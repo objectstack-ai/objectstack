@@ -1,0 +1,32 @@
+{
+  "number": 4756,
+  "kind": "issue",
+  "title": "`sys_comment.visibility` and `sys_comment.reply_count` are declared but nothing anywhere reads or maintains them (ADR-0049 enforce-or-remove)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T02:31:25Z",
+  "updated_at": "2026-08-03T10:10:23Z",
+  "closed_at": "2026-08-03T10:10:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4756",
+  "body": "Found while implementing #4630 (record-level authorization for `sys_comment`). Filed unassigned, out of that PR's scope.\n\n## What\n\n`sys_comment` (`packages/plugins/plugin-audit/src/objects/sys-comment.object.ts`) declares two fields that no code path in this repo — or in `objectui` — ever reads or writes:\n\n| field | declaration | reality |\n|---|---|---|\n| `visibility` | `Field.select(['public','internal','private'], { defaultValue: 'public' })` | Never read. No gate consults it: not `enforceFeedsCapability`, not the record-level gates added in #4630, not the REST layer, not `objectui`'s `RecordDetailView` discussion panel. A comment marked `private` is exactly as visible as a `public` one. |\n| `reply_count` | `Field.number({ defaultValue: 0, readonly: true })` | Never incremented. Nested replies are modelled by the `parent_id` lookup; nothing counts them on either side. Every row's `reply_count` is `0` forever, and the field is `readonly` so an author cannot even set it by hand. |\n\n```\n$ grep -rn \"reply_count\" --include=*.ts packages/    # only the schema + its generated translations\n$ grep -rn \"visibility\" packages/plugins/plugin-audit/src/   # only the schema\n$ grep -rn \"reply_count\" --include=*.tsx ../objectui   # nothing\n```\n\n## Why it matters\n\nThis is the exact shape of the Prime Directive #10 trap: `visibility` reads as an access-control lever on a collaboration object. An app author (or an AI authoring metadata) who sets `visibility: 'private'` on a sensitive comment will reasonably believe it is hidden from other users who can read the record. It is not. Declaring an unenforced *security-looking* key is worse than not declaring it.\n\n`reply_count` is milder but the same class: a UI that binds a \"N replies\" badge to it renders `0` forever.\n\n## Precedent — this exact pair was already resolved once, next door\n\n`sys_attachment` carried `share_type` and `visibility` with zero runtime consumers, and #2755 **removed** both rather than implementing them, on the grounds that attachment access derives from the parent record and there is no replacement key (see `packages/services/service-storage/CHANGELOG.md`, the `f531a26` entry: \"Both fields were modeled in v1 with zero runtime consumers (ADR-0049 parsed-but-unenforced). There is no replacement key: attachment access is derived from the parent record by the hooks above.\").\n\nAfter #4630 that argument transfers verbatim to `sys_comment.visibility`: a comment's access now derives from the record its `thread_id` names, so a per-row `visibility` enum has no coherent meaning layered on top of it — unless someone deliberately designs one (e.g. `internal` = hidden from external/portal principals, which would need to be defined against ADR-0090 D11's `externalSharingModel`, not invented ad hoc).\n\n## Decision needed (maintainer)\n\nFor each field, enforce or remove:\n\n- **`visibility`** — (a) REMOVE, following the `sys_attachment` precedent (the `spec-property-retirement` playbook applies: tombstone + changeset with the FROM/TO, and note these are object *fields*, not spec keys, so the kit is lighter); or (b) ENFORCE, which first requires deciding what `internal` and `private` mean relative to OWD/sharing and to external principals. Recommendation: **(a) remove** — an undesigned enum on a security surface is a liability, and #4630's parent-derived rule is the coherent answer to \"who sees this comment\".\n- **`reply_count`** — (a) REMOVE, and let consumers count `parent_id` children; or (b) MAINTAIN it with `afterInsert`/`afterDelete` hooks on `sys_comment` (a roll-up, cheap and self-contained). Recommendation: **(b) maintain** if any UI wants the badge, otherwise (a); this one is a genuine convenience denormalization, not a security claim.\n\nNote that removing either field is a stored-data question as well as a schema one — existing rows carry the columns, and the `sys_attachment` removal chose to leave the DB columns as unmanaged leftovers with no migration.\n"
+}

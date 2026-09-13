@@ -1,0 +1,34 @@
+{
+  "number": 4245,
+  "kind": "issue",
+  "title": "ADR-0053 D-A3：共享矩阵的 driver-sql 消费者被钉死在 SQLite —— server-timezone 轴与 D-A3 自己写的「Postgres at minimum」都从未执行过",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "tests"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T00:33:50Z",
+  "updated_at": "2026-08-02T20:54:21Z",
+  "closed_at": "2026-08-02T20:54:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4245",
+  "body": "从 #4191 收尾时核实 server-timezone 轴现状发现。ADR 里那句话点了**两条**轴，storage-form 已由 #4205 / #4223 / cloud#938 / cloud#942 落地，server-timezone 这条的现状比「只是隐含在 CI 配置里」更差。\n\n> D-A3's conformance matrix should gain a **storage-form** axis (canonical, legacy-epoch, legacy-naive) and a **server-timezone** axis, since both are now known to have produced dialect-divergent row results.\n> —— `docs/adr/0053-date-and-datetime-semantics.md`，D-B3 的 Consequences\n\n## 现状（已逐条核对，不是推测）\n\n`packages/plugins/driver-sql/src/sql-driver-temporal-conformance.test.ts` 是共享矩阵的 driver-sql 消费者。它的**三个 describe 全部硬编码** `client: 'better-sqlite3'`（`:63`、`:112`、`:155`），也从不读 `OS_TEST_POSTGRES_URL` / `OS_TEST_MYSQL_URL`。真正连 live server 的只有三个专用套件：\n\n- `sql-driver-datetime-postgres-timezone.test.ts`\n- `sql-driver-time-live-dialects.test.ts`\n- `sql-driver-date-now-default-live.test.ts`\n\n它们断言的是各自的**存储形态 / NOW() 默认值 / 往返精度**，**不是** `TEMPORAL_CASES` / `TEMPORAL_TIME_CASES` 的行 id 集合。\n\n于是逐轴现状是：\n\n| 轴 | 矩阵是否执行 |\n|---|---|\n| 进程时区偏斜（job 的 `TZ=America/New_York`） | ✅ 覆盖——整包在该 TZ 下跑，矩阵也在内 |\n| **服务器时区**（PG `Asia/Shanghai`、MySQL `+08:00`，job 已provision） | ❌ 矩阵**根本没连服务器** |\n| **driver 轴**（D-A3 原文 `driver {SQLite, Postgres at minimum}`） | ❌ 对矩阵不成立 |\n\n## 附带：一处 declared ≠ enforced\n\n该文件头注写着：\n\n> Runs against a real SQLite, and — through the `Temporal Conformance (live PG + MySQL)` CI job, which runs this package's whole suite under `TZ=America/New_York` against servers on `Asia/Shanghai` — **against real Postgres and MySQL too, with no workflow change needed.**\n\n前半句成立（整包确实在该 job 下跑、进程时区确实偏斜），**后半句对本文件不成立**：矩阵里的 driver 永远是 SQLite。这与 #4191 记的 `mongodb-temporal.ts` canon 表同species——文档写对了、代码没实现，直到有人去执行它才可见。\n\n## 为什么这格值得补，而不只是记账\n\n服务器时区**已知**造成过方言分歧的行结果，这正是 ADR 点名它的原因：\n\n> A bare `YYYY-MM-DD` comparand (what a `{30_days_ago}` token expands to) meant midnight in the SERVER's timezone, so the identical query over the identical instant put a row on a **different calendar day** than it did on SQLite.\n> —— D-B2，对 PG 16 @ `Asia/Shanghai` 的实测\n\nD-B2 的修复（comparand 规则方言无关、两侧都写明 `Z`）有回归锁，但那是**它自己的**夹具。矩阵的意义恰恰是「一个后端漂了就有一条具名用例红」——而 PG/MySQL 在矩阵里没有格子，所以这个信号对它们不存在。这与 #4081 follow-up 的教训逐字相同：`NativeSQLStrategy` 曾在矩阵的后端表里被列名却没有消费者。\n\n## 建议形状\n\n1. **把矩阵消费者按 driver 参数化**，而不是新写一份。三个 live 套件已有现成范式：`OS_TEST_*_URL` 存在则跑、缺失则 skip，并断言服务器非 UTC 以防空转。让 `sql-driver-temporal-conformance.test.ts` 对 `[sqlite, postgres?, mysql?]` 各跑一遍同一批 `TEMPORAL_CASES` / `TEMPORAL_TIME_CASES`，**行 id 集合逐格相同**。\n2. **server-timezone 成为显式轴**：断言「服务器时区 ≠ 进程时区 ≠ UTC」三方错开确实生效（job 已经 provision 了 `Asia/Shanghai` / `+08:00` 与 `America/New_York`，缺的是矩阵去消费它并在非空转守卫下断言）。\n3. **修正头注**，让它描述代码实际做的事——或者在第 1 步之后它自然成立。\n4. 顺带值得考虑：`driver-turso`（cloud）local 模式同样只跑 SQLite，但它是 SQLite-only 驱动，不适用；`driver-sqlite-wasm` 同理。这一格只对 `driver-sql` 有意义。\n\n## 验收\n\n同一批用例在 SQLite / Postgres / MySQL 上返回**完全相同**的行 id 集合，且三者的服务器时区与进程时区互不相同、非空转守卫生效。任何一格不同即该方言的 comparand 或存储路径与共识有偏差。\n\n## 关联\n\n#4191（storage-form 轴，已落地）、#4081（D-A3 本体）、#4205、#4223、#4220、cloud#938、cloud#942；ADR-0053 D-A3 / D-A3.1 / D-B2 / D-B3 / D-B4 / D-C3。"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 4587,
+  "kind": "issue",
+  "title": "spec 双源 C2:MetadataEvent / MetadataBulkRegisterRequestSchema —— ./api ≠ ./kernel(3 条,#4535 C 组)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "protocol:breaking"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T09:09:11Z",
+  "updated_at": "2026-08-02T10:21:37Z",
+  "closed_at": "2026-08-02T10:21:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4587",
+  "body": "父单:#4535(C 组第 2 簇)。`packages/spec/dual-source-exports.baseline.json` 现存 31 条中的 3 条:\n\n```\nMetadataBulkRegisterRequestSchema — [./api (const)] ≠ [./kernel (const)]\nMetadataEvent — [./api (type)] ≠ [./kernel (type)]\nMetadataEventSchema — [./api (const)] ≠ [./kernel (const)]\n```\n\n同名 schema + 推断类型在 `./api` 与 `./kernel` 各有一份**不同声明** —— 消费者拿到哪个形状只取决于 import 路径(#4411 陷阱)。\n\n**背景提示(判定时核实,不要照抄)**:`./kernel` 的 metadata 家族有死副本前科 —— #4411/PR #4458 已删过 11 个零消费的 kernel metadata-loader schema,A1(#4536)也证伪过 kernel 侧枚举的虚胖成员。本簇的 kernel 侧很可能同属该家族残留,但**必须**按 import 语句级扫描重新判定,不得凭前科直接下结论。\n\n## 任务\n\n1. **先判真源**(contract-first):import 语句级扫描三仓(本仓 + cloud(/workspace/cloud 若在)+ objectui 浅克隆),不要用名字出现次数。两份声明逐字段 diff:形状差异、语义差异、各自消费方,判定结果写进 PR 正文。\n2. **处置三选一**(按 #4535 手册):死侧零消费方 ⇒ 直接删(v17 rc 是 major 窗口);两侧都活且同概念 ⇒ 收敛到真源 + 另一侧 re-export(re-export 不会被 gate 报);真是两个概念 ⇒ 改名一侧(先例:#4539 → PR #4571、#4572 → PR #4581 的 `OpenApiWebhookEvent`)。\n3. **收敛 ≠ 无行为变化**:若存活形状比被删侧窄/宽,消费方类型会变 —— 逐字段核实并写进 changeset;拿不准的分歧用**编译期 pin**(`typeof import` 条件类型,PR #4581 先例 —— 优先于运行时动态 import pin,不吃 vitest 超时)。\n\n## 验收\n\n- 基线**恰好 −3**(31 → 28):`check:dual-source-exports` stale 分支点名的即这 3 行,不多删不漏删\n- `check:generated` 8/8 up to date(api-surface 等经 `--fix` 定向再生,单独 commit)\n- spec `build` / `typecheck` / `test` 全绿;全仓 `pnpm build` / `pnpm typecheck` / `pnpm test` 全绿\n- changeset:`@objectstack/spec` major,FROM → TO 迁移行;**不改 `content/docs/releases/`**(releases-freeze,见 CLAUDE.md);手写文档若引用被改名/删除的导出,一并修正\n- 若触及可作者化 metadata key 的形状,回 `spec-property-retirement` skill 走完整流程\n- 范围外发现按第十条军规立 unassigned issue,不夹带进本 PR\n\n## 工作方式\n\n专用 worktree(`git worktree add ../objectstack-issue-<本单号> -b claude/issue-<本单号>-metadata-event-dual-source main`)→ 实现 → 推分支 → **draft PR**(正文含逐条判定 + 验证清单)→ 向 PM 返回 JSON 报告。"
+}

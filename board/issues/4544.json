@@ -1,0 +1,32 @@
+{
+  "number": 4544,
+  "kind": "issue",
+  "title": "合法但惰性的元数据：建 ADR-0078 的完整性闸门（共享谓词 + 全授权面执行）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "needs-user-decision"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T01:48:14Z",
+  "updated_at": "2026-08-03T06:22:57Z",
+  "closed_at": "2026-08-03T06:22:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4544",
+  "body": "## 洞在哪\n\n一个元数据**实例**可以：Zod 校验通过（闸门 1 绿）、用到的每个属性都是 live 的（闸门 2 绿）、而且一个**正确**写法的同类实例被证明能跑（闸门 3 绿）——**然后它依然是死的**，因为它漏了消费者需要的兄弟配置，而消费者**静默 no-op**。\n\n奠基案例（cloud#687）：一个 AI 写出 `{ type: 'summary' }`，没有 `summaryOperations`。**而 `engine.ts` 一句 `if (!d.summaryOperations) continue` 把它跳过。** 字段到处读出 0，依赖它的「入住率」公式永远是 0，**而 agent 报告「上座率做好了」。**\n\n## 为什么这比 #4001 刚关掉的洞更糟\n\n| | 未知键静默剥离（#4001，已关） | **功能性不完整（本 issue）** |\n|---|---|---|\n| 作者写了什么 | 一个我们不认识的键 | **全是我们认识的键** |\n| schema 判定 | 拒绝（现在） | **合法** |\n| 谁会说话 | 解析拒绝，带处方 | **没有人** |\n| 作者看到 | 一条错误 | **成功** |\n\n**AI 拿到 success 信封然后报告 done——而「起疑」正是 AI 授权移除掉的那一步。**\n\n## 决策（ADR-0078）\n\n一个「省略后会让实例静默失效」的配置，必须恰好处于三态之一：**(1)** 被完整性 lint 抓住 · **(2)** 标记 `[EXPERIMENTAL — not enforced]` · **(3)** 真正可选且优雅降级。**第四态——「解析通过、无标记、静默惰性」——被禁止。**\n\n---\n\n## ✅ 全部阶段落地（两仓库）\n\n| 阶段 | 内容 | 状态 |\n|---|---|---|\n| **1** | 共享谓词 + `validate-functional-completeness` + 注册（28 → 29 条） | ✅ #4547 |\n| **2** | blueprint `expression` 槽位 + parity pin（framework）· `objectBody` 透传 + `rowColor` 修复（cloud） | ✅ #4577 · ✅ cloud#999 |\n| **3** | Tier-B 逐条验证，落地 `webhook/without-triggers` | ✅ #4565 |\n| **附** | nav 非对象目标（归 ADR-0072，16 → 17 条） | ✅ #4574 |\n| **4** | 注册时诊断建成；生成式遍历**否决** | ✅ #4599 |\n\n**终态闭环：author-time error ↔ runtime warn，一个共享谓词裁决两端。** dogfood boot 兼任权威扫描：所有出货 stack（平台对象、showcase、CRM、Todo）注册时 0 条 functionally-incomplete 警告——零误报，也没有藏在 lint 看不见的门后的惰性字段。\n\n### Phase 4 的裁决（直接决策，不再 evidence-gated）\n\n**生成式规则遍历：否决，不是推迟。** 生成器能枚举候选，不能验证运行时跳过点；无跳过点引用的规则=假处方（本战役 4 条全靠验证遍拦下，自动生成在结构上绕开验证遍）。否决理由已写进 changeset，防止未来以「数据够了」重提。\n\n**注册时诊断：#4599。** `SchemaRegistry.registerObject` 是所有元数据门的汇合点（含绕过 Zod 和 lint 的门——#3896、`rowColor.mapping` 证明它们真实存在）。同一谓词、同一 rule id；**warn 不 throw**（error 的语义是「实例死了」不是「系统该死」）。webhook enqueuer 的静默 `return null` 同步补 warn，「manual-only」注释改真。\n\n### Phase 1 规则（每条附运行时静默跳过证据行）\n\n`field/summary-without-operations` · `field/formula-without-expression` · `field/relationship-without-reference` · `field/choice-without-options`（select/radio error，checkboxes warning）· `view/layout-without-binding`（warning）· `webhook/without-triggers`（Phase 3）\n\n首跑真实 app 即抓到 `showcase_field_zoo.f_summary`（裸 roll-up，已移除）。\n\n### Phase 2 —— A1 的真实形状\n\n`summaryOperations` 半边早已修好（cloud#970）；**`formula` 被落下**，且是**死胡同**而非静默剥离：模型能命名 `formula` 类型，graph-lint 能报 `formula_without_expression`，但 blueprint 里没有键可写处方。真正的修复是 **parity pin**：strict mirror（模型能发出的）与 lenient schema（下游读取的）现在被测试强制 key 一致。\n\n### 顺带发现与修复\n\n- cloud `ai-pending-action.view.ts` 的 `rowColor.mapping` 从来不是键（应为 `colors`），藏在 `as never` 后——tsc 知道、cast 让它闭嘴、运行时静默丢弃。该 grid 从写下起就没有过行着色。已随 cloud#999 修复。\n- **cloud 合并队列瘫痪**（发现于 #999 悬死）：required check 不响应 `merge_group`，自 #993 后没有任何 PR 能合并。诊断与 cloud#997（前一日独立得出）一致；实测证明 merge group 会自愈（两次全绿），最终堵点在设置层由 admin 解开。#997 落地后队列自流，积压（#1003、#999、#1007…）全部排出。\n\n---\n\n## 剩余工作（不阻塞，各有归属）\n\n1. **cloud embedder binding 既有失败** —— `ai-service.test.ts > embedder binding`。非本战役引入（stash 验证：干净基线上文件根本加载不了），属 cloud settings/plugin 接线，留给该模块负责人。\n2. **dataset 零 measures / 非法 cron** —— 仍缺各自的验证遍（运行时静默跳过行未找到/未追踪）。找到才写，找不到不写。\n3. **cloud graph-lint re-home** —— 把 cloud 的重复规则迁到共享谓词上，消除漂移面（低急迫：现在两边行为一致）。\n\n## 纪律（终版）\n\n> 1. **每条规则先指名运行时静默跳过的那一行**；刻意不设的规则，把豁免证据一起钉进测试。\n> 2. **运行时注释的「祝福」需要第二个来源证明被祝福的模式仍可达。**\n> 3. **写规则前先查它是否已存在** —— 本战役靠这条避开三个近似重复的 lint；没执行它的一次（cloud#1002，与 #997 重复）当天就付了学费。\n> 4. **生成式产规则被永久否决** —— 它在结构上绕开第 1 条。\n\n## 相关\n\nADR-0078 · ADR-0049 · ADR-0054 · ADR-0019 · ADR-0072 · `docs/audits/2026-06-metadata-functional-completeness.md` · cloud#687（奠基）· cloud#970（先例）· #4001（相邻洞，已关）\nPR：#4547 · #4565 · #4574 · #4577 · #4599 · cloud#999 · （队列修复：cloud#997）"
+}

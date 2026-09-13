@@ -1,0 +1,35 @@
+{
+  "number": 4822,
+  "kind": "pull_request",
+  "title": "fix(service-analytics): 按聚合种类填充「查询从未报告过的分组」,并补上 compareTo 这一道接缝 (#4708)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T08:42:09Z",
+  "updated_at": "2026-08-03T10:22:31Z",
+  "closed_at": "2026-08-03T10:22:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T10:22:30Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4822",
+  "body": "Fixes objectstack-ai/objectstack#4708\n\n按 issue 作者的推荐与 PM 裁定取**方向 1**(在 merge 时按聚合种类填充),不取方向 2(`missingAs: 'zero'`)。理由就是 issue 自己写的那条:方向 2 把决定重新分配给每一个未来的作者,而**忘记的失败模式是静默的** —— 对一个从邻近声明里模式匹配的 AI 作者来说,必须被记住的正确性开关等价于终将被漏掉的正确性开关。方向 1 没有这个表面积。\n\n零改动:`packages/spec/**`。本 PR 只动 `packages/services/service-analytics`。\n\n---\n\n## 现场复核:一半已经在 main 上,另一半还在\n\n先说一个必须讲清楚的事实,免得 reviewer 以为这个 PR 比实际大或比实际小。\n\nissue 描述的机制里,**「measure 自带 filter 的那道接缝」在 main 上已经修好了** —— objectui#3136 曾经加过一段按聚合种类的填充(`emptyGroupValueFor`),就在 `executeSelection` 里。我用 issue 的复现表逐字跑了一遍真实 executor,四行全部正确:`cold_call` 的 `won_count` 是 0、`win_rate` 是 0%。\n\n但那段代码**一个测试都没有**。issue 的验收标准 1/2/3 要求把这个行为钉死,而当时没有任何东西拦得住它回退 —— 事实上它下面就摆着一次回退的活证据(见下)。所以本 PR 的第一半是:把 issue 的复现表原样变成回归测试。\n\n第二半是真正的代码修复:**同一个缺陷在下一道接缝上原封不动地活着**。\n\n## 还活着的那一半:compareTo 追加出来的行\n\n填充过去跑在 `compareTo` 合并**之前**。而那次合并是会**追加行**的(`mergeByDimensions` 对只在对比窗口出现的 bucket 做 outer-ish 追加,注释里写着「so comparison-only buckets still surface」)。被追加出来的行上,**每一个** base measure 都是缺失的 —— 包括没有 filter 的那些,因为主查询压根没返回过这个分组。\n\n用假 service 跑真 executor,修复前的输出:\n\n```\n{ lead_source: 'content',   revenue: 100, avg_deal: 50, won_count: 3,\n                            revenue__compare: 80, avg_deal__compare: 40, won_count__compare: 2 },\n{ lead_source: 'cold_call', revenue__compare: 10, avg_deal__compare: 10, won_count__compare: 1 }\n```\n\n`cold_call` 上个周期卖过、这个周期一单没有 —— 这一行的 `revenue` / `won_count` 全是空白,而正确答案是 **0**。偏置方向和 issue 抓到的那条一模一样:**空白的恰好是表现最差的行**。上期有业绩、本期归零的渠道,在仪表盘上渲染成「无数据」,而不是「归零了」—— 后者才是要看的那个信号。\n\n修复后同一组输入:`revenue: 0`、`won_count: 0`、`avg_deal: null`,`__compare` 三列原样不动。\n\n顺带把镜像的一侧也一起覆盖了:本期存在、上期完全没有的 bucket,`revenue__compare` / `won_count__compare` 现在读 0 而不是空白(「上个月卖了 0」是事实,不是缺口)。这两列走的是**同一个** `mergeByDimensions` 调用、同一套聚合种类推理,分开修只会让下一个 issue 立刻开在隔壁那一行 —— 但它确实比 issue 的字面范围宽一点,所以在这里点名,reviewer 若认为该拆出去,砍掉三行即可。\n\n## 严格按聚合种类,不一刀切\n\n| aggregate | 分组被排除时 | 为什么 |\n|:---|:---|:---|\n| `count` / `count_distinct` | `0` | 「有多少行匹配」在没有匹配时有确切答案 |\n| `sum` | `0` | 空集合上的单位元 |\n| `avg` / `min` / `max` | 保持 `null` | 确实无定义 —— 没有东西可平均 |\n\n一刀切填 0 会把「没有数据」和「平均值为零」混成一件事,制造一个方向相反的新谎。种类→单位元的映射仍然是 `@objectstack/spec/data` 的 `emptyGroupValueFor`(与 authoring 侧的一致性检查共用一个源,两边不会漂移),本 PR 没有碰它。\n\n**只填格子,不造行**(验收标准 4):填充只遍历**已经存在**于网格里的行。某个维度值如果没有任何一个查询报告过,它就是真的没有数据,不会被凭空物化成一行 0。测试里有一条专门钉这个。\n\n## 改了什么\n\n- `dataset-executor.ts` — 新导出 `fillEmptyGroups(rows, columnAggregates)`,把原先内联在循环后的那段提出来;调用点从「supplementary 合并之后」移到「**所有**合并之后、derived 求值之前」,覆盖范围从 `filtered` 扩到全部 base measure 加它们的 `__compare` 列。\n- `index.ts` — 导出 `fillEmptyGroups`(与既有的 `mergeByDimensions` 同级,便于直接单测)。\n- `__tests__/dataset-empty-group-fill.test.ts` — 新增 9 条。\n- 一个 changeset(patch,`@objectstack/service-analytics`)。\n\n## 测试\n\n`pnpm --filter @objectstack/service-analytics test` → **37 files / 502 tests passed**(含新增 9 条)。\n\n新测试对**修复前**的 executor 跑过一遍,证明它们真的钉住了东西:\n\n```\n× fills every base measure on a row only the previous period produced\n× fills a comparison column the previous window never reported\n× fills count/count_distinct/sum, leaves avg/min/max and reported values alone\n× touches only the columns it is given, and never adds rows\nTests  4 failed | 5 passed (9)\n```\n\n那 5 条修复前就通过 —— 它们正是 issue 复现表的回归钉,钉的是 objectui#3136 已经修好、但一直裸奔的行为。\n\n`tsc --noEmit`:7 处报错,全部在本 PR 未触碰的既有测试文件里(`analytics-service.test.ts` 的 TS6133、`measure-source-field-gate.test.ts` 的 TS2339、`objectql-timedimension-projection.test.ts` 的 TS7053),我改动的三个文件 **0 报错**。该包在 `check-type-check-coverage.mjs` 里带 DEBT 条目,本 PR 不增不减。ESLint 对三个改动文件干净。\n\n## ⚠️ 跨仓协调:hotcrm 侧会转红,这是设计好的信号\n\nissue 说明 hotcrm 侧钉了一条**故意写成「平台修好后会失败」**的断言,用来把平台的修复暴露成一条红测试,而不是让仪表盘悄悄改变数字。\n\n**本 PR 合并后,那条 app 侧测试会转红 —— 这是预期信号,不是回归,也不是撞车。** 我们不改那个仓;请对面按 hotcrm#656 的原计划把断言翻过来(顺带可以撤掉 `?? 0` 之类的消费侧兜底,以及把 `decided_count` 换回 `derived: { op: 'sum', of: ['won_count','lost_count'] }` 的写法 —— 现在 `lost_count` 会被填 0,那个「从没输过的销售分母变空」的坑不复存在了)。\n\n相关:hotcrm#656、hotcrm#593、#4698。\n\n## 顺手发现的、**没有**在本 PR 里修的两件事(Prime Directive #10)\n\n- **#4820** — `compareTo` 完全丢弃 measure 级 filter:`runCompare` 只带 `baseFilter` 发一条 shifted 查询,`compiled.measureFilters` 从未被查阅。于是 `won_count__compare` 数的是上个周期的**全部**行,不是赢单行 —— 与它并排那一列是两个不同的度量。这是**数错**而不是**留白**,补法(按主路径拆成每个 filtered measure 一条 shifted 子查询)和影响面都不同,单独修。\n- **#4821** — `mergeByDimensions` 的维度键用空串拼接(`.join('')`),多维度下 `'ab'|'c'` 与 `'a'|'bc'` 撞键,两个分组会合并成一行;`String(row[d] ?? '')` 还把 `null` 和 `''` 压成同一个键。隔壁 `cross-object-rebucket.ts` 已经用 JSON 编码解决过同一个问题。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_015Br2xsJsczFsTR9bvbh2Ny\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015Br2xsJsczFsTR9bvbh2Ny)_"
+}

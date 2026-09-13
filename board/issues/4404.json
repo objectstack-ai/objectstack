@@ -1,0 +1,35 @@
+{
+  "number": 4404,
+  "kind": "pull_request",
+  "title": "feat(spec,objectql): IObjectQLEngine —— objectql 槽的契约落地,类 implements 之,七个本地 stand-in 退场 (#4251 B3)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T11:44:49Z",
+  "updated_at": "2026-07-31T12:21:49Z",
+  "closed_at": "2026-07-31T12:21:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T12:21:46Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4404",
+  "body": "#4251 的 **B3**,按 issue 上评估过的方案:objectql 一族不机械类型化,而是**把契约写出来**。\n\n## `IObjectQLEngine`:`objectql` 槽的契约\n\nObjectQL 一个实例注册两个名字,ledger 现在能说清各自含义:\n\n| 槽 | 契约 | 视图 |\n|---|---|---|\n| `data` | `IDataEngine`(不变) | 数据面 |\n| `objectql` | **`IObjectQLEngine extends IDataEngine`** | 完整引擎 |\n\n新契约覆盖:schema 访问(`getSchema` / `getObject` / `registry`)、actions(`registerAction` / `removeActionsByPackage` / `executeAction`)、hook/middleware seams(`registerHook` / `unregisterHooksByPackage` / `registerFunction` / `registerMiddleware` / `bindHooks`)、first-wins 默认 runner 与 hook metrics、启动接线(`registerDriver` / `setDatasourceMapping` / `registerApp`)、运维探针(`checkDriversHealth` / `wasDatastoreCreatedFromEmpty` / `invalidateDataMigrationFlags`)。ledger 测试钉住新关系:`objectql` **严格加宽** `data`,刻意不再相等。\n\n## `implements` 是本 PR 的要点\n\n两个批次以来的诚实状态记录在 `DomainHandlerContext.getObjectQL` 上:更宽的表面没有契约,把它标成 `IDataEngine` 会是\"看着更舒服的谎\"。过渡纪律 —— 每个消费方声明自己用的窄切片 —— 累积出**七个本地 stand-in**(`AppEngineSurface`、`EngineRegistrySurface`、`EngineExtensionSurface`、`SecurityEngineSurface`、`FreshDatastoreEngine`、dispatcher 的 inline `checkDriversHealth` 切片、`getObjectQL: any` 本身)。\n\n每一个都诚实,每一个都是**未经检查的 claim**:`getService<Surface>('objectql')` 是断言,引擎改个名,七处消费方运行时全坏、编译期零报错。\n\n**`ObjectQL implements IObjectQLEngine` 把七份断言并成一份编译器验证的 claim。** 七个 stand-in 全部删除;`getObjectQL` 端到端标成 `Promise<IObjectQLEngine | null>`,关闭 dispatcher 里最老的一处记录在案的 `any`。\n\n**证据门槛不变**:每个声明成员都有经槽到达的跨包调用方;没有的(如 `triggerHooks`,跨包只有测试在用)不入契约,等调用方出现。注册表视图 `EngineSchemaRegistryView` 恰好声明消费方在用的 8 个成员。\n\n## `_registry` 从此不出引擎包\n\nplugin-security 的五处 declared-metadata 读取(`readDeclared`、permission-set projection、suggested audience bindings)一直在 `any` 下伸进 ObjectQL 的私有 `_registry` 字段 —— 与 B2 抓到的 `/me/apps` 同款,×5。全部迁到契约声明的公开 `registry` getter,测试替身同步。\n\n## 顺带:`IMetadataService` 补 `subscribe?` / `loadMany?`\n\n`MetadataManager` 在 `watch` 旁边一直实现着它们,唯一跨包调用方(ObjectQLPlugin 的 metadata bridge —— 保持 runtime-authored hooks/actions 活性的 re-sync)只能靠 `any` 够到。声明后,该 bridge 的 6 处 `metadata` 查找与 metadata-protocol 的 `objectql` 查找全部携带契约类型,两个文件整体退出祖父名单。\n\n**基线:167 → 159 站点,36 → 34 文件。**\n\n## 验证\n\n- `pnpm check:slot-lookup` 强制模式:`✓ 159 unswept site(s) in 34 file(s), none new`;`no files added`(对 d25a0ec)\n- spec build(dts)+ **7198 tests / 282 files**;objectql build(即 `implements` 检查)+ **1464 / 89**\n- runtime **1015 / 70**、plugin-security **677 / 32**、plugin-hono-server **135 / 12**、plugin-auth **579 / 26**、platform-objects **254 / 8**、metadata **281 / 13**、metadata-protocol **136 / 21**\n- 八个被触包 dts build 全过;eslint 干净\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

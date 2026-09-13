@@ -1,0 +1,32 @@
+{
+  "number": 4437,
+  "kind": "issue",
+  "title": "analytics: a measure naming a missing field 500s with SQLITE_ERROR instead of a 400 naming the field",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T07:05:12Z",
+  "updated_at": "2026-08-01T13:09:23Z",
+  "closed_at": "2026-08-01T13:09:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4437",
+  "body": "Found while verifying the 17.0.0-rc.1 checklist on #3909 (F5). Verified on `main` @ `1ee48bc60`, showcase under `os serve --dev`.\n\nThe declared-aggregation half of the analytics honesty axis works (`total_sum` emits `SUM(total)`, #4184/#4153 hold), and the DATA route already refuses a missing field on `searchFields`/`groupBy`/`aggregations` with a 400 naming the field (#4315/#4254). But the ANALYTICS route lets a measure naming a nonexistent field fall through to SQL:\n\n```\nPOST /api/v1/analytics/query  {\"cube\":\"showcase_invoice\",\"measures\":[\"ghost_sum\"]}\n→ 500 {\"success\":false,\"error\":{\"code\":\"SQLITE_ERROR\",\"message\":\"Internal server error\",\"httpStatus\":500}}\n```\n\n`inferMeasure('ghost_sum')` happily builds `SUM(ghost)`, the driver throws `no such column`, and the caller gets an opaque `SQLITE_ERROR` 500 — a driver name on the wire and nothing actionable. A dotted spelling takes the same path (`\"measures\":[\"total.sum\"]` → prefix-strip → `inferMeasure('sum')` → 500 SQLITE_ERROR).\n\nExpected: measure resolution validates the inferred source field against the cube/object schema BEFORE building SQL, and refuses with a 400 naming the field and the valid measures — the same shape the data route's #4315 refusal already has (and the `dateRange`-family validation on this same endpoint already achieves for its own inputs). A driver error class should never be the `error.code` for a caller-shaped mistake (ADR-0112).\n\nPart of the #3909 rc.1 verification (section F5).\n"
+}

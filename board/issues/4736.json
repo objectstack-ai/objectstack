@@ -1,0 +1,36 @@
+{
+  "number": 4736,
+  "kind": "issue",
+  "title": "All nine i18n-extract configs author `name:` on `defineStack` — a key the lint drops at load, warning on every `check:i18n` run",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T01:07:55Z",
+  "updated_at": "2026-08-03T08:07:59Z",
+  "closed_at": "2026-08-03T08:07:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4736",
+  "body": "在 #3207 收尾(PR #4734)跑 `pnpm check:i18n` 时发现的既有噪音,与该 PR 无关,按 Prime Directive #10 立单不修。\n\n## 现象\n\n`check:i18n` 全绿的运行中稳定输出:\n\n```\ndefineStack: stack.name: 'name' is not a declared stack key, so its value is dropped at load — did you mean 'pages'?\n```\n\n(unknown-authoring-key lint 有 dedupe,九个包只打印一次。)\n\n## 根因\n\n全部九个 `scripts/i18n-extract.config.ts` 都在 `defineStack({ ... })` 顶层写了 `name:`:\n\n```\npackages/platform-objects/scripts/i18n-extract.config.ts:181\npackages/plugins/plugin-approvals/scripts/i18n-extract.config.ts:30\npackages/plugins/plugin-audit/scripts/i18n-extract.config.ts:25\npackages/plugins/plugin-security/scripts/i18n-extract.config.ts:27\npackages/plugins/plugin-sharing/scripts/i18n-extract.config.ts:23\npackages/plugins/plugin-webhooks/scripts/i18n-extract.config.ts:26\npackages/services/service-messaging/scripts/i18n-extract.config.ts:30\npackages/services/service-realtime/scripts/i18n-extract.config.ts:23\npackages/services/service-storage/scripts/i18n-extract.config.ts:26\n```\n\n`name` 不是声明的 stack key,值在 load 时被丢弃 —— lint 行为正确,配置是错的(九份互相拷贝的同一处错)。\n\n## 决策点(二选一,不建议消音 lint)\n\n- **A. 删掉九处 `name:`**:机械修正,extract 配置本就不需要自命名;\n- **B. 若 stack 确实该有 `name`**:走 spec 正路把它声明成 authorable key(Zod + 生成物),而不是靠 lint 容忍。\n\n倾向 A:这些是内部 extract 夹具,`name` 从未被读。绿色运行里稳定出现的 warning 会训练人忽略 warning,这本身就是成本。\n\n## 复现\n\n`pnpm check:i18n`(需先构建 CLI:`pnpm turbo run build --filter=@objectstack/cli...`)。\n\n---\n_发现于 session `session_0176qgxgCXTJCUv4YFLtusP9`(#3207 收尾途中,超范围不代修)_"
+}

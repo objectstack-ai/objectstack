@@ -1,0 +1,35 @@
+{
+  "number": 2902,
+  "kind": "issue",
+  "title": "ADR-0089 D3a: flip `.strict()` on view/page schemas so mis-layered visibility keys are loud errors",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "protocol:breaking"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-14T07:47:06Z",
+  "updated_at": "2026-08-03T00:33:37Z",
+  "closed_at": "2026-08-03T00:33:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2902",
+  "body": "Follow-up to #2642 / #2900 (ADR-0089). D1 (canonical `visibleWhen`) + D2 (deprecated `visibleOn`/`visibility` aliases normalized at parse) have landed. This tracks **D3a**.\n\n## Goal\n\nPer ADR-0049 (enforce-or-remove) and ADR-0078 (no-silently-inert), a mis-layered or stale visibility key must be a **loud parse error**, not a silent strip. Tighten the relevant object schemas with `.strict()` so e.g. a raw `visibleOn` surviving past the deprecation window, or a `visibleWhen` on a schema with no visibility semantics, fails validation.\n\n## Why it's staged separately\n\n`.strict()` on `FormFieldSchema` / `FormSectionSchema` / `PageComponentSchema` rejects **every** unknown key, not just visibility ones — a large blast radius. The ADR requires sweeping the monorepo + example apps first, then flipping strict. That sweep is bigger than the alias mechanism and risky to land alongside it under parallel-agent development.\n\n## Tasks\n\n- [ ] Sweep `packages/` + `examples/` (and platform metadata) for any keys these schemas currently strip silently; fix or file them.\n- [ ] Add `.strict()` (or a targeted unknown-key guard with `UNKNOWN_KEY_GUIDANCE` tombstones) to the view form + page component schemas.\n- [ ] Confirm the deprecated `visibleOn`/`visibility` aliases still parse (they are declared keys, so strict must keep accepting them until removal).\n- [ ] Ensure the rejection message points authors at `visibleWhen`.\n\n## References\n- ADR-0089 D3a (`docs/adr/0089-unify-visibility-predicate-naming.md`)\n- Precedent: `object.zod.ts` `UNKNOWN_KEY_GUIDANCE`\n- Parent: #2642"
+}

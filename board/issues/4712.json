@@ -1,0 +1,35 @@
+{
+  "number": 4712,
+  "kind": "pull_request",
+  "title": "fix(runtime): carry the capability channel onto AI-route req.user (#4705)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T20:16:47Z",
+  "updated_at": "2026-08-02T20:49:21Z",
+  "closed_at": "2026-08-02T20:49:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-02T20:49:19Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4712",
+  "body": "Fixes objectstack-ai/objectstack#4705\n\n## 问题\n\n`packages/runtime/src/domains/ai.ts` 的 `handleAIRequest()` 从 ExecutionContext 构造 `req.user` 时，只拷了**权限集名**通道，没拷 **capability** 通道。这两类东西在平台上是两个字段，形状像但语义完全不同：\n\n| ExecutionContext 字段 | 承载内容 | 来源 |\n|---|---|---|\n| `permissions` | 权限**集名**（`admin_full_access` / `organization_admin` / `member_default`）+ 合成的 `ai_seat` | `core/src/security/resolve-authz-context.ts` 的 `grants.permissions.push(ps.name)` |\n| `systemPermissions` | **capability**（`manage_metadata`、`studio.access`、`setup.access` …），即用户所有已解析权限集 `systemPermissions[]` 的并集 | 同文件的 `grants.systemPermissions.push(p)` 循环 |\n\n结果是 **`/ai/*` 成了全仓唯一无法做 capability gate 的路由域**：平台其他每一处 capability 判断读的都是 `systemPermissions`（`domains/meta.ts` 的 `manage_metadata` 门禁、`action-execution.ts`、`rest/src/rest-server.ts`），而 AI 路由的 handler 只拿得到集名，所以任何写在 `req.user.permissions` 上的 capability 判断**恒为 false**——那不是「收紧」，是把路由对所有人（含平台管理员）关死。这正是 objectstack-ai/cloud#1015 想给 `POST /api/v1/ai/tools/:toolName/execute` 加门禁时撞上的阻塞项（该路由在默认配置下允许任何登录用户执行任意已注册工具，含 `create_object` / `apply_blueprint` / `create_seed`）。\n\n## 改动\n\n**只做透传，不含任何策略。** 本仓没有任何路由因此开始判 capability，`route.permissions` 那套（声明了从不执行）一行未动。\n\n1. `domains/ai.ts` — `req.user` 增加 `systemPermissions`，与 `roles` / `permissions` 完全同款的 fail-closed 缺省：非数组（或 ExecutionContext 上根本没有该字段——它在 `ExecutionContextSchema` 上是 optional）一律变成 `[]`，绝不是 `undefined`。\n\n   ```ts\n   systemPermissions: Array.isArray(ec.systemPermissions) ? ec.systemPermissions : [],\n   ```\n\n   两条通道**并排拷贝、绝不合并**。把任一条压进另一条会在「看起来修好了」的同时污染 `permissions` 的每一个既有消费者。\n\n2. `dispatcher-plugin.ts` 的 `resolveRequestUser`（另一条挂载路径，服务于逐路由的具体挂载）——它没有 ExecutionContext 可取，**继续保持 fail-closed，没有为它编造任何 capability 来源**。这里只是把 `systemPermissions: []` **显式写出来**而不是省略，让 AI 路由 `req.user` 的两个生产者在**形状**上一致：消费者看到的永远是「不持有任何 capability」，而不是一边 `[]` 一边 `undefined`——否则消费者迟早要自己写个 `?? []` 去抹平两者，那正是 Prime Directive #12 要避免的宽容 fallback。\n\n### 关于「这个字段在真实请求里到底有没有值」\n\nissue 里最该被证伪的一点，先说结论：**有**。\n\n- `/api/v1/ai/*` 的真实请求走的是 `dispatcher-plugin` 里 `registerAIRoutes` 挂的 method-wildcard，经 `dispatcher.dispatch()` → `domains/ai.ts`，而 `dispatch()` 在此之前已经通过 `timedResolveExecutionContext` → `resolveExecutionContext` 填好了 `context.executionContext`；后者在 `security/resolve-execution-context.ts` 把 `authz.permissions` 与 `authz.systemPermissions` 两个字段**并列**挂上。\n- 这些 wildcard 在同一个 `start()` 里**先于** `mountAiRoute` 的具体路由注册，所以答请求的是带 ExecutionContext 的那条路径。这一点已被测试钉住（见下），避免将来有人调换注册顺序、把 `/ai/*` 悄悄交还给没有 capability 的那个生产者。\n- capability 确实到得了平台管理员手上：`plugin-security` 的 `admin_full_access` 在 `systemPermissions` 里声明了 `manage_metadata` / `studio.access` / `setup.access`，经 `resolve-authz-context.ts` 汇聚进 `grants.systemPermissions`。所以 cloud#1015 的门禁按平台既有契约判时，管理员会通过而不是被 403。\n\n## 测试\n\n新增 `packages/runtime/src/domains/ai-request-user-capability-channel.test.ts`，6 个用例：\n\n- ExecutionContext 上持有的 capability **到达** `req.user.systemPermissions`；\n- `permissions` 仍**逐字**是集名 + `ai_seat`，`roles` 仍是 positions——并断言两条通道互不含有对方的元素（capability 读不到 `permissions` 上，集名 / `ai_seat` 也读不到 `systemPermissions` 上）；\n- 不持有任何 capability 的调用方拿到 `[]`，不是 `undefined`；\n- `ec.systemPermissions` 是畸形值（如字符串）时同样 fail-closed 成 `[]`；\n- `resolveRequestUser` 这条路径同样给出 `systemPermissions: []`；\n- `/ai/*` wildcard 先于具体 AI 路由挂载（上面那条可达性论证的回归钉子）。\n\n**没有本 PR 的改动时，这个测试文件 6 个用例里会挂 5 个**（唯一通过的是挂载顺序那条，它本就不依赖本改动）。实测输出：\n\n```\nAssertionError: expected undefined to deeply equal []\n ❯ src/domains/ai-request-user-capability-channel.test.ts:155:40\nTest Files  1 failed (1)\n     Tests  5 failed | 1 passed (6)\n```\n\n加上改动后的完整门禁（均在本地实跑）：\n\n```\npnpm --filter @objectstack/runtime exec vitest run --maxWorkers=2\n  Test Files  80 passed (80)\n       Tests  1092 passed (1092)\n\nnpx turbo run typecheck --filter=@objectstack/runtime... --concurrency=2\n  Tasks:    44 successful, 44 total\n\nnpx eslint packages/runtime/src/domains/ai.ts packages/runtime/src/dispatcher-plugin.ts \\\n           packages/runtime/src/domains/ai-request-user-capability-channel.test.ts --no-inline-config\n  (无输出，exit 0)\n\npnpm check:type-check-coverage\n  OK — 60/77 workspace packages type-checked …\n```\n\n`@objectstack/runtime` 本身在 `#4311` 的 DEBT 账本里没有 `typecheck` 脚本，所以编译层证据取自它的 `build`：tsup 的 DTS 步骤对 src 跑完整 `tsc`，`DTS ⚡️ Build success`。\n\n## 影响面\n\n- 用户可见（AI 路由 handler 的 `req.user` 多了一个字段），已附 changeset `.changeset/ai-route-user-system-permissions.md`。\n- 未改 `content/docs/releases/**`。\n- 解除 objectstack-ai/cloud#1015 的阻塞：那边的门禁可以照平台既有 `systemPermissions` 契约写，不需要在消费侧做任何宽容处理。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_019TYoxKa8yFLiDDh7tkBqtu\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019TYoxKa8yFLiDDh7tkBqtu)_"
+}

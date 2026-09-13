@@ -1,0 +1,34 @@
+{
+  "number": 4102,
+  "kind": "issue",
+  "title": "`datasource-autoconnect.test.ts` federated-query case fails locally on clean main — engine.find returns 8 duplicated rows for 2 seeded (CI green, so likely environment-sensitive)",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T09:54:15Z",
+  "updated_at": "2026-08-02T12:02:11Z",
+  "closed_at": "2026-08-02T12:02:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4102",
+  "body": "Hit while running the `@objectstack/runtime` suite for unrelated work. Filing rather than chasing it, since it is not mine and not obviously broken for everyone.\n\n## Symptom\n\n`packages/runtime/src/datasource-autoconnect.test.ts` → *ADR-0062 declared-datasource auto-connect › makes the federated object queryable through the engine with zero app code*:\n\n```\nAssertionError: expected [ 'first', 'first', 'first', …(5) ] to deeply equal [ 'first', 'second' ]\n```\n\nThe test seeds exactly two rows into the live external driver and reads them back through the engine:\n\n```ts\nawait driver.bulkCreate('ext_note', [{ id: 'n1', title: 'first' }, { id: 'n2', title: 'second' }]);\nconst rows = await engine.find('ext_note');\nexpect(rows.map((r) => r.title).sort()).toEqual(['first', 'second']);\n```\n\n`engine.find` returns **eight** rows, and the sorted head is all `'first'` — so the federated read is multiplying rows rather than returning the two that were written.\n\n## Reproduction / scoping\n\n- Clean `main` at `7ac1995`, fresh full `pnpm build`, `node v22.22.2`.\n- Fails **both** in the full package suite (`1 failed | 913 passed`) and when the file is run **alone** (`1 failed | 9 passed`), so it is not cross-file order pollution.\n- Reproduces with unrelated local edits stashed, so it is not caused by them.\n\n## Important caveat\n\nCI's **Test Core** job was **green** on #4084 against this same base, so this does not reproduce everywhere — it is likely sensitive to something environmental (driver/adapter build, platform, or a timing assumption in the federated read path) rather than plainly broken on `main`. Worth someone confirming whether the runtime suite's `datasource-autoconnect` case is actually in CI's scope, because if it is and it passes there, the row multiplication is real but conditional — and a conditional duplicate-rows bug in the federated read path is worth more than a flaky-test label.\n\nI have not investigated the cause."
+}

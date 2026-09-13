@@ -1,0 +1,34 @@
+{
+  "number": 4691,
+  "kind": "issue",
+  "title": "spec 双源清账 C14:HttpMethod(./api, ./shared ≠ ./ui)—— 1 条,且两侧是「7 值 vs 5 值」的真分歧,不是同形别名",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "protocol:breaking"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T18:17:34Z",
+  "updated_at": "2026-08-03T00:24:01Z",
+  "closed_at": "2026-08-03T00:24:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4691",
+  "body": "#4535 的 HttpMethod 簇。原排在 v18,**维护者 2026-08-02 裁定并进 v17**。基线行:\n\n```\nHttpMethod — [./api, ./shared (type)] ≠ [./ui (type)]\n```\n\n⚠️ **派发前 PM 已做过定位复核,推翻了「与 C11 同形、一行即可」的初判。** 请先读下面这节再动手 —— C11(#4688 / PR #4689)的结论**不适用于本簇**。\n\n## 这两个 `HttpMethod` 是真的不同类型\n\n`packages/spec/src/shared/http.zod.ts` 里并存两个 HTTP 方法枚举(行号对 `origin/main` @ `7d21581`,开工请自行复核):\n\n| 位置 | 声明 | 取值 |\n|:--|:--|:--|\n| `shared/http.zod.ts:20` + `:30` | `export const HttpMethod` / `export type HttpMethod` | **7 值** — GET POST PUT DELETE PATCH **HEAD OPTIONS** |\n| `shared/http.zod.ts:37` | `export const HttpMethodSchema = lazySchema(…)` | **5 值** — GET POST PUT PATCH DELETE |\n| `shared/http.zod.ts:39` | `export type HttpMethodType = z.infer<typeof HttpMethodSchema>` | 5 值(**就是 `./ui` 那个类型,只是叫别的名**) |\n| `ui/view.zod.ts:2040` | `export type HttpMethod = z.infer<typeof HttpMethodSchema>` | **5 值,却叫 `HttpMethod`** |\n\n`:37` 的注释自己写明了它的身份:*\"HTTP Method Schema (subset for UI/View data sources)\"*。\n\n所以 `./shared` / `./api` 的 `HttpMethod` 是 7 值,`./ui` 的 `HttpMethod` 是 **5 值真子集**。**同一个名字,两个不同类型** —— 这正是 #4411 陷阱最恶劣的形态(C11 那簇只是符号身份不同、形状相同;本簇形状也不同)。\n\n## ⛔ 因此「让 ./ui re-export ./shared 的 HttpMethod」是错的\n\n那会把 `./ui` 的 `HttpMethod` 从 5 值**悄悄放宽到 7 值**,而 `HttpRequestSchema.method`(`shared/http.zod.ts:48`)用的是 **5 值的 `HttpMethodSchema`**。结果是类型说 `HEAD` / `OPTIONS` 合法、运行时 `.parse()` 直接抛 —— **类型开始对运行时说谎**。这比双源本身更糟,不要为了清一行基线换来这个。\n\n## 推荐路线(PM 分析,实施者需复核;复核结论若与此矛盾请升级而不是硬做)\n\n**让 `./ui` 不再导出 `HttpMethod` 这个名字**,冲突即消失(名字只剩 `./api` + `./shared` 的那一个声明),且类型保持诚实的 5 值。\n\n- 删 `ui/view.zod.ts:2040` 的 `export type HttpMethod = z.infer<typeof HttpMethodSchema>`。\n- 需要给 `./ui` 保留一个可用的方法类型名的话:`export type { HttpMethodType } from '../shared/http.zod'`(纯新增,安全)。`./ui` 本来就 re-export 了 `HttpMethodSchema`(`ui/view.zod.ts:37`),消费者也可自行 `z.infer`。\n- 迁移指引:`import type { HttpMethod } from '@objectstack/spec/ui'` → `import type { HttpMethodType } from '@objectstack/spec/shared'`(**同一个类型,零形状变化**)。\n\n### 风险面 —— PM 已实测,仓内为零\n\n- **全仓没有任何地方从 `./ui` 导入 `HttpMethod`。** 唯一的跨包消费者 `packages/rest/src/route-manager.ts:9` 用的是 `Shared.HttpMethod`(7 值那个),不受影响。\n- `HttpMethodType` 目前**零消费者**(只有 `:39` 的声明本身)。\n- 但它仍是**已发布的 API 表面**,外部消费者不可见 → `api-surface.json` 会变,changeset 定 **major**,写清 FROM → TO。\n- **不是 authorable key,不需要 ADR-0087 tombstone / conversion。** 若你的实现产生了任何一个,说明走偏了,停下来升级。\n\n## 纪律(#4535 §1–§4 + 手册 6/7/8)\n\n1. **⛔ 禁止手编 `packages/spec/authorable-surface.json`**(#4650)。\n2. **⚠️ 门禁绿 ≠ 登记正确**(#4659):自己枚举核对,别信 leaf-name 匹配。\n3. **回归 pin 必须能真的红。** #4642 已证本包**编译期 pin 空转**(`tsconfig.json` 排除 `**/*.test.ts`、vitest 不开 `typecheck`)。`HttpMethod` 是**类型**,运行时看不见 —— 直接抄 PR #4689 在 `ui/view.test.ts` 里那条用 **TypeScript compiler API 在 `src/` 上做符号身份解析**的断言(含它的防空转守卫 `expect(moduleSym).toBeTruthy()`),那是本仓目前唯一有效的类型级 pin 形态。**必须 sabotage 验证并贴实际输出。**\n4. **本簇额外要求一条值域 pin**:钉住 `./shared` 的 `HttpMethod` 是 7 值、`HttpMethodSchema` 是 5 值,且 `HttpRequestSchema.parse({url, method:'HEAD'})` **抛错**。这条防的是将来有人「顺手统一」两个枚举而不自知。\n5. **⚠️ 生成物冲突只能靠重新生成**(手册第 7 条)。推之前重新 `git fetch origin main`;`spec-changes.json` 是对象数组,**必须跑 `gen:spec-changes`**,集合合并会丢条目。\n6. ⛔ **不要碰 `content/docs/releases/`**。\n\n## 验收\n\n- [ ] 基线删掉 `HttpMethod` 那 1 行,**只减不增**(其余行一字不动)。\n- [ ] `./ui` 不再导出 `HttpMethod`;`./api` / `./shared` 的 7 值声明**原样不动**。\n- [ ] 全绿:`build`、`check:dual-source-exports`、`check:generated`、`test`,加源码审计组(`check:liveness` / `check:strictness-ledger` / `check:empty-state` / `check:variant-docs` / `check:exported-any` / `check:skill-examples`),以及全仓 `pnpm typecheck`。\n- [ ] changeset 一份,`@objectstack/spec` **major**,含 FROM → TO 与迁移指引。\n- [ ] 三/四条 pin 全部 sabotage 验证并贴输出。\n\n## 顺带记录,**本簇不处理**\n\n`HttpMethodType`(5 值)零消费者、`HttpMethod`(7 值)与它并存且命名无法自解释(\"Type\" 后缀是噪音,而且它是**更窄**的那个)。按 ADR-0049 enforce-or-remove 与 ADR-0112 D9(a)「给领域专用的那一侧改名」,更彻底的收敛是把 5 值那对改成 `ViewHttpMethod` / `ViewHttpMethodSchema` 之类自解释的名。**但那超出清一行基线的范围,范围由维护者定** —— 想做请单独立单,不要搭本簇顺风车。\n\n关联:#4535(主单)、#4688 / PR #4689(C11,同文件相邻行,但结论**不适用**本簇)、#4642(pin 空转)、#4650 / #4659(门禁洞)、#4675(生成物冲突)、ADR-0049、ADR-0087、ADR-0112"
+}

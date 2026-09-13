@@ -1,0 +1,34 @@
+{
+  "number": 4608,
+  "kind": "issue",
+  "title": "ADR-0118:平台级「非用户 actor」契约 —— null 表示 / fail-closed / 显式 isSystem(#4556 #2991 #4560 #3166 的对齐规范)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T10:20:58Z",
+  "updated_at": "2026-08-02T10:47:49Z",
+  "closed_at": "2026-08-02T10:47:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4608",
+  "body": "维护者 2026-08-02 裁决(按四轴框架:长远合理性 / 防 AI 静默犯错 / 实际业务 / 不扩边界):四处现场各自发明「系统在操作」的表示法,需要一份平台级 ADR 统一,**在 #4556 / #2991 派发前定稿**,让执行 PR 照同一张图纸施工。\n\n## 四个现场(执行项)\n\n| 现场 | 现状 | ADR 决策 |\n|---|---|---|\n| #4556 `sys_metadata_history.recorded_by` | `lookup('sys_user')` 存哨兵 `'system'` | D1:系统 actor = null,列放宽可空,迁移存量 |\n| #2991 AI `ToolExecutionContext` | 契约文本已改 fail-closed(`ai-service.ts:394-404`),执行面待验证 | D2:缺席 ≠ 系统,全平台规则 |\n| #4560 SQL driver | `current_user` 令牌下沉为列 DEFAULT | D4:框架令牌永不下沉存储层 |\n| #3166 `isSystem` | 引擎惯例成立但自愿声明 | D3:入口点显式构造,可检查化 |\n\n## 决策要点(正文见 ADR)\n\n1. **D1 表示法**:用户 lookup 列中系统 actor = `null`;不造魔法账号(`sys_user` 归 better-auth 管,ADR-0092)、不存哨兵;UI 渲染「系统」是渲染规则不是数据。\n2. **D2 授权**:缺 actor 一律 fail-closed(匿名、RLS 开、什么都看不见),`isSystem: true` 是唯一显式提权入口。\n3. **D3 传播**:系统上下文只在入口点(boot/迁移/调度器/生命周期扫描)显式构造,跨异步边界显式重建。\n4. **D5 归因**:actor 二分(用户/系统);「哪个自动化」由 flow run id / job 名等关联字段回答,不设 actor_kind。\n5. **D6 非目标**:不动 `owner_id`(ownership 轴);不做多态 actor 引用。\n\n交付物:`docs/adr/0118-non-user-actor-contract.md`。"
+}

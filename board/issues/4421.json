@@ -1,0 +1,35 @@
+{
+  "number": 4421,
+  "kind": "pull_request",
+  "title": "feat(spec,automation,objectql,runtime,cli): declare the script-function purity contract; a writer opts out honestly (#4396)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T17:25:28Z",
+  "updated_at": "2026-07-31T23:38:48Z",
+  "closed_at": "2026-07-31T23:38:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T23:38:46Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4421",
+  "body": "Closes #4396.\n\n## The gap\n\nA `script` node's function is contractually pure — it takes its `inputs`,\n**returns** a value, and a later declarative node persists it — and #4354's run\nsummary depends on that. A `script` step reports *no* record metrics precisely\nbecause every write a pure function causes is a downstream `create_record` /\n`update_record` counting itself, so \"this node touched no records\" is exact\nrather than a guess.\n\nThe contract lived only in a comment inside the executor. `ActionDescriptor`\nsaid `category: 'logic'` and nothing about purity, so no author, lint or\ndesigner could read the rule the summary was relying on — and a function that\nwrote anyway made its run report `selected: 30, acted: 0`, which is\nindistinguishable from the broken sweep the counters exist to detect, recorded\npermanently on `sys_automation_run`.\n\n## What this ships (issue options 1 and 2)\n\n**1. Declare the contract where it can be seen.** `ActionDescriptor` carries\n`handlerContract: 'none' | 'pure'`; the `script` descriptor publishes `'pure'`.\nThe rule now reaches the action catalog, the designer palette, the generated\nreference docs (`content/docs/references/automation/flow-function`), the flows\nguide and the automation skill.\n\n**2. Let a function opt in to declaring its effect.** Either `functions` shape\nmay state what a function does:\n\n```ts\ndefineStack({\n  functions: {\n    scoreLead: (ctx) => ({ score: 42 }),                     // pure — the default\n    syncBilling: { handler: syncBilling, effect: 'writes' }, // declared writer\n  },\n});\n```\n\nA step calling a declared writer reports `unmeasuredEffect`, so the run's\n`unmeasured` tally keeps the broken-sweep query\n(`selected > 0 AND acted = 0 AND unmeasured = 0`) off that flow — **and only\nthat flow**. The rejected alternative was marking *every* `script` step\nunmeasured, which would blind the detector on every flow that calls any\nfunction in order to cover the few that break the rule.\n\nNothing is retired or renamed: a bare `functions: { fn }` entry is unchanged and\nmeans `effect: 'pure'`.\n\n## The seams the declaration crosses\n\nEach one could drop it silently, so each one carries it:\n\n| Seam | Change |\n| :--- | :--- |\n| `defineStack({ functions })` | map value may be a handler **or** `{ handler, effect }`; `effect` also allowed on the array form |\n| `AppPlugin` | `collectBundleFunctionEntries()` keeps the declaration; `collectBundleFunctions()` still answers plain callables for hooks/jobs |\n| ObjectQL registry | `registerFunction(name, handler, packageId \\| { packageId, effect })`, plus `resolveFunctionEntry(name)` |\n| automation bridge | resolver returns `{ handler, effect }`; a registry without the new lookup reads as pure, exactly as before |\n| `script` executor | `effect: 'writes'` → `metrics: { unmeasuredEffect: true }`, on success and on a throw (a writer that threw may have written first) |\n| `objectstack build` | a declared entry lowers to `{ handler: '<ref>', effect }` instead of being dropped |\n| artifact load | `mergeRuntimeModule` re-attaches the module's callable to the declaration the JSON carried |\n\n## Also fixed\n\n`bindHooksToEngine` returned before registering a bundle's functions when the\nstack declared no hooks. A flow-only app's `defineStack({ functions })` therefore\nreached the engine as nothing, and every `script` node calling one failed with\n*\"no function named 'x' is registered\"* — naming the one thing the author had\nactually done. Found by the new tests; pinned by two of them.\n\n## What is deliberately NOT claimed\n\nThis is declaration, not enforcement. A flow function is ordinary host code and\ncan close over a data client at module scope; no descriptor field or context\nshape stops that, so an **undeclared** writer still under-reports and the docs\nsay so plainly. The one part the runtime does hold — `FlowFunctionContext` hands\nthe function no data engine — is now pinned by a test instead of being\nincidental.\n\n## Tests\n\n- `packages/spec` — the effect enum, declaration defaults, `normalizeFlowFunctionEntry`\n  (including an unreadable `effect` reading as `writes`, never as pure), both\n  `defineStack` shapes, and `handlerContract` defaults/rejection.\n- `packages/objectql` — registry entries carry the declaration; `bindHooks` registers\n  functions with no hooks present.\n- `packages/runtime` — bundle collection keeps declarations; the artifact merge re-attaches.\n- `packages/cli` — lowering keeps a declared entry.\n- `service-automation` — pure step reports no metrics, declared writer reports\n  `unmeasured` (success and throw), a mixed flow stays measurable per node,\n  descriptor publishes the contract, context shape pinned.\n- `packages/qa/dogfood` — end-to-end: boots the app, triggers two identical\n  sweeps differing only in the function they call, and asserts the summary the\n  trigger returns (`unmeasured: 0` vs `unmeasured: 1`).\n\nAll eight `packages/spec` generated-artifact gates regenerated and green\n(`check:generated`), plus `check:liveness`, `check:exported-any`,\n`check:skill-examples`, `check:strictness-ledger` (the new schema file is\ndeclared in the ledger) and `check:type-check-coverage`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017nwaAedz4jxRsy63nW8bGq)_"
+}

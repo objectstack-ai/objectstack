@@ -1,0 +1,32 @@
+{
+  "number": 4483,
+  "kind": "issue",
+  "title": "$search 自动字段集：nameField/name/title 被无条件前置，绕过 SEARCH_AUTO_EXCLUDED_FIELDS——搜索会打到主键",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T09:41:34Z",
+  "updated_at": "2026-08-01T13:47:16Z",
+  "closed_at": "2026-08-01T13:47:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4483",
+  "body": "**包**：`@objectstack/spec`（`packages/spec/src/data/search-fields.ts`）\n**发现于**：核对 #4419 时（PR #4459），与该 issue 无关，故当时留在 PR 之外\n**核实基线**：`main` @ `ec975f1`\n\n## 摘要\n\n`autoDefaultFields` 逐字段过了三道排除条件来决定哪些字段可以被 `$search` 自动扫描，\n然后把「主标题字段」**无条件前置**——不再复查那三道条件。于是排除表对这一个字段完全失效。\n\n后果是 `$search` 会对**主键**做子串扫描：一个只有 `id`(text) 和数值列的对象，\nADR-0079 会把它的 `nameField` 定成 `id`，`$search` 随即展开成 `{ id: { $contains: <term> } }`。\n\n## 位置\n\n`packages/spec/src/data/search-fields.ts:65-82`：\n\n```ts\nfunction autoDefaultFields(fields, displayField?): string[] {\n  const names = Object.keys(fields).filter((f) => {\n    if (SEARCH_AUTO_EXCLUDED_FIELDS.has(f)) return false;   // ← 66-74 行：三道排除\n    const meta = fields[f];\n    if (!meta || meta.hidden) return false;\n    const t = meta.type;\n    if (!t) return false;\n    if (SEARCH_AUTO_EXCLUDED_TYPES.has(t)) return false;\n    return SEARCHABLE_TEXTUAL_TYPES.has(t) || SEARCHABLE_ENUM_TYPES.has(t);\n  });\n  // Lead with the display/name field when present.\n  const lead = displayField && fields[displayField] ? displayField   // ← 75-81 行：只查存在\n    : fields.name ? 'name'\n    : fields.title ? 'title'\n    : undefined;\n  if (!lead) return names;\n  return [lead, ...names.filter((f) => f !== lead)];                 // ← 无条件前置\n}\n```\n\n`lead` 有**三条**旁路，都只做存在性检查：`displayField`、`fields.name`、`fields.title`。\n任何一条命中的字段都会进入结果集，无论它是否在排除表里、类型是否可搜、是否 `hidden`。\n\n## 复现\n\n对 `packages/spec` 的构建产物直接调用（实测，非推演）：\n\n```js\nimport { resolveSearchFieldResolution } from '@objectstack/spec/data';\n\nconst fields = { id: { type: 'text' }, amount: { type: 'number' } };\n\nresolveSearchFieldResolution({ fields });\n// → { allowed: [], source: 'auto' }          ✅ 正确：id 在排除表，amount 类型不符\n\nresolveSearchFieldResolution({ fields, displayField: 'id' });\n// → { allowed: ['id'], source: 'auto' }      ❌ 排除表被绕过\n```\n\n## 这不是构造出来的场景\n\n`displayField` 的实参是对象的 `nameField`，而 `nameField` 由 ADR-0079 的\n`provisionPrimary(schema, { synthesize: false })` 在注册时自动指定\n（`packages/objectql/src/registry.ts:842`）：当对象上有可作标题的字段时就指认一个。\n对于「唯一文本列就是 `id`」的表——系统表、连接表、追加型日志表都是这个形状——它指认的就是 `id`。\n\n我在**真实注册对象上通过引擎**观察到过展开结果，不是只调了这个 helper：\n\n```\nfindOne('ledger', { search: 'anything' })\n  → 交给 driver 的 AST：{ object: 'ledger', limit: 1,\n                         where: { $or: [{ id: { $contains: 'anything' } }] } }\n```\n\n对象定义是 `{ id: { type: 'text', primaryKey: true }, amount: { type: 'number' } }`。\n\n## 第二层后果：#4254 的 REST 入口闸门也跟着放行\n\n`resolveSearchFieldResolution` 不只服务引擎侧的自动默认集，它同时是 #4254 那道\nREST 入口闸门的判据（`packages/metadata-protocol/src/protocol.ts:3751`）。\n闸门的职责是「拒绝引擎不会扫描的 `$searchFields` 覆盖」——但因为 `id` 现在确实在 `allowed` 里，\n一个 `$searchFields=id` 的请求会被**接受**，而不是按设计拒绝。\n\n所以这一处偏差同时松动了两层：自动默认集，以及本该收口它的那道闸门。\n\n## 被打破的是该模块自己写下的不变量\n\n`search-fields.ts:42`：\n\n```ts\n/** System / audit / heavy fields never auto-included. */\nexport const SEARCH_AUTO_EXCLUDED_FIELDS: ReadonlySet<string> = new Set([\n  'id', '_id', 'created', 'modified', 'created_at', 'updated_at',\n  'created_by', 'updated_by', 'owner_id', 'organization_id', 'space', 'company_id',\n]);\n```\n\n`never` 目前不成立。\n\n## 建议修法\n\n把 `lead` 过同一条谓词——它是否可搜，和它是不是主标题无关；`lead` 的作用应该只是**排序**\n（把主标题排在最前），不该是准入。不通过就退回原 `names`：\n\n```ts\nconst eligible = (f?: string) => !!f && names.includes(f);\nconst lead = eligible(displayField) ? displayField\n  : eligible('name') ? 'name'\n  : eligible('title') ? 'title'\n  : undefined;\n```\n\n这样 lead 的排序意图完整保留，只是不再兼作后门。\n\n## 影响面判断\n\n不是数据泄露，也不属于 #4419 那类「谓词被丢弃」——它产生的是一个**更窄**且语义错误的谓词\n（搜到的是 id 里恰好含该子串的行）。真正的代价是：宣称的不变量没有被执行，\n而 #4254 那道闸门在此之上给出的是一个它自己也不该给的通过。"
+}

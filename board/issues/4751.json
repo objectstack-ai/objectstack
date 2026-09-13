@@ -1,0 +1,35 @@
+{
+  "number": 4751,
+  "kind": "pull_request",
+  "title": "fix(rest): 服务端闸门也过滤 `areas[].navigation` —— area 内导航项权限不再只是渲染层的礼貌 (#4722)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T02:17:51Z",
+  "updated_at": "2026-08-03T03:10:06Z",
+  "closed_at": "2026-08-03T03:10:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T03:10:05Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4751",
+  "body": "Fixes objectstack-ai/objectstack#4722\n\n## 问题\n\n`filterAppForUser`(`packages/rest/src/rest-server.ts`)是 app 元数据的**服务端权威可见性闸门**,但它只走顶层 `navigation` 树 —— `if (!nav) return item` 提前返回,`item.areas` 从头到尾没被读过。于是写在 **area 内部**导航项上的 `requiredPermissions` / `requiresService` 只有客户端 `NavigationRenderer` 会执行:该条目连同它的 `objectName` / `pageName` / `componentRef` 指向,照常出现在 `/meta` 响应体里。改一次前端状态、或者直接 `curl` 一下 `/meta` 的 JSON,就能看到本该被 gate 掉的条目。对 areas 型 app 而言,导航项级闸门此前**不是**服务端强制。\n\n## 改法\n\n同一个 `filterNav` 复用到每一棵 `areas[].navigation` 上 —— 不是第二份实现,所以两棵树对同一个键的语义不可能漂移(这是裁定第 2 问的要求)。列表 `GET /meta/:type` 与单项 `GET /meta/:type/:name` 两条路径都覆盖:两者都经过这个函数,且单项读对 app 类型本就绕过共享缓存,正是为了让这个 per-user 过滤能跑。\n\n**同一提交修正了 `resolveRegisteredServices` 的探测面。** 它此前每个节点只取第一个命中的子数组(`navigation` / `children` / `widgets` 三选一),不下钻 `areas`。若不改,只在 area 内被引用的服务名根本不会被探测,而**未探测的名字在闸门看来等同于「服务不存在」** —— 会把一个服务确实注册着的条目误剥离。探测面必须与过滤面完全一致,这不是顺手改,是本改动的正确性前提(有专门的 pin)。\n\n## 三问的落实\n\n**1. 空 area 返不返回 —— 实测到的顶层既有行为,照抄。**\n\n顶层 `filterNav` 的分组处理(`rest-server.ts` 第 1836-1854 行,本 PR 未改动这段逻辑,只是复用):只有当 `e.children` 是**非空数组**时才进入过滤分支;过滤后,若该条目 `type` 为 group 且孩子被滤光,`continue` 掉它 —— 即**剥离**;否则带着过滤后的 children 保留。而 `children` 缺失或本来就是空数组的条目走 else 分支,**原样保留**。\n\n所以既有形状是:**被闸门滤空的分组剥离,作者本来就写成空的分组保留**。area 照此同形 —— 被 gate 滤空的 area 整个剥离(空壳标签没有消费价值),作者写成 `navigation: []` 的 area 原样返回。过滤只负责报告调用方看不到什么,不负责整理元数据。这条区分有独立 pin(`an area emptied BY the gate is dropped; an area authored empty is passed through`)。\n\n**2. 两棵树一致** —— `filterNav` 复用,零复制。area 内的嵌套 group 折叠行为也自动与顶层一致(有 pin 对照)。\n\n**3. `visible` CEL 明确不做** —— 服务端求值需要绑定 `user` 上下文,不是这个读路径现有的能力。这个不对称写进了三处:`filterAppForUser` 的文档注释、`packages/spec/liveness/app.json` 的账本 note、以及 `rest.test.ts` 里一条**新的 characterisation pin**(钉住「服务端在任何层级都不求值 `visible`」,并写明谁把 CEL 搬到服务端就该看到它红)。`requiresObject` 同理仍是客户端。\n\n**退役键未复活**:#4651 移除的 **area 级** `visible` / `requiredPermissions` 一个都没回来。本次强制的是 area **里面**的项级闸门 —— 这正是 #4651 留下的真缺口。\n\n## 已预期的钉,已按预案改写\n\n`rest.test.ts` 里 `characterises the boundary the #4651 prescription warns about: areas is not walked` 那条 —— 它的注释写着「谁让服务端开始走 areas 就该看到它红,然后连同账本 note 一起有意识地改写」。这就是那次改写:重写成 `AREA level: the item gate applies inside areas[] too`,并同步改写 `packages/spec/liveness/app.json` 的 `areas.navigation` note(以及顶部 `_note` 里同一句已经变假的陈述、`navigation.requiredPermissions` 与 `navigation.visible` 两条 note)。\n\n⚠️ **spec 零改动约束**:只动了 `packages/spec/liveness/app.json` 这一个文件的账本 note —— 派发时开的单文件例外。`packages/spec/**` 其余一行未改。\n\n## 留了一个尾巴,已单独立单\n\n`packages/spec/src/ui/app.zod.ts:662` 的 `AREA_REQUIRED_PERMISSIONS_RETIRED` 处方正文仍写着「the server does not walk `areas`」,`packages/spec/src/ui/app.test.ts:1374` 还有一条断言把这个措辞钉死。改它是处方正文 + pin + spec 生成物的耦合改动,撞上本单的 spec 零改动约束,故按 Prime Directive #10 记为 **#4749**(未认领)。方向上它是「过度保守」而非不安全 —— 劝作者把敏感项挪到顶层树,这仍然可行 —— 但它是错的,而且是说给作者听的那一份。\n\n## 验证\n\n```\npnpm --filter @objectstack/rest test\n  Test Files  38 passed (38)\n  Tests  571 passed (571)\n```\n\n新增/改写的测试**先证明它们能红**:把 `rest-server.ts` 的改动 stash 掉后重跑,\n\n- `rest.test.ts`:`Tests 6 failed | 191 passed` —— 4 条 AREA level + 2 条 `[#4722]` requiresService/探测面\n- `meta-app-area-nav-gate.test.ts`(新增,路由级):`Tests 3 failed | 2 passed`\n\n路由级那一份是验收标准的直接证据 —— 断言的是**响应体字节**:无权限调用方拿到的 `/meta` 列表与单项 JSON 里,`secret_forecast` / `secret_ops_page` / `secret_sys_user` 这些 gate 掉条目的指向一个都搜不到,同时有权限的调用方拿到完整树(不过度过滤)。\n\n其他:`pnpm --filter @objectstack/spec check:liveness` ✓(账本改动通过,evidence 行号已同步);`eslint --no-inline-config` 三个文件干净;`tsc --noEmit -p packages/rest` 错误数 67,与 `origin/main` 基线逐一相同(该包在 #4311 的 DEBT 账本里,无 `typecheck` 脚本);`node scripts/check-type-check-coverage.mjs` OK。已合入最新 `origin/main`(#4742)后重装、重建、重跑,增量提交不与 `packages/rest` / `packages/spec` 重叠。\n\n## 消费方注意(changeset 已写清)\n\n服务端响应形状**收紧**:无权限用户拿到的 app 元数据里,被 gate 的 area 内导航项不再出现,被滤空的 area 整个不见。任何依赖「服务端全量下发、客户端自己藏」的消费方需要改为信任服务端已过滤的树 —— 这正是本次收紧的目的。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_015Br2xsJsczFsTR9bvbh2Ny\n"
+}

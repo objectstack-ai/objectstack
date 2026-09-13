@@ -1,0 +1,32 @@
+{
+  "number": 4447,
+  "kind": "issue",
+  "title": "data: created_at is client-writable on an ordinary PATCH — the audit anchor can be forged silently",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T07:50:32Z",
+  "updated_at": "2026-08-01T16:17:36Z",
+  "closed_at": "2026-08-01T16:17:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4447",
+  "body": "Found while verifying the 17.0.0-rc.1 checklist on #3909 (section C, \"write observability — `droppedFields`\"). Verified on `main` @ `1ee48bc60`, showcase under `os serve --dev`, ordinary admin session (no `isSystem`).\n\n`created_at` accepts a client-supplied value on an ordinary REST write and **persists it**:\n\n```\nPATCH /api/v1/data/showcase_task/<id>   {\"progress\":42,\"created_at\":\"1999-01-01T00:00:00Z\"}\n→ 200\n\nGET  …?select=created_at,progress   → {\"created_at\":\"1999-01-01T00:00:00.000Z\",\"progress\":42}\nsqlite> select created_at from showcase_task where id='<id>';\n        1999-01-01T00:00:00.000Z\n```\n\nIts two siblings are correctly protected — the same request shape aimed at `updated_at` and `created_by` leaves both untouched (`updated_at` keeps the engine's real timestamp, `created_by` stays as it was). So this is one field out of the audit trio, not a general posture.\n\nThe field metadata confirms nothing marks it:\n\n```json\n\"created_at\": {\"label\":\"Created At\",\"type\":\"datetime\",\"readonly\":false, …}\n```\n\n`readonly: false` on a system-managed audit timestamp is the root of it — the write path has no reason to drop the value, which is also why **no `droppedFields` is reported**: from the platform's point of view nothing was dropped. (Genuinely computed fields are handled elsewhere and correctly: writing `f_formula` / `f_summary` is rejected 400 `INVALID_FIELD` rather than dropped.)\n\n## Why it matters\n\n`created_at` is the anchor of the audit timeline — the field the historical-import work (#3479/#3493) deliberately preserves, the one dashboards bucket on, and the one an auditor reads to establish when a record came into existence. Any authenticated caller who can edit a record can forge it, silently, in the same request that makes a legitimate edit. There is no diagnostic: the response is a normal 200 with the record, and the forged value reads back as truth from then on.\n\nIt also leaves the #3794 `droppedFields` contract untestable on the most obvious input a reviewer would reach for. I could not find a path on this build that produces a non-empty `droppedFields` — computed fields 400, unknown fields 400, and system fields (this one) are simply written. Worth confirming the contract has live coverage rather than only the FLS path.\n\n## Expected\n\n`created_at` is engine-owned like `updated_at`: a client-supplied value is dropped (and reported in `droppedFields`, which is exactly the case that key exists for) rather than persisted. If back-dating must remain possible, it belongs behind the historical-import path that already argues for it (`isSystem` / the import wizard's \"import as historical data\"), not on the ordinary write path.\n\nPart of the #3909 rc.0/rc.1 verification (section C).\n"
+}

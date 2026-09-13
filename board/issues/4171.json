@@ -1,0 +1,32 @@
+{
+  "number": 4171,
+  "kind": "issue",
+  "title": "[P2] spec: four exported types resolve to `any`, so \"bind the spec-named symbol to the spec\" actively degrades the consumer that obeys it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T13:44:20Z",
+  "updated_at": "2026-08-01T14:16:10Z",
+  "closed_at": "2026-07-30T15:44:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4171",
+  "body": "Found while burning down #4115's ledger in objectui (objectui#3042). The rule #4115 established — *a spec-named symbol must be an import, not a declaration* — is wrong for exactly four symbols, and there is no way for the consumer to know that from the outside without probing for it.\n\n## The mechanism\n\nA recursive zod schema needs an explicit annotation to break the circular inference. The spec annotates with `z.ZodType&lt;any&gt;`, and then derives the type from it:\n\n```ts\n// dist/…d.ts\ndeclare const NavigationItemSchema: z.ZodType&lt;any&gt;;\ntype NavigationItem = z.infer&lt;typeof NavigationItemSchema&gt;;   // → any\n```\n\nSo the *type* export is `any`. Same shape for all four:\n\n| type export | subpath(s) | schema |\n|---|---|---|\n| `NavigationItem` | `./ui`, `./system` | `NavigationItemSchema: z.ZodType&lt;any&gt;` |\n| `FormField` | `./ui` | `FormFieldSchema: z.ZodType&lt;any&gt;` |\n| `JoinNode` | `./data` | `JoinNodeSchema: z.ZodType&lt;any&gt;` |\n| `NormalizedFilter` | `./data` | `NormalizedFilterSchema: z.ZodType&lt;any&gt;` |\n\nMeasured against `@objectstack/spec@17.0.0-rc.0`: **4 of 2240** exported types resolve to `any`. The scope is small, which is the good news — this is a tightly bounded fix, not a systemic rewrite.\n\n## Why it's worth a P2 rather than a footnote\n\n#4115 tells every objectui package that a local declaration under a spec export's name must be replaced by a binding to the spec. For these four, obeying that instruction **replaces a precise type with `any`**.\n\nConcretely: objectui's `NavigationItem` is a 118-line documented interface (`recordId` template variables, `requiresObject` / `requiresService` runtime capability gates, `filters` precedence rules). Every one of its keys exists in the spec's version — I checked, `Exclude<keyof Local, keyof Spec>` is `never` — so by every available signal it is a redundant fork that should be deleted in favour of the import. Deleting it swaps a fully-typed interface for `any`.\n\n**I made that exact edit before catching it**, along with `JoinNode`, and had to revert both.\n\nThe reason it is hard to catch is that `any` is mutually assignable with everything, so the natural check reports these as *identical to the spec* and recommends precisely the wrong action:\n\n```ts\ntype A = [Local] extends [Spec] ? true : false   // true, because Spec is any\ntype B = [Spec] extends [Local] ? true : false   // true, because Spec is any\n// A && B → \"identical, safe to re-export\"\n```\n\nThis is the same failure family as #4075's `[key: string]: any` on `ActionDef`: a type that answers every question affirmatively reads as agreement. It also means the damage is silent — no compile error anywhere, just a type that stopped constraining anything.\n\nA related trap sits next door: objectui's `FormFieldSchema` and the spec's have an **identical `_output` and a divergent `_input`**, so even comparing the parsed shapes would have said \"same\" while the two schemas accept different authoring input.\n\n## The fix\n\nThe standard zod recursion pattern — annotate with the interface instead of `any`, so `z.infer` gives it back:\n\n```ts\ninterface NavigationItem { id: string; type: NavigationItemType; children?: NavigationItem[]; /* … */ }\nconst NavigationItemSchema: z.ZodType&lt;NavigationItem&gt; = z.lazy(() =&gt; z.object({ /* … */ }));\n```\n\n`z.infer` then resolves to `NavigationItem` rather than `any`, and consumers that follow #4115's rule get the type they were promised.\n\n## The check\n\nSame meta-rule as #4115 and #4118: this should land as CI, not as a note, or the next recursive schema reintroduces it. The whole check is a scan over each subpath's `.d.ts`:\n\n```js\nconst ty = checker.getDeclaredTypeOfSymbol(sym);\nif (ty.flags & ts.TypeFlags.Any) fail(`${subpath}:${name} is an exported type that resolves to \\`any\\``);\n```\n\nRatchet it the way `check-type-check-coverage.mjs` does — declared, reasoned, shrink-only — so the four current ones can be listed while nothing new joins them.\n\n## Consumer-side tripwire already in place\n\nobjectui#3042 pins this from the outside, so no coordination is needed on the release:\n\n```ts\ntype IsAny<T> = 0 extends 1 & T ? true : false;\nconst _specNavigationItemIsStillAny = true satisfies IsAny&lt;SpecNavigationItem&gt;;\nconst _specJoinNodeIsStillAny = true satisfies IsAny&lt;SpecJoinNode&gt;;\nconst _specFormFieldIsStillAny = true satisfies IsAny&lt;SpecFormField&gt;;\n```\n\nThe assertion is deliberately **inverted** — it asserts these are *still* `any`. The day this issue is fixed, `true satisfies false` stops compiling in objectui's `spec-derived-unions.test.ts`, and the failure names the symbol whose ledger entry can now be burned down. So fixing this here automatically tells objectui to finish the job, rather than the two repos needing to stay in sync by hand.\n\n`NormalizedFilter` has no objectui collision today, so it carries no tripwire — it is in scope here only because it is the same defect.\n\nRefs #4115, #4075, objectui#3042, objectui#3003, objectui#3009."
+}

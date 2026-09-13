@@ -1,0 +1,34 @@
+{
+  "number": 4844,
+  "kind": "pull_request",
+  "title": "feat(lint): 视图 searchableFields 按运行时同一套判定做构建期校验 —— lookup 笔误在 validate 期就报错,而非运行时 400 (#4830)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T09:48:04Z",
+  "updated_at": "2026-08-03T10:13:48Z",
+  "closed_at": "2026-08-03T10:13:47Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T10:13:47Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4844",
+  "body": "Fixes objectstack-ai/objectstack#4830\n\n## 问题\n\n视图 searchableFields 声明了不可搜索类型字段(如 lookup)时,compile/validate 全绿,但 Console 工具栏搜索把声明逐字回显为 `$searchFields`,#4254 入口闸按对象的可搜索集合判定后整条查询 400 INVALID_FIELD——任何角色敲第一个字符即整列表翻车,纯声明层笔误三道关全放行。\n\n## 修复(issue 方案 1,declared = enforced)\n\n新增 lint 规则 `searchable-field-unsearchable`(error 级),对四个视图级 narrowing 面(对象内建 listViews、defineView 的 list/listViews、react 页面 ListView searchableFields)按运行时同一个 `resolveSearchFieldResolution`(`@objectstack/spec/data`)做构建期判定,单一事实源、不复制类型清单。\n\n- auto 源:被 auto-default 拒绝的类型/hidden/审计列报 error(lookup 附「镜像到本对象 text/formula 字段」处方);\n- declared 源:超出对象声明集合的条目报 error(视图只能收窄);\n- 对象 canonical 集合维持只查存在性(运行时按存在过滤,不按类型过滤,构建期按类型拒绝会误伤运行时接受的元数据,ADR-0072 D1);\n- 注册表系统列在 narrowing 中跳过判定(元数据对 linter 不可见,宁漏报不误报,均有测试钉住);\n- 特意钉住的运行时一致性:对象把 json/lookup 显式声明进自身 searchableFields 后,视图回显它保持全绿(运行时确实接受)。\n\n## 测试\n\npackages/lint:970 个测试全过(新增 9 个:issue 复现用例、declared 源越界、hidden、系统列 declared 存在性 stub 一致性、canonical 不查类型等),`tsc --noEmit` 干净。\n\n跨对象路径的能力缺口另拆 #4840(未指派)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 4451,
+  "kind": "issue",
+  "title": "discovery 的 workflow / graphql 槽位还声明着两条无人挂载的 route —— #4318 同款,但目前\"上了膛没击发\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T08:03:12Z",
+  "updated_at": "2026-08-01T09:49:43Z",
+  "closed_at": "2026-08-01T09:49:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4451",
+  "body": "按 Prime Directive #10 记录,#4318(PR #4448)收尾时把 `SERVICE_CONFIG` 剩下的路由逐条核了一遍,发现同款构造还剩两条。**今天不发出**(两个槽位都没有任何东西注册,`registeredServices.has()` 恒假),所以危害度比 #4318 低一档 —— 但构造上的谎是同一个,而且任何人往槽位里塞一个实现的那天就开始广播 404。\n\n## 现象\n\n### 1. `workflow` —— 两个 builder 都声明,没有任何 handler\n\n```js\n// packages/metadata-protocol/src/protocol.ts:1245\nworkflow:     { route: '/api/v1/workflow' },\n```\n\n```js\n// packages/runtime/src/http-dispatcher.ts:980\nworkflow:      hasWorkflow ? `${prefix}/workflow` : undefined,\n// :1184\nworkflow:      hasWorkflow ? svcAvailable(routes.workflow, undefined, workflowSvc) : svcUnavailable('workflow'),\n```\n\n而全仓没有任何东西服务这条路径:\n\n- `packages/runtime/src/domains/` 下**没有 workflow 域** —— 已注册的域前缀是 `/actions` `/ai` `/analytics` `/auth` `/automation` `/data` `/i18n` `/keys` `/mcp` `/meta` `/notifications` `/packages` `/security` `/share-links` `/ui`;\n- `packages/rest/src/rest-route-ledger.ts` 里**没有 workflow family**;\n- 全仓没有任何 `registerService('workflow', …)` 或 `providesServices: ['workflow']`;\n- `CORE_SERVICE_PROVIDER['workflow']` 是 `null`,注释写着 \"nothing implements those slots(**no consumer either** — ADR-0115 Evidence 5)\"。\n\n即:槽位有名分(`workflow` 是合法 `CoreServiceName`)、路由有声明、实现和 handler 都不存在。\n\n### 2. `graphql` —— dispatcher 明说删掉了,metadata-protocol 还在声明\n\n```js\n// packages/metadata-protocol/src/protocol.ts:1255\ngraphql:      { route: '/graphql' },  // GraphQL uses /graphql by convention (not versioned REST)\n```\n\n```js\n// packages/runtime/src/http-dispatcher.ts:1591\n// /graphql removed — GraphQL is not in the product plan (#2462 follow-on).\n```\n\n比 workflow 更靠不住的地方在于:**`graphql` 根本不是 `CoreServiceName`**。它只出现在两处 —— `CORE_SERVICE_PROVIDER['graphql'] = null` 和上面这行 `SERVICE_CONFIG`。一个不在服务枚举里的槽位,声明了一条产品计划里已经明确否掉的路径。\n\n## 为什么现在不发出\n\n两个槽位都没有任何 provider,所以 `SERVICE_CONFIG` 循环走的是 `else` 分支(`unavailable`,不带 route)。实测(showcase,`pnpm dev -- --fresh -p 39514`,本 PR 分支 @ 5293114):\n\n```\nworkflow  status=unavailable handlerReady=None route=None\nroutes keys: analytics,auth,automation,data,i18n,metadata,notifications,storage,ui\n```\n\n和 #4318 的区别正在这里:cache/queue/job 有 kernel 兜底占位,所以**每个默认部署**都发;这两个是**空槽**,声明躺在表里等一个占位者。\n\n## 证据方法上的一个说明\n\n我也直接 curl 了这两条路径,都是 404。但**这条证据不是决定性的**,记下来免得下一个人被它误导:`/api/v1/i18n` 这种确实挂载了域的路径,裸前缀同样返回 404(域自己对未知子路径的应答)。`unavailable.ts` 把这层区分写得很清楚 —— **404 = 路由没挂,501 = 路由挂了但没实现**。所以判定\"有没有人挂\"要看域注册表 / route ledger / registerService 调用点这些结构事实,404 只是与之一致而已。\n\n## 两者需要拍板的东西不一样,所以没有并进 #4448\n\n#4318 的结论是\"这三个槽位**永远不会有** HTTP 面\"(provider 是进程内契约),摘 route 是唯一正确解。这两条不同:\n\n- **`workflow`**:要先定 workflow 引擎还做不做。做 ⇒ route 声明保留、补 dispatcher 域(或 REST ledger 条目),让 declared === enforced;不做 ⇒ 连槽位一起退役(ADR-0115 Evidence 5 已经说了 no consumer,那就是往退役方向走的证据)。\n- **`graphql`**:dispatcher 那行注释已经把结论写了 —— 不在产品计划里。倾向直接从 `SERVICE_CONFIG` 和 `CORE_SERVICE_PROVIDER` 里删掉,它连槽位都不是。\n\n把它们和 #4318 混在一条 PR 里,会让\"没人挂 ⇒ 不声明\"这条规则的适用依据变模糊(一个是永远不会有,一个是还没决定要不要有),所以单开。\n\n## 关联\n\n#4318(PR #4448)、#3898、#4089(#4114)、#4130(#4141)、#3891、#2462、ADR-0076 D12、ADR-0115 Evidence 5。\n\n<sub>核对于 `origin/main` @ 5293114。</sub>\n"
+}

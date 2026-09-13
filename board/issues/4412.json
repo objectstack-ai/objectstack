@@ -1,0 +1,35 @@
+{
+  "number": 4412,
+  "kind": "pull_request",
+  "title": "fix(spec): 不再承诺根本不会跑的校验，并让严格性账本闸门看见嵌套目录（#4001）",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T12:35:20Z",
+  "updated_at": "2026-07-31T12:52:10Z",
+  "closed_at": "2026-07-31T12:52:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T12:52:08Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4412",
+  "body": "对 #4001 战役的两处修正。**两处都是这场战役要消灭的那个缺陷本身——一个成功信号盖住了一处遗漏——只不过这次出现在战役自己的产物里。**\n\n起因是一次「#4001 到底做完了没有」的核查。结论是没有（长尾 ~416/500 站点仍是默认 strip，`studio/` 27 站点 0 strict），但核查过程中发现了两处比长尾更该先修的东西。\n\n## 1. `config` 的处方是假的 —— 而且有四份拷贝\n\n#4207 把 `DatasourceSchema` 收紧成 `.strict()` 时，把 `config` 留开。于是一个把连接细节写在顶层的作者，会收到这样的拒绝：\n\n> `` `host` `` is a driver connection detail — it belongs inside `config` … Move it to `config: { host: … }`; **the driver's own configSchema validates it there.**\n\n**没有任何东西在那里校验。** 这句话在两个独立层面上都不成立：\n\n- `DriverDefinitionSchema.configSchema` 是个 `z.record`，而仓库里仅有的两个驱动定义都把它设成 `{}`（`driver/mongo.zod.ts` 那行还带着「will be populated … at runtime」的注释，没有任何代码执行它）\n- 本仓没有任何读取点；四个驱动插件也都没有拿 schema parse 过自己的 config\n\n所以这句话把一个**在会报错的位置**犯了可恢复错误的作者，以平台的口吻，指引到了一个**同样的错误重新变静默**的槽里：`config: { hostname: … }` 被静默丢弃，数据源连到 localhost —— 这就是 #4001 的原始 bug，逐字同构，只低了一层。**一条错误的指令比没有指令更坏**，对 AI 作者尤其如此，它判断「这样对不对」的唯一信号就是解析有没有抱怨。\n\n同一句话在仓库里有 **4 份拷贝**，全部改掉：\n\n| 位置 | 性质 |\n|---|---|\n| `datasource.zod.ts` 模块注释 | 内部 |\n| `datasource.zod.ts` `belongsInConfig` | **作者会看到的错误信息** |\n| `driver/mongo.zod.ts` 头部 | 内部（「used by the Platform to validate `datasource.config`」）|\n| `content/docs/releases/v17.mdx` | **用户会看到的发布说明** |\n\n第 4 份是被本 PR 自己的 docs-drift 机器人找出来的 —— 它按包级启发式列了 107 篇文档，其中真正需要改的正好一篇，而那一篇恰好是读者真会看的那份。\n\n处方改成指向 per-driver 的形状（`PostgresConfigSchema` / `MongoConfigSchema` / `MemoryConfigSchema`），不再声称任何执行力。**没有改动任何可授权键** —— 只是错误信息与文档文字。真正的执行（对惰性 `configSchema` 做 enforce-or-remove）另立 **#4410** 追踪。\n\n## 2. 账本闸门的覆盖扫描只有一层深\n\n`check:strictness-ledger`（#4232 建立）承诺：被分类目录下每一个有站点的 `*.zod.ts` 都必须带一行分类。它用非递归的目录列举实现这个承诺，于是 `data/driver/` —— 三个 per-driver 配置文件、**九个可授权站点** —— 对它完全不可见，而它照常打印 *\"no undeclared schema files\"*。\n\n这正是账本自己开头那句话的升级版：*会漂移的地图比没有地图更坏，因为它会被人照着走*。**一个漏报的闸门比没有闸门更坏，因为它把「我该分类一下」变成了「已经分类过了」。** 没有闸门时读者还会保持怀疑；绿色的闸门会解除这份怀疑。\n\n- 扫描改为递归（嵌套文件以 `driver/postgres.zod.ts` 形式申报，行解析器本来就接受）\n- 三个文件在账本中分类归档：**authorable**，但注明它们今天是**仅契约导出** —— 没有任何东西拿它们 parse `datasource.config`，所以此刻收紧不会执行任何东西；这一行的棘轮卡在 #4410 给它一个 parse 点上，而不是卡在验证上\n- `data/` 分区计数 149 → 158\n\n### 为什么单独加了测试\n\n`scripts/strictness-ledger.test.ts` 钉住递归这件事，**它和闸门不重复**——实测：在账本行已经补齐之后，把扫描改回非递归，`check:strictness-ledger` **依然是绿的**（一层深的扫描在「没有嵌套文件缺失」时确实找不到缺失）。**闸门抓不住自己的回归。** 这个测试可以，并且我先让它红、再让它绿地验证过。\n\n按同样的道理，账本里也记下了这条：任何声称覆盖的检查，在信它之前得先证明它看得见它该看见的东西。\n\n## 3. 顺带：给「等田野数据」加了决策点\n\n账本的 Next steps 只剩一条，而且是无限期的等待（「等告警层跑一个 release」）。没有到期条件的等待，会安静地变成永久停摆，而这份文件会一直显示战役进行中。现在它由一个**可回答的问题**来解除，而不是日期，并列出三种结果各自的下一步 —— 其中要重点排查的那种是「零发现，因为根本没有任何东西在回报」，它和成功在表面上无法区分，正是这场战役自己的主题。\n\n同时把 `studio/`（27 站点、0 strict、三个文件全是未验证的 `(p)`）显式列为不依赖田野数据的备选起点。\n\n## 验证\n\n- `@objectstack/spec`：**283 文件 / 7205 用例通过**，`tsc --noEmit` 干净\n- **下游消费包全绿**：`lint` / `metadata` / `platform-objects` / `metadata-core` / `metadata-protocol` —— turbo **17/17 任务成功，0 失败**\n- **8 个生成物闸门全部 up-to-date**（无需重新生成 —— 证实这些 JSDoc 改动没有让参考文档漂移，即 #3746 踩过的那个坑没有复现）\n- **全部 `check:*` 闸门绿**：docs / skill-refs / skill-docs / api-surface / spec-changes / upgrade-guide / authorable-surface / react-blocks / liveness / empty-state / variant-docs / strictness-ledger / exported-any / react-conformance / skill-examples\n- 闸门行为双向实证：在 `data/driver/` 未申报时变红、补齐后变绿；植入一处分区合计漂移仍能抓到；把递归改回去后新测试变红而闸门仍绿（这就是新测试存在的理由）\n- 全仓确认：被改掉的旧错误信息文本没有任何测试或文档依赖，且假声明已无残留拷贝\n\n## 参考\n\n- #4001（未知键静默剥离战役）、#4207（datasource 收紧那一步）、#4232（账本闸门）\n- **#4410**（本 PR 开出的后续：驱动 `configSchema` 的 enforce-or-remove）\n- ADR-0049 enforce-or-remove、ADR-0078 no-silently-inert-metadata、ADR-0054 棘轮范式\n- AGENTS.md Prime Directive #10（never advertise a capability the runtime doesn't actually deliver）\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WnqGjQFQMqd5k81LYV8SCY"
+}

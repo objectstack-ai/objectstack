@@ -1,0 +1,37 @@
+{
+  "number": 4731,
+  "kind": "issue",
+  "title": "bump-objectui.sh 的 pin changeset 只收 feat|fix 且静默截断到 40 条 —— 破坏性 refactor! 进不了前端发布记录",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T01:00:28Z",
+  "updated_at": "2026-08-03T10:38:56Z",
+  "closed_at": "2026-08-03T10:38:29Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4731",
+  "body": "**未认领。** 刷 #4665（objectui pin `7d9734d5e321 → 785b8a5d432c`）时发现，与该单同源（#3340 的失效模式：前端改动没进平台发布记录），但修的是机制本身，所以另立，不在 #4665 的 PR 里顺手改。\n\n## 现状\n\n`scripts/bump-objectui.sh` 用提交标题猜\"这条提交要不要写进 `@objectstack/console` 的 changeset\"：\n\n```bash\nCHANGES=\"$(git -C \"$OBJECTUI_ROOT\" log --no-merges --format='- %s' \"${OLD_SHA}..${NEW_SHA}\" \\\n  | grep -iE '^- (feat|fix)' | head -40 || true)\"\n```\n\nbump 类型也用同一套猜法（`grep -ciE '^feat'` 有命中就 minor，否则 patch）。\n\n## 三个后果，都是这次刷新的实测\n\n区间 `7d9734d5e321..785b8a5d432c`：53 个非 merge 提交，其中 `feat|fix` 34 条。\n\n1. **带 `!` 的破坏性 `refactor` 一条都进不去。** 这次被过滤掉的就有 8 条 `refactor(...)!`，包括 `refactor(layout)!: delete PageNodeRenderer, the unregistered page-node renderer (#3225)` 和两批 burn ledger（objectui#3220 / #3224）。破坏性变更是最不该从发布记录里消失的那一类，而它恰好是唯一被类型过滤挡在门外的一类。`chore(deps)!` 同理（区间里的 `chore(deps): lockstep the @objectstack family onto 17.0.0-rc.1` 也没进）。\n2. **`head -40` 是静默截断。** 没有 \"…and N more\" 的尾标记，读者无从知道清单是完整的还是被砍过的。这次 34/40 —— 用掉了 85%，下一次多攒两周就会开始悄悄掉最旧的几条，而\"掉了\"和\"本来就没有\"在成品里长得一模一样。\n3. **反向也不准：不发版、不进包的提交被收了进来。** 两条 `fix(ci)`（objectui#3198 `never render a budget FAIL for a run that measured nothing`、objectui#3186 `hand the cross-repo token to github-script`）按类型匹配进了清单，但它们在 objectui 侧连 changeset 都没有，也不在构建产物里。（#4665 的 PR 里我手工删掉了这两行，但下一次刷新会照样带回来。）\n\n## 为什么值得修\n\n`bump-objectui.sh` 写这个 changeset 的**唯一理由**就是补 #3340 那个洞：pin 一动、前端改动却在平台发布记录里查无此人。但它判断\"这条提交算不算前端改动\"用的是提交标题的 conventional-commit 类型，而不是\"这条提交在 objectui 侧发不发版\"。猜错的两个方向都已经在真实区间里出现了。\n\n## 建议（按可持续性排序）\n\n1. **读区间里新增的 `.changeset/*.md` 的 frontmatter，别猜 commit 类型。** objectui 每个发版 PR 都带一个 changeset，空 frontmatter = release-nothing。`git diff --name-only --diff-filter=A OLD..NEW -- .changeset/` 就能拿到这批文件，有包名的才是\"发版的前端改动\"，级别（major/minor/patch）也是现成的 —— 连 bump 类型都不用再从 `^feat` 猜。声明即依据，跟本仓 contract-first 的方向一致。\n2. 过渡方案（若 1 太大）：把 `!` 破坏性提交无条件收进清单（`^- \\w+(\\(.*\\))?!:`），排除 scope 为 `ci` 的提交，并在截断处补 `- …and N more commits (see the objectui range)`。\n3. 无论走哪条，**截断必须出声**：静默截断和没有截断在成品里不可区分，这正是这个脚本存在要防的那种沉默。\n\n## 关联\n\n- #3340 —— 本条要防的失效模式\n- #4665 —— 发现现场（pin 刷到 `785b8a5d432c`）\n"
+}

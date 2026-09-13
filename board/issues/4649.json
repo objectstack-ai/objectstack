@@ -1,0 +1,37 @@
+{
+  "number": 4649,
+  "kind": "issue",
+  "title": "Script validation rules are silently skipped when their predicate fails to evaluate — fail-open is the wrong direction for a validation",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T13:59:01Z",
+  "updated_at": "2026-08-03T03:26:12Z",
+  "closed_at": "2026-08-03T03:26:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4649",
+  "body": "Reported from the HotCRM side (objectstack-ai/hotcrm#630), where it produced a rule that read as enforced and required nothing. Filing here because the behaviour is entirely in the engine's validation path; the app-side mitigation works but should not be the only line of defence.\n\n## What happens\n\nA script validation's predicate is evaluated against the merged record `{...previous, ...data}`.\n\n- On **insert**, fields absent from the payload are materialised as `null`, so a predicate referencing them evaluates normally.\n- On **update**, they are not. `previous` is whatever the driver returns, and a driver that stores only written columns returns a record that **does not carry the key at all**.\n\nStrict CEL then aborts the whole predicate with `No such key`, and the engine's handling of a predicate that failed to evaluate is to **skip the rule**, leaving only a WARN:\n\n```\nWARN Validation rule 'duplicate_disqualification_requires_survivor'\n     predicate failed to evaluate (…) — skipped\n```\n\nSo the rule is declared, appears in the metadata, shows up in any \"what protects this object\" listing — and enforces nothing, on exactly the records whose shape triggers it.\n\n## Why this is worth changing\n\nFor most engine features, skipping something unevaluable is a reasonable robustness choice. For a **validation** it inverts the guarantee: the rule exists precisely to reject a write, and the failure mode ships the write through. The observable signal is one WARN in a log nobody reads during normal operation — not a failing request, not a failing test.\n\nConcretely, in HotCRM this let a lead be closed as a duplicate while naming no surviving record, and it did so on the in-memory driver the entire test suite runs on, so no test could have caught it.\n\n## Suggested direction\n\nEither would remove the trap; the first is the smaller change:\n\n1. **Fail closed for validations specifically** — an unevaluable validation predicate rejects the write with a clear error naming the rule and the missing key, rather than passing it. Other rule categories can keep whatever policy they have.\n2. **Make the merged record total** — materialise declared-but-absent fields as `null` on update as well as insert, so a predicate written against the object's declared shape always has a value to read. This also makes insert and update behave the same way, which is what an author would assume from the docs.\n\nA third, weaker option is to keep skipping but promote the WARN to an error-level event that a health check or a test harness can assert on. That still leaves running deployments unprotected.\n\n## App-side mitigation (already shipped, not a substitute)\n\nHotCRM now wraps every field reference in its validation predicates with `has(...)`, making each predicate a total function that returns a verdict for any record shape rather than aborting on some of them. That is correct authoring practice and we are keeping it, but an author who forgets it gets a rule that silently does nothing, and nothing in the toolchain tells them."
+}

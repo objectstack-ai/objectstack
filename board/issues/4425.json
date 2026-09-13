@@ -1,0 +1,35 @@
+{
+  "number": 4425,
+  "kind": "pull_request",
+  "title": "feat(spec): 蓝图可以声明汇总字段（含带条件的汇总）",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T03:47:08Z",
+  "updated_at": "2026-08-01T04:33:04Z",
+  "closed_at": "2026-08-01T04:33:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-01T04:33:02Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4425",
+  "body": "## 问题\n\n`BlueprintFieldSchema` 没有承载 `summaryOperations` 的位置，于是蓝图里的 `summary` 字段只能是个空壳。实测（cloud#970）造成两处后果：\n\n1. `z.object` 会**丢弃未知键**。模型其实写对了 —— `{ type:'summary', summaryOperations:{ object:'task', function:'count', filter:{ status:'completed' } } }` —— 但这份配置在 parse 这道关口被静默剥掉，落库即 runtime-dead。\n2. 严格结构化输出的镜像（`SolutionBlueprintStrictSchema`）同样表达不了它，所以**方案设计阶段**（唯一真正知道聚合语义的地方，\"已完成任务数只统计 completed\"）无处安放这个信息。\n\n这不只是整洁问题：引擎只在**子记录写入时**重算 roll-up。等蓝图把示例数据灌完之后再补 `summaryOperations`，父记录上的值会一直是空的，直到有人去改一条子记录。所以它**必须**能在设计阶段就声明。\n\n## 改动\n\n- 新增 `BlueprintSummaryOperationsSchema`（`object` / `function` / `field` / `relationshipField` + 谓词），挂到 `BlueprintFieldSchema.summaryOperations`，宽松版与严格镜像都有。\n- 严格模式无法表达 `filter` 这种开放键的 map（`additionalProperties`），所以谓词用扁平的 `conditions: [{field, op, value}]` 数组 —— 与 dashboard widget 的 `condition` 完全同形（既有先例）；宽松版**同时**接受真正的 `filter` map，供手写蓝图使用。\n- `BlueprintWidgetConditionSchema` 改为共享的 `BlueprintConditionSchema` 的别名。\n- 顶层 `summary` 在宽松 schema 中改为**可选**。它是纯描述性的一句话、没有任何结构作用，但 `apply_blueprint` 用这份 schema 校验模型回传的蓝图 —— 缺了它整份蓝图被拒，报错 `path: \"summary\"`，而模型把这条读成了\"summary 字段有问题\"，于是**把两个汇总字段删掉**当作修复。严格设计契约仍然要求它。\n\n## 测试\n\n`packages/spec` 全量 285 files / 7228 tests 通过；新增用例覆盖：宽松 schema 保留 `summaryOperations`（含 `filter` 与 `conditions` 两种写法）、缺 `summary` 不再被拒（缺 `objects` 仍然被拒）、严格镜像携带 `summaryOperations` 且 `conditions` 为扁平数组。\n\n消费侧（cloud `service-ai-studio` 的 `apply_blueprint` 物化 + graph-lint）在 objectstack-ai/cloud#970 的 PR 中一并落地。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

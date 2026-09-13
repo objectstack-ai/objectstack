@@ -1,0 +1,35 @@
+{
+  "number": 4664,
+  "kind": "pull_request",
+  "title": "feat(spec)!: 退役五个「lint 永远无法告警」的键，并接通 doc.tags (#4509)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T15:05:28Z",
+  "updated_at": "2026-08-02T15:44:02Z",
+  "closed_at": "2026-08-02T15:44:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-02T15:44:01Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4664",
+  "body": "收尾 #4509 正文的「顺带的三个小清理候选」—— #4558 落地四条主线之后剩下的部分。\n\n## 为什么这批必须赶在 v17\n\n把这五个键归到一起的不是它们所在的类型，而是**为什么它们必须走 major 而不能先弃用一轮**：五个里有四个带 schema **默认值**，默认值在 parse 时物化，所以活性 lint 分不清「作者写的值」和「schema 填的值」。给它们打 `authorWarn` 会对现存的每一个 mapping、每一个 selector 都告警 —— 这就是账本里记的是 `_authorWarnSkipped` 而不是 `authorWarn` 的原因。\n\n对处于这种状态的键，移除**不是**告警之后的升级手段，而是唯一能触达作者的通道。spec 现在 `17.0.0-rc.1`、pre 模式仍开着，这个通道在 `changeset pre exit` 时关闭，下次开启是 v18。\n\n## 移除（strict 删除 + `guidance` 处方，账本行删除）\n\n| FROM | 它声称的 | 实际 |\n|---|---|---|\n| `mapping.extractQuery` | \"Query to run for export only\" | 没有任何 exporter 读过 mapping 工件 |\n| `mapping.errorPolicy` | skip / abort / retry | 三个值是同一个行为；错误处理属于 import **请求** |\n| `mapping.batchSize` | 批大小 | 写路径自己定批大小 |\n| `app.contextSelectors[].includeAll` | 加一个 \"All\" 行 | 见下 |\n| `app.contextSelectors[].placement` | sidebar_header / topbar | 没有渲染器读它；`'topbar'` 什么也没放 |\n\n`os migrate meta --from 16` 自动改写既有源码。\n\n### `includeAll` 值得看两遍\n\n它不是没人读，是**被故意无视**，而且理由是安全的。context selector 是 mandatory-scope 语义，一个 \"All\" 行会把一个「存在就是为了被限定」的表面解除限定 —— 对 Studio 的 package 选择器而言，那等于把平台自己的 system/cloud 内核包列给一个明明已经限定到自己包的开发者看。渲染器无论这个 flag 取什么值都从不渲染 All 行，所以 `includeAll: false` 没加固任何东西，`includeAll: true` 也没解锁任何东西。\n\n`STUDIO_APP` 就这么写着 `includeAll: true`，对着一个忽略它的渲染器 —— 这个 authoring 点在本 PR 里跟着键一起走。\n\n### `batchSize` 刻意不提供改名建议\n\n`bulkActionDef.batchSize`、`connector.batchSize`、`sync.batchSize`、`offline.batchSize`、seed-loader 的、NoSQL driver cursor 的 —— **全都是活的、被强制执行的**，但每一个都是另一个类型上的另一个键、各自定各自的批。「removed」再加上一行之外一个眼熟的名字，正是死设置被洗成活设置的路径。和一个 issue 之前 `datasource.retryPolicy` 要防的 `hook`/`job` `retryPolicy`（延迟拼作 `backoffMs`）是同一个陷阱。有 pin 测试钉住报错文案必须把它们说成 **DIFFERENT** 键。\n\n退役的 **alias** 拼法（`query`、`onError`、`errorHandling`、`errorMode`、`batch`、`chunkSize`、`skipErrors`、`showall`、`location`）路由到同样的处方，而不是建议改名到一个同样已经没了的键。\n\n## 接通，不移除 —— `doc.tags`\n\n`BookGroup.include` 一直接受 `{ tag }`，而它在任何 stack 里都**匹配不中任何一个 doc**。不是因为 matcher 缺失：\n\n- `matchesInclude` 一直在比对 `doc.tags` —— `packages/spec/src/system/book.zod.ts:213`\n- book 路由一直在转发 `tags: d.tags` —— `packages/rest/src/rest-server.ts:3218`\n- `ResolverDoc` 一直声明着 `tags?: string[]`，注释写着 `(P3d; absent today)`\n\n缺口在**授权端**的一行：`DocSchema` 是 `.strict()` 且没有 `tags` 键，所以在 doc 上写 `tags:` 是解析错误，每个 doc 到达 resolver 时 `tags` 都是 undefined。\n\nADR-0049 说功能存在时 enforce 胜出。移除变体的代价还包括：union 成员没有干净的墓碑（`retiredKey` 只覆盖 object 键），作者只会拿到一条不带处方的 union 报错，而且要丢掉一份能用的 matcher 代码。\n\n## ADR-0087\n\n- 新增 conversion `mapping-inert-keys-removed` —— **刻意限定到 `mappings` 集合**：全局 strip 会把 connector / sync / bulk-action / offline 上被强制执行的 `batchSize` 一起删掉\n- 扩展既有的 `app-dead-authoring-keys-removed` 下钻 `contextSelectors` 数组（同 major 同类型，新开一条会撞 fixture 互斥契约），`expectedNotices` 4 → 6\n- 两条都接进 protocol-17 的 D3 链步，`step17.rationale` 已扩写\n\n## 连带核验：`allValue`\n\n它的账本 note 明写着 \"re-verify if includeAll is ever removed\" —— 照做了。仍然 `live`（shell 真的读它，用于自动选中和 query 参数默认化），但它的 `.describe()` 不再把它叫做「All 被选中时发出的值」：那个事件不可能发生，也从来没可能过。\n\n## 顺带发现（已另行记录，未在此修）\n\n核验 selector 键时确认了 `filterAppForUser` 只走顶层 `navigation` 树，**从不读 `item.areas`**（`rest-server.ts:1823` 在 `navigation` 缺失时提前返回），客户端 area 切换器也照渲染所有 area。所以 area 级的 `visible` / `requiredPermissions` 是 **fail-open** 的闸门，不只是没人读 —— 一个「隐藏的」或「需要权限的」area 对所有人可见。\n\n账本里已如实记录，并**另开 #4651** 走 enforce-or-remove 决策。没有在这里顺手修：在一个退役 PR 里就地发明授权机制，正是 #4583 对 managed 只读闸门拒绝做的事（#4584）。\n\n跨仓：objectui#3208 记录了下次抬 spec pin 时会断的两条 parity 断言（objectui 的 selector schema 按引用派生自 spec，漂移守卫会如期触发）。\n\n## 验证\n\n- 全量 `pnpm build` 71/71、`pnpm typecheck` 122/122、`pnpm lint` 干净\n- 全量 `pnpm test` 132/132（dogfood 单独复跑 453 passed / 3 skipped —— 首轮它拿到 SIGTERM 是我并发跑 typecheck 造成的资源争用，非本 PR 问题）\n- spec 十三道闸门全绿：`liveness` / `empty-state` / `authorable-surface` / `docs` / `api-surface` / `spec-changes` / `upgrade-guide` / `skill-refs` / `skill-docs` / `skill-examples` / `variant-docs` / `strictness-ledger` / `generated`，外加 `check:i18n`\n- `check:liveness`：**mapping 死键 3 → 0**（继 #4583 的 datasource 之后第二个归零的类型），app 6 → 4，doc 新增 `tags` 行为 live\n- 新增 pin 测试：三条 mapping 拒绝（`batchSize` 那条同时断言文案含 \"relocating\" 与 `connector.batchSize|sync.batchSize`）、两条 selector 拒绝、alias 路由、`allValue` 存活、book tag 端到端匹配\n- 回归钉：`bulk-action` / `sync` / `connector` / `offline` / seed-loader 的 `batchSize` 未被 conversion 误伤\n- `authorable-surface.json` 五行**消失**是 strict 删除的预期特征（闸门 (a) 的绊线），本 PR 刻意删除\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01E5CYr5SDwe85gH2Jr5KSgu\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01E5CYr5SDwe85gH2Jr5KSgu)_"
+}

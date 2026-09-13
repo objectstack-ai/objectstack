@@ -1,0 +1,32 @@
+{
+  "number": 4485,
+  "kind": "issue",
+  "title": "protocol-handshake 的 ReDoS 断言用绝对 50ms 墙钟，并行满负载时会把无关 PR 染红",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T09:42:39Z",
+  "updated_at": "2026-08-01T13:10:32Z",
+  "closed_at": "2026-08-01T13:10:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4485",
+  "body": "**包**：`@objectstack/metadata-core`\n**发现于**：#4459 的一次全仓 `pnpm test` 被它染红；该 PR 完全没碰这个包\n**核实基线**：`main` @ `ec975f1`\n\n## 摘要\n\n`protocol-handshake.test.ts` 的 ReDoS 防护断言用的是**绝对墙钟上界 50ms**。\n在 132 个 turbo task 并行的全仓测试里，这个上界没有余量——机器一忙就超，\n把一个和它毫无关系的 PR 变红，而诊断成本由当时正好在跑的人承担。\n\n**要说在前面**：底层防护是真的、该留（CodeQL 837/838）。问题在**怎么度量**，不在要不要测。\n\n## 位置\n\n`packages/metadata-core/src/protocol-handshake.test.ts:67-77`：\n\n```ts\n  it('bounds pathological input (ReDoS-safe) without a slow scan', () => {\n    // The engines string is externally authored; the comparator/hyphen parsing\n    // must not degrade on adversarial input (CodeQL alerts 837/838).\n    const overlong = '<' + '\\t'.repeat(100_000);\n    const hyphenBomb = 'a\\t-\\t' + '\\t'.repeat(100_000);\n    const start = performance.now();\n    expect(rangeAdmitsMajor(overlong, 11)).toBeNull();\n    expect(rangeAdmitsMajor(hyphenBomb, 11)).toBeNull();\n    expect(rangeAdmitsMajor('>=11.0.0 ' + ' '.repeat(100_000) + '<13.0.0', 11)).toBeNull();\n    expect(performance.now() - start).toBeLessThan(50);      // ← 绝对上界\n  });\n```\n\n## 实测\n\n| 怎么跑 | 结果 |\n|---|---|\n| `pnpm test`（全仓，132 个 turbo task 并行） | ❌ `AssertionError: expected 60.95567000000028 to be less than 50` |\n| `pnpm --filter @objectstack/metadata-core test`（单独） | ✅ 8 个文件 / **103 个测试全绿** |\n\n同一份代码、同一台机器、同一次 checkout，只差机器负载。\n\n## 为什么值得修而不是忍\n\n前三条 `expect(...).toBeNull()` 才是这个测试的**意图**——它们验证病态输入不会走进灾难性回溯。\n最后那行墙钟断言是**代理指标**，而且是一个在并行 CI 上没有余量的代理指标。\n\n它的失败模式恰恰是最坏的一种：红在一个和它无关的 PR 上，报的是一个看起来像性能回归的数字，\n而真实原因是隔壁包在同时跑。这和 AGENTS.md「route & surface ownership」第 3 条里说的\n「悄悄降级的验证器比没有验证器更糟，因为它报告成功」是一枚硬币的两面——这个是反过来报告失败。\n\n## 建议修法\n\n两条都行，取一：\n\n**相对基准**（更贴近意图）——同一函数先跑一遍良性输入取基线，断言病态输入与基线的比值有界：\n\n```ts\nconst bench = (fn: () => void) => { const t = performance.now(); fn(); return performance.now() - t; };\nconst baseline = Math.max(bench(() => rangeAdmitsMajor('>=11.0.0 <13.0.0', 11)), 0.01);\nconst pathological = bench(() => { /* 三个病态输入 */ });\nexpect(pathological / baseline).toBeLessThan(200);   // 灾难性回溯是数量级差异，不是 20%\n```\n\n机器慢时基线一起变慢，比值稳定；灾难性回溯是几个数量级的差异，这个比值一样抓得住。\n\n**或者**保留绝对上界但放宽到并行下也有余量（比如 500ms）。100k 字符输入上，\n线性扫描与灾难性回溯的差距远不止一个数量级，放宽不会让它漏掉真正的回归。\n\n## 其它\n\n值得顺手 grep 一下仓库里还有没有同形状的绝对墙钟断言——如果不止这一处，\n可以一起处理，省得下次再有人花时间诊断同一类假阳性。"
+}

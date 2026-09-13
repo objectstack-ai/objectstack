@@ -1,0 +1,35 @@
+{
+  "number": 4559,
+  "kind": "pull_request",
+  "title": "feat(objectql): 只报告不拦截的悬空引用巡检 —— #4441 留下的 `isSystem` 残留 (#4551)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T03:08:46Z",
+  "updated_at": "2026-08-02T08:51:47Z",
+  "closed_at": "2026-08-02T08:51:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4559",
+  "body": "Fixes #4551\n\n## 根因与形态\n\n#4441（PR #4511）让引擎在写入路径上强制 lookup 引用完整性，但**刻意豁免了 `isSystem` 写入**：种子重放、包安装、启动期供给合法地以「批次完成后才自洽」的顺序写入，让它们 fail-closed 会把一个排序细节变成启动失败。\n\n这个豁免是对的。它留下的是一个**只有平台自己能走的门**：平台仍可写入指向虚无的引用，而没有任何东西会说出来。PR #4511 明确记录了这处残留、未静默接受；本 PR 是它的落地跟进——**只报告，不改写**。\n\n形态刻意沿用 #4469 的 `inspectStrandedRequests()`（PR #4502），因为那是同构问题：发现一类平台自身造成的坏数据，只报告不改写。\n\n## 改动\n\n### 1. `ObjectQL.inspectDanglingReferences()`（`packages/objectql/src/engine.ts`）\n\n走遍每个已注册对象的**非 `readonly` 引用字段**，报出每一个解析不到行的存储 id：对象、记录 id、字段、目标对象、id 本身、以及持有行的租户。\n\n| 判断 | 依据 |\n|:---|:---|\n| **绝不改写** | 数据是真实写入的。把悬空链接置空会让存储数据与事实不符；修复到底是补建目标、重跑种子、还是删掉持有行，是平台做不了的判断。 |\n| **探测器就是强制路径那一个** | 用的是 `this.referenceExists` —— `assertReferencesResolve` 调用的同一个私有方法。巡检与闸门因此在结构上**不可能**对「什么叫存在」产生分歧。 |\n| **不可知 ≠ 健康** | 探测**跑过且没找到**才记为悬空；目标未注册 / 无 driver / 探测抛错一律计入 `undetermined`，持有对象读不到则进 `skipped`。数据源故障永远不会被读成一张健康证明。 |\n| **`readonly` 引用跳过** | 与写入路径同一理由：值是平台铸造的，且其中至少有一个**按设计就是哨兵**——`sys_metadata_history.recorded_by` 往 `lookup('sys_user')` 里填 `actor ?? 'system'`（#4511 的 dogfood 实测发现）。每小时报一次它就是一条永久误报。 |\n| **空值不是引用** | `null` / `''` / `[]` 复用写入路径的 `isEmptyReferenceValue`；已展开的 `{id, …}` 也跳过，与写入路径一致。 |\n| **RBAC 关联表优先** | `REFERENCE_SCAN_PRIORITY_OBJECTS`。那里的一条悬空行是**指向虚无的安全面记录**，而受众锚点闸门恰恰要解析那个目标才能评估授权。**只是排序，不是过滤**——其余对象照扫。 |\n| **有界** | 每对象 1000 行 / 每轮 5000 行；同一 `目标+id` 每轮只探测一次。撞到上限置 `truncated`——**一份提前停下的报告不许读成「全都查过了」**，与 `undetermined` 是同一条诚实规则。 |\n\n### 2. 挂在既有清扫时钟上（`lifecycle-service.ts` / `plugin.ts`）\n\n不新起时钟，挂 ADR-0057 的 lifecycle 时钟：每小时一次，**首跑延迟到启动之后**——正好是种子写入的引用变得可检查的那一刻。\n\n刻意**没有**塞进 `LifecycleService.sweep()`：`sweep()` 会被 `db:clean`、dogfood growth gate 直接调用，它们要的就是策略执行本身，必须继续只回答这个。两者共享的是**时钟**，不是方法。新增 `tick()` 依次跑「先 sweep，后 inspect」，两条腿各自 try/catch 互不影响。\n\n**顺序而非并发**：并发会与 reaper 的删除竞态（目标被扫中途 reap 掉，会读成一条崭新的悬空引用），且会让两次全表游走同时在飞。\n\n### 3. 导出（`index.ts`）\n\n新增 `DanglingReference`、`DanglingReferenceReport`、`REFERENCE_SCAN_PRIORITY_OBJECTS`、`DANGLING_SCAN_ROWS_PER_OBJECT`、`DANGLING_SCAN_MAX_ROWS`。**没有删除或重命名任何东西，#4441 的强制逻辑一行未动。**\n\n## 真实启动验证 —— 巡检第一次跑就抓到了真东西\n\n`pnpm dev -- --fresh -p 38109` 启动 showcase。服务器确实监听：`curl /api/v1/health` → **HTTP 200**，启动日志 33 行含 `➜  API:       http://localhost:38109/`。等过 lifecycle 时钟 60s 的首跑延迟后，日志第 2895 行（**原样粘贴，未编辑**）：\n\n```\n2026-08-02T03:08:28.553Z WARN [dangling-refs] stored references that resolve to nothing (reported, never rewritten)\n{\"scannedObjects\":63,\"scannedRows\":182,\"scannedReferences\":295,\"dangling\":2,\"undetermined\":0,\"truncated\":false,\n \"references\":[\"showcase_field_zoo.f_owner[IFMh0g-ouRI8ZOQp] → sys_user:current_user\",\n               \"showcase_field_zoo.f_owner[TP2KMqigH9TAFu0J] → sys_user:current_user\"]}\n```\n\n63 个对象 / 182 行 / 295 个引用值，`undetermined: 0`、`truncated: false`（即**这一轮确实全查完了**，不是提前停下的空报告），报出 **2 条**。用完已 `kill $(lsof -ti tcp:38109)`，端口已确认释放。\n\n这两条是**真的**：`showcase_field_zoo.f_owner` 是 `Field.user({ defaultValue: 'current_user' })`，而种子没设这个字段。引擎侧是对的（`applyFieldDefaults` 在无登录用户时刻意留空、不乱盖 owner），值是 **SQL 列 DEFAULT** 写的——`SqlDriver` 把任意非对象 `defaultValue` 原样下发为列默认值（`sql-driver.ts:5952`），`'NOW()'` 在紧邻的上一个分支被特判翻译了，`'current_user'` 从来没有。于是数据库自己往 `lookup('sys_user')` 里写了字面串。\n\n#4441 抓不到它，因为写入路径根本没看见这个值——它在检查的定义域之外，只能被事后巡检发现。这正是本 issue 存在的理由。按 PD #10 已单独立 issue **#4560**（unassigned，未在本 PR 修：修法要动 driver 的 DDL 发出逻辑 + 既有列的迁移）。\n\n## 回归测试撤销后失败条数（实测，非声称）\n\n新增 `engine-dangling-reference-sweep.test.ts`，14 条全绿。三个实验各自真跑过：\n\n| 实验 | 结果 |\n|:---|:---|\n| **撤掉巡检**（`inspectDanglingReferences` 直接返回空报告 + 从时钟上摘掉） | **11 / 14 变红**。剩下 3 条全是断言**沉默**的（空值、readonly 哨兵、以及 #4441 写入路径的 pin）——正好是该活下来的那一组。 |\n| **放松测试替身**（`findOne` 对任何东西都返回一行） | **5 条变红**，其中包括底部那条 #4441 写入路径 pin。这就是「替身比真实实现宽松」逃不过去的那道闸。 |\n| **让探测不再抛错**（`probeFailures` 失效） | 「counts an unprobeable target as undetermined」**单独变红**。 |\n\n关于 #4550：本套用例的坏数据**全部经 `context: { isSystem: true }` 种入**——也就是平台自己那扇门，这才使它是 #4551 的用例而不是 #4441 的复测；非 system 写入同一行会被拒（已 pin 在底部）。探测器没有被伪造（就是真实那一个）；内存 driver **实现了 `limit` 与 `fields` 投影**，因为 `truncated` 是被断言的，一个忽略 `limit` 的替身会让那条断言变成空话。\n\n## 门禁\n\n| 门禁 | 结果 |\n|:---|:---|\n| `pnpm --filter @objectstack/objectql test` | ✅ 97 files / **1584 tests** |\n| `pnpm typecheck` | ✅ **122/122** tasks |\n| Dogfood shard 1/2 | ✅ 39 files / 241 passed, 1 skipped |\n| Dogfood shard 2/2 | ✅ 37 passed + 1 skipped files / 197 passed, 2 skipped |\n| `pnpm lint` (eslint) | ✅ clean |\n| `pnpm check:nul-bytes` | ✅ 2856 files, no raw NUL |\n| `pnpm check:slot-lookup` | ✅ ratchet holds, none new |\n| `pnpm check:doc-authoring` | ✅ 215 files clean |\n| `pnpm check:role-word` | ✅ no new occurrences |\n| changeset | ✅ `.changeset/dangling-reference-sweep.md` |\n| 真实启动（`-p 38109`） | ✅ 见上，报文原样 |\n\n> 首次推送的 `42b1c3af0` 修的是 `check:nul-bytes`（#3127）：探测缓存的 key 分隔符我写成了**裸 U+0000 字节**，那会让 grep/ripgrep 把整个 `engine.ts` 当成二进制、静默返回零匹配。已改成 unicode 转义写法（源码里写 `\\u0000`），运行时字节完全相同。\n\n## 边界：没有做、需要拍板的事\n\n- **没有**改动 #4441 的强制逻辑，**没有**新增任何可作者化的 spec key。#4441 提到的「悬空引用改为 opt-in」仍是需要维护者决策的方向。\n- 巡检的输出面目前只有**日志**（`WARN [dangling-refs] …`，与 #4469 的 `inspectStrandedRequests` 一致）。若希望它进一步落到某个 `sys_*` 对象或 admin 只读端点，那是一次面的新增，需要单独定夺。\n- 上限（1000 行/对象、5000 行/轮）是拍的第一版数字，刻意不做成设置项（不新增可作者化的键）。若生产上需要可调，值得单独一张卡讨论放在哪个 namespace。\n- **#4560**（本 PR 实测发现，unassigned）：`current_user` 令牌被 SQL driver 当成字面列 DEFAULT 下发。修法涉及 DDL 发出逻辑与既有列迁移，不在本 PR 范围。\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

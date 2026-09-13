@@ -1,0 +1,32 @@
+{
+  "number": 4739,
+  "kind": "issue",
+  "title": "spec 双源清账 C16:TenantPlan(./cloud ≠ ./system)—— 路线 B:删 system 侧 provisioning 家族,2 条",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T01:14:58Z",
+  "updated_at": "2026-08-03T02:40:58Z",
+  "closed_at": "2026-08-03T02:40:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4739",
+  "body": "#4535 第二批。基线行:`TenantPlan(+Schema) — [./cloud] ≠ [./system]`。\n\n**已裁决路线(维护者 2026-08-03 批复前锋判定):B —— 删 system 侧,cloud 保名。** 裁决依据:system 侧 provisioning 家族(`TenantProvisioningRequest/Result` + `IProvisioningService` + `ITenantRouter`)三仓**零实现零调用**(declared-only),确认已被 cloud 的 `Provision*` 家族取代。\n\n**前锋证据摘要**(详见 [#4535 前锋评论](https://github.com/objectstack-ai/objectstack/issues/4535#issuecomment-5161308046)):cloud 侧经 `EnvironmentSchema`/`TenantContext`/`ProvisionTenantRequest` 活着,cloud 仓 service-tenant 消费;system 侧 5 值 ⊃ 3 值但两边都窄于产品现实(cloud `billing.ts` 实际用 8 值词表)。\n\n**实施要点**:\n- 删 `system/provisioning.zod.ts` 的 enum def(整 def 消失走 manifest ratchet 路径,#4650 门禁响亮打印)+ `contracts/provisioning-service.ts` / `contracts/tenant-router.ts` 处置(retire 或删除,以 spec-property-retirement 判则 + 门禁输出为准);cloud 侧预期零改动。\n- major changeset 据实(删已发布导出名 + 契约文件);零元数据迁移预期,逐项验证。\n- **cloud 仓跟进单**(实施时立,不塞本单):`auto-default-environment-plugin.ts:94` 手抄 5 值 plan 联合 → 改 import spec 单一真源(潜在跨仓双源)。\n- **分区**:`./system` + `contracts` —— **与 C10 绝不并飞**(同区,B 线内串行);与 C7/C13+C15/C17 可并飞;入队串行协议照旧。"
+}

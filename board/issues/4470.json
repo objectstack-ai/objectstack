@@ -1,0 +1,32 @@
+{
+  "number": 4470,
+  "kind": "issue",
+  "title": "[verify] 端到端验证从构造上绕开了挂起 run 的持久化路径(harness 写死 suspendedRunStore: 'memory')",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T08:59:50Z",
+  "updated_at": "2026-08-01T15:16:20Z",
+  "closed_at": "2026-08-01T15:14:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4470",
+  "body": "#4420 的后续 —— 关于\"为什么这个 bug 能一路发版\"。\n\n## 问题\n\n`packages/verify/src/harness.ts` 挂载自动化插件时写死了 `suspendedRunStore: 'memory'`。也就是说 dogfood / e2e 这一层**从构造上就不可能**碰到 DB-backed 的挂起 run 存储:被验证的永远是内存路径。\n\n结果是覆盖率上有一条整齐的缝:\n\n- 单测覆盖了**引擎侧**的持久化(`suspended-run-store.test.ts` 用假表跑 suspend → restart → resume);\n- e2e 覆盖了**业务侧**的审批链路(但全程单进程、纯内存);\n- 而两者中间的**装配**——对象有没有注册、表有没有建、store 有没有真的接上——没有任何一层真正跑过。\n\n#4420 恰好就长在这条缝里:store 挂在一张没建的表上,每次写盘失败都被吞进一条 warn,挂起照常\"成功\",直到下次重启才暴露。#4460 补了针对装配的单测,但 e2e 这一层的盲区还在。\n\n## 期望\n\n至少一条走 durable store 的端到端验证,把\"挂起真的落库了\"变成可断言的事实,而不是靠日志推断。最小形态:\n\n- 用真实驱动跑一个含 `approval`(或任意可挂起节点)的流程,让它挂起;\n- 断言 `sys_automation_run` 里确实出现了对应的 `paused` 行(不是断言\"没报错\");\n- 冷启动一个新 kernel,`resume` 能继续走对分支。\n\n注意 `#4460` 之后 `hasSuspendedRun()` 可以直接用来做这个断言。\n\n另外值得顺带确认的是:harness 当初写死 `'memory'` 是为了跑得快、还是因为持久化在那个环境跑不通。如果是后者,那本身就是这个 issue 更值得修的部分。\n\n## 参考\n\n- `packages/verify/src/harness.ts`(`suspendedRunStore: 'memory'`)\n- `packages/services/service-automation/src/plugin-suspended-run-wiring.test.ts`(#4460 新增,单测层的装配覆盖)\n- `packages/services/service-automation/src/suspended-run-store.test.ts`\n- #4420 / #4460"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 4409,
+  "kind": "issue",
+  "title": "[cli/lint] 作者时规则的命令覆盖漂移是系统性的:23/26 条手工接线规则只跑部分命令,9 条 error 级有门禁盲区(os build 会发布 os lint 拒绝的流)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T12:09:45Z",
+  "updated_at": "2026-08-01T08:08:49Z",
+  "closed_at": "2026-08-01T08:08:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4409",
+  "body": "## 现象\n\n逐条统计 CLI 三个作者时命令(`os validate` / `os build`(compile.ts)/ `os lint`)源码里手工接线的 26 条规则,各自跑在哪些命令上:\n\n| 覆盖 | 条数 |\n| :--- | :--- |\n| 三个命令都跑 | **3** |\n| 只跑 1–2 个 | **23** |\n\n其中 **9 条能报 `error`**(即门禁级)的分布:\n\n| 规则 | 来源 | validate | build | lint | 盲区 |\n| :--- | :--- | :---: | :---: | :---: | :--- |\n| `validateStackExpressions` | @objectstack/lint | ✓ | ✓ | · | lint |\n| `validateFilterTokens` | 〃 | ✓ | ✓ | · | lint |\n| `validateDashboardActionRefs` | 〃 | ✓ | ✓ | · | lint |\n| `validateResponsiveStyles` | 〃 | ✓ | ✓ | · | lint |\n| `lintAutonumberFormats` | CLI 本地 | ✓ | ✓ | · | lint |\n| `lintViewRefs` | CLI 本地 | ✓ | ✓ | · | lint |\n| `validateListViewMode` | @objectstack/lint | ✓ | · | · | **build** |\n| `validateViewContainers` | 〃 | ✓ | · | · | **build** |\n| `validateApprovalApprovers` | 〃 | · | · | ✓ | **build + validate** |\n\n最后三行是最危险的方向:**`os build` 是三个命令里最弱的门**,会发布 `os validate` 或 `os lint` 拒绝的东西。\n\n## 实测(不是 grep 推断)\n\napp-todo 里植入一个 CEL 语法坏掉的 expression approver(`{ type: 'expression', value: 'record.owner ==' }`,命中门禁级 `approval-expression-invalid`):\n\n```\nos lint      EXIT=1   ✗ approval-expression-invalid\nos validate  EXIT=0\nos build     EXIT=0   ← 构建照常产出\n```\n\n一个审批人表达式解析不了的流,构建、发布一路绿灯——只有 `os lint` 拦得住,而 CI 通常跑的恰恰是另外两个。\n\n<details>\n<summary>完整 26 条矩阵(validate / build / lint)</summary>\n\n```\nvalidateApprovalApprovers      · · ✓   1/3\nvalidateCapabilityReferences   ✓ · ✓   2/3\nvalidateDashboardActionRefs    ✓ ✓ ·   2/3\nvalidateFilterTokens           ✓ ✓ ·   2/3\nvalidateFlowTriggerReadiness   ✓ · ·   1/3\nvalidateJsxPages               ✓ · ·   1/3\nvalidateListViewMode           ✓ · ·   1/3\nvalidateOrgAxisRedLines        ✓ ✓ ✓   全\nvalidatePageSourceStyling      ✓ · ·   1/3\nvalidateReactPageProps         ✓ · ·   1/3\nvalidateReactPages             ✓ · ·   1/3\nvalidateRecordTitle            · · ✓   1/3\nvalidateResponsiveStyles       ✓ ✓ ·   2/3\nvalidateSecurityPosture        ✓ ✓ ✓   全\nvalidateSeedReplaySafety       · · ✓   1/3\nvalidateSeedStateMachine       · · ✓   1/3\nvalidateSemanticRoles          · · ✓   1/3\nvalidateStackExpressions       ✓ ✓ ·   2/3\nvalidateViewContainers         ✓ · ·   1/3\nvalidateVisibilityPredicates   ✓ ✓ ·   2/3\nvalidateWidgetBindings         ✓ ✓ ✓   全 (另跑 os doctor,已记录的例外)\nlintAutonumberFormats          ✓ ✓ ·   2/3\nlintFlowPatterns               ✓ ✓ ·   2/3\nlintLivenessProperties         ✓ ✓ ·   2/3\nlintUniqueDeclarations         ✓ ✓ ·   2/3\nlintViewRefs                   ✓ ✓ ·   2/3\n```\n\n统计口径:按命令源码里的直接调用;经 `validateReferenceIntegrity` 套件进入三命令的规则不在此列(那部分 #4402 已守住)。severity 按源码中 `severity: 'error'` 是否出现判定,个别属条件分支;approval 一条已实测,其余属\"可报 error\"。\n\n</details>\n\n## 这不是新型缺陷,是同一型的第四次\n\n1. **#3583 §5 D5** 建 `REFERENCE_INTEGRITY_RULES`,起因就是\"同一个 stack,跑哪个命令就被哪个子集检查\";\n2. **#3782**(validate.ts 3e3 注释自己记录):四条 authoring lints 曾只在 build 跑,其中两条 gating,validate 报干净、build 拒绝;\n3. **#4384 / #4394**:`validateReadonlyFlowWrites` 只在 validate+build,lint 放行 build 拒绝的 stack;\n4. 本 issue:剩下的 23 条,含 9 条 error 级。\n\n每次都修了\"那一例\",失败模式留着。#4402 的接线守卫也**拦不住这 23 条**——它只过滤 `REFERENCE_INTEGRITY_RULES` 现有成员名,suite 之外的规则被手工接进两个命令,它一声不吭。\n\n## 建议\n\n**不变量:任何能报 `error` 的规则必须三个命令都跑。** advisory 规则可以按成本做命令级取舍(如 react 系列要加载 ~9MB TypeScript,`os lint` 保持轻量是正当理由)——但那必须是**写下来的决定**,不是没人接线的默认。\n\n落地形态(#4384 讨论中的\"家族 + 组合层\"方向):\n\n1. 每条规则(或按家族)显式声明跑在哪些命令上,写成数据、带理由;三个命令消费同一 registry;\n2. 守卫从\"点名单条\"升级为**棘轮**:一份\"仍允许 CLI 直接调用\"的清单,每项带理由,新增必须显式编辑——`FLOW_WRITE_NODE_TYPES_DEFERRED` / `TEST_DEBT` 的同款纪律;\n3. 分批迁移:\n   - **P1:build 瞎的 3 条 gating**(`validateListViewMode`、`validateViewContainers`、`validateApprovalApprovers`)——能发布坏构建的方向;\n   - **P2:lint 瞎的 6 条 gating**——预检说谎的方向;\n   - **P3:advisory 17 条**——逐条写下命令范围与理由,进棘轮清单。\n\n## 版本\n\n`main` @ `27f907252`。发现自 #4384 的收尾评估。相关:#4394、#4402、#3583、#3782。"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 4436,
+  "kind": "issue",
+  "title": "data: unsupported-filter-operator refusal ships without error.code and leaks the [sql-driver] prefix",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T07:02:27Z",
+  "updated_at": "2026-08-01T13:47:16Z",
+  "closed_at": "2026-08-01T13:47:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4436",
+  "body": "Found while verifying the 17.0.0-rc.1 checklist on #3909 (F3). Verified on `main` @ `1ee48bc60`.\n\nThe #4209/#4029 posture itself works — a filter carrying an operator the driver cannot compile is refused instead of matching everything. But the refusal envelope breaks the ADR-0112 contract this train shipped:\n\n```\nGET /api/v1/data/showcase_task?filter={\"title\":{\"$bogusop\":\"x\"}}\n→ 400 {\"error\":\"[sql-driver] Unsupported filter operator \\\"$bogusop\\\" on field \\\"title\\\". Supported operators: $eq, $ne, …\"}\n```\n\n- **No `code` at all** — the body's only key is `error`. ADR-0112 (#3988, #4021) made `error.code` the schema-enforced, SCREAMING_SNAKE vocabulary; #4229 even enforces `error.code` at compile time for the shared envelope writer. Sibling refusals on the same route already comply (`INVALID_FIELD`, `INVALID_FILTER`, `BATCH_TOO_LARGE`, `RECORD_NOT_FOUND`).\n- The **`[sql-driver]` internal prefix leaks** into the client message — driver-internal wording on the wire is what the #3867 sanitiser exists to stop.\n\nContrast: the same request with a non-AST filter array gets a proper `{\"code\":\"INVALID_FILTER\"}`; only the unsupported-operator branch bypasses the envelope (the driver's thrown message is served raw).\n\nExpected: the unsupported-operator refusal speaks a catalogued code (`INVALID_FILTER` fits) with the actionable operator list kept in the message/details, and no driver prefix.\n\nPart of the #3909 rc.1 verification (section F3).\n"
+}

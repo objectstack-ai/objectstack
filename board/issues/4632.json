@@ -1,0 +1,36 @@
+{
+  "number": 4632,
+  "kind": "issue",
+  "title": "[convention] best-effort 降级导致\"看起来正常、实则不持久\"时不应记 warn——把 #4460 的点状修复定成规则",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "repo:objectstack"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T12:20:52Z",
+  "updated_at": "2026-08-03T01:54:13Z",
+  "closed_at": "2026-08-03T01:54:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4632",
+  "body": "从 #4471 拆出的独立事项(#4471 的正文里明确说这条\"值得单独定一条\",#4631 只做了声明契约的强制,这条未实现)。\n\n## 问题\n\n当一个 best-effort 降级的后果是**静默丢数据/丢持久性**——系统看起来正常运行,实际上写入不落盘——它就不该记 `warn`。#4420 正是这个形态:durable suspended-run store 挂在不存在的表上,每次写失败进 warn,没人读,重启丢光在途审批。#4460 在 service-automation 这一处把它提到了 `error`,但只是点状修复,没有形成可依循的规则。\n\n## 期望\n\n定一条日志级别约定(建议落在 AGENTS.md 或相关 ADR 的 addendum):\n\n- 降级只影响**功能可用性**(界面缺一块、某能力不开)→ `warn`/`info` 合理;\n- 降级影响**持久性/数据一致性**(声称持久化的东西实际不持久、写入静默失败)→ 必须 `error`,且首次降级时一次性说清后果与修复动作(参考 #4460 后 `service-automation/src/plugin.ts` start() 里的 error 文案)。\n\n可以顺带盘点现有 `catch { logger.warn(...) }` 形态里还有哪些属于第二类(#4631 的 `check:init-service-contract --list` 输出可作为盘点起点——init 期 best-effort 消费 `manifest` 注册 sys 表的插件都是候选)。\n\n## 参考\n\n- #4471(根因模式)、#4420(事故)、#4460(点状修复)、#4631(声明契约强制,不含本条)"
+}

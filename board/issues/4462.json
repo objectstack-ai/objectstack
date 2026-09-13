@@ -1,0 +1,32 @@
+{
+  "number": 4462,
+  "kind": "issue",
+  "title": "datasource: an object mapped to an unreachable datasource silently reads/writes the DEFAULT store — no boot failure, /ready still 200",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T08:28:01Z",
+  "updated_at": "2026-08-01T16:08:09Z",
+  "closed_at": "2026-08-01T16:08:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4462",
+  "body": "Found while verifying the 17.0.0-rc.1 checklist on #3909 (section A, \"Datasource fail-fast #3741/#3758/#3826\"). Verified on `main` @ `1ee48bc60` with a minimal purpose-built stack.\n\n## Setup\n\n```ts\nexport default defineStack({\n  manifest: { id: 'com.rc1.probe', … },\n  datasources: [\n    { name: 'broken', driver: 'postgres',\n      config: { url: 'postgres://nobody:secret123@127.0.0.1:1/nonexistent_db' } },\n  ],\n  datasourceMapping: [{ objectPattern: 'rc1_audit', datasource: 'broken' }],\n  objects: [Widget, Audit, Trigger],\n});\n```\n\nPort 1 on loopback with a nonexistent database — unreachable by construction.\n\n## Observed\n\n1. **Boot succeeds, silently.** `os serve --dev` comes up healthy. The string `broken` appears **zero times** in the entire boot log — no connect attempt, no warning, no fail-fast.\n2. **`/ready` answers 200** `{\"status\":\"ready\",\"state\":\"running\"}`.\n3. The datasource listing reports the mapped datasource as **`\"status\":\"unvalidated\"`** — honest that nothing was checked, but it is not a connect verdict:\n   ```json\n   {\"name\":\"default\",\"driver\":\"sqlite\",\"status\":\"ok\"},\n   {\"name\":\"broken\",\"driver\":\"postgres\",\"status\":\"unvalidated\"}\n   ```\n4. **Worst part — the mapped object silently uses the DEFAULT datasource.** Writing to `rc1_audit` (the object mapped to `broken`) returns 201, reads back fine, and the row is physically in the default SQLite store:\n   ```\n   POST /api/v1/data/rc1_audit {\"name\":\"ds-probe\",…} → 201\n   sqlite> select id,name from .objectstack/data/standalone.db rc1_audit;\n           lnK_IbrJnhDTUyKp|ds-probe\n   ```\n\nSo an operator who routes an object to Postgres and gets the URL wrong is not told at boot, is not told at `/ready`, is not told at write time — and their data lands in a different database than the one they declared. They find out when they go looking in Postgres and it is empty.\n\n## Against what the checklist claims\n\n- *\"a bound datasource with a bad URL fails the boot with an operator-readable error\"* — boot succeeds with no error at all.\n- *\"`/ready` 503s when a driver stops answering\"* — 200.\n- *\"Setup datasource list shows the real connect verdict + reason\"* — the verdict is `unvalidated`; there is no reason because nothing connected.\n\nI could not tell from the outside whether the mapping is being **ignored** (never routed) or **resolved and silently falling back**. Either way the user-visible outcome is the same and equally wrong; the fix differs, so worth determining internally. (`objectPattern: 'rc1_audit'` is an exact object name — if that spelling is not a valid pattern, an unmatched mapping rule should itself be an authoring error, which is the #4001-family posture this train applied everywhere else.)\n\n## Expected\n\nA datasource that an object is actually mapped to is connected during boot; failure is a fail-fast with the operator-readable reason (and never a silent fallback to `default`). `/ready` reflects it. If lazy connection is deliberate, then the **first read/write through the mapping** must surface the connect failure rather than answering from another store.\n\nPart of the #3909 rc.0 verification (section A).\n"
+}

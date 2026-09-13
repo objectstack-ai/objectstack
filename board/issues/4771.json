@@ -1,0 +1,36 @@
+{
+  "number": 4771,
+  "kind": "issue",
+  "title": "bug(service-automation): flow 节点类型校验跑在插件贡献的执行器注册之前 —— 每个 ADR-0019 approval flow 都被误报「will fail at execution time」",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T05:27:39Z",
+  "updated_at": "2026-08-03T07:14:58Z",
+  "closed_at": "2026-08-03T07:14:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4771",
+  "body": "## TL;DR\n\n`pnpm dev`（showcase）每次启动报 8 条「这些 flow 运行时会失败」，**全是误报**。校验在 `ApprovalsServicePlugin` 注册 `approval` 节点执行器**之前 0.8 秒**就跑完了。\n\n告警措辞是断言式的，会直接把人送去查一个不存在的 bug（本 issue 的作者就被送去查了一轮）。\n\n## 现场\n\n```\nWARN Flow 'showcase_expense_signoff' references node type(s) with no registered executor\n     or descriptor: approval. They will fail at execution time unless a plugin registers\n     them. Registered types: start, end, decision, assignment, loop, parallel, try_catch,\n     get_record, create_record, update_record, delete_record, screen, script, http,\n     connector_action, notify, wait, subflow, map\n```\n\n×8：`showcase_expense_signoff`、`showcase_committee_quorum`、`showcase_budget_approval`、`showcase_invoice_signoff`、`showcase_one_task_signoff`、`showcase_closure_signoff`、`showcase_dynamic_approval`、`showcase_approver_bindings`。\n\n## 证据：是时序，不是缺失\n\n用 `--log-level info` 跑一次：\n\n| 事件 | 时刻 |\n|---|---|\n| flow 校验告警 `showcase_expense_signoff` | `04:28:05.302` |\n| `ApprovalsServicePlugin: service registered` | `04:28:06.105` |\n\n晚 **0.8 秒**。\n\n而且 `ApprovalsServicePlugin` 的兜底日志 —— `approvals-plugin.ts:283` 的\n\n```ts\n} catch {\n  ctx.logger.info('ApprovalsServicePlugin: no automation engine — approval node not registered');\n}\n```\n\n—— 在整份 info 级日志里 **一次都没出现**（`grep -c` = 0）。说明 `ctx.getService('automation')` 拿到了引擎，`registerApprovalNode(...)` 确实跑了，`approval` 最终是注册上的，flow 运行时是好的。\n\n相关代码：`packages/plugins/plugin-approvals/src/approvals-plugin.ts:272-285`、`packages/plugins/plugin-approvals/src/approval-node.ts:92`。\n\n## 为什么值得修，而不是当噪音\n\n1. **措辞是断言不是猜测**。\"They will fail at execution time\" 对一个恰好会在 0.8 秒后被注册的类型来说是假的。ADR-0018 明确允许插件在运行时通过 `registerNodeExecutor(type)` 扩展词汇表 —— 那么一个在扩展完成前拍板的校验器，就是在校验一个还没成型的世界。\n2. **它掩盖真问题**。真正没人提供 `approval` 的部署（没装 approvals 插件）会得到一模一样的 8 条告警。现在这条信号的信噪比是 0，没人能用它区分两种情况。\n3. 它是 showcase 冷启 24 条告警里的 8 条，占三分之一。\n\n## 修法（择一）\n\n1. **把校验推迟到所有插件 `start()` 完成之后**（`kernel:ready`）—— 那时词汇表才是完整的。这是最贴合 ADR-0018 的做法。\n2. 保留早期校验但**降级为 debug/info**，在 `kernel:ready` 再跑一次权威校验，只有那一次才 warn。\n\n倾向 1。另外顺带看一下 `approvals-plugin.ts:283` 那个 `catch` —— 它把\"没有 automation 引擎导致 approval 节点没注册\"记成 `info`，而 dev 默认日志级别是 `warn`，也就是**真的降级发生时你反而看不见**。这个 catch 至少该是 `warn`。\n\n## 复现\n\n```bash\nrm -rf examples/app-showcase/.objectstack && pnpm dev\n```\n\n想看时序：`objectstack dev --seed-admin --log-level info`，对比 `WARN Flow '...'` 与 `ApprovalsServicePlugin: service registered` 的时间戳。"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 4588,
+  "kind": "issue",
+  "title": "process: #4551 被两个会话重复实现（#4555 与 #4559）——需要 Fixes 唯一性 CI 闸 + 认领评论带会话 ID + 分支名带 issue 号",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T09:10:26Z",
+  "updated_at": "2026-08-02T09:31:54Z",
+  "closed_at": "2026-08-02T09:31:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4588",
+  "body": "今天上午 #4551 被两个会话各自完整实现了一遍：\n\n| 时间 | 事件 | 会话 |\n|:---|:---|:---|\n| 02:32 | 会话 A 立案 #4551 | `session_017gEH…` |\n| 02:42 | `/pm-dispatch` 会话在 #4551 上留认领评论（分支 `claude/issue-4551-stranded-lookup-audit`） | `session_012C2c…` |\n| 02:59 | pm 会话开出 #4555 | `session_012C2c…` |\n| 03:08 | 会话 A 开出 #4559（834 行，全套门禁跑绿） | `session_017gEH…` |\n| 03:29 | #4555 合并、#4551 关闭；#4559 直到 08:52 才被人工发现是重复、关闭 | |\n\n直接原因是会话 A 跳过了 claim-before-code 的检查（认领评论 26 分钟前就在那儿了）。但有三个结构性因素让这类错误容易发生、且**五个多小时无人发现**：\n\n1. **共享身份让 `assignees` 失效**——两个会话都是 `os-zhuang`，\"已认领\"分不清是谁认领的。唯一能区分的是评论正文，而认领评论里恰恰没有会话 ID。（同根因已咬过一次：卡 4 的 agent 读到 `draft: false` 误判为自己写入失败，反手撤销了维护者的手动 ready 操作。）\n2. **两个 PR 都声明 `Fixes #4551`，没有任何东西拦**。GitHub 允许任意多个 open PR 声明关闭同一个 issue；第二个 PR 开出的那一刻（03:08）就已经可以机器判定为疑似重复，却拖到 08:52 才被人工发现。\n3. **分支命名不统一，互相不可见**：`claude/issue-4551-…` vs `claude/dangling-reference-sweep`。任何一边用 `git ls-remote | grep 4551` 预检都查不到对方。\n\n## 提议（一个小 PR 做完）\n\n- **A. `Fixes #N` 唯一性 CI 闸**：PR opened/edited/reopened 时解析正文的同仓库关闭关键字，若存在**更早**（编号更小）的 open PR 声明同一 issue，本 PR 挂红并列出冲突方。更早的那个 PR 不受影响——与 pm-dispatch 认领评论\"以更早认领为准\"的既有约定同向。\n- **B. 认领评论必须带会话 ID**：改 pm-dispatch skill 的认领模板与 AGENTS.md 措辞。让\"这条认领是不是我自己发的\"变成可回答的问题。\n- **C. 分支名统一 `claude/issue-<n>-<slug>`**：写进 AGENTS.md 分支纪律；CI 闸对带 `Fixes #N` 但分支名不含 issue 号的 PR 给 warning（不挂红，避免打断存量分支）。\n\n维护者已确认按 A+B+C 执行。"
+}

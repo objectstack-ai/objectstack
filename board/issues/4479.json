@@ -1,0 +1,32 @@
+{
+  "number": 4479,
+  "kind": "issue",
+  "title": "读副本路由（read/write splitting）：真要做的话，从查询路径开始，而不是从 datasource 上加个字段（#4468 移除 readReplicas 后的正式立项位）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "needs-user-decision"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T09:22:51Z",
+  "updated_at": "2026-08-03T06:22:59Z",
+  "closed_at": "2026-08-03T06:22:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4479",
+  "body": "#4468 把 `datasource.readReplicas` 删了。删的理由不是\"不需要读副本\"，是**这个字段从来没接到任何东西上** —— 没有驱动打开过副本连接，也没有任何查询路径区分读和写。这个 issue 是那件事的另一半：把功能本身立成一个正常的功能需求，而不是让它继续以一行 schema 的形式假装存在。\n\n不需要立刻做。开着就是为了下次有人想要读副本时，有个地方讨论，而不是在 `DatasourceSchema` 里再加一个字段然后以为完事了。\n\n## 为什么当初那行 schema 不算\"差一点就好了\"\n\n`readReplicas: z.array(z.record(z.string(), z.unknown())).optional()` 看起来像功能做了 90%、只差接线。实际上它描述的东西一件都不存在：\n\n- `ConnectableDatasource` / `DatasourceConnectionSpec` 没有 replicas 字段 —— 副本配置到不了驱动层\n- `createDefaultDatasourceDriverFactory` 从不读这个 key\n- **最关键的**：没有任何一处代码区分\"这是一次读\"和\"这是一次写\"。没有这个区分，就算副本连接建好了，也没有东西可以路由过去\n\n所以缺的不是接线，是整条读写分离的路径。工作量的分布大概是：schema 字段 1%，其余 99% 在下面。\n\n## 真要做的话，难的部分在哪\n\n按依赖顺序，不是按代码量：\n\n**1. 谁来判定\"这是一次读\"。** 最容易低估的一步。`find` / `count` / `aggregate` 是读，`insert` / `update` / `delete` 是写 —— 到这里都简单。麻烦的是：\n\n- **事务内的读必须走主库。** 一个事务里先 `update` 再 `find`，那次 find 走副本就读不到自己刚写的东西。所以路由决策必须能看到\"当前是否在事务中\"，这是一个跨越 ObjectQL engine 和驱动层的上下文\n- **flow / hook / action 里的读写交织**。自动化里\"改完立刻读回来判断\"是常见写法\n- **read-your-own-writes 是用户能直接感知的**。保存一条记录、页面刷新、记录看起来没变 —— 这类 bug 比\"读慢一点\"严重得多，而且是间歇性的，取决于复制延迟\n\n**2. 复制延迟的语义要显式声明，不能默认。** 需要一个策略维度（大意如此，不是提议最终 API）：强制主库 / 允许副本 / 会话内单调。默认值必须是安全的那一侧，否则等于给每个现有查询悄悄换了一致性保证。\n\n**3. 副本的健康与摘除。** 一台副本挂了或者延迟到几分钟，路由要能把它摘掉。这意味着副本连接需要独立的健康检查、独立的连接池、独立的重试策略 —— 现在 `datasource.pool` / `healthCheck` / `retryPolicy` 都是单连接假设。\n\n**4. 观测。** 一次查询走了主库还是副本、副本延迟多少，必须能看见。否则线上出现\"偶尔读到旧数据\"根本无法定位。\n\n**5. 然后才是 schema 和 UI。** 到这一步字段该长什么样，会由上面四条决定 —— 很可能不是原来那个 `Record<string, unknown>[]`。\n\n## 现在的替代方案（已经能用，且一直能用）\n\n把副本藏在一个端点后面，让数据库侧做路由：pgpool-II、ProxySQL、RDS/Aurora 的 reader endpoint。`config` 指向那个端点即可。\n\n这不是敷衍的绕路 —— 它把上面 1~4 里最难的部分（判定读写、延迟策略、摘除故障副本）交给了专门做这件事、并且做得比我们好的组件。真正需要 ObjectStack 自己做路由的场景，是\"平台需要按业务语义决定一致性级别\"，那时候第 2 条会变成核心需求而不是附属选项。\n\n**在那之前，`config` 指向代理端点是正确答案，不是将就。**\n\n## 验收标准（如果有人要做）\n\n- 存在一个显式的读写判定点，事务内的读无条件走主库，且有测试覆盖\"事务内改完读回来\"\n- 一致性策略是声明式的，默认值不改变现有查询的语义\n- 副本故障时自动摘除，恢复后自动加回，有测试\n- 每次查询的目标（主/副本）可观测\n- schema 字段最后加，形状由上面四条决定\n- 不引入第二种\"声明了但没接上\"的字段 —— ADR-0049\n\n## 相关\n\n- #4468 —— 移除 `datasource.readReplicas`（本 issue 的来源）\n- #4410 —— datasource.config 按驱动契约校验；正是它给 `readReplicas` 加了逐条校验，让一个死字段看起来更像活的\n- ADR-0049 enforce-or-remove\n- 另外记一笔：`packages/spec/src/integration/connector/database.zod.ts` 的 `readReplicaConfig`（`{ enabled, hosts: [{host, port, weight}] }`）是**同一个功能的第二处声明**，同样零消费者。已单独开 issue，处置应与本 issue 保持一致：要么一起做，要么一起删。"
+}

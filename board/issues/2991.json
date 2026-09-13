@@ -1,0 +1,35 @@
+{
+  "number": 2991,
+  "kind": "issue",
+  "title": "Security: AI ToolExecutionContext contract documents `system`-level as the missing-actor default — a contract-level fall-open across all data tools",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "priority:p2",
+    "protocol:breaking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T01:26:37Z",
+  "updated_at": "2026-08-03T04:42:55Z",
+  "closed_at": "2026-08-03T04:42:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2991",
+  "body": "Surfaced by the ADR-0096 E4 verification. The framework **owns the AI tool-execution contract** but not its executor (which lives in cloud). The contract's documented default for a missing `actor` is **system-level (RLS-bypassing) execution**, spanning all built-in data tools — a fall-open baked into the type's documentation.\n\n## The contract\n\n`packages/spec/src/contracts/ai-service.ts`:\n- `ToolExecutionContext.actor` is **optional** (`:393`). Docstring (`:388-397`): *\"Built-in tools promote this into the ObjectQL `ExecutionContext` so RLS engages. **Omit for internal/system invocations.**\"*\n- `ChatWithToolsOptions.toolExecutionContext` (`:367-378`): the route *\"should populate this from `req.user` … so RLS automatically scopes what the LLM can see or change. **Optional for backward compatibility — when omitted, tools fall back to system-level behaviour.**\"* (`:376-377`)\n\nSo a missing `actor` ⇒ system-level, for \"**built-in data tools**\" generically (query/get/create/update/delete/run_action, not just knowledge). Any cloud or custom route that forgets to populate `actor` from `req.user` runs the LLM's tools with full authority.\n\n## Why framework-side, even though the executor is cloud\n\n- No framework executor exists — grep for `chatWithTools|toolExecutionContext|ToolExecutionContext` across `packages/**` matches **only** `ai-service.ts`. No `implements IAIService`, no tool loop.\n- So there is no framework-side RLS re-check to backstop the contract (unlike the sibling `IKnowledgeService`, whose executor *does* live in framework and now fails closed — see #2981).\n- But the framework **defines the contract**, and its docstring actively documents `system` as the omission default — which is what invites the bypass. The honest, greppable fix belongs in the contract.\n\n## Fix direction\n\n- Change the documented default from \"system-level behaviour\" to **anonymous/deny** for data-touching tools (`ai-service.ts:376-377`, `:388-397`): a missing `actor` must mean an unauthenticated (RLS-on, sees nothing) principal, **never** `isSystem`. This turns the fall-open into a fail-closed.\n- Optionally make `actor` non-optional for data tools, or add an explicit `system: true` opt-in (mirroring `IKnowledgeService`'s `isSystem` convention) so \"run as system\" is a deliberate, greppable choice — not the consequence of a forgotten field.\n- **Cloud side (cross-repo):** the tool loop must (a) populate `actor` from `req.user` on every AI route, and (b) default a missing actor to anonymous/deny `ExecutionContext`, never `isSystem`.\n\n## Relationship to ADR-0096\n\nE4 \"unknown seam\" resolved to a contract-level fall-open. This is the D1 invariant (\"no identity is never a grant of authority\") applied at the contract layer, and the mirror of the #2981 knowledge/RAG fix (which closed the same shape framework-side where an executor existed). Refs: ADR-0096 (#2975 / e07645c), #2981, #2849."
+}

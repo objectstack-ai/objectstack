@@ -1,0 +1,32 @@
+{
+  "number": 4379,
+  "kind": "issue",
+  "title": "MongoDBDriver.findOne 完全忽略 query.orderBy 和 query.fields —— 「最新一条」在 Mongo 上返回任意一条",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T10:01:29Z",
+  "updated_at": "2026-08-02T09:13:49Z",
+  "closed_at": "2026-08-02T09:13:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4379",
+  "body": "## TL;DR\n\n`MongoDBDriver.findOne()` 把 `query` 里除 `where` 以外的一切都丢掉：\n\n```ts\nasync findOne(object, query, options) {\n  const filter = translateFilter(query.where, this.temporalKindFor(object));\n  const result = await collection.findOne(filter, {\n    session,\n    projection: { _id: 0 },     // ← query.fields 没有参与\n  });                            // ← query.orderBy 没有参与\n  return result;\n}\n```\n\n`packages/plugins/driver-mongodb/src/mongodb-driver.ts`（`find()` 下方的 `findOne()`）。\n\n于是 `engine.findOne('order', { where: {...}, orderBy: [{ field: 'created_at', order: 'desc' }] })` —— 「这个客户最近的一单」这种最常见的写法 —— 在 MongoDB 上返回的是**任意一条**匹配文档，而不是排序后的第一条。`SqlDriver.findOne()` 是转调 `find()` 实现的，`orderBy` 在那边是生效的，所以两个 driver 对同一个查询给出不同答案。\n\n## 为什么值得单开\n\n这属于 #3948 的那一族：**未生效的表达式看起来生效了**。调用方写了 `orderBy`，拿回一条完全合法的记录，200，没有任何信号说明排序被丢掉了。#4226 已经为「排序读不出来」立了姿态（拒绝而不是静默降级），而这里是同一个轴上更彻底的一种 —— 排序读得出来，只是压根没被传下去。\n\n`query.fields` 被忽略的后果轻一些（多返回字段，不会返回错的记录），但同样是 declared ≠ enforced：projection 明明是 `FindOptions` 支持的，`find()` 也实现了。\n\n## 建议的修法\n\n`find()` 已经有现成的两块可以复用：`buildSortSpec(query)`（#4363 之后读整个 query）和它的 projection 构造。把 `findOne` 改成组装同样的 `FindOptions` 即可：\n\n```ts\nconst findOptions: FindOptions = { session, projection: /* 同 find() */ };\nconst sort = this.buildSortSpec(query);\nif (sort) findOptions.sort = sort;\n```\n\n一个需要拍板的细节：`buildSortSpec` 在「有 `orderBy`」时会追加 `id` tie-breaker。对 `findOne` 而言这是对的（调用方要的就是确定的第一条）；而在「无 `orderBy`」时它对分页读取才补 `id`，`findOne` 不该走那条分支 —— 这和 #4363 给 `SqlDriver` 定的 `singleRowLookup` 边界是同一条，`IDataDriver.findOne` 的 JSDoc 里已经写下了理由（`ORDER BY <key> LIMIT 1` 会让 planner 放弃谓词自己的索引）。所以这里要传的是「按调用方给的排序，但不要凭空造一个」。\n\n## 关联\n\n- #4363 / #4367 —— 分页确定性；`IDataDriver.findOne` 的那段 JSDoc 明确写了这条边界为什么在 `find` 而不在 `findOne`，但没有覆盖「调用方**给了** `orderBy` 却被丢掉」这一种。\n- #3948 —— 「未生效的表达式不该看起来生效了」。\n- #4226 / #4256 —— sort 轴上「拒绝而非静默降级」。\n\n按 Prime Directive #10 从 #4363 的 PR（#4378）里拆出来单开，而不是就地扩范围 —— 而且发现它的那个环境拉不到 mongod 二进制（`fastdl.mongodb.org` 被网络策略挡掉），跑不了真实回归测试，盲改比不改更糟。修它的人请确保 `mongodb-memory-server` 能起。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 4497,
+  "kind": "pull_request",
+  "title": "fix(docs,test): 文档失真修正与 ReDoS 断言去负载敏感 (#4485, #4476, #4486, #4452)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T12:06:26Z",
+  "updated_at": "2026-08-01T13:10:33Z",
+  "closed_at": "2026-08-01T13:10:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-01T13:10:31Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4497",
+  "body": "v17 验收缺陷清单 #4482 的文档与 CI 稳定性批次。四项全部落地，CI 全绿。\n\n## 已落地\n\n### `#4485` —— ReDoS 断言去负载敏感（建议优先合并）\n\n原断言用绝对 50ms 墙钟给病态输入设上界。这个上界量的是**机器负载**而不是解析器：全仓 `pnpm test`（约 130 个 turbo task 并行）下，健康代码也会超过 50ms，把完全没碰 `@objectstack/metadata-core` 的 PR 染红，诊断成本由当时正好在跑的人承担。\n\n三条 `toBeNull()` 行为断言（真正的契约：病态输入是\"无法识别\"而非误拒）**全部保留**。被替换的只是那条墙钟代理指标，改为**规模判据**：同样的病态形状分别在 1x 和 8x 长度上测，断言解析开销随输入长度保持线性。负载在比值里基本抵消，这才是\"对负载不敏感\"的来源。\n\n实测：健康解析随输入呈 8.3–8.5x，跨次稳定。40x 的上限留了约 5x 余量，同时仍能抓住哪怕只是**二次**的回归（约 64x），指数级回溯更是根本跑不完。\n\n两处加固都是实测得出的，不是拍脑袋：\n- 两个计时在**同一轮内背靠背**取，并按**比值**取最小值，而不是各自独立取最小值再相除 —— 后者在调度抖动只落在其中一个窗口时会失真（在 3 倍 CPU 超订下实测复现过染红）。\n- 先预热 JIT，避免基线被拉高。\n\n> 顺带一提：issue 里建议的\"病态输入 / 良性输入\"比值判据**在这里不成立**。良性的 16 字符 range 比 10 万字符的快约 300x，纯粹因为它短 10 万个字符 —— 那正是线性扩展的正常表现，该判据在健康机器上就会失败。所以采用了规模判据。\n\n### `#4476` —— 版本号从 18 改回 17（实际覆盖 17 处，多于 issue 列的 9 处）\n\nissue 列了 9 处，按它自己的建议改用裸模式全仓 grep，实际找到 **17 处**：\n\n| 位置 | 处数 | 说明 |\n|:---|:---|:---|\n| `protocol/objectql/query-syntax.mdx` | 5 | issue 列了 4 处；第 98 行 #4286 汇总段同样写错，issue 未列 |\n| `data-modeling/queries.mdx` | 4 | issue 所列 |\n| `deployment/troubleshooting.mdx` | 1 | issue 所列 |\n| `skills/objectstack-query/`（`SKILL.md` 3 + `rules/aggregation.md` 1 + `rules/pagination.md` 1） | 5 | **issue 未列**，且是面向 agent 的，杀伤力最大 —— agent 写查询时把它当作事实来源 |\n| `releases/implementation-status.mdx` | 2 | **issue 未列**，同型错误但属于另一个变更 `api.requireAuth`（#3963） |\n\n判定 17 正确的证据（机器可读，非推断）：`spec-changes.json` 中 `data.query.{cursor,distinct,joins,windowFunctions}` 与 `stack.api.requireAuth` 全部为 `toMajor: 17`；本树为 `17.0.0-rc.1` / `PROTOCOL_VERSION = '17.0.0'`，且这些键在 `authorable-surface.json` 里已是 `[RETIRED]` —— 一个变更不可能既在 17 的构建里已退役、又要到 18 才发布。\n\nskills 只动正文、未动 frontmatter，因此 `build-skill-docs.ts` 从 frontmatter 派生的清单不受影响（`check:skill-docs` / `check:skill-refs` 已验证）。\n\n按 issue 要求，把这个指纹补进了 `docs/v17-docs-sweep.md`：前两轮 sweep 只匹配**接口名**，所以径直读过了\"接口名对、版本号错\"的段落；新增行要求下一轮核对**数字**，并以 `spec-changes.json` 的 `toMajor` 为准。\n\n### `#4486` —— IDataEngine 读方法补回尾部 `options`\n\n四个读方法都少了 `options?: BaseEngineOptions`。同一代码块里写方法各自带着 `options`，所以它教出来的恰好是**反的**心智模型（\"写有 options、读没有\"）—— 而这正是 #4251 要修的那个误解。\n\n这个尾参不是可有可无：同一个 `{ context }` 作为 `insert` 第 3 参正确，作为 `find` 第 3 参却被**静默丢弃**，于是本意为 `isSystem` 的绕过凭空消失（org-scoping hook 落地后控制面读取开始返回空）。照着这段文档写代码的人或 agent，会被引回 pre-#4251 的写法，而这个失败模式**不报错**。\n\n同时给代码块的 import 补上 `BaseEngineOptions`（真实契约从同一模块导入），并按契约原文记下优先级：`query.context` 仍受支持，两者同时给出时 **`options.context` 胜**。\n\n### `#4452` —— service-automation README 按真实 flow DSL 重写\n\n原 README 描述的 DSL **从未存在过**：节点类型名全错（`record_create` vs `create_record`、`query` vs `get_record`），插值方言是 Salesforce 的 `{!…}`（平台从不解析），分支/循环/错误处理写成嵌套 `steps` 数组（schema 里没有这个键）。照抄没有一个节点能跑。\n\n#4414 + #4439 之后这不再只是\"没用\"：`conditions[].expression` 进了表达式账本，README 的 `'{!trigger.record.amount} > 10000'` 现在会在 `registerFlow()` / `objectstack validate` 直接被拒 —— 而报错给的建议（\"去掉花括号\"）修不好，因为整个节点形状也是错的。\n\n按 schema 和 executor 重写（不是照着错的版本改）：\n\n- flow 是 `nodes` + `edges` 的 DAG。分支是**边**，且 decision 靠把分支 `label` 与出边 `label` 对上来路由 —— #4414 那个坑，已在示例里就地标注。\n- record-change 绑定在 `start` 节点的 config（`{ objectName, triggerType, condition }`），不在 flow 顶层。\n- CRUD config 表：`objectName`（非 `object`）、`filter` 是**对象**（非 `filters` 三元组数组）、`outputVariable`（非 `output`）、没有 `recordId`。并注明 `update_record` **没有** `outputVariable` —— executor 不读。\n- 两套方言用一句话区分：**条件一律裸 CEL，花括号只用于值**。并明说 `{!…}` 不是这里的方言。\n- `loop` / `parallel` / `try_catch` 给出真实的 ADR-0031 region 形状（`config.body`、`config.branches`、`config.try`/`catch`），`wait` 用节点级 `waitEventConfig` 而非臆造的 `duration` + `nextSteps`。\n- flow `type` 值修正（`schedule`，非 `scheduled`）。\n- 补注 `parallel` / `try_catch` 虽不在 `FlowNodeAction` 枚举里，但确有注册的内建 executor —— 这正是 `FlowNodeSchema.type` 走**活注册表**而非闭合枚举校验的原因。\n\n按 issue 的倾向，**没有**在这里复制一份逐节点参考：README 现在指向 `content/docs/automation/flows.mdx`（在维护的那份）。在包内 README 再维护一套节点清单，正是 #4027/#3569 那个\"两份手写清单不对账\"的形状，也就是这次漂移的来源。\n\n## 验证\n\n| 项 | 结果 |\n|:---|:---|\n| CI（head `eab5083`，全部 5 个 workflow） | ✅ 全绿（CI / Lint & Type Check / Docs Drift Check / Spec Liveness Check / PR Automation） |\n| `#4485` 测试文件连跑 | ✅ **6/6 全绿**（干净环境） |\n| `#4485` 负载压测 | ✅ **8/8 全绿**（3 倍 CPU 超订 —— 正是复现原故障的形状；修改前同条件下 5 次里失败 1 次） |\n| `@objectstack/metadata-core` 全量测试 | ✅ 8 文件 / **103 测试全绿**（与 issue 给的基线一致） |\n| `pnpm --filter @objectstack/spec check:generated` | ✅ **8 项生成产物全部最新** |\n| `pnpm typecheck`（全仓） | ✅ **122/122 task 成功** |\n| ESLint（改动的测试文件） | ✅ 干净 |\n| `#4476` 九处逐行核对 | ✅ 九处全部覆盖（按 issue 给的行号逐行验证），另加 8 处 |\n\n## changeset\n\n本分支只动 `.md`/`.mdx` 与一个 `.test.ts`（已对 diff 核实：无包源码、无公开导出、无协议变更），因此用**空 frontmatter** 的 release-nothing changeset —— 它是\"本 PR 不发布任何东西\"的正式声明，而不是漏填。\n\n## 是否可转正式\n\n**可以转正式评审。** 四项均已完成、CI 全绿、验收标准（#4485 连跑）已满足。我按纪律没有自行转正式，也没有开 auto-merge，请按需翻转。\n\n其中 **`#4485` 值得优先合并**：它落地后能减少其他 PR 因那条 50ms 墙钟断言而无端染红，属于对并行开发的即时止血。\n\n## 需要评审者留意的范围判断\n\n有两处我超出了 issue 的字面清单，均属\"同型文档失真\"，若认为应拆分请指出：\n\n1. `skills/objectstack-query/` 的 5 处 —— #4476 的指纹清单未覆盖，但 issue 明确建议\"用裸模式 grep 而不是逐文件改\"。\n2. `implementation-status.mdx` 的 2 处 —— 同型错误，但属于 `api.requireAuth`（#3963）而非 #4286；`spec-changes.json` 同样给出 `toMajor: 17`。\n\n未触及任何可作者化 spec key、公开导出或协议面，因此**没有需要拍板的协议问题**。\n\n分支：`claude/v17-verification-defects-gnf9e6-docs`\n\nFixes #4485\nFixes #4476\nFixes #4486\nFixes #4452"
+}

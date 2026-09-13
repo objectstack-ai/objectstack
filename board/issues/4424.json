@@ -1,0 +1,35 @@
+{
+  "number": 4424,
+  "kind": "pull_request",
+  "title": "fix(automation,spec): the cold-boot flow bind must survive the read path's own annotations",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T03:41:20Z",
+  "updated_at": "2026-08-01T04:12:05Z",
+  "closed_at": "2026-08-01T04:12:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-01T04:12:03Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4424",
+  "body": "Fixes the framework half of objectstack-ai/cloud#971.\n\n## The bug\n\n`getMetaItems({ type: 'flow' })` decorates every served item with `_diagnostics` (and `_draft` on a preview read). The cold-boot bind fed that **served** document straight into `engine.registerFlow` → `FlowSchema.parse` — and since #4001 closed the metadata schemas, an unrecognized key **throws** instead of being dropped. So every flow failed to register on every boot:\n\n```\nWARN [Automation] cold-boot flow bind: failed to register task_hours_pause_project: [\n  { \"code\": \"unrecognized_keys\", \"keys\": [\"_diagnostics\"], \"path\": [], … }\n]\n```\n\nNot AI-specific — cloud's boot-smoke saw the same on the sample package's `overdue_escalation` / `task_completion` / `quick_add_task`. The **stored** metadata was always clean (`_diagnostics` is never persisted — #4326 sees to that on the write path). We broke our own parse with our own annotation.\n\nNot fatal today only by luck: `RecordChangeTriggerPlugin` binds record flows by a second path, so automations kept firing behind the WARN. A flow whose only binding path is this one would simply have gone **silently dead** — and every boot log carried one WARN per flow, which is exactly the noise that hides a real failure.\n\n`resyncFlowsFromProtocol` reads the same seam, so publish-time rebinds were failing identically (`flow re-sync: failed to register …`).\n\n## The fix\n\nStrip the read decorations at the read seam (`readFlowDefsFromProtocol`) — **not** by loosening `FlowSchema`. The payload is malformed because *we* decorated it, so the producer's annotation is the producer's to remove; widening the schema would make our own read shape a second, permanent contract.\n\nThe canonical list moves from `metadata-protocol` (where it was module-private) into `@objectstack/spec/kernel`, because the **producer** (`metadata-protocol`) and the **consumers** (`service-automation`'s bind, and whoever is next) sit in different layers and must not drift. `metadata-protocol` now imports it and re-exports `stripReadDecorations` unchanged — no public-surface change.\n\nThe strip removes **only** the read decorations, never the ADR-0010 envelope (`_lock`, `_packageId`, …): `FLOW_KEYS` allowlists those precisely so a served flow keeps its provenance on re-parse, and a blanket `_`-purge would erase a packaged flow's binding on every rebind.\n\n## Regression coverage\n\nAll three verified to fail without the fix (and the two pre-existing cold-boot tests pass either way — they served naked bodies, which is why they never caught this):\n\n- `flow-cold-boot-bind.test.ts` — a decorated payload binds, in both the bare and `{ item: … }` envelope shapes, with `_packageId` preserved and `_diagnostics`/`_draft` gone.\n- `protocol.read-decorations.test.ts` — driven through the **real** `getMetaItems`:\n  1. the raw served flow must still be **rejected** (proves the strip is load-bearing, not decoration);\n  2. the stripped one parses;\n  3. **the drift guard** — every key the read *adds* must be either a known decoration or allowlisted by the closed schema. Stamping a hypothetical `_servedAt` on the read path fails it by name:\n     > `the read path stamped a key that is neither stripped (add it to METADATA_READ_DECORATIONS in @objectstack/spec) nor accepted by the closed schema … expected [ '_servedAt' ] to deeply equal []`\n\n## Sweep for other re-feeds\n\nThis is the only live one. Everything else that touches a served document is already safe: the write-back paths funnel through `saveMetaItem` (strips first, #4326); `permission-set-projection`, `assemblePackageManifest` and cloud's `service-ai-studio` each run their own strip; `service-analytics` / `import-prepare` / `admin-import-users` read named fields only; and `AgentSchema`/`SkillSchema` are deliberately not `.strict()`. `_packageId` is **not** the same disease — every closed schema allowlists it via `MetadataProtectionFields`.\n\n## Test\n\n`@objectstack/spec` 7225 ✓ · `@objectstack/metadata-protocol` 139 ✓ · `@objectstack/service-automation` 566 ✓\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

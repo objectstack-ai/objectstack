@@ -1,0 +1,35 @@
+{
+  "number": 4660,
+  "kind": "pull_request",
+  "title": "feat(spec)!: retire the overloaded `managedBy: 'system'` bucket → `system-data` (#3355)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T14:37:39Z",
+  "updated_at": "2026-08-02T16:21:00Z",
+  "closed_at": "2026-08-02T16:20:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-02T16:20:58Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4660",
+  "body": "Fixes #3355\n\n配套 UI 侧 PR：**objectstack-ai/objectui#3214**。两边需要一起合——`ManagedByBucket` 是本仓枚举的镜像。\n\n## 背景：v16 的加法式拆分留下了一个名不副实的桶\n\nADR-0103 在 v16 拆分了被重载的 `managedBy: 'system'`，而且是**加法式**拆的：20 个引擎自有对象迁到了新的、显式的 `engine-owned`，而 8 个 admin/user 可写的对象——RBAC 关联表（`sys_user_position`、`sys_user_permission_set`、`sys_position_permission_set`）、`sys_user_preference`、`sys_approval_delegation`，以及三张消息配置表——留在了 `system` 上。\n\n对一个不能破坏作者代码的 v16 来说这是对的做法，但它把枚举留在了一个**幸存的值恰好在描述已经搬走的那一半**的状态：`system` 挂在用户真正会写的对象上。\n\n这不是措辞洁癖。作者在 `system` 和 `engine-owned` 之间做选择时，**词汇表里没有任何可供判断的依据**，于是任何善意读名字的人都会把这个桶重新重载一遍——尤其是模型作者，因为 \"system table\" 在其他所有代码库里读起来都是\"引擎拥有它\"。\n\n**scope 校验（issue 是 v16 时期写的）**：正文那张 8 行表与当前 main **零漂移**——8 个对象、归属包、`userActions` 声明全部一致。\n\n## 方案：`system` → `system-data`，并从加载路径上退休\n\n- **`system-data`**，不是 `platform-data`（与既有 `platform` 相邻混淆），不是复用 `config`（`sys_user_preference` 是**用户自有**而非 admin-authored，且 `config` 抑制 CSV 导入）。\n- 桶语义：**schema 归平台**（对比 `platform`，那是租户建模的）／**data 归 admin 或用户**（对比 `engine-owned`，那里引擎两者都拥有）。\n- 默认 affordance 可写：`create/edit/delete/import/exportCsv: true`。\n\n因为 v16 已经把引擎侧抽干了，这次转换是**一对一的机械改名**，没有任何判断余地。\n\n### 存量元数据是被转换的，不是被重新解释的\n\nADR-0087 D2 转换条目 `object-managed-by-system-to-system-data`，带 fixture，`retiredFromLoadPath: true`。放在 `normalizeStackInput` 的存活窗口条目会跑在枚举之前、静默吸收该值，作者（或模型）就会继续写这个改名本来要让他们忘掉的名字；存量 `sys_metadata` 行与 `os migrate meta --from 16` 才是 `includeRetired` 的接缝。\n\n## ⚠️ 一个刻意的后果：affordance 默认值翻转，且 `import` 由 false 变 true\n\n`system` 默认 **LOCKED**，8 个对象各自用 `userActions: { create: true, edit: true, delete: true }` 把写入再打开一遍。`system-data` 默认 **WRITABLE**，这些块已删除；`userActions` 今后只用来**收窄**。\n\n那 8 个 `userActions` 块只重开了 create/edit/delete，所以 CSV `import` 在 v16 解析为 **false**；`system-data` 的默认行让它变成 **true**。这意味着三张 RBAC 关联表在 UI 上多出 CSV 导入入口。**这只是 affordance**——CSV 导入写的每一行仍然经过 `DelegatedAdminGate` / RLS / 权限集裁决，没有绕过任何授权；风险在**杠杆**而非授权边界。\n\n> **默认值是否应包含 `import` 由 #4671 单独追踪，不阻塞本 PR。** 本 PR 按含 `import` 落地；若 #4671 裁决为收窄，改动仅限 `CRUD_AFFORDANCE_DEFAULTS` 一行加同步 pin 期望值，且下述逐对象等价 pin 会直接变红、不会静默通过。\n\n## enforcement 没有位移——由测试承担，不由论证承担\n\n引擎写入守卫、`DelegatedAdminGate`、RLS、权限集，全部基于解析后的 affordance 和调用主体裁决，从不基于桶名。`system-data` 只是加入 `platform` / `config` 的行列，成为 fail-closed 守卫不覆盖的桶——可写的默认值没有什么可以\"关闭\"的。8 个对象此前通过守卫（靠 `userActions`），现在依然通过（靠桶默认值）。\n\n对应的 pin：\n\n1. **逐对象 before/after 等价**（`plugin-security` / `service-messaging` / `platform-objects` / `plugin-approvals` 四个包，覆盖全部 8 个对象）：v16 形态与 v17 形态解析出的 create/edit/delete/exportCsv 必须逐个相等；漏删或错删某个 `userActions` 会直接变红。\n   > v16 基线用 `engine-owned` 重建——它与 v16 的 `system` 默认行逐位相同。**不能**用退役字面量重建：v17 已删掉该行，查表会回落到 `platform` 默认而悄悄造出错误基线。这个坑真的踩了一次，是 pin 自带的 `expect(v16).toEqual(V16_EXPECTED)` 把它抓出来的。\n2. **`/me/permissions` 钳制**：同一份授权输入下，v16 形态与 v17 形态的 `allowEdit/Create/Delete` 必须完全一致；另加一条\"无 `userActions` 的 `system-data` 成员不被钳制\"。该函数直接读 `userActions` 而非解析后的 affordance，所以若继续钳制这个桶，会对引擎乐意写入的表报 `allowEdit: false`——正是它要避免的假阴性，只是反了过来。\n3. **写入守卫**：`ENGINE_OWNED_BUCKETS` 同时排除 `system` 与 `system-data`；并 pin 了 `system-data` 在任何写操作下都不被拒绝。\n\n## 新增：误配的**授权时**拒绝\n\n\"审阅时肉眼可见\"不是闸门。默认值翻转之后，把一个引擎自有对象误标进这个桶不再无害：它会凭空得到通用 CRUD affordance，而这个桶又没有守卫兜底。\n\n`ObjectSchema.create()` 现在**拒绝** `managedBy: 'system-data'` 且解析后 affordance 不含任何 create/edit/delete 的对象——这是一个从声明本身即可计算、无需调用图分析、且没有诚实读法的矛盾。报错直接指向 `engine-owned` / `append-only`。\n\n阈值刻意是\"一个写入动词都没有\"，不是\"任何收窄\"：`system-data` + `userActions: { create: false, delete: false }`（只可编辑的配置表）是合法**收窄**，照常通过。位置在 `create()`——ADR-0077 的授权面，与既有的 `warnGenericPasswordFields` 同侧；存量行经转换到达的是 1:1 改名后的可写值，让**加载**因已落盘的元数据失败会把授权缺陷变成事故。\n\n## 变更范围\n\n- `packages/spec/src/data/object.zod.ts` — 枚举改名 + 退休处方；`CRUD_AFFORDANCE_DEFAULTS` 默认值翻转；新增 `assertSystemDataIsWritable`\n- `packages/spec/src/conversions/registry.ts` — ADR-0087 转换条目 + fixture\n- `packages/spec/src/migrations/registry.ts` — protocol 17 step 叙述 + `conversionIds`\n- `packages/plugins/plugin-security/src/system-write-guard.ts` — `ENGINE_OWNED_BUCKETS` 移除 `system`\n- `packages/plugins/plugin-hono-server/src/current-user-endpoints.ts` — `GUARDED_WRITE_BUCKETS` 同步\n- 8 个对象声明改桶并删除冗余 `userActions`\n- `docs/adr/0103-*.md` — v17 addendum 收官（D5 原文即把该改名记为 v17 目标，本 PR 完成它，不推翻任何既有决定）\n- `content/docs/data-modeling/objects.mdx` — 桶表、`engine-owned` vs `system-data` 段落、v16 升级 callout\n- 生成物：`spec-changes.json`、`protocol-upgrade-guide.md`、`references/data/object.mdx`\n\n`content/docs/releases/` 未触碰（AGENTS.md 守则），发布说明的输入是 changeset + ADR-0087 登记表。\n\n## 验证\n\n```\npnpm turbo run test typecheck (8 包)     Tasks: 69 successful, 69 total\n  spec / objectql / plugin-security / plugin-approvals /\n  platform-objects / service-messaging / plugin-hono-server / cli\n```\n\nspec 全部 **17** 个 check 门禁通过。\n\n已 merge 当前 `main`（`5966c2abe`）并在 merge 后重跑上述全部。该 merge 解了两处冲突，均在 protocol 17 的叙述段落——#4509 与本 PR 各自追加了一段，两段都保留（本 PR 这段改为非收尾语气并前置），`docs/protocol-upgrade-guide.md` 为生成物、重新生成而非手工调和。\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_012C2cd7tL8QDoZ2QKN3djJ5"
+}

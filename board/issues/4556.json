@@ -1,0 +1,36 @@
+{
+  "number": 4556,
+  "kind": "issue",
+  "title": "`sys_metadata_history.recorded_by` 是 `lookup('sys_user')` 却存哨兵字符串 `'system'`——声明的类型与实际存的值不是一回事",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "protocol:breaking"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T03:00:39Z",
+  "updated_at": "2026-08-03T01:59:27Z",
+  "closed_at": "2026-08-03T01:59:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4556",
+  "body": "发现自 #4551 的实现过程（PR #4555）。#4441 的代码注释已明确写下「The sentinel-in-a-lookup is a real modelling wart and is filed separately」，但检索不到那条 issue，故补记。**未认领。**\n\n## 事实\n\n`sys_metadata_history.recorded_by` 声明为 `Field.lookup('sys_user', { readonly: true })`，而元数据仓库以 `actor ?? 'system'` 填入——当没有 actor 时，落库的是**字符串 `'system'`**，不是任何 `sys_user` 行的 id。（`SystemUserId.SYSTEM = 'usr_system'` 在新运行时下也不再自动供给，所以即便写成 `'usr_system'` 也一样解析不到。）\n\n## 为什么这不只是「不整洁」\n\n它是**声明 ≠ 实际**（Prime Directive #10 的正面形态）在数据层的实例，而且已经产生了两次真实代价：\n\n1. **#4441**：写入路径的引用完整性检查一旦覆盖到这个字段，就会拒绝掉普通的元数据创作（package create / publish / clone）——由 dogfood 闸门发现。修法是把 `readonly` 字段整体排除在检查之外，正确，但那是绕开而非解决。\n2. **#4551**：只读巡检出于同一理由必须跳过同一批字段。于是这个字段两端都被豁免了：写的时候不校验，事后也不报告。它是这个平台里**唯一一个既不受强制也不受巡检的引用字段类别**的样板。\n\n任何按声明来读这个字段的消费者（expand、报表里的 owner 列、审计时间线要显示「谁改的」）都会拿到一个解析不出来的 id。\n\n## 可能的方向（待维护者决策，不要直接开做）\n\n- **A. 把类型改对**：`recorded_by` 改为 `text`，语义是「actor 标识符或 `'system'`」。诚实，但失去了 expand 出用户名的能力，且是破坏性 schema 变更。\n- **B. 拆成两个字段**：`recorded_by`（真 lookup，可空）+ `recorded_by_kind`（`'user' | 'system'`）。表达力最强，成本最高。\n- **C. 让平台在无 actor 时写 NULL**：空值本来就表示「没有链接」，与 `deleteBehavior: 'set_null'` 一致；「是系统写的」由 NULL 本身表达。改动最小，但会丢掉「明确是系统」与「不知道是谁」的区分。\n\n选哪条会影响存量数据的迁移形态，所以需要维护者定，不适合顺手改。\n\n## 边界\n\n- **不要**因此去动 #4441 的 `readonly` 收窄或 #4551 的巡检跳过——在这个字段的类型定对之前，那两处的豁免都是正确的。\n- 这条 issue 只记录问题与方向。\n\nRefs #4441（PR #4511）、#4551（PR #4555）。"
+}

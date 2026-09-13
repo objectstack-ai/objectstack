@@ -1,0 +1,35 @@
+{
+  "number": 4579,
+  "kind": "issue",
+  "title": "RestServerConfig.openApi31(OpenApi31Extensions / Callback / OpenApiWebhookEvent)declared ≠ enforced:没有任何运行时读取它 —— ADR-0049 enforce-or-remove 候选",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "protocol:breaking"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T08:40:28Z",
+  "updated_at": "2026-08-03T04:47:52Z",
+  "closed_at": "2026-08-03T04:47:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4579",
+  "body": "在 #4572(spec 双源 C1)的三仓消费方扫描中发现,范围外,按第十条军规立案。\n\n## 现象\n\n`packages/spec/src/api/rest-server.zod.ts` 的 OpenAPI 3.1 扩展块整体是 declared-but-unenforced:\n\n- `RestServerConfigSchema.openApi31`(`OpenApi31ExtensionsSchema`:`webhooks` / `callbacks` / `jsonSchemaDialect` / `pathItemReferences`)是可作者化的配置键,但 **没有任何运行时读取它**:\n  - `packages/rest/src/rest-server.ts` 的 `normalizeConfig` 只读 `api` / `crud` / `metadata` / `batch` / `routes`,`openApi31` 被静默丢弃;\n  - `GET <basePath>/openapi.json` 由静态 `@objectstack/spec/openapi.json` 加载后 enrich,不看配置;\n  - `packages/spec/scripts/build-openapi.ts`(`gen:openapi`)零 webhook/callback/openApi31 引用;\n  - `plugin-hono-server` 只透传 `RestServerConfig`,同样无人消费该键。\n- `CallbackSchema` / `OpenApiWebhookEventSchema`(#4572 中由 `WebhookEventSchema` 改名)与 `OpenApi31ExtensionsSchema` 三个导出在三仓(framework / cloud / objectui)的 import 级消费方均为零(各自的单测除外)。\n\n即:作者在 `openApi31.webhooks` 里声明的 webhook 定义永远不会出现在服务出的 OpenAPI 文档里 —— 典型的「declared ≠ enforced」(Prime Directive #10 corollary),与 #3197(connector webhooks 声明未强制)同类。\n\n## 建议处置(二选一,ADR-0049)\n\n1. **enforce**:让 `/openapi.json` 的 enrich 阶段把 `openApi31.webhooks` / `callbacks` 合入输出文档(OpenAPI 3.1 顶层 `webhooks` 是标准能力);或\n2. **remove**:整块删除(`openApi31` 键 + `OpenApi31ExtensionsSchema` + `CallbackSchema` + `OpenApiWebhookEventSchema`)。这是插件 TS 配置面(非 metadata 文件),但 `openApi31` 是 authorable-surface 记账键,删除需走 authorable-surface 台账 + major changeset;`RestServerConfigSchema` 非 strict,删除后作者继续写 `openApi31` 会被静默剥离 —— 需评估是否要 UNKNOWN_KEY_GUIDANCE/tombstone 位。\n\n#4572 已把 `./api` 侧死掉的 `WebhookConfig(Schema)` 删除、`WebhookEvent(Schema)` 改名 `OpenApiWebhookEvent(Schema)`(消歧,不改变本 issue 的判定);本 issue 决定剩余整块的去留。\n\n关联:#4572(发现现场)、#3197(同类:connector webhooks declared-not-enforced)、#4535(双源清账主单)、ADR-0049。"
+}

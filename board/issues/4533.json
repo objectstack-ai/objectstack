@@ -1,0 +1,35 @@
+{
+  "number": 4533,
+  "kind": "pull_request",
+  "title": "feat(spec)!: action 收紧，ADR-0010 信封欠债归零（#4001 批 6d）",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T19:41:48Z",
+  "updated_at": "2026-08-01T20:23:32Z",
+  "closed_at": "2026-08-01T20:23:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-01T20:23:31Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4533",
+  "body": "#4001 批 6d（[清单](https://github.com/objectstack-ai/objectstack/issues/4001#issuecomment-5152144077)）。批 1–6c = #4514 → #4532，均已合并。\n\n## 模板自己一直没被应用到\n\n`ActionParamSchema` 从 #3746 起就是 strict——**这场战役就是从它推广出来的**，而且它贡献了最锋利的那条教训：\n\n> `visibleWhen` → `visible` 证明了，**别名表里最值钱的那条从来不是错别字，而是一个读起来像控制、实际不是的键。**\n\n而 param **外面的那个 action**，又开了三个 release。\n\n## 为什么这一个特别要紧：AI 暴露块\n\n`ActionAiSchema` 是**治理闸门**。它自己的文档写着：平台的价值在于「**一个人类能精确治理 agent 队伍被允许调用哪些能力**」，以及「**一个半成品或未经审阅的 action 绝不能被静默武装**」。\n\n然而 —— **`requireConfirmation`（比 `requiresConfirmation` 少一个字母）会被静默丢弃**。\n\n一个作者要求在 AI 调用这个 action 时插入人类审批环节，**他没有得到，而且没有人告诉他**。\n\n现在这个块和 action 根都会拒绝，并且对作者最容易写错层级的两个键给出处方（`exposed` 和 `requiresConfirmation` 属于 `ai` 之下）。\n\n---\n\n## ⚠️ 这个 PR 里我自己犯的两个错\n\n两个形状相同：**对着「我记得的 schema」判断，而不是对着 schema**。都已修正（commit 2、commit 3）。\n\n### 错误一：一条会让人删掉权限门的处方\n\n第一版 guidance 写的是「**`permissions` 写在 action 上不是权限门**」，并把作者引向对象的权限集。\n\n**这是错的，而且错在最要命的方向。**\n\n`requiredPermissions`（ADR-0066 D4）**是**一个已声明的键，**在平台 action 路由上以 403 强制执行**，而 `content/docs/ui/actions.mdx` 就在教它：\n\n```typescript\nlocations: [],                            // no UI surface\nrequiredPermissions: ['finance.admin'],   // still gated\n```\n\n**任何照着我那条处方做的人，都会被引导去删掉一个正在工作的权限门。**\n\n| 键 | 现在 |\n|---|---|\n| `permissions` / `capabilities` / `acl` | **改名到 `requiredPermissions`** |\n| `requiredPermissions` 的 guidance 条目 | **删除**——键是声明过的，strict 根本到不了它；那条既错误又不可达 |\n| `location` → `locations` | 方向反了：`locations` 才是声明的键，原别名会建议把**正确的键改成不存在的键** |\n| `visible`/`disabled` 那句警告 | 移到 `hidden` 上——**隐藏不等于门控**，无 UI 的 action 是 `locations: []`，**依然有门** |\n\n账本第 7 条的**第四次**：**这场战役自己的处方，本身就是一个可能自信地写错的表面。**\n\n**抓到它的是那份 docs-drift 报告**——那份我一直当例行公事的「107 个文件、仅供参考」清单，逐条对着 schema 核的时候，`ui/actions.mdx` 正好教了那个键。\n\n### 错误二：本地只跑了 `packages/spec`\n\nCI 的 `Test Core` 挂了 —— `@objectstack/metadata-protocol` 两个 fixture 在 action 上写了 `object: 'crm_invoice'`，而 **`ActionSchema` 从未声明过 `object`，键是 `objectName`**。`git log -S` 确认没有任何 commit 曾声明过它，所以不是缺转换链，就是打错的键。\n\n**值得记的是它在哪儿**：这两个 fixture 扮演「数据库里的 pre-17 行」，所以一个打错的键**读起来像一个关于真实历史数据的断言**——「存量 action 带 `object`」——**而那个键从未存在过**。\n\n**第六个 strip 时代的假象，第一个伪装成「存量行」而不是「作者写的字面量」的。**\n\n教训直白：**关闭一个注册类型的影响半径，是每一个解析那个类型的包**，不是 `packages/spec` 一个。\n\n---\n\n## 🎯 ADR-0010 信封欠债归零\n\n结构化遍历当初打开这张表时有**八个名字**（`action` `book` `field` `job` `mapping` `page` `translation` `validation`）——而它替换掉的那个探针，**藏了其中七个**。\n\n`action` 是最后一个。\n\n**空集合被保留，而不是删掉。** 没有豁免项之后，`DECLARES the protection envelope` 这条会跑遍**每一个**注册类型——新类型漏了那个 spread **会立刻报红，而不是被悄悄加进一张豁免表**。\n\n> 往回加一个名字，是在**提一个 bug**，不是在**授予一个豁免**。\n\n## 进度\n\n**注册类型顶层已关闭：24 / 25**。只剩 **`view`**。\n\n## 两件记下来而不是抹掉的事\n\n**1. 数组下标那个测试已经没有测试对象了。** `action` 关闭之后，**整个注册面上再没有任何仍是 strip 的「对象数组」**。遍历器的数组处理没变、依然正确——**消失的是能触发它的元数据类型**。测试改为断言交接 + 已关闭根下的逐节点下降（#4522），并在原地写明：将来出现新的 strip 表面就把带下标的断言加回来。\n\n**2. `view` 是最后一个开着的根。** 它关闭后这一层在根层面就没有可警告的了。测试里写明：**把下限改成 0 并「刻意」断言空集，不要删掉这个测试**——因为**一个没人选择的空结果，和一个坏掉的推导，长得一模一样**。\n\n## 验证\n\n- `@objectstack/spec`：**284 文件 / 7240 用例**，`tsc --noEmit` 干净\n- **全仓测试套件通过**（exit 0，零失败）—— 这次不再只跑 spec\n- **8 个生成物 up-to-date**，spec `check:*` 全绿\n- CRM / Todo / showcase / platform-objects 构建通过\n- 修正后单独验证：`requiredPermissions` + `locations: []` **被接受**；`permissions`/`capabilities` **改名到 `requiredPermissions`**；`location` **改名到 `locations`**\n\n授权影响：`ActionSchema` 没声明的键从「静默丢弃」变成「拒绝」——本来就已经被忽略。\n\n## 参考\n\n- #4001、#3746（`visibleWhen` 先例）、#1884（agent 层权限门）、#4528 / #4530（同一类的前两次）、ADR-0010、ADR-0064、**ADR-0066 D4（action 的 `requiredPermissions`，403 强制）**\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WnqGjQFQMqd5k81LYV8SCY"
+}

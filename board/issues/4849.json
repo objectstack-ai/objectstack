@@ -1,0 +1,35 @@
+{
+  "number": 4849,
+  "kind": "pull_request",
+  "title": "feat(plugin-audit)!: sys_comment 的 visibility / reply_count 退役 —— ADR-0049 enforce-or-remove,两键都移除 (#4756)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T09:54:50Z",
+  "updated_at": "2026-08-03T10:10:23Z",
+  "closed_at": "2026-08-03T10:10:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T10:10:21Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4849",
+  "body": "Fixes #4756\n\n`sys_comment` 上两个「声明了但没人读、没人维护」的字段按 ADR-0049 enforce-or-remove 移除。维护者裁决:**两键都移除**,`reply_count` 明确**不走** rollup hook 路线。\n\n## 为什么移除 `visibility`\n\n- **这是 security 观感的假闸门(首要理由,Prime Directive #10 的教科书形状)。** 没有任何代码路径读它:不是 `enforceFeedsCapability`,不是 #4630 加的记录级 gate,不是 REST 层,也不是 objectui 的讨论面板。标成 `private` 的评论,对所有能看到该记录的人**完全一样可见** —— 作者(或写 metadata 的 AI)会合理地相信它被藏起来了,拿到的却是静默安全失效,而不是一个报错。\n- **没有替代键。** #4630 之后「谁能看这条评论 = 谁能看 `thread_id` 指向的那条记录」是唯一连贯规则;把一个未设计的 per-row 枚举叠在上面,等于给同一个问题造第二个真相源。\n- **枚举里唯一真正缺失的语义(对外部/portal 主体隐藏)依赖外部主体先存在**,而那要等 ADR-0090 D11 `externalSharingModel` 落地 —— 今天没有可以对之隐藏的人。这不封死未来:portal 落地时它可以**带真实闸门 + 测试**、enforce-first 地回来。\n\n## 为什么 `reply_count` 也移除(而不是补 rollup hook)\n\n- 从未被任何地方递增,且 `readonly: true` 让作者连手填都做不到,所以每行永远读作 `0`;绑「N 条回复」徽章的 UI 永远渲染 0。\n- 立单人给的 (b) rollup hook 选项在本仓今天撞枪口:同日已系统性发现谓词式/批量写 hook 缺口一族(#4770 / #4778 / #4779 —— `if (!id) return` 把批量操作整个放过)。靠 hook 维护的计数器正落在这类缺口上,**批量删回复后计数不减**。**会漂移的计数比没有计数更糟** —— UI 和 AI 都会信任它。\n- 徽章需求便宜:读时按 `parent_id` 聚合。等 #4775 一族把批量 hook 语义收干净后,若性能需要再引入设计过的 rollup。\n\n## #2755 先例逐字对照\n\n`sys_attachment` 的 `share_type` / `visibility` 是同构的一对:v1 建模、零运行时消费者,#2755 选择**移除**而非实现,理由是「attachment access is derived from the parent record」(`packages/services/service-storage/CHANGELOG.md` 的 `f531a26` 条目)。#4630 之后这个论证逐字迁移到 `sys_comment.visibility`。存量列的处置也照抄:**留作 unmanaged leftover,不做数据迁移**。\n\n## 消费方复核(裸名扫描,不是 import 扫描)\n\n三仓扫描,读数如下 —— 没有任何真 reader:\n\n| 仓 | `reply_count` | sys_comment 语境的 `visibility` |\n|---|---|---|\n| objectstack | 6 处命中:字段声明 1 + 四份生成 translations + `docs/adr/0052` 表格一行 | 5 处命中:字段声明 1 + 四份生成 translations |\n| objectui(`/workspace/objectui`,`git -C` 扫描) | 只有 **camelCase 的 `replyCount`**,是 `FeedItem` 的**前端本地状态**:`RecordDetailView` 回复时自己 `+1`,`ThreadedReplies` 直接 `replies.length`;从 `sys_comment` 拉行的 map 只读 `id / author_name / author_avatar_url / body / created_at / updated_at / parent_id / reactions` —— **不读 `reply_count`**,create 负载也不发 | 0(`visibility` 的命中全是 view/section/tab 的 `visible` 条件与 record-alert 谓词,与本对象无关) |\n| cloud | 0 | 0(命中全是 EE 层级安全/文档,与本对象无关) |\n\nobjectui 的 create 负载同样从不写 `visibility`。\n\n## 形态:这是 object field 级退役,不是 spec key 退役\n\nkit 比 spec 轻,**以实跑门禁为准**,没有照搬 `retiredKey()`:\n\n- 本仓**没有** object field 级的墓碑机制(`retiredKey()` / `UNKNOWN_KEY_GUIDANCE` 都是 spec 属性的设施),liveness ledger 也只登记 spec 属性,没有 sys_comment 字段条目 —— 与 #2755 当时一致。\n- 因此**墓碑由 pin 测试 + 源码处方注释承担**:`sys-comment-retired-fields.test.ts` 在任一字段被复活时变红,失败信息里直接带处方。\n- translations:按配置 docstring 记录的命令用 `node scripts/check-i18n-bundles.mjs --write --filter=plugin-audit` 重生(merge 模式,四份 bundle 各删 11 行,手写译文全部保留),**未手改生成物**。plugin-audit 不产 `metadata-forms` bundle(其 extract 配置带 `--objects-only --no-metadata-forms`),`platform-objects` 的 `*.metadata-forms.generated.ts` 与本对象无关,未被触及。\n- changeset 定级 `minor`(与 #2755 在 15.1.0 的处理、以及当前 17.x rc 线上其他移除类 changeset 一致),body 写明 FROM → TO 与存量列不迁移。\n\n## 处方(墓碑写在哪都一致)\n\n- `visibility` → 评论可见性由 `thread_id` 指向记录的记录级权限决定(#4630),没有 per-row 覆盖。\n- `reply_count` → 读时按 `parent_id` 聚合子行。\n\n## 存量 DB 列:不迁移,以及移除后各路径的响亮程度\n\n按 #2755 先例留作 unmanaged leftover。诚实地区分两条路径:\n\n- **读路径处处响亮。** 读轴门禁(#4134 / #4226)是从 object schema 解析字段名的,不是从表,所以 filter / sort / `select` / `expand` 点名这两个字段,**任何部署上**都是 `400 INVALID_FIELD`,不管遗留列在不在。原来「永远显示 0」的静默错,变成会自报家门的报错。\n- **写路径只在新库上响亮。** 新建库没有该列 → driver 报错 → 经 `mapDataError` 归一到同一 `400 INVALID_FIELD` envelope;**老库上遗留列仍会接受写入**(`validateRecord` 不拒绝未声明的键),值永远没人读。删列是可选的手工清理,不是升级要求。\n\n## Pin 测试与 sabotage 实跑\n\n`packages/plugins/plugin-audit/src/objects/sys-comment-retired-fields.test.ts`:两个字段不在 `fields` 里、不在 index / highlightFields / titleFormat / nameField 里,且两条处方各自的替代路径(`parent_id` / `thread_id`)仍在。\n\nsabotage(把两个字段声明原样加回)实跑 —— **必须红,且失败信息带处方**:\n\n```\n ❯ src/objects/sys-comment-retired-fields.test.ts (5 tests | 2 failed) 10ms\n     × visibility is not declared on sys_comment 6ms\n     × reply_count is not declared on sys_comment 1ms\n\nAssertionError: sys_comment.visibility was retired under ADR-0049 (#4756) — comment\nvisibility derives from the record `thread_id` points at (#4630); a per-row enum would\nbe a second, unenforced source of truth. An external/portal distinction must be designed\nagainst ADR-0090 D11 `externalSharingModel` first.:\nexpected [ 'id', 'thread_id', …(13) ] to not include 'visibility'\n\nAssertionError: sys_comment.reply_count was retired under ADR-0049 (#4756) — count\n`parent_id` children at read time (#4756); a hook-maintained roll-up drifts through the\npredicate/bulk write-hook gaps tracked by #4770 / #4778 / #4779.:\nexpected [ 'id', 'thread_id', …(13) ] to not include 'reply_count'\n\n Test Files  1 failed (1)\n      Tests  2 failed | 3 passed (5)\n```\n\n恢复后同一文件 5 passed。\n\n## ADR-0052 的一行注记\n\n`docs/adr/0052` §5 的对比表里有一行把 `reply_count` 列为「已声明的字段」。**决策本身不动**(Prime Directive #13),只在表下加一条 `> Note (#4756)`,说明该行记录的是决策当时的字段清单、其中 `reply_count` 已退役、threading 本身(`parent_id`)/mentions/reactions 不受影响 —— 免得后来的读者(尤其是 AI)从一张历史表里读出一个已经不存在的字段。\n\n## 验证(全部实跑读数,merge `origin/main` 之后重跑)\n\n- `pnpm build --concurrency=2` → `Tasks: 71 successful, 71 total`\n- `pnpm --filter @objectstack/plugin-audit test` → `Test Files 7 passed (7) / Tests 94 passed (94)`\n- `pnpm --filter @objectstack/plugin-audit typecheck` → 无输出(clean)\n- 全仓 `turbo run typecheck --concurrency=2` → `Tasks: 122 successful, 122 total`\n- `pnpm check:i18n` → `OK (9 package(s), all bundles in sync).`\n- `pnpm check:i18n-coverage` → `OK (12 config(s), 660 baselined untranslated string(s), none new).`\n- 受影响消费方:`@objectstack/rest` `Test Files 38 passed / Tests 573 passed`;`@objectstack/metadata-protocol` `31 passed / 260 passed`;`@objectstack/platform-objects` `9 passed / 266 passed`\n- 未触发 `packages/spec` 生成物(本 PR 不改 spec),四张 ratchet 无改动。\n- `content/docs/releases/` 一个字未碰。\n\n草稿状态,不 auto-merge、不自行 ready;入队由 PM 决定。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_0176qgxgCXTJCUv4YFLtusP9)_"
+}

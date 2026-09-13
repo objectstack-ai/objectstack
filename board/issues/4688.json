@@ -1,0 +1,35 @@
+{
+  "number": 4688,
+  "kind": "issue",
+  "title": "spec 双源清账 C11:HttpRequest(./shared ≠ ./ui)—— 1 条",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "protocol:breaking"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T17:18:10Z",
+  "updated_at": "2026-08-02T18:18:39Z",
+  "closed_at": "2026-08-02T18:18:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4688",
+  "body": "#4535 的 C11 簇,**v17 收口三簇之二**。基线行(仅 1 条,且只有 type、没有 Schema):\n\n```\nHttpRequest — [./shared (type)] ≠ [./ui (type)]\n```\n\n基线现为 **19 条**(C9/#4684 因待裁决未落地,故口径是 19 不是 17),本簇目标 **19 → 18**。\n\n## 本簇大概率是三簇里最简单的一簇 —— const 本来就是单源\n\n已在 `origin/main`(`f2445c9`)复核:\n\n| 位置 | 内容 |\n|:--|:--|\n| `ui/view.zod.ts:21` | `import { HttpMethodSchema, HttpRequestSchema } from '../shared/http.zod';` |\n| `ui/view.zod.ts:37` | `export { HttpMethodSchema, HttpRequestSchema };` —— 原样 re-export |\n| `ui/view.zod.ts:2039` | `export type HttpRequest = z.infer<typeof HttpRequestSchema>;` ← **唯一的双源点** |\n| `shared/http.zod.ts:46` | `HttpRequestSchema` 唯一声明;`:54` `export type HttpRequest = z.infer<...>` |\n\n**`HttpRequestSchema` 从来就没有第二份声明** —— ui 是 import 进来再 re-export 的,所以基线里没有 `HttpRequestSchema` 行。被判为双源的只有那个**本地 type 别名**:它 `z.infer` 的正是**同一个** schema 对象,只是构成了第二个类型声明符号。基线文件表头说明了判据:\n\n> judged by **symbol identity** (a re-export of one declaration from many entries is fine and not listed)\n\n所以处置就是把 `:2039` 那行从「本地 infer」改成「re-export shared 的类型」,让它变成表头说的 \"a re-export of one declaration\" 从而不再被记。\n\n**零 authorable key 消失、零 tombstone、零 conversion** —— 本簇**不触发** C9(#4684)撞上的那个门禁死结(那是 def 改名导致 ratchet 认为 key 消失;本簇不改任何 def、不动 `HttpRequestSchema`)。\n\n## ⚠️ 必须保持 ui 侧仍然导出这个类型\n\n`ui/view.test.ts:39` 有 `type HttpRequest` 从 `./view.zod` 的具名导入。**删掉别名而不补 re-export 会打断它**,这是本簇唯一的现实风险。`export type { HttpRequest } from '../shared/http.zod';` 之类的写法可保持导入点不变 —— 具体形式由你定,但要保证 `from './view.zod'` 导入该类型的既有写法继续可用。\n\n## ⛔ 不要顺手修隔壁的 HttpMethod\n\n`ui/view.zod.ts:2040`,**紧挨着的下一行**,是形状完全相同的 `export type HttpMethod = z.infer<typeof HttpMethodSchema>;`。它的基线行是 `HttpMethod — [./api, ./shared (type)] ≠ [./ui (type)]`,**#4535 已把它排进 v18**(不在元数据文档管道上)。\n\n诱惑很大且改动几乎零成本,但**范围是维护者定的,不是就手方便定的**。本簇只清 1 条。若你确认它确实是同一形状,**写进 PR 描述与 out-of-scope findings**,让维护者决定要不要并进来 —— 不要自己扩。\n\n## 关于 breaking 级别:自己判,不要为了凑 major 而声称破坏\n\n#4535 把三簇统称 breaking,但**本簇需要你自己核实**:两个别名从**同一个** schema 对象 infer,结构上应当完全相同,消费者侧可能是零类型差异。changeset 级别按**实际情况**定并在正文说清理由。若确认零消费者影响,不要硬写成 major —— 谎报破坏和漏报破坏一样是污染升级指南。(反之若你发现两者其实不同,那是重要发现,写清楚。)\n\n## 纪律(#4535 §1–§4 + 手册 6/7/8,开工前必读)\n\n1. **⛔ 禁止手编 `packages/spec/authorable-surface.json`**(#4650)。\n2. **⚠️ 门禁绿 ≠ 登记正确(#4659)**;**默认值 / 约束变更不被任何门禁记录(#4666)** —— 本簇若真是纯类型别名改动,这两条应当不触发,但要自己确认而不是假定。\n3. **回归 pin 用运行时模块命名空间断言**(#4642 已证编译期 pin 空转),**必须 sabotage 验证**并贴输出。\n4. **判不出来就升级,不要猜**(#4653 / #4658 / #4661 / #4684 先例)。分析本身就是交付物。\n5. **⚠️ 生成物冲突只能靠重新生成**(手册第 7 条)。v17 收尾期 main 前进很快 —— **推之前重新 `git fetch origin main` 判一次**;`spec-changes.json` 是对象数组,**必须跑 `gen:spec-changes`**,集合合并会丢条目并把 CI 打红。解完冲突务必本地跑对应 `check:*` 再推。\n6. ⛔ **不要碰 `content/docs/releases/`**。\n7. ⛔ **不要碰门禁洞 issue**(#4666 / #4650 / #4659 / #4663 / #4642 / #4675 / #4676),它们等维护者排期。\n\n## 验收\n\n- 基线删掉上面 1 行,**19 → 18**,只减不增。\n- 全绿:`build`、`check:dual-source-exports`、`check:generated`、`test`,加源码审计组(`check:liveness` / `check:strictness-ledger` / `check:empty-state` / `check:variant-docs` / `check:exported-any` / `check:skill-examples`),以及全仓 `pnpm typecheck`。\n- `ui/view.test.ts` 的既有具名类型导入继续可用。\n- changeset 一份,级别按上面「自己判」一节的结论定,含 FROM → TO(若确有消费者可见变化)。\n- 注意 spec 现为 `17.0.0-rc.1`、pre-mode 仍开。\n\n关联:#4535(主单)、#4684(C9,待裁决 —— 其门禁死结**不适用于本簇**)、#4650 / #4659 / #4666(门禁洞)、#4642(pin 空转)、#4675(生成物冲突)、ADR-0049、ADR-0087、ADR-0104"
+}

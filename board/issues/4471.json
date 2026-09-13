@@ -1,0 +1,34 @@
+{
+  "number": 4471,
+  "kind": "issue",
+  "title": "[core/ADR-0116] init 阶段取服务的顺序契约是自愿声明的——不声明就没人拦,#4085 与 #4420 都是这么发生的",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T09:00:55Z",
+  "updated_at": "2026-08-02T12:48:35Z",
+  "closed_at": "2026-08-02T12:48:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4471",
+  "body": "#4420 的后续 —— 关于根因模式,而不是那一个 bug。\n\n## 问题\n\nADR-0116 / `packages/core/src/plugin-order.ts` 已经把插件顺序讲清楚了,三种边各有语义(`dependencies` 硬、`optionalDependencies` 有则排前、`requiresServices` 声明\"我在 init() 里同步取这个服务\",由 `assertInitServiceRequirements` 具名报错)。机制是完备的。\n\n**缺的是:这些声明全部是自愿的。** 一个插件在 `init()` 里 `getService('manifest')` 却什么都不声明,没有任何一层会指出来——它只会在某个组合顺序下静默拿不到服务。而这类失败通常又被写成 best-effort 的 try/catch + warn(因为插件确实想在没有该服务时也能跑),于是问题被吞两次:一次在顺序上,一次在日志级别上。\n\n已经发生过两次:\n\n- **#4085** — AppPlugin 在 ObjectQL 注册 `manifest` 之前就于 init 里取它。plugin-order.ts 的注释里原话是\"the fix existed only as a convention\"。\n- **#4420** — `AutomationServicePlugin` 声明 `dependencies = []`、无 `optionalDependencies`、无 `requiresServices`,却在 `init()` 里取 `manifest` 注册 `sys_automation_run`,又在 `start()` 里凭 `objectql` 单独启用 DB-backed 的挂起 run 存储。排在 ObjectQL 之前时:对象没注册 → 表没建 → store 照样挂上 → 每次挂起写盘失败进 warn → 每次重启丢光在途审批。\n\n第二次的代价是数据一致性级别的,而且**症状与原因隔了一次发版**,现场极难自查。\n\n## 现状调查(#4460 时顺手扫的)\n\n大部分 manifest 消费方其实是声明了的:\n\n| 插件 | 声明 |\n|---|---|\n| `plugin-approvals` | `dependencies = ['com.objectstack.engine.objectql']` |\n| `service-messaging` | 同上 |\n| `service-realtime` | 同上 |\n| `platform-objects` | `optionalDependencies = [...objectql]` |\n| `service-automation` | **无**(#4460 已补 `optionalDependencies`) |\n\n`apps/setup`、`apps/studio`、`apps/account` 走的是另一条路——它们**故意**放在 `start()` 注册(源码里有注释说明),而且注册的是 app/nav 而非带表的对象,漏了会表现为界面缺失,不会静默丢数据。风险等级不同,不必按同一把尺子量。\n\n所以这不是一个\"到处都是\"的问题——恰恰相反,**它是少数漏网的那个最贵**。靠人工 review 维持的一致性,漏掉一个就够了。\n\n## 期望\n\n把这个约定变成可强制的。方向(择一即可,倾向前者):\n\n1. **加一个 `check:*` 门禁**:静态扫描插件源码,凡在 `init()` 里同步 `getService('X')`,而 X 由某个已知插件 `providesServices` 提供,却没在自己的 `dependencies` / `optionalDependencies` / `requiresServices` 里提到那个插件的,报错。`providesServices` 的清单已经存在,这一步是可做的。\n2. 或者运行期兜底:kernel 在 `init()` 期间记录每个插件实际解析过哪些服务,与其声明比对,不一致就在 bootstrap 结束时警告——比静态扫描弱,但不受代码形态影响。\n\n另外值得单独定一条的是**日志级别的约定**:当一个 best-effort 的降级会导致\"看起来正常、实则不持久\"时(#4420 正是如此),它就不该是 warn。#4460 在自动化这边把它提到了 error,但这只是一个点上的修复,没有形成规则。\n\n## 参考\n\n- `packages/core/src/plugin-order.ts`(`resolvePluginOrder`、`assertInitServiceRequirements`、开头关于 #4085 的注释)\n- `packages/services/service-automation/src/plugin.ts`(#4460 后的形态,可作为参考写法)\n- ADR-0116 / #4085 / #4420 / #4460"
+}

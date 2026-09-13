@@ -1,0 +1,35 @@
+{
+  "number": 4639,
+  "kind": "issue",
+  "title": "declared ≠ enforced:引擎 multi:true 谓词写入没有 data.record.* 事件,webhook / 知识同步对其静默(REST 批量端点不受影响)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "repo:objectstack"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T12:51:46Z",
+  "updated_at": "2026-08-02T17:15:04Z",
+  "closed_at": "2026-08-02T17:15:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4639",
+  "body": "#4626(subscribeData/DataEvent 生产者履约)的范围外发现,按第十条军规立案,unassigned。\n\n## 现象\n\n`DataEvent`(`@objectstack/spec/api`)是**逐记录**契约:`recordId` 必填。但 ObjectQL 引擎的批量写路径拿不到记录标识:\n\n- `IDataDriver.updateMany` / `deleteMany` 的契约返回值是 `Promise<number>`(受影响行数,见 `packages/spec/src/contracts/data-driver.ts`),没有行、也没有 id;\n- 引擎 `update()` / `delete()` 的 `options.multi = true` 分支就走这两个方法。\n\n#4626 之前,这两条路径各发**一条**伪造事件:`payload: { recordId: '', changes, after: <受影响条数> }`。它同时骗了两个仓内消费者——webhook auto-enqueuer 收到 `recordId: ''` 的一次投递,知识同步则把 `{recordId, after}` 这个信封当成记录写进索引。#4626 按契约优先(不在消费端容错、也不在生产端伪造)改成:**批量写不发事件,并 warn 出声**。\n\n于是留下这个真实的能力缺口:\n\n- **`multi: true` 的更新/删除不再触发 webhook**(此前触发一次,但内容不可用);\n- 知识库 object source 对批量写不同步;\n- `subscribeData` 订阅者看不到批量写。\n\n## 处置方向(需裁决)\n\n1. **逐记录扇出**:批量写前/后按 AST 取一次匹配行(或让驱动 `updateMany`/`deleteMany` 返回受影响 id),对每行发一条合规 `DataEvent`。语义最正,但热路径多一次查询(或改驱动契约,涉及全部驱动)。\n2. **新增批量事件类型**:在 `DataEventType` 里声明 `data.records.updated` / `data.records.deleted`(带 `object` + `matched` 计数 + 可选的 where),让批量写有自己的**诚实**契约,而不是冒充逐记录事件。消费者(auto-enqueuer / 知识同步 / client SDK)按新类型分别处理。\n3. **维持现状**:批量写没有实时事件,文档写清楚(#4626 已在 `content/docs/automation/webhooks.mdx` 写明)。\n\n三条都要顺带回答:批量事件是否应进入 webhook 触发器词汇表(`create`/`update`/`delete` 目前是逐记录语义)。\n\n## 参考\n\n- #4626 / PR(生产者履约,把伪造事件换成\"发不出就出声\")\n- `packages/objectql/src/engine.ts` — `publishDataEvent()` 的 \"no record identity → no event\" 闸门\n- `packages/spec/src/api/events.zod.ts` — `DataEventType` / `DataEventSchema`"
+}

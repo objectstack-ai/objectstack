@@ -1,0 +1,35 @@
+{
+  "number": 4755,
+  "kind": "pull_request",
+  "title": "fix(security): permission-set 投影只写 spec 认的键;失败的 backfill 变响亮 (#4669)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T02:31:19Z",
+  "updated_at": "2026-08-03T03:14:21Z",
+  "closed_at": "2026-08-03T03:14:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T03:14:20Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4755",
+  "body": "Fixes objectstack-ai/objectstack#4669\n\n## 症状与因果\n\n`sys_permission_set` 每一行都带一个 `active` **存储列**。ADR-0094 D4 的 backfill 走 `permissionSetBodyFromRow(row)` 把整行转成 metadata body,`active` 跟着进去;#4001 之后 `PermissionSetSchema` 是 `.strict()`,于是每一次 `saveMetaItem` 都抛\n\n```\n[invalid_metadata] permission/d8_qc_user failed spec validation: :\nUnrecognized key(s) on this permission set: `active`.\n```\n\n失败被 `catch` 成一条 `warn`、`backfilledIntoMetadata` 不加一 —— **测试全绿,没有任何自动信号**,一条整体停摆的投影路径就这样过了一个发布周期。\n\n## 归属判定:`active` 是行状态,不是声明\n\n按 PM 裁定走**投影侧挑键**(正文方案 1),`packages/spec/**` 零改动。理由在它的全部消费面上:表列、`highlightFields`、两个 list view 的 filter、两个启停动作的 `bodyExtra` —— 全是**记录的运行时开关**,不是作者声明的能力边界。把它加进 spec 等于把状态提升成契约,方向不对。\n\n## 改了什么\n\n**1. 白名单从 schema 派生,不是手抄**\n\n`permissionSetBodyFromRow()` 和 `mergeRowPatchIntoBody()` 现在都过一道 `pickSpecDeclaredKeys()`,键表来自 `PermissionSetSchema.shape` 本身:\n\n```ts\nlet cachedSpecBodyKeys: ReadonlySet< string > | null = null;\nexport function permissionSpecBodyKeys(): ReadonlySet< string > {\n  return (cachedSpecBodyKeys ??= new Set(Object.keys(PermissionSetSchema.shape ?? {})));\n}\n```\n\n手抄一份字符串数组会在 spec 加键的那天静默漏掉它 —— 那正是本 issue 的病,只是换了一层。首次使用才解析,不在 module load 时把 `lazySchema` 代理拆开。\n\n覆盖面比 backfill 一处大:**`#4001` 之前已经落库、body 里仍带 `active` 的历史 overlay 行**(data at rest)也在同一个闸口被滤掉,所以那些 set 的数据门编辑不再 422。\n\n**2. 两个启停动作行为不变(并且顺带不再造假 overlay)**\n\n只含行状态的 PATCH(`bodyExtra: { active: … }` 正是这个形状)**不再被改写成 metadata 写入**,而是 `return next()` 交给驱动做列写入 —— 保留 history / `updated_at` / FLS 等一切正常语义,并且不会再给一个包自带的 permission set 平白造出一条 \"customization\" overlay。INSERT(Clone 动作会带 `active`)在投影之后把列补上。\n\n反方向也钉住了:投影通道**不再从 body 读 `active`**(`upsertEnvPermissionSet` / `recordDiffersFromBody`)。否则一条陈旧的历史 body 会在下一次投影时把管理员刚停用的 set 重新打开。\n\n**3. 第二半:失败变响亮(#4632 / AGENTS.md「Degradation log levels」)**\n\n这是规则里的第二类降级 —— 记录照常列出、evaluator 照常从表里解析,**看起来一切正常**,而定义根本不在权威存储里。现在:\n\n- 级别 `error`,签名对齐 `@objectstack/spec/contracts` 的 `Logger.error(message, error?, meta?)`;\n- 文案含**后果**(重新 provision 不会重建它、每次启动都同样失败)与**修复动作**;\n- 「说一次」—— 第一次失败给完整那条,其余计数;\n- 新增 `ProjectionReconcileOutcome.backfillFailed`,**降级进结果**,不只进日志;汇总行在有失败时也走 `error`(一条 `info` \"reconciled\" 盖在失败的 backfill 上,正是这条规则要消灭的安慰性半真话)。\n\n同文件 `restore` 分支那处同类 `warn`(重新 author 失败)一并对齐 —— 同一函数族、同一类降级,只修一处、留下三行外的孪生兄弟本身就是个 finding。若认为越界,可以单独摘出。\n\n## 闸门局限(照 PM 说明)\n\n`check:durability-log-level` 的词表(`DURABILITY_CRITICAL_CALLEES`)**覆盖不到**这类投影写入 —— 它不认 `saveMetaItem`。本 PR 跑 `node scripts/check-durability-degradation-log-level.mjs` 是绿的,但那是因为闸门看不见,不是因为它检查过。\n\n我实测了把 `saveMetaItem` 加进词表的影响:**8 处违规,3 个包 4 个文件(`runtime/domains/packages.ts` ×3、`rest/rest-server.ts` ×2、`metadata-protocol/protocol.ts` ×2、`runtime/domains/meta.ts` ×1),全部是 catch 里连日志都没有的完全静默**。逐一判定 + 词表条目必须同一个 PR,那是一次独立清账,已单独立: **#4754**(未认领)。\n\n## 验证\n\n```\n$ pnpm --filter @objectstack/plugin-security test --maxWorkers=2\n Test Files  33 passed (33)\n      Tests  718 passed (718)\n\n$ pnpm --filter @objectstack/plugin-security typecheck\n> tsc --noEmit        (无输出 = 通过)\n\n$ node scripts/check-durability-degradation-log-level.mjs\n✓ durability-degradation log levels: 8 durability-critical catch seam(s), all loud or rethrowing (1 baselined).\n```\n\n**测试确实能抓到这个 bug**:mock protocol 的 `saveMetaItem` 现在跑**真的 `PermissionSetSchema`**,与 `protocol.ts` 的 `resolveOverlaySchema` 一模一样的 422 信封。把缺陷放回去(`permissionSetBodyFromRow` 重新带上 `active`)再跑:\n\n```\n × drops `active` and every other storage column from the projected body\n × every key the projection emits is one the spec ACCEPTS (parsed by the real schema)\n × filters a body STORED before #4001 (data at rest can still carry `active`)\n × [#4669] INSERT honours an explicit `active` on the record (Clone action sends one)\n × backfills a legacy data-door-only record into the metadata store ONCE\n × [#4669] a row carrying the `active` STORAGE COLUMN backfills instead of failing spec validation\nError: [invalid_metadata] permission/support_agent failed spec validation: <root>:\n  Unrecognized key(s) on this permission set: `active`. …\n Tests  6 failed | 38 passed (44)\n```\n\n**真实 stack 端到端**(showcase,真 kernel + 真 metadata protocol,临时 dogfood 用例跑完即删):往 `sys_permission_set` 插一条带 `active` 列、没有 metadata 定义的遗留行,再跑 boot reconcile ——\n\n```\nOUTCOME {\"projectedFromMetadata\":0,\"backfilledIntoMetadata\":1,\"driftHealed\":0,\"backfillFailed\":0}\nLOGS\nINFO [security] sys_permission_set projection reconciled (ADR-0094 D4) {…,\"backfilledIntoMetadata\":1,\"backfillFailed\":0}\n```\n\n计数增长、正文那条 WARN 不再出现、落库的 body 里没有 `active`、记录自己的 `active` 列纹丝不动。既有的两个 permission 相关 dogfood 用例也全绿(`showcase-permission-projection` + `two-doors-permission`,12/12)。\n\n## 约束核对\n\n- ⛔ `packages/spec/**` 零改动(白名单用的是运行时可及的 schema 导出)\n- ⛔ `content/docs/releases/` 未碰;cloud 仓未碰\n- changeset 在位:`.changeset/permission-backfill-row-state-columns.md`\n\n## 行为变化(供 review 判断)\n\n1. 只含 `active` 的数据门 PATCH 现在**放行给驱动**而不是改写成 metadata 写入。对一个还没有 metadata 定义的遗留行,这意味着它不再顺手被 author 进元数据 —— 启动时的 reconcile 仍会 backfill 它。\n2. `upsertEnvPermissionSet` 创建记录时 `active` 恒为 `true`(与包 seeder 和字段 `defaultValue` 一致),不再从 body 取。\n3. `ProjectionReconcileOutcome` 新增必填字段 `backfillFailed`(该类型只在本包内被消费)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_015Br2xsJsczFsTR9bvbh2Ny\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015Br2xsJsczFsTR9bvbh2Ny)_"
+}

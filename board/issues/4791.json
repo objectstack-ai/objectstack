@@ -1,0 +1,35 @@
+{
+  "number": 4791,
+  "kind": "pull_request",
+  "title": "fix(automation,approvals): 节点类型校验推迟到插件词汇表封闭之后 —— approval flow 不再被误报「运行时会失败」",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T06:47:01Z",
+  "updated_at": "2026-08-03T07:14:58Z",
+  "closed_at": "2026-08-03T07:14:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T07:14:56Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4791",
+  "body": "Fixes objectstack-ai/objectstack#4771\n\n## 问题\n\n`AutomationServicePlugin.start()` 从 ObjectQL registry 拉起 flow 并**当场**校验节点类型;\n`ApprovalsServicePlugin.start()` 在 0.8 秒后才注册 `approval` 执行器。校验器在词汇表还没成型\n的时候就下了结论 —— showcase 每次冷启的那 8 条「will fail at execution time」全是假的。\n\n而 ADR-0018 明确把节点词汇表定义为**开放、可运行时扩展**的(插件通过 `registerNodeExecutor(type)`\n贡献类型)。在扩展完成前拍板的校验器,是在校验一个还没成型的世界。\n\n真正的代价不是噪音,是**信号丢失**:真的没装 approvals 插件的部署会得到一模一样的 8 条告警,\n这条 warn 的信噪比因此是 0。本 PR 之后它才第一次具备拦截价值。\n\n## 改动(PM 裁定的修法 1)\n\n**`packages/services/service-automation`**\n\n- `AutomationEngine.sealNodeTypeVocabulary()` —— 宣告词汇表封闭,对所有**已启用**的已注册 flow\n  跑一次权威校验,每个有问题的 flow warn 一条。幂等:只有第一次会打日志,之后仍返回当前 audit。\n- `AutomationEngine.getUnknownNodeTypeAudit(): UnknownNodeTypeAuditEntry[]` —— 同一发现的\n  **状态**形态(供 CLI 启动摘要 / 健康检查直接读引擎,而不是 grep 日志)。与\n  `getTriggerBindingAudit()` 同一套路。\n- `AutomationServicePlugin` 在 **`kernel:bootstrapped`** 调用它。\n- 封闭之后 `registerFlow` **恢复即时告警**:Studio 发布 / dev reload 进正在运行的服务器时,\n  词汇表确实完整,那句断言此时为真。**这是时序修复,不是把告警静音。**\n- 被禁用的 flow(`status: 'obsolete'`/`'invalid'`)不再上报 —— 跑不起来的 flow 谈不上「运行时\n  失败」,这正是本 issue 要消灭的那类假断言(与 `getTriggerBindingAudit` 的口径一致)。\n- 告警文案改成它现在能承诺的事,并带上补救动作。\n\n### 为什么是 `kernel:bootstrapped` 而不是 `kernel:ready`\n\n裁定的语义是「所有插件 `start()` 完成之后」,`kernel:bootstrapped` 严格更晚且更安全:\n\n1. 本插件**自己的** `kernel:ready` handler 还会再注册一批 flow(`syncFlowsFromProtocol`,即\n   inline app flow 的冷启绑定);\n2. 排在本插件之后启动的插件,仍可能在它自己的 `kernel:ready` 里贡献执行器;\n3. `packages/core/src/kernel.ts` 对这个 hook 的定义原文就是:「Reconcile/backfill work that\n   consumes data produced by a later-starting plugin's `kernel:ready` handler belongs here, not in\n   `kernel:ready` (where handler order would race the data)」。本审计正是这种消费者。\n\n告警可见性不受影响:CLI 的 boot-quiet 窗口会截获整个 boot 期的 `logger.warn` 并在 banner 下\n重放(#4012),`kernel:bootstrapped` 在 `bootstrap()` 之内。\n\n**`packages/plugins/plugin-approvals`**(同一缺陷类的另一半)\n\n- 拿不到 automation 引擎时由 `info` 改为 `warn` —— dev 默认日志级别是 `warn`,原来**真降级发生时\n  反而看不见**(#4632)。文案写明后果(该部署里每个 ADR-0019 approval flow 都会以 `NO_EXECUTOR`\n  失败)与补救(装 `@objectstack/service-automation`)。按 AGENTS.md「Degradation log levels」,\n  这是**功能性**降级(能力没装上,不是数据没落盘),`warn` 是正确档位。\n- `catch` 收窄到「服务查找」这一步:`registerApprovalNode` 内部真出错时以自己的身份抛出,不再被\n  贴上 \"no automation engine\" 的错误标签。\n- `automation` 服务存在但不接受节点执行器的分支,从前**一条日志都不打**,现在同样 warn。\n\n## 测试(两种部署必须可区分 —— 验收标准 1 & 2)\n\n`packages/services/service-automation/src/flow-node-type-audit.test.ts`(新增,LiteKernel 真启动)\n\n复现条件是**断言出来的**,不是假设的:每个用例都从 boot 日志证明 `Flow registered: …` 出现在\n`Node executor registered: approval` **之前** —— 即修复前误报的那个窗口确实发生了。\n\n| 用例 | 断言 |\n|---|---|\n| 装了贡献插件 | 0 条节点类型告警,`getUnknownNodeTypeAudit()` 为空 |\n| 没装 | 每个 flow 1 条告警,带 flow 名 + `approval` + 补救动作;audit 有对应条目 |\n| 两者对照 | `0 !== 1` —— 修复前这两个 boot 打印的东西完全一样 |\n| 封闭后再发布 flow | 立即 warn 1 条(证明这是时序修复而非静音) |\n\n反向验证:把 `nodeTypeVocabularySealed` 临时改成初值 `true`(等价于修复前的即时校验),\n该文件 4 个用例里 3 个失败(其中「没装」那条从 2 变成 4 条告警 —— 即注册时 + 封闭时各报一次)。\n\n`engine.test.ts` 增补:封闭前不告警 / 封闭时按 flow 报 / 封闭后即时报 / 禁用 flow 不报 /\n幂等封闭只 warn 一次 / 「插件后注册」不再误报。\n\n`plugin-approvals/src/approval-node-degradation.test.ts`(新增):无 automation 服务 → `warn`\n且不再是 `info`;服务在但不收执行器 → 同样 `warn`;正常时注册 `approval` 且不告警。\n\n```\n@objectstack/service-automation:test  Test Files 55 passed (55)   Tests 662 passed (662)\n@objectstack/plugin-approvals:test    Test Files 17 passed (17)   Tests 370 passed (370)\n@objectstack/plugin-approvals:typecheck  tsc --noEmit  ✓\n```\n\n`service-automation` 没有 `typecheck` 脚本(ratchet 里是 DEBT 条目),直接跑 `tsc --noEmit`:\n改动前后都是**同样的 5 个既有报错**(`engine.test.ts` 2 个 TS2739 + `nested-region-parity.test.ts`\n3 个 TS2341,后者访问私有 `flows`,与本 PR 无关),本 PR **零新增**。\n\n另跑:`check-durability-degradation-log-level`、`check-changeset-fixed`、`check-changeset-no-major`、\n`check-adr-anchors` 全绿;改动文件 eslint 无输出。\n\n## 范围\n\n只碰 `packages/service-automation` + `packages/plugins/plugin-approvals`(+ 一个 changeset),\n未触碰本轮并行批的 `objectql` / `service-storage` / `plugin-auth`。\n\n## 嵌入式 host 注意\n\n直接 `new AutomationEngine()` 而不经过 `AutomationServicePlugin` 的宿主,需要在自己的插件都装好\n之后调用一次 `sealNodeTypeVocabulary()`,才能拿到这条告警(以及之后的即时校验)。已写进 changeset。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_015Br2xsJsczFsTR9bvbh2Ny\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015Br2xsJsczFsTR9bvbh2Ny)_"
+}

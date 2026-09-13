@@ -1,0 +1,32 @@
+{
+  "number": 4446,
+  "kind": "issue",
+  "title": "spec 缺一条「跨 barrel 同名导出」检查:api-surface.json 里同名跨入口目前可见但不报警(#4411 遗留裁决 2)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T07:49:01Z",
+  "updated_at": "2026-08-01T14:35:07Z",
+  "closed_at": "2026-08-01T14:35:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4446",
+  "body": "#4411 的第二条待裁决。那条 issue 由一次同名双源引发(`MetadataWatchEvent` 在 `./kernel` 与 `./system` 各一份、形状不同、kernel 版零消费方),已在 #4411 的 PR 里连同同文件另外 10 个同类一并退役。**但产生这类问题的机制没有被堵上** —— `api-surface.json` 里同名跨入口是**可见但不报警**的,下一个同名双源仍会静默落地。\n\n## 为什么这类缺陷特别值得机器来抓\n\n它是**只在 import 路径上分叉**的缺陷:两份声明共用一个名字,靠 `from '@objectstack/spec/<entry>'` 区分。\n\n- 自动 import 和模型补全**按名字**解析,拿到哪一份取决于工具先看到哪个入口 —— 这不是判断力问题,是没有可判断的信息。\n- 两份形状通常**大量重叠**,所以选错**照样编译**,只在边缘值或必填性上翻车(#4411 的例子:`type: 'add'` vs `'added'`)。\n- 更糟的是命名直觉可以是**反的**:#4411 里看起来更规范的那份(规范化枚举、字段必填、每个属性都有 `.describe()`)是死的,真正在用的是自称 legacy 的宽松超集。**按\"哪个看起来更正统\"来选,选反。**\n\n一次 code review 很难看见它 —— 两个文件各自都是合理的。\n\n## 当前实测基线(#4411 PR 合入后)\n\n从 `packages/spec/api-surface.json` 直接算:\n\n| 指标 | #4411 前 | #4411 后 |\n|---|---|---|\n| 跨**子路径**同名导出(`name (kind)` 出现在 >1 个非 `.` 入口) | 103 | **83** |\n| 其中在 >1 个源文件里各自声明的(真·多源,非 re-export) | 70 | 待重算 |\n\n复算脚本:\n\n```js\nconst s = require('./packages/spec/api-surface.json');\nconst map = new Map();\nfor (const [ep, list] of Object.entries(s).filter(([, v]) => Array.isArray(v)))\n  for (const n of list) (map.get(n) ?? map.set(n, []).get(n)).push(ep);\nconsole.log([...map].filter(([, eps]) => eps.filter(e => e !== '.').length > 1).length);\n```\n\n`.`(根入口)+ 子路径的组合要排除 —— 那是有意的 re-export,同一个符号。\n\n## 设计要点(裁决时值得先看的几条)\n\n1. **按符号 identity 判定,不能只按名字。** 83 条里绝大多数是同一个声明从两个入口可达(合法),真正的缺陷是**两个不同声明共用一个名字**。`scripts/build-api-surface.ts` 已经用 TS checker 解析 module symbol,拿到 declaration 位置来做同一性判断是可行的 —— 这也是这条检查唯一有价值的形态,只比名字会淹没在误报里。\n2. **需要 allowlist 基线。** 剩余的真·多源不可能在一个 PR 里清完,得按 ratchet 模式落地(新增即失败,存量记账),形态参照 `authorable-surface.json` / `check-type-check-coverage.mjs`。\n3. **挂载点。** 跟着 `check:api-surface` 走(同一个 `TypeScript Type Check` job,读 built `dist/*.d.ts`);注意 AGENTS.md 记的 stale-dist 陷阱同样适用。\n\n## 已知的存量条目(建档,便于起基线)\n\n- **`MetadataFormat`** —— `system/metadata-persistence.zod.ts`(7 个成员,含 `yml`/`ts`/`js` 别名)与 `shared/metadata-types.zod.ts`(4 个成员)**枚举分歧**,两者都在导出面上。#4411 只把 kernel 的第三份删掉了,这一对仍在。\n- **`contracts/metadata-service.ts`** 自有的 `MetadataExportOptions` / `MetadataImportOptions` interface —— 与 `system/metadata-persistence.zod.ts` 的同名 schema **第三形状**,且有消费方,不是删得掉的死副本,需要单独判定哪边是真源。\n- `system` ↔ `integration`(`ConsumerConfig`、`DatabaseProvider`、`MessageQueueProvider`、`MultipartUploadConfig`)、`system` ↔ `cloud`(`EnvironmentArtifact`、`TenantPlan`)、`kernel` ↔ `api`(`*PackageRequest/Response` 一族)、`ui` ↔ `shared`(`HttpRequest`、`HttpMethodSchema`)等成组条目 —— 需逐组判定 re-export vs 真分歧。\n\n## 待裁决\n\n这条检查是否值得做、按什么优先级做,由维护者定(#4411 里已明确记为「值不值当由维护者定」)。开这条 issue 是为了不让那次裁决连同实测基线一起丢失。\n\n---\n\n关联:#4411(触发路径 + 已退役的 11 个同名双源)、#4404、#4251、#4393、ADR-0049"
+}

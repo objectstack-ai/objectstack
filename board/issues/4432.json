@@ -1,0 +1,32 @@
+{
+  "number": 4432,
+  "kind": "issue",
+  "title": "meta overlays: unnormalized type segment creates phantom rows that shadow the code-authored listing and cannot be deleted",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T06:49:31Z",
+  "updated_at": "2026-08-01T16:08:09Z",
+  "closed_at": "2026-08-01T16:08:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4432",
+  "body": "Found while verifying the 17.0.0-rc.1 checklist on #3909 (F1). Verified on `main` @ `1ee48bc60`, showcase under `os serve --dev`, admin session.\n\n#3985 made the `/meta` **per-type gates** accept both spellings of the type segment — but the **customization-overlay write path does not normalize it**, so the two spellings address two different overlay namespaces, and the phantom rows this creates corrupt every listing surface that should have been artifact ∪ overlay.\n\n## Repro & observed (one fresh boot, in order)\n\n1. `PUT /api/v1/meta/actions/rc1_probe` (plural) → `200 … Saved customization overlay … type=actions, name=rc1_probe [seq=1]`\n2. `PUT /api/v1/meta/action/rc1_probe` (singular) → `200 … type=action, name=rc1_probe [seq=1]` — **a second, distinct row** (both seq=1).\n3. `GET /api/v1/meta/actions` (plural — the spelling the showcase's 11 code-authored actions listed under before step 1) now returns **only `rc1_probe`** — one overlay row shadows the entire code-authored action list on that spelling. `GET /api/v1/meta/action` (singular) returns the merged 12.\n4. `DELETE /api/v1/meta/action/rc1_probe` → `200 … reset to artifact default [seq=2]`. `DELETE /api/v1/meta/actions/rc1_probe` → `200 … No customization overlay found for actions/rc1_probe — already at artifact default.` — **the plural row it created in step 1 is unreachable by either spelling**.\n5. After both deletes: `GET /meta/actions` still returns the phantom `rc1_probe` (and still hides the 11 real actions); `GET /meta/action` still lists `rc1_probe` among 12 items, while `POST /api/v1/actions/showcase_task/rc1_probe` correctly 404s. Listing and dispatch now disagree about a deleted item.\n6. Throughout all of this, `sys_metadata` in the bound SQLite datasource holds **0 rows** (and `.objectstack/metadata` holds no matching file) — where these \"env-wide, state=active\" overlays actually persist is not observable; on this boot they appear to be process-memory only.\n\nAlso observed: after step 2 the overlay was **listed but not dispatchable for a short window** (`POST` answered the ADR-0110 \"has no declaration\" 404, then succeeded on a later call) — some cache between `saveMeta` and `resolveRouteActionDeclaration` lags the write.\n\n## Expected\n\n- One canonical type key at the save/read/delete boundary (`pluralToSingular`, the same fold #3985 applied to the gates) — a plural-spelled PUT lands in the same namespace as a singular one.\n- `GET /meta/<type>` on either spelling = code-artifact items ∪ active overlays, never overlay-only.\n- DELETE removes the row it addresses; a deleted overlay leaves every surface (list, get, dispatch) in agreement.\n\nPart of the #3909 rc.1 verification (section F1).\n"
+}

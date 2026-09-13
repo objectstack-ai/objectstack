@@ -1,0 +1,32 @@
+{
+  "number": 4318,
+  "kind": "issue",
+  "title": "discovery 的 cache/queue/job 槽位声明了三条不存在的 route —— 同一条记录里 handlerReady:false 与 route 互相矛盾",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T05:53:01Z",
+  "updated_at": "2026-08-01T08:06:31Z",
+  "closed_at": "2026-08-01T08:06:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4318",
+  "body": "按 Prime Directive #10 记录,#3898 / PR #4306 收尾时核对出的同类残留。**当前无害**(没有已知消费者读 `services.*.route`),记下来是因为它是构造上的谎,且与 #4114 / #4141 刚修掉的形态同款。\n\n## 现象\n\n`packages/metadata-protocol/src/protocol.ts:1104-1106` 的 `SERVICE_CONFIG` 给这三个服务声明了 route:\n\n```js\ncache:        { route: '/api/v1/cache' },\nqueue:        { route: '/api/v1/queue' },\njob:          { route: '/api/v1/jobs' },\n```\n\n全仓提到这三条路径的地方,**就是这三行本身** —— 没有 dispatcher 域(`packages/runtime/src/domains/` 下没有 cache/queue/jobs)、没有 adapter 挂载、没有插件注册。\n\nkernel 在默认 boot 时会给这三个槽位自动注入内存兜底(`preInjectCoreFallbacks`,三者在 `core-services.zod.ts:154-156` 都是 `core` 级),而这些兜底自报 `handlerReady: false`。于是**每个默认部署**的 discovery 都输出:\n\n```\ncache: status=degraded handlerReady=false route=/api/v1/cache\nqueue: status=degraded handlerReady=false route=/api/v1/queue\njob:   status=degraded handlerReady=false route=/api/v1/jobs\nroutes map keys: data,metadata,i18n\n```\n\n(实证:`CORE_FALLBACK_FACTORIES` 全量注册进 `ObjectStackProtocolImplementation` 后 `getDiscovery()` 的真实输出。)\n\n同一条 `ServiceInfo` 里,`handlerReady: false` 说\"没有 HTTP handler\",`route` 说\"去这里调用\"。比 #4089/#4130 那种\"两个 builder 互相矛盾\"更尖锐 —— 这是**一条记录内部**的自相矛盾。\n\n顺带,两个 builder 也确实不一致:dispatcher 侧同一槽位是 `svcAvailable(undefined, undefined, cacheSvc)`,route 为 `undefined`(`http-dispatcher.ts:1145-1147`)。\n\n## 范围界定(为什么现在无害)\n\n- `ApiRoutesSchema` 没有 `cache`/`queue`/`job` 键,所以 **`discovery.routes` 不带它们** —— 泄漏面仅限 `services.<slot>.route`;\n- objectui 不读 `services.*.route`(核对了 `packages/react/src` 全量);\n- 所以今天没有消费者会照着这条路由发请求。\n\n但 D12 的动机是 AI agent 读这张表决定\"我能不能用这个能力\" —— 一条声明了路径的记录,正是给 agent 看的。\n\n## 不是\"暂时没实现\",是\"永远不会有\"\n\n`CORE_SERVICE_PROVIDER` 给这三个槽位指向 `@objectstack/service-cache` / `service-queue` / `service-job`。这三个包**都存在**,且**都不挂任何 HTTP 路由** —— 它们是内部服务,没有 HTTP 语义。所以这三条 route 不是\"等插件补上\",是不会有人挂。\n\n这与 `realtime` 的处境完全同构,而 `realtime` 早就按 D12 处理成 `realtime: {}` 了,注释就写着\"nothing mounts /api/v1/realtime, so no route is advertised\"。\n\n## 两种修法,代价不同(需要拍板)\n\n**A. 摘掉 route(`cache: {}`,与 realtime 同构)**\n\n最贴合\"没人挂 ⇒ 不声明\"的 D12 规则。代价是会走进 `noHttpSurface` 分支,连带两个语义变化:\n\n1. 一个**真实**的 service-cache(不带 marker)会从 `available` 变成 `degraded`。是否可接受取决于 `available` 在这里到底是什么意思 —— realtime 的先例说\"没有 HTTP 面就不能说 available\",但 cache 压根不是 HTTP 能力,消费者不会去调它;\n2. message 会变成 `'In-process service only — no HTTP surface is mounted'`,对一个跨进程的 Redis cache **不准确**(这句话的主语本来是 realtime)。要么接受,要么把这句 message 按槽位拆开。\n\n**B. 把三者纳入 `advertisedRoute` 的抑制条件(`handlerReady === false` ⇒ 不声明 route)**\n\n更保守:只抑制自报无 handler 的实现,真实插件的 `status`/`message` 一律不变。理由与 `file-storage` 留在 `DISPATCHER_GATED_SERVICES` 里完全同构(注释:\"对该槽位 `handlerReady` 不是代理,它就是事实本身\")。代价是集合名不再准确(不全是 dispatcher-gated,得改名),且一个不自报的假实现仍会拿到假 route。\n\n倾向 A —— 它修的是根因(这条路由本就不该存在),B 只是让当前占槽者不触发。但 A 的第 1 条是对外可见的语义变化,值得先定。\n\n## 关联\n\n#3898、#4089(#4114)、#4130(#4141)、#3891、ADR-0076 D12、#2462。\n\n<sub>核对于 `origin/main` @ 366105c3f。</sub>"
+}

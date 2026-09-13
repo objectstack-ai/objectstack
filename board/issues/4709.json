@@ -1,0 +1,35 @@
+{
+  "number": 4709,
+  "kind": "issue",
+  "title": "`app.homePageId` 退役的前提写错了 —— objectui 的 `resolveLandingRoute()` 一直在读它，现在成了永远走不到的死分支",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T20:10:53Z",
+  "updated_at": "2026-08-03T11:01:55Z",
+  "closed_at": "2026-08-03T11:01:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4709",
+  "body": "发现于 cloud 的 pin bump（objectstack-ai/cloud#1017，`462b713a` → `16fc124a`）对 #4667 逐条对账的时候。**不影响 cloud 的行为**（下面有核算），但 #4667 的裁决依据本身不成立，且留下了跨仓的死代码，所以单独记一条。\n\n## #4667 的前提\n\n`packages/spec/src/ui/app.zod.ts` 的墓碑文案：\n\n```\n`app.homePageId` was removed in @objectstack/spec 17.0.0 (#4667, ADR-0049) — no shell\never read it. An app's landing page IS its first navigation item (by `order`) ...\n```\n\ncommit `7d215814` 的正文同样以「其 describe() 自己的对冲措辞（\"if not set, usually defaults to the first navigation item\"）描述的就是唯一存在的行为」为由，把它归进 `authorWarn` 死键。\n\n## 但 objectui 读它\n\n`objectstack-ai/objectui@a8ad6c0f`，`packages/app-shell/src/console/AppContent.tsx`：\n\n```\nfunction resolveLandingRoute(activeApp: any, ctx?: NavTemplateContext): string {\n  const homePageId: string | undefined = activeApp?.homePageId;\n  const navigation = activeApp?.navigation || [];\n  if (homePageId) {\n    const item = findNavItemById(navigation, homePageId);\n    const route = buildItemRoute(item, ctx);\n    if (route) return route;\n  }\n  return findFirstRoute(navigation, ctx);\n}\n```\n\n挂在 `apps/:appName` 的 `path=\"/\"` 上。它自带的 docblock 把「不是第一项」这件事说得很明确：\n\n```\nHonors the app's explicit `homePageId` (Salesforce-style \"Default Landing\"); falls back\nto the first reachable nav item only when no homePageId is set ... This is what lets the\nCRM example open on the Sales Dashboard instead of the Lead list.\n```\n\n`findFirstRoute` 会跳过 `type: 'url'` / `separator` / `action`，但在**导航项之间**它就是「第一项」。所以：\n\n- 「no shell ever read it」是**错的** —— console 读，而且是唯一决定 app 内落地页的地方；\n- 「landing page IS its first navigation item」在**没有** `homePageId` 时成立，有的时候不成立，这正是这个键存在的意义。\n\n（`RootLandingRedirect` 那一层确实只看 `isDefault`，墓碑文案的后半句没问题；出问题的是前半句和 app **内部**这一层。）\n\n## 现在的实际状态\n\nspec 17 起 `homePageId` 是 `retiredKey()`：编译期 `never`、解析期抛错。于是\n\n1. 任何 app 都**无法再声明**「落地到非第一项」；`findFirstRoute` 成为唯一行为。\n2. objectui 里那段 `if (homePageId)` 连同 `findNavItemById` 变成**永远进不去的死分支**——ADR-0078 要清的那一类，只是这次是渲染器侧。\n3. docblock 里承诺的「CRM example 落在 Sales Dashboard 而不是 Lead 列表」这条能力，没有替代写法。\n\n## cloud 侧的核算（说明危害面，不是说没事）\n\ncloud 唯一的 `homePageId` 是 `CLOUD_APP.homePageId: 'nav_home'`，而 `nav_home` 本来就是 `navigation` 的第一项、第二项是 `type: 'url'` 的 Open Production 快捷方式（会被 `findFirstRoute` 跳过），所以删掉键之后 `findFirstRoute` 解析到同一个 `page/welcome`，行为不变。cloud#1017 已按这个核算删掉并写了注释。**换一个把落地页指向靠后导航项的 app，同一个删除就是静默的行为变更。**\n\n## 要决定的事（不猜，交给维护者）\n\n两条路，代价不同：\n\n- **A. 承认前提写错，撤回这一条退役**：`homePageId` 恢复为 authorable key，并把 objectui 的 `resolveLandingRoute` 记进 liveness ledger 的 enforced 一侧（ADR-0049 「有实现就 enforce」）。代价：#4667 的 baseline / 墓碑 / conversion 要回退一部分，`authorable-surface.json` 与 `app-dead-authoring-keys-removed` 的条目要拆。\n- **B. 维持退役，把 objectui 一起清干净**：删掉 `resolveLandingRoute` 的 `homePageId` 分支与 `findNavItemById`，并**明确记录**「落地页只能靠导航顺序表达」这条产品约束（含 CRM 示例那句 docblock 要改）。代价：真的失去一个能力，且 objectui 需要同步一次。\n\n倾向 **B**，理由是：这个键的语义与「导航顺序」重复表达同一件事，两个来源本身就是 #4411 那类陷阱的温床，而「把想先看到的放前面」是作者可以直接做到的；但 A/B 的分歧是**产品能力取舍**，不该由适配 pin 的人替维护者决定。无论选哪条，`app.zod.ts` 里「no shell ever read it」这句都要改——它现在会让下一个读者据此做错判断（本次就是先信了这句、再去核渲染器才发现不对）。\n\n## 关联\n\n- #4667 / commit `7d215814`（退役）\n- objectstack-ai/cloud#1017（pin bump，发现地；已按核算删除 cloud 侧唯一一处）\n- ADR-0049 enforce-or-remove、ADR-0078\n"
+}

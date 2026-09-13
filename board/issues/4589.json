@@ -1,0 +1,35 @@
+{
+  "number": 4589,
+  "kind": "pull_request",
+  "title": "ci: 第二个声明 Fixes 同一 issue 的 open PR 开出即挂红 —— #4555/#4559 重复开发的三重堵漏 (#4588)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T09:13:56Z",
+  "updated_at": "2026-08-02T09:31:55Z",
+  "closed_at": "2026-08-02T09:31:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-02T09:31:53Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4589",
+  "body": "Fixes #4588\n\n## 背景\n\n今天上午 #4551 被两个会话完整实现了两遍（#4555 与 #4559，834 行重复劳动、全套门禁各跑一轮）。重复从第二个 PR 开出那一刻（03:08）起就是机器可判定的——两个 open PR 同时声明了针对 #4551 的关闭关键字——却直到 08:52 才被人工发现。共享 GitHub 身份让 issue 的 assignee 起不到警示作用：\"assigned to os-zhuang\" 无论认领者是不是你，读起来一模一样。\n\n三个洞，三个对应的堵法，合在本 PR：\n\n## A. `Duplicate Fix Guard` 工作流（新增，挂红的那道闸）\n\nPR opened / edited / reopened / synchronize 时解析正文的**同仓库**关闭关键字（裸 `#N` 与限定 `objectstack-ai/objectstack#N`；跨仓库引用是 cross-repo-issue-closer 的领域，不归它管），逐一比对其它 open PR（**含 draft**——draft 恰恰是第二个会话最需要看见的在途工作）：\n\n- 存在**更早**（编号更小）的 open PR 声明同一 issue → 本 PR `setFailed`，点名对方（链接 + 分支名）。\n- 更**晚**的冲突方只记 info——它会在自己的运行里挂红。**先到先得**，与 pm-dispatch「首条认领评论获胜」的既有约定同向；两边都挂红会冤枉原作者，挂红更早那个则是奖励抢跑。\n- 失败信息里写明出路：重复方关闭时把独有产出转移走（#4559 关闭时抢救出 #4560 正是这个动作），或先关掉被弃的早方——检查在 `edited`/`synchronize` 上重跑，冲突消失即转绿。\n- 代码格式内的关键字**不算声明**：匹配前剥掉围栏代码块与行内反引号——GitHub 自己的关闭关键字解析器就忽略代码格式，闸门不能比它保护的链接器更严（这一条是首次真实运行发现后补的，见下）。\n\n## B. 认领评论必须带会话 ID（pm-dispatch 模板 + AGENTS.md + CLAUDE.md）\n\n共享身份下,「这条认领是不是我发的」只有评论里的会话 ID 能回答。模板新增一行 `会话:session_<id>`，race check 的判负条件同步改为「更早且**会话 ID 或分支名**不同」。AGENTS.md 与 CLAUDE.md 的认领规则补上同一条：认领 = assign **加**带会话 ID 的评论，动码前必须重读评论区。这一改动同时覆盖此前另一次同根因事故（agent 把共享身份的 `draft: false` 误读为自己写入失败，反手撤销了维护者的手动操作）。\n\n## C. 分支名统一 `claude/issue-<n>-<slug>`（AGENTS.md 分支纪律）\n\nissue 号进分支名，`git ls-remote --heads origin | grep issue-<n>` 就是一条命令的预检。#4555（`claude/issue-4551-…`）与 #4559（`claude/dangling-reference-sweep`）互相不可见，一半原因就是后者没带 issue 号。工作流对「声明了 Fixes 但分支名不含任何被声明 issue 号」的 PR 给 **warning，不挂红**——存量分支不应被追溯打红。\n\n## 验证\n\n| 项 | 状态 |\n|:---|:---|\n| YAML 解析 | ✅ |\n| 脚本语法 —— **完整注入标识符集**包装（`github, context, core, exec, glob, io, fetch, require, octokit, __original_require__`），#4573 的教训 | ✅ |\n| 关键字正则 16 组样本：冒号形、`prefixes #99` 不误报、跨仓库排除、大小写、多引用、代码格式剥离 | ✅ 16/16 |\n| 分页（>100 open PRs）用 `github.paginate` | ✅（代码路径，未实测大仓） |\n| **端到端真实运行** | ✅ **已在本 PR 上跑过并通过** —— `pull_request`（不同于 `pull_request_target`）从 merge ref 读工作流定义，所以新增的闸在自己的 PR 上就会跑。初版 PR 正文断言「合并前不会跑本文件」，**是错的**，已由第一次运行本身证伪。 |\n\n**首次真实运行立刻暴露了一个真缺陷**：日志记下 `This PR declares: #4588, #4551`——正文里**用反引号讨论**事故的那句 `Fixes #4551` 被当成了声明。当时无害（#4551 已关闭、无其它 open PR 声明它），但若某个 open PR 真在修被讨论的 issue，这就是一次冤枉的挂红。第二个 commit 修复：匹配前剥离代码格式，与 GitHub 自身解析行为对齐。修复后的运行应记 `This PR declares: #4588`——这是可核验的预期，请以该次 Actions 日志为准。\n\nchangeset：`.changeset/duplicate-fix-guard.md`（空 frontmatter，release-nothing）。未触碰 `content/docs/releases/`。\n\n## 边界\n\n- **只管同仓库重复。** 跨仓库的重复实现（若有）无法靠单侧 CI 挂红解决，不在范围。\n- **不改 objectui。** 该仓库的 AGENTS.md/认领约定是独立文件；等本 PR 的形状被真实运行验证过再镜像过去，避免把未经运行的工作流一次铺到两个仓库（cross-repo closer 就是这么放大故障面的）。\n- pm-dispatch SKILL.md 的措辞改动不改变循环的结构，只改认领评论模板与判负条件。"
+}

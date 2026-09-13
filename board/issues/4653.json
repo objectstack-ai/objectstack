@@ -1,0 +1,34 @@
+{
+  "number": 4653,
+  "kind": "issue",
+  "title": "spec 双源清账 C5:ActivationEventSchema(./kernel ≠ ./studio)—— 1 条",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "protocol:breaking"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T14:09:51Z",
+  "updated_at": "2026-08-02T16:24:08Z",
+  "closed_at": "2026-08-02T16:24:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4653",
+  "body": "#4535 的 C5 簇,v17 窗口第一簇。基线行:\n\n```\nActivationEventSchema — [./kernel (const)] ≠ [./studio (const)]\n```\n\n## 已知事实(立单时核过,开工请复核)\n\n两侧都被父 schema 嵌入,**都是作者真写的位置**:\n\n| 侧 | 嵌入点 | 可作者化 key |\n|:--|:--|:--|\n| `./kernel` | `kernel/plugin-runtime.zod.ts:112` — `activationEvents: z.array(ActivationEventSchema).optional()` | 2 |\n| `./studio` | `studio/plugin.zod.ts:358` — `activationEvents: z.array(ActivationEventSchema).default(['*'])` | 0 |\n\n两处都叫 `activationEvents`、都在 plugin 形状上 —— **高度疑似同一概念的两份声明**,但 `default(['*'])` 与 `.optional()` 的差异说明至少有一侧的语义被改过。这正是 #4411 陷阱的典型形态:插件作者写同一个 key,拿到哪套校验取决于他的 plugin 元数据被哪个 schema 解析。\n\n## ⚠️ 本簇起适用新纪律(#4535「v17 重切」§1–§3,开工前必读)\n\n1. **默认路线是收敛 + re-export(手册路线二),不是 C1–C4 的死删。** 两侧都活、都在作者面 ⇒ 收敛不删任何可作者化 key ⇒ 不需要 tombstone。只有确认必须丢键时,才对被丢的键走 ADR-0087(`retiredKey()` + D2 conversion + D3 chain step + major changeset)。\n2. **⛔ 禁止手编 `packages/spec/authorable-surface.json` 绕过 vanish 检查。** 删基线行就是删证据,门禁不会拦(见 #4650)。C3/C4 用过这条捷径,本簇起不再允许 —— 若你的方案导致某个可作者化 key 消失,必须走 tombstone,不许改基线。\n3. **改名不省事。** key 记作 `${defKey}:${name}`,改名 ⇒ 旧 `defKey` 下所有 key 集体 vanish ⇒ `gen:schema` 直接红(检查 (a) 在 `--check` 之外)。若判定为「两个概念该改名一侧」,studio 侧 0 可作者化 key 是便宜的那侧,kernel 侧的 2 个 key 要付 tombstone。\n\n## 验收\n\n- `packages/spec/dual-source-exports.baseline.json` 删掉上面那 1 行,**22 → 21**,只减不增。\n- 全绿:`build`、`check:dual-source-exports`、`check:generated`(8 项含 `check:authorable-surface`)、`test`,以及源码审计组 `check:liveness` / `check:strictness-ledger` / `check:empty-state` / `check:variant-docs` / `check:exported-any` / `check:skill-examples`。\n- 删 zod 形状则同步 `docs/audits/2026-07-unknown-key-strictness-ledger.md`(C3 教训)。\n- `.changeset/*.md` 一份,`@objectstack/spec` major,含 FROM → TO。\n- ⛔ **不要**碰 `content/docs/releases/`。\n\n关联:#4535(主单 + 完整手册)、#4650(基线手编漏洞)、#4411(先例)、ADR-0049、ADR-0087、ADR-0104"
+}

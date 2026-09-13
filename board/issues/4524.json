@@ -1,0 +1,30 @@
+{
+  "number": 4524,
+  "kind": "issue",
+  "title": "spec 是否应建模 `DecisionOutputDef.required`?服务端今天已在强制它,而 spec 未声明",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T16:19:18Z",
+  "updated_at": "2026-08-02T01:07:41Z",
+  "closed_at": "2026-08-02T01:07:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4524",
+  "body": "objectui 台账燃尽批次 3(objectui#3169 / #4115)对读 `DecisionOutputDef` 时发现。\n\n## 现状\n\nobjectui 的 `DecisionOutputDef` 现已从 spec 结构性派生,但**多带一个 `required` 键**——因为**服务端今天就在强制这个约束**,而 spec 没有建模它。这条分歧在 objectui 侧是钉住的、有书面理由的,但它指向的是 spec 侧的一个缺口。\n\n## 这属于\"declared ≠ enforced\"的镜像\n\n#4115 那一整条线索讲的是\"声明了却不强制\"。这一条是反过来的:**强制了却没声明**。后果同样具体——任何按 spec 读写 decision 输出定义的客户端,都不知道有这条约束存在,直到服务端拒绝它。\n\n## 需要决定的\n\n1. `required` 是不是 decision 输出定义的**规范**语义?如果是,spec 应当建模它,objectui 侧那条分歧随之消失(可以从\"钉住的有意分歧\"降级为普通派生)。\n2. 如果不是——即服务端的强制本身是过度的——那该修的是服务端,objectui 的 `required` 也应移除。\n\n无论哪个方向,现在的状态都不该维持:三方(spec / 服务端 / objectui)对同一个字段有三种理解。"
+}

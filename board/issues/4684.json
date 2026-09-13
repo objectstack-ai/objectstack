@@ -1,0 +1,34 @@
+{
+  "number": 4684,
+  "kind": "issue",
+  "title": "spec 双源清账 C9:RateLimitConfig / RateLimitConfigSchema(./integration ≠ ./shared)—— 2 条",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "protocol:breaking"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T16:52:21Z",
+  "updated_at": "2026-08-02T19:17:33Z",
+  "closed_at": "2026-08-02T19:17:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4684",
+  "body": "#4535 的 C9 簇,**v17 收口三簇之一**。基线行:\n\n```\nRateLimitConfig       — [./integration (type)]  ≠ [./shared (type)]\nRateLimitConfigSchema — [./integration (const)] ≠ [./shared (const)]\n```\n\n基线现为 **19 条**,本簇目标 **19 → 17**。\n\n## 本簇在作者面上 —— tombstone 风险是真的\n\n静态引用图确认 `RateLimitConfigSchema` **从 `BUILTIN_METADATA_TYPE_SCHEMAS` 可达**。已知嵌入点(开工请自行复核):\n\n| 侧 | 嵌入点 | 可作者化 key |\n|:--|:--|:--|\n| `./shared` | `shared/http.zod.ts:144` 声明;`api/endpoint.zod.ts:47` 与 `api/registry.zod.ts:379` 的 `rateLimit:` | 3 |\n| `./integration` | `integration/connector.zod.ts:336` 声明 | 6 |\n\n**任何可作者化 key 消失都会真的静默剥离作者写的值**(schema 非 `.strict()`,Zod 直接吞)。\n\n**C8 是最接近的先例**(`RetryPolicy`,同样两侧都活、都可达):它把单一声明放进 `shared/retry-policy.zod.ts`、由两个入口 re-export,利用「发布的 def key 由**入口命名空间**决定」这一点,让两个 def key 都存活且 key 集相同 —— 因此只付了 1 个 key 的代价而不是 8 个。**本簇很可能适用同一手法**(注意 `./shared` 侧的声明已经在 `shared/http.zod.ts`,情况可能更简单)。\n\n## 纪律(#4535 §1–§4 + 手册 6/7/8,开工前必读)\n\n1. **默认路线:收敛 + re-export,优先选让两侧 key 并集存活的方向。** 不删 key 就不需要 tombstone。若两侧存在「同一概念两种拼法」(C8 的 `retryDelayMs` vs `backoffMs`),并集保全**不可行** —— 同时声明两者是 alias 反模式,必须选一个并对被丢的键走完整 ADR-0087。\n2. **⛔ 禁止手编 `packages/spec/authorable-surface.json`**(#4650)。`gen:schema` 只允许因**新增** key 而重写它。\n3. **⚠️ 门禁绿 ≠ 登记正确(#4659)**:检查 (b) 按 **leaf name** 匹配 conversion surface,无关 conversion 也能满足。**自己枚举 `ALL_CONVERSIONS` 的 clause,确认以你 retire 的那个叶名结尾的全仓只有 1 条且就是你的**(C8 的做法)。\n4. **⚠️ 默认值 / 约束的变更不被任何门禁记录(#4666)。** 若收敛导致某个 `.default()` 或 `.min()/.max()` 改变,**必须**用手写运行时测试钉住,并在 changeset 里显式写明;若存量文档会因此改变行为,用 conversion **显式物化**旧值(C8 的做法:把 pre-17 默认值写进每个省略了它的存量文档,已部署栈行为不变)。\n5. **回归 pin 用运行时模块命名空间断言**(#4642 已证编译期 pin 空转),**必须 sabotage 验证**并贴输出。\n6. **判不出来就升级,不要猜**(#4653 / #4658 / #4661 先例)。分析本身就是交付物。\n7. **⚠️ 生成物冲突只能靠重新生成**(手册第 7 条,2026-08-02 实测教训)。main 在 v17 收尾期前进很快,你跑完门禁大概率已落后。**推之前重新 `git fetch origin main` 判一次**;要合并时:字符串数组可集合合并,**`spec-changes.json` 是对象数组,必须跑 `gen:spec-changes`**(集合合并会丢条目,已把 CI 打红过)。`pnpm install --filter @objectstack/spec...` 走缓存约 2.5 秒,生成器秒级。**解完冲突务必本地跑对应 `check:*` 再推。**\n8. ⛔ **不要碰 `content/docs/releases/`**。\n\n## 验收\n\n- 基线删掉上面 2 行,**19 → 17**,只减不增。\n- 全绿:`build`、`check:dual-source-exports`、`check:generated`、`test`,加源码审计组(`check:liveness` / `check:strictness-ledger` / `check:empty-state` / `check:variant-docs` / `check:exported-any` / `check:skill-examples`),以及全仓 `pnpm typecheck`。\n- 删 zod 形状则同步 `docs/audits/2026-07-unknown-key-strictness-ledger.md`。\n- changeset 一份,`@objectstack/spec` major,含 FROM → TO 与迁移指引。\n- 注意 spec 现为 `17.0.0-rc.1`、pre-mode 仍开;major 通道在 `changeset pre exit` 关闭。\n\n关联:#4535(主单)、#4661 / PR #4670(最接近的先例)、#4650 / #4659 / #4666(门禁洞)、#4642(pin 空转)、#4675(生成物冲突)、ADR-0049、ADR-0087、ADR-0104"
+}

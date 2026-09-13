@@ -1,0 +1,35 @@
+{
+  "number": 4525,
+  "kind": "issue",
+  "title": "spec 是否该建模 `DecisionOutputDef.required`？服务端今天就在强制它，而 spec 未声明",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T16:20:02Z",
+  "updated_at": "2026-08-02T03:39:07Z",
+  "closed_at": "2026-08-02T03:39:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4525",
+  "body": "objectui 台账燃尽批次 3(objectui#3169 / #4115)派生 `DecisionOutputDef` 时暴露的差异,记录在此待拍板。\n\n## 现状\n\nobjectui 的 `DecisionOutputDef` 在 spec 形状基础上**多一个 `required` 键**。派生时保留了这处分歧并钉住,因为它不是手抄漂移——**服务端今天就在强制这个约束**,只是 spec 没有建模它。\n\n于是形成一个典型的\"声明 ≠ 强制\"的反向缺口:约束真实存在且被执行,却不在契约里。后果是任何只读 spec 的消费者(包括 agent)都不会知道这个字段是必需的,直到运行时被服务端拒绝。\n\n## 需要决定的\n\n1. **spec 建模它** —— 若 `required` 是决策输出的固有语义,应当进 spec,objectui 侧的分歧随即消失、可以纯派生。\n2. **服务端停止强制** —— 若这个约束本不该存在,那要改的是服务端。\n3. **确认为实现层扩展** —— 若它只对某类部署有意义,那 objectui 侧应保留并按 #4115 的规矩写明理由(已经这么做了),spec 不动。\n\n## 相关\n\n这与 #4171 是相反方向的同类问题:#4171 是 spec 声明了但类型被擦除(声明存在、类型信息丢失),这一条是约束被执行但从未声明。两者都会让\"读 spec 就能知道契约\"这个前提失效。"
+}

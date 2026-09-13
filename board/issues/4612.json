@@ -1,0 +1,32 @@
+{
+  "number": 4612,
+  "kind": "issue",
+  "title": "No plugin-reachable transactional write primitive — every migration-class tool rebuilds journal + compensation",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T10:44:23Z",
+  "updated_at": "2026-08-02T12:22:19Z",
+  "closed_at": "2026-08-02T12:22:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4612",
+  "body": "Found while scoping the D13 promotion tool (cloud#874). Not a blocker for any single tool — the point is that **four migration-class consumers are now queued behind the same missing primitive**, and each is being forced into the same hand-rolled shape.\n\n## Current state\n\n- The data-engine contract declares an **optional** `batch?(requests, { transaction?: boolean })` (`packages/spec/src/contracts/data-engine.ts:70-91`) — no engine implementation, no callers.\n- driver-turso has real primitives (`beginTransaction` / `commit` / `rollback`, `turso-driver.ts:764-776`; `remote-transport.ts:430-443`) — not surfaced through ObjectQL.\n- Plugin-visible multi-row mutation is therefore a JS loop of single-row writes (or `multi: true` predicate updates). A failure mid-sequence strands partial state; a process crash (as opposed to a thrown error) defeats in-process compensation entirely.\n\n## The queued consumers\n\n| Tool | Status | Tables touched |\n|---|---|---|\n| ADR-0105 D13 BU-subtree → org promotion (分立) | in design, cloud | `sys_organization`, `sys_business_unit(_member)`, `sys_member`, `sys_user_position`, N business objects |\n| ADR-0117 D8 ownership backfill | Proposed | every object gaining `owning_business_unit_id` |\n| ADR-0110 org lifecycle hooks（新设/分立/合并） | Proposed | memberships, grants, master data |\n| D10 master-data distribution (#4585) | blocked on its ADR | distribution/mirror rows per policy |\n\nEach independently converges on: dry-run preflight → undo journal → LIFO compensation → re-entrant forward recovery (precedent: cloud `organization-lifecycle.ts` slug rename). One copy of that machinery is an engineering answer; four copies is a platform debt signal.\n\n## Decision needed (one of three)\n\n1. **Surface driver transactions through the engine.** The honest cost: middleware/hook semantics inside a transaction (do post-hooks fire before commit?), cache invalidation on rollback, cross-driver support — a real design project, not a plumbing task.\n2. **Bless a shared migration-journal primitive** — a framework-owned journal + compensation/resume runner that migration tools consume, standardizing the pattern instead of transactionalizing the engine.\n3. **Explicitly rule both out** and document journal+compensation as the blessed pattern — then at least extract the shared helper so the four consumers stop hand-rolling it.\n\nNo urgency ranking implied between 1 and 2; what needs deciding is *which* debt we are choosing. D13 proceeds on the hand-rolled pattern regardless and simplifies later if 1/2 lands.\n\nRefs: #4346 (the `multi: true` no-predicate footgun — evidence this write path is sharp), ADR-0110, ADR-0117, cloud#874, cloud#1006."
+}

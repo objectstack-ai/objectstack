@@ -1,0 +1,37 @@
+{
+  "number": 4416,
+  "kind": "pull_request",
+  "title": "fix(batch,drivers): 分页确定性的两个后续 —— 把「有 gate」变成真的，把批处理翻页改成 keyset (#4363)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T12:57:03Z",
+  "updated_at": "2026-07-31T13:15:30Z",
+  "closed_at": "2026-07-31T13:15:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T13:15:29Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4416",
+  "body": "#4378(#4363)的两个后续。**两个 commit 各自独立、可分开 review 也可分开 revert**，放在一起只是因为本任务只有一条分支。\n\n- `bfaa13a` — driver conformance gate（+ 它当场找到的 wasm 分页缺口）\n- `106a300` — 批处理翻页改 keyset\n\n---\n\n## 一、`bfaa13a`：那句「held to by a gate」以前是假的\n\n`packages/spec/src/data/*-conformance.ts` 里的共享用例集存在的理由，是让各自独立实现的 driver 回答**同一个**标准：filter 组合子语义（#3774）、temporal 存储形态（ADR-0053）、分页确定性（objectui#3106 / #4363）。三份 changeset 各自都写了某种版本的「a future driver is held to this **by a gate** rather than by remembering it」。\n\n**没有这个 gate。** 用例集只是躺在包里的导出，没有任何东西逼一个 driver 去 import 它。在 `main` 上实测，矩阵有三个洞 —— 其中一个就在那句话所属的用例集里：\n\n```\n  driver              FILTER_LOGIC  TEMPORAL  TEMPORAL_TIME  PAGINATION  PAGINATION_UNORDERED\n  driver-memory       ok            ok        ok             ok          ok\n  driver-mongodb      MISSING       ok        ok             ok          ok\n  driver-sql          ok            ok        ok             ok          ok\n  driver-sqlite-wasm  MISSING       ok        ok             MISSING     MISSING\n```\n\n这是 Prime Directive #10 的 declared ≠ enforced 形态，所以修法是**把 gate 做出来**，而不是发一条更正把那句话删掉。\n\n### `scripts/check-driver-conformance.mjs`\n\n三条不变量：\n\n| | |\n|:---|:---|\n| **CONSUMED** | 每个 (driver × 用例集) 格子要么被覆盖 —— 包 `src/` 下有文件 **import 且真的用了**该用例集的 marker 导出 —— 要么带一条量过的 DEBT/EXEMPT 台账条目 |\n| **CLASSIFIED** | `spec/src/data/*-conformance.ts` 导出的每个用例集都必须在需求表里有名字。新加的共享 fixture 没人分类就**挂**，而不是悄悄掉出覆盖（#4203 那条教训，用在真正会烂的那个方向）。它第一次跑就抓到了没分类的 `TEMPORAL_TIME_CASES` |\n| **RECONCILED** | 双向：台账条目指向一个已经被覆盖的格子、或一个不存在的 driver / 用例集，都是错误 |\n\n两条轴都**从磁盘发现**，不写死列表 —— 新 driver 包一存在就在范围内。「覆盖」要求 marker 在自己的 import 之外被引用过：没用到的 import 不算覆盖，本地重新声明一份同名 fixture 也不算共享标准。`--self-test` 把这三种区分和两条发现都跑一遍。\n\n**范围是刻意划的**：只管 `packages/plugins/driver-*`。`packages/formula` 和 service-analytics 也消费同一批用例集，但它们不是 driver、实现的是不同子集，把它们收进来就得逐个回答「哪些用例集对你适用」——那是这个 gate 只能猜的问题。写在脚本头注里了。\n\n### 顺手补上它找到的一个洞\n\n`driver-sqlite-wasm` 拿到分页 conformance 套件（17 个用例）。它继承 `SqlDriver` 的 ORDER BY 构造，所以什么都没重新实现 —— 套件钉的是**那条子句能不能活过另一个引擎**：这个 driver 把 knex 的传输层换成了自定义 sql.js 方言，语句的编译、执行、每一行的 marshal 都走它自己的路径，一个把末尾 `ORDER BY id` 重排或丢掉的方言会在别处任何套件里都不报错。这和隔壁 temporal 套件存在的理由是同一个。\n\n### 两个 filter-logic 洞记账而不是就地修\n\n进 DEBT 台账，理由每次运行都打印出来，跟踪在 **#4405**。mongodb 那条是实质性的：`translateFilter` 是一个独立的 FilterCondition backend —— 第五个，也是 #3774 数「四个」时没数进去的那个。\n\n---\n\n## 二、`106a300`：批处理翻页改 keyset\n\n#4363 让**一次**分页读取成为结果集的划分。它没法让一次**遍历**成为划分：七处后台扫描一边用递增 `offset` 翻页，一边写它正在读的那些行 —— 而 offset 是往一个正被自己的写改变的集合里数数。行从游标底下滑过去，永远不会被访问。\n\n这在每一处都不是「慢一页」，而是**穿着干净外衣的错误答案**：\n\n| 位置 | 后果 |\n|:---|:---|\n| `rebuildApproverIndex` | 走 `sys_approval_request WHERE status='pending'`，**完全没有 orderBy**，然后按这份「期望状态」**删除**解释不了的索引行。漏一个请求 = 某人的待办审批被静默删掉。（紧挨着的第二个循环按 `created_at` 排 —— 不唯一，所以它的页也从来不是划分。） |\n| `verifyFileReferences` | 判定哪些文件已无引用。没访问到的记录会被报成「无引用文件」 |\n| `backfillFileReferences` / 拼音 companion 回填 | 重写它们读到的每一行，自己的写把集合从游标底下挪走 —— 记录没被转换、搜不到，而这一趟报告成功 |\n| `scanValueShapes` | 用来担保没有存储值是坏形态的，并据此打开一个迁移 gate |\n\n全部改走 `keysetWalk`（`@objectstack/types`）：按唯一键排序，seek 过上一个键而不是从头数。行被更新时键不动，别的行被删时键也不会被挪，所以遍历对这些函数**正在做的那种改动**是稳定的。顺带从 O(n²/page) 变成 O(n) —— Postgres 2M 行实测，深页 offset ~1.1 s、seek ~0.09 s。\n\n三个细节由 helper 独占，免得六份拷贝各自漂移：\n\n1. 游标用 `$and` 合并而不是展开进调用方的 filter —— 调用方自己的 `where` 如果也约束了键列（`{ id: { $in: [...] } }`），不会被游标静默覆盖掉。\n2. 有 `max` 上限时多读一行，用来区分「是上限拦住的」和「数据刚好在这里没了」。没有这一行，读完了整张表的遍历照样报 `truncated`，而据此行动的调用方会去找从来没被扣下的行。\n3. **游标没前进就停**，不再自旋。一个丢掉 seek 的 reader 否则会挂死 —— 而挂死是唯一一种没人能从日志里读出来的失败。这一条是被一个正好这么干的 test double 逼出来的（写这个 PR 时真的挂了一次）。\n\n**一处刻意不改**：REST 的导出流保留 offset。它要尊重调用方选的排序，而 keyset 就得把导出重排成 `id` 序 —— 为了省成本去改用户要的东西。它的页自 #4363 起本来就是划分了，剩下的只是深度成本。\n\nstorage 和 pinyin 的 fake engine 现在遇到 `offset` **直接抛**而不是照做，所以这次转换是被钉住的，不是碰巧过。\n\n---\n\n## 验证\n\n合并 `main`（到 `302e972`）后 `pnpm install --frozen-lockfile` + 全量 `pnpm build` + 清 `.objectstack/`，全部重跑：\n\n| | |\n|:---|:---|\n| 全仓 `pnpm test` | **132 / 132 tasks successful** |\n| `@objectstack/types` | 12 个新用例（keysetWalk），包内 71 passed |\n| `driver-sqlite-wasm` | 17 个新用例（分页 conformance），包内全绿 |\n| `objectql` / `plugin-approvals` / `service-storage` / `plugin-pinyin-search` | 1488 / 330 / 252 / 14 passed |\n| `pnpm check:driver-conformance` | OK — 18 covered / 2 DEBT / 0 exempt；`--self-test` 通过 |\n| `check:type-check-coverage` / `check:doc-authoring` / `check:role-word` / `check:nul-bytes` | 全绿 |\n| `typecheck`（types）+ 改动文件 eslint | clean |\n\ngate 的三条不变量都做过**变异验证**（拆了会红，不是跑绿了）：删掉 wasm 的分页套件 → 报 CONSUMED（2 条）；把台账条目指到一个已覆盖的格子 → 报 RECONCILED；`TEMPORAL_TIME_CASES` 没分类 → 报 CLASSIFIED（这条是真实发生的，不是构造的）。\n\n`service-storage` 的 `tsc --noEmit` 错误数改动前后都是 42，没有新增（该包在覆盖率台账里，这些是冻结债务）。\n\n## 关联\n\n- #4363 / #4378 —— 本 PR 的来源。\n- #4405 —— 本 PR 开的：两个 filter-logic 覆盖洞。\n- #4379 —— 上一趟开的：`MongoDBDriver.findOne` 忽略 `orderBy`，仍未修。\n- #3774 / ADR-0053 / objectui#3106 —— 三个共享用例集的出处，也是那句「有 gate」的三个出处。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016niiseyRn43L9M4JdAwuqD)_"
+}

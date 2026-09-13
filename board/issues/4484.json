@@ -1,0 +1,35 @@
+{
+  "number": 4484,
+  "kind": "issue",
+  "title": "IDataDriver.findStream 没有任何调用方，两个 driver 的实现还正好做了它承诺要避免的事（ADR-0049 enforce-or-remove）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "protocol:breaking"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T09:42:09Z",
+  "updated_at": "2026-08-02T14:42:48Z",
+  "closed_at": "2026-08-02T14:42:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4484",
+  "body": "**包**：`@objectstack/spec`（契约）、`driver-sql` / `driver-memory` / `driver-mongodb`（实现）\n**发现于**：核对 #4419 时（PR #4459）。当时只注意到 Mongo 少了个投影，判定「返回更多数据而非错数据」不属于该 issue 那一类，在代码里注明后留在 PR 之外。后续核查发现问题比那个大。\n**核实基线**：`main` @ `ec975f1`\n\n## 摘要\n\n`IDataDriver.findStream` 是**必填**契约方法（不是 optional），文档承诺\n「Optimized for large datasets to avoid memory overflow」。实际上：\n\n1. **全仓没有任何生产调用方。**\n2. **三个实现里有两个先把整个结果集读进内存再逐条 yield**——正是它声称要避免的事。\n3. 唯一真正流式的那个（Mongo）忽略 `query.fields`，与同文件的 `find` 分歧。\n\n这是 declared ≠ enforced（AGENTS.md PD #10）叠加 ADR-0049 enforce-or-remove，\n和 #4480 是同一族。\n\n## 契约\n\n`packages/spec/src/contracts/data-driver.ts:107-112`：\n\n```ts\n  /**\n   * Stream records matching the structured query.\n   * Optimized for large datasets to avoid memory overflow.\n   * Returns an AsyncIterable or ReadableStream.\n   */\n  findStream(object: string, query: QueryAST, options?: DriverOptions): unknown;\n```\n\n必填。所以每个 driver 都得实现，每个测试桩也都得提供一个。\n\n## 1. 没有调用方\n\n全仓 `grep findStream`，除了契约声明和三个 driver 自己的实现，**其余全部是测试桩**，\n而且多数长这样：\n\n```ts\nfindStream() { throw new Error('not implemented'); }   // engine-unknown-option.test.ts:80\nfindStream() { throw new Error('ns'); }                // engine-filter-alias.test.ts:60\nfindStream() { throw new Error('ni'); }                // engine-driver-health.test.ts:20\n```\n\n二十来个测试桩直接抛异常而从没有人注意到——只有在没人调用它时才可能是这样。\n引擎没有 `stream` 入口，REST / 导出 / 批量读路径也都不经过它。\n\n## 2. 两个实现做的正好相反\n\n**`SqlDriver.findStream`**（`packages/plugins/driver-sql/src/sql-driver.ts:1494-1504`），\n它自己的注释就承认了：\n\n```ts\n  /**\n   * Stream records matching a structured query.\n   * NOTE: Current implementation fetches all results then yields them.\n   * TODO: Use Knex .stream() for true cursor-based streaming on large datasets.\n   */\n  async *findStream(object, query, options) {\n    const results = await this.find(object, query, options);   // ← 整表进内存\n    for (const row of results) yield row;\n  }\n```\n\n**`InMemoryDriver.findStream`**（`packages/plugins/driver-memory/src/memory-driver.ts:361-368`）：同样先 `find()` 再 yield。\n\n也就是说，一个以「避免内存溢出」为存在理由的方法，在两个 driver 上会**先把可能溢出的那份数据完整读进来**。\n如果哪天真有调用方按文档承诺来用它，它会在最需要它的那个规模上失效。\n\n## 3. 唯一流式的那个丢参数\n\n**`MongoDBDriver._findStream`**（`packages/plugins/driver-mongodb/src/mongodb-driver.ts:302-323`）\n确实走游标，但：\n\n```ts\n    const findOptions: FindOptions = {\n      session,\n      projection: { _id: 0 },     // ← 恒定，忽略 query.fields\n    };\n```\n\n同文件的 `find` 走 `buildFindOptions`，会按 `query.fields` 构造投影。\n`findStream` 不走，所以 `fields` 在这条路径上被静默丢弃。\n（#4459 修 `findOne` 时把 `find`/`findOne` 统一到了 `buildFindOptions`，\n并在其 TSDoc 里显式记下 `_findStream` 没有并入——就是这一处。）\n\n## 要请的是决策，不是补丁\n\n两条路都合理，取决于这个能力还要不要：\n\n**enforce** —— 接一个真实调用方（导出、批量读是天然位置），并把三个实现补齐：\nSQL 走 `knex.stream()`、内存 driver 真正惰性产出、Mongo 并入 `buildFindOptions` 拿到 `fields` 投影。\n好处是这个方法终于有人验证；代价是要给它配契约测试，否则同样的分歧还会再长出来。\n\n**remove** —— 从 `IDataDriver` 撤掉，删三处实现和二十来个测试桩。\n按 `spec-property-retirement` 的套路走（tombstone + changeset 里的 FROM → TO）。\n如果确实没有产品需求要流式读，这条更诚实——留着一个没人调、且两处实现与文档相反的必填方法，\n只会让下一个读到它的人（或 agent）从它推理出错误的结论。\n\n我倾向 **remove**，除非有明确的大结果集读取需求在排期上。理由是 PD #10 的那句：\n一个 `case` 标签不是执行，调用点才是——这里连调用点都没有，而文档的承诺已经被两个实现反过来了。"
+}

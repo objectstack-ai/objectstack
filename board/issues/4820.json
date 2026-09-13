@@ -1,0 +1,37 @@
+{
+  "number": 4820,
+  "kind": "issue",
+  "title": "compareTo drops every measure-scoped filter, so `<measure>__compare` silently reports a different measure than the column beside it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T08:40:53Z",
+  "updated_at": "2026-08-03T11:51:21Z",
+  "closed_at": "2026-08-03T11:51:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4820",
+  "body": "Found while implementing #4708 (`packages/services/service-analytics`); filed rather than fixed there, because it is a *wrong number*, not a blank one, and deserves its own decision.\n\n## Mechanism\n\n`DatasetExecutor.executeSelection` applies a measure's own `filter` by running a **supplementary grouped sub-query** per filtered measure (`combineFilters(baseFilter, compiled.measureFilters[m])`). The `compareTo` pass does not: `runCompare` issues **one** shifted query over *all* base measures with only `baseFilter` as its `where`.\n\n```ts\nconst compareRows = await this.runCompare(\n  compiled, selection, [...baseMeasures], dimensions, baseFilter, context,\n);\n```\n\n`compiled.measureFilters` is never consulted on that path. So for a measure declared with a filter, the current-period column is scoped and the comparison column is not — two different measures rendered side by side under one label.\n\n## Reproduction\n\nDataset (`won_count` carries a measure-scoped filter):\n\n```ts\nmeasures: [\n  { name: 'revenue',   aggregate: 'sum',   field: 'amount' },\n  { name: 'won_count', aggregate: 'count', filter: { stage: 'closed_won' } },\n]\n```\n\nSelection with `compareTo: { kind: 'previousPeriod', dimension: 'close_date' }`. The three queries the executor emits, captured from the fake service:\n\n| # | measures | where |\n|---|---|---|\n| 1 | `revenue` | — |\n| 2 | `won_count` | `{\"stage\":\"closed_won\"}` |\n| 3 (shifted) | `revenue`, `won_count` | **absent** |\n\nQuery 3 is the comparison pass. `won_count__compare` is therefore a count of **every** opportunity in the previous window, not of the won ones — inflated by exactly the rows the measure exists to exclude. A \"won deals vs. last month\" tile reads as a collapse in performance when nothing changed.\n\n`revenue` (unfiltered) compares correctly, which is what makes this hard to spot: only the measures that carry a filter are wrong, and they are wrong in the direction of \"the comparison period looks better\".\n\n## Why not fixed in #4708\n\n#4708's fix is about a measure that comes back **absent** being rendered as no-data. Here the number is present and wrong, which is a different failure mode with a different remedy (issue one shifted sub-query per filtered measure, mirroring the primary path's split), and a different blast radius — it changes numbers that dashboards are showing today.\n\n## Suggested direction\n\nMirror the primary path: split the comparison pass into unfiltered-measures-in-one-query plus one shifted sub-query per filter-scoped measure, merged by dimension key with `mergeByDimensions`, exactly as `executeSelection` already does for the current period. That also keeps the `__compare` columns consistent with the empty-group fill #4708 added over them.\n\nCost: one extra query per filtered measure when `compareTo` is set. The alternative — declaring the discrepancy in the response — is not a real option, since the two columns are meant to be directly comparable.\n\nRelated: #4708.\n"
+}

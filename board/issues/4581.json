@@ -1,0 +1,35 @@
+{
+  "number": 4581,
+  "kind": "pull_request",
+  "title": "feat(spec)!: 双源 C1 收敛 — WebhookConfig / WebhookEvent 归 ./integration,./api 侧死删 + 改名 OpenApiWebhookEvent (#4572)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T08:47:37Z",
+  "updated_at": "2026-08-02T09:08:17Z",
+  "closed_at": "2026-08-02T09:08:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-02T09:08:15Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4581",
+  "body": "Fixes objectstack-ai/objectstack#4572\n\n#4535 C1:基线 35 条中的 4 条 —— `WebhookConfig(Schema)` / `WebhookEvent(Schema)` 在 `./api` 与 `./integration` 各有一份不同声明,且是**跨形态**的(`./api` 的 `WebhookEventSchema` 是 z.object,`./integration` 的是 z.enum)—— 选错 import 路径连\"形状重叠、编译通过\"的掩护都没有(#4411 陷阱)。\n\n## 判真源:三仓 import 语句级扫描\n\n按手册以 import 语句级(非名字出现次数)扫描 framework、`/workspace/cloud`、objectui(浅克隆,HEAD `022e4c3`):\n\n- **cloud:0 处引用**;**objectui:0 处 import**(仅 `app-shell/clientValidation.ts` 一行注释提及 `WebhookEventSchema`,非消费);\n- **本仓**:两侧的**唯一** importer 都是各自的单测(`rest-server.test.ts` / `connector.test.ts`)。文件内部引用:`./api` 侧 `WebhookEventSchema` 被 `OpenApi31ExtensionsSchema.webhooks` 引用;`./integration` 侧被 `ConnectorSchema.webhooks`(#3197,declared-not-enforced)引用。\n\n## 逐字段 diff(判定依据)\n\n**`WebhookEvent(Schema)` —— 两个概念,两种形态:**\n\n| | `./api` | `./integration` |\n|---|---|---|\n| 形态 | `z.object` | `z.enum` |\n| 内容 | OpenAPI 3.1 顶层 `webhooks` 的**定义描述子**:`name`(snake_case)/`description`/`method`(默认 POST)/`payloadSchema`($ref)/`headers?`/`security`(hmac_sha256\\|basic\\|bearer\\|api_key) | connector 事件**类型字符串**:`record.created/updated/deleted`、`sync.started/completed/failed`、`auth.expired`、`rate_limit.exceeded` |\n| 概念 | API 文档描述(OpenAPI 3.1 webhooks 节) | connector webhook 订阅的事件词表 |\n\n**`WebhookConfig(Schema)` —— 两个概念,且 `./api` 侧已死:**\n\n| | `./api` | `./integration` |\n|---|---|---|\n| 形状 | `{enabled=false, events: WebhookEvent[], deliveryConfig{maxRetries=3, retryIntervalMs=5000, timeoutMs=30000, signatureHeader='X-Signature-256'}, registrationEndpoint='/webhooks'}` | 规范 `WebhookSchema`(automation).extend(`events?`, `signatureAlgorithm?='hmac_sha256'`) |\n| 概念 | REST server webhook 功能配置 | connector 的 webhook 订阅配置 |\n| 消费方 | **仅自己的单测**。未接进 `RestServerConfigSchema`,也没有任何 runtime 读 REST webhook 配置 | `ConnectorSchema.webhooks`(#3197)+ 单测 |\n\n## 处置(逐名判定)\n\n1. **`./api` `WebhookConfig` / `WebhookConfigSchema` → 死侧删除**(手册路线 1,v17 major 窗口)。三仓零消费方、未接线进任何 schema、无 runtime。authorable-surface 的 4 行按 #4458/#4568 先例手工删除(插件 TS 配置类型,非可作者化 metadata 文件 —— 不适用 tombstone / D2 conversion;schema 本体已删,不存在\"父 schema 静默剥离\"路径,误用者在 import 处编译期即失败,changeset 带 FROM → TO)。\n2. **`./api` `WebhookEvent` / `WebhookEventSchema` → 改名 `OpenApiWebhookEvent(Schema)`**(手册路线 3,先例 #4539 → PR #4571)。它是 OpenAPI 3.1 webhook 描述子,归入 `./api` 现有 `OpenApi*` 家族(`OpenApiSpec` / `OpenApiServer` / `OpenApiSecurityScheme` …);`OpenApi31ExtensionsSchema.webhooks` 同步改引用,**作者可写形状零变化**(纯改名,无字段增删,消费方类型不变 —— \"收敛 ≠ 无行为变化\"逐字段核实过:此处确实无行为变化)。\n3. **`./integration` 两对保持原名不动**,成为裸名唯一属主 —— `WebhookConfig`/`WebhookEvent` 在同一域内保持成对语义(config.events: WebhookEvent[]),不再出现\"裸名拆到两个域\"的新陷阱。回归防护:编译期 pin(`typeof import` 条件类型,`tsc --noEmit` 兜底)+ `check:dual-source-exports` gate 本体(任何一侧再长回裸名即报新增双源)。\n4. json-schema.manifest:`api/WebhookConfig` 蓄意退休删行、`api/WebhookEvent` → `api/OpenApiWebhookEvent`(蓄意改名,非静默下架)。\n\n## 基线\n\n`dual-source-exports.baseline.json` 恰好删除 gate 点名的 4 行(**35 → 31**,不多删不漏删):\n\n- `WebhookConfig — [./api (type)] ≠ [./integration (type)]`\n- `WebhookConfigSchema — [./api (const)] ≠ [./integration (const)]`\n- `WebhookEvent — [./api (type)] ≠ [./integration (type)]`\n- `WebhookEventSchema — [./api (const)] ≠ [./integration (const)]`\n\n## 验证\n\n- `pnpm --filter @objectstack/spec build` ✅\n- `check:dual-source-exports` ✅(self-test 通过;4308 名字 / 16 入口,基线 **31**)\n- `check:generated` **8/8 up to date** ✅(api-surface + reference docs 经 `--fix` 定向再生,单独 commit;api-surface 净变化:−4 +2)\n- spec `typecheck` ✅;spec `test` 287 文件 / 7270 用例全过 ✅\n- 全仓 `pnpm build` 71/71 ✅、`pnpm typecheck` 122/122 ✅、`pnpm test` 132/132(spec 287 文件全过;pin 测试改为编译期后全绿) ✅\n\n## Changeset\n\n`@objectstack/spec` major:两条 FROM → TO 迁移各带一行修法(`./api` `WebhookConfig` 删除 → 指向 automation `Webhook` / integration `WebhookConfig` 并说明形状差异;`./api` `WebhookEvent` → `OpenApiWebhookEvent` 或按实际所需形状改从 `./integration` import)。不改 `content/docs/releases/`。\n\n## 范围外发现\n\n- **#4579**(unassigned):`RestServerConfig.openApi31` 整块(`OpenApi31Extensions` / `Callback` / `OpenApiWebhookEvent`)declared ≠ enforced —— `packages/rest` 的 `normalizeConfig` 不读它,`/openapi.json` 由静态 spec enrich,`gen:openapi` 也不消费;ADR-0049 enforce-or-remove 候选。本 PR 只消歧命名、不裁决该块去留。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01M9uWvoEp9CoLzYjNExj9sL\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01M9uWvoEp9CoLzYjNExj9sL)_"
+}

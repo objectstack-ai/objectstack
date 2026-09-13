@@ -1,0 +1,34 @@
+{
+  "number": 4396,
+  "kind": "issue",
+  "title": "A `script` node's function is contractually pure, but nothing enforces it — a function that writes makes its run under-report",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T10:53:16Z",
+  "updated_at": "2026-07-31T23:38:47Z",
+  "closed_at": "2026-07-31T23:38:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4396",
+  "body": "Package: `@objectstack/service-automation` (`src/builtin/screen-nodes.ts`, the `script` executor)\nFound while wiring #4354's per-run summaries into `script`.\n\n## The declared contract\n\nThe `script` executor states the rule in its own comment:\n\n> Pure-function pattern: the function RETURNS its result; `outputVariable` exposes it as a flow variable so a later declarative node persists it (e.g. `update_record fields: { ai_category: '{aiResult.ai_category}' }`). **Data I/O stays on the flow graph — the function itself does no writes.**\n\nThat is a good contract, and #4354 depends on it: because writes stay on the graph, every write a `script` causes is a downstream `create_record` / `update_record` that counts itself, so the `script` node correctly reports no record metrics at all.\n\n## What is not enforced\n\nNothing stops a registered function from writing. `FlowFunctionHandler` receives the live `variables` map, the `AutomationContext`, and a logger — and it is ordinary host code, so it can reach any service it closes over, including the data engine:\n\n```ts\ndefineStack({\n  functions: {\n    async syncBilling({ input }) {\n      await db.insert('invoice', { ... });   // nothing rejects this\n      return { ok: true };\n    },\n  },\n});\n```\n\nA flow whose only action is that function reports `selected: N, acted: 0` and looks exactly like a broken sweep — the false positive #4354 exists to avoid. Or, read the other way: a run that wrote N invoices claims it wrote nothing, and the durable `sys_automation_run` row says so permanently.\n\nThis is the AGENTS.md PD #10 shape — declared ≠ enforced — with the twist that the *declaration lives only in a code comment*. `ActionDescriptor` for `script` says `category: 'logic'` and nothing about purity, so neither an author, a lint rule, nor the runtime can see the rule the executor is relying on.\n\n## Deliberately not worked around\n\nThe tempting fix is to have `script` report `unmeasuredEffect: true` (the escape hatch #4354 added for `connector_action`). That was rejected: it would suppress the broken-sweep signal on **every flow that calls any function**, in order to accommodate a contract violation. Paying for a rule-breaker with everyone else's signal is the wrong trade, and it would fossilize the violation as supported behaviour (PD #12).\n\n## Options, roughly in order of preference\n\n1. **Declare the contract where it can be seen.** Put purity on the `script` action descriptor and in the authoring docs, so \"functions don't write\" is a rule an author reads rather than a comment an executor holds.\n2. **Let a function opt in to declaring its effect** — `defineStack({ functions: { syncBilling: { handler, writes: true } } })` — so a legitimately-writing function is *declared*, its run counts honestly, and the graph-only rule stays the default.\n3. **Enforce it**: hand the function a context with no data-engine reach. Cleanest in principle, likely the largest change, and it cannot stop a function that closed over a client at module scope.\n\n(1) is cheap and closes the \"invisible rule\" half immediately. (2) is what would let #4354 count these runs accurately.\n\nRelated: #4354 (the summaries), #4395 (the same \"the platform cannot see what this did\" problem for `connector_action`, where the declaration is missing rather than unenforced).\n"
+}

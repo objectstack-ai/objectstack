@@ -1,0 +1,37 @@
+{
+  "number": 4700,
+  "kind": "issue",
+  "title": "`@objectstack/verify` 的 bootStack 与 qa dogfood 同样用裸 import 解析 cloud 私有包 —— 与 cloud#1013 同一缺陷类",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T19:00:49Z",
+  "updated_at": "2026-08-03T10:43:23Z",
+  "closed_at": "2026-08-03T10:43:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4700",
+  "body": "发现于 cloud#1013 的实现(PR #4699)。修 `serve` 时按 PM 要求扫了一遍 framework 里「用裸 `import()` 加载 host 提供的可选包」的调用点,还剩两处同类。\n\n## 缺陷类\n\nNode ESM 对裸 specifier 按**导入方自己的 realpath** 解析。framework 里的包(CLI、verify、qa)realpath 都在 framework 工作区,而 `@objectstack/organizations` 是 **cloud 私有**包,只存在于被服务/被测的 app 的 `node_modules`。任何 framework 侧的裸 import 都解析不到它 —— 与 cloud#1013 完全同因。\n\n## 剩余两处\n\n**1. `packages/verify/src/harness.ts:270`(有实际影响)**\n\n```ts\nconst organizationsPkg = '@objectstack/organizations';\ntry {\n  mod = await import(/* webpackIgnore: true */ organizationsPkg);\n} catch (e) {\n  throw new Error('verify: multiTenant=true requires the enterprise @objectstack/organizations package …');\n}\n```\n\n`objectstack verify --multi-tenant`(以及任何 `bootStack(app, { multiTenant: true })` 调用方)在真实 host app 里必然走进 catch。症状比 serve 温和 —— 报错信息本身是诚实的、可执行的,不会伪装成「墙生效了」 —— 但结论是错的:app 明明装了包也照样说「requires … Install/link it in this workspace」。cloud 那边 `apps/ee-group-showcase` 等 dogfood 一律显式传 `extraPlugins: [new OrganizationsPlugin()]`,大概率就是被这条路挡过。\n\n**2. `packages/qa/dogfood/test/attachments-permission-matrix.dogfood.test.ts:528`(测试内的可用性探测)**\n\n```ts\nconst organizationsAvailable = await import(/* webpackIgnore: true */ '@objectstack/organizations') …\n```\n\n同样的解析基点,所以这个探测**永远**判定「不可用」,对应分支永远跳过 —— 一个恒假的能力探测,属于 Prime Directive #10 里「declared ≠ enforced」的测试版本。\n\n## 为什么没有一起修在 #4699\n\n不是「太小懒得修」,而是**修它需要先决定这个解析器住在哪**,那是跨包架构决定,不该塞进一个 bugfix PR:\n\n- 解析器现在是 `packages/cli/src/utils/import-from-host.ts`(`createHostRequire` / `createHostImporter`)。`@objectstack/verify` 和 `@objectstack/qa` **不能**从 CLI 里 import(依赖方向相反)。\n- 放进 `@objectstack/types`(现成的共享工具位,已经住着 `readEnvWithDeprecation` 这类运行时 helper)是最自然的答案,但它会把 `node:module` / `node:url` 带进一个可能被 edge / 浏览器场景消费的包 —— 需要确认该包的目标运行时,或者用 `exports` 子路径把 node-only 部分隔开。\n- 第三种是各包各抄一份 —— 一个行为两个源,AGENTS.md「No workarounds」直接排除。\n\n## 验收\n\n1. 选定共享位置(建议:`@objectstack/types` 的一个 node-only 子路径导出,例如 `@objectstack/types/node`,并在 PR 里说明为什么不是根导出),把 `createHostRequire` / `createHostImporter` 迁过去,CLI 改为消费它(#4699 的 `packages/cli/src/utils/import-from-host.ts` 变成 re-export 或删除)。\n2. `harness.ts` 改用它;`packages/verify/src/harness.posture.test.ts` 的 `vi.mock` 仍应生效(host 解析不到 → 回退裸 import → mock 命中),需实测确认。\n3. 给 `bootStack({ multiTenant: true })` 补一条「包只装在 host app 里」的解析回归 —— 形状可直接借 #4699 的 `packages/cli/test/serve-organizations-host-resolution.e2e.test.ts`(临时目录 + 真实 `node_modules` + 替身包,不 mock)。\n4. qa 那处探测:要么走同一解析器,要么改成显式声明式开关(依 Prime Directive #10,一个恒假的探测比没有探测更糟)。\n\nRefs: cloud#1013、PR #4699、ADR-0081 D2、ADR-0093 D5"
+}

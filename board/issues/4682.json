@@ -1,0 +1,34 @@
+{
+  "number": 4682,
+  "kind": "issue",
+  "title": "client-react 没有任何测试基座:8 个公开 hook 的行为全靠 typecheck 兜底",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "repo:objectstack"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T16:46:54Z",
+  "updated_at": "2026-08-02T19:21:00Z",
+  "closed_at": "2026-08-02T19:21:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4682",
+  "body": "做 #4678 时发现,按第十条军规立案,unassigned。\n\n## 现象\n\n`packages/client-react` 的 `package.json` 只有 `build` 和 `typecheck` 两个脚本,**没有 `test`**,`src/` 下也没有任何测试文件。它导出 8 个公开 hook:\n\n`useMetadataSubscription` / `useDataSubscription` / `useMetadataSubscriptionCallback` / `useDataSubscriptionCallback` / `useRealtimeConnection` / `useAutoRefresh`(以及 #4678 新增的 `useBulkDataSubscription` / `useBulkDataSubscriptionCallback`)。\n\n这些 hook 的正确性完全没有运行时验证。typecheck 只能证明它们**类型对**,证明不了:\n\n- `useEffect` 的依赖数组对不对(漏一项 → 订阅不随 `object` 变化重建,换对象后还在收旧对象的事件);\n- 卸载时是否真的 `unsubscribe`(漏了 → 内存泄漏 + 幽灵回调);\n- `useAutoRefresh` 是否真的在事件到达时调了 `refetch`。\n\n最后一条正是 #4678 修的那个 bug 的形状:**它对批量写不刷新,而这件事 typecheck 永远看不见**。同类缺陷可以再次静默溜进来。\n\n## 为什么没有顺手在 #4678 里补\n\n全仓**没有任何 DOM 测试基座**:\n\n- 没有根 `vitest.config.ts` / `vitest.workspace.ts`;\n- 全仓 `package.json` 里 grep 不到 `jsdom`,也 grep 不到 `@testing-library/*`。\n\n所以给 hook 写测试不是\"加一个 `.test.tsx`\",而是要引入 `jsdom` + `@testing-library/react`(或 `react-hooks` 等价物)两个新的 devDependency、配 vitest environment、并让它进 CI 的 `Test Core` 分片。这是个该由维护者定的取舍(新依赖 + CI 时长),不该作为一个 hook 修复的 rider 夹带进来。\n\n## 处置方向\n\n1. 给 `client-react` 加 `test: vitest run` + 一份 `vitest.config.ts`(`environment: 'jsdom'`);\n2. devDeps 加 `jsdom` + `@testing-library/react`;\n3. 起步测试覆盖三件 typecheck 覆盖不到的事:**依赖数组导致的重订阅**、**卸载时退订**、**回调确实被调用**(`useAutoRefresh` 对逐记录和批量两条流都要断言);\n4. 确认它被 CI 的 turbo `test` 任务捡到。\n\n## 参考\n\n- #4678 / 其 PR —— 这次修的正是一个 typecheck 看不见的行为缺陷\n- `packages/client-react/src/realtime-hooks.tsx`\n- `packages/client/src/realtime-api-data.test.ts` —— client 层已有的边界测试,可作断言风格参照"
+}

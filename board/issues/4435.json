@@ -1,0 +1,32 @@
+{
+  "number": 4435,
+  "kind": "issue",
+  "title": "data: PATCH/DELETE of a nonexistent record answer 200 success instead of RECORD_NOT_FOUND",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T07:00:48Z",
+  "updated_at": "2026-08-01T13:47:16Z",
+  "closed_at": "2026-08-01T13:47:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4435",
+  "body": "Found while verifying the 17.0.0-rc.1 checklist on #3909 (F3, the \"silent drops became refusals\" axis). Verified on `main` @ `1ee48bc60`, showcase under `os serve --dev`, admin session.\n\nThe read path already answers honestly, but both single-record **write** paths report success for a record that does not exist:\n\n```\nGET    /api/v1/data/showcase_task/definitely_not_a_row\n→ 404 {\"error\":\"Record … not found in showcase_task\",\"code\":\"RECORD_NOT_FOUND\",…}   ✅\n\nPATCH  /api/v1/data/showcase_task/definitely_not_a_row   {\"progress\":1}\n→ 200 {\"object\":\"showcase_task\",\"id\":\"definitely_not_a_row\",\"record\":null}          ❌\n\nDELETE /api/v1/data/showcase_task/definitely_not_a_row\n→ 200 {\"object\":\"showcase_task\",\"id\":\"definitely_not_a_row\",\"success\":true}         ❌\n```\n\nThe REST layer is a pass-through (`rest-server.ts` DELETE handler `res.json(await p.deleteData(...))`), so the 200s come from the metadata-protocol's update/delete answering success on a zero-row match.\n\nWhy this matters beyond symmetry:\n\n- A client that PATCHes a record which was concurrently deleted gets **200 with `record: null`** and believes the write landed. Nothing in the envelope says \"not found\" — the caller has to null-check a success payload to detect a failed write.\n- `DELETE` reports `success: true` for any string you put in the path — a typo'd id, an already-deleted row and a real deletion are indistinguishable. (The response also carries `success` where the spec's `DeleteDataResponse` declares `deleted`, so even the \"did anything happen\" bit the spec provides for is absent.)\n- This is the exact shape the v17 train has been removing everywhere else this window: #4240/#4303/#4315 (sort/select/expand/searchFields refuse missing fields), #4169 (unknown params refused), #4190 (dropped filters now merge)… a write that touched zero rows reporting 200 is the same silent no-op, one level up.\n\nExpected: PATCH/DELETE of a nonexistent id answer `404 RECORD_NOT_FOUND` exactly as GET does (and a DELETE that does delete answers the declared `deleted` key). If idempotent-DELETE-200 is a deliberate posture, it should at least say `deleted: false` — but then PATCH, which has no idempotency story, still needs the 404.\n\nPart of the #3909 rc.1 verification (section F3).\n"
+}

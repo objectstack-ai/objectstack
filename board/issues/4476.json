@@ -1,0 +1,32 @@
+{
+  "number": 4476,
+  "kind": "issue",
+  "title": "docs: nine passages date the #4286 query-surface removals to spec 18 — they ship in 17",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T09:15:39Z",
+  "updated_at": "2026-08-01T13:10:33Z",
+  "closed_at": "2026-08-01T13:10:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4476",
+  "body": "Found by the **docs sweep run 2** the tracker calls for (#3909 section D, watermark `a641d10` → `2bafe62e8`). Verified on `main` @ `1ee48bc60`.\n\nNine passages across four hand-written docs state that the `#4286` query-surface removals landed in **`@objectstack/spec` 18**. They landed in **17** — this train.\n\n```\ncontent/docs/protocol/objectql/query-syntax.mdx:726  query.distinct        … removed in `@objectstack/spec` 18\ncontent/docs/protocol/objectql/query-syntax.mdx:796  query.joins           … 18\ncontent/docs/protocol/objectql/query-syntax.mdx:808  query.windowFunctions … 18\ncontent/docs/protocol/objectql/query-syntax.mdx:874  query.cursor          … 18\ncontent/docs/data-modeling/queries.mdx:259           query.cursor          … 18\ncontent/docs/data-modeling/queries.mdx:425           query.joins           … 18\ncontent/docs/data-modeling/queries.mdx:535           query.windowFunctions … 18\ncontent/docs/data-modeling/queries.mdx:568           query.distinct        … 18\ncontent/docs/deployment/troubleshooting.mdx:283      cursor                … 18\n```\n\nEverything the runtime says disagrees:\n\n```\npackages/spec/package.json               → 17.0.0-rc.1\npackages/spec/src/kernel/protocol-version.ts → PROTOCOL_VERSION = '17.0.0'\nos migrate meta --from 16                → \"[protocol 17] data.query.cursor → …\"\n                                            \"[protocol 17] data.query.distinct → …\"\n                                            \"[protocol 17] data.query.joins → …\"\n                                            \"[protocol 17] data.query.windowFunctions → …\"\n```\n\nThe `#4286` changesets are in the rc.1 window and ship in 17.0.0.\n\n## Why it is worth fixing before RC exit\n\nThe number is the actionable part of these passages. A reader on 16 who needs to know whether upgrading to 17 breaks their `cursor`-paginated loop is told the removal is a major away — so they plan for it later and their upgrade breaks. It also contradicts the v17 release page, which correctly lists the same removals under 17, and the migration chain a reader would run.\n\nSuggested fix: `removed in \\`@objectstack/spec\\` 18` → `17` in the nine places above. Worth grepping for the bare pattern rather than fixing file by file, in case the same phrasing reached other passages the fingerprint list does not cover.\n\nLogged as part of docs sweep run 2 for #3909; the sweep's own run-log entry (`docs/v17-docs-sweep.md`) should record this fingerprint so the next run checks the version number, not just the surface name.\n"
+}

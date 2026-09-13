@@ -1,0 +1,35 @@
+{
+  "number": 4616,
+  "kind": "issue",
+  "title": "spec/system 通知模板语汇在 C3 后成为零消费方孤儿:EmailTemplate/SMSTemplate/PushNotification/InAppNotification(Schema) 待 enforce-or-remove 处置",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "protocol:breaking"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T11:19:24Z",
+  "updated_at": "2026-08-03T08:59:30Z",
+  "closed_at": "2026-08-03T08:59:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4616",
+  "body": "#4610(#4535 C3)删除 `system/notification.zod.ts` 的 `NotificationConfigSchema` 后发现的范围外遗留,按 Prime Directive #10 立案记录,**不在 C3 PR 内处理**。\n\n## 现状\n\nC3 前,`EmailTemplateSchema` / `SMSTemplateSchema` / `PushNotificationSchema` / `InAppNotificationSchema` 的唯一非测试消费方是同文件 `NotificationConfigSchema.template` 联合。该 wrapper 因双源清账死删(三仓 import 级扫描零消费方)后,这四个模板 schema 只剩:\n\n- 自己的单测(`system/notification.test.ts`)\n- `./system` barrel 导出(继续出现在 api-surface / json-schema.manifest / authorable-surface)\n\n三仓(framework / cloud / objectui)import 语句级扫描:四个名字均无任何外部 import 站点(`plugin-email` 用的是 `email-template.zod.ts` 的 `EmailTemplateDefinition`,是另一个声明,勿混淆)。\n\n同文件的 `NotificationChannel(Schema)` **是活的**(经 `contracts/notification-service.ts` re-export,service-messaging 消费),不在本案范围。另注意 `ui/notification.zod.ts` 的 `NotificationSeveritySchema` 同样无外部消费方(objectui 只 pin 了 Type/Position/Action 三个枚举),可一并处置。\n\n## 待决\n\n按 ADR-0049 enforce-or-remove 与 ADR-0030 的收敛方向处置:\n\n1. **死删**(倾向):ADR-0030 的模板层是 `sys_notification_template`(topic×channel×locale 元数据对象),不是这些 spec 常量;渠道级投递语汇属于 service-messaging 的对象模型。这些 schema 声明了 runtime 从不读取的能力(declared ≠ enforced)。\n2. **保留并接线**:若某渠道实现(email/sms)确要用 spec 级模板 shape 校验,应先有消费方 PR 再谈保留。\n\n处置走 `spec-property-retirement` skill 的整套流程(api-surface、manifest、authorable-surface、reference docs、changeset)。\n\n关联:#4610(触发本发现的 C3 PR)、#4535(双源主账本)、ADR-0030(通知平台收敛)、ADR-0049(enforce-or-remove)、#3197(渠道 dead-letter 现状)。"
+}

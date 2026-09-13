@@ -1,0 +1,32 @@
+{
+  "number": 4705,
+  "kind": "issue",
+  "title": "AI 路由的 req.user 丢失 capability 通道 —— ec.systemPermissions 从不透传，AI 域无法做任何 capability gate",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T19:47:38Z",
+  "updated_at": "2026-08-02T20:49:21Z",
+  "closed_at": "2026-08-02T20:49:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4705",
+  "body": "## 问题\n\n`packages/runtime/src/domains/ai.ts` 的 `handleAIRequest()` 从 ExecutionContext 构造 `req.user` 时，只拷了**权限集名**通道，没拷 **capability** 通道：\n\n```ts\n// domains/ai.ts:145-155\nconst user = ec?.userId\n    ? {\n        userId: ec.userId,\n        id: ec.userId,\n        displayName: …,\n        email: ec.userEmail,\n        roles: Array.isArray(ec.positions) ? ec.positions : [],\n        permissions: Array.isArray(ec.permissions) ? ec.permissions : [],\n        organizationId: ec.tenantId,\n      }\n    : undefined;\n```\n\n平台在 ExecutionContext 上把这两类东西分在**两个字段**：\n\n| 字段 | 内容 | 来源 |\n|---|---|---|\n| `ec.permissions` | 权限**集名**（`admin_full_access` / `organization_admin` / `member_default`）+ 合成的 `ai_seat` | `core/src/security/resolve-authz-context.ts:389` `grants.permissions.push(ps.name)` |\n| `ec.systemPermissions` | **capability**（`manage_metadata`、`studio.access`、`setup.access` …） | 同文件 `:396` |\n\n`runtime/src/security/resolve-execution-context.ts:167-168` 两个字段并列透出，但 `domains/ai.ts` 只取了前者。\n\n## 后果\n\n**AI 域是全仓唯一无法做 capability gate 的路由域。** 平台其他地方的 capability 判断全部读 `systemPermissions`：\n\n- `runtime/src/domains/meta.ts:321` — `new Set(ec?.systemPermissions ?? []).has('manage_metadata')`\n- `runtime/src/action-execution.ts:295` — `new Set(ec?.systemPermissions ?? [])`\n- `rest/src/rest-server.ts:2846` — `!ctx?.isSystem && !held.has('manage_metadata')`\n\n而 AI 路由的 handler 只拿得到 `req.user.permissions`（集名），所以任何想在 AI 路由上判 `manage_metadata` / `studio.access` 的代码都**恒为 false**——写出来不是「收紧」，是把路由对所有人（含平台管理员）关死。\n\n这是 cloud#1015 的**直接阻塞项**：那个 issue 要给 `POST /api/v1/ai/tools/:toolName/execute` 加 capability 门禁（默认配置下任何登录用户可执行任意已注册工具，含 `create_object` / `apply_blueprint`），维护者已选定「把 capability 通道打通、按平台既有契约判」这条路线，而通道的缺口在本仓。\n\n## 期望\n\n`domains/ai.ts` 构造 `req.user` 时补上：\n\n```ts\nsystemPermissions: Array.isArray(ec.systemPermissions) ? ec.systemPermissions : [],\n```\n\n语义与既有字段一致：缺省空数组、fail-closed。\n\n另一条挂载路径 `dispatcher-plugin.ts:1167-1175` 的 `resolveRequestUser` 把 `permissions` 写死 `[]` 且不带 `roles`（它没有 ExecutionContext 可取，注释已说明）。**保持 fail-closed 即可**，不要为它编造 capability 来源——但需要确认它不会因为新增字段而产生类型不一致。\n\n## 范围\n\n**只做透传。** 不要在本仓给任何路由加 capability 判断，不要动 `route.permissions` 那套（声明了从不执行的机制，是另一个待定的 ADR-0049 决定，见 cloud#1015 讨论）。\n\n## 关联\n\n- 阻塞 objectstack-ai/cloud#1015\n- 契约来源：`core/src/security/resolve-authz-context.ts:389/396`、`runtime/src/security/resolve-execution-context.ts:167-168`\n- 既有范式：`runtime/src/domains/meta.ts:321`\n"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 4708,
+  "kind": "issue",
+  "title": "A filtered dataset measure returns ABSENT (not 0) for a group its filter excludes, so every derived ratio over it blanks — on exactly the worst-performing row",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T20:03:13Z",
+  "updated_at": "2026-08-03T10:22:31Z",
+  "closed_at": "2026-08-03T10:22:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4708",
+  "body": "Measured on `@objectstack/service-analytics@17.0.0-rc.1` while building win-rate widgets in the HotCRM reference app (hotcrm#593 / hotcrm#656, where the full reproduction lives).\n\n## Mechanism\n\nA dataset measure carrying its own `filter` is executed as a separate sub-query and merged back onto the selected dimensions (`executeSelection` → `mergeByDimensions`). `mergeByDimensions` only writes a measure's column onto rows the sub-query returned. A `GROUP BY` over a filtered row set produces **no group at all** for a dimension value the filter excludes entirely — so the measure comes back **absent**, not `0`.\n\n`computeDerived` then propagates that:\n\n```js\nconst vals = d.of.map((name) => num(row[name]));\nif (vals.some((v) => v === null)) return null;   // absent input poisons the whole ratio\n```\n\n## Reproduction, through the real executor on shipped metadata\n\n```ts\n{ name: 'won_count',     aggregate: 'count', filter: { stage: 'closed_won' } },\n{ name: 'lost_count',    aggregate: 'count', filter: { stage: 'closed_lost' } },\n{ name: 'decided_count', aggregate: 'count', filter: { stage: { $in: ['closed_won','closed_lost'] } } },\n{ name: 'win_rate',      derived: { op: 'ratio', of: ['won_count','decided_count'] } },\n```\n\nGrouped by `lead_source`:\n\n| lead_source | won_count | lost_count | decided_count | win_rate |\n|---|---|---|---|---|\n| content | 2 | 1 | 3 | 66.7% |\n| referral | 1 | 1 | 2 | 50.0% |\n| partner | 1 | — | 1 | 100% |\n| **cold_call** | **—** | **1** | **1** | **—** |\n\n`cold_call` won nothing and lost one. The correct answer is **0%**. What renders is blank — visually identical to \"no data for this row\", which is the opposite of what the row means.\n\nNote the asymmetry: `partner` (all wins) renders fine, because there the *numerator* is the measure that exists. **The rows that blank are exactly the worst-performing ones.** For a dashboard, that is the least acceptable direction for the bias to run.\n\n## Why we did not patch it in the consumer\n\nThe obvious fix is `?? 0` in the widget or a `coalesce` in the measure. We deliberately did not, and think the reasoning generalises: a consumer-side patch has to be repeated by every author of every ratio widget, forever, and **forgetting it is silent** — the number just reads as missing. It is also not always correct: absent and zero are genuinely different for `sum`/`avg`, and only the executor knows which aggregate produced the gap.\n\nInstead the current behaviour is pinned by an app-side assertion written to **fail when the platform fixes this**, so the fix surfaces as a red test rather than as dashboards silently changing.\n\n## Suggested direction\n\n1. **Fill on merge, by aggregate kind.** `mergeByDimensions` knows which measure it is merging. A `count` that produced no group for a dimension value present in another measure's result is unambiguously `0` — \"how many rows matched\" has an exact answer when the answer is none. `sum` over no rows is arguably 0; `avg`/`min`/`max` are genuinely null.\n2. **Or: let `derived` declare its null semantics** (`missingAs: 'zero'`).\n\n**We recommend 1, and the reason is worth stating explicitly: it requires no author to remember anything.** Option 2 looks more precise and more \"explicit\", but it redistributes the decision to every future author, and the failure mode of forgetting is silent. For AI-authored metadata — where the author is a model pattern-matching from neighbouring declarations — a correctness switch that must be remembered is equivalent to a correctness switch that will eventually be missed. Option 1 has no such surface.\n\n## Workaround shipped today\n\n`decided_count` is its own filtered count rather than `derived: { op: 'sum', of: ['won_count','lost_count'] }` — the derived-sum spelling would blank the **denominator** for any rep who has never lost a deal (a 100% win rate: the row you least want to hide). Every shipped table also prints the raw counts beside the rate, so a blank reads as \"0 of 1\" rather than \"no data\".\n\nRelated: hotcrm#656 (full detail), hotcrm#593, #4698."
+}

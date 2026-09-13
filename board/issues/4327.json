@@ -1,0 +1,32 @@
+{
+  "number": 4327,
+  "kind": "issue",
+  "title": "[P3] os migrate meta --stored: rewrite sys_metadata rows in place so the read-path chain has a finish line",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T06:12:16Z",
+  "updated_at": "2026-08-01T09:35:21Z",
+  "closed_at": "2026-08-01T09:35:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4327",
+  "body": "Follow-up to #3903 (option 2), downgraded from decision to enhancement by PR #4317. Filed per Prime Directive #10.\n\n## Context\n\n#4317 answered #3903 with option 1: every stored-row rehydration seam replays the full ADR-0087 conversion chain (`applyConversionsToStoredItem`, retired entries included), so a row written under any past protocol reads canonical forever. That closes the correctness gap — data at rest can no longer diverge from the contract.\n\nWhat it deliberately does NOT do is make the rows themselves canonical. A pre-17 row keeps its legacy bytes; the chain re-lowers it on every load, and each affected row emits one `[metadata_spec_invalid]`-adjacent conversion warning per process (deduped, but recurring per boot). Today the only ways a row gets rewritten are a Studio re-save and `duplicatePackage`.\n\n## The enhancement\n\n`os migrate meta --stored` (or an admin route): walk `sys_metadata` (active + draft, all orgs), run the same `applyConversionsToStoredItem` pass, and re-save changed bodies through the normal write path (history row, checksum, mutation projectors) with `source: 'migrate-stored'`. Optionally `--dry-run` printing the per-row conversion notices.\n\nValue:\n- rows stop carrying pre-protocol dialects (cleaner diffs, exports, history going forward);\n- the boot/read conversion pass returns to a no-op on every row, and the recurring notices go quiet;\n- operators get an explicit, verifiable \"my data is on protocol N\" statement instead of an implicit perpetual shim.\n\nNot load-bearing: the read path stays the guarantee (#3855's conclusion that operator-run migrations cannot be relied on still holds — this is hygiene for those who run it, not a prerequisite for anyone).\n\nRefs #3903, PR #4317, ADR-0087 addendum \"stored metadata replays the chain\", #3855."
+}

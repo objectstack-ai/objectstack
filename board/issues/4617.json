@@ -1,0 +1,30 @@
+{
+  "number": 4617,
+  "kind": "issue",
+  "title": "feat(core,platform-objects): implement the ADR-0119 D2 migration-journal runner (sys_migration_journal + runMigrationJournal)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T11:20:15Z",
+  "updated_at": "2026-08-02T21:02:47Z",
+  "closed_at": "2026-08-02T21:02:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4617",
+  "body": "Implements **ADR-0119 D2**, which specifies this runner in implementable detail. Surfaced by #4612 — four migration-class consumers (ADR-0105 D13 promotion, ADR-0117 D8 ownership backfill, org lifecycle 新设/分立/合并, D10 master-data distribution #4585) each independently converge on dry-run preflight → undo journal → LIFO compensation → re-entrant forward recovery. One copy is engineering; four is platform debt.\n\n> **ADR renumbered.** This issue originally cited ADR-0118. That record is now **ADR-0119** (`docs/adr/0119-plugin-reachable-transactions-and-honest-atomic-batch.md`) — it merged the same day as an unrelated ADR-0118 (非用户 actor 的平台契约), and the earlier merge holds the number. Every \"D1/D2/D3/D4\" below means the renumbered record.\n\n## Why a journal at all, given ADR-0034 transactions\n\nADR-0119 D1 makes `engine.transaction()` contract-reachable, but a transaction cannot be the whole answer for migration-class work:\n\n- a million-row backfill cannot hold one SQLite write-lock for its duration;\n- `driver-memory`'s `beginTransaction` deep-clones the entire database (`memory-driver.ts:595-630`) — O(db) per begin;\n- `ObjectQL.transaction()` binds only the **default** driver (`engine.ts:4950`), so a multi-datasource migration silently commits part of its work outside the transaction;\n- a **process crash** (as distinct from a thrown error) defeats in-process rollback entirely — the case the issue calls out.\n\nSo the unit of atomicity is the *chunk*, and durability across chunks is the *journal*.\n\n## Deliverables\n\n**1. `sys_migration_journal` platform object** (`packages/platform-objects`). Rows keyed `(run_id, seq)`; event kinds `run_started` (carries the plan hash + chunk plan), `chunk_started(i)`, `chunk_done(i)`, `compensated(i)`, `run_done`, `run_failed`.\n\n**2. The runner** — `packages/core/src/utils/migration-journal.ts`, next to `bulk-write.ts`, typed against `IObjectQLEngine` (core already re-exports it):\n\n- **Preflight dry-run.** Every plan step declares a read-only validator; the runner runs all validators before any write and refuses to start on any failure. Fail-closed, matching ADR-0117 D8's enable-gate posture.\n- **Chunked writes.** Rows re-chunked per the `bulk-write.ts` discipline; each chunk's writes run inside `engine.transaction()`, and **`chunk_done(i)` is written inside that same transaction** so `done ⇔ committed` is not a race. `chunk_started(i)` is written autonomously *before* it, so `started ∧ ¬done` precisely means \"outcome unknown\".\n- **LIFO compensation.** On failure, walk completed chunks newest-first, running each step's declared `compensate` in its own transaction plus a `compensated(i)` marker. A compensation failure journals and halts loudly — it must never be swallowed.\n- **Re-entrant forward recovery.** On restart (boot reconciliation and/or `os migrate resume`), scan for `run_started ∧ ¬run_done ∧ ¬fully-compensated` and resume forward from the first chunk lacking `chunk_done`, per-plan policy `onCrash: 'resume' | 'compensate'`.\n- **At-least-once + idempotency.** Every forward and compensate callback receives an `attempt` counter; `attempt > 1` means the prior outcome is unknown and the callback must recheck by natural key before re-writing. This is verbatim the contract `packages/core/src/utils/bulk-write.ts` already documents in its header — reuse the wording, don't re-derive it.\n- **Capability gate.** Refuses to start when the runtime cannot provide real transactions (same probe as ADR-0119 D4's `batchData` gate).\n\n**3. Boot reconciliation + `os migrate resume`** so an interrupted run is discoverable without the operator knowing it happened.\n\n## Why an engine-persisted object, not a caller-supplied `JournalStore`\n\nRecorded in ADR-0119 D2 as a decision, not an implementation detail:\n\n- Recovery must be **re-entrant and discoverable with zero host wiring** — a boot scanner needs one authoritative place to find half-run migrations. A pluggable store fragments that authority per caller, which is the ADR-0078 silently-inert failure mode: a journal nobody re-reads is a journal that does not exist.\n- The journal is data-plane state *about* the data plane, so it belongs inside the same backup/restore/transaction boundary as the rows it describes. A side-file journal (the ADR-0008 JSONL shape) desyncs from the database on restore — ADR-0008 solved audit, which is a different problem from recovery authority.\n- Framework-owned `sys_*` tables with a registered schema are the established ledger pattern (ADR-0060).\n\n## Acceptance\n\nA migration killed mid-run is either resumable to completion or compensable to clean, **with journal rows proving which** — asserted by conformance tests covering: crash mid-chunk → resume completes exactly once (idempotency honored on the re-attempted chunk); crash mid-compensation → halts loudly, no silent partial; plan-hash mismatch on resume → refuses rather than resuming a changed plan against an old journal.\n\nOnce this lands, the four queued consumers drop their hand-rolled copies. Existing hand-rolled prior art to fold in or retire: `ImportUndoLog` (`packages/rest/src/import-runner.ts:48-59`), the publish revert plan (`packages/metadata-protocol/src/protocol.ts:7400-7424`, `revertCommit` at `:8210`).\n\nRefs: ADR-0119 D2, #4612, ADR-0034, ADR-0087 D3, ADR-0060, ADR-0117 D8, #4585."
+}

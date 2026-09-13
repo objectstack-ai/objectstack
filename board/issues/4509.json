@@ -1,0 +1,35 @@
+{
+  "number": 4509,
+  "kind": "issue",
+  "title": "#4488 审计发现的四个\"授权门断连\"：email_template / job / validation 的元数据条目到不了执行点，action 导航项点不动",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "protocol:breaking",
+    "repo:objectstack"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T14:01:56Z",
+  "updated_at": "2026-08-02T19:48:42Z",
+  "closed_at": "2026-08-02T19:48:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4509",
+  "body": "#4488 把最后 9 个类型纳入活性账本时，逐类型闭合调用图暴露出四个**结构性断连** —— 不是单个死键，而是\"整扇授权门通向空地\"。每一个都是 webhook #3461 的形状，而 webhook 那扇门已经用 #3489（materializer 桥）修好了，所以修法有现成范本。全部按 ADR-0049 enforce-or-remove 处置：要么建桥，要么关门（撤销注册/收窄 schema），不许维持现状。\n\n## 1. `email_template` —— 整个元数据表面到不了 sendTemplate（最严重，涉及认证邮件）\n\n- **执行端**：`sendTemplate` 只读 `sys_email_template` **行**（plugin-email/src/email-service.ts:404-465），行的唯一写入者是内置 auth 模板 + 代码构造的 `EmailServicePluginOptions.templates`（email-plugin.ts:358-371, :431-468）；没有任何 bootstrapper 传 `templates`（serve.ts 的 email 参数组装里没有它）。\n- **授权端**：stack `emailTemplates:`（被 metadata plugin 摄入为元数据条目）、`*.email-template.ts`、Studio（studio.app.ts:331 的导航指向 metadata-admin 列表）、PUT /meta —— 全部落进**没人读回**的元数据存储；包导入路径还显式排除 emailTemplates（runtime/src/domains/packages.ts:569-571）。\n- **后果**：管理员在 Studio\"修好\"了密码重置邮件，保存成功，用户继续收到内置版 —— 认证邮件上的 ADR-0078 false compliance。\n- **修法**：`upsertTemplate` 的字段映射（email-plugin.ts:432-449）就是未来桥的映射表，和 #3489 用 sys_webhook 列映射的方式完全一致。或者：撤销 `email_template` 的 `allowRuntimeCreate` 并从 stack schema 移除 `emailTemplates:`，让 sys_email_template 数据门成为唯一入口。\n- 账本：`packages/spec/liveness/email_template.json`（全表面 dead，warn 载于 `name`）。\n\n## 2. `job` —— 运行时创建的 job 条目永远不会被调度\n\n- 只有编译后 bundle 的 `jobs` 到达调度器（app-plugin.ts:766-802，handler 从 bundle 函数表解析）；`job` 注册为 `allowRuntimeCreate: true`（metadata-plugin.zod.ts:640），但没有任何代码把运行时 job 条目送进 `IJobService.schedule` —— 而且**结构上不能**：运行时条目的 `handler` 在 bundle 函数表之外无从解析。\n- **修法**：要么撤 `allowRuntimeCreate`（诚实：job 是代码工件），要么设计 handler 可解析的运行时 job（比如 handler 限定为已注册 flow / 具名函数）再建桥。\n- 账本：`packages/spec/liveness/job.json` 类型注记。\n\n## 3. `validation` —— 独立 validation 条目绑不到任何对象\n\n- 写路径只消费**对象内嵌**的 `object.validations`（engine.ts:3703/:4017/:4085 → rule-validator）；`ValidationRuleSchema` 本身没有对象绑定键，没有任何合并代码，只有引用追踪器假设条目上有 `object`/`objectName`（metadata-protocol/src/protocol.ts:1306 —— 这个键甚至不在 schema 里，parse 会剥掉它）。\n- **后果**：在 Studio 里创建一条 state_machine 规则（ADR-0020 记录状态机！），保存成功，从不拦截任何写入。\n- **修法**：要么给 schema 加 `objectName` + 建合并桥，要么撤 `allowRuntimeCreate` 并把独立 `*.validation.ts` filePatterns 收掉（规则只在对象里授权）。\n- 账本：`packages/spec/liveness/validation.json` 类型注记（规则词汇本身全活 —— 经由内嵌路径）。\n\n## 4. `action` 导航项渲染但点击无事发生\n\n- NavigationRenderer 的 action 分支把点击派给宿主传入的 `onAction` prop（NavigationRenderer.tsx:976），但 objectui 的两条 console 侧边栏路径（AppSidebar / UnifiedSidebar）都不传 `onAction` —— `actionDef.actionName` 到不了任何 dispatcher，条目照常渲染、照常被门控，点了没反应。\n- **修法**：objectui 侧接 `onAction` → ActionEngine（或在接通前把 `action` variant 标记 experimental）。跨仓库：objectui 仓库需要对应 issue。\n- 账本：`packages/spec/liveness/app.json` 类型注记（`actionDef` 在 union 走查边界之外，故记录在注记而非行）。\n\n## 顺带的三个小清理候选（不阻塞，同 PR 顺手也行）\n\n- `app.contextSelectors[].includeAll`：渲染器**有意**忽略（ContextSelectors.tsx:242-246，mandatory-scope 语义，注释即处方）→ retiredKey 候选。`placement` 同理（无消费者）。\n- `book.groups[].include` 的 `{ tag }` 变体：resolver 实现了 tag 匹配，但 `DocSchema` 没有 `tags` 属性，永远匹配不中 → either 给 doc 加 `tags` or 收掉变体。\n- `mapping.errorPolicy` / `batchSize`：死键但因 schema 默认值在编译期物化而**不可 warn**（`_authorWarnSkipped`）→ 想让作者听到警告只能走移除路线。\n\n未指派 —— 认领哪一项请在下面说一声。每项独立可做；1 和 3 是安全形状，优先。"
+}

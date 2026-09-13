@@ -1,0 +1,36 @@
+{
+  "number": 4825,
+  "kind": "issue",
+  "title": "[metadata] nextEventSeq() 把驱动读失败也当成「表还没建」,静默从 1 重新发号 —— #4632 同形,机械检查覆盖不到",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T08:45:46Z",
+  "updated_at": "2026-08-03T11:42:21Z",
+  "closed_at": "2026-08-03T11:42:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4825",
+  "body": "发现于 #4728(修 `database-loader.ts` 的 `ensureSchema()` 静默吞 DDL 失败)。**仅记录,未在该 PR 中修改** —— 与本单无关,按 Prime Directive #10 单开。\n\n## 现象\n\n`packages/metadata/src/loaders/database-loader.ts` 的 `nextEventSeq()`:\n\n```ts\nprivate async nextEventSeq(): Promise< number > {\n  const where: Record< string, unknown > = this.organizationId\n    ? { organization_id: this.organizationId }\n    : {};\n  try {\n    const rows = await this._find(this.historyTableName, { where });\n    let max = 0;\n    for (const row of rows as Array< { event_seq?: number | null } >) {\n      const v = typeof row.event_seq === 'number' ? row.event_seq : 0;\n      if (v > max) max = v;\n    }\n    return max + 1;\n  } catch {\n    // Table not provisioned yet or driver error — start at 1.\n    return 1;\n  }\n}\n```\n\n## 为什么值得单开\n\n这是 #4728 刚修掉的**同一种形状**,只是在下一层,而且 #4632 的机械检查**看不到它**(`_find` 不在 `DURABILITY_CRITICAL_CALLEES` 词表里):\n\n- 注释同时点名了两种原因 —— 「表还没建」(良性:此时确实该从 1 开始)和「驱动错误」(**不良性**),然后用同一个 `return 1` 对待两者;\n- 历史表里已经有 N 行时,一次瞬时读失败(连接抖动、超时、权限)会让下一条历史记录拿到 `event_seq = 1`,与既有行**直接撞号**;\n- `event_seq` 是历史排序/回滚定位的依据,撞号之后版本顺序就是错的,而写入本身**成功**、日志**一行没有** —— 系统对外完全正常。\n\n`nextEventSeq` 的 TSDoc 已经承认它是 legacy、非事务、并发会撞号(canonical 是 `SysMetadataRepository`),所以这里不是「必须马上修」,但「并发撞号」和「读失败静默重置到 1」是两回事:前者被记录过,后者没有。\n\n## 建议\n\n按 #4632 的判定问句处理,任选其一:\n\n1. 只在**确实是表不存在**时返回 1(按错误类型判别 —— #4728 落地的 `packages/metadata/src/utils/schema-sync-errors.ts` 是同类判别的现成范式),其余读失败以 `error` 上报后果(历史序号将从 1 重新发号,与既有行撞号,版本顺序不可信)并**抛出**,让调用方决定;\n2. 或者确认该 legacy 路径已无生产调用方,直接删除,把历史写入统一收敛到 `SysMetadataRepository`。\n\n顺带:如果要动这个词表,`_find` 这类「读出来决定后续写什么」的调用是否该进 `DURABILITY_CRITICAL_CALLEES`,值得一并想清楚 —— 它不是「字节没落盘」,而是「落盘的字节是错的」,可能需要词表之外的第二条规则。\n\n## 参考\n\n- #4632(降级日志级别规则 + gate)、#4728(`ensureSchema()` 的同形缺陷,已修)、#4420(事故)、#4471(根因模式)\n"
+}

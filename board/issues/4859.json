@@ -1,0 +1,32 @@
+{
+  "number": 4859,
+  "kind": "issue",
+  "title": "ci: merge queue 吞吐优化——Test Core / Dogfood 各 2→3 分片 + 队列失败自动分诊评论",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T10:31:07Z",
+  "updated_at": "2026-08-03T11:46:42Z",
+  "closed_at": "2026-08-03T11:46:42Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4859",
+  "body": "## 背景（2026-08-03 上午实测数据）\n\nmerge queue 体感慢。查了当天全部 merge_group 运行：\n\n1. **单次队列构建关键路径 ~11 分钟**：`filter`(10s) → **Test Core (2/2) 测试步 9m50s** → 聚合 gate。分片按测试文件数均分但运行时长不均（shard 2 = 9m50s vs shard 1 = 7m47s）。Test Core 砍掉后，下一根长杆是 Dogfood (2/2) 7m38s。\n2. **失败放大是主因**：当天 20 个队列构建 7 个失败。#4822 同内容红 4 次第 5 次过（09:19→10:22 才落地），每次失败连坐后面所有构建重建（#4831/#4849 失败 4 分钟后原样通过）。失败全部集中在 Test Core 分片——PR 侧跑 affected-only、队列跑全量，flaky 测试专门在队列（最贵的位置）爆炸。而每次失败都被**盲目重排**，没有人先回答「失败的测试与本 PR 相关吗」。\n\n## 范围\n\n1. **Test Core 2→3 分片**（`ci.yml`）：matrix + 分区参数 `/3`。安全性：branch protection 只 require 聚合 gate `Test Core`（#3622 之后 gate 承载稳定名，分片数可变正是建 gate 的目的）。关键路径预期 ~11min → ~8min。\n2. **Dogfood 2→3 分片**（`ci.yml`）：同上，vitest `--shard=x/3`（单包 ~60 文件，3 分片安全）。顺带给 dogfood 的 turbo restore 补一个 job 级兜底恢复键（现在只有 shard 级前缀，新 shard 3 在 main 播种前全冷；Test Core 的同名 fallback 模式已存在）。\n3. **新 workflow：merge_group 失败自动分诊评论**。`workflow_run`(CI, completed) + `event == merge_group && conclusion == failure` 触发：从队列分支名解析 PR 号，列出失败 job/step、从日志抽取失败测试名，附本 PR 的重排失败历史与当天队列失败面板，评论到 PR 上，带分诊清单（与本 PR 相关→修 PR；无关→先查 flaky/同组语义冲突，**不要盲目重排**）。给人和 PM agent 一个机器可读的「先诊断再重排」信号。\n\n## 不做（已查证）\n\n- lint.yml typecheck 加 turbo 缓存——**已存在**（restore + main 播种 save 都在），10 分钟档是 spec 改动全量重编译的真实代价。\n- merge queue 设置（并发构建数、组大小）是仓库 Settings，不在代码内；建议维护者：并发 ≥5，flaky 清掉前组保持小。\n\n## 验收\n\n- 队列构建里 Test Core 最慢分片 ≤ ~7min，Dogfood 最慢分片 ≤ ~5.5min；`Test Core` / `Dogfood Regression Gate` 两个 required 上下文名字不变。\n- 人为让一个 merge_group 构建失败，对应 PR 收到分诊评论，含失败测试名与重排历史；cancelled（连坐撤销）不触发评论。"
+}

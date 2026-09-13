@@ -1,0 +1,36 @@
+{
+  "number": 4692,
+  "kind": "pull_request",
+  "title": "test(client-react): give the package a test harness and pin realtime hook behavior (#4682)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T18:47:58Z",
+  "updated_at": "2026-08-02T19:21:01Z",
+  "closed_at": "2026-08-02T19:20:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-02T19:20:59Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4692",
+  "body": "Fixes #4682\n\n## 问题\n\n`packages/client-react` 导出 8 个公开 hook,而 `package.json` 里只有 `build` 和 `typecheck`,`src/` 下**一个测试文件都没有**。\n\n`tsc --noEmit` 结构上就看不见 hook 真正会坏的地方——**依赖数组是值,不是类型**。少一项依赖、少一个 cleanup、回调根本没被调用,这三种缺陷全都能完美通过类型检查。\n\n#4678 就是这个形状:`useAutoRefresh` 对谓词写纹丝不动(而谓词写恰恰是把列表弄脏得最厉害的那种写入),类型系统全程没有察觉。\n\n## 改动\n\n新增全工作区**第一个 DOM 测试环境**(`jsdom` + `@testing-library/react`,`environment: 'jsdom'`;其余每个包都是 `node`),以及 17 条覆盖 realtime hooks 的测试,正对着类型检查看不见的三件事:\n\n**1. 依赖数组驱动的重订阅** —— 改 `object` 会在新名字上开订阅并释放旧的;无关的重渲染不产生任何 churn。还钉住了一点:hook 依赖的是**原始值** `options?.recordId` / `options?.packageId`,而不是 options 对象的身份,所以「值相等但身份是新的」对象必须是 no-op。把那个依赖「顺手简化」成 `options` 会让这条测试变红。\n\n**2. 卸载时释放** —— 每个订阅 hook 都退订,包括持有**两个**订阅的 `useAutoRefresh`。另有一条:卸载后迟到的事件不得触发 state 更新(React 对这类缺陷是打 console.error 而非抛错,所以断言也盯着 console)。\n\n**3. 事件确实送达** —— 事件进到 state 和回调,且 `useAutoRefresh` 在**逐记录流和批量流两条**上都会 refetch(#4678 的回归钉)。\n\n## 断言不是空的:破坏验证\n\n绿色本身不证明什么,所以每一类断言都用破坏源码的方式验过:\n\n| 破坏 | 结果 |\n|:---|:---|\n| 从 `useDataSubscription` 依赖数组拿掉 `object` | 1 条红 |\n| 删掉 `useDataSubscription` 的 cleanup | 3 条红 |\n| 把 `useAutoRefresh` 退回只订逐记录流(#4678 原缺陷) | 3 条红 |\n| 全部还原 | 17/17 绿 |\n\n## CI 无需接线\n\n`Test Core` 是**按包**分片的(`scripts/partition-test-shards.mjs` 读 `turbo ls`),所以加一个 `test` 脚本就够了。已用该脚本实测确认 client-react 落在**分片 2**。\n\n顺带说明:那段分片注释提到的 \"vitest 4 对测试文件数少于分片数的包硬失败\" 不适用于本包——分片是按包切的,每个包整套跑在一个分片上。\n\n## 验证\n\n按真实退出码(注意 `cmd | tail` 的退出码是 `tail` 的,不能当证据):\n\n```\ntypecheck exit=0   build exit=0   test exit=0 (17/17)   eslint exit=0\n```\n\n`tsconfig.json` 的 exclude 补了 `**/*.test.tsx` —— 全仓统一把测试排除在 `tsc` 之外(`**/*.test.ts`),但那个 glob 匹配不到 `.tsx`。\n\n**没有改动任何运行时代码。**\n\n## 用这套基座立刻抓到的两个缺陷\n\n基座建起来不到一小时就抓到两个 typecheck 永远看不见的真实缺陷,都已单独立案、**不夹带进本 PR**:\n\n- **#4693 —— `useQuery` 在文档示例用法下是无界请求循环(P0)**。`useQuery('todo_task', { where: … })` 在 **300ms 内发出 8830 次 `find`**;把 options 提升成稳定对象则是 1 次。\n- **#4694 —— `useAutoRefresh` 在回调身份不稳定时每渲染一次就重订阅一次**。3 次渲染 → 每条流各 3 个订阅。\n\n两者同源(依赖数组按身份而非按值),且在同一条调用链上——`useAutoRefresh` 的 TSDoc 示例正是 `const { refetch } = useQuery(...)`。都是实测数字,不是读代码推断的。修复各自独立,本 PR 只交付基座本身。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01LYnZrTwXbrctB8E8HpJAPT"
+}

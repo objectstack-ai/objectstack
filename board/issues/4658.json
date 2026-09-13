@@ -1,0 +1,34 @@
+{
+  "number": 4658,
+  "kind": "issue",
+  "title": "spec 双源清账 C6:EventSchema(./automation ≠ ./kernel)—— 1 条",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "protocol:breaking"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T14:23:20Z",
+  "updated_at": "2026-08-03T01:49:08Z",
+  "closed_at": "2026-08-03T01:49:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4658",
+  "body": "#4535 的 C6 簇。基线行:\n\n```\nEventSchema — [./automation (const)] ≠ [./kernel (const)]\n```\n\n可作者化 key:automation 2 / kernel 4(共 6)。\n\n## 立单判断(开工请自行复核,不要采信)\n\n主单把本簇标为「**名字过泛,大概率该改名而非收敛**」—— `Event` 是全仓最容易撞的裸名之一,两侧很可能根本是两个概念(自动化流程事件 vs 内核生命周期事件),而不是同一概念的两份声明。若确是两个概念,**收敛是错的**,改名才对。\n\n参考 C5(#4653)刚证实的形态:四仓零 importer ≠ 可以死删 —— 两侧都只被各自父 schema 引用、两个父都在作者面上时,没有死侧。先把这一步做扎实。\n\n## ⚠️ 适用纪律(#4535「v17 重切」§1–§3,开工前必读)\n\n1. **默认路线是收敛 + re-export**(不删 key ⇒ 不需要 tombstone);仅在必须丢键时走 ADR-0087(`retiredKey()` + D2 conversion + D3 chain step + major changeset)。**不要**照抄 C1–C4 的死删路线。\n2. **⛔ 禁止手编 `packages/spec/authorable-surface.json` 绕过 vanish 检查**(#4650:删基线行 = 删证据,门禁不拦)。`gen:schema` 只允许因**新增** key 重写该文件。\n3. **改名不省 tombstone** —— key 记作 `${defKey}:${name}`,改名 ⇒ 旧 `defKey` 下所有 key vanish ⇒ `gen:schema` exit 1。**例外**:若某侧可作者化 key 数为 0(如 C5 的 studio 侧),改那一侧零成本。**先查两侧各自的 key 数再选改哪边。**\n4. **回归 pin 用运行时模块命名空间断言,不要用编译期条件类型**(#4642:`packages/spec` 的 tsconfig `exclude` 掉 `**/*.test.ts`、vitest 未开 `typecheck.enabled`,编译期 pin 空转);且必须做 **sabotage 验证**并在 PR 里贴出结果。\n\n## 判不出来就升级,不要猜\n\n若「收敛 / 改名 / 退休」的选择取决于维护者对协议的意图(C5 就是这样:`activationEvents` 四仓零读取方,先要定去留才能定编码),**停下来立单升级**,把两轴分析写清,不要替维护者选。分析本身就是交付物。\n\n## 验收\n\n- 基线删掉上面 1 行,**22 → 21**(若 C5 先落则相应顺延),只减不增。\n- 全绿:`build`、`check:dual-source-exports`、`check:generated`、`test`,加源码审计组 `check:liveness` / `check:strictness-ledger` / `check:empty-state` / `check:variant-docs` / `check:exported-any` / `check:skill-examples`,以及全仓 `pnpm typecheck`。\n- 删 zod 形状则同步 `docs/audits/2026-07-unknown-key-strictness-ledger.md`(C3 教训)。\n- changeset 一份,`@objectstack/spec` major,含 FROM → TO。\n- ⛔ **不要**碰 `content/docs/releases/`。\n\n关联:#4535(主单 + 手册)、#4650(基线手编漏洞)、#4642(pin 空转)、#4653 / #4657(C5 的升级先例)"
+}

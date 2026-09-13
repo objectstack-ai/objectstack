@@ -1,0 +1,35 @@
+{
+  "number": 4768,
+  "kind": "pull_request",
+  "title": "feat(spec)!: 改名 studio 侧 ActionLocationSchema → ActionContributionLocationSchema —— 双源清账 C17,裸名唯一归 ./ui (#4737)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T05:10:52Z",
+  "updated_at": "2026-08-03T06:31:32Z",
+  "closed_at": "2026-08-03T06:31:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T06:31:31Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4768",
+  "body": "Fixes #4737(#4535 C17,第二批,v17 破坏窗口内)。\n\n## 路线(已裁决,按 #4737 body 执行)\n\n前锋判定 + 维护者 2026-08-03 批复:**D9(a) 改名 studio 侧** → `ActionContributionLocationSchema`;ui 侧正名一字未动。`ActionLocationSchema` 曾由 `./studio` 与 `./ui` 各自导出一个声明 —— 同名、词表完全互斥的两个概念(#4411 陷阱):studio 侧 3 值 IDE surface 枚举(`toolbar` / `contextMenu` / `commandPalette`,唯一嵌入方 `ActionContributionSchema.location`)vs ui 侧 7 值平台正典(`list_toolbar` … `global_nav`,docblock 自宣全平台唯一真源)。\n\n## 三仓消费者复核(import 级,实施前重扫)\n\n先锋结论逐条复核,一致:\n\n| 仓 | 结果 |\n|:--|:--|\n| **objectstack** | studio 侧 `ActionLocationSchema` 引用仅:`studio/plugin.zod.ts`(声明 + `ActionContributionSchema.location`)、`studio/index.ts`、`studio/plugin.test.ts` + 生成物/基线。`packages/lint` 的 validate-action-locations 不 import spec 任何符号(本地词表),不受影响。root `.` 入口不导出该名。 |\n| **cloud** | GitHub code search `ActionLocation repo:objectstack-ai/cloud` → **0 命中**。 |\n| **objectui** | 14 个文件全部消费 **ui 侧**(ActionEngine、`types/src/ui-action.ts`、`spec-derived-unions.test.ts:379-383` 按引用钉住 `ACTION_LOCATIONS`、parity ratchet 等)—— ui 侧本 PR 一字未动,**零迁移,不复演 objectui#3235**(C15 的 S3 教训)。对 `./studio` 的唯一代码引用是 `export type * as Studio`(type-only 命名空间),对 const 改名不可见;新增的 `ActionContributionLocation` 类型导出对其纯增量。 |\n\n**扫描集外补充**:`objectstack-ai/studio` 仓(私有,2026-02-22 起未更新,处置手册四仓集之外)有 `spec/studio` 字样引用,但 `ActionLocation repo:objectstack-ai/studio` → **0 命中**,不受本改名影响。\n\n## 实施\n\n- `studio/plugin.zod.ts`:改名 + 完整改名注释(含「禁止 re-export ui 枚举」的守则);**新增 `ActionContributionLocation` 类型导出**(旧 const 从无 type 导出,顺带消掉 docs-import-surface 基线的 no-type-export 例外行 —— 基线只减不增,若不补类型导出,改名会产生一条新例外行直接打红 check:docs)。\n- `studio/index.ts`:导出改名 + 类型导出。\n- `scripts/lib/renamed-defs.ts`:`studio/ActionLocation → studio/ActionContributionLocation`(**0-key carry** —— 枚举 def 无 authorable properties,`authorable-surface.json` 逐字节零变化,以门禁实跑为准,见下)。零 tombstone(无 key 退役)、零 ADR-0087 conversion(StudioPluginManifest 是根 schema,不在 stack 树,`converge-activation-event-schema` 先例)。\n- `dual-source-exports.baseline.json`:删 `ActionLocationSchema` 行,**6 → 5**。\n- `docs-import-surface.baseline.json`:删 `studio/ActionLocation — no type export` 行(shrink-only,stale 行不删即红)。\n- 幽灵页 `content/docs/references/studio/action.mdx` 随 gen:docs **自愈删除**(#4696 语境):`ActionContributionLocation` 现落到它真正的家 `studio/plugin.mdx`,import 示例行同时补进 const + type。\n- changeset:major,FROM → TO 及零元数据迁移论证见 `.changeset/action-location-dual-source-c17.md`。\n\n## 定级自证(#4535 §5,不抄别簇)\n\n**major**:`./studio` 已发布 const 名消失,曾 import 它的 TypeScript 自 v17 起 TS2305。**零已知受影响方**(上表三仓 + studio 仓零外部 importer)。**零元数据迁移**:作者写的 `contributes.actions[].location` 取值域(3 值)逐字节不变,已有清单原样解析;def 改名经 RENAMED_DEFS 承接,发布的 JSON Schema `$id` 随动。\n\n## 门禁自证(实跑输出)\n\n删基线行自证(0-key def 改名,不触发 authorable-surface 删行 —— 门禁实跑证实):\n\n```\n✓ check:authorable-surface   authorable-surface.json + JSON schemas   (authorable-surface.json 零 diff = 0-key carry)\njson-schema.manifest.json:  -\"studio/ActionLocation\"  +\"studio/ActionContributionLocation\"  (RENAMED_DEFS 承接,±1 行)\n```\n\n`check:dual-source-exports`(基线 6 → 5,rebase 后终态):\n\n```\n✅  self-test: flags same-name different-declaration exports, and nothing else.\n✅  no new dual-source exports: 4300 names across 16 entry points — 168 re-exported (single declaration), 5 accepted dual-source (baseline).\n```\n\n`check:generated`(rebase 后终态):\n\n```\n✓ All 8 generated artifacts are up to date.\n```\n\n源码审计组:`check:liveness` ✓ / `check:empty-state` ✓ / `check:skill-examples` ✅ 202 / `check:variant-docs` ✓ / `check:exported-any` ✅ / `check:react-declaration-parity`(本地无 objectui manifest,照常 skip)/ **`check:strictness-ledger` ✓**(site counts match —— 纯改名不动 site 数,台账零改动,实跑为准)。\n\n测试与类型:spec `7351 passed (7351)`;spec typecheck ✓;**全仓 typecheck `122 successful, 122 total`**(rebase 到 #4764 之后重跑)。\n\n## 符号身份 pin + sabotage(#4642 形态,照 PR #4760)\n\n新增 `packages/spec/src/studio/action-location-retirement.test.ts`:TypeScript compiler API 在 src 上做符号身份解析,从 exports map 枚举**全部 16 入口**(防新入口逃逸)+ 防空转守卫(module symbol 必解析、`./studio` 表面 &gt; 40 名、邻居健在)+ **holders 精确相等断言**(`ActionLocation(Schema)` 与 `ACTION_LOCATIONS` 必须恰为 `['./ui']`、origin 钉在 `src/ui/action.zod.ts`;`ActionContributionLocation(Schema)` 恰为 `['./studio']`)+ 活路径断言(manifest 经改名后枚举照常 parse,`list_toolbar` 在 studio 清单里仍响亮被拒)。\n\n**S1(禁止路线:`./studio` re-export ui 声明顶旧名 —— 对 dual-source 门禁不可见的语义谎报)**,被两层独立拦截:\n\n```\n× resolves the export surface: one owner per name, across every public entry\n  AssertionError: ./studio must not export ActionLocationSchema\n× keeps the runtime namespaces consistent with the compiler view\n  Tests  2 failed | 1 passed (3)\n```\n\n且 build 本身在 gen:schema 阶段直接拒绝(比预期更强 —— 该路线连构建都过不去):\n\n```\n❌ 1 problem(s) in RENAMED_DEFS (scripts/lib/renamed-defs.ts):\n   - studio/ActionLocation → studio/ActionContributionLocation: the SOURCE def is still\n     emitted by this build. That is a copy, not a rename — and a copy is precisely the\n     dual-source shape this table must never be able to launder (#4411, #4446).\n```\n\n(dual-source 门禁对 re-export 的结构性盲区由其 self-test 固定(fixture 断言 re-export 不许被标),故 pin 的 holders 精确相等断言是该路线唯一的符号级守卫。)\n\n**S2(复活旧 3 值声明顶旧名 —— 双源回归)**,同样两层拦截:pin 同上 2 failed;`check:authorable-surface` 红(同一条 copy-not-a-rename 不变式)。\n\n两次 sabotage 后均已还原,还原后终态:pin 3/3 passed、`check:dual-source-exports` ✅、`check:authorable-surface` ✅(输出见上)。\n\n## 入队备注\n\n- 交付即 draft,入队/ready 由 PM 管理;**已按 #4535 串行协议 rebase 到 `695cfbd8f`(#4764 之后)并重生成 + 全量复验**,delta 对 main 恰为本单意图(api-surface ±:`+ActionContributionLocation (type)` / `+ActionContributionLocationSchema (const)` / `-ActionLocationSchema (const)`)。\n- 区域:仅 `./studio` def 文件与入口 + 生成物 + docs 基线;未触碰 api / system / cloud / automation / integration / data / ai 区,与在飞 C10(system+cloud)不相交。\n- 不触碰 `content/docs/releases/`。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_0176qgxgCXTJCUv4YFLtusP9)_"
+}

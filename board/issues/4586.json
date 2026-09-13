@@ -1,0 +1,34 @@
+{
+  "number": 4586,
+  "kind": "issue",
+  "title": "`sys_member` grade changes lose the true actor — thread attribution through the better-auth seam (validity windows deliberately NOT added)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T09:05:13Z",
+  "updated_at": "2026-08-02T15:00:57Z",
+  "closed_at": "2026-08-02T15:00:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4586",
+  "body": "&gt; **Revision 1 (2026-08-02):** narrowed after verifying the code. Two facts shrink this issue: `sys_member` already has `trackHistory: true` (the transitions ARE recorded — the missing piece is only *who*), and `granted_by` already exists on the capability-grant table (`auto-org-admin-grant.ts:244` deliberately writes `null` into it). And one half of the original \"suggested shape\" is **reversed**: adding ADR-0091 validity columns to `sys_member` turns out to be the wrong move, for a reason worth recording — see \"Deliberately not doing\". Original framing preserved in History.\n\nSplit out of #3723 (closed by #3802 / ADR-0108). Everything else in that investigation landed; this is the one substantive item left.\n\n## The actual gap: attribution, not machinery\n\nThe elevation chain is `sys_member.role` (admin grade) → `auto-org-admin-grant.ts` → `sys_user_permission_set(organization_admin, org-scoped)` → `isTenantAdmin()`. Both hops lose provenance:\n\n1. **Hop 1 — the grade change loses the true actor.** `sys_member` is `trackHistory: true`, so role transitions are already captured as history rows. But every writer is a better-auth path running under `isSystem`, so history records \"system\" as the actor. The human who clicked *make admin* is known exactly once — in the better-auth hook layer, where the session actor exists (`invitation-role-cap.ts` already resolves the issuer's membership on that same seam). It is discarded before the write reaches ObjectQL.\n\n2. **Hop 2 — the capability grant discards provenance it has a column for.** `auto-org-admin-grant.ts:244` writes `granted_by: null` into a column that exists. So `explain` cannot answer \"why is X a tenant admin\" end to end, even though every table involved could carry the answer.\n\n## Suggested work\n\n**W1 — thread the true actor from the better-auth seam into the write context**, so `trackHistory` captures it. Two shapes:\n\n- **General (recommended):** better-auth-originated ObjectQL writes carry the real actor for ATTRIBUTION. Fixes actor history for *every* better-auth-managed table in one move, not just `sys_member`.\n- **Targeted:** emit explicit grade-transition audit events from the hook layer only. Smaller blast radius; the next table with the same problem does it again.\n\n⚠️ **The one hard constraint either way:** the threaded actor must be attribution-only — it must NOT become the authorization subject of the write. better-auth writes are `isSystem` *on purpose* (the route already authorized the action under better-auth's ACL); re-authorizing them as the human actor would create a second adjudication track at exactly the boundary ADR-0095 D3 closed. Attribution and authorization stay separate fields of the context, and a test should pin that.\n\n**W2 — stamp `granted_by` on the auto-grant row**: a machine-provenance marker plus the `sys_member` row that triggered it (and the W1 actor when present). One-liner class of change; makes `explain` answer the whole chain.\n\n**W3 — cover it at the call sites, not the declaration** (the #3106 lesson: a `case` label is not enforcement). Tests drive the real better-auth routes — invite-accept, `update-member-role`, reconciler bind, demotion revoke — and assert the history row / grant row carries the actor.\n\n## Deliberately NOT doing: validity windows on `sys_member`\n\nThe original filing suggested adding the ADR-0091 `valid_from` / `valid_until` columns. Rejected on the merits, and the reasoning is the record here:\n\n- **A platform-side window on the grade would be dual-track adjudication.** better-auth's own route ACL reads the stored `role` string (`update-member-role`, invitation permissions). If the platform computes \"admin until Friday, member after\", there are two answers to *is X an admin* — the platform's and better-auth's — which is the #2836 class reopened at the boundary ADR-0095 D3 just cleaned. The stored string must remain the single truth.\n- **The alternative (revert the role at expiry via a job) is banned** — ADR-0049: a security property enforced by a cleanup job is not enforced.\n- **Windowed temporary authority already exists, governed:** `delegated_admin` grade (carries no authority by construction) + an `adminScope` permission-set grant with an ADR-0091 window, capped by the 30-day delegation ceiling implemented in `DelegatedAdminGate`. That is the incident-window tool. Full `owner`/`admin` is a standing appointment, not a temp elevation mechanism.\n- **Temporary *membership*** (a contractor whose belonging lapses) is a different thing — a product feature in ADR-0093 lifecycle territory, not an audit-parity fix. Note the read path is only PARTIALLY prepared for it: of the three membership-consuming loops in `resolve-authz-context`, only `accessible_org_ids` applies `isGrantActive` today — the grade-projection and fellow-org (`org_user_ids`) loops do not, so building the feature requires closing those two plus copying the window onto the auto-granted capability row and gating the better-auth actor seam. Windowing MEMBERSHIP does not hit the dual-track wall the way windowing the GRADE does — an expired plain member diverges only on presentation (better-auth still lists the org) while Layer 0 already denies all data — but it is real scoped work. **Decided 2026-08-02 (founder): not now — demand-gated.** Revisit when an enterprise/compliance need lands; it then gets its own design (ADR-0093 addendum), starting from the analysis above.\n\n## Not in scope\n\nNarrowing the `resolve-authz-context.ts` projection union — with the vocabulary closed (ADR-0108) it can only see the four framework names; correct as it stands.\n\n## History\n\n- **Original filing (2026-07-28):** framed as \"no audit trail and no expiry\", suggesting ADR-0091 columns + a `granted_by` stamp. Half right: the audit machinery already existed (`trackHistory`), the expiry half is architecturally wrong on this table, and the real gap is actor attribution at the better-auth seam.\n\nRelated: #3723 · #3697 · #3767 (`sys_member` write governance) · ADR-0049 · ADR-0091 D3 · ADR-0093 · ADR-0095 D3 · ADR-0108."
+}

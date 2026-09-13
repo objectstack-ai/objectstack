@@ -1,0 +1,36 @@
+{
+  "number": 4575,
+  "kind": "pull_request",
+  "title": "ci: `check:adr-anchors` — governed code must keep naming its decision (#3723 follow-up)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T08:18:19Z",
+  "updated_at": "2026-08-02T09:14:31Z",
+  "closed_at": "2026-08-02T09:14:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-02T09:14:30Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4575",
+  "body": "Follow-up to #3802 (ADR-0108). This is the recurrence guard for the *process* failure behind #3723, not the vocabulary bug it already fixed.\n\n## The failure, stated precisely\n\nThree accepted ADRs said the same thing:\n\n- **ADR-0057 D4** — feed app names to better-auth *\"**only** so invitations are accepted — **never as the authority for RBAC**\"*\n- **ADR-0090 D3** — the word ban: *\"capability = `permission_set` · distribution = `position` … The word 'role' does not exist here\"*\n- **ADR-0095 D3** — *\"no enforcement-time code path may consult the better-auth role directly\"*\n\nA patch-level changeset reversed all three by making app-declared names storable in `sys_member.role`. A follow-up then made the derivation automatic in **every host**. The reversal held for a day, and the tracking issue was closed, reopened and rewritten three times while the cause moved.\n\n**The mechanism was not carelessness.** `auth-manager.ts` cited ADR-0105 D8 (why `delegated_admin` is registered) and said nothing about why the app-role loop directly beside it was a violation. Reading that file, an author — human or agent — could not have known. In a repo worked by many agents in parallel, nobody greps the ADR corpus before an edit. **The constraint has to be where the edit is.**\n\n## What this adds\n\n`scripts/adr-anchors.json` — a curated map of file → governing ADR ids + the invariant:\n\n```json\n{\n  \"file\": \"packages/plugins/plugin-auth/src/auth-manager.ts\",\n  \"adrs\": [\"ADR-0108\"],\n  \"invariant\": \"better-auth's organization roles map registers the closed framework vocabulary ONLY. App-declared `position` / `permission` names are not organization roles — registering one makes it storable in `sys_member.role`, which `resolve-authz-context` projects into `current_user.positions`.\"\n}\n```\n\n`scripts/check-adr-anchors.mjs` verifies each anchored file exists, each listed ADR has a real record under `docs/adr/`, and each id still appears in the file. Wired into `Lint & Type Check` next to the existing `check:role-word` ratchet.\n\n**Deliberately dumb.** It is a presence check, not a proof of obedience — no static check can be that, and pretending otherwise would be its own `declared ≠ enforced`. Its value is twofold: the failure states the **invariant** rather than \"put this string back\", and it fires on exactly the diff that warrants a second look — someone rewriting a governed block and dropping the rationale with it.\n\n**Seeded with 8 anchors**, all in the incident's blast radius: the membership-role cluster (spec, auth-manager, auth-plugin, both platform objects), the authz resolver (ADR-0095 D3), the delegated-admin gate (ADR-0090 D12), the invitation role cap (ADR-0105 D8). Deliberately not more — a map of everything is a map of nothing, and each entry must earn its failure mode. The script's header documents the test for adding one: *if a reasonable engineer could \"fix\" this code and be reverting a decision, anchor it.*\n\n## AGENTS.md Prime Directive #13\n\n> **An accepted ADR binds until a superseding ADR says otherwise.** Reversing a recorded decision is itself a decision: it needs a **new ADR** (or an amended status line on the old one), not a changeset that quietly does the opposite. […] when you implement an ADR's decision, **leave its id in the code** […] A decision nobody can find is a decision that will be reversed.\n\nThis is the half the script cannot enforce, and the rule that was actually broken.\n\n## Verification\n\nNegative-tested, since a guard that never fails is decoration:\n\n| Case | Result |\n| :-- | :-- |\n| Strip `ADR-0108` from `auth-manager.ts` | ✅ fails, printing the invariant |\n| Anchor a non-existent file | ✅ fails |\n| Anchor withdrawn `ADR-0107` (no record) | ✅ fails |\n| Malformed id (`\"nonsense\"`) | ✅ fails |\n| Seed as-is | ✅ `OK (8 anchored file(s))` |\n\n`check:role-word`, `check:doc-authoring` and `eslint` on the new script all clean. Releases nothing — the changeset has empty frontmatter (no package changes).\n\n## Reviewer notes\n\n- **This is a governance change** — Prime Directive #13 binds every agent in the repo. If you'd rather it stayed advisory, dropping the AGENTS.md hunk leaves the script fully functional.\n- The check runs on the **tree**, not the PR diff, so it needs no CI context and works locally (`pnpm check:adr-anchors`).\n- It does not replace per-invariant tests; each anchored decision keeps its own enforcement (e.g. `membership-role-vocabulary.dogfood.test.ts` for ADR-0108).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_0186LhwkUBupmLJUUAMda5hU\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_0186LhwkUBupmLJUUAMda5hU)_"
+}

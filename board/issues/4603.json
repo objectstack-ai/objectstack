@@ -1,0 +1,35 @@
+{
+  "number": 4603,
+  "kind": "pull_request",
+  "title": "feat(spec)!: 双源 C2 收敛 — MetadataEvent / MetadataBulkRegisterRequest 归 ./api,./kernel 侧死删 (#4587)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T09:53:10Z",
+  "updated_at": "2026-08-02T10:21:37Z",
+  "closed_at": "2026-08-02T10:21:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-02T10:21:35Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4603",
+  "body": "Fixes objectstack-ai/objectstack#4587\n\n#4535 C2:基线 31 条中的 3 条 —— `MetadataEvent(Schema)` / `MetadataBulkRegisterRequestSchema` 在 `./api` 与 `./kernel` 各有一份不同声明,消费者拿到哪个形状只取决于 import 路径(#4411 陷阱)。issue 的「kernel 侧可能是 #4411 家族残留」线索,已按手册以 import 语句级扫描**重新判定**,未照抄前科。\n\n## 判真源:三仓 import 语句级扫描\n\nframework(本仓)、`/workspace/cloud`(HEAD `bce2bec`)、objectui(浅克隆,HEAD `d3584c6`):\n\n- **cloud:0 处引用**;**objectui:0 处 import**(仅 `ResourceHistoryPage.tsx` 一行注释提及 `MetadataEvent[]`,指的是 metadata-core 的第三个同名概念,非消费)。\n- **`./kernel` 侧三个名字**:三仓唯一 importer 是**自己的单测**(`metadata-plugin.test.ts`)。`packages/metadata` 从 `@objectstack/spec/kernel` import 了一串名字(`MetadataQuery`/`MetadataBulkResult`/…),**不含**这三个。\n- **`./api` `MetadataEvent`(type)**:`packages/client/src/realtime-api.ts` 与 `packages/client-react/src/realtime-hooks.tsx` 都 `import type { MetadataEvent } from '@objectstack/spec/api'` —— 活的 SDK 合同。\n- **事件词表的字符串级复核**(不只看 import):api 词表 `metadata.{type}.{created|updated|deleted}` 有真实生产者 —— `MetadataManager` 的 register/unregister 路径向 realtime service 发布 `` `metadata.${type}.created` `` / `` `.deleted` ``,client 的 `subscribeMetadata` 按同词表过滤。kernel 词表(`metadata.registered/…/exported`)在**三仓零生产者、零消费者**。\n- 第三个同名概念 `@objectstack/metadata-core` 的 `MetadataEvent`(ADR-0008 仓库变更日志事件)不在 spec 入口、不归本 gate 管,未触碰;handwritten docs(`concepts/metadata-lifecycle.mdx`、ADR-0008)引用的都是它,无需改。\n\n## 逐字段 diff(判定依据)\n\n**`MetadataEvent(Schema)` —— 同名两个信封,kernel 侧已死:**\n\n| | `./api`(events.zod.ts) | `./kernel`(metadata-plugin.zod.ts,已删) |\n|---|---|---|\n| 判别字段 | `type`: enum `metadata.{13 类型}.{created\\|updated\\|deleted}`(39 值) | `event`: enum `metadata.registered/updated/unregistered/validated/deployed/overlay.applied/overlay.removed/imported/exported`(9 值) |\n| 独有字段 | `id`(uuid,必填)、`definition?`、`userId?` | `namespace?`、`actor?`、`payload?`(record) |\n| 共有字段 | `metadataType`(z.string)、`name`、`packageId?`、`timestamp` | `metadataType` 为 `MetadataTypeSchema`(枚举),其余同名 |\n| 消费方 | client / client-react(import type);realtime 生产者按其词表发布 | 仅自己的单测 |\n\n**`MetadataBulkRegisterRequestSchema` —— 同概念近重复,kernel 侧已死且偏离强制路径:**\n\n| | `./api` | `./kernel`(已删) |\n|---|---|---|\n| items 元素 | `{type, name, data}` | `{type, name, data, namespace?}` |\n| 其余 | `continueOnError=false`、`validate=true` 完全一致 | 同左;另导出 type `MetadataBulkRegisterRequest = z.input`(kernel 独有,不在基线) |\n| 强制路径 | `IMetadataService.bulkRegister` 与 `MetadataManager.bulkRegister` 的 item 形状都是 `{type, name, data}`,**无 namespace** —— 与 api 侧一致;`namespace` 平台级弃用(军规 #6) | 无任何 runtime 读它 |\n| 消费方 | 自己的单测 + POST /api/meta/bulk/register 合同族(json-schema/docs 发布面) | 仅自己的单测 |\n\n## 处置(手册路线 1:死侧删除,v17 major 窗口)\n\n1. **`./kernel` `MetadataEventSchema` / `MetadataEvent` → 死删**。零消费方、词表零生产者。运行时 watch 事件另有 `MetadataWatchEvent`(`./system`),不受影响。\n2. **`./kernel` `MetadataBulkRegisterRequestSchema` / `MetadataBulkRegisterRequest` → 死删**。`MetadataBulkResultSchema`(活,`packages/metadata` 消费)原地保留。\n3. **`./api` 两族原样不动,成为裸名唯一属主**。唯一新增:`./api` 补导出 `MetadataBulkRegisterRequest = z.input<…>` 类型别名 —— 名字延续到真源;该文件族本就每个 Schema 配推断类型(bulk 对是仅有的例外),且 build-docs 剥 `Schema` 后缀生成 import 示例(#4570),api/metadata 文档此前宣传的这个 import 现在真实存在。`z.input` 保留 kernel 侧原语义(authoring 形状,`continueOnError`/`validate` 可省略)。\n4. **收敛 ≠ 无行为变化,逐字段核实过**:对 `./api` 消费者零变化;从 `./kernel` 迁来的消费者(三仓实测为零)是**形状变化**:`event/actor/payload/namespace` 字段不复存在、bulk item 不再接受 `namespace` —— changeset FROM → TO 各带一行修法与形状差说明。\n5. **回归防护**:编译期 pin(`typeof import('./metadata-plugin.zod')` 条件类型,#4581 先例,不吃 vitest 超时)钉死 kernel 模块不再声明这两个裸名;`./api` 幸存声明补了此前缺失的单测(`events.test.ts`:词表模式、client 订阅的三个事件名、kernel 退休词表不再 parse;`metadata.test.ts`:z.input 形状 + item 无 `namespace` 的类型级断言)。\n6. json-schema.manifest:`kernel/MetadataEvent`、`kernel/MetadataBulkRegisterRequest` 两键蓄意退休删行(gate 点名后删,非静默下架);authorable-surface 的 11 行按 #4458/#4568/#4581 先例手工删除(插件 TS 类型,schema 本体已删,不存在「父 schema 静默剥离」路径 —— 不适用 tombstone / D2 conversion,误用者在 import 处编译期即失败)。\n\n## 基线\n\n`dual-source-exports.baseline.json` 恰好删除 gate 点名的 3 行(**31 → 28**,不多删不漏删):\n\n- `MetadataBulkRegisterRequestSchema — [./api (const)] ≠ [./kernel (const)]`\n- `MetadataEvent — [./api (type)] ≠ [./kernel (type)]`\n- `MetadataEventSchema — [./api (const)] ≠ [./kernel (const)]`\n\n## 验证\n\n- `pnpm --filter @objectstack/spec build` ✅\n- `check:dual-source-exports` ✅(self-test 通过;4308 名字 / 16 入口,基线 **28**)\n- `check:generated` **8/8 up to date** ✅(api-surface + reference docs 经 `--fix` 定向再生,单独 commit;api-surface 净变化:kernel −4、api +1)\n- spec `typecheck` ✅;spec `test` **288 文件 / 7274 用例全过** ✅\n- 全仓 `pnpm build` **71/71** ✅、`pnpm typecheck` **122/122** ✅、`pnpm test` **132/132** ✅(首轮 service-datasource 的 sqlite-wasm 文件回环用例在并行负载下超时一次 —— `/tmp` mkdir ENOENT,环境性;单跑 197/197 全过,复跑全仓 132/132 绿,与本改动无关)\n- 合并 `origin/main`(b3235b5,来向不触 spec)后按 §10 范围复验:spec build + `check:generated` 8/8 + 基线 28 复确认 ✅\n\n## Changeset\n\n`@objectstack/spec` major:两条 FROM → TO 迁移(kernel `MetadataEvent` → api,含形状差与 `MetadataWatchEvent`/metadata-core 的指路;kernel `MetadataBulkRegisterRequest(Schema)` → api,含 `namespace` 不再 parse 与 z.input 语义说明)。不改 `content/docs/releases/`。\n\n## 范围外发现\n\n- **#4602**(unassigned):client realtime declared ≠ enforced —— `subscribeMetadata` 把 `RealtimeEventPayload` 信封 `as any as MetadataEvent` 硬铸交给订阅者,声明的顶层 `name`/`metadataType`/`definition` 运行时嵌在 `payload` 里、`id`/`userId` 从不生成。本 PR 只消歧命名归属,不改 realtime 行为;该单给出生产者履约 vs 合同如实两个方向待裁决。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01M9uWvoEp9CoLzYjNExj9sL\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01M9uWvoEp9CoLzYjNExj9sL)_"
+}

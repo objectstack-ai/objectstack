@@ -1,0 +1,32 @@
+{
+  "number": 3699,
+  "kind": "issue",
+  "title": "spec: `agent.knowledge.indexes` / `sources` reference a namespace with no definition site in a stack",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "protocol:breaking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T15:00:14Z",
+  "updated_at": "2026-08-02T10:07:04Z",
+  "closed_at": "2026-08-02T10:07:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3699",
+  "body": "从 #3583 的引用完整性工作中分出来的 spec 决策项(方案文档 §5 D1,见 `docs/audits/2026-07-app-metadata-reference-integrity-assessment.md`)。\n\n## 现状\n\n`AgentSchema.knowledge` 声明了两个引用形状的字段:\n\n- `packages/spec/src/ai/agent.zod.ts:37` — `indexes: z.array(z.string()).describe('Vector Store Indexes')`(**必填**)\n- 同处 `sources: z.array(z.string()).optional()`\n\n但这两个字段引用的命名空间**在 stack 里没有任何定义位**:\n\n- `KnowledgeSourceSchema` 确实存在(`packages/spec/src/ai/knowledge-source.zod.ts:86`),但 `stack.zod.ts` **从未引用它** —— 没有 `knowledgeSources: []` 槽位。\n- 唯一「index」形状的声明是 `VectorStoreSchema.collection`(`packages/spec/src/ai/embedding.zod.ts:71`),只能从 KnowledgeSource 到达,而后者本身不可在 stack 中书写。\n\n也就是说,作者写进 `knowledge.indexes` 的任何字符串,按构造就是不可解析的。\n\n## 为什么这是决策而不是 bug\n\n按 ADR-0049 / ADR-0078 的三分法,一个已解析的配置必须处于以下之一:强制校验、标注 `[EXPERIMENTAL — not enforced]`、或优雅降级的真可选。当前状态是被明确禁止的**第四态**:可解析、未标注、静默失效。\n\n这也是为什么 #3583 的 AI 引用规则(方案里的 R7)没有写:给一个没有定义位的命名空间加校验,等于把这个缺口制度化。\n\n## 两个出口\n\n1. **加定义位** —— 把 `knowledgeSources` 接入 `stack.zod.ts`,让 `indexes`/`sources` 能真正解析。之后 R7 可以连同 `agent.skills` → `stack.skills`、`skill.tools` → `stack.tools` 一起写。\n2. **标注为实验性** —— 在字段上加 `[EXPERIMENTAL — not enforced]`,明确「现在写它是无操作」,作者就不会误以为有效。\n\n出口 1 是 spec 变更,值得一个 ADR;出口 2 是一行 describe 改动。任一都行,现状不行。\n\n## 关联\n\n- #3583(引用完整性审计)\n- #3657 / #3684 / #3698(已落地的规则)\n- ADR-0049 / ADR-0078"
+}

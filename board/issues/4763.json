@@ -1,0 +1,36 @@
+{
+  "number": 4763,
+  "kind": "issue",
+  "title": "`has(x)` reads as a null guard and is not one — a publish-time lint should reject un-guarded nullable comparisons in CEL predicates",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T03:07:52Z",
+  "updated_at": "2026-08-03T08:45:12Z",
+  "closed_at": "2026-08-03T08:36:46Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4763",
+  "body": "Found while implementing #4649 (PR #4761). Filed unassigned.\n\n## The trap\n\nCEL's `has(x)` asks whether the key is **present**. A declared column holding `NULL` is present. So the idiom that reads like a null guard —\n\n```\nhas(record.start_date) && has(record.end_date) && record.end_date < record.start_date\n```\n\n— is not one: both `has()` calls return `true` for a row whose dates are NULL, the comparison then evaluates `null < null`, CEL has no overload for that, and the whole predicate aborts. Until #4761 the abort was swallowed (rule skipped, one WARN), so a rule of this shape **never enforced anything on any row with a null value**, on every driver that returns its NULL columns — i.e. essentially all of them. It read as a guard, it was in the metadata, and it did nothing.\n\nThis is not hypothetical: turning on fail-closed evaluation in #4761 immediately found **two of our own example objects** written this way, both authored as exemplars others copy:\n\n- `examples/app-showcase/src/data/objects/project.object.ts` — `end_after_start`\n- `examples/app-crm/src/objects/opportunity.object.ts` — `opp_close_date_not_past`\n\nBoth are fixed in #4761 to the correct form:\n\n```\nrecord.start_date != null && record.end_date != null && record.end_date < record.start_date\n```\n\nA third instance is still live on a different evaluation path and is **not** covered by #4761:\n\n- `examples/app-showcase/src/data/hooks/index.ts:70` — `has(record.spent) && has(record.budget) && record.spent > record.budget`, a **hook** condition. Same shape, same latent fault, different evaluator with its own skip policy.\n\n## Why a lint, not more runtime tolerance\n\n#4761 makes the failure loud at write time and the rejection message names the fix. That is the right runtime behaviour, but it is still the *late* place to learn it: the author finds out from a 400 on real data, possibly in production, possibly months after writing the rule. The fault is fully decidable from the metadata alone — the predicate's AST plus the object's declared field types say whether a comparison operand can be null. `packages/lint/src/validate-expressions.ts` already walks validation expressions at build/publish, which is where this belongs (AGENTS.md PD #12: reject at authoring, do not tolerate at the consumer).\n\nThis matters disproportionately for **AI-authored metadata**. `has(x)` is the obvious-looking guard, an agent writing a validation rule will reach for it, and nothing in the toolchain currently says no — the rule then ships looking correct and enforcing nothing. A publish-time rejection is the structural prevention; a runtime rejection is the backstop.\n\n## Suggested rule\n\nReject (or warn loudly) at lint/publish when a validation-rule CEL predicate applies an **ordering or arithmetic operator** (`<`, `>`, `<=`, `>=`, `-`, `*`, …) to an operand that:\n\n- resolves to a declared field which is nullable (not `required`, no `defaultValue`), and\n- is not dominated by an explicit `!= null` / `== null` test in the same boolean branch.\n\n`has(x)` must NOT count as satisfying the guard — that is the entire point. Guidance text to emit is already written and can be lifted verbatim from `unevaluableRuleError` in `packages/objectql/src/validation/rule-validator.ts`:\n\n> The predicate compares a value that is null. Guard it with `!= null` — `has(x)` does NOT do that: a declared field holding null is still PRESENT, so `has(x)` is true.\n\nWorth applying to hook / flow-trigger conditions too, since the third instance above lives there.\n\n## Acceptance sketch\n\n- A predicate of the `has(a) && has(b) && a < b` shape over nullable declared fields fails `pnpm lint` / the publish gate, naming the rule, the operand, and the `!= null` fix.\n- The `!= null` form passes.\n- `has()` over an **undeclared** key is untouched — that is its legitimate use.\n- `examples/app-showcase/src/data/hooks/index.ts:70` is corrected in the same PR (it is the remaining live instance).\n- A doc line in the CEL / validation authoring guide states the `has()` ≠ null-guard rule; `skills/objectstack-formula` is the natural home.\n"
+}

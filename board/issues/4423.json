@@ -1,0 +1,35 @@
+{
+  "number": 4423,
+  "kind": "pull_request",
+  "title": "fix(auth): a degraded tenancy posture must not hand out a default organization",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T00:48:54Z",
+  "updated_at": "2026-08-01T00:57:08Z",
+  "closed_at": "2026-08-01T00:57:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-01T00:57:05Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4423",
+  "body": "## What\n\n`TenancyService.defaultOrgId()` documents *\"returns `null` under any walled posture\"*, but the implementation keyed on the posture actually **in force** (`isolationActive()`) instead of the one the operator **requested**.\n\nThose two disagree in exactly one state — **degraded**: a deployment that asked for `group`/`isolated` and cannot enforce it (the enterprise `@objectstack/organizations` package is absent) reports `posture: 'single'`, and the resolver then answered with *\"the `slug='default'` org, or the only org that exists\"*.\n\n```diff\n async defaultOrgId(): Promise<string | null> {\n-  if (isolationActive()) return null;\n+  if (postureEnforcesWall(requestedPosture)) return null;\n```\n\n## Why it matters\n\nEverything downstream of that resolver **binds new users** to whatever it returns:\n\n- `reconcileMembership` (ADR-0093 D2) is composed into better-auth's `user.create.after` — the one seam **every** creation path flows through (email signup, `/admin/create-user`, bulk import, SSO JIT);\n- `backfillMemberships` (D6) sweeps every pre-existing member-less user in on `kernel:ready` / `app:seeded`.\n\nSo a degraded deployment silently auto-bound **every** new user as a `member` of whichever organization happened to be resolvable.\n\n**This reached production.** ObjectStack Cloud's control plane runs `OS_MULTI_ORG_ENABLED=true` while deliberately *not* mounting the enterprise package — it enforces its own control-plane org wall instead. The `org-scoping` probe therefore misses, the posture resolves degraded, and fresh self-serve signups landed inside a stranger's organization with read access to that org's environments (cloud#957). Reproduced deterministically against a control plane holding one organization:\n\n```\n[membership] bound user to organization {\"userId\":\"…\",\"organizationId\":\"org_seed_repro\"}\nsys_member for new user: [{\"org\":\"org_seed_repro\",\"role\":\"member\"}]\n```\n\n## Why fail closed\n\nThis is the same judgement D6 already applies to the backfill — *\"a wrong org in a tenant-isolated deployment is a data-exposure bug, not a convenience\"* — applied to the resolver those consumers share. Degrading the **wall** is survivable and already branded (`tenancy.degraded`, `/auth/config`, the Setup dashboard); degrading into **cross-tenant membership writes** is not.\n\nIt also removes an inconsistency: the default-org bootstrap in `AuthPlugin.start()` was *already* gated on `!postureEnforcesWall(resolveTenancyPosture())` — the requested posture. Now the resolver agrees with it.\n\n## Blast radius\n\n- **Single-org: unchanged.** Nothing about `requested: 'single'` moves.\n- **Enforced `group`/`isolated`: unchanged** — already returned `null`.\n- **Degraded: loses the auto-bind.** That is the point, and ADR-0093 D5 already refuses to boot such a deployment at all unless the operator sets `OS_ALLOW_DEGRADED_TENANCY=1`.\n\n## Verification\n\n- Two new cases in `tenancy-service.test.ts` pin the degraded behaviour for both walled postures (including the `slug='default'` shortcut, which also must not fire).\n- `plugin-auth`: **26 files / 581 tests, 0 failures**; `tsc --noEmit` clean.\n- The single-org dogfood (`packages/qa/dogfood/test/membership-reconciler.dogfood.test.ts`) boots without `OS_MULTI_ORG_ENABLED` and is unaffected.\n\nCloud closes its own half in objectstack-ai/cloud#957 by declaring `membershipPolicy: 'invite-only'` on the control plane — it does not wait on this pin.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

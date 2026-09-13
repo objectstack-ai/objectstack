@@ -1,0 +1,38 @@
+{
+  "number": 4630,
+  "kind": "issue",
+  "title": "`sys_comment` has no record-level authorization: any org member reads and writes comments on records they cannot see",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T12:18:11Z",
+  "updated_at": "2026-08-03T03:11:03Z",
+  "closed_at": "2026-08-03T03:11:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4630",
+  "body": "Found while dogfooding `enable.feeds` for objectstack-ai/hotcrm#602 (HotCRM, `@objectstack/*` 17.0.0-rc.1). Filed unassigned.\n\n## What happens\n\nAttachments derive their visibility from the parent record. Comments do not derive anything. On the *same* record, with the *same* user, the two answer differently:\n\n```\nuser: rep2 (sales_rep permission set, does NOT own and cannot read the opportunity)\nGET /api/v1/data/crm_opportunity?$filter=[\"id\",\"=\",\"1A7nlQpfEhWxIaeX\"]   → 200, 0 rows\nGET /api/v1/data/sys_attachment?$filter=[\"parent_id\",\"=\",\"1A7nlQpfEhWxIaeX\"] → 200, 0 rows\nGET /api/v1/data/sys_comment?$filter=[\"thread_id\",\"=\",\"crm_opportunity:1A7nlQpfEhWxIaeX\"]\n  → 200, 1 row:\n    \"Dogfood #602: kickoff call booked with Apex procurement — MSA draft attached above.\"\n```\n\nThe same query as the app's `guest_portal` holder — a permission set whose stated contract is \"reads nothing, INSERT-only on lead/case\" — returns the same row.\n\nWrites are equally ungated:\n\n```\nPOST /api/v1/data/sys_comment  (as rep2, on a record rep2 cannot read)\n  { \"thread_id\": \"crm_opportunity:<id>\", \"body\": \"rep2 should not be here\" }\n  → 201 Created\n```\n\nAnonymous is correctly refused (401 UNAUTHENTICATED) on both objects — this is an authenticated-user boundary, not an anonymous leak.\n\n## Why\n\n`service-storage` installs two things for `sys_attachment`:\n\n- `installAttachmentAccessHooks` — `beforeInsert` requires `sharing.canEdit(parent_object, parent_id)`, `beforeDelete` requires uploader-or-parent-editor;\n- `installAttachmentReadVisibility` — a `find`/`findOne`/`count`/`aggregate` middleware that rewrites the AST to intersect with the parents the caller can actually read, failing closed to a deny-all filter.\n\n`sys_comment` has no counterpart. The only feed-side enforcement is `plugin-audit`'s `enforceFeedsCapability`, which inspects `thread_id`'s object prefix and throws `FEEDS_DISABLED` **only** when the target object declares `enable.feeds: false`. Access to the record behind the thread is never consulted, on read or on write. The liveness ledger entry for `props.enable.children.feeds` describes exactly this and nothing more, so the gap looks like an omission rather than a decision:\n\n> `enforceFeedsCapability` beforeInsert hook: explicit `feeds:false` on the target object rejects `sys_comment` creation, 403 `FEEDS_DISABLED`\n\n## Why it matters\n\n`enable.feeds` is **opt-out** (spec default `true`), so every object in every app has comments on by default. A deployment that carefully authors OWD, sharing rules and RLS on its records still has an org-wide readable side-channel hanging off each of them, and the record feed is exactly where people paste the reasons — pricing approvals, legal positions, personnel notes. It also makes the flag itself misleading: an app can be told \"comments follow record access\" by analogy with attachments, and nothing contradicts that until an audit.\n\n## Suggested shape (not a decision, just the symmetric option)\n\nMirror what attachments already do, keyed off `thread_id`'s `<object>:<recordId>` split:\n\n1. `beforeInsert` on `sys_comment` → require read (posting on a record you cannot see is never right; whether it should require *edit* is the open question — attachments chose edit).\n2. A read middleware that intersects `sys_comment` queries with visible thread parents, fail-closed, same as `computeParentVisibilityFilter`.\n3. `beforeUpdate`/`beforeDelete` → author-or-parent-editor.\n\nTwo sub-questions worth deciding explicitly rather than inheriting:\n\n- **Threads whose prefix is not a record** (`thread_id` with no `:`; today the capability hook simply returns). Fail open or fail closed?\n- **Post authority = read or edit?** A read-only collaborator commenting is a plausible product decision; silently allowing a user with no access at all is not.\n\n## Repro\n\nAny 17.x stack with two users, one permission set granting `readScope: 'own'` on an object, and a record owned by the other user. Post a comment as the owner through the console's Discussion panel, then query `sys_comment` filtered on that `thread_id` as the non-owner.\n\n## Note on the neighbouring path (separate, smaller)\n\nWhile confirming the above I found that `authorizeDownload` in `service-storage` gates only when `file.scope === \"attachments\"` or the file is field-owned:\n\n```js\nconst fieldOwned = !!file.ref_object && file.ref_id != null && file.ref_id !== \"\";\nconst gated = file.scope === \"attachments\" || fieldOwned;\nif (!gated || file.acl === \"public_read\" || !opts.authorizeFileRead) return presignedTtl;\n```\n\nA file uploaded through `POST /storage/upload/presigned` **without** `scope: \"attachments\"` (the default is `\"user\"`) and then linked with a `sys_attachment` row is therefore attached to a record but not gated: `GET /storage/files/:fileId/url` answers 200 — including unauthenticated — and the signed URL serves the bytes. The console always sends `scope: \"attachments\"` so its own path is correctly gated (verified: 401 anonymous, 403 for a user without record access, 200 for one with it). The exposure needs the file UUID, so it is not a browsing hole; but the gate keying off the file's declared scope rather than \"is there a `sys_attachment` row for this file\" means a hand-rolled API client can opt out of governance by omitting a field. Happy to split this into its own issue if you'd rather track it separately.\n"
+}

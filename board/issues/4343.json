@@ -1,0 +1,34 @@
+{
+  "number": 4343,
+  "kind": "issue",
+  "title": "`script` 的 config 契约要接入 #4277 的执行期 parse,先得有判别式(actionType)形态",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T07:09:30Z",
+  "updated_at": "2026-08-01T15:55:47Z",
+  "closed_at": "2026-08-01T15:55:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4343",
+  "body": "#4278 与 #4277 在同一天落地,两者交界处留下一个明确的后续,记在这里以免被当成「忘了接」。\n\n## 现状\n\n#4277(#4332)让 12 个「有契约」的内置节点在执行前 `parse()` 自己的\n`node.config`(`service-automation/builtin/parse-config.ts`),并让 `registerFlow()`\n拒绝 descriptor `configSchema` 未声明的键。\n\n#4278(#4325)给另外三个 **descriptor-schemaless** 节点补上了执行器派生的契约\n(`spec/automation/schemaless-node-config.zod.ts`:`ScriptConfigSchema` /\n`SubflowConfigSchema` / `DecisionConfigSchema`),但**刻意没有**接入 parse,也没有发布\ndescriptor `configSchema`——两件事是同一个理由。\n\n## 为什么不能直接接上去\n\n**它们的键集不等于契约。**\n\n- **`script`** —— 合法键随 `actionType` 变:内置副作用分支读\n  `template` / `recipients` / `variables`;函数分支读\n  `function` / `inputs` / `outputVariable`;内联 `script` 是被识别但不执行的第三种。\n  平铺 parse 只能取这些键的并集,于是\n  `{ actionType: 'email', function: 'x' }` 这种自相矛盾的配置照样通过——**检了个寂寞**;\n  若反过来收紧成任一分支,就会拒绝另一半合法元数据。\n- **`decision`** —— 完全可以不带 `conditions`,只靠出边的 `edge.condition` 分支\n  (这是遗留但合法的形态)。\n- **`subflow`** —— 这个其实**最接近可接入**:键集扁平,`flowName` 执行期必需,\n  执行器已经用 `refuseNode()` 拒绝缺失的情况。\n\n## 建议做法\n\n1. **`subflow` 可以先接**——低风险,把现有的 `refuseNode` 换成统一的 parse guard,\n   与其它 12 个节点的失败形态一致(guard refusal,不走 fault 边)。\n2. **`script` 需要先改造成判别式**:按 `actionType` 拆成\n   `z.discriminatedUnion`(或等价的 `superRefine`),分支分别声明各自的键。\n   这同时会让「自相矛盾的配置」在作者时就被拒,而不是运行到一半才发现\n   ——`actionType: 'email'` 却写了 `function` 是当前唯一还能悄悄通过的形态。\n3. **`decision` 大概率维持现状**:它的真实契约一半在边上,不在 config 里;\n   接 parse 的收益仅限于「`conditions[]` 元素的类型」,可以等 2 做完再评估。\n\n一个附带好处:`script` 一旦有了判别式形态,objectui 的\n`flow-node-config.spec-reconciliation.test.ts`(objectui#3099)可以从「键集并集比对」\n升级为「按 `actionType` 分支比对表单的 `showWhen` 分组」——那才是表单实际的形状,\n也能挡住「某个分支少提供了一个字段」这类 #4278 没覆盖到的漂移。\n\n## Related\n\n- #4278 —— schemaless 节点的表单无人对账(已关闭)\n- #4325 —— 发布这三个契约的 PR\n- #4277 / #4332 —— 执行器 parse config + registerFlow 拒绝未声明键\n- objectui#3099 —— 跨仓对账测试\n- #1870 —— `config.function` 作为 canonical 调用引用的来源"
+}

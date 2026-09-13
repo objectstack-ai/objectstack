@@ -1,0 +1,32 @@
+{
+  "number": 4507,
+  "kind": "issue",
+  "title": "[P3] platform `agent` definitions change with no durable change log — `MetadataManager.register` bypasses the history path",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T13:52:38Z",
+  "updated_at": "2026-08-01T14:41:40Z",
+  "closed_at": "2026-08-01T14:41:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4507",
+  "body": "**Rewritten after checking the `cloud` repo — the original framing was wrong.** It read the closed `agent` flags as an oversight and proposed opening them. They are deliberate, and the real finding is narrower. The original text is preserved at the bottom.\n\n## What is actually true\n\n`agent` is the only metadata type with both `allowOrgOverride: false` and `allowRuntimeCreate: false`, and `packages/spec/src/kernel/metadata-plugin.zod.ts` says why, in as many words:\n\n```\nADR-0063 §2 — `*.agent.ts` is CLOSED to third parties. The kernel ships\nexactly two platform-owned agents (`ask`/`build`); tenants extend the\nplatform by authoring skills + tools, never agents. Hence\nallowRuntimeCreate:false (no runtime \"create agent\") and\nallowOrgOverride:false (no per-org agent fork).\n```\n\nConfirmed against the population: the two agents are `ask` and `build`, both shipped from `@objectstack/service-ai-studio` in the `cloud` repo (`agents/ask-agent.ts`, `agents/metadata-assistant-agent.ts` — `BUILD_AGENT_NAME = 'build'`).\n\nSo **`migrateStoredMetadata` skipping `agent` is correct and permanent**, not a gap awaiting a write path. And the `saveMetaItem` legacy raw-engine branch — the one that records no history and forces `state: 'active'` — has, for this type, **no callers at all**: nothing authors an agent through it, by design. The silent-draft-publish hazard I originally described is latent, not live.\n\n## The real finding\n\nThe two agents do not reach `sys_metadata` through `saveMetaItem`. `AIStudioPlugin.registerMeta` calls `metadataService.register(...)`:\n\n```ts\nconst stored = await withTimeout(metadataService.get(type, name));\nif (stored != null && JSON.stringify(stored) === JSON.stringify(item)) return;  // up to date\nawait withTimeout(metadataService.register(type, name, item, { notify: false }));\nctx.logger.info(stored\n  ? `[AI Studio] built-in ${type} ${name} refreshed (shipped definition changed)`\n  : `[AI Studio] ${type} ${name} registered`);\n```\n\n`MetadataManager.register` persists by calling `loader.save(...)` on any writable `datasource:` loader, and `DatabaseLoader.save` writes the `sys_metadata` row directly — computing a fresh `checksum`, skipping the write when the checksum is unchanged, and **appending no `sys_metadata_history` row**.\n\nThat log line is the finding: `refreshed (shipped definition changed)` is a real mutation of a live behavioural surface — an agent's instructions, tools and knowledge — recorded nowhere durable. Consequences:\n\n- no answer to \"what did the `build` agent's instructions say in 17.0.0-rc.1\"; the previous body is simply gone;\n- no rollback for a shipped agent definition that regresses behaviour;\n- nothing for a Studio history tab or an audit timeline to render;\n- and the platform's own migration reports these rows as `skipped`, so no operator-facing surface shows their state either.\n\nAgent definitions are arguably the type where \"what changed, when, and can we go back\" matters *most*, and they are the one type that cannot answer.\n\n## Scope note on the general shape\n\n`register()` bypassing the history path is not agent-specific — it is how every plugin-shipped metadata record is written. For most types that is harmless because the same record is also authorable through `saveMetaItem`, which does record history. `agent` is the case where the bypass is the *only* path, so it is where the missing change log is total rather than partial.\n\n## Sketch\n\nDeliberately not \"open the type\" — ADR-0063 closed it on purpose and this issue should not reopen that.\n\n1. **Decide whether platform-shipped metadata deserves history at all.** It may be defensible that a code-owned record needs no change log because the code *is* the record (the definition is in git, in `cloud`). If that is the answer, write it down next to the ADR-0063 comment and close this — the honest resolution.\n2. **If not:** have `MetadataManager.register` (or the `DatabaseLoader.save` path) append a history row with a `source` marking it a platform refresh, so the durable record exists without routing platform writes through `saveMetaItem`'s authoring gate.\n3. **Independently, make the latent branch honest.** `saveMetaItem`'s raw-engine branch silently upgrades `mode: 'draft'` to a publish. Nothing hits it for `agent` today, but a future type declaring the same flag pair would inherit the behaviour silently. A refusal naming the type beats a silent upgrade.\n\nDowngraded P2 → P3: no live victim, no regression, and option 1 may be a legitimate close.\n\n<details>\n<summary>Original text as filed (superseded)</summary>\n\nThe original body claimed the flags were possibly set \"by omission\" and proposed flipping them as the preferred fix, and framed the silent draft-publish as an active hazard. Both are wrong: ADR-0063 §2 closes the type deliberately, and no caller reaches that branch for `agent`. The observation that survives is the missing history, via a different write path than the one originally named.\n\n</details>\n\nRefs #4327 (PR #4464), #4454 (PR #4492), #4498 (PR #4504), ADR-0063 §2, ADR-0033, ADR-0087."
+}

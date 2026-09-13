@@ -1,0 +1,36 @@
+{
+  "number": 4781,
+  "kind": "issue",
+  "title": "content/docs/protocol/kernel/runtime-capabilities.mdx 通篇描述已于 #3605 删除的 ObjectStackCapabilities —— 整页教一个不存在的 schema",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T06:15:59Z",
+  "updated_at": "2026-08-03T08:45:41Z",
+  "closed_at": "2026-08-03T08:45:06Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4781",
+  "body": "#4634(DriverCapabilities 活性审计)扫描 hand-written docs 时发现,顺带记录,不在该 PR 范围内修。\n\n## 现象\n\n`content/docs/protocol/kernel/runtime-capabilities.mdx`(hand-written 区)整页教读者使用 `ObjectStackCapabilities`(`data` / `ui` / `system` 三子系统能力描述符),包括两个完整的 `const capabilities: ObjectStackCapabilities = {...}` 示例和 `hasCapability()` 用法。\n\n但该 schema 已不存在:\n\n- `packages/spec/src/kernel/index.ts:19` 注释明言 `ObjectStackCapabilities.system.features` 描述符「was itself removed as dead (#3605)」;\n- 全仓 grep `ObjectStackCapabilities` 只剩注释引用(kernel/index.ts、stack.zod.ts:255),`api-surface.json` 无此导出;\n- 页内表格的键(`queryDistinct`、`queryHaving`、`queryJoins`、`geoSpatial`……)与任何现存 schema 都对不上——它们既不是 `DriverCapabilities` 的键,也不是别处的。\n\n`import type { ObjectStackCapabilities } from '@objectstack/spec'` 是 TS2305,照抄示例的读者(尤其 AI)会在第一行编译失败;更糟的是页面声称「AI Agents: Understanding platform constraints for code generation」——教 AI 用一个不存在的能力协商面。\n\n## 建议处置\n\n二选一,按 docs-accuracy 流程定:\n\n1. **删页**(倾向):运行时能力发现的活机制是 REST `/api/v1/discovery`(页尾那节反而是准的)+ 驱动侧 `DriverCapabilities` 三个活位(#4634 后)。把 discovery 节并入 API 文档,其余删除。\n2. 重写为 discovery 文档,删除三子系统描述符的全部内容。\n\n`meta.json` 同步更新。可参考 docs-accuracy-audit 技能的流程。\n\n发现于 #4634 审计,未认领——谁开工谁按 AGENTS.md 认领。"
+}

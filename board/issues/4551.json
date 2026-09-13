@@ -1,0 +1,35 @@
+{
+  "number": 4551,
+  "kind": "issue",
+  "title": "`isSystem` 写入仍可产生悬空 lookup 引用——需要一条只报告不拦截的巡检（#4441 残留）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T02:32:22Z",
+  "updated_at": "2026-08-02T03:29:21Z",
+  "closed_at": "2026-08-02T03:29:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4551",
+  "body": "#4441 让引擎在写入路径上强制 lookup 引用完整性，但**刻意豁免了 `isSystem` 写入**：种子重放、包安装、启动期供给合法地以「批次完成后才自洽」的顺序写入，让它们 fail-closed 会把一个排序细节变成启动失败。\n\n这个豁免是对的，但它留下一个缺口：**平台自身仍可写入指向虚无的引用，而没有任何东西会说出来。**#4441 的 PR 已明确记录该残留、未静默接受，本 issue 是它的落地跟进。\n\n## 为什么不能靠「把豁免去掉」解决\n\n去掉豁免会把种子排序问题变成启动失败——这正是豁免存在的理由。而且平台确实有合法的非 id 写入：`sys_metadata_history.recorded_by` 是 `lookup('sys_user')`，平台以 `actor ?? 'system'` 填入**哨兵字符串**，且该写入不带 `isSystem`（这一条已由 #4441 收窄为跳过 `readonly` 字段处理）。拒绝平台自身的写入不是报告问题的正确方式。\n\n## 建议形态：只报告，不改写\n\n与 #4469 的 `inspectStrandedRequests()` 同一形状——那条巡检的判断已经过一轮实践检验，可直接借鉴：\n\n- **只报告，绝不改写。** 数据是真实写入的；自动清理会让审计与事实不符。\n- **报告面向人工**：哪个对象、哪条记录、哪个字段、指向哪个不存在的 id、目标对象是什么。\n- **不可知与不存在必须分开。** 目标对象未注册、无 driver、探测抛错 —— 计入 `undetermined` 而非判定为悬空，这样「0 条悬空」永远不会被误读成「一切正常」。#4469 的巡检为此专门写了两条测试。\n- **挂在既有的清扫时钟上**，让运维不必知道要去找。\n\n## 范围建议\n\n- 覆盖非 `readonly` 的 `lookup` / `master_detail` 字段；`readonly` 字段按 #4441 的既有判断跳过（那里的值由平台铸造，非调用方值）。\n- 空值（`null` / `''` / 空数组）不是引用，跳过 —— 与 #4441 的判断保持一致。\n- **RBAC 关联表优先**（`sys_position_permission_set` 等）：一条悬空行在那里是**指向虚无的安全面记录**，而受众锚点闸门恰恰要解析那个权限集才能评估授权。\n\n## 验收\n\n- 回归测试要能在**撤掉巡检判据后失败**；至少覆盖：发现悬空引用并报出完整定位、目标存在时不报、探测抛错时计入 `undetermined` 而不判死、以及快照前后数据 JSON 相等（钉死「绝不改写」）。\n- 注意本仓库刚记录的一类失效模式（#4550）：**测试替身不得比真实实现宽松**。若用假引擎，其探测行为需与真实 driver 对齐。\n\n## 边界\n\n只做巡检与报告。**不要**改动 #4441 的强制逻辑，**不要**新增可作者化的 spec key（「悬空引用改为 opt-in」是另一个待维护者决策的方向，见 #4441）。\n\n发现自 #4482 v17 验收批次；#4441 的 PR #4511 记录了这一残留。"
+}

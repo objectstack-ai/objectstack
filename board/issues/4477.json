@@ -1,0 +1,32 @@
+{
+  "number": 4477,
+  "kind": "issue",
+  "title": "screen flows: resume performs no server-side validation — missing required fields and undeclared keys all complete the run",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T09:18:46Z",
+  "updated_at": "2026-08-01T15:14:50Z",
+  "closed_at": "2026-08-01T15:14:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4477",
+  "body": "Found while verifying the 17.0.0-rc.1 checklist on #3909 (section C — *\"Screen flows (#3528): … `visibleWhen` honored in render+validation\"*). Verified on `main` @ `1ee48bc60` with a purpose-built two-field screen flow.\n\n**The render half works. There is no validation half — `POST …/runs/:runId/resume` accepts anything.**\n\n## Specimen\n\n```ts\n{ id: 'ask', type: 'screen', label: 'Triage', config: { fields: [\n    { name: 'kind', label: 'Kind', type: 'text', required: true },\n    { name: 'escalation_reason', label: 'Escalation reason', type: 'text',\n      required: true, visibleWhen: \"kind == 'escalate'\" },\n]}}\n```\n\n## Render — correct\n\nThe trigger response and `GET …/runs/:runId/screen` both carry the predicate intact, so a renderer has what it needs:\n\n```json\n{\"nodeId\":\"ask\",\"title\":\"Triage\",\"fields\":[\n  {\"name\":\"kind\",\"label\":\"Kind\",\"type\":\"text\",\"required\":true},\n  {\"name\":\"escalation_reason\",\"label\":\"Escalation reason\",\"type\":\"text\",\n   \"required\":true,\"visibleWhen\":\"kind == 'escalate'\"}]}\n```\n\n## Resume — accepts every shape\n\n| resumed with | expected | actual |\n|---|---|---|\n| `{\"kind\":\"normal\"}` — conditional field hidden | accept | **200 accept** ✅ |\n| `{\"kind\":\"escalate\"}` — conditional field VISIBLE and required, value missing | reject | **200 accept** ❌ |\n| `{}` — `kind` itself required, unconditional, missing | reject | **200 accept** ❌ |\n| `{\"kind\":\"normal\",\"totally_bogus\":\"x\"}` — undeclared key | reject | **200 accept** ❌ |\n\nEvery one completes the run (`success: true`, both nodes `status: \"success\"`).\n\nSo the checklist's \"honored in validation\" reads as passing only vacuously: nothing is validated, so the conditional-required case cannot be got wrong. A client that skips the dialog and posts to `resume` directly bypasses every `required` the flow author declared.\n\n## Why this matters here specifically\n\nScreen flows are the one place where the **declared field contract is the only contract** — there is no object schema behind a screen node to catch it downstream. The platform enforces the analogous contracts everywhere else this train touched: action params are strict by default with required/option/unknown-key checks (ADR-0104 D2, #4213 — verified working), record writes enforce `required` with per-field errors (ADR-0113, #4031 — verified), approval `decisionOutputs` reject a missing required key *and* an undeclared one (#3447 — verified, with the declared keys listed in the error). Screen-flow resume is the gap in that row.\n\n## Expected\n\n`resume` validates the submitted bag against the suspended node's declared fields, evaluating `visibleWhen` against the submitted values first: a hidden field's `required` does not fire, a visible one's does, and an undeclared key is refused — the same shape `enforceActionParams` already produces (`Invalid action params: …`, 400).\n\nPart of the #3909 rc.0/rc.1 verification (section C).\n"
+}

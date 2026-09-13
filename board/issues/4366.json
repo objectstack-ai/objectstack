@@ -1,0 +1,32 @@
+{
+  "number": 4366,
+  "kind": "issue",
+  "title": "[automation/audit] runAs:'system' 流回写的审计行无归因(user_id/actor 双空),console 历史显示「未知用户」",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T09:07:45Z",
+  "updated_at": "2026-07-31T12:14:44Z",
+  "closed_at": "2026-07-31T12:14:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4366",
+  "body": "## 现象\n\n审批流(`runAs:'system'`)自动回写业务记录(如镜像「当前审批节点」字段)后,记录详情「历史」页签里这些 UPDATE 条目显示 **「未知用户」+ \"?\" 头像**,和真实用户条目交错出现。下游业务用户的原话:「历史中的未知用户,是指系统吗?」——看起来像数据错乱,而不是系统自动化。\n\n## 根因链\n\n1. `packages/services/service-automation/src/runtime-identity.ts`:`runAs:'system'` 解析为 `{ isSystem: true }` —— 不带 `userId`,也**没有放 `actor` 服务主体**。\n2. `packages/plugins/plugin-audit/src/audit-writers.ts` `writeAudit()`:`user_id = sess.userId ?? null`;归因回退读 `sess.actor`(ADR-0014 D2 专门为非用户写入准备的 `svc:*` 通道)。流引擎没设 actor,于是审计行 **`user_id=null`、`actor=null`,完全无归因**。\n3. console `RecordDetailView` 历史归因链(user 目录解析 → `actor` 列回退)全落空 → `HistoryTimeline` 渲染 `unknownUserText`(「未知用户」)。\n\n即:audit 侧的服务主体归因通道是现成的,流引擎在 system 上下文里漏了标注自己。\n\n## 建议\n\n- **framework**:流引擎构造 `runAs:'system'` 数据上下文时带上服务主体 actor,如 `svc:flow:<flowName>`(或至少 `svc:automation`),现有 audit writer 无需改动即可归因;顺带 flowRunId 已在 context 上,可进 actor 标签方便追查是哪次运行写的。\n- **console(锦上添花)**:把 `svc:*`/system 主体渲染成本地化的「系统」徽标而非裸主体串——`RecordDetailView.tsx` L1442 已有 `detail.systemActor`(默认 'System')的先例,历史时间线可复用。\n\n## 版本 / 下游\n\n- `@objectstack/*@17.0.0-rc.0`\n- 下游项目 steedos-labs/os-project-titanwind-ehr#662(有截图)\n"
+}

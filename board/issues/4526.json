@@ -1,0 +1,37 @@
+{
+  "number": 4526,
+  "kind": "pull_request",
+  "title": "chore: merge main into percent-scale-3136, regenerating the api-surface baseline (#4442)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T16:26:42Z",
+  "updated_at": "2026-08-02T01:02:08Z",
+  "closed_at": "2026-08-02T01:02:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-02T01:02:07Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4526",
+  "body": "**Not mergeable through GitHub — see \"How to land this\" below.** This PR holds a verified conflict resolution for #4442; it cannot be squash-merged without defeating its own purpose.\n\nResolves the merge conflict that put #4442 into `dirty`.\n\n## Why #4442 went dirty\n\n#4442 was `clean` against `main` at `fd3013a`. `main` has since moved to `20b1a9e` (#4511 and friends), which reshaped the `@objectstack/spec` public surface — and #4442 now carries a regenerated `packages/spec/api-surface.json` of its own. Both sides rewrote the same lines of the same generated file:\n\n```\nCONFLICT (content): Merge conflict in packages/spec/api-surface.json\n```\n\nThat was the **only** conflicted path. Everything else — including `service-analytics/src/analytics-service.ts` and `plugin.ts`, which both branches touched — auto-merged.\n\n## How it's resolved\n\nNeither side is the answer for a generated file. `--ours` would erase main's surface changes; `--theirs` would erase the percent-scale exports; both would leave a baseline that no longer describes the built package, which is precisely the state the `check:api-surface` gate exists to catch. So the resolution is to **rebuild `spec` from the merged sources and re-run `gen:api-surface`** — let the generator state the truth about the merged tree.\n\nThe result is verifiable rather than asserted. Against main's own baseline, the merged branch differs by exactly the four percent-scale exports and nothing else:\n\n```diff\n+    \"PercentScale (type)\",\n+    \"PercentScaleFieldMeta (interface)\",\n+    \"emptyGroupValueFor (function)\",\n+    \"percentScaleOf (function)\",\n```\n\nMain's additions and removals all survive — the export count moves `4606 → 4500` in step with main. `api-surface-signatures.json` came back byte-identical on both sides.\n\n## Reading the diff — the file count is an artifact\n\nGitHub diffs this PR against its base, `claude/percent-scale-3136` at `bb79c30`, and that commit is **459 files behind `main`**. Merging `main` in therefore renders every one of main's commits since `ad5fe25` as though it were authored here. It was not.\n\nMeasured against `main`, the merged branch adds **16 files** — #4442's own change, plus two files from this PR:\n\n```\n 16 files changed, 378 insertions(+), 22 deletions(-)\n```\n\nTo see what this PR actually decides, diff the branch against `main`, not against the PR base:\n\n```\ngit diff origin/main <this-branch> -- packages/spec/api-surface.json   # 4 added lines\ngit diff origin/main <this-branch> --stat                             # 16 files total\n```\n\nNote that `git show --stat` on the merge commit is *not* the right lens — for a merge it prints the full first-parent diff (447 files), not the resolution.\n\n## The semantic-conflict check\n\nA textual auto-merge is not proof of a semantic one. #4442 renames `measureCurrency` → `sourceFieldMeta` in `analytics-service.ts`, and main independently added `__tests__/measure-source-field-gate.test.ts` to the same package — the classic shape for a merge that compiles on paper and breaks in fact. Verified directly: main's new test references neither name, and `measureCurrency` has no remaining references anywhere in `packages/`.\n\n## Verification (post-merge, on the merged tree)\n\n| Check | Result |\n|---|---|\n| `spec check:api-surface` | `public API surface + factory signatures unchanged ✓` |\n| `spec typecheck` (`tsc --noEmit`) | clean |\n| `spec` `src/data` suite | 43 files, **1264 passed** |\n| `service-analytics` full suite | 36 files, **493 passed** (up from 470 — main's new tests included) |\n| `measureCurrency` dangling references | none |\n| PR checks | 7/7 green |\n\n## How to land this\n\n**Do not squash-merge this PR.** This repository disallows merge commits (`405: Merge commits are not allowed`), and squashing would flatten main's history into a single commit *without recording `main` as an ancestor* — leaving `merge-base(main, percent-scale-3136)` stuck at `ad5fe25`, ballooning #4442's own diff, and likely re-conflicting on `api-surface.json`. That undoes the fix.\n\nThe correct way to land it is to push the merge commit `3144a11` straight onto `claude/percent-scale-3136` — exactly what GitHub's own \"Update branch\" button does:\n\n```\ngit fetch origin\ngit checkout claude/percent-scale-3136\ngit merge --ff-only origin/claude/pr-4442-fix-5o08wm\ngit push origin claude/percent-scale-3136\n```\n\nThat is a fast-forward — `3144a11` already has `bb79c30` as its first parent — so nothing is rewritten. #4442 returns to `mergeable` and its diff stays at its own 16 files.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01S9TVFwXGsXqR3SD5e2qAU8"
+}

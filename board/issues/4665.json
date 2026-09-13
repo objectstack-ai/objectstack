@@ -1,0 +1,35 @@
+{
+  "number": 4665,
+  "kind": "issue",
+  "title": "跑 `pnpm objectui:refresh` 并落 console pin —— 2026-08-02 合并的 7 个 objectui PR 目前进不了 v17",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T15:17:19Z",
+  "updated_at": "2026-08-03T01:16:39Z",
+  "closed_at": "2026-08-03T01:16:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4665",
+  "body": "联动跟进(仓规:objectui 侧 PR 被接受后,立刻在消费仓立案,不靠记性)。**未认领。**\n\n## 为什么现在立\n\n2026-08-02 一天内 objectui 合并了 **7 个 PR**,其中 4 个改动了已发布包:\n\n| objectui PR | 内容 | changeset |\n|---|---|---|\n| objectui#3196 | dashboard date filter 未知值改为跳过 + 点名警告(objectstack#4475 的姐妹情形) | `@object-ui/core` **minor** |\n| objectui#3203 | `reference` 成为 action param 唯一可作者化的 picker 目标;九个解析侧键从公共类型移除 | `@object-ui/types` + `@object-ui/app-shell` **minor**(**对作者破坏性**) |\n| objectui#3204 | `record:activity` 接上取数路径,11 个声明输入不再是空 feed 上的摆设 | `@object-ui/plugin-detail` |\n| objectui#3210 | 取数中的活动 feed 显示加载态而非\"暂无活动\" | `@object-ui/plugin-detail` **patch** |\n\n另三个是 release-nothing(objectui#3195 仓库卫生、objectui#3211 CI 文档钉数字)或纯 CI(objectui#3198 假 FAIL 评论)。\n\n**这些修复现在只存在于 objectui 的 main 上。** 在 `pnpm objectui:refresh` 跑过、console pin 落下来之前,它们不在 objectstack 的构建产物里 —— 也就是说**不会出现在 v17 里**。\n\n## 需要做什么\n\n1. `pnpm objectui:refresh`;\n2. 落 console pin 的版本 bump;\n3. 核对 objectui 的 changeset 都被带上(这正是 #3340 描述的失效模式:console pin 落后时前端 changeset 被漏掉)。\n\n## 特别注意:objectui#3203 是**对作者破坏性**的\n\n它从公共 `ActionParam` 上移除了九个键(`referenceTo` / `displayField` / `idField` / `descriptionField` / `titleFormat` / `lookupColumns` / `lookupFilters` / `lookupPageSize` / `dependsOn`)。迁移处方:内联 picker 目标改写 `reference`,其余改成 field-backed(`{ field: '<lookup_field>' }`)整组继承。\n\n理由是这些键**从来就存不进去** —— `@objectstack/spec` 的 `ActionParamSchema` 是 `.strict()` 且别名表点名 `referenceto → reference`,所以作者写它们在服务端是硬性 parse 拒绝,只是 `tsc` 一直放行。刷进来时请确认 v17 的升级指南收录了这条迁移。\n\n## 关联\n\n- #3340 —— 本条要防的那个流程失效(console pin 落后 ⇒ 前端 changeset 被漏)\n- #4475 / objectui#3150 —— objectui#3196 补的是这一条的另一半\n- objectui#3174 / objectui#3201 —— 破坏性变更的来龙去脉\n- objectui 侧全部已合并:objectui#3195 / #3196 / #3198 / #3203 / #3204 / #3210 / #3211"
+}

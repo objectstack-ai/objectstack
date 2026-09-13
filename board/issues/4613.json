@@ -1,0 +1,32 @@
+{
+  "number": 4613,
+  "kind": "issue",
+  "title": "#3770 / #3867 的存在性闸门只有注入式单测,生产接线没有任何断言 —— 删掉接线全仓库 694 个测试无一变红",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T10:45:53Z",
+  "updated_at": "2026-08-02T11:24:05Z",
+  "closed_at": "2026-08-02T11:24:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4613",
+  "body": "按 Prime Directive #10 记录。这是对我自己在 #3770 / #3867 里留下的测试形态的复盘,**有实证**。\n\n## 实证:把闸门从生产接线上摘掉,没有一个测试会响\n\n两个对照实验,各自只删掉「把探针递给服务」的那几行,不动实现、不动单测:\n\n| 实验 | 改动 | 结果 |\n|:---|:---|:---|\n| **A** | 从 `service-analytics/src/plugin.ts` 删掉 `isRegisteredObject: (name) => …` 那 5 行 | service-analytics **299 全绿**;dogfood(真实启动 + 真实 HTTP)**395 全绿** |\n| **B** | 从 `metadata-protocol/src/protocol.ts` 的 `findData` 删掉 `this.assertObjectRegistered(request.object)` | **立刻红 4 条** |\n\n实验 A 的含义:**#3867 的 cube 存在性闸门可以被一次重构整个删掉,仓库里没有任何测试会发现。** 它只会打一行 `logger.warn`(stand-down 警告),而没人断言那行 warn。`/analytics/query` 会安静地退回到 #3867 修复前的状态 —— 也就是当时用 `sqlite_master` 实测过的「连接能看到的任何表都能读」。\n\n## 为什么是这个不对称\n\n不是运气,是测试形态的差别:\n\n- **#3770 的测试**(`protocol-unregistered-object.test.ts`)驱动**真实的** `protocol.findData`,调用点在被测对象内部 → 删掉就红。\n- **#3867 的测试**(`cube-inference-gate.test.ts`)把探针当**配置注入**:`new AnalyticsService({ isRegisteredObject: … })`。它测的是**服务收到探针后的行为**,不是**有没有人把探针递给它**。\n\n这正是 AGENTS.md Prime Directive #10 结尾那句话的镜像 —— 「`case` 标签不是强制;去看**调用点**」。#3106 当年漏的是 `switch` 里每个 case 都对但 `updateMany` 调用点没调它;这次方向反过来:实现和单测都对,**接线没被测**。\n\n## 不是孤例,而且在扩散\n\n`packages/services/service-analytics/src/__tests__/measure-source-field-gate.test.ts:54` 是后来新增的另一个闸门测试,同样以 `isRegisteredObject: (n) => n === 'showcase_invoice'` 注入。同一个模式正在被复制,所以缺口在扩大而不是收敛。\n\n仓库里已有先例说明这类 boot 级 ratchet 是有价值的 —— `analytics-rls.dogfood.test.ts` 的文件头逐字写着:\n\n> Every pre-existing analytics RLS test injects `getReadScope` as a fake into a hand-built AnalyticsService. NONE booted the real plugin, so the `getReadScope → security.getReadFilter` auto-bridge had zero coverage — **which is how the gap shipped.**\n\n#3597 就是这么漏出去的。#3867 现在处在完全相同的位置。\n\n## 建议\n\n加**一条 boot 级** dogfood 用例(照 `analytics-rls.dogfood.test.ts` 的形态,`bootStack` + `stack.apiAs`),同时钉住两条接线:\n\n- `GET /api/v1/data/<未注册对象>` → 404 `OBJECT_NOT_FOUND`(#3770 接线)\n- `POST /api/v1/analytics/query {\"cube\":\"<未注册>\"}` → 404(#3867 接线)\n- 外加已注册对象的对照断言,避免「启动就是坏的」让前两条为了错误的理由变绿\n\n关键是**必须走真实插件启动**,不能是 `new AnalyticsService(...)` —— 否则又在测服务而不是接线。\n\n关联:#3770、#3867、PR #3866、PR #3875、#3597、#3106、ADR-0049。"
+}

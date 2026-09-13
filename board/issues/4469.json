@@ -1,0 +1,32 @@
+{
+  "number": 4469,
+  "kind": "issue",
+  "title": "[approvals] 存量僵尸请求无人认领:已终态但 run 悬空的请求落在 releaseDeadRunRequests 的盲区里",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T08:59:31Z",
+  "updated_at": "2026-08-01T15:15:47Z",
+  "closed_at": "2026-08-01T15:14:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4469",
+  "body": "#4420 的后续。那个 PR（#4460）修的是**不再产生**新的僵尸;**已经卡住的**请求仍然没有任何机制发现或释放。\n\n## 问题\n\n#4420 的故障形态是:请求行已翻成 `approved`(或 `rejected`),但它的 `flow_run_id` 指向的 run 已经不存在——决策落库了,流程永远不动。凡是在装有 17.0.0-rc.1 且撞上装配漏洞的部署上、于重启前后跨越的审批,都可能留下这种行。\n\n现有的死信清扫 `ApprovalService.releaseDeadRunRequests()`(`packages/plugins/plugin-approvals/src/approval-service.ts`)扫不到它们,原因很直接:\n\n- 它只扫 `status: 'pending'` 的请求;\n- 而僵尸的状态**恰恰已经不是 pending**——它是被那次\"成功\"的决策翻成终态的。\n\n也就是说,把请求推入僵尸态的那一步,同时把它推出了唯一一个会去检查它的清扫器的视野。这也是这类故障能长期无声的原因之一:没有任何一层在看它。\n\n另外 `releaseDeadRunRequests` 判定\"死\"的依据是 `getRun(runId)` 返回终态状态,而 `getRun` 读的是执行日志环形缓冲——重启后对一个**活着的**挂起 run 同样返回 null。它把 null 当作\"还活着\"来处理(保守,正确),但这也意味着它本来就没有能力回答\"这个 run 是不是真的没了\"。\n\n## 现在有了可用的原语\n\n#4460 引入了 `AutomationEngine.hasSuspendedRun(runId)`:直接问挂起存储,而不是问执行日志;库读不到时**抛错**而不是答 `false`(避免把一次抖动误判成死 run)。它已经通过可选的 `ApprovalResumeSurface.hasSuspendedRun` 暴露给审批侧,可以直接复用。\n\n## 期望\n\n一个管理端清扫/巡检,能找出**终态请求中 run 已不可恢复**的行:\n\n- 扫描条件大致是:`flow_run_id` 非空 且 请求已终态 且 `hasSuspendedRun(runId) === false` 且 该 run 也没有终态 run 记录(`sys_automation_run` 里 `run_` 前缀的历史行)——即\"既不在挂起,也没跑完\",这才是真悬空;\n- 对 `hasSuspendedRun` 抛错的情况必须跳过而非判死(存储不可读 ≠ run 不存在);\n- 输出面向人工:哪些记录卡在哪一级、镜像字段停在什么状态。**不建议自动改写状态**——决策是真实发生过的,自动回滚会让审计与事实不符;先做成可见的报表/告警,由管理员决定是重跑后续动作还是重新发起。\n\n## 参考\n\n- `packages/plugins/plugin-approvals/src/approval-service.ts` — `releaseDeadRunRequests`(只扫 pending)、`ApprovalResumeSurface`\n- `packages/services/service-automation/src/engine.ts` — `hasSuspendedRun`、`getRun` 的语义差异\n- `packages/services/service-automation/src/suspended-run-store.ts` — 活挂起行(裸 runId)与终态历史行(`run_` 前缀)的键设计\n- #4420 / #4460"
+}

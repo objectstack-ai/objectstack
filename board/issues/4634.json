@@ -1,0 +1,35 @@
+{
+  "number": 4634,
+  "kind": "issue",
+  "title": "DriverCapabilities.streaming 在 findStream 退休后指向不存在的能力，且从来没有读者（ADR-0049，#4484 收尾发现）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "protocol:breaking"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T12:21:56Z",
+  "updated_at": "2026-08-03T07:07:56Z",
+  "closed_at": "2026-08-03T07:07:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4634",
+  "body": "做 #4484（退休 `IDataDriver.findStream`）时闭合调用图，发现能力标志 `DriverCapabilities.streaming` 是同一处死声明的**另一半**，单独留下会比原来更糟。未在 #4484 里一并处理，是因为它的爆炸半径不同（每个 driver 的能力字面量，含三方 driver），值得单独定夺。\n\n## 位置\n\n`packages/spec/src/data/driver.zod.ts:273-276`：\n\n```ts\n  /**\n   * Whether the driver supports streaming large result sets.\n   */\n  streaming: z.boolean().default(false).describe('Supports result streaming (cursors/iterators)'),\n```\n\n## 证据\n\n1. **零读者。** 全仓（framework + cloud，排除 `node_modules` / `dist`）没有任何一处读 `supports.streaming` / `capabilities.streaming`。命中全部是**写**：\n\n```\npackages/plugins/driver-memory/src/memory-driver.ts:202     streaming: true,   // 注释原文曾是 \"Implemented via findStream()\"\npackages/plugins/driver-mongodb/src/mongodb-driver.ts:115   streaming: true,\npackages/plugins/driver-sql/src/sql-driver.ts:552           streaming: false,\npackages/spec/src/api/registry.example.ts:219               streaming: false,\npackages/core/API_REGISTRY.md:306                           streaming: false,\n```\n\n没有查询规划、没有能力协商、没有 REST discovery 字段读它。它是纯粹写进去就再没人看的一位。\n\n2. **写进去的值本身就是错的**，而且没人发现——这正是零读者的直接后果：`SqlDriver` 声明 `streaming: false` 却实现了 `findStream`；`InMemoryDriver` 声明 `streaming: true`，实现却是 `await this.find()` 之后再逐条 yield（把整表读进内存，恰好是 streaming 的反面）。三个 driver 里只有 mongo 的 `true` 是名副其实的，而它现在也随 #4484 一起删掉了。\n\n3. **#4484 之后它指向空。** `findStream` 是这个标志唯一可能描述的东西（memory driver 的注释直说了 `// Implemented via findStream()`）。契约方法删掉后，`streaming: true` 描述的是一个平台不再声明的能力——下一个读到它的人（或 agent）会据此推断存在一条流式读路径，这正是 #4484 要消除的假可供性，只是往上挪了一层。\n\n## 处置倾向\n\n**remove**，理由与 #4484 同源。真要做流式读，路径是\"先有调用方，再有契约方法，再有描述它的能力位\"，而不是留一个描述空洞的布尔。\n\n需要先定夺的是范围：`DriverCapabilitiesSchema` 有近 30 个位，`streaming` 未必是唯一一个零读者的（`queryCache`、`preparedStatements`、`vectorSearch`、`geospatialQuery` 值得一并查）。两条路：\n\n1. **只删 `streaming`**——干净、与 #4484 同源、当天可完成；代价是同一份审计要再做一遍。\n2. **对整个 `DriverCapabilities` 做一次活性审计**，按 ADR-0049 一次性处置所有零读者的位；代价是范围大得多，且要处理三方 driver 的能力字面量（删一个 key 会让写它的对象字面量报 excess-property 错误）。\n\n我倾向 **先做 2 的审计、再按结果一次性 remove**：逐位退休会让每个 driver 作者被迫改三四次能力字面量，而一次审计只改一次。\n\n## 相关\n\n- #4484 —— `IDataDriver.findStream` 退休（本 finding 的来源；PR 里保留了 `streaming` 位并把 memory driver 的注释改成指向本 issue）\n- ADR-0049 enforce-or-remove / ADR-0078 no-silently-inert-metadata\n\n未指派 —— 按 AGENTS.md 的约定，这是一条记录下来的 finding，谁开工谁认领。"
+}

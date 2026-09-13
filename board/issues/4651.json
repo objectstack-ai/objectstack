@@ -1,0 +1,35 @@
+{
+  "number": 4651,
+  "kind": "issue",
+  "title": "app.areas[] 的 visible / requiredPermissions 是 fail-open 的访问闸门 —— 服务端从不走 areas（ADR-0049，v17 限时）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "protocol:breaking",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T14:09:21Z",
+  "updated_at": "2026-08-02T21:33:04Z",
+  "closed_at": "2026-08-02T21:33:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4651",
+  "body": "从 #4509「顺带三项」的核验中分出来的独立发现。**未指派 —— 只是记录。**\n\n## 现象\n\n`NavigationAreaSchema`（`packages/spec/src/ui/app.zod.ts:625-661`）声明了两个门控键：\n\n```ts\nvisible: ExpressionInputSchema.optional().describe('Visibility predicate (CEL) for this area.'),\nrequiredPermissions: z.array(z.string()).optional().describe('Permissions required to access this area'),\n```\n\n两个都**没有任何消费者**。服务端的权威可见性闸门 `filterAppForUser` 只走 `item.navigation`：\n\n- `packages/rest/src/rest-server.ts:1814-1817` 检 **app 级** `requiredPermissions`\n- `:1823` `const nav = Array.isArray(item.navigation) ? item.navigation : null; if (!nav) return item;`\n- `:1826-1844` `filterNav` 递归 **nav 项级** `requiredPermissions` / `requiresService`\n\n`item.areas` 从头到尾**一个字都没读**。objectui 侧同样：`packages/layout/src/NavigationRenderer.tsx:894` 只对 nav item 做 `checkPerm`，area 切换器渲染每一个 area。\n\n## 为什么这是缺陷而不是债\n\n这不是普通死键，是**fail-open 的能力闸门**：\n\n- 作者写 `requiredPermissions: ['sales.admin']` 在一个 area 上，保存成功，**所有人都看得见这个 area**及其下的全部导航\n- 作者写 `visible: 'user.role == \"manager\"'`，同上\n\n而且**同名的兄弟键是真被执行的** —— 这正是它读起来「活着」的原因：app 级 `requiredPermissions` 在 rest-server.ts:1814 强制，nav 项级 `requiredPermissions` 在服务端（:1830）和客户端（NavigationRenderer.tsx:894）双端强制。三个地方两个是真的，中间那层是假的。ADR-0078 false compliance 的教科书形状，和 #4583 的 `capabilities.readOnly` 同一个模子。\n\n活性账本已把两条都标了 `authorWarn`，处方也写好了：\n\n> `visible` — Delete it, or gate the items INSIDE the area — nothing evaluates an area-level `visible` predicate, so a 'hidden' area renders for everyone: a capability gate that fails open, the worst shape of the silent no-op (#4001's own words).\n>\n> `requiredPermissions` — Fail-open access gate — same class as `visible` above; **the two are this ledger's most important app findings.**\n\n## 需要决定（ADR-0049，二选一）\n\n**A. enforce** —— 在 `filterAppForUser` 里加一层 area 过滤（app 级 → **area 级** → nav 项级，三层同构），客户端 area 切换器同步过滤。语义要先定清楚：一个 area 被过滤掉之后，它下面的 nav 项是整体消失，还是仍按自己的 `requiredPermissions` 参与其它 area？`visible` 的 CEL 求值上下文也要定（服务端有没有 `user` 绑定）。\n\n**B. remove** —— 从 `NavigationAreaSchema` 删这两个键（该 schema 是 `.strict()`，走 strict 删除 + `guidance` 处方），处方指向真正生效的两层：per-item `requiredPermissions`（服务端 + 客户端双端强制）与 app 级 `requiredPermissions`。\n\n## ⏳ 时限\n\n**B 是破坏性的，必须赶在 `changeset pre exit` 之前落进 17.0.0**，否则要等 v18 —— 期间这两个键会在整个 17.x 里继续以 fail-open 的姿态被作者写下去。A 是新增行为（收紧），不受此限，但拖着不做等于让缺陷带着一个 major 走。\n\n## 同一账本里的邻居（顺带记录，不在本 issue 范围）\n\n`app` 类型还有另外两个 open dead 键：`areas[].order`（`authorWarn` —— 没有渲染器排序 areas，声明顺序就是显示顺序；对照组是**真被排序**的 nav 项 `order`，NavigationRenderer.tsx:1154）和 `areas[].description`（docs-shaped，按 ADR-0033 刻意保留、不告警）。`order` 若走移除路线，同样限时，可与本 issue 合并处理。"
+}

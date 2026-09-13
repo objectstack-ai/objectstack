@@ -1,0 +1,35 @@
+{
+  "number": 4815,
+  "kind": "pull_request",
+  "title": "fix(objectql,cli): 巡检随引擎一起停 —— `unreadableObjects` 不再被关停污染 (#4747)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T08:24:13Z",
+  "updated_at": "2026-08-03T08:52:08Z",
+  "closed_at": "2026-08-03T08:52:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T08:52:07Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4815",
+  "body": "Fixes objectstack-ai/objectstack#4747\n\n采纳 issue 与 PM 裁定的 **A + B**:A 修时序,B 保证即使时序再次被打破,`unreadableObjects` 也不会被非发现污染。**单独的 C(一次性命令不跑巡检)没有采用** —— 见下面「巡检在 CLI 场景仍然运行」一节。\n\n## 根因:两处静默空转叠在一起\n\n现场比 issue 猜的更基础一层。两个「看起来做了、其实没做」的调用:\n\n1. **`ObjectQLPlugin` 把关停逻辑写在 `stop()` 里,而内核根本不调 `stop()`。**\n   插件契约是 `init` / `start` / `destroy`(`packages/core/src/types.ts`),`performShutdown()` 只遍历 `plugin.destroy`。这件事仓里已经写明过了 —— `DefaultDatasourcePlugin.destroy` 的注释一字不差:\n\n   > Note the kernel's teardown phase is `destroy()` — `stop()` exists nowhere in the Plugin contract and is never called.\n\n   于是那行唯一会解除 ADR-0057 巡检定时器的 `this.lifecycleService?.stop()`,**在任何宿主上都没有跑过**,`os serve` 收 SIGTERM 时也一样。\n\n2. **`bootSchemaStack().shutdown()` 调的是 `(runtime as any).stop?.()`,而 `Runtime` 没有 `stop`。**\n   一个强制转型加一个 `?.`,把「没有关停」伪装成了「关停过了」:内核状态始终是 running、没有任何插件收到 `destroy()`,而同一个函数的下一行已经把 driver 断开了。\n\n叠起来的结果就是 issue 里那三行:启动 60 秒后巡检在**仍然活着**的进程里醒来,读一个自己宿主早已断开的连接池。`scanned: 0`,两个对象进 `unreadableObjects`。\n\n## 改了什么\n\n| 文件 | 改动 |\n|:--|:--|\n| `packages/objectql/src/plugin.ts` | `stop` → `destroy`(内核真正调用的钩子) |\n| `packages/cli/src/utils/schema-migrate.ts` | 走 `kernel.shutdown()` —— 与 `os serve` 收到 SIGTERM 时同一条路径;显式 `disconnect()` 保留为兜底 |\n| `packages/objectql/src/lifecycle/lifecycle-service.ts` | `stop()` 不只清定时器:它把「引擎正在拆」这一位交给飞行中的 sweep,并在每个 leg 边界检查;停掉之后不再开始新 sweep。新增 `get stopped` |\n| `packages/objectql/src/integrity/dangling-reference-audit.ts` | 新增 `signal`;读之前先问「还算数吗」;**因关停而失败的读被丢弃而不是归档**;新增 `DanglingReferenceReport.aborted` |\n\n`engine.ts` 与 `src/validation/**` **零改动**(#4794 的车道):`inspectDanglingReferences` 本来就原样转发 options,`signal` 顺着已有的通道流下去。\n\n### B 为什么不是字符串匹配\n\n区分「引擎正在关停」与「数据源不可达」的信号是**显式传下去的一位**,不是对 `Unable to acquire a connection` 做消息嗅探。后者正是 Prime Directive #12 说的消费端宽容:它会把一个错误文案变成事实上的第二份契约,换个 driver 就失灵。`LifecycleServiceOptions.referenceAudit` 的类型也顺手收成了 `Omit< DanglingReferenceAuditOptions, 'signal' >` —— 巡检的寿命就是这个 service 的寿命,不该有第二个人来回答「现在还能读吗」。\n\n`aborted` 是独立字段而不是 `unreadableObjects` 里的一条:**「没人问」不是「数据源拒绝了」**。它让「这次没跑完」依然是响的(报告永远不会被读成 clean bill of health),但不占用只该装发现的那个桶。\n\n## 验收\n\n**1. 成功运行里不再有噪声 —— 真实 CLI,不是测试替身**\n\n修前(`examples/app-crm`,`migrate recorded-by --json`):\n\n```\n2026-08-03T07:30:14.388Z ERROR Find operation failed {\"object\":\"sys_metadata\", …}\n2026-08-03T07:30:14.388Z WARN  [integrity] dangling-reference audit could not list an object …\n2026-08-03T07:30:14.389Z ERROR Find operation failed {\"object\":\"sys_view_definition\", …}\n2026-08-03T07:30:14.389Z WARN  [integrity] stored references that resolve to nothing (#4551)\n      {\"scanned\":0,…,\"unreadableObjects\":[\"sys_metadata\",\"sys_view_definition\"],…}\n```\n\n修后,同一条命令:\n\n```\n{ \"planId\": \"metadata.recorded-by-sentinel-to-null\", \"sentinel\": \"system\", \"pending\": 0, \"applied\": false }\n2026-08-03T07:54:21.546Z INFO Graceful shutdown started\n2026-08-03T07:54:21.556Z INFO ✅ Graceful shutdown complete\n```\n\n`grep -c \"Find operation failed\"` → `0`;`grep -c integrity` → `0`;stderr 全空。注意 `Graceful shutdown` 这两行本身就是证据:关停第一次真的发生了。\n\n**2. 真正读不出来的对象照旧进桶 —— 两种情况被同一对测试钉死**\n\n`dangling-reference-audit.test.ts` 里新增的 describe 以这一对开头,因为**修之前它们无法区分**:\n\n- `a REAL datasource fault still lands in unreadableObjects, loudly` — 列表失败、没有 abort ⇒ `unreadableObjects: ['…']`、`aborted: false`、warn 照发。\n- `the SAME failure, raced by a teardown, is dropped instead of filed` — 同一段抛错,只是 signal 在 `find` 中途翻转(连接池就是这样关的)⇒ `unreadableObjects: []`、`aborted: true`、不发 warn。\n\n外加:abort 在读之前 ⇒ **一次查询都不发**(这是 `ERROR Find operation failed` 消失的机制);abort 在中途 ⇒ 已经证成的 dangling 全部保留、没读到的对象不进桶;探针在关停下抛错**也不算** `undetermined`(同一个范畴错误,隔壁桶)。\n\n**3. 巡检在 CLI 场景仍然运行**\n\n这不是「一次性命令不跑巡检」。巡检在每个宿主上照旧接线、配置完全一致,唯一的边界是**引擎活着才读**。新的 `schema-migrate.teardown.integration.test.ts` 在真实 `bootSchemaStack` 上把两头都断言了:引擎活着时 sweep 真的读、报告 `aborted: false` 且 `unreadableObjects: []`;`shutdown()` 之后 sweep 一次读都不发。最后一条断言故意证明它不是空转 —— 直接对引擎发一次 `find` 会 reject,说明池确实关了,上面的沉默是修复的结果而不是「本来就没东西可读」。\n\n```\npnpm --filter @objectstack/objectql exec vitest run   →  107 files / 1695 tests passed\npnpm --filter @objectstack/cli      exec vitest run   →   67 files /  586 tests passed\npnpm --filter @objectstack/runtime  exec vitest run   →   80 files / 1092 tests passed\npnpm --filter @objectstack/objectql --filter @objectstack/cli typecheck  →  Done\n```\n\n## 顺带的两件事\n\n**与 #4776 是同一族的镜像面。** 那边是「判断下得太早(提供方还没注册)」,这边是「判断下得太晚(依赖已经拆了)」。共同点不是时序本身,而是**检查与它所依赖的资源之间没有一份可被检查方看见的生命周期契约**:两处的检查都只能观察到自己被调用了,观察不到「现在问这个问题还算不算数」。本 PR 在一条边上把它变成了显式的一位(`signal` / `stopped`),没有推广成通用机制 —— 如果要统一,自然的形状是让 `PluginContext` 暴露一个内核级的 readiness/teardown 信号,让所有周期性工作都从同一处取,而不是每个 service 各自发明。**本 PR 不实现它**,记在这里供裁定。\n\n**另发现一条,已单独开 #4813(未认领)。** 内核的 `initPluginWithTimeout` / `startPluginWithTimeout` 创建的超时守卫定时器在插件赢下 race 之后既不 `clearTimeout` 也不 `unref()`,于是每个进程在活干完之后还要空转 `startupTimeout`(`ObjectQLPlugin` 是 120s)。实测一条 `os migrate` 3 秒干完活、120 秒才退出,8 根带 ref 的 Timeout 挂着。这**正是 #4747 的使能条件** —— 一个干完就退出的进程永远碰不到那个 60 秒的定时器。本 PR 从生命周期契约那一侧修,不依赖 #4813;而同一个 `kernel.ts` 里 `shutdown()` 自己的守卫**已经**写了 `t.unref()` 并附了注释,修法就在隔壁 30 行。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_015Br2xsJsczFsTR9bvbh2Ny\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015Br2xsJsczFsTR9bvbh2Ny)_"
+}

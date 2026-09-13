@@ -1,0 +1,37 @@
+{
+  "number": 4714,
+  "kind": "issue",
+  "title": "D-A3 的 driver 轴只补到了 temporal 矩阵：pagination / filter-logic 两条共享矩阵的 driver-sql 消费者仍钉死 SQLite",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "repo:objectstack",
+    "tests"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T20:18:51Z",
+  "updated_at": "2026-08-03T01:54:30Z",
+  "closed_at": "2026-08-03T01:54:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4714",
+  "body": "从 #4245（PR #4713）收尾时发现，未在该 PR 内修——同一形状，但属于另外两条共享矩阵，按 Prime Directive #10 单开记录。\n\n## 现状（已逐条核对）\n\n#4245 把 `sql-driver-temporal-conformance.test.ts` 按 driver 轴参数化了，并留下了可复用的 `packages/plugins/driver-sql/src/live-dialect-matrix.testkit.ts`（`DIALECT_CELLS` + 服务器时区探测 + 三方错开守卫 + `OS_EXPECT_LIVE_DIALECT_MATRIX`）。但 `driver-sql` 还消费着另外两条 `@objectstack/spec/data` 的共享矩阵，两条都仍然只跑 SQLite：\n\n| 文件 | 共享矩阵 | 硬编码 |\n|---|---|---|\n| `packages/plugins/driver-sql/src/sql-driver-pagination-conformance.test.ts` | `PAGINATION_CASES` / `PAGINATION_UNORDERED_CASES` | `client: 'better-sqlite3'`（两个 describe） |\n| `packages/plugins/driver-sql/src/sql-driver-or-filter.test.ts` | `FILTER_LOGIC_CASES` | `client: 'better-sqlite3'`（describe 名字就叫 `filter logic conformance (SQLite)`） |\n\n## 为什么 pagination 那条尤其值得补\n\n它的头注**自己**就说清了 SQLite 上这半边证明不了什么：\n\n> SQLite over a twelve-row table hands back both ties and wholly unordered rows in rowid order every time, so the partition check passes with or without the fix. … on SQL it would pass the day someone deletes the feature.\n\n也就是说：分页的**性质断言**（页与页构成结果集的一个划分）在 SQLite 上是恒真的，文件靠第二半（断言真正到达数据库的 ORDER BY 子句）兜底。而在真 PG / MySQL 上，无 tiebreaker 的分页**会**重排——性质断言在那里才第一次有牙。这与 objectui#3106 / #4363 的起因是同一件事。\n\nfilter-logic 那条则是 `$or` 编译（#3774 的 `applyFilterCondition` 把 `logicalOp='or'` 传进分支导致结果集被放大）——方言之间 `where` 分组与 NULL 语义并不完全一致，PG / MySQL 上跑一遍是有信号的。\n\n## 建议形状\n\n复用 #4245 留下的 testkit，逐个消费者改成 `for (const cell of DIALECT_CELLS)`，live cell 沿用同一套非空转守卫（缺 URL → 具名 skip；`OS_EXPECT_LIVE_DIALECT_MATRIX=1` → 红）。CI 的 `Temporal Conformance (live PG + MySQL)` job 已经在跑**整包** `pnpm --filter @objectstack/driver-sql test`，所以不需要新 job；表名沿用 issue 前缀避免与并行套件抢同一张表。\n\n## 验收\n\n同一批 `PAGINATION_CASES` / `FILTER_LOGIC_CASES` 在 SQLite / Postgres / MySQL 上返回完全相同的结果，任何一格不同即该方言的分页排序或逻辑组合子编译与共识有偏差。**注意**：这一格打开后 PG/MySQL 很可能**真的红**（分页在真服务器上会重排），那是发现不是失败——按本条验收，交付的是「格子存在且会红」。\n\n## 关联\n\n#4245 / PR #4713（driver 轴 + server-timezone 轴，temporal 矩阵）、#4081（D-A3 本体）、#4363、objectui#3106、#3774；ADR-0053 D-A3。\n"
+}

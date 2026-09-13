@@ -1,0 +1,37 @@
+{
+  "number": 4778,
+  "kind": "issue",
+  "title": "审批记录锁 `bindApprovalLockHook` 对谓词式(multi)更新完全失效:`if (!id) return` 把「没解析到行」当成「允许」",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T06:06:32Z",
+  "updated_at": "2026-08-03T10:19:35Z",
+  "closed_at": "2026-08-03T10:19:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4778",
+  "body": "在 #4757 的排查中发现(那条 issue 末尾要求「看看仓库里还有没有别的 `beforeDelete` 守卫共享『没解析到行 ⇒ 放行』这个形状」)。**未认领**,归属 `plugin-approvals`,不在 #4757 的 PR(#4780)范围内。\n\n## 现象\n\n`packages/plugins/plugin-approvals/src/lifecycle-hooks.ts`,`bindApprovalLockHook` 注册的全局 `beforeUpdate`(ADR-0019 记录锁)开头就是:\n\n```ts\nengine.registerHook('beforeUpdate', async (ctx: any) => {\n  const id = String((ctx?.input?.id ?? '') as string);\n  if (!id) return;\n```\n\n而 `packages/objectql/src/engine.ts` 的 `update()` 只在 `where.id` 是**标量**时才把它提取成 `input.id`(与 `delete()` 同源的规则,注释里写明了:操作符对象 `{ $in: [...] }` 是多行谓词,要走 `updateMany`)。于是任何谓词式更新到达这个 hook 时 `input.id` 都是 `undefined`,锁直接 `return` 放行:\n\n```ts\n// 记录 rec_1 上挂着 pending 的 sys_approval_request,lockRecord 未关闭\nawait ql.update('crm_opportunity', { where: { id: 'rec_1' }, data: { amount: 999 } });   // 被 RECORD_LOCKED 拦下 ✅\nawait ql.update('crm_opportunity', { where: { id: { $in: ['rec_1'] } }, multi: true, data: { amount: 999 } }); // 通过 ❌\nawait ql.update('crm_opportunity', { where: { name: 'x' }, multi: true, data: { amount: 999 } });             // 通过 ❌\n```\n\n也就是说,只要把同一次编辑改写成 `multi: true` 的形式,审批期间的记录锁就形同虚设 —— 不需要 admin 角色,不需要 `isSystem`,不需要 `lockRecord: false`,也不需要命中 `approvalStatusField` 白名单。SDK / ObjectQL / flow 的 `update_record` 类调用方都能产生这个形状。\n\n## 为什么这是同一个 fail-open 家族\n\n和 #4757(`sys_attachment` 的 `beforeDelete`)是同一个错误推理:**「没有解析到目标行」被当作「没有东西需要授权」**,而实际上是「从来没有查询过」。#4630 给 `sys_comment` 立的 `resolveTargetRows` 是正确姿势的参考。\n\n区别在于修法不同 —— 这里不能照抄「无 id 无 where ⇒ 拒绝」:记录锁是**按行判定**的守卫(某条记录是否有 pending 审批),不是「整表操作要不要拒绝」。正确的做法应该是把 `where` 解析成匹配行集合(带上界,超限失败关闭),再对每一行查 pending 请求 —— 与 attachment / comment 两个守卫解析行集合的方式一致。\n\n## 验收建议\n\n- 谓词式 `multi: true` 更新命中被锁记录时抛 `RECORD_LOCKED`(409),与按 id 更新的行为一致。\n- `lockRecord: false`、admin 覆盖、`approvalStatusField` 镜像写、`isSystem`、`flowRunId` 同源写(#3456 / #3712)这些既有豁免在多行路径上同样生效,不能只在单 id 路径上生效。\n- 匹配行数超上界时失败关闭(参考 `MULTI_DELETE_AUTH_LIMIT` 的 1000 行上界)。\n- 单元测试放在 `lifecycle-hooks` 现有用例旁边。\n\n## 同轮排查的其它位置(仅记录,不必在本 issue 处理)\n\n同一形状在这些地方也存在,但它们不是授权守卫,后果是数据/可观测性而非越权,且多数在注释里已被声明为已知边界:\n\n- `packages/plugins/plugin-audit/src/audit-writers.ts` 的 `captureBefore`:`if (!id) return; // bulk update/delete — too costly to snapshot every row here` —— 批量删除不留审计快照(已声明的取舍)。\n- `plugin-webhooks` / `plugin-email` / `plugin-sharing` 三处 provenance 盖章 hook:`if (!id) return; // multi-row update — see boundary note above`(注释里明确写了 known boundary)。\n- `plugin-sharing/src/primary-bu-projection.ts` 的 `beforeDelete`:批量删成员行时 `sys_user.primary_business_unit_id` 投影不更新(设计上 best-effort,靠下次写入或 boot backfill 自愈)。\n\n`plugin-auth/src/identity-write-guard.ts` 不在此列 —— 它的 `beforeDelete` 是无条件拒绝,`beforeUpdate` 走字段白名单,不依赖行解析。`plugin-sharing/src/rule-hooks.ts` 单独立在 #4779。\n"
+}

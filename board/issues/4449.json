@@ -1,0 +1,32 @@
+{
+  "number": 4449,
+  "kind": "issue",
+  "title": "[cli/lint] 同一漂移的上一层:validateFormLayout 写了、测了、导出了,但没有任何命令调用它——registry 只挡住\"接错\",挡不住\"没接\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T07:58:55Z",
+  "updated_at": "2026-08-01T16:08:10Z",
+  "closed_at": "2026-08-01T16:08:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4449",
+  "body": "## 现象\n\n`@objectstack/lint` 导出 `validateFormLayout`，有完整单测（`validate-form-layout.test.ts`），发布了四条规则 id：\n\n- `FORM_COLSPAN_ABSOLUTE`\n- `FORM_FIELD_UNKNOWN`\n- `FIELD_GROUP_UNDECLARED`\n- `FIELD_GROUP_EMPTY`\n\n**没有任何命令调用它。** 全仓搜索，除了它自己的实现、`index.ts` 的导出行和单测，零个调用点：\n\n```\npackages/lint/src/index.ts:104:  validateFormLayout,\npackages/lint/src/validate-form-layout.ts:82:export function validateFormLayout(...)\n```\n\n不在 `os validate` / `os build` / `os lint`，不在 `REFERENCE_INTEGRITY_RULES`，不在 #4409 新建的 `AUTHORING_RULES`，不在 `os doctor`。也就是说：一条表单布局规则完整存在于代码库里，从来没有对任何一个 stack 跑过一次。\n\n（严重性：`severity: 'error'` 出现 0 次，四条都是 advisory。所以这不是门禁盲区，是一条**从未产生过任何输出**的规则——成本更低，但性质更纯粹。）\n\n## 为什么这是同一型缺陷的上一层\n\n#4409 修的是\"规则接进了哪几个命令\"的漂移，落地为一张 registry + 棘轮守卫。那个守卫能挡住的是：\n\n- 一条 registry 里的规则被某个命令**手工另接**一次（`DIRECT_CALL_RATCHET`）\n- 一条 gating 规则**只接了部分命令**（`GATING_COVERAGE_DEBT`）\n- 一条 gate 伪装成 `advisory` 来换取部分覆盖（回读源码核对）\n\n它挡不住的是：一条规则**哪里都没接**。守卫是从 registry 出发往命令看的，`validateFormLayout` 从来没进过 registry，所以它在守卫的视野之外——和 #4402 的守卫看不见 suite 之外的规则，是同一个形状，只是又高了一层。\n\n这也正好命中 AGENTS.md Prime Directive #10 的推论：**never advertise a capability the runtime doesn't actually deliver**。这条规则在 `@objectstack/lint` 的公开导出面上，任何读导出列表的人（或 AI）都会认为表单布局在作者时被检查了。它没有。\n\n## 建议\n\n`AUTHORING_RULES` 已经是\"哪条规则跑在哪些命令上\"的唯一账本，缺的是反方向的闭合：**一条 `@objectstack/lint` 导出的规则，必须要么进 registry，要么进一份带理由的清单。** 具体形态和现有的 `TEST_DEBT` / `FLOW_WRITE_NODE_TYPES_DEFERRED` 同款：\n\n1. 加一条守卫：枚举 `@objectstack/lint` 导出的 `validate*` / `lint*` 规则函数，减去 `AUTHORING_RULES` ∪ `REFERENCE_INTEGRITY_RULES`，差集必须为空或落在 `UNWIRED_RULE_LEDGER` 里，每项带理由（例如\"给 Studio 的 X 面板复用，不在 CLI 作者时跑\"这类真实理由——如果确实存在的话）。\n   > 复现这个统计的一行：把两个 registry 的 `name` 与 `packages/lint/src/index.ts` 的规则导出做 `comm -23`。今天差集恰好是 `validateFormLayout` 一条。\n2. `validateFormLayout` 本身二选一——**接进 `AUTHORING_RULES`**（advisory，三命令，成本可忽略：它只走结构化 metadata，不加载任何重依赖），或者按 ADR-0049 enforce-or-remove **删掉**。它检查的东西（`colSpan` 绝对值、表单字段名解析、`Field.group` 指向）看起来是真实有用的，倾向前者，但那是个需要写下来的决定，不是默认。\n\n## 相关\n\n发现自 #4409 的收尾核对（#4445）。相关：#4402、#4394、#3782、#3583，以及 ADR-0049 的 enforce-or-remove 纪律。"
+}

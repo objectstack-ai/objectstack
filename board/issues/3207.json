@@ -1,0 +1,35 @@
+{
+  "number": 3207,
+  "kind": "issue",
+  "title": "Remove dead object `enable.trash` / `enable.mru` capability flags (ADR-0049 enforce-or-remove)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "protocol:breaking"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-18T12:18:42Z",
+  "updated_at": "2026-08-03T01:29:32Z",
+  "closed_at": "2026-08-03T01:29:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3207",
+  "body": "Follow-up to #2377 (ADR-0049 enforce-or-remove). The final `object` dead-property slice deliberately **deferred** from #3199 (merged as `5754a23`).\n\n## What\nTwo object capability flags in the `enable` block are ledger-classified **dead** but still authored across the system objects:\n\n| Property | Schema | Ledger |\n|----------|--------|--------|\n| `enable.trash` | `object.zod.ts:110` — `z.boolean().default(true)` | `spec/liveness/object.json` → `status: dead`, \"no behavior-changing reader\" |\n| `enable.mru` | `object.zod.ts:113` — `z.boolean().default(true)` | `spec/liveness/object.json` → `status: dead`, \"no behavior-changing reader\" |\n\nNo runtime consumer reads either flag — verified by grep across plugins/services/objectql/runtime. The only non-setter references are the generated i18n form labels (`capabilities.trash` / `capabilities.mru`) and the `authorWarn`-skip note in `lint-liveness-properties.ts`. Authoring them is a false affordance: toggling \"Enable Recycle Bin\" or \"Track Recently Viewed\" off changes nothing.\n\n## Why it was deferred (not a quick win)\nUnlike the other #2377 removals, these are inert **`default(true)`** flags **explicitly set** by the system-object definitions:\n- **`trash:`** set in **44** `*.object.ts` files\n- **`mru:`** set in **39** `*.object.ts` files\n\n(mostly `sys-*.object.ts` across `packages/metadata-core` and `packages/platform-objects`). Removing the schema property is breaking (next major) and forces touching all ~44 files to drop the now-rejected keys. High churn, low value — so #3199 left them `dead` + authorWarn-skipped rather than block that PR.\n\n## Proposed work (same pattern as #3199)\n1. Remove `trash` and `mru` from the `enable` capabilities schema in `packages/spec/src/data/object.zod.ts`.\n2. Add rejecting tombstones for `enable.trash` / `enable.mru` in `UNKNOWN_KEY_GUIDANCE` (point authors at the removal, matching the `tags`/`active`/`abstract` tombstones).\n3. Delete the `enable: { … trash, mru … }` entries from all ~44 setter `*.object.ts` files.\n4. Remove the two entries from `packages/spec/liveness/object.json` and update the ledger README count table.\n5. Drop the `capabilities.trash` / `capabilities.mru` entries from the object authoring form (`object.form.ts`) and regenerate the metadata-forms i18n bundles (`os i18n extract`, all 4 locales).\n6. Regenerate `api-surface.json` + reference docs (`gen:schema` + `gen:docs`); run `check:docs`.\n7. Add a `minor` changeset (launch-window policy — breaking spec changes ship as `minor`, per `check-changeset-no-major`), with a migration note: the flags never gated behavior, so removal is drop-the-key only.\n\n## Verification\n- `pnpm --filter @objectstack/spec test` (full)\n- Spec property liveness gate (`check-liveness.mts`)\n- Full-repo build/typecheck — a missed setter surfaces as an `ObjectSchema.create()` unknown-key throw\n- `check:docs` + `check:api-surface`\n\n## Notes\n- Non-breaking at runtime: the metadata registry parses objects via `ObjectSchema.parse()`, which **strips** unknown keys — a stale `trash`/`mru` in a persisted payload is a no-op, not an error. The break is purely author-side (`ObjectSchema.create()` on hand-authored `*.object.ts`).\n- Scope is intentionally just these two flags. Every other #2377 property is already removed or confirmed live.\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 4515,
+  "kind": "issue",
+  "title": "[automation] getSuspendedScreen 只读内存热缓存 —— 重启后一个仍然活着的挂起 run 取不到它的 screen（404）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T14:51:03Z",
+  "updated_at": "2026-08-02T04:07:57Z",
+  "closed_at": "2026-08-02T04:07:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4515",
+  "body": "在做 #4470（让验证 harness 走真实持久化路径）时发现的，与那张卡本身无关，单独记录。\n\n## 问题\n\n`AutomationEngine.getSuspendedScreen` 只查内存热缓存：\n\n```ts\n// packages/services/service-automation/src/engine.ts\ngetSuspendedScreen(runId: string): ScreenSpec | null {\n    return this.suspendedRuns.get(runId)?.screen ?? null;\n}\n```\n\n它是同步的，所以**没有能力**去问挂起存储。而 `SuspendedRun.screen` 是**会持久化**的（`sys_automation_run.screen_json`），`resume()` 也确实会在热缓存未命中时经 `loadSuspendedRunStrict` 从库里冷读回来。\n\n于是两条路径对同一个 run 给出相反的答案：\n\n| 进程重启后，对一个 durably 挂起的 screen run | 结果 |\n|---|---|\n| `POST …/runs/:runId/resume` | 正常继续（从库里 rehydrate） |\n| `GET …/runs/:runId/screen` | **404 `No pending screen for run`** |\n\n## 为什么这有实际影响\n\n这条路由的存在意义就是「刷新安全的重新拉取」——屏幕流 runner 在用户刷新页面、或换设备继续时用它把表单再画出来。而它恰恰在**最需要它的那一刻**失效：进程重启之后。用户看到的是「这个审批/表单不见了」，但 run 其实活得好好的，`resume` 也还能打通——只是客户端已经拿不到该渲染什么了。\n\n这也正是 ADR-0019 持久化挂起要解决的场景：暂停要能跨进程存活。存活了，但它的渲染契约没跟上。\n\n## 复现\n\n`packages/qa/dogfood/test/flow-durable-suspend.dogfood.test.ts`（#4502 引入）最初就是这样写的，在这一步红：\n\n```\nAssertionError: screen not rehydrated:\n{\"success\":false,\"error\":{\"code\":\"RESOURCE_NOT_FOUND\",\"message\":\"No pending screen for run\",\"httpStatus\":404}}\n```\n\n## 修复方向（需要决策）\n\n直接的修法是让它跟 `resume` 一样能读存储，但那要把方法变成异步，而它是**公开契约**的一部分：\n\n```ts\n// packages/spec/src/contracts/automation-service.ts\ngetSuspendedScreen?(runId: string): ScreenSpec | null;\n```\n\n改成 `Promise<ScreenSpec | null>` 是破坏性变更，需要同时改 `packages/runtime/src/domains/automation.ts` 里的路由调用点和任何其它消费方。所以这条**没有顺手修**，留给能拍板协议变更的人。\n\n另一种不破坏签名的思路是在 `resume` 之外增加一个异步的 `loadSuspendedScreen(runId)`，让路由改用它，把同步版本留作热路径快查——代价是两个名字做一件事。\n\n## 参考\n\n- `packages/services/service-automation/src/engine.ts` —— `getSuspendedScreen`、`loadSuspendedRunStrict`\n- `packages/services/service-automation/src/suspended-run-store.ts` —— `screen_json` 的序列化/反序列化\n- `packages/runtime/src/domains/automation.ts` —— `GET /:name/runs/:runId/screen`\n- #4470 / #4420 / ADR-0019\n"
+}

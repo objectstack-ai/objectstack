@@ -1,0 +1,35 @@
+{
+  "number": 4352,
+  "kind": "issue",
+  "title": "action.body 的 type 门是 declared ≠ enforced —— spec 说只在 type:'script' 生效,runtime 有 body 就绑",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "protocol:breaking"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T07:39:55Z",
+  "updated_at": "2026-08-02T14:43:31Z",
+  "closed_at": "2026-08-02T14:43:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4352",
+  "body": "## 现象\n\n`ActionSchema.body` 的 spec 声称 body 只在 `type === 'script'` 时生效,运行时不看 `type`。\n\n`packages/spec/src/ui/action.zod.ts`:\n\n```ts\nbody: HookBodySchema.optional().describe(\n  'Action body — expression (L1) or sandboxed JS (L2). Only used when type is `script`.'\n),\n```\n\nJSDoc 里更明确:\"Only meaningful when `type === 'script'`. When set, the runtime invokes the body inside the sandbox … and ignores `target`.\"\n\n运行时两处都不过滤 `type`:\n\n- `packages/runtime/src/app-plugin.ts` 的 `collectBundleActions` 只要 `a.name` 是字符串就收,`type` 完全不参与;\n- `packages/runtime/src/sandbox/body-runner.ts` 的 `actionBodyRunnerFactory` 只判 `action.body` 在不在、`HookBodySchema.safeParse` 过不过,从不读 `type`。\n\n所以一个 `type: 'url'` 且带 `body` 的 action 照样 `ql.registerAction(...)`,handler 可以从 `POST /api/v1/actions/:object/:action` 调起来并在沙箱里执行。\n\n## 为什么值得掰扯\n\n这是 declared ≠ enforced 的一个小切口(Prime Directive #10):spec 说\"只在 script 下生效\",runtime 说\"有 body 就跑\"。两种读法各自会引出不同的正确行为:\n\n- 如果 spec 是对的 —— 作者把 `type` 从 `script` 改成 `url` 之后,会以为那段 body 已经不再执行了,而它还在;\n- 如果 runtime 是对的 —— spec 在教作者一件不成立的事,而且 `type` 就不该出现在这句话里。\n\n目前无人被这个坑到,是因为把 body 写在非 script action 上本来就少见。但\"改了 type 以为逻辑停了、其实还在跑\"这种形状,踩到时非常难查。\n\n## 已经受影响的地方\n\n#4344(action body 写集 lint)**刻意跟了 runtime**:检查所有带 `body` 的 action,不看 `type`,理由写在\n`packages/lint/src/validate-action-body-writes.ts` 的 `collectActionBodies` 注释里 ——\n\n> `type` is deliberately not consulted: the runtime binds a handler from `action.body` alone\n> (`actionBodyRunnerFactory` never reads `type`), so a body on a non-`script` action still runs\n> and still fails silently. Checking what executes beats checking what the schema says should.\n\n这个选择在\"两边不一致\"的前提下是对的,但它同时把不一致固化进了第三个地方。定了之后 lint 那边要跟着调。\n\n## 两条出路(需要决策)\n\n1. **runtime 认下 spec**:`actionBodyRunnerFactory`(或 `collectBundleActions`)在 `type !== 'script'` 时不绑 handler。附带要想清楚 `type` 缺省是 `'script'`(`ActionType.default('script')`),所以只影响显式写了别的 type 的 action;还要决定\"带 body 但 type 不是 script\"要不要在作者时报错 —— 按 ADR-0087 的姿态,这种自相矛盾的元数据应该在 publish gate 上被拒,而不是静默忽略。\n2. **spec 认下 runtime**:去掉 `.describe()` 和 JSDoc 里的 type 条件,改成\"body 一旦存在就是这个 action 的实现,`target` 被忽略\",并说明 `type` 只影响渲染侧的呈现。\n\n倾向 1 + 作者时拒绝:`type: 'url'` 配一段沙箱 body 是自相矛盾的元数据,静默各跑各的比报错糟。但这会改变现有行为,得确认没有 app 在依赖\"非 script 也能跑 body\"。\n\n## 参考\n\n- `packages/spec/src/ui/action.zod.ts`(`ActionSchema.body` 的 describe + JSDoc)\n- `packages/runtime/src/sandbox/body-runner.ts`(`actionBodyRunnerFactory`)\n- `packages/runtime/src/app-plugin.ts`(`collectBundleActions`)\n- `packages/lint/src/validate-action-body-writes.ts`(`collectActionBodies` —— 当前跟的是 runtime)\n- 相关:#4344\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 4444,
+  "kind": "issue",
+  "title": "决策记录：react 页的 `<RecordScope>` 不做——翻转条件与最低门槛见正文（#4413 后续）",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-08-01T07:48:30Z",
+  "updated_at": "2026-08-01T08:59:14Z",
+  "closed_at": "2026-08-01T08:59:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4444",
+  "body": "> **状态：已决策并关闭（2026-08-01，`not_planned`）。出现下述「翻转条件」时 reopen。**\n>\n> 关闭不是搁置——正文是一份完整的决策记录：事实核实、不做的理由、若要做的最低门槛、以及绑定的产品立场。关闭的理由见「传感器」一节：原本打算靠发布门的 fire 频次当需求传感器，**核实后该通路不存在**，一个 open issue 对唯一剩下的信号（用户主动反馈）没有任何帮助，反而会被下一个 agent 误读成待办工作——正是 #4413 刚消灭的那种「声明与现实不符」。本 issue 从「设计提议」两次改写至此，历史见编辑记录。\n\n## 决策\n\n`kind:'react'` 页面上的 `record:*` 家族维持 #4413 的撤回状态（PR #4450，`ebb209c`）。**不**引入 `<RecordScope>`（会取数的记录作用域组件），直到下述翻转条件成立。\n\n## 背景事实（对 objectui `a8ad6c0` / framework `ebb209c` 核实）\n\n1. **原语已存在且被复用两次，只是没有公开名字。** `RecordContextProvider`（`objectui packages/react/src/context/RecordContext.tsx:167`）是纯值 provider，自己不取数。挂载点两个：记录路由 `RecordDetailView.tsx:2033`，以及**不是记录路由**的元数据编辑器预览 `PagePreview.tsx:192`（自己 fetch 样本 + objectSchema 再喂进 provider，注释原话 *\"The metadata editor has no record route\"*）。\n2. **react 页不是记录路由。** `usePageAssignment` 把记录路由解析到记录页；react 页拿不到 URL 里的 recordId，只能从自身状态（ListView 选中等）造出一个。这给\"react 页蚕食记录页\"设了机械上界——没有任何平台导航会带着记录 id 进入 react 页。\n3. **FLS 在服务端裁剪。** `plugin-security/src/field-masker.ts` 的 `maskResults` 在查询结果返回前剥掉不可读字段；objectui 渲染器里的 `readableFields` 过滤是体验层。所以\"作者手写 JSX 面板\"的损失是格式化 / i18n / 失效刷新等**一致性**问题，不是安全问题。\n4. **四个撤回块里真正不可替代的只有 `record:details`**（FLS 分区、内联编辑保存栏、OCC）。`record:related_list` ≤ `<ListView filters>`；`record:highlights` / `record:path` 手写成本低。**这扇门实质上是为一个 block 开的。**\n\n## 为什么不做\n\n- **不可逆性不对称。** 晚做的成本 ≈ 现在做；做错再撤的成本刚在 #4413 付过一次（契约改写、lint 新规则、showcase 重写、文档订正）。平台原语几乎不可回收，而当前需求证据 = 一张 showcase 页 + 零用户抱怨。\n- **AI 错误面的代价换了形状但没消失。** RecordScope 把错误面从\"手写 JSX（lint 够不着）\"换成\"结构化 props（lint 够得着）\"——这是它最强的论据；但它同时引入需要整套新门禁的错误类：绑定上移后块上的 `objectName`/`recordId` 必须消失（**除了** `RecordRelatedList` 的子对象 `objectName`），而 AI 的训练分布（Salesforce 惯例 + 我们自己的旧契约）都说\"block 自带绑定\"，静默忽略就是在低一层复刻 #4413。外加 lint 静态查不了的关系性错位（scope 声明的对象 ≠ recordId 状态实际来自的对象）。\n- **契约体积。** react-blocks 契约是 AI 的在场上下文，刚从 8 块减到 4 块；为未证明的使用率回填 5 个（scope + 四块）不划算。\n\n## 传感器：核实结论是「没有」\n\n原设想是把 `react-block-needs-record-context` 的 fire 频次当需求计数器。**核实后该通路不存在**（framework `ebb209c`）：\n\n- `validate` / `lint` / `compile` 三条命令都在本地调 `validateReferenceIntegrity`，findings 只走 `console.log` 或 `--json`（供本地 CI 消费），到此为止；\n- CLI 的全部出站请求与校验结果无关：`auth-flows.ts` 的设备登录流、`plugin/publish.ts` 的插件包发布、`cloud/` 下只有 login/logout/whoami、`environments/` 不传元数据；\n- 名字最像的 `packages/cli/src/utils/telemetry-datasource.ts` 是 ADR-0057 §3.6 的**客户侧**事务——把 telemetry/event/audit 类对象路由到第二个本地 SQLite 文件，防止平台生成的数据撑爆业务库，与回传无关；\n- `commands/dev.ts:372` 记着 CLI **已经不再** POST `/api/v1/dev/metadata-events`——方向是在减少回传。\n\n**所以唯一的需求信号是用户主动反馈**（issue / 支持渠道）。建这条遥测通路要碰产品定位（是否收集客户构建期数据）、隐私声明与 opt-out 机制，分量远超一个 record block，不应由本议题驱动——若将来因别的原因建了，本节即失效，届时可把 fire 频次纳入信号。\n\n## 翻转条件（任一成立即 reopen 并重启设计）\n\n1. 用户反馈中出现**指名 `record:details`** 的真实需求——它是唯一不可替代块，也是首要触发条件；\n2. 或需求虽指向其他块、但频次高到 hint 里的替代写法（`<ListView filters>` / `<ObjectForm mode=\"view\">` / 手写 JSX）被反复投诉不够用。\n\n`record:path` 单独出现的需求**不触发**翻转：正确形状是不需要记录身份的 value-bound 展示块（`<StageBar objectName field value>`，picklist 选项+译名来自对象元数据、当前值来自作者已有标量），不是 prop-bound 记录块，更不是 RecordScope。\n\n## 若翻转，最低门槛（不打折）\n\n1. **失效总线集成。** `RecordDetailView.tsx:317/319/531` 的 `useDataInvalidation` / `notifyDataChanged` 必须接上，否则页面上别处的 `<ObjectForm onSuccess>` 保存后 scope 数据不刷——\"陈旧但看起来正确\"比 #4413 修掉的\"渲染成空\"**更难发现**。取数不是成本，接总线才是。\n2. **prop 形状 lint 全套。** scope 内的 record 块不得携带 `objectName`/`recordId`（`RecordRelatedList` 子对象 `objectName` 除外），违者 error + hint；`react-block-needs-record-context` 从\"一律拒绝\"改为\"不在 `<RecordScope>` 祖先链内才拒绝\"（JSX 祖先链静态可查）。\n3. **只进 react scope，不进注册表。** 它会是 `buildComponentScope`（`react-page.tsx:64`，从 `getPublicConfigs()` 推导）之外第一个手工成员——这是明确接受的偏离：做成公共 SDUI block 更糟（记录页上无意义，Studio 面板里徒增困惑）。\n4. framework 侧连带：`REACT_BLOCKS` 重新收录 record 块（这次不带绑定 prop）、`REACT_RECORD_BLOCK_ALTERNATIVES` ledger 改写、SKILL.md 与 validating-metadata §10b 同步。\n\n## 可以独立做的零暴露准备（不依赖翻转，objectui 内部事务）\n\n把 `RecordDetailView` 与 `PagePreview` 各自的\"取数 + 喂 provider\"收敛成一个内部 core。两个消费者已在漂移（PagePreview 手写了第二套取数），提取是纯卫生改动、不发布任何契约，却让将来的 `<RecordScope>`（若翻转）从\"新实现\"降为\"薄包装\"。**这一项与本决策无关，可随时单独进行。**\n\n## 与此决策绑定的产品立场\n\n在翻转之前，平台的立场是：**要完整的记录明细体验，去 `type:'record'` 页**；react 页负责的是更大场景里的主从面板，父记录是普通 React state，用读自身 props 的块绑定。此立场已随 #4450 落到出厂产物里（`skills/objectstack-ui/SKILL.md` 的 react 档一节、`content/docs/deployment/validating-metadata.mdx` §10b、以及 lint 报错的 hint），不依赖本 issue 存续。\n\n/cc `objectstack-ai/objectui`（零暴露准备项 + 若翻转的实现侧）"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 4439,
+  "kind": "issue",
+  "title": "表达式 ledger 只认 descriptor configSchema，所以「刻意 schemaless」的节点上声明的 CEL 槽位没有任何 build-time 校验器",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T07:25:30Z",
+  "updated_at": "2026-08-01T11:01:00Z",
+  "closed_at": "2026-08-01T11:01:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4439",
+  "body": "修 #4414 时发现的相邻缺口，独立于那三条路由机制，所以单独开。\n\n## 现状\n\n`FLOW_NODE_EXPRESSION_PATHS`(`packages/spec/src/automation/flow-node-expression-paths.ts`)是 #4027 立的账本：一个节点 config 里声明的表达式槽位必须登记在这里，`registerFlow` 和 `objectstack validate` 才会去走它。棘轮由 `config-expression-ledger.test.ts` 双向咬死：\n\n- descriptor 的 `configSchema` 里出现新的 `xExpression` 而账本没登记 → 失败(#3528 的形状);\n- 账本里有条目而没有 descriptor 声明它 → 也失败(防止账本腐烂)。\n\n问题在于**账本的唯一真值来源是 descriptor 的 `configSchema`**。而 `decision` / `script` / `subflow` / `wait` / `connector_action` 这一类是**刻意不发 `configSchema`** 的 —— `schemaless-node-config.zod.ts` 的模块注释写得很明确：这些类型的 config 契约发布在那个文件里，\"must NOT grow into descriptor `configSchema`s\"(表单在 objectui 手写)。\n\n两条规则一叠，结果是:**凡是 schemaless 类的节点，它声明的表达式槽位在结构上无法进账本，因此永远没有 build-time 校验器。**\n\n## 具体的一个\n\n`DecisionConditionSchema.expression`(`schemaless-node-config.zod.ts:193`)自己写着 `'Bare CEL predicate deciding this branch'`,注释也点名 `{…}` 是 #1491 的陷阱。但:\n\n- 它不在 `FLOW_NODE_EXPRESSION_PATHS` 里 —— 也加不进去,加了 `config-expression-ledger.test.ts` 的「无 stale 条目」那条会红;\n- 所以 `registerFlow` 不校验它,`objectstack validate` 也不校验它。\n\n对比 `edge.condition`:那条是**结构性**槽位(每条边都有),两个校验器都硬编码走它,所以 `{lead_record.status} == 'converted'` 写在边上会在注册时就炸,并带修正提示。写在 decision 的 `conditions[].expression` 里则一路绿灯到运行时。\n\n#4414 已经把运行时那半补上了 —— 执行器现在按声明的 bare CEL 求值(`{ dialect: 'cel', source }`),所以带花括号的谓词会**响亮地失败**而不是静默判 false。但作者是在**跑起来**才知道,不是在 `os build` 时知道,这正是 #4027 建账本要消除的那段延迟。\n\n## 建议\n\n账本的「反向」棘轮应该按**槽位的声明处**分档,而不是一律要求 descriptor 声明:\n\n- 有 `configSchema` 的节点 → 维持现状(双向咬死 `xExpression`);\n- schemaless 类节点 → 允许账本条目由 `schemaless-node-config.zod.ts` 里的 Zod schema 认领。棘轮改成「每条账本条目要么对应一个 descriptor 的 `xExpression`,要么对应一个 schemaless config schema 里标注过的字段」,两边都不许有孤儿。\n\n落地之后把 `decision.conditions[].expression` 登记为 `role: 'predicate'`,两个校验器就自动覆盖它了。顺带该扫一遍 `script` / `subflow` / `wait` / `connector_action` 的 config 契约,看还有几个同样形状的槽位 —— 我没有逐个数。\n\n相关: #4027(账本本身)、#3528(它要防的那个缺陷)、#4414(decision 路由,运行时那半已修)、#4336。\n"
+}

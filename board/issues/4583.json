@@ -1,0 +1,34 @@
+{
+  "number": 4583,
+  "kind": "issue",
+  "title": "datasource 账本判定的 20 条死键至今无人处置：三个块整块无人读，其中 readOnly 让一个 shipped 示例的「只读副本」可写（ADR-0049 enforce-or-remove）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "protocol:breaking"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T08:54:17Z",
+  "updated_at": "2026-08-02T12:42:55Z",
+  "closed_at": "2026-08-02T12:42:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4583",
+  "body": "#4487 把 `datasource` 纳入活性账本时判了 **43 条，其中 20 条 dead**，并给每一条写了 `authorHint`。那次交付的是**判定**；**处置**没有人接，至今没有 issue 跟踪。这条就是那个位置。\n\n对比一下同类死键的处置都是一簇一条 issue 立的 —— #3207（`object.enable.trash`/`mru`）、#4484（`IDataDriver.findStream`）、#4579（`openApi31`）、#4391（`crypto.hash`）。datasource 这 20 条是全仓最大的一块，**也是唯一 20 条全部带 `authorWarn` 的**（全平台 75 条 dead 里只有 29 条带告警），却是唯一没立项的。\n\n## 处置方向已经定了：全部 remove\n\n20 条的 `authorHint` **无一例外都是 \"Delete it\"**。这不是本 issue 新做的判断，是 #4487 逐条闭合调用图后的结论 —— 没有一条走 enforce 路线，因为每一条都有一个**已经在工作的、不同的机制**：\n\n| 簇 | 死键 | 真正被强制执行的是什么 |\n|---|---|---|\n| `capabilities.*` | 11 条（整块） | 引擎的下推判断读的是**运行时 driver 自己的 `supports.*`**（`objectql/src/engine.ts:3671, :4529, :4810`），和 datasource 元数据是两套机制 |\n| `retryPolicy.*` | 4 条（整块） | 连接失败走 `datasource-connection-service.ts` 的启动策略（降级启动 / `bootCritical` fail-fast），不按计划重试 |\n| `healthCheck.*` | 3 条（整块） | 连接存活按需探测：driver handle 的 `ping()` / `checkHealth()`（`contracts/datasource-driver-factory.ts:88-92`） |\n| `external.label` / `external.requirePermission` | 2 条 | 前者用顶层 `label`；后者的访问控制走普通对象权限集 + RLS |\n\n**三个块会整块清空**，这比「20 个键」更干净：`DatasourceCapabilities`（11/11 死）、`healthCheck`（3/3 死）、`retryPolicy`（4/4 死）作为 schema 块整体消失，`external` 块留下但少两个键。\n\n## 最严重的一条：`readOnly` 已经在 shipped 示例里造成了它声称要防的那个 bug\n\n`examples/app-crm/src/datasources/crm.datasource.ts` 里有一个叫 **`CRM Analytics Read Replica`** 的 datasource：\n\n```ts\nexport const CrmAnalyticsDatasource = defineDatasource({\n  name: 'crm_analytics',\n  label: 'CRM Analytics Read Replica',\n  driver: 'sqlite',\n  config: { filename: ':memory:' },\n  capabilities: { readOnly: true },   // ← 没有任何写路径读它\n  active: true,\n});\n```\n\n它上面的注释自己写着（#4410 留下的）：\n\n> `readOnly` 是 datasource **能力**，不是 sqlite 配置。它本来在 `config` 里，直到 #4410 给那个槽加了闸门 —— 一个没有驱动读的键，于是「读副本」是可写的，而每一个信号都说它不是。\n\n**搬家没有修好它。** #4410 把 `readOnly` 从 `config`（无闸门）挪到 `capabilities`（有 schema 闸门但仍无人读），注释描述的那个 bug **原封不动地活到今天**：这个「只读副本」现在照样可写。\n\n### 而且这里有个真实的能力缺口，不能靠改处方绕过\n\n账本的 `authorHint` 给的替代是 `external.allowWrites: false`（`objectql/src/engine.ts` 的 `assertWriteAllowed`）。但读一下那个闸门：\n\n```ts\nconst ds = this.datasourceDefs.get(dsName);\n// No recorded definition, or an explicitly managed one ⇒ allow.\nif (!ds || !ds.schemaMode || ds.schemaMode === 'managed') return;\n```\n\n**它只对 external / 联邦 datasource 生效。** crm 那个是本地 sqlite、没声明 `schemaMode` ⇒ 落进 `managed` 默认 ⇒ 闸门在第 1904 行直接放行。\n\n也就是说：**对一个 managed datasource，目前根本不存在任何被强制执行的只读机制**。`capabilities.readOnly` 是唯一长得像的那个，而它什么也不做。\n\n删掉这个键是对的（它是假合规），但要同时诚实地承认：**这不是把作者指向另一个键就能了结的，那个键对他的场景不适用**。建议本 issue 只做删除 + 把示例改成不再声称只读，并**另立一条 feature issue** 讨论 managed datasource 要不要有只读闸门 —— 参照 #4479（`readReplicas` 移除后另立读写分离立项）的先例，不要在退役 PR 里顺手发明一个机制。\n\n## 影响半径（已实测）\n\n- `DatasourceCapabilities` 全仓引用**只有** `datasource.zod.ts` 自己两处（:370 driver-definition、:544 datasource）+ 它自己的 `datasource.test.ts`。**零运行时消费者**，判定可复核。\n- 唯一的 authoring 站点是上面那个 `app-crm` 示例（`capabilities:`）。`healthCheck` / `retryPolicy` **无人 authoring**。\n- 手写文档**没有**教这三个块（`content/docs/data-modeling/*.mdx` 零命中）。`healthCheck` / `retryPolicy` 在 docs 里的命中全是**别的类型**的生成参考页（model-registry、plugin-rest-api、events-queue/bus、startup-orchestrator）—— 就是 #4488 点名的「同名不同类型」陷阱，不要照着改。\n- `DatasourceCapabilitiesType` 是导出类型，在公共 API 面上 ⇒ `check:api-surface` 会参与。\n\n## 路线：strict-removal（账本行删除，不是墓碑）\n\n三个块全部是 `.strict()`（`datasource.zod.ts:427/551/568`），按 `.claude/skills/spec-property-retirement` §2 走**删除 + `*_RETIRED_KEY_GUIDANCE` 处方**路线 —— 键离开 walked shape，所以**账本行要一并删掉**（留着会被 `orphans.mts` 判 ORPHAN）。反过来（留墓碑却删账本行）会判 UNCLASSIFIED。两个方向都会红。\n\n`DatasourceCapabilities` 整块消失时，`driver-definition` 上那处 `capabilities`（:370）需要单独决定：它不在本账本治理范围内（账本治的是 `datasource`），但用的是同一个 schema。判它之前先闭合它自己的调用图，**不要因为 datasource 侧判死就顺手判死**。\n\n## 建议的批次（可并行认领）\n\n| 批 | 内容 | 备注 |\n|---|---|---|\n| **A** | `capabilities.*` 11 条 + `DatasourceCapabilities` 整块 + app-crm 示例 | 含安全形状，优先 |\n| B | `retryPolicy.*` 4 条（整块） | 注意别碰 `hook.retryPolicy` / `job.retryPolicy`，那两个**是被强制执行的**，且拼写不同（`backoffMs` vs `baseDelayMs`）—— #4488 点名的最险的一个坑 |\n| C | `healthCheck.*` 3 条（整块） | 同名不同类型命中 20 处，没有一处属于 datasource |\n| D | `external.label` / `external.requirePermission` 2 条 | 块留下，只删两个键 |\n\n每批一个 changeset，FROM → TO 写清楚。批 A 的 changeset 必须明说：删除 `readOnly` **不等于**给了替代方案，managed datasource 的只读能力是另一条 issue。\n\n## 验收\n\n- 四个簇的键从 schema 消失，`*_RETIRED_KEY_GUIDANCE` 给出处方\n- `packages/spec/liveness/datasource.json` 对应行**删除**（不是改状态），README 计数按现有口径重算\n- `check:liveness` / `check:api-surface` / `check:generated` / 全仓 `build` + `test` 绿\n- app-crm 示例不再声称自己只读\n- CLI `lint-liveness-properties` 的 datasource 相关期望更新（20 条告警归零）\n\n## 参考\n\n- #4487 —— 判定来源（方法论范本）\n- #4410 / #4465 / #4481 —— 手工挖出那 6 个死键，本闸门存在的理由；#4410 正是把 `readOnly` 挪进 `capabilities` 的那次\n- #4479 —— 「移除后另立 feature issue」的先例\n- #4509 —— 同一族的四个断连，刚合并；其中 email_template 走 enforce、validation 走 remove，本 issue 全部走 remove\n- ADR-0049 enforce-or-remove / ADR-0078 no-silently-inert-metadata\n- `.claude/skills/spec-property-retirement` §2（路线分叉）、§4（14 面清单）"
+}

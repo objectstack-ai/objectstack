@@ -1,0 +1,35 @@
+{
+  "number": 4567,
+  "kind": "issue",
+  "title": "defineJob 解析后的 cron schedule 是表达式信封,CronJobAdapter 直接喂给 croner —— 声明式 cron job 静默调度失败",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T05:17:36Z",
+  "updated_at": "2026-08-02T09:32:52Z",
+  "closed_at": "2026-08-02T09:32:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4567",
+  "body": "在 #4538 的三仓 import 级扫描中发现的运行时缺陷(与该 issue 的类型收敛无关,按 Prime Directive #10 单独立案)。\n\n## 现象\n\n`defineJob`(`JobSchema.parse`)产出的 cron schedule 里,`expression` 已被 `CronExpressionInputSchema` 的 transform 变换成 ADR 表达式信封:\n\n```js\n// packages/spec (built dist) 实测:\ndefineJob({ name: 'x_job', schedule: { type: 'cron', expression: '0 1 * * *' }, handler: 'h' }).schedule\n// => {\"type\":\"cron\",\"expression\":{\"dialect\":\"cron\",\"source\":\"0 1 * * *\"},\"timezone\":\"UTC\"}\n```\n\n而 `AppPlugin`(`packages/runtime/src/app-plugin.ts`,`kernel:ready` 钩子里的 declarative-jobs 注册段)把 `job.schedule` **原样**传给 `IJobService.schedule`,`CronJobAdapter`(`packages/services/service-job/src/cron-job-adapter.ts`)又把 `schedule.expression` **原样**传给 croner:\n\n```js\nnew Cron({dialect:'cron',source:'0 1 * * *'}, {timezone:'UTC'}, ...)\n// => throws: \"CronPattern: Pattern has to be of type string.\"\n```\n\n该异常被 AppPlugin 的 per-job try/catch 吞掉,只留一条 `warn('[AppPlugin] Failed to schedule job', …)` —— **通过 `defineJob` 授权的 cron job 永远不会真正被调度**,而作者看到的是一次成功的 build 和一次成功的 boot。`examples/app-showcase` 的 `HealthSweepJob`(`src/automation/jobs/index.ts`,`schedule: { type: 'cron', expression: '0 1 * * *' }`)正中此路径。\n\ninterval/once 分支不受影响(无 transform);`trigger-schedule` 一侧自己归一化出裸字符串 expression,也不受影响。\n\n## 成因判定\n\ndeclared ≠ enforced 的典型分裂:`JobSchema.schedule` 的解析产物(信封)与 `IJobService.schedule` 的消费约定(裸字符串,见 `@objectstack/spec/contracts` 的 `JobSchedule` — #4538 后是该名字唯一声明)之间没有任何一层做信封 → 字符串的降解,adapter 也从未声明它能吃信封。\n\n## 修复方向(按 contract-first,不建议在 adapter 里加 `typeof === 'object'` 容错)\n\n候选:\n1. AppPlugin 注册声明式 job 时(与 retryPolicy/timeout 同一处)把 `Schedule`(authoring tier)降解为 contracts `JobSchedule`(boundary tier):信封 `expression.source` → 裸字符串。降解点单一、两个 tier 的边界正好是 #4538 划清的那条线。\n2. 或者让 `IJobService.schedule` 正式接受 authoring `Schedule` 并由各 adapter 统一经 `@objectstack/formula` cron engine 解包/校验 —— 改动面大,但把信封作为一等公民贯穿到执行层。\n\n无论取哪条,失败路径都应从 warn 升级为更响亮的信号(至少 error + 计数),\"调度失败\"不该和\"缺 handler\"共用一条静默 warn。\n\n复现:任一 defineJob cron job → boot → 观察 warn 日志与 `listJobs()`。"
+}

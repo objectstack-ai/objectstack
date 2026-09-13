@@ -1,0 +1,35 @@
+{
+  "number": 4518,
+  "kind": "issue",
+  "title": "[verify] `bootStack({ databaseFile })` 的数据活不过进程内重启 —— 表在、行没了，挡住冷启动类 e2e",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T15:17:29Z",
+  "updated_at": "2026-08-02T03:33:10Z",
+  "closed_at": "2026-08-02T03:33:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4518",
+  "body": "在做 #4470（让验证 harness 走真实持久化路径）时发现的。它挡住了 #4470「最小形态」的第三条，所以单独记录 —— `packages/qa/dogfood/test/flow-durable-suspend.dogfood.test.ts` 的文件头、以及 `@objectstack/verify` 的 changeset 都引用了这条。\n\n## 问题\n\n#4470 给 `bootStack` 加了 `databaseFile`，本意是让两次顺序启动共享同一个 SQLite 文件，从而构成一次真正的**冷启动**（ADR-0019 的挂起 run 必须活过的那种重启）。实际行为是：第二次 `bootStack` 打开同一个文件，**表结构在，行没了**。\n\n关键点是这**与挂起 run 无关** —— 普通业务记录同样不保留。所以归因在 harness/驱动这一层，不在挂起存储。\n\n## 复现\n\n```ts\nconst dir = mkdtempSync(join(tmpdir(), 'probe-'));\nconst dbFile = join(dir, 'v.sqlite');\n\nconst a = await bootStack(someStack, { automation: true, databaseFile: dbFile });\nconst ta = await a.signIn();\nawait a.apiAs(ta, 'POST', '/data/suspend_note', { name: 'persisted-me', status: 'new' });\nawait a.stop();                       // kernel shutdown\n\nconst b = await bootStack(someStack, { automation: true, databaseFile: dbFile });\nconst tb = await b.signIn();\nawait b.apiAs(tb, 'GET', '/data/suspend_note?limit=10');\n```\n\n实测输出：\n\n```\nPROBE hot row status         200                      ← 第一个进程里读得到\nPROBE file exists            true 1073152             ← 文件确实在，1MB\nPROBE cold automation_run    {\"records\":[],\"total\":0}\nPROBE cold suspend_note      {\"records\":[],\"total\":0} ← 普通记录也没了\n```\n\n两次运行文件大小完全一致（1073152），像是在某个早期时点（schema sync 之后）写过一次就再没更新。表能查到 200（不是 `no such table`），说明第二次启动确实读到了那个文件 —— 只是里面没有后来写入的行。\n\n## 线索\n\n- `packages/plugins/driver-sqlite-wasm/src/sqlite-wasm-driver.ts` —— `persist` 默认 `'on-disconnect'`：只在驱动 disconnect 时把 sql.js 的内存镜像刷回磁盘（外加一个 `process.once('beforeExit')` 的兜底 flush）。\n- `packages/runtime/src/default-datasource-plugin.ts` —— `destroy()` 会 `connection.disconnect('default', { asDefault: true })`，看起来应该触发那次 flush。\n- `packages/verify/src/harness.ts` —— `stop()` 关掉 http server 后调用 `kernel.shutdown()`；日志里确实出现 `Graceful shutdown started` / `✅ Graceful shutdown complete`。\n\n所以从代码看这条链路本该 flush，但结果表明没有（或者 flush 发生得太早）。没有继续深挖，因为这已经在 #4470 的范围之外了。\n\n注意 `beforeExit` 兜底对**进程内重启**是无效的：进程根本没退出。`objectstack dev` 这类「跑到被杀」的用法因此不受影响，这也可能是它一直没被发现的原因。\n\n## 影响\n\n1. **挡住 #4470 的第三条最小形态** —— 「冷启动一个新 kernel，`resume` 能继续走对分支」目前无法在 dogfood 层断言。已在测试文件头标注为 KNOWN GAP，没有用放松断言的方式假装通过。\n2. 任何想验证「跨进程状态存活」的 e2e 都会撞上同一堵墙 —— 而这正是持久化类缺陷（#4420 那一类）最需要被覆盖的维度。\n\n## 期望\n\n`bootStack({ databaseFile })` 之后的 `stop()` 应当保证数据已落盘，使下一次 `bootStack` 是一次真实的冷启动。可能的方向（未验证，留给认领者判断）：\n\n- 查清 `stop()` → `kernel.shutdown()` → 插件 `destroy()` → 驱动 `disconnect()` 这条链在 harness 里是否真的走全了；\n- 或让 harness 在 `stop()` 里显式调用驱动已有的 `flush()`；\n- 或在 `databaseFile` 模式下改用更即时的 `persist` 策略（如 `debounced:*`）。\n\n修好之后，`flow-durable-suspend.dogfood.test.ts` 最自然的下一个用例就是它最初被写出来的那个：挂起 → 关停 → 冷启动 → `resume` 走对分支。\n\n## 参考\n\n- #4470 / #4420 / ADR-0019\n- `packages/verify/src/harness.ts`（`databaseFile`、`stop()`）\n- `packages/plugins/driver-sqlite-wasm/src/{sqlite-wasm-driver,wasm-connection}.ts`\n- `packages/runtime/src/default-datasource-plugin.ts`\n- `packages/qa/dogfood/test/flow-durable-suspend.dogfood.test.ts`（KNOWN GAP 注释）"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 4641,
+  "kind": "issue",
+  "title": "spec 双源清账 C4:Session / SessionSchema(./api ≠ ./identity)—— 2 条",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "protocol:breaking"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T13:08:59Z",
+  "updated_at": "2026-08-02T13:58:17Z",
+  "closed_at": "2026-08-02T13:58:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4641",
+  "body": "#4535 C 组第四簇(C4)。同一个名字在两个入口解析到不同声明,消费者拿到哪个类型只取决于 import 路径(#4411 陷阱)。合并后 `packages/spec/dual-source-exports.baseline.json` 恰好 **24 → 22**(删除下列 2 行,只减不增):\n\n```\nSession — [./api (type)] ≠ [./identity (type)]\nSessionSchema — [./api (const)] ≠ [./identity (const)]\n```\n\n## 处置手册(#4411 先例;#4535 正文有完整版)\n\n1. **先判真源**:import 语句级扫描三仓(本仓 + `cloud` + `objectui`),裸名从哪个入口被真实 import、有没有 runtime 读取(接进父 schema / 校验路径 / 会话签发与校验 / REST 响应)。不要用名字出现次数。\n   - 提示:会话是**跨层概念** —— `./identity` 侧大概率是认证域的会话记录(登录态、过期、设备),`./api` 侧可能是 REST 会话响应体。若两侧都活,优先**收敛 + re-export**(`MetadataManagerConfig` 模式);若确属两个概念,按 C1 的 `OpenApiWebhookEvent` 先例改名一侧,命名可争议时报 `needs_decision`。\n2. 零消费方一侧 ⇒ **死删**(v17 rc 是 major 窗口)。\n3. 收敛 ≠ 无行为变化:存活形状比被删侧窄/宽时,在 changeset 里写清消费方类型如何变。\n4. 导出类型,非可作者化 metadata key,一般不需要 tombstone / ADR-0087。\n\n## 验收\n\n- 基线恰好 −2(24 → 22),`check:dual-source-exports` 绿(stale 分支点名的行即删行凭证)\n- **务必跑全 `packages/spec` 的源码审计**,不止 `check:generated`:`check:liveness`、`check:strictness-ledger`、`check:empty-state`、`check:variant-docs`、`check:exported-any`、`check:skill-examples`。C3(#4638)就是栽在 `check:strictness-ledger` 上 —— 删掉 zod 形状会让 `docs/audits/2026-07-unknown-key-strictness-ledger.md` 里该文件的站点数与章节总计过期,必须同步更新\n- 若涉及导出名增删,`build-docs` 的 import-surface 基线(#4595 ratchet)按 shrink-only 处理\n- changeset:`@objectstack/spec` major,写明 FROM→TO 导出面变化\n- ⛔ 不碰 `content/docs/releases/`\n- 回归 pin:编译期条件类型优先(C1 先例,不吃 vitest 超时)\n\n关联:#4535(主账本)、#4610 → PR #4638(C3 先例)、#4587 → PR #4603(C2)、#4572 → PR #4581(C1)、ADR-0049"
+}

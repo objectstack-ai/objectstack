@@ -1,0 +1,35 @@
+{
+  "number": 4438,
+  "kind": "pull_request",
+  "title": "fix(spec,objectql,metadata-protocol): a `user` field carries its target in the TYPE — bare `{type:'user'}` is not targetless",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T07:10:49Z",
+  "updated_at": "2026-08-01T07:38:02Z",
+  "closed_at": "2026-08-01T07:38:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-01T07:38:01Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4438",
+  "body": "## The contract question, settled first\n\n`type: 'user'` — does it **imply** the target object, or must it carry an explicit `reference`?\n\n**It implies it.** The spec says so in its own words:\n\n- `field.zod` type list: *\"User reference — a lookup specialized to the `sys_user` system object … Stored IDENTICALLY to 'lookup' (FK string column → sys_user.id)\"*.\n- `Field.user()`: *\"target fixed to the `sys_user` system object\"* — and unlike `Field.lookup(reference, …)` / `Field.masterDetail(reference, …)` it takes **no target argument**; it writes `reference: 'sys_user'` itself.\n- `reference`'s own docstring names the types that require it: *\"Used by `lookup` and `master_detail` field types\"*.\n- objectui agrees from the other side: `buildExpandFields` expands on TYPE alone (*\"the `reference` / `reference_to` target is irrelevant to the decision\"*), and `lookupTargetObject({type:'user'})` → `sys_user`.\n\nSo the target is a **constant of the type**. `reference` on a `user` field materializes that constant; it does not supply it. Metadata authored without it — hand-written JSON, an AI author, a Studio form — is **complete**, not under-specified.\n\n## What was broken\n\nTwo callers read `field.reference` raw and so disagreed with that definition:\n\n- `protocol.assertExpandTargetsExist` refused `?expand=<bare user field>` → `400 INVALID_FIELD … declares no target object`\n- `engine.expandRelatedRecords` skipped it (`if (!fieldDef.reference) continue`)\n\nLive capture (cloud#983): an AI-built equipment app modelled 负责人 as `{ type: 'user' }`, objectui's default list expanded that column, and the very first screen of the brand-new app rendered 「该视图的查询被拒绝」:\n\n```\nGET /api/v1/data/fzqb_equipment?populate=responsible_person&top=100&select=… → 400\n{\"code\":\"INVALID_FIELD\",\"field\":\"responsible_person\",\"object\":\"fzqb_equipment\",\n \"error\":\"Field 'responsible_person' … declares no target object.\"}\n```\n\n## The fix\n\n`referenceTargetOf` in `@objectstack/spec/data`, next to `REFERENCE_VALUE_TYPES` — the set those same two callers already share for *\"is this a reference at all\"*. It answers the companion question *\"what does it point at\"*, folding the type-implied targets. Both halves of the expand path read it, which is what stops the gate from refusing a field the engine would have expanded, or blessing one it skips.\n\n**A gate-only fix would have been worse than none:** the request would be admitted and the engine would still skip the field, answering `200` with a raw user id in the cell — the *\"client renders raw ids where names belong\"* failure the whole expand axis exists to close. The conformance test pins both halves; each was verified to fail on its own (engine reverted → `expected 'usr_1' to match object {id:'usr_1', name:'Ada'}`; gate reverted → the issue's exact 400).\n\n## Deliberately unchanged\n\n`seed-loader`'s reference resolution still requires an explicit `reference`. An unresolvable seed reference is a **hard failure** there, so folding implicit targets in would turn seeds that today write a raw string into failed loads. That is a different subsystem's contract question, not this one.\n\n## Tests\n\n- `spec` — `referenceTargetOf` unit tests, plus a drift guard asserting `user` is the only reference type with an implied target\n- `objectql/query-expression-conformance` — a bare `{type:'user'}` field is admitted **and actually expands** (`{id:'usr_1', name:'Ada'}`, not the raw id)\n- `@objectstack/spec` 7230 · `metadata-protocol` 139 · `objectql` 1507 — all green; `spec` + `objectql` typecheck clean\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

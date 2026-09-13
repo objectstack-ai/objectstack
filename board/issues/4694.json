@@ -1,0 +1,32 @@
+{
+  "number": 4694,
+  "kind": "issue",
+  "title": "useAutoRefresh 在 refetch 身份不稳定时每渲染一次就重订阅一次(两条流都churn)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T18:48:45Z",
+  "updated_at": "2026-08-02T19:53:26Z",
+  "closed_at": "2026-08-02T19:53:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4694",
+  "body": "做 #4682(给 client-react 建测试基座)时,用刚建好的基座实测发现,unassigned。\n\n## 现象\n\n`useAutoRefresh(object, refetch)` 在 `refetch` 的函数身份每渲染变化时,**每渲染一次就把两条订阅各拆一次、重开一次**。\n\n实测(fake client 记录每次 `subscribeData` / `subscribeBulkData`):\n\n| `refetch` 身份 | 3 次渲染后的订阅数(逐记录 / 批量) |\n|:---|---:|\n| 内联箭头函数 `() => {}` | **3 / 3** |\n| 稳定引用(`vi.fn()` 提到外面) | 1 / 1 |\n\n## 成因\n\n`packages/client-react/src/realtime-hooks.tsx`:\n\n```ts\nconst handleEvent = useCallback((_e: DataEvent) => { refetch(); }, [refetch]);\nconst handleBulkEvent = useCallback((_e: BulkDataEvent) => { refetch(); }, [refetch]);\n\nuseDataSubscriptionCallback(object, handleEvent, options);\nuseBulkDataSubscriptionCallback(object, handleBulkEvent);\n```\n\n而 `useDataSubscriptionCallback` / `useBulkDataSubscriptionCallback` 的 effect 依赖数组里都含 `callback`。`refetch` 身份一变 → `handleEvent` 身份变 → effect 重跑 → 退订 + 重订。\n\n## 为什么这不只是性能问题\n\n1. **退订与重订之间有窗口**,该窗口内到达的事件直接丢失 —— 而 `useAutoRefresh` 的全部职责就是不漏掉数据变更;\n2. 真实 `RealtimeAPI` 的 `subscribeData` 会 `startPolling()`,unsubscribe 在订阅数归零时 `stopPolling()`,所以这是**轮询定时器的反复起停**,不是往 Map 里塞一项那么轻;\n3. 与 #4690 叠加时更糟:`useQuery` 的 `refetch` 本身就是每渲染换身份的(它 memo 在同样不稳定的 `fetchData` 上),而 `useAutoRefresh` 的 TSDoc 示例正是 `const { refetch } = useQuery(...)` 配 `useAutoRefresh(...)`。**两个缺陷是同一条调用链上的**。\n\n## 处置方向\n\n把 callback 存进 ref,effect 只依赖 `[client, object, options?.recordId]`,回调从 ref 里读。这是这类「订阅 + 回调」hook 的标准做法,也让 `useDataSubscriptionCallback` / `useBulkDataSubscriptionCallback` 对调用方是否记得 `useCallback` 免疫。\n\n注意别顺手把 `useDataSubscription` / `useBulkDataSubscription`(返回 state 的那两个)的依赖也改了——它们不接收外部回调,当前依赖是正确的,#4682 已有测试钉住(改成依赖 options 对象身份会变红)。\n\n修复须带回归测试:基座已就位(#4682 / PR #4692),断言形状即上表——内联回调渲染 3 次后订阅数仍应为 1。\n\n## 优先级\n\n比 #4690 低:本缺陷是 churn 与丢事件窗口,#4690 是无界请求循环。但两者同源(依赖数组用身份而非值),建议一并修。"
+}

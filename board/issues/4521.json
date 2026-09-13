@@ -1,0 +1,34 @@
+{
+  "number": 4521,
+  "kind": "issue",
+  "title": "meta overlay: a just-saved overlay is listed but not dispatchable for a short window — a cache between saveMeta and resolveRouteActionDeclaration lags the write",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T16:01:59Z",
+  "updated_at": "2026-08-02T11:57:28Z",
+  "closed_at": "2026-08-02T11:57:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4521",
+  "body": "Split out of #4432 so it is not buried when that issue closes. **Unassigned — nobody is on this.**\n\n#4432's repro (v17 verification, F1) reported two distinct defects. The type-segment namespace split is fixed in #4520. This is the other one, which #4520 deliberately did **not** touch (Prime Directive #10 — no silent scope expansion).\n\n## Observed\n\nQuoting the original report (step 2 aftermath):\n\n> after step 2 the overlay was **listed but not dispatchable for a short window** (`POST` answered the ADR-0110 \"has no declaration\" 404, then succeeded on a later call) — some cache between `saveMeta` and `resolveRouteActionDeclaration` lags the write.\n\nSo immediately after a successful `PUT /api/v1/meta/action/<name>`:\n\n- `GET /api/v1/meta/action` already lists the item, but\n- `POST /api/v1/actions/<object>/<name>` answers the ADR-0110 `404 … has no declaration`,\n- and a later identical POST succeeds.\n\n## Why it is worth its own issue\n\nTwo read surfaces disagree about the same write for a bounded but nonzero window, and the disagreement is *timing*-dependent, so it reads as a flake to anyone who hits it. It is also the shape a Studio \"save then run\" flow walks straight into.\n\n`saveMetaItem` already awaits its projection before the fire-and-forget listeners (ADR-0094) and emits `emitMetadataMutation` synchronously; the lag is presumably downstream of that, in whatever `resolveRouteActionDeclaration` reads. Worth determining whether the dispatch resolver caches per-process without subscribing to the mutation event, or subscribes but is invalidated asynchronously — the fix differs.\n\n## Not reproduced here\n\nI did not reproduce this myself; I am recording it so the observation survives #4432 closing. Original evidence: #4432, \"Also observed\" paragraph. Environment there: showcase under `os serve --dev`, admin session, `main` @ `1ee48bc60`.\n\nPart of the #3909 rc.1 verification (section F1) family.\n"
+}

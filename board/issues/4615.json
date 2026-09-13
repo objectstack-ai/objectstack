@@ -1,0 +1,35 @@
+{
+  "number": 4615,
+  "kind": "pull_request",
+  "title": "test(dogfood): pin that the object-existence gates are WIRED, not just implemented (#4613)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T11:09:26Z",
+  "updated_at": "2026-08-02T11:24:06Z",
+  "closed_at": "2026-08-02T11:24:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-02T11:24:04Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4615",
+  "body": "Closes #4613. Test-only — no runtime change.\n\n## The gap, measured\n\n#3770 (data path) and #3867 (analytics cube auto-inference) are both implemented and unit-tested. Neither implementation is what this protects. It protects the **wiring**, which nothing asserted.\n\nTwo deletion experiments, each removing only the lines that hand the probe to the service — implementation and unit tests untouched:\n\n| Experiment | Deleted | Result **before** this PR |\n|:---|:---|:---|\n| **A** | the 5 lines in `service-analytics/src/plugin.ts` passing `isRegisteredObject` | service-analytics **299/299 green**, dogfood **395/395 green** |\n| **B** | `this.assertObjectRegistered(request.object)` in `findData` | 4 red immediately |\n\nExperiment A means the #3867 gate could be deleted from production by one refactor and **nothing in the repo would notice**. It only logs a one-shot stand-down `warn` that nobody asserts, so `/analytics/query` silently reverts to \"any table the connection can see is readable\" — the exact state #3867 was filed for.\n\n## Why the asymmetry — it's the test shape, not luck\n\n- **#3770's suite** drives the real `protocol.findData`. The call site is inside the object under test → deleting it reddens.\n- **#3867's suite** injects the probe as config: `new AnalyticsService({ isRegisteredObject })`. It proves how the service behaves *once handed a probe* — never that anyone hands it one.\n\nPrime Directive #10's closing line in mirror image: *a `case` label is not enforcement, check the CALL SITE.* (#3106 was the same lesson pointing the other way.)\n\n**This repo has already paid for this exact gap once.** From `analytics-rls.dogfood.test.ts`'s own header, verbatim:\n\n> Every pre-existing analytics RLS test injects `getReadScope` as a fake into a hand-built AnalyticsService. NONE booted the real plugin, so the `getReadScope → security.getReadFilter` auto-bridge had zero coverage — **which is how the gap shipped.**\n\nThat was #3597. #3867 sits in the identical position, and the pattern is spreading — `measure-source-field-gate.test.ts` is a newer gate wired the same injected way.\n\n## Verified to bite\n\nWith this test in place, the same two experiments now redden:\n\n| Experiment | With this PR |\n|:---|:---|\n| A (#3867 wiring deleted) | **3 cases red** |\n| B (#3770 call site deleted) | **1 case red** (plus the 4 unit ones) |\n\n## Why `sqlite_master` and not an invented name\n\nThe harness boots `sqlite-wasm`, so `sqlite_master` is **guaranteed to exist and hold rows** while never being a registered object. That is the case that actually regressed — #3867's live repro read real rows out of it (`{index: 262, table: 71, view: 1}`) — and it keeps the gate honest: a 404 here cannot be explained away by *\"there was no table anyway\"*, which is precisely the loophole the pre-#3770 driver-error-string 404 depended on.\n\n## What's asserted\n\nEverything goes through `bootStack` (real plugin lifecycle, real Hono app, real HTTP) and never constructs a service by hand.\n\n- **Premise** — the table IS readable straight through the engine. Ground truth, and it doubles as a pin on #3770's choice to gate at the protocol ingress rather than the engine, so internal callers (hooks, flows, migrations, raw ObjectQL) keep working.\n- **#3770** — `GET /data/sqlite_master` → 404 `OBJECT_NOT_FOUND` (SCREAMING_SNAKE per ADR-0112); the write verb too.\n- **#3867** — `POST /analytics/query` scalar and grouped, plus `/analytics/sql`, all 404, with the response asserted not to carry `\"rows\"` or `FROM \"sqlite_master\"`.\n- **Controls** — a registered object still serves on `/data`, and still auto-infers a cube on `/analytics/query` (the `object-metric` KPI path #3867 narrowed but must not have removed). Without these, a simply-broken boot would make every 404 above pass for the wrong reason.\n\n`pnpm test` green across the monorepo (132/132 turbo tasks).\n\nEmpty changeset — the CI check explicitly allows one for changes that release nothing.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01EWHv5StvA4KDkHhx19xufX\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01EWHv5StvA4KDkHhx19xufX)_"
+}

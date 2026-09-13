@@ -1,0 +1,32 @@
+{
+  "number": 4536,
+  "kind": "issue",
+  "title": "[#4535·A1] MetadataWatchEvent.type 收紧到 'added'|'changed'|'deleted' —— add/change/unlink 零生产者",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T01:24:14Z",
+  "updated_at": "2026-08-02T02:27:42Z",
+  "closed_at": "2026-08-02T02:27:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4536",
+  "body": "#4535 A1 项。#4411 清掉 kernel 死副本后,唯一存活的 `system` 版 `MetadataWatchEvent` 内部仍有枚举虚胖:`type` 声明 6 个值,其中 `add`/`change`/`unlink` **零生产者**(declared ≠ enforced,Prime Directive #10)。\n\n## 已核实的证据(直接可用,不必重查)\n\n全仓仅两处构造该事件,两处都只产出规范三值:\n\n- `packages/metadata/src/node-metadata-manager.ts:70-88` —— chokidar 的 `add`/`change`/`unlink` 在监听回调里即被翻译(`handleFileEvent` 参数类型写死 `'added'|'changed'|'deleted'`),`:121` 原样带出\n- `packages/metadata/src/metadata-manager.ts:1663-1670` —— repo 事件经 `evt.op === 'create' ? 'added' : evt.op === 'delete' ? 'deleted' : 'changed'` 归一\n\n三仓消费方核实(2026-08-01):本仓所有消费方从 `@objectstack/spec/system` 导入;`cloud` 零引用;`objectui` 仅有自己本地声明的无关同名 interface。**没有任何消费方 switch 到原始三值。**\n\n## 改动清单\n\n1. `packages/spec/src/system/metadata-persistence.zod.ts` `MetadataWatchEventSchema.type`:`z.enum(['add','change','unlink','added','changed','deleted'])` → `z.enum(['added','changed','deleted'])`,附一行注释说明原始 watcher 词汇在 `node-metadata-manager` 的监听回调即被翻译、从未到达事件面。\n2. `packages/spec/src/contracts/metadata-service.ts` `subscribe?` 的 TSDoc:现文写 `` (`add`/`changed`/`deleted`) `` —— 自身混用两套词汇,改为规范三值。\n3. `packages/spec/src/system/metadata-persistence.test.ts:383-411`:现测试断言 6 个值全 parse 通过 —— 改为三值通过 + **pin 三个原始值被拒**。\n4. 生成物:`pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec check:generated --fix`(枚举变化会动 references 文档;`api-surface` 无导出增删,预期不动)。\n5. changeset:`major`(枚举收窄对解析方是 breaking;v17 rc 窗口内)。FROM → TO:写 `add`/`change`/`unlink` 的事件构造方(如有外部实现者)改用 `added`/`changed`/`deleted`;读取方可删除对原始三值的分支。\n6. **不需要** tombstone / ADR-0087 conversion:事件信封非可作者化 metadata,无 load path 解析(#4411 路线)。\n\n## 验收\n\nspec 14 gate 全 PASS、`check:generated` 全 up to date、全仓 typecheck + test 绿;pin 测试证明原始值被拒。\n\n关联:#4535(主单)、#4411、#4404"
+}

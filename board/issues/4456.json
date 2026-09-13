@@ -1,0 +1,34 @@
+{
+  "number": 4456,
+  "kind": "issue",
+  "title": "驱动工厂仍保留 4 处未声明的 `??` 容错，应按 ADR-0087 转换层退役（#4410 收尾发现）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T08:22:07Z",
+  "updated_at": "2026-08-02T13:52:22Z",
+  "closed_at": "2026-08-02T13:52:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4456",
+  "body": "#4410 给 `datasource.config` 装上了 per-driver 的 zod 门禁，作者侧现在只有一种拼写。但\n`createDefaultDatasourceDriverFactory` 里仍留着几处**未声明的读取侧 `??` 回退**——它们不是\n契约的一部分，任何文档、表单、示例都没写过，纯粹是\"读的人比较宽容\"才碰巧能用：\n\n| 位置 | 容错的拼写 | 契约里的键 |\n|---|---|---|\n| `buildSqlConnection`（sqlite 分支） | `cfg.file` / `cfg.database` | `filename` |\n| `buildSqlConnection`（pg 分支） | `cfg.connectionString` | `url` |\n| `buildSqlConnection` / `buildMysqlConnection` | `cfg.user` | `username` |\n| `buildMongoUrl` | `cfg.uri` | `url` |\n\n这正是 AGENTS.md Prime Directive #12 点名的债：*\"When you must tolerate an alias at all,\ndeclare it as a conversion-layer entry (never a bare `??`), so it is declared, loud, tested,\nand removable on a schedule.\"* `filters` → `filter`、`object` → `objectName` 已经按这条路\n毕业了（`flow-node-crud-filter-alias` 等），这四处是同一形状。\n\n**#4410 为什么没有顺手删掉。** 删了会静默改变已持久化的运行时数据源的行为：一条早先通过\nAPI 存进 `sys_metadata`、`config` 里写着 `file` 的记录，删回退之后会落到 `:memory:`——\n数据位置无声改变，比现在的容错更糟。正确做法是 ADR-0087 D2 的转换条目：在加载时把旧键改写\n成规范键（`applyConversionsToStoredItem` 会对存量数据重放整条链，#3903），然后回退就可以\n真的删除，而不是继续留在 reader 里。\n\n**建议做法**\n1. 加一条 `datasource-config-driver-key-aliases` 转换条目（含 fixture），覆盖上表四组映射；\n   需要一个 `mapDatasources` walker（`conversions/walk.ts` 目前没有）。\n2. 转换落地后删除工厂里的四处 `??`，并把 `sqlite.zod.ts` / `mongo.zod.ts` 里\"工厂仍容忍\n   存量记录\"的注释一并删掉——那两段注释是专门为这个中间状态写的。\n3. `spec-changes` / `upgrade-guide` 按常规重新生成。\n\n**关联**：#4410（本 issue 的来源）、#3796（同类 alias 毕业）、ADR-0087 D2、ADR-0078。"
+}

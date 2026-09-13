@@ -1,0 +1,36 @@
+{
+  "number": 4657,
+  "kind": "issue",
+  "title": "ADR-0049:两份 `activationEvents` 声明四仓零 reader —— declared-but-unenforced,且 studio 侧 `z.string()` 零校验",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "protocol:breaking"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T14:18:08Z",
+  "updated_at": "2026-08-03T10:18:02Z",
+  "closed_at": "2026-08-03T10:18:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4657",
+  "body": "从 #4653(双源清账 C5)的三仓 import 扫描里掉出来的范围外发现,**不在 #4653 的 PR 里修**,单独立案。\n\n## 事实\n\n`packages/spec` 有两份 `ActivationEventSchema`,分别嵌在两个父 schema 的 `activationEvents:` 上:\n\n| 侧 | 声明 | 父 schema |\n|:--|:--|:--|\n| `kernel/plugin-runtime.zod.ts:74` | `z.object({ type: z.enum([...7 项]), pattern: z.string() })` | `DynamicLoadRequestSchema.activationEvents`(`.optional()`) |\n| `studio/plugin.zod.ts:285` | `z.string()` | `StudioPluginManifestSchema.activationEvents`(`.default(['*'])`) |\n\n**四仓(objectstack / cloud / cloud-v1 / objectui)全量扫描:没有任何运行时读取 `activationEvents`。** 命中的只有 spec 自身的源码与测试、生成文档,以及三个 VS Code 扩展**自己的** `package.json`(`packages/vscode-objectstack`、`objectui/packages/vscode-extension`、`objectql/packages/tools/vscode-objectql`)—— 那是 VS Code 的字段,与本平台无关。\n\n外部佐证 —— `cloud-v1/docs/ROADMAP.md:641` 自己记着这条没实现:\n\n```\n| `plugin-runtime.zod.ts` -> `ActivationEventSchema` | Lazy activation triggers (onCommand, etc.) | ❌ | All plugins activated immediately on install | v0.4.0 |\n```\n\n即:**所有插件安装即激活**,惰性激活是 v0.4.0 的计划,不是今天的行为。\n\n## 两重问题\n\n1. **declared ≠ enforced(ADR-0049)。** 作者在 studio plugin manifest 里写 `activationEvents: ['onMetadataType:flow']`(`content/docs/plugins/development.mdx:387`,带 `os:check` 标记的示例),期待插件被延迟到该事件才加载;实际它立即加载。这不是惰性 no-op,是一个**语义上撒谎**的键。\n\n2. **studio 侧零校验。** `z.string()` 接受任何字符串:`''`、`'banana'`、`'onMetadatType:flow'`(拼写错误)全部通过,作者拿不到任何反馈。文档里列的词表(`*`、`onMetadataType:`、`onCommand:`、`onView:`)完全不被 schema 表达 —— 这正是 AI 生成的元数据出错后能长期潜伏的地方。对比 kernel 侧的 `z.enum([...])` 至少挡得住 trigger 类型拼错。\n\n## 建议处置(需维护者裁决,故不自行动手)\n\n按 enforce-or-remove:要么在 v0.4.0 实现惰性激活并把词表收进 schema,要么按 ADR-0087 tombstone 掉这两处 `activationEvents`。**注意**:`ActivationEventSchema` 的**双源**问题正由 #4653 处理,而「选哪个编码」的裁决与本单强耦合 —— 如果这个键最终要被 retire,#4653 就不该先为它挑一个编码。建议两单一起裁。\n\n关联:#4653、#4535、ADR-0049、ADR-0087"
+}

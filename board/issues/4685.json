@@ -1,0 +1,35 @@
+{
+  "number": 4685,
+  "kind": "pull_request",
+  "title": "refactor(spec)!: remove DataEventType 'data.field.changed' — no producer (#4673)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T16:54:29Z",
+  "updated_at": "2026-08-02T17:25:50Z",
+  "closed_at": "2026-08-02T17:25:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-02T17:25:48Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4685",
+  "body": "Fixes #4673\n\n按维护者裁决走 ADR-0049 enforce-or-remove 的**路线 3(移除)**。\n\n## 为什么移除\n\n`data.field.changed` 声明在 `DataEventType` 里,但**全仓没有任何生产者**:engine 的 `publishDataEvent` 只发 `data.record.{created,updated,deleted}`,以及(自 #4639 起)`data.records.{updated,deleted}`。订阅方 `switch` 到这个值上的分支永远不会执行,而 `switch` 本身照样编译通过——这正是 ADR-0078 说的\"静默失效的声明\",只不过发生在事件词表上。\n\n更关键的是,**按现有契约它根本无法被实现**:`DataEventSchema` 是 record 形状的(`recordId` / `changes` / `before` / `after`),没有 `field` / `oldValue` / `newValue` 槽位可以承载逐字段语义。这个 enum 成员承诺了一个 payload 装不下的粒度。\n\n## FROM → TO\n\n| FROM | TO |\n| :--- | :--- |\n| `type: 'data.field.changed'` | `type: 'data.record.updated'`,逐字段明细从 payload 的 `changes` 读(`before` / `after` 给出前后状态) |\n\n一行修复——删掉死分支,改从 update 事件读 `changes`:\n\n```ts\n// BEFORE —— 永远不会执行,没有生产者发过这个事件\nif (event.type === 'data.field.changed') { onFieldChange(event); }\n\n// AFTER —— 变更字段一直挂在 record 事件上\nif (event.type === 'data.record.updated') {\n  for (const [field, value] of Object.entries(event.changes ?? {})) onFieldChange(field, value);\n}\n```\n\n信息没有丢失:逐字段明细本来就在 `data.record.updated` 上,而且是**一次写入一个事件**,而不是宽表上 N 个事件。删掉那个分支不改变任何可观测行为——它从来没跑过。\n\n## 退役套件:哪些面适用、哪些不适用\n\n这是本次实现前先做的判断。`data.field.changed` 是**运行时事件类型的 enum 成员**,不是作者在 stack 定义里书写的可授权(authorable)元数据属性,所以 `.claude/skills/spec-property-retirement` 的很多机件并不适用。逐条核对结果:\n\n**适用:**\n\n| 面 | 处理 |\n| :--- | :--- |\n| Schema | 从 `DataEventType` 删除成员,并在 schema 注释里写明移除了什么、活的机制是什么 |\n| ADR-0087 **D3 semantic migration** | 新增 `data-field-changed-event-retired` 到 `migrations/registry.ts` 的 step 17,并扩写该 step 的 `rationale` |\n| Pin 测试 | `api/events.test.ts`:收窄后的 `.options`、退役名不再 parse、以及 FROM → TO 的正向 pin |\n| 生成物 | `spec-changes.json`、`docs/protocol-upgrade-guide.md`、`content/docs/references/api/events.mdx` |\n| Changeset | `@objectstack/spec` major,含 FROM → TO 表与一行修复 |\n\n**不适用(逐条说明理由,避免下次重新审一遍):**\n\n- **`retiredKey()` 墓碑** —— 一个被删除的 enum **值**无法承载 fix-it 提示,这和 step 17 里 sharing-rule `full` 退役时撞上的是同一个限制(该 step 的 rationale 已经写明这一点)。可强制执行的通道是 **tsc**(任何仍把该值写在 `DataEventType` 位置上的消费者编译失败)和 **enum parse**(现在直接拒绝,而不是接受一个永不到达的事件)。\n- **ADR-0087 D2 conversion** —— 这是**运行时事件面**,没有任何 stack / example / template 会书写事件名,所以没有源文件给 `os migrate meta` 改写。按 `enhanced-api-error-field-errors-renamed` 和 `data-driver-find-stream-retired` 的先例,登记为 semantic TODO 而非 conversion。(webhook 的订阅走的是**另一个**可授权 enum `WebhookTriggerType`,其词表早在 #3196 就已经收敛到\"真实存在的生产者\"。)\n- **liveness ledger** —— ledger 治理的是可授权元数据类型(`object` / `field` / `flow` …),`liveness/` 下**没有** event 条目;`DataEvent` 是运行时 payload 契约。`check:liveness`、`check:empty-state` 均原样通过。\n- **`authorable-surface.json` / gate (a)(b)** —— 该棘轮追踪的是可授权**键**(`api/DataEvent:type` 这种),不是 enum 成员,所以键列表不变、两个 gate 正确地保持沉默(`check:authorable-surface` PASS 已验证)。\n- **`api-surface.json`** —— 快照记录导出的 `name (kind)`,对 enum 成员级收窄是盲的;`DataEventType (type)` 条目不变(`check:api-surface` PASS 已验证)。\n- **forms / i18n bundles / CLI advisory lint / examples / published skills** —— 均以可授权键为前提,这里一个都没有:`*.form.ts` 没有对应输入,lint 是 ledger 驱动的,`examples/` 与 `skills/` 全仓 grep 无命中。\n- **`content/docs/references/api/realtime.mdx`** —— 里面的 `field.changed` 属于**另一个** enum `RealtimeEventType`(不带 `data.` 前缀),归 #3197,**本 PR 不动**。\n\n## 验证\n\n全部在本地实跑,命令与结果如下:\n\n```\npnpm --filter @objectstack/spec build                    OK\npnpm --filter @objectstack/spec check:generated          先 FAIL(证明 3 项过期)→ 精确重新生成后 PASS\n  stale: spec-changes.json / docs/protocol-upgrade-guide.md / content/docs/references/**\n```\n\n重新生成后的 gate 全绿:\n\n```\ncheck:generated              PASS\ncheck:liveness               PASS\ncheck:empty-state            PASS\ncheck:authorable-surface     PASS\ncheck:api-surface            PASS\ncheck:spec-changes           PASS\ncheck:upgrade-guide          PASS\ncheck:skill-examples         PASS\ncheck:strictness-ledger      PASS\ncheck:doc-authoring          PASS\n```\n\n测试与类型检查:\n\n```\npnpm --filter @objectstack/spec typecheck                Done(exit 0)\npnpm --filter @objectstack/spec test                     Test Files 291 passed (291) / Tests 7315 passed (7315)\nobjectql + client + plugin-webhooks typecheck            三个全部 Done\nobjectql  src/engine-data-events.test.ts                 Test Files 1 passed / Tests 10 passed\nplugin-webhooks src/auto-enqueuer.test.ts                Test Files 1 passed / Tests 16 passed\ncli test/migrate-meta.e2e.test.ts (链路重放)              Test Files 1 passed / Tests 12 passed\neslint(三个改动源文件)                                   exit 0\n```\n\n> 说明:`plugin-webhooks` 首次 typecheck 报 `Cannot find module '@objectstack/service-messaging'`,是 sibling 包 dist 未构建所致(退役 skill 里记录的 stale-dist 陷阱),`turbo run build --filter=…...` 补齐依赖闭包后三个包全部通过,与本次改动无关。\n\n## ⚠️ 与在途 PR #4677 的文本冲突\n\n#4677(分支 `claude/bulk-write-missing-events-sm1i4b`)向**同一个文件** `packages/spec/src/api/events.zod.ts` 新增 `BulkDataEventType` / `BulkDataEventSchema`。本分支从 `origin/main` 切出(尚不含 #4677),diff 严格限定在 `data.field.changed` 的移除上,但两者大概率会在该文件产生文本冲突。\n\n**后合并的一方请注意**:解决冲突后必须重新跑 spec 生成物门禁,否则 `spec-changes.json` / `protocol-upgrade-guide.md` / `content/docs/references/**` 会过期:\n\n```bash\npnpm --filter @objectstack/spec build\npnpm --filter @objectstack/spec check:generated   # 再按它证明过期的项精确重新生成\n```\n\n两者语义上不冲突:#4677 新增一套批量写事件契约,本 PR 移除一个无生产者的成员,方向一致(都在让事件词表只保留真实存在的生产者)。\n\n## 刻意没做\n\n- 没有碰 `content/docs/releases/`(code PR 禁止,发布说明在 release 时集中从 changeset + ADR-0087 registries 编译)。\n- 没有手工编辑任何 `content/docs/references/` 下的自动生成文件——全部走重新生成。\n- 没有顺手修 `RealtimeEventType` 的 `field.changed`(属 #3197,不是本 issue 的范围)。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01LYnZrTwXbrctB8E8HpJAPT)_"
+}

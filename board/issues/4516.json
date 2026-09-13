@@ -1,0 +1,35 @@
+{
+  "number": 4516,
+  "kind": "pull_request",
+  "title": "feat(spec,automation)!: converge `script` to a function call and parse script/subflow config at execute time (#4343)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T15:01:20Z",
+  "updated_at": "2026-08-01T15:55:47Z",
+  "closed_at": "2026-08-01T15:55:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-01T15:55:45Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4516",
+  "body": "Closes #4343.\n\n## 方向变更(已在 issue 上说明)\n\n原 issue 要求给 `script` 的 config 契约做**判别式(actionType)形态**,再接 #4277 的执行期 parse。评估后改为**激进收敛**:与其给一套历史形态建模,不如退役它——四个分支里只有函数路径跑真实逻辑。\n\n| 分支 | 真实行为 |\n|---|---|\n| `actionType: 'email' \\| 'slack'` | **logger stub**:写一行日志、报告成功、任何配置下都不投递任何东西 |\n| `template` / `recipients` / `variables` | 喂给上面那个 stub,寻址一条从没被发出的消息 |\n| 内联 `config.script` | **从未执行**——内置运行时没有服务端 JS 沙盒,节点 warn 后 no-op |\n| 其他 `actionType` | 注册函数名的简写(`invoke_function` 只是个 marker,自身不指向任何东西) |\n\n留下的就是能用的:`config.function`(**改为必需**)+ `inputs` + `outputVariable`。\n\n**这同时解决了 #4343 的原始诉求**:契约无法 parse 的原因正是「合法键集随 `actionType` 变」——平铺 parse 要么误拒合法形态、要么放行一切。收敛之后契约天然扁平,`script` 与 `subflow` 一并接入 #4277 给扁平内置节点的执行期 parse(违约 = guard refusal,`fault` 边不可路由,#3863)。`decision` 按 issue 维持现状:唯一的键是可选的,parse 无物可查。\n\n## 改动\n\n**退役(ADR-0049 removal 路线)** — 5 个键打 `retiredKey()` 墓碑,各带自己的处方(三条替代是**不同机制,不是一次改名**):\n\n| 退役 | 替代 |\n|---|---|\n| `actionType: 'email'`(+ `template`/`recipients`/`variables`) | `notify` 节点——经 messaging 服务真实投递:默认站内收件箱,装了 `@objectstack/plugin-email` 后走真实邮件 |\n| `actionType: 'slack'` | `connector_action`(Slack connector)或 `http` 打 incoming webhook——`notify` **没有** slack channel |\n| `actionType: 'my_fn'`(简写) | `function: 'my_fn'`——conversion 自动搬 |\n| 内联 `script` | 逻辑移入注册函数,用 `config.function` 调用 |\n\n**ADR-0087 D2 conversion** `flow-node-script-branch-keys-removed`(step 17 已接线,`retiredFromLoadPath`):简写 `actionType` **搬进** `function`(那正是它指的东西),除非 `function` 已经赢了——那种情况下它本来就是执行器够不着的死元数据;其余四键直接丢弃,没有任何读者,无值可留。\n\n**执行期 parse**:`script` / `subflow` 走 `parseNodeConfig()`。`subflow` 手写的 `flowName` guard 换成同一条契约(文案随之变化,inventory 与单测已更新)。\n\n**一个值得记录的事实**:墓碑对**存量 JSON 元数据是听不见的**——load 路径从不 parse 节点 config(`FlowNodeSchema.config` 是 `z.record(z.unknown())`),`script` 也不发布 descriptor `configSchema`。两条通道分别对应不同人群:墓碑教**作者**(`tsc` 把键类型变 `never`,直接 parse 抛出处方),而**存量流程**走另一条——`registerFlow` 连退役 conversion 一起重放(#3903,`sys_metadata` 里的行没有作者可教),所以老的 email-stub 节点到达时已被剥掉没人读的键,然后**因为没有可调用对象而被拒**,而不是像以前那样打一行日志报成功。**这个翻转就是本次退役买到的行为变化。**\n\n**其余**:删除 `SCRIPT_BUILTIN_ACTION_TYPES` / `SCRIPT_INVOKE_FUNCTION_ACTION_TYPE` / `ScriptBuiltinActionType`(它们描述的分发集合已不存在);`os validate` 现在点名退役键并给出替代,而不是报一句笼统的「没有 callable」;例子里 7 个 email stub 改为 `notify`、1 个 slack stub 改为 `http` webhook,showcase 新增一个注册函数,让它的 `script` 节点演示**唯一能用的形态**。\n\n## 验证\n\n- `packages/spec`:281 文件 / **7076 用例**全绿(含新建的 `schemaless-node-config.test.ts` 与 conversions 的 8 组新 pin)。\n- `service-automation` 51/**629**、`lint` 44/**746**、`cli` 67 文件全绿。\n- **13 个 spec gate 全 PASS**:`check:liveness` / `empty-state` / `authorable-surface` / `docs` / `api-surface` / `spec-changes` / `upgrade-guide` / `skill-refs` / `skill-docs` / `skill-examples` / `strictness-ledger` / `variant-docs` / `exported-any`。\n- `authorable-surface.json` diff **恰好**是 5 行 `[RETIRED]` 标记,`function` 未消失。\n- 例子:showcase 10 文件 / 60 用例绿(含 `flowNodeTypes` 覆盖测试——`script` 仍被覆盖,由新的函数调用节点),两个 app 的 `validate` + `typecheck` 均通过,且**零新增告警**(改造中途 `notify` 暴露出 2 条 `{record.project.owner}` 跨对象跳转,已在例子里改为记录自身字段;剩下 2 条属我未触碰的既有节点)。\n- changeset 双守卫通过:pre-release(rc)模式下 `check-changeset-no-major` 明确让行,与近期所有退役 changeset(wait #4158、tool、datasource)一致。\n\n## 配套 PR\n\nobjectui 半边(表单收敛 + 跨仓对账测试双态):objectstack-ai/objectui#3170。已用**本地构建的 spec** 实测过跨仓契约:收敛后的面板双向对账干净。\n\n> 顺带记录一条既有债(**不在本 PR 范围**):objectui 的 `wait` 面板仍编辑 #4158 已退役的 `waitEventConfig.timeoutMs` / `.onTimeout`,所以下一次 spec 升版会让它的 ratchet 亮红——这正是那个 ratchet 的本意,由 objectui#3101 追踪。\n\n## Related\n\n- #4277 / #4332 —— 执行期 parse config 的接缝\n- #4278 / #4325 —— 发布这三个 schemaless 契约\n- #4158 —— `wait` 超时键退役(本次退役的模板)\n- #1870 —— `config.function` 作为 canonical 调用引用\n- objectui#3099 —— 跨仓对账测试的由来\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Ct9NXp2JumjKuARtQnrbPf"
+}

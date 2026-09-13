@@ -1,0 +1,32 @@
+{
+  "number": 4572,
+  "kind": "issue",
+  "title": "spec 双源 C1:WebhookConfig / WebhookEvent —— ./api ≠ ./integration(4 条,#4535 C 组)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T07:58:19Z",
+  "updated_at": "2026-08-02T09:08:16Z",
+  "closed_at": "2026-08-02T09:08:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4572",
+  "body": "父单:#4535(C 组第 1 簇)。`packages/spec/dual-source-exports.baseline.json` 现存 35 条中的 4 条:\n\n```\nWebhookConfig — [./api (type)] ≠ [./integration (type)]\nWebhookConfigSchema — [./api (const)] ≠ [./integration (const)]\nWebhookEvent — [./api (type)] ≠ [./integration (type)]\nWebhookEventSchema — [./api (const)] ≠ [./integration (const)]\n```\n\n同名 zod schema + 推断类型在 `./api` 与 `./integration` 各有一份**不同声明** —— 消费者拿到哪个形状只取决于 import 路径(#4411 陷阱)。\n\n## 任务\n\n1. **先判真源**(contract-first):import 语句级扫描三仓(本仓 + cloud + objectui),不要用名字出现次数(#4411 的教训)。两份声明先 diff:形状差异、语义差异、各自消费方,判定结果写进 PR 正文。\n2. **处置三选一**(按 #4535 手册):死侧零消费方 ⇒ 直接删(v17 rc 是 major 窗口);两侧都活且同概念 ⇒ 收敛到真源 + 另一侧 re-export(re-export 不会被 gate 报);真是两个概念 ⇒ 改名一侧(先例:#4539 → PR #4571 的 `RecordShareRecipientType`)。\n3. **收敛 ≠ 无行为变化**:若存活形状比被删侧窄/宽,消费方类型会变 —— 逐字段核实并写进 changeset;拿不准的分歧用 `@ts-expect-error` pin 进测试。\n\n## 验收\n\n- 基线**恰好 −4**(35 → 31):`check:dual-source-exports` stale 分支点名的即这 4 行,不多删不漏删\n- `check:generated` 8/8 up to date(api-surface 等经 `--fix` 定向再生,单独 commit)\n- spec `build` / `typecheck` / `test` 全绿;全仓 `pnpm build` / `pnpm typecheck` / `pnpm test` 全绿\n- changeset:`@objectstack/spec` major,FROM → TO 迁移行;**不改 `content/docs/releases/`**(releases-freeze,见 CLAUDE.md);文档若引用被改名/删除的导出,一并修正\n- 若触及可作者化 metadata key 的形状,回 `spec-property-retirement` skill 走完整流程\n- 范围外发现按第十条军规立 unassigned issue,不夹带进本 PR\n\n## 工作方式\n\n专用 worktree(`git worktree add ../objectstack-issue-<本单号> -b claude/issue-<本单号>-webhook-dual-source main`)→ 实现 → 推分支 → **draft PR**(正文含逐条判定 + 验证清单)→ 向 PM 返回 JSON 报告。"
+}

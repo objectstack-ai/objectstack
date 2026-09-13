@@ -1,0 +1,32 @@
+{
+  "number": 4480,
+  "kind": "issue",
+  "title": "DatabaseConnector.readReplicaConfig 是读副本的第二处死声明（ADR-0049 enforce-or-remove，#4468 收尾发现）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T09:23:14Z",
+  "updated_at": "2026-08-01T13:01:56Z",
+  "closed_at": "2026-08-01T13:01:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4480",
+  "body": "做 #4468（删除 `datasource.readReplicas`）时闭合调用图，发现读副本在 spec 里被声明了**两次**，两处都没有消费者。第一处已删，这是第二处。\n\n## 位置\n\n`packages/spec/src/integration/connector/database.zod.ts:154-161`：\n\n```ts\nreadReplicaConfig: z.object({\n  enabled: z.boolean().default(false).describe('Use read replicas'),\n  hosts: z.array(z.object({\n    host: z.string().describe('Replica host'),\n    port: z.number().min(1).max(65535).describe('Replica port'),\n    weight: z.number().min(0).max(1).default(1).describe('Load balancing weight'),\n  })).describe('Read replica hosts'),\n}).optional().describe('Read replica configuration'),\n```\n\n## 证据\n\n全仓库（排除 `node_modules` / `dist`）搜 `readReplicaConfig`，命中三处，全在这个文件和它自己的测试里：\n\n```\npackages/spec/src/integration/connector/database.zod.ts:154\npackages/spec/src/integration/connector/database.test.ts:172\npackages/spec/src/integration/connector/database.test.ts:210\n```\n\n没有 runtime reader。和 #4468 的结论同源：平台没有读写分离，没有任何路径区分读和写，所以 `enabled: true` 加一串 `hosts` 加权重，合起来仍然是零效果。`weight: z.number().min(0).max(1)` 尤其扎眼 —— 它精确描述了一个不存在的负载均衡器的输入格式。\n\n## 为什么单开而不是并进 #4468\n\n处置很可能相同（remove），但**范围判断需要先做一件 #4468 没做的事**：确认 `DatabaseConnectorSchema` 整体的活性。\n\n初步看这个 schema 的邻居们（`cdcConfig`、`poolConfig`、`sslConfig`、`tables`）在框架仓库里同样搜不到消费者 —— `poolConfig` 的三处命中全是 `data/driver*.zod.ts` 里同名但无关的字段。也就是说，问题可能不是\"connector 上有一个死字段\"，而是**整个 integration connector 声明层还没接上运行时**。那是一个数量级不同的问题，塞进 #4468 的 PR 里会把一个干净的 retirement 变成一次范围失控的审计。\n\n所以正确的下一步是先回答：\n\n1. `DatabaseConnectorSchema` 有没有任何 runtime 消费者？（`integration/connector/*` 整个目录同问）\n2. 如果有 → 只退休 `readReplicaConfig`，按 `spec-property-retirement` 走完整套（conversion + chain step + changeset + 基线）\n3. 如果没有 → 这是一个集群级问题，应该按 ADR-0049 对整个 connector 声明层立项，而不是一个字段一个字段地拆\n\n## 处置倾向\n\n`readReplicaConfig` 本身：**remove**。理由和 #4468 完全一致，且这里更清楚 —— 它连\"曾经有人打算接\"的痕迹都没有。\n\n真要做读副本，路径在 #4479，从查询路径的读写判定开始，不是从再加一个字段开始。\n\n## 相关\n\n- #4468 —— 已删除的 `datasource.readReplicas`（同一功能的第一处声明）\n- #4479 —— 读副本路由的正式功能需求\n- ADR-0049 enforce-or-remove / ADR-0078 no-silently-inert-metadata\n\n未指派 —— 按 AGENTS.md 的约定，这是一条记录下来的 finding，谁开工谁认领。"
+}

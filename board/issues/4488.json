@@ -1,0 +1,32 @@
+{
+  "number": 4488,
+  "kind": "issue",
+  "title": "活性账本覆盖 worklist：9 个已注册 metadata type 仍未治理（#4487 建立闸门后的剩余债务）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T10:07:00Z",
+  "updated_at": "2026-08-01T14:31:09Z",
+  "closed_at": "2026-08-01T14:31:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4488",
+  "body": "#4487 让活性闸门对注册表负责：每个已注册的 metadata type 必须在 `GOVERNED` 里，或者在 `PENDING_GOVERNANCE` 里带一条理由和一个 issue 号。这个 issue 就是那些条目指向的地方。\n\n`datasource` 已经在 #4487 里治理完毕（43 条判定，20 条 dead）。**剩 9 个：**\n\n| type | 备注 |\n|---|---|\n| `app` | #4001 的 app step 退休了 7 个死键却没有播种账本，AppSchema 其余部分至今未分类 |\n| `book` | ADR-0046 文档骨架，从未做过属性审计 |\n| `doc` | ADR-0046 扁平 Markdown 文档，面小，未审计 |\n| `email_template` | 未审计 |\n| `job` | 未审计。**注意 `job.retryPolicy` 是被强制执行的**（`runtime/src/app-plugin.ts:791`），不要照搬 datasource 的结论 |\n| `mapping` | #2611 可复用导入映射，未审计 |\n| `seed` | 发布时应用的初始数据，未审计 |\n| `translation` | 未审计 |\n| `validation` | `ValidationRuleSchema` 承载 ADR-0020 记录状态机，判错代价高，未审计 |\n\n## 怎么做一个（datasource 那次的方法，复述一遍免得重新发明）\n\n1. `npx tsx scripts/liveness/check-liveness.mts --dump <type>` 出属性清单\n2. **先找那个类型的\"边界结构\"**，这是效率最高的一步。datasource 的边界是 `ConnectableDatasource` 和 `DatasourceConnectionSpec` —— 不在这两个 interface 上的块，根本到不了驱动，一次性判掉了 20 条里的大部分。每个类型都有类似的东西（编译后的 stack、传给执行器的 config、序列化到 DB 的行）\n3. 逐条闭合调用图，`live` 的写 `evidence`（`file.ts:line`），全部写 `verifiedAt`\n4. dead 且**有误导性**的加 `authorWarn` + `authorHint`；`authorHint` 必须指向真正被强制执行的机制，否则只是把作者的困惑挪个地方\n5. 加进 `GOVERNED`，从 `PENDING_GOVERNANCE` 删掉（闸门两个方向都会失败，删漏了会报 stale）\n6. **如果这个类型要 author 警告，还要把它加进 CLI 的 `TYPE_COLLECTIONS`**（`packages/cli/src/utils/lint-liveness-properties.ts`）。账本正确但没人被警告是最糟的中间态\n\n## 三个坑，每一个都在 #4487 里差点造成错判\n\n**1. 同名不同类型。** `healthCheck` 在仓库里有 20 处命中，没有一处属于 datasource —— 全是插件健康监控、AI model registry、integration connector、`StartupOrchestratorOptions`。`retryPolicy` 更险：它在 `hook` 和 `job` 上**确实**被强制执行，所以 grep 看起来是活的。分辨方法是看**形状**：`hook.retryPolicy` 用 `backoffMs`，datasource 用 `baseDelayMs`/`maxDelayMs`/`backoffMultiplier` —— 没有任何代码同时读两种拼写，这个不一致本身就是\"没人读\"的证据。\n\n**2. preview renderer 不算消费者。** `liveness/README.md` 有专门一节。#4481 是最新的例子：`readReplicas` 在两个仓库里唯一的\"消费者\"是 objectui 的一枚 pill。datasource 的 `retryPolicy` / `healthCheck` 也被 `DatasourcePreview` 渲染成面板 —— 一条都没有被当作证据。\n\n**3. `z.record` 是账本的盲区。** `datasource.config` 是开放 record，walk 到此为止，所以作者真正写的键（`host`、`port`、`filename`）由 `data/driver/*.zod.ts` 的 per-driver schema 管，不由账本管。这条**显式记在了 `config` 的 note 里**而不是默默跳过。其他类型碰到 `z.record` 请照做 —— 沉默的盲区和不存在的盲区在文件里长得一模一样。\n\n## 顺带一件独立的小事\n\n`liveness/README.md` 的 per-type 计数表**有几行是陈旧的**，#4487 故意没有批量修。原因是有两种计数口径会打架：README 自带的 python 片段数账本 JSON 条目，闸门的 `--json` 还会解析 `describe()` marker 并对 `children` 做不同下钻；而 `query` 和 `webhook` 两行是手工标注、超出任何一种口径的（见它们各自的 note）。用错口径机械重写会静默抹掉那些标注 —— 写 #4487 时试过一次，产生了两处回归才被发现。\n\n修它的正确方式是**先决定这张表到底是哪个口径，并把这句话写进 README**，然后再重算。不难，但需要一个决定，不适合夹在别的 PR 里顺手做。\n\n## 验收标准\n\n- `PENDING_GOVERNANCE` 清空\n- 每个类型的账本每条属性有判定 + `verifiedAt`；`live` 有指向真实 runtime reader 的 `evidence`\n- 需要作者警告的类型都进了 `TYPE_COLLECTIONS`\n- 每个类型的 `z.record` / 开放形状边界显式记录\n- README per-type 表口径确定并重算\n- **不要为了绿而批量填 `live`** —— 一个橡皮图章账本比没有账本更糟，它把\"没人看过\"伪装成\"看过且干净\"\n\n## 参考\n\n- #4487 —— 建立闸门 + 治理 datasource（方法论范本）\n- #4410 / #4465 / #4481 —— 那 6 个手工挖出来的死键，本闸门存在的理由\n- `packages/spec/liveness/README.md` —— 判定方法论\n- ADR-0049 enforce-or-remove / ADR-0078 no-silently-inert-metadata / ADR-0054 prove-it-runs\n\n未指派 —— 可以按类型拆开并行做，认领一个就在这条 issue 下说一声，避免撞车。"
+}

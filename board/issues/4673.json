@@ -1,0 +1,33 @@
+{
+  "number": 4673,
+  "kind": "issue",
+  "title": "declared ≠ enforced:DataEventType 的 data.field.changed 全仓没有生产者(ADR-0049 第四态)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "repo:objectstack"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T15:58:43Z",
+  "updated_at": "2026-08-02T17:25:50Z",
+  "closed_at": "2026-08-02T17:25:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4673",
+  "body": "从 #4639 的裁决中拆出(明确不做 #4639 的 rider),unassigned。\n\n## 现象\n\n`packages/spec/src/api/events.zod.ts` 的 `DataEventType` 声明四个值:\n\n```ts\nexport const DataEventType = z.enum([\n  'data.record.created',\n  'data.record.updated',\n  'data.record.deleted',\n  'data.field.changed',   // ← 无生产者\n]);\n```\n\n全仓 grep `data.field.changed` 只有三处出现:上面这行、`packages/spec/src/api/events.test.ts`、以及文档 `content/docs/references/api/events.mdx`。**没有任何代码发出它**——ObjectQL engine 的 `publishDataEvent` / `publishBulkDataEvent` 只发 `data.record.{created,updated,deleted}` 与(#4639 起)`data.records.{updated,deleted}`。\n\n`content/docs/references/api/realtime.mdx` 自己已经承认了这件事:\n\n> not yet enforced — the runtime emits data.record.* event names instead, and field.changed is never emitted; see #3197\n\n这是教科书式的 ADR-0049 第四态(parsed / unmarked / unenforced),同族 #3197。\n\n## 处置方向(ADR-0049 enforce-or-remove 三选一)\n\n1. **实现**:在 engine 的 update 路径按 `changes` 逐字段发 `data.field.changed`。要先回答值不值:逐字段事件在宽表上是一次写入 N 条事件,且现有 `DataEvent` 的 schema 没有 `field` / `oldValue` / `newValue` 字段可承载它——真要做需要自己的 schema(参照 #4639 给批量写单独立契约的做法)。\n2. **标 `experimental`**:仅当确实打算近期实现。\n3. **移除**:从 `DataEventType` 删掉。按 `.claude/skills/spec-property-retirement` 走完整套件(ADR-0087 转换层、liveness ledger、生成基线、文档、pin 测试),别手工重建。\n\n倾向 **3**:没有需求方,`DataEvent` 的形状也不适合承载逐字段语义;真需要时按 #4639 的先例新立一个诚实的契约,比让一个空 enum 值占着位置强。\n\n## 参考\n\n- ADR-0049 `docs/adr/0049-no-unenforced-security-properties.md` — 三态与被禁的第四态\n- #3197 — 同族(realtime 声明与运行时不符)\n- #4639 — 相邻裁决,把\"批量写没有合规事件\"从伪造/静默改成独立契约"
+}

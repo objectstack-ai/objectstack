@@ -1,0 +1,32 @@
+{
+  "number": 4693,
+  "kind": "issue",
+  "title": "useQuery 在文档示例用法下是无界请求循环:内联 options 300ms 内发出 8830 次 find",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T18:48:28Z",
+  "updated_at": "2026-08-02T19:53:25Z",
+  "closed_at": "2026-08-02T19:53:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4693",
+  "body": "做 #4682(给 client-react 建测试基座)时,用刚建好的基座实测发现,unassigned。\n\n## 现象\n\n`useQuery(object, options)` 在 **options 里带任何对象/数组/函数字段** 时会进入无界重取循环——而这正是它自己 TSDoc 示例的写法。\n\n实测(jsdom + @testing-library/react,fake client 记 `data.find` 调用次数,渲染后静置 300ms):\n\n| 用法 | 300ms 内 `find` 调用次数 |\n|:---|---:|\n| `useQuery('todo_task', { where: { status: 'open' } })` —— **内联 options** | **8830** |\n| `const OPTS = {...}` 提升到组件外,`useQuery('todo_task', OPTS)` | **1** |\n\n不是「多取几次」,是以事件循环的速度**永远打下去**。\n\n## 成因\n\n`packages/client-react/src/data-hooks.tsx`:\n\n```ts\n// L116\nconst fetchData = useCallback(async (isRefetch = false) => { … },\n  [client, object, query, resolvedFields, resolvedWhere, resolvedSort,\n   resolvedLimit, resolvedOffset, enabled, onSuccess, onError]);\n\n// L156\nuseEffect(() => { fetchData(); }, [fetchData]);\n```\n\n`resolvedWhere` / `resolvedFields` / `resolvedSort` 直接来自 `options` 的解构,`onSuccess` / `onError` 同理。调用方内联传入 → 每次渲染都是新身份 → `fetchData` 每渲染换身份 → L156 的 effect 每渲染重跑 → `setData` → 重渲染 → 闭环,无出口。\n\n`useQuery('todo_task', {})`(全部字段 `undefined`,都是原始值)不受影响——所以它一直没被发现。触发条件是传 `where` / `fields` / `orderBy` / `onSuccess` / `onError` 中的任意一个,也就是绝大多数真实用法。\n\n同一形状的 `useCallback` 依赖链在 `data-hooks.tsx:592` 和 `metadata-hooks.tsx:136` 也存在,需要一并核查。\n\n## 影响\n\n- 客户端把服务端当压测目标打;\n- 组件永远处于 loading/refetching 抖动;\n- 是**运行时**缺陷,`tsc` 完全看不见 —— 这正是 #4682 存在的理由。\n\n## 处置方向\n\n不要用「让调用方自己 `useMemo`」当修复——文档示例就是内联写法,把正确性押在调用方的记忆力上等于没修。\n\n按值而非按身份做依赖。可选:对 `where`/`fields`/`orderBy` 做稳定序列化(如 `JSON.stringify` 或结构化哈希)作为依赖;`onSuccess`/`onError` 存进 ref(它们是副作用回调,本就不该参与重取决策)。\n\n修复必须**带回归测试**,基座已经就位(#4682 / PR #4692),断言直接用上表那两个数字的形状(内联 options 稳定后 `find` 只该被调用 1 次)。\n\n## 复现\n\n基座合入后,`packages/client-react/` 下:\n\n```tsx\nconst find = vi.fn(async () => ({ data: [], total: 0 }));\nconst client = { data: { find, query: find }, events: {}, setLocale: vi.fn() } as unknown as ObjectStackClient;\nfunction C() { useQuery('todo_task', { where: { status: 'open' } }); return null; }\nrender(<ObjectStackProvider client={client}><C /></ObjectStackProvider>);\nawait new Promise(r => setTimeout(r, 300));\nexpect(find.mock.calls.length).toBe(1);  // 实测 8830\n```"
+}

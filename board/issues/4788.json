@@ -1,0 +1,32 @@
+{
+  "number": 4788,
+  "kind": "pull_request",
+  "title": "fix(plugin-auth): 限流计数器惰性解析 kernel cache —— 误报的告警，与它掩盖的共享限流功能洞",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/l"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T06:30:38Z",
+  "updated_at": "2026-08-03T07:12:00Z",
+  "closed_at": "2026-08-03T07:11:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T07:11:58Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4788",
+  "body": "Fixes objectstack-ai/objectstack#4772\n\n## 先回答 PM 要求先验证的那个问题：**是功能洞，不只是日志误报**\n\n结论：**是**。`init()` 时定下的「没有 cache」结论会被冻结整个进程生命周期，后续限流计数一直用的是 better-auth 的进程内 memory store，即使 cache 随后注册上也不会切换。建议给本 issue 补 `security` 标签。\n\n证据链（全部来自代码，不是推测）：\n\n1. `AuthPlugin.init()` 里那次 `getServiceAsync('cache')` 探测的结果写进 `authConfig.secondaryStorage`，随后 `new AuthManager(authConfig)` 把它存进 `this.config`。\n2. `AuthManager` 的 better-auth 实例是**懒创建**的（`getOrCreateAuth()` → `createAuthInstance()`），但它读的是 **init 时那份 config**：`...(this.config.secondaryStorage ? { storage: 'secondary-storage' } : {})`。所以「懒创建」并没有让探测重来一次 —— 冻结的是结论，不是时机。\n3. `init()` 早于 `CacheServicePlugin` 注册 `cache`（issue 现场：早 21ms），所以标准 `serve` 组合下这个分支**永远**走 else。\n4. 于是 better-auth 落到默认 `rateLimit.storage: 'memory'` —— `node_modules/better-auth/dist/api/rate-limiter/index.mjs` 里那个模块级 `memory` Map，**每个进程一份**。\n\n也就是说：多节点部署的限额从来没有被全局强制过，攻击者轮换节点即可把限额乘以节点数；而日志还在告诉运维「去接 Redis」，接完 Redis 仍然是同一条 warn、同一个洞。ADR-0069 D2 声明的能力与运行时不一致（Prime Directive #10 的形态）。\n\n红→绿也验证过：把 `auth-plugin.ts` stash 掉、只留新测试，新增的 5 条插件级测试有 4 条失败。\n\n## 改了什么\n\n**取 PM 裁定的修法 2（惰性解析），落点是 better-auth 的 `rateLimit.customStorage`。**\n\n新增 `packages/plugins/plugin-auth/src/rate-limit-storage.ts`：\n\n- `createLazyCacheRateLimitStorage({ resolveCache, logger })` —— 计数器**被消费时**才去解析 `cache` 服务。这一刻必然在 `kernel:ready` 之后，因此与任何插件启动顺序无关；解析到之后句柄缓存复用。\n- 保留告警，但改了触发时机：只有当一个计数器**真的**要用共享存储、而此刻确实一个 cache 服务都没有时才打，每进程一次。那时它才是真信号。\n- 真没有 cache 的部署仍然限流，退化成进程内定宽窗口计数（**降级，不是关闭**）—— `customStorage` 会整体接管 better-auth 的存储选择，所以降级路径必须自己会数。\n- 计数算法（定宽窗口、不随请求滑动、只把剩余秒数交给存储）抽成 `incrementFixedWindow`，与 `secondary-storage.ts` 的 `increment` **共用一份实现**，两个计数入口不可能漂移。\n\n`AuthManagerOptions` 新增 `rateLimitStorage`（counters-only）。它刻意**不**放在 `rateLimit` 里面：`bindAuthSettings` 在管理员调限流参数时会整个替换 `rateLimit` 对象，放进去等于「一改设置就悄悄退回不共享」，有测试钉住。\n\n## 一个必须让维护者知道的连带发现：为什么不用 `secondaryStorage`\n\nissue 的直觉修法是「把 cache 真的接成 `secondaryStorage`」。**不能这么修**，否则会在修一个安全洞的同时开另一个：\n\nbetter-auth 1.7.0-rc.2 的 `internal-adapter.mjs`：\n\n- `createSession`：`if (secondaryStorage && !storeInDb)` —— 设了 `secondaryStorage` 就**不写 `sys_session` 行**；\n- `findSession`：先读 `secondaryStorage.get(token)`，命中直接返回，**完全不查库**（即使打开 `storeSessionInDatabase` 双写，读路径依然以缓存为准）。\n\n而 ADR-0069 **D4** 的三个会话管控（`enforceSessionControls` 的空闲/绝对超时、`enforceConcurrentCap` 的并发上限）**全部靠写 `sys_session` 行来撤销会话**，而且是 best-effort、异常吞掉。所以一旦 cache 被绑成 `secondaryStorage`：查不到行 → 直接 return，三个管控静默失效；就算双写，写进库的撤销 better-auth 也读不到，缓存快照最长活到会话 TTL（默认 7 天）。外加 `sys_session` 空表会牵连 `sys_presence` / `sys_oauth_access_token` / `sys_oauth_refresh_token` 三处 lookup 外键和会话列表 UI。\n\n这个冲突一直没被发现，正是因为那次探测从来没成功过 —— 声明与运行时不一致把两个问题一起藏了起来。\n\n本 PR 的处理：**不替维护者决定会话该存哪。**\n\n- 不再从 cache 服务自动派生 `secondaryStorage`；它回归「宿主显式提供才生效」，行为与今天标准组合下的**实际运行时行为完全一致**（会话仍在 `sys_session`）。\n- `cacheSecondaryStorage()` 改为从包根导出 + 就地写清代价，供知情的宿主自行选用，而不是留一个「顺序一变就静默废掉 D4」的地雷。\n- ADR-0069 的实现状态行做了**事实订正**（此前写着 shared session store 已 landed，实际从未生效）—— 按 Prime Directive #13，这是修订状态行而非推翻 D 行：D2 要的是限流用共享存储（现在真的做到了），D4 要的是 `sys_session` 行可写可撤（继续成立）。\n- 「会话的记录之处到底在数据库还是缓存」作为**架构决策**单独开了 #4785（`needs-user-decision`），列了三个选项及各自代价，未自行决定。\n\n## 验收对照\n\n| issue 验收标准 | 落点 |\n|---|---|\n| 1. 配了 cache 的部署不再出现这条 warn | `auth-plugin.test.ts` → `does not warn during init when the cache has not registered yet`；有 cache 时改打一条 info |\n| 2. 真没配 cache 的部署仍然告警，两种情况可区分 | `rate-limit-storage.test.ts` → `warns exactly once, at counting time, and says what is actually wrong` + `stops warning once the cache is there`（有 cache 全程零 warn） |\n| 3. 证实功能洞 → 加测试证明 cache 后注册时限流真的用上共享 cache | `rate-limit-storage.test.ts` → `picks the shared cache up on the first consume that follows registration`；插件级同题 `counts in the cache registered AFTER init` |\n| 4. 改动限定在 `packages/plugins/plugin-auth` | 是。另有 `.changeset/` 与 `docs/adr/0069`（状态行事实订正），未碰 `packages/objectql`、`service-storage`、`service-automation`、`plugin-approvals` |\n\n## 测试\n\n```\npnpm --filter @objectstack/plugin-auth test\n Test Files  29 passed (29)\n      Tests  632 passed (632)\n\npnpm --filter @objectstack/plugin-auth typecheck\n (tsc --noEmit, no output)\n```\n\n红→绿证据（stash 掉 `auth-plugin.ts` 后跑新测试）：`Tests 4 failed | 1 passed | 60 skipped`。\n\n另跑通：`check:adr-anchors`、`check:durability-log-level`、`check:init-service-contract`、`check:service-providers`。\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_015Br2xsJsczFsTR9bvbh2Ny\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015Br2xsJsczFsTR9bvbh2Ny)_"
+}

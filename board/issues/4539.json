@@ -1,0 +1,34 @@
+{
+  "number": 4539,
+  "kind": "issue",
+  "title": "[#4535·B] 跨形态同名三条:ShareRecipientType(type≠const)、TransformType(const≠type)、suggestFieldType(双实现 function)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T01:24:58Z",
+  "updated_at": "2026-08-02T07:40:38Z",
+  "closed_at": "2026-08-02T07:40:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4539",
+  "body": "#4535 B 项。基线里最阴险的三条 —— 同名但**不同形态**,选错一侧时连\"形状重叠、编译通过\"的掩护都没有,报错信息会指向完全无关的方向:\n\n| 名字 | 分歧 |\n|---|---|\n| `ShareRecipientType` | `./contracts` 是 **type**,`./security` 是 **const** |\n| `TransformType` | `./data` 是 **const**,`./shared` 是 **type** |\n| `suggestFieldType` | 唯一的 **function 双源**:`.` + `./shared` 共享一份实现,`./data` 另有一份 —— 可能是**行为**分叉,不只是类型 |\n\n## 处置\n\n- 前两条:判真源 → 收敛 + re-export 或改名(const 侧通常是值表/枚举 const,type 侧是别名 —— 看消费方各自用哪一面)。\n- `suggestFieldType`:**先 diff 两份实现**。若逻辑等价 → 留一份 re-export;若有分歧 → 这可能是一个潜伏 bug(两个调用方各自拿到不同的字段类型推断),按 bug 处理并在 PR 里写清行为差异。\n\n## 验收\n\n对应 3+ 条基线行被 stale 分支点名删除;spec gate 全绿;`suggestFieldType` 的行为判定写入 PR 描述。\n\n关联:#4535(主单)、#4506(基线)"
+}

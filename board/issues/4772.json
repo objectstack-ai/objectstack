@@ -1,0 +1,37 @@
+{
+  "number": 4772,
+  "kind": "issue",
+  "title": "bug(plugin-auth): `[auth] no cache service registered` 在 CacheServicePlugin 注册前 21ms 就喊了 —— 误报，且把人引向「你需要 Redis」",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T05:28:00Z",
+  "updated_at": "2026-08-03T07:12:31Z",
+  "closed_at": "2026-08-03T07:11:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4772",
+  "body": "## TL;DR\n\n`pnpm dev`（showcase）每次启动都报一条\"没有 cache 服务，限流退化成进程内内存计数器，多节点部署需要 Redis\"。但 `CacheServicePlugin` **就在 21 毫秒后注册好了**，而且它本来就在已加载插件列表里。\n\n和 #4771 是同一类问题（校验/告警跑在提供方注册之前），但在另一个子系统，修法也不同，所以单开。\n\n## 现场\n\n```\nWARN [auth] no cache service registered — rate-limit counters use a per-process in-memory\n     store; a multi-node deployment needs a shared cache (Redis) to enforce limits\n     globally (ADR-0069 D2)\n```\n\n启动摘要里的已加载插件：\n\n```\nPlugins: 47 loaded\n         ObjectQL, SqlDriver, ..., QueueServicePlugin, CacheServicePlugin, SettingsServicePlugin, ...\n```\n\n## 证据\n\n`--log-level info` 的时间戳：\n\n| 事件 | 时刻 |\n|---|---|\n| `WARN [auth] no cache service registered` | `04:28:04.527` |\n| `INFO Service 'cache' registered {\"service\":\"cache\"}` | `04:28:04.548` |\n| `INFO CacheServicePlugin: registered memory cache adapter` | `04:28:04.548` |\n\n差 **21ms**。\n\n## 为什么值得修\n\n告警本身的建议（\"多节点需要 Redis\"）在这个语境下是**错的指路**：这个部署确实配了 cache 插件，缺的不是 Redis，是\"auth 在 cache 注册完之前就问了\"。照着这条日志去接 Redis，接完还是会看到同一条 warn。\n\n同 #4771：真正没配 cache 服务的部署会得到一模一样的一条 warn，两种情况无法区分。\n\n## 修法（择一）\n\n1. **把这次探测推迟到 `kernel:ready`**，那时服务注册表才是完整的 —— 与 #4771 同一思路。\n2. auth 改成**惰性解析** cache：不要在 `start()` 时一次性拍板并缓存\"没有 cache\"，而是在真正用限流计数器时再取一次服务。这样也顺带修掉真正的功能退化 —— 目前即使 cache 后来注册上了，auth 这一侧是不是还捏着启动时那个进程内存储？**这一点我没验证**，但如果是，那就不只是日志误报，而是限流真的没用上共享 cache。值得在修的时候一并确认。\n\n## 复现\n\n```bash\nrm -rf examples/app-showcase/.objectstack && pnpm dev\n```\n\n看时序：`objectstack dev --seed-admin --log-level info`，对比上表两个时间戳。"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 4401,
+  "kind": "issue",
+  "title": "Three independent declarations of \"where ADR-0031 regions live\", and two region walkers inside @objectstack/lint",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T11:35:09Z",
+  "updated_at": "2026-07-31T12:16:08Z",
+  "closed_at": "2026-07-31T12:16:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4401",
+  "body": "#4381(closes #4347)和 #4388(closes #4380)在同一个小时内各自独立地发现了「flow 校验遍历不进 region」这个问题,并各自独立地建了一份「region 住在哪里」的声明。两个 PR 单看都对,合在一起产生了这个仓库自己的 AGENTS.md §10 警告过的情形:**git 干净合并,联合结果不对**。\n\n## 现状:三份槽位表\n\n| 位置 | 名字 | 形态 | 引入 |\n|:---|:---|:---|:---|\n| `packages/spec/src/automation/control-flow.zod.ts` | `regionSlotsOf()` | 函数,返回 `{ raw, key, index, label, schema }` | #4381 |\n| `packages/spec/src/conversions/walk.ts` | `FLOW_REGION_SLOTS` | `Map<type, {key, many}[]>` | #4381 |\n| `packages/lint/src/flow-walk.ts` | `REGION_SLOTS` + `REGION_CONFIG_KEYS` | `Map<type, string[]>` + `Set<string>` | #4388 |\n\n三份都各自配了 reconciliation 测试钉住自己 —— 也就是说,**每一份都单独防住了漂移,但没有任何一个测试会因为三份互相不一致而失败**。加第四种 ADR-0031 构造时要改三个地方,漏一个的失败模式恰好就是 #4347 / #4380 那种静默盲区。\n\n## 现状:lint 包内两个 walker 并存\n\n| 消费方 | 用的是 |\n|:---|:---|\n| `validate-expressions.ts` | spec 的 `collectFlowGraphs`(#4381) |\n| `validate-flow-node-writes.ts`、`validate-readonly-flow-writes.ts`、`validate-approval-approvers.ts`、`validate-flow-template-paths.ts` | `flow-walk.ts` 的 `walkFlowNodes`(#4388) |\n\n同一个包里,同一件事,两条路径。\n\n## 它们不是纯粹重复\n\n值得强调,免得合并方案做成「删一个」:**两者的形状不同,各自都有对方没有的东西。**\n\n- `collectFlowGraphs` 按**图**分组(`{ scope, nodes, edges }`)。校验边的谓词必须要边,所以 `validate-expressions.ts` 和引擎的 `validateFlowExpressions` 只能用它。\n- `flow-walk.ts` 按**节点**展开,并提供 `localConfig` —— 容器 config 里挖掉 region 槽之后的视图。任何递归扫 config 的规则都必须用它,否则每个嵌套发现会被报两次(一次在内层节点,一次在物理上包含它的容器)。它还给每个节点一个真实 `path`,`validate-flow-template-paths` 的 `filter` 位置判定依赖这个。\n\n所以合并方案不是二选一。\n\n## 建议方向(待讨论,我没有预设结论)\n\n把**槽位表**收敛成一份、放在 spec(它是 `FlowRegionSchema` / `LoopConfigSchema` 等的所在地,是这个知识的自然归属),两种遍历形状都建在它上面:\n\n- spec 导出单一的槽位声明 + 现有的 `collectFlowGraphs`(按图);\n- 再补一个按节点的形状,带 `localConfig` 和 `path`,把 `flow-walk.ts` 的能力搬上去;\n- `packages/lint/src/flow-walk.ts` 变成薄封装或直接删除,四条规则改指 spec。\n\n`spec/conversions/walk.ts` 那份是我(#4381)刻意留的本地副本,理由是该模块是纯形状 walker、不引 schema —— 如果这条理由在合并方案里站不住,它也该一起并掉;当时的取舍写在文件注释里,可以直接推翻。\n\n## 为什么单开而不顺手做\n\n`flow-walk.ts` 是 #4388 刚落地的模块,按 AGENTS.md 多 agent 纪律不该在无关 PR 里改别人在飞的代码。而且这是**架构取舍**(统一在哪一层、两种形状怎么并存),值得先有结论再动手,不适合夹在 #4389 的 bugfix 里。"
+}

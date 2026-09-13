@@ -1,0 +1,32 @@
+{
+  "number": 4646,
+  "kind": "issue",
+  "title": "check-driver-conformance 的 audit 路径对「发现零个 driver」报 OK — 零发现该是失败，且唯一的守卫硬编码了 driver-sql",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T13:45:59Z",
+  "updated_at": "2026-08-02T14:33:36Z",
+  "closed_at": "2026-08-02T14:33:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4646",
+  "body": "**包**：`scripts/check-driver-conformance.mjs`（#4363 引入的 driver conformance gate）\n**核实基线**：`main` @ `0a936ea`，**已实测复现**（下附命令与输出）\n**关联**：#4645（driver 目录重组 `packages/plugins/driver-*` → `packages/drivers/*`）——这是那次重组的前置项，但**本身独立成立**\n**PR**：#4648\n\n## 摘要\n\ngate 的发现根写死在 `packages/plugins`，而 `listDir` 吞掉 ENOENT 返回 `[]`。**audit 路径在发现零个 driver 时不报错，打印 `OK — 0 covered cell(s)` 并 exit 0。**\n\n先把范围说准，避免把它讲得比实际严重：**今天 CI 拦得住**。`lint.yml:304` 跑的是 `pnpm check:driver-conformance`，而 `package.json:50` 把它定义成 `--self-test && audit`，self-test 里有一条 driver 发现断言会先失败。问题在于**守卫只长在 self-test 上，audit 自己没有**——而 audit 是脚本 header 第 21 行明确文档化的独立用法。\n\n## 实测\n\n把 `DRIVERS_DIR` 指向一个不存在的目录（即「目录改名了但常量没跟上」），两条路径：\n\n```\n$ node check-driver-conformance.mjs\n\ndriver conformance matrix (0 drivers x 5 case-sets)\n\n  driver    FILTER_LOGIC  TEMPORAL  TEMPORAL_TIME  PAGINATION  PAGINATION_UNORDERED\n\ncheck-driver-conformance: OK — 0 covered cell(s), 0 in the DEBT ledger, 0 exempt.\n\nexit=0        ← 覆盖零个 driver，报 OK\n```\n\n```\n$ node check-driver-conformance.mjs --self-test\n  x self-test: discovers driver packages from disk\n\ncheck-driver-conformance --self-test: 1 failure(s).\n\nexit=1        ← 这条拦住了\n```\n\n## 三条不变量为什么会全部空过\n\n`audit()` 里：\n\n- **CONSUMED** — `for (const driver of drivers)`（:237），零 driver = 零次迭代 = 零 error\n- **RECONCILED** — `for (const entry of LEDGER)`（:271），而 `LEDGER = []`（:134，#4405 起清空，注释写明「An empty ledger is the intended steady state」）= 零次迭代 = 零 error\n- **CLASSIFIED** — 只比对 `CASE_SETS` 与磁盘上的 `*-conformance.ts`，与 driver 轴无关，照常通过\n\n`errors` 为空 → `report()` 走到 :318 打印 OK。空台账是**预期的稳态**，所以 RECONCILED 这条兜底在正常状态下恒为空——它挡不住这个洞。\n\n## 根因：两条轴的不对称\n\n> **更正**：本 issue 早前版本说「`CASE_SETS_DIR` 也没有任何守卫，该一并加固」——**那是错的，实测它有守卫**。把 `CASE_SETS_DIR` 指向不存在的目录：\n>\n> ```\n>   x CLASSIFIED: CASE_SETS names FILTER_LOGIC_CASES, which filter-logic-conformance.ts no longer exports.\n>   x CLASSIFIED: CASE_SETS names TEMPORAL_CASES, ...\n>   ...（5 条，每个 case-set 一条）\n> check-driver-conformance: 5 problem(s).   exit=1\n> ```\n>\n> 给它再加一层是冗余的。\n\n两条轴之所以一条会烂一条不会，差别在**有没有一份声明的预期可供反向对账**：\n\n| 轴 | 声明的预期 | 反向对账 | 目录失效时 |\n|---|---|---|---|\n| case-set | `CASE_SETS`（脚本内 5 条） | CLASSIFIED 第二个方向 | **5 条 error** |\n| driver | 无——纯磁盘发现 | RECONCILED 遍历 `LEDGER`，而它按设计恒空 | **静默 OK** |\n\ndriver 轴不能靠「补一份清单」来修——那正好违反脚本 `:145` 的 `/** Driver packages, from disk — never a hardcoded list. */`。能声明的只有一条：**零不是有效的发现结果**。\n\n## 为什么仍然要修\n\n1. **文档化的用法会给出假绿。** header :21-22 把两条命令并列列出，直接跑 audit 是被鼓励的（本地迭代时谁都不想每次跑 self-test）。它对零发现返回 OK。\n2. **唯一的守卫硬编码了 driver 名和数量。** `selfTest()` :375：\n   ```js\n   expect('discovers driver packages from disk', drivers.length >= 3 && drivers.includes('driver-sql'));\n   ```\n   而同一份脚本 :145 的注释是 `/** Driver packages, from disk — never a hardcoded list. */`。守卫违反了被守卫者的设计原则；`>= 3` 还会随 driver 增加而静默失去意义（现在 4 个，迁入 turso 后 5 个）。\n3. **失败信息不指向真因。** `discovers driver packages from disk` 不提 `DRIVERS_DIR`、不说路径已失效。#4645 的重组正是要动这个常量，届时踩中的人拿到的是一句不知所云的自检失败。\n4. 这正是该脚本 header 自己点名要避免的形状——「a verifier that reports success while degrading（route-ownership rule 3）」。它把这条标准用在了被检查对象上，没用在自己身上。\n\n## 修法（#4648 已实施）\n\n`audit()` 增加第四条不变量 **DISCOVERED**，检查体抽成 `discoveredErrors(drivers)` 以便 self-test 驱动不变量本身而非其替身；self-test 里的 `driver-sql` / `>= 3` 硬编码随之删除。失败信息带上实际搜索的目录：\n\n```\nx DISCOVERED: no driver package found under packages/drivers/. Either these\n  packages moved and DRIVERS_DIR is stale, or they are gone. Every other\n  invariant iterates the discovered set, so a zero-driver run reports OK having\n  checked nothing — it fails here instead.\n```\n\ncase-set 轴按上面的实测结论**不动**。\n\n## 不做的代价\n\n小，但方向错。gate 存在的理由就是「把缺失变成失败」；它自己在最基础的一格上把缺失变成了 OK。#4645 的重组会实际触发这一格，而那时诊断成本落在一个正在做别的事的人头上。"
+}

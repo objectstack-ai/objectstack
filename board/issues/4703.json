@@ -1,0 +1,34 @@
+{
+  "number": 4703,
+  "kind": "issue",
+  "title": "spec 双源清账 C12:FieldMapping / FieldMappingSchema(./data ≠ ./integration ≠ ./shared,三源)—— 2 条",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "protocol:breaking"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T19:20:24Z",
+  "updated_at": "2026-08-02T20:33:14Z",
+  "closed_at": "2026-08-02T20:33:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4703",
+  "body": "#4535 的 C12 簇,**v17 收口最后三簇之一**。基线行:\n\n```\nFieldMapping       — [./data (type)]  ≠ [./integration (type)]  ≠ [./shared (type)]\nFieldMappingSchema — [./data (const)] ≠ [./integration (const)] ≠ [./shared (const)]\n```\n\n基线现为 **16 条**(C9 刚落地,`c1f344b`),本簇目标 **16 → 14**。\n\n## 定位表(PM 已对 post-C9 的 `origin/main` 复核,开工请自验)\n\n| 侧 | 声明 | 形态 | authorable key |\n|:--|:--|:--|:--|\n| `./shared` | `shared/mapping.zod.ts:102` | **基**,plain `z.object` | **4**:`source` `target` `transform` `defaultValue` |\n| `./integration` | `integration/connector.zod.ts:105` | `BaseFieldMappingSchema.extend({…})`(`:7` 以别名 import 基)| **7**:基 4 + `dataType` `required` `syncMode` |\n| `./data` | `data/mapping.zod.ts:97` | **独立** `strictObject`,不 extend 基 | **4**:`source` `target` `transform` `params` |\n\n## ⚠️ 这不是「同一概念三种拼法」—— 三侧是两个不同概念\n\n`./shared` 与 `./integration` 是**基与其超集**(extend,7 ⊃ 4)。但 `./data` 是**另一件事**:它是**数据导入的列映射**(CSV/表格 → 对象字段),不是 connector 同步映射。三处硬证据:\n\n1. **`transform` 同名不同类型** —— `./shared`+`./integration` 用**判别联合** `FieldMappingTransformSchema`(`shared/mapping.zod.ts:52`);`./data` 用**普通枚举** `TransformType` 加 `.default('none')`,配一个平铺的 `params` 袋子。同一个键名,类型互不兼容。**这条是三侧不能共名的最硬证据。**\n2. **`source` / `target` 基数不同** —— `./data` 是 `z.union([z.string(), z.array(z.string())])`(一个目标字段可由多列合成);另两侧只收 `string`。\n3. **`./data` 是 `strictObject`,另两侧不是** —— 它带 `surface` / `history` / `aliases`(#4001 的别名归一 + 拒绝未知键机制,`from`/`sourceField`/`column`/`header` → `source` 等)。**该侧未知键会 throw,不是静默 strip**,与另两侧的失败模式相反。\n\n## 推荐路线(PM 分析;复核结论若与此矛盾请升级而不是硬做)\n\n按 **ADR-0112 D9(a)**、**C9(#4684 / PR #4695)刚刚确立的先例**办:**`./shared` 保留基名不动,给两个领域专用侧加领域前缀**。\n\n- `integration/FieldMapping` → **`ConnectorFieldMapping`**(带 7 个 key)\n- `data/FieldMapping` → **`ImportFieldMapping`**(带 4 个 key)\n\n这个命名不是新发明 —— **同一仓里已经是这个风格**:`data/external-lookup.zod.ts:86` 的 `ExternalFieldMappingSchema` 就是 `BaseFieldMappingSchema.extend(…)` 加领域前缀,且**正因为加了前缀,它从来没进过基线**。C9 也刚把 `integration/RateLimitConfig` 改成 `ConnectorRateLimitConfig`,同文件更早还有 `ConnectorErrorCategory` / `ConnectorRetryStrategy`。\n\n## 🔑 本簇是 C9 新建的 `RENAMED_DEFS` 承接表的**第一个真实消费者**\n\nC9(PR #4695)为解 def 改名的门禁死结新建了 `packages/spec/scripts/lib/renamed-defs.ts`,并接进了 `build-schemas.ts` 的两道 ratchet。**本簇直接用它,不要另造轮子,更不要手编基线。** 加两条:\n\n```ts\n'integration/FieldMapping': 'integration/ConnectorFieldMapping',\n'data/FieldMapping':        'data/ImportFieldMapping',\n```\n\n承接表已强制三条不变式(旧 def 每个 key 必须在新 def 下存在 / target 必须被产出 / source 必须不再被产出),并保留旧 key 的 retired 状态。**先读那个文件的文档注释再动手** —— 它把为什么不能走 tombstone / conversion 讲清楚了。\n\n**注意**:这是承接表第一次同时承接**两个** def,也是第一次承接**别处 extend 的基**。若你发现承接逻辑在多条目或 extend 场景下有洞,**那本身就是有价值的交付物** —— 修它并补单测(`packages/spec/scripts/renamed-defs.test.ts` 已有 10 条规则单测可扩)。\n\n## ⚠️ 必须同步清空 C9 留下的显式清单\n\n`packages/spec/src/integration/connector.test.ts:790`:\n\n```ts\nconst KNOWN_STILL_DUAL_SOURCE = ['FieldMapping', 'FieldMappingSchema'];\n```\n\n那是 C9 通用不变式 pin 里**故意**写成显式清单的「已知尚存双源」(这样新出现一个就红,而不是写一条从来不成立的「不许同名」)。**本簇清完后必须把它改成 `[]`,否则该 pin 会红。** 这是设计好的强制握手,不是遗漏。\n\n## 纪律(#4535 §1–§8 + 手册,开工前必读)\n\n1. **⛔ 禁止手编 `packages/spec/authorable-surface.json`**(#4650)。用 `gen:schema` 经承接表重新生成。\n2. **⚠️ 门禁绿 ≠ 登记正确**(#4659):检查 (b) 按 leaf name 匹配 conversion surface,自己枚举核对。\n3. **零 tombstone、零 ADR-0087 conversion** —— 改名不 retire 任何 key。**产生了就是走偏,停下升级。**\n4. **回归 pin 必须能真的红并 sabotage 验证。** #4642 已证本包**编译期 pin 空转**(`tsconfig.json` 排除 `**/*.test.ts`、vitest 不开 `typecheck`)。`FieldMapping` 是**类型**,运行时看不见 —— 抄 PR #4695 / #4689 里那条 **TypeScript compiler API 符号身份解析**断言(含防空转守卫 `expect(moduleSym).toBeTruthy()` 与 `origins.size > 20`)。**本簇是三源,pin 要覆盖三个入口两两之间。**\n5. **额外钉住概念差异**:`./data` 侧 `transform` 是枚举 + `params` 袋子、`source`/`target` 收数组、且 `strictObject` **未知键 throw**;另两侧 `transform` 是判别联合、只收 string、未知键静默 strip。**这些差异正是三侧不能共名的理由,钉住它们防止将来有人「顺手统一」。**\n6. **`./data` 侧动了 `strictObject` 就要同步严格性台账** `docs/audits/2026-07-unknown-key-strictness-ledger.md`(该文件 `:475` 有 `mapping.zod.ts` 条目)。纯改名不应改变严格性,但**必须实际跑 `check:strictness-ledger` 确认**,别假设。\n7. **⚠️ 生成物冲突只能靠重新生成**(手册第 7 条)。推之前重新 `git fetch origin main`;`spec-changes.json` 是对象数组,**必须跑 `gen:spec-changes`**,集合合并会丢条目。\n8. ⛔ **不要碰 `content/docs/releases/`**。\n9. 注意 `gen:docs` 可能挪动 `content/docs/references/**` 的页面归属 —— 见 **#4696**(`build-docs.ts` 按裸 schema 名做全局索引,同名跨 category 互相覆盖)。**`FieldMapping` 正是 #4696 点名的高危同名对之一**,改名后文档页归属很可能变化。**那是修复不是回归**,但请在 PR 里说明,别当成意外。\n\n## 验收\n\n- [ ] 基线删掉上面 2 行,**16 → 14**,**其余 14 行一字不动**。\n- [ ] `./shared` 侧的 `FieldMapping` / `FieldMappingSchema` **原样不动**。\n- [ ] `RENAMED_DEFS` 两条,**7 + 4 个 key 逐条核对表**,一个不少。\n- [ ] `connector.test.ts` 的 `KNOWN_STILL_DUAL_SOURCE` 清空为 `[]`。\n- [ ] 三源 pin + 概念差异 pin,**全部 sabotage 验证并贴实际输出**。\n- [ ] 零 tombstone、零 ADR-0087 conversion。\n- [ ] 全绿:`build`、`check:dual-source-exports`、`check:generated`、`test`,加源码审计组(`check:liveness` / `check:strictness-ledger` / `check:empty-state` / `check:variant-docs` / `check:exported-any` / `check:skill-examples`),以及全仓 `pnpm typecheck`。\n- [ ] changeset 一份,`@objectstack/spec` **major**,含两条 FROM → TO 的 import 改法、`$id` 迁移、以及「作者写的元数据是否需要迁移」的明确结论(**据实写**:C9 是 `major` 但元数据零迁移,C11 是 `patch`;**不要照抄任一结论,也不要为凑级别夸大**)。\n- [ ] ⛔ 不碰 `content/docs/releases/`,不手编 `authorable-surface.json`。\n\n## 判不出来就升级\n\n若你复核后认为 `./shared` 与 `./integration` 应该**收敛**而不是改名(它们确实是基与超集),或认为 `ImportFieldMapping` / `ConnectorFieldMapping` 的命名不妥,**停下来把多轴分析写进报告** —— #4653 / #4658 / #4661 三簇都是这样处理的,分析本身就是交付物。\n\n关联:#4535(主单)、#4684 / PR #4695(C9,`RENAMED_DEFS` 本体与先例)、#4688 / PR #4689(C11,类型级 pin 形态)、#4696(docs 生成器按裸名索引)、#4650 / #4659 / #4666(门禁洞)、#4642(pin 空转)、#4675(生成物冲突)、#4001(strictObject 别名机制)、ADR-0049、ADR-0087、ADR-0104、ADR-0112"
+}

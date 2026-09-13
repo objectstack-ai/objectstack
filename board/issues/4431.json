@@ -1,0 +1,32 @@
+{
+  "number": 4431,
+  "kind": "issue",
+  "title": "actions: sandbox capability denial answers 400 as a deliberate rejection, not the 500 the crash contract promises",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T06:49:04Z",
+  "updated_at": "2026-08-01T13:47:15Z",
+  "closed_at": "2026-08-01T13:47:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4431",
+  "body": "Found while browser/API-verifying the 17.0.0-rc.1 checklist on #3909 (F1, \"failures speak HTTP\"). Verified on `main` @ `1ee48bc60` against a running showcase (`os serve --dev`, workspace CLI).\n\n## What happens\n\nA script action body that calls a `ctx.api` method **without the required capability** answers:\n\n```\nPOST /api/v1/actions/showcase_task/rc1_crash_probe\n→ HTTP 400\n{\"success\":false,\"error\":{\"code\":\"VALIDATION_ERROR\",\"message\":\"SandboxError: capability 'api.read' not granted to action 'rc1_crash_probe' (called ctx.api.object('showcase_task').count)\",\"httpStatus\":400}}\n```\n\nTwo things are wrong with that wire:\n\n1. **It should be a 500.** The `action-crash-vs-rejection` changeset (#3951, shipped in this train) pins the contract: *\"`SandboxError` with no `innerMessage` — timeout, **capability denial** → crash → 500\"*. A capability denial is not an outcome the action chose to report; served as 400 it stays invisible to gateway error rates / APM / alerting — exactly the blindness #3951 was written to close.\n2. **The debug prefix leaks.** The client-facing message carries the `SandboxError: ` name prefix the sandbox uses for server logs; the runner's own doc says only the business `innerMessage` should reach the client.\n\nRepro: author any script action whose `body.capabilities` omits a capability its source uses (e.g. `capabilities: []` + `ctx.api.object('x').count({})`), invoke it over REST.\n\n## Why\n\nThe capability gate throws `SandboxError` **synchronously inside a QuickJS host function** (`packages/runtime/src/sandbox/quickjs-runner.ts` — `capability '${required}' not granted…`). That throw rejects the async IIFE *inside* the VM, so it surfaces through the `__error` side-channel, and the pump loop wraps it as:\n\n```ts\nthrow new SandboxError(\n  `${kind} '${name}' threw: ${errStr}`,\n  userFacingMessage(String(errStr)),   // ← innerMessage SET\n  readErrorInfo(vm),\n);\n```\n\ni.e. **`innerMessage` is set for a host-side denial**, because anything that comes back through `__error` is presumed \"user code threw this deliberately\". The dispatcher's classifier (`packages/runtime/src/domains/actions.ts`, `unexpectedFault`) then reads `innerMessage`-present as a deliberate rejection → 400. The contract's \"capability denial has no user-meaningful inner message\" (SandboxError jsdoc) only holds for denials detected *outside* evaluation.\n\nTimeouts take the separate `budgetError` path, so the 500 half of the contract likely still holds for them; it is the **in-VM host-call denials** (capability gates on `ctx.api.*`, `ctx.log`, `ctx.crypto`) that get misclassified.\n\n## Expected\n\nA capability denial (and any other sandbox-internal fault crossing `__error`) reaches the classifier distinguishable from a user throw — e.g. the host-function throw carries a marker (`code: 'CAPABILITY_DENIED'` / a sentinel the pump loop recognizes before setting `innerMessage`) — and answers 500 through `errorFromThrown`, without the `SandboxError:` prefix reaching the client.\n\nPart of the #3909 rc.1 verification (section F1).\n"
+}

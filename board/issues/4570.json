@@ -1,0 +1,35 @@
+{
+  "number": 4570,
+  "kind": "issue",
+  "title": "build-docs.ts 用「剥掉 Schema 后缀」推导 import type 示例,类型别名不存在时生成的文档引用无法编译",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T07:17:47Z",
+  "updated_at": "2026-08-02T09:51:46Z",
+  "closed_at": "2026-08-02T09:51:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4570",
+  "body": "## 现象\n\n`packages/spec/scripts/build-docs.ts` 生成每个 reference 页的 TypeScript Usage 段时,`import type { X }` 行是从 schema const 名机械剥掉 `Schema` 后缀推导的:\n\n```ts\n// scripts/build-docs.ts:461\nconst typeNames = schemas.map(s => s.name.replace(/Schema$/, '')).join(', ');\n// :466\nmd += `import type { ${typeNames} } from '@objectstack/spec/${category}';\\n\\n`;\n```\n\n它假设每个 `XSchema` 都存在且导出了同名推断类型 `X`。这个假设没有任何 gate 验证:一旦某个 schema 没有配套的 `export type X`(或别名被删/改名),生成出的文档会引用一个不存在的导出 —— `check:docs` 依然全绿,因为它只对比「生成器现在的输出」和「已提交的文档」,不验证 import 行能否编译。\n\n## 触发实例\n\n#4539 处理 shared `TransformType` 双源行时,首选方案本来是只删除零消费者的类型别名、保留 `TransformTypeSchema` 不动,结果发现这样会让生成文档持续宣传 `import type { TransformType } from '@objectstack/spec/shared'`(该导出已不存在,且与 `./data` 的同名 enum 混淆)。最终被迫改成整对重命名(`FieldMappingTransformSchema` / `FieldMappingTransform`)来绕开生成器的这个假设 —— 结果是对的,但决策被生成器缺陷绑架了。\n\n## 建议\n\n生成 import 示例时对照真实导出面(api-surface.json 已按 entry 记录了每个名字,或直接解析入口 d.ts),只列真实存在的名字;或者加一个校验步骤:剥后缀推导出的每个类型名必须出现在对应 entry 的导出里,否则 `check:docs` 变红。机器可读表面不能撒谎(AGENTS.md「Route & surface ownership」#4)—— 文档里的 import 示例正是 AI 编写元数据应用时最常被复制的行。\n\n关联:#4539(触发场景)、#2978(schema 静默下架删文档的老问题,同一层生成器)。"
+}

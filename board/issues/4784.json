@@ -1,0 +1,34 @@
+{
+  "number": 4784,
+  "kind": "issue",
+  "title": "bug(objectql/docs): hook `condition` 的 CEL 作用域只绑定 `record` —— 文档教的 `previous.x` / `ctx.record` 根本不存在,过渡型条件写不出来",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T06:20:10Z",
+  "updated_at": "2026-08-03T07:48:47Z",
+  "closed_at": "2026-08-03T07:47:37Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4784",
+  "body": "## TL;DR\n\n声明式 hook 的 `condition` 求值时**只绑定一个根 `record`**:\n\n```ts\n// packages/objectql/src/hook-wrappers.ts\nconst r = ExpressionEngine.evaluate< boolean >(expr, { record: record ?? {} });\n```\n\n但两处**已发布**的 skill 文档教作者写 `previous.*`(以及一个不存在的 `ctx.record`)。写了就静默失效:`previous.status` → `No such key: previous` → 被 catch 成 `false` → hook 不触发,只留一条 warn。\n\n## 现场\n\n1. `skills/objectstack-formula/SKILL.md` §5「Update hook condition — `previous` vs `record`」直接给出:\n\n   ```ts\n   P`previous.status != 'escalated' && record.status == 'escalated'`\n   ```\n\n   这个例子对 **validation rule** 的 condition 是对的(`rule-validator.ts` 确实传 `previous` binding),对 **hook** 的 condition 是错的 —— 而小标题写的是 hook。同一页的转换表还把 `ISCHANGED(x)` 映射成 `previous.x != record.x`,作者会照着往 hook 里抄。\n\n2. `skills/objectstack-automation/SKILL.md` 的 time-word 速查表:\n\n   | Surface | Event-time record | Pre-event record | Live record |\n   |:--|:--|:--|:--|\n   | Object hook (`ctx`) | `ctx.record` (write payload) | `ctx.previous` | — |\n\n   `HookContext` 上**没有 `record` 这个键**(`packages/spec/src/data/hook.zod.ts`:`input` / `result` / `previous` / `session` / …)。`ctx.previous` 是真的,`ctx.record` 不是。\n\n## 为什么现在值得单独立一条\n\n#4770(hook 条件改为对 stored ⊕ payload 求值)刚把条件的语义从「本次 diff」变成「记录状态」:`record.done == true` 现在对**每一次**已完成任务的 update 都为真,而不只是那次把它置为 done 的 update。想表达「刚刚变成 done」这件事,唯一的写法就是比较 `previous` —— 而 hook 条件恰恰拿不到它。审计类 hook 的原意(`showcase_audit_task_completion` 的 description 写的是 \"after a task transitions to done\")因此仍然表达不出来。\n\n## 两条路,需要定夺(所以本条不带实现)\n\n- **A. 给 hook condition 的作用域补上 `previous`(以及可能的 `user`),与 validation 谓词对齐。** 好处:文档里已经这么教了,作者心智一致,过渡语义可写。代价:condition 的可写表达面变大,属于公开契约扩展 —— 而且 `previous` 只在引擎取到 prior row 时才有(bulk predicate update 没有),要先定「拿不到时 `previous` 是什么」。\n- **B. 不扩作用域,把两处文档改成只讲 `record`,并明确「hook 条件无法表达过渡,需要过渡语义请用 record-change flow trigger 的 start condition」。** 好处:不动运行时。代价:`skills/objectstack-formula` 的 `ISCHANGED` 迁移路径在 hook 上就是断的。\n\n无论选哪条,**文档与运行时现在是对不上的**,属于 declared ≠ delivered。\n\n## 复现\n\n一个 `afterUpdate` hook,`condition: \"previous.done != true && record.done == true\"`,更新任一字段:\n\n```\nWARN [hook] condition evaluation failed; treating as false\n  {\"hook\":\"...\",\"condition\":\"previous.done != true && record.done == true\",\n   \"error\":\"No such key: previous...\"}\n```\n\n---\n\n发现于 #4770 的实现过程中(PR: hook 条件合并 record),按 AGENTS.md Prime Directive #10 记录,未在该 PR 内修复。"
+}

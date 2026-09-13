@@ -1,0 +1,34 @@
+{
+  "number": 3715,
+  "kind": "issue",
+  "title": "[P2] Execute ADR-0033's deletion of the unenforced `tool.requiresConfirmation` (safety-shaped, gated by nothing)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "priority:p2",
+    "protocol:breaking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T15:52:58Z",
+  "updated_at": "2026-08-03T01:11:34Z",
+  "closed_at": "2026-08-03T01:11:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3715",
+  "body": "Surfaced by the #3686 preview-claim sweep; marked honestly in #3711 (`dead` + `authorWarn`). This issue tracks the **prune**, which ADR-0033 already resolved but never executed.\n\n## The state\n\n`tool.requiresConfirmation` (`packages/spec/src/ai/tool.zod.ts:100`) is read by **no execution path**:\n\n| Path | Behaviour |\n|---|---|\n| LLM tool set | `cloud service-ai/src/adapters/vercel-adapter.ts:263-272` — tools reach the model as name/description/parameters only |\n| `ToolRegistry.execute` | `cloud tool-registry.ts:183-210` — no gate |\n| `POST /api/v1/ai/tools/:name/execute` | `cloud tool-routes.ts:91,105` — `has()` then `execute()` |\n| MCP bridge | `packages/mcp/src/mcp-server-runtime.ts:176` — sets `destructiveHint` from a **hardcoded name list** (`:229-231`), ignoring the flag |\n\nEvery genuine `requiresConfirmation` read in all three repos is **`action.ai.requiresConfirmation`** — a different property, genuinely live (`liveness/action.json`, `packages/runtime/src/action-execution.ts:264`).\n\n## Why it is worse than inert\n\nThe authoring surface actively teaches reliance on it:\n\n- `packages/spec/src/ai/tool.form.ts:36-42` — section titled **\"Access & safety\"**, description *\"Permissions and confirmation requirements.\"*, helpText *\"Ask user to approve before executing (for destructive actions)\"*\n- `skills/objectstack-ai/SKILL.md:547` — *\"for destructive operations put a human in the loop — `requiresConfirmation: true` on the tool\"*\n- `packages/spec/docs/MCP_GUIDE.md:358`, `packages/spec/README.md:136`\n\nAn author (or an AI) marking a destructive tool `requiresConfirmation: true` gets **no pause, no prompt, no gate**. Same class as `skill.permissions` (pruned in #3704) and agent `visibility` (#1901) — *a security/safety-shaped field that lies is dropped, not carried marked.*\n\n## ADR-0033 already decided this\n\n`docs/adr/0033-…`:\n- `:31` — *\"The `requiresConfirmation` flag exists but is **not enforced** (the tool-call loop ignores it)\"*\n- `:60` — *\"We **delete** the unenforced `requiresConfirmation` placeholder on metadata tools\"*\n\nThe rationale stands: the **draft/publish workspace is the real approval gate** — AI never publishes, every metadata mutation lands as a draft a human must publish. That is the enforced HITL boundary; the flag was a placeholder for a gate that got built somewhere better.\n\nThe decision was recorded and never executed.\n\n## Scope if approved (mirrors #3704 exactly)\n\n- `packages/spec/src/ai/tool.zod.ts` — the property\n- `packages/spec/src/ai/tool.form.ts` — the field; note the \"Access & safety\" section's **only two fields** are this and the already-`dead` `permissions`, so decide whether the section goes too\n- `packages/spec/liveness/tool.json` + the README count table\n- i18n: `packages/platform-objects/src/apps/translations/{en,es-ES,ja-JP,zh-CN}.metadata-forms.generated.ts` — regenerate (`pnpm i18n:extract`), and verify the diff touches **only** these keys\n- `skills/objectstack-ai/SKILL.md:547` + `MCP_GUIDE.md` + `README.md` — replace the guidance with the real HITL path\n- objectui `ToolPreview.tsx` — the pill\n- 24 cloud `*.tool.ts` declarations that set it\n- changeset with FROM→TO: *use an action with `ai.requiresConfirmation` + the approval queue; for metadata mutations the draft/publish gate already applies*\n\n## Open question for the owner\n\nPrune (execute ADR-0033), or **wire it** — i.e. make `ToolRegistry.execute` and the REST route honour the flag by routing through the same HITL queue actions use? ADR-0033's reasoning argues for prune, but that ADR predates the current tool surface; if first-class metadata tools are meant to be a first-class extension point, a per-tool confirmation gate may be worth building rather than deleting.\n\nRefs #3711, #3704, ADR-0033."
+}

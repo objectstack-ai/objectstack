@@ -1,0 +1,32 @@
+{
+  "number": 4433,
+  "kind": "issue",
+  "title": "sharing: deactivating a rule never withdraws its materialized grants — not on touch, not at boot",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T06:58:07Z",
+  "updated_at": "2026-08-01T13:10:32Z",
+  "closed_at": "2026-08-01T13:10:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4433",
+  "body": "Found while verifying the 17.0.0-rc.1 checklist on #3909 (F2, \"switching a rule off actually withdraws access\", #3850). Verified on `main` @ `1ee48bc60`, showcase under `os serve --dev`, SQLite datasource.\n\n## Repro\n\n1. Object `showcase_private_note` (`sharingModel: 'private'`). Admin owns note N; member B cannot read it (404 — correct baseline).\n2. Admin authors a criteria rule at runtime: `POST /api/v1/sharing/rules` `{type:'criteria', name:'rc1_rule_livetest', object:'showcase_private_note', criteria:{title:'rc1 rule target'}, accessLevel:'read', recipientType:'user', recipientId:<B>, active:true}` → 200.\n3. Admin touches N (PATCH) → the rule **materializes** a `sys_record_share` row (`source:'rule'`, `source_id:<rule id>`); B reads N → 200. ✅ so far.\n4. Admin saves the same rule with **`active:false`** → 200; `GET /sharing/rules/rc1_rule_livetest` confirms `active:false`.\n5. B reads N → **still 200**.\n6. Admin touches N again (the same event that materialized the grant) → B **still 200**; the `source:'rule'` share row is still there.\n7. **Full server restart** on the same datastore → B **still 200**. The rule reads `active:false`, the orphaned grant row still answers:\n\n```\nGET /sharing/rules/rc1_rule_livetest → {\"active\":false,\"id\":\"srule_05574dc1-…\"}\nGET /data/showcase_private_note/<N>/shares → [{\"source\":\"rule\",\"source_id\":\"srule_05574dc1-…\",\"level\":\"read\"}]\n```\n\nOnce a rule's grant is materialized it is **permanent**: deactivating the rule never withdraws it — not on the next record touch, not at boot. (And the rule cannot be deleted over REST either — the DELETE route 500s unconditionally, filed separately as its own issue; with both paths dead there is NO way to withdraw a rule grant short of hand-editing `sys_record_share`.)\n\n## Expected\n\nDeactivating (or deleting) a sharing rule withdraws the grants it materialized — that is the #3850 posture the v17 release notes advertise (\"switching a rule off actually withdraws access\"). At minimum the evaluator/materializer must treat `source:'rule'` rows whose `source_id` resolves to an `active:false` (or missing) rule as void, and the reconciliation that runs on record-touch/boot should sweep them.\n\nPart of the #3909 rc.1 verification (section F2).\n"
+}

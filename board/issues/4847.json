@@ -1,0 +1,35 @@
+{
+  "number": 4847,
+  "kind": "pull_request",
+  "title": "fix(devx): `check:i18n` 把 unknown-authoring-key 判为失败,不再只判 bundle drift (#4804)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T09:52:23Z",
+  "updated_at": "2026-08-03T10:25:37Z",
+  "closed_at": "2026-08-03T10:25:36Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T10:25:36Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4847",
+  "body": "Fixes objectstack-ai/objectstack#4804\n\n采纳 issue 裁定的**方案 A**:失败判定落在 `scripts/check-i18n-bundles.mjs`。不碰 `os i18n extract` 的公开退出码(B),不碰 `ObjectStackDefinitionSchema`(C)。`packages/**` 一行未改。\n\n## 问题不是「lint 没看见」,是「看见了也拦不住」\n\n#4167 的 unknown-authoring-key lint 把九处全看见了。它在每次运行里逐包打印:\n\n```\ndefineStack: stack.name: 'name' is not a declared stack key, so its value is dropped at load — did you mean 'pages'?\n```\n\n但它出现在一次**全绿**的 `check:i18n` 里,于是被人眼过滤了九次。#4736 清的是症状。\n\n实施中发现了一个 issue 正文没写到、但决定成败的事实:**这条 lint 写的是 stderr,不是 stdout**(`defineStack` 走 `console.warn`)。而门禁用的是 `execFileSync`,它**只在抛错路径上**交出 stderr —— 退出码为 0 时那条流直接透传到终端,**没有任何代码读过它**。所以当时不是「读了但没判」,是压根没读。这也解释了为什么它能安稳待在绿色运行里。\n\n两处都修了:\n\n1. `execFileSync` → `spawnSync`,两条路径都拿到两条流。不属于 lint 签名的 stderr 行原样回吐,捕获不吞任何诊断信息。\n2. 门禁此前只判 bundle drift,现在多一类判定 —— 命中 unknown-authoring-key 签名即非零退出。\n\n覆盖面不需要维护清单:`findConfigs` 遍历 `packages/`,第十份配置落地当天就在保护里。\n\n## 两类失败不合并(验收第 3 条)\n\ndrift 保留原有小节和原有解法(`--write`);新的一类自己一节,指名**哪个包、哪个配置文件、哪个键**,以及那个真正要紧的后果 —— **它在 load 时被丢弃,所以它想配置的东西从来没生效过**。重新生成 bundle 修不好它,错误信息也这么写了。逐包状态行还带 `← UNDECLARED KEY` 标记,扫一眼就能分辨,不用读到底下的报告。\n\n两类同时命中时的真实输出(把 plugin-audit 的配置还原到 `ffab8033b^` 再破坏它的一份 bundle):\n\n```\n  plugins/plugin-audit           DRIFTED (1)  ← UNDECLARED KEY\n\ncheck-i18n-bundles: 1 bundle problem(s)\n\n  • plugins/plugin-audit: 1 bundle(s) drifted from the schema\n\nRegenerate and commit: node scripts/check-i18n-bundles.mjs --write\n...\n\ncheck-i18n-bundles: UNDECLARED AUTHORING KEY in 1 package(s)\nThese keys are parsed away at load — whatever they were meant to configure is NOT\nin effect, and never was. This is a separate verdict from bundle drift below/above;\nregenerating bundles will not fix it.\n\n  plugins/plugin-audit  (packages/plugins/plugin-audit/scripts/i18n-extract.config.ts)\n    • 'name' at stack.name is not a declared stack key — dropped at load (did you mean 'pages'?)\n```\n\n## 反向验证(验收第 4 条)—— 这条是本 PR 的核心证据\n\n一个只在 main 上绿过的门禁,和一个什么都匹配不到的门禁无法区分(#4690 就是那样:无 MANIFEST 时静默 skip 退 0,永远不可能红)。所以两头都跑了。\n\n**红:把九份配置还原到 `ffab8033b^`(#4803 删掉 `name:` 之前的那个 commit),`pnpm check:i18n` 退出 1,九处全部报出**:\n\n```\n  platform-objects               in sync (8 bundle(s))  ← UNDECLARED KEY\n  plugins/plugin-approvals       in sync (4 bundle(s))  ← UNDECLARED KEY\n  ... (九个包,逐一)\n\ncheck-i18n-bundles: UNDECLARED AUTHORING KEY in 9 package(s)\n...\n  platform-objects  (packages/platform-objects/scripts/i18n-extract.config.ts)\n    • 'name' at stack.name is not a declared stack key — dropped at load (did you mean 'pages'?)\n  plugins/plugin-approvals  (packages/plugins/plugin-approvals/scripts/i18n-extract.config.ts)\n    • 'name' at stack.name is not a declared stack key — dropped at load (did you mean 'pages'?)\n  ... (九条)\nEXIT=1\n```\n\n顺带纠正 issue 正文的一处描述:dedupe 是**按进程内的 path** 去重的,而门禁对每份配置各起一个进程,所以九个包实实在在打印九条(上面这次「合并前」运行,以及用**未改动的**旧门禁跑同一份语料,都能看到九条 —— 旧门禁看到九条仍然退出 0)。判定挂在**每一份被发现的配置**上,不是只看全局出现过一次。\n\n**绿:当前 `main`(即本分支的基线),干净、无新增噪音(验收第 2 条)**:\n\n```\n✓ check:i18n --self-test — bundle-drift and undeclared-authoring-key classifiers both go red, and stay distinct.\n  platform-objects               in sync (8 bundle(s))\n  ... (九个包全部 in sync,零 UNDECLARED KEY 标记)\n\ncheck-i18n-bundles: OK (9 package(s) — all bundles in sync, no undeclared authoring keys).\nEXIT=0\n```\n\n## 测试:`--self-test`(仓库既有惯例)\n\n按 `check:route-envelope` / `check:published-files` 等的惯例加了 `--self-test`,并接进 `check:i18n`(先自检、再真跑),所以「门禁能不能红」这件事本身进了 CI,而不是只在这个 PR 的描述里被断言过一次。它不需要 build、不需要 CLI —— 纯粹拿录下来的 CLI 输出喂两个分类器。用例覆盖:\n\n- 逐字钉住 `ffab8033b^` 上那条真实 stderr,断言解析出 `path` / `key` / `surface` / hint。CLI 措辞一改,**自检先红**,而不是门禁悄悄失灵;\n- `os compile` 的 stdout 变体(`• ` 项目符号、无 `defineStack:` 前缀);\n- 同一份输出里两个不同 path 都要留下,重复 path 不重复计数;\n- **两类判定互不串味**:drift 文本喂给 key 分类器必须是 0,key 文本喂给 drift 分类器必须是 0;\n- 措辞被改写、强正则失配时,弱签名仍然要让门禁红,并落进 `unattributed` 桶(明说「解析不出是哪个键」),**绝不退化成「干净」** —— 这条直接冲 #4690 那个形状去的;\n- 干净输出不产生任何 finding。\n\n```\n$ node scripts/check-i18n-bundles.mjs --self-test\n✓ check:i18n --self-test — bundle-drift and undeclared-authoring-key classifiers both go red, and stay distinct.\n```\n\n另外验过:`--write` 路径仍然把 40 份 bundle 逐字节重新生成(`git status` 对所有 `src/translations/**` 干净);单独破坏一份 bundle 时 drift 判定行为不变(验收第 3 条);`npx eslint scripts/check-i18n-bundles.mjs` 干净;`check:release-notes` / `check:doc-authoring` / `check:nul-bytes` 均绿。\n\n## gate 语义变宽这件事,写在了脚本自己身上(A 的诚实代价)\n\n脚本头部注释重写了:开篇就列出它现在判的**两类**,以及各自的修法;并写明为什么这一类落在门禁层而不是 CLI 退出码。`check:i18n` 此前只判 drift —— 有人被它拦下时,不该需要读源码才知道它现在管什么。最终成功行也改成 `all bundles in sync, no undeclared authoring keys`。\n\n修法始终指向**生产者**:把键从配置里删掉。如果那个键是真需要,就在 `packages/spec` 里**郑重地**声明它 —— 不靠消费侧 fallback,也不靠把 schema 改 strict 来堵嘴(那会连 lint 本身一起静音,`metadata-authoring-lint.ts` 里写明了)。\n\n## 改动面\n\n- `scripts/check-i18n-bundles.mjs`\n- `package.json`(`check:i18n` 前置一次 `--self-test`)\n- `.changeset/check-i18n-fails-on-undeclared-authoring-key.md`(不发布任何包)\n\n未触碰 `packages/**`、`content/docs/releases/`,以及本会话另两位 dev 在飞的 `scripts/check-durability-degradation-log-level.mjs`、`scripts/durability-degradation.baseline.json`、`scripts/bump-objectui.sh`。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_018iARDqtrhQgz6fVHDeDkbQ\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018iARDqtrhQgz6fVHDeDkbQ)_"
+}

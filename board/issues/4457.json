@@ -1,0 +1,32 @@
+{
+  "number": 4457,
+  "kind": "issue",
+  "title": "[spec] bulkActionDefs is z.record(z.any()) — type the def shape (ADR-0018 second-vocabulary smell) and cover it in reference-integrity lint",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T08:22:19Z",
+  "updated_at": "2026-08-01T14:31:09Z",
+  "closed_at": "2026-08-01T14:31:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4457",
+  "body": "## 背景\n\nobjectui#3139 落地了批量选择条的聚合执行模式(`bulkActionDefs[].execution: 'aggregate'`,objectui@636ac2f + 本仓 `_selectedIds` 白名单/showcase specimen)。落地过程中确认了一个既有债务:\n\n`packages/spec/src/ui/view.zod.ts` 中 `bulkActionDefs` 声明为:\n\n```ts\nbulkActionDefs: z.array(z.record(z.string(), z.any())).optional()\n```\n\n**完全无形状** —— 真正的 def 契约(`name/operation/patch/params/confirmText/visible/maxRecords/batchSize/execution/actionDef`)只存在于 objectui `@object-ui/types` 的 `BulkActionDef` 接口与源码注释中。作者写错任何 key(`opeartion`、`excution: 'aggregate'` 拼错等)解析层静默通过,运行期静默降级为默认语义 —— 正是 ADR-0078 要消灭的 silently-inert 形态,也是 ADR-0018 警示的「第二套平行 action 词汇表」。\n\n## 建议\n\n1. **在 spec 中类型化 `BulkActionDef`**(Zod,`ui/view.zod.ts` 或独立 `ui/bulk-action.zod.ts`):至少覆盖 `name`(必填)、`operation: 'update'|'delete'|'custom'`、`execution: 'perRecord'|'aggregate'`、`patch`、`params[]`(可复用 ADR-0104 的 `ActionParamSchema` 词汇或映射表)、`confirmText`、`confirmLabel`、`visible`(`ExpressionInputSchema`)、`maxRecords`、`batchSize`。注意与 objectui 的 `BulkActionDef` 对齐(那边是 renderer 侧真源,含 `actionDef` 这类 renderer 内部 key —— spec 侧应禁止作者书写 `actionDef`)。\n2. **`packages/lint/src/validate-action-name-refs.ts` 覆盖 `bulkActionDefs`**:目前只走 `rowActions`/`bulkActions` 的名字解析;`execution: 'aggregate'` 的 authored def 依赖 `name` 命中 `objectDef.actions`,名字失配今天完全无校验(按钮点击后 executor no-op)。至少对「`operation: 'custom'` 且无内联 `actionDef` 的 def」做名字解析校验。\n3. 类型化后按流程走 authorable-surface / liveness ledger(为每个新 key 落行)/ docs 再生成。\n\n## 参考\n\n- 聚合模式契约见 `view.zod.ts:740` 的 describe(objectui#3139 落地时已扩写)与 objectui `packages/types/src/objectql.ts` `BulkActionDef`。\n- showcase specimen:`examples/app-showcase/src/ui/views/task.view.ts` → `bulk_actions`。"
+}

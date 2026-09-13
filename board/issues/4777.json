@@ -1,0 +1,37 @@
+{
+  "number": 4777,
+  "kind": "issue",
+  "title": "把 #4632 词表扩到「启动期对注册表的终局判断」—— 一次冷启抓出 3 例,当前零防线",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T06:00:22Z",
+  "updated_at": "2026-08-03T11:34:37Z",
+  "closed_at": "2026-08-03T09:58:13Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4777",
+  "body": "`Blocked-by: #4769`\n`Blocked-by: #4771`\n`Blocked-by: #4772`\n\n## 背景\n\n2026-08-03 一次 showcase 冷启日志暴露了三个**同形**缺陷,分别落在三个互不相干的子系统(#4769 objectql 的 ADR-0104 自证、#4771 service-automation 的 flow 节点校验、#4772 plugin-auth 的 cache 探测)。三处代码此前互不知情,由三拨人在三个时期写下。\n\n共同形状:**启动期问注册表「有没有 X」,把得到的「没有」当成终局事实并记账下来** —— 缓存进进程内变量、打成断言式告警、或者(最坏的 #4769)写进数据库。提供方随后注册好了,记账却不会撤销。\n\n完整的两轴分析和「是否要更进一步收紧 kernel 契约」的裁定请求在 **#4776**(`needs-user-decision`)。本 issue 是那份分析里**不需要维护者拍板的第一步**,PM 已裁定直接派发。\n\n## 要做什么\n\n沿 #4632 已经建立的机制(静默降级词表 + 门禁),把词表扩到这一类。#4632 的词表已经证明这条路能自己找活:#4669 引用它落地,#4755 的 dev 实测把 `saveMetaItem` 加进词表,当场抓出 8 处全静默 catch(→ #4754)。\n\n要抓的模式,大致是这三者的**组合**(单独出现都可能是合法的,组合起来才是违规):\n\n1. 在插件 `start()` / 构造期 / `kernel:ready` 之前,读服务注册表或能力注册表(`getService(...)`、节点执行器表、driver 表、capability 表等);\n2. 对「读不到」这个结果做出终局判断;\n3. **把该判断记账** —— 赋值给实例字段 / 模块级变量(缓存)、`logger.warn` 断言式措辞、或写入持久层。\n\n第 3 点是判定的关键,请在实现时守住:只读不记账的调用是完全合法的,不要误报。三个已知实例分别命中三种记账方式,可以拿来当测试夹具:\n\n| 实例 | 记账方式 | 修复后应当不再违规 |\n|:--|:--|:--|\n| #4772 plugin-auth | 缓存进实例字段 | ✅ 惰性解析后不再有启动期终局判断 |\n| #4771 service-automation | 断言式 warn(“will fail at execution time”) | ✅ 校验推迟到 `kernel:ready` |\n| #4769 objectql | **写进数据库**(`sys_migration` 的 `attested`) | ✅ attestation 推迟到首启 seed 之后 |\n\n## 为什么要等三个 PR 先落地(Blocked-by)\n\n词表要抓的正是这三处现存代码。若门禁先于修复进 main,main 会立刻变红。三个修复都已在第 3 轮派发中,合并后再落这条门禁,可以顺带**用它们验证词表**:门禁在修复前的 commit 上必须报出这三处,在修复后的 commit 上必须干净。请把这个双向验证做进 PR 的证据里 —— 一个只在当前 main 上绿的门禁,无法证明它抓得到东西(参见 #4690:`check:react-declaration-parity` 无 MANIFEST 时静默 skip 退出 0,永远不可能红)。\n\n## 已知的覆盖边界(请在 PR 里如实写明,不要粉饰)\n\n这是文本模式匹配,覆盖面天然有限:\n\n- `getService('cache')` 抓得到;包了三层的 `resolveCacheOrFallback()` 抓不到。\n- #4769 完全抓不到 —— 它的「注册表」是数据库里的 `sys_migration` 表,不是服务注册表。它能进上表当夹具,是因为它的**修复**可以被验证,不是因为词表能发现它。\n\n换句话说:这条门禁能止血,不能根治。根治与否是 #4776 要裁定的事。**请不要为了让门禁看起来更强而放宽匹配** —— 误报会比漏报更快地让人关掉它。\n\n## 顺带\n\n#4773(SQL driver 注册两次)尚未定性,可能是同族第四例(若第二次注册的调用方也在做「我没看到 X,所以我来注册」这类过早判断)。该 issue 独立派发,定性后如果确属同族,回到本 issue 补进夹具表。"
+}

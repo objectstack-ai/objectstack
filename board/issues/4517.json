@@ -1,0 +1,35 @@
+{
+  "number": 4517,
+  "kind": "pull_request",
+  "title": "docs(automation): 屏幕流 resume 契约与审批越权标记的文档 + 两份 changeset（#4502 跟进）",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T15:14:05Z",
+  "updated_at": "2026-08-01T15:35:18Z",
+  "closed_at": "2026-08-01T15:35:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-01T15:35:16Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4517",
+  "body": "#4502 的跟进，**只有文档、changeset 与注释文本，没有任何行为改动**。\n\n#4502 修了 v17 验收缺陷汇总 #4482 里的四个缺陷（#4477 / #4466 / #4469 / #4470），已合入 `main`（`5a84d4148`），CI 20/20 全绿。下面这些本该在那个 PR 里，但它进入 merge queue 后远端拒绝更新分支：\n\n```\nGH006: Protected branch update failed for refs/heads/claude/v17-verification-defects-gnf9e6-flows.\nA pull request for this branch has been added to a merge queue.\nBranches that are queued for merging cannot be updated.\n```\n\n我不会自行 dequeue 别人做出的合并决定，所以拆成这个小 PR 落地。已在 #4502 上留言说明（[comment](https://github.com/objectstack-ai/objectstack/pull/4502#issuecomment-5152024415)），并把 #4469 / #4470 的完整根因与验证证据补成了两个 issue 上的永久评论。\n\n---\n\n## 1. `content/docs/automation/flows.mdx` —— 屏幕流 resume 现在是有契约的\n\n#4477 之前，`POST …/runs/:runId/resume` 把收到的任意 bag 直接折进流程变量：缺必填字段、以及未声明的键，都能让整个 run 跑完。文档描述的是那个旧行为（暂停节点表里 `screen` 那一行只说「the UI runner posting the collected `inputs`」），读者据此会以为客户端校验就是全部校验。\n\n新增一节 *A `screen` resume is checked against the declared fields*，放在「Durable pause & resume」下、紧挨着它所对应的 `$` 命名空间那条规则（两者是同一条接缝上的两条规则，挨着读最省事）：\n\n- `config.fields` 是**契约**而不只是渲染提示；\n- 拒绝形态写成实际报文：400 + `Invalid screen input: Screen field \"escalation_reason\" is required — declared fields: 'kind', 'escalation_reason'`，并点明 `code: 'INVALID_SCREEN_INPUT'`；\n- 两类违规（该问而没给的 `required`、未声明的键）会**一次全部报出**，空白字符串算缺失；\n- `visibleWhen` 按**本次提交的值**求值，所以隐藏字段的 `required` 不触发 —— 否则就是把 #3528 那个死锁搬到服务端；求值失败的谓词按隐藏处理，因为客户端才是「用户看到了什么」的权威；\n- 拒绝发生在**消费挂起之前**，所以 run 仍然停着、改对了再提交仍然能落；\n- 三种不声明契约因而保持 pass-through 的形状（object-form 屏幕、纯消息屏幕、`signal.output`）。\n\n暂停节点表里 `screen` 那一行也改成明确写出这些 inputs 会被服务端按声明的 `fields` 校验。\n\n## 2. `content/docs/automation/approvals.mdx` —— 越权标记与终态僵尸请求\n\n**管理员越权的 callout（#4466）.** 原文只说管理员「may act on any `pending` request」并「audited under the admin's own id」，读起来像是审计已经够用了。#4466 指出的恰恰是它不够用：越权那一行和指定审批人自己批的那一行**在字节层面完全相同**。现在补上：\n\n- 写明它**实际实现的规则**是「操作者是管理员」，而不是「名单无人」—— 所以管理员也能越过一份**已配齐**的名单，这正是 issue 复现的场景；\n- 因此决策会记录**它是从哪扇门进来的**：`sys_approval_action.via_override`；\n- 为什么同时是指定审批人的管理员记 `false`（标记记的是哪条分支放行了这次调用，不是操作者有没有管理员权限）；\n- 为什么旧行的缺失读作「未记录」而非「不是越权」；\n- 以及在此之前，一份名单被绕过的唯一痕迹是被绕过者后来收到的 `409 INVALID_STATE` —— 而且只有他碰巧去点了才存在。\n\n**死信 callout（#4469）.** 原文描述的清扫只扫 `pending`。补上它看不见的那一类：已终态但 run 悬空的请求 —— 决策落库了、流程永远不动，而**把请求推入僵尸态的那一步，正是把它推出 `pending` 的那一步**。同时说明新巡检为什么用两个判据、为什么存储读不到时跳过而非判死、以及为什么**只报告不改写**（决策是真实发生过的，自动回滚会让审计与事实不符）。\n\n`content/docs/references/` 是自动生成的，未触碰。\n\n## 3. 两份 changeset\n\n#4502 里 #4477 / #4466 的 changeset 已随该 PR 合入；这里补上剩下两份：\n\n- `@objectstack/plugin-approvals` patch —— #4469 的僵尸请求巡检（含「只报告不改写」的理由，以及 `recalled` 为何刻意排除）；\n- `@objectstack/verify` minor —— #4470 的 harness 改动（`suspendedRunStore` 不再写死 `'memory'`、新增 `databaseFile`），并回答 issue 提的那个问题：当初写死是为了**跑得快/省事**，不是因为持久化在那个环境跑不通 —— 换成真实持久化路径后，既有 dogfood 分片 1 的 38 个文件 239 个用例**全部通过，一个既有用例都没失败**。\n\n## 4. 把两处「filed separately」指向真正的 issue\n\n`flow-durable-suspend.dogfood.test.ts` 的 KNOWN GAP 注释和上面那份 changeset 都告诉读者「该缺口已另行记录」却没给编号 —— 那是一个指向不存在之处的指针，恰恰是本分支想避免的那种过期记录。现在都指向 **#4518**（`bootStack({ databaseFile })` 的数据活不过进程内重启：表在、行没了，普通业务记录同样不保留，所以归因在 harness/驱动层而非挂起存储）。\n\n纯注释/文本改动，无行为变化。\n\n---\n\n## 相关\n\n- **#4515** —— `getSuspendedScreen` 只读内存热缓存，重启后一个仍然活着的挂起 run 取不到 screen（404）。这条是 #4502 新增的 e2e **第一次运行就抓出来的**，正好兑现了 #4470「修好验证手段本身，这类缺陷今后才能被测出来」的论证。修它需要把公开契约上的方法改成异步，属协议破坏性变更，按 AGENTS.md #10 单独立 issue 未认领。\n- **#4518** —— 见上，挡住了 #4470 第三条「冷启动后 resume」的断言；已在测试文件头明确标注为 KNOWN GAP，没有用放松断言的方式假装通过。\n\n_关联：#4477 #4466 #4469 #4470 —— 这些 issue 已由 #4502 关闭，本 PR 不重复 `Fixes`。_\n"
+}

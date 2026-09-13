@@ -1,0 +1,37 @@
+{
+  "number": 4728,
+  "kind": "issue",
+  "title": "[metadata] database-loader 吞掉 sys_metadata 的 DDL 失败后仍置 schemaReady=true —— 第二类降级(#4632 规则),本轮因包冻结未修",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "repo:objectstack"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T00:39:50Z",
+  "updated_at": "2026-08-03T09:32:19Z",
+  "closed_at": "2026-08-03T09:32:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4728",
+  "body": "发现于 #4632(降级日志级别规则 + 盘点)。`packages/metadata/**` 本轮被冻结(#4556 正在改写入路径),因此**只记录不修**,按 PM 约束单开此单。\n\n## 现象\n\n`packages/metadata/src/loaders/database-loader.ts` 的 `ensureSchema()`:\n\n```ts\ntry {\n  await this.driver!.syncSchema(this.tableName, {\n    ...SysMetadataObject,\n    name: this.tableName,\n  });\n  this.schemaReady = true;\n  // ... migrateProjectIdToEnvironmentId / addSysMetadataOverlayIndex\n} catch {\n  // If syncSchema fails (e.g. table already exists), mark ready and continue\n  this.schemaReady = true;\n}\n```\n\n`catch` 完全静默,**且把 `schemaReady` 置为 `true`**,与成功路径不可区分。\n\n## 为什么这是 #4632 的第二类降级\n\n按 #4632 定下的判定问句 ——「降级后系统对外表现是否仍然『正常』,而声称已持久化的东西实际没有落盘?」—— 这里答案是**是**:\n\n- `schemaReady = true` 之后,后续每一次 metadata 写入都当作表已就绪,直接写 `sys_metadata`;\n- 若 DDL 真的失败(不是注释里假设的 \"table already exists\",而是权限不足、datasource 未连上、列类型冲突),表或新列根本不存在;\n- 写入要么报错、要么在宽松驱动上悄悄丢列,而启动日志**一行都没有** —— 没有 `warn`,没有 `error`,没有任何痕迹。\n\n注释里的免责理由(\"e.g. table already exists\")只覆盖了失败原因中最良性的一种,却用它为**全部**失败原因开脱。这正是 #4420 的形态:声称持久化、实际不持久、系统看起来完全正常。\n\n对照:同文件的 `ensureHistorySchema()` 在同样的位置用了 `console.error(...)`,是诚实的 —— 两处应当一致。\n\n## 期望\n\n按 #4632 的约定处理:\n\n- `catch` 里以 `error` 上报,文案说清**后果**(sys_metadata 的表/列未创建,后续元数据写入不持久)与**修复动作**(修驱动/数据源错误后重启);\n- 重新评估失败后是否还应该 `schemaReady = true` —— 若确实要继续(为了不阻断启动),至少让它是一个响亮的、被记录的决定,而不是与成功路径同形;\n- 若 \"table already exists\" 确实是需要静默吞掉的合法情形,应当**按错误类型判别**后只静默那一种,而不是静默全部。\n\n## 机械检查已就位\n\n#4632 落地的 `pnpm check:durability-log-level`(`scripts/check-durability-degradation-log-level.mjs`)已经能自动发现这一处;它目前挂在 `scripts/durability-degradation.baseline.json` 的 baseline 里,并指向本 issue。**修复本单时请同时删掉那条 baseline 条目**(该文件是 shrink-only,残留条目会让 gate 变红)。\n\n## 参考\n\n- #4632(规则 + gate)、#4460(点状修复范本)、#4420(事故)、#4471(根因模式)"
+}

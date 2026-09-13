@@ -1,0 +1,32 @@
+{
+  "number": 4467,
+  "kind": "issue",
+  "title": "analytics: /analytics/query ignores record-level scoping — a member counts and reads dimension values of records they cannot read",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T08:54:53Z",
+  "updated_at": "2026-08-01T13:09:23Z",
+  "closed_at": "2026-08-01T13:09:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4467",
+  "body": "Found while verifying the 17.0.0-rc.1 checklist on #3909 (section C, \"Analytics: RLS/tenant scope on ObjectQL path #3597\"). Verified on `main` @ `1ee48bc60`, showcase under `os serve --dev`, two real signed-in principals.\n\n**`POST /api/v1/analytics/query` does not apply record-level scoping. A caller can count — and, via `dimensions`, read the field VALUES of — records the data API correctly refuses them.**\n\n## Repro\n\n`showcase_private_note` is `sharingModel: 'private'`. Admin owns 5 notes; a plain member holds shares on exactly 2 of them and no `viewAllRecords` anywhere.\n\nThe data path is correct:\n\n```\nGET /api/v1/data/showcase_private_note   as admin  → total 5\nGET /api/v1/data/showcase_private_note   as member → total 2     ✅ OWD + shares\n```\n\nThe analytics path is not:\n\n```\nPOST /api/v1/analytics/query {\"cube\":\"showcase_private_note\",\"measures\":[\"count\"]}\n  as admin  → [{\"count\":5}]\n  as member → [{\"count\":5}]      ❌ counts 3 records it may not read\n```\n\nAnd it is not limited to counts — grouping discloses the values themselves:\n\n```\nPOST /api/v1/analytics/query\n     {\"cube\":\"showcase_private_note\",\"measures\":[\"count\"],\"dimensions\":[\"title\"]}\n  as member →\n    [{\"title\":\"rc1 rule target\",\"count\":1},   ← entitled\n     {\"title\":\"rc1 secret\",\"count\":1},        ← entitled\n     {\"title\":\"rls-probe-1\",\"count\":1},       ← NOT entitled\n     {\"title\":\"rls-probe-2\",\"count\":1},       ← NOT entitled\n     {\"title\":\"rls-probe-3\",\"count\":1}]       ← NOT entitled\n\nGET /api/v1/data/showcase_private_note?select=title   as member\n  → [\"rc1 secret\",\"rc1 rule target\"]          the same caller, the same field\n```\n\nSo any authenticated user who can reach `/analytics` can enumerate the field values of every row of any object exposed as a cube, regardless of OWD, sharing rules, or RLS. `title` here is innocuous by construction; the same query shape against a real deployment's objects reads whatever the grouping column holds.\n\n**Method note (this cost me a false negative first):** a permission set carrying `viewAllRecords` had been bound to my member during an earlier export test, which made the two paths agree at 5/5 and look correct. The divergence only appears once the caller genuinely lacks VAMA. Anyone re-testing should confirm the data path returns FEWER rows than the admin before reading anything into the analytics numbers.\n\n## Scope check\n\n`/analytics` mounts only when the capability exists (#4019 — verified separately, holds), the entry validates its body (#4010 — holds), and a measure emits its declared aggregate (#4184 — holds). The scoping layer is the piece that is absent: the SQL the endpoint returns in `data.sql` carries only the caller's own `WHERE` (e.g. the `dateRange` predicate from #3650), never an owner/share/RLS predicate.\n\n## Expected\n\nThe analytics path resolves through the same execution context as `/data`, so the compiled query carries the caller's read filter (owner scope + share grants + RLS), and a dimension can only group by values inside that scope. Fail-closed if the scope cannot be resolved, matching the posture #3989 took for the empty-slot case.\n\nPart of the #3909 rc.0/rc.1 verification (section C).\n"
+}

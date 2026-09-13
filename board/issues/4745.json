@@ -1,0 +1,35 @@
+{
+  "number": 4745,
+  "kind": "pull_request",
+  "title": "feat(spec)!: 移除 `./automation` 的孤儿 `EventSchema` —— C6 双源清账,基线 13 → 12 (#4658)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T01:26:36Z",
+  "updated_at": "2026-08-03T01:49:08Z",
+  "closed_at": "2026-08-03T01:49:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T01:49:07Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4745",
+  "body": "Fixes https://github.com/objectstack-ai/objectstack/issues/4658\n\n关联:#4535(主账本 C6)、#4650(删行自证门禁,本单走其「整 def 消失」路径)、#4642(pin 形态)、#4446 / #4506(gate 本体)。\n\n按维护者裁决走**路线 A**:删除 `./automation` 侧的孤儿 `EventSchema`。两侧键集完全不相交 —— automation 侧是 XState 式**信号声明** `{ type, schema? }`,kernel 侧是事件总线**信封** `{ id?, name, payload, metadata }` —— 收敛等于在合同里写假话,故删孤儿而非收敛;kernel 侧一字未动,成为全包唯一声明。\n\n## 1. 重验前提(未采信旧结论,全部实测)\n\n**三仓 import 语句级扫描**(objectstack @ 本分支基线 / cloud @ `5df2c69` / objectui @ `785b8a5`,后者恰为本次 rebase 携带的 console pin 版本):\n\n- `packages/spec` 之外裸名 `EventSchema` **零命中**(cloud 连子串命中都是 0;objectui 仅 `TimelineEventSchema` / `CalendarEventSchema` 等复合名,及 `packages/types` 的 `export type * as Automation / as Kernel` 命名空间隔离再导出)。\n- 本仓消费方:automation 侧**零引用**(定义行即全部);kernel 侧消费链完好 —— `kernel/events/dlq.zod.ts:24,71` 嵌入 + `kernel/events.test.ts`,`export type Event` 同文件。\n- `StateMachineSchema` 确不引用被删 schema:状态机事件类型是 `on:` 的**记录键**(纯字符串)。\n\n**真图可达性**(以 #4650 门禁同款真 Zod 图 BFS,对合并基线版源码实测):\n\n```\nroots: 24 metadata types [action, agent, app, book, dashboard, dataset, datasource, doc,\n  email_template, field, flow, hook, job, mapping, object, page, permission, position,\n  report, seed, skill, tool, translation, view]\nclosure: 4689 schema instances reachable from the roots\n  automation EventSchema (merge-base orphan): NOT reachable\n  automation StateMachineSchema: REACHABLE\n  kernel EventSchema (envelope): NOT reachable\n  kernel EventTypeDefinitionSchema: NOT reachable\n```\n\n孤儿不可达、而 `StateMachineSchema` 本身可达 —— 删除是外科式的,不伤作者面。与裁决零冲突。\n\n## 2. #4650 门禁对被删行的判定(实跑输出,rebase 后重跑)\n\n```\nℹ️  1 baseline deletion(s) since 072806aa58a5 carry their own proof (#4650):\n     - automation/Event:* (2 line(s)) — def no longer emitted by this build; whole-schema\n       removals are adjudicated by json-schema.manifest.json (#2978) and check:api-surface.\n```\n\n即「整 def 消失」自证路径;两个裁决点本 PR 均满足:`json-schema.manifest.json` 删 `automation/Event` 键(#2978 蓄意移除通道,门禁错误信息指定的同 PR 手删),`check:api-surface` 全绿(`api-surface.json` 恰好只有 `./automation` 一行删除)。`authorable-surface.json` 删的两行(`automation/Event:type` / `:schema`)与生成器规范形逐字节一致(`check:authorable-surface` ✓)。\n\n## 3. 基线 13 → 12(实跑)\n\n`dual-source-exports.baseline.json` 删 `EventSchema — [./automation (const)] ≠ [./kernel (const)]` 一行,其余 12 行一字未动:\n\n```\n✅  self-test: flags same-name different-declaration exports, and nothing else.\n✅  no new dual-source exports: 4328 names across 16 entry points — 168 re-exported\n    (single declaration), 12 accepted dual-source (baseline).\n```\n\n## 4. 回归 pin + sabotage(C14 形态,#4642 纪律)\n\n`packages/spec/src/automation/state-machine.test.ts` 新增 `[#4658]` describe 块:\n\n- **compiler-API pin**:入口从 `package.json` exports map 枚举(17 个,防新入口逃逸),断言 `./automation` 不再命名 `EventSchema`(且表面非平凡,防真空通过)、`./kernel` 仍导出且声明落在 `src/kernel/events/core.zod.ts`、**全入口范围内任何叫 `EventSchema` 的导出都必须解析到该唯一声明**;模块符号解析带防空转守卫。\n- **运行时命名空间断言**:automation 命名空间无该属性、kernel 有;信封样例 parse 通过、XState 信号声明样例(`type` 为 APPROVE 的对象)被拒 —— 两概念从未收敛的运行时证据。\n- **sabotage 实证**(均已回滚):\n\n  **S1** 重加 `export const EventSchema` → 2 条 pin 红:\n\n  ```\n  × resolves the export surface: no entry but ./kernel declares `EventSchema`\n    AssertionError: expected [ 'flowForm', 'defineFlow', …(262) ] to not include 'EventSchema'\n  × keeps the runtime namespaces consistent with the compiler view\n    AssertionError: expected true to be false\n  ```\n\n  **S2** 走被否决的收敛路线(符号同一性此时是单声明,骗得过 dual-source gate 的视角):\n\n  ```ts\n  export { EventSchema } from '../kernel/events/core.zod';\n  ```\n\n  → pin 仍是同样 2 条红 —— 拦的是「名字离开 ./automation」这条裁决本身,不只是名字存在性。\n- 干净态:`state-machine.test.ts` 8/8 通过。\n\n## 5. changeset 定级(逐条自证)\n\n`@objectstack/spec` **major**:已发布导出名的移除,外部消费方将以 TS2305 编译失败(与 C14 同形):\n\n```ts\n// FROM —— TS2305\nimport { EventSchema } from '@objectstack/spec/automation';\n// TO(要信封)\nimport { EventSchema } from '@objectstack/spec/kernel';\n// TO(要事件定义)\nimport { EventTypeDefinitionSchema } from '@objectstack/spec/kernel';\n// 要状态机信号声明:该表面从来不存在 —— 事件类型写在 on: 的记录键上,无需替代物\n```\n\n同时**零元数据迁移**:def 从元数据根不可达(§1 BFS 输出),没有任何元数据文档曾被它解析,无 tombstone、无 ADR-0087 conversion / migration(`spec-changes.json` / upgrade-guide 两 gate 零变化)。三仓零消费者 ⇒ 预期 TS2305 实际命中数为 0。全文见 `.changeset/event-schema-dual-source-c6.md`。\n\n## 6. 全量验证(实跑)\n\n| 验证 | 结果 |\n|:--|:--|\n| `check:generated`(8 门) | ✓ 全部 up to date(rebase 后重跑) |\n| `check:dual-source-exports` | ✓ 12 条基线(13 → 12) |\n| `check:liveness` | ✓ all governed-type properties classified |\n| `check:strictness-ledger` | ✓(automation 段 87 → 86 sites、`state-machine.zod.ts` 行 7 → 6,按 gate 实跑指令更新并留 −1 注记 —— C3 教训) |\n| `check:empty-state` | ✓ all classified (1 closed, 2 open, 4 output, 9 scope) |\n| `check:variant-docs` | ✓ 19 unions — 8 governed, 11 exempt |\n| `check:exported-any` | ✓ 1893 types + 1637 schemas across 16 entry points |\n| `check:skill-examples` | ✓ 202 prose examples type-check |\n| spec `pnpm test` | ✓ **294 files / 7400 tests 全过** |\n| spec `typecheck` | ✓ |\n| 全仓 `pnpm typecheck` | ✓ **122/122 tasks successful** |\n\n## 7. 并行协议合规(#4535 2026-08-03 新纪律)\n\n- 改动面:automation/kernel Event 区 + spec 生成物 + 台账,与 #3207 的 `data/` zod / object form / i18n 区**零交集**(diff 11 文件,见下)。\n- 入队串行:开工后 origin/main 推进一格(`072806aa5`,console pin 刷新,不触 spec)——已 **rebase → 重跑生成器 → 重验**(§2 / §6 输出即 rebase 后结果);入队前若 main 再推进,将再走一轮同流程。\n- 全部重活经 `flock /tmp/os-heavy-verify.lock` 串行,vitest `--maxWorkers=2`、turbo `--concurrency=2`。\n- `.changeset/pre.json` 开工实测仍 `mode: pre` / `tag: rc`。\n- 未碰 `content/docs/releases/`;`KNOWN_STILL_DUAL_SOURCE` 保持 `[]`;`RENAMED_DEFS` 未动(本单是删除不是改名);`authorable-surface.json` 的删行走 #4650 自证而非绕过。\n\n改动清单(11 文件):`state-machine.zod.ts`(删孤儿 + 指路注释)、`state-machine.test.ts`(pin)、基线/manifest/api-surface/authorable-surface/docs-import-surface 各一行级收缩、`references/automation/events-core.mdx` 随生成器消失 + `meta.json` 同步、严格性台账、changeset。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_0176qgxgCXTJCUv4YFLtusP9"
+}

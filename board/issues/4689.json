@@ -1,0 +1,35 @@
+{
+  "number": 4689,
+  "kind": "pull_request",
+  "title": "refactor(spec): 双源 C11 收敛 — HttpRequest 类型别名改为 re-export ./shared 的唯一声明 (#4688)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T17:48:20Z",
+  "updated_at": "2026-08-02T18:18:39Z",
+  "closed_at": "2026-08-02T18:18:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-02T18:18:38Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4689",
+  "body": "Fixes objectstack-ai/objectstack#4688\n\n#4535 的 C11 簇,v17 收口三簇之二。基线 **19 → 18**,只减不增。\n\n## 改了什么\n\n`HttpRequest` 这个名字过去在 `@objectstack/spec/shared` 和 `@objectstack/spec/ui` 解析到**两份不同的类型声明**(#4411 陷阱)。现在 `./ui` re-export `./shared` 的那一份。\n\n```ts\n// FROM —— ui/view.zod.ts 底部的本地 infer(第二个类型声明符号)\nexport type HttpRequest = z.infer< typeof HttpRequestSchema >;\n\n// TO —— re-export ./shared 的唯一声明,挪到文件顶部 schema re-export 旁边\nexport type { HttpRequest } from '../shared/http.zod';\n```\n\n派发单的定位表复核无误:`HttpRequestSchema` **从来只有一份声明**(`shared/http.zod.ts:46`),`ui/view.zod.ts:21` import 进来、`:37` 原样 re-export,所以基线里根本没有 `HttpRequestSchema` 行。唯一的双源点就是那个本地类型别名。处置后它变成基线表头明说不计的 \"a re-export of one declaration from many entries\"。\n\n构建产物可证收敛成功 —— 两个入口现在指向同一个 chunk 的同一个符号:\n\n```\ndist/ui/index.d.ts:      export { …, d as HttpRequest, … } from '../http.zod-BLsW0NuY.js';\ndist/shared/index.d.ts:  export { …, d as HttpRequest, … } from '../http.zod-BLsW0NuY.js';\n```\n\n## ⚠️ 级别是 patch,不是 major —— 已实证零消费者影响\n\n派发单要求「自己判,不要为了凑 major 而声称破坏」。结论:**FROM 与 TO 是同一个类型**,升级者无需做任何事。\n\n两个别名 `z.infer` 的是**同一个** schema 对象,所以这不是推断,是编译器验过的(临时脚本,已删除):\n\n```ts\ntype Equal< X, Y > = (< T >() => T extends X ? 1 : 2) extends (< T >() => T extends Y ? 1 : 2) ? true : false;\ntype Assert< T extends true > = T;\n\ntype PreFixUiHttpRequest = z.infer< typeof HttpRequestSchema >;   // 逐字复刻旧的那一行\n\nexport type _A = Assert< Equal< PreFixUiHttpRequest, SharedHttpRequest > >;\nexport type _B = Assert< Equal< PreFixUiHttpRequest, UiHttpRequest > >;\nexport type _C = Assert< Equal< UiHttpRequest, SharedHttpRequest > >;\nexport type _NEGATIVE = Assert< Equal< UiHttpRequest, { totallyDifferent: true } > >;  // 负对照\n```\n\n`tsc --ignoreConfig --noEmit --strict` 输出 —— **只有负对照报错**,证明前三条不是空转:\n\n```\ntmp-from-to-identity.ts(25,32): error TS2344: Type 'false' does not satisfy the constraint 'true'.\n```\n\n配套证据(重新 build 后):`api-surface.json`、`authorable-surface.json`、`spec-changes.json` **全部零改动**。零可作者化 key 消失、零 tombstone、零 ADR-0087 conversion。\n\n关于 #4684(C9)的门禁死结:**确认未被惊动**。本簇不改任何 def、不动 `HttpRequestSchema` 声明,`check:authorable-surface` 与 ratchet 全程无感,`authorable-surface.json` 未被手编(#4650 纪律)。\n\n## 回归 pin(三条,全部 sabotage 验证)\n\n`src/ui/view.test.ts` 新增三条**运行时**断言。#4642 已证本包编译期 pin 空转(`tsconfig.json` 排除 `**/*.test.ts`、vitest 不开 `typecheck`)—— 这条同样适用于该文件**已有的** `type HttpRequest` 具名导入:它被 vitest transform 抹掉,从来就没有保障过这个导出还在。第三条断言正是来补这个洞的:用 TypeScript compiler API 在 `src/` 上做符号身份解析(`check:dual-source-exports` 在 dist 上做的同一件事),因为 `HttpRequest` 是**类型**,运行时看不见,而它恰恰是本簇唯一改动的东西。\n\n| sabotage | 实际输出 |\n|:--|:--|\n| 还原旧的本地 infer 别名 | `AssertionError: expected 'src/ui/view.zod.ts:2056' to be 'src/shared/http.zod.ts:54'` |\n| 删掉 re-export 不补(派发单点名的现实风险) | ``AssertionError: ./ui must still export the name `HttpRequest`: expected undefined to be truthy`` |\n| 在 `./ui` 重新声明第二份 `HttpRequestSchema` | `AssertionError: expected [Function] to be [Function] // Object.is equality` |\n\n第二条同时正是验收项「`ui/view.test.ts` 的既有具名类型导入继续可用」的守卫。\n\n## 验证\n\n已合并 `origin/main`(含刚落地的 #4685),合并后重新 build 并重跑生成物门禁。\n\n```\ncheck:dual-source-exports  ✅ 4323 names across 16 entry points — 166 re-exported, 18 accepted dual-source (baseline)   ← 19 → 18\ncheck:generated            ✓ All 8 generated artifacts are up to date\ncheck:liveness             ✓ all governed-type properties are classified …\ncheck:strictness-ledger    ✓ 67 file(s) across 5 triaged director(ies)\ncheck:empty-state          ✓ all classified (1 closed, 2 open, 4 output, 9 scope)\ncheck:variant-docs         ✓ 20 discriminated union(s) — 8 governed, 12 exempt\ncheck:exported-any         ✅ 1893 types + 1639 schemas across 16 entry points\ncheck:skill-examples       ✅ 202 prose examples type-check against @objectstack/spec\npnpm --filter @objectstack/spec test    Test Files 292 passed (292) / Tests 7333 passed (7333)\npnpm typecheck (全仓)                    Tasks: 122 successful, 122 total\n```\n\n`pnpm typecheck` 全仓那次跑在合并前;合并后按手册第 10 条按重叠面收窄,重跑了 spec 的 build / check:generated / typecheck / test。\n\n## ⛔ 未纳入:紧挨着的 `HttpMethod`(留给维护者决定)\n\n`ui/view.zod.ts` 下一行 `export type HttpMethod = z.infer< typeof HttpMethodSchema >` 我已确认是**完全相同的形状** —— 同样只有 type 双源、同样从 import 进来的同一个 `HttpMethodSchema` infer、同样零 authorable key。基线行 `HttpMethod — [./api, ./shared (type)] ≠ [./ui (type)]` 仍在,一行改动即可清掉。\n\n**但范围是维护者定的**,#4535 已把它排进 v18,故本 PR 不动。若要并进来请直接说,改动约等于零。\n\n一个差别值得记一笔:`HttpMethod` 比本簇多一层复杂度 —— `shared/http.zod.ts` 里 `HttpMethod`(7 值,`:20`)和 `HttpMethodSchema`(5 值,`:37`)是**两个不同的枚举**,而 `./ui` 的 `HttpMethod` 类型 infer 自 5 值的那个。所以它不像本簇那样必然零类型差异,并进来时需要单独核 FROM → TO。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_0176qgxgCXTJCUv4YFLtusP9\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_0176qgxgCXTJCUv4YFLtusP9)_"
+}

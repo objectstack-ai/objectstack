@@ -1,0 +1,36 @@
+{
+  "number": 4830,
+  "kind": "issue",
+  "title": "compiler/validate: view searchableFields not validated against searchable field types — a declaration typo 400s the whole list at runtime",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T09:13:40Z",
+  "updated_at": "2026-08-03T10:13:48Z",
+  "closed_at": "2026-08-03T10:13:48Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4830",
+  "body": "## 现象(17.0.0-rc.1,实测)\n\n视图 `searchableFields` 里声明了「不可搜索类型」的字段(如 lookup)时:\n\n- `objectstack compile` / `npm run validate` **全程零告警**(56 对象 46 视图 ✓ Validation passed);\n- 运行时 Console 工具栏搜索发 `GET /api/v1/data/<object>?$search=<kw>&$searchFields=<视图声明>`,服务端逐字段校验类型(只接受 text/email/phone/url/autonumber/textarea/markdown/select/status),命中 lookup 即**整条查询 400 INVALID_FIELD**,Console 映射成 errorKind='rejected',列表区整块红盾「该视图的查询被拒绝」——**任何角色(含系统管理员)敲第一个字符必翻车**。\n\n一个纯声明层笔误可以让整张列表的搜索对全体用户彻底不可用,且 compile/validate/CI 三道关全放行,只能靠人肉点搜索框发现;报错文案还是面向管理员的(「需要管理员修正」)。\n\n## 期望(任一)\n\n1. compile/validate 期就按**与运行时同一套判定**校验视图 searchableFields(把 400 前移到构建期,declared = enforced);\n2. 或运行时对不可搜索字段**静默跳过 + warn**,而不是整条查询 400——一个字段声明错误不应打掉整张列表。\n\n附带:`$searchFields` 不支持 `project.name` 跨对象路径(400 Unknown field),「按关联对象名称做关键字搜索」目前无声明式落点,是否支持请一并考虑。\n\n## 复现\n\n任意对象视图 `searchableFields: ['name', '<某lookup字段>']` → validate 全绿 → 列表工具栏搜索输 1 字符 → 整列表 400。\n\n## 下游对策\n\nos-project-titanwind-ehr 登记 PLAT-DEF-041,PR steedos-labs/os-project-titanwind-ehr#746:修正声明 + 自写 `check-searchable-fields.cjs` 全量扫描兜住(98 视图)。"
+}

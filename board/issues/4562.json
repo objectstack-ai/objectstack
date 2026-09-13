@@ -1,0 +1,36 @@
+{
+  "number": 4562,
+  "kind": "issue",
+  "title": "objectui: `DecisionOutputDef` 派生分歧已纯冗余——塌缩为 re-export,反转 parity 钉子(#4525 收尾)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T03:16:51Z",
+  "updated_at": "2026-08-02T08:27:38Z",
+  "closed_at": "2026-08-02T08:27:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4562",
+  "body": "#4525 核查确认:spec 自 `cd6b9f202`(2026-07-29,objectui#2955)起已建模 `DecisionOutputDef.required`,服务端强制语义与 spec 一致;objectstack 侧 PR #4561 补齐了 schema 层钉子。objectui 侧因此留下三处待收尾(**代码落地仓库:objectui**,发现自 #4561 的范围外记录):\n\n1. **塌缩冗余派生**:`packages/app-shell/src/utils/decisionOutputParams.ts:56` 的 `DecisionOutputDef extends SpecDecisionOutputDef { required?: boolean }` 已纯冗余——spec 早有该键,接口应塌缩为纯 re-export;\n2. **修正过期注释**:同文件 48–54 行的模块 TSDoc 仍断言「the spec does not model it yet」,已过期且误导;\n3. **反转 parity 钉子**:`packages/app-shell/src/__tests__/spec-symbol-parity.test.ts:246` 钉住 `Equal<Exclude<keyof DecisionOutputDef, keyof SpecDecisionOutputDef>, 'required'>`——塌缩后该断言必须同步反转(这正是原注释第 54 行承诺的「fails on that day」绊线,今天就是那一天)。\n\n三处应在**同一个 PR** 内完成,避免钉子与实现脱节。\n\n验收:parity 测试反转后通过;app-shell 构建、测试、typecheck 全绿;无其他行为变化。\n\n另注(供 PM 与维护者参考):#4525 源自 objectui 台账燃尽批次 3(objectui#3169 / #4115)的誊录,同批次其他「spec 尚未建模 X」类 issue 可能带有同样过期的前提,分诊时应先对照当前 spec 核查。"
+}

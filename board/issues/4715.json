@@ -1,0 +1,36 @@
+{
+  "number": 4715,
+  "kind": "pull_request",
+  "title": "feat(metadata-protocol,lint): 作者时规则接到运行时写入闸门 —— 第四扇门 (#4463)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T20:47:10Z",
+  "updated_at": "2026-08-02T22:02:24Z",
+  "closed_at": "2026-08-02T22:02:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-02T22:02:23Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4715",
+  "body": "Fixes objectstack-ai/objectstack#4463\n\n## 问题\n\n#4409/#4445 把 26 条作者时规则收进一张 registry,`os validate` / `os build` / `os lint` 由构造保证跑同一套。**三扇门都在 CLI 上。** 元数据的运行时写入路径 —— Studio 编辑、REST `/meta` item CRUD、MCP/AI agent 授权 —— 最终都走 `saveMetaItem`,那里只做 per-type 的 Zod `safeParse`。26 条规则一条不跑。\n\n对租户来说这不是「四扇门里最弱的一扇」,而是**唯一的一扇**:`sys_metadata` overlay 行根本不在 CLI 的 config 文件里,`os lint` 再完美也看不见,租户没有任何等价命令可跑。正文那个实测例 —— expression approver 是坏 CEL 的审批流(`record.owner ==`)—— 在 Zod 里 `approver.value` 就是个 string,schema 全绿,存进 `sys_metadata`,经 `registerFlow` 注册,触发时节点在入口处失败。这正是 #4409 之后 `os lint` 一直在拦的那个 body。\n\n它同时是 **AI 作者走的那扇门**,这也是裁决里权重最高的一条:模型写出来的元数据恰恰最容易出错,却从唯一没有检查的入口进来。\n\n## 做法:一个共享校验核 + 一个运行时闸门\n\n不是四套规则引擎,也不是每个 surface 各写一遍。\n\n1. **共享核落在 `packages/lint`。** `AUTHORING_RULES` 从 `packages/cli/src/lint/` 搬到 `packages/lint/src/`,连同五个原本住在 CLI 的规则模块(`lintFlowPatterns` / `lintLivenessProperties` / `lintAutonumberFormats` / `lintViewRefs` / `data-model-rules`)—— 规则逻辑零改动,只是搬家。**CLI 改为调用同一核**(裁决第 3 条),`packages/spec/**` 零改动。\n\n2. **依赖障碍是解决的,不是绕开的。** 新增子路径导出 **`@objectstack/lint/runtime`**,`metadata-protocol` 只 import 这个入口。新加的 `runtime-lazy-deps.test.ts` 钉住比 `lazy-deps.test.ts` 更强的一条:不只是 import 时不加载,**跑闸门判一个真实 flow body 时也不加载** `typescript` / `sucrase`。`lazy-deps.test.ts` 本身一行未改、仍绿。\n\n3. **`surfaces` 维度是 P1 的结构性最小集,不是顺手做的 P3。** 棘轮守卫要覆盖新 surface(正文说这条「不是建议,是这个 issue 存在的理由」),而守卫无法守一个没被声明的 surface —— 否则运行时门就只能硬编码一份规则名单,正是本单要禁止的「手工接线第四命令」。所以每条规则新增 `surfaces` + (`runtimeTypes` | `surfaceReason`)。**P3 的其余部分(推广成 N-surface、docs 表格第四列)不在本 PR。**\n\n## 落地行为\n\n| 决策 | 实现 |\n|---|---|\n| D1 | 只挡 `state: 'active'`。draft 保存永远放行。**`publishMetaItem` 的 draft→active 提升也走同一闸门** —— 否则 `?mode=draft` + `POST /publish` 就是免费绕过,而这正是 Studio designer 每次编辑做的事 |\n| D2 | 选项 (c):按被写 item 的类型建每次写入的 stack 快照,首期跑 flow / approval / expression / reference 四族 |\n| D3 | gating → **422 `INVALID_METADATA`**,复用 Zod 失败已有的结构化 `issues` 信封,每条带 `rule` / `path` / `where` / `message` / `hint`。objectui 不需要新协议 |\n| D4 | 只挡新写入,读路径不拒绝。逃生阀 `OS_ALLOW_UNLINTED_METADATA_WRITES=1`,置位后放行且每次都完整打日志 |\n\n**差分求值**是 D4 的结构化实现,不是防御性补丁:规则跑两遍(上下文含/不含被写 item),只有这次写入 **新增** 的 finding 才能拒绝它。否则保存 flow A 会因为一条早就存在、可能是包里发来的坏 object 谓词而 422 —— 那比本单要补的洞更糟。\n\n## 降级放行:逐条列出\n\n裁决允许「个别规则在运行时上下文缺输入则降级为 warn」,要求显式记录。**本 PR 没有任何规则被降级为 warn。** 采取的是另一种显式收窄:每条不上运行时门的规则在 registry 里写明理由,三类共享常量:\n\n- `RUNTIME_NEEDS_FULL_SNAPSHOT` —— 规则读的是快照没带的全栈集合(pages / dashboards / nav / translations / seeds)。运行时宇宙其实**更全**(D2 说的那个反直觉红利),但构造那个快照是 P2;拿半个快照跑,会把租户没放进这次写入的元数据报成「缺失」。\n- `RUNTIME_HEAVY_SOURCE_PARSE` —— 规则要用 `typescript` / `sucrase` 解析作者写的源码(react/jsx 页面、L2 JS body)。这两个依赖正是 kernel boot path 不能碰的;Studio 的页面编辑另有 save-time 编译路径。\n- `RUNTIME_OBJECT_WRITES_P2` —— 规则判的是 object/field 声明。object 写入是产品里最热的元数据路径(Studio 每次改字段),一个误判 422 的爆炸半径是整个产品,所以 P1 先上 `flow`(issue 的实测例和全部验收标准都是 flow),等闸门跑过真实流量再放宽。\n\n两条单独写了具体理由,因为它们不是「以后再说」:\n\n- `validateCapabilityReferences` —— 唯一一条运行时宇宙让它**更严**的规则(「可能由别的包提供」这个 advisory 对冲在活的 capability registry 面前是可判定的)。那是 advisory→gating 的严重性变更,该单独一个 PR,不该搭在接线 PR 上。\n- `validateSecurityPosture` —— 这个 surface 上**已经**被另一套机制挡住了:plugin-security 通过 `registerAuthoringGate` 在 `object` 上跑同一套 OWD posture 规则。再跑一遍 linter 会把一次拒绝用两种话术报两遍。合并到本表是 P2,是合并不是缺口。\n\n## 验收证据\n\n**1. 实测例被 422 拒绝,带结构化 issues**\n\n```\n[invalid_metadata] flow/leave_approval failed author-time validation:\n  flows[0].nodes[1].config.approvers[0].value: [approval-expression-invalid]\n  expression approver does not parse as CEL: Unexpected token: EOF\nstatus 422 · code INVALID_METADATA · rulesRun 含 validateApprovalApprovers\n```\n\n**2. 同一份元数据 draft 保存放行** / **3. 逃生阀置位后放行且日志响亮** —— `protocol.runtime-authoring-gate.test.ts` 9 passed。\n\n**4. CLI 三命令与运行时门跑的是同一个模块 —— 用「删一条规则,两侧同时红」证明**\n\n把 `validateApprovalApprovers` 从 `AUTHORING_RULES` 删掉一条(不动任何其他文件):\n\n```\n--- SIDE A: 共享核侧 packages/lint ---\n x the runtime gate and the CLI commands read the SAME array\n x every rule @objectstack/lint exports is wired into a registry\n x the registry is non-empty and still holds the rules that motivated it\n x rejects the issue's worked example with a located, fixable finding\n x runs the four rule families #4463 P1 wired, from the shared table\n--- SIDE B: 运行时门侧 packages/metadata-protocol ---\n x refuses an ACTIVE save of the broken approval flow with a 422\n x gates the draft->active PROMOTION, so the draft door is not a bypass\n x OS_ALLOW_UNLINTED_METADATA_WRITES=1 allows the write and says so loudly\n x survives a host whose registry cannot list objects\n```\n\n一次删除,两侧同时红。\n\n**5. `lazy-deps.test.ts` 仍绿且未被放宽** —— 该文件 diff 为空;新增的 `runtime-lazy-deps.test.ts` 是更强的一条,不是替代。\n\n**6. 棘轮守卫覆盖新 surface,且能 sabotage 验证** —— 两个反向注入都被抓住:\n\n```\n# 注入 A:运行时门直接手工接线一条规则\n x the runtime gate consumes the registry and names no rule of its own\n   -> packages/metadata-protocol/src/runtime-authoring-gate.ts\n      calls registry rule(s) directly: validateApprovalApprovers.\n\n# 注入 B:第四扇门根本不接核\n x the runtime gate consumes the registry and names no rule of its own\n   -> must run the shared core: expected ... to match /runRuntimeAuthoringRules\\s*\\(/\n```\n\n## 测试\n\n```\npackages/lint              Test Files  53 passed (53)   Tests  928 passed (928)\npackages/metadata-protocol Test Files  27 passed (27)   Tests  225 passed (225)\npackages/cli               Test Files  65 passed (65)   Tests  581 passed (581)\ntypecheck (lint, cli)      Done\ncheck-type-check-coverage  OK  (metadata-protocol 原始 tsc 错误数 59 -> 59,零增量)\nspec check:generated       All 8 generated artifacts are up to date\n```\n\n已合入 `origin/main` 后重建 spec 并复跑上述三包。\n\n## 明确不在本单\n\n- **P2**:advisory findings 进响应 + objectui 渲染;registry 快照推广到全部 runtime-safe 规则;`object` 等类型上门。本 PR 里 advisory findings 走去重后的服务端日志,不进响应 —— 跑了规则却把结论丢掉,是本单要修的那个洞小一号的版本。\n- **P3**:`surfaces` 推广成通用 N-surface 维度 + docs 「the gate」表格第四列。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_015Br2xsJsczFsTR9bvbh2Ny\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015Br2xsJsczFsTR9bvbh2Ny)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 4735,
+  "kind": "pull_request",
+  "title": "test(driver-sql): 把 pagination / filter-logic 两条共享矩阵也跑到 driver 轴上 (#4714)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T01:07:12Z",
+  "updated_at": "2026-08-03T01:54:30Z",
+  "closed_at": "2026-08-03T01:54:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T01:54:28Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4735",
+  "body": "Fixes objectstack-ai/objectstack#4714\n\n#4245（PR #4713）把 D-A3 的 driver 轴补到了 temporal 矩阵，并留下 `live-dialect-matrix.testkit.ts`。本 PR 照抄那个形状，把 `driver-sql` 还在消费的另外两条 `@objectstack/spec/data` 共享矩阵也搬上同一根轴：\n\n| 文件 | 共享矩阵 | 之前 | 现在 |\n|:--|:--|:--|:--|\n| `sql-driver-pagination-conformance.test.ts` | `PAGINATION_CASES` / `PAGINATION_UNORDERED_CASES` | 两个 describe 都钉死 `client: 'better-sqlite3'` | `for (const cell of DIALECT_CELLS)` |\n| `sql-driver-or-filter.test.ts` | `FILTER_LOGIC_CASES` | 同上，describe 名字就叫 `(SQLite)` | 同上 |\n\n## 结论先说：格子存在，而且**真的会咬人** —— 但当前实现是绿的\n\n按 issue 的验收，「红了是交付」。这一轮的实测结果是：**三个方言 46 条用例逐格一致，全绿**。这不是因为断言被放松了，而是因为 `paginationTieBreaker` 的修复在真服务器上确实成立。为了证明这一格不是空转，我做了一次**破坏性实验**（临时把 `paginationTieBreaker` 改成对 managed 表也返回 `null`，测完已 `git checkout` 还原，未进入本 PR 的 diff）：\n\n| 格子 | 破坏后失败数 | 失败的是哪一半 |\n|:--|:--|:--|\n| `sqlite` | 8 | **性质断言的有序用例一条都没红**；红的只有 3 条 unordered walk + 5 条 emitted-SQL |\n| `live postgres` | **15** | **性质断言红了 7 条** —— `visits every row exactly once` 报 `expected 11 to be 12`（一行被翻了两次、另一行一次都没出现），`orders pages consistently` 红 4 条 |\n| `live mysql` | 5 | 只有 emitted-SQL 那一半（InnoDB 主键序全表扫描在 12 行上恰好稳定） |\n\nPG 上那句 `expected 11 to be 12` 就是 objectui#3106 的原始故障，一字不差 —— 这正是文件头注自己说 SQLite 上证不出来的那半边。换句话说：**在补上这根轴之前，删掉分页修复只会让 emitted-SQL 那半边红；性质断言在唯一跑得到的方言上是恒真的。**\n\n破坏实验的 PG 证据：\n\n```\nFAIL ... (live postgres) > visits every row exactly once — single ascending key with 4-row ties\nAssertionError: expected 11 to be 12 // Object.is equality\nFAIL ... (live postgres) > orders pages consistently with the requested sort — single ascending key with 4-row ties\n- Expected      + Received\n-   \"r09\",          \"r02\",\n    \"r02\",          \"r10\",\n    \"r10\",          \"r03\",\n    \"r03\",      +   \"r09\",\n-   \"r06\",      +   \"r12\",\n```\n\n（`r06` 整趟走丢，`r12` 出现两次。）\n\n## 实测环境与逐格证据\n\n本地起了真服务器，配置与 CI 的 `Temporal Conformance (live PG + MySQL)` job 对齐：PostgreSQL **16.13 @ `Asia/Shanghai`**、MariaDB **10.11.14 @ `+08:00`**，进程 `TZ=America/New_York`，并开 `OS_EXPECT_LIVE_DIALECT_MATRIX=1`。\n\n```\n$ TZ=America/New_York OS_TEST_POSTGRES_URL=... OS_TEST_MYSQL_URL=... \\\n  OS_EXPECT_LIVE_DIALECT_MATRIX=1 vitest run \\\n  src/sql-driver-pagination-conformance.test.ts src/sql-driver-or-filter.test.ts\n\nsqlite         passed: 46\nlive postgres  passed: 46\nlive mysql     passed: 46\n Test Files  2 passed (2)\n      Tests  138 passed (138)\n```\n\n三格用例数完全相同（46 × 3 = 138），行 id 集合逐格一致。整包（CI 形状，含 temporal 矩阵与全部 live 套件）：\n\n```\n$ pnpm --filter @objectstack/driver-sql test        # 无 URL\n Test Files  55 passed | 4 skipped (59)\n      Tests  636 passed | 44 skipped (680)\n\n$ TZ=... OS_TEST_*_URL=... OS_EXPECT_LIVE_DIALECT_MATRIX=1 pnpm --filter @objectstack/driver-sql test\n Test Files  59 passed (59)\n      Tests  844 passed (844)\n```\n\n**说明**：MariaDB 10.11 不等于 CI 的 MySQL 8.0（容器里没有 docker daemon，只能用系统自带的 server）。仓库注释里说 #3942 的手工验证正是跑在 MariaDB 10.11 上，两者互为补充；MySQL 8.0 那一格由 CI 上这个 job 给出。\n\n## 非空转守卫（没有退化）\n\n缺 URL → **具名 skip**，不是静默跳过：\n\n```\n↓ ... > sql-driver — paged-read conformance matrix (live postgres) > is provisioned — set OS_TEST_POSTGRES_URL to run this cell of the D-A3 driver axis\n↓ ... > sql-driver — filter-logic conformance matrix (live mysql) > is provisioned — set OS_TEST_MYSQL_URL to run this cell of the D-A3 driver axis\n```\n\n`OS_EXPECT_LIVE_DIALECT_MATRIX=1` 且缺 URL → 直接红（实测 4 条）：\n\n```\nFAIL ... > sql-driver — paged-read conformance matrix (live postgres) > is provisioned — ...\nAssertionError: OS_TEST_POSTGRES_URL is unset while OS_EXPECT_LIVE_DIALECT_MATRIX=1: this runner\ndeclared it provisions live Postgres and MySQL, so the live postgres cell of the paged-read\nconformance matrix must not be skipped (ADR-0053 D-A3 \"Postgres at minimum\").\n```\n\n这个守卫从 temporal 文件里**上提到了 testkit**（`declareUnprovisionedCell(cell, matrix)`），三条矩阵共用一份定义 —— 复制三份的守卫可以在其中一份里悄悄变弱，而「巡检发现零个 cell 却报 OK」正是 #4646 已经付过一次学费的形状。temporal 文件的调用点同步改掉，行为与文案逐字不变。\n\n## 几处刻意的判断（请重点看这三条）\n\n1. **不加 server-timezone 轴。** D-B3 的三方错开守卫属于 temporal 矩阵 —— 那里的答案会被时区搬动。分页和 `$or` 里没有任何一个 instant 参与比较，硬要求非 UTC 服务器只会制造出与本矩阵无关的红。\n2. **unpaged + 无 orderBy 的那条，精确顺序只钉 SQLite。** #4363 承诺的是「driver 对这个形状不追加任何东西」，不是「服务器按某个顺序返回」。MySQL 给的是 InnoDB 主键序、PG 给的是堆序，把任何一个钉死都是把**服务器的执行计划**当成我们的契约来断言。三个格子共同断言的是「整集合原样返回」，而契约那一半（**没有** ORDER BY 发出去）现在逐方言断言。\n3. **emitted-SQL 那一半也参数化了**，按方言的标识符引号（PG `\"`，SQLite/MySQL `` ` ``）构造断言 —— 于是「ORDER BY 真的到达了数据库」这句话在三个真引擎上分别成立，而不只是在 knex 的 SQLite 编译结果上。\n\n诚实的边界：12 行只是一次 seq scan，真服务器**也可能**恰好稳定返回（本轮 MySQL 就是这样）。所以 emitted-SQL 那一半仍然是必要的，两半互相兜底 —— 头注里写清楚了。\n\n## 约束遵守情况\n\n- ⛔ 只动 `packages/plugins/driver-sql/**`；`@objectstack/spec/data` 只消费不修改 —— **没有**为了变绿给 fixture 加 tiebreaker、改用例或放宽断言。\n- ⛔ `packages/spec/**` 零改动；`content/docs/releases/` 未碰；**无新增 CI job**（现有 job 已经在跑整包）。\n- 表名全部带 issue 前缀（`os4714_pagination` / `os4714_pagination_clause` / `os4714_filter_logic` / `os4714_filter_logic_windows`），替换掉原来裸的 `t` / `task` —— 共享 live 库上裸表名会和并行套件抢，抢输的那边会表现为一次假的 conformance 失败。\n\n## 一处脚手架 bug（自己的，已修）\n\n从 `beforeEach`（每条用例一个 `:memory:` driver）改成 `beforeAll`（live cell 承担不起每条断言一个连接）之后，`nondeterministicPagingWarned` 这个「每个 object 只警告一次」的账本开始跨用例共享，导致 `says so, once, ...` 数到 0 次。修法是给那条用例自己的 object 名，而不是去清账本 —— 属于 issue 里说的「红的是脚手架自身，那是你的 bug」。\n\n## 关联\n\n#4245 / PR #4713（driver 轴 + server-timezone 轴，temporal 矩阵）、#4081、#4363、objectui#3106、#3774、#4646；ADR-0053 D-A3。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_015Br2xsJsczFsTR9bvbh2Ny\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015Br2xsJsczFsTR9bvbh2Ny)_"
+}

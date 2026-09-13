@@ -1,0 +1,32 @@
+{
+  "number": 4487,
+  "kind": "issue",
+  "title": "datasource 是注册的 metadata type，却不在 liveness 账本的 GOVERNED 里 —— 两个 PR 手工挖出 6 个死键，正是因为没有闸门看着它",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T09:44:21Z",
+  "updated_at": "2026-08-01T10:25:14Z",
+  "closed_at": "2026-08-01T10:25:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4487",
+  "body": "#4465 和 #4481 一共在 `DatasourceSchema` 上处置了 6 个\"声明了但没接上\"的键。它们不是被闸门抓到的，是**人一个个闭合调用图挖出来的**。\n\n原因很结构性：`packages/spec/scripts/liveness/check-liveness.mts` 的 `GOVERNED` 列表里没有 `datasource`。\n\n```ts\nconst GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'position',\n                  'agent', 'tool', 'skill', 'dataset', 'page', 'view', 'report',\n                  'dashboard', 'webhook', 'query'];\n```\n\n`packages/spec/liveness/` 下也没有 `datasource.json`。所以活性闸门从来没问过这个类型的任何一个属性\"谁读它\"。\n\n## 手工挖出来的那 6 个\n\n| 键 | 当时的状态 | 处置 |\n|---|---|---|\n| `datasource.config` | 整个槽零校验；`config: { hostname: … }` 静默连 localhost | #4410 → 按驱动契约校验 |\n| `datasource.pool` | 声明了、带进连接规格了，然后被硬编码 `{ min: 0, max: 5 }` 覆盖 | #4465 → 接上 |\n| `datasource.schemaMode` | 在记录→连接规格之间掉了，`external` 库被当 `managed` 构建（**DDL 未设防**） | #4465 → 接上 |\n| `datasource.ssl` | 停在记录层，从没放上连接规格 —— TLS 配了等于没配 | #4465 → 接上 |\n| memory `indexes` / `maxRecordsPerObject` | `InMemoryDriverConfig` 没有对应字段 | #4465 → 删除 |\n| `datasource.readReplicas` | 没有驱动打开过副本连接 | #4481 → 删除 |\n\n其中 `schemaMode` 和 `ssl` 是安全/正确性形状的：一个让 ObjectStack 对\"绝不能跑 DDL\"的外部库跑了 DDL 的路径，一个让 TLS 配置看起来生效实则没有。**这类正是活性账本存在的理由**，而它们在一个不受账本管辖的类型上躺了不知道多少个 release。\n\n## 为什么\"补一个 ledger 文件\"不是全部工作\n\n`datasource` 在 `BUILTIN_METADATA_TYPE_SCHEMAS` 里，所以 `getMetadataTypeSchema('datasource')` 应该能解析出来，加进 `GOVERNED` 是一行。真正的工作在后面：\n\n1. **`--dump datasource` 出属性清单**，然后**逐条闭合调用图**给出 `live` / `dead` / `experimental` 判定 + evidence + `verifiedAt`。这是主要成本，也是唯一有价值的部分 —— 批量填 `live` 等于把闸门变成橡皮图章\n2. **注意 `config` 是 `z.record`**，闸门的 children 下钻到此为止。per-driver 的形状（`driver/*.zod.ts`）不在 walk 范围内，账本表达不了\"`config.host` 是活的\"。需要想清楚这一层怎么记，或者显式记成一条 note 说明边界在哪\n3. **别把 preview renderer 当证据**。objectui 的 `DatasourcePreview` 会回显 `pool` / `ssl` / `retryPolicy` / `healthCheck` —— `liveness/README.md` 有专门一节讲这个，2026-06 那次仅凭 preview 定性的 13 个属性复核后错了 10 个。#4481 刚踩过：`readReplicas` 在 objectui 唯一的\"消费者\"就是一枚 pill\n4. **`authorWarn` + CLI 建议 lint** 会随账本自动生效，判定错了会直接喷到作者脸上\n\n## 顺带一个更大的问题\n\n`datasource` 是不是唯一漏网的？`GOVERNED` 有 17 项，`BUILTIN_METADATA_TYPE_SCHEMAS` 有多少？两者的差集值得列一下 —— 如果还有别的注册类型不在名单里，那本 issue 应该升级成\"把差集补齐 + 加一条元闸门（新注册的 metadata type 必须同时进 GOVERNED）\"，否则下一个类型还会以同样的方式漏掉。\n\n**建议先跑这一条**，因为它决定本 issue 的形状：是补一个类型，还是补一个机制。\n\n## 验收标准\n\n- `datasource`（以及差集里的其他类型）进入 `GOVERNED`，`liveness/datasource.json` 每个可授权属性都有判定 + evidence + `verifiedAt`\n- 每条 `live` 的证据指向**真正的 runtime reader**，不是 form/preview renderer\n- `config` 这类 `z.record` 边界在账本里显式记录，而不是沉默略过\n- `liveness/README.md` 的 per-type 表和计数同步更新（用 README 里的 python 片段重算，别手改）\n- 如果差集不止一个类型：加一条闸门，让新注册的 metadata type 不进 GOVERNED 就失败\n\n## 参考\n\n- #4410 / #4465 —— `datasource.config` 驱动契约校验，以及顺带接上的 `pool` / `schemaMode` / `ssl`\n- #4481 —— 移除 `readReplicas`\n- `packages/spec/liveness/README.md` —— 判定方法论，尤其 \"⚠️ An authoring/preview renderer is NOT a runtime consumer\"\n- `.claude/skills/spec-property-retirement`\n- ADR-0049 enforce-or-remove / ADR-0078 no-silently-inert-metadata\n\n未指派 —— 按 AGENTS.md 的约定，这是一条记录下来的 finding，谁开工谁认领。"
+}

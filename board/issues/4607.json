@@ -1,0 +1,35 @@
+{
+  "number": 4607,
+  "kind": "issue",
+  "title": "把 pm-dispatch 泛化为正式发布的 skill——任何 ObjectStack 项目(hotcrm、客户项目)可装即用,含平台问题上报规程",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T10:10:36Z",
+  "updated_at": "2026-08-02T12:04:06Z",
+  "closed_at": "2026-08-02T12:04:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4607",
+  "body": "维护者拍板:把 `.claude/skills/pm-dispatch`(内部 PM 派发机制)的**通用内核**泛化为 `skills/` 发布目录里的正式 skill,供第三方 ObjectStack 项目(如 hotcrm、客户项目)经 `npx skills add objectstack-ai/objectstack/skills` 安装使用。\n\n## 范围\n\n**新增 `skills/pm-dispatch/SKILL.md`(发布版,无 `metadata.internal`)**,包含项目无关的内核:\n\n- 队列标签状态机(`pm:queue` / `pm:dispatched` / `needs-user-decision`)与标签初始化;\n- 认领协议(同账号多会话:认领评论 + 竞态验证;跨账号:assignee 即身份)与僵尸认领回收;\n- backlog 持续分诊判据(具体缺陷直接入队 / 设计卡进维护者收件箱 / 截断正文先修复)+ 派发前过时前提核查(读评论、对照 main 近期历史);\n- 批次独立性(文件不相交,拿不准串行)与派发后端(会话内子 agent / mode:cloud);\n- 复核契约(以 GitHub 实况为准、结构化 JSON 回报、ACCEPT/REWORK≤2/ESCALATE)与合并政策(复核过 + CI 绿 → 入 merge queue 或按项目惯例);\n- 升级判据(产品语义分歧或破坏性动作才问维护者;恢复不变量/排序/验证策略自决,事后报告 + 否决窗口)与两轴决策分析(项目长远合理性 × 防 AI 写代码犯错——两轴本身即通用);\n- 多 PM 按仓库分片 + 分片登记表 + 跨分片移交协议;容器资源纪律(重型阶段互斥锁、堆上限、范围化构建、PID 精确操作、worktree 清理);\n- **内嵌通用开发 agent 规程模板**(worktree-first、范围=issue、报告契约、needs_decision 而非猜)供 PM 注入派发 prompt——不依赖自定义 agent 类型,任何项目可用;\n- **Upstream reporting 节**(维护者点名要求):应用项目开发中发现平台(ObjectStack)缺陷的上报规程——先对照平台 main 做过时前提核查;最小复现 + 钉版本,绝不在应用侧加容忍性 workaround;上报 issue 带 `Part of <app-repo>#N` 回链、不打对方队列标签(平台侧 PM 自行分诊);应用侧任务以 `Blocked-by:` 挂起或钉版本登记解除条件。\n\n**配置约定**:skill 读取项目的 `.claude/pm-dispatch.json`(仓库清单、backlog 归属、batch 默认、门禁/规范文件指针);**无配置时零配置起跑**(当前仓库 = 唯一分片 = backlog)。\n\n## 边界\n\n- objectstack 自己的内部版(`.claude/skills/pm-dispatch`)**本 PR 不动**(其 objectstack 专属规则照旧);后续可另行瘦身为「发布版 + 内部配置」;\n- 遵守 `template-consistency.test.ts` 的目录边界:发布版**不得**带 `metadata.internal`;检查 skills 目录的注册/文档惯例(scaffolder REGISTRY、docs 是否需要列出)并按既有形态补齐;\n- changeset 按门禁要求(不发布 npm 包则空 frontmatter,涉 create-objectstack 注册则如实标记)。\n\n维护者原话背景:「我建议泛化为正式发布的 skill」;第三方项目场景:hotcrm、客户项目,开发中可能发现平台问题需要上报。"
+}

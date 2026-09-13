@@ -1,0 +1,35 @@
+{
+  "number": 4560,
+  "kind": "issue",
+  "title": "data: the SQL driver emits the `current_user` framework token as a literal column DEFAULT, so the database itself writes a non-id into a `lookup('sys_user')`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T03:10:48Z",
+  "updated_at": "2026-08-02T09:59:14Z",
+  "closed_at": "2026-08-02T09:59:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4560",
+  "body": "发现自 #4551 的悬空引用巡检**在真实启动中的第一次运行**（showcase, `pnpm dev -- --fresh -p 38109`，PR #4559 分支）。这是巡检报出的唯一一类发现，且它是真的。\n\n```\nWARN [dangling-refs] stored references that resolve to nothing (reported, never rewritten)\n{\"scannedObjects\":63,\"scannedRows\":182,\"scannedReferences\":295,\"dangling\":2,\"undetermined\":0,\"truncated\":false,\n \"references\":[\"showcase_field_zoo.f_owner[IFMh0g-ouRI8ZOQp] → sys_user:current_user\",\n               \"showcase_field_zoo.f_owner[TP2KMqigH9TAFu0J] → sys_user:current_user\"]}\n```\n\n存进 `lookup('sys_user')` 列的值是字符串 **`current_user`** —— 框架的 defaultValue 令牌本身，不是任何用户的 id。\n\n## 根因：不是引擎，是 DDL\n\n引擎这一侧是**对的**。`ObjectQL.applyFieldDefaults`（`packages/objectql/src/engine.ts:1448`）显式处理该令牌，并且在没有登录用户时**刻意不落值**：\n\n```ts\n} else if (dv === 'current_user') {\n  // When there is no authenticated user (system/anonymous), leave it unset\n  // and let required-validation decide — never stamp a bogus owner.\n  if (execCtx?.userId != null) out[f.name] = String(execCtx.userId);\n}\n```\n\n值是**数据库**写的。`SqlDriver` 建列时把任意非对象 `defaultValue` 原样下发为列 DEFAULT（`packages/plugins/driver-sql/src/sql-driver.ts:5952`）：\n\n```ts\n} else if (field.defaultValue !== undefined && field.defaultValue !== null) {\n  const dv = field.defaultValue;\n  if (isNowDefaultValue(dv)) {\n    col.defaultTo(this.nowColumnDefault(type));   // 'NOW()' 被特判了\n  } else if (typeof dv !== 'object') {\n    col.defaultTo(dv as any);                     // 'current_user' 没有 —— 字面量入库\n  }\n}\n```\n\n于是引擎**故意留空**的那一列，被 SQL 的列默认值填成了字面串 `'current_user'`。\n\n注意 `'NOW()'` 就在**紧邻的上一个分支**里被翻译成了驱动原生默认值，理由写得很清楚——「而不是把字面串 `'NOW()'` 留给碰巧写入的上游代码」。`current_user` 是同一个约定家族的成员，只是从来没被同样处理。\n\n## 为什么 #4441 抓不到\n\n#4441 的引用完整性校验只看**调用方给出的值**。这里调用方（和引擎）什么都没给，值是数据库自己供的——写入路径根本看不见它，所以既不是豁免也不是漏判，是它天然在检查的定义域之外。这也正是为什么它只能被一条事后巡检发现。\n\n## 复现\n\n```bash\npnpm dev -- --fresh -p <port>     # showcase\n# 等过 lifecycle 时钟 60s 首跑延迟（需要 PR #4559 的巡检才会打印）\ngrep dangling-refs <log>\n```\n\n字段定义：`examples/app-showcase/src/data/objects/field-zoo.object.ts:120`\n```ts\nf_owner: Field.user({ label: 'Owner (current_user default)', defaultValue: 'current_user' }),\n```\n种子（`examples/app-showcase/src/data/seed/index.ts:268` 起）**没有**设置 `f_owner`，两条 specimen 行因此都吃到了列默认值 —— 与报文里的 2 条一一对应。\n\n不依赖 showcase：任何 `Field.user({ defaultValue: 'current_user' })` + SQL 数据源 + 一次不带登录用户的插入（种子重放、包安装、启动期供给）都会复现。\n\n## 影响\n\n- `lookup` 列里存了一个不是 id 的值 —— 与 `sys_metadata_history.recorded_by` 的哨兵（PR #4511 记录）同类，但这一条**没有任何设计意图**，纯粹是令牌泄漏。\n- 任何 `?expand=f_owner` 或按 owner 关联的读取都会解析到空。\n- 若 `Field.user({ defaultValue: 'current_user' })` 被用在 owner/审批人一类字段上，这就是一条静默的错误归属。\n\n## 待决策的修法方向（未认领）\n\n最小且与既有约定一致的修法，是在 DDL 侧把 `current_user` 与 `'NOW()'** 同等对待：它是一个**运行时**令牌，没有任何数据库原生对应物，因此**不应该发出列 DEFAULT**（引擎已经在应用层负责它了）。是否还有别的字符串令牌处在同样位置，值得一并盘一遍——`col.defaultTo(dv)` 目前对**所有**非对象 defaultValue 一视同仁，这个兜底才是真正的口子。\n\n范围上这需要动 driver 的 DDL 发出逻辑与既有表的迁移（已建的列带着错误的 DEFAULT），所以不在 #4551 的巡检范围内，单独立此 issue。"
+}

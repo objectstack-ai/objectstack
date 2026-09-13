@@ -1,0 +1,35 @@
+{
+  "number": 4833,
+  "kind": "pull_request",
+  "title": "feat(devx): 把静默降级词表扩到「启动期对注册表的终局判断」—— 读可以,记账不行 (#4777)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T09:32:52Z",
+  "updated_at": "2026-08-03T09:58:13Z",
+  "closed_at": "2026-08-03T09:58:12Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T09:58:12Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4833",
+  "body": "Fixes objectstack-ai/objectstack#4777\n\n## 这条门禁抓什么\n\n一次 showcase 冷启(2026-08-03)在三个互不相干的子系统里抓出**同一个形状** ——\n启动期问注册表「有没有 X」,把「没有」当成终局事实**并记账**,提供方随后注册好了,\n记账却不会撤销。三处代码由三拨人在三个时期写下,此前互不知情。\n\n判定必须**三条同时成立**,少一条就不是发现:\n\n1. 读一个**还在填充中**的注册表 —— `init()`/`constructor` 期的服务注册表,或\n   ADR-0018 那种「封闭(seal)之前一直可以长大」的能力注册表;\n2. 从「读不到」得出**终局结论**;\n3. 该结论被**记账** —— 缓存进实例字段 / 模块级变量、写成断言式 `warn`、或落库。\n\n**第 3 条是这条规则和噪音的分界线。** 只读不记账完全合法,门禁必须放过 ——\n`AutomationEngine.getUnknownNodeTypeAudit()` 每次调用都枚举执行器注册表、什么都不记,\n它是对的。一个见到启动期 `getService(...)` 就报的门禁,一周之内就会被人关掉,而被关掉的\n门禁比没有门禁更糟,因为它还会**报告成功**。\n\n## 双向验证(这是交付物,不是附赠)\n\n只在当前 main 上绿的门禁,和一个什么都匹配不到的门禁无法区分(见 #4690:\n`check:react-declaration-parity` 无 MANIFEST 时静默 skip 退出 0,永远不可能红)。\n所以下面三个点都跑了,输出照抄:\n\n**① `f2eb85007^` —— #4771 与 #4772 两处缺陷都还在:**\n\n```\n$ node scripts/check-startup-registry-verdict.mjs --packages-dir /tmp/os4777-pre4772/packages\n\n✗ 2 startup registry read(s) record a verdict the boot can still contradict (#4777):\n\n  packages/plugins/plugin-auth/src/auth-plugin.ts:346  AuthPlugin.init()\n    reads   : getServiceAsync('cache')\n    why     : resolves the kernel service registry (async accessor), which other plugins are still filling; ADR-0116: another plugin's init() may not have run yet, so an absent service may simply be a later one\n    records : asserted — warn log (line 357); cached — < obj >.secondaryStorage (line 352)\n\n  packages/services/service-automation/src/engine.ts:3317  validateNodeTypes\n    reads   : nodeExecutors, actionDescriptors (open capability registry)\n    why     : ADR-0018 makes the flow node-type vocabulary open and runtime-extensible …\n    records : announces the verdict — warn@3329\n```\n\n**② `25784cfec^` —— #4772 已修、#4771 还在(修一个就少一个,证明报的确实是那两处):**\n\n```\n$ node scripts/check-startup-registry-verdict.mjs --packages-dir /tmp/os4777-pre4771/packages\n\n✗ 1 startup registry read(s) record a verdict the boot can still contradict (#4777):\n\n  packages/services/service-automation/src/engine.ts:3317  validateNodeTypes\n    records : announces the verdict — warn@3329\n```\n\n**③ 当前 `main` —— 干净:**\n\n```\n$ pnpm check:startup-registry-verdict\n  ✓ 18 self-test case(s) passed\n✓ startup registry verdicts: 47 startup/open-registry seam(s) across 1398 file(s),\n  41 read-only (legal), none recording a verdict the boot can contradict.\n```\n\n47 个 seam / 41 个只读,说明它确实在看东西,不是空转。`--list` 里那些**合法**的读长这样:\n\n```\n[B] …/engine.ts:3396  getUnknownNodeTypeAudit reads nodeExecutors+actionDescriptors → read-only (legal)\n[B] …/engine.ts:3357  knownNodeTypes         reads nodeExecutors+actionDescriptors → read-only (legal)\n[B] …/engine.ts:3437  sealNodeTypeVocabulary reads … → announces warn@3449 via warnUnknownNodeTypes() [sealed by nodeTypeVocabularySealed]\n[A] …/knowledge-service-plugin.ts:78  KnowledgeServicePlugin.init() probes 'objectql' → cached:this.service@100\n    [final: declared 'com.objectstack.engine.objectql' in dependencies/optionalDependencies — the kernel orders it ahead]\n```\n\n## 覆盖边界 —— 如实写明,不粉饰\n\n这是声明式词表 + AST,覆盖面天生有限,**宁可漏报也不误报**:\n\n- `getService('cache')` 抓得到;包了三层、还在另一个包里的 `resolveCacheOrFallback()`\n  抓不到 —— 调用图只跟到同文件。\n- **#4769 完全抓不到。** 它的「注册表」是数据库里的 `sys_migration` 表,经 ObjectQL 读出,\n  语法上和任何一次取行没有区别。它进 fixture 表是因为它的**修复**可以被验证\n  (`c44dd5ed4^` 上本门禁同样是绿的 —— 已实测,如实计为「未覆盖」而不是「已覆盖」),\n  不是因为词表能发现它。\n- 服务名不是字符串字面量(`ctx.getService(cfg.name)`)一律跳过,不猜。\n\n**这条门禁能止血,不能根治。** 是否要进一步收紧 kernel 契约是 #4776 要裁定的事,不在本 PR。\n\n## 为什么不误报 —— 三条「治好了的形状」必须原样通过\n\n跑第一版时它在 main 上报了 7 处,逐一读下来全是误报或已被仓库自有契约许可,于是按下面三条收窄\n(**没有为了让门禁显得更强而放宽匹配**):\n\n1. **ADR-0116 的声明就是许可。** `dependencies` / `optionalDependencies` /\n   `requiresServices` 一旦声明,kernel 就会把提供方提前(或断言其已注册),此时「没有」\n   就是**事实**而非猜测。这正是 #4772(`cache` 一处未声明)与 `KnowledgeServicePlugin`\n   (声明了 `optionalDependencies`,缓存答案完全正确)之间的分界。容忍度写在插件自己的声明里、\n   由 kernel 执行,永远不写进 checker 的 ledger —— 与 `check-init-service-contract.mjs`\n   同一条线。这条门禁因此与 #4471 互补而非重复:**#4471 说「你得声明」,#4777 说\n   「你没声明就不许记账」。**\n2. **只有 `warn`/`error` 才叫「断言」。** `info`/`debug` 是叙述。\n3. **Rule B 只认「枚举」。** `[...registry.keys()]` / `for…of` / `.size` 是对\n   *整个世界此刻的快照*,才可能产生 #4771 那种「没有插件提供这个类型」的终局判断;\n   `registry.has(x)` / `.get(x)` 问的是一个具体条目,是运行时正常派发 ——\n   `registerNodeExecutor` 对**找到的**重复项 warn、`refuseGatedResume` 在 resume 时\n   解析一个 descriptor,两者都读注册表也都 warn,都不是启动期判断。\n\n`start()` 也**刻意**不在扫描范围内:到 `start()` 时每个 `init()` 都已跑完,\n`ApprovalsServicePlugin.start()` 探测 `automation` 并 warn 与 #4772 的缺陷**结构完全相同**,\n只有阶段能区分二者 —— 报它就等于给一个正确的修复判红。这两种形状都各有一条 self-test 钉住。\n\n## 机制沿用 #4632,不另起炉灶\n\n`scripts/check-durability-degradation-log-level.mjs` 的那套(显式词表 + AST + 只减不增的\nbaseline + `--self-test` + `--list`)原样复用。**没有塞进同一个脚本**,因为两者问的是不同问题\n(catch 块的日志级别 vs 生命周期体里的记账),合并会让词表语义含混。\n\n新增 `--packages-dir 路径`:上面的 before/after 就是这么产出的,谁都可以复跑。\n另有一条「响亮的缺席」保护:扫不到任何源文件时**报错退出 1**,而不是绿着退出 0(#4690 的教训)。\n\n## 变更清单\n\n- `scripts/check-startup-registry-verdict.mjs` —— 门禁 + 18 条 self-test(每条都引 #4777,\n  正反双向:三种记账方式必须报,三种治好的形状 + 只读探测 + 非字面量服务名必须放过)\n- `scripts/startup-registry-verdict.baseline.json` —— 只减不增,**落地时为空**\n  (三处实例都已修完,无需 baseline 任何东西)\n- `package.json` —— `check:startup-registry-verdict`(先跑 `--self-test` 再审计,同邻居)\n- `.github/workflows/lint.yml` —— `Lint & Type Check` 里加一步\n- `AGENTS.md` —— 新增「Startup registry reads」一节:判定问题、三部分形状、三种解法\n  (按优先级:用时解析 → 声明顺序 → 先封闭再判断)、以及门禁的边界\n- `.changeset/startup-registry-verdict-guard.md` —— tooling-only,不发布任何包\n\n未改动 `packages/**` 任何文件。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_018iARDqtrhQgz6fVHDeDkbQ\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018iARDqtrhQgz6fVHDeDkbQ)_"
+}

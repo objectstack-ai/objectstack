@@ -1,0 +1,36 @@
+{
+  "number": 4407,
+  "kind": "pull_request",
+  "title": "fix(spec,drivers): the three drivers type-check — and most of their 292 errors were the types, not the tests (#4311)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T11:58:04Z",
+  "updated_at": "2026-07-31T13:15:59Z",
+  "closed_at": "2026-07-31T13:15:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T13:15:56Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4407",
+  "body": "Burns down the largest block of #4311's code-tier ledger: `driver-sql` (241), `driver-sqlite-wasm` (27) and `driver-memory` (23). All three now declare `typecheck` and leave the DEBT ledger — **60/77 packages covered, 17 ledgered** (was 57/20).\n\n#4311 filed these as one playbook: *author-tier literals handed to a parsed-tier parameter*. That is what 127 of the 292 were. **165 were the types being wrong**, and only a `tsc` that had never run could have kept them invisible.\n\n## What the errors actually were\n\n### `bypassTenantAudit` was never on `DriverOptionsSchema` — 118\n\n`SqlDriver.auditMissingTenant` reads it. Its own warning text tells callers to pass it (*\"set bypassTenantAudit:true to silence\"*). `ObjectQLEngine` sets it for system-context calls (`engine.ts:1069`). `service-settings` and `service-datasource` send it on global-scope writes. `packages/verify` documents it. Only the schema had never heard of it — so every driver read went through `(options as any)` and every caller through an untyped options object, and nothing on either side type-checked.\n\nDeclared now, with the limit stated in the schema: it silences a diagnostic, it **never** changes which rows a write touches.\n\nThe same `as any` covered `timezone`, `tenantId`, `tenantIds` and `preserveAudit` — all four long since declared. All seven casts are gone, so the next undeclared option fails the build instead of hiding behind one.\n\n### `findOne(object, id)` was on no contract — 41\n\nAn undeclared `typeof query === 'string' | 'number'` branch in `SqlDriver`, used by nothing outside this package's own tests, and answered differently by the other two drivers:\n\n| driver | `findOne('task', 't1')` does |\n|:--|:--|\n| `SqlDriver` | id lookup (the undeclared branch) |\n| `MemoryDriver` | spreads the string → `{0:'t',1:'1'}` |\n| `MongoDriver` | reads `query.where` → `undefined` → **an arbitrary row** |\n\nIt also bypassed `find()`, skipping field selection, temporal coercion, and the deterministic-order tie-breaker `IDataDriver.find` explicitly promises. Removed; call sites spell the lookup as `{ object, where: { id } }`.\n\n### `initObjects` did not declare the `tenancy` it consumes — 4\n\nEach object flows into `computeAndRecordTenantField`, which reads `obj.tenancy` to pick the tenant column and set the sticky opt-out. `registerExternalObject` had it right all along.\n\n### `AnalyticsQuery` had no author tier — 20\n\n`timezone` is `.default('UTC')` and `Cube.public` is `.default(false)`, so the parsed types require both while authors write neither. Added `AnalyticsQueryInput` beside `AnalyticsQuery` (the existing `QueryInput`/`QueryAST` pattern) and routed the literals through the schema, so the parse itself proves the default lands. `defineCube` — already in spec for exactly this — does the same job for the cube.\n\n### `InMemoryDriver.create` declared no return type — 3\n\nTS inferred the literal it builds, so every column of the created row except `id`/`created_at`/`updated_at` vanished from the caller's view.\n\n## The second commit: 111 `as any` casts\n\nOnboarding a package is supposed to make its `typecheck` mean something. These three declared it while **111 driver-call arguments were cast to `any`**. Stripping them produced 66 fresh errors, every one real:\n\n- **65** were a missing `object` — the same defect, in the sites the checker had not been allowed to read.\n- **1 was a silent runtime bug.** `sql-driver-aggregate-temporal-output.test.ts` asked for `orderBy: [['id', 'asc']]`. The driver reads `item.field`; a tuple has none; `if (item.field)` was false and **the sort never reached SQL**. The helper is called `viaFind` and exists to read a column in order — in the one file whose subject is output ordering. The tuple form appears nowhere else in the repo.\n\n**43** casts were needed by nothing at all. Exactly **2** are load-bearing and stay: `sql-driver-filter-no-silent-drop` and `memory-filter-ast-vocabulary` both feed `where` shapes `isFilterAST()` refuses, on purpose, to prove the driver throws rather than dropping the condition. Those now read `where as FilterCondition` next to a comment explaining why — one honest cast is easier to see when a hundred idle ones aren't standing next to it.\n\n## Six call sites the checker could not see\n\n`findOne('users', alice.id as any)` — the cast is what let an off-contract call survive a contract narrowing. They surfaced as **runtime failures** the moment the branch was removed, which is the point of the whole issue.\n\n## Filed, not fixed: #4406\n\n`QueryAST.object` is required at the driver boundary and read by **no** driver — parameter 1 always wins, and nothing rejects a call where the two disagree. Adding it to query literals was the single largest edit here (127 keys, all inert at the call site). Reshaping `IDataDriver` across four drivers is a design change, not a rider on a type-debt burn-down.\n\n## Verification\n\n- `turbo run typecheck` — **122/122** (three new targets)\n- `pnpm test` — **132/132** tasks; 1069 tests green across the three drivers\n- `pnpm lint`, the 12 `lint.yml` check gates, coverage ratchet self-test 18/18\n- `packages/spec/authorable-surface.json` regenerated by the build (one added key)\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_011m13wbaZziPveBdtQthrXd)_"
+}

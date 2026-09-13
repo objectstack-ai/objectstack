@@ -1,0 +1,34 @@
+{
+  "number": 4452,
+  "kind": "issue",
+  "title": "service-automation 的 README 教的是一套不存在的 flow DSL(节点类型、插值方言、嵌套 steps 全不对)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T08:05:03Z",
+  "updated_at": "2026-08-01T13:10:33Z",
+  "closed_at": "2026-08-01T13:10:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4452",
+  "body": "修 #4439 时顺手扫到的,不是那次改动造成的,单独开。\n\n`packages/services/service-automation/README.md` 的「Step 类型」几节整体描述的是一套**从来没有存在过**的 DSL。逐项对照现行 schema:\n\n| README 写的 | 现行真值 |\n|:---|:---|\n| `type: 'record_create'` / `'record_update'` / `'record_delete'` | `create_record` / `update_record` / `delete_record` |\n| `type: 'query'` | `get_record` |\n| `object: 'account'` | `objectName`(`object` 别名已在 protocol 17 由 `flow-node-crud-object-alias` 转换层收口) |\n| `recordId: '{!trigger.recordId}'` | 没有 `recordId` 这个键;按 id 取记录是 `filter: { id: '{recordId}' }` |\n| `filters: [{ field, operator, value }]` | `filter`(对象形式,`filters` 已由 `flow-node-crud-filter-alias` 收口) |\n| `output: 'opportunities'` | `outputVariable` |\n| `{!trigger.record.amount}` | 单花括号 `{record.amount}`;`{!…}` 是 Salesforce 方言,平台从不解析 |\n| `type: 'decision'` 顶层带 `conditions` | `conditions` 在 `config` 里 |\n| `conditions[].steps` / `defaultSteps` | 不存在。分支是 DAG 的边(`edge.condition` + `isDefault`),不是嵌套 steps |\n\n也就是说,照着这个 README 写出来的 flow **没有一个节点能跑**。\n\n## 为什么现在值得修\n\n原来这只是「文档没用」。#4414 + #4439 之后,其中 decision 那一块的写法(`expression: '{!trigger.record.amount} > 10000'`)会**直接构建失败** —— 因为 `conditions[].expression` 进了表达式账本,花括号谓词在 `registerFlow` / `objectstack validate` 就被拒。作者照 README 抄,拿到的是一条 CEL 报错,而报错说的(\"去掉花括号\")对这个例子来说甚至不是完整的修法,因为它整个节点形状都是错的。\n\n#4439 里我只改了 `content/docs/automation/flows.mdx` 和 `FlowNodeSchema` 的 `@example`(那两处是真会被作者读到的入口)。这个 README 没动 —— 单修其中一块,会让它和周围同样错的例子更不一致,而且这属于整篇重写,不该塞进那个 PR。\n\n## 建议\n\n按现行 schema 重写这几节,或者干脆删掉 Step 类型那一段、指向 `content/docs/automation/flows.mdx`(那是维护中的真文档)。倾向后者 —— 一份包内 README 再维护一套节点参考,本身就是 #4027/#3569 那类「两份手写清单不对账」的形状。\n\n顺带值得查一下别的 package README 有没有同样的陈旧片段;我只扫了 `expression: '{`,没做全面对照。\n\n相关: #4414、#4439。\n"
+}

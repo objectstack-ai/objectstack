@@ -1,0 +1,37 @@
+{
+  "number": 4669,
+  "kind": "issue",
+  "title": "permission-set backfill (ADR-0094 D4) 现在 100% 失败：行里的 `active` 存储列喂进了 #4001 之后严格化的 permission spec",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T15:42:53Z",
+  "updated_at": "2026-08-03T03:14:21Z",
+  "closed_at": "2026-08-03T03:14:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4669",
+  "body": "**发现于**：cloud 侧把 framework pin 从 `ad5fe25` 前移到 `462b713`（cloud#1010）后跑全量测试时，日志里出现的 WARN。\n**核实基线**：`objectstack` @ `462b713`，`cloud` @ `e14553d`\n**未认领** —— 只是记录，谁接手谁 assign。\n\n## 症状\n\n`ee-group-showcase` / `security-enterprise` 的测试里，每次 permission-set backfill 都打出这条：\n\n```\nWARN [security] permission-set backfill into metadata failed (ADR-0094 D4)\n  {\"name\":\"d8_qc_user\",\"error\":\"[invalid_metadata] permission/d8_qc_user failed spec\n   validation: <root>: Unrecognized key(s) on this permission set: `active`.\n   Until #4001 these were dropped silently — the set still parsed, so the author\n   believed a capability boundary was declared that the runtime never saw.\"}\n```\n\n**测试是绿的。** 失败在 `permission-set-projection.ts:770-773` 被 `catch` 成一条 `logger.warn`，`backfilledIntoMetadata` 不加一，然后继续。所以没有任何 gate 会因此变红。\n\n## 因果链\n\n1. `sys_permission_set` 有一个 **`active` 存储列** —— 是 framework 自己声明的，`sys-permission-set.object.ts:33` 把它放进 `highlightFields`，还有两个动作靠 `bodyExtra: { active: true }` / `{ active: false }` 来启停一个 set。它是完全正当的运行时状态。\n2. ADR-0094 D4 的 backfill 走 `permissionSetBodyFromRow(row)`，把**数据库行**转成 metadata body —— `active` 跟着进去了。\n3. `#4001` 把 permission-set 的 spec 形状封成严格键。`active` 从来不是 spec 上的键，此前被静默 strip，所以第 2 步一直\"能用\"。\n4. 严格化之后，`saveMetaItem` 对**每一个**没有 declared body 的 permission set 抛 `invalid_metadata`，backfill 全线失效。\n\n不是 showcase 数据特有的问题：任何走这条路径的 set 都会命中，因为 `active` 来自表结构，不是作者写的。\n\n## 为什么值得单独立一条\n\n这正是 `#4001` 报错文案自己描述的那类事故，只是发生在 framework 内部而非授权侧：一个存储列被当成 spec 键送去校验，严格化之后整条投影路径静默停摆。`catch` + `warn` 的处理让它**没有任何自动信号** —— 我是在读一次无关的 bump 日志时偶然看见的。\n\n顺带一提，cloud 那边新加的 `audit-spec-changes.mjs`（cloud#995）也抓不到它：审计只扫 `spec-changes.json` 登记过的 surface，而 permission-set 的严格化没有对应条目。\n\n## 可能的修法（未验证，留给接手的人判断）\n\n- `permissionSetBodyFromRow()` 里显式挑出 spec 认的键，而不是把整行带过去 —— 存储列（`active`、时间戳、`managed_by` 等）本来就不该进 metadata body；\n- 或者反过来，如果 `active` 确实应当是 permission set 的**声明**语义（而不只是行状态），那就该在 spec 上正式加回来，而不是靠 strip 苟活。\n\n先判断哪一边才是它真正的归属，再动手 —— 这个键同时被表列和两个动作使用，不能只看 backfill 这一处。\n\n## 复现\n\n```bash\n# cloud @ e14553d（pin 已在 462b713）\npnpm turbo run test --filter @objectstack/ee-group-showcase\n# 测试通过；在输出里搜 \"backfill into metadata failed\"\n```"
+}

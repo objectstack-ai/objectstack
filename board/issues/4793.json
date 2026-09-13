@@ -1,0 +1,36 @@
+{
+  "number": 4793,
+  "kind": "issue",
+  "title": "fix(metadata-protocol)!: batch 逐行结果迁移到 `BatchOperationResultSchema` 形状 —— 方案 B 已拍板,硬切 + 诚实迁移说明(Blocked-by #4620)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "protocol:breaking"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T06:50:13Z",
+  "updated_at": "2026-08-03T11:50:29Z",
+  "closed_at": "2026-08-03T11:50:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4793",
+  "body": "## 背景\n\n#4620 的第 3 节。第 1、2 节(`deleteManyData` 假原子、`updateManyData` 完全不读 `atomic`)已派发实现中,分支 `claude/issue-4620-many-data-atomic`。本条是被刻意留下的那一半。\n\n这不是第一次被留下:ADR-0119 D4 修 `batchData` 的 `atomic` 时就已经识别出它并明确不动,理由写在代码里(`packages/metadata-protocol/src/protocol.ts:814-820`):\n\n> Deliberately the shape the implementation has always emitted (`error: string`, `record`), which diverges from `BatchOperationResultSchema`'s `errors: ApiError[]` / `data` — reconciling the two is a wire-visible change that must not ride along on a bug fix (ADR-0119 D4; tracked separately).\n\n我这次派发 #4620 时沿用了同一条理由 —— 让 wire 兼容性变更搭在 bug fix 上,正是它两次被留下的原因。**但它不能一直被留下去:这是 declared ≠ delivered,而且分歧就写在两份都对外的东西之间。**\n\n## 具体分歧(已逐字核对,不是照抄 issue)\n\n`BatchOperationResultSchema`(`packages/spec/src/api/batch.zod.ts:183`)声明:\n\n| key | schema | 实现(`BatchDataRowResult`,`protocol.ts:821`) |\n|:--|:--|:--|\n| `id` | `string?` | ✅ 一致 |\n| `success` | `boolean` | ✅ 一致 |\n| 错误 | **`errors: ApiError[]?`** | **`error: string?`** ← 名字与类型都不同 |\n| 记录 | **`data: RecordData?`** | **`record: any?`** ← 名字不同 |\n| `index` | `number?` | ❌ 实现从不发 |\n| `droppedFields` | `DroppedFieldsEvent[]?` | ✅ 一致(`protocol.ts:5446` 等处确实在发) |\n\n也就是说:**两个键名字对不上、一个键实现从不发,`droppedFields` 反而是对齐的**。schema 被 `BatchUpdateResponse.results`(`batch.zod.ts:249`)引用,是对外响应的一部分。\n\n## 可选方案\n\n### A. 放宽 schema 迁就现实(加上 `error: string` / `record`)\n- **项目长远合理性:差。** 它把一次记账错误**固化成契约**。收完之后 schema 里会同时躺着 `error` 和 `errors`、`record` 和 `data` —— 四个键表达两件事,而且没有任何规则说明什么时候用哪个(答案是「实现只发一种,另一种永远是空」)。这不是收敛,是把分歧升级成官方的双份声明。\n- **防 AI 写错:最差,而且是本仓最该防的那种错。** 一个 AI 消费方读 schema 看见 `errors: ApiError[]`,写 `result.errors[0].message` —— 编译、类型、schema 校验全过,运行时永远 undefined,因为实际发的是 `error`。**声明与投递不一致时,AI 会照着声明写,然后在运行时静默拿到空值** —— 这正是「宽容的消费端是 AI 批量犯错的温床」的教科书形状。A 让这个陷阱永久合法。\n\n### B. 迁实现到 schema 形状,并给响应加版本\n`error: string` → `errors: [ApiError]`,`record` → `data`,补上 `index`。\n- **项目长远合理性:最好。** 唯一一个终局只剩**一份真相**的方案。schema 本来就是契约,实现漂了就该把实现拉回来,而不是反过来改契约迁就漂移(Prime Directive #12 contract-first)。\n- **防 AI 写错:最好。** declared = delivered,读 schema 写出来的代码就是能跑的代码。\n- **代价(要如实看):** 这是**破坏性 wire 变更**,已发布客户端里读 `result.error` / `result.record` 的会拿到 undefined。需要 major changeset,并且要确认「给响应加版本」在我们这套协议里具体怎么做 —— 如果没有现成的响应版本机制,B 就等于一次硬切。\n\n### C. 双发过渡:同时发新旧两组键,标记旧键弃用,一个版本后删掉\n- **项目长远合理性:好,是通往 B 的兼容路径。** 终局与 B 相同(一份真相),中间多一个过渡期。代价是过渡期内**响应体里真的有四个键**,以及必须有人真的执行「一个版本后删掉」—— 没删掉的话它就退化成 A,而且是没写进 schema 的 A,更糟。\n- **防 AI 写错:过渡期内中等,终局同 B。** 关键在于旧键必须在 schema 里被**显式标记 deprecated**,否则过渡期就是 A 的所有问题。\n- 只有当我们确认存在真实的外部客户端依赖旧键时,C 才值得付这份复杂度;如果消费方基本在仓内,B 直接切更干净。\n\n## 我的建议\n\n**B**,除非你知道有仓外客户端已经在读 `result.error` / `result.record` —— 那就 **C**,且必须把删除旧键这一步同时立成 issue、写进弃用说明,不能只靠「以后记得删」。\n\n两条轴都指向同一个方向:长远上只有 B/C 收敛到一份真相,A 是把错误写进契约;防 AI 犯错上 A 最危险 —— 它让「照 schema 写、运行时拿空值」这条路径永久合法,而这正是我们反复在收紧的那类漏洞。A 唯一的优点是不动 wire,但它买来的兼容性是用「契约从此说谎」换的。\n\n需要你拍板的其实是一个事实问题:**仓外有没有已发布的消费方在读旧键**。B 还是 C 由它决定;A 我建议直接排除。\n\n## 关联\n\n- 来源:#4620 第 3 节(第 1、2 节已派发,`claude/issue-4620-many-data-atomic`)\n- 前史:ADR-0119 D4 / #4612 —— 第一次识别并刻意留下,理由记在 `protocol.ts:814-820`\n- 涉及:`packages/spec/src/api/batch.zod.ts:183`(schema)、`packages/metadata-protocol/src/protocol.ts:821`(实现类型)、`batch.zod.ts:249`(响应引用点)\n- 相关原则:ADR-0049 enforce-or-remove(声明即强制)"
+}

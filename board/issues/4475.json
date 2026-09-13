@@ -1,0 +1,32 @@
+{
+  "number": 4475,
+  "kind": "issue",
+  "title": "Setup System Overview: every KPI tile reads 0 — the dataset path lowers an all-time range to WHERE created_at = $1",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T09:13:49Z",
+  "updated_at": "2026-08-01T12:33:32Z",
+  "closed_at": "2026-08-01T12:32:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4475",
+  "body": "Found while verifying the 17.0.0-rc.1 checklist on #3909. Verified in the browser on `main` @ `1ee48bc60`, showcase under `os serve --dev --ui`, published `@objectstack/console@17.0.0-rc.1` at `/_console/`, signed in as the dev admin.\n\n## What you see\n\nSetup → **系统概览 / System Overview** with the period selector on **全部时间 (All time)** renders every KPI tile as **0**:\n\n| tile | shown | actual |\n|---|---|---|\n| 用户总数 / Users | 0 | 4 |\n| 活跃会话 / Sessions | 0 | 16 |\n| 登录事件 / Login events | 0 | non-zero |\n| 权限变更, 配置变更 | 0 | — |\n\nThe data is there — the same page, same session, querying the platform's own API returns the truth:\n\n```\nGET  /api/v1/data/sys_user                                   → total 4\nPOST /api/v1/analytics/query {cube:'sys_user',measures:['count']} → [{\"count\":4}]\n```\n\n## Root cause is visible in the widget's own response\n\nThe tiles go through `POST /api/v1/analytics/dataset/query`, and that response carries the SQL it ran:\n\n```json\n{\"rows\":[{\"user_count\":0}],\n \"fields\":[{\"name\":\"user_count\",\"type\":\"number\",\"label\":\"Users\"}],\n \"sql\":\"SELECT COUNT(*) AS \\\"user_count\\\" FROM \\\"sys_user\\\" WHERE created_at = $1\"}\n```\n\n**`WHERE created_at = $1`** — an equality test on a timestamp column. An \"all time\" selection is being lowered to a single-value comparison instead of an unbounded range (or no predicate at all), so it matches only rows whose `created_at` is exactly the bound and the count is always 0.\n\nNote the contrast with the cube path, which lowers a range correctly (verified separately for #3650):\n\n```sql\n... FROM \"showcase_invoice\" WHERE (issued_on >= $1 AND issued_on < $2) GROUP BY date_trunc('month', issued_on)\n```\n\nSo the defect is specific to how the **dataset** path compiles its date filter, not to date handling generally.\n\n## Why it matters for the RC\n\nThis is the first screen an operator sees in Setup, and every number on it is wrong in the safest-looking direction — zeros read as \"nothing is happening yet\" rather than as an error. Nothing in the UI signals a failure: the requests are `200 OK`, the widgets render normally.\n\nI could not exercise the dataset route directly from curl to narrow it further — it answers `body.selection.measures must be a non-empty array of measure names` for the shapes I tried, so the request the Console builds is the reliable reproduction. Open Setup → System Overview with \"All time\" selected and read the `sql` field of any tile's response.\n\nPart of the #3909 rc.0/rc.1 verification.\n"
+}

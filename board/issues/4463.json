@@ -1,0 +1,34 @@
+{
+  "number": 4463,
+  "kind": "issue",
+  "title": "[runtime/metadata] 作者时规则只存在于 CLI:Studio/REST/MCP 的运行时授权面是第四扇门,26 条规则一条不跑——#4409 修完后最大的敞口",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "protocol:breaking"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T08:28:40Z",
+  "updated_at": "2026-08-02T22:08:03Z",
+  "closed_at": "2026-08-02T22:02:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4463",
+  "body": "## 现象\n\n#4409/#4445 把 26 条作者时规则收进一张 registry,三个 CLI 命令(`os validate` / `os build` / `os lint`)由构造保证跑同一套门禁。但全仓只有一个包依赖 `@objectstack/lint`:\n\n```\n$ grep -rln '\"@objectstack/lint\"' --include=package.json packages/ apps/ core/\npackages/lint/package.json\npackages/cli/package.json\n```\n\n而元数据的运行时写入路径——Studio 编辑、REST `/meta` item CRUD(`packages/runtime/src/domains/meta.ts`)、MCP/AI agent 授权——最终都走 `metadata-protocol` 的 `saveMetaItem`,那里只做 per-type 的 Zod `safeParse`(`packages/metadata-protocol/src/protocol.ts:5994`,失败 422 带结构化 issues)。**26 条规则一条不跑。**\n\n具体后果,用 #4409 的同一个实测例:租户在 Studio 里保存一个 expression approver 是坏 CEL 的审批流(`{ type: 'expression', value: 'record.owner ==' }`)。approver 的 `value` 在 Zod 里就是个 string,schema 全绿,存进 `sys_metadata`,经 `registerFlow`(`service-automation/src/engine.ts:1551`)注册,触发时节点在入口处失败——CLI 侧三个命令刚刚花了一个 PR 保证拦住的东西,换个门就直接进来了。\n\n## 为什么这是 #4409 的下一层,不是新问题\n\n#4409 的教训一句话:**门禁的强度等于最弱那扇门**。那个 PR 把 CLI 的三扇门对齐了——但三扇门都在 CLI 上。运行时授权面是第四扇门,而且:\n\n1. **它是租户唯一的门。** CLI 用户还有三个命令可跑;Studio 用户没有任何等价物。`os lint` 再完美也看不见租户 overlay(ADR-0033 的 `sys_metadata` 行根本不在 CLI 的 config 文件里)。\n2. **文档在做 declared ≠ enforced。** docs 把这套规则称为\"the gate\",AGENTS.md Prime Directive #10 的推论是 never advertise a capability the runtime doesn't deliver——而 gate 只存在于四个授权面之一。\n3. **有先例可循。** Prime Directive #12 的 worked example 正是这个形状:AI 授权的 `create_record` 用错 key,修法是**授权技能修正 + publish-gate lint 在发布时拒绝**(cloud#688),而不是运行时容错。cloud 侧已经承认\"发布时跑 lint\"是正确层次;framework 自己的发布面反而没有。\n\n## 需要先定的四个产品决策(这是提 issue 而不是提 PR 的原因)\n\n**D1 — 门在哪:draft-save 还是 publish/activate?**\n`saveMetaItem` 对两种保存(`state: 'draft' | 'active'`)已有统一的验证缝(protocol.ts ~1576-1588)。建议:**gating 规则只挡 `active`**(publish/activate),draft 保存永远放行、只回 advisory——草稿本来就允许是半成品,挡 draft 会毁掉 Studio 的编辑体验;而 `active` 正是\"发布\"的语义,和 `os build` 是同一个动词。\n\n**D2 — 输入形状不匹配:规则是 stack 级的,运行时写入是 item 级的。**\n26 条规则的签名都是 `(stack) => findings`,靠\"stack 声明了什么\"解析名字。运行时的等价宇宙是**活的 registry**(所有已装包 + 租户 overlay)。三个选项:\n- (a) 写入时从 registry 构造一个 stack 视图快照,跑全套——语义最对,但每次保存的成本需要测量;\n- (b) 给规则加 per-item 入口——API 大改,26 条一条条来,慢;\n- (c) 首期只按被写 item 的类型跑相关规则族(flow → approval/flow/expression 规则),用 (a) 的快照但按需构造。\n建议 (c) 起步、(a) 收尾。注意一个反直觉的红利:运行时宇宙比 CLI 的单包视图**更全**,`validateCapabilityReferences` 那类\"可能由别的包提供\"的 advisory 对冲在这里是可判定的——同一条规则在运行时门上反而能更严。\n\n**D3 — 严重性到 HTTP 的映射。**\ngating → 422,复用 Zod 失败已有的结构化 issues 信封(`rule` / `path` / `message` / `hint` 直接就是 `AuthoringFinding` 的形状);advisory → 2xx 但在响应里带 findings,Studio 渲染成警告。这样 objectui 不需要新协议,只需要读一个已有形状的新字段。\n\n**D4 — 逃生阀与迁移。**\n存量 `sys_metadata` 里一定有今天看是违规的行。门只挡**新写入**,存量走 ADR-0087 的老路(读路径不拒绝;`applyConversionsToStoredItem` 已经证明过这个不对称是对的)。需要一个 `OS_ALLOW_*` 形状的显式逃生阀吗?建议要——`OS_ALLOW_UNLINTED_METADATA_WRITES=1`,按 Prime Directive #9 的\"故意难看\"惯例命名,给迁移窗口用。\n\n## 依赖结构上的一个障碍(需要在设计里解决,不是绕开)\n\n`metadata-protocol` 不能简单加一个 `@objectstack/lint` 依赖了事:lint 包在 kernel boot path 之外是刻意的,它的重依赖(typescript ~9MB / sucrase)靠 `lazy-deps.test.ts` 钉住惰性。好在运行时门需要的规则族(flow/approval/expression/reference)恰好都不碰这两个依赖;react/jsx 页面源码类规则在运行时门上本来就可以先不接(Studio 的页面编辑另有 save-time 编译路径)。设计上应把\"运行时门跑哪个子集\"也写成 registry 数据——`AUTHORING_RULES` 每条已经有 `tier`/`input`/`commands`,加一个 `surfaces: ['cli', 'runtime-publish']` 维度即可,理由照写。\n\n## 防止历史重演的一条硬要求\n\n无论落地成什么形状,**运行时门必须消费 `AUTHORING_RULES` 同一张表**,并且 #4445 的棘轮守卫要扩展到这个新 surface——否则我们就是在手工接线一个\"第四命令\",五次修过的漂移(#3583 → #3782 → #4384/#4394 → #4402 → #4409)会在一个新表面上原样长回来。这条不是建议,是这个 issue 存在的理由。\n\n## 建议分批\n\n- **P1:** `saveMetaItem` 的 `active` 保存跑 flow/approval/expression 规则族(D2 选项 c),gating → 422。这是 #4409 实测例在运行时面的直接对应,风险最高、成本最低(纯结构化 metadata,零重依赖)。\n- **P2:** registry 快照方案推广到全部 runtime-safe 规则;advisory findings 进响应,objectui 渲染(需要 objectui 侧一个配套 issue)。\n- **P3:** `AUTHORING_RULES` 加 `surfaces` 维度 + 守卫扩展;docs 把\"the gate\"的表格加上第四列。\n\n## 相关\n\n#4409 / #4445(CLI 三命令 registry,本 issue 的直接前提)、#4449(同型缺陷的另一方向:导出但零接线)、#4402、#3583、ADR-0033(draft/active 语义)、ADR-0087(存量行的读路径不对称)、ADR-0049(enforce-or-remove)、cloud#688(publish-gate lint 先例,Prime Directive #12 worked example)。"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 4441,
+  "kind": "issue",
+  "title": "data: a lookup accepts an id that does not exist in the referenced object — including the RBAC permission-set link tables",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T07:44:23Z",
+  "updated_at": "2026-08-01T16:17:37Z",
+  "closed_at": "2026-08-01T16:17:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4441",
+  "body": "Found while verifying the 17.0.0-rc.1 checklist on #3909 (section A, the export-axis anchor gate). Verified on `main` @ `1ee48bc60`, showcase under `os serve --dev`, admin session.\n\nA `lookup` field that declares `reference: '<object>'` accepts an id that **does not exist in the referenced object**, on both platform and application objects:\n\n```\n# RBAC link table — permission_set_id is required + reference: 'sys_permission_set'\nPOST /api/v1/data/sys_position_permission_set\n     {\"position_id\":\"position_msa65wsxuij6auhn\",\"permission_set_id\":\"ps_does_not_exist_at_all\"}\n→ 200, row created\n\n# ordinary application object — project is required + reference: 'showcase_project'\nPOST /api/v1/data/showcase_task\n     {\"title\":\"…\",\"project\":\"proj_does_not_exist\",\"status\":\"backlog\"}\n→ 200, row created\n```\n\nThe field metadata is unambiguous about the constraint:\n\n```json\n\"permission_set_id\": {\"type\":\"lookup\",\"required\":true,\"reference\":\"sys_permission_set\",\"deleteBehavior\":\"set_null\", …}\n```\n\n`deleteBehavior: 'set_null'` shows the platform *does* reason about this edge on the delete side; the insert side never checks.\n\n## Why this one is worth more than the usual referential-integrity nit\n\nThe RBAC link tables are the sharp case. `sys_position_permission_set` is how a position is granted a permission set, and a dangling row there is a **security-surface record that resolves to nothing**. It reads back fine (`GET` 200), it appears in listings, and an admin auditing \"what does the `everyone` anchor carry?\" sees a binding whose target cannot be inspected. Worse, the audience-anchor gate (ADR-0090 D5/D9) has to *resolve the set* to judge its privilege — a binding whose set does not resolve is a gate input that cannot be evaluated. I hit this by accident: a shell variable expanded to the literal string `FAIL`, and the platform stored `permission_set_id: \"FAIL\"` against the `everyone` position without complaint.\n\nThis also sits directly against the posture this train shipped everywhere else: #4240/#4303/#4315 refuse a *field name* that does not exist, #4209 refuses a filter the server cannot apply, #4200 refuses a non-AST `$filter`, ADR-0113 (#4031) made `required` a real write contract. A `reference` that names an object is the same kind of declared constraint — and it is the one that still passes anything.\n\n(Related but distinct: seeds already count and report dropped reference fields, #3932 — so the seed path takes reference resolution seriously while the REST write path does not.)\n\n## Expected\n\nAn insert/update writing a `lookup` value that resolves to no row in the referenced object is refused with a 400 in the declared `fields[]` envelope naming the field and the unresolvable id — the same shape `required` violations already produce. If a deployment genuinely needs dangling references (import staging, eventual consistency), that should be the opt-in, not the default.\n\nPart of the #3909 rc.0/rc.1 verification (section A).\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 4678,
+  "kind": "issue",
+  "title": "client-react 拿不到批量写事件:useAutoRefresh 对 multi:true 不刷新,三个 realtime hook 都没有 subscribeBulkData 的对应物",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "repo:objectstack"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T16:36:01Z",
+  "updated_at": "2026-08-02T17:44:47Z",
+  "closed_at": "2026-08-02T17:44:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4678",
+  "body": "#4639 实施(PR #4677)的范围内发现,按第十条军规立案。\n\n## 现象\n\n#4677 给谓词写(`multi: true`)加了聚合事件契约,并在 `@objectstack/client` 上开了 `subscribeBulkData(object, cb)`。但 `@objectstack/client-react` 没有跟上:\n\n`packages/client-react/src/realtime-hooks.tsx` 里三个 hook 全部委托 `client.events.subscribeData`(`:94`、`:183`),没有任何一个订阅 `data.records.*`:\n\n- `useDataSubscription` (`:84`)\n- `useDataSubscriptionCallback` (`:173`)\n- `useAutoRefresh` (`:251`)\n\n于是 React 用户拿不到批量写事件 —— client SDK 有这个能力,hooks 层没暴露。\n\n## 最刺眼的是 `useAutoRefresh`\n\n它的语义就是\"数据变了就重取\"。而谓词写恰恰是**最该重取**的场景 —— 一次改掉/删掉 40 行,列表页整页都脏了。现在它对此完全不刷新,而对单条记录改动反而会刷。\n\n这不是性能取舍,是语义漏洞:一个叫 \"auto refresh\" 的 hook 在数据变化最大的那次写入上静默不动。\n\n## 处置方向\n\n1. 新增 `useBulkDataSubscription`(和 `useBulkDataSubscriptionCallback`,如果要与现有成对结构保持一致),委托 `subscribeBulkData`;\n2. **`useAutoRefresh` 同时订两条流** —— 逐记录和批量都触发重取。它的返回值是刷新信号,不是事件体,所以两种事件在这里天然同构,不存在 #4639 里那个\"形状不同不能混\"的问题(那条约束针对的是把 `BulkDataEvent` 交给 `(event: DataEvent) => void` 回调,`useAutoRefresh` 不暴露事件体);\n3. `useDataSubscription` / `useDataSubscriptionCallback` **保持只收逐记录** —— 它们的回调签名是 `DataEvent`,混进来就是 #4626 消灭的那个缺陷。\n\n## 参考\n\n- #4639 / PR #4677 —— 批量事件契约\n- `packages/client/src/realtime-api.ts` —— `subscribeBulkData` 的边界校验写法\n- `packages/client-react/src/realtime-hooks.tsx`"
+}

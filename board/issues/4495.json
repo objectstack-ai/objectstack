@@ -1,0 +1,35 @@
+{
+  "number": 4495,
+  "kind": "pull_request",
+  "title": "fix(sharing): 停用规则时撤回已物化授权,并修复 DELETE 500 (#4433, #4434)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T12:06:02Z",
+  "updated_at": "2026-08-01T13:10:32Z",
+  "closed_at": "2026-08-01T13:10:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-01T13:10:31Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4495",
+  "body": "v17 验收缺陷清单 #4482 的第一批修复。这一对缺陷合在一起,会让一条过度授权的共享规则在 API 层面**无法挽回**。\n\n## 修了什么\n\n### #4433 —— 停用规则从不撤回已物化的授权\n\n共享规则的授权是**物化**的:评估规则会真的往 `sys_record_share` 写入 `source:'rule'` 行。这些行的存活期超过产生它们的那次评估,所以\"撤回\"必须是一个明确的动作。原先三条路径**全部**失效,各自的成因互相独立:\n\n**1. 停用动作本身(主因)。** `sys_sharing_rule` 的 reconcile trigger 对所有 `isSystem` 写入跳过,理由是\"那些是启动期播种\"。但 `SharingRuleService.defineRule` —— `POST /sharing/rules` 背后唯一的实现,也是文档规定的停用规则的方式 —— **无条件**使用 `SYSTEM_CTX` 写入,因为它必须触达一张 sharing 中间件本来会拦截的平台表。于是这个跳过条件命中了 **100% 的 REST 授权写入**。#3821 建好的撤销通道存在、有测试(测的是真实路径根本不会发送的 mock `session`),且在生产中不可达。现改为按**启动阶段**判断 —— 这才是那个跳过条件真正想问的问题。\n\n**2. 记录触碰。** `evaluateAllForRecord` 只列 active 规则,停用的规则**根本不在循环里**,它物化的授权连看都没被看一眼。现在遍历全部规则;停用的规则\"期望授权集合为空\",直接走 `reconcileForRecord` 已有的 revoke 分支。\n\n**3. 启动回填。** `backfillRuleGrants` 拿到的是 `activeOnly` 列表,**结构上不可能**撤销任何东西。现在遍历全部规则,并新增 `sweepOrphanedRuleGrants` 清理规则行已彻底消失的授权 —— 靠遍历规则永远够不到它们,所以需要独立的清扫。\n\n### #4434 —— DELETE 两种寻址形式都 500\n\n`deleteRule` 用 `where:{source,source_id}` 谓词删 `sys_record_share`,既无标量 id 也无 `multi:true`,正好是 engine dispatch 唯一拒绝的形状,在触达规则行之前就抛了。\n\n修复方式是走 `purgeRuleGrants`(而**不是**补一个 `multi:true`):让规则授权只有一条回收路径 —— `SharingService.revoke`,与其它所有撤销路径(`evaluateRule` 遇到 inactive、数据 API 删除后的 `revokeRuleGrants`)完全一致。补 `multi:true` 能消掉 500,却会让 delete 成为唯一绕过 sharing service 的撤销路径(AGENTS.md PD #5)。\n\n### 测试假引擎的保真度\n\n`makeEngine().delete` 原先接受任意 `where` —— 这正是 #4434 能带着绿灯发布的原因:已有的 `deleteRule drops rule + all its grants` 测试一直在对着一个真实服务器必然拒绝的删除断言成功。现已对齐真实 engine 的 dispatch 守卫,该测试在修复前**确实失败**。\n\n## 验证证据\n\n### 单元 / 集成测试\n\n`pnpm --filter @objectstack/plugin-sharing test` → **243 passed (11 files)**。\n`pnpm typecheck`(全仓库 turbo)→ **122/122 successful**。\n\n新增回归测试均已确认**撤掉修复后会失败**(8 条):#4434 的两种寻址形式、按服务路径撤销、触碰撤销、孤儿清扫、跨启动撤销,以及把旧的 `activeOnly` 调用点作为缺陷钉死的用例。`rule-rebind.test.ts` 中原本 `skips system-context writes` 那条测试**钉死的正是缺陷行为**,已替换为正确契约。\n\n### 真实启动验证(持久化 SQLite,端口 38102)\n\n用持久化数据库而非 `--fresh`,以便做**真正的重启**。showcase 的 `showcase_private_note`(`sharingModel: 'private'`),admin 持有笔记,member B 为收件人。\n\n| 步骤 | B 读取 | 记录上的 share 数 |\n|:--|:--|:--|\n| 基线(无规则) | `404` | 0 |\n| 建规则 `active:true` | `200` | 1 |\n| 停用 `active:false` | **`404`** | **0** |\n| 再触碰记录(PATCH) | `404` | 0 |\n| **完整重启后** | **`404`** | **0** |\n\n规则在重启后仍为 `active: false`,授权保持已撤回 —— #4433 的核心断言(issue 里\"下次记录改动时不撤,完整重启后也不撤\"两条路径)均已实测通过。\n\n**启动清扫的修复能力**也单独验证过:直接往 SQLite 注入一条 `source:'rule'`、`source_id` 指向不存在规则的孤儿授权(模拟从缺陷版本升级上来的数据库),重启后日志出现 `[sharing-rule] revoked rule grants whose rule row no longer exists {\"grants\":1}`,孤儿行消失,同时**合法的种子规则授权原样保留**。\n\n**#4434 两种寻址形式:**\n\n| 寻址方式 | DELETE | 规则 GET | B 读取 | share 数 |\n|:--|:--|:--|:--|:--|\n| 按 name(`rc1_del_byname`) | **`204`** | `404` | `404` | — |\n| 按 id(`srule_2719031d-…`) | **`204`** | `404` | `404` | 1 → **0** |\n\n两者均从原先的无条件 `500 RULE_DELETE_FAILED` 变为 `204`,且授权同步撤回。验证结束后已 `kill $(lsof -ti tcp:38102)` 并清理临时数据库。\n\n## 文档\n\nCI 的 docs-drift advisory 点了 6 篇手写文档。逐篇核对后:**没有一篇存在失真断言** —— 撤回时机本来就**没有被写进文档**,这也正是该行为得以悄悄漂移的原因。\n\n- `permissions/sharing-rules.mdx` —— 补上缺失的章节:三个 reconcile 时机、delete 支持 id 与 name、启动清扫。\n- `permissions/permissions-matrix.mdx` —— 原文只说规则在记录 insert/update 时重新评估,属实但不完整(现在规则写入与启动也会 reconcile),已补正。\n- 其余四篇(`protocol/objectql/security.mdx`、`kernel/services-checklist.mdx`、`plugins/packages.mdx`、`releases/implementation-status.mdx`)仅列出该插件或其所属层次,无需改动。\n\n`content/docs/references/` 为自动生成,未触碰。\n\n## Changeset\n\n`@objectstack/plugin-sharing`: **minor**。定 minor 而非 patch 的理由:这改变了可观察的运行时行为 —— 规则处于 inactive 或已消失的 `source:'rule'` 授权会在升级后消失(包括为绕开旧行为而手工修补出来的数据),且 `DELETE` 从 500 变为真正删除,原先把该 500 当作\"不支持\"的调用方现在会真的删掉规则。\n\n## 边界\n\n未触及 `packages/spec`、公开导出或任何协议层;无可作者化 spec key 的移除或重命名。**无需决策拍板。**\n\n分支:`claude/v17-verification-defects-gnf9e6-sharing`\n\nFixes #4433\nFixes #4434"
+}

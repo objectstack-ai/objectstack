@@ -1,0 +1,32 @@
+{
+  "number": 4741,
+  "kind": "issue",
+  "title": "spec 双源清账 C7:PackageDependency(./cloud ≠ ./kernel)—— kernel 侧 D9(a) 改名,2 条",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T01:15:32Z",
+  "updated_at": "2026-08-03T07:56:59Z",
+  "closed_at": "2026-08-03T07:56:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4741",
+  "body": "#4535 第二批。基线行:`PackageDependency(+Schema) — [./cloud] ≠ [./kernel]`。\n\n**已裁决路线(前锋判定 + 维护者 2026-08-03 批复)**:D9(a) 改名 **kernel 侧** → `ResolvedPackageDependency`(备选 `PackageDependencyRequirement`,bikeshed 不阻塞);cloud 侧保名。\n\n**前锋证据摘要**(详见 [#4535 前锋评论](https://github.com/objectstack-ai/objectstack/issues/4535#issuecomment-5161308046)):键集完全不相交(0 共享)——cloud 侧 `{packageId, versionRange, optional}` 是 manifest 声明形,kernel 侧 `{name, versionConstraint, type, resolvedVersion}` 是 resolver 形。两侧三仓均零外部 importer(#4653 判则:零 importer ≠ 有死侧可删);cloud 侧嵌在 `PackageManifestSchema`、kernel 侧嵌在 `DependencyGraphNode` + `PluginSecurityProtocol`,都各自成立。\n\n**实施要点**:`kernel/plugin-security.zod.ts` + `RENAMED_DEFS` 承接(键随 def 改名 carry);major、零元数据迁移(C9/C12 先例论证形);幽灵页 `cloud/plugin-security.mdx` 随 gen:docs 自愈;基线删 2 行走门禁自证。**分区**:`./kernel` —— 与 C10/C13+C15/C16/C17 可并飞;注意与 #4657(`kernel/plugin-runtime`)同入口 barrel,不并飞为稳。\n\n**附带记录**(前锋发现,不塞本单):cloud `PackageManifestSchema` 与 kernel dep-resolution/SBOM 簇本身是 ADR-0049 零 reader 候选,留给后续 enforce-or-remove 扫描。"
+}

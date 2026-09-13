@@ -1,0 +1,37 @@
+{
+  "number": 4818,
+  "kind": "issue",
+  "title": "serve.ts 的 ADR-0093 D5 catch 把 OrganizationsPlugin 抛出的任何错误都改写成「包加载不出来」，并给出会误导的 OS_ALLOW_DEGRADED_TENANCY 解法",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T08:35:10Z",
+  "updated_at": "2026-08-03T10:44:12Z",
+  "closed_at": "2026-08-03T10:44:12Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4818",
+  "body": "发现于 cloud 侧实现 objectstack-ai/cloud#1020（多组织许可闸门归位到插件自身）。**不改本条不阻塞那边**——cloud 已用「在 app config 里更早拒绝」绕开——但 framework 这一侧的守卫确实把两种不同的失败合并成了一种，属于 ADR-0049「声明与执行不一致」那一类。\n\n## 现象\n\n`packages/cli/src/commands/serve.ts`（当前 main，约 1745-1810 行）：\n\n```ts\nconst tenancyPosture = resolveTenancyPosture();\nconst multiTenant = tenancyPosture !== 'single';\nif (multiTenant) {\n  try {\n    const mod: any = await importFromHost('@objectstack/organizations');\n    await kernel.use(new mod.OrganizationsPlugin());   // <- 也在 try 里\n    trackPlugin('Organizations');\n  } catch (orgErr) {\n    if (!resolveAllowDegradedTenancy()) {\n      console.error(chalk.red(\n        `\\n  ✖ FATAL: tenancy posture '${tenancyPosture}' was requested but ` +\n        '@objectstack/organizations could not be loaded,\\n' + ...\n        '      • set OS_ALLOW_DEGRADED_TENANCY=1 to boot in an explicitly degraded single-org state.\\n\\n'\n      ));\n      process.exit(1);\n    }\n    console.warn(chalk.yellow('  ⚠ DEGRADED TENANCY (OS_ALLOW_DEGRADED_TENANCY=1) ...'));\n  }\n}\n```\n\n这个 `catch` 同时覆盖 `importFromHost(...)` **和** `kernel.use(new mod.OrganizationsPlugin())`。所以插件在**构造/挂载**阶段抛出的任何错误——不只是模块解析失败——都会：\n\n1. 被打印成 **「@objectstack/organizations could not be loaded」**，即「包缺席」；\n2. 附带 **「set OS_ALLOW_DEGRADED_TENANCY=1」** 作为一条出路；\n3. 在该 env 已设时，被**降级为一条 warning 并继续启动**。\n\n## 为什么这是个问题\n\ncloud 的多组织运行时（私有包 `@objectstack/organizations`）现在会在构造时对**未授权**抛错（企业许可闸门）。这与「包缺席」是两件事，解法完全不同：\n\n| | 包缺席 | 未授权 |\n|---|---|---|\n| 事实 | 运行时不在这台机器上 | 运行时就在镜像里，但这个部署没被授权用它 |\n| 解法 | 装上它 / 改单组织 / 显式接受降级 | 拿一张许可 / 改单组织 |\n| `OS_ALLOW_DEGRADED_TENANCY=1` 该不该管用 | 该（operator 明确接受能力缺席） | **不该**（那是授权问题，共享逃生口等于把许可闸门搬到一个 env 变量上） |\n\n合并之后有两个具体后果：\n\n- **运维排错跑偏**：包明明在镜像里，日志却说它「加载不出来」，第一反应是去查模块解析 / NODE_PATH / prune，而真因是授权。\n- **逃生口串味**：`OS_ALLOW_DEGRADED_TENANCY=1` 会把「未授权」也吞成 warning 继续启动。它的语义只应是「包加载不出来但我接受降级」。\n\n## 建议\n\n只改错误分类，不动 D5 的态度（要求了隔离就不能假装有，仍然拒绝启动）：\n\n1. **把 `import` 与 `kernel.use(...)` 拆成两段 try**。前者失败 = 包缺席，走现有 D5 文案与 `OS_ALLOW_DEGRADED_TENANCY` 逃生口；后者失败 = 插件自己拒绝，属于另一类。\n2. **对插件抛出的、带结构化标识的错误原样上报并无条件退出**，不套用「could not be loaded」文案，也不认 `OS_ALLOW_DEGRADED_TENANCY`。判定建议用结构化字段而非 `instanceof`——该包是 `importFromHost` 动态加载的，CLI 与它可能持有不同模块实例。cloud 侧已经导出了这种形状（`err.code === 'MULTI_ORG_NOT_LICENSED'`，以及一个 `isMultiOrgLicenseError(err)` 谓词），framework 只需一个通用判据即可，例如「错误自带 `code` 且插件包导出了对应谓词」，或更中性的「插件抛出的错误一律原样上报，只有 import 阶段的失败才归入 D5」。后者更简单，也不需要 framework 知道任何 cloud 私有语义——**推荐这一条**。\n\n## 兼容性\n\n第 2 条只影响「插件存在但挂载失败」这条路径，今天它本来就走 D5 退出（除非设了 degraded）。变化是：文案变准确，且 degraded 逃生口不再能吞掉插件自己的拒绝。包真缺席的路径行为完全不变。\n\n## 关联\n\n- objectstack-ai/cloud#1020（许可闸门归位插件；cloud 侧已合的规避是在 app config 里、插件挂载之前先拒绝）\n- ADR-0093 D5（降级即拒绝启动）、ADR-0049（声明与执行不一致）、ADR-0022（离线许可 / license is deterrence, not DRM）\n"
+}

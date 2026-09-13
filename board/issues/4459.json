@@ -1,0 +1,35 @@
+{
+  "number": 4459,
+  "kind": "pull_request",
+  "title": "fix(objectql,driver-mongodb)!: findOne must say which record it wants, and executes every option it declares (#4419)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T08:22:55Z",
+  "updated_at": "2026-08-01T09:18:50Z",
+  "closed_at": "2026-08-01T09:18:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-01T09:18:49Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4459",
+  "body": "Closes #4419.\n\n## 先说结论：issue 的四条建议，三条已经在 `main` 上了\n\n对照 issue 观察的 `16.1.0` dist，当前是 `17.0.0-rc.1`：\n\n| issue 建议 | 现状 |\n|:---|:---|\n| (1) 拒绝未知查询键 | ✅ #4400 `rejectUnknownEngineOptions` |\n| (2) `filter` → `where` 统一折叠 | ✅ #4346 `foldEngineOptionAliases`，六个入口同一张槽表 |\n| (4) 修正 `createContext` 文档注释 | ✅ 已是 `where`，`skills/` 与 `content/docs/` 同步 |\n| (3) 让 `findOne` fail-safe | ❌ 本 PR |\n\n核对时又挖出**两处仍然活着的同类缺陷**——都不是 `filter` 这个键。三者合起来才是 #4419 的完整收口。\n\n## 1. `findOne` 空谓词守卫（**破坏性**，issue 建议 3）\n\n`findOne` 只读一行，所以谓词是调用方和**任意一条记录**之间唯一的东西。谓词缺失时结果不是 `null`，\n而是对象的**第一行**：一条真实、看起来合理、和请求毫无关系的记录，调用方现成的 `if (!row)` 抓不住它，\n它接着流进后面所有计算。issue 报告的下游后果——行项目从目录第一个产品取单价、\n\"这单是不是已经关闭了？\"对着一条无关记录求值而随后的写入却正确指向了目标 id——都源于这一条。\n\n抛异常会在开发期被抓住；`null` 会被空值检查抓住。一条看起来有效的错记录同时绕过了两者。\n\n**FROM → TO：**\n\n| 原来 | 现在写 | 含义 |\n|---|---|---|\n| `findOne(o)` / `findOne(o, {})` / `findOne(o, { where: {} })` | `findOne(o, { where: … })` | 匹配这个谓词的记录 |\n| | `findOne(o, { search: 'Acme' })` | 这次搜索找到的记录 |\n| | `findOne(o, { orderBy: [{ field, order }] })` | **这个顺序下的第一条**（最新的一条） |\n| | `find(o, { limit: 1 })` | 任何一行都行——并且调用点说出了这一点 |\n\n错误文案把四个出口都列出来。`find` / `count` 不动：返回或统计全表是诚实的答案，\n只有 `findOne` 隐含的\"随便给一条\"会把缺失的谓词变成一条自信的错记录。\n\n守卫读的是**调用方自己的**谓词，跑在 RLS / sharing 中间件注入之前：租户过滤器缩小的是可见行，\n它不会把\"随便哪一行排在前面\"变成调用方要的东西。判定口径与 #3896（空 criteria 分享不了任何记录）\n一致：缺失、`null`、`{}`。非普通对象的 `where`（表达式树）交给 driver——守卫只关掉\n\"确定匹配全表\"这一个洞，不关它证明不了的东西。\n\n## 2. `findOne` 静默丢 `search`\n\n这是 issue 标题本身，只是键名不同。ADR-0061 的 `search` → 跨字段 `$contains` 展开只写在 `find()` 里，\n而 `find` 和 `findOne` 被同一张合法键表校验——所以 `search` 在门口合法通过、原样挂上 AST、到达 driver。\n**没有任何 driver 读 `ast.search`**（展开是引擎的职责）。于是查询在完全无谓词下执行，`limit: 1` 完成剩下的事：\n`findOne({ search: 'Acme' })` 此前返回表里第一行。\n\n展开提成 `expandSearchOnAst`，`find` 和 `findOne` 各调一次。\n\n## 3. `MongoDBDriver.findOne` 丢 `orderBy` / `fields` / `offset`\n\n它只翻译 `query.where`，其余全丢——所以 `findOne({ orderBy })` 返回的不是最新的记录，\n而是集合扫描先碰到的那份文档。同一文件里的 `find` 和 `_findStream` 一直都处理这三个。\n\n这条必须和 (1) 一起修：守卫让无谓词的调用去用 `orderBy`，**一个出口如果在某个 driver 上被丢，它就不是出口**。\n调用方没给排序时仍然**不强加**排序（#4363 的规则，两侧一致）；`sql-driver` 里那条把 Mongo 当作\n\"已经一致\"的注释也改了——它引用的正是被丢的那个参数。\n\n## 4. 契约漂移闸门（防复发）\n\n遍历 `ENGINE_OPTION_KEY_SETS.findOne`，要求每个声明的键都有可观测效果：落到 driver 收到的 AST 上、\n落到 driver options 上，或写进一张显式的\"不执行 + 原因\"表（目前只有 `limit`，被契约上的 `limit: 1` 覆盖）。\n\n`search` 熬过了 #4346 和 #4400 两轮加固还活着，就是因为从来没人问过这个问题。\n\n## 验证\n\n- **反向验证**（这是关键，不是走过场）：临时撤掉引擎改动 → 新测试 25 个中红 18 个（含漂移 pin）；\n  撤掉 Mongo 改动 → 9 个中红 4 个。\n- objectql 1531 测试全绿；全仓 `pnpm test` **132/132** turbo task 绿。\n- objectql / driver-mongodb / driver-sql typecheck 干净；eslint 无输出。\n- `packages/spec` 8 个生成物闸门全过（本 PR 只加了 `contracts/data-engine.ts` 的 TSDoc，不影响生成物）。\n- **issue 原始 repro 对着构建产物跑通**（`persistence: false`，issue 里强调过这点）：\n\n  ```\n  findOne({where:{id:two.id}})    -> Two\n  findOne({filter:{id:two.id}})   -> Two          (#4346)\n  count({filter:{rev:100}})       -> 1            (#4346)\n  findOne({search:'Two'})         -> Two          (本 PR，此前是 One)\n  findOne({})                     -> THROWS       (本 PR，此前是 One)\n  findOne({orderBy:[name desc]})  -> Two\n  find({limit:1})                 -> [One]\n  ```\n\n## ⚠️ 一处必须说明的验证缺口\n\n`packages/plugins/driver-mongodb/src/mongodb-findone-query.test.ts`（真实 mongod 的端到端套件）\n**在我的环境里跳过了**——拉不到 mongod 二进制，和仓库里既有的 3 个 Mongo 套件行为一致。**不要当作通过**。\n\n所以我另写了 `mongodb-findone-options.test.ts`：不依赖服务器，直接断言交给 Mongo 的 `FindOptions`。\n这样做不是退让——bug 恰恰在那个 options 对象里才可读：一个三文档的集合按插入序稳定返回，\n**行级断言对一个完全不排序的 driver 也会通过**。这一套跑了并且通过了；端到端那套等 CI 上 mongod 可达时覆盖。\n\n## 变更文件\n\n| 文件 | 内容 |\n|:---|:---|\n| `packages/objectql/src/engine.ts` | `expandSearchOnAst` 提取 + `requireFindOnePredicate` + `findOne` TSDoc |\n| `packages/plugins/driver-mongodb/src/mongodb-driver.ts` | `buildFindOptions` 提取；`buildSortSpec` 加 `singleRowLookup` |\n| `packages/plugins/driver-sql/src/sql-driver.ts` | 仅修正那条已失真的 Mongo 对照注释 |\n| `packages/spec/src/contracts/data-engine.ts` | `IDataEngine.findOne` 契约 TSDoc |\n| `packages/objectql/src/engine-findone-contract.test.ts` | 新建：守卫 + search + 漂移 pin（25 例） |\n| `packages/plugins/driver-mongodb/src/mongodb-findone-{options,query}.test.ts` | 新建：无服务器断言 + 端到端 |\n| `packages/objectql/src/engine.test.ts` | 两处补 `where`（守卫在仓内的全部影响面） |\n| `content/docs/releases/v17.mdx`、`skills/objectstack-data/references/data-hooks.md`、`.changeset/` | 文档与破坏性变更集（含 FROM → TO） |\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Uy3zSSDGcJybydLSwGypFS)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 3355,
+  "kind": "issue",
+  "title": "v17: retire the overloaded `managedBy: 'system'` bucket — move the 8 admin/user-writable objects to a dedicated bucket",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "pm:dispatched",
+    "protocol:breaking"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-20T07:50:58Z",
+  "updated_at": "2026-08-02T16:21:00Z",
+  "closed_at": "2026-08-02T16:21:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3355",
+  "body": "Deferred breaking cleanup from the ADR-0103 addendum (v16 enum split, merged in #3352 / objectui#2739). **Not urgent — this is a v17 major-only change.**\n\n## Background\n\nADR-0103 (v16) split the overloaded `managedBy: 'system'` bucket **additively**: the 20 engine-owned objects moved to the new explicit `engine-owned` value, while the **8 admin/user-writable objects kept `managedBy: 'system'`** — which now means \"engine-managed schema, writable via `userActions`\". That leaves `system` as a *residual, still-overloaded* value: its name says \"system\" but it now specifically labels writable platform DATA.\n\nThe addendum recorded the end state as a v17 change:\n\n> Removing the overloaded `system` entirely — moving the 8 writable objects to a dedicated writable-platform-data bucket (or `config`) and retiring `system` — is a genuinely breaking rename deferred to **v17**.\n\n## Scope — the 8 objects still on `managedBy: 'system'`\n\nAll declare `userActions: { create: true, edit: true, delete: true }` (or a subset). Authz is the `DelegatedAdminGate` / RLS / permission sets — the `userActions` is an affordance declaration only.\n\n| Object | Home | Kind |\n| :--- | :--- | :--- |\n| `sys_user_preference` | `platform-objects/identity` | User-owned preferences |\n| `sys_approval_delegation` | `plugin-approvals` | Admin-authored delegation |\n| `sys_user_position` | `plugin-security` | RBAC link table (DelegatedAdminGate) |\n| `sys_position_permission_set` | `plugin-security` | RBAC link table |\n| `sys_user_permission_set` | `plugin-security` | RBAC link table |\n| `sys_notification_subscription` | `service-messaging` | Messaging config grid |\n| `sys_notification_template` | `service-messaging` | Messaging config grid |\n| `sys_notification_preference` | `service-messaging` | Messaging config grid |\n\n## The design decision (resolve first)\n\nWhat bucket do these move to? Two candidates:\n\n1. **A new `platform-data` value** — \"platform-defined schema holding admin/user-writable data; authz via delegated administration / RLS.\" Cleanest fit; keeps them distinct from admin-authored `config` and from user-owned `platform`. The affordance default would be writable (create/edit/delete: true, so most drop their `userActions`), or stay locked-by-default with `userActions` — TBD.\n2. **`config`** — reuse the existing admin-authored bucket. Simpler (no new value) but semantically loose: several of these are user-owned (`sys_user_preference`) or governed by delegated admin / RLS, not \"admin authored,\" and `config` suppresses CSV import which some may want.\n\nRecommend option 1 (a dedicated value) unless the affordance semantics of `config` prove an exact match.\n\n## Blast radius (mirrors the v16 split)\n\n- **framework** — spec enum + `CRUD_AFFORDANCE_DEFAULTS` (`packages/spec/src/data/object.zod.ts`); **remove `'system'`** and its default row; guard sets (`ENGINE_OWNED_BUCKETS`, `GUARDED_WRITE_BUCKETS`) if the new bucket needs listing; the 8 object declarations; tests; ADR update; `objects.mdx` + regenerated references.\n- **objectui** — `ManagedByBucket` union + `MANAGED_BY_BUCKETS` (`@object-ui/types`); `resolveCrudAffordances` DEFAULTS (`@object-ui/core`); `ManagedByBadge` variant + `resolveManagedByEmptyState` (`@object-ui/app-shell`).\n\n## Why v17 (breaking)\n\n- **Removes an enum value** (`system`) — any downstream app or package declaring `managedBy: 'system'` becomes invalid (a type error against the closed union, and unknown at runtime → `platform` fallthrough).\n- Unlike the v16 addition, this is not additive: it changes the meaning of existing declarations.\n\n## Not in scope / already handled\n\n- **Enforcement is unaffected** either way — `resolveCrudAffordances` + the engine write guard drive the policy off resolved affordances, not the bucket literal (verified: no code branches on `=== 'system'`). This is purely a taxonomy/self-documentation cleanup.\n- The v16 engine-owned split, dogfood verification, and the `userActions` de-dup are **done** (#3352, objectui#2739, objectui#2724).\n\n## Related\n#3343 (parent tracking issue) · #3352 · objectui#2739 · objectui#2724 · ADR-0103 (+ its v16 addendum)"
+}

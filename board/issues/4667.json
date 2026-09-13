@@ -1,0 +1,34 @@
+{
+  "number": 4667,
+  "kind": "issue",
+  "title": "清空剩余 6 条 authorWarn 死键 —— book ×2 / job.id / translation.validationMessages / app.homePageId / app.areas[].order（ADR-0049，v17 限时）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "protocol:breaking"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T15:34:56Z",
+  "updated_at": "2026-08-02T18:35:59Z",
+  "closed_at": "2026-08-02T18:03:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4667",
+  "body": "#4488 的活性审计把「声明看起来在做事、实际什么都不做」的键标成 `dead + authorWarn`。#4509、#4583 之后，账本里还剩 **8 条 authorWarn**。其中 **2 条**（`app.areas[].visible` / `requiredPermissions`）是 fail-open 授权闸门、需要单独决策，已在 **#4651**。\n\n本 issue 收剩下的 **6 条**——它们的共同点是**处方已经在账本里写死、没有待决问题**，全部走 remove。\n\n## ⏳ 为什么限时\n\n`@objectstack/spec` 现在 `17.0.0-rc.1`，`.changeset/pre.json` 仍是 `mode: pre`。**破坏性移除现在落地进 17.0.0；`changeset pre exit` 之后要等 v18。** 这 6 条会在整个 17.x 生命周期里继续以「看起来在配置什么」的姿态被作者写下去。\n\n## 六条 + 各自的路线\n\n⚠ **路线不是统一的**，而两条路线的账本纪律是**相反**的（strict 删除 ⇒ 删账本行，否则报 ORPHAN；`retiredKey` 墓碑 ⇒ **保留**账本行，否则报 UNCLASSIFIED）。逐条确认过：\n\n| # | 键 | 所在 schema | 路线 | 账本行 |\n|---|---|---|---|---|\n| 1 | `book.translations` | `BookSchema`（`strictObject`） | strict 删除 + `guidance` | **删** |\n| 2 | `book.groups[].translations` | `BookGroupSchema` —— **plain `z.object`，没有 `.strict()`** | **`retiredKey` 墓碑** | **留** |\n| 3 | `job.id` | `JobSchema`（`strictObject`） | strict 删除 + `guidance` | 删 |\n| 4 | `translation.validationMessages` | `ObjectTranslationDataSchema`（`strictObject`） | strict 删除 + `guidance` | 删 |\n| 5 | `app.homePageId` | `AppSchema`（strict） | 与同文件既有退役键一致 → `retiredKey` | 留 |\n| 6 | `app.areas[].order` | `NavigationAreaSchema`（strict + `strictUnknownKeyError`） | strict 删除 + `guidance` | 删 |\n\n第 2 条是这批最容易做错的一处：`BookGroupSchema` **不是** strict，所以平删会被 zod 静默 strip —— 一个静默 no-op 换成另一个静默 no-op（#2169 「Mark Done 什么也没做」的形状）。必须走 `retiredKey`。\n\n## 每条的证据与处方（摘自账本，均 `verifiedAt` 2026-08-01）\n\n**1 + 2 `book.translations` / `groups[].translations`** —— 没有任何 resolver 读 book 的内嵌翻译图；tree endpoint 和 portal 逐字渲染 `label`/`description`，通用 bundle 翻译器只覆盖 view/action/object/app/dashboard/page。**陷阱在于邻接**：两个文件之外的 `doc.translations` 在每条读路径上都是活的，所以这个图读起来像同一个特性。\n\n**3 `job.id`** —— `describe()` 写着「省略时默认取 `name`」，暗示一个**不存在的身份覆盖**。`name` 才是 job 在每一处的身份：调度键（`app-plugin.ts:833`）、`sys_job` 行键（db-job-adapter 按 `name` upsert 并自己铸 row id）、`JobExecution.jobId` 戳。没有任何代码读 `id`，所以两个只有 `id` 不同的 job 是同一个 job。\n\n**4 `translation.validationMessages`** —— 平台自己的签名按在上面**两次**：schema 示例给了具体覆盖（`{\"discount_limit\": \"折扣不能超过40%\"}`），而 #3778 的 legacy-key 迁移表把退役的 `errors:` 作者往这儿指。\n\n> ⚠ **移除时必须改写 `translation.zod.ts:291` 的 `errors` guidance**：\n> `` `errors` is the retired object-first dialect — use 'validationMessages' for rule messages ``\n> 它是一条指向死键的处方。这已经是同类第三次了（#4583 批 A 的 `READ_ONLY_BELONGS_ON_DATASOURCE`、#4509 的 `mapping.guidance.skipErrors`）——**退役一个键时，先 grep 有没有别的处方指着它**。\n\n**5 `app.homePageId`** —— schema 自己的对冲措辞（「if not set, usually defaults to the first navigation item」）描述的就是唯一存在的行为。没有 shell 读它：落地页**就是**第一个导航项（按 `order`），根落地走 `isDefault` 路由（objectui `RootLandingRedirect`）。⚠ `appUnknownKeyError` 里有三个 alias 指着它（`home` / `homepage` / `landingpage`，app.zod.ts:905-907），要一并处理。\n\n**6 `app.areas[].order`** —— 没有渲染器给 areas 排序（`AppSidebar` 和 `AppSchemaRenderer` 都按数组顺序迭代），声明顺序就是显示顺序。对照组是**真被排序**的 nav 项 `order`（`NavigationRenderer.tsx:1154`）——能用的兄弟键正是它读起来像活的原因。⚠ `NavigationAreaSchema` 的 alias 里有 `sort: 'order'`。\n\n## 需要一并做的\n\n- ADR-0087 D2 conversion + D3 链步：`app.homePageId` / `areas[].order` 可以**扩已有的 `app-dead-authoring-keys-removed`**（同 major 同类型，新开会撞 fixture 互斥契约）；book / job / translation 各需入册\n- 三处指向死键的 alias / guidance 清理（上面标 ⚠ 的）\n- `authorable-surface.json`：strict 删除的行**消失**是闸门 (a) 的绊线，要在同一 PR 里刻意删；`retiredKey` 的则变成 `… [RETIRED]`\n- `lint-liveness-properties.test.ts` 跑在**真实 shipped 账本**上，`book.translations` / `groups.translations` / `job.id` 的正向断言会随账本反转 —— #4583 和 #4509 都在这里翻过车，**预先处理**\n- `liveness/README.md` 的 book / job / translation / app 行 + 计数（计数用闸门的 `--json` 重算，不要手编）\n\n## 完成后\n\n`authorWarn` 只剩 #4651 那两条 —— 而那两条需要的是决策，不是补丁。"
+}

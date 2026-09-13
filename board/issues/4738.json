@@ -1,0 +1,32 @@
+{
+  "number": 4738,
+  "kind": "issue",
+  "title": "spec 双源清账 C13+C15(一单):DataSyncConfig + ConflictResolution(automation 死删 / integration 改名 / ui 保名)—— 4 条",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T01:14:42Z",
+  "updated_at": "2026-08-03T03:22:42Z",
+  "closed_at": "2026-08-03T03:22:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4738",
+  "body": "#4535 第二批,**两簇合并为一个实施单**(同文件区,拆开会自相冲突)。基线行 4 条:`DataSyncConfig(+Schema)`(`./automation` ≠ `./integration`)与 `ConflictResolution(+Schema)`(三源 `./automation` ≠ `./integration` ≠ `./ui`)。\n\n**已裁决路线(前锋判定 + 维护者 2026-08-03 批复,含 L1 否决位默认通过)**:\n- **automation 侧整体死删**(`DataSyncConfig` 19 键 + 其嵌入的 `ConflictResolution` 枚举):三仓零 importer、无嵌入方,仅活在手写 `SYNC_ARCHITECTURE.md` 的 L1 叙事里(L1 Simple Sync 确认退役);authorable keys 走 PR #4726 路径 2(真图不可达)自证,**以门禁实跑输出为准**。\n- **integration 侧 `ConflictResolution` D9(a) 改名 → `ConnectorConflictResolution`**(`RENAMED_DEFS` 承接,0-key carry);`DataSyncConfig` integration 侧**保名**(在 `ConnectorSchema.syncConfig:683` 活解析路径上)。\n- **ui 侧 `ConflictResolution` 保留正名**——它是独立概念(client/server/manual/last_write_wins),且是唯一有跨仓消费者的一侧:objectui `useOffline.ts` + `types/index.ts:1054` re-export + parity ratchet test 钉「必须保持 spec 导出」(改它 = 重演 objectui#3235 断链)。\n\n**前锋证据摘要**:automation vs integration 是近同概念但词表互斥(`destination_wins` vs `target_wins`、`merge`)、共享键语义冲突(`batchSize` 默认 100 vs 1000);详见 [#4535 前锋评论](https://github.com/objectstack-ai/objectstack/issues/4535#issuecomment-5161308046)。另注意第四个亲戚 `api/ConflictResolutionStrategy`(路由冲突,不同名,不进基线,勿动)。\n\n**实施要点**:`automation/sync.zod.ts` + test 删除;`SYNC_ARCHITECTURE.md` L1 段重写(手写文档,非 releases);strictness-ledger 按 `check:strictness-ledger` 实跑;2 个 manifest def 移除(#4725 纪律区,响亮打印);major、零元数据迁移、无可写 conversion。**分区**:`./automation`+`./integration`——**须待 C6 #4658 落地后才可起飞**(同 automation barrel);与 C7/C16/C17 可并飞;入队串行协议照旧。"
+}

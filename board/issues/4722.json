@@ -1,0 +1,38 @@
+{
+  "number": 4722,
+  "kind": "issue",
+  "title": "filterAppForUser 只走 app 顶层 navigation —— areas[] 里的 nav 项权限过滤仅客户端生效（#4651 移除假闸门后剩下的真缺口）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T21:49:23Z",
+  "updated_at": "2026-08-03T03:10:06Z",
+  "closed_at": "2026-08-03T03:10:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4722",
+  "body": "从 #4651 / #4718 分出的独立记录。**未指派 —— 只是记录。**\n\n## 现象\n\n服务端权威可见性闸门 `filterAppForUser`（`packages/rest/src/rest-server.ts`）只过滤 app 的**顶层** `navigation` 树：\n\n```\n:1814  检 app 级 requiredPermissions —— 不满足 return null\n:1823  const nav = Array.isArray(item.navigation) ? item.navigation : null;\n       if (!nav) return item;                       ← 没有 navigation 就直接原样返回\n:1826  filterNav 递归检 nav 项级 requiredPermissions / requiresService\n```\n\n`item.areas` 从头到尾没有被读到。所以一个写在 **area 内部**的 nav 项上的 `requiredPermissions` / `requiresService`：\n\n- **服务端不剥离** —— 该条目连同它的 `objectName` / `pageName` / `componentRef` 等指向，照常出现在 `/meta` 响应里；\n- **只有客户端** `NavigationRenderer.tsx:894` 的 `checkPerm` 会把它藏起来。\n\n也就是说，对 areas 型 app 而言，导航项级权限目前是**渲染层的礼貌**，不是服务端强制。改一次前端状态、或者直接读 `/meta` 的 JSON，就能看到本该被 gate 掉的条目。\n\n## 与 #4651 的关系（这是剩下的那一半）\n\n#4651 处理的是 **area 级**的两个键 `areas[].visible` / `areas[].requiredPermissions`——它们**任何一层都没有**消费者，是纯粹 fail-open 的假闸门，已按维护者裁决在 17.0.0 走路线 B 移除（#4718）。\n\n**本单是另一件事**：area **里面**的 nav 项闸门是真的被消费的，只是**只被客户端消费**。#4651 的处方对此没有回避，明写了限定并落进了三处：\n\n- 退役处方本身（`ui/app.zod.ts` 的 `AREA_REQUIRED_PERMISSIONS_RETIRED`：「Items nested under `areas[]` are gated in the shell only — the server does not walk `areas`」）；\n- 活性账本 `packages/spec/liveness/app.json` 的 `areas.navigation` 条目 note；\n- 一条 characterisation pin（`packages/rest/src/rest.test.ts`，`filterAppForUser — the enforced permission layers (#4651)` 里的最后一条），它**故意**把当前行为钉住，并在注释里写明：谁让它开始走 areas，就应该看到这条断言红掉、然后连同账本 note 一起有意识地改写。\n\n所以现状是「已知、已记录、已钉住」，但**没有 open issue 跟踪**——#4651 已随 #4718 关闭。本单补上这个跟踪位。\n\n## 需要决定（与 #4651 的路线 A 是同一组语义问题）\n\n要让服务端也过滤 areas，先得回答：\n\n1. 一个 area 里的项被过滤光之后，这个 area 本身还返不返回？（返回一个空 area，客户端切过去是一片空白）\n2. 顶层 `navigation` 与 `areas[].navigation` 同时存在时（schema 允许，`AppSchema with areas` 的 backward-compat 用例就是这个形状），两棵树的过滤要不要一致？\n3. 是否顺带补服务端的 `visible` CEL 求值？目前 `visible` **任何层级**都只在客户端求值（`AppSidebar.tsx:236` 经 ExpressionProvider），服务端从不绑定 `user` 上下文——所以「服务端强制」在 `requiredPermissions` / `requiresService` 上成立，在 `visible` 上不成立，这个不对称本身也值得写进文档而不是让人自己发现。\n\n## 影响面\n\n- `filterAppForUser` 的调用方：`/meta` 列表与单项 GET（后者在 `rest-server.ts:3298` 附近另有一次 app 级复检）。\n- 平台自带的 areas 型 app 有多少、其中多少条 nav 项带 `requiredPermissions`，需要清点一遍再判严重程度。\n- 不影响 app 级 `requiredPermissions`（服务端强制，#4718 已加 pin）与顶层 `navigation` 树的项级闸门（服务端 + 客户端双端，同上）。\n\n## 关联\n\n#4651（area 级假闸门，已移除）、#4718（实现 PR，含上述三处记录与 pin）、ADR-0045（hidden app 可见性）、ADR-0057 D10（`requiresService` 能力闸门）、ADR-0049（enforce-or-remove）、ADR-0078（false compliance）"
+}

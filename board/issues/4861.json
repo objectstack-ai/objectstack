@@ -1,0 +1,35 @@
+{
+  "number": 4861,
+  "kind": "pull_request",
+  "title": "feat(objectql)!: hook 的 condition 求不出值时 fail loud —— 抛错并中断该次操作 (#4775)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T10:33:59Z",
+  "updated_at": "2026-08-03T10:56:47Z",
+  "closed_at": "2026-08-03T10:56:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T10:56:45Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4861",
+  "body": "Fixes objectstack-ai/objectstack#4775\n\n按维护者拍板的**方案 B(全局 fail loud)**实现,并同批实现 #4800 的 **B1**(predicate 批量写的专门诊断)。\n\n## 做了什么\n\nhook 的 `condition` 求不出值时,原先是 `logger.warn` + `return false` —— 把「表达式说不」和「平台算不出表达式说什么」压成同一个结果。这两件事对不同 hook 是**相反方向**的风险:`before*` 守卫被吞成 `false` 会**放行**一次本该被拦的写入,`after*` 审计被吞成 `false` 会**漏记**一条没人会去找的记录。\n\n现在:求不出值 → 抛 `HookConditionError`,**中断该次操作**,错误点名 hook 与出问题的 key。`before*` 与 `after*` **同一个方向**,这是明知并接受的代价 —— 一条规则一个答案,平台不多长一条「要看 event 类别才知道失败方向」的隐性规则。\n\n**编译不过的 condition 也一并阻断。** 它原先的处置(`condition ignored`)是这次吞咽里更糟的一半:整个门被删掉了,于是声明来拦截的守卫放行了每一次写入、审计 hook 在每一次写入上都触发。改为在**调用时**报错而非 bind 时,这样一条坏 hook 不会把没人写入的 app 的启动卡死。\n\n## 没有改变的部分\n\n- condition 求值为 **FALSE** 仍然只是跳过,写入照常成功。只有「求不出值」是新行为。\n- **`onError` 未被接入,这是刻意的。** 它管辖的是 handler 抛错;condition 求值发生在 handler 之前。接进去会让 `onError: 'log'` 把本次要消灭的静默跳过原地复活,并长出第三套语义。`retryPolicy` / `async` 同理留在门外。\n\n## 错误文案与 #4649 同源\n\n新增 `cel-fault.ts`,由 hook `condition` 与 validation 谓词(`rule-validator.ts`)**共用**。两个因同一原因拒写的求值器不该用两种方言描述它 —— 与当初把 `materializeDeclaredFields` 抽出来共用是同一个理由。`rule-validator.ts` 这边是纯重构,对外错误形状不变。\n\n## B1:predicate 批量写的专门诊断 (#4800)\n\n批量写匹配 N 行、hook 只触发**一次**,所以 `previous` 不绑定、`record` 只是裸 payload。fail loud **不开例外**,但文案是诊断而不是谜语:点名 hook、说明「这是 predicate 批量更新,没有单一前置记录」、给出可行的路(改写掉 `previous`,或按 id 单记录写入)。\n\n批量写上的**未声明** key 仍然走普通的拼写错误文案 —— 那个确实是拼错,说成批量问题会把作者引去修一个拼写正确的字段。\n\n### 🔴 硬防线:record-change flow trigger 这条出路已核实,并**被否决**\n\n文案里**没有**写「改用 record-change flow trigger」。核实结论(实测,非推断):\n\n- `packages/triggers/trigger-record-change/src/record-change-trigger.ts:252` 通过 `engine.registerHook` 订阅的正是这同一批生命周期 hook;\n- 它读 `ctx.previous ?? ctx.__previous`(第 291-293 行);\n- 引擎只在**单 id 分支**赋值 `hookContext.previous`(`engine.ts:4888`),批量分支 `priorRecord` 始终为 null;\n- plugin-audit 的 `__previous` 兜底也在批量上直接返回(`audit-writers.ts:425`,`if (!id) return;`)。\n\n所以 flow trigger 在批量写上拿到的是**同样未绑定的 `previous`** —— 它不是出路。在一个修 declared ≠ enforced 的 PR 里,于错误信息中指一条自己没验证过的路,就是当场再造一个同类缺陷。**flow trigger 的批量语义已在报告中交回 PM 另立单。**\n\n## 落地前的全仓扫描(含 `examples/`)\n\n仓内**真正的** hook `condition` 只有两条,都在 showcase,且都是对的:\n\n| hook | condition | 结论 |\n|:---|:---|:---|\n| `showcase_audit_task_completion` | `previous.done != true && record.done == true` | 单记录写正常;这正是 #4784 教的写法 |\n| `showcase_warn_over_budget` | `record.spent != null && record.budget != null && record.spent > record.budget` | 已按 #4763/#4649 的教训用 `!= null` 而非 `has()` 守卫 |\n\nshowcase 三个 `update_record` 节点全部按 `id` 过滤,roll-up(`recomputeSummaries`)也是按 id 单记录更新,仓内没有任何一条已编写的批量写路径会踩到 B1 那一格。\n\n⚠️ 注意 `examples/app-showcase/src/automation/flows/index.ts` 里那些 `status == \"done\" && previous.status != \"done\"` 是 **flow / automation 的扁平作用域**,与 hook `condition` 的 `record` 作用域是**两个面**,不受本改动影响。\n\n### 扫描当场揪出一条从没真正生效过的条件\n\n`hook-metrics.test.ts` 里的 `condition: 'name == \"skipme\"'` 是**裸标识符**。hook condition 是 `record` 作用域的,裸标识符解析不到任何东西,该表达式**每次调用都在 fault** —— 那条测试断言的「skip」来自旧的吞咽(fault → warn → false),而不是来自一个回答了「否」的条件。这正是本 issue 预期会揪出来的东西。已改为 `record.name == \"skipme\"`,同样的意图,但真的被求值了。\n\n`hook-binder.test.ts` 里那条 pin 则显式接受两种结果(「要么编译期忽略(handler 跑)、要么求值 false(跳过)…只断言没崩」),那份宽容本身就是缺陷;已改为断言拒绝、`uncompilable` 原因与 handler 未运行。\n\n## 破坏性 & changeset\n\n已加 `.changeset/hook-condition-fail-loud.md`,标 **major**,写清「存量靠静默跳过苟着的 hook 会开始让写入失败」,并附迁移清单(拼错/退役字段、未加保护的 null 比较、批量上的 `previous`、裸标识符)。\n\n## 验证\n\n| 命令 | 结果 |\n|:---|:---|\n| `pnpm --filter @objectstack/objectql test` | **110 files / 1741 tests passed** |\n| `pnpm --filter @objectstack/objectql typecheck` | `tsc --noEmit` 无输出 |\n| `eslint`(全部改动文件) | 0 errors |\n| `@objectstack/rest` | 38 / 573 passed |\n| `@objectstack/runtime` | 80 / 1092 passed |\n| `@objectstack/plugin-approvals` | 18 / 402 passed(含新落地的 `record-lock-multi-update`) |\n| `@objectstack/plugin-sharing` | 11 / 243 passed |\n| `@objectstack/trigger-record-change` | 4 / 51 passed |\n| `turbo run build`(全仓,排除 docs) | 71 tasks successful,含 `example-showcase` |\n| `@objectstack/spec check:generated` | 8 / 8 up to date |\n\n新增 `hook-condition-fail-loud.test.ts`(504 行)覆盖:求不出值即拒绝且点名 hook 与 key、与 #4649 共用同一句文案、`before*`/`after*` 同向且无 event 分档、FALSE 仍只是跳过(改动的爆炸半径,最容易误伤的一条)、`onError`/`retryPolicy` 不参与、B1 四格诊断、以及编译不过的 condition。\n\n## 归口约束\n\n未改动 `skills/**`、`packages/lint`、`content/docs/**`、`packages/spec/**`。改动仅落在 `.changeset/` 与 `packages/objectql/**`。`skills/objectstack-formula/SKILL.md` §5 该补的那一行已写进给 PM 的报告,由 #4814 在对侧车道补上。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015Br2xsJsczFsTR9bvbh2Ny)_"
+}

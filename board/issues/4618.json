@@ -1,0 +1,30 @@
+{
+  "number": 4618,
+  "kind": "issue",
+  "title": "chore(spec): retire IDataEngine.batch? per ADR-0119 D3 — declared-but-unimplemented, zero callers",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T11:20:31Z",
+  "updated_at": "2026-08-02T21:02:48Z",
+  "closed_at": "2026-08-02T21:02:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4618",
+  "body": "**ADR-0119 D3** rules `IDataEngine.batch?` retired. This issue is the mechanical removal.\n\n> **ADR renumbered.** This issue originally cited ADR-0118. That record is now **ADR-0119** (`docs/adr/0119-plugin-reachable-transactions-and-honest-atomic-batch.md`) — it merged the same day as an unrelated ADR-0118 (非用户 actor 的平台契约), and the earlier merge holds the number.\n\n## The finding\n\n`packages/spec/src/contracts/data-engine.ts:97-100`:\n\n```ts\n/**\n * Batch Operations (Transactional)\n */\nbatch?(requests: DataEngineRequest[], options?: { transaction?: boolean }): Promise;\n```\n\n- **No engine implements it.** `ObjectQL` has no `batch` method; there is no other engine in the tree.\n- **No caller invokes it.** `DataEngineRequest` is imported by exactly one non-spec file — the contract declaring it.\n- **The doc comment is three words**, specifying nothing about partial failure, ordering, cross-object refs, rollback scope, or what `transaction: false` means. Contrast the deliberate, evidenced optionality of its neighbours `getDefaultDriverName?`/`getDriverByName?` (`:107-118`), which name their implementer and their probing caller.\n- Its `DataEngineRequestSchema` union (`packages/spec/src/data/data-engine.zod.ts:706-717`) even nests batch requests recursively — a shape nobody designed against because nobody built it.\n- The only \"test\" is `packages/spec/src/contracts/data-engine.test.ts:162-177`, which builds an ad-hoc object literal with a `batch` property and asserts it is defined. It pins the type, not an implementation.\n\nA declared capability that cannot be exercised is precisely ADR-0049's enforce-or-remove target. ADR-0119 D1 (`transaction` on `IObjectQLEngine`) and D4 (real atomic `batchData`) now cover its stated purpose in-process, and `POST {basePath}/batch` covers it on the wire.\n\n## Work\n\nFollow the `spec-property-retirement` playbook, **contract-member route** — this is a TypeScript contract member, not an authorable Zod metadata key, so there is no `retiredKey` tombstone to add (nothing can \"author\" it; the removal is invisible to metadata authors and visible only to TS consumers).\n\n1. Delete the member at `data-engine.ts:97-100`; drop the type-only test case at `data-engine.test.ts:162-177`.\n2. Decide `DataEngineRequest` / `DataEngineBatchRequestSchema`'s fate (`data-engine.zod.ts:694-717, 764`) — if the union has no other live reader after the member goes, it retires with it; if the wire-side batch still uses part of it, keep exactly that part and say so.\n3. Rebuild spec **before** running the generated-artifact check (`pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec check:generated`) — `check:api-surface` reads `dist`, and a stale `dist` produces a phantom-removal diff.\n4. Changeset carrying the FROM → TO migration text, since it ships to consumers as the package CHANGELOG: *\"`IDataEngine.batch?` is removed. It was never implemented by any engine and had no callers. For in-process multi-write atomicity use `IObjectQLEngine.transaction(cb)`; for a batch over one object use the metadata protocol's `batchData` with `options.atomic: true`; on the wire use `POST {basePath}/batch`.\"*\n5. Upgrade-guide entry per ADR-0087's removal discipline.\n\nRefs: ADR-0119 D3, ADR-0049, #4612."
+}

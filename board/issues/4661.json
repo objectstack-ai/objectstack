@@ -1,0 +1,34 @@
+{
+  "number": 4661,
+  "kind": "issue",
+  "title": "spec 双源清账 C8:RetryPolicy / RetryPolicySchema(./automation ≠ ./system)—— 2 条",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "protocol:breaking"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T14:49:11Z",
+  "updated_at": "2026-08-02T16:49:54Z",
+  "closed_at": "2026-08-02T16:49:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4661",
+  "body": "#4535 的 C8 簇,**v17 收口四簇之一**。基线行:\n\n```\nRetryPolicy       — [./automation (type)]  ≠ [./system (type)]\nRetryPolicySchema — [./automation (const)] ≠ [./system (const)]\n```\n\n## ⚠️ 本簇与 C5 / C6 的关键区别:它真的在作者面上\n\nC5 / C6 的两侧都**不从 `BUILTIN_METADATA_TYPE_SCHEMAS` 可达**,所以它们的可作者化 key 是过度收集产物,vanish 只是形式上的。**C8 不是** —— 静态引用图复算确认 `RetryPolicySchema` **从元数据根集合可达**(automation 侧经 `control-flow.zod.ts` 的 `retry:` 进 `FlowSchema`)。\n\n**后果:本簇任何可作者化 key 消失都是真的会静默剥离作者写的值**(schema 非 `.strict()`,Zod 直接吞)。tombstone 要求是实打实的,不是形式主义。可作者化 key:automation 5 / system 3(自行复核)。\n\n## 已知线索(开工请自行验证,不要采信)\n\n- `automation/control-flow.zod.ts:179` `export type RetryPolicy = z.input<typeof RetryPolicySchema>`;`:194` `retry: RetryPolicySchema.optional()`(try 区域)。\n- `system/worker.zod.ts:94` 另有一个**同名不同物**的 `TaskRetryPolicySchema`(`:152` `retryPolicy:`)—— 注意别把它和 `system` 侧真正的 `RetryPolicySchema` 搞混,后者声明点要自己找。\n- 两侧 key 数不同(5 vs 3)说明形状不是简单同构,收敛方向要选得让**并集**存活,或对被丢的键走完整 ADR-0087。\n\n## 纪律(#4535 §1–§4,开工前必读)\n\n1. **默认路线:收敛 + re-export。** 优先选让两侧 key **并集**存活的方向 —— 不删 key 就不需要 tombstone。\n2. **若必须丢键 ⇒ 完整 ADR-0087**:`retiredKey()` + `src/conversions/registry.ts` 的 D2 conversion + D3 chain step + major changeset。本簇可达,所以这条会真的被触发,别指望绕过。\n3. **⛔ 禁止手编 `packages/spec/authorable-surface.json`**(#4650)。删基线行 = 删证据,门禁不拦但这是明令禁止的。`gen:schema` 只允许因**新增** key 而重写它。\n4. **⚠️ 注意 #4659**:检查 (b) 按 **leaf name** 匹配 conversion surface,无关 conversion 也能满足它。也就是说**门禁绿不等于你的 conversion 真的对上了** —— 自己核对 surface 是否真指向你 retire 的那个 def,别让门禁替你判断。\n5. **改名成本取决于改哪侧**:key 记作 `${defKey}:${name}`,改名 ⇒ 旧 `defKey` 全部 key vanish。两侧都有 key,所以本簇**没有零成本改名侧**。\n6. **回归 pin 用运行时模块命名空间断言**,不要用编译期条件类型(#4642 已证空转);**必须 sabotage 验证**并在 PR 贴输出。\n7. **判不出来就升级,不要猜**(#4653 / #4658 先例)。分析本身就是交付物。\n8. ⛔ 不要碰 `content/docs/releases/`。\n\n## 验收\n\n- 基线删掉上面 2 行,**22 → 20**(若 C5 先落则顺延),只减不增。\n- 全绿:`build`、`check:dual-source-exports`、`check:generated`、`test`,加源码审计组(`check:liveness` / `check:strictness-ledger` / `check:empty-state` / `check:variant-docs` / `check:exported-any` / `check:skill-examples`),以及全仓 `pnpm typecheck`。\n- 删 zod 形状则同步 `docs/audits/2026-07-unknown-key-strictness-ledger.md`。\n- changeset 一份,`@objectstack/spec` major,含 FROM → TO 与迁移指引。\n\n关联:#4535(主单)、#4650 / #4659(门禁漏洞)、#4642(pin 空转)、ADR-0049、ADR-0087、ADR-0104"
+}

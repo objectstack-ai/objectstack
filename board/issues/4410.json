@@ -1,0 +1,32 @@
+{
+  "number": 4410,
+  "kind": "issue",
+  "title": "datasource.config 至今无人校验：驱动 configSchema 是声明但完全惰性的（ADR-0049 enforce-or-remove，#4001 收尾发现）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T12:22:27Z",
+  "updated_at": "2026-08-01T08:54:31Z",
+  "closed_at": "2026-08-01T08:54:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4410",
+  "body": "从 #4001 的收尾核查中发现。#4207 把 `DatasourceSchema` 顶层收紧成 `.strict()` 时，把 `config` 作为「逃生口」留开，理由写在 `data/datasource.zod.ts` 的模块注释里：\n\n> `config` is per-driver by construction … so it stays `z.record`. **The driver's own `configSchema` is what validates it.**\n\n**这句话是假的。** 它在两个独立的层面上都不成立。\n\n## 证据\n\n1. **没有东西去填它。** `DriverDefinitionSchema.configSchema` 声明为 `z.record(z.string(), z.unknown())`（`data/datasource.zod.ts:284`），而仓库里仅有的两个驱动定义都把它设成空对象：\n   - `data/driver/memory.zod.ts:279` — `configSchema: {}`\n   - `data/driver/mongo.zod.ts:67` — `configSchema: {}, // Will be populated with JSON Schema version of MongoConfigSchema at runtime`\n\n   那句注释承诺的 \"at runtime\" 填充不存在。\n\n2. **没有东西去读它。** 全仓 grep `configSchema` 的命中全部属于 automation 的**流程节点** descriptor（那个是活的，两回事）。**驱动**的 `configSchema` 在本仓没有任何读取点。四个驱动插件（`driver-memory` / `driver-mongodb` / `driver-sql` / `driver-sqlite-wasm`）也都没有拿任何 schema 去 parse 自己的 config。\n\n3. **对应的 zod schema 存在，但接在空气上。** `PostgresConfigSchema` / `MongoConfigSchema` / `MemoryConfigSchema` 都在 `data/driver/` 里写得很完整（连接串、host、port、pool、ssl…），是纯导出，没有任何消费者。\n\n## 为什么这个比一般的「声明未执行」更值得修\n\n因为 #4001 的修复**主动把作者指引到这个洞里**。`belongsInConfig` 给出的处方原文是：\n\n> `host` is a driver connection detail — it belongs inside `config` … Move it to `config: { host: … }`; **the driver's own configSchema validates it there.**\n\n于是一个把 `host` 写在顶层的作者——那是**现在会报错**的位置——被平台以权威口吻，指引到一个**同样的拼写错误重新变得静默**的槽里。这正是 #4001 要消灭的失效模式，由 #4001 自己的修复重现了一次。\n\n具体后果举例：`config: { hostname: 'db.internal' }`（正确的键是 `host`）今天完全静默——`z.record` 收下它，驱动读不到 `host`，于是**连到 localhost 默认值**上。这与 #4001 描述的原始 bug 逐字同构，只是低了一层。\n\n对 AI 作者尤其糟糕：它拿到成功响应，报告「数据源已配置」。\n\n## 处置\n\n`#<PR>` 已经先做了止血——把那句假承诺删掉，改成指向 per-driver schema 的诚实措辞，并把 `data/driver/` 三个文件补进 #4001 的严格性账本。**但那只是不再撒谎，洞还在。**\n\n本 issue 追踪真正的二选一（ADR-0049 enforce-or-remove）：\n\n- **enforce** —— 让 `configSchema` 真的生效：驱动注册时用自己的 zod schema（或其 JSON Schema 投影）parse `datasource.config`，未知键按 #4001 的标准配可修错误信息拒绝。注意这条要先回答一个问题：`configSchema` 的 JSDoc 说它 \"Used by the UI to generate the connection form\" —— 那是 `../objectui`，本仓看不到，**需要先确认前端是否真的在读它**，否则可能是第三处虚假声明。\n- **remove** —— 如果结论是驱动 config 就该保持 schemaless，那么 `configSchema` 字段和三个 `*ConfigSchema` 导出都属于 ADR-0049 的「声明但不执行」，应当按 `spec-property-retirement` 走退役流程，而不是继续摆在那里让人以为它管用。\n\n倾向 **enforce**：三个 schema 已经写好了，`datasource` 是注册元数据类型，而 config 是**唯一**一个作者会写、却在收紧之后仍然完全无校验的槽。\n\n## 参考\n\n- #4001（未知键静默剥离战役）、#4207（datasource 收紧那一步）\n- ADR-0049 enforce-or-remove、ADR-0078 no-silently-inert-metadata\n- `docs/audits/2026-07-unknown-key-strictness-ledger.md`\n- AGENTS.md Prime Directive #10（「never advertise a capability the runtime doesn't actually deliver」）"
+}

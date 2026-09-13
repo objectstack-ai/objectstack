@@ -1,0 +1,37 @@
+{
+  "number": 4804,
+  "kind": "issue",
+  "title": "`check:i18n` 应把 unknown-authoring-key lint 判为失败 —— 否则第十份 extract 配置还会照抄同一个错",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T07:51:48Z",
+  "updated_at": "2026-08-03T10:26:49Z",
+  "closed_at": "2026-08-03T10:25:37Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4804",
+  "body": "`Blocked-by: #4736`\n\n由 #4736 的 dev 在实施中提出,PM 裁定采纳方案 A 并立单。**#4803 合并后可派发。**\n\n## 背景\n\n#4736 清掉了九份 `scripts/i18n-extract.config.ts` 里未声明的 `name:` 键。但那九份是**同一个错被拷贝了九次** —— 说明后来者是照着第一份抄的,而**没有任何东西拦住第一份**。\n\n现状:unknown-authoring-key lint 只打 warning(还带 dedupe,九个包只印一次),出现在一次**全绿**的 `check:i18n` 运行里。清掉现存九处之后,第十份新配置写错时,得到的仍然是同一条被人眼过滤掉的 warning。\n\n## 采纳方案:A —— 在 `scripts/check-i18n-bundles.mjs` 里把 lint 签名判为失败\n\n在该脚本里检测 CLI stdout 中 unknown-authoring-key lint 的签名(`is not a declared stack key` / `is not a declared * key`),命中则非零退出。约 5 行。\n\n`findConfigs` 已经会自动发现 `packages/` 下新增的配置,所以**新包一落地就自动进保护**,不需要维护清单。\n\n## 为什么是 A,不是 B / C(PM 裁定,附两轴)\n\ndev 给了四个选项,分析准确,我采纳其推荐并补充判据:\n\n**A(gate 脚本内判失败)**\n- *长远合理性*:✅ 唯一一个**不扩大任何对外契约面**的选项。它把「lint 已经看见的问题」变成「CI 会拦的问题」,落在 gate 脚本这一层,不碰 spec、不碰 CLI 的公开退出码。代价诚实说明:改变了 `check:i18n` 的 gate 语义(此前只判 bundle drift),需要在脚本的文档/错误信息里写清它现在还管什么。\n- *防 AI 写错*:✅ 这正是「让错误在写的时候就被拒绝,而不是靠下游容忍」的形状。九份配置全写错、九次都只得到一条被过滤掉的 warning —— **这就是 AI 生成的 metadata 错误藏身并繁殖的地方**。\n\n**B(让 `os i18n extract` 自己非零退出)** —— 覆盖更广,但把一个内部卫生问题写进了**公开 CLI 的退出码契约**,会打断现有调用方,需要 changeset。这是面向用户的行为变更,不该顺手做;若将来真要做,应当单独立单并按公开契约变更处理。\n\n**C(`ObjectStackDefinitionSchema` 改 `.strict()`)** —— 排除。爆炸半径覆盖全仓每一个 `defineStack`,而且 `metadata-authoring-lint.ts` 明确写了 schema 一旦 strict 这条 lint 就要自行静默 —— 等于用一次大迁移换一个小噪音,两头不讨好。\n\n**D(什么都不做)** —— 排除。#4736 清的是**症状**;不装拦截器,第十份照抄是时间问题,而且下一次可能不是无害的 `name:`。\n\n## 验收\n\n1. 一份含未声明 stack key 的 `i18n-extract.config.ts` 会让 `pnpm check:i18n` **非零退出**,错误信息指名是哪个包、哪个键、以及\"它在 load 时被丢弃\"这个后果;\n2. 现有九个包(#4736 清理后)**全绿**,不产生任何新噪音;\n3. bundle drift 的原有判定**不受影响**(两类失败要能分辨,不要合并成一条模糊的错误);\n4. **反向验证必做**:在 #4803 合并**之前**的 commit 上跑这个门禁,必须报出那九处;在 main 上必须干净。一个只在当前 main 上绿的门禁,无法证明它抓得到东西 —— 参见 #4690(`check:react-declaration-parity` 无 MANIFEST 时静默 skip 退出 0,永远不可能红)。\n\n## 关联\n\n- #4736 / PR #4803 —— 清掉现存九处(本单挂它,合并后再动手,否则门禁上线即红)\n- #4167 —— unknown-authoring-key lint 本身\n- #4690 —— 「门禁必须能红」的反面教材,验收第 4 条就是冲它去的\n- #4777 —— 同属「把已知缺陷形状变成机械拦截」这一类。⚠️ 那条落在 `packages/lint`,车道待定(见 #4604);**本单落在 `scripts/check-i18n-bundles.mjs`,不在 `packages/lint`**,归主 backlog PM。"
+}

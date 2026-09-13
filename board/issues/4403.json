@@ -1,0 +1,35 @@
+{
+  "number": 4403,
+  "kind": "pull_request",
+  "title": "fix(automation,objectql,spec,approvals): flow system-write audit attribution (#4366) + structured reassign hand-off (#4365)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T11:43:29Z",
+  "updated_at": "2026-07-31T12:14:44Z",
+  "closed_at": "2026-07-31T12:14:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-31T12:14:42Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4403",
+  "body": "Closes #4365, closes #4366。两个都是审批/审计归因的可读性问题,一次分支两个 commit 分别修复。\n\n## #4366 — `runAs:'system'` 流回写的审计行无归因(bug 修复)\n\n`runAs:'system'` 流的数据写入完全无归因:run context 只有 `{ isSystem: true }`,audit writer 落 `user_id=null, actor=null`,console 历史渲染「未知用户」。`svc:*` 归因通道(ADR-0014 D2,`ExecutionContext.actor`)本来就是为这类写入者设计的,只是从未端到端接通——包括 issue 里没写到的第三环:objectql `buildSession()` 根本不透传 `actor`,audit writer 的 `userId ?? session.actor` 回退在引擎路径上不可达。\n\n- **service-automation**:`resolveRunContext` 在唯一构造点随 `runAs`/`flowRunId` 打上 `flowName`;`resolveRunDataContext` 给 system run 的数据上下文标 `actor: 'svc:flow:<flowName>'`(无名回退 `svc:flow:automation`)。\n- **objectql**:`buildSession` 透传 `ExecutionContext.actor` → hook session。\n- **spec**:`AutomationContext.flowName`(引擎打标的溯源字段)+ hook session schema 的可选 `actor` 字段。\n\n仅归因,不涉授权:任何安全中间件都不 key 在 `actor` 上;有 `userId` 时依旧 `userId` 优先。\n\n## #4365 — 转签审计默认 comment 落裸用户 ID(schema/契约改进)\n\n转签「谁转给谁」此前只存在于默认自由文本 comment(`\"<from_id> → <to_id>\"`)里,客户端既不能可靠解析也没法可读渲染。\n\n- `sys_approval_action` 新增 `reassign_from` / `reassign_to`(`lookup('sys_user')`),`reassign()` 写入;\n- `comment` 回归纯用户输入,没填就不落;\n- `listActions()` 随 `actor_name` 一并解析 `reassign_from_name` / `reassign_to_name`;\n- `ApprovalActionRow` 契约声明 4 个新字段;i18n bundle 重生成并补 zh-CN/ja-JP/es-ES 翻译。\n\n存量行保留旧 comment;客户端优先结构化字段、缺失时回退 comment(objectui 侧渲染 PR 另开)。\n\n## 验证\n\n- 单测:crud-runas 24/24、plugin-approvals 全套、objectql 全套、spec 全套、plugin-audit 46/46;typecheck 全过;`check:generated` 全绿(docs 已重生成);i18n 两门禁 OK。\n- showcase 真机 dogfood:reassign 后 actions API 返回结构化字段+双方显示名、无默认 comment;`showcase_invoice_signoff` reject 边系统回写的 `sys_audit_log` 行 `actor=svc:flow:showcase_invoice_signoff`;配 objectui HMR console 验过「从 A 转给 B」与「系统」徽标渲染。\n\nchangeset:`patch`(#4366)+ `minor`(#4365,新增契约字段)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

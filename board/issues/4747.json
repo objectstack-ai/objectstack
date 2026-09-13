@@ -1,0 +1,36 @@
+{
+  "number": 4747,
+  "kind": "issue",
+  "title": "每个 `os migrate` 子命令关停时，悬空引用巡检都会把 `sys_metadata` / `sys_view_definition` 报成 `unreadableObjects`（连接已关闭）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T01:49:14Z",
+  "updated_at": "2026-08-03T08:52:08Z",
+  "closed_at": "2026-08-03T08:52:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4747",
+  "body": "发现自 #4556 的实现过程（PR #4742）跑真实 CLI 时。**未认领。与 #4556 无关**，任何 `bootSchemaStack` 系的子命令都能复现。\n\n## 复现\n\n```bash\ncd examples/app-crm\nOS_DATABASE_URL=\"file:/tmp/t.db\" node packages/cli/bin/run.js migrate recorded-by --json\n```\n\n命令**正常返回** JSON、退出码正确。但在返回之后、进程关停时，稳定打出：\n\n```\nERROR Find operation failed {\"object\":\"sys_metadata\",\"error\":{\"message\":\"Unable to acquire a connection\", …}}\nWARN  [integrity] dangling-reference audit could not list an object {\"object\":\"sys_metadata\",\"error\":\"Unable to acquire a connection\"}\nERROR Find operation failed {\"object\":\"sys_view_definition\",\"error\":{\"message\":\"Unable to acquire a connection\", …}}\nWARN  [integrity] dangling-reference audit could not list an object {\"object\":\"sys_view_definition\",\"error\":\"Unable to acquire a connection\"}\nWARN  [integrity] stored references that resolve to nothing (#4551)\n      {\"scanned\":0,\"dangling\":0,\"undetermined\":0,\n       \"unreadableObjects\":[\"sys_metadata\",\"sys_view_definition\"],\n       \"truncatedObjects\":[],\"references\":[]}\n```\n\n即 #4551 的巡检在 stack shutdown 之后才跑到这两个对象，此时 knex 连接池已经关了。\n\n## 为什么值得修，而不只是噪音\n\n巡检自己的文档把这件事写成了它最在意的一条设计原则：\n\n> ## Unknown and absent are DIFFERENT answers\n>\n> The single most important property here. An existence probe that cannot run … must never be recorded as \"the target does not exist\" … Together they are what stops \"0 dangling\" from ever being read as \"everything is fine\".\n\n`unreadableObjects` 这个桶存在的意义，正是让「我没能检查」区别于「我检查了，没问题」。而现在它在**每一次**正常的 CLI 调用里都非空 —— 一个恒定为真的告警不再携带任何信息，它训练操作者忽略这个桶。等到真有一个对象因为数据源故障读不出来时，那条信息会淹没在同样的两行里。\n\n这也正是 AGENTS.md「Route & surface ownership」第 3 条要防的形态：\n\n> **3. Absence must be loud.** … a verifier that silently degrades (reusing a stale build, skipping a check it could not run) is worse than no verifier, because it reports success.\n\n这里是它的镜像：一个**永远**报告自己降级了的巡检，与不报告一样没有信息量。\n\n另外那两行 `ERROR Find operation failed` 是引擎层打的，级别是 ERROR，出现在一条**成功**的命令输出里 —— 对 CI 日志抓 ERROR 的流水线是直接的误报源。\n\n## 可能的方向（未验证，需要看巡检的触发时机）\n\n- **A. 巡检在 shutdown 之前跑完，或在 shutdown 时跳过。** 一次性 CLI 进程本来就不该在关停路径上做完整巡检 —— 它的定位是启动期/巡检期的可观测性，不是退出钩子。\n- **B. 关停中的连接失败不进 `unreadableObjects`。** 把「引擎正在关停」与「数据源不可达」区分开：前者不是一个发现，不该占用那个桶。\n- **C. 一次性命令进程默认不跑这个巡检**（由 `os serve` / 巡检专用命令承担）。\n\n倾向 **A + B**：A 解决时序，B 保证即使时序再次被打破，这个桶也不会被非发现污染。C 单独用的话会让巡检在 CLI 场景永久失明，与它的存在意义相悖。\n\n## 边界\n\n- 不涉及 #4556 的 `recorded_by` 改动 —— 在那条 PR 之前就存在，之后也照旧。\n- 与 #4743（豁免范围是否收窄）是不同的问题：那条问「该不该查这些字段」，这条问「查的时候连接还在不在」。\n\nRefs #4551、#4556（PR #4742）、#4743。\n"
+}

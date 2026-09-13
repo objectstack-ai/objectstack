@@ -1,0 +1,32 @@
+{
+  "number": 4486,
+  "kind": "issue",
+  "title": "docs: data-engine.mdx 的 IDataEngine 代码块漏掉四个读方法的 options 参数——漏的正是 #4251 修的那个",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T09:43:03Z",
+  "updated_at": "2026-08-01T13:10:33Z",
+  "closed_at": "2026-08-01T13:10:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4486",
+  "body": "**文件**：`content/docs/kernel/contracts/data-engine.mdx`（手写文档，非自动生成）\n**发现于**：核对 #4419 时（PR #4459）。文档漂移先于该 PR 存在，当时没混进一个破坏性 PR。\n**核实基线**：`main` @ `ec975f1`\n\n## 摘要\n\n文档里的 `IDataEngine` 代码块把**四个读方法**都写成两个参数，漏掉了尾部的\n`options?: BaseEngineOptions`。真实契约四个都有。\n\n漏掉的恰恰是 #4251 修复的那个参数——当初正因为它缺失而出过 bug。\n\n## 现状对照\n\n`content/docs/kernel/contracts/data-engine.mdx:33-38`：\n\n```typescript\nexport interface IDataEngine {\n  // Query\n  find(objectName: string, query?: EngineQueryOptions): Promise<any[]>;\n  findOne(objectName: string, query?: EngineQueryOptions): Promise<any>;\n  count(objectName: string, query?: EngineCountOptions): Promise<number>;\n  aggregate(objectName: string, query: EngineAggregateOptions): Promise<any[]>;\n```\n\n真实契约 `packages/spec/src/contracts/data-engine.ts:70 / 85 / 89 / 90`：\n\n```ts\n  find(objectName: string, query?: EngineQueryOptions, options?: BaseEngineOptions): Promise<any[]>;\n  findOne(objectName: string, query?: EngineQueryOptions, options?: BaseEngineOptions): Promise<any>;\n  count(objectName: string, query?: EngineCountOptions, options?: BaseEngineOptions): Promise<number>;\n  aggregate(objectName: string, query: EngineAggregateOptions, options?: BaseEngineOptions): Promise<any[]>;\n```\n\n同一代码块里的写方法（`insert` / `update` / `delete`）都带着各自的 `options`，\n所以读者看到的是「写方法有 options、读方法没有」——这正是 #4251 之前那个错误认知。\n\n## 为什么值得单独修\n\n这个尾参不是可有可无的细节。契约里它自己的 TSDoc 记着它的来历：\n\n> 同一个 `{ context }` 对象作为 `insert` 的第 3 参是正确的，作为 `find` 的第 3 参却被\n> **静默丢弃**，于是一个本意为 `isSystem` 的绕过凭空消失（控制面读取在 org-scoping hook\n> 落地后开始返回空）。契约当时只保留了 `query.context`，所以每个传尾参的调用方——\n> 包括当前用户端点的 permission-set 加载器——都得靠 `any` 去够它。\n\n也就是说：文档漏掉的，正是「当初因为缺失而出 bug、后来专门补上」的那个参数。\n一个照着这段文档写代码的人（或 agent）会被引回旧写法。\n\n## 修法\n\n把那四行补齐即可，纯文档：\n\n```typescript\n  find(objectName: string, query?: EngineQueryOptions, options?: BaseEngineOptions): Promise<any[]>;\n  findOne(objectName: string, query?: EngineQueryOptions, options?: BaseEngineOptions): Promise<any>;\n  count(objectName: string, query?: EngineCountOptions, options?: BaseEngineOptions): Promise<number>;\n  aggregate(objectName: string, query: EngineAggregateOptions, options?: BaseEngineOptions): Promise<any[]>;\n```\n\n顺带值得加一句：`query.context` 与 `options.context` 同时给出时，**后者胜**（契约原文如此）。\n\n`content/docs/kernel/contracts/` 不在自动生成范围内（只有 `content/docs/references/` 是），\n所以这是手改，不需要跑生成器。"
+}

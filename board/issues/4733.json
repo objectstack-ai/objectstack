@@ -1,0 +1,36 @@
+{
+  "number": 4733,
+  "kind": "issue",
+  "title": "[docs-only] v17 升级指南补 objectui#3203 作者破坏性迁移 + console 段区间更新到 785b8a5d432c",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T01:02:57Z",
+  "updated_at": "2026-08-03T01:42:34Z",
+  "closed_at": "2026-08-03T01:42:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4733",
+  "body": "联动跟进(PR #4732 的 PM 裁定,选项 B)。**Blocked-by: #4732** —— pin 合并前区间不成立。\n\n## 为什么必须有这个 docs-only PR\n\nobjectui#3203 从公共 `ActionParam` 移除九个键(`referenceTo` / `displayField` / `idField` / `descriptionField` / `titleFormat` / `lookupColumns` / `lookupFilters` / `lookupPageSize` / `dependsOn`),**对作者破坏性**。迁移处方已进 changeset(发布说明的法定输入层,PR #4732 已做),但 RC 期间正在升级的作者读的是文档站 —— 一条只活在 `.changeset/` 里的破坏性迁移对他们等于不存在。\n\nCLAUDE.md 为此留了正门:「dedicated docs-only PR, never a rider on code changes」。本单就是那个 PR。\n\n## 要改什么(仅 `content/docs/releases/v17.mdx`,零代码)\n\n1. **\"Breaking changes & migration\" 补 objectui#3203 一条**,含处方与理由:\n   - 内联 picker 目标:`{ type: 'lookup', referenceTo: 'account' }` → `{ type: 'lookup', reference: 'account' }`\n   - 其余八个键:改 field-backed(`{ field: 'account_id' }`)整组继承\n   - 理由原样带上(说明这不是回退):九个键**从来就存不进去** —— `ActionParamSchema` 是 `.strict()`,authorable 键表只有 `reference`,别名表点名 `referenceto → reference`(`packages/spec/src/ui/action.zod.ts:61-82`),服务端一直硬性 parse 拒绝,只是 `tsc` 放行。移除的是从未生效的编译期假象,不是能力。\n2. **console 段(约 :1917)区间更新**:`4a4829d0ef39 → 7d9734d5e321` 改为 `4a4829d0ef39 → 785b8a5d432c`(PR #4732 落地后旧区间即失真)。\n\n## 约束\n\n- **docs-only**:除 `content/docs/releases/v17.mdx` 外零改动;无 changeset(docs 不发版)。\n- 两轴记录:changeset 单一输入不破(A 已做);authoring-time 拦截靠文档站可读,这正是该迁移的全部价值。\n\nRefs #4665 / PR #4732、objectui#3203、objectui#3174、objectui#3201。"
+}

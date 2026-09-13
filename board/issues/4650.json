@@ -1,0 +1,34 @@
+{
+  "number": 4650,
+  "kind": "issue",
+  "title": "authorable-surface 的 tombstone 门禁可被手编基线绕过 —— 删掉基线行就删掉了证据(#4638 / #4643 已两次这样过绿)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "protocol:breaking"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T14:08:00Z",
+  "updated_at": "2026-08-03T00:13:57Z",
+  "closed_at": "2026-08-03T00:13:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4650",
+  "body": "## 症状\n\n`packages/spec/scripts/build-schemas.ts` 的可作者化面 ratchet 检查 (a)(约 L408–428)本意是:**可作者化 key 不许无声消失**,因为这些 schema 不是 `.strict()`,Zod 会静默 STRIP 未知键 —— 作者继续写就得到一次干净的 parse 和一个永不生效的设置(#3733、ADR-0104)。错误文案要求走 tombstone:`retiredKey()` + D2 conversion + D3 chain step + major changeset。\n\n但检查是这样做的:\n\n```ts\nconst prev = new Map(surfaceDoc.keys.map(...));         // ← 读**磁盘上**的 authorable-surface.json\nconst vanished = [...prev.keys()].filter((k) => !currentKeys.has(k));\nif (vanished.length > 0) { /* 报错 + process.exit(1) */ }\n```\n\n`surfaceDoc` 读的是**同一个 commit 里可以被随手改掉**的基线文件。把要删的 key 从 `authorable-surface.json` 里手工删掉,`prev` 里就没有它,`vanished` 为空,门禁静默通过 —— **删掉基线行就是删掉证据**。\n\n文件自己的 `description` 与错误文案都写着:\n\n> A tombstone that has aged out (~two majors) is the ONE legitimate reason to delete a line here — do it in the same PR, deliberately.\n\n**但没有任何东西校验这一条。** 基线行的删除既不要求对应 `[RETIRED]` 标记存在过,也不要求它已 aged out,更不要求有 conversion 登记。\n\n## 已发生两次\n\n| PR | 删除的 key | tombstone | conversion / migration | 结果 |\n|:--|:--|:--|:--|:--|\n| #4638(C3)| `ui/Notification:*`、`ui/NotificationConfig:*`、`system/NotificationConfig:*` | 无 | 无 | 绿 |\n| #4643(C4)| `identity/Session:*` 全部 10 个 | 无 | 无 | 绿 |\n\n复核 #4643 的 commit `21676eb5d`:`authorable-surface.json` 里 10 行 `identity/Session:*` 被直接删除,`src/conversions/` 与 `src/migrations/` **零改动**。\n\n## 这两次的实质是否有害?\n\n倾向于**无害,但不该被当先例**:\n\n- `identity/Session` 是 DB 行 / 运行时形状,`ui/Notification` 是 toast 实例形状 —— 都不是作者在元数据文件里手写的类型,三仓 import 级扫描也已证实零消费方。\n- 更根本的问题是 **`authorable-surface.json` 过度收集**:它记录每个被发出的 schema 的全部 properties,包括 `api/SessionResponse:success`、`api/SessionResponse:meta` 这类 REST 信封字段 —— 这些无论如何都不是「metadata author 可写」的东西。文件的名字比它的内容强。\n\n所以真正的缺口有两个,建议分开处置。\n\n## 建议\n\n**(1) 堵住捷径。** 让基线行的删除必须自证合法。最小实现:检查 (a) 之外再加一条 —— 对比 `git show HEAD:packages/spec/authorable-surface.json` 与工作树版本,任何被删除的行必须满足「上一版本带 `[RETIRED]` 标记」且「其 surface 已在 `CONVERSIONS_BY_MAJOR` / `MIGRATIONS_BY_MAJOR` 登记过、且登记的 major 距当前 ≥ 2」。不满足就红,错误信息指向本单。\n\n注意实现时别把 (a) 的现有语义弄反:(a) 防的是**形状变了而基线没动**,新检查防的是**基线动了而形状没有正当理由** —— 两者都需要。\n\n**(2) 收窄收集面。** ratchet 应只记录**从真作者面可达**的 schema(object / field / flow / view / connector / plugin 等作者手写的元数据类型,及其传递引用),而不是每个被 `gen:schema` 发出的 schema。否则「可作者化」这个判定在评审时不可用 —— 每次都要人肉判断某个 key 是不是真的作者面,而这正是 #4638 / #4643 两次都得靠 reviewer 直觉的原因。\n\n(2) 比 (1) 影响面大,可能需要先确定「真作者面根集合」的定义,建议单独排期;(1) 是可以立刻落的窄修。\n\n## 影响范围\n\n- 门禁失效期间合并的:#4638、#4643(实质无害,见上)。\n- **#4535 剩余 16 条落在真作者面上**(`DataSyncConfig` automation 19 keys vs integration 9、`RateLimitConfig` 进 `api/endpoint.rateLimit`、`HttpRequest` 进 `ui/view.read/write` 等),若沿用这条捷径就会真正触发 #3733 / ADR-0104 描述的静默剥离。已在 #4535 的 worklist 里写明**禁止**手编基线,但那只是纪律,不是门禁。\n\n## 关联\n\n#4535(双源清账主单,v17 重切一节记录了同一发现)、#3733、#3855、ADR-0059 §5、ADR-0087、ADR-0104"
+}

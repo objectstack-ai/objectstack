@@ -1,0 +1,36 @@
+{
+  "number": 4817,
+  "kind": "issue",
+  "title": "content/docs/protocol/kernel/http-protocol.mdx 的 discovery 响应示例把 dispatcher 形状挂在 /api/v1/discovery 名下 —— 字段与 REST 实际返回体对不上",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T08:28:16Z",
+  "updated_at": "2026-08-03T09:28:04Z",
+  "closed_at": "2026-08-03T09:27:34Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4817",
+  "body": "#4781(删除 runtime-capabilities 页)核实页尾 discovery 那节时顺带发现,不在该 PR 范围内修,未认领。\n\n## 现象\n\n`content/docs/protocol/kernel/http-protocol.mdx` 的 **API Discovery** 一节写:\n\n> `/.well-known/objectstack` 和版本化的 `/api/v1/discovery` 路由都直接返回 discovery 文档 —— 两者之间没有 HTTP 重定向\n\n随后给出**一份**响应示例,含 `name` / `version: \"2.1.0\"` / `environment` / `routes` / `services` / `locale`。\n\n但这两条路径在**挂载了 `@objectstack/rest` 的常规组合里返回的不是同一形状**:\n\n- `/api/v1` 与 `/api/v1/discovery` 由 `registerDiscoveryEndpoints`(`packages/rest/src/rest-server.ts`)注册的同一个 handler 服务,body 来自 `ObjectStackProtocolImplementation.getDiscovery()`(`packages/metadata-protocol/src/protocol.ts`),形状是 `{ version, apiName, routes, services, capabilities }`,再由 rest-server 补 `capabilities.transactionalBatch` 与 `scoping`。**没有 `name`、没有 `environment`、没有 `locale`**,`version` 还被 `config.api.version` 覆盖成 `v1`(不是 `2.1.0` 这类语义版本)。\n- `name` / `environment` / `features` / `locale` 是 **dispatcher** 的 `getDiscoveryInfo()`(`packages/runtime/src/http-dispatcher.ts`)才有的字段,由 `/.well-known/objectstack` 提供(body 还外包一层 `{ \"data\": ... }`)。dispatcher 只在 **REST-less 组合**里才注册 `${prefix}/discovery`,挂了 REST 就把该路由让出去(`packages/runtime/src/dispatcher-plugin.ts`,单一 owner,ADR-0076 D11)。\n\n所以该页的示例实际上是 dispatcher 形状,却被标注成两条路径共同的返回体;`locale` 更是读者会直接拿去初始化 i18n 的字段。\n\n对照:`content/docs/api/index.mdx` 已经把这两者的差别写对了(`GET /api/v1` 一节 + `GET /.well-known/objectstack` 一节,并说明 SDK `connect()` 先试 `/api/v1/discovery` 再回退)。\n\n## 建议处置\n\n把 http-protocol.mdx 的这节改成与 `api/index.mdx` 一致的两段式:一段 REST 形状(`version` / `apiName` / `routes` / `services` / `capabilities`),一段 `/.well-known/objectstack` 形状(含 `name` / `environment` / `features` / `locale`,`{ data: ... }` 包裹),并写明「两条路径同文档」只在 REST-less 组合里成立。别再给一份混合示例。\n\n顺带(同一页可一并处理,也可另开):`.claude/workflows/docs-accuracy-audit.js` 的 `ALL_HANDWRITTEN` 清单仍用重命名前的 `content/docs/protocol/objectos/*` 路径,该目录早已改名为 `protocol/kernel/`,清单里 11 个条目全部指向不存在的文件 —— 这个内部审计脚本会静默漏审整个 protocol/kernel 目录。\n\n发现于 #4781,未认领 —— 谁开工谁按 AGENTS.md 认领。\n"
+}

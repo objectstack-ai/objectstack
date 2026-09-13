@@ -1,0 +1,34 @@
+{
+  "number": 4538,
+  "kind": "issue",
+  "title": "[#4535·A3] contracts 手写 interface 与域内 zod 推导类型收敛(3 簇 9 条)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T01:24:45Z",
+  "updated_at": "2026-08-02T06:31:41Z",
+  "closed_at": "2026-08-02T06:31:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4538",
+  "body": "#4535 A3 项。系统性成因相同:`packages/spec/src/contracts/` 手写了参数/返回类型 interface,而对应域里已有同名 zod schema 推导类型 —— 同名不同形状,基线 9 条:\n\n- `./contracts` ≠ `./system`:`MetadataExportOptions`、`MetadataImportOptions`、`JobExecution`、`JobSchedule`、`NotificationChannel`\n- `./contracts` ≠ `./kernel`:`HealthStatus`、`PluginStartupResult`、`StartupOptions`、`ValidationResult`\n- `./contracts` ≠ `./data`:`AnalyticsQuery`、`DriverCapabilities`\n\n**两侧都有消费方,不能一删了之。** 逐名判定真源(哪一侧的形状是运行时实际流动的),然后收敛:contracts 引用 zod 推导类型并 re-export,或域侧 schema 对齐 contracts 语义后 contracts 改引 —— 每个名字单独判,不搞批量假设。`MetadataExportOptions`/`MetadataImportOptions` 有 #4411 的旁证:`IMetadataService.exportMetadata/importMetadata` 用的是 contracts 自有形状(`types`/`namespaces`/`format`),与 system 版(`output`/`format`/…)语义就不同 —— 这类可能是**改名**而非收敛(两个概念:服务参数 vs 持久化选项)。\n\n建议分 3 个 PR(按入口对),每个 PR 删对应基线行作为验收。适合与 #4535·B/C 项并行排期,但注意所有 PR 都动 `dual-source-exports.baseline.json`,**串行入队**。\n\n关联:#4535(主单)、#4506(基线)"
+}

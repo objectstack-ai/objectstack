@@ -1,0 +1,32 @@
+{
+  "number": 4406,
+  "kind": "issue",
+  "title": "[P3] IDataDriver: `query.object` is required at the driver boundary and read by no driver — parameter 1 silently wins",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "tech-debt"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T11:57:19Z",
+  "updated_at": "2026-07-31T13:15:57Z",
+  "closed_at": "2026-07-31T13:15:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4406",
+  "body": "Split out of #4311 per Prime Directive #10 — found while burning down the three drivers' code-tier errors, deliberately **not** fixed there.\n\n## The shape\n\nEvery read method on `IDataDriver` names the object twice:\n\n```ts\nfind(object: string, query: QueryAST, options?: DriverOptions): Promise<Record<string, unknown>[]>;\nfindOne(object: string, query: QueryAST, options?: DriverOptions): Promise<Record<string, unknown> | null>;\ncount(object: string, query?: QueryAST, options?: DriverOptions): Promise<number>;\nupdateMany(object: string, query: QueryAST, data, options?): Promise<number>;\ndeleteMany(object: string, query: QueryAST, options?): Promise<number>;\n```\n\n`QueryAST.object` is **required** (`object: z.string()` in `BaseQuerySchema`, no default), so callers must supply it. And no driver reads it:\n\n```\n$ grep -rn 'query\\.object' packages/plugins/*/src/*.ts | grep -v test\n(nothing)\n```\n\n`driver-sql`, `driver-memory` and `driver-mongodb` all resolve the table/collection from **parameter 1**. The AST field is inert at this boundary.\n\n## Why it is not merely redundant\n\n1. **The two can disagree, and nothing says so.** `find('account', { object: 'contact', where: … })` reads `account`. No driver compares them, no gate rejects it. The failure is a query against the wrong object that returns plausible rows.\n2. **Callers pay for it.** The engine stamps the field purely to satisfy the type — `const ast: QueryAST = { object, ...query }` appears at 6 sites in `objectql/src/engine.ts`, feeding a driver call that already carries `object`. `metadata/src/loaders/database-loader.ts:226` writes `this.driver!.findOne(table, { object: table, ...query } as any)`: the `as any` is there because someone hit the requirement and worked around it.\n3. **#4311 paid for it 127 times.** Adding `object:` to driver-test query literals was the single largest edit in that burn-down, and every one of those keys is dead at the call site.\n\nWorth stressing: `object` is meaningful *inside* the AST elsewhere — a nested `expand` entry names the related object, and the REST/engine surface genuinely needs it. This is specifically about the top level of a **driver** call, where parameter 1 already carries it.\n\n## Options\n\n1. **A driver-boundary query type.** `type DriverQuery = Omit<QueryAST, 'object'> & { object?: string }` in `spec/contracts`, used by the five methods above. Removes the ambiguity structurally; touches `IDataDriver`, `driver.zod.ts`'s `z.function()` mirrors, and the four driver implementations (a widened parameter still satisfies the interface, so implementors are free to adopt it in any order).\n2. **Keep it required, make it mean something.** Drivers assert `query.object === object` and throw on mismatch. Cheap, but the field stays inert on the happy path and every caller still writes it twice.\n3. **Leave as-is** and document that parameter 1 wins.\n\n(1) is the one that matches what the code does. It was left out of #4311 on purpose: reshaping a contract across four drivers is a design change, not a rider on a type-debt burn-down.\n\n## Not in this issue\n\n`driver.zod.ts`'s `find` example is separately stale — it shows `filters` / `sort` / `top`, none of which are current `QueryAST` keys. Nothing validates driver calls against those `z.function()` schemas at runtime, which is why the rot survived.\n"
+}

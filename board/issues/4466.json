@@ -1,0 +1,32 @@
+{
+  "number": 4466,
+  "kind": "issue",
+  "title": "approvals: an admin override of a staffed approver slate is recorded as an ordinary approval — no override marker anywhere",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T08:52:46Z",
+  "updated_at": "2026-08-01T15:14:50Z",
+  "closed_at": "2026-08-01T15:14:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4466",
+  "body": "Found while verifying the 17.0.0-rc.1 checklist on #3909 (section C, \"admin override for unstaffed approver #3424\"). Verified on `main` @ `1ee48bc60`, showcase under `os serve --dev`.\n\n## What happened\n\nDriving the `showcase_dynamic_approval` flow (#3447's specimen), stage 2 (`co_sign`) resolved its `expression` approvers correctly to exactly one designated user:\n\n```json\n{\"id\":\"areq_5a2a0b05…\",\"status\":\"pending\",\"step\":\"co_sign\",\n \"pending_approvers\":\"QcKhACD4LXgVxGMluaOfqxU9T2VBzfZH\"}   ← the member, not the admin\n```\n\nThe **admin**, who is not in that slate, approved it anyway (the privileged-override path, #3424) — and the designated approver then got `409 INVALID_STATE: request is approved`.\n\nThe override itself is defensible: `isOverrideActor`'s own docstring says an admin *\"may always act on a PENDING request to release it\"*. The problem is what the audit trail records:\n\n```json\n{\"request_id\":\"areq_5a2a0b05…\",\"step_name\":\"co_sign\",\"action\":\"approve\",\n \"actor_id\":\"KJxlcqUX…\",\"comment\":\"not mine\",\"reassign_from\":null,\"reassign_to\":null}\n```\n\n`sys_approval_action` has no override column at all — its full field list is `request_id, step_name, step_index, action, actor_id, comment, reassign_from, reassign_to, attachments, created_at, …`. So **an admin overriding a properly-staffed approver slate is byte-for-byte indistinguishable from the designated approver approving normally.**\n\n## Why it matters\n\nThe whole point of an approval record is to answer \"who authorized this, and were they entitled to?\". Right now:\n\n- A reader of the timeline sees `approve` by the admin and cannot tell whether the admin *was* an approver or *overrode* the ones who were.\n- The designated approver's 409 is the only trace that a slate was bypassed, and it exists only if they happen to try.\n- The platform **knows** at decision time — it took the `isOverrideActor` branch to allow the call — so this is dropped information, not unavailable information.\n\nThis also sits oddly against the sibling work this train shipped: #3800 made decisions attribute to the authenticated caller, #3783 made the status mirror name the human, and #4366 gave flow system-writes audit attribution. The override flag is the one bit of \"who really decided this\" that still isn't recorded.\n\nNote the gap between the docstring's justification and the implemented rule: the comment motivates the override with a **stuck** request (routed to a position with no holders), but `isOverrideActor` only tests whether the actor is an admin — it never tests whether the slate is actually unresolvable. Whether that breadth is intended is worth confirming separately; either way the decision should say it was an override.\n\n## Expected\n\n`sys_approval_action` carries an override marker (e.g. `via_override: boolean`, or an `action: 'approve_override'` variant) set on exactly the decisions that took the privileged path, surfaced in the timeline. If the breadth is intended, the record is what makes it auditable rather than silent.\n\nPart of the #3909 rc.0/rc.1 verification (section C).\n"
+}

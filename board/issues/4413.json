@@ -1,0 +1,32 @@
+{
+  "number": 4413,
+  "kind": "issue",
+  "title": "kind:'react' 页面上 record:* 四个 block 全部失效——契约 publish 的 objectName/recordId 渲染器根本不读（#4340 后续）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-07-31T12:37:00Z",
+  "updated_at": "2026-08-01T08:39:41Z",
+  "closed_at": "2026-08-01T08:39:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4413",
+  "body": "#4340（由 #4353 关闭）settle 了 `<RecordRelatedList objectName>` 的语义。为了确认那个判定，我把 objectui（HEAD `c785740`）拉下来读了渲染器——判定是对的，但顺带发现一个**更靠下的问题**：`record:*` 这一族 block 在 `kind:'react'` 页面上**根本不工作**，而 react-tier 契约照样 publish 着它们的 `objectName` / `recordId` 绑定。\n\n这是 AGENTS.md Prime Directive #10 的推论——「never advertise or demo a capability the runtime doesn't actually deliver」——的一个活实例。\n\n## 证据链\n\n1. **react-page 的 scope 把 JSX props 摊进 SDUI schema bag，但只包了 `SchemaRendererProvider`，没有 `RecordContextProvider`。**\n   `objectui packages/components/src/renderers/layout/react-page.tsx` → `buildComponentScope`：\n\n   ```tsx\n   React.createElement(SchemaRenderer, {\n     schema: { dataSource, ...props, type: tag },\n   })\n   ```\n\n   全文件 grep `RecordContextProvider` / `RecordContext` **零命中**。\n\n2. **`RecordContextProvider` 只由 record 详情路径挂载**——`app-shell` 的 `RecordDetailView`，以及 metadata-admin 的 `PagePreview`。react 页面不经过任何一个。\n\n3. **`useRecordContext()` 在 provider 外返回 `null`**，这是有意设计（`objectui packages/react/src/context/RecordContext.tsx:190-198` 的注释写明：让 record:* 渲染器在 Studio 设计器里能静态渲染而不抛错）。\n\n4. 于是在 react 页面上：\n\n   | block | 渲染器取 `objectName` | 取父记录 | 实际结果 |\n   |---|---|---|---|\n   | `<RecordDetails>` | `ctx?.objectName \\|\\| ''` <sub>(`record-details.tsx:53`)</sub> | ctx | 作者写的两个 prop 都到不了 → 空 |\n   | `<RecordHighlights>` | `ctx?.objectName \\|\\| ''` <sub>(`record-highlights.tsx:37`)</sub> | ctx（`data`/`objectSchema` 也来自 ctx） | 同上 → 空 |\n   | `<RecordPath>` | ctx | ctx | 同上 → 空 |\n   | `<RecordRelatedList>` | **`schema.objectName`** ✅ <sub>(`record-related-list.tsx:64`)</sub> | `ctx?.recordId` ❌ | `parentLinkValue = null` → **拒绝 fetch** |\n\n   最后一行有 objectui 自己的测试钉着：`packages/plugin-detail/src/__tests__/RelatedList.parentscope.test.tsx:58` — *\"refuses to fetch when parentId is missing\"*。\n\n   注意四个 block 里只有 `<RecordRelatedList>` 从 schema 读 `objectName`；另外三个连对象名都走 context。也就是说**这一族内部本身就不一致**。\n\n## 活体影响\n\n`examples/app-showcase/src/ui/pages/renewals-pipeline.page.ts` 的 `<RecordHighlights>` 和 `<RecordRelatedList>` 现在渲染出来是空的——**在 #4353 之前和之后都是**。#4353 修正的是元数据的正确性（`objectName` 该写子对象），它没有、也不可能在 framework 侧让渲染器去读它。\n\n## 需要更正 #4353 的一句话\n\n那个 PR 的正文写了「the parent record stays bound by `recordId`」。那是**契约**这么说，渲染器并不读 `schema.recordId`。#4353 里 `relationshipValueField` 被 ledger 为 skipped-with-reason，理由写的是「react 面绑父*记录*但不绑父*对象*」——实际情况更糟：**父记录也没绑上**。\n\n**但 #4340 的 `objectName` 判定本身是确认无误的**，不受此影响：\n\n```tsx\n<RelatedList\n  api={objectName}                           // 被查询/列出的对象 = 子对象\n  referenceField={schema.relationshipField}   // 该对象上的外键\n  parentId={parentLinkValue}                  // 父值，另走 RecordContext\n  columns={filteredColumns}                   // objectName 的列\n/>\n```\n\n`columns`/`sort` 确实解析到 `objectName` 命名的那个对象，所以 #4353 里的 lint 校验的是正确的对象。\n\n## 修的方向（以及它的真实成本）\n\n直觉方案是：让 react-page 的 scope 对 `record:*` 类型用 block 自己的 `objectName`/`recordId` props 包一层 `RecordContextProvider`。但 `RecordContextProvider`（`RecordContext.tsx:167`）是个**纯值 provider，自己不取数**——它要 `data` / `objectSchema`，`RecordDetailView` 是自己 fetch 完再喂进去的。所以真正要加的是一个**会取数的 wrapper**，这不是接线，是新组件。\n\n分档看成本：\n\n- `<RecordRelatedList>` 在默认 `relationshipValueField: 'id'` 下**只需要 `recordId`**，不需要 `data` —— 这一档最便宜，单独修就能让 showcase 那个页面活过来。\n- `<RecordDetails>` / `<RecordHighlights>` / `<RecordPath>` 需要 `data` + `objectSchema`，必须真取数。\n\n另一条路是承认这四个 block 本就是 record-detail 语境的组件，**把它们从 react-tier 契约里摘掉**（`REACT_BLOCKS`），而不是让 react 面去伪造一个 record context。ADR-0080「capability ≠ contract」支持这种取舍。两条路都是产品决策，不是纯实现问题。\n\n不论选哪条，**当前状态不能留**：契约 publish 了四个 block 的绑定 prop，渲染器一个都不读（related-list 只读一半），而 `os validate` 现在还会认真校验这些 prop 指向的字段——lint 在为一个不会执行的绑定把关。\n\n## 验收\n\n`record:*` 的每个 block 要么在 react 页面上真的按自己的 props 绑定并渲染，要么从 react-tier 契约里移除；showcase 的 Renewals Pipeline 页面能真的渲染出 highlights 和 invoice 关联列表（或者不再声称能）。\n\n/cc 需要 objectui 侧改动（`objectstack-ai/objectui`）。"
+}

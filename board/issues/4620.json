@@ -1,0 +1,36 @@
+{
+  "number": 4620,
+  "kind": "issue",
+  "title": "fix(metadata-protocol): deleteManyData has the same fake-atomic as batchData, updateManyData ignores atomic entirely",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T11:20:57Z",
+  "updated_at": "2026-08-03T07:46:37Z",
+  "closed_at": "2026-08-03T07:46:01Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4620",
+  "body": "ADR-0118 D4 fixes `batchData`'s `atomic` flag (it opened no transaction — it only broke the loop, stranding every prior write as committed). Its two siblings in the same file have the same class of defect and were out of that PR's confirmed scope.\n\n## 1. `deleteManyData` — fake-atomic (`packages/metadata-protocol/src/protocol.ts:5543`)\n\nSame break-without-rollback shape as pre-fix `batchData`; the comment there even says *\"Same stop semantics as batchData\"*. Deletes performed before the failure stay deleted while the response is titled atomic — worse than the `batchData` case, because a partial delete has no natural undo.\n\n## 2. `updateManyData` — ignores `atomic` entirely (`protocol.ts:5405-5444`)\n\nThe option is accepted and never read. A caller passing `atomic: true` gets best-effort with no signal.\n\n## Work\n\nReuse the two pieces ADR-0118 D4 introduces rather than re-deriving them: the extracted per-record loop helper, and the fail-closed capability gate (engine exposes `transaction` **and**, where the driver registry is inspectable, the default driver has `beginTransaction`; otherwise `501 NOT_IMPLEMENTED` rather than a silent best-effort run). Apply the same response contract: a rolled-back batch reports **zero successes**, with rows marked `ROLLED_BACK:` / `NOT_ATTEMPTED:` so a client can tell which is which.\n\n## 3. Second finding — per-row result shape diverges from its own schema\n\nThe implementation pushes `{ id, success, error: string, record }` while `BatchOperationResultSchema` declares `{ errors: ApiError[], data }`. ADR-0118 D4 deliberately kept the implementation shape (changing it there would have been a silent wire-compat break riding on a bug fix). Decide the direction on purpose: widen the schema to match reality, or migrate the implementation and version the response. Whichever way, the two should stop disagreeing.\n\nRefs: ADR-0118 D4, #4612, ADR-0049."
+}

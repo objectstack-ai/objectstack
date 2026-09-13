@@ -1,0 +1,32 @@
+{
+  "number": 4468,
+  "kind": "issue",
+  "title": "datasource.readReplicas 声明了、strict 了、刚被加了校验——但没有任何消费者（ADR-0049 enforce-or-remove，#4410 收尾发现）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T08:59:02Z",
+  "updated_at": "2026-08-01T09:38:48Z",
+  "closed_at": "2026-08-01T09:38:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4468",
+  "body": "从 #4410 / #4465 的收尾核查中发现，而且**是那个 PR 自己加重的**。\n\n`DatasourceSchema.readReplicas` 的 JSDoc 写着：\n\n> Optional list of duplicate configurations for read-only operations.\n> Useful for scaling read throughput.\n\n**没有任何东西读它。**\n\n## 证据\n\n1. `ConnectableDatasource`（`service-datasource/src/datasource-connection-service.ts`）**没有\n   `readReplicas` 字段**——数据源记录到连接规格的转换 `toSpec()` 里也没有它。\n2. `DatasourceConnectionSpec`（`contracts/datasource-driver-factory.ts`）同样没有。\n3. `createDefaultDatasourceDriverFactory` 只构建**一个**驱动，没有任何副本连接的构建点。\n4. 全仓 grep `readReplicas`，`packages/spec` 的 schema 与其 `dist` 之外**零命中**。\n\n也就是说：一个作者写了 `readReplicas: [{ host: 'replica-1.internal', … }]` 的数据源，读流量\n全部照旧打到主库，没有任何提示。\n\n## 为什么现在必须处置（这是 #4465 欠下的）\n\n#4465 给 `datasource.config` 装门禁时，顺手把 `readReplicas` 的每个条目也按驱动契约校验了\n——理由是\"它承载同样的 per-driver config 形状\"，这话本身没错。但结果是：**平台现在会认真\n校验一个它根本不读的槽**。\n\n作者写错副本的 `hostname` 会收到一条精确的、可修的错误信息；写对了则什么也不会发生。这比\n#4410 修掉的沉默更糟一层：沉默至少不假装在工作，而一个只在你写错时才出声的门禁，会让人确信\n写对了就生效了。ADR-0078 no-silently-inert-metadata 的反面形态。\n\n## 处置（二选一）\n\n- **remove** —— 倾向这个。读副本路由是一个**没人建过的功能**，不是一个没接上的字段：它要\n  查询路由（哪些读走副本）、副本健康与故障回退、以及 ADR-0015 下与 `schemaMode` /\n  federation 的交互。schema 里一行 `z.array(z.record(...))` 不是\"差一点就好了\"，它只是描述了\n  一个不存在的东西。按 `spec-property-retirement` 走退役流程（tombstone + changeset 迁移\n  说明 + 账本），并把\"我们想要读副本\"另开 feature request。\n- **enforce** —— 真去实现副本池 + 读路由。这是一个功能，不是一次收口，应当有自己的 ADR 与\n  验收，而不是塞进一个 enforce-or-remove 的收尾里。\n\n无论走哪条，**#4465 加的那段 `readReplicas` 校验都要一起处理**：remove 就随字段删掉；enforce\n就保留，但那时它才第一次名副其实。\n\n## 参考\n\n- #4410 / #4465（`datasource.config` 的驱动契约校验，本 issue 的来源）\n- ADR-0049 enforce-or-remove、ADR-0078 no-silently-inert-metadata、ADR-0015（数据源联邦）\n- `.claude/skills/spec-property-retirement`"
+}

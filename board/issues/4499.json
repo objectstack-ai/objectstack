@@ -1,0 +1,32 @@
+{
+  "number": 4499,
+  "kind": "issue",
+  "title": "trigger-registry.zod.ts 的 ConnectorSchema 簇是同一业务需求的第三份声明——零运行时消费者（ADR-0049，Prime Directive #12，#4480 收尾发现）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T12:31:19Z",
+  "updated_at": "2026-08-01T13:45:18Z",
+  "closed_at": "2026-08-01T13:45:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4499",
+  "body": "处理 #4480（删除 `integration/connector/*` 六文件簇）时定级，发现\"connector\"这个业务需求在 spec 里被声明了**三次**。#4480 删掉了第二份，这是第三份。\n\n## 三份声明的关系（#4480 已查实的部分）\n\n| 位置 | 状态 |\n|---|---|\n| `integration/connector.zod.ts`（ADR-0097） | **活** —— `engine.registerConnector()` 在 `service-automation/engine.ts:1379` 用它校验；stack `connectors:` 集合走 `DeclarativeConnectorEntrySchema`（`stack.zod.ts:395`）；`GET /connectors` 和 `connector_action` 跑在它上面 |\n| `integration/connector/*.zod.ts` 六文件 | **已删**（#4480） |\n| `automation/trigger-registry.zod.ts` 的 Connector 簇 | **本 issue** —— 零运行时消费者 |\n\n## 证据\n\n`automation/trigger-registry.zod.ts` 导出一整套连接器词汇（~440 行）：`ConnectorSchema`、`ConnectorCategorySchema`、`AuthenticationSchema`/`AuthenticationTypeSchema`/`AuthFieldSchema`/`OAuth2ConfigSchema`、`OperationTypeSchema`/`OperationParameterSchema`/`ConnectorOperationSchema`、`ConnectorTriggerSchema`。\n\n1. **引擎导入的是另一份**：`service-automation/engine.ts:26` — `import { ConnectorSchema } from '@objectstack/spec/integration'`。automation 这份从未被任何注册/校验路径引用\n2. 全仓 grep 这个簇的各 schema 名（排除 spec 自身与 dist）：spec 之外的命中只有**生成文档**（`build-docs.ts` 的 Flow & Execution 章节列表、`build-skill-references.ts`）——都是发布渠道，不是消费者\n3. 名字撞车但形状不同：integration 版有 `provider`/`providerConfig`/`auth`（ADR-0097 实例语义）；automation 版是 `category`/`authentication`/`operations`/`triggers`/`rateLimit` —— 一套自成体系、没接任何执行器的词汇\n4. `integration/connector.zod.ts` 的头注释还有一节 **\"When to use Integration Connector vs. Trigger Registry?\"**，在教用户选择一个没接线的选项 —— 和 #4487 修掉的 `capabilities.readOnly` 处方同一种病：平台权威口吻指向死角\n\n## 定级注意（别照搬 #4480 的结论）\n\n`trigger-registry.zod.ts` 可能不止 Connector 簇 —— 文件里如果还有 trigger 注册表相关的**其他**导出被 flow/automation 侧使用，需要逐个甄别，不能整文件删。生成文档侧还牵涉 `build-docs.ts` Flow & Execution 章节的页面列表和 `build-skill-references.ts:82` 的显式引用，两处都要跟着改。\n\n## 处置倾向\n\n**remove**（Connector 簇部分）。业务需求已由 ADR-0097 活路径承担；留着第三份拼写违反 Prime Directive #12（one capability, one contract）。顺带删掉 `connector.zod.ts` 里指向它的 \"When to use\" 对比段。\n\n按 `.claude/skills/spec-property-retirement` 走：这是导出面（非存储元数据），预计与 #4480 同型 —— manifest / authorable-surface 基线删行、生成文档重算、v17 dead-clusters 表、major changeset；无 D2 conversion（没有 stack 源可改写）。\n\n## 参考\n\n- #4480 / PR（六文件簇删除，含三层关系的完整调查）\n- #4487 —— `capabilities.readOnly` 假处方的先例\n- ADR-0097 / ADR-0023 / ADR-0049 / Prime Directive #12\n\n未指派 —— 记录 finding，谁开工谁认领（AGENTS.md 惯例）。"
+}

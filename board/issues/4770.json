@@ -1,0 +1,35 @@
+{
+  "number": 4770,
+  "kind": "issue",
+  "title": "bug(objectql): hook 条件对着「只含本次更新字段」的残缺 record 求值，取不到的字段被吞成 false —— 审计 hook 静默不触发",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-03T05:27:14Z",
+  "updated_at": "2026-08-03T06:41:16Z",
+  "closed_at": "2026-08-03T06:38:44Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4770",
+  "body": "## TL;DR\n\n声明式 hook 的 `condition` 是拿 **update payload**（只有本次改动的字段）求值的，不是完整记录。条件里引用了一个本次没改的字段 → `No such key` → 被 catch 成 `false` → **hook 该触发时不触发，只留一条默认日志级别下会被当噪音划过去的 warn**。\n\n`50185a8`（*\"fail closed on unevaluable validation predicates, and **make the merged record total**\"*, #4649）刚给 validation 谓词修了同一类问题。hook 条件这条路径没跟上，而且它是静默失败。\n\n## 现场\n\n`pnpm dev`（showcase）每次启动刷 10 条：\n\n```\nWARN [hook] condition evaluation failed; treating as false\n  {\"hook\":\"showcase_audit_task_completion\",\"condition\":\"record.done == true\",\n   \"error\":\"No such key: done\\n\\n>    1 | record.done == true\\n                ^\"}\n```\n\n**`showcase_task` 确实有 `done` 字段** —— 不是数据模型问题：\n\n```ts\n// examples/app-showcase/src/data/objects/task.object.ts\ndone → boolean\n```\n\n## 根因\n\n`packages/objectql/src/hook-wrappers.ts:327`\n\n```ts\nfunction pickRecordPayload(ctx: HookContext): any {\n  const input: any = ctx.input ?? {};\n  if (input && typeof input === 'object' && input.data && typeof input.data === 'object') {\n    return input.data;          // ← 只有本次 update 的字段\n  }\n  if (ctx.previous && typeof ctx.previous === 'object') {\n    return ctx.previous;        // ← 够不到：上面已经 return 了\n  }\n  return input;\n}\n```\n\n`input.data` 的优先级高于 `ctx.previous`，而且**两者从不合并**。于是一个 `afterUpdate` hook 的条件只能引用\"本次恰好被改到\"的字段；引用任何其它字段都会炸。\n\n炸了之后（`hook-wrappers.ts:86`）：\n\n```ts\nconst r = ExpressionEngine.evaluate<boolean>(expr, { record: record ?? {} });\nif (!r.ok) {\n  logger.warn('[hook] condition evaluation failed; treating as false', {...});\n  return false;      // ← 吞掉\n}\n```\n\n## 为什么这比噪音危险\n\n`showcase_audit_task_completion` 是个**审计** hook。它的语义是\"任务被标记完成时留痕\"。现在的行为是：只要那次 update 的 payload 里没带 `done`，审计就静默不发生 —— 而这恰恰是最常见的情况（改个 status、改个 assignee）。审计记录缺失，且没有任何东西会告诉你缺了。\n\n\"treating as false\" 对不同 hook 意味着相反的风险方向：对一个 guard 型 hook 是放行，对一个审计型 hook 是漏记。无论哪种，**\"表达式求不出值\"和\"表达式求出 false\"被压成了同一个结果**。\n\n## 修法\n\n1. **让 record 完整**：与 #4649 对齐 —— 把 `ctx.previous` 和 `input.data` 合并后再求值（stored ⊕ payload），这样条件引用任何已存在字段都成立。\n2. **区分\"求不出值\"和\"值为 false\"**：至少不要静默。#4649 对 validation 选的是 fail closed；hook 的正确方向取决于 hook 类别，需要定夺 —— 但当前\"一律吞成 false + warn\"肯定不是答案。\n\n建议 1 先做，它把绝大多数 case 直接消灭掉；2 作为兜底语义单独讨论。\n\n## 复现\n\n```bash\nrm -rf examples/app-showcase/.objectstack && pnpm dev\n```\n\n启动日志里搜 `condition evaluation failed`。"
+}

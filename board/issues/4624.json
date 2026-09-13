@@ -1,0 +1,35 @@
+{
+  "number": 4624,
+  "kind": "issue",
+  "title": "loadMetaFromDb boot hydration keeps a third inline copy of the overlay→registry rule with an UNSCOPED artifact lookup (ADR-0048 gap)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "repo:objectstack"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T11:46:25Z",
+  "updated_at": "2026-08-02T12:48:35Z",
+  "closed_at": "2026-08-02T12:48:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4624",
+  "body": "Found while implementing #4521 (PR #4622). **Unassigned — nobody is on this.** Recording only, per Prime Directive #10.\n\n#4521 deduplicated the overlay→SchemaRegistry registration rule into `hydrateOverlayIntoRegistry` (protection-envelope graft per ADR-0010 §3.3 + **package-scoped** artifact lookup per ADR-0048/#1828) and made the read-side hydration in `getMetaItems` and the new write-through share it.\n\nThere is a **third** copy the PR deliberately did not touch: the boot hydration in `loadMetaFromDb` (`packages/metadata-protocol/src/protocol.ts`, non-object branch, around the `mergeArtifactProtection` call at ~line 8969). It open-codes the same graft but calls `this.lookupArtifactItem(normalizedType, name)` **without the row's `record.packageId`** — the exact pre-#1828 shape #1828 fixed in `getMetaItems`: a name-colliding overlay can graft the first-registered package's `_lock`/`_packageId`/`_provenance` onto another package's row at boot.\n\nSuggested fix: replace the inline block with `this.hydrateOverlayIntoRegistry(normalizedType, data, record.packageId)` — one rule, one implementation, and the ADR-0048 scoping applies at boot too. Needs a look at whether any boot-order assumption (artifacts loading after this hydration) depends on the current unscoped lookup, plus a pin test with two packages shipping same-named artifacts.\n\nNot done in #4622 because it changes boot-time behaviour and is unrelated to the #4521 read-your-writes window (no silent scope expansion)."
+}

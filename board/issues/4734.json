@@ -1,0 +1,35 @@
+{
+  "number": 4734,
+  "kind": "pull_request",
+  "title": "fix(spec): #3207 收尾 — 补上 enable.trash/mru 退役缺失的 ADR-0087 迁移面,墓碑改指 #3146",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T01:06:51Z",
+  "updated_at": "2026-08-03T01:29:32Z",
+  "closed_at": "2026-08-03T01:29:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T01:29:31Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4734",
+  "body": "Fixes https://github.com/objectstack-ai/objectstack/issues/3207\n\n## 现场核实:退役主体已由 PR #3414 落地(2026-07-24 合入)\n\n动手前按纪律重验现场,发现 issue 的 7 步主体工作**已在 PR #3414(commit `88346ba58`)合入 main**:schema 移除 + `.strict()` 化、`CAPABILITIES_RETIRED_KEY_GUIDANCE` 墓碑、~45 处 setter 删除、liveness ledger 两行删除 + README 计数表、`object.form.ts` 两行删除 + 4 locale i18n 再生、docs/skills 清理、changeset(`remove-enable-trash-mru`,已被 rc 消费)。issue 未随之关闭,PM 派单时未察觉。\n\n但对照 2026-08-02 裁决与 `spec-property-retirement` 清单,**已落地实现存在两处实质缺口**,本 PR 只做这两件事(不重复 #3414 的工作):\n\n### 缺口一:未登记 ADR-0087 D2 conversion(存量数据被误伤)\n\n`ObjectCapabilities` 已 `.strict()`,而退役时**没有登记任何 conversion**。后果:\n\n1. **存量 16.x `sys_metadata` 行永久报警**。带 `enable.trash` 的旧行经 `applyConversionsToStoredItem` 重放后键仍在,registry 的 spec 一致性诊断每次 rehydration 都记 `metadata_spec_invalid` —— 违反 #3903 的不变式(该诊断的前提是「链已收编全部历史形状,报警即真实的现行契约违规」);\n2. `os migrate meta --from 16` 无法改写作者源码,与墓碑处方的 house style(第 5 条:仅当 conversion 改写源码时才引用该命令)无法闭环。\n\n本 PR 新增 `object-enable-trash-mru-removed`(protocol 17,`retiredFromLoadPath: true`,`stripKeys` 嵌套下钻,照 `datasource-inert-blocks-removed` 先例),接入 `CONVERSIONS_BY_MAJOR[17]` 与 `MIGRATIONS_BY_MAJOR[17].conversionIds` + rationale;fixture 证明剥离是外科式的(同块存活键 `searchable` 原样保留),`expectedNotices: 2`(按键计数)。\n\n### 缺口二:墓碑指向已关闭的 #1893(违背 2026-08-02 裁决)\n\n裁决原文:「`UNKNOWN_KEY_GUIDANCE` 墓碑指向 **#3146** 作为立项位」。而 #3414 落地的墓碑指向 **#1893 —— 该 issue 已于 2026-07-24 关闭**,作者撞上墓碑后顺着指针只能找到一个已完结的审计杂务单,而非软删除的立项位。本 PR 修正:\n\n- `trash` 墓碑 → 指向 #3146(parked)+ `os migrate meta --from 16` 处方;\n- `mru` 墓碑 → 去掉死指针(MRU 无立项单,保留「若实现则以 live enforced flag 回归,ADR-0049」)+ migrate 处方;\n- `restore` legacy-apiMethod guidance 与 `api-derivation.ts` 注释中的 #1893 → #3146(同一退役面上的两处死指针,一并修正)。\n\n## 证据\n\n### 1. 三处零 reader 重验(不引立单结论,2026-08-03 实跑)\n\n```\n$ grep -rn --include=\"*.ts\" -E \"enable\\??\\.(trash|mru)\\b\" packages/ examples/  (排除 node_modules/test)\n→ 仅 5 处命中,全部在 spec 自身的墓碑文案/注释里;core/runtime/objectql/rest/metadata*/plugins/services 零命中\n\n$ grep -rn --include=\"*.object.ts\" -E \"^\\s*(trash|mru)\\s*:\" packages/ examples/\n→ 0 命中(~83 处 setter 已由 #3414 全部删除,现重验为零残留)\n```\n宽松 `\\b(trash|mru)\\b` 的其余命中逐一核过:全是 icon 名(`icon: 'trash-2'`)、注释、与本键无关的保留权限位 `allowRestore`。objectui/cloud 兄弟仓本容器无检出;键已删除 10 天且 main 全绿,若有消费者早已显形。\n\n### 2. 墓碑 sabotage(dist 实跑)\n\n作者写 `enable: { trash: false, mru: true }` → 解析拒绝,全文:\n\n```\nUnrecognized key(s) on `enable`: `trash`, `mru`.\n  • `enable.trash` was removed from @objectstack/spec in the 16.x line (#2377/#3207, ADR-0049) — … Delete the key. For recoverability use per-field `trackHistory` (audit trail) or a `lifecycle` policy; soft delete is parked at #3146 and, if built, returns as a live enforced flag (ADR-0049 prune-or-build). Run `os migrate meta --from 16` to rewrite it automatically.\n  • `enable.mru` was removed from @objectstack/spec in the 16.x line (#2377/#3207, ADR-0049) — … Delete the key. If MRU tracking is built it returns as a live enforced flag (ADR-0049 prune-or-build). Run `os migrate meta --from 16` to rewrite it automatically.\n```\n\n存活键防「拒绝一切」:`{ searchable: true, trackHistory: true, apiEnabled: true, activities: false }` → 正常通过。\n\n链路行为(dist 实跑):\n- **存量行**:`applyConversionsToStoredItem('object', {…enable: {trash:false, mru:false, searchable:true}})` → `enable: {\"searchable\":true}`,notices = `object-enable-trash-mru-removed @ objects[0].enable.trash / .mru`(2 条);\n- **默认加载路径**:retired 条目不自动剥离(0 notices,键原样留给墓碑当场拒绝)—— 拒绝教作者、链路收历史,各归其位。\n\n### 3. Retirement 路径门禁(全部实跑捕获退出码,无 tail 掩码)\n\n```\ncheck:liveness               PASS   (strict 路线:ledger 行已删,无 UNCLASSIFIED/ORPHAN)\ncheck:empty-state            PASS\ncheck:authorable-surface     PASS\ncheck:docs                   PASS\ncheck:api-surface            PASS\ncheck:spec-changes           PASS   (再生后;新增 conversion 条目见 diff)\ncheck:upgrade-guide          PASS   (再生后;v17 表新增一行 + rationale 段落)\ncheck:skill-refs / skill-docs / skill-examples  PASS\ncheck:strictness-ledger      PASS\n```\n\n**#4650 门禁说明(PM 现势修正一的核实结论)**:`authorable-surface.json` 对嵌套 `enable` 块只记 **一行不透明的 `data/Object:enable`**,不逐键展开 —— 两键从未有过基线行,本次 diff 里 `authorable-surface.json` 零变更,#4650 检查 (c) 不涉及、`[RETIRED]` 转换不适用(该机制属 `retiredKey()` 墓碑路线;本键走的是 `.strict()` + guidance map 路线,skill §2 判则下 ledger 行删除与基线行不存在均为正确形状)。`check:authorable-surface` 实跑 PASS 为准。\n\n### 4. 测试与类型\n\n```\n@objectstack/spec        build ✓  test 7400/7400 ✓  typecheck ✓\n@objectstack/cli         test 581/581 ✓(含 migrate-meta e2e:全链重放 + 幂等断言)\n@objectstack/metadata-protocol  test 231/231 ✓(stored-conversions/stored-migration 套件)\nmetadata / objectql / cli  typecheck ✓\n```\n新增 pin:处方必须含 `#3146` 与 `os migrate meta --from 16`、必须不再含 `#1893`;stored 行重放恰剥两键。未做全仓 typecheck:本 PR 未删任何 setter(#3414 已删完,上文 grep 证零残留),spec 导出面零变化(`check:api-surface` PASS),全仓扫描无增量信息,按资源纪律 scoped。\n\n### 5. i18n 逐行证明\n\n本 PR 不触 `object.form.ts`(#3414 已删两行并再生 4 locale)。`pnpm check:i18n` 实跑:**9 包全部 in sync,diff 为空** —— 「只含目标键」在此退化为「零 diff」,严格满足。\n\n### 6. Changeset 定级(issue 旧第 7 步的纠正)\n\nissue 第 7 步的「minor(launch-window 政策,check-changeset-no-major)」已过时:现处 **v17 pre/rc 窗口**(`.changeset/pre.json` `mode: \"pre\"` 实测),`check-changeset-no-major.mjs` 在 pre-mode **自动让行**(脚本内注明 RC EXEMPTION,无需 `allow-major` 标签)。据此:\n\n- **`remove-enable-trash-mru.md` 由 minor 翻正为 major**:破坏纯在作者侧(`ObjectSchema.create()` 手写对象),运行时对存量元数据经链路重放为无损剥离;但它就是 v17 窗口内的 breaking 移除(裁决原文「v17 major 窗口内落地」,C9/C12/C14/#4651 同窗先例均 major),编译 CHANGELOG 时列在 Minor Changes 会误导升级 agent。pre-mode 下改动已消费 changeset 的定级仅影响 `pre exit` 后的终版计算(lockstep 取最高级,已有其他 major,机械上无副作用),语义上归位。migration 段同步补上 `os migrate meta --from 16` 与 #3146 指针。\n- 本 PR 自身增量(conversion 补登 + 处方修正)按 `notify-source-shape-conversion` 先例定 **patch**(`object-enable-trash-mru-migration-surface`)。\n\n### 7. 裁决引用\n\n> **裁决(2026-08-02):remove** —— 删除 `enable.trash` / `enable.mru`;#3146 维持 parked,现阶段不实现软删除。…实施走 `spec-property-retirement` 流程,`UNKNOWN_KEY_GUIDANCE` 墓碑指向 #3146 作为立项位。v17 major 窗口内落地。\n> 维护者确认(2026-08-02 19:53Z):「这个功能暂时不是重点,可以移除」\n\n#3146 本 PR 未触碰(维持 parked,仅在墓碑/注释中引用)。`content/docs/releases/` 未触碰。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_0176qgxgCXTJCUv4YFLtusP9\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_0176qgxgCXTJCUv4YFLtusP9)_"
+}

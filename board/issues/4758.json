@@ -1,0 +1,35 @@
+{
+  "number": 4758,
+  "kind": "pull_request",
+  "title": "fix(plugin-audit,rest)!: sys_comment 的访问权从 thread_id 指向的记录继承 (#4630)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T02:32:53Z",
+  "updated_at": "2026-08-03T03:11:03Z",
+  "closed_at": "2026-08-03T03:11:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T03:11:02Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4758",
+  "body": "Fixes objectstack-ai/objectstack#4630\n\n## 问题\n\nattachment 的可见性由父记录派生,comment 什么都不派生。同一条记录、同一个用户,两者答案不同 —— issue 正文的三条实测里,读不到 opportunity 的 `rep2` 依然能列出它下面的评论、能 POST 一条(连 `\"crm_opportunity:\"` 这种空 id 的悬空 thread 也 201),`guest_portal`(契约是\"什么都读不到\")同样读得到。\n\n根因:`sys_comment` 是 public、没有 owner 列、父记录藏在 `thread_id` 字符串里,所以 OWD/sharing 的静态谓词和 RLS 从来没有收窄过它;唯一的 feed 侧网关 `enforceFeedsCapability` 只看 `enable.feeds` 开关,从不看记录。而 `enable.feeds` 是 opt-out(spec 默认 `true`),于是**每个应用的每个对象**都挂着这条组织级可读可写的旁路。\n\n## 做法:照 attachment 的两件套,不发明新形状\n\n`AuditPlugin` 现在装上 `service-storage` 给 `sys_attachment` 装的同一套东西,按 `thread_id` 的 `{object_name}:{record_id}` 解析父记录。新文件 `packages/plugins/plugin-audit/src/comment-access-hooks.ts` 与 `attachment-access-hooks.ts` 同构(同样的 duck-typed engine seam、同样的 system/无 session 绕过、同样的 deny-all 哨兵、同样的扫描上限)。\n\n**读侧** `installCommentReadVisibility` —— `find`/`findOne`/`count`/`aggregate` 中间件(不是 find hook:只有中间件能让 `count()` 与 `find()` 被同样过滤,否则列表 `total` 会泄露隐藏行的存在)。每次读:系统上下文预扫候选 `thread_id` → 按父对象分组 → 用**调用者上下文**探测哪些父记录真的读得到(父对象自己的 OWD/sharing/RLS/对象级 CRUD 说了算,这正是 `guest_portal` 那条被翻转的原因)→ AND 上 `{ thread_id: { $in: <可见 thread> } }`。thread id 一律**原样保留**、绝不由分量拼回,所以发出的过滤器只可能命中预扫真的见过的行。\n\n**写侧** `installCommentAccessHooks`:\n\n| 动作 | 规则 |\n|---|---|\n| `beforeInsert` | 对父记录**可读**即可评论,并按会话给 `author_id` 盖章 |\n| `beforeUpdate` | 评论**作者本人**,或对父记录有 **EDIT**;若 payload 改了 `thread_id`,新 thread 还要再过一遍 insert 规则 |\n| `beforeDelete` | 同上(attachment 的 uploader-or-parent-editor 规则) |\n\n## 两处需要维护者过目的判断\n\n**1. insert 用\"可读\"而不是 attachment 的 `canEdit`。** PM 的裁定要求以 attachment 的既有选择为默认、如认为该更宽/更严就在 PR 里论证 —— 这里选了更宽,三条理由:\n\n- 验收标准本身这么写:\"可读 parent 的用户:读写正常\"。`canEdit` 会把只读份额的用户挡在门外(fixture 里的 `cmt_readonly`:public_read,人人可读、仅 owner 可改),而\"能看见的记录就能讨论\"是协作面的基本语义(Salesforce Chatter 也是 read 即可发帖)。attachment 更严是有原因的:往记录上挂**文件**是在动它的内容面,`#2970 item 3` 明确按 Salesforce 取了 edit;评论不是。\n- 它实际上**堵得更多**,不是更少。`sharing.canEdit` 对 public OWD 的对象一律返回 `true`,且完全不看权限集;`guest_portal` 这类\"读不到任何东西\"的集合正是被对象级 CRUD 拒的,只有调用者上下文的一次真读能看见。用 `canEdit` 反而会在 public 对象上放行\"读不到却能评论\"。\n- 改写/删除别人的话是**审核**,不是协作,所以那两个动词保持 attachment 的严格规则(作者或 parent editor)。读→评论、编辑→审核,这条分界是这次唯一的语义主张。\n\n**2. 加了 `beforeUpdate`(PM 只点名了 insert 与 delete)。** update 是 issue 标题里\"writes comments on records they cannot see\"的一半:不管它,任何成员都能改写任意记录下的任意评论,并且能把自己的评论**搬到**读不到的记录上(所以 `thread_id` 改动要再过 insert 规则)。规则复用 delete 的,没有第三套策略。若认为越界,删掉这个 hook 不影响其余部分。\n\n## fail closed 的边界\n\n`thread_id` 解析不出记录 —— 悬空空 id(issue 正文那条 POST)、自由文本 thread、指向 `sys_comment` 自身(它不是记录级父亲,回复走 `parent_id`;探测它还会让中间件自我重入)—— 写入拒绝、读取排除。过滤器算不出来(父对象探测抛错、预扫抛错)一律 deny-all。无 id 且无 `where` 的多行写入直接拒绝,而不是当成\"没有行要授权\"(attachment 那边的同一处缺口另行开了 #4757)。\n\n## 错误码:用标准目录,不新造同义词\n\n拒绝统一答 **403 `RECORD_NOT_ACCESSIBLE`**(`StandardErrorCode`,注释就是 \"Sharing rule restriction\"),而不是对称的 `COMMENT_PARENT_ACCESS` / `COMMENT_DELETE_DENIED`。两个原因:ADR-0112 的账本文档明写 \"If the condition is generic (not found / permission / validation / rate limit), use the standard catalog instead of registering a synonym\",而\"你对这条 thread 背后的记录没有访问权\"正是通用权限条件;并且本任务约束 `packages/spec/**` 零改动,新扩展码必须登记进 `ERROR_CODE_LEDGER` 才能通过信封一致性套件。顺带把一个从未被任何生产者发出过的已声明标准码变成了真的会发出的码。`packages/rest` 加了一个映射分支,理由与 attachment/feeds 两个网关一致:`error.object` 报的是**记录的对象名**,通用 4xx 透传会把它换成路由上的 `sys_comment`。\n\n## 未改动(正交)\n\n- `enforceFeedsCapability`(`enable.feeds` → `FEEDS_DISABLED`):它管\"这个对象有没有评论\",与记录级授权正交,fixture 里的 `cmt_nofeeds` 钉住它行为不变。\n- 匿名 401:在这一切之前发生,dogfood 里有断言。\n- `packages/spec/**`、`content/docs/releases/`:零改动。\n- attachment 的既有行为与测试:一条没动。\n\n## 测试\n\n| 层 | 文件 | 结果 |\n|---|---|---|\n| 端到端(真 HTTP + better-auth 成员 + sharing/security) | `packages/qa/dogfood/test/comments-permission-matrix.dogfood.test.ts` | 10 passed |\n| 写侧单测 | `packages/plugins/plugin-audit/src/comment-access-hooks.test.ts` | — |\n| 读侧单测(含 Filter Protocol 求值器自检,照 attachment 的 harness) | `packages/plugins/plugin-audit/src/comment-read-visibility.test.ts` | — |\n| 挂载点 | `audit-plugin.test.ts` 新增两例(注册了什么 + 挂上去的 hook 真的会拒) | — |\n| REST 映射 | `packages/rest/src/rest.test.ts` 新增两例 | — |\n\n```\npnpm --filter @objectstack/plugin-audit test        Test Files 6 passed (6)   Tests 89 passed (89)\npnpm --filter @objectstack/plugin-audit typecheck   (clean)\npnpm --filter @objectstack/rest test                Test Files 37 passed (37) Tests 561 passed (561)\npnpm --filter @objectstack/service-storage test     Test Files 19 passed (19) Tests 252 passed (252)   ← attachment 回归\ndogfood: comments-permission-matrix                 Test Files 1 passed (1)   Tests 10 passed (10)\ndogfood: attachments-permission-matrix + membership Test Files 2 passed (2)   Tests 21 passed | 1 skipped\nnode scripts/check-type-check-coverage.mjs          OK — 60/77 …\n```\n\n**可回退证明**:把 `AuditPlugin` 里两处 install 临时关掉重跑 dogfood,10 条里 **7 条转红**(`(a)` 列表泄露、`(b)` 写入 403 变成放行、`(c)` 悬空 thread、`(d)` 三条、`(e)` author 盖章),另 3 条是本来就该保持不变的对照(feeds 网关、匿名 401、total 一致)。这些测试不是装饰。\n\n关掉网关重跑时还暴露了一件事:**在 `main` 上,不带 `author_id` 的 POST 会被 400 `VALIDATION_FAILED` 挡下**,也就是说客户端必须自己填 author —— 而它爱填谁就填谁。现在服务端盖章,冒充这条路一并关掉了(changeset 里记了这个行为差异)。\n\n## 顺手记录的越界发现(已单独立 issue,本 PR 不修)\n\n- objectstack-ai/objectstack#4756 —— `sys_comment.visibility` / `reply_count` 声明了但全仓无人读写(`visibility` 尤其危险:它看起来像访问控制开关)。`sys_attachment.share_type`/`visibility` 在 #2755 里是被**删掉**的,同一论证在本 PR 之后原样适用。\n- objectstack-ai/objectstack#4757 —— attachment 的 `beforeDelete` 在\"无 id 且无 where\"时把\"没查到行\"当成\"没有行要授权\"而放行,`deleteMany` 会拿到无谓词 AST。本 PR 的 comment 网关在这里 fail closed。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_015Br2xsJsczFsTR9bvbh2Ny\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015Br2xsJsczFsTR9bvbh2Ny)_"
+}

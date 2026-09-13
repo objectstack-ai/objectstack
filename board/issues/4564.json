@@ -1,0 +1,35 @@
+{
+  "number": 4564,
+  "kind": "pull_request",
+  "title": "fix(driver-sqlite-wasm): persist `RETURNING` writes — `stop()` 返回即落盘,冷启动 e2e 解封 (#4518)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T03:21:52Z",
+  "updated_at": "2026-08-02T03:33:11Z",
+  "closed_at": "2026-08-02T03:33:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-02T03:33:09Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4564",
+  "body": "Fixes #4518\n\n## 结论先说:不在 harness,在驱动\n\nissue 给了三个候选方向(查 `stop()` 链路 / harness 里显式 `flush()` / 换 `persist` 策略),实测下来**一个都不是**——三者都建立在\"flush 该发生却没发生\"这个前提上,而真实情况是**驱动压根不认为自己脏了**,所以再怎么 flush 都是空转。\n\n用探针把链路拆开看:\n\n```\nPROBE connection cfg {\"filename\":\"/tmp/probe-4518-…/v.sqlite\",\"persist\":\"on-write\"}\nPROBE[after-write-before-stop] suspend_note = [[0]]   ← 内存里读得到,盘上 0 行\nPROBE[after-write-before-stop] sys_user     = [[1]]   ← 但早期某次写是落盘了的\nPROBE[after-stop]              suspend_note = [[0]]   ← stop() 之后仍然 0\n```\n\n两条线索合在一起就指向答案了:`persist` 其实是 `on-write`(不是 issue 猜的 `on-disconnect`,`default-datasource-driver-factory.ts` 对文件型 sqlite-wasm 就是这么配的),也就是说**每次写都该 flush**;但盘上只留下了 boot 早期的一次快照(所以文件大小两次完全一致 1073152)。既然 `on-write` 都不生效,`stop()` 那条链路是否走全就无关紧要了——它最后调用的 `close()` → `flush()` 第一行就是 `if (!this.dirty) return`。\n\n## 根因\n\n`packages/plugins/driver-sqlite-wasm/src/knex-wasm-dialect.ts` 的 `_query` 用**「这条语句返不返回行」**挑执行分支,然后**只在无行返回的那条分支上**调 `markDirty()`:\n\n```ts\nif (isReadMethod(obj.method, obj.returning) || PRAGMA) {\n  const stmt = db.prepare(obj.sql);   // ← INSERT … RETURNING * 走这里\n  …\n  return obj;                          // ← 没有 markDirty\n}\ndb.run(…);\nconnection.markDirty(obj.method);      // ← 只有这条分支标脏\n```\n\n`INSERT … RETURNING *` 是返回行的,于是走上面那条分支。而 ObjectQL 的写路径**就是**用 `RETURNING *`(它要把落库后的整行还给调用方),所以受影响的是**几乎全部业务数据**——这也是为什么它表现成\"harness 冷启动不了\"而不是\"某个驱动 bug\"。`knex.raw('INSERT …')` 这类不带 Knex `method` 的语句同样掉进这条分支,同样丢。\n\n`on-disconnect` 也救不了它:最后那次 flush 用的是同一个 `dirty` 标志位。两种持久化策略一起漏。\n\n`sys_user` 之所以还在,是因为 better-auth 的插入没走 `RETURNING`;这也是当初这个 bug 能长期潜伏的原因之一——`objectstack dev` 那种\"跑到被杀\"的用法里,身份/配置类数据看起来是持久的。\n\n## 修法:让\"是否变更了数据库\"只有一个答案\n\n不在 harness 里补 `flush()`(那是把驱动的错误结论当成既定事实去绕开),而是把**分类**和**执行**彻底拆开:\n\n```ts\nexport function statementMutatesDatabase(sql: string, method?: string): boolean\n```\n\n- 同时看 Knex `method` 和 SQL 文本,所以既不会因为\"走了返回行的分支\"漏掉,也不会因为\"没带 method\"漏掉;\n- `_query` 重构成两段:**① EXECUTE**(三种执行形态,都不做持久化决策)→ **② PERSIST**(唯一一处决策)。这样\"某条分支忘了说自己写过\"在结构上不再可能;\n- 事务控制语句仍然只交给 `noteTransactionControl`,继续把 flush 推迟到事务真正关闭(sql.js 的 `export()` 会 close+reopen,事务中导出会把事务冲掉 —— #1494);\n- 顺带把会改文件的 `PRAGMA` 赋值(`auto_vacuum`、`user_version`)也算成写。\n\n同时 `WasmSqliteConnection.markDirty(method?)` 改成 `markDirty()`。它原本会拿调用方给的 method 再过一遍自己的白名单——\"这条语句写了吗\"于是有**两个**判断点,而这两个点恰好就是分歧发生的地方。现在方言分类、连接执行,一个决策一个归属。\n\n## 结果:`stop()` 返回 ⇒ 数据已落盘\n\n这条保证现在是结构性的,不需要调用方配合。`packages/verify` 里 `databaseFile` 的 TSDoc 补了这句话,顺带写明\"冷启动看到表没有行 = 驱动 bug,不是 fixture 忘了等\"。\n\n## 测试\n\n`flow-durable-suspend.dogfood.test.ts` 的 KNOWN GAP 注释删掉了,换成它当初就是为之而写的那个用例:\n\n```\n✓ ordinary business rows survive the restart — `stop()` returning means DURABLE\n✓ the `paused` row survives the restart with its continuation intact\n✓ the cold kernel RESUMES the run and takes the right branch\n✓ the resumed result is itself durable — a THIRD boot still reads it\n```\n\n第一条是刻意排在最前的:当初把这个问题识别成驱动缺陷、而不是挂起存储缺陷的关键事实,就是**普通业务记录也活不过重启**。留着它,以后回归时能直接告诉你坏在哪一层。第四条则堵住\"resume 只在 WASM 堆里成功\"这种假绿。\n\n驱动层新增 `sqlite-wasm-driver-returning-persist.test.ts`,逐条钉住每种执行形态(`INSERT … RETURNING`、`UPDATE … RETURNING`、`knex.raw`、事务内提交、`on-disconnect`),外加对 `statementMutatesDatabase` 本身的分类断言。\n\n**回滚验证**(把两个源文件 stash 掉重新 build):\n\n```\n驱动:  Tests  6 failed (6)\n        AssertionError: expected [] to deeply equal [ 'a1' ]\ndogfood: Tests  4 failed | 6 passed (10)\n        AssertionError: the note written by the first kernel is gone:\n          {\"error\":\"Record 8XE_7uCP_utEcCQb not found in suspend_note\", …}: expected 404 to be 200\n        AssertionError: {\"code\":\"RESOURCE_NOT_FOUND\",\"message\":\"No suspended run 'run_c7e3…'\"}: expected 404 to be less than 300\n```\n\n注:`on-disconnect` 那条用例一开始是\"假绿\"的——建表 DDL 本来就会标脏,而 `on-disconnect` 直到 close 才 flush,于是那次导出顺手把没标脏的行也带上了。加了一次显式 `flush()` 把标志位清掉,才复现出 `on-write` 在生产里的真实处境(每次 flush 都清标志,之后再没人置位)。这一条现在也随回滚失败。\n\n**全量**:\n\n```\n@objectstack/driver-sqlite-wasm   Test Files  15 passed (15)   Tests  214 passed (214)\n@objectstack/dogfood              Test Files  76 passed | 1 skipped (77)   Tests  442 passed | 3 skipped (445)\n@objectstack/driver-sql           Test Files  54 passed | 4 skipped (58)   Tests  623 passed | 38 skipped (661)\n@objectstack/service-datasource   Test Files  11 passed (11)   Tests  197 passed (197)\n@objectstack/runtime              Test Files  74 passed (74)   Tests  1046 passed (1046)\n@objectstack/verify               Test Files   2 passed (2)    Tests    7 passed (7)\ntypecheck (driver-sqlite-wasm / verify)  clean\neslint --no-inline-config (driver-sqlite-wasm, qa/dogfood, verify)  clean\n```\n\n已 merge 最新 `origin/main`(a7163ea8a)并按 AGENTS.md §9 重装 + 全量 build 后复跑。\n\n## 影响面提醒\n\n文件型 wasm SQLite 现在**真的会**按 `on-write` 落盘,写入次数会明显多于从前——从前几乎为零。`:memory:` 不受影响。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012C2cd7tL8QDoZ2QKN3djJ5)_"
+}

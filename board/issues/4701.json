@@ -1,0 +1,34 @@
+{
+  "number": 4701,
+  "kind": "pull_request",
+  "title": "fix(client-react): stop five hooks from looping on dependency identity (#4693, #4694)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T19:10:25Z",
+  "updated_at": "2026-08-02T19:53:25Z",
+  "closed_at": "2026-08-02T19:53:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-02T19:53:24Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4701",
+  "body": "Fixes #4693\nFixes #4694\n\n> ℹ️ 曾 stacked 在 #4692(测试基座)上。#4692 已合并(`bbb1192`),base 已 retarget 到 `main`,并已并入一次 main 让 diff 收敛——净差异就是下面这 6 个文件。\n\n## 问题\n\n五个 hook 把 `useCallback` / `useEffect` 的依赖挂在**调用方内联传入的值**上——`where` / `fields` / `orderBy` 对象、`onSuccess` / `onError` 处理器,以及 `useMetadata` 作为**必传位置参数**接收的 `fetcher`。内联意味着每次渲染都是新身份,于是 effect 每渲染重跑;而取数 hook 会 `setState`,那次渲染又触发下一次。\n\n在这些 hook **自己文档示例的写法**下,这就是一个无界请求循环。\n\n单个已挂载组件在 250ms 内发出的请求数:\n\n| hook | 修复前 | 修复后 |\n|:---|---:|---:|\n| `useQuery`(内联 `where`) | 4691 | **1** |\n| `useInfiniteQuery`(内联 `where`) | 6611 | **1** |\n| `useObject`(**完全不传 options**) | 4306 | **1** |\n| `useView`(内联 `onSuccess`) | 8197 | **1** |\n| `useMetadata`(内联 `fetcher`) | 7654 | **1** |\n\n`useObject` 和 `useMetadata` 不需要任何特定用法就会循环:前者的依赖数组里有它**自己的** `data` 和 `etag` state,而函数体又写这两个;后者的 fetcher 是位置参数,根本没有非内联的调用方式。\n\n`useMutation` **不受影响**——没有 effect 驱动它。这是实测确认的(0 次调用),不是假设。\n\n同一根因也在 churn 实时订阅(#4694):`useAutoRefresh` 拿到未 memo 的 `refetch`(而 #4693 修复前 `useQuery` 每渲染返回的正是这种),会每渲染在两条流上各退订重订一次,退订与重订之间到达的事件直接丢失。\n\n## 改动\n\n两个**内部**原语(不从 index 导出),分别解决两半:\n\n- **`stableKey(value)`** —— 把结构化值变成「值变了才变」的依赖。键排序(`{a,b}` 与 `{b,a}` 等价),**数组顺序保留**(`orderBy: ['-created_at','name']` 的顺序是语义)。跟随仓库既有先例(`service-settings` / `service-automation` 各有一份本地实现)。\n- **`useEventCallback(fn)`** —— 给处理器一个恒定身份,同时始终调用**最新**版本。ref 在 effect 里同步而非渲染期写入:并发渲染下被丢弃的那次渲染不应该把一个从未提交的处理器发布出去。\n\n**没有选择「让调用方自己 `useMemo`」**:TSDoc 示例本身传的就是对象字面量,把正确性押在每个调用点记得 memo 上等于没修。\n\n## 测试:13 条,每条都用还原修复的方式验过\n\n| 还原 | 结果 |\n|:---|:---|\n| `useQuery` 依赖改回按身份 | 3 条红 |\n| `useObject` 自身 state 放回依赖 | 3 条红 |\n| `useMetadata` 的 `fetcher` 放回依赖 | 2 条红 |\n| 订阅 hook 依赖改回原始 `callback` | 2 条红 |\n| 全部还原 | **31/31 绿** |\n\n请求数断言用的是**精确值**而不是 `< 10` 之类的上界——后者在「循环只是变慢了」的情况下依然会通过,而那正是这套测试要防的失败。\n\n覆盖也包含反方向,免得修复把循环换成更糟的东西:\n\n- **值真的变了仍要重取** —— `where` 从 `{status:'open'}` 变成 `{status:'done'}` 必须发起第二次请求;同值重建的对象则必须是 no-op。\n- **稳定化的处理器不能陈旧** —— ref 间接层最容易在这里出错。每个被稳定化的处理器都断言运行的是**当前渲染**那一版:换掉 `onSuccess` 不触发重取,但下一次取数必须打到**新**的那个;订阅回调换掉后,送达的事件必须进新回调而不是订阅时捕获的旧闭包。\n\n## 验证\n\n按真实退出码(`cmd | tail` 的退出码是 `tail` 的,不作为证据),并在并入 main 之后重跑过一遍:\n\n```\ntypecheck exit=0   build exit=0   test exit=0 (31/31)   eslint exit=0\ncheck:type-check-coverage exit=0\n```\n\n## 顺带一提\n\n仓库**没有配 `react-hooks` eslint 插件**,而 `exhaustive-deps` 正是专门抓这类缺陷的规则。这解释了它们为何能长期存活。是否引入该插件是个独立的取舍(它会在既有代码上产生大量告警),没有夹带进本 PR。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01LYnZrTwXbrctB8E8HpJAPT"
+}

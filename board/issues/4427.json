@@ -1,0 +1,35 @@
+{
+  "number": 4427,
+  "kind": "pull_request",
+  "title": "fix(objectql): 运行时注册的汇总字段不该等重启才会算",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T04:56:49Z",
+  "updated_at": "2026-08-01T05:04:01Z",
+  "closed_at": "2026-08-01T05:03:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-01T05:03:59Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4427",
+  "body": "## 问题\n\n引擎的 roll-up summary 索引**只有一个失效点** —— `engine.registerApp`。而运行时发布路径根本不走它：它直接往 registry 里注册（`protocol.saveMetaItem` → `registry.registerObject`）。\n\n于是：任何**已经写过一次数据**的 kernel（发布动作自己就会往 `sys_metadata` 写行）都握着一份在新对象出现之前构建的索引。此后每一次子记录写入都查不到 descriptor，**静默跳过重算**，父记录上的汇总字段一直是 null，直到进程重启。\n\n这正是 AI 搭出来的应用里「已完成任务数」在元数据**完全正确**的情况下依然永远为空的原因：汇总配置对、子行的外键也解析好了，就是没有任何东西去算它（objectstack-ai/cloud#970 的收尾环节）。\n\n## 改动\n\n- `SchemaRegistry` 增加单调递增的 `objectRevision`，在对象集合发生变化时自增（`registerObject` / `invalidate` / `invalidateAll` / `unregisterObjectsByPackage` / `reset`）。\n- 引擎的 `getSummaryDescriptors` 记住索引构建时的 revision，一旦对方前进就重建。\n\n这样「从 registry 派生的缓存」不会再因为某条路径忘了调用失效函数而变陈旧。`invalidateSummaryIndex()` 保留，作为兜底。\n\n## 测试\n\n新增回归用例 `summary-rollup.test.ts > a roll-up registered at RUNTIME still computes`：先写一行把索引焐热，再按运行时发布的方式注册 parent + child，插入子行后断言父行的 `task_count` / `completed_task_count`（带 filter）算对。**去掉本 PR 的引擎改动后该用例会失败**（已验证）。\n\n`packages/objectql` 全量 91 files / 1501 tests 通过。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

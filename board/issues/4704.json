@@ -1,0 +1,37 @@
+{
+  "number": 4704,
+  "kind": "issue",
+  "title": "`Seed.env` is authorable but never enforced: the app seeding path never sets `SeedLoaderConfig.env`, so `env: ['dev']` seeds into production too",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T19:47:19Z",
+  "updated_at": "2026-08-03T10:19:35Z",
+  "closed_at": "2026-08-03T10:19:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4704",
+  "body": "Found while implementing hotcrm#640 (a demo app needed dev-only seed rows); filed unassigned per Prime Directive #10. Measured against 17.0.0-rc.1.\n\n## The declared capability\n\n`SeedSchema` in `packages/spec` gives every seed dataset an `env` axis, with a default:\n\n```\nenv: z.ZodDefault< z.ZodArray< z.ZodEnum< { prod, dev, test } > > >\n```\n\nand the parsed-type comment advertises it as always-present:\n\n> Parsed/output type — all defaults are applied (**env**, mode, externalId always present)\n\nRead as authoring guidance, that says: mark a dataset `env: ['dev']` and it seeds\non a development install only. That is precisely the affordance an app wants for\ndemo-only fixtures, and it is the first thing you reach for.\n\n## What is enforced\n\n`SeedLoaderService.load()` filters on the **loader config's** env, not the dataset's:\n\n```\nfilterByEnv(datasets, env) {\n  if (!env) return datasets;\n  return datasets.filter((d) => d.env.includes(env));\n}\n```\n\n`SeedLoaderConfigSchema.env` is `z.ZodOptional` with **no default**, and the two\nplaces that seed an app never pass it. In `AppPlugin` (`@objectstack/runtime`),\nthe inline seed:\n\n```\nSeedLoaderRequestSchema.parse({\n  seeds: normalizedDatasets,\n  config: { defaultMode: 'upsert', multiPass: true, identity: seedIdentity },\n})\n```\n\nand the per-org replayer, which adds only `organizationId`. Neither sets `env`.\n\nSo `config.env` is `undefined` on every app-seeding call, `filterByEnv` returns\n**all** datasets, and `dataset.env` is never read at all. A dataset marked\n`env: ['dev']` seeds into production exactly as if it were marked `['prod']`.\n\n## Why this is worth fixing rather than documenting\n\nThis is the declared-vs-enforced shape ADR-0049 is about, and it fails in the\ndangerous direction: the author believes they have restricted the blast radius,\nand the runtime silently widens it. The keys most likely to carry `env: ['dev']`\nare demo users, fake customers, seeded credentials — the exact rows whose\nappearance in a customer tenant is the failure everyone is trying to avoid. A\nlint or a doc note cannot cover that, because the metadata *is* correct; the\nconsumer just never asks.\n\nIn hotcrm#640 the workaround was to keep the demo rows out of the artifact\nentirely (a repo script rather than a seed), which is sound for that app but is\nnot available to an app that legitimately wants environment-scoped fixtures.\n\n## Repro\n\nAuthor any dataset with `env: ['dev']`, boot with `NODE_ENV=production`, and\nobserve the rows land. Or read it statically: nothing in `packages/runtime`\npasses `env` into `SeedLoaderRequestSchema.parse`.\n\n## The two honest ways out (ADR-0049 enforce-or-remove)\n\n1. **Enforce.** Have the app-seeding path derive `config.env` — from `NODE_ENV`,\n   or from an explicit `OS_SEED_ENV`, with a documented default — so\n   `dataset.env` becomes the gate it reads like. Worth deciding what the default\n   is: defaulting to `prod` changes behaviour for every existing dataset that\n   left `env` at its schema default, so the default probably has to be \"no\n   filter unless the host opts in\", with the opt-in documented.\n2. **Remove.** Drop `env` from `SeedSchema` and the loader's `filterByEnv`, and\n   say plainly that seed scoping is the host's business.\n\nEither is fine. What is not fine is the current state, where the key is\nauthorable, type-checked, defaulted, and inert."
+}

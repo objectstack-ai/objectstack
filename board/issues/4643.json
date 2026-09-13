@@ -1,0 +1,35 @@
+{
+  "number": 4643,
+  "kind": "pull_request",
+  "title": "feat(spec)!: 双源 C4 收敛 — Session 归 ./api,./identity 侧死删 (#4641)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T13:36:44Z",
+  "updated_at": "2026-08-02T13:58:17Z",
+  "closed_at": "2026-08-02T13:58:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-02T13:58:16Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4643",
+  "body": "Fixes objectstack-ai/objectstack#4641\n\n#4535 C 组第四簇(C4)。`Session` / `SessionSchema` 各有两处声明,消费者拿到哪个形状只取决于 import 路径(#4411 陷阱)—— 而两侧连字段名都不一致,所以写错的表现是运行时 `undefined`,不是类型错误。\n\n## 判真源:三仓 import 语句级扫描\n\n| 侧 | 形状 | 消费方 / runtime 读取点 |\n|:--|:--|:--|\n| **`./api`**(`api/auth.zod.ts`)| `{ id, expiresAt, token?, ipAddress?, userAgent?, userId }` | **活** —— 接进 `SessionResponseSchema`,即 `AuthEndpointPaths.getSession`(`/get-session`、`/me`、`/refresh`)的响应体 |\n| `./identity`(`identity/identity.zod.ts`)| `{ id, sessionToken, userId, activeOrganizationId?, expires, createdAt, updatedAt, ipAddress?, userAgent?, fingerprint? }` | **零消费方** —— framework / cloud / objectui 三仓除自身单测外无任何 importer,未接进任何父 schema |\n\n判定 `./identity` 侧为死侧的**决定性证据**不只是「没人 import」,还有它已经偏离了自己声称描述的那张表:被**强制执行**的会话记录是 `packages/platform-objects/src/identity/sys-session.object.ts` 的 `sys_session` 对象,列名是 `token` / `expires_at`(与 `./api` 一致,而非 `./identity` 的 `sessionToken` / `expires`),且**根本没有 `fingerprint`**。cloud 侧确实读 `activeOrganizationId`,但走的是 better-auth 自己的类型(`active-org-session-hook.ts` 只 import 了 `@objectstack/spec/contracts`),不经 spec 的 `Session`。\n\n也就是说 `./identity` 的 `Session` 是一份没人执行、且已经漂移的 better-auth 词汇复述 —— 正是 ADR-0049「declared but unenforced」要清掉的东西。\n\n## 处置\n\n**路线一:死删无消费方一侧**(v17 major 窗口)。`./identity` 的 `SessionSchema` / `Session` 移除,`./api` 成为裸名唯一所有者。未做收敛+re-export:两者是「存储行」与「线上投影」两个概念,收敛要么把 `sessionToken` / `fingerprint` 泄进 REST 响应体,要么收窄记录 —— 都不对。也未改名:改名会把一个零消费方的死声明换个名字留下来。\n\n`dual-source-exports.baseline.json` 恰好删掉 issue 指名的 2 行,**24 → 22,只减不增**:\n\n```\n- Session — [./api (type)] ≠ [./identity (type)]\n- SessionSchema — [./api (const)] ≠ [./identity (const)]\n```\n\n## 回归 pin —— 顺带发现手册推荐的 pin 是空转的\n\n手册(C1 #4581 / C3 #4638 先例)推荐用**编译期条件类型**做 pin。落之前我实测了一下,**它在 `packages/spec` 里不可能失败**:\n\n1. `packages/spec/tsconfig.json` 的 `exclude` 含 `**/*.test.ts` —— `pnpm typecheck` 根本不编译测试文件;\n2. `vitest.config.ts` 没开 `typecheck.enabled`,vitest 走 esbuild 剥类型,不做类型检查。\n\nsabotage 验证:把 `export const SessionSchema` 加回 `identity.zod.ts` 再跑 `tsc --noEmit`,pin **零报错**。\n\n附带第二个坑:`keyof typeof import(...)` **只枚举 value 导出**,type-only 导出对它不可见,所以对**裸类型名**写这类断言即便被编译也是空转(已用最小复现验证)。\n\n所以本 PR 没有跟着写一个「看起来像门禁、实际不会红」的 pin,改用**运行时**模块命名空间断言,并在注释里写明取舍;裸类型交给 `check:dual-source-exports`(读构建产物 `.d.ts`,type 和 const 都枚举)。同样的 sabotage 下新断言**立刻红**:\n\n```\nTests  1 failed | 19 passed (20)\n```\n\n范围外发现已另立 **#4642**(unassigned)记录,影响 #4581 / #4638 已落地的 pin —— 本 PR 不修。\n\n## 连带产物\n\n- `json-schema.manifest.json`:去掉 `identity/Session`\n- `authorable-surface.json`:去掉该 schema 的 10 个 key(整形状移除,同 #4638 先例;非可作者化 metadata key,不需要 tombstone / ADR-0087)\n- `api-surface.json`:重新生成\n- **reference docs 跟着声明走** —— 这一处顺带修好了一个既有缺陷:`Session` 之前因名字碰撞被生成到 `references/api/identity` 页,而真正声明它的 `references/api/auth` 页反而缺了它。现在 `Session` 出现在 `api/auth`,碰撞页 `api/identity` 随之消失(`api/meta.json` 同步)\n- 严格性台账:`identity/` 粗粒度行 34 → 33,并写明掉站点的原因(该行在粗粒度表,不受 gate 解析,但地图不能漂)\n- `docs-import-surface.baseline.json`(#4595 ratchet):**未触发**,未改动\n- ⛔ `content/docs/releases/`:未触碰\n\n## changeset\n\n`.changeset/session-dual-source-c4.md` —— `@objectstack/spec` **major**,含 FROM → TO 表与迁移指引(`sessionToken` → `token`,`expires` → `expiresAt`;`createdAt` / `updatedAt` / `activeOrganizationId` / `fingerprint` 不在线上形状,改读 `sys_session` 对象)。\n\n## 验证(全绿)\n\n在 `packages/spec` 下,全部前台跑、共享 flock 串行、`--max-old-space-size=4096`:\n\n| 门禁 | 结果 |\n|:--|:--|\n| `pnpm --filter @objectstack/spec build` | ✅ |\n| `pnpm check:dual-source-exports` | ✅ `4313 names across 16 entry points — 160 re-exported, 22 accepted dual-source (baseline)` |\n| `pnpm check:generated` | ✅ `All 8 generated artifacts are up to date.` |\n| `pnpm test` | ✅ `291 passed (291) / 7266 passed (7266)` |\n| `check:liveness` | ✅ 全部 governed-type 属性已分类 |\n| `check:strictness-ledger` | ✅ `67 file(s) across 5 triaged director(ies) — 站点数与章节总计均衡` |\n| `check:empty-state` | ✅ `all classified (1 closed, 2 open, 4 output, 9 scope)` |\n| `check:variant-docs` | ✅ `20 discriminated union(s) — 8 governed, 12 exempt` |\n| `check:exported-any` | ✅ `1884 types + 1638 schemas`,无 `any` |\n| `check:skill-examples` | ✅ `202 prose examples type-check` |\n| 全仓 `pnpm typecheck` | ✅ `122 successful, 122 total` |\n\n收尾前 `git fetch origin main && git merge origin/main` → `Already up to date`(main 仍在 `0a936ea62`),无需重跑。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01M9uWvoEp9CoLzYjNExj9sL\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01M9uWvoEp9CoLzYjNExj9sL)_"
+}

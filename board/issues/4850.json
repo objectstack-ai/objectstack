@@ -1,0 +1,38 @@
+{
+  "number": 4850,
+  "kind": "issue",
+  "title": "止血:packages/spec 的 vitest 缺 testTimeout —— 12 个跑 TS 编译器的用例配在 5s 默认值下",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "ci/cd",
+    "domain:spec",
+    "pm:dispatched",
+    "tests"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T10:02:14Z",
+  "updated_at": "2026-08-03T10:42:42Z",
+  "closed_at": "2026-08-03T10:42:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4850",
+  "body": "> **范围严格限死:只改 `packages/spec/vitest.config.ts` 一行 + changeset。**\n> 这是 #4796 的**止血**,不是它的解。#4796 保持打开,方向 2(把导出面解析提成构建期产物)仍归 spec 车道。\n> ⚠️ 本单**不得**写 `Fixes #4796`,那会把还没解决的结构问题一并关掉。\n\n## 根因(已在 #4796 取证完毕,证据见 [该条评论](https://github.com/objectstack-ai/objectstack/issues/4796#issuecomment-5164859186))\n\n`packages/spec/vitest.config.ts` 没有设 `testTimeout`,吃 vitest 默认的 **5000ms**:\n\n```ts\nexport default defineConfig({\n  test: { globals: true, environment: 'node', include: [...], coverage: {...} },\n});          // ← 无 testTimeout\n```\n\n而 `packages/spec/src` 下有 **12 个测试文件**在用例里加载 TypeScript 编译器并对整个导出面做类型解析:\n\n```ts\nconst ts = (await import('typescript')).default;   // 建 program、解析 symbol、unalias、追 originOf\n```\n\n```\napi/rest-server · automation/state-machine · automation/sync-retirement · cloud/tenant\ndata/driver · integration/connector · kernel/package-dependency-dual-source\nstudio/action-location-retirement · system/environment-artifact · system/notification\nui/app · ui/view\n```\n\n这类工作量本来就是秒级。合并队列的 runner 同时跑多个 PR 的批次,比 PR 分支拥挤,所以**今晚 5 次命中全部发生在队列里,PR 分支一次没红过**。\n\n## 影响\n\n今晚 5 次把**完全无关**的 PR 踢出合并队列:#4755(`metadata-protocol`)、#4788(`plugin-auth`)、#4823(`metadata`)、#4822(`service-analytics`,**连踢两次**)。每次都要有人去翻 `gh-readonly-queue/*` 的 run,才能做出「不是我的锅」这个证明。\n\n## 要做的\n\n1. `packages/spec/vitest.config.ts` 的 `test` 块加 `testTimeout: 60_000`。60s 与 PR #4506 当初给同族用例定的值一致,只是提到配置层一次覆盖全部 12 个,不再随新增清账单漏。\n2. changeset(patch;仅测试配置,无公共 API 变化)。\n\n## 不要做的\n\n- ⛔ 不改任何 `.zod.ts`、不改任何测试逻辑、不动 `spec-changes.json` / liveness 台账 / 生成基线。\n- ⛔ 不做方向 2 的重构(构建期产物)——那是 #4796 的本体,留给 spec 车道。\n- ⛔ 不逐条给用例加 `{ timeout: … }`。PR #4506 就是这么做的,只覆盖了当时红的那几条,池子有 12 个,后续新增的照样漏。**改配置层才收得干净。**\n\n## 跨车道说明\n\n`packages/spec/**` 按 #4604 登记表归 spec 车道(`session_0176qgxgCXTJCUv4YFLtusP9`)。本单由主 backlog PM(`session_015Br2xsJsczFsTR9bvbh2Ny`)在**维护者批准下**破例跨入,理由是它卡住的是全仓合并吞吐(含本次发版关键项),而止血只需一行。已在 #4796 与 #4604 登记,**留否决窗口** —— spec 车道若认为这一行应换个值或换个位置,直接说,本单立刻让行。\n\nRelated: #4796(本体,保持打开)、#4506(上一次局部修法)、#4739 / #4658 / #4740(受影响用例所属的清账单)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 4702,
+  "kind": "pull_request",
+  "title": "build: merge driver for generator-owned spec artifacts (#4675)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T19:16:49Z",
+  "updated_at": "2026-08-02T19:52:05Z",
+  "closed_at": "2026-08-02T19:52:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-02T19:52:04Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4702",
+  "body": "Closes #4675.\n\n`packages/spec`'s checked-in artifacts are sorted arrays and append-only ledgers. Two PRs each adding a few lines is a **set union** — semantically composable — but git reports a text conflict a human must resolve. Measured over one afternoon (2026-08-02): four merges, nine conflicts across those files, and **not one** was a real semantic conflict. Every correct resolution was the same three steps — discard both sides, re-run the generator, re-run the gates — at a dozen-plus minutes each, on a `main` moving fast enough that the rerun could itself go stale.\n\n`.gitattributes` now routes those paths to `merge=os-regen`.\n\n## The driver deliberately does not regenerate\n\nThis is the design decision in the change, and it inverts what the issue proposed.\n\nThe obvious implementation — \"on conflict, run the generator\" — is wrong, and measurably so. Git invokes merge drivers **while** it is merging, in index order, and the worktree still holds the pre-merge sources at that moment. `packages/spec/spec-changes.json` sorts before `packages/spec/src/…` (`'p' < 'r'`), so a driver firing there reads a `migrations/registry.ts` with the incoming side's retirements **missing**. Verified directly rather than assumed:\n\n```\n=== driver invoked for %P: packages/spec/spec-changes.json ===\n--- worktree src/registry.ts at that moment:\nSRC base\nSRC theirs-added          ← ours only; the incoming side is not merged yet\n```\n\nIt would write a confidently wrong artifact — strictly worse than the conflict it replaces:\n\n> A conflict marker is a **visible** error. A plausible-looking generated file is an **invisible** one.\n\nThis repo already has that scar. On #4687 a `gen:api-surface` run against an incomplete `dist` silently dropped an unrelated `./studio` export and ratcheted a `docs-import-surface.baseline.json` exemption in to cover the hole. Nothing failed. It was caught only by diffing generated files against `main`.\n\nSo the driver **defers**: it resolves the path (no text merge, no markers, exit 0) and records it in `$GIT_DIR/os-regen-pending`. A `pre-commit` hook then refuses the commit until those artifacts check clean — so regeneration happens on the **fully-merged tree**, the only state in which it is correct, and cannot be forgotten.\n\nThe hook **verifies and clears**; it never regenerates. Blanket regeneration from a hook would rewrite artifacts whose staleness nobody saw, which is the signal-destroying behaviour `check:generated` already refuses for the same reason. And a marker cannot get stuck: it clears the moment the artifacts are current, whether you regenerated them or the merge simply did not change them.\n\n## The dist trap, made unsurvivable where it writes\n\n`check:generated --fix` now **refuses** `gen:api-surface` when `dist` is older than `src`, instead of printing advice a reader can skip. On a stale dist that generator does not fail — it emits a plausible surface missing every export added since the last build. `--fix` is the one path that **writes**, so it is the one place the trap cannot be survived. The staleness rule is *shared* with the pre-commit half rather than copied: the direction two copies drift in is the one that writes a wrong artifact.\n\n## Excluded on purpose\n\nShrink-only ratchets (`docs-import-surface.baseline.json`, `dual-source-exports.baseline.json`), the hand-written `migrations`/`conversions` registries, and `variant-docs.json` stay on text merge. **Recomputing a shrink-only ratchet can WIDEN it**, laundering a new exemption in as merge noise. `NOT_DRIVER_MANAGED` records the reason per path — the point being that \"a generator writes it\" is not sufficient grounds to let a merge recompute it.\n\n## Verification\n\n`pnpm check:merge-driver`:\n\n- reconciles `.gitattributes` against the one table in **both** directions (a path in only one place fails);\n- pins that `.githooks/pre-commit` is mode **100755 in the index** — git silently **ignores** a non-executable hook, and this was caught exactly that way here, with two e2e commits sailing past an installed-but-inert hook;\n- proves the driver end to end against real git.\n\nBeyond the self-tests, the whole loop was exercised on **real files and real generators** — two branches each appending a retirement to `migrations/registry.ts`, then merged:\n\n| step | result |\n|:--|:--|\n| merge | **3 conflicts → 1** (only the hand-written registry) |\n| `spec-changes.json`, `protocol-upgrade-guide.md` | resolved, **zero** conflict markers, both recorded pending |\n| commit **without** regenerating | **BLOCKED**, with the exact `gen:` command per artifact; `HEAD` unmoved |\n| regenerate → commit | passes, marker **self-cleared** |\n| merged artifacts | **both** sides' entries present — the set union the text merge could not express |\n\nAlso verified: fresh build → `distIsStale = false`; stale src → `true` (no false positive from branch switching, since git only rewrites files whose content actually differs). The refusal path was confirmed to fire by forcing a stale artifact against a stale dist.\n\nGates: `pnpm typecheck` (exit 0), `pnpm lint` clean, `check:generated` 8/8 current, `check:adr-anchors` OK, changeset validators pass.\n\n## Deployment note\n\nRegistration is **per clone** — `.gitattributes` and `.githooks/` are committed, but git will not let a repository execute code on you just because you cloned it. `pnpm install` does it via `prepare`. A clone where that never ran falls back to git's default text merge — verified: **pre-#4675 behaviour, not breakage** — so committing `.gitattributes` cannot regress anyone, and `setup-git-hooks.mjs` warns-and-exits-0 on every failure path rather than breaking `pnpm install`.\n\nRefs: #4675, #4663, #4650, #4687\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01NKcGqCYCCpMkB5UW8jNPXx)_"
+}

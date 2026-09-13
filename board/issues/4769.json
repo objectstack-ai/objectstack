@@ -1,0 +1,36 @@
+{
+  "number": 4769,
+  "kind": "issue",
+  "title": "bug(objectql): ADR-0104「空库即已迁移」自证写在首启 seed 之前 —— 部署证明了一个它同一次启动就违反的契约，第二次 `pnpm dev` 起永久 10 条 ERROR",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T05:26:48Z",
+  "updated_at": "2026-08-03T07:24:36Z",
+  "closed_at": "2026-08-03T07:24:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4769",
+  "body": "## TL;DR\n\n第一次 `pnpm dev` 全绿（130 rows，0 ERROR）。**从第二次启动起，永久变成 10 条 ERROR、10 条种子记录写不进去** —— 数据没变、代码没变，只是重启了一次。\n\n被拒的正是首启自己写进去的数据。\n\n## 复现\n\n```bash\nrm -rf examples/app-showcase/.objectstack\npnpm dev     # 启动完成后 Ctrl+C\npnpm dev     # 第二次\n```\n\n| | ERROR 行数 | Seeds |\n|---|---|---|\n| 冷启（删掉 `.objectstack`） | 0 | `com.example.showcase 130 rows` |\n| 第二次启动 | **10** | `⚠ 120 ok / 10 errors ⚠` |\n\n第二次启动的报错（×10，每条带完整栈）：\n\n```\nERROR Update operation failed {\"object\":\"showcase_task\",\"error\":{\"message\":\n  \"Cover Image has an invalid image value: Expected an opaque sys_file id\",\n  \"stack\":\"ValidationError: ... at validateRecord (packages/objectql/dist/index.mjs:2208:32)\"}}\nWARN [Seeder] Seed loading completed with 10 dropped record(s) and 10 error(s)\n     {\"inserted\":0,\"updated\":1,\"skipped\":119,\"errored\":10}\n```\n\n冷启时同一份数据只产生一条 warn-first：\n\n```\n[value-shape] cover has an invalid image value: Expected an opaque sys_file id\n  — accepted for now (ADR-0104 warn-first; run `os migrate files-to-references --apply` ...)\n```\n\n## 根因\n\n冷启过程中，平台往 `sys_migration` 写了两行（直接查 `examples/app-showcase/.objectstack/data/dev.db` 得到）：\n\n```json\n{\"id\":\"adr-0104-file-references\",\"last_run_at\":\"2026-08-03T04:24:43.382Z\",\n \"verified_at\":\"2026-08-03T04:24:43.382Z\",\"blocking\":0,\n \"details\":\"{\\\"attested\\\":\\\"datastore-created-empty\\\"}\"}\n{\"id\":\"adr-0104-value-shapes\", ...同上}\n```\n\n意图是合理的：全新空库没有历史值，天然满足迁移，所以标成 verified，让新部署直接进 strict（\"born-migrated\"）。\n\n**问题是顺序反了。** 这个自证写在 `04:24:43.382`，而**同一次启动**的 seed 在 `04:24:44.3+` 才跑，写进去的 `cover` 值恰恰违反刚刚被证明的契约。也就是说：部署先给自己开了\"我的数据符合 ADR-0104\"的证明，然后立刻写入不符合的数据。\n\n首启为什么还是绿的 —— `ObjectQL.isFileReferencesMigrationVerified()` 把 flag 读结果记忆化：\n\n```ts\nasync isFileReferencesMigrationVerified(): Promise<boolean> {\n  if (!this.fileReferencesMigrationVerified) {\n    this.fileReferencesMigrationVerified = this.readMigrationFlagVerified(...);\n  }\n  return this.fileReferencesMigrationVerified;\n}\n```\n\n首启在 flag 行写入之前就已经有写操作触发过这次读取，于是整个进程缓存了 `false`，一路保持 warn-first。第二次启动是新进程，第一次读就看到已存在的 verified 行 → 缓存 `true` → `mediaStrictEffective()` 返回 true → `record-validator.ts:519` 走 `fail('invalid_type', ...)` 而不是 `warnOnce(...)`。\n\n相关代码：\n- `packages/objectql/src/validation/record-validator.ts:513-533` — strict 时 `fail`，否则 `warnOnce`\n- `packages/objectql/src/engine.ts:3061-3072` — 记忆化的 flag 读取\n- `packages/spec/src/system/migration.zod.ts:138` — `FILE_REFERENCES_MIGRATION_ID`\n\n## 要恢复的不变量\n\n**一次启动不能证明一个它即将在同一次启动里违反的契约。**\n\n## 修法（需要定夺，故未直接动手）\n\n1. **把 attestation 推迟到首启 seed 之后**，并对 seed 完的数据重跑自检 —— 空库的前提在 seed 写入后就不再成立了，\"empty ⇒ clean\" 这个推理需要在真正没有数据可写之后才下结论。\n2. **让 seed 走同一套契约** —— 让 insert 和后续 update 口径一致：要么都接受、要么都拒绝。目前 insert 宽松、update 严格，本身就是个不对称。\n\n倾向 1，因为它修的是\"证据在被推翻之前就被记账\"这个根本问题；2 只是让两条路径一样糟或一样严。\n\n顺带：`adr-0104-value-shapes` 那行是同一时刻、同样 `attested: datastore-created-empty` 写下的，同一个问题，别只修 media 那半边。\n\n## 关联\n\nshowcase 的 `cover` 种子值（`src/data/seed/index.ts` 的 `placeholderCover(...)`）确实不是 opaque `sys_file` id —— 那是本 issue 的诱因数据，单独在 showcase 的 issue 里跟踪；但把种子数据改干净只是让这个部署不再触发，**不修复\"提前自证\"本身**。"
+}

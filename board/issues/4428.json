@@ -1,0 +1,33 @@
+{
+  "number": 4428,
+  "kind": "pull_request",
+  "title": "test(objectql): 补上运行时汇总字段修复的三个邻近路径 (#4427 后续)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T05:07:35Z",
+  "updated_at": "2026-08-01T15:46:55Z",
+  "closed_at": "2026-08-01T15:46:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4428",
+  "body": "> **原本这个 PR 带着一份和 #4427 等价的实现**（同样在 registry 上加单调 revision、同样那 5 处 bump、引擎同样记 revision 重建）——两边是并行做的。#4427 先落地，所以这里把实现全部去掉，**只留 #4427 没有覆盖到的测试**。现在是纯测试改动。\n\n## 补什么\n\n#4427 钉住了主路径：**索引建好之后**才注册的对象能算对。同一个 revision 计数器还负责另外三条邻近路径，那个 PR 都没有测到，而在修复前它们**各自独立地坏着**：\n\n1. **给已经注册过的对象追加汇总字段** —— `update_metadata` 增量编辑那条路。对象已经上线了，所以这走的是「替换已有 contributor」，不是「新增对象」。\n2. **父对象注销之后要停止重算** —— 这个 bug 的反面：陈旧索引会继续往一个已经不存在的父对象上写。\n3. **子记录自己那次 insert 就得是对的**，而不是靠后续某次写入悄悄补上 —— 这正是原缺陷最难抓的地方：那个 no-op `PATCH` 绕过办法**每次都给出正确答案**，于是很容易误判成「偶发」而不是「时序」。\n\n## 这些用例不是白写的\n\n把 #4427 对 `getSummaryDescriptors` 的改动回退掉，**三个全部失败**（roll-up 读到 `undefined`），和它自己那个用例一起挂。恢复后 12/12 通过。\n\n- objectql：1504 通过\n- `tsc --noEmit` 干净\n- 仅改 `summary-rollup.test.ts`，无实现改动\n\n## 附：#4427 的修复在真机上确认有效\n\n`run-stack.sh --prod-like --seed` 跑同一句「项目任务管理」提示词，带负控制：\n\n| | 任务总数 | 已完成任务数（带 filter） | 预估总工时 |\n|---|---|---|---|\n| **带修复** | 12/12 与子表吻合 | 完全吻合 | 完全吻合 |\n| **回退修复** | 全 NULL | 全 NULL | 全 NULL |\n\n两次子表数据都正常。（这份 E2E 是在 #4427 合并前、对等价实现跑的；机制相同。）\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

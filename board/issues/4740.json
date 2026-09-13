@@ -1,0 +1,32 @@
+{
+  "number": 4740,
+  "kind": "issue",
+  "title": "spec 双源清账 C10:EnvironmentArtifact ×3(./cloud ≠ ./system)—— 路线 A′:system 收敛为活 wire 形,cloud re-export,3 条",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T01:15:12Z",
+  "updated_at": "2026-08-03T05:43:53Z",
+  "closed_at": "2026-08-03T05:43:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4740",
+  "body": "#4535 第二批。基线行 3 条:`EnvironmentArtifact` / `EnvironmentArtifactInput` / `EnvironmentArtifactSchema` — `[./cloud]` ≠ `[./system]`。\n\n**已裁决路线(维护者 2026-08-03 批复前锋判定):A′ —— `./system` 收敛为单一声明取「活的 wire 形」,`./cloud` re-export,零下游迁移。**\n\n**前锋证据摘要**(详见 [#4535 前锋评论](https://github.com/objectstack-ai/objectstack/issues/4535#issuecomment-5161308046)):同概念两阶段。cloud 侧是唯一现实——全仓唯一 runtime Zod parse 在 `packages/metadata/src/plugin.ts:582-607`(checksum 为 hex **字符串**、metadata=ObjectStackDefinition),cloud 仓 3 处 type import 全部来自 spec/cloud;system 侧三仓零代码消费者、从未实现(CLI compile 写裸 definition),checksum 是**对象**、带从未实现的 `functions` / `manifest` / `payloadRef`,两侧互相解析不过。\n\n**实施要点**:\n- `system/environment-artifact.zod.ts` 重写为活 wire 形;`cloud` 侧改 re-export(同一声明,消除双源);`packages/metadata/src/plugin.ts` 的 parse 按路线核对(预期零行为变化——收敛目标就是它已在解析的形状)。\n- **`functions` / `manifest` / `payloadRef` 三键退役**走 `spec-property-retirement` 全流程:system def 现有 10 个 authorable key 的增删以门禁实跑为准;conversion 需求按 #4734 先例评估(存量行是否可能携带)。\n- 手写文档 `north-star.mdx` §6.3 锚点同步(非 releases,可改);variant-docs 门禁会盯。\n- ⚠️ #4666 盲区提示:checksum 对象→字符串是**类型变更**,key 级门禁不可见——changeset 与 PR 正文里显式写明,pin 测试补 parse 断言(旧对象形 → 拒;hex 字符串 → 过)。\n- major changeset 据实;跨仓验证 cloud @ /workspace/cloud。\n- **分区**:`./system` + `./cloud` + `packages/metadata` —— **与 C16 绝不并飞**(同区,B 线内串行,C16 先行);与 C7/C13+C15/C17 可并飞;入队串行协议照旧。\n\n**排位**:第二批最后一单(裁决面最大 + retirement 流程最重)。"
+}

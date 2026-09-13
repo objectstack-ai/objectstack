@@ -1,0 +1,39 @@
+{
+  "number": 4640,
+  "kind": "issue",
+  "title": "`auto-org-admin-grant` 的所有 revoke 都是静默空操作 —— `ql.delete` 调用签名与引擎不符（降级后仍是 tenant admin）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "priority:p1",
+    "repo:objectstack",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T12:53:01Z",
+  "updated_at": "2026-08-02T17:06:28Z",
+  "closed_at": "2026-08-02T17:06:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4640",
+  "body": "> 由 #4586 的 W3 路由级测试撞出来的**既有缺陷**，与该 issue 的归因主题无关，按 Prime Directive #10 单独立案，不在 #4586 的 PR 里顺手改（这是一处安全行为变更，值得自己的 review 与 changeset）。\n\n## 事实\n\n`packages/plugins/plugin-security/src/auto-org-admin-grant.ts:94-101`：\n\n```ts\nasync function tryDelete(ql: any, object: string, id: string): Promise<boolean> {\n  try {\n    await ql.delete(object, id, { context: SYSTEM_CTX });   // ← 三参数\n    return true;\n  } catch {\n    return false;\n  }\n}\n```\n\n引擎的签名是**两参数**（`packages/objectql/src/engine.ts:4562`）：\n\n```ts\nasync delete(object: string, options?: EngineDeleteOptions): Promise<any>\n```\n\n于是 `options` 收到的是字符串 `'ups_xxx'`。`rejectUnknownEngineOptions`（engine.ts:249）对它做 `Object.entries(bag)`，得到 `'0'/'1'/'2'…` 这些字符下标当作未知选项，**抛错**；`tryDelete` 的 `catch` 把它吞掉并返回 `false`。第三个参数（`{ context: SYSTEM_CTX }`）连同系统上下文一起被丢弃。\n\n本仓其余 12 处 `ql.delete(...)` 调用点全部是规范形状 `ql.delete(object, { where: { id }, context })`（`permission-set-projection.ts:324`、`cleanup-package-permissions.ts:49`、`suggested-audience-bindings.ts:245`、`objectql-adapter.ts` 多处）——这一处是唯一的例外。\n\n## 后果（全部是安全方向的）\n\n`tryDelete` 是该模块**唯一**的删除通道，所以三条路径同时死掉：\n\n1. **降级不回收能力。** `organization/update-member-role` 把 `owner`/`admin` 降回 `member` 后，`reconcileOrgAdminGrant` 走 revoke 分支、`removed` 恒为 0，返回 `{action:'skipped', reason:'delete_failed'}`，`sys_user_permission_set(organization_admin…)` 那行**留在原地**。该行 → 通配 `viewAllRecords`/`modifyAllRecords` → `isTenantAdmin()`：被降级的人仍然是 tenant admin。移除成员（delete membership）同理。\n2. **ADR-0105 D4 的 superseded-variant 收敛失效。** 换 posture 后旧的 `organization_admin` / `organization_admin_no_bypass` 行不会被清掉，wall-less 部署上留着的正是无边界那份。\n3. **`kernel:ready` backfill 的孤儿清扫失效**（membership 已删、grant 还在）。\n\n## 为什么单测全绿\n\n`auto-org-admin-grant.test.ts` 的 in-memory stub 自己实现的就是三参数形状：\n\n```ts\nasync delete(object: string, id: string) { tables[object] = ...filter(r => r.id !== id); return true; }\n```\n\nstub 与真引擎的签名不一致，于是「revoke 生效」这件事只在测试替身里成立过。正是 #3106 那一类：`case` 标签/函数体不是 enforcement，**要看调用点**——只不过这次跑偏的是调用点的**签名**。\n\n## 复现\n\n`packages/qa/dogfood/test/membership-actor-attribution.dogfood.test.ts`（#4586 落的那个文件）里把 demotion 后的断言改回 `expect(grants).toHaveLength(0)` 即红：真实 `organization/update-member-role` 降级 200 之后，grant 行仍在。\n\n## 建议修法\n\n- `tryDelete` 改成 `ql.delete(object, { where: { id }, context: SYSTEM_CTX })`；\n- **把 stub 对齐真引擎签名**，否则修完仍然测不出来（这才是本 issue 的真正教训）；\n- 加一条 dogfood 级断言：真实路由降级后 grant 归零；\n- 考虑存量：已经部署的环境里留着一批本该被回收的 `organization_admin` 行，`kernel:ready` backfill 修好后会自愈，但值得在 changeset 里写明这是行为变更（有人会突然失去 tenant admin —— 那正是本该发生的事）。\n\n相关：#4586（撞出它的 issue）· ADR-0105 D4 · #3106"
+}

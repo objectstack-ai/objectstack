@@ -1,0 +1,34 @@
+{
+  "number": 4592,
+  "kind": "issue",
+  "title": "build-schemas.ts 用 replace('Schema','') 剥后缀,前缀含 Schema 的 4 个 schema 名被截断($id / 文档页名 / import 全错)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T09:22:34Z",
+  "updated_at": "2026-08-02T12:25:26Z",
+  "closed_at": "2026-08-02T12:25:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4592",
+  "body": "## 现象\n\n`packages/spec/scripts/build-schemas.ts:200` 把导出常量名转成 JSON Schema 名时用的是**字符串** replace,不是后缀正则:\n\n```ts\nconst schemaName = key.endsWith('Schema') ? key.replace('Schema', '') : key;\n```\n\n`String.prototype.replace(string, …)` 只替换**第一处**出现。常量名里 `Schema` 出现在前缀或中间时,被剥掉的就不是后缀,而是名字里面的那一段。目前受影响的 4 个:\n\n| 导出常量 | 实际生成的 schema 名 | 正确的名字 |\n|:---|:---|:---|\n| `SchemaModeSchema` (`src/data/datasource.zod.ts:440`) | `data/ModeSchema` | `data/SchemaMode` |\n| `SchemaChangeSchema` (`src/system/deploy-bundle.zod.ts:46`) | `system/ChangeSchema` | `system/SchemaChange` |\n| `SchemaLevelIsolationStrategySchema` (`src/system/tenant.zod.ts:376`) | `system/LevelIsolationStrategySchema` | `system/SchemaLevelIsolationStrategy` |\n| `DocumentSchemaValidationSchema` (`src/data/driver-nosql.zod.ts:119`) | `data/DocumentValidationSchema` | `data/DocumentSchemaValidation` |\n\n## 影响面\n\n这个名字不是内部细节,它同时是三处对外表面:\n\n1. `$id`:`https://schema.objectstack.io/v17/data/ModeSchema.json` —— 一个并不存在的类型名,IDE 自动补全和外部引用都会拿到它;\n2. `json-schema.manifest.json` 的棘轮条目(已记录了这 4 个错名);\n3. `content/docs/references/` 的页面小节标题与 import 示例 —— 在 #4570 的修复之后,这 4 个名字在真实导出面里查无此名,于是被从 import 行里剔除,并作为 4 条 `no schema const export` 记进 `packages/spec/docs-import-surface.baseline.json`。也就是说这 4 个 schema 现在有文档页、但页面给不出任何 import 示例。\n\n## 建议\n\n改成 `key.replace(/Schema$/, '')`,然后 `gen:schema` + `gen:docs` + `gen:api-surface` 重跑,并把 `json-schema.manifest.json` 里 4 条旧键换成新键(属于 #2978 说的「有意退役」范畴,要在 PR 里说明),同时把 `docs-import-surface.baseline.json` 里对应的 4 条 `no schema const export` 删掉(该 baseline 是只减不增的棘轮,修好后必须删行,否则 `check:docs` 会因为陈旧条目变红)。\n\n发现于 #4570。\n"
+}

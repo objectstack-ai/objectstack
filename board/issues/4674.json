@@ -1,0 +1,34 @@
+{
+  "number": 4674,
+  "kind": "issue",
+  "title": "fix(metadata-protocol): two internal `engine.find` calls sort by `direction`, a key no driver reads — audit history and global search silently return ASCENDING",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T16:03:09Z",
+  "updated_at": "2026-08-03T00:35:39Z",
+  "closed_at": "2026-08-03T00:35:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4674",
+  "body": "Two internal `engine.find` calls in `protocol.ts` write their sort as `{ field, direction: 'desc' }`. The QueryAST sort shape is `{ field, order }` (`SortNodeSchema`, `packages/spec/src/data/query.zod.ts:12-15`). `direction` is not read by anything on that path, so both queries silently run **ascending**.\n\nBecause both carry a `limit`, a wrong direction does not merely reorder the page — it changes **which rows come back at all**.\n\n## The two sites\n\n`packages/metadata-protocol/src/protocol.ts:3316` — metadata audit history:\n\n```ts\nconst rows = await this.engine.find('sys_metadata_audit', {\n    where,\n    orderBy: [{ field: 'occurred_at', direction: 'desc' }],\n    limit,\n} as any);\n```\n\nIntent: the newest `limit` audit events. Actual: the **oldest** `limit` events. The history panel shows the beginning of an object's life and never its recent changes — and on a long-lived object it will never show anything an editor is looking for.\n\n`packages/metadata-protocol/src/protocol.ts:5104` — global search:\n\n```ts\nconst opts: any = {\n    where,\n    limit: perObject,\n    orderBy: [{ field: 'updated_at', direction: 'desc' }],\n};\n```\n\nIntent: most-recently-updated matches first. Actual: the **stalest** matches, truncated to `perObject`. Recently-edited records are the ones a searcher is most likely to want, and they are exactly the ones excluded.\n\n## Why `direction` does nothing\n\nBoth real drivers normalize off `.order`, and neither has a fallback for `direction`:\n\n- `packages/plugins/driver-sql/src/sql-driver.ts:5659`\n  ```ts\n  keys.push({ field: item.field, direction: item.order === 'desc' ? 'desc' : 'asc' });\n  ```\n- `packages/plugins/driver-mongodb/src/mongodb-driver.ts:663`\n  ```ts\n  lastDirection = item.order === 'desc' ? -1 : 1;\n  ```\n\nWith `order` absent, `undefined === 'desc'` is false and both land on ascending. Note `sql-driver` uses `direction` as its **internal** post-normalization vocabulary — which is likely how the wrong key looked plausible to whoever wrote the call sites.\n\n## Why nothing caught it\n\nWorth recording, because the fix for the two lines does not address any of it:\n\n1. **The types were erased at both sites.** One uses `} as any)`, the other `const opts: any`. `EngineQueryOptions.orderBy` is `SortNodeSchema[]` and would have rejected `direction` — the annotation that would have caught this is precisely the one both sites opted out of.\n\n2. **Sort validation does not run on this path.** `INVALID_SORT` lives in the protocol's inbound `findData` normalizer (`protocol.ts`) and in `rest-server.ts`. `ObjectQL.find` performs no sort validation of its own, and these are the protocol calling `this.engine.find` directly — inside its own guard, not behind it.\n\n3. **The normalizer catches bad *values*, not wrong *keys*.** `packages/objectql/src/query-expression-conformance.test.ts:310-318` pins refusal for `{ field: 'title', order: 'sideways' }` and even for `{ order: 'desc' }` (an entry naming no field) — both 400 `INVALID_SORT`. But `{ field: 'x', direction: 'desc' }` has the required `field` and no unreadable value, so it reads as a well-formed \"sort by x, direction unspecified\" and passes. Schemas here are not `.strict()`, so the unknown key is dropped rather than flagged.\n\n4. **A test double implements the wrong vocabulary.** `packages/metadata-protocol/src/protocol-publish-rollback.test.ts:86`:\n   ```ts\n   const { field, direction } = (opts as any).orderBy;\n   ```\n   This fake sorts by `direction`, so a test exercising it **agrees with the bug instead of catching it**. Any coverage built on this fake would confirm the broken behaviour.\n\n## Root cause: two vocabularies for one concept\n\nBoth spellings are live and legitimate somewhere:\n\n- `SortNodeSchema` — `{ field, order }` — the QueryAST / `EngineQueryOptions` shape (`query.zod.ts:12`).\n- `IReportService.orderBy` — `{ field, direction? }` — a genuinely different contract (`packages/spec/src/contracts/report-service.ts:29`).\n\n`packages/plugins/plugin-auth/src/objectql-adapter.ts:521` already translates between them explicitly:\n\n```ts\nconst orderBy = sortBy ? [{ field: sortBy.field, order: sortBy.direction as 'asc' | 'desc' }] : undefined;\n```\n\nSo the translation is known to be necessary — it just is not enforced anywhere, and where a caller forgets it the result is a silently wrong answer rather than an error. That is the ADR-0049 shape: a property that is declared one way and read another, with nothing making the mismatch fail.\n\n## Proposed work\n\n1. Fix both call sites to `order: 'desc'`, and **drop the `as any` / `: any`** so the contract types the query — the erasure is what let this through, and reinstating it is most of the value.\n2. Fix the `protocol-publish-rollback.test.ts` fake to read `order`, so the double stops ratifying the wrong shape.\n3. Add a regression test asserting newest-first on both paths — with `limit` set, so it pins *which* rows return and not merely their order.\n4. Consider the class fix, worth its own decision: either make the QueryAST sort schema reject unknown keys on this axis (so `direction` is a 400 rather than a silent drop), or have the normalizer specifically recognize `direction` and refuse it with a message naming `order`. A silently-ignored sort key is the same invisible failure `#4363` and the `INVALID_SORT` work were written against — caught there for values, still open here for keys.\n\nSurfaced while implementing ADR-0119 D2 (#4617); unrelated to that change, so it was not fixed in-line. Both sites predate it.\n\nRefs: ADR-0049, #4363"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 4737,
+  "kind": "issue",
+  "title": "spec 双源清账 C17:ActionLocationSchema(./studio ≠ ./ui)—— studio 侧 D9(a) 改名,1 条",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T01:14:27Z",
+  "updated_at": "2026-08-03T06:31:32Z",
+  "closed_at": "2026-08-03T06:31:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4737",
+  "body": "#4535 第二批。基线行:`ActionLocationSchema — [./studio (const)] ≠ [./ui (const)]`。\n\n**已裁决路线(前锋判定 + 维护者 2026-08-03 批复)**:D9(a) 改名 studio 侧 → `ActionContributionLocationSchema`(备选 `StudioActionLocationSchema`,bikeshed 不阻塞);ui 侧保留正名。\n\n**前锋证据摘要**(详见 [#4535 前锋评论](https://github.com/objectstack-ai/objectstack/issues/4535#issuecomment-5161308046)):同名不同概念——studio 侧 3 值 IDE surface 枚举(唯一嵌入方 `ActionContributionSchema.location`;`defineStudioPlugin` 三仓零调用;无 type export)vs ui 侧 7 值平台正典(objectui `spec-derived-unions.test.ts:379-383` identity test 按引用钉住、app-showcase 覆盖)。objectui 的 `export type * as Studio` 是 type-only,对 const 改名不可见。\n\n**实施要点**:`studio/plugin.zod.ts` + `studio/index.ts`;`RENAMED_DEFS` 承接(0 authorable key,以门禁实跑为准);零 tombstone、conversion 不可写(根 schema,C6 先例);major、零已知消费者;幽灵页 `studio/action.mdx` 随 gen:docs 自愈(#4696 语境)。基线删行走 #4650 门禁自证。**分区**:`./studio`,与所有在飞单可并飞;入队按 #4535 串行协议。\n\n预计就绪度:**最高,A 线下一单**。"
+}

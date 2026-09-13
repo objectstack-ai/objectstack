@@ -1,0 +1,35 @@
+{
+  "number": 4442,
+  "kind": "pull_request",
+  "title": "fix(spec,service-analytics): carry a percentage measure's SCALE, and report an empty filtered group as zero (objectui#3136)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T07:44:49Z",
+  "updated_at": "2026-08-02T02:03:58Z",
+  "closed_at": "2026-08-02T02:03:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-02T02:03:57Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4442",
+  "body": "Fixes the server half of objectstack-ai/objectui#3136. The Console half is objectstack-ai/objectui#3140 — merge this first; the renderer reads a field this PR adds.\n\n## The bug, precisely\n\nA `%` format string says how to **print** a number, not what **scale** it is on. The two readings collide at exactly `1`, which is both \"100%\" (a 0–1 ratio at full compliance) and \"1%\" (one percentage point). Nothing on the wire told them apart, so renderers guessed from the value's magnitude — and resolved the collision the way almost nobody means. An SLA dashboard reporting `sla_rate = 1` displayed **\"1.0%\"**: \"everything met the SLA\" read as \"1% met the SLA\".\n\nThe scale was never unknowable. It just never left the server:\n\n- `derived: { op: 'ratio' }` is a 0–1 fraction **by definition**;\n- a measure aggregating a `percent` field has whatever scale that field stores.\n\nBoth facts sit in metadata the measure-column enrichment pass already reads — for the **ADR-0053 currency chain**, which walks back to the source field, checks `type === 'currency'`, and rides the resolved code onto the result column. Percentages got no such treatment. Same seam, now they do.\n\n## What lands\n\n**`percentScaleOf(field)`** (`spec/data/percent-scale.ts`) — the one place the question is answered. A `percent` field stores a FRACTION unless it declares `max > 1` (e.g. `min: 0, max: 100`), which marks whole-percent storage. That is not a new convention: it is the rule the percent **edit widget already writes by**, so reading it back this way is what makes a value round-trip. Non-`percent` fields get no opinion — a plain `number` an author formatted with a `%` keeps meaning exactly what their format string says.\n\n**`AnalyticsResult.fields[].percentScale`** — `'fraction'` | `'whole'`, absent when the column is not a percentage. `queryDataset` sets it from `derived.op === 'ratio'` first, then the source field. `currency` — emitted since ADR-0053 but only ever written through a cast — is now declared on the same interface.\n\n**`measureCurrency` → `sourceFieldMeta`**, returning `max` alongside `type`/`defaultCurrency`. The old name had already outgrown itself: the date-bucketing path reads `type` through it to tell a `date` dimension from a `datetime` one, and percent scale is its third consumer.\n\n**Second fix, same widget family: an empty filtered group is a measured zero.** A measure-scoped filter can exclude every row of a group the grid still lists, and the database reports that by *omitting* the group — after the merge, indistinguishable from \"never measured\". For a COUNT or a SUM it **is** measured: the answer is 0. `emptyGroupValueFor(aggregate)` states which aggregates have an identity over the empty set, and the executor fills it in after **all** supplementary merges (a later measure's merge can append rows no earlier query saw). So \"0 of 12 paid\" reports `0` instead of blank and a ratio on it computes to `0` instead of null. `avg`/`min`/`max` keep their null — there is nothing to average over an empty group, and a zero there would invent a measurement.\n\n**Showcase**: a `paid_rate` ratio measure plus KPI + table widgets on Revenue Pulse. Grouping by `status` pins the Paid bucket at exactly `1` — the repro value, now demonstrated instead of described.\n\n## Verification\n\nReal backend (`objectstack dev --fresh`, showcase seed), `POST /api/v1/analytics/dataset/query`:\n\n```json\n{\"status\": \"Paid\",  \"invoice_count\": 5, \"paid_count\": 5, \"paid_rate\": 1}\n{\"status\": \"Sent\",  \"invoice_count\": 5, \"paid_count\": 0, \"paid_rate\": 0}\n{\"name\": \"paid_rate\", \"format\": \"0.0%\", \"percentScale\": \"fraction\"}\n```\n\nBrowser (Console dev server against that backend, Revenue Pulse dashboard), A/B in one running UI:\n\n| Paid Rate — Paid row | |\n|---|---|\n| with the annotation | **100.0%** ✅ |\n| response intercepted, `percentScale` stripped (pre-fix server) | **1.0%** ❌ — the reported bug |\n| annotation restored | **100.0%** ✅ |\n\nThe Sent row moved from `—` / `—` to `0` / `0.0%`.\n\nTests: `service-analytics` 470 passed (5 new — ratio→fraction, `max:100` source field→whole, bare percent field→fraction, plain number unannotated, empty filtered group→0); `spec/data` 1234 passed. `pnpm build` 71/71. `spec` typecheck clean, `service-analytics` sources clean. Full `pnpm test`: 72/73 tasks green — `service-datasource` failed 5 assertions on 5s timeouts under load and passes 10/10 in isolation, unrelated to this change.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

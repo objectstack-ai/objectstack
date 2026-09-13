@@ -1,0 +1,30 @@
+{
+  "number": 4543,
+  "kind": "issue",
+  "title": "[PM] 多仓库协调约定与 PM 派发标签初始化",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T01:43:52Z",
+  "updated_at": "2026-08-02T01:44:21Z",
+  "closed_at": "2026-08-02T01:44:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4543",
+  "body": "本 issue 用于初始化 PM 派发机制(PR #4540)的标签,并作为多仓库协调约定的入口说明。机制全文见 `.claude/skills/pm-dispatch/SKILL.md`。\n\n## 约定摘要\n\n**主 backlog**:功能级任务 issue 统一开在本仓库(`objectstack`,契约源头),用路由标签指明代码落地仓库:\n\n- `repo:objectui` → 前端(objectui)\n- `repo:cloud` → 云端(cloud)\n- 无路由标签 → 后端(本仓库)\n\n**状态标签**(三个仓库同名同义):\n\n- `pm:queue` — 就绪,等待 PM 循环派发\n- `pm:dispatched` — 已派发给开发 agent\n- `needs-user-decision` — 等维护者拍板,PM 绝不派发、绝不代答\n\n**跨仓功能**:父 issue + 每仓一个 sub-issue,契约优先(spec/后端先行);下游 sub-issue 在正文写 `Blocked-by: <owner/repo>#<n>`,依赖未合并前 PM 不派发。\n\n**决策分析两条硬性评估轴**(所有 `[决策]` issue 必须按此分析):\n1. 项目长远合理性(北极星方向、no workarounds、contract-first);\n2. 防 AI 写代码犯错、尤其防 AI 写元数据 app 犯错(严格 schema、发布时响亮拒绝、declared = enforced,拒绝消费端宽容回退)。\n\n本 issue 达成标签初始化目的后,标签会被移除并关闭本 issue(标签本身保留在仓库中)。"
+}

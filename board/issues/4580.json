@@ -1,0 +1,34 @@
+{
+  "number": 4580,
+  "kind": "issue",
+  "title": "`saveMetaItem`'s flow canonicalizer throw-fallback is silent — a publish-mode save that skipped canonicalization looks identical to a clean one",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T08:43:50Z",
+  "updated_at": "2026-08-02T09:11:30Z",
+  "closed_at": "2026-08-02T09:11:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4580",
+  "body": "Follow-up to #4542 / #4548.\n\n## What\n\n`saveMetaItem` canonicalizes flow bodies before the schema gate (#4548). Four postures, three of which are observable:\n\n| posture | signal |\n| --- | --- |\n| clean canonicalization | row is healed; `--stored` reports it canonical |\n| refused rename (conflict) | `409 FLOW_CONVERSION_CONFLICT`, names the token + path |\n| **canonicalizer throws → raw save** | **nothing at all** |\n| no automation service | save unchanged; `--stored` reports what it could not canonicalize |\n\nThe throw-fallback is a bare `catch { result = undefined }` (`packages/metadata-protocol/src/protocol.ts`). The fallback itself is correct and should stay — `canonicalizeStoredFlow` is stricter than the gate (strict parse, cycle detection, control-flow regions), and a WIP draft with a temporary cycle must remain saveable in publish mode as well as draft. But it is *completely silent*: a save that quietly skipped canonicalization is indistinguishable, in the logs and in the response, from one that healed the row.\n\n## Why it matters\n\nThe row can be both a legacy dialect **and** unparseable by the strict canonicalizer. That save re-persists the pre-protocol shape verbatim — exactly the symptom #4542 fixed — and the author gets no hint. They find out only by running `os migrate meta --stored`, where the row shows up `failed`. The boot warning for stored legacy rows tells authors \"re-save it (Studio edit → save …) to persist the canonical shape\"; for this corner that advice silently does nothing.\n\nThis also contradicts the posture the rest of the chain keeps. ADR-0087 D2 is \"loud\": every conversion emits a notice, `convertStoredItem` warns once per row on read, `migrateStoredMetadata` reports `failed` with the message. The write seam is the one place a skipped canonicalization says nothing.\n\n## Proposal\n\nEmit a `console.warn` from the catch, naming the flow and the canonicalizer's own error, deduped once per process per flow (`storedConversionWarned`'s pattern — a Studio autosave loop should not spam). No behavior change: the fallback still saves, the gate stays the arbiter, `registerFlow` still refuses to arm a malformed flow.\n\nExplicitly **not** proposed: refusing the save in publish mode. That option was flagged in #4542 and settled in #4548 — it would silently tighten validation for every existing caller (publish is the default mode), and it can only be enforced where an automation service exists, so the same body would save on a control-plane host and 422 on an automation host. Observability is the gap here, not permissiveness.\n\n## Scope\n\nOne `catch` block, one dedupe set, unit coverage in `protocol.save-flow-canonicalization.test.ts` (warn on throw-fallback; deduped on repeat; silent on the clean and conflict paths)."
+}

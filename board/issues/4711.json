@@ -1,0 +1,34 @@
+{
+  "number": 4711,
+  "kind": "issue",
+  "title": "`check:authorable-surface` 在 --check 模式下仍会写 `json-schema.manifest.json` —— 一个「检查」在改工作区",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T20:11:49Z",
+  "updated_at": "2026-08-02T23:10:32Z",
+  "closed_at": "2026-08-02T23:10:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4711",
+  "body": "在 #4703(C12,PR #4710)做承接表 sabotage 验证时撞到的,与该单无关,按 Prime Directive #10 单独记录。\n\n## 现象\n\n`pnpm --filter @objectstack/spec check:authorable-surface` 是 `build-schemas.ts --check`,名字和 `check:generated` 里的定位都是「只检查、不改」。但它**会写** `packages/spec/json-schema.manifest.json`。\n\n实测:我把 `authorable-surface.json` / `json-schema.manifest.json` 暂存(`git stash push`)到改名前的状态,只跑了 `--check`,随后 `git stash pop` 直接失败:\n\n```\nerror: Your local changes to the following files would be overwritten by merge:\n\tpackages/spec/json-schema.manifest.json\nPlease commit your changes or stash them before you merge.\n```\n\n## 原因\n\n`packages/spec/scripts/build-schemas.ts` 的 manifest ratchet 段落没有 `CHECK` 判别:\n\n```ts\nconst added = [...generatedKeys].filter((key) =&gt; !(manifest?.schemas ?? []).includes(key));\nconst renamedAway = (manifest?.schemas ?? []).filter((key) =&gt; key in RENAMED_DEFS);\nif (!manifest || added.length &gt; 0 || renamedAway.length &gt; 0) {\n  const updated: SchemaManifest = { /* … */ schemas: [...generatedKeys].sort() };\n  fs.writeFileSync(MANIFEST_PATH, JSON.stringify(updated, null, 2) + '\\n');   // ← 无条件写\n  console.log(`\\n📒 json-schema.manifest.json …  — commit it.`);\n}\n```\n\n对比紧随其后的 authorable-surface 段落,那里是**分开**处理的,正是本 issue 期望的形状:\n\n```ts\nif (surfaceChanged &amp;&amp; CHECK)  { /* 报错 + process.exit(1) */ }\nif (surfaceChanged &amp;&amp; !CHECK) { /* 写文件 */ }\n```\n\n即:`missing`(已发布 schema 消失)那条会 `process.exit(1)`,是真检查;但**新增/改名导致的 manifest 变更在 check 模式下被静默写掉**,而不是报「stale,请跑 gen:schema」。\n\n## 为什么值得修,而不只是洁癖\n\n1. **「检查」不该有副作用。** `check:generated` 会顺序跑这一条,开发者跑一次门禁就得到一个未预期的 tracked 文件改动;在脏工作区里 `git stash` / `git worktree` 一类操作会莫名其妙地失败(上面那段就是)。\n2. **它让 manifest 的 additions 分支永远无法在 CI 里红。** 其它 7 个生成物都是「stale 就红,让人跑 gen」;这一个是「stale 就自己写」。两种语义混在同一个 `check:generated` 汇总里。\n3. **和刚落地的 #4675 合并驱动叠加更糟。** 合并冲突期间跑任何 check,都可能拿**半合并**的树算出一个 manifest 并写进去 —— 而 #4702 的 commit message 恰好花了一整段解释为什么合并驱动**故意不**在那个时刻重新生成:「a plausible generated file is an invisible error」。这里是同一个坑的另一个入口。\n\n## 建议\n\n把 manifest 段落改成和 authorable-surface 同构:\n\n- `CHECK` 时:若 `added.length > 0 || renamedAway.length > 0`,打印差异 + 提示 `pnpm --filter @objectstack/spec gen:schema`,`process.exit(1)`;\n- 非 `CHECK` 时:照旧写。\n\n`missing` 那条(已发布 schema 消失)的行为不变,它已经是对的。\n\n## 影响面\n\n低——CI 是干净 checkout,`check:docs` 本身又会先跑一遍 `gen:schema`,所以线上不会漏。主要是本地开发/agent 并行工作时的困惑成本,以及上面第 2、3 条的语义漏洞。\n\n关联:#4684 / PR #4695(`RENAMED_DEFS` 与 `renamedAway` 分支的来源)、#4675 / PR #4702(生成物合并驱动)、#4703 / PR #4710(撞到本问题的上下文)、#4203 / #4232(`check:generated` 分类不一致的历史)。"
+}

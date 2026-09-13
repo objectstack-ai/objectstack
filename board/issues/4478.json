@@ -1,0 +1,32 @@
+{
+  "number": 4478,
+  "kind": "issue",
+  "title": "Console approvals: quorum progress and per-group chips do not render, though the server sends minApprovals / group / __nodeLabel",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T09:20:51Z",
+  "updated_at": "2026-08-01T13:39:10Z",
+  "closed_at": "2026-08-01T13:39:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4478",
+  "body": "Found while verifying the 17.0.0-rc.1 checklist on #3909 (section C — *\"Approvals UX: quorum progress, per-group chips (objectui#2811)\"*). Verified in the browser on `main` @ `1ee48bc60` against the published `@objectstack/console@17.0.0-rc.1` (pin `7d9734d5e321`).\n\n**The server publishes everything the quorum UI needs; the Console renders none of it.**\n\n## What the server sends\n\nThe showcase's `showcase_committee_quorum` demo request carries, on `sys_approval_request.node_config_json`:\n\n```json\n{\"approvers\":[{\"type\":\"position\",\"value\":\"manager\"},\n              {\"type\":\"position\",\"value\":\"finance\"},\n              {\"type\":\"position\",\"value\":\"legal\"}],\n \"behavior\":\"quorum\",\n \"minApprovals\":2,\n \"lockRecord\":true,\n \"onEmptyApprovers\":\"admin_rescue\",\n \"__nodeLabel\":\"Committee Sign-off (2 of 3)\",\n \"__approverGroups\":{ … }}\n```\n\n`behavior`, `minApprovals`, the per-approver `group` labels (the `showcase_expense_signoff` request carries `\"group\":\"manager\"` / `\"group\":\"finance\"` with `behavior:\"per_group\"`), and even a pre-rendered `__nodeLabel` reading *\"Committee Sign-off (2 of 3)\"*.\n\n## What renders\n\nOn the business record (`showcase_expense_report/AyG40_bAHSP_gi8T`) the approval panel is otherwise complete and correct — **批准 / 驳回** in the header, the Draft → Submitted → Approved → Reimbursed pipeline, a **审批中已锁定** badge for `lockRecord`, and **撤回审批**. Scraping the rendered page for the quorum signals:\n\n```json\n{\"lockBadge\": true, \"approveBtn\": true, \"quorumHint\": false, \"groupChips\": false}\n```\n\nNo `2 / 3`, no progress indicator, no group chips — neither on the record's approval panel nor on the `sys_approval_request` detail page (which renders as a generic record page: status pills, request id, flow run/node, and `待审批人` as a raw comma-joined string of repeated user ids).\n\n## Consequence\n\nOn a `quorum` node an approver cannot see how many more approvals are needed, and on a `per_group` node they cannot see which groups have signed and which are outstanding — the two facts that decide whether their own decision completes the step. The `lockRecord` half of the same checklist line (objectui#2906/#2914) **does** render, so this is specifically the quorum/group progress surface.\n\nFiled against the framework tracker since #3909 is where it was found; the fix belongs in objectui (#2811). No framework-side change appears needed — the data is already on the wire.\n\nPart of the #3909 rc.0/rc.1 verification (section C).\n"
+}

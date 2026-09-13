@@ -1,0 +1,32 @@
+{
+  "number": 4472,
+  "kind": "issue",
+  "title": "check-react-blocks-conformance 比的是两份声明，不是声明↔实现——#4413 全程它都是绿的（Prime Directive #10 落在门禁自己身上）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-08-01T09:03:23Z",
+  "updated_at": "2026-08-01T11:02:48Z",
+  "closed_at": "2026-08-01T11:02:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4472",
+  "body": "`packages/spec/scripts/check-react-blocks-conformance.ts` 的文件头声称（原文大写强调）：\n\n> Spec ↔ frontend conformance report (ADR-0081 follow-up). Confirms the objectui components **ACTUALLY implement** the props the spec protocol declares for each curated react block. The spec is the protocol; the frontend must conform.\n\n**它不做这件事。** 它比对的是两份**声明**：\n\n| 左 | 右 |\n|---|---|\n| spec zod schema 的 props（`specProps()` 走 `z.toJSONSchema`） | 注册表配置声明的 inputs（`manifestInputs()`） |\n\n右边那份来自 objectui `scripts/dump-public-manifest.mjs` → `manifestFromConfigs(getPublicConfigs())`，而 `manifestFromConfigs`（`packages/sdui-parser/src/index.ts`）的实现是：\n\n```ts\ninputs: (c.inputs ?? []).map((i) => ({ name: i.name, type: …, required: i.required, … }))\n```\n\n——直接读注册表配置的 `c.inputs`。**纯声明，与渲染器读不读毫无关系。**\n\n## 已证实的后果：#4413 全程绿灯\n\n#4413 里四个 block 的 `objectName`/`recordId` 没有任何渲染器读，页面渲染成空。而合并前（`ebb209c` 之前）的 `packages/spec/react-conformance.baseline.json` 长这样：\n\n```json\n\"RecordDetails\":     { \"frontendOnly\": [], \"missing\": false },\n\"RecordHighlights\":  { \"frontendOnly\": [], \"missing\": false },\n\"RecordRelatedList\": { \"frontendOnly\": [], \"missing\": false },\n\"RecordPath\":        { \"frontendOnly\": [], \"missing\": false }\n```\n\n**四个完全不工作的块，门禁报\"零分歧\"。** 因为两边都老老实实声明了 `objectName`——两份声明各自都不算撒谎，谎言在于**渲染器两份都没实现**，而这道门禁的视野里根本没有渲染器。\n\n#4413 是靠人肉读 objectui 渲染器发现的，不是靠它。\n\n## 为什么这比任何单个 block 重要\n\n这是 Prime Directive #10（declared ≠ enforced）**落在门禁自己身上**的实例，和 #1475「spec 声明 9 种校验规则、执行器只认 3 种」是同一形状，只不过这次撒谎的是那个本该抓撒谎的东西。\n\n**一道报绿的假门禁比没有门禁更危险**：没有门禁时人会去人肉核对；有一道自称\"ACTUALLY implement\"的绿灯时，人不会。#4413 存续期间没人怀疑过这四个块，这就是代价。\n\n## 公平地说，它并非无用\n\n它能看见的是真的，别一并推翻：\n\n- **`spec-only`**：spec 声明了、注册表没声明 → 前端没实现协议。真信号。\n- **`missing`**：manifest 里根本没有这个组件（没注册 / 非 public）。真信号。\n- 看不见的只有一类：**两边都声明了，渲染器不读**。而这恰好是 #4413 那一类。\n\n所以问题不是\"门禁没用\"，是**它的名字和文件头承诺了一个它给不了的保证**，而团队按那个承诺信任了它。\n\n## 次要发现（一并记录）\n\n1. **它在 console 构建里是 warn-only**：`scripts/gen-sdui-manifest.sh:71-78` 调用时没传 `--strict`，分歧只打印 `⚠`。注释也写明了\"Warn-only here — run check:react-conformance --strict to gate\"。所以即便它看得见的那部分，也没有真正 gate。\n2. **只在 console 构建时跑**（manifest 只在那时存在），不是 PR 门禁——这是脚本自己写明的成本取舍，本身合理，但和上一条叠加后，\"分歧被记录\"和\"分歧被拦住\"之间的距离比读文件头感觉到的更远。\n\n## 候选方向（不预设结论，检测手段需要设计）\n\n**(a) 先把话说回来——本仓库内即可做，最便宜。** 改文件头与报告用词，把\"ACTUALLY implement\"降级为它真正做的事（**声明一致性 / declaration parity**），并写明它看不见\"声明了但不读\"这一类。不解决检测问题，但立刻消除误信任——按 #10 的处置顺序（fix it / trim it / file it），这是\"trim the claim\"。\n\n**(b) 行为式冒烟测试——我认为最有希望。** #4413 的症状是渲染器吐出 designer placeholder（`record:details — bind a record to preview`）。一个\"把每个 public block 按其声明的必需绑定挂载在裸 `SchemaRendererProvider` 下、断言输出不是 placeholder / 不为空\"的测试，**四个块会全部亮红**。它直接命中这一类，不需要静态分析，而且天然属于 objectui 侧。\n\n**(c) 让 manifest 携带使用证据。** 扩展 objectui 的 manifest，给每个 input 标注\"渲染器是否消费\"（对渲染器源码做 AST pass，或运行时探针）。能复用现有比对框架，但是启发式——props 可能经 spread / 转发 / helper 读取，假阴性假阳性都要评估。\n\n**(d) 只对 `kind:'binding'` 收紧。** 一个不被读的**绑定** prop 永远是 bug（块没连上数据），而一个不被读的装饰 prop 可能只是冗余。若检测手段有假阳性成本，先只在 binding 上开火，信噪比最好。\n\n(a) 与 (b)/(c)/(d) 不互斥：(a) 现在就能做且必须做（门禁不该继续撒谎），其余按检测手段的设计结论再选。\n\n## 参考\n\n- #4413 / PR #4450 —— 这个盲区放过去的那个缺陷\n- `packages/spec/scripts/check-react-blocks-conformance.ts`、`packages/spec/react-conformance.baseline.json`、`scripts/gen-sdui-manifest.sh`\n- objectui `a8ad6c0`：`scripts/dump-public-manifest.mjs`、`packages/sdui-parser/src/index.ts` 的 `manifestFromConfigs`\n\n/cc `objectstack-ai/objectui`（(b)/(c) 的实现侧）"
+}

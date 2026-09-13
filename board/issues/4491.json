@@ -1,0 +1,36 @@
+{
+  "number": 4491,
+  "kind": "pull_request",
+  "title": "fix(spec,docs): check-react-blocks-conformance 比的是两份声明，不是声明↔实现 (#4472)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T10:19:57Z",
+  "updated_at": "2026-08-01T11:02:48Z",
+  "closed_at": "2026-08-01T11:02:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-01T11:02:47Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4491",
+  "body": "Closes #4472. 配套 PR：objectstack-ai/objectui#3146（检测手段落地的那一侧，已合并）+ objectstack-ai/objectui#3147（它发现的两个真缺陷的修复）。\n\n## 问题\n\n`check-react-blocks-conformance.ts` 的文件头原话是 \"confirms the objectui components **ACTUALLY implement** the props the spec protocol declares\"。它做不到，也从来没做过。它 diff 的两边都是**声明**：\n\n| 左 | 右 |\n|---|---|\n| spec zod schema 的 props（`z.toJSONSchema`） | objectui 注册表配置声明的 inputs（`manifestFromConfigs` 原样抄 `config.inputs`） |\n\n整条链路里没有渲染器。所以一个**两边都声明、没有任何东西读**的 prop，在这道门禁眼里是完美一致。#4413 就是代价：四个 `record:*` 块发布了没人读的 `objectName`/`recordId`，在 `kind:'react'` 页面上渲染成 \"bind a record to preview\" 占位符，而 baseline 里 `{ \"frontendOnly\": [], \"missing\": false }` 稳稳绿了整个缺陷存续期——最后是人肉读 objectui 渲染器发现的。\n\nPrime Directive #10（declared ≠ enforced）落在本该抓 #10 的东西自己身上。\n\n## 改了什么（issue 的方向 (a)，全做）\n\n- **改名到它真正做的事**，名字和文件头一起改——名字本身是误信任的一部分：`check-react-blocks-declaration-parity.ts`、`react-declaration-parity.baseline.json`、npm `check:react-declaration-parity`，baseline 键 `frontendOnly` → `registryOnly`（是\"注册表*声明*了\"，不是\"前端*实现*了\"）。\n- **作用域说明随每一次输出走**，包括绿的那次。对这道门禁形成判断的人读的是 CI 日志，不是文件头。\n- **它现在真的 gate**（#4472 次要发现 1）。`gen-sdui-manifest.sh` 调用时没传 `--strict`，还把退出码吞进一个 `⚠`——连它看得见的那部分也只是被记录、从未被拦住。ratchet 只对相对 baseline 的**新增**分歧开火，所以失败必定是一次有意的注册表改动。\n- **声明由测试钉住**：`check-react-blocks-declaration-parity.test.ts` 断言它能看见的两个方向、caveat 确实被打印、以及那句\"实现\"声明不会回来。这是 Prime Directive #10 可执行的那一半。\n- ADR-0082 带 addendum；2026-06 那份 audit 顶上加更正横幅，点名那句让整件事看起来安全的假设（*\"The component reads its full config from the spec schema at render.\"*）是预期，从未被测量。\n\n**没有推翻它能看见的东西**，那些仍是真信号：`spec-only`（palette 缺口，软）、`registry-only`（未文档化扩展，被 ratchet）、`missing`（没注册/非 public）。看不见的只有一类：两边都声明了，没人读。\n\n## 检测手段：方向 (b) 成立，已落地在 objectui\n\nissue 把 (b)/(c)/(d) 留给\"检测手段的设计结论\"。实测过了，(b) 成立且便宜（console 测试项目里 13s）：把每个声明了 `objectName` 的 public block 挂在一个记录所有调用的 `dataSource` 下，问\"有没有一次调用带上了这个对象名\"。八个候选里五个到达、三个没到——`record:related_list` 合理（要先拿到父记录 id），另外两个是同形真缺陷：`list-view` / `embeddable-form` 的注册没把 context 桥接到组件的 `dataSource` prop 上（objectui#3144，已由 objectui#3147 修复，修好后台账的双向断言**强制**删掉了那两条记录）。\n\n(d) 顺带否掉：注册表侧的 `inputs` 里**没有任何一处**用到 `binding: true`，`kind:'binding'` 是 spec react overlay 的概念，收紧点不在那儿。\n\n## 验证\n\n- `pnpm --filter @objectstack/spec test` — 合入最新 `main` 后重跑：286 files / 7229 tests 全绿\n- `pnpm --filter @objectstack/spec typecheck` — clean；改动文件 eslint clean\n- `check:generated` 的 ledger 双向对账接受了改名（新名字出现在 \"Not run here\" 里）。同一次运行里 `check:api-surface` 失败，是 AGENTS.md 记录过的 stale-`dist` 幻影（未 build 的树），本 PR 没有碰 `packages/spec/src` 的任何文件\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01S3cP1eY1novcNhQEDBrSZD"
+}

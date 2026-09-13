@@ -1,0 +1,32 @@
+{
+  "number": 4434,
+  "kind": "issue",
+  "title": "sharing: DELETE /sharing/rules/:idOrName answers 500 for both address forms — rules cannot be deleted over REST",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T06:58:08Z",
+  "updated_at": "2026-08-01T13:10:33Z",
+  "closed_at": "2026-08-01T13:10:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4434",
+  "body": "Found while verifying the 17.0.0-rc.1 checklist on #3909 (F2). Verified on `main` @ `1ee48bc60`, showcase under `os serve --dev`.\n\n`DELETE /api/v1/sharing/rules/:idOrName` — the route the REST ledger documents as the SDK's `shares.rules.delete` — fails unconditionally:\n\n```\nDELETE /api/v1/sharing/rules/rc1_rule_livetest\n→ HTTP 500 {\"code\":\"RULE_DELETE_FAILED\",\"error\":\"Delete requires an ID or options.multi=true\"}\n\nDELETE /api/v1/sharing/rules/srule_05574dc1-d342-…   (the rule's real id)\n→ HTTP 500 {\"code\":\"RULE_DELETE_FAILED\",\"error\":\"Delete requires an ID or options.multi=true\"}\n```\n\nBoth address forms the route advertises (`:idOrName`) hit the same wall — the handler's engine `delete` call passes neither an id filter the driver accepts nor `options.multi`, so **no sharing rule can be deleted over REST at all**. The 500 also leaks the driver's internal wording instead of a catalogued error (ADR-0112).\n\nConsequence compounds with the deactivation gap (filed separately): a materialized rule grant cannot be withdrawn by deactivating the rule, and the rule cannot be deleted either — an over-granted rule is unrecoverable from the API surface.\n\nExpected: DELETE resolves `:idOrName` to the stored row (as GET on the same route already does — `GET /sharing/rules/rc1_rule_livetest` works), deletes it, withdraws its materialized grants, and failure modes speak catalogued codes.\n\nPart of the #3909 rc.1 verification (section F2).\n"
+}

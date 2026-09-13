@@ -1,0 +1,35 @@
+{
+  "number": 4720,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): sort audit history and global search by `order`, not `direction` (#4674)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T21:30:48Z",
+  "updated_at": "2026-08-03T00:35:40Z",
+  "closed_at": "2026-08-03T00:35:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T00:35:38Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4720",
+  "body": "Closes #4674.\n\nTwo internal `engine.find` calls in `protocol.ts` wrote their sort as `{ field, direction: 'desc' }`. The QueryAST sort shape is `SortNodeSchema` = `{ field, order }`, and both real drivers normalize off `.order` with no fallback — `sql-driver` maps `item.order === 'desc'`, `mongodb-driver` the same. With `order` absent, `undefined === 'desc'` is false and **both queries ran ascending**.\n\nBecause both carry a `limit`, the wrong direction did not merely reorder a page — it changed **which rows came back**:\n\n| site | intent | actual |\n|:--|:--|:--|\n| metadata audit history | newest `limit` events | the **oldest** — the beginning of an object's life, never its recent changes |\n| global search | most-recently-updated matches | the **stalest** `perObject`, with recently-edited records truncated away |\n\nOn a long-lived object the history panel would never show what an editor came for; in search, the recently-edited records are both the most wanted and the ones excluded.\n\n## Why the type erasure is most of the fix\n\n`EngineQueryOptions.orderBy` is `SortNodeSchema[]` and **would have rejected `direction`**. Both sites opted out of exactly that check — one with `} as any)`, the other with `const opts: any`. Dropping the erasure is what makes the mistake unrepeatable here, so this PR does that rather than only correcting the two literals.\n\nThat matters because for an *internal* caller `tsc` is the enforced channel, and nothing else on this path is:\n\n- `INVALID_SORT` lives in the protocol's inbound `findData` normalizer and in `rest-server.ts`. These two sites are the protocol calling `this.engine.find` **directly** — inside its own guard, not behind it.\n- That normalizer rejects bad **values**, not unknown **keys**. `{ field: 'x', direction: 'desc' }` has the required `field` and no unreadable value, so it reads as a well-formed \"sort by x, direction unspecified\". The schema is not `.strict()`, so the key is dropped rather than flagged.\n\n## The test double was ratifying the bug — twice over\n\n`protocol-publish-rollback.test.ts` destructured `{ field, direction }` off `opts.orderBy`, which is an **array**. Both names read `undefined`, so the double spoke the vocabulary the engine does not read *and* sorted nothing at all. Either way, coverage built on it would have confirmed broken behaviour. It now reads `{ field, order }` across the array, supporting multiple sort keys.\n\n## Regression tests assert identity, not sequence\n\n`protocol.orderby-vocabulary.test.ts` (4 tests) sets `limit` **below** the fixture size, so sorting the wrong way returns a **disjoint set** — an order-only assertion would pass against a double that ignored `orderBy` entirely. The double honours `orderBy` + `limit` and nothing else; filtering is deliberately unimplemented so a sort bug cannot hide behind a `where` that happens to select the right rows.\n\nVerified they fail against the old code:\n\n```\n× returns the NEWEST `limit` events, not the oldest\n  AssertionError: expected [ 'a1', 'a2' ] to deeply equal [ 'a5', 'a4' ]\n× returns the most recently updated matches, not the stalest\n  AssertionError: expected [ 'c1', 'c2' ] to deeply equal [ 'c4', 'c3' ]\n```\n\n## Swept for the same mistake\n\nThe three other `direction` sites in the tree are all **correct** and untouched:\n\n- `report-service.ts:29` — `IReportService.orderBy` is `{ field, direction? }`, a genuinely different contract\n- `plugin-auth/objectql-adapter.ts:536` — the explicit `direction` → `order` translation, which is the proof the translation is known to be needed\n- `sql-driver.ts:1429` — `direction` as the driver's **post-normalization internal** vocabulary, likely how the wrong key looked plausible in the first place\n\nThese two were the only wrong ones.\n\n## Item 4 is deliberately not here\n\nThe issue's fourth item — make the mismatch fail for callers too — is filed separately rather than folded in, because it protects a **different population**. Both proposals in the issue (`.strict()` on the sort schema, or a normalizer that recognizes `direction`) live on the inbound path, and the issue's own \"why nothing caught it\" section establishes that path does not run for these two sites. So the class fix would not have caught the bug that motivated it; it guards *external* callers, where `tsc` cannot reach. Worth doing, worth deciding on its own terms.\n\n## Verification\n\n`pnpm typecheck` 122/122 · `pnpm lint` clean · metadata-protocol **220** tests (27 files) · objectql **1638** tests (103 files).\n\nRefs: ADR-0049, #4363\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01NKcGqCYCCpMkB5UW8jNPXx)_"
+}

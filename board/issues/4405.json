@@ -1,0 +1,36 @@
+{
+  "number": 4405,
+  "kind": "issue",
+  "title": "filter-logic conformance 少了两个 backend：MongoDB 的 translateFilter 从来没被 #3774 的标准收编",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T11:55:52Z",
+  "updated_at": "2026-08-02T10:02:09Z",
+  "closed_at": "2026-08-02T10:02:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4405",
+  "body": "## TL;DR\n\n`FILTER_LOGIC_CASES`（`packages/spec/src/data/filter-logic-conformance.ts`，#3774）的文件注释说它是「the four independent FilterCondition backends are each checked against」的共享标准。实测跑这套用例的是：`driver-memory`、`driver-sql`、`packages/formula`、`service-analytics`。\n\n**`driver-mongodb` 不在里面** —— 而 `mongodb-filter.ts` 的 `translateFilter` 是一个完全独立的第五个 backend，`$and` / `$or` / `$not` 的翻译跟 SQL、跟内存匹配器一行代码都不共用。它是被漏掉的，不是被排除的：#3774 数「四个」的时候没把它数进去。\n\n`driver-sqlite-wasm` 同样没跑，但性质不同（见下）。\n\n## 怎么发现的\n\n#4363 的后续加了 `scripts/check-driver-conformance.mjs`（driver × 共享用例集的覆盖矩阵 gate）。它跑出来的第一版矩阵：\n\n```\n  driver              FILTER_LOGIC  TEMPORAL  TEMPORAL_TIME  PAGINATION  PAGINATION_UNORDERED\n  driver-memory       ok            ok        ok             ok          ok\n  driver-mongodb      DEBT          ok        ok             ok          ok\n  driver-sql          ok            ok        ok             ok          ok\n  driver-sqlite-wasm  DEBT          ok        ok             ok          ok\n```\n\n两个 `DEBT` 就是本 issue。（`driver-sqlite-wasm` 的两个 PAGINATION 格子当时也是空的，已在同一个 PR 里补上。）\n\n## 两行的优先级不一样\n\n**`driver-mongodb` —— 真的洞，建议优先。** 独立实现的组合子翻译从来没有被共享标准验证过。风险是具体的：`$not` 在 MongoDB 里没有顶层等价物（要靠 `$nor` 或 per-field `$not`），嵌套 `$or` 里的 `$and` 展开也容易和 SQL 语义分叉 —— 而分叉的表现是「过滤条件看起来生效了，但选出来的行不一样」，属于 #3948 那一族。\n\n**`driver-sqlite-wasm` —— 价值低但不该 exempt。** 它继承 `SqlDriver` 的过滤编译器，所以风险不在「谓词编错」而在「sql.js 方言执行编好的谓词」—— 和它的 temporal / pagination 套件已经覆盖的是同一类风险。之所以记成 DEBT 而不是 EXEMPT：「继承了所以没问题」正是那两个套件存在的理由所要否证的假设。\n\n## 清账方式\n\n两条都写各自的 conformance 套件（照 `packages/plugins/driver-sql/src/sql-driver-or-filter.test.ts` 的形状），然后在同一个 PR 里删掉 `scripts/check-driver-conformance.mjs` 里对应的 ledger 条目。只删条目不写套件会挂 `CONSUMED`，写了套件不删条目会挂 `RECONCILED`。\n\n⚠️ MongoDB 那条需要能跑 `mongodb-memory-server`。发现它的环境拉不到 `fastdl.mongodb.org`（网络策略挡掉），所以没法在那里验证 —— 修它的人请先确认 mongod 能起，否则就是盲改。\n\n## 关联\n\n- #3774 —— filter-logic 共享用例的出处，「四个 backend」的说法。\n- #4363 —— 引出这个 gate 的 issue。\n- #3948 —— 「未生效 / 生效得不一样的东西不该看起来正常」。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 4675,
+  "kind": "issue",
+  "title": "spec 生成物没有 merge driver:两个 PR 各改几行,语义上是集合运算,却每次都打成文本冲突",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T16:20:00Z",
+  "updated_at": "2026-08-02T19:52:05Z",
+  "closed_at": "2026-08-02T19:52:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4675",
+  "body": "## 症状\n\n仓里**没有 `.gitattributes`**(整个仓一个都没有),所以 `packages/spec` 的生成物走默认的三路文本合并。这批文件是排序数组 / 追加式登记表,两个 PR 各自增删几行时,**语义上是集合并与集合差、完全可组合**,却表现为需要人工解决的文本冲突。\n\n`authorable-surface.json` 是 315KB、8262 行的排序数组 —— 任何两个动它的 PR 只要落点相近就冲突。\n\n## 2026-08-02 一个下午的实测\n\n| 冲突 | 文件 | 结果 |\n|:--|:--|:--|\n| PR #4670(C8 RetryPolicy)vs #4664 | `authorable-surface.json`、`spec-changes.json`、`docs/protocol-upgrade-guide.md`、`conversions/registry.ts`、`migrations/registry.ts` | 全套门禁 + 全仓 typecheck **重跑一遍** |\n| PR #4662(C5 ActivationEvent)vs #4664 | `authorable-surface.json` | 重新生成 + 重跑 |\n| 同上,期间 main 又前进到 #4668 | `authorable-surface.json` + `api-surface.json` | **再**重跑一遍 |\n\n三次冲突里**没有一次**是真正的语义冲突 —— 每次的正确解法都是「丢掉两边的文本,重新生成」。一个双源簇跑完整套门禁约十几分钟,而 v17 收尾期 main 上 spec PR 的密度让「跑完就已过期」成为常态。\n\n## 根因不是「进了仓库」,是「以这个形式进了仓库」\n\n这些文件必须提交(至少记忆类必须,见 #4676),但它们的合并语义不是文本级的。Git 对此有现成机制:自定义 merge driver。\n\n## 建议\n\n`.gitattributes`:\n\n```gitattributes\npackages/spec/authorable-surface.json    merge=os-regen\npackages/spec/api-surface.json           merge=os-regen\npackages/spec/spec-changes.json          merge=os-regen\npackages/spec/json-schema.manifest.json  merge=os-regen\ndocs/protocol-upgrade-guide.md           merge=os-regen\ncontent/docs/references/**               merge=os-regen\n```\n\ndriver 在冲突时**不做文本合并**,直接调对应生成器重算:\n\n- `authorable-surface.json` / `json-schema.manifest.json` ← `gen:schema`\n- `api-surface.json` ← 先 `build`(它 `readsDist`)再 `gen:api-surface`\n- `spec-changes.json` ← `gen:spec-changes`\n- `protocol-upgrade-guide.md` ← `gen:upgrade-guide`\n- `content/docs/references/**` ← `gen:docs`\n\n实现注意:\n\n1. driver 必须在**合并后的源码**上重算(先让 git 正常合并 `src/**`,driver 只处理生成物),否则算出来的是半截状态。\n2. 两个手写登记表(`conversions/registry.ts`、`migrations/registry.ts`)**不适用** —— 它们是手写代码,冲突要人看。今天两次都是双方各自追加、保留两边即可,但那是人的判断。\n3. driver 需要 `pnpm install` 过的 workspace;在裸 CI 或 `git rebase` 的中间态可能不可用,要考虑 fallback(失败时保留冲突标记并提示手工跑生成器,而不是产出错误内容)。\n\n## 与 #4650 / #4663 互补\n\n#4663 提的加固是「要求 `authorable-surface.json` 与重新生成的结果**逐字节相同**」。merge driver 保证冲突时**必定**走重新生成 —— 两者合起来,**冲突类与证据删除类一起关掉**:该文件永远只能是生成器的输出,手编和手工解冲突都无处落脚。\n\n单独做本单也有价值(立刻消除返工),但和 #4663 一起做收益更大。\n\n## 范围\n\n窄、可立刻做、发布期也安全 —— 不改任何政策、不削弱任何门禁、不影响 review 可见性(文件仍然提交,diff 仍然可见)。\n\n投影类是否该干脆退出仓库是**另一个问题**,见 #4676。\n\n关联:#4650、#4663、#4659(门禁自证据链一族)、#4535(触发本单的双源清账流水线)"
+}

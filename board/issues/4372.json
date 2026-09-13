@@ -1,0 +1,32 @@
+{
+  "number": 4372,
+  "kind": "issue",
+  "title": "写路径 validate-only(dry-run)模式:把「提交前反馈」的 UX 用单实现的方式补回来(objectui#3110)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T09:21:55Z",
+  "updated_at": "2026-08-01T07:41:04Z",
+  "closed_at": "2026-08-01T07:41:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4372",
+  "body": "## 背景\n\nobjectui 刚拍板(objectui#3110):**客户端不再镜像对象级校验规则** —— 规则是 enforcement,enforcement 单实现在服务端 `objectql/src/validation/rule-validator.ts`。objectui 的 `ObjectValidationEngine` 已标 `@deprecated`,并加了 tripwire 测试防止再被接进生产路径。\n\n拍板过程里唯一被牺牲掉的东西是 **UX**:用户现在只能提交之后才吃到 `rule_violation`。这个 issue 就是把那份 UX 用**不产生第二个求值器**的方式补回来。\n\n促成拍板的实证:objectui#3103 逐条对着本仓 rule-validator 源码做了一轮认真收敛(8 个 mutation-test 闸门),**仍然留了一处分歧** —— ADR-0113 的 legacy-violation 豁免(仅当合并后状态违规**且本次写入使其恶化**时才拒)客户端没有实现。一轮认真收敛尚且留尾巴,说明跨仓镜像 parity 是结构性不可靠。\n\n## 诉求:写路径的 validate-only(dry-run)模式\n\n跑**真正的** rule-validator、不落库、返回 violations 列表。\n\n- **零 parity 风险**:同一份代码路径,不存在第二个实现可漂移。\n- **覆盖客户端永远做不到的两类**:`unique`(要查库,而且客户端做 SELECT-then-check 本身就是 TOCTOU 竞态 —— 正是 spec 有意移除 `unique` 规则类型的理由)、`json_schema`(ajv 在服务端)。\n- **ADR-0113 语义自动正确**:豁免逻辑就在那条路径上,不需要任何一侧去\"记得\"实现它。\n- 也顺带能服务非 UI 消费者(CLI 校验、导入预检、AI 生成记录的自检)。\n\n## 需要设计的点(非结论,列出来供讨论)\n\n1. **接口形态**:`insert`/`update` 带 `dryRun: true` 选项,还是独立端点?倾向前者——同一入口保证走同一段代码,独立端点容易长出自己的分支。\n2. **`previous` 的取法**:`update` 的 dry-run 要不要真去读 prior record(`state_machine`、跨字段谓词、ADR-0113 都需要它)?读了才准,但就有一次读的成本。\n3. **权限**:dry-run 必须走与真实写入相同的权限判定,否则会变成一个探测器(用报错差异反推他人数据是否存在/字段值)。\n4. **副作用边界**:明确 lifecycle hooks(`beforeInsert` 等)在 dry-run 下**不**执行——只跑声明式规则。否则 dry-run 自己就成了副作用来源。\n5. **返回形状**:直接复用现有的 `FieldValidationError[]`(`field`/`code`/`message`/`label`),console 已经会渲染,不需要新契约。\n\n## 排期建议\n\n**不建议现在就做。** objectui 侧的弃用已经落地,现状(服务端拒绝 + 结构化报错渲染)是可用的。这个 issue 先作为**决策记录**存在,等产品确认「提交前反馈」是真需求时再排期。先记下来是为了:objectui#3110 的结论明确指向这里,没有这个 issue,下一个 agent 会重新发明客户端预检。\n\n## 关联\n\n- objectui#3110 —— 拍板与理由(含为什么选 B 而不是接线)\n- objectui#3103 / objectui#3107 —— 语义收敛,以及留下的 ADR-0113 分歧\n- ADR-0020(规则求值器)、ADR-0113(legacy-violation 豁免)\n\n## 另:未来若 objectui 需要离线写入\n\n`OfflineConfig` 一旦进路线图,客户端求值器会从\"冗余\"变成\"必需\"(离线时没有服务端可问)。届时的前置条件应该是 **`@objectstack/spec` 携带 conformance fixtures** —— golden 的「规则 + 记录 + 判定」三元组,两仓 CI 各跑同一套。那是唯一能把跨仓行为 parity 从约定变成机制的办法。这不是本 issue 的范围,但值得在这里留个指针。\n"
+}

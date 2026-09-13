@@ -1,0 +1,37 @@
+{
+  "number": 4790,
+  "kind": "issue",
+  "title": "每号码 OTP 发送预算(#2780)也只在进程内计数 —— 与 #4772 的限流洞同类,多节点下可按节点数倍增",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T06:44:13Z",
+  "updated_at": "2026-08-03T08:15:56Z",
+  "closed_at": "2026-08-03T08:15:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4790",
+  "body": "在 #4772(限流计数器惰性解析 kernel cache)的实施过程中发现,**未认领**,不在那个 PR 的范围内。由 PM 代为立单 —— dev 在报告里记录了这条,但没有开 issue,而它是 Prime Directive #10 该立的那种。\n\n## 现象\n\n`AuthManager.getOtpSendGuard()` 实现的 #2780「每号码 OTP 发送预算」,**只在宿主显式提供 `secondaryStorage` 时才跨节点共享**;标准 `serve` 组合下没有宿主提供它,于是预算是**每进程一份**。\n\n这与 #4772 修掉的限流计数器洞是**同一类**(计数器落在进程内存储,声明的「全局限额」在多节点下不成立),但**是独立的一处** —— #4788 修的是 better-auth 的 `rateLimit` 计数器,走的是新的 `rateLimit.customStorage`;OTP 预算是 ObjectStack 自己在 `AuthManager` 里实现的另一套计数,**行为未被 #4788 改变**。\n\n## 为什么值得单独修\n\n后果比限流洞更直接地带成本:\n\n1. **短信费用**。每次 OTP 发送是真金白银。预算按节点数倍增,意味着一个 N 节点部署的实际发送上限是声明值的 N 倍。#2814(短信全局/每租户日发送配额)正是在处理这条成本线 —— 如果那个闸也建立在同一套进程内计数上,它上线即失效,建议一并核对。\n2. **OTP 暴力面**。每号码预算是 OTP 的核心反滥用手段之一;跨节点轮换即可放大尝试次数。\n3. **声明 ≠ 强制**(ADR-0049)。这是 #4772 那条的翻版:配置里能写一个每号码预算,运行时在多节点下不兑现,而**没有任何信号告诉你它没兑现** —— #4772 至少还打了一条(误导性的)warn,这里连 warn 都没有。\n\n## 修法方向\n\n#4788 已经把正确姿势建好了:`packages/plugins/plugin-auth/src/rate-limit-storage.ts` 的 `createLazyCacheRateLimitStorage()` —— 计数器被消费时才解析 `cache` 服务(必然晚于 `kernel:ready`,与插件启动顺序无关),解析不到则降级为进程内计数并**响亮告知**。OTP 预算应当复用同一条路径,而不是再写一份。\n\n`incrementFixedWindow` 也已经被抽出来在两个计数入口间共用(#4788),第三个入口接进去是自然的。\n\n⚠️ **接手前先等 #4788 合并**,否则会与它的新文件冲突。当前状态:PR #4788 已复核通过,CI 中。\n\n## 要先确认的一点\n\n这条来自 #4772 dev 的顺带观察,**我(PM)没有独立验证过 `getOtpSendGuard()` 的具体代码路径**。接手的第一件事请核实:该预算的存储确实取自 `AuthManagerOptions.secondaryStorage`(而非别的地方),且默认组合下确实为空。如果实际情况不同,如实回报并关掉本单 —— 不要为了让 issue 成立而修一个不存在的问题。\n\n## 关联\n\n- #4772 / PR #4788 —— 同类的限流计数器洞(已修),本单的修法参照它\n- #4785 —— `secondaryStorage` 与 ADR-0069 D4 会话管控的冲突(待裁定)。**注意**:本单的修法**不应**引入 `secondaryStorage`,而应走 #4788 建立的 `cache` 惰性解析路径,否则会踩 #4785 记录的那个地雷\n- #2814 —— 短信发送配额(成本总量闸),建议核对是否共用同一套进程内计数\n- #2780 —— 每号码 OTP 预算的原始需求"
+}

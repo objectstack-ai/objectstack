@@ -1,0 +1,35 @@
+{
+  "number": 4794,
+  "kind": "pull_request",
+  "title": "fix(objectql,platform-objects): 空库自证改在本次启动写完数据之后 —— 一次启动不能证明它随即违反的契约 (#4769)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T06:58:27Z",
+  "updated_at": "2026-08-03T07:24:36Z",
+  "closed_at": "2026-08-03T07:24:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T07:24:34Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4794",
+  "body": "Fixes objectstack-ai/objectstack#4769\n\n## 问题\n\n全新部署第一次 `pnpm dev` 全绿(130 rows,0 ERROR),**第二次启动开始永久 10 条 ERROR**,10 条种子记录写不进去。数据没变、代码没变,只是重启了一次 —— 被拒的正是首启自己写进去的数据。\n\n根因不是哪个值算错了,是**顺序反了**。`sys_migration` 里那两行带着 `{\"attested\":\"datastore-created-empty\"}` 的自证写在 `kernel:ready`,而同一次启动的 seed 还在往库里写行。「空库 ⇒ 没有历史值」这个推理的前提是**没有数据可写**,它却恰恰写在即将写入 130 行之前:证书落笔那一刻是真的,一秒之后就不是了。首启在 warn-first 下把数据留下,之后每一次启动读到这张证书、进入 strict、拒掉前任写下的那批行。\n\n按 PM 裁定取**修法 1**(推迟到首启 seed 之后 + 对落定的数据重新下结论)。修法 2 只是把 insert/update 的不对称抹平成一样松或一样严,不触及真正坏掉的东西:**证据在被推翻之前就被记账**。\n\n## 改了什么\n\n一条不变量,三个位置:**一次启动不能证明一个它在同一次启动里违反的契约。**\n\n**① 写入时机 —— 等本次启动自己的数据落定。**\n自证从 `kernel:ready` 改为订阅 `app:seeded`(inline seed 的结算点,含超出 `OS_INLINE_SEED_BUDGET_MS` 后台跑完的那一半);不 seed 的 kernel 仍由 `kernel:ready` 兜底。两条路径进的是同一个幂等调用:先到的那个写行,后到的读到行就跳过。\n\n**② 写入前提 —— 先问这次启动放行过什么。**\n`attestFreshDatastore` 先读引擎的「已放行违规值」台账,任何被本次启动证伪的 migration id **不再自证**;部署维持 warn-first(真实、可恢复),并在日志里指名是哪个 `对象.字段`、该跑哪条 `os migrate` 才能真正关闸。\n\n台账由写路径产生:引擎在 warn-first 放行每一个不合形状的值时,用**与 strict 模式完全相同的判定**把它记下来。这是刻意的不对称 —— 证明一个部署干净需要扫全库,证伪只需要一个反例,而这个反例写路径本来就已经算出来了,所以它零成本、精确,且不可能与将来的强制判定漂移。\n\n`adr-0104-file-references` 与 `adr-0104-value-shapes` **各自独立判定**:一个 `cover` 不合形状不牵连 `location` 那道闸,反之亦然(两条 migration 声称的是两件不同的事)。\n\n**③ 写入之后 —— 被推翻就撤销。**\n证书若在签发之后被本次启动推翻(操作员显式开了 `OS_ALLOW_LAX_MEDIA_VALUES` / `OS_ALLOW_LAX_VALUE_SHAPES`,或后台 seed 收尾晚于签发),引擎撤销它:`verified_at` 清空、`blocking` 记上、`details` 保留原 `attested` 再补一条 `revoked` 说明是哪个值推翻的。范围刻意收窄到**本次启动亲手创建的库上的自证行** —— 扫过全库的真实迁移证据,不该被一次写入的观察推翻。\n\n## 记忆化(PM 要求一并审查的第二张脸)\n\n结论:**会脱节,是同一个 bug 的第二张脸,已在本 PR 一并修。**\n\n首启之所以「看起来是绿的」,一半靠的就是进程内正好缓存了 `false`。`sys_migration` 在 kernel init 期间才注册,而第一条写完全可能赶在它之前 —— 那一次读**根本没读到账本**,却被当成结论冻结了一整个进程的姿态。于是同一份代码、同一份数据,启动姿态取决于「哪条写先跑」。\n\n现在区分两种否定:\n\n- **问过了,账本说不**(没有行 / `verified_at` 为空 / `blocking` 非零)—— 是结论,照旧缓存,想立刻生效仍走 `invalidateDataMigrationFlags()`;\n- **根本问不到**(`sys_migration` 未注册、查询抛错)—— 依旧答 `false`(问不到的闸必须关着),但**不记住**,下一次写再问一次。\n\n代价是账本存在之前每次写多一次 registry 查表(在任何查询之前就短路),账本可读之后即止。\n\n`kernel:bootstrapped` 上那条 ADR-0104 建议行同理改为直接读账本 —— 否则一个刚刚自证成功的新部署,会被告知去跑一条它已经不需要跑的迁移。\n\n## 测试\n\n回归测试按 PM 的验收标准写成**「两次启动」**,不是单次:两个 engine 跑同一个 store,第二个 engine 的 driver 报告表已存在(`wasDatastoreCreatedFromEmpty() === false`)。单次启动的测试根本看不见这个缺陷 —— 坏的构建里首启也是绿的。\n\n`packages/objectql/src/adr0104-attestation-evidence.test.ts`(新增 8 条)覆盖:反例按 migration id 记账、两道闸互不牵连、干净启动不留反例、**两次启动同一数据集第二次不得拒绝首次写入的数据**、以及它的对照组(没被推翻的证书在第二次启动照常强制,说明修的是「未获证」而不是「关掉了强制」)、非本次创建的库永不撤销、记忆化重问。\n\n`packages/platform-objects/src/{system/migration-flag,plugin}.test.ts`(新增 8 条)覆盖:被证伪的 id 不自证且日志给出处方、只拒被证伪的那一条、订阅 `app:seeded`、两次 pass 幂等。\n\n反向验证过:把源码 stash 掉、只留测试文件跑,8 条里 6 条失败(含「两次启动」与记忆化两条),确认它们真的钉住了这个回归。\n\n```\npackages/objectql          Test Files 108 passed   Tests 1693 passed\npackages/platform-objects  Test Files   9 passed   Tests  266 passed\ntypecheck (两个包)          Done / Done\neslint(改动文件)            clean\ncheck-adr-anchors           OK (17 anchored file(s))\n```\n\n## 范围\n\n- `packages/spec/**` **零改动**(按 PM 更正的硬约束;spec 侧只读引用 `FILE_REFERENCES_MIGRATION_ID` 等常量)。\n- 未触碰 `service-storage` / `plugin-auth` / `service-automation` / `plugin-approvals`(并行车道)。\n- 未改 `examples/app-showcase` 的种子数据 —— 那在 #4774 单独跟踪,且改了只会让这个部署不再触发,不构成修复。\n- 未改 `content/docs/releases/`。\n\n改动落在 `packages/objectql` 与 `packages/platform-objects` 两个包:自证的**写入者与时机**本来就在 platform-objects(#4243 把它从 service-storage 移过去的),不动它无法修「时机」这一半;两个包都不在本轮并行车道上。\n\n## 留在门外的两个窗口(已另立 issue,未在本 PR 修)\n\n- **#4795** —— inline seed 超预算在后台收尾时,`kernel:ready` 的兜底自证可能签在尾部数据落定之前,那批尾行会在首启即被拒(跨启动一致,不再翻转,但仍是「一次启动两套契约」)。关它需要先决定 multi-tenant / `skipSeedData` 模式下的期望姿态。\n- **#4797** —— 扫描得来的证书,若操作员显式开了 lax 开关之后写入不合形状的值,证书会变陈旧;本 PR 的撤销刻意不覆盖这一类,因为一次写入的观察不该推翻一次全库扫描。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_015Br2xsJsczFsTR9bvbh2Ny"
+}

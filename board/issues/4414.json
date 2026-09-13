@@ -1,0 +1,34 @@
+{
+  "number": 4414,
+  "kind": "issue",
+  "title": "A decision node has three declared ways to route a branch and two of them do nothing — app-crm's convert-lead guard runs both branches",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T12:39:00Z",
+  "updated_at": "2026-08-01T07:46:11Z",
+  "closed_at": "2026-08-01T07:46:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4414",
+  "body": "在为 #4336 量化剩余静默 false 时发现的。#4336 的「Related」一节提了一句 `branchLabel` 回退,但实际情况比那句描述更糟,而且已经在 shipped 的 example app 里造成了可复现的错误行为。\n\n## 一个 decision 想分支,有三条声明出来的路\n\n| 机制 | 声明处 | 实际 |\n|:---|:---|:---|\n| `decision.config.conditions[].label` → `branchLabel` | `logic-nodes.ts` 执行器 | 三个 example app 里与出边 label 匹配数 **0**,一律静默回退到全边集 |\n| `FlowEdgeSchema.isDefault` | `flow.zod.ts:321`,`.describe('Marks this edge as the default path when no other conditions match')` | **零读者**。全仓库除了 schema 声明和 `FLOW_EDGE_KEYS` 之外没有任何代码读它 |\n| `edge.condition` | `FlowEdgeSchema.condition` | ✅ 唯一真正工作的 |\n\n前两条都是 ADR-0049 「declared ≠ enforced」/ PD #10 的形状:作者按文档写了,运行时什么也没发生,而且不报错。\n\n## 实测数据\n\n三个 example app 的全部 decision 节点:\n\n```\napp-crm/crm_convert_lead_wizard · check_converted\n   decision labels: [\"Yes — already converted\",\"No — proceed\"]\n   out-edge labels: [\"Yes\",\"No\"]                → matched: 0\napp-showcase/showcase_inquiry_purge · any_found\n   decision labels: []          out-edge labels: [\"yes\",\"no\"]        → matched: 0\napp-showcase/showcase_budget_approval · needs_exec\n   decision labels: []          out-edge labels: [\"true\",\"false\"]    → matched: 0\napp-showcase/showcase_project_escalation · triage\n   decision labels: []          out-edge labels: [\"critical\",\"normal\"] → matched: 0\napp-todo/task_completion · check_recurring\n   decision labels: []          out-edge labels: [\"Yes\",\"No\"]        → matched: 0\n```\n\n四个连 `conditions` 都没声明(执行器返回 `branchLabel: 'default'`),唯一认真写了的那个 label 对不上。**decision 的 branchLabel 路由在整个仓库里从未真正生效过。**\n\n(`branchLabel` 机制本身不是死的 —— resume/approval 路径确实在用,`engine.ts:2520` 的 `signal?.branchLabel`。死的是 `decision` 节点对它的使用。)\n\n## 后果:app-crm 的守卫不守\n\n`examples/app-crm/src/flows/convert-lead.flow.ts` 想表达「已转换 → 中止屏;否则 → 进入向导」。实跑(把该 flow 的分支骨架接上真引擎):\n\n```\nlead status 'converted' → visited: [\"screen_already_converted\",\"screen_account\"]\nlead status 'open'      → visited: [\"screen_account\"]\n```\n\n**已转换的 lead 两条路都走** —— 弹出「This lead has already been converted」中止屏,然后照样进入转换向导。\n\n链条是这样断的:\n\n1. decision 的 `conditions[0]` 用了 `{lead_record.status} == 'converted'`,那是 #4336 那条静默 false(永远不成立);\n2. 于是落到 `conditions[1]`(`'true'`),返回 `branchLabel: 'No — proceed'`;\n3. 没有出边 label 叫 `'No — proceed'`(它们是 `'Yes'` / `'No'`)→ 静默回退到全边集;\n4. `e3a` 带 CEL 条件(裸 `lead_record.status == 'converted'`),**这条是对的**,已转换时成立 → 中止屏执行;\n5. `e3b` **无条件** → 无论如何都执行 → 向导也走。\n\n第 1、3 步各自静默,第 5 步是真正的漏洞。而作者要修第 5 步,最自然的写法是给 `e3b` 加 `isDefault: true` —— **那也是死键**。\n\n## 建议\n\n拆成三件事,严重级别不同:\n\n1. **`isDefault`:enforce-or-remove(ADR-0049)。** 要么在 `traverseNext` 实现 BPMN default-flow 语义(所有 conditional 兄弟边都不成立时才走),要么按 `spec-property-retirement` 流程摘掉。现状是它向作者承诺了一个不存在的机制。\n2. **`branchLabel` 对不上时不要静默。** `traverseNext` 已经文档化了「无匹配则回退全边集」这个行为,但一个 decision 明明算出了分支、却没有任何边认领它,这是元数据错误,不是正常路径。至少 warn,附上算出的 label 和实际的出边 label 集合。\n3. **修 app-crm 的 flow。** 但这个得等 1 有结论 —— 在 `isDefault` 落地前,唯一能表达「否则」的写法是给 `e3b` 写一条反条件。\n\n第 2 条基本零风险(warn),可以先做。\n\n## 复现\n\n```ts\n// decision 的 conditions 与出边 label 对不上 → 路由静默失效;\n// 无条件边无论如何都执行。\nnodes: [\n  { id: 'check', type: 'decision', label: 'Check',\n    config: { conditions: [\n      { label: 'Yes — already converted', expression: \"{rec.status} == 'converted'\" },\n      { label: 'No — proceed', expression: 'true' },\n    ] } },\n  { id: 'abort', type: 'mark', label: 'Abort' },\n  { id: 'proceed', type: 'mark', label: 'Proceed' },\n],\nedges: [\n  { id: 'a', source: 'check', target: 'abort', condition: \"rec.status == 'converted'\", label: 'Yes' },\n  { id: 'b', source: 'check', target: 'proceed', label: 'No' },   // 无条件 → 永远执行\n],\n```\n\n相关:#4336(静默 false 的那半)、#4347 / #4389(同族的遍历那半)。"
+}

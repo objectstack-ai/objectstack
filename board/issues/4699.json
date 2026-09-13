@@ -1,0 +1,35 @@
+{
+  "number": 4699,
+  "kind": "pull_request",
+  "title": "fix(cli): resolve @objectstack/organizations from the host app (cloud#1013)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T19:00:13Z",
+  "updated_at": "2026-08-02T19:53:25Z",
+  "closed_at": "2026-08-02T19:53:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-02T19:53:24Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4699",
+  "body": "Fixes objectstack-ai/cloud#1013\n\n## 问题\n\n`objectstack serve` 用**裸 import** 加载企业版多组织运行时:\n\n```ts\nconst organizationsPkg = '@objectstack/organizations';\nconst mod: any = await import(/* webpackIgnore: true */ organizationsPkg);\n```\n\nNode ESM 对裸 specifier 按**导入方自己的 realpath** 解析 —— CLI 是通过 workspace/`link:` 接入的,realpath 落在 framework 工作区里;而 `@objectstack/organizations` 是 cloud 私有包,只存在于**被服务的 app** 的 `node_modules`。这个 import 因此永远不可能成功:\n\n```\ncause: Cannot find package '@objectstack/organizations' imported from …/packages/cli/src/commands/serve.ts\n```\n\n后果是任何自托管的 walled posture(`OS_TENANCY_POSTURE=group` / `isolated`)都直接撞上 ADR-0093 D5 的 fail-fast 并 `exit(1)`,唯一绕过方式是 `OS_ALLOW_DEGRADED_TENANCY=1` —— 正是 D5 要防的「墙不生效还照常服务」状态。在 app 的 `package.json` 里声明依赖没有任何用,因为解析基点根本不是 host app。\n\n## 修复\n\n同一个文件里**本来就有**正确的解析器 `importFromHost`(先用 host app 的 `createRequire` 解析,再 import 解析出的绝对路径),但它定义在 auth 区块**之后**,而 organizations 的加载在该区块**之内**,所以用不上。\n\n- 把它抽成 `packages/cli/src/utils/import-from-host.ts`(`createHostRequire` / `createHostImporter`),**上提到 auth 区块之前**,organizations 处改用它。AI 服务那条路径行为不变(仍是同一个 helper)。\n- host app 只要在自己的 `package.json` 里声明 `@objectstack/organizations` 即可 —— 两个 showcase app 已经声明了。\n\n顺带两处修正:\n\n1. **回退只在「host 解析不到」时发生。** 原实现 `try { host } catch { bare }` 会把*已解析成功但求值时抛错*的包重新裸 import 一遍,真实错误被替换成 `MODULE_NOT_FOUND` —— 而所有调用方都把它归类为「没装」(`Serve.isModuleNotFoundError`)。于是一个坏掉的包会被静默跳过(可选服务),或者让 D5 打印「请安装」去指责一个已经装好的包。现在求值期的崩溃原样抛出。\n2. **D5 的致命信息指明「装到 app 里」**,因为那才是包该待的地方。\n\n## 回归 —— 这是本 PR 的重点\n\n这个缺陷能活这么久,是因为**所有**多组织测试都绕开了 CLI 自己的解析路径:cloud 的 dogfood 套件显式传 `extraPlugins: [new OrganizationsPlugin()]`,`packages/verify` 的 posture 测试直接 `vi.mock` 掉这个模块。两者都跳过了唯一坏掉的那一环。\n\n新增 `packages/cli/test/serve-organizations-host-resolution.e2e.test.ts`:用现成的 `test/helpers/serve-process.ts` **spawn 真实的 `os serve` 进程**,跑在一个临时 app 目录上 —— 真的 `package.json`、真的 `node_modules/@objectstack/organizations`(企业包在本工作区装不了,这正是问题本身,所以用一个注册同样 `org-scoping` 服务 + posture entitlement 的替身),**不 mock 任何东西**。\n\n- **case 1**(核心):app 自带该包 + `OS_TENANCY_POSTURE=isolated` ⇒ 必须启动到 banner,且插件列表里出现 `Organizations`。\n- **case 2**:app 没有该包 ⇒ D5 fail-fast 仍然必须触发(修复不能把它变成宽容跳过)。\n\n**对旧代码验证过会红**:把那一行改回裸 import 后重跑,case 1 失败并打印出 issue 里那条一模一样的信息:\n\n```\nAssertionError: the D5 fail-fast fired — the app-installed package was not found\n  ✖ FATAL: tenancy posture 'isolated' was requested but @objectstack/organizations could not be loaded,\n  cause: Cannot find package '@objectstack/organizations' imported from …/packages/cli/src/commands/serve.ts\n```\n\n另加 `packages/cli/src/utils/import-from-host.test.ts` —— 用真实 fixture 目录钉住解析语义:issue 的两半 repro(CLI 侧解析不到 / host 侧解析得到)、回退分支、以及「求值崩溃不得被伪装成 MODULE_NOT_FOUND」。\n\n## 文档\n\n`content/docs/deployment/tenancy-modes.mdx` 的 D5 boot-guard 补救清单原文是「install `@objectstack/organizations`」—— 在修复前这句**根本无法执行**(装在哪都没用,因为解析基点是 CLI 的 realpath);修复后位置变成精确且是关键信息,所以那一条改为「装进被服务的 app,在该 app 的 `package.json` 里声明」,措辞与 CLI 打印的 D5 致命信息一致。只改这一条,不做文档普扫。\n\n## 验证\n\n```\n$ pnpm exec vitest run --maxWorkers=2          # packages/cli 全量\n  Test Files  70 passed (70)\n       Tests  711 passed (711)\n\n$ pnpm --filter @objectstack/cli typecheck      # tsc --noEmit,干净\n$ pnpm exec turbo run build --filter=@objectstack/cli... --concurrency=2\n  Tasks:  54 successful, 54 total\n$ pnpm exec eslint --no-inline-config <改动的文件>   # 干净\n```\n\n## 顺带扫描到的同类缺陷(**不在本 PR 范围**,已另开 issue #4700)\n\n`packages/verify/src/harness.ts:270` 的 `bootStack({ multiTenant: true })` 是同一形状的裸 import,同样解析不到;`packages/qa/dogfood/test/attachments-permission-matrix.dogfood.test.ts:528` 用裸 import 探测该包是否可用,因而永远判定「不可用」。修它需要先决定这个 node-only 解析器的共享位置(CLI 的 utils 用不了,`@objectstack/types` 会把 `node:module` 带进可能跑在 edge/浏览器的包里),属于跨包架构决定 —— 详见 #4700。\n\n另注(未改、未开 issue,留给维护者判断):`tenancy-modes.mdx` 里那段引用的 FATAL 代码块仍是 `OS_MULTI_ORG_ENABLED=true but …` 的旧措辞,而 CLI 现在打印的是 ADR-0105 D1 的 posture 措辞(`tenancy posture 'isolated' was requested but …`)。这是本次改动**之前**就存在的漂移,按 PM 指示本 PR 只动那一条 bullet,未一并修改。\n\nRefs: ADR-0093 D5、ADR-0081 D2、ADR-0105 D12、cloud#1012\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_019TYoxKa8yFLiDDh7tkBqtu"
+}

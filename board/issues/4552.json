@@ -1,0 +1,33 @@
+{
+  "number": 4552,
+  "kind": "pull_request",
+  "title": "fix(plugin-auth): the issuer is the provider's to declare — Google links stop resolving under a synthesized one",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T02:34:58Z",
+  "updated_at": "2026-08-02T07:51:31Z",
+  "closed_at": "2026-08-02T07:51:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-02T07:51:29Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4552",
+  "body": "## What broke\n\nGoogle sign-in on the hosted control plane returns\n`/_console/login?...&error=unable_to_link_account` — on **staging and production\nboth**, for accounts that had signed in with Google before.\n\n## Root cause\n\nbetter-auth 1.7 keys every account on `(issuer, providerAccountId)`, and the\nissuer is the **provider's** to declare: `resolveOAuthAccountKey` takes\n`provider.accountIssuer` and synthesizes `local:oauth:<id>` *only* for a\nprovider that declares none.\n\n`backfillAccountIssuer` synthesized that value for **every** social provider. So\na Google link written before the 1.7 upgrade got stamped `local:oauth:google`,\nwhile sign-in looks it up under `https://accounts.google.com`:\n\n1. `findAccountOwnerByKey({issuer, providerAccountId})` misses the row.\n2. `findUserByEmail` still finds the user, but no `linkedAccount` matches.\n3. The callback falls through to \"link this provider\".\n4. `linkAccount` INSERTs and collides with that very row on the\n   `(provider_id, account_id)` unique index.\n5. `handleOAuthUserInfo` catches it → `error: \"unable to link account\"` →\n   `?error=unable_to_link_account`.\n\nOnly returning users are affected; a first-ever Google login writes the correct\nissuer and works. Seven of better-auth's built-in providers declare their own\nissuer — `google`, `apple`, `facebook`, `cognito`, `line`, `paybin` as strings\nand `microsoft` (Entra) as a per-login function — so all seven were mis-stamped.\n`google` is the one wired on the hosted control plane.\n\nThe file's own doc comment predicted this exactly: *\"a wrong issuer is\nindistinguishable from a missing one at sign-in, and it also occupies the\n(provider_id, account_id) unique slot that the correct row needs.\"*\n\n## The fix\n\n- **Read the issuer, don't derive it.** The backfill now takes the providers\n  better-auth *instantiated* (`authContext.socialProviders`, reached through\n  `authManager.getAuthInstance()`) and reads `accountIssuer` off each one —\n  the same either/or better-auth applies itself. A provider whose\n  `accountIssuer` is a function resolves it per login (Entra reads the tenant\n  `iss` off the profile); that stays underivable at boot and is **reported, not\n  guessed**.\n- **Repair, not just stamp.** Correcting the derivation does nothing for a\n  database already stamped wrong, so the pass re-stamps rows carrying the\n  synthetic issuer for a provider that declares a real one. Only that one\n  wrong-by-construction value is rewritten — a row holding the real issuer, or\n  anything else, is left alone. Counted separately as `result.repaired`.\n- **A parity gate that gets its assertion from upstream.**\n  `account-issuer-parity.test.ts` walks better-auth's own `socialProviderList`\n  and asserts the backfilled issuer equals the one sign-in will resolve. A\n  dependency bump that gives another provider an issuer of its own turns this\n  red instead of silently mis-stamping that provider's users on the next boot.\n\n## Verification\n\n- `plugin-auth`: 593 tests pass, `tsc --noEmit` clean.\n- **Negative control on the new gate**: reverting the derivation to the old\n  synthesize-always behaviour reddens it, naming all six fixed-issuer providers\n  (`apple`, `cognito`, `facebook`, `google`, `line`, `paybin`).\n- Probed separately that the backfill's `{ issuer: null }` predicate does reach\n  the driver intact (engine passes it through; the SQL driver compiles `IS\n  NULL`), so the NULL-row scan is not a second dormant path.\n\n## Rollout\n\nNeeds a cloud `.objectstack-sha` bump to reach staging/prod; the repair then\nruns on the next control-plane boot. An operator wanting to unblock sooner can\ncorrect the rows directly:\n\n```sql\nUPDATE sys_account SET issuer = 'https://accounts.google.com'\nWHERE provider_id = 'google' AND (issuer IS NULL OR issuer = 'local:oauth:google');\n```\n\n(A unique-constraint error there would mean duplicate rows already exist and\nneed de-duplicating first.)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 4872,
+  "kind": "pull_request",
+  "title": "fix(metadata): 历史序号 event_seq 不再从一次失败的读里凭空发号 —— 只有「表还没建」可以从 1 开始 (#4825)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T11:31:41Z",
+  "updated_at": "2026-08-03T11:42:22Z",
+  "closed_at": "2026-08-03T11:42:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T11:42:20Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4872",
+  "body": "Fixes objectstack-ai/objectstack#4825\n\n## 问题:不是「字节没落盘」,是「落盘的字节是错的」\n\n`DatabaseLoader.nextEventSeq()` 把读 `sys_metadata_history` 的**全部**失败折成同一个答案:\n\n```ts\n} catch {\n  // Table not provisioned yet or driver error — start at 1.\n  return 1;\n}\n```\n\n注释同时点名了两种原因,然后用同一个 `return 1` 对待两者。这是 #4728 刚修掉的同一种形状,\n但危害是**更贵的那一半**:\n\n- #4728 是「声称持久化、实际没落盘」——坏在**缺失**,重试/重启可以修;\n- 本条是「**落盘了,但落的字节是错的**」。历史表已有 N 行时,一次瞬时读失败(连接抖动、\n  超时、权限)让下一条历史拿到 `event_seq = 1`,与既有行**直接撞号**,而 insert **成功**、\n  日志**一行没有**。`event_seq` 正是历史列表排序与 rollback 定位的依据 —— 撞号之后版本顺序\n  永久不可信,重试不修、重启也不修。\n\n#4632 的机械检查看不到它:`DURABILITY_CRITICAL_CALLEES` 建在「持久化调用」上,而这一类的\n危害发生在**读**上,读的结果决定了写什么(见下「关于词表」)。\n\n## 为什么走方向 1 而不是方向 2(删掉这条 legacy 路径)\n\nissue 给了两条方向,方向 2(确认无生产调用方后直接删除、收敛到 `SysMetadataRepository`)\n更彻底 —— 但**核实下来它不成立**。TSDoc 里的 \"legacy\" 指的是「不是 canonical 的事务型\nproducer」,不是「没有生产调用方」。全仓查证:\n\n- `MetadataManager.setDatabaseDriver()` / `setDataEngine()` 在 platform kernel 上把\n  `DatabaseLoader` 注册为生产 loader;\n- `MetadataManager.save()`(`metadata-manager.ts:1591`,以及 `:408` 的\n  `protocol === 'datasource:' && capabilities.write` 分发)→ `DatabaseLoader.save()` →\n  `createHistoryRecord()` → `nextEventSeq()`;\n- `MetadataManager.rollback()` → `DatabaseLoader.registerRollback()` → 同一条路径;\n- 且两者都有对外 REST 路由:`rest-route-ledger.ts` 里的\n  `POST /api/v1/meta/:type/:name/rollback` 与 `GET /api/v1/meta/:type/:name/history`。\n\n所以这段代码在跑,而且跑在正是会撞号的那条路上。走方向 1。\n\n## 改法:按错误类型判别,复用 #4728 的那套机制\n\n⚠️ 刻意**没有**另起一套错误判别 —— 同一个包里两套判别就是新的债。\n`packages/metadata/src/utils/schema-sync-errors.ts`(#4728 / PR #4823 落地)重构成\n**一个匹配器 + 两个词表**:`code` → `errno` → `message` → 跟随 `cause` 链(上限 4 层),\n`isSchemaAlreadyExistsError()` 与新增的 `isMissingTableError()` 都是它的薄封装。既有\npredicate 的签名与行为逐字节不变(其原有测试原样通过)。\n\n两个 predicate **不是彼此的取反**:各自只回答「这是那唯一一种良性原因吗?」,默认都是\n「不良性」,所以两边都不认识的错误在两边都响亮。\n\n- **良性的「表还没建」** —— SQLite `no such table: …`、Postgres SQLSTATE `42P01` /\n  `relation \"…\" does not exist`、MySQL `ER_NO_SUCH_TABLE` / errno `1146`。没有行,就没有\n  可撞的号,`1` 确实是下一个号 → 静默返回 1。\n- **其余一切读失败** —— `nextEventSeq()` **原样抛出**。调用方 `createHistoryRecord()`\n  以 `console.error` 上报后**跳过这条历史记录**。\n\n判别方向刻意保守。`does not exist` 本身**不够**:`role \"…\" does not exist`(42704)、\n`database \"…\" does not exist`(3D000)、`column \"…\" does not exist`(42703)全是真实失败,\n而且每一条都对应「表里可能满是行」的场景 —— 判成良性正是撞号的来源。所以消息匹配要求\ntable/relation 与该短语同现,code 集合只收表级 SQLSTATE。\n\n## 上报的文案与两条边界\n\n`error` 一行同时给出 AGENTS.md「Degradation log levels」要求的两样东西,外加一个这条特有的:\n\n1. **后果**:该条历史未写入;**元数据写入本身已成功**,所以服务器仍报告健康,而变更历史\n   正在悄悄出现空洞,版本时间线与 rollback 目标将不完整;\n2. **为什么是空洞而不是错号**:从 1 发号会与既有行撞号,把「不完整」变成「顺序错误」——\n   前者可见、后者无人能发现;\n3. **修复动作**:修掉下面那条驱动/数据源错误;下一次元数据写入会重试并补报恢复。\n\n两条边界刻意保持不变:\n\n- **元数据写入本身不因此失败**。记录已经落盘,把它报成失败会是比原缺陷更糟的谎;这也与\n  同一函数里既有的「history 失败不拖垮主操作」策略、以及 #4728 对 `ensureHistorySchema()`\n  的处理一致。\n- **本路径已知的并发撞号限制不变**(非事务,canonical producer 仍是\n  `SysMetadataRepository`)。那是被记录过的限制,与「读失败静默重置到 1」是两回事。\n\n按「说一次」的纪律:`historySeqFailureReported` 一次性开关 + 恢复时补一条 `info`。\n\n## 测试\n\n钉住的是**落盘的值**,不只是「有没有写」——因为危害就在值上:\n\n- 良性(表不存在)→ `event_seq` 落 `1`,`console.error`/`info` 一行没有;\n- 真实读失败、且历史表**已有 N 行** → 落盘序列停在 `[1, 2]` 而**不是** `[1, 2, 1]`\n  (改前就是后者:一条撞号的行成功写入、悄无声息),同时 `error` 响亮上报;\n- **同一调用点、相反结论**的对照用例(仿 #4823 的写法),否则一个 `() => true` 的分类器\n  也能过;\n- 主写入不受影响(`save()` 仍 `success: true`,记录可读回);\n- 只说一次 + 恢复补 `info`,恢复后从 `2` 续号而非再从 1;\n- `registerRollback()` 这条 rollback 历史路径同样覆盖;\n- classifier 层:两个方向 + 「两者互不为取反」+ `role/database/column does not exist`\n  必须判为**非**良性 + `cause` 链深度上限。\n\n`pnpm check:durability-log-level` 仍绿(8 个 seam,全部响亮或 rethrow),\n`scripts/durability-degradation.baseline.json` 无需改动(仍为空)。\n\n## 关于词表(`_find` 是否该进 `DURABILITY_CRITICAL_CALLEES`)—— 只给看法,未动手\n\nissue 末尾那个问题是独立决定,本 PR **没有**改词表,看法记在这里供维护者判断:\n\n**不建议把 `_find` 加进现有词表。** 词表里现有的五个条目全是**写 / provisioning** 调用,\n失败本身就等于持久化损失,「记 error 或 rethrow」是完整的补救。读不是:绝大多数包着读的\n`catch` 合理地停在 `warn`/`debug`。而且 AST 是按 callee **名字**匹配的,加 `_find`\n(以及必然连坐的 `find`/`findOne`/`count`)会在几百个良性读 seam 上炸开 —— 一个塞满\n两百条例外的 shrink-only baseline,正是它自己的 `$comment` 警告过的「门禁失去意义」。\n\n有害的形状比「catch 里有个读」窄得多,是**三部分同时成立**:\n读失败 → `catch` 用一个**编造的值**顶替没读到的数据 → 那个值被**写下去 / 记录下来**。\n`nextEventSeq` 三条全中(`_find` → `return 1` → `event_seq: 1` 落库);\n`catch { return [] }` 只让列表渲染成空,前两条中、第三条不中,是完全合法的。\n\n所以它需要的是**词表之外的第二条规则**,形状与 AGENTS.md 里紧跟在降级规则之后的\n「Startup registry reads」那条一样(那条也是写侧规则的读侧对应物,靠「三部分同时成立」\n而不是靠 callee 词表立住)。问句大致是:\n\n> 这个 `catch` 是否用一个编造的值顶替了它没能读到的数据?那个值是否随后被写入或记录?\n> 两个都是 → 这个 fallback 值必须由错误分类**挣来**,否则就不该产生。\n\n**能不能机械化是开放问题,我不会替它打包票。** 写侧门禁成立是因为「callee 名在词表里」\n是个便宜的 AST 判断;读侧要的是数据流(catch 的返回值最终进了某个被持久化的字段),\n通用版本是 taint analysis,而一个 60% 精度的门禁配 shrink-only baseline 比没有更糟。\n建议:先把规则写进 AGENTS.md(#4632 的价值本来也主要来自规则本身),机械检查作为独立的、\n刻意收窄到「`catch` 里 `return` 一个字面量」的后续单,先量命中率再决定是否上门禁。\n\n顺带:#4777(把词表扩到启动期注册表判断)是同一观察的另一侧 —— 两条都说明 #4632 的词表\n应当**保持原样**(只收持久化写调用),新形状各立新规则,而不是往老列表里塞新词。\n\n## 顺带发现,已单开不在本 PR 修\n\n**#4867** —— `packages/metadata-protocol/src/sys-metadata-repository.ts` 的\n`nextEventSeq()` 与 `nextItemVersion()` 有**逐字同形**的 `catch { return 1 }`。而那是\n**canonical 路径**(本单正文与分诊都把它称作「历史写入应当收敛过去的地方」),并且那里有\n**两个**数字:`event_seq`,以及 `version` —— 后者的 TSDoc 明说它刻意从 history 取 MAX\n「so delete + recreate continues incrementing instead of restarting at 1」,一次读失败正好\n把它恢复成它明确要避免的行为,而 `rollback(type, name, version)` 正是按 `version` 定位快照。\n跨包复用本 PR 新增的判别器需要先定它的落点(内部工具 vs 下沉到共同依赖),已在 #4867 里\n列出三个选项,留给维护者定。\n\n## 验证\n\n```\npnpm --filter @objectstack/metadata exec vitest run --maxWorkers=2\n  Test Files  15 passed (15)\n       Tests  336 passed (336)\n```\n\n`packages/metadata` 无 `typecheck` script(在 `check-type-check-coverage.mjs` 的 DEBT 账本里)。\n手动量了两次 `tsc --noEmit`:改动前 **92**,改动后 **92** —— 本 PR 新增 0 个类型错误\n(过程中一版测试写法引入过 5 个 `TS2348`,已用一个带类型的 `DriverFind` 别名 + 单一\n`driverWithBreakableHistoryReads()` helper 消掉,顺带去掉了四处重复的 driver 包装)。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015Br2xsJsczFsTR9bvbh2Ny)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 4677,
+  "kind": "pull_request",
+  "title": "feat(spec,objectql,client,plugin-webhooks): honest bulk event contract for predicate writes (#4639)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T16:25:55Z",
+  "updated_at": "2026-08-02T17:15:05Z",
+  "closed_at": "2026-08-02T17:15:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-02T17:15:03Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4677",
+  "body": "Fixes #4639 (裁决第 2 条)\n\n## 问题\n\n`multi: true` 的 update/delete 走 `IDataDriver.updateMany` / `deleteMany`,契约返回值是**受影响行数**,别的什么都没有。这既满足不了 `DataEvent.recordId`(必填),也给不出 `before`/`after`/`changes`。\n\n于是这条路径历史上只有两种形态,两种都不对:\n\n- **#4626 之前**:伪造一条 `recordId: ''` / `after: <条数>` 的逐记录事件。任何遵守 schema 的消费者都必须拒绝它,而 webhook enqueuer 里那条 `?? 'unknown'` 兜底会把它变成一次**真实投递**,指代一条无法识别的记录。\n- **#4626 之后**:不发事件并 warn。诚实,但 webhook、知识同步、`subscribeData` 对谓词写全部静默。\n\n## 方案(维护者裁决:出路 2)\n\n给批量写**自己的**契约,既不冒充逐记录事件,也不继续静默。\n\n### spec\n\n新增 `BulkDataEventType` / `BulkDataEventSchema` —— `data.records.updated` / `data.records.deleted`(注意是复数),载荷 `{ id, type, object, matched, userId?, timestamp }`。\n\n**刻意做成独立 schema,而不是放宽 `DataEvent`**:消费者拿到 `data.records.updated`,从类型本身就知道没有 `recordId` 可用,而不是在运行时发现它是个空串。\n\n**不带 `where`** —— 这是实施中相对裁决正文的一处偏离。发布时手上唯一的谓词是中间件**合成后**的 AST,其 `where` 内含安全层注入的行级作用域(RLS 写过滤器、sharing 的 editable-rows 过滤器,见 #2982)。把它放进事件,等于把租户作用域内部结构发到 webhook 指向的任意外部 URL。理由写进了 schema 的 TSDoc 和一条 pin 测试,免得以后被\"顺手补全\"。\n\n### objectql\n\n两个 multi 分支调用新的 `publishBulkDataEvent()`,publish 前 `BulkDataEventSchema.parse`。\n\n- **匹配 0 行不发事件**:没匹配到行 = 没有数据变更 = 不是数据事件(逐记录路径同理)。这条挡住了每小时的 lifecycle sweep 给每个对象发一条 \"0 records\" webhook。\n- **驱动返回非计数时不发事件并 warn**:`matched` 是批量事件的全部实质内容,发一个没法验证的数字比不发更糟。\n- **逐记录路径完全不受影响**,包括 `where: { id }` + `multi: true` —— 标量 id 仍是单记录目标,仍发 `data.record.deleted`(LifecycleService 的 guarded reap 就是这个形状,已加 pin)。\n\n### plugin-webhooks\n\n新增 **opt-in** 的 `bulk_update` / `bulk_delete` 触发器(`WebhookTriggerType` + `sys_webhook.triggers` 多选)。\n\n**不**并入现有 `create`/`update`/`delete`:批量投递的 body 没有 `recordId`、没有记录体,发给按逐记录形状写的订阅者,等于给它一个缺失了它所读全部字段的载荷 —— 和当年 `recordId: ''` 是同一类破坏,只是方向相反。想要两种就订两种。\n\n批量投递按**生产者的事件 uuid** 去重:同一毫秒的两次 sweep 是两个真事件,`${object}:${action}:${timestamp}` 那种键会把第二条静默吃掉。\n\n顺带修:`sys_webhook` 自身被谓词写修改时(比如批量停用)现在也会触发缓存自愈,此前只认 `data.record.`。\n\n### client\n\n新增 `client.events.subscribeBulkData(object, cb)`,边界同样 `safeParse` 后大声拒绝。\n\n单独一个方法而不是并进 `subscribeData`:把 `BulkDataEvent` 交给 `(event: DataEvent) => void` 回调,正是 #4626 消灭的那个缺陷 —— 类型上有、运行时是 `undefined`。\n\n`subscribeData` 的守卫也顺带收紧:排除 `data.records.` 命名空间(而非收窄成 `data.record.`,那样会连带吃掉 `data.field.changed`,见 #4673)。\n\n### service-knowledge\n\n知识索引是**逐记录投影**,`matched: 40` 不指代任何记录,适配器也不接受计数或谓词 —— 没有任何事件形状能驱动它。所以现在收到 `data.records.*` 会**出声**指明索引可能陈旧且无法从事件流自愈,而不是静默 fall through(静默读起来和\"什么都没发生\"一模一样)。\n\n真正的修复是对账,已立 **#4672**(事件管新鲜度,对账管正确性)。\n\n## 一处**未**按裁决执行的项\n\n裁决第 3 条要求把 `lifecycle-service.ts` 的 retention reap 改成 per-id 扇出。**没做,因为它撞 ADR-0057 §3.3 的硬规则**:\n\n> the LifecycleService's own deletes/rotations are not audited or activity-logged (otherwise **cleanup re-feeds the tables it is draining**). **Aggregate one summary row at most.**\n\n逐记录扇出正是该规则禁止的形态。裁决里引为\"先例\"的 `guardedReap` per-id 删除,其实是为了**级联删除**(filter-delete 会绕过 `cascadeDeleteRelations`),不是为了发事件 —— 是我当时混为一谈了。按 PD #13,推翻已记录的决定需要新 ADR。\n\n好消息:一次谓词删除发**一条**聚合事件,恰好就是 §3.3 说的 \"aggregate one summary row at most\"。\n\n详细说明见 [issue 上的更正评论](https://github.com/objectstack-ai/objectstack/issues/4639#issuecomment-5159177633)。\n\n## 测试\n\n- `packages/objectql/src/engine-data-events.test.ts` —— 新增 `#4639` describe(9 例):聚合事件 schema 合规、`BulkDataEventSchema` 校验、**用 `DataEventSchema.safeParse` 断言它不是 DataEvent**(证明没有冒充)、不携带谓词、`userId`、匹配 0 行不发、驱动违约不发并 warn、标量 id + `multi` 仍走逐记录、publish 失败不影响写入。原先两条 \"publishes NOTHING for a multi-row …\" 被新契约取代。\n- `packages/plugins/plugin-webhooks/src/auto-enqueuer.test.ts` —— 新增 7 例:双向 opt-in 隔离(逐记录订阅者收不到批量、批量订阅者收不到逐记录)、off-contract 丢弃、uuid 去重(同毫秒不塌缩 + 真重投仍塌缩)、`sys_webhook` 谓词写自愈。\n- `packages/client/src/realtime-api-data.test.ts` —— 新增 5 例 + 1 例回归(`subscribeData` 遇到批量事件不应抛错)。\n- `packages/services/service-knowledge/src/__tests__/event-sync-data-events.test.ts` —— 新增陈旧告警断言。\n\n`pnpm lint` 干净;spec 的 8 个生成物门禁全绿(`check:generated`);`check:liveness` 通过。\n\n## 顺带还上 #4655 的实测债\n\n#4655 正文声称做了写路径开销实测但数据从未贴出。`packages/objectql/src/engine-data-events.bench.ts`:\n\n| 用例 | 开事件 | 关事件 | 每事件增量 |\n|:---|---:|---:|---:|\n| insert | 0.021ms | 0.012ms | ~9µs |\n| 单 id update | 0.013ms | 0.007ms | ~7µs |\n| 谓词 update(100 行匹配) | 0.040ms | 0.034ms | ~7µs |\n\n内存驱动下每条事件约 **7–9µs**(uuid + schema parse + 信封 + no-op publish)。批量写**每次写入只付一次**,与匹配行数无关,所以匹配集越大相对开销越小。内存驱动几乎没有自身开销,所以这里的相对倍数是真实驱动下的**上界**。\n\n第一版 benchmark 是错的,记下来免得重犯:三组用例共享同一对引擎,而 vitest 按**墙钟**跑而非固定迭代数 —— 快的那侧多跑近一倍迭代、往表里多插了近两倍的行,于是谓词那组报出\"开事件反而更快\"(实为关事件的引擎在扫 84k 行 vs 47k 行)。改成每组独立引擎对、且谓词过滤的列不被自己写入之后数字才自洽。\n\n## 拆出的后续 issue\n\n- **#4672** —— 知识库 object source 的对账通道(批量写后索引陈旧的真正修复)\n- **#4673** —— `data.field.changed` 全仓无生产者(ADR-0049 第四态),走 spec-property-retirement\n\n## 不在本 PR\n\nv17 release notes 的 breaking 段落 —— 按仓库规矩由发布流程统一编写,代码 PR 不碰 `content/docs/releases/`。需要写准范围:**仅引擎 `multi:true` 谓词写入**此前静默,REST 的 `createMany`/`updateMany`/`deleteMany`/`batch` 一直逐记录发事件、不受影响(issue 标题原本的\"完全静默\"夸大了一个量级,已更正)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01LYnZrTwXbrctB8E8HpJAPT\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01LYnZrTwXbrctB8E8HpJAPT)_"
+}

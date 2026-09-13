@@ -1,0 +1,37 @@
+{
+  "number": 4757,
+  "kind": "issue",
+  "title": "`installAttachmentAccessHooks` does not authorize an UNSCOPED multi-delete: no id + no `where` reads as \"nothing to authorize\" and `deleteMany` runs over the whole table",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T02:31:44Z",
+  "updated_at": "2026-08-03T06:43:35Z",
+  "closed_at": "2026-08-03T06:43:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4757",
+  "body": "Found while implementing #4630 (the symmetric record-level gates for `sys_comment`). Filed unassigned — the fix belongs to `service-storage`, not to that PR.\n\n## What\n\n`packages/services/service-storage/src/attachment-access-hooks.ts`, the `beforeDelete` gate, resolves the rows a delete matches in two ways and then short-circuits when it found none:\n\n```ts\nconst ids = asIdList(ctx?.input?.id);\nif (ids) { /* resolve each by id */ }\nelse if (ctx?.input?.options?.where) { /* resolve the match set, bounded */ }\nif (!rows.length) return;   // nothing matched — nothing to authorize\n```\n\nA delete with **no id and no `where`** takes neither branch, so `rows` stays empty and the gate returns *allow*. That is not \"nothing matched\" — nothing was ever queried.\n\nThe engine then treats the same call as a bulk delete over everything (`packages/objectql/src/engine.ts`, the `delete` path):\n\n```ts\nif (!id) {\n  opCtx.ast = { object, ...(options?.where !== undefined ? { where: options.where } : {}) };\n}\n…\n} else if (options?.multi && driver.deleteMany) {\n  const ast = opCtx.ast;               // { object }  — no `where`\n  result = await driver.deleteMany(object, ast, …);\n}\n```\n\nSo `ql.delete('sys_attachment', { multi: true, context: <a real caller's context> })` reaches `deleteMany` with an unscoped AST.\n\n## Why the other layers do not catch it\n\n- **plugin-sharing** — `buildWriteFilter` returns `null` for an object with no owner field, and `sys_attachment`'s provenance column is `uploaded_by`, not `owner_id`, so no row-scoping predicate is composed onto the AST.\n- **plugin-security** — the `member_default` baseline carries no `allowDelete` (ADR-0090 D5), so a rank-and-file member is refused by RBAC first. But an app that ships a domain grant with the delete bit on `sys_attachment` — which is exactly what the attachments panel requires, and what `attachmentsFixture`'s `att_attachment_manager` models — passes RBAC and lands on the ungated path.\n\n## Scope\n\nI have not checked whether the REST layer can produce this shape (its delete routes look id-bound); the reachable surfaces are the SDK / ObjectQL / flow `delete_record`-style callers that pass `multi: true` without a predicate.\n\n## Suggested fix\n\nFail closed instead of falling through: when there is neither an id nor a `where`, refuse rather than returning. #4630's `sys_comment` gate does this — see `resolveTargetRows` in `packages/plugins/plugin-audit/src/comment-access-hooks.ts`:\n\n```\nforbid(`Refusing an unscoped multi-${verb} of comments — scope the write to the rows you mean`);\n```\n\n`sys_attachment` should get the same posture (403 `ATTACHMENT_DELETE_DENIED`), plus a unit test alongside the existing `attachment-access-hooks.test.ts` cases. Worth a look at whether any other `beforeDelete` gate in the repo shares the \"no rows resolved ⇒ allow\" shape.\n"
+}

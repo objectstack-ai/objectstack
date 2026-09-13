@@ -1,0 +1,34 @@
+{
+  "number": 4540,
+  "kind": "pull_request",
+  "title": "feat(agents): add /pm-dispatch PM loop and os-dev developer subagent",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T01:25:30Z",
+  "updated_at": "2026-08-02T02:01:22Z",
+  "closed_at": "2026-08-02T02:01:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-02T02:01:21Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4540",
+  "body": "## 目的\n\n在 Claude Code 中构建「项目经理 agent 派发任务」机制:PM agent 从 issue 清单中挑选、认领并派发任务给并行的开发 agent;开发 agent 完成后以结构化 JSON 回报;PM 逐项复核后派发下一批。过程中遇到需要维护者拍板的不确定性,不猜测,而是创建 `needs-user-decision` issue 等待确认。\n\n## 内容\n\n**`.claude/skills/pm-dispatch/SKILL.md`** — PM agent 的运行规程(`/pm-dispatch` 触发):\n\n- **循环**:select → claim → dispatch → collect → review → report → 下一批。\n- **状态全部落在 GitHub**(标签 `pm:queue` / `pm:dispatched` / `needs-user-decision`、assignee、PR 关联),不依赖任何本地状态,新会话可直接续跑。\n- **两种派发后端**:`mode:subagent`(默认,会话内并行子 agent,回报无损)与 `mode:cloud`(每个 issue 一个独立云端会话,经 poke-only trigger 拉起;回报走 issue 评论 + `send_later` 定时收取)。\n- **多仓库协调**(backend `objectstack` / frontend `objectui` / cloud):主 backlog 统一在 objectstack,`repo:objectui` / `repo:cloud` 标签路由代码落地仓库;跨仓功能按契约优先拆分(父 issue + 每仓 sub-issue,spec/后端先行),`Blocked-by:` 未合并不派发;联动收尾(如 objectui 合并后的 `objectui:refresh` 回灌)由 PM 自动生成跟进 issue。\n- **复核**以 GitHub 为准而非报告自述:PR 存在且为 draft、`Fixes #n`、无 `content/docs/releases/` 改动、changeset 到位、测试证据是真实输出。裁决 ACCEPT / REWORK(最多返工 2 轮)/ ESCALATE。\n- **升级路径与两条硬性评估轴**:所有 `[决策]` issue 必须沿 ① 项目长远合理性(北极星、no workarounds、contract-first)与 ② 防 AI 写代码犯错、尤其防 AI 写元数据 app 犯错(严格 schema、发布时响亮拒绝、declared = enforced、拒绝消费端宽容回退)两条轴分析各方案并给出建议;两轴冲突时如实呈现交维护者拍板。\n- **硬性护栏**:PM 不写代码、不合并 PR;不 force-push;不碰他人已认领的 issue;与 AGENTS.md 冲突时以 AGENTS.md 为准。\n\n**`.claude/agents/os-dev.md`** — 单 issue 开发子 agent 定义:\n\n- 独立 worktree(遵守 Prime Directive #11)、分支 `claude/issue-<n>-<slug>`、实现 + 测试 + changeset、推送、draft PR。\n- 对影响公共契约(spec schema、API 形状、命名)的欠定问题,**返回 `needs_decision` 而不是猜**,且必须按上述两条评估轴分析各选项;顺带发现的问题按 Prime Directive #10 另开 issue,不塞进本 PR。\n- 最终消息为固定 JSON 报告契约,PM 机械解析。\n\n## 备注\n\n- 两个文件均在 `skills/` 发布目录之外,已按 `template-consistency.test.ts` 的要求打上 `metadata.internal: true`(已用同一正则本地校验通过)。\n- 纯 `.claude/` 工具改动,不发布任何 package,已按门禁要求附**空 frontmatter changeset**(sanctioned 的 \"this PR releases nothing\" 声明)。\n- 三个仓库的状态标签与 objectstack 的路由标签已通过初始化 issue 建好并关闭:objectstack#4543、objectui#3176、cloud#998。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_012C2cd7tL8QDoZ2QKN3djJ5"
+}

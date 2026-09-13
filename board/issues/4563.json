@@ -1,0 +1,32 @@
+{
+  "number": 4563,
+  "kind": "issue",
+  "title": "authorable-surface.json 只能发现、不能阻止 spec 键被移除——`gen:schema` 会无声重写基线(#4525 钉子暴露的系统性弱点)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "needs-user-decision"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T03:18:10Z",
+  "updated_at": "2026-08-03T06:22:55Z",
+  "closed_at": "2026-08-03T06:22:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4563",
+  "body": "发现自 #4525 / PR #4561 的变异测试。**未认领,先记录待讨论,不要直接开做。**\n\n## 事实\n\n`DecisionOutputDefSchema` 是 `.strict()` 的:把 `required` 从 Zod 源里摘掉,作者写的 `required: true` 立即变成 unknown-key 拒绝——行为破坏。而在 #4561 补钉子之前,唯一能反映这次移除的防线是 `authorable-surface.json`,它是 `gen:schema` **重新生成**的基线:跑一次生成,基线被无声改写,没有任何东西变红。变异实验证实:摘掉该键后,既有 40 条用例全绿。\n\n这不是 `DecisionOutputDef.required` 一个键的问题:**所有**仅由该基线守护的 authorable 键都具有同样性质——移除是「可见的」(diff 里有),但不是「困难的」(没有闸门喊)。\n\n## 与既有机制的关系\n\n- ADR-0049 enforce-or-remove 管的是「声明了但没执行」的键;这条相反:管「执行着却可以被无声取消声明」。\n- #4561 的解法(schema 层钉子测试)是逐键的,靠人记得补;系统性的问题需要系统性的答案。\n\n## 可能的方向(待维护者定,均未验证)\n\n- **A. 基线比对闸门**:`check:authorable-surface` 区分「新增」与「移除」——移除项要求 PR 显式携带确认标记(类似 ADR-0087 转换注册或 ADR-0112 ledger 的形态),让删除变成一个响亮的、有记录的动作;\n- **B. 生成钉子**:从 authorable-surface 自动生成每键的 parse 钉子测试,人不用记;\n- **C. 维持现状**:接受「可见即足够」,依赖 PR review 看 diff——代价是 #4561 所暴露的:40 条用例全绿的情况下移除一个在用的键。\n\nRefs #4525、PR #4561、#4001(strict unknown-key 体系)、ADR-0049。"
+}

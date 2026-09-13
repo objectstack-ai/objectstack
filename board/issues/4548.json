@@ -1,0 +1,35 @@
+{
+  "number": 4548,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): `saveMetaItem` canonicalizes flow bodies on write (#4542)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T02:26:24Z",
+  "updated_at": "2026-08-02T07:52:23Z",
+  "closed_at": "2026-08-02T07:52:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-02T07:52:21Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4548",
+  "body": "Fixes #4542.\n\n## What\n\nA Studio edit healed every legacy metadata row except a flow's. Reads serve stored flows verbatim (the ADR-0078 open-namespace conflict guard needs the engine's live executor registry, so `convertStoredItem` skips them), and `FlowNodeSchema.config` is an open `z.record` — so the legacy dialect an author was served (`config.filters`, pre-17 node aliases) sailed back through `saveMetaItem`'s schema gate and re-persisted verbatim. The row stayed `pending` in `os migrate meta --stored` no matter how many times an author edited it, contradicting the boot warning's own remediation text (\"re-save it (Studio edit → save …) to persist the canonical shape\").\n\n`saveMetaItem` now runs `resolveFlowCanonicalizer()` (#4498) on flow bodies **before** the schema gate — the same seam and postures as `duplicatePackage`:\n\n- **Clean canonicalization** → persists `storable` (conversions + derived condition envelopes, never the schema's defaults — ADR-0087). Copy-on-write, so `migrateStoredMetadata` / `duplicatePackage` re-entering `saveMetaItem` with already-canonical bodies pay nothing.\n- **Refused node-type rename** (old token is a live name owned by a custom executor) → the save fails with `409 FLOW_CONVERSION_CONFLICT` naming the token and path, never a silent legacy persist. 409 rather than 422 because the body may be perfectly valid — the refusal comes from environment state, so resubmitting the same body cannot help.\n- **Canonicalizer throw** (it is stricter than the gate: cycle detection, control-flow regions) → falls back to the raw save and today's gate, so a WIP draft with a temporary cycle stays saveable. `registerFlow` still refuses to arm a malformed flow.\n- **No automation service reachable** (control-plane / metadata-only host) → saves exactly as before; `os migrate meta --stored` reports what it could not canonicalize.\n\nReads are unchanged (\"reads diagnose, never drop\") — the heal happens on the way back in.\n\n## Decision flagged in the issue\n\nThe issue left open whether the throw-fallback applies in `publish` mode or drafts only. This PR applies it in **both** modes: default mode is `publish`, so refusing on canonicalizer throw would silently tighten validation for every existing caller and make save semantics diverge between control-plane hosts (no canonicalizer → no strict parse) and automation hosts. The alternative (publish-mode 422 for unparseable flows) is defensible — it just cannot register anyway — but is a behavior change for bodies that save fine today, better made as its own deliberate change. Reviewers can overrule cheaply; the branch is one condition.\n\n## Tests\n\n- **New unit file** `packages/metadata-protocol/src/protocol.save-flow-canonicalization.test.ts` (11 tests): runs the real repository write path with a stub engine (the existing flow-canonicalizer harness mocks `saveMetaItem` itself, which a fix inside it cannot use). Pins: heal + checksum pairs with the canonical body; conflict → 409 with token, nothing persisted; throw → raw save; throw does not rescue a gate-invalid body (422 still wins); absent service → verbatim save; copy-on-write identity; both behaviors in draft mode; lazy resolution; called with name; non-flow types never consult the canonicalizer.\n- **Integration** (`packages/cli/.../meta.stored-flow-resolution.integration.test.ts`, real `bootSchemaStack` + SQLite): the exact probe from #4542 — seed a pre-17 flow, `getMetaItem` (served legacy), edit only the label, save; assert the disk row is canonical, carries no schema defaults, and the `--stored` preview reports `pending: 0`.\n- Regression: full `metadata-protocol` suite (201 tests), objectql `saveMetaItem` repo-path suites (98), automation canonicalizer/inert-mode suites — all green. Typecheck + eslint clean.\n\n## Riders\n\nChangeset (`.changeset/save-meta-item-flow-canonicalization.md`) and an ADR-0087 addendum (\"the save seam itself\") — the 2026-08-01c addendum ended with \"`saveMetaItem` is the seam they would adopt\"; this completes it. No `content/docs/releases/` changes.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01NDmJ5ASMSzcw1q17vh32MG\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01NDmJ5ASMSzcw1q17vh32MG)_"
+}

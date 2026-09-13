@@ -1,0 +1,35 @@
+{
+  "number": 4626,
+  "kind": "issue",
+  "title": "client realtime declared ≠ enforced:subscribeData 回调把 RealtimeEventPayload 硬铸成 DataEvent,顶层 recordId/changes/id 运行时是 undefined",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "repo:objectstack"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T12:08:57Z",
+  "updated_at": "2026-08-02T14:43:31Z",
+  "closed_at": "2026-08-02T14:43:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4626",
+  "body": "#4602(subscribeMetadata/MetadataEvent 同病)修复时的范围外发现,按第十条军规立案,unassigned。#4602 的 PR 只修 metadata 侧;data 侧是同构缺陷但生产者不同,需单独裁决与实施。\n\n## 现象\n\n`@objectstack/spec/api` 的 `DataEventSchema` 声明顶层字段 `id`(uuid,必填)、`object`、`recordId`(必填)、`changes?`、`before?`、`after?`、`userId?`、`timestamp`。但:\n\n- **生产侧**(`packages/objectql/src/engine.ts` 的 `data.record.*` 发布)发的是 `RealtimeEventPayload` 信封,record 数据嵌在 `payload`(`{ recordId, after, changes }`),从不生成 `id`/`userId`。\n- **消费侧** `packages/client/src/realtime-api.ts` `subscribeData` 把信封 `callback(event as any as DataEvent)`;`client-react` 的 `useDataSubscription` / `useDataSubscriptionCallback` / `useAutoRefresh` 同源。\n\n订阅者写 `event.recordId` / `event.changes`(类型系统说存在)运行时是 `undefined`;必填的 `event.id` 不存在。\n\n## 处置方向\n\n与 #4602 的裁决同族(生产者履约,消费端边界 `DataEventSchema.safeParse` 响亮拒绝,删除 `as any as` 双铸)。注意 data 侧的生产者是 ObjectQL engine(热路径,每次 insert/update/delete),且 webhook auto-enqueuer 等服务端消费者直接读信封 `payload`(`packages/plugins/plugin-webhooks/src/auto-enqueuer.ts` 读 `payload.recordId ?? payload.id ?? …`)——迁移时需要同时核对这些信封依赖,成本比 metadata 侧高,需单独评审。\n\n另注意 `DataEventType` 里的 `data.field.changed` 疑似无生产者(declared ≠ enforced 同族,cf. #3197)。\n\n参照:#4602 的实施(producer 生成完整 spec 事件放入信封 `payload`,client 边界 parse)。"
+}

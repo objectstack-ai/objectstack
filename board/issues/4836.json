@@ -1,0 +1,35 @@
+{
+  "number": 4836,
+  "kind": "pull_request",
+  "title": "fix(seed): enforce Seed.env against the runtime environment",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T09:37:09Z",
+  "updated_at": "2026-08-03T10:19:35Z",
+  "closed_at": "2026-08-03T10:19:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T10:19:34Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4836",
+  "body": "Fixes objectstack-ai/objectstack#4704\n\n## 一、先核实:issue 描述完全属实\n\n按 PM 要求,先验证再动手。三条都逐一在代码里核对过:\n\n**1. `filterByEnv` 的实际行为** —— 与 issue 引用的一字不差(`packages/metadata-protocol/src/seed-loader.ts`,修复前第 1355 行):\n\n```\nprivate filterByEnv(datasets: Seed[], env?: string): Seed[] {\n  if (!env) return datasets;\n  return datasets.filter(d => (d.env as string[]).includes(env));\n}\n```\n\n**2. `SeedLoaderConfig.env` 确实从未被填充** —— 全仓一共 **六处** 构造 `SeedLoaderRequest` 的地方,没有一处传 `env`:\n\n| # | 位置 | 场景 |\n|---|---|---|\n| 1 | `packages/runtime/src/app-plugin.ts` :974 | 每租户 seed 重放 |\n| 2 | `packages/runtime/src/app-plugin.ts` :1042 | 启动内联 seed |\n| 3 | `packages/runtime/src/app-plugin.ts` :1234 | 热重载 seed |\n| 4 | `packages/runtime/src/domains/packages.ts` :677 | package seed apply |\n| 5 | `packages/metadata-protocol/src/protocol.ts` :7782 | 发布 seed 草稿 |\n| 6 | `packages/cloud-connection/src/marketplace-install-local-plugin.ts` :1037 | 市场安装 |\n\n所以 `config.env` 恒为 `undefined` → `filterByEnv` 第一行直接返回全量 → `dataset.env` **一次都没被读到**。\n\n**3. 补充一条 issue 没提、但值得记录的证据**:`packages/spec/liveness/seed.json` 里 `env` 被标为 `\"status\": \"live\"`,证据指向 `seed-loader.ts:91`(即消费端那一行),备注写着「filterByEnv drops datasets whose env list excludes the running environment」。这正是 AGENTS.md 第 10 条警告的那个陷阱 —— **「`case` 标签不是 enforcement,要看调用点」**。台账核对了「消费端代码存在」,没核对「生产者是否真的传值」,于是这个洞在绿灯下活了下来。(该文件在 `packages/spec/**`,本轮零改动车道,我没碰;建议由 spec 车道把这条备注改成指向调用点的表述。)\n\n同族证据:`packages/runtime/src/seed-loader.test.ts:327` 早就有一个 `should handle environment filtering` 测试 —— 但它 **显式传了 `env: 'prod'`**。所以过滤机制一直是好的,坏的只有接线。这也解释了为什么单测全绿而线上失效。\n\n## 二、修法:在唯一的漏斗处解析,而不是在六个调用点\n\n环境解析放进 `SeedLoaderService.load()` —— 所有 seeding 路径的唯一必经之处。\n\n之所以不选「在六个调用点各自传 `env`」:这个 bug 的成因**就是**调用点漏传。在调用点补齐,只是把洞推迟到第七个调用点(将来任何新增 seeding 路径)重新打开。放在漏斗处,则新调用点**结构上不可能**漏掉 —— 这也是「让 AI 写的代码难以写错」的方向。\n\n**环境来源复用仓内既有的那一个:`NODE_ENV`。** 没有新造环境变量,也没有新增可声明键。理由是它已经是全仓的事实标准,而且两条一方启动路径都会把它钉死:\n\n- `packages/cli/src/commands/start.ts` :239 —— `if (!localEnv.NODE_ENV) localEnv.NODE_ENV = 'production'`(生产)\n- `packages/cli/src/commands/serve.ts` :455 —— `process.env.NODE_ENV = 'development'`(`os dev` / `serve --dev`)\n- vitest 自动置 `test`\n\n其余环境敏感行为(auto-DDL 关闭、api-registry 生产守卫、sqlite 降级、热重载 seeder)也都在读它。\n\n映射:`production`/`prod` → `prod`,`development`/`dev` → `dev`,`test` → `test`(大小写不敏感)。接受 `prod`/`dev` 简写,是因为 `NODE_ENV` 属于**运维提供的第三方边界变量**(Prime Directive #9 明确把 `NODE_ENV` 列为第三方例外),不是我们自己的元数据契约 —— 这与「不要在消费端加宽容 fallback」不冲突。\n\n优先级:宿主显式传的 `config.env` 永远优先(这是文档化的 escape hatch,也是「以另一个环境的身份种数据」的唯一手段)。\n\n## 三、环境无法确定时:放行 + 响亮告知(fail-open)\n\n这一条按 PM 要求给出理由。结论与 PM 倾向一致,但理由不止「向后兼容」:\n\n**决定性的一条是伤害不对称。** 一刀切 fail-closed 不只会拦下 `env: ['dev']`,同样会拦下 `env: ['prod']` —— 也就是说,一台只是忘了 export `NODE_ENV` 的**生产**主机,会静默丢掉本该种下的生产数据。那是数据缺失,比多种一批 dev 数据更糟,而且更难诊断。\n\n其次,不确定窗口**在结构上很窄**:两条一方启动路径都会钉死 `NODE_ENV`(见上),vitest 也会。真正落进这个窗口的,基本只有直接嵌入 kernel 的宿主。\n\n第三,它现在**不再是静默的**。当且仅当确实存在收窄了 `env` 的数据集时,打一条 `warn`,点名每个数据集、给出可接受的 `NODE_ENV` 取值、并指出 `config.env` 这条出路。没有任何数据集收窄时保持安静(不制造噪音)。\n\n诚实说明残留风险:一台 `NODE_ENV` 未设的嵌入式生产宿主,仍然会种下 `env: ['dev']` 的数据 —— 但从此有一条明确的告警,而不是完全无声。这就是这次取舍的全部代价。\n\n**被过滤掉的数据集一律点名**(`info` 级)。用 `info` 而非 `warn`,是因为在生产跳过 dev 数据集是**声明所要求的正确行为**,每次生产启动都 warn 属于狼来了;但它必须可查 —— 「我的 demo 数据怎么没了」应该是一行日志就能回答的问题。\n\n另外,解析出的环境同时绑定给 seed CEL 的 `env`(`baseEvalCtx.env` 此前同样恒为 `undefined`),避免出现「过滤器按 prod 走、表达式看到 undefined」的分裂状态。\n\n## 四、验收对照\n\n四种情况分别有独立测试,且**可相互区分**(`packages/metadata-protocol/src/seed-loader-env-scope.test.ts`,13 个用例):\n\n- `env: ['dev']` 在 dev 种、在 production **不种** —— 两条独立断言,外加一条 `produces a different result in production than in development` 显式断言两者结果**必须不同**(防止「全丢」或「全放」任何一种退化通过其中一条)。\n- 未声明 `env` / 声明为 schema 默认值的数据集,在 `production` / `development` / `test` 三个环境都种 —— 行为零变化。\n- 环境无法确定:全部种下 + `warn` 点名 + 含 `NODE_ENV` 与 `config.env` 两处补救;而「无法确定但无人收窄」时**保持安静**,两者分别断言。\n- 一条 `distinguishes filtered, permissive-and-warned, and clean loads` 把三种结局的 (种下对象集合, 是否告警) 元组一次性钉死。\n\n**反向验证**:把修复代码 stash 掉、只保留测试跑一遍,13 个里 **8 个失败**,首条失败正是 issue 的复现 —— `expected [ 'account', 'demo_user' ] to deeply equal [ 'account' ]`(production 下 demo 数据仍被种下)。其余 5 个通过的正是向后兼容那几条,符合预期。\n\n## 五、范围\n\n- 改动仅 `packages/metadata-protocol/src/seed-loader.ts` + 新增测试 + changeset。\n- `packages/spec/**` **零改动** —— `Seed.env` 与 `SeedLoaderConfig.env` 的 schema 都无需改动,本次是纯接线修复。\n- 未新增任何包根导出(`index.ts` 只导出 `SeedLoaderService`,未动),故 changeset 定级 **patch**。\n- 未碰 `packages/lint`、`skills/**`、`content/docs/**`、`content/docs/releases/`,也未碰本轮其它 agent 的文件面。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015Br2xsJsczFsTR9bvbh2Ny)_"
+}

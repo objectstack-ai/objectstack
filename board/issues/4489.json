@@ -1,0 +1,35 @@
+{
+  "number": 4489,
+  "kind": "pull_request",
+  "title": "feat(spec,cli): 活性闸门开始对注册表负责 —— 并治理 datasource（43 条判定，20 条无消费者）(#4487)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T10:08:43Z",
+  "updated_at": "2026-08-01T10:25:16Z",
+  "closed_at": "2026-08-01T10:25:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-01T10:25:13Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4489",
+  "body": "Closes #4487\n\n## 闸门自己有个盲区\n\n`check-liveness.mts` 的 `GOVERNED` 是一份手工维护的名单，**从来没有任何东西拿它和它声称覆盖的注册表对过**。\n\n结果：它治理 **25 个已注册 metadata type 中的 15 个**，同时报告自己完整。剩下 10 个是可授权的 —— `/api/v1/meta/types/:type` 提供它们，Studio 能编辑它们 —— 但从来没有被问过\"谁读这个属性\"。所以那些类型上的死键对 CI 不可见，而**它们的沉默被读作成功**。\n\n一份治理 15/25 却自报完整的名单，比一份承认缺口的名单更糟。\n\n`datasource` 在这个状态里待了它的整个生命周期。#4410 / #4465 / #4481 在它身上**手工**挖出 6 个死键，其中两个是安全形状的：\n\n- `schemaMode` 在记录→连接规格之间掉了，一个 ObjectStack 绝不能跑 DDL 的外部库被当作 `managed` 构建\n- `ssl` 停在记录层，一个带 CA 证书的 TLS 块配置了零，且和生效的那个长得一模一样\n\n闸门对此一言不发，因为这个类型不在名单上。\n\n## 改了什么\n\n### 1. 闸门对注册表负责（持久的那一半）\n\n每个已注册类型必须在 `GOVERNED` 里，**或者**在 `PENDING_GOVERNANCE` 里带一条理由和一个 issue 号。注册一个类型却忘了账本 → CI 失败，并把该写的条目告诉你。\n\n反方向也会烂，所以也失败：一个已经治理完的类型如果还留在 `PENDING_GOVERNANCE` 里，就是在声称一笔不存在的债，让\"还剩多少\"变成谎话。和 orphan ledger row 同一种腐烂，方向相反。\n\n这是个**棘轮，不是可以随便加的白名单**。注释里写明了：为了让刚注册的类型变绿而加一条，正是这张表要暴露的失败本身；没有 issue 号的条目和\"从没看过\"无法区分。\n\n**负证明**（silence must not read as success，这条闸门自己也得守）：临时从 `PENDING_GOVERNANCE` 删掉 `seed`，闸门以 exit 1 失败并打印该类型 + 补救指引；恢复后 exit 0。\n\n### 2. datasource 治理完毕\n\n`liveness/datasource.json`，43 条属性全部带证据分类。结果是**所有被治理类型中最高的 dead 占比：43 中有 20 条没有 runtime 消费者。**\n\n| 死簇 | 为什么 |\n|---|---|\n| `capabilities.*`（11） | 引擎的下推判断走的是 runtime driver 自己的 `supports.*` 对象（`autonumber` / `batchSchemaSync` / `queryDateGranularity`）—— 另一套机制，词汇表和这个块**零重叠**。`having-filter.ts:13` 说得很直白：\"SQL pushdown can come later behind a driver capability flag\" |\n| `healthCheck.*`（3） | 没有任何东西调度 datasource 探活。连接活性是按需通过 driver handle 的 `ping()` 检查的 |\n| `retryPolicy.*`（4） | 没有 connect 或 query 路径重试 |\n| `external.label` / `external.requirePermission` | 无读者。后者是安全形状的：它读起来像访问门，但不是 |\n\n### 3. 一处更正 —— 这是这次审计值得做的理由\n\n**`capabilities.readOnly` 读起来像安全开关，实际不守任何东西。而有两处已发布的处方把作者指向它：**\n\n- `datasource.zod.ts` 的 `externalSettingsUnknownKeyError`：\"…or `capabilities.readOnly` to describe the driver\"\n- #4465 changeset 的搬迁表：`readOnly` → `capabilities: { readOnly: true }`\n\n两处现在都指向 `external.allowWrites: false` —— ObjectQL 引擎真正检查的写入门（`engine.ts:620`）。**照旧建议做的作者，相信自己把一个数据源标成了不可写，而并没有。**\n\n这正是我在同一个文件里为 `belongsInConfig` 写过的那段失败：\"把一个犯了*可恢复*错误的作者，用平台的权威指向一个同样错误再次沉默的位置。\" 我在隔壁一个字段上做了同样的事，而且是在一个全部意义就是安全的属性上。\n\nv17 release notes 里还有一句配套的假声明 —— 说未注册的 `capabilities` 键会让引擎停止下推、改在内存里算 —— 一并更正。\n\n### 4. 作者警告闭环\n\nCLI 建议 lint 是账本驱动的，所以 `os compile` 现在会警告设置了那 20 条中任何一条的作者。这需要账本之外的一行：把 `datasource` 加进 `TYPE_COLLECTIONS`。\n\n值得记一笔的区别：覆盖率靠标 `authorWarn` 增长，但**仅限于 lint 已经在走的类型内部**。一个新治理的类型如果没登记 collection，账本正确却警告不到任何人 —— 这正是 lint 存在要防的形状。\n\n## 三个坑，每个都差点造成错判\n\n1. **同名不同类型。** `healthCheck` 全仓 20 处命中，**没有一处属于 datasource**（插件健康监控、AI model registry、connector、`StartupOrchestratorOptions`）。`retryPolicy` 更险 —— 它在 `hook` 和 `job` 上**确实**被强制执行。分辨靠形状：`hook.retryPolicy` 用 `backoffMs`，datasource 用 `baseDelayMs`/`maxDelayMs`/`backoffMultiplier`，没有代码同时读两种拼写。\n2. **preview renderer 不算消费者。** objectui 的 `DatasourcePreview` 把 `pool`/`ssl`/`retryPolicy`/`healthCheck` 渲染成面板 —— **一条都没有被当作证据**。#4481 是最新的教训：`readReplicas` 唯一的\"消费者\"是一枚 pill。\n3. **`z.record` 是账本盲区。** `datasource.config` 是开放 record，walk 到此为止，per-driver 键由 `data/driver/*.zod.ts` 管。这条**显式记进了 `config` 的 note**，而不是默默跳过 —— 沉默的盲区和不存在的盲区在文件里长得一样。\n\n## 一件我**没有**做的事\n\n`liveness/README.md` 的 per-type 计数表有几行陈旧。我试着机械重算，**产生了两处回归**（`query` 的 7 个 experimental 来自 describe marker 不是账本条目；`webhook` 行是手工标注的），及时发现并回滚了。\n\n原因是有两种口径在打架：README 自带的 python 片段数账本 JSON，闸门的 `--json` 还解析 marker 并对 `children` 不同下钻。修它需要**先决定这张表是哪个口径**，那是一个决定，不该夹在这个 PR 里顺手做。所以我只加了 `datasource` 行，并把这个坑连同\"我踩过\"一起写进了 README 和 #4488。\n\n## 验证\n\n```\ncheck:liveness               PASS\ncheck:empty-state            PASS\ncheck:authorable-surface     PASS\ncheck:docs                   PASS\ncheck:api-surface            PASS\ncheck:spec-changes           PASS\ncheck:upgrade-guide          PASS\ncheck:skill-refs             PASS\ncheck:skill-docs             PASS\ncheck:skill-examples         PASS\ncheck:strictness-ledger      PASS\n```\n\n- `@objectstack/spec` — 285 files / 7248 tests passed\n- `@objectstack/cli` — 67 files / **689** tests passed（新增 3 条 datasource lint pin test：死块会警告、`capabilities.readOnly` 的 hint 必须点名 `allowWrites`、只设活属性时保持沉默）\n- 闸门负证明：删一条 `PENDING_GOVERNANCE` → exit 1 且打印补救指引；恢复 → exit 0\n\n闸门输出的新一行：\n\n```\ndatasource  43 classified (live 23, dead 20)\ncoverage: 18 type(s) governed, 9 registered type(s) awaiting a ledger\n  (app, book, doc, email_template, job, mapping, seed, translation, validation)\n  — a worklist, not a merge gate.\n```\n\n## 后续\n\n**#4488** —— 剩余 9 个类型的 worklist，`PENDING_GOVERNANCE` 每条都指向它。里面写了 datasource 这次用的方法（**先找类型的\"边界结构\"**是效率最高的一步 —— `ConnectableDatasource` + `DatasourceConnectionSpec` 一次判掉了 20 条里的大部分）、上面三个坑、README 计数口径那件事，以及一条明确要求：**不要为了绿而批量填 `live`，橡皮图章账本比没有账本更糟。**\n\n那 20 条死属性本身是 ADR-0049 的退休 worklist，不在本 PR 范围 —— 账本的职责是**记录判定**，`authorWarn` 负责告诉作者；退休是每个簇各自的决定，像 #4481 那样单独走。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WsgTqRF58HsQYKLsrZ5pQY)_"
+}

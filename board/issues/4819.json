@@ -1,0 +1,37 @@
+{
+  "number": 4819,
+  "kind": "issue",
+  "title": "pm-dispatch 协议升级:domain 车道 —— 按「修复落点的包」划域认领,支持同仓多 PM 并发(维护者已拍板)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T08:38:25Z",
+  "updated_at": "2026-08-03T09:06:35Z",
+  "closed_at": "2026-08-03T09:06:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4819",
+  "body": "维护者 2026-08-03 拍板:采用 domain 车道方案支持多 PM 并发(每个 PM 独立会话、独立容器)。本单落地协议文本到 `.claude/skills/pm-dispatch/SKILL.md`。\n\n## 背景:为什么是 domain,锚定规则是什么\n\n今晚多 PM 运行暴露的核心问题:**分诊与选批发生在认领之前,两个 PM 各自视野内的「文件独立」在全局不成立**(#4763 险撞、`declared-fields.ts` 共享面、#4604 的车道协商)。domain 标签把一个 PM 的分诊结果缓存成全体 PM 可见的路由,选批过滤在标签层完成。\n\n**锚定规则(方案的核心,必须原样写进协议)**:\n\n> 每个包恰好属于一个 domain;issue 的 `domain:*` 标签 = **修复落点所在包**的 domain,在分诊时读代码后打,**不从标题词汇猜**。\n\n反例说明(写进协议做示例):#4775 的 hook condition 概念上属 automation,但修复落点是 `packages/objectql/src/hook-wrappers.ts` —— 按落点归 `domain:engine`。按题目猜会让两个 PM 撞进同一个包。\n\n## 分类表(初版,写进 SKILL.md;新包在首次分诊时归类并 PR 更新此表)\n\n| 标签 | 包家族 |\n|:--|:--|\n| `domain:engine` | `packages/objectql`、`packages/metadata*`、`packages/platform-objects`、`packages/core`、`packages/plugins/driver-*` |\n| `domain:services` | `packages/services/*`、`packages/plugins/plugin-approvals`、`plugin-webhooks`、`packages/connectors/*` |\n| `domain:identity` | `packages/plugins/plugin-auth`、`plugin-security`、`plugin-sharing`、`plugin-audit` |\n| `domain:devx` | `packages/lint`、`skills/**`、`content/docs/**`、`scripts/`(门禁类) |\n| `domain:spec` | `packages/spec` 及其生成物(现 spec 车道不变) |\n| `domain:cli` | `packages/cli`、`runtime`、`verify`、`qa`、`types` |\n\n`examples/**` 随其锻炼的子系统归域;归不进的在分诊时按主要落点判。\n\n## SKILL.md 要改的三处\n\n### 1. 新增一节「Domain lanes(同仓多 PM 并发)」,放在「Multi-repo coordination」之后\n\n内容包含:\n\n- 前提:每个 PM = 独立会话 + 独立容器,加 PM 即加算力;冲突由 domain-包映射防止;\n- 上面的锚定规则 + #4775 反例 + 分类表;\n- **标签纪律**:`domain:*` 在 backlog sweep(round loop 第 0 步)分诊时打;打标 ≠ 认领,任何 PM 都可为任何 issue 打标;未打标的 issue 任何 PM 不得直接认领(先分诊打标);\n- **认领范围**:每个 PM 会话在登记表(#4604)登记自己的 domain **集合**;只认领标签在集合内的 issue;\n- **跨域单**:按既有 contract-first 规则拆成子单各归各域;不拆则单个 PM 认领并在认领注释里**声明全部文件面**;\n- **借单**:空闲 PM 可跨域借单,条件:(a) 该域 PM 未认领它,(b) 认领注释声明文件面,(c) 全局在飞检查通过;\n- **全局在飞检查**:选批时列出全仓 `pm:dispatched` 的 issue,读其最新认领注释的文件面声明,要求与本批候选不相交;\n- 合并队列仍是全体共享的串行资源:flaky 税(参 #4796)随 PM 数线性放大,队列健康是全体 PM 的共同责任。\n\n### 2. 认领注释模板(round loop 第 4 步)加两行\n\n```\n> 认领:PM 循环第 N 轮\n> 会话:`session_<id>`\n> 分支:`claude/issue-<n>-<slug>`\n> Worktree:`<repo>-issue-<n>`\n> 域:`domain:<x>`\n> 文件面:`<预计触碰的目录列表>`(越界即停,报告说明)\n```\n\n「文件面」对跨域单与借单**必填**,同域普通单**建议填**。\n\n### 3. 修订「Multi-repo coordination」规则 4\n\n现文写「Multiple PMs on the SAME queue: prohibited」。改为:同队列多 PM **仅在 domain 车道协议生效时允许**(每 PM 独立会话独立容器 + 登记 domain 集合 + 遵守标签纪律与全局在飞检查);无该协议时维持禁止。原有的 repo 分片阶梯保留,domain 车道作为同仓扩展的第三级。\n\n## 约束\n\n- **只改 `.claude/skills/pm-dispatch/SKILL.md`**。不动 `.claude/agents/os-dev.md`,不动任何 `packages/**`。\n- 行文风格贴合该文件现有段落(简洁、规则式、带理由),不要写成变更日志。\n- 若 Check Changeset 门禁对 `.claude/` only 的 diff 要求 changeset,用空 frontmatter changeset(先例:PR #4803 对 scripts-only 改动的做法)。\n- 分类表照抄本 issue,不要自行增删 domain —— 表的演化走后续 PR。\n\n## 验收\n\n1. 上述三处改动齐全,锚定规则与 #4775 反例原文在;\n2. 现有章节的编号/引用未被破坏(该文件被多个在跑会话引用);\n3. `pnpm lint`(若覆盖 markdown)/ 基本 CI 绿。\n\n## 关联\n\n- #4604(登记表 —— 本单合并后 PM 们在那里改登记 domain 集合)\n- #4763 / #4775(锚定规则的实证)\n- #4796(队列 flaky 税)"
+}

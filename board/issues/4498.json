@@ -1,0 +1,32 @@
+{
+  "number": 4498,
+  "kind": "issue",
+  "title": "[P2] `duplicatePackage` still mints pre-protocol flow rows — the \"strictly shrinking\" premise does not hold for flows",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T12:29:39Z",
+  "updated_at": "2026-08-01T14:05:32Z",
+  "closed_at": "2026-08-01T14:05:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4498",
+  "body": "Found while closing #4454, filed per Prime Directive #10.\n\n## The claim, and where it breaks\n\n`duplicatePackage` canonicalizes each source row before re-saving it, with this stated guarantee:\n\n```ts\n// Canonicalize the source row before re-saving (#3903): the copy\n// is a NEW write and must pass today's schema gate, so a legacy\n// shape the chain owns is lifted rather than failing the copy —\n// duplication never mints new rows in a pre-protocol dialect.\nitem = this.convertStoredItem(String(row.type), …);\n```\n\n`convertStoredItem` opens with:\n\n```ts\nif (singular === 'flow') return { item: data, notices: [] };\n```\n\nSo for `flow` the guarantee is **not** delivered. Duplicating a package that contains a pre-17 flow copies its legacy body verbatim into a brand-new row.\n\nIt does not fail loudly either: `FlowNodeSchema.config` is an open `z.record`, so `config.filters` sails through `saveMetaItem`'s schema gate. The copy lands silently in a pre-protocol dialect.\n\n## Why this is worse than an un-migrated row\n\nADR-0087's addendum justifies the whole stored-metadata design on this premise:\n\n> **Writes stay gated.** `saveMetaItem` keeps rejecting off-spec bodies (422, tombstones included) — new rows are always canonical, so the stored pass is a **strictly shrinking** concern.\n\nFor flows that premise is false. `duplicatePackage` is a *live producer* of new legacy rows, so the population #4327's `os migrate meta --stored` cleans up can grow again after the migration has run. An operator can run the migration, get a clean report, duplicate a package, and be back to having pre-protocol rows — with the report still saying they are on protocol N until the next run.\n\n## Why it was not fixable before, and is now\n\nThe reason `convertStoredItem` skips flows is real: flow-node conversions carry ADR-0078's open-namespace conflict guard, which needs the automation engine's live executor registry, and `metadata-protocol` has no way to obtain one.\n\n#4454 built exactly that seam:\n\n- `AutomationEngine.canonicalizeStoredFlow(name, definition)` — the single canonicalization policy, returning a `storable` shape (conversions + the schema's `condition` envelopes, without schema defaults);\n- `migrateStoredMetadata`'s optional `canonicalizeFlow` hook — the established pattern for handing that capability to a caller in `metadata-protocol`;\n- `AutomationServicePluginOptions.armRuntime: false` — how to hold the engine without arming a runtime.\n\n`duplicatePackage` needs the same hook. Unlike the CLI it usually runs *inside a server*, which already has a live engine — so the plumbing is likely simpler here than it was for the migration.\n\n## Sketch\n\n1. Thread an optional `canonicalizeFlow` into `duplicatePackage` (same signature as `migrateStoredMetadata`'s), and use it for `flow` rows.\n2. Wire the runtime caller — the server's protocol assembly can resolve `automation` from the services registry it is already given, so this may need no new option at all. Worth checking whether the protocol should resolve the hook once at construction rather than per call site; `getMetaItems` / `getMetaItem` / `loadMetaFromDb` all skip flows for the same reason and would benefit from the same wiring.\n3. Decide the failure posture. A refused rename must not silently produce a legacy copy — it should fail that item into `duplicatePackage`'s existing `failed[]` list, naming the token, consistent with how #4454 reports it.\n4. Without a hook, keep today's behaviour but make it honest: the comment must stop claiming a guarantee it does not deliver for flows.\n\nStep 4 is worth doing even if 1–3 are deferred — a comment asserting an invariant that does not hold is how the gap stayed invisible.\n\n## Scope note\n\n`duplicatePackage` is the case I verified. The same `convertStoredItem` flow-skip is on every metadata-protocol read seam (`getMetaItems`, `getMetaItem`, `getMetaItemLayered`, `loadMetaFromDb`) — those are *reads*, so they are covered by `registerFlow` canonicalizing at execution and are not producing bad data. Duplication is the one that **writes**. Worth a sweep for any other write path that funnels through `convertStoredItem`.\n\nRefs #4327 (PR #4464), #4454 (PR #4492), #3903, ADR-0087 addenda, ADR-0078."
+}

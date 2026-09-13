@@ -1,0 +1,35 @@
+{
+  "number": 4429,
+  "kind": "pull_request",
+  "title": "fix(objectql,metadata-protocol): 租户自己写的覆盖层不该被当成代码包产物",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-01T05:16:59Z",
+  "updated_at": "2026-08-01T05:23:48Z",
+  "closed_at": "2026-08-01T05:23:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-01T05:23:46Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4429",
+  "body": "## 问题\n\n`saveMetaItem` 会拒绝写入「artifact-backed 且该类型没开启 overlay 写」的元数据（`not_overridable`），而它判断谁是 artifact-backed 靠的是 `registry.getArtifactItem`。这个判据一直是「`_packageId` 不等于字面量 `sys_metadata` 就算代码产物」—— 但这个哨兵**只在 save 路径上成立**。\n\n启动时 `loadMetaFromDb` 把 `sys_metadata` 的每一行按它**真实的 packageId**（`app.<slug>`）注册进 registry，而自从 package 成为强制项之后，**所有运行时创作的条目都带着这样一个 packageId**。\n\n结果：用户刚在 Studio（或 AI 搭建 agent）里建好的应用，经过下一次 kernel 重建之后，看起来就像是代码包发布的产物 —— 于是**之后对它的任何修改都被 403 拒绝，且是永久性的**。\n\n线上实测（objectstack-ai/cloud#970）：对同一个对象、相隔几秒的两次 `modify_field`，第一次 `status: published` 成功上线，第二次直接 `[not_overridable]` —— 因为第一次的 auto-publish 在中间触发了 kernel 重建。\n\n这也正是 AI 授权 skill 里那条「apply_blueprint 之后你必须 update_metadata 把汇总配置补上」的指示为什么是空话：它指向的那条路根本走不通。\n\n## 改动\n\n真正区分两者的轴是 **provenance**（ADR-0010：`'package'` = loader 引入，`'org'` = 租户自己写的），所以就问它：\n\n- `loadMetaFromDb` 注册 object 时打上 `_provenance: 'org'` —— 这些行按定义就来自 `sys_metadata`，是租户的覆盖层。\n- `getArtifactItem` 的四个分支都不再把 `_provenance === 'org'` 的条目当作 artifact。\n\n**没有** provenance 的条目在真实 packageId 下维持原判定，所以本来受保护的东西不会悄悄变成可写。\n\n## 测试\n\n新增 `registry-tenant-authored-artifact.test.ts`（5 例）：租户覆盖层不再被当 artifact；代码包产物仍然是 artifact；无 provenance 维持原状；`sys_metadata` 哨兵仍生效；非 object 类型同理。**去掉 registry 改动后其中 2 例会失败**（已验证）。\n\n`packages/objectql` 92 files / 1506 tests、`packages/metadata-protocol` 21 files / 139 tests 全绿。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

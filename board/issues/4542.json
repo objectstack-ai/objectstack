@@ -1,0 +1,32 @@
+{
+  "number": 4542,
+  "kind": "issue",
+  "title": "[P2] A Studio edit heals every legacy row except a flow's — `saveMetaItem` re-persists the pre-protocol dialect an author was served",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T01:30:57Z",
+  "updated_at": "2026-08-02T07:52:22Z",
+  "closed_at": "2026-08-02T07:52:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4542",
+  "body": "Follow-up to #4498 (PR #4504), verified empirically before filing. Probe: boot the real stack, seed one pre-17 `flow` (`delete_record` + `config.filters`) and one pre-17 `object` (`conditionalRequired`, retired #3855), read each via `getMetaItem`, edit only the `label`, save back exactly what was served.\n\n## Measured result\n\n| | READ serves | after edit+save, DISK holds | `--stored` preview after the edit |\n| :--- | :--- | :--- | :--- |\n| `object` | `requiredWhen` (canonical) | `requiredWhen` — **edit healed the row** | — |\n| `flow` | `filters` (**legacy, unconverted**) | `filters` — **edit changed nothing** | still `pending` |\n\nTwo seams compose into the asymmetry:\n\n1. **Read**: `getMetaItem` canonicalizes every type through `convertStoredItem` — which returns `flow` untouched (the ADR-0078 conflict-guard skip). Studio is served the pre-protocol dialect.\n2. **Write**: `saveMetaItem`'s schema gate accepts it back — `FlowNodeSchema.config` is an open `z.record`, so `config.filters` is not off-spec, just legacy. No conversion runs on the write.\n\nSo the implicit contract \"an author's explicit save leaves the row canonical\" — which is exactly what the once-per-boot stored-conversion warning promises for every other type (\"re-save it (Studio edit → save …) to persist the canonical shape\") — holds for everything except flows. A flow row stays `pending` in the `--stored` report **no matter how many times an author edits it**; only the migration itself can retire it.\n\n## Why the write gate is the right seam (not the read)\n\nThe obvious-looking fix — canonicalize flow reads via `resolveFlowCanonicalizer` (#4498) — is the wrong one:\n\n- Reads are hot and list-shaped; `canonicalizeStoredFlow` runs a full parse + cycle detection + control-flow validation per body.\n- It **throws** on an invalid flow, and the read path's contract is availability over purity (\"reads diagnose, never drop\") — a broken row must stay readable and fixable in Studio.\n- Execution is already covered: `registerFlow` canonicalizes at the load seam.\n\nThe write gate is where ADR-0087's premise (\"new rows are always canonical\") lives, and it is the same seam #4498 already fixed for `duplicatePackage`. `saveMetaItem` is the one remaining producer-shaped path that accepts a legacy flow dialect — both on the Studio roundtrip and for any API caller that authors `config.filters` directly today.\n\n## Sketch\n\nIn `saveMetaItem`, for `singular === 'flow'` with an item present:\n\n1. Resolve via `resolveFlowCanonicalizer()` (#4498 — already lazy, already tested). **Absent → save as today**: a control-plane host must not start refusing flow writes it accepted yesterday.\n2. Canonicalize **before** the schema gate (the #3903 principle: chain-owned legacy shape is lifted, not failed) and persist `storable`.\n3. **Conflicts** (refused node-type rename over a live custom executor) → refuse the save loudly, naming the token — never persist the un-renamed body. Same posture as `duplicatePackage`/#4454.\n4. **Parse throw** → fall back to saving the raw item and let today's gate decide. `canonicalizeStoredFlow` is stricter than the schema alone (cycle detection, region validation); a work-in-progress draft with a temporary cycle must not become unsaveable when it saves fine today.\n5. Idempotence keeps the other callers cheap: `migrateStoredMetadata` and `duplicatePackage` hand in already-canonical bodies, and the pass is copy-on-write, so the second run changes nothing.\n\nDecision to settle at review: whether step 4's fallback also applies in `publish` mode or only for drafts — publish-refusing an unparseable flow is defensible (it cannot register anyway), but it is a behaviour change for bodies that save fine today.\n\n## Evidence trail\n\nProbe harness identical to `meta.stored-flow-resolution.integration.test.ts` (real `bootSchemaStack`, inert automation plugin, SQLite on disk). One probe artifact worth knowing about for whoever picks this up: rows seeded raw carry `checksum: null`, and `saveMetaItem`'s derived `parentVersion` then disagrees with the column, so the save 409s — pass an explicit `parentVersion` in probes. (Real rows written by any governed or loader path carry a checksum; not a production issue.)\n\nRefs #4498 (PR #4504), #4454, #4327, #3903, ADR-0087, ADR-0078."
+}
