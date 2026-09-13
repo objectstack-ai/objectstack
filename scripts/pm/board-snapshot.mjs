@@ -2030,11 +2030,11 @@ export async function selfTest() {
     t('the row is ABSENT before the run — the state #18045 measured, reproduced on disk', readArchivedCard(liveDir, 18045).ok === false);
     const first = await driveSnapshot({ dir: liveDir, board: live });
     t('THE REGRESSION: a row updated after the previous manifest stamp is archived on the VERY NEXT run, out of a budget the backfill would otherwise have spent whole',
-      readArchivedCard(liveDir, 18045).ok === true && readArchivedCard(liveDir, 18045).issue.updated_at === '2026-09-13T14:50:00Z');
+      readArchivedCard(liveDir, 18045).ok === true && readArchivedCard(liveDir, 18045).issue?.updated_at === '2026-09-13T14:50:00Z');
     t('…and so is a CLOSED row that moved, and a pull request — the delta archives every row it sees, not the open issues alone',
-      readArchivedCard(liveDir, 17999).issue.state === 'closed' && readArchivedCard(liveDir, 18043).issue.kind === 'pull_request');
+      readArchivedCard(liveDir, 17999).issue?.state === 'closed' && readArchivedCard(liveDir, 18043).issue?.kind === 'pull_request');
     t('…and the backfill demonstrably could NOT have done it: it ran out of budget inside the backlog, hundreds of rows short of that day',
-      first.stopped?.kind === 'budget' && first.manifest.resume.phase === 'history' && Date.parse(first.manifest.walk.history.cursor) < Date.parse('2026-08-05T00:00:00Z'));
+      first.stopped?.kind === 'budget' && first.manifest.resume?.phase === 'history' && Date.parse(first.manifest.walk.history.cursor) < Date.parse('2026-08-05T00:00:00Z'));
     const listings = live.calls.filter((c) => c.startsWith('/repos/o/r/issues?'));
     t('THE ORDER: the FIRST listing of the run is the delta, and the history listing comes after it — ⛔ a backfill placed first spends everything and the delta never runs',
       listings[0].includes(encodeURIComponent(skewedSince('2026-09-10T15:39:49.484Z')))
@@ -2088,7 +2088,7 @@ export async function selfTest() {
     }));
     const stop = await driveSnapshot({ dir: stopDir, board: fakeBoard({ rows: [...historyRows, movedIssue] }), options: { maxRequests: 6 } });
     t('RESUME UNCHANGED: a history walk that runs out of budget still stops with its OWN cursor, named as the history walk and not as the phase',
-      stop.manifest.resume?.phase === 'history' && stop.manifest.resume.stopped_by === 'budget' && stop.manifest.resume.since === stop.manifest.walk.history.cursor);
+      stop.manifest.resume?.phase === 'history' && stop.manifest.resume?.stopped_by === 'budget' && stop.manifest.resume?.since === stop.manifest.walk.history.cursor);
     t('…and `selectWalkPlan` reads that manifest back as a history resume from that cursor — the semantics the delta does not touch',
       selectWalkPlan(stop.manifest).phase === 'history' && selectWalkPlan(stop.manifest).since === stop.manifest.walk.history.cursor);
     t('…while the delta cursor survives the stop untouched, so the next run re-reads the live board before the backfill again',
