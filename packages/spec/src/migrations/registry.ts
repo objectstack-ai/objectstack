@@ -5470,7 +5470,19 @@ const step18: MigrationStep = {
     + 'multi-key form becomes one entry per key in the same order. A string that does not parse as '
     + 'that grammar — the `\'-field\'` dialect above all — is left alone and meets the door instead: '
     + 'that dialect belongs to `RecordRelatedListProps.sort`, never reaches '
-    + '`convertSortToQueryParams`, and retiring it was NOT ruled.',
+    + '`convertSortToQueryParams`, and retiring it was NOT ruled. '
+    + 'It also removes `page.assignedProfiles` (ADR-0090 D2 / ADR-0049 enforce-or-remove; '
+    + 'maintainer ruling 2026-09-12 \u300c\u540c\u610f\u300d). The key was authorable on the published '
+    + '`PageSchema` and named for the Profile concept ADR-0090 D2 deleted, while the schema\'s own '
+    + 'alias table CORRECTED an authored `profiles:` into it — two files from '
+    + '`security/permission.zod.ts` answering the same word with "no Profile concept". Measured '
+    + 'across this repository and objectui it had zero readers, so a page that "assigned '
+    + 'profiles" was open to every caller who could reach it. It is a retiredKey tombstone on '
+    + '`PageSchema` — the def is still parsed from the `page` root, so there is an author to '
+    + 'teach — and the two alias entries became refusals naming the permission-set route. The '
+    + 'D2 conversion STRIPS the key — there is no lossless target, because which permission set '
+    + 'a given profile name corresponds to is a judgement no walker can make, which is what the '
+    + 'paired D3 semantic entry is for.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5499,6 +5511,7 @@ const step18: MigrationStep = {
     'turso-config-timeout-to-timeout-ms',
     'view-page-mount-removed',
     'list-view-sort-string-clause-to-array',
+    'page-assigned-profiles-removed',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
