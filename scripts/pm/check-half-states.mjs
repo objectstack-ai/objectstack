@@ -14100,6 +14100,469 @@ export function h63StaleFindingBesideGrade(issue) {
 }
 
 // ---------------------------------------------------------------------------
+// H64 (#18069) — a seat- or dev-signed artefact whose GitHub AUTHOR is a user
+// account rather than the App.
+//
+// ## The defect, and why it is a half-state rather than a style note
+//
+// Every agent on this board shares one protocol identity, and that identity has
+// two spellings on the API. Content written through the MCP GitHub tools is
+// authored by a USER account; content written through the REST proxy is
+// authored by `claude[bot]`, whose `user.type` is `Bot`. Measured 2026-09-13 on
+// this board: #18045 and objectui#9404 authored `os-project-manager` with
+// bodies signed by the skills seat, PR #18051 authored `os-project-manager`
+// with a dev-signed body, comment 5652138683 on objectui#9370 authored
+// `os-tesla`; and comments 5654046782 / 5654227341 / 5654347747 authored
+// `claude[bot]` as the clean side of the same pair.
+//
+// The two spellings are not interchangeable, and the inequality is the
+// half-state: a SUSPENDED user account hides everything that account authored.
+// The card, the claim and the report stay in the database and leave every
+// reader's view at once — so a seat's own record of what it did is held by an
+// account the protocol does not control. The artefact says a seat wrote it,
+// GitHub says a person did, and the two carriers disagree about one live
+// artefact with the repair on the board. That is `state`'s definition exactly.
+//
+// ## The artefact is recognised STRUCTURALLY — ⛔ and never from a roster
+//
+// The roster refusal is H44's, taken for H44's reason, and it is restated here
+// because this is the row that looks like it needs one: there is no seat roster
+// in this repo (the only frozen account list is `GOVERNED_APPROVERS`, the
+// APPROVER set), one account is simultaneously a seat and the maintainer's own
+// login (H43's header), and the seat-post sticker login does not match comment
+// authorship. ⚠️ The direction is what makes the two rows agree rather than
+// collide: H44 refused an author test for FINDING seat artefacts and that
+// refusal stands — this row finds them exactly the structural way H44, H33, H34
+// and H37 do, and reads the author only as the DEFECT, never as the way in.
+//
+// ## The six signature forms, and the TWO the measurement widened
+//
+// Four forms reuse a marker this file already owns, so 「what is a claim」 has
+// one answer here and not two: `CLAIM_COMMENT_MARKER`, `OS_DEV_REPORT_MARKER`,
+// `CONTRACT_REVIEW_HEADING_MARKER` beside a `Reviewed-by:` directive line, and
+// `directiveValues`' decoration contract. Two are this row's own: the filing
+// header, and a session id.
+//
+// ⚠️ Two of the filing card's five forms were MEASURED against the specimens it
+// named and would not reach them. Both widenings are recorded here because a
+// reader comparing the card to the code must see the reason, not a drift:
+//
+//   the claim form  the card wrote 「a `Claim:` block with a `Session:` line」.
+//                   Comment 5652138683 — the card's own os-tesla fixture —
+//                   opens `Claim: objectui#9370 …` and carries NO `Session:`
+//                   line anywhere in its 35 lines. Requiring the line excludes
+//                   the specimen, so the form is `CLAIM_COMMENT_MARKER` alone,
+//                   which is also the marker every other claim reader here uses.
+//   the session form  the card wrote 「a bare session id in the first three
+//                   lines」. PR #18051 — the card's own dev-signed fixture —
+//                   carries its ONLY session token on line 45 of 45, in the
+//                   attribution footer. Measured over the 9 open PRs on this
+//                   board, the first-three-lines window fires on 0 of them and
+//                   the footer form on 4. So the footer is a SIXTH form rather
+//                   than a widening of the fifth: the head window stays narrow
+//                   (a session id quoted mid-body is prose), and the footer is
+//                   matched as the attribution URL `claude.ai/code/session_…`,
+//                   which is written by a Claude Code session and by nothing
+//                   else. ⛔ The BARE footer — the platform's own appended
+//                   `claude.ai/code` with no session id — is deliberately NOT a
+//                   signature: the platform appends it to comments, so reading
+//                   it would make the row fire on the platform's own byte.
+//
+// ## `user.type` is the test; `user.login` is printed, never tested
+//
+// The card offered them as equivalents (「`user.type !== 'Bot'`, equivalently
+// `user.login !== 'claude[bot]'`」) and they are not. `user.type` is the account
+// KIND: it answers `Bot` for EVERY App-authored artefact, so a second App on
+// this board is judged correctly the day it appears and an App rename changes
+// nothing. The login test is a one-name roster wearing an equality sign — it
+// judges `github-actions[bot]`, which authored 2 open cards and 1 open PR here,
+// as a user account. Measured: those three artefacts carry no signature at all,
+// so the two tests agree on TODAY's board and would diverge on the first
+// workflow-authored artefact that carries one. This row trusts `user.type`, and
+// prints `user.login` because naming the author is the row's job.
+//
+// An author that cannot be read is DECLINED, never accused: a row whose `user`
+// is missing or malformed is counted in the clause and judged by nobody (#4690
+// in the direction that matters here — an unknown must not become an
+// accusation).
+//
+// ## The channel is INFERRED where the payload carries it, and UNREAD where it
+// does not
+//
+// `performed_via_github_app` rides issue rows and comment rows: a slug means
+// the write went through that App's tools under a user token (the MCP GitHub
+// tool), an absent one means a user PAT. ⚠️ The `/pulls` listing does not serve
+// the field AT ALL — measured over all 9 open PRs — so a PR's channel is
+// reported as UNREAD with both candidates named, rather than inferred from an
+// absence that means nothing here. ⛔ No per-PR fetch is bought to close it.
+//
+// ## The pin, and why everything before it is a CENSUS
+//
+// H55's shape, for H55's reason. The write-shape discipline is 2026-09-13's
+// ruling; the board in front of it was written under the older practice, and
+// 「re-post it through the proxy」 is not a remedy anyone will perform 164 times.
+// So `created_at` before `USER_AUTHORED_WRITE_SINCE` is COUNTED in the summary
+// clause and files no row, and on/after it is judged. Measured at the pin: 33
+// open card bodies + 1 open PR body judged, against 164 cards + 3 PRs in the
+// census reaching back to 2026-08-07. An unreadable `created_at` is judged,
+// never silently legacy.
+//
+// `created_at` rather than H55's `updated_at`, and the difference is the
+// subject: H55 judges an ENTRY into a label state, which has no creation
+// instant of its own, while this row judges a WRITE, which does. ⚠️ Declared
+// residual: an EDIT re-writes a body through the same channel without moving
+// `created_at`, so an edited artefact is judged at the instant it was first
+// written. This row does not read edit history and buys no timeline page.
+//
+// ## Why this family CAPS its rows — the renderer's ordering, not a preference
+//
+// `renderMarkdown` sorts rows by band rank and then by card number ASCENDING,
+// and the body trim eats the TAIL. For every other family that is neutral. For
+// this one it is inverted: the newest write carries the highest number, so the
+// artefact this row exists to surface within the hour is the FIRST thing the
+// trim removes. Changing that sort belongs to every family and is not this
+// row's to take, so the row bounds ITSELF instead: the judged findings are
+// ordered NEWEST-first and the freshest `H64_ROW_CAP` are filed. The clause
+// prints the full judged count on every run, so a reader can never mistake the
+// rendered rows for the population.
+//
+// ## Population and cost — ZERO requests
+//
+// Open card bodies (the unscoped listing and the label pages, both in hand),
+// open PR bodies (`seenPrs`, in hand), and the card comment threads
+// `commentCache` already holds when this pass runs — H44's and H56's corpus
+// exactly, which is why this pass sits beside them and BEFORE H46's leg (b)
+// widens the cache: three clauses describing one population is worth more than
+// a few extra threads. ⚠️ Declared residual, H44's and stated again because it
+// is this row's too: a PULL-REQUEST comment thread is not read here — H48 and
+// H51 buy those for a different population, and folding them in would make this
+// row's corpus depend on which PRs happened to be governed or gated.
+//
+// One row per CARRIER for comments (H44's choice), naming the NEWEST offender
+// rather than H44's oldest: the remedy is one re-post per comment either way,
+// and the row that reaches a reader should be the one whose subject is still
+// this hour's.
+//
+// ## Boundaries, pinned rather than described
+//
+// An authorized REVIEW (os-zhuang / hotlong) and the maintainer's own prose are
+// out of this population TWICE: a review is a `/pulls/{n}/reviews` object this
+// row never reads, and neither carries a seat signature, so the structural gate
+// excludes them before the author is ever consulted. ⛔ That is by construction
+// and not by exemption — this row has no exemption list and cannot acquire one
+// without acquiring the roster it refuses.
+// ---------------------------------------------------------------------------
+
+/**
+ * The instant from which a seat- or dev-signed write owes the App channel — the
+ * UTC day of the ruling that put the write-shape discipline in force. Pinned as
+ * data for `MAINTAINER_ACTION_LINE_SINCE`'s reason: the board in front of it was
+ * written under the older practice and is a census, not a worklist.
+ */
+export const USER_AUTHORED_WRITE_SINCE = '2026-09-13T00:00:00Z';
+
+/**
+ * How many of the freshest judged findings this family files per run. See the
+ * banner's ordering argument — the cap is what keeps the newest write from
+ * being the first row the body trim removes, never a budget preference. Ten is
+ * one patrol window's measured arrivals with headroom: 34 judged artefacts on
+ * the pin day against `PATROL_CADENCE_HOURS`-spaced runs is ~8.5 per window.
+ */
+export const H64_ROW_CAP = 10;
+
+/** A Claude Code session id, as a signature writes it. ⛔ No `g` flag. */
+export const SEAT_SESSION_ID = /session_01[0-9A-Za-z]{22}/;
+
+/** How many opening lines of a body count as its HEAD for the bare-id form. */
+export const SEAT_SIGNATURE_HEAD_LINES = 3;
+
+/**
+ * The attribution footer's SESSION form. ⛔ Deliberately not the bare
+ * `claude.ai/code` footer, which the platform appends to comments itself — see
+ * the banner.
+ */
+export const SEAT_SIGNATURE_FOOTER = /claude\.ai\/code\/session_01[0-9A-Za-z]{22}/;
+
+/**
+ * The filing header — `Filed by the … seat` / `… dev`, line-anchored with a
+ * bounded decoration prefix so the measured spellings (`**`, `⛔ **`, a
+ * blockquote, an HTML small-text tag) all read while a mention buried in a
+ * paragraph does not.
+ */
+export const SEAT_SIGNATURE_FILER = /^[^\n]{0,24}Filed by the\b[^\n]{0,80}?\b(?:seat|dev)\b/im;
+
+/** The key the contract-review heading's second half writes. */
+export const REVIEWED_BY_KEY = 'Reviewed-by';
+
+/** A body's opening lines — the window the bare-session-id form reads. */
+export function seatSignatureHead(text, lines = SEAT_SIGNATURE_HEAD_LINES) {
+  return String(text ?? '').split('\n').slice(0, lines).join('\n');
+}
+
+/**
+ * The six signature forms, as data so the self-test can drive each by name and
+ * a reader can check the banner against the tests. Ordered most specific first:
+ * the form a row NAMES is the first that matches, and the footer is last
+ * because every body a Claude Code session writes carries one.
+ *
+ * `what` is rendered into a GitHub issue body, so ⛔ no less-than fragment
+ * appears in it (the platform mutates those) — the self-test pins the absence.
+ */
+export const SEAT_SIGNATURE_FORMS = Object.freeze([
+  Object.freeze({
+    kind: 'claim',
+    what: 'a `Claim:` block',
+    test: (text) => CLAIM_COMMENT_MARKER.test(text),
+  }),
+  Object.freeze({
+    kind: 'report',
+    what: 'an `os-dev-report` marker',
+    test: (text) => OS_DEV_REPORT_MARKER.test(text),
+  }),
+  Object.freeze({
+    kind: 'review',
+    what: 'a `## Contract review` heading with its `Reviewed-by:` line',
+    test: (text) =>
+      CONTRACT_REVIEW_HEADING_MARKER.test(text) && directiveValues(text, REVIEWED_BY_KEY).length > 0,
+  }),
+  Object.freeze({
+    kind: 'filer',
+    what: 'a `Filed by the … seat` / `… dev` header',
+    test: (text) => SEAT_SIGNATURE_FILER.test(text),
+  }),
+  Object.freeze({
+    kind: 'session',
+    what: `a bare session id in its first ${SEAT_SIGNATURE_HEAD_LINES} lines`,
+    test: (text) => SEAT_SESSION_ID.test(seatSignatureHead(text)),
+  }),
+  Object.freeze({
+    kind: 'footer',
+    what: 'a Claude Code attribution footer carrying a session id',
+    test: (text) => SEAT_SIGNATURE_FOOTER.test(text),
+  }),
+]);
+
+/**
+ * Which seat/dev signature this text carries, or `null` for ordinary prose.
+ *
+ * @param {string} body
+ * @returns {{ kind: string, what: string }|null}
+ */
+export function seatSignature(body) {
+  const text = String(body ?? '');
+  if (!text) return null;
+  for (const form of SEAT_SIGNATURE_FORMS) {
+    if (form.test(text)) return { kind: form.kind, what: form.what };
+  }
+  return null;
+}
+
+/**
+ * The author of a REST row, or `null` when the payload does not carry a
+ * readable one — declined, never read as a user account (#4690 in the direction
+ * that matters here: an unknown must not become an accusation).
+ *
+ * @returns {{ login: string, type: string, isApp: boolean }|null}
+ */
+export function artefactAuthor(row) {
+  const user = row?.user;
+  const login = typeof user?.login === 'string' ? user.login.trim() : '';
+  const type = typeof user?.type === 'string' ? user.type.trim() : '';
+  if (!login || !type) return null;
+  return { login, type, isApp: type === 'Bot' };
+}
+
+/**
+ * Which channel this write implies, read off `performed_via_github_app`.
+ *
+ * Three states, never two: `'app'` (a slug — the MCP GitHub tool under a user
+ * token), `'pat'` (the field is served and empty — a user PAT), `'unread'` (the
+ * payload does not carry the field at all, which is every row the `/pulls`
+ * listing serves). ⛔ An unread field is never reported as a PAT.
+ *
+ * @returns {{ kind: 'app'|'pat'|'unread', slug: string|null }}
+ */
+export function artefactChannel(row) {
+  if (!row || typeof row !== 'object' || !('performed_via_github_app' in row)) {
+    return { kind: 'unread', slug: null };
+  }
+  const slug = row?.performed_via_github_app?.slug;
+  if (typeof slug === 'string' && slug.trim()) return { kind: 'app', slug: slug.trim() };
+  return { kind: 'pat', slug: null };
+}
+
+/**
+ * Where a write falls against the pin, read from `created_at`: `'legacy'`
+ * (before it — census), `'judged'` (on/after — a row candidate), `'undated'`
+ * (unreadable — judged, never silently legacy).
+ */
+export function h64EntryClass(row, since = USER_AUTHORED_WRITE_SINCE) {
+  const at = Date.parse(row?.created_at ?? '');
+  if (!Number.isFinite(at)) return 'undated';
+  return at < Date.parse(since) ? 'legacy' : 'judged';
+}
+
+/**
+ * Does H64 speak about this text at all? A readable body carrying a signature,
+ * whose author is readable and is NOT an App. The pin is judged separately, so
+ * this predicate answers membership and `h64EntryClass` answers freshness.
+ *
+ * @param {{ kind: string, row: object }} text
+ */
+export function h64SpeaksAbout(text) {
+  if (typeof text?.row?.body !== 'string') return false;
+  if (!seatSignature(text.row.body)) return false;
+  const author = artefactAuthor(text.row);
+  if (!author) return false;
+  return !author.isApp;
+}
+
+/** How the row names each artefact kind. */
+export const H64_ARTEFACT_KINDS = Object.freeze(['card', 'pull request', 'comment']);
+
+/**
+ * H64 — `null` when the text is out of scope or legacy, else the finding
+ * sentence naming the artefact, its author, the channel implied and the remedy.
+ *
+ * ⛔ No less-than fragment in the sentence: it is rendered into a GitHub issue
+ * body and the platform mutates those, so every placeholder is spelled in
+ * words and the self-test pins the absence.
+ *
+ * @param {{ kind: string, row: object, carrier?: object }} text
+ * @param {number} more — further offending comments on the same carrier.
+ * @param {string} since
+ */
+export function h64UserAuthoredSeatContent(text, more = 0, since = USER_AUTHORED_WRITE_SINCE) {
+  if (!h64SpeaksAbout(text)) return null;
+  const entry = h64EntryClass(text.row, since);
+  if (entry === 'legacy') return null;
+  const signature = seatSignature(text.row.body);
+  const author = artefactAuthor(text.row);
+  const channel = artefactChannel(text.row);
+  const kind = H64_ARTEFACT_KINDS.includes(text.kind) ? text.kind : 'artefact';
+  const subject =
+    kind === 'comment'
+      ? `comment \`${String(text.row?.id ?? 'an unread id')}\` on this card`
+      : `this open ${kind}`;
+  const channelClause =
+    channel.kind === 'app'
+      ? `The write went through the \`${channel.slug}\` App's tools under that account's token — the MCP ` +
+        'GitHub tool channel'
+      : channel.kind === 'pat'
+        ? 'The payload carries no `performed_via_github_app`, so the write was made with a user PAT rather ' +
+          'than through an App'
+        : 'The channel is UNREAD rather than inferred: the `/pulls` listing this row reads does not serve ' +
+          '`performed_via_github_app` at all, so this write is either the MCP GitHub tool or a user PAT and ' +
+          'no absence here decides which';
+  const moreClause =
+    more > 0
+      ? ` ${more} further comment(s) on this carrier carry the same defect; this is the NEWEST.`
+      : '';
+  const dated =
+    entry === 'undated'
+      ? ' ⚠️ Its `created_at` could not be read, so it is judged rather than counted as a legacy write — an ' +
+        'unknown reading must not present as a clean one.'
+      : '';
+  return (
+    `${subject} carries ${signature.what} — a seat/dev artefact — while GitHub records its author as ` +
+    `\`${author.login}\`, a USER account (\`user.type\` = \`${author.type}\`, not \`Bot\`). ${channelClause}. ` +
+    'The two carriers disagree about one artefact: the text says a seat or a dev wrote it, the account ' +
+    'field says a person did. The cost is not attribution tidiness — a user account that is SUSPENDED ' +
+    'hides everything it authored, so the card, the claim or the report leaves every reader at once while ' +
+    'staying in the database, and the protocol side controls neither the account nor the moment. Content ' +
+    'written through the REST proxy is authored `claude[bot]` (`user.type` `Bot`) and is not affected.' +
+    `${moreClause}${dated} Remedy — WHO and HOW: the seat or dev that owns the artefact re-posts it ` +
+    'through the REST proxy; the original STAYS as history and is neither deleted nor edited into a ' +
+    'redirect, because a re-post is a second durable copy and a deletion is one fewer. ⛔ Report-only: ' +
+    'this row writes nothing, relabels nothing and re-posts nothing on anyone\'s behalf. Boundaries: an ' +
+    'authorized review and the maintainer\'s own prose are out of this population by CONSTRUCTION rather ' +
+    'than by exemption — a review is an object this row never reads and neither carries a signature, so ' +
+    'the structural gate excludes them before the author is consulted, and ⛔ this row holds no roster of ' +
+    `accounts to exempt from. Writes created before ${since} are COUNTED in the summary clause and file ` +
+    'no row: the board in front of the pin was written under the older practice, and this row is the ' +
+    'alarm for what happens now, not a worklist over what happened then.'
+  );
+}
+
+/**
+ * The whole family over one run's corpus — census and rows in one pure pass, so
+ * the two can never describe different populations.
+ *
+ * Comments are grouped per CARRIER (H44's choice) and the NEWEST offender wins
+ * the row; bodies stand alone. Judged rows are ordered newest-first and cut to
+ * `cap` — the banner's ordering argument.
+ *
+ * @param {{ kind: string, row: object, carrier?: object }[]} texts — every text
+ *   this sweep read, bodies and comments alike.
+ * @returns {{ counts: object, rows: { subject: object, message: string }[] }}
+ */
+export function h64Sweep(texts, { since = USER_AUTHORED_WRITE_SINCE, cap = H64_ROW_CAP } = {}) {
+  const counts = {
+    texts: 0,
+    signed: 0,
+    user: 0,
+    legacy: 0,
+    unreadAuthor: 0,
+    oldest: null,
+    judged: 0,
+    rows: 0,
+  };
+  const carriers = new Map();
+  const direct = [];
+  for (const text of texts ?? []) {
+    counts.texts += 1;
+    const body = typeof text?.row?.body === 'string' ? text.row.body : '';
+    if (!seatSignature(body)) continue;
+    counts.signed += 1;
+    const author = artefactAuthor(text.row);
+    if (!author) {
+      counts.unreadAuthor += 1;
+      continue;
+    }
+    if (author.isApp) continue;
+    counts.user += 1;
+    const entry = h64EntryClass(text.row, since);
+    if (entry === 'legacy') {
+      counts.legacy += 1;
+      const at = String(text.row.created_at ?? '');
+      if (at && (counts.oldest === null || at < counts.oldest)) counts.oldest = at;
+      continue;
+    }
+    counts.judged += 1;
+    const at = Date.parse(text.row?.created_at ?? '');
+    const stamp = Number.isFinite(at) ? at : 0;
+    if (text.kind !== 'comment') {
+      direct.push({ text, stamp, more: 0 });
+      continue;
+    }
+    const key = Number(text.carrier?.number);
+    if (!Number.isFinite(key)) continue;
+    const held = carriers.get(key);
+    if (!held) {
+      carriers.set(key, { text, stamp, more: 0 });
+      continue;
+    }
+    const more = held.more + 1;
+    if (stamp > held.stamp) carriers.set(key, { text, stamp, more });
+    else held.more = more;
+  }
+  const ordered = [...direct, ...carriers.values()].sort(
+    (a, b) =>
+      b.stamp - a.stamp ||
+      Number(b.text?.row?.id ?? b.text?.row?.number ?? 0) -
+        Number(a.text?.row?.id ?? a.text?.row?.number ?? 0),
+  );
+  const rows = [];
+  for (const entry of ordered.slice(0, Math.max(0, cap))) {
+    const message = h64UserAuthoredSeatContent(entry.text, entry.more, since);
+    if (!message) continue;
+    rows.push({ subject: entry.text.carrier ?? entry.text.row, message });
+  }
+  counts.rows = rows.length;
+  return { counts, rows };
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -14418,6 +14881,24 @@ export const SWEEP_COUNT_KEYS = [
   'linkageCardsRead',
   'linkageUnread',
   'linkageShort',
+  // H64's census and coverage set (#18069). `seatSignedTexts` is how many texts
+  // this row judged at all (open card and PR bodies plus the card threads
+  // already in `commentCache`), `seatSignedSigned` how many carried a seat/dev
+  // signature and `seatSignedUser` how many of THOSE are authored by a user
+  // account — the finding population, legacy and judged together.
+  // `seatSignedLegacy`/`seatSignedOldest` are the census behind the pin,
+  // `seatSignedUnreadAuthor` the rows whose `user` could not be read (declined,
+  // never accused) and `seatSignedRows` how many of the judged findings this
+  // family actually FILED under its own cap — without that last number a capped
+  // run and a quiet board render identically.
+  'seatSignedTexts',
+  'seatSignedSigned',
+  'seatSignedUser',
+  'seatSignedJudged',
+  'seatSignedLegacy',
+  'seatSignedOldest',
+  'seatSignedUnreadAuthor',
+  'seatSignedRows',
   'refBeyond',
 ];
 
@@ -14890,6 +15371,22 @@ export function summaryLine(counts, findingCount) {
     // purchase in this file that is a per-card timeline page, its cap, and the
     // measured fact that the commit leg fires on nothing here.
     `Merged-PR closing linkage (H59): ${h59LinkageClause(counts)} ` +
+    // H64's census and coverage set (#18069). UNCONDITIONAL like every other
+    // window's, and it is the only place three of this row's readings are
+    // visible at all: the population behind the pin (a census that files no
+    // row), the authors that could not be read (declined, never accused), and
+    // how many judged findings the family's own cap left unfiled.
+    `User-authored seat content (H64): ${counts.seatSignedSigned ?? 0} of ${counts.seatSignedTexts ?? 0} ` +
+    `text(s) read carry a seat/dev signature; ${counts.seatSignedUser ?? 0} of those are authored by a ` +
+    `USER account rather than \`claude[bot]\` — ${counts.seatSignedJudged ?? 0} created on/after ` +
+    `${USER_AUTHORED_WRITE_SINCE} and judged, ${counts.seatSignedRows ?? 0} filed as rows under this ` +
+    `family's own ${H64_ROW_CAP}-row cap (newest first, because the body trim eats the highest card ` +
+    `numbers), and ${counts.seatSignedLegacy ?? 0} counted here as a CENSUS` +
+    `${counts.seatSignedOldest ? ` reaching back to ${counts.seatSignedOldest}` : ''}. ` +
+    `${counts.seatSignedUnreadAuthor ?? 0} signed text(s) carried no readable \`user\` and were ` +
+    'DECLINED rather than accused. It fetches NOTHING of its own: the corpus is the open card and PR ' +
+    'bodies in hand plus the card threads H44 and H56 read, so a PULL-REQUEST comment thread is outside ' +
+    'it by construction and these numbers are a LOWER BOUND. ' +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
 }
@@ -14952,6 +15449,7 @@ export const SUMMARY_CLAUSE_ANCHORS = [
   ['h57Scheduled', 'Scheduled non-blocking workflows (H57): '],
   ['h58RulingMarkers', 'Queued ruling markers (H58): '],
   ['h59Linkage', 'Merged-PR closing linkage (H59): '],
+  ['h64SeatSigned', 'User-authored seat content (H64): '],
   ['reportOnly', 'Report-only: '],
 ];
 
@@ -15575,6 +16073,22 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   // card whose labels contradict each other, repaired on the board in one
   // write — and it is H29's band, the row this one is careful not to duplicate.
   H63: 'state',
+
+  // H64 is a `state` (#18069), and the other three bands are refused on their
+  // own criteria rather than on this subject's vocabulary. ⛔ NOT `gate`: that
+  // band exists for the row that can tell a STRIPPED gate from an ungated card
+  // — an ABSENCE reading as a green light — and here nothing is absent and
+  // nothing clears: both carriers are PRESENT and legible, a signed text and an
+  // account field, and they disagree. That is H54's refusal, taken for H54's
+  // reason. ⛔ NOT `stall`: nothing is stopped. The claim claimed, the report
+  // reported, the PR is open — whether a user-authored artefact DELAYS anything
+  // is unmeasured by this row and it claims no such thing; what is at risk is
+  // the artefact's survival, not its motion. ⛔ NOT `inventory`: it alarms about
+  // ONE artefact, and the population reading — how many writes sit behind the
+  // pin — is a summary census that takes no band at all (H39's shape). What is
+  // left is `state`'s definition exactly: a LIVE artefact whose two carriers
+  // contradict each other, the repair a re-post on the board.
+  H64: 'state',
 
   // H57 is a `stall` (#17132), and the three refusals are each taken on the
   // refused band's own criterion rather than on this subject's vocabulary —
@@ -19892,6 +20406,40 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   stats.stampComments = h56Judged;
   stats.stampUnjudged = h56Unjudged;
   stats.stampAmbiguous = h56Held;
+
+  // H64 (#18069) — the user-authored seat/dev write. Placed HERE, after H56 and
+  // BEFORE H46, for H56's reason in H56's words: H46's leg (b) widens
+  // `commentCache`, so judging this row after it would hand H64 a comment
+  // corpus H44 and H56 never saw and the three clauses would stop describing
+  // one population. It buys NOTHING — every body and every thread it reads was
+  // already paid for by a row above it, and the summary clause states the one
+  // thing that costs: a PULL-REQUEST comment thread is outside the corpus.
+  //
+  // The card union is H46's, built the same way one pass below for the same
+  // reason (a card can arrive on a label page or on the unscoped listing, and
+  // a number must be judged once). Both listings filter `!i.pull_request`, so
+  // the `card` and `pull request` legs cannot judge one row twice.
+  const h64Cards = new Map();
+  for (const [number, issue] of seenUnscoped) h64Cards.set(number, issue);
+  for (const [number, issue] of seen) h64Cards.set(number, issue);
+  const h64Texts = [];
+  for (const issue of h64Cards.values()) h64Texts.push({ kind: 'card', row: issue });
+  for (const pr of seenPrs.values()) h64Texts.push({ kind: 'pull request', row: pr });
+  for (const [number, rows] of commentCache) {
+    const carrier = h64Cards.get(number);
+    if (!carrier) continue;
+    for (const row of rows ?? []) h64Texts.push({ kind: 'comment', row, carrier });
+  }
+  const h64 = h64Sweep(h64Texts);
+  for (const row of h64.rows) findings.push([row.subject, 'H64', row.message]);
+  stats.seatSignedTexts = h64.counts.texts;
+  stats.seatSignedSigned = h64.counts.signed;
+  stats.seatSignedUser = h64.counts.user;
+  stats.seatSignedJudged = h64.counts.judged;
+  stats.seatSignedLegacy = h64.counts.legacy;
+  stats.seatSignedOldest = h64.counts.oldest;
+  stats.seatSignedUnreadAuthor = h64.counts.unreadAuthor;
+  stats.seatSignedRows = h64.counts.rows;
 
   // H46 — the claim-less implementation. Placed HERE, AFTER H44, deliberately:
   // leg (b) adds threads to `commentCache`, and H44's corpus is whatever the
