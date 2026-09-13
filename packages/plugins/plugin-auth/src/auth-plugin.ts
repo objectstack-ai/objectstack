@@ -82,8 +82,10 @@ import {
   type WalledOwnerAccountState,
 } from './walled-owner-verification-path.js';
 import {
+  probeSignInPathWiring,
   probeSignInReachability,
   reportIfNoSignInAccountExists,
+  type SignInPathConfigView,
 } from './boot-sign-in-reachability.js';
 import { judgePlatformAdmin, isPlatformAdminUser, type PlatformAdminActor } from './platform-admin-gate.js';
 import {
@@ -1002,7 +1004,7 @@ export class AuthPlugin implements Plugin {
       // `AuthManager` without ever registering the kernel `email` service, and
       // the sibling hook below injects the service into it. Reading BOTH makes
       // this hook's answer independent of hook registration order.
-      let pub: { socialProviders?: unknown[]; features?: { sso?: boolean } } | undefined;
+      let pub: SignInPathConfigView | undefined;
       try { pub = this.authManager?.getPublicConfig(); } catch { pub = undefined; }
       const hasEmailTransport = !!emailSvc || !!this.authManager?.hasEmailTransport();
       const hasFederatedSignIn =
@@ -1025,7 +1027,16 @@ export class AuthPlugin implements Plugin {
       // and the answer handed to the walled-owner probe, so no boot pages
       // `sys_user` twice. Cost on a fresh store is a single bounded page.
       const reachability = await probeSignInReachability(ql);
-      const deadEnd = reportIfNoSignInAccountExists(reachability, ctx.logger);
+      // [#15074] …and the fact that decides whether "humans, zero accounts" is
+      // a dead end AT ALL on this deployment: does it sign people in through an
+      // identity provider, which needs no `sys_account` row of its own? On a
+      // platform-SSO tenant kernel that population is the HEALTHY one, and the
+      // report's "NOBODY CAN SIGN IN" was false on every boot. The resolver
+      // pays for its bounded provider read only when the answer can change what
+      // is reported; a deployment with no delegated path is untouched and still
+      // reports at `error`.
+      const signInPath = await probeSignInPathWiring(reachability, pub, ql);
+      const deadEnd = reportIfNoSignInAccountExists(reachability, ctx.logger, signInPath);
 
       let ownerAccountState: WalledOwnerAccountState = 'unknown';
       if (
