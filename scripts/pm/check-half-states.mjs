@@ -290,11 +290,12 @@
  *       GitHub computes mergeability asynchronously, so that reading is the
  *       platform saying "ask again later", not a state to name.
  *
- * ## H17 — the one item here that is NOT an invariant
+ * ## H17 — an item here that is NOT an invariant
  *
  *   H17 the on-hold TRIGGER-FILE INDEX — an inventory SECTION, not a
- *       predicate, and the only thing in this file that can never produce a
- *       finding. Each row is an open `pm:on-hold` card and the repo-relative
+ *       predicate, and one of the TWO things in this file that can never
+ *       produce a finding — the decision-box dependency flags below are the
+ *       other. Each row is an open `pm:on-hold` card and the repo-relative
  *       files its hold comment(s) or body name as opportunistic-restart
  *       triggers. A card appearing in it is a hold in perfectly good standing;
  *       the row exists so a dispatching seat can intersect its file surface
@@ -327,6 +328,56 @@
  *       invents — a fabricated row would send a seat to intersect against a
  *       path that does not exist, and that intersection would silently never
  *       hit, which is the original defect wearing a new mask.
+ *
+ * ## Decision-box dependency flags — the OTHER item here that is not an invariant
+ *
+ *   ④  the DECISION-BOX DEPENDENCY FLAGS section — an inventory beside H17's
+ *       and, like it, never a finding, never a label, never a remedy. One line
+ *       per open `needs-user-decision` card that at least one OPEN card's
+ *       `Blocked-by:` line points at, naming the waiters. It discharges
+ *       standing triage instruction ④, the 2026-08-11 maintainer ruling quoted
+ *       VERBATIM at `INSTRUCTION_FOUR_RULING` — read that constant, not this
+ *       paraphrase of it.
+ *
+ *       It is here because ④ was measured UNRUNNABLE on the triage seat's own
+ *       tool surface (#17968). MCP `search_issues` is semantic matching, so a
+ *       literal `Blocked-by:` needle returned 0 against a board where #16348's
+ *       first body line is exactly that string — while the same card answered
+ *       a conceptual query about its subject. A standing instruction nobody
+ *       can execute is the #10034 shape again (a written step nobody runs),
+ *       and ④ is the check that keeps a ruling nobody knows is owed from
+ *       sitting in the inbox with a queue behind it.
+ *
+ *       ⭐ The card's reading three — 「`list_issues` 只能按 label / state / since
+ *       过滤，不返回正文检索」 — is true of that MCP tool and FALSE of this
+ *       script's REST reader, which lists every open card AND already fetches
+ *       the comment channel to build H14's reverse index. So ④ is ONE LOOKUP
+ *       over an index this file already has, not a new channel. That sentence
+ *       is written here so the next reader does not re-file the card.
+ *
+ *       ⚠️ The reading is NOT exhaustive, and the section states its own scope
+ *       ON THE PAGE rather than only here, because the two halves of
+ *       「complete」 fail differently and a brief needs both:
+ *
+ *         - POPULATION. Dependent BODIES come from the unscoped open-issue
+ *           listing (every open card in this repo, bounded by
+ *           `OPEN_LISTING_PAGE_CEILING`); dependent COMMENTS come only from
+ *           open `pm:blocked` / `pm:blocking` cards whose body is clean
+ *           (`needsBlockedByComments`). A card that parks the line in a
+ *           comment and carries neither label is OUTSIDE the read, and a
+ *           cross-repo dependent is dropped by `buildBlockingIndex` by
+ *           construction. The rendered scope line says exactly this rather
+ *           than widening the read, which would be a different index.
+ *         - LOSS. A dependent that never wrote a machine-readable line at all
+ *           is invisible to any index built from that line. That loss is
+ *           already COUNTED in this file — it is H4's population — so the
+ *           section carries the H4 count as a DECLARED NOT-MEASURED number
+ *           rather than re-deriving it: one computation, two readers.
+ *           objectui#6653 measured the same loss at 17 of 24 on that board.
+ *
+ *       ⛔ A brief cites BOTH numbers or writes NOT MEASURED. Citing the flag
+ *       count alone is precisely the false green #17968 predicted for this
+ *       route: a number that ran, and therefore reads as if it were complete.
  *
  * ## H18 — `pm:retriage` aged past one triage cycle
  *
@@ -3926,6 +3977,82 @@ export function h17IndexRows(entries, isTracked) {
     if (files.length > 0) rows.push({ issue, files });
   }
   return rows.sort((a, b) => (a.issue?.number ?? 0) - (b.issue?.number ?? 0));
+}
+
+// ---------------------------------------------------------------------------
+// DECISION-BOX DEPENDENCY FLAGS (standing triage instruction ④) — the second
+// inventory in this file, and like H17 never a finding.
+//
+// The full rationale, the measured unrunnability it answers and the two halves
+// of its incompleteness are in the file header. What lives here is the ruling's
+// own bytes, the gathering pass, and the one thing a reader must not get wrong:
+// this section asks the REVERSE question H14 asks, over the SAME index. H14
+// asks whether a card carrying `pm:blocking` is targeted by anything; ④ asks
+// which cards in the DECISION inbox are targeted by anything. Same edges, two
+// populations — so there is exactly one index, and no second parser for the
+// line (`buildBlockingIndex` stays the only builder, `blockedByTargets` the
+// only parser it uses).
+// ---------------------------------------------------------------------------
+
+/**
+ * Standing triage instruction ④, the 2026-08-11 maintainer ruling — VERBATIM.
+ *
+ * ⛔ ONE copy, on ONE line. It is both this section's docblock quote and the
+ * sentence the section renders into the anchor body, pinned against the same
+ * bytes for `RELEASE_RULE_LINE`'s reason: a ruling that drifts in one reader
+ * while the other holds is exactly the drift a shared constant cannot express.
+ * Rewriting it is rewriting the ruling; re-wrapping it across docblock lines is
+ * one byte away from rewriting it, which is why this stays over-long.
+ */
+export const INSTRUCTION_FOUR_RULING =
+  '**④(决策箱依赖旗标,2026-08-11 维护者裁决)**:每轮收尾简报的决策箱段须标注带有 open 下游依赖的决策卡(判据:**任一 open 卡的 `Blocked-by:` 行指向它**;读时派生,⛔ 不打优先级标签)。';
+
+/**
+ * The section's gathering pass — pure, over cards already in hand.
+ *
+ * No request of its own and no second listing: `issues` is the unscoped
+ * open-issue listing the sweep already holds, and `index` is the very
+ * `buildBlockingIndex` map H14 is judged against. ④ costs this patrol one
+ * `Map.get` per decision card.
+ *
+ * The inbox label is `GOVERNED_PR_DECISION_LABEL`, deliberately NOT a second
+ * spelling of the same string: H52 already reads that constant on CARDS while
+ * H48 reads it on PULL REQUESTS, and the self-test pins the single-spelling
+ * rule there (「the label constant is the one H48 already owns, not a second
+ * spelling」). It is declared further down this file; a `const` in the temporal
+ * dead zone is fine HERE because nothing calls this at module-evaluation time.
+ *
+ * A decision card with NO dependent is omitted rather than rendered empty, for
+ * `h17IndexRows`'s reason: the section exists to name the cards somebody is
+ * waiting on, and printing the quiet majority would bury them. The count line
+ * is what keeps the omission legible — it states the inbox total beside the
+ * flagged total, so an empty section reads as 「read, nothing waiting」 and
+ * never as 「nothing read」.
+ *
+ * Dependents are sorted and the index's own de-duplication is inherited: a
+ * card naming the same target in both channels is listed once, because
+ * `buildBlockingIndex` already unioned them.
+ *
+ * @param {{ number: number, labels?: unknown }[]} issues — OPEN issues only;
+ *   the caller's listing is what bounds the population, exactly as it bounds
+ *   the index's.
+ * @param {Map<number, number[]>} index — from `buildBlockingIndex`.
+ * @returns {{ rows: Array<{ issue: object, dependents: number[] }>, inbox: number }}
+ *   `rows` ascending by card number; `inbox` is every open decision card read,
+ *   flagged or not.
+ */
+export function decisionDependentIndex(issues, index) {
+  const rows = [];
+  let inbox = 0;
+  for (const issue of issues ?? []) {
+    if (!labelNames(issue ?? {}).includes(GOVERNED_PR_DECISION_LABEL)) continue;
+    inbox++;
+    const dependents = index?.get?.(issue.number) ?? [];
+    if (dependents.length === 0) continue;
+    rows.push({ issue, dependents: [...dependents].sort((a, b) => a - b) });
+  }
+  rows.sort((a, b) => (a.issue?.number ?? 0) - (b.issue?.number ?? 0));
+  return { rows, inbox };
 }
 
 /**
@@ -14539,6 +14666,99 @@ export function renderTriggerIndex(index, { markdown = false } = {}) {
 }
 
 /**
+ * The decision-box dependency-flag section (standing instruction ④), in either
+ * medium — one builder, so the two renderers can never drift on WHAT the
+ * inventory says, only on how it is marked up. `renderTriggerIndex`'s shape,
+ * deliberately: the two sections sit side by side in the same reserved block
+ * and a reader compares them at a glance.
+ *
+ * Returns `[]` when no inventory was supplied at all, which keeps every
+ * existing two-argument call byte-identical: a caller that gathers nothing
+ * gets the report it always got, rather than a section claiming an empty
+ * decision box.
+ *
+ * Three lines always render, findings or none, and each answers a question a
+ * round-closing brief must not guess at:
+ *
+ *   - the COUNT line   — flagged of inbox. `0 of 0` is an empty decision box
+ *     and `0 of 7` is seven cards nobody is waiting on; without the pair those
+ *     two read identically, which is #4690 at section granularity.
+ *   - the NOT-MEASURED line — H4's own count of open `pm:blocked` cards with no
+ *     machine-readable `Blocked-by:` line in EITHER channel. Those cards are
+ *     waiting on SOMETHING and no index built from that line can say what, so
+ *     the number is declared here rather than left for a reader to infer from
+ *     a section that otherwise looks complete.
+ *   - the SCOPE line — which bodies and which comments were read at all.
+ *
+ * ⛔ No row cap, and that is a bounded choice rather than an oversight: the
+ * population is the maintainer's answer queue (1–9 cards across the boards this
+ * was measured on), so the ceiling this section keeps is the PER-ROW dependent
+ * cap, and it reuses `BLOCKING_DEPENDENT_LIST_CAP` rather than inventing a
+ * second number for the same fan-out H14 already bounds.
+ *
+ * @param {{ rows: Array<{ issue: object, dependents: number[] }>, inbox?: number,
+ *   unmeasured?: number }} [inventory] — from `decisionDependentIndex`, plus
+ *   the H4 count the sweep already computed.
+ * @param {{ markdown?: boolean }} [options]
+ */
+export function renderDecisionDependents(inventory, { markdown = false } = {}) {
+  if (!inventory) return [];
+  const rows = inventory.rows ?? [];
+  const inbox = inventory.inbox ?? 0;
+  const unmeasured = inventory.unmeasured ?? 0;
+  const head = markdown
+    ? ['### Decision-box dependency flags (instruction ④)', '']
+    : ['', 'Decision-box dependency flags (instruction ④)'];
+
+  head.push(
+    `Report-only and derived at READ TIME: a card below is an open ` +
+      `\`${GOVERNED_PR_DECISION_LABEL}\` card that at least one OPEN card's \`Blocked-by:\` line ` +
+      `names, and ⛔ no priority label is written for it. The standing instruction this ` +
+      `discharges, verbatim: 「${INSTRUCTION_FOUR_RULING}」 It is one lookup over the same ` +
+      `reverse index H14 is judged against — no second channel and no second parser (#17968).`,
+    '',
+  );
+
+  if (rows.length === 0) {
+    head.push(
+      markdown
+        ? '_No open decision card is named by any open card\'s `Blocked-by:` line. The inbox was READ — this is a clean reading, not an unread one._'
+        : '  (no open decision card is named by any open `Blocked-by:` line — read, not unread)',
+    );
+  } else {
+    for (const { issue, dependents } of rows) {
+      const shown = dependents.slice(0, BLOCKING_DEPENDENT_LIST_CAP);
+      const named = shown.map((n) => `#${n}`).join(', ');
+      const more = dependents.length > shown.length ? ` +${dependents.length - shown.length} more` : '';
+      const waiters = `waited on by ${dependents.length} open card(s): ${named}${more}`;
+      if (markdown) {
+        head.push(`- [#${issue.number}](${issue.html_url}) — ${waiters}`);
+      } else {
+        head.push(`  #${issue.number} ${waiters}`, `     ${issue.html_url}`);
+      }
+    }
+  }
+
+  const count =
+    `${rows.length} of ${inbox} open \`${GOVERNED_PR_DECISION_LABEL}\` card(s) have an open ` +
+    `downstream dependent.`;
+  const notMeasured =
+    `NOT MEASURED beside it: ${unmeasured} open \`pm:blocked\` card(s) carry no machine-readable ` +
+    `\`Blocked-by:\` line in EITHER channel — H4's own count, reused rather than re-derived. ` +
+    `Whatever those cards wait on cannot appear above. ⛔ Cite BOTH numbers or write NOT ` +
+    `MEASURED: the flag count alone is a number that ran, and therefore reads as complete.`;
+  const scope =
+    `Population scope: dependent BODIES are read from every open issue in this repo (the ` +
+    `unscoped listing); dependent COMMENTS only from open \`pm:blocked\` / \`pm:blocking\` cards ` +
+    `whose body carries no \`Blocked-by:\` line. A dependent that states the wait in a comment ` +
+    `and carries neither label, and any dependent in a sibling repo, is outside this reading — ` +
+    `unread, not absent.`;
+
+  head.push('', ...(markdown ? [`_${count}_`, '', `_${notMeasured}_`, '', `_${scope}_`] : [`  ${count}`, `  ${notMeasured}`, `  ${scope}`]));
+  return head;
+}
+
+/**
  * The terminal report — byte-identical to what this script printed before the
  * format switch existed. Findings arrive already sorted by issue number and
  * that order is kept: a terminal has no fold, so there is nothing for a
@@ -14557,6 +14777,7 @@ export function renderPlain(findings, counts, options = {}) {
   );
   lines.push(...renderDanglingReferences(options.references, { markdown: false }));
   lines.push(...renderTriggerIndex(options.triggerIndex, { markdown: false }));
+  lines.push(...renderDecisionDependents(options.decisions, { markdown: false }));
   lines.push(
     ...renderClosedResidueCensus(options.census, {
       markdown: false,
@@ -15336,9 +15557,17 @@ export function renderMarkdown(findings, counts, options = {}) {
   // H40 leads the reserved block (#13634): it is the only section here that can
   // carry an ALARM, and the reservation is the whole point of putting it in a
   // section rather than in the finding rows the trim eats (#13947).
+  // The decision-box dependency flags (instruction ④, #17968) ride the same
+  // reservation and sit directly BELOW the H17 index, which is the placement
+  // their reading argues for: both are inventories a dispatching seat reads on
+  // purpose, and a brief quotes the two of them in one glance. A section whose
+  // whole subject is 「is anyone waiting on a ruling nobody knows is owed」 is
+  // the last thing a noisy board may truncate away — losing it restores exactly
+  // the silence it was added to end.
   const indexBlock = [
     ...renderDanglingReferences(options.references, { markdown: true }),
     ...renderTriggerIndex(options.triggerIndex, { markdown: true }),
+    ...renderDecisionDependents(options.decisions, { markdown: true }),
     ...renderClosedResidueCensus(options.census, { markdown: true, fresh: options.freshResidue }),
     ...renderRatePremise(options.ratePremise, { markdown: true }),
   ];
@@ -16411,8 +16640,12 @@ async function sweep(options = {}) {
   // as a reserved SECTION rather than as finding rows, so it cannot travel back
   // on `findings` (#13634).
   const references = { report: null };
+  // Instruction ④'s inventory rides out the same way, and for `hold`'s reason:
+  // it is gathered deep in the sweep (where the `Blocked-by:` index is built)
+  // and rendered at the top, as a reserved section rather than as findings.
+  const decisions = { rows: [], inbox: 0 };
   try {
-    await sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seenClosed, stats, hold, references, isTracked);
+    await sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seenClosed, stats, hold, references, isTracked, decisions);
   } catch (err) {
     err.sweptSoFar = seen.size + seenPrs.size + seenMerged.size + seenUnscoped.size + seenClosed.size;
     throw err;
@@ -16447,6 +16680,15 @@ async function sweep(options = {}) {
     probed: hold.probed,
     tracked: tracked ? tracked.size : null,
   };
+  // Instruction ④'s NOT-MEASURED population: H4's OWN rows, counted rather than
+  // re-derived (one computation, two readers). It has to be read HERE because
+  // H4 is emitted late in the sweep — after the index the section's rows come
+  // from — and counting the rows it actually emitted is the only reading that
+  // cannot drift from the rows the anchor prints.
+  const decisionIndex = {
+    ...decisions,
+    unmeasured: findings.filter(([, code]) => code === 'H4').length,
+  };
   // H39's census (#13526) — gathered AFTER the findings, so a census that
   // cannot run costs the report nothing that was already gathered. Its failure
   // is rendered as a failure rather than swallowed: this leg's whole output is
@@ -16469,6 +16711,7 @@ async function sweep(options = {}) {
       ? renderMarkdown(findings, counts, {
           provenance: options.provenance,
           triggerIndex,
+          decisions: decisionIndex,
           census,
           freshResidue,
           ratePremise,
@@ -16476,6 +16719,7 @@ async function sweep(options = {}) {
         })
       : renderPlain(findings, counts, {
           triggerIndex,
+          decisions: decisionIndex,
           census,
           freshResidue,
           ratePremise,
@@ -18030,7 +18274,7 @@ export async function sweepScheduledWorkflows(findings, stats = {}, options = {}
   stats.scheduledInactiveNames = inactive.length > 0 ? inactive.join(', ') : null;
 }
 
-async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seenClosed, stats = {}, hold = null, references = null, isTracked = () => false) {
+async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seenClosed, stats = {}, hold = null, references = null, isTracked = () => false, decisions = null) {
   // H57 (#17132) — FIRST in the sweep, and the placement is mechanism rather
   // than preference. This is the only pass here whose subject is not a card or
   // a PR: it touches `seen`, the comment cache and the reference corpus not at
@@ -18874,6 +19118,11 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
 
   const blockingIndex = buildBlockingIndex(unscoped, { comments: fallback.comments });
   const indexComplete = fallback.unreadable.size === 0;
+  // Instruction ④ (#17968) — the SAME index, asked the decision box's question.
+  // Here rather than beside the renderer because this is where both inputs are
+  // in hand: the unscoped open listing and the index it just fed. No request,
+  // no second parser, and no widening of what H14 reads.
+  if (decisions) Object.assign(decisions, decisionDependentIndex(unscoped, blockingIndex));
   for (const issue of unscoped) {
     const incoherent = h14BlockingCacheIncoherent(issue, blockingIndex, { indexComplete });
     if (incoherent) findings.push([issue, 'H14', incoherent]);
@@ -23240,6 +23489,124 @@ async function selfTest() {
   t('summaryLine: reports the H9 restart-comment reads', saidBy('h9Restart', summaryLine({ ...counts, restartCandidates: 7, restartProbed: 7 }, 0)).includes('`Restart-when:` hold comments read on 7 of 7 H9 candidate(s)'), true);
   t('summaryLine: …and a partial restart read says so', saidBy('h9Restart', summaryLine({ ...counts, restartCandidates: 7, restartProbed: 2 }, 0)).includes("read on 2 of 7 H9 candidate(s) — each unread thread fires its own card's H9 row"), true);
   t('summaryLine: absent H9 counts degrade to 0, never to undefined', saidBy('h9Restart', summaryLine(counts, 0)).includes('`Restart-when:` hold comments read on 0 of 0'), true);
+
+  // -- Decision-box dependency flags: standing instruction ④ (#17968) -------
+  //
+  // The section discharges a ruling that was measured UNRUNNABLE on the triage
+  // seat's own tool surface, so these cases pin the two properties that make it
+  // runnable HERE and honest anywhere: it reads the index the patrol already
+  // builds for H14 (both channels, one parser), and NEITHER of its two numbers
+  // can go missing — the flag count alone is the false green the card predicted.
+  const decisionCard = (number) =>
+    carded(number, ['needs-user-decision'], '', { html_url: `https://example.test/${number}` });
+  const dependentCard = (number, body) => carded(number, ['pm:blocked'], body);
+  // The real pair, run together: `buildBlockingIndex` then the gathering pass.
+  // Fixtures rather than a hand-built Map, so a change to either the parser or
+  // the index's channel union reaches these cases.
+  const decisionBox = (cards, comments = []) =>
+    decisionDependentIndex(
+      cards,
+      buildBlockingIndex(cards, { repo: 'objectstack-ai/objectstack', comments: new Map(comments) }),
+    );
+
+  // (a) Two dependents on one decision card — the shape ④ exists to surface.
+  const twoDeps = decisionBox([
+    decisionCard(16348),
+    dependentCard(9709, 'Blocked-by: #16348'),
+    dependentCard(9828, 'Blocked-by: #16348'),
+  ]);
+  t('④ gather: a decision card with two dependents is ONE row naming both', twoDeps.rows.map((r) => `${r.issue.number}:${r.dependents.join('+')}`).join(','), '16348:9709+9828');
+  const mdBox = renderDecisionDependents({ ...twoDeps, unmeasured: 3 }, { markdown: true }).join('\n');
+  t('④ markdown: the row links the card and names both waiters', mdBox.includes('- [#16348](https://example.test/16348) — waited on by 2 open card(s): #9709, #9828'), true);
+
+  // (b) A decision card nobody waits on is ABSENT from the rows — and still
+  // counted, which is the whole point of the count line being a PAIR.
+  const quietBox = decisionBox([decisionCard(17000), dependentCard(9709, 'Blocked-by: #12345')]);
+  t('④ gather: a decision card nobody waits on is NOT a row', quietBox.rows.length, 0);
+  t('④ gather: …but it is still counted in the inbox total', quietBox.inbox, 1);
+  const quietMd = renderDecisionDependents({ ...quietBox, unmeasured: 0 }, { markdown: true }).join('\n');
+  t('④ count: a quiet inbox renders as 0 of 1, never as a bare 0', quietMd.includes('_0 of 1 open `needs-user-decision` card(s) have an open downstream dependent._'), true);
+  t('④ count: …and an EMPTY decision box is the distinguishable 0 of 0', renderDecisionDependents({ rows: [], inbox: 0, unmeasured: 0 }, { markdown: true }).join('\n').includes('_0 of 0 open `needs-user-decision` card(s)'), true);
+  t('④ count: an empty section says the inbox was READ', quietMd.includes('The inbox was READ — this is a clean reading, not an unread one'), true);
+
+  // (c) The COMMENT channel counts — the #8813 body-escaping hazard is why
+  // seats park the line there, and a body-only reading would miss it entirely.
+  const commentCards = [decisionCard(16348), dependentCard(9969, 'no machine-readable line in the body at all')];
+  const commentBox = decisionBox(commentCards, [[9969, ['Blocked-by: #16348 — parked here rather than in the body']]]);
+  t('④ channel: a dependent that states the wait in a COMMENT counts', commentBox.rows.map((r) => r.dependents.join(',')).join(''), '9969');
+  t('④ channel control: …and with that channel unread the same card is NOT a row', decisionBox(commentCards).rows.length, 0);
+
+  // (d) The NOT-MEASURED number is H4's OWN count. The fixture is run through
+  // `h4BlockedNoBlockedBy` here for the same reason the sweep counts the H4
+  // ROWS IT EMITTED rather than re-deriving the population: two derivations of
+  // one number drift, and the drift would show up as a section that looks
+  // complete. ⛔ Never replace this with a literal.
+  const lossFixture = [
+    issue(['pm:blocked'], [], 'Blocked-by: #16348'),
+    issue(['pm:blocked'], [], 'held by the spec rewrite; nothing machine-readable here'),
+    issue(['pm:blocked'], [], 'waiting on the maintainer, stated in prose only'),
+  ];
+  const h4Count = lossFixture.filter((c) => h4BlockedNoBlockedBy(c, []) !== null).length;
+  t('④ loss: the fixture really does fire H4 on two of its three cards', h4Count, 2);
+  t('④ loss: the NOT-MEASURED line carries that very count', renderDecisionDependents({ ...quietBox, unmeasured: h4Count }, { markdown: true }).join('\n').includes('NOT MEASURED beside it: 2 open `pm:blocked` card(s) carry no machine-readable `Blocked-by:` line in EITHER channel'), true);
+  t('④ loss: …and says it is H4\'s, reused rather than re-derived', mdBox.includes("H4's own count, reused rather than re-derived"), true);
+  t('④ loss: …and forbids citing the flag count alone', mdBox.includes('Cite BOTH numbers or write NOT MEASURED'), true);
+
+  // (e) The cap: named few, counted all, overflow announced. The ceiling is
+  // `BLOCKING_DEPENDENT_LIST_CAP` — H14's, for the same fan-out — rather than a
+  // second constant for the same question.
+  const manyDecisionDeps = decisionBox([
+    decisionCard(16348),
+    ...Array.from({ length: BLOCKING_DEPENDENT_LIST_CAP + 2 }, (_, i) => dependentCard(9000 + i, 'Blocked-by: #16348')),
+  ]);
+  const manyMd = renderDecisionDependents({ ...manyDecisionDeps, unmeasured: 0 }, { markdown: true }).join('\n');
+  t('④ cap: every dependent is gathered', manyDecisionDeps.rows[0].dependents.length, BLOCKING_DEPENDENT_LIST_CAP + 2);
+  t('④ cap: …but only the cap is NAMED', (manyMd.match(/#90\d\d/gu) ?? []).length, BLOCKING_DEPENDENT_LIST_CAP);
+  t('④ cap: …the head count is the TOTAL, not the shown few', manyMd.includes(`waited on by ${BLOCKING_DEPENDENT_LIST_CAP + 2} open card(s)`), true);
+  t('④ cap: …and the overflow is counted, never silently dropped', manyMd.includes('+2 more'), true);
+
+  // The ruling itself. Pinned by its load-bearing parts rather than by a second
+  // copy of its bytes: a duplicate literal is the drift `RELEASE_RULE_LINE`'s
+  // header warns about, while a paraphrase is what these four cases catch.
+  t('④ ruling: the section quotes the constant, not a paraphrase of it', mdBox.includes(`「${INSTRUCTION_FOUR_RULING}」`), true);
+  t('④ ruling: the constant is ONE unwrapped line — re-wrapping a ruling rewrites it', INSTRUCTION_FOUR_RULING.includes('\n'), false);
+  t('④ ruling: …it names the 2026-08-11 maintainer ruling', INSTRUCTION_FOUR_RULING.includes('2026-08-11 维护者裁决'), true);
+  t('④ ruling: …and carries the criterion that makes ④ measurable', INSTRUCTION_FOUR_RULING.includes('任一 open 卡的 `Blocked-by:` 行指向它'), true);
+  t('④ ruling: …and the ⛔ half a flag must never become', INSTRUCTION_FOUR_RULING.includes('⛔ 不打优先级标签'), true);
+
+  // Posture and scope — the two sentences that keep a reader from over-reading
+  // a number that ran.
+  t('④ posture: report-only, derived at READ TIME', mdBox.includes('derived at READ TIME'), true);
+  t('④ posture: …and it writes no priority label', mdBox.includes('no priority label is written for it'), true);
+  t('④ scope: the section declares which BODIES it read', mdBox.includes('dependent BODIES are read from every open issue in this repo'), true);
+  t('④ scope: …and the narrower COMMENT population', mdBox.includes('dependent COMMENTS only from open `pm:blocked` / `pm:blocking` cards'), true);
+  t('④ scope: …and calls the remainder unread, never absent', mdBox.includes('unread, not absent'), true);
+
+  // Absent inventory -> byte-identical to the report this script already prints.
+  t('④ render: no inventory supplied renders no section at all', renderDecisionDependents(undefined).length, 0);
+  t('④ render: …so a two-argument renderMarkdown carries no section', renderMarkdown([quietRow], counts).includes('Decision-box dependency flags'), false);
+  t('④ render: …and a two-argument renderPlain is unchanged', renderPlain([quietRow], counts).endsWith('not a gate verdict.'), true);
+
+  // Plain medium, and the terminal's one placement rule.
+  const plainBox = renderPlain([quietRow], counts, { decisions: { ...twoDeps, unmeasured: 3 } });
+  t('④ plain: the section is titled and present', plainBox.includes('Decision-box dependency flags (instruction ④)'), true);
+  t('④ plain: a row names the card and its waiters', plainBox.includes('  #16348 waited on by 2 open card(s): #9709, #9828'), true);
+  t('④ plain: …with the card URL on its own line', plainBox.includes('\n     https://example.test/16348'), true);
+  t('④ plain: the summary sentence is still the last line', plainBox.endsWith('not a gate verdict.'), true);
+
+  // Markdown placement and the reservation. The section sits BELOW the H17
+  // index so a brief reads the two inventories in one glance, and it takes the
+  // same budget reservation — a board noisy enough to trim the findings must
+  // not be able to trim away the answer to 「is anyone waiting on a ruling」.
+  const bothSections = renderMarkdown([quietRow], counts, { triggerIndex: triggerIdx, decisions: { ...twoDeps, unmeasured: 3 } });
+  t('④ placement: the section renders as a heading', bothSections.includes('### Decision-box dependency flags (instruction ④)'), true);
+  t('④ placement: …below the findings', bothSections.indexOf('### Findings') < bothSections.indexOf('### Decision-box dependency flags'), true);
+  t('④ placement: …and directly below the H17 index it is read beside', bothSections.indexOf('### On-hold trigger-file index') < bothSections.indexOf('### Decision-box dependency flags'), true);
+  t('④ render: a findings-clean sweep still renders the section', renderMarkdown([], counts, { decisions: { ...twoDeps, unmeasured: 3 } }).includes('### Decision-box dependency flags'), true);
+  const crowdedBox = renderMarkdown(manyRows, counts, { triggerIndex: triggerIdx, decisions: { ...twoDeps, unmeasured: 3 } });
+  t('④ budget: a truncated findings list still carries the section', crowdedBox.includes('### Decision-box dependency flags'), true);
+  t('④ budget: …and the H17 index beside it', crowdedBox.includes('### On-hold trigger-file index'), true);
+  t('④ budget: …and the whole body stays inside the render budget', crowdedBox.length <= MARKDOWN_BODY_BUDGET, true);
 
   // -- #13947: family legibility, and a trim that ranks by WHAT a row is ------
   //
