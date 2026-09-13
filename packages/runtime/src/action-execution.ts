@@ -1468,10 +1468,25 @@ export function buildActionEngineFacade(_deps: ActionExecutionDeps, ql: any, ec?
         },
         // Both spellings are DECLARED contract (#15117), not a tolerance: the
         // spec's `ActionEngineFacade.delete` takes `string | string[]`.
+        //
+        // [#17620] And there is no third, undeclared one. This loop used to
+        // open with `if (id != null)`, so a NULLISH element was silently
+        // skipped and the call resolved as though the deletion had happened —
+        // a silent no-op on a destructive verb. The declared type excludes
+        // nullish, so no typed caller ever reached it; the population was
+        // UNTYPED hosts (a JS host, a `registerAction` handler whose slot is
+        // still `(ctx: any)`), which is exactly the population that cannot see
+        // the loss. Every id now goes to `ql.delete` as written, where the
+        // engine's own dispatch predicate refuses a `where.id` that is not a
+        // truthy scalar (`ENGINE_DELETE_REJECT_MESSAGE`) — the loud answer the
+        // declaration already implied. Removing the guard declares nothing new:
+        // it pulls the runtime back onto the contract that is already on the
+        // record, here, in the spec member doc, and in the `never a null id`
+        // pin at `packages/spec/src/ui/action-params.test.ts`.
         async delete(object: string, idOrIds: string | string[]): Promise<void> {
             const ids = Array.isArray(idOrIds) ? idOrIds : [idOrIds];
             for (const id of ids) {
-                if (id != null) await ql.delete(object, { where: { id }, context });
+                await ql.delete(object, { where: { id }, context });
             }
         },
         async find(object: string, query: Record<string, unknown>): Promise<Array<Record<string, unknown>>> {

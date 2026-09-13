@@ -405,13 +405,19 @@ const PENDING_REGISTRATION_ALLOWANCE = Object.freeze({
  * not red — set well below the 70 measured when this landed.
  *
  * ⚠️ ⛔ THE FLOOR ALONE CANNOT CATCH A LOST GLOB, and saying otherwise would be
- * the same false comfort this gate exists to refuse. Measured on this tree, per
- * workspace glob: `packages/*` 31, `packages/services/*` 16,
- * `packages/plugins/*` 15, `packages/drivers/*` 5, `examples/*` 5,
- * `packages/qa/*` 4, `packages/connectors/*` 4, `packages/apps/*` 3,
- * `packages/triggers/*` 3, `packages/adapters/*` 1, `apps/*` 1 — 88 members
- * before the published filter. Losing the LARGEST glob entirely still leaves 57,
- * comfortably over any floor low enough not to red on ordinary churn — and
+ * the same false comfort this gate exists to refuse. ⭐ The numbers below are
+ * the PUBLISHED population — the one this floor is a floor ON. An earlier
+ * revision of this paragraph counted DIRECTORIES (`packages/*` 31, 88 in all),
+ * which is a different quantity from the one the floor reads, so the margin it
+ * reported flattered the floor by ten. Measured on this tree, per workspace
+ * glob: `packages/*` 23, `packages/services/*` 16, `packages/plugins/*` 15,
+ * `packages/drivers/*` 5, `packages/connectors/*` 4, `packages/apps/*` 3,
+ * `packages/triggers/*` 3, `packages/adapters/*` 1, and `packages/qa/*`,
+ * `apps/*`, `examples/*` 0 each (every member under those three is private) —
+ * 70 published members, out of 80 manifest-carrying member directories and 88
+ * directories before the manifest filter. Losing the LARGEST glob entirely
+ * still leaves 47 — comfortably over any floor low enough not to red on
+ * ordinary churn, but a margin of 7, not the 17 the directory count implied. And
  * `expandWorkspaceGlob` returns `[]` for a glob whose parent directory is gone,
  * SILENTLY. So `packages/*` could vanish, taking `packages/spec` with it, and a
  * floor of 40 would not notice.
@@ -423,7 +429,36 @@ const PENDING_REGISTRATION_ALLOWANCE = Object.freeze({
 const PUBLISHED_SOURCE_FACE_FLOOR = 40;
 
 /**
- * [#16649] Every non-exclusion workspace glob that expands to NOTHING.
+ * [#17145] The expansion this pin means by "member": the directories a glob
+ * resolves to that actually carry a `package.json`.
+ *
+ * ⛔ NOT `expandWorkspaceGlob` raw. Eight of this workspace's 88 directories are
+ * CATEGORY directories holding no manifest at all — all eight under `packages/`:
+ * adapters, apps, connectors, drivers, plugins, qa, services, triggers. So a raw
+ * expansion counts a thing that is not a member and the pin's own message ("NO
+ * member") says something the pin did not measure. The failure that hides in
+ * the gap is the realistic one: members move one level deeper,
+ * `pnpm-workspace.yaml` does not follow, the parent still exists, the glob
+ * still resolves to category directories — and the pin stays quiet while every
+ * member under it has left the published face. Measured before this filter
+ * landed: `content/*` (two directories, neither a member) was accepted silently.
+ *
+ * ⛔ And NOT the PUBLISHED filter either, which would be the wrong correction in
+ * the other direction: three live globs (`packages/qa/*`, `apps/*`,
+ * `examples/*`) enumerate real members of which none is published, so a
+ * published-filtered pin reds on a healthy tree. "Member" is pnpm's word and
+ * the manifest is pnpm's test; publication is the FLOOR's question, below.
+ *
+ * @param {string} root
+ * @param {string} glob
+ * @returns {string[]} repo-relative member directories, unsorted
+ */
+function expandWorkspaceMembers(root, glob) {
+  return expandWorkspaceGlob(root, glob).filter((dir) => existsSync(join(root, dir, 'package.json')));
+}
+
+/**
+ * [#16649] Every non-exclusion workspace glob that expands to NO MEMBER.
  *
  * Zero on this tree, and that is the whole point: a glob expanding to nothing
  * is either a directory that moved without `pnpm-workspace.yaml` following it,
@@ -432,7 +467,9 @@ const PUBLISHED_SOURCE_FACE_FLOOR = 40;
  * cleanup. Both are worth a red, and neither is visible in a member COUNT.
  *
  * `readGlobs` / `expand` are injected so `--self-test` can drive a workspace
- * this repo does not have.
+ * this repo does not have. ⚠️ Every caller that drives it over the LIVE tree
+ * passes {@link expandWorkspaceMembers} — production and `--self-test` reading
+ * two different populations is the defect #17145 carded, not a spare knob.
  */
 export function emptyWorkspaceGlobs({ readGlobs, expand }) {
   return readGlobs()
@@ -5755,21 +5792,45 @@ function selfTest() {
       'an EXCLUSION glob expands to nothing by definition and is not a finding (control)');
     ok(emptyWorkspaceGlobs({
       readGlobs: () => readWorkspaceGlobs(ROOT),
-      expand: (g) => expandWorkspaceGlob(ROOT, g),
+      expand: (g) => expandWorkspaceMembers(ROOT, g),
     }).length === 0,
       'the LIVE workspace has a glob that expands to nothing — the production run refuses on this too');
-    // The measurement that says the floor alone is not enough, held against the
-    // live tree rather than left as a claim in a comment.
+    // [#17145] The same expansion, shown to be the MANIFEST-filtered one and not
+    // the raw directory listing. Without this the two could drift apart again
+    // silently, which is the whole defect: a glob resolving only to category
+    // directories is a lost population, and the raw expansion calls it healthy.
+    ok(expandWorkspaceMembers(ROOT, 'packages/*').length < expandWorkspaceGlob(ROOT, 'packages/*').length,
+      'packages/* resolves to directories that carry no manifest, so the manifest filter is load-bearing here ' +
+        '— if these two ever agree, this case is no longer proving the pin counts members');
+    ok(emptyWorkspaceGlobs({
+      readGlobs: () => ['content/*'],
+      expand: (g) => expandWorkspaceMembers(ROOT, g),
+    }).join(',') === 'content/*',
+      'a LIVE glob resolving only to manifest-less directories (content/blog, content/docs) is reported by ' +
+        'name — before #17145 the raw expansion accepted it silently, which is how members can move one ' +
+        'level deeper with pnpm-workspace.yaml left behind and nothing red');
+    // [#17145] The measurement that says the floor alone is not enough, held
+    // against the live tree — and computed on the PUBLISHED population, which is
+    // the one PUBLISHED_SOURCE_FACE_FLOOR is a floor on. Computing it on
+    // directories (88/31) compares the margin of one quantity against the floor
+    // of another and the agreement is coincidental.
     {
+      const readManifest = (rel) => readFileSync(join(ROOT, rel), 'utf8');
       const perGlob = readWorkspaceGlobs(ROOT)
         .filter((g) => !isExclusionGlob(g))
-        .map((g) => expandWorkspaceGlob(ROOT, g).length);
+        .map((g) => derivePublishedFaces({ dirs: expandWorkspaceMembers(ROOT, g), readManifest }).length);
       const total = perGlob.reduce((a, b) => a + b, 0);
+      // The decomposition has to BE the floor's population, or the margin below
+      // is arithmetic over a set nothing else reads. Two globs overlapping would
+      // double-count here and inflate it; `live` is deduplicated, this is not.
+      ok(total === live.length,
+        `the per-glob published counts sum to ${total} but the live published face enumerates ` +
+          `${live.length} — the margin below would be computed over a population the floor never reads`);
       ok(total - Math.max(...perGlob) > PUBLISHED_SOURCE_FACE_FLOOR,
-        `losing the largest workspace glob would leave ${total - Math.max(...perGlob)} member(s), which is ` +
-          `BELOW the floor of ${PUBLISHED_SOURCE_FACE_FLOOR} — if this ever flips, the floor really would ` +
-          'catch a lost glob and PUBLISHED_SOURCE_FACE_FLOOR\'s docblock is stale. It is asserted in the ' +
-          'direction that keeps the per-glob pin necessary, not in the direction that flatters the floor');
+        `losing the largest workspace glob would leave ${total - Math.max(...perGlob)} published member(s), ` +
+          `which is BELOW the floor of ${PUBLISHED_SOURCE_FACE_FLOOR} — if this ever flips, the floor really ` +
+          'would catch a lost glob and PUBLISHED_SOURCE_FACE_FLOOR\'s docblock is stale. It is asserted in ' +
+          'the direction that keeps the per-glob pin necessary, not in the direction that flatters the floor');
     }
 
     // Registration is the way out: a registered code derives no site at all.
@@ -5899,7 +5960,7 @@ function main() {
   // members than any survivable floor can detect (see PUBLISHED_SOURCE_FACE_FLOOR).
   const emptyGlobs = emptyWorkspaceGlobs({
     readGlobs: () => readWorkspaceGlobs(ROOT),
-    expand: (glob) => expandWorkspaceGlob(ROOT, glob),
+    expand: (glob) => expandWorkspaceMembers(ROOT, glob),
   });
   if (emptyGlobs.length > 0) {
     throw new Error(
@@ -5943,7 +6004,8 @@ function main() {
     `${registered.size} registered codes (${ledger.size} ledger + ${standard.size} standard); ` +
     `${sites.length} unregistered code-stamping site(s) found; ${declared.length} classified.\n` +
     `  [#16649] the published face: ${publishedFaces.length} published member(s), each contributing its ` +
-    `src/ (floor ${PUBLISHED_SOURCE_FACE_FLOOR}, and every workspace glob checked non-empty — the floor ` +
+    `src/ (floor ${PUBLISHED_SOURCE_FACE_FLOOR}, and every workspace glob checked to hold at least one ` +
+    `manifest-carrying member — the floor ` +
     `alone cannot see a lost glob), holding ${publishedSites.length} stamp site(s); plus the stricter ` +
     `spec face, ${specSites.length} site(s) under ${SPEC_SOURCE_FACE}. Every one of them is ` +
     `'foreign-vocabulary' or 'runtime-pinned' — any other verdict there is a finding: those trees ship in ` +

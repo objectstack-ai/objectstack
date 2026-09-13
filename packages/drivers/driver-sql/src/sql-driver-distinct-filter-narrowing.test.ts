@@ -51,6 +51,25 @@ import { SqlDriver } from './index.js';
 /** `true` for `any` and for nothing else — `0 extends 1 & T` holds only there. */
 type IsAny<T> = 0 extends 1 & T ? true : false;
 
+/**
+ * [#17879] MEASURED — this door's `IsAny` half is a PHANTOM half, and the
+ * `ContainsAny` detector (#17876) does NOT close it here. On disk, against
+ * this file's own driver, with both directions predicted before running:
+ *
+ *   door resolves to      `FilterCondition | undefined`
+ *   CONTROL  `filters?: any`                 3 errors here (the `narrowed`
+ *                                             leg + both TS2578) => it fires
+ *   NESTED   `filters?: Record<string, any>`  0 errors here => no half at all
+ *   the same run with `ContainsAny` swapped in: still 0 => it buys nothing
+ *
+ * TWO reasons, both measured: `ContainsAny` distributes over a union, so an
+ * optional parameter (`X | undefined`) answers `boolean`, which passes both
+ * assertion forms; and `ContainsAny<FilterCondition>` is already `true` —
+ * the contract type is an open map (`[key: string]: any`), so the detector is
+ * SATURATED on the correct door and cannot separate it from a regression.
+ * No swap was made. The two measured repairs are in the #17879 report.
+ */
+
 describe('SqlDriver.distinct takes a bare FilterCondition (#6320)', () => {
   let driver: SqlDriver;
   let knexInstance: Knex;

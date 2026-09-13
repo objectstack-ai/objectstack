@@ -213,10 +213,11 @@ const fakeRotatingCtx = (
  * WHO does this set of request headers resolve to, asked through the exact
  * seam the framework's data routes use.
  *
- * `null` for anonymous. Never a status code — better-auth answers a dead
- * session with a 200 and a JSON `null`, so a status assertion is blind here.
- * That is precisely how this defect read in the field: `get-session` came back
- * 200 and EMPTY.
+ * `null` for anonymous. Never a status code — this asks better-auth's JS API
+ * (`auth.api.getSession`), which answers a dead session with a plain `null`
+ * return value and has no status to read. ⚠️ Unchanged by #17238, which moved
+ * the HTTP answer only. That is precisely how this defect read in the field:
+ * `get-session` came back 200 and EMPTY.
  */
 const principalFor = async (
   manager: AuthManager,
@@ -229,9 +230,10 @@ const principalFor = async (
 };
 
 /**
- * A real protected 2FA route, driven with the given credentials. `get-session`
- * alone is not enough evidence: it answers 200 for anonymous. This is the
- * route the card names, and it is the one that tells 200 from 401.
+ * A real protected 2FA route, driven with the given credentials. The JS-API
+ * session read alone is not enough evidence — it answers a bare `null` with no
+ * status at all. This is the route the card names, and it is the one that
+ * tells 200 from 401.
  */
 const getTotpUri = (manager: AuthManager, headers: Record<string, string>) =>
   post(manager, '/two-factor/get-totp-uri', { password: PASSWORD }, headers);
@@ -353,9 +355,10 @@ describe('#10701 — the three cases from the card, one arrangement', () => {
   }, 60_000);
 
   it('the same three cases on a real protected route, not just `get-session`', async () => {
-    // `get-session` answers 200 for anonymous, so status codes there prove
-    // nothing. `get-totp-uri` is the route the card names, and against the
-    // unfixed endpoint it answered 401 for both bearer cases.
+    // The JS-API session read this file's `principalFor` uses has no status at
+    // all, so status codes cannot come from there. `get-totp-uri` is the route
+    // the card names, and against the unfixed endpoint it answered 401 for
+    // both bearer cases.
     const { manager, echoedToken, rotatedCookie } = await arrangeCompletedEnrolment();
 
     expect((await getTotpUri(manager, { authorization: `Bearer ${echoedToken}` })).status).toBe(200);

@@ -17,7 +17,12 @@ import {
   formatDefKeyCollisions,
   type EmittedDef,
 } from './lib/def-key-collisions';
-import { RENAMED_DEFS, carryAuthorableKey, checkRenameTable } from './lib/renamed-defs';
+import {
+  RENAMED_DEFS,
+  carryAuthorableKey,
+  checkRenameBaselineCollisions,
+  checkRenameTable,
+} from './lib/renamed-defs';
 // The Zod-graph walkers the authorable-surface reachability BFS runs on. Extracted
 // at #5317 so the pipe-direction rule (#4488) is assertable without running the
 // whole generator — see scripts/zod-graph.test.ts.
@@ -46,6 +51,10 @@ import {
   FOREIGN_JSON_SCHEMA_ARTIFACTS,
   clearOwnedOutputs,
 } from './lib/json-schema-out-dir';
+// The ONE write point for `json-schema/`'s freshness stamp (#16175). Imported
+// from the module that also READS it, because a digest written by one function
+// and compared by another is a comparison that means nothing the day they drift.
+import { recordSchemaStamp } from '../../../scripts/check-regen-pending.mjs';
 import {
   AUTHORABLE_SURFACE_DIR_NAME,
   SCHEMA_MANIFEST_DIR_NAME,
@@ -867,10 +876,40 @@ try {
   process.exit(1);
 }
 
+/**
+ * Refuse a declared rename that would COLLAPSE two of a baseline's own keys
+ * (#17383). Every carry below is a plain `Map.set` keyed by the carried key, so
+ * a rename whose source and target both hold the same property name in this
+ * baseline loses one of the two recorded facts — its retired state and its
+ * default — before any comparison runs. `checkRenameTable` cannot see this: it
+ * validates the table against the defs this build EMITS, and the damage lives
+ * in the baseline. Called once per baseline this script carries, because the
+ * in-tree snapshot and the upstream anchor are different documents and a
+ * collision can exist in either alone.
+ */
+function assertNoRenameBaselineCollisions(label: string, baselineKeys: Iterable<string>): void {
+  const problems = checkRenameBaselineCollisions(baselineKeys);
+  if (problems.length === 0) return;
+  console.error(
+    `\n❌ ${problems.length} declared def rename(s) would COLLAPSE keys of the ${label}:`,
+  );
+  for (const p of problems) console.error(`     - ${p}`);
+  console.error(
+    `\n   A rename may MOVE keys; it may never merge two of them onto one name. The carry\n` +
+    `   runs before every ratchet below, so a collapsed key makes the diff they report a\n` +
+    `   diff against input this script already corrupted — in both directions: a real\n` +
+    `   default change on the merged key can read as no change, and a key whose default\n` +
+    `   never moved can read as changed. See scripts/lib/renamed-defs.ts (#4684, #17383).`,
+  );
+  process.exit(1);
+}
+
 if (surfaceDoc) {
   const snapshot = new Map<string, boolean>(
     surfaceDoc.keys.map((e) => [e.replace(RETIRED_MARK, ''), e.endsWith(RETIRED_MARK)]),
   );
+
+  assertNoRenameBaselineCollisions(`committed ${SURFACE_FILE_NAME}`, snapshot.keys());
 
   // Carry the snapshot through any declared def rename FIRST, so every check
   // below compares like with like. A rename moves keys between defs; it must
@@ -2133,6 +2172,10 @@ let gitResolvedAnchor: { rev: string; keys: string[] } | null = null;
   if (base) {
     // Carry base keys through declared def renames first — same discipline as
     // the snapshot carry above — so a rename is never misread as a deletion.
+    assertNoRenameBaselineCollisions(
+      `upstream baseline ${base.rev.slice(0, 12)}`,
+      (base.doc.keys ?? []).map((entry) => entry.replace(RETIRED_MARK, '')),
+    );
     const baseSnapshot = new Map<string, boolean>();
     for (const entry of base.doc.keys ?? []) {
       const key = entry.replace(RETIRED_MARK, '');
@@ -2874,4 +2917,42 @@ writeFileWithRetry(bundledPath, JSON.stringify(bundledSchema, null, 2));
 console.log(`\n✅ Generated bundled schema: objectstack.json (${Object.keys(defs).length} definitions)`);
 
 console.log(`\n✅ Successfully generated ${count} schemas.`);
+
+// ─── The generation stamp (#16175) ───────────────────────────────────────────
+//
+// The LAST thing this script does, and that position is the whole argument.
+// `schemaTreeIsStale` in scripts/check-regen-pending.mjs asks whether
+// `json-schema/` may be believed, and answered it from mtimes alone: a `git
+// merge`, `git checkout` or `git worktree add` re-checks-out a source file with
+// IDENTICAL bytes, bumps its mtime, and the build that follows correctly does
+// not run (turbo's cache hashes content) — so the rule refused a tree that was
+// exactly current, and `check:docs` cost a full regeneration for nothing.
+//
+// Nothing recorded which sources this tree came from, so the rule had no
+// evidence of any kind to answer with. This is that evidence, and it is written
+// HERE rather than by the build for two reasons this file is the proof of:
+//
+//   - this script rebuilds the WHOLE tree unconditionally, before the `--check`
+//     / `--update-base` fork, so one write point covers `gen:schema`,
+//     `check:authorable-surface` and `gen:authorable-surface-base` alike;
+//   - every ratchet above exits 1 on refusal, and the clean at the top removes
+//     the previous stamp with the rest of this generator's outputs. So a stamp
+//     exists only for a run that emitted the tree beside it AND reached this
+//     line — a generation that died halfway leaves none, which is no evidence,
+//     which leaves the refusal standing.
+//
+// ⛔ It may only ever ACQUIT a tree the mtime rule has already accused. A failure
+// to write it is therefore reported and never thrown: no stamp is the
+// conservative state, and killing a successful generation over a missing
+// performance stamp would trade a slow gate for a broken build.
+const schemaStampDigest = recordSchemaStamp(PKG_DIR);
+if (schemaStampDigest) {
+  console.log(`✓ json-schema/.build-input-hash-schema ← ${schemaStampDigest.slice(0, 16)}…`);
+} else {
+  console.warn(
+    `⚠ json-schema/.build-input-hash-schema could not be written — the tree is generated and correct,\n` +
+      `  but nothing records which sources from, so the mtime freshness rule will keep refusing it\n` +
+      `  until the next build. Gates stay conservative; nothing here is wrong, only slower.`,
+  );
+}
 

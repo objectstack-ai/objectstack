@@ -72,9 +72,9 @@
  *      why the wiring workflow subscribes to the `edited` activity type — an
  *      author who rewords the sentence gets a fresh event with a fresh payload
  *      and a green run, with no push and no re-run. The identical trigger set
- *      and the identical reason are already in the duplicate-fix guard, the
- *      repo's other PR-body-scoped blocking check; this follows it rather than
- *      inventing a second shape.
+ *      and the identical reason are already in the duplicate-fix guard, one of
+ *      this repo's other PR-body-scoped blocking checks; this follows it rather
+ *      than inventing a second shape.
  *
  * The residual hole is named rather than hidden: `rerun_failed_jobs` on a run
  * whose body has since been fixed replays the stale body and stays red. The

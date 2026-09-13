@@ -166,22 +166,53 @@ describe('#14310 — a 5xx is never silent', () => {
     });
 
     it('a RETURNED 5xx envelope logs too — the path that leaves no throw to catch', async () => {
-        // `/notifications` with no messaging service answers through
-        // `deps.error(...)`: nothing is thrown, so `errorResponseBase` is never
-        // reached and `__obsRecordedError` is never set. This is the shape
-        // every `/packages` handler answers with, and the one that was
-        // completely untraceable before this change.
+        // A returned envelope answers through `deps.error(...)`: nothing is
+        // thrown, so `errorResponseBase` is never reached and
+        // `__obsRecordedError` is never set. This is the shape every
+        // `/packages` handler answers with, and the one that was completely
+        // untraceable before this change.
+        //
+        // ⚠️ [#14656] The fixture used to be `/notifications` with no messaging
+        // service. That is now a declared capability ABSENCE — the ruled
+        // exception, answered once per route per process at `warn`
+        // (`declared-capability-absence-warn-once.test.ts` owns it). The shape
+        // THIS case is about is the returned exit, not the absence, so the
+        // fixture moves to a returned envelope that is a genuine FAULT: the
+        // analytics door catching its own failure and answering 500.
+        const { handlers, logger } = await boot({
+            analytics: {
+                query: async () => { throw new Error('returned-not-thrown'); },
+                getMeta: async () => ({ cubes: [] }),
+                generateSql: async () => ({ sql: null }),
+            },
+        });
+
+        const res = makeRes();
+        await handlers['POST /api/v1/analytics/query'](
+            { body: { cube: 'x', measures: ['count'] }, query: {} },
+            res,
+        );
+
+        expect(res.statusCode).toBeGreaterThanOrEqual(500);
+
+        const records = faultRecords(logger);
+        expect(records, 'the returned exit owes exactly one line too').toHaveLength(1);
+        expect(records[0][2]).toMatchObject({ status: res.statusCode });
+    });
+
+    it('the RULED exception does not leak into the rule — a declared absence is warn, not error', async () => {
+        // The one door-level guard kept HERE, so this file cannot go green
+        // while believing `/notifications` still costs an `error` line.
+        // Everything else about the exception is pinned next door in
+        // `declared-capability-absence-warn-once.test.ts`.
         const { handlers, logger } = await boot({});
 
         const res = makeRes();
         await handlers['GET /api/v1/notifications']({ body: {}, query: {}, headers: {}, params: {} }, res);
 
         expect(res.statusCode).toBeGreaterThanOrEqual(500);
-        expect((res as any).__obsRecordedError).toBeUndefined();
-
-        const records = faultRecords(logger);
-        expect(records, 'the returned exit owes exactly one line too').toHaveLength(1);
-        expect(records[0][2]).toMatchObject({ status: res.statusCode });
+        expect(faultRecords(logger), 'a configuration fact is not a fault').toHaveLength(0);
+        expect(logger.warn.mock.calls.filter((c) => String(c[0]).startsWith('[5xx]'))).toHaveLength(1);
     });
 
     it('a 4xx stays quiet — the predicate must not turn client mistakes into fault noise', async () => {

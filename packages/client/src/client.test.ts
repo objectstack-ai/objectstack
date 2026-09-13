@@ -877,11 +877,26 @@ describe('Auth enhancements', () => {
         expect((client as any).token).toBeUndefined();
     });
 
-    // [#16760] The anonymous answer is the literal `null` at 200. The lift must
-    // pass it through rather than manufacture a signed-in-looking envelope.
-    it('me() passes the anonymous null through untouched', async () => {
-        const { client } = createMockClient(null);
-        expect(await client.auth.me()).toBeNull();
+    // [#17238, reversing #16760] The anonymous answer WAS the literal `null` at
+    // 200, and this case pinned the SDK passing it through. The server no longer
+    // serves that: `/get-session` refuses an anonymous caller with the declared
+    // ADR-0112 envelope at 401, so `me()` rejects and every value it RESOLVES
+    // with is inside its declared `SessionResponse`.
+    //
+    // ⚠️ This case is fetch-MOCK driven, which is why the reversal had to be
+    // made by hand. Left alone it would have stayed GREEN — pinning a wire shape
+    // no server produces any more, against a mock that keeps producing it. Its
+    // real-server twin (`auth-get-session-envelope.test.ts` block ③) went red on
+    // the same change and announced itself; this one could not.
+    it('me() rejects the anonymous refusal rather than resolving outside its type', async () => {
+        const { client } = createMockClient(
+            { success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in first' } },
+            401,
+        );
+        await expect(client.auth.me()).rejects.toMatchObject({
+            code: 'UNAUTHENTICATED',
+            httpStatus: 401,
+        });
     });
 
     it('signInWithProvider defaults callbackURL to the current page (base-path-correct)', async () => {

@@ -17,6 +17,7 @@ import { RETIRED_PAGE_COMPONENT_TYPES } from './page.zod';
 // shared source rather than re-spelled here (#6276).
 import { SortItemSchema } from '../shared/enums.zod';
 import { strictObject } from '../shared/strict-object';
+import { ruleArrayFilterError } from './filter-rule-array';
 import type { KeySetGuidance } from '../shared/suggestions.zod';
 // [#13855] The section → field-group reference form, shared with
 // `FormSectionSchema` (view.zod.ts) so one mixing rule serves both escape hatches.
@@ -1850,7 +1851,12 @@ export const ElementNumberPropsSchema = lazySchema(() => strictObject({
    * array, by design). The record form is refused at `filter`; the migration
    * prescription is the `element-number-filter-rule-array` semantic entry.
    */
-  filter: z.array(ViewFilterRuleSchema).optional()
+  filter: z.array(ViewFilterRuleSchema, {
+    error: ruleArrayFilterError({
+      surface: 'this `element:number`',
+      migration: 'element-number-filter-rule-array',
+    }),
+  }).optional()
     .describe('Filter rules narrowing the aggregate — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` input in this map shares. The MongoDB-style record form is refused — see migration `element-number-filter-rule-array`'),
   format: z.enum(['number', 'currency', 'percent']).optional().describe('Number display format'),
   prefix: z.string().optional().describe('Prefix text (e.g. "$")'),
@@ -2230,7 +2236,12 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
    * (`ds.filter ?? props.filter`) is `ElementDataSourceSchema`'s key, not this
    * entry's subject.
    */
-  filter: z.array(ViewFilterRuleSchema).optional()
+  filter: z.array(ViewFilterRuleSchema, {
+    error: ruleArrayFilterError({
+      surface: 'this `element:record_picker`',
+      migration: 'element-record-picker-filter-rule-array',
+    }),
+  }).optional()
     .describe('Filter rules narrowing which records the picker offers — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography the array-declared `filter` doors of this map share. The MongoDB-style record form is refused — see migration `element-record-picker-filter-rule-array`. The binding-level `dataSource.filter` wins outright when both are set'),
   /**
    * Row order (#6276). The flat shorthand for `dataSource.sort`, and the same
@@ -2491,7 +2502,12 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * `filter`; the migration prescription is the
    * `element-data-source-and-object-block-filter-rule-array` semantic entry.
    */
-  filter: z.array(ViewFilterRuleSchema).optional()
+  filter: z.array(ViewFilterRuleSchema, {
+    error: ruleArrayFilterError({
+      surface: 'this `object-grid`',
+      migration: 'element-data-source-and-object-block-filter-rule-array',
+    }),
+  }).optional()
     .describe('Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. THE key, singular — not the plural misspelling. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array`'),
   defaultFilters: z.unknown().optional()
     .describe('Legacy base-filter fallback, read only when `filter` is absent. Prefer `filter`'),
@@ -2705,7 +2721,12 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * at `filter`; see migration
    * `element-data-source-and-object-block-filter-rule-array`.
    */
-  filter: z.array(ViewFilterRuleSchema).optional()
+  filter: z.array(ViewFilterRuleSchema, {
+    error: ruleArrayFilterError({
+      surface: 'this `object-metric`',
+      migration: 'element-data-source-and-object-block-filter-rule-array',
+    }),
+  }).optional()
     .describe('Filter the aggregation is scoped by — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array`'),
   format: z.string().optional().describe("Number format pattern (e.g. '0,0', '$0,0', '0%')"),
   currency: z.string().optional().describe("ISO currency code (e.g. 'USD') — enables currency formatting"),
@@ -2738,8 +2759,12 @@ export type ObjectMetricPropsParsed = z.infer<typeof ObjectMetricPropsSchema>;
  * value or bare strings, NOT a field projection), `filter` (:198, the
  * `$filter` handoff), `data` (:217-224), `cardTitle`/`titleField` (:233),
  * `cardFields` (:322), `swimlaneField`/`grouping` (:518-519), and via the
- * forwarded schema `quickAdd`/`coverImageField`/`conditionalFormatting`
- * (`KanbanRenderer`, index.tsx). `groupField` is the DESIGNER's spelling with
+ * forwarded schema `coverImageField`/`conditionalFormatting` (`KanbanRenderer`,
+ * index.tsx — `ObjectKanban.tsx:931` spreads the authored bag into it).
+ * `quickAdd` sat on that forwarded list and is RETIRED (#17260, tombstoned
+ * below): the sentence was true about the FORWARD and false about the READ,
+ * which is how the key kept re-authorizing itself. `groupField` is the
+ * DESIGNER's spelling with
  * zero read points (#7973 class) — aliased to the `groupBy` the board reads.
  * `limit` (#16503) was measured later, at the pin this repo builds against
  * (`.objectui-sha` = `53ded82bf`; re-READ there 2026-09-08, file
@@ -2773,7 +2798,12 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * `filter`; see migration
    * `element-data-source-and-object-block-filter-rule-array`.
    */
-  filter: z.array(ViewFilterRuleSchema).optional()
+  filter: z.array(ViewFilterRuleSchema, {
+    error: ruleArrayFilterError({
+      surface: 'this `object-kanban`',
+      migration: 'element-data-source-and-object-block-filter-rule-array',
+    }),
+  }).optional()
     .describe('Base query filter, handed to the wire `$filter` — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array`'),
   /**
    * Row cap (#16503 — the spec half of objectui#8172; decision batch #68,
@@ -2817,7 +2847,48 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
   cardFields: z.array(z.string()).optional().describe('Fields rendered on each card'),
   swimlaneField: z.string().optional().describe('Field for horizontal swimlanes (in addition to columns)'),
   grouping: z.unknown().optional().describe('View grouping config; its first field is the swimlane fallback'),
-  quickAdd: z.boolean().optional().describe('Show the per-column quick-add affordance'),
+  /**
+   * RETIRED (#17260, ADR-0049 enforce-or-remove — the spec half of the
+   * objectui#8285 director-seat ruling, decision batch #91, 2026-09-08:
+   * option B, `quickAdd` leaves `object-kanban` and stays only on the
+   * React-host `kanban-ui` block).
+   *
+   * Measured at the objectui pin this repo builds against
+   * (`.objectui-sha` = `53ded82bf`): the board forwards the key —
+   * `ObjectKanban.tsx:931` spreads the authored bag into `KanbanRenderer`,
+   * which passes
+   * `quickAdd={schema.quickAdd}` and `onQuickAdd={schema.onQuickAdd}`
+   * (`plugin-kanban/src/index.tsx:196`) — but the affordance is gated on
+   * BOTH (`KanbanImpl.tsx:355` and `:368`), and `onQuickAdd` is a
+   * host-supplied FUNCTION that JSON cannot carry and no producer puts on an
+   * `object-kanban` node. `ObjectKanban.tsx` names neither half of the pair
+   * (0 occurrences each, against 6 for the sibling `onCardClick` in the same
+   * file). So the gate was permanently false and authoring the key was a
+   * parse-clean no-op — the accepted-and-dropped class.
+   *
+   * ⛔ Not a silent one, which is why the retirement is worth more than a
+   * tidy-up: objectui's registry↔spec ledger records the key verbatim as
+   * `ESCALATED (object-kanban.quickAdd — measured NOT honoured)` and its html
+   * tier reported it as `unknown-prop` — the SAME diagnostic a typo gets. An
+   * author following this published contract met a tool that contradicted it
+   * and could not tell which side was wrong. The tombstone collapses both
+   * halves onto one answer.
+   *
+   * The control itself is NOT withdrawn from the platform: it stays on
+   * `kanban-ui`, the block a React host renders directly and can hand the
+   * runtime function to. Sources are stripped by the D2 conversion
+   * `object-kanban-quick-add-removed` (a pure lossless delete — the key never
+   * had an effect to preserve).
+   */
+  quickAdd: retiredKey(
+    '`object-kanban` property `quickAdd` was removed in @objectstack/spec 17 (ADR-0049) — '
+    + 'the board forwarded it, but the per-column affordance is gated on both `quickAdd` and '
+    + '`onQuickAdd`, and `onQuickAdd` is a host-supplied function JSON cannot carry and no '
+    + 'producer ever put on an `object-kanban` node, so authoring it was a parse-clean no-op. '
+    + 'Delete the key. The quick-add control is unchanged on the `kanban-ui` block, where a React '
+    + 'host supplies the `onQuickAdd` slot the control needs. '
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+  ),
   coverImageField: z.string().optional().describe('Image field rendered as the card cover'),
   conditionalFormatting: z.unknown().optional().describe('Card conditional formatting rules'),
 }));
@@ -2883,7 +2954,12 @@ export const ObjectCalendarPropsSchema = lazySchema(() => strictObject({
    * `filter`; see migration
    * `element-data-source-and-object-block-filter-rule-array`.
    */
-  filter: z.array(ViewFilterRuleSchema).optional()
+  filter: z.array(ViewFilterRuleSchema, {
+    error: ruleArrayFilterError({
+      surface: 'this `object-calendar`',
+      migration: 'element-data-source-and-object-block-filter-rule-array',
+    }),
+  }).optional()
     .describe('Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array`'),
   /**
    * Row order for the fetched events — the same `SortItem` ARRAY form

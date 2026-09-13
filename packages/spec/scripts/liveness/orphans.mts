@@ -48,39 +48,63 @@ export interface OrphanScanInput {
   /** Top-level keys the gate's schema walk produced for this type. */
   shapeKeys: readonly string[];
   /**
-   * Child keys of a container property, or `null` when the property is not a
-   * container. Injected so every Zod-walking detail stays in the gate and this
-   * module stays pure and testable.
+   * Child keys of the container at a property PATH (`['widgets']`,
+   * `['widgets', 'chartConfig']`), or `null` when that path is not a container.
+   * Injected so every Zod-walking detail stays in the gate and this module stays
+   * pure and testable.
+   *
+   * A PATH rather than a key because the forward walk recurses: the ledger may
+   * nest `children` as deep as it likes, and a reverse direction that only ever
+   * asked about depth one would stop asking exactly where the forward pass
+   * started looking — re-creating this module's own asymmetry one level down.
    */
-  childKeysOf: (key: string) => readonly string[] | null;
+  childKeysOf: (path: readonly string[]) => readonly string[] | null;
 }
 
 /**
- * Find ledger rows with no corresponding schema property.
+ * Find ledger rows with no corresponding schema property, at EVERY depth the
+ * ledger declares.
+ *
+ * Recursion terminates on the data: a parsed ledger is a finite acyclic JSON
+ * tree, so the descent is bounded by the file the author can read rather than by
+ * a constant in here.
  *
  * Deliberately silent in one case: a row that declares `children` on a property
  * that is not a container. The FORWARD pass already reports that as
  * UNCLASSIFIED with a more specific message, and reporting it twice under two
  * different headings would obscure the single fix.
+ *
+ * Deliberately silent in one more: an orphan's OWN `children` are not descended
+ * into. The parent coordinate does not exist, so every key beneath it is the
+ * same single fix, and listing the subtree would bury the row that has to move.
  */
 export function findOrphanEntries({ type, props, shapeKeys, childKeysOf }: OrphanScanInput): Orphan[] {
   const orphans: Orphan[] = [];
   const shape = new Set(shapeKeys);
+
+  const scanChildren = (entry: any, path: readonly string[]): void => {
+    const declaredChildren = entry?.children;
+    if (!declaredChildren) return;
+
+    const childKeys = childKeysOf(path);
+    if (!childKeys) return; // the forward pass owns this one — see the docblock
+    const childShape = new Set(childKeys);
+    for (const childKey of Object.keys(declaredChildren)) {
+      const childPath = [...path, childKey];
+      if (!childShape.has(childKey)) {
+        orphans.push({ key: `${type}/${childPath.join('.')}`, level: 'child' });
+        continue;
+      }
+      scanChildren(declaredChildren[childKey], childPath);
+    }
+  };
 
   for (const key of Object.keys(props ?? {})) {
     if (!shape.has(key)) {
       orphans.push({ key: `${type}/${key}`, level: 'top' });
       continue;
     }
-    const declaredChildren = props![key]?.children;
-    if (!declaredChildren) continue;
-
-    const childKeys = childKeysOf(key);
-    if (!childKeys) continue; // the forward pass owns this one — see the docblock
-    const childShape = new Set(childKeys);
-    for (const childKey of Object.keys(declaredChildren)) {
-      if (!childShape.has(childKey)) orphans.push({ key: `${type}/${key}.${childKey}`, level: 'child' });
-    }
+    scanChildren(props![key], [key]);
   }
 
   return orphans;

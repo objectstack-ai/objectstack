@@ -172,11 +172,41 @@ os dev --database file:./data/test.db --auth-secret $(openssl rand -hex 32)
 | `--auth-secret <s>` | `OS_AUTH_SECRET` | Override the dev-fallback secret |
 | `--environment-id <id>` | `OS_ENVIRONMENT_ID` | Environment identifier (default `env_local`) |
 | `-p, --port <n>` | `OS_PORT` / `PORT` | Listen port (default `3000`). In dev a busy port auto-hops to the next free one; the banner shows the actual port. |
+| `--cert <path>` | — | Path to a TLS certificate (PEM). With `--key`, terminate TLS in the dev process and serve `https://localhost:<port>`. Bring your own certificate — none is generated |
+| `--key <path>` | — | Path to the private key (PEM) for `--cert`. Required with `--cert` |
 | `--ui` | — | Force Console UI on (already on by default in dev) |
 | `--compile` | — | Force compiling `objectstack.config.ts` → `dist/objectstack.json` before starting (auto when the artifact is missing; ignored with `--artifact`) |
 | `--fresh` | — | Ephemeral `OS_HOME` in the OS tempdir (clean DB, uploads root, and other `OS_HOME`-keyed state), auto-deleted on exit; implies `--seed-admin`. See the scope note below |
 | `--seed-admin` / `--no-seed-admin` | — | Seed a dev admin (`admin@objectos.ai` / `admin123`) on an empty DB — default on; override with `--admin-email` / `--admin-password` |
 | `-v, --verbose` | — | Verbose output |
+
+##### Serving dev over https
+
+An interactive MCP client (and any OAuth client worth the name) refuses to open a
+sign-in against a plain-http URL, so the self-serve identity path — *interactive
+clients just open a browser login* — cannot be exercised against a dev server on
+`http://localhost`. Hand `os dev` a certificate you already have and it
+terminates TLS itself:
+
+```bash
+os dev --cert ./localhost.pem --key ./localhost-key.pem
+```
+
+Both flags are required together, and an unreadable file is refused rather than
+quietly downgraded to http. With them, every address this boot advertises is
+`https://localhost:<port>`: the two `/.well-known/*` discovery documents, the
+CSRF allow-list, the ready banner's `API:` / `MCP:` rows, the `🤖 MCP server`
+connect hint, and the runtime state file a supervisor reads. Without them nothing
+changes.
+
+Only the built-in default follows the listener. `OS_AUTH_URL` (and
+`OS_BASE_URL`) still win when set — they name where the deployment is *reached*,
+which behind a proxy or a tunnel is a different address from the one this process
+bound — so an explicit value is never rewritten, `http://` ones included.
+
+Where the certificate comes from, and which certificates your client or your
+machine accepts, is yours to decide: ObjectStack generates none and reads no
+store.
 
 By default `os dev` keeps your data between restarts in a project-local SQLite
 file at `.objectstack/data/dev.db` (created on first run). Pass `--database`,
@@ -203,6 +233,67 @@ lifecycle-classed system data (activity streams, job runs, notifications,
 audit) lands there instead of the business DB (ADR-0057). Opt out with
 `OS_TELEMETRY_DB=0`, or point it elsewhere (any mode, including `serve`)
 with `OS_TELEMETRY_DB=<path>`.
+
+##### Waiting for the boot from a parent process
+
+`✓ Server is ready` is true about the **HTTP server**, and deliberately says
+nothing about the app's data. Seeding races a soft budget
+(`OS_INLINE_SEED_BUDGET_MS`, default `8000`); when it runs long the kernel
+starts anyway and the rest of the seed finishes **in the background** — so the
+banner, and anything that waits for it, can be a minute ahead of the seed's own
+result. On a machine where the seed fits its budget the same command settles
+before the banner. Both are normal, and which one you get depends on the box.
+
+So a script that spawns a dev server and wants to act **after the boot has come
+to rest** should not wait on the banner, and should not need to read the child's
+output at all. Spawn with an `ipc` channel and wait for a message:
+
+| Message | Sent by | Means |
+|---|---|---|
+| `objectstack:listening` | `os serve` | The HTTP server is bound. Carries `{ port, url }` — the port actually bound, which in dev may differ from the one requested. |
+| `objectstack:seed-settled` | `os serve` | Nothing is still seeding. Carries `{ ok, suppressed, sources }`. Sent once per boot, always **after** `objectstack:listening`. |
+
+```js
+import { spawn } from 'node:child_process';
+
+const child = spawn('os', ['dev'], { stdio: ['inherit', 'inherit', 'inherit', 'ipc'] });
+
+child.on('message', (msg) => {
+  if (msg?.type !== 'objectstack:seed-settled') return;
+  if (msg.suppressed.length > 0) {
+    console.log(`boot complete — seeds not run this boot (${msg.suppressed.join(', ')})`);
+  } else if (!msg.ok) {
+    console.log('boot complete — but some seed records did not land; see the log above');
+  } else {
+    console.log('boot complete — the app is ready to use');
+  }
+});
+```
+
+**`os dev` spawns `os serve`, and the two channels are not symmetric.** `os dev`
+consumes `objectstack:listening` itself — it is how the `↪ server bound to port`
+line and the MCP connect hint learn the real port — and does **not** relay it.
+It forwards `objectstack:seed-settled` to its own parent verbatim. Spawn
+`os serve` directly if you need both messages in one place.
+
+An `ipc` channel is optional: without one, both sends are no-ops and nothing
+about the command changes. There is no polling to do — if you did not open the
+channel, the messages simply are not sent.
+
+<Callout type="info" title="What `objectstack:seed-settled` promises, and what it does not">
+It is sent when **nothing is still writing** — on success *and* on failure, since
+a seed that failed has still come to rest. Read `ok` together with `sources`
+rather than alone: `ok` is a verdict on the per-source counts the boot recorded,
+and a source that finished by throwing may record no counts at all.
+
+`suppressed` is non-empty when this boot registered a seed source and
+deliberately never ran it — `multi-tenant-replay` (rows are written per
+organization on `sys_organization` insert) or `skip-seed-data` (a planning boot
+that writes nothing). Those sources never settle and no further signal is
+coming for them, which is exactly why the message is sent anyway with the reason
+attached: a consumer that waited for *every* source to finish would wait
+forever.
+</Callout>
 
 #### `os serve`
 
@@ -498,7 +589,7 @@ os compile --json                    # JSON output for CI pipelines
   → Normalizing stack definition...
   → Lowering inline handlers...
   → Validating protocol compliance...
-  → Running author-time rules (44)...
+  → Running author-time rules (45)...
   → Checking capability providers (#3366)...
   → Collecting package docs (ADR-0046)...
   → Writing artifact...

@@ -126,7 +126,7 @@ export const MigrationPlanSchema = lazySchema(() => z.object({
   reversible: z.boolean().default(true).describe('Whether the plan can be fully rolled back'),
 
   /** Estimated execution time in milliseconds */
-  estimatedDurationMs: z.number().int().min(0).optional().describe('Estimated execution time'),
+  estimatedDurationMs: z.number().int().min(0).optional().describe('Estimated execution time in milliseconds'),
 }).describe('Ordered migration plan'));
 
 export type MigrationPlan = z.input<typeof MigrationPlanSchema>;

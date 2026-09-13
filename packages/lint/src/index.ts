@@ -501,6 +501,8 @@ export type {
 } from './validate-object-field-refs.js';
 
 export { validateActionNameRefs, ACTION_NAME_UNDEFINED } from './validate-action-name-refs.js';
+export { validateActionDispatchContract, ACTION_DISPATCH_CONTRACT_MISMATCH } from './validate-action-dispatch-contract.js';
+export type { ActionDispatchContract, ActionDispatchContractFinding } from './validate-action-dispatch-contract.js';
 export type { ActionNameRefFinding, ActionNameRefSeverity } from './validate-action-name-refs.js';
 
 export { validateActionLocations, ACTION_NO_PLACEMENT } from './validate-action-locations.js';
@@ -838,6 +840,16 @@ export {
   // never share the `dead` id: the two ask the author for opposite actions.
   LIVENESS_LIVE_ELSEWHERE_PROPERTY,
 } from './lint-liveness-properties.js';
+
+export { validateRetiredPermissionResidue } from './validate-retired-permission-residue.js';
+export type { RetiredPermissionResidueFinding } from './validate-retired-permission-residue.js';
+export {
+  // [#17425] The one value #12840's residue stage accepts in silence, named at
+  // the authoring door. Published because `f.rule` is what `--json` consumers
+  // and `suppressWarnings` compare against — a rule id no barrel re-exports is
+  // unreachable (`rule-id-barrel-exports.test.ts`).
+  PERMISSION_RETIRED_LIFECYCLE_RESIDUE,
+} from './validate-retired-permission-residue.js';
 
 export { lintAutonumberFormats } from './lint-autonumber-formats.js';
 export type { AutonumberLintFinding } from './lint-autonumber-formats.js';

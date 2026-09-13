@@ -198,6 +198,7 @@ export function createInboxChannel(opts: InboxChannelOptions): MessagingChannel 
             const row: Record<string, unknown> = {
                 user_id: userId,
                 notification_id: n.notificationId ?? null,
+                actor_id: n.actorId ?? null,
                 topic: n.topic,
                 title,
                 body_md: bodyMd,

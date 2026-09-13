@@ -29,19 +29,19 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 222 |
-| Object name statically decidable | 148 |
+| Write call sites | 223 |
+| Object name statically decidable | 149 |
 | Object name chosen at run time | 74 |
-| Against a tenancy-enabled object | 148 |
+| Against a tenancy-enabled object | 149 |
 | Against an object declaring tenancy off | 0 |
-| Threading a tenant context | 138 |
+| Threading a tenant context | 139 |
 | Provably carrying none | 17 |
 | …and decidably tenancy-enabled | 9 |
 | Options argument unreadable | 67 |
 | …and decidably tenancy-enabled | 32 |
 | Threading a decidably elevated context | 104 |
 | Threading a decidably non-elevated context | 0 |
-| Threading a context of undecidable elevation | 101 |
+| Threading a context of undecidable elevation | 102 |
 
 ## Corpus scale — present and dated, ⛔ NOT enforced
 
@@ -52,14 +52,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-09-12 at `bbeb190f6`.
+Measured on 2026-09-13 at `f62bc2d0a`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 564 |
-| engine-shaped types recognised | 59 |
+| tracked non-test sources scanned | 567 |
+| engine-shaped types recognised | 61 |
 | declared objects in the registry | 300 |
-| same-named calls subtracted as non-engine | 137 |
+| same-named calls subtracted as non-engine | 138 |
 
 ## Every site
 
@@ -78,6 +78,7 @@ Measured on 2026-09-12 at `bbeb190f6`.
 | `packages/plugins/plugin-audit/src/read-audit.ts` | `insert` | `sys_audit_log` | enabled | options unreadable | 1 |
 | `packages/plugins/plugin-auth/src/admin-import-users.ts` | `insert` | `sys_audit_log` | enabled | options unreadable | 1 |
 | `packages/plugins/plugin-auth/src/admin-import-users.ts` | `update` | `sys_user` | enabled | options unreadable | 2 |
+| `packages/plugins/plugin-auth/src/admin-set-user-manager.ts` | `update` | `sys_user` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-auth/src/admin-user-endpoints.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/admin-user-endpoints.ts` | `update` | `sys_user` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/adopt-membership.ts` | `update` | `SystemObjectName.MEMBER` | undecidable | PROVABLY NONE | 1 |

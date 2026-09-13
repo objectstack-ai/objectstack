@@ -45,6 +45,33 @@ import { judgeHeadlessScreen } from '../screen-input-contract.js';
  *   that parse is what makes the retirement audible to stored metadata.
  */
 
+/**
+ * The `fields[].reference` repeater column of the `screen` designer form: the
+ * object PICKER (that is what `xRef` marks) whose collected value is the target
+ * object's NAME — the same string `FieldSchema.reference` carries.
+ *
+ * Named rather than written inline at its `reference:` key, and the naming is
+ * load-bearing. `check:reference-carrier-shape` classifies the object HOLDING a
+ * `reference` key; here that holder is a JSON-Schema `properties` map, keyed by
+ * property NAME — the same class the gate excludes by shape for a `fields` map
+ * (N1) and for a field-key class map (N3), but a shape its position rules have
+ * no case for. Written inline, the holder resolved under neither reading and
+ * the gate refused to guess (exit 3 — correctly). None of its three site
+ * remedies is spellable here: the holder is not under `fields:`, its own `type`
+ * key holds a sub-schema rather than a string literal, and all twelve of its
+ * keys are `data/Field` authorable keys, so no key can prove it is not a field
+ * definition. A value reached through a name is UNJUDGED by the gate's stated
+ * predicate, which judges LITERALS only. That narrows the gate nowhere else in
+ * the tree; the missing `properties`-map rule is reported to the maintainer
+ * rather than patched from inside this PR.
+ */
+const LOOKUP_TARGET_COLUMN = {
+  type: 'string',
+  title: 'Lookup object',
+  xRef: { kind: 'object' },
+  description: "Object whose records a `lookup` field picks from. Required on a `lookup` field — a picker with no target object resolves nothing.",
+};
+
 export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext): void {
     // screen — server-side pass-through (input vars already injected by engine).
     engine.registerNodeExecutor({
@@ -98,6 +125,17 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
                   },
                   defaultValue: { title: 'Default', description: 'Prefilled value. Interpolates {var} references.' },
                   placeholder: { type: 'string', title: 'Placeholder' },
+                  // Declared in #17306 — the bound pair, the help text and the
+                  // lookup target, spelled as the object field spells them.
+                  // Offered here for the same reason `options`/`defaultValue`/
+                  // `placeholder` were in #4045: the executor forwards them, so
+                  // a form that omitted them would leave the keys authorable
+                  // only by hand. `builtin-node-form-zod-ledger.test.ts`
+                  // reconciles this column set against the Zod both ways.
+                  min: { type: 'number', title: 'Min', description: 'Minimum accepted value (numeric fields). Enforced when the run resumes.' },
+                  max: { type: 'number', title: 'Max', description: 'Maximum accepted value (numeric fields). Enforced when the run resumes.' },
+                  inlineHelpText: { type: 'string', title: 'Help text', description: 'Help text shown under the input. Unlike the placeholder, it stays readable once the user types.' },
+                  reference: LOOKUP_TARGET_COLUMN,
                   visibleWhen: { type: 'string', title: 'Visible when', xExpression: 'expression' },
                 },
               },
@@ -208,6 +246,15 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
           options: f.options as Array<{ value: unknown; label: string }> | undefined,
           defaultValue: f.defaultValue !== undefined ? interpolate(f.defaultValue, variables, context) : undefined,
           placeholder: f.placeholder,
+          // #17306. `min`/`max` go on the wire for the client to apply at the
+          // input, and are re-checked server-side on resume
+          // (`validateScreenInputs`) so the bound is not dialog-only.
+          // `inlineHelpText`/`reference` are presentation and picker-target
+          // hints the client alone acts on.
+          min: f.min,
+          max: f.max,
+          inlineHelpText: f.inlineHelpText,
+          reference: f.reference,
           // Forwarded RAW — deliberately not interpolated. `visibleWhen` is a
           // predicate the client re-evaluates on every keystroke against the
           // values collected SO FAR; the server has no view of those, so

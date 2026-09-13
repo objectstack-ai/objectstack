@@ -211,6 +211,163 @@ describe('migration chain (ADR-0087 D3)', () => {
     });
   });
 
+  // Fourth of the #5781 class, on the `replacement` field: a projected ledger
+  // string that asserted a runtime capability the tree does not deliver. The
+  // entry told an author displaced by the ETL layer's retirement that
+  // connector-attached sync "IS parsed and executed" — parsed is true
+  // (`AutomationEngine.registerConnector` runs `ConnectorSchema.parse`),
+  // executed never was: `syncConfig` has no reader outside `packages/spec`, the
+  // same measurement that retired `syncConfig.schedule` under ADR-0049. Because
+  // `replacement` is projected verbatim into `spec-changes.json` (which ships in
+  // the `@objectstack/spec` tarball) and into `docs/protocol-upgrade-guide.md`,
+  // the claim was published advice, not a code comment. ⚠️ Nothing in this repo
+  // cross-checks a projected ledger string against the tree it describes — the
+  // mechanism is a per-entry pin like this one, added after each defect is
+  // found. That gap is the recurring cause; this pin only closes THIS entry.
+  describe('protocol-17 `etl-pipeline-layer-retired` — states what happens to `syncConfig`, not a sync that never ran', () => {
+    const entry = () =>
+      MIGRATIONS_BY_MAJOR[17]!.semantic.find((s) => s.id === 'etl-pipeline-layer-retired');
+
+    it('finds the entry, and it still routes the author layer by layer (anti-vacuity)', () => {
+      // Guards every negative below against passing on `undefined`, which is
+      // exactly how a `.find()` that stops matching reads as green.
+      expect(entry()).toBeDefined();
+      expect(entry()!.replacement).toMatch(/Layer by layer/);
+      expect(entry()!.replacement).toMatch(/ConnectorSchema\.syncConfig/);
+    });
+
+    it('⛔ never claims connector-attached sync is executed', () => {
+      // Pinned on the CLAIM, not on the words: the entry may still name the
+      // execution question in order to answer it, which is what the corrected
+      // sentence does — going quiet would leave a reader who remembers the
+      // published guide still expecting a sync to run.
+      const r = entry()!.replacement;
+      expect(r).not.toMatch(/IS parsed and executed/);
+      expect(r).not.toMatch(/syncConfig[^.]{0,80}\bis executed\b/i);
+    });
+
+    it('says what `syncConfig` IS and what actually happens to it', () => {
+      // A false promise replaced by a vague one would be the same defect wearing
+      // a fix's clothes: the author has to come away knowing the block is a
+      // declared shape, and knowing where the parse happens.
+      const r = entry()!.replacement;
+      expect(r).toMatch(/PARSED AND VALIDATED but NOT\s+EXECUTED/);
+      expect(r).toMatch(/declared shape/);
+      expect(r).toMatch(/AutomationEngine\.registerConnector/);
+      expect(r).toMatch(/no\s+reader outside `packages\/spec`/);
+    });
+
+    it('names the surface that IS executed, so the author has somewhere to go', () => {
+      // The measurement behind this line: `connector_action`
+      // (`service-automation/src/builtin/connector-nodes.ts`) resolves the
+      // registered handler and awaits it. Without this the correction would
+      // leave the ETL-displaced author with no route at all.
+      const r = entry()!.replacement;
+      expect(r).toMatch(/`actions`/);
+      expect(r).toMatch(/connector_action/);
+    });
+
+    it('the retirement itself still stands — this is a correction to the advice', () => {
+      // ⛔ Correcting a projected sentence is not an un-retirement.
+      const r = entry()!.replacement;
+      expect(r).toMatch(/removed — no protocol surface replaces it/);
+      expect(entry()!.acceptanceCriteria).toMatch(/No source imports `ETLPipeline`/);
+    });
+  });
+
+  // The D3 half of a node-level refusal, and the one class of entry whose
+  // ABSENCE is invisible to every other gate in this family: `check:spec-changes`
+  // and `check:upgrade-guide` pin the registry to its PROJECTIONS, so an entry
+  // that was never written leaves them perfectly consistent. What made the gap
+  // reachable is that the two D2 conversions below are deliberately partial —
+  // they strip the props and leave the node, because deleting an authored page
+  // node is a layout decision a mechanical conversion must not make — while
+  // `RETIRED_PAGE_COMPONENT_TYPES` now refuses that same node BY NAME. Between
+  // the two, a 17 → 18 replay ended `schemaValid: false` and `os migrate meta`
+  // closed with "resolve the manual changes above" over a list that named
+  // neither element. This block pins the instruction back into the list.
+  describe('protocol-18 #17594 entry — the chain NAMES the bare node it leaves standing', () => {
+    /** A page authored against 17, carrying both retired elements. */
+    const authored = () => ({
+      pages: [
+        {
+          name: 'order_board',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                { type: 'element:filter', properties: { object: 'order', fields: ['status'] } },
+                { type: 'element:form', properties: { object: 'order', fields: ['status'] } },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    const entry = () =>
+      MIGRATIONS_BY_MAJOR[18]!.semantic.find((s) => s.id === 'element-filter-and-form-node-refused');
+
+    it('finds the entry (anti-vacuity: every assertion below reads through this `find`)', () => {
+      expect(entry()).toBeDefined();
+      expect(entry()!.surface).toMatch(/element:filter/);
+      expect(entry()!.surface).toMatch(/element:form/);
+    });
+
+    it('the replay really does leave the bare nodes — the residue this TODO is about', () => {
+      const result = applyMetaMigrations(authored(), 17, 18);
+      const ids = new Set(result.applied.map((a) => a.conversionId));
+      expect(ids.has('element-filter-removed')).toBe(true);
+      expect(ids.has('element-form-removed')).toBe(true);
+
+      // Both nodes survive the chain, stripped bare. If a conversion ever starts
+      // deleting them this line fails, and this entry's premise is what should be
+      // revisited — not this expectation.
+      const components = (result.stack.pages as any[])[0].regions[0].components;
+      expect(components.map((c: any) => c.type)).toEqual(['element:filter', 'element:form']);
+      expect(components[0].properties).toEqual({});
+      expect(components[1].properties).toEqual({});
+    });
+
+    it('a 17 → 18 run emits exactly one todo naming BOTH node types (ADR-0087 D3)', () => {
+      const result = applyMetaMigrations(authored(), 17, 18);
+      const naming = result.todos.filter(
+        (t) => /element:filter/.test(t.surface) && /element:form/.test(t.surface),
+      );
+      expect(naming).toHaveLength(1);
+      expect(naming[0]!.id).toBe('element-filter-and-form-node-refused');
+      expect(naming[0]!.toMajor).toBe(18);
+    });
+
+    it('prescribes DELETING the node, and names each element\'s replacement', () => {
+      // The two replacements are the ones `RETIRED_PAGE_COMPONENT_TYPES` already
+      // sends an author to at the parse; pinned here so the two doors cannot
+      // drift into prescribing different things.
+      const r = entry()!.replacement;
+      expect(r).toMatch(/Delete the component node/);
+      expect(r).toMatch(/userFilters/);
+      expect(r).toMatch(/object-form/);
+    });
+
+    it('⛔ does not prescribe an automatic delete — the conversions must not make it', () => {
+      const text = `${entry()!.replacement} ${entry()!.reason}`;
+      expect(text).toMatch(/layout/i);
+      expect(text).not.toMatch(/the conversion (deletes|removes) the node/i);
+    });
+
+    it('the acceptance criterion is checkable, and names `os validate` (the card\'s bar)', () => {
+      const a = entry()!.acceptanceCriteria;
+      expect(a).toMatch(/os validate/);
+      // Named at the node's own path, so a remaining node is reported
+      // individually rather than as one page-level failure.
+      expect(a).toMatch(/retiredComponentType/);
+      // Regions, slots and nested containers — the three places the conversions
+      // walk, and therefore the three places a bare node can be left.
+      expect(a).toMatch(/slots/);
+      expect(a).toMatch(/nested containers/);
+    });
+  });
+
   describe('composition (cross-major is the designed-for case)', () => {
     it('composes only the steps in (from, to]', () => {
       const chain = composeMigrationChain(10, 11);

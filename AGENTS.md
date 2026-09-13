@@ -438,8 +438,8 @@ recognised and the whole block lands under it, leaving two; the session-URL form
 verbatim and a bare one lands under it, leaving two. ⛔ A tail bare footer on a comment is the
 platform's, not your form downgraded. Which layer does this is unknown; don't go establishing
 it. **Commit message:** an agent commit ends with the model-free trailer pair
-`Claude-Session: https://claude.ai/code/session_<id>` and
-`Co-authored-by: Claude <noreply@anthropic.com>`; no model identifier lands in a PR title or body,
+`Claude-Session: https://claude.ai/code/session_<id>` and `Co-authored-by: Claude <noreply@anthropic.com>`,
+and the pre-push hook refuses a model identifier in that pair; no model identifier lands in a PR title or body,
 a comment, a changeset, a doc or a code comment. The one exemption is a REPORTING one: a harness-written
 `Co-Authored-By` trailer is not declared a deviation; the pair stays model-free; landed history is not rewritten.
 
@@ -530,8 +530,8 @@ Even inside your own worktree, operate defensively:
    A running dev server you didn't start probably belongs to another agent or the user;
    killing it (or its port) breaks their in-flight work. Spin up your own instance on a
    random high port (`pnpm dev -- --fresh -p <random>`) and **shut it down yourself when
-   the task is done** (`kill $(lsof -ti tcp:<port>)`). Don't leave orphan servers behind.
-   ⛔ One process table per container: **kill only a PID you recorded, never a name** (`guard-process-kill.sh`).
+   the task is done** (`kill $(lsof -ti tcp:<port>)`). ⛔ One process table per container: **kill only a PID you
+   recorded, and wait only on one, never a name** — `pgrep -f` matches the asking shell (`guard-process-kill.sh`).
 9. **After pulling `main` into a long-lived worktree, refresh its build state before you
    trust a single test or gate.** A worktree open across several merges accumulates
    artefacts stale relative to the source, and every one of them fails **as if your change
@@ -654,7 +654,7 @@ content/docs/     # 📝 Docs content
 | `Identity` | `identity/` | User, Organization, Profile |
 | `Security` | `security/` | Permission, Role, Policy |
 | `Kernel` | `kernel/` | Plugin lifecycle (PluginContext) |
-| `Cloud` | `cloud/` | Multi-tenant, deployment, environment |
+| `Marketplace` | `marketplace/` | Package, Version, Listing, Install, Template |
 | `QA` | `qa/` | Test, validation |
 | `Contracts` | `contracts/` | Cross-package interfaces |
 | `Integration` | `integration/` | External integrations |

@@ -20,8 +20,8 @@ describe('PluginHealthMonitor', () => {
 
   it('should register plugin for health monitoring', () => {
     const config: PluginHealthCheckParsed = {
-      interval: 5000,
-      timeout: 1000,
+      intervalMs: 5000,
+      timeoutMs: 1000,
       failureThreshold: 3,
       successThreshold: 1,
     };
@@ -32,8 +32,8 @@ describe('PluginHealthMonitor', () => {
 
   it('should report healthy status initially', () => {
     const config: PluginHealthCheckParsed = {
-      interval: 5000,
-      timeout: 1000,
+      intervalMs: 5000,
+      timeoutMs: 1000,
       failureThreshold: 3,
       successThreshold: 1,
     };
@@ -44,8 +44,8 @@ describe('PluginHealthMonitor', () => {
 
   it('should get all health statuses', () => {
     const config: PluginHealthCheckParsed = {
-      interval: 5000,
-      timeout: 1000,
+      intervalMs: 5000,
+      timeoutMs: 1000,
       failureThreshold: 3,
       successThreshold: 1,
     };
@@ -61,8 +61,8 @@ describe('PluginHealthMonitor', () => {
 
   it('should shutdown cleanly', () => {
     const config: PluginHealthCheckParsed = {
-      interval: 5000,
-      timeout: 1000,
+      intervalMs: 5000,
+      timeoutMs: 1000,
       failureThreshold: 3,
       successThreshold: 1,
     };
@@ -78,7 +78,7 @@ describe('PluginHealthMonitor', () => {
   // Same shape as the kernel's startup guards (#4813, PR #4874), with one
   // aggravating difference: health checks are *periodic*, so an abandoned
   // guard is not a fixed cost paid once at boot — it is one orphaned timer per
-  // plugin per round, each pinning the event loop for a whole `config.timeout`.
+  // plugin per round, each pinning the event loop for a whole `config.timeoutMs`.
   //
   // What follows asserts the observable consequence, never the source:
   // "health-monitor.ts calls clearTimeout" is a tautology any refactor could
@@ -86,8 +86,8 @@ describe('PluginHealthMonitor', () => {
   describe('Health-check timeout guard does not outlive the race (#4875)', () => {
     /** A guard long enough that a single orphan is unmistakable. */
     const guardedConfig = (overrides: Partial<PluginHealthCheckParsed> = {}): PluginHealthCheckParsed => ({
-      interval: 30_000,
-      timeout: 120_000,
+      intervalMs: 30_000,
+      timeoutMs: 120_000,
       failureThreshold: 3,
       successThreshold: 1,
       checkMethod: 'healthCheck',
@@ -122,7 +122,7 @@ describe('PluginHealthMonitor', () => {
       const config = guardedConfig();
       monitor.registerPlugin('guarded-plugin', config);
 
-      const guards = await recordGuards(config.timeout, async () => {
+      const guards = await recordGuards(config.timeoutMs, async () => {
         monitor.startMonitoring('guarded-plugin', healthyPlugin(calls));
 
         // The initial check runs immediately; wait for its report to land.
@@ -176,7 +176,7 @@ describe('PluginHealthMonitor', () => {
           }),
       } as unknown as Plugin;
 
-      monitor.registerPlugin('hanging-plugin', guardedConfig({ timeout: 100 }));
+      monitor.registerPlugin('hanging-plugin', guardedConfig({ timeoutMs: 100 }));
       monitor.startMonitoring('hanging-plugin', hangingPlugin);
 
       await vi.waitFor(() => {
@@ -202,7 +202,7 @@ describe('PluginHealthMonitor', () => {
 
       it('accumulates no guard across periodic rounds', async () => {
         const calls = { count: 0 };
-        const config = guardedConfig({ interval: 1_000 });
+        const config = guardedConfig({ intervalMs: 1_000 });
         monitor.registerPlugin('guarded-plugin', config);
 
         const before = vi.getTimerCount();
@@ -220,7 +220,7 @@ describe('PluginHealthMonitor', () => {
 
         // Periodic checks are where this leak compounds: one orphan per round.
         for (let round = 0; round < 5; round++) {
-          await vi.advanceTimersByTimeAsync(config.interval);
+          await vi.advanceTimersByTimeAsync(config.intervalMs);
         }
 
         expect(calls.count).toBe(6);
@@ -265,8 +265,8 @@ describe('PluginHealthMonitor', () => {
     const failingConfig = (
       overrides: Partial<PluginHealthCheckParsed> = {}
     ): PluginHealthCheckParsed => ({
-      interval: INTERVAL_MS,
-      timeout: 100,
+      intervalMs: INTERVAL_MS,
+      timeoutMs: 100,
       failureThreshold: 2,
       successThreshold: 1,
       checkMethod: 'healthCheck',
@@ -417,9 +417,9 @@ describe('PluginHealthMonitor', () => {
       // Past `failureThreshold`, and past the former backoff window, twice
       // over: the retired path would have destroyed by now and moved the
       // status to `recovering`.
-      await vi.advanceTimersByTimeAsync(config.interval);
+      await vi.advanceTimersByTimeAsync(config.intervalMs);
       await vi.advanceTimersByTimeAsync(FORMER_RESTART_BACKOFF_MS);
-      await vi.advanceTimersByTimeAsync(config.interval);
+      await vi.advanceTimersByTimeAsync(config.intervalMs);
       await vi.advanceTimersByTimeAsync(FORMER_RESTART_BACKOFF_MS);
 
       expect(destroyed.count).toBe(0);
@@ -442,18 +442,18 @@ describe('PluginHealthMonitor', () => {
       monitor.registerPlugin('hanging-plugin', config);
       monitor.startMonitoring('hanging-plugin', plugin);
 
-      await vi.advanceTimersByTimeAsync(config.timeout);
+      await vi.advanceTimersByTimeAsync(config.timeoutMs);
       expect(monitor.getHealthStatus('hanging-plugin')).toBe('failed');
 
-      await vi.advanceTimersByTimeAsync(config.interval - config.timeout);
-      await vi.advanceTimersByTimeAsync(config.timeout);
+      await vi.advanceTimersByTimeAsync(config.intervalMs - config.timeoutMs);
+      await vi.advanceTimersByTimeAsync(config.timeoutMs);
       await vi.advanceTimersByTimeAsync(FORMER_RESTART_BACKOFF_MS);
 
       expect(destroyed.count).toBe(0);
       expect(state.alive).toBe(true);
 
       const report = monitor.getHealthReport('hanging-plugin');
-      expect(report?.message).toBe(`Health check timeout after ${config.timeout}ms`);
+      expect(report?.message).toBe(`Health check timeout after ${config.timeoutMs}ms`);
       expect(report?.checks).toEqual([
         { name: 'health-check', status: 'failed', message: report?.message },
       ]);
@@ -472,7 +472,7 @@ describe('PluginHealthMonitor', () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(monitor.getHealthStatus('unhealthy-plugin')).toBe('degraded');
 
-      await vi.advanceTimersByTimeAsync(config.interval);
+      await vi.advanceTimersByTimeAsync(config.intervalMs);
       await vi.advanceTimersByTimeAsync(FORMER_RESTART_BACKOFF_MS);
 
       expect(monitor.getHealthStatus('unhealthy-plugin')).toBe('unhealthy');
@@ -514,8 +514,8 @@ describe('PluginHealthMonitor', () => {
   // shape straight from the caller's hand.
   describe('a config still declaring a restart is REFUSED (#12032)', () => {
     const legalConfig = (): PluginHealthCheckParsed => ({
-      interval: 30_000,
-      timeout: 5_000,
+      intervalMs: 30_000,
+      timeoutMs: 5_000,
       failureThreshold: 3,
       successThreshold: 1,
     });
@@ -586,8 +586,8 @@ describe('PluginHealthMonitor', () => {
     const thresholdConfig = (
       overrides: Partial<PluginHealthCheckParsed> = {}
     ): PluginHealthCheckParsed => ({
-      interval: INTERVAL_MS,
-      timeout: 100,
+      intervalMs: INTERVAL_MS,
+      timeoutMs: 100,
       failureThreshold: 2,
       successThreshold: THRESHOLD,
       checkMethod: 'healthCheck',
@@ -811,5 +811,59 @@ describe('PluginHealthMonitor', () => {
 
       monitor.stopMonitoring('fresh-plugin');
     });
+  });
+});
+
+// ── [#17780] The two duration renames refuse at the door, not silently ──────
+//
+// `PluginHealthCheckSchema` is not `.strict()` and `registerPlugin` takes the
+// parsed shape straight from the caller's hand, so a host still spelling
+// `interval` / `timeout` would otherwise get `undefined` where a duration
+// belongs — a `setInterval` with no period and a race with no deadline.
+describe('a config still spelling the pre-rename durations is REFUSED (#17780)', () => {
+  let monitor: PluginHealthMonitor;
+  beforeEach(() => {
+    monitor = new PluginHealthMonitor(createLogger({ level: 'silent' }));
+  });
+
+  it.each([
+    ['interval', 'intervalMs', 30_000],
+    ['timeout', 'timeoutMs', 5_000],
+  ])('refuses `%s` with an ADR-0112 envelope naming `%s`', (old, next, value) => {
+    const config = {
+      intervalMs: 30_000,
+      timeoutMs: 5_000,
+      failureThreshold: 3,
+      successThreshold: 1,
+      [old]: value,
+    } as unknown as PluginHealthCheckParsed;
+
+    let caught: (Error & { code?: string; status?: number }) | undefined;
+    try {
+      monitor.registerPlugin('legacy-duration-plugin', config);
+    } catch (error) {
+      caught = error as Error & { code?: string; status?: number };
+    }
+
+    expect(caught, `${old} must be refused`).toBeDefined();
+    expect(caught?.code).toBe('VALIDATION_ERROR');
+    expect(caught?.status).toBe(400);
+    expect(caught?.message).toContain(`'${old}' was renamed to '${next}'`);
+    expect(caught?.message).toContain('milliseconds');
+
+    // Refused BEFORE anything was stored.
+    expect(monitor.getHealthStatus('legacy-duration-plugin')).toBeUndefined();
+    expect(monitor.getAllHealthStatuses().size).toBe(0);
+  });
+
+  it('accepts the suffixed spellings (anti-vacuity)', () => {
+    const config = {
+      intervalMs: 30_000,
+      timeoutMs: 5_000,
+      failureThreshold: 3,
+      successThreshold: 1,
+    } as PluginHealthCheckParsed;
+    expect(() => monitor.registerPlugin('modern-plugin', config)).not.toThrow();
+    expect(monitor.getHealthStatus('modern-plugin')).toBe('unknown');
   });
 });

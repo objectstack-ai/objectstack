@@ -1365,6 +1365,34 @@ export const CalendarConfigSchema = lazySchema(() => strictObject({
   endDateField: z.string().optional().describe('Field providing the event end date/time (defaults to a single-day event)'),
   titleField: z.string().optional().describe('Field displayed as the event title. Omit to fall back to the record display name (ADR-0079 resolver chain)'),
   colorField: z.string().optional().describe('Field to derive each event color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the calendar theme-aware palette color hashed from the value'),
+  /**
+   * [#17054] The fifth binding, and the one this schema was missing while two
+   * other faces of this same package already published it as a member: the
+   * `object-calendar` flat-key prescription names it verbatim
+   * (`OBJECT_CALENDAR_FLAT_FIELD_GUIDANCE` in `ui/component.zod.ts`) and that
+   * block's `calendar` prop `.describe()` spells the config as
+   * `{ startDateField, endDateField?, titleField?, colorField?, allDayField? }`
+   * — text that ships to `content/docs/references/ui/component.mdx`. An author
+   * who followed the prescription on a STORED VIEW was refused here by name.
+   *
+   * Declared rather than trimmed because the renderer honours it: at the
+   * objectui pin `53ded82b` this repo builds against, `ListView`'s
+   * `collectViewFields` reads `calendar.allDayField` into the fetch projection
+   * (`plugin-list/src/ListView.tsx`) and its calendar branch forwards the
+   * authored block onto the `object-calendar` node, where `getCalendarConfig`
+   * resolves it; objectui#8026 then makes it load-bearing in the render itself.
+   * It is a FIELD BINDING like its four neighbours, which is what separates it
+   * from `defaultView` — the renderer's initial view mode, a UI preference with
+   * its own declared home as an `object-calendar` component prop and no
+   * business on a field-binding config.
+   *
+   * ⛔ No default field name. An undeclared `allDayField` leaves the renderer's
+   * existing inference untouched (an event with no end date draws as all-day);
+   * a DECLARED one is absolute — a record whose flag is absent or false is not
+   * all-day, because letting the inference overrule a declared key is this
+   * card's own defect inverted.
+   */
+  allDayField: z.string().optional().describe('Field carrying the all-day flag for each event (names a boolean field, not a value): a record whose flag is true is drawn as an all-day band rather than at a clock time, and one whose flag is absent or false is not all-day. Omit to leave the renderer inference in place — an event with no end date draws as all-day'),
 }));
 
 /**
@@ -4839,6 +4867,72 @@ function unclaimedBranchIssue(
 }
 
 /**
+ * [#17299] The prescription a RETIREMENT tombstone raises, if the branch raised
+ * one — the FAMILY-WIDE half of {@link exportOptionsPdfUnionError}.
+ *
+ * ## The shape this reads, and why it is the family rather than a heuristic
+ *
+ * `retiredKey()` (`../shared/retired-key.ts`) is `z.never({ error: () =>
+ * guidance }).optional()`, so a tombstone that is written to raises exactly one
+ * issue shape: `code: 'invalid_type'`, `expected: 'never'`, and a `message`
+ * that IS the upgrade prescription. That pair is not a guess about this file —
+ * it is the retirement channel's declared issue shape, named as such where the
+ * same shape is produced one grain wider (`ui/component.zod.ts`'s
+ * `retiredComponentProps`: *"`expected: 'never'` / `code: 'invalid_type'` is
+ * the same issue shape a key tombstone raises"*).
+ *
+ * ## Why the discriminant does not over-reach — measured, with a lit control
+ *
+ * `strictObject()` closes a shape with a `z.never()` CATCHALL, so the union's
+ * four members reach 67 `never` leaves in total and only 8 of them are
+ * tombstones. The other 59 are those catchalls — and they never produce this
+ * issue shape, because zod's object parser folds a rejecting `never` catchall
+ * into `code: 'unrecognized_keys'` instead (measured on the built artifact:
+ * a bogus key under `pagination` reports `unrecognized_keys`, never
+ * `expected: 'never'`). The control is lit by construction: those 59 ARE
+ * `z.never()` in the schema graph, so a discriminant that read the graph
+ * would have caught all 67; reading the raised ISSUE catches exactly the 8.
+ *
+ * So this is not "lift anything that looks like guidance". It lifts one
+ * declared issue shape, whose `message` is a prescription by the definition of
+ * the helper that produced it.
+ *
+ * ## Per case or family-wide
+ *
+ * {@link exportOptionsPdfUnionError} solved the same burial for ONE retired
+ * enum VALUE by re-reading `issue.input` structurally — the right shape there,
+ * because an enum-value narrowing leaves no tombstone to key on. A KEY
+ * retirement does leave one, and there are eight on this union's surface today
+ * reachable at four different depths (`virtualScroll`, `config.virtualScroll`,
+ * `list.virtualScroll`, `listViews.<key>.virtualScroll`), which a structural
+ * input-reader would have to re-implement the whole nesting to find. Reading
+ * the issue the tombstone already raised is depth-independent, and it means the
+ * NEXT retirement on this shape — there are 592 `retiredKey()` call sites in
+ * this package — is surfaced without anyone remembering to wire it.
+ *
+ * ## What it deliberately does not do
+ *
+ * The prescription is lifted **verbatim**: no prefix, no count, no decoration.
+ * The string is the migration document (`../shared/retired-key.ts`) and its
+ * wording is pinned class-wide by `retired-key-migrate-sentence.test.ts`;
+ * a message this function composed would be a second spelling of it. When a
+ * body writes more than one retired key the FIRST is lifted and the rest stay
+ * exactly where they were, reachable in the same nested `errors` as before —
+ * the top-level message is a pointer to the prescription, never a replacement
+ * for the issue list.
+ */
+function retirementPrescription(issues: readonly z.core.$ZodIssue[]): string | undefined {
+  for (const issue of issues) {
+    const candidate = issue as { code?: string; expected?: string; message?: unknown };
+    if (candidate.code === 'invalid_type' && candidate.expected === 'never'
+      && typeof candidate.message === 'string' && candidate.message.length > 0) {
+      return candidate.message;
+    }
+  }
+  return undefined;
+}
+
+/**
  * [#7510] Focus a FAILED `ViewMetadataSchema` union on the branch the body
  * claims, so the branch that got furthest is the one whose prescription the
  * author reads.
@@ -4902,10 +4996,13 @@ function unclaimedBranchIssue(
  * - **The `errors` array keeps its length and its ORDER.** A muted branch is
  *   replaced in place, not filtered out, so a positional consumer (objectui's
  *   canary read `errors[2]`) still finds branch 2 where branch 2 was.
- * - **The wrapper itself is untouched.** Whether zod emits the
+ * - **The wrapper's SHAPE is untouched.** Whether zod emits the
  *   `invalid_union` wrapper or returns a lone non-aborted branch's issues
  *   verbatim is decided in `handleUnionResults` before any check runs, so
- *   nothing about the envelope's shape or issue codes moves.
+ *   nothing about the envelope's shape or issue codes moves. Its `message` is
+ *   the one field #17299 may rewrite, and only to a prescription the claimed
+ *   branch already raised — see {@link retirementPrescription}; every other
+ *   failure keeps zod's `Invalid input` byte for byte.
  * - **An unclaimed body is left alone.** When no discriminant settles the claim
  *   (`selectViewMetadataBranch` → `null`) the ranking keeps the case, exactly as
  *   {@link diagnoseViewMetadata} keeps it (`candidates = claimed ? [claimed] :
@@ -4928,8 +5025,18 @@ function focusClaimedBranch(): z.core.$ZodCheck<unknown> {
       // have a different arity, and renaming its branches would be a lie.
       if (issue.errors.length !== VIEW_METADATA_BRANCHES.length) continue;
 
+      const claimedIssues = issue.errors[VIEW_METADATA_BRANCHES.indexOf(claimed)] ?? [];
+      // [#17299] A retirement prescription raised inside the claimed branch
+      // becomes the UNION's own message. Without this the top-level message is
+      // zod's bare `Invalid input` and the prescription sits at
+      // `issues[0].errors[k][j].message` — invisible at `PUT /api/v1/meta/view`,
+      // the door an MCP/AI author reaches. `undefined` leaves the message
+      // exactly as zod wrote it, which is every non-retirement failure.
+      const prescription = retirementPrescription(claimedIssues);
+
       payload.issues[index] = {
         ...(payload.issues[index] as object),
+        ...(prescription === undefined ? {} : { message: prescription }),
         errors: issue.errors.map((branchIssues, position) => {
           const branch = VIEW_METADATA_BRANCHES[position]!;
           return branch === claimed

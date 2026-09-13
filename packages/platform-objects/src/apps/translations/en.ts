@@ -37,6 +37,16 @@ export const en: TranslationData = {
         nav_account_sessions: { label: 'Active Sessions' },
         nav_account_api_keys: { label: 'API Keys' },
         nav_account_oauth_apps: { label: 'OAuth Applications' },
+        // Contributed at RUNTIME by `@objectstack/mcp` into
+        // `grp_account_developer` (`connect-ui.ts`), so `ACCOUNT_APP` declares
+        // no nav item for it and no static walk in this package can see it —
+        // the same shape as the contributed Setup entries below. Its Setup twin
+        // carries the identical source string, and BOTH keys are needed: the
+        // bundles are keyed `apps.<app>.navigation.<id>`, one namespace per
+        // app, so `apps.setup.navigation.nav_connect_agent` never answers for
+        // the Account door. Its absence rendered the English literal under
+        // Account while Setup rendered the translation, for one destination.
+        nav_connect_agent: { label: 'Connect an Agent' },
       },
     },
     setup: {

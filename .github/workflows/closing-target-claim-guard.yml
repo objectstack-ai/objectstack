@@ -1,0 +1,140 @@
+# A pull request may close a card only while that card's own thread carries a
+# `Claim:` naming this pull request's head branch.
+#
+# Every agent here shares ONE GitHub identity, so the assignee field is a
+# presence bit and the `Claim:` comment is the identity record. Two guards
+# already run at pull-request time — the Duplicate Fix Guard ("no other open PR
+# may claim the same issue") and the Single-Claim Path Guard — and neither asks
+# the question that decides ownership. That question WAS already asked, by row
+# H46 of the half-state sweep, and asked AFTER THE FACT as a report-only patrol
+# input: the cloud-repo incident (one card implemented 29 minutes apart by two
+# seats, the second with no claim) and an objectstack card implemented twice in
+# one morning were both visible to that predicate and stopped by nothing. A
+# control that detects a defect it cannot prevent is a TIMING defect in an
+# existing control, not an absent one — so this workflow runs the same
+# predicate at the moment the merge can still be stopped.
+#
+# The rule, the imported predicates, the declined-number policy, the
+# branch-rename remedy and the exit contract all live in
+# `scripts/check-closing-target-claim.mjs`; that header is authoritative and
+# this file is the invocation.
+#
+# Sibling shape, deliberately copied rather than reinvented: the Part-of
+# Closing-Keyword Guard and the Single-Claim Path Guard are this repo's other
+# PR-scoped blocking checks, and this takes their job shape, their runtime pin
+# and their `pull_request` trigger set.
+name: Closing-Target Claim Guard
+
+# THREE things are load-bearing here.
+#
+# `edited`: one of the two remedies is to drop the closing keyword and write
+# `Part of #N` instead. The body is the frozen half of this check's input, so
+# that remedy needs a fresh event rather than a re-run — exactly as in the two
+# body-scoped sibling guards.
+#
+# `synchronize`: the head BRANCH is half the question, and a force-free re-push
+# onto a differently-named branch arrives as a new pull request, but a push that
+# changes what the PR contains must be re-judged on the commit that changed it.
+#
+# `merge_group`: and this is where this gate deliberately DIVERGES from both
+# siblings, whose headers say they take no queue leg because a merge-queue event
+# carries no pull request. True — and here it does not matter, because the queue
+# REF NAMES its pull request (`gh-readonly-queue/<base>/pr-<N>-<sha>`). The
+# script reads that number with the governed queue guard's own shipped parser
+# and then reads the same PR body and the same live comment threads, so the
+# queue build judges the SAME pull request by the SAME rule. That is what makes
+# the card's "the check holds in the queue too" a wiring fact rather than an
+# assumption.
+#
+# ⚠️ In a MULTI-PR group the queue ref names only the LAST pull request; the
+# script header states that limit. Every member of the group passed the
+# `pull_request` leg to be armed at all.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+  merge_group:
+
+# ⛔ NO `paths:` filter, on either leg. A skipped job counts as SUCCESS in branch
+# protection, so a path filter would hand a green check to the very PR the
+# filter mis-scoped — and this gate's input is a PR BODY, which no path filter
+# can see at all. (`merge_group` has no paths support either, so a filter would
+# also make the two legs disagree about what they cover.)
+
+# Read-only, and that is the whole grant. This gate reports; it never closes a
+# PR, comments, edits a body, or writes a label.
+#
+# `contents: read` is not optional padding: naming a `permissions:` block at all
+# sets every scope NOT listed to `none`, and this job checks the repo out to get
+# at the script. `issues: read` is what the card comment threads need — the
+# claim record is an ISSUE comment, and the pull-requests scope does not reach
+# it. `pull-requests: read` is what the merge_group leg needs to read the body
+# of the pull request its queue ref names.
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: closing-target-claim-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  closing-target-claim:
+    # ⚠️ THIS LITERAL IS THE CHECK-RUN NAME branch protection would pin, and it
+    # is duplicated in `CHECK_CONTEXT_NAME` in the script — deliberately, and
+    # pinned in both directions: the script's `--self-test` reads THIS FILE and
+    # fails if the two ever disagree. Renaming a job silently detaches a
+    # required context.
+    #
+    # ⛔ Making it a required context is NOT this PR's step. Branch protection
+    # takes a `REQUIRED_CONTEXTS` row PLUS the Settings → Rulesets entry, in one
+    # sitting, and the settings half is the maintainer's. Either half alone is
+    # an outage. What the merge_group leg above buys today is that the question
+    # is asked on the queue build; what it buys the day someone does make this
+    # required is that it cannot deadlock the queue, which a workflow with no
+    # queue leg always does.
+    name: The card this PR closes must claim this branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      # Pinned to the same major and spelling as every other setup-node in this
+      # repo, for the measured reason the sibling guards record: a setup-node
+      # major whose package-manager-cache default is on reads `packageManager`
+      # out of package.json and shells out to pnpm to find its store, killing
+      # the job in the SETUP step with "Unable to locate executable file: pnpm"
+      # — before the script runs, and naming a tool the workflow source never
+      # mentions. This job installs no package manager on purpose: the script is
+      # dependency-free and imports two sibling modules.
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # Everything reaches the script through `env:`, never through `${{ }}`
+      # inside the `run:` line. A PR body is arbitrary author-controlled text,
+      # and an expression interpolated into a shell line is substituted before
+      # bash ever sees it; through `env:` it is inert data. The script's
+      # self-test pins this spelling.
+      #
+      # On the merge_group leg every `github.event.pull_request.*` expression
+      # renders EMPTY and `MERGE_GROUP_HEAD_REF` carries the queue ref, which is
+      # what selects the leg inside the script. On the pull_request leg the
+      # reverse holds. Neither leg needs its own step.
+      #
+      # `PR_HEAD_REF` is not decoration: the head branch IS the question this
+      # gate asks, so a blank one exits NOT MEASURED rather than green.
+      #
+      # The token is required, not optional: the claim record is a comment on
+      # another issue, which cannot be answered from the event payload.
+      - name: A PR may close only a card that claims its branch
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          MERGE_GROUP_HEAD_REF: ${{ github.event.merge_group.head_ref }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/check-closing-target-claim.mjs

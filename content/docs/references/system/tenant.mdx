@@ -151,7 +151,7 @@ Quota enforcement check result
 | **strategy** | `'isolated_schema'` | ✅ | Schema-level isolation strategy |
 | **schema** | `{ namingPattern: string; includePublicSchema: boolean; sharedSchema: string; autoCreateSchema: boolean }` | optional | Schema configuration |
 | **migrations** | `{ strategy: Enum<'parallel' \| 'sequential' \| 'on_demand'>; maxConcurrent: integer; rollbackOnError: boolean }` | optional | Migration configuration |
-| **performance** | `{ poolPerSchema: boolean; schemaCacheTTL: integer }` | optional | Performance settings |
+| **performance** | `{ poolPerSchema: boolean; schemaCacheTtlSeconds: integer }` | optional | Performance settings |
 
 ### Nested Shape: `SchemaLevelIsolationStrategy.schema`
 
@@ -175,7 +175,8 @@ Quota enforcement check result
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **poolPerSchema** | `boolean` | optional (default: `false`) | Separate pool per schema |
-| **schemaCacheTTL** | `integer` | optional (default: `3600`) | Schema cache TTL |
+| **schemaCacheTtlSeconds** | `integer` | optional (default: `3600`) | Schema cache TTL in seconds |
+| **schemaCacheTTL** | `never` | optional | [REMOVED] `performance.schemaCacheTTL` was renamed to `schemaCacheTtlSeconds` on `SchemaLevelIsolationStrategy` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Its unit (seconds) lived in a source comment only and the published description named none, so a reader of the reference page could not tell 3600 seconds from 3600 milliseconds. Rename the key to `schemaCacheTtlSeconds`; the value (seconds) is unchanged. |
 
 
 ---
@@ -278,7 +279,7 @@ This schema accepts one of the following structures:
 | **strategy** | `'isolated_schema'` | ✅ | Schema-level isolation strategy |
 | **schema** | `{ namingPattern: string; includePublicSchema: boolean; sharedSchema: string; autoCreateSchema: boolean }` | optional | Schema configuration |
 | **migrations** | `{ strategy: Enum<'parallel' \| 'sequential' \| 'on_demand'>; maxConcurrent: integer; rollbackOnError: boolean }` | optional | Migration configuration |
-| **performance** | `{ poolPerSchema: boolean; schemaCacheTTL: integer }` | optional | Performance settings |
+| **performance** | `{ poolPerSchema: boolean; schemaCacheTtlSeconds: integer }` | optional | Performance settings |
 
 ### Nested Shape: `TenantIsolationConfig[strategy='isolated_schema'].schema`
 
@@ -302,7 +303,8 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **poolPerSchema** | `boolean` | optional (default: `false`) | Separate pool per schema |
-| **schemaCacheTTL** | `integer` | optional (default: `3600`) | Schema cache TTL |
+| **schemaCacheTtlSeconds** | `integer` | optional (default: `3600`) | Schema cache TTL in seconds |
+| **schemaCacheTTL** | `never` | optional | [REMOVED] `performance.schemaCacheTTL` was renamed to `schemaCacheTtlSeconds` on `SchemaLevelIsolationStrategy` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Its unit (seconds) lived in a source comment only and the published description named none, so a reader of the reference page could not tell 3600 seconds from 3600 milliseconds. Rename the key to `schemaCacheTtlSeconds`; the value (seconds) is unchanged. |
 
 ---
 

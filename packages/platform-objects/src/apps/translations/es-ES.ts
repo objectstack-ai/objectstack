@@ -24,6 +24,10 @@ export const esES: TranslationData = {
         nav_account_sessions: { label: 'Sesiones activas' },
         nav_account_api_keys: { label: 'Claves API' },
         nav_account_oauth_apps: { label: 'Aplicaciones OAuth' },
+        // Contributed at runtime by `@objectstack/mcp` into
+        // `grp_account_developer`; the Setup twin's key does not answer for the
+        // Account app (one `apps.<app>.navigation` namespace per app).
+        nav_connect_agent: { label: 'Conectar un agente' },
       },
     },
     setup: {

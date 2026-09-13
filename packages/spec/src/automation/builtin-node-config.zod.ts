@@ -377,6 +377,23 @@ export type DeleteRecordConfigParsed = z.infer<typeof DeleteRecordConfigSchema>;
  * `ScreenSpec` the client renders). `visibleWhen` is forwarded RAW — the client
  * re-evaluates it against the values collected so far (#3528).
  */
+/**
+ * What a `type: 'lookup'` screen field with no target is told (maintainer
+ * ruling A′, 2026-09-13). Named rather than inlined for the reason every
+ * refusal string on this surface is: the wording is the contract an author
+ * meets, and a test pins it.
+ *
+ * It names the KEY, not just the condition: a picker with no target object is
+ * the exact shape ADR-0078 uses as its own example of silently-inert metadata
+ * — it parses, nothing marks it, and the field renders a picker that can
+ * resolve nothing. ⛔ No tracker id in this text: it is printed AT the author,
+ * who has no access to one (`check:doc-authoring`).
+ */
+export const SCREEN_FIELD_LOOKUP_REFERENCE_REQUIRED =
+  "A `type: 'lookup'` screen field must declare `reference` — the name of the object whose records the picker "
+  + "offers (e.g. `reference: 'crm_knowledge_article'`). Without it the field renders a picker with nothing to "
+  + 'resolve.';
+
 export const ScreenFieldConfigSchema = lazySchema(() => strictObject({
   surface: 'this screen field',
   history: BUILTIN_NODE_CONFIG_HISTORY,
@@ -400,6 +417,27 @@ export const ScreenFieldConfigSchema = lazySchema(() => strictObject({
      */
     visible: 'visibleWhen',
     showWhen: 'visibleWhen',
+    /**
+     * The three intents #17306 added land on `FieldSchema`'s OWN spellings —
+     * one platform, one field vocabulary, so an author who has declared an
+     * object field already knows these names. These renames are the same ones
+     * `FieldSchema` carries for the same targets (`field.zod.ts`), repeated
+     * here because an alias table is per-shape: a spelling this surface does
+     * not answer is refused with the bare key list, and the neighbouring-
+     * surface spellings are exactly what an author arrives holding.
+     */
+    help: 'inlineHelpText', helpText: 'inlineHelpText', hint: 'inlineHelpText', tooltip: 'inlineHelpText',
+    relatedTo: 'reference', referenceTo: 'reference', target: 'reference',
+    targetObject: 'reference', lookupObject: 'reference',
+    /**
+     * `object` is NOT a `FieldSchema` alias — it earns a row here because this
+     * surface has two levels and they mean different things. On the screen NODE
+     * `object` renames to `objectName` (render this object's whole form); on a
+     * screen FIELD it can only mean the lookup target, which is `reference`.
+     * The report that filed #17306 reached for `object` at this level, so the
+     * spelling is measured, not hypothetical.
+     */
+    object: 'reference',
   },
 }, {
   /** Field name — an item with an empty name is dropped. */
@@ -424,6 +462,74 @@ export const ScreenFieldConfigSchema = lazySchema(() => strictObject({
   placeholder: z.string().optional().describe('Input placeholder text'),
   /** Bare-CEL predicate the client re-evaluates as values change (#3528). */
   visibleWhen: z.string().optional().describe('CEL predicate controlling visibility, evaluated client-side'),
+  /**
+   * Numeric bound pair (#17306), spelled as `FieldSchema` spells it.
+   *
+   * Forwarded into the `ScreenFieldSpec` the client renders AND enforced
+   * server-side on resume (`validateScreenInputs`, `min_value` / `max_value`):
+   * a screen field's declared contract is the ONLY contract behind it — there
+   * is no object schema to catch a bad bag downstream — so a bound that lived
+   * in the dialog alone would be bypassed by any caller that posts to `resume`
+   * directly, which is the gap #4477 closed for `required`.
+   *
+   * The resume check compares numbers, and a caller that posts a non-number no
+   * longer slips past it by never reaching it: on a `type: 'number'` field a
+   * present value that is not a finite JSON number is refused first
+   * (`invalid_type`), ⛔ not coerced (maintainer ruling A′, 2026-09-13). So
+   * "a caller that skips the dialog is refused too" holds with no qualifier.
+   *
+   * Unconditioned on `type` in the SHAPE, exactly as `FieldSchema.min` /
+   * `.max` are: a screen field's `type` is an open widget hint, so this schema
+   * cannot judge which types a bound is meaningful on. A bound declared on a
+   * non-numeric field still constrains nothing the client renders — the shape
+   * refusal above reads `'number'` alone, not the presence of a bound.
+   */
+  min: z.number().optional().describe('Minimum accepted value (numeric fields); enforced on resume'),
+  max: z.number().optional().describe('Maximum accepted value (numeric fields); enforced on resume'),
+  /**
+   * Help text under the input (#17306) — `FieldSchema`'s spelling for the same
+   * intent, which is why it is not `helpText`: `FieldSchema` renames that (and
+   * `help` / `hint` / `tooltip`) onto `inlineHelpText`, so a screen field that
+   * declared `helpText` would make the platform answer one question with two
+   * names. Distinct from `placeholder`, which is the IN-INPUT hint and is gone
+   * the moment the user types — the carrier the reference app was forced to
+   * overload for a constraint that has to stay readable.
+   */
+  inlineHelpText: z.string().optional().describe('Help text displayed below the field'),
+  /**
+   * Lookup target (#17306) — the object whose records a `type: 'lookup'` screen
+   * field picks from, spelled as `FieldSchema.reference` spells it.
+   *
+   * Optional in the SHAPE and REQUIRED on `type: 'lookup'` by the refinement
+   * below, which is how `FieldSchema` binds it too: the key is meaningless on
+   * a `text` field, so the requirement is conditional rather than a
+   * `z.string()` every screen field would have to carry.
+   *
+   * ⚠️ This REVERSES the optionality this card first shipped. The argument for
+   * optional was that shipped flows declare a bare `lookup` screen field (the
+   * reference app's own "Resolved by Article" is one) and refusing them breaks
+   * metadata that parses today. The maintainer ruled the other way (A′,
+   * 2026-09-13): ADR-0078's own example of silently-inert metadata IS a
+   * `lookup` with no `reference`, and a degraded shipped twin is not a reason
+   * to bend the contract to it. A stored bare lookup has NO lossless
+   * conversion — nothing in the metadata says which object the author meant —
+   * so this is an ADR-0087 SEMANTIC migration entry (a structured TODO naming
+   * the flow and the field), ⛔ never a D2 conversion that would have to invent
+   * a target.
+   */
+  reference: z.string().optional().describe("Target object name (snake_case) whose records a `type: 'lookup'` field picks from; REQUIRED when `type` is `lookup`"),
+}).superRefine((field, ctx) => {
+  // Conditional requirement, not a shape change: the key set is unchanged and
+  // `.shape` still enumerates twelve keys. `type` is an open widget hint, so
+  // this reads ONE member of it — the member whose whole meaning is "resolve
+  // records from another object", which cannot be done without naming one.
+  if (field.type !== 'lookup') return;
+  if (typeof field.reference === 'string' && field.reference.trim() !== '') return;
+  ctx.addIssue({
+    code: 'custom',
+    path: ['reference'],
+    message: SCREEN_FIELD_LOOKUP_REFERENCE_REQUIRED,
+  });
 }));
 
 export type ScreenFieldConfig = z.input<typeof ScreenFieldConfigSchema>;

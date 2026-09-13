@@ -466,17 +466,22 @@ const AUTHORABLE_SURFACE_FILE = 'packages/spec/authorable-surface.base.json';
  *
  * `authorable-surface.base.json` is what #12824 names, and it is an ANCHOR: its own
  * `description` says it is "a verbatim copy of the keys in authorable-surface/ as they
- * stood at `baseRev`" — a fixed commit for the deletion gate. Measured on this tree it
- * lagged the live ratchet by 532 keys, and the lag is load-bearing here: `data/Object:editMode`
- * and every key of `security/OrgScopingEntitlement` and `api/ProvenanceWaiver` are absent
- * from it and present in `authorable-surface/`, so reading the anchor ALONE would suppress
+ * stood at `baseRev`" — a fixed commit for the deletion gate, so it is missing every key
+ * authored since. ⛔ THAT LAG IS NOT STATED HERE AS A NUMBER: `check:authorable-surface`
+ * prints it on every run, and the anchor's own `description` says so too — a count copied
+ * into prose about staleness is the same defect one level up, and it rots on the same
+ * clock as the thing it describes. What does not rot is what the lag IS, which is the
+ * only part this rule needs: `data/Object:editMode` and every key of
+ * `security/OrgScopingEntitlement` and `api/ProvenanceWaiver` are absent from the anchor
+ * and present in `authorable-surface/`, so reading the anchor ALONE would suppress
  * anchors on genuinely authorable keys — a false negative, growing with every key added
- * after `baseRev`, which is the one direction the ruling forbids.
+ * after `baseRev`, which is the one direction the ruling forbids. `--self-test` pins that
+ * class behaviourally, against the live artifacts, and re-measures it on every run.
  *
  * The union can only ever KEEP an anchor that either source vouches for, never drop one
  * more. `[RETIRED]` is stripped for the same reason: the ratchet's own description says a
  * tombstoned key "still rejects with an upgrade prescription", so it is still surface a
- * page documents, and an exact-match lookup would silently drop all 103 of them.
+ * page documents, and an exact-match lookup would silently drop every one of them.
  */
 const AUTHORABLE_KEY_SUFFIX_RE = /\s\[[A-Z]+\]$/;
 
@@ -3465,7 +3470,7 @@ function selfTest() {
     false, mergeSurface.isAuthorable('ui/ListView', 'x'));
   // `[RETIRED]` is a TOMBSTONE, not a deletion: the ratchet's own description says such a
   // key "still rejects with an upgrade prescription", so it is still surface a page
-  // documents. An exact-match lookup would silently drop all 103 of them.
+  // documents. An exact-match lookup would silently drop every one of them.
   const retiredSurface = buildContainerSurface([{ entries: { S: 'ui/PageCardProps' }, collisions: [] }], ['ui/PageCardProps:body [RETIRED]']);
   check('buildContainerSurface.isAuthorable', 'a tombstoned key is still authorable — the annotation is stripped, not matched', 'ui/PageCardProps:body',
     true, retiredSurface.isAuthorable('ui/PageCardProps', 'body'));

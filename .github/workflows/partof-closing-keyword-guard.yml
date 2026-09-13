@@ -13,8 +13,8 @@
 # reuses; that header is authoritative, this file is the invocation.
 #
 # Sibling shape, deliberately copied rather than reinvented: the Duplicate Fix
-# Guard is this repo's other PR-body-scoped blocking check, and it takes the
-# same trigger set for the same measured reason.
+# Guard is one of this repo's other PR-body-scoped blocking checks, and it takes
+# the same trigger set for the same measured reason.
 name: Part-of Closing-Keyword Guard
 
 # `edited` is load-bearing, not decoration. The body is this check's whole

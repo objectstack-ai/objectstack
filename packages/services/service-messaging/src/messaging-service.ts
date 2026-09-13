@@ -951,6 +951,9 @@ export class MessagingService {
             recipients,
             channels: input.channels,
             actionUrl: actionUrlFor(input, payload),
+            // Who caused it, projected onto the per-recipient unit so a channel
+            // can materialize it without reading `sys_notification` back.
+            actorId: input.actorId,
             payload: input.payload,
         };
 
@@ -981,6 +984,10 @@ export class MessagingService {
             body: str(payload.body) ?? '',
             severity: input.severity ?? 'info',
             actionUrl: actionUrlFor(input, payload),
+            // Snapshot the actor too: the dispatcher reads it back in
+            // `processRow` rather than re-reading `sys_notification`, which
+            // would cost a read per delivery and break the snapshot rule above.
+            actorId: input.actorId,
         };
         const deliveries: DeliveryOutcome[] = [];
         for (const { recipient, channels, notBefore, digest } of targets) {

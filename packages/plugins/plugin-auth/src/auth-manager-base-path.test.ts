@@ -48,7 +48,10 @@
 // that can hold a live better-auth and this manager at once.
 
 import { describe, it, expect } from 'vitest';
-import { AuthManager } from './auth-manager';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { resolve, dirname } from 'node:path';
+import { AuthManager, DEFAULT_AUTH_BASE_PATH } from './auth-manager';
 import type { AuthManagerOptions } from './auth-manager';
 
 const managerWith = (basePath?: unknown) =>
@@ -330,5 +333,70 @@ describe('#16399 one normalisation chain, and an MCP resource URL that is always
       const stamped = (await auth.$context).baseURL;
       expect(manager.getAuthIssuer()).toBe(stamped);
     }
+  });
+});
+
+/**
+ * #16384 — the literal `'/api/v1/auth'` used to be written independently at
+ * FOUR sites: this file's own `configuredBasePath()` fallback, plus three in
+ * `auth-plugin.ts` (the constructor default, `registerAuthRoutes`'s fallback,
+ * `registerOidcDiscoveryRoutes`'s fallback). Nothing was BROKEN by that — see
+ * the card: `AuthPlugin` always supplies `basePath`, so this manager's own
+ * fallback is dead on the live path, unfalsifiable by construction (measured
+ * during #16025's round: mutating it to `/api/v7/elsewhere` was INERT). That
+ * is exactly why a VALUE-comparison test cannot catch a future divergence:
+ * two independently-typed copies of the same string are byte-identical today
+ * and would stay green right up until someone edited only one of them — and
+ * the edited one might be the manager's, which no test on the live path can
+ * observe at all.
+ *
+ * The fix is structural, not behavioural: `DEFAULT_AUTH_BASE_PATH` (declared
+ * above, next to `readMcpServerEnabledEnv`) is now the only place the literal
+ * is WRITTEN; every one of the four readers imports it instead of retyping
+ * it. What this describes pins is that structural fact, by reading the two
+ * files' own source text — a future edit that reintroduces a hardcoded
+ * default at any of the four sites (however well-intentioned: "it's just a
+ * string, inlining it is simpler") reappears here as a second literal and
+ * fails immediately, before it has any chance to drift from the other three.
+ */
+describe('#16384 the default base path is written in exactly ONE place', () => {
+  const HERE = dirname(fileURLToPath(import.meta.url));
+  const AUTH_MANAGER_SRC = readFileSync(resolve(HERE, 'auth-manager.ts'), 'utf8');
+  const AUTH_PLUGIN_SRC = readFileSync(resolve(HERE, 'auth-plugin.ts'), 'utf8');
+
+  /**
+   * Lines of source that carry the literal, MINUS comment lines (this file's
+   * docblocks use a leading `*` per continuation line; ordinary comments use
+   * `//`). A `@default` TSDoc annotation or a worked example inside a
+   * docblock is documentation, not a second definition, and stays out of
+   * this card's scope by design — the dispatch that opened it counts four
+   * CODE sites and two doc comments separately, and only the four move here.
+   */
+  const codeLinesCarryingTheLiteral = (source: string): string[] =>
+    source
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.includes(`'${DEFAULT_AUTH_BASE_PATH}'`))
+      .filter((line) => !line.startsWith('*') && !line.startsWith('//'));
+
+  it('sanity: DEFAULT_AUTH_BASE_PATH is still the shipped literal this pin reasons about', () => {
+    // Hardcoded on purpose, not a re-read of the constant — if this constant's
+    // VALUE ever moves, this line (not the structural assertions below) is
+    // what should turn red.
+    expect(DEFAULT_AUTH_BASE_PATH).toBe('/api/v1/auth');
+  });
+
+  it('auth-manager.ts writes the literal exactly once — the constant declaration itself', () => {
+    expect(codeLinesCarryingTheLiteral(AUTH_MANAGER_SRC)).toEqual([
+      `export const DEFAULT_AUTH_BASE_PATH = '${DEFAULT_AUTH_BASE_PATH}';`,
+    ]);
+  });
+
+  it('auth-plugin.ts never writes the literal — every site imports the shared constant', () => {
+    expect(codeLinesCarryingTheLiteral(AUTH_PLUGIN_SRC)).toEqual([]);
+    // And it isn't simply missing the import either — the three collapsed
+    // sites (constructor default, registerAuthRoutes, registerOidcDiscoveryRoutes)
+    // must actually reference the shared binding.
+    expect(AUTH_PLUGIN_SRC.match(/DEFAULT_AUTH_BASE_PATH/g)?.length ?? 0).toBeGreaterThanOrEqual(4);
   });
 });

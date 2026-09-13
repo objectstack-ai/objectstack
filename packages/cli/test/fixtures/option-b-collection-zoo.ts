@@ -115,6 +115,38 @@ export const PROBE_HOOK_OBJECT = 'probe_order';
 export const PROBE_SEED_DATASET = 'probe_account';
 export const PROBE_LOCALE = 'en';
 
+/**
+ * [#17528] The one deliberately LINT-DIRTY value in this fixture: a label that
+ * `os lint`'s HAND-WRITTEN family has something to say about.
+ *
+ * It is here for the same reason `PROBE_FEDERATED_DATASOURCE` is — "watching
+ * the map required carrying one". `lintConfig`'s own rubric (naming, labels,
+ * structure, data-model conventions) reports nothing at all about a CLEAN
+ * stack, so on this zoo as it stood the reader returned the identical four
+ * findings in BOTH shapes while reading an empty one under option B: every
+ * finding came from the shared rule registry, which #17069 had already taught
+ * to fold. A probe row counted over that return value would have been green
+ * before the fix and green after it — a row that cannot go red.
+ *
+ * So exactly one label is lower-cased, on the MODULE package's federated
+ * object, which makes the row a CROSS-PACKAGE resolution rather than a
+ * within-body read. Labels are display strings: nothing in this fixture, the
+ * probe or the pin keys on one, and `ObjectSchema` does not constrain their
+ * case — the whole effect is one `convention/label-case` warning.
+ *
+ * ⛔ Do not "fix" this label. Restoring its case deletes the only signal two
+ * probe rows have.
+ */
+export const PROBE_DIRTY_LABEL = 'probe federated order';
+/**
+ * [#17528] The hand-written `os lint` rule {@link PROBE_DIRTY_LABEL} provokes.
+ *
+ * Named here, beside the value that provokes it, so the provocation and the
+ * rule that observes it cannot drift apart. It is one of the two rules the
+ * card's own repro measured going missing on a `packages[]`-only project.
+ */
+export const PROBE_DIRTY_LABEL_RULE = 'convention/label-case';
+
 // ─── Package 1: the App ─────────────────────────────────────────────────────
 
 const coreStack = (): ObjectStackDefinition =>
@@ -241,7 +273,8 @@ const ordersStack = (): ObjectStackDefinition =>
       // makes the two collections separately observable through one function.
       {
         name: PROBE_FEDERATED_OBJECT,
-        label: 'Probe Federated Order',
+        // [#17528] Deliberately lower-case — see `PROBE_DIRTY_LABEL`.
+        label: PROBE_DIRTY_LABEL,
         pluralLabel: 'Probe Federated Orders',
         sharingModel: 'private',
         datasource: PROBE_FEDERATED_DATASOURCE,

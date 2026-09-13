@@ -175,9 +175,12 @@ const cookieFrom = (response: Response): string =>
 /**
  * Is this cookie still authenticated?
  *
- * better-auth answers `/get-session` with HTTP 200 and a JSON `null` body when
- * the session is gone — NOT a 401 — so a status-only assertion would pass
- * against a fully revoked session. Read the body.
+ * Reads the BODY, and that is deliberate: `/get-session` answers a live
+ * session `200` with `{ user, session }` and an unauthenticated caller `401`
+ * with the ADR-0112 refusal envelope (#17238), so both legs below are real.
+ * ⛔ Do not reduce this to a status check — the point of the helper is that a
+ * session which is gone is proven gone by the absence of a user, not by a
+ * status this file would then be trusting a single seam to keep emitting.
  */
 const isAuthenticated = async (manager: AuthManager, cookie: string): Promise<boolean> => {
   const res = await getSession(manager, cookie);

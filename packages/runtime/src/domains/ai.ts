@@ -82,11 +82,13 @@ export async function handleAIRequest(deps: DomainHandlerDeps, subPath: string, 
         // authenticated. This is the exit the defect lived behind.
         if (denyAnonymous) return anonymousRefusal();
         // The console polls `GET /ai/agents` on every navigation to decide
-        // whether to show AI affordances. Reporting that as a 404 turns the
-        // normal "no AI service configured" state (the open-source default —
-        // service-ai is a Cloud/Enterprise package) into console error-log
-        // spam on every page. An empty list conveys the same information
-        // without looking like a fault. Every other /ai/* route still 404s.
+        // whether to show AI affordances. Reporting that as an error turns
+        // the normal "no AI service configured" state (the open-source
+        // default — service-ai is a Cloud/Enterprise package) into console
+        // error-log spam on every page. An empty list conveys the same
+        // information without looking like a fault. Every other /ai/* route
+        // answers 501 below — an anonymous caller having already been
+        // refused 401 at the gate above.
         //
         // The body is the declared envelope (#4053). `data` carries
         // `AiAgentsResponseSchema`'s `{ agents }` — a RELOCATION of the declared

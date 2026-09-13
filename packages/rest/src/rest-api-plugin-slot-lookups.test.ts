@@ -3,13 +3,25 @@
 /**
  * [#4251 B4] The REST composition root's slot lookups, pinned at runtime.
  *
- * `rest-api-plugin.ts` resolves sixteen service slots and hands most of them to
- * `RestServer` as lazily-invoked providers. B4 replaced the `any` on every one
- * of those lookups with the slot's contract — a change that cannot alter
- * behaviour, but CAN silently mis-wire it: the providers are positional
- * arguments 6..19 of a twenty-argument constructor, all with the same shape
- * (`(environmentId?) => Promise<unknown>`), so a provider that resolves the
- * wrong slot name is assignable everywhere and invisible to the compiler.
+ * `rest-api-plugin.ts` resolves the service slots enumerated by `BOOT_SLOTS`
+ * and `PROVIDERS` below and hands most of them to `RestServer` as
+ * lazily-invoked providers. B4 replaced the `any` on every one of those
+ * lookups with the slot's contract — a change that cannot alter behaviour, but
+ * CAN silently mis-wire it: the providers are positional arguments of one
+ * constructor, all with the same shape (`(environmentId?) => Promise<unknown>`),
+ * so a provider that resolves the wrong slot name is assignable everywhere and
+ * invisible to the compiler.
+ *
+ * ⛔ [#17716] Neither the slot count nor the argument span is written in this
+ * header as a numeral, on purpose. The two that were — a spelled-out slot
+ * count, and an "arguments A..B of an N-argument constructor" span — were
+ * undated present-tense constants. The span figures were accurate the day B4
+ * wrote them and went stale by one the day a provider was appended to the
+ * constructor; the slot count matched no quantity derivable from
+ * `rest-api-plugin.ts` even then. Nothing recomputes a sentence, and a reader
+ * cannot tell a figure that was never measured from one that has since
+ * drifted. Both figures now exist only in the tables below and in the cases
+ * that pin them, so the only spelling of either is one this suite can fail on.
  *
  * Why a RUNTIME pin and not a type-level one. ⚠️ NOT because nothing compiles
  * this file. `packages/rest/tsconfig.json` does exclude its `.test.ts` files,
@@ -101,6 +113,43 @@ const PROVIDERS = [
   { index: 15, label: 'settingsServiceProvider', slot: 'settings' },
   { index: 17, label: 'securityServiceProvider', slot: 'security' },
   { index: 19, label: 'metadataServiceProvider', slot: 'metadata' },
+  // [#17716] The appended parameter #15256's own docblock warns about. Its
+  // provider is kernel-first (`ctx.getKernel()?.getServiceAsync('tenancy')`)
+  // and falls back to `ctx.getService('tenancy')` for a host with no async
+  // accessor — which is the host `mockCtx` builds, so driving it records
+  // `tenancy` in `asked` exactly as every sibling row does. LAZINESS WAS NEVER
+  // WHY IT WAS INVISIBLE: `objectQLProvider` at index 7 has the identical
+  // two-leg shape and has always been covered. It was invisible because it was
+  // absent from this table, so nothing ever drove it, the slot was never asked
+  // for, the set the last case compares could not contain it, and the guard
+  // read green against ANY binding at this position.
+  { index: 20, label: 'tenancyServiceProvider', slot: 'tenancy' },
+] as const;
+
+/**
+ * The positional arguments inside the provider span that are deliberately NOT
+ * providers — so the span is accounted for END TO END, rather than up to
+ * whichever argument someone last remembered.
+ *
+ * [#17716] This table is why the span needs no numeral. With it, every index
+ * from the first provider to the last argument the composition root passes is
+ * either covered by `PROVIDERS` or excused here, and `accounts for every
+ * positional argument` below fails on any that is neither. An argument
+ * APPENDED to `RestServer` — the move #15256 made precisely because inserting
+ * one mid-list "would silently re-bind every positional argument after it" —
+ * now forces a decision here instead of landing uncovered.
+ */
+const NON_PROVIDERS_IN_SPAN = [
+  {
+    index: 16,
+    label: 'serviceExistsProvider',
+    why: '`(name: string) => boolean` — a presence probe, pinned by its own case below',
+  },
+  {
+    index: 18,
+    label: 'requestEnvResolver',
+    why: '`RestRequestEnvResolver` — a resolver instance, not a slot provider',
+  },
 ] as const;
 
 /**
@@ -199,6 +248,34 @@ describe('[#4251 B4] rest-api-plugin slot lookups', () => {
         services[slot],
       );
     }
+  });
+
+  it('accounts for every positional argument from the first provider to the last', async () => {
+    const services = allServices();
+    const { args } = await boot(services);
+
+    const classified = new Set<number>([
+      ...PROVIDERS.map((p) => p.index),
+      ...NON_PROVIDERS_IN_SPAN.map((p) => p.index),
+    ]);
+
+    // Derived from the captured call, never hand-typed. The span ends at the
+    // LAST argument the composition root passes, so an argument appended to
+    // `RestServer` falls inside it by construction and has to be classified.
+    const firstProvider = Math.min(...PROVIDERS.map((p) => p.index));
+    const span: number[] = [];
+    for (let i = firstProvider; i < args.length; i++) span.push(i);
+
+    expect(
+      span.filter((i) => !classified.has(i)),
+      'a positional argument in the provider span is covered by neither PROVIDERS nor NON_PROVIDERS_IN_SPAN — add a row (provider) or an entry (not a provider)',
+    ).toEqual([]);
+    // And no row may outlive its argument: a removed parameter takes its row
+    // with it, rather than leaving one that silently asserts nothing.
+    expect(
+      [...classified].filter((i) => i >= args.length),
+      'a row points past the end of the argument list the composition root passes',
+    ).toEqual([]);
   });
 
   it('passes the env-registry and default-environment seams as RestServer declares them', async () => {

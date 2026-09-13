@@ -289,9 +289,15 @@ export interface ExtractResult {
    *
    * Computed by `collectFilledFromHashes` in
    * `@objectstack/platform-objects/apps`, the module maintainer ruling #8765
-   * Option B put the mechanism in; the extractor supplies the tree and the
-   * previous records and owns none of the rule. The default locale gets no
-   * entry: it is the source, not a copy of one.
+   * Option B put the mechanism in; the extractor supplies the tree, the
+   * previous records and THE SECTIONS THIS RUN BUILT, and owns none of the
+   * rule. The default locale gets no entry: it is the source, not a copy of
+   * one.
+   *
+   * Covers every section the run generated, not just the two a default
+   * `--objects-only` run happens to emit (#16872). A `--no-objects-only` run
+   * fills `apps` / `dashboards` / `pages` from the source too, and before this
+   * those leaves were recorded by nobody and judged by nobody.
    */
   sourceHashes: Record<string, Record<string, string>>;
 }
@@ -2004,12 +2010,32 @@ export function extractTranslations(config: any, opts: ExtractOptions = {}): Ext
 
   const sourceHashes: Record<string, Record<string, string>> = {};
   const sourceBundle = bundles[defaultLocale];
+  /**
+   * The population the provenance rule walks is THIS RUN'S — the sections it
+   * actually built — not `GENERATED_SECTIONS`, the default a caller that does
+   * not know inherits (#16872).
+   *
+   * Every leaf in `bundles[locale]` got there through this extractor, which is
+   * the discriminator the rule is written against: `--fill=default` copies it
+   * from the source. Under the default `--objects-only` the sections built are
+   * `objects` and `metadataForms`, so this is byte-identical to the previous
+   * behaviour; under `--no-objects-only` it is the difference between a filled
+   * `apps` leaf having provenance and having none.
+   *
+   * Read off the BUILT tree rather than off the config, for the reason #16121
+   * records about counts: a number or a name derived independently of the bytes
+   * it describes is a number nothing can check. WHICH of these sections becomes
+   * a committed bundle stays a separate, later decision that
+   * `narrowToCommittedSections` already derives from the emitted module list —
+   * this layer supplies the tree and owns none of the rule.
+   */
   for (const locale of locales) {
     if (locale === defaultLocale) continue;
     sourceHashes[locale] = collectFilledFromHashes(
       bundles[locale],
       sourceBundle,
       opts.previousSourceHashes?.[locale],
+      Object.keys(bundles[locale] ?? {}),
     );
   }
 

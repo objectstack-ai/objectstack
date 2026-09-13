@@ -3059,7 +3059,15 @@ const step17: MigrationStep = {
       replacement:
         '(removed — no protocol surface replaces it, deliberately. Layer by layer: '
         + 'connector-attached synchronisation is `ConnectorSchema.syncConfig` '
-        + '(`integration/connector.zod.ts`), which IS parsed and executed; per-field value '
+        + '(`integration/connector.zod.ts`), which is PARSED AND VALIDATED but NOT '
+        + 'EXECUTED — a declared shape, not a running sync. '
+        + '`AutomationEngine.registerConnector` runs `ConnectorSchema.parse` and stores the '
+        + 'parsed definition; nothing reads `syncConfig` back off it, and the key has no '
+        + 'reader outside `packages/spec` at all — the same measurement that retired '
+        + '`syncConfig.schedule` in 18 under ADR-0049 (#16320). What the platform DOES '
+        + 'execute on a connector is its `actions`: a flow\'s `connector_action` node '
+        + 'resolves the registered handler and awaits it, so an author who needs data '
+        + 'actually moved drives it from there. Per-field value '
         + 'transformation on import is `shared/mapping.zod.ts`, whose `transform` is applied '
         + 'row by row by the REST import path and recorded key by key in '
         + '`packages/spec/liveness/mapping.json`; scheduling is `system/job.zod.ts`. What has '
@@ -5436,7 +5444,19 @@ const step18: MigrationStep = {
     'both keys rather than rewriting `type` to `\'grid\'`: `type` defaults to `grid` in the ' +
     'schema, so deleting it lands the row on exactly what it already rendered without this ' +
     'registry guessing a view type. The surviving page mount is the app navigation item ' +
-    '(`PageNavItem.pageName`), untouched.',
+    '(`PageNavItem.pageName`), untouched. ' +
+    'It also retires `object-kanban`\'s `quickAdd` (#17260, ADR-0049 enforce-or-remove; the spec ' +
+    'half of the objectui#8285 director-seat ruling, decision batch #91, 2026-09-08 — ruled ' +
+    'option B). The board FORWARDED the key into the shared renderer but the affordance is gated ' +
+    'on both `quickAdd` and `onQuickAdd`, and `onQuickAdd` is a host-supplied FUNCTION JSON ' +
+    'cannot carry and no producer puts on an `object-kanban` node — so the gate was permanently ' +
+    'false. The drop was NOT silent, and that is what made it worse than silence: objectui\'s ' +
+    'html tier reported the published key as `unknown-prop`, the same diagnostic a typo gets, so ' +
+    'an author following the contract met a tool contradicting it with no way to tell which side ' +
+    'was wrong. A retiredKey tombstone on `ObjectKanbanPropsSchema` with one D2 conversion that ' +
+    'is a pure lossless DELETE (the key never had an effect to preserve) scoped by component ' +
+    '`type`: `quickAdd` stays LIVE on the `kanban-ui` block, where a React host supplies the ' +
+    'runtime slot, and the ruling keeps it there deliberately.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5445,11 +5465,13 @@ const step18: MigrationStep = {
     'element-form-removed',
     'field-column-lists-canonicalized',
     'metric-filters-removed',
+    'cube-sub-day-granularities-removed',
     'record-highlights-field-icon-removed',
     'mapping-lookup-params-removed',
     'translation-component-submit-label-removed',
     'page-component-responsive-removed',
     'object-grid-default-sort-removed',
+    'object-kanban-quick-add-removed',
     'permission-allow-restore-purge-removed',
     'form-view-option-default-removed',
     'field-reference-to-alias',
@@ -5468,6 +5490,49 @@ const step18: MigrationStep = {
     // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
     // FILE — never by editing between the markers, which is generated.
     // <os-generated semantic:18>
+    {
+      id: 'action-bulk-dispatch-contract-undeclared',
+      surface: '`action.execution` — the bulk dispatch contract an action’s body is written for',
+      replacement:
+        "Declare `execution: 'perRecord' | 'aggregate'` on every action a list view wires into the "
+        + 'selection bar, DERIVED from the wiring that action already has: a view naming it in '
+        + "`bulkActions: ['<name>']` (the bare-string form) dispatches it once per selected row with "
+        + "that row's `recordId` ⇒ `execution: 'perRecord'`; a `bulkActionDefs` entry naming it with "
+        + "`execution: 'aggregate'` dispatches it once for the whole selection with every id in "
+        + "`params._selectedIds` ⇒ `execution: 'aggregate'`. The derivation is exact wherever an "
+        + 'action is wired ONE way, because the wiring is what the body has been receiving all along '
+        + '— declaring it changes no behaviour, it writes down the behaviour. ⛔ There is no default: '
+        + 'an action no view bulk-wires, and an action whose body genuinely serves both contracts '
+        + '(it reads `recordId` AND `_selectedIds` and copes with either), stays UNDECLARED rather '
+        + 'than being given a value.',
+      reason:
+        'Not losslessly convertible, because the fact being written down does not live on the item '
+        + 'being rewritten. The declaration belongs to the ACTION and the evidence for it belongs to '
+        + 'the VIEWS — potentially several, in other files or other packages — so no per-item '
+        + 'transform has both halves in hand, and `objectstack migrate meta` rewrites stored metadata '
+        + 'by key. The residue is genuinely a judgement: an action wired BOTH ways has no correct '
+        + 'value, because one call and N calls have different side effects and the platform will not '
+        + 'silently unify them (the #17319 ruling refused exactly that option). Such an action is TWO '
+        + 'actions — split the body along the line the two wirings already draw and declare each half '
+        + '— or, if the body was deliberately written to serve both, it stays undeclared and the two '
+        + 'wirings stand. The census that is this migration’s input was taken 2026-09-13 over '
+        + 'objectstack@a9c64779046 (shipped app metadata, test fixtures excluded: 13 distinct '
+        + 'bulk-wired actions — 11 unambiguously per-record, 1 unambiguously aggregate, 1 wired both '
+        + 'ways) and hotcrm@c716a2ccb3d31574a1a238a590f3e331ddae0200 (3 distinct bulk-wired actions — '
+        + '2 per-record, 1 aggregate, 0 wired both ways). So the both-ways residue is real but rare, '
+        + 'which is why it is a structured TODO and not a blocking rewrite.',
+      acceptanceCriteria:
+        '`objectstack validate` (and `os lint` / `os build`) reports no '
+        + '`action-dispatch-contract-mismatch` finding on the stack; every action a list view wires '
+        + 'into the selection bar either declares the `execution` its wiring implies, or is '
+        + 'deliberately left undeclared with the reason recorded beside it; no action is wired both '
+        + 'ways while declaring either contract. Prove the derivation rather than assuming it: for '
+        + "each action you declared `'aggregate'`, its body reads `params._selectedIds` and does NOT "
+        + "depend on `ctx.recordId`; for each you declared `'perRecord'`, the reverse. Run the bulk "
+        + 'button once per declared action against a multi-row selection and confirm the number of '
+        + 'dispatches matches the declaration (N for per-record, one for aggregate) — a mismatch that '
+        + 'used to be silent is what this key exists to surface.',
+    },
     {
       id: 'address-location-value-unknown-keys-refused',
       surface: 'stored `address` and `location` field VALUES (`AddressSchema` / `AddressValueSchema`, '
@@ -5955,6 +6020,65 @@ const step18: MigrationStep = {
         + 'this entry. No authored metadata document ever embedded a branded '
         + 'value, so no source rewrite ships and `objectstack migrate meta` has '
         + 'nothing to visit.',
+    },
+    {
+      id: 'cache-warmup-scheduled-strategy-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
+      // span AND a table cell.
+      surface:
+        "CacheWarmup.strategy — the value 'scheduled' left the warmup-strategy enum "
+        + '(packages/spec/src/system/cache.zod.ts), and the enum describe stopped promising '
+        + '"scheduled (cron)". The key itself, DistributedCacheConfig.warmup.strategy, is '
+        + 'unchanged and still authorable',
+      replacement:
+        "'eager' to warm at startup or 'lazy' to warm on first access — the two strategies "
+        + 'the vocabulary ever described without pointing outside itself. There is no '
+        + 'replacement for the cadence: a warmup on a schedule is a job. Declare a `job` with '
+        + 'schedule.expression (system/job.zod.ts) whose handler does the warming — that is '
+        + 'the one cron slot this platform evaluates, and it is the slot #16320 deliberately '
+        + 'kept when it deleted the other seven',
+      reason:
+        'ADR-0049 enforce-or-remove, closing the residue #16320 left inside the schema it had '
+        + 'just edited. That card deleted CacheWarmup.schedule — the cron key this enum member '
+        + 'selected — and declined the member itself on the reading that it is "a value, not a '
+        + "position this ruling names\". That is a statement about the ruling's SCOPE, not a "
+        + 'finding that the value was sound: after the deletion the member declared a warmup '
+        + 'cadence with no key left to configure it, no engine that has ever run one, and a '
+        + '.describe() still promising "(cron)" — ADR-0049 declared-not-enforced in the form '
+        + 'Prime Directive 10 names outright, a capability advertised that the runtime does '
+        + 'not deliver. Re-measured on main at 690f083f83 with a lit control rather than '
+        + 'inherited from the card: CacheWarmupSchema has zero runtime consumers outside its '
+        + 'declaring file (six files reference it — the generated reference page import, the '
+        + 'declaration-map and export-origins catalogues, the ADR-0058 D7 ledger comment and '
+        + 'two spec test files — while the control, ConnectorSchema, resolves to 46 files), '
+        + 'and no cache-warmup engine exists anywhere on the platform. Bookkeeping follows the '
+        + "hot-reload-inert-state-strategies-retired and crypto.hash precedents: an enum-VALUE "
+        + 'narrowing puts nothing in RETIRED_KEYS_BY_MAJOR (no authorable KEY changed) and '
+        + 'leaves the four surface ratchets byte-identical (no def changed, and they key on '
+        + "positions and names, never on a def's value set), so the prescription hangs on the "
+        + "enum's own error map dispatched by issue.input — telling the author of a TYPO that "
+        + 'their value "was removed" would misinform. It is a SEMANTIC entry rather than a D2 '
+        + 'conversion because there is no source to rewrite: CacheWarmup is bound to no '
+        + 'metadata type and embedded in no stack collection, so no authored document and no '
+        + 'stored row has ever carried this value, and os migrate meta has nothing to list. '
+        + 'Route 3 of the retirement playbook, the #4834 / #11825 shape: this entry IS the '
+        + 'declaration. ADR-0049, ADR-0087, #17157, #16320.',
+      acceptanceCriteria:
+        "No configuration passes strategy: 'scheduled' to CacheWarmupSchema or to "
+        + 'DistributedCacheConfigSchema.warmup. TypeScript callers cannot: '
+        + "CacheWarmup['strategy'] is now 'eager' | 'lazy', so the literal is a compile error "
+        + 'at the authoring site. Callers that arrive as JSON get a parse REFUSAL — not the '
+        + 'silent strip #16320 left for the schedule key beside it, because a narrowed enum '
+        + 'rejects rather than drops — carrying the prescription, which names the job route. '
+        + 'Concretely, check two places. (1) Any host or deployment config embedding a '
+        + 'DistributedCacheConfig: a warmup block selecting the retired strategy now fails to '
+        + 'parse where it previously parsed green; change it to eager or lazy. (2) Anything '
+        + 'that was waiting on the cadence to take effect: it never did. No warmup has ever '
+        + 'run on a schedule on this platform, so migrating the value changes no runtime '
+        + 'behaviour whatsoever — what changes is that the contract stops promising it. If a '
+        + 'scheduled warmup is genuinely wanted, it comes back through the ENFORCE leg of '
+        + 'ADR-0049: the engine first, the declaration with it, never as a bare enum row '
+        + 'again.',
     },
     {
       id: 'cbp-master-detail-required-forced',
@@ -7196,6 +7320,42 @@ const step18: MigrationStep = {
         + '"three shapes" note narrows — objectui cards filed by the seat, not blocked on here.',
     },
     {
+      id: 'element-filter-and-form-node-refused',
+      surface:
+        'page.component.element:filter / page.component.element:form — the bare component '
+        + 'node itself, left standing by the `element-filter-removed` and '
+        + '`element-form-removed` conversions after they strip its properties',
+      replacement:
+        'Delete the component node. `element:filter` → a list surface owns its own '
+        + "filtering: use a view's `userFilters` quick-filter bar or the list toolbar's "
+        + 'filter builder. `element:form` → the object-bound `object-form` block, which is '
+        + 'rendered, designer-publishable and carries the same intent (`objectName`, '
+        + '`fields`, `mode`, `submitText`). Nothing is placed where the node was unless the '
+        + 'page needs it — which region keeps its layout is the judgment this step delegates',
+      reason:
+        'Both elements were retired whole at element grain (ADR-0049 enforce-or-remove): no '
+        + 'renderer for either ever shipped in objectui, framework or cloud, so every '
+        + 'authorable key was a capability claim nothing kept. The conversions are mechanical '
+        + 'where they can be — they strip all twelve keys losslessly — and stop at the node, '
+        + 'because removing an authored page node changes the LAYOUT of a page the author '
+        + 'composed, and a conversion cannot know whether the region should close up, hold a '
+        + 'replacement, or keep its slot. That residue is no longer inert: both names are '
+        + 'members of `RETIRED_PAGE_COMPONENT_TYPES`, so `PageComponentSchema.type` refuses '
+        + 'them by name, and a stack that replays the chain and stops there is schema-INVALID. '
+        + 'Mechanical where it can be, delegated where it cannot — this entry is the '
+        + 'delegation, in writing',
+      acceptanceCriteria:
+        'No `element:filter` and no `element:form` component remains in any page — regions, '
+        + 'named slots and nested containers alike (the conversions walk all three, so every '
+        + 'place they stripped properties is a place a bare node can be sitting). `os validate` '
+        + 'is clean: the refusal is reported at the node\'s `type` path with '
+        + '`params.retiredComponentType` naming the element, so a remaining node is named '
+        + 'individually rather than as one page-level failure. Replaying the same 17 → 18 chain '
+        + 'over the edited source then reports the migrated stack schema-valid — '
+        + '`schemaValid: true` in `--json`, and the run closes with the schema-valid line '
+        + 'rather than the manual-changes warning',
+    },
+    {
       id: 'element-number-filter-rule-array',
       surface:
         "`element:number` component props — `filter` (the FORM: the MongoDB-style "
@@ -7921,6 +8081,62 @@ const step18: MigrationStep = {
         + 'condition carrying a non-blank `source` parses byte-identically to before.',
     },
     {
+      id: 'hook-register-undispatched-lifecycle-event-refused',
+      surface:
+        "engine.registerHook('beforeFindOne' | 'afterFindOne' | 'beforeCount' | 'afterCount' | "
+        + "'beforeAggregate' | 'afterAggregate', handler)",
+      replacement:
+        "for the findOne pair, register on 'beforeFind' / 'afterFind' — they already fire for "
+        + "`findOne`; for the count and aggregate pairs there is no hook seam at all, so move the "
+        + 'logic to `engine.registerMiddleware(fn)` and read '
+        + "`ctx.operation === 'count' | 'aggregate'`, composing the predicate onto `ctx.ast.where`",
+      reason:
+        '`registerHook` took `event: string` and, for a name outside the dispatched set, warned and '
+        + 'then REGISTERED the handler anyway. Six of those names are inside the engine\'s own '
+        + "lifecycle namespace — (`before`|`after`) x `OperationContext['operation']` minus the eight "
+        + 'the engine dispatches — so an author writing one of them believes they are subscribing to '
+        + 'an engine lifecycle event, and what they get back is an inert declaration: ADR-0078\'s '
+        + 'prohibited fourth state (parsed, unmarked, silently inert) on an authorable seam.\n\n'
+        + 'The measured consequence is a data-visibility one, which is why this is not a cosmetic '
+        + 'warning. A downstream consumer registered READ FILTERS on `beforeFindOne` and '
+        + '`beforeCount`, expecting them to scope single-record reads and list totals; they sat inert '
+        + 'through every boot behind about forty warning lines. `findOne` was still filtered — '
+        + '`beforeFind` covers it — so the mistake gave no signal there. `count` was not: a `limit`ed '
+        + 'list answered a `total` counting rows the caller could not see. `aggregate` was not '
+        + 'either: a `groupBy` was not narrowed at all. A filter that was supposed to narrow '
+        + 'visibility and silently did not run is a guardrail the author believes they armed.\n\n'
+        + 'Refused at REGISTRATION rather than repaired on the dispatch side. Making `count()` and '
+        + '`aggregate()` dispatch hooks would widen what a hook may intercept — a different and much '
+        + 'larger decision — and it would also be the wrong seam: read authorization and row '
+        + 'filtering are the middleware chain\'s job, which is what `HookEvent` in `@objectstack/spec` '
+        + 'already says and what `count()` already honours (its AST rides the operation context '
+        + 'precisely so the security and sharing middlewares can scope it). The refusal names the '
+        + 'per-seam repair in its own message, because "this never fires" alone cannot tell the two '
+        + 'seams apart: one is a rename, the other is a different API.\n\n'
+        + 'The refusal is scoped to those six names, not to everything outside the dispatched set. '
+        + '`triggerHooks` is public, so a plugin dispatching its own event under a name outside the '
+        + "engine's vocabulary (`'myPlugin:flush'`) is a legitimate reading — that is why #3195 made "
+        + 'this branch a warn — and it still warns and still registers. The population is DERIVED '
+        + 'from the operation union rather than typed out, so a new engine verb widens it without an '
+        + 'edit; a hand-written list of refused names would be this same defect one layer up.\n\n'
+        + 'This is a RUNTIME registration API, not stored metadata, so — like '
+        + '`hook-register-empty-object-target-refused` at the previous step — there is no '
+        + '`sys_metadata` row for the D2 chain to rewrite, and the ledger entry is the notification '
+        + 'channel. The metadata door was never open on this axis: `HookSchema.events` is '
+        + '`z.array(HookEvent)`, and `HookEvent` enumerates exactly the eight dispatched names, so no '
+        + 'authored or stored hook could ever carry one of the six. The exposure was entirely on the '
+        + 'code door. #17713, #3195, ADR-0078.',
+      acceptanceCriteria:
+        'No `registerHook` call site passes `beforeFindOne`, `afterFindOne`, `beforeCount`, '
+        + '`afterCount`, `beforeAggregate` or `afterAggregate`. Every read filter that was written '
+        + 'against one of those names has been moved: the findOne pair to `beforeFind` / `afterFind`, '
+        + 'the count and aggregate pairs to a middleware registered with '
+        + '`engine.registerMiddleware`. Boot completes with no '
+        + '"[ObjectQL] Hook \'...\' is an engine lifecycle event name the engine never dispatches" '
+        + 'throw, and any list `total` or `groupBy` that was expected to be scoped is scoped by a '
+        + 'middleware rather than by a hook.',
+    },
+    {
       id: 'hot-reload-inert-state-strategies-retired',
       surface:
         "`HotReloadConfig.stateStrategy` values 'disk' and 'distributed', plus the "
@@ -8338,6 +8554,68 @@ const step18: MigrationStep = {
         + 'dropped.',
     },
     {
+      id: 'kernel-health-check-and-hot-reload-durations-unit-in-key',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface: 'the three plugin-lifecycle durations whose unit lived in a source JSDoc only: '
+        + 'PluginHealthCheck.interval, PluginHealthCheck.timeout and HotReloadConfig.debounceDelay '
+        + '(kernel/plugin-lifecycle-advanced.zod.ts)',
+      replacement: 'intervalMs, timeoutMs and debounceDelayMs — rename each key; all three values '
+        + '(milliseconds) and their 30000 / 5000 / 1000 defaults are unchanged',
+      reason:
+        'Director-seat ruling A on #15939, 2026-09-11, carrying the maintainer\'s 「同意」 (decision '
+        + 'batch #115), executing the #14478 rule per file. Each key named milliseconds in its JSDoc '
+        + '— "Health check interval in milliseconds", "Timeout for health check in milliseconds", '
+        + '"Debounce delay before reloading (milliseconds)" — and the JSDoc above a key is NOT what '
+        + '`content/docs/references/**` renders; `.describe()` is. Measured on this tree by the '
+        + 'gate\'s own census (check-duration-unit-keys --list): all three read [name: -] [prose: -] '
+        + '— no unit in the name and none in the published prose either. `interval` is the sharpest '
+        + 'of the three: its describe carried one unit-shaped token, the parenthetical '
+        + '"(default: 30s)", which names SECONDS for a value the schema bounds and defaults in '
+        + 'MILLISECONDS (min 1000, default 30000). That is the 1000x confusion the rule exists for, '
+        + 'published to the one reader who cannot see the source. The suffix is the family\'s own '
+        + 'spelling, counted on this tree: 100 key-position *Ms declarations across packages/spec, '
+        + 'timeoutMs 29 of them and intervalMs 3, so both renames land on names the surface already '
+        + 'uses. debounceDelay takes the plain suffix rather than a shortened form: it is the only '
+        + 'debounce-shaped key spelling in the whole repo (5 key-position occurrences, all of this '
+        + 'one key and its fixtures, no debounceMs variant anywhere), while the Delay-plus-Ms pairing '
+        + 'is already attested (maxDelayMs, initialDelayMs, retryDelayMs, delayMs) — so unlike the '
+        + 'Ttl-versus-TTL question the sibling round had to settle, there is no competing family '
+        + 'spelling to choose between. All three old spellings are retiredKey() tombstones: neither '
+        + 'PluginHealthCheckSchema nor HotReloadConfigSchema is .strict(), so a bare deletion would '
+        + 'be a SILENT STRIP (#3733, ADR-0104) — and here the stripped value lands on a setInterval '
+        + 'period, a race deadline and a setTimeout delay. Why a semantic entry and not a D2 '
+        + 'conversion: the conversion chain walks a normalized STACK, and neither def is an '
+        + 'authorable surface — no metadata-type binding, stack collection or manifest embed carries '
+        + 'either, and both are library parameters a host passes to PluginHealthMonitor / '
+        + 'HotReloadManager in TypeScript (the #4914 / #11825 keep) — so a conversion would be a '
+        + 'transform with no seam that ever runs. That is the same disposition '
+        + 'plugin-auto-restart-never-reinitialised and hot-reload-watch-placeholder-retired recorded '
+        + 'for keys on these two defs. The registration-time refusals in '
+        + 'PluginHealthMonitor.registerPlugin and HotReloadManager.registerPlugin are the door for '
+        + 'the audience that does not parse. Measured on 884e8347d: the only in-repo readers are '
+        + 'packages/core/src/health-monitor.ts and packages/core/src/hot-reload.ts, both moved in '
+        + 'this same change; and the pinned objectui checkout — the pin this repo builds '
+        + 'against, `.objectui-sha` = `53ded82bf7a494f54e344e19099dbf00854b8694` — names '
+        + 'neither def and neither key: all thirteen exports of plugin-lifecycle-advanced.zod.ts and '
+        + 'the string debounceDelay each occur 0 times across its 6409 tracked files, against lit '
+        + 'controls objectstack 10171 and @objectstack/spec 3479 on the same corpus.',
+      acceptanceCriteria:
+        'Every producer and reader of a PluginHealthCheck spells intervalMs and timeoutMs, and every '
+        + 'one of a HotReloadConfig spells debounceDelayMs — concretely '
+        + 'packages/core/src/health-monitor.ts, whose loop now reads setInterval(..., '
+        + 'config.intervalMs) and whose race reads config.timeoutMs, and '
+        + 'packages/core/src/hot-reload.ts, whose debounce now reads config.debounceDelayMs. '
+        + 'Authoring any old spelling fails to compile (input type `never`) and fails to parse with '
+        + 'the rename prescription naming the suffixed key; handing one to registerPlugin on either '
+        + 'class is refused with an ADR-0112 VALIDATION_ERROR / 400 before the plugin is stored. '
+        + 'Behaviour is unchanged: the same milliseconds, the same 30000 / 5000 / 1000 defaults and '
+        + 'the same min bounds (1000 / 100 / 0), and the published describes now name milliseconds. '
+        + 'The sibling shutdownTimeout on HotReloadConfig is deliberately NOT renamed with them: its '
+        + 'JSDoc reads "Graceful shutdown timeout" and names no unit anywhere, so it is the #14519 '
+        + 'unit-nowhere shape the #14478 gate leaves outside its verdict, not part of this row set.',
+    },
+    {
       id: 'kernel-package-lifecycle-durations-unit-in-key',
       // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
       // code span AND a table cell.
@@ -8466,6 +8744,65 @@ const step18: MigrationStep = {
         + 'key. Verify the sharp pair explicitly: a manifest and a health report in the same '
         + 'codebase must now read responseTimeHours and responseTimeMs respectively, and neither '
         + 'accepts the bare name.',
+    },
+    {
+      id: 'kernel-runtime-config-timeout-unit-in-key',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface: 'RuntimeConfig resourceLimits.timeout (kernel/plugin-security-advanced.zod.ts)',
+      replacement: 'resourceLimits.timeoutMs — rename the key; the value (milliseconds) is unchanged',
+      reason:
+        'This entry COMPLETES what #15678 deliberately left alone, and the two are meant to be read '
+        + 'as a sequence. #15678 renamed the four plugin-security durations on this same file '
+        + '(`kernel-plugin-security-durations-unit-in-key`) and recorded, accurately, that one key was '
+        + 'out of its scope: RuntimeConfig.resourceLimits.timeout named its unit only in the JSDoc '
+        + 'above it ("Execution timeout in milliseconds"), a channel check:duration-unit-keys does not '
+        + 'read — it reads `.describe()` and `.meta({ description })` — and that key\'s describe '
+        + '("Maximum execution time") named none, so the gate listed it among the duration-shaped keys '
+        + 'without judging it, neither an offender nor an exemption. That JSDoc-channel gap was filed '
+        + 'as #15939, and #15678\'s statement about its own scope stays true. #15939 is now ruled and '
+        + 'this is its remediation: director-seat ruling A, 2026-09-11, carrying the maintainer\'s '
+        + '「同意」 (decision batch #115), which remediates the 21-row JSDoc-channel population per file '
+        + 'and lands the widened gate (#17635) last, into a tree already clean. So the reader who most '
+        + 'needs the unit — the reader of the published reference page, who never sees the source '
+        + 'JSDoc — got a bare integer on '
+        + 'content/docs/references/kernel/plugin-security-advanced.mdx and could not tell 60000 '
+        + 'milliseconds from 60000 seconds. The key is renamed and the describe is corrected in the '
+        + 'same stroke, because under the #14478 rule moving the unit into the describe alone is '
+        + 'itself a violation (unit in prose, none in the name). Spelled Ms, the same token '
+        + 'SandboxConfig.process.timeoutMs on this very file already carries: counted on this tree, '
+        + 'the suffixed family spells it that way in every member (29 key-position `timeoutMs` '
+        + 'declarations across packages/spec/src/**/*.zod.ts, 40 distinct *Ms keys) and there is no '
+        + 'timeoutMillis, timeout_ms or timeoutMS variant anywhere in packages/spec/src. Tombstoned '
+        + 'with retiredKey() because the nested resourceLimits object is not strict, so a bare '
+        + 'deletion would silently strip the key. Why a semantic entry and not a D2 conversion: a '
+        + 'RuntimeConfig is the engine block of the SandboxConfig a host or a plugin security manifest '
+        + 'constructs — stack.zod.ts declares no sandbox, security-policy or runtime-config collection '
+        + 'and it is not a stored sys_metadata row — so the conversion chain has no seam that runs on '
+        + 'it; the same reading #15678 recorded for the four keys it renamed. Measured on 146c291943: '
+        + 'no in-repo runtime reads the key — packages/core/src/security/sandbox-runtime.ts, the one '
+        + 'consumer of this shape, reads resourceLimits.maxCpu (3 occurrences of resourceLimits) and '
+        + 'spells timeout 0 times; outside the zod file and its test the only live occurrences are the '
+        + 'generated rows in content/docs/references/kernel/plugin-security-advanced.mdx, which this '
+        + 'rename regenerates. The pinned objectui checkout — this is the pin we build against, '
+        + '`.objectui-sha` = `53ded82bf7a494f54e344e19099dbf00854b8694`, re-read from this tree — '
+        + 'spells resourceLimits.timeout 0 times across '
+        + '6409 tracked files, against lit controls timeout 832, RuntimeConfig 236 and resourceLimits '
+        + '2 on the same corpus; both resourceLimits hits are prose in packages/app-shell recording '
+        + 'that objectui\'s own AppShellRuntimeConfig shares not one key with the spec\'s '
+        + 'RuntimeConfig, so nothing there authors this key and no pin bump is owed. #15939, #15678, '
+        + '#14478, ADR-0087.',
+      acceptanceCriteria:
+        'Every RuntimeConfigSchema.parse(…) site, and every literal handed to a plugin sandbox as its '
+        + 'runtime block, spells resourceLimits.timeoutMs; authoring resourceLimits.timeout fails to '
+        + 'compile (input type `never`) and fails to parse with the rename prescription naming '
+        + 'timeoutMs and the shape it belongs to. Behaviour is unchanged: a runtime given '
+        + 'timeoutMs: 60000 aborts execution after sixty seconds exactly as timeout: 60000 did, and '
+        + 'the min(0) integer bound rides along with the renamed key. The published describe reads '
+        + '"Maximum execution time in milliseconds". Verify the two same-named keys on this one file '
+        + 'apart: RuntimeConfig.resourceLimits.timeout and SandboxConfig.process.timeout both retire '
+        + 'to a key spelled timeoutMs, and each refusal names its own shape so an upgrading author '
+        + 'edits the right block.',
     },
     {
       id: 'kernel-startup-orchestrator-durations-unit-in-key',
@@ -9679,6 +10016,60 @@ const step18: MigrationStep = {
         + 'no backfill, no reaper, no migrate command.',
     },
     {
+      id: 'screen-field-lookup-reference-required',
+      surface:
+        "The `reference` key of a `type: 'lookup'` field on a `screen` node — "
+        + '`flows[].nodes[].config.fields[]` where the node `type` is `screen` and the field '
+        + "`type` is `lookup` (`ScreenFieldConfigSchema`). Nothing is renamed, retired or "
+        + 're-typed and the key set does not move: `reference` was already declared and '
+        + 'already optional in the shape. What narrows is the ACCEPT SET for one value of the '
+        + "sibling `type` — a `lookup` field with no `reference`, or with a blank one, parsed "
+        + 'before this major and is refused now. Every other widget hint is untouched, and a '
+        + '`lookup` field that already names its target parses byte-identically.',
+      replacement:
+        "Name the object whose records the picker offers, beside the type: "
+        + "`{ name: 'resolved_by_article', type: 'lookup', reference: 'crm_knowledge_article' }`. "
+        + 'The value is an object NAME (the canonical id — same string `FieldSchema.reference` '
+        + 'carries), not a label and not a record id. ⚠️ There is deliberately no default and no '
+        + 'inference: a picker pointed at the wrong object is worse than one that refuses to '
+        + 'load, because it offers a human a plausible list of the wrong records and the flow '
+        + 'stores the id it is given. Where the field genuinely has no target object — the '
+        + 'author was using `lookup` to mean "type an id here" — the fix is the other '
+        + "direction: change `type` to `'text'`, which is what that field actually was, and "
+        + 'keep the prose that asked for an id in `inlineHelpText`.',
+      reason:
+        'Maintainer ruling A′, 2026-09-13 (decision batch #130 item 1), verbatim, '
+        + 'untranslated: 「同意」. ADR-0078 forbids metadata that parses, carries no marking and '
+        + 'does nothing — and its own worked example of that state is a `lookup` with no '
+        + '`reference`: the field renders a picker, the picker has no object to query, and '
+        + 'nothing anywhere says so. The key shipped OPTIONAL on this surface one release '
+        + 'earlier, on the argument that flows declaring a bare `lookup` already exist; the '
+        + 'ruling reversed that, holding that a degraded shape which ships is not a reason to '
+        + 'bend the contract to it. ⛔ NOT losslessly convertible, and the reason is the same '
+        + 'one `schedule-flow-acting-organization-required` gives: the remedy is a value the '
+        + 'artifact does not contain. A bare lookup records the field name and nothing about '
+        + 'its intended object, so `objectstack migrate meta` can identify every site but can '
+        + 'answer none of them — and a conversion that guessed (the first object with a '
+        + 'matching-looking name, the flow\'s trigger object) would write an authoritative '
+        + 'wrong answer into metadata a human then trusts. Registered under ADR-0087 D3 rather '
+        + 'than left silent because the change DOES carry a prescription a human can execute, '
+        + 'which is what D3 says a structured TODO is for.',
+      acceptanceCriteria:
+        "Every `type: 'lookup'` field on every `screen` node in the stack declares a non-empty "
+        + '`reference`, and the stack parses: `ScreenFieldConfigSchema` refuses the bare form '
+        + 'with a message addressed to `reference` '
+        + '(`SCREEN_FIELD_LOOKUP_REFERENCE_REQUIRED`), so a full metadata parse — `os lint`, or '
+        + 'any publish — reports one issue per unfixed site and names the FLOW and the FIELD in '
+        + 'its path. Work the list to empty rather than sampling it: a flow whose screen never '
+        + 'reaches that node in testing is refused at publish just the same. For each site, '
+        + 'answer which object the picker was meant to offer — the declaration is the answer, '
+        + "and where there is no such object the field was never a lookup (retype it `'text'`). "
+        + '⚠️ Runs SUSPENDED at a screen before the upgrade rehydrate their `ScreenSpec` from '
+        + 'stored context, so an in-flight run parked on an unfixed screen carries the old '
+        + 'shape: drain or re-drive those rather than assuming the fix reaches them '
+        + 'retroactively.',
+    },
+    {
       id: 'send-template-input-org-retired',
       surface: 'contracts.emailService.sendTemplate input.org',
       replacement:
@@ -10264,6 +10655,41 @@ const step18: MigrationStep = {
         + 'renamed key. The sibling max is a COUNT and keeps its name — it has no unit to carry.',
     },
     {
+      id: 'tenant-schema-cache-ttl-unit-in-key',
+      surface: 'SchemaLevelIsolationStrategy `performance.schemaCacheTTL` (system/tenant.zod.ts)',
+      replacement: '`performance.schemaCacheTtlSeconds` (default 3600) — rename the key; the value '
+        + '(seconds) is unchanged',
+      reason:
+        'Director-seat ruling A on #15939, 2026-09-11, carrying the maintainer\'s 「同意」 (decision '
+        + 'batch #115), executing the #14478 rule per file. The key carried its unit (seconds) in a '
+        + 'source JSDoc only — "Schema cache TTL in seconds" — while `.describe()`, the text '
+        + '`content/docs/references/**` publishes, said "Schema cache TTL" and named no unit at all. '
+        + 'So the reader who most needs the unit, the reader of the published reference page, was the '
+        + 'only reader who never saw it: 3600 is a plausible number of seconds and a plausible number '
+        + 'of milliseconds, and nothing on the page decided it. Under the #14478 gate, moving the unit '
+        + 'into the describe alone is itself a violation (unit in prose, none in the name), so the key '
+        + 'is renamed and the describe is corrected in the same stroke. Spelled `Ttl` and not `TTL`: '
+        + 'counted on this tree, the suffixed family already spells it that way in every member '
+        + '(`cacheTtlSeconds` 11, `ttlSeconds` 3, `defaultCacheTtlSeconds` 1) and no key-position '
+        + '`TtlSeconds` variant spells it otherwise. Tombstoned with `retiredKey()` because the nested '
+        + '`performance` object is not strict, so a bare deletion would silently strip the key. Why a '
+        + 'semantic entry and not a D2 conversion: `stack.zod.ts` declares no tenancy collection and a '
+        + 'tenant isolation strategy is not a stored metadata row (it describes cloud tenancy '
+        + 'configuration), so the chain has no seam that runs on it — the same reading '
+        + '`tenant-timeouts-unit-in-key` recorded for the two sibling keys on this file. Measured on '
+        + 'bd25e897dc: no in-repo runtime reads the key — outside `packages/spec/src/system/tenant.zod.ts` '
+        + 'and its test the only occurrences are the four generated rows in '
+        + '`content/docs/references/system/tenant.mdx`, which this rename regenerates; and the pinned '
+        + 'objectui checkout — `.objectui-sha` = `53ded82bf7a494f54e344e19099dbf00854b8694` — spells it 0 '
+        + 'times across 6409 tracked files, against lit controls `TTL` 112 and `tenant` 819 on the '
+        + 'same corpus.',
+      acceptanceCriteria:
+        'Every schema-level tenant isolation source spells `performance.schemaCacheTtlSeconds`; '
+        + 'authoring `performance.schemaCacheTTL` fails to compile and fails to parse with the rename '
+        + 'prescription naming the suffixed key; the parsed default is 3600 as before, and the '
+        + 'published describe reads "Schema cache TTL in seconds".',
+    },
+    {
       id: 'tenant-timeouts-unit-in-key',
       surface: 'DatabaseLevelIsolationStrategy `connectionPool.idleTimeout` / TenantSecurityPolicy '
         + '`accessControl.sessionTimeout` (system/tenant.zod.ts)',
@@ -10288,6 +10714,44 @@ const step18: MigrationStep = {
         + '`sessionTimeoutSeconds`; authoring `idleTimeout` or `sessionTimeout` fails to compile and '
         + 'fails to parse with the rename prescription naming the suffixed key; the parsed defaults '
         + 'are 300 and 3600 as before.',
+    },
+    {
+      id: 'time-update-interval-sub-day-retired',
+      surface:
+        '`TimeUpdateInterval` — the `/analytics/query` body\'s `timeDimensions[].granularity` and an '
+        + 'analytics cube dimension\'s `granularities[]`. The three sub-day members `second`, '
+        + '`minute` and `hour` are retired; `day`, `week`, `month`, `quarter` and `year` are '
+        + 'unchanged and parse byte-identically',
+      replacement:
+        'the coarsest declared interval that still answers the question — `day` is the finest bucket '
+        + 'the platform labels. A caller who wants raw per-instant rows drops `granularity` entirely, '
+        + 'which groups on the unbucketed timestamp deliberately rather than by accident. There is no '
+        + 'mechanical replacement that preserves a sub-day bucket, because no backend ever produced '
+        + 'one',
+      reason:
+        'ADR-0049 enforce-or-remove (#17296, the card #17206\'s changeset promised). The rest of the '
+        + 'contract never carried these three: `DateGranularity` (`data/query.zod.ts`) — the '
+        + 'vocabulary a `groupBy` entry and every driver\'s bucket expression are typed by — declares '
+        + 'five, `@objectstack/core`\'s `BUCKET_GRANULARITIES` labels the same five, and '
+        + '`DriverCapabilitiesSchema.supports.queryDateGranularity` is a `z.record(DateGranularity, '
+        + 'boolean)`, so a driver could not advertise sub-day bucketing even if it had one. Measured '
+        + 'on the shipped faces before the narrowing: `driver-memory`\'s analytics face answered '
+        + 'NOT_IMPLEMENTED/501, `driver-mongodb`\'s bucket builder answered NOT_IMPLEMENTED/501, and '
+        + 'the engine\'s in-memory aggregation — the fallback every SQL/ObjectQL analytics query '
+        + 'carrying a granularity lands on, since `NativeSQLStrategy` declines on a granularity — '
+        + 'answered 200 with one group per distinct timestamp, echoing the raw instant back as its '
+        + 'own bucket label. Two honest refusals and one silently wrong answer, and no third '
+        + 'behaviour anywhere. ⚠️ This retires the NAMES, not the idea: offering sub-day analytics '
+        + 'means widening `DateGranularity`, the `queryDateGranularity` record, the canonical '
+        + 'bucket-key vocabulary and every driver\'s bucket expression together — new capability, '
+        + 'decided as such',
+      acceptanceCriteria:
+        'No analytics request body carries `timeDimensions[].granularity` of `second`, `minute` or '
+        + '`hour`, and no cube dimension offers one in `granularities[]` (the D2 conversion '
+        + '`cube-sub-day-granularities-removed` strips them from sources, dropping the key entirely '
+        + 'when nothing coarser remains). ⚠️ The conversion cannot decide what a dimension that '
+        + 'offered ONLY sub-day intervals should offer instead — review each site the run reports '
+        + 'and state the granularities that dimension actually serves.',
     },
     {
       id: 'training-deadline-keys-retired',
@@ -11761,6 +12225,24 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // records: a health report is emitted by the startup orchestrator at runtime,
     // never authored into a metadata document.
     'kernel/HealthStatus:timestamp',
+    // #15939 ruling A (per-file remediation of #14478).
+    // `HotReloadConfig.debounceDelay` said "Debounce delay before reloading
+    // (milliseconds)" in a source JSDoc and "Wait time after change detection before
+    // reload" in the `.describe()` the reference pages publish, so the published
+    // channel named no unit at all and the reference-page reader got a bare 1000.
+    // Renamed to `debounceDelayMs`, the plain suffix rather than a shortened form:
+    // this is the only debounce-shaped key spelling in the repo (5 key-position
+    // occurrences, all this key and its fixtures; no `debounceMs` variant anywhere),
+    // while the Delay-plus-Ms pairing is already attested (`maxDelayMs`,
+    // `initialDelayMs`, `retryDelayMs`, `delayMs`) — so there was no competing family
+    // spelling to choose between. The value and the 1000 default are unchanged.
+    // Tombstoned with `retiredKey()`: `HotReloadConfigSchema` is not `.strict()`, so
+    // a bare deletion would silently strip the key and hand `setTimeout` no delay.
+    // No D2 conversion: not a stack collection member, not a stored row —
+    // `HotReloadConfig` is a library parameter a host passes to `HotReloadManager` in
+    // TypeScript, the same reading `hot-reload-watch-placeholder-retired` recorded
+    // for this def. See `kernel-health-check-and-hot-reload-durations-unit-in-key`.
+    'kernel/HotReloadConfig:debounceDelay',
     // #12428 — ADR-0049 enforce-or-remove, one symbol over from #12340 (PR #12425)
     // in the same file and on the same per-key test. `HotReloadManager.startWatching`
     // contained NO watcher: a guard plus `logger.info('File watching started',
@@ -12312,6 +12794,23 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // registration-time refusal in `PluginHealthMonitor.registerPlugin` is the door
     // for the audience that exists.
     'kernel/PluginHealthCheck:autoRestart',
+    // #15939 ruling A (per-file remediation of #14478). `PluginHealthCheck.interval`
+    // said "Health check interval in milliseconds" in a source JSDoc, and the
+    // `.describe()` the reference pages publish said "How often to perform health
+    // checks (default: 30s)" — its one unit-shaped token naming SECONDS for a value
+    // the schema bounds at min 1000 and defaults to 30000 MILLISECONDS. Measured by
+    // the gate's own census, the key read [name: -] [prose: -]: no unit in the name,
+    // and none the gate recognises in the prose either. Renamed to `intervalMs` —
+    // the family's own spelling on this tree (100 key-position `*Ms` declarations in
+    // packages/spec, `intervalMs` 3 of them). The value and the 30000 default are
+    // unchanged. Tombstoned with `retiredKey()`: `PluginHealthCheckSchema` is not
+    // `.strict()`, so a bare deletion would silently strip the key and hand
+    // `setInterval` no period at all. No D2 conversion: not a stack collection
+    // member, not a stored row — `PluginHealthCheck` is a library parameter a host
+    // passes to `PluginHealthMonitor` in TypeScript, the same reading
+    // `plugin-auto-restart-never-reinitialised` recorded for this def. See
+    // `kernel-health-check-and-hot-reload-durations-unit-in-key`.
+    'kernel/PluginHealthCheck:interval',
     // #12032 — ADR-0049 enforce-or-remove, one class over from #12428 (PR #12571)
     // and #12340 (PR #12425) in the same host-driven lifecycle library, and for a
     // sharper reason than either: this key HAD a reader that acted, and what it did
@@ -12418,6 +12917,21 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // registration-time refusal in `PluginHealthMonitor.registerPlugin` is the door
     // for the audience that exists.
     'kernel/PluginHealthCheck:restartBackoff',
+    // #15939 ruling A (per-file remediation of #14478). `PluginHealthCheck.timeout`
+    // said "Timeout for health check in milliseconds" in a source JSDoc and
+    // "Maximum time to wait for health check response" in the `.describe()` the
+    // reference pages publish, so the published channel named no unit at all and the
+    // reference-page reader got a bare 5000. Renamed to `timeoutMs` — the family's
+    // most attested spelling on this tree (29 key-position `timeoutMs` declarations
+    // in packages/spec). The value and the 5000 default are unchanged. Tombstoned
+    // with `retiredKey()`: `PluginHealthCheckSchema` is not `.strict()`, so a bare
+    // deletion would silently strip the key and race the health check against no
+    // deadline. No D2 conversion: not a stack collection member, not a stored row —
+    // `PluginHealthCheck` is a library parameter a host passes to
+    // `PluginHealthMonitor` in TypeScript, the same reading
+    // `plugin-auto-restart-never-reinitialised` recorded for this def. See
+    // `kernel-health-check-and-hot-reload-durations-unit-in-key`.
+    'kernel/PluginHealthCheck:timeout',
     // #15678 (stack card 3/6 of #14478) — ruling B. `PluginHealthReport.metrics.responseTime`
     // said "Average response time in ms" in prose and nothing else. Renamed to
     // `responseTimeMs`; the value is unchanged. Tombstoned with `retiredKey()`.
@@ -12460,6 +12974,21 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // this rename, and the divergence between the two shapes is filed separately.
     // See `kernel-startup-orchestrator-durations-unit-in-key`.
     'kernel/PluginStartupResult:duration',
+    // #15939 ruling A (per-file remediation of #14478 ruling B). This is the fifth
+    // duration on `kernel/plugin-security-advanced.zod.ts` and the one #15678
+    // deliberately left alone: `resourceLimits.timeout` said "Execution timeout in
+    // milliseconds" in a source JSDoc and "Maximum execution time" in the
+    // `.describe()` the reference pages publish, so the published channel named no
+    // unit at all and the gate listed the key in its census without judging it.
+    // Renamed to `timeoutMs`, the same token `SandboxConfig.process.timeoutMs` on
+    // this file already carries. The value is unchanged. Tombstoned with
+    // `retiredKey()`: the nested `resourceLimits` object is not strict, so a bare
+    // deletion would silently strip the key. No D2 conversion: a `RuntimeConfig` is
+    // the engine block of the `SandboxConfig` a host or a plugin security manifest
+    // constructs, never a stack collection member or a stored row — the same
+    // reading `kernel-plugin-security-durations-unit-in-key` recorded for the four
+    // keys it renamed. See `kernel-runtime-config-timeout-unit-in-key`.
+    'kernel/RuntimeConfig:resourceLimits.timeout',
     // #15678 (stack card 3/6 of #14478) — ruling B. `SandboxConfig.process.timeout`
     // said "Process timeout in ms" in prose and nothing else. Renamed to
     // `timeoutMs`; the value is unchanged. Tombstoned with `retiredKey()` inside
@@ -12944,6 +13473,17 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `api/BatchEndpointsConfig:operations.upsertMany` are.
     // D3 semantic entry: `change-management-duration-keys-retired`.
     'system/RollbackPlan:steps.estimatedMinutes',
+    // #15939 ruling A (per-file remediation of #14478). `performance.schemaCacheTTL`
+    // said "Schema cache TTL in seconds" in a source JSDoc and "Schema cache TTL" in
+    // the `.describe()` the reference pages publish, so the published channel named
+    // no unit at all. Renamed to `schemaCacheTtlSeconds` — `Ttl`, not `TTL`, because
+    // that is how every member of the suffixed family on this tree already spells it
+    // (`cacheTtlSeconds`, `ttlSeconds`, `defaultCacheTtlSeconds`). The value and the
+    // 3600 default are unchanged. Tombstoned with `retiredKey()`: the nested
+    // `performance` object is not strict, so a bare deletion would silently strip the
+    // key. No D2 conversion: not a stack collection member, not a stored row. See
+    // `tenant-schema-cache-ttl-unit-in-key`.
+    'system/SchemaLevelIsolationStrategy:performance.schemaCacheTTL',
     // #15679 (stack card 4/6 of #14478) — ruling B. The second of the two
     // byte-identical `window.size` declarations in `metrics.zod.ts`; it carries the
     // same prose and takes the same new name, `durationSeconds`, for the reason
@@ -13456,6 +13996,34 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // (wrap-and-rename to `sort: [pair]` when `sort` is absent; a pure lossless
     // delete when `sort` is present, since the fallback was never read then).
     'ui/ObjectGridProps:defaultSort',
+    // #17260 — ADR-0049 enforce-or-remove, executing the objectui#8285
+    // director-seat ruling (comment 5583979207, decision batch #91, 2026-09-08,
+    // standing maintainer delegation): ruled option B — `quickAdd` is retired from
+    // the `object-kanban` board and stays only on the `kanban-ui` block, where a
+    // React host can supply the runtime function the control needs.
+    // The board FORWARDED the key but never honoured it: measured at the
+    // `.objectui-sha` pin `53ded82bf`, `ObjectKanban.tsx:931` spreads the authored
+    // bag into `KanbanRenderer` (`plugin-kanban/src/index.tsx:196` passes both
+    // `quickAdd` and `onQuickAdd`), and `KanbanImpl` gates the affordance on BOTH
+    // (`:355`, `:368`) — while `onQuickAdd` is a host-supplied FUNCTION that JSON
+    // cannot carry and no producer puts on an `object-kanban` node
+    // (`ObjectKanban.tsx` names neither half: 0 each, against 6 for the sibling
+    // `onCardClick` in the same file). The drop was not silent, which is the sharp
+    // edge: objectui's html tier reported the published key as `unknown-prop` —
+    // the SAME diagnostic a typo gets — and its registry-spec ledger records it as
+    // `ESCALATED (object-kanban.quickAdd — measured NOT honoured)`, so the author
+    // met a tool contradicting the contract with no way to tell which side was
+    // wrong. Tombstoned with `retiredKey()` in `ObjectKanbanPropsSchema` (the
+    // surface baseline line carries `[RETIRED]`); sources are stripped by the D2
+    // conversion `object-kanban-quick-add-removed`, a pure lossless delete scoped
+    // by component `type` so the LIVE `kanban-ui` spelling is untouched.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look — the `ui/ObjectGridProps:defaultSort`
+    // precedent one entry over.
+    'ui/ObjectKanbanProps:quickAdd',
     // #17063 (ADR-0049 enforce-or-remove; maintainer ruling 2026-09-09, decision
     // batch #107 item 1, verbatim 「撤」). `ObjectListView.pageName` named the published
     // page a `type: 'page'` view was to mount. Only the spec half of #13216 ever

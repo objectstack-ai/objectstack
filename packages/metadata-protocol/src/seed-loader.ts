@@ -14,6 +14,7 @@ import type {
   Seed,
 } from '@objectstack/spec/data';
 import { SeedLoaderConfigSchema, isMultiValueField } from '@objectstack/spec/data';
+import { SEED_WRITE_EXECUTION_CONTEXT } from '@objectstack/spec/kernel';
 import { resolveSeedRecord } from '@objectstack/formula';
 import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult, runWithAdvisoryAggregation, type AdvisoryGroup } from '@objectstack/core';
 // [#8442] The repo's ONE recogniser for "this throw is a record-validation
@@ -2095,32 +2096,20 @@ export class SeedLoaderService implements ISeedLoaderService {
   // ==========================================================================
 
   /**
-   * Seed writes always run as a privileged system context. This bypasses
-   * RBAC checks (so seeds can target system tables like `sys_*`) and
+   * The seed-write options every write in this loader uses — the shared
+   * {@link SEED_WRITE_EXECUTION_CONTEXT} posture, wrapped in the options bag
+   * the engine's write methods take.
+   *
+   * The posture itself (system-elevated, automation suppressed, state-machine
+   * exempt) and why each flag is load-bearing are documented once, on that
+   * export in `@objectstack/spec/kernel`. What is specific to this loader:
+   * `isSystem` is what lets a seed target system tables like `sys_*` and what
    * disables the SecurityPlugin's auto-injection of `organization_id` /
-   * `owner_id` — seeds either declare those fields explicitly per
-   * record, or are intentionally cross-tenant / global.
-   *
-   * `skipTriggers` suppresses record-change AUTOMATION (autolaunched flow
-   * triggers) for seed writes: a package's seed is pre-existing END-STATE
-   * reference/sample data, not a stream of user events, so firing
-   * on-create/on-update flows (notifications, escalations, assignments,
-   * approvals) for it is semantically wrong and dangerous — a self-triggering
-   * flow can loop and wedge the whole first-boot (2026-07-06 incident).
-   * Lifecycle HOOKS (derived/default fields, validation) still run.
-   *
-   * `seedReplay` (#3433) tells the engine this is curated seed data so the
-   * object's `state_machine` validation rule is skipped — both the
-   * `initialStates` entry-point check on insert and the transition check on
-   * update. A seed is a snapshot of established facts (a `completed` project, a
-   * `closed_won` opportunity), not a record walking its lifecycle, so the FSM
-   * entry/transition guards do not apply. Without this a declared
-   * `initialStates` silently rejects every mid-lifecycle seed row and cascades
-   * its master-detail children — the "installed but no data" failure for
-   * showcase and every marketplace template. All OTHER validation (field
-   * shape, `format`, `cross_field`, `script`, `json_schema`) still runs.
+   * `owner_id`, so seeds either declare those fields explicitly per record or
+   * are intentionally cross-tenant / global. Lifecycle HOOKS
+   * (derived/default fields, validation) still run.
    */
-  private static readonly SEED_OPTIONS = { context: { isSystem: true, skipTriggers: true, seedReplay: true } } as const;
+  private static readonly SEED_OPTIONS = { context: SEED_WRITE_EXECUTION_CONTEXT } as const;
 
   /**
    * The engine write {@link writeRecoveringSummary} guards, as a NAMED callee.

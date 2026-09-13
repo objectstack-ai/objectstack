@@ -48,6 +48,20 @@ export interface Notification {
     readonly channels?: string[];
     /** Optional deep-link surfaced as the inbox row's call-to-action. */
     readonly actionUrl?: string;
+    /**
+     * User who caused the event (mentioner, assigner) — the same semantics as
+     * `sys_notification.actor_id`, projected onto the per-recipient unit so a
+     * channel can materialize it without reading the L2 event back.
+     *
+     * Carried end to end: `EmitInput.actorId` → here → (P1) the delivery row's
+     * snapshotted payload → back onto this field in the dispatcher → the
+     * `sys_inbox_message.actor_id` column. Consumers use it for the standard
+     * "do not notify me of my own action" rule, a purely local comparison.
+     *
+     * Absent on a digest delivery by construction: a collapsed group has no
+     * single actor.
+     */
+    readonly actorId?: string;
     /** Arbitrary structured payload carried to renderers / webhook receivers. */
     readonly payload?: Record<string, unknown>;
 }

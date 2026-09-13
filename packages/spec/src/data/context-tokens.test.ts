@@ -183,3 +183,67 @@ describe('classifyFilterToken — brace-wrapped by intent (#5586)', () => {
     expect(classifyFilterToken(value)).toBeNull();
   });
 });
+
+/**
+ * The Object.prototype fall-through pin. Its POPULATION is the point: the
+ * suite's other suggestion cases iterate the canonical near-miss vocabulary
+ * only — precisely the population that behaves — which is why this site sat
+ * green while `classifyFilterToken('{constructor}')` put the `Object` FUNCTION
+ * into `suggestion`, whose declared type is `ContextToken`.
+ */
+describe('classifyFilterToken — Object.prototype fall-through in `suggestion`', () => {
+  // Fixed at five. `toString` / `valueOf` are quiet only because the key is
+  // lower-cased first (`tostring` names nothing); they are in the population
+  // so that the accident is pinned as an outcome rather than trusted as a
+  // guard.
+  const POPULATION = ['constructor', 'toString', 'valueOf', '__proto__', 'nope'] as const;
+
+  it.each(POPULATION)('{%s} carries this branch\'s own declared refusal — an absent suggestion', (word) => {
+    // `suggestion` is optional in the declared return, so its absence IS the
+    // refusal value; ⛔ nothing was invented for the fix.
+    expect(classifyFilterToken(`{${word}}`)).toEqual({ kind: 'unknown', token: word, suggestion: undefined });
+    expect(classifyFilterToken(`\${${word}}`)).toEqual({ kind: 'unknown', token: word, suggestion: undefined });
+  });
+
+  it('no spelling reachable through the wrapped-token regex yields a non-ContextToken suggestion', () => {
+    // `FILTER_TOKEN_WRAPPED_RE` captures `[^{}]+` — anything but braces — so the
+    // reachable key set is NOT the identifier-shaped one objectui's narrower
+    // `[a-zA-Z0-9_]+` bounds. This sweep is over every own property name of
+    // `Object.prototype`, which is the set a bracket index can resolve, rather
+    // than over the two spellings that happen to be noisy today.
+    for (const name of Object.getOwnPropertyNames(Object.prototype)) {
+      const out = classifyFilterToken(`{${name}}`);
+      expect(out).not.toBeNull();
+      const suggestion = out && 'suggestion' in out ? out.suggestion : undefined;
+      // Pins the SILENCE: either absent, or a declared member of the union.
+      expect(suggestion === undefined || (CONTEXT_TOKENS as readonly string[]).includes(suggestion)).toBe(true);
+      expect(typeof suggestion).not.toBe('function');
+      expect(typeof suggestion).not.toBe('object');
+    }
+  });
+
+  it('lit control — a real near miss still gets its suggestion', () => {
+    // Without this, a guard that refused everything would pass the cases above.
+    expect(classifyFilterToken('{current_user}')).toEqual({
+      kind: 'unknown',
+      token: 'current_user',
+      suggestion: 'current_user_id',
+    });
+    expect(classifyFilterToken('{org_id}')).toEqual({
+      kind: 'unknown',
+      token: 'org_id',
+      suggestion: 'current_org_id',
+    });
+  });
+
+  it('lit control — the lookup table shadows no prototype member with an own key', () => {
+    // The reading the fix rests on: the table cannot be "already safe" by
+    // accident. If a row named `constructor` were ever added, the guard's
+    // meaning changes and this goes red first.
+    for (const name of Object.getOwnPropertyNames(Object.prototype)) {
+      expect(Object.prototype.hasOwnProperty.call(CONTEXT_TOKEN_SUGGESTIONS, name)).toBe(false);
+    }
+    // Lit control for the control: a row that IS present.
+    expect(Object.prototype.hasOwnProperty.call(CONTEXT_TOKEN_SUGGESTIONS, 'current_user')).toBe(true);
+  });
+});

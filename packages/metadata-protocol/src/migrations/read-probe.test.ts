@@ -26,14 +26,15 @@
  * one family does not silently fall through to the fallback probe.
  *
  * ⚠️ Running those statements against a live SERVER is a different claim, and
- * this file does not make it. The MySQL arm is executed against a real server in
+ * this file still does not make it — it names where each arm is executed
+ * instead. The MySQL arm runs against a real server in
  * \`seed-tenancy-backfill.live-mysql.test.ts\`; the SQLite arm end to end against
  * a real \`SqlDriver\` in \`packages/runtime\`'s
- * \`seed-tenancy-autonumber-split.integration.test.ts\`. ⛔ The POSTGRES arm is
- * NOT MEASURED against a live server anywhere — this package has no live-PG
- * harness, no \`pg\` dependency, and its CI leg supplies \`OS_TEST_MYSQL_URL\`
- * only while filtering to \`live-mysql\`. Recorded here rather than left to be
- * discovered.
+ * \`seed-tenancy-autonumber-split.integration.test.ts\`; and [#17621] the POSTGRES
+ * arm — recorded here as NOT MEASURED anywhere for as long as that was true —
+ * now runs in \`seed-tenancy-backfill.live-postgres.test.ts\`, on the postgres
+ * service the \`Temporal Conformance\` job already provisions. All three arms are
+ * executed.
  */
 
 import { describe, it, expect } from 'vitest';

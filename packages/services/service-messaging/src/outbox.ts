@@ -24,6 +24,14 @@ export interface DeliveryPayload {
     body?: string;
     severity?: 'info' | 'warning' | 'critical';
     actionUrl?: string;
+    /**
+     * User who caused the event, snapshotted alongside the rendered content so
+     * the dispatcher can put it back on the `Notification` without a read per
+     * delivery. Declared rather than left to the index signature below: a typed
+     * key beats an untyped record (Prime Directive #12), and the dispatcher's
+     * read of it is then type-checked at both ends.
+     */
+    actorId?: string;
     [k: string]: unknown;
 }
 

@@ -1240,6 +1240,57 @@ describe('AuthPlugin', () => {
       );
     });
 
+    // [#16384] Before this card, the DEFAULT base path was independently
+    // written at the constructor (line ~326) AND re-derived here in
+    // `registerAuthRoutes` (`this.options.basePath || '/api/v1/auth'`) — two
+    // literals that happened to agree, with nothing wiring them together. This
+    // is the sibling of "should use custom base path" above: that test never
+    // exercised the DEFAULT reaching the mount at all. Asserted against the
+    // external contract literal, not the `DEFAULT_AUTH_BASE_PATH` binding the
+    // implementation now shares — a typo in that constant must still fail
+    // this test.
+    it('should mount the default base path when none is configured', async () => {
+      const { hookFn, trigger } = createHookCapture();
+      mockContext.hook = hookFn;
+
+      authPlugin = new AuthPlugin({
+        secret: 'test-secret-at-least-32-chars-long',
+        baseUrl: 'http://localhost:3000',
+      });
+
+      await authPlugin.init(mockContext);
+
+      const mockRawApp = {
+        all: vi.fn(),
+        get: vi.fn(),
+        post: vi.fn(),
+      };
+
+      const mockHttpServer = {
+        post: vi.fn(),
+        get: vi.fn(),
+        put: vi.fn(),
+        delete: vi.fn(),
+        patch: vi.fn(),
+        use: vi.fn(),
+        getRawApp: vi.fn(() => mockRawApp),
+      };
+
+      // Cast, not the bare assignment the sibling test above uses: the bare
+      // form is TS2322 against `getService`'s generic signature — an
+      // ALREADY-tracked debt (`test-typecheck-debt.json`, 11 instances) this
+      // new test must not grow to 12.
+      mockContext.getService = vi.fn(() => mockHttpServer) as unknown as typeof mockContext.getService;
+
+      await authPlugin.start(mockContext);
+      await trigger('kernel:ready');
+
+      expect(mockRawApp.all).toHaveBeenCalledWith(
+        '/api/v1/auth/*',
+        expect.any(Function)
+      );
+    });
+
     it('should configure session options', async () => {
       authPlugin = new AuthPlugin({
         secret: 'test-secret-at-least-32-chars-long',

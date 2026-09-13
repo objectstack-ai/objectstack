@@ -1030,6 +1030,33 @@ jobs:
       - name: Single-claim path guard self-test
         run: pnpm check:single-claim-paths
 
+      # Closing-target claim guard self-test (#15845). Same split as the step
+      # above and for the same reason: the guard is a PR-scoped blocking check
+      # in its own workflow, because its question is about the COMMENT THREAD of
+      # the card a PR closes and needs a pull request plus an API read that this
+      # job has neither of. What runs HERE is the half that needs no PR — the
+      # verdict layer, the exit-code contract, the collection policy over a fake
+      # transport, and the wiring.
+      #
+      # Three things make this step worth its second. (a) The ACCEPTANCE PAIR:
+      # a correct claim is green and a claim naming a DIFFERENT branch is red,
+      # because a probe exercised only on its red half has not been shown to
+      # reach the card at all. (b) The NEGATIVE CONTROLS: a PR that closes
+      # nothing and a PR carrying only `Part of` make zero API calls and emit no
+      # annotation, so the gate cannot become a tax on correct PRs. (c) The COST
+      # assertions are measured over a fake transport with a call log, so
+      # "bounded by the closing-keyword count" is a test rather than a claim in
+      # a header.
+      #
+      # It also pins the WIRING (the guard workflow still invokes the script,
+      # still carries the check-run name the script pins, still subscribes to
+      # `edited` and `synchronize`, still takes the `merge_group` leg without
+      # which the queue claim would be prose, and still passes the head ref and
+      # the token), so unwiring the gate reddens here rather than going quiet.
+      # Dependency-free, imports two sibling modules, reads one file; ~0.1s.
+      - name: Closing-target claim guard self-test
+        run: pnpm check:closing-target-claim
+
       # PM half-state sweeper self-test (#8528). `scripts/pm/check-half-states.mjs`
       # carried a 79-case --self-test — the H1..H7 predicates, the seat-sticker
       # parser, the transport classifier and its measured container classes —
@@ -1124,6 +1151,45 @@ jobs:
       # exactly the family `check:self-test-wired` requires this step for.
       - name: Widening-tell gate self-test
         run: pnpm check:pm-widening-tells
+
+      # Prior-ruling reader self-test (#17009) — same family and the same split
+      # as every step around it. The LIVE read takes a card number over REST and
+      # searches this checkout's `origin/main`, so it is a tool a seat runs
+      # against the card in front of it, not a verdict about the PR that happens
+      # to run CI next. Only the offline self-test runs here.
+      #
+      # ⛔ Do not "promote" the live read into a gate. It is REPORT-ONLY by the
+      # ruling that admitted it: it ranks candidate rulings and names them, and
+      # WHICH candidate governs is a seat's reading and the maintainer's ruling
+      # (SKILL.md 〈升级与决策〉③). A blocking context over that judgement would
+      # be a required-set change, and the required set is the maintainer's.
+      #
+      # What the self-test instruments is the set of rules a clean tree cannot
+      # exercise: the term derivation's length floor, stopwords and code-span
+      # splitting (a backticked CLAUSE must not become a term); the
+      # governing-text carrier in both shapes the live board uses, plus the
+      # ABSENT case, which is 23 of its 27 open decision cards; word-boundary
+      # matching against the substring noise `git grep -iE` would drag in; the
+      # two decision shapes and the prose bullets the separator rule rejects;
+      # and status classification, which reads the FIRST status word rather than
+      # scanning for a retirement word anywhere in the line — two live accepted
+      # ADRs mention a later supersession/withdrawal of a sub-part, and
+      # precedence-scanning hides both from the pasted reading. Weakening any of
+      # them leaves an ordinary run just as green — it would simply surface
+      # fewer rulings, which is indistinguishable from a card that has none —
+      # and that is the shape `check:self-test-wired` requires this step for.
+      #
+      # It also carries ONE live-tree leg: the ADR-0131 D8 heading must still
+      # parse at the shape the reader expects, so a heading-format drift reds
+      # here instead of quietly shrinking every future candidate set. That leg
+      # reports `skipped` where no `origin/main` exists rather than passing —
+      # "could not check" is never rendered as "checked and clean".
+      #
+      # It imports `check-half-states.mjs` for the board resolver and the proxy
+      # re-exec plan — one source each, so this reader and the patrol cannot
+      # come to disagree about which board is read or how it is reached.
+      - name: Prior-ruling reader self-test
+        run: pnpm check:pm-prior-rulings
 
       # Stamped-post helper self-test (#17314) — the WRITE half of the rule that
       # a timestamp a seat writes into GitHub comes from a clock read by the act
@@ -3734,6 +3800,19 @@ jobs:
       # then the real scan; reads ~72 manifests and their test sources.
       - name: Declared registry log level
         run: node scripts/check-registry-log-declared.mjs --self-test && node scripts/check-registry-log-declared.mjs
+
+      # The same defect one package down (#15484). `packages/rest`'s own fault
+      # logging hands whole `Error` objects to `console.error`, and Node prints
+      # the stack and the `[cause]` chain with them — 2,095 indented `at ` frame
+      # lines on one green run, 36.7% of the captured output, all of it through
+      # one shim. ⛔ Those frames are READ (four assertions pin the identity of
+      # the error that arrives, #5437 / #4886 / #5489), so the ruled repair was a
+      # DECLARED level, not a quieter product. This holds the two halves that rot
+      # silently: a harness declaration that is deleted or typo'd to a level the
+      # seam does not recognise (it resolves to the DEFAULT, silently), and the
+      # shipped default itself being lowered to quieten a log. Self-test first.
+      - name: Declared REST fault-log level
+        run: node scripts/check-rest-log-declared.mjs --self-test && node scripts/check-rest-log-declared.mjs
 
       # Live-server database isolation (#10382). CI provisions ONE Postgres and
       # ONE MySQL for the whole temporal-conformance job and points every live

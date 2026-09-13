@@ -24,6 +24,10 @@ export const zhCN: TranslationData = {
         nav_account_sessions: { label: '活动会话' },
         nav_account_api_keys: { label: 'API 密钥' },
         nav_account_oauth_apps: { label: 'OAuth 应用' },
+        // Contributed at runtime by `@objectstack/mcp` into
+        // `grp_account_developer`; the Setup twin's key does not answer for the
+        // Account app (one `apps.<app>.navigation` namespace per app).
+        nav_connect_agent: { label: '连接智能体' },
       },
     },
     setup: {
