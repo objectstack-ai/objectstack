@@ -10572,11 +10572,14 @@ const step18: MigrationStep = {
         + 'to misread. The magnitudes make the guess plausible in both directions: 10000, 30000, '
         + '5000 and 5000 are all defensible as seconds and as milliseconds, and an operator who '
         + 'reads seconds sets an exporter deadline 1000x short. The suffix is the family spelling, '
-        + 'counted in key position across packages/spec/src: 281 *Ms declarations over 42 distinct '
-        + 'names, timeoutMs 65 of them and intervalMs 14, against 0 key-position timeoutSeconds; '
-        + 'the Delay-plus-Ms pairing is likewise already attested (maxDelayMs, initialDelayMs, '
-        + 'retryDelayMs, delayMs, debounceDelayMs) with no competing scheduledDelay spelling '
-        + 'anywhere. Note this file is milliseconds throughout and its own landed precedent is '
+        + 'counted in key position at 98bd7986fe over packages/spec/src *.ts (reproduce with '
+        + 'git grep -hoE on that ref): 281 *Ms declarations over 42 distinct names, timeoutMs 65 of '
+        + 'them and intervalMs 14, against 0 key-position timeoutSeconds and 77 *Seconds of any '
+        + 'name; the Delay-plus-Ms pairing is likewise already attested on that same ref '
+        + '(maxDelayMs 9, initialDelayMs 9, maxRetryDelayMs 5, debounceDelayMs 2, delayMs 2, '
+        + 'retryDelayMs 1) with 0 occurrences of any competing exportTimeout, scheduledDelay or '
+        + 'exportInterval spelling, suffixed or Seconds. Note this file is milliseconds throughout '
+        + 'and its own landed precedent is '
         + 'Span.duration to durationMs, the opposite of the sibling metrics card whose rows were '
         + 'seconds. exporter.timeoutMs and exporter.batch.exportTimeoutMs are deliberately allowed '
         + 'to sit one nesting level apart: the pair pre-exists the rename — the batch sub-object is '
@@ -10594,17 +10597,18 @@ const step18: MigrationStep = {
         + 'either, and a tracing configuration is never a stored sys_metadata row — so a conversion '
         + 'would be a transform with no seam that ever runs. That is the same disposition '
         + 'system-tracing-span-duration-unit-in-key recorded for the other key on this file. '
-        + 'Measured on 98bd7986fe: NO in-repo reader exists outside packages/spec — '
+        + 'Measured at 98bd7986fe: NO in-repo reader exists outside packages/spec — '
         + 'OpenTelemetryCompatibility, TracingConfig and all three batch key names occur 0 times '
-        + 'across the whole tree excluding packages/spec and the generated reference pages, against '
-        + 'a lit control of 20875 Schema occurrences on the same corpus; inside packages/spec the '
+        + 'across the whole tree at that ref excluding packages/spec and the generated reference '
+        + 'pages, against a lit control of 20875 Schema occurrences on that same corpus and ref '
+        + 'and a dark control of 0; inside packages/spec the '
         + 'only occurrences are tracing.zod.ts, its test, and the generated rows in '
         + 'content/docs/references/system/tracing.mdx, which this rename regenerates. And the '
         + 'pinned objectui checkout — `.objectui-sha` = `53ded82bf7a494f54e344e19099dbf00854b8694` — names none of it: all 37 exports of '
-        + 'tracing.zod.ts and each of the four key names occur 0 times across its 6409 tracked '
-        + 'files (the 404 Span and 40 SpanSchema hits are objectui\'s own HTML text-span component, '
-        + 'TextSpanSchema, an unrelated name), against lit controls objectstack 10171 and '
-        + '@objectstack/spec 3479 on the same corpus.',
+        + 'tracing.zod.ts and each of the four key names occur 0 times across the 6409 files '
+        + 'tracked at that sha (the 404 Span and 40 SpanSchema hits are objectui\'s own HTML '
+        + 'text-span component, TextSpanSchema, an unrelated name), against lit controls '
+        + 'objectstack 10171 and @objectstack/spec 3479 on that same corpus and sha.',
       acceptanceCriteria:
         'Every author and reader of an OpenTelemetryCompatibility spells exporter.timeoutMs, '
         + 'exporter.batch.exportTimeoutMs and exporter.batch.scheduledDelayMs, and every one of a '
@@ -13440,9 +13444,11 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // #15939 ruling A (per-file remediation of #14478). `exporter.batch.scheduledDelay`
     // said "Scheduled delay in milliseconds" in a source JSDoc and carried NO
     // `.describe()` at all, so the published reference page showed a bare 5000.
-    // Renamed to `scheduledDelayMs`, the plain suffix: the Delay-plus-Ms pairing is
-    // already the family spelling on this tree (`maxDelayMs`, `initialDelayMs`,
-    // `retryDelayMs`, `delayMs`, `debounceDelayMs`) and no competing form exists.
+    // Renamed to `scheduledDelayMs`, the plain suffix: counted in key position across
+    // `packages/spec/src` at `98bd7986fe`, the Delay-plus-Ms pairing is already the
+    // family spelling (`maxDelayMs` 9, `initialDelayMs` 9, `maxRetryDelayMs` 5,
+    // `debounceDelayMs` 2, `delayMs` 2, `retryDelayMs` 1) and neither
+    // `scheduledDelayMs` nor `scheduledDelaySeconds` occurs there at all.
     // The value and the 5000 default are unchanged. Tombstoned with `retiredKey()`:
     // the nested `batch` object is not strict, so a bare deletion would silently
     // strip the key. No D2 conversion: not a stack collection member, not a stored
@@ -13578,7 +13584,9 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // carried NO `.describe()` at all, so the published reference page showed a bare
     // 5000. Renamed to `exportIntervalMs`; the value and the 5000 default are
     // unchanged. `intervalMs` is the family spelling already attested 14 times in key
-    // position on this tree, so the suffix lands on a name the surface uses.
+    // position across `packages/spec/src` at `98bd7986fe` (0 `exportIntervalMs` and 0
+    // `exportIntervalSeconds` there, so nothing competes), so the suffix lands on a
+    // name the surface already uses.
     // Tombstoned with `retiredKey()`: the nested `performance` object is not strict,
     // so a bare deletion would silently strip the key and hand a background exporter
     // its default period. No D2 conversion: not a stack collection member, not a
