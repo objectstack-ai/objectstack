@@ -1,5 +1,397 @@
 # @objectstack/plugin-security
 
+## 17.5.0
+
+### Minor Changes
+
+- 041d9fd: fix(service-analytics)!: `POST /analytics/dataset/query` asks the OBJECT-level read grant before it serves an inline dataset (#16645)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is renamed, retired or re-typed: no `packages/spec` key changes its name, its type or its optionality, no stored shape moves, and every dataset, dashboard and analytics request body parses byte-identically to before — so `objectstack migrate meta` has nothing to rewrite and this changeset carries no rewrite instructions. What narrows is the ACCEPT SET of a published route at REQUEST time: `POST /analytics/dataset/query` (and the `/analytics/query` and `/analytics/sql` doors) now refuse a caller who holds no object-level read grant on an object the request reads, which is the same verdict `GET /data/<object>` already returns for that caller on that deployment. The remedy for a caller who is refused is a GRANT, held in permission-set data rather than in an authored file: the deployment gives the principal read on the object, exactly as it must today to use `/data`. There is no authored artifact and no stored representation for a migration to act on, and the additions to the contract are additive (a new OPTIONAL `ISecurityService.canReadObject`, new optional keys on three option payloads), which is a widening rather than a retirement. -->
+  
+  **BREAKING** in the accept-set sense — an accept-set narrowing on a published
+  route — landing in the launch window as `minor` on all four packages (the
+  lockstep convention: during the window the bump level is not the carrier, this
+  banner and the disposition above are). Nothing that was already admitted
+  becomes refused **except** the requests `GET /data/<object>` refuses today for
+  the same principal, which is the defect. Nothing that was refused becomes
+  admitted.
+  
+  `POST /analytics/dataset/query` now asks the OBJECT-level read grant before it serves an inline dataset, so the analytics door and `GET /data/<object>` reach one admission verdict on every driver.
+  
+  The route accepts an inline dataset definition (`body.dataset`) from any authenticated caller. On a SQL driver the compiled statement ran through the driver's raw `execute()`, which is documented as a tenant-isolation bypass and which no middleware sits in front of — so the request reached the database having passed exactly ONE of the three read layers (the row scope, threaded since ADR-0021 D-C). A caller with **no grant of any kind** on an object received its row count, and with `dimensions` its grouped counts by any column, where the `/data` door answered `403 PERMISSION_DENIED` for the same principal on the same deployment. On the memory driver the identical request fell through to the ObjectQL engine, which applies all three layers in one place, and was refused. The exposure is not opt-in and an application cannot decline it: a deployment shipping 0 datasets and 0 dashboards has the identical surface, because the reachable slot is the inline definition rather than a declared one.
+  
+  **This change NARROWS what the analytics doors accept.** Requests that were already refused by `/data` are now refused by analytics too; nothing that was refused becomes admitted. "Fails closed" is a statement about a WIRED provider: a deployment with no `security` service registered keeps its previous analytics behaviour by design, because on that deployment `/data` carries no object-level gate either and the equivalence is what is being defended.
+  
+  - **`ISecurityService.canReadObject(object, context)`** (`@objectstack/spec`, optional) — the object-level half of a read, the sibling of `getReadFilter`'s row-level half. It exists because the two are not interchangeable: `getReadFilter` answers "which rows" and answers `undefined` — "no row restriction" — for a caller who may not read the object at all, so a door holding only the filter reads a caller with NO grant as a caller with NO restriction. Fails CLOSED. Absence is a defined state and its fallback is **not** "admit": a consumer composes the same verdict from `explain`, which is not optional.
+  - **`@objectstack/plugin-security` implements it** as the middleware's own read gate, arm for arm and in its order — the `isSystem` bypass, the "no permission sets resolved" skip, the #3545 fail-closed refusal on an unresolvable object posture, the ADR-0066 D3 `requiredPermissions` capability AND-gate, the `allowRead` CRUD grant, and the ADR-0090 D10 delegator intersection — from the same primitives the middleware calls, and it is exposed on the registered `security` service.
+  - **`@objectstack/service-analytics` asks it once at the door**, for the base object and every joined object, **ahead of strategy selection**. Placement is the fix: two strategies each enforcing their own copy of three layers is the CAUSE of the divergence, not its remedy, so both strategies — and any strategy added later — inherit one verdict by construction. `AnalyticsServicePlugin` auto-bridges the new `admitObjectRead` hook to the `security` service (`canReadObject`, falling back to `explain`), the same way it already bridges `getReadScope`, and warns loudly at init when no security service is registered. The bridge tells three resolutions apart: an ABSENT `security` service admits (that deployment has no object-level gate on `/data` either, so the two doors still agree, and this is what keeps a deployment shipping no `plugin-security` working as before); a service that cannot be USED — resolving it throws, or it exposes neither `canReadObject` nor `explain` — DENIES and reports at `error`, because `/data`'s middleware does not fall open in those states.
+  - **`@objectstack/verify`** gains `bootStack(app, { databaseDriver: 'sqlite-wasm' | 'memory' })`, because a two-driver equivalence property cannot be measured on one driver — which is how the strategies were allowed to disagree.
+  
+  The refusal is `PERMISSION_DENIED` / 403, the same code and status the engine path already answers, and it names only the object the caller themselves named.
+- 2266438: Re-run the seed-ownership claim when the seed settles, and report whether each pass was final.
+  
+  `claimSeedOwnership` was reached exactly once per database lifetime, on the pass that promotes the first platform admin, while the platform's own seeder was still writing in the background — an app bundle that overruns `OS_INLINE_SEED_BUDGET_MS` (default 8 s) continues past kernel start rather than block it. Registry order and seed order are unrelated, so every object whose rows landed after that walk stayed `owner_id IS NULL` permanently: nothing re-ran the claim. Ownerless rows are invisible to every `readScope: 'own'` grant, and under `public_read` they read fine and answer 403 on every write at `modifyAllRecords: false` — a granted permission that can never be exercised.
+  
+  The claim now also runs on `app:seeded`, the published settle signal for that background continuation, against the same admin and with the same predicates — so it moves ownership for exactly the rows the promotion-time pass missed, and never for a row a human already owns.
+  
+  Two additive keys support it, both optional: `bootstrapPlatformAdmin` reports `adminUserId` on the promotion path and on the `already_have_admin` short-circuit (so the re-run reads the one existing holder scan instead of a second copy of it), and both `bootstrapPlatformAdmin` and `claimSeedOwnership` accept a `seedSettlement` snapshot read through the `seed-settlement` contract. No existing key, argument or return shape changed.
+  
+  Every claim pass now logs one line whether or not it claimed anything, and says whether its reading was final: a pass taken while a seed source is still writing is reported at `warn` as PROVISIONAL. Previously a pass that matched nothing logged nothing at all, so a boot that permanently orphaned rows and a boot with nothing to do produced identical evidence.
+- a016f08: fix(plugin-security)!: the insert-side RLS `check` is evaluated on the row that will be STORED — after `beforeInsert` — instead of on the caller's raw payload (#16608)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) an enforcement-ORDER change: no authorable key, spelling or stored shape moves, so a stored `sys_metadata` row needs no conversion and an upgrader has nothing to hand-edit. What changes is which image the existing `check` predicate is evaluated against; the remedy for a newly-refused insert is to fix the policy or the data, not to migrate metadata. -->
+  
+  **BREAKING** — an accept-set narrowing on the write gate's refusal behaviour. An insert that is admitted today can be refused after this change.
+  
+  `check` validates the row a write produces — the PostgreSQL `WITH CHECK` analog. `update` reached that row by merging the caller's pre-image with the change set. `insert` could not: it has no pre-image, and the security middleware runs BEFORE the engine's operation, so its post-image was `opCtx.data` — the caller's payload as it arrived, ahead of `applyFieldDefaults` and ahead of every `beforeInsert` hook.
+  
+  A denormalised scoping field is exactly what an RLS predicate compares (ADR-0055: a predicate cannot traverse a lookup) and exactly what an app stamps server-side so a caller cannot choose it. Judging the raw payload therefore inverted the policy in both directions, measured on 17.3.0 with a real engine, a real `SecurityPlugin` and both drivers:
+  
+  - **the derived value was not on the image**, so the only way to pass a `check` over it was for the caller to SEND the value the hook exists to make un-sendable. Same identity, same object, same second: the payload carrying the stamped field returned 201, the identical payload leaving it to the hook returned 403 — and the stored row was identical either way.
+  - **the sent value WAS on the image and was then overwritten**, so an insert naming an in-scope organization while pointing at a parent in ANOTHER organization PASSED the check and stored the parent's organization. That is a row whose stored scope the caller does not hold, and it is why this is a narrowing rather than a widening: today it is admitted, after this change it is refused with nothing stored.
+  
+  Ruled 2026-09-07 (maintainer, verbatim 「同意」, director seat, summon #17, decision batch #3). The refused alternative — keep the order and write the contract that a checked field must arrive from the caller, plus an `os validate` rule to police it — institutionalises the contradiction and needs a permanent lint to hold it in place.
+  
+  **What changed, mechanically.** `OperationContext` gains `postHookWriteImageCheck` (`@objectstack/objectql`), an optional judgement an enforcement layer installs and `ObjectQL.insert` runs once the `beforeInsert` chain has produced the row — after the post-hook declared-field door, after the two value-changing strips (`stripRuntimeOwnedFields` and the static-`readonly` strip with its `defaultValue` re-default, both moved ahead of it), and before every producer with a side effect (the secret channel, the autonumber, validation, the statement), so a refusal still costs nothing. `@objectstack/plugin-security` installs its compiled `check` filter there for `insert` instead of matching it against `opCtx.data`; `update` is unchanged. The compiled filter is still built in the middleware, where the caller's permission sets, the ADR-0090 D10 delegator's, the staged membership and the request context are all resolved — only the IMAGE is deferred. A middleware that installed the judgement and finds the seam was never run refuses the write and logs at ERROR: an unjudged write is not an allowed one.
+  
+  **Who is affected.** Only objects governed by a permission set that EXPLICITLY declares `check`, on single-row inserts by a non-system caller — the gate's existing scope, unchanged. Two behaviour changes to expect, and they are the two halves of the same correction: an insert that left a hook-stamped field off the payload now succeeds where it used to be refused, and an insert whose hook-stamped field lands outside the caller's scope is now refused where it used to be admitted. Callers that were duplicating the stamp to get past the gate keep working and may stop.
+  
+  **Two further behaviour changes the reorder produces, measured on both legs** (the reviewed order and this one), because moving the strips ahead of the seam also moves them ahead of the credential channel:
+  
+  - a caller-forged value on an author-declared `readonly` **`secret`** field is now stripped. Before, `encryptSecretFields` ran first and replaced the row's value with a `sys_secret` reference, so the strip's `Object.is` value test compared that reference against the caller's plaintext, read the difference as a hook's write, and KEPT the forgery — measured on 17.3.0's order as stored `token: "secret:sec_1"` with a `sys_secret` row minted. This is a narrowing, and it closes a hole that predates this card.
+  - an empty string on a `readonly` **`password`** field is stripped instead of answering `VALIDATION_ERROR`. `""` reaches the store on neither order, so the 2026-08-13 empty-credential ruling's guarantee is unchanged; only which refusal a caller sees moves, on a payload a caller was never allowed to send. ⚠️ This is the one direction of the reorder that is not a narrowing, and it is recorded rather than left to be discovered.
+  
+  **The invariant this buys, stated to its real edge.** A stored row satisfies the insert `check` on every field the CALLER can steer, whatever the caller sent. Nothing offered any such guarantee before: the check read the payload, and the payload was entirely the caller's.
+  
+  ⚠️ It is deliberately not "on every field", and the difference is a boundary rather than a hedge. Four engine-owned passes still run between the judgement and the driver, and each substitutes a platform value for whatever stands on the row: the tenant fill of an ABSENT organization column (`resolveSystemInsertOrganization` plus the driver's `injectTenantOnInsert`), `encryptSecretFields` replacing a `secret` field's plaintext with a `sys_secret` reference, `applyAutonumbers` issuing a record number, and `normalizeMultiValueFields` coercing a declared multi-value field to its stored shape. A policy whose `check` names an autonumber, a `secret` or the tenant column is therefore judging a value the platform is about to replace. None of those four is caller-steerable — which is exactly why the two passes that WERE (`stripRuntimeOwnedFields` and the static-`readonly` strip) moved above the seam instead of being explained away.
+- 331a1a2: fix(security): an OAuth-connected MCP agent runs at its delegator's record depth — "you connect as yourself" becomes true (#16549)
+  
+  Maintainer ruling, decision batch #81 item 1 (2026-09-08), option 1: **the OAuth agent runs with the user's own permissions; the ceiling only subtracts; the diagnostic lands regardless.**
+  
+  **The defect, measured.** The Setup → Connect an Agent page promises, verbatim, *"you connect as yourself, and every call runs under your own permissions and row-level security."* It did not. The same sales manager, same questions, same server:
+  
+  | identity path | `crm_account` | `crm_opportunity` | `crm_task` |
+  |:--|--:|--:|--:|
+  | API key, `principalKind: human` | 9 | 23 | 45 |
+  | OAuth, `principalKind: agent`, `onBehalfOf` = same user | **5** | **0** | **0** |
+  
+  The agent read `own` scope where the human read `viewAllRecords`, so any profile whose visibility comes from `viewAllRecords` — every manager-type profile — collapsed to *own + explicit shares*. And it was **silent**: the MCP tools answered `total: 0` with no note, so the agent reported "there are no opportunities this quarter" as a fact about the data.
+  
+  **The mechanism, in one line.** `mcp_agent_data_read` / `mcp_agent_data_write` are pure CAPABILITY ceilings — a `'*'` grant with no `readScope` and no `viewAllRecords`, whose own doc says *"NO row-level security … all row/owner/tenant narrowing comes from the delegating user"*. `PermissionEvaluator.getEffectiveScope` nevertheless answered `'own'` for them, because its owner-only default turns a granting-but-silent set into an owner-scoped one. That default is correct for a principal standing on its own and wrong as an input to an intersection: it made the ADR-0090 D10 fold subtract with an opinion nobody declared.
+  
+  **(1) Parity.** A new `PermissionEvaluator.getDeclaredScope` answers the depth a set actually *declares*, or `undefined` when every granting set is silent; `intersectDelegatedScope` reads that silence as **no opinion**, so the delegated principal's own leg contributes no owner narrowing and the delegator's depth stands — `agent ∩ user = user` for visibility. A ceiling that *does* declare a depth keeps its full subtractive force. The explain engine's `depth` layer folds through the identical function, so a report cannot describe an intersection the query did not have.
+  
+  ⛔ **Only visibility depth moved.** Each ceiling's remaining subtractions are now written down explicitly beside the sets themselves (`objects/default-permission-sets.ts`): `data:read` still cannot write, create, delete, export or `allowTransfer`; `data:write` still cannot `allowTransfer` or export, and `sys_*` / better-auth-managed identity tables stay read-only; neither reaches a `private`-posture object nor carries any `systemPermissions`; a dangling delegator still fails CLOSED; and share-MANAGEMENT authority is still not delegated (`hasWriteBypass` → `false`, `resolveWriteScope` → `'own'` for any on-behalf-of context). Putting `viewAllRecords` / `modifyAllRecords` on the ceiling — the ruling's other permitted route — would have granted `allowTransfer` (`MODIFY_ALL_WRITE_KEYS` covers it) and reached `private` objects through the superuser wildcard, both explicitly fenced off, which is why the fix lands on the intersection instead.
+  
+  **(2) The diagnostic, independent of (1).** `ISecurityService.describeDelegationNarrowing` (optional) reports whether the agent ceiling narrowed a delegated read, resolved from the same two evaluator calls the CRUD middleware stashes as `__readScope`. `McpDataBridge.diagnoseDelegation` (optional) carries it to the transport, and MCP `query_records` serves a narrowed result with `delegationNarrowed: true` plus a `warning` sentence naming the D10 intersection — the `partial` / `warning` shape `list_objects` already uses. The rows are still served; what is added is the fact the payload could not previously carry: *this count describes the ceiling, not the object.* An un-narrowed read, a non-delegated read, a bridge with no probe and a throwing probe all render exactly what they rendered before.
+  
+  **(3)** The Setup page's promise is untouched — it is now true rather than rewritten.
+  
+  Purely additive on every published surface: two new optional members, one new exported type (`DelegationNarrowing`), and one new evaluator method. No existing member changed shape, and the only behavioural change is on the delegated path with a ceiling that declares no depth.
+  
+  `DelegationNarrowing` is a **discriminated union** on `narrowed`, not one shape with three optional fields, because the two shapes are not symmetric once released:
+  
+  | direction, after release | consumer cost |
+  |:--|:--|
+  | ship optional fields, later tighten them to required | a compile break |
+  | ship discriminated, later loosen it (a new union member, or an optional field on the `true` arm) | none |
+  
+  The loose shape buys nothing and forecloses the tightening. It also removes the very failure mode the method exists to prevent: `statement` is the sentence an AI consumer renders, so left optional, a consumer that forgets the `narrowed` check silently renders `undefined` — the same silence the table above measures. The five-member scope ladder it reports names the alias that already exists for it, `ObjectAccessScope` (ADR-0057 D1, `@objectstack/spec/security`), rather than minting a second declaration of one ladder; `resolveWriteScope` now names it too, so the union is spelled once instead of three times and no export is added beyond `DelegationNarrowing` itself.
+- 1c83ca2: The first-boot `already_have_admin` short-circuit now FINDS an existing platform admin instead of sampling for one, so a tenant's organization-admin count can no longer decide whether a second unscoped `admin_full_access` grant is minted.
+  
+  Before this change the holders read was `sys_user_permission_set` with **no `orderBy` and a cap of 50**, and the predicate that actually decides — `!organization_id` — was applied **client-side to whatever 50 rows the driver returned first**. `admin_full_access` is not only the platform-admin set: every *organization-scoped* grant of it writes a row carrying the same `permission_set_id`, so this population grows with the number of **org** admins, not platform admins. A tenant with fifty-odd of them filled the window with rows that all fail the filter, the short-circuit did not fire, a **second** unscoped grant was minted, and `claimSeedOwnership` re-owned the seeded business records to the newly promoted user — silently, because the boot logs a successful promotion exactly as on a genuinely fresh install. Measured on the real better-sqlite3 driver: with 60 organization-scoped grants plus one unscoped human grant, the unordered 50-row window contained 50 organization-scoped rows and not the one that decides.
+  
+  That is the guarantee #14348 case D pins — 「Moving an already-granted platform admin is reserved to the maintainer.」 — failing open by row count.
+  
+  - **The read asks the driver the narrow question first.** `{ permission_set_id, organization_id: null }`, ordered and bounded. Because it is narrowed server-side, no number of organization-scoped grants can crowd the answer out of a window.
+  - **A second, ordered and bounded leg still applies the exact predicate.** It runs only when the narrow leg found nobody. This is deliberate rather than redundant: `organization_id: ''` is storable and reads back as `''` on both SQL families, which `!organization_id` counts as **unscoped** and `where: { organization_id: null }` does **not** return — so replacing the client-side predicate with the narrowed read alone would have made this guard fire *less* often and mint the very grant this fixes. Both legs are strictly additive to what the old read could see, so the guard can only fire more often than before, never less.
+  - **The bound is never silent.** The scan pages 200 rows at a time up to a 5000-row ceiling, and reaching that ceiling without finding an unscoped human holder now WARNS — naming the ceiling, the number of rows examined, and the consequence (promoting from here would mint a second unscoped grant and re-own the seeded records).
+  - **The answer says how many rows it examined.** `bootstrapPlatformAdmin`'s returned report gains an optional `adminGrantRowsExamined`, counted by row identity across both legs, on every return the guard reaches. A guard that had seen the whole population and one that had seen a truncated slice of it previously returned byte-identical payloads.
+  - **The ordering is stated to the driver, and it is measured, not assumed.** `tryFind` answers `[]` when a query is refused, and on this guard `[]` reads as "no platform admin exists yet" — which promotes. An order this object could not serve would therefore be a silent relaxation, so `id` ascending was measured honoured through ObjectQL on both SQL driver families against the real declarations.
+  
+  Unchanged: an unscoped grant held by the seed identity `usr_system` still never counts, so a database where it was wrongly promoted stays self-healing on restart; the walled postures still mint no grant row and still point a legacy unscoped holder at the config path; and a genuinely fresh install still promotes exactly as before.
+- 9b9581b: First-boot platform-admin promotion under the `single` posture now CHOOSES its target instead of sampling one: the candidate read is ordered by the database, and an operator who declared an owner gets that owner — and only once that owner has verified the address.
+  
+  Before this change the selection read `sys_user` with **no `orderBy` and a cap of 50** and then sorted that array client-side, so "the oldest authenticable user" actually meant *the oldest authenticable user among whatever 50 rows the driver produced first*. Measured on 113 seeded users with the intended owner inserted first, holding the oldest `created_at` and an id that collates last: the in-memory driver returned it in row 1 and promoted it, while the default sqlite driver returned rows in id order, never saw it at all, and handed the unscoped `admin_full_access` grant — plus, through `claimSeedOwnership`, ownership of every seeded business record — to a seeded job-seeker persona. Same code, same config, same data; the answer changed with the storage driver.
+  
+  - **The read is ordered where the driver can see it.** `created_at` ascending with `id` as the tie-breaker (seeded populations routinely share one timestamp). There is deliberately no client-side re-sort left behind: one would re-rank the returned page and keep the guard passing if the ordering were ever lost again.
+  - **The declared owner is asked first, and must be a VERIFIED holder.** `OS_PLATFORM_OWNER_EMAIL` was imported into this file and read only on the walled branch, so a deployment that had said who its owner is could still have someone else promoted. Under `single` the target is now a row that holds a declared address, is human, can authenticate, and has `email_verified === true` — all four. Requiring verification rather than merely preferring it answers the one direction in which honouring the declaration would otherwise have been a widening: because `sys_user.email` is UNIQUE on the SQL family, an attacker who registers the declared address before the operator does would have been promoted with no way for the real owner to coexist, so an unverified holder is refused instead.
+  - **A declared owner who cannot sign in, or has not verified, REFUSES.** No silent fall-back to whoever happens to be oldest — that is the outcome this fixes. The pass warns, naming the variable, the address and which of the two is missing (`declared_owner_not_authenticable` / `declared_owner_not_verified`), and promotes nobody. **Accepted cost, stated rather than discovered:** a `single` deployment whose declared owner has not verified their email gets no platform admin at first boot until they do, loudly. Because the pass replays per sign-up while no admin exists, that warning re-emits on each replay until the owner is promotable; it is deliberately not latched, so the condition stays visible in the log a fresh operator is actually reading.
+  - **Verification landing is a replay trigger again.** `shouldReplayBootstrapFor` admits a `sys_user` update touching `email` / `email_verified` under `single` — but only while an owner is declared, which is the only configuration where such a write can change the answer. With none declared, the trigger set stays exactly as narrow as it was.
+  - **The cap is replaced, and never silent again.** A 200-row page with a 5000-row scan ceiling, walked oldest-first. Because the page is ordered it holds the rows the age rule actually wants, so truncation can only bite when every one of the oldest 5000 humans is non-authenticable — and reaching the ceiling now WARNS, naming the number examined.
+  - **The grant's log line records WHY and FROM HOW MANY.** `[security] first user promoted to platform admin: <email>` keeps its prefix and gains the basis (`declared-owner` / `oldest-authenticable`) and the candidate-pool size, repeated as `basis` / `candidatePoolSize` fields for structured sinks. The returned report carries `basis` too.
+  
+  Unchanged: no declaration still means first-user promotion by age (`single` keeps Choice 4A), and that leg has no verification requirement; a user nobody can authenticate as is still never promoted; an existing unscoped grant still short-circuits before any selection runs, so no deployment that already has an administrator can be re-pointed by this.
+- 2a79726: feat(plugin-security): a position row can no longer spell an ADR-0068 built-in identity name (#15972)
+  
+  `sys_position.name` and `sys_user_position.position` were unconstrained, so a tenant could mint a row spelling any framework-reserved built-in identity name — `platform_admin`, `org_owner`, `org_admin`, `org_member`. PR #15948 closed every in-repo READER that turned such a name into authority; it could not stop the row existing, and a reader is not an invariant: an out-of-repo consumer that reads the NAME instead of the capability rung reopens the hole with nothing mechanical to catch it.
+  
+  Both declarations now carry an object-level `validations[]` rule whose CEL list literal is **generated** from `BUILTIN_IDENTITY_NAMES`, the `@objectstack/spec` constant that declares the identities. The set is a closed enumeration — imported, never retyped, and never widened to an `org_*` pattern, so an ordinary tenant position named `org_manager` still writes. Object-level validations are evaluated by the engine on insert, by-id update and multi-row update, so the data API, the seeders and metadata import are all covered by one refusal carrying one code (`VALIDATION_FAILED`).
+  
+  Two doors, two shapes, for a reason:
+  
+  - **`sys_position`** exempts the platform's own catalog provenance (`managed_by` of `platform`, or its legacy `system` spelling). `bootstrapBuiltinRoles` seeds exactly these four names per organization on purpose, and that catalog is unaffected. A `package`- or tenant-authored row is refused.
+  - **`sys_user_position`** takes **no** exemption. No writer in any package creates an assignment row spelling a built-in identity name — `platform_admin` standing comes from the unscoped `admin_full_access` grant, the `org_*` trio from `sys_member.role` — so every such row is a name pretending to be an identity.
+  
+  Existing rows are not migrated and nothing rewrites them (maintainer ruling: refuse new writes only). The rule is an INVARIANT, so a row that already spells a reserved name is refused on any edit until it is renamed — frozen, not bricked. `scripts/measure-reserved-identity-name-census.mjs` is the read-only census that reports such rows from an operator-supplied export.
+  
+  Housekeeping this change drags along, disclosed because a reviewer should not have to discover it: a validation rule's `name` is snake_case by contract, and `scripts/tenant-audit-census.mjs` counts every snake_case `name:` literal in a `*.object.ts` as a "declared object" (it already counts the four `actions[]` names on `sys_position`, so that figure was never a count of objects). The two new rule names move it 298 → 300, so the census artefacts are regenerated with the script's own `--write`. That block regenerates **whole**, so it also refreshes two figures this diff did not cause — `tracked non-test sources scanned` 557 → 562 and `engine-shaped types recognised` 59 → 58 — which are drift accumulated since the block was last measured at `9cefca9a3`.
+- 7026141: fix(plugin-security)!: an RLS predicate naming an undeclared column now denies in EVERY position and polarity, on the read face and the write face alike (#17042)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) an enforcement change with no authorable surface behind it: no Zod schema, no metadata key, no spelling and no stored representation moves, so a stored `sys_permission_set` row needs no conversion and `objectstack migrate meta` has nothing to rewrite. What changes is whether an existing predicate is ENFORCED or silently dropped; the remedy for a newly-denied policy is to correct the column name in the policy, which is authoring, not migration — and the authoring-time detector for exactly that mistake is already shipped in `@objectstack/lint`. -->
+  
+  **BREAKING** — a fail-open-to-fail-closed narrowing on row-level security. A policy that widened yesterday denies today. Shipped as `minor` under the launch-window convention, the same grading the insert-side `check` post-image narrowing used.
+  
+  A predicate naming a column the object does **not declare** could not narrow, and in a **negation-carrying position** it did not deny either — it **widened** the policy to every row inside the tenant wall, and on the write path it **permitted** the write the policy was authored to refuse.
+  
+  ⛔ It is **not** a cross-tenant leak. Tenancy is a separate layer and it holds. What was defeated is the narrowing the policy author wrote *inside* the wall — an owner-only or private-record policy silently becoming "every row".
+  
+  Two independent sites, each with its own reason, each measured against the same two controls (a real column must still narrow; the *same* phantom column in a **positive** position must still refuse):
+  
+  - **Read face.** `extractTargetField` is a **leading-only** `==` / `=` / `in` shape match, so `nope != "x"`, `!(nope == 1)`, `!(nope in ['a'])` and any arm after the first returned `null`; the policy was **kept**, the drop counter never incremented and the deny sentinel never armed. The kept filter then met the settled include-direction ruling — a row that *has* no such column satisfies "column != x". Measured on the matcher: **3 of 3** rows for each negated shape, against **1 of 3** for the real narrowing and **0 of 3** for the same phantom column in a positive position.
+  - **Write face — the worse one.** `computeWriteCheckFilter` compiled `check` clauses with **no field-existence check at all**, and the ADR-0058 D4 post-image gate evaluates that filter in-process. Measured end to end on both SQL drivers: every negated phantom **permitted** the insert, in both post-image polarities, while a positive phantom refused (by accident of an absent value comparing unequal) — which is why a suite that only ever exercised the positive shape stayed green over the hole.
+  
+  **The repair is one seam, not two.** `RLSCompiler.compileFilter` — the single choke point both the read layer and the write gate already pass through — now takes the object's declared-column set and judges every column the policy names on the **compiled** `FilterCondition` tree. That is positional-agnostic by construction: the pushdown compiler lowers `!` to `$not`, `||` to `$or` and `&&` to `$and`, so a column lands as a plain object key whatever position it was authored in, and there is no spelling of negation left for a shape match to miss. Widening the regex instead was rejected: a matcher that must enumerate every spelling of negation is the same "recognises only what it was told about" defect one level over, and it would additionally have broken the ADR-0095 carve-out that *depends* on the regex recognising only the leading shape. A policy dropped this way joins the existing fail-closed path — same deny sentinel, same WARN line — rather than growing a parallel mechanism.
+  
+  ⛔ **The matcher's include-direction ruling is untouched.** A row lacking a column *does* satisfy "column != x" for an ordinary user query, and re-semanticing every filter in the repo to fix one caller is not the trade. The defect was that a policy compiler lowered an undeclared column into a filter at all; the matcher now never sees a phantom, and a regression test pins the raw matcher still answering 3 of 3 for the same filter so a later reader can see which half moved.
+  
+  **Who is affected.** Only a permission set carrying an RLS policy whose predicate names a column its object does not declare — an authoring mistake `@objectstack/lint` already reports on all of these shapes. For such a policy the object now returns **zero rows** for every holder of the set (read) and refuses every governed insert / update (write), where before a negated spelling returned everything and permitted everything. ⚠️ **An installation relying on such a policy to grant access will lose that access at the upgrade, and that is the intended direction**: what it was "granting" was the absence of enforcement. Correct the column name; the linter names the miss and offers the object's real field list.
+  
+  **driver-sql, previously unmeasured, is now measured, and it refines the picture.** On the **read** face `driver-sql` and `driver-sqlite-wasm` never widened — they failed closed by **raising** `INVALID_FILTER` / 400 when the phantom column reached the statement builder, so the read-face defect was driver-dependent (in-process matchers widened; SQL raised). On the **write** face they failed open exactly like every other driver, because the `check` is evaluated in-process and never reaches SQL. After this change both faces answer uniformly on both drivers. `driver-mongodb` remains inferred from the shared ruling rather than measured.
+  
+  `@objectstack/lint`'s diagnostic for this miss is corrected in the same change. Its **detection is unchanged** — all the negated shapes were already reported. Its consequence text was stale in one half and misattributed in the other: it described the field miss as having two directions decided by position, and it credited the write leg's fail-closed to a safety net that path never had. It now states one direction for both clauses, and records the older runtime's fail-open write behaviour explicitly so an operator reading it against a deployment that predates this guard is not told the wrong thing.
+
+### Patch Changes
+
+- fb7d75f: Tell a read that DID NOT ANSWER apart from a read that answered NOTHING at two boot-reconciler seams, so a transient storage fault can no longer withdraw a standing org-admin grant or report an unreadable catalog as an already-canonical one (#15840).
+  
+  `reconcileOrgAdminGrant`'s `sys_member` read swallowed a fault into `[]`, and `[]` is what that function reads as "this user is not an admin of this organization" — the input to a DELETE. One transient read fault therefore revoked a sitting admin's standing grant, and the store kept it withdrawn after the fault cleared; only a `debug` line separated that run from a healthy one. That read now reports at `error` and returns `{ action: 'skipped', reason: 'membership_unreadable' }`, performing no write at all for the pair: nothing is granted, so nothing widens, and nothing standing is destroyed. The next `sys_member` write and the `kernel:ready` backfill ask again.
+  
+  `normalizeManagedByVocab` swallowed a catalog read fault into `[]` too, so an unreadable catalog and an already-canonical one were byte-identical on both channels — the same `{ positions: 0, permissionSets: 0 }` and zero log lines at any level — while the row that needed healing stayed legacy. A read that does not answer now reports at `error` and refuses the pass instead of attesting counts it could not read. The refusal aborts at the first un-answered read, so it is one line per refused boot rather than the four the report-and-continue shape measured. Its only production consumer already declared the handling: the `kernel:ready` bootstrap catches it, reports it at `warn` as non-fatal, and boot proceeds.
+  
+  ⭐ Per-site, not a sweep. A genuine EMPTY read keeps today's behaviour EXACTLY at both seams — a demotion with no membership row still revokes, a membership still grants, an already-canonical catalog still answers `{ positions: 0, permissionSets: 0 }` in silence. `claim-seed-ownership.ts` is untouched: its fault already propagates to a per-predicate handler that reports at `warn` and names the consequence, which is the right disposition already. The plugin's other reads keep their existing best-effort contract, where an unanswered read costs a grant that is not created rather than one that is destroyed.
+  
+  No exported symbol, published payload key or spec path changes: `action: 'skipped'` is already in the returned union, `reason` is already free text, and the two logger option types gain an optional `error` method a caller may omit. Healthy-path behaviour is byte-identical; only the fault path moves.
+- 470746a: fix(security): resolve `current_user.accessible_org_ids` into the RLS variable bag (#16518)
+  
+  `patch` — a bug fix in a released package. No API signature changes, no exported
+  symbol added, no spec or ADR edit: the contract already promised this, and only
+  the line that delivers it was missing.
+  
+  ## What was wrong
+  
+  `packages/spec/src/contracts/rls-membership-resolver.ts` does not merely reserve
+  the name `accessible_org_ids`. It declares the field's SHAPE (`:53`,
+  `accessible_org_ids?: string[]`), states at `:35` that the key is CORE-resolved
+  and not an app resolver, and lists it at `:70` in
+  `RESERVED_RLS_MEMBERSHIP_KEYS` — so an app's membership resolver is refused when
+  it tries to supply the set itself. `ExecutionContext.accessible_org_ids` goes
+  further and names the RLS spelling outright: *"RLS policies may reference it as
+  `organization_id IN (current_user.accessible_org_ids)`"*.
+  
+  `RLSUserContext` declared `id`, `organization_id`, `positions`, `org_user_ids`
+  and `email`, and nothing copied `accessible_org_ids` out of the execution
+  context. So the key was reserved on the grounds that core resolves it, and core
+  did not resolve it — a slot with a declared shape and no filler, which is the
+  ADR-0049 "declared but unenforced" shape.
+  
+  **The cost is the invisible one.** A predicate such as
+  `employer_org IN (current_user.accessible_org_ids)` compiled to an unresolved
+  variable, every applicable policy dropped out, and `RLS_DENY_FILTER` returned
+  **zero rows with no error raised**. Nothing failed. An empty list is
+  indistinguishable from "this user really has no data", which is how the shape
+  survived three green static gates and, in the reporting app, left ten policies
+  across six objects inert — the entire multi-tenant isolation model.
+  
+  The failure direction is **closed**: zero rows, never a cross-tenant read. This
+  is a usability and declared-means-enforced defect on a security surface, not a
+  leak.
+  
+  ## What it does now
+  
+  `RLSCompiler.compileFilter` copies `ExecutionContext.accessible_org_ids` into
+  `RLSUserContext`, following `org_user_ids`' precedent exactly — both are
+  core-resolved membership sets the runtime **pre-resolves**, precisely so this
+  compiler never has to issue a subquery. The compiler is unchanged otherwise; it
+  already handled the value correctly once present.
+  
+  The producer already existed and is unconditional: `resolve-authz-context.ts`
+  types the set as required and `assemble-execution-context.ts` copies it on every
+  face, in every posture (*"in `single` posture the set is resolved but no wall
+  consumes it"*). Only the consuming line was missing.
+  
+  One consequence worth naming: **reserved now means reserved at the compiler
+  too.** `stageRlsMembership` screens reserved keys out of a *resolver's* answer,
+  but a bag already present on the context was spread through unscreened, and
+  landed in the variable bag because nothing named the field. Now that the kernel
+  names it, the compiler's own "a membership key never clobbers a named field"
+  rule covers it and the kernel's value wins.
+  
+  ## Measured, end to end
+  
+  A rig on real drivers (`driver-sql`, `driver-sqlite-wasm`), six rows across
+  three organizations, a caller holding membership in two of them:
+  
+  | predicate | before | after |
+  |:--|--:|--:|
+  | `employer_org IN (current_user.accessible_org_ids)` | **0 of 6** | **4 of 6** — the rows of both orgs |
+  | same, caller scoped to ONE org | 0 of 6 | 2 of 6 — that org only |
+  | same, caller with no set / an empty set / an org with no rows | 0 of 6 | 0 of 6 — unchanged, still fails closed |
+  | a predicate naming a NON-EXISTENT variable | 0 of 6 | 0 of 6 — unchanged (#16119's face, untouched) |
+  | `org_user_ids`, `organization_id`, `email`, `id`, an app membership key | — | byte-identical |
+  
+  An app **could** work around the defect by supplying the same set under its own
+  unreserved key through `rlsMembership` and rewriting its predicates to
+  `current_user.my_org_ids`; that reads 4 of 6 on the same rig, before and after.
+  The workaround costs every app a membership-resolver registration it should not
+  need and moves every predicate off the documented spelling — and it is no longer
+  necessary.
+- ac24458: security(rls): the RLS compiler refuses `RESERVED_RLS_MEMBERSHIP_KEYS` by name
+  
+  A caller-supplied `ExecutionContext.rlsMembership` entry could supply a RESERVED
+  kernel key — `id`, `organization_id`, `positions`, `org_user_ids`,
+  `accessible_org_ids`, `email` — whenever the kernel had not resolved a value for
+  that key on the request. `RLSCompiler.compileFilter` admitted a membership key on
+  the test `userCtx[key] === undefined` ("did the kernel happen to resolve one"),
+  not on whether the key is reserved, so an absent kernel value handed the name to
+  the bag.
+  
+  The direction was widening. With the key unresolved, the predicate referencing it
+  fails CLOSED — it joins the dropped-policy path and the compile returns the deny
+  sentinel, which yields zero rows. The bag instead produced a satisfiable filter
+  over caller-chosen values, converting a denial into a match.
+  
+  The merge now refuses reserved keys by name, at the one seam both faces pass
+  through (the read layer compiles `using` there, the ADR-0058 D4 write gate
+  compiles `check` there). `stageRlsMembership`'s existing screen covers only the
+  registered resolver's answer, and only when a resolver is registered at all — it
+  returns at its first line otherwise — so it could not carry this guarantee.
+  
+  No behaviour change for non-reserved membership keys, and none when the kernel
+  did resolve the reserved value: the kernel's value already won, and still does.
+  A refused key simply stays unresolved, so its policies drop out and fail closed
+  through the reason vocabulary that already exists.
+- Updated dependencies [7f62536]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [245f360]
+- Updated dependencies [324968e]
+- Updated dependencies [fe71032]
+- Updated dependencies [482d34d]
+- Updated dependencies [305e7fc]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [9c577c1]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [baf9745]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [6548118]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [48203ff]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [de62769]
+- Updated dependencies [c9eb773]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [dfeba25]
+- Updated dependencies [0a88a80]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [e7ff9c2]
+- Updated dependencies [758ac40]
+- Updated dependencies [c744c0a]
+- Updated dependencies [134b410]
+- Updated dependencies [4c42fd1]
+- Updated dependencies [5f392f0]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [f03f6c7]
+- Updated dependencies [cf79182]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [c3ebe4a]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [2bed4c3]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [71629a1]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [288fe9c]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [6e3462d]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [cca1dc0]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5a95b0e]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [de1a611]
+- Updated dependencies [db76982]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [ab450f4]
+- Updated dependencies [025588a]
+- Updated dependencies [5505646]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [4215417]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/types@17.5.0
+  - @objectstack/spec@17.5.0
+  - @objectstack/platform-objects@17.5.0
+  - @objectstack/core@17.5.0
+  - @objectstack/formula@17.5.0
+  - @objectstack/metadata-core@17.5.0
+
 ## 17.4.0
 
 ### Minor Changes

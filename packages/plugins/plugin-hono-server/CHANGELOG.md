@@ -1,5 +1,232 @@
 # @objectstack/plugin-hono-server
 
+## 17.5.0
+
+### Minor Changes
+
+- 89a652b: feat(cli): `objectstack dev --cert <path> --key <path>` terminates TLS in the dev process, and the canonical origin follows the listener (#16804)
+  
+  An interactive MCP client refuses to start an OAuth sign-in against a non-TLS
+  URL, so the self-serve identity path the product advertises — "interactive
+  clients just open a browser login" — could not be exercised against a local dev
+  server at all. The only way round it was a hand-built https reverse proxy plus
+  `OS_AUTH_URL`, a page of setup that every developer, demo and video recording
+  repeated off-camera.
+  
+  **Bring your own certificate.** Nothing here generates one, and nothing here —
+  not the code, not `--help`, not any doc page — says anything about installing a
+  certificate into a system trust store. 「⛔ 不生成自签 CA；⛔ 不打印、不文档化任何
+  「把 CA 装进系统信任库」的指引——信任库是开发者自己的事」. The trust store is the
+  developer's own business; this feature's whole job is to *use* the certificate
+  they already have.
+  
+  ```bash
+  objectstack dev --cert ./localhost.pem --key ./localhost-key.pem
+  ```
+  
+  Both flags are required together — half a pair is refused by name — and an
+  unreadable file is refused rather than degraded to a plain-http listener.
+  
+  **What follows the listener.** With both flags given, everything this boot
+  advertises is `https://localhost:<port>`: the two `/.well-known/*` discovery
+  documents, the CSRF allow-list, the ready banner's `API:` / `MCP:` rows, the
+  `🤖 MCP server` connect hint, and the runtime state file the `os dev` parent and
+  external supervisors dial. Only the built-in default at the end of the base-URL
+  chain moves — `OS_AUTH_URL`, `BETTER_AUTH_URL` and `OS_BASE_URL` keep winning,
+  an `http://` value included, because they name where a deployment is *reached*
+  rather than what this process *bound*.
+  
+  **Without the flags nothing changes**, byte for byte — pinned by ablation legs
+  rather than asserted.
+  
+  `@objectstack/plugin-hono-server` gains the option this is built on:
+  `HonoPluginOptions.tls` (`{ cert, key }` PEM bytes) makes the adapter bind a TLS
+  listener with the same fetch handler, the same route table and the same graceful
+  drain. Absent, the listener is plain http exactly as before.
+- cefe068: fix(plugin-hono-server): an escaped throw that declares an ADR-0112 envelope is answered as that envelope, not as a bare `500 INTERNAL_ERROR "No response from handler"` (#16545)
+  
+  `HonoHttpServer.wrap()` is the seam **every direct-mount route passes** — `get` /
+  `post` / `put` / `delete` / `patch` each register `this.wrap(handler)`, and
+  `IHttpServer` is how `service-datasource`, `packages/rest` and the dispatcher
+  bridge all mount. Until now a throw that escaped a route handler was answered
+  there as `500 { code: 'INTERNAL_ERROR', message: 'No response from handler' }`,
+  with the thrown value discarded — so a producer that had *declared* its refusal
+  lost both halves of the declaration on the way to the caller.
+  
+  The measured case: `service-datasource`'s `requireDatasourceAdmin` re-raises
+  `AuthzStoreUnavailableError` (declared `status: 503`, declared `code:
+  SERVICE_UNAVAILABLE`) when the authorization store cannot be read — deliberately,
+  per the #13279 ruling that an unreadable store licenses no verdict. The operator's
+  outage reached the caller as a generic fault naming the wrong component: the
+  declared code never arrived, and the message said "No response from handler".
+  
+  **What changed.** An escaped throw carrying **both** a declared ADR-0112 status
+  (a key of `HttpStatusErrorCodeMap`) **and** a code registered in `ErrorCode`
+  (`StandardErrorCode` ∪ `ERROR_CODE_LEDGER`) is now rendered as that envelope,
+  with the producer's `details` and `userMessage` channels forwarded. The status
+  and code are read through `resolveThrownHttpError` — the one rule the REST
+  registrar and the dispatcher already share — so this seam agrees with the other
+  doors by construction rather than by a second ladder.
+  
+  **What did NOT change**, pinned in the same PR:
+  
+  - an escaped throw that is **not** such an envelope answers exactly the bytes it
+    answered before — 500, no cause in the body. A partial declaration (status but
+    no code, code but no status), an unregistered code, and a status ADR-0112 does
+    not declare all take that arm;
+  - a handler that simply wrote nothing is untouched;
+  - a handler that **wrote and then threw** keeps what it wrote;
+  - the `notFound` fallback seam still answers `Fallback handler failed` — a
+    fallback that threw is a broken consumer, not a refusal it declared;
+  - ⛔ no error code is minted and no ledger row is added. A code on this path that
+    is not registered is a ledger gap under the #16404 ruling, and takes the
+    unchanged 500 arm rather than being registered in passing.
+  
+  The 5xx disclosure filter every door emitting a thrown message already runs
+  (`looksLikeInternalErrorLeak`, #3867 / #8086) is applied here from this seam's
+  first day: a driver dump on a declared 5xx is withheld, where the old bare 500
+  disclosed nothing at all. The escaped-throw diagnosis (#5848) still fires exactly
+  once at `error`, and now names the answer that was really sent instead of
+  claiming an opaque 500.
+  
+  ⚠️ **Known-unreached door, stated rather than left silent.** A route mounted
+  through `getRawApp()` funnels through neither `wrap()` nor any registrar wrapper,
+  so it is **not** repaired by this change and still answers a non-envelope
+  `text/plain` 500. That is out of this card's scope by the `domain:cli` seat's
+  ruling and is filed separately.
+
+### Patch Changes
+
+- ca31ff6: Take the fix for the fifteen OSV advisories that turned `Validate Package Dependencies` red on every PR.
+  
+  The advisory database moved; the lockfile did not. `origin/main`'s `pnpm-lock.yaml` is byte-identical to the tree that scanned GREEN the day before and RED the day after, so this is a repo-wide condition rather than any PR's regression, and every one of the fifteen names a published fix version — the take-the-fix path `osv-scanner.toml`'s header describes, not the exemption path. That ledger keeps its zero entries and is untouched here, as is `.github/workflows/validate-deps.yml`.
+  
+  Two published packages change what a downstream install resolves, which is what this changeset grades:
+  
+  - **`@objectstack/plugin-email`** declares `nodemailer` `^9.1.1` (was `^9.0.5`), clearing GHSA-2x7j-588g-ccc2 (7.5), GHSA-cc9r-2j5m-2m83 (6.5), GHSA-wmmp-3585-3rmp (6.5) — all fixed in 9.1.0 — and GHSA-8m3c-c648-2xjj (5.9), fixed in 9.1.1. The range takes the higher of the two fix lines so one floor covers all four. The 10.x major is deliberately not taken.
+  - **`@objectstack/plugin-hono-server`** declares `hono` `^4.13.5` (was `^4.13.2`), clearing GHSA-crvj-82cr-hjcx (5.9), GHSA-g6gw-c38x-mqfc (5.3) and GHSA-gqvv-2mrq-wpjv (6.5).
+  
+  No exported symbol, payload key or accept/reject behaviour of ours moves — the published surface is unchanged and both grade `patch`.
+  
+  The rest of the sweep releases nothing and is named here only so the set is readable in one place: the `sharp` override target lifts to `^0.35.4` (GHSA-rgj7-g3m4-5g8c, 8.9) and the `hono` override target to `^4.13.5`, both target-only lifts whose selectors already sit at the compatibility boundary; the private docs app takes `next` 16.3.3 (GHSA-2xp9-vwfh-vxw4 9.5 and GHSA-p293-qw3h-jr36 9.0, the two Criticals); and the `vitest` devDependency line takes 4.1.11 across the workspace, with `@vitest/coverage-v8` moved in lockstep because its peer on `vitest` is exact (GHSA-82fw-gwwq-j7x9, 5.9, which flagged both `vitest` and `@vitest/mocker`).
+  
+  `hono` was flagged at TWO resolved versions and both are gone: the override lift is what collapses them. The transitive copy `@modelcontextprotocol/sdk` pulled sat exactly on the old `^4.12.34` floor and so was never re-resolved, while our own three declarations floated up to 4.13.2; `^4.13.5` excludes the floor, both edges re-resolve, and the tree now holds one `hono`. A bump that moved only our declarations would have left the transitive copy flagged and the gate red.
+- 0ced0aa: **`getRawApp()` mounts now answer an escaped throw with the declared ADR-0112 envelope.** A route mounted on the Hono handle funnels through neither the adapter's `wrap()` nor any registrar wrapper, so an escaped throw was answered by Hono's own default handler — `500 text/plain "Internal Server Error"`, no `success` flag, no `code`, and the thrown value's own declared `status` / `code` discarded. A transport error seam on the raw handle now renders the same throw-to-envelope rule a direct-mount route already used, so both doors answer one shape: a throw declaring `503` / `SERVICE_UNAVAILABLE` answers `503 application/json` with `{"success":false,"error":{"code":"SERVICE_UNAVAILABLE",…}}`, and a throw declaring no envelope still answers `500` with no cause in the body.
+  
+  The escape hatch is unchanged: consumers still mount framework-natively, still stay outside `getMountedRoutes()`, and still need no adapter verb. A thrown value carrying its own `Response` (Hono's `HTTPException`) keeps the response it declared. A consumer that installs its own `getRawApp().onError(...)` replaces the seam.
+  
+  Also fixed alongside it: `afterResponse` observers — and therefore `http_requests_total{status}` — reported a hard-coded `500` for any request that ended in a throw, which stops being the status actually sent once a declared envelope is rendered.
+- Updated dependencies [7f62536]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [245f360]
+- Updated dependencies [324968e]
+- Updated dependencies [fe71032]
+- Updated dependencies [482d34d]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [baf9745]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [6548118]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [48203ff]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [c9eb773]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [dfeba25]
+- Updated dependencies [0a88a80]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [e7ff9c2]
+- Updated dependencies [758ac40]
+- Updated dependencies [134b410]
+- Updated dependencies [4c42fd1]
+- Updated dependencies [5f392f0]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [f03f6c7]
+- Updated dependencies [cf79182]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [c3ebe4a]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [71629a1]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [288fe9c]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [6e3462d]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5a95b0e]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [de1a611]
+- Updated dependencies [db76982]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [ab450f4]
+- Updated dependencies [025588a]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/types@17.5.0
+  - @objectstack/spec@17.5.0
+  - @objectstack/core@17.5.0
+  - @objectstack/observability@17.5.0
+
 ## 17.4.0
 
 ### Minor Changes

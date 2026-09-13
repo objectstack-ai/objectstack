@@ -1,5 +1,896 @@
 # Changelog — @objectstack/service-analytics
 
+## 17.5.0
+
+### Minor Changes
+
+- e526556: fix(service-analytics): a `min`/`max` over a `formula` field is typed from the formula's declared `returnType`, not described as `number` (#16236)
+  
+  **Behaviour change — read this if any dataset measure aggregates a `formula`
+  field.** `AnalyticsResult.fields[].type` for such a measure column was always
+  `number`, whatever the formula computes. It is now translated from the field's
+  declared `FieldSchema.returnType`:
+  
+  ```
+  FROM  {"rows":[{"first_label":"alpha","latest_due":"2026-06-01"}],
+         "fields":[{"name":"first_label","type":"number"},
+                   {"name":"latest_due","type":"number"}]}
+  
+  TO    {"rows":[{"first_label":"alpha","latest_due":"2026-06-01"}],
+         "fields":[{"name":"first_label","type":"string"},
+                   {"name":"latest_due","type":"time"}]}
+  ```
+  
+  Both values were strings; both descriptors said `number`, so a renderer that
+  branches on the declared type never reached its textual or temporal branch.
+  
+  **The mapping is a TRANSLATION, not a pass-through.** `returnType` speaks the
+  authoring vocabulary (`number` / `text` / `boolean` / `date`);
+  `fields[].type` speaks `DimensionType` (`string` / `number` / `boolean` /
+  `time` / `geo`). Two of the four words do not exist on the wire at all:
+  
+  | declared `returnType` | `fields[].type` |
+  |:---|:---|
+  | `text` | `string` |
+  | `date` | `time` |
+  | `number` | unchanged — the producer's `number` is already correct |
+  | `boolean` | unchanged — three readings disagree on what `min`/`max` over a boolean returns |
+  
+  **A formula with no `returnType` is unchanged.** The key is optional — "absent
+  when the type can't be proven (an ambiguous/`dyn` expression)" — and an
+  unproven formula's measure column keeps the `number` it had. The absence is not
+  read as an answer. That tier is written down as a row in `measureResultType`'s
+  own table rather than left as an implied code path, and so is the treatment of
+  a word outside the declared four: left alone, never guessed at.
+  
+  **For hosts wiring `AnalyticsService` directly.** `AnalyticsServiceConfig`'s
+  `sourceFieldMeta` hook gains an optional fourth member on its return —
+  `returnType?: string` beside `type` / `defaultCurrency` / `max`. Additive: a
+  host that returns the three-member shape still satisfies the contract and gets
+  exactly today's behaviour for every column. `AnalyticsServicePlugin` relays the
+  key automatically, so a host on the plugin needs no change at all.
+- 0da638c: fix(analytics)!: every analytics face lowers the closed `dateRange` preset vocabulary to one window and refuses the rest with `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` (#16322)
+  
+  <!-- adr-0087: not-required (already-registered analytics-time-dimension-date-range-vocabulary-closed) the driver half of #16041 implements the migration that card registered; the accept set narrowed at the contract there, and the prescription an author needs is that entry's, unchanged -->
+  
+  **BREAKING** for an in-process caller that reaches an analytics face PAST the
+  schema door with a string the closed vocabulary does not contain: it used to be
+  answered, and is now refused. Shipped as `minor` under the repo's launch-window
+  convention. The driver half of #16041, whose spec change closed
+  `AnalyticsQuery.timeDimensions[].dateRange`'s string arm to the thirteen
+  dashboard preset names; every value affected here was already refused at
+  `POST /analytics/query` and `/analytics/sql` when that landed.
+  
+  ## What was wrong
+  
+  #16041 closed the contract; the faces behind it never aligned, so the defect it
+  abolished simply moved onto the newly-blessed vocabulary. Measured on the built
+  `driver-memory` dist over five probe rows (2020, 2026-08-31, 2026-09-05, now,
+  2099):
+  
+  | input | before | after |
+  |:--|--:|--:|
+  | `today` | 1/5 | 1/5 |
+  | the other twelve declared presets | **5/5 — 2020 and 2099 included** | a real window each |
+  | `'not a range at all'`, `'Last 7 Days'` | 5/5 | `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` |
+  
+  `driver-memory` recognised exactly `today`: every snake_case preset missed its
+  `startsWith('last ')` branch and fell to a `[range, range]` pseudo-window whose
+  two bounds were the preset's own NAME, which matched every `Date`-typed row
+  under BSON cross-type ordering. Both `service-analytics` SQL strategies lowered
+  the same names — and unrecognised strings, and `today` — to the point window
+  `created_at >= 'last_30_days' AND created_at <= 'last_30_days'`, whose answer is
+  whatever the dialect decides a vocabulary word compares as. So a dashboard
+  asking for one month got all of history on one backend and a nonsense
+  comparison on the other, at HTTP 200 on both.
+  
+  ## What it does now
+  
+  - **One lowering, in `@objectstack/core`.** `resolveAnalyticsDateRangePreset` /
+    `resolveAnalyticsDateRangeString` resolve every declared preset to
+    `{ start, end, endExclusive }`. The window is a pair of `{date-macro}` tokens
+    handed to the existing macro resolver, so `dateRange: 'this_month'` and a
+    `{month_start}` filter token cannot answer differently, and the anchoring on
+    `AnalyticsQuery.timezone` (#16042) plus the one-calendar arithmetic (#15825)
+    come from that resolver rather than from each face.
+  - **One refusal.** `analyticsDateRangeUnrecognizedError` stamps the ADR-0112
+    envelope `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` with the spec's own
+    `analyticsDateRangeRefusalMessage` wording — the same sentence the schema door
+    answers with. `driver-memory`, both SQL strategies and the draft-preview evaluator call
+    it, so "memory and SQL refuse identically" is one function rather than an
+    agreement.
+  - **The upper bound keeps #16179's separation.** A window a face RESOLVED is
+    compared exclusively (`$lt` / `<`) for the ten calendar presets and
+    inclusively for the three rolling `last_N_days`, whose bound is NOW; an
+    explicit `[a, b]` a CALLER wrote is untouched and keeps `$lte`.
+  - The fifteen `driver-memory` date-range pins #16041 retired are reinstated in
+    preset form (DST cells re-measured under calendar semantics, not re-spelled),
+    and one cross-face conformance fixture holds all FOUR faces to the same
+    windows and the same refusal.
+  - **The draft-preview evaluator is the fourth face**, and it is in that fixture
+    for the same reason the other three are. `preview-evaluator.ts` (ADR-0037 P3 —
+    the Live Canvas preview over a pending seed draft) carried the identical
+    `[range, range]` fallback, so a valid `last_30_days` selected NOTHING there,
+    silently, while the published chart beside it answered a real window — across
+    a publish boundary the preview exists to make continuous, since publish
+    materialises the same seed.
+  
+  ## FROM → TO
+  
+  Unchanged from #16041's — the spelling that is refused here is the spelling that
+  was already refused at the door.
+  
+  | you wrote | write instead |
+  |:--|:--|
+  | `dateRange: 'Last 7 days'` / `'last 7 days'` | `dateRange: 'last_7_days'` |
+  | `dateRange: 'last 3 months'` | `dateRange: 'last_90_days'`, or an explicit `['{90_days_ago}', '{today}']` |
+  | `dateRange: '2026-01-20'` (the SQL single-day dialect) | `dateRange: ['2026-01-20', '2026-01-20']` |
+  | `dateRange: ['2026-01-01', '2026-01-31']` | unchanged |
+  
+  The `@objectstack/spec` entry is a `PROVENANCE_WAIVERS` row only: the refusal's
+  code stays registered under `@objectstack/runtime` (the door that names the wire
+  vocabulary), and the waiver records that the shared constructor spelling it
+  lives one package over.
+- 041d9fd: fix(service-analytics)!: `POST /analytics/dataset/query` asks the OBJECT-level read grant before it serves an inline dataset (#16645)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is renamed, retired or re-typed: no `packages/spec` key changes its name, its type or its optionality, no stored shape moves, and every dataset, dashboard and analytics request body parses byte-identically to before — so `objectstack migrate meta` has nothing to rewrite and this changeset carries no rewrite instructions. What narrows is the ACCEPT SET of a published route at REQUEST time: `POST /analytics/dataset/query` (and the `/analytics/query` and `/analytics/sql` doors) now refuse a caller who holds no object-level read grant on an object the request reads, which is the same verdict `GET /data/<object>` already returns for that caller on that deployment. The remedy for a caller who is refused is a GRANT, held in permission-set data rather than in an authored file: the deployment gives the principal read on the object, exactly as it must today to use `/data`. There is no authored artifact and no stored representation for a migration to act on, and the additions to the contract are additive (a new OPTIONAL `ISecurityService.canReadObject`, new optional keys on three option payloads), which is a widening rather than a retirement. -->
+  
+  **BREAKING** in the accept-set sense — an accept-set narrowing on a published
+  route — landing in the launch window as `minor` on all four packages (the
+  lockstep convention: during the window the bump level is not the carrier, this
+  banner and the disposition above are). Nothing that was already admitted
+  becomes refused **except** the requests `GET /data/<object>` refuses today for
+  the same principal, which is the defect. Nothing that was refused becomes
+  admitted.
+  
+  `POST /analytics/dataset/query` now asks the OBJECT-level read grant before it serves an inline dataset, so the analytics door and `GET /data/<object>` reach one admission verdict on every driver.
+  
+  The route accepts an inline dataset definition (`body.dataset`) from any authenticated caller. On a SQL driver the compiled statement ran through the driver's raw `execute()`, which is documented as a tenant-isolation bypass and which no middleware sits in front of — so the request reached the database having passed exactly ONE of the three read layers (the row scope, threaded since ADR-0021 D-C). A caller with **no grant of any kind** on an object received its row count, and with `dimensions` its grouped counts by any column, where the `/data` door answered `403 PERMISSION_DENIED` for the same principal on the same deployment. On the memory driver the identical request fell through to the ObjectQL engine, which applies all three layers in one place, and was refused. The exposure is not opt-in and an application cannot decline it: a deployment shipping 0 datasets and 0 dashboards has the identical surface, because the reachable slot is the inline definition rather than a declared one.
+  
+  **This change NARROWS what the analytics doors accept.** Requests that were already refused by `/data` are now refused by analytics too; nothing that was refused becomes admitted. "Fails closed" is a statement about a WIRED provider: a deployment with no `security` service registered keeps its previous analytics behaviour by design, because on that deployment `/data` carries no object-level gate either and the equivalence is what is being defended.
+  
+  - **`ISecurityService.canReadObject(object, context)`** (`@objectstack/spec`, optional) — the object-level half of a read, the sibling of `getReadFilter`'s row-level half. It exists because the two are not interchangeable: `getReadFilter` answers "which rows" and answers `undefined` — "no row restriction" — for a caller who may not read the object at all, so a door holding only the filter reads a caller with NO grant as a caller with NO restriction. Fails CLOSED. Absence is a defined state and its fallback is **not** "admit": a consumer composes the same verdict from `explain`, which is not optional.
+  - **`@objectstack/plugin-security` implements it** as the middleware's own read gate, arm for arm and in its order — the `isSystem` bypass, the "no permission sets resolved" skip, the #3545 fail-closed refusal on an unresolvable object posture, the ADR-0066 D3 `requiredPermissions` capability AND-gate, the `allowRead` CRUD grant, and the ADR-0090 D10 delegator intersection — from the same primitives the middleware calls, and it is exposed on the registered `security` service.
+  - **`@objectstack/service-analytics` asks it once at the door**, for the base object and every joined object, **ahead of strategy selection**. Placement is the fix: two strategies each enforcing their own copy of three layers is the CAUSE of the divergence, not its remedy, so both strategies — and any strategy added later — inherit one verdict by construction. `AnalyticsServicePlugin` auto-bridges the new `admitObjectRead` hook to the `security` service (`canReadObject`, falling back to `explain`), the same way it already bridges `getReadScope`, and warns loudly at init when no security service is registered. The bridge tells three resolutions apart: an ABSENT `security` service admits (that deployment has no object-level gate on `/data` either, so the two doors still agree, and this is what keeps a deployment shipping no `plugin-security` working as before); a service that cannot be USED — resolving it throws, or it exposes neither `canReadObject` nor `explain` — DENIES and reports at `error`, because `/data`'s middleware does not fall open in those states.
+  - **`@objectstack/verify`** gains `bootStack(app, { databaseDriver: 'sqlite-wasm' | 'memory' })`, because a two-driver equivalence property cannot be measured on one driver — which is how the strategies were allowed to disagree.
+  
+  The refusal is `PERMISSION_DENIED` / 403, the same code and status the engine path already answers, and it names only the object the caller themselves named.
+- 5d12b16: fix(service-analytics): the ROW-SCOPE bridge to the `security` service tells the same three resolutions apart as the object-level one — a broken security service refuses the query instead of running it with no row policy (#16918)
+  
+  `AnalyticsServicePlugin` bridges to the `security` service twice: once for the OBJECT-level read grant (`admitObjectRead` → `canReadObject`, #16645) and once for the ROW-level read scope (`getReadScope` → `getReadFilter`, ADR-0021 D-C). The object-level bridge tells three resolutions apart — ABSENT admits, THROWING and METHOD-LESS deny at `error`. The row-scope bridge collapsed all three into one:
+  
+  ```ts
+  const trySecurity = () => {
+    try {
+      const svc = ctx.getService<SecurityReadFilter>('security');
+      return svc && typeof svc.getReadFilter === 'function' ? svc : undefined;
+    } catch { return undefined; }
+  };
+  getReadScope = (object, context) => trySecurity()?.getReadFilter(object, context);
+  ```
+  
+  A throwing resolver and a registered service without `getReadFilter` both produced `undefined` — the same value an absent security service produces, and the value `ISecurityService.getReadFilter` reserves for one meaning only: *"this caller has no row restriction on this object"*. So on a deployment whose security service was wired but broken (a boot-order fault, a mis-registered plugin, a failing dependency, a provider that is not the contract it claims to be) analytics queries ran with **no row-level policy at all**, and nothing said so. One door of the file failed closed on a throwing resolver and its neighbour failed open — and the neighbour is the one carrying row-level policy.
+  
+  **What changes.** The bridge now resolves the same explicit three-way, at the same reporting level:
+  
+  - **ABSENT** — no `security` service resolved: **unchanged**. No row-scope provider on this deployment, which is a legitimate configuration (a single-tenant kernel that ships no `plugin-security`, where `/data` carries no row-level policy either) and is already reported loudly at init. ⛔ Deliberately not tightened: refusing here would break every such deployment.
+  - **THROWING** resolver, or a registered service with **no `getReadFilter`** — the query is **REFUSED**, and the reason is reported at `error` naming the object and which of the two states it was. The refusal is a throw, which `AnalyticsService.resolveReadScopes` — fail-closed since ADR-0021 D-C — already turns into "deny the whole query rather than emit SQL with that object unscoped". A log over an `undefined` would not have been a refusal.
+  
+  **This change only NARROWS what analytics serves, and only in a state where the security service is broken.** No deployment with a working `security` service, and no deployment with none, changes behaviour by so much as a byte. Nothing that was refused becomes admitted.
+  
+  **No published-surface delta.** No new error code (the refusal rides the seam's existing fail-closed error), no exported symbol, no key on `AnalyticsServicePluginOptions` or any payload, and no documented envelope changes shape. Graded `minor` rather than `patch` because it is a behaviour narrowing on a published package's read path, matching how its object-level sibling was graded in the same lockstep window.
+  
+  ⚠️ Deliberately **not** answered here: which tenant wall the platform's is (plugin-security's posture-gated Layer 0, or driver-sql's posture-independent auto-scope) — the escalated maintainer decision of triage condition 5. Refusing to serve is neutral between them: it answers *"should we serve at all"*, never *"what shape is the wall"*.
+- 634f23d: fix(analytics)!: `AnalyticsServiceConfig.sqlDialect` declares its three-name accept set, and a host that answers outside it is told once (#16206)
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/services/service-analytics/src/analytics-service.ts#AnalyticsServiceConfig) The narrowed member is one hook on a service CONSTRUCTOR CONFIG — a published runtime TypeScript interface with no metadata surface. It has no Zod schema, no `packages/spec` declaration and no stored representation, so `objectstack migrate meta`, `spec-changes.json` and the generated upgrade guide have nothing to rewrite; the affected party is a TypeScript host and the channel that reaches every one of them is the compiler at their own composition site. No metadata key is added, removed, renamed or re-shaped, and `packages/spec` is untouched by this diff. -->
+  
+  **BREAKING** for a TypeScript host that declares its `sqlDialect` hook as returning
+  `string`: the hook's declared return is now the three canonical dialect names or
+  `undefined`, so such a composition stops compiling until the host's own annotation
+  says which names it can answer. Shipped as `minor` under the repo's launch-window
+  convention, in which breaking-ness is carried by this banner and the disposition
+  above rather than by the bump level. Runtime behaviour for every host is unchanged:
+  the same three names were the only ones that ever did anything.
+  
+  ## What was wrong
+  
+  `AnalyticsServiceConfig.sqlDialect` — the hook a host answers to say which SQL
+  dialect backs an object — was typed as free `string`, while `normalizeSqlDialect`
+  has only ever recognised `sqlite`, `postgres` and `mysql`. Nothing said so, and
+  nothing told a host that answered otherwise.
+  
+  So a host that owns a SQLite datasource and answers the spelling its own stack uses
+  — knex's canonical `sqlite3`, or `better-sqlite3`, both of which `driver-sql` itself
+  lists in `SQLITE_EMIT_CLIENTS` — was read as `unknown`. And because `sqlDialectFor`
+  is tiered "cannot answer, do not block", **a wrong answer and no answer were the
+  same answer**: the host that tried hardest to help got the residue arm, silently.
+  
+  ## What it does now
+  
+  - **The vocabulary is declared**, on the type and in the docblock, as
+    `AcceptedSqlDialect` — `sqlite` | `postgres` | `mysql` — so a host reading the
+    config learns the accept set without running anything. The type and the runtime
+    membership set are generated from one `const` tuple, so a future widening cannot
+    land in one and miss the other.
+  - **A non-empty answer outside the set is diagnosed**: one `warn` naming the object,
+    the answer and the accepted set. It is emitted **once per distinct unrecognised
+    spelling** — the failure's identity — so the line count is bounded by the host's
+    own hook and never grows with query volume.
+  - **`undefined` stays silent and legal.** The hook is optional and "cannot answer,
+    do not block" is a supported composition, not a misconfiguration. A pin holds both
+    halves, because a diagnostic that also shouted at hosts who wired nothing would be
+    a worse defect than the one being fixed.
+  - **The accept set is NOT widened.** Teaching this package `driver-sql`'s knex
+    aliases would be a second copy of that driver's table, and an unrecognised
+    spelling is sometimes deliberate (`mariadb`, #11756). The answer is still read as
+    `unknown`; only the silence changed.
+  - **The plugin bridge translates the driver's own residue.** `SqlDriver.dialectName`
+    carries a fourth name, `unknown`, meaning "I cannot say"; handed on verbatim it
+    would have presented a correctly-behaving driver as a host answering out of
+    contract. It now arrives as `undefined`, this hook's own spelling for the same
+    thing. The dialect the compilers end up with is unchanged either way.
+  
+  ## Measured, and worth reading before relying on the residue arm
+  
+  Driven on sql.js through a host answering `sqlite3`, against the shared
+  `FILTER_TEXT_CASES` fixture, with a host answering `sqlite` as the control: **five of
+  the six case-EXACT cases come back with the wrong rows** — every case that
+  discriminates on ASCII case. `{ name: { $contains: 'acme' } }` answers `['1','2']`
+  where the table says `['2']`, and the negated form DROPS a row that belongs in the
+  result. That is #15684's fold, live on the arm this population lands on, and it is
+  reported rather than fixed here: closing it is that card's business, not this one's.
+- 357f499: feat(service-analytics)!: a dataset measure whose `aggregate` its `field`'s declared type cannot carry is refused at compile time with `400 DATASET_INVALID` (#16737, compile leg of #16099)
+  
+  <!-- adr-0087: registered dataset-measure-aggregate-field-type-refused -->
+  
+  **BREAKING** — an accept-set narrowing on a published authoring surface. A dataset
+  measure pairing `aggregate: 'avg'` with a `Field.datetime` used to compile to
+  `AVG(col)` and reach the backend; it is now refused by `compileDataset` before any
+  query is built. Shipped as `minor` under the repo's launch-window convention for
+  accept-set narrowings; the hand-migration prescription is registered under protocol
+  major 18 as `dataset-measure-aggregate-field-type-refused`.
+  
+  The pair is judged against `AGGREGATE_FIELD_TYPE_COMPATIBILITY` — the one table
+  `@objectstack/spec` declared in #16353 under the director ruling of decision batch
+  #59 (2026-09-06, "both legs, table in spec"). ⛔ This changeset adds no rows and
+  restates none: the refusal reads the shipped predicate, so the contract has exactly
+  one statement.
+  
+  ## What was wrong
+  
+  The answer to `AVG` over a temporal column was decided by the SQL dialect rather
+  than by the data. Both halves measured on this card:
+  
+  ```
+  -- SQLite (better-sqlite3), the canonical UTC-text storage form (#3912)
+  select typeof(submitted_at), submitted_at from clm_contract limit 1;
+    text|2026-05-19T00:00:00.000Z
+  select avg(submitted_at) from clm_contract;
+    2025.5                    <- text->numeric coercion: the average YEAR
+  
+  -- PostgreSQL 16.13
+  select avg(submitted_at) from t;
+    ERROR:  function avg(timestamp with time zone) does not exist   -- SQLSTATE 42883
+  ```
+  
+  The silent half is the dangerous one, and SQLite is the default dev datasource:
+  `derived: { op: 'difference', of: [avg_a, avg_b] }` over two such averages returned
+  `-0.85` and rendered on a tile labelled "average cycle time delta" — a number
+  indistinguishable from a correct one. Nothing refused it at any layer: not the
+  schema, not `os validate` / `os lint`, not the analytics service, not the renderer.
+  
+  ## What it does now
+  
+  - `compileDataset` refuses an incompatible `aggregate` × `field` pair with
+    `DATASET_INVALID` / **400**, naming the measure, the field, its declared type and
+    the accepted set (read off the table, never restated). Nothing reaches the driver.
+  - It reads the declared type from the `sourceFieldMeta` a host already wires, via a
+    new optional `DatasetCompileOptions.declaredFieldType` probe.
+  - **`derived` is covered by construction.** A derived measure's `of` operands are
+    base measures of the same dataset, so a dataset carrying a refused base measure
+    never finishes compiling and no `derived` op can be handed its output — including
+    when the selection names only the derived measure.
+  - Tiered "cannot answer, do not block" like every sibling probe: no
+    `sourceFieldMeta`, an unresolvable field, or a `relationship.field` path (whose
+    column lives on a joined object) leaves the pair unjudged.
+  
+  ## ⚠️ Scope: the compile leg executes the TEMPORAL rows only
+  
+  The gate judges only a measure whose field is declared `date` / `datetime` /
+  `time`; a field of any other class is never handed to the predicate. The
+  verdict for the pairs it does judge is the table's — no row is restated — but
+  which FIELDS are judged is narrower than the table, on purpose:
+  
+  - **String rows** (`min` / `max` over `text`, `select`, `lookup`,
+    `autonumber`, …) are **not enforced here**. They are under #16785, **ruled
+    C**: the table itself is to be amended to accept them, because
+    `measureResultType` (#15768) already types those results as `'string'` and
+    pins them end to end. Enforcing them from this card would pre-empt that
+    ruling.
+  - **Boolean rows** are not a refusal at all any more: #16685 was ruled A and
+    #16750 added `boolean` / `toggle` to `sum` / `avg` / `min` / `max`, so the
+    table ACCEPTS them and this gate never judged them.
+  - The table's `sum` × `percent` row is likewise **not** executed by this leg;
+    `sum` over a `percent` compiles exactly as it did before.
+  
+  ⇒ The only pairs whose behaviour changes in this release are `avg` / `sum`
+  over a `date` / `datetime` / `time` field. The full-table leg remains #16099's.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead |
+  |:--|:--|
+  | `{ aggregate: 'avg', field: <a date/datetime/time field> }` | `{ aggregate: 'min' \| 'max', field: <same> }` — a real instant of the field's own type |
+  | `{ aggregate: 'sum', field: <a date/datetime/time field> }` | store the duration as a number (a computed "days open" field) and `sum`/`avg` that |
+  | `derived: { op: 'difference', of: ['avg_a', 'avg_b'] }` over temporal averages | fix the two operand measures; the `derived` spec itself is unchanged |
+  
+  ⭐ A duration is not recoverable from an aggregate over instants on any backend.
+  Where an "average cycle time" is wanted, the cycle length has to exist as a number
+  before it can be averaged.
+  
+  ## What is deliberately untouched
+  
+  `date` / `datetime` used as a **dimension** — grouping, bucketing, date-range
+  filtering — is unchanged; this is about aggregation only. `avg` over a genuine
+  numeric measure, `min` / `max` over a temporal one, and `count` / `count_distinct`
+  over anything all behave exactly as before.
+  
+  ⚠️ **Two faces stay uncovered, deliberately.** The refusal lives in
+  `compileDataset` and reads a `declaredFieldType` probe, so it applies only where
+  a host wires one: `/analytics/query` — the non-dataset face, whose measures a
+  Cube infers rather than an author declaring them — is NOT covered, and neither
+  is any other `compileDataset` caller that passes no probe (those stand down
+  unjudged rather than guessing). Closing those is #16099's, not this card's.
+  
+  Alongside the refusal, `service-analytics`' contradictory annotations about what a
+  SQLite `Field.datetime` column physically holds are reconciled to one statement —
+  **seven** source sites plus two test narratives, not the four the card quoted. Some
+  said the column holds an INTEGER epoch and ISO TEXT at once; one said flatly that it
+  IS an INTEGER epoch. Neither is current: since #3912 the column has ONE
+  storage form, canonical UTC text, with the epoch surviving only in a database not
+  yet converged by `backfillCanonicalDatetimes`. The fact is now stated once, on
+  `AnalyticsServiceConfig.coerceTemporalFilterValue`, and the other sites link to it.
+  No behaviour changes from that half.
+- 3c557e2: **The published `DimensionLabelDeps` type (re-exported from this package's `index.ts`) gains
+  one new optional key, `translateSelectOptions`** — the surface the level is graded against,
+  per the same "a new key on a published exported type is the mechanical floor for clause ②"
+  rule #16778 shipped under. Backward compatible (optional, additive, no removed/renamed key,
+  no wire-shape change), so `minor` rather than `major`.
+  
+  A dataset's `select`-field dimension now renders its option label in the request's locale on
+  a dataset-backed chart, matching what `GET /meta/object/:name` (and hence the console's list
+  grid) already renders for the identical field.
+  
+  `dimension-labels.ts` resolved a select dimension's category label straight out of field
+  metadata's authored `options[].label` — always the author's own-language text, since
+  `SelectOptionSchema.label` is a plain string, never an inline locale map. The dotted
+  cross-object arm (`field: 'contract.direction'`) was unaffected: a relationship-path field
+  name never matches a key in the BASE object's own field map, so `resolveDimensionLabels`
+  skips it via `if (!meta) continue` before either branch runs — this fix changes nothing on
+  that path, and a regression test now pins that it is never even consulted.
+  
+  `DimensionLabelDeps` gains one new optional capability, `translateSelectOptions`, which the
+  plugin bridge (`plugin.ts`) implements by calling `translateObject` (`@objectstack/spec/system`)
+  — the SAME translator the object-metadata REST endpoint already uses — against the
+  deployment's i18n bundle, when an `i18n` service is registered. No new export, no new spec
+  key, no wire-shape change: `AnalyticsResult` carries the same `rows`/`fields` shape as before,
+  and a kernel with no i18n service configured (or nothing for the requested locale) falls back
+  to exactly today's authored-label text.
+  
+  A future widening of `LOOKUP_TYPES` (#16390) does **not** automatically inherit this: lookup /
+  master_detail labels resolve through the separate `fetchRecordLabels` capability (a related
+  RECORD's display name, not a field's authored `options[]`), which this change does not touch.
+  It does lower the cost of adding translated lookup-record labels later, though — the i18n
+  service bridge (`plugin.ts`'s `i18nService()` / `buildTranslationBundle()`) is now already
+  wired into this package and is a `ctx.getService('i18n')` away from reuse.
+- e66da5c: feat(service-analytics)!: a dataset measure applying `sum` or `avg` to a field whose declared type cannot carry it is refused at compile time, for every field type and not only the temporal class (#16099)
+  
+  <!-- adr-0087: not-required (already-registered dataset-measure-aggregate-field-type-refused) the hand-migration prescription for this exact narrowing is already registered under protocol major 18 by #16778 — store the quantity as a numeric field and aggregate that — and this change widens which pairs reach it without changing what an affected author must do. ⚠️ That entry's `acceptanceCriteria` is scoped to a `date`/`datetime`/`time` field and says a field of any other class is "neither refused nor certified by this leg", which is no longer true at HEAD; widening that sentence is a `packages/spec` edit this card is fenced out of and is reported to the `domain:spec` seat rather than done here. -->
+  
+  **BREAKING** — an accept-set narrowing on a published authoring surface, continuing the
+  one #16778 began. A dataset measure pairing `aggregate: 'sum'` with a `text` field (or
+  `avg` with a `select`, `json`, `lookup`, `formula`, … field) used to compile and reach
+  the backend; it is now refused by `compileDataset` with `DATASET_INVALID` / **400**
+  before any query is built. Shipped as `minor` under the repo's launch-window convention
+  for accept-set narrowings.
+  
+  ⛔ This changeset adds no rows to any table and restates none. The verdict is
+  `AGGREGATE_FIELD_TYPE_COMPATIBILITY`'s — the one table `@objectstack/spec` declared in
+  #16353 under the director ruling of decision batch #59 ("both legs, table in spec") —
+  read through `isAggregateCompatibleWithFieldType`.
+  
+  ## What was wrong
+  
+  #16778 landed the compile leg SCOPED to temporal source fields, leaving "every other
+  non-temporal pair the table refuses" as a stated residual that had never been driven.
+  Driven on this card, through the real service door:
+  
+  ```
+  sum × text    the table refuses the pair   the compile leg does NOT throw   SQL IS emitted
+  sweep         6 aggregates × 49 field types = 294 pairs; 155 refused by the table;
+                minus 6 temporal (#16778's) minus 42 `min`/`max` × the string classes;
+                residual 107 — and 107 of 107 were ACCEPTED by the compile leg
+  control       avg × datetime / date / time → DATASET_INVALID / 400, no SQL emitted
+  ```
+  
+  The control is what makes that a reading of the tree rather than of a blind harness: the
+  same service, door and `sourceFieldMeta` hook sees the pairs #16778 enforces refused.
+  
+  So `sum` over a `text` column reached whichever backend the object is bound to, and the
+  answer was a property of the dialect rather than of the data — the shape Prime Directive
+  #12 exists to remove, and the same shape #16778 closed for one field class.
+  
+  ## What it does now
+  
+  - `compileDataset` judges a measure whose aggregate DERIVES a number (`sum` / `avg`)
+    against the table for **every** declared field type, and refuses an unaccepted pair
+    with `DATASET_INVALID` / **400** — naming the measure, the field, its declared type
+    and the accepted set read off the table. Nothing reaches the driver.
+  - `sum` × `percent` is refused at last: the row `analytics-service.ts` has called
+    "incoherent" in a comment since before the table existed. `avg` × `percent` is still
+    ACCEPTED by the same table, which is what makes it a row and not a class.
+  - The refusal's closing prescription is now chosen by the source field's class: the
+    temporal sentence #16778 measured is kept verbatim for temporal fields, and a
+    non-numeric field is pointed at `count` / `count_distinct`, which accept every type
+    because they read no arithmetic off a value.
+  - Unchanged: `derived` is covered by construction (a dataset carrying a refused base
+    measure never finishes compiling), and the three "cannot answer, do not block" tiers —
+    no `sourceFieldMeta`, an unresolvable field, a `relationship.field` path.
+  
+  ## ⚠️ Scope: the DERIVING aggregates. `min` / `max` are still not judged here
+  
+  `min` / `max` SELECT one of the stored values; `sum` / `avg` DERIVE a number. This is the
+  line this package already draws — `measureResultType` branches on exactly that pair of
+  aggregates — and the defect is about a derived number, so the deriving aggregates are its
+  population.
+  
+  The `min` / `max` rows stay with **#17513**, and that is measured rather than assumed.
+  Enforcing the residual whole was tried on this card: with `min` / `max` × the string
+  classes subtracted, **15** cases in `measure-result-type.test.ts` still went red, every
+  one of them on `min` × `json` — a pair the table refuses, in no ruling's scope, driven
+  end to end by the same shared fixture as the string rows. One dataset compiles every
+  measure in that fixture, so one refused pair reds the whole section. ⇒ `min` / `max` is
+  one question, and it is the table-amendment card's.
+  
+  ## Upgrading — FROM → TO
+  
+  Nothing an author writes is removed or renamed: `DatasetMeasure.aggregate` and
+  `DatasetMeasure.field` keep their spellings and their types. What narrows is which PAIRS of
+  values are accepted. The one-line fix, per shape:
+  
+  | FROM (compiled before, refused now) | TO |
+  |---|---|
+  | `{ aggregate: 'sum', field: <a text / select / lookup / user / autonumber field> }` | `{ aggregate: 'count_distinct', field: <the same field> }` — counting reads no arithmetic off the value |
+  | `{ aggregate: 'sum' | 'avg', field: <a json / file / location / vector / composite field> }` | store the quantity you meant as its own numeric field and aggregate that |
+  | `{ aggregate: 'sum', field: <a formula field> }` | aggregate the formula's numeric INPUT column; a `formula` is virtual in SQL storage, so no arithmetic aggregate can be lowered to it |
+  | `{ aggregate: 'sum', field: <a percent field> }` | `{ aggregate: 'avg', field: <the same field> }` — a rate averages, it does not add |
+  | `{ aggregate: 'sum' | 'avg', field: <a date / datetime / time field> }` | unchanged from #16778: use `min` / `max` for a real instant, or store a duration as a number and aggregate that |
+  
+  `min` / `max` are **not** affected by this change at all, over any field type.
+  
+  No shipped dataset in this repository declares a newly-refused pair — every one of the
+  eleven shipped dataset measures resolves to `number`, `currency`, `summary` or `progress`.
+  The refusal names the accepted set for the aggregate, read off the table.
+- 51efbf1: feat(driver-sql)!: a text operator over a column whose DECLARED type is temporal answers the type-gated no-match on every SQL face (#15683)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is renamed, retired or re-typed. No `packages/spec` key changes its name, its type or its optionality, no stored shape moves, and every object definition and filter body parses byte-identically to before — so `objectstack migrate meta` has nothing to rewrite and this changeset carries no rewrite instructions. What changes is the ANSWER a published filter surface gives at request time: a text operator aimed at a `date` / `datetime` / `time` column returns the declared no-match instead of the ISO-substring match SQLite happened to give it. The remedy for a caller who was leaning on that match is a different FILTER — the range operators, which are data the caller holds rather than an authored artifact with a stored representation — and it is spelled in the banner below. The one spec change is the membership of an existing exported set (`NON_TEXT_STORED_VALUE_TYPES`), which adds no export and removes none. -->
+  
+  **BREAKING** in the answer sense, on every SQL face, landing in the launch
+  window as `minor` under the lockstep convention this cluster's siblings use.
+  
+  **The behaviour that GOES AWAY, by name: searching a date as a string.** On the
+  SQLite family — `driver-sql` on any SQLite connection, `driver-sqlite-wasm`, and
+  `driver-turso`'s local transport — a `Field.date` / `Field.datetime` /
+  `Field.time` column stores canonical ISO TEXT (ADR-0053), and a text operator
+  matched that text. `{ signed_on: { $contains: '2026' } }` returned every 2026
+  row; `{ made_at: { $startsWith: '2026-01' } }` returned that January's rows;
+  `{ shift_at: { $contains: ':30' } }` returned every half-past shift. **All three
+  now return nothing**, and their `$notContains` mirrors now return every valued
+  row. If you are relying on any of them, this is a row-set change and the
+  replacement is a range filter — spelled out below. The behaviour was never
+  declared by any contract row and it never worked outside SQLite: the same three
+  filters were a `DATABASE_ERROR` 500 on live Postgres.
+  
+  Nothing that was refused becomes admitted, and no new error code is minted — the
+  refusal reused is the one `NON_TEXT_STORED_VALUE_TYPES` already carried for the
+  numeric and boolean classes.
+  
+  Maintainer ruling, 2026-09-05 on #15683, quoted rather than paraphrased:
+  「a text operator over a column whose DECLARED type is temporal is type-gated
+  exactly like the numeric and boolean classes; the SQLite ISO-text match is not
+  a contract」.
+  
+  ## What was wrong — one filter, three answers across one driver family
+  
+  `{ on_day: { $contains: '2026' } }` over a column declared `Field.date` holding
+  `2026-01-05`:
+  
+  | face | before | mechanism |
+  |:--|:--|:--|
+  | `driver-sql` / `driver-sqlite-wasm` / `driver-turso` local (SQLite) | **the row** | the column stores canonical ISO TEXT (ADR-0053), so `GLOB '*2026*'` matched it |
+  | `driver-sql` on live PostgreSQL 16.13 | **`DATABASE_ERROR` 500** | `operator does not exist: date ~~ unknown` (SQLSTATE 42883) — the same for `timestamptz` and `time` |
+  | `driver-sql` on MySQL | **NOT MEASURED** | no server was provisionable; reads as coercion via `CAST(col AS BINARY) LIKE` |
+  
+  Three answers to one filter, and no face declared which was canonical. The
+  SQLite answer was the accident of a storage form, not a capability: the same
+  query against Postgres was a 500.
+  
+  ## What it does now
+  
+  The three temporal classes join `NON_TEXT_STORED_VALUE_TYPES`
+  (`@objectstack/spec`), the set the SQL compilers consult at compile time
+  because the stored value is not visible until run time. Every face that reads
+  it — `SqlDriver` (and everything that inherits its compiler),
+  `driver-turso`'s remote transport, `service-analytics`' three SQL lowerings —
+  compiles the positive operators (`$contains` / `$startsWith` / `$endsWith` /
+  `$icontains` / `$like` / `$ilike`) to the FALSE constant and `$notContains` to
+  the TRUE constant. Postgres's 500 becomes that declared answer; complementarity
+  holds; the constants compose with the existing NULL-safe rules and the `$not`
+  rewrite unchanged.
+  
+  **The SQLite ISO-substring match is RETIRED.** A caller who was using it to ask
+  for "records in 2026" writes a range instead, which every dialect has always
+  answered the same way:
+  
+  ```ts
+  // before — matched only on the SQLite family, 500 on Postgres
+  { on_day: { $contains: '2026' } }
+  // after — the prescription, identical on every backend
+  { on_day: { $gte: '2026-01-01', $lt: '2027-01-01' } }
+  ```
+  
+  ## Boundaries, so a reader does not over-read this
+  
+  - **A MULTI-VALUED temporal field is untouched.** `multiple: true` stores a JSON
+    TEXT array, where `$contains` is the MEMBERSHIP spelling #7398 left working on
+    a JSON column — not a substring test. It keeps compiling exactly as before.
+  - **The value-keyed JS evaluators do not move, and they DIVERGE — measured, not
+    caveated.** `driver-memory` canonicalises a declared temporal write to ISO
+    TEXT (#4047), for a `Date` input and a string input alike, so a positive text
+    operator MATCHES there — the exact complement of the answer this changeset
+    declares. That divergence is filed as #17348 and pinned by name in that
+    driver's conformance suite, alongside a correction: the two rows previously
+    read as pinning the no-match answer pass because their comparand omits the
+    milliseconds, not because anything type-gates. `formula` and `having` cannot
+    key on the declaration at all — `matchesFilterCondition(record, filter)` takes
+    a bare record ("this evaluator sees a bare record and has no schema to
+    consult", its own docblock), and `having` filters AGGREGATED rows whose columns
+    carry no field declaration. ⛔ So "on every face" is NOT delivered by this
+    change, and this changeset does not claim it: the SQL family answers the
+    declared rule, the JS faces do not yet.
+  - **`FILTER_TEXT_CASES` grows no temporal column**, deliberately. Every row there
+    is keyed on the STORED value — which is why its non-string column is a number
+    and not a date — so a temporal fixture would assert one stored form across all
+    five drivers that import it, the stored-form guarantee the ruling refused
+    option (b) for.
+  - **MySQL is NOT MEASURED**, not "passing": no server was provisionable, so its
+    cell rests on the compiled-shape pin, which reads the constant a statement
+    would carry without executing one.
+
+### Patch Changes
+
+- 86c5052: fix(analytics): a `dateRange` array that is not a two-bound window is refused, once, instead of meaning three different things (#17124)
+  
+  `AnalyticsDateRangeSchema`'s array arm is a bare `z.array(z.string())` with no
+  length constraint, so `dateRange: ['2026-01-01']` is schema-valid and reaches the
+  analytics faces through `POST /analytics/dataset/query`, which types its selection
+  from `AnalyticsQuery` and never Zod-parses it. The four faces in this package that
+  read the arm answered it three different ways — measured over one authored
+  document and four rows:
+  
+  | face | `['2026-01-01']` meant |
+  |---|---|
+  | `ObjectQLStrategy.dateRangeBounds` | the point window `created_at >= '2026-01-01' AND <= '2026-01-01'` |
+  | `NativeSQLStrategy` | no time clause at all — the whole dataset |
+  | the draft-preview evaluator | an upper bound of the string `"undefined"`, which every ISO date sorts below — everything from that day onward |
+  | `DatasetExecutor`'s `compareTo` pass | the point window, shifted — compared against a primary pass that may have read all of history |
+  
+  For a dashboard that is one day's number, the whole dataset's, and everything
+  from that day onward, from the same document, decided by which backend answered.
+  `[]` and `[a, b, c]` split the same three ways, and `[null, null]` reached
+  `parseUTC(null)` as a bare `TypeError` — a 500 for a malformed request.
+  
+  One rule is now the single reading of the arm and all four faces call it; the
+  three divergent fallbacks are deleted. An array that is not exactly two string
+  bounds is refused with the ADR-0112 `ANALYTICS_DATE_RANGE_UNRECOGNIZED` / 400
+  envelope — the answer the contract already gives for a `dateRange` that does not
+  denote a window. A two-element window is untouched on every face, bound for
+  bound, including the inclusive upper reading a caller's bounds keep (#16179) and
+  the half-open bare-day widening on the SQL side (#3777).
+  
+  ### Write both bounds
+  
+  | wrote | write instead |
+  |---|---|
+  | `dateRange: ['2026-01-01']` | `dateRange: ['2026-01-01', '2026-01-01']` |
+  
+  That spelling already selects exactly that one day on every face, and it is the
+  same instruction #16322 shipped for the single-day string dialect.
+  
+  ⭐ Shipped as `patch`, not as a breaking narrowing, because nothing DECLARED
+  moves. The spec's own refusal wording already states that *"an explicit window is
+  the two-element array [start, end] of ISO dates or {date-macro} tokens"*, and
+  #16322's shipped migration table already told authors to write a single day as
+  `['2026-01-20', '2026-01-20']`. A one-element array was therefore never a valid
+  document; it was an invalid one that four faces answered arbitrarily, and a
+  behaviour that was never one behaviour is not a behaviour this removes. The Zod
+  type admitting the shape is weaker than the contract the same file states —
+  tightening it is a separate, spec-owned question.
+- 40098a4: fix(service-analytics): an unrecognised `compareTo.kind` is refused, not answered with a previous-period window under a 200 (#17550)
+  
+  `shiftRange` had one branch and a fall-through — `previousYear` was named, and
+  **everything else** landed in the `previousPeriod` arm. No `default`, no
+  exhaustiveness check. So `compareTo: { kind: 'previousQuarter' }` came back as a
+  previous-period comparison under an ordinary **200**, and the caller was told
+  nothing. The wrong answer is a comparison **window**: a number a dashboard
+  renders and a person reads as fact, with no status, header or field in the
+  response to distinguish it from a real answer.
+  
+  `DatasetCompareTo.kind` has only ever declared two values
+  (`'previousPeriod' | 'previousYear'`), but `DatasetSelection` is a TypeScript
+  interface with no Zod schema anywhere, and `/analytics/dataset/query`'s door
+  parses only the seven members the selection shares with `AnalyticsQuery` —
+  `compareTo` is one of the four it projects away before its parse, and the route
+  forwards the caller's selection to the service untouched. So `kind` was checked
+  by `tsc` inside this repo and by nothing at all on the wire.
+  
+  ## FROM → TO
+  
+  | Input | Was | Now |
+  |:--|:--|:--|
+  | `compareTo: { kind: 'previousPeriod' }` | the equal-length window before | **unchanged** |
+  | `compareTo: { kind: 'previousYear' }` | the same window one year back | **unchanged** |
+  | `compareTo: { kind: <anything else> }` | a previous-period window, **200** | `DATASET_INVALID` / **400**, naming the value received and both legal ones |
+  
+  The fix is to name one of the two declared windows, or drop `compareTo` — which
+  is what the refusal says. No accept set widens, no new error code is minted: the
+  refusal is the fourth member of the `datasetInvalidError` family
+  `resolveCompareDimension` already raises three times for the same document, so it
+  arrives at the route through the envelope that route already classifies on.
+  
+  ## Why this is a `patch`
+  
+  It pulls behaviour back onto the contract the type has always declared, rather
+  than narrowing past it: every input `DatasetCompareTo` permits returns
+  byte-identical windows, pinned by a control in the same change. What flips from
+  200 to 400 is input the declared contract never permitted. The reachable-today
+  population for that input was measured on the tree — the dashboard authoring path
+  is already doored (`DashboardWidgetSchema` parses the widget's `kind` as a
+  `z.enum`, so a third kind cannot arrive through a parsed widget), and no producer
+  in this repository sends a third value. What is not enumerable from here is a
+  consumer outside it calling the published `shiftRange` export, or posting a
+  hand-rolled body to the dataset route; for those, the refusal replaces a wrong
+  answer with a located one.
+  
+  `alignedCompareBucketKey` reads the same two-valued `kind` and deliberately gains
+  no refusal of its own: it is not on the package's public surface, and its only
+  caller runs `shiftRange` first — both pinned, so exporting it turns the pin red
+  rather than silently reopening this defect.
+- 113050e: A dataset dimension over a `user` or `tree` field renders the referenced record's display name, the same way a `lookup` dimension already did. A "by person" chart's axis is people's names, not a column of user ids.
+  
+  `packages/spec` declares one reference class — `REFERENCE_VALUE_TYPES` = `lookup`, `master_detail`, `user`, `tree`, "value points at another record … a record-id string in stored form" — and this service already treated it as one class where it annotates measure result types (`measure-result-type.ts` imports that very set). The label resolver, one file away, hand-wrote a two-member subset of it (`lookup`, `master_detail`), so within a single dataset query one axis came back as a name and the other as a raw id, for two fields that differ in one word:
+  
+  ```
+  Field.user({ label: 'Person' })            -> { type: 'user',   reference: 'sys_user' }
+  Field.lookup('sys_business_unit', { … })   -> { type: 'lookup', reference: 'sys_business_unit' }
+  ```
+  
+  - **The subset is gone, not extended.** The resolver now asks `referenceTargetOf` (`@objectstack/spec/data`) — the declared single arbiter of "what does this reference field point at" — at all three sites that classified a dimension: the display pass, the `#3680` sort-key hook's `isLabelBearing`, and its `resolveLabels`. Adding two literals to a private `Set` would have left the next member of the class to be re-reported by the next user.
+  - **A `user` field authored without `reference` resolves too.** `sys_user` is a constant of the type, which `referenceTargetOf` materializes; requiring an author to restate it is exactly the disagreement between two readers of one field that arbiter exists to end.
+  - **The label read stays scoped (`#3602`).** Turning a user id into a name is a read of `sys_user`, and it travels the same `LabelScopeResolver` path every other member of the class travels — the referenced object's own RLS is resolved and ANDed into the lookup, and an unresolvable scope still fails closed to the raw id rather than fetching unscoped. This is the half of the change that had to land with it, not after it.
+  - **Nothing degrades into an error or a blank.** An orphaned or RLS-hidden user id, a `sys_user` with no display field, and a user object unknown to the engine all leave the raw id in place and answer the query, which is the pre-existing contract for an unresolved lookup id.
+  
+  No new authorable key and no new export: `DatasetDimensionSchema` is untouched, and a dimension's own declared `type` still does not decide this — the resolver reads the object field's type, as it always has.
+- 54b3d1d: fix(service-analytics): a fail-closed row-scope refusal can no longer be served as an empty chart (#17130)
+  
+  `queryDataset` degrades to `{rows: [], fields: [], totals: []}` when a BARE error looks like a driver reporting an absent table — a deliberate leniency (#5033) so a dashboard widget over an unmounted object renders "no data" instead of failing. The test is a substring match over the message, and three of its six limbs — `not registered`, `unknown object`, `is not a registered object` — are exactly the phrasings a registry or security refusal reaches for.
+  
+  Both sites of the row-scope RESOLUTION stage refused with a bare `throw new Error(…)`: the `security` bridge in `AnalyticsServicePlugin`, and `AnalyticsService.resolveReadScopes`. They propagated only because their wording happened to miss all six — so any reword, or any refusal added to that stage later, could silently turn a fail-closed gate into a `200` with no rows.
+  
+  Both now declare `READ_SCOPE_COMPILE_FAILED` / `500` — the code the sibling read-scope LOWERING stage has answered with since #5367, so the registered wire vocabulary is unchanged. Two visible consequences for a deployment whose wired `security` service cannot answer a row-level read scope:
+  
+  - the refusal reaches the caller as a declared `500` instead of relying on its phrasing to escape the degradation path;
+  - its message is withheld from the response body by declaration (the operator still gets the full text, at `error`, from the producing site) rather than echoed.
+  
+  Every refusal message is byte-unchanged, and #5033's leniency is untouched: a genuine absent source table still degrades to the empty result with its `warn`, and a deployment with NO security service still runs unscoped exactly as before. A guard derived from the source (`refusal-wording-collision.test.ts`) now walks every `throw` in the package and fails if an un-enveloped refusal can be read as a missing source table.
+- f3b28eb: Draft-preview analytics: `avg` answers the mean of the NON-NULL operands, and `null` when there are none — matching every live face
+  
+  A dataset measure `{ aggregate: 'avg', field: 'amount' }` compiles to the cube
+  metric `{ type: 'avg', sql: 'amount' }`, and the draft-preview evaluator built
+  its operand list with `rows.map((r) => Number(r[field]))`. `Number(null)` is `0`
+  and `Number.isFinite` accepts it, so every NULL entered the average as a zero
+  OPERAND and was counted in the divisor. `AVG(col)` is defined over non-null
+  values in every SQL dialect, so a drafted chart showed a different number than
+  the published one, silently — and where a group's column was NULL in every row
+  the number it showed was `0`: a plausible-looking average that a reader cannot
+  tell from one somebody measured.
+  
+  Measured on one dataset, one row set, two `AnalyticsService` instances differing
+  only in `draftRowsResolver` (the live half being `NativeSQLStrategy`'s generated
+  SQL on a real SQLite). Rows `{meals, null}` and `{meals, null}` answered
+  `avg_amount` null live and `0` on preview; rows `{travel, 10}`, `{travel, 20}`,
+  `{travel, null}` answered 15 live and 10 on preview. Both cells now answer the
+  live number.
+  
+  The empty answer is READ from the platform's own ruling rather than restated
+  here: `emptyGroupValueFor` (`@objectstack/spec/data`) returns the identity `0`
+  where counting or summing nothing is a measured fact and `undefined` — spelled
+  `null` on this wire — where there is nothing to answer. It is the same function
+  `fillEmptyGroups`, `sql-driver` and `driver-turso` read, and the one #16203 cited
+  when it moved `min`/`max` off the same idiom in this function.
+  
+  Unchanged, and pinned by the same differential: `sum` over a group with no values
+  still answers the ruled identity `0`, `count` over one still answers `0`
+  (#16218), `min`/`max` still answer `null` (#16203), and `avg` over a group that
+  has values still answers its mean. `sum` and the numeric `default` arm keep their
+  existing operand list — `0` is the additive identity, so the coercion never moved
+  `sum`'s answer, and the `default` arm serves the custom-SQL metric types, which
+  have no live standard to be moved towards.
+  
+  The `null` fires on an EMPTY group and never on an incoherent one. "No numeric
+  operand" is two different situations: no row carried a value at all — the empty
+  group the policy rules on — or rows carried values that do not read as numbers,
+  such as a `date` column under `avg`. The second is an incoherent
+  aggregate/field-type pair that #16099 owns and no layer refuses yet; it keeps the
+  numeric identity it has always had, since the live face answers a different
+  number again (SQLite's numeric affinity over a TEXT column) and a `null` there
+  would invent a third answer. That boundary is pinned from both sides — by
+  `preview-aggregate-operand-type.test.ts` (#16203) and by a control in the new
+  differential.
+  
+  The live path is unchanged.
+  
+  Bumped `patch` rather than `minor`, on the same reasoning the sibling #16218
+  shipped under: the package's published surface is byte-unchanged — `src/index.ts`
+  is not in this diff and does not re-export `preview-evaluator.ts` at all, and
+  `aggregate()` is module-private — and the only user-visible effect is a drafted
+  chart's number moving to the number the published chart already showed. A value
+  correcting toward the live standard is a fix, not the backwards-compatible
+  feature addition `minor` denotes. It is a real value change for a consumer
+  reading the preview response (`0` becomes blank), which is why the card was filed
+  separately rather than ridden along with #16203 — but the `0` it replaces was
+  never a number the platform promised.
+- fd5cff2: Draft-preview analytics: `count` over a declared field counts its non-null values, matching every live face
+  
+  A dataset measure `{ aggregate: 'count', field: 'payer' }` compiles to the cube
+  metric `{ type: 'count', sql: 'payer' }`, and the draft-preview evaluator carried
+  that field in and never read it — it answered the ROW count, nulls included,
+  while every SQL face lowers the same measure to `COUNT("payer")`, defined over
+  non-null values. A drafted chart therefore showed a different number than the
+  published one, silently, and the number it showed was the one `count(*)` gives:
+  the author's choice to count a specific column had no effect on the preview path.
+  
+  Measured on one dataset, one row set, two `AnalyticsService` instances differing
+  only in `draftRowsResolver` (the live half being `NativeSQLStrategy`'s generated
+  SQL on a real SQLite): rows `{meals, 'bob'}` and `{meals, null}` answered
+  `payer_count` 1 live and 2 on preview. Both now answer 1.
+  
+  Unchanged, and pinned by the same differential: `count` with no field and `count`
+  with `field: '*'` still answer the row count (the compiler writes
+  `sql: m.field ?? '*'`, so the star is the "no field declared" spelling), and
+  `count_distinct` still answers a cardinality. A group in which no row carries a
+  value counts `0`, never null — `emptyGroupValueFor` rules counting nothing the
+  identity `0`.
+  
+  The live path is unchanged.
+  
+  Bumped `patch` rather than `minor`: the package's published surface is
+  byte-unchanged — `src/index.ts` is not in this diff, `aggregate()` is
+  module-private and `evaluateAnalyticsQueryOverRows` is not on the barrel — and
+  the only user-visible effect is a drafted chart's number moving to the number
+  the published chart already showed, which is a correction toward the live
+  standard rather than the backwards-compatible feature addition `minor` denotes.
+- Updated dependencies [7f62536]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [245f360]
+- Updated dependencies [324968e]
+- Updated dependencies [fe71032]
+- Updated dependencies [482d34d]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [baf9745]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [6548118]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [48203ff]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [c9eb773]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [dfeba25]
+- Updated dependencies [0a88a80]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [e7ff9c2]
+- Updated dependencies [758ac40]
+- Updated dependencies [134b410]
+- Updated dependencies [4c42fd1]
+- Updated dependencies [5f392f0]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [f03f6c7]
+- Updated dependencies [cf79182]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [c3ebe4a]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [71629a1]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [288fe9c]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [6e3462d]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5a95b0e]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [de1a611]
+- Updated dependencies [db76982]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [ab450f4]
+- Updated dependencies [025588a]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/types@17.5.0
+  - @objectstack/spec@17.5.0
+  - @objectstack/core@17.5.0
+
 ## 17.4.0
 
 ### Minor Changes

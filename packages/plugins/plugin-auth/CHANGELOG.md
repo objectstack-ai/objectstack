@@ -1,5 +1,541 @@
 # Changelog
 
+## 17.5.0
+
+### Minor Changes
+
+- ee6fbd7: fix(plugin-auth): give the auth `basePath` default a single written definition (#16384)
+  
+  `'/api/v1/auth'`, the shipped default for `AuthPlugin`'s `basePath` option, was
+  written independently at four sites: the `AuthPlugin` constructor, two later
+  re-derivations inside `AuthPlugin` (`registerAuthRoutes`, the OIDC discovery
+  `.well-known` alias), and `AuthManager.configuredBasePath()`'s own fallback.
+  Nothing was broken by the duplication — `AuthPlugin` always supplies `basePath`
+  to `AuthManager`, so the manager's copy was dead on the live path and
+  unfalsifiable by construction: no test could have caught one copy drifting from
+  the other three.
+  
+  The default now lives in exactly one place, `DEFAULT_AUTH_BASE_PATH` (exported
+  from `@objectstack/plugin-auth`, declared beside `readMcpServerEnabledEnv` in
+  `auth-manager.ts`); all four sites import it instead of retyping the literal.
+  Every site evaluates byte-identically to before — this is a consolidation of
+  where the value is *written*, not a change to what any site *evaluates to*, and
+  in particular does **not** touch `AuthManager`'s `configuredBasePath` →
+  `rootedBasePath` → `getBasePath` normalisation chain (#16399) or the published
+  OAuth `iss` / RFC 8707 `aud` identifiers those getters produce.
+  
+  This is additive and non-breaking — no existing call site's behaviour changes —
+  but it does add one new named export (`DEFAULT_AUTH_BASE_PATH`) to the
+  package's public surface, which is what makes this `minor` rather than `patch`.
+- 344d475: fix(plugin-auth)!: `POST /admin/create-user` reads the deployment's membership policy instead of hard-coding `auto` (#16683)
+  
+  **BREAKING** — the membership this published endpoint writes moves for existing inputs on `invite-only` deployments. The route, its request body, its response fields and every exported signature are byte-identical; what changes is what an existing call does on a deployment that declared a non-default policy, stated as a FROM/TO pair below.
+  
+  ADR-0093 D1 makes the deployment's `membershipPolicy` the one answer to "does this new account get an organization membership", and enumerates the `invite-only` flows as a closed set — "which endpoint created the user" is explicitly not a determinant. The `user.create.after` reconciler and the D6 backfill both read it through `AuthManager.getMembershipPolicy()`. This endpoint did not: its belt-and-suspenders bind handed the reconciler a literal `'auto'`, so it was the one membership-writing path in the product that ignored the setting.
+  
+  FROM: on a deployment declaring `membershipPolicy: 'invite-only'`, an account created through `POST /api/v1/auth/admin/create-user` was bound to the default organization anyway, and the 200 response answered `membershipCreated: true`. The `user.create.after` reconciler had already declined to bind it; this endpoint bound it afterwards.
+  
+  TO: the same call creates the account and binds no membership. The response answers `membershipCreated: false` and omits `organizationId`, and the audit row records the same. The account is created and can sign in — `invite-only` withholds the membership, not the login.
+  
+  Who is affected: only deployments that set `auth.membership_policy` (or `OS_AUTH_MEMBERSHIP_POLICY`) to `invite-only`. Under the default `auto` posture behaviour is unchanged in every observable respect — response body, `sys_member` write and audit metadata — and that equivalence is pinned by a test rather than asserted here.
+  
+  If you relied on admin-created accounts acquiring a membership on an `invite-only` deployment, the supported way to keep it is to bind the membership explicitly (the `add_member` action / `POST /organization/add-member`), which is what `invite-only` means: memberships are granted deliberately, never as a side effect of account creation. Setting the deployment back to `auto` restores the old behaviour for every path at once, including sign-up.
+  
+  The direction of the old defect was open, not closed: it GRANTED a membership the operator had configured the platform to withhold, and reported success while doing it. An operator who set `invite-only` specifically to keep a shared organization identity off their users got one anyway.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) nothing authorable changes shape: no spec key, no Zod schema, no stored metadata and no exported symbol is added, removed or renamed, so `os migrate meta` has no edit to make and no ledger id to carry. What moves is one runtime decision inside an HTTP handler, already governed by the `auth.membership_policy` setting an operator sets and can change back. -->
+- 374d9d3: **BREAKING** — `GET /api/v1/auth/get-session` answers an anonymous caller with the
+  declared ADR-0112 failure envelope and HTTP 401, instead of HTTP 200 wrapping a JSON `null`.
+  
+  Until now an unauthenticated session read answered:
+  
+  ```
+  HTTP 200
+  null
+  ```
+  
+  `ObjectStackClient.auth.me()` declares `Promise<SessionResponse>`, and
+  `SessionResponseSchema` requires `data.session` and `data.user` — so no value of that type
+  means "nobody is signed in", and the most ordinary call a logged-out caller can make
+  resolved to something outside the method's own declared type. Ruled by the director seat
+  (decision batch #117 item 4) under the charter rule
+  「spec 与代码不一致默认改代码,改协议单独立卡非选项」: the implementation is corrected to
+  the published contract. `SessionResponseSchema` is untouched.
+  
+  What changes on the wire:
+  
+  - **An anonymous or unresolvable credential ⇒ `401` with `error.code: 'UNAUTHENTICATED'`**
+    and the message `Sign in first`, the same body a raw `/admin/` mount already answers the
+    same caller with. No error code is minted: `UNAUTHENTICATED` is an existing
+    `StandardErrorCode` member, derived from the status through ADR-0112's own map, so
+    `ERROR_CODE_LEDGER` is unchanged.
+  - **Unchanged:** a signed-in read still answers `200` with `{ user, session }`,
+    byte-identical. Every other `/auth/*` route is untouched, and so is the `404` that a
+    method this route does not serve already answered — this change never invents a route.
+  - **Also unchanged:** better-auth's JS API. `auth.api.getSession()` still returns `null` for
+    an anonymous caller, so every internal identity read — execution-context resolution, the
+    platform-admin gates, the SSO bridges — behaves exactly as before. Only the wire moves.
+  
+  **`@objectstack/client`:** `client.auth.me()` now **rejects** for an anonymous caller
+  instead of resolving with `null` — the SDK throws on every non-2xx before unwrapping. Every
+  value the method resolves with is now inside its declared `SessionResponse`. Callers that
+  inspected the resolved value must move to a `catch`:
+  
+  ```ts
+  try {
+    const session = await client.auth.me();
+    // …signed in
+  } catch (err: any) {
+    if (err.code === 'UNAUTHENTICATED') {
+      // …signed out; err.httpStatus is 401
+    }
+  }
+  ```
+  
+  A caller that branches on the HTTP status directly reads `401` plus
+  `error.code: 'UNAUTHENTICATED'` where it used to read `200` plus an empty body.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) retires no metadata surface: no Zod schema, no authorable key, no export, no config field, and no stored sys_metadata row changes shape, so `objectstack migrate meta` has nothing to rewrite and no ledger entry can be written for it. What changes is an HTTP status plus an SDK method's promise contract, and the only channel that reaches those consumers is this changeset itself. -->
+- 854639b: feat(engine)!: `findOne`, `update` and `delete` declare what they answer, and their hook seams are guarded (#16231)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable moves. No spec key, no authored metadata property, no config field, no accepted request shape and no stored artifact changes spelling or shape; `objectstack migrate meta` has nothing to rewrite, `spec-changes.json` has nothing to project and the upgrade guide has no row to gain. What moves is the declared RETURN TYPE of three TypeScript methods (`packages/spec/src/contracts/data-engine.ts`, its `scoped-context.ts` mirrors, and `ObjectQL` itself) plus three new registered ADR-0112 error codes. The rewrite this ships — add the null check the type now demands — is addressed to a TYPESCRIPT CONSUMER and is delivered by the compiler at their own call site, which is the audience the ADR-0087 ledger explicitly does not serve. `type-surface-only` is the category built for exactly this class and it is NOT claimed here, because its predicate 2 (`no-spec-diff`) is mechanically false for this PR: the surface the maintainer ruling names IS `packages/spec/src/contracts/**`. That gap is reported on the card rather than worked around, and the `**BREAKING**` banner below is carried rather than dropped. -->
+  
+  **BREAKING** on three published `.d.ts` surfaces. `ObjectQL.findOne`, `ObjectQL.update` and `ObjectQL.delete` — and the `IDataEngine` / `IScopedObjectRepository` contracts they implement — declared `Promise<any>` and now declare the answers they have always given:
+  
+  - `findOne` → `Promise<Record<string, any> | null>`
+  - `update` → `Promise<Record<string, any> | number | null>`
+  - `delete` → `Promise<boolean | number>`
+  
+  `any` is assignable to everything and admits every property read, so TypeScript consumers of these three methods can stop compiling — most often on the null check the declaration now demands. Shipped as `minor` under the repo's launch-window convention, in which `major` is refused by `check-changeset-no-major` and breaking-ness is carried by this banner plus the ADR-0087 disposition rather than by the level. The governing text is the **WHICH LEVEL** maintainer ruling of 2026-09-04 (decision batch #35, on #15294) recorded at `.github/workflows/pr-automation.yml`; `AGENTS.md`'s "a bug fix in a released package takes a patch changeset — never none" is the floor against `none` and was rejected as the ceiling here, because this PR also widens `@objectstack/objectql`'s index with new exported symbols, which that ruling puts at `minor` on its own.
+  
+  **Why.** `engine.ts` has four `return hookContext.result` sites, one per hook-bearing verb. #15823 closed the `find()` one — an `afterFind` handler that replaced the array made a method declared `Promise<any[]>` resolve to an envelope, silently — and recorded that it could close only that one: the other three declared `Promise<any>` and so carried no declaration a handler could break. A guard cannot exist before a declaration worth guarding does. The maintainer ruled the gap shut (option A, 2026-09-07, director seat summon #17, decision batch #2; option B "declare only, no enforcement" and option C "record `any` as intended" were refused).
+  
+  The shapes are read off the driver contract each engine exit delegates to, not invented: `driver.findOne` and the by-id `driver.update` declare `Record<string, unknown> | null`, `driver.delete` declares `boolean`, and the predicate exits `driver.updateMany` / `driver.deleteMany` declare the affected-row `number` a bulk write resolves (#4639). Row FIELD values stay erased (`Record<string, any>`), which is #15823's precedent extended exactly rather than softened: `find()` declares `Promise<any[]>`, so the CONTAINER is the contract and the rows inside it are `any`. It is also the only spelling that can state "record or null" at all, since `any | null` collapses to `any`.
+  
+  **What is enforced now.** Each seam re-checks `hookContext.result` against its declaration immediately after the `after*` dispatch and ahead of the consumers that already assume the shape, and refuses a value outside it with a registered ADR-0112 envelope — `FIND_ONE_HOOK_RESULT_NOT_RECORD`, `UPDATE_HOOK_RESULT_NOT_WRITE_SHAPE`, `DELETE_HOOK_RESULT_NOT_WRITE_SHAPE`, all `500`, all branchable on `error.code`. Shaping stays legal exactly as it does on `find()`: a handler may mutate what it is handed, drop keys, or assign a different value of a declared shape. The falsy answers are legal and deliberately so — `null` from `findOne`, `null` or a count from `update`, and `false` or `0` from `delete`, the two most ordinary answers that verb gives.
+  
+  **Who has to change something, on the TYPE axis.** A TypeScript consumer that reads a field off `findOne`'s result without a null check, or off `update`'s result without separating the by-id record from the predicate count. In this repository that was measured before anything moved, at the maintainer's instruction: 18 files and 92 compile errors, all repaired here.
+  
+  **What changes at RUNTIME, per door.** TWO things can put an off-declaration value at a seam, and every refusal's `developerMessage` names both: an `after*` handler that assigned one, and a DRIVER whose own exit answered off `IDataDriver`. Each door goes from returning that value silently to refusing it — one door, one registered code, all `500`:
+  
+  - `findOne` — FROM: whatever the `afterFind` dispatch left in `ctx.result`, or whatever `driver.findOne` answered off its declared `Promise<Record<string, unknown> | null>`, returned to the caller as-is and walked first by `maskSecretFields` / `stripSearchCompanionFromRead`. TO: `500 FIND_ONE_HOOK_RESULT_NOT_RECORD`, raised at the seam when that value is neither a record nor `null`.
+  - `update` — FROM: whatever the `afterUpdate` dispatch left in the batch `ctx.result`, or whatever `driver.update` / `driver.updateMany` answered off their declared `Promise<Record<string, unknown> | null>` / `Promise<number>`, returned as-is and read first by `stripSearchCompanion` and the realtime publish. TO: `500 UPDATE_HOOK_RESULT_NOT_WRITE_SHAPE`, raised when that value is outside record-or-count-or-`null`.
+  - `delete` — FROM: whatever the `afterDelete` dispatch left in `ctx.result`, or whatever `driver.delete` / `driver.deleteMany` answered off their declared `Promise<boolean>` / `Promise<number>`, returned as-is to a caller such as `metadata-protocol`'s `deleteData`, which turns `false` into a 404. TO: `500 DELETE_HOOK_RESULT_NOT_WRITE_SHAPE`, raised when that value is neither a boolean nor a number — never on `false` or `0`, which are declared answers.
+  
+  The driver half of each line is not hypothetical: the seven off-contract test doubles this PR repairs are exactly that source, and they are why the refusal sentence names the SEAM instead of accusing the handler.
+- e758131: fix(plugin-auth): a `single`-posture deployment holding more than one organization is reported at `error` instead of booting silently (#17010)
+  
+  ADR-0131 §1.2(3) states that its precondition — many organizations with the organization wall inert — 「is today a refused boot」. It is not. A deployment that never REQUESTS a walled posture and simply HOLDS more than one `sys_organization` row under `single` boots, serves, and says nothing: `resolveDefaultOrgId` answers the bootstrap org, else the sole org when exactly one exists, else `null` — silently. The harm then surfaces far away and looks like an unrelated data outage: users reconciled from then on are bound to no organization, a platform admin reads zero rows of every organization-stamped object while analytics still counts them, and system-context writes are refused `ambiguous-organization` by the per-write guard.
+  
+  The tenancy service now takes a `count(sys_organization)` census on that same seam and reports at `error` when a non-walled deployment holds more than one, naming the posture it DECLARED, the count it HOLDS, and the two ways out: declare a walled posture (`OS_TENANCY_POSTURE=group` / `isolated`, plus the `@objectstack/organizations` package that activates it), or hold one organization and model the sub-units as business units.
+  
+  **The boot is not refused.** This change only reports; whether the boot should instead be refused stays open for the maintainer, and nothing here has to be undone if that is the answer. The per-write `ambiguous-organization` refusal is untouched.
+  
+  Cost is one `count()` per process: the census sits downstream of the walled-posture early return (a `group`/`isolated` deployment pays nothing and says nothing) and downstream of the memoized resolution, and an engine that cannot answer stays silent rather than guessing. A healthy install — exactly one organization, or none bootstrapped yet — is silent by construction.
+- 9bd4344: feat(auth)!: adopt better-auth's account-issuer rollback — drop `sys_account.issuer`, retire the backfill, lift the `@better-auth/*` family to an exact `1.7.3` (#17440)
+  
+  <!-- adr-0087: registered sys-account-issuer-retired -->
+  
+  **BREAKING** — a platform object drops a declared field and `@objectstack/plugin-auth`
+  drops six published symbols. Shipped as `minor` under the launch-window convention
+  (`major` is refused by `check-changeset-no-major`; breaking-ness is carried by this
+  banner plus the ADR-0087 disposition above). The hand-migration prescription is
+  registered under protocol major 18 as `sys-account-issuer-retired`.
+  
+  better-auth `1.7.3` removed the issuer-scoped account identity outright
+  (`better-auth/better-auth#10909`): `createLocalAccountIssuer` is deleted,
+  `accountSchema.issuer` is gone, `AccountKey` is `(providerId, accountId)` again, and the
+  `account.issuer` column and its unique index are gone from `get-tables`. There is no
+  drop-in replacement. `#16186` pinned the family at an exact `1.7.2` as a stopgap; this is
+  the durable half, per the maintainer ruling of 2026-09-10 on `#16629`.
+  
+  ## 迁移:FROM → TO
+  
+  | FROM | TO | the one-line fix |
+  |:--|:--|:--|
+  | `sys_account.issuer` (column + `{ fields: ['issuer','account_id'], unique: true }`) | — | nothing replaces it; identity is `(provider_id, account_id)`, declared UNIQUE on `sys_account` since the object was created |
+  | reading `account.issuer` off a row or off `client.accounts.list()` | `sys_sso_provider.issuer`, resolved through the account's `provider_id` | `provider_id` is unique per environment, so it names the authority on its own |
+  | `backfillAccountIssuer(ql, …)` | — | delete the call; there is no successor pass |
+  | `CREDENTIAL_ISSUER` / `oauthIssuerFor(id)` | — | drop the argument; `internalAdapter.createAccount({ userId, providerId, accountId, password })` takes no `issuer` |
+  | `ResolvedSocialProvider`, `BackfillAccountIssuerOptions`, `BackfillAccountIssuerResult` | — | delete the import; the compiler names every site |
+  | `@better-auth/*` at an exact `1.7.2` (eleven members) | an exact `1.7.3` (eleven members) | the family moves as ONE line — `@better-auth/core@1.7.2` and `@better-auth/kysely-adapter@1.7.3` are mutually incompatible in both directions |
+  
+  ## ⭐ Existing deployments: run the pre-flight BEFORE the column is dropped
+  
+  Uniqueness moves from `(issuer, account_id)` to `(provider_id, account_id)` — a
+  **narrower** key. Two rows sharing `provider_id` + `account_id` and differing only in
+  `issuer` are legal under the old key and are ONE account under the new one.
+  
+  ```
+  os migrate account-issuer          # read-only; exits non-zero when the drop must not proceed
+  # … take a backup (the operator's act, and the apply step's precondition) …
+  os migrate apply --allow-destructive
+  os migrate account-issuer          # post-check: reads zero
+  ```
+  
+  The pre-flight reads **rows**, never the index declaration. `syncDeclaredIndexes` logs a
+  plain UNIQUE whose CREATE failed on existing duplicates onto the durability channel and
+  lets the boot continue (`#14902` / `#15479`), so a database can carry the declaration
+  without the constraint — and on such a database the drop does not fail loudly, it
+  degrades silently: the rows become indistinguishable and a sign-in can resolve onto the
+  wrong user's account. `os migrate apply --allow-destructive` re-runs the same pre-flight
+  and refuses the drop before writing any DDL. A read that throws, or a scan that
+  truncates, refuses too — an unread table is not a clean one.
+  
+  ⛔ Colliding rows are never merged or dropped for you: which row survives is application
+  knowledge, and two different people can be behind one colliding key. Keep the row whose
+  provider account is live, delete the rest so a fresh sign-in re-links, and re-run.
+  
+  The boot refusal is unchanged and needs no new machinery: a runtime already refuses to
+  start against unapplied destructive drift, naming the command to run, and never
+  auto-migrates.
+  
+  ## ⚠️ A `provider_id` re-pointed at a different IdP must have its bindings REBUILT
+  
+  This is the one case `issuer` still discriminated. After the drop no column records which
+  IdP vouched for a row, so if a re-pointed provider's new IdP mints a subject the old one
+  had already issued to somebody else, the key resolves that sign-in onto the other
+  person's account. Under the old key that failed loudly (`unable_to_link_account`); under
+  the new one it is silent.
+  
+  ⇒ `sys_sso_provider` now **refuses an `issuer` change while `sys_account` rows are still
+  bound to that `provider_id`** (`RESOURCE_CONFLICT` / 409). Delete the provider's account
+  bindings first; each user re-links on their next sign-in.
+  
+  ## Why the column was a liability, not an asset
+  
+  A credential row whose `issuer` was not the local credential issuer was invisible to
+  `findAccountByKey`, so sign-in failed `INVALID_EMAIL_OR_PASSWORD` behind a "User not
+  found" warn pointing at the `sys_user` row rather than at the account. **Four checklist
+  items had that recorded as a knownGap, each rediscovering it.** Its discriminating power
+  here was near zero anyway: `sys_sso_provider` declares `{ fields: ['provider_id'], unique:
+  true }`, so `provider_id → issuer` is a function within an environment.
+  
+  ## Also in this change
+  
+  `pnpm check:vendor-export-contract` (from `#16186`) keeps its exactness requirement and
+  still resolves every named symbol — its self-test re-anchors from the now-retired
+  `@better-auth/core/db` specimen onto a live edge, and gains a case asserting the two
+  deleted names are imported nowhere. `#11627`'s hash-shadow-key machinery is untouched: it
+  is a generic driver capability serving five UNIQUE members of the >768-char class.
+
+### Patch Changes
+
+- c9246fa: fix(plugin-auth): `/sign-in/email` and `/sign-up/email` now attach the `session` their declared `SessionResponse` envelope requires (#17234)
+  
+  Both routes answered `{ token, user }` (`/sign-in/email` also carries
+  `redirect`) with no `session` member anywhere in the body or the response
+  headers, so `SessionResponseSchema.safeParse` on `auth.login()` / `auth.register()`'s
+  return value always reported a `data.session` issue — the second of two
+  departures measured on #17234 (`success` was closed in the previous round).
+  
+  **The fix is a read, never an invention.** better-auth stores sessions in the
+  database by default and `internalAdapter.createSession` is awaited to
+  completion — including the write — before either endpoint returns its
+  `{ token, user }` body (measured against the installed `better-auth@1.7.3`,
+  `dist/db/internal-adapter.mjs:247-319`). So the row the response's own `token`
+  names is already committed by the time this repo's global `after` hook runs.
+  The fix reads it back through `internalAdapter.findSession(token)` — the exact
+  seam `/get-session` already uses for `data.session` — and attaches it. No id or
+  expiry is ever fabricated; a read that fails for any reason (no
+  `internalAdapter`, no row, any error) leaves the response exactly as
+  better-auth wrote it.
+  
+  ```
+  FROM  POST /api/v1/auth/sign-in/email -> 200 { redirect, token, user }
+  TO    POST /api/v1/auth/sign-in/email -> 200 { redirect, token, user, session }
+  
+  FROM  POST /api/v1/auth/sign-up/email -> 200 { token, user }
+  TO    POST /api/v1/auth/sign-up/email -> 200 { token, user, session }
+  ```
+  
+  `session` is the SAME row a following `/get-session` call reads (same `id`,
+  same `expiresAt`, same `userId`) — one row read twice, not two arrangements —
+  and `session.token` is the same UNSIGNED credential the body already carried
+  at `token` / `data.token`, not a second credential this fix introduces.
+  
+  ⛔ **No wire byte moves on any other member.** `token`, `user`, `redirect` are
+  byte-identical; `data.token` and the client's auto-`this.token = data.token`
+  are unchanged and pinned. `auth.me()` / `auth.refreshToken()` (`/get-session`,
+  #16760) are untouched — this change is scoped to the two credential-issuing
+  routes.
+  
+  This is additive on an already-declared field — `SessionResponseSchema.data.session`
+  existed in `@objectstack/spec` before this card; the two routes simply did not
+  serve it. No schema changes, no new exported symbol, no new key on any
+  published payload.
+- efa2533: fix(plugin-auth): build ONE better-auth instance per boot, so the RFC 8707 resource row is seeded once (#17176)
+  
+  `AuthManager.getOrCreateAuth()` assigned its `this.auth` memo only after `createAuthInstance()` had resolved, and that function awaits a dynamic `import('better-auth')`, the plugin list, the password hasher and finally better-auth's own `$context`. Every caller arriving inside that window read `this.auth === null` and started its own build, so overlapping callers constructed one better-auth instance each — measured: three concurrent `getAuthInstance()` calls returned three distinct instances.
+  
+  The boot has such callers. `AuthPlugin` dispatches `registerOidcDiscoveryRoutes()` with `void` from its route-mounting `kernel:ready` hook, which returns while that call is still pending, and a later `kernel:ready` hook reads the instantiated social providers off the instance for the account-issuer backfill.
+  
+  Each duplicate instance re-runs every better-auth plugin's `init`, and `@better-auth/oauth-provider` seeds the RFC 8707 `sys_oauth_resource` row from there. Its seed is already check-then-insert — `findOne` by `identifier`, then `create` only on a miss — so on a warm database every instance finds the row and inserts nothing. On a FRESH one all of them miss together, all of them insert, and the unique index refuses all but the first: the `Insert operation failed {object: sys_oauth_resource}` line on the first boot of a fresh project.
+  
+  `getOrCreateAuth()` now holds the in-flight build so concurrent callers share it. The seed runs once per process on every driver, because there is only one plugin `init` to run it. Two consequences of the new in-flight slot: `setRuntimeBaseUrl()` now reports "already created" for a build in flight (it silently no-opped before), and `applyConfigPatch()` discards a build composed from the pre-patch configuration instead of letting it install itself.
+  
+  No log level changed, in this package or any other.
+- dd2fd20: fix(plugin-auth): one base-path normalisation chain, and an MCP resource identifier that is always a URL
+  
+  `AuthManager` derived its base path in three independent places. `getMcpResourceUrl()`
+  read `this.config.basePath` directly and added no leading slash, so a `basePath`
+  configured without one produced a value that is not a URL at all:
+  
+      basePath 'api/v1/auth'   ->  http://localhost:3000api/v1/mcp
+  
+  `new URL()` throws on that (`3000api` is not a port), so the RFC 9728 path-inserted
+  well-known route derived from it throws too, and `@better-auth/oauth-provider` 1.7.2
+  refuses to seed the `sys_oauth_resource` row from it at plugin init ("resource
+  identifier ... must be an absolute URI (RFC 8707 §2)"). With
+  `enforcePerClientResources` at its `true` default, every MCP client was then refused
+  for want of a link row. That input class could never mint or match a token, so
+  repairing it re-selects nothing.
+  
+  There is now exactly one read of the configured value and one chain above it:
+  
+      configuredBasePath()   the configured value VERBATIM — what better-auth is handed
+        └─ rootedBasePath()  + a leading slash when absent (better-auth's own rule)
+             ├─ getAuthIssuer()      = origin + this
+             └─ getBasePath()        = this, trailing slashes stripped
+                  └─ getMcpResourceUrl()  = origin + this minus `/auth` + `/mcp`
+  
+  `getAuthIssuer()` and `getBasePath()` answer byte-identically to before for every
+  spelling. Only `getMcpResourceUrl()` moves, and only for a non-canonical `basePath`:
+  a missing leading slash (was not a URL), repeated trailing slashes, or a configured
+  `/` (was a `//mcp` path no mount serves). A canonical `basePath` is unchanged on all
+  three getters.
+- d2c1d19: fix(objectql)!: `beforeUpdate` receives the record the engine intends to persist, and the caller's submission travels on `ctx.submitted` (#16344)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) an enforcement-ORDER change plus one ADDITIVE optional key on a runtime context schema. No authorable key, spelling or stored shape moves, so a stored `sys_metadata` row needs no conversion and an upgrader has nothing to hand-edit. What changes is which image a `beforeUpdate` handler is shown; the remedy for a handler that depended on seeing a refused value is to read `ctx.submitted`, which is a code edit in the handler, not a metadata migration. Nothing is retired: `HookContext.submitted` is new and optional. -->
+  
+  **BREAKING** — what a `beforeUpdate` handler reads on `ctx.input.data` changes. A `readonly` field the caller supplied a value for is no longer there. The hidden set is the update strip's own subject set: author-declared `readonly: true` **and** the types whose value the runtime owns end to end (`autonumber`, implicitly read-only since #5503). `readonlyWhen` locks are deliberately not hidden.
+  
+  ## The defect
+  
+  On update, a value sent for a field declared `readonly: true` was correctly **not persisted** — and was still handed to the object's `beforeUpdate` hook. A hook deriving columns from the incoming record therefore derived them from a value the row would never contain, and **those derived writes persisted**, because they are the hook's own.
+  
+  Measured on a real app (17.2.0, sqlite, dev runtime) and reproduced in `packages/objectql/src/engine-readonly-hook-input.test.ts`. One `PATCH { actual_value: 380, target_value: 1, weight: 1 }` against a `readonly` `target_value`:
+  
+  ```
+  read back: target_value 400   weight 10        ← the strip worked
+             score 1.2  calc_trace "实际 380 / 目标 1 … 权重 1%"
+  ```
+  
+  The row's own audit trail cites values the row does not hold. No error, no warning, 200, and `droppedFields` correctly reporting the strip the whole time — every channel said the write was fine, because by every channel's own lights it was. The only way for an application to be safe was for every hook to re-read its read-only columns and ignore the incoming record, which defeats declaring them read-only at all.
+  
+  ## What changed
+  
+  **`ctx.input.data` on `beforeUpdate` is now the record the engine intends to persist.** Caller-supplied values for `readonly` fields are taken out of the hooks' view before the before phase is dispatched, and handed back at the engine's post-hook confluence — so the payload every engine-owned consumer below reads is byte-for-byte what it read before. `onFieldsDropped` reports the same fields with the same `readonly` reason, the read-only WARN says the same sentence, and `strictReadonlyWrites` refuses exactly the same writes.
+  
+  **The caller's submission travels on a new `HookContext` member, `ctx.submitted`** (`@objectstack/spec`, `HookContextSchema`) — the payload as sent, snapshotted at engine entry before any middleware or hook stamp, frozen, and documented as *diagnostics only, never the persist image*. It is bound on the update verb, both phases, and every per-row dispatch of one caller write.
+  
+  Two things deliberately did **not** move:
+  
+  - **The enforcement pass is still after the hooks.** It is the only point that can tell a hook's stamp from a caller's forgery (`hookWrittenKeys`), so a `beforeUpdate` that stamps a read-only column still lands — including when the caller echoed the same key back, which is the whole subject of #5591 / #14088.
+  - **`beforeInsert` is untouched.** The create side's strip position is settled post-hook by ruling C (#14147, "one semantics, one enforcement point"), and `readonlyWhen`-locked fields stay hook-writable per #9107.
+  
+  `@objectstack/plugin-auth`'s ADR-0092 identity write guard is migrated onto the new member in the same change, which is why nothing degrades: its 403 and its security warn still name the non-whitelisted field the caller sent. Without that migration the identical request answers `None of the submitted fields (—) are editable` — as strong a refusal, saying nothing about what was refused. Both readings are pinned side by side in `identity-write-guard.test.ts`.
+  
+  Ruled 2026-09-08 (maintainer, verbatim 「批 #87 同意」, director seat, decision batch #87). The refused primary was the same strip move **without** the new member: the ADR-0092 diagnostic degrades and every third-party `beforeUpdate` guard reading `ctx.input.data` degrades with it, silently. The refused alternative on the other side was documenting that hooks must read read-only columns from `ctx.previous` — which outsources the invariant to every application, the exact shape triage had already rejected.
+  
+  ## Who is affected
+  
+  A `beforeUpdate` handler that **reads a `readonly` field (declared, or runtime-owned) out of `ctx.input.data`**, on a non-`isSystem` write. Three shapes, and the fix is one line each:
+  
+  - **deriving a value from it** — this is the defect; the handler now derives from `ctx.previous`, or from `ctx.input.data` with the payload's absence meaning "unchanged", which is what it always meant for a field the caller never sent.
+  - **reporting on what the caller sent** (a guard naming the offending key) — read `ctx.submitted`.
+  - **a self-assignment** (`data.x = data.x`) on such a field — this used to promote the caller's forged value to hook-owned and commit it. It is now a **no-op**: the key the hook reads is gone, so the line re-creates it holding `undefined`, and the engine treats set-to-undefined of a hidden read-only key as the no-op it is — deleting the key, dropping it from the hook-write record, and letting the ordinary hand-back put the caller's value back for the strip to judge. **The stored value stands**, and the write reports exactly as it would with no hook at all (stripped, `onFieldsDropped`, the WARN, `strictReadonlyWrites` refusing). Persisting the `undefined` instead would erase the stored value on the memory driver and hand knex an undefined binding on a SQL one — neither is the record the engine intends to persist. That laundering route closing is intended, and it is re-pinned in both directions rather than removed.
+  
+  ⚠️ **The sharpest edge is a sandboxed `body` hook, and it is a refusal rather than a quiet change.** A body that reaches *through* such a key — `ctx.input.locked_meta.who = 'hook'` — now dereferences `undefined` and throws, and a `body`'s default `onError` is `abort`, so the caller's **whole write is rejected** where it used to succeed. What that body used to do was persist a value derived from the caller's forgery, so refusing is the correct direction; but the message the author sees is a raw `TypeError` from their own dereference and names nothing actionable. Measured end to end through a real QuickJS sandbox and pinned in `packages/runtime/src/sandbox/hook-input-writeback-readonly-provenance.integration.test.ts`.
+  
+  A body hook cannot read `ctx.submitted`: it is deliberately not marshalled onto the sandbox face, for the reason `dispatch.scope` is not — that face is assembled key by key, and a key added there is a second published contract with its own compatibility story. A body deriving a column from a read-only field reads **`ctx.previous`**, the stored row, which is the correct source either way.
+  
+  ⚠️ **One ADR-0092 boundary changes a status code, and no in-repo object hits it today.** On an object whose UPDATE whitelist admits a field that is ALSO declared `readonly`, a whitelist-only payload now answers **403** where it used to answer **200 having written nothing**. The identity write guard composes its refused list from what the engine left it, and a whitelisted key is excluded from that list by design, so the refusal reads `None of the submitted fields (—) are editable` — naming nothing. The write was already being dropped by the read-only strip before this change; what moves is that the caller is now told, and told imprecisely. `sys_user`'s three writable fields are not read-only, so nothing in this repository is on that boundary; an application that puts a `readonly` field in an UPDATE whitelist should take it out, which is what the whitelist meant either way.
+  
+  An `isSystem` caller sees no change at all: the strip has never applied to one, and neither does the hide.
+- 96684bb: fix(plugin-auth): let `ImportProtocolLike` type the admin import protocol's members (#17422)
+  
+  `admin-import-users.ts` is the only hand-written in-repo implementor of the runner's `ImportProtocolLike`, and it annotated all three required members `args: any`. An explicit parameter annotation wins over the contextual type, so #16952's newly declared request dialect held every implementor except this one — the one with a demonstrated history: before #16950 this file read `args?.query?.$filter ?? {}`, the runner moved to the canonical spelling, the read went `undefined`, and the `?? {}` default degraded the import's duplicate probe into match-everything, so `POST /api/v1/auth/admin/import-users` updated the wrong users without a sound.
+  
+  The three annotations are deleted, so `findData` / `createData` / `updateData` are typed by the contract they implement. Measured: with the annotations gone, reading a retired wire alias (`args.query?.$filter`) is `TS2339 Property '$filter' does not exist on type 'QueryInput'`; with `args: any` restored the identical probe type-checks at exit 0.
+  
+  `FindDataRequest` declares `query` optional, so `findData` now states its refusal in code — a thrown `Error` carrying the already-registered `INVALID_REQUEST` code — instead of relying on an incidental `TypeError` from a property read on `undefined`. No `??` fallback and no optional chaining were added: both spell match-everything, which is the defect this closes.
+  
+  No API, request body, response shape or exported signature changes. A caller that reaches `findData` through `runImport` always supplies `query`, so no supported call moves; only a protocol call that was already failing now fails with a code attached.
+- 45c2cf9: MCP OAuth: refuse a `client_credentials` (machine-to-machine) access token
+  
+  `AuthManager.verifyMcpAccessToken` resolved an M2M access token to a
+  principal — a machine ran as an authenticated member, stamping a user id that
+  belongs to no user into `created_by` / `updated_by` and owner columns — while
+  the method's own contract declared such tokens rejected. The contract's
+  premise was that they carry no `sub`; the OAuth provider stamps
+  `sub = user?.id ?? client.clientId`, so the premise was never true and the
+  rejection it described could never fire.
+  
+  The subject and the client identity are now read as a pair, the way RFC 9068
+  defines them for a JWT access token: `client_id` is REQUIRED (§2.2), and `sub`
+  is the resource owner for a grant that had one or an identifier for the client
+  application for a grant that did not (§2.2.3.1). A token whose `sub` equals its
+  own `client_id` / `azp` therefore assembles no principal, and the MCP HTTP door
+  answers `401`. A token carrying neither client claim is refused as well: the
+  check has no input, and a check that cannot run must not silently pass.
+  
+  Unchanged: interactive OAuth clients (authorization code + PKCE) resolve
+  exactly as before, and the headless track is untouched — `x-api-key` /
+  `Bearer osk_…` over HTTP and `OS_MCP_STDIO_API_KEY` over stdio are a separate
+  chain with a separate credential shape, and remain the supported way for a
+  machine to call this platform.
+- 9ca49eb: `runAdminImportUsers`'s hand-written `ImportProtocolLike` reads the CANONICAL QueryAST (`where` / `limit`) — the payload `@objectstack/rest`'s import runner sends as of this same release — instead of the wire-only `$filter` / `$top`.
+  
+  `POST /api/v1/auth/admin/import-users` reuses the shared import runner but swaps in an identity-specific protocol, because an identity write is `auth.api.createUser` and not an engine insert. That protocol is hand-written, so it never passes through `ObjectStackProtocolImplementation` — the normalizer that folds `$filter` onto `where` and `$top` onto `limit` for a caller arriving off the HTTP door. It has to read the canonical keys itself.
+  
+  - **A mismatch here does not produce a missing filter, it produces an unbounded one.** `const where = args?.query?.$filter ?? {}` turns an unread key into an empty filter, and an empty filter constrains nothing: the upsert duplicate probe stops discriminating, `findExisting` matches rows it was given no key for, and an admin import updates the WRONG user. Both halves are measured in `admin-import-users.test.ts` — the email-match case reported `updated: 2` where one of the two rows was new, and the phone-match case sent a probe carrying no `where` at all.
+  - **One dialect, and no default behind it.** The two reads are now `args.query.where` and `args.query.limit`, with no `??`. A default here would not be tolerance for an older caller — this handle is fed by the runner, never off the wire — it is precisely the lenient fallback that converts a spelling mismatch into a silent match-everything. A request that arrives without a `query` now costs a loud `TypeError` instead.
+  
+  ⚠️ No published version shipped the mismatch. The runner's rewrite and this adapter land in the same release, and `@objectstack/plugin-auth` depends on `@objectstack/rest` at an exact workspace version, so the two cannot be installed apart. What this entry records is why they move together — and what the same mismatch costs any OTHER hand-written `ImportProtocolLike`, which the `@objectstack/rest` entry calls out for implementors.
+- ab1c585: `POST /two-factor/verify-totp` and `/two-factor/verify-otp` now echo the user row as it stands when the response is written, instead of the pre-rotation snapshot the vendor closes over.
+  
+  On the enrolment lane — a signed-in caller confirming a new factor — better-auth writes `twoFactorEnabled: true`, rotates the session, and only then calls the `valid(ctx)` closure it built at entry. That closure still holds the pre-rotation session, so a successful verification answered `user.twoFactorEnabled: false` to the very caller who had just switched 2FA on. An account portal reading that body renders the factor as still OFF right after enrolment, and a bearer client that caches the echoed user carries the wrong flag until its next `get-session`.
+  
+  `two-factor-rotated-token-echo` already repaired the body's other stale member, `token`, on exactly these routes and on exactly this predicate — the response staged a session cookie whose token differs from the one echoed. The `user` member is stale for the same reason, so it is repaired under the same predicate rather than a new one.
+  
+  - **Two narrowings, both load-bearing.** Only the members the vendor already echoed are written, so the published payload shape (`AuthWireUser`) cannot widen — better-auth's own output filter is a deny-list, and forwarding a raw row would put every column it happens to carry on the wire. And the row is re-read through `internalAdapter` by the id the response itself published, so the repair travels the same output transform that produced the echo (a driver that stores booleans as `1`/`0` cannot change a member's wire type) and can never substitute a different principal into a response.
+  - **`/two-factor/verify-backup-code` is untouched.** It does not rotate and already echoed the live row; it is in neither path list, its row is not read, and it is pinned as a negative control on both the in-memory engine and a real `SqlDriver` — an unconditional re-read would have "fixed" the broken lane and quietly rewritten one that was already right.
+  - **The failure posture is inherited.** A row read that throws or answers nothing degrades to the vendor's own echo, never to a failed verification and never to a lost `token` repair, which is written first for that reason.
+  
+  `@objectstack/client` drops the `AuthTwoFactorVerificationResult.user` warning that told callers to re-read the session for the live flag; the wire shape it declares is unchanged.
+- Updated dependencies [7f62536]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [245f360]
+- Updated dependencies [324968e]
+- Updated dependencies [3a5eaea]
+- Updated dependencies [fe71032]
+- Updated dependencies [482d34d]
+- Updated dependencies [305e7fc]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [9c577c1]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [baf9745]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [a370073]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [6548118]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [48203ff]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [c9eb773]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [dfeba25]
+- Updated dependencies [0a88a80]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [e7ff9c2]
+- Updated dependencies [690f083]
+- Updated dependencies [e7fea46]
+- Updated dependencies [a9096af]
+- Updated dependencies [4be4e04]
+- Updated dependencies [2b08a72]
+- Updated dependencies [758ac40]
+- Updated dependencies [c744c0a]
+- Updated dependencies [134b410]
+- Updated dependencies [4c42fd1]
+- Updated dependencies [5f392f0]
+- Updated dependencies [94c9302]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [f03f6c7]
+- Updated dependencies [cf79182]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [c3ebe4a]
+- Updated dependencies [a900841]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [71629a1]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [288fe9c]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [ab56ea3]
+- Updated dependencies [9ca49eb]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [6e3462d]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [3644fad]
+- Updated dependencies [dfb42c5]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5a95b0e]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [2e8e118]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [cf6e0a1]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [de1a611]
+- Updated dependencies [db76982]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [ab450f4]
+- Updated dependencies [025588a]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [4215417]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/types@17.5.0
+  - @objectstack/spec@17.5.0
+  - @objectstack/rest@17.5.0
+  - @objectstack/platform-objects@17.5.0
+  - @objectstack/core@17.5.0
+  - @objectstack/service-messaging@17.5.0
+
 ## 17.4.0
 
 ### Minor Changes

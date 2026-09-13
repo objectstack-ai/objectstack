@@ -1,5 +1,697 @@
 # @objectstack/driver-sql
 
+## 17.5.0
+
+### Minor Changes
+
+- fe71032: feat(driver-sql,objectql,cli)!: the ADR-0104 file-family column step, and the kernel→driver supply that arms it (#15989)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable moves. No `packages/spec` key, no Zod schema, no authored metadata property, no object definition and no accepted request shape changes its spelling, type or legality in this diff: `DataMigrationFlagSchema` and its `columns_moved_at` member landed under #16185 and are READ here, not edited, and the one `packages/spec` edit is a new exported PREDICATE function over that existing type. So `objectstack migrate meta` has nothing to visit, `spec-changes.json` has nothing to project and the upgrade guide has no row to gain — the ledger's whole subject is authored metadata, and what moves here is a physical column's type plus the encoding of the values inside it, on a deployment whose operator ran a command to move them. ADR-0104's row-data side already has its own declared, operator-run surface (`os migrate files-to-references`), which is not a metadata upgrade. The other four categories are closed on facts: every package here publishes to npm, declares no `private` and ships `dist` in `files[]` (not `unpublished`); no ADR-0087 id is minted in this diff (not `registered`) and none pre-dates the base that would cover it (not `already-registered`); and exported declarations DO change — 13 new declarations reaching a package entry (11 on `@objectstack/driver-sql`'s: the 6 values MEDIA_COLUMN_MOVE_DIALECTS, MEDIA_COLUMN_MOVE_ROLLBACK_NOTES, MEDIA_ID_MOVE_WIDTH, isJsonColumnType, mediaColumnMoveDialect, mediaColumnMovePlan and the 5 types MediaColumnMoveDialect, MediaColumnMoveKind, MediaColumnMovePlan, MediaColumnMoveRefusal, MediaColumnMoveScan; plus recordFileColumnMove on `@objectstack/platform-objects/system` and hasMovedFileColumns on `@objectstack/spec`) and 3 new public methods on exported classes (SqlDriver.planMediaColumnMove, SqlDriver.setFileColumnsMovedResolver, ObjectQL.haveFileColumnsMoved) — so neither `runtime-interface-only` nor `type-surface-only` applies. The `**BREAKING**` banner below is carried rather than dropped, because published storage behaviour of `@objectstack/driver-sql` changes. -->
+  
+  **BREAKING** on the published storage behaviour of `@objectstack/driver-sql`. A deployment that runs `os migrate files-to-references --apply` now has its media columns **retyped and their values rewritten** into the bare-`sys_file`-id encoding, and its driver writes bare ids from the next boot. This completes the maintainer ruling on #15041 (「15041 应该改为实际 id 保存。选A，其他同意」) whose encoding half shipped in the previous release.
+  
+  Shipped as `minor` under the repo's launch-window convention, in which `major` is refused by `check-changeset-no-major` and breaking-ness is carried by this banner plus the ADR-0087 disposition rather than by the level.
+  
+  ## The column step
+  
+  `os migrate files-to-references --apply` gains a further step, run **only after** the backfill and its self-check report zero blocking rows — and it moves nothing at all until three gates pass:
+  
+  1. the migration's own gate (zero blocking rows);
+  2. **every** abort pre-check, across **every** planned column, before a single statement runs;
+  3. no refusals — a column the driver could not plan stops the columns it could.
+  
+  **PostgreSQL** and **SQLite** only. ⛔ MySQL is refused by name and belongs to #17788, where its statement ORDER is settled against a real instance rather than transcribed.
+  
+  Per column, the shape is read off the column's **physical type**, not off the dialect: a `json` column is retyped (`ALTER … TYPE varchar(2048) USING (col #>> '{}')`), while a column that is already `varchar` — the population `os generate migration --format sql` creates and a JSON-arm driver fills with quoted ids — has its values unquoted in place. SQLite has only the second shape, since it has no json type.
+  
+  ### ⛔ The abort clause is NOT the one the ADR sketched
+  
+  The #15041 addendum prescribed the retype with nothing in front of it while *requiring* the step to abort "on the first cell that is not a JSON string". Those two sentences contradict each other, and which was wrong was settled by running it. Measured on live PostgreSQL 16.13, `USING (col #>> '{}')` is **accepted** over a row holding an inline metadata blob, because `#>> '{}'` extracts *any* json type as text: the bytes survive, but the column is no longer `json`, so an object becomes a plain string in a column whose declared contents are ids — silently, in a migration that reports success. The director ruling (decision batch #120 item 1) replaced the clause with the pre-check that implements the requirement: `json_typeof(col) IS DISTINCT FROM 'string'` on PostgreSQL, and `json_valid(col) AND json_type(col) <> 'text'` on SQLite, where excluding invalid JSON is what keeps a re-run idempotent over cells a previous run already moved.
+  
+  Both the destructive form and the guarded one are executed side by side, on one fixture, in this release's own test suite — so the difference stays a measurement rather than a comment.
+  
+  ## The kernel→driver supply seam
+  
+  `SqlDriverConfig.fileColumnsMoved` shipped last release and no host outside the driver supplied it. It is supplied now: `ObjectQL.registerDriver` hands every driver that has the seam a closure over the new `ObjectQL.haveFileColumnsMoved()`, which reads `sys_migration.columns_moved_at` — and requires the `adr-0104-file-references` flag to be verified **as well**, since the stamp alone would attest a column move with nothing attesting the values inside it.
+  
+  ⭐ **Every way of not knowing still answers "not moved".** The option omitted, a resolver that throws or rejects or answers a non-`true` value, a resolver that never runs because the host never calls `initObjects`, a driver with no such seam, no `sys_migration` object, no row, an unreadable table, a null or empty stamp — all the JSON arm. That is the encoding every deployment in the world is on, and a driver that guessed the other way would write bare ids into a JSON column.
+  
+  ⛔ **A host that names `fileColumnsMoved` in its own config wins**, in either polarity. The engine only ever fills an empty slot, and never contradicts an explicit composition: overruling a declared `false` is precisely the bare-ids-into-a-JSON-column failure this mechanism exists to prevent.
+  
+  ## New published surface
+  
+  - `@objectstack/spec` — `hasMovedFileColumns(flag)`, the single arbiter of the conjunction above, beside `isDataMigrationFlagVerified` and `authorisesIrreversibleAction`.
+  - `@objectstack/objectql` — `ObjectQL.haveFileColumnsMoved()`, sharing one memoized read (and one `invalidateDataMigrationFlags()`) with `isFileReferencesMigrationVerified()`, so the two answers can never come out of one another's date.
+  - `@objectstack/platform-objects` — `recordFileColumnMove(engine, migrationId)`, which refuses to stamp a deployment with no verified flag row. `readDataMigrationFlag` now carries `columns_moved_at`; it previously dropped it, which made a moved deployment indistinguishable from an unmoved one to every caller.
+  - `@objectstack/driver-sql` — `SqlDriver.setFileColumnsMovedResolver()`, `SqlDriver.planMediaColumnMove()`, and the statement builders `mediaColumnMovePlan` / `mediaColumnMoveDialect` / `isJsonColumnType` with `MEDIA_COLUMN_MOVE_DIALECTS`, `MEDIA_COLUMN_MOVE_ROLLBACK_NOTES` and `MEDIA_ID_MOVE_WIDTH`. The statements live in the package that owns the dialects and measured them; a second copy in the CLI would be a second copy of the clause the ruling got wrong.
+  
+  ## What does NOT change
+  
+  A deployment that does not run `--apply` is byte-for-byte where it was: the column stays `json`, the write still JSON-encodes, and the read still accepts both encodings. A backfill re-run does not set the stamp and — deliberately — cannot clear it either: `recordDataMigrationRun` omits the key rather than writing a preserved value, so a ledger read that FAILS cannot demote a moved deployment back onto the JSON arm. A partial or failed column step records nothing at all, which leaves such a datastore on the arm that reads both encodings.
+  
+  `multiple: true` media is untouched on both arms: its value is a list of ids and a JSON column on every deployment.
+- e04a0af: `$contains` on a multi-valued / JSON column is a MEMBERSHIP test, compiled per dialect so SQLite, MySQL and PostgreSQL answer the same rows.
+  
+  `$contains` is the membership spelling on a `multiple: true` field or a `JSON_COLUMN_TYPES` member — the one operator that kept working on a JSON column after the scalar-comparison family was refused there, and the spelling that refusal's own message prescribes. It was lowered like any other text operator, so each backend was asked about the SERIALIZATION rather than about the members, and the three answered three different things: SQLite matched a substring of the stored array text, MySQL coerced its `json` column for `LIKE` and matched the same substring, and PostgreSQL raised SQLSTATE 42883 (`operator does not exist: json ~~ text`) — a `DATABASE_ERROR` 500 for a filter the spec accepts.
+  
+  `driver-sql` now compiles a real membership construct per dialect: `jsonb` containment on PostgreSQL, `JSON_CONTAINS` on MySQL, a `json_each` scan on SQLite. `$notContains` moves with it as its exact complement.
+  
+  **Behaviour change on SQLite and MySQL, in the narrowing direction.** Where the substring reading matched ACROSS element boundaries it no longer does: `{ tags: { $contains: 'red' } }` stops answering a row whose only tag is `redwood`, and `{ nums: { $contains: '1' } }` stops answering a row holding `[10, 21]`. Those rows were wrong answers, not a contract — a filter that needs the old reading is asking for a substring search over a serialization and should be written against a scalar column. On PostgreSQL the same filters change from a 500 to the member rows.
+  
+  Unchanged: `$contains` on a scalar string column is still the case-sensitive substring test, and the rest of the text family (`$startsWith`, `$endsWith`, `$icontains`, `$like`, `$ilike`) keeps the lowering it had on every column.
+  
+  `packages/spec`'s `StringOperatorSchema` docblock — published source — now states the membership reading and records, per face, which runtimes answer it.
+- be5c602: fix(driver-sql,driver-turso): eight more `IDataDriver` doors publish their declared return type, not a nested `any` (#17690)
+  
+  **BREAKING** for TypeScript consumers — a published TYPE-surface narrowing, shipped as `minor` under the launch-window convention (PR #15280 for `SqlDriver.update()` and the `TursoDriver.update()` override, PR #14434 before it on `@objectstack/driver-memory`, PR #17258 for the five `SqlDriver` doors of #15267, PR #17689 for `aggregate()`). No runtime behaviour changes.
+  
+  Eight doors published an annotation whose `any` sat **inside** a wider type, while `packages/spec/src/contracts/data-driver.ts` had already declared each one narrower. A consumer holding one of these classes got `any` back and the compiler stopped checking:
+  
+  | class | door | published | now |
+  |---|---|---|---|
+  | `SqlDriver` | `find` | `Promise<any[]>` | `Promise<Record<string, unknown>[]>` |
+  | `SqlDriver` | `upsert` | `Promise<Record<string, any>>` | `Promise<Record<string, unknown>>` |
+  | `SqlDriver` | `bulkUpdate` | `Promise<Record<string, any>[]>` | `Promise<Record<string, unknown>[]>` |
+  | `SqlDriver` | `temporalFilterValue` | `any` | `unknown` |
+  | `TursoDriver` | `find` (override) | `Promise<any[]>` | `Promise<Record<string, unknown>[]>` |
+  | `TursoDriver` | `upsert` (override) | `Promise<Record<string, any>>` | `Promise<Record<string, unknown>>` |
+  | `TursoDriver` | `bulkUpdate` (override) | `Promise<Record<string, any>[]>` | `Promise<Record<string, unknown>[]>` |
+  | `RemoteTransport` | `beginTransaction` | `Promise<any>` | `Promise<unknown>` |
+  
+  The `TursoDriver` rows are separate sites, not consequences: an override re-declares the door in that package's own `.d.ts`, so the `@objectstack/driver-sql` narrowing does not reach a consumer holding a `TursoDriver`.
+  
+  **What a consumer does.** A cell read off a row now arrives as `unknown` and is typed before use (`String(row.name)`, `Number(cell)`, or a `typeof` narrowing); `Array.prototype.find` over a result set answers `… | undefined` and the absent arm is separated rather than asserted past. Measured across the whole consumer closure of both packages at this change's tree — 115 `typecheck` tasks — the repo-wide cost is **11 sites**, all inside `@objectstack/driver-sql` (9) and `@objectstack/driver-sqlite-wasm` (2), and **zero** outside the driver packages.
+  
+  `TursoDriver.beginTransaction` is deliberately NOT narrowed here and stays `Promise<any>`. It overrides `SqlDriver.beginTransaction(): Promise<Knex.Transaction>` — narrower than the contract, the honest direction, and the binding declaration for an override — so the contract's `Promise<unknown>` does not compile there (TS2416). That `any` masks an LSP violation, not an un-narrowed door, and closing it is a separate decision.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable moves. No metadata key, no authored property, no config field, no accepted request shape and no stored artifact changes spelling or shape: the edit is eight declared RETURN TYPES on two driver classes and one transport class, plus their docblocks, so `objectstack migrate meta` has nothing to rewrite, `spec-changes.json` has nothing to project and the upgrade guide has no row to gain. The party this change addresses is a TYPESCRIPT CONSUMER and the delivery channel is the compiler at their own call site — the audience the ADR-0087 ledger explicitly does not serve. This changeset carries no FROM/TO rewrite block for stored metadata; the "what a consumer does" paragraph above is a source-code prescription, which is exactly the distinction #13080 records this refusal cannot make on its own.
+       `type-surface-only` is the category built for this class of change, and it is NOT claimed here because it is UNAVAILABLE on ALL EIGHT doors — measured by driving the gate, not assumed, and refused on TWO INDEPENDENT legs.
+       Leg 1 — the six record-shaped doors. Predicate 4 (`narrowed-from-erased`) reads the base annotation through `isErasedType`, whose line is "the type IS `any`/`unknown`", never "the type CONTAINS `any`". Driven with `packages/drivers/driver-sql/src/sql-driver.ts#find`, the gate answers: "[predicate 4: narrowed-from-erased] is FALSE: at the merge base the return annotation of `find` was already CONCRETE (`Promise<any[]>`), not `any` / `unknown` / unannotated." `Promise<Record<string, any>>` and `Promise<Record<string, any>[]>` read the same way. That is this card's own subject one layer up: the predicate cannot express the question, so its refusal is about the spelling rather than about the change.
+       Leg 2 — the two `unknown`-destination doors, `SqlDriver.temporalFilterValue` (`any` to `unknown`) and `RemoteTransport.beginTransaction` (`Promise<any>` to `Promise<unknown>`). Their BASE side is erased, so leg 1 does not reach them; their HEAD side is refused instead. Driven with `packages/drivers/driver-turso/src/remote-transport.ts#beginTransaction`, the gate answers: "[predicate 4: narrowed-from-erased] is false at HEAD: the return annotation of `beginTransaction` is still `Promise<unknown>`. This category is for a surface that MOVED OFF an erased type. One that is still erased narrowed nothing." `unknown` is a real narrowing to a TypeScript consumer — it admits no property read, which is the whole break — but `isErasedType` groups it with `any`.
+       The two legs are each other's control: the same citation form and the same marker grammar produce two DIFFERENT refusals naming two different revs, so the probe is discriminating rather than rejecting everything handed to it. The **BREAKING** banner is carried rather than dropped — that erosion is what #13080 was filed about. Leg 2 is the erased-destination wrinkle #15267's changesets already had to write around; both legs are filed separately rather than worked around here. An instrument's silence is only evidence if the instrument could have spoken. -->
+- 88a9330: feat(driver-sql): `aggregate()` publishes its declared return type — the contract's own, not `any` (#17277)
+  
+  **BREAKING** for TypeScript consumers — a published TYPE-surface narrowing, shipped as `minor` under the launch-window convention (the one PR #14434 set for this class of change on `@objectstack/driver-memory`, and PRs #15280 and #15267 followed on this very class). `SqlDriver.aggregate()` carried an EXPLICIT `Promise<any>` over a door `IDataDriver` had already declared narrower: `aggregate?(object, query, options?): Promise<Record<string, unknown>[]>`. An explicit `any` satisfies that structurally, so `tsc` said nothing while the emitted `.d.ts` told every consumer that an aggregate row is whatever they like.
+  
+  The door is now declared as the contract declares it. A caller that read a cell straight off an aggregate row through the `any` now types what it reads — an aggregate cell arrives as `unknown` — and a caller that indexed the result array, or took `.find()` on it, now narrows the absent arm first. No runtime behaviour changes.
+  
+  `aggregate()` is OPTIONAL on the contract (`aggregate?`) where the five doors #15267 moved are required. That governs whether the member EXISTS, not what it returns once it does: a consumer that has already guarded `typeof driver.aggregate === 'function'` — the engine's own dispatch — holds a function whose published return was `any` and is now the contract's record array. The narrowing reaches it either way.
+  
+  `@objectstack/driver-sqlite-wasm` does not override this door and re-declares no member of its own, so it carries no entry: the narrowing reaches its consumers through this package's `.d.ts`. `@objectstack/driver-turso` overrides it and carries its own entry.
+  
+  <!-- adr-0087: not-required (type-surface-only packages/drivers/driver-sql/src/sql-driver.ts#aggregate) A published driver method's declared return moves off an explicit `any` onto the contract's own shape. No metadata key is removed, renamed or re-shaped, `packages/spec` is untouched, and nothing exists for `objectstack migrate meta`, `spec-changes.json` or the upgrade guide to rewrite; the obligation is a TypeScript narrowing at the consumer's own call site, delivered by the compiler. -->
+- 3cbcedb: feat(driver-sql): the five remaining `IDataDriver` doors publish their honest types — the contract's own, not `any` (#15267)
+  
+  **BREAKING** for TypeScript consumers — a published TYPE-surface narrowing, shipped as `minor` under the launch-window convention (the one PR #14434 set for the same class of change on `@objectstack/driver-memory`, and PR #15280 followed for `update()` on this very class). `SqlDriver` carried an EXPLICIT `Promise<any>` on five doors that `IDataDriver` had already declared narrower: `findOne()` (`Record<string, unknown> | null` — it has always answered `results[0] || null`), `create()` (`Record<string, unknown>`), `bulkCreate()` (`Record<string, unknown>[]`), `execute()` (`unknown`) and `explain()` (`unknown`). An explicit `any` satisfies all five structurally, so `tsc` said nothing while the emitted `.d.ts` told every consumer that `findOne()` never returns `null` and that `create()` returns whatever they like. #15280 un-masked `update()` and filed the census of what was left; this is that remainder.
+  
+  Each door is now declared as the contract declares it. A caller that read fields off `findOne()` through the `any` now narrows the `null` arm first; a caller that leaned on `any` to read undeclared members off `create()` / `bulkCreate()`, or to dereference a raw `execute()` / `explain()` result, now types what it reads. No runtime behaviour changes.
+  
+  `@objectstack/driver-sqlite-wasm` overrides none of these five and re-declares no member of its own, so it carries no entry: the narrowing reaches its consumers through this package's `.d.ts`. `@objectstack/driver-turso` overrides four of the five and carries its own entry.
+  
+  Out of scope and deliberately unmoved: `analyzeQuery()` (not an `IDataDriver` member) and `aggregate()` keep their annotations.
+  
+  <!-- adr-0087: not-required (type-surface-only packages/drivers/driver-sql/src/sql-driver.ts#findOne, packages/drivers/driver-sql/src/sql-driver.ts#create, packages/drivers/driver-sql/src/sql-driver.ts#bulkCreate) Published driver methods' declared returns move off an explicit `any` onto the contract's own shapes. No metadata key is removed, renamed or re-shaped, `packages/spec` is untouched, and nothing exists for `objectstack migrate meta`, `spec-changes.json` or the upgrade guide to rewrite; the obligation is a TypeScript narrowing at the consumer's own call site, delivered by the compiler. The same change to `execute` and `explain` is not named above because their destination is the contract's own `unknown`, which `isErasedType` counts as erased (TSO-U6), so predicate 4 cannot read them as narrowed-from-erased; they carry the identical disposition and the body states them in full. -->
+- 2bed4c3: fix(objectql)!: a field whose `type` is absent or is not a `FieldType` member is refused at the registration door, and every downstream family default becomes a refusal (#16319)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) nothing an author can write is removed or renamed, and no conversion could repair these bodies: a field with no `type` carries no statement of intent for a conversion to rewrite, which is exactly the finding — the platform cannot know whether the author meant a bounded VARCHAR or an unbounded TEXT, and the two producers guessed differently. The remedy is a human decision per field, so it is prescribed in prose and in the refusal text rather than registered as a mechanical rewrite. -->
+  
+  **BREAKING** for stored metadata only: an object whose declaration carries a field with no `type`, or with a `type` that is not a `FieldType` member, **no longer loads**. Shipped as `minor` under the repo's launch-window convention. Maintainer ruling, 2026-09-10, verbatim: 「16319 一个没写 type(或拼错)的字段 应该禁止加载。这个才是合理的吧?其他同意」.
+  
+  **What you have to do.** Nothing, unless a `sys_metadata` row in your deployment carries such a field. If one does, the startup log names it at `error` level — object, field and reason — and the row is left untouched and still reachable: open it in Studio and give the field a real `FieldType` member, or delete it (`DELETE /api/v1/metadata/object/NAME`). Nothing that passes `FieldSchema` is affected: it has always required `type` and always refused a non-member, so only the doors that skip Zod could ever deliver one.
+  
+  ## What was wrong
+  
+  One declaration produced two different columns. Measured on live PostgreSQL 16.13, driving all three producers from one object:
+  
+  | declaration | driver | `os generate migration --format sql` | `--format ts` |
+  |:---|:---|:---|:---|
+  | `{ maxLength: 100 }`, no `type` | `character varying(100)` | `TEXT` | `TEXT` |
+  | `{ type: 'this_is_not_a_field_type', maxLength: 100 }` | `character varying(255)` | `TEXT` | `TEXT` |
+  
+  `SqlDriver.createColumn` read `field.type || 'string'`, which heads its STRING-family arm and sizes the column from the declared `maxLength` (knex's 255 without one). All four generator loops in `os generate` read `String(fieldDef.type || 'text')`, which heads the TEXT family — unbounded unless the column is keyed. Both directions of harm are in the first row: the platform refuses a 101-character value that both generated tables accept, and a table generated from the same object accepts values the platform will not store.
+  
+  ## What it does now
+  
+  - **One point of closure, at the registration door.** `SchemaRegistry.registerObject` refuses the WHOLE object declaration, with the ADR-0112 envelope (`INVALID_METADATA` + `422`), naming the object, the field and the reason — and offering the spec's own "did you mean?" for a mis-spelling. ⛔ The offending field is never dropped on its own: an object loaded one field short reports success at every authoring surface while the column is never created and every read of it answers `undefined`. Every door goes through this one — declared stacks, package and plugin manifests, `saveMetaItem`, the `sys_metadata` boot rehydration, and raw `registerObject` calls — and all three contributor kinds (`own`, `overlay`, `extend`) are judged, because `ObjectSchema.fields` and `ObjectExtensionSchema.fields` are both `z.record(z.string(), FieldSchema)`.
+  - **The startup policy is revised for this class.** `loadMetaFromDb`'s 「Registered anyway so it stays serveable and fixable」 no longer applies to it. The row does not register; the startup log states the consequence and the fix once, at `error`. The row itself is untouched, and the metadata API's raw-row path still lists it, still serves it with the offending field visible, still accepts a corrected write, and still deletes it — pinned, because a refused row that vanished from Studio would be unfixable.
+  - **Downstream guesses become refusals.** `createColumn` refuses a field that declares no `type` instead of building `varchar(255)` for it. All four `os generate` loops — both migration formats and both `os generate types` loops — refuse an absent or non-member `type` and generate nothing for that object, rather than emitting a table one column short. `fieldTypeToSql`'s docblock is rewritten in the same stroke: its `TEXT` miss branch is now dead residue of a total table, ⛔ not a family default to route anything new to.
+  
+  ## Scope, stated rather than left to be inferred
+  
+  `SqlDriver.createColumn` refuses `type` ABSENCE, not `FieldType` MEMBERSHIP. Membership is refused for the whole object at the registration door, which fronts every route into `syncSchema`, so a non-member cannot reach the driver from a runtime at all. `driver-sql`'s own test corpus declares 388 non-member spellings across ~100 files that drive `initObjects` directly, and `'string'` is a declared `case` arm of that switch whose column shape differs from every member's — so closing that half is a corpus migration with column consequences, deliberately not folded into this change. A pin holds the boundary in both directions.
+  
+  ONE fixture in that corpus is migrated here, because it is the one that crosses the door. `CROSS_FIELD_OBJECT_FIELDS` — exported from this package's root, so a published export and not only a local literal — declared `stage` and `owner` as `'string'`. Four of its five consumers hand it to `driver.initObjects`, which the paragraph above leaves alone; the fifth hands it to `ql.registerObject`, which now refuses the whole object. Both fields are re-spelled `'text'`. That is not a re-typing: `canonicalizeSqlType('varchar(255)')` is `'text'` and `suggestFieldTypeForSqlType('varchar(255)')` is `'text'`, both pinned in `spec/data/type-compat.test.ts`, so `'text'` is the spelling of the column `'string'` was already producing. It does move the emitted column from `varchar(255)` to `TEXT` (measured on sqlite-wasm: `stage varchar(255)` becomes `stage text`), which is inert for this fixture — no index keys either column, `initObjects` is passed no indexes, and the corpus's longest value in them is four characters.
+- 77c801e: feat(driver-sql)!: the file family's physical column holds the bare `sys_file` id, per deployment (#15989)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable moves. No spec key, no authored metadata property, no object definition, no accepted request shape and no `packages/spec` declaration changes spelling or shape in this diff: `FILE_REFERENCE_TYPES` and the ADR-0104 stored-value contract are READ here and not edited, and `packages/spec` is untouched. So `objectstack migrate meta` has nothing to rewrite, `spec-changes.json` has nothing to project and the upgrade guide has no row to gain — the ledger's whole subject is authored metadata, and what moves here is a driver's choice of physical column plus one read-side decode. The row-data side of ADR-0104 already has its own declared, operator-run surface (`os migrate files-to-references`) and is not a metadata upgrade. The `**BREAKING**` banner below is carried rather than dropped, because published storage behaviour of `@objectstack/driver-sql` does change. -->
+  
+  **BREAKING** on the published storage behaviour of `@objectstack/driver-sql`, under the maintainer ruling on #15041 (decision batch #49 item 1), verbatim: 「15041 应该改为实际 id 保存。选A，其他同意」. The physical column for the file family — `file` / `image` / `avatar` / `video` / `audio` — holds the **actual `sys_file` id**, a bare id string in a string column, rather than a JSON-quoted id in a JSON column. The SQL generator already emitted `VARCHAR(2048)` for the family and does not move; the driver is the side that moves.
+  
+  Shipped as `minor` under the repo's launch-window convention, in which `major` is refused by `check-changeset-no-major` and breaking-ness is carried by this banner plus the ADR-0087 disposition rather than by the level.
+  
+  **The switch is per DEPLOYMENT, and its default is today's encoding.** The ADR-0104 addendum forbids keying it on the `adr-0104-file-references` flag alone: every creation-attested store since 17.0 and every deployment that ran `os migrate files-to-references --apply` before a column step existed holds that flag *and* JSON-quoted ids in a JSON column. The evidence is `sys_migration.columns_moved_at`, which reaches this driver as the new published option `SqlDriverConfig.fileColumnsMoved` — a boolean or an async resolver, resolved once at `initObjects` and memoized. **Every way of not knowing answers "not moved"**: the option omitted, a resolver that throws, a resolver that never runs, a host that never calls `initObjects`. Absence is the JSON arm because every flag row that exists in the world today lacks the field, and a driver that guessed the other way would write bare ids into a JSON column.
+  
+  **What an UNMOVED deployment gets** — which is every deployment until something supplies that option — is today's driver, with exactly one answer changed:
+  
+  - the column is still `json` / `jsonb` / SQLite `TEXT`, the write still JSON-encodes, and `isJsonField` still answers `true` for the family;
+  - a media cell whose bytes are a JSON-quoted id **sitting in a character column** now reads back as the id instead of as the id with its quotes. That population is not hypothetical: a database built by `os generate migration --format sql` has a `VARCHAR(2048)` media column, and MEASURED on live PostgreSQL 16.13, the driver wrote `"file_01HXYZ"` into it and handed it back verbatim — every consumer that matches the raw stored form (file resolution, ownership claims) refused it. SQLite never had this defect: its read arm parses the cell and keeps the raw string when the parse fails, which is why the gap was a server-dialect one.
+  
+  **What a MOVED deployment gets**: the family leaves `JSON_COLUMN_TYPES`, so `isJsonField` / `formatInput` / `formatOutput` stop treating a single-value media field as JSON; `createColumn` builds `varchar(2048)` — the generator's own width, mirrored by `varcharColumnChars` so the drift detector reads the column the emitter actually builds; and the id on disk is the id. Throughout the window the read path accepts **both** encodings on every dialect, so a cell a column step has not converted still reads correctly. The decode is deliberately narrow — it engages only on a leading `"`, `{` or `[`, none of which can begin a `sys_file` id, a resolver URL or a `data:` URI — because an all-digit id would otherwise parse to a number.
+  
+  `multiple: true` media is unaffected on both arms: its value is a list of ids, it is a JSON column on every deployment, and `createColumn` decides `multiple` above its type switch.
+  
+  **The drift detector moves with the writer.** `JSON_COLUMN_FIELD_TYPES` no longer names the family, because the family is no longer a constant on either side; `diffManagedTable` takes a `fileColumnsMoved` input instead, and OMITTING it reproduces this module's previous verdicts exactly — an unthreaded caller keeps reporting a `varchar` media column as the corruption it still is on an unmoved deployment. Without this, a deployment that moved its columns would be told by its own tooling to convert them back to `json`, i.e. to undo the ruling.
+  
+  **Not shipped here, and named rather than implied:** the column step itself. `os migrate files-to-references --apply` does not yet retype or rewrite media columns, and nothing in this diff moves any deployment's storage. A deployment moves only when it runs that step and its host supplies the arm, and the two must be one act — MEASURED on SQLite: after the columns are converted, a driver still on the JSON arm reads the migrated column correctly but its next write re-quotes.
+- 9cdffbe: One physical representation for the NUMERIC column family, read by every producer of DDL
+  
+  `packages/spec` now states, per field type, what column a numeric field gets, and all three
+  producers read it: `SqlDriver.createColumn`, `os generate migration --format sql` and
+  `os generate migration --format typescript`. Measured on live PostgreSQL 16.13, one object
+  through all three producers, before and after:
+  
+  ```
+               BEFORE                                  AFTER
+               driver  sql gen        ts gen           all three
+  number       real    numeric(18,2)  numeric(8,2)     numeric(65,30)
+  currency     real    numeric(18,2)  numeric(8,2)     numeric(65,30)
+  percent      real    numeric(5,2)   numeric(8,2)     numeric(65,30)
+  slider       real    numeric(18,2)  numeric(8,2)     numeric(65,30)
+  summary      real    numeric(18,2)  numeric(8,2)     numeric(65,30)
+  progress     real    numeric(5,2)   numeric(8,2)     numeric(65,30)
+  rating       real    integer        integer          integer
+  ```
+  
+  7 of 7 columns diverged before, 0 of 7 after. Every arm of the old split lost data in its own
+  direction: `real` is IEEE-754 binary32, so a `currency` of `1234567.89` read back `1234567.9`;
+  `numeric(5,2)` and `numeric(18,2)` silently ROUND a legitimate `33.333` to `33.33` (round
+  half-up — executed, not inferred); `numeric(8,2)` refused `1234567.89` outright. `65,30` is
+  MySQL's documented `DECIMAL` maximum and therefore the portable one, and it is the only
+  candidate measured to lose nothing on a nine-value corpus.
+  
+  Both migration formats also take the physical `NOT NULL` from `storage.notNull` and never from
+  `required`, which is where `SqlDriver.createColumn` has taken it since ADR-0113: `required` is
+  the write-time contract the record validator enforces, and binding the DDL to it made every
+  post-deploy tightening a destructive migration.
+  
+  **BREAKING** — new columns only; no existing column is retyped, no migration is planned, and no
+  backfill runs. Four consequences to know before creating new tables:
+  
+  - `rating` is an INTEGER column, and the two server dialects dispose of a fractional star count
+    DIFFERENTLY — do not read one answer for both. PostgreSQL REFUSES `4.5` outright, where a
+    `real` column accepted it. MySQL does NOT refuse: it ROUNDS, and `4.5` becomes `5` with no
+    error, which is a silent alteration and the reason to declare a `slider` (in the exact-decimal
+    set) for anything that wants fractional values. SQLite refuses nothing either: it stores `4.5`
+    as a REAL in an INTEGER-affinity column, unchanged from today.
+  - An exact-decimal column is bounded where a float is not, in BOTH directions. It keeps 30
+    fractional digits: a magnitude whose significant digits run past the 30th decimal place loses
+    the tail silently — `1.2345678901234567e-15` stores as `0.000000000000001234567890123457`, so
+    the loss begins around |x| < 1e-13 and is total below 1e-30 — and magnitudes at or above 1e35
+    are REFUSED, where `real` kept about seven significant digits out to ~1e38. A refusal is loud;
+    the rounding it replaces was not.
+  - Reads are bounded by the wire contract, not by the column. `find()` hands back a JS number
+    (`z.number().finite()`), so a value that was never a JS double does not survive the round trip
+    exactly — `1234567890123456.123` reads back `1234567890123456`, and 2^53+1 reads back 2^53.
+    The fidelity this buys is an exact COLUMN read through a double: values written by this
+    platform round-trip exactly, and SQL-side writers, `summary` roll-ups computed in SQL and any
+    magnitude at or above 2^53 are bounded by the read seam. Widening that is a wire-contract
+    change and is not in this release.
+  - A generated migration no longer emits `NOT NULL` for a field marked only `required: true`.
+    Declare `storage: { notNull: true }` for a physical constraint — which is what the platform's
+    own table has always done since ADR-0113, and what `os migrate meta` deliberately does NOT
+    supply on your behalf (the conversion that stamped it was withdrawn by maintainer ruling on
+    2026-09-08). A source author who wants the column they had must write that block themselves;
+    `required: true` keeps its own meaning, the write-time contract the record validator enforces.
+  
+  SQLite emits byte-identical DDL for the six exact-decimal members: knex compiles both
+  `table.decimal(name, p, s)` and `table.float(name)` to the same `float` column there.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Claimed on a POSITIVE argument, not on the detector finding nothing — the failure mode this gate's own docblock names (#8277). Stated plainly: bullet 4 (the `NOT NULL` one) IS a prescription, and it is a prescription for a SOURCE AUTHOR, not for a metadata upgrader, which is the distinction ADR-0087's D8 addendum says this category cannot mechanically tell apart. The ledger serves `objectstack migrate meta`; the only ledger entry this change could carry is the `field-required-notnull-explicit` conversion, and that conversion was WITHDRAWN by maintainer ruling on 2026-09-08 (decision batch #85, #16693/#16890) on the ground that stamping `storage.notNull` wherever `required: true` appears is the implication ADR-0113 abolished — `packages/spec/src/conversions/registry.ts` now carries a tombstone saying re-adding one is the mistake it exists to stop. So `registered` is FORBIDDEN here, not merely unnecessary. The other four are closed on facts: the bumped packages publish (not `unpublished`); no id pre-dates the base (not `already-registered`); no named symbol is a non-metadata runtime interface (not `runtime-interface-only`); and `type-surface-only` fails its predicate 2, since this diff adds a module under `packages/spec/**`. The numeric half prescribes nothing at all — no spec key, no export and no config field is removed or renamed, existing sources parse and publish unchanged, and existing columns are untouched by the ruling that authorized this (「不考虑现有数据」). ⚠️ The residual is declared rather than hidden: the vocabulary has no category for a source-author prescription the ledger must not carry, which is D8's blind spot reached from a second direction; raised for the maintainer in the PR report rather than resolved by dropping the BREAKING banner. -->
+- 51efbf1: feat(driver-sql)!: a text operator over a column whose DECLARED type is temporal answers the type-gated no-match on every SQL face (#15683)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is renamed, retired or re-typed. No `packages/spec` key changes its name, its type or its optionality, no stored shape moves, and every object definition and filter body parses byte-identically to before — so `objectstack migrate meta` has nothing to rewrite and this changeset carries no rewrite instructions. What changes is the ANSWER a published filter surface gives at request time: a text operator aimed at a `date` / `datetime` / `time` column returns the declared no-match instead of the ISO-substring match SQLite happened to give it. The remedy for a caller who was leaning on that match is a different FILTER — the range operators, which are data the caller holds rather than an authored artifact with a stored representation — and it is spelled in the banner below. The one spec change is the membership of an existing exported set (`NON_TEXT_STORED_VALUE_TYPES`), which adds no export and removes none. -->
+  
+  **BREAKING** in the answer sense, on every SQL face, landing in the launch
+  window as `minor` under the lockstep convention this cluster's siblings use.
+  
+  **The behaviour that GOES AWAY, by name: searching a date as a string.** On the
+  SQLite family — `driver-sql` on any SQLite connection, `driver-sqlite-wasm`, and
+  `driver-turso`'s local transport — a `Field.date` / `Field.datetime` /
+  `Field.time` column stores canonical ISO TEXT (ADR-0053), and a text operator
+  matched that text. `{ signed_on: { $contains: '2026' } }` returned every 2026
+  row; `{ made_at: { $startsWith: '2026-01' } }` returned that January's rows;
+  `{ shift_at: { $contains: ':30' } }` returned every half-past shift. **All three
+  now return nothing**, and their `$notContains` mirrors now return every valued
+  row. If you are relying on any of them, this is a row-set change and the
+  replacement is a range filter — spelled out below. The behaviour was never
+  declared by any contract row and it never worked outside SQLite: the same three
+  filters were a `DATABASE_ERROR` 500 on live Postgres.
+  
+  Nothing that was refused becomes admitted, and no new error code is minted — the
+  refusal reused is the one `NON_TEXT_STORED_VALUE_TYPES` already carried for the
+  numeric and boolean classes.
+  
+  Maintainer ruling, 2026-09-05 on #15683, quoted rather than paraphrased:
+  「a text operator over a column whose DECLARED type is temporal is type-gated
+  exactly like the numeric and boolean classes; the SQLite ISO-text match is not
+  a contract」.
+  
+  ## What was wrong — one filter, three answers across one driver family
+  
+  `{ on_day: { $contains: '2026' } }` over a column declared `Field.date` holding
+  `2026-01-05`:
+  
+  | face | before | mechanism |
+  |:--|:--|:--|
+  | `driver-sql` / `driver-sqlite-wasm` / `driver-turso` local (SQLite) | **the row** | the column stores canonical ISO TEXT (ADR-0053), so `GLOB '*2026*'` matched it |
+  | `driver-sql` on live PostgreSQL 16.13 | **`DATABASE_ERROR` 500** | `operator does not exist: date ~~ unknown` (SQLSTATE 42883) — the same for `timestamptz` and `time` |
+  | `driver-sql` on MySQL | **NOT MEASURED** | no server was provisionable; reads as coercion via `CAST(col AS BINARY) LIKE` |
+  
+  Three answers to one filter, and no face declared which was canonical. The
+  SQLite answer was the accident of a storage form, not a capability: the same
+  query against Postgres was a 500.
+  
+  ## What it does now
+  
+  The three temporal classes join `NON_TEXT_STORED_VALUE_TYPES`
+  (`@objectstack/spec`), the set the SQL compilers consult at compile time
+  because the stored value is not visible until run time. Every face that reads
+  it — `SqlDriver` (and everything that inherits its compiler),
+  `driver-turso`'s remote transport, `service-analytics`' three SQL lowerings —
+  compiles the positive operators (`$contains` / `$startsWith` / `$endsWith` /
+  `$icontains` / `$like` / `$ilike`) to the FALSE constant and `$notContains` to
+  the TRUE constant. Postgres's 500 becomes that declared answer; complementarity
+  holds; the constants compose with the existing NULL-safe rules and the `$not`
+  rewrite unchanged.
+  
+  **The SQLite ISO-substring match is RETIRED.** A caller who was using it to ask
+  for "records in 2026" writes a range instead, which every dialect has always
+  answered the same way:
+  
+  ```ts
+  // before — matched only on the SQLite family, 500 on Postgres
+  { on_day: { $contains: '2026' } }
+  // after — the prescription, identical on every backend
+  { on_day: { $gte: '2026-01-01', $lt: '2027-01-01' } }
+  ```
+  
+  ## Boundaries, so a reader does not over-read this
+  
+  - **A MULTI-VALUED temporal field is untouched.** `multiple: true` stores a JSON
+    TEXT array, where `$contains` is the MEMBERSHIP spelling #7398 left working on
+    a JSON column — not a substring test. It keeps compiling exactly as before.
+  - **The value-keyed JS evaluators do not move, and they DIVERGE — measured, not
+    caveated.** `driver-memory` canonicalises a declared temporal write to ISO
+    TEXT (#4047), for a `Date` input and a string input alike, so a positive text
+    operator MATCHES there — the exact complement of the answer this changeset
+    declares. That divergence is filed as #17348 and pinned by name in that
+    driver's conformance suite, alongside a correction: the two rows previously
+    read as pinning the no-match answer pass because their comparand omits the
+    milliseconds, not because anything type-gates. `formula` and `having` cannot
+    key on the declaration at all — `matchesFilterCondition(record, filter)` takes
+    a bare record ("this evaluator sees a bare record and has no schema to
+    consult", its own docblock), and `having` filters AGGREGATED rows whose columns
+    carry no field declaration. ⛔ So "on every face" is NOT delivered by this
+    change, and this changeset does not claim it: the SQL family answers the
+    declared rule, the JS faces do not yet.
+  - **`FILTER_TEXT_CASES` grows no temporal column**, deliberately. Every row there
+    is keyed on the STORED value — which is why its non-string column is a number
+    and not a date — so a temporal fixture would assert one stored form across all
+    five drivers that import it, the stored-form guarantee the ruling refused
+    option (b) for.
+  - **MySQL is NOT MEASURED**, not "passing": no server was provisionable, so its
+    cell rests on the compiled-shape pin, which reads the constant a statement
+    would carry without executing one.
+
+### Patch Changes
+
+- baf9745: Three source comments now state the registered position for the `door: 'none'` boot-refusal codes instead of the pre-#16404 one
+  
+  `SERVICE_NOT_REGISTERED`, `PLUGIN_CONTRACT_VIOLATION` and — as the worked
+  example the `driver-sql` comment cites — `MONGODB_MULTI_TENANT_UNSUPPORTED` are
+  all registered in `ERROR_CODE_LEDGER`. #16649 registered fourteen `door: 'none'`
+  codes under the #16404 door-or-no-door ruling, and re-registered the MongoDB one
+  that #8035 had removed. Three TSDoc comments still asserted the position that
+  preceded that ruling — that these codes are deliberately not wire vocabulary,
+  and that registering one is "not something to start doing at a door" — and each
+  was false the moment #16649 landed. They also pointed at
+  `dispatcher-error-vocabulary.ts`'s `boot-refusal` verdict, which the same PR
+  ratcheted from fourteen rows to zero, so the pointer dangled.
+  
+  These docblocks ship inside each package's `dist/*.d.ts`, which is why this is a
+  published change rather than an internal one: the sentence is what an agent or
+  an IDE reader sees at the point it decides whether the code needs registering.
+  
+  ⛔ No behaviour changes. Every reachability sentence is kept verbatim — none of
+  these codes reaches an HTTP door on this tree — no code is added, removed or
+  re-registered, and no gate moves. With every comment character removed by
+  `scripts/js-comment-mask.mjs`, all three files' executable token streams are
+  byte-identical to the commit this branched from.
+- 82cb69f: A `multiple: true` boolean column keeps its `$contains` membership filter
+  
+  A `multiple: true` field is stored as a JSON TEXT array, and on such a column
+  `$contains` is not a substring test — it is the MEMBERSHIP spelling, the one
+  operator #7398 left working there after refusing the equality family. The
+  declared-type gate added in #14079 fired on the boolean limb regardless of
+  storage shape, so a membership filter over a `multiple: true` `boolean` or
+  `toggle` column compiled to the always-false constant:
+  
+  ```
+  { flags: { $contains: 'true' } }
+  - select * from `probe_tbl` where 1 = 0                 (matched nothing)
+  + select * from `probe_tbl` where `flags` GLOB '*true*' (matches the rows whose array holds it)
+  ```
+  
+  That is the fail-CLOSED direction: the query returns a `200` with no rows,
+  byte-identical to a filter that legitimately matched nothing, so an author sees
+  "no matching records" and doubts their data rather than the filter. Both
+  registry fills — `initObjects` and `registerExternalObject` — were affected, and
+  both are fixed, because the repair is at the predicate they share.
+  
+  The same shape on a `multiple: true` NUMBER was already correct (its registry is
+  filled `!field.multiple`), and #15683 spelled the equivalent carve-out for the
+  temporal limb at the predicate. This change spells it on the boolean limb, the
+  one that had neither. `booleanFields` itself is deliberately unchanged: it is a
+  read-coercion registry, and the three other seams that read it — the Postgres
+  aggregate cast, the presentation-kind door and `formatOutput`'s row pass — are
+  about "this column holds a boolean", which a multi-valued column still does.
+  
+  ⚠️ Not a widening of the gate: a SCALAR `boolean` / `toggle` column still
+  answers the declared no-match for every positive text operator and `$notContains`
+  its exact complement, unchanged. What moves is exactly the JSON-column cell.
+- d46deba: A `multiple: true` boolean/toggle column reads back as its stored array, not as a single inverted `true`
+  
+  `formatOutput` runs its `jsonFields` pass first, which `JSON.parse`s the cell
+  into a real array, and then its `booleanFields` pass did
+  `data[field] = Boolean(data[field])`. Every non-empty array is truthy, so a
+  `multiple: true` `boolean`/`toggle` column presented a single `true` whatever
+  the array held — a stored `[false]` read back as **`true`**, the opposite of
+  what is stored, with no error anywhere. `readPresentationKind` hands the same
+  presenter to the `aggregate()` / `distinct()` doors, so the collapse was not
+  confined to the row-read door.
+  
+  **Fixed at the registry fill.** `&& !field.multiple` is the condition the three
+  neighbouring pushes in both registration blocks already carry (`mediaCols`,
+  `numericCols`, `numericValueCols`); `booleanCols.push(name)` was the single
+  omission, in **both** fills (`registerExternalObject` and
+  `registerManagedObjectMetadata`). A `multiple: true` boolean/toggle is a JSON
+  column here, and its array is written faithfully — only the read collapsed it.
+  
+  **What moves for a caller.** A `find()` / `aggregate()` / `distinct()` read of a
+  `multiple: true` `boolean` or `toggle` column now returns the stored array of JS
+  booleans (`[false]`, `[true, false]`) where it previously returned `true`. Code
+  that consumed the old scalar was reading a value that did not reflect storage —
+  including for an all-`false` array. Scalar `boolean`/`toggle` columns are
+  unchanged and keep their stored-`1`/`0` → JS `true`/`false` coercion; the
+  `multiple: true` number and `tags` classes were already correct and do not move.
+- 7c2c5ae: `distinct()` answers a backend refusal with the ADR-0112 envelope instead of leaking the dialect's own error
+  
+  `SqlDriver.distinct` awaited its query builder bare — no `try`/`catch`, no
+  envelope — so any refusal the statement raised left the driver as the backend's
+  own object: a raw SQLSTATE in `code`, `status` **undefined**, and the compiled
+  statement as the message. `@objectstack/rest` builds a wire status from the
+  envelope, so an error carrying no `status` and a `code` that is a raw SQLSTATE
+  is on no list it reads: an ordinary caller shape — *list the distinct values of
+  this column* — surfaced as an UNHANDLED server fault rather than a declared
+  `DATABASE_ERROR` 500.
+  
+  Measured on live PostgreSQL 16.13: this driver stores every `multiple: true`
+  column as `json`, and PostgreSQL's `json` defines no equality operator, so
+  `SELECT DISTINCT` over one is refused —
+  `code=42883 status=undefined`, `msg=select distinct "toggles" from "…" - could
+  not identify an equality operator for type json`. Class-wide across every JSON
+  column (`toggle`, `boolean` and `number` with `multiple: true`, and `tags`),
+  with a scalar `boolean` column in the same table answering normally.
+  
+  The third read door now routes through the same terminal
+  `backendStatementFault` that `find()` and `count()` have used since
+  objectstack#8931 and `aggregate()` since objectstack#11455: one catalogued
+  code, one status, the dialect's own text written to the server log for an
+  operator and withheld from the caller, and the original error kept as a
+  non-enumerable `cause` so `isMissingTableError` still reads through it.
+  
+  ⛔ No new export, no new error code, no new envelope field, and the accepted
+  input set does not move: `status` and `code` are fields this envelope already
+  declares. ⛔ This does not make `distinct()` ANSWER over a `json` column — the
+  call fails either way; what changes is whether the failure is classified.
+  Whether such a column should support a distinct read belongs with
+  objectstack#17590.
+- 0f38ab0: fix(driver-memory,driver-sql): an explicit `tenancy.enabled: false` opt-out is sticky, so a partial `syncSchema` re-registration no longer flips a platform-global object's UNIQUE partition (#16729)
+  
+  ## What was wrong
+  
+  `InMemoryDriver.syncSchema` recomputed its uniqueness constraints from whatever
+  schema THAT call happened to carry. A second registration without a `tenancy`
+  block — the `{ name, fields }` shape — fell through to the implicit
+  `organization_id` heuristic, so a `unique` field moved from **one row per
+  install** (`scopeField: null`, which is what `tenancy.enabled: false` declares)
+  to **one row per organization**. A duplicate the declaration refuses then
+  landed. Measured at the driver door on `origin/main` `d61139f1ba`:
+  
+  | sequence | second `key: 'K'`, different organization |
+  |:--|:--|
+  | register with `tenancy.enabled: false` | `REFUSED` — `UNIQUE_VIOLATION` / 409 |
+  | …then re-register with `{ name, fields }` | **`LANDED`** |
+  
+  `SqlDriver` running the same sequence refuses in **both** cases: it has kept a
+  sticky `tenantOptOutByTable` since #3249. `driver-memory` had mirrored the inner
+  `computeTenantField` and not the wrapper that consults the record, so "mirrors
+  `computeTenantField` arm for arm" stayed literally true while the pair diverged.
+  
+  It is silent in both directions — nothing logs the flip, and the refusal names
+  the field, never the partition. That is the declared-vs-enforced shape Prime
+  Directive #10 forbids, reached by a state change rather than by a missing check.
+  
+  ## What it does now
+  
+  - **`@objectstack/driver-memory`** gains `computeAndRecordTenantField`, the
+    sticky resolver, and the `TenantOptOutRecord` type for the per-instance record
+    a driver owns. `InMemoryDriver` holds one and resolves through it, handing
+    BOTH declaration surfaces — field-level `unique` and declared `indexes[]` —
+    the same resolved column. `uniqueConstraintsFromFields` and
+    `uniqueConstraintsFromDeclaredIndexes` accept that column as an optional
+    second argument; called with one argument they answer exactly as before.
+    `tenantFieldOf` is unchanged and still a pure function of its argument.
+  - **`@objectstack/driver-sql`**: the shard leaf resolved its tenant column with
+    the BARE `computeTenantField`, so a `rotateShards` sweep carrying no `tenancy`
+    block gave a shard an organization key part the base table's index does not
+    have — one object, two partitions, decided by which physical table a row
+    landed in. It now resolves through the record, keyed by the base table.
+  - **`@objectstack/objectql`**: `LifecycleObjectLike` declares `tenancy`. The
+    Archiver hands that object straight to `cold.syncSchema`, and the published
+    type refused the key while the driver below read it — so an author writing a
+    fresh literal was pushed into producing exactly the partial re-registration
+    above. Same correction #16711 made where the shard leaf narrowed the key off
+    the object it was handed.
+  
+  The record is deliberately narrow. Only the explicit OPT-OUT is sticky: a
+  declared `tenancy.tenantField` is not recorded, matching `SqlDriver`. An object
+  that never declared the opt-out never enters the record, so a genuinely
+  org-scoped object keeps its `organization_id` partition across a partial
+  re-registration — an implementation answering `null` more often would not be
+  stickier, it would be tenant isolation switched off. A carried `tenancy` block
+  stays authoritative in both directions and CLEARS a recorded opt-out.
+  
+  `@objectstack/driver-memory` is `minor` for the two new public-entry exports.
+  The behaviour repairs themselves are `patch`: each restores an implementation to
+  the `tenancy.enabled: false` contract (`isTenancyDisabled`, ADR-0066) it was
+  already declaring, rather than replacing one legal published answer with
+  another. The `objectql` entry is a published type WIDENING — a key the interface
+  refused is now accepted, and nothing that compiled before stops compiling.
+- 5a95b0e: fix(types,metadata-protocol,metadata,cli): a stored operator record names the dialect again, not the driver's composed refusal
+  
+  Since the raw-SQL seam began declaring its own fault, `SqlDriver.execute()` no longer
+  lets the dialect's error out: it raises `code: DATABASE_ERROR` / `status: 500` with a
+  COMPOSED message that discloses neither the statement nor the diagnostic, and carries
+  the dialect error whole under a non-enumerable `cause`. That envelope is deliberate and
+  is unchanged here.
+  
+  What changed underneath it is what every consumer STORED. Each migration probe, backfill
+  and rename in `@objectstack/metadata-protocol` / `@objectstack/metadata` embedded
+  `error.message` into an operator-facing record, so those records began reading
+  
+      the database refused to run a raw statement
+  
+  where they used to read
+  
+      no such column: foo
+  
+  For a live console that costs nothing — the driver prints the statement and the dialect
+  text to its warn sink one line earlier. For a record read later it costs everything:
+  whoever opens a customer install's backfill result a week on never had that line, and the
+  dialect's words were unrecoverable for them.
+  
+  `@objectstack/types` now exports `operatorFacingErrorText(error)` — a depth-bounded walk
+  of the `cause` chain, shaped like the `matchesDriverError` beside it — and the thirteen
+  stored-record sites plus `os db clean`'s console line read through it:
+  
+  - `runtime-index-preflight` — the per-probe `detail` and the seam-failure fan-out;
+  - `seed-tenancy-backfill` — the `absent` detail, the organization-probe report and the
+    three per-object warnings;
+  - `partial-index-probe` — the `detail` both callers report (and its two module comments,
+    which stated the opposite of what happened);
+  - `migrate-env-id-to-project-id`, `migrate-project-id-to-environment-id`,
+    `migrate-sys-notification-to-event`, `drop-projection-tables` — the per-table `error`;
+  - `os db clean` — the `VACUUM failed` line.
+  
+  Two narrowings are part of the contract, not incidental: an UNDECLARED throw is returned
+  on its own message channel, its `cause` never walked, and a declared envelope that is not
+  the raw-path one — the typed read exits' terminal, which composes a different sentence —
+  is left exactly as it arrived.
+  
+  That message channel is deliberately NOT byte-identical to what the replaced expressions
+  computed. The RULE, rather than a catalogue of cases: an undeclared throw comes back as
+  `messageChannelOf(error) || String(error)` — the thrown value's own string `message`, the
+  string itself when a string was thrown, and `String(error)` when neither yields text. Every
+  difference from the replaced expressions follows from that rule, so read the rule and not a
+  list. Illustrations of it, not an exhaustive set: an empty-message `Error` reads its `name`,
+  which for a named subclass is that subclass's name rather than `Error` / `TypeError`; a
+  thrown non-`Error` reads its own text or `String(error)` where `(e as Error).message` read
+  `undefined`, and where `null` / `undefined` threw a `TypeError` out of the catch, so no
+  record was written at all and the operation aborted; an object carrying a NON-EMPTY string
+  `message` reads it where `err instanceof Error ? … : String(err)` recorded `[object Object]`
+  (one carrying an EMPTY `message` still reads `[object Object]`). A thrown EMPTY string reads
+  `''`, so this channel is neither always prose nor never empty.
+  
+  ## The levels, and why they are not uniform
+  
+  `@objectstack/types` takes **`minor`**: it is the one package here that grows a published
+  surface — `operatorFacingErrorText` is a new export, present in `dist/index.d.ts` and in the
+  export list. A purely additive widening takes at least `minor`.
+  
+  The other four take **`patch`**, because none of them widens anything: they are a bug fix in a
+  released package, which is exactly what `patch` is for. `@objectstack/driver-sql` is named
+  because this change moves its `src/**` — by one ADDED file, the `.test.ts` that pins the helper
+  against a real `SqlDriver.execute()` refusal. Its published `dist/` is byte-unchanged by this
+  PR: no entry point reaches a test file, and `files` packs `dist` only.
+  
+  **Not breaking, and deliberately not marked so.** Nothing is removed, renamed or made stricter:
+  what moves is the TEXT inside an operator-facing `detail` / `error` field, never a field name
+  and never a type. The change these sites were made for is the declared raw-path fault, where
+  the record gains the dialect's words in place of the driver's composed placeholder. Every
+  other throw now reaches these records through the rule above rather than through the
+  expression each site spelled out, so its text can move too — a consequence of the rule, not a
+  bounded list of exceptions. At thirteen of the fourteen sites the rule is the whole record,
+  and some shapes still record `''` there: a thrown empty string, a thrown empty array, and an
+  `Error` whose `name` and `message` are both empty are the ones measured. The fourteenth was
+  `seed-tenancy-backfill`'s organization probe, which kept a `|| 'unknown error'` fallback on
+  top of the rule, so those same three shapes recorded `'unknown error'` there rather than `''`;
+  that fallback was load-bearing — the site read an empty value as "the probe did not fail" —
+  and #17167 removed it in this same release, so all fourteen sites now record the channel as
+  is and that site carries its failure fact structurally. The sentence being replaced is not a value any
+  consumer can have been parsing: it is an opaque human diagnostic. A consumer reading these
+  records gets the dialect's words back where it had been getting a placeholder.
+- Updated dependencies [7f62536]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [245f360]
+- Updated dependencies [324968e]
+- Updated dependencies [fe71032]
+- Updated dependencies [482d34d]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [baf9745]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [6548118]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [48203ff]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [c9eb773]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [dfeba25]
+- Updated dependencies [0a88a80]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [e7ff9c2]
+- Updated dependencies [758ac40]
+- Updated dependencies [134b410]
+- Updated dependencies [4c42fd1]
+- Updated dependencies [5f392f0]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [f03f6c7]
+- Updated dependencies [cf79182]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [c3ebe4a]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [71629a1]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [288fe9c]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [6e3462d]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5a95b0e]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [de1a611]
+- Updated dependencies [db76982]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [ab450f4]
+- Updated dependencies [025588a]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/types@17.5.0
+  - @objectstack/spec@17.5.0
+  - @objectstack/core@17.5.0
+  - @objectstack/observability@17.5.0
+
 ## 17.4.0
 
 ### Minor Changes

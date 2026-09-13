@@ -1,5 +1,576 @@
 # @objectstack/client
 
+## 17.5.0
+
+### Minor Changes
+
+- 6b2ec3b: fix(client): `oauth.applications.register` declares `redirect_uris` optional, matching the body schema of the route it posts to (#17215)
+  
+  `ObjectStackClient.oauth.applications.register` declared `redirect_uris` **required**. `POST /api/v1/auth/oauth2/create-client` is mounted verbatim from `@better-auth/oauth-provider`, and that route's body schema declares the member **optional** — so a request the route accepts had no spelling through this SDK. The caller never got a wrong answer; they got a call they could not write.
+  
+  ## What changes for a caller
+  
+  Nothing they have to do. Every existing call still compiles — this only *adds* spellings:
+  
+  ```ts
+  // now expressible, and accepted by the route:
+  await client.oauth.applications.register({ client_name: 'My App' });
+  
+  // unchanged, and still the right call when you have redirect URIs:
+  await client.oauth.applications.register({
+    client_name: 'My App',
+    redirect_uris: ['https://app.example.com/cb'],
+  });
+  ```
+  
+  ⛔ Not breaking in this direction — relaxing a required member to optional keeps every existing call valid. Tightening it back later would be breaking, which is why the parity is now pinned.
+  
+  ## Measured at runtime, not read off a `.d.ts`
+  
+  The vendor body schema was re-introspected the way the card's original measurement was taken: instantiate `oauthProvider()`, walk `endpoints`, find the endpoint whose `path` is `/oauth2/create-client`, read `options.body`. At the installed **1.7.3** (the card measured 1.7.2; the package has since moved) the object still declares **21 members and every one of them is optional**, and `body.safeParse({ client_name: '…' })` succeeds with `redirect_uris` absent.
+  
+  ⚠️ Optional does **not** mean an empty array will do: the vendor refuses `[]`, so when the member is present it must be non-empty. Omitting it and passing `[]` are different requests and only the first is legal. Nor does it mean a client registered without redirect URIs is *usable* — it cannot complete an `authorization_code` flow. The type states what the route accepts, never that every accepted call yields a client fit for every grant; the docblock now says both.
+  
+  ## Why it was required, for the record
+  
+  Not as a guard. It is residue from the method's first commit, which declared `client_name` required too; the same-day follow-up relaxed `client_name` and left this one behind. No comment, test, ADR or review thread ever asserted a reason for it — which is exactly why it read as a defect to the next auditor.
+  
+  Nothing else on the signature moves: the other ten members are byte-identical.
+- d61139f: feat(client): a bearer-mode `ObjectStackClient` keeps the session the server rotates it onto (#16534)
+  
+  Three better-auth routes ROTATE the caller's session on success — they mint a new session, install it in `Set-Cookie` (and, through `bearer()`, in the `set-auth-token` response header), and DELETE the row the caller was presenting:
+  
+  | route | where the new credential is |
+  | --- | --- |
+  | `auth.twoFactor.verifyTotp()` on the enrolment lane | body — `token`, and it is the LIVE one (plugin-auth's `two-factor-rotated-token-echo` repairs the vendor's stale echo) |
+  | `auth.changePassword({ revokeOtherSessions: true })` | body — `token` |
+  | `auth.twoFactor.disable()` | **response header only** — the body is `{ status: true }` |
+  
+  A browser is carried across all three by its own cookie. A bearer client — this SDK's own mode — kept presenting the DELETED session's token, so its very next call answered `401 UNAUTHORIZED`. Measured against a real `AuthManager` (better-auth 1.7.2) over a real driver, driven through the real `ObjectStackClient`, `login → enable → verifyTotp → disable → deleteUser` could not run to the end without the caller re-seating `client.token` by hand between the steps.
+  
+  The three methods now adopt the rotated credential themselves, the way `login()` already adopts the token it is handed. The `token` members stay on the wire and stay declared, so a caller that keeps its own credential store is unaffected; what changes is that it no longer has to.
+  
+  **No public surface moves.** No new export, no new option or flag, no new key on any declared request or response type — the SDK stores a token the server already sends and this package already declares. Graded `minor` rather than `patch` because the published runtime behaviour of three methods moves for existing callers.
+  
+  ## What does NOT change, deliberately
+  
+  The adoption is on those three routes only, never in the shared `fetch` wrapper. `set-auth-token` rides **every** response that stages a session cookie — `POST /update-user` stages one to carry the updated user without rotating anything — and it carries the SIGNED `<token>.<sig>` spelling while every JSON `token` echo carries the UNSIGNED one. A wrapper-level read would therefore rewrite the stored credential into a different spelling of the SAME session on ordinary traffic. `auth.me()`, `auth.sessions.list()`, `auth.updateUser()` and `auth.twoFactor.verifyBackupCode()` (which does not rotate — the vendor echoes the session it resolved at entry) all leave the stored credential byte-identical, and that is pinned.
+  
+  A cookie-only deployment sends no `set-auth-token`; there is then nothing to adopt and `twoFactor.disable()` leaves the stored credential exactly as it was. `changePassword` without `revokeOtherSessions` answers `token: null` and likewise stores nothing.
+  
+  The three TSDoc warnings that told bearer callers "this SDK does not store it" are updated in the same change.
+- 1c4270f: feat(client): `environments.delete` gains `purge` and documents the hosted control plane's two-step delete (#17636)
+  
+  The hosted control plane's `DELETE /api/v1/cloud/environments/:id` follows cloud ADR-0014: a live environment is **archived**, and only a second call with `?purge=1` on the now-archived environment tears it down. `?force=1` confirms a production environment and is never a purge. The SDK sent `force` only, so an SDK caller could archive an environment but never purge one.
+  
+  - `opts.purge?: boolean` sends `?purge=1`. It combines with `force`: a production environment is torn down with `{ force: true }`, then `{ force: true, purge: true }`. Calls that pass no options, or `force` alone, build exactly the URL they built before.
+  - The return type declares the two answers the route actually sends, discriminated by `deleted`:
+    - archive: `{ environmentId, deleted: false, archived: true, purgeDeferred, retentionDays, warnings, message }`
+    - teardown: `{ environmentId, deleted: true, purged: true, warnings }`
+  
+    Both members carry every key the old declaration named (`deleted`, `environmentId`, `warnings`), so existing reads still compile.
+  - The JSDoc no longer describes a one-call cascade delete: a live environment is archived, `purge` acts only on an archived environment, `force` is the production confirmation, and a `failed` environment is torn down in one call.
+  - `organizations.delete`'s JSDoc no longer claims that server-side hooks tear down the organization's environments. No hook does; delete each environment first.
+  
+  Graded `minor`: a purely additive widening of a published method's accepted options and declared answer (the "WHICH LEVEL" rule in `.github/workflows/pr-automation.yml`). Nothing is removed or renamed.
+- f904e61: fix(client): `organizations.getActiveMember(organizationId)` answers the organisation the caller NAMES, not whichever one the session has active (#16568)
+  
+  **BREAKING** — the answer this published method gives moves for existing inputs. The signature, the declared return type and the export are byte-identical; what changes is the response an existing call observes, stated below as a before/after pair per input.
+  
+  The method built `GET /organization/get-active-member?organizationId=…`, and better-auth 1.7.2's handler for that path reads `session.session.activeOrganizationId` and never looks at `ctx.query`. The query string was dead on arrival: a client doing a permission check for organisation B while A was active got **A's** membership row back, with a 200 and no diagnostic — the wrong-but-plausible answer, silently. The SDK's own JSDoc promised "the calling user's membership row in the given organisation", so this was a declared capability the runtime did not deliver.
+  
+  It now asks the question honestly, in two requests:
+  
+  1. `GET /get-session` — the caller's own user id;
+  2. `GET /organization/list-members?organizationId=…&filterField=userId&filterValue=<the caller>&limit=1` — the row, unwrapped from the one-entry page.
+  
+  `list-members` reads `ctx.query.organizationId`, and its rows carry the identical shape (`OrganizationMemberWithUserWire`, user projection included), so the signature and the declared return type are unchanged and no caller's types move.
+  
+  ## What an existing call observes, before and after
+  
+  Everything here is measured against a real `AuthManager` (better-auth 1.7.2, organization plugin) over a real `SqlDriver`. Each bullet is one input, with the response it drew before and the response it draws now.
+  
+  - **An organisation id other than the session's active one.** Before: a 200 carrying the **active** organisation's membership row, whatever id was named. After: a 200 carrying the **named** organisation's row. An input that named the active organisation's own id drew that organisation's row before and draws the same row after — `auth.me()` is where that id is readable, on `session.activeOrganizationId`.
+  - **An organisation the caller is not a member of.** Before: the named organisation was never consulted, so the answer was about the **active** one — a 200 carrying the active organisation's row, or `400 MEMBER_NOT_FOUND` when the caller had no row there either. After: `403 YOU_ARE_NOT_A_MEMBER_OF_THIS_ORGANIZATION`, the server's own refusal, about the organisation that was actually named.
+  - **Any id, on a session with no active organisation.** Before: `400 NO_ACTIVE_ORGANIZATION`. After: a 200 carrying the caller's row in the named organisation. `setActive` has stopped being a precondition, which is the point of naming the organisation.
+  - **An empty `organizationId`.** Before: a 200 carrying the **active** organisation's row — better-auth resolves `ctx.query.organizationId || session.activeOrganizationId`, so an empty string fell through to session state and the wrong-but-plausible answer survived on that one input. After: the SDK refuses it before the wire, with a thrown `[ObjectStack] organizations.getActiveMember: organizationId is required`.
+  
+  Two things do not move: an anonymous caller still draws `401 UNAUTHORIZED`, thrown by the same session middleware that guarded the old route; and the row's shape is the same on both sides. The method now makes two HTTP requests where it made one.
+  
+  Graded `minor` rather than `patch`: the method's published behaviour moves for existing callers, which is the same clause-② judgement this PR declares, and the maintainer's ruling of 2026-09-04 (decision batch #35) holds that a change to a published package's public surface takes at least `minor` — a commit type may raise a bump, never lower it below what the act requires. The banner above carries the breaking-ness that the level cannot, per the ruling recorded on #16568 on 2026-09-08.
+  
+  The auth route ledger's `GET /api/v1/auth/organization/get-active-member` row is rebooked from `sdk` to `server-only` in the same change: `sdk` means "expressed by the SDK", and no SDK method builds that URL any more. The `get-session` and `list-members` rows gain the method in their notes, since it now builds both. Ledger-internal, nothing published moves with it.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) SDK call-site change, no metadata conversion -->
+- fb6a2de: fix(client): `packages.get` binds the bare `InstalledPackage` row on both the global and the environment-scoped client, replacing a `{ package }` envelope no surface emits (#12034)
+  
+  `client.packages.get(id)` and `ScopedEnvironmentClient.packages.get(id)` now resolve to **`InstalledPackage`** — the row itself — instead of an object wrapping it.
+  
+  **Migration — read the row directly, not `.package`:**
+  
+  ```ts
+  // before
+  const { package: pkg } = await client.packages.get('com.acme.crm');
+  const pkg2 = (await scoped.packages.get('com.acme.crm')).package;
+  
+  // after
+  const pkg = await client.packages.get('com.acme.crm');
+  const pkg2 = await scoped.packages.get('com.acme.crm');
+  ```
+  
+  FROM `{ package: any }` (global) and `{ package: InstalledPackage }` (scoped) TO `InstalledPackage` on both.
+  
+  This is a **narrowing**: a `.package` read compiles today and stops compiling after this change. That is the point of the change rather than a side effect of it — the wrapper was never what the wire sent, so every one of those reads was already `undefined` at runtime, and on the global method the `any` member is what kept the falsehood invisible. Nothing about the request or the wire changes; only the declaration moves to match what the server has been sending.
+  
+  Why it can be bound now, when #11925 deliberately left it erased: this route used to be served by two implementations that disagreed — the runtime dispatcher sent the bare row, the `@objectstack/rest` registrar sent `{ package }` — so no declaration was true on both. The registrar's read routes were removed in #16628, leaving the dispatcher's `/packages` domain as the single implementation. It builds the detail body with the same expression it maps over every `list` row, which is why this type now agrees with the `InstalledPackage[]` that `packages.list` has already declared, and with `GetInstalledPackageResponseSchema` in `@objectstack/spec`, which has declared `data: InstalledPackageSchema` all along.
+  
+  The environment-scoped method is the sharper half of the change: its member was a real `InstalledPackage`, not `any`, so `.package` reads there looked type-safe while returning `undefined` against every surface that has served that path since #16628.
+- bccf311: fix(client): `oauth.applications.register` declares only the members `/oauth2/create-client` accepts — `name`, `scopes` and `metadata` are removed (#15447)
+  
+  **BREAKING** — three members leave a published request type. A caller who sets one compiles today and gets a type error after this release. That is the point: the route never honoured any of them, so what the compiler now refuses is code that was already having its value thrown away.
+  
+  ## What a caller passing these members should do instead
+  
+  | you were passing | pass instead | why |
+  |---|---|---|
+  | `name: 'My App'` | `client_name: 'My App'` | same `string`, and `client_name` is the member the route reads |
+  | `scopes: ['openid', 'profile']` | `scope: ['openid', 'profile'].join(' ')` | ⚠️ **not** a rename — `scope` is one space-delimited string; posting an array is refused with `400 [body.scope] Invalid input: expected string, received array` |
+  | `metadata: { tenant: 'acme' }` | nothing — delete the member | no door this SDK can reach accepts it (see below) |
+  
+  ## ⚠️ These were the vendor's RECORD vocabulary, not typos
+  
+  `client_name` writes the DB column literally named **`name`**; `scope` writes the DB column literally named **`scopes`**, as a JSON array. The removed members were the *column* names offered next to the *wire* names in the same declared type — an author picking the adjacent one of two got a success receipt and no value. Treating them as misspellings would be the wrong reading of what they were; the prescription above is still the wire member either way.
+  
+  ## Why they had to go rather than be honoured here
+  
+  `POST /api/v1/auth/oauth2/create-client` is mounted verbatim from `@better-auth/oauth-provider@1.7.2`. Its body schema declares 21 members and sets no `catchall`, so it is zod's default **strip**: an unknown key is dropped, not refused, and the caller gets **HTTP 201 and a client that quietly does not have the value**. Driven end to end against a real `betterAuth` + `oauthProvider` over a real ObjectQL engine on a real socket, through this client: each of the three came back absent from the response, absent from `oauth.applications.get`, absent from `oauth.applications.list`, and `null` in the `sys_oauth_application` row.
+  
+  A second, independent barrier stands behind that strip — the handler funnels the parsed remainder into the opaque-metadata envelope, and all three names sit in `OPAQUE_METADATA_RESERVED_FIELDS` — so no amount of loosening on the SDK side could ever have made them arrive. `metadata` in particular is honoured only by `PATCH /admin/oauth2/update-client`, which is `SERVER_ONLY` and therefore not an HTTP route at all: over the wire it answers 404 with a zero-byte body.
+  
+  Nothing else on the method moves. The two members the route does honour, `client_name` and `scope`, are declared exactly as before and still reach the server byte for byte; the method's return type, its URL and its request-building step are unchanged.
+  
+  Graded `minor` rather than `patch` because a published package's public surface moves, per the maintainer's ruling of 2026-09-04 (decision batch #35) that such a change takes at least `minor`; the banner above carries the breaking-ness the level cannot.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Claimed on a POSITIVE argument rather than on the detector finding nothing. Stated plainly: the table above IS a prescription, and it is addressed to a TYPESCRIPT CONSUMER at their own call site, delivered by the compiler — the audience ADR-0087's D8 addendum says the ledger explicitly does not serve. Nothing authorable moves: no spec key, no Zod schema, no object definition, no config field and no stored representation changes spelling or shape, so `objectstack migrate meta` has nothing to visit, `spec-changes.json` has nothing to project and the upgrade guide has no row to gain. Minting a ledger id here would put a prescription in the one ledger this gate keeps true that none of its three consumers can project. The other four categories are closed on facts: `@objectstack/client` publishes to npm (not `unpublished`); no id pre-dates the base (not `already-registered`); no named symbol is a non-metadata runtime interface whose members moved (not `runtime-interface-only`); and `type-surface-only` fails its predicate 4 (`narrowed-from-erased`), because the request type was concretely declared at the merge base rather than `any` — this narrowing removes members from a concrete type instead of replacing an erased one. ⚠️ Residual declared rather than hidden: the vocabulary still has no category for a source-author prescription the ledger must not carry, which is D8's blind spot reached from a third direction; raised for the maintainer in the PR report rather than resolved by dropping the BREAKING banner. -->
+- 9bd4344: feat(auth)!: adopt better-auth's account-issuer rollback — drop `sys_account.issuer`, retire the backfill, lift the `@better-auth/*` family to an exact `1.7.3` (#17440)
+  
+  <!-- adr-0087: registered sys-account-issuer-retired -->
+  
+  **BREAKING** — a platform object drops a declared field and `@objectstack/plugin-auth`
+  drops six published symbols. Shipped as `minor` under the launch-window convention
+  (`major` is refused by `check-changeset-no-major`; breaking-ness is carried by this
+  banner plus the ADR-0087 disposition above). The hand-migration prescription is
+  registered under protocol major 18 as `sys-account-issuer-retired`.
+  
+  better-auth `1.7.3` removed the issuer-scoped account identity outright
+  (`better-auth/better-auth#10909`): `createLocalAccountIssuer` is deleted,
+  `accountSchema.issuer` is gone, `AccountKey` is `(providerId, accountId)` again, and the
+  `account.issuer` column and its unique index are gone from `get-tables`. There is no
+  drop-in replacement. `#16186` pinned the family at an exact `1.7.2` as a stopgap; this is
+  the durable half, per the maintainer ruling of 2026-09-10 on `#16629`.
+  
+  ## 迁移:FROM → TO
+  
+  | FROM | TO | the one-line fix |
+  |:--|:--|:--|
+  | `sys_account.issuer` (column + `{ fields: ['issuer','account_id'], unique: true }`) | — | nothing replaces it; identity is `(provider_id, account_id)`, declared UNIQUE on `sys_account` since the object was created |
+  | reading `account.issuer` off a row or off `client.accounts.list()` | `sys_sso_provider.issuer`, resolved through the account's `provider_id` | `provider_id` is unique per environment, so it names the authority on its own |
+  | `backfillAccountIssuer(ql, …)` | — | delete the call; there is no successor pass |
+  | `CREDENTIAL_ISSUER` / `oauthIssuerFor(id)` | — | drop the argument; `internalAdapter.createAccount({ userId, providerId, accountId, password })` takes no `issuer` |
+  | `ResolvedSocialProvider`, `BackfillAccountIssuerOptions`, `BackfillAccountIssuerResult` | — | delete the import; the compiler names every site |
+  | `@better-auth/*` at an exact `1.7.2` (eleven members) | an exact `1.7.3` (eleven members) | the family moves as ONE line — `@better-auth/core@1.7.2` and `@better-auth/kysely-adapter@1.7.3` are mutually incompatible in both directions |
+  
+  ## ⭐ Existing deployments: run the pre-flight BEFORE the column is dropped
+  
+  Uniqueness moves from `(issuer, account_id)` to `(provider_id, account_id)` — a
+  **narrower** key. Two rows sharing `provider_id` + `account_id` and differing only in
+  `issuer` are legal under the old key and are ONE account under the new one.
+  
+  ```
+  os migrate account-issuer          # read-only; exits non-zero when the drop must not proceed
+  # … take a backup (the operator's act, and the apply step's precondition) …
+  os migrate apply --allow-destructive
+  os migrate account-issuer          # post-check: reads zero
+  ```
+  
+  The pre-flight reads **rows**, never the index declaration. `syncDeclaredIndexes` logs a
+  plain UNIQUE whose CREATE failed on existing duplicates onto the durability channel and
+  lets the boot continue (`#14902` / `#15479`), so a database can carry the declaration
+  without the constraint — and on such a database the drop does not fail loudly, it
+  degrades silently: the rows become indistinguishable and a sign-in can resolve onto the
+  wrong user's account. `os migrate apply --allow-destructive` re-runs the same pre-flight
+  and refuses the drop before writing any DDL. A read that throws, or a scan that
+  truncates, refuses too — an unread table is not a clean one.
+  
+  ⛔ Colliding rows are never merged or dropped for you: which row survives is application
+  knowledge, and two different people can be behind one colliding key. Keep the row whose
+  provider account is live, delete the rest so a fresh sign-in re-links, and re-run.
+  
+  The boot refusal is unchanged and needs no new machinery: a runtime already refuses to
+  start against unapplied destructive drift, naming the command to run, and never
+  auto-migrates.
+  
+  ## ⚠️ A `provider_id` re-pointed at a different IdP must have its bindings REBUILT
+  
+  This is the one case `issuer` still discriminated. After the drop no column records which
+  IdP vouched for a row, so if a re-pointed provider's new IdP mints a subject the old one
+  had already issued to somebody else, the key resolves that sign-in onto the other
+  person's account. Under the old key that failed loudly (`unable_to_link_account`); under
+  the new one it is silent.
+  
+  ⇒ `sys_sso_provider` now **refuses an `issuer` change while `sys_account` rows are still
+  bound to that `provider_id`** (`RESOURCE_CONFLICT` / 409). Delete the provider's account
+  bindings first; each user re-links on their next sign-in.
+  
+  ## Why the column was a liability, not an asset
+  
+  A credential row whose `issuer` was not the local credential issuer was invisible to
+  `findAccountByKey`, so sign-in failed `INVALID_EMAIL_OR_PASSWORD` behind a "User not
+  found" warn pointing at the `sys_user` row rather than at the account. **Four checklist
+  items had that recorded as a knownGap, each rediscovering it.** Its discriminating power
+  here was near zero anyway: `sys_sso_provider` declares `{ fields: ['provider_id'], unique:
+  true }`, so `provider_id → issuer` is a function within an environment.
+  
+  ## Also in this change
+  
+  `pnpm check:vendor-export-contract` (from `#16186`) keeps its exactness requirement and
+  still resolves every named symbol — its self-test re-anchors from the now-retired
+  `@better-auth/core/db` specimen onto a live edge, and gains a case asserting the two
+  deleted names are imported nowhere. `#11627`'s hash-shadow-key machinery is untouched: it
+  is a generic driver capability serving five UNIQUE members of the >768-char class.
+
+### Patch Changes
+
+- 3c86008: `client.ai`'s docblock says the AI slot answers 501, names the 401-first and `GET /ai/agents` arms, and stops promising a 404
+  
+  The `ai` namespace docblock described the pre-`capabilityUnavailable`
+  behaviour: that this repo's dispatcher *"404s `AI service is not configured`
+  when the service is absent (the open-source default)"*. The dispatcher has
+  answered **501** since the shared exit landed. `/ai/*` is registered
+  **unconditionally** (`createAiDomain`, plus the host wildcard across four
+  methods in every branch of the scoping conditional), so a request reaches a
+  handler with nothing behind it — which is 501 Not Implemented, not 404.
+  `packages/runtime/src/domains/unavailable.ts` exists to draw exactly that line:
+  404 means *the route is not there*, and for `/ai/*` that is false.
+  
+  **Why the replacement is narrower than "`/ai/*` answers 501".** That sentence
+  is not true either, and a caller branching on status needs both exceptions.
+  Verified against the unserveable-slot branch in
+  `packages/runtime/src/domains/ai.ts`, in its own evaluation order:
+  
+  ```
+  FROM  any /ai/* with no AI service  ->  404 `AI service is not configured`
+  
+  TO    anonymous caller              ->  401  (ANONYMOUS_DENY_STATUS; the 501 and
+                                                the courtesy below are capability
+                                                disclosures, owed to nobody who has
+                                                not authenticated)
+        GET /ai/agents                ->  200  { agents: [] } under the envelope's
+                                                `data` — a console polls it on every
+                                                navigation to decide whether to show
+                                                AI affordances
+        every other /ai/* route       ->  501  serviceUnavailableMessage('ai')
+  ```
+  
+  All three arms are already test-pinned in
+  `domains/ai-anonymous-deny-ordering.test.ts` — this changeset moves no
+  behaviour, only the sentence describing it.
+  
+  **The `GET /ai/agents` courtesy was mentioned nowhere in this docblock**, which
+  is the one an SDK reader actually opens, so it is added rather than merely
+  corrected. Also stated now: the 501 body is not a local string — it comes from
+  the shared `serviceUnavailableMessage`, the same sentence
+  `discovery.services.ai` reports for the slot, so the two cannot drift into
+  naming different remedies.
+  
+  ⛔ No behaviour changes. This is a docblock; no export, authorable key, accept
+  set or response byte moves.
+  
+  **This is shipped, which is why it carries a changeset rather than
+  `skip-changeset`.** `@objectstack/client`'s published `files[]` ships `dist`,
+  and this TSDoc is emitted into all four built artifacts — `dist/index.d.ts`,
+  `dist/index.d.mts`, `dist/index.js` and `dist/index.mjs` — measured on the
+  built tree, with the stale `AI service is not configured` sentence absent from
+  every built file afterwards and the docblock's own neighbouring sentence
+  present as the lit control. The declarations are what a consumer's editor shows
+  on hover and what an upgrading agent greps, and they change.
+  
+  The two sibling corrections in the same change do **not** publish and are not
+  named here: `packages/runtime/src/route-ledger.ts` is a CI-audit ledger that is
+  not exported from the runtime entry (`ROUTE_LEDGER` is absent from
+  `packages/runtime/dist` entirely), and the `domains/ai.ts` implementation
+  comment is not emitted — three pre-existing comments from that same file were
+  probed as controls and none appears in the built output.
+- 7baf04a: `oauth.applications.register`'s docblock says where a plain `name` IS honoured, and that it is not this route
+  
+  A caller who wants to name an OAuth client reaches for `name`. On the route this
+  method posts — the provider's `/oauth2/create-client` — that member is not in
+  the body schema and is stripped: driven on a real socket, the call answered
+  **201** and the value was absent from the response, from `applications.get`,
+  from `applications.list`, and `null` in the `sys_oauth_application` row's `name`
+  column. Nothing in the answer says so.
+  
+  The spelling is not wrong everywhere, which is what made it worth writing down:
+  `POST /api/v1/auth/sys-oauth-application/register` — the session-required
+  ObjectStack mount behind the Console's *Setup → OAuth Applications* form —
+  answered **200** to the same body, mapped `name` onto `client_name`, and set
+  that column. That mount is `disposition: 'server-only'` in the auth route ledger
+  and objectstack#17210 ruled it stays that way, so no SDK method builds its URL.
+  
+  The docblock now states both halves where the caller reads them: post
+  `client_name` to name a client from here, and `redirect_uris` must arrive
+  pre-split — the newline-separated-textarea split is the Console wrapper's, not
+  this route's.
+  
+  Docblock only. No method is added, no request or response type changes, and the
+  ledger row is untouched — but the text ships inside `dist/*.d.ts` as editor
+  hover, so it is a `patch` rather than a no-publish change.
+- 01388fe: `auth.login` and `auth.register` now deliver the `SessionResponse` envelope they declare.
+  
+  Both methods annotate their return as `SessionResponse`, whose base `BaseResponseSchema` declares
+  `success` as a required boolean. Both carried an inline lift that filled `data` and never wrote
+  `success`, so neither delivered the type it advertises and every consumer keying on the envelope
+  flag — `ObjectStackClient.unwrapResponse` keys on exactly this — read `undefined` rather than
+  `true` or `false`. They now run the same lift `auth.me` / `auth.refreshToken` use, so the family
+  cannot deliver two different envelopes again.
+  
+  The credential is unchanged: `data.token` is still the token the route puts in the response body,
+  byte-identical, and `login` / `register` still arm the client's bearer token from it.
+  
+  Known residue, unchanged by this release: `data.session` is still absent from what these two
+  methods return. `POST /sign-in/email` and `POST /sign-up/email` serve no session object, id or
+  expiry in the body or in any header, so the member is not obtainable without a second
+  `GET /get-session` call — read it from `auth.me()`. Nothing is synthesized in its place.
+- 5de9372: fix(client): `auth.me` / `auth.refreshToken` deliver the `SessionResponse` envelope they declare, and `refreshToken` reads the token the route actually serves (#16760)
+  
+  Both methods annotate their return as `SessionResponse` — ObjectStack's REST
+  `{ success, data }` envelope — for `GET /api/v1/auth/get-session`. better-auth
+  owns those bytes and answers **bare**. Measured against a real `AuthManager`
+  (better-auth 1.7.2, organization plugin) over a real driver:
+  
+  ```
+  GET /api/v1/auth/get-session  (signed in) -> 200 {"user":{…},"session":{…,"token":"…"}}
+  GET /api/v1/auth/get-session  (anonymous) -> 200 null
+  ```
+  
+  So `(await client.auth.me()).data.user` type-checked and was `undefined` at
+  runtime, while `.user` — the real payload — did not type-check. The annotation
+  pointed every caller at the wrong key.
+  
+  ## What changed
+  
+  - The bare answer is now lifted into the declared envelope, the same lift
+    `auth.login` has always carried for `/sign-in/email`. `SessionResponse` is
+    **unchanged** and so is each method's published return annotation: the fix is
+    in what the methods produce, not in what they promise.
+  - The lift fills `success` as well as `data`. `SessionResponseSchema` is
+    `BaseResponseSchema.extend(…)` and that base declares `success` as a required
+    boolean, so a body carrying `data` alone still would not parse as the declared
+    type.
+  - The raw `.user` / `.session` keys are **kept** alongside `data`. They are what
+    callers were pushed onto while the declared shape was unreachable; dropping
+    them would trade one silent breakage for another.
+  - `auth.refreshToken` now reads `data.session.token`. It used to read
+    `data.data?.token` — a field this route does not produce at any nesting, so
+    the method returned successfully having captured nothing. A bearer-mode client
+    calling it to refresh kept whatever credential it already had, silently.
+  
+  ## The read was not a consequence of the envelope
+  
+  Worth stating because the reverse is the natural assumption: enveloping the body
+  does **not** put a token at `data.token`, because the route serves no top-level
+  `token` to lift. The only credential in the body is `session.token`, and that is
+  now the read. Fixing the shape alone would have left `refreshToken` exactly as
+  inert as it was.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead |
+  |:--|:--|
+  | `(await client.auth.me()).user` | still works — kept deliberately |
+  | `(await client.auth.me()).data.user` | now populated (was `undefined`) |
+  | `(await client.auth.refreshToken(t)).data.token` | `.data.session.token` |
+  
+  `refreshToken` stores the **unsigned** session token, which is the spelling
+  `/get-session` serves; `bearer()` accepts it and the signed
+  `token.signature` form interchangeably, so a client that held the signed form
+  stays signed in across the call.
+  
+  Two answers stay outside the declared type and are **not** addressed here: the
+  anonymous `null`, which would need the published return annotation to widen, and
+  `SessionUser.image`, declared `z.string().optional()` against a route that
+  serves `null` (#17235). The sibling `auth.login` / `auth.register`, which
+  normalize into `data` but set no `success`, are #17234.
+- f8fea00: fix(client): `organizations.invite` defaults `role` to `'member'`, so the shorter call it declares actually works (#16582)
+  
+  `organizations.invite` declares `role?` as **optional** and forwarded the caller's object to better-auth verbatim. better-auth 1.7.2's body schema for `POST /organization/invite-member` makes `role` **required**, so the documented-looking minimal call was refused before it reached any ObjectStack code:
+  
+  ```
+  client.organizations.invite({ email, organizationId })   ->  400  [body.role] Invalid input   (VALIDATION_ERROR)
+  ```
+  
+  Omitting `role` now sends `'member'`. **No published type moves** — `role` stays optional, and a caller who names a role still gets exactly that role on the wire (including `role: undefined`, which is treated as omission rather than dropped).
+  
+  The default is `'member'` because the sibling `organizations.invitations.resend` has always substituted exactly that over the **same** vendor endpoint. That asymmetry is why the gap stayed invisible: one member of the family papered over the vendor's requirement and the other did not, so only the shorter form ever failed. It is also the least-privileged name in the closed membership vocabulary (ADR-0108 D1 — `orgRoleGrade` floors at `member` and rises only for `owner`/`admin`), and an invitation is a pending row the invitee must still accept, so the implicit choice cannot confer reach the caller did not ask for.
+  
+  Measured against a real `AuthManager` (better-auth 1.7.2, organization plugin, `teams: { enabled: true }`) over a real `SqlDriver` (better-sqlite3), before and after:
+  
+  ```
+  before:  POST /organization/invite-member  ->  400  {"message":"[body.role] Invalid input","code":"VALIDATION_ERROR"}
+  after:   POST /organization/invite-member  ->  200  {"role":"member","status":"pending", ...}
+  ```
+  
+  No caller had to change: the census found no in-repo or Console caller using the two-argument form, so this repairs a path that was declared and unreachable rather than one that was in use.
+- 032452a: fix(client): the scoped SDK reads `metadata.prefix` off the advertised routes instead of restating `/meta`
+  
+  `metadata.prefix` is a live `RestServerConfig` key: REST mounts every metadata
+  route under `metaPath = ${basePath}${metadata.prefix}` and the discovery handler
+  advertises the same value as `routes.metadata = ${realBase}${metadata.prefix}`.
+  Three surfaces describe one set of paths — the mounts, the discovery document,
+  and this SDK.
+  
+  `ScopedEnvironmentClient` restated `/meta` as a literal in all six of its
+  metadata methods — `getTypes`, `getItems`, `getItem`, `saveItem`, `deleteItem`,
+  `getHistory` — so on a deployment that moved the prefix, every one of them
+  called a path the server does not mount. The unscoped twin of each method was
+  already correct (it builds `${baseUrl}${getRoute('metadata')}`), so one SDK
+  disagreed with itself: the unscoped half read the advertised value while the
+  scoped half guessed. Measured on a live server booted at
+  `metadata: { prefix: '/metadata' }`, all six went to
+  `/api/v1/environments/<id>/meta`, which that deployment answers 404.
+  
+  The six now build through `metaUrl()`, which takes its base from `_apiBase()`
+  and its prefix from the new `_metaPrefix()` — the exact sibling of the
+  `_dataPrefix()` derivation that fixed `crud.dataPrefix`, fallback discipline
+  included. `_metaPrefix()` prefers the advertised `routes.metadata`, recovers the
+  prefix from `routes.data` as a second equation over the same `realBase` when the
+  advertised value is not the conventional one, and **declines to `/meta`**
+  whenever the document does not determine the answer: an SDK must not become
+  unusable because a server's discovery document is missing a key.
+  
+  Deployments on the default prefix are unaffected, by construction and by
+  measurement: the conventional-suffix rule is taken first, so a default
+  deployment is answered from `routes.metadata` alone, and a client that never
+  connected never reaches a rule at all. The pinned negative control asserts the
+  six request URLs of a default deployment byte for byte, for a connected client
+  and for an unconnected one, and that the unconnected client puts no discovery
+  request on the wire.
+  
+  The unscoped metadata methods are untouched.
+- ab1c585: `POST /two-factor/verify-totp` and `/two-factor/verify-otp` now echo the user row as it stands when the response is written, instead of the pre-rotation snapshot the vendor closes over.
+  
+  On the enrolment lane — a signed-in caller confirming a new factor — better-auth writes `twoFactorEnabled: true`, rotates the session, and only then calls the `valid(ctx)` closure it built at entry. That closure still holds the pre-rotation session, so a successful verification answered `user.twoFactorEnabled: false` to the very caller who had just switched 2FA on. An account portal reading that body renders the factor as still OFF right after enrolment, and a bearer client that caches the echoed user carries the wrong flag until its next `get-session`.
+  
+  `two-factor-rotated-token-echo` already repaired the body's other stale member, `token`, on exactly these routes and on exactly this predicate — the response staged a session cookie whose token differs from the one echoed. The `user` member is stale for the same reason, so it is repaired under the same predicate rather than a new one.
+  
+  - **Two narrowings, both load-bearing.** Only the members the vendor already echoed are written, so the published payload shape (`AuthWireUser`) cannot widen — better-auth's own output filter is a deny-list, and forwarding a raw row would put every column it happens to carry on the wire. And the row is re-read through `internalAdapter` by the id the response itself published, so the repair travels the same output transform that produced the echo (a driver that stores booleans as `1`/`0` cannot change a member's wire type) and can never substitute a different principal into a response.
+  - **`/two-factor/verify-backup-code` is untouched.** It does not rotate and already echoed the live row; it is in neither path list, its row is not read, and it is pinned as a negative control on both the in-memory engine and a real `SqlDriver` — an unconditional re-read would have "fixed" the broken lane and quietly rewritten one that was already right.
+  - **The failure posture is inherited.** A row read that throws or answers nothing degrades to the vendor's own echo, never to a failed verification and never to a lost `token` repair, which is written first for that reason.
+  
+  `@objectstack/client` drops the `AuthTwoFactorVerificationResult.user` warning that told callers to re-read the session for the live flag; the wire shape it declares is unchanged.
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [245f360]
+- Updated dependencies [324968e]
+- Updated dependencies [fe71032]
+- Updated dependencies [482d34d]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [baf9745]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [6548118]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [48203ff]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [c9eb773]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [dfeba25]
+- Updated dependencies [0a88a80]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [e7ff9c2]
+- Updated dependencies [134b410]
+- Updated dependencies [4c42fd1]
+- Updated dependencies [5f392f0]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [f03f6c7]
+- Updated dependencies [cf79182]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [71629a1]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [de1a611]
+- Updated dependencies [db76982]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [ab450f4]
+- Updated dependencies [025588a]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/spec@17.5.0
+  - @objectstack/core@17.5.0
+
 ## 17.4.0
 
 ### Minor Changes

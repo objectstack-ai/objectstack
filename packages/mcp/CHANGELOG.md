@@ -1,5 +1,320 @@
 # @objectstack/plugin-mcp-server
 
+## 17.5.0
+
+### Minor Changes
+
+- 76ddab7: fix(runtime,mcp): `action.ai.requiresConfirmation` is ENFORCED at the AI-facing action door — an unconfirmed call is refused, and `run_action` grows the `confirm` member that satisfies it (#15942)
+  
+  **Behaviour change — read this if any of your actions declare `ai.requiresConfirmation: true`.** An AI-facing invocation of such an action (`invokeBusinessAction`, reached from the MCP `run_action` tool) is now REFUSED unless the request carries the confirmation member. A call that succeeded before starts answering `428 ACTION_CONFIRMATION_REQUIRED`, and nothing dispatches: the action body does not run, and the subject record is not even read.
+  
+  FROM → TO, for a caller of a gated action:
+  
+  ```
+  run_action({ actionName: 'archive_lead', recordId: 'lead_1' })                  // was: ran
+  run_action({ actionName: 'archive_lead', recordId: 'lead_1', confirm: true })   // now: required
+  ```
+  
+  The refusal is machine-readable so the retry is mechanical rather than guessed — `error.details` carries `{ actionName, objectName?, confirmationMember }`, and `confirmationMember` echoes the member's exact spelling (`AI_ACTION_CONFIRMATION_MEMBER`, `@objectstack/spec/contracts`). The `run_action` tool schema advertises `confirm` as an optional boolean, so an agent discovers the retry from the tool definition rather than from prose.
+  
+  **What is NOT gated**, because this narrows a published accept set and the narrowing is deliberately as small as the author's own declaration:
+  
+  - Only the DECLARED flag gates. `ai.requiresConfirmation: true`, set by the action's author, and nothing else. The wider `list_actions` heuristic — `mode: 'delete'` / `variant: 'danger'` on an action whose author declared nothing — still reports `requiresConfirmation: true` to advise a client, and still does NOT refuse. An explicit `ai.requiresConfirmation: false` never refuses.
+  - Only the boolean `true` confirms. `'true'`, `1` and `false` are not attestations.
+  - Only the AI-facing doors. The enforced set is the doors that enforce `ai.exposed` — today `invokeBusinessAction` via MCP `run_action`. REST `/actions` is not `ai.exposed`-gated and sits outside this gate.
+  - `list_actions` is unchanged.
+  
+  **A gate, not a queue.** Nothing is parked, nothing is held for an operator, and there is no resume path: a refused call simply did not run, and the caller confirms with its human and retries. And `confirm: true` is an unverifiable caller claim — an agent that always sends it bypasses the gate. The gate makes FORGETTING loud; it does not prove a human.
+  
+  Why it is worth the break: the flag was read once and consumed once, to fill a field of the `list_actions` summary. It stopped nothing. That is the failure ADR-0049 retired `tool.requiresConfirmation` for — "a SAFETY flag that is merely accepted is false compliance" — reappearing on the very key the retirement's own ledger entry told authors to move to. The contract this implements landed in `@objectstack/spec` first (#16293).
+- 331a1a2: fix(security): an OAuth-connected MCP agent runs at its delegator's record depth — "you connect as yourself" becomes true (#16549)
+  
+  Maintainer ruling, decision batch #81 item 1 (2026-09-08), option 1: **the OAuth agent runs with the user's own permissions; the ceiling only subtracts; the diagnostic lands regardless.**
+  
+  **The defect, measured.** The Setup → Connect an Agent page promises, verbatim, *"you connect as yourself, and every call runs under your own permissions and row-level security."* It did not. The same sales manager, same questions, same server:
+  
+  | identity path | `crm_account` | `crm_opportunity` | `crm_task` |
+  |:--|--:|--:|--:|
+  | API key, `principalKind: human` | 9 | 23 | 45 |
+  | OAuth, `principalKind: agent`, `onBehalfOf` = same user | **5** | **0** | **0** |
+  
+  The agent read `own` scope where the human read `viewAllRecords`, so any profile whose visibility comes from `viewAllRecords` — every manager-type profile — collapsed to *own + explicit shares*. And it was **silent**: the MCP tools answered `total: 0` with no note, so the agent reported "there are no opportunities this quarter" as a fact about the data.
+  
+  **The mechanism, in one line.** `mcp_agent_data_read` / `mcp_agent_data_write` are pure CAPABILITY ceilings — a `'*'` grant with no `readScope` and no `viewAllRecords`, whose own doc says *"NO row-level security … all row/owner/tenant narrowing comes from the delegating user"*. `PermissionEvaluator.getEffectiveScope` nevertheless answered `'own'` for them, because its owner-only default turns a granting-but-silent set into an owner-scoped one. That default is correct for a principal standing on its own and wrong as an input to an intersection: it made the ADR-0090 D10 fold subtract with an opinion nobody declared.
+  
+  **(1) Parity.** A new `PermissionEvaluator.getDeclaredScope` answers the depth a set actually *declares*, or `undefined` when every granting set is silent; `intersectDelegatedScope` reads that silence as **no opinion**, so the delegated principal's own leg contributes no owner narrowing and the delegator's depth stands — `agent ∩ user = user` for visibility. A ceiling that *does* declare a depth keeps its full subtractive force. The explain engine's `depth` layer folds through the identical function, so a report cannot describe an intersection the query did not have.
+  
+  ⛔ **Only visibility depth moved.** Each ceiling's remaining subtractions are now written down explicitly beside the sets themselves (`objects/default-permission-sets.ts`): `data:read` still cannot write, create, delete, export or `allowTransfer`; `data:write` still cannot `allowTransfer` or export, and `sys_*` / better-auth-managed identity tables stay read-only; neither reaches a `private`-posture object nor carries any `systemPermissions`; a dangling delegator still fails CLOSED; and share-MANAGEMENT authority is still not delegated (`hasWriteBypass` → `false`, `resolveWriteScope` → `'own'` for any on-behalf-of context). Putting `viewAllRecords` / `modifyAllRecords` on the ceiling — the ruling's other permitted route — would have granted `allowTransfer` (`MODIFY_ALL_WRITE_KEYS` covers it) and reached `private` objects through the superuser wildcard, both explicitly fenced off, which is why the fix lands on the intersection instead.
+  
+  **(2) The diagnostic, independent of (1).** `ISecurityService.describeDelegationNarrowing` (optional) reports whether the agent ceiling narrowed a delegated read, resolved from the same two evaluator calls the CRUD middleware stashes as `__readScope`. `McpDataBridge.diagnoseDelegation` (optional) carries it to the transport, and MCP `query_records` serves a narrowed result with `delegationNarrowed: true` plus a `warning` sentence naming the D10 intersection — the `partial` / `warning` shape `list_objects` already uses. The rows are still served; what is added is the fact the payload could not previously carry: *this count describes the ceiling, not the object.* An un-narrowed read, a non-delegated read, a bridge with no probe and a throwing probe all render exactly what they rendered before.
+  
+  **(3)** The Setup page's promise is untouched — it is now true rather than rewritten.
+  
+  Purely additive on every published surface: two new optional members, one new exported type (`DelegationNarrowing`), and one new evaluator method. No existing member changed shape, and the only behavioural change is on the delegated path with a ceiling that declares no depth.
+  
+  `DelegationNarrowing` is a **discriminated union** on `narrowed`, not one shape with three optional fields, because the two shapes are not symmetric once released:
+  
+  | direction, after release | consumer cost |
+  |:--|:--|
+  | ship optional fields, later tighten them to required | a compile break |
+  | ship discriminated, later loosen it (a new union member, or an optional field on the `true` arm) | none |
+  
+  The loose shape buys nothing and forecloses the tightening. It also removes the very failure mode the method exists to prevent: `statement` is the sentence an AI consumer renders, so left optional, a consumer that forgets the `narrowed` check silently renders `undefined` — the same silence the table above measures. The five-member scope ladder it reports names the alias that already exists for it, `ObjectAccessScope` (ADR-0057 D1, `@objectstack/spec/security`), rather than minting a second declaration of one ladder; `resolveWriteScope` now names it too, so the union is spelled once instead of three times and no export is added beyond `DelegationNarrowing` itself.
+
+### Patch Changes
+
+- f19dbcf: Connect an Agent is reachable from the Account app, so a non-admin can mint their own key
+  
+  `POST /api/v1/keys` mints a `sys_api_key` bound to the **caller**, and the
+  Connect-an-Agent page says the key "acts as you". But the page's only navigation
+  entry sat in the Setup app, which declares `requiredPermissions:
+  ['setup.access']` — so every non-admin following the shipped two-step guide, and
+  every reader of the runtime's own error text (`packages/mcp/src/plugin.ts`:
+  *"mint an API key (Setup → Connect an Agent, or POST /api/v1/keys)"*, and
+  `README.md`), stopped at step 1 while the endpoint behind the button had accepted
+  them all along. Measured before: a principal with no system permissions gets
+  `403 PERMISSION_DENIED` on `GET /api/v1/meta/apps/setup` and `nav_connect_agent`
+  is absent from the wire.
+  
+  `CONNECT_AGENT_UI_BUNDLE` now carries a **second** `navigationContributions`
+  entry, targeting the `account` app's `grp_account_developer` group beside the
+  `nav_account_api_keys` entry already shipping there. Measured after, over the
+  real composition (real `SETUP_APP` / `ACCOUNT_APP` / `SETUP_NAV_CONTRIBUTIONS`,
+  the real fold and the real RBAC-by-route filter): the same permissionless
+  principal gets `200` on `GET /api/v1/meta/apps/account` with
+  `grp_account_developer` carrying `['nav_account_api_keys',
+  'nav_account_oauth_apps', 'nav_connect_agent']`, while `apps/setup` still
+  answers `403 PERMISSION_DENIED` with `connect_agent` absent from that body.
+  
+  **Nothing else moves.** No backend change, no authorization change, no change to
+  which permissions exist, and the published "acts as you" promise is unchanged —
+  it simply becomes keepable for the users it was written for. The Setup entry
+  stays exactly as it was, so admins keep the page where the guide points, and no
+  gate is added or removed anywhere: a navigation contribution registers exactly
+  when the page registers, so an opted-out deployment
+  (`OS_MCP_SERVER_ENABLED=false`) still gets no page and neither entry.
+  
+  ⛔ Ungating Setup was **not** the fix, and was measured rather than assumed: the
+  app-level `setup.access` gate fires before the group gate, so dropping the group
+  gate alone changes nothing, and dropping both serves 14+ unrelated Setup
+  surfaces (Users, Organization, Business Units, Branding, Feature Flags, …) to
+  every signed-in user. ⛔ Nor was a `requiresService: 'mcp'` gate on an
+  `account.app.ts` entry: the `mcp` service registers unconditionally in `init()`
+  while this bundle registers behind `isMcpServerEnabled()`, so such an entry
+  would outlive its page and 404 for every signed-in user on an opted-out
+  deployment.
+  
+  Both entries deliberately share the item id `nav_connect_agent` — one
+  destination, one identity. That is scoped, not a collision: `SchemaRegistry`
+  keys contributions by target app and `applyNavContributions(app)` consults only
+  that app's bucket, so a nav item id is unique within one app's navigation tree,
+  and the translation bundles are keyed `apps.<app>.navigation.<id>`.
+- 4af758d: refactor(runtime,mcp): the last two admission doors classify the `tenancy` rejection through the shared `classifyAdmissionTenancyPosture` (#17114)
+  
+  `@objectstack/core`'s `classifyAdmissionTenancyPosture` is the one place the
+  #13906 decision 1 option A classification lives: a branded "never registered"
+  rejection is the supported no-tenancy composition and answers a quiet
+  `undefined`, while every other rejection becomes
+  `AuthzStoreUnavailableError('tenancy', err)` — ADR-0112 `SERVICE_UNAVAILABLE` /
+  503 — because the posture is an authorization INPUT and admission was never
+  decided.
+  
+  Two admission doors were still hand-writing that classification, out of the
+  declared scope of the fold that extracted it:
+  
+  - `@objectstack/runtime`'s `resolveExecutionContext` — the REST/dispatcher
+    entry-point identity resolver;
+  - `@objectstack/mcp`'s `resolveStdioTenancyPosture` — the stdio door's **async
+    kernel** leg.
+  
+  Both now call the shared function. ⛔ **No behaviour changes at either door.**
+  Tenancy posture decides which rows a caller may see, so a divergence between
+  copies would be two answers to "whose data is this", and the copies are the
+  stale ones by construction — the shared version is the one that will be
+  maintained.
+  
+  **The resolution stayed at each seam, deliberately.** The extractable part is
+  the classification, not the resolution: each door keeps its own accessor guard
+  and hands its own former accessor expression in as the thunk, so the helper
+  never learns *how* a seam reaches the service. A helper that owned the wiring
+  too would be wrong for one seam or grow a flag per seam.
+  
+  **One neighbouring leg is deliberately NOT folded.** The stdio door's **sync**
+  fallback is taken only on a `KernelBase`-shaped host with no `getServiceAsync`,
+  whose accessor reports its one possible fault — nothing registered under that
+  name — **unbranded**. Routing it through the shared classification would mint a
+  503 outage out of a supported composition, so its bare `catch` remains that
+  seam's recorded decision. A test arm now fails if that leg is ever folded.
+  
+  Shipped rather than `skip-changeset`: both packages publish `files[]: ["dist"]`,
+  and the built `dist` of each carries the new call (2 files each, measured after
+  a real build, with a symbol known-absent scoring 0 and
+  `isServiceNotRegisteredError` scoring 4 in `runtime/dist` as the lit control).
+  `@objectstack/mcp`'s `dist` no longer mentions `isServiceNotRegisteredError` at
+  all.
+- 3977410: docs(mcp): the README no longer promises that Claude Desktop reaches intranet deployments — *Add custom connector* is the claude.ai connector system and dials from Anthropic's servers (#16882)
+  
+  `packages/mcp/README.md` grouped the clients by **where the client application runs**: "Local clients (Claude Code / Desktop) can reach intranet deployments; claude.ai web connectors additionally need the endpoint publicly reachable." That grouping is wrong for Claude Desktop. Its *Settings → Connectors → Add custom connector* flow is the same claude.ai connector system, and the connection to the MCP server is made **from Anthropic's servers** — Anthropic's custom-connector documentation requires the server to be reachable over the public internet from Anthropic's IP ranges and states that a server on a private corporate network, behind a VPN, or blocked by a firewall will not connect. An operator following the old sentence pointed Claude Desktop at an intranet address and the failure surfaced inside a third-party client, with nothing to connect it back to our instructions.
+  
+  The README now groups by **where the connection is made from**, which is the mechanism and does not go stale when a client's dialog is redesigned:
+  
+  - **Claude Code** (`claude mcp add`, or the plugin) dials the endpoint from your own machine, so `localhost` and intranet-only deployments work — this is the door that genuinely reaches a private deployment, and the README now names it as such.
+  - **claude.ai (web) and Claude Desktop** go through the one claude.ai custom-connector system and need public HTTPS; a locally trusted certificate does not make a private address reachable.
+  
+  Documentation only — no exported symbol, endpoint, schema or runtime behaviour changes. The `patch` bump is because `README.md` is in this package's published `files[]`, so the corrected text ships to the npm page.
+- 46cf705: fix(mcp): refuse undeclared argument keys on every MCP tool instead of stripping them
+  
+  `query_records` answered `{"objectName":"crm_opportunity","sort":"-amount","limit":3}` with `200`
+  and rows in seed order, and `{"objectName":"crm_opportunity","filters":[["name","contains","Meridian"]]}`
+  with `200` and the full unfiltered set. Neither key is declared, and zod's strip default — reached
+  through the MCP SDK's raw-shape wrap — deleted both before the handler ran, so the handler could not
+  report what it never received. Nothing in either payload distinguished it from a real answer, and the
+  consumer of these tools is an AI agent: it reads a successful response and reports the wrong answer
+  confidently. A dropped sort key answers a differently ORDERED set; a dropped filter key answers a
+  WIDER one.
+  
+  All eleven tools held that posture; none refused. Each tool's `inputSchema` is now a built strict
+  object, so an undeclared key is refused before dispatch, the data bridge is never reached, and
+  `tools/list` advertises `additionalProperties: false` — the closed set is readable off the schema
+  rather than discoverable only by being refused. The refusal names the offending key and, where the
+  spelling is recognisable, the declared one to send instead.
+  
+  Spellings that used to be accepted-and-ignored, and what to send now. Every one of them was already
+  inert: it was dropped, and the call proceeded exactly as if it had never been sent.
+  
+  | previously sent and ignored | send instead | on |
+  | :-- | :-- | :-- |
+  | `sort`, `sortBy`, `order`, `order_by` | `orderBy` | `query_records` |
+  | `filters`, `filter`, `conditions`, `criteria` | `where` | `query_records` |
+  | `select`, `columns`, `projection` | `fields` | `query_records` |
+  | `pageSize`, `top`, `take` | `limit` | `query_records` |
+  | `skip`, `start` | `offset` | `query_records` |
+  | `filters`, `filter`, `conditions` | `where` | `aggregate_records` |
+  | `metrics`, `aggregates`, `aggs` | `aggregations` | `aggregate_records` |
+  | `group_by` | `groupBy` | `aggregate_records` |
+  | `tz`, `timeZone` | `timezone` | `aggregate_records` |
+  | `object`, `table` | `objectName` | every object-scoped tool |
+  | `id`, `record_id` | `recordId` | `get_record`, `update_record`, `delete_record`, `run_action` |
+  | `record`, `values`, `fields` | `data` | `create_record`, `update_record` |
+  | `action`, `name`, `action_name` | `actionName` | `run_action` |
+  | `args`, `input`, `arguments`, `parameters` | `params` | `run_action` |
+  | `formula`, `expr`, `cel` | `expression` | `validate_expression` |
+  
+  A key outside this table is refused with its name echoed back and a closest-declared-key suggestion
+  when one is within a length-relative edit distance.
+- Updated dependencies [7f62536]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [245f360]
+- Updated dependencies [324968e]
+- Updated dependencies [fe71032]
+- Updated dependencies [482d34d]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [baf9745]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [6548118]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [48203ff]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [de62769]
+- Updated dependencies [c9eb773]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [dfeba25]
+- Updated dependencies [0a88a80]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [e7ff9c2]
+- Updated dependencies [758ac40]
+- Updated dependencies [134b410]
+- Updated dependencies [4c42fd1]
+- Updated dependencies [5f392f0]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [f03f6c7]
+- Updated dependencies [cf79182]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [c3ebe4a]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [71629a1]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [288fe9c]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [6e3462d]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5a95b0e]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [de1a611]
+- Updated dependencies [db76982]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [ab450f4]
+- Updated dependencies [025588a]
+- Updated dependencies [5505646]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/types@17.5.0
+  - @objectstack/spec@17.5.0
+  - @objectstack/core@17.5.0
+  - @objectstack/formula@17.5.0
+
 ## 17.4.0
 
 ### Patch Changes

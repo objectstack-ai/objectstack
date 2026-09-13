@@ -1,5 +1,520 @@
 # @objectstack/service-automation
 
+## 17.5.0
+
+### Minor Changes
+
+- 92865f6: fix(service-automation)!: a whitespace-only `config.condition` is refused at `registerFlow`, the rule the edge door has carried since #15807 (#17322)
+  
+  <!-- adr-0087: not-required (already-registered flow-edge-condition-evaluated-slot-source-required) this is a second face of the decision that entry already carries — an evaluated slot requires a non-blank `source`, refused with EVALUATED_EXPRESSION_SOURCE_REQUIRED — applied to the other structural condition slot by importing the same schema rather than by deriving a second rule; no key is renamed, retired or given a new meaning here. ⚠️ That entry's `surface` and `acceptanceCriteria` name only `edges[].condition`, so they need widening to `config.condition` for a consumer replaying the chain; that file is in packages/spec, outside this card's package, and is filed as a follow-up rather than edited here. -->
+  
+  **BREAKING** in the accept-set sense, landing in the launch window as `minor`
+  (the lockstep convention: `major` is refused by `check-changeset-no-major`, and
+  breaking-ness is carried by this banner plus the ADR-0087 disposition): a flow
+  node's `config.condition` — a `decision` node's predicate, and on a `start` node
+  the **trigger gate** — is now refused at `registerFlow` when its source is blank
+  after trimming, where it used to register clean and answer a **silent `false`**
+  at every evaluation.
+  
+  Two doors, the same authored value, two fates until now. `FlowEdgeSchema.condition`
+  composes `EvaluatedExpressionInputSchema` (#15807), so `'   '` on an edge is
+  refused at `FlowSchema.parse`, by name. A node's `config` is an open
+  `z.record(z.string(), z.unknown())`, so the same value passed through verbatim,
+  reached `AutomationEngine.evaluateCondition`'s empty-source arm — `exprStr.trim()
+  === ''` — and returned `false`, under a comment that names that arm as being for
+  an **unauthored** condition. `'   '` was authored. The branch never ran, forever,
+  with nothing said at any layer.
+  
+  ```yaml
+  nodes:
+    - { id: gate,   type: start,    config: { objectName: lead, triggerType: record-after-update, condition: '   ' } }  # the flow was gated shut
+    - { id: branch, type: decision, config: { condition: { dialect: cel, source: '   ' } } }                            # the same blank, through the envelope key
+  ```
+  
+  > An expression in an evaluated slot needs a non-blank `source`: the expression
+  > engine evaluates `source` (the canonical persisted form) and
+  > cannot evaluate `ast` alone, so an envelope carrying only `ast`, or a `source`
+  > that is blank after trimming, would validate and register and then fault at
+  > run time. Write `{ dialect: 'cel', source: '…' }`.
+  
+  - **The rule is imported, not re-derived.** `registerFlow`'s structural pass runs
+    the condition's source through `EvaluatedExpressionInputSchema` itself, so the
+    node door and the edge door cannot drift into two notions of "blank" or two
+    sentences for it — the property the #15662 campaign built the shared refusal
+    for. Nothing is exported from this package to carry it, and no new export was
+    added.
+  - **Applied to the SOURCE, not to the whole value**, deliberately: the union
+    would also refuse an envelope with no `dialect` or with a dialect outside its
+    enum, and this slot admits both (`structuralConditionRefusal`'s docblock,
+    #4336). The narrowing is exactly the blank population and nothing else — a
+    `cron` envelope with a real source still earns its own pre-existing verdict,
+    and a bare string with a `{…}` brace trap still earns #1491's.
+  - **`evaluateCondition` is unchanged and still answers `false`.** It is the
+    shared evaluator and a public method on an exported class, so its throw
+    behaviour is itself a contract; and a stored flow reaches it whatever the
+    producer refuses. This change is at the producer only.
+  - **`structuralConditionRefusal` is unchanged.** A string is still a well-shaped
+    condition; the new refusal sits behind the shape one and in front of the CEL
+    one, and answers the evaluated-slot sentence rather than
+    `STRUCTURAL_CONDITION_SHAPE_REFUSAL`.
+  
+  **What an author does with a refused condition.** A whitespace-only condition was
+  never a predicate — the engine answered `false`, so the branch never fired, and on
+  a `start` node the flow never triggered. **Remove the `condition` key** if the node
+  was meant to be unconditional, or **write the expression** if it was meant to
+  branch. ⚠️ Those two are not interchangeable: a refused condition never fired,
+  while an absent `condition` on a decision node is an unconditional branch that
+  always fires and an absent one on a start node is a gate that always opens.
+  Deleting the key to clear the refusal inverts the node rather than preserving it.
+  Every condition with a non-blank source is unchanged, and nothing is renamed or
+  retired.
+  
+  **A flow ALREADY STORED in `sys_metadata` stops running entirely — the whole flow,
+  not just the branch.** Stored flows are deliberately not canonicalized by
+  `applyConversionsToStoredItem` (`spec/src/conversions/stored.ts`, and the same
+  skip in `metadata/src/loaders/database-loader.ts`'s `rowToData`); they canonicalize
+  at `registerFlow`, and each of the three boot paths in
+  `service-automation/src/plugin.ts` wraps that call in `try`/`catch`, logs one
+  `warn` naming the flow, and continues. So a node condition that used to answer a
+  silent `false` while the rest of the flow ran now takes the flow down with it: it
+  is never registered, its trigger is never armed, and the announcement is that one
+  warn line — `[Automation] failed to register flow` at boot, `[Automation]
+  cold-boot flow bind: failed to register flow` at the kernel:ready bind,
+  `[Automation] flow re-sync: failed to register flow` on a re-sync. The warn line
+  is also the locator: the refusal names the node and the slot, e.g. `node 'gate'
+  (start) condition`. A stack authored in config files has a second door,
+  `objectstack validate` — see the note below for what that door does **not** yet
+  say.
+  
+  **A repo-wide census on this branch found zero authored `config.condition` values
+  of this shape**, against a lit control: a textual probe over all 8,123 tracked
+  source files found **461** non-blank `condition:` string literals and **zero**
+  blank-after-trim ones in any authored flow (the four blank hits are two prose
+  examples inside #15807's own changeset and two `packages/lint` test fixtures).
+  There is nothing in this repository to rewrite.
+  
+  ⚠️ **Two follow-ups this change does not carry, both outside this card's package.**
+  (1) The ADR-0087 D3 entry named above,
+  `flow-edge-condition-evaluated-slot-source-required`, registers the decision this
+  change is a second face of — an evaluated slot requires a non-blank `source` — but
+  its `surface` and `acceptanceCriteria` name only `edges[].condition`. They need
+  widening to `config.condition` so a consumer replaying the chain is told to sweep
+  the node key too; that file is in `packages/spec`.
+  (2) `@objectstack/lint`'s `validate-expressions` applies only
+  `structuralConditionRefusal` to a structural condition, so `objectstack validate`
+  still reports nothing for a blank `config.condition` that `registerFlow` now
+  refuses — the two doors disagree until that rule is rebound as well.
+- 9540590: `restoreConsumedSuspension` reaches a NESTED run: the ancestors a stranded descendant cascade-failed are journalled too, and the chain is re-armed as one unit
+  
+  `resumeInternal`'s catch arm journalled the consumed suspension of the run that
+  threw, and nothing else. For a nested run the ancestors were handled on both
+  paths with no journal at all: up-bubble (`failAncestors` walks `$parentRunId`
+  and calls `failSuspendedRun` on each suspended ancestor) and delegation (the
+  parent frame sees a failed child with no retryable code and calls
+  `failSuspendedRun` on itself). `failSuspendedRun` was `forgetSuspendedRun(run,
+  'failed')` plus a `failed` log record — it journalled nothing.
+  
+  So the leaf was restorable while every ancestor was recorded `failed` with its
+  pause consumed and no snapshot (`restoreConsumedSuspension(PARENT)` answered
+  `NO_CONSUMED_SUSPENSION`), and restoring the leaf completed it into a parent
+  that never continues: `bubbleToParent` found no parent suspension and logged.
+  The operator ended up worse off than before using the exit.
+  
+  `failSuspendedRun` now journals the pause it consumes whenever the descendant
+  whose failure consumed it is itself repairable — from the same single producer
+  and onto the same durable terminal row as the strand's own snapshot, so the
+  chain is repairable from any replica and after a restart, not only from the
+  process that stranded it. `restoreConsumedSuspension` then repairs the chain as
+  one unit: it walks down to the stranded descendant and up through the ancestors
+  it cascaded into, and re-arms every member DEEPEST FIRST, so an ancestor becomes
+  resumable only after the run it is parked awaiting is parked again. The entry
+  point does not matter — naming any member of the chain repairs all of it — and
+  the continuation is then re-issued once, on the run that was named.
+  
+  Additive on the wire and in the type: the result's existing fields still
+  describe the run the caller named, and the new `chain` key is present only when
+  the repair was a chain repair. `ChainRestoreEntry` is exported for it. The
+  narrower `IAutomationService.restoreConsumedSuspension` contract in
+  `@objectstack/spec` is unchanged and the HTTP door's payload is unchanged — the
+  door answers `{ runId, restored, reason }` as it always did.
+  
+  Every member goes through the same per-run call as a flat restore — its own
+  in-process claim, its own strict live-suspension read, its own two-witness read,
+  its own durable park — so idempotence and the #14333 advance claim hold per run
+  in the chain: a second restore finds every member parked and answers
+  `RUN_SUSPENDED` without minting a second pause anywhere.
+  
+  ⛔ No ancestor is stamped `'stranded'`. That word is the resume result of a run
+  that consumed its OWN pause and then threw downstream, and nothing re-arms an
+  ancestor by resuming it; stamping it would send an operator to retry a recovery
+  that cannot succeed. The parent frame's delegation result still carries no
+  status at all, and an ancestor's repairability is carried by the journal and by
+  this verb's answer.
+  
+  Journalling is EARNED, not applied to every cascade: an ancestor whose
+  descendant is beyond repair is still consumed without a snapshot, because
+  re-arming it would promise a chain repair that could not be completed.
+  
+  **`@objectstack/plugin-approvals`** reports the consequence rather than causing
+  it: `inspectStrandedRequests` asks the engine per run, so a cascade-failed
+  ancestor whose descendant is repairable now comes back `runState:
+  'repairable'` instead of `'unrepairable'`, and restoring either row repairs the
+  pair. `'unrepairable'` keeps its other causes — a run that never paused, a
+  snapshot no longer held, and a cascade whose descendant was itself beyond
+  repair. No plugin logic changed; the docblocks that documented the old
+  limitation did.
+- 775e5ec: A run's durable history row records the terminal status the run actually reached — `completed`, `failed`, `cancelled` or `timed_out` — instead of folding all four into two. A restart no longer changes a run's answer.
+  
+  `RunRecord.status` declared two members (`'completed' | 'failed'`) while `AutomationEngine.recordLog`'s own terminal predicate admitted four and `ExecutionStatus` (`@objectstack/spec`) has declared them all along. Both ends of the store folded to match the narrower declaration: the write mapped everything that was not `completed` to `failed`, and the read mapped everything that was not `failed` back to `completed`. The distinction was therefore not hidden — it was **destroyed at write time**, so no later change could recover it for a row already stored. The cost was that one run answered differently depending on where you read it: `getRun` prefers the in-memory ring entry and said `cancelled`, while after a restart or a ring-buffer eviction the durable row answered, and it said `failed`.
+  
+  - **The write side.** `recordLog` writes the status its own terminal predicate admitted, resolved once into a `const` that also decides whether a row is written at all. The predicate is now the single declared vocabulary, `TERMINAL_RUN_STATUSES` (`engine.ts`) — three sites had a copy of that list and only one of them was ever going to be updated together with the writer.
+  - **The read side.** `ObjectStoreSuspendedRunStore` resolves the row's status once in the gate that already decided whether the row is terminal at all and hands the member to `deserializeTerminal`, which no longer re-reads or folds it. `listHistory`'s filter was the second copy of the two-member list — left alone it would have replaced a wrong status with a *missing row*, dropping cancelled runs out of the Runs list entirely.
+  - **The stored column.** `sys_automation_run.status` accepts the two added members, and the retention scope (`lifecycle.retention.onlyWhen`) counts them as terminal — a widened writer over a two-member sweep scope would have left `cancelled` and `timed_out` history rows never ageing out, on a table whose whole retention posture (ADR-0057) is that history is telemetry. `refused` is deliberately not added: `ExecutionStatus` declares it (#14945) but no engine path produces it, and an option nothing can write is declared-but-inert metadata (ADR-0078).
+  - **Rows already stored keep reading `failed`.** The information they lost is not recoverable and this change does not pretend otherwise — there is no backfill, because there is nothing to backfill *from*. Rows written from this release forward carry the distinction.
+  - **`TerminalRunStatus`** is exported for the same reason `ConsumedSuspensionDropNotice` is: `RunRecord` is barrel-reachable, and a host store implementing `recordTerminal` / `loadTerminal` has to be able to name the field it round-trips.
+  
+  Not a breaking change, and deliberately carries no breaking-change banner: the published contract (`IAutomationService.getRun` / `listRuns` return `ExecutionLog`, whose `status` is `ExecutionStatus`) has declared all four members since before this row existed. What changes is that the implementation stops under-reporting one the contract already promised — a consumer written against the declared contract is unaffected. Also no ADR-0087 migration entry: that ADR governs authorable metadata shapes on `sys_metadata`, and this is an engine-owned system data table whose existing values stay valid under the widened option set.
+- ecdfc94: fix(triggers,spec,service-automation,lint)!: a time-triggered flow declares its acting organization, and both its query and its run are confined to it (#16659)
+  
+  <!-- adr-0087: registered schedule-flow-acting-organization-required -->
+  
+  **Registered as an ADR-0087 semantic migration**
+  (`schedule-flow-acting-organization-required`, protocol 18). Nothing authorable
+  is renamed, retired or re-typed — no `packages/spec` key changes its name, its
+  type or its optionality, no stored shape moves, and every flow, node and
+  start-node `config` that parses today parses byte-identically afterwards,
+  because the start node's `config` is an OPEN record (ADR-0018) and the new
+  `organization` key is an addition to a slot that already accepted anything. So
+  `objectstack migrate meta` has nothing MECHANICAL to prescribe: the remedy is a
+  value only the deployment holds, a `sys_organization.id` minted at runtime, with
+  no authored artifact and no stored representation a rewrite could act on — and
+  inventing one is precisely what the ruling forbids. ⚠️ That is the argument
+  against a CONVERSION, and it is not an argument for silence: ADR-0087 D3 says a
+  migration that cannot be expressed declaratively gets a structured TODO
+  (surface, reason, acceptance criteria) rather than nothing, and what follows IS
+  a prescription in that sense — declare `config.organization` once per
+  organization, no fan-out, then act on the three consequences of the split named
+  below. Direct precedent: `rest-requireauth-default-flip` (protocol 12) —
+  behaviour-only, no shape moved, a deployment judgement no transform can make,
+  registered anyway. Filed under protocol **18**, not 17: v17.0.0 was cut before
+  this narrowing landed, so the enforcement rides the 17.x line by the
+  launch-window convention while the prescription belongs at the major boundary
+  where `migrate meta` users look.
+  
+  **BREAKING** in the accept-set sense, and in TWO places rather than one —
+  landing in the launch window as `minor` on all four packages (the lockstep
+  convention: during the window the bump level is not the carrier, this banner and
+  the disposition above are). Nothing that was refused becomes admitted.
+  
+  1. **Bind time.** A `schedule` or `time_relative` flow that declares no
+     `organization` is no longer armed.
+  2. **Run time — the DATA PLANE.** A time-triggered run now carries a
+     `tenantId`, and a `time_relative` sweep now carries one on its own query.
+     Where a run previously read, updated and deleted across every organization,
+     it is now confined to the one it declares.
+  
+  ⚠️ **Read (2) as a narrowing that can stop something that was working**, because
+  it is one. Two shapes to plan for, and neither is hypothetical:
+  
+  - **A deployment running ONE time-triggered flow to cover ALL organizations must
+    now declare one flow per organization.** That is the ruling
+    (「不允许跨组织的定时任务」) and it is the whole point, but it is migration
+    work: there is no fan-out, and a sweep wanted in N organizations is N
+    declarations. Nothing detects the shape for you — the flow simply starts
+    seeing one organization's rows.
+  
+    ⚠️ **And the split has three effects the sentence above does not carry.** Each
+    is deployment work, and none of them is detected for you either:
+  
+    1. **A NULL-organization row fans out N-fold.** The driver's scope is
+       `org = :tenant OR org IS NULL` (`sql-driver.ts`), so a platform row with no
+       tenant column value stays visible to a *scoped* read — this PR's own
+       negative control fixture selects exactly that row under scope, on purpose.
+       After the split every `organization_id IS NULL` row in a swept object is
+       therefore matched **once per flow**: N runs, N notifications, each acting
+       as a different organization. Before the split it was matched once. ⇒ Either
+       backfill the tenant column on swept objects or declare the object
+       platform-global (`tenancy: { enabled: false }`, ADR-0066), which stops the
+       scope rather than multiplying under it.
+    2. **The current window's dispatch claims are abandoned.** The dedup key
+       embeds the FLOW NAME — `schedule:<flowName>:<window>` and
+       `time-relative:<flowName>:<scope>:<recordId>` — so N differently-named
+       flows claim under N different keys. A window already delivered under the
+       old name can deliver again, once, under each new one. ⇒ Cut over at a
+       window boundary, or accept one duplicate window.
+    3. **A run suspended before the upgrade is not retroactively confined.**
+       Resume rebuilds the run's context from `context_json`
+       (`suspended-run-store.ts`), and a row written before this change carries no
+       `tenantId` — so it resumes org-less, exactly as it ran. Nothing back-fills
+       it. Not a regression (that is how it already ran), but the banner would
+       otherwise imply "after upgrade, runs are confined". ⇒ Drain in-flight
+       suspended time-triggered runs, or accept that the tail of them is
+       unconfined.
+  - **On a SINGLE-organization install a time-triggered flow WAS delivering** —
+    the #8844 guard derives the only organization there — and after this change it
+    is unarmed at boot until someone adds one line. On `@objectstack/driver-sql`
+    that install loses nothing at run time once the line is added: the scope is
+    `org = :tenant OR org IS NULL` and its one organization is the only scope there
+    was. ⛔ **On `@objectstack/driver-memory` it does lose something, and the loss
+    has no legal configuration.** That driver refuses *any* call handed a tenant
+    scope (`assertCallNotTenantScoped`, `MEMORY_MULTI_TENANT_UNSUPPORTED`, #16589)
+    — `find` / `findOne` / `create` / `update` / `upsert` / `delete` / `count` /
+    `bulk*` / `aggregate`, one call at a time, regardless of how many
+    organizations the install holds. So a time-triggered flow that touches
+    per-organization data on that driver is refused per call if it declares an
+    organization and unarmed at boot if it does not. The declaration is not what
+    breaks it — the driver has no row-level tenant isolation to offer either way —
+    but this change is what moves such a flow from the "no organization context at
+    all → served" case into the refused one. Multi-organization deployments use
+    `@objectstack/driver-sql`; a `driver-memory` install whose swept objects are
+    genuinely platform-global can declare them so (`tenancy: { enabled: false }`,
+    ADR-0066) and is served unchanged, and ⛔ that is not a way to silence the
+    refusal on data that really is per-organization.
+  
+  A `type: 'schedule'` flow and a `time_relative` sweep now declare their acting organization on the start node, and the run executes as that organization.
+  
+  Maintainer ruling, 2026-09-08, verbatim: 「多组织定时任务本来只能在组织内运行，应该带组织ID，不允许跨组织的定时任务。」
+  
+  A time-triggered flow launches its run from a job tick, and a job tick carries no identity, so `ScheduleTrigger` and `TimeRelativeTrigger` built an `AutomationContext` with no `tenantId`. Two consumers already read that key and both resolved NULL: `notify-node.ts` threads it onto the notification it emits (#11303), and `AutomationEngine.recordLog` copies it onto the `sys_automation_run` history row (#10101). On an install holding more than one `sys_organization` the #8844 guard then refused every tenant-scoped row beneath the run — `sys_inbox_message`, `sys_notification_delivery`, `sys_notification_receipt` and the history row — one layer BELOW anything that summarises a run. So the tick selected its rows, landed its `update_record` steps, reported `unmeasured=0`, and delivered nothing.
+  
+  - **`@objectstack/spec`** declares the start-node `config.organization` key (`schedule-organization.zod.ts`): `SCHEDULE_ORGANIZATION_KEY`, `ScheduleOrganizationSchema`, the `ScheduleOrganization` type, `resolveScheduleOrganization` and `describeMissingScheduleOrganization` — five names, so the engine's lift and both triggers cannot drift about what counts as declared. The near-miss scan is module-local and runs INSIDE the refusal sentence (`describeMissingScheduleOrganization(flowName, { kind, config })`): both callers only ever wanted the sentence, and a `minor` freezes what it publishes — removing an export later is breaking where adding one is not.
+  - **`@objectstack/lint`** teaches `validate-flow-trigger-readiness` the requirement, so an author learns at authoring time rather than from a production stderr line at boot. It re-implements no judgement: `resolveFlowTriggerKind` says which flows owe the key and `resolveScheduleOrganization` says whether one was declared, which are the same two answers the triggers refuse with. Severity `warning`, not `error` — see **The four flows this repo itself ships** below.
+  - **`@objectstack/service-automation`** lifts the declaration onto the `schedule` / `time_relative` binding, beside `schedule`. `record_change` and `api` bindings leave it `undefined` by construction: both are fired by a caller who already carries an organization, and lifting a declared one onto them would let a flow overrule the tenant of the write that triggered it.
+  - **`@objectstack/trigger-schedule`** refuses to bind a time-triggered flow that declares none — at `error`, naming the flow, and dropping any prior binding so a hot re-publish that REMOVES the key cannot leave the previous job armed — and threads the declared organization onto the run as `tenantId`, **and onto the `time_relative` sweep's own query**. The refusal is **thrown** from `start()`, not merely logged: `FlowTrigger.start` returns `void`, so a logged-and-returned refusal leaves the engine free to record the flow as bound. Thrown, it takes the engine's designed catch path — the flow is never marked bound, `getFlowRuntimeStates()` reports `bound: false`, and `getTriggerBindingAudit()` lists it, so the `kernel:bootstrapped` warning and the CLI startup summary both name it.
+  
+  **What an existing deployment feels.** A scheduled or time-relative flow with no `organization` stops being armed at boot; the log line names the flow, the key, where the key goes, and — when the author wrote a near-miss (`organizationId`, `tenantId`, `orgId`, …) — which spelling of theirs the open `config` record accepted and then ignored. On a SINGLE-organization install such a flow was working, because the #8844 guard derives the only organization there; it now needs one line to say so. That cost is the ruling's, not an implementation choice: "declared = enforced" is what makes the multi-organization case safe, and a posture-conditional refusal would leave a flow that is legal on a one-organization install and silently inert the day a second organization is created — which is the defect being closed, moved one step later.
+  
+  ⛔ Nothing on this path ever CHOOSES an organization — not the install's only one, not the platform organization, not the first row of `sys_organization`, not the swept record's own `organization_id`. (The trigger does read the declared value from two places, the lifted binding field and the raw start-node `config`; that is one value read twice, so an engine predating the lift reports a correctly declared flow as declared instead of turning a version skew into an authoring error. It resolves nothing the author did not write.) A wrong `organization_id` is worse than a refusal: a refusal is visible at boot and names its flow, while a wrong value is silently authoritative to every report, export and cleanup that filters by organization. ⛔ There is no fan-out either: a sweep wanted in N organizations is declared N times, and a single flow never spans them.
+  
+  **Run-history volume is bounded by a contract that already exists.** Scheduled runs now persist to `sys_automation_run` where they previously could not, and that table's retention is two-sided and declared: a per-flow cap on terminal rows enforced at WRITE time (`runHistoryMaxPerFlow`, default 100) and declarative age retention (`retention: { maxAge: '30d', onlyWhen: { status: { $in: ['completed', 'failed'] } } }`, ADR-0057 / #2834, with `paused` rows retained regardless of age). A minute-cadence flow is bounded by the per-flow cap, not by the tick rate. Measured before landing this: nothing in the tree depends on scheduled runs NOT reaching `sys_automation_run` — no test asserts an absent or zero run-history row for a time-triggered flow, and no deployment config, migration or quota keys off that emptiness.
+  
+  No object's tenancy declaration changes, and `NotifyConfigSchema` is untouched — the two routes the ruling excluded. `system-write-organization.ts` stays exactly as it is: the producer it guards against now carries what it demands.
+  
+  **What the declaration now bounds, precisely.** The value goes onto the run's `AutomationContext.tenantId`, and — for a `time_relative` sweep — onto its `find` context as well. From there it is the platform's existing tenancy path and nothing new: `Engine.buildDriverOptions` turns `context.tenantId` into `DriverOptions.tenantId`, and the driver scopes reads, updates, deletes and aggregates to that organization. ⛔ No `organization_id` predicate is hand-built anywhere — that would be a second implementation of tenancy inside a trigger, hardcoding a column an object is free to rename, selecting nothing on a platform-global object and breaking a federated one. Two consequences follow from using the platform's mechanism rather than a private one, and both are stated rather than discovered:
+  
+  - **A store that cannot scope refuses the call instead of answering it.** `@objectstack/driver-memory` implements no row-level tenant isolation and refuses any call handed a tenant scope (`MEMORY_MULTI_TENANT_UNSUPPORTED`, #16589), so a time-triggered flow on that driver fails loudly rather than quietly crossing organizations. Multi-organization deployments use `@objectstack/driver-sql`; this is the same refusal that driver already gives every other org-scoped read.
+  - **On a platform-global (`tenancy: { enabled: false }`, ADR-0066) or federated (ADR-0015) object the declaration cannot narrow anything** — the engine drops the scope for those by design. Such a sweep still selects across every organization while its runs act as the declared one, and the trigger says so at bind, at `warn`, naming the object. ⛔ It does not pretend the flow is contained.
+  
+  **The four flows this repo itself ships stop firing, and cannot be repaired by authoring.** `showcase_scheduled_digest` and `showcase_task_due_reminder` (`examples/app-showcase`), `task_reminder` and `overdue_escalation` (`examples/app-todo`) are all time-triggered and none declares an organization. There is no value they COULD declare: organization ids are minted per install at runtime, so a package-shipped flow has nothing to write there, and ⛔ inventing a placeholder is strictly worse than the omission — a value matching no row is silently authoritative. Each of the four now carries a comment saying it does not fire as shipped and why. What a package-shipped time-triggered flow should do instead is an open maintainer decision, tracked on #17396; this changeset and those comments are the record until it is ruled. That corpus is also why the new lint id is a `warning`: at `error` it gates `objectstack build`, which was run and refuses `examples/app-showcase` outright — the repo would be unable to build its own examples for a defect they have no way to fix.
+
+### Patch Changes
+
+- 216b066: A run whose nodes all succeeded is no longer answered `failed` — or, under `errorHandling.strategy: 'retry'`, RE-EXECUTED — because its terminal run-history write threw (#16274)
+  
+  `AutomationEngine.execute()` and `executeWithoutRetry()` each called `recordLog({ status: 'completed' })` from inside the `try` whose `catch` exists for **node** failures, so a throw out of a history write on a run that had already finished successfully was handled as though a node had thrown. This is the initial-execution half of the pattern fixed on the resume path in 17.4.0; that fix deliberately scoped these two sites out.
+  
+  **The consequence was measured, and it is a double run, not just a mislabelled one.** `execute()`'s node-failure arm ends at the retry strategy branch, which hands the false `failed` result to the retry loop; the loop reads `result.success` and therefore re-enters `executeWithoutRetry()` — the whole flow, every node, again. Driven with `maxRetries: 2`: a flow whose node always succeeded ran it **three** times and wrote three `failed` rows, unattended, inside one `execute()` call, with the node's side effects repeated each time. Controls on the same instrument: the identical flow on healthy sinks runs the node once, and a genuine node failure runs it three times (retry working correctly).
+  
+  **What can throw there is a host surface, not in-repo code** — which is why it could not be reproduced from inside the package and why the package owed the fix:
+  
+  - the run-summary line `logger.info(line, meta)`, on by default (`runSummaryLog: 'info'`) and calling a **host-injected** `Logger`. This one needs no store at all.
+  - `store.recordTerminal(record)` throwing **synchronously**, before it returns a promise — the `void write.catch(...)` beneath that call only ever sees a returned promise's rejection. Both stores shipped in this package are `async` methods and cannot do it, but `SuspendedRunStore` is an exported interface whose `recordTerminal` is optional, so a host store is unconstrained. (A store returning a non-thenable escapes identically: `write.catch` is then itself a synchronous `TypeError`.)
+  
+  On that second variant the old code did not even answer `failed`: the node-failure arm's own `recordLog({ status: 'failed' })` threw again out of the same store and escaped `execute()` entirely — a rejected promise where `AutomationResult` is declared.
+  
+  What changes:
+  
+  - **Each completion-path history write is guarded at its own call site**, restoring the invariant that call's own documentation states: a history write must never block or break the run that produced it. The caller is told the truth — `success: true`, no `status`, the flow's `successMessage`, and a `summary` recomputed by the same pure function `recordLog` runs first — the node runs exactly once, and one `completed` row is recorded rather than `1 + maxRetries` `failed` ones.
+  - **The swallowed failure is reported once per run at `error`**, with the consequence and the fix in the first line: the run completed, its terminal history row never landed, nothing retries it, and the run must not be re-run. The thrown text rides the structured slot.
+  
+  ⛔ No `catch` arm's meaning is widened: a genuine node failure still reaches the node-failure arm, is still recorded `failed`, still carries the node's own text, and is still retried the full `1 + maxRetries` times.
+- bea41f6: A run that genuinely failed is still answered in the declared shape when its own terminal run-history write throws (#17562)
+  
+  `AutomationEngine.execute()` and `executeWithoutRetry()` each ended their node-failure `catch` with an unguarded `recordLog({ status: 'failed' })`. That `catch` **is** the handler for node failures and there is no outer one, so a throw out of the history write escaped the method entirely and left `execute()` a **rejected promise**, where its declared return type is an `AutomationResult`. This is the failure-arm half of the completion-path guard shipped just before it, and the same shape already landed on the resume path's failure arm in 17.4.0.
+  
+  **What is lost is the shape, not the verdict.** The run really did fail, so nothing misleads an operator: there is no false `failed` and no double run. But a caller that branches on `{ success: false, status: 'failed' }` gets an exception instead, so the transport's `status` arm is bypassed and `errorMessage` (the author's failure text) and `summary` (how far the run got before dying) never arrive — a REST route or SDK caller sees a 500-class throw for a run that had a perfectly good failure envelope waiting, and the node's own error text is replaced by the history driver's.
+  
+  Reproduced with a control, the identical flow and the identical node failure differing only in the store:
+  
+  ```
+  store = SYNC-THROW        -> {"kind":"threw","error":"run-history driver refused the terminal row"}
+  store = HEALTHY (control) -> {"kind":"returned","status":"failed","error":"work blew up"}
+  ```
+  
+  **What can throw there is a host surface, not in-repo code** — the same two statements the completion-path fix names: the default-on run-summary line `logger.info(line, meta)`, which calls a host-injected `Logger` and needs no store at all; and `store.recordTerminal(record)` throwing **synchronously**, before it returns a promise, which the `void write.catch(...)` beneath that call cannot see. Both stores shipped in this package are `async` and cannot do it, but `SuspendedRunStore` is an exported interface whose `recordTerminal` is optional, so a host store is unconstrained.
+  
+  What changes:
+  
+  - **Each failure-path history write is guarded at its own call site**, restoring the invariant that call's own documentation states: a history write must never block or break the run that produced it. The caller now receives the envelope it was always promised — `success: false`, `status: 'failed'`, the **node's** own text in `error`, the flow's `errorMessage`, and a `summary` recomputed by the same pure function `recordLog` runs first.
+  - **The retry budget survives the loss.** On the retry path the throw used to reject out through the retry loop and `execute()` both, ending the run early; the remaining attempts now run as the author's policy says.
+  - **The swallowed failure is reported once per abandoned write at `error`**, with the consequence and the fix in the first line: the run failed, its terminal row never landed, nothing retries it, and the caller *was* told the run failed so nothing needs re-driving. The thrown text rides the structured slot.
+  
+  ⛔ No `catch` arm's meaning is widened: the suspend arm, the input-schema refusal and the retry strategy branch are untouched, and a genuine node failure against healthy sinks is answered exactly as before.
+- a36b526: `sys_automation_run.variables_json` states its presence discriminator in ONE direction, and a row-rebuilt snapshot no longer claims its steps are the pause's
+  
+  Three corrections to text this package ships. No behaviour changes; every shape
+  described below is the ruled design, measured as it already is.
+  
+  **`variables_json` said `⇔` where only `⇒` holds.** The field description
+  declared "present on a completed/failed row" and "the row's run had a pause its
+  resume consumed before a downstream node failed" to be equivalent. The forward
+  direction holds — nothing but the consumed-suspension path writes that column on
+  a terminal row. The reverse does not, for one shape: a run that stranded, was
+  restored and then finished. `recordTerminal` upserts the SAME `run_<id>` row
+  with all four snapshot columns explicitly `null` — deliberately, so
+  "restorable" cannot outlive the condition it describes — which leaves that row
+  equal, across every column the discriminator is read from, to the row of a run
+  that never paused at all. Absence means "nothing to restore now", never "this
+  run never had one", and the restore verb already refuses in exactly those terms:
+  it names the status it observed and declines to say which. The description now
+  says so.
+  
+  **A snapshot rebuilt from a row does not carry the step log as of the pause.**
+  `deserializeConsumedSuspension`'s docblock said its `steps` are the log "AS OF
+  THE PAUSE". That is true of the engine's process-local journal copy only, which
+  slices `run.steps` back to the step count at the pause; the trimmed array is
+  never persisted. `steps` are the one field the rebuild takes from the row's own
+  `steps_json`, which is the terminal row's log of the WHOLE run — and both bounds
+  on that column keep the failure on purpose (history compaction retains every
+  failure; the byte cap trims the head). A row-rebuilt snapshot therefore carries
+  steps the pause did not have. It re-arms the same run regardless: the pause is
+  `nodeId` plus `variables` / `context` / `correlation`, none of which the step log
+  feeds.
+  
+  **`recordTerminal` now names the verb that reads what it writes** — the
+  restore path in `engine.ts` — and the three properties of the write that are
+  that verb's inputs rather than local detail. Its summary line also said
+  "completed / failed" where the terminal vocabulary has had four members since
+  the fold was removed from both ends of this write.
+  
+  Both falsifying shapes are pinned in `suspended-run-store.test.ts`, including the
+  indistinguishability itself: the restored-then-finished row and a never-paused
+  row compare equal across those five columns, with the same comparison separating
+  them while the snapshot is still there.
+- ae6dcf6: `notify` now reports the recipients it addressed, so a run that notified nobody stops reading like a run that had nobody to notify
+  
+  A `notify` node whose delivery count came back zero contributed `acted: 0` and nothing else to the run summary. A flow whose only effect-bearing node is that one then folded to `selected: 0, acted: 0, unmeasured: 0` — byte for byte the summary of a run that had nothing to notify about, and of a run whose `notify` node never executed. The run read healthy, and the only trace was a log line.
+  
+  `emit()` returns `delivered: 0, enqueued: 0` on several paths, each after logging and nothing else: an audience that resolved to no recipient, a preference filter that suppressed every (recipient × channel) pair, a dedup hit, every enqueue failing. A stack with no messaging service installed lands in the same place. All of them were silent in the summary, so this is not one cause being fixed — it is the whole class becoming visible.
+  
+  The node now reports `selected` — the recipient entries it addressed — on every path that reaches a recipient list, alongside the `acted` / `unmeasuredEffect` rules it already had. Those two are unchanged, so a delivering run keeps its existing `acted` (inline) or `unmeasured` (outbox) reading and stays outside the broken-sweep filter; a zero-delivery run now reports `selected: N, acted: 0` with no `unmeasured`, which is the platform's declared "matched N, acted on none, and that zero is trustworthy" signature and puts the run **inside** `selected > 0 AND acted = 0 AND unmeasured = 0` — the filter that exists for exactly this, and whose first clause the old reading could never satisfy.
+  
+  The zero is deliberately NOT reported as `unmeasuredEffect`. That flag means the count is unknown; this count is known and it is zero, and claiming otherwise would take the run out of the very filter it belongs in.
+  
+  `selected` counts audience entries, not resolved users: the entry (`role:manager`, a bare id) is what the node has, since expansion happens inside the messaging service and is not reported back.
+- a2509d7: fix(service-automation): a `null` / `undefined` envelope is refused attributed, not as a raw `TypeError` (#16439)
+  
+  `AutomationEngine.evaluateValueEnvelope` derives its verdict from `valueEnvelopeRefusals` — the same call `registerFlow` makes — so registration's reject set and evaluation's reject set are one set by construction. That covered every malformed **envelope**, and exactly two shapes fell outside it: `null` and `undefined`. Neither published primitive judges them (the shape rule is a no-op on anything not `isExpressionEnvelopeShaped`, and `validateExpression` reads an absent `source` as "not authored"), so both returned no findings and the method went on to read `envelope.source` off nothing — `TypeError: Cannot read properties of null (reading 'source')`, with no `where`, no source and no rule. Driven across the ten shapes the card enumerates, eight failed attributed and only these two did not.
+  
+  Both now fail attributed like the other eight, led by the published `ASSIGNMENT_VALUE_ENVELOPE_REFUSAL` sentence and carrying the `where` and the source. The rule is stated in the **shared** refusal, never as a guard in the evaluator: a reject reason living only on the evaluation side would end the very property this design has.
+  
+  Refused rather than admitted, and the asymmetry with the predicate path is deliberate: `structuralConditionRefusal` admits `null` / `undefined` because the condition *field* is optional, so absence there means "the author wrote no predicate". A value slot's envelope **is** the value, so an absent one is a caller handing nothing where a value was required.
+  
+  **Why `patch`, not `minor` and not nothing.** Nothing changes for authored metadata: the only production call site guards with `isExpressionEnvelopeShaped`, which neither shape satisfies, and the value-role feeder emits only envelope-shaped objects, so `registerFlow` never presents a nullish value to the shared refusal — measured, and pinned. An authored `null` in an `assignments` slot is still a literal, still parses and still registers. What does move is the runtime behaviour of a **public method on an exported class**: a direct caller that passed a nullish envelope used to get a language-level `TypeError` and now gets an attributed `Error`. That is a published surface, so it is not silent — but it adds no API, no option and no capability, and no correct caller has to adapt, which is what makes it a patch rather than a minor.
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [245f360]
+- Updated dependencies [324968e]
+- Updated dependencies [fe71032]
+- Updated dependencies [482d34d]
+- Updated dependencies [305e7fc]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [9c577c1]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [baf9745]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [6548118]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [48203ff]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [de62769]
+- Updated dependencies [c9eb773]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [dfeba25]
+- Updated dependencies [0a88a80]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [e7ff9c2]
+- Updated dependencies [c744c0a]
+- Updated dependencies [134b410]
+- Updated dependencies [4c42fd1]
+- Updated dependencies [5f392f0]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [f03f6c7]
+- Updated dependencies [cf79182]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [2bed4c3]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [71629a1]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [cca1dc0]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [de1a611]
+- Updated dependencies [db76982]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [ab450f4]
+- Updated dependencies [025588a]
+- Updated dependencies [5505646]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [4215417]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/spec@17.5.0
+  - @objectstack/platform-objects@17.5.0
+  - @objectstack/core@17.5.0
+  - @objectstack/formula@17.5.0
+  - @objectstack/metadata-core@17.5.0
+
 ## 17.4.0
 
 ### Minor Changes

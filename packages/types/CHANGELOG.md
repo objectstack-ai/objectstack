@@ -1,5 +1,283 @@
 # @objectstack/types
 
+## 17.5.0
+
+### Minor Changes
+
+- 758ac40: refactor(types): one `isNativeErrorName` reader, so three doors cannot disagree about what a crash is (#17681)
+  
+  The predicate that decides whether a sandboxed body's `throw` is a business
+  REFUSAL (4xx, the author's words relayed) or a CRASH (5xx, the words withheld)
+  had **three byte-identical copies** — measured, one distinct 74-character regex
+  literal across three packages:
+  
+  | copy | package | its stated reason for being a copy |
+  |:--|:--|:--|
+  | `isScriptFaultMessage` | `@objectstack/rest` (`error-response.ts`, #7543) | the original |
+  | `isScriptCrash` | `@objectstack/objectql` (`hook-withheld-readonly-fault.ts`) | this package must not depend on `@objectstack/rest` for a regex |
+  | `sandboxRefusalMessage` | `@objectstack/runtime` (`sandbox/quickjs-runner.ts`, #17265) | rest declares one export subpath and re-exports nothing from `error-response` |
+  
+  ⭐ **Every reason is a statement about reaching `@objectstack/rest`, and none of
+  them survives moving the rule.** `@objectstack/types` now owns
+  `isNativeErrorName` — the name list, the `^` anchor, and the deliberate absence
+  of a bare `Error:`. All three packages already depend on it and it depends on
+  none of them, so this fold **adds zero dependency edges** and cannot cycle.
+  
+  ⚠️ The hazard was never style. One copy learning a new native error name and the
+  others not means the same throw is a refusal at one door and a crash at the
+  next — a crash message **leaked** at one boundary and **withheld** at another.
+  #16013's argument for extracting exactly this class applies verbatim: the
+  classification is the part nobody may get wrong, so one *tested* helper is worth
+  more than N correct copies that must each stay correct forever.
+  
+  ⛔ **No behaviour changes at any door, per case.** This is a pure refactor and
+  the three WRAPPERS are deliberately NOT folded, because they are not the same
+  shape and merging them would move a door's answer:
+  
+  - rest asks a trimmed message and answers a boolean;
+  - objectql asks **two** slots — `err.name` **or** `err.innerMessage.trim()` —
+    because a code hook and a sandboxed body carry the native name in different
+    places;
+  - runtime asks the trimmed inner message and answers the **message**, not a
+    boolean.
+  
+  What the three share is the predicate, so the predicate is what moved. Each call
+  site keeps its own slot choice and its own trimming, and `isNativeErrorName`
+  deliberately does **not** trim for its callers — a contract pinned in its test.
+  
+  **Shipped rather than `skip-changeset`**, measured on a real build: all four
+  packages publish `files[]: ["dist", …]`, and the built `dist` of each carries
+  the new call — `@objectstack/types` 4 files, `@objectstack/objectql` 4,
+  `@objectstack/rest` 3, `@objectstack/runtime` 2 — with `looksLikeInternalErrorLeak`
+  scoring 4 in `types/dist` as the lit control and a nonexistent symbol scoring 0.
+  The retired copies are gone from the artifacts too: the regex literal scores
+  **0** in `rest/dist`, `objectql/dist` and `runtime/dist`, and **2** in
+  `types/dist` (the ESM and CJS bundles).
+  
+  `@objectstack/types` takes **minor**: a new export is a purely additive widening
+  of a published surface, which is at least minor whatever the commit type says.
+  The three consumers take `patch` — their artifacts change, their behaviour does
+  not.
+- c3ebe4a: A producer-declared 5xx **refusal** now keeps its message on the wire, at every door that reads the declaration.
+  
+  `ApiErrorSchema.refusal` (`@objectstack/spec`) is the producer-side declaration that a 5xx is a deliberate refusal whose `message` is authored for the caller. Until now nothing read it: all three arms that withhold a declared 5xx's prose could tell only that the producer had declared a *status*, so a refusal and a driver fault were sanitised alike and every producer-declared 5xx refusal reached the caller as `"Internal server error"`.
+  
+  The read is one new function, `declaredRefusalMessage` (`@objectstack/types`), called by all three arms — `declaredServerFaultAnswer` and `resolveErrorResponse`'s 5xx passthrough in `@objectstack/rest`, and `errorResponseBase` in `@objectstack/runtime`. REST's logging follows the same field: a declared refusal is no longer logged as `[REST] Unhandled error`.
+  
+  **What changes for a caller.** A 5xx whose producer sets `refusal: true` beside a `status` (or `statusCode`) in the 500-599 band and a non-empty `code` now carries that producer's message, bounded exactly as a 4xx message is. The first live case is `GET /api/v1/meta/:type/:name/references` for an unanswerable target, whose ADR-0110 D3 sentence ("Ask the owning object instead: …") reaches an operator again.
+  
+  **What does not change.** Everything else, and the default is fail-closed: a declared 5xx that carries no `refusal` is withheld exactly as before, an undeclared 5xx still goes through the leak heuristic, and a rewrap that drops the flag is withheld as a fault. A refusal cannot buy leaky prose past `looksLikeInternalErrorLeak` either — the declaration says the prose is *addressed* to the caller, not that it is *safe*.
+  
+  **For producers.** Setting `refusal: true` on a thrown 5xx is opt-in and additive; a producer that does not set it is unaffected. Platform and driver code must never set it on a fault.
+- 6e3462d: Host importer: a `link:` / `file:` install is now verified by the LOCATION the app declared, so a correctly linked package loads instead of being refused.
+  
+  The ESM fallback finder (`createHostImporter`) verifies the one directory it consults — `<hostRoot>/node_modules/<key>` — against what the host's own `package.json` declares. Until now it could only do that by NAME, and a `link:` / `file:` value promises no name, so the KEY stood in for one: a package linked exactly as the app asked, whose own manifest happens to be named something else, was refused with `declared-unresolvable` / `MODULE_NOT_FOUND`. Nothing was broken, and the only way out was to stop using a supported linking mode.
+  
+  Such a declaration does name something checkable — a directory — so the finder now checks that too: `realpath(node_modules/<key>)` against `realpath(resolve(hostRoot, <declared path>))`, both sides canonicalised, compared exactly (no basename matching, no case folding). If they are the same directory, the host declared it and it loads.
+  
+  This is a second verification axis, not a looser first one. A directory the app declared neither by name nor by path is refused exactly as before, and the finder stays strictly tighter than the CommonJS resolution it backs up, which asks neither question. Unchanged: a plain version range licenses no path; an `npm:` alias is still checked by name; `github:` / tarball URLs and the bare `owner/repo` shorthand name no on-disk location, so they gain nothing; a package that publishes a `require` condition never reaches this fallback at all, so no load that succeeds today changes.
+  
+  Measured on pnpm 10.33: `link:` symlinks the key at the declared directory and verifies; a `file:` directory install routes through pnpm's virtual store (a copy), so it does not, and keeps today's refusal. The refusal's text now states what the location check compared instead of asserting a limit the finder no longer has.
+- 5a95b0e: fix(types,metadata-protocol,metadata,cli): a stored operator record names the dialect again, not the driver's composed refusal
+  
+  Since the raw-SQL seam began declaring its own fault, `SqlDriver.execute()` no longer
+  lets the dialect's error out: it raises `code: DATABASE_ERROR` / `status: 500` with a
+  COMPOSED message that discloses neither the statement nor the diagnostic, and carries
+  the dialect error whole under a non-enumerable `cause`. That envelope is deliberate and
+  is unchanged here.
+  
+  What changed underneath it is what every consumer STORED. Each migration probe, backfill
+  and rename in `@objectstack/metadata-protocol` / `@objectstack/metadata` embedded
+  `error.message` into an operator-facing record, so those records began reading
+  
+      the database refused to run a raw statement
+  
+  where they used to read
+  
+      no such column: foo
+  
+  For a live console that costs nothing — the driver prints the statement and the dialect
+  text to its warn sink one line earlier. For a record read later it costs everything:
+  whoever opens a customer install's backfill result a week on never had that line, and the
+  dialect's words were unrecoverable for them.
+  
+  `@objectstack/types` now exports `operatorFacingErrorText(error)` — a depth-bounded walk
+  of the `cause` chain, shaped like the `matchesDriverError` beside it — and the thirteen
+  stored-record sites plus `os db clean`'s console line read through it:
+  
+  - `runtime-index-preflight` — the per-probe `detail` and the seam-failure fan-out;
+  - `seed-tenancy-backfill` — the `absent` detail, the organization-probe report and the
+    three per-object warnings;
+  - `partial-index-probe` — the `detail` both callers report (and its two module comments,
+    which stated the opposite of what happened);
+  - `migrate-env-id-to-project-id`, `migrate-project-id-to-environment-id`,
+    `migrate-sys-notification-to-event`, `drop-projection-tables` — the per-table `error`;
+  - `os db clean` — the `VACUUM failed` line.
+  
+  Two narrowings are part of the contract, not incidental: an UNDECLARED throw is returned
+  on its own message channel, its `cause` never walked, and a declared envelope that is not
+  the raw-path one — the typed read exits' terminal, which composes a different sentence —
+  is left exactly as it arrived.
+  
+  That message channel is deliberately NOT byte-identical to what the replaced expressions
+  computed. The RULE, rather than a catalogue of cases: an undeclared throw comes back as
+  `messageChannelOf(error) || String(error)` — the thrown value's own string `message`, the
+  string itself when a string was thrown, and `String(error)` when neither yields text. Every
+  difference from the replaced expressions follows from that rule, so read the rule and not a
+  list. Illustrations of it, not an exhaustive set: an empty-message `Error` reads its `name`,
+  which for a named subclass is that subclass's name rather than `Error` / `TypeError`; a
+  thrown non-`Error` reads its own text or `String(error)` where `(e as Error).message` read
+  `undefined`, and where `null` / `undefined` threw a `TypeError` out of the catch, so no
+  record was written at all and the operation aborted; an object carrying a NON-EMPTY string
+  `message` reads it where `err instanceof Error ? … : String(err)` recorded `[object Object]`
+  (one carrying an EMPTY `message` still reads `[object Object]`). A thrown EMPTY string reads
+  `''`, so this channel is neither always prose nor never empty.
+  
+  ## The levels, and why they are not uniform
+  
+  `@objectstack/types` takes **`minor`**: it is the one package here that grows a published
+  surface — `operatorFacingErrorText` is a new export, present in `dist/index.d.ts` and in the
+  export list. A purely additive widening takes at least `minor`.
+  
+  The other four take **`patch`**, because none of them widens anything: they are a bug fix in a
+  released package, which is exactly what `patch` is for. `@objectstack/driver-sql` is named
+  because this change moves its `src/**` — by one ADDED file, the `.test.ts` that pins the helper
+  against a real `SqlDriver.execute()` refusal. Its published `dist/` is byte-unchanged by this
+  PR: no entry point reaches a test file, and `files` packs `dist` only.
+  
+  **Not breaking, and deliberately not marked so.** Nothing is removed, renamed or made stricter:
+  what moves is the TEXT inside an operator-facing `detail` / `error` field, never a field name
+  and never a type. The change these sites were made for is the declared raw-path fault, where
+  the record gains the dialect's words in place of the driver's composed placeholder. Every
+  other throw now reaches these records through the rule above rather than through the
+  expression each site spelled out, so its text can move too — a consequence of the rule, not a
+  bounded list of exceptions. At thirteen of the fourteen sites the rule is the whole record,
+  and some shapes still record `''` there: a thrown empty string, a thrown empty array, and an
+  `Error` whose `name` and `message` are both empty are the ones measured. The fourteenth was
+  `seed-tenancy-backfill`'s organization probe, which kept a `|| 'unknown error'` fallback on
+  top of the rule, so those same three shapes recorded `'unknown error'` there rather than `''`;
+  that fallback was load-bearing — the site read an empty value as "the probe did not fail" —
+  and #17167 removed it in this same release, so all fourteen sites now record the channel as
+  is and that site carries its failure fact structurally. The sentence being replaced is not a value any
+  consumer can have been parsing: it is an opaque human diagnostic. A consumer reading these
+  records gets the dialect's words back where it had been getting a placeholder.
+
+### Patch Changes
+
+- 7f62536: A **declared capability absence** — a 5xx answered because the deployment did not install an optional service — is now reported **once per route per process at `warn`**, naming the missing service, instead of one `error` line per request. Every other 5xx keeps the per-request `error` line #14310 shipped.
+  
+  Measured before the change, on a stock showcase boot: `GET /api/v1/ai/*` (the cloud-only AI service's declared `501 NOT_IMPLEMENTED`) printed one `error`-level line per request, and Studio opens it unprompted. A deployment that is working exactly as configured was training the channel built to mean "an operator must look" into noise — which is the failure mode `--log-level`-watching operators learn as "skim the errors".
+  
+  - **What counts as an absence** is the envelope the door composed: a producer-declared 5xx (`declaresServerFault` — the repo's existing declared-5xx predicate) whose ADR-0112 `code` is `NOT_IMPLEMENTED` or `SERVICE_UNAVAILABLE`. Nothing is invented to recognise one; the code the producer already declared *is* the declaration.
+  - **The predicate is applied inside the shared funnel** (`logServerFault`, `@objectstack/types`), not at each door, so `sendError`'s nested-envelope exit and the runtime dispatcher read one answer by construction. A door cannot opt in, opt out, or drift.
+  - **The dedupe key is (route, process).** A restart reports again, and a second, different route reports on its own — deliberately not a global "first N", which is the shape that hides the second route. A door that supplies no route coordinates is demoted to `warn` but never suppressed: an un-keyed bucket is that same hiding shape.
+  - **A thrown 5xx keeps its `error` line even when it declared `501`.** The thrown exit hands the funnel the throw and no envelope `code`, so it is not recognised as an absence — fail-loud for the half that carries a stack.
+  
+  ⛔ **No wire byte moves.** Status, `code`, `message` and body shape are unchanged at both doors; this changes a log level and a count. The response bytes are pinned in `packages/runtime/src/declared-capability-absence-warn-once.test.ts`, and that block runs green on the pre-change tree too, which is what makes it a before/after measurement rather than a claim.
+  
+  Operators who were alerting on `[5xx]` at `error` level for an uninstalled optional service will now see one `warn` line per route per process instead. The line says so in its own text: `(declared capability absence — reported once per route per process)`.
+- 288fe9c: `createHostImporter` stops prescribing an install repair for a `link:` / `file:` install that is already correct. The refusal is unchanged; only its wording is.
+  
+  A host app declaring `{"foo": "link:../bar"}` links `node_modules/foo` to a directory whose manifest may be named anything. `link:`, `file:` and git or tarball URLs name a LOCATION or a remote artefact, never a package, so the specifier carries no name for the ESM-only fallback finder to expect and the KEY stays the expectation — kept deliberately, because widening it would accept any directory sitting at the key and trade a wrong REMEDY for a wrong LOAD. When the linked manifest names something else the finder therefore refuses, and it was reporting that refusal with the `declared-unresolvable` INSTALL wording: run `pnpm install`, check a production prune did not drop it, check the dist was built. Driven on a real symlinked install, all three are measurably false — the finder had just read the manifest at `node_modules/foo`, so the package is on disk, was not pruned, and its `import` target exists. The operator reinstalls, nothing changes, and they go looking for a build that is not broken.
+  
+  That sub-case now states what was actually measured: the directory it consulted, the name the manifest there carries, the name it expected, and why a location specifier leaves it with only the key. It says outright that this is neither an install nor a declaration problem, and closes with the remedy that does work — make the two names agree, by declaring the linked package under its own name or by renaming the linked manifest to the key. Both ends are pinned as loading.
+  
+  Unchanged: the refusal itself, its `declared-unresolvable` kind, its `MODULE_NOT_FOUND` code and every consumer branch that reads them; the finder's accept set, which is byte-for-byte what it was — a `link:` install whose manifest matches the key still loads silently, and a plain range or an `npm:` alias whose directory holds a different package still gets the INSTALL wording, because there the install really is the fault. The second verification axis that would make these installs LOAD (comparing `realpath(node_modules/<key>)` against the declared location) is deliberately not built here.
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [245f360]
+- Updated dependencies [324968e]
+- Updated dependencies [fe71032]
+- Updated dependencies [482d34d]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [48203ff]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [c9eb773]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [dfeba25]
+- Updated dependencies [0a88a80]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [134b410]
+- Updated dependencies [5f392f0]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [de1a611]
+- Updated dependencies [db76982]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [ab450f4]
+- Updated dependencies [025588a]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/spec@17.5.0
+
 ## 17.4.0
 
 ### Minor Changes

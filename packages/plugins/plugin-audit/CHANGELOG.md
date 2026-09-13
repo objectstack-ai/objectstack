@@ -1,5 +1,167 @@
 # @objectstack/plugin-audit
 
+## 17.5.0
+
+### Patch Changes
+
+- ab48938: A lost audit row is reported once per failure CAUSE, not once per process, and the first line names the cause instead of a fixed remedy.
+  
+  `reportAuditWriteFailure` — the best-effort catch around `persistAuditTrailRow` — deduped on a single process-wide boolean. After the first failure of any cause, every later failure of every *other* cause degraded to `debug` for the life of the process, so a long-running server could keep losing compliance rows for hours to a second, unrelated fault with one `error` line at the top of the log describing the first. `persistAuditTrailRow` is registered in the durability-degradation vocabulary precisely because a lost audit row must be reported at `error`.
+  
+  The dedupe key is now the failure's identity — the error `code` (or its absence) together with the object being audited. A repeat of an already-reported cause still degrades to `debug`, exactly as before; a new cause reports at `error`, once. The key is built from the `code` and **never** the message: a driver names the offending row in its message, so a message-keyed dedupe would grow one `error` line per failed write. Keyed on the code, the reported-cause set is bounded by the boot-declared object registry and the driver's code vocabulary and does not grow with traffic — measured at 65 lines for 6,500 failed writes and the same 65 for 26,000.
+  
+  The first `error` line now leads with the underlying code and message, which were already computed at the call site and passed only into the `debug` payload. The ADR-0057 §3.6 telemetry-datasource guidance is kept — it is the correct remedy for the "no such table" cause it was written for — but is now printed only for that cause, decided by the shared `isMissingTableError` predicate for both tables this writer writes. Previously it was printed unconditionally, so an organization refusal was answered with "check the datasource", sending the operator to inspect something that was working.
+  
+  `@objectstack/types` is added as a dependency for that predicate, rather than hand-rolling a second driver-error vocabulary.
+- 8d4690b: fix(plugin-audit): record-view rows keep the VIEW instant instead of the buffer-drain instant (#16829)
+  
+  `sys_audit_log`'s `record_views` rows answer "when did this user look at this record?". Read auditing batches its INSERTs off the request path by design, so `buildRow` writes `created_at: event.viewedAt` rather than letting the column's `NOW()` default stamp a whole batch with one flush timestamp — up to `flushIntervalMs` after the fact, with read order inside the window destroyed.
+  
+  `persistReadAuditRows` wrote that row under `{ context: { isSystem: true } }`, and the module's comment cited that flag as what carried the view instant through. It never was. `isSystem` exempts a write from the readonly strip; the layer that decides `created_at` on an insert is the audit stamp hook `sys_stamp_audit_insert`, which reads `session.preserveAudit` and has never read `isSystem`. What was actually carrying the value was that hook's pre-#15964 line, `record.created_at = record.created_at ?? now` — client-preferred on every insert, with no flag and no privilege required. #15964 closed that accident (maintainer ruling 2026-09-06), and the ordinary branch has stamped `now` since: on this path, the flush instant.
+  
+  The write now declares both context keys, for two different layers:
+  
+  ```ts
+  await engine.insert(
+    'sys_audit_log',
+    rows as any,
+    { context: { isSystem: true, preserveAudit: true } } as any,
+  );
+  ```
+  
+  `isSystem` still carries the readonly-strip exemption the row needs; `preserveAudit` is the one the stamp hook reads. `preserveAudit` is the ruled historical-import channel (#3493, reaffirmed by #15964's ruling) — the door audit left open for reinstating an original timeline — and a view row's original timeline is the moment of the view, so this use is inside its declared purpose rather than a bypass of it.
+  
+  **What changes for a deployment.** Only for deployments that opted objects in to record-view auditing (`AuditPlugin`'s `readAudit.objects`). Rows written from now on carry the view instant. ⛔ Rows already written under the flattened behaviour are not repaired by this change: their `created_at` is the drain time of the batch they were in, and the view instant they should have carried was never persisted anywhere else, so it cannot be recovered. Only builds cut from `main` after #15964 are affected — the objectql half has not shipped in a published version.
+  
+  **No exported symbol, schema, route or config key moves.** The only observable change is that a `created_at` this writer already intended to write now survives.
+- Updated dependencies [7f62536]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [245f360]
+- Updated dependencies [324968e]
+- Updated dependencies [fe71032]
+- Updated dependencies [482d34d]
+- Updated dependencies [305e7fc]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [9c577c1]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [baf9745]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [6548118]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [48203ff]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [c9eb773]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [dfeba25]
+- Updated dependencies [0a88a80]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [e7ff9c2]
+- Updated dependencies [758ac40]
+- Updated dependencies [c744c0a]
+- Updated dependencies [134b410]
+- Updated dependencies [4c42fd1]
+- Updated dependencies [5f392f0]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [f03f6c7]
+- Updated dependencies [cf79182]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [c3ebe4a]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [0780e88]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [2bed4c3]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [71629a1]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [706ad0f]
+- Updated dependencies [288fe9c]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [a016f08]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [6e3462d]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [0f38ab0]
+- Updated dependencies [cca1dc0]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [980dc78]
+- Updated dependencies [5c8f5af]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5a95b0e]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [5b5bd36]
+- Updated dependencies [2e8e118]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [de1a611]
+- Updated dependencies [db76982]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [ab450f4]
+- Updated dependencies [025588a]
+- Updated dependencies [8c9bd8f]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [4215417]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/types@17.5.0
+  - @objectstack/spec@17.5.0
+  - @objectstack/objectql@17.5.0
+  - @objectstack/platform-objects@17.5.0
+  - @objectstack/core@17.5.0
+  - @objectstack/metadata-core@17.5.0
+
 ## 17.4.0
 
 ### Patch Changes
