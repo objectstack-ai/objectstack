@@ -2323,6 +2323,51 @@ export class AuthPlugin implements Plugin {
     });
 
     // ────────────────────────────────────────────────────────────────────
+    // #16678 — admin: set (or clear) a user's manager.
+    //
+    // `sys_user.manager_id` drives the approvals `{ type: 'manager' }` rung
+    // and the `own_and_reports` read scope, and had no product write surface
+    // at all: the generic data path refuses it (ADR-0092 D2's managed-update
+    // whitelist is `{name, image, locale}`), the bulk import does not carry
+    // it, and the Console renders it read-only. So the rung expanded to
+    // nobody on every record in any install without a directory sync.
+    //
+    // Same family as `unlock-user` above: an ObjectStack mount on the raw app
+    // ahead of the catch-all, platform-admin gated (ADR-0068), ledgered in
+    // `auth-route-ledger.ts`. The handler runs under a SYSTEM context, so it
+    // reaches the column by context rather than by whitelist — exactly how
+    // `admin-import-users` already reaches `phone_number` and `role` — which
+    // is why no Tier-1 list moves and the column keeps `readonly: true`.
+    // Every refusal (self-assignment, cycle, depth, cross-organization,
+    // directory-owned identity) is enforced in the handler; see
+    // `admin-set-user-manager.ts` for why each one has to live at the write.
+    rawApp.post(`${basePath}/admin/set-user-manager`, async (c: any) => {
+      try {
+        const actor = await gateAdmin(c);
+        if (actor instanceof Response) return actor;
+        const { runSetUserManager } = await import('./admin-set-user-manager.js');
+        // Attribution only — the route's own authorization already happened
+        // in `gateAdmin`. Opening the actor seam here credits the `sys_user`
+        // row to the admin instead of recording it as the system.
+        const { status, body } = await runAttributedToUser(actor.id, () =>
+          runSetUserManager(
+            {
+              getDataEngine: () => this.authManager!.getDataEngine() as any,
+              logger: ctx.logger,
+            },
+            actor,
+            c.req.raw,
+          ),
+        );
+        return c.json(body, status as any);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] set-user-manager failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+      }
+    });
+
+    // ────────────────────────────────────────────────────────────────────
     // #2766 V1 — admin direct user management. `sys_user` CRUD is suppressed
     // (managedBy better-auth), and until now the only add-a-teammate path was
     // the email-dependent invite flow. These routes let a platform admin
