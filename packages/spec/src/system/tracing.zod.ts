@@ -549,7 +549,7 @@ export const OpenTelemetryCompatibilitySchema = lazySchema(() => z.object({
     /** Tombstone for the rename above (#17785, ruling A on #15939). */
     timeout: retiredKey(
       '`OpenTelemetryCompatibility.exporter.timeout` was renamed to `timeoutMs` in '
-      + '@objectstack/spec 18 — the unit of a duration-shaped number lives in the key name, '
+      + '@objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, '
       + 'not only in the describe prose. Its unit (milliseconds) lived in a source JSDoc '
       + 'only and the key carried no describe at all, so the reference-page reader got a '
       + 'bare 10000 and could not tell it from 10000 seconds. Rename the key to `timeoutMs`; '
@@ -600,7 +600,7 @@ export const OpenTelemetryCompatibilitySchema = lazySchema(() => z.object({
       /** Tombstones for the two renames above (#17785, ruling A on #15939). */
       exportTimeout: retiredKey(
         '`OpenTelemetryCompatibility.exporter.batch.exportTimeout` was renamed to '
-        + '`exportTimeoutMs` in @objectstack/spec 18 — the unit of a duration-shaped number '
+        + '`exportTimeoutMs` in @objectstack/spec 17 — the unit of a duration-shaped number '
         + 'lives in the key name, not only in the describe prose. Its unit (milliseconds) '
         + 'lived in a source JSDoc only and the key carried no describe at all, so the '
         + 'reference-page reader got a bare 30000. Rename the key to `exportTimeoutMs`; the '
@@ -608,7 +608,7 @@ export const OpenTelemetryCompatibilitySchema = lazySchema(() => z.object({
       ),
       scheduledDelay: retiredKey(
         '`OpenTelemetryCompatibility.exporter.batch.scheduledDelay` was renamed to '
-        + '`scheduledDelayMs` in @objectstack/spec 18 — the unit of a duration-shaped number '
+        + '`scheduledDelayMs` in @objectstack/spec 17 — the unit of a duration-shaped number '
         + 'lives in the key name, not only in the describe prose. Its unit (milliseconds) '
         + 'lived in a source JSDoc only and the key carried no describe at all, so the '
         + 'reference-page reader got a bare 5000. Rename the key to `scheduledDelayMs`; the '
@@ -777,7 +777,7 @@ export const TracingConfigSchema = lazySchema(() => z.object({
     /** Tombstone for the rename above (#17785, ruling A on #15939). */
     exportInterval: retiredKey(
       '`TracingConfig.performance.exportInterval` was renamed to `exportIntervalMs` in '
-      + '@objectstack/spec 18 — the unit of a duration-shaped number lives in the key name, '
+      + '@objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, '
       + 'not only in the describe prose. Its unit (milliseconds) lived in a source JSDoc '
       + 'only and the key carried no describe at all, so the reference-page reader got a '
       + 'bare 5000. Rename the key to `exportIntervalMs`; the value (milliseconds) and the '
