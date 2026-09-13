@@ -1266,7 +1266,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     source: 'packages/lint/src/validate-retired-permission-residue.ts',
     surfaces: CLI_ONLY,
     surfaceReason:
-      'Ruled scope (#17425 D): the signal belongs at the authoring door over RAW SOURCE, which is ' +
+      'Ruled scope: the signal belongs at the authoring door over RAW SOURCE, which is ' +
       'where the authored and the built path are distinguishable. Crossing it needs a measurement ' +
       "this round did not take — whether the gate's `body` reaches it BEFORE the per-type " +
       '`safeParse`, whose residue stage strips the only evidence this rule reads. Post-parse the ' +
