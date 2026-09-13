@@ -257,6 +257,14 @@ const screenFieldSpecShape = () => z.object({
   })).optional().describe('Closed-enum options for select-style fields'),
   defaultValue: z.unknown().optional(),
   placeholder: z.string().optional(),
+  min: z.number().optional()
+    .describe('Minimum accepted value (numeric fields). Applied by the client at the input and re-checked server-side on resume'),
+  max: z.number().optional()
+    .describe('Maximum accepted value (numeric fields). Applied by the client at the input and re-checked server-side on resume'),
+  inlineHelpText: z.string().optional()
+    .describe('Help text rendered under the input. Unlike `placeholder`, it survives the user typing'),
+  reference: z.string().optional()
+    .describe("Object whose records a `type: 'lookup'` field picks from. Absent = no picker target to resolve"),
   visibleWhen: z.string().optional().describe(
     'Conditional-visibility predicate, evaluated by the CLIENT against the '
     + 'screen\'s live collected values - bare CEL over the screen\'s own field '

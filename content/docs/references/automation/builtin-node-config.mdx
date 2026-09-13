@@ -227,6 +227,10 @@ Value the variable takes: a string (`{token}` flow interpolation — a sole toke
 | **defaultValue** | `any` | optional | Prefilled value (interpolates `{token}` templates) |
 | **placeholder** | `string` | optional | Input placeholder text |
 | **visibleWhen** | `string` | optional | CEL predicate controlling visibility, evaluated client-side |
+| **min** | `number` | optional | Minimum accepted value (numeric fields); enforced on resume |
+| **max** | `number` | optional | Maximum accepted value (numeric fields); enforced on resume |
+| **inlineHelpText** | `string` | optional | Help text displayed below the field |
+| **reference** | `string` | optional | Target object name (snake_case) whose records a `type: 'lookup'` field picks from |
 
 
 ---
@@ -245,6 +249,10 @@ Value the variable takes: a string (`{token}` flow interpolation — a sole toke
 | **defaultValue** | `any` | optional | Prefilled value (interpolates `{token}` templates) |
 | **placeholder** | `string` | optional | Input placeholder text |
 | **visibleWhen** | `string` | optional | CEL predicate controlling visibility, evaluated client-side |
+| **min** | `number` | optional | Minimum accepted value (numeric fields); enforced on resume |
+| **max** | `number` | optional | Maximum accepted value (numeric fields); enforced on resume |
+| **inlineHelpText** | `string` | optional | Help text displayed below the field |
+| **reference** | `string` | optional | Target object name (snake_case) whose records a `type: 'lookup'` field picks from |
 
 ### Nested Shape: `ScreenFieldConfig.options[number]`
 
