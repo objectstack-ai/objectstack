@@ -2880,7 +2880,7 @@
   *Erratum, 2026-09-13 — #17783 and #17785 renamed the two keys this entry
   named as gate-exempt; both are tombstoned and inside the gate's
   population as of `@objectstack/spec` 17. (Corrected after publication,
-  #PRPLACEHOLDER18076.)*
+  #18077.)*
 - fb77aa5: feat(spec)!: a `tree` field's `reference`, when present, must name the declaring object — any other target is refused at parse (#14892)
   
   <!-- adr-0087: not-required (no-migration-prescription) No authorable key is renamed, retired or re-typed: `reference` keeps its name, its type and its optionality on a `tree` field, and every self-referencing or reference-less `tree` parses byte-identically to before. What is newly refused is a `tree` whose `reference` names a different object — a shape no prose surface ever documented, that no runtime reader consumed as a cross-object link, and whose one in-repo author (the showcase field zoo) hedged in its own label. The remedy is authoring intent, not a mechanical rewrite: the author decides whether the field is this object's own hierarchy (a self-reference, or no `reference` at all) or a link to another object (a `lookup`), so `objectstack migrate meta` has nothing to rewrite and this changeset carries no rewrite instructions. -->
