@@ -496,16 +496,46 @@
 // ## THE TWO TIERS (#13504, #14554) — `unit` and `integration`, DERIVED population
 //
 // Maintainer ruling (2026-09-01): split this suite into two NAMED tiers — a
-// unit-fast tier that is the local default and does not monopolise the shared
+// unit-fast tier that is fast to run locally and does not monopolise the shared
 // verify lock, and a real-kernel integration tier that is CI-mandatory and run
-// locally on demand. Nothing is skipped, weakened, deleted or doubled: every
-// test file in this package still runs under `pnpm test`, because `vitest run`
-// with no `--project` runs every project. The tiers only change what a NARROWED
-// local run selects.
+// locally on demand.
 //
-//   pnpm --filter @objectstack/cli exec vitest run --project unit          # fast, local default
+//   pnpm --filter @objectstack/cli test                                    # BOTH tiers — what CI runs
+//   pnpm --filter @objectstack/cli exec vitest run --project unit          # fast; runs ONLY the unit tier
 //   pnpm --filter @objectstack/cli exec vitest run --project integration   # the real thing, on demand
-//   pnpm --filter @objectstack/cli test                                    # both — what CI runs
+//
+// ⛔ `--project` NARROWS THE RUN, AND A PATH YOU NAME OUTSIDE THE SELECTED TIER
+// IS DISCARDED RATHER THAN RUN (#17853). The split itself skips, weakens,
+// deletes and doubles nothing — `vitest run` with no `--project` runs every
+// project, so the POPULATION is intact. ⛔ That sentence is about the
+// population and says nothing whatever about one narrowed invocation, and this
+// block used to print it three lines above the narrowed commands, which is
+// precisely how it got read as a guarantee about the reader's own command line.
+// The safe invocation is now printed FIRST, above the two that can lose things.
+//
+// Naming an integration-tier file while passing `--project unit` selects
+// nothing for that path — the two tiers are a partition (`:583`) and each
+// project's `include` is an exact-path list (`:613`), so the intersection is
+// empty BY CONSTRUCTION, not by accident. Measured on this tree, vitest 4.1.11:
+// if that path was the ONLY one you named, vitest is already loud —
+// `No test files found, exiting with code 1`. If you named OTHER paths that did
+// match, it is dropped in SILENCE: five paths in, `Test Files … (4)` out, the
+// discarded name printed nowhere in vitest's own output, and the whole run
+// byte-identical to the one that named only the four.
+//
+// ⇒ A false green in the worst direction, and it has already cost one dispatch
+// round (#16872): that dev verified with `--project unit`, read green, pushed,
+// and CI went red on `Test Core` with the failing assertion inside the very
+// integration-tier file the local run had discarded.
+//
+// ⇒ `vitest-filter-preflight.ts` is wired into `reporters` below and now says
+// so: every named path that selected no test file is reported BY NAME, with the
+// tier it really lives in and the command that runs it. It prints nothing at
+// all when every named path selected something, so a healthy narrowed run is
+// byte-identical to what it was before this existed. ⛔ Before accepting a
+// narrowed run as pre-delivery verification, read that line — or run the full
+// `test` target above, which is the only one of the three whose green is a
+// statement about this package rather than about a subset you chose.
 //
 // ⛔ THE PREDICATE IS WHAT A FILE DOES, NOT WHAT IT IS CALLED. The ACCEPT on
 // #13504 fixed that the `*.e2e.test.ts` name disagrees with behaviour, so a
@@ -613,6 +643,7 @@
 // `node_modules` exclusion: an exact-path list matches nothing it does not name.
 import { defineConfig } from 'vitest/config';
 import path from 'path';
+import { tierFilterPreflight } from './vitest-filter-preflight.js';
 import { integrationTestFiles, unitTestFiles } from './vitest-tiers.js';
 
 // The two tiers, DERIVED from what the files DO — never written down — over
@@ -701,6 +732,21 @@ export default defineConfig({
         external: [/packages[\/]types[\/]dist/],
       },
     },
+    // #17853 — the preflight the tier header above describes. `'default'` is
+    // vitest's own default reporter, restated because naming `reporters` at all
+    // replaces the default list rather than extending it; the second entry adds
+    // output ONLY when a path named on the command line selected no test file,
+    // so a run that loses nothing is byte-identical to one without it. The two
+    // populations are the SAME derived arrays the projects below use as their
+    // `include` — ⛔ never a second derivation, which would be a copy of a fact
+    // and would go stale exactly where this one cannot.
+    reporters: [
+      'default',
+      tierFilterPreflight({
+        root: __dirname,
+        populations: { unit: UNIT_FILES, integration: INTEGRATION_FILES },
+      }),
+    ],
     // The two tiers (#13504) — see the header section of the same name, and
     // "THE NIGHTLY TIERS" for the population both read. Both `extends: true`
     // so each project inherits the `resolve.alias` table and the

@@ -171,6 +171,17 @@
       "@objectstack/verify": ["../verify/src/index.ts"]
     }
   },
-  "include": ["test/**/*", "vitest.config.ts", "vitest-tiers.ts", "vitest-tiers.fixtures.ts"],
+  // ⛔ Every package-root harness module is named here ONE BY ONE, because the
+  // `include` above reaches `test/` and nothing else: a root module that is only
+  // reachable through a test's import is in the program by accident and leaves
+  // it the moment that import goes. `vitest-filter-preflight.ts` (#17853) is the
+  // fourth for that reason, not because a test happens to import it.
+  "include": [
+    "test/**/*",
+    "vitest.config.ts",
+    "vitest-tiers.ts",
+    "vitest-tiers.fixtures.ts",
+    "vitest-filter-preflight.ts"
+  ],
   "exclude": ["node_modules", "dist"]
 }
