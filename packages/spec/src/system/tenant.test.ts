@@ -271,7 +271,7 @@ describe('SchemaLevelIsolationStrategySchema', () => {
       },
       performance: {
         poolPerSchema: false,
-        schemaCacheTTL: 3600,
+        schemaCacheTtlSeconds: 3600,
       },
     };
 
@@ -752,5 +752,43 @@ describe('tenant idleTimeout / sessionTimeout → *Seconds (#14478, #14519)', ()
     const access = TenantSecurityPolicySchema.shape.accessControl.unwrap().shape.sessionTimeoutSeconds;
     expect(pool.description).toBe('Idle pool timeout in seconds');
     expect(access.description).toBe('Session timeout in seconds');
+  });
+});
+
+// #15939 ruling A (executing #14478) — the third duration key on this file to
+// carry its unit in a source JSDoc only. `.describe()` said "Schema cache TTL",
+// so the reference-page reader could not tell 3600 seconds from 3600
+// milliseconds. Renamed with the unit in the key; the old spelling is a
+// retiredKey tombstone (the nested `performance` object is not strict).
+describe('tenant schemaCacheTTL → schemaCacheTtlSeconds (#15939, #14478)', () => {
+  it('REFUSES `performance.schemaCacheTTL` with a rename naming `schemaCacheTtlSeconds`', () => {
+    const result = SchemaLevelIsolationStrategySchema.safeParse({
+      strategy: 'isolated_schema',
+      performance: { schemaCacheTTL: 3600 },
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'performance.schemaCacheTTL');
+    expect(issue).toBeDefined();
+    expect(issue!.message).toMatch(
+      /`performance\.schemaCacheTTL` was renamed.*Rename the key to `schemaCacheTtlSeconds`/s,
+    );
+  });
+
+  it('accepts the suffixed key at the magnitude the retired key carried, with the same default', () => {
+    const parsed = SchemaLevelIsolationStrategySchema.parse({
+      strategy: 'isolated_schema',
+      performance: { schemaCacheTtlSeconds: 7200 },
+    });
+    expect(parsed.performance?.schemaCacheTtlSeconds).toBe(7200);
+    expect(parsed.performance).not.toHaveProperty('schemaCacheTTL');
+    expect(
+      SchemaLevelIsolationStrategySchema.parse({ strategy: 'isolated_schema', performance: {} })
+        .performance?.schemaCacheTtlSeconds,
+    ).toBe(3600);
+  });
+
+  it('publishes the unit in the describe — the text the reference pages render', () => {
+    const cache = SchemaLevelIsolationStrategySchema.shape.performance.unwrap().shape.schemaCacheTtlSeconds;
+    expect(cache.description).toBe('Schema cache TTL in seconds');
   });
 });
