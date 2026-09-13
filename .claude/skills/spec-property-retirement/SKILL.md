@@ -206,13 +206,14 @@ conversion 是消费者跟的。两个都要写。
       从它解析归属 —— 那个职责移给了上面的条目。#5898 起这对**每个**消费者都成立:门
       (c) 的 *aged-out tombstone* 证明曾是最后一个叶匹配者,现在也读同一张精确键
       表,再没有任何规则从 `surface` 解析归属。
-- [ ] **`retiredFromLoadPath: true`** —— 退役恒真。两种论证,不可互换:对*改名*它意
-      味着「没有 alias 窗口,故意的」(拒绝由墓碑负责;条目存在是为了
-      `spec-changes.json` 与 `os migrate meta` 仍携带它);对**默认值翻转**它承重正
-      确性 —— 自动应用 `field-required-notnull-explicit` 的 loader 会把 NOT NULL 盖
-      到 17 时代编写的 `required: true` 上,静默恢复 ADR-0113 删掉的三重绑定。只有
-      `migrate meta --from <old>` 可以应用翻转 —— 在那里「这份 source 早于拆分」是
-      事实而不是猜测。
+- [ ] **`retiredFromLoadPath: true`** —— 退役恒真,但管辖权只有 authoring 漏斗
+      `normalizeStackInput`;三处 data-at-rest seam 以 `includeRetired: true` 故意重放退役
+      条目,它**一处也拦不住**:`applyConversionsToStoredItem`(钉死)、automation
+      engine 的 flow rehydration、`applyArtifactForwardConversions`。对*改名*它意味着
+      「没有 alias 窗口,故意的」;对**默认值翻转**,只有确知输入早于翻转的 seam 才可重
+      放,其余按 id 退订 `excludeConversionIds` —— `app-hidden-to-unpublished` 在 artifact
+      门即如此。上一版样例栽在这:它教「只有 migrate meta 能应用翻转」,而 boot 时照样
+      应用,该 conversion 已撤(`packages/spec/CHANGELOG.md`)。
 - [ ] **一步 D3 链**,在 `packages/spec/src/migrations/registry.ts` —— 把 id 加进
       `MIGRATIONS_BY_MAJOR[N].conversionIds`,扩写该步的 `rationale`。
       `conversion.toMajor` **必须等于**该步的 major。⚠ 没有东西直接断言「每个
@@ -220,11 +221,10 @@ conversion 是消费者跟的。两个都要写。
       chain-replay 测试抓得到它,只因为没接线的 fixture 永远到不了自己的 `after`。
       所以把那个测试的失败读作「没接线」,不是「transform 坏了」。
 - [ ] **fixture 必须不相交 —— 两重。** 每个 fixture 都被整张表 replay,必须恰好等于
-      自己的 `after`,每条 notice 都归属自己的 id。`before` 保持最小、避开其它条目
-      的键(新的 `objects[].fields` fixture 不许带裸 `required: true`,否则 notNull
-      conversion 在它上面开火)。第二重容易漏:`retiredFromLoadPath` 的 fixture 还必
-      须不被任何 *live-window* conversion 碰到,因为另有测试断言它以零 notice 走过
-      默认加载路径。这条不相交契约正是逼出同 major 吸收(§0)的东西。
+      自己的 `after`,每条 notice 都归属自己的 id。`before` 保持最小、避开其它条目的
+      键。第二重容易漏:`retiredFromLoadPath` 的 fixture 还必须不被任何 *live-window*
+      conversion 碰到,因为另有测试断言它以零 notice 走过默认加载路径。这条不相交契
+      约正是逼出同 major 吸收(§0)的东西。
 - [ ] **幂等靠构造,不靠测试。** 没有测试把 conversion replay 两遍。`stripKeys` 删
       除天然幂等(`if (!(key in next)) continue`),`renameKey` 拒绝覆盖已存在的
       canonical 值;默认值翻转**不是**幂等安全的,靠它自己的守卫加
