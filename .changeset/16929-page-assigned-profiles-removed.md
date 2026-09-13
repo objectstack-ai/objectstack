@@ -1,5 +1,5 @@
 ---
-'@objectstack/spec': major
+'@objectstack/spec': minor
 ---
 
 **BREAKING** — remove `page.assignedProfiles`, and answer `profiles:` / `assignedTo:` with the permission-set route instead of correcting an author into the retired vocabulary.
