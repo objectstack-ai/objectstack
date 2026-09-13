@@ -5134,7 +5134,7 @@ export function selfTest() {
   t('⭐ the MERGED body reads DECLARED — bold-wrapped, on line 4, with closing keywords above it', readClause2Line(P17819_MERGED)?.kind === 'declared');
   t('…carrying the value the seat wrote, which is what `Check Changeset` printed on run 34684357221', readClause2Line(P17819_MERGED)?.value === 'no');
   t('…and quoting LINE 4 back, never the first line — the row names the line it actually read', says(readClause2Line(P17819_MERGED)?.line, 'Clause-②: no') && !says(readClause2Line(P17819_MERGED)?.line, 'Fixes'));
-  t('⛔ POSITION is the LINE: the same line alone at the top reads identically', readClause2Line('**Clause-②: no**' + P17819_REASON)?.value === readClause2Line(P17819_MERGED)?.value);
+  t('⛔ POSITION is the LINE: the same line alone at the top reads identically, and BOTH read `no`', readClause2Line('**Clause-②: no**' + P17819_REASON)?.value === 'no' && readClause2Line(P17819_MERGED)?.value === 'no');
   t('⛔ …and pushing it further down changes nothing either — no line index is consulted', readClause2Line('a\nb\nc\nd\ne\n**Clause-②: no**' + P17819_REASON)?.value === 'no');
   t('⭐ the shape the SAME PR was OPENED with is NOT a declaration — the span opens before the key and the line talks on outside it', readClause2Line(P17819_OPENED)?.kind === 'near-miss');
   t('…reasoned DESCRIBING, the reading `Check Changeset` refused on run 34684118255 at exit 1', readClause2Line(P17819_OPENED)?.reason === 'describing');
