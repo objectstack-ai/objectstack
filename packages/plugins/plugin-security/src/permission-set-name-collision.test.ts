@@ -30,6 +30,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 import {
   bootstrapDeclaredPermissions,
@@ -66,9 +67,14 @@ function makeQl(declared: any[] = []) {
       rows.push({ ...data });
       return { id: data.id };
     },
-    async update(object: string, data: any) {
+    // `assertEngineUpdateDispatch` rather than a hand-rolled id check: a fake
+    // looser than `ObjectQL.update` is how a dead route once shipped with its
+    // suite green (`check:engine-double-contract`).
+    async update(object: string, data: any, options?: any) {
+      const dispatch = assertEngineUpdateDispatch(data, options);
       if (object !== 'sys_permission_set') return;
-      const r = rows.find((x) => x.id === data.id);
+      if (dispatch.kind !== 'by-id') throw new Error('fake driver: only by-id update is modelled');
+      const r = rows.find((x) => x.id === dispatch.id);
       if (r) Object.assign(r, data);
     },
   };
