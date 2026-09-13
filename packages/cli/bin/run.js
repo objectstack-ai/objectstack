@@ -81,14 +81,26 @@ import { flush, handle, run, settings } from '@oclif/core';
  * `packages/cli/tsconfig.json` to aim at in any case (`files` names `dist`
  * only).
  *
- * ⚠️ What it costs, stated rather than discovered: a `plugins link`ed plugin
- * written in TypeScript is no longer auto-transpiled through THIS entry (oclif
- * keeps the lookup alive for `type === 'link'` plugins even in production, and
- * this setting is checked ahead of that). Use `bin/run-dev.js`, or build the
- * plugin. And on an UNBUILT tree this file now answers oclif's "command not
- * found" under `development`/`test` as it already did when `NODE_ENV` was unset
- * — which is the signature `scripts/cli-build-prerequisite.mjs` classifies for
- * every gate that shells out to this CLI, so the three legs stop disagreeing.
+ * ⚠️ What it costs, measured rather than assumed. The one thing oclif keeps the
+ * TypeScript lookup alive for even in production is a LINKED plugin
+ * (`plugin?.type !== 'link'` guards the `isProduction` early return), and this
+ * setting is checked ahead of that — so a `plugins link`ed TypeScript plugin
+ * would no longer be auto-transpiled through this entry. ⭐ That path is not
+ * reachable today: `@oclif/plugin-plugins` sits in `devDependencies`, and
+ * oclif's core-plugin loader only matches names under `dependencies`, so
+ * `os plugins` is not a registered command at all (measured on this entry —
+ * `os --help` lists 34 topics and none of them is `plugins`; the count is the
+ * control, so the zero is a reading). `content/docs/plugins/index.mdx` says the
+ * same in its own words and tells an extension author to build an `os`
+ * distribution listing the package in both places. ⛔ If that is ever fixed,
+ * this line is what has to be revisited — the remedy is `bin/run-dev.js`, or
+ * building the plugin.
+ *
+ * The other change in behaviour is a convergence, not a loss: on an UNBUILT
+ * tree this file now answers oclif's "command not found" under
+ * `development`/`test` exactly as it already did when `NODE_ENV` was unset —
+ * the signature `scripts/cli-build-prerequisite.mjs` classifies for every gate
+ * that shells out to this CLI, so the three legs stop disagreeing.
  */
 settings.enableAutoTranspile = false;
 
