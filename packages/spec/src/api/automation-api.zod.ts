@@ -258,9 +258,9 @@ const screenFieldSpecShape = () => z.object({
   defaultValue: z.unknown().optional(),
   placeholder: z.string().optional(),
   min: z.number().optional()
-    .describe('Minimum accepted value (numeric fields). Applied by the client at the input and re-checked server-side on resume'),
+    .describe('Minimum accepted value (numeric fields). Applied by the client at the input and re-checked server-side on resume when the submitted value is a number'),
   max: z.number().optional()
-    .describe('Maximum accepted value (numeric fields). Applied by the client at the input and re-checked server-side on resume'),
+    .describe('Maximum accepted value (numeric fields). Applied by the client at the input and re-checked server-side on resume when the submitted value is a number'),
   inlineHelpText: z.string().optional()
     .describe('Help text rendered under the input. Unlike `placeholder`, it survives the user typing'),
   reference: z.string().optional()

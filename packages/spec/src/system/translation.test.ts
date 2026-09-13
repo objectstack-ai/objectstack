@@ -1157,6 +1157,10 @@ describe('translation unknown-key strictness (#4001)', () => {
       expect(message).toContain('inlineHelpText');
       // …and it must not be re-pointed at `placeholder`, which means something else.
       expect(message).not.toContain('`help` → `placeholder`');
+      // The card that moved this reason is named in the code comment above the
+      // string, never IN the string: this text is printed AT the author, who
+      // has no tracker, so `#NNNN` resolves to nothing (check:doc-authoring).
+      expect(message).not.toMatch(/#\d{3,5}\b/);
     });
 
     it('says why select-option labels are not translatable here', () => {

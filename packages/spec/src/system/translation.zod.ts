@@ -618,9 +618,9 @@ const TRANSLATION_KEY_GUIDANCE: Record<LegacyObjectFirstKey | 'validationMessage
  */
 const FLOW_SCREEN_FIELD_NO_HELP =
   'the flows translation face carries `label` and `placeholder` only, so a help entry here would '
-  + 'translate nothing. The screen field itself does declare help copy (`ScreenFieldConfig.inlineHelpText`, '
-  + '#17306); what is missing is a translation key for it, not the string. ⛔ Do not use `placeholder` '
-  + 'instead — that is the in-input hint, a different string.';
+  + 'translate nothing. The screen field itself does declare help copy '
+  + '(`ScreenFieldConfig.inlineHelpText`); what is missing is a translation key for it, not the '
+  + 'string. ⛔ Do not use `placeholder` instead — that is the in-input hint, a different string.';
 
 /**
  * The measured exclusion on `datasets.<name>.dimensions.<d>` and

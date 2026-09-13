@@ -166,8 +166,11 @@ export interface ScreenFieldSpec {
      * spelled as the object field spells it (`FieldSchema.min` / `.max`).
      *
      * Unlike {@link visibleWhen}, these are NOT client-only: the server
-     * re-checks them when the run resumes (`validateScreenInputs`), so a bound
-     * holds against a caller that skips the dialog. The client still applies
+     * re-checks them when the run resumes (`validateScreenInputs`) — for a
+     * submitted value that is already a finite number, which is as far as this
+     * surface can judge, its `type` being an open widget hint. So a bound
+     * holds against a caller that skips the dialog and posts a NUMBER; a
+     * numeric string is not coerced and passes it. The client still applies
      * them so the user is stopped at the input rather than at Submit.
      */
     min?: number;

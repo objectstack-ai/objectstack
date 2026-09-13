@@ -404,7 +404,7 @@ field means the same thing here:
 
 | Key | Type | What it does |
 |:---|:---|:---|
-| `min` / `max` | `number` | Numeric bound. Applied by the client at the input **and re-checked server-side when the run resumes**. |
+| `min` / `max` | `number` | Numeric bound. Applied by the client at the input **and re-checked server-side on resume when the submitted value is a number**. |
 | `inlineHelpText` | `string` | Help text under the input. Unlike `placeholder`, it stays readable after the user types. |
 | `reference` | `string` | Object whose records a `type: 'lookup'` field picks from, so the field renders a record picker. |
 
@@ -424,12 +424,18 @@ field means the same thing here:
 }
 ```
 
-**The bound is not advice.** `min` / `max` ride to the client so the user is
-stopped at the input, and `validateScreenInputs` re-checks them on resume, so a
-caller that skips the dialog and posts to `resume` directly is refused too
-(`min_value` / `max_value`, inside the run's `INVALID_SCREEN_INPUT`). A screen
-field's declared contract is the only contract behind it — there is no object
-schema to catch a bad bag downstream.
+**The bound is re-checked on resume — for a value that arrives as a number.**
+`min` / `max` ride to the client so the user is stopped at the input, and
+`validateScreenInputs` re-checks them on resume, so a caller that skips the
+dialog and posts a *number* to `resume` directly is refused too (`min_value` /
+`max_value`, inside the run's `INVALID_SCREEN_INPUT`). A screen field's declared
+contract is the only contract behind it — there is no object schema to catch a
+bad bag downstream.
+
+⚠️ The re-check reads only finite numbers. `"25"` — the same quantity as a
+*string* — is not coerced and passes the bound in silence, for the reason the
+next list gives: this surface has no closed `type` vocabulary and so does not
+judge value shape. Outside that, the bound is the client's alone.
 
 **What these keys refuse:**
 

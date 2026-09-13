@@ -448,12 +448,15 @@ export const ScreenFieldConfigSchema = lazySchema(() => strictObject({
   /**
    * Numeric bound pair (#17306), spelled as `FieldSchema` spells it.
    *
-   * Forwarded into the `ScreenFieldSpec` the client renders AND enforced
-   * server-side on resume (`validateScreenInputs`, `min_value` / `max_value`):
-   * a screen field's declared contract is the ONLY contract behind it — there
-   * is no object schema to catch a bad bag downstream — so a bound that lived
-   * in the dialog alone would be bypassed by any caller that posts to `resume`
-   * directly, which is the gap #4477 closed for `required`.
+   * Forwarded into the `ScreenFieldSpec` the client renders AND re-checked
+   * server-side on resume (`validateScreenInputs`, `min_value` / `max_value`)
+   * for a value that arrives as a finite number: a screen field's declared
+   * contract is the ONLY contract behind it — there is no object schema to
+   * catch a bad bag downstream — so a bound that lived in the dialog alone
+   * would be bypassed by any caller that posts a number to `resume` directly,
+   * which is the gap #4477 closed for `required`. A numeric STRING is not
+   * coerced and passes the bound; the re-check is narrower than the words
+   * "enforced server-side" on their own would suggest.
    *
    * Unconditioned on `type`, exactly as `FieldSchema.min` / `.max` are: a
    * screen field's `type` is an open widget hint with no closed vocabulary, so
@@ -461,8 +464,8 @@ export const ScreenFieldConfigSchema = lazySchema(() => strictObject({
    * a non-numeric field constrains nothing the client renders; it is not an
    * error this surface can detect.
    */
-  min: z.number().optional().describe('Minimum accepted value (numeric fields); enforced on resume'),
-  max: z.number().optional().describe('Maximum accepted value (numeric fields); enforced on resume'),
+  min: z.number().optional().describe('Minimum accepted value (numeric fields); re-checked on resume when the submitted value is a number'),
+  max: z.number().optional().describe('Maximum accepted value (numeric fields); re-checked on resume when the submitted value is a number'),
   /**
    * Help text under the input (#17306) — `FieldSchema`'s spelling for the same
    * intent, which is why it is not `helpText`: `FieldSchema` renames that (and
