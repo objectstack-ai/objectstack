@@ -23,7 +23,8 @@ export const entry: SemanticMigration = {
     + 'set corresponds to a given profile name is a judgement no walker can derive, which is why '
     + 'this is a TODO rather than a rewrite.',
   acceptanceCriteria:
-    'No page metadata carries `assignedProfiles` (`os migrate meta --from 17` lists the strips; '
+    'No page metadata carries `assignedProfiles` (the D2 conversion '
+    + '`page-assigned-profiles-removed` strips it from authored sources on a chain replay; '
     + '`os migrate meta --stored` covers rows already at rest). For every page that carried one, '
     + 'each name in the old list resolves to a permission set held by the intended people through '
     + 'a position, and a caller OUTSIDE that audience, signed in, is refused the data the page '

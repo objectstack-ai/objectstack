@@ -6,9 +6,14 @@
 // deleted, and it gated nothing: measured across this repository and objectui,
 // every hit was a declaration, a generated artifact, prose or a round-trip test —
 // no renderer, route or metadata read door ever read it, so a page that "assigned
-// profiles" stayed open to every caller who could reach it. `PageSchema` is a
-// `strictObject`, so the key is deleted from the shape and the prescription lives
-// in that schema's `guidance` table; the two alias entries that steered an
+// profiles" stayed open to every caller who could reach it. `PageSchema` is reachable
+// from the `page` metadata-type root, so the key is NOT deleted from the shape: it
+// stays as a `retiredKey()` tombstone that carries the prescription, which is why the
+// key keeps its authorable-surface line (marked `[RETIRED]`) and its liveness row (as
+// `dead`). Authoring it is a `tsc` error and a parse error; there is no `guidance`
+// entry for it, because a guidance entry only ever runs from the
+// `unrecognized_keys` path and the shape still declares this key. The two alias
+// entries that steered an
 // authored `profiles:` / `assignedTo:` INTO this retired vocabulary became
 // refusals naming the permission-set route in the same change. Page audience is
 // the permission set's: the object's permission sets gate the DATA, and positions

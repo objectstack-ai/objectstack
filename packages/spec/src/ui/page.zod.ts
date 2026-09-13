@@ -676,7 +676,7 @@ export function checkPageSourceCompleteness(
  * `shared/retired-key-migrate-sentence.test.ts`).
  */
 const PAGE_ASSIGNED_PROFILES_RETIRED =
-  '`page.assignedProfiles` was removed in @objectstack/spec 18 (ADR-0090 D2, ADR-0049 '
+  '`page.assignedProfiles` was removed in @objectstack/spec 17.5.0 (ADR-0090 D2, ADR-0049 '
   + 'enforce-or-remove) — it was named for the Profile concept ADR-0090 D2 deleted, and it '
   + 'gated nothing: no renderer, route or metadata read door ever read the key, so a page that '
   + '"assigned profiles" stayed open to every caller who could reach it. Delete the key. Page '
