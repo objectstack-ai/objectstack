@@ -846,7 +846,35 @@ export const CEILINGS = new Map([
   // line-neutral folds among this file's adjacent rule pairs, and re-wrap funding
   // is refused per the 2026-08-17 rule in any case. Landed count, headroom 0,
   // same convention.
-  ['.claude/skills/pm-dispatch/references/platform-readings.md', 449],
+  // Raised 449 → 451 by the TWELFTH readings increment, again under the STANDING
+  // one-file exception quoted above rather than a fresh decision card, and again
+  // recorded as a `ruledRaises` record citing it. Spent at ONE line per
+  // deduplicated reading, each written in this file's voice: this table's own
+  // `mustName` does not require exclusivity, so pinning a seventh registry row
+  // cannot turn the table red (+1); and its corollary — a green gate is
+  // therefore NOT a reading that the count row beside it is current, which is
+  // exactly what leaves that row hand-maintained (+1) = +2 exactly.
+  //
+  // ONE correction is paid in place and buys nothing: the required-checks row
+  // and its wrapped continuation, which said six and named six. The new count
+  // and the seventh name land inside the two lines that row already occupied.
+  //
+  // ⚠️ ONE candidate was REFUSED rather than trimmed, and the refusal is this
+  // corpus's own standard doing the work. The seventh context's entry date and
+  // the card that pinned it were drafted as a third line; that is provenance
+  // narrative carrying a date and two issue numbers, which `check-skill-id-lint`
+  // refuses outright and which the 2026-08-12 ruling keeps out of the scanned
+  // corpus altogether. Its one operative residue — that the registry can lag the
+  // real required set — is already what the corollary line above says, so the
+  // line was DELETED rather than bought, and this increment is +2 and not the +3
+  // it was drafted at. Candidates 3 / landed 2 readings / already present 0 /
+  // refused 1.
+  //
+  // Nothing else was paid in place: the fourth increment MEASURED zero
+  // line-neutral folds among this file's adjacent rule pairs, and re-wrap funding
+  // is refused per the 2026-08-17 rule in any case. Landed count, headroom 0,
+  // same convention.
+  ['.claude/skills/pm-dispatch/references/platform-readings.md', 451],
   // Per-operation REST/GraphQL/git channel mapping — which fleet operation has
   // a REST twin (each row executed in a real session, provenance date carried
   // per row), the handful that are GraphQL-only, and the queue-routing
@@ -1449,6 +1477,23 @@ export const CROSS_FILE_MOVES = new Map([
             + '逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排」',
           date: '2026-09-12',
           delta: 24,
+        },
+        {
+          // The TWELFTH increment, under the same STANDING exception — the same
+          // words again, for the same reason: a record that quotes no ruling is
+          // RED and each record stands alone. The +2 is accounted for line by
+          // line beside this entry's ceiling above, and the exception's own
+          // conditions (per-item verification and the candidate / landed /
+          // already-present / refused counts) are carried by the raising PR's
+          // dedup table and the seat's ACCEPT.
+          ruling:
+            'the standing one-file exception for'
+            + ' `.claude/skills/pm-dispatch/references/platform-readings.md` — pm-dispatch'
+            + ' SKILL.md, verbatim and untranslated: 「唯一例外:`platform-readings.md`'
+            + ' 增量抬上限到落地行数,免决策卡,记 `ruledRaises` 引常设裁决。条件:席位验收评论'
+            + '逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排」',
+          date: '2026-09-13',
+          delta: 2,
         },
       ],
       sources: [
