@@ -1,0 +1,37 @@
+{
+  "number": 5291,
+  "kind": "issue",
+  "title": "`content/docs/protocol/objectui/widget-contract.mdx` 的 Theme 段仍在教 #3494 已删除的 `density`(照抄文档即构建失败)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T15:55:21Z",
+  "updated_at": "2026-08-05T12:45:36Z",
+  "closed_at": "2026-08-05T12:45:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5291",
+  "body": "发现于 #5021 / PR #5289 的文档面扫查(主题 token 退役),**与该 PR 无关,未在其中修复**。\n\n## 现象\n\n`content/docs/protocol/objectui/widget-contract.mdx` 第 319 行起的 \"## Theme\" 段落:\n\n> ObjectUI theming is defined by `ThemeSchema` … The `mode` is one of `light`, `dark`, or `auto`, **and `density` is one of `compact`, `regular`, or `spacious`**.\n\n紧跟的 YAML 示例也照写:\n\n```yaml\nname: corporate\nlabel: Corporate\nmode: light\ndensity: regular          # ← 这个键不存在\ncolors:\n  # ColorPalette configuration\nborderRadius:\n  base: 0.25rem\n  md: 0.375rem\n```\n\n## 为什么是缺陷而不是纯陈旧\n\n`density` 在 **#3494** 就被删了(当轮判据:主题引擎从不发出对应变量,写它是静默 no-op),现在是 `theme.zod.ts` 里 `THEME_RETIRED_KEY_GUIDANCE` 的一条墓碑:\n\n> `density` was removed in #3494 — no renderer read it. Express compact/comfortable spacing as your own tokens under `customVars`.\n\n而 #4001 批 15 之后 `ThemeSchema` 已 `.strict()`。两件事叠加的结果是:**照抄本页示例的作者会拿到一次响亮的 parse 失败**——`defineStack({ themes })` / `defineTheme()` 都会拒。拒绝是响亮的、带处方的(这部分工作正常),问题在于**平台自己的文档把作者送进了那次拒绝**。\n\n对 AI 作者尤其贵:这一页是 objectui widget 契约的权威说明,模型从这里取样写主题,得到的是一个两年前就不存在的键。\n\n## 范围\n\n- 该页 Theme 段的散文 + YAML 示例。\n- 顺带核对同段其余断言是否也停在 #3494 之前(`borderRadius` 的描述是对的;`mode` 是对的)。\n- ⚠️ **#5021 落地后这一段会再陈旧一层**:`typography` / `animation` / `zIndex` 三块已退役,该页末句 \"Widgets inherit the active theme automatically; they do not each carry a full set of color/typography props\" 虽然没直接列这些键,但整段的 token 词表口径需要跟着更新一遍。建议在 PR #5289 合入后一并处理,一次改到位。\n\n## 未做的事\n\n按 Prime Directive #10,#5289 的范围严格限定在 spec 退役面,没有搭车改这一页;也没有碰 `content/docs/releases/`。"
+}

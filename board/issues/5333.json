@@ -1,0 +1,36 @@
+{
+  "number": 5333,
+  "kind": "issue",
+  "title": "`/analytics/sql` 回显的 SQL 丢掉 `$startsWith` / `$endsWith` 谓词:回显比实际执行的查询更宽,无法复现结果",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T23:36:00Z",
+  "updated_at": "2026-08-05T18:15:42Z",
+  "closed_at": "2026-08-05T18:15:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5333",
+  "body": "修 #5325 时给第三个编译器(`ObjectQLStrategy.renderFilterNodeSql`,即回显给浏览器的展示\nSQL)补布尔常量 kind,顺手核对它的算子覆盖面,发现这一条。**不属于 #5325 的范围面**,\n按 Prime Directive #10 单独记在这里,unassigned。\n\n## 位置\n\n`packages/services/service-analytics/src/strategies/objectql-strategy.ts` 的\n`buildFilterClauseSql` / `SCALAR_SQL_OPS`。\n\n## 现象(实测)\n\n`buildFilterClauseSql` 显式处理 `set` / `notSet` / `in` / `notIn` / `contains` /\n`notContains`,其余落到\n\n```ts\nconst op = SCALAR_SQL_OPS[operator];   // { equals, notEquals, gt, gte, lt, lte }\nif (!op) return null;                  // ← 静默丢掉整条谓词\n```\n\n`startsWith` / `endsWith` 既不在 `SCALAR_SQL_OPS` 里,也不在上面的分支里,于是返回 `null`,\n被调用方当作「这个节点没有约束」丢掉。同一个 query 走 `NativeSQLStrategy` 时是有谓词的:\n\n| `where` | `NativeSQLStrategy.generateSql`(真正执行的) | `ObjectQLStrategy.generateSql`(回显的) |\n|---|---|---|\n| `{ stage: { $startsWith: 'w' } }` | `WHERE stage LIKE $1`,`['w%']` | **没有 WHERE**,`params` 为空 |\n| `{ stage: { $endsWith: 'n' } }` | `WHERE stage LIKE $1`,`['%n']` | **没有 WHERE**,`params` 为空 |\n| `{ stage: { $contains: 'w' } }` | `WHERE stage LIKE $1` | `WHERE stage LIKE $1` ✅ |\n\n## 为什么是 bug\n\n这个字符串的存在理由就是**复现执行**。`objectql-strategy.ts` 自己在渲染块顶上写着:\n\n> a rendering that contradicts execution is worse than no rendering\n\n以及后来补 `$or` / 时间窗口时那句「omitting it here would be the lie in the other direction」。\n一个作者带着「为什么这张图少了几行」来看回显,拿到的是一条**没有该筛选条件**的语句 ——\n跑一遍返回更多行,于是结论是「筛选器没生效」,而实际执行是生效的。这与 #3601 / #3602 /\n#3650 修的是同一类「回显与执行不一致」。\n\n不涉及越权或错行:该字符串**从不执行**(`execute()` 的 echo 会丢弃 `params`),\n损害限于可调试性。\n\n## 建议\n\n把 `startsWith` / `endsWith` 补进 `buildFilterClauseSql`(与 `contains` 同一分支,\npattern 分别是 `` `${v}%` `` / `` `%${v}` ``,与 `NativeSQLStrategy.buildFilterClause` 的\n`likePattern` 表一致)。\n\n更根本的一条:`return null` 这个「渲染不了就静默丢」的出口本身是缺陷形状 —— 与\n`filter-normalizer.ts` 对未知算子直接 THROW 的姿态相反。normalizer 的算子词汇表是\n**封闭**的(不支持的算子在那里就抛了),所以回显端遇到映射不到的算子只可能意味着两张表\n漂移了,抛错比静默丢更符合这个文件其它地方的立场(参考 `convertFilter` 的 `default:` 分支,\n它正是为同一个理由从「当成等值」改成抛错的,#4128)。\n\n关联:#5325(同函数、同一轮里发现)、#4128(同类「算子静默丢失」)、#3602 / #3650\n(回显必须忠实于执行)。\n"
+}

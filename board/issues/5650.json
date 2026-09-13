@@ -1,0 +1,34 @@
+{
+  "number": 5650,
+  "kind": "pull_request",
+  "title": "docs(os-dev): PR 收尾清单增补 `skip-changeset` 硬步骤,以回读 PR labels 为闭环",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T22:03:32Z",
+  "updated_at": "2026-08-05T22:39:17Z",
+  "closed_at": "2026-08-05T22:39:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T22:39:15Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5650",
+  "body": "Fixes #5559\n\n## 背景\n\n测试-only / 工作流-only / `.claude/`-only 的 PR 不写 changeset,靠 `skip-changeset` 标签豁免 Check Changeset —— 门禁自己的失败文案就把标签列为 PREFERRED 路径。但 os-dev 的「Definition of done」收尾清单对这一步**一字未提**:当前 main 的 `.claude/agents/os-dev.md` 全文搜 label 零命中。于是 dev 在 PR 正文里「声明」标签而没有真正挂上,#5533、#5538 各烧一轮门禁红并由 PM 手工兜底 —— 「声明了 ≠ 执行了」正是 declared ≠ enforced 的 agent 版。\n\n## 改动\n\n`.claude/agents/os-dev.md` 收尾清单新增一条硬步骤,与「PR 正文以 Fixes 开头」同级。**19 行新增、0 行删除**,单文件;其余段落一字未动(含 #5630 新加的 toolchain trap 5、#5642 今日重写的 Byte discipline)。\n\n## 实测校正了派发词的三处认知\n\n派发词给的新数据点是「CI Auto Label 已会自动挂 skip-changeset,文案 PR has no user-facing published change,所以硬步骤应写成回读验证为准而非无条件 POST」。**逐 PR 核对 timeline 后,前半句证伪**,因此条款按实测事实落笔(「回读为准」这个结论保留 —— 但理由完全不同):\n\n| 核对项 | 派发认知 | 实测 |\n| --- | --- | --- |\n| 谁挂的标签 | CI Auto Label | 六例 #5533/#5538/#5542/#5624/#5642/#5645 **全部**来自 agent(`os-zhuang` 五次、`claude[bot]` 一次);`github-actions[bot]` 一次都没挂过,它只挂 `size/*`、`documentation`、`tests`、`ci/cd` |\n| 配置依据 | 有对应 labeler 规则 | `.github/labeler.yml` 九条规则里**没有** `skip-changeset`;仓内唯一匹配「PR has no user-facing published change」的字符串,是本 PR 初稿里我自己写下的那一行 |\n| 「标签未落」的成因 | dev 漏做这一步 | #5533 的标签 `15:46:44` 已落地,`15:46:45` 被 `github-actions[bot]` 的整集写入抹掉 —— 只活了一秒,dev 侧与「没挂」无法区分 |\n\n**整集写入会互相抹**:agent 每次挂标签都伴随一条自己发出的 `unlabeled`,把 bot 刚挂的 `size/*` / `documentation` / `tests` 抹掉(#5533/#5538/#5642/#5645 均可见);反向就是上表第三行。本 PR 自证时更抓到纯 CI 侧的一次:`22:03:48` bot 挂 `size/s`,`22:03:49` **bot 自己**把它 `unlabeled` 又挂上 `documentation` —— 与任何 agent 动作无关。条款因此写明**只加一个标签**。落点在 pr-automation.yml 与写入客户端,超出本单文件面,已另开 #5649,本 PR 不修。\n\n## 实践自证:本 PR 自己是新条款的第一次实测\n\n| 步骤 | 结果 |\n| --- | --- |\n| 开 PR 后立刻回读(`22:03:52`,PR 创建后 20 秒) | `[\"documentation\"]` —— CI **没有**代挂 `skip-changeset`,证实上表第一、二行 |\n| 以新增语义自挂(`POST /issues/5650/labels`) | 返回 `[\"documentation\",\"skip-changeset\"]`,`documentation` 未被抹;timeline 里我这次写入**没有**产生任何 `unlabeled` 事件 —— 与六例 agent 整集写入形成对照 |\n| bot 平息后回读(`22:04:52`) | `[\"documentation\",\"size/s\",\"skip-changeset\"]` —— 三个标签齐全,`size/s` 由 bot 自行补回 |\n\n**预设方向被证伪的一处,如实改掉了条款措辞。** 初稿按 #5542 的历史预设「首 run 必然红」,并在本 PR 正文里写过「立刻落标签让首 run 直接豁免不可达」。实测相反:标签 `22:03:54` 落地,而 `opened` run(workflow run `31051251795`,创建于 `22:03:38`)的 Check Changeset job 直到 `22:04:35` 才启动并做实时回读 —— 读到了早它 41 秒的标签,该 run 直接 **success**。所以首 run 的颜色是一场由 runner 启动耗时决定的竞态,两个方向都有实例(#5542 红、#5650 绿),第二次 commit 把措辞改成如实描述竞态,并把指导语从「预期会红」改为「尽快落标签,把首 run 的颜色当信息而不是自己的判决」。\n\n## 验证\n\n- diff 逐行自查:单文件 19+/0−,只在目标清单区域;`- Tear down …` 之后一行未动。\n- `node scripts/check-nul-bytes.mjs --self-test` 48 assertions 绿 + 全仓扫描 `OK (5573 tracked text file(s))`;改动文件自扫 `grep -naP` 控制字节零命中。\n- `check-doc-authoring`(362 files clean)、`check-role-word`(43 baselined, no new)绿。\n- markdown 结构:单个顶层列表项、18 行续行全为 2 空格缩进、`**` 四个成对、反引号 20 个成对、最大 80 列与既有条目一致。\n- 必需检查:TypeScript Type Check / Build Core / Test Core / Dogfood Regression Gate 均按 path filter 处理(纯 `.claude/` diff),Check Changeset 经标签豁免。\n\n## 边界\n\n⛔ 未动 `.github/workflows/pr-automation.yml`(#5580/#5625 已改,#5620 在排队);⛔ 未动 pm-dispatch SKILL.md 的 PM 兜底逻辑;⛔ 未写 changeset(`.claude/` 文档-only,走标签路线)。"
+}

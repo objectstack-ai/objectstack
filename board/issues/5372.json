@@ -1,0 +1,37 @@
+{
+  "number": 5372,
+  "kind": "issue",
+  "title": "Action context's `ctx.user.name` is hardcoded to the raw user id on the REST dispatch path — three dispatchers hand the sandbox three different user shapes",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T02:21:11Z",
+  "updated_at": "2026-08-05T15:22:11Z",
+  "closed_at": "2026-08-05T15:22:11Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5372",
+  "body": "Part of objectstack-ai/hotcrm#673(下游症状:活动时间线 `sys_activity.actor_name` 渲染为裸 user id)。Filed unassigned by the hotcrm PM loop;证据由该单的实施 agent 在 `17.0.0-rc.2` 安装包上核实。\n\n## The defect\n\nThe REST action dispatcher builds the body's user object with the **`name` key declared and delivered wrong** — it is assigned the raw user id:\n\n- `@objectstack/runtime` dist (17.0.0-rc.2) REST action path, dist/index.js:5397-5399: `{ id: ec.userId, name: ec.userId, … }`\n- MCP dispatch path disagrees in the same file (dist/index.js:1776): `ec.userName ?? ec.userDisplayName ?? ec.userId` — but **nothing in the installed packages ever assigns `ec.userName` or `ec.userDisplayName`** (grep across runtime / account / objectql / metadata / spec / plugin-auth finds read sites only, dist/index.js:1776 and :5264), so this path also lands on the id.\n- The AI-route builder disagrees with both: dist/index.js:5264 exposes `displayName`, not `name`.\n\n`buildActionSandboxContext` (dist/index.js:1289-1305) passes the user object through verbatim — the sandbox is not where the name is lost.\n\n## Why this is worse than a missing key\n\n`ctx.user.name` reads as a **plausible string**; no `??` fallback chain can detect it is the wrong value. This is exactly the failure mode declared = enforced exists to prevent, and it is silent by construction. App code that trusts the declared key writes opaque ids into user-facing surfaces (hotcrm's activity timeline did, for every activity action).\n\nThe platform has the correct value available at dispatch time: `sys_user.name` is the platform's own profile display-name column (plugin-auth `SYS_USER_PROFILE_EDIT_FIELDS = {name, image}`; the dev admin is seeded with name \"Dev Admin\").\n\n## Suggested fix\n\nResolve the display name once at dispatch and populate `ctx.user.name` consistently on **all three** paths (REST, MCP, AI-route). Downstream app-side workarounds (hotcrm now resolves via a `sys_user` read inside the action body, with a comment naming this issue's condition) can then be deleted — the hotcrm workaround deliberately trusts `ctx.user.name` the moment it differs from the id, so it self-retires when this lands.\n\n## Acceptance\n\n- An action body dispatched over REST reads `ctx.user.name` as the acting user's display name (not the id);\n- MCP and AI-route paths agree on the same user shape;\n- a pin test covers the REST path (the one that was hardcoded)."
+}

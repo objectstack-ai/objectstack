@@ -1,0 +1,37 @@
+{
+  "number": 5307,
+  "kind": "issue",
+  "title": "spec: EmailServiceConfigSchema 未声明 CLI 实读的 queueDelivery / appName / defaultTemplateContext(与 #5104 同族,不同键)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T17:20:38Z",
+  "updated_at": "2026-08-05T16:00:25Z",
+  "closed_at": "2026-08-05T16:00:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5307",
+  "body": "在实施 #5104(给 `EmailProviderSchema` 补 `smtp`)时,顺带实测了 `config.email` 的**读侧**与**声明侧**的差集。provider 之外还有三个键落在同一类缺口上,属于 #5104 的同族缺陷但不在其验收范围内,故单独立单。\n\n## 实测(origin/main @ 5993c5b)\n\n`packages/cli/src/commands/serve.ts` 的 `resolveEmailCapabilityArg` 从 `config.email` 读这些键:\n\n```\ncfgEmail.apiKey\ncfgEmail.appName                 <-- 未声明\ncfgEmail.defaultFrom\ncfgEmail.defaultTemplateContext  <-- 未声明\ncfgEmail.options\ncfgEmail.provider\ncfgEmail.queueDelivery           <-- 未声明\ncfgEmail.retries\n```\n\n`packages/spec/src/system/email-config.zod.ts` 的 `EmailServiceConfigSchema` 声明:\n`provider` / `apiKey` / `defaultFrom` / `retries` / `persist` / `options`。\n\n差集三个:**`queueDelivery`**、**`appName`**、**`defaultTemplateContext`**。\n\n复现命令:\n\n```bash\ngrep -oE \"cfgEmail\\.[a-zA-Z]+\" packages/cli/src/commands/serve.ts | sort -u\n```\n\n## 影响\n\n与 #5104 完全同型 —— spec 落后于运行时的 declared != implemented,只是键不同:\n\n- `queueDelivery` 是 #5160 落地的**耐久队列投递**开关(对应 `OS_EMAIL_QUEUE_ENABLED`),是已发布的真实能力。用 `EmailServiceConfig` 类型标注 `objectstack.config.ts` 的作者写 `queueDelivery: true` 会拿到类型错误,而运行时完全支持 —— CLI 直读 `config.email`,不过这个 schema。\n- `appName` / `defaultTemplateContext` 同理,喂的是邮件模板渲染上下文。\n- 生成的参考文档 `content/docs/references/system/email-config.mdx` 的属性表同样看不到这三个键,AI 作者读到的是「不支持」。\n\n注意这三个键都是运行时**已经在读**的,所以补声明是把契约追平既成事实,不是新增能力。\n\n## 与 #5104 的关系\n\n不是 #5104 的子集:#5104 的验收面明确只到 provider 枚举 + SMTP 的 TSDoc/生成文档,PR 已按该范围收口。本单需要**新增可授权键**,因此还要走 #5220 的 strictness-ledger 纪律(`pnpm gen:strictness-ledger` 整体重算,禁止手改数字),体量与风险都与 #5104 不同,合并在一起会让那单的 diff 失焦。\n\n两单碰同一个文件 `email-config.zod.ts` 与同一个生成物(`merge=os-regen`,会静默吞掉一侧),建议**串行**:等 #5104 的 PR 落地后再派发本单。\n\n## 待确认(不要照抄,以实施者实测为准)\n\n- 三个键的正确 Zod 形状,尤其 `defaultTemplateContext`(自由 record 还是有约束的对象?)。\n- `persist` 是反向的:schema 声明了它,但 `resolveEmailCapabilityArg` 没读 —— 需要确认它是在别处(plugin 侧)被消费,还是一个 declared-but-unenforced 的键。若是后者,按 ADR-0049 enforce-or-remove 处理,与本单三键方向相反。\n\n---\n_由 #5104 的实施过程中发现并记录(session `session_01ErbEDVAg1No9gdg1pgDAGB`),未认领。_\n"
+}

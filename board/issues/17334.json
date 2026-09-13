@@ -2,7 +2,7 @@
   "number": 17334,
   "kind": "pull_request",
   "title": "fix(triggers,spec,service-automation)!: a time-triggered flow declares its acting organization and the run executes as it",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-10T07:39:53Z",
-  "updated_at": "2026-09-10T15:18:22Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-10T15:47:27Z",
+  "closed_at": "2026-09-10T15:47:25Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": "2026-09-10T15:47:25Z",
   "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/17334",

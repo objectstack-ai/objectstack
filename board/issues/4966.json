@@ -1,0 +1,36 @@
+{
+  "number": 4966,
+  "kind": "issue",
+  "title": "`lint-flow-patterns.test.ts` 的 fixture 教了一个永远绑不上的 `timeRelative` 描述符（#4001 第一类发现的第八例）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T17:28:18Z",
+  "updated_at": "2026-08-05T15:35:00Z",
+  "closed_at": "2026-08-05T15:35:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4966",
+  "body": "发现于 #4001 批 11 的载荷普查，**不在该批范围内，未修**。与 #4924 同类不同处（那条是 `packages/spec` 自己的 `flow.test.ts`，这条在 `packages/lint`）。\n\n## 事实\n\n`packages/lint/src/lint-flow-patterns.test.ts:343`：\n\n```ts\nscheduledDataFlow({ flowType: 'autolaunched', startConfig: { timeRelative: { object: 'task', field: 'due_at', offsetDays: -1 } } })\n```\n\n对照 `TimeRelativeTriggerSchema`（`packages/spec/src/automation/time-relative-trigger.zod.ts`），这个描述符有**两处**跑不通：\n\n1. `field` —— 声明的键是 `dateField`。`field` 不是别名、不是转换项，就是不存在；\n2. `offsetDays: -1` —— 声明是 `z.array(z.number().int()).min(1)`，要的是**数组**（`[-1]`）。单个数字不是「负偏移」的写法，是类型错误。\n\n`TimeRelativeTriggerPlugin.start()` 对 `binding.config.timeRelative` 做 `safeParse`，任一处都会让它 **不绑定**并 warn。所以这个 fixture 描述的是一个 flow：lint 认为它是 time-relative 触发的，而运行时永远不会为它装上 sweep。\n\n## 为什么绿\n\n`lintFlowPatterns` 判定「这是不是 time-relative flow」的依据是 `lint-flow-patterns.ts:185`：\n\n```ts\nif (startCfg.timeRelative != null) return 'time-relative';\n```\n\n—— **只看非空，不看形状**。于是 lint 正确地对这个 flow 报了 `FLOW_RUNAS_UNSCOPED`，测试正确地断言了它，而描述符本身有没有可能生效，两边都没人问。\n\n这不是 lint 的 bug（它的职责是 runAs，不是描述符校验），而是本战役反复记录的那个形状：**两道守卫各守一扇门，谁也不知道对方在守什么**，中间那条「lint 说它是 time-relative，运行时说它不是」的缝隙没有任何东西站着。\n\n## 值得单独记的一点\n\n#4001 批 11 把 `TimeRelativeTriggerSchema` 收紧了，而这个 fixture **不会因此变红** —— 它根本不经过那个 schema（`config` 槽位按 ADR-0018 刻意开放，lint 只做 `!= null`）。也就是说：这是一份**收紧之后仍然全绿的错误教材**，和 #4924 的四处 fixture 是同一句话。`flow.test.ts` 之外，`packages/lint` 的 fixture 同样会被当成「平台官方怎么写」来读。\n\n## 建议\n\n1. fixture 改成能绑的形状：`{ object: 'task', dateField: 'due_at', offsetDays: [-1] }`，并就地留一句注释说明为什么（照 #4001 惯例：修测试并记原因，不要绕开）；\n2. 可选、更有价值的一步：让 `lint-flow-patterns` 在认出 `timeRelative` 之后顺手 `safeParse` 一次描述符，把「声明了但永远不会绑定」报成一条 advisory。今天这个缺口只有 boot 时的一行 `warn` 兜着，而作者在 `os validate` 阶段是看不到它的 —— 正是 ADR-0078 说的「声明了却惰性」的元数据。第 2 步若要做，建议单独立单评估规则归属。\n\n## 相关\n\n- #4924（`packages/spec` 自己的 flow fixture 教三种跑不通的形状 —— 同类第七例）\n- #4001（第一类发现：「把 strip 时代假象固化成预期的测试」）\n- #1874（`timeRelative` 描述符的引入）\n- ADR-0078（no-silently-inert-metadata）\n"
+}

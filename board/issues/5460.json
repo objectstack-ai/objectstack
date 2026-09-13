@@ -1,0 +1,36 @@
+{
+  "number": 5460,
+  "kind": "issue",
+  "title": "DEL(0x7f)在 C0 扫描面之外:login.ts / register.ts 各有一枚裸 0x7f 当 Backspace 键值,与刚转义的 0x03 同处一个 switch",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T12:48:18Z",
+  "updated_at": "2026-08-05T14:03:38Z",
+  "closed_at": "2026-08-05T14:03:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5460",
+  "body": "发现于 #5157 的实施(PR 见下)。按 Prime Directive #10 单独记录,未在那个 PR 里扩大范围。\n\n> **本单第一版正文自己踩了本单描述的坑**:写\"PR 已转义成 …\"时,工具把转义序列物化成了两枚**真的 0x03 字节**存进了 issue 正文,渲染为空。已改用 `U+0003` 这种不含反斜杠转义的写法重写。这是本会话里同一事故的第三、四例(另两例见下方\"事故源\"),也是 #4958 那句\"工具链本身就会不断重新引入这类字节\"的又一次实测。\n\n## 事实\n\n#5157 把 `check:nul-bytes` 的扫描面定为 C0 控制字符集去掉 tab/LF/CR,即 C0 全集减去 U+0009 / U+000A / U+000D(与 #4890 当年的手工扫描一致)。**DEL(U+007F,0x7f)不在这个区间里** —— 它不是 C0 控制符,是 ASCII 表末尾单独的一个控制字符。\n\n实施时逐字节扫描发现,仓内还有两枚裸 0x7f,而且就在 #5157 刚刚转义的那两枚 0x03 的**同一个 switch 里,隔九行**:\n\n| 文件 | 行 | 字节 | 处置 |\n|:--|:--|:--|:--|\n| `packages/cli/src/commands/login.ts` | 38 | 0x03 | PR 已转义成 U+0003 的转义序列 |\n| `packages/cli/src/commands/login.ts` | 47 | **0x7f** | **未动**(不在扫描面) |\n| `packages/cli/src/commands/register.ts` | 34 | 0x03 | PR 已转义成 U+0003 的转义序列 |\n| `packages/cli/src/commands/register.ts` | 43 附近 | **0x7f** | **未动** |\n\n那个 `switch` 里,转义后的 case 与仍是裸字节的 case 并排:Ctrl+C 那条现在写成 U+0003 的转义序列,读得出来;Backspace 那条仍是一枚裸 0x7f,渲染为空,读起来是 `case '':` —— 一个空串 case。\n\n除这两处外,全仓其余含 0x7f 的受追踪文件只有 4 个 PNG 和 1 个 ICO(真二进制,门禁本就跳过)。\n\n## 为什么单独记录而不是顺手一起改\n\n改不改是**门禁扫描面的定义问题**,不是两行代码的问题:\n\n- 只把这两处转义、不扩扫描面 —— 树是干净了,但下一枚 0x7f 照样进得来,而门禁会报绿。这正是 #4958 里说的\"约定挡不住、只有机器能可靠看见\"。\n- 扩扫描面到 0x7f —— 得改 #5157 刚刚按 issue 明文(以及 #4890 先例)定下的区间。这是一条对全仓作者生效的规则,不该由实施 agent 顺手扩。\n\n## 判断依据(供分诊)\n\n支持纳入的理由,与 #5157 正文对 C0 的论证**逐条同构**:0x7f 同样渲染为空、同样两种拼写都搜不到(文件里是字节,搜不到转义文本;那个字节本身也没法敲进搜索框)、同样是\"编辑工具把转义落成真字节\"这一事故源的产物 —— 该事故源不挑字节值,#5157 的核心论点正是这一条(本单正文自己刚又贡献了两例)。多数语言的\"控制字符\"定义(C 的 `iscntrl`、正则的 `\\p{Cc}` 类)也都把 0x7f 算进去。\n\n反对的理由:#5157 与 #4890 的先例都明确写的是 C0 区间;0x7f 在原始扫描模式里就不在。\n\n倾向纳入,但这是维护者的判断。若纳入,改动很小:`scripts/check-nul-bytes.mjs` 里给查找表加一行(`IS_SCANNED[0x7f] = 1`)+ 自测加一个样本 + 上表两处转义,其余机制(二进制判据、报错处方、载体范围)全部照用。注意自测里现有一条断言明确把 0x7f 钉在扫描面**之外**(`'tab / CR / LF / DEL are outside the scanned set and stay green'`),纳入时要一并改掉 —— 那条断言是故意写的,用来说明这条边界是选出来的而不是漏掉的。\n\n## 关联\n\n- #5157(C0 扩面,本单的来源)、#4958(裸 U+0001 的姊妹单,同一机制)\n- #4890 / PR #4907(门禁起源与当年的手工扫描模式)、#5140(0x01 实例现场)\n\n~~Blocked-by: #5157~~(已解除:PR #5461 于 2026-08-05 13:1xZ MERGED,`scripts/check-nul-bytes.mjs` 文件面释放,裁定方向 A 生效)\n"
+}

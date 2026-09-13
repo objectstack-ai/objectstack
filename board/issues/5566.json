@@ -1,0 +1,35 @@
+{
+  "number": 5566,
+  "kind": "pull_request",
+  "title": "fix(service-analytics): `contains` 以规范算子 `$contains` 送进引擎,比较值不再落进正则位置 (#5557)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T18:37:47Z",
+  "updated_at": "2026-08-05T19:17:36Z",
+  "closed_at": "2026-08-05T19:17:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T19:17:34Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5566",
+  "body": "Fixes objectstack-ai/objectstack#5557\n\n## 前提核对(对 `origin/main` @ 9ecdca993,含刚合并的 PR #5558)\n\nissue 的前提**成立**,行号已漂移到 `convertFilter` 的第 1018 行附近。三条论证逐条实测:\n\n| issue 的论断 | 核对结果 |\n|---|---|\n| `case 'contains': return { $regex: values[0] };` | ✅ 在 `objectql-strategy.ts:1018`,三个同族算子确为规范算子 |\n| `$regex` 不在 `filter.zod.ts` 的 `FILTER_OPERATORS` | ✅ 15 个算子(`filter.zod.ts:957`),无 `$regex` |\n| 同包 `read-scope-sql.ts` 的 `compileOperator` 对 `$regex` fail-closed | ✅ `read-scope-sql.ts:244` 的 `default` 直接抛 |\n| driver-memory 把 `$regex` 当真正则求值 | ✅ `memory-matcher.ts:209`,`new RegExp(target, condition.$options || '')` + `catch { return false }`;且 `filter-refusal.ts` 的 `SUPPORTED_FIELD_OPERATORS` 有意接受 `$regex`(服务 plugin-auth 的 adapter),所以**不会**被拒收,而是被求值 |\n| driver-sql 把 `$regex` 编译成子串 LIKE | ✅ `sql-driver.ts:6495`,与 `$contains` 共用 `applyContainsLike` |\n\n## 改动\n\n一行(`objectql-strategy.ts`):\n\n    case 'contains': return { $contains: values[0] };\n\n`filter-normalizer.ts` 的 `MONGO_TO_CUBE_OP` 只把 `$contains` 映到 `contains`,别无来源,所以这里回送 `$contains` 就是作者自己那个 key 的往返 —— 与三个同族算子完全一致。\n\n⛔ 按分诊要求**未碰** `filter-normalizer.ts`(#5526-B 排下一位)。\n\n## 测试\n\n新增 `packages/services/service-analytics/src/__tests__/objectql-contains-canonical-operator.test.ts`。issue 明确指出「只断言 SQL/filter 字符串会漏掉转义这一半」,所以两半都断言:\n\n1. **引擎 filter 的算子键**逐个对 `filter.zod.ts` 的 `ALL_OPERATORS` 校验 —— 取自 spec 而非手抄一份(`filter-refusal.ts` 对它自己那份词表说过同样的话:手抄的副本只在打字那天与契约一致)。\n2. **行结果**跑在一个复刻 `memory-matcher.ts` 各 arm 的求值面上(镜像而非 import:`service-analytics` 不依赖任何驱动)。元字符用例:\n   - `$contains: 'a.b'` 只命中字面行,不命中 `axb`;\n   - `$contains: '50% (+)'` 命中它该命中的那一行,而且用 `toEqual(['3'])` 断言**恰好**只有那一行 —— 修前的答案是**空集**,一个只检查「行 3 在不在」的断言会被「什么都不产出」满足(这正是 PR #5046 记下的那个陷阱);exact set 同时排掉诱饵行 4(行 3 去掉那个 `%`),这就是「比较值逐字符是字面量」的含义。\n3. **同包另一个 `FilterCondition` 消费方**:四个 LIKE 算子的产出全部送进 `compileScopedFilterToSql` 确认编译得过(修前 `$contains` 那条抛 fail-closed)。\n\n`50% (+)` 刻意**不**用在第 3 项上:那个编译器的 LIKE 元字符转义是它自己的另一个缺陷(已另行归档,见下),从本文件断言它等于替别人的 bug 钉桩。\n\n### 反向验证(方向修前预判,结果与预判一致:修前红 / 修后绿)\n\n修前(新测试文件,`case 'contains'` 仍为 `$regex`):**6 个断言红**\n\n    FAIL  ... > the issue's measured table > `$contains` is forwarded as `$contains` — was the undeclared `$regex`\n    FAIL  ... > the issue's measured table > every operator key it emits is one the spec DECLARES\n          AssertionError: $contains emitted undeclared operator \"$regex\": expected false to be true\n    FAIL  ... > a `.` in the comparand matches a literal dot, not any character\n          AssertionError: expected [ '1', '2' ] to deeply equal [ '1' ]\n    FAIL  ... > a comparand that is not a valid regex still finds its rows\n          AssertionError: expected [] to deeply equal [ '3' ]\n    FAIL  ... > compiles every LIKE-family filter the strategy produces — `$regex` threw\n          \"Error: [read-scope-sql] unsupported operator \\\"$regex\\\" on \\\"stage\\\" (fail-closed).\"\n    FAIL  ... > and returns the same row the regex-evaluating face returns\n\n修后:`Test Files 50 passed (50) / Tests 825 passed (825)`。\n\n### #5558 留下的翻译已删除 —— 本修复最直接的反向证据\n\nPR #5558 在 `objectql-echo-operator-coverage.test.ts` 的替身引擎里留了一个 `asCondition()`,把 `$regex` 翻回 `$contains`(注释指向本单)。它存在的理由现在没有了,已删除,`options.filter` 原样送进 `compileScopedFilterToSql`。\n\n于是把 `case 'contains'` 退回 `$regex` 之后,该文件也红 —— **7 个断言、2 个文件**:\n\n    FAIL  objectql-echo-operator-coverage.test.ts > [#5333] ... > running the echo returns the rows the query returns, not more\n    Error: [read-scope-sql] unsupported operator \"$regex\" on \"stage\" (fail-closed).\n     ❯ compileOperator src/read-scope-sql.ts:244:13\n     ❯ Object.executeAggregate src/__tests__/objectql-echo-operator-coverage.test.ts:177:33\n     ❯ ObjectQLStrategy.execute src/strategies/objectql-strategy.ts:152:28\n\n    Test Files  2 failed | 48 passed (50)\n          Tests  7 failed | 818 passed (825)\n\n恢复修复后回到 50/50 全绿。\n\n### 消费半径清扫\n\n`service-analytics` 的下游是 `cli` / `rest` / `verify` / `qa-dogfood`。逐个 grep 过它们的 fixture:\n\n- `packages/rest/src/analytics-filter-refusal-envelope.test.ts:292` 的 `$regex` 是**字面错误消息字符串**(`mockRejectedValue`),不经 `convertFilter`,且 `read-scope-sql.ts` 的 fail-closed 行为本次未改 —— 不受影响;\n- `packages/rest/src/export-integration.test.ts` 的替身驱动已经理解 `$contains`(`$search` 折叠出的形状),本改动只让它更对;\n- 其余无耦合。\n\n`pnpm --filter @objectstack/rest test`:`Test Files 48 passed (48) / Tests 719 passed (719)`。\n\n### typecheck\n\n`service-analytics` 在 `scripts/check-type-check-coverage.mjs` 里是 measured DEBT 条目(无 `typecheck` script),所以直接跑了它自己的 `tsc --noEmit -p tsconfig.json`:7 条报错,全部落在 `analytics-service.test.ts` / `measure-source-field-gate.test.ts` / `objectql-timedimension-projection.test.ts` —— 本 PR 三个文件一条都没有,均为先存在的债(与 ledger 记的 3 条有漂移,那是 main 上的既有情况,不是本改动引入)。\n\n`node scripts/check-nul-bytes.mjs`:`OK (scanned 5509 tracked text file(s))`;本 PR 四个文件另做了 `grep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]'` 自扫,干净。\n\n## 范围外发现\n\n`$contains` / `$startsWith` / `$endsWith` 的比较值在 analytics 侧的**三个** SQL 编译器里都没有做 LIKE 元字符转义(`read-scope-sql.ts` 的 `compileOperator`、`native-sql-strategy.ts` 的 `likePattern`、`objectql-strategy.ts` 的 `LIKE_SQL_OPS`),而 `driver-sql` 的 `applyLike` 是显式 `ESCAPE '\\'` 的、并在注释里把 `%` 旁路称作 P0。已按 Prime Directive #10 另行归档(unassigned),不在本 PR 修。\n\n关联:#5333 / PR #5558(同文件回显侧)、#4128(同函数上次同类修复)、#4706(`$regex` 语义待裁 —— 本改动让 `$regex` 在 service-analytics 失去生产方,反而缩小该裁决的影响面)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01BWS4heBoAitLmzCLhcYdbK\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BWS4heBoAitLmzCLhcYdbK)_"
+}

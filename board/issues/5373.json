@@ -1,0 +1,32 @@
+{
+  "number": 5373,
+  "kind": "issue",
+  "title": "driver-memory analytics 面的 cube 值往返是有损的:布尔比较数变成数字(`{is_active: true}` 取到 0 行),`null` 比较数被整条丢掉(取到全表)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T02:39:05Z",
+  "updated_at": "2026-08-05T11:31:43Z",
+  "closed_at": "2026-08-05T11:31:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5373",
+  "body": "做 #5345(analytics 面两处静默 `continue`)时,为了给「哪些算子这个面真的能编译」写断言,必须逐个实测**编译出来的谓词**。在这一步发现的两个缺陷不属于 #5345 的范围面(那一单裁定的是 `$or`/`$not` 与无 cube 映射的算子 —— 都是**算子**层面),按 Prime Directive #10 单独记在这里,unassigned。\n\n这两条都在**比较数(值)**层面,`#5345` 的修法(拒收无法编译的算子)碰不到它们:下面这些算子全部在 #5345 之后依然被声明为「本面支持」,只是它们的**值**编译错了。\n\n## 位置\n\n`packages/plugins/driver-memory/src/memory-analytics.ts`:\n\n- `stringifyForCube` / `coerceFilterValue`(约 :640 / :660)—— 本文件私有的一对,和 `service-analytics/src/strategies/filter-normalizer.ts` 里的同名函数是**两份独立实现**;\n- `flattenFilterCondition` 开头的 `if (raw == null) continue;`。\n\ncube 规格把过滤值序列化成 `string[]`,所以每个比较数都要 JS 值 → 字符串 → JS 值往返一次。这个往返对非字符串类型是有损的。\n\n## 现象(实测)\n\n固定数据 3 行,分别用 analytics 面(`MemoryAnalyticsService.query`,`measures: ['t.count']`)和同一个 driver 的 `find()` 跑同一个 `where`:\n\n```\n{ id: 1, is_active: true,  name: 'alpha', closed_at: null }\n{ id: 2, is_active: false, name: 'beta',  closed_at: '2026-01-01' }\n{ id: 3, is_active: true,  name: 'gamma', closed_at: null }\n```\n\n| `where` | analytics count | `find()` 行数 | 应为 | 方向 |\n|---|---|---|---|---|\n| `{ is_active: true }` | **0** | 2 | 2 | 缩小 |\n| `{ is_active: false }` | **0** | 1 | 1 | 缩小 |\n| `{ closed_at: null }` | **3** | 2 | 2 | **放大** |\n\n### 布尔:`'1'` 出去,数字 `1` 回来\n\n```ts\nstringifyForCube(true)   // → '1'\ncoerceFilterValue('1')   // → 1   ← /^-?\\d+$/ 先命中,回不到 true\n```\n\n于是 `matchStage` 是 `{ is_active: { $eq: 1 } }`,而记录里存的是 `true`。mingo 跨类型比较恒不等,所以**一行都不匹配**。`stringifyForCube` 的注释说布尔转 `'1'/'0'` 是「so that downstream consumers expecting SQLite-style numeric booleans match correctly」—— 这个理由对生成 SQL 的那一半成立,对 in-memory 那一半不成立,而两半共用同一个编码。\n\n值得单独指出:`{ where: { is_active: true, stage: { $nin: ['lost'] } } }` 正是 `AnalyticsQuerySchema.where` 的 **docstring 示例**(`packages/spec/src/data/analytics.zod.ts`)。规格自己举的例子在这个面上取到零行。\n\n### `null`:整条谓词消失\n\n`flattenFilterCondition` 第一行就是 `if (raw == null) continue;`,所以 `{ closed_at: null }` 连一条 cube 条目都不产生 —— 少一个约束 = 多返回行,就是 #3948 立规矩针对的放大方向。\n\n这条和 #5332 是同一个形状的**不同包**:#5332 记的是 `service-analytics` 的 `fieldLeaves`,而那一半**恰恰是对的** —— 它有 `raw === null` → `notSet`(`IS NULL`)分支,只有 `{$eq: null}` 走算子映射时才退化成 `= ''`。driver-memory 这一半连 `{field: null}` 都直接丢,比 #5332 描述的状态更差一档。\n\n## 为什么是 bug\n\n1. **两个方向都错,且都静默。** 布尔那条是「图表空了」,`null` 那条是「图表算了全表」。前者作者至少看得见异常;后者看不见 —— 一个「结案日期为空」的部件统计了包括已结案在内的所有记录,渲染出来和正常部件没有区别。\n2. **同一 driver 的两个面对同一个 `where` 给出不同行集。** `find()` 全部答对,analytics 面三条全错。这正是 #5240 为本包立下的不变量(「一个后端的两半对一个过滤器是什么意思意见不一致,就是那条裁决要关掉的分叉」)所禁止的形状。\n3. **#5345 关不掉它。** #5345 之后,`$eq` / 隐式相等 / 这些算子都在 `ANALYTICS_FILTER_CAPABILITIES` 里被**声明为支持**。声明支持而编译错,是 Prime Directive #10 的 declared ≠ enforced,只是错在值而不是算子。\n\n## 建议(不代裁决)\n\n两条共一个根因(`string[]` 编码对非字符串类型有损),建议一起裁,大致三条路:\n\n- **A. 让往返无损。** `stringifyForCube` 给布尔/`null` 加可识别前缀或改用 tagged 编码,`coerceFilterValue` 按标记还原。改动小,但把一个本来就可疑的编码又加一层。\n- **B. 不再往返。** cube 条目的 `values` 内部改成 `unknown[]`,只在真正需要 SQL 字面量的 `generateSql` 出口才字符串化。最贴近「一个契约」,工作量最大。\n- **C. 拒收。** 与 #5345 同款:布尔和 `null` 比较数在本面上抛 `INVALID_FILTER`。但这会拒掉规格 docstring 自己的示例,恐怕不是想要的答案。\n\n我倾向 B(值不该在内部表示里被降级成字符串),但这是本面数据表示的公开形状,请 PM/维护者裁。\n\n## 未验证的部分\n\n只测了上表三个形状。没有测数字比较数经 `'100'` → `100` 往返后与存储为字符串 `'100'` 的列比较会怎样(可能是同一个根因的第三个症状),也没有统计现网有多少部件的 `where` 带布尔或 `null` 比较数。严重度请 PM 按 triage 定。\n\n关联:#5345(同函数、同一轮核对里发现;它裁的是算子层)、#5332(`service-analytics` 里同形状的一半,那半还更好)、#3948(no-silent-drop)、#5240(本包两面不得分叉)。\n"
+}

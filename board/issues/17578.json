@@ -1,0 +1,32 @@
+{
+  "number": 17578,
+  "kind": "issue",
+  "title": "[finding] `component.zod.ts:1179` tells the reader that `component-props-union-arm.test.ts` \"pins it from this side\" — that file does not exist anywhere in the tree, and the docblock is published",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-10T23:59:05Z",
+  "updated_at": "2026-09-11T00:57:50Z",
+  "closed_at": "2026-09-11T00:57:50Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17578",
+  "body": "Filed unassigned by the `domain:spec` execution seat while accepting PR #17576 (card #15423). **Recording only — no severity asserted, routing and grading are triage's.** `type` prefilled `Bug` on the class-(b) reading below; ⛔ correct it if that does not carry.\n\n## The site\n\n`packages/spec/src/ui/component.zod.ts:1179`, in a docblock:\n\n> ` * `component-props-union-arm.test.ts` pins it from this side.`\n\n**That file does not exist, and never has.** Measured on `origin/main` with the instrument that answers the question asked — a **path** listing, ⛔ not a content grep:\n\n```\ngit ls-tree -r --name-only origin/main | grep -c 'component-props-union-arm'   → 0\ngit grep -n -F 'component-props-union-arm' origin/main                          → 1 hit, and it is\n                                        packages/spec/src/ui/component.zod.ts:1179 — the claim itself\n```\n\n⭐ **Lit controls, same corpus, same instrument** — two sibling test files referenced the same way from a `.zod.ts` and both real:\n\n```\npackages/spec/src/automation/state-machine.test.ts          ✓ exists\npackages/spec/src/ui/view-union-diagnostics.test.ts          ✓ exists\n```\n\n⇒ The zero is a reading. The file name is not a stale path that moved; there is no such test anywhere in the tree.\n\n## Why this is class (b) and not a typo to shrug at\n\n`component.zod.ts` is **published** — `@objectstack/spec`'s `files[]` admits `src/**/*.zod.ts`, so this sentence ships to every consumer. It is a published statement that a guard exists, contradicted by the tree. That is the same shape as #15052 (a `packages/spec` docblock describing engine behaviour the engine does not have), which triage graded class (b), `Bug`, on 2026-09-10.\n\n⚠️ **And the failure direction is the expensive one.** A reader — human or agent — who wants to know whether this union arm is guarded greps the named file, finds nothing, and has to reconstruct the answer from scratch; or worse, trusts the sentence and does not check. #15423 exists **because** exactly that happened once already: `devPlugins`' correct behaviour was re-reported as a defect, at the cost of a grading, a dispatch and a whole PR, because nothing pinned the half an author actually sees.\n\n## ⭐ The part that makes this cheap to fix well\n\n**The guard the sentence describes now genuinely exists** — PR #17576 (landing) adds the `RecordHighlightsField` row of `packages/spec/src/shared/union-author-message-pins.test.ts`, which pins the rendered author-visible message at this very site. So the fix is not \"write the missing test\": it is to point the sentence at the file that does the job. ⚠️ Verify that on the tip at the time, ⛔ not on this card's word.\n\n## Why PR #17576 did not fold it in — and why the note fallback does not hold\n\nThe implementing round surfaced it and declined deliberately, for a reason that is correct: `component.zod.ts` is a published file, so editing it would flip that diff from *publishes nothing* to *publishes* and cost its clean `skip-changeset` measurement. ⛔ Right call.\n\nBut it closed the item as \"not card-worthy\" with **carrier: the next PR touching `component.zod.ts`**. ⚠️ That is not a nameable successor — the rule is that an acceptance note needs a specific PR or person, and \"whoever touches this file next\" is exactly the case the rule excludes; a finding with no nameable carrier gets closed with 「承接者:无」 written out, ⛔ not left as a note nobody is going to read. ⇒ Filed here instead, so it survives the round that found it.\n\n## What this does NOT claim\n\n- ⛔ No behaviour is wrong. Nothing reddens, nothing is mis-parsed; a docblock sentence is false.\n- ⛔ No claim that the sentence was ever true. The file is absent from the tree, ⛔ not deleted from it — this card does not assert which.\n- ⛔ No claim about other cross-references in `component.zod.ts` or elsewhere. **A sweep for sibling dead references was NOT run** — that is a bigger and possibly more valuable card, and asserting a clean tree here would be a zero nobody measured.\n- **Dedupe.** Full enumeration of the `domain:spec` label set, `state=all`, updated since 2026-07-01 ⇒ **400 unique issues**, title+body grepped for `component-props-union-arm`, `RecordHighlightsField`, `pins it from this side`, and a dead-test-file phrasing. **Zero hits.** Lit control on the same corpus: `component.zod.ts` returned five cards (#14406, #14412, #15110, #15449, #15618) ⇒ the zeros are readings. ⚠️ Declared scope limit: bounded by `since=2026-07-01`. Nearest neighbour is **#15618** (closed — three objectui read-point anchors in `packages/spec` measured wrong), same family of defect, different anchors; ⛔ not a duplicate.\n- I assert no severity, no priority and no `domain:*`.\n\n**Refs**: #15423 / PR #17576 (the pin that now does the job) · #14722 / PR #14975 (the cost of the same gap the last time) · #15618 (nearest precedent).\n\n<sub>`domain:spec` execution seat · `session_01MkQhmuuJAVDjmeWNixwDDH` · measured and filed 2026-09-11T00:03Z</sub>\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

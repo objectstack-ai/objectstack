@@ -1,0 +1,37 @@
+{
+  "number": 5450,
+  "kind": "issue",
+  "title": "objectui: four more source files carry raw control bytes — three are invisible to grep, one is a stray U+0001",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T12:16:38Z",
+  "updated_at": "2026-08-05T13:43:28Z",
+  "closed_at": "2026-08-05T13:43:28Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5450",
+  "body": "Found while implementing objectstack#5425 (the repo-wide scan it asks for immediately reported these). Filed separately per Prime Directive #10 — objectstack#5425's dispatch scope is `useDatasetFields.ts` plus the gate, so these are **not** fixed there.\n\nBlocked-by: objectstack#5425 — its PR adds the `KNOWN_OFFENDERS` baseline map in `scripts/check-control-bytes.mjs` that lists these four. Fixing a file here means deleting its baseline entry in the same PR; the script fails on a stale entry, so the two cannot drift apart.\n\n### The four files\n\n⚠️ Written as escape descriptions only, never as the byte itself — see the Notes in objectstack#5425. In this issue \"the six-character escape\" means backslash, lowercase u, four zeroes.\n\n| file | line | byte | used as |\n| --- | --- | --- | --- |\n| `packages/core/src/evaluator/listConditional.ts` | 71 | U+0000 | composite cache key, `(label ?? '') + SEP + source` |\n| `packages/core/src/utils/record-title.ts` | 45 | U+0000 | `EMPTY_TOKEN` sentinel |\n| `packages/fields/src/widgets/PeoplePicker.tsx` | 320 | U+0000 | `.join(SEP)` over person ids |\n| `packages/plugin-dashboard/src/DatasetWidget.tsx` | 89 | U+0001 | `.join(SEP)` over row-dimension values |\n\nReproduce (the scan the gate runs):\n\n```\ngit ls-files -z | tr '\\0' '\\n' | while IFS= read -r f; do\n  LC_ALL=C grep -qaP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]' \"$f\" 2>/dev/null && echo \"$f\"\ndone\n```\n\n### Two different harms, and the measurement that separates them\n\nThe first three carry U+0000 and are **invisible to content search today**:\n\n```\ngrep -n \"const\" packages/core/src/utils/record-title.ts\n# => grep: packages/core/src/utils/record-title.ts: binary file matches\n```\n\n`packages/plugin-dashboard/src/DatasetWidget.tsx` is different, and worth writing down because objectstack#5425's body predicts otherwise. Measured on GNU grep 3.11 and ripgrep 14, writing one control byte per fixture file and searching for a literal on another line:\n\n- **U+0000 is the only byte that triggers binary classification.** grep prints `binary file matches`; ripgrep prints `binary file matches (found NUL byte around offset N)`.\n- **U+0001, U+0002, U+0007, U+0008, U+000B, U+000C, U+000E, U+001A, U+001B, U+001F and U+007F all print the matching line normally** in both tools.\n\nSo `DatasetWidget.tsx` is *not* grep-blind — `grep -n \"rowDims\"` on it returns line 67 as normal text. Its defect is the other one: an invisible byte sitting in a string literal, which no reviewer can see, no diff renders, and which is indistinguishable from a typo'd neighbour. That is still a real defect (a separator nobody can read or verify), but it is not the code-search outage the other three are, and the fix priority should reflect that.\n\nThis also sharpens objectstack#5157's lesson rather than contradicting it: a NUL-only scanner does miss these, and they should not be in the tree — but the reason to reject them is \"never intentional, never reviewable\", not \"grep goes blind\". The gate landing in objectstack#5425 covers both classes and says which harm applies to which byte.\n\n### Suggested fix\n\nSame shape as objectstack#5425's: replace each separator with a readable spelling that cannot occur in the joined values — a newline, or the six-character escape named above if the runtime value must stay byte-identical — then delete that file's entry from `KNOWN_OFFENDERS`. Four one-line changes; `record-title.ts`'s `EMPTY_TOKEN` is a sentinel rather than a separator, so check that nothing compares it against persisted data before changing its value.\n\n⚠️ Writing discipline: any PR or comment text describes the escape and never pastes the byte. Two of the five prior incidents in this family happened while an agent was writing the rule itself (objectstack#4763 / #4890 / #5140 / #5157). This issue's own first revision lost an escape to that exact trap: a backslash-u escape typed into a JSON tool payload was decoded into a real byte before it ever reached GitHub, then stripped — leaving empty backticks. Spell it in words.\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 5503,
+  "kind": "issue",
+  "title": "[17.0-rc2验收] autonumber 字段可被普通调用者改写:POST 提交显式值绕过序列、PATCH 直接改号落库 —— readonly 剥离不保护 type:'autonumber'",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T14:29:44Z",
+  "updated_at": "2026-08-05T23:54:08Z",
+  "closed_at": "2026-08-05T23:38:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5503",
+  "body": "## 现象\n\n非 system 上下文的普通 REST 调用者可以**自由指定和改写 autonumber 字段的值**:\n\n- `POST /data/:object` 携带显式 autonumber 值 → 被原样落库(序列被绕过);\n- `PATCH /data/:object/:id` 携带 autonumber 字段 → 200 且**改写落库**(业务单号被篡改)。\n\n而引擎自己的文档说得很清楚(`packages/objectql/src/engine.ts` `applyAutonumbers` 注释):*\"Required-validation exempts `autonumber` either way, so a `required` record number is never rejected for 'missing' — **the runtime owns the value, not the client**.\"* —— 运行时声称拥有这个值,但写路径没有任何一层阻止客户端提交/改写它。\n\n## 复现步骤(HotCRM 17.0-rc2 验收环境,admin token,SQLite file 驱动)\n\n```bash\n# 1) POST 显式提交 autonumber → 被采纳,序列绕过\ncurl -X POST :4092/api/v1/data/crm_account -H \"Authorization: Bearer $TOK\" \\\n  -d '{\"name\":\"AN forge\",\"account_number\":\"ACC-777777\"}'\n# → 201, record.account_number = \"ACC-777777\"\n\n# 2) PATCH 改写既有单号 → 200,回读已变\ncurl -X POST :4092/api/v1/data/crm_account -d '{\"name\":\"AN1\"}'   # → ACC-000012\ncurl -X PATCH :4092/api/v1/data/crm_account/<id> -d '{\"account_number\":\"ACC-888888\"}'  # → 200\ncurl :4092/api/v1/data/crm_account/<id>   # → account_number = \"ACC-888888\"\n\n# 3) 同样在 crm_product 复现\ncurl -X PATCH :4092/api/v1/data/crm_product/<id> -d '{\"product_code\":\"PRD-8888\"}'  # → 200,回读 PRD-8888\n```\n\n两次独立运行均复现;在 HotCRM 的 7 个对象上逐一验证了 PATCH 改写(`account_number` / `product_code` / `campaign_code` / `member_number` / `contract_number` / `quote_number` / `attendee_number`),机制上同样适用于 `crm_case.case_number`(8 个 autonumber 字段全部暴露)。\n\n**对照**:同批测试中所有真正声明 `readonly: true` 的字段(`name_normalized`、`line_number`、`is_closed`、`seed_key`、`view_count`…)PATCH 均被正确剥离(200 但值不变)——剥离机制本身工作正常,只是 autonumber 不在保护范围内。\n\n## 期望 vs 实际\n\n- 期望:autonumber 是运行时生成的业务标识,非 system 写入中的调用者提交值应像 readonly 字段一样被剥离(insert 与 update 都是);\n- 实际:insert 端 `applyAutonumbers` 显式 \"respect explicit value\"(`if (current != null && current !== '') continue`),SQL 驱动路径同样采纳显式值;update 端 `stripReadonlyFields` 只看 `def.readonly`,autonumber 字段没有该标记,直接放行。\n\n## 落点分析\n\n- `packages/spec/src/data/field.zod.ts:895` —— `autonumber: (config) => ({ type: 'autonumber', ...config })`,builder 不隐含 `readonly: true`;\n- `packages/objectql/src/validation/rule-validator.ts` `stripReadonlyFields` —— `if (!def?.readonly) continue;`,按字段级 `readonly` 标记剥离,`type === 'autonumber'` 不参与;\n- `packages/objectql/src/engine.ts` `applyAutonumbers`(约 1829-1885)—— 只在值为空时生成,显式值原样保留;SQL 驱动 `supports.autonumber` 路径实测同样采纳调用者显式值(上面复现 1)。\n\n## 影响\n\n- 业务单号(合同号、报价号、工单号……)可被任何有对象写权限的调用者伪造/改写,审计与对外引用失去锚点 —— 与已修复的 #4447(`created_at` 可被普通 PATCH 伪造)同一缺陷族;\n- 大多数对象的 autonumber 列**没有唯一索引**(HotCRM 仅 `crm_case` 声明了 `(organization_id, case_number)` 复合唯一),伪造会产生**静默重号**;\n- 在有唯一索引的对象上,把号改到序列尚未发出的值,会让后续正常插入在追上该值时撞唯一约束 —— 与 #5495 / hotcrm#698 的 409 风暴叠加放大。\n\n## 建议方向\n\n写路径将 `type: 'autonumber'` 视为隐含 readonly(非 system 上下文一律剥离,insert 与 update 同权),或在 spec 层为 autonumber builder 注入 `readonly: true` 并让 `applyAutonumbers` / 驱动序列继续豁免 system 写(import/seed 的 preserveAudit 类场景可沿用现有白名单机制)。\n\n## 环境\n\n`hotcrm@0899b4f + @objectstack 17.0.0-rc.2`(`pnpm exec objectstack dev`,file:SQLite,--seed-admin)\n\n查重:搜过 `autonumber`(24 条)、`readonly autonumber/account_number/quote_number`、`autonumber overwrite/writable/forge`,两仓 open+closed 均无本缺陷(#5495/#698 是序列计数器不同步问题,#4903 是 readonly 剥离与 hook 补写不对称,均不覆盖「autonumber 无写保护」)。"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 5604,
+  "kind": "issue",
+  "title": "main 全仓红:`check:engine-double-contract` 挂在 #5584 刚落地的 `action-execution-calldata-not-found.test.ts`(2 个 double 未接 `assertEngineDeleteDispatch`,基线无条目)——所有新 PR 的 ESLint job 都过不去",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T20:17:39Z",
+  "updated_at": "2026-08-05T20:56:37Z",
+  "closed_at": "2026-08-05T20:56:37Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5604",
+  "body": "发现于 PR #5597(**纯 `.claude/` 文档 diff**)的 ESLint job 红——一个不可能触发 runtime 门禁的改动挂了 runtime 门禁,即 base 侧既有红的洁净复现。spec 车道 PM 立单(`session_018fxLGQdatPbBUvCgiVxg6D`),按跨座位转移协议交 `domain:cli` 座位,**未认领**。\n\n## 门禁输出(PR #5597 ESLint job,run 31043022802,merge-ref base `43ca3997e`)\n\n```\nengine doubles: 58 in 57 test file(s) — 24 pinned to ObjectQL.delete's dispatch predicate, 34 in the shrink-only baseline.\n\n  x PINNED: packages/runtime/src/action-execution-calldata-not-found.test.ts declares 2 engine double(s)\n    whose delete() does not route through assertEngineDeleteDispatch (lines 69, 102).\n    ... Open the fake's delete with `assertEngineDeleteDispatch(options)` from '@objectstack/objectql'\n    (add it as a devDependency if the package lacks it), or add a MEASURED entry to\n    scripts/engine-double-contract.baseline.json saying why not.\n\ncheck-engine-double-contract: 1 problem(s).\n```\n\n## 因果链(已核 origin/main 历史)\n\n- 失败文件由 **`43ca3997e` = PR #5584(Fixes #5138,runtime callData 404 统一)** 刚写入/改动——该提交正是当前 main 顶部第二个提交,也是 #5597 的 base。\n- 门禁与基线一侧,**PR #5533(#5198,service-queue double 钉接)**不久前刚动过 `scripts/engine-double-contract.baseline.json` / 检查脚本。\n- 形状为典型**队列语义互锁**:git 层零冲突,两单各自绿,后落地组合红。#5584 的 CI 快照大概率早于门禁面收紧的那次落地。\n\n## 影响\n\n门禁跑在 ESLint job 里,**每个新 PR、每次队列重建都会红**——全部车道的落地通道被阻断。修 main 为最高优先级。\n\n## 修法(二选一,cli 座位定)\n\n1. **钉接(推荐)**:两处 double 的 `delete()` 走 `assertEngineDeleteDispatch(options)`(`@objectstack/objectql`;`packages/runtime` 是否已有该依赖需核对——#4987 记录过 metadata-protocol 加这个 devDependency 会被 turbo 判环,runtime 是否同病需先查)。\n2. **MEASURED 基线条目**:按门禁提示加带理由的条目——但 #5584 的 double 是新写的,直接钉接更符合 #5197 正在推的纪律。\n\n## 关联\n\n- #5584 / #5138(引入侧)、#5533 / #5198(门禁收紧侧)\n- #5197(os-dev 派发词加「假引擎 delete() 必须路由 assertEngineDeleteDispatch」——本次正是它要防的形状,第三次命中)\n- #4987(基线 `closes` 动作在 metadata-protocol 上不可行的既有记录)\n- 洁净复现:PR #5597(docs-only,同签名红)"
+}

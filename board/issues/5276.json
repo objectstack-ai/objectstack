@@ -1,0 +1,34 @@
+{
+  "number": 5276,
+  "kind": "issue",
+  "title": "`MetadataLoader` 不声明 `delete?`:一个 `capabilities.write` 的 datasource loader 若没有 delete 方法,`unregister()` 会静默跳过它并照常宣告「已删除」",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T14:06:12Z",
+  "updated_at": "2026-08-05T22:38:32Z",
+  "closed_at": "2026-08-05T22:38:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5276",
+  "body": "发现于 #5259(`unregister()` 失效/删除顺序)实现期,**不在该单范围内**(改的是顺序与失败上报,不是 loader 契约),故单独立卡。**当前无人踩到**,按 observation-class 归档:挂 `finding`,不挂 `pm:queue`,留给分诊决定要不要动契约。\n\n## 事实\n\n`packages/metadata/src/loaders/loader-interface.ts` 的 `MetadataLoader` 接口声明了可选的\n\n```ts\nsave?( type: string, name: string, data: any, options?: MetadataSaveOptions ): Promise< MetadataSaveResult >;\n```\n\n但**完全没有 `delete`**。于是 `MetadataManager.unregister()` 只能在调用点鸭子类型地探它(#5259 之前是两处 `as any`,之后是一个具名的 `DeletableMetadataLoader` 形状 + `typeof … === 'function'` 守卫,casts 收敛了,契约缺口没有变):\n\n```ts\nif (loader.contract.protocol !== 'datasource:' || !loader.contract.capabilities.write) continue;\nif (typeof ( loader as DeletableMetadataLoader ).delete !== 'function') continue;   // ← 静默跳过\n```\n\n也就是说:一个 loader 只要声明 `protocol: 'datasource:'` + `capabilities.write: true`,`register()` 就会往它写(`save` 有就写、没有就跳过),而 `unregister()` 在它**没有 `delete` 方法**时**一声不吭地跳过**——不是 `warn`,不是 #5259 新加的 `error`,什么都没有。随后 `unregister()` 照常删 registry、失效 listCache、`publishRealtimeMetadataEvent('deleted')` 并 `notifyWatchers({type:'deleted'})`。\n\n后果与 #5259 处理的「delete 抛错」完全同类,而且更安静:\n\n- 调用方(Studio/Setup、REST DELETE、CLI、package teardown)被告知删除成功;\n- 行还在那个 loader 里,下一次 `list()`/`get()` 直接把它读回来(registry ∪ loaders 合并),重启后依旧;\n- 与 #5259 的区别只有一点:失败路径现在**响**(`error`,带后果与修复),而「压根没有 delete 方法」这条路径**完全没有信号**。\n\n`capabilities.write` 的语义因此是分叉的:对 `register()` 它意味着「可写」,对 `unregister()` 它什么也不保证。declared ≠ enforced 的标准形状。\n\n## 为什么现在没人踩到(所以是 observation,不是 P0)\n\n全仓 `protocol: 'datasource:'` 的 loader 只有一个 —— `packages/metadata/src/loaders/database-loader.ts` —— 而它有 `async delete(type: string, name: string): Promise< void >`(第 1199 行)。所以今天**任何用户路径都不会**走到这个静默分支;它是给第三方/未来 loader 留的坑,以及给「AI 写一个新 loader」留的坑:接口没声明 `delete`,照着接口实现出来的 loader 天然就少这个方法,而它声明 `write: true` 时不会被任何东西拦下。\n\n严重度不由我判:#5259 正文自己也说过「是否一并处理请分诊定夺」,而按 objectstack#4949 的纪律,填卡时判的严重度两个方向都不可靠。这里只把事实与范围写清楚。\n\n## 可能的方向(不预设结论,涉及公共契约,应由维护者定)\n\n1. **`MetadataLoader` 声明 `delete?( type: string, name: string ): Promise< void >`**,并在 `unregister()` 里把「声明了 `write` 却没有 `delete`」变成**响的**(一次性 `error`,或注册时就拒绝)。契约优先,作者期就能发现。\n2. **把删除能力搬进 contract**:`capabilities` 已经是声明面(`read`/`write`/`watch`/`list`),让 `write` 真正蕴含「可删」,并在 `registerLoader()` 落地时校验方法存在——declared = enforced,注册期就炸,而不是删除期静默。\n3. 维持现状,只补一条 `registerLoader()` 期的诊断。\n\n方向 1/2 会动 `MetadataLoader` 这个公共接口(第三方 loader 的实现面),因此明确不在 #5259 内擅自决定。\n\n发现于 #5259 实现期(会话 `session_01Pbu27iNUfQCHeuS551Rqo7`);未认领,留给分诊。\n"
+}

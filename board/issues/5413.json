@@ -1,0 +1,37 @@
+{
+  "number": 5413,
+  "kind": "issue",
+  "title": "`LocalManifestSource.list()` 静默丢弃损坏的 ledger 条目 —— 已装应用在 boot 时消失、在控制台列表里缺席,且没有任何一条日志",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T10:13:44Z",
+  "updated_at": "2026-08-05T11:20:31Z",
+  "closed_at": "2026-08-05T11:20:31Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5413",
+  "body": "实施 #5412(拆开 `os doctor` 的 ledger 读取 catch)时核验发现;**未在该 PR 里改** —— #5412 的判定面被 PM 限定为 `packages/cli/src/commands/doctor.ts`,本条在 `packages/cloud-connection`,且要动 `list()` 的返回契约(跨包)。\n\n## 事实\n\n`packages/cloud-connection/src/local-manifest-source.ts`(`origin/main` `b4872a868`),`LocalManifestSource.list()`:\n\n```\n    /** Every valid entry in the ledger (corrupt files are skipped). */\n    list(): InstalledManifestEntry[] {\n        if (!existsSync(this.dir)) return [];\n        const out: InstalledManifestEntry[] = [];\n        for (const name of readdirSync(this.dir)) {\n            if (!name.endsWith('.json')) continue;\n            try {\n                const raw = readFileSync(join(this.dir, name), 'utf8');\n                out.push(JSON.parse(raw));\n            } catch { /* skip corrupt files */ }\n        }\n        return out;\n    }\n```\n\n每个文件一个不带绑定的 `catch`。一个截断 / 不可读 / JSON 解析失败的 manifest 被就地丢掉,`list()` **成功返回**一个短列表 —— 调用方**无法**把它和一个完整列表区分开:没有返回值上的差别,没有日志,没有计数。抛出的对象在 catch 处就被丢弃了。\n\n实测(worktree 里跑真实实现,一好一坏两个条目):\n\n```\nA) truncated-entry list() DID NOT THROW; returned 1 entries: [ 'good' ]\n```\n\n## 后果(两个消费者,都是静默的错答案)\n\n`packages/cloud-connection/src/marketplace-install-local-plugin.ts:1279` `readAll = () => this.ledger.list()`,两处调用:\n\n1. **`rehydrate()`(:212)** —— boot 时把每个已缓存 manifest 重新注册进 kernel。条目损坏 = 那个已装应用**不被注册**,即从这个 runtime 里消失(app switcher 里没有、对象不存在),而日志里一个字都没有。函数自己对「拿不到 manifest service」是会 `warn` 的,唯独对「少读了几个条目」不会。\n2. **`handleList()`(:702)** —— 控制台「已安装应用」列表。损坏条目直接不在返回的 `items` 里,前端得到的是一份看起来完整的清单。\n\n3. 第三个消费者是 `os doctor` 的 ADR-0120 D5e unique-scope 建议(#5412)。#5412 修掉了**目录级**读取失败(`✓ Unique scope` 不再在 ledger 不可读时打印),但**条目级**损坏够不着那个 catch —— 因为它在这里就被吸收了。#5412 的 PR 用一条 `⚠ SCOPE BOUNDARY` 测试把这个边界钉住了(`doctor-ledger-read-failure.test.ts`),本 issue 修好后那条测试会转红,这是预期的。\n\n也属于 #4801 / cloud#1020「诊断面与运行时不一致」和 #5403 / #5412「catch 吞掉唯一能解释状况的那个对象」的家族。注释 `/* skip corrupt files */` 说明跳过是**有意**的 —— 有意跳过是对的(一个坏文件不该让整个 runtime 起不来),**有意不说**才是缺陷。\n\n## 复现路径\n\n```\n.objectstack/installed-packages/good.json     # 完整条目\n.objectstack/installed-packages/broken.json   # 截断的 JSON\n```\n\n`os serve` 起一个装了 `broken` 那个包的 runtime:该应用不出现,日志无提示;`GET` 已装列表:少一项,`success: true`。\n\n## 决策点(不预设,留给分诊)\n\n`list()` 的返回契约要改成什么,是本单真正的决策点,不是实现细节 —— 它是 `@objectstack/cloud-connection` 的公开 API,有 3 个消费者:\n\n- **A. 返回结构化结果**(如 `{ entries, skipped: Array of { file, cause } }`):调用方各自决定怎么报;类型即契约,漏报变成编译期就看得见。破坏性,要改 3 处调用方。\n- **B. 保持返回类型,加一个可选的 `onSkip` 回调 / 累加器**:非破坏性,但「不传就还是静默」—— 默认仍然是错的那一边,和仓规「declared = enforced」相反。\n- **C. `list()` 内部 `logger.warn` 一条**:最小改动,但 `LocalManifestSource` 目前不持有 logger,且把「谁来报告」的决定从调用方手里拿走(doctor 要的是一行 `HealthCheckResult`,不是 stderr)。\n\n倾向 A(契约优先:让「读了一半」在类型上无法被忽略),但 3 个调用方的改法需要维护者拍板。\n\n## 备注\n\n- 已按关键词 + 文件路径搜过 open issues(`LocalManifestSource` / `installed-packages` / `ledger` / `corrupt manifest`),无重复;唯一命中是 #5412 自身。\n- 与 #5412 **无依赖关系**,独立成单:#5412 的 PR 只动 `doctor.ts` 的目录级 catch,不触及本函数。不作为 #5412 的 sub-issue —— 本条的修复面在另一个包、且是跨包契约变更,不落在 #5412 的完成范围内。"
+}

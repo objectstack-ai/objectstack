@@ -1,0 +1,36 @@
+{
+  "number": 4924,
+  "kind": "issue",
+  "title": "spec 自己的 flow fixture 教了三种跑不通的形状:CRUD 的 `recordId`、decision 的 `condition`、`object`（#4001 第一类发现的第七例）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T16:29:08Z",
+  "updated_at": "2026-08-05T16:23:12Z",
+  "closed_at": "2026-08-05T16:23:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4924",
+  "body": "发现于 #4001 批 9 的载荷普查,**不在该批范围内,未修**。\n\n## 事实\n\n`packages/spec/src/automation/flow.test.ts` 的 fixture 里,示范用的 flow 节点写着这些 config 键:\n\n| 位置 | 写的 | 实际 |\n|---|---|---|\n| `flow.test.ts:336` | `get_record` 的 `config: { object: 'opportunity', recordId: '{opportunityId}' }` | 两个键**都没有**被 `GetRecordConfigSchema` 声明,executor 一个都不读。`object` 有 ADR-0087 转换(`flow-node-crud-object-alias`)会在加载期改写;`recordId` **什么都不是** |\n| `flow.test.ts:355` | `update_record` 的 `config: { recordId: … }` | 同上 |\n| `flow.test.ts:487` | `delete_record` 的 `config: { recordId: '{loop_records.item.id}' }` | **只有这一个键**。CRUD executor 只按 `filter` 定位行,所以这是一个「唯一的约束条件根本不被读」的删除节点 —— 正是 #3810 要防的 match-everything,穿着一个读起来像约束的键 |\n| `flow.test.ts:346` | `decision` 的 `config: { condition: '{opportunity.amount} > 100000' }` | `config.condition` 只在 `start` 节点上被读(触发闸门),在其余 19 个内建节点类型上是惰性的 —— `lint-flow-patterns` 的 `flow-inert-node-condition`(#4414)就是专门报这件事的 advisory |\n\n这些 fixture 断言的是 `FlowSchema` / `FlowNodeSchema`,而 `FlowNodeSchema.config` 是**刻意开放**的 `z.record(z.unknown())`,所以它们全绿,而且**批 9 收紧后依然全绿**——收紧的是槽位里的每类型契约,不是槽位本身。**这不是一个会红的测试,是一份会被照抄的教材。**\n\n## 为什么这是一条发现而不是洁癖\n\n#4001 的第一类发现（「六个把 strip 时代假象固化成预期的测试」）已经点名过同一形状五次,其中 `page.route` 那条的原话是「一个从未存在的路由键,平台自己的测试套件养了多年」。这是第六、七例,而且更靠近作者:`flow.test.ts` 是**协议层最容易被当成范例读的文件**,对 AI 作者尤其如此 —— 它读起来像「平台官方怎么写一个 flow」。\n\n`recordId` 尤其值得记:批 9 因此给它写了 guidance（编辑距离够不到任何已声明的键,不给处方的话拒绝信息就只能报个键名),而那条 guidance 的经验依据,正是**仓库自己的 fixture**。\n\n## 建议\n\n把这四处 fixture 改成能跑的形状,并在原地留一句注释说明为什么改（照 #4001 的惯例:「修测试,并记下原因,不要绕开」）:\n\n- `object` → `objectName`\n- `recordId: '{x}'` → `filter: { id: '{x}' }`\n- decision 的 `config.condition` → 挪到出边的 `condition`,fallback 边标 `isDefault: true`\n\n⛔ 不要顺手把 `FlowNodeSchema.config` 收紧 —— 它按 ADR-0018 刻意开放（`node.type` 对插件开放,插件 executor 自带 `configSchema`),批 9 的台账行已就地记了这一条。\n\n## 相关\n\n- #4001（批 9 的载荷普查发现了它;三个 config 契约已收紧)\n- #4414（`flow-inert-node-condition` advisory —— 惰性 `config.condition`)\n- #3810（模板求值抹掉过滤条件 → 拒绝执行）\n- #4277 / #4045（`registerFlow` 的描述符键闸门与 form↔Zod 对账)"
+}

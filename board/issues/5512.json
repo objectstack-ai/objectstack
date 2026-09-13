@@ -1,0 +1,37 @@
+{
+  "number": 5512,
+  "kind": "issue",
+  "title": "[17.0-rc2验收] wait 定时暂停被外部 resume 短路后,一次性唤醒 job 仍保持 armed —— 次日对已完成 run 发起幽灵 resume,sys_job 里留下误导性的「待唤醒」行",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T14:38:51Z",
+  "updated_at": "2026-08-05T16:35:50Z",
+  "closed_at": "2026-08-05T16:35:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5512",
+  "body": "环境:`hotcrm@0899b4f + @objectstack 17.0.0-rc.2`,`objectstack dev -p 4093`,fresh dev DB(file:…/data.db,--seed-admin)。发现于 17.0-rc2 验收 A3(自动化 Flows)组。\n\n## 现象\n\n`wait` 节点(timer,`timerDuration: 'P1D'`)挂起的 run,通过 REST resume 端点(`POST /api/v1/automation/:name/runs/:runId/resume`,对 screen/wait 暂停是被 #3801 gate 明确放行的门)提前恢复并跑完之后,wait 节点入场时排下的一次性唤醒 job(`flow-wait:<runId>:<nodeId>`,`{type:'once', at:+24h}`)**没有被取消**:\n\n- run 已 `completed`,但 `sys_job` 里对应行仍 `active: true`,`schedule_expression` 指向明天;\n- 到点后该 job 会对一个已完成的 run 调 `engine.resume(runId)` —— 一次注定失败的幽灵 resume(machine-state error,结果被回调丢弃),然后才在 `finally` 里自我取消;\n- 在此之前的整整 24h 窗口内,任何看 `sys_job` 的运维/测试都会把这行读成「还有一个 run 在等唤醒」。\n\n## 复现(两次,同一形态)\n\n1. HotCRM `case_csat_followup`(record-change,close 后 `wait P1D` → notify):关闭一个 case,flow 挂起,`sys_job` 出现 `flow-wait:run_…:wait_1d`(at = +24h)。\n2. `POST /api/v1/automation/case_csat_followup/runs/<runId>/resume`(body `{}`)→ run 完成,notify 正常投递。\n3. 复查 `GET /api/v1/data/sys_job`:该 `flow-wait` 行仍 `active: true`。\n\n实测残留(14:37Z 快照,两个 run 均已 completed):\n\n```\nflow-wait:run_635c0008-d4fc-43e9-adfc-cc9bfc96324b:wait_1d  once  active=True at=2026-08-06T14:17:09.006Z\nflow-wait:run_bfbe27ff-c9e7-4b71-8d01-eb3d888813de:wait_1d  once  active=True at=2026-08-06T14:24:59.742Z\n```\n\n对应 run 状态(runs 端点):`run_635c0008… completed`、`run_bfbe27ff… completed`。\n\n## 期望 vs 实际\n\n- 期望:run 离开 wait 节点(不论 timer 到点还是外部 resume)时,该节点的唤醒 job 一并取消 —— job 表与 run 状态一致。\n- 实际:job 只在**自己的 timer 回调**里自我取消;外部 resume 路径完全不碰它。\n\n## 落点分析(平台,service-automation)\n\n`packages/services/service-automation/src/builtin/wait-node.ts` 中,`job.cancel(jobName)` 只出现在两处:timer 回调的 `finally`(约 L90)和 boot re-arm 的同款回调(约 L227)。`engine.resume()` / `resumeInternal` 侧没有任何按 correlation(suspend 时返回的 `correlation: jobName` 就是现成的钩子)取消 job 的逻辑。\n\n影响面小(一次幽灵 resume + 24h 的误导性 job 行,无数据效应),报 p2 性质;但凡是「signal/manual 提前唤醒 timer wait」的正常用法都会留下这种残留,长期运行的 org 会在 sys_job 里积累一批 stale once-job。\n\n## 佐证\n\n- 幽灵 resume 无害的依据:`engine.resume()` 对未挂起 run 走 `resumeInternal` 的 machine-state error 分支(engine.ts L2482 起),回调不消费结果。\n- 挂起/唤醒本身工作正常(同验收轮实测):timer job 正确排在 +P1D,cold-boot re-arm 逻辑存在(`rearmSuspendedWaitTimers`)。"
+}

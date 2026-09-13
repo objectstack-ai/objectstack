@@ -1,0 +1,35 @@
+{
+  "number": 5486,
+  "kind": "pull_request",
+  "title": "fix(spec): 别名表必须是对 schema 的真断言 —— 修 12 条存量 + 全仓闸门 (#5013)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T13:50:48Z",
+  "updated_at": "2026-08-05T14:22:56Z",
+  "closed_at": "2026-08-05T14:22:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T14:22:54Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5486",
+  "body": "Fixes #5013\n\n## 前提复核(先做的事)\n\nissue 的复现日期是 08-03,此后 `main` 动过 `ui/*.zod.ts` 数次,所以先逐条对 `origin/main`\n(ed0d2aac0)取证。**1 + 5 条全部仍如所述**,而且 `main` 上的\n`ui/strictness-batch14.test.ts` 自己就把这六条钉成了引用 `#5013` 的反向债务清单\n(`KNOWN_DEFECTS`),连带确认了 issue 的判断。前提成立。\n\n## 一张别名表是「对 schema 的两半断言」\n\n- 它挂的 key 是 shape **拒绝**的(别名只从 `unrecognized_keys` 路径查表,已声明的 key 根本到不了);\n- 它开的 target 是 shape **接受**的(账本 finding 12)。\n\n两半都没人核对,而且**两半都是假的**。作者写 `filter`:\n\n```\nUnrecognized key(s) on this report: `filter`. … Did you mean `filter` -> `filters`?\n```\n\n照做之后第二次被拒,这次连建议都没有 —— `ReportSchema` 声明的是 `runtimeFilter`。\n\n## 改了什么(没有增删任何可授权 key,原本能 parse 的都照旧 parse)\n\n**建议 1** `ReportSchema` 的 `filter`/`filters`/`where`/`criteria` 一并指向 `runtimeFilter`,\n与三十行之上的 `JoinedReportBlockSchema` 逐字一致 —— 容器和子报表必须用同一套话纠正作者。\n\n**建议 2** 五条死条目删除(逐条已由运行时 `.shape` 复核仍是死的):\n`ReportSchema` 的 `columns`/`chart`、`DatasetSchema` 的 `measures`/`filter`、\n`ActionSchema` 的 `body` —— 这些 key 本身都已被各自 schema 声明。\n(顺带确认 `chartConfig` 是 `DashboardWidget` 的 key,不是 report 的:那条别名当年指错了层。)\n\n**闸门额外挖出的 6 条**,同一缺陷类,issue 的 AST 体检看不到:\n\n- `system/email-template.zod.ts` 5 条 —— `content`/`html` → `bodyHtml`、`text` → `bodyText`、\n  `from`/`sender` → `fromOverride`。原来全指向 `body` / `fromAddress`,两个都不是这张 schema 的 key。\n  `content` 选 `bodyHtml` 是有理由的:它是**必填**那个 body 且接受任意字符串,\n  省略 `bodyText` 时服务端自己派生纯文本 —— 所以无论作者写的是标签还是散文,改名后都真的能渲染。\n- `ai/skill.zod.ts` 1 条 —— `trigger` 原指 `triggers`(从来不是 key)。\n  **没有**改指 `triggerConditions`,因为正确答案是个**分叉**:路由意图进 `triggerConditions`,\n  自然语言意图进 `description`/`instructions`(`triggerPhrases` 墓碑本身就是这么写的)。\n  改名会把 `trigger: 'create a case'` 这样的短语塞进 condition 数组槽,变成值上的第二次拒绝 ——\n  finding 7 原形。所以改成 `guidance` 条目,它不做任何假承诺。\n\n**建议 3** 全仓闸门 `packages/spec/src/shared/alias-integrity.test.ts`。\n\n## 为什么判定必须走运行时,而不是读源码字面量\n\n批 14 那版用 TS AST 读源码对象字面量、再把 `surface` 字符串手工映射到 schema。\n三件事在全仓尺度上把它打穿,而且都是实测不是推测:\n\n1. **spread** —— `...MetadataProtectionFields` 展开的 key 字面量读不到;\n2. **拼装的表** —— 10 个调用点的 `aliases`(或 `surface`)不是字面量\n   (`data/field.zod.ts`、`ui/theme.zod.ts`、`automation/etl.zod.ts` 等),AST 读成空表并报告干净;\n3. **撞名的 surface** —— `'this field group'` 同时是两张 schema 的 surface,\n   字符串不是 key,手工映射会拿甲的表去judge乙的 shape。\n\n所以改成 `strictObject` 在**构造期登记** `{ options, shape }`,表和 shape 出自同一个运行时节点,\n没有第二份真相,也没有 per-surface 注册可忘。\n\n一个中途踩到的坑值得记:最初是把 options 用 symbol 挂在**构建出的 schema 实例**上,\n结果 `.superRefine()` / `.extend()` 的 clone 不带 symbol —— `ReportSchema`、`DatasetSchema`\n这些最要紧的当场静默失去看守,而闸门显示绿。改成构造期登记才对。\n\nAST 保留,但**只做覆盖**:枚举源码里存在的调用点,走查必须每个都够到。\n这是「absence must be loud」那一半 —— 走查够不到的表就是这道闸门没在judge的表,它必须红。\n\n闸门另外钉了两条自己**不**judge 的边界:直接调 `strictUnknownKeyError` 的 44 个调用点\n(只减不增棘轮,实测干净,#5483),以及同表内 `aliasProbe` 撞车(#5481)。\n\n## 反向验证(先证红)\n\n方向是**跑之前**定的,六次全部命中预测,每次都是预测的那一条断言红:\n\n| 破坏 | 预测 | 实测 |\n|---|---|---|\n| 活别名改指不存在的 key | target 断言红 | 红:`` `where` -> `runtimeFilterz` — 未声明`` |\n| 别名挂到已声明 key 上 | 死条目断言红 | 红:`` `columns` — 此处已声明`` |\n| 别名指向**墓碑** key | target 断言红 | 红:`` `phrases` -> `triggerPhrases` — 墓碑,不接受任何值`` |\n| 加一张谁也不构造的表 | **覆盖**断言红,判定保持绿 | 红:`ui/report.zod.ts:408 (this unreachable surface)` |\n| 五个文件整体还原成 `origin/main` | 全部 12 条被点名 | 红:12 条,含 `` ui/report.zod.ts:248 `filter` -> `filters` `` |\n\n第三行值得单独说:helper 自己的 `knownKeys` 过滤掉了墓碑,**但别名表在那个 fallback 之前就被查**,\n所以「别名指向墓碑」是现有防线够不到的,这道闸门补上了。\n\n第四行是这道闸门与批 14 那版的真正差别:后者对「表存在但没人judge」是静默通过的。\n\n## 验证\n\n```\npnpm --filter @objectstack/spec typecheck     # tsc --noEmit,干净\npnpm --filter @objectstack/spec test          # 311 files / 7945 tests 全绿\npnpm --filter @objectstack/spec check:generated  # 9 个生成物全部 up to date\npnpm --filter @objectstack/lint test          # 57 files / 1198 tests 全绿(消费侧抽查)\n```\n\n生成物 **0 改动** —— 本 PR 不增删任何可授权 key、不动任何 `.describe()`,\n所以 `spec-changes.json` / `authorable-surface.json` / 台账都没有落差,不存在手改生成物的问题。\n\n`packages/lint` 首轮 10 个文件失败,是 AGENTS.md §9 的陈旧构建陷阱\n(`@objectstack/formula`、`@objectstack/sdui-parser` 未构建),\n`pnpm --filter '@objectstack/lint^...' build` 后全绿,与本 PR 无关。\n\n## 批 14 的反向钉子\n\n`ui/strictness-batch14.test.ts` 的 `KNOWN_DEFECTS` 按它自己注释的承诺红了 ——\n「this list cannot outlive its debt」。它的 prescription-integrity 整节是**删除**而不是清空的:\n留下来就是一份更弱的活检查副本(源码字面量读法,看不见 spread、拼装表、撞名 surface),\n正是 `strictObject` 要消灭的「两份真相」。它带的那条 parse 级断言(结构闸门做不到的)留下了。\n\n## 范围外发现(已单独立 issue,未指派)\n\n- #5481 —— `aliasProbe` 归一化后同表两 key 撞车,后者静默覆盖前者。\n  **1 条活 defect**:`these snap settings` 里 `grid_` 覆盖了 `grid: 'gridSize'`,\n  作者写 `grid: 24` 被指向 `showGrid`(一个 boolean)。另有 3 条同因的休眠冗余。\n- #5483 —— 44 个直接调 `strictUnknownKeyError` 的调用点在本闸门之外。\n  临时加登记实测过,**当前干净**(唯一的报告是 `ui/app.zod.ts` navigation 系列刻意的散文式 target),\n  属观察类,已加只减不增棘轮看住。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018fxLGQdatPbBUvCgiVxg6D)_"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 4968,
+  "kind": "issue",
+  "title": "OS_STORAGE_ROOT 对任何非默认值不生效:CLI 与设置服务的 env 通道错位,schema 默认值覆盖宿主构造配置(原报「swap 假警告」归因已被 #4096 时间线推翻,警告本身是准确的)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T17:29:51Z",
+  "updated_at": "2026-08-05T20:39:52Z",
+  "closed_at": "2026-08-05T20:39:52Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4968",
+  "body": "Found while clearing the showcase's boot warnings for #4774. Not caused by that change — it reproduces identically before and after — so it is filed rather than fixed there.\n\n## What happens\n\nEvery `examples/app-showcase` boot logs:\n\n```\nWARN StorageServicePlugin: storage adapter swapped (LocalStorageAdapter → LocalStorageAdapter).\n     Existing files were NOT migrated and may be unreachable through the new adapter.\n```\n\nAfter #4774 lands this is one of only **two** warnings left in the showcase's boot diagnostics, so it is now a visible share of the reference app's noise.\n\n## Why it is wrong\n\nThe message is the loud branch of a two-branch guard in `packages/services/service-storage/src/storage-service-plugin.ts` (~225). The quiet branch exists for exactly this case:\n\n```ts\nctx.logger.info(\n  `StorageServicePlugin: storage adapter replaced (${prevName} → ${nextName}) — `\n  + 'same backing store, existing files unaffected.',\n);\nreturn;\n```\n\n…but the boot takes the `warn` branch even though `prevName === nextName === 'LocalStorageAdapter'`, i.e. the \"same backing store\" the info branch describes. Whatever the sameness predicate is keying on, it is not answering \"did the backing store change\".\n\n## Why it is worth fixing rather than tolerating\n\nThe warning claims **potential data loss** (\"existing files … may be unreachable\"). On a deployment where an adapter genuinely was swapped that is exactly the right thing to say — which is why it must not also fire when nothing was swapped. A data-loss warning that appears on every clean boot of the reference app is the fastest way to train operators to skim the one that matters, which is the failure mode AGENTS.md's \"Degradation log levels\" section is written against.\n\nIt is also a `declared ≠ real` report in the sense of Prime Directive #10: the log asserts a state transition the runtime did not perform.\n\n## Repro\n\n```bash\npnpm --filter @objectstack/example-showcase exec objectstack dev --fresh -p 39774 --log-level warn\n```\n\nObserved on `main` @ 6bc93dc. Also present in the #4774 baseline capture (8-warning boot) and in the fixed one (2-warning boot).\n\n## Suggested direction\n\nCompare what actually determines reachability — adapter class *and* its resolved backing location (local root / bucket + prefix) — and take the `info` branch when they are unchanged. A second, independent question worth a look while in there: why the adapter is constructed twice on a single boot at all.\n\nFiled unassigned per Prime Directive #10.\n"
+}

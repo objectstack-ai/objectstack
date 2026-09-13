@@ -1,0 +1,37 @@
+{
+  "number": 5421,
+  "kind": "issue",
+  "title": "lint: `runtime-lazy-deps.test.ts` \"gating a flow in-process\" runs on the default 5s timeout and flakes under load — its cold-load sibling already carries `COLD_LOAD_TIMEOUT_MS`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tests"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T11:01:17Z",
+  "updated_at": "2026-08-05T11:29:53Z",
+  "closed_at": "2026-08-05T11:29:53Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5421",
+  "body": "`packages/lint/src/runtime-lazy-deps.test.ts` has two cases that both pay a\ncold module load:\n\n- the subprocess one ends `}, COLD_LOAD_TIMEOUT_MS)` (line 121);\n- `it('gating a flow in-process loads neither dep, and still finds the defect', …)`\n  (line 124) ends `})` — vitest's default 5000 ms — even though its first act is\n  `await import('./runtime.js')`, i.e. the same cold graph load, in-process.\n\nUnder a loaded machine (several agents' suites sharing one container) the\nin-process one intermittently exceeds 5 s:\n\n```\n × gating a flow in-process loads neither dep, and still finds the defect 5004ms\n FAIL  src/runtime-lazy-deps.test.ts > @objectstack/lint/runtime (kernel boot-path contract, #4463) > gating a flow in-process loads neither dep, and still finds the defect\nError: Test timed out in 5000ms.\n```\n\nObserved 2 of 4 consecutive `pnpm --filter @objectstack/lint test --maxWorkers=2`\nruns on `origin/main` + an unrelated one-function change in\n`validate-translation-references.ts`; the other 2 runs were fully green\n(1202 passed). Nothing in the failing case touches the code under change — it\nloads `./runtime.js` and inspects `require.cache`.\n\n### Why it matters\n\nIt is a false red on whatever PR happens to run while the box is busy, on a test\nwhose actual claim (the boot path loads no source parser) is unaffected by wall\nclock. The repeated-flake cost is paid by every parallel lane, and the failure\ntext points at the runtime gate rather than at the timeout.\n\n### Suggested fix\n\nGive the in-process case the same explicit timeout its sibling already uses —\n`}, COLD_LOAD_TIMEOUT_MS)` — so both cold-load cases state the same budget. A\ntimeout is the wrong instrument for asserting laziness in any case: the\nassertion below it is what proves the deps stayed unloaded.\n\nFound while implementing #5415 (out of scope there: that PR is a fact-set fix in\n`validate-translation-references.ts` and does not touch the runtime entry).\nVerified against `origin/main` `d0856707f`."
+}

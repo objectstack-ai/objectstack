@@ -1,0 +1,38 @@
+{
+  "number": 5224,
+  "kind": "issue",
+  "title": "声明式端点的两个机器可读面会说谎:runtime-authored `api` 行在 /meta/api 与 /openapi.json 里在场,匹配器却永远看不见(真实 boot 实测)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T11:04:31Z",
+  "updated_at": "2026-08-05T14:46:05Z",
+  "closed_at": "2026-08-05T14:46:05Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5224",
+  "body": "发现于 #5112(#5040 E8 收官验收)的真实 boot 探针,**不在该单文件面内**,按 Prime Directive #10 单独立项。\n\n## 事实(showcase 真实 boot,`objectstack dev --fresh`,47 plugins)\n\n通过 Studio 的元数据写入口写一条 `api` 条目 —— 注意这是**匿名且未计量**的形状(ADR-0121 D6 明令禁止的那一种):\n\n```\nPUT /api/v1/meta/api/e8_backdoor\n{\"name\":\"e8_backdoor\",\"path\":\"/api/v1/apps/showcase/backdoor\",\"method\":\"GET\",\n \"type\":\"object_operation\",\"target\":\"showcase_task\",\n \"objectParams\":{\"object\":\"showcase_task\",\"operation\":\"find\"},\"authRequired\":false}\n→ HTTP/1.1 200 OK\n  {\"success\":true,\"version\":\"sha256:9ad721f4...\",\"seq\":1,\"state\":\"active\",\n   \"message\":\"Saved customization overlay (env-wide, state=active) — type=api ...\"}\n```\n\n写入成功。随后:\n\n```\nGET /api/v1/apps/showcase/backdoor            (匿名) → 404 {\"error\":\"Not found\"}\nGET /api/v1/apps/showcase/backdoor            (已鉴权) → 404 {\"error\":\"Not found\"}\n\nGET /api/v1/meta/api → 三条,含\n  - e8_backdoor GET /api/v1/apps/showcase/backdoor authRequired=False\n\nGET /api/v1/openapi.json → paths 含 /api/v1/apps/showcase/backdoor:\n  {\"get\":{\"operationId\":\"e8_backdoor\",\"responses\":{\"200\":{\"description\":\"Success\"}},\"security\":[]}}\n```\n\n**路由 404,而两个机器可读面都在宣告它存在 —— 且 OpenAPI 用 `security: []` 明确把它描述成「不需要凭据」的公开端点。**\n\n## 为什么会这样(不是 E7b 的门在挡)\n\n两边读的是**两个不同的库**:\n\n- `IMetadataService.matchEndpoint` → `EndpointMatcher` → `MetadataManager.listForIndex('api')`,只读 manager 自己的 `registry` + 已注册 loader。dev/serve 的 manager 上 loaders 是 `[\"filesystem\",\"memory\"]`,`sys_metadata` 行**根本不在其中**(实测:`registry.get('api')` 为 undefined,`list('api')` 长度 0,而同一时刻 `/meta/api` 返回 2 条)。\n- `/meta/:type` 与 `/openapi.json`(#5040 E6 的 enrichment)都走 `protocol.getMetaItems`,读的是 ObjectQL SchemaRegistry + `sys_metadata`。\n\n所以这条路由死掉**不是**因为 #5189/#5203 的装载期门把它拒了 —— 那道门压根没被走到(dev 日志里没有 `[EndpointMatcher] ... EXCLUDED` 那行)。E7b 的门依然正确且必要;这里是它下面还有一层看不见。\n\n## 影响的两个方向\n\n1. **面在说谎(本条的主症)**:`/openapi.json` 是 SDK / codegen / AI 客户端直接生成代码的契约面(Route & surface ownership 第 4 条、ADR-0076 D12)。一个被宣告为匿名可达、实际 404 的端点,会传播进所有基于它构建的东西。\n2. **反方向同样成立**:一条**合法的、本应服务的**端点如果是通过 Studio / 运行时写入(而非 stack artifact)落库的,匹配器同样看不见 —— 作者被告知 \"Saved\",面上也能看到,唯独请求 404。当前净行为是 fail-closed(安全),但「声明了却不生效」正是 #4936 这条线一直在还的债。\n\n## 建议的判断轴(不预设结论)\n\n- 要么让 `matchEndpoint` 的取数与 `getMetaItems` 收敛到同一个源(一条路由一个所有者的元数据版本);\n- 要么让两个面**只宣告匹配器实际会服务的集合**(enrichment 与 `/meta/api` 走匹配器的索引);\n- 要么在写入口就拒绝一条永远不会被服务的 `api` 条目(与 #5189 的 publish 门同侧)。\n\n三条的长期代价不同,请维护者裁决 —— 中间那条最省,但它把「面不说谎」变成了「面自己去问匹配器」,是唯一不引入第二真相源的形状。\n\n## 复现\n\n```\npnpm dev:showcase -- --fresh -p 39720 --seed-admin\n# 登录取 token,然后照上面三条 curl\n```\n\n关联:#5040(执行器立项)、#5112(E8 验收,发现于此)、#5189/#5203(E7b 兜底门)、ADR-0076 §1/§4、ADR-0121 D6。"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 5547,
+  "kind": "pull_request",
+  "title": "fix(service-analytics): `recoverNumber` 只还原规范数字串 —— `'007'` / `'1.50'` 保持字符串 (#5528)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T16:56:15Z",
+  "updated_at": "2026-08-05T17:29:29Z",
+  "closed_at": "2026-08-05T17:29:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T17:29:27Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5547",
+  "body": "Fixes objectstack-ai/objectstack#5528\n\n#5526 的止血单(其路线 C)。**本单不裁根因** —— `values: string[]` 往返编码本身的有损性(以及 `'null'`/`'true'`/`'false'` 的 token 撞车)仍归 #5526,这里只收窄解码侧,挡住已实测的真实业务形状。\n\n## 前提复核(切分支后按 rule 6 实测)\n\n#5525(#5332)已在基上;它改的是**编码侧**(`fieldLeaves` 把 `null` 移出值数组),本单改的是**解码侧**,两者不相交。在 origin/main `f2a1c0be1` 上跑 `normalizeAnalyticsFilterTree` + 两个 coercer,#5526 表格逐行复现:\n\n| 作者写的 `v` | leaf `values` | SQL 绑定 | 引擎比较数 |\n|---|---|---|---|\n| `'007'` | `[\"007\"]` | `7` | `7` |\n| `'0912'` | `[\"0912\"]` | `912` | `912` |\n| `'1.50'` | `[\"1.50\"]` | `1.5` | `1.5` |\n| `'7'` | `[\"7\"]` | `7` ✅ | `7` ✅ |\n| `'1e3'` | `[\"1e3\"]` | `\"1e3\"` ✅ | `\"1e3\"` ✅ |\n\n前提成立。顺手实测到两条 issue 未列的同族形状:`'-0'` → `0`(丢符号)、`'12345678901234567890'` → `12345678901234567000`(丢精度),同样是往返有损,一并纳入。\n\n## 改法\n\n`recoverNumber` 在原有形状正则**之后**加一条往返判据 `String(Number(s)) === s`:\n\n- 真数字比较数出去时就是 `String(n)`,天然规范,照旧还原(`7` → `'7'` → `7`);\n- `Number()` 会改写的串(前导零、尾零、`'-0'`、超出双精度位数)不可能来自数字,只能是作者写的字符串,保持原样。\n\n形状正则**留在前面**是刻意的:这样本改动只可能**减少**还原,不会新增。`'1e3'`、`'1e+21'`、`'+7'`、`' 7'`、`'0x10'`、`'Infinity'`、`'NaN'` 改前是字符串、改后仍是字符串 —— 其中 `'1e+21'` 本身是 `String(1e21)` 的规范形,仅靠往返判据会被还原,正则挡住了它。\n\n方向上也是 ADR-0053 D-A2 早已定的:这个函数是 driver 侧 `coerceTemporalFilterValue` 钩子背后的**最后兜底**,按形状猜类型的面越小越好。TSDoc 里已留下 ADR 编号与 issue 号。\n\n`coerceFilterValueForSql` / `coerceFilterValueForObjectQL` 两个 coercer 同步(两者共用同一个 `recoverNumber`;它们只在布尔写法上刻意不同,\"哪些串算数字\"必须是同一条规则),测试里有一条专门守这个一致性。\n\n## 反向验证(方向**先**预测,后运行)\n\n预测:非规范形的 decode 行转红;行集用例转红且**取到错行**(不是零行 —— SQLite 会把 TEXT 列的 affinity 套到整数绑定上);引擎用例转红在比较数上;规范形 / 真数字往返 / token 撞车三组保持绿。\n\n把 `recoverNumber` 退回旧实现后实测,13 条红,方向逐条命中:\n\n```\n× \"007\" → SQL \"007\" / engine \"007\"\n  → leading zeros — order number / SKU (was 7): expected 7 to deeply equal '007'\n× \"-0\" → SQL \"-0\" / engine \"-0\"\n  → the sign is lost: expected -0 to deeply equal '-0'\n× {code: {$eq: '007'}} finds the row storing '007'\n  → Before #5528 the bind was the integer 7 and this returned ['r_7'] — the wrong row, silently.:\n    expected [ 'r_7' ] to deeply equal [ 'r_007' ]\n× {code: {$in: ['007', '1.50']}} keeps both spellings\n  → expected [ 'r_15', 'r_7' ] to deeply equal [ 'r_007', 'r_150' ]\n× binds '007' as TEXT, not as the integer 7  → expected [ 7 ] to include '007'\n× passes the string \"007\" through …          → expected 7 to be '007'\n✓ \"7\" / \"1.5\" / \"-3\" / \"0\" / \"1000\"（规范形,不受影响）\n✓ 7 → values → 7（真数字往返守卫,不受影响）\n✓ {code: {$eq: '7'}} still finds the row storing '7'\n✓ {score: {$eq: 7}} still matches on the numeric column\n✓ the author strings null / true / false still decode to non-strings\n```\n\n一处如实说明:引擎用例的红停在**比较数**断言上,后面那句\"行数为 0\"没跑到。所以我用 `tsx` 在退回态下单独量了一次,`'007'` → 比较数 `7` → `order_count: 0`,`'1.50'` → `1.5` → `0`;测试注释里的\"Was 0 before #5528\"是量出来的,不是推出来的。\n\n行集用例特意放了 `r_7`(存 `'7'`)和 `r_15`(存 `'1.5'`)两行:改前作者查 `'007'` 拿到的是 `'7'` 那行 —— 比零行更难发现,这才是现场会报的症状。\n\n## 测试\n\n新增 `src/__tests__/filter-value-canonical-number.test.ts`(39 例,复用本包既有的两套 harness):\n\n1. **decode 表**:21 个值 × 两个 coercer,含 #5526 三行、规范形、以及\"改前后都是字符串\"的 7 种形状;\n2. **真数字往返守卫**:经真编码器 `normalizeAnalyticsFilterTree` 出去再解回来(不是手写字符串),防过度收窄;\n3. **SQL 路径行集**:sql.js 真 SQLite,TEXT 列 + `$eq` / `$in`,外加两条直接断言绑定**类型**的用例(数字列那条 SQLite 的 numeric affinity 会\"救\"回来,行集看不出差别,只有绑定类型能);\n4. **引擎路径**:`AnalyticsService` + 严格相等的 `executeAggregate` 替身,比较数与行数一起断言;\n5. **#5526 撞车原样钉住**(pinned, not endorsed),避免后来的读者误以为本单修掉了它。\n\n命令与结果:\n\n```\npnpm --filter @objectstack/service-analytics test\n  Test Files  48 passed (48)\n       Tests  792 passed (792)\n\nnpx vitest run src/__tests__/filter-value-canonical-number.test.ts\n  Test Files  1 passed (1)\n       Tests  39 passed (39)\n\nnpx eslint <两个改动文件>            → exit 0\nnode scripts/check-nul-bytes.mjs    → OK (5499 files, no control bytes)\n```\n\n`typecheck`:本包无 `typecheck` script(在 `check-type-check-coverage.mjs` 里带 DEBT 台账条目),故 CI 不对它做类型检查。仍手工跑了 `npx tsc --noEmit -p packages/services/service-analytics/tsconfig.json`,报的 7 条全是既有测试文件的旧账,`filter-normalizer.ts` 与新测试文件均无报错。\n\n消费半径已按\"规则被谁消费\"扫过:两个 coercer 只被本包 `native-sql-strategy.ts` / `objectql-strategy.ts` 引用;仓库内既有的数字串比较数 fixture(`$gte: '80'`、`{ v: '9' }`)都是规范形,不受影响。\n\n## 范围红线\n\n- 未碰 `objectql-strategy.ts`(#5333 另单)、未碰 `stringifyForCube` 的编码方向(#5526 待裁)、未处理 `'null'`/`'true'`/`'false'` token 撞车;\n- 一个如实的取舍:若作者把字符串 `'007'` 写在**数字列**上,改前会被\"猜\"成 `7` 而匹配,改后按作者写的字符串绑定,在 SQLite 上不再匹配。#5526 路线 C 的原话是\"保留了原始写法信息的串只可能是作者笔下的字符串\",这里照此执行 —— 让它按作者写的意思生效,而不是继续替作者改写。\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01BWS4heBoAitLmzCLhcYdbK\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BWS4heBoAitLmzCLhcYdbK)_"
+}

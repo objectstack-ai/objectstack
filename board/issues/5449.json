@@ -1,0 +1,36 @@
+{
+  "number": 5449,
+  "kind": "issue",
+  "title": "幽灵 `@ts-expect-error` 不止 spec:`@objectstack/client` 也有 1 处落在 tsconfig 排除区内(全仓横扫结果)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T12:14:48Z",
+  "updated_at": "2026-08-05T17:17:29Z",
+  "closed_at": "2026-08-05T17:17:29Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5449",
+  "body": "Blocked-by: #5286\n\n在 #5286 的横扫环节发现(该单只授权 `packages/spec` 文件面,故此处只记录不修)。基线 `origin/main` @ `39396bd`。\n\n## 事实\n\n按 `pnpm-workspace.yaml` 的全部 glob 枚举 77 个 workspace 包,逐包读 `package.json.scripts.typecheck` 与 `tsconfig.json.exclude`,并统计其测试文件里的 `@ts-expect-error` 指令数:\n\n| 指标 | 值 |\n|---|---|\n| workspace 包总数 | 77 |\n| `tsconfig.json` 排除自身测试文件 | 24 |\n| 其中同时声明了 `typecheck` 脚本(即绿灯但没读测试) | 23 |\n| 完全没有 `typecheck` 脚本 | 15 |\n| **落在排除区内、因而从未被求值的 `@ts-expect-error`** | **18** |\n\n18 处的分布:\n\n```\n@objectstack/spec      17 处 / 5 文件   <- #5286 的范围\n@objectstack/client     1 处 / 1 文件   <- 本单\n```\n\n具体位置:`packages/client/src/client.test.ts:1283`\n\n```ts\n// @ts-expect-error — empty string rejected at runtime\n```\n\n`packages/client/tsconfig.json` 的 `exclude` 为 `[\"node_modules\", \"dist\", \"**/*.test.ts\"]`,而 `typecheck` 脚本是裸 `tsc --noEmit`(读同一份 tsconfig),vitest 也不做类型检查 —— 与 #5286 完全同一根因,只是换了个包。\n\n对照组(`exclude` 不含测试、指令真的会被求值,无需处理):`@objectstack/cli`(3 处)、`@objectstack/types`(2 处)、`@objectstack/metadata-core`(1 处)、`@objectstack/service-cluster-redis`(1 处)。\n\n## 为什么这不是 #4311 的重复\n\n`scripts/check-type-check-coverage.mjs` 的 `TEST_DEBT` 已经记录了「这些包的测试没被 tsc 读」这一事实(`@objectstack/client`、`@objectstack/rest`、`@objectstack/runtime` 都在册),那是 #4311 的量化欠账。\n\n本单记录的是**另一层**:那片盲区里躺着 18 条**读起来像门禁的断言**。台账说的是「测试没被检查」,没有任何东西说「这些已声明的 pin 是空转的」—— 而 pin 的作者与后来的读者都会当它们是有效守卫。这正是 #5286 命名的 phantom check 类。台账条目消化完之前,这 18 条一直是假绿。\n\n## 处置\n\n取决于 #5286 为 `packages/spec` 定下的机制(`tsconfig.test.json` 双跑 / vitest `typecheck` / 改写为运行时断言),`@objectstack/client` 这 1 处按同一机制跟进即可,不宜独立发明第二套。故标 Blocked-by。\n\n顺带:若 #5286 最终引入「测试文件必须进 tsc」的门禁,建议同时加一条**跨包不变式** —— 任何携带 `@ts-expect-error` 的测试文件都不得落在该包 tsc 的排除区内。有了它,这一类幽灵 pin 就无法再新增,而不必等 24 个包的存量欠账全部还清。\n\n关联:#5286、#4642(更早的同根因单)、#4311(类型检查覆盖台账)。\n"
+}

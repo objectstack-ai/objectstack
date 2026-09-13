@@ -1,0 +1,36 @@
+{
+  "number": 5581,
+  "kind": "issue",
+  "title": "callData 的 delete 成功体两条路径不同形状:protocol 回 `{success:true}`(合规范),ObjectQL 兜底回 `{deleted:true}`(spec 未声明的键)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T19:46:46Z",
+  "updated_at": "2026-08-05T21:54:14Z",
+  "closed_at": "2026-08-05T21:54:14Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5581",
+  "body": "**观察类(`finding`)**:与 #5138 同样的可达性 —— 装了 MetadataPlugin(`@objectstack/metadata-protocol`,注册 `protocol` 槽)的部署走 protocol 优先路径,碰不到兜底。记录在案交分诊定级,不自行判轻重。\n\n实现 #5138(PR 见下)时在同一函数里撞见,**不在该单范围内**(#5138 收敛的是「记录不存在」的答案,这一条是「删除成功」的答案),故另立。\n\n## 事实\n\n`packages/runtime/src/action-execution.ts` 的 `callData('delete', …)` 两条路径回的成功体不是同一个形状:\n\n| 路径 | 返回 | 与 spec |\n|---|---|---|\n| protocol(`deleteData`,`packages/metadata-protocol/src/protocol.ts`) | `{ object, id, success: true }` | 合规范 |\n| ObjectQL 兜底(`action-execution.ts`,`delete` 分支末行) | `{ object, id, deleted: true }` | **`success` 缺失,`deleted` 未声明** |\n\n规范只有一个:\n\n```\npackages/spec/src/api/protocol.zod.ts:472\nexport const DeleteDataResponseSchema = lazySchema(() => z.object({\n  object: z.string().describe('Object name'),\n  id: z.string().describe('Deleted record ID'),\n  success: z.boolean().describe('Whether deletion succeeded'),\n}));\n```\n\n实测(#5138 的复现 harness,同一行数据,唯一差别是注不注册 `protocol` 槽,main @ `c11369013`):\n\n```\nPROTOCOL del (hit): {\"object\":\"task\",\"id\":\"r1\",\"success\":true}\nFALLBACK del (hit): {\"object\":\"task\",\"id\":\"r1\",\"deleted\":true}\n```\n\n## 还有一处文档面与规范相反\n\n`packages/runtime/src/domains/data.ts:102` 的路由注释写的是:\n\n```\n// Spec: returns DeleteDataResponse = { object, id, deleted }\n```\n\n`DeleteDataResponseSchema` 声明的是 `success`,不是 `deleted`。所以这条注释把兜底的形状当成了规范 —— 下一个读它的人(或 agent)会照着 `deleted` 写消费端。同文件 87/94 行的 get/update 注释与各自的 schema 是对上的,只有 delete 这条对不上。\n\n## 为什么值得记\n\n- `DELETE /data/:object/:id` 的成功体因部署是否装 protocol 插件而不同,而调用方无从分辨自己走的是哪条 —— 与 #5138 是同一个「一个 `callData`、两种答案」的家族,只是落在成功侧而非 not-found 侧;\n- 按 `DeleteDataResponseSchema` 写的客户端在精简装配上读到 `success === undefined`,即「删除是否成功」读不出来,而 HTTP 状态是 200;\n- 声明式端点执行器(#5092 / PR #5136)逐字节复用 `/data` 的委派形状,同样原样继承这个分叉;\n- 修点在 `callData` 一处(兜底改回 `success`,或规范改成 `deleted` —— **要拍板哪个是规范**,spec 现物是 `success`),消费者侧各自兼容两种键正是 contract-first 禁止的形状。\n\n## 不在 #5138 处置的原因\n\n#5138 的验收面是「记录不存在时三分支给同一个 404 `RECORD_NOT_FOUND`」,其 PR 已按此收敛并显式保持 `deleted: true` 原样(有测试钉住成功路径未变)。本条要决定的是「删除成功的规范键是 `success` 还是 `deleted`」,是一次独立取舍,且会动到 spec 或所有 `deleted` 的读取方,不适合搭车。"
+}

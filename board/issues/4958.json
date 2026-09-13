@@ -1,0 +1,33 @@
+{
+  "number": 4958,
+  "kind": "issue",
+  "title": "裸控制字节(U+0001)作为分隔符写进源码:不可见、能让 issue 写错前提,而 check:nul-bytes 只拦 0x00",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T17:12:46Z",
+  "updated_at": "2026-08-05T13:03:50Z",
+  "closed_at": "2026-08-05T13:03:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4958",
+  "body": "实施 #4821(PR #4957)时发现,与该 issue 的修复本身不相干,按 Prime Directive #10 单独记录,未在那个 PR 里扩大范围。\n\n## 机制\n\n仓内有三处把**裸控制字节 U+0001 直接写进源码**当复合键分隔符:\n\n| 文件 | 行 | 用途 |\n|:--|:--|:--|\n| `packages/services/service-analytics/src/dataset-executor.ts` | 924(修复前) | 维度合并键 —— 已随 #4821 去掉 |\n| `packages/services/service-analytics/src/strategies/cross-object-rebucket.ts` | 131 | 跨对象重分桶键 |\n| `packages/services/service-storage/src/verify-file-references.ts` | 107 | `object`/`recordId`/`field` 复合键 |\n\n裸控制字符**渲染为空** —— 在终端、在编辑器、在 GitHub issue/PR 正文、在从文件复制出来的\n引文里都一样。它不像 NUL 那样让 grep 把文件判成二进制(所以代码搜索仍然工作),但**任何\n人肉眼读到的都是一个不存在的分隔符**。\n\n## 已经造成的实际损失\n\n#4821 整张 issue 就是这么来的:报告者从 `dataset-executor.ts` 复制出键函数,字节在复制中\n消失,于是正文写成\n\n```ts\ndimensions.map((d) => String(row[d] ?? '')).join('')   // ← 实际是 join(U+0001)\n```\n\n并据此断言 `['ab','c']` 与 `['a','bc']` 同键。**该复现其实不成立**(分隔符一直在)。派发\n前的复核注释基于同一份被吃掉字节的引文,又在其上建了一整套方向裁决。真正的缺陷是另外\n两条(`null` vs `''` 合并、值本身含该字符时碰撞)—— 一张 bug 单从机制到复现到裁决全部\n建立在一个看不见的字节上,直到实施阶段逐字节 `cat -A` 才发现。\n\n`cross-object-rebucket.ts:122` 的注释本身也是这个形状:\n\n```\n// Bucket key = base dims (unchanged) + resolved attributes. `` is a\n// separator no group value contains, matching the engine's own convention.\n```\n\n反引号之间本应是那个字符,读起来是空的 —— 一条自我抹除的注释。\n\n## 与既有门禁的关系\n\n`scripts/check-nul-bytes.mjs` 只拦 **0x00**。它的头注对自己的适用范围有一段很到位的推理\n(#4890:「危害是 *grep* 的属性,不是 JavaScript 的属性」,所以按**载体**而不是按**用途**\n划范围)。同一条推理往前推一步就落到这里:*让读者读到一个不存在的字符* 这件事,是**裸控制\n字符**的属性,不是 NUL 独有的。NUL 的额外危害(grep 判二进制)更重,但不是唯一的危害。\n\n顺带:本会话的 agent harness 也拒绝执行含裸控制字符的命令,写文件时同样会把转义序列\n物化成裸字节 —— 也就是说**工具链本身就会不断重新引入这类字节**,人工守则挡不住。\n\n## 建议方向(需维护者定,故本单不带实现)\n\n1. 把 `check:nul-bytes` 扩成 `check:control-bytes`:拒绝 C0 控制字符(制表 `\\t`、换行\n   `\\n`、回车 `\\r` 除外),要求写成转义序列 —— 与现行 NUL 规则完全同构,运行时字节相同,\n   改动零语义。范围沿用现有的「按载体」判定。\n2. 或维持门禁不变,仅把这两处改写为转义序列并加注释。成本最低,但不能防复发 —— 而复发\n   的代价刚刚以一整张写错前提的 issue 结算过一次。\n\n倾向 (1):这类错误的特征是**写的人和读的人都收不到任何信号**,只有机器能可靠地看见,\n正是门禁而不是约定该管的事。\n\n相关:#4821 / PR #4957(把 `dataset-executor.ts` 那一处改成了长度前缀键,顺带消除了该\n文件对分隔符字符的依赖)、#4890(NUL 门禁按载体划范围的推理)、#3127(六个文件积累同一\n缺陷的原始批次)。"
+}

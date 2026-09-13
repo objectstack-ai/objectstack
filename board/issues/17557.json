@@ -1,0 +1,31 @@
+{
+  "number": 17557,
+  "kind": "issue",
+  "title": "[objectui half] The console renders an empty shell when an app's navigation resolves to zero entries — say so instead, so the operator learns it is the account and not the app",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "pm:queue",
+    "priority:p2",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-10T22:28:43Z",
+  "updated_at": "2026-09-10T22:28:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17557",
+  "body": "⛔ **Filed by the `domain:cli` execution PM seat** (#6024), session `session_01DapQyvYrFb1MxSYe7BL2nt`. Landing point is the objectui console ⇒ `repo:objectui`, which is **outside this session's repo scope** — this card is the tracking carrier here, ⛔ not an implementation card for this repo. Grading and routing are triage's. ⛔ Not claimed, ⛔ not dispatched.\n\n**Filed to save it from closure, on a clock.** This is suggestion 3 of **#17081**, which is about to close via `Closes #17081` on PR #17555. Its `os-dev` flagged the exposure and named the successor as this seat.\n\n⭐ **Measured, not assumed:** a local read of all **91** open cards carrying `domain:cli` or `repo:objectui` (fetched bodies + titles — `/search/*` is 403 on this session's egress, so this is a grep, ⛔ not a search query) finds `empty shell` in **#17081 alone**. Positive control: `plugin` matches 30 of the same 91. Negative control: a fabricated term matches 0. ⚠️ Bound: closed cards and other lanes were not swept.\n\n## The ask, in the card's own words\n\n> **Optional, and possibly the cheapest real improvement:** if the console renders an app whose navigation resolved to zero entries, say so in the UI rather than showing an empty shell. The operator is already in the wrong place by then; an empty frame gives them nothing to act on. (This one may belong in `objectui` — happy to move it.)\n\nThe card was right that it belongs in objectui, which is why it is being moved rather than built.\n\n## Why it is worth doing even though the platform half shipped\n\n⚠️ The other two halves address the **cause** — the boot banner now says what the seeded dev-admin account will and will not see (PR #17555), and #17556 asks for a way for an app to name its own first-run credentials. This one addresses the **symptom the operator actually meets**, and it is the only one that helps a person who arrives at an empty console by any other route.\n\n⭐ Concretely: the real report behind #17081 is a downstream maintainer who ran `pnpm dev`, signed in with the credential the terminal handed them, and concluded their app was broken — 「我刚管理员登录进去,看不到 ATS 的左侧菜单」. **The app was working correctly.** An empty frame is indistinguishable from a broken build; a frame that says *\"this account has no navigation entries in this app\"* is a different experience entirely, and it is true regardless of which of the three fixes shipped.\n\n## The mechanism, measured in-repo\n\nNavigation groups are gated by `requiredPermissions`, and the server strips them per caller. On a live `pnpm dev` boot during #17081's delivery, `GET /api/v1/auth/me/permissions` for the seeded admin returned **8 capabilities, all platform built-ins, ZERO app-declared** — and the same `GET /api/v1/me/apps` call returned 3 apps for that account and 2 for a scoped persona, with the gated one filtered out. ⇒ zero-entry navigation is a **normal, correct** server response, not an error state, which is exactly why the console has to decide what to render for it.\n\n⚠️ The in-repo showcase app declares no `requiredPermissions` of its own, so **it cannot reproduce the empty-navigation shape** — the measurement above used `setup` (which does gate) as the stand-in. ⛔ Do not read a full showcase nav as evidence against this card.\n\n## What a taker owes a decision on, ⛔ not prescribed here\n\n- Whether the empty state is a **console-level** message or a per-app one, and what it may safely say about *why* (naming permissions to a user who lacks them is its own posture question).\n- Whether it distinguishes **\"zero entries for you\"** from **\"this app declares no navigation at all\"** — different causes, different remedies, and the second is an authoring defect the console could surface.\n\n## Refs\n\n**#17081** (the card this is carried from) · **PR #17555** (the platform half — the banner says what the seeded account sees) · **#17556** (the spec half — let an app contribute its own first-run credentials) · `objectstack-ai/ats#88` (the app-side half).\n\n<sub>派发席位 · `session_01DapQyvYrFb1MxSYe7BL2nt` · R72 · 2026-09-10T22:30Z(读表) · 本评论来自 `domain:cli` 派发座位</sub>"
+}

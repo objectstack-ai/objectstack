@@ -1,0 +1,35 @@
+{
+  "number": 5422,
+  "kind": "pull_request",
+  "title": "fix(lint): `translation-target-unknown` 读取视图容器的默认 `form.sections` (#5415)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T11:02:14Z",
+  "updated_at": "2026-08-05T11:17:33Z",
+  "closed_at": "2026-08-05T11:17:30Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T11:17:30Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5422",
+  "body": "Fixes #5415\n\n## 前提复核(改之前先证伪)\n\n按正文在 `origin/main`(切 worktree 时 `9fad07f66`,issue 钉的是 `b4872a868`,两者之间未触 `packages/lint`)重跑了 showcase 复现:直接 import 真实的 `examples/app-showcase/src/ui/views/contact.view.ts`,把正确翻译 `showcase_contact._sections.contact` 的 bundle 喂给 `validateTranslationReferences`,输出与 issue 正文**逐字一致**:\n\n```\nrule:     translation-target-unknown\nseverity: warning\nwhere:    locale \"zh-CN\" · object \"showcase_contact\" · section \"contact\"\nmessage:  Translations are keyed to section \"contact\", which nothing on object\n          \"showcase_contact\" declares — no `fieldGroups[].key`, no named form-view\n          section, no named `record:details` section. ...\nhint:     ... Object \"showcase_contact\" declares no named section at all.\n```\n\n前提成立。\n\n## 改了什么\n\n`collectViewRecord` 原本从四个锚点收集对象的合法 `_sections` 名:`fieldGroups[].key`、`listViews.*` / `formViews.*` 的具名段落、页面 `record:details` 的具名段落、以及视图记录自身的 `sections`。容器的**默认 `form`**(`defineView({ list, form, formViews })` 里那个、没有指定具名表单视图时 `ObjectForm` 渲染的那个)哪一条都不是 —— 循环写死 `['listViews', 'formViews']`,而它既不在其中、也不是记录自身的 `sections`,于是 `view.form.sections[].name` 对事实集**零贡献**。\n\n现在默认 `form` 走与 `formViews.*` 完全相同的段落收集路径,绑定取 `bindingOf(view.form) ?? listBinding` —— 即先 `form.data.object`、再记录级对象、最后旁边那个 list 的绑定 —— 与 CLI i18n walker 的 `viewObjectName` 对 `view.form.data.object` 的解析对齐。这正是 #5405 要建立的集合关系(覆盖走查器**要求**的 key ⊆ 引用校验器**接受**的 key)在 lint 侧的那一半。\n\n顺带把四处段落收集收敛成一个 `addSections` 收集器:锚点清单从此是「一串调用点」,而不是四份会各自漂移的循环副本。\n\n**没有任何收紧**:无名段落依旧不可翻译(它没有可查的稳定 key),任何锚点都没声明的 `_sections` key 依旧上报 —— 只是 hint 现在会列出真实存在的锚点,而不再断言「declares no named section at all」。\n\n未触 `_views` 族(#5164 领地),未触 `packages/lint/src/index.ts`(PR #5416 在队列中触该文件)。\n\n## 测试\n\n`packages/lint/src/validate-translation-references.test.ts` 新增 4 例:\n\n1. **默认 `form` 的具名段落可解析**(合成最小形状)。\n2. **默认 `form` 按自己的 `data` 绑定,而不是旁边的 list** —— 一个 stack 里同时断言两个方向。只断言「`crm_lead` 仍被上报」是**不可证伪**的:在修复前它同样通过,因为默认 form 什么都没贡献(空集合让断言\"通过\"的经典陷阱);是 `crm_contact` 那一半让这一对有了方向。\n3. + 4. **真实 showcase 元数据**(`import { Contact }` + `import { ContactViews }`)。选真实 import 而不是手工缩写:缺陷本身就是「锚点清单漏了一项」,手写 fixture 只能钉住作者记得的锚点。而这个面恰好是暴露它的形状 —— 对象只声明 `field.group`、没有 `fieldGroups[]`,所以**默认 form 是它唯一的段落锚点**。一例钉四个具名段落全部被接受;一例是防过度放宽的反例:`contract`(`contact` 的错拼)与 `who_is_this`(`formViews.create` 那个**无名**段落的 label)两个 key 仍各上报一条,且 hint 改口列出 `Declared sections: contact, notes, status, work`。\n\n按车道口径,两条真实元数据 import 的用例显式 `}, 60_000)`。\n\n### 反向验证(方向先预判,再跑)\n\n预判:删掉新加的这一条 limb,4 条新用例应**全红**(这是纯放宽,不存在 #5018 那种反转,也不存在 #5046 那种「计数从 1 变 0 反而多出诊断」)。实测一致:\n\n```\n× resolves a section named on the container default `form` 12ms\n× binds the default `form` by its OWN data, not by the list beside it 2ms\n× accepts every section the default form names 3ms\n× still reports a section name nothing declares, and names the real ones 5ms\nAssertionError: expected [ { severity: 'warning', …(5) } ] to deeply equal []\nAssertionError: expected 'Sections are translatable only throug…' to contain 'Declared sections: contact, notes, st…'\nTests  4 failed | 24 passed (28)\n```\n\n恢复 limb 后:\n\n```\npnpm --filter @objectstack/lint test        →  Test Files 57 passed | Tests 1202 passed (1202)\npnpm --filter @objectstack/lint typecheck   →  tsc --noEmit (clean)\npnpm --filter @objectstack/lint build       →  DTS Build success\nnpx eslint <两个改动文件> --no-inline-config  →  clean\nnode scripts/check-nul-bytes.mjs            →  OK (5429 files)\n```\n\n消费半径已按规则的调用点(而非改动包)扫过:`translation-target-unknown` / `validateTranslationReferences` 仅由 `packages/lint` 内的 `reference-integrity-suite` + `index.ts` 消费,全仓 `_sections` 的 fixture 只出现在本规则的测试与 `packages/spec` 的 translation schema 测试里 —— 没有 #5046 那种跨包 fixture 需要同步。\n\n### 关于 #5416\n\n切 worktree 时 PR #5416(#5405)尚未合入 `main`,故按分诊口径**跳过**「走查器要求 ⊆ 校验器接受」的集合断言,不为它引入跨分支依赖;本修复不依赖 #5416。#5416 落地后可在其上补该断言。\n\n## 越界发现(已另开 issue,未在本 PR 修)\n\n- #5420 — `ContactViews` 在 `examples/app-showcase/objectstack.config.ts` 的 `views` 里**从未注册**(barrel 导出了、config 第 23/196 行漏了),而 app 导航有 `nav_contacts`、文档 `content/docs/ui/create-vs-edit-form.mdx` 又把该文件列为活参考实现。本 PR 的 fixture 直接 import 该模块,不依赖 showcase 注册。\n- #5421 — `packages/lint/src/runtime-lazy-deps.test.ts` 的 in-process 用例用默认 5s 超时(同文件的冷加载兄弟用例已带 `COLD_LOAD_TIMEOUT_MS`),负载下 4 跑 2 挂,与本改动无关。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016FNvXhtSdnEGEfLEsMmvxh\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016FNvXhtSdnEGEfLEsMmvxh)_"
+}

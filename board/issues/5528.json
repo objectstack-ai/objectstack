@@ -1,0 +1,37 @@
+{
+  "number": 5528,
+  "kind": "issue",
+  "title": "止血(service-analytics):`recoverNumber` 只还原规范数字串 —— `'007'` / `'1.50'` 这类保留原写法的字符串比较数不再被降级成数字",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T15:37:35Z",
+  "updated_at": "2026-08-05T17:29:29Z",
+  "closed_at": "2026-08-05T17:29:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5528",
+  "body": "从 #5526 拆出的**止血单**(其路线 C)。根因 —— `values: string[]` 往返编码对非字符串类型有损,路线 A(tagged 编码)/ B(内部表示改 `unknown[]`)—— 在 #5526 等维护者拍板;**本单不裁根因**,只挡住已实测的真实业务形状(零填充订单号 / SKU / 邮编、带尾零的价格串)。\n\n## 位置\n\n`packages/services/service-analytics/src/strategies/filter-normalizer.ts`:`recoverNumber` 的正则 `/^-?\\d+(\\.\\d+)?$/` 及其在 `coerceFilterValueForSql` / `coerceFilterValueForObjectQL` 中的消费。\n\n## 改法\n\n仅当字符串是**规范数字形**(`String(Number(s)) === s`)才还原为数字:\n\n- `'7'` → `7`、`'1.5'` → `1.5`(真数字往返不回退);\n- `'007'`、`'0912'`、`'1.50'` **保持字符串**(它们保留了 `Number()` 往返会丢失的原写法信息,只可能是作者笔下的字符串);\n- `'null'` / `'true'` / `'false'` 的 token 撞车**不在本单**(那是编码层面的根因,#5526 裁)。\n\n## 验收\n\n- #5526 实测表:`{code: {$eq: '007'}}` 两条路径(SQL 绑定 + 引擎比较数)都绑 `'007'` 字符串;`'1.50'` 同理;\n- 行集用例:文本列存 `'007'` 的行能被 `{$eq: '007'}` 取到(现状零行);\n- 真数字比较数(`{$eq: 7}` 经 stringify → `'7'`)行为不变;\n- 两个 coercer 同步改、同步测。\n\nBlocked-by: https://github.com/objectstack-ai/objectstack/pull/5525(同文件 `filter-normalizer.ts`,按同文件串行规则先等它落地)\n\nPart of #5526"
+}

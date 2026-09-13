@@ -1,0 +1,36 @@
+{
+  "number": 5589,
+  "kind": "issue",
+  "title": "driver-sql 的 LIKE 转义(自标 P0 的过滤器旁路)只在 SQLite 上验证过 —— live PG + MySQL 矩阵已存在、testkit 也已存在,LIKE 族一个用例都没接进去",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "tests"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T19:56:55Z",
+  "updated_at": "2026-08-05T23:19:33Z",
+  "closed_at": "2026-08-05T22:40:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5589",
+  "body": "做 #5567(analytics 三个 SQL 编译器不转义 LIKE 比较值)时,为了给 PR 里的「方言确认」找一个能站住的断言面,去查 `LIKE … ESCAPE` 在本仓到底被哪些引擎跑过。发现的覆盖缺口,按 Prime Directive #10 单独记在这里,unassigned。\n\n**不属于 #5567 的范围面**:那一单裁的是 analytics 三个编译器**自己**不转义(已修,PR #5587);本条裁的是 `driver-sql` 那份**正确实现**的验证面只覆盖三个已发布方言中的一个。两者都不是「逻辑错」——本条目前没有已知的错误行为,所以是 observation-class。\n\n## 事实\n\n`driver-sql` 的 `applyLike`(`packages/plugins/driver-sql/src/sql-driver.ts` ~:6276)转义 `\\` / `%` / `_` 并绑显式 `ESCAPE ?`,它头上的注释自己把未转义的 `%` 标为 **P0 过滤器旁路**:\n\n```\n`%` matches every row (a filter-bypass, P0). Binds an explicit `ESCAPE '\\'`\n```\n\n它的回归守卫是 `packages/plugins/driver-sql/src/sql-driver-like-escape.test.ts`(文件头写着 \"P0-3 regression\")。该文件**硬编码单一方言**:\n\n```ts\ndriver = new SqlDriver({\n  client: 'better-sqlite3',\n  connection: { filename: ':memory:' },\n  useNullAsDefault: true,\n});\n```\n\n而 CI 里**已经有** live Postgres 16 + MySQL 8.0 的服务容器作业(`.github/workflows/ci.yml`,`Temporal Conformance (live PG + MySQL)`),它注入 `OS_TEST_POSTGRES_URL` / `OS_TEST_MYSQL_URL`,并且跑的就是**整个 driver-sql 套件**:\n\n```\npnpm --filter @objectstack/driver-sql test\n```\n\n也就是说这个守卫**在那个作业里也跑了**,只是因为自己写死了 client,仍然只在 SQLite 上跑一遍。\n\n实测:driver-sql 里读那两个 URL 的测试文件共 8 个,其中提及 `$contains` / `LIKE` / `startsWith` / `endsWith` 的有 **0 个**:\n\n```\n$ grep -rln \"OS_TEST_POSTGRES_URL\\|OS_TEST_MYSQL_URL\" packages/plugins/driver-sql/src/\nsql-driver-temporal-conformance.test.ts\nlive-dialect-matrix.testkit.ts\nsql-driver-or-filter.test.ts\nsql-driver-pagination-conformance.test.ts\nsql-driver-date-now-default-live.test.ts\nsql-driver-datetime-postgres-timezone.test.ts\nsql-driver-datetime-mysql-storage.test.ts\nsql-driver-time-live-dialects.test.ts\n→ 其中含 LIKE 族的:0 个\n```\n\n注意 `live-dialect-matrix.testkit.ts` 已经是一个**可复用的方言矩阵 testkit**(ADR-0053 D-A3 那条轴用的),所以缺的不是基础设施,只是没人把 LIKE 族接上去。\n\n## 为什么值得记一笔\n\n1. **方言差异在这条路径上是真实的,不是理论的。** 三家默认转义符不一致 —— PG 默认反斜杠、MySQL 默认 `\\`(除非 `NO_BACKSLASH_ESCAPES`)、SQLite **没有**默认转义符。`applyLike` 的注释正是靠这一点解释它为什么必须绑显式 `ESCAPE`。恰恰是「唯一没有默认转义符」的那一个,成了唯一被跑到的那一个:守卫覆盖的是差异最小的一端。\n2. **MySQL 那一侧多一条文档约束没人验证过。** MySQL 手册说 `ESCAPE` 的实参 \"must evaluate as a constant at execution time\"。`applyLike` 绑的是占位符 `ESCAPE ?`;经 knex + mysql2 的默认 `query()` 路径它会被客户端插值成字面量(因此满足该条件),但这是**推断**,不是实测 —— 而且它依赖 mysql2 走 `query()` 而不是 server-side prepared `execute()`。若哪天该路径改成真正的服务端预处理语句,这条约束是否仍满足,没有任何用例会告诉我们。\n3. **同一个 P0 的另一半刚刚才被发现过一次。** #5567 证明这族 pattern 拼接的缺陷会在同一个仓里被重新犯一遍(analytics 三处,全部漏)。一个只覆盖 1/3 方言的守卫,对「换个方言重新犯一遍」是看不见的。\n4. **不是「declared ≠ enforced」的代码面,而是它的测试面。** 实现是对的;被断言的只是它在一个引擎上是对的。\n\n## 建议(不代裁决)\n\n把 `sql-driver-like-escape.test.ts` 的三个用例(字面 `%` / 字面 `_` / 普通子串)接到已有的 `live-dialect-matrix.testkit.ts` 上,再补一条**字面 `\\`** 的用例 —— 后者是三方言分歧最大的一格(SQLite 上 `\\` 本就是字面量,PG/MySQL 上它是默认转义符),也是 #5587 里唯一只能靠文档 + 模拟论证、无法在 SQLite 上做前红后绿的一格。URL 缺失时按现有惯例 skip,`OS_EXPECT_LIVE_DIALECT_MATRIX` 已经负责把「本该跑却 skip」变成命名的红。\n\n## 未验证的部分\n\n- 没有在真实 PG / MySQL 上跑过任何 LIKE 用例(本条正是这个缺口本身),所以**不声称**那两个方言上今天有错误行为;文档口径与 SQLite 实测都指向 `applyLike` 是对的。\n- 没有核实 knex + mysql2 在本仓配置下是否可能走服务端预处理路径(上面第 2 点的前提)。\n- 严重度请 PM 按 triage 定:按「今天没有用户会撞到」记为 observation-class(`finding`,不入 `pm:queue`),但它守的是一条被自己标为 P0 的旁路,所以两个方向都不敢自判 —— 只把实测摆在这里。\n\n关联:#5567 / PR #5587(analytics 侧同族缺陷,本条在其「方言确认」环节被发现)、#4191(ADR-0053 D-A3 storage-form 轴的同类覆盖缺口 —— **不同范围面**,那条是 `Field.datetime` / `Field.time` 的存储形态,不含 LIKE,故本条独立立单而非挂为其子单)、#5499(冻结裁决明确 `driver-sql` **不**在冻结范围)。"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 5416,
+  "kind": "pull_request",
+  "title": "fix(cli): i18n 覆盖走查收集 `objects.*._sections` —— 段落标题不再是「声明了、渲染了、却零告警」的面 (#5405)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T10:23:30Z",
+  "updated_at": "2026-08-05T11:21:34Z",
+  "closed_at": "2026-08-05T11:21:32Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T11:21:32Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5416",
+  "body": "Fixes #5405\n\n> 正文刻意不写 `&lt;` 紧跟字母的写法(GitHub 正文清洗器会把它当 HTML 标签吞掉)。占位符一律写成 `{type}` / `{slot}` 形式。\n\n## 前提核验(先证伪,再动手)\n\n按 rule 6 对 `origin/main`(`b4872a868`)逐条验证 issue 正文,三条全部成立:\n\n- `grep -c \"_sections\" packages/cli/src/utils/i18n-extract.ts` → `0`;反查对照组 `_views` → `9`、`fieldGroups` → `0`。零命中不是 grep 失灵。\n- `ExpectedEntry['source']` 联合类型(`i18n-extract.ts:96-111`)确无 `section`;两个 `metadataForm*` 项走的是 `metadataForms.{type}.sections.*` 这条 Studio 元数据表单命名空间,与 app object 无关。\n- `COVERAGE_SOURCE`(`i18n-coverage.ts`)照抄同一联合,`computeI18nCoverage` 结构上不可能报出缺失的段落标题。\n\n反向面同样核实过:声明面 `ObjectTranslationDataSchema._sections`(`packages/spec/src/system/translation.zod.ts:216`,并把 `sections` 列为 authoring alias);消费面 `@object-ui/i18n` 的 `sectionLabel`(`useObjectLabel.ts:397-400`)被 `plugin-detail` 的 `record:details`、`plugin-form` 的 `ObjectForm`/`ModalForm`、以及 `ObjectFormDesigner` 三处读取。**只有走查器不知道这个面存在。**\n\n## 改法\n\n新增 `section` kind,双源取齐,同一 (object, section) 只产一个 key:\n\n**(a) `fieldGroups` × 字段 `group`。** 经 `deriveFieldGroupLayout`(ADR-0085 §5)判定 —— 这正是渲染端自己消费的那份共享推导(`plugin-detail` 的 `deriveFieldGroupDetailSections` 把它的 `key` 直接映射成 `sectionLabel(object, name, …)` 查的那个 `name`)。因此:没有可见字段引用的已声明分组不出 key,`fieldGroups` 未声明的 `group:` 也不出 key,尾部无 key 的 ungrouped 桶不出 key —— 屏幕上不存在的标题,不该记一笔翻译债。`fieldGroups[].label` 供默认语言文本;分组自身没写 `label` 时仍产出脚手架 key(种子退回分组名),但 `inline` 留空,覆盖门不去追一句没人写过的话。\n\n**(b) 具名 `sections[]`。** 表单视图(含容器的默认 `form`)与记录页组件树。无 `name` 的段落一律跳过 —— 每个渲染端都把查表挂在它上面(`s?.name ? sectionLabel(…) : s?.label`),没有 `name` 就是构造性不可翻译。\n\n`COVERAGE_SOURCE` 映射之,`os lint` 得到 `i18n/missing-section` 类别,落在用户桶而非平台桶(不需要 `--include-platform` 才看得见);`os i18n extract` 的骨架经共享走查器免费获得。\n\n### 页面这半边:复用,而不是再抄一份\n\n页面段落走 `@objectstack/lint` 的 `walkPageComponents`(本 PR 顺带把它连同 `isSourceAuthoredPage` / `WalkedComponent` 从 lint 的 index 导出)。`page-walk.ts` 的模块头就写着它为何独此一份:重复实现已经造出过一条死规则(#3583)。复用不只是 DRY,它是这半边**正确**与**仅仅存在**的分界:\n\n- 组件挂在 `regions[].components` **和** `slots.{slot}`(后者可以是裸组件而非数组);\n- 子树藏在无类型的 `properties` 袋里(`page:tabs` → `properties.items[].children[]`,`page:card` → `properties.body`/`.footer`)—— 也就是 issue 点名的那层深嵌套;\n- `kind: 'html' | 'react' | 'jsx'` 的页面,`regions` 只是 `source` 的派生缓存,拿它刮 key 等于凭空发明一个作者面;\n- 每个组件解析**自己**的绑定(`dataSource.object` → `properties.object` → 页面 `object`)。这条比「漏」更要紧:被 `dataSource` 改绑到别的对象的 `record:details`,若按页面对象记 key,产出的是一个解析器永远不读的**错**路径。\n\n## 验证\n\n```\npnpm --filter @objectstack/cli exec vitest run --maxWorkers=2\n  Test Files  78 passed (78)      Tests  749 passed (749)\n\npnpm --filter @objectstack/lint test\n  Test Files  57 passed (57)      Tests  1198 passed (1198)\n\npnpm --filter @objectstack/cli --filter @objectstack/lint typecheck\n  packages/lint typecheck: Done\n  packages/cli typecheck: Done\n```\n\n新增 `packages/cli/test/i18n-section-coverage.test.ts`(22 例)。\n\n**反向核验 —— 方向是先判后跑,结果是常规的「红」:** 这是补一个从未存在的面,不是收窄既有规则,所以预判为「注释掉 `walkObjectSections(config, out)` 调用 → 新用例转红」。实测 `16 failed | 4 passed`,方向吻合。那 4 例正是断言「不该产出」的负向用例 —— 它们在删除态下**因为什么都没产出而绿**,即 PR #5046 记录的空集假绿。据此逐条整改,而不是留给下一个读者踩:\n\n- 「区域名不当作段落名」与「未绑定对象的页面跳过」两例,各自补上同配置下的正向断言(同一个 region 里放一个真段落 / 同一个组件挂到一个绑定了对象的页面上),现在它们无法靠「什么都没有」通过;\n- 「无 `name` 的段落跳过」由同 describe 首例的精确 `toEqual([三个 key])` 兜住,负向断言只是把意图写明;\n- 「单语项目零告警」是刻意的 opt-in 不变量,同一对象的正向覆盖用例就在上面。\n\n**对账锚(声明即强制),两面各一处:**\n\n- **声明面** —— 把 `extractTranslations` 产出的 bundle 直接喂给 `ObjectTranslationDataSchema.safeParse`,要求全绿且 `_sections` 键集合精确匹配。走查器若发明了拼写(`sections` / `_section` / `.title`),在这里被严格 schema 当场拒绝,而不是安静地刮出一堆 bundle 合法性存疑的 key。\n- **消费面** —— 断言字段分组产出的 key 集合 **等于** `deriveFieldGroupLayout` 自己返回的有 key 段落集合。渲染端消费的就是这份推导,于是「声明的」与「被门禁的」是同一个集合,而不是两张会漂移的清单。\n\n**真实取数** —— 直接 import 仓内示例 app 的两个模块,不造假数据:`examples/app-showcase/src/ui/views/contact.view.ts`(容器默认 `form` 的四个具名段落 `contact`/`work`/`status`/`notes`,绑 `showcase_contact`)与 `examples/app-showcase/src/data/objects/semantic-zoo.object.ts`(`fieldGroups: basics/money`,两者都被真实字段的 `group:` 引用),断言六个 key 一个不多一个不少。按车道纪律该用例显式 `}, 60_000)`。\n\n## 越界与顺带发现\n\n- ⛔ 未触碰 `_views` 族的任何拼写/键逻辑(#5164 领地),未触碰 `commands/doctor.ts`(在飞 #5412)。\n- **唯一一处越出 PM 声明文件面**:`packages/lint/src/index.ts` 增加一行导出。理由如上 —— 另一个选择是在 cli 里再抄一份页面走查,而那正是 `page-walk.ts` 存在的目的所反对的,且会丢掉按组件解析绑定这条正确性。`packages/lint` 无 API 基线门禁,全量 1198 例通过。\n- **顺带发现,已单独立 issue #5415(未在本 PR 修)**:`packages/lint` 的 `validate-translation-references` 在收集 `_sections` 事实时,`collectViewRecord` 只遍历 `['listViews', 'formViews']`,**漏掉视图容器的默认 `form.sections`**。实测:给 `showcase_contact` 正确翻译一个真实渲染的段落标题,会被报 `translation-target-unknown`,措辞还是「该对象根本没有具名段落」—— 建议作者删掉一个能用的翻译。本 PR 落地后二者会在真实 showcase 元数据上互相打架(extract 刮出的 key 立刻被 lint 判为未知目标),所以现在就记了下来。应有的集合关系是:覆盖走查器**要求**的每个 key,都必须是引用校验器**接受**的 key。"
+}

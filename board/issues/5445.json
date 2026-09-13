@@ -1,0 +1,35 @@
+{
+  "number": 5445,
+  "kind": "pull_request",
+  "title": "fix(driver-memory): analytics 面的 `$notContains` 编译成真正排除行的谓词,而不是不约束任何行的裸 `{$not: 'x'}` (#5374)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T11:55:43Z",
+  "updated_at": "2026-08-05T12:10:50Z",
+  "closed_at": "2026-08-05T12:10:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T12:10:49Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5445",
+  "body": "Fixes #5374\n\n`MemoryAnalyticsService` 把每个 cube 算子映射成一个 mingo 算子的**名字**,调用点再把这个名字填成 `matchStage[field] = {[name]: comparand}`。这个形状只能表达「拿这个字段和这个值比」,别的都表达不了 —— 于是那两个需要**包装**比较数的算子被硬塞了进去。\n\n`notContains` → `'$not'` 编译出 `{name: {$not: 'et'}}`。mingo 的 `$not` 期望正则或算子表达式,给它一个裸标量时它不构成约束,所以谓词**生成了、在管线里看得见、然后放过了全表**:3 行,而 `find()` 是 2 行。对作者而言,一个「生成了但不起作用」的谓词和一个正确的谓词完全不可区分 —— 与 #3948 同一个放大方向,只是第三次从另一个地方到达。\n\n这也是同一张面上第三个独立的层:#5345 裁的是**没有映射**的算子,#5373 裁的是**比较数编码**,这一条是**有映射但指向了错的目标**。#5431 没有让它变小:那个调用点现在收到的是真实值而不是字符串化的值,但那与算子层做了什么正交。\n\n## 采用的路线\n\nissue 给了两条:调用点包装,或者让映射表返回一个**结构**而不是算子名。选了后者 —— issue 本身倾向它,代码也确实支撑得起。\n\n`CUBE_OPERATOR_TO_MONGO_PREDICATE` 每个算子持有一个 builder,返回整个 `{$op: …}` 对象。于是 `notContains` 可以说 `{$not: {$regex: …}}`,而「这个算子需要一个结构,可表里只放得下一个名字」这一**类**问题消失了,而不只是这一个实例。调用点原本为 `$in` / `$nin` / `$lte` / `$exists` 长出来的那串 `if`,现在都是这张表里的普通行。\n\n## 实测(issue 的 3 行固定数据,analytics vs `find()`)\n\n| `where` | 修复前 | 修复后 | `find()` |\n|---|---|---|---|\n| `{name: {$notContains: 'et'}}` | **3** | 2 | 2 |\n| `{name: {$notContains: 'a'}}` | **3** | 0 | 0 |\n| `{name: {$contains: 'a.p'}}` | **1** | 0 | 0 |\n| `{name: {$contains: 'ALPHA'}}` | **0** | 1 | 1 |\n| `{name: {$notContains: 'ALPHA'}}` | **3** | 2 | 2 |\n| `{made_at: {$contains: '(完整 ISO)'}}` | **1** | 0 | 0 |\n| `{code: {$in: []}}` | **3** | 0 | 0 |\n| `{code: []}` | **3** | 0 | 0 |\n\n## 同一调用点上另外三处,一并关掉了\n\n不是扩范围 —— 要写出一个**正确的** `notContains`,这三条每一条都必须先裁掉:\n\n- **`contains` 的比较数是原样进去的。** 算子映射本身没错,但比较数既没转义(`.` 变成了通配符)也没折叠大小写,而 live query path 是 `escapeRegex` + `/…/i`。只修 `notContains` 而不管这个,两者会以一种新的方式**不互补** —— `alpha` 会同时出现在两边的答案里。所以子串规则改成**向 driver 借**(新增窄接口 `filterSubstringPattern`,与 `filterComparandStorageForm` 并列),而不是在这里重新推导一遍(#5240)。\n- **不是比较数的操作数也走了存储形式转换。** 于是在声明为 `datetime` 的列上,`$contains` 的**模式串本身**被改写成了 canonical 形式,然后匹配上了 `find()` 匹配不到的行。builder 的入参因此带两份列表,与 `normalizeFieldOperators` 做的是同一个切分(#4047)。\n- **调用点的 `values.length > 0` 守卫**让空 `$in` 一个谓词都不生成,直接放大到全表。一个「取整个列表」的算子没有什么可守的。\n\n## issue 里标为「未实测」的两条,已经裁了\n\n- **`'inDateRange': '$gte'`**:今天**什么都编译不出来**。没有任何 `MONGO_TO_CUBE_OPERATOR` 条目降级到这个名字,`timeDimensions` 走的是 Stage 2、根本不经过这个函数,而两个出口都只消费 `normalizeFilters` 的输出。所以它是死的 —— 并且**万一**被走到还是错的(用单边 `>=` 回答一个双端区间,这一点它自己的注释也承认了 \"Will need special handling\")。删掉了,同时删掉旁边同样是死的、并且方向反了的 `'notSet': '$exists'`。\n- **`opMap[operator] || '$eq'`**:出于同样的理由不可达 —— 但只是在**有人拓宽词表之前**,而 #5345 恰恰刻意把拓宽做成了对 `MONGO_TO_CUBE_OPERATOR` 的一行编辑。所以不只是删掉:那张表现在是 `as const`,谓词表的键类型是从它派生出来的算子 union,于是那一行拓宽编辑**编译不过**,直到对应的谓词写出来为止。剩下的那个 throw 是全域性的兜底(totality floor),不是 fallback。\n\n这一点是本 PR 长期价值的所在:兜底不再是「不可达」,而是「不必要」—— 全域性被**证明**了,而不是被**防守**。对 AI 写的元数据尤其重要:宽容的消费端正是 AI 生成的错误藏身并繁殖的地方。\n\n## 测试\n\n放在共享的 conformance 文件里,紧挨着 #5345 的 shape 表和 #5373 的比较数类型表,作为**第三条轴**,持有同一个不变量:与 `find()` 一致,或者拒收,绝不给出第三个更安静的答案。\n\n外加「declared = enforced」那一半:`ANALYTICS_FILTER_CAPABILITIES` 声明的**每一个**算子都被驱动着走两条路并必须一致,且探针必须至少排除一行(否则「一致」什么也证明不了 —— 那正是本 bug 的形状)。往词表里加算子却没有可用的降级,现在会在这里失败,而不是发布一个安静的错数字。\n\n只回退源码改动(保留测试),新断言失败 14 条:\n\n```\n × $notContains excludes the rows that contain the comparand\n × a $notContains that matches every row selects none of them\n × $contains treats a metacharacter as a literal\n × $contains is case-insensitive, as the live path is\n × $notContains is case-insensitive, as the live path is\n × $contains matches a mixed-case comparand\n × $contains does not rewrite its pattern into a datetime storage form\n × $notContains does not rewrite its pattern either\n × $notContains over a column holding nulls\n × an empty $in selects nothing\n × an empty implicit-equality list selects nothing\n × $contains and $notContains partition the table for every comparand\n × every operator this face DECLARES compiles to a predicate that agrees with find()\n × the emitted $match wraps the negation around a pattern instead of a bare scalar\n Tests  14 failed | 74 passed (88)\n```\n\n各门实际输出:\n\n```\npnpm --filter @objectstack/driver-memory typecheck   -> tsc --noEmit, 无输出\nnpx eslint packages/plugins/driver-memory/src        -> LINT OK\npnpm --filter @objectstack/driver-memory test        -> Test Files 17 passed (17) / Tests 512 passed (512)\npnpm --filter @objectstack/service-analytics test    -> Test Files 47 passed (47) / Tests 745 passed (745)\n```\n\n`packages/runtime` 的 suite 在本 worktree 里因为工作区依赖未构建而整文件 import 失败(`Failed to resolve entry for package \"@objectstack/objectql\"` 等)。把本改动 stash 掉后失败**完全相同**,与本 diff 无关。\n\n## 范围之外,已单独立项\n\n- **#5440** —— 同一字段上的多个算子互相覆盖(`{qty: {$gte:150, $lte:250}}` 取到 `[1,2]`,`find()` 取到 `[2]`)。在 `$match` **组装**层,本 PR 之后依然完整存在;正确的修法需要一份等价于 live path `_multiRegex` → `$and` 的提升,是独立的一块。\n- **#5442** —— `flattenFilterCondition` 对所有算子一律摊平数组比较数,`{qty: {$eq: [100]}}` 变成 `$eq: 100`(`find()` 0 行,analytics 2 行)。在更上游的降级层。\n- **#5444** —— `generateSql` 把 `contains` 回显成 `LIKE 'et'`(没有 `%` 通配符),回显的是等值匹配、执行的是子串匹配。作为 **#5433 的 sub-issue**,因为修复落点完全在 #5433 的完成范围内(同一个 `operatorToSql` + 同一个 WHERE 构建循环)。\n\n`operatorToSql` 与 `generateSql` **一个字节都没动** —— #5433 是同一类缺陷在**另一个出口**上,刻意不打包在一起。`packages/spec`、`service-analytics` 同样未触碰。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Pbu27iNUfQCHeuS551Rqo7\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Pbu27iNUfQCHeuS551Rqo7)_"
+}

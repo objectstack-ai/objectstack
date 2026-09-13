@@ -1,0 +1,35 @@
+{
+  "number": 5365,
+  "kind": "pull_request",
+  "title": "fix(service-analytics): 空 $and/$or 按布尔单位元归约,两个编译器对齐五后端,四条进一致性表 (#5322)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T01:24:01Z",
+  "updated_at": "2026-08-05T04:33:22Z",
+  "closed_at": "2026-08-05T04:33:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T04:33:21Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5365",
+  "body": "Fixes #5322\n\n## 拍板依据\n\n2026-08-04 维护者拍板(#5322 评论):采纳主案 **取布尔单位元,service-analytics 两处对齐**。publish/lint 编写期对字面量空组合子的响亮拒收另立 #5330,⛔ 不在本单范围。按 spec 车道链序,本 PR 排在 #5323(driver-mongodb 归约)之后合入。\n\n## 前提复核 — 两轮实测矩阵(sql.js 逐行执行,非推断)\n\nissue 正文矩阵是 @ `175d789` 的,已过时。实测两轮:\n\n**第一轮(base `f1cc3a316`)**:read-scope-sql 的后两格已由 #5297/#5326 修复;normalizer 四格全错。\n\n**第二轮(#5335 于 00:00Z 合入 main 后重测,base `c89d18c16`)**——#5335 把 normalizer 的后两格也修了:\n\n| 编译器 @ merged main | `{$and:[]}` | `{$or:[]}` | `{$or:[{a:'x'},{}]}` | `{$not:{}}` |\n|---|---|---|---|---|\n| 期望(#5134/#5322) | 全部行 | 零行 | 全部行 | 零行 |\n| `read-scope-sql` | **抛错** | **抛错** | 全部行 ✓(#5297/#5326) | 零行 ✓ |\n| `filter-normalizer` | **抛错** | **抛错** | 全部行 ✓(#5335) | 零行 ✓(#5335) |\n\n**结论:前提成立但范围收窄** —— 剩余工作是两个编译器的**空数组单位元**(第 1、2 格)+ 双侧 pin 翻向 + 四条进表。#5335 的三个重叠文件按「取 main 的 `const` 节点体系」解决冲突,我此前自研的 `{kind:'false'}` 方案整体弃用,最终 delta 收敛为 9 文件。\n\n修后矩阵:两编译器 × 四格与期望列逐格一致(全部行/零行/全部行/零行)。\n\n## 改动\n\n- **`read-scope-sql.ts` `compileNode`**:空数组从抛错改为单位元 —— 空 `$and` 不产出约束(TRUE),空 `$or` 产出 `FALSE_CLAUSE`(`1 = 0`,零行)。非数组仍抛错(消息从 \"requires a non-empty array\" 改为 \"requires an array\")。与 #5146/#5326 NULL-safe 重写的组合语义 = **先归约、后 NULL-safe**:`nullSafeNegationOperand` 对组合子数组逐元素映射(空数组原样通过、`{}` 叶子无字段可守卫),归约出的常量不受重写影响,幸存叶子照常加守卫 —— 有专门测试钉住。\n- **`filter-normalizer.ts` `buildNode`**:同一单位元,落在 #5335 的 `const` 节点体系上(空 `$or` → `falseNode()`)。#5335 的形状拒收(非数组/非对象分支/非对象 `$not` 操作数)**原样保留** —— 归约让「无约束」成为有意义裁决,把畸形分支静默读成 TRUE 会吸收 `$or` 放宽查询。\n- **pin 翻向(RED-first,方向先预测)**:`read-scope-sql.test.ts:86`、`read-scope-not-null-safe.test.ts` 的 4 连抛错 pin、#5335 新增的 `filter-normalizer-not-null-safe.test.ts` 「#5322 is its own ruling」pin 块,全部翻向单位元断言;原错误消息(\"An empty combinator has no defensible reading…\")的历史交代与翻向理由写进各 docblock,引用 #5322 拍板。\n- **四条进表**:`FILTER_LOGIC_CASES` 补空 `$and`/空 `$or`/`{}` 析取项吸收/`{$not:{}}` 四行,自此两个 analytics conformance suite + 五后端被同一张表钉住这四格。`read-scope-sql-conformance.test.ts` 的 `WHERE ${sql}` 拼接补上 `'' = TRUE` 的生产语义(与 `applyReadScope` 一致)。\n- **新增 `empty-combinator-identity.test.ts`**:树级归约 pin(`const` 节点、吸收、`notOf` 折叠)、引擎路径接缝(FALSE 以 `{$not:{}}` 真实到达 `executeAggregate`,而非「什么都不发」)、非数组仍响亮的守卫 pin。\n- changeset:`service-analytics` + `spec` 均 patch,写明迁移含义(从抛错变为求值、`{$or:[]}` 在 RLS 下 fail-closed)。\n\n## 验证(全部在 merged main 态,`flock` 串行)\n\n```\n@objectstack/service-analytics   45 files / 659 tests 全绿\n@objectstack/driver-sql          61 passed | 4 skipped / 798 passed | 44 skipped\n@objectstack/driver-memory       12 files / 328 tests 全绿\n@objectstack/formula             16 files / 361 tests 全绿\n@objectstack/driver-sqlite-wasm  17 files / 241 tests 全绿\n@objectstack/driver-mongodb      7 passed | 5 skipped / 143 passed | 125 skipped(见下)\n@objectstack/spec                308 files / 7885 tests 全绿;check:generated 9/9 up to date;tsc --noEmit 通过\ncheck:type-check-coverage OK;check:driver-conformance 20 cells OK;check:nul-bytes OK + 改动文件控制字节自扫无命中;eslint 改动文件无告警\n```\n\n### 反向验证 —— 方向先预测、两轮如实记录\n\n**第一轮**(pre-#5335 base):预测还原两侧源码后 23 红,实测 **23 红/预测逐条命中**;其中 `read-scope-sql-conformance` 四条新行只红 2(`{}` 吸收与 `{$not:{}}` 在 main 已被 #5297/#5326 修复,保持绿)—— 与派发模板预设的「四条全红」不同,方向如实记录。\n\n**第二轮**(merged #5335 后重做):预测 19 红(native-sql conformance 从 4 红缩为 2 红,因 #5335 已覆盖后两格),实测 **19 红/预测逐条命中,分布逐文件一致**。\n\n### driver-mongodb:「预期红」在本容器不可观测,如实说明\n\n派发词预告本地 driver-mongodb 四条会红(#5323 未合入)。实测**本容器全绿**,且这不是覆盖达成:translation 侧 suite 用进程内 matcher 把译文 document 桥接到行 id,而该 matcher 建模的是 MongoDB 的**文档求值**语义(`$and:[]` → `.every` = true,`$or:[]` → `.some` = false)——真实服务端对空数组是**整条查询拒绝**(`must be a nonempty array`),只有需要真 mongod 的 `mongodb-filter-logic-conformance.test.ts` 半边能观测到,而本容器取不到 mongod 二进制(125 skipped)。因此:**在能取到 mongod 的 CI 上,本 PR 的四条新行会在该 suite 红,解除条件 = #5323 合入**(其归约让服务端半边转绿)。这正是 #5323 PR body 第 2 节记录的依赖方向,不在本单修复。\n\n## 合并次序与 #5323 的文件交叠\n\n#5323 与本 PR 都动 `packages/spec/src/data/filter-logic-conformance.ts`:#5323 在**头部 docblock** 记「三族已裁定未进表」注记,本 PR 在 **cases 数组**加四行 —— 区域不同,git 可干净合并。#5323 先合后,本 PR 随车道 rebase 时需做两件小事(留给接力方或届时我方处理):\n1. 该注记的「族 1(空组合子)」段落删除(本 PR 已让其过时),族 2/3 保留;\n2. #5323 在 `filter.zod.ts` 写的「Deliberately NOT declared here」段中空组合子一句,可改为正式声明(两端已 enforced,declared ≠ enforced 顾虑解除)—— 属可选跟进,不阻塞。\n\n## 范围外\n\n- #5330(publish/lint 编写期拒收)未动。\n- #5297 在 normalizer 侧的 NULL-safe 已由 #5335 完成,本 PR 未触碰其语义,仅在其 `const` 体系上叠加空数组单位元。\n- 无新发现需要立单。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ErbEDVAg1No9gdg1pgDAGB\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ErbEDVAg1No9gdg1pgDAGB)_"
+}

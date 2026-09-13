@@ -1,0 +1,37 @@
+{
+  "number": 5420,
+  "kind": "issue",
+  "title": "showcase: `ContactViews` is exported but never registered in `objectstack.config.ts` — the docs' canonical \"create form ≠ edit form\" example does not run",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T10:57:30Z",
+  "updated_at": "2026-08-05T12:05:10Z",
+  "closed_at": "2026-08-05T12:05:10Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5420",
+  "body": "`examples/app-showcase/src/ui/views/contact.view.ts` declares `ContactViews`\n(default grouped edit `form` with four named sections + a sparse\n`formViews.create` + the `addRecord: { mode: 'form', formView: 'create' }`\nbinding on the list). `src/ui/views/index.ts` re-exports it.\n\n`examples/app-showcase/objectstack.config.ts` does not:\n\n```\nline 23:  import { TaskViews, ProjectViews, InquiryViews, BusinessUnitViews } from './src/ui/views/index.js';\nline 196: views: [TaskViews, ProjectViews, InquiryViews, BusinessUnitViews],\n```\n\n`ContactViews` is in the barrel and missing from both the import list and the\n`views` array. There is no directory-scan auto-registration for views (the CLI\nreads the config's `views` array; nothing in `packages/cli/src` globs\n`src/ui/views`), so the container never reaches the stack.\n\n### Why it matters\n\n- The app DOES navigate to the object: `src/ui/apps/index.ts:53` ships\n  `{ id: 'nav_contacts', type: 'object', objectName: 'showcase_contact', … }`.\n  So the Contacts nav item renders a derived default list/form rather than the\n  authored ones, and `addRecord.formView: 'create'` never binds — the \"create\n  entry point uses the slim hand-shaped form\" behaviour the file's own header\n  comment describes is not what the running showcase does.\n- `content/docs/ui/create-vs-edit-form.mdx:106` links this exact file as the\n  live reference implementation (\"full edit form + sparse `formViews.create` +\n  `addRecord` binding\"). Prime Directive #10's corollary — never advertise a\n  capability the runtime does not actually deliver — is the rule being bent\n  here: the metadata is correct, it just isn't wired in.\n- Every static pass over the showcase stack (`os validate`, `os lint`,\n  `os i18n extract`, coverage) sees a stack without those four named sections,\n  so the surface is unexercised by any gate.\n\n### Repro\n\n`grep -n \"ContactViews\" examples/app-showcase/objectstack.config.ts` → no match,\nwhile `grep -rn \"ContactViews\" examples/app-showcase/src` → the barrel and the\ndeclaration only.\n\n### Suggested fix\n\nAdd `ContactViews` to the import on line 23 and to `views:` on line 196, then\nre-run the showcase's `pnpm verify` — the object nav's list/form will start\nrendering the authored container, which is also what makes the four named\n`form.sections` reachable to the i18n walker and the reference validator.\n\nFound while implementing #5415 (out of scope there: that PR is `packages/lint`\nonly, and its fixture imports the view module directly, so the fix does not\ndepend on the showcase registration). Verified against `origin/main`\n`9fad07f66`."
+}

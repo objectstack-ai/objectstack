@@ -1,0 +1,37 @@
+{
+  "number": 5393,
+  "kind": "issue",
+  "title": "flow 的 `delete_record` / `update_record` 无法表达批量意图 —— 节点 schema 无键、执行器不传 `options.multi`,谓词批量写对所有 flow 平台级不可达,而节点描述符宣称支持",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T05:15:16Z",
+  "updated_at": "2026-08-05T14:51:00Z",
+  "closed_at": "2026-08-05T14:51:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5393",
+  "body": "Part of #5225(showcase 清扫流从未删过记录 —— 该单的根因,按跨车道协议转 spec 车道;发现与全部实测证据来自其 os-dev 的 needs_decision 报告,PM 转录)。\n\n## 事实(真实 boot + built spec 的 safeParse 实测,origin/main @ ccba1bb33)\n\n- `DeleteRecordConfigSchema`(`packages/spec/src/automation/builtin-node-config.zod.ts:242`)是 `strictObject`,只声明 `objectName` 与 `filter` 两键;`multi` / `options.multi` / `bulk` / `all` 逐一实测被 `unrecognized_keys` 拒绝。\n- CRUD 执行器(service-automation)调用引擎时**从不**传 `options.multi`。引擎契约(`packages/objectql/src/engine-delete-dispatch.ts`):标量 `where.id` → 按 id;否则 `options.multi` 为真 → deleteMany;否则抛 `Delete requires an ID or options.multi=true`。\n- 于是**谓词批量删除从任何 app 的任何 flow 都不可达**,而节点描述符写着 `name: 'Delete Records'` / `description: 'Delete records matching a filter.'`;`writtenRowCount` 的文档与 #3810 擦除防护的前提都以「谓词 delete_record 会到达 deleteMany」为设计意图 —— declared ≠ enforced。\n- **`update_record` 同病**(`engine.ts:5403` 同款抛错,`UpdateRecordConfigSchema` 同样无批量键);showcase 三处 `update_record` 全用 `filter: { id: … }` 所以被掩盖。\n- 单元测试全程绿的原因已另记:service-automation 的 `run-summary.test.ts:405` 内联 fake 接受真引擎拒绝的谓词删除,且不在 engine-double 基线内(已评论至 #5197,检测器盲点)。\n\n## PM 裁定(两轴分析由 #5225 的 dev 给出,PM 附议;**留否决窗口** —— 维护者可否决,不等批准)\n\n**取 A:在 spec 给两个节点 config 声明批量意图键(一次命名,两节点共用),CRUD 执行器在作者声明后传 `options.multi`;B 与 C 否决。**\n\n- 长远轴:A 是唯一契约先行的形态 —— 破坏性批量写的安全要求在 authoring 时可见,而不是在旗舰示例上以运行时失败浮现;B 在 flow 层伪造「作者声明过批量」,把引擎刻意竖起的护栏溶解掉,并分叉出第二份事实契约。\n- 防 AI 轴:A 最强 —— 破坏性批量删除需要一个显式、可 grep 的声明,AI 只写 filter 会得到点名拒绝而非静默 no-op;**B 是该轴上最坏选项**:AI 元数据最常见错误就是 filter 字段名拼错,B 把它从「引擎拒绝」升级成「全表删除」(#3810 只防模板插值失败的条件擦除,不防语法合法、语义错误的字面字段名);C(示例改 get→loop→逐 id 删)是 PD #5 的 workaround、PD #10 的反面,且撞上 #5383(flow lint 不进 loop 体),等于教 AI 一个 lint 盲区里的 N+1 删除惯用法。\n- **两节点必须同改**:拆开必然让同一个概念在两个 CRUD 写入器上长出两个名字与语义(PD #12 的「N 方言」结局),且生成面翻倍。\n- 时序注:这是**恢复宣称能力的加性键**,非 breaking,不占 v17 硬窗口;spec 车道按自身节奏排(authorable-surface / docs / api-surface 生成物随行)。\n\n## 完成判据\n\n- 两个 config schema 声明同名批量意图键(surface/history/guidance 随 #4001 纪律);执行器接线 `options.multi`;\n- 引擎抛错路径对「未声明批量的谓词写」保持现状(拒绝即契约);\n- #5225(showcase 示例)在此单落地后以声明批量意图收尾(该单挂 Blocked-by 本单);\n- service-automation 侧补真实契约测试(#5197 记录的 fake 盲点不再掩盖)。\n\n关联:#5225(现场与验收锚)、#5197(检测器盲点)、#5383(loop lint 盲区)、#3810、PD #5/#10/#12。"
+}

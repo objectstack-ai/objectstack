@@ -1,0 +1,35 @@
+{
+  "number": 5472,
+  "kind": "issue",
+  "title": "pm-dispatch 协调模型改版:纵向拆分(分诊/执行)+ 一人一车道双射 + 登记表正文即真相 + 座位 Routine 化(维护者 2026-08-05 拍板)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T13:34:33Z",
+  "updated_at": "2026-08-05T16:46:42Z",
+  "closed_at": "2026-08-05T16:39:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5472",
+  "body": "维护者 2026-08-05 拍板的协调模型改版,本单是 SKILL 条款的实施单。背景:#4604 三天累积 79 条登记评论,「现状」与「历史」同通道导致对账成本线性涨;全局在飞检查是 O(PM × 在飞) 的常备税且依赖自由文本申报;objectstack 仓最大,单 PM 认知吞吐不够,同仓多 PM 必须保留——改版目标是把多 PM 的协调税降为结构性防撞。\n\n## 拍板的模型(五点)\n\n1. **纵向拆分**:1 个**分诊 PM**(全仓唯一)+ N 个**执行 PM**。分诊 PM 只扫、只分类、只打标签(`domain:*` / `pm:queue` / `finding` / `needs-user-decision`)、只拆跨域 issue、只查重,**永不认领派发**;它是 `domain:*` 的唯一生产者,「未标签不可认领」从此有机械保障。执行 PM 信任标签、跳过分诊、只在本车道认领。\n2. **一人一车道双射**:每个执行 PM 恰好持有一个 `domain:*` 车道。**删除 borrowing 规则**(突发积压 → 调高该域 Routine 频率或 batch;持续积压 → 拆域,改表走 PR)。「域 X 谁管 / PM Y 管什么」都恰好一个答案。\n3. **跨域例外路径(唯一越界通道)**:真拆不动的跨域单 PR,由分诊 PM 指定一个车道 PM 认领 + 认领评论申报文件面 + **定向**在飞检查——全局在飞检查从常备税降级为仅此路径触发。\n4. **登记表协议改写**(#4604):正文表格 = 唯一权威现状,就地编辑;行 = 座位(分诊 + 各域 + 姊妹仓),列 = 座位 | 范围 | 当前 PM | 说明;评论仅作交接审计,不承载状态。**无急切心跳**——活性惰性判定:Routine 座位查调度器(last_fired/next_run),会话座位查其最近产出评论;冲突时 >24h 无产出即可回收。\n5. **座位 Routine 化**:每座位一个 cron Routine(fresh session per fire),频率随队列深度独立调(轻域每日、重域每小时),醒来读 #4604 拿范围 → 从 labels 重建状态 → 跑一轮 → 结束。轮次互斥的具体机制(防上一 fire 未完成时重入)在实施中定型,倾向「fire 开始时查上一轮产出时间,间隔不足即自退」。试点单:分诊座位先行(见关联单)。\n\n## SKILL.md 待改条款\n\n- 「Multi-repo coordination」rule 4 与「Domain lanes」:改写为上述 1-3(borrowing 段删除;global in-flight check 段改为例外路径专用);\n- 登记表协议段(rule 4 末与 Domain lanes 的 registry 引用、Epic 车道的登记要求):按 4 改写,epic 登记退回 `pm:epic` 父单正文(#4604 不重复记,`label:pm:epic` 即索引);\n- 「One board, no second tracker」rule 5:补充 org Project 为**视图层**(auto-add workflow 按 `pm:*`/`domain:*`/`repo:*` 聚合三仓,无任何机器读它,GraphQL 成本不进循环热路径——登记表权威层坚持 issue 正文 + REST,依据 Operational note 3 的配额实测);\n- 「Dispatch backends」/「Collect」:补座位 Routine 化的运行形态。\n\n## 域表重切(与 #5095 同 PR)\n\n`domain:engine` 现覆盖 objectql + metadata* + platform-objects + core + 全部 driver-*,双射下单 PM 吃不下,拆为 `domain:engine-core` 与 `domain:drivers`(建议线:objectql/metadata*/platform-objects/core ↔ plugins/driver-*);#5095 的约 20 个漏网包同批归位。拆分即改 SKILL 域表 + #4604 加行。\n\n## 同文件施工批次\n\n同一 SKILL.md 的待改单:**#5441**(串行接力等六条运维缺口)、**#5130**(决策轴扩三条)、**#5095**(域表补包)。建议一个 dev 一批做完,changeset 一份。\n\n## 验收\n\n- SKILL.md 上述条款落地,与本单描述一致;域表拆分后每包恰好一域;\n- #4604 正文按新协议运行(已由拍板会话先行改写,见其审计评论),SKILL 引用与实态一致;\n- borrowing 字样从 SKILL 移除,跨域例外路径有明确的触发条件与检查范围。"
+}

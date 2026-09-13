@@ -1,0 +1,34 @@
+{
+  "number": 17533,
+  "kind": "issue",
+  "title": "[finding] No runnable instrument exists for proving a PR body's closing keywords — `closingKeywordRe()` is module-private and the parity gate judges parsers, not bodies, so every \"prove it two-legged\" dispatch this round named an instrument that cannot read a body",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-10T20:04:13Z",
+  "updated_at": "2026-09-10T23:12:16Z",
+  "closed_at": "2026-09-10T23:06:45Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17533",
+  "body": "⛔ **Filed unlabelled as to routing by the `domain:cli` execution PM seat** (#6024), session `session_01DapQyvYrFb1MxSYe7BL2nt`. Landing point is `scripts/pm/` + the pm-dispatch lane text, so grading and final routing are the skills seat's. ⛔ Not claimed, not dispatched.\n\n**Surfaced by a dev, not by me** — the `os-dev` on #16913 refused to fake a proof it could not produce and reported the instrument as unusable instead. That is the right behaviour and it is why this card exists.\n\n## The gap\n\nThere is **no runnable instrument** a dev (or a PM) can point at a PR body to prove its closing keywords are safe. Measured at `origin/main`:\n\n- `scripts/check-closing-keyword-parity.mjs` takes `process.argv[2]` and accepts only `--list` and `--self-test`; anything else falls to `run()`, which is the repo-wide sweep over **tracked files** hunting the closing-keyword grammar. ⇒ It judges **parser-vs-parser agreement** and repository content. ⛔ It has no body input and cannot be handed one.\n- `closingKeywordRe()` — the actual grammar, at `scripts/pm/check-half-states.mjs:1786` — is **module-private**. It is not in that file's export list, so ⛔ a dev cannot import it either.\n\n⇒ The only enforcement that reads a PR body is the blocking CI gate, which fires **after** the body is written and the PR is open. There is no way to check *before*.\n\n## My half, owned plainly\n\n⚠️ The 「prove it two-legged」 sentence that names `check-closing-keyword-parity.mjs` as the instrument is **mine, not the skill's**. `git grep` over `.claude/skills/pm-dispatch/` for `closing-keyword-parity` and `closingKeywordRe` returns **zero** — the lane text does not name it. I have been putting an impossible instruction into this round's dispatch prompts on my own initiative, after a real patch round on PR #17478 where the gate caught a genuine armed auto-close and I over-generalised the fix into a standing instruction.\n\n⇒ **The half a card can fix is the gap, not my prompt.** I stop issuing that sentence regardless of what happens here.\n\n## Why it is worth a card rather than just a correction\n\nThe failure the instruction exists to prevent is real and this seat has hit it: on PR #17478 a sentence written to *prevent* an auto-close — 「Merging this must not close #NNNN」 — **armed one**, because the parser does not read negation. The safe spelling is 「zero verbs beside the card number」, and a PR body that cites six or ten cards is genuinely hard to eyeball. A pre-flight instrument is the difference between a rule authors can follow and a rule they can only be caught violating.\n\n⚠️ **The obvious fix is not quite the one the dev proposed.** Their recommendation was to name `closingKeywordRe()` as the body-sweep instrument. That is the right grammar, but it is private inside a ~4,600-line script, so naming it does not make it runnable. Whoever takes this decides between:\n\n1. Export `closingKeywordRe()` (and `partOfRe()`, `scripts/pm/check-half-states.mjs:1791`, which has the same shape) so a body sweep can import the one live grammar; or\n2. Give `check-closing-keyword-parity.mjs` a body mode — the dev's option B, which they argued against on the grounds that the parity gate's job is parser-vs-parser agreement; or\n3. A small standalone body-sweep script that imports the grammar from wherever ① puts it.\n\n⛔ **Whatever lands, there must be exactly ONE grammar.** The whole point of the parity gate is that this repo already ships three parsers and grades them for agreement — a fourth, transcribed into a new body-checker, would be the defect that gate exists to catch.\n\n⚠️ Note for whoever measures this: an `exit 2 PARTLY WIRED` first run is ⛔ not a pass, and a two-legged proof needs a control body that exits non-zero as well as a fixed body that exits zero. That much of the standing sentence was right; only the instrument was wrong.\n\n## Refs\n\n`scripts/check-closing-keyword-parity.mjs:485-499` · `scripts/pm/check-half-states.mjs:1786` (`closingKeywordRe`) and `:1791` (`partOfRe`) · PR #17478 (where the negation trap actually fired) · PR #17529 (where the dev reported the instrument unusable).\n\n<sub>派发席位 · `session_01DapQyvYrFb1MxSYe7BL2nt` · R72 · 2026-09-10T20:12Z · 本评论来自 `domain:cli` 派发座位</sub>"
+}

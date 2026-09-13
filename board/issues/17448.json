@@ -2,7 +2,7 @@
   "number": 17448,
   "kind": "pull_request",
   "title": "measure-test-shard-timings: fold a package's test:repo leg into its sample",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -18,10 +18,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-10T14:55:51Z",
-  "updated_at": "2026-09-10T14:57:40Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-10T15:53:03Z",
+  "closed_at": "2026-09-10T15:53:01Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-10T15:53:01Z",
   "comments": 0,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/17448",

@@ -1,0 +1,37 @@
+{
+  "number": 5481,
+  "kind": "issue",
+  "title": "别名表内部撞车:`aliasProbe` 归一化后两个 key 相同,后者静默覆盖前者(`snap.grid` 被指向 `showGrid`)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T13:47:59Z",
+  "updated_at": "2026-08-05T16:12:09Z",
+  "closed_at": "2026-08-05T16:12:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5481",
+  "body": "发现于 #5013 的全仓别名一致性闸门(范围外,未指派)。\n\nBlocked-by: #5486\n\n## 成因\n\n`strictUnknownKeyError` 把别名表的 key 用 `aliasProbe` 归一化后建索引:\n\n```ts\nconst aliasProbe = (key) => key.toLowerCase().replace(/[_\\-\\s]/g, '');\nfor (const [key, canonical] of Object.entries(options.aliases ?? {})) {\n  aliases[aliasProbe(key)] = canonical;   // 后写覆盖先写\n}\n```\n\n同一张表里两个 key 归一化后相同时,**后一条静默覆盖前一条**。没有任何东西检查这件事——\n和 #5013 的成因是同一类:别名表是对 schema 的断言,而断言没人核对。\n\n## 活defect(1 条,作者可见)\n\n`packages/spec/src/studio/flow-builder.zod.ts:244`,`these snap settings`:\n\n```\naliases: { …, grid: 'gridSize', size: 'gridSize', step: 'gridSize', visible: 'showGrid', grid_: 'showGrid' },\n```\n\n`grid_` 归一化后是 `grid`,与前面的 `grid` 撞车且写在后面,于是 `grid: 'gridSize'` 被覆盖。\n作者写 `grid: 24`(想设网格像素大小,shape 里是 `gridSize: z.number().int().min(1)`)得到的是:\n\n```\nDid you mean `grid` -> `showGrid`?\n```\n\n`showGrid` 是 `z.boolean()`。照做即第二次被拒——正是账本 finding 7 的形状:\n把作者指进一个他的值同样不合法的槽位。\n\n## 休眠实例(3 条,同因不同果)\n\n这三条两个 key 指向**同一个** target,覆盖后语义不变,今天没人踩到:\n\n| 文件 | surface | 撞车 | target |\n|---|---|---|---|\n| `data/field.zod.ts:400` | `this field` | `rollup` / `rollUp` | 都是 `summaryOperations` |\n| `automation/webhook.zod.ts:141` | `this webhook` | `object_name` / `objectName` | 都是 `object` |\n| `ui/chart.zod.ts:212` | `this chart series` | `strokeDasharray` / `strokeDashArray` | 都是 `dashArray` |\n\n这三条其实说明了另一件事:既然 `aliasProbe` 已经吃掉大小写和分隔符,\n**同一 probe 的多条 key 本身就是冗余**,写两遍不会更管用。\n\n## 建议\n\n在 #5013 新增的 `packages/spec/src/shared/alias-integrity.test.ts` 里加第三条断言:\n一张表内任意两个别名 key 的 `aliasProbe` 不得相同(判定同样走运行时表,\n`strictObjectDeclarations()` 已经把表交出来了,加这条大约十行)。\n先修 `flow-builder` 那条(`grid_` 删掉即可,`visible: 'showGrid'` 已经覆盖那个意图),\n再删三条冗余,最后开断言。\n\n复现日期 2026-08-05,基线 `origin/main` ed0d2aac0。"
+}

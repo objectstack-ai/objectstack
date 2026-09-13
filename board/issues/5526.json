@@ -1,0 +1,36 @@
+{
+  "number": 5526,
+  "kind": "issue",
+  "title": "analytics 的 `string[]` 值往返对字符串比较数也有损:`{code: {$eq: '007'}}` 绑成数字 `7`、`'null'` 绑成真 NULL、`'true'` 绑成 `1` —— 文本列静默取到错行",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T15:34:21Z",
+  "updated_at": "2026-08-05T21:27:07Z",
+  "closed_at": "2026-08-05T21:27:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5526",
+  "body": "修 #5332(`filter-normalizer.fieldLeaves` 的 `null` 比较数)时,为了确认「`stringifyForCube` 的 `v == null → ''` 保留下来之后还服务哪些比较数位置」,必须把这条 `unknown → string → unknown` 往返逐个值实测一遍。在这一步发现的分叉。\n\n**不属于 #5332 的范围面**(那一单只裁 `$eq: null` / `$ne: null` 两种写法,且我的修法把 `null` 彻底移出了值数组,与本条无关),按 Prime Directive #10 单独记在这里,unassigned。\n\n这正是 **#5373(已关闭)自己列在「未验证的部分」里的第三个症状** —— 它当时写「没有测数字比较数经 `'100'` → `100` 往返后与存储为字符串 `'100'` 的列比较会怎样(可能是同一个根因的第三个症状)」。现在测了,是的,而且不止数字一种。区别在于 #5373 记的是 `driver-memory` 自己那份私有的 `stringifyForCube` / `coerceFilterValue`,本条记的是 `service-analytics` 的那一对(两份独立实现,#5373 正文也点明了这一点)。`driver-memory` / `driver-mongodb` 已被 #5499 冻结投入,本条不在冻结面内。\n\n## 位置\n\n`packages/services/service-analytics/src/strategies/filter-normalizer.ts`:\n\n- `stringifyForCube`(约 :233)—— 出口,把比较数写成 `values: string[]` 里的一项;\n- `coerceFilterValueForSql` / `coerceFilterValueForObjectQL`(文件末尾,两个都是 `export`)—— 入口,把那个字符串还原成绑定值;\n- `recoverNumber` —— 还原数字的那条正则 `/^-?\\d+(\\.\\d+)?$/`。\n\n消费者:`native-sql-strategy.ts:542`(SQL 绑定)、`objectql-strategy.ts:626/638/956/957`(交给引擎的比较数 + 回显 SQL 的绑定)。\n\n## 现象(实测)\n\n直接跑 `normalizeAnalyticsFilterTree` + 两个 coercer(`npx tsx`,cube 字段 `code`,`where` 为 `{code: {$eq: v}}`):\n\n| 作者写的 `v`(字符串) | leaf `values` | SQL 绑定 | 引擎绑定 |\n|---|---|---|---|\n| `'007'` | `[\"007\"]` | **`7`** | **`7`** |\n| `'null'` | `[\"null\"]` | **`null`** | **`null`** |\n| `'true'` | `[\"true\"]` | **`1`** | **`true`** |\n| `'false'` | `[\"false\"]` | **`0`** | **`false`** |\n| `'1.50'` | `[\"1.50\"]` | **`1.5`** | **`1.5`** |\n| `'won'` | `[\"won\"]` | `\"won\"` ✅ | `\"won\"` ✅ |\n| `''` | `[\"\"]` | `\"\"` ✅ | `\"\"` ✅ |\n\n也就是说,一个 TEXT 列上存 `'007'` 的行,用 `{code: {$eq: '007'}}` 去筛,绑定出去的是整数 `7`:SQLite 跨类型比较恒不等,取到零行;Postgres 上 `text = integer` 直接报类型错。存 `'null'` 的行更糟——绑定成真 NULL,`code = NULL` 在三值逻辑里永远 UNKNOWN,**任何**行都取不到。\n\n## 为什么是 bug\n\n- **静默错行,不是报错。**「订单号 = 007」的部件画出来是空的,作者看到的是「没有数据」;`'null'` 那条是永远空。方向以缩小为主,但和 #3948 立的规矩同一族:一个声明支持的算子把作者的值悄悄换成了另一个值。\n- **零填充字符串是真实业务形状**,不是构造出来的边角:订单号 / 工单号 / 国家区号 / SKU / 邮编,`'007'`、`'0912'` 都会命中 `recoverNumber` 的正则。`'1.50'` 这种价格串也一样,丢掉尾零之后再比对文本列就不匹配了。\n- **`token` 与真实字符串撞车是这套编码自己的选择,但没有转义。** `stringifyForCube` 的 TSDoc 明确解释了为什么布尔要写成 `'true'`/`'false'` 而不是 `'1'`/`'0'`(#5373 记的正是 `'1'`/`'0'` 那版在 driver-memory 上的后果),这个理由成立;但**没有任何机制区分「布尔 true 序列化出来的 `'true'`」和「作者本来就在筛字符串 `'true'`」**。`null` 同理。往返有损的根因是 `values: string[]` 这个内部表示,而不是某一条 `if`。\n- **两个消费者还原成不同类型**:`'true'` 在 SQL 侧变 `1`、在引擎侧变 `true`。这是刻意的(两边存储形态不同),但也意味着同一个 `where` 在两条路径上绑出**两种类型**,而两边都不是作者写的那个字符串。\n\n## 建议(不代裁决)\n\n根因与 #5373 同一条(`string[]` 编码对非字符串类型有损),它当时给出的三条路在这里同样适用,而且这一半的取舍不同——本包这一半是**两个** consumer(SQL 绑定 + 引擎比较数),所以「只在出口字符串化」的收益更明显:\n\n- **A. 让往返无损**:`values` 里带类型标记(tagged 编码),两个 coercer 按标记还原。改动小,但给一个本来就可疑的编码再加一层,且要同时改三处。\n- **B. 不再往返**:`NormalizedFilterNode` 的 leaf `values` 内部改成 `unknown[]`,只在真正需要 SQL 字面量的地方(`generateSql` 回显)才字符串化。最贴近「一个契约」,也顺手消掉 `coerceFilterValueFor*` 这两个函数本身;工作量最大,且 `values: string[]` 是 cube 规格的形状,要一起看。\n- **C. 缩小 `recoverNumber`**:只是把 `'007'`、`'1.50'` 这类**保留了原始写法信息**的串排除(要求 `String(Number(s)) === s`),`'null'`/`'true'`/`'false'` 的撞车不动。最小改动,能挡住零填充/尾零这一族,但不是根因修法。\n\n我倾向 **B**(值不应该在内部表示里被降级成字符串),与 #5373 的倾向一致;但这是本面内部表示的形状问题,而且 `values: string[]` 写在 cube 规格里,请 PM / 维护者裁。若要先止血,C 是范围最小的一步。\n\n## 未验证的部分\n\n只测了上表七个值和 `$eq` 一个算子(同一对 coercer 服务全部算子,所以 `$in` / `$gt` / `$between` 应当同样受影响,但我没有逐个跑)。没有测过真实 SQLite / Postgres 上这些绑定的最终行集(表里给的是绑定值,不是行数),也没有统计现网有多少部件的 `where` 带这类字符串比较数。严重度请 PM 按 triage 定。\n\n关联:#5332(同文件、同一轮核对里发现;它裁的是 `null` **比较数**,已把 `null` 移出值数组,与本条不重叠)、#5373(`driver-memory` 那半同根因,已关闭;本条是它自己留下的「第三个症状」在 `service-analytics` 这半的实测)、#3948(no-silent-drop)、#4128(同文件上一轮「算子静默丢失」)。\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 5590,
+  "kind": "issue",
+  "title": "driver-turso 的 remote transport 自带一套 where/分页编译器，却不跑 FILTER_LOGIC / PAGINATION 共享 case-set —— 迁回本仓即入矩阵，实测 3 个 DEBT 格",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T20:01:22Z",
+  "updated_at": "2026-08-05T23:19:43Z",
+  "closed_at": "2026-08-05T22:40:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5590",
+  "body": "**发现于**：#4645 Phase A（把 `@objectstack/driver-turso` 从 cloud 迁回 `packages/drivers/driver-turso`）。迁入落盘的那一刻 `scripts/check-driver-conformance.mjs` 就把它收进矩阵，实测 3 个格子 `MISSING`。Phase A 的 PR 按 gate 规则记了 3 条 measured DEBT 条目让 CI 绿，**这个单是清掉那 3 条 DEBT 的工作项**。\n\n## 实测（objectstack `81087877e` + #4645 Phase A 分支）\n\n```\ndriver conformance matrix (5 drivers x 5 case-sets)\n\n  driver              FILTER_LOGIC  TEMPORAL  TEMPORAL_TIME  PAGINATION  PAGINATION_UNORDERED\n  driver-memory       ok            ok        ok             ok          ok\n  driver-mongodb      ok            ok        ok             ok          ok\n  driver-sql          ok            ok        ok             ok          ok\n  driver-sqlite-wasm  ok            ok        ok             ok          ok\n  driver-turso        MISSING       ok        ok             MISSING     MISSING\n```\n\nTEMPORAL / TEMPORAL_TIME 两格是真绿：`turso-temporal-conformance.test.ts` 与 `turso-remote-temporal-conformance.test.ts` 双面（local 与 remote）都驱动了共享 case-set。\n\n## 为什么这三格不是\"继承 SqlDriver 所以没问题\"\n\n`TursoDriver` 是**双传输**的。local / replica 面确实继承 `SqlDriver`，但 remote 面完全不走 Knex：`packages/drivers/driver-turso/src/remote-transport.ts`（1,726 行）自带\n\n- `buildWhereSQL`（:1019）—— 一套独立的过滤器编译器，`$and` / `$or` / `$not` 嵌套、算子词表、比较值拒收全部自己实现（cloud 侧 #1116/#1117/#1080/#1078/#1074/#1071 六个语义修复都落在这里，说明这条缝会真的分叉）；\n- 自己的 `ORDER BY` / `LIMIT` / `OFFSET` 拼装（:960-977）。\n\n这正是 #3774（filter 组合语义）和 #4363 / objectui#3106（有序与无序分页读都是一个 partition）设这两组共享 case-set 要压住的东西：**独立实现的第 N 个后端**。\"继承所以没问题\"恰恰是这些套件存在来证伪的假设 —— driver-sqlite-wasm 当初也是按这个理由记的 DEBT，最后是用套件清掉的，不是用理由清掉的。\n\n## 完成标准\n\n在 `packages/drivers/driver-turso/src/` 下补套件，从 `@objectstack/spec/data` 导入并驱动：\n\n- `FILTER_LOGIC_CASES`\n- `PAGINATION_CASES`\n- `PAGINATION_UNORDERED_CASES`\n\n**双面覆盖**（参照同包 temporal 两个套件的形状）：local 面走 `:memory:`，remote 面走 `libsql-sqlite-stub.testkit.ts` 的 sqlite stub —— 两面都 hermetic，默认 CI 可跑，不需要网络或凭据。套件落地后，在同一个 PR 里删掉 `scripts/check-driver-conformance.mjs` 里对应的 3 条 LEDGER 条目（留着会判 RECONCILED 红）。\n\n## 边界\n\n- ⛔ 不在这个单里改 gate 的判定逻辑。\n- ⛔ 不顺手修 remote transport 的语义缺陷：套件如果**跑红**，说明是真分叉，另开单，不要在这个单里边写套件边改实现（那样等于自己给自己发准考证）。\n\n**Blocked-by**：#4645 Phase A 的 PR（`packages/drivers/driver-turso` 落盘）。\n"
+}

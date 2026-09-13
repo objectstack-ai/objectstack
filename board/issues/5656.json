@@ -1,0 +1,34 @@
+{
+  "number": 5656,
+  "kind": "pull_request",
+  "title": "test(driver-turso): 双传输各跑一遍 FILTER_LOGIC / PAGINATION 共享 case-set，清掉三条 DEBT (#5590)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/l",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T22:21:04Z",
+  "updated_at": "2026-08-05T22:40:25Z",
+  "closed_at": "2026-08-05T22:40:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T22:40:24Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5656",
+  "body": "Fixes objectstack-ai/objectstack#5590\n\n## 做了什么\n\n给 `packages/drivers/driver-turso` 补四个套件，从 `@objectstack/spec/data` 导入并驱动 `FILTER_LOGIC_CASES` / `PAGINATION_CASES` / `PAGINATION_UNORDERED_CASES`，**每格两面**——照同包 temporal 那对套件的形状：\n\n| 文件 | 传输面 | 引擎 |\n|---|---|---|\n| `turso-filter-logic-conformance.test.ts` | local | `:memory:`（better-sqlite3 + knex） |\n| `turso-remote-filter-logic-conformance.test.ts` | remote | `libsql-sqlite-stub.testkit.ts` |\n| `turso-pagination-conformance.test.ts` | local | `:memory:` |\n| `turso-remote-pagination-conformance.test.ts` | remote | `libsql-sqlite-stub.testkit.ts` |\n\n四个都 hermetic：不要网络、不要凭据、CI 默认跑。四个全绿，所以同一个 commit 里把 `scripts/check-driver-conformance.mjs` 的三条 DEBT 条目删干净（⛔ 判定函数一行未动，只动 `LEDGER` 数组与它的说明注释）。\n\n## 为什么\"继承所以没问题\"不成立——这也是套件的内容主张\n\n`TursoDriver` 是双传输的。local/replica 继承 `SqlDriver`；remote 完全不走 knex，`src/remote-transport.ts` 自带 `buildWhereSQL`（组合子嵌套、算子词表、比较值拒收、空组合子的布尔单位元）和自己的 ORDER BY / LIMIT / OFFSET 拼装。这就是 #3774 / #4363 设共享 case-set 要压的\"独立实现的第 N 个后端\"。\n\n**反向验证（先定方向再跑，三个都按预测走）**：\n\n1. 把 remote `buildWhereSQL` 的顶层 `clauses.join(' AND ')` 改成 `' OR '`（#3774 那个缺陷的形状）→ 预测 remote 套件红、local 套件绿。实测 **remote 16 红、local 全绿**，例如\n   `multi-key $or branch ANDs its own keys: expected [ '1', '2', '3' ] to deeply equal [ '1' ]`。\n2. 让 remote `buildSelectSQL` 只在**非分页**读上拼 ORDER BY → 预测 remote 分页套件红、local 绿。实测 **remote 6 红**（5 条 `page boundaries are invisible` + 机制 pin），local 全绿。\n3. 在 `TursoDriver.find` 的 local 分支里把调用方 `orderBy` 丢掉（打的是本包自己的传输路由层，正是 local 套件模块注释声称在钉的东西）→ 预测 local 分页套件红、remote 绿。实测 **local 5 红**，remote 全绿。\n\n三次都是\"一面红另一面绿\"，正好把 issue 的前提——两条传输是两套实现，一面的套件看不见另一面的回归——直接测了出来。\n\n（顺带记一个诚实的强度边界：第 2 个 mutation 下 `visits every row exactly once` 仍然绿，因为丢掉 ORDER BY 后 rowid 序仍是一个 partition。这正是 case-set 自己说的\"性质\"和\"那条子句\"是两回事，所以 `page boundaries are invisible` 与机制 pin 才是这两个套件里带牙的断言。）\n\n## remote 分页这两格是绿的，但请连着这段一起读\n\n`buildSelectSQL` 把调用方的 `orderBy` **原样**透传、不追加唯一列；local 面走的是 `SqlDriver.orderKeysFor()`，按 #4363 的三态表补 `id` tie-breaker。实测 remote 面 `ORDER BY status ASC` 的并列组内是**插入序**而非 id 序，无序分页读则是 rowid 序：\n\n```\nremote sorted:    r03,r09,r02,r10 | r01,r12,r08,r06 | r07,r11,r05,r04\nremote unordered: r07,r03,r11,r01,r09,r05,r12,r02,r08,r04,r10,r06\n```\n\n也就是说：**remote 面满足了这些 case，但不是靠契约点名的那个机制**——是靠 stub 那张 12 行内存表计划固定。真实 endpoint 上并列行的排布不被 SQLite 承诺在两条语句之间一致，而 `pagination-conformance.ts` 自己的模块注释就写明无序读是同一缺陷的满强度形态、`driver-memory` 那条\"存储顺序稳定\"的豁免针对的是 JS 数组不是 SQL 计划。\n\n按本单边界（套件里不修实现、不给自己发准考证），这条缺陷**另开单**：#5653。remote 套件里留了两条 `records the measured mechanism` 测试把当前\"没有 tie-breaker\"的事实钉住——#5653 落地那天它们会红并随之改写，而不是让这条分叉在一个绿格子底下悄悄躺着。gate 注释里也记了同一件事（放注释而不是 LEDGER 条目：格子确实已覆盖，给已覆盖的格子留条目会判 RECONCILED 红）。\n\n## 验证\n\n```\n$ npx vitest run --maxWorkers=2         # packages/drivers/driver-turso 全量\n  Test Files  19 passed (19)\n       Tests  621 passed (621)          # 迁入时是 15 files / 逐步增至 19\n\n$ pnpm check:driver-conformance         # 含 --self-test\n  driver-turso        ok  ok  ok  ok  ok\n  check-driver-conformance: OK — 25 covered cell(s), 0 in the DEBT ledger, 0 exempt.\n  OK  self-test: detects driven / unused / re-declared fixtures, discovers both axes, …\n\n$ pnpm --filter @objectstack/driver-turso typecheck     # tsc --noEmit，无输出\n$ npx eslint <5 个变更文件> --no-inline-config           # exit 0\n$ node scripts/check-query-options-erasure-ratchet.mjs\n  ✓ query-options-erasure ratchet holds: 84 unswept non-test site(s) in 19 file(s), none new.\n    test surface: 267 site(s) in 51 file(s) — at the ceiling.     # 新套件零新增擦除站点\n$ node scripts/check-nul-bytes.mjs\n  check-nul-bytes: OK (scanned 5573 tracked text file(s); …)\n```\n\nquery-options 类型：四个新套件的 query 从第一行就是正确类型，**没有一处 `as any`**（`find`/`count` 的签名本就 `any`，直接传字面量即可），所以 267 天花板纹丝不动。\n\n## 边界\n\n- ⛔ 没动 gate 的判定逻辑，只删 `LEDGER` 的三条 + 改它的说明注释。\n- ⛔ 没修 remote transport 的任何语义，包括上面那条 tie-breaker 缺失（→ #5653）。\n- 文件面只有 `packages/drivers/driver-turso/src/`（4 个新文件）+ `scripts/check-driver-conformance.mjs`。\n\n## Changeset\n\n测试 + gate ledger，不发布任何包 → 按 `pr-automation.yml` 的路线 2，请挂 `skip-changeset` 标签。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WyvqvKMG6asi9aXjKE6xtx\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WyvqvKMG6asi9aXjKE6xtx)_"
+}

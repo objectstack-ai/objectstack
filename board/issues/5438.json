@@ -1,0 +1,35 @@
+{
+  "number": 5438,
+  "kind": "pull_request",
+  "title": "fix(showcase): 注册 `ContactViews` —— 文档引用的「create form ≠ edit form」参考实现终于真的进栈 (#5420)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T11:51:28Z",
+  "updated_at": "2026-08-05T12:05:10Z",
+  "closed_at": "2026-08-05T12:05:08Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T12:05:08Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5438",
+  "body": "Fixes #5420\n\n## 前提复核（先证伪,再实现）\n\n在 `origin/main` `123067ce7`(即 #5416 / #5422 合并之后)上实证,issue 的前提**仍然成立** —— #5416 与 #5422 都没有做注册:\n\n```\ngit show origin/main:examples/app-showcase/objectstack.config.ts | grep -n Views\n23:  import { TaskViews, ProjectViews, InquiryViews, BusinessUnitViews } from './src/ui/views/index.js';\n196: views: [TaskViews, ProjectViews, InquiryViews, BusinessUnitViews],\n```\n\nbarrel `src/ui/views/index.ts` 导出 5 个容器,config 的具名 import 只取了 4 个。`views:` 背后没有目录扫描,CLI 读的就是这个数组,所以这份元数据编译通过、类型通过、lint 干净,却**既进不了运行栈,也进不了任何静态门**:`nav_contacts` 渲染的是派生默认表单而不是作者写的那份,`addRecord.formView: 'create'` 从未绑定,而 `content/docs/ui/create-vs-edit-form.mdx` 一直把这个文件当作活的参考实现引用。这也解释了 #5405 的 `i18n/missing-section` 为什么在 showcase 上采到 10 条却没有一条属于 `showcase_contact`。\n\n## 改了什么\n\n1. `examples/app-showcase/objectstack.config.ts` —— 第 23 行 import + 第 196 行 `views:` 各补一个 `ContactViews`。\n2. `examples/app-showcase/src/system/translations/index.ts` —— 为注册后新可见的 5 个 zh-CN 覆盖键补译文。\n3. `examples/app-showcase/test/seed.test.ts` —— 两条 pin(见下)。\n4. 空 frontmatter changeset —— 示例应用为 private 包,不发布任何包(仓规里「本 PR 不发布任何东西」的正规声明方式)。\n\n⛔ 未动 `packages/**`,未动棘轮基线 `scripts/i18n-coverage-baseline.json`,未缩 `supportedLocales`。\n\n## 新增键是实测的,不是预测的\n\n```\nnode packages/cli/bin/run.js lint examples/app-showcase/objectstack.config.ts\n\n  483 warning(s)   ← 注册前(= origin/main)\n  488 warning(s)   ← 只注册、未补译文\n  484 warning(s)   ← 本 PR 最终态\n```\n\n注册引入的 5 条,逐条 diff 出来的:\n\n```\n+ i18n/missing-view     translations.zh-CN.objects.showcase_contact._views.list.label\n+ i18n/missing-section  translations.zh-CN.objects.showcase_contact._sections.contact.label\n+ i18n/missing-section  translations.zh-CN.objects.showcase_contact._sections.work.label\n+ i18n/missing-section  translations.zh-CN.objects.showcase_contact._sections.status.label\n+ i18n/missing-section  translations.zh-CN.objects.showcase_contact._sections.notes.label\n```\n\n`formViews.create` 的那个段落没有 `name`,按渲染器的约定天生不可翻译,所以不在集合内 —— 这不是遗漏。\n\n译文体例对齐 PR #5416 的返工 commit `e3d1e855c`:zh-CN 从本 bundle 既有词汇表取词(`状态`/`备注` 就是它自己 `stage` 族与 `notes` 的用词),`en` 不加条目(默认语言由内联 label 满足,复述源串只会伪造覆盖率)。两处需要解释的取词写在代码注释里:`contact` 取「联系方式」而不是在联系人记录里再套一个循环的「联系人」;`_views.list` 的源串是光秃秃的 \"Contacts\",所以用对象自己的 `pluralLabel`,而 task/project 列表的「全部…」属于那些真的写了 \"All …\" 的 label。\n\n## 两条 pin\n\n`test/seed.test.ts`:\n\n- **`registers every view container the barrel exports`** —— 按**目标对象**比对,不是按对象标识:`defineStack` 会 parse config,`stack.views[i]` 是结构副本,永远不 `===` 导出的容器(第一版按标识写的,五个全红,已改)。容器本身按 spec 无顶层 `name`,隐式以 `list`/`form` 绑定的对象为键,与 objectql 的 `resolveMetadataItemName` 和 i18n walker 同一套推导。\n- **`keys the contact form sections to exactly what the container declares`** —— 断言**集合相等**,因为两个 i18n 门是反向读同一个集合的:`i18n/missing-section`(#5405)红在「声明了没译文」,`translation-target-unknown`(#5415/#5422)红在「有译文没声明」。只查一个方向的测试会在另一个方向坏掉时保持绿。#5422 落地后这个集合关系**第一次在真实 config 上可测**,实测结论:四个正确翻译的段落**没有**被 `translation-target-unknown` 误报。\n\n### 反向验证(方向是事先预判的:红)\n\n把 config 那一处 hunk stash 掉重跑,两条 pin 按预期变红,且第一条精确点名:\n\n```\nAssertionError: exported but absent from `views:` → ContactViews:\n  expected [ 'ContactViews' ] to deeply equal []\n Tests  2 failed | 4 passed (6)\n```\n\n只点名 `ContactViews`、不误伤其余四个,说明按目标对象比对的那版 helper 是对的。\n\n## 验证\n\n```\npnpm build (turbo, --concurrency=2)      Tasks: 71 successful, 71 total\nnpx tsc --noEmit (examples/app-showcase) 通过\nnpx vitest run  (examples/app-showcase)  Test Files 12 passed / Tests 126 passed\nnpx objectstack validate                 ✓ Validation passed (1367ms)，exit 0\npnpm check:i18n-coverage                 OK (12 config(s), 660 baselined\n                                         untranslated string(s), none new)\nnode scripts/check-nul-bytes.mjs         OK (5436 files, no raw NUL bytes)\n```\n\n仓库级 `check:i18n-coverage` 是先 `turbo run build` 再跑的(门 shell 到构建产物)—— #5416 用一次 CI 红换来的教训,这次没有重付。\n\n## 已知遗留:`_views.list` 上那条 `translation-target-unknown`\n\n补 `_views.list` 译文之后,`translation-target-unknown` 多出一条 —— 但这**不是本 PR 引入的新类**:`showcase_project` / `showcase_task` / `showcase_inquiry` / `showcase_business_unit` 在 main 上已经各有一条一模一样的。根因是 #5164 记录的那件事:i18n 覆盖 walker 把容器默认列表按 `primary.name || 'list'` 推导出 `_views.list.label` 并**要求**它,而引用校验器认为没有任何视图叫 `list` —— 同一次 `os lint` 里两条规则互相打架。`validate-translation-references.ts` 的注释也明写了这归 #5164。本 PR 只能二选一,选了不让覆盖率棘轮变红的那一边,并把第 5 个实例作为数据点评论回 #5164。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016FNvXhtSdnEGEfLEsMmvxh)_"
+}

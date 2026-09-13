@@ -1,0 +1,37 @@
+{
+  "number": 5427,
+  "kind": "issue",
+  "title": "objectui: `ObjectGantt` hardcodes Chinese quick-filter labels — English-only-codebase violation, and the gantt toolbar is Chinese in every locale",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T11:07:58Z",
+  "updated_at": "2026-08-05T12:13:57Z",
+  "closed_at": "2026-08-05T12:13:56Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5427",
+  "body": "Found while measuring objectstack#5407's item 2 (`Clear` in list/toolbar chrome). It is not that bug — it is its mirror image — so it is filed separately.\n\n`packages/plugin-gantt/src/ObjectGantt.tsx` (around line 1384) renders `QuickFilterBar` with the labels hardcoded in **Chinese**:\n\n```\nlabels={{\n  all: '...',            // 全部\n  clear: '...',          // 清除筛选\n  empty: '...',          // 无可选项\n  resultSummary: (shown, total) => `... ${shown} / ${total} ...`,  // 显示 N / M 项任务\n}}\n```\n\n`QuickFilterBar` itself is correct — it is presentational and falls back to English (`labels?.clear ?? 'Clear'`). The host is what pins the copy.\n\n### Two defects in one\n\n1. **AGENTS.md Commandment #-1** — \"All user-facing text ... MUST be English. No Chinese or other non-English in those.\" This is the objectui codebase, not the instruction file, so the rule applies literally.\n2. **It is untranslatable.** These are not bundle keys, so the gantt quick-filter bar reads Chinese under an `en`, `ja`, `es`, `ar` … session. The rest of the gantt toolbar localizes fine, which makes the mismatch conspicuous the same way objectstack#5407's item 3 describes for dashboards.\n\nNote for whoever picks this up: `resultSummary` uses SINGLE-brace interpolation on purpose (the call site does a literal string replace, not i18next), which `all-locales-key-parity`'s placeholder check already knows about — see its `SINGLE` regex. Any bundle keys added here must keep that spelling or the parity guard will flag them.\n\n### Suggested fix\n\nMove all four into the `gantt` namespace of `packages/i18n/src/locales/*.ts` (all ten packs — full parity is enforced) and read them through `useSafeTranslate`, the way `DashboardFilterBar` already does for `dashboard.filters.*`.\n"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 5473,
+  "kind": "issue",
+  "title": "objectui: buildPivot 的 cell key 用空格拼接 rowId 与 colId,维度值含空格时会静默串格",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T13:34:51Z",
+  "updated_at": "2026-08-05T23:37:06Z",
+  "closed_at": "2026-08-05T23:37:06Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5473",
+  "body": "实现 objectstack#5450(清理 `DatasetWidget.tsx` 里那个裸控制字节)时在**相邻两行**发现的,按 Prime Directive #10 单独开单,不在 5450 的 PR 里顺手改。\n\n### 位置\n\n`packages/plugin-dashboard/src/DatasetWidget.tsx`,`buildPivot()` 里:\n\n```\nconst rid = rowDims.map((d) => String(row[d] ?? 'EMPTY')).join(SEP);   // SEP = U+0001\nconst cid = String(row[colDim] ?? 'EMPTY');\ncellIndex.set(`${rid} ${cid}`, index);                                  // 注意:空格\n```\n\n行 id 内部用的是一个\"维度值不可能包含\"的字符(U+0001,objectstack#5450 已把它改成可读的转义写法,运行时值不变),但**行 id 与列 id 之间用的是一个普通空格** —— 而维度值里含空格是再常见不过的事(\"New York\"、\"In Progress\"、\"Closed Won\")。\n\n### 后果\n\n当两行满足 `rid1 + 空格 + cid1 === rid2 + 空格 + cid2` 时,`cellIndex` 的后写者覆盖先写者,透视表那一格显示的是**另一行**的度量值。举例(行维度 `region`,列维度 `quarter`):\n\n| 行 | region | quarter | cell key |\n| --- | --- | --- | --- |\n| A | `New` | `York Q1` | `New York Q1` |\n| B | `New York` | `Q1` | `New York Q1` |\n\n两行落进同一个 key,`cellIndex` 只保留后者;drill-through 也是按这个 index 读 `drillRawRows` 的,所以钻取会一并钻到错的那行。\n\n全程无报错、无警告 —— 只是格子里的数字不对。\n\n### 触发面(如实说)\n\n要求两个维度值恰好能在边界上\"接得上\",不是每天都撞;但维度值是任意用户数据,而且这是**静默的数据正确性**问题,不是渲染瑕疵。严重度请 triage 时按贵重口径判,我只按发现原样记。\n\n### 为什么没在 objectstack#5450 里一起修\n\n- 那一单的文件面是四个控制字节 + `KNOWN_OFFENDERS` 基线,越界即停;\n- cell key 的字符串形态被现有测试直接钉着(`expect(p.cellIndex.get('Open High')).toBe(0)`),换编码要连同测试一起重写,属于另一个改动的完整范围。\n\n### 建议方向\n\n- cell key 不再依赖\"不可能出现的字符\":`JSON.stringify([rid, cid])`(与 objectui#3388 对 include key、objectstack#5450 对告警去重 key 的处置同形),边界对任意维度值都无歧义;\n- 顺带把 `buildPivot` 的用例从\"只有一个行维度\"扩到多行维度 —— objectstack#5450 补的那条用例已经开了个头,在那之前**分隔符从来没被任何用例跑到过**(改成空串也照样全绿)。\n\n发现来源:objectstack#5450 / PR objectui#3389。\n"
+}

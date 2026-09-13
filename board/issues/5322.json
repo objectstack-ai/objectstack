@@ -1,0 +1,32 @@
+{
+  "number": 5322,
+  "kind": "issue",
+  "title": "空组合子在同仓有两个对立答案:五个后端归约成布尔单位元,service-analytics 的两个编译器 fail-closed 抛错 —— #5239 的一致性表四条因此进不了表",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T19:33:43Z",
+  "updated_at": "2026-08-05T04:33:22Z",
+  "closed_at": "2026-08-05T04:33:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5322",
+  "body": "实现 #5239 的 spec 半边(FILTER_LOGIC_CASES 扩四条布尔单位元)时实测发现,**不在该单范围内**,按 Prime Directive #10 单独记在这里,unassigned。\n\n#5239 的前提是「四条只差 driver-mongodb 一家,补上归约即可全绿」。实测这条前提不成立:一致性表**在册的**另外两个后端对同样四条给出的不是「错的答案」,而是**相反的立场**,并且写在代码注释里、还有 pin 测试钉着。\n\n## 实测矩阵(`origin/main` @ `175d789`,四行 fixture)\n\n| 后端 | `{$and:[]}` | `{$or:[]}` | `{$or:[{a:'x'},{}]}` | `{$not:{}}` |\n|---|---|---|---|---|\n| 期望(#5134 / #5239 裁定) | 全部行 | **零行** | 全部行 | **零行** |\n| `formula` `matchesFilterCondition` | 全部行 | 零行 | 全部行 | 零行 |\n| `driver-memory` | 全部行 | 零行 | 全部行 | 零行 |\n| `driver-sql`(#5134 / PR #5243) | 全部行 | 零行 | 全部行 | 零行 |\n| `driver-sqlite-wasm` | 全部行 | 零行 | 全部行 | 零行 |\n| `driver-mongodb`(#5239 本次) | 全部行 | 零行 | 全部行 | 零行 |\n| **`read-scope-sql`** | **抛错** | **抛错** | **行 1,2** | **整表** |\n| **analytics `filter-normalizer`** | **抛错** | **抛错** | **行 1,2** | **整表** |\n\n两处落点:\n\n- `packages/services/service-analytics/src/read-scope-sql.ts` 的 `compileNode`(第 53-56 行)\n- `packages/services/service-analytics/src/strategies/filter-normalizer.ts` 的 `buildNode`(第 249-255 行)\n\n两者都被一致性表在册:`read-scope-sql-conformance.test.ts` 与 `native-sql-filter-logic-conformance.test.ts` 各自遍历全部 `FILTER_LOGIC_CASES`。所以四条一进表,这两个 suite 立刻各红四格。\n\n## 为什么这是「要拍板」而不是「有人没跟上」\n\n对立是**成文的**,不是遗漏。`filter-normalizer.ts` 的错误消息逐字写着:\n\n> `\"$and\" requires a non-empty array. An empty combinator has no defensible reading — dropping it widens the query, and treating it as \"match nothing\" silently empties a chart.`\n\n「treating it as match nothing」正是 #5134 为 `$or: []` 定下的答案。而 `read-scope-sql.test.ts:86` 用 `expect(...).toThrowError(/non-empty array/)` 把这个抛错钉住了。所以这不是「照抄 #5296 即可」的那类跟进(#5297 的 `$not` 就是那类),而是两条已落地的立场必须有一条让步。\n\n顺带注意:**「响亮拒收」本身是有先例的答案** —— #5240 对 `{ field: {} }` 取的正是拒收,理由是「让 AI 生成的元数据在编写期就炸」。同一条理由套在空组合子上同样成立:一个 disjunct 列表循环出零项,几乎必然是 producer 的 bug,而不是作者想表达「零行」。\n\n## 两轴分析\n\n**A. 项目长远合理性**\n\n- 取**单位元**:布尔代数唯一自洽的读法,且 `{}` / `{$and:[]}` / `{$or:[]}` / `{$not:{}}` 会在嵌套里互相组合(`$not` of `$or:[]`、`$and` 里含 `$or:[]`),只有三值归约能把整棵树算完。拒收方案必须回答「嵌在 `$or` 第三个分支里的 `$and: []` 算不算错」—— 拒收要么过度(合法的空合取也炸),要么就得先归约再判空,那已经是单位元方案了。代价:analytics 两处要改,`read-scope-sql.test.ts` 的 pin 要翻向。\n- 取**拒收**:与 #5240 同向,producer 的 bug 在编写期爆炸。代价:要**反向**改五个后端(含刚合入的 PR #5243 / #5296),而 `$or: []` 在 RLS 里的正确答案(零行)会退化成 500 —— 一条本可安全求值的 scope 变成整条请求失败。\n\n**B. 让 AI 写的元数据难写错**\n\n- 单位元:`{$or: []}` = 零行是 **fail-closed** 的 —— 循环出零项的 RLS scope 隐藏全部行,而不是放行全表(那是 #5134 修掉的 P0)。但作者拿不到任何信号。\n- 拒收:信号最响,但只在**能拒收的路径**上响;`updateMany` / `deleteMany` 也走同一个 translate 层,那里「炸掉」和「零行」的安全性没差别,而「炸掉」会把一次本可正确执行的批量写变成失败。\n\n**推荐:取单位元,analytics 两处对齐** —— 理由是 A 轴的组合性(拒收无法回答嵌套),加上 B 轴上 `$or: []` = 零行本身已经是 fail-closed。若维护者更看重编写期信号,可以两者兼取:**归约照做,同时在 publish/lint 面对字面量空组合子响亮拒收** —— 运行期语义单一,作者错误仍在编写期爆炸,这是 PD #12「在生产端拒绝、不要在消费端容忍」的标准形状,也是唯一不需要任何一边让步的读法。\n\n## 连带\n\n- 同两个文件的 `$not` 非 NULL-safe(#5146 后的少数派)已由 #5297 记录 —— 但 #5297 只点了 `read-scope-sql.ts`,`filter-normalizer.ts` 是同缺陷的第二份拷贝,已在 #5297 补注。\n- 拍板前 `FILTER_LOGIC_CASES` 不能加这四条(加了就是把另一条车道的未决工作变成这张表的红)。已在 `filter-logic-conformance.ts` 留下实测矩阵与本单编号,PR 见 #5239 的分支。\n\n## 关联\n\n#5239(一致性表扩条,被本单阻塞)、#5134 / PR #5243(driver-sql 单位元)、#5297(同两处的 `$not` 分叉)、#5240(`{field:{}}` 取拒收的先例)、cloud#1073、#3774。\n"
+}

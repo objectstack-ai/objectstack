@@ -1,0 +1,37 @@
+{
+  "number": 5313,
+  "kind": "issue",
+  "title": "`content/docs/ui/apps.mdx` 仍在教两个已 `retiredKey()` 退役的键(`version` / `mobileNavigation`)—— 照抄「Basic Structure」示例即解析失败,而 `check:skill-examples` 结构上看不见",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T18:33:59Z",
+  "updated_at": "2026-08-05T13:23:59Z",
+  "closed_at": "2026-08-05T13:23:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5313",
+  "body": "在 #5280(`app.form.ts` 提供墓碑键)的全量扫尾中顺带发现,与该单同类不同面 —— 那单的范围是 `packages/spec/src/**/*.form.ts` 与 #3786 对账门,手写文档面不在其内,故单独立案。\n\n## 事实\n\n`content/docs/ui/apps.mdx` 有三处仍把 17.0.0 已退役的键当作可作者化面在教:\n\n| 位置 | 内容 | 实际状态 |\n|---|---|---|\n| 第 17 行(第 12 行 `os:check` 块内) | `version: '1.0.0'` | `App.version` 是 `retiredKey()` 墓碑 |\n| 第 45 行(App Properties 表) | 一行 `version` / `string` / optional / App version | 同上,表格把它列为可选可写 |\n| 第 215-224 行 | 整节 `## Mobile Navigation`,含 `mobileNavigation: { mode, bottomNavItems }` 示例与 `mode` 取值说明 | `App.mobileNavigation` 是 `retiredKey()` 墓碑(完全未实现) |\n| 第 235 行(第 230 行 `os:check` 块内) | `version: '2.0.0'` | 同 `version` |\n\n墓碑是 `z.never().optional()`,所以照抄不是「多写个没用的键」,是**整条 save 硬失败**。实测(worktree @ origin/main de113a4,把第 12 行 `os:check` 块的对象原样喂给 `getMetadataTypeSchema('app')`):\n\n```\napps.mdx \"Basic Structure\" example parses: false\nversion :: `App.version` was removed in @objectstack/spec 17.0.0 (2026-06 liveness audit — no consumer in framework or ob…\n```\n\n## 为什么门没开火\n\n两个示例块都带 `{/* os:check */}`,`check:skill-examples` 也确实在跑(本机 `✅ 204 prose examples type-check against @objectstack/spec`)。它绿是因为**这个门只做 tsc**,而两个块都是**无类型标注的对象字面量**(`const crmApp = { … }` / `const projectApp = { … }`):没有任何东西把它们和 `AppSchema` 关联起来,`retiredKey()` 赖以在编译期开火的 `never` 入参类型于是永远不参与推断。\n\n即:`os:check` 覆盖的是「示例能否编译」,不是「示例是否合规」。对退役键这一类,前者恒真。两条可能的收紧路径(择一,需裁决):\n\n- **A. 示例侧**:给这类块加标注(`const crmApp: App = { … }` 或 `defineApp({ … })`),让 `never` 入参在 tsc 就红。改动面是文档示例,门本身不动。\n- **B. 门侧**:`check:skill-examples` 对能推断出 schema 的块追加一次 `safeParse`。覆盖更广(标注漏了也能抓),但要先解决「哪个块对应哪个 schema」的归属问题。\n\n我倾向 A + 逐步 B:A 立刻可做且零门改动;B 是长期正确的那一半,但归属推断本身需要设计。\n\n## 顺带\n\n同类不同页已有 #5291(widget-contract 的 Theme 段在教 #3494 删掉的 `density`)。两单的共同形状是「手写文档面没有随退役一起清」,若要一次性收口,值得考虑一条覆盖 `content/docs/**` 的墓碑键扫描门 —— 但那是第三个决定,不塞进本单。\n\n## 现场\n\n- `content/docs/ui/apps.mdx:17` / `:45` / `:215-224` / `:235`\n- `packages/spec/src/ui/app.zod.ts:1099`(`version` 墓碑)/ `:1245`(`mobileNavigation` 墓碑)\n- `packages/spec/scripts/check-skill-examples.ts:250-263`(示例被逐字写盘后仅跑 tsc,不做 schema 校验)"
+}

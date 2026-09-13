@@ -1,0 +1,35 @@
+{
+  "number": 5596,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): 元数据保存的 422 保留 union 分支处方,Studio 重新拿得到字段名 (#5364)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T20:12:20Z",
+  "updated_at": "2026-08-05T21:49:42Z",
+  "closed_at": "2026-08-05T21:49:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T21:49:40Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5596",
+  "body": "Fixes #5364\n\n&gt; **排版说明**:下文一律用 `⟨root⟩` 指代源码里那个 ASCII 尖括号字面量(小于号 + root + 大于号,见 `i.path || ...` 那行的 fallback)。GitHub 的正文消毒器会把小于号紧跟字母整段当 HTML 标签**删掉**,本 PR 初版正是这么被吃掉了一次,故改用这对括号写。\n\n## ✅ 停放已解除(PM 维护,2026-08-05)\n\n曾因 base 分支的 #5604 红(`check-engine-double-contract` 挂 `action-execution-calldata-not-found.test.ts`)停放;#5615(`2614aef`)落地后本分支已同步 main(head `2cf9cc0`),CI 23 项全绿,按 ACCEPT 流程转 ready 入队。\n\n## 前提复核(在 origin/main `e900015` 上实测)\n\n先按「issue 是线索不是规格」核了一遍。issue 引用的 `protocol.ts:7128` 已漂移,`INVALID_METADATA` 现在有两处:L7010 是「分层读信封当写体」的防御性拒绝(与本单无关),**L7141 才是 saveMetaItem 的 spec-conformance 422**。缺陷本身则**完全成立**,走真实 `saveMetaItem` 路径复现:\n\n```\nTHROWN? true code= INVALID_METADATA status= 422\nMESSAGE = [invalid_metadata] view/task_list failed spec validation: ⟨root⟩: Invalid input\nISSUES = [ { path: '', message: 'Invalid input', code: 'invalid_union' } ]\nROWS = 0\n```\n\n被 `.map()` 丢掉的 4 个分支里躺着的是:branch[1] 的 `unrecognized_keys`(点名 `type`、`columns`,带 #4001 策展处方)、branch[2]/[3] 的 `invalid_value`(带槽位路径与合法枚举)。\n\n## 改了什么\n\n`packages/metadata-protocol/src/protocol.ts` 新增 `zodIssuesToMetadataIssues`,422 的 `issues` 由它产出。union 自己那条**保留不动**——展开是严格叠加的,今天读 `issues[0]` 的消费者不会少读到任何东西——后面跟上真正解释这次拒绝的分支,路径按**绝对路径**拼好(分支 issue 的 `path` 是相对于 union 的,#5014 为此付过学费)。422 的 `message` 摘要行随之变得可读。\n\n分支选择策略与 main 上两份参考实现**逐条一致**:丢弃只报根部 kind 不匹配的分支;报得最少的分支胜出;`unrecognized_keys` 破平局;声明顺序决定其余;并列全出(上限 3);嵌套 union 递归(上限 3 层)。这是同一机制的**第三份**拷贝,形态不同而判决相同:spec 的 `formatZodError`(#4971)只导出字符串渲染器,rest 的 `zodIssuesToFields`(#5014)产出 ADR-0114 的 `{ field, code }` 目录条目,本处信封是 `{ path, message, code }` 且 `code` **透传 zod 原码**(按派发约束,不顺手对齐 ADR-0114 目录 —— 那需要单独裁决)。\n\n## 修后实测\n\nissue 那个 view 输入,`issues` 从 1 条变成 2 条,第二条 `code` 是 `unrecognized_keys`,message 点名 `` `type` ``、`` `columns` `` 并带 #4001 的完整处方;摘要行从 `... failed spec validation: ⟨root⟩: Invalid input` 变成 `... failed spec validation: ⟨root⟩: Invalid input; ⟨root⟩: Unrecognized key(s) on this view container: ...`。\n\n## ⚠️ 与派发词预期不一致的一点(如实报告,未按模板凑证据)\n\n派发约束写的是「修后 `issues` 必须含带真实键名的 `unrecognized_keys` 条目**与**带 `type` 路径的 `invalid_value` 条目」。**用 issue 那个输入,后者不会出现**,而且这不是实现缺陷:\n\n- branch[1](容器)= 1 条 issue 且带 `unrecognized_keys` → rank `[1, 0]`\n- branch[2]/[3](扁平 list/form)= 各 2 条 issue → rank `[2, 1]`\n\n「报得最少的分支胜出」是排序第 2 位,`unrecognized_keys` 破平局是第 3 位,所以只有 branch[1] 入选。要同时输出两者就必须改排序策略,而那会让四个消费者判决不一致——正是本单存在的理由。故按「语义必须与两份参考一致」执行,并把「带 `type` 路径、可高亮」的承重断言放到**确实产出它**的输入上(容器体 `{ list: { type: 'nope', ... } }` → `path` 为 `list.type`、`code` 为 `invalid_value`、message 含合法枚举)。\n\n## 测试\n\n新增 `packages/metadata-protocol/src/protocol.save-union-issues.test.ts`(14 例):\n\n- zod 确实把整次拒绝折叠成一条无路径 issue —— 缺陷本身钉死为「关于 zod 的事实」\n- issue 原样输入:真实键名到达作者;union 那条仍在 `issues[0]`;摘要行可读\n- 容器体:`list.type` 绝对路径 + `invalid_value` + 合法枚举\n- **承重**:合法 view 照常保存(不凭空造拒绝);非法 view 仍 422 且 `rows.size === 0`\n- 策略单测:非 union 原样透传;全是 kind 不匹配则输出不变;`errors: []` 变体不加噪;最少胜出 + `unrecognized_keys` 破平局;并列全出且上限 3;逐层拼绝对路径;第 4 层 union 不再展开;同键同话去重一次;去重不跨顶层 issue;非数组入参返回空信封\n\n### 反向验证(方向**事先**预判,结果与预判一致)\n\n把调用点还原成旧的 `.map()`,预判「只有两条 save 路径的展开断言转红,其余 12 条(zod 事实钉、合法保存对照、10 条纯策略单测)保持绿」。实跑:\n\n```\nTests  2 failed | 12 passed (14)\n x the issue's view body: real key names now reach the author instead of Invalid input\n x a container body localises the failure to a real path Studio can highlight\n```\n\n### 影响面(按规则消费半径,不按被改包)\n\n`err.issues` 的下游 fixture 全扫了一遍:`packages/objectql` 的 `protocol-meta.test.ts` / `metadata-validation-sweep.test.ts` 只断言 `Array.isArray(issues)` 与 code/status,`packages/rest` 的两个信封测试自建 `issues` 数组——都不钉条数或内容,故不受影响。最终同步圈(head `2cf9cc0`,base 含 `2614aef`)三包实跑:\n\n```\n@objectstack/metadata-protocol   Test Files  43 passed (43)    Tests   402 passed (402)\n@objectstack/objectql            Test Files 118 passed (118)   Tests  1911 passed (1911)\n@objectstack/rest                Test Files  49 passed (49)    Tests   737 passed (737)\n```\n\ntypecheck:`@objectstack/metadata-protocol` 无 `typecheck` 脚本(在 `check-type-check-coverage.mjs` 的 DEBT 台账里)。改用直跑 tsc 对比基线,**63 → 63,未增一条**;`pnpm check:type-check-coverage` 与 `node scripts/check-nul-bytes.mjs` 均 OK;`check:engine-double-contract` OK(26 pinned);#5600 新落的 query-options-erasure ratchet 绿且本 PR 未进其基线。\n\n## 范围纪律\n\n- ⛔ 未碰 `packages/spec`(含 `strictness-batch14.test.ts:191` / `dashboard-compareto.test.ts:201` 的 docblock 校准 —— 那两句「`zodIssuesToFields` 只映射顶层 issue」在 PR #5362 合入后对 REST 面已失真,本 PR 又让它对 saveMetaItem 面失真;按派发约束不动,债记在 #5364 时间线)\n- ⛔ 未碰 `packages/rest` / `packages/cli`(#5014 已修、#5341 待派)\n- ⛔ 未动 `content/docs/releases/`;`.changeset/savemeta-422-union-branch-issues.md` 已附\n- 构建副产物 `packages/spec/authorable-surface.base.json`(`gen:schema` 重锚 `baseRev`)已还原,不在本 PR 的 diff 里\n\n## 顺带发现(已另立 issue,不在本 PR 修)\n\n- **#5598** —— 同一折叠机制的**第五个**消费者:`metadata-diagnostics.ts:77` 的 `computeMetadataDiagnostics`(读路径 `_diagnostics` 信封,同形同病)。本 PR 修好后,**保存**一个有缺陷的 view 能看到字段名,**打开**一个存量有缺陷的 view 仍然只有一条无字段的 `Invalid input`。\n- **#5599** —— `view` 的 spec 校验闸门形同虚设:`saveMetaItem({ item: { nope: 1 } })` 返回 success 并把该 body 存成一条 active view。`ViewMetadataSchema` 第 4 个 arm(`FormViewSchema.extend(...).strip()`)既 strip 又无必填键,等于给整个 union 开了万能通行证。落点在 `packages/spec`,需要单独裁决。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01V7WetGmnfoXNn8cLieKKmx"
+}

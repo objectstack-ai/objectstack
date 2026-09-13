@@ -1,0 +1,38 @@
+{
+  "number": 5401,
+  "kind": "issue",
+  "title": "merge_group 条目在前一次 main 合并后 ~4 分钟内入队时永远吃不到 Turbo 缓存 —— 连续合并每条多付数分钟冷构建(实测)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T07:46:31Z",
+  "updated_at": "2026-08-05T17:29:29Z",
+  "closed_at": "2026-08-05T17:29:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5401",
+  "body": "观察类 finding,来自 PR #5398 队列「变黄」的诊断(2026-08-05,只读调查,无任何状态干预)。记录备查,由分诊轮定级。**未认领。**\n\n## 实测事实\n\nTurbo 缓存**只由 main 分支 run 写入**(`Save Turbo cache (main only)` 在每个 merge_group run 上都是 `skipped`);merge_group 条目只能读。于是当一个队列条目在前一次 main 合并后立刻入队时:\n\n| 步骤 | pr-5395 条目(基线) | pr-5398 条目(受影响) |\n|---|---|---|\n| Restore Turbo cache | 5 秒,**HIT** | 0 秒,**MISS** |\n| Build workspace packages | **4 秒** | **4+ 分钟**(整仓冷构建) |\n| Lint & Type Check job 总耗时 | 3m36s | ~8-10 分钟 |\n\n机制:给 `f417863f` 写缓存的 main push run(30985383811)07:31:52 → 07:35:23 才写完,而 pr-5398 的队列条目 07:34:18 就到达恢复步 —— **早了 ~65 秒**,整个 workspace 冷建。时序竞态,结构性:任何紧跟 main 合并 ~4 分钟内入队的条目必然命中。\n\n## 影响\n\n- 不是故障:构建照常成功,只是慢;条目仍在正常 10-20 分钟带内的偏慢端。\n- 但它是**连续合并的固定税**:队列吞吐越高付得越多(今天单日 ~10 次合并的节奏,尾对尾入队几乎必中),且表现为「队列黄得比平时久」,已经消耗过一次人工排查(本单的由来)。\n\n## 可能方向(未定)\n\n1. 让 merge_group run 可**读** main 的缓存键(restore keys 加 main 前缀,只读不写,不破坏缓存单写者纪律);\n2. 或队列条目的构建步对「前一 main run 的 cache-save 尚未完成」做短等待;\n3. 或接受现状,把本单作为「队列黄 >N 分钟」排查手册里的已知良性原因记录。\n\n方向 1 最小且不改写入方;定级与派发由发现分诊轮裁。\n\n关联:PR #5398(诊断现场)、#4845(另一次「构建慢/黄」误诊的教训:先量再改)、`.github/workflows/ci.yml` 的 Turbo cache 步骤。"
+}

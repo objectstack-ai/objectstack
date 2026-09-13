@@ -1,0 +1,35 @@
+{
+  "number": 5538,
+  "kind": "pull_request",
+  "title": "test(driver-mongodb): 依赖 mongod 二进制的套件改为 opt-in,默认响亮跳过(#5517)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T16:42:05Z",
+  "updated_at": "2026-08-05T17:05:31Z",
+  "closed_at": "2026-08-05T17:05:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T17:05:29Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5538",
+  "body": "Fixes objectstack-ai/objectstack#5517\n\n按维护者 2026-08-05 拍板的「作废相关测试」执行:依赖 mongodb-memory-server 二进制的套件改为 **opt-in**,默认跳过并打印原因 —— 响亮作废,不是静默删除。不为该驱动族建下载单飞 / 预热基建(#5499 冻结令)。\n\n## 一、机制:issue 说的「两种触发形态」其实是同一件事(已核到上游源码)\n\n`mongodb-memory-server-core@11.2.0` 的 `lib/util/MongoBinaryDownload.js:405-415`:\n\n```js\nfileStream.on('finish', async () => {          // async 监听器,没有任何人 await 它\n  ...\n  await fs.promises.rename(tempDownloadLocation, downloadLocation);   // :413\n  resolve(downloadLocation);\n});\n```\n\n冷缓存下两个 worker 同时下载:赢家先把 `.tgz.downloading` rename 掉,输家的 `rename` 抛 ENOENT。因为这个 `async` 监听器是 fire-and-forget,该 rejection **谁都收不到**,并且外层 `new Promise` 既不 resolve 也不 reject。于是同一个事件产生两个症状:\n\n1. 输家的 `MongoMemoryServer.create()` 永不 settle —— 结束等待的是本包 120s 的 deadline,这正是现场看到的「timed out after 120s 跳过」(issue 里的形态 ②);\n2. ENOENT 以**进程级 unhandled rejection** 冒出,vitest 记为 `Errors 1 error`,于是全部测试绿仍 exit 1(形态 ①)。\n\n推论一条,对实现是关键的:**在 `create()` 返回的 promise 上挂 `.catch()` 治不了这个** —— 错误根本不经过那个 promise(`Promise.race` 早已给它挂了 handler,它自己的 rejection 一直是被处理的)。所以「接住弃流 rejection」只能在进程级监听器上做。\n\n## 二、改法\n\n- 门:`OS_TEST_MONGODB_MEMORY_SERVER_ENABLED=1`。命名照 Prime Directive #9 的 test/CI-only 形状 `OS_TEST_*` + 布尔开关 `_ENABLED`,与既有 `OS_TEST_MULTI_ORG_ENABLED`(`packages/qa/dogfood/test/enterprise-organizations.ts`)同一套房规;live 后端那半是用 URL 提供能力(`OS_TEST_POSTGRES_URL`),不适用于布尔 opt-in。\n- **门在 import 之前**:`test-mongod.ts` 对 `mongodb-memory-server` 只保留 `import type`(编译期擦除),值导入放进 `createTestMongod` 里的动态 `import()`,在门后面。默认跑一次下载都不会开始。新套件 `mongodb-memory-server-gate.test.ts` 用 mock 工厂**数库被求值的次数**把这条性质钉住(反向验证见下)。\n- **默认跳过要能看见**:提示走 `process.stderr.write`,不走 `console.warn`。实测 vitest 4.1.10:默认 reporter 对「通过/跳过」文件里 `console.*` 的输出**一行都不渲染**(只有 `--reporter=verbose` 才带 `stderr | file` 头打出来),而直写 stderr 总是到日志。若照原有 `console.warn` 惯例写,这次作废就会变成静默跳过 —— 恰好是本单要避免的东西。该测量结论写在 `printMongodNotice` 的注释里。\n- **接住弃流 rejection**(维护者要求 3,opt-in 本地跑仍需要):`installAbandonedDownloadGuard` 只在 opt-in 路径安装一个进程监听器,只吞 `ENOENT` + `syscall: rename` + 源路径以 `.downloading` 结尾这一种签名;**其它一律 re-raise**。必须 re-raise 的原因:vitest 的 worker handler 只要发现存在第二个 `unhandledRejection` 监听器就整体让位(源码 `vitest/dist/chunks/init.*.js` 里 `processListeners(event).length` 大于 1 即 return),所以只吞不抬会把该 worker 里**所有**别的 unhandled rejection 一起消音 —— 那正是本单在治的那类隐藏失败。\n- `mongodb-findone-query` 与 `mongodb-pagination-conformance` 原先各自直接 `MongoMemoryServer.create()`,既绕过门也绕过本包的 deadline,一并收敛到 `createTestMongod`。\n- 未动 `.github/workflows/**`:核过,没有任何 workflow 硬要求这些套件必须跑(Temporal Conformance 的非 SQL 步骤只是 `pnpm --filter @objectstack/driver-mongodb test`,现在照跑,binary 套件跳过)。也未动包的任何非测试源码。\n\n## 三、验证(真实输出)\n\n冷缓存 + 默认(无 env),`~/.cache/mongodb-binaries` 事前不存在:\n\n```\nTEST EXIT=0\n=== cache state AFTER ===  ls: cannot access '/root/.cache/mongodb-binaries': No such file or directory\n=== Downloading MongoDB occurrences ===  0\n[driver-mongodb] SKIP MongoDBDriver — needs a real mongod, ... retired from default test runs by #5517 ... Set OS_TEST_MONGODB_MEMORY_SERVER_ENABLED=1 to run it.\n(7 个套件各打印一行,此处略)\n Test Files  10 passed | 5 skipped (15)\n      Tests  202 passed | 133 skipped (335)\n   Duration  8.55s\n```\n\nopt-in(从冷缓存起,单套件):`EXIT=0`、`Tests 37 passed`,缓存目录被创建并落下 `mongod-x64-ubuntu-8.2.6`(221 MB)—— 即门开则下载真的会发生。随后整包 opt-in:\n\n```\n Test Files  15 passed (15)\n      Tests  335 passed (335)\n```\n\n暖缓存 + 默认:仍然 7 行 SKIP、exit 0 —— 决定权在 env,不在缓存。\n\n**反向验证(方向事先预判为「红」)**:把删掉的静态值导入加回 `test-mongod.ts`,门测试里两条「库未被求值」断言立刻红:\n\n```\n× skips without touching the library at all when the switch is unset\n× treats a set-but-not-\"1\" value as OFF and says so instead of skipping quietly\nAssertionError: expected 1 to be +0 // Object.is equality\n```\n\n其它:`pnpm --filter @objectstack/driver-mongodb typecheck` EXIT=0;`check:driver-conformance`(含 `--self-test`)OK,20 covered cells;`check-type-check-coverage` OK;`check-nul-bytes` OK;改动文件另做了一次 `grep -naP` 控制字符自扫,干净;eslint 对改动文件零输出。\n\n## 四、台账与诚实记账\n\n- `scripts/check-test-completeness.mjs` 不受影响:skipped 计入「已交代」,不是洞。\n- `scripts/check-driver-conformance.mjs` 的判定是**按 import**,所以 mongo 的 cell 仍然 CONSUMED —— 诚实,但覆盖的东西变少了。**不能加 ledger entry**(为已覆盖的 cell 加条目会被 RECONCILED 判红),因此把事实写进该 ledger 的注释,逐 marker 记明:`FILTER_LOGIC_CASES` 默认仍全量跑(server-free 那半);`PAGINATION_CASES` / `PAGINATION_UNORDERED_CASES` 只剩 opt-in(server-free 那半断言的是 sort spec,不是分区性质);`TEMPORAL_CASES` / `TEMPORAL_TIME_CASES` 只剩 opt-in(无 server-free 半边)。\n- 包 README 增加 opt-in 说明与命令。\n- 测试-only 改动,按仓规走 `skip-changeset` 标签(已挂到本 PR);README 与脚本注释不带任何行为变化,不加 changeset。\n\n## 五、顺手发现(未在本 PR 修)\n\n`docs/adr/0053-date-and-datetime-semantics.md` 的 coverage note 写着 mongo 端到端扫描「runs in CI and skips where no binary is reachable」—— 本单落地后它在 CI 里不再跑。属跨面(ADR)的文档准确性问题,另开 observation-class finding,不夹带进本 PR。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BWS4heBoAitLmzCLhcYdbK)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 5564,
+  "kind": "issue",
+  "title": "`packages/client/vitest.integration.config.ts` 的 `test.poolOptions` 在 Vitest 4 已被移除 —— 「集成测试串行跑」这条声明现在不生效(vitest 只打一条 DEPRECATED 警告)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T18:32:05Z",
+  "updated_at": "2026-08-05T19:53:37Z",
+  "closed_at": "2026-08-05T19:53:37Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5564",
+  "body": "在 #5544 的实施里量到(该单只让 tsc 读集成套件,不改运行通道,故不在其范围内修)。基线:`origin/main` @ `229d29ea4`。\n\n## 事实\n\n`packages/client/vitest.integration.config.ts` 写着:\n\n```ts\n    // Run integration tests sequentially to avoid race conditions\n    pool: 'forks',\n    poolOptions: {\n      forks: {\n        singleFork: true\n      }\n    }\n```\n\n而本仓 `@objectstack/client` 的 devDependency 是 `vitest ^4.1.10`。在该套件上跑一次收集就能看到 vitest 自己报:\n\n```\n$ npx vitest list --config vitest.integration.config.ts\n DEPRECATED  `test.poolOptions` was removed in Vitest 4. All previous `poolOptions`\n are now top-level options. Please, refer to the migration guide:\n https://vitest.dev/guide/migration#pool-rework\n```\n\n即:`singleFork: true` 这条**没有被读取**。注释声明的「串行执行以避免竞态」是 declared,不是 enforced —— Prime Directive #10 的形状,发生在测试配置层。\n\n`poolOptions` 在全仓只此一处(`grep -rn poolOptions --include=*.ts --include=*.mts --include=*.js`,排除 node_modules),所以这是孤例,不是一次批量迁移的遗留。\n\n## 为什么现在没人踩到\n\n该套件由 `pnpm --filter @objectstack/client test:integration` 单独跑,且需要一台**外部仓库提供的**活服务器(`tests/integration/README.md` 写明),CI 的常规 `test` 任务用 `vitest.config.ts` 把 `tests/integration/**` 排除掉。于是没有任何自动通道跑到它,这条失效的串行声明今天不会让任何人变红——属于观察类(`finding`),不是当下缺陷。但它是**将来**有人接上服务器时第一批会咬人的东西:并行跑一组共享同一台服务器、同一份测试数据的用例,正是注释想避免的竞态。\n\n## 处置\n\n按 Vitest 4 迁移指南把 `poolOptions` 里的选项提到顶层(`pool: 'forks'` 保留,`singleFork` 的等价物按迁移指南定 —— 目测是顶层 `fileParallelism: false` 或 `maxWorkers: 1`,需照文档核实而不是照猜)。落点只有这一个文件。\n\n顺带:同目录 `README.md` 列了 17 个集成测试文件的规划表,而目录里实际只有 `01-discovery.test.ts` 一个 —— 那是另一件事,不在本单。\n\n关联:#5544(纳入 tsconfig + 修 `client.discovery` 漂移)、#5449。"
+}

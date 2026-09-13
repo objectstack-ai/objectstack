@@ -1,0 +1,38 @@
+{
+  "number": 5178,
+  "kind": "issue",
+  "title": "A MISSPELLED `format` name in a `json_schema` validation rule still enforces nothing — `format: 'emial'` is logged-and-dropped, at runtime AND at publish",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T07:51:29Z",
+  "updated_at": "2026-08-05T14:32:02Z",
+  "closed_at": "2026-08-05T14:32:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5178",
+  "body": "Found while implementing #5029 (PR pending) — filed unassigned, deliberately not fixed there. #5029's ruling was \"register `ajv-formats` so `format` is enforced\"; this is the residual half that registration does **not** close, and #5029 pins the current behaviour by test rather than changing it.\n\n## What is still unenforced\n\nAfter #5029 the runtime's shared ajv is `new Ajv({ allErrors: true, strict: false })` + `addFormats(ajv)`, so `format: 'email'` now really rejects `not-an-email`. But `strict: false` is also what makes an **unrecognised** format name a non-event: ajv logs one line at compile time and **drops the keyword**.\n\nReproduced with the repo's own ajv + ajv-formats and the runtime's own options:\n\n```\n$ node -e \"const Ajv=require('ajv'); const addFormats=require('ajv-formats');\n  const ajv=new Ajv({allErrors:true,strict:false}); addFormats(ajv);\n  const v=ajv.compile({type:'object',properties:{e:{type:'string',format:'emial'}}});\n  console.log('validates {e: zzz} =', v({e:'zzz'}));\"\nunknown format \"emial\" ignored in schema at path \"#/properties/e\"\nvalidates {e: zzz} = true\n```\n\nSo an author who types `emial`, `e-mail`, `uri-reference` (real) vs `urireference` (not), `datetime` vs `date-time`, `ipv_4`, … gets a rule that is declared, appears in the metadata, runs on every write, enforces `type` / `required` — and enforces nothing for the keyword they actually wrote. Same declared-but-not-enforced shape as #5029 itself, with the trigger moved from \"we forgot the plugin\" to \"the author made a typo\".\n\n## Why the #4762 publish gate does not catch it either\n\n`packages/lint/src/validate-rule-compilability.ts` compiles each `json_schema` rule with the **same** ajv environment the runtime uses — deliberately, and #5029 extended that parity to the `ajv-formats` registration. A schema whose format name the runtime silently drops is therefore a schema the gate also compiles happily. That is correct for *that* gate (a gate inventing a verdict the runtime does not share is the `strict: true` mistake in a different hat), and it is why this needs its own decision rather than a tweak there.\n\n## Why this is worth a decision rather than a shrug\n\nA misspelling is the single most likely authoring mistake in a hand-written or AI-generated JSON Schema, and it is invisible: nothing in the metadata, the UI, or a test run says the constraint is inert. The failure is also silent in the direction that matters — the record is **accepted**. And it is decidable statically: the set of registered format names is knowable from the metadata alone, with no record in hand, which is exactly the property #4762 used to argue for an authoring-time gate.\n\n## Options\n\n1. **New publish-gate rule** (`validation-rule-json-schema-unknown-format`): the gate walks the schema, collects every `format` value, and errors on any name not in the registered `ajv-formats` set — naming the rule, the object, the JSON pointer, and the nearest match. Keeps the runtime untouched, keeps runtime/gate compile parity intact (this is a *separate* judgement layered on top, not a different compile), and rejects before deployment. Cost: the gate must enumerate the registered format set, which couples it to the plugin version.\n2. **`strict: 'log'` → throw on unknown format in the runtime.** ajv's `strictSchema`/`validateFormats` knobs can make an unknown format a compile error. Rejects the same class, but at *runtime* and fail-open (the rule is skipped and logged, per `checkJsonSchema`), i.e. it converts one silent gap into another — and `strict: false` is load-bearing for vendor keywords, so this must not be done by loosening that dial globally.\n3. Do nothing but document it (the status quo #5029 pinned).\n\n## Acceptance sketch\n\n- A `json_schema` rule carrying `format: 'emial'` is refused at publish time (option 1), naming the offending pointer and suggesting `email`.\n- A rule carrying every legitimate registered format stays green — the gate must not turn working metadata red.\n- The runtime/gate compile-parity test from #4762/#5029 still passes unchanged: whatever this adds is a judgement *beside* the compile, not a divergent compile.\n\n~~Blocked-by: #5029~~(已解除:#5029 于 2026-08-04 关闭,`ajv-formats` 已注册,registered format set 已良定义)\n~~Blocked-by: #5417~~(已解除:#5417 → PR #5455 于 2026-08-05 13:0xZ MERGED,`packages/lint` 文件面释放)\n"
+}

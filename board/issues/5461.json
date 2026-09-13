@@ -1,0 +1,35 @@
+{
+  "number": 5461,
+  "kind": "pull_request",
+  "title": "chore(scripts): the raw-byte gate scans the whole C0 control set, not only NUL (#5157)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T12:50:27Z",
+  "updated_at": "2026-08-05T13:03:50Z",
+  "closed_at": "2026-08-05T13:03:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T13:03:48Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5461",
+  "body": "Fixes objectstack-ai/objectstack#5157\nCloses objectstack-ai/objectstack#4958 —— 见下方\"与 #4958 的关系\"。\n\n## 前提核验\n\n成立,而且比 issue 说的更严重。`scripts/check-nul-bytes.mjs` 在 `origin/main`(`01c0baef9`)上确实只扫 0x00(扫描循环是 `buf.indexOf(0)`)。但按 issue 建议的区间对全仓做逐字节扫描,发现**当下就有 4 个受追踪源文件、共 6 枚裸 C0 控制字节**从这道门禁下溜着,不是理论缺口:\n\n| 文件 | 行 | 字节 |\n|:--|:--|:--|\n| `packages/cli/src/commands/login.ts` | 38 | 0x03 |\n| `packages/cli/src/commands/register.ts` | 34 | 0x03 |\n| `packages/services/service-analytics/src/strategies/cross-object-rebucket.ts` | 121、131 | 0x01 × 2 |\n| `packages/services/service-storage/src/verify-file-references.ts` | 107 | 0x01 × 2 |\n\n## 一处对 issue 论证的修正(实测,不是外推)\n\nissue 正文猜测\"grep/ripgrep 的二进制判定对其他控制字节同样敏感(实现相关)\"。**实测不成立**,这一点很重要,所以没有照抄进门禁文案:\n\n```\nwith-nul.txt  → grep: binary file matches      / rg: binary file matches (found \"\\0\" byte around offset 11)\nwith-soh.txt  → grep: 1:alpha sep='' beta      / rg: 1:alpha sep='' beta        (0x01,照常匹配)\nwith-etx.txt  → grep: 1:alpha sep='' beta      / rg: 1:alpha sep='' beta        (0x03,照常匹配)\n```\n(GNU grep 3.11 / ripgrep 14.1.0)\n\n所以本次扩面**不是**把 NUL 的论证外推到别的字节 —— 那会是一条自己证不了的门禁文案。真正的理由是另一条独立的、落在整个 C0 集上的危害,而且上面那三行输出本身就是证据:**这些字节渲染为空,连 grep 的输出里都是空的**。本 PR 清掉的两个真实样本,读起来都是空串,而它们是承重的:\n\n```\nconst key = keyParts.join('U+0001 的裸字节');   // 所有人看到的:keyParts.join('')\nreturn `${object}U+0001${recordId}U+0001${field}`;  // 所有人看到的:三段直接拼接\n```\n\n第一处是\"一个显然多余、下一个读者会顺手删掉\"的 `join('')`;第二处更糟 —— \"复合键没有分隔符\"正是经典碰撞 bug 的样子,读者会去**修一个并不存在的缺陷**。`cross-object-rebucket.ts` 的注释同样是自我抹除的:``// … `` is a separator no group value contains``,反引号之间本应是那个字符。**对每一个读者说谎的代码,比 grep 找不到的代码更糟**,因为没有任何信号提示还存在第二种读法。而本意写该转义的作者,两种拼写都搜不到:搜转义文本搜不到(文件里是字节),那个字节也没法敲进搜索框。\n\n第三条理由是事故源:本仓每一例都来自\"作者正在写关于这个字节的内容时,编辑工具把转义落成了真字节\"(#4763、#4890、PR #5140)。**该事故源不挑字节值**,所以门禁也不该挑。\n\n## 双向证明(先定方向,再跑)\n\n预期方向:旧门禁在**未修**的树上判绿(盲区),新门禁在同一棵树上判红(扩面生效),修完判绿。三次都如预期:\n\n```\n① 旧门禁(origin/main 版脚本)× 未修的树\n   check-nul-bytes: OK (scanned 5442 tracked text file(s); … no raw NUL bytes).   EXIT=0\n\n② 新门禁 × 同一棵未修的树\n   check-nul-bytes: 4 files contain a raw C0 control byte\n     • packages/cli/src/commands/login.ts:38:15 -- 1 occurrence of 0x03, first at byte offset 1336\n     • packages/cli/src/commands/register.ts:34:15 -- 1 occurrence of 0x03, first at byte offset 1176\n     • …/cross-object-rebucket.ts:121:67 -- 2 occurrences of 0x01, first at byte offset 5087\n     • …/verify-file-references.ts:107:20 -- 2 occurrences of 0x01, first at byte offset 4461\n   Write the escape sequence instead of the byte:\n       0x01  ->  (U+0001 的转义序列)\n       0x03  ->  (U+0003 的转义序列)                                              EXIT=1\n\n③ 新门禁 × 修完的树\n   check-nul-bytes: OK (scanned 5442 tracked text file(s); skipped 5 binary, 1 non-regular; no raw C0 control bytes).   EXIT=0\n```\n\n自测里也把这条钉住了,而且钉的是\"为什么当年判绿\"而不只是\"现在判红\":**每个新样本文件整个文件都不含 NUL**,所以旧的 `buf.indexOf(0)` 扫描确实无事可做 —— 断言直接检查这一点,免得日后有人以为样本是靠构造才变红的。把扩面回退成 NUL-only,自测立刻 **8 条失败**(变异测试已跑)。\n\n## 关键设计点:二进制判据要不要跟着扩(PM 点名)\n\n**要,而且这一步是承重的,不是顺手对齐。**\n\n原判据是\"剔除 NUL 后整文件 UTF-8 严格解码,解不通才算二进制\"。issue 说\"0x01 是合法 UTF-8 单字节,不会被解码判定挡住\"—— 单独出现时确实如此,但**塞进多字节序列中间就会**:`E4 B8 01 AD` 是「中」被塞进一个 0x01,只剔 NUL 的话它解码失败 → 文件判二进制 → 跳过 → **那个 0x01 成了自己的不在场证明**。这正是本门禁存在的理由(git 对 NUL 掉进去的那个循环),只是换了一个字节值。自测有专门样本 `docs/split-sequence.md` 钉住这条,并同时断言\"只剔 NUL 的话它会被误判二进制\"。\n\n反方向不会误伤:扫描集全部不超过 0x1f,而合法 UTF-8 多字节序列只由不小于 0x80 的字节构成,所以剔除它们**永远不会**破坏一个本来合法的序列。验收自测按 PM 的两条标准做了实测 —— 全部 **5448 个受追踪路径**,扩面后文本/二进制判定**零变化**(仍是 4 PNG + 1 ICO 跳过,5442 个文本文件被扫)。也就是说这条反循环性质是白拿的。\n\n仓内没有合法含 C0 字节的受追踪文本(那 6 枚全是缺陷),所以不需要按 #4890 先例开豁免 —— 门禁的\"无 per-file 豁免口\"保持不变。\n\n## 命名:保留旧名(按\"引用点 × 破坏面\"自判)\n\n保留 `scripts/check-nul-bytes.mjs` 与 `pnpm check:nul-bytes`。功能引用点 2 个(`package.json`、`lint.yml`),散文引用点 5 个,其中三个**改不动或不该改**:`packages/lint/scripts/check-doc-formula-expressions.mjs:263`(该包文件面由 #5417 在飞占用,本单明令不触)、`.claude/agents/os-dev.md` 与 `.claude/skills/pm-dispatch/SKILL.md`(agent 配置)。改名换来的是名字更准,代价是一次**跨文件、只改了一半**的重命名 —— 而半改的重命名正是下一个 agent 会踩的坑。语义变化改为写在三处:脚本头、报错文案、CI 步骤名(`Raw NUL byte guard` → `Raw control-byte guard`)。#4958 建议过改名成 `check:control-bytes`,#5417 落地后可作为独立的一次性重命名,已在报告里留作 open question。\n\n## 与 #4958 的关系\n\n搜重时发现 **#4958**(08-03,未认领、未入队)是本单的姊妹单:它点名的正是本 PR 修的那两处 0x01(`cross-object-rebucket.ts:131`、`verify-file-references.ts:107`),给出的建议方向 (1) 就是本 PR 实现的东西,并且记录了这个字节**已经造成的实际损失** —— #4821 整张 issue 的机制、复现、方向裁决全部建立在一段复制时字节被吃掉的引文上,复现其实不成立,直到实施阶段逐字节 `cat -A` 才发现。本 PR 把它的两处样本和它推荐的门禁一起落地,故一并 close;若维护者认为该单应独立走,把 `Closes` 行删掉即可。\n\n## 顺带发现(未在本 PR 修)\n\n`login.ts:47` / `register.ts` 各有一枚裸 **DEL(0x7f)** 当 Backspace 键值,与本 PR 刚转义的 0x03 **同一个 switch、隔九行**。0x7f 不是 C0 控制符,不在 issue 明文给的区间里 —— 扩不扩是门禁扫描面的定义问题,不该由实施顺手扩,已按 Prime Directive #10 单独记录为 #5460(`finding`,未入队)。自测里有一条断言**故意**把 0x7f 钉在扫描面之外,说明这条边界是选出来的而不是漏掉的。\n\n## 测试\n\n```\nnode scripts/check-nul-bytes.mjs --self-test\n  ✓ check-nul-bytes --self-test: 34 assertions over a temp git repo (real scan() path)   (原 16)\nnode scripts/check-nul-bytes.mjs\n  check-nul-bytes: OK (scanned 5442 tracked text file(s); skipped 5 binary, 1 non-regular; no raw C0 control bytes).\n\npnpm --filter @objectstack/cli test                → Test Files 79 passed (79) / Tests 767 passed (767)\npnpm --filter @objectstack/service-analytics test  → Test Files 47 passed (47) / Tests 745 passed (745)\npnpm --filter @objectstack/service-storage test    → Test Files 21 passed (21) / Tests 283 passed (283)\npnpm --filter @objectstack/cli typecheck           → tsc --noEmit, EXIT=0\neslint(5 个改动文件)                              → EXIT=0\nnode scripts/check-changeset-fixed.mjs             → ✓ in sync with 69 public workspace packages\n```\n\n耗时 505ms → 586ms(全仓 5443 个文本文件),扩面成本可忽略。\n\n## 一条实测到的元证据\n\n本 PR 的 changeset 与 #5460 的第一版正文,**在写\"不要写裸控制字节\"的过程中各自落进了裸控制字节** —— changeset 那两枚是被**本 PR 新加的扫描面当场抓住的**(旧门禁会放行)。这是 #4890 那次事故的第五、六例,也是 #4958 里\"工具链本身就会不断重新引入这类字节,人工守则挡不住\"的实测复现。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01GX3sL71LFq8m2usg6VqTSE\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01GX3sL71LFq8m2usg6VqTSE)_"
+}

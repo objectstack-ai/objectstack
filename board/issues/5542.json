@@ -1,0 +1,34 @@
+{
+  "number": 5542,
+  "kind": "pull_request",
+  "title": "chore(ci): lint.yml 的 typecheck 补 build-core 的 turbo 缓存回退 (#5401)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T16:46:51Z",
+  "updated_at": "2026-08-05T17:29:29Z",
+  "closed_at": "2026-08-05T17:29:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T17:29:27Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5542",
+  "body": "Fixes objectstack-ai/objectstack#5401\n\n工作流-only 改动,`.github/workflows/lint.yml` 的 `typecheck` job 的 `Restore Turbo cache` 步加两条 `restore-keys`。**净增 21 行、删 0 行**,写入方一字未动。\n\n## 依据:先量再改\n\n本 PR 的全部依据是落在 issue 上的一手测量:objectstack-ai/objectstack#5401 的评论 5194564203(只读调查,无状态干预)。它同时**否证了 issue 正文的方向 1**,所以本 PR 做的不是方向 1:\n\n- 正文方向 1 是「给恢复步加 main 前缀 restore-keys」。**它早就在文件里**:链尾那条 `${{ runner.os }}-turbo-${{ github.job }}-`,即 `Linux-turbo-typecheck-`,比任何「main 前缀」都更宽 —— main 写入的键就是 `Linux-turbo-typecheck-main-{sha}`,裸前缀本就前缀命中它。没有任何 restore-key 能加得更宽。\n- 事故 run `30985524210` / job `92239260750`,07:34:18Z 的日志把三条键全列了出来并全部 not found,**含最宽那条**:\n\n  ```\n  Cache not found for input keys: Linux-turbo-typecheck-gh-readonly-queue/main/pr-5398-f417863f…-98369a86…,\n  Linux-turbo-typecheck-gh-readonly-queue/main/pr-5398-f417863f…-, Linux-turbo-typecheck-\n  ```\n- 而基线 run `30985094934`(07:27:59Z)用同一条链命中了 `Linux-turbo-typecheck-main-58975525c9bffcc2afa834465a3e4bec4e21cbcb` —— 证明 merge_group 的 ref 本就读得到 main 作用域的缓存,**不是权限/作用域问题,也不是缺前缀**。\n\n所以真实缺口是:这条链只覆盖**自己的 job 命名空间**,而该命名空间存在一个「上一代已消失、当代还没写完」的空窗。\n\n## 现有 key 的构成 / 加了什么 / 为什么它能命中\n\n`typecheck` job 的 key 与 main 的写入键:\n\n| | 表达式 | merge_group 条目上的实际值 |\n|---|---|---|\n| key | `{os}-turbo-{job}-{ref_name}-{sha}` | `Linux-turbo-typecheck-gh-readonly-queue/main/pr-5398-f417863f…-98369a86…` |\n| main 写入(save,未改) | 同一表达式,`ref_name` = `main` | `Linux-turbo-typecheck-main-{sha}` |\n\n加的两条(位于链尾,只读):\n\n```yaml\n${{ runner.os }}-turbo-build-core-${{ github.ref_name }}-\n${{ runner.os }}-turbo-build-core-\n```\n\n第二条前缀匹配 ci.yml `build-core` job 在 main push 上写入的 `Linux-turbo-build-core-main-{sha}`。两条与 ci.yml 的 Temporal Conformance / Dogfood Verify / Console Pin 三个既有消费 job 的写法**逐字节相同**(ci.yml:466-467 / 746-747 / 1135-1136),已用脚本断言过集合完全一致,含缩进。\n\n**用 #5401 那次实测反推「若当时有此回退会命中哪个 key」**:同一次 main push 的 ci.yml run `30985383135` 里,`Build Core` 的 `Save Turbo cache (main only)` 在 **07:32:47Z → 07:32:50Z** 就 success 了;`typecheck` 的恢复步在 **07:34:18Z** 才执行,**晚 88 秒**。所以那一刻 `Linux-turbo-build-core-main-f417863f…` 已在池中可读,第 4 条 restore-key 会前缀命中它 —— 同一队列条目的 ci.yml 各 job 也正是在那一分钟里全部命中 `-main-f417863f…`(Build Core / Test Core (1/3) / Dogfood Regression Gate (1/3)),互为佐证。\n\n而 build-core 跑的是 `pnpm build` = `turbo run build --filter=!@objectstack/docs`(整个 workspace 除 docs),是本 job 构建步 `turbo run build --filter='./packages/*' --filter='./examples/*^...'` 的**超集** —— 与 ci.yml 那三个 job 注释里给出的理由同源。\n\n## 陈旧 / 异构缓存的正确性\n\n回退到一个**更旧**或**由别的 job 写入**的缓存都不会产出错误结果:turbo 的缓存是**按内容哈希寻址**的,每个 task 的复用与否由该 task 的输入哈希决定,而不是由 `.turbo/cache` 这个目录从哪儿来决定。哈希不匹配的 task 一律重跑,只是少了一次命中;哈希匹配的 task,其输出按定义就是这份输入应当产生的输出。所以「旧而温」严格优于「冷」,「读别的 job 的条目」也只是多一批可能命中的 entry,不引入任何新的正确性面。\n\n写入方保持原样以维持缓存单写者纪律:`Save Turbo cache (main only)` 的 `if: always() && github.event_name == 'push'` 与 key 均未改,merge_group 条目仍然只读不写。方向 2(对 cache-save 未完成做短等待)按裁定维持否决 —— 它给每个条目加固定延迟,与提速目标相反。\n\n## 验证(工作流改动无本地运行时,以下为代偿,未跑的项如实说明)\n\n- **YAML 有效性**:`node scripts/check-workflow-status-functions.mjs` 用 CI 同一个 `yaml` 解析器 `parseDocument` 走了全部 22 个 workflow(含本文件):\n  `check-workflow-status-functions: OK (scanned 22 workflow file(s), 39 job(s), 19 job-level if: expression(s); 9 read needs.*.outputs.*, all naming a status function).`,`--self-test` 34 assertions 通过。另用 Python `yaml.safe_load` 解析后回读了该步的 key 与 4 条 restore-keys、以及 save 步的 `if`/key(确认未变)。仓库未依赖 actionlint,容器内也没有,故未跑。\n- **控制字节**:`check-nul-bytes: OK (scanned 5500 tracked text file(s); …; no raw ASCII control bytes)`,`--self-test` 48 assertions 通过;并对改动文件做了越过门禁盲区的自扫(C0 全集 + DEL),零命中。\n- **最小 diff**:`1 file changed, 21 insertions(+)`,删除 0 行;两条功能行 + 一段说明注释,写入方与其余 6 个 turbo 恢复步全部未动。\n- **没跑什么**:本改动不含任何被测试覆盖的代码,故未跑 `pnpm test` / `pnpm typecheck`,也没有可加的单测 —— 这条改动的正确性只能由落地后的 run 日志判定,判据见下。\n\n## 落地后的可观测判据(「部分温」,不承诺基线的 4 秒)\n\n后续任何紧跟 main 合并入队的 merge_group 条目,其 `TypeScript Type Check` job 应表现为:\n\n1. `Restore Turbo cache` 打印 `Cache hit for restore-key: Linux-turbo-build-core-main-{sha}`(而不是 0 秒的 `Cache not found for input keys: …`);\n2. `Build workspace packages` 明显低于事故那次的 4m54s。\n\n**明确不承诺回到基线那 4 秒**:build-core 只写 `build` 任务,不跑 `typecheck` 任务,所以本 job 的 `Type check workspace packages` 一步仍只能靠自己的命名空间 —— 命中 build-core 时那一步照旧是冷的。即「暖构建步、不暖 typecheck 步」,这是本改动的设计上限,不是缺陷。\n\n## 未做的部分(留在 issue 里)\n\n上一代条目为何在 6 分钟内从池中消失,未能证实:`GET /repos/…/actions/caches` 被调查会话的出网代理拦截。按每代约 12 个 job 键 × 250-300 MB ≈ 3 GB、池上限 10 GB 粗估,新一代写入挤掉上一代是最自然的解释。若成立,则杠杆在池容量 / 条目体积 / 远端缓存(方向 C),按裁定**只留 issue 记录不做**;sharded `test` / `dogfood` 也带同样的「仅自身命名空间」链,但无实测拉力,本 PR 不扩。\n\n工作流-only,无用户可见变更 → 挂 `skip-changeset`,不带 changeset。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BWS4heBoAitLmzCLhcYdbK)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 5490,
+  "kind": "pull_request",
+  "title": "feat(lint): refuse a MISSPELLED `format` in a `json_schema` validation rule at publish time (#5178)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T14:14:21Z",
+  "updated_at": "2026-08-05T14:32:02Z",
+  "closed_at": "2026-08-05T14:32:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T14:32:00Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5490",
+  "body": "Fixes objectstack-ai/objectstack#5178\n\n## 前提复核(先证实,再动手)\n\n按 os-dev 规程,先在合并后的 `origin/main` 上用仓库自己的依赖重跑了 issue 的 repro,确认前提仍然成立:\n\n- `ajv@8.20.0` + `ajv-formats@3.0.1`,运行时的选项原样:\n\n```\nunknown format \"emial\" ignored in schema at path \"#/properties/e\"\nvalidates {e: zzz} = true            ← 拼错的 format:记录被接受\ncorrect-spelling validates {e: zzz} = false   ← 拼对的 format:确实拒收\n```\n\n- #5029/PR #5182 已在 main:`packages/objectql/src/validation/rule-validator.ts:267` 是 `addFormats(ajv)`,`packages/lint/src/validate-rule-compilability.ts` 的 parity 也已跟上。\n- `strict: false` 下 ajv 只在编译期打一行日志就**丢掉这个关键字**,于是规则声明了、出现在元数据里、每次写入都跑、`type`/`required` 照样生效 —— 而作者真正写下的那个约束一条记录都不管。失败方向是**记录被接受**,所以下游也没有任何信号。\n\n前提成立,按裁定的**方案 1** 实施。\n\n## 做了什么\n\n新增 gating 规则 `validateRuleSchemaFormats`(`packages/lint/src/validate-rule-schema-formats.ts`),规则 id `validation-rule-json-schema-unknown-format`,在 `AUTHORING_RULES` 里一行接入,`os validate` / `os build` / `os lint` 三个命令自动拾取(接入方式与 `validate-rule-compilability` 完全一致:`tier: 'gating'` / `input: 'parsed'` / `commands: ALL` / `surfaces: CLI_ONLY` + `RUNTIME_OBJECT_WRITES_P2`)。\n\n每条 finding 点名:规则名、对象名、**RFC 6901 JSON Pointer**、以及**最近似的合法名**:\n\n```\nobjects.account.validations.support_shape.schema#/properties/email/format\n  ... names `format: 'emial'` at `#/properties/email/format`, which is not a\n  registered format. ... the schema compiles, the rule ships and runs on every\n  write, ... and this constraint is enforced on no record, ever. The record is\n  ACCEPTED, so nothing downstream reports the gap either.\n  hint: Did you mean `format: 'email'`? The registered names are: binary, byte,\n  date, date-time, ... — the default `ajv-formats` set, the one\n  `rule-validator.ts` registers (#5029).\n```\n\n### format 注册集:从同一注册路径枚举,不硬编码\n\n`registeredFormatNames()` 读的是 `createRuntimeAjv()` 这个**活实例**的 `ajv.formats` 键集 —— 也就是本仓库门禁为镜像运行时而构造的那台 ajv,其选项与插件注册由既有 parity 测试对着 `rule-validator.ts` 的源码钉住。硬编码清单会是**第三份意见**,而且是唯一没人会去更新的那份:插件哪天加了一个名字,清单就开始拒收写入路径真正会执行的 format —— 正是\"门禁把好元数据判红,于是被关掉,于是什么都不保护\"这条失败模式,只不过枪口对着门禁自己。枚举则让门禁在插件升级时自动跟随,一行都不用改。\n\n顺带回答了派发单里\"含 fast 模式差异如有\"这一问:实测两种模式注册的**名字集合完全相同**(26 个),只有实现不同 —— 而即便哪天不再相同,实例仍然知道,清单仍然不会知道。\n\n### 遍历是 JSON-Schema 感知的,因为 `format` 不是魔法词\n\n朴素的\"收集任意深度的每一个 `format` 键\"会在**数据**上产生假阳性,而假阳性是本条验收的红线。所以只下潜到 JSON Schema 定义为子 schema 的位置:`properties`、`items`(2020-12 的 schema 形态与 draft-07 的 tuple 数组两种)、`anyOf`/`allOf`/`oneOf`/`prefixItems`、`$defs`/`definitions`、`additionalProperties`、`patternProperties`、`if`/`then`/`else`、`not`、`contains`、`propertyNames`、`dependentSchemas`、draft-07 `dependencies`,任意深度;外层还覆盖 `conditional` 的 `then`/`otherwise` 子规则(`evaluateRule` 会递归进去,撞的是同一个 `checkJsonSchema`)。\n\n反过来,**持有任意数据的位置一律不读**:`default` / `const` / `enum` / `examples` 里的 `format` ajv 从不当 schema 解释,本来就不生效、也从来不是要它生效 —— 报它等于凭一份合法文档凭空发明一个缺陷。非字符串的 `format`(如 `format: 42`)交给 `validation-rule-json-schema-uncompilable`,那条已经用 ajv 自己的话拒收了(`data/properties/e/format must be string`),这里再报一遍只是噪音。\n\n### 运行时没动;#4762/#5029 的编译 parity 也没动\n\n方案 2 出局的理由在实现里落成了结构:这条判断**叠在编译旁边**,不是折进编译里。`validateRuleCompilability` 依旧在运行时的精确环境里编译、依旧**放行**拼错的 format(因为在那里它确实编译得过),它的 #5029 钉子\n\n> `it('a MISSPELLED format name is published by THIS gate — the compile parity, unchanged (#5029/#5178)')`\n\n**断言一字未改**,只加了注释说明拒收现在由谁给出。两条规则回答两个不同的问题 —— \"ajv 接受这份 schema 吗?\"与\"这个 `format` 关键字会起作用吗?\" —— 并共享同一次遍历(`walkObjectValidationRules`)和同一台 ajv,所以它们不可能对\"有哪些规则\"或\"什么叫已注册\"产生分歧。\n\n`ajv`/`ajv-formats` 保持惰性,而且本条比邻居更惰:只有当 schema 真的**写下了**某个 `format` 名字时才去取注册集,所以一条不含 `format` 的 `json_schema` 规则两个包都不加载 —— `lazy-deps.test.ts` 的三层(结构扫描、两个 dist 子进程探针、进程内行为)都钉了这一点。\n\n## 反向验证:方向是先判定、再运行的\n\n这条**不是**\"把删掉的肢体接回去看诊断变红\"那一类。金丝雀方向在写之前就定了:合并进编译门禁会让 publish gate 与写入路径对\"什么能编译\"产生分歧 —— 而那正是 `validate-rule-compilability.ts` 存在的唯一理由。所以正确的预期是 **旧门禁在同一份 fixture 上保持绿**,新规则在它旁边判红:\n\n```ts\nconst stack = objectWith(schemaRule({ type: 'object', properties: { email: { format: 'emial' } } }));\nexpect(validateRuleCompilability(stack)).toEqual([]);                          // 保持绿 —— 编译 parity 完好\nexpect(ids(stack)).toEqual([VALIDATION_RULE_SCHEMA_UNKNOWN_FORMAT]);           // 新规则判红\n```\n\n这条断言若哪天变红,说明两个判断被合并了、parity 契约已破 —— 测试里写明了这层含义。另有一例钉住\"schema 既编译不过、又拼错 format\"时**两个判决各出一条、各归其主**。\n\n## 假阳性红线 + 消费半径清扫\n\n- **表驱动逐一绿**:对枚举出的**全部 26 个**已注册 format 名各建一个 fixture,断言新规则 `[]`,并**同时**断言 #4762 编译门禁也 `[]` —— 免得这张表是因为元数据在别处坏掉而\"空着绿\"。\n- 无 `format` 键的 schema、其余五种 validation 规则、无 `schema` 的规则、以及 `undefined`/`null`/数字/字符串/数组等垃圾输入,全部绿且不抛。\n- **消费半径按规则的调用方枚举,不按被改的包**:全仓穷尽 grep 后确认,`examples/`、`packages/cli`、`packages/metadata-protocol`、`apps/`、`content/` 里**唯一**真实存在的 `json_schema` 校验规则是 `examples/app-showcase/src/data/objects/account.object.ts` 的 `support_config_shape`,其 schema 不含任何 `format` 键;用构建产物对它原样跑过一遍,两个门禁都是 `[]`。所以本门禁不可能把任何既有元数据判红。\n- `packages/lint` 的 #5096 元测试(源码扫描\"只读 spec 声明的键\")因共享句柄引入了 `walked` / `names` 两个新累加器,按该测试的设计把它们加进 `PLUMBING` 白名单并写明理由(数组的 `.push`/`.length`/`.sort`,不是元数据键)。\n\n## 验证\n\n| 命令 | 结果 |\n|:---|:---|\n| `pnpm --filter @objectstack/lint test`(合并 main 后) | **59 files / 1285 tests passed** |\n| `pnpm --filter @objectstack/lint typecheck` | 干净(`tsc --noEmit` 无输出) |\n| `pnpm --filter @objectstack/cli test` | **80 files / 780 tests passed** |\n| `pnpm --filter @objectstack/metadata-protocol test` | **42 files / 388 tests passed** |\n| 新测试单跑 | **56 tests passed**(其中 26 条为合法 format 逐一绿) |\n| `node scripts/check-nul-bytes.mjs` | OK(5464 files;含 #5460 刚加严的 DEL 扫描),另对本 PR 每个文件做了 `grep -naP` 自扫 |\n| `check:doc-authoring` / `check:published-files` / `check:type-check-coverage` | 全绿 |\n\n`packages/lint` 是发布包,已附非空 changeset(`.changeset/json-schema-rule-unknown-format-gate.md`),含 FROM/TO 式的升级说明:门禁若新拒了某条规则,那个 format 名从来就没被执行过,改对拼写或换 `pattern` 即可,没有任何原本在工作的元数据会改变行为。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01GX3sL71LFq8m2usg6VqTSE\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01GX3sL71LFq8m2usg6VqTSE)_"
+}

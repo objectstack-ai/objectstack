@@ -1,0 +1,34 @@
+{
+  "number": 5558,
+  "kind": "pull_request",
+  "title": "fix(service-analytics): `/analytics/sql` 回显补上 `$startsWith` / `$endsWith` 谓词 (#5333)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T17:55:31Z",
+  "updated_at": "2026-08-05T18:15:42Z",
+  "closed_at": "2026-08-05T18:15:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T18:15:41Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5558",
+  "body": "Fixes objectstack-ai/objectstack#5333\n\n## 前提核实(先做的事)\n\nissue 正文是线索,不是规格,所以先在当前 `origin/main`(`229d29ea4`)上核对:\n\n- `buildFilterClauseSql` 仍是「`set`/`notSet`/`in`/`notIn`/`contains`/`notContains` 显式分支 + 落到 `SCALAR_SQL_OPS`(只有 `equals/notEquals/gt/gte/lt/lte`)查表,查不到即 `return null`」;`startsWith`/`endsWith` 两处都不在。\n- `NativeSQLStrategy.buildFilterClause` 的 `likePattern` 表(约 666 行)已有两条:`startsWith` 的 pattern 是 `` `${v}%` ``,`endsWith` 的是 `` `%${v}` ``。\n- **实测**(把新用例跑在未修改的代码上):`{stage: {$startsWith: 'w'}}` 的回显是 `SELECT id AS \"id\", COUNT(*) AS \"total\" FROM \"deal\" GROUP BY id` —— 没有 WHERE,`params` 为空。issue 那张对照表逐行成立,9 条断言红。\n\n前提有效。\n\n## 主修:LIKE 家族收进一张表\n\n新增 `LIKE_SQL_OPS`,四个算子的 SQL 拼写与 pattern 并排:\n\n| `where` | 实际执行(`NativeSQLStrategy`) | 修复前回显 | 修复后回显 |\n|---|---|---|---|\n| `{stage: {$startsWith: 'w'}}` | `WHERE stage LIKE $1` / `['w%']` | **没有 WHERE**,`params` 为空 | `WHERE stage LIKE $1` / `['w%']` |\n| `{stage: {$endsWith: 'n'}}` | `WHERE stage LIKE $1` / `['%n']` | **没有 WHERE**,`params` 为空 | `WHERE stage LIKE $1` / `['%n']` |\n| `{stage: {$contains: 'w'}}` | `WHERE stage LIKE $1` | `WHERE stage LIKE $1` | 不变(产物逐字节相同) |\n\n与 `NativeSQLStrategy` 的 `opMap` / `likePattern` 一一对应 —— 回显描述的正是那个编译器产出的语句,两张表并列摆着,漂移才看得见。\n\n回显比执行**更宽**是这个字符串最不能有的毛病:它存在的唯一理由就是复现执行(文件自己在渲染块顶上写着 “a rendering that contradicts execution is worse than no rendering”)。作者带着「为什么这张图少了几行」来看回显,拿到一条**没有该筛选条件**的语句,跑一遍返回更多行,于是结论是「筛选器没生效」—— 而实际执行是生效的。不涉及越权或错行:该字符串从不执行(`execute()` 的 echo 丢弃 `params`),损害限于可调试性。\n\n## 次修:`return null` 改 THROW —— 前提已验证\n\nPM 预批的方向,前提是「算子词汇表确实封闭」。已验证,证据:\n\n- `filter-normalizer.ts` 的 `fieldLeaves` 是叶节点的**唯一**生产者(全仓 grep `kind: 'leaf'` 只有它一处非测试命中,`objectql-strategy.ts` 自己不造叶)。\n- 它对 `MONGO_TO_CUBE_OP` 之外的算子在建叶之前就以 `invalidFilterError`(`INVALID_FILTER` / 400)拒绝。\n- 因此能到达回显端的叶算子集合有限可枚举,共 14 个:`MONGO_TO_CUBE_OP` 的 12 个 + `set` / `notSet`(`$null` / `$exists` / 裸 `null` / `$eq: null` / `$ne: null` 都归到这两个);`$between` 降解成 `gte` / `lte`,已在 12 个里。\n\n所以任何调用方写出的过滤器都到不了这个出口;真到了,只能是 normalizer 的表新增了这里没有分支的算子 —— 我们自己两张表漂移,而对此唯一不能给的答案就是悄悄放宽作者的查询。与 `convertFilter` 的 `default:` 分支在 #4128 做出的是同一个选择。刻意**不**用 `invalidFilterError` 的 400 信封:这不是调用方形状的错误,是我们自己的 bug。\n\n`values.length === 0` 那条 `return null` 原样保留 —— 它表达的是「这个叶没有谓词」,与 `execute()` / `NativeSQLStrategy` 一致,和「渲染不了」是两件事。函数的 doc 注释也据此改写。\n\n## 反向验证 —— 方向先预测,再跑\n\n两项修改各自独立验证,**方向不同,如实报告:**\n\n1. **主修(常规红→绿)**:未修改的代码上跑新用例 → 9 红,`$startsWith` 回显为 `SELECT … GROUP BY id`(无 WHERE)。修完 → 817/817 绿。\n2. **次修(只动一条断言,枚举断言不动)**:保留第 1 项、只把 throw 改回 `return null` → **恰好 1 条**断言红(`throws for an operator with no SQL spelling`),枚举断言与回显对照表**全部保持绿色**。\n\n第 2 项的方向是预测好的,也是这次要如实说的一点:补上 `startsWith`/`endsWith` 之后,词汇表内 14 个算子全部有分支,那个出口**今天从公共入口不可达**,所以改回 `return null` 不可能让枚举断言变红。它是一个**漂移探针,不是行为修复** —— 行为修复是第 1 项。把它写成「改回去就全红」会是一个符合模板但不成立的说法。\n\n`$contains` 等既有算子无回归:产物逐字节未变,817 条用例全绿。\n\n## 测试\n\n新增 `objectql-echo-operator-coverage.test.ts`,两层:\n\n1. **行结果钉住 issue 那张表。** 回显语句在同一份 sql.js fixture 上**真的被执行**,行 id 与查询实际返回的行 id 比对(`$startsWith: 'w'` → `['1']`,`$endsWith: 'n'` → `['1']`,`$contains: 'o'` → `['1','2']`),外加「回显不得返回整份 fixture」的兜底断言。只断言 SQL 字符串会放过下一个未映射的算子 —— #4128 里 `$between` 就藏在 `$startsWith` 后面。fixture 里 `'won'` 是唯一既以 `w` 开头又以 `n` 结尾的行,`'lost'` 含 `o` 但两头都不沾,所以「前缀锚点被编译成子串」会表现为**错的 id**,而不是碰巧通过。\n2. **按封闭词汇表枚举。** 直接从 spec 导入 `FILTER_OPERATORS`(15 个可编写算子)驱动,逐个断言回显渲染出谓词、`$n` placeholder 数与 `params.length` 对齐,并断言「执行侧有 WHERE 的地方回显也必须有」。另有一条断言表本身覆盖了 spec 声明的全部算子 —— spec 新增算子而这张表没跟上,这里先红。\n\n命令与结果:\n\n```\npnpm --workspace-concurrency=2 --filter @objectstack/service-analytics test -- --maxWorkers=2\n  修前: Test Files 1 failed | 48 passed (49)   Tests 9 failed | 808 passed (817)\n  修后: Test Files 49 passed (49)              Tests 817 passed (817)\n\ntsc --noEmit -p packages/services/service-analytics/tsconfig.json\n  7 errors —— 与 origin/main 基线(git stash 后同样 7)完全一致,新增文件 0 error\n  (该包无 typecheck 脚本,在 scripts/check-type-check-coverage.mjs 里带实测 DEBT 条目)\n\npnpm --filter @objectstack/service-analytics build   → Build success\nnode scripts/check-nul-bytes.mjs                     → OK (5507 files)\ngrep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]' 本次改动的三个文件 → CLEAN\n```\n\n消费半径已清扫:`ObjectQLStrategy.generateSql` 的回显没有别的包在断言;`driver-memory` 的 analytics 面自带 `ANALYTICS_FILTER_CAPABILITIES` 能力门,对 `$startsWith`/`$endsWith` 是**声明式的响亮拒绝**(#5345),不是静默丢,不受本改动影响。\n\n`packages/spec/authorable-surface.base.json` 在 spec 构建时被 `gen:schema` 顺手重锚了 `baseRev`,与本 PR 无关,已 revert,不随本 PR 进来。\n\n## 范围外发现(已另行开单,未在本 PR 修)\n\n- **#5557** — `convertFilter` 把 `contains` 送成未声明的 `$regex` 且比较值不转义(`{$contains: 'a.b'}` → `{$regex: 'a.b'}`,`new RegExp('a.b').test('axb') === true`;`'50% (+)'` 直接 SyntaxError),而它三个同族算子早在 #4128 就改成了规范算子。这是**执行**侧的缺陷,与本 issue 的回显侧只隔一个函数,故单独开单。本 PR 的 stand-in 引擎里对它做了一处 `$regex` → `$contains` 翻译(测试脚手架,注释指向 #5557),因为 `read-scope-sql.ts` 对 `$regex` fail-closed —— 这本身就是 #5557 的第 2 条证据。\n\n未碰 `filter-normalizer.ts`(#5526 根因单待派)。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01BWS4heBoAitLmzCLhcYdbK"
+}

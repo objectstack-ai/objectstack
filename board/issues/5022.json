@@ -1,0 +1,38 @@
+{
+  "number": 5022,
+  "kind": "issue",
+  "title": "`drillDown` 是 objectui 读的活能力,却不是 spec 声明的任何键 —— #3752 的迁移处方曾指向它",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue",
+    "protocol:breaking",
+    "target:v17"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T00:07:10Z",
+  "updated_at": "2026-08-05T11:44:30Z",
+  "closed_at": "2026-08-04T11:43:35Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5022",
+  "body": "从 #4001 批 15 中分离出来,**未指派**。批 15 已就地修正了错误的处方文本(否则会把它提升成一条带平台权威的报错),但底下的缺口是独立的一件事。\n\n## 发现\n\n`packages/spec/src/ui/chart.zod.ts` 里 #3752 写下的迁移说明是:\n\n> `clickAction` — … Migration: **`drillDown`**, or handle it in React.\n\n批 15 要把这句话提升进 `ChartInteractionSchema` 的 strict 拒绝信息时,先按惯例核了处方指向的键是否存在。**不存在**:\n\n- `grep -rn \"drillDown\" packages/spec/src/ui/*.zod.ts` → 只有这段注释本身;\n- `DashboardWidgetSchema` 没有任何 drill 相关键;\n- `ReportSchema` 有的是 `drilldown`(**全小写**,ADR-0021 D2,布尔,默认 true);\n- objectui 侧则是 `packages/plugin-charts/src/ObjectChart.tsx:602` 的 **`const drillDown = (schema as any).drillDown;`** —— 一个未类型化的读取,后面真的驱动了 drill drawer、`computeDrillFilter`、`drillDown.target` / `.maxRows` / `.columns`。\n\n即:**渲染器实现了一套 drill 配置,协议里没有它的声明**,而 spec 的注释在教作者写它。\n\n## 为什么这是个问题,而不只是注释错字\n\n如果批 15 照抄那句话,一个把 `clickAction` 改对的作者会被告知写 `drillDown`,然后被**同一个刚加上的闸门**再拒一次 —— 账本记过两次的 finding 7(「本战役自己的修复,给人指向了它本要消灭的失效模式」)的第三次。批 15 因此把处方改成只点名确实存在的东西(`onSegmentClick` / `ReportSchema.drilldown` / dashboard widget 的 `options` 袋),并留了一条测试钉死「永不出现 `drillDown`」。\n\n但那只是让**错误信息**不再说谎。真实缺口仍在:\n\n1. `drillDown` 走的是 `options`(`DashboardWidgetOptionsSchema`,故意 `passthrough`)还是别处?今天没有声明,所以两种写法都「能跑」,取决于渲染器拿到的扁平化 schema 长什么样 —— 这是 Prime Directive #10 的 declared ≠ delivered,方向相反的一种:delivered 但 never declared。\n2. `ReportSchema.drilldown` 与 objectui 的 `drillDown` **拼写不同、语义不同**(前者是布尔开关,后者是 `{ target, maxRows, columns, mode }` 配置对象),名字却几乎一样。这正是本战役反复付学费的那类近似键。\n\n## 建议\n\n按 contract-first 择一:\n\n- **声明它** —— 给 chart drill 配置一个 Zod 形状(`{ enabled, mode, target, maxRows, columns }`,从 `ObjectChart.tsx` 的实际读取点反推),挂在 widget `options` 或 chart config 上,再让渲染器读声明后的键;顺便决定与 `ReportSchema.drilldown` 的关系(是否统一拼写)。\n- **或明确它是渲染器私有** —— 那就在 `DashboardWidgetOptionsSchema` 的文档里点名 `drillDown` 属于「渲染器自有、协议不建模」的那一类(该 schema 已有这段话,只是没列它),并保持 `(schema as any)` 的读取方式,但不要在 spec 注释里把它当作可授权键推荐。\n\n## 参考\n\n- #3752(移除 `zoom` / `clickAction` 的那次改动,处方文本的来源)\n- #4001 批 15(修正处方 + 测试钉;账本 `ui/chart.zod.ts` 行记录了这条更正)\n- ADR-0021 D2(`ReportSchema.drilldown`)\n- `packages/spec/src/ui/dashboard.zod.ts` `DashboardWidgetOptionsSchema`(声明的渲染器逃生口)\n"
+}

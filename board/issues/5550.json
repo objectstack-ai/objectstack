@@ -1,0 +1,35 @@
+{
+  "number": 5550,
+  "kind": "pull_request",
+  "title": "fix(spec): docs-gen 把嵌套花括号整对包进行内代码,不再切成半对 (#5452)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T17:02:58Z",
+  "updated_at": "2026-08-05T19:28:48Z",
+  "closed_at": "2026-08-05T19:28:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T19:28:47Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5550",
+  "body": "Fixes #5452\n\n**排版说明**:GitHub 会把 body 里的引号和尖括号在**存储时**转义,所以本文刻意不写裸引号/尖括号,证据改用表格与列表呈现(#5452 实施中踩到,已回读存储后的 body 校验过)。\n\n## 前提复核(先于实现)\n\nissue 的基线是 `ed0d2aac0`,已前移大半天。在 `origin/main` @ `5acb93add` 上重新核对,3 处存量**仍在**,前提成立:\n\n```\ncontent/docs/references/ai/model-registry.mdx:171\ncontent/docs/references/ai/model-registry.mdx:172\ncontent/docs/references/automation/flow.mdx:106\n```\n\n## 根因\n\n`packages/spec/scripts/build-docs.ts` 的 `escapeMdxDescription` 把带定界符的片段包进行内代码,让 MDX 按字面渲染而不是当成 JS 表达式 / JSX 标签。它用 `indexOf` 找收尾定界符 —— 取的是**第一个**闭合符,不是**配对**的那个:\n\n```ts\nconst end = raw.indexOf(close, i + 1);   // 旧:第一个闭合符\n```\n\n所以任何嵌套对都只被包到内层闭合符为止,外层那个漏在代码跨度之外。`{{var}}` 于是输出成反引号只吃掉前半截、后面跟一个游离的 `}` —— 恰恰落在「教读者怎么写模板变量」的那几行上,而成对双花括号本身就是被文档的东西。\n\n## 修法\n\n改成**按嵌套深度**配对(新增 `packages/spec/scripts/lib/escape-mdx.ts` 的 `findMatchingClose`),整对落进同一个代码跨度。\n\n转义逻辑同时从 `build-docs.ts` 抽到 `scripts/lib/escape-mdx.ts` —— 和 #4912 抽 `format-type.ts` 是同一个理由:生成器是带副作用的顶层脚本,在此之前想断言它的输出只能整跑一遍再 grep 产物,这正是本 bug 能在 main 上活下来的原因。\n\n## 实测:是 5 处,不是 3 处\n\n重新 `gen:docs` 后改动 4 个页面共 5 行。除 issue 点名的 3 处外,另有两处**同一根因**但起手只有单个花括号,因此 issue 用的 `` `{{ `` grep 天然看不见它们:\n\n| 页面 | 行 | 修前 | 修后 |\n|:---|:---|:---|:---|\n| `ai/model-registry.mdx` | 171 / 172 | `` `{{var}` `` + 游离 `}` | `` `{{var}}` `` |\n| `automation/flow.mdx` | 106 | `` `{{nodeId.field}` `` + 游离 `}` | `` `{{nodeId.field}}` `` |\n| `ai/solution-blueprint.mdx` | 156 | `` `{ status: { $in: [...] }` `` + 游离 `}` | 整对包住 |\n| `api/analytics.mdx` | 70 | `` `{ cube, query: {...}` `` + 游离 `}` | 整对包住 |\n\n## ⚠️ 验收判据需要更正:issue 那条 grep 不会归零,也**不应该**归零\n\nissue(及派单)把验收写成「`grep -rn` 反引号加两个左花括号,应归零」。**实测这条判据是错的**:该 pattern 匹配「反引号后面跟两个左花括号」,而**修好之后的正确输出 `` `{{var}}` `` 同样以反引号加两个左花括号开头**。所以它修前修后都是 3 命中,内容变了、计数不动。归零只有在「参考文档里根本不许出现模板变量语法」时才成立,而那恰恰与本单目的相反。\n\n两条判据在同一语料(main 的 224 页 vs 本 PR 重生成后)上的实测:\n\n| 扫描判据 | main | 本 PR |\n|:---|:---:|:---:|\n| issue 那条字面 pattern(反引号 + 两个左花括号) | 3 | **3** |\n| 缺陷形状(以左花括号开头的行内代码跨度,闭合反引号后紧跟游离右花括号) | 5 | **0** |\n\n下面的门禁测试用的是第二条判据的等价不变量,不是 issue 那条字面 grep。\n\n## 门禁测试 + 反向验证\n\n`packages/spec/scripts/escape-mdx.test.ts`(12 例)= 单元 pin + 全语料门禁。\n\n门禁判据是**行内代码跨度里的花括号必须配平** —— 配平才是缺陷真正破坏的不变量(包裹把一对切成了两半),所以它能抓住上表那两处非双花括号开头的,并且在措辞改写后依然抓得住。实测语料信噪比:main 的 224 页 **5 处**违例(即上表 5 行),本 PR 重生成后 **0 处**,零噪声。\n\n尖括号**故意不设语料门禁**:尖括号同时是比较运算符,校验规则里的比较式与 SemVer 区间前缀合法地带着不配平的一只,实测 11 处全部正确,设门禁纯属噪声。尖括号的嵌套改由正向单元用例 pin。反斜杠转义过的花括号(模块 JSDoc 那条路径写成反斜杠加花括号)在计数前先剔除。\n\n**反向验证 —— 两个方向都实跑了,方向为常规「还原缺陷 → 转红」。** 把 `findMatchingClose` 换回 `raw.indexOf(close, i + 1)`:\n\n**方向 1:5 条嵌套定界符单元用例立刻转红**,各自报出被切开的形状:\n\n- `PromptTemplate` 的 `` `{{var}}` `` —— 跨度只吃到内层右花括号,外层漏出\n- `flow` 的 `` `{{nodeId.field}}` `` —— 同上\n- roll-up 的 `` `{ status: { $in: [...] } }` `` —— 单层起手的嵌套,同样被切\n- 嵌套泛型类型串(Array 套 Record)—— 尾部第二个闭合尖括号漏出跨度\n- 一行里两个独立的双花括号对 —— 两处各切一次\n\n```\nTests  5 failed | 7 passed (12)\n```\n\n**方向 2:再跑 `gen:docs` 让语料回到旧转义之下,语料门禁转红**,报出的 5 行与 main 上那 5 行逐行一致:\n\n```\n× has no inline-code span with an unbalanced brace\n+   content/docs/references/ai/model-registry.mdx:171\n+   content/docs/references/ai/model-registry.mdx:172\n+   content/docs/references/ai/solution-blueprint.mdx:156\n+   content/docs/references/api/analytics.mdx:70\n+   content/docs/references/automation/flow.mdx:106\n```\n\n之所以是常规方向而非反转方向:这些用例断言的是修复**产生**的正向输出形状,不是某个 finding 的消失。单定界符与不配对的用例两个方向都是绿的 —— 这正是 bug 活下来的原因:凡是有人想到去看的形状,转义器都是对的。\n\n还原修复后重跑 `gen:docs`,工作树与本 PR 提交**逐字节一致**(`git status` 干净),生成物可复现。\n\n## 验证\n\n```console\n$ pnpm --filter @objectstack/spec exec vitest run --maxWorkers=2\nTest Files  315 passed (315)\n     Tests  8022 passed (8022)\n\n$ pnpm --filter @objectstack/spec typecheck\ncheck:test-typecheck: OK\n\n$ pnpm --filter @objectstack/spec check:docs\n✅ 239 generated files in sync with packages/spec\n\n$ node scripts/check-nul-bytes.mjs\ncheck-nul-bytes: OK (scanned 5501 tracked text file(s))\n```\n\n## 刻意不做的三件事\n\n- **#5307 在 `email-config.zod.ts` `appName` describe 里的绕写保持原样**。那段注释引用本单、历史成立,且措辞是作者面的选择,不是本单验收项。\n- **`packages/spec/authorable-surface.base.json` 未纳入**。跑 `gen:schema` 会顺手把 `baseRev` 推到当前 main 并吸收 #5307 / #5498 新增的键 —— 那是 `gen:schema` 的副作用,与本单无关,且是并行 agent 的冲突热点,已还原。\n- **配平扫描顺带发现的另一条缺陷未在此修**,已单独立单 **#5553**:模块 JSDoc 走的是另一条路径(`getFileDescription` 按源码行 `join` 成段落),跨行的行内代码跨度被段落边界切断,5 张参考页正文露出裸反引号;根因与本单无关。\n\n## 变更集\n\n`@objectstack/spec` patch。包导出与运行时行为零变化(改的是 `scripts/`,不进 `dist`),但参考文档是该包生成器的读者可见产物,被切坏的又正是教语法的那一列,所以走 changeset 而非 skip 标签。\n"
+}

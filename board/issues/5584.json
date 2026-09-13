@@ -1,0 +1,34 @@
+{
+  "number": 5584,
+  "kind": "pull_request",
+  "title": "fix(runtime): callData 的 ObjectQL 兜底对「记录不存在」统一答 404 RECORD_NOT_FOUND (#5138)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T19:48:54Z",
+  "updated_at": "2026-08-05T20:12:27Z",
+  "closed_at": "2026-08-05T20:12:26Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T20:12:26Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5584",
+  "body": "Fixes #5138\n\n基于 `origin/main` @ `c11369013`(含 #5569 `5aaa6fca8`)。\n\n## 前提复核:成立,且 protocol 路径「先测后判」的结论是**不需要改**\n\n开工先在最新 main 上实测,复现 harness 用一个不注册 `protocol` 槽的服务组合(这正是 issue 自述「装了 MetadataPlugin 的部署走不到兜底」所要求的),同一行数据同时喂给两条路径:\n\n```\nFALLBACK get   : resolved  null                              -> /data 200 {data:null}\nFALLBACK update: rejected  Error('[ObjectStack] Not Found')  -> code undefined, status undefined => 500\nFALLBACK delete: resolved  {object,id,deleted:true}          -> 200,行从未存在\nPROTOCOL get   : rejected  RECORD_NOT_FOUND / 404 / \"Record ghost not found in task\"\nPROTOCOL update: rejected  RECORD_NOT_FOUND / 404 / \"Record ghost not found in task\"\nPROTOCOL delete: rejected  RECORD_NOT_FOUND / 404 / \"Record ghost not found in task\"\n```\n\n三分支的分歧与 issue 描述逐条吻合。**protocol 路径三个动词已经都是规范答案**(#4435 落下、#5088 在批量面重申),所以按分诊锚定第 2 条,这次**没有动 protocol 路径一行**,只把它钉进测试;真正的缺陷全部在兜底侧。\n\n## 改了什么\n\n三个兜底分支抛同一个信封。信封**不重新拼写**:`recordNotFoundError` 从 `@objectstack/metadata-protocol` 导出、由 `callData` 导入 —— 一个构造点,两条路径无法再漂移,也没有新造第二种 not-found 信封。它是纯工厂函数(不做任何服务解析),所以在「protocol 插件缺席」的装配上导入它零代价,而那正是兜底会跑的场合。\n\n| 动词 | 之前 | 现在 |\n|---|---|---|\n| `get` | `: null` | `throw recordNotFoundError(object, id)` |\n| `update` | `throw new Error('[ObjectStack] Not Found')`(无 `.status`) | 同上 |\n| `delete` | 无存在性检查 | 先探测,不存在则同上,**且不下发删除** |\n\n其中 `update` 的裸 Error 是把 4xx 事实报成 5xx 的直接原因:三个错误出口(`HttpDispatcher.errorFromThrown`、`dispatcher-plugin` 的 `errorResponseBase`、endpoint executor 的 `errorAnswer`)都是读 `.status` 再读 `.statusCode` 再兜底 500。\n\n### delete 为什么用 find 探测,而不是读 `ql.delete` 的返回值\n\n`deleteData` 能读返回值,是因为 `IDataDriver.delete` 声明了 `Promise< boolean >`(契约原文:true if deleted, false if not found)。但兜底里的 `ql` 是 ObjectQL **引擎**(或 MCP 多环境路径上的裸驱动),而 `IDataEngine.delete` 声明的是 `Promise< any >` —— `engine.ts:5589` 把驱动结果穿过 hook 链后返回 `opCtx.result`。对它测 `=== false` 是读一个契约没有承诺的信号,而且失败方向恰好是本单要修的方向(退回「删了零行却报成功」)。探测用的正是同函数里 `get`/`update` 兜底已经在跑的那一个 `find`。\n\n## 反向验证(方向先判后跑)\n\n预判写在跑之前:还原三分支后,兜底与两个消费面的用例应变红,而 **protocol 路径的 3 条与全部 happy-path 用例应保持绿**(因为 protocol 本来就是对的,这次没改它)。\n\n实跑结果 **16 red / 9 green,与预判逐条一致**。旧答案在 assertion 里原样浮出:\n\n```\nexpected a RECORD_NOT_FOUND rejection, but the call RESOLVED with null\nexpected { code: undefined, status: undefined, ... } to deeply equal { code: 'RECORD_NOT_FOUND', ... }\nexpected a RECORD_NOT_FOUND rejection, but the call RESOLVED with {\"object\":\"task\",\"id\":\"definitely_not_a_row\",\"deleted\":true}\nexpected Error: [ObjectStack] Not Found to match object { status: 404, code: 'RECORD_NOT_FOUND' }\n```\n\n保持绿的 9 条正是应该绿的:protocol 三动词 3 条 + happy-path 6 条。\n\n**一处过程更正,记在这里而不是抹掉**:第一次还原是**不完整**的 —— 脚本用的字符串替换同时命中了 `update` 和 `delete` 两个分支的同一行,导致 delete 的探测其实没被删掉,只有信封退回了裸 Error。结果是 14 red / 9 green + 2 条「本该红却绿」(\"delete refuses BEFORE touching the store\"、\"DELETE no longer answers a 200 success\")。那 2 条绿是**还原不彻底的证据,不是用例无效** —— 探测还在,所以它们当然仍然通过。重做彻底还原后两条如期转红,才得到上面的 16/9。这也顺带说明这两条用例确实钉的是探测本身,而不是信封。\n\n## 消费面\n\n- **`/data` 经真实 `HttpDispatcher.dispatch()`**:GET/PATCH/DELETE `/data/task/:missing` 三条,断言抛出体带 `status: 404` + `code: 'RECORD_NOT_FOUND'`。`dispatch()` 对非权限错误是原样再抛,落到 HTTP 状态码由两个挂载点的出口完成,而「`.status` 优先」这一步已由 `domains/error-passthrough.test.ts` 钉住。另有一条专门断言 DELETE 不再 resolve 出 200,且底层 `ql.delete` 一次都没被调用。\n- **声明式端点执行器(#5092 / PR #5136)**:用**真实 `callData`** 绑定驱动 `executeEndpointTarget`,它自己构造 HTTP 应答,所以这里能直接断言客户端拿到的状态码。还原后的实测把三个旧答案完整暴露出来:`get -> 200`、`update -> 500`、`delete -> 200`;修复后三者均为 `404` + `RECORD_NOT_FOUND` + 原文消息(4xx 不经 5xx 泄漏消毒)。\n\n### 半径扫描(按规则的消费者枚举,不按改动包)\n\n`callData` 的 get/update/delete 调用方逐个看过:\n\n- `domains/actions.ts:300` 与 `action-execution.ts:915`(动作体加载 `ctx.record`):两处本来就是 `try { ... if (got?.record) ... } catch { /* pass empty */ }`。之前 `null` 走 `got?.record` 落空,现在抛出走既有 `catch`,**结果都是 `record = {}`,行为不变**。\n- `domains/mcp.ts` 的 `bridge.get`:`packages/mcp/src/mcp-http-tools.ts:475` 的 `get_record` 工具同时处理 `record == null` 和 `catch`,两条都产出 errorResult;而装了 protocol 的正常部署本来走的就是抛出那条,所以这次是让精简装配向生产行为**收敛**。\n- 全仓 grep `[ObjectStack] Not Found` 无任何消费者依赖旧消息。\n- `packages/rest/**`、`packages/cli/src/commands/**`、`domains/actions.ts` 匿名门:未触碰。\n- qa/dogfood 两处提及 `callData` 的用例:一处是 RLS 拒绝断言 `isError === true`(两种形状都成立,且走 protocol 路径),一处的 404 是路由未匹配的 404,均不受影响。\n\n## 测试\n\n新增 `packages/runtime/src/action-execution-calldata-not-found.test.ts`(25 条,in-process 用例均显式 `}, 60_000)`),分四组:兜底三动词的信封、protocol 三动词的钉子、**两条路径 field-for-field 相等**(调用方真正依赖的那个断言),以及上面两个消费面。其中一条刻意不比字面量而是拿导出的工厂函数本身对照 —— 那样任何一侧重新拼写形状都无法靠改本文件里的字面量把它糊绿。\n\n```\npnpm --filter @objectstack/runtime test\n  Test Files  97 passed (97)\n       Tests  1422 passed (1422)\n\npnpm --filter @objectstack/metadata-protocol test\n  Test Files  42 passed (42)\n       Tests  388 passed (388)\n\npnpm --filter @objectstack/runtime typecheck   -> tsc --noEmit, Done\n\nnode scripts/check-nul-bytes.mjs\n  OK (scanned 5518 tracked text file(s); no raw ASCII control bytes)\n```\n\nchangeset:`@objectstack/runtime` + `@objectstack/metadata-protocol` 均 patch,升级须知写明了「精简装配上这三个调用对不存在 id 的答案会变」以及装了 protocol 的部署不受影响。未触碰 `content/docs/releases/`。\n\n## 界外发现\n\n- **#5581**(已立,`finding` 标签,未派单):同一函数里 `delete` 的**成功体**两条路径形状也不同 —— protocol 回 `{object, id, success: true}`(合 `DeleteDataResponseSchema`),兜底回 `{object, id, deleted: true}`(`success` 缺失、`deleted` 未声明);且 `domains/data.ts:102` 的注释把兜底形状写成了规范。本 PR **刻意保持 `deleted: true` 原样**并有测试钉住成功路径未变,因为「删除成功的规范键是哪个」是一次独立取舍,会动到 spec 或所有 `deleted` 读取方。\n- **#5571**(毗邻观察单,未触碰):复现路上没有撞到该 400。本 PR 对它的可达性也**不构成改变** —— 动作体加载记录那两处本来就 `try/catch` 吞掉查不到的情况并以 `record = {}` 继续(见上方半径扫描),这次抛出走的是同一个既有 catch,后续时序与之前一致。没有因果可写,不算修复它。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016FNvXhtSdnEGEfLEsMmvxh\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016FNvXhtSdnEGEfLEsMmvxh)_"
+}

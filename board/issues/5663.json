@@ -1,0 +1,35 @@
+{
+  "number": 5663,
+  "kind": "pull_request",
+  "title": "feat(lint): `multi: true` 且无 filter 的 delete/update 在 authoring 期告警(#5482)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T23:08:54Z",
+  "updated_at": "2026-08-05T23:25:54Z",
+  "closed_at": "2026-08-05T23:25:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T23:25:52Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5663",
+  "body": "Fixes #5482\n\n按 2026-08-05 分诊裁决执行**方案 1**(authoring 期 warning);⛔ 未加 spec refine、未动 #3810 运行期守卫 / `crud-nodes.ts` / 引擎派发表 / #5651 的 time-relative 规则。\n\n## 前提核实(PD #6)\n\n先在 `origin/main`(5b60b3669)上实测,四种形状全部**零诊断**,与 issue 描述一致:\n\n```\n[premise] no filter        → []\n[premise] empty filter     → []\n[premise] update no filter → []\n[premise] nested no filter → []\n```\n\n`filter` 与 `multi` 在两个 config schema 里各自 optional、彼此无约束(`packages/spec/src/automation/builtin-node-config.zod.ts`),`lintFlowPatterns` 也没有任何针对破坏性节点 config 的检查。前提成立。\n\n## 改了什么\n\n`packages/lint/src/lint-flow-patterns.ts` 新增 `flow-multi-write-unfiltered`(warning):`delete_record` / `update_record` 且 `config.multi === true` 且 filter 无有效条件时告警,说明这是「按声明清空整个对象」,给出两条出路(补 filter 约束 / 确认整表意图属实——运行期照常允许)。规则 id 沿用 #5496 留的 `flow-{descriptor}-{verdict}` 家族前缀;barrel 补 `packages/lint/src/index.ts` 导出。`lintFlowPatterns` 本来就挂在 `AUTHORING_RULES` 上,严重度缺省即 warning,所以 `os validate` / `os build` / runtime publish gate 三个面自动生效,无需新增注册项。\n\n诊断落在每个 graph 上(不只顶层),所以**loop body 内的清扫节点**天然命中——这正是定时 janitor 流的标准形状,也是 #5383/#5635 刚打开的那片区域。\n\n## 「无有效条件」判定表\n\n只判**可证**的两格,窄是刻意的:一条说「这是整表写」的告警必须说对。\n\n| 形状 | 判定 | 依据 |\n|---|---|---|\n| `filter` 键缺失 | **告警** | 执行器代入 `{}`(`resolveNodeFilter(cfg.filter ?? {}, …)`) |\n| `filter: {}` | **告警** | 原样下传;`driver-memory` 的 matcher 开篇即 `Object.keys(filter).length === 0 → return true` |\n| `filter: { owner: '{record.ownr}' }` | 不判 | 条件**写了**;插值抹除是 #3810 运行期守卫的事实,不抢它的活 |\n| `filter: { status: 'closed' }` | 不判 | 有约束(showcase 清扫流即此形) |\n| 无 `multi` / `multi: false` | 不判 | 引擎本来就点名拒绝(`… requires an ID or options.multi=true`) |\n| `multi: 'true'`(字符串) | 不判 | schema 是 `z.boolean()`,parse 阶段就refuse,节点跑不起来 |\n| `filter` 非对象(字符串/数组) | 不判 | schema 是 `z.record(z.string(), z.unknown())`,`parseNodeConfig` 按名拒绝 |\n| `filter: { $and: [] }` | **不判(已知缺口)** | 按 #5322/#5134 恒等元这**是**整表写,但判它需要布尔身份归约,而该归约在三个 driver 各有一份;linter 里再抄第四份正是 `engine-delete-dispatch.ts` 被抽出来防的事故。已单独立 #5659 |\n| `filter: { $or: [] }` / `{ $not: {} }` | 不判(正确) | 恒等元为 FALSE,一行都不匹配,告警会是假警 |\n\n## 与 #3810 不重复:两者判不同的事\n\n| 事实 | 判定方 | 时机 | 结论 |\n|---|---|---|---|\n| 作者**写过**的条件消失了 | #3810 filter 守卫 | 运行期 | 拒绝执行 |\n| 从来**没写过**条件 | 本规则 | authoring 期 | 告警 |\n\n`crud-nodes.ts` 的注释与 `crud-filter-guard.test.ts` 都明写那条守卫「deliberately keyed on 'a condition the author wrote is gone', not on 'the filter is empty'」,并专门钉住「an intentionally empty filter is still allowed」。所以两者互不覆盖:`filter: { owner: '{record.ownr}' }` 在本规则处**沉默**、在那条守卫处被拒;完全没有 `filter` 的节点在本规则处告警、在那条守卫处——正确地——被放行。诊断文案点名对方,并说明各自判什么。\n\n⚠️ **点名是单向的**:本规则的 hint 指向 #3810 守卫,反向那半需要改 `crud-nodes.ts` 的 refusal 文案,而本单派发明确 ⛔ 不动该文件,故未做。若要补,是一行文案改动,请 PM 定夺(未另立 issue,以免为自家一行遗漏散单)。\n\n## 验证\n\n**先红后绿**(方向预先声明:6 条正向用例应因「0 findings」变红,9 条 false-positive guard 断言的是「不报」,规则关掉时会**空洞地绿**——所以证明力全在正向那 6 条):\n\n```\n# 规则调用点临时注释掉\nTests  6 failed | 9 passed | 79 skipped\nAssertionError: expected [] to have a length of 1 but got +0\n# 恢复\nTests  15 passed | 79 skipped\n```\n\n用例覆盖:delete/update 各一条、`filter: {}` 一条(并断言文案区分「no filter key」与「an EMPTY filter」)、#3810 互相点名断言、**loop body 嵌套**(scope 前缀 `flow 'campaign_enrollment' · loop 'loop_leads' body · node 'sweep' (delete_record)`)、**两层嵌套** update、以及 8 组 false-positive guard。\n\n```\npnpm --filter @objectstack/lint test        → 59 files / 1373 tests passed\npnpm --filter @objectstack/lint typecheck   → tsc --noEmit 无输出\npnpm --filter @objectstack/lint build       → OK\npnpm --filter @objectstack/cli test         → 82 files / 812 tests passed(消费半径)\nnpx eslint <改动文件> --no-inline-config     → exit 0\nnode scripts/check-nul-bytes.mjs            → OK(另做 grep -naP 控制字符自查,clean)\n```\n\n**showcase 清扫流 A/B(真 before:revert 源码 → 重建 dist → 重跑)**,三个 example app 逐行对照:\n\n```\ndiff BEFORE.txt AFTER.txt\n1c1\n< [app-showcase]   ✓ Validation passed (971ms)\n> [app-showcase]   ✓ Validation passed (914ms)\n52c52 / 66c66  (app-crm / app-todo 同,仅耗时数字)\n```\n\n67 条告警两侧完全一致,**零新增**。\n\n**并做了正向对照,免得「零新增」是空的**:临时删掉 showcase 清扫流的 `filter` 后重跑 `os validate`,规则确实穿透到 CLI 面,且校验仍然 PASS(warning 不 gate):\n\n```\n✓ Validation passed (898ms)\n⚠ flow 'showcase_inquiry_purge' · node 'purge' (delete_record): declares `multi: true` with no `filter` key\n  — this is a WHOLE-OBJECT write, by declaration: every row of 'showcase_inquiry' is deleted on every run. …\n```\n\nfilter 放回后该告警消失(0 命中)。\n\n## 范围外发现\n\n- 立 #5659:`flow-multi-write-unfiltered` 不判空组合子,`filter: { $and: [] }` + `multi: true` 按 #5322/#5134 恒等元是整表删除却零告警;建议把布尔身份归约提到 spec 侧共享谓词,四个消费者共用一个答案,而不是第四份手抄。\n\nchangeset:`.changeset/flow-unbounded-bulk-write-lint.md`(`@objectstack/lint\": patch`)。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01GX3sL71LFq8m2usg6VqTSE)_"
+}

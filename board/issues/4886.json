@@ -1,0 +1,36 @@
+{
+  "number": 4886,
+  "kind": "issue",
+  "title": "Metadata routes log every expected 404 as \"[REST] Unhandled error\" with a stack trace — Studio's draft probe produced 45 in one browsing session",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T13:11:33Z",
+  "updated_at": "2026-08-05T05:27:42Z",
+  "closed_at": "2026-08-05T05:27:42Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4886",
+  "body": "## What happens\n\nOpening Studio / any metadata designer floods the server log with stack traces:\n\n```\n[REST] Unhandled error: Error: [no_draft] No pending draft exists for app/showcase_app.\n    at _ObjectStackProtocolImplementation.getMetaItem (…/metadata-protocol/dist/index.js:2656:21)\n    at async handler (…/rest/dist/index.js:…) {\n  code: 'NO_DRAFT',\n  status: 404\n}\n```\n\n**45 of these in a single browsing session** across ~60 console routes — by far\nthe dominant entry in the log. Breakdown by target:\n\n| count | target |\n|---|---|\n| 14 | `app/showcase_app` |\n| 8 | `page/showcase_capability_map` |\n| 4 | `object/showcase_account` |\n| 4 | `app/setup` |\n| 2 | `page/showcase_start_here`, `object/showcase_project` |\n| 1 each | `object/showcase_task`, `dataset/showcase_task_metrics`, `dashboard/showcase_ops_dashboard`, `flow/showcase_task_completed`, `permission/showcase_contributor`, … |\n\n## This is a normal outcome, not a fault\n\nThe designer probes `GET /meta/:type/:name?state=draft` to decide whether to show\n\"unsaved draft\" state. **Not having a draft is the overwhelmingly common case** —\nit is true of every artifact nobody is currently editing.\n\nThe wire behaviour is already correct: `getMetaItem` throws a structured error\ncarrying `code: 'NO_DRAFT'` and `status: 404`, `sendError` passes it through, and\nthe client gets a clean 404 it handles fine (no user-visible breakage). Only the\n**logging** is wrong.\n\n## The guard already exists — metadata routes just don't use it\n\n`rest-server.ts` has exactly this concept for the data routes:\n\n- `isExpectedDataStatus(status)` (~L627) — 403/404/409/502/503 are expected outcomes\n- `isExpectedQueryRejection(body)` (~L642) — client-caused 400s\n\nand the CRUD handlers consult them:\n\n```js\nif (!isExpectedDataStatus(mapped.status) && mapped.body?.code !== \"VALIDATION_FAILED\")\n  logError(\"[REST] Unhandled error:\", error);\n```\n\nThe **metadata** handlers do not. There are **29 unconditional**\n`logError(\"[REST] Unhandled error:\", error)` sites in `rest-server.ts`; the\ndraft-read path at ~L3923-3932 is the one Studio hits on every panel.\n\nThe `isExpectedQueryRejection` docblock already records this exact regression\nhappening once before:\n\n> The filter and sort codes joined this list late: both shipped without it, so\n> every rejection they produced was ALSO logged as an unhandled error.\n\nSame shape, different route family.\n\n## Why it matters\n\n- **It buries real errors.** 45 stack traces of noise per session is how a\n  genuine 500 goes unnoticed — the \"log is noisy and can mask real errors\"\n  concern `plugin-audit`'s `provisionSystemTables` docblock raises verbatim.\n- **It misreports severity.** \"Unhandled error\" + stack trace tells an operator\n  something is broken. Nothing is.\n- It is also per-request work (stack formatting) on a hot UI path.\n\n## Suggested direction\n\nRoute the metadata handlers' catch through the same predicate the data handlers\nuse, so a structured error carrying an expected 4xx (`NO_DRAFT` and its siblings)\nresponds without an \"Unhandled error\" line. Given there are 29 unguarded sites, a\nsingle shared `handleRouteError(res, error)` helper that both families call would\nstop the two from drifting apart again — the docblock above shows they already\nhave once.\n\n## Repro\n\n1. `os dev --ui --seed-admin` in `examples/app-showcase`\n2. Sign in, open `/_console/studio/com.example.showcase/interfaces`\n3. Watch the server log — one stack trace per designer panel\n\nObserved on `main` @ 0e96e46. Found while browser-sweeping showcase + Studio for #4879."
+}

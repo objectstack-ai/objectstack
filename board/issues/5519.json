@@ -1,0 +1,38 @@
+{
+  "number": 5519,
+  "kind": "issue",
+  "title": "[17.0-rc2验收] 安全:REST /actions 与 /automation 派发路由缺少匿名拒绝门 —— 未认证调用者可触发 system 提权的 RLS/FLS 绕过写入",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue",
+    "priority:p0"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T14:59:03Z",
+  "updated_at": "2026-08-05T19:09:28Z",
+  "closed_at": "2026-08-05T19:09:28Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5519",
+  "body": "环境行:`hotcrm@0899b4f + @objectstack 17.0.0-rc.2`(平台源码 `/home/user/objectstack`,dev server:`objectstack dev`,已装 `@objectstack/plugin-auth`,登录/鉴权正常)\n\n## 现象(p0 越权 / 未认证写入)\n\n同一个进程里,`@objectstack/rest` 注册的数据面路由(`/data`、`/meta`)对**匿名**请求一律 401 `UNAUTHENTICATED`;但 `@objectstack/runtime` 的 **dispatcher-plugin** 注册的 `/actions/*` 和 `/automation/*` 路由**没有任何匿名拒绝门**,匿名调用者可以:\n\n1. 直接调用任意 **script 型** action → 其 body 以 `isSystem: true` 执行(`buildActionExecutionContext`),即 **RLS/FLS 绕过** 的系统提权写入;\n2. 直接调用任意 **flow 型** action / 直接 `POST /automation/:name/trigger` → 启动 flow run。\n\naction 的唯一前置门是 ADR-0066 D4 的 `actionPermissionError`,它在 action **未声明 `requiredPermissions`** 时对**所有调用者**(含匿名)放行。绝大多数 action 默认就是未声明的(HotCRM 全部 13 个 action 无一声明 `requiredPermissions`),因此整条 CRM action 写入面对匿名开放。\n\n这与平台自己的承诺矛盾。`packages/spec/src/stack.zod.ts` 的 `api.requireAuth` 退役墓碑(#3963)明确写道:\n> \"Anonymous access to object data is now always denied. … A stack that mounts no auth at all now fails at boot rather than silently serving object data to anonymous callers.\"\n\n而 action body 做的正是**对象写入**(比 `/data` 写更强,因为它系统提权绕过 RLS/FLS),却绕过了这条\"永远拒绝匿名\"的保证。\n\n## 复现(可直接粘贴执行,HOST=起的 dev server)\n\n```bash\n# 前置:随便拿一个 crm_contact 的 id(用 admin token 读一次即可),记为 CID\n# ── 1. 匿名 script action:成功 200,真实落库,行归属 system ──\ncurl -s -X POST http://HOST/api/v1/actions/crm_contact/send_email/$CID \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"params\":{\"subject\":\"ANON-INJECTED\",\"body\":\"written with no auth\"}}'\n# → 200 {\"success\":true,\"data\":{\"emailId\":\"...\",\"activityId\":\"...\"}}\n#   之后用 admin 读该 sys_email:sent_by = \"system\", from_address = \"noreply@hotcrm.local\"(即 send_email 的匿名分支)\n\n# ── 1b. 匿名 mark_primary 同样 200 并落库(is_primary=true)──\ncurl -s -X POST http://HOST/api/v1/actions/crm_contact/mark_primary/$CID \\\n  -H 'Content-Type: application/json' -d '{}'\n# → 200 {\"success\":true,\"data\":{\"ok\":true,\"id\":\"...\",\"is_primary\":true}}\n\n# ── 2. 匿名 flow action / automation:200,启动 run ──\ncurl -s -X POST http://HOST/api/v1/actions/crm_case/escalate_case/$CASEID \\\n  -H 'Content-Type: application/json' -d '{\"params\":{\"reason\":\"anon\"}}'\n# → 200 {\"success\":true,\"data\":{\"status\":\"paused\",\"runId\":\"run_...\"}}\ncurl -s -o /dev/null -w '%{http_code}\\n' -X POST \\\n  http://HOST/api/v1/automation/lead_conversion/trigger \\\n  -H 'Content-Type: application/json' -d '{\"recordId\":\"x\"}'\n# → 200\n\n# ── 对照:同样匿名身份在数据面被拒 ──\ncurl -s -o /dev/null -w '%{http_code}\\n' -X POST http://HOST/api/v1/data/crm_contact \\\n  -H 'Content-Type: application/json' -d '{\"first_name\":\"x\",\"last_name\":\"y\",\"crm_account\":\"'$ACCT'\"}'\n# → 401  (message: \"Authentication is required to access this endpoint.\")\ncurl -s -o /dev/null -w '%{http_code}\\n' http://HOST/api/v1/meta/objects\n# → 401\n```\n\n复现两次均一致(send_email 匿名连打两次各生成一条 `sys_email`,`sent_by:'system'`,已用 admin 读回确认持久化;raw sqlite 亦可见)。\n\n## 期望 vs 实际\n\n- **期望**:匿名请求 `POST /api/v1/actions/...`(和 `/automation/...`)在**派发之前**即被 401 拒绝,与 `/data`、`/meta` 同一基线;`requiredPermissions` / `ai.exposed` 等更细的授权在通过匿名门之后再判。\n- **实际**:匿名请求直达 action/flow 派发;script body 以 `isSystem:true` 系统提权执行并绕过 RLS/FLS 落库;automation trigger 直接启动 run。\n\n## 落点分析(读到的源码位置)\n\n1. **门缺失点**:`packages/runtime/src/domains/actions.ts` `handleActionsRequest` 全程无匿名判定 —— 唯一前置门是 `actionExec.actionPermissionError(...)`(约 line 217)。而 `packages/runtime/src/action-execution.ts` 的 `actionPermissionError`(line 300+):\n   ```js\n   const required = Array.isArray(actionDef?.requiredPermissions) ? actionDef.requiredPermissions : [];\n   if (required.length === 0) return null;   // ← 未声明 = 对所有人(含匿名)放行\n   if (ec?.isSystem) return null;\n   ```\n   对比:`domains/ai.ts:127`、`domains/meta.ts:59`、`domains/security.ts:92` 都在处理前调用 `shouldDenyAnonymous({ userId, isSystem })`。`domains/actions.ts` 没有这一步。\n\n2. **路由注册点**:`packages/runtime/src/dispatcher-plugin.ts` 的 `registerActionRoutes`(dist `index.js` 约 line 8108)把 `/actions//:action`、`/actions/:object/:action`、`/actions/:object/:action/:recordId` 直接接到 `dispatcher.dispatch(\"POST\", ...)`,**未经过** `mountRouteOnServer` 的 `route.auth` 401 门,也没有 rest-server 的 `enforceAuth`。`/automation/*` 同样如此。相较之下 `@objectstack/rest` `rest-server.ts` 的每个 `/data`、`/meta` handler 都先 `if (this.enforceAuth(req, res, context)) return;`(内部 `shouldDenyAnonymous`)。同一进程两套注册路径,只有 rest 那套设了门。\n\n3. **提权确认**:`packages/runtime/src/security/resolve-execution-context.ts` 文档保证 \"Anonymous requests yield `{ isSystem: false, positions: [], permissions: [] }`\" —— 匿名本身不是 system;但 action body 一旦进入,`buildActionExecutionContext` 强制 `isSystem:true`(dist line ~1698),所以匿名触发即拿到系统提权、RLS/FLS 绕过的 body 执行上下文。\n\n## 影响面与关联\n\n- **影响 HotCRM 业务面**:HotCRM 全部 13 个 action(mark_primary / send_email / log_call·log_meeting·schedule_meeting × 5 对象 / convert_lead / schedule_followup / create_campaign / clone_opportunity / mass_update_stage / generate_quote / escalate_case / close_case / enroll_leads)均未声明 `requiredPermissions`,故全部可被匿名调用。按验收纪律不在 hotcrm 重复立单,此处记录关联。\n- **关联(非重复)**:#2849 处理的是 **MCP** action 面按 `ai.exposed` 的 invoke-time 门,与本单是同一\"body 系统提权、invoke-time 才是边界\"的安全模型,但覆盖的是不同的传输面(MCP);本单是 **REST `/actions` + `/automation`** 缺少更底层的**匿名基线门**。#2991(已闭)是 AI tool 上下文 `system` 默认 actor 的 fall-open,亦不同面。两仓 open/closed 检索未见覆盖 REST /actions 匿名调用的现单。\n\n## 建议方向(仅供参考,不在本单实现)\n\n在 `domains/actions.ts`(及 automation 派发)进入派发前加 `shouldDenyAnonymous({ userId: ec?.userId, isSystem: ec?.isSystem })` → 401,与 `/data`、`/meta`、`/ai`、`/security` 保持同一基线;之后再走 `requiredPermissions` / `ai.exposed`。\n"
+}

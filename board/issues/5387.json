@@ -1,0 +1,36 @@
+{
+  "number": 5387,
+  "kind": "issue",
+  "title": "`os doctor` 不加载 `.env*`,读到的环境与 `serve`/`dev`/`start` 实际运行的不是同一份 —— 写在 `.env` 里的配置错误 doctor 一律看不见",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T04:03:43Z",
+  "updated_at": "2026-08-05T07:45:37Z",
+  "closed_at": "2026-08-05T07:45:37Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5387",
+  "body": "发现于 #5382(doctor 的 posture 报告,PR 见下)实施过程中的顺带核验;本单只记录,不在该 PR 里改(那单的文件面被限定为 `packages/cli/src/commands/doctor.ts` 的 posture 读取,而本单的修法会改变 doctor **每一项** env 派生检查所看到的输入,属于另一个决定)。\n\n## 事实\n\n`serve` / `dev` / `start` 三条命令都在 `run()` 早期用 dotenv-flow 载入 `.env*`:\n\n- `packages/cli/src/commands/serve.ts:516` — `dotenvFlow.config({ node_env: mode, silent: true })`\n- `packages/cli/src/commands/dev.ts:132` — `dotenvFlow.config({ node_env: 'development', silent: true })`\n- `packages/cli/src/commands/start.ts:121` — `dotenvFlow.config({ node_env: mode, silent: true })`\n\n`doctor.ts` **没有任何 dotenv 载入**(`grep -n dotenv packages/cli/src/commands/doctor.ts` 无匹配),只看 `process.env`。\n\n## 后果\n\n诊断面读到的环境,和被诊断的那条命令实际运行时的环境,不是同一份。具体到 #5382 修完之后的那项检查:\n\n```\n# .env(提交进仓库,团队共享)\nOS_TENANCY_POSTURE=isolatd\n\n$ os doctor      # 看不到 .env,posture 解析成 single,报绿,exit 0\n$ os serve       # 载入 .env,读到 isolatd,FATAL 拒绝启动(PR #5381 的闸门)\n```\n\n也就是说 #5382 修好的那条「doctor 与 serve 不一致」,在 `.env` 这条来源上仍然成立 —— 只是从「归因错误」缩小成了「完全看不见」。PR 里的文案已经如实写明这一点(「`os doctor` does not load `.env*` files, so a value set in one is not visible here」),不冒充检查过,但残留本身值得单独记一笔。\n\n`.env` 恰恰是这个变量最常见的来源:PR #5381 把 serve 的闸门刻意放在 dotenv 载入**之后**,理由正是「该变量常常来自提交进仓库的 `.env*` 而不是 shell」。\n\n## 为什么现在才成为问题\n\n在 #5382 之前,`doctor.ts` 里 `process.env` 的直接读取是 **0 处** —— 它此前根本没有 env 派生的检查,所以「不加载 .env」不产生可观察差异。#5382 给它加了第一项(posture),这条不一致才有了落点。任何后续想在 doctor 里检查 `OS_*` 配置的工作都会撞上同一堵墙。\n\n## 需要决定的地方(所以没有顺手改)\n\n在 doctor 里加一行 `dotenvFlow.config()` 表面上是一行,但它:\n\n1. 改变 doctor 每一项(现在的和将来的)env 派生检查的输入;\n2. 需要选一个 `node_env` —— serve 从 `--dev` / `NODE_ENV` 推导,`start` 用 mode,doctor 没有对应的旗标,选错会读到另一套 `.env.<mode>`;\n3. 会把 `.env` 里的值**写进当前进程**的 `process.env`,doctor 之后若还要报告「你的 shell 里设了什么」就分不清来源了 —— 可能需要把「从哪读到的」也报出来,而不是静默合并。\n\n倾向:doctor 应当**模拟 serve 的读取顺序**并在报告里注明每个值的来源(shell / 哪个 `.env` 文件),而不是静默 merge —— 但这是诊断输出的契约变化,交维护者裁定。\n\n## 现状证据\n\n`packages/cli` 下没有任何测试钉 doctor 与 `.env` 的关系。\n\n---\nContext: #5382 / #5359 / PR #5381。与 #4801、cloud#1020 同属「诊断面与运行时不一致」家族。\n"
+}

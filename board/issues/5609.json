@@ -1,0 +1,35 @@
+{
+  "number": 5609,
+  "kind": "pull_request",
+  "title": "test(spec): 别名一致性闸门收编 44 个 strictUnknownKeyError 直调点 —— probe 撞车维度首测 (#5483)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T20:22:55Z",
+  "updated_at": "2026-08-05T22:27:32Z",
+  "closed_at": "2026-08-05T22:27:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T22:27:30Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5609",
+  "body": "Fixes #5483\n\n按路线 1(过渡看守)落地:让 `strictUnknownKeyError` 自己登记别名表,`alias-integrity.test.ts` 因此把 44 个直调点也判了 —— **一个调用点都没改**。\n\n## 为什么需要它\n\n#5013 的闸门判的是 `strictObject` 建的表:那个 helper 在构造期登记 `{ options, shape }`,所以闸门能拿到运行时 shape。helper 之前的老接线直接调 `strictUnknownKeyError`,自带一份手抄的 `knownKeys` 数组,没有 shape 可登记,于是这 44 张表在闸门的**每一条**判据之外。\n\n#5481 之后判据从两条变成三条,而第三条(表内 `aliasProbe` 撞车)只读别名表本身、不依赖 shape。所以本 issue 正文里那句「实测干净」只覆盖前两条 —— 这批表在撞车维度上是**未测量**,不是已测净。\n\n## 怎么做的\n\n- 新增 `packages/spec/src/shared/alias-table-registry.ts`:一张**独立**的登记表。刻意不并进 `strictObject` 那张,因为两者成色不同,合表等于把弱的那一半悄悄贴上「shape 背书」的标签。\n- `strictUnknownKeyError` 首行登记自己的 `{ surface, knownKeys, aliases, guidance }`。登记放在**工厂里**而不是调用点上,这是「零调用点改动」的全部机关,也让 #5593 的迁移仍然是一次干净可分离的改动。\n- `strictObject` 内部那次调用用 `withoutDirectAliasTableRegistration` 抑制登记:它的表已经带 shape 登记在更强的那张里,重复登记会让本表的规模取决于「此前有没有哪个测试恰好触发过一次拒绝」。规模随测试顺序漂移的东西不叫测量。\n- 闸门的 forcing walk 现在**也会构建 error map**(用一个合成的 `unrecognized_keys` issue)。两处 error map 是延迟构建的:`strictObject`(绕开 `field.zod` 与 `suggestions.zod` 的循环导入)和 `data/object.zod.ts`(绕开 temporal dead zone)。对直调点而言,这个延迟就是「登记了」和「根本看不见」的区别。\n\n## 三条判据在这批表上的成色(闸门自己也这么写)\n\n| 判据 | `strictObject` 的 235 张 | 这 44 个直调点 |\n|:--|:--|:--|\n| 别名 key 不得是已知键 | 对 `.shape` 判 | 对**手抄数组**判 |\n| 别名 target 必须是已知键 | 对 `.shape` 判(含墓碑) | 对**手抄数组**判(墓碑不可见) |\n| 表内 `aliasProbe` 不得撞车 | 判 | 判 —— **完全等价** |\n\n前两条继承手抄数组与 shape 之间的漂移,那是路线 1 消不掉的一半,归 #5593。\n\n## 首测结果\n\n**44 个源码调用点 → 运行时 52 张表**(`ui/app.zod.ts` 的导航项工厂一个调用点跑九次,每个 `type` 变体一张;`strictObject` 那 235 张不受影响)。\n\n- **probe 撞车:0 条。** 这是从没测过的那一维。参考量级:已覆盖的 235 张里实测 4 条(1 活缺陷 + 3 休眠冗余,PR #5516 清零);同样的密度没有出现在这 44 张里。\n- **别名 key 不得是已知键:0 条。**\n- **别名 target 必须是已知键:32 条,同一个根因。** `ui/app.zod.ts` 把四条「默认展开」别名(`defaultopen` / `open` / `collapsed` / `isopen` 指向 `expanded`)放在九个变体**共用**的 `NAV_ITEM_ALIASES` 里,而 `expanded` 只声明在 `group` 上。于是另外八个变体把作者指向该变体同样会拒的键 —— ledger finding 7 的二次拒绝。已立 **#5555**;修法要改面向作者的报错文案且落在调用点里,本单硬约束是不动那 44 个文件,所以这里只把它钉成**只减不增**的已知债(`toBeLessThanOrEqual(32)`),判定规则是结构化的:只放过「nav 变体表 + 这四个 key + target 恰为 `expanded`」,第五种拼法直接红。\n\n## 两处显式豁免(都带陈旧检查,不许静默放过)\n\n1. `PROSE_ALIAS_TARGETS` —— `ui/app.zod.ts` 六条**刻意的散文式 target**(形如 `type: 'url' (with url)`)。它们回答的是「键名对、变体错」,裸键名会误导。逐条枚举、绑定到 nav 那一族 surface;配套一条测试要求每条仍被用到,否则删除。\n2. `VARIANT_LEGAL_GUIDANCE` —— `children` 的 guidance 在 `object` / `group` 两个变体上确实不触发,因为那两个变体真的声明了 `children`。一张手写 guidance 被盖了九份,这是判据碰上变体族、不是死条目;同样逐条枚举 + 陈旧检查。\n\n## 反向验证(先定方向再跑)\n\n五次注入,每次**先写下预期方向再执行**:\n\n| 注入 | 预期 | 实测 |\n|:--|:--|:--|\n| A 直调表里塞一个不存在的 target | 红(判据 2),不被 #5555 的容差吸收 | 符合 —— 1 failed / 17 passed |\n| B 直调表里塞一对 probe 撞车的 key | 红(判据 3),同 target 的休眠冗余款 | 符合 —— 1 failed / 17 passed |\n| C nav 族里加第五种 `expanded` 拼法 | 红 —— 容差是结构化的,新拼法落进 `broken` | 符合 —— 1 failed / 17 passed |\n| D 去掉工厂里的登记调用 | 红(规模自检) | **红得更多**,6 failed |\n| E 去掉 forcing walk 里的 error map 触发 | **只**红「延迟 error map 也被触发」一条 | **多红一条**,2 failed |\n\n```\n=== A   x every alias target is a key the table claims to accept\n        Tests  1 failed | 17 passed (18)\n=== B   x no two alias keys in one table collapse onto the same probe (#5481)\n        Tests  1 failed | 17 passed (18)\n=== C   x every alias target is a key the table claims to accept\n        Tests  1 failed | 17 passed (18)\n=== D   x the direct call sites really registered (self-test before the verdict)\n        x every direct call site with an alias table was reached at runtime\n        x the deferred error maps were forced too\n        x the nav-item factory registered one table per variant\n        x every prose-target exemption is still load-bearing\n        x every variant-legal guidance exemption is still load-bearing\n        Tests  6 failed | 12 passed (18)\n=== E   x every direct call site with an alias table was reached at runtime\n        x the deferred error maps were forced too\n        Tests  2 failed | 16 passed (18)\n=== BASELINE restored\n        Tests  18 passed (18)\n```\n\n两处预期没中,都按实测改了说法,没有把结果套回模板:\n\n- **D 比预期红得多**(6 条而非 1 条)。方向没错,范围错了:登记一停,所有「豁免仍被用到」的陈旧检查也一并失去依据 —— 它们读的正是这张登记表。这其实是好消息:说明陈旧检查不是自证的。\n- **E 比预期多红一条。** 我原本在测试注释里写「删掉触发之后覆盖检查不会注意到」,**这是错的**,实验直接推翻了它:`data/object.zod.ts:962` 的 `surface` 与别名条目都是字面量,AST 看得见,所以覆盖检查会把它报成 unreached。注释已按实测改写:这条按名钉住的断言不是让「触发缺失」**可见**的东西,而是让它**可读** ——「`this object` 不见了」指出机制,「object.zod.ts:962 未触达」只会让下一个人去找一个并不存在的 walk bug。\n\n## 常规测试\n\n```\npnpm --filter @objectstack/spec exec vitest run src/shared --maxWorkers=2\n   Test Files  17 passed (17)\n        Tests  303 passed (303)\n\npnpm --filter @objectstack/spec exec tsc --noEmit         -> exit 0\npnpm --filter @objectstack/spec check:strictness-ledger   -> 三条全绿,数字无变化\nnode scripts/check-nul-bytes.mjs                          -> OK(5501 个文件,无裸控制字节)\n```\n\n## 棘轮\n\n`toBeLessThanOrEqual(44)` 一个字符没动。它劝阻的事情 —— 新增一个直调点、再抄一份键表 —— 在这批表拿到看守之后与之前一样不受欢迎。注释改了,因为原文说这批「没人看着」,现在不成立。\n\n## 其他\n\n- changeset:`@objectstack/spec` **patch**。helper 里多了一次登记调用,是随包发布的运行时代码(对解析行为无影响),按 AGENTS.md「功能/改进加 changeset」与 #5013 自身闸门 PR 的先例走 patch。\n- `check:strictness-ledger` 数字无变化,故**未**动 `gen:strictness-ledger` 产物(本 PR 没有新增 `z.object(` 站点,新文件也不是 `*.zod.ts`)。未新增任何 `check:` / `gen:` 脚本,无需登记 check-generated 台账。\n- 公开 API 面无变化:新登记模块**不**从 `shared/index.ts` 导出,与 `strict-object.ts` / `alias-probe.ts` 同待遇 —— 闸门按相对路径取用的内部接缝。\n- 登记表带**容量上限**(512,当前占用 52)。`strictUnknownKeyError` 是发布出去的 API(在 `api-surface.json` 的 `./shared` 下),消费者完全可以在循环里按租户建 error map;无上限的登记表会变成别人进程里的滞留物。溢出计数由闸门断言为 0,所以「装不下」会是一次响亮的失败,而不是悄悄判一个前缀。\n\n## 跟进\n\n- **#5555** —— 上面那 32 条背后的真实缺陷(修法要改面向作者的文案,需单独决定)。\n- **#5593** —— 路线 2:44 个调用点分批迁 `strictObject`,棘轮降到 0,本 PR 的登记表随最后一个调用点一起删除。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_018fxLGQdatPbBUvCgiVxg6D\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018fxLGQdatPbBUvCgiVxg6D)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 4987,
+  "kind": "issue",
+  "title": "[engine-double-contract] 四条 metadata-protocol 基线条目的 `closes` 指向一个不可能的动作:加 @objectstack/objectql devDependency 会让 turbo 直接判环",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T18:48:47Z",
+  "updated_at": "2026-08-05T21:12:44Z",
+  "closed_at": "2026-08-05T21:12:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4987",
+  "body": "发现于 #4867(PR #4980)在 `scripts/engine-double-contract.baseline.json` 里新增条目时。**仅记录,未在该 PR 中修改** —— 改别人的基线条目正文不属于那个 PR 的文件面,按 Prime Directive #10 单开,未指派。\n\n## 现象\n\n`scripts/engine-double-contract.baseline.json`(#4550 / PR #4948)里四条 metadata-protocol 条目写着同一句 `why` / `closes`:\n\n```\n\"why\":    \"@objectstack/metadata-protocol does not depend on @objectstack/objectql.\n           Pinning needs a devDependency + lockfile change, which is a separate reviewable act.\"\n\"closes\": \"add @objectstack/objectql to devDependencies, then open the fake's delete with\n           assertEngineDeleteDispatch(opts)\"\n```\n\n涉及:\n\n- `packages/metadata-protocol/src/protocol-publish-drafts-org-scope.test.ts`\n- `packages/metadata-protocol/src/protocol.runtime-authoring-gate.test.ts`\n- `packages/metadata-protocol/src/protocol.save-flow-canonicalization.test.ts`\n- `packages/metadata-protocol/src/sys-metadata-repository.recorded-by.test.ts`\n\n`closes` 描述的动作**做不到**:`@objectstack/objectql` 的 `dependencies` 里已经有 `@objectstack/metadata-protocol`,反向加 devDependency 就是一个环。实测(加上边、跑 turbo、再回退):\n\n```\n$ pnpm turbo run test --filter=@objectstack/metadata-protocol --dry\n WARNING  Circular package dependency detected: @objectstack/objectql, @objectstack/metadata-protocol\n  x Cyclic dependency detected:\n  |     @objectstack/metadata-protocol#build, @objectstack/objectql#build\n```\n\nturbo 2.10.7 直接拒绝任务图 —— 不是警告,是 `turbo run` 失败。所以这四条不是「一次单独的 review 就能关掉」的债,而是**这条路径根本关不掉**。\n\n## 为什么值得单开\n\n这正是本仓库反复付费的 declared ≠ actual 形状,只不过长在**账本**上而不是代码上:一条 shrink-only 账本的 `closes` 就是给下一个作者的处方。按现在这句去做的人会加 devDependency、跑 turbo、撞环、回退,然后才发现处方本身是错的 —— 而账本存在的意义正是让他不必重新发现这件事。\n\n同一个文件里已经有一条把这个方向写对的条目(`packages/spec/src/contracts/data-engine.test.ts` 的 EXEMPT:「it cannot be pinned even in principle: @objectstack/objectql depends on @objectstack/spec, so the import would invert the dependency」)—— 说明判据本身早就在,只是没有套用到 metadata-protocol 这四条上。\n\n## 建议\n\n1. 把这四条的 `why` 改成实测的环(而不是「a separate reviewable act」),`closes` 改成唯一存在的路线:**把 `assertEngineDeleteDispatch` 下沉到两边都已依赖的包** —— `@objectstack/metadata-core` 是现成的共同依赖(objectql 与 metadata-protocol 都依赖它);`@objectstack/spec/contracts` 是另一个候选,但注意 spec 的那条 EXEMPT 说明 objectql→spec 方向同样不能反向 import,所以下沉到 spec 只有在「谓词本身属于契约层」成立时才对。\n2. 下沉之后,这四条 + #4867 新增的那条(`sys-metadata-repository.history-counters.test.ts`)可以一起关掉,`plugin-approvals` 等「本来就依赖 objectql」的条目不受影响。\n\nPR #4980 已按现状新增了一条,其 `closes` 写的是下沉路线并注明四条同族条目同理 —— 但没有改动它们的正文。\n\n## 参考\n\n- #4550 / PR #4948(gate 与基线的落地)、#4434(gate 的起因:fake 比真引擎松,路由死了一整段而套件全绿)\n- #4867 / PR #4980(发现处)\n"
+}

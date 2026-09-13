@@ -1,0 +1,35 @@
+{
+  "number": 5608,
+  "kind": "pull_request",
+  "title": "feat(lint): react 页发布闸门改为 PARSE `ChartAggregateSchema`,不再手写重推它的规则 (#5020)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T20:21:54Z",
+  "updated_at": "2026-08-05T20:43:14Z",
+  "closed_at": "2026-08-05T20:43:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T20:43:12Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5608",
+  "body": "Fixes objectstack-ai/objectstack#5020\n\n按 issue 上 2026-08-05 的 PM 裁定(R1/R2/R3)执行的**两步走第一步**:只做 `packages/lint` 侧接 parse,spec schema 本体零改动(收紧归 #5583)。\n\n## 前提复核(对 origin/main,开工前)\n\n| 前提 | 结果 |\n|---|---|\n| `validate-react-page-props.ts:301` 手写 `CHART_FUNCTIONS`、:356/:363 手推 refinement | ✅ 仍在,且 :288 的 `ChartDrillDownSchema.safeParse` 先例仍在 |\n| 两个 schema 均 STRIP 姿态 | ✅ 实测:`safeParse({function:'count',groupBy:'status',groupby:'status'})` success 且丢 `groupby`;嵌套 `dateGranularty` 同 |\n| zod 4 union 分支消息塌缩 | ✅ 实测:`groupBy` 的失败以一条 `invalid_union`、message 为字面量 `Invalid input` 到达,具名消息只在 `issue.errors` 里 |\n| 渲染器兑现 `groupBy` 缺席 | ✅ objectui `ObjectChart.tsx:640`:`schema.aggregate?.groupBy \\|\\| schema.xAxisKey`;spec 自己的 `chartAggregateCategoryKey` TSDoc 也写明「未分组聚合返回单行、没有分类列」 |\n| `groupBy` 被声明为必填 | ✅ schema 与 `react-blocks.ts:245` 的已发布类型串都必填 —— 三方不一致确实存在,这正是 R2 降 warning 的依据 |\n| 仓内 authored aggregate | ✅ `examples/app-showcase/src/ui/pages/renewals-pipeline.page.ts:138` 完全合法;技能语料 / 文档片段里的 aggregate 也都带合法 `groupBy`,无一处被新闸门打断 |\n\n裁定与实码无冲突,范围未收缩。\n\n## R1 —— 接 parse,词表与 refinement 收敛回 schema\n\n`checkChartAggregate()` 照 `checkChartDrillDown` 的形状调 `ChartAggregateSchema.safeParse()`;`CHART_FUNCTIONS` 与手推的 count/field refinement **删除**。`NOT_STATIC` 短路语义不变(ADR-0072 D1)。\n\n**解包 `invalid_union`**:zod 4 把 union 的分支失败塌成一条顶层 issue、message 只剩 `Invalid input`,直接透传等于没说话。现在把各 arm 的具名消息拼进同一条 finding:\n\n```\naggregate.groupBy: Invalid input (received {\"dateGranularity\":\"day\"}) — no accepted form matched:\n  (1) Invalid input: expected string, received object\n  (2) field — Invalid input: expected string, received undefined\n```\n\n这条解包在 #5583 之后更要紧:strict 分支的 `unrecognized_keys` 会以完全相同的方式塌缩,具名 surface + 改名建议要靠它到达作者。\n\n另外补了一件 zod 不做的事:**回显作者写下的值**。`Invalid option: expected one of …` 不带 received 值,而被删掉的手写检查是带的;现在按 issue path 从**输入**里取回(通用逻辑,不在消费端复述任何契约知识)。\n\n## R2 —— 严格度分级\n\n| 授权内容 | 之前 | 之后 |\n|---|---|---|\n| 缺 `function` | 静默通过 | **error** `aggregate.function: Invalid option: expected one of …(nothing is set there)` |\n| `function` 不在枚举内 | error(本地词表) | **error**(枚举自带词表)+ `(received \"median\")` |\n| `field` 非字符串 | 静默(或被误报成缺 field) | **error** `aggregate.field: Invalid input: expected string, received number` |\n| sum/avg/min/max 缺 `field` | error(手写措辞) | **error**,schema refinement 原话 |\n| `aggregate` 不是对象 | 静默 return | **error** `aggregate must be a configuration object, not string.` |\n| `groupBy` 存在但类型错 | 静默通过 | **error**(解包 union) |\n| **`groupBy` 缺席** | 静默通过 | **warning,不阻断** |\n\n`groupBy` 缺席是唯一降级项:它是唯一有活渲染路径兑现的形状,按 #5068 条款「渲染器兑现的键先声明后设闸」不设 error。finding 自带解释并点名 #5583(产品问题「无分组单值图是否受支持」在那边裁)。分级是**按 issue** 分的,不是按整个 aggregate:`{ function: 'median' }` 同时产出一条 error(function)+ 一条 warning(groupBy)。\n\n## ⚠️ 本 PR 没有关闭什么(过渡期缺口已钉住)\n\n两个 schema 仍是 STRIP,所以**这条 parse 依旧把未知键静默丢掉** —— `groupby` / `dateGranularty` 今天照旧让图退化成单点而 build 全绿。接 parse 是收紧的**前置条件**,不是收紧本身(`.strict()` 是 parse 的属性,在此之前根本没有 parse 可收紧)。\n\n`validate-react-page-props.test.ts` 因此显式钉住今日容忍度并点名 #5583。两条 pin 都做了**判别性加固**,不靠「什么都没产出」蒙绿(#5046 的坑):同一个 fixture 里在未知键旁边种一个只有 parse 才报得出的违规,断言「恰好 1 条 finding、来自 schema 的措辞、且不含 `Unrecognized key`」。反向验证证明这半边是判别性的 —— 把旧规则放回去,pin 立刻红,报的正是手写措辞 `aggregate.function \"kount\" is not an aggregation this chart can run`。\n\n## R3 —— 三处记录随本 PR 翻\n\n1. `packages/spec/src/ui/chart.zod.ts` —— **仅注释散文**(文件头 + schema 旁那段大块注释),schema 本体零改动;批 15 那句「DO NOT convert before that is decided」标注为**已满足**并指向 #5583,而不是被推翻。\n2. `packages/spec/src/ui/chart.test.ts` —— **仅 pin 注释**改指 #5583;两条「still STRIPS — deliberate」断言本体不动,姿态未变必须保持绿(75 tests 全绿),常驻 BFS 断言不动。\n3. `docs/audits/2026-07-unknown-key-strictness-ledger.md` —— :636 triage 行与 :849 strip 行 `no gate` → `authorable`,并在汇总段落把 `no gate` 桶里的 chart 一对划掉。⚠️ strip 行的 `Class` 单元格是**机读的**,只能放一个 verdict:`~~no gate~~ **authorable**` 会被 `check:strictness-ledger` 判为「not a verdict」(我先踩了一次),所以历史写在证据列。`.counts.md` 按 os-regen 规程用 `gen:strictness-ledger` **整体重生成**,未手改数字:`no gate` 31 → 29、`authorable` 11 → 13,恰好这 2 个站点。\n\n## 触碰面声明(spec 车道地带)\n\n`chart.zod.ts` / `chart.test.ts` / 台账三个文件均属 spec 车道散文面。push 前 `git log --oneline origin/main -- 这些文件` 复核:最近一次改动是 e900015cd(#5435 的 drillDown target,已在我的 base 里),**当日无其它人在改**;`git ls-remote --heads origin` 也无 chart/ledger/5583 相关在飞分支。\n\n## 验证\n\n- `pnpm --filter @objectstack/lint test` —— **59 files / 1335 passed | 4 skipped**;单文件 `validate-react-page-props.test.ts` **135 passed**(新增约 49 条,含 37 行表驱动词表逐绿:5 个函数 × 裸串 arm + 结构 arm + 5 个 granularity,外加 alias 与 count 带 field)\n- `pnpm --filter @objectstack/lint typecheck` —— 绿(过程中吃了一记 TS7006:`Array.isArray()` 会把 `ReadonlyArray` 窄化成 `any[]`,已改成可选属性判空,注释里记下了)\n- `pnpm --filter @objectstack/spec` 的 `src/ui/chart.test.ts` —— **75 passed**\n- `pnpm --filter @objectstack/spec check:generated` —— **10/10 绿**(含 `check:strictness-ledger`、`check:docs`、`check:authorable-surface`)\n- `node scripts/check-nul-bytes.mjs` 绿;另对改动文件跑了越过闸门盲区的自查 `grep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]'`,干净\n- eslint 干净\n- **反向验证(方向先判后跑)**:预判「把手写限枝放回去 → 新 pin 全红」。实跑 11 条红,与预判一致 —— 10 条新断言 + 1 条既有断言(`flags a non-count function with nothing to aggregate`,因为它现在断言 schema 原话,属预期的 FROM/TO 后果)。两条 STRIP 容忍断言的**容忍那半**在新旧代码下都绿(两版都不查未知键),这一点如实说明,不假装是本 PR 的成果;判别性由上面那半提供。\n\n## 给 review 的一条注意\n\n在飞的旧 changeset `.changeset/objectchart-aggregate-result-columns.md` 把 `react-chart-aggregate-invalid` 描述成「(error)」,而本 PR 之后它多了一个 warning 分支。没有去改别人那份 pending changeset(冲突磁铁、且不在本单范围);本 PR 自己的 changeset 已把分级写清楚。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01GX3sL71LFq8m2usg6VqTSE)_"
+}

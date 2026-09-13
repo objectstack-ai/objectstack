@@ -1,0 +1,37 @@
+{
+  "number": 5130,
+  "kind": "issue",
+  "title": "pm-dispatch SKILL:决策分析轴由两条扩为三条 —— 补「实际业务需求」轴与创业聚焦原则(维护者 2026-08-04 指示)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T05:43:54Z",
+  "updated_at": "2026-08-05T12:40:33Z",
+  "closed_at": "2026-08-05T12:40:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5130",
+  "body": "维护者 2026-08-04 指示立单(#5021 裁决现场:「我们是一个创业项目,应该先专注于核心能力,这个也应该写入项目经理 skills」)。**未认领。**\n\n## 变更内容\n\n`.claude/skills/pm-dispatch/SKILL.md` 第 8 步(Escalate)的「两条固定评估轴」扩为**三条**,并同步所有引用「两轴」的文案:\n\n1. **实际业务需求**(新增,列第一位)—— 每个方案先问:它服务的是真实存在的业务场景,还是投机性的能力面?判据来源要求**实测**(谁在写这个键 / 谁在读这个能力 / 示例应用与真实部署的用法),不接受「读起来像有用」。**创业阶段聚焦原则**:能力扩张默认从紧——新能力/新词表/新配置面需要真实业务拉动才立项;无拉动的声明面按 implementation-first 处置(退役或停车,词表随未来实现回归)。已发布但零消费的「能力」不因沉没成本获得豁免(先例:#5021 主题排版 9 组、#4988 交互配置 22 站点、#4834 plugin-runtime 五 schema)。\n2. **项目长远合理性**(原第一轴,原文保留)\n3. **防 AI 写代码/写元数据犯错**(原第二轴,原文保留)\n\n同步修订:第 8 步「每个方案必须沿两条固定评估轴分析」→ 三条;「两轴冲突时如实呈现权衡」→ 三轴。\n\n## 依据(当天实操已在用三轴,skill 落后于实践)\n\n2026-08-04 的六项裁决(#5005/#4936/#4988/#4938/#4964/#4923)与后续四项(#5011/#5073/#5074/#5021)全部按三轴呈报,其中 #4936(响亮拒绝而非退役,因 showcase 自证业务方向)与 #5021(9 组退役,因无业务拉动)是业务轴改变结论的正反两例——两轴框架下这两单会得出相同答案,是错的。\n\n## 验收\n\n- SKILL.md 变更 + 与 `.claude/skills/pm-dispatch/` 内其它引用处一致;\n- ⛔ 不碰 skill 的其它段落(操作纪律、州机模型等);\n- 这是 `.claude/` 内部 agent 工具,不是发布内容,无 changeset 需求(按仓惯例核实)。"
+}

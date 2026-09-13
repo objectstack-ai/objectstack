@@ -1,0 +1,33 @@
+{
+  "number": 4897,
+  "kind": "issue",
+  "title": "merge queue 已启用但零 workflow 声明 `merge_group` —— 队列里一个检查都不跑,进队列的 PR 只会空转并锁死自己的分支",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T14:18:45Z",
+  "updated_at": "2026-08-05T17:56:52Z",
+  "closed_at": "2026-08-05T17:56:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4897",
+  "body": "## 现象\n\n#4422(发布 PR)被加入 merge queue 后一直没有合并,同时 main 上的 Release workflow([run 30821243525](https://github.com/objectstack-ai/objectstack/actions/runs/30821243525))失败:\n\n```\n[command]/usr/bin/git push origin HEAD:changeset-release/main --force\nremote: error: GH006: Protected branch update failed for refs/heads/changeset-release/main.\nremote: - A pull request for this branch has been added to a merge queue. Branches that\nremote:   are queued for merging cannot be updated. To modify this branch, dequeue the\nremote:   associated pull request.\n```\n\n## 根因\n\n`.github/workflows/` 下 17 个 workflow,**没有一个**声明 `merge_group` 触发器:\n\n```\n$ for f in .github/workflows/*.yml; do grep -q merge_group \"$f\" || echo \"no  $(basename $f)\"; done\nno  check-links.yml\nno  ci.yml\nno  codeql.yml\nno  coverage-nightly.yml\nno  docker-publish.yml\nno  docs-drift-check.yml\nno  engine-split-metric.yml\nno  lint.yml\nno  pr-automation.yml\nno  publish-smoke.yml\nno  release.yml\nno  rerun-safety-nightly.yml\nno  scaffold-e2e.yml\nno  showcase-smoke.yml\nno  spec-liveness-check.yml\nno  stale.yml\nno  validate-deps.yml\n```\n\nGitHub 的 merge queue 是把 PR **推测性地合并到当前 main** 生成一个 merge group,然后在这个 merge group 上重跑必需检查、只有全绿才落地 —— 这正是 AGENTS.md §7 说它「就是 §10 的重新验证,由平台做,无竞态」的原因。但检查要跑起来,workflow 必须声明 `on: merge_group`。一个都没有,于是队列里不会触发任何 CI:必需检查永远不满足,条目空转到队列超时被踢出。\n\n## 两处代价\n\n1. **对任何 PR**:进队列等于什么也不会发生,还白等一轮超时。\n2. **对发布 PR 尤其致命**:队列会锁住 `changeset-release/main`,而 changesets/action 在每次 main push 时都要 force-push 刷新这个分支 —— 于是发布 PR 一旦进队列,就同时(a)自己拿不到新 CI,(b)让**后续每一次** main push 的 Release job 以 GH006 整个失败。#4422 正是卡在这个死结上:它的 CI 结果停在旧 workflow 的那一次,而修好的 workflow 推不进来。\n\n## 与文档的冲突\n\nAGENTS.md「Multi-agent working discipline §7」写着:\n\n> **Once the repo's merge queue is enabled, \"add to queue\" IS the sanctioned path** —— it is the opposite of the auto-merge this rule bans: the queue builds your PR *as merged onto the current `main`* and lands it only if that speculative result is green\n\n按现在的配置,这句话指向的是一个陷阱:队列已启用,但它 build 出来的 merge group 上没有任何检查会跑,「only if that speculative result is green」这个前提不成立。文档和实际配置必须对齐 —— 要么补触发器让队列真能干活,要么在文档里明确「队列尚不可用,走 §7 的手工串行兜底」。\n\n## 可选方向(未决,需要维护者拍板)\n\n- **补 `merge_group` 触发器**:让队列名副其实。代价是每个 merge group 都要跑一遍全量 CI(本仓库的 Test Core / Dogfood / Temporal 等都不便宜),是仓库级的 CI 成本变更。可能需要同时收敛「必需检查」清单,只让真正必需的那几个跑在 merge group 上。\n- **暂时关掉 merge queue**,并把 AGENTS.md §7 改回手工串行,等成本方案定了再开。\n- 无论选哪条,`changeset-release/main` 都值得单独考虑是否应该被排除在队列之外 —— 它是机器生成、随时被重写的分支,进队列的语义本身就可疑。\n\n---\n\n发现于修 #4894(#4896)之后跟进 #4422 的过程中。本 issue 只做记录,未认领。"
+}

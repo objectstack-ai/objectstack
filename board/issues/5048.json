@@ -1,0 +1,37 @@
+{
+  "number": 5048,
+  "kind": "issue",
+  "title": "bug(service-automation): flow 绑定失败的告警把 Zod issue 数组塞进单行日志，读者只拿到一个孤零零的 `[`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T00:51:44Z",
+  "updated_at": "2026-08-05T19:47:15Z",
+  "closed_at": "2026-08-05T19:47:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5048",
+  "body": "在 17.0.0-rc.2 上实测；诊断源自 hotcrm 侧的 objectstack-ai/hotcrm#653。\n\n## 症状\n\n`AutomationServicePlugin` 的三个 flow 绑定点都用同一种方式渲染错误：把 `err.message` 直接插进一条单行 `logger.warn`。\n\n`packages/services/service-automation` — `dist/index.js` 中对应的三处（源码里是 `syncFlowsFromProtocol` / `resyncFlowsFromProtocol` / `start()` 的 ObjectQL registry pull）：\n\n```js\nctx.logger.warn(\n  `[Automation] cold-boot flow bind: failed to register ${def.name}: ${err.message}`\n);\n```\n\n而 `registerFlow` 用 `FlowSchema` 解析，#4001 关闭了 metadata schema 之后，未知键是**抛出**而不是被丢弃。于是 `err.message` 是一个 Zod issue 数组的多行 JSON dump，它的第一行就是一个 `[`。CLI 的 boot diagnostics 每条记录只打一行，结果是：\n\n```\nWARN [Automation] cold-boot flow bind: failed to register campaign_enrollment: [\nWARN [Automation] cold-boot flow bind: failed to register case_escalation: [\nWARN [Automation] cold-boot flow bind: failed to register case_escalation_on_create: [\n… 一共 24 条，每个 flow 一条 …\n```\n\n告警点了名字，却没说问题。**一次启动的阅读成本，零信息量。**\n\n## 为什么现在报\n\n触发它的那个缺陷（cloud#971，`getMetaItems` 的 `_diagnostics` 装饰喂回严格 schema）已经在 rc.2 由 `stripReadDecorations` 在读取缝合处修好了，所以今天不再有 flow 绑定失败。但**渲染缺陷本身一行未动**：下一个真正绑不上的 flow，仍然只会给出一个 `[`。\n\n这不是假设。cloud#971 这个缺陷之所以能横跨整条 rc.1 发布线没人发现，唯一原因就是它的症状不可读——绑定是加性的，boot pull 已经注册过一遍，record-change 插件又是第二条绑定路径，于是\"24 条谁也看不懂的告警\"是它对外的全部表现。**是第 2 个缺陷让第 1 个缺陷得以隐身。**\n\n## 实测复现（rc.2）\n\n在 hotcrm 的 worktree 里，把 rc.2 的 strip 临时改回 rc.1 的行为（只改 `node_modules`，不提交）：\n\n```js\n// readFlowDefsFromProtocol\n- return stripReadDecorations(doc);\n+ return doc;\n```\n\n然后 `npx objectstack dev --fresh -p 41877`：\n\n```\n$ grep -c \"cold-boot flow bind\" boot4.log\n24\n$ grep -m1 \"cold-boot flow bind\" boot4.log\n2026-08-04T00:38:50.385Z WARN [Automation] cold-boot flow bind: failed to register campaign_enrollment: [\n```\n\n再把那一行日志里的换行替换成可见字符重跑一次，才看到它其实一直想说的话：\n\n```\n[\n  {\n    \"code\": \"unrecognized_keys\",\n    \"keys\": [\n      \"_diagnostics\"\n    ],\n    \"path\": [],\n    \"message\": \"Unrecognized key(s) on this flow: `_diagnostics`. Until #4001 these were dropped silently — the flow still parsed, so a trigger binding or config the author wrote was quietly ignored.\"\n  }\n]\n```\n\n这条信息里有维护者需要的一切：哪个键、在哪条路径、为什么现在才抛。它一直都在，只是从来没走出过日志的第一行。\n\n## 建议的修法\n\n不要靠 `err.message` 的字符串形态传递结构化信息——把 Zod issues 作为**结构化数据**交给 logger 的第二个参数，让它像其他告警一样被序列化成一行 JSON（`WARN Failed to evaluate default expression {\"object\":…}` 这类在同一次启动里是完整可读的，因为换行被包在 JSON 字符串里转义了）。大致方向：\n\n```js\n} catch (err) {\n  ctx.logger.warn('[Automation] cold-boot flow bind: failed to register flow', {\n    flow: def.name,\n    // ZodError 有结构化的 issues；其余错误退回单行 message\n    issues: err?.issues,\n    error: err?.issues ? undefined : String(err?.message ?? err),\n  });\n}\n```\n\n要点是**类别**而不是这一处：三个绑定点（cold-boot bind、`metadata:reloaded` re-sync、boot pull）以及 `readFlowDefsFromProtocol` 里 `getMetaItems` 失败的那条 warn，都是同一个 `${err.message}` 单行插值形态，都会在错误恰好是 ZodError 时退化成一个 `[`。建议一起改。\n\n顺带一提，这与 #4632 立下的规矩同源：一个降级如果代价是\"没人能读懂发生了什么\"，它的日志就还不够格。被截断的诊断比没有诊断更贵——它要你付一次启动，然后什么都不告诉你。\n\n## 影响面\n\n- 严重度：不是故障，是**可诊断性**缺陷。它不让任何东西坏掉，它让坏掉的东西查不出来。\n- 触发条件：任何 `registerFlow` 抛 ZodError 的场合（未知键、类型不符、缺必填），即 flow schema 校验的全部失败面。\n- 关联：cloud#971（`_diagnostics` 装饰，rc.2 已修）、#4001（关闭 metadata schema，让未知键改为抛出）、objectstack-ai/hotcrm#653（现场报告与本次诊断）。\n\n## 已在 hotcrm 侧钉住的部分\n\nhotcrm 加了 `test/flow-cold-boot-rebind.test.ts`：把每个 flow 过一遍真实的 `AutomationEngine.registerFlow`，失败时打印**完整**的 issue 数组。它管不到平台的日志行，但至少保证 HotCRM 的 flow 不会成为那条日志所隐藏的东西。平台侧这一半只能在这里修。"
+}

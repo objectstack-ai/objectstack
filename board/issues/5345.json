@@ -1,0 +1,32 @@
+{
+  "number": 5345,
+  "kind": "issue",
+  "title": "driver-memory 的 analytics 面静默丢弃大半个 filter:`$or`/`$not` 整条丢,`$between`/`$startsWith`/`$null`/`$regex` 因无 cube 映射而丢 —— 聚合结果被放大",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T00:03:36Z",
+  "updated_at": "2026-08-05T10:53:23Z",
+  "closed_at": "2026-08-05T10:53:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5345",
+  "body": "做 #5324 / #5328(`normalizeFilterCondition` 的「该拒收没拒收」)时,顺手清点同包**第三个**过滤面,发现这一处不属于那两单范围的缺陷。按 Prime Directive #10 单独记在这里,unassigned。\n\n## 位置\n\n`packages/plugins/driver-memory/src/memory-analytics.ts` 的 `normalizeFilters` → `flattenFilterCondition`(约 :415)。它把 `query.where` 摊平成 cube 风格的 `{ member, operator, values }` 列表。\n\n## 现象:两处静默 `continue`\n\n```ts\n// $or / $not are not yet supported in the cube pipeline; ignore so\n// a partial query still runs rather than failing entirely.\nif (key === '$or' || key === '$not') continue;\n```\n\n```ts\nconst cubeOp = this.mongoOperatorToCubeOperator(opKey);\nif (!cubeOp) continue;          // ← 无映射 = 整条谓词消失\n```\n\n`mongoOperatorToCubeOperator`(:475)只映射 **11 个**算子:`$eq $ne $gt $gte $lt $lte $in $nin $contains $notContains $exists`。\n\nspec `FILTER_OPERATORS` 声明 15 个,因此下面这些在 analytics 面上**一律无声消失**:\n\n| 被丢的 | 备注 |\n|---|---|\n| `$between` | 仪表盘日期区间最常用的写法 |\n| `$startsWith` / `$endsWith` | |\n| `$null` | |\n| `$regex` | plugin-auth 的 ObjectQL adapter 会产出 |\n| `$or` 整条 | 注释写明「暂不支持,忽略以便部分查询仍能跑」 |\n| `$not` 整条 | CEL `!expr` 的 RLS scope 就是这个形状 |\n\n## 为什么是 bug\n\n1. **方向是放大,不是缩小。** 丢掉一条约束 = 少过滤 = **多返回行**。#3948 立的规矩正是针对这个方向:「无法编译的过滤器必须响亮拒收,不能被跳过」。`{$or: […]}` 被丢掉后,一个本应只统计两类记录的部件会统计**全表**。\n2. **`$not` 落在权限路径上。** `cel-to-filter.ts` 把 CEL `!expr` 编译成 `{$not: {…}}`,这是 RLS read scope 的常规产物。在 analytics 面上它被 `continue` 掉,等于 scope 没生效 —— 聚合数字里混进了调用方无权读的行。这不是「数字不准」,是越权读。\n3. **注释把它当成了 feature。**「ignore so a partial query still runs rather than failing entirely」正是 #4286 / ADR-0078 在 `objectql` 的 `having` 上判定为错误的那条理由 —— 那里的结论写得很直白:忽略一个算子会「silently return UNFILTERED aggregates」,所以 `having` 改成了抛错。\n\n## 为什么至今没被测出来\n\n`memory-analytics.test.ts` 没有一条用例断言「一个带 `$or` / `$between` 的 where 在 analytics 面上仍然生效」。#5324 修好的一致性表穿透(`FILTER_LOGIC_CASES` → `InMemoryDriver.find`)只覆盖 `find`,不覆盖 analytics 面 —— 这个包有三个过滤面,现在有两个被同一个门禁盯住了,第三个没有。\n\n## 建议(不代裁决)\n\n- 与 `objectql` 的 `having` 取齐:无法编译的算子/组合子 **抛 `INVALID_FILTER`**(同包 `filter-refusal.ts` 的 `unsupportedFilterError` 直接可用),而不是 `continue`。这条最省事也最一致。\n- 或者把 cube 管线补齐到 `FILTER_OPERATORS` 全集 + `$or`/`$not`。工作量大得多,且 `$or` 在 cube 模型里未必表达得出来。\n- 无论走哪条,都建议让 analytics 面也进 `FILTER_LOGIC_CASES` 的穿透范围。\n\n## 未验证的部分\n\n我没有量化今天有多少仪表盘部件的 `where` 真的带 `$between` / `$or`;也没有测 `service-analytics` 的对应面(它是另一套编译器,#5325 在飞)。严重度请 PM 按 triage 定,不代表我判断它低。\n\n关联:#5324 / #5328(同包 `find` 面的同一形状,已修)、#3948(no-silent-drop)、#4286 / ADR-0078(`having` 的同款裁决)、#5239(一致性表)。"
+}

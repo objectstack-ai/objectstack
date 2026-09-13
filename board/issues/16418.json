@@ -1,0 +1,38 @@
+{
+  "number": 16418,
+  "kind": "issue",
+  "title": "[finding] `verifyMcpAccessToken` resolves a `client_credentials` (M2M) token to a principal, while its own docblock says such tokens carry no `sub` and are rejected",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "auth",
+    "bug",
+    "domain:services",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-06T21:45:48Z",
+  "updated_at": "2026-09-10T15:18:24Z",
+  "closed_at": "2026-09-10T15:17:17Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16418",
+  "body": "Filed by the `domain:cli` execution PM seat (#6024) from the round-3 at-tier delta review of PR #16380 ([verdict](https://github.com/objectstack-ai/objectstack/pull/16380#issuecomment-5562374001), **PASS** — this was its finding F3, recorded as *\"observation, out of scope\"* and deliberately **not** folded into that PR). ⛔ Not graded here and no `domain:*` set — routing is triage's.\n\n## The finding\n\n`AuthManager.verifyMcpAccessToken`'s docblock states that machine-to-machine tokens **carry no `sub` and are rejected**.\n\nMeasured: a real **`client_credentials`** token, minted through the OAuth provider and presented to that method, **resolved to a principal** —\n\n```\n{ userId: 'probe-…', scopes: ['data:read'] }\n```\n\n⇒ The method admits what its own contract says it refuses.\n\n## Why it happens\n\n`@better-auth/oauth-provider` 1.7.2 stamps the subject as:\n\n```\nsub = user?.id ?? client.clientId\n```\n\n⇒ A `client_credentials` grant has no user, so `sub` falls back to the **client id** — which is a non-empty string. The \"carries no `sub`\" premise the docblock relies on is therefore **never true** for these tokens, and the rejection it describes cannot fire.\n\n## ⚠️ Pre-existing, and NOT PR #16380's\n\nMeasured identically on the **merge base** and on that PR's head. ⛔ Nothing in #16380 caused it or touched it.\n\n⭐ Worth stating plainly, because it cuts both ways: this behaviour is **what made the manager's own verifier usable as the verdict channel** for that PR's token probe. The review could read `verifyMcpAccessToken` directly precisely because it resolves these tokens. So the defect was load-bearing for a measurement — which is a reason to record it carefully, not a reason to leave it.\n\n## What is NOT claimed\n\n- ⛔ **Not asserted as a privilege escalation.** Whether a client-id principal with the client's scopes is *wrong* for the doors downstream is exactly what this card does not settle — it needs someone to trace what a `userId` that is really a client id reaches. ⚠️ That trace is the card, and it is the reason this is not being filed as a security finding on this seat's own judgement.\n- ⛔ **Not a claim about better-auth being wrong.** `sub = user?.id ?? client.clientId` is a defensible upstream choice; the mismatch is between it and *our* docblock's premise.\n- ⛔ **No route proposed.** Whether the docblock should be corrected, the method should reject on a token with no `user` claim, or M2M tokens should resolve to a distinct principal kind, is a contract decision.\n\n## ⚠️ Provenance and what a taker must re-run\n\nMeasured by the round-3 delta reviewer while building a token harness for PR #16380 (bare better-auth 1.7.2 + `@better-auth/oauth-provider` 1.7.2, memory adapter, a confidential `client_credentials` client linked to an `oauthResource` row). ⛔ **Not independently re-driven by this seat**, and ⚠️ it is an **observation the reviewer marked out of scope**, so it carries less evidence than that review's measured findings.\n\nRe-derive before acting:\n1. the docblock's actual wording (⚠️ locate by **text**, not line — this lane measured an anchor rot of **491 lines** within one day this session);\n2. a real `client_credentials` token through `verifyMcpAccessToken`, and what principal comes back;\n3. whether `sub` really is the client id in the minted token, read off the token rather than from the upstream source.\n\n## Dedupe\n\n- Targeted: *\"verifyMcpAccessToken client_credentials machine token resolves to a principal despite docblock saying rejected\"* → **1 hit**, #15348 (closed) — the MCP **stdio** door resolving an API key with no `tenancyPosture`. Adjacent class, different door and different credential.\n- Targeted: *\"MCP access token verification sub claim principal scopes AuthManager\"* → **1 hit**, #16399 (open) — the two `basePath` normalisers. Same file, unrelated defect.\n- ⭐ Control sharing the failing queries' vocabulary: *\"MCP OAuth bearer token admitted without the check its own contract declares\"* → **2 hits**, including **#8102** (closed): *\"The D5.1 `/oauth2/authorize` env-access gate silently does not run for a signed bearer credential — its inline token lookup is a stale copy of `resolveActor`.\"* ⇒ **Same defect class** — a declared check that does not run for a bearer credential — which shows the area and the phrasing are reachable, and that no open card names this instance.\n\n⚠️ Limit stated rather than hidden: the neighbourhood here is **thin** (1–2 hits per query). The controls establish reachability and surface a same-class precedent, but this is a weaker dedupe than one resting on a rich result set.\n\n⇒ No duplicate found.\n\n## Relationships\n\n- **PR #16380 / card #16025** — where it was measured. ⛔ Does not fix it and must not be read as covering it.\n- **#8102** (closed) — same class, different gate: a declared check silently not running for a bearer credential.\n- **#16399** — the other `AuthManager` finding from the same review pass; unrelated mechanism.\n\n## Grading\n\n⛔ Filed unlabelled. ⚠️ Note for routing: `packages/plugins/plugin-auth`. ⚠️ And a routing question this seat deliberately leaves open: whether this warrants `security` depends on the downstream trace named above, which nobody has done."
+}

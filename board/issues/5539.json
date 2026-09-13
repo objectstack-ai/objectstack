@@ -1,0 +1,36 @@
+{
+  "number": 5539,
+  "kind": "issue",
+  "title": "ADR-0053 的 coverage note 与 driver-conformance 的 mongo 覆盖claim,在 #5517 把 mongod 套件改 opt-in 后成了陈述失真",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T16:43:23Z",
+  "updated_at": "2026-08-05T18:39:20Z",
+  "closed_at": "2026-08-05T18:39:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5539",
+  "body": "Observation-class finding,来自 #5517 的实施(PR #5538)。**今天没有用户会撞到**,所以不带 `pm:queue`,交 PM 分诊评级。\n\n## 事实\n\nPR #5538 依维护者拍板,把 `packages/plugins/driver-mongodb` 里需要真实 mongod 的 7 个套件改为 opt-in(`OS_TEST_MONGODB_MEMORY_SERVER_ENABLED=1`),默认跳过且不启动下载。副作用是:CI 里 **mongo 的 temporal / pagination conformance 活体半边不再跑**。\n\n两处已有文字因此与现实不符:\n\n1. `docs/adr/0053-date-and-datetime-semantics.md`(约 977-979 行)的 Coverage note:\n\n   > mongo 端到端 sweep 需要真实 server(`mongodb-memory-server`),所以 **it runs in CI** and skips where no binary is reachable\n\n   落地后:默认不再跑,与 binary 是否可达无关。\n\n2. 同 ADR 约 837-838 行把 `driver-mongodb`(real MongoDB)列为 skewed-process-zone 轴的一格 —— 那一格现在只在 opt-in 时成立。\n\nPR #5538 已把逐 marker 的真实状态记进 `scripts/check-driver-conformance.mjs` 的 ledger 注释(该 gate 按 import 判定,仍 CONSUMED;为已覆盖的 cell 加 ledger entry 会被 RECONCILED 判红,所以只能记注释)。**ADR 正文没动**:改 ADR 是跨面动作,且「一格覆盖从 CI 撤到 opt-in」是否要在 ADR 上留痕、以什么形式留痕(注记 / 修正状态行 / 新 ADR),按 Prime Directive #13 应由维护者定,不该由一个 test-only PR 顺手改。\n\n## 与既有单的关系\n\n- 依赖但不属于 #5517(该单已由 PR #5538 修掉本体)。\n- 与 #4191(ADR-0053 D-A3:storage-form 轴只锁住 driver-sql)同一片领土但不是同一件事:#4191 说的是轴锁得不够,这条说的是**已有的一格从 CI 撤了、而文档仍宣称它在 CI**。#4191 未在队列里(无 `pm:queue`),故独立立单而非挂子单。\n- 真正让这几格回到 CI 的前提是 #5499 的冻结令解除;在那之前本单的正解可能只是「把文档改成实话」。\n\n## 建议处置(供分诊)\n\n1. 最小:把 ADR-0053 的两处 coverage note 改成实话(注记 opt-in + 指向 #5517 / PR #5538),docs-only PR。\n2. 或:等 #5499 解冻时一并处理,那时若重新提供 binary(runner 预热或 vendored mongod),这几格回到 CI,文档自然复原。\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 5464,
+  "kind": "pull_request",
+  "title": "fix(rest): a declared 5xx no longer ships its own message to the client (#5437)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T13:04:35Z",
+  "updated_at": "2026-08-05T13:17:26Z",
+  "closed_at": "2026-08-05T13:17:25Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T13:17:25Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5464",
+  "body": "Fixes #5437\n\n## 前提核验（在 `origin/main` `01c0baef` 上）\n\nissue 的成因描述**仍然成立**，行号已漂移：直通区间 400–599 在 `packages/rest/src/rest-server.ts:831-832`；两个活体产出方在 `packages/metadata-protocol/src/protocol.ts:7462-7467`（`OVERLAY_PERSISTENCE_FAILED`，`status = 500` 字面量）与 `:9813-9814`（`Failed to delete customization overlay`，`status` 动态赋值）；第三个同区间产出方 `:5582`（`status = 501`，`NOT_IMPLEMENTED`）也已核对。\n\n## 落地方向：A，但消毒点在分支内，不是「落回 `mapDataError`」\n\n分诊裁定的是方向 A（收窄到 4xx、5xx 走消毒）。实现前先把「让 5xx 落回 `mapDataError`」这条字面路径**实测**了一遍，结论是它做不到裁定要的结果，因此消毒改在直通分支内完成，状态与 `code` 原样保留。实测输出（用真实 fixture 直接调 `mapDataError`）：\n\n| 输入 | `mapDataError` 的答复 |\n|:---|:---|\n| 500 `...sys_metadata: SQLITE_ERROR: no such table: sys_metadata` | `404 OBJECT_NOT_FOUND` / `Object not found` |\n| 500 `...: relation \"sys_metadata\" does not exist` | `404 OBJECT_NOT_FOUND` |\n| 500 `Failed to delete customization overlay: connect ECONNREFUSED 10.0.0.5:5432` | **`400`，驱动原文逐字保留** |\n| 501 `Atomic batch on 'showcase_account' requires ...`（带 object 参数） | `404 Object 'showcase_account' is not registered` |\n| 503 `Search index rebuild is in progress; retry in 30s.` | `400`，原文逐字 |\n\n三个问题：① `mapDataError` 是**按消息文本推导状态**的，服务端故障被改写成客户端错误，能力拒绝被改写成「对象不存在」；② 改写后的 404 落在 `isExpectedDataStatus` 里，这条故障连日志都不打了；③ 关键词一条都不命中的 5xx 落到 `mapDataError` 的兜底 `{ status: 400, error: raw }` —— 原文照样出去，只是换了个 4xx 的壳。第 ③ 条正是分诊否决 B 时写的「判准必然漏」，只是漏在兜底而不是漏在启发式。分诊要求的 pin ③（501 家族同验）恰好就是证伪这条路径的那一条。\n\n所以 5xx 的处置是：**保留产出方声明的状态、保留 `code`、丢掉正文**，正文换成 `@objectstack/types` 的 `INTERNAL_ERROR_MESSAGE`。无条件丢弃而不是过启发式 —— 加判准只是把问题挪成「这个方言启发式认不认识」，而这正是本 bug 的成因。\n\n⛔ 未动：`isSqlLeak` / `looksLikeInternalErrorLeak` 本身、`mapDataError`、#5436 的 4xx 截断。文件面只有 `packages/rest`。\n\n## 接受代价（已按分诊口径写进 changeset）\n\n自撰 5xx 正文客户端将读到通用文案 + 原 `code`：`OVERLAY_PERSISTENCE_FAILED` 的「In-memory registry was updated but will be lost on restart」、原子批的「retry without options.atomic」都属此类。`code` 仍然随响应下发（SCREAMING_SNAKE 常量不是泄漏，也正是客户端该 key 的东西），按 code 判断的客户端不受影响。\n\n**日志侧补齐**：`sendError` 原先完全不打日志，5xx 一旦消毒就会从「客户端读得到」直接变成「没人读得到」。新增 `logWithheldServerFault`，只在「正文确实被扣下」时打一行；`handleRouteError` 对真故障已经打整个 error 对象，所以这行只补它判定为「预期」而静默的 502/503 那个口子 —— **一次故障恰好一行，不重复**（有专门用例钉住）。\n\n## 补齐 issue 正文的「未验证部分」\n\n- **真实走通**：真实 `ObjectQL` + 真实 `ObjectStackProtocolImplementation` + 每个方法都抛驱动错的 mock 驱动，打真实路由 `DELETE /api/v1/meta/:type/:name`，走出真实的 `Failed to delete customization overlay: SQLITE_ERROR: no such table: sys_metadata`，断言客户端 body 里没有任何一段原文、状态仍是 500、原文完整进日志。SQLite 与 Postgres 两种措辞各一条。\n- **动态赋值 status 抽查**：上面这条走的就是 `(e as any).status = 500` 那个产出方 —— `status:` 字面量 grep 找不到它，正是 issue 说没清点的形状。方法记录在测试文件顶部。\n- `saveMetaItem` 的 `OVERLAY_PERSISTENCE_FAILED` 未做 live：走到它的 legacy 分支要求「既不可 overlay 又不可 runtime create」的类型且该项是 artifact-backed，运行时新建会先被 `403 NOT_CREATABLE` 拦下。改为按产出方原样构造消息形状覆盖，测试里写明了这一点，没有假装走通。\n\n## 反向验证（方向先判后跑）\n\n预判：把区间改回 `< 600`（恢复「短于 500 字符逐字、超长换 Request failed」）应当**恰好**红掉 5xx 消毒 pin，4xx 截断 pin 全绿。实跑一致 —— 10 红 14 绿，红的全部是 5xx 处置断言（含 499/500 边界那条，它按设计依赖 5xx 侧），#5423/#5436 的每一条 4xx 截断用例保持绿。\n\n一条例外值得写明：「一次故障恰好一行日志」那条在还原后**仍然绿**。它不是修复 pin，而是防重复日志的守卫 —— 还原后正文照常直通，`logWithheldServerFault` 自然 no-op，只剩 `handleRouteError` 那一行。这条断言的方向就是「无论哪一侧都只有一行」，不是「改前后不同」。\n\n## fixture 处置\n\n`rest-4xx-message-truncation.test.ts` 里那条「an over-long 5xx is DELIBERATELY still replaced」精确地钉住了本 PR 删掉的那条限枝（它断言的 `'Request failed'` 恰好来自被删的长度分支），按整体替换处理：重写为钉新的处置（不论长度一律扣下、`code` 保留），并指向新文件。#5423 的其余断言一字未动。\n\n消费半径已扫：`resolveErrorResponse` 是 `rest-server.ts` 私有函数（对外只导出 `mapDataError`），依赖 `@objectstack/rest` 的 5 个包中没有任何测试驱动 `RestServer`，runtime / services 的 envelope conformance 走的是另一条边界（`errorResponseBase`）。\n\n## 验证\n\n- `pnpm --filter @objectstack/rest test` → **45 files / 676 tests passed**\n- `pnpm --filter @objectstack/rest build`（tsup DTS 即类型检查）→ success；`node scripts/check-type-check-coverage.mjs` → OK（`@objectstack/rest` 在 DEBT 账本内，无 `typecheck` 脚本，未新增误差）\n- `node scripts/check-nul-bytes.mjs` → OK，另对改动文件做了控制字符自扫\n\n## 顺带记录\n\n方向 C（产出方不插值驱动原文）按分诊不在本单。落地后另有一条本单实测撞见的旁证已单独立项：**#5462** —— `sys_metadata` 整体不可用时，不带 `status` 的原始驱动错误被 `looksLikeUnknownObject` 误报成 `404 OBJECT_NOT_FOUND`，且 404 属「预期状态」因而一行日志都不留。那条不带显式 status，不受本 PR 影响。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016FNvXhtSdnEGEfLEsMmvxh\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016FNvXhtSdnEGEfLEsMmvxh)_"
+}

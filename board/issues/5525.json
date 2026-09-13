@@ -1,0 +1,35 @@
+{
+  "number": 5525,
+  "kind": "pull_request",
+  "title": "fix(service-analytics): 分析查询里的 `null` 比较数是 null 谓词,不是 `= ''` (#5332)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T15:31:53Z",
+  "updated_at": "2026-08-05T16:35:07Z",
+  "closed_at": "2026-08-05T16:35:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T16:35:06Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5525",
+  "body": "Fixes objectstack-ai/objectstack#5332\n\n## 前提核对(先于实现)\n\n在 `origin/main`(基线 `308c70951`)上逐条核对了 issue 的前提,**全部成立**:\n\n- `fieldLeaves` 的算子循环里 `$eq` / `$ne` 走 `MONGO_TO_CUBE_OP` 统一映射,对 `null` 没有特判;\n- `stringifyForCube` 的第一行仍是 `if (v == null) return '';`;\n- `nullValueSatisfiesOperator` / `operatorIsNullTotal` 里没有 `read-scope-sql` 的两条 `value === null` arm,\n  而 `filter-normalizer.ts` 的 TSDoc 自己写明「`''` 比较数是另一个缺陷,单独记录、本单不裁定」——本单就是那条记录。\n\n近日落在同文件的 #5325(PR #5335)、#5334(PR #5355)、#5322、#5352 都没有触及这条路径。\n\n## 为什么这不需要裁决:契约早就定了\n\n`$eq: null` 和 `$null: true` 不是「两种相近写法需要挑一个」——**`driver-mongodb` 的 translator\n直接把后者改写成前者**(`mongodb-filter.ts` 的 `$null` arm:`$null: true` → `{$eq: null}`,\n`$null: false` → `{$ne: null}`),所以在契约层面它们本来就是同一个谓词。同包的\n`read-scope-sql.ts`(`compileOperator`)、`driver-sql`、`driver-memory`(`value != target` 的松散相等)、\n`formula` 四家全都这么编译;`packages/spec/src/data/filter.test.ts` 也明确接受 `{$eq: null}`。\n本模块是**一个包里唯一唱反调的那一半**,所以这是对齐,不是新决策。\n\n## 改了什么\n\n**1. emitter(`fieldLeaves`)**——算子循环里先判 `null` 比较数:`$eq: null` → `leaf('notSet', [])`、\n`$ne: null` → `leaf('set', [])`,与上面 `raw === null` 分支、旁边的 `$null` / `$exists` 完全同形。\n三个 consumer 早就都实现了 `notSet` / `set`(`native-sql-strategy.buildFilterClause`、\n`objectql-strategy.convertFilter` / `buildFilterClauseSql`),所以**不需要任何新 case**。\n严格 `=== null`(与 `read-scope-sql` / `driver-sql` 一致):JSON 写不出 `undefined`。\n\n**2. 守卫表,同一个 commit 里一起改**——#5146 的极性表描述的是**本文件自己的 emitter**。\n`$eq: null` 还是值比较时,表把它归到值比较是**对的**;emitter 一变,表不跟着变就会给\n`{$not: {stage: {$eq: null}}}` 套出 `stage IS NOT NULL AND stage IS NULL` 这个恒假合取再取反 ——\n「阶段非空」返回**全表**。现在 `nullValueSatisfiesOperator` 拿到 `$eq`/`$ne` 的 `value === null` arm、\n`operatorIsNullTotal` 判定这两个为 null-total → guard `'none'`,与 `read-scope-sql` 的两条 arm 同形。\n`read-scope-sql.ts` 本身**无需改动**——它两条 arm 早就在(#5297),本单是把 normalizer 补齐到它。\n\n**3. 刻意不改的**:`stringifyForCube` 的 `v == null → ''` 保留(issue 的建议之一)。它现在只服务\n「没有裁定过的比较数位置」(`$gt: null`、`$in: [null]`),那里 `''` 是占位而不是答案 ——\n`values` 是 `string[]`,凡是**意思是 null** 的叶子都以空 `values` 的 `notSet` / `set` 表达,根本不进这个函数。\n同时钉住反方向:`{stage: {$eq: ''}}` 仍然是值比较(绑定 `''`),把 `''` 读成 null 是同一个缺陷反着犯。\n\n## 反向验证:先声明预期方向,再跑\n\n预期是**标准红**(新钉子断言 `IS NULL` / 新行集,旧代码给 `= ''` / 旧行集)。把源码改动\n`git stash` 掉、只留新测试跑了一遍,7 条全红,并且**逐条复现了 issue 的实测表**:\n\n```\n× the issue's measured table: all four spellings, SQL and bindings\n  Expected: \"WHERE stage IS NULL\"\n  Received: \"SELECT id AS \"id\", COUNT(*) AS \"total\" FROM \"deal\" WHERE stage = $1 GROUP BY id\"\n\n× the row sets agree with the other three spellings\n  AssertionError: expected [] to deeply equal [ '3', '4' ]        // $eq: null 取到零行\n\n× [#5332] the OPERATOR spellings of a `null` comparand are untouched too\n  AssertionError: expected [ '1', '2', '3', '4' ] to deeply equal [ '1', '2' ]\n                                                    // {$not: {$eq: null}} 返回全表\n\n× on a TEXT column the `$ne` direction stops excluding the `''` rows\n  AssertionError: expected [ 'e2' ] to deeply equal [ 'e3' ]\n                    // $eq: null 取到的是空串那行,而不是 null 那行\n```\n\n最后一条是 issue 严重度论证的实测版:文本列上 `''` 是**真值**,所以旧行为里\n「阶段为空」取到了唯一那个**不为空**的行,「阶段非空」则把空串行排掉了。\n\n恢复源码后:`47 files / 753 tests` 全绿。\n\n## 测试\n\n复用 `filter-normalizer-not-null-safe.test.ts` 的 sql.js + 四行 fixture(与 `driver-sql` /\n`formula` / `read-scope-sql` 的同名文件逐行同构),不新建重复 harness:\n\n- **issue 的实测表**:四种写法的 SQL 与绑定值逐条钉住;\n- **行集**:`$eq: null` → `3,4`,`$ne: null` → `1,2`,并断言四种写法**行行相等**;\n- **tree 形状**:`normalizeAnalyticsFilterTree` 直出 `notSet` / `set` 且 `values: []`;\n- **`$not` 行集**:`{$not: {stage: {$eq: null}}}` → `1,2`、`{$ne: null}` → `3,4`。\n  这正是 issue 说「#5325 刻意没钉、以免钉死错答案」的那两条;id 集不是推的,是\n  `read-scope-not-null-safe.test.ts:346`、`driver-sql/sql-driver-not-null-safe.test.ts:216`、\n  `formula/matches-filter-not-null-safe.test.ts:128` 在同一 fixture 上已有的答案;\n- **两条 objectql 路径**:交给引擎的是 `{stage: null}` / `{stage: {$ne: null}}`(旧值 `{stage: ''}`),\n  回显 SQL 出 `IS NULL` / `IS NOT NULL` 且绑定为空;\n- **文本列**:带 `''` 行的独立小表(共享 fixture 是与 `driver-sql` 逐行同构的,不能动),证明\n  `$eq: null` 不再命中空串行、`$ne: null` 不再排掉空串行;\n- **不越界**:`{$eq: ''}` 仍绑 `''`,`{$eq: 'won'}` / `{$ne: 'won'}` 行为不变。\n\n命令与结果:\n\n- `pnpm --filter @objectstack/service-analytics test`(worktree 内,锁下串行)→ `Test Files 47 passed (47)` / `Tests 753 passed (753)`\n- `pnpm --filter @objectstack/service-analytics build` → exit 0\n- 该包无 `typecheck` script(在 `check-type-check-coverage.mjs` 里是 `errors: 3` 的 DEBT 条目),\n  所以直接跑 `npx tsc --noEmit -p tsconfig.json`:改动前后都是 **7 个错误**,且 7 条全在我没碰的\n  文件里(`analytics-service.test.ts`、`measure-source-field-gate.test.ts`、\n  `objectql-timedimension-projection.test.ts`)。台账写 3 的漂移是既有的,不是本 PR 引入\n  ——按范围纪律没有在本 PR 里动它。\n- `eslint --no-inline-config`(两个改动文件)→ exit 0\n- `node scripts/check-nul-bytes.mjs` → OK;另对三个改动文件做了越出该 gate 扫描面的自查\n  (`grep -naP` 全部控制字节)→ 无命中。\n\n## 消费半径扫描\n\n`normalizeAnalyticsFilterTree` / `collectFilterLeaves` 的调用者只有 `native-sql-strategy.ts` 与\n`objectql-strategy.ts`(两者已实现 `notSet` / `set`)。`packages/rest` 的\n`analytics-filter-refusal-envelope.test.ts` 只钉拒绝集,而本 PR **没有增删任何拒绝**;\n它的 stub matcher 对 `{stage: null}` 走 `bucket[key] === value` 分支,不受影响。\nexamples(showcase / CRM)与 content 里没有 `\"$eq\": null` / `\"$ne\": null` 形状的 widget filter。\n\n## 范围\n\n按派发要求**没有碰 `objectql-strategy.ts`**(#5333 下一轮),也没有碰 `read-scope-sql.ts`\n(它已经是正确的那一半,本单是把 normalizer 对齐到它)。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BWS4heBoAitLmzCLhcYdbK)_"
+}

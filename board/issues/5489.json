@@ -1,0 +1,37 @@
+{
+  "number": 5489,
+  "kind": "issue",
+  "title": "`/meta/:type` 上一个未分类的服务端故障被报成 HTTP 400 —— handleRouteError 的兜底把 outage 说成客户端错误",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T14:06:54Z",
+  "updated_at": "2026-08-05T20:13:47Z",
+  "closed_at": "2026-08-05T20:13:47Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5489",
+  "body": "发现于 #5224 / PR #5487 的测试编写过程,不在该单文件面内,按 Prime Directive #10 单独立项。**观察类**:我是用注入错误测到的,没有在真实的存储故障下复现过,严重度请分诊时判定。\n\n## 事实\n\n`GET /api/v1/meta/:type` 的处理器以 `handleRouteError(res, error)` 收尾。让它内部抛一个普通 `Error('metadata store unreachable')`(在 #5224 的场景里就是 `matchEndpoint` 按契约在存储读不到时抛的那一个 —— 它抛正是为了让 outage 不伪装成 miss,见 ADR-0110 D3),实测响应是:\n\n```\nHTTP 400\n```\n\n不是 5xx。路径是 `handleRouteError` → `sendError` → `resolveErrorResponse` → `mapDataError`,一个关键词都不匹配的错误落到 `mapDataError` 的终局兜底,那一支给 400。\n\n## 为什么值得记一笔\n\n- 400 是「你请求错了」。客户端据此**不会重试**,而一个存储不可达恰恰是应该重试的。把服务端故障标成客户端错误,会让 SDK / 前端在真出故障时做出恰好相反的决定。\n- 这与 #5437 / PR #5464 是同一片领地(`resolveErrorResponse` 的状态归类),那一单刚把 5xx 的 message 收住;状态码这一侧的兜底方向没有一并看。#5437 的分析里已经记下 `mapDataError` 会「把服务端故障重贴成客户端错误」,当时是作为**不采用它**的理由;这里是它仍在生效的那条兜底路径。\n- 不是 #5224 / PR #5487 引入的:它是 `/meta/:type` 上任何未分类错误的既有归类。PR #5487 的用例因此**只钉「请求失败、而不是返回一个集合」**,并在注释里写明了不去钉 5xx —— 断言 5xx 会把别人的 bug 钉成好像已经修好。\n\n## 复现\n\n`packages/rest/src/rest-endpoint-surfaces-served-only.test.ts` 里那条 `reports a store outage rather than an empty declaration set`:把断言从 `toBeGreaterThanOrEqual(400)` 改成 `toBeGreaterThanOrEqual(500)`,实测得到 `expected 400 to be greater than or equal to 500`。\n\n相关:#5437 / PR #5464、#5436、ADR-0110 D3、#5108(同一条 miss vs outage 之分在复数读路径上的另一半)。"
+}

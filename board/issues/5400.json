@@ -1,0 +1,37 @@
+{
+  "number": 5400,
+  "kind": "issue",
+  "title": "E7 翻转后,「适配器无 setFallbackHandler」仍只记 debug —— 声明式端点静默不可达,而代码注释自己写明此时应转 warn",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T07:41:39Z",
+  "updated_at": "2026-08-05T09:17:14Z",
+  "closed_at": "2026-08-05T09:17:14Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5400",
+  "body": "发现于 #5399(E 系列失真注释摘除)的注释核对过程,**非该单范围**(改日志级别属行为变更),按 Prime Directive #10 单独立案。\n\n## 现场\n\n`packages/runtime/src/dispatcher-plugin.ts`,声明式端点挂载接缝的 `else` 分支(origin/main `f417863fc` 约 1433-1443 行):\n\n```ts\n} else {\n    // `debug`, not `warn`: no stack can declare an endpoint yet (a\n    // non-empty `apis:` is rejected at publish until #5040 E7), so\n    // nothing is missing from any deployment today. When that flip\n    // lands, THIS is where absence must become loud — an adapter\n    // without the seam can never serve a declared endpoint.\n    ctx.logger.debug(\n        '[dispatcher] http.server exposes no `setFallbackHandler`; declarative endpoints '\n        + 'would be unreachable on this transport.',\n    );\n}\n```\n\n## 为什么现在成立\n\n注释里那个条件句的触发条件**已经发生**:E7 发布翻转已落地(`packages/spec/src/api/endpoint-publish-gate.ts` 开篇即自述 \"This module is that flip\"),非空 `apis:` 不再被整体拒绝,只按形状逐条把关。因此:\n\n- 声明**已经存在**(showcase 就声明了两条,`packages/qa/dogfood/test/showcase-declarative-endpoints.dogfood.test.ts` 以真实 boot 验证);\n- 一个不暴露 `setFallbackHandler` 的适配器上,这些声明**永远不会被服务**,调用方只拿到裸 404;\n- 而运维侧唯一的信号是一条 `debug` —— 默认 `level: 'info'` 下**根本不打印**(`packages/core/src/logger.ts` 的 `isEnabled`)。\n\n这正是 AGENTS.md「Route & surface ownership §3 Absence must be loud」点名的形状:合法地什么都不服务的组合,必须在 boot 时说一次并给出补救办法,而不是留一个裸 404 让人去诊断。注释自己把这一条写下来了,只是执行时机没到 —— 现在到了。\n\n相关:#5122(runtime 导出的 `HttpServer` 包装器静默丢弃 `IHttpServer` 的全部可选成员,`setFallbackHandler` 在内)。两者独立但叠加:#5122 使这个 `else` 分支在实践中**更容易**被走到,而本单是走到之后的信号缺失。\n\n## 建议修法(待 PM/维护者定夺)\n\n`debug` 升 `warn`,并按 AGENTS.md 对「响亮的缺失」的要求,让这一行同时带上**后果**与**补救**:该传输上任何 metadata 声明的 `apis:` 端点都不会被服务,换用暴露 `setFallbackHandler` 的适配器(如 `@objectstack/plugin-hono-server`)。\n\n注意这是**功能性降级**而非持久化降级,按「Degradation log levels」一节 `warn` 是正确档位,不应升到 `error`。\n\n## 不做什么\n\n#5399 是纯注释/台账修真单,零行为变更,因此该单只把这处注释改写为「当前仍是 debug + 本单号」的真话,级别本身留给本单处理。\n"
+}

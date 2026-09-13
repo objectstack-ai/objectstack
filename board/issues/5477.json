@@ -1,0 +1,36 @@
+{
+  "number": 5477,
+  "kind": "pull_request",
+  "title": "chore(ci): job 级 `if:` 读 needs.*.outputs.* 必须显式点名状态函数 (#5343)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T13:40:11Z",
+  "updated_at": "2026-08-05T13:55:34Z",
+  "closed_at": "2026-08-05T13:55:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T13:55:32Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5477",
+  "body": "Fixes objectstack-ai/objectstack#5343\n\n## 这是什么\n\nGitHub 会给任何**不含状态函数**的 `if:` 隐式包一层 `success()`。于是一个本意是「读上游 job 的输出值做数据驱动决策」的 job 级条件,悄悄同时携带了一个作者从未写下的状态决策 —— 「上游挂了」和「上游说不用跑」这两件完全不同的事,到达时是同一个 skipped,而 skipped 在任何 checks 列表里都渲染成绿。\n\n本仓已经手工踩过两次,相隔数月:#4900 的发布完整性守卫恰好在它前面那个 job 失败时停止守卫;#4928 在 `ci.yml` 里找到七处 `needs.filter.outputs.*` 闸门,一旦上游出事就自己把自己关掉。这条规则可静态判定,所以这次把它变成门禁,而不是等第三次有人读出来。\n\n## 新门禁\n\n`scripts/check-workflow-status-functions.mjs` → `pnpm check:workflow-status-functions`,接进 `lint.yml` 的 ESLint job(#5461 刚改写过的 Raw control-byte guard 段之后、按主题挨着 Node-version drift guard 放,两者都是 workflow 文件的守卫)。\n\n规则:**job 级** `if:` 只要读 `needs.SOMEJOB.outputs.SOMEKEY`,就必须点名 `always()` / `!cancelled()` / `success()` / `failure()` 之一。\n\n**范围收窄是刻意的,也是这条规则能不猜意图、不带豁免名单的前提**:\n\n- step 级读 `steps.*.outputs.*` 不管 —— 那里的隐式 `success()` 说的是「本 job 前面的步骤挂了就别继续」,通常正是作者要的语义;\n- step 级读 `needs.*.outputs.*` 同样不管,理由相同(它所在的 job 已经在 job 级过了这条规则)。`publish-smoke.yml` 那两处 `needs.resolve.outputs.report-sha` 步骤就是活样本,两处都对;\n- `needs.*.result` / `.conclusion` 不管 —— 那本来就是状态读,作者已经在推理状态,不是被塞了一层没写的包装。\n\n脚本**没有** skip-list。若将来真有 job 级 `if:` 需要豁免,那是要摆到台面上做的决定。\n\n两个实现细节值得单独说:\n\n1. **用真 YAML 解析,不是 grep `if:` 行。** grep 分不清「文件坏了」和「没有违规」—— 两者都是零匹配 —— 也看不见折叠标量。本仓 `merge-queue-triage.yml` 与 `pr-automation.yml` 已经在用 `if: >-` 跨行写条件,#5343 那张手工 grep 得出的审计表在那里是盲的。为此把 `yaml` 加进根 devDependencies(工作区里 `packages/cli` 已依赖同一版本,lockfile 只多了 3 行 importer 记录,无新解析条目)。\n2. **输入缺失一律判红(#4690 反模式的正面)。** `.github/workflows/` 不存在、零个 workflow 文件、YAML 解析失败、没有 `jobs:` 映射、`if:` 不是标量 —— 全部退出非零。读不到输入的门禁什么都没验证,这时报 OK 正是 #4690 记录的那个缺陷。\n\n`--self-test` 34 条断言跑**真实的 `scan()` 路径**(临时 fixture 根目录,check-nul-bytes.mjs 的惯例);`--list` 直接把 #5343 手工做的那张审计表打出来。\n\n## 存量违规:按「显式红,不跑、不猜」修\n\n`pack-smoke` 的**行为不变** —— 仍是 resolve 成功且 `run == 'true'` 才跑 —— 但 `success() &&` 现在写了出来。真正新增的是 `resolve-guard` job:`always() && needs.resolve.result == 'failure'` 时判红,并尽力把一条 failure commit status 写回 release PR head。\n\n这里**没有**照搬 #4928 的 `!cancelled() && ... != 'false'`,因为「存疑就全跑」在本 workflow 不成立:`ci.yml` 的 filter job 输出带 `|| 'true'` 兜底,而 `resolve` 没有,且 `ref` 也是它算出来的。存疑就跑 = checkout 一个空 ref、花 45 分钟 smoke 掉不知道什么东西、再把结论当作「release candidate 通过」报出去 —— 发布完整性上的**假绿**比没有答案更糟。\n\n## 附带核实项(issue 留的那条)实测结论\n\n**`publish-smoke / packed-tarballs` 不是 `main` 的必需检查。** 分支保护实测要求的是四项:`TypeScript Type Check`、`Build Core`、`Test Core`、`Dogfood Regression Gate`(仓库 ruleset 里没有 `required_status_checks` 规则;必需检查来自 classic branch protection)。\n\n所以 issue 里那个条件分支不成立:resolve 挂掉时那条 status 根本不写,后果**不是**「release PR 被卡住」,而是它在 release PR 上**完全不可见** —— 比 skipped 更安静。这正是 `resolve-guard` 回写 status 所填的洞,也是为什么这一条不需要另立单:它没有独立于本单的后果。(顺带说明它为何本就不该是必需检查:这个 workflow 由 `workflow_run` 触发,不保证在每个 PR 上跑,设成必需会把不触发它的 PR 全部锁死。)\n\n## 验证\n\n**反向验证方向(先声明再跑)**:这是一道新门禁,所以正确方向是「修 publish-smoke 之前判红、之后判绿」,并且判红的位置必须正好是 issue 点名的那一处。实跑结果:\n\n改前(`origin/main` 的 workflow 文本):\n\n```\ncheck-workflow-status-functions: 1 job-level if: read needs.*.outputs.* without naming a status function\n\n  • .github/workflows/publish-smoke.yml:98  job `pack-smoke`\n      if: needs.resolve.outputs.run == 'true'\n::error file=.github/workflows/publish-smoke.yml,line=98,title=...\nEXIT: 1\n```\n\n机器审计独立复现了 #5343 手工 grep 的结论:全仓仅此一处,行号一致。\n\n改后:\n\n```\n✓ check-workflow-status-functions --self-test: 34 assertions over temp fixture roots (real scan() path)\ncheck-workflow-status-functions: OK (scanned 21 workflow file(s), 38 job(s), 19 job-level if: expression(s); 9 read needs.*.outputs.*, all naming a status function).\nEXIT: 0\n```\n\n其余门禁:\n\n| 命令 | 结果 |\n|:--|:--|\n| `pnpm check:workflow-status-functions` | OK(自测 34 断言 + 全仓扫描) |\n| `npx eslint scripts/check-workflow-status-functions.mjs --no-inline-config` | exit 0 |\n| `pnpm check:node-version` | OK,22 个 setup-node 步骤 / 21 个 workflow |\n| `node scripts/check-nul-bytes.mjs` | OK,5452 个受追踪文本文件,无裸控制字节 |\n| `node scripts/check-changeset-fixed.mjs` | OK,69 个公开包 |\n| `node scripts/check-override-consistency.mjs` | OK |\n\n本 PR 不含任何包源码改动(新增脚本 + 两个 workflow + 根 `package.json` 脚本项/devDep + changeset),故未跑全仓 `pnpm test` / `pnpm typecheck` —— 那对本 diff 没有信号,只有 OOM 风险。已加 changeset(空 frontmatter,工具链改动不发版,沿用 #5461 的先例)。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01GX3sL71LFq8m2usg6VqTSE)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 5651,
+  "kind": "pull_request",
+  "title": "fix(lint): report a `config.timeRelative` descriptor the sweep will refuse, at authoring time (#5496)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T22:04:05Z",
+  "updated_at": "2026-08-05T22:37:49Z",
+  "closed_at": "2026-08-05T22:37:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T22:37:48Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5651",
+  "body": "Fixes #5496\n\n按分诊裁决执行**方案 1**:在 `packages/lint/src/validate-flow-trigger-readiness.ts` 的 §1b 区域新增规则,对非空 `config.timeRelative` 跑 `TimeRelativeTriggerSchema.safeParse`,失败时**逐字转发 zod 的 issue 列表**。判定权唯一留在 schema —— lint 里没有任何一行复写描述符的形状知识。\n\n## 前提复核(先证实,再动手)\n\nissue 正文的前提在当前 `main`(e6b1bb013,#5635 今日改过 `lint-flow-patterns.ts` 之后)**仍然成立**。实测:`task` 对象存在、`status: 'active'`、`runAs: 'system'`,即除描述符外一切合规:\n\n```\nvalidateFlowTriggerReadiness = []\nlintFlowPatterns             = []\n```\n\n两条 lint 全沉默,原因与正文一致:`lint-flow-patterns.ts:254` 的 `startCfg.timeRelative != null` 只看非空;§1b 只读 `timeRelative.object` 拿去比对 stack 里的对象名。`TimeRelativeTriggerSchema` 确实拒绝这个描述符,但它唯一运行的地方是 **bind 期**(`TimeRelativeTriggerPlugin.start()`:warn 后 `return`)—— sweep 永不装,flow 自称已武装,作者唯一的反馈是服务器日志里的一行。对 AI 作者来说那行完全在反馈回路之外,它读的是 `os validate`。\n\n## 改法\n\n新规则 `flow-time-relative-descriptor-invalid`(severity **warning**,与该文件现行一致):\n\n- 判据刻意与**引擎的路由判据逐字一致**(`AutomationEngine` 的 trigger 解析:`config.timeRelative != null && typeof … === 'object'`),所以规则只为「引擎真正交给 time-relative trigger 的那些 flow」发言,不多说也不少说。\n- 诊断把 zod 的 issue 列表按 `path: message` 拼接,**与 bind 期 warn 的渲染方式完全一致**(`TimeRelativeTrigger.start()` 用的就是这个格式),两条通道讲同一个故事、同一种方言。仅做空白折叠:finding 在 CLI 里是一行(`• where: message`),而 schema 的 guidance 分条带换行。\n- 因此诊断自带 schema 已经算好的东西:缺失的键名、错误的类型、未知键的「Did you mean」(`field` → `dateField`),以及 wrong-layer 提示(`schedule` 写在描述符**里面**时,告诉作者它是同级兄弟)。\n- 唯一被前移的是 schema 运行的**时机**;判定与措辞仍然全部属于 `TimeRelativeTriggerSchema`,所以描述符将来加键时规则自动跟上,不会和第二份副本漂移。没有引入任何消费端宽容(PD #12):不加 `??` 别名、不做 coercion。\n\n`packages/lint/src/index.ts` 补了新规则 id 常量的 barrel 导出(该包只开 `\".\"` / `\"./runtime\"` 两个入口,不进 barrel 消费者就拿不到)。\n\n## 三条完成判据(逐条实测,非推断)\n\n**① 坏描述符点名 `config.timeRelative` 且含 zod 键名** —— 把 showcase 的 `Task Due Reminder` 临时改成 issue 正文那个描述符,跑**真的 `os validate`**(已还原):\n\n```\n⚠ flow \"showcase_task_due_reminder\" › start node: has a config.timeRelative descriptor the\ntime-relative trigger REFUSES at bind time, so the sweep is never installed — the flow declares a\ntime-relative trigger and then never runs (the only trace is one warn in the server log).\ndateField: Invalid input: expected string, received undefined; offsetDays: Invalid input: expected\narray, received number; (root): Unrecognized key(s) on this flow start node's `config.timeRelative`\ndescriptor: `field`. … Did you mean `field` → `dateField`?\n      rule: flow-time-relative-descriptor-invalid  at flows[0].nodes[0].config.timeRelative\n```\n\n三条 zod issue(`dateField` 缺失、`offsetDays` 需数组、`field` 未知键)全部到位。\n\n**② canonical 描述符零诊断(A/B 实测)** —— 仓库里 **10 个**真实 time-relative 描述符逐个 `safeParse`,全部 spec-valid(showcase `Task Due Reminder`、`content/docs/automation/flows.mdx`、`content/docs/references/automation/time-relative-trigger.mdx` 三个例子、各包测试 fixture)。三个 example app 的 `os validate` 输出改动前后**逐行一致**:\n\n```\n##### DIFF app-showcase (before vs after) → IDENTICAL — zero new diagnostics\n##### DIFF app-crm      (before vs after) → IDENTICAL — zero new diagnostics\n##### DIFF app-todo     (before vs after) → IDENTICAL — zero new diagnostics\n```\n\n「before」是真的 before:stash 掉规则、重建 `@objectstack/lint` dist、重跑同一条命令。三个 app 都 exit=0,showcase 输出里 `task_due_reminder` 一次都没出现。\n\n**③ 与 §1b unknown-object 不重复报同一件事** —— 对象名错 + 形状同时错时的实测输出:\n\n```\n⚠ … sweeps object 'contract', which this stack does not define — …\n      rule: flow-trigger-unknown-object  at flows[0].nodes[0].config.timeRelative.object\n⚠ … has a config.timeRelative descriptor the time-relative trigger REFUSES at bind time, …\n      dateField: …; (root): Unrecognized key(s) … Did you mean `field` → `dateField`?\n      rule: flow-time-relative-descriptor-invalid  at flows[0].nodes[0].config.timeRelative\n```\n\n两条 finding、两个 path、两件不同的事:**只有 stack 知道对象名存不存在,只有 schema 知道形状**。schema 没有 stack 知识,永远报不出对象名;这条规则不读 `tr` 的任何其他键,也永远不报形状之外的事。测试里对此双向设了断言(名字那条不提 `dateField`,形状那条不提 `'contract'`)。\n\n## 反向验证(方向是**先预测再跑**的)\n\n预测:把新规则的 `safeParse` 分支停掉,新增的坏描述符用例应该报**零诊断**(而不是报错的诊断)—— 因为这正是 issue 的前提。实测方向一致:\n\n```\n× flags the descriptor from #5496 and names every key zod named\n  AssertionError: expected [] to have a length of 1 but got +0\n× reports a wrong object name and a wrong shape as two facts, not one twice\n  expected [ { severity: 'warning', …(5) } ] to have a length of 2 but got 1\n(7 failed)\n```\n\n值得记一笔:断言「沉默」的那几个用例(canonical 全绿、非对象标量不报)在**没有规则时也通过** —— 它们本来就该那样,所以它们不是这条规则的红证据,真正的红证据是上面那 7 条。恢复后 31/31 全绿。\n\n另设了一条**防漂移 pin**:测试从 schema 现场算出期望的 issue 文本再比对,所以 schema 措辞变了规则输出跟着变、测试照样绿,而手抄一份副本在规则里就不会。\n\n## 验证\n\n| 项 | 结果 |\n| --- | --- |\n| `pnpm --filter @objectstack/lint test` | 59 files / **1358 passed**(新增 10) |\n| `pnpm --filter @objectstack/lint typecheck` | 绿 |\n| `pnpm --filter @objectstack/lint build` | 绿 |\n| 消费半径 `pnpm --filter @objectstack/cli test` | 82 files / **812 passed** |\n| example app A/B ×3 | 逐行一致,零新增诊断 |\n| `node scripts/check-nul-bytes.mjs` | OK(5539 files) |\n| 控制字节自扫(超出闸门盲区) | 改动文件全清 |\n| `eslint` 改动文件 | exit=0 |\n\n## severity 建议\n\n**维持 warning**。跑完真实输出后的实感:后果确实接近 error(声明了 time-relative 触发、运行时永远不绑),但转发的 zod 文案里 `strictObject` 会带上 history 那句(「Until #4001 these were dropped silently — …」),在 error 的显示位上噪音偏大;而且该文件现行规则全是 warning,单独升一条会让 flow 家族的 severity 不成体系。若要升,建议与该文件其他 never-fire 类规则(`flow-trigger-unknown-event`)**同批**升,并单独一个 PR —— 已发布规则 id 的 severity 变更本身就该独立成 PR。\n\n## 边界(都没碰)\n\n- ⛔ 未动 `packages/spec` 的 schema;⛔ 未动 trigger-schedule 的 bind 期行为;⛔ 未动 `lint-flow-patterns.ts` 的 `userLessTriggerKind`(反模式层,分诊已否决方案 2);⛔ 未动 `content/docs/releases/`。\n- **#5482 的接缝**:规则 id 取 `flow-{descriptor}-{verdict}` 风格(常量 JSDoc 里写明了这是同族第一条、下一条照此取名),落位留在 §1b 之后、§1c 之前的相邻空间。⛔ 未实现、未预埋它的任何逻辑。\n- 一个建后即弃的副作用需要 reviewer 知道:构建 `@objectstack/spec` 会让 `gen:schema` 重写 `packages/spec/authorable-surface.base.json`(重锚 baseRev)。那不是本 PR 的改动,已 revert,不在 diff 里。\n\n## changeset\n\n`.changeset/flow-time-relative-descriptor-lint.md` —— `\"@objectstack/lint\": patch`。\n\n## 范围外发现(已另开,均未指派)\n\n- **#5647** —— 标量 `config.timeRelative`(如 `timeRelative: 'daily'`)时引擎解析不出任何 trigger,flow 永不触发且**全层零输出**(连 bind 期 warn 都没有,比本单修的缺口还差一档)。与 #3481 同构。不在本 PR 修:覆盖它需要放宽 `isTimeRelative`,而该变量同时喂 §1b 的 unknown-object 规则和 `isAutoTriggered`(draft-status 规则),会改变另外两条已发布规则的覆盖面。已实测证实沉默,非推断。\n- **#5648**(`finding` 标签,观察类)—— `FLOW_TRIGGER_UNKNOWN_EVENT` 规则 id 常量没进 barrel,消费者拿不到,只能对字面量。本 PR 只补了自己新增的那一行,补别人的漏项属范围外。"
+}

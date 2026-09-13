@@ -1,0 +1,36 @@
+{
+  "number": 5483,
+  "kind": "issue",
+  "title": "44 个 `strictUnknownKeyError` 直接调用点的别名表在 #5013 闸门覆盖之外(实测干净,但无人看守)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T13:48:25Z",
+  "updated_at": "2026-08-05T22:27:31Z",
+  "closed_at": "2026-08-05T22:27:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5483",
+  "body": "发现于 #5013 的全仓别名一致性闸门(范围外,未指派)。**观察类:实测当前无缺陷**,\n记录的是覆盖边界本身。\n\n## 现状\n\n#5013 新增的 `packages/spec/src/shared/alias-integrity.test.ts` 判定的是\n`strictObject(...)` 建的表——它靠 `strictObjectDeclarations()` 在构造期登记,\n所以能拿到运行时 `.shape`。**235 个 surface 被判定。**\n\n但 `strictObject` 不是唯一的入口。helper 之前的老接线直接调\n`strictUnknownKeyError({ surface, knownKeys, aliases, guidance, history })`,\n自带一份**手抄的 `knownKeys` 数组**,这些表根本不进登记表:\n\n```\n44 个调用点,分布在 14 个文件\ndata/object.zod.ts、automation/flow.zod.ts、security/permission.zod.ts、\nui/app.zod.ts(9 处)、data/datasource.zod.ts(6 处)、automation/approval.zod.ts(4 处)、\ndata/driver/{sqlite,mongo,memory,postgres,mysql}.zod.ts、data/hook*.zod.ts、\nsecurity/{rls,sharing}.zod.ts、identity/position.zod.ts、\nui/{action,bulk-action}.zod.ts\n```\n\n`ui/action.zod.ts` 的 `ActionParamSchema` 就是其中之一——#5013 修的是同一个文件里\n`ActionSchema` 的表,而同文件的 param 表当时不在任何闸门下。\n\n## 实测结论:干净\n\n临时给 `strictUnknownKeyError` 加了登记后跑同样两条判据(别名 key 不得是已知键、\n别名 target 必须是已知键)+ guidance key 判据,**51 张表全部通过**,唯一的报告集中在\n`ui/app.zod.ts` 的 navigation item 系列,那是**刻意的散文式 target**\n(`type: 'url' (with url)`),不是键名,属于另一种写法而非缺陷。\n\n所以这条是「暂时没事,但没人看着」,不是待修 bug。\n\n## 已做的缓解\n\n#5013 在闸门里放了一条**只减不增**的棘轮,把这个数钉在 44:\n\n```ts\nexpect(uncovered.length).toBeLessThanOrEqual(44);\n```\n\n迁一个到 `strictObject` 是免费的;**新增**一个直接调用点会红,逼作者显式选择。\n\n## 建议(两条路,选一)\n\n1. **收编判定**:让 `strictUnknownKeyError` 也登记 `{surface, knownKeys, aliases, guidance}`,\n   闸门对这批按 `knownKeys` 判定。便宜,但判的是**手抄数组**而不是 shape——\n   数组本身与 shape 漂移仍无人看守(那正是 `strictObject` 存在的理由,\n   见其 docblock「the array is a second copy of the truth」)。\n2. **迁移到 `strictObject`**:一次性消掉手抄数组,这批自动进入现有闸门,\n   棘轮随之降到 0。工作量大得多,但把两个问题一起消掉。\n\n倾向 2,分批做;1 可以作为过渡期的看守。\n\n复现日期 2026-08-05,基线 `origin/main` ed0d2aac0。\n"
+}

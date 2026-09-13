@@ -1,0 +1,37 @@
+{
+  "number": 5559,
+  "kind": "issue",
+  "title": "finding(os-dev): 测试-only PR 的 `skip-changeset` 标签两次由 dev 声明却未落到 PR 上 —— 疑似 os-dev 定义/工具面缺口,每次都靠 PM 兜底 + 烧一轮门禁红",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T18:07:39Z",
+  "updated_at": "2026-08-05T22:39:17Z",
+  "closed_at": "2026-08-05T22:39:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5559",
+  "body": "发现于 services 车道 2026-08-05 的派发循环,同日两例(查重:仓内无既有单):\n\n## 事实\n\n- **PR #5533**(#5198,测试 + 门禁台账):PR 正文明确写「打 `skip-changeset` 标签,不加 changeset(门禁自述首选路径)」,但标签未落,Check Changeset 红一轮,PM 手工补标签后经 `labeled` 重触发转绿。\n- **PR #5538**(#5517,测试 + 门禁台账注释):派发词已因上例**显式加了一句**「要真的把标签挂到 PR 上,不是只在正文声明」,标签仍未落,门禁又红一轮,仍由 PM 兜底。\n- 对照:**PR #5542**(#5401)的 dev 成功自行挂上(其报告含 `POST labels 返回 ['ci/cd','size/s','skip-changeset']`)—— 说明能力可用,但不是稳定路径。\n\n## 为什么值得看\n\n- 每次缺失 = 一轮 Check Changeset 红 + 一次 PM 人工干预;测试-only / 工作流-only PR 在本仓是常态形状;\n- 三例对照说明问题不在权限而在**流程位置**:挂标签发生在 create_pull_request 之后的独立步骤,易被 dev 在收尾序列中遗漏 —— 「声明了 ≠ 执行了」恰是 declared ≠ enforced 的 agent 版。\n\n## 可能方向(交 devx 分诊)\n\n1. os-dev 定义(`.claude/agents/os-dev.md`)的 PR 收尾清单里把「若无 changeset → 挂标签并**回读 PR labels 验证**」列为硬步骤(与「PR 正文以 Fixes 开头」同级);\n2. 或 Check Changeset 门禁在红时的提示文案已足够好(实测最终都能收敛)—— 接受现状,记录为已知摩擦。\n\n标 `finding`,unassigned,归 devx 车道分诊。\n\nFound-during: services 车道 PM 循环(session_01BWS4heBoAitLmzCLhcYdbK)"
+}

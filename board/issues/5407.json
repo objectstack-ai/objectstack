@@ -1,0 +1,37 @@
+{
+  "number": 5407,
+  "kind": "issue",
+  "title": "console: chrome i18n gaps beyond #5084 — raw object API name in a lookup placeholder, untranslated toolbar/filter strings, CJK list joiner in the `en` validation toast",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T08:55:59Z",
+  "updated_at": "2026-08-05T11:16:10Z",
+  "closed_at": "2026-08-05T11:16:10Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5407",
+  "body": "Companion to #5084 (view-mode switcher, `Sum:`/`Avg:` footer, dialog a11y\nstrings). The items below are the remainder found in the same acceptance sweep\non 17.0.0-rc.2, all in console-supplied chrome that no app bundle key reaches —\ndeliberately excluding everything #5084 already lists.\n\n### 1. Lookup placeholder interpolates the raw object API name — in every locale including `en`\n\nThe dependent-lookup placeholder on a create form renders the **API name**\ninstead of the object's (translated) label:\n\n| Locale | Rendered |\n|---|---|\n| en | `Select crm_account first` |\n| zh-CN | `请先选择crm_account` |\n| ja-JP | `まず crm_account を選択してください` |\n| es-ES | `Seleccione primero crm_account` |\n\nThe sentence is localized; the interpolated name is raw. Note the `en` row: this\nis not only an i18n bug — an English user sees an internal identifier too. The\nfix is presumably to interpolate the resolved object label rather than\n`object.name`.\n\n### 2. Toolbar/list chrome with no translation key\n\n`More actions`, `Add reaction`, `Clear`, `Close` (visible button, distinct from\n#5084's sr-only string) stay English in every locale. Same class as #5084;\nlisted here so the set is complete.\n\n### 3. Dashboard filter chips and KPI sub-captions hardcoded\n\nFilter chips read `Owner:` / `Lead Source:` while their **values** localize\ncorrectly (全部 / すべて / Todo); KPI stat cards carry English sub-captions\n(`Total Amount / Accounts / Contacts / Leads`). Widget titles/descriptions\ntranslate fine, which is what makes the mismatch conspicuous.\n\n### 4. The `en` validation toast joins field names with the CJK enumeration comma\n\n> Please check the highlighted fields: Subject、Account、Status…\n\nThe `validation.formInvalid` joiner is hardcoded `、` (U+3001) — wrong in\nEnglish, right by accident in zh/ja. Related nit, same layer: the es-ES\ntemplate lacks gender agreement (`Cuenta es obligatorio` → `obligatoria`).\n\nAll four items are unreachable from app metadata; every one needs a console\nbundle key (the console already ships bundles for zh-CN/ja/es/…, per #5084).\n\nDownstream: objectstack-ai/hotcrm#682."
+}

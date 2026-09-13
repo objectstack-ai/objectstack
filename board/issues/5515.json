@@ -1,0 +1,36 @@
+{
+  "number": 5515,
+  "kind": "issue",
+  "title": "`SYNC_ARCHITECTURE.md` 的 L3 `Connector` 示例不可编译,且写的是 schema 会**拒收**的键名(`sourceField` / `targetField` / `transform.type: 'custom'` / webhook `retryPolicy`)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T14:44:30Z",
+  "updated_at": "2026-08-05T22:27:32Z",
+  "closed_at": "2026-08-05T22:27:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5515",
+  "body": "发现于 #4963(修 L2 `ETLPipeline` 示例)时用同一套 compiler-API 探针顺手量了同文件的 L3 段,不在该 PR 范围内 —— 属主是 `integration/connector.zod.ts`,不是 `automation/etl.zod.ts`。\n\n## 事实\n\n`packages/spec/docs/SYNC_ARCHITECTURE.md` 的 \"Level 3: Enterprise Connector → Example\"(`const sapConnector: Connector = { … }`,约 200–300 行)逐字丢给 `ts.createProgram`(`strict: true`,`@objectstack/spec/*` 映射到 entry barrel,`types: ['node']`),报四条诊断:\n\n```\nTS2322: Type 'string' is not assignable to type\n        '{ dialect: \"cel\" | \"cron\" | \"template\"; source?: string | undefined; ... }'\nTS2353: Object literal may only specify known properties,\n        and 'sourceField' does not exist in type '{ source: string; target: string; ... }'\nTS2322: Type '\"custom\"' is not assignable to type\n        '\"map\" | \"lookup\" | \"constant\" | \"cast\" | \"javascript\"'\nTS2353: Object literal may only specify known properties,\n        and 'retryPolicy' does not exist in type\n        '{ name: string; url: string; method: ...; timeoutMs: number; isActive: boolean; signatur…'\n```\n\n逐条对照 schema:\n\n| 示例写的 | schema 实际声明 | 位置 |\n|:---|:---|:---|\n| `fieldMappings[].sourceField` / `targetField` | `source` / `target` | `packages/spec/src/shared/mapping.zod.ts:101` 起(`ConnectorFieldMappingSchema` extends 它,`connector.zod.ts:121`) |\n| `transform: { type: 'custom', function: … }` | `type` 只接受 `map` / `lookup` / `constant` / `cast` / `javascript` | `shared/mapping.zod.ts` 的 `FieldMappingTransformSchema` |\n| `webhooks[].retryPolicy: { … }` | `WebhookConfigSchema` 没有这个键 | `connector.zod.ts:284–309` |\n| `syncConfig.schedule: '*/15 * * * *'` | 见下 | — |\n\n**`sourceField` 不是\"随便写错的键\",它是 schema 里挂了 curated alias 的被拒键**:`packages/spec/src/integration/connector.test.ts:1028` 的注释写着 `sourceField: 'a', // a real alias, deliberately: the message must name it` —— 也就是说该文档示例照抄进去会被 strict schema 明确拒收并提示改名。这正是 Prime Directive #10 里\"绝不宣传运行时不兑现的能力\"的反面,而且是 AI 作者最可能直接复制的那种行数。\n\n第四条(cron 字符串)是**另一个 #4963**:`connector.zod.ts:742` 是 `export type Connector = z.infer(…)`,而 `ConnectorInput = z.input(…)` 在 744 行 —— 该文件用的是第三种命名(`XInput` 而非 house convention 的 `XParsed`),而示例注解用的是 parsed 的裸名 `Connector`,于是 `syncConfig.schedule` 的裸 cron 字符串被拒。这一条**改注解或改约定都能解**,不必和上面三条捆绑;#4963 的裁定路线(裸名翻转 + `*Parsed`)在这里迁移面不为空,要单独裁定 —— `connector.zod.ts` 有 20 个 `z.infer` 裸名别名且是 live parse path(`ConnectorSchema.syncConfig`)。\n\n同文件另两段 L3 片段(Migration Guide 的 \"Before (L3 `syncConfig`)\" / \"After (L3)\")用裸 `...` 做省略,不是 TypeScript,属于示意草图,不在此列。\n\n## 建议\n\n前三条是纯文档修正(把示例改成 schema 真的接受的键名和取值),可以独立于第四条先做。#4963 的 PR 里已经加了 `packages/spec/src/automation/etl-author-shape.test.ts`,它把该文档的 ```typescript 块总数钉死为 6 并逐字编译其中 3 段 ETL 块;把 L3 段也纳入同一个门是自然的下一步,但需要先决定第四条怎么解,否则门进不去。\n\n## 未验证的部分\n\n只量了 `SYNC_ARCHITECTURE.md`。`content/docs/references/integration/connector.mdx` 和 `connector.zod.ts` 自己的 `@example` 是否有同样的键名错误,没查。\n"
+}

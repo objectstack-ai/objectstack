@@ -1,0 +1,37 @@
+{
+  "number": 5157,
+  "kind": "issue",
+  "title": "check:nul-bytes 只扫 NUL(0x00)—— 0x01-0x08 等控制字节不在扫描面,#5140 实测一个 0x01 会从 NUL-only 修复下溜走",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T06:44:24Z",
+  "updated_at": "2026-08-05T13:03:50Z",
+  "closed_at": "2026-08-05T13:03:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5157",
+  "body": "**未认领,记录不派发**(维护者已下停派令;本单归下一波)。发现于 PR #5140 的返工:修复被 #4890 门禁抓住的裸 NUL 时,dev 在 **14 字节外发现第二个裸控制字节(0x01)** —— `scripts/check-nul-bytes.mjs` 不扫它,NUL-only 的修复会放它入库。两个字节已在该 PR 内一并转义。\n\n## 缺口\n\n#4890 建的门禁按其报错文案的理由(\"grep 把文件当二进制、静默零匹配\")只扫 **0x00**。但 grep/ripgrep 的二进制判定对其他控制字节同样敏感(实现相关,至少 0x00 确定触发;部分实现对其他 C0 控制符也降级处理),而\"编辑工具把转义落成真字节\"这个事故源(本仓已四例:#4763 派发文、#4890 起源、#5140 两枚)**不挑字节** —— 0x01 与 0x00 同样是工具滑手的产物,没有正当理由出现在文本源文件里。\n\n值得注意的对照:**#4890 议题里 dev 当年的手工扫描恰恰是全控制字符的**(`grep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]'`)—— 落地成门禁时收窄到了 NUL,收窄的理由(报错文案只论证了 NUL 的 grep 后果)当时成立,但事故源的形状说明扫描面应按\"工具滑手会落下什么\"划,不只按\"grep 对什么变二进制\"划。\n\n## 建议\n\n扫描面扩到 C0 控制字符集(排除 `\\t` `\\n` `\\r`):`[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]`,与 #4890 起源的手工扫描一致。报错处方按字节给对应转义(`\u0001` 等)。双向证明照 #4890 的先例:含 0x01 的文件改前判绿、改后判红。注意二进制探测逻辑(#4890 的\"剔除 NUL 再整文件 UTF-8 解码\")需同步考虑:0x01 是合法 UTF-8 单字节,不会被解码判定挡住 —— 这正是它能溜进文本文件的原因。\n\n## 关联\n\n- #4890(门禁起源,含当年的全控制符手工扫描)、PR #4907(落地)、PR #5140(0x01 实例现场)\n- #4763(第一次 NUL 事故)"
+}

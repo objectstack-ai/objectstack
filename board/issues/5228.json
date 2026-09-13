@@ -1,0 +1,34 @@
+{
+  "number": 5228,
+  "kind": "issue",
+  "title": "handleFileEvent 的 catch 对 loader 读/解析失败不可达 —— 坏文件被当作 `data: null` 广播出去",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T11:08:04Z",
+  "updated_at": "2026-08-05T21:36:23Z",
+  "closed_at": "2026-08-05T21:36:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5228",
+  "body": "发现于 #5218(FS 监听改动不失效 `listCache`)实现期,**不在该单范围内**,故单独立卡。\n\n## 现象\n\n`packages/metadata/src/node-metadata-manager.ts` 的 `handleFileEvent()` 在非 `deleted` 事件上这样保护自己:\n\n```ts\n    let data: any = undefined;\n    if (eventType !== 'deleted') {\n      try {\n        data = await this.load(type, name, { useCache: false });\n      } catch (error) {\n        this.logger.error('Failed to load changed file', undefined, { filePath, error: ... });\n        return;                      // ← 想表达「读不出来就别广播」\n      }\n    }\n```\n\n这个 `catch` 对 **loader 的读/解析失败不可达**。`load()` 只是 `loadDiagnosed()` 的取值包装:\n\n```ts\n  async load(type, name, options) {\n    return (await this.loadDiagnosed(type, name, options)).data;   // metadata-manager.ts\n  }\n```\n\n而 `loadDiagnosed()` 按 ADR-0110 D3 的设计**吞掉** loader 抛出的异常,把它记进 `errors[]` 并返回 `{ data: null, degraded: true }`。于是:`FilesystemLoader.load()` 对坏 JSON 确实 `throw`(它自己先 `logger.error` 再 `throw error`),但那个异常在 `loadDiagnosed` 里就被吃掉了,`load()` 返回 `null` 而不是抛出 —— `handleFileEvent` 的 `catch` 永不进入,`return` 永不执行。\n\n结果是 `data: null` 一路进到广播出去的事件里:\n\n```ts\n    const event: MetadataWatchEvent = { type: eventType, metadataType: type, name, path: filePath, data, ... };\n    this.notifyWatchers(type, event);\n```\n\n即:**「这个文件我读不出来/解析不了」与「这个文件合法地什么都没有」在事件上完全同形**,正是 `loadDiagnosed` 存在的理由所要区分的那两件事(ADR-0110 D3:miss 与 outage 是意义相反的两个事实),而这个调用点用的恰好是丢掉该区分的那个变体。\n\n## 复现\n\n已由 #5218 的回归测试间接钉住(`node-metadata-manager-fs-invalidation.test.ts` 的 “still invalidates when the changed file cannot be parsed”):写入一个 `{ not json` 的 `view/v_broken.json` 并投递 `added` 事件,`handleFileEvent` **不**提前返回 —— 该用例先前按「会提前返回」写,实测失败,才发现此事。\n\n## 后果(为什么标 `finding` 而不是缺陷)\n\n目前**没有**仓内消费者读这个 `data`,所以今天没有用户会踩到:\n\n- `ObjectQLPlugin` 的 `subscribe('object', …)`(`packages/objectql/src/plugin.ts` :690-724)在收到事件后是回头 `metadataService.get('object', name)` 重读的,不看 `event.data`;\n- `applyRepoEvent()` 干脆显式写 `data: undefined`,并在注释里记着 “HMR consumers don't read `data` so this is fine for M0”。\n\n所以这是一条**休眠**缺陷:契约上已经在说谎(事件声称该元数据为空),但当前无人据此下判断。一旦将来有消费者(HMR 前端、Studio 预览、任何想省一次重读的订阅者)开始信任 `event.data`,一个开发期的拼写错误就会被当作「作者把这个视图清空了」。同理,那个 `logger.error('Failed to load changed file')` 分支从不打印,坏文件在监听路径上只剩 `FilesystemLoader` 自己那行日志。\n\n## 建议修法(留给分诊裁决)\n\n两条方向,倾向 A:\n\n- **A. 该调用点改用 `loadDiagnosed()`**,按 `degraded` 分流:`degraded === true` 时走原本 `catch` 想走的路(记 `error` 日志并 `return`,不广播一个内容可疑的事件);干净的 miss 仍按现状处理。与 ADR-0110 D3 的既有分法一致,也让那条 `logger.error` 真正可达。\n- **B. 只删掉这段 `try/catch`**,承认它不可达。成本是把「坏文件广播成 `data: null`」固化为契约,与 A 相比是把问题记账而不是修掉。\n\n另注:#5218 落地后,坏文件事件仍会失效缓存 —— 那是对的(`loadMany` 会跳过读不出的文件,清单确实变了),与本单无关。\n\n## 关联\n\n`packages/metadata/src/node-metadata-manager.ts` `handleFileEvent()`、`packages/metadata/src/metadata-manager.ts` `load()` / `loadDiagnosed()`、ADR-0110 D3、#5218(发现来源)、#5108(`DatabaseLoader` 曾把读失败吞成 `[]` 的同类问题)。\n"
+}

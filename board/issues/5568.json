@@ -1,0 +1,32 @@
+{
+  "number": 5568,
+  "kind": "issue",
+  "title": "多行选择从未投递进 action input:REST 无任何合法形状携带 selectedIds,console 工具栏在客户端就拦下多行(17.0.0-rc.2)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T18:45:40Z",
+  "updated_at": "2026-08-05T20:46:35Z",
+  "closed_at": "2026-08-05T20:46:35Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5568",
+  "body": "Part of objectstack-ai/hotcrm#508\n\n## 现象\n\n一个在列表视图上按 bulk 语义接线的 script action(hotcrm 的 `mass_update_stage`,opportunity 列表),在 17.0.0-rc.2 上**不存在任何能把多行选择送达 action input 的派发路径**。`input.selectedIds` 在所有已知形状下都为空。\n\n## 证据(hotcrm@0899b4f + @objectstack/* 17.0.0-rc.2,独立 dev server、全新种子库、admin token)\n\n```\n# A. 顶层 selectedIds(2 行)\nPOST /api/v1/actions/crm_opportunity/mass_update_stage\n     {\"selectedIds\":[\"22EA…\",\"3DD_…\"],\"params\":{\"stage\":\"needs_analysis\"}}\n→ 400 {\"code\":\"VALIDATION_ERROR\",\"message\":\"mass_update_stage: no opportunity selected\"}\n     (顶层键未投递进 body 的 input,action 自己的「未选中」校验命中)\n\n# B. params.selectedIds\n→ 400 \"Invalid action params: Unknown action param \\\"selectedIds\\\" — not declared on this action\"\n     (新参数校验器按声明拒绝,选择集不属于 declared params——它本该走 input,而 input 收不到)\n\n# C. Console 工具栏,选中 2 行后填参提交\n→ 客户端红 toast「This action runs on a single record — select exactly one row.」,零网络请求\n     (选择集根本不出客户端)\n```\n\n每次尝试后 re-GET 记录:`stage` 保持不变。失败均为显式 400 / 显式 toast,rc.0 时代的假成功路径已不存在(那半已修,好)。\n\n**对照组**:单行 `{\"recordId\":…,\"params\":{…}}` 派发**能**到达服务器并执行到 action body(hotcrm 侧 body 内另有一个与本单无关的签名缺陷,hotcrm 自修)。即 recordId 通道是通的,缺的只是**多行选择**这一通道。\n\n## 期望\n\n以 bulk 语义接线的 action 至少有一条有文档的派发形状能把当前选择集送达 action input(例如 `input.selectedIds`):REST 一条 + console 选择栏/工具栏一条。\n\n## 关联\n\n- hotcrm 侧的选择栏 bulk 按钮在 rc.0 假成功时代被 app 侧摘除(hotcrm#588);平台交付多选投递后,hotcrm 会恢复 `opportunity.view.ts` 的 bulkActions 一行并以「选择栏 POST 携带 selectedIds」为验收条件(记录在 hotcrm#508)。\n- 三轮 rc.2 复核证据(API 全形状 + 浏览器走查 + 截图/抓包文件)见 hotcrm#508 的 2026-08-05 评论。"
+}

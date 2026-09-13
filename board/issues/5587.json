@@ -1,0 +1,35 @@
+{
+  "number": 5587,
+  "kind": "pull_request",
+  "title": "fix(service-analytics): analytics 三个 SQL 编译器转义 LIKE 比较值,并绑显式 ESCAPE (#5567)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T19:54:16Z",
+  "updated_at": "2026-08-05T20:19:13Z",
+  "closed_at": "2026-08-05T20:19:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T20:19:12Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5587",
+  "body": "Fixes objectstack-ai/objectstack#5567\n\n## 问题\n\nLIKE 族四个算子(`$contains` / `$notContains` / `$startsWith` / `$endsWith`)把作者写的**字面量**包进通配符。本包三个 SQL 编译器都是直接字符串拼接,零转义、无 `ESCAPE` 子句,于是 `_`(单字符通配)和 `%`(多字符通配)不再是字面量。\n\n正文实测行集在 `origin/main` 上逐字复现(真 SQLite / `sql.js`,4 行 `x_admin` / `xyadmin` / `off 50% now` / `off 5012 now`):\n\n```\nAssertionError: expected [ '1', '2' ] to deeply equal [ '1' ]   ← {$contains: '_admin'}\nAssertionError: expected [ '3', '4' ] to deeply equal [ '3' ]   ← {$contains: '50%'}\n```\n\n三处都是**放大**方向;`read-scope-sql.ts` 编的是 ADR-0021 D-C 读作用域(tenant + RLS),放大即越权而非降级的筛选(#5347 / #5324 在同一文件立的规矩)。PD #3 强制 machine name 用 `snake_case`,所以几乎每个机器名比较值都带 `_`,而且完全无声。\n\n## 修法\n\n新增包内 `src/like-pattern.ts`(`escapeLikePattern` / `likePattern` / `LIKE_ESCAPE_CHAR`),三个编译器全部走它,各自绑 `LIKE ? ESCAPE ?`:\n\n| 文件 | 改动点 | 角色 |\n|---|---|---|\n| `src/read-scope-sql.ts` | `compileOperator` 四臂 + 新增 `bindLike()` | 读作用域降级 |\n| `src/strategies/native-sql-strategy.ts` | `buildFilterClause`(`likePattern` 表 → `likeShape`) | **实际执行** |\n| `src/strategies/objectql-strategy.ts` | `LIKE_SQL_OPS` | `/analytics/sql` 回显 |\n\n回显一起改是必须的,不是顺手:它描述的那次执行经引擎走到 `driver-sql`,而 `applyLike` 一直是转义的 —— 只修执行侧会让回显重新与执行分叉(#3601 / #3602 / #3650 那一族,#5333 刚为这张表付过一次代价)。\n\n## helper 落点:包内自建\n\n`service-analytics` 的 `package.json` 只依赖 `@objectstack/core` 与 `@objectstack/spec`,不依赖任何驱动;而 `applyLike` 是 knex builder 上的**私有方法**,签名收 builder + field 而不是字符串 —— 即使有依赖也没有可导入的东西。为三个同包调用点向 `@objectstack/core` 新开一个公开面不值当,所以按派发要点选**包内自建**,未新增任何包外公开面(`index.ts` 未导出)。\n\n防第三份手抄的责任没有落在注释上:`like-pattern.ts` 与 `sql-driver.ts` 的 `applyLike` **两处 TSDoc 互指**(driver-sql 侧本 PR 只加注释,不改实现),真正的约束是新测试里那条断言 —— 它把 `escapeLikePattern` 与 `applyLike` 的表达式逐字符比对,任一侧漂移即红。\n\n## 方言确认\n\n**`ESCAPE` 子句加在哪一层**:完全在**谓词层**。`read-scope-sql.ts` 发的是 `?`,它的两个消费者(`NativeSQLStrategy.applyReadScope`、`ObjectQLStrategy.generateSql`)都把 `?` 重编号成 `$N` 并同步 push 取值 —— 因为转义符是**绑定值**而不是 SQL 字面量,它被这套重写免费带过去,上层两个消费者一行没改。\n\n**转义符为什么绑而不写成字面量**:MySQL 在字符串字面量里套用 C 转义语法(官方手册:\"If you want a LIKE string to contain a literal `\\`, you must double it\"),所以反斜杠转义符在 MySQL 要写 `'\\\\'`、在 SQLite / Postgres 写 `'\\'` —— 这三个编译器不知道自己的输出会被哪个方言执行。绑定值由驱动按自己的方言转义,这里就只有一种写法。这也正是 `applyLike` 的做法(`ESCAPE ?` + `'\\\\'`),对齐即零新增方言风险。\n\n三方言口径(引各家官方手册,PG / MySQL 未在本仓跑到真实引擎,以文档为准并如实标注):\n\n| 方言 | 默认转义符 | 显式 `ESCAPE` |\n|---|---|---|\n| PostgreSQL | 反斜杠(\"The default escape character is the backslash but a different one can be selected by using the `ESCAPE` clause\") | 支持 |\n| MySQL | `\\`(\"If you do not specify the ESCAPE character, `\\` is assumed, unless the `NO_BACKSLASH_ESCAPES` SQL mode is enabled\") | 支持;参数\"must evaluate as a constant at execution time\" —— 绑定占位符满足该条件 |\n| SQLite | **无**默认转义符 | 支持,且**必需** |\n\n即:显式子句在 PG / MySQL 上是把默认值写明,在 SQLite 上是唯一能让转义生效的办法。\n\n**两半是一个修复,不是两个改进** —— 这一点我没有只写在注释里,而是直接对引擎实测并固化成用例:\n\n```\nA. 原始 pattern,无 ESCAPE(修前)     : [ '1', '2' ]   ← issue 的实测行\nB. 已转义 pattern,无 ESCAPE 子句      : []            ← 只转义 = 零行,比放大更糟\nC. 已转义 pattern + 绑定 ESCAPE(修后) : [ '1' ]        ← 正确\nD. 原始 pattern + 只加 ESCAPE 子句    : [ '1', '2' ]   ← 只加子句 = 什么都没变\nH. 绑定的 ESCAPE 实参被接受           : [ '3' ]        ← 绑定而非字面量的前提\n```\n\n## 验证\n\n`pnpm --filter @objectstack/service-analytics test`:**51 files / 854 tests 全绿**(修前:新测试文件 18 failed / 8 passed)。`driver-sql` `tsc --noEmit` 干净。另跑 `rest` 的 analytics 用例(33 绿)、`driver-sql` 的 `sql-driver-like-escape.test.ts`(3 绿)、`check:nul-bytes` / `check:type-check-coverage` / `check:wildcard-fallthrough` / `check:driver-conformance` / `check:adr-anchors` / `check:role-word`、以及 spec 的 `check:generated`(10/10,因合并带入 spec 改动)。\n\n新增 `src/__tests__/like-metacharacter-escape.test.ts`(29 例)覆盖:\n\n- **正文两张表修前红 / 修后绿**,行集全部 exact-set(`toEqual`),每个元字符行都配一个只在通配读法下才会被命中的**诱饵行**,断言不可能靠巧合通过;\n- 正文只测到绑定层的 `$startsWith` / `$endsWith` / `$notContains` **各补齐行集**:`{$startsWith: 'x_'}` `['1','2']`→`['1']`、`{$endsWith: '0% now'}` `['3','4']`→`['3']`、`{$notContains: '_admin'}` `['3','4','5','6']`→`['2','3','4','5','6']`(缩小方向,多排除了作者留下的那一行);\n- **三个编译器的绑定层同表驱动**,同一个算子/比较值断言三处绑出同一 `[pattern, 转义符]`;\n- **回显与执行同 fixture 行集一致**:回显 params 与 `NativeSQLStrategy` params 相等,且把回显语句真跑一遍取行集;\n- **零回归**:`plain` 这类无元字符比较值,三处 pattern 与改动前逐字节相同(唯一变化是追加的 `ESCAPE` 绑定);`filter-operator-coverage.test.ts` 那套比较值(`one` / `alpha` / `-one`)本就不含元字符,未受影响。\n\n### 反向验证的方向:字面 `\\` 那一例是**例外**,如实记录\n\n其余四族都是标准的**修前红 / 修后绿**。但字面反斜杠比较值那一例,在本套件唯一能跑的引擎(SQLite)上**不是**修前红,把它写成红会是编造:\n\n```\nE. 原始 pattern,无 ESCAPE(SQLite 修前)   : [ '5' ]   ← `\\` 在这里本就是字面量\nF. 原始 pattern + ESCAPE(= PG/MySQL 默认) : [ '6' ]   ← `\\b` 被读成字面 `b`:既漏又误命中\nG. 已转义 pattern + ESCAPE(修后)          : [ '5' ]   ← 各方言统一\n```\n\n`\\` 只有在**已有转义符生效时**才是元字符。SQLite 没有默认转义符,所以修前 `%a\\b%` 在那里碰巧是对的;同一个修前 pattern 在 PG / MySQL(默认转义符就是 `\\`)上读成字面 `b`,匹配到 `p ab q` 而漏掉 `p a\\b q` —— 一个比较值同时造成漏与误命中。因此这一例钉在**能在本引擎上验证的层面**(绑出的 pattern 字符串,修前红:`['%a\\b%']` vs `['%a\\\\b%', '\\']`)+ 行集非回归,方言那半用上表(在 SQLite 上模拟 PG/MySQL 的**文档化默认**)与手册引文论证,并在测试注释里明确标注这是模拟、不是在那两个引擎上跑的。\n\n## 范围\n\n三个编译器 + 同包测试 + changeset(patch)。`driver-sql` 仅加 TSDoc 互指,不动实现(#5499 明确 `driver-sql` 不在冻结范围)。未碰 `filter-normalizer.ts`(#5526-B)。无 out-of-scope 发现需另立单。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01BWS4heBoAitLmzCLhcYdbK\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BWS4heBoAitLmzCLhcYdbK)_"
+}

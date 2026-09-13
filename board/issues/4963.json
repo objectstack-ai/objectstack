@@ -1,0 +1,37 @@
+{
+  "number": 4963,
+  "kind": "issue",
+  "title": "`automation/etl.zod.ts` 的九个类型别名全部导出 parsed 形状,违反 `X` / `XParsed` house convention(SYNC_ARCHITECTURE.md 的示例因此不可编译)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue",
+    "protocol:breaking"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T17:23:51Z",
+  "updated_at": "2026-08-05T16:12:09Z",
+  "closed_at": "2026-08-05T16:12:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4963",
+  "body": "发现于 #4001 批 12(`automation/etl.zod.ts` 的 strict 收紧),**不在该 PR 范围内**,按 Prime Directive #10 单独记录。与 strictness 正交:`.strict()` 既不改 `z.input` 也不改 `z.infer`,本条在批 12 前后完全一致。\n\n## 事实\n\nhouse convention 是 `X` = 作者写的东西(`z.input`),`XParsed` = parse 之后的东西(`z.infer`)。`shared/retry-policy.zod.ts` 的 JSDoc 把这条写得最清楚,而且记录了它自己**就是从违反态改过来的**:\n\n> Note for pre-17 `@objectstack/spec/system` consumers: this used to be `z.infer` (the post-parse shape, every key present) on that entry only. It is now the input shape on both, matching the house `X` / `XParsed` convention used by the sibling control-flow configs.\n\n`automation/flow.zod.ts` / `automation/io-node-config.zod.ts` / `automation/builtin-node-config.zod.ts` 都成对导出(`Flow` + `FlowParsed`、`NotifyConfig` + `NotifyConfigParsed`……)。\n\n`automation/etl.zod.ts` 九个别名**一个都没跟上**,全部是 parsed 形状占用了裸名,且没有任何 `*Parsed` 对应物:\n\n```\nETLEndpointType, ETLSource, ETLDestination, ETLTransformationType,\nETLTransformation, ETLSyncMode, ETLPipeline, ETLRunStatus, ETLPipelineRun\n    = z.infer< typeof …Schema >\n```\n\n## 为什么这不是纯风格问题\n\n因为 ETL 上有四个带 `.default()` 的键 —— `ETLDestination.writeMode`、`ETLTransformation.continueOnError`、`ETLPipeline.syncMode`、`ETLPipeline.enabled`、`ETLPipeline.retry` 的两个子键。在 `z.infer` 下它们**全是必填**。于是\"用 `ETLPipeline` 标注一份手写的 pipeline 字面量\"这个最自然的用法直接编译不过 —— 而这正是本文件唯一的授权门(三仓零 importer、零 parse 点,作者接触这个契约的方式就是 `const x: ETLPipeline = { … }`)。\n\n仓库里现成的证据:`packages/spec/docs/SYNC_ARCHITECTURE.md` 的 Migration Guide,\"After (L2)\"一段:\n\n```typescript\nconst pipeline: ETLPipeline = {\n  name: 'order_analytics_pipeline',\n  source: { type: 'api', connector: 'orders' },\n  transformations: [\n    { type: 'aggregate', config: { groupBy: ['customer_id'] } }\n  ],\n  destination: { type: 'database', config: { table: 'analytics_order' } }\n};\n```\n\n这段**不可编译**,两个独立原因:`source.config` 是必填却没写;`syncMode` / `enabled` / `destination.writeMode` / `transformations[].continueOnError` 在 `z.infer` 下必填却没写。同一节的\"Before (L2)\"更短,同样过不了。因为它们在 `.md` 里,没有任何 gate 读到 —— 这是\"declared ≠ enforced\"的文档版本:我们向数据工程师展示了一份平台自己拒绝的 L2 pipeline。\n\n`ETL.databaseSync` / `ETL.apiToDatabase` 两个 factory 的返回类型标成 `ETLPipeline`,因此被迫把 `syncMode` / `enabled` / `writeMode` 显式写死 —— 那不是 factory 的设计意图,是被 `z.infer` 逼出来的。\n\n## 两个选项\n\n**A. 按 house convention 改:裸名 = `z.input`,新增九个 `*Parsed` = `z.infer`。**\n- 长期正确性:最好。这正是 #4661 对 `RetryPolicy` 做过的同一件事,理由已经论证过,不需要重新论证;`etl` 是 `automation/` 里最后一个没跟上的文件。\n- 让 AI 写的 metadata 不易出错:最好。作者(人或 LLM)拿到的 `ETLPipeline` 从此**就是\"我该写什么\"**,把带默认值的键正确标成可省略;写完即可编译,不再需要靠试错发现 `syncMode` 其实可以不写。\n- 成本:breaking(裸名语义变化 + 九个新导出),需要 `gen:api-surface` + changeset 迁移文案(`ETLPipeline` → `ETLPipelineParsed` 给读取 parse 结果的消费者)。此处**三仓零 importer**,所以实际迁移面为空 —— 和 #4962 一样,这是此刻做最便宜的一类改动。\n- 顺带:SYNC_ARCHITECTURE.md 的两段示例在 A 之后只剩\"`source.config` 必填却没写\"一个错误,需要在同一个 PR 里补上。\n\n**B. 只修文档示例,类型别名不动。**\n- 长期正确性:差。文档被改成\"符合 parsed 形状\"意味着示例里要写满 `syncMode: 'full', enabled: true, writeMode: 'append', continueOnError: false` 这些作者本不必写的键 —— 等于把违反 convention 的后果固化成\"推荐写法\",下一个照抄的作者会以为这些键是必须的。\n- 让 AI 写的 metadata 不易出错:差,且是反向的。LLM 抄文档,抄到的会是一份噪音更多、且暗示\"默认值必须显式重复\"的模板。\n- 成本:最低,非 breaking。\n\n## 建议\n\n**A**,两轴一致。这是 #4661 已经在同一个仓库、同一个 `automation/` 目录下走过一遍并写下理由的路径,`etl` 只是没被那次收敛扫到(它没有导出名冲突,不在 #4535 的雷达上 —— 与 #4962 同一个漏网机制)。B 用最低成本换来一份把错误示范写进文档的结果,在\"让 AI 写的 metadata 不易出错\"这一轴上是负收益。\n\n如果维护者希望把 breaking 面压到最小,可以把 A 拆成两步:先加九个 `*Parsed` 导出(纯增量,非 breaking),下一个 major 再翻转裸名 —— 但鉴于此处零 importer,我认为一次做完更省事。\n\n/cc #4001 #4661 #4962\n"
+}

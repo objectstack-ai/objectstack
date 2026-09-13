@@ -1,0 +1,34 @@
+{
+  "number": 5404,
+  "kind": "pull_request",
+  "title": "docs(runtime,metadata,rest): 摘除已失真的「structurally unreachable until the E7 flip」注释族 + 多租户 decline 分支补零覆盖 (#5399)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T08:11:36Z",
+  "updated_at": "2026-08-05T08:24:55Z",
+  "closed_at": "2026-08-05T08:24:53Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T08:24:53Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5404",
+  "body": "Fixes objectstack-ai/objectstack#5399\n\n父单 #5231 的实施子单(另一子单 #5244 已随 PR #5395 落地)。两节工作:**纯注释修真(零行为变更)** + **E5b decline 分支补测**。\n\n## 前提复核(逐处按 origin/main 核对,行号已全部漂移)\n\nissue 立案时给的行号无一命中,#5385 重排过 runtime。翻转本身也复核了:issue 写的 `d21c001` 在本仓 **无法解析**(`git log` 报 unknown revision),但翻转确已落地 —— 权威在 `packages/spec/src/api/endpoint-publish-gate.ts` 开篇自述 \"This module is that flip\",并写明 #4936 的整体拒绝已被逐条形状把关取代。\n\n| issue 列出 | origin/main 实际 | 判定 |\n| :--- | :--- | :--- |\n| `route-ledger.ts:298` | :298-300 | 失真,已改 |\n| `endpoint-executor.ts:31-34` | :23-34(含 `## Nothing calls this yet` 标题) | 失真,已改 |\n| `api-endpoint-step.ts:24-27` | :20-26 | 失真,已改 |\n| `endpoint-policy.ts:49-53` | :49-53 | 失真,已改 |\n| `dispatcher-plugin.ts:1430` | :1428-1431 | 失真,已改 |\n| `metadata-manager.ts:1551` | **:2163-2166** | 失真,已改 |\n| `openapi-endpoints.ts:60,332` | :58-63、:330-334 | 失真,已改 |\n\n`openapi-endpoints.ts` 的「Today it emits nothing」确被 PR #5230 P9 反证:`packages/qa/dogfood/test/showcase-declarative-endpoints.dogfood.test.ts:287-323` 以真实 boot 断言 `/openapi.json` 的 `paths` 含 showcase 两条声明端点。\n\n## 家族扫荡:7 处是抽样,实际 13 处\n\n按 issue 要求做了全仓 grep(`E7 flip` / `Structurally unreachable` / `til the #5040`),**列表外又找到 6 处同族**,一并闭环:\n\n- `packages/runtime/src/api-endpoint-step.test.ts:9`\n- `packages/runtime/src/api-mapping.test.ts:17`\n- `packages/runtime/src/dispatcher-plugin.endpoint-fallback.integration.test.ts:23`\n- `packages/runtime/src/dispatcher-plugin.ts` 的 **`else` 分支**(:1434-1439,见下)\n- `packages/rest/src/openapi-endpoints.test.ts:13`\n- `packages/rest/src/rest-openapi-route.test.ts:81`\n- `packages/rest/src/rest-server.ts:2865`\n\n核过但**不改**的两处(措辞已是过去时,本来就成立):`examples/app-showcase/src/coverage.ts:127`(「the waiver stood from #4936 until the #5040 executor landed」)、`packages/qa/dogfood/.../showcase-declarative-endpoints.dogfood.test.ts:8`(「was built E1–E7 ... BEHIND a publish gate that made it structurally unreachable」)。\n\n改写口径:描述**当前**事实并给出权威出处(发布闸门文件 / 真实 boot 探针),周围仍成立的散文原样保留。\n\n## ⚠️ 一处越界,已另立 #5400 而非在本 PR 修\n\n`dispatcher-plugin.ts` 的 `else` 分支(适配器不暴露 `setFallbackHandler` 时)注释原文写着:\n\n> `debug`, not `warn`: no stack can declare an endpoint yet ... **When that flip lands, THIS is where absence must become loud**\n\n**这个条件句的触发条件已经发生**。翻转后声明真实存在,该传输上它们静默不可服务,而唯一信号是默认 `info` 级别根本不打印的 `debug`。要让这条注释成真只有一条路 —— `debug` 升 `warn` —— 那是**行为变更**,超出本单(纯注释)范围。\n\n故本 PR 只把该注释改写为「当前仍是 debug、且这是低估、由 #5400 跟进」的真话,级别本身留给 #5400。相关:#5122(runtime 的 `HttpServer` 包装器丢弃可选成员,使这个分支实践中更易走到)。\n\n## 第二节:E5b decline 分支补测\n\n新增 `packages/runtime/src/dispatcher-plugin.multi-tenant-endpoint.integration.test.ts`(4 例)。零覆盖属实:`isMultiTenantHost` 全仓仅 `data-path-object.test.ts` 以 `() =` false 打桩,decline 分支无任何引用 —— 因为 `kernel-resolver` **提供方在 cloud**,本仓只有消费者。\n\n照 #5385 姿态以桩 resolver 驱动,但**上移一层**:该分支活在 plugin 的 `setFallbackHandler` 闭包里(不在 dispatcher 上),没有任何接缝能把它交出来,所以走 LiteKernel + 真 Hono + 真 socket,而不是复刻组合(ADR-0076「who serves this path」/ #4073 的教训)。已按 #5385 写在 `context.kernel` 的当前形状。\n\n- **解析成功**:带 `X-Environment-Id` 的请求在**自己**的租户内核上执行,`servedBy` 只可能来自该租户;\n- **解析不出**:裸 404 + warn + **完全不探 declaration**(decline 必须发生在 match 之前,否则一个租户的声明会决定另一个租户的 URL)。\n\n### 反向验证(先定方向再跑,结果与预测一致)\n\n**第一版是伪绿,已修正并记录在测试文件抬头。** 初稿只在租户内核上声明端点;删掉 decline 分支重跑,预测「全红」而实际**只有 warn 断言变红**:宿主没有 `metadata` 槽位,该步会因**另一个无关原因**再次弃权,于是 404 与「未探测」两条断言恒真、什么也没证明。\n\n改成**宿主也声明同一条路径**(并占住 `automation`)后再删分支重跑:\n\n```\n× answers the transport's own 404 and never probes the declaration\n× declines an UNKNOWN environment the same way — a header is not a placement\nAssertionError: expected 200 to be 404\nTests  2 failed | 2 passed (4)\n```\n\n红的正是该分支要挡的那件事 —— 无法归属的请求被**从宿主内核答成了 200**。恢复分支后 4/4 全绿。\n\n## 验证\n\n重活全走 `flock /tmp/os-heavy-verify.lock` + 4G 堆上限、scoped filter、`--workspace-concurrency=2` 前置。\n\n```\npnpm --filter '@objectstack/runtime^...' build                                  # 新 worktree 先建依赖\npnpm --workspace-concurrency=2 --filter @objectstack/runtime --filter @objectstack/rest --filter @objectstack/metadata test\n  → runtime  Test Files 92 passed (92) / Tests 1341 passed (1341)\n  → rest     Test Files 43 passed (43) / Tests  652 passed (652)\n  → metadata Test Files 22 passed (22) / Tests  478 passed (478)\npnpm ... typecheck  → runtime: tsc --noEmit 零错误(rest/metadata 无 typecheck 脚本,走覆盖率台账豁免)\nnode scripts/check-nul-bytes.mjs → OK (5418 files)\ngit diff --name-only | xargs grep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]' → 无命中\n```\n\n**消费半径**:route-ledger 的 `note:` 由 `packages/client` 的 ledger 覆盖测试消费(#5046 的教训:改动包之外的 fixture 才是漏网处),故一并跑了 client —— 首轮 3 个文件 collection 失败(`Failed to resolve entry for package \"@objectstack/runtime\"`),是新 worktree 未建依赖的 AGENTS.md §9 陷阱、非本改动;补 `'@objectstack/client^...'` build 后 **Test Files 17 passed / Tests 222 passed**。\n\n## changeset\n\n**未加 changeset,请打 `skip-changeset` 标签** —— 与 PR #5395 同一口径。纯注释 + 纯测试,对包消费者零可见变更(AGENTS.md 也写明纯修正类不强制);不选空 frontmatter changeset 是因为 `release.yml` 记着 #4898:main 上只剩空 changeset 时 changesets 会打印 \"All changesets are empty; not creating PR\" 并白吃一轮发布。\n\n## 边界\n\n- ⛔ 未动父单 #5231、未动 `content/docs/releases/`、未改任何行为。\n- 全 diff 中唯一的非注释行是 route-ledger 的描述性 `note:` 字符串;无任何测试断言其文本。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01VkPSGsX9o17MsGv3Lbxu2w)_"
+}

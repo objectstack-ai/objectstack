@@ -1,0 +1,33 @@
+{
+  "number": 17480,
+  "kind": "issue",
+  "title": "Queue-flake anchor: test/schedule-sweep-organization-scope.dogfood.test.ts",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [
+    "finding",
+    "queue-flake-anchor"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-10T16:32:55Z",
+  "updated_at": "2026-09-10T17:20:17Z",
+  "closed_at": "2026-09-10T17:20:17Z",
+  "closed_by": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17480",
+  "body": "`test/schedule-sweep-organization-scope.dogfood.test.ts` has ejected **2 pull requests** from the merge\nqueue within a rolling 24 hours — **2 independent hits** once\nGitHub's speculative stacking is accounted for. This issue is the single place for\nthat conversation; it is refreshed by the merge-queue-triage workflow on every\nfurther ejection.\n\n| PR | stack | queue build |\n|---|---|---|\n| #17444 | independent | [34500588865](https://github.com/objectstack-ai/objectstack/actions/runs/34500588865) |\n| #17465 | independent | [34501605908](https://github.com/objectstack-ai/objectstack/actions/runs/34501605908) |\n\n**This issue is a NAME, not a diagnosis.** The workflow that files it reads the\nfailing test file path out of the job logs and counts PRs; it does not\nknow whether this is a flake, a load/timing cliff, a semantic conflict between\nqueued PRs, or a real regression, and it does not act on any of those. No test is\nskipped, quarantined or re-queued by it, and no PR is labelled by it — weakening\na gate stays a human act.\n\nWhat to do with it: read one victim PR's triage comment for the failure REASON\nline beside the FAIL line (a timeout and an assertion are the same FAIL line and\nopposite diagnoses), decide the cause, and close this issue with the fix or with\nthe reason it is not one.\n\nLast refreshed by queue build [34501605908](https://github.com/objectstack-ai/objectstack/actions/runs/34501605908) (PR #17465).\n\n---\n_Filed by the merge-queue-triage workflow (#4859, aggregation #10128)._\n\n<!-- queue-signature-anchor:test/schedule-sweep-organization-scope.dogfood.test.ts -->"
+}

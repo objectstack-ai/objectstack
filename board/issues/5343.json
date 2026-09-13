@@ -1,0 +1,38 @@
+{
+  "number": 5343,
+  "kind": "issue",
+  "title": "静态扫描:job 级 `if:` 读 `needs.*.outputs.*` 必须显式带状态函数(#4928 沉淀的规则 + publish-smoke.yml 唯一存量违规)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T23:58:11Z",
+  "updated_at": "2026-08-05T13:55:34Z",
+  "closed_at": "2026-08-05T13:55:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5343",
+  "body": "从 #4928 拆出来的第二半。#4928 的正文点名这条规则「值得沉淀成一条可检查的规则」,但它落地需要一个不属于 #4928 文件面的判断,所以单独立单。\n\n## 规则\n\n> 任何 **job 级** `if:` 只要读了 `needs.SOMEJOB.outputs.SOMEKEY`,就必须显式点名一个状态函数(`always()` / `!cancelled()` / `success()` / `failure()`)。\n\n理由:读上游 **输出值** 来决策,说明这个决策是数据驱动的;而 GitHub 会给不含状态函数的 `if:` 隐式包一层 `success()`,于是「上游挂了」和「上游说不用跑」这两件完全不同的事被压成同一个 skipped。作者如果真的想要 success() 语义,也应当写出 `success() && ...` —— 声明即强制,而不是靠读者记得 GitHub 的隐式规则。\n\n这条规则是可静态判定的:限定在 **job 级** 且读 `needs.*.outputs.*`,不涉及意图猜测。\n\n## 为什么把范围收到「job 级 + needs.outputs」\n\n我在 #4928 里跑过全仓审计(`grep` 全部 `.github/workflows/*.yml` 的 `if:` 行):\n\n| 位置 | 层级 | 表达式 | 判定 |\n|:--|:--|:--|:--|\n| `ci.yml` ×7 | job | `needs.filter.outputs.*` | PR #4928 已修 |\n| `release.yml:342` | job | `needs.release.outputs.published` | 已带 `!cancelled()`(#4900) |\n| `publish-smoke.yml:98` | job | `needs.resolve.outputs.run == 'true'` | **唯一存量违规** |\n| `ci.yml:1091,1126` | step | `steps.console-dist.outputs.cache-hit` | 规则不覆盖 |\n| `release.yml:99,313` | step | `steps.*.outputs.*` | 规则不覆盖 |\n| `publish-smoke.yml:106,159` | step | `needs.resolve.outputs.report-sha` | 见下 |\n\nstep 级读 **本 job 自己** 的 `steps.*.outputs.*` 被排除是对的:那里的隐式 success()(前一步挂了就别继续)通常正是作者要的语义。把它们一起扫会立刻产生一批需要豁免的假阳性,而带着长豁免名单出生的门禁离 #4690 的反模式只有一步之遥。\n\n## 存量违规需要一个决策(所以没有顺手在 #4928 里修)\n\n`publish-smoke.yml` 的 `resolve` job 与 `ci.yml` 的 `filter` **不同**:它的 outputs 没有 `|| 'true'` 兜底(`run: ${{ steps.target.outputs.run }}`),而且 `ref` 也是它算出来的。所以 `resolve` 失败时:\n\n- 现状:`pack-smoke` 被跳过 —— release candidate 静默地没被 smoke 过。\n- 若照搬 #4928 的形状(`!cancelled() && needs.resolve.outputs.run != 'false'`):`run` 为空 → 跑,但 `ref` 同样为空 → checkout 落到 workflow_run 的默认 ref,**可能 smoke 了错的东西**,而且是一趟 45 分钟的 job。\n\n即「存疑就全跑」在这里不像在 `ci.yml` 那样无条件正确,要先决定 `resolve` 失败时的正确兜底(补 `|| ` 默认值?失败时显式报一个红状态而不是跑?)。这属于该 workflow 自己的取舍,不该由 #4928 顺手拍板。\n\n另外未核实的一点,留给接手的人:`publish-smoke / packed-tarballs` 这个 commit status 在 `resolve` 挂掉时根本不会被写(连 pending 都没有)。如果它在 release PR 上是必需检查,后果与「skipped 算通过」不同,需要单独确认。\n\n## 验收\n\n- [ ] `scripts/check-workflow-status-functions.mjs`(或等价物):解析 `.github/workflows/*.yml`,对每个 job 的 `if:` 检查是否读 `needs.*.outputs.*` 且未点名状态函数,违规则退出非零并打 `::error file=...,line=...`。\n- [ ] **输入缺失必须大声失败**(#4690 反模式):扫不到任何 workflow 文件、YAML 解析失败、`.github/workflows/` 不存在 —— 一律退出非零,绝不 `exit 0` 静默放过。\n- [ ] 有测试:至少一个「违规样本判红」+ 一个「合规样本判绿」+ 一个「输入缺失判红」的 fixture。\n- [ ] **真的接进某个 workflow 跑**(`lint.yml` 最自然),而不是只躺在 `scripts/` 里。\n- [ ] `publish-smoke.yml:98` 按上面的决策修掉,或写进脚本的显式豁免名单并附理由注释。\n\n## 参考\n\n- #4928(本单来源,PR 已修 `ci.yml` 七处 + 两个聚合闸门)\n- #4900(同一 GitHub 语义的前两次:`release.yml` 的发布完整性守卫与 `docker` job)\n- #4690(门禁静默跳过并 `exit 0` 的反模式)"
+}

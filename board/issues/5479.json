@@ -1,0 +1,35 @@
+{
+  "number": 5479,
+  "kind": "pull_request",
+  "title": "chore(scripts): 门禁扫描面纳入 DEL(0x7f),并转义 login.ts / register.ts 各一枚裸字节 (#5460)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T13:45:17Z",
+  "updated_at": "2026-08-05T14:03:39Z",
+  "closed_at": "2026-08-05T14:03:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T14:03:37Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5479",
+  "body": "Fixes objectstack-ai/objectstack#5460\n\n> 本文全程用 `U+007F` / `U+0003` 这种不含反斜杠转义的写法指代字节。原因见下面「事故源在本 PR 里又复现三次」一节 —— 写反斜杠转义正是它物化成真字节的时机。本文第一版就在「行为不变的证明」那段栽了一次(见该节末尾的订正说明)。\n\n## 前提已核实(rule 6)\n\n按 issue 正文逐条对 `origin/main`(#5461 合并后,`577cd27be`)验证:\n\n- 两枚裸 0x7f 仍在,位置与正文一致:`packages/cli/src/commands/login.ts:47`、`packages/cli/src/commands/register.ts:43`,`od -c` 实证为八进制 177。\n- 「同一个 switch、隔九行」属实:两文件里 47/38 行、43/34 行,中间隔着 Ctrl+C 与 Enter 两组 case;Ctrl+C 那条已被 #5157 转义成 U+0003 的转义序列,读得出来。\n- 「全仓其余含 0x7f 的受追踪文件只有 4 个 PNG + 1 个 ICO」属实,实测复现(见下表)。\n- 自测里那条**故意**把 DEL 钉在扫描面之外的断言确实存在,原文 `tab / CR / LF / DEL are outside the scanned set and stay green`。\n\n前提全部成立,按 08-05 12:56Z 裁定实施方案 A(纳入)。\n\n## 为什么 0x7f 该纳入\n\n#5157 把扫描面定为「C0 控制集去掉 tab/LF/CR」。DEL 是控制字符但不是 C0 —— 它单独坐在 ASCII 表末尾、印刷字符区之后,所以**一个用连续区间表达的集合根本够不到它**。\n\n这个缺口是偶然而非深思熟虑,最硬的证据就是剩下那两枚裸字节被发现的位置:#5157 刚转义了同一个 switch 里的一枚裸 0x03,往下九行的 Backspace 仍是裸字节。于是转义后的 case 与裸字节的 case 并排:一条读得出是个按键,另一条渲染为空、读起来是一个空串 case。区分二者的只有 ASCII 当年把这个字节放在了 0x1f 的哪一侧。\n\n#5157 对 C0 论证的三条危害,逐条原样落在 0x7f 上(渲染为空 / 两种拼写都搜不到 / 事故源不挑字节值)。`iscntrl` 与正则的 `Cc` 类也都把 0x7f 算作控制字符 —— 「C0」是个更窄的读法。\n\n## 改动\n\n| 文件 | 改动 |\n|:--|:--|\n| `scripts/check-nul-bytes.mjs` | 查找表加一行 `IS_SCANNED[0x7f] = 1`(带注释说明「虽非 C0,但按事故源不挑字节纳入」);脚本头/报错文案的扫描面描述如实改为「ASCII 控制字符」;自测 34 → 48 断言 |\n| `.github/workflows/lint.yml` | CI 步骤注释里那句逐字列举扫描集的描述同步(#5461 把语义写在脚本头、报错文案、CI 步骤**三处**,少改一处就是一句成文的假话) |\n| `packages/cli/src/commands/login.ts` / `register.ts` | 各一枚裸 0x7f 转义 |\n| `.changeset/control-byte-gate-scans-del.md` | 按 #5461 的 `control-byte-gate-scans-all-c0.md` 先例 |\n\n扫描面现在是 `[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]`。\n\n## 二进制判据:扩面是承重的,不是顺手对齐\n\n判据是「剔除全部扫描字节后整文件 UTF-8 严格解码」。0x7f 纳入剔除集与 #5157 对 0x01 的论证同构:`E4 B8 7F AD` 是「中」被塞进一枚 0x7f,只剔 C0 的话解码失败 → 判二进制 → 跳过 → **那枚 0x7f 成了自己的不在场证明**。反方向不会出错:扫描集全部 `0x7f` 及以下,而合法 UTF-8 多字节序列只由 `0x80` 及以上的字节构成。\n\n**实测全部 5457 个受追踪常规文件,扩面前后文本/二进制判定零变化**(#5461 的验收先例):\n\n```\nbefore (C0 only):   {\"text\":5452,\"binary\":5}\nafter  (C0 + DEL):  {\"text\":5452,\"binary\":5}\nfiles whose text/binary verdict MOVED: 0\n```\n\n改前含裸 0x7f 的 7 个受追踪文件:\n\n| 文件 | 判定 | 0x7f 枚数 |\n|:--|:--|--:|\n| `apps/docs/app/favicon.ico` | binary | 27 |\n| `docs/screenshots/architecture.png` | binary | 1317 |\n| `docs/screenshots/automation.png` | binary | 1881 |\n| `docs/screenshots/layers.png` | binary | 500 |\n| `docs/screenshots/modeling.png` | binary | 1609 |\n| `packages/cli/src/commands/login.ts` | text | 1 |\n| `packages/cli/src/commands/register.ts` | text | 1 |\n\nPNG/ICO 里的 0x7f 不受影响:它们是**整文件解码失败**才判的二进制,与任何单个字节无关。改后 text 类里 0x7f 归零。\n\n## 反向验证(方向在跑之前先定)\n\n**预判方向:经典的红向** —— 因为两个新样本文件整个都不含 C0 字节,前一版 C0-only 的扫描确实无事可做。两条都按预判走:\n\n**(a) 摘掉 `IS_SCANNED[0x7f] = 1`,自测转红:**\n\n```\n✗ check-nul-bytes --self-test -- 7 failure(s)\n  • #5460: a raw 0x7f Backspace literal must be flagged\n  • #5460: the offending byte is reported as 0x7f, got undefined\n  • #5460: a 0x7f inside a multi-byte sequence must be flagged\n  • #5460: widened stripping keeps the DEL split-sequence file scannable\n  • exactly the 2 binary assets skip, got 3\n  • DEL is a control-byte hit (#5460)\n  • the scanned set is C0-minus-tab/LF/CR plus DEL, got 29 bytes\n```\n\n其中 `exactly the 2 binary assets skip, got 3` 这条最值得看:它不是重复计数,而是那个「中」被塞了 0x7f 的样本**从文本掉进了二进制** —— 不在场证明当场生效。这正是二进制判据必须同步扩面的实证。\n\n**(b) 把两个 cli 文件恢复成裸字节,扩面后的门禁判红,行号与 issue 正文逐字对上:**\n\n```\ncheck-nul-bytes: 2 files contain a raw ASCII control byte\n\n  • packages/cli/src/commands/login.ts:47:15 -- 1 occurrence of 0x7f, first at byte offset 1574\n  • packages/cli/src/commands/register.ts:43:15 -- 1 occurrence of 0x7f, first at byte offset 1405\n```\n\n报错并给出处方:`0x7f` → 对应的 U+007F 转义序列。\n\n## Backspace 行为不变的证明\n\n`packages/cli` 下**没有**覆盖这个按键处理器的测试(`grep` 只命中三个源文件,无测试文件),按派发口径以字节等价论证,并跑全包测试证明无回归。\n\n把两个版本的 case 标签按 TS/JS 解析器的规则求值后比较码点,结果:\n\n| 版本 | 拼写 | 求值后码点 | 长度 |\n|:--|:--|:--|--:|\n| before | 一对单引号,中间夹一枚**裸 0x7f** | `[127]` | 1 |\n| after | 一对单引号,中间是 **U+007F 的转义序列** | `[127]` | 1 |\n\n`IDENTICAL AT RUNTIME: true` —— 两种拼写求值后都是单个码点 127、长度 1,`switch` 命中完全相同。\n\n> **订正说明(本身就是证据):** 本文第一版这里贴的是程序原始输出,两行分别是 before / after 的拼写。可是 before 那行的裸字节渲染为空、after 那行的反斜杠转义在我组装 PR 正文时又被物化掉,结果**两行长得一模一样**,一段本该证明「两种拼写不同但求值相同」的证据,变成了两行相同的字符 —— 看起来什么也没证明。改成上表这种「描述拼写而不粘贴字节」的写法。这正是本 PR 要治的病:**渲染为空的字节让代码和文档对每一个读者说谎。**\n\n另一条独立佐证:同包的 `packages/cli/src/commands/cloud/login.ts:50` **本来就**用 U+007F 的转义序列拼写同一个按键。仓内三个密码输入实现里,规范拼写早已存在,只有这两个漂移成了裸字节;本次是把它们收回既有惯例,不是发明新写法。\n\n## 事故源在本 PR 里又复现四次\n\nissue 正文记录了它自己的第一版被这个坑绊倒(写着写着落进两枚真的 0x03)。实施过程中又复现四次,每次都被逐字节自扫或工具校验当场抓住:\n\n1. 写临时测量脚本时,`split(...)` 的参数里落进一枚真的 NUL(渲染为空,直到 `Edit` 工具匹配不上那行才暴露);\n2. 往脚本头部写**那段正在描述该事故的注释**时,落进一枚真的 0x03(第 95 行);\n3. 写 changeset 时落进三枚 0x7f;\n4. 写本次 commit message 时又落进一枚 0x7f,被工具的控制字符校验拦下。\n\n外加上面那条订正说明里的第五次。这些都不在 issue 的记录里,写在这里是因为它们正是「事故源不挑字节值、也不挑文件类型」的当场实测 —— 也顺带说明为什么本文用 `U+007F` 而不用反斜杠转义。\n\n**另注一个门禁边界(非本单缺陷,不扩范围):** changeset 那三枚 0x7f 落地时,`node scripts/check-nul-bytes.mjs` 报的是 OK —— 因为门禁扫的是 `git ls-files` 的**受追踪**文件,而新建的 changeset 当时还没 `git add`。`git add` 之后立刻判红。这是门禁既有的、正确的设计(未追踪文件不归它管),提一句是因为它恰好说明 `AGENTS.md` 里「除了跑门禁,还要逐字节自扫」那条不是冗余。\n\n## 验证\n\n```\n$ pnpm check:nul-bytes\n✓ check-nul-bytes --self-test: 48 assertions over a temp git repo (real scan() path)\ncheck-nul-bytes: OK (scanned 5452 tracked text file(s); skipped 5 binary, 1 non-regular; no raw ASCII control bytes).\n\n$ pnpm --filter @objectstack/cli test\nTest Files  79 passed (79)\n     Tests  767 passed (767)\n\n$ pnpm --filter @objectstack/cli typecheck\n(clean)\n\n$ npx eslint scripts/check-nul-bytes.mjs packages/cli/src/commands/{login,register}.ts --no-inline-config\n(clean)\n```\n\n## 自测新增了什么\n\n正反两向都钉在代码旁边,外加一条「处方本身可测」:\n\n- **正向**:裸 0x7f 判红;报错报出 `0x7f` 与对应转义处方;多字节序列里的 0x7f 判红。\n- **反向**:两个新样本**整个文件都不含 C0 字节**(断言里现算,不靠注释声称),所以前一版 C0-only 的扫描确实无事可做;以及那个被塞了 0x7f 的「中」在 C0-only 剔除下解不出来 —— 扩面前它连**扫都不会被扫**。\n- **处方绿**:转义后的拼写保持绿。门禁教作者写转义,那这条处方必须可测 —— 只有红样本、没有绿样本,只证明了什么会被拒,没证明照做会被接受。\n- **边界整体断言**:把扫描集与「ASCII 控制字符减 tab/LF/CR」逐字节比对,并钉住印刷字符永不入集,这样将来改查找表的人必须正面面对边界,而不是悄悄挪一格。\n\n原先那条**故意**把 DEL 钉在扫描面外的断言按裁定**反转而非删除**:它当年是用来说明这条边界是选出来的而不是漏掉的;这次边界被重新选择,选到了另一边,注释里记下了这次改选的来由。"
+}

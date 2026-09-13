@@ -1,0 +1,35 @@
+{
+  "number": 5607,
+  "kind": "pull_request",
+  "title": "feat(spec): RecordHighlightsField 声明 readonly —— 渲染器已强制的键不再被静默剥离 (#5176)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T20:21:48Z",
+  "updated_at": "2026-08-05T22:27:32Z",
+  "closed_at": "2026-08-05T22:27:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T22:27:30Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5607",
+  "body": "Fixes #5176\n\n按维护者 2026-08-05 裁定的 **Option A** 实施,仅 spec 侧。\n\n## 改了什么\n\n`packages/spec/src/ui/component.zod.ts` 中 `RecordHighlightsField` 的**对象成员**新增一个已声明键:\n\n```ts\nreadonly: z.boolean().optional().describe('Render this chip read-only — ...')\n```\n\nunion 形状本身不动(bare-string 成员不变),**不翻 `.strict()`** —— 那属于 #5068 的闸门专项,明确不在本单范围。对象级的 `highlightFields: string[]` 同样未触碰(见 issue 的范围边界)。\n\n同时把两处 `.describe()` 里已经过时的形状说明补齐(`{name,label?,icon?,type?}` → `{name,label?,icon?,type?,readonly?}`),否则生成的组件参考文档会描述一个与 schema 不符的形状。\n\n## 前提复核(rule 6):issue 前提**成立**,已实测复现\n\n在 `origin/main`(`e900015cd`)上按 issue 所述逐条核对:union 为 `[string, object]`、对象成员非 `.strict()`、`readonly` 缺席且被静默剥离。剥离实测(改动前跑新增的保留测试):\n\n```\nAssertionError: expected undefined to be true\n ❯ src/ui/component.test.ts:229:28\n     expect(entry.readonly).toBe(true);\n```\n\n即 `{ name: 'supply_share', readonly: true, type: 'number' }` 解析后 `readonly` 为 `undefined` —— 与 issue 正文给出的 input/parsed 对照完全一致。\n\n## 先证红 → 后转绿\n\n按\"先写测试证红\"的要求,**先**写保留测试并在未修改的 schema 上跑红,再改 schema。事前预判的方向是**常规红**(删掉 `readonly` 这条 limb,新增的 pin 测试转红),实际与预判一致:\n\n改动前(5 个新增用例中 3 红 / 2 绿):\n\n```\nFAIL should preserve an authored readonly on an object-form highlight field\nFAIL should preserve readonly: false rather than dropping it\nFAIL should reject a non-boolean readonly instead of silently stripping it\n Test Files  1 failed | 314 passed (315)\n      Tests  3 failed | 8025 passed (8028)\n```\n\n另外 2 个用例(`不物化默认值`、`bare-string 与其它对象形式仍被接受`)是回归护栏,**改动前后都应绿**,实测也确实都绿 —— 它们不承担证红职责,如实标注。\n\n改动后(spec 全量):\n\n```\n Test Files  315 passed (315)\n      Tests  8028 passed (8028)\n```\n\n其中 `should reject a non-boolean readonly` 这一条值得单说:改动前 `readonly: 'yes'` 会被静默剥离从而**通过**解析,改动后 union 两个成员都失配、解析响亮失败 —— 这正是裁定里\"拼写/类型错误在闸门接通后响亮失败\"的那一半,现在在 schema 层就已兑现。\n\n## 消费半径清扫\n\n`record:highlights` 的下游读取方是 `packages/lint` 的 `validate-page-field-bindings.ts`(`COMPONENT_FIELD_SPECS['record:highlights'] = { props: ['fields'] }`)与 `validate-react-page-props.ts`,两者只从条目中取 `name`;本次是**纯增量**、未删除任何 limb,因此不存在需要重判的 fixture(fixture 三分类处置在此无适用项)。全仓 grep 也确认没有任何 fixture 拼写过 `readonly`。\n\n`packages/lint` 全量:`59 passed (59) / 1284 passed | 4 skipped`。\n\n## 生成物审查\n\n- `content/docs/references/ui/component.mdx` —— **本 PR 内唯一应当移动的生成物**,三处改动逐行可由这一个键解释:union 描述行、对象成员表新增 `readonly` 行、`fields` 行内类型因生成器满 4 个属性后截断而显示省略号。\n- `api-surface.json` —— **未移动**,已实测确认(`public API surface + factory signatures unchanged ✓`)。该文件只记录 `\"名字 (kind)\"` 字符串,不含类型文本,而本次未新增导出,因此结构上不可能移动。\n- `authorable-surface.base.json` —— **已 `git checkout` 排除,不入本 PR**(#5358 纪律)。`gen:schema` 会把它刷新到新 baseRev 并顺带吸收 3 个与本单无关的键(`system/EmailServiceConfig:appName` / `defaultTemplateContext` / `queueDelivery`,来自其它已合入 issue)。注意:它**不含**本次新增的 `readonly`。\n- 其余闸门(`check:spec-changes` / `upgrade-guide` / `skill-refs` / `skill-docs` / `skill-examples` / `react-blocks` / `react-declaration-parity` / `variant-docs` / `empty-state` / `strictness-ledger` / `liveness` / `doc-authoring` / `docs-audit-scope` / `nul-bytes`)全绿,未新增任何 `check:` / `gen:` 脚本,故无需登记 check-generated 台账。\n\n### 一处对派发预设的更正\n\n派发说明预期\"`component.zod.ts` 在 #5068 中实测 BFS 不可达,故 authorable-surface 不应移动\"。结论(不移动)对,但**理由需更正**:`ui/RecordHighlightsProps:fields` 本身**在**该 walk 里。真正的原因是这个 walk 是**严格一层**的 —— 全表 1080 个 `ui/` 键中带嵌套路径的为 **0**(`RecordRelatedListProps:add` 同样只记容器、不下钻 `add.picker.object`)。`readonly` 挂在 `fields` 数组项 union 的对象成员上,属于第二层,因此不产生新的 authorable-surface 键。对 #5068 实施者而言这是个有意义的差别:该键不会自动进入 authorable 面,闸门接通时需按 props 解析路径单独覆盖。\n\n## 验证命令\n\n```\nnpx vitest run --maxWorkers=2                       # packages/spec: 315 files / 8028 passed\nnpx vitest run --maxWorkers=2                       # packages/lint: 59 files / 1284 passed\npnpm --filter @objectstack/spec --filter @objectstack/lint typecheck   # 均 Done\npnpm --filter @objectstack/spec check:generated     # 建包后 10/10 绿\nnode scripts/check-nul-bytes.mjs                    # OK,另做控制字节自扫,干净\n```\n\n`check:api-surface` 与 `check:skill-examples` 在新工作树里初次为红,原因是尚未 `build` 出 `dist/`(闸门自身即提示 \"this gate reads the BUILT dist ... the removals above are phantoms\");建包后两者均转绿,与本改动无关。\n\n## Changeset\n\n`@objectstack/spec` **minor**(新增已声明协议键,additive)。\n\n## 后续项(不在本 PR)\n\n- **objectui**:在 `record:highlights` block 的 `inputs` 中声明 `readonly`,使其进入 `sdui.manifest.json` —— 裁定中明确可另 PR,由 objectui 车道承接。在此之前,AI 作者仍无法从 manifest 学到该键(`docs/audits/2026-06-react-blocks-conformance.md` 记为 \"zero inputs\")。\n- Option C(chips 读 form view 字段级 `readonly`)按裁定保留为后续便利层,未并入。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018fxLGQdatPbBUvCgiVxg6D)_"
+}

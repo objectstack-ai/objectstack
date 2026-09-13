@@ -1,0 +1,37 @@
+{
+  "number": 5425,
+  "kind": "issue",
+  "title": "objectui: two raw U+0000 bytes in `useDatasetFields.ts` make the whole file binary to grep",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T11:07:40Z",
+  "updated_at": "2026-08-05T12:59:07Z",
+  "closed_at": "2026-08-05T12:59:07Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5425",
+  "body": "Found while measuring objectstack#5407 (unrelated to that fix; filed separately per Prime Directive #10).\n\n`packages/app-shell/src/views/metadata-admin/inspectors/useDatasetFields.ts` uses a NUL character as a join separator, and it is stored as a **raw U+0000 byte** rather than as a six-character escape:\n\n- line 246 — `const includeKey = include.join(...)`\n- line 265 — `const includeList = includeKey ? includeKey.split(...) : []`\n\nBoth separators are a literal U+0000 in the file bytes. Reproduce:\n\n```\ngrep -rn \"resolveLabel\" packages/app-shell/\n# => packages/app-shell/src/views/metadata-admin/inspectors/useDatasetFields.ts: binary file matches\n\ngrep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]' packages/app-shell/src/views/metadata-admin/inspectors/useDatasetFields.ts\n# => 246, 265\n```\n\n### Why it matters\n\nOne raw control byte makes grep classify the **entire file** as binary: it prints `binary file matches` instead of the line, and with `-l`/`--include` filters in a pipeline it is routinely dropped altogether. Every agent and every human who searches this repo by content is blind to this file. It is the same failure family as objectstack#4763 / #4890 / #5140 / #5157, and it is currently invisible to the gates because objectui ships no `check:nul-bytes` equivalent.\n\n### Suggested fix\n\n1. Write the separator as the escape sequence (backslash-u-0000) so the source file stays plain ASCII while the runtime value is unchanged. Better still, use a separator that cannot be part of a field name (e.g. a newline or a comma) — the NUL is only being used as \"a character no identifier contains\", and the escape spelling makes that intent readable.\n2. Add a repo-level scan to objectui's `check` task so this cannot recur silently. The scan must cover more than U+0000: PR objectstack#5140 shipped a NUL **and** a U+0001 fourteen bytes away, and a NUL-only scanner missed the second (objectstack#5157).\n\n### Notes\n\nDo NOT paste the byte when writing about it — describe the escape. Two of the four prior incidents happened while an agent was writing documentation about the rule itself.\n"
+}

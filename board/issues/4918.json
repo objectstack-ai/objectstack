@@ -1,0 +1,37 @@
+{
+  "number": 4918,
+  "kind": "issue",
+  "title": "lint 规则:禁止对引擎/驱动查询选项做 `as any` / `: any` 擦除(#4721 的顺带项,已实测残余量)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T16:03:29Z",
+  "updated_at": "2026-08-05T20:46:35Z",
+  "closed_at": "2026-08-05T20:46:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4918",
+  "body": "#4721 正文最后一段的顺带项:「一条更便宜的内部护栏是 lint 禁止对引擎查询选项 `as any` —— 是否值得单开一单,**取决于树里这种擦除还有多少**」。#4721 的执行 agent 按 06:25Z 裁决要求做了这次测量,结论是**值得**,故按 Prime Directive #10 单独立项,**未认领**。\n\n## 实测(`origin/main` = `89d2a4e`)\n\n| 形状 | 非测试代码 | 测试代码 |\n|:--|--:|--:|\n| A. `.find(…) / .findOne(…) / .count(…) / .aggregate(…)` 调用里把参数 `as any` 掉 | **25** | 126 |\n| C. 局部变量声明成 `const opts/options/query/queryOptions/findOptions: any` | **11** | — |\n\nA 的样本(全部非测试):\n\n```\npackages/metadata/src/loaders/database-loader.ts:231  return this.engine.find(table, query as any);\npackages/objectql/src/engine.ts:4170                  await driver.find(object, …, hookContext.input.options as any)\npackages/objectql/src/engine.ts:3788                  ...(nestedAST.orderBy ? { orderBy: nestedAST.orderBy as any } : {}),\n```\n\nC 的样本:\n\n```\npackages/metadata-protocol/src/protocol.ts:4363  const options: any = { ...request.query };\npackages/metadata-protocol/src/protocol.ts:4822  const queryOptions: any = { … };\npackages/cli/src/commands/data/query.ts:75       const queryOptions: any = { … };\npackages/objectql/src/hook-wrappers.ts:461       const options: any = input.options;\npackages/runtime/src/domains/mcp.ts:349          const query: any = {};\npackages/plugins/plugin-sharing/src/sharing-plugin.ts:735  const options: any = ctx.options;\n```\n\n36 处非测试擦除不是「个位数、顺手清掉」的量级,也不是可以一次性全删的量级——其中一部分(`hookContext.input.options`、`buildDriverOptions` 的返回)是真的跨了类型边界,需要的是把边界类型补上而不是删 `as any`。\n\n## 为什么这条护栏针对的是 #4674 那一类\n\n#4674 的两个站点都不是「缺运行时闸」漏掉的,是**类型被擦掉**漏掉的:`} as any)` 和 `const opts: any`。`EngineQueryOptions.orderBy` 声明的就是 `SortNodeSchema[]`,`tsc` 本来完全有能力在写的那一刻拒绝 `direction`——它没拒绝,只因为那一行把类型抹平了。#4720 恢复了那两处,#4721 关掉了外部调用方那一侧;这一单是**防止同一类擦除再长出来**。\n\n注意这三单的分工,不要混:\n\n| 层 | 谁来管 | 状态 |\n|:--|:--|:--|\n| 内部调用方(包内代码、协议、插件) | `tsc`,前提是没人擦类型 | #4720 修了两处;**本单防复发** |\n| 外部调用方(REST / RPC 的 `orderBy`) | schema strict + ingress normalizer | #4721 已关 |\n\n## 建议形状(需要决定)\n\n1. **范围**:只管「引擎/驱动查询选项」这一个语义位,还是所有 `as any`?后者必然要一张巨大的 baseline,而这条规则的价值恰恰在窄——它要说的是「查询选项的类型是有意义的,别抹」。倾向窄。\n2. **落点**:`packages/lint` 里的自定义规则,还是 `scripts/check-*.mjs` 里的一个 AST 走查(仓里已有 `check-durability-log-level` / `check-startup-registry-verdict` 两个同形状的、带 shrink-only baseline 的走查)?后者与既有惯例一致,且天然支持「已存在的 36 处进 baseline、只禁新增」。倾向后者。\n3. **测试代码是否算**:126 处在测试里。测试里 `as any` 常常是构造非法输入的**正当**手段(#4721 自己的拒绝测试就要这么写)。倾向排除测试,或只在测试里禁「传给真引擎的合法查询」这一子集——但这个子集不好机械识别,所以更可能就是排除。\n\n三条都不是实现问题,是规则边界问题,建议由维护者拍板后再动手。\n\n关联:#4674、#4720、#4721、#4363。测量于 #4721 的实现过程。\n"
+}

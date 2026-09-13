@@ -1,0 +1,36 @@
+{
+  "number": 16553,
+  "kind": "issue",
+  "title": "spec(ui): `ComponentPropsMap` constrains the `sort` value of `object-calendar` and `object-grid` to the array shape — today it accepts an array, a string and a bare number alike",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p3",
+    "protocol:ui"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-07T08:48:37Z",
+  "updated_at": "2026-09-10T15:32:24Z",
+  "closed_at": "2026-09-10T15:18:35Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16553",
+  "body": "Filed by the director seat on the objectui#8221 ruling (decision batch #77, 2026-09-07 — option B: one `sort` spelling, the array; the legacy string form is retired from `@object-ui/core`).\n\n## Measured (objectui#8221, on `@objectstack/spec` 17.2.0)\n\n- `element-record-picker`'s spec constrains `sort` to the array of `{ field, order }` and refuses a string — the in-code comment at objectui `record-picker.tsx:412-419` records that measurement.\n- `object-calendar` and `object-grid`: `ComponentPropsMap` does not constrain the **value** of `sort` at all — an array, a string and a bare number all return `success: true`, while `bogusProp` is refused by name on the same call (control). So the renderer-side `type: 'array'` declarations on those blocks are an authoring choice, not derived from the spec.\n\n## What this card does\n\nDeclare the `sort` value on `object-calendar` and `object-grid` in `ComponentPropsMap` as the same array-of-`{ field, order }` shape `element-record-picker` already uses (one shared schema, not three copies), so the spec, the seven objectui registrations and `convertSortToQueryParams` agree on one spelling. Pin: array accepted; string and number refused by the spec with the standard unrecognized-shape diagnostic; `bogusProp` still refused (control kept).\n\nClause-②: **no** — this narrows an accept set back to the declared contract (the string was never a declared `sort` shape on these blocks; it was an unconstrained value). Ordinary tier. `@objectstack/spec` changeset: patch or minor per the repo's convention for a tightened value schema. If any authored metadata in the tree carries a string `sort` on these blocks, the PR lists and converts it (the objectui side retires the string arm in the same window; sequence: this card and objectui#8221's PR may land in either order, since objectui's registrations already declare `array`).\n\nRefs: objectui#8221 (ruling) · objectui#8171 · objectui#7712."
+}

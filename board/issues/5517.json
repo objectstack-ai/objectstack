@@ -1,0 +1,37 @@
+{
+  "number": 5517,
+  "kind": "issue",
+  "title": "driver-mongodb 测试:两个套件并发下载 MongoDB 二进制,mongodb-memory-server 的 rename 竞态让全绿测试 exit 1(队列 flaky)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "ci/cd",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T14:53:29Z",
+  "updated_at": "2026-08-05T17:05:46Z",
+  "closed_at": "2026-08-05T17:05:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5517",
+  "body": "发现于合并队列构建 [31016396703](https://github.com/objectstack-ai/objectstack/actions/runs/31016396703)(Test Core 3/3)对 PR #5508 的整批判红。**该 PR 零包源码改动**,失败与其无关 —— 这是队列级 flaky,按 pm-dispatch 队列健康职责立单。查重:`mongodb-memory-server` / `mongodb-binaries rename` 两轮检索无既有单。\n\n## 签名(日志原文)\n\n```\nstdout | src/mongodb-driver.test.ts\nDownloading MongoDB \"8.2.6\": 100% (122.6mb / 122.6mb)\nstdout | src/mongodb-filter-boolean-identity.test.ts\nDownloading MongoDB \"8.2.6\": 100% (122.6mb / 122.6mb)\n\n⎯⎯ Unhandled Rejection ⎯⎯\nError: ENOENT: no such file or directory, rename\n  '/home/runner/.cache/mongodb-binaries/mongodb-linux-x86_64-ubuntu2404-8.2.6.tgz.downloading'\n  -> '/home/runner/.cache/mongodb-binaries/mongodb-linux-x86_64-ubuntu2404-8.2.6.tgz'\n ❯ MongoBinaryDownload.js:413 (mongodb-memory-server-core@11.2.0)\n\n Test Files  14 passed (14)\n      Tests  319 passed | 8 skipped (327)\n     Errors  1 error\n ELIFECYCLE  Test failed.\n```\n\n## 机制\n\n`src/mongodb-driver.test.ts` 与 `src/mongodb-filter-boolean-identity.test.ts` 各自触发 `mongodb-memory-server` 的二进制下载,vitest 并行 worker 下**两个下载同时写同一个缓存路径**:都下到 100% 后,赢家先 rename 掉 `.tgz.downloading`,输家的 rename 报 ENOENT → unhandled rejection → **全部测试绿仍 exit 1**。\n\n两个叠加缺陷:\n\n1. **下载无单飞(single-flight)**:两个套件各自 `MongoMemoryServer.create()`,包级没有 globalSetup 预下载或跨 worker 锁;缓存命中时无事,冷缓存(队列 runner 常态)必然竞态。\n2. **boolean-identity 套件的优雅降级只接了一半**:它捕获了「起不来就跳过」(日志里 `Skipping boolean identity suite — timed out after 120s` 的兜底是工作的,8 条跳过),但**没有接住下载 promise 的 rejection** —— 跳过路径生效的同时,悬空的下载错误仍以 unhandled rejection 炸掉整个 run。修复至少要把这半边接住:降级即降级,不能一边跳过一边 exit 1。\n\n## 修复方向(实施者定,列作参考)\n\n- vitest `globalSetup` 单次预下载二进制(或 `MONGOMS_DOWNLOAD_DIR` 按 worker 隔离 / runner 层缓存预热),消除并发下载;\n- boolean-identity 套件的 skip 兜底同时 `catch` 下载 promise;\n- 上游 `mongodb-memory-server-core@11.2.0` 的已知形态,若有 upstream fix 可评估升级。\n\n## 影响\n\n- 队列过去 24h 有 10 次失败构建(triage bot 统计),本签名至少贡献本次;冷缓存 runner 上可复现概率高。\n- **对各车道 PM**:凡队列红中出现本签名(`ENOENT ... mongodb-binaries ... rename` + 全测试绿),按 notes 2 原样重投,不要改 PR;本单修复合入后同签名再现才需重新诊断。\n\n现场:PR #5508(受害者,已重投)。"
+}

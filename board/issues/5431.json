@@ -1,0 +1,35 @@
+{
+  "number": 5431,
+  "kind": "pull_request",
+  "title": "fix(driver-memory): analytics 面不再把比较数往返成 string[](布尔取 0 行、null 取全表)(#5373)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T11:10:51Z",
+  "updated_at": "2026-08-05T11:31:44Z",
+  "closed_at": "2026-08-05T11:31:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T11:31:42Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5431",
+  "body": "Fixes #5373\n\n## 根因:一个编码,两个出口\n\n`MemoryAnalyticsService` 把 `AnalyticsQuery.where` 降级成 cube 风格的\n`{member, operator, values}` 列表,而 `values` 是 `string[]` —— 所以每个比较数都要\n走一遍 JS 值 → 字符串 → JS 值的往返。这个往返对**任何本来就不是字符串的类型都是有损的**,\nissue 里的两个症状是同一个根因:\n\n- **布尔**:`stringifyForCube(true)` → `'1'` → `coerceFilterValue('1')` → **数字 `1`**\n  (`/^-?\\d+$/` 先命中),而记录里存的是 `true`。mingo 跨类型比较恒不等,所以\n  `{is_active: true}` **一行都不匹配**。\n- **`null`**:`flattenFilterCondition` 开头的 `if (raw == null) continue` 让\n  `{closed_at: null}` 连一条 cube 条目都不产生,谓词整条消失。少一个约束 = 多返回行,\n  查询**放大到全表**。这是 #3948 立规矩针对的方向,也是两者中更危险的那个 ——\n  空图表有人会发现,而被放大的图表和正常图表长得一模一样。\n\n关键在于这个编码**修不好**:注释里给布尔转 `'1'/'0'` 的理由\n(「downstream consumers expecting SQLite-style numeric booleans」)对**生成 SQL 的那一半\n成立,对 in-memory 那一半不成立**,而两半共用同一个编码。不存在一种 `true` 的字符串写法\n能同时满足 `WHERE is_active = ?` 和 mingo 对存储布尔值的 `$eq`。\n\n## 采用 Route B:不再往返\n\n`values` 内部改成 `unknown[]`,比较数保持作者写下的样子,只在 `generateSql` 这个\n**真正需要 SQL 字面量**的出口才字符串化。\n\n不选 A/C 的理由:A 是在 issue 自己称为可疑的编码之上再加一层标记;C 会拒掉\n`{is_active: true, stage: {$nin: ['lost']}}` —— 那正是 `AnalyticsQuerySchema.where`\n自己的 docstring 示例。\n\n### 前提已实测验证,不是假设\n\nB 成立的前提是这个三元组现在是**纯内部中间表示**。动手前先验证了这一点:\n\n| 检查项 | 结果 |\n|---|---|\n| `normalizeFilters` / `flattenFilterCondition` / `stringifyForCube` / `coerceFilterValue` / `toSqlLiteral` | 全部 `private`,仅在本文件内引用 |\n| `index.ts` 导出 | 只有 `MemoryAnalyticsService` 类和 `MemoryAnalyticsConfig` |\n| `IAnalyticsService` 契约 | 只有 `AnalyticsQuery` / `AnalyticsResult`,不含该三元组 |\n| `packages/spec` | 无任何声明 |\n| 线上格式 | **反向证据**:`spec/src/api/analytics.test.ts` 与 `runtime/src/http-dispatcher.test.ts` 各有一条测试,断言 cube 风格的 `filters` 数组会被**拒收** |\n\n所以本 PR **未触碰一个 spec 字节**。`service-analytics` 里同名的 `filter-normalizer.ts`\n是另一个包的独立实现,按 scope 围栏未动。\n\n## 两个出口都改了\n\n修法如果只让 mingo 满意、却让 SQL 表达另一件事,那只是把 bug 挪了个地方,所以两个出口\n一起钉:\n\n- `toSqlLiteral` 现在拿到真值,不必再从文本里猜类型 —— TEXT 列的 `'100'` 会加引号,\n  以前它和数字 `100` 长得一样,两者都不加引号地输出成 `code = 100`;\n- `null` 比较数编译成 `IS NULL` / `IS NOT NULL`,而不是 SQL 里恒不为真的 `= NULL`\n  (本次修复前是**根本不输出这个子句**,也就是放大方向);\n- 布尔保留 SQLite 风格的 `1`/`0` —— 那个理由对这一半一直是对的,只是不该被另一半共用。\n\n时间类比较数**仍然转换**,但改为借用 driver 自己的存储形式规则(新增窄接口\n`filterComparandStorageForm`,按声明的字段种类分派,#4047),而不是就地再写一个\n`toISOString()`。在本面内重新推导一遍该规则,正是 #5240 裁定要关掉的分叉。\n\n## 实测(issue 的 3 行固定数据,analytics 面 vs 同一 driver 的 `find()`)\n\n| `where` | 修复前 | 修复后 | `find()` |\n|---|---|---|---|\n| `{is_active: true}` | **0** | 2 | 2 |\n| `{is_active: false}` | **0** | 1 | 1 |\n| `{closed_at: null}` | **3** | 2 | 2 |\n| `{code: '100'}`(TEXT 列) | **0** | 2 | 2 |\n| `{is_active: {$ne: true}}` | **3** | 1 | 1 |\n| `{closed_at: {$ne: null}}` | **3** | 1 | 1 |\n\nissue 标注为**未验证**的第三个症状:已实测,**是真的**,且是同一根因、同一处修复覆盖 ——\nTEXT 列存 `'100'`、比较数写 `'100'`,往返成数字 `100` 后取到 0 行;`generateSql` 同时\n输出了不加引号的 `code = 100`。顺带测出 issue 未列出的另外两条同根因放大:\n`{is_active: {$ne: true}}` 与 `{closed_at: {$ne: null}}` 都返回全表。\n\n## 测试放在共享一致性覆盖里\n\n新用例进的是 #5375 刚扩到 analytics 面的那个共享文件,而不是独立测试文件。原因:\n`FILTER_LOGIC_CASES` 变化的是**过滤器形状**,而它的固定数据每一列都是字符串\n(有意为之,好让其中没有一条是关于类型强转的)—— 这恰恰是它在本缺陷下全绿的原因。\n新增的块变化的是**比较数类型**,守同一条不变量:与 `find()` 给出相同的行集,或者拒收。\n\n回归证明(按 #5375 的做法,只回退源码改动、保留测试):\n\n```\n× boolean true selects the true rows\n× a null comparand is a predicate, not an absent one\n× a numeric-looking STRING stays a string\n× negated boolean excludes only the matching rows\n× a null comparand becomes a nullness test, not a comparison\n× a numeric-looking string is quoted and a real number is not\n  ...\nTests  11 failed | 56 passed (67)\n```\n\n失败方向与 issue 描述一致:布尔/字符串是空集,`null`/`$ne` 是全表;两个出口都失败。\n恢复源码后 `Tests 67 passed (67)`。\n\n## 验证\n\n- `vitest run`(driver-memory 全包):**491 passed (17 files)**\n- `pnpm --filter @objectstack/driver-memory typecheck`:干净通过\n- `eslint --no-inline-config`(三个改动文件):无输出\n\n## 范围外\n\n- **#5374**(`$notContains` → 裸 mingo `{$not: 'x'}`)按要求未动。说明一下:本 PR\n  **没有**让它变简单,也**没有**顺带修好它 —— 它的调用点\n  `matchStage[fieldPath] = {$not: coerced[0]}` 现在拿到的是真值而不是字符串,但\n  `{$not: 'x'}` 约束不了任何东西这个问题在算子层,与比较数编码无关,仍需按原样单独修。\n- 另发现 `generateSql` 的**算子层**缺陷(与本 PR 的比较数编码无关,修复前后都存在):\n  `operatorToSql` 没有 `in`/`notIn`/`set`/`notSet` 的映射,回退到 `=`,且只取\n  `values[0]` —— 所以 `{code: {$in: ['100','200']}}` 输出 `WHERE code = '100'`。\n  形状与 #5345/#5374 同类,已另行记录,未在本 PR 修。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Pbu27iNUfQCHeuS551Rqo7)_"
+}

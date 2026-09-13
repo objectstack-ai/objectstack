@@ -1,0 +1,36 @@
+{
+  "number": 5555,
+  "kind": "issue",
+  "title": "`ui/app.zod.ts` 导航项:4 条 `expanded` 别名在另外 8 个变体上把作者指向该变体同样拒绝的键(二次拒绝)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T17:22:57Z",
+  "updated_at": "2026-08-05T23:43:32Z",
+  "closed_at": "2026-08-05T23:43:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5555",
+  "body": "由 #5483 的过渡看守新装的判据实测发现(范围外,未指派)。**具体缺陷**:错误信息把作者指向一个下一步同样会被拒的键。\n\n## 现状\n\n`packages/spec/src/ui/app.zod.ts` 的 `NAV_ITEM_ALIASES` 是**九个导航项变体共用**的一张别名表,其中四条指向 `expanded`:\n\n```ts\ndefaultopen: 'expanded',\nopen: 'expanded',\ncollapsed: 'expanded',\nisopen: 'expanded',\n```\n\n但 `expanded` 只声明在 `group` 变体上(`NAV_VARIANT_KEYS.group = ['expanded', 'children']`)。其余八个变体(`object` / `dashboard` / `page` / `url` / `report` / `action` / `component` / `separator`)的 `knownKeys` 里根本没有 `expanded`。\n\n于是在这八个变体上,作者的路径是:\n\n1. 写 `{ type: 'url', url: '/x', defaultOpen: true }`\n2. 得到 `Unrecognized key(s) on this `url` navigation item: `defaultOpen`. … Did you mean `defaultOpen` → `expanded`?`\n3. 照做写成 `expanded: true`\n4. **再次被拒**,而且第二次没有任何建议\n\n这正是 #5013 立案时那条 `ReportSchema` 的 `filter → filters`、以及 ledger finding 7 的形状:#4001 战役自己的修复,把作者指进它要消灭的失败模式。\n\n## 证据\n\n新判据(别名 target 必须是本表的已知键)在 44 个直调点上跑出 32 条,全部是这一个根因 —— 4 个别名 × 8 个变体:\n\n```\n\"this `url` navigation item\": `collapsed`   -> `expanded` — `expanded` is not a known key here\n\"this `url` navigation item\": `defaultopen` -> `expanded` — `expanded` is not a known key here\n\"this `url` navigation item\": `isopen`      -> `expanded` — `expanded` is not a known key here\n\"this `url` navigation item\": `open`        -> `expanded` — `expanded` is not a known key here\n…(其余 7 个变体同形)\n```\n\n同一批测量里另外两条判据(别名 key 不得是已知键、表内 `aliasProbe` 不得撞车)在这 44 张表上是干净的,所以这 32 条不是噪声底噪,是唯一的信号。\n\n## 为什么会写成这样(机制,不是粗心)\n\n同一个文件里紧接着的六条**跨变体**别名已经解决了同一个问题,用的是散文式 target:\n\n```ts\n...(variant !== 'object' ? { objectname: \"type: 'object' (with objectName)\" } : {}),\n...(variant !== 'url'    ? { url: \"type: 'url' (with url)\" } : {}),\n```\n\n作者显然知道\"键名对、变体错\"不能用裸键名回答。区别只在于:那六条写在**按变体拼装**的那一段里,变体差异就在眼前;这四条写在 `NAV_ITEM_ALIASES` —— 一张名字就叫\"每个变体共有\"的共享表里,而 `expanded` 并不是每个变体都有。\n\n## 建议的修法(未在此擅自决定)\n\n把这四条从共享表挪到按变体拼装的那一段,给非 `group` 变体一个散文 target,与既有六条同形:\n\n```ts\n...(variant !== 'group' ? {\n  defaultopen: \"type: 'group' (with expanded)\",\n  open: \"type: 'group' (with expanded)\",\n  collapsed: \"type: 'group' (with expanded)\",\n  isopen: \"type: 'group' (with expanded)\",\n} : { defaultopen: 'expanded', open: 'expanded', collapsed: 'expanded', isopen: 'expanded' }),\n```\n\n这会改动**面向作者的报错文案**,所以没有在 #5483 的 PR 里顺手改:那张单子的硬约束是不动 44 个调用点本身。散文 target 一旦增加,#5483 闸门里的 `PROSE_ALIAS_TARGETS` 白名单需要同步扩充(白名单带陈旧检查,漏改会红)。\n\n## 当前缓解\n\n#5483 的闸门把这 32 条钉成**只减不增**的已知债(`toBeLessThanOrEqual(32)`),并且判定规则是结构化的 —— 只放过\"nav 变体表 + 这四个别名 key + target 恰为 `expanded`\"这一种组合,别的破损 target(包括这张表上第五种\"展开\"拼法)一律直接红。所以这条债只会缩,不会悄悄长。\n\n复现:`pnpm --filter @objectstack/spec exec vitest run src/shared/alias-integrity.test.ts`,把 `isPinnedExpandedDefect` 的调用去掉即可看到 32 条。\n"
+}

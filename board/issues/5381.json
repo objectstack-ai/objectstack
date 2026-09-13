@@ -1,0 +1,35 @@
+{
+  "number": 5381,
+  "kind": "pull_request",
+  "title": "fix(cli): 非法 OS_TENANCY_POSTURE 在 serve 最开头被显式拒绝，不再伪装成 AuthPlugin 加载失败 (#5359)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T03:03:00Z",
+  "updated_at": "2026-08-05T03:54:15Z",
+  "closed_at": "2026-08-05T03:54:14Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T03:54:14Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5381",
+  "body": "Fixes objectstack-ai/objectstack#5359\n\n## 修了什么\n\n`resolveTenancyPosture()`（`@objectstack/types`）对无法识别的 `OS_TENANCY_POSTURE` 抛错，文案自称「Refusing to boot rather than silently falling back to a posture with no organization wall」。**拒绝本身一直是对的，错的是这个拒绝怎么传出去。**\n\n`serve` 过去没有单独解析 posture，而是让抛错从「第一处读到它的地方」自然逃逸 —— 而那个位置恰好落在 AuthPlugin 那个很宽的 `try` 里，它的 catch 只打印一句黄字就继续。于是一个 env 拼写错误的第一现场是：\n\n```\n  ⚠ AuthPlugin failed to load: Invalid OS_TENANCY_POSTURE=\"bogus\". Expected one of: …\n```\n\n把环境变量拼错报成了插件加载问题。启动随后带伤继续：整个 capability slate 照常装载，本地 crypto 密钥被生成并**持久化到磁盘**，直到下一处没有被 `try` 包住的读取才中止，最终由通用 `printError` 把解析器那句话裸着打出来。退出码对，别的都不对。\n\n## 怎么修的\n\n`serve.run()` 现在在一个固定位置解析一次 posture，非法值走 ADR-0093 D5 同款形状的显式拒绝：\n\n```\n  ✖ FATAL: OS_TENANCY_POSTURE=\"bogus\" is not a recognized tenancy posture.\n    Refusing to boot. Falling back to a default would silently drop the organization wall a\n    walled deployment asked for — a posture typo must never be the thing that removes it\n    (ADR-0105 D1; same refusal contract as ADR-0093 D5).\n\n    No config has been loaded, no plugin has been mounted, and the HTTP server was\n    never started — this deployment has not served a single request.\n\n    Fix one of:\n      • set OS_TENANCY_POSTURE=single — one organization, no organization wall — the default\n      • set OS_TENANCY_POSTURE=group — organization wall enforced by the open engine, one shared database\n      • set OS_TENANCY_POSTURE=isolated — organization wall + the enterprise @objectstack/organizations runtime (…)\n      • unset OS_TENANCY_POSTURE entirely — the posture then derives from OS_MULTI_ORG_ENABLED\n        (true ⇒ isolated, anything else ⇒ single).\n\n    Checked the process environment and every .env file dotenv-flow loaded for this mode,\n    so a stale value in a committed `.env*` is as likely a source as the shell.\n\n    cause: Invalid OS_TENANCY_POSTURE=\"bogus\". Expected one of: single, group, isolated (…)\n```\n\n几处刻意的设计：\n\n- **位置是有承载的，两头都是。** 放在 `dotenvFlow.config()` **之后** —— 该变量常来自提交进仓库的 `.env*`，闸门放在载入之前会把它读成 unset、放行，然后把非法值原样交回那条会被吞掉的路径；同时放在本方法**所有 `try` 之外**，任何 catch 都无法降级它。\n- **拒绝是返回值，不是 throw。** `resolveTenancyPostureOrRefusal()` 返回 verdict 而非抛出 —— throw 正是当初被宽 catch 变成一句 warning 的那种东西。这是本次修复的核心属性。\n- **修法清单由 `TENANCY_POSTURES` 生成**，不是第二份字面量，新增一个 posture 不会让建议悄悄过期。\n- **`cause` 保留解析器原话**，不转述：vocabulary 与措辞归 `@objectstack/types`，serve 不维护会跟它打架的第二份。\n- **后续读取复用同一个值**（组织插件装载判断、启动横幅的 `Tenancy:` 行）。横幅那处尤其值得说：它此前是非法 posture 的**最后一道防线**，等于让一个诊断输出承担安全属性。\n\n`packages/types/src/env.ts` **未改动** —— 解析器的语义和文案是对的。\n\n## ⚠️ 对 issue 前提的一处订正（请复核）\n\nissue 的静态追踪认为「进程在报错前已经 listen 过」，并据此把 `printServerReady` 认定为最终抛错点。**实测不成立。** 逃逸的抛错来自更早的位置：\n\n```\nError: Invalid OS_TENANCY_POSTURE=\"bogus\". …\n    at resolveTenancyPosture (packages/types/dist/index.mjs:58:13)\n    at new SchemaRegistry (packages/objectql/dist/index.mjs:447:46)      ← packages/objectql/src/registry.ts:757\n    at new _ObjectQL  →  ObjectQLPlugin.init\n    at ObjectKernel.initPluginWithTimeout  →  ObjectKernel.bootstrap     ← Phase 1\n    at async Runtime.start  →  at async Serve.run\n```\n\n而监听套接字是在 `packages/core/src/kernel.ts` 的 **Phase 4**（`kernel:listening` 钩子，第 403 行）才打开的，Phase 1 的插件 init 抛错会先让 `bootstrap()` 中止。用一个每 10ms 轮询 TCP 端口的探针实测：\n\n| | exit code | 端口曾被监听 |\n|---|---|---|\n| 修复前，`OS_TENANCY_POSTURE=bogus` | 1 | **false** |\n| 修复后，`OS_TENANCY_POSTURE=bogus` | 1 | false |\n| 对照组，`OS_TENANCY_POSTURE=single` | （持续运行） | true（3.7s 时） |\n\n（对照组证明探针本身是有效的，不是「探针测不到」。）\n\n所以「端口从未绑定」**修复前后都成立**，本 PR 没有把它当作修复生效的证据 —— 一条因为「什么都没产生」而通过的断言什么也证明不了。**本次真正改变的**是：拒绝成为第一条也是唯一一条输出、归因正确、带处方，且启动不再留下任何副作用（修复前那次「被拒绝」的启动会在 `$OS_HOME` 留下持久化的 dev crypto key；修复后该目录为空）。\n\nissue 里那条更实际的担忧（「这条路径依赖 banner 一定会执行来兜底」）方向是对的，只是兜底者认错了人 —— 实际兜底的是 ObjectQL registry 的构造，而那同样是**顺带**的、非刻意的闸门。本 PR 把这个拒绝交给一个刻意的闸门拥有。\n\n## 测试\n\n新增 `packages/cli/src/commands/serve-tenancy-posture-gate.test.ts`（11 条）。此前 `packages/cli` 零测试钉住这个行为。\n\n反向核验**先定方向后执行**：预测「只回退闸门的**放置位置**、保留 helper，应当只有那条顺序断言翻红，10 条纯文案断言不受影响」。实测完全符合：\n\n```\n ❯ src/commands/serve-tenancy-posture-gate.test.ts (11 tests | 1 failed)\n     × refuses before the config file is even read, and writes nothing else\nAssertionError: expected 'EEXIT: 1' to be '__PROCESS_EXIT__:1'\n Tests  1 failed | 10 passed (11)\n```\n\n`EEXIT: 1` 是 oclif 从「Nothing to serve」那条路径退出的错误 —— 正好说明启动已经走过了配置载入，也就是 issue 描述的那个形态。恢复修复后 11/11 通过。\n\n命令与结果（均在容器共享 verify 锁下、`--maxWorkers=2`）：\n\n```\npnpm --filter @objectstack/cli typecheck        → tsc --noEmit，无输出（通过）\nnpx vitest run --maxWorkers=2                   → Test Files 71 passed，Tests 652 passed\nnpx vitest run src/commands/serve-tenancy-posture-gate.test.ts → 11 passed\nnpx eslint <改动文件>                            → 0 errors 0 warnings\nnode scripts/check-nul-bytes.mjs                → OK (5394 files)\nnode scripts/check-adr-anchors.mjs              → OK (29 anchored)\n```\n\n真机核验（`examples/app-crm`，`os serve`）：非法值下 FATAL 是唯一输出、无 `AuthPlugin failed to load`、无配置载入、`$OS_HOME` 为空；`single` 正常启动且横幅 `Tenancy: single`；`isolated` 仍正确落到 ADR-0093 D5 那道闸门。\n\n## 影响面\n\n`packages/cli/src/commands/serve.ts` + 新测试 + changeset。`os dev` / `os start` 都是把 `serve` 作为子进程拉起、且自身不解析 posture，因此闸门覆盖三个入口。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01VkPSGsX9o17MsGv3Lbxu2w)_"
+}

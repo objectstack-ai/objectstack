@@ -1,0 +1,36 @@
+{
+  "number": 16737,
+  "kind": "issue",
+  "title": "service-analytics: `AVG()` over a `Field.datetime` measure returns SQLite's text→numeric coercion (an average YEAR) with no error, and `derived: { op: 'difference' }` renders the difference of two of them as a clean plausible number",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-08T02:51:48Z",
+  "updated_at": "2026-09-10T17:07:36Z",
+  "closed_at": "2026-09-10T06:13:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16737",
+  "body": "Split out of #16707 (\"One more, adjacent, and load-bearing\"), where the filer wrote *\"Say the word and I will split it out.\"* The two lint findings that card carried are already fixed on `main` (see the triage comment there); this one is not, and it is the only live item, so it gets its own card rather than keeping that one open.\n\n⛔ Filed by the triage seat, unassigned. The measurement below is the original filer's (`objectstack-ai/hotclm`, `@objectstack/*` 17.3.0, `better-sqlite3` 13.0.3, single-org dev posture); ⛔ I did not re-drive it. What I did verify is the in-repo half, marked as such.\n\n## The measurement (reported, not re-driven)\n\n```\nsqlite> select typeof(submitted_at), submitted_at from clm_contract limit 1;\ntext|2026-05-19T00:00:00.000Z\n\nsqlite> select avg(submitted_at) from clm_contract;\n2025.9166666666667        ← SQLite's text→numeric coercion: the average YEAR\n```\n\nDownstream, `derived: { op: 'difference', of: [avg_a, avg_b] }` **does not error** — it parses, runs, and returns `-0.849999999999909`: the difference of two average years, a clean plausible number that renders happily on a dashboard tile.\n\n## Why this is the dangerous shape\n\nA wrong number that *looks* wrong gets caught by the first reader. This one does not: `-0.85` on a tile labelled \"average cycle time delta\" is exactly what a correct answer looks like. The filer's own note is the point — *\"That is the form that would have shipped had the app not asked what the number meant.\"*\n\nNothing refuses it at any layer: not the schema, not `os validate` / `os lint`, not the analytics service, not the renderer.\n\n## In-repo half, verified on `origin/main` `5e53d73d`\n\nThe annotation the filer flagged is real, and it is **not** a single site:\n\n```\ngit grep -n 'INTEGER epoch' origin/main -- packages/services/service-analytics/src/\n  strategies/native-sql-strategy.ts:963   \"A SQLite `Field.datetime` column carries an INTEGER epoch (a `Date` write)\"\n  strategies/objectql-strategy.ts:1669    \"a SQLite `Field.datetime` is an INTEGER epoch (#2034)\"\n  __tests__/native-sql-datetime-filter.test.ts:9, :80\n  analytics-service.ts:493   \"INTEGER epoch (a `Date` write) and ISO TEXT (a REST/JSON write, a `NOW()` …\"\n  plugin.ts:662              \"holds BOTH storage forms — INTEGER epoch from a `Date` write, ISO TEXT from …\"\n```\n\n⭐ **The package already contradicts itself.** `analytics-service.ts:493` and `plugin.ts:662` state the column holds **BOTH** storage forms depending on the write path; `objectql-strategy.ts:1669` states flatly that it **is** an INTEGER epoch. The filer's row was written through a REST/JSON path, which is precisely the case the first two describe and the third denies. So the reported TEXT reading is consistent with what the package's own newer comments say — it is the older flat claim that is stale.\n\n⚠️ Not measured here: whether `NativeSQLStrategy`'s `coerceTemporal` (which the `:1669` docblock cites as the reason that path needs coercion) is correct for the mixed-storage reality, or is itself written against the flat claim. **That is the first thing to establish**, and ⛔ it must not be assumed either way from this card.\n\n## What is NOT claimed\n\n- ⛔ Not that `AVG()` over a datetime should have a defined meaning. It may well be that the right answer is to refuse it.\n- ⛔ Not that the remedy is the comment. The filer explicitly declined to pick: *\"the remedy could be the comment, the storage, or a duration primitive.\"*\n- ⛔ Not re-confirmed on a second dialect. On Postgres/MySQL a text→numeric coercion of an ISO string does not silently succeed the way SQLite's does, so the **silent** half may be SQLite-specific while the **meaningless** half is not.\n\n## Acceptance\n\n1. **Establish the storage reality first**, and write it down in one place: for `Field.datetime` on SQLite, which write paths produce INTEGER and which produce TEXT. Every remedy below depends on this, and the package currently states two incompatible answers.\n2. **Reconcile the annotations** — `native-sql-strategy.ts:963` and `objectql-strategy.ts:1669` must agree with `analytics-service.ts:493` / `plugin.ts:662`, whichever direction the reading settles. ⛔ Do not fix only the one the filer quoted.\n3. **Decide and implement one refusal or one definition** for an aggregate over a datetime measure. Whichever is chosen, the acceptance criterion is the same: the shape the filer measured must stop producing a **plausible** number. Either it errors, or it returns something a reader cannot mistake for a duration.\n4. **`derived` compounding is part of the scope, not a follow-up.** An `op: 'difference'` over two such aggregates is where the nonsense becomes presentable; a fix that only refuses the bare aggregate while `derived` keeps accepting its output leaves the demonstrated failure intact.\n5. **Second dialect**: confirm the behaviour on Postgres or MySQL before closing, and say which half (silent vs meaningless) is dialect-specific.\n6. **Negative control**: an `AVG()` over a genuine numeric measure must still work, and a `datetime` used as a **dimension** (grouping, date-range filtering) must be untouched — this card is about aggregation only.\n\nRelated: #16707 (the card this was split from) · #2034 (the annotation's source) · ADR-0053 D-F1/D-F3 and #16728 (the neighbouring question of what a SQLite datetime read door hands back — same storage, different layer)."
+}

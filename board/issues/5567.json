@@ -1,0 +1,37 @@
+{
+  "number": 5567,
+  "kind": "issue",
+  "title": "analytics 侧三个 SQL 编译器都不转义 LIKE 比较值:`$contains: '_admin'` 命中 `xyadmin`、`$contains: '50%'` 命中 `off 5012 now` —— driver-sql 自己把这条旁路标为 P0 —— 实测",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T18:40:53Z",
+  "updated_at": "2026-08-05T20:19:13Z",
+  "closed_at": "2026-08-05T20:19:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5567",
+  "body": "做 #5557(`convertFilter` 把 `contains` 送成未声明的 `$regex`)时,为了给「比较值带元字符」的用例挑一个能站住的断言面,必须逐个核对 `$contains` 落到各个编译器之后**到底绑出什么 pattern**。在这一步发现的分叉。\n\n**不属于 #5557 的范围面**(那一单裁的是「送 `$regex` 还是送 `$contains`」这个算子选择,修完之后 `$contains` 到达驱动,`driver-sql` 会正确转义;本条裁的是 analytics 自己那三个 SQL 编译器**收到正确的 `$contains` 之后**怎么拼 LIKE pattern),按 Prime Directive #10 单独记在这里,unassigned。也不在 #5526 的范围面内:#5526 裁的是 `unknown` 到 `string` 再回来的**类型**往返有损(`'007'` 绑成 `7`),本条的字符串一路都保真,坏在它被原样插进了一个 pattern 位置。\n\n## 位置\n\n三处,都是 `values[0]` 直接做字符串拼接,没有转义、也没有 `ESCAPE` 子句:\n\n- `packages/services/service-analytics/src/read-scope-sql.ts` 的 `compileOperator`(约 :237):\n\n      case '$contains':    return `${col} LIKE ${bind(params, `%${String(val)}%`)}`;\n      case '$notContains': return `${col} NOT LIKE ${bind(params, `%${String(val)}%`)}`;\n      case '$startsWith':  return `${col} LIKE ${bind(params, `${String(val)}%`)}`;\n      case '$endsWith':    return `${col} LIKE ${bind(params, `%${String(val)}`)}`;\n\n- `packages/services/service-analytics/src/strategies/native-sql-strategy.ts` 的 `likePattern`(约 :666)—— 这是**实际执行**的那一条;\n- `packages/services/service-analytics/src/strategies/objectql-strategy.ts` 的 `LIKE_SQL_OPS`(约 :39)—— #5333 / PR #5558 新建的表,只用于 `/analytics/sql` 回显。\n\n对照:`packages/plugins/driver-sql/src/sql-driver.ts` 的 `applyLike`(约 :6276)**是**转义的,而且绑了显式 `ESCAPE '\\'`(注释说 SQLite 不认默认转义符),它自己在 `applyContainsLike` 头上写着:\n\n> `%` matches every row (a filter-bypass, P0). Binds an explicit `ESCAPE '\\'`\n\n也就是同一族 pattern 拼接,驱动那一侧已经按 P0 处理过了,analytics 这三处没有跟上。\n\n## 实测\n\n绑定层(三个编译器,`name` 为字符串维度):\n\n| 编译器 | 算子 | 比较值 | 绑出的 param |\n|---|---|---|---|\n| `read-scope-sql` | `$contains` | `_admin` | `%_admin%` |\n| `read-scope-sql` | `$startsWith` | `_admin` | `_admin%` |\n| `read-scope-sql` | `$endsWith` | `_admin` | `%_admin` |\n| `read-scope-sql` | `$contains` | `50%` | `%50%%` |\n| `read-scope-sql` | `$contains` | `a_b` | `%a_b%` |\n| `native-sql-strategy` | `$contains` | `_admin` | `%_admin%` |\n| `native-sql-strategy` | `$contains` | `50%` | `%50%%` |\n| `objectql-strategy`(回显) | `$contains` | `_admin` | `%_admin%` |\n| `objectql-strategy`(回显) | `$contains` | `50%` | `%50%%` |\n\n行结果(真 SQLite / `sql.js`,4 行:`x_admin` / `xyadmin` / `off 50% now` / `off 5012 now`,经 `compileScopedFilterToSql` 编译后执行):\n\n| `where` | 取到 | 应为 |\n|---|---|---|\n| `{name: {$contains: '_admin'}}` | **`['1','2']`** | `['1']` |\n| `{name: {$contains: '50%'}}` | **`['3','4']`** | `['3']` |\n\n`_` 在 LIKE 里是**单字符通配**,所以 `xyadmin` 被 `_admin` 命中;`%` 是多字符通配,所以 `off 5012 now` 被 `50%` 命中。两条方向都是**放大**。\n\n## 为什么是 bug\n\n1. **`read-scope-sql.ts` 这一处的放大是越权,不是降级的筛选。** 这个编译器编的是 ADR-0021 D-C 的读作用域(tenant + RLS),整个文件的其余部分是 fail-closed 写的(`$in` 不是数组就抛、嵌套关系就抛、未知算子就抛)—— 唯独 LIKE 族安静地把作者的字面量当成 pattern。一条 `{owner_name: {$contains: '_admin'}}` 形状的作用域会多放进它没打算放的行。这与 #5347 / #5324 在同一个文件上立的规矩(「在读作用域上,放大是越权,不是降级的筛选」)是同一句话。\n2. **`_` 撞车是真实业务形状,不是构造出来的边角。** 下划线在机器名 / 前缀约定里到处都是(`sys_user`、`crm_account`、`_admin`、`app_`),而 ObjectStack 自己的命名规范(Prime Directive #3:machine names → `snake_case`)保证了**每一个** snake_case 比较值都带至少一个 LIKE 通配符。作者按名字筛一个 `snake_case` 值,几乎必然踩到。`%` 那半更容易被看见(折扣、百分比),但 `_` 那半更普遍且完全无声。\n3. **declared ≠ enforced,而且驱动这半已经做对了。** 同一个 `$contains` 在 `driver-sql` 上是转义的字面子串、在 analytics 的三个编译器上是 pattern —— 同一个 dashboard 走 `NativeSQLStrategy`(有 `executeRawSql`)和走 `ObjectQLStrategy`(经引擎到 driver-sql)会返回不同行集,这正是 #5557 论证第 3 条的形状,只是换了一层。\n4. **回显那一处方向相反,但也不一致。** `objectql-strategy.ts` 的 `LIKE_SQL_OPS` 只喂给 `/analytics/sql` 的回显字符串,不执行 —— 但它存在的唯一理由是复现执行(#5333 的原话)。若只修执行侧不修回显侧,回显又会和执行分叉,是 #3601 / #3602 / #3650 那一族。三处应当一起看。\n\n## 建议(不代裁决)\n\n- 一个共用的 `escapeLikePattern(v)`(转义 `\\`、`%`、`_`)+ 每处 `LIKE ? ESCAPE '\\'`,与 `driver-sql` 的 `applyLike` 对齐 —— 三个编译器都改,回显那一处也改(否则回显与执行再次分叉)。`escapeLikePattern` 放哪里需要裁:`driver-sql` 自己那份是私有方法,analytics 不依赖任何驱动,所以要么在 `@objectstack/core` 起一个共享的、要么各自实现(第二份实现正是 #3948 那一族缺陷的来源)。\n- `ESCAPE` 子句的方言差异需要确认:SQLite / Postgres / MySQL 对 `LIKE … ESCAPE '\\'` 的支持我只在 SQLite(`sql.js`)上跑过。`read-scope-sql.ts` 的输出是拼进上层语句的,`bind()` 只管 `?`,所以 `ESCAPE` 加在哪一层也要一起看。\n- `$notContains` 同样受影响(方向是**缩小**:多排除行),表里没单独列,机制同一条。\n\n## 未验证的部分\n\n- 只在 SQLite(`sql.js`)上实测了行集。没有在 Postgres / MySQL 上跑,也没有确认各自的 `ESCAPE` 方言。\n- 只测了 `$contains` 的行集;`$startsWith` / `$endsWith` / `$notContains` 只测到绑定层(pattern 里带着未转义的 `_` / `%`),没有逐个跑行集。\n- 没有统计现网有多少读作用域 / widget 的 `where` 带 `_` 或 `%` 的比较值。严重度请 PM 按 triage 定 —— 我倾向它比读起来严重(`snake_case` 是本仓强制的命名规范,见上第 2 点),但 #5557 的分诊经验是这类判断两个方向都不可靠,所以只把实测摆在这里。\n\n关联:#5557 / PR #5566(同一轮核对里发现;它裁的是算子选择,修完之后本条才是唯一剩下的转义缺口)、#5333 / PR #5558(`LIKE_SQL_OPS` 这张表的来源)、#4706(`$regex` 在 driver-sql 上编译成子串 LIKE 的语义待裁)、#5234(driver-sql 的 LIKE 族对象比较值)、#5444(driver-memory analytics 回显的 `contains` 少了 `%` —— 方向相反的同族缺陷)、#5347 / #5324(`read-scope-sql` 上「放大即越权」的先例)。\n"
+}

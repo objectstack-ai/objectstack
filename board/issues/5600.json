@@ -1,0 +1,35 @@
+{
+  "number": 5600,
+  "kind": "pull_request",
+  "title": "feat(lint): 禁止把引擎查询选项擦成 `any`,存量入计数 baseline 只减不增 (#4918)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "size/l",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T20:15:23Z",
+  "updated_at": "2026-08-05T20:46:35Z",
+  "closed_at": "2026-08-05T20:46:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T20:46:34Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5600",
+  "body": "Fixes objectstack-ai/objectstack#4918\n\n## 一、前提重测(派发口径的硬要求)\n\n正文的测量基于 `89d2a4e`(08-03)。本分支基于 `e900015cd`(08-05,后并入 `e0b2ea72d`)重测,**逐形状**结果:\n\n| 形状 | 非测试 | 测试 |\n|:--|--:|--:|\n| A. `find` / `findOne` / `count` / `aggregate` 的选项参数(第 1、2 位)被 `any` 断言擦掉 | **80** | 266 |\n| B. `orderBy: … as any`(比参数低一层,A 的选择器看不到) | **1** | 0 |\n| C. 拆开写的 `const opts: any = { … }` … `find(o, opts)`(作用域解析,非命名启发) | **3** | 1 |\n| 合计 | **84 处 / 19 文件** | **267 处 / 51 文件** |\n\n比正文的 25+11 多,不是少 —— **前提成立,而且更强**。这不是两天里长出来的:正文的 A 是按 `} as any)` 这类文本形状数的,AST 口径把同一个类的其它拼法(标识符参数、第 2 位的 `hookContext.input.options as any`、`aggregate` / `count`)一起算进来了。84 处的源行逐条人工核对过,**零误报** —— 全部是真的 engine / driver 查询调用。存量清单进 `scripts/query-options-erasure-baseline.json`。\n\n## 二、形态选择:eslint 规则 + 计数 baseline(不是 `scripts/` 独立走查)\n\n判据是「哪种已有同形先例且能双向证红」。同形先例就在隔壁:`#4251` 的 slot-lookup 是**同一个类**(把已声明的契约擦成 `any`),它的形态是 eslint 规则 + `ignores` 按文件豁免 + 计数 shrink-only baseline + `check-slot-lookup-ratchet.mjs` 复测。本单照抄这套机制,理由:\n\n1. 擦除是 `packages/**` TS 源码上的**词法 / 作用域**形状,ESLint 已经在 CI 解析这片源码(`pnpm lint`),独立走查要再解析一遍;\n2. 更重要的是:**未被豁免的文件会直接让 `pnpm lint` 变红**,这是本地最快的信号。独立走查给不了这个。\n\n⛔ 没有碰 `packages/lint`(那是 metadata graph 的 linter,不是仓库自身 TS 源码的 linter),所以也没有碰互斥声明里的 `packages/lint/src/validate-react-page-props.ts`。\n\n## 三、规则\n\n新规则 `query-options/no-any-erasure`(`eslint.config.mjs`),覆盖三个形状:\n\n- **参数位**:第 1、2 个实参上的 `any` 断言。第 0 位在这四个签名上一律是对象名,所以从 1 起算 —— 顺带也把 `Array.prototype.find(cb)`(同名方法、回调在第 0 位)整个排除在外,不靠白名单。\n- **`orderBy`**:`...(ast.orderBy ? { orderBy: ast.orderBy as any } : {})` 坐在一个本来有类型的选项字面量里面,参数位检查看不见它。`orderBy` 按名入围,因为它就是 #4674 拼错的那个键。\n- **拆开写**:`const opts: any = { … }` 之后 `find(o, opts)` —— #4674 的 global search 站点用的正是这个形状。走**作用域解析**而不是标识符名字:按名字匹配会误伤仓里每一个 `const options: any`(不管它有没有流向查询),又漏掉别的拼法。作用域分析不需要类型信息,所以仍然留在无类型 lint pass 里。\n\n断言链是**整条**走的,`{ … } as any as EngineQueryOptions` 也算 —— 那个拼法先把字面量对着 `any` 检查(等于不检查),再贴回契约的名字,擦除程度和裸 `as any` 一样,读起来却像有类型。\n\n`as unknown as EngineQueryOptions` **故意不算**。它点名了自己在绕过哪个契约、保留了调用其余部分的检查、而且 grep 得出来是个有意行为 —— 裸 `as any` 三条都不满足。所以它是「这个值就是故意越契约的」(例如一条断言引擎会**拒绝**未知选项的测试)的规范拼法。\n\n**为什么是独立 plugin 规则而不是再加三条 `no-restricted-syntax` 选择器**,两个理由都是硬的:\n\n1. flat config **不合并**规则选项。第二个块在 `packages/**` 上再设一次 `no-restricted-syntax`,会把 slot-lookup 那块的选择器列表在两块都命中的文件上**整体替换掉**,等于静默删掉那条规则。两个门禁还需要各自独立的 `ignores`(未清扫集合是不同的文件),一个共享块给不了。\n2. 拆开写的形状需要**作用域分析**把标识符解析回它的声明,esquery 表达不了 —— 这也是 `slot-lookup/no-any-assignment` 存在的原因。\n\n**已知残余(写出来而不是暗示)**:经由有类型的间接层发生的擦除 —— 形如 `(o, q?: any) => engine.find(o, q)` 的转发 helper,或者自身返回类型被标成 any 的 wrapper —— 擦除效果一样,本规则看不到。`: any` **形参**转发进查询是个真实形状(约 50 处,几乎全是测试 double),判它需要调用图而不是单文件作用域,和 slot-lookup 自己的 KNOWN RESIDUAL 是同一条边界,同一个答案:属于有类型的 lint pass。\n\n## 四、存量:baseline + 只减不增,不清扫\n\n`scripts/check-query-options-erasure-ratchet.mjs`(`pnpm check:query-options-erasure`,在 lint.yml 里紧挨 slot-lookup ratchet)是让 baseline 有意义的那一半。\n\n- **非测试**:按文件豁免。`ignores` 一条会让**整个文件**闭嘴,所以 baseline 带**逐文件计数**,由脚本把豁免解除后复测 —— 列表里的文件新长一处擦除,骑不了旧条目。计数涨、跌、文件清干净没删条目、以及**往 baseline 里加文件**(对比与 main 的 merge base),四种都判红。\n- **测试**:用**一个聚合的只减不增数字**,不做逐文件计数。08-03 分诊把首刀划在非测试代码是对的:测试里有相当一部分擦除是**正当**的 —— `engine-unknown-option.test.ts`、`engine-wire-alias-reject.test.ts`、`sqlite-wasm-out-of-contract-filter-input.test.ts` 这类以「越契约输入」为**被测对象**的测试,必须擦掉类型才能构造出 `tsc` 本来会拒绝的输入。逐文件 ratchet 会在一条**正当**的新拒绝测试上判红,而且**没有诚实的补救动作**;聚合数字有一个:把故意的那处写成 `as unknown as EngineQueryOptions`,它点名契约、也不进这个计数。这是我在字面口径上唯一的取舍,明写在 baseline 的 `$comment` 和脚本注释里,请 PM 复核。\n\n⛔ **本 PR 不清扫那 84 处**,按派发口径。其中一部分是真的跨类型边界(objectql 的 `hookContext.input.options`、metadata loader 的 query bag),需要的是把边界类型**补上**,不是删断言 —— 属后续批次。\n\n## 五、双向证红\n\n方向在跑之前就定了,四组:\n\n| 注入位置 | 预测 | 实测 |\n|:--|:--|:--|\n| 新的**未豁免**非测试文件 | `pnpm lint` 红 + ratchet 红 | 两者都红:`__injected_probe.ts: NEW engine query-options erasure (1 site(s))` |\n| **已豁免**文件(`protocol.ts`)追加一处 | `pnpm lint` **绿**(`ignores` 让整个文件闭嘴 —— 这正是「看不见的那一步」)+ ratchet 红 | lint 绿;ratchet 红:`erasure count grew 6 → 7` |\n| **测试**文件追加一处 | `pnpm lint` 绿(首刀不覆盖)+ ratchet 红 | lint 绿;ratchet 红:`test surface grew 267 → 268 site(s)` |\n| 当前树(未注入) | 全绿 | `pnpm lint` 绿;ratchet:`84 unswept non-test site(s) in 19 file(s), none new` |\n\n第二行是这套机制存在的全部理由:`ignores` 藏得住的那一步,只有计数抓得到。\n\n`--self-test` 把这些做成了可重跑的形式:10 个应报形状、10 个应静默的对照(含 `Array.prototype.find`、结果位断言、第 0 位断言、被遮蔽的内层有类型绑定、`as unknown as` 逃逸口)、豁免通道与测试 glob 通道的双向证明、以及 8 个 ratchet 比较用例(相等 / 新文件 / 涨 / 跌 / 文件清空 / baseline 加键 / 测试面涨 / 测试面跌)。ratchet 比较逻辑抽成了纯函数 `diffRatchet`,因为那正是「在干净树上跑绿」永远碰不到的那一半。\n\n**另外把 #4674 的成因原地三态复现了一遍**,证明这条规则守的是真东西,而不是一个自造的形状。取 `protocol.ts` 的 audit-history 查询(#4720 修的那处),`pnpm exec tsc --noEmit -p packages/metadata-protocol/tsconfig.json`:\n\n| 状态 | 第 3520 行 | tsc | 本门禁 |\n|:--|:--|:--|:--|\n| main 现状 | `order: 'desc'` | 64 个既有错误,3520 行 0 个 | 绿 |\n| A:改回错键,**不**加擦除 | `direction: 'desc'` | **`error TS2353 … 'direction' does not exist in type` … @ 3520,51** | 绿(没有擦除) |\n| B:错键 **+ `} as any)`** | `direction: 'desc'` | 63 个错误,3520 行 **0 个** —— 擦除精确地拿掉了那一个 | **红:`count grew 6 → 7`** |\n\n即:擦除就是把编译错误变成静默的那一步,而这条门禁现在抓的就是擦除。注:`@objectstack/metadata-protocol` 目前还在 `check:type-check-coverage` 的 DEBT 台账里、没有 `typecheck` 脚本,所以那条 `tsc` 通道今天是本地 / 编辑器级的,不是 CI 门禁 —— 这让本门禁更必要,不是更不必要。\n\n`baselineKeysAddedSinceMergeBase`(merge-base 单调性)这一段依赖 git,本 PR 里 baseline 在 base 上还不存在,所以它按设计**报告自己没能跑**(`NOT verified: …`)而不是静默通过;它的判定逻辑由 `diffRatchet` 的 `addedBaselineKeys` 用例覆盖。下一个 PR 起这条会真跑。\n\n## 六、其它\n\n- 三处注入与 #4674 三态复现**全部还原**,`git status` 干净;`pnpm --filter '@objectstack/metadata-protocol^...' build` 顺带重写的 `packages/spec/authorable-surface.base.json` 已 checkout 还原,不随本 PR 走。\n- `node scripts/check-nul-bytes.mjs` 通过,并对改动文件做了超出门禁扫描面的自扫(`grep -naP` 全部 C0)—— 零命中。\n- `pnpm check:type-check-coverage`、`pnpm check:published-files` 绿;`.github/workflows/lint.yml` YAML 可解析,新步骤落在 slot-lookup ratchet 之后。\n- 已并入 `origin/main`(`e0b2ea72d`)后重测,84 / 267 两个数字未变,`pnpm lint` 仍绿。\n- **changeset**:本 PR 只动 `eslint.config.mjs` / `scripts/` / 根 `package.json` 一条脚本 / 工作流,**不发布任何包**,按 pr-automation 的处方走首选路线 2 —— `skip-changeset` 标签(非空 changeset 无包可署名;空 frontmatter changeset 是 #4898 的静默卡住路径,按 #5292 后的处方属最后手段)。\n- 根 `package.json` 的脚本项基于当前 main(`check:prerelease-pins` 之后)加入。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01GX3sL71LFq8m2usg6VqTSE)_"
+}

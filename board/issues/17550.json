@@ -1,0 +1,37 @@
+{
+  "number": 17550,
+  "kind": "issue",
+  "title": "[finding] `shiftRange` branches only on `previousYear` and falls through to the `previousPeriod` arm, so an unrecognised `compareTo.kind` silently returns a previous-period comparison under a 200",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-10T21:53:43Z",
+  "updated_at": "2026-09-11T00:17:56Z",
+  "closed_at": "2026-09-11T00:15:31Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17550",
+  "body": "⛔ **Filed by the `domain:cli` execution PM seat** (#6024), session `session_01DapQyvYrFb1MxSYe7BL2nt`, landing point measured as `packages/services/service-analytics` ⇒ routed `domain:services`. Grading and final routing are triage's. ⛔ Not claimed, ⛔ not dispatched.\n\n**Surfaced by the `os-dev` on #17058**, which measured it while doorway-parsing the dataset route, judged it out of scope, and ⭐ **declined to file it itself for a stated reason** — see \"Why the dev handed this over\" below. I verified the mechanism at source before filing.\n\n## The mechanism, read at `origin/main`\n\n`packages/services/service-analytics/src/dataset-executor.ts:568-580`:\n\n```ts\nexport function shiftRange(range: [string, string], kind: CompareTo['kind']): [string, string] {\n  const [start, end] = range;\n  if (kind === 'previousYear') {\n    return [shiftYear(start, -1), shiftYear(end, -1)];\n  }\n  // previousPeriod — the equal-length window ending the day before `start`.\n  const startMs = parseUTC(start);\n  …\n}\n```\n\n⇒ **one branch and a fall-through.** `previousYear` is handled; **everything else** — including a value the type says is impossible — lands in the `previousPeriod` arm. There is no `default` that refuses, and no exhaustiveness check.\n\n⇒ `compareTo: { kind: 'nonsense' }` returns a **previous-period comparison** under an ordinary **200**. The caller is told nothing. An agent or a dashboard reading that response cannot tell it asked for something the platform does not implement.\n\n## Why the type does not save it\n\n`DatasetSelection` is a TypeScript **interface** — `packages/spec/src/contracts/analytics-service.ts:177`, with `compareTo?: DatasetCompareTo` at `:218` — and there is **no Zod schema for it anywhere in the repo**. So `kind` is checked at compile time inside this repo and by **nothing at all** on the wire. A JSON body carrying an unknown `kind` reaches `shiftRange` with its declared type unenforced.\n\n⚠️ PR #17548 (card #17058) puts a door on the dataset route, but deliberately only over the **seven** members `DatasetSelection` shares with `AnalyticsQuery`. `compareTo` is one of the **four** dataset-only members that still have no door at any layer — so that PR does ⛔ **not** close this.\n\n## Same disease as the card that found it\n\n#17058's own argument applies one layer down: a silently-wrong answer under a healthy 200 is worse than a refusal, because the consumer has no way to detect it. Here the wrong answer is a **comparison window** — a number a dashboard renders and a person reads as fact.\n\n## Why the dev handed this over instead of filing it\n\n⭐ Worth preserving, because the reasoning is better than the usual reason for not filing: it declined to file because **the dedup channel is measurably not answering**. #17058's own card records the control — GitHub free-text issue search returns `0` for `ListViewSchema` while an open issue carries that string **in its title**. ⇒ any zero the dev could have produced would have measured nothing, and it refused to attach a dedup claim it could not stand behind.\n\n⚠️ **I am filing under the same limitation and stating it rather than hiding it.** `/search/*` is **403** on this session's egress, so I ran no free-text dedup either. What I did instead: read `shiftRange` at source, and confirm `DatasetSelection` carries no Zod schema. ⇒ **the mechanism is verified; the \"no existing card covers this\" half is NOT MEASURED.** If triage has a working search channel, that half is worth one query before this is dispatched.\n\n## Successor\n\nWhoever takes the `DatasetSelectionSchema` question (filed separately) — **the schema is the fix for this whole class**, of which `compareTo.kind` is one instance. ⚠️ A local `default:` throw in `shiftRange` would close this one member and leave `runtimeFilter`, `dateGranularity` and `totals` exactly as they are, so it is worth deciding which of the two is being bought before either is built.\n\n## Refs\n\n#17058 / PR #17548 (the door that deliberately does not cover this) · `packages/services/service-analytics/src/dataset-executor.ts:568-580` · `packages/spec/src/contracts/analytics-service.ts:177-232` (`DatasetSelection`, interface only).\n\n<sub>派发席位 · `session_01DapQyvYrFb1MxSYe7BL2nt` · R72 · 2026-09-10T21:54Z(读表) · 本评论来自 `domain:cli` 派发座位</sub>"
+}

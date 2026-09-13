@@ -1,0 +1,37 @@
+{
+  "number": 5013,
+  "kind": "issue",
+  "title": "ReportSchema 的 `filter` 别名指向 `filters` —— 一个 ReportSchema 同样拒绝的键(#4001 战役自己的假处方,第 5 例)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T20:27:48Z",
+  "updated_at": "2026-08-05T14:22:56Z",
+  "closed_at": "2026-08-05T14:22:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5013",
+  "body": "Part of the #4001 strictness campaign's own failure class —— 账本 finding 12 / finding 18:\n**「a guidance entry is a claim about the schema」**,而这条声明是假的,现在活在 `main` 上。\n\n## 复现(measured 2026-08-03,在批 14 的策展体检中发现)\n\n`packages/spec/src/ui/report.zod.ts` 的 `ReportSchema` 别名表里有 `filter: 'filters'`。\n作者写 `filter`,得到:\n\n```\nUnrecognized key(s) on this report: `filter`. … Did you mean `filter` -> `filters`?\n```\n\n照做之后:\n\n```\nUnrecognized key(s) on this report: `filters`. …\n```\n\n—— 第二次拒绝,而且这次连建议都没有。`ReportSchema` **既不接受 `filter` 也不接受 `filters`**;\n它声明的是 `runtimeFilter`。\n\n这正是 finding 7 反复记录的形状:**本战役的修复把作者指进了它自己要消灭的失败模式**,\n而且对 AI 作者最致命 —— 它唯一的信号就是 parse 有没有抱怨,而这里抱怨了两次,第二次无话可说。\n\n## 另有 5 条死条目(永远不会触发)\n\n别名只在**未识别**的键上生效,所以一个本身已被声明的键做别名 key 就是死条目。\n用 AST 扫 `packages/spec/src` 全部 `strictObject(` 调用:\n\n| 文件 | 条目 | 为什么是死的 |\n|---|---|---|\n| `ui/report.zod.ts` | `columns: 'values'` | `columns` 是 matrix 横轴,**已声明** |\n| `ui/report.zod.ts` | `chart: 'chartConfig'` | `chart` **已声明**;且 `chartConfig` 不存在于 `ReportSchema` |\n| `ui/dataset.zod.ts` | `measures: 'metrics'` | `measures` **已声明**;`metrics` 不存在 |\n| `ui/dataset.zod.ts` | `filter: 'filters'` | `filter` **已声明** |\n| `ui/action.zod.ts` | `body: …` | `body` **已声明** |\n\n死条目本身无害,但它们和上面那条真缺陷是同一个成因:**别名表是对 schema 的断言,而没有任何东西拿它跟 schema 对过**。\n\n## 建议\n\n1. 把 `ReportSchema` 的 `filter` 别名改指 `runtimeFilter`(`filters`/`where`/`criteria` 建议一并指过去)。\n2. 清掉 5 条死条目。\n3. **把体检变成闸门**:对每个 `strictObject(` 调用断言 (a) 每个别名 key 本身不是已声明键,(b) 每个别名 target 是该 schema 真正接受的键。判定必须走**运行时 `.shape`**(能看见 `...MetadataProtectionFields` 这类展开),而不是读源码对象字面量 —— 批 14 第一版体检正因为读字面量而漏判,破坏测试时保持全绿。\n\n批 14 在自己新增的表上已经带了这条断言(并用「先证红」证明它真的会红);这个 issue 是把它推广到全仓并修掉存量。\n\n发现于 #4001 批 14 的范围外体检,未指派。\n"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 5225,
+  "kind": "issue",
+  "title": "showcase 的 `showcase_inquiry_purge` 清扫流从来没删掉过任何记录 —— delete_record 节点每次都失败(Delete requires an ID or options.multi=true)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T11:04:53Z",
+  "updated_at": "2026-08-05T16:12:09Z",
+  "closed_at": "2026-08-05T16:12:09Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5225",
+  "body": "发现于 #5112(#5040 E8 收官验收)的真实 boot 探针。**与 E8 无关的存量缺陷**,按 Prime Directive #10 单独立项。\n\n## 事实(showcase 真实 boot,`objectstack dev --fresh`)\n\n两条路径,同一个失败 —— 这正好也说明执行器是忠实的:\n\n```\nPOST /api/v1/apps/showcase/inquiries/purge        (声明式端点)\n→ HTTP/1.1 200 OK\n  {\"success\":true,\"data\":{\"success\":false,\n    \"error\":\"Node 'purge' failed: delete_record(showcase_inquiry) failed: Delete requires an ID or options.multi=true\",\n    \"durationMs\":9,\"summary\":{\"selected\":1,\"acted\":0,\"skipped\":0,...}}}\n\nPOST /api/v1/automation/showcase_inquiry_purge/trigger   (内建触发路由,对照组)\n→ HTTP/1.1 200 OK\n  success: False\n  error: Node 'purge' failed: delete_record(showcase_inquiry) failed: Delete requires an ID or options.multi=true\n```\n\n## 声明本身\n\n`examples/app-showcase/src/automation/flows/index.ts`(`InquiryPurgeFlow`):\n\n```\n{\n  id: 'purge',\n  type: 'delete_record',\n  label: 'Delete them',\n  config: { objectName: 'showcase_inquiry', filter: { status: 'closed' } },\n}\n```\n\n按 filter 批量删,但没有声明批量意图,执行器要求 `options.multi=true`(或一个 id)。于是这个「get_record + delete_record 四件套收官示例」的 delete 半边**从来没有真正执行过** —— `acted: 0`。\n\n## 为什么现在才看见\n\n在 #4936 之前这条流只能通过 `/automation/.../trigger` 手动触发,而它是 `autolaunched` 且没有记录触发器,所以没有任何自动路径会跑到它;#5112 把声明式端点回迁之后,它第一次被真实 boot 上的 HTTP 探针打到,失败才浮出来。同一文件里的 notify 节点在 #4277 也是这样被发现的(「executors started parsing their config」)。\n\n## 影响\n\n例子层面的 declared ≠ enforced:showcase 的 coverage 声称 `delete_record` 被演示,实际上每次运行都在这个节点上失败。修法要么给节点补上批量意图的正确声明,要么把流改成先 get_record 拿 id 再逐条删 —— 哪种是 `delete_record` 想要的长期形状,请按执行器契约裁决,别照着报错盲填。\n\n关联:#5112(发现于此)、#4277(同一条流的 notify 节点前例)、ADR-0018。"
+}

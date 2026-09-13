@@ -1,0 +1,36 @@
+{
+  "number": 5441,
+  "kind": "issue",
+  "title": "pm-dispatch SKILL:spec 车道串行接力一夜(10 PR)沉淀的六条缺口 —— 接力模式、锚点措辞、裁决传播扫描、停摆纠偏、飞行中重叠、预期红停放",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T11:51:59Z",
+  "updated_at": "2026-08-05T15:02:24Z",
+  "closed_at": "2026-08-05T15:02:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5441",
+  "body": "2026-08-04/05 夜 spec 车道以**串行接力**连落 10 个 PR(#5304→#5306→#5308→#5318→#5319→#5321→#5314→#5312→#5323→#5365),全程按 pm-dispatch SKILL 执行。现行 SKILL 的合并队列判读、os-regen 四步、跟到 MERGED、限流规程等条目全部命中、无需改;但以下六个情形是 SKILL **没有覆盖、本夜靠现场即兴**的,各有实付学费,建议按序补进(每条已注明落点章节)。查重:与 #5095(域表)、#5130(决策轴)不重叠。\n\n## 1. 串行接力模式(新小节,平行于「入队与落地」)\n\n现行 batch 模型假设**同批 file-disjoint 并行**;而「多个已实现 PR 全碰 `packages/spec` 生成物」的形态只能**串行接力**:一次只放行一个,每合并一个即向下一棒发接力指令(merge main + §9 重建 + 全套验证 + 兄弟断言复核 → PM 复核回报 → 转 ready + 挂 auto-merge)。要点:\n- **auto-merge 由 PM 挂,dev 永不碰**(现行 ACCEPT 条目只写了单 PR 流程);ready → enable auto-merge 的顺序不可反(draft 转换清空 auto-merge,notes 1 已有,但接力循环里每棒都要走一次);\n- **相邻棒同文件的语义合并交接**:前棒在回报里写明对共享文件的改动性质(改名/提取变量/增补断言,非纯追加),PM 原样转告下一棒,要求「两 PR 意图叠加,禁止机械取边」。实例:#5318→#5319 同动 `metadata-form-zod-reconciliation.test.ts`,#5319 逐行号验证了 #5318 的十项元素并实测两者交互(无它的 preprocess 修复,#5318 的新断言在 view 上空转);\n- **两棒散文互锁**:允许前棒给后棒留「本段由 #N 在其同步轮翻正/删除」的占位交接(实例:#5323 的族 1 段落 ↔ #5365;#5335 的「#5322 is its own ruling」pin 块),PM 负责在两侧接力指令里写明分工,防止双方都动或都不动。\n\n## 2. authorable-surface 锚点断言的正确措辞(补进「入队与落地 A」)\n\n#5304 落地树内基线锚点后,接力模板曾用**错误断言**「baseRev == merge-base」派发,后棒实测证伪并修正。正确措辞(本夜后八棒全部沿用,零误报):\n> 断言 `check:authorable-surface` 绿即可——锚点 authenticity 的定义是 baseRev 是 origin/main 的**祖先** 且其 keys 与该 commit 的 surface 逐行一致;baseRev **允许滞后**,`gen:schema` 仅在 keys 漂移时才推进它;⛔ 禁止为凑相等手改锚点文件(那正是 #4650 堵住的攻击本身);不得要求 baseRev == merge-base。\n\n配套两个新陷阱(已立单,SKILL 引用即可):**#5370**(merge 未 commit 就跑 `gen:schema` 会把锚点静默倒退回旧 merge-base,全部门放行——四步序必须是「先 commit merge,再整体重生成」)、**#5371**(`gen:schema` 的 rmSync 顺手抹掉 `gen:openapi` 产物,rest 随后 503 假红)。\n\n## 3. 裁决传播 = 全仓 pin 扫描(补进 step 5 派发词 + step 7 review)\n\n维护者裁决翻转公共语义时(实例:#5322 空组合子从拒收改单位元),**旧立场的 pin 不止存在于改动包**——消费层(REST 信封测试、objectql、runtime)各有拷贝。#5365 首轮只翻了 service-analytics 层,REST 层 `analytics-filter-refusal-envelope.test.ts` 的拷贝在 CI 上红(`expected 200 to be 400`),补一轮才清零。规则两条:\n- 实施裁决的派发词必须含「**全仓扫描同语义 pin**(grep 错误码/错误消息,如 `INVALID_FILTER`)并一次翻完」;\n- 翻 pin 必须**保留承重**:断言新语义的实质(行数/译文),不是删掉旧断言了事;真正无效形状的拒收断言原样保留,守卫点覆盖不缩。\n\n## 4. subagent 停摆纠偏(补进 step 6 Collect 的 subagent 半边)\n\nos-dev 以「后台 watcher 会唤醒我」为由中途停止时,**watcher 永不触发**(完成通知本身即意味着无存活子任务)——本夜四个 agent 共停摆 6 次,全靠 PM 手动唤醒。两条:\n- 长验证管线的派发/接力指令写明「**前台(阻塞)同步执行全部步骤,中途不停止、不把构建/测试挂后台等唤醒**」;\n- 完成通知携带的是**中途状态**(\"build still in progress\"、\"I'll resume when...\")即为停摆信号:立即 SendMessage 恢复并附上述指令,不等 50 分钟阈值。第三次停摆视为不可靠,重派新 agent 接管分支(接手协议同「Handing off an interrupted dev」)。\n- 同一修正应同步落到 `.claude/agents/os-dev.md`(生产端修复优于 PM 端补救,PD #12)。\n\n## 5. 飞行中范围重叠拦截(补进 step 5「same-day churn」段的姊妹段)\n\n现行「same-day churn goes INTO the prompt」只管**派发时刻**;main 一天 ~18 合并,**飞行中**同样会撞。实例:#5322 的 agent 23:17Z 起飞,#5335(同两个编译器、四格中两格)00:0xZ 合入——PM 例行核查读 main log 发现重叠,立即 SendMessage 预警(合 main 重测矩阵、读对方 diff 定边界、只补未覆盖部分、被完全覆盖则停下回报勿硬造 diff)。agent 两次收窄范围、弃自研方案改在对方体系上最小 diff 重放。规则:PM 每轮核查 `git log origin/main` 时,对每个在飞 dispatch 做一次「新落地 PR × 在飞范围」的相交判断,相交即发预警——晚一轮就是一次返工。\n\n## 6. 依赖 PR 的「预期红」停放(补进「入队与落地 B」)\n\n串行链中后棒先行实现、依赖前棒才能转绿的 PR(实例:#5365 四条进表依赖 #5323 的 mongodb 归约):**draft 停放**,PR body 写明**精确的预期红清单**(失败测试名 + 报错签名)与**解除条件**(依赖 PR 合入);每个 CI-failure webhook 到达时与该签名比对——匹配则静默跳过,**新签名才是真问题**(#5365 的 REST 红正是靠这个对比识别为新问题的);依赖合入后走「最后一轮同步 → 红清 → ready + auto-merge」。这是 notes 2「flaky 签名」纪律在**故意红**上的对偶,现行文本只覆盖了前者。\n\n---\n六条的实付学费:错误锚点断言若未纠正会教唆手改锚点(#4650 攻击自身);#5365 的 REST 红多花一轮 CI;6 次停摆合计拖慢约 1.5-2 小时;#5335 重叠若晚发现即重写返工。均为一次性成本,固化进 SKILL 后消失。\n\n关联:#5370、#5371、#5388(裁决传播的边缘残留实例)、#5095、#5130(同文件待改事项,可合并施工)。"
+}

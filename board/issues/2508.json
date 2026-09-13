@@ -1,0 +1,34 @@
+{
+  "number": 2508,
+  "kind": "issue",
+  "title": "tooling: migrate Node version management from nvm to Volta (multi-repo)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-01T16:02:07Z",
+  "updated_at": "2026-08-05T15:59:07Z",
+  "closed_at": "2026-08-05T15:58:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2508",
+  "body": "## Problem\n\n`pnpm dev` broke locally with two stacked failures, both traced back to how Node\nis provisioned on dev/agent machines:\n\n1. `env: node: No such file or directory` — `nvm` only puts `node` on `PATH` via\n   shell *functions* sourced from `.zshrc`, which zsh only loads for **interactive**\n   shells. Any non-interactive process (scripts, some agent/CI shells) gets a `PATH`\n   with no `node` at all, even though `node -v` works fine in a normal terminal.\n2. `better-sqlite3` ABI mismatch (`NODE_MODULE_VERSION 141` vs `137`) — the native\n   binding had been compiled against a different Node build than the one currently\n   active via `nvm`. Because Node version activation is per-shell and implicit, it's\n   easy for one process to install/rebuild native deps against version A while\n   another later runs against version B.\n\nNeither failure is repo-code related — both come from `nvm`'s shell-hook model,\nwhich becomes a real liability once **many agents/processes run in parallel**\nagainst the same checkout(s): whether a given subshell sourced `.zshrc` is\nunpredictable, so \"which Node am I actually running\" silently varies per process.\n\n## Proposal\n\nReplace `nvm` with [Volta](https://volta.sh) across our repos (framework + objectui\n+ cloud + objectos — front and back end).\n\nWhy Volta specifically:\n- Volta installs real shim binaries into a static `PATH` directory (`~/.volta/bin`),\n  not shell functions — so version resolution works identically in interactive,\n  non-interactive, and sandboxed/agent shells. This is the exact failure mode (1)\n  above; Volta doesn't have it.\n- Per-repo pinning lives in `package.json`:\n  ```json\n  \"volta\": { \"node\": \"24.18.0\", \"pnpm\": \"10.31.0\" }\n  ```\n  Volta auto-switches on `cd`, so repos with different toolchain needs (front-end\n  vs back-end) don't fight each other, and there's no more \"whoever ran\n  `pnpm install` last with whatever Node happened to be active\" drift that caused\n  failure mode (2).\n\n## Scope / open questions\n\n- [ ] Confirm target Node version to pin — proposal: `24.18.0` (already the version\n      everyone is effectively running; no forced upgrade as part of this migration).\n- [ ] Pin `pnpm` version via the same `volta` field (already pinned via\n      `packageManager`; Volta field should match).\n- [ ] Land `\"volta\"` field in `framework/package.json` first, verify in a fresh\n      non-interactive shell (`zsh -c \"which node\"`), then propagate to\n      objectui / cloud / objectos.\n- [ ] Update onboarding docs / README that currently reference `nvm`.\n- [ ] Decide whether to fully uninstall `nvm` from shared dev machines or just stop\n      sourcing it (leave installed, unhooked, in case something else depends on it).\n- [ ] Check CI runners — do they rely on `nvm` today, or already pin Node another way?\n\n## Non-goals\n\n- Not proposing a Node version upgrade — this is purely a version-manager swap to\n  fix determinism, not a bump to a newer major."
+}

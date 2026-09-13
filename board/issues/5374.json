@@ -1,0 +1,32 @@
+{
+  "number": 5374,
+  "kind": "issue",
+  "title": "driver-memory analytics 面的 `$notContains` 编译成裸 mingo `{$not: 'x'}`,该谓词不约束任何行 —— 结果被放大到全表",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T02:39:38Z",
+  "updated_at": "2026-08-05T12:10:50Z",
+  "closed_at": "2026-08-05T12:10:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5374",
+  "body": "同样是做 #5345 时逐个实测「这个面声明支持的 11 个算子各自编译成什么」发现的。不属于 #5345 的范围面(那一单裁的是**没有** cube 映射的算子;`$notContains` **有**映射,只是映射到了一个错的目标),按 Prime Directive #10 单独记在这里,unassigned。\n\n## 位置\n\n`packages/plugins/driver-memory/src/memory-analytics.ts` 的 `convertOperatorToMongo`(约 :700):\n\n```ts\n'contains':    '$regex',\n'notContains': '$not',     // ←\n```\n\n调用点(`query()` Stage 1)把它填成 `matchStage[fieldPath] = { $not: coerced[0] }`。\n\n## 现象(实测)\n\n3 行数据,`name` 分别为 `alpha` / `beta` / `gamma`(其中只有 `beta` 含 `et`):\n\n| `where` | analytics count | `find()` 行数 | 应为 |\n|---|---|---|---|\n| `{ name: { $notContains: 'et' } }` | **3** | 2 | 2 |\n\n编译出来的 `$match` 是 `{ name: { $not: 'et' } }`。mingo 的 `$not` 期望的是一个**正则或算子表达式**,不是裸标量;给一个裸字符串时它不构成约束,于是整条谓词等于没写 —— 全表通过。\n\n对照:`contains` 映射到 `$regex` 是对的(`{ name: { $regex: 'et' } }` 取到 1 行,与 `find()` 一致)。正确的取反形式应当是 `{ name: { $not: /et/ } }` 或 `{ name: { $not: { $regex: 'et' } } }`,而不是把比较数直接塞进 `$not`。\n\n## 为什么是 bug\n\n1. **方向是放大。** 和 #5345 完全同一类后果,只是机制不同:#5345 是谓词**没被生成**,这里是谓词**被生成了但不起作用**。对作者而言两者不可区分 —— 都是一个看起来正常的图表统计了它本该排除的行。\n2. **#5345 修不到它,而且 #5345 之后它更需要修。** #5345 让本面的算子词表从 `MONGO_TO_CUBE_OPERATOR` 派生,`$notContains` 在表里,所以它被**声明为本面支持**并且会通过 `ANALYTICS_FILTER_CAPABILITIES` 的门。声明支持而编译成空操作,正是 Prime Directive #10 的 declared ≠ enforced。\n3. **`generateSql` 那一半是对的。** `operatorToSql` 给 `notContains` 的是 `NOT LIKE`,所以 SQL 回显显示了一个真实的排除谓词,而实际执行的 in-memory 管线没有排除任何行 —— 回显与执行不一致,和 #5333 是同一类「回显比实际更可信/更不可信」的问题,只是方向相反。\n\n## 建议(不代裁决)\n\n- 最小改法:`convertOperatorToMongo` 保持返回 `$not`,由调用点把比较数包成 `{ $not: { $regex: value } }`;或者干脆让映射返回一个结构而不是一个算子名(`contains`/`notContains` 是这张表里唯二需要包装比较数的项,现在被硬塞进了「算子名 → 算子名」的形状里)。\n- 顺带值得核对同表的 `'inDateRange': '$gte'`(注释自称 \"Will need special handling\",但没有任何调用点做那个 special handling)与 `opMap[operator] || '$eq'` 的兜底 —— 一个拼错的 cube 算子名会静默变成相等比较。我没有实测这两条,只是读到时觉得可疑,一并记下不代表判断。\n\n## 未验证的部分\n\n只在 in-memory(mingo)路径上实测。没有确认 mingo 对 `{$not: 'et'}` 是「忽略」还是「按某种语义匹配全部」—— 观察到的结果是 3 行(全表),但我没有读 mingo 源码确认它内部走的是哪一条。结论(全表通过)是实测的,机制描述是推断的。严重度请 PM 按 triage 定。\n\n关联:#5345(同文件、同一轮核对里发现;它裁的是无映射的算子)、#5373(同一轮里发现的比较数往返缺陷)、#3948(no-silent-drop)、#5333(analytics SQL 回显与执行不一致)。\n"
+}

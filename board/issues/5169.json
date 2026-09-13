@@ -1,0 +1,36 @@
+{
+  "number": 5169,
+  "kind": "issue",
+  "title": "plugin-email: EmailService.managedRowIds 泄漏 persistedId —— insert 返回不同 id 时永不清理",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T07:28:38Z",
+  "updated_at": "2026-08-05T16:37:24Z",
+  "closed_at": "2026-08-05T16:37:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5169",
+  "body": "发现于 #5160 实现期间(读 `send()` 时看到),**与该单无关,未在该 PR 中修**。\n\n## 位置\n\n`packages/plugins/plugin-email/src/email-service.ts`,`send()`(#5160 后叫 `sendInternal`)的 try/finally:\n\n```\nthis.managedRowIds.add(id);\ntry {\n  const res = await this.options.persistence.insert(baseRow);\n  persistedId = typeof res === 'string' ? res : res?.id ?? id;\n  if (persistedId !== id) this.managedRowIds.add(persistedId);   // 加了\n  ...\n} finally {\n  this.managedRowIds.delete(id);                                  // 只删了 id\n}\n```\n\n`persistedId !== id` 时,`persistedId` 被塞进 `managedRowIds` 这个 `Set< string >` 却**永远不会被删**。每一封这样的邮件都在进程生命周期内往集合里留一个字符串。\n\n## 后果\n\n1. **内存**:长跑进程里 `managedRowIds` 单调增长,一封一个 id;\n2. **语义**:`isServiceManaged(persistedId)` 从此恒为 true。id 唯一,所以不会误伤别的行 —— 但 outbox drain 钩子(`email-plugin.ts` afterInsert)与 #5161 将要加的清扫器都以这个集合判断\"该行归 send() 管\",一个永久 true 的条目是一条永远不会被复核的断言。\n\n## 今天为什么打不到\n\n仓内唯一的 persistence 实现(`email-plugin.ts` 里的 `insert`)是\n\n```\nreturn created?.id ? { id: String(created.id) } : { id: String(row.id) };\n```\n\n而 `send()` 传入的 `baseRow.id` 就是它自己生成的 `newId()`,ObjectQL insert 会原样回传,所以 `persistedId === id`,分支不进。**`EmailPersistence` 是导出的公开接口**,任何自建实现(数据库自增主键、外部投递系统回执 id)都会踩到。\n\n按\"观察级\"归档:今天没有用户能撞到,但它是一条已经写下的、只等一个不同 persistence 实现来点燃的引线。严重程度请 PM triage 判定 —— 我在 #5160 里没顺手改,因为它与该单的 diff 无关。\n\n## 建议修法\n\n```\n} finally {\n  this.managedRowIds.delete(id);\n  if (persistedId && persistedId !== id) this.managedRowIds.delete(persistedId);\n}\n```\n\n(需要把 `persistedId` 提到 try 外面声明。)配一条用例:persistence 返回与入参不同的 id,断言 `send()` 返回后 `isServiceManaged(persistedId)` 为 false。\n"
+}

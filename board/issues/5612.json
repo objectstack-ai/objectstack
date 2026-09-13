@@ -1,0 +1,36 @@
+{
+  "number": 5612,
+  "kind": "issue",
+  "title": "`doctor-ledger-read-failure.test.ts` 整块 7 条在 origin/main 上就是红的 —— `os doctor` 对坏 ledger 一行都不报，#5413/#5424 的报告面测不出来",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T20:24:45Z",
+  "updated_at": "2026-08-05T21:58:27Z",
+  "closed_at": "2026-08-05T21:58:27Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5612",
+  "body": "**发现于**：#4645 Phase A 跑 `@objectstack/cli` 全量测试时撞上。**与 #4645 无关**——已按下面的方法证伪过因果。\n\n## 实测\n\nobjectstack `origin/main` @ `81087877e`，`packages/cli`：\n\n```\n$ pnpm exec vitest run src/commands/doctor-ledger-read-failure.test.ts\n\n × withholds the clean bill of health when the ledger cannot be read\n × expands the detail under --verbose, and only under --verbose\n × still reports this project's own findings when only the ledger half failed\n × an intact ledger WITH a global unique is still reported the way it always was\n × reports a CORRUPT ENTRY by name instead of skipping it in silence\n × withholds the clean bill when the ONLY finding is an unparseable entry\n × names EVERY unparseable entry, and expands the causes under --verbose\n\n Test Files  1 failed (1)\n      Tests  7 failed | 10 passed (17)\n```\n\n`describe('os doctor, end to end, against an unreadable installed-package ledger')` 这一整块 7 条全红；同文件另外 10 条（不属于这个 describe）全绿。\n\n## 症状：doctor 跑通了，就是不报 ledger\n\n失败断言的实际输出显示 `os doctor` **正常跑完了每一项**，只是 ledger 那一行根本没出现：\n\n```\n+   ✓ Platform spec         Declared specVersion is current with the installed platform\n+   ✓ Dependencies          No circular references detected\n+   ⚠ Object \"account\" is defined but not referenced by any view, flow, app, or lookup field\n+   ✓ Unique scope          No unconfirmed installation-wide uniques for this 'isolated' environment\n+ ⚠️  Environment is functional but has some warnings.\n```\n\n期望里的 `2 installed-package ledger entries…` / `(+1 more)` 一个都没有。注意最后一行 —— ledger 里明明放着坏条目，`✓ Unique scope` 却照样打了 clean bill，这正是 #5412/#5414 修掉的那个形状，而 #5413/#5424 又在它上面加了\"报告读不到的条目\"。**两轮修复的报告面，现在测不出来。**\n\n## 已排除的因果\n\n- **不是 #4645 造成的**：把本次改动碰过的三个 CLI 文件（`utils/storage-driver.ts`、`utils/storage-driver.test.ts`、`commands/serve.ts`）`git checkout origin/main --` 回去再跑，**7 条依旧全红**，一条都没变。#4645 的其余改动是 `packages/plugins/driver-*` → `packages/drivers/*` 的目录平移，与 doctor 读 `.objectstack/installed-packages` 零交集。\n- **不是环境残留**：`~/.objectstack` 不存在，环境里没有任何 `OS_*` 变量。测试自己在 `beforeEach` 里设 `OS_TENANCY_POSTURE=isolated` 并 mock `process.cwd()` 到临时目录，`node_modules` 也按 #5390 的坑造好了（`✓ Dependencies` 证明这步生效）。\n- **不是 root/权限**：这块用的是\"写一个文件冒充目录\"和\"写坏 JSON\"，不走 chmod，所以 root 身份不影响判定。\n\n## 与 #5429 的关系\n\n#5429 说的是\"两条 ledger 健康行都锁在 `isolated` posture 之内，换个 posture 一行都不报\"。**这个单不是它**：这里 posture 就是 `isolated`（测试自己设的），条件满足，却仍然一行不报。两者可能同源（都指向那两行的触发条件），但现象不同，需要分别核实。\n\n## 建议的下一步\n\n先确认 CI 上这块是不是也红（如果 CI 绿而本地红，那是环境依赖，本身就是个要修的可复现性问题）；然后从 `LocalManifestSource.list()`（#5413/#5424）往 doctor 的渲染那一段走一遍，看报告是在读的时候丢的还是在渲染的时候丢的。\n"
+}

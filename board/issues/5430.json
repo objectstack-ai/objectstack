@@ -1,0 +1,37 @@
+{
+  "number": 5430,
+  "kind": "issue",
+  "title": "objectui: remaining untranslated console-chrome accessible names (`Page header actions`, `Emoji picker`, the reaction-count label, `Close`/`Close panel` in the nav overlay)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T11:08:33Z",
+  "updated_at": "2026-08-05T14:37:33Z",
+  "closed_at": "2026-08-05T14:37:33Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5430",
+  "body": "Swept while implementing objectstack#5407 item 2, which enumerates four strings (`More actions`, `Add reaction`, `Clear`, `Close`). These are the neighbours the sweep turned up that #5407 does not name, so they are filed here rather than smuggled into that PR.\n\nAll are icon-only controls, so the hardcoded literal IS the control's name to a screen reader and to a hover tooltip.\n\n| String | Site |\n|---|---|\n| `Page header actions` | `packages/components/src/renderers/layout/containers.tsx` — the `role=\"toolbar\"` accessible name, ~8 lines above the `More actions` trigger #5407 fixes |\n| `Emoji picker` | `packages/plugin-detail/src/ReactionPicker.tsx` — the `role=\"listbox\"` popup the (now translated) add button opens |\n| `{emoji} {count} reaction(s)` | same file — the per-reaction chip's label, with **English pluralization built in** (`reaction${count !== 1 ? 's' : ''}`) |\n| `Close` + `Close panel` | `packages/components/src/custom/navigation-overlay.tsx` lines 391-392 and 476 |\n\n### The pluralized one needs a shape decision, not just a key\n\nThis repo does not use i18next plural suffixes — it uses an explicit two-key scheme (`lookup.recordCount` / `lookup.recordCountOne`, `detail.relatedRecords` / `detail.relatedRecordOne`). A `_one` / `_other` pair would also break `all-locales-key-parity`, since zh/ja legitimately have no `_one` form and the guard demands identical key sets. So the reaction-count label should follow the existing two-key convention, not introduce a third.\n\n### Not filed here\n\n`Clear` and `Close` as #5407 reports them (untranslated in every locale) could not be reproduced in the console chrome a CRM sweep would touch — see the objectstack#5407 dev report for the enumeration of every `Clear`/`Close` site and which resolver each one already goes through.\n"
+}

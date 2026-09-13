@@ -1,0 +1,37 @@
+{
+  "number": 5383,
+  "kind": "issue",
+  "title": "flow lint rules never descend into a `loop` body — the whole family is blind to nested nodes (8 real inert conditions shipped past `flow-inert-node-condition`)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T03:14:01Z",
+  "updated_at": "2026-08-05T21:26:50Z",
+  "closed_at": "2026-08-05T21:26:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5383",
+  "body": "Found while implementing objectstack-ai/hotcrm#650 (removing inert `decision` node `config.condition` copies from HotCRM). Filed unassigned for triage.\n\n## What\n\nThe flow rule family in `packages/lint` reads a flow's node and edge lists **flat off the top level** and never walks the regions nested inside a `loop` node's `config.body`. Every rule in that family is therefore blind to any node authored inside a loop.\n\n`@objectstack/lint@17.0.0-rc.2`, `dist/index.js:6791` (the entry point that feeds every flow rule below it):\n\n```js\nfor (const flow of asArray38(stack.flows)) {\n  const nodes = Array.isArray(flow.nodes) ? flow.nodes : [];\n  const edges = Array.isArray(flow.edges) ? flow.edges : [];\n```\n\nNo descent into `node.config.body.nodes` / `.edges`. Contrast `@objectstack/service-automation`, whose `validateNodeConfigKeys` and `validateFlowExpressions` both iterate `collectFlowGraphs(flow)` precisely so loop-body regions are covered (and tag findings with a `graph.scope` prefix). The engine walks the regions; the linter does not.\n\n## Measured, in a real app\n\nHotCRM has 17 `decision` nodes. 8 carried the inert singular `config.condition` that `flow-inert-node-condition` exists to catch. `pnpm lint` reported **none** of them.\n\nAll 8 sit inside a `loop` body:\n\n```\ncampaign_enrollment/loop_leads/check_not_enrolled\ncontract_renewal/loop_contracts/check_notice_window\ncontract_renewal/loop_contracts/check_not_reminded\ncontract_renewal/loop_contracts/check_auto_renewal\ncontract_renewal/loop_contracts/check_no_open_renewal\nopportunity_stagnation/loop_opps/check_not_nudged\nforecast_snapshot/loop_owners/has_deals\nforecast_snapshot/loop_owners/check_missing\n```\n\nDirect A/B on the same repo: temporarily adding the identical key to a **top-level** decision node (`lead_assignment.check_hot`) makes the rule fire immediately —\n\n```\nWARN flow 'lead_assignment' - node 'check_hot' (decision): `config.condition` is set but\nnothing reads it - the key is the trigger gate on a `start` node and is ignored on every\nother node type, so this predicate never gates anything.\n  flow-inert-node-condition\n```\n\n— while the 8 loop-nested instances stay silent. Same key, same node type, same flow file set; the only difference is nesting depth.\n\nThis is also, most likely, *why* those 8 survived: the top-level decision nodes in that repo had already been cleaned up (9 of 17 correctly carry no config, and one even carries a comment citing `flow-inert-node-condition`), so the gate visibly worked where it could see and silently did nothing where it could not.\n\n## Scope — it is not one rule\n\nEverything downstream of that binding shares the blind spot. From the same region of `dist/index.js`:\n\n- `flow-inert-node-condition`\n- `flow-decision-unconditional-branch`\n- `flow-branch-label-unmatched`\n- `flow-default-edge-with-condition`\n- `flow-multiple-default-edges`\n- `flow-double-brace-interp`\n- `flow-bare-dollar-ref`\n- plus `scanApprovalReviseLoops` / `scanErrorLabelledEdges` / `scanBranchRouting`, all called with the same flat `nodes` / `edges`\n\nLoop bodies are where a lot of real branching lives — a per-item gate inside a sweep is the standard shape for scheduled flows — so this is a large share of authorable flow metadata that no flow rule inspects.\n\nWorth noting the severity asymmetry: `flow-default-edge-with-condition` is `severity: 'error'`, i.e. a build-stopping rule that currently cannot see a contradiction authored one level down.\n\n## Suggested direction\n\nFeed the flow rules from the same region walk the engine uses (`collectFlowGraphs`, or the linter's own equivalent) and prefix findings with the region scope so the message still points at a unique node — the engine already formats these as `scope: node 'id'`. Rules that reason about a node together with its out-edges (the branch-routing family) need the region's own `edges` array, not the top-level one, so the walk has to keep nodes and edges paired per region rather than flattening both into one bag.\n\nA fixture with a `decision` inside a `loop` body would pin it; there appears to be no such case today, which is consistent with the gap going unnoticed.\n\n## Related\n\n- #4414 — introduced this rule family.\n- #4924 — spec's own flow fixtures teaching unsupported shapes, including a decision `condition`. Different surface (fixtures vs. the lint walk); noting it because both touch the same key.\n"
+}

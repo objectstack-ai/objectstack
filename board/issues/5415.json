@@ -1,0 +1,37 @@
+{
+  "number": 5415,
+  "kind": "issue",
+  "title": "lint: `translation-target-unknown` misses a view container's DEFAULT `form.sections` — correctly translating a rendered heading is reported as a stale key",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T10:20:53Z",
+  "updated_at": "2026-08-05T11:17:32Z",
+  "closed_at": "2026-08-05T11:17:32Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5415",
+  "body": "`validate-translation-references` derives an object's legal `_sections` names from three anchors (`packages/lint/src/validate-translation-references.ts`):\n\n- `fieldGroups[].key` (line 346-349),\n- named sections on `listViews` / `formViews` sub-views (line 234-255),\n- named `record:details` sections on pages (line 358-368),\n- plus the view's OWN `sections` (line 257-262).\n\n`collectViewRecord` iterates `for (const key of ['listViews', 'formViews'])`. The view CONTAINER's default `form` is not in that list, and it is not the view's own `sections` either — so **`view.form.sections[].name` contributes nothing to the fact set**, even though `ObjectForm` renders that form and translates its headings through the very same `sectionLabel(object, section.name, ...)` convention.\n\n### Repro against in-repo metadata\n\n`examples/app-showcase/src/ui/views/contact.view.ts` declares the default form with four named sections (`contact`, `work`, `status`, `notes`) bound to `showcase_contact`. A bundle that correctly translates one of them:\n\n```ts\ntranslations: [{ 'zh-CN': { objects: { showcase_contact: { _sections: { contact: { label: '联系方式' } } } } } }]\n```\n\n`validateTranslationReferences(stack)` returns:\n\n```\nrule:     translation-target-unknown\nseverity: warning\nwhere:    locale \"zh-CN\" · object \"showcase_contact\" · section \"contact\"\nmessage:  Translations are keyed to section \"contact\", which nothing on object\n          \"showcase_contact\" declares — no `fieldGroups[].key`, no named form-view\n          section, no named `record:details` section. The section heading stays in\n          the source locale.\nhint:     ... Object \"showcase_contact\" declares no named section at all.\n```\n\nBoth the message and the hint are false: the object declares four named sections and the heading DOES resolve at render time. The advice the finding gives (\"give the section a `name` and use it here, or drop the translation\") points the author at deleting a translation that works.\n\n### Why it matters more now\n\nPR for #5405 adds a `section` kind to the CLI i18n walker, and its second source is exactly this surface — the container default `form`, `formViews.*`, and page `record:details`. So after #5405, `os i18n extract` scaffolds `objects.showcase_contact._sections.contact.label`, and `os lint` immediately reports the key it just scaffolded as an unknown target. The two rules will contradict each other on real showcase metadata.\n\nThe #5405 walker deliberately covers `view.form.sections` because that is what the renderer reads; this issue is the reference validator catching up on the same anchor. The set relationship the two should hold is: every key the coverage walker DEMANDS must be a key the reference validator ACCEPTS.\n\n### Suggested fix\n\nIn `collectViewRecord`, feed the container's default `form` through the same section-name collection as `formViews.*` entries, binding it via `bindingOf(view.form) ?? listBinding` (mirroring how `viewObjectName` in the CLI walker resolves `view.form.data.object`). Worth a fixture pinning the showcase `ContactViews` shape so the anchor list cannot silently lose an entry again.\n\nFound while implementing #5405 (out of scope there: `packages/lint`, and #5405 is CLI-walker scoped). Related: #5164 (the `_views` spelling disagreement — the same producer-drift family on the neighbouring key group).\n\nCode references pinned to `b4872a868`."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 5075,
+  "kind": "issue",
+  "title": "Detail page renders `Field.address` values as raw JSON — the display registry has a `location` formatter but no `address` one",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T02:20:35Z",
+  "updated_at": "2026-08-05T16:55:53Z",
+  "closed_at": "2026-08-05T16:55:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5075",
+  "body": "## Summary\n\nOn a record detail page, a `Field.address` value renders as a stringified JSON object instead of a formatted address. The create/edit dialog renders the same field correctly as Street / City / State / ZIP / Country inputs, so this is specific to the detail page's **read** renderer.\n\n## Decisive evidence — same record, same field group\n\n| field | type | detail page (read) |\n|---|---|---|\n| `billing_address` | `Field.address` | ❌ `{\"street\":\"中策路 1 号\",\"city\":\"杭州\",…}` |\n| `office_location` | `Field.location` | ✅ `📍 30.2741, 120.1551` |\n\nBoth fields sit in the same `contact_info` group on the same account record. The detail-page read renderer therefore **has** a `location` formatter and **lacks** an `address` one, so `address` falls through to stringifying the object.\n\nThis matches the shipped console bundle: the **input** registry carries both `address:` and `location:`; the **display** registry the detail page uses does not carry `address`.\n\nThe detail page's inline edit mode shows the JSON too.\n\n## Reproduce\n\n1. Declare an `address` field on any object and give a record a value for it.\n2. Open that record's detail page.\n3. The value renders as raw JSON. Open the create/edit dialog for the same record — it renders correctly.\n\n## Scope\n\nType-level, not object-specific. Confirmed by writing a value to a second object's `address` field through the API and seeing the same rendering (reverted afterwards).\n\n## Why we have no app-side workaround\n\n- **Changing the field to `text`** destroys the structured value and breaks the flat `billing_country` projection our territory sharing rules match on — and loses the sub-field inputs that currently work.\n- **A mirrored \"display\" field** puts two addresses on the page that can drift apart.\n- **Authoring detail-page sections** changes the value's *source*, not the renderer that formats it.\n\nSo we have recorded it as a known gap rather than papering over it.\n\n## Environment\n\n`@objectstack/*` protocol `^17.0.0-rc.1`, console served from `@objectstack/console`, driver-sql on SQLite, browser locale `zh-CN`.\n\nFiled from a downstream app (`hotcrm-heimao`), tracked there as issue #54."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 5382,
+  "kind": "issue",
+  "title": "`os doctor` 对非法 `OS_TENANCY_POSTURE` 退出码 0 并报告「环境功能正常」—— 抛错被 config 分析的宽 catch 吞成一句「Could not load config」",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T03:04:59Z",
+  "updated_at": "2026-08-05T04:43:48Z",
+  "closed_at": "2026-08-05T04:43:48Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5382",
+  "body": "发现于 #5359（`serve` 的 posture 闸门，PR #5381）实施过程中的顺带核验；本单只记录，不在该 PR 里改（那单的文件面被限定为 `packages/cli/src/commands/serve.ts`）。\n\n**与 #5359 是同一形状、不同命令**，但不是它的子集：#5359 的完成范围只覆盖 `serve.ts`，本单的修复点在 `doctor.ts`，两者可独立进行。\n\n## 现象\n\n一个 `OS_TENANCY_POSTURE` 拼错、**根本无法启动**的环境，`os doctor` 报告它「functional」并 **exit 0**：\n\n```\n$ OS_TENANCY_POSTURE=bogus os doctor\n  …\n  ⚠ Could not load config for analysis (config checks skipped)\n\n⚠️  Environment is functional but has some warnings.\n   Run with --verbose to see fix suggestions.\n\nEXIT=0\n```\n\n全程没有任何一个字提到 `OS_TENANCY_POSTURE`。而同一个环境下 `os serve` 是会拒绝启动的（退出码 1）。\n\n## 成因（`origin/main` @ 2f6516eb9）\n\n`packages/cli/src/commands/doctor.ts:688`：\n\n```\n        if (postureGatesGlobalUniques(resolveTenancyPosture())) {\n```\n\n这行位于 config 分析那个很宽的 `try` 内，其 catch 在 `doctor.ts:740-743`：\n\n```\n      } catch {\n        printWarning('Could not load config for analysis (config checks skipped)');\n        hasWarnings = true;\n      }\n```\n\n`resolveTenancyPosture()`（`packages/types/src/env.ts:145`）对无法识别的值抛错，这个抛错被上面这个 catch 接住，转述成「配置载不进来」——**归因错了**（配置本身没问题），并且只记为 warning，所以最终退出码是 0。\n\n`doctor.ts:294`（`findUnscopedGlobalUniques()` 内的 `resolveTenancyPosture()`）在同一个 try 的覆盖下，同理。\n\n## 为什么值得修\n\n这是「declared ≠ enforced」落在**诊断面**上，而且落在最糟的位置：`os doctor` 正是运维在 `serve` 起不来之后会去跑的那个命令。它此刻回答「环境功能正常」，等于把排查引向别处。#4801 / cloud#1020 已经为「诊断面与运行时不一致」付过一次账，这次是诊断面与**另一个 CLI 命令**不一致。\n\n另外 exit 0 意味着任何把 `os doctor` 放进 CI/健康检查的地方，都不会因为这个配置错误变红。\n\n## 建议方向（未实现，供 triage）\n\n两条都不在本单决定：\n\n1. 与 PR #5381 给 `serve` 加的闸门同构 —— 在 `doctor` 早期、宽 catch 之外解析一次 posture，非法值直接以带处方的文案报 error 并让 `hasErrors = true`（doctor 的语义是「报告」而非「拒绝」，所以大概率不该 `process.exit(1)`，而是走它自己的 error 汇总）。\n2. 更窄的做法：只把 `resolveTenancyPosture()` 从那个 try 里提出来。\n\n倾向 1：doctor 的价值就在于把 env 层面的问题**指名道姓**说出来，而不是让它以「config 载不进来」的形态糊过去。\n\n## 现状证据\n\n`packages/cli` 下没有测试钉 `doctor` 在非法 posture 下的行为（#5359 之前 `packages/cli` 对该变量零测试；PR #5381 新增的 `serve-tenancy-posture-gate.test.ts` 只覆盖 `serve`）。\n"
+}

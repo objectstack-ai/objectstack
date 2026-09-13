@@ -1,0 +1,37 @@
+{
+  "number": 5529,
+  "kind": "issue",
+  "title": "wait 定时唤醒 job 在 resume 没能消费掉暂停时也会自我取消 —— store 短暂不可达即丢掉这一次唤醒,run 挂到下次重启才被捞回",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T15:38:31Z",
+  "updated_at": "2026-08-05T17:29:29Z",
+  "closed_at": "2026-08-05T17:29:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5529",
+  "body": "发现于 #5512 的修复过程(PR #5527),与该 PR 相邻但不同因,按 Prime Directive #10 单开。**未在 PR #5527 中修改。**\n\n## 现象(按代码判定,非线上实测)\n\n`packages/services/service-automation/src/builtin/wait-node.ts` 里 timer wait 排下的一次性唤醒 job,其回调是:\n\n```\ntry { await engine.resume(runId) } finally { await job.cancel?.(jobName) }\n```\n\n`finally` 无条件取消 —— 但 `engine.resume()` 是**返回结果对象**而不是抛错的,所以「这一枪打空了」和「这一枪打中了」在这里无法区分。打空的两种情况(`origin/main` 的 `engine.ts`,`resumeInternal` 内):\n\n- `STORE_UNAVAILABLE`(L2757 一带):持久 suspended-run store 读不到 —— 按 #4420 的设计这**不能**被当成「没有这个 run」,暂停仍然存在、行还在;\n- `RESUME_IN_PROGRESS`(L2736):另一个 resume 正在进行中。\n\n第二种无害(另一路 resume 会消费掉暂停,PR #5527 之后它也会顺带取消 job)。**第一种是个洞**:暂停没被消费(run 还挂在 wait 节点上),但它唯一的唤醒 job 已经被取消了。此后没有任何东西会唤醒它,直到下一次进程启动 —— `rearmSuspendedWaitTimers` 会把它当 overdue 立即 resume。也就是说:store 在唤醒那一刻抖一下 + 之后不重启 = 这个 run 永远停在 wait 节点。\n\n窗口很窄(要恰好在到点那一刻 store 不可达),也能靠重启自愈,所以不急;但它属于 #4632 明确要防的那一类「持久化承诺没兑现」——只不过 #4632 覆盖的是 re-arm 路径的降级,这条在 timer 回调里,当时没看。\n\n## 期望\n\n`finally` 里的自我取消应当只在「这一枪确实打中了(暂停被消费了)」或「这个 job 无论如何不该再响」时执行,而不是把 store 故障也当成打中。可能的方向(未决,交 PM/维护者裁断):\n\n- 按 `resume()` 的返回码分流:`STORE_UNAVAILABLE` 时**不**取消(让 job 服务的既有重试/下次到点再试),其余照旧取消;\n- 或者让这条路径显式记一条 error(现在是静默的:结果被回调丢弃,没有任何日志),这样至少可观测。\n\n注意 PR #5527 引入的 `onSuspensionReleased` 拆除**不**覆盖这条:它只在暂停真的被消费时才触发,正是「打中了」的那一半;`finally` 保留下来的职责恰恰是「这一次性 job 不该再响」,两者的语义分歧就是这个 issue。\n\n## 佐证\n\n- `wait-node.ts`(origin/main)L87-L92:`finally` + `One-shot: drop the job so it never re-fires`。\n- `engine.ts`(origin/main)L2736 / L2757:两个「resume 没消费掉暂停」的返回码。\n- `rearmSuspendedWaitTimers`:overdue 分支会在下次启动时立即 resume,这就是唯一的自愈路径。\n"
+}

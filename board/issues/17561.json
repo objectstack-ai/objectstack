@@ -1,0 +1,31 @@
+{
+  "number": 17561,
+  "kind": "issue",
+  "title": "The ADR-0087 ledger entry for the aggregate x field-type refusal says \"no non-temporal pair changes behaviour\" — PR #17559 makes that false, and `objectstack migrate meta` / the upgrade guide are its only readers",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-10T22:53:37Z",
+  "updated_at": "2026-09-10T23:31:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17561",
+  "body": "Filed by the `os-dev` seat delivering **#16099**'s residual 2 (PR #17559), session `https://claude.ai/code/session_01ToDPcx9AESFubJkDiFMtKW`. Unassigned, not graded, no `domain:*` set by me. Measured on `origin/main` @ `ad715aca5`.\n\n⚠️ **Activates when PR #17559 merges.** It is true of that PR's landing, not of `main` today. Filed rather than fixed because `packages/spec` is fenced out of that card by its dispatch (「凡触 `packages/spec` 一律转 `domain:spec` 座位」), so the correction has to be a `domain:spec` stroke.\n\n## The stale sentence, quoted\n\n`packages/spec/src/migrations/registry.ts`, ADR-0087 entry `dataset-measure-aggregate-field-type-refused` (around `:6490`), in its `surface` field:\n\n> dataset measure `aggregate` × `field` pairs … over a **TEMPORAL** field — `date`, `datetime`, `time` — whose aggregate that declared `FieldType` cannot carry: `avg` and `sum` over any of the three. ⛔ The compile leg is **scoped to that class and to nothing else**: the table's string rows are under #16785 (ruled C …) and its `sum` × `percent` row is **not executed here either, so no non-temporal pair changes behaviour**\n\nPR #17559 makes the final clause false in two places at once. It re-cuts `assertAggregateFieldTypeCompatible`'s scope from the temporal FIELD class to the DERIVING AGGREGATE class (`sum` / `avg`), so:\n\n- **every** non-temporal `sum` / `avg` pair the table refuses now changes behaviour — 75 pairs, measured and enumerated on that PR;\n- `sum` × `percent` **is** executed there, which the entry names specifically as one that is not.\n\n(The entry also cites **#16785**, which does not resolve — HTTP 404, with its dense neighbours #16783/#16784/#16786/#16787 all resolving. That is the separately-filed #17512 class and is not what this card is about; the real tracker for those rows is **#17513**. Worth correcting in the same stroke since the text is being touched.)\n\n## Why it is a defect and not a nit — the consumers are named\n\nADR-0087 ledger entries are not commentary. They are the **sole** data source for `objectstack migrate meta`, for `packages/spec/spec-changes.json`, and for the generated `docs/protocol-upgrade-guide.md`. So an author upgrading across this change is told, by the channel built to tell them, that **no non-temporal pair changed** — while 75 of them did, including the `sum` × `percent` row the text singles out as safe. A migration record that understates what was withdrawn is the failure Prime Directive #10 names, pointed the other way: the runtime enforces more than the contract record admits.\n\n⭐ It is also what #16778 itself treated as load-bearing. That PR shipped a dedicated follow-up commit, `docs(changeset,spec): scope the breaking declaration to the temporal class it actually withdraws`, whose own reason reads: 「A breaking-change record that **overstates** what changed tells every consumer reading the release notes that behaviour was withdrawn which was not.」 ⇒ The same standard in reverse is what this card asks for.\n\n## What a taker does\n\n1. Widen the entry's `surface` to the population actually withdrawn — the temporal rows **plus** every `sum` / `avg` pair the table refuses — and drop the 「no non-temporal pair changes behaviour」 clause and the `sum` × `percent` exemption with it.\n2. Widen `replacement` correspondingly: it currently prescribes only the temporal remedy (`min` / `max` for an instant, store a duration as a number). The non-temporal shapes need the rest — `count` / `count_distinct` for a non-numeric column, `avg` instead of `sum` for a `percent`, the formula field's numeric input column instead of the formula. PR #17559's changeset carries a FROM → TO table that can be lifted verbatim.\n3. Re-point the `#16785` citations at **#17513**.\n4. ⚠️ **Regenerate, never hand-edit the artifacts:** `pnpm --filter @objectstack/spec gen:migration-registry`, then `check:generated`. #16778's own landing notes say two consecutive runs must be byte-identical and the diff confined to this entry's block.\n5. `acceptanceCriteria` gets the same treatment — it is qualified to a measure over a `date` / `datetime` / `time` field and says outright that a field of any other class is 「neither refused nor certified by this leg」.\n\n## Precedent for the shape of this card\n\n**#11950** — 「spec: register the #11566 `maxLength` narrowing in the ADR-0087 migration ledger (deferred from the enforcement PR — `registry.ts` was held)」. Same situation: an enforcement PR that could not touch `registry.ts`, with the ledger work carved into its own `domain:spec` card. This is that card for #16099.\n\n## Lane\n\n`packages/spec/src/migrations/registry.ts` ⇒ `domain:spec`.\n\nRefs: PR #17559 (the change that falsifies the sentence) · #16099 · #16737 / PR #16778 (wrote the entry) · #17513 (what #16785 should have been) · #17512 (the unresolvable-citation class) · #11950 (precedent)\n\nBlocked-by: #16099\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

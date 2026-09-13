@@ -1,0 +1,36 @@
+{
+  "number": 5485,
+  "kind": "pull_request",
+  "title": "feat(spec,automation): flow 的 update_record / delete_record 可以声明批量意图 `multi`",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T13:49:42Z",
+  "updated_at": "2026-08-05T14:51:00Z",
+  "closed_at": "2026-08-05T14:50:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T14:50:59Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5485",
+  "body": "Fixes #5393\n\n## 前提复核(rule 6,对 origin/main @ ed0d2aac0)\n\nissue 的三条事实全部成立,逐条实测:\n\n- `DeleteRecordConfigSchema` / `UpdateRecordConfigSchema`(`packages/spec/src/automation/builtin-node-config.zod.ts`)是 `strictObject`,前者只声明 `objectName` / `filter`,后者只多一个 `fields` —— 任何批量意图拼法都被 `unrecognized_keys` 拒。\n- `packages/services/service-automation/src/builtin/crud-nodes.ts` 的两个执行器调用 `data.update` / `data.delete` 时不传 `options.multi`。\n- 引擎契约不变:`resolveEngineDeleteDispatch`(标量 `where.id` → 按 id;否则 `options.multi` → `deleteMany`;否则抛 `Delete requires an ID or options.multi=true`),update 侧在 `engine.ts` 有同款内联 throw。\n\n所以谓词批量写从任何 app 的任何 flow 都不可达,而节点描述符写着 `Delete Records` / `Delete records matching a filter.` —— declared ≠ enforced(PD #10)。按在册裁定 **A** 实现。\n\n## 改了什么\n\n**spec** —— 两个 config 各声明一个同名键 `multi`(`z.boolean().optional()`,默认 false):\n\n- 缺省 / `false`:执行器传 `multi: false`,写入必须以标量 `id` 点名一行,谓词(含 `id: { $in: [...] }`)由引擎拒绝。**拒绝即契约**,不是要绕过的缺陷。\n- `true`:执行器传 `options.multi: true`,落到 `driver.updateMany` / `deleteMany`,步骤的 `acted` 指标报出命中行数。\n- 名字复用引擎既有的词(`EngineUpdateOptions.multi` / `EngineDeleteOptions.multi`)—— 一概念一名(PD #12),从节点 config 到 driver 调用全程可 grep,不发明第二个词。\n\n**guidance(#4001 纪律,两道门都写)** —— `bulk` / `all` / `multiple` 拿到点名处方,`options: { multi: true }` 被当作**写错层**回答(那是引擎的 options 包,不是节点 config)。这四个拼法是 #5225 诊断期真喂过 `safeParse` 的,编辑距离从它们中的任何一个都够不到 `multi`,没有这些条目拒绝就只会报个键名。同一份处方复制到 service-automation 引擎的注册门(`FLOW_NODE_UNKNOWN_KEY_GUIDANCE`),因为注册是作者在 boot 时撞到的**第一道**门,而 #4001 的发现正是:检测面会随默认值翻转自动泛化,**处方不会**。\n\n**描述符表单** —— 两个节点的 `configSchema` 各加 `multi`,所以 form ↔ Zod 台账对得上,键在 Studio 里可授权,而不是只能手写元数据。\n\n**执行器** —— `multi: cfg.multi === true` 在**每次**调用上都写出来,而不是 true 时才 spread:`multi: false` 是让引擎拒绝谓词写的那一半契约,调用点的读者应该直接看见问的是哪一半,而不是从一个缺席的键推断。\n\n`packages/objectql` 零改动。#3810 的抹除守卫零改动,并新增用例钉住它:声明 `multi` **不会**解除它。\n\n## 测试\n\n新增 `packages/services/service-automation/src/builtin/crud-bulk-intent.test.ts`(10 例)。它的 delete 替身以 `assertEngineDeleteDispatch`(从 `@objectstack/objectql` import 的**生产者自己的判定**)开头,所以在任何输入上都不可能比真引擎松 —— 包括手抄守卫必漏的 `id: { $in: [...] }`(看着像 id,其实是谓词)。`check-engine-double-contract` 已把该文件认作 `pinned`。\n\n这正是 issue 点名的 #5197 盲点:`run-summary.test.ts` 的内联 `async delete() { return false; }` 既接受真引擎拒绝的谓词删除,又因为**零参**而躲过门禁的 arity 判定(`isEngineDeleteShape` 要求引擎的 `(object, options)` 形状),连被发现都做不到。\n\n为此给 `@objectstack/service-automation` 加了 `@objectstack/objectql` devDependency —— 无环:objectql 的传递依赖闭包(12 包)不含 service-automation,`turbo run build --filter=@objectstack/service-automation --dry` 正常解析。`scripts/engine-double-contract.baseline.json` 里 8 条 service-automation 条目的 `why` 原本写着「不依赖 objectql,加依赖是另一次可评审动作」—— 那句话被本 PR 变成假的,所以按 plugin-auth 的 #3585 先例把它们改成 MEASURED 记述,并给 `crud-filter-guard.test.ts` 多留一句:它有几条 #3810 fixture 断言谓词删除成功,真引擎会拒;#5393 之后那是可表达的,所以将来 pin 它时那些 fixture 应该**补 `multi: true`**,而不是删掉。\n\n**update 侧刻意不 pin,并在文件头写明原因**:objectql 没有导出 update 的判定函数(`engine.ts` 里是内联 throw),门禁自己的文件头也把 \"update's twin dispatch\" 列为待抽取后再覆盖的切片。所以 update 用例只断言**执行器交给引擎的 options 包**——执行器的全部义务——并明确不对引擎会不会接受它发表第二份意见;在 fake 里手抄一份 update 判定,恰恰是那道门禁存在的理由。已另开 issue 记录。\n\n### 反向验证(方向是**先判定后跑**的:红)\n\n预判:把执行器的 `multi` 接线撤掉,`multi: true` 的用例应当变红,因为替身钉在生产者判定上,谓词删除会拿到引擎真实的拒绝。实测撤线后 `10 例中 7 例红`:\n\n```\nAssertionError: expected { where: { stage: 'stale' }, …(1) } to match object { multi: false }\nAssertionError: expected false to be true // Object.is equality\nAssertionError: expected { where: { id: 'd2' }, …(1) } to match object { where: { id: 'd2' }, multi: false }\nTests  7 failed | 3 passed (10)\n```\n\n三例仍绿,各有诚实的理由,其中一条据此**改强了**:「`multi: false` 写出来与不写是同一个拒绝」原本只断言拒绝本身,而拒绝在接线前后都成立 —— 它会穿过本文件存在的意义所在的那次 revert 保持绿。已补上对 options 包的断言。另两条(#3810 守卫、描述符表单)本就与执行器接线无关,绿在两边是设计使然,不是空断言。\n\n### 命令与真实输出\n\n```\npnpm --filter @objectstack/spec test                 → Test Files 310 passed  / Tests 7941 passed\npnpm --filter @objectstack/service-automation test   → Test Files  56 passed  / Tests  675 passed\npnpm --filter @objectstack/lint test                 → Test Files  58 passed  / Tests 1229 passed\npnpm --filter @objectstack/objectql test             → Test Files 118 passed  / Tests 1911 passed\npnpm --filter @objectstack/metadata-protocol test    → Test Files  42 passed  / Tests  388 passed\npnpm --filter @objectstack/cli test                  → Test Files  79 passed  / Tests  767 passed\npnpm --filter @objectstack/spec typecheck            → Done\n```\n\n消费半径按规则的**调用方**扫过,不是按被改的包:CRUD node config 被 cli(validate/lint/migrate)、lint、metadata-protocol(canonicalization)、studio flow-builder 一并消费,全部跑过。cli 首轮 30 红,原因是新 worktree 里 `@objectstack/setup` 等依赖没构建(`Failed to resolve entry for package`),`pnpm --filter '@objectstack/cli^...' build` 后 79/79 全绿 —— 与本改动无关。\n\n门禁:\n\n```\ncheck:generated                → ✓ All 9 generated artifacts are up to date\ncheck-engine-double-contract   → OK — 23 pinned, 32 in the DEBT ledger, 1 exempt\ncheck-nul-bytes                → OK (5457 files; no raw C0 control bytes)\ncheck-i18n-bundles             → OK (9 packages, all in sync)\ncheck-i18n-coverage            → OK (12 configs, 660 baselined, none new)\ncheck:merge-driver / check:adr-anchors / check:durability-log-level /\ncheck:startup-registry-verdict / check:type-check-coverage /\ncheck:published-files / check:release-notes / check:stall-guard / … → OK\n```\n\n生成物随行:`authorable-surface.json`(+2 键)、`content/docs/references/automation/builtin-node-config.mdx`(+2 行),两者都由 `gen:schema` / `gen:docs` 整体重生成,未手改。strictness 台账重生成后无变化(往已 strict 的 shape 上加键不动计数)。\n\n## 两处刻意留下的行为,写在这里而不是留给下一个读者\n\n1. **`multi: true` 且没有 `filter` = 按声明清空整个对象。** 引擎的派发表本就把「multi 且完全没有谓词」列为合法,#3810 的守卫按「作者写过的条件被抹掉」判定而**不是**按「filter 为空」判定(那是它注释里的原话,也有专门用例钉住)。#5393 之前这条路径不可达,现在可达了,但它是显式、可 grep 的声明。是否要在 authoring 期加告警,已另开 issue 交 PM 定级,不在本 PR 内发明。\n2. **`update_record` 的破坏性并不比 `delete_record` 低多少**(谓词 update 覆盖整表字段),但它的测试替身在结构上**不能**被绑到生产者契约。同上,另开 issue。\n\n## 范围外发现(PD #10,均已建单、未指派)\n\n- #5480 —— objectql 的 UPDATE dispatch 没有共享判定函数;delete 有 `engine-delete-dispatch.ts`,update 只是 `engine.ts` 里的内联 throw,门禁的 update 切片因此无从建立。\n- #5482 —— `multi: true` + 空 `filter` 在 authoring 期零诊断(上面第 1 点)。\n\n## 后续\n\n#5225(showcase 清扫流)挂 Blocked-by 本单,本单落地后由它以声明批量意图收尾。示例目录本 PR 未动。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018fxLGQdatPbBUvCgiVxg6D)_"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 5557,
+  "kind": "issue",
+  "title": "`ObjectQLStrategy.convertFilter` 把 `$contains` 送成未声明的 `$regex`(比较值不转义),三个同族算子早在 #4128 已改成规范算子 —— 实测",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T17:53:41Z",
+  "updated_at": "2026-08-05T19:17:35Z",
+  "closed_at": "2026-08-05T19:17:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5557",
+  "body": "修 #5333(回显丢 `$startsWith`/`$endsWith`)时核对 `objectql-strategy.ts` 的算子覆盖面,发现这一条在**执行**侧,与 #5333 的回显侧只隔一个函数。\n\n## 位置\n\n`packages/services/service-analytics/src/strategies/objectql-strategy.ts` 的 `convertFilter`(约 1018 行):\n\n```ts\ncase 'contains': return { $regex: values[0] };\n// `notContains` had no arm and fell to the `default` below ... These three pass\n// through as the canonical spec operators every driver implements directly, so an\n// anchored match stays anchored rather than depending on regex dialect (#4128).\ncase 'notContains': return { $notContains: values[0] };\ncase 'startsWith':  return { $startsWith: values[0] };\ncase 'endsWith':    return { $endsWith: values[0] };\n```\n\n紧挨着的注释把三个同族算子改成规范算子的理由写得很清楚 ——「so an anchored match stays anchored rather than depending on regex dialect」—— 而 `contains` 留在了 `$regex` 上,**同一个 switch 里的四个 LIKE 家族算子,三个走规范算子,一个走正则**。\n\n## 实测(`ObjectQLStrategy.execute` 捕获交给 `executeAggregate` 的 filter)\n\n```\n{\"stage\":{\"$contains\":\"a.b\"}}     => engine filter: {\"stage\":{\"$regex\":\"a.b\"}}\n{\"stage\":{\"$notContains\":\"a.b\"}}  => engine filter: {\"stage\":{\"$notContains\":\"a.b\"}}\n{\"stage\":{\"$startsWith\":\"a.b\"}}   => engine filter: {\"stage\":{\"$startsWith\":\"a.b\"}}\n{\"stage\":{\"$endsWith\":\"a.b\"}}     => engine filter: {\"stage\":{\"$endsWith\":\"a.b\"}}\n```\n\n比较值**原样**放进 `$regex`,不转义。于是在任何把 `$regex` 当真正则求值的后端上:\n\n```\nnew RegExp('a.b').test('axb') === true      // 作者要的是字面子串,拿到的是通配\nnew RegExp('50% (+)')         THROWS SyntaxError: Nothing to repeat\n```\n\n`driver-memory` 的 `memory-matcher.ts` 正是 `new RegExp(target, …)`,并且 `catch` 之后 `return false` —— 所以带正则元字符的比较值要么**多匹配**(`.` `[` `|`),要么**静默零行**(括号/量词非法时)。对照:`driver-memory` **自己的** analytics 面(`memory-analytics.ts`)对 `contains` 是 `substring: (v) => this.driver.filterSubstringPattern(v)`,即用驱动自己的规则**转义成字面子串**;经由本 issue 这条路径进来的 `$regex` 绕过了那层转义。\n\n## 为什么是 bug(三点,都不依赖 #4706 的裁决)\n\n1. **`$regex` 不在契约里。** `packages/spec/src/data/filter.zod.ts` 的 `FILTER_OPERATORS` 是 15 个:`$eq $ne $gt $gte $lt $lte $in $nin $between $contains $notContains $startsWith $endsWith $null $exists` —— **没有 `$regex`**。这里是一个**生产方**在向引擎发送 schema 未声明的算子;按 Prime Directive #12,修法在生产方,而不是让消费方各自容忍。\n2. **同包内已有消费方对它 fail-closed。** 同一个包的 `read-scope-sql.ts` 的 `compileOperator` 遇到 `$regex` 直接抛 `[read-scope-sql] unsupported operator \"$regex\" on \"stage\" (fail-closed)`(#5333 的测试用它做 stand-in 引擎时当场撞上)。同一个 `FilterCondition` 在同一个包的两个消费方之间已经不通。\n3. **跨驱动结果不一致。** `driver-sql` 把 `$regex` 编译成子串 `LIKE`(`sql-driver.ts` 约 6489 行,注释还写着「`$regex` reaches SQL only via the better-auth adapter」—— 它不知道 analytics 是第二个生产方),而 regex 求值的后端按正则匹配。**同一个 dashboard 的 `$contains` widget 在不同驱动上返回不同行集** —— 这正是 #4706 第 3 点最想要答案的那个形状。\n\n## 建议\n\n`case 'contains': return { $contains: values[0] };` —— 与它三个同族算子一致,一行。这样 `$regex` 在 `service-analytics` 里就没有生产方了,#4706 那道「`$regex` 到底该是什么语义」的裁决也少一个受影响的调用方(本条不等它:改成规范算子无论 #4706 怎么裁都是对的)。\n\n需要的用例:`contains` 的比较值带正则元字符(`a.b`、`50% (+)`)时,行结果与字面子串一致 —— 断言 SQL/filter 字符串会漏掉转义这一半。\n\n关联:#5333(同文件、回显侧的同类算子表漂移)、#4128(`convertFilter` 的 `default:` 从「当成等值」改成抛错、三个同族算子改成规范算子的那次)、#4706(`$regex` 语义待裁决,`needs-user-decision`)、#5374(`driver-memory` analytics 面改成整条谓词构建的那次,`contains` 在那边是转义过的)。"
+}

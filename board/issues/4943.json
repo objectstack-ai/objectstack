@@ -1,0 +1,30 @@
+{
+  "number": 4943,
+  "kind": "issue",
+  "title": "[spec/driver-sql] `IndexSchema.partial` is authorable but no driver ever emits the WHERE clause (declared ≠ enforced)",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T16:57:08Z",
+  "updated_at": "2026-08-05T16:56:56Z",
+  "closed_at": "2026-08-05T16:56:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4943",
+  "body": "Found while fixing #4884 (drift detector misreading the ADR-0048 overlay indexes). Filing rather than fixing — out of that PR's scope.\n\n## The gap\n\n`packages/spec/src/data/object.zod.ts` L294 declares an authorable key on every index:\n\n```ts\npartial: z.string().optional().describe('Partial index condition (SQL WHERE clause for conditional indexes)'),\n```\n\nNothing consumes it. `SqlDriver.syncDeclaredIndexes`\n(`packages/plugins/driver-sql/src/sql-driver.ts`) builds every declared index through\nknex's `table.unique(fields, { indexName })` / `table.index(fields, name)`, which have\nno way to express a predicate; `normalizeDeclaredIndex` in `schema-drift.ts` reads only\n`name` / `fields` / `unique`. A grep across `packages/plugins/**` and `packages/objectql/**`\nfinds no other reader.\n\nSo an author who writes `partial` gets a **full** index, silently — the declaration is\naccepted, documented, rendered into `content/docs/references/`, and inert.\n\n## It is not hypothetical\n\n`packages/metadata-core/src/objects/sys-metadata.object.ts` is itself an author of it:\n\n```ts\n{\n  name: 'idx_sys_metadata_overlay_active',\n  fields: ['type', 'name', 'organization_id', 'package_id'],\n  unique: true,\n  partial: \"state = 'active'\",\n}\n```\n\nThe comment right above it explains that overlay uniqueness must be \"restricted to active\nrows so resets / archived versions don't collide\" — and the index the additive sync\nactually creates is unrestricted, so on a driver without `metadata-protocol`'s\n`ensureOverlayIndex` runtime migration, archived rows DO collide with the active one. The\nruntime migration is what makes this work today on the SQL driver; the declaration alone\ndoes not deliver what it says.\n\n## Decision needed (ADR-0049 enforce-or-remove)\n\n- **Enforce** — teach the index-creation path to emit `CREATE [UNIQUE] INDEX … WHERE <partial>`\n  via `knex.raw` on the dialects that support it (SQLite, Postgres), and decide what MySQL\n  (no partial indexes) does: reject at publish time, or degrade with a loud warning.\n  This also gives the drift comparator a real predicate to diff, instead of ignoring the\n  dimension as it does today.\n- **Remove** — retire the key per the `spec-property-retirement` playbook, and let a runtime\n  migration remain the only way to declare a partial index.\n\nEnforcing looks right on the merits (the platform's own metadata object needs it), but it\nis a producer-side contract change plus a dialect-capability decision, so it wants a\nmaintainer call rather than a drive-by.\n\n## Not the same as #4884\n\n#4884 is about the **detector** misreading expression columns and pointing\n`--allow-destructive` at framework-created indexes; its fix teaches introspection to read\npartial/expression indexes correctly but deliberately does not start *creating* them.\nThis issue is the producer-side half.\n"
+}

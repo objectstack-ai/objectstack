@@ -1,0 +1,37 @@
+{
+  "number": 5546,
+  "kind": "pull_request",
+  "title": "fix(client): 让 client 测试层真的进 tsc,那处 `@ts-expect-error` 不再是幽灵检查",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "skip-changeset",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T16:53:56Z",
+  "updated_at": "2026-08-05T17:17:29Z",
+  "closed_at": "2026-08-05T17:17:28Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T17:17:28Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5546",
+  "body": "Fixes #5449\n\n照 #5286 / PR #5478 定下的机制跟进,不发明第二套。\n\n## 前提复核(先证后改)\n\n在最新 `origin/main`(`9894a723e`)上两态实测:\n\n- 保留 `packages/client/src/client.test.ts:1283` 的 `// @ts-expect-error — empty string rejected at runtime` → `pnpm --filter @objectstack/client typecheck` 退出码 0\n- 删掉该指令行 → 同一条命令仍退出码 0\n\n两态皆绿 = 该指令从未被求值。前提成立。\n\n## 反向验证方向:与派发模板相反,如实申报\n\n派发单预判「修好后删掉指令行应红 TS2578」。**这个方向在本单不成立,而且是本单的核心发现**:`project(environmentId: string)` 接受 `''` —— 那就是一个合法的 `string` —— 所以该指令从来没有东西可压制。它第一次被编译时报的就是\n\n```\nsrc/client.test.ts(1283,9): error TS2578: Unused '@ts-expect-error' directive.\n```\n\n也就是说,**正确的修法就是删掉这行指令**(它自己的注释已经说明了这个测试真正证明的事:空 id 是在**运行时**被下面那道 guard 拒绝的)。因此反向验证是镜像的:**把指令行加回去应该红**。先判后跑,实跑结果:\n\n```\n✓ check:test-typecheck --self-test — 8 semantic case(s) + the parser hold.\ncheck:test-typecheck: 1 problem(s)\n\n  • src/client.test.ts: 1 type error(s) in a file the ledger does not cover. Fix them — this file is\n    inside the checked zone, which is the point of tsconfig.test.json. (A deleted `@ts-expect-error`\n    shows up exactly here, as TS2578/TS2694.)\nERR_PNPM_RECURSIVE_RUN_FIRST_FAIL @objectstack/client typecheck: Exit status 1\n```\n\n修改前同样的「加回去」是绿的,修改后是红的 —— 这正是「该文件现在真的在一个 tsc program 里」的证据。\n\n## 做了什么\n\n- **`packages/client/tsconfig.test.json`(新增)**:build config 的 sibling。build 的 `exclude` **保留不动**(ci.yml 有「编译产物不得含测试文件」的闸门,已实跑 `pnpm --filter @objectstack/client build` 确认 `dist/` 无测试文件)。差异只在**模块语义**:`module: esnext`、`moduleResolution: bundler`、ES2022 lib,匹配 vitest 的真实执行方式;外加把 `rootDir` 放宽到工作区根 —— 有四个测试文件深引用兄弟包的 route ledger(`../../runtime/src/route-ledger` 等),继承来的 `rootDir: ./src` 会为此报 5 条 TS6059,那是**检查本身配错**,不是测试的问题(它们正是该包 TEST_DEBT 陈旧条目的大头)。**严格性 flags 一律继承,一条都没放宽。**\n\n- **13 条错误,修掉 8 条真实缺陷**:两个未使用的 import、一个未使用的形参、两处对可选 `routes` 的可能为 undefined 的读取(改成可选读 + 断言,没有用 `!` 或 `?? {}` 兜底,map 缺失照样测试失败)、一处 `unknown` 载荷改用 `toMatchObject` 结构断言(不加 cast)、一个字段 schema 根本没有的 `reference_to` key(那个 lookup 此前**没有声明任何目标**),以及那处幽灵 pin。重新拼对 `reference` 之后又暴露出 1 条同族错误。\n\n- **剩下 6 条进 EXACT ratchet 台账**:三个文件、一个根因 —— objectql 的 `registerObject` 参数标成了 schema 的 OUTPUT 类型(`z.infer`)而非 INPUT(已另立 #5543)。`packages/client/test-typecheck-debt.json` 逐文件精确记账、只减不增;#5543 修好那天台账会自动变红要求毕业,而不是烂在那里。**pin 所在文件 `client.test.ts` 不在台账里,必须零错误** —— 上面的反向验证就是靠这一点成立的。\n\n- **`scripts/check-test-typecheck.mts`:从 `packages/spec/scripts/` 提升为共享脚本**,用 `--package` 指定包。派发单明确要求「不要发明第二套」,而把 300 行脚本复制一份进 client 恰恰就是第二套。spec 侧只改 `package.json` 的两行脚本;其台账文件一字未动,生成的 `_comment` 模板与已存字节完全一致(未来 `--update` 不会产生伪 diff),实跑 `pnpm --filter @objectstack/spec check:test-typecheck` 仍为 79 文件 / 691 错误。\n\n- **两处台账毕业**(闸门本身会强制):`@objectstack/client` 从 `TEST_DEBT` 删除(陈旧条目记 15 文件 / 19 错误,其中 5 条是上面说的 rootDir 误配),`PHANTOM_PIN_DEBT` 里 #5478 写明「留给 #5449」的 seed 条目删除。\n\n- `AGENTS.md` 里那一段随之更新:台账不再是 spec 专有,闸门是一个共享脚本,接入方式是接线而不是复制。\n\n## 验证\n\n```\npnpm --filter @objectstack/client typecheck\n  ✓ check:test-typecheck --self-test — 8 semantic case(s) + the parser hold.\n  check:test-typecheck: OK — @objectstack/client's test layer compiles under\n  packages/client/tsconfig.test.json; 3 file(s) / 6 error(s) held in\n  test-typecheck-debt.json (shrink-only, #5286).\n\npnpm --filter @objectstack/client test\n  Test Files  17 passed (17)\n       Tests  222 passed (222)\n\npnpm --filter @objectstack/spec check:test-typecheck\n  check:test-typecheck: OK — @objectstack/spec's test layer compiles under\n  packages/spec/tsconfig.test.json; 79 file(s) / 691 error(s) held in\n  test-typecheck-debt.json\n\nnode scripts/check-type-check-coverage.mjs\n  check-type-check-coverage: OK — 62/77 workspace packages type-checked (plus the root),\n  15 in the DEBT ledger, 1 exempt.\n    test layer: 19 package(s) still exclude their own tests   ← 修改前为 20\n\nnode scripts/check-nul-bytes.mjs\n  check-nul-bytes: OK (scanned 5496 tracked text file(s); no raw ASCII control bytes).\n\npnpm --filter @objectstack/client build   → dist/ 无测试文件\neslint --no-inline-config <改动文件>       → 无输出\n```\n\n## 未做 / 界外\n\n- **不做** issue 处置段建议的「跨包不变式」(任何带 pin 的测试文件不得落在排除区内)—— 那是 #5286 留下的独立提案,越界另立单。顺带一提,`check-type-check-coverage.mjs` 的 `PINS_CHECKED` 已经在做等价的事,且 `PHANTOM_PIN_DEBT` 对新增条目是关闭的。\n- 文件面未触碰 `packages/runtime/**`(#5519 在飞)与 `packages/rest/**`(#5530 在飞)。\n- 界外发现(查重后新立,无标签无指派):#5543(objectql `registerObject` 参数类型 —— 6 条残留欠账的唯一根因)、#5544(`packages/client/tests/integration/` 不在任何 tsconfig 里,且断言了一个不存在的 `client.discovery`)、#5545(`meta.getItem` 缺返回类型声明,而并排的 `getItems` 有)。\n\n## Changeset\n\n纯测试层 + 工装,不发布任何行为变更,按仓里同类先例(PR #5478 同样未加 changeset)走 `pr-automation.yml` 首选的**第 2 条路径**:请打 `skip-changeset` 标签,而不是塞一个空 changeset(空 changeset 是 changesets/action 的真实输入,全空会静默绿着停掉发布 —— #4898)。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016FNvXhtSdnEGEfLEsMmvxh)_"
+}

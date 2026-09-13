@@ -1,0 +1,37 @@
+{
+  "number": 5443,
+  "kind": "issue",
+  "title": "showcase: `showcase_contact` 的九个字段声明了 `group` 却没有 `fieldGroups` —— 文档级示例自己的注释承诺了平台并不提供的自动分组",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T11:52:31Z",
+  "updated_at": "2026-08-05T13:17:26Z",
+  "closed_at": "2026-08-05T13:17:26Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5443",
+  "body": "在 #5420 / PR #5438(把 `ContactViews` 注册进 showcase 的 `views:`)期间发现,超出该单范围,单独记录。已在 `origin/main` `123067ce7` 上核对,与那条注册无关 —— 注册前后 `os lint` 的这九条数量完全不变。\n\n## 现象\n\n`os lint examples/app-showcase/objectstack.config.ts` 与 `objectstack validate` 都报九条,规则 `field-group-undeclared`,showcase 里**只有这一个对象**中招:\n\n```\n⚠ object \"showcase_contact\": showcase_contact.name: group \"contact\" is not declared in\n  fieldGroups — the field renders in the ungrouped bucket, not under \"contact\"\n  field-group-undeclared  at objects[5].fields.name.group\n  … 同样的 9 条,覆盖 name/email/phone/company/title/account/stage/lead_score/notes\n```\n\n`examples/app-showcase/src/data/objects/contact.object.ts` 的九个字段都写了 `group: 'contact' | 'work' | 'status' | 'notes'`,而该对象没有声明 `fieldGroups`。\n\n## 为什么值得单独修\n\n`examples/app-showcase/src/ui/views/contact.view.ts` 的头注释,正是 `content/docs/ui/create-vs-edit-form.mdx` 引用的那份参考实现,原文写着(节选):\n\n> `form` (default edit/detail) — the FULL record, grouped into sections by each field's `group`. **This mirrors what the platform auto-derives from `field.group`**; it is written out explicitly here only so the example is legible. In the target model **you can OMIT it and get an equivalent grouped form for free**.\n\nlint 说的恰好相反:group 没在 `fieldGroups` 里声明,字段落进未分组桶,那个「免费的等价分组表单」并不存在。也就是说,读者照着这份 canonical 示例学、真的把 `form` 省掉,拿到的是一张平铺表单 —— 属于 Prime Directive #10 的推论(不要宣传运行时并不提供的能力),只不过这次说谎的是示例自己的注释。\n\n#5420 落地后这条更要紧了:注册之前这个视图族根本不进栈,谁也走不到;现在 `nav_contacts` 会真的渲染它。\n\n## 两个方向(需要判定,不要顺手选一个)\n\n1. **给 `showcase_contact` 补 `fieldGroups`**(contact/work/status/notes 四个 key + label)。九条告警消失,注释的承诺变成真的。注意副作用:`i18n-extract` 的 `deriveFieldGroupLayout` 分支随之开始产出 `objects.showcase_contact._sections.*` —— 键名与 PR #5438 已经翻译过的那四个**完全相同**(`contact`/`work`/`status`/`notes`),所以覆盖棘轮预期不变,但值得实测确认而不是推定。\n2. **改注释**,老实说明当前平台只在声明了 `fieldGroups` 时才推导分组,`field.group` 单独存在不足以成组。\n\n方向 1 更贴近示例应有的样子(示例就该是能照抄的),但它默认了「`fieldGroups` 才是自动分组的授权来源」这个语义确实是平台想要的 —— 这属于 ADR-0085 的地盘,请维护者定。\n\n## 复现\n\n```\nnode packages/cli/bin/run.js lint examples/app-showcase/objectstack.config.ts \\\n  | grep -c \"is not declared in fieldGroups\"\n→ 9\n```"
+}

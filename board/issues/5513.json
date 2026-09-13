@@ -1,0 +1,36 @@
+{
+  "number": 5513,
+  "kind": "issue",
+  "title": "pm-dispatch skill 缺六条实测规程:阻塞解除后的重新定价、带前提的裁决、收益是否穿过下游边界、多面组件的测试落点、跨仓 pin 滞后、死代码删除的复核",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T14:40:14Z",
+  "updated_at": "2026-08-05T22:02:53Z",
+  "closed_at": "2026-08-05T22:02:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5513",
+  "body": "2026-08-05 用 `/pm-dispatch` 跑完一整条 filter 缺陷链(objectstack #5363 / #5366 / #5368 / #5375 / #5431 / #5445,cloud #1117)后回看,有六处**在这一轮真实咬过人或真实救过场**的规程,`.claude/skills/pm-dispatch/SKILL.md`(908 行)里没有对应条目。逐条 grep 核过现有文本,不是重复条目 —— 最接近的 `Stale-premise check`(:426)覆盖的是「issue 放久了与 main 脱节」,与下面第 1 条是不同的东西。\n\nunassigned,只是记录。\n\n---\n\n## 1. 阻塞解除后要给延后的 issue **重新定价**（step 3,:508 附近）\n\n### 现有文本管到哪\n`### 3. Select the batch` 的「Same-file issues serialize strictly across rounds — and deferring is not shelving」已经要求:延后一条 issue 时,把在飞那单学到的坑**当轮**记到被延后的 issue 上(#4820/#4821 的教训)。\n\n### 缺的是后半段\n前一单**合入之后**,后一单的成本模型会变,而且方向不止一个。本轮四种结果各出现过:\n\n| 方向 | 实例 |\n|---|---|\n| **变便宜** | #5375(#5345)去掉了「cube 风格数组也可作为输入」这条腿,`{member, operator, values}` 三元组自此纯属私有中间表示 —— #5373 的 B 路线因此从 issue 正文写的「工作量最大」变成不跨 spec 的内部改动 |\n| **没变** | #5431(#5373)对 #5374:dev 明确回报「**没有**让它变简单,也**没有**顺带修好它」—— 调用点现在收到真值而非字符串化的值,但「`{$not: 'x'}` 约束不了任何东西」在算子层,与比较数编码正交 |\n| **issue 正文的成本估计过期** | 同上,#5373 正文的「我倾向 B(工作量最大)」在派发时已不成立 |\n\n**默认假设(「前一单大概让它变简单了」)本轮错了两次、对了一次。** 而且两个方向的代价不对称:误以为变简单 → dev 按缩小的范围做,漏修;误以为没变 → 走了一条已经没必要的贵路线。\n\n### 建议\nstep 3 那段之后补一条:阻塞解除、准备派发被延后的那一单时,**重新读一遍它的选项与成本估计**,并把下面这句写进派发令作为**必答项**:\n\n> 你的改动是否让 #X 变简单、变难、变得不必要,或完全无影响?明确回答,不要假设。\n\n本轮正是这个必答项的否定回答,直接决定了 #5374 不能缩范围(见 https://github.com/objectstack-ai/objectstack/pull/5445 的「范围之外」段)。\n\n---\n\n## 2. 带前提的裁决 —— step 8 目前只有两档（:785）\n\n### 现有文本管到哪\n`### 8. Escalate uncertainties to the maintainer` 给了一条清晰的升级门槛(「明显的问题直接修」),并把结果二分成:**PM 自己裁**(多数)或 **升级给维护者**(仅公开契约/产品语义分歧,或破坏性动作)。\n\n### 缺的第三档\n#5373 给了 A/B/C 三条路并在正文写「这是本面数据表示的公开形状,请 PM/维护者裁」。按现有门槛读,它像是要升级的那一类。\n\n实际做法是第三档:**裁了 B,但把裁决挂在一个可证伪的前提上** —— 「这个三元组现在是纯内部表示」—— 并在派发令里要求 dev **先验证前提再动手**,且明确写「前提不成立就报 fork,不许硬做,也不许悄悄退回 A 或 C」。\n\ndev 用五项检查验证了它,其中一条是**反向证据**:`spec/src/api/analytics.test.ts` 与 `runtime/src/http-dispatcher.test.ts` 各有一条测试断言 cube 风格的 `filters` 数组会被**拒收** —— 直接证明该三元组没有线上格式。最终 PR 未触碰一个 spec 字节。\n\n### 为什么值得单列\n它让 PM 在信息不全时能做决定而**不靠猜**:决定自带检验。既不是「自己拍了算」(那要赌前提),也不是「升级」(那要占用维护者时间去回答一个可以被代码回答的问题)。\n\n### 建议\n在 step 8 的升级门槛之后补一小节,大意:当分歧的关键是**一个可以被代码证伪的事实**(而不是产品口味或契约取向)时,裁决 + 前提验证要求 + 「前提不成立就报 fork」的显式禁令,是比升级更合适的动作。三件缺一不可 —— 尤其是最后那条禁令,否则 dev 会在前提不成立时自行改选,而那正是无人裁决的状态。\n\n---\n\n## 3. review 清单缺一条:**用户可见的收益,真的到得了用户吗**（step 7,:692）\n\n### 现象\n本轮整条链的价值主张是「拒收要说清楚作者错在哪」。#5423 揭示:`packages/rest/src/rest-server.ts` 有两处 4xx 直通(`mapDataError` :395 与 `sendError` :604),对 `message.length >= 500` 的错误**整条替换**成 `\"Request failed\"` —— 不是截断。\n\n实测 `driver-sql` 的 `$null` 拒收(#5347/#5368 刚写的那条)运行时 **606 字符**,越线。REST 客户端拿到的是:\n\n```json\n{ \"code\": \"INVALID_FILTER\", \"error\": \"Request failed\" }\n```\n\n即:`code` 到了,**正文一个字也没到**。而写那条 message 的唯一目的就是告诉作者错在哪。\n\n反直觉的一层:**不带 `status` 时原文完整直通,带上 `status: 400` 反而被这道闸门吞掉** —— 而 `status: 400` 正是 #4436 为了进 ADR-0112 信封特意加的。`sql-driver.ts:456` 的注释把这个因果讲反了。\n\n### 为什么是规程缺口\nstep 7 的清单检查了:PR 存在且是 draft、范围、changeset、测试证据是真实命令输出、diff 是否满足验收标准、dev 是否验证了前提、`+0/-0` 的 NUL 陷阱。**唯独没有一条问「这个收益穿过它必经的那道边界之后还在吗」。**\n\n四个 PR 合入、没有任何人查过这件事,直到一个 dev 在做别的单时顺手撞上。\n\n### 建议\nstep 7 清单加一条:当一批工作的价值是**通过某个边界交付**的(HTTP 错误信封、序列化、日志汇聚、跨进程传输),至少端到端验一次收益在边界之后仍然存在。不必每单都做 —— 判据是「这批工作的价值主张是否依赖某个下游组件如实转发」。\n\n---\n\n## 4. 多面组件:测试必须落在**共享一致性表**,不许独立文件（step 5 派发令,:576）\n\n### 证据\n`driver-memory` 有三个过滤面(`find` 的 live path、参考匹配器、analytics/cube 面)。让这些缺陷活下来的不是难度,是**没有一条断言在问** —— #5345 之前,共享一致性表 `FILTER_LOGIC_CASES` 只盯住其中两个。\n\n本轮三次派发都写了这条要求,三次都兑现,并且形成了三条正交的轴,共用同一条不变量:\n\n| PR | 轴 |\n|---|---|\n| #5375(#5345) | 过滤器**形状**(组合子、算子词表) |\n| #5431(#5373) | **比较数类型**(布尔 / null / 数字样字符串) |\n| #5445(#5374) | **算子**(每个声明的算子编译出的谓词是否真的排除行) |\n\n> 不变量:**与 `find()` 给出相同的行集,或者以 `INVALID_FILTER` 拒收 —— 不允许有第三种、更安静的答案。**\n\n第三条轴还带了「declared = enforced」的另一半:`ANALYTICS_FILTER_CAPABILITIES` 声明的**每一个**算子都被驱动着走两条路并必须一致,且探针必须至少排除一行(否则「一致」什么也证明不了 —— 那正是 #5374 的形状)。\n\n### 建议\n派发令加一条标准条款,原话可直接用:\n\n> 测试放在**未来的分叉会被抓住的地方**,不是放在一个独立测试文件里。若本组件对同一契约有多个实现面,新用例进共享一致性覆盖。\n\n适用判据:该组件对同一个契约有 ≥2 个实现面。\n\n---\n\n## 5. 跨仓:**pin 滞后**要在派发令里点明,不许当 rider 顺手 bump（Multi-repo 段,:191）\n\n### 现象\ncloud#1116 的裁决来自 framework 的 #5347,落地于 framework 的 #5368(`9c5abf4e9`)。但 cloud 的 `.objectstack-sha` 是 `586d6f701a16`,`9c5abf4e9` 不是它的祖先 —— **framework main 领先 pin 87 个 commit**。\n\n所以 cloud#1117 合入后到下一次 pin bump 之前,同一个 `TursoDriver` 仍有短暂分叉,只是**方向反了**:remote 抛 400,local(继承 `SqlDriver`)仍编译 `IS NULL`。这是 fail-closed 的一侧先到,不是新的洞,pin 前移后自动收敛。\n\ndev **没有**动 pin,并把这件事写进 PR 正文留档 —— 这是对的:`.objectstack-sha` 是共享文件,且要走 `scripts/bump-objectstack.sh`(连带 hono override 与 lockfile 重生),塞进这一单会把一个独立的、会冲突的改动变成 rider。\n\n### 建议\nMulti-repo 段补一条:当一单的裁决来自**另一个仓已合入的 PR** 时,派发前核 pin 是否已覆盖那个 commit(`git log --oneline <pin_sha>..<target_sha>` 或直接判祖先关系)。未覆盖则要求 dev 在 PR 正文留档说明分叉窗口与方向,**不要**把 pin bump 塞进这一单。\n\n顺带值得单独想清楚的(不在本单范围,若认为值得可另立):**跨仓一致性目前完全靠 pin bump 的节奏兜着,没有任何闸门在量这个滞后。** 本轮它恰好是安全方向,不保证下次也是。\n\n---\n\n## 6. 声明为**死代码**的删除,PM 要自己 grep 一次（step 7 清单,:692）\n\n### 现象\n#5445 删除了 `memory-analytics.ts` 里两条被判定为死代码的映射:`'inDateRange': '$gte'`(注释自称 \"Will need special handling\" 但无任何调用点实现)与 `'notSet': '$exists'`(方向还是反的)。\n\n放行前自己核了一次:\n\n```\ngit grep -n \"inDateRange\\|'notSet'\" origin/main -- 'packages/**/*.ts'\n```\n\n结果确认 `driver-memory` 内只有被删的那两行引用,其余命中全部落在 `service-analytics` —— **另一个包、另一套 strategy**,不受影响。dev 的判断成立。\n\n### 为什么值得单列\nstep 7 的清单是围绕「改动是否正确」构造的,删除是另一回事:**它比修改难回滚,而且「这是死代码」是一个断言,不是一个可从 diff 读出的事实**。dev 给了推理(无条目降级到该名、`timeDimensions` 走 Stage 2、两个出口都只消费 `normalizeFilters` 的输出),但推理是可以错的,而 grep 只花十秒。\n\n注意与 Operational notes 6 的关系:那条讲的是**退役核验**要用带引号的精确名 + 查声明式而非查提及。本条是它在 review 侧的对应动作 —— notes 6 说「怎么查才不会假阴性」,本条说「什么时候必须查」。\n\n### 建议\nstep 7 清单加一条:diff 里有**以「死代码 / 不可达」为由的删除**时,PM 在 `origin/main` 上独立核一次引用面(按 Operational notes 6 的方法),再决定 ACCEPT。\n\n---\n\n## 未验证的部分\n\n- 六条都出自**同一轮**(2026-08-05 的 filter 链),样本集中在「一个组件的多个实现面逐层收口」这一类工作上。第 1、4 条可能对形态很不同的批次(如纯 UI、纯文档)不那么适用,写入时值得斟酌措辞的普适性。\n- 没有回溯统计前几轮(08-03 / 08-04)是否也命中过这六条中的任何一条 —— 若命中过,证据会更硬,值得实施时顺带查一下 issue 时间线。\n- 第 3 条的边界检查该做到多细(每单一次?每批一次?只在价值主张依赖下游转发时?)没有定论,建议里给的是最后一种,但没有实测支撑哪一种成本收益最好。\n\n## 关联\n\n- 本轮的链:#5345 / #5373 / #5374(实现单),PR #5375 / #5431 / #5445,cloud#1116 / cloud#1117\n- 第 3 条的证据单:#5423(rest-server 吞掉 ≥500 字符正文,已给出 A/B/C 选项,`needs-user-decision` 待裁)\n- 本轮产出的其余发现(说明第 4 条那张表的产能):#5433 及其 sub-issue #5444、#5440、#5442、#5369\n- 现有 SKILL.md 里最接近但**不重复**的条目:`Stale-premise check`(:426)、`Same-file issues serialize`(:508)、`Did the dev verify the issue's premise?`(:705)、Operational notes 6(:145)"
+}

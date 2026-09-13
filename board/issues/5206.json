@@ -1,0 +1,36 @@
+{
+  "number": 5206,
+  "kind": "issue",
+  "title": "`api` 不在 metadata 类型注册表里 —— Studio 直写路径完全不校验端点,publishPackageDrafts 也没有 E7 门",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T09:10:51Z",
+  "updated_at": "2026-08-05T14:05:03Z",
+  "closed_at": "2026-08-05T14:05:03Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5206",
+  "body": "越范围发现,记录于 #5189(E7b,PR #5203)实现期,**不在该 PR 内修**(#5189 的文件面声明为 `packages/metadata` + `packages/spec/src/api/index.ts`)。\n\n## 事实(两条,同一处出水口)\n\n#5189 的正文推断:Studio 写接口对 `api` 条目「按 `ApiEndpointSchema` 校验、但不过 E7 的门」。读代码后实情**更弱一层**:\n\n**1. `api` 根本不在类型注册表里,所以直写路径一道校验都不跑。**\n\n- `packages/spec/src/kernel/metadata-plugin.zod.ts` 的 `DEFAULT_METADATA_TYPE_REGISTRY` 里**没有** `{ type: 'api', … }` 条目;\n- `packages/spec/src/kernel/metadata-type-schemas.ts` 的 `BUILTIN_METADATA_TYPE_SCHEMAS` 里**没有** `api: ApiEndpointSchema`;\n- 于是 `packages/metadata-protocol/src/protocol.ts` 的 `saveMetaItem` → `resolveOverlaySchema('api', …)` → `getMetadataTypeSchema('api')` 返回 `undefined`,落进它自己文档写明的那条分支:「未注册 schema 的类型**不经校验**直接落库」。\n\n也就是说 `PUT /meta/api/{name}` 可以把**任意 JSON** 存成一条 `api` 条目。同时,因为类型不在注册表里,`getMetaTypes()` 也枚举不到它 —— Studio 的 metadata-admin 既不显示这个类型,也不为它渲染表单。这是同一个缺失的两面。\n\n**2. `publishPackageDrafts`(Studio「全部发布」的真实入径)没有端点门。**\n\n`protocol.publishPackageDrafts`(ADR-0033 / ADR-0067 D2)在提升 draft 前只跑了对象命名空间前缀检查(`validateObjectNamespacePrefix`,仅 `d.type === 'object'`)。`api` 类型的 draft 直接提升为 active,不经 E7 的任何一道门 —— 与 #5189 在 `MetadataManager.publishPackage` 上修掉的是**同一形状,另一条路**。\n\n## 影响\n\n**安全后果已被 #5189 的第二层兜住。** PR #5203 在匹配器装载期(`buildEndpointIndex`)对每条存量条目重跑免身份门(不支持子集 / 映射 / policy 含 D6),未过门者被排除出索引并 `error` 点名。所以经本路径写入的「匿名 + 零配额」端点**不会被服务**,它答 404 + 一条响亮日志。\n\n因此本单剩下的是两个**非安全**缺口,但都是本程序在消灭的形状:\n\n- **拒绝得晚,而不是拒绝不了** —— 作者在 publish 时得不到点名 key 的处方,要到装载期日志里才看得见,而 ADR-0121 的原文是「publish 拒绝」;\n- **一个真实的元数据类型没有契约** —— `api` 条目由 artifact ingest 正常产出并被匹配器索引(#5089),它是活的类型;却既不在注册表、也没有 schema、也无表单。`declared ≠ enforced` 的镜像:enforced 但 undeclared。\n\n## 建议(不预判)\n\n一处修,两步:\n\n1. 给 `api` 补上 `DEFAULT_METADATA_TYPE_REGISTRY` 条目与 `BUILTIN_METADATA_TYPE_SCHEMAS['api'] = ApiEndpointSchema`,让 `saveMetaItem` 的既有 422 路径自动生效;\n2. 在 `publishPackageDrafts` 里对 `api` 类型 draft 调用 `validateApiEndpointDeclarations` —— PR #5203 已把它从 `@objectstack/spec/api` 导出,命名空间取该 package 已经读到的 `pkgNamespace`(那段代码就在同一函数里,`this.engine?.registry?.getPackage?.(…)?.manifest?.namespace`),所以这条路**有**身份,可以跑全量门,不像 `publishPackage` 需要调用方传入。\n\n判据仍然只有一份(E7 的门函数),不产生第二套。\n\n注意第 1 步不是纯加性:给一个此前不校验的类型接上 schema,会让既有的越界存量行在下次写入时被 422 拒绝。是否需要一次性的存量体检 / 宽限,留给裁决。\n\n## 前置\n\nPR #5203(#5189)落 main —— 门函数的公共导出与装载期兜底都在其中。"
+}

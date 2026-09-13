@@ -1,0 +1,36 @@
+{
+  "number": 3823,
+  "kind": "issue",
+  "title": "automation: the revise-window `wait` pause is service-owned but type-keyed gating can't see it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T07:35:48Z",
+  "updated_at": "2026-08-05T19:06:08Z",
+  "closed_at": "2026-08-05T19:06:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3823",
+  "body": "Found while implementing the resume gate for #3801 (PR #3822). Adjacent seam, same\ntrust boundary, different shape — filing rather than widening that PR.\n\n**Reasoned from code, not demonstrated** — no repro was written, same caveat as\n#3801.\n\n## Requirement\n\n#3822 gates `POST /api/v1/automation/:name/runs/:runId/resume` on the **node type**\nthat produced the suspension: a descriptor may declare `resumeAuthority: 'service'`,\nand `approval` does, so an approval pause continues only through `ApprovalService`.\n\nADR-0044's **revise window** is the same trust boundary in a shape that key cannot\nsee. Send-back resumes the run down the `revise` edge onto an **ordinary `wait` node\n(signal flavor) placed by the flow author** (ADR-0044 §D3: \"The revise edge targets an\nordinary `wait` node — the durable pause already shipped for timers/signals\"). The run\nparks there until `ApprovalService.resubmit`, which enforces `submitter-only`, refuses\na colliding pending request, and audits a `resubmit` action before resuming.\n\nNothing enforces that path. `wait` is `resumeAuthority: 'any'` — correctly, since a\nsignal-flavored wait is *meant* to be resumable by an external producer — so a raw\nresume of a run parked in a revise window walks the declared back-edge into the\napproval node, opening round N+1 with no `sys_approval_action` row and none of\n`resubmit`'s checks. Lower severity than the approval bypass #3801 closed (it forces a\nresubmit rather than an approval), but it is the same class: a service-owned\ncontinuation reachable around the service.\n\n## Why the #3822 mechanism doesn't extend to it\n\nThe gate keys on the node's **registry type**, and the type here is a generic `wait`\nindistinguishable from every other author-placed wait in the system. Gating all `wait`\nnodes would break the documented signal/webhook/manual resume contract.\n\nClosing it needs a **per-suspension** owner claim rather than a per-type one — the\nsuspension itself recording that a service owns this particular pause. Sketch, for\ndiscussion rather than a settled design: let a resume signal carry an owner claim that\nis persisted onto the continuation, so the service that drove the run *into* the wait\nalso owns driving it out; the type-keyed declaration then becomes the default when no\nclaim is recorded.\n\nRefs #3801, #3822. Context recorded in the 2026-07-28 addendum to\n[ADR-0019](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0019-approval-as-flow-node.md)."
+}

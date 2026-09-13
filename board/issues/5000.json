@@ -1,0 +1,37 @@
+{
+  "number": 5000,
+  "kind": "issue",
+  "title": "`objectstack build` / `validate` 从不按 PageSchema 解析页面元数据:ADR-0089 D3a 早就该拒绝的键一路通过,#4001 的「三个示例应用 validate 全过」对 page 面是空证",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T19:31:56Z",
+  "updated_at": "2026-08-05T03:44:28Z",
+  "closed_at": "2026-08-05T03:44:28Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5000",
+  "body": "从 #4001 批 13 的 ADR-0087 示例应用验证步骤拆出(发现)。做阴性对照时撞到的:对照本身没能变红。\n\n## 问题\n\n`objectstack build` 与 `objectstack validate` **不会**把 `page` 元数据按 `PageSchema` 解析。一个 `PageComponentSchema` 自 ADR-0089 D3a 起就是 `.strict()` 拒绝的键,原样通过两条命令,并被**写进产物**。\n\n## 复现(`origin/main` + #4001 批 13 分支,2026-08-03)\n\n往 `examples/app-showcase/src/ui/pages/styling-gallery.page.ts` 的一个页面组件上加一个键:\n\n```ts\n{\n  id: 'styling_root', type: 'flex',\n  responsiveStyles: { large: { display: 'flex' } },\n  aKeyPageComponentHasRejectedSinceADR0089: 1,   // 加这一行\n  ...\n}\n```\n\n结果:\n\n```\npnpm -s build     → exit 0(无任何相关报错)\npnpm -s validate  → exit 0(无任何相关报错)\n```\n\n而同一份组件走元数据类型注册表这条门是拒绝的:\n\n```ts\ngetMetadataTypeSchema('page')!.safeParse(page)\n// REJECTED — Unrecognized key(s) on this view/page schema:\n//            `aKeyPageComponentHasRejectedSinceADR0089`\n```\n\n也就是说 `PageSchema` 的严格性在 `MetadataManager.validate` / `GET /api/v1/meta` / Studio 表单那条路上是生效的,**唯独 CLI 的 build/validate 不走它**。\n\n## 为什么这条值得单独记\n\n1. **它让 #4001 的零破坏证据在 page 面上是空的。** 这场战役每一批的验收里都有一条「app-showcase / app-crm / app-todo 三个示例应用 `validate` 全过」(#3746 起就是这么写的)。对 `object` / `flow` / `field` 那些类型这条证据是实的;对 `page` 它**恒为真**,因为那条路根本不解析。批 13 收紧 `ResponsiveConfigSchema` / `ResponsiveStylesSchema` 时,阴性对照(把 `responsiveStyles.large` 改成 `.lg`)在 `validate` 上没变红 —— 只有在按槽位溯源解析产物的探针上、以及在 `getMetadataTypeSchema('page')` 这条真门上才变红。后两者是批 13 实际采用的证据。\n\n2. **产物会把坏值带下去。** 上面那次注入之后 `dist/objectstack.json` 里确实带着未声明的键(587.8 KB 的 showcase 产物,`build` 打印 41 条 author-time warning,没有一条与之相关)。\n\n3. **这是 Prime Directive #10 的形状** —— 一条被当作闸门引用的命令,在这个类型上并不闸。\n\n## 建议方向(未定,需维护者判)\n\n- **A.** 让 `objectstack build` / `validate` 对每个已注册的元数据类型都走 `getMetadataTypeSchema(type)`,与写路径同门。要先测量现有示例应用会不会因此变红(很可能会 —— 那正是这条 issue 的价值)。\n- **B.** 只让 `validate` 走(build 保持宽松,便于迭代),把它做成发布前闸门。\n- **C.** 明确记录 build/validate **不是** schema 闸门,并把 #4001 各批验收里那条证据的措辞按类型限定,免得后续批次继续引用一条对 page 面为空的证据。\n\n无论选哪条,#4001 后续批次(`ui/component.zod.ts` 还有 29 个站点,`view.zod.ts` 还有 20 个)在写「三个示例应用 validate 全过」之前应该知道这条,否则会重复地把空证当成实证。\n\n## 相关\n\n- #4001(批 13 的 PR 描述里记了同一组测量)、#3746(这条证据措辞的出处)\n- ADR-0089 D3a(view/page strict)、ADR-0087\n- `packages/spec/src/kernel/metadata-type-schemas.ts`、`packages/cli`\n\n按 AGENTS.md Prime Directive #10 归档,未指派。\n"
+}

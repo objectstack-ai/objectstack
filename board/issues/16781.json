@@ -1,0 +1,37 @@
+{
+  "number": 16781,
+  "kind": "issue",
+  "title": "finding(runtime): scoped `/api/v1/environments/:id/packages[/:id]` has no dispatcher door on a `plugin-hono-server`-only composition after #16628 (B′ follow-up to #14503)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-08T05:15:55Z",
+  "updated_at": "2026-09-10T15:41:09Z",
+  "closed_at": "2026-09-10T15:32:03Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16781",
+  "body": "Filed by the director seat under the #14503 step-2 ruling **C′** (2026-09-08, decision batch #84): PR #16628 lands with this residue disclosed; this card carries the repair.\n\n## The residue\n\n`mountPackagesRoute` (`packages/runtime/src/dispatcher-plugin.ts:1306-1330`) mounts `/packages*` at the unscoped prefix only. Scoped variants exist for automation / actions / ai (`:1653-1667`) — zero scoped `/packages` mounts. `plugin-hono-server`'s only route into the dispatcher is `setFallbackHandler` (`:1711`), gated on `isAppEndpointPath`. So a host composed as `plugin-hono-server` + REST with `enableProjectScoping: true` + dispatcher, **without** `createHonoApp`, had exactly one door for scoped package reads/deletes — the REST mirror #16628 removes. After #16628: the transport's bare `notFound` answers. Reachable from the open-core CLI (`serve.ts:2334` skips the standalone boot when `shouldBootWithLibrary()` is false; `serve.ts:3967` forwards `api.enableProjectScoping` to REST `:4019` and the dispatcher `:4040`); documented at `content/docs/api/environment-routing.mdx:62-66`.\n\nPopulation at ruling time, all zero with firing controls (fork report `#14503` comment 5571983259): in-repo production callers of `ScopedEnvironmentClient.packages.*` 0; Console scoped `/environments/${…}/packages` calls 0; `source` stamp readers 0. NOT MEASURED: the `cloud` repo's host composition.\n\n## Deliverable\n\n1. A scoped `mountPackagesRoute` variant mirroring the existing automation / actions / ai pattern twenty lines away, so `GET /api/v1/environments/:id/packages`, `GET …/packages/:id`, `DELETE …/packages/:id` answer through the dispatcher on that composition — the same handler, no second implementation.\n2. The response-shape drift the contract review of #16628 (5578894182, F2) measured: `GET /packages` answers `{ packages, total }` but `ListInstalledPackagesResponseSchema` (`package-api.zod.ts:71-77`) requires `hasMore`; `DELETE /packages/:id` answers `{ success, registryRemoved, persisted }` but `UninstallPackageApiResponseSchema` (`:358-364`) requires `packageId`; runtime ledger rows `route-ledger.ts:336,339` carry no `responseSchema`. Reconcile to the spec (protocol is the baseline) and pin the ledger rows with `responseSchema`.\n3. A test on the `plugin-hono-server`-only composition that reddens if the scoped door disappears again.\n\nAcceptance control: the same request on the same composition answers `ROUTE_NOT_FOUND`/bare 404 before and the dispatcher's row after.\n\nRelated: #14503 (ruling C′), PR #16628, #12034 (SDK `packages.get(id, version?)` retiring `version`), #15859."
+}

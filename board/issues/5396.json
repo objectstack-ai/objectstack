@@ -1,0 +1,37 @@
+{
+  "number": 5396,
+  "kind": "issue",
+  "title": "dogfood 真实 boot 断言只钉 `max-age=30`,不钉 `private` —— 上线到线上的那一位安全指令在唯一观测真实 wire 的那层没有被钉住",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue",
+    "tests"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T07:21:53Z",
+  "updated_at": "2026-08-05T09:21:10Z",
+  "closed_at": "2026-08-05T09:21:10Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5396",
+  "body": "发现于 #5244(showcase 注释把 `cacheTtl` 的响应头写成 `public`)的实现过程。**观察类,今天没有用户会踩到**,只是一处可收紧的断言,记下来交 PM 分诊。\n\n## 事实\n\n`packages/qa/dogfood/test/showcase-declarative-endpoints.dogfood.test.ts:202`:\n\n```\nexpect(res.headers.get('cache-control'), 'cacheTtl: 30 must reach the wire').toMatch(/max-age=30/);\n```\n\n这条断言只钉 `max-age=30` 这一半,不钉 `private` / `public` 这一位。也就是说:如果哪天运行时把\n`private` 翻成 `public`,**这条真实 boot 断言仍然是绿的**。\n\n而 `private` 在这条链上不是调优选择而是安全规则(`packages/runtime/src/endpoint-policy.ts`\n的 `computeCacheControl` 文档块成文):任何一条响应都可能按调用者被 RLS 裁剪,共享缓存绝不能\n存下来再发给别人。被漏钉的恰好是这条链上唯一有安全含义的那一位。\n\n## 为什么仍然只算观察类,而不是缺陷\n\n`private` 在下面三处是钉死的,真翻成 `public` 会被逮到:\n\n- `packages/runtime/src/endpoint-policy.test.ts:312`、`:316`、`:331`\n- `packages/runtime/src/api-endpoint-step.test.ts:349`、`:522`\n- `packages/runtime/src/dispatcher-plugin.endpoint-fallback.integration.test.ts:499`\n  (这条查的是真实 `Response` 头)\n\n所以这不是一个没人守的洞,而是**唯一一层观察真实 boot wire 的断言比它下面几层松**。收紧它的\n价值在于:单测钉的是 `computeCacheControl` 的返回值,dogfood 钉的是「整条栈跑完之后真正发出去\n的东西」—— 中间任何一层若改写了这个头,只有 dogfood 这层看得见,而它现在看不见这一位。\n\n## 修法(一行)\n\n```\n.toMatch(/^private, max-age=30$/)\n```\n\n或至少 `toContain('private')`。同文件 `:213` 那条「错误答案不得带缓存指令」的断言是对的,不用动。\n\n## 边界\n\n- 只动这一条断言,不动运行时、不动 showcase 声明。\n- 与 #5244 不相交:#5244 的完成面是 `examples/app-showcase` 的一段注释(PR #5395),\n  改不到 qa/dogfood;故独立立单而非挂作其子单。\n"
+}

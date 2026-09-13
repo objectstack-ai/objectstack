@@ -1,0 +1,37 @@
+{
+  "number": 5452,
+  "kind": "issue",
+  "title": "docs-gen: `.describe()` 里的 `{{var}}` 在生成的参考文档里被转义成 `` `{{var}` `` + 游离的 `}`(main 上现存 3 处)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T12:29:28Z",
+  "updated_at": "2026-08-05T19:28:48Z",
+  "closed_at": "2026-08-05T19:28:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5452",
+  "body": "实施 #5307 时给 `EmailServiceConfigSchema.appName` 写 `.describe('… ({{appName}}) …')`,重新生成参考文档后发现输出被切坏。查了一下,不是新引入的,`main` 上已有 3 处。\n\n## 现象(origin/main @ ed0d2aac0)\n\n`packages/spec/scripts/build-docs.ts` 把 `.describe()` 文本写进属性表的 Description 列时,对 MDX 的花括号做转义。输入 `{{var}}`,输出是**反引号只包住前半截、后半个花括号漏在外面**:\n\n```bash\ngrep -rn '`{{' content/docs/references/\n```\n\n```\ncontent/docs/references/ai/model-registry.mdx:171:| **system** | … | optional | System prompt — supports `{{var}`} interpolation |\ncontent/docs/references/ai/model-registry.mdx:172:| **user**   | … | ✅       | User prompt template — supports `{{var}`} interpolation |\ncontent/docs/references/automation/flow.mdx:106:| **outputSchema** | … | … 表达式(`{{nodeId.field}`})… |\n```\n\n对应的源:\n\n```\npackages/spec/src/ai/model-registry.zod.ts:121:  system: … .describe('System prompt — supports {{var}} interpolation'),\npackages/spec/src/ai/model-registry.zod.ts:122:  user:   … .describe('User prompt template — supports {{var}} interpolation'),\n```\n\n即 `{{var}}` 变成 `` `{{var}` `` 后面跟一个游离的 `}`。渲染出来读者看到的是 `` {{var} `` 加一个孤立右括号,而模板语法本身要的正是**成对**的双花括号 —— 这一列恰恰是在教读者怎么写模板变量。\n\n## 分级\n\nobservation-class:纯生成物排版,没有运行时行为、没有校验绕过,今天没有用户因此报错;但它出现在「怎么写模板变量」这一句上,是唯一会误导人的地方。故打 `finding`、不进 `pm:queue`,交 PM 分诊。\n\n## 规避与代价\n\n#5307 的 PR 已经绕开:`appName` 的 `.describe()` 改写成「the appName variable」,不带花括号,并在源码里留了一行注释指回本单。这说明代价是真实的 —— 一个 schema 作者想在描述里写模板语法,就得先知道生成器会切坏它,否则得等文档生成完再回头改。\n\n## 修法方向(未验证,交实施者实测)\n\n`build-docs.ts` 里做 MDX 转义的那一段。花括号在 MDX 里是 JSX 表达式定界符,所以转义本身必要;问题出在**转义边界与代码反引号包裹的先后顺序**——现在的顺序让包裹只吃掉了一个 `}`。要么整段用行内代码包住再转义,要么转义时把连续花括号当一个整体。修好后 `pnpm --filter @objectstack/spec gen:docs`,上面三处 `grep` 应归零。"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 5447,
+  "kind": "issue",
+  "title": "spec/cli: `EmailServiceConfig.persist` 声明了但没有载体 —— `config.email.persist` 永远到不了 EmailServicePlugin(#5307 的反向面,ADR-0049)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T12:13:40Z",
+  "updated_at": "2026-08-05T13:57:52Z",
+  "closed_at": "2026-08-05T13:29:24Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5447",
+  "body": "实施 #5307(补齐 `EmailServiceConfigSchema` 未声明的三个实读键)时,按该 issue「待确认」一节核实了反向的 `persist` 键。结论:**它是 declared-but-unenforced,不是「在别处被消费」**。本单只记录,#5307 的 PR 未动它。\n\n## 实测(origin/main @ ed0d2aac0)\n\n`config.email` 在全仓只有一个读者:\n\n```bash\ngrep -rn \"config as any).email\\|config\\.email\\b\" --include=*.ts --exclude-dir=node_modules --exclude-dir=dist packages/ examples/ | grep -v \"\\.test\\.ts\"\n# packages/cli/src/commands/serve.ts:2335:   (config as any).email ?? {},   <-- 唯一读者\n```\n\n即 `packages/cli/src/commands/serve.ts` 的 `resolveEmailCapabilityArg`。它读的键(#5307 的复现命令):\n\n```\ncfgEmail.apiKey / appName / defaultFrom / defaultTemplateContext / options / provider / queueDelivery / retries\n```\n\n**没有 `cfgEmail.persist`。** 该函数拼出的 `options` 对象里也没有 `persist` 字段。\n\n## 为什么不是「在 plugin 侧被消费」\n\n插件选项 `persist` 本身是活的:\n\n- `packages/plugins/plugin-email/src/email-plugin.ts:81` 声明 `persist?: boolean`\n- 同文件 482 行按它决定是否构造 `EmailPersistence`:\n  `const persistence: EmailPersistence | undefined = this.options.persist === false ? undefined : { ... }`\n- 877 行还用它写诊断:`sys_email persistence is disabled ('persist: false'), so a queued job would have no row to deliver`\n\n活的是**插件构造参数**。缺的是**从 `config.email.persist` 到那个构造参数的那一段路**——`resolveEmailCapabilityArg` 是唯一能走这一段的代码,而它不读这个键。settings 侧(Settings → Mail)也没有对应开关(`email-plugin.mail-settings.test.ts` 与 `mail-manifest-providers.contract.test.ts` 均无 persist)。\n\n## 影响\n\n作者在 `objectstack.config.ts` 写:\n\n```ts\nemail: { provider: 'smtp', persist: false, options: { host: 'smtp.acme.test' } }\n```\n\n用 `EmailServiceConfig` 标注 —— 类型通过,schema `safeParse` 通过,生成的参考文档 `content/docs/references/system/email-config.mdx` 正面写着「Persist to sys_email (default true)」。**运行时依旧把每一封邮件写进 `sys_email`。**\n\n这正是 Prime Directive #10 的 declared ≠ enforced:一个 PII 敏感部署以为自己关掉了邮件正文落库,其实没有。方向与 #5307 相反(那边是 spec 落后于运行时,这边是 spec 超前于运行时),所以拆成两单。\n\n## 待决(ADR-0049 enforce-or-remove,两条路)\n\n1. **enforce** —— 在 `resolveEmailCapabilityArg` 里补 `...(cfgEmail.persist != null ? { persist: !!cfgEmail.persist } : {})`,并配一个 `OS_EMAIL_PERSIST_ENABLED`(Prime Directive #9 的布尔开关形状)。成本约一行 + 测试;把已声明的契约兑现。\n2. **remove** —— 从 `EmailServiceConfigSchema` 删掉 `persist`,走 spec-property-retirement 的整套纪律(ADR-0087 转换层 / liveness 台账 / 生成物)。代价高,而且删掉的是一个**能力真实存在、只是没接线**的键,直觉上不对。\n\n倾向 1(enforce):插件侧已经完整实现并有诊断文案,缺的只是配置通路;删声明等于把一个真能力藏起来,只能通过直接 `new EmailServicePlugin({ persist: false })` 触达——而 `os serve` 路径下作者根本没有这个入口。\n\n## 关联\n\n- #5307 同族反向面(该 PR 在 `packages/cli/src/commands/serve-email-config-parity.contract.test.ts` 里把 `persist` 登记为唯一的 `DECLARED_BUT_UNREAD` 豁免项并指回本单;本单落地后那个数组清空,断言收紧为集合相等)\n- #5104 / PR #5308 同族(provider 枚举)\n- ADR-0049 enforce-or-remove"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 5020,
+  "kind": "issue",
+  "title": "`ChartAggregateSchema` 有活的承载键却没有任何 parse:react 页发布闸门手写重推了它的规则,未知键从不检查(#4001 批 15 的 `no gate` 首例)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T00:05:59Z",
+  "updated_at": "2026-08-05T20:43:14Z",
+  "closed_at": "2026-08-05T20:43:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5020",
+  "body": "从 #4001 批 15 的门测量中分离出来,**未指派**。批 15 已按测量把这两个站点留开并三处留痕,本 issue 是它指向的那件事。\n\n## 测量结果(2026-08-03/04,均带对照)\n\n`packages/spec/src/ui/chart.zod.ts` 的 7 个 object 站点里,5 个从 `dashboard` / `report` 两个 metadata-type root 可达(`DashboardWidget.chartConfig`、`ReportChartSchema`),已在批 15 收紧。**剩下 2 个 —— `ChartAggregateSchema` 和 `ChartGroupBySchema` 的 object 分支 —— 情况不同,而且不是「死槽位」**:\n\n| 测量 | 结果 |\n|---|---|\n| 承载键 | ✅ **活的**。`aggregate` 是 react 层 `< ObjectChart objectName aggregate={…} >` 的真实可授权 prop(ADR-0081),发布在生成的 react-blocks 契约里,objectui 的 `ObjectChart` 读 `schema.aggregate` 去跑查询 |\n| 从 24 个 metadata-type root + `ObjectStackSchema` 做 BFS | ❌ `UNREACHABLE`(同一次运行里,上述 5 个是 `root-graph`,批 13 的 no-door 形状是 `UNREACHABLE` —— 双向对照都成立) |\n| 三个仓库里的 `.parse()` / `.safeParse()` | ❌ 除本文件单测外没有 |\n\n## 问题\n\n唯一实际审查作者所写 `aggregate` 的东西是 react 页发布 lint(`packages/lint/src/validate-react-page-props.ts`),它**手写重推了这个 schema 的规则**:`CHART_FUNCTIONS` 复制了函数词表,`fn !== 'count' && !field` 复制了那条 refinement,结果列命名另算一份。**它从不检查未知键。**\n\n`react-blocks.ts` 里这个 prop 是一条**手写的类型字符串**;旁边的 Zod schema 不是契约的生成来源。\n\n所以今天:\n\n```ts\n< ObjectChart objectName=\"invoice\" aggregate={{ function: 'sum', field: 'total', groupby: 'status' }} / >\n//                                                                              ^^^^^^^ 静默丢弃\n```\n\n`groupby`(而非 `groupBy`)被剥掉 → 聚合退化成无分组、单行返回 → 图表画出坐标轴和一个点,`build`/`validate` 全绿。`dateGranularty` 同理:日期不分桶,趋势线变成一根。这正是 #4001 的原始失效模式,只是发生在 react 层。\n\n## 为什么批 15 没有顺手收紧\n\n`.strict()` 是 **parse 的属性**,这里没有 parse。收紧只会花掉一次 v17 破坏性变更让文件看起来完成,并留下账本自己警告过的东西 —— *「一个被精确校验的死槽位是更有说服力的谎言」*(#4583)。而且这里比批 13 的情形更需要小心:**这套词汇是活的**,所以正确动作不是 ADR-0049 退役,而是把闸门接上。\n\n批 15 因此在账本的分类规则表里加了第四类 **`no gate`**,与批 13 的 `no door` 并列 —— 两者都「没有 parse」,但处方相反:\n\n| | 承载键 | parse | 正确的下一步 |\n|---|---|---|---|\n| `no door`(批 13) | 无 | 无 | ADR-0049 enforce-or-remove |\n| `no gate`(批 15) | **活的** | 无 | **接上 parse**;退役会打断一个能用的功能 |\n\n## 建议(contract-first)\n\n让 `validate-react-page-props.ts` 用 `ChartAggregateSchema.safeParse()` 判定 `aggregate`,而不是重推它的规则:\n\n- 未知键立刻有了闸门,且错误信息可以走本战役的 `strictObject` 路子(点名 + 改名建议);\n- `CHART_FUNCTIONS`、count/field refinement 两份重复实现收敛成一份 —— 目前它们已经能各自漂移;\n- 之后这两个站点就是普通的 `authorable`,收紧是一行改动。\n\n需要先确认的一点:react 页 prop 是**静态字面量抽取**的结果,`NOT_STATIC` 的值不能判。所以是「能静态判定时才 parse」,与现有 `if (aggregate === undefined || aggregate === NOT_STATIC) return;` 的短路保持一致。\n\n## 参考\n\n- #4001(战役)、批 15 的 PR(账本 `ui/` 行 + `chart.zod.ts` 头部注释 + `chart.test.ts` 的常驻 BFS 断言 —— 一旦有人给 `aggregate` 加上 metadata 承载键,那条断言会变红并把人指回这里)\n- #4988(批 13 的 `no door` 裁决)、#4583(精确校验的死槽位)\n- ADR-0081(react 层)、ADR-0021(dataset 路径的对照)\n"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 5448,
+  "kind": "issue",
+  "title": "cli: `config.email.defaultTemplateContext.appName` 压过 `OS_APP_NAME` —— 与「env 逐项覆盖」的声明相反",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T12:14:16Z",
+  "updated_at": "2026-08-05T14:38:36Z",
+  "closed_at": "2026-08-05T14:38:36Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5448",
+  "body": "实施 #5307 时实测 `resolveEmailCapabilityArg` 的模板上下文解析顺序,发现一处与文档声明相反的优先级。#5307 的 PR 只把**实测到的现状**写进 TSDoc 并用测试钉住,没有改行为——改不改是契约决定,故单独立单。\n\n## 实测(origin/main @ ed0d2aac0)\n\n`packages/cli/src/commands/serve.ts`,`resolveEmailCapabilityArg` 内:\n\n```ts\nconst defaultTemplateContext = {\n  appName: env.OS_APP_NAME || cfgEmail.appName || configAppName || 'ObjectStack',\n  ...(cfgEmail.defaultTemplateContext || {}),\n};\n```\n\n`appName` 先算,`defaultTemplateContext` 再**整体展开覆盖在它上面**。于是:\n\n| 来源 | 胜负 |\n|---|---|\n| `config.email.defaultTemplateContext.appName` | 赢 |\n| `OS_APP_NAME`(环境变量) | 输 |\n| `config.email.appName` | 输 |\n| 顶层 `config.appName` | 输 |\n\n复现(无需起服务):\n\n```ts\nresolveEmailCapabilityArg(\n  { appName: 'From The Key', defaultTemplateContext: { appName: 'From The Context' } },\n  { OS_APP_NAME: 'From The Env' },\n).options.defaultTemplateContext.appName\n// => 'From The Context'\n```\n\n## 为什么是问题\n\n`EmailServiceConfigSchema` 的头部 TSDoc(也是生成文档 `content/docs/references/system/email-config.mdx` 的开头)写的是:\n\n```\nResolution order in serve.ts:\n  1. config.email.* from objectstack.config.ts\n  2. OS_EMAIL_* environment variables (override per setting)\n  3. Default -> provider='log'\n```\n\n「环境变量逐项覆盖配置」是这个文件对所有键的承诺,`apiKey` / `defaultFrom` / `retries` / `queueDelivery` / SMTP 一族都照此执行。只有 `appName` 这一项,一旦作者同时写了 `defaultTemplateContext.appName`,env 就失效——而且是静默失效。\n\n具体后果:同一份 `objectstack.config.ts` 部署到多环境,运维在生产设 `OS_APP_NAME=Acme` 覆盖仓库里写死的 `defaultTemplateContext: { appName: 'Acme Dev' }`,发出去的品牌邮件仍然叫 Acme Dev。连带地,没有配 `defaultFrom` 时的兜底发件人也是从这个值 slug 化来的(`no-reply@acme-dev.local`),所以错的不止是正文。\n\n## 两种读法(需要维护者定)\n\n- **A:现状即正确** —— 「显式完整上下文」比「便捷单键 + env」更具体,应该赢。那就该在 TSDoc 里把 `appName` 标为 env 规则的显式例外(#5307 的 PR 已按这个读法把现状写清楚了),不改代码。\n- **B:env 必须赢** —— 与文件声明的解析顺序一致,也与其余所有键一致。改法是把 env/键的解析结果放在展开**之后**:\n\n  ```ts\n  const defaultTemplateContext = {\n    ...(cfgEmail.defaultTemplateContext || {}),\n    appName: env.OS_APP_NAME || cfgEmail.appName\n      || (cfgEmail.defaultTemplateContext || {}).appName || configAppName || 'ObjectStack',\n  };\n  ```\n\n  注意这里要显式把 `defaultTemplateContext.appName` 插进链条(排在两个专用来源之后、顶层 `configAppName` 之前),否则从 B 改过去会把「只写了 `defaultTemplateContext.appName`、没写 `appName`」的既有配置直接降级到 `'ObjectStack'` —— 修一个静默错值换来另一个,更糟。\n\n倾向 **B**:一份配置多环境部署时 env 覆盖是运维的唯一手段,而当前行为让这个手段在一个键上无声失效;例外规则(A)要求作者读到 TSDoc 的那一段才知道,属于「必须记住才不会踩」的设计。但 B 会改变既有部署的可观察行为(user-visible,需要 changeset),不是能顺手带的改动。\n\n## 关联\n\n- #5307 补齐 `appName` / `defaultTemplateContext` 声明的同一次实测;该 PR 在 `packages/cli/src/commands/serve-email-config-parity.contract.test.ts` 以 `spreads defaultTemplateContext OVER the resolved appName, as documented` 钉住现状并指回本单——若选 B,那条测试连同 schema TSDoc 一起改。\n- Prime Directive #9(`OS_APP_NAME` 是不合 `OS_{DOMAIN}_{FEATURE}` 形状的历史遗留变量,AGENTS.md 已把这类列为 debt;本单不涉及改名)"
+}

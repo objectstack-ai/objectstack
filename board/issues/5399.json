@@ -1,0 +1,36 @@
+{
+  "number": 5399,
+  "kind": "issue",
+  "title": "E 系列收尾本体:摘除已失真的「structurally unreachable」注释族 + 多租户 decline 分支补零覆盖(#5231 的实施子单)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T07:32:35Z",
+  "updated_at": "2026-08-05T08:24:54Z",
+  "closed_at": "2026-08-05T08:24:54Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5399",
+  "body": "Part of #5231(父单为协调节点不直派,按 PM 规程拆此实施子单;另一子单 #5244 已随 PR #5395 落地)。\n\n工作内容照父单正文两节,不重复展开:\n\n## 1. 失真注释摘除(E7 翻转 `d21c001` + E8 回迁后措辞已不成立)\n\n- `packages/runtime/src/route-ledger.ts:298`(`* /apps/**` 行的「Structurally unreachable today」)\n- `packages/runtime/src/endpoint-executor.ts:31-34`、`api-endpoint-step.ts:24-27`、`endpoint-policy.ts:49-53`、`dispatcher-plugin.ts:1430`\n- `packages/metadata/src/metadata-manager.ts:1551`、`packages/rest/src/openapi-endpoints.ts:60,332`(后者的「Today it emits nothing」已被 PR #5230 P9 真实 boot 反例)\n\n台账纪律同 #5078:注释必须与实际一致。纯注释/台账修真,零行为变更。⚠️ 行号取自父单立案时,以 origin/main 现状为准逐处核对(#5385 等已重排过 runtime 文件)。\n\n## 2. 多租户 decline 分支零覆盖\n\n`dispatcher-plugin.ts` 的「多租户解析不出环境 → 弃权 + warn」分支(E5b)全仓无测试引用(`kernel-resolver` 提供方在 cloud)。补法照父单:packages/runtime 内以桩 kernelResolver 驱动集成测试,覆盖「按请求环境解析」与「解析不出 → 404 + warn」两条。范本:PR #5385 的 `http-dispatcher.multi-tenant-concurrency.test.ts` 已有桩 kernel-resolver 姿态可参照。\n\n关联:#5231(父单)、#5040(E 系列)、#5112、PR #5230 / #5385。"
+}

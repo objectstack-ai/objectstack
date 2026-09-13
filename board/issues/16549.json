@@ -1,0 +1,37 @@
+{
+  "number": 16549,
+  "kind": "issue",
+  "title": "OAuth-connected MCP agents run under the `mcp_agent_data_*` ceiling ∩ user, not \"as yourself\": a viewAllRecords manager sees 5 accounts / 0 opportunities over OAuth vs 9 / 23 over an API key",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:done",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-trump"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-07T08:23:06Z",
+  "updated_at": "2026-09-10T15:12:42Z",
+  "closed_at": "2026-09-10T15:12:04Z",
+  "closed_by": {
+    "login": "os-tesla",
+    "id": 327383522,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/16549",
+  "body": "## Summary\n\nOnce the OAuth-for-MCP door is open (with #16530 worked around locally), a user connecting \"as themselves\" sees far less than they see in the Console or through a per-user API key. Measured with the same account, same questions, same server:\n\n| identity path | crm_account | crm_opportunity | crm_task |\n|---|---|---|---|\n| API key bound to sales.manager (`principalKind: human`) | 9 | 23 (11 in Q3) | 45 |\n| OAuth as sales.manager (`principalKind: agent`, `onBehalfOf` = sales.manager) | **5** | **0** | **0** |\n\nThe Setup → Connect an Agent page says, verbatim: *\"Identity is self-serve: … you connect as yourself, and every call runs under your own permissions and row-level security.\"* and, in the page header, *\"every call runs under the caller's own permissions and row-level security.\"* The OAuth path does not do that: it runs under the **intersection** of the caller's permission sets and a platform agent ceiling that has no `viewAllRecords`, so any user whose access comes from `viewAllRecords` / `modifyAllRecords` (every manager-type profile) collapses to `own + explicit shares`.\n\n## Environment\n\n- hotcrm `789a7324`, `@objectstack/*` 17.3.0, dev server with `OS_AUTH_URL=https://localhost:4443` behind a local TLS proxy\n- Claude Code desktop (Claude Code 2.1.260), MCP entry `https://localhost:4443/api/v1/mcp`, OAuth (DCR + PKCE), consent granted for `data:read data:write actions:execute offline_access` as `sales.manager@objectos.ai`\n- `sys_oauth_consent` row: scopes `[\"data:read\",\"data:write\",\"actions:execute\",\"offline_access\"]`, `user_id` = sales.manager\n\n## Reproduction\n\n1. Connect via OAuth as sales.manager (profile `sales_manager`: `crm_opportunity` / `crm_account` / `crm_lead` … all `viewAllRecords: true, modifyAllRecords: true`).\n2. Ask the agent: 「本季度金额前十的商机里，哪些超过两周没有跟进？」 — it runs `query_records` / `aggregate_records` on `crm_opportunity`, `crm_account`, `crm_task` and reports `crm_account 5`, `crm_opportunity 0`, `crm_task 0` (`count(*)` = 0 with and without filters). No error is returned — empty sets.\n3. Same account through `x-api-key` (per-user key from `POST /api/v1/keys`), same questions: 9 accounts, 23 opportunities, 45 tasks, and the Console shows the same.\n\n## Where it happens (`@objectstack/plugin-security` 17.3.0)\n\n- `resolveDelegatorContext` / the CRUD explain path: when `context.onBehalfOf.userId` is set, `sets` = the **agent principal's** sets and `delegatorSets` = the user's; `crudAllowed = agentCrud && delegatorCrud`, field masks are intersected, and read scope goes through `narrowerScope(a, b)` over `[\"own\",\"own_and_reports\",\"unit\",\"unit_and_below\",\"org\"]`.\n- The agent principal's set for a `data:write` token is the platform's `mcp_agent_data_write`: `{\"*\": {allowCreate: true, allowRead: true, allowEdit: true, allowDelete: true, allowTransfer: false, viewAllRecords: false, modifyAllRecords: false}, sys_*: read-only}` (`mcp_agent_data_read` is the same with read only). Its description: *\"Read+write ceiling for an AI agent acting on behalf of a user (OAuth `data:write`)\"*.\n- `narrowerScope(agent = own, delegator = org)` → `own`. Rows then come only from ownership (sales.manager owns nothing in the demo seed — everything is owned by the dev admin) plus sharing rules aimed at her position: hotcrm's `account_team_sharing` → the 5 accounts; the opportunity rules target `sales_director` / `executive` → 0.\n- `hasWriteBypass` returns `false` and `resolveWriteScope` returns `\"own\"` unconditionally for any on-behalf-of context (`if (!context?.userId || context?.onBehalfOf?.userId) return \"own\"`).\n\nSo the behaviour is exactly what D10 + the shipped ceiling specify. The problem is that the ceiling is **below the user for the most common case** (any profile whose visibility is `viewAllRecords`), while the UI and the docs promise parity with the user.\n\n## Expected — one of\n\n1. **Parity with the user (what the Setup page promises):** the agent ceiling for `data:read` / `data:write` should carry `viewAllRecords` / `modifyAllRecords` (or the intersection should treat the ceiling's scope as \"no opinion\" and take the delegator's), so that `agent ∩ user = user` for CRUD/RLS, with the ceiling only *removing* things the scopes exclude (e.g. no writes on a `data:read` token, no `allowTransfer`).\n2. **Keep the ceiling, fix the promise:** change the Setup page / SKILL.md / discovery `resource_name` copy to say that OAuth agents run under *own-records + shares* regardless of the user's profile, and document that managers must use a per-user API key to see what they see in the Console.\n\nEither way the current combination — the page says \"as yourself\", the engine says \"own only\" — will be read by users as data loss (\"the AI says I have no opportunities\").\n\n## Side observations\n\n- No diagnostic reaches the client: the MCP tools answer `total: 0` / `n: 0`, never \"narrowed by agent ceiling\". The engine's explain path (`layer: \"object_crud\"`, \"D10 intersection\") has the sentence; the MCP `query_records` result does not carry it.\n- The consent screen (verbatim): *\"`<client_id>` wants to access your account — `<client_id>` is requesting permission (sales.manager@objectos.ai). This app will be able to: ✓ data:read ✓ data:write ✓ actions:execute ✓ Stay signed in (refresh access) — Deny / Authorize — You can revoke access at any time from your account settings.\"* The client is shown as its DCR id, not as \"Claude Code (hotcrm)\" (the registered `name`).\n- Depends on #16530 being worked around; related demo cards #15705, #16370.\n"
+}

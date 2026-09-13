@@ -1,0 +1,36 @@
+{
+  "number": 5244,
+  "kind": "issue",
+  "title": "showcase 端点注释把 `cacheTtl` 的响应头写成 `public, max-age=30` —— 运行时发的是 `private`，而 `private` 是安全规则",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T12:05:14Z",
+  "updated_at": "2026-08-05T07:31:50Z",
+  "closed_at": "2026-08-05T07:31:50Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5244",
+  "body": "发现于 #5238(#5040 E9 文档追平)。**纯注释修真，零行为变更**；与本 issue 的父单 #5231 同一类纪律(注释必须与实际一致),故挂为其子单。\n\n## 事实\n\n`examples/app-showcase/src/system/apis/index.ts:80`,`TaskFeedEndpoint.cacheTtl` 上方的注释:\n\n```\n// Seconds. Emitted as `Cache-Control: public, max-age=30` on a SUCCESSFUL\n// answer only — never on a 401/429/5xx, ...\n```\n\n运行时发的不是 `public`。`packages/runtime/src/endpoint-policy.ts` 的 `computeCacheControl`:\n\n```\nif (!Number.isFinite(ttl) || ttl <= 0) return 'no-store';\nreturn `private, max-age=${Math.floor(ttl)}`;\n```\n\nPR #5230 自己的真实 boot 探针 P1 也打印了实测值:\n\n```\n########## P1  GET /api/v1/apps/showcase/tasks  (authed)\nHTTP/1.1 200 OK\ncache-control: private, max-age=30\n```\n\n注释的后半句(只随成功答案上线、不随 401/429/5xx)是对的,错的只有 `public` 这一个词。\n\n## 为什么值得单独记一笔\n\n`private` 在这条链上不是调优选择而是**安全规则**,`endpoint-policy.ts` 的文档块把理由写清楚了:任何一条响应都可能是按调用者 RLS 裁剪过的,所以共享缓存绝不能存下来再发给别人(#5040 §3.3 的 per-principal cache key 在没有服务端缓存时就落在这个 header 上)。\n\n而这条注释所在的位置是 showcase —— 声明式端点**唯一**的一手示例,是 AI 作者最可能整段抄走的那份文件。抄走 `public` 的作者会顺理成章地推断「共享缓存可以存这条响应」,而这正好是该规则要挡住的推断。\n\n## 修法\n\n把 `public` 改成 `private`,并把「`private` 是安全规则不是调优」这半句带上(与 `endpoint-policy.ts` 的措辞对齐,不复述第二套规则)。顺带可核一下 `cacheTtl: 0` 的语义(`no-store`)是否也需要在示例里点一句。\n\n## 边界\n\n不动运行时,不动声明本身(`cacheTtl: 30` 是对的),不动 `content/docs/releases/`。\n"
+}

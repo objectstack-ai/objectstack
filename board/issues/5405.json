@@ -1,0 +1,37 @@
+{
+  "number": 5405,
+  "kind": "issue",
+  "title": "cli: the i18n coverage walker never collects `objects.<o>._sections` — a bundle can ship every section heading in English and lint zero warnings",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T08:55:36Z",
+  "updated_at": "2026-08-05T11:21:34Z",
+  "closed_at": "2026-08-05T11:21:34Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5405",
+  "body": "`objectstack lint`'s i18n coverage is driven by a shared walker whose kind union\nsimply has no entry for an app object's `_sections`:\n\n- `packages/cli/src/utils/i18n-extract.ts:93-108` — `ExpectedEntry['source']` is\n  `object | field | option | view | action | globalAction | app | navigation |\n  dashboard | widget | page | metadataType | metadataFormSection |\n  metadataFormField`. The two `metadataForm*` kinds cover **Studio metadata\n  forms** (`metadataForms.<type>.sections.*`, hidden behind\n  `--include-platform`), not app objects.\n- The walker never emits an `objects.<o>._sections.*` path: the string\n  `'_sections'` does not occur in `i18n-extract.ts`, and nothing walks\n  `fieldGroups` or a field's `group`.\n- `packages/cli/src/utils/i18n-coverage.ts:190-204` (`COVERAGE_SOURCE`) mirrors\n  the same union, so `computeI18nCoverage` structurally cannot report a missing\n  section heading.\n\nYet the surface is real and supported end-to-end everywhere else:\n`ObjectTranslationDataSchema` declares `_sections`\n(`packages/spec/src/system/translation.zod.ts`), the resolver applies them\n(record detail pages render translated headings), and `os i18n extract` will\nnever scaffold them either — same walker.\n\nCode references pinned to main @ `98369a8`.\n\n### Measured impact (HotCRM, four locales)\n\nHotCRM's metadata declares 85 sections across 15 objects (union of field\n`group`s and page/view `sections[].name`). Before objectstack-ai/hotcrm#697,\n`ja-JP` and `es-ES` each carried **2 of 85** — English headings on essentially\nevery record page and form — while `objectstack lint` reported **0 i18n\nwarnings** for both. The gap also kept growing invisibly: objects added later\n(`crm_event`, `crm_event_attendee`) shipped with headings untranslated in every\nlocale, and nothing flagged it. Downstream had to build its own guard\n(hotcrm#697) deriving the expected set from metadata.\n\n### Suggested fix shape\n\nAdd a `section` kind to the walker: emit\n`objects.<o>._sections.<key>.label` for (a) every distinct `group` across an\nobject's fields — the fields are the authority for which sections exist;\n`fieldGroups[].label` supplies the default-locale text — and (b) every\n`sections[].name` under the object's pages/form views. Both sources are needed;\ndetail pages nest sections inside `page:tabs → components →\nproperties.sections`, which a shallow walk misses. `COVERAGE_SOURCE` then maps\nit, giving lint an `i18n/missing-section` category and the extractor the\nscaffold for free (they share the walker — that co-derivation is the point of\n`collectExpectedEntries`).\n\nRelated: #5164 (the `_views` key-spelling disagreement between composer,\nextractor and lint — adjacent producer-drift problem on the neighbouring group).\nDownstream: objectstack-ai/hotcrm#683 (part 2)."
+}

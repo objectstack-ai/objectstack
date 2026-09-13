@@ -1,0 +1,36 @@
+{
+  "number": 5176,
+  "kind": "issue",
+  "title": "`RecordHighlightsField` does not declare `readonly`, so the spec silently strips the key the chip gate reads",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T07:43:58Z",
+  "updated_at": "2026-08-05T22:27:31Z",
+  "closed_at": "2026-08-05T22:27:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5176",
+  "body": "Split out of #5077 as an out-of-scope finding — filed unassigned, needs a maintainer decision before it can be actioned.\n\n## What was measured\n\nWhile implementing #5077 (objectui PR carries `readonly` through the `record:highlights` entry normalization) I checked whether an authored `readonly` is actually part of the contract. It is not.\n\n`packages/spec/src/ui/component.zod.ts`:\n\n```ts\nexport const RecordHighlightsField = z.union([\n  z.string(),\n  z.object({\n    name: z.string(),\n    label: z.string().optional(),\n    icon: z.string().optional(),\n    type: z.string().optional(),\n  }),\n]).describe('Highlight field: bare name, or {name,label?,icon?,type?}');\n```\n\nFour keys. `readonly` is not among them, and the object is not `.strict()`, so it is **silently stripped**. Measured against the installed build:\n\n```\ninput   { fields: [ { name: 'supply_share', readonly: true, type: 'number' } ] }\nparsed  { \"fields\": [ { \"name\": \"supply_share\", \"type\": \"number\" } ], \"layout\": \"horizontal\" }\n```\n\n## Why this matters today, and more tomorrow\n\n`ComponentPropsMap` has no consumers outside `component.zod.ts` and its own test — I grepped. So per-component props are **not** validated on the live load path right now: `PageComponentSchema.properties` is `z.record(z.string(), z.unknown())` and the bag rides through untouched. That is the only reason the objectui-side fix in #5077 works end to end at all.\n\nThat is a fragile place to stand:\n\n- The moment `ComponentPropsMap` is wired into validation — which is plainly the direction of travel, given protocol 15 flipped `FormFieldSchema` / `FormSectionSchema` / `PageComponentSchema` to `.strict()` under ADR-0089 D3a precisely so an undeclared key is \"a loud parse error instead of a silent strip\" — an authored `readonly: true` becomes either a silent strip or a hard parse error. The silent-strip case is the dangerous one: header chips for hook-maintained columns quietly become editable again, and the corruption in #5077 returns with no diagnostic anywhere.\n- `readonly` is absent from the block's declared `inputs`, so it never reaches the generated `sdui.manifest.json`. An AI author reading the manifest has no way to learn the key exists. Per AGENTS.md #0.1 the renderer reading a key the spec does not declare is exactly the consumer-side tolerance we do not want — it fossilizes a second de-facto contract.\n\n## The decision\n\nShould `readonly` become a declared key on `RecordHighlightsField`?\n\n**Option A — declare it in the spec** (`readonly: z.boolean().optional()`), then declare it in objectui's `record:highlights` block `inputs` so it reaches the manifest.\n\n- Long-term soundness: this is the contract-first route. The key is genuinely enforced — objectui's `HeaderHighlight` gate acts on it — so it satisfies ADR-0049 enforce-or-remove on arrival rather than joining the declared-but-inert backlog. It also survives the `.strict()` flip instead of being broken by it.\n- AI-authoring safety: declared means it appears in the manifest an authoring model reads, and means a typo (`readOnly`, `read_only`) fails loudly once the props map is enforced, instead of silently leaving a machine-owned column writable. This is the option that structurally prevents the mistake at authoring time.\n\n**Option B — leave the spec alone**; objectui keeps reading an undeclared key.\n\n- Long-term cost, stated plainly: a permanent divergence between what the spec says a highlight entry is and what the renderer honours. It works only while per-component props go unvalidated, and it breaks — silently, in the data-corrupting direction — on the day they are validated. It is the \"lenient consumer\" pattern AGENTS.md #0.1 names.\n\n**Option C — do not add a key; have the chips consult the form view's field-level `readonly`** (suggestion 3 on #5077).\n\n- One declaration covering both the dialog and the detail-page surfaces, which is the asymmetry that produced #5077 in the first place. No new vocabulary. But it is a larger change, it only helps records that have a form view with that field, and it does not give an author a way to lock a chip that has no corresponding form-view field.\n\n**Recommendation: A**, and it is the same answer on both axes. It is the only option under which the authored declaration and the enforced behaviour are the same fact, which is what makes it safe for AI-written metadata; and it is the only one that does not have a scheduled breakage date. C is worth doing as well, but as a convenience layered on top of a declared key, not instead of one — A is small, and it is what makes the #5077 fix durable rather than incidental.\n\nNote the scope boundary: this is about the **page component's** `RecordHighlightsField`. The object's own `highlightFields` stays a plain `string[]` — no change proposed there.\n\nDownstream: yinlianghui/hotcrm-heimao#61."
+}

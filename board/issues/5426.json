@@ -1,0 +1,37 @@
+{
+  "number": 5426,
+  "kind": "issue",
+  "title": "`LocalManifestSource.read()` 把「条目不存在」和「条目损坏」都答成 `null`，两个 HTTP 调用方因此只能回一句无因由的 500",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T11:07:55Z",
+  "updated_at": "2026-08-05T12:00:01Z",
+  "closed_at": "2026-08-05T12:00:01Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5426",
+  "body": "实施 #5413（给 `list()` 加上 `skipped` 返回契约）时在同一个文件里核验发现；**未在该 PR 里改** —— #5413 的判定面被 PM 限定在 `list()` 的返回契约与它的三个消费者，本条是 `read()` 的返回契约，另一组调用方。\n\n## 事实\n\n`packages/cloud-connection/src/local-manifest-source.ts`（分支 `claude/issue-5413-manifest-source-skipped-entries`，`read()` 本身未被 #5413 改动）：\n\n```\n    /** Read one entry; null when absent or unreadable. */\n    read(manifestId: string): InstalledManifestEntry | null {\n        const file = this.fileFor(manifestId);\n        if (!existsSync(file)) return null;\n        try {\n            return JSON.parse(readFileSync(file, 'utf8'));\n        } catch {\n            return null;\n        }\n    }\n```\n\n和 #5413 修掉的 `list()` 是同一个形状的另一半：不带绑定的 `catch`，抛出的对象在原地丢弃。`null` 同时表示两个事实 —— 「这个 manifest 没装过」和「装过，但那个文件读不出来」。注释 `null when absent or unreadable` 说明这是**有意**的合并。\n\n与 `list()` 的区别在于：`read()` 的 `null` 至少**是**一个信号（调用方会分支），不像 `list()` 的短列表那样完全不可察觉。所以这条比 #5413 轻。\n\n## 后果\n\n三个调用方（都在 `packages/cloud-connection/src/marketplace-install-local-plugin.ts`）：\n\n1. **`:586` 安装路径的 ADR-0120 D5e posture gate** —— `previousEntry = this.ledger.read(manifestId)` 喂给 `evaluateGlobalUniqueGate()`。损坏的既有条目读成 `null` = 「没有既往 attestation」= gate 重新发问。**这个方向是安全的**（宁可重复一次一次性仪式，也不会跳过它），列在这里只为说明它已核验、不是隐患。\n\n2. **`:929` reseed** 与 **`:1009` purge** —— 两处都是先 `has()`（`existsSync`，为 true）再 `read()`（因损坏得到 `null`），于是回：\n\n```\n500 { code: 'MARKETPLACE_STORAGE_FAILED', message: 'Failed to read manifest cache.' }\n```\n\n`has()` 刚说文件在，`read()` 就说读不出来，而**为什么**读不出来（`Unexpected end of JSON input` / `EACCES` / `EISDIR`）在 `catch` 处已经被丢掉了。操作者拿到的是一句自己指向自己的话，没有任何一条能指向那个文件的线索；服务端日志里也没有补一行。属 #5403 / #5412 / #5413「catch 吞掉唯一能解释状况的那个对象」家族。\n\n## 复现路径\n\n```\n.objectstack/installed-packages/com.acme.crm.json   # 截断的 JSON\nPOST /api/v1/marketplace/install-local/com.acme.crm/reseed-sample-data\n→ 500 \"Failed to read manifest cache.\"（无因由；日志无补充）\n```\n\n## 决策点（不预设，留给分诊）\n\n`read()` 的返回契约怎么改，和 #5413 是同一类决策，但**结论不见得相同** —— `read()` 的 `null` 已经是一个可分支的信号，破坏性改造的收益比 `list()` 小：\n\n- **A. 与 #5413 对齐**，返回 `{ entry, failure }` 之类的结构化结果：契约一致，漏报编译期可见；要改 3 处调用方。\n- **B. 只让两处 500 带上因由**：`read()` 不动，改在调用方 —— 但调用方拿不到 cause（它在 `read()` 里就没了），所以这条实际上要求 `read()` 至少把 cause 透出来，等价于 A 的弱化版。\n- **C. 保持现状**，仅在 `read()` 内补一行日志：与 #5413 分诊里否决 C 的理由相同（剥夺调用方报告权、该类不持有 logger）。\n\n倾向 A（与 #5413 同一形状，两个方法的契约不至于分叉），但 `read()` 的 `null` 语义被三处调用方以不同方式消费，需要维护者拍板。\n\n## 备注\n\n- 已按关键词 + 文件路径搜过 open issues（`LocalManifestSource` / `installed-packages` / `manifest cache` / `ledger`），无重复；唯一命中是 #5413 自身。\n- 与 #5413 **无依赖关系**，独立成单。不作为 #5413 的 sub-issue —— #5413 的完成范围是 `list()` 的契约与它的三个消费者，`read()` 与它的调用方不落在其中。"
+}

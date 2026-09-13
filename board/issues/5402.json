@@ -1,0 +1,35 @@
+{
+  "number": 5402,
+  "kind": "pull_request",
+  "title": "fix(cli): `os doctor` 按 `os serve` 的环境载入 objectstack.config.ts (#5397)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T08:08:20Z",
+  "updated_at": "2026-08-05T08:20:55Z",
+  "closed_at": "2026-08-05T08:20:53Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T08:20:53Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5402",
+  "body": "Fixes objectstack-ai/objectstack#5397\n\n## 前提核验:成立(在 `origin/main` 98369a86b 上重跑,不照抄 issue)\n\n#5398 几分钟前才合入,所以第一件事是确认它的零件确实在 main 上、而 `loadConfig()` 确实还光着:\n\n```\n$ git log --oneline -1 origin/main\n98369a86b fix(cli): `os doctor` reads serve's `.env*` cascade and attributes every value (#5387) (#5398)\n\n$ grep -n 'withDotenvOverlay|loadConfig' packages/cli/src/commands/doctor.ts\n271:export function withDotenvOverlay(reading, fn) { …          # 零件在\n405:    return { ok: true, posture: withDotenvOverlay(reading, …) };   # 唯一调用点:posture\n1110:        const { config: rawConfig } = await loadConfig();          # 在 overlay 之外\n```\n\n**真机复现** —— 临时目录,`.env` 里一个变量,配置文件顶层读它并在缺值时抛错:\n\n```\n  ✓ Environment files    .env (node_env=development), the cascade `os serve` loads — no environment input set\n  → Loading configuration for analysis...\n  ⚠ Could not load config for analysis (config checks skipped)\n\n⚠️  Environment is functional but has some warnings.\n```\n\n同一目录、同一份配置,只把那个值改从 shell 传入(即 serve 载入 `.env` 后的等效环境):\n\n```\n  → Loading configuration for analysis...\n  ✓ Platform spec         Declared specVersion is current with the installed platform\n  ✓ Dependencies          No circular references detected\n  ⚠ Object \"account\" is defined but not referenced by any view, flow, app, or lookup field\n```\n\nissue 的事实面逐条成立。注意第二段里那条 `Object \"account\"` 警告:它不是新增的检查,而是\n**此前整块被跳过、一条都看不到**的那组 config 检查终于跑起来了 —— 下面「影响面」一节的实物。\n\n## 改了什么\n\n**1)`loadConfig()` 套上 `run()` 顶部已解析好的同一份 `dotenvReading`。**\n\n```\nconst { config: rawConfig } = await withDotenvOverlayAsync(dotenvReading, () => loadConfig());\n```\n\n不是第二次 `readDotenvFiles()`:一轮 doctor 只解析一次 cascade,否则 `Environment files`\n那一行就未必是 config 载入真正看到的那份,两次读取之间还可能分歧。\n\n**2)新增 `withDotenvOverlayAsync`,这是必需而非装饰。** 配置文件的顶层跑在 `bundleRequire`\n的动态 `import()` 里,同步版的 `finally` 会在 `loadConfig()` 交回 pending promise 的那一刻\n就把 overlay 摘掉 —— 套上了,又在被读之前摘掉,**等于没套,而且不会报错**。所以这条不是\n注释能担保的,单独钉了一例(见下反向验证 B)。两个 wrapper 共用同一套 apply/revert\n(dotenv-flow 自己 `unload()` 的判定:只删掉仍然等于写入值的那些),而不是抄一份 —— 「doctor\n允许动哪些变量、什么时候放回去」写两遍就是 #5387 花了整篇篇幅反对的那种漂移。\n\n**3)文件自述与报告同步更正。** 文件头原本写着 overlay 之外「nothing downstream — the config\nbundle … silently inherits a different environment」,现在 config bundle 正是第二个窗口,那句话\n若留着就是文档说自己没看某处而其实看了 —— 与 #5398 退役 posture 那句自陈是同一件事。\n`environmentSourcesCheck` 仍是报告 cascade 的**唯一**一处,并说明这些文件同样施加于配置载入:\n\n```\n      Sources only: doctor reports where a value came from, never what it is.\n      These files are also applied while objectstack.config.ts is loaded, so a config\n      that reads process.env at top level sees the values `os serve` gives it.\n```\n\n来源口径不变,而且这次更吃重:overlay 现在携带的是配置文件想读的**任意**变量,不再是\n`DOCTOR_ENV_INPUTS` 这个声明过的子集,而 `.env` 正是密钥的常见住处。变量名无法预先枚举,\n提供它们的**文件**可以 —— 有测试钉住报告里既不出现变量名也不出现值。\n\n## 影响面:判定变化是修复内容,不是副作用\n\n按 PM 裁定(与 #5398 对 D5e 建议同一姿态)如实列出可观察差异,三类:\n\n1. **此前因缺值抛错而被跳过的配置,现在载入成功** —— 那句归因错误的 warning 消失,而下面\n   那一整组 config 检查(spec 版本 / 循环依赖 / 未引用对象 / 孤儿视图 / 仪表盘完整性)**开始\n   运行**,因此**可能新增此前从未打印过的 warning**。上面真机复现里的\n   `⚠ Object \"account\" is defined but not referenced …` 就是实物:它在修复前不是「通过」,而是\n   根本没跑。\n2. **按环境值分支的配置**(条件声明的 object / datasource):doctor 判定的集合改为与\n   `os serve` 一致。这是安静的那一半 —— 配置两边都载入得了,只是声明了不同的形状,没有任何\n   warning 会浮现出来,所以它只能靠差分测试证明。\n3. **配置确实坏掉时,`Could not load config for analysis (config checks skipped)` 照旧触发。**\n   套上 cascade 之后仍然载入不了的配置,`os serve` 同样载入不了 —— 这句话从此归因正确,而不是\n   被消音。一并静默等于用「没有 warning」换掉「归因错误的 warning」,是本单窄读法的失败模式,\n   单独钉了一例。\n\noverlay 的边界也如实写在代码里:它在配置文件**载入**期间有效,不常驻整轮运行。doctor 分析的\n一切都是模块求值时读出的普通值,所以这覆盖了真实的读取;把环境读取推迟到 lazy getter 的配置\n会落在窗口外 —— 那是与同步版一致的克制(doctor 绝不给后面跑的东西留下一个合并过的环境),\n不是疏漏。\n\n## 测试\n\n新增 `packages/cli/src/commands/doctor-config-env-overlay.test.ts`(10 例):`withDotenvOverlayAsync`\n跨 await 仍可见 / 之后摘除 / shell 优先 / **回调 reject 时仍摘除**(配置抛错正是本单的主线路径,\n不是边角)/ 不误删回调改写的值;报告只报来源不报值、且说明配置载入也用这份 cascade;以及三例\n进程内跑真实命令的端到端差分,覆盖上节三类影响。端到端用例按仓库约定显式 `}, 60_000)`,并在\n临时 cwd 里预置 `node_modules/`(否则 `Dependencies` 自己就 error+exit 1,断言会因为无关原因通过\n—— PR #5390 写下、#5398 继承的那个坑)。\n\n**反向验证(两个方向,都在跑之前就写下了预测)。**\n\n方向 A —— 把调用点还原成裸 `await loadConfig()`(即 #5397 之前的状态)。预测:两例依赖「配置看得见\n`.env`」的端到端用例转红;「配置确实坏掉」那例**保持绿**(它从来不依赖 overlay);helper 单元测试\n**保持绿**(它们直接测 helper,不经过调用点)。实跑:\n\n```\n Test Files  1 failed | 2 passed (3)\n      Tests  2 failed | 43 passed (45)\n\n × loads a config that THROWS without its .env value — the misattributed warning is gone\n   AssertionError: expected … not to contain 'Could not load config for analysis'\n × sees the SHAPE serve sees when the config branches on an env value\n   AssertionError: expected … to contain 'Object \"beta_widget\" is defined but n…'\n```\n\n红的方式正是缺陷本身,红的**范围**也与预测逐条一致。\n\n方向 B —— 保留 overlay 但把调用点换成**同步**的 `withDotenvOverlay`。预测:同样那两例转红,而且\n输出与「完全不套 overlay」**别无二致** —— 这正是这个变体必须存在的理由:写错了不会报错,只会\n静默地套上一个没人读的 overlay。实跑,同样两例、同样两条断言转红,输出逐字同 A。\n\n整包(桩已撤除,`flock` 串行 + `--maxWorkers=2`):\n\n```\n$ pnpm --filter @objectstack/cli typecheck        # tsc --noEmit,干净\n$ pnpm --filter @objectstack/cli exec vitest run --maxWorkers=2\n Test Files  76 passed (76)\n      Tests  715 passed (715)\n   Duration  145.55s\n```\n\n(#5398 合入时是 75 files / 705 tests,新增即本 PR 的 1 文件 10 例。)\n\n另跑:`check:nul-bytes` OK(扫描 5420 个文件)、`check:role-word` OK、`check:error-code-casing` OK、\n`check:wildcard-fallthrough` OK、`check:adr-anchors` OK、eslint 干净;控制字符自查\n(`grep -naP` 扫 `\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f`)三个改动文件均无裸控制字节。\n`DOCTOR_ENV_INPUTS` 漂移守卫仍绿 —— 本 PR 未在 `doctor.ts` 里新增任何 `OS_` 变量名(注释里也刻意\n不写具体变量名,否则守卫会把它当成新的 env 输入)。\n\n## 未做的事\n\n- 没有改动 `serve.ts` / `dev.ts` / `start.ts` / `env.ts`(派发口径的禁区),也没有改\n  `content/docs/releases/`。\n- 没有改 `Could not load config for analysis` 这句文案本身:套上 cascade 之后它已经归因正确,\n  改写文案属于另一处输出契约变化,不在本单判定面内。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01VkPSGsX9o17MsGv3Lbxu2w\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01VkPSGsX9o17MsGv3Lbxu2w)_"
+}

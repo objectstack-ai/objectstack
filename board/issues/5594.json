@@ -1,0 +1,36 @@
+{
+  "number": 5594,
+  "kind": "issue",
+  "title": "`dev --fresh` claims the tempdir owns ALL persistent state, but app-declared cwd-relative datasource paths still write into the project tree and survive exit",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T20:06:23Z",
+  "updated_at": "2026-08-05T21:45:20Z",
+  "closed_at": "2026-08-05T21:45:20Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5594",
+  "body": "Found while verifying #4968 (PR for the `OS_STORAGE_LOCAL_ROOT` env-channel fix). Not caused by that change and not fixed there — filing per Prime Directive #10.\n\n## The claim\n\n`packages/cli/src/commands/dev.ts` (the `--fresh` block) states:\n\n> Creates a unique scratch dir that owns ALL persistent state for this run: the SQLite DB (via OS_HOME → &lt;home&gt;/data/...), the storage-service uploads root, and any other state plugins keyed off OS_HOME. Auto-deleted on exit.\n\n## What is actually true after #4968\n\n#4968 closes the storage half of this: with the env channel fixed, a `--fresh` run's uploads really do land in the tempdir and the project cwd stays clean. Verified on the PR branch — uploaded bytes at `/tmp/objectstack-dev-*/uploads/user/...`, nothing under `examples/app-showcase/.objectstack`.\n\nWhat remains is the qualifier the sentence does not carry: the tempdir owns all **framework-owned, OS_HOME-keyed** state. State reached by an **app-declared relative path** is resolved against the process cwd and is untouched by `--fresh`.\n\nLive specimen — the showcase's own external datasource, `examples/app-showcase/src/system/datasources/showcase-external.datasource.ts`:\n\n```ts\nconfig: { filename: '.objectstack/data/showcase_external.db' },\n```\n\nIts own comment says so plainly (\"Relative path → resolved against the project cwd by better-sqlite3\"), so this is deliberate authoring, not a bug in the example. But the consequence is that every `pnpm --filter @objectstack/example-showcase exec objectstack dev --fresh` run leaves `examples/app-showcase/.objectstack/data/showcase_external.db` (+ `-wal`, `-shm`) behind in the working tree after exit — observed on both the pre-fix and post-fix boots.\n\n## Why it is observation-class rather than a defect\n\nNo user loses data and no documented deployment channel is broken; the residue is one example app's fixture database in a dev working tree. The defect, such as it is, is in the **claim**: \"ALL persistent state\" is the kind of unqualified promise that a reader relies on when reasoning about isolation, and #4968 exists precisely because a `--fresh` isolation promise was believed and was false. Marking `finding`, no `pm:queue` — the PM's triage round should grade it.\n\n## Possible dispositions (not a recommendation, just the shape)\n\n1. Narrow the comment (and any user-facing `--fresh` docs) to name what is actually covered: state keyed off `OS_HOME` plus the env channels the CLI publishes.\n2. Additionally resolve relative datasource `filename` against `OS_HOME` when it is set — a real behaviour change with a real contract question (does an app-declared relative path mean \"relative to cwd\" or \"relative to this run's home\"?), so it is not a drive-by.\n\nOption 2 is a contract decision and should not be taken as implied by this filing.\n\nFiled unassigned."
+}

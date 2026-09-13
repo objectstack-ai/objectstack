@@ -1,0 +1,34 @@
+{
+  "number": 5625,
+  "kind": "pull_request",
+  "title": "fix(ci): Check Changeset 实时读 skip-changeset 标签,首个 run 不再永久红 (#5580)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T20:48:31Z",
+  "updated_at": "2026-08-05T21:11:32Z",
+  "closed_at": "2026-08-05T21:11:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T21:11:30Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5625",
+  "body": "Fixes #5580\n\n## 症状\n\n`.github/workflows/pr-automation.yml` 的 changeset-check job 从**事件载荷**读标签:\n\n```yaml\nif: >-\n  !contains(github.event.pull_request.labels.*.name, 'skip-changeset')\n```\n\n`github.event.pull_request.labels` 是事件触发那一刻的快照。于是开 PR 后数秒内补\n`skip-changeset` 标签时:\n\n1. `opened` 事件的 run 看不见标签 → 走计数路径 → 无 changeset → **红**;\n2. 标签落上后 `labeled` 事件的新 run → skipped(判定正确);\n3. 但首个红 run **永久红**:`rerun_failed_jobs` 复用原事件载荷(pm-dispatch\n   Operational notes 5),重跑多少次都看不见后来的标签。\n\n一日三例:#5467(该门禁自己的修复 PR)、#5501、#5577。每例的直接成本是一个需要人或\nagent 停下来「认签名解释掉」的红检查 —— merge-queue-triage、PM 复核、事件订阅三方\n会各自撞一次。\n\n## 修法\n\njob 内新增**第一个**步骤,用 `gh api repos/$REPO/pulls/$PR` 实时读回标签集,产出\n`steps.labels.outputs.skip`;其后每个步骤按它决定是否执行。载荷读法按 issue 建议\n**保留为 fast-path**(载荷已有标签 → 整个 job 跳过,常规路径零 runner 成本)。\n\n重跑因此收敛:载荷仍是旧的,但实时读每次都重新查询。\n\n### 四个设计决定\n\n- **容忍方向朝着执行。** 标签读不到(API 报错、无 PR 号)判为 `skip=false`,即照常\n  执行守卫。读不到输入的门什么也没验证,据此发豁免正是 #4690 反模式(静默跳过、\n  exit 0、看起来像「无违规」)。失败以 `::warning::` 明说,由计数步骤定论。\n- **实时读放在 checkout 之前。** 标签在位时其后全部步骤跳过,整个 job 只花一次 API\n  调用 —— 收敛到实时状态比它替掉的那个 stale 红更便宜。\n- **精确整行匹配**(`grep -qxF`,here-string 而非管道)。被替换的 `contains(数组,\n  'skip-changeset')` 是数组元素精确匹配,子串匹配会让 `skip-changeset-audit` 这类\n  标签新获豁免。here-string(与 release.yml 一致)让 `grep -q` 不进管道:`-q` 首个\n  命中即关闭管道,写入端可能吃 SIGPIPE,在 `set -o pipefail` 下会把判定翻成 false。\n  该步骤未写 `shell:`,两种方言都已实测。\n- **每步重复 guard,而非新增一个 gate job。** job 级 `if:` 读不到自己 job 的步骤;\n  另起一个 gate job 会给本已在与检查列表噪音作战的仓库再添一行检查和一个全新的变红\n  途径,而把标签判定塞进计数步骤里则要先付 checkout + install 才发现该 PR 豁免。\n\n## 边界\n\n- ⛔ 未动 `BASE_SHA` diff **计数逻辑**,也未动 #5292/PR #5467 的三段有序失败文案 ——\n  heredoc 终结符仍在块基缩进(解析后确认 `MSG` 落在生成脚本第 0 列)。\n- ⛔ 未动其他 job。\n- `allow-major` 步骤的同款载荷读法**按边界留在原样**,只补上「changeset 豁免时同样\n  跳过」这一句以保持 #5580 之前的语义(那时整个 job 连带此步骤一起跳过)。它自身的\n  竞态在 RC pre-mode 期间休眠 —— `check-changeset-no-major.mjs` 整个 RC 窗口让位,\n  标签目前根本用不上 —— 已记为 #5620,文件内注释指向它。\n\n## 验证\n\n| 项 | 结果 |\n|:--|:--|\n| `pnpm check:workflow-status-functions`(#5343/PR #5477 门禁) | OK,22 workflow / 39 job / 19 个 job 级 `if:`;self-test 34 断言通过 |\n| `pnpm check:nul-bytes` | OK,5533 个文件无裸控制字节;self-test 48 断言通过 |\n| `pnpm check:node-version` | OK,23 个 setup-node 步骤仍全在 Node 22 |\n| YAML 结构解析 | 7 个步骤中 6 个带 guard(实时读步骤自身不带,它必须总是执行);`BASE_SHA` env 与计数命令逐字未变 |\n| 步骤脚本分支矩阵 | **14/14 通过**(见下) |\n| 前后决策真值表 | 7 格中仅 2 格改变,与事前预测一致(见下) |\n\n### 分支矩阵(从 YAML 抽出真实 `run:` 脚本,stub `gh`,两种 shell 方言)\n\n跑的是 workflow 里那段脚本本身,不是重敲的副本。\n\n| 场景 | 期望 | `bash -e` | `bash -eo pipefail` |\n|:--|:--|:--|:--|\n| 载荷 stale、标签实时在位 —— **#5580 本体** | exempt | PASS | PASS |\n| 实时无该标签 | enforce | PASS | PASS |\n| 完全没有标签 | enforce | PASS | PASS |\n| API 失败(HTTP 403) | enforce + warning | PASS | PASS |\n| 无 PR 号(gh 一次都没调用) | enforce + warning | PASS | PASS |\n| 近似标签名(`skip-changeset-audit` / `no-skip-changeset`) | enforce | PASS | PASS |\n| 401 个标签含目标(pipefail 压力) | exempt | PASS | PASS |\n\n### 反向验证\n\nGitHub 表达式语言无法在本地执行,所以**前后决策函数是建模的**(shell 那一半是真跑\n的)。方向先预测后运行:应当**只有一格**改变。\n\n| 场景 | 载荷 | 实时 | BEFORE | AFTER | 变 |\n|:--|:--|:--|:--|:--|:--|\n| 开 PR 前就带标签,仍在 | has | has | skipped | skipped | . |\n| 开 PR 后约 5s 补标签 —— **本 bug** | none | has | enforce | **exempt** | YES |\n| 该红 run 的 `rerun_failed_jobs`(同一份冻结载荷) | none | has | enforce | **exempt** | YES |\n| 全程无标签、无 changeset | none | none | enforce | enforce | . |\n| 开 PR 后**移除**标签(载荷仍带) | has | none | skipped | skipped | . |\n| 该移除触发的 `unlabeled` 事件 | none | none | enforce | enforce | . |\n| 标签实时在位但 labels API 读不到 | none | n/a | enforce | enforce | . |\n\n实际改变 2 格,而非 1 —— 因为「首 run」与「它的重跑」是同一个缺陷的两次,预测里写的\n就是这两格;其余 5 格逐格不变。\n\n**保留 fast-path 留下的唯一反向 stale 格已如实记在文件里**:标签在开 PR 后被移除时\n本 run 仍短路,即凭快照放行。该格自愈 —— 移除标签必然触发 `unlabeled` 事件,它起的\nrun 两处都看不到标签而照常执行。#5580 那个方向没有这种救援:`labeled` run 的绿不会\n清掉 `opened` run 的红。这是保留 fast-path 换来常规路径零成本的代价,值得,但下一个\n读者应当看见它,所以写进了注释而不是只写在这里。\n\n## 本 PR 自身\n\n- **需要 `skip-changeset` 标签**:纯 workflow 改动,⛔ 未写空 frontmatter changeset\n  (那正是 #5292/PR #5467 判定为最后手段的东西)。请 PM 落标签。\n- `pull_request` 事件的 workflow 取自 merge ref,所以本 PR 的 Check Changeset 跑的\n  已经是**新逻辑**。预测:标签若在首个 run 的第一步之后才落上,该 run 仍会红 —— 但\n  这次 `rerun_failed_jobs` 就能变绿,而这恰是修好了的那半。\n- **已知 base 侧红,非本 PR 引入**:ESLint job 全仓红于 #5604 ——\n  `check:engine-double-contract` 在 `packages/runtime/src/action-execution-calldata-not-found.test.ts`\n  第 69、102 行。在本分支 base(`cc5b048a0`)上直接跑该脚本复现,退出码 1,签名逐字\n  一致;本 PR 只改一个 workflow 文件。ESLint 非必需检查。注意上面两个门禁**也在**\n  ESLint job 里,且排在那个失败步骤**之前**,所以它们各自的绿在 job 日志里仍可见,\n  只是 job 总结论为红。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01GX3sL71LFq8m2usg6VqTSE)_"
+}

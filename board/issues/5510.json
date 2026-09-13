@@ -1,0 +1,37 @@
+{
+  "number": 5510,
+  "kind": "issue",
+  "title": "[17.0-rc2验收] lint naming/namespace-prefix 把按对象区分的同名 action 误判为包内重复 —— 规则去重键漏掉了 objectName,HotCRM 每次 lint 固定 12 条误报",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T14:36:31Z",
+  "updated_at": "2026-08-05T16:12:09Z",
+  "closed_at": "2026-08-05T16:12:09Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5510",
+  "body": "## 现象\n\n在 HotCRM(`objectstack-ai/hotcrm@0899b4f`)上运行 `objectstack lint`(rc.2 CLI),固定产生 **12 条 `naming/namespace-prefix` warning**,全部指向 #592 模式下按对象生成的活动 action(`log_call` / `log_meeting` / `schedule_meeting` × 5 个对象 = 15 个 action,首个不警,后续 12 个全警):\n\n```\n⚠ Action \"log_call\" is declared more than once in this package (also at actions[0].name).\n  Two items of the same type sharing a bare name within one package shadow each other\n  on the registry key (ADR-0048 §3.4) — rename one, e.g. \"crm_log_call\". …\n    naming/namespace-prefix  at actions[6].name\n```\n\n但这些 action **并不共享注册键**:它们的 `objectName` 各不相同(crm_lead / crm_contact / crm_account / crm_opportunity / crm_case),运行时注册键是 `<objectName>:<name>`,互不遮蔽。\n\n## 复现\n\n1. `objectstack-ai/hotcrm` 检出 `0899b4f`,`pnpm install`;\n2. `pnpm exec objectstack lint`(带不带 `--skip-i18n` 均可);\n3. 观察 12 条 `naming/namespace-prefix` warning(两次运行结果一致)。\n\n同名不同 `objectName` 的 action 实际互不遮蔽,可在运行的 dev server 上直接证明——每个组合独立派发且真实执行:\n\n```\nPOST /api/v1/actions/crm_contact/log_call → 200(crm_event + sys_activity + attendee 行落库)\nPOST /api/v1/actions/crm_case/log_call    → 200(不同对象、同名 action,互不影响)\n```\n\n## 期望 vs 实际\n\n- 期望:仅当两个 action 的**真实注册键**冲突(同 `objectName` + 同 `name`,或同为 objectless)时告警;\n- 实际:规则只按裸 `name` 去重,凡是「一个包内多个对象各带一个同名 action」的合法形状必然告警,且每对象一条,噪音随对象数线性增长。\n\n后果:HotCRM 的 lint 输出常驻 12 条誓不清零的 warning,真实告警(如同次输出中的 `field-group-shadowed`)被淹没;而按提示改名(`crm_log_call`)反而会破坏 #592 式共享 i18n 键(`_actions.log_call.label`)的设计。\n\n## 证据\n\n- 警告文本自身与自身矛盾:它建议的 fix「rename one, e.g. \"crm_schedule_meeting\"」若照做,同一对象家族的 5 个 action 还需 5 个不同名字,而它们语义上就是同一个动作按对象实例化。\n- HotCRM `src/actions/global.actions.ts` 的设计注释明确记载注册键形状:「the runtime keys the registry on `<objectName>:<action.name>` and the dispatcher probes `<objectName>` first」,并被 `test/global-actions.test.ts` 等守卫钉住。\n\n## 环境\n\nhotcrm@0899b4f + @objectstack 17.0.0-rc.2\n\n## 落点分析\n\n`@objectstack/cli` `dist/commands/lint.js` 的 `PREFIXED_TYPES` 循环:对每类项目用 `firstSeen = new Map()` **仅按 `items[i].name` 去重**;对 `actions` 而言真实的复合键是 `(objectName ?? 'global', name)`。规则自己的注释也说明了本意是抓「genuine duplicate (type, name) pair」——对 action 这个类型,`name` 不是完整键。修法方向:actions 的去重键改为 `${item.objectName ?? ''}:${item.name}`(其余类型不变);同 `objectName` 同名(或两个 objectless 同名)仍应告警——那才是最后写入者遮蔽的真冲突。"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 5241,
+  "kind": "issue",
+  "title": "`check:durability-log-level` 分不清「故障已答给调用方」和「故障被吞掉」—— 词表加 `saveMetaItem` 后逼出 2 条基线,记的全是正确代码",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T11:59:26Z",
+  "updated_at": "2026-08-05T21:23:22Z",
+  "closed_at": "2026-08-05T21:23:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5241",
+  "body": "发现于 #4754 的实现期(PR 分支 `claude/issue-4754-savemetaitem-durability-wordlist`)。**未认领 —— 只是记录。观察类:今天没有用户会撞到,代价是一份本不该存在的基线。**\n\n## 现象\n\n#4754 把 `saveMetaItem` 加进 `DURABILITY_CRITICAL_CALLEES`。修掉闸门自身两个精度缺陷后,命中从 8 降到 4,其中:\n\n- **1 处是真丢失**(`packages/runtime/src/domains/packages.ts` 的 ADR-0045 可见性翻转:HTTP 200 + `unhideError` 埋在 body 里,零日志)—— 已按范本改成 `error`;\n- **3 处不是降级**,它们把故障**原样答给了调用方**:\n  - `packages/runtime/src/domains/meta.ts` — `catch` → `deps.errorFromThrown(e, 400)`,调用方拿到带 `issues` 的 4xx/422;\n  - `packages/metadata-protocol/src/protocol.ts` ×2 — `migrateStoredItems` 的 `report.failed++` + 逐项 `outcome:'failed'`;复制入包的 `failed.push()` + 聚合 `success:false` / `failedCount`。\n\n按 AGENTS.md 的判据原问 ——「降级之后系统从外面看还正常吗?」—— 这 3 处答案都是**否**:请求方被明确告知这次写入没有落盘。它们**根本不是降级**,而是错误传播。但闸门的模型只认「loud 日志 or rethrow」,表达不了「已答给调用方」,于是这 3 处只能进 `scripts/durability-degradation.baseline.json`。\n\n## 为什么这是个问题,而不是「基线就是干这个的」\n\n基线文件自己的表头写着「Every entry names WHY it is still here and **WHAT closes it**」,而且是 shrink-only。给**正确代码**写基线条目有两个后果:\n\n1. 这些条目**永远关不掉**(代码没毛病),shrink-only 的账本从此有了一批不会缩的行,「基线 = 待还的债」这个语义被稀释;\n2. 更糟的是它给下一个作者立了个范例:这个闸门会误报,遇红先加基线。而闸门脚本自己的注释恰恰写着,误报率高到让人绕过的闸门「worth less than no gate, because it also *reports success*」。\n\n还有第三个后果,是这次差点踩到的:面对 `meta.ts` 那处误报,**最省事的「修法」是补一句 `logger.error`** —— 而那条路径最常见的情况是作者提交了不合 spec 的 body,于是每一次校验拒绝都会打一条持久性 `error`。这正是 AGENTS.md 点名的镜像错误(「trains everyone to skim `error`」),也正是 #4420 那条 `warn` 当初没人读的成因。**一个闸门,最省力的满足方式是有害的,那闸门的形状就有问题。**\n\n## 根因:`saveMetaItem` 和词表里其他条目不是一类\n\n现有词表条目(`syncSchema`、`writeRecord`、`writeDeferredReference`、`rearmSuspendedWaitTimers`、`dropPromotedDraftRow`、`deliverPersistedRow`…)清一色是**背景副作用**:调用方并不在等这一次写的结果,某个更外层的操作会照常报成功 —— 所以「catch 必须响」对它们无一例外地成立。\n\n`saveMetaItem` 不同:8 处命中里 7 处是**调用方直面的主操作**(HTTP 写元数据、批量迁移/复制),只有 1 处是搭别人便车的副作用。#4669 那个真事故也正是副作用型。**词表按 callee 名字匹配,而这个 callee 横跨两类**,精度就掉了。\n\n## 建议方向(裁决留给维护者,本卡不预设)\n\n1. **给闸门加一份「故障传播词汇」**(和 `DURABILITY_CRITICAL_CALLEES` 一样是**显式声明**的,不猜):一个 `catch` 若每条路径都把故障交了出去,就等价于 rethrow。HTTP 形状好办 —— `errorFromThrown` / `sendError` 是专名;难的是 protocol.ts 那种**结构化逐项结果报告**(`report.failed++`、`failed.push({...})`),按名字识别就退回成脚本注释明确拒绝的启发式了;\n2. **收窄词表**:承认这一族要区分「副作用型写」和「主操作型写」,而 callee 名字做不到这个区分 —— 那就接受 `saveMetaItem` 只能靠基线管住,并把基线表头的语义从「待还的债」放宽成「已复核的例外」,明说这个取舍;\n3. **维持现状**(3 处基线),只把这份取舍记在案。\n\n我倾向 1,但它对第二种形状(结构化结果报告)是否可机械判,我没有把握 —— 这正是本卡不自作主张的原因。\n\n## 现状\n\n#4754 的 PR 已经落了这些,本卡**不阻塞**它:\n\n- 修好闸门两个真缺陷(见下,它们不在本卡范围,已随 #4754 落地);\n- 真丢失那 1 处改成 `error`;\n- 3 处进基线,`closes` 字段指向本卡。\n\n本卡关闭时,应能删掉那 2 条基线条目(键是 `file::callee`,3 处站点合成 2 个键)。\n\n## 关联\n\n#4632(立规矩)、#4669(副作用型的那次真事故)、#4754(加词表 + 清账)、#5186(同一闸门的**另一个**盲区:读接缝的漏报;本卡是反方向的**误报**)、AGENTS.md「Degradation log levels — `warn` vs `error`」。\n"
+}

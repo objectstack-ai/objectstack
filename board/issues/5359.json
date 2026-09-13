@@ -1,0 +1,36 @@
+{
+  "number": 5359,
+  "kind": "issue",
+  "title": "非法 `OS_TENANCY_POSTURE` 的「拒绝启动」实际发生在端口已监听之后 —— 第一次抛错被 serve.ts 的 AuthPlugin 宽 catch 吞掉",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T00:43:17Z",
+  "updated_at": "2026-08-05T03:54:15Z",
+  "closed_at": "2026-08-05T03:54:15Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5359",
+  "body": "发现于 #5269（`content/docs/deployment/tenancy-modes.mdx` 文档核证）过程中，逐断言对码时撞到；本单只记录，不在该文档 PR 里改。\n\n## 声称的契约\n\n`packages/types/src/env.ts:145-160` —— `resolveTenancyPosture()` 对无法识别的值抛错，错误文案自称：\n\n```\nInvalid OS_TENANCY_POSTURE=\"bogus\". Expected one of: single, group, isolated (or the legacy alias 'multi' = 'isolated').\nRefusing to boot rather than silently falling back to a posture with no organization wall.\n```\n\n`content/docs/deployment/environment-variables.mdx:85` 也照此写：「An unrecognized value **refuses to boot**」。\n\n## 实际发生的顺序（静态追踪，`origin/main` @ c89d18c16）\n\n1. `packages/cli/src/commands/serve.ts:1772` `const tenancyPosture = resolveTenancyPosture();` 位于 AuthPlugin 那个大 `try` 内（更早的 `kernel.use(new AuthPlugin(...))` @ `serve.ts:1692` 也会经 `packages/plugins/plugin-auth/src/auth-plugin.ts:470` 触发同一次解析）。\n2. 该 `try` 的 catch 在 `serve.ts:1942-1948`，只打印一句黄字 `⚠ AuthPlugin failed to load: <msg>` 就继续。于是非法 posture 的第一次抛错**被吞**，启动继续进行，只是没有 plugin-auth。\n   - 这一点代码自己就写明了：`serve.ts:1816-1819` 的注释说「this catch sits inside the broad AuthPlugin try below, which swallows errors — a throw would be caught and boot would silently continue degraded」，D5 闸门因此特意用 `process.exit(1)` 而不是 throw。posture 解析的抛错没有这层保护。\n3. `await runtime.start()` @ `serve.ts:2560` —— HTTP 服务已经起来并绑定端口。\n4. `printServerReady({ ..., tenancyPosture: resolveTenancyPosture() })` @ `serve.ts:2698-2716` —— 同一个解析器第二次抛错，这次不在 AuthPlugin 的 try 里，落到外层 catch `serve.ts:2764-2773`，`printError` + `this.exit(1)`。\n\n## 结论\n\n退出码这一半是对的（最终 exit 1），但「refusing to boot」的另一半不成立：\n\n- 进程在报错前已经 **listen 过**；\n- 运维看到的第一条信号是「AuthPlugin failed to load」，把一个 env 拼写错误伪装成插件加载问题；\n- 真正的 `Invalid OS_TENANCY_POSTURE=...` 只在最后由通用 `printError` 抛出，不是 D5 那种带修法清单的显式拒绝。\n\n排查成本之外还有一个更实际的担忧：这条路径依赖「banner 一定会执行」这一点来兜底。任何让 `printServerReady` 不被执行的分支（或把 banner 的 posture 读取改成缓存值/容错读）都会把它变成「非法 posture 静默按 single 跑」——正是 env.ts 那句话要防的形态。\n\n## 建议修法（不在本单实现）\n\n在 `serve` 早期、任何 `try` 之外解析一次 posture 并显式 `process.exit(1)`，与 ADR-0093 D5 闸门同一风格（有修法清单的 FATAL 文案），后续调用复用该值。\n\n## 现状证据\n\n`packages/cli/**` 下没有任何测试钉住这个行为：`git grep -n \"Invalid OS_TENANCY_POSTURE\" packages/` 只命中 `packages/types/src/env.ts:154`。"
+}

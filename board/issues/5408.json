@@ -1,0 +1,37 @@
+{
+  "number": 5408,
+  "kind": "issue",
+  "title": "console: the create/edit form's section tab strip ignores `_sections` translations that the detail page applies",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T08:56:10Z",
+  "updated_at": "2026-08-05T10:34:30Z",
+  "closed_at": "2026-08-05T10:34:30Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5408",
+  "body": "The record create/edit form groups fields into sections and renders them as a\ntab strip. That strip displays the **untranslated** section labels in every\nlocale — even when the bundle carries a complete `_sections` block that the\n*detail page* for the same object resolves correctly.\n\n### Observed (17.0.0-rc.2, HotCRM)\n\nNew Case form: tab strip reads `Case • / SLA / Resolution` in all four locales.\nThe same object's `_sections` translations exist and work elsewhere — the case\n**detail page** renders 工单信息 / 状态与SLA under zh-CN from\n`objects.crm_case._sections.*`. So this is not a missing key or an incomplete\nbundle: the form renderer simply never consults `_sections` for its tab strip,\nwhile the detail-page renderer does.\n\n(As of objectstack-ai/hotcrm#697 all four HotCRM locales carry all 85 declared\nsection headings, so any locale is now a ready-made reproduction: every\ntranslated heading appears on the detail page and stays English on the form\ntabs.)\n\n### Why this is distinct from neighbouring issues\n\n- Not #5377 / hotcrm#661 (list-view tab bar) — that surface resolves via the\n  referenced view's `_views` label on rc.2 and is fixed.\n- Not the missing-lint-rule problem (#5405, filed separately) — this is the\n  renderer half: the key path exists, is authored, and is ignored by one\n  component.\n\nExpected: the form section tab strip resolves headings through the same\n`_sections` lookup the detail page uses (`objects.<o>._sections.<key>.label`,\nfalling back to the authored label).\n\nDownstream: objectstack-ai/hotcrm#683 (part 1)."
+}

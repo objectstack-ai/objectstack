@@ -1,0 +1,35 @@
+{
+  "number": 5518,
+  "kind": "pull_request",
+  "title": "fix(runtime): `ctx.user.name` 交付真实 display name —— 三条 dispatch 路径统一 user 形状 (#5372)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T14:58:12Z",
+  "updated_at": "2026-08-05T15:22:11Z",
+  "closed_at": "2026-08-05T15:22:10Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T15:22:10Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5518",
+  "body": "Fixes #5372\n\n## 前提核验(issue 正文基于 17.0.0-rc.2 dist,行号对 src 无效)\n\n三条路径已在 `origin/main` 的 src 上逐条定位,**premise 成立且未漂移**:\n\n| 路径 | src 落点(修改前) | 实际交付 |\n|---|---|---|\n| REST `/actions` | `packages/runtime/src/domains/actions.ts:279` — `name: ec.userId` | 裸 user id(硬编码) |\n| MCP `run_action` | `packages/runtime/src/action-execution.ts:878` — `ec.userName ?? ec.userDisplayName ?? ec.userId` | 裸 user id |\n| AI routes | `packages/runtime/src/domains/ai.ts:178` — `displayName: ec.userDisplayName ?? ec.userName ?? ec.userId` | 裸 user id,且键名不同 |\n\n全仓 grep 确认:`ec.userName` / `ec.userDisplayName` **只有读点没有赋值点**,`ExecutionContextSchema` 也没有声明这两个键 —— 即 #4984 的\"死枝 `??` 链\"家族,唯一可达分支就是最后一个 id。`buildActionSandboxContext`(`sandbox/body-runner.ts:326`)确为 pass-through,名字不是在 sandbox 丢的。\n\n顺带核出**同类的第二个静默错值**:AI route 的 `email: ec.userEmail` —— 声明的字段是 `ec.email`,所以该路径的 `user.email` 一直是 `undefined`。它与本单要统一的是同一个对象、同一处构造,故一并修正(未另开 issue)。\n\n## 改了什么\n\n新增**唯一生产者** `packages/runtime/src/security/actor-user.ts`,三条路径 + AI route 的第二个生产者(`dispatcher-plugin.ts` 的 `resolveRequestUser`)全部经它构造。\n\n- `name` 取 `sys_user.name`(平台自己的 profile 显示名列,对象上 `required: true`),**每请求解析一次**:memo 以请求的 ExecutionContext 对象身份为 key(WeakMap),同一请求内 N 次 action dispatch 只读一次,且跨请求不缓存(改名下一请求即生效,无需失效钩子)。\n- 解析**安静失败**:查不到行 / 无引擎 / 读抛错 / name 为空白 → 回退 id。名字缺失不该让 action 失败。于是 `name === id` 精确地只表示\"该用户没有可解析的 display name\" —— 这正是下游 workaround(`name !== id` 即信任)得以**自退**的条件。\n- 读取是 system-elevated 的(与 core 的 `resolveAuthzContext` 自己那次 `sys_user` 读一致):判断\"调用者是谁\"不能依赖调用者对身份表的读权限。\n\n## 统一形状的键集与依据(PM 授权由实测消费方决定)\n\n先 grep 了下游读键,结论把形状**锚到已有的 spec 契约**而不是新造:\n\n**[ADR-0068 D1]** `EvalUser` 是仓里声明的唯一 user-context 契约,谓词面(`formula/stdlib.ts` `buildScope`)正是以 `current_user` / `user` / **`ctx.user`** 三个别名挂同一个对象,且其上 `name` 的声明就是 \"Display name\"。也就是说 REST 的硬编码不只是与兄弟 dispatcher 不一致,它是在一个 spec 已经定义过的键上交付了别的东西。一个 action 的 `visible` 谓词和它的 `body` 并排写、都拼作 `ctx.user`,两者形状不同正是 ADR-0068 当初要消灭的缺陷。\n\n所以身份内核改由 spec 自己的 `createEvalUser` 构造 —— `id` / `name` / `email` / `positions` / `isPlatformAdmin` / `organizationId`;在此之上保留两个 dispatch 面**本来就已发布**的传输键:\n\n- `userId`、`displayName`(`id` / `name` 的别名,同值)—— AI route 消费方读 `displayName`,按 PM 口径**两键并存而非删键**;\n- `roles`(`positions` 的 ADR-0090 前别名),`permissions`(权限集名)与 `systemPermissions`(capability)—— #4705 明确的两条独立通道,仍并列不合并。\n\n对所有既有读者是**纯增量,未删任何键**。匿名 / 自调用仍是 `system` principal(#2701),AI route 匿名仍返回 `undefined`(handler 以 `user` 缺席判断无调用者)—— 这两处语义不同,故不强行合一。\n\n`resolveRequestUser` 的 `?? user.email` 中间档被去掉:它的 display name 直接取 session 的 `user.name`(better-auth 对 `sys_user.name` 的投影,无额外读),这样 `name === id` 在每个生产者上含义一致;邮箱仍在自己的 `email` 键上。\n\n## 性能实测\n\n真实 ObjectQL + better-sqlite3(200 行 `sys_user`,主键读),500 次取均值:\n\n```\nBENCH cold=0.2239ms/dispatch memoized=0.00055ms/dispatch\n```\n\n即每请求首次 0.22ms,同请求内后续 dispatch 约 0.0006ms。未新增连接或缓存层。\n\n## 测试\n\n新增 `packages/runtime/src/action-ctx-user-shape.test.ts`(15 例),按三族组织:**值**(REST 为主,MCP / AI 各一条同值断言,并有一条真 QuickJS sandbox body `return ctx.user.name` 的端到端)、**反向**(无 name / 空白 name / 无行 → `name === id`,双向闭合)、**失败模式与形状**(读抛错仍 200、system-elevated 读、每请求一次、三路径键集与值逐一相等)。另在 `ai-request-user-capability-channel.test.ts` 给第二个生产者加了形状与 fallback 断言,并把该文件里 `userEmail:` 这个**谁也不赋值的拼写**改回声明的 `email:`。\n\n反向验证(方向先判后跑):此处是**标准 RED**,不是 #5018 的 inverted —— 被删的枝就是错值的生产者,不存在 canonical-first 的 `??` 链。预判\"把 REST 硬编码还原 → REST 值断言与形状断言转红\";实跑 **7 failed / 8 passed**,红的正是 REST 值、sandbox 端到端、形状两条、system-elevated 读、每请求一次、匿名 principal 的 `systemPermissions`。值得如实记一笔:留绿的 4 条全是\"无 name 时回退 id\"方向 —— 单靠那一侧**抓不到**这个回归,双向断言里的另一侧才是探针。\n\n命令与结果:\n- `pnpm --filter @objectstack/runtime test` → `Test Files 94 passed (94) / Tests 1362 passed (1362)`\n- `pnpm --filter @objectstack/runtime typecheck` → `tsc --noEmit`,无输出\n- `pnpm --filter @objectstack/runtime build` → CJS/ESM/DTS build success\n- 相邻闸门:`check:authz-resolver` ✓、`check:role-word` ✓、`check:adr-anchors` ✓、`check:route-envelope` ✓、`check:org-identifier` ✓、`check:slot-lookup` ✓、`check-nul-bytes` OK\n\n## 文件面\n\n只动 `packages/runtime/src/**` 与该包测试 + 一个 changeset。**未触** `packages/rest`(#5487/#5462 领地),未触 hotcrm 仓,未动 `content/docs/releases/`。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016FNvXhtSdnEGEfLEsMmvxh\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016FNvXhtSdnEGEfLEsMmvxh)_"
+}

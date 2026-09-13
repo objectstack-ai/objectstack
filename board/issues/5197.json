@@ -1,0 +1,36 @@
+{
+  "number": 5197,
+  "kind": "issue",
+  "title": "os-dev 派发词/定义可加一行:测试假引擎的 delete() 必须路由 assertEngineDeleteDispatch —— 同一门禁一日两红(#5173、#5192)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T08:30:20Z",
+  "updated_at": "2026-08-05T21:23:21Z",
+  "closed_at": "2026-08-05T21:23:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5197",
+  "body": "观察类记录,按 Prime Directive #10 立案,不自行压级。\n\n## 现象\n\n`check:engine-double-contract` 在同一天两次判红两个不同 dev agent 的新增测试,错误一模一样 —— 新写的假引擎 `delete()` 手抄守卫、未路由 `assertEngineDeleteDispatch`:\n\n- PR #5173(`email-plugin.queue-delivery.test.ts:53`),修复 `b169f217`;\n- PR #5192(`job-queue-retention.test.ts:62`),修复进行中。\n\n两次修复都走门禁提示的第一条路,各花一轮 CI 往返(~15 分钟/次)。#5173 那次还证实手抄守卫真有洞(`$in` 多行谓词被放行)。\n\n## 判断\n\n门禁工作正常,防线没漏;代价只是每次一轮 CI 往返。但「新增测试 + 需要假引擎 + delete 路径」是 os-dev 的高频组合,`.claude/agents/os-dev.md`(或 pm-dispatch 的派发词模板)加一行「假引擎的 `delete()` 一律 `assertEngineDeleteDispatch(options)` 开门,参照既有 14 个 pinned fake」,可以把这轮往返省在提交前。\n\n属 devx 文档一行改动;是否值得动 agent 定义文件,留分诊轮判。若采纳,落点是 `.claude/`(非发布面),domain:devx。"
+}

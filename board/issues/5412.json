@@ -1,0 +1,37 @@
+{
+  "number": 5412,
+  "kind": "issue",
+  "title": "`os doctor` 的 installed-package ledger 读取 catch 把「损坏」和「没装」当成同一件事 —— D5e 建议因此静默少报,并打出「clean」",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T09:07:02Z",
+  "updated_at": "2026-08-05T10:24:33Z",
+  "closed_at": "2026-08-05T10:24:33Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5412",
+  "body": "实施 #5403(给 config 分析的 catch 加上 error 绑定)时顺带核验发现;**未在该 PR 里改** —— #5403 的判定面被限定为 config 分析那一个 catch 的输出,本条是另一处 catch、另一条检查的判定面。\n\n## 事实\n\n`packages/cli/src/commands/doctor.ts:771-784`(`origin/main` `4b61cf3`):\n\n```\n/** Read the installed-package ledger without going through HTTP. Best-effort:\n *  a runtime that never installed anything simply has no directory. */\nasync function readInstalledPackageEntries(cwd: string): Promise<any[]> {\n  try {\n    const mod: any = await import('@objectstack/cloud-connection');\n    const dir = path.join(cwd, mod.DEFAULT_INSTALLED_PACKAGES_DIR ?? '.objectstack/installed-packages');\n    if (!fs.existsSync(dir)) return [];\n    return new mod.LocalManifestSource(dir).list();\n  } catch {\n    return [];\n  }\n}\n```\n\n这个 `catch` 不带绑定,且**覆盖了两件性质完全不同的事**:\n\n1. **`import('@objectstack/cloud-connection')` 解析不到** —— 可选包没装。注释写明了这一条,而且是对的:doctor 必须能在没有该包的 checkout 里跑完。\n2. **`new mod.LocalManifestSource(dir).list()` 抛错** —— 目录**存在**(`fs.existsSync(dir)` 已经通过),但里面某个 manifest 损坏 / 不可读 / JSON 解析失败。\n\n第 2 种被当成第 1 种处理,一律 `return []`。\n\n## 后果\n\n唯一的消费者是 ADR-0120 D5e 的 unique-scope 建议(`findUnscopedGlobalUniques`,同文件 `792-815`):它把「本项目 metadata 的 findings」和「ledger 里已装包的 findings」拼在一起。ledger 那一半返回空数组时,doctor 走的是 `else` 分支:\n\n```\n  ✓ Unique scope          No unconfirmed installation-wide uniques for this 'isolated' environment\n```\n\n也就是说,**一个装了包、但 ledger 损坏的 isolated 环境,拿到的是一张干净的体检单**,而不是「有一部分我没能读到」。这比报一条 warning 更糟:false PASS 会让操作者停止查看。\n\n与 #5403 是同一族(诊断命令自己吞掉了唯一能解释状况的那个对象),但**低一层**:#5403 里被吞的是「检查跑不了」的原因,这里被吞的是「检查跑了一半」这个事实本身 —— 连「有东西没读到」都没说。也属于 #4801 / cloud#1020 的「诊断面与运行时不一致」家族。\n\n## 复现路径(未在真机执行,静态可判)\n\n前提:`OS_TENANCY_POSTURE=isolated`,`.objectstack/installed-packages/` 存在且至少一个条目损坏(截断的 JSON、权限不可读)。预期得到上面那行 `✓ Unique scope`,而不是任何提示。\n\n## 可能的方向(供分诊,不预设)\n\n- 把两种情形分开:`import()` 单独 try(可选包缺失 = 静默,现状正确),`list()` 的抛错另行处理;\n- `list()` 失败时产出一条常规 `HealthCheckResult`(#5403 刚把 `renderHealthCheckResult()` 提成具名函数,这条路径可以直接复用),措辞按 #5390 体例引上游原话;\n- 档位:大概率 warning(环境仍能跑),但「读不到 ledger 时 D5e 建议是否还能声称 clean」需要判定 —— 这一条是本单真正的决策点,不是实现细节。\n\n## 备注\n\n- 已按关键词 + 文件路径搜过 open issues(`doctor` / `installed-packages` / `ledger`),未见重复;唯一命中是 #5403 自身。\n- 与 #5403 无依赖关系,独立成单(#5403 的 PR 只动 config 分析那个 catch,不触及本函数)。\n"
+}

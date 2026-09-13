@@ -1,0 +1,35 @@
+{
+  "number": 5658,
+  "kind": "pull_request",
+  "title": "fix(cli): `os doctor` tells a broken cloud-connection install from an absent one (#5644)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T22:36:46Z",
+  "updated_at": "2026-08-05T22:54:06Z",
+  "closed_at": "2026-08-05T22:54:05Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T22:54:05Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5658",
+  "body": "Fixes #5644\n\n按分诊 21:56Z 裁定的**方案 A**(先解析再加载)实现。B(用 ledger 目录在场做代理)、C(维持现状写成已知取舍)均未采用。\n\n## 前提复核:成立(先证后改)\n\n在已构建的工作树里,把 `@objectstack/cloud-connection` 置为「在场但求值抛错」,并放一份**声明了 installation-wide `unique`** 的 ledger 条目,`OS_TENANCY_POSTURE=isolated` 跑 `os doctor --verbose`:\n\n```\n  → Checking unique scopes against the 'isolated' tenancy posture...\n  ✓ Unique scope          No unconfirmed installation-wide uniques for this 'isolated' environment\n```\n\n`invoice.code` 这条本该出现的 finding 一行都没有,连 `--verbose` 也没有。issue 正文描述的假 PASS 在 `origin/main` 上逐字复现。\n\n## 判别机制:为什么是 `import.meta.resolve`,不是 `createRequire().resolve()`\n\nNode 22.22 上对**真包**实测的四态(见 `packages/cli/src/utils/optional-package.ts` 头注释):\n\n| 状态 | `import.meta.resolve()` | `createRequire().resolve()` | `import()` |\n|---|---|---|---|\n| 包不在 | 抛 | 抛 | 抛 |\n| 包在、`dist/` 缺失(未构建/被裁剪) | **返回 URL** | **抛** | 抛 |\n| 包在、入口求值抛错 | 返回 URL | 返回路径 | 抛 |\n| 健康 | 返回 URL | 返回路径 | 加载 |\n\n第二行是关键,也是不能用 CJS 解析的两个理由:它会 stat 入口文件,于是这一行塌回「没装」——而这恰是 issue 正文那条复现路径(`mv packages/cloud-connection/dist /tmp/x`)所在的态;它还按 `require` 条件解析,回答的是**另一个产物**(`index.cjs`),而 `import()` 加载的是 `index.js`。`import.meta.resolve` 回答同一个产物,且不 stat,所以「包在不在」与「入口能不能加载」保持两个问题。\n\n判别分两步,两步都复用仓内既有的所有者:\n\n1. 抛出的**不是** module-not-found 错误 → 一定是包自己抛的,不必再问解析器。`isModuleNotFoundError()`(`@objectstack/types`,framework#3265 指定的单一所有者,`serve.ts` 同样读它)。\n2. 是 module-not-found 错误 → 仍然覆盖两个世界,只有解析器能分开(上表第一、二行)。\n\n解析只在 `import()` 已经失败之后才调用:happy path 零成本,且判定「加载是否成功」的始终是加载本身,不是解析器。无 `import.meta.resolve` 的运行时(本包 engines 是 Node 22+,不会发生)只保留第 1 步的确定性,含混态一律归 `absent`——宁可退回改动前的沉默,也绝不在从未装过该包的 checkout 里误报。这条硬约束原样保留。\n\n## 报法\n\n新增第三个同族行,与 #5412 目录级行、#5413 条目级行同档:`Unique scope` 名列、`warning`、退出码不变、错误原文入 `--verbose` 详情,走 `renderHealthCheckResult`(#5410)。\n\n```\n  ⚠ Unique scope          Could not load the installed-package ledger reader (installed packages\n                          NOT checked for installation-wide uniques) — Cannot find module …\n```\n\n措辞与 #5412 那行刻意区分(`load` 对 `read`,且不是其超串),因为**事实与药方都不同**:修的是 `@objectstack/cloud-connection` 的安装,不是 ledger。这一行也刻意**不**以 `.objectstack/installed-packages/` 是否存在为条件——ledger 目录名是那个加载不了的包自己的导出常量,doctor 无从断言「没有 ledger」;拿目录在场当条件正是被否决的方案 B。\n\n代价说清楚:未构建 `packages/cloud-connection` 的仓内工作树,`isolated` 下跑 doctor 会多这一条 warning。而这个态的沉默,正是 #5612 追查一个从未回退的报告面的起点。\n\n## 测试(三态各就各位)\n\n- 新增 `packages/cli/src/utils/optional-package.test.ts`(6 例,**全真机制、零 mock**):真不可解析的 specifier → `absent`;求值抛错 → `broken`;**可解析但文件不在** → `broken`(未构建 `dist/` 的形态,单看错误码会误判成 `absent` 的那一例);包自身依赖缺失 → `broken`;健康 → `loaded`;外加真 workspace 包的对照例。\n- `doctor-ledger-read-failure.test.ts`:17 → 24 例。新增 5 例渲染单测 + 2 例 e2e。\n- **原最后一个 describe 是整批改动的重点**:它此前用「让模块求值抛错」来**模拟包不在**并断言沉默——在新契约下那恰恰是**另一个**态。于是重排为两个 describe:同一份复现留在原地、改钉它现在该产出的行(#5413 用过的「换断言不换复现」处置);而「真没装 → 沉默 + 照打 clean bill」这条契约移到自己的 describe,通过 loader 接缝表达(该包是本包的声明依赖,module mock 改不了它的**可解析性**,再用旧写法就是钉一个不存在的态)。分层是刻意的:分类本身对着真运行时钉在 `optional-package.test.ts`,渲染对着 doctor 钉在这里。\n- **#5643 的 `beforeAll` 前置断言未回退**,并保留在它仍有判别力的位置:「在场且坏」那个 describe 里,未构建的工作树会**因为同一个原因**产出同一行,前置断言正是把模拟与巧合分开的那层。新增的 absent describe 不加它,并写明理由——那里根本不读真包(接缝已 mock),没有「因巧合而绿」可防;这是 #5612 同一条推理的应用,不是放宽。\n\n## 反向验证(方向先判后跑,两处都是 before-green/after-red)\n\n1. 把 `optional-package.ts` 的解析限支删掉(所有 module-not-found 一律判 `absent`)。预测:两条判别用例红,其余绿。实测:\n\n```\n× reports a RESOLVABLE module whose file is not there as broken, not absent\n× reports a package whose own dependency is missing as broken, not absent\nTests  2 failed | 4 passed (6)\n```\n\n2. 把 doctor 的 `broken` 分支还原成改动前的合并(broken 也当 absent)。预测:两条 e2e 红,absent 那条仍绿(它走接缝)。实测:\n\n```\n× withholds the clean bill and names the reader, with a ledger it never read\n× quotes the load failure verbatim and keeps the row to one line\nTests  2 failed | 22 passed (24)\n```\n\n## 验收\n\n- `pnpm --filter @objectstack/cli test`:`83 passed (83)` / `825 passed (825)`(改动前为 82 文件 / 812 例)\n- 两个改动文件单跑:`30 passed (30)`\n- `pnpm --filter @objectstack/cli typecheck` 绿;改动文件 eslint 零告警\n- `node scripts/check-nul-bytes.mjs` OK;改动文件另做控制字节自扫,无命中\n- changeset:`@objectstack/cli` patch(行为变化:doctor 对坏包新增 warning 行)\n\n## 边界\n\n未动 `packages/cloud-connection` 本体、未动 `serve.ts`(它对同一个包的点名告警只是仓内对照读法)、未动 `packages/client/**`(#5638 在飞)。#5429(posture 门禁触发条件)现象不同,未收敛、未触碰。\n\n一处界外观察,**未新立单**:在干净工作树里跑一次构建会重写 `packages/spec/authorable-surface.base.json`(baseRev + 三个 `EmailServiceConfig` 键)。已按关键词查重,命中既有 open 单 #5358 / #5370,同一现象,不另开;本 PR 已把该文件还原,不含在改动里。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016FNvXhtSdnEGEfLEsMmvxh\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016FNvXhtSdnEGEfLEsMmvxh)_"
+}

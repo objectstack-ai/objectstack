@@ -2,7 +2,7 @@
   "number": 17449,
   "kind": "pull_request",
   "title": "fix(rest): resolve the public-form lookup picker target from `reference` only",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-10T14:56:00Z",
-  "updated_at": "2026-09-10T15:28:58Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-09-10T15:53:03Z",
+  "closed_at": "2026-09-10T15:53:01Z",
+  "closed_by": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "merged_at": "2026-09-10T15:53:01Z",
   "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/17449",

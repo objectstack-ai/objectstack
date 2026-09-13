@@ -1,0 +1,34 @@
+{
+  "number": 5467,
+  "kind": "pull_request",
+  "title": "fix(ci): Check Changeset 的失败文案不再把「空 changeset」当作与标签等价的出路 (#5292)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T13:11:52Z",
+  "updated_at": "2026-08-05T13:26:21Z",
+  "closed_at": "2026-08-05T13:26:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T13:26:19Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5467",
+  "body": "Fixes objectstack-ai/objectstack#5292\n\n## 问题(前提已对 origin/main 复核)\n\n`origin/main` @ `61fde5e44`:\n\n- `.github/workflows/pr-automation.yml:108` —— 失败文案仍写着 `an empty changeset is fine for changes that release nothing`;\n- 同文件 `:102-104` —— 计数逻辑上方的注释把空 changeset 称作 `on par with the skip-changeset label`。\n\n两处都在,issue 的前提成立。\n\n这两条出路**在本闸门的计数里确实等价**,但**在 `changesets/action` 眼里不等价**:\n\n- `skip-changeset` 标签 = 闸门层面的豁免,**不产生任何输入**;\n- 空 frontmatter 的 changeset = **喂给 action 的真实输入**。待消费的 changeset 全为空时,action 走 `hasChangesets && !hasNonEmptyChangesets` 分支,打印 `All changesets are empty; not creating PR`,0 秒返回 —— 不建版本 PR、不发布,而 Release run 全绿。\n\n这条机制不是本 PR 的推断,仓内已有记录:`.github/workflows/release.yml:203-208` 的恢复步骤注释原文写着 \"changesets/action reaches its publish branch only with ZERO pending changesets, and an EMPTY changeset still counts ... and a GREEN run (#4898)\"。\n\n所以旧文案是一条**主动的错误处方**:开发者(或 agent)刚撞上红闸门的那一刻,它把一个已知会静默卡死发布的输入推荐给对方。\n\n## 改动\n\n只动文案与注释,**不动计数逻辑**(按分诊口径)。\n\n失败时改为输出三条**有序**出路:\n\n1. 确实要发版 → `pnpm changeset` 并点名 package;\n2. 不发版(`.github/`、`.claude/`、`docs/`、`content/`、`examples/`、纯测试等)→ **首选** `skip-changeset` 标签,并说明它为什么安全(不产生 action 输入);\n3. 空 frontmatter changeset —— **依然合法、依然被计数**,但降级为带警告的次选:点名它是 action 的真实输入、点名 `#4898`、点名「全空则 0 秒静默不发版且 Release 全绿」。\n\n上方注释同步改写,去掉 `on par with the skip-changeset label` 这个错误等价,同时明确保留「仍然计数」这一事实。\n\n完整对照写进 job log(作者用 `gh run view --log-failed` 或在 UI 里展开这一步时看到的就是它),`::error::` 注解保留为 Checks 页签上的单行版本 —— 一行装不下两条出路的取舍。\n\n## 验证:计数逻辑逐字未动\n\n把 `origin/main` 与本分支的 `run:` 脚本从 YAML 里各自抽出,喂同一组 fixture 仓库跑,比对退出码:\n\n| fixture | old exit | new exit |\n|:---|:---|:---|\n| A. PR 不加任何 changeset | 1 | 1 |\n| B1. PR 加一个**非空** changeset | 0 | 0 |\n| B2. PR 加一个**空 frontmatter** changeset | 0 | 0 |\n| C. PR 只加 `.changeset/README.md` | 1 | 1 |\n\n四个 fixture 退出码完全一致。**B2 是关键的一格**:空 changeset 仍然计数、仍然放行 —— 与今日先例(#5453 / #5454,两者都是带空 frontmatter changeset 过的这道门)保持一致。唯一的差异是 A / C 打印的文案。\n\n关于反向验证方向的老实话:这里**不存在**「回退改动 → 测试转红」那种方向。本次修改按分诊口径刻意不碰判定,四个 fixture 的**判定本就应当前后一致**;能证明改对了的,是「退出码逐格相同」+「文案不再包含 `an empty changeset is fine`」这两条,而不是一次红绿翻转。仓内全域 grep 确认 `empty changeset is fine` 改后 0 处命中,且 `skip-changeset` 只在本文件出现,没有第二份需要同步的副本。\n\nYAML 与 heredoc 也实测过:`yaml.safe_load` 解析通过,抽出的脚本里终止符 `MSG` 落在第 0 列(YAML 会剥掉块标量的公共缩进,所以终止符必须停在本块基准缩进 —— 这点已写进代码注释,防止后来者重新缩进时踩坑)。\n\n门禁:`node scripts/check-nul-bytes.mjs` → `OK (scanned 5447 tracked text file(s) ... no raw NUL bytes)`;另按 AGENTS.md 的控制字符纪律对改动文件做了越界自扫 `grep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]'` → 无命中。\n\n## 清点:`.changeset/` 的空 frontmatter 残留(分诊范围 ②)\n\n`origin/main` @ `61fde5e44` 快照:\n\n| 项 | 数量 |\n|:---|---:|\n| `.changeset/*.md`(不含 README) | 1065 |\n| 非空 frontmatter | 893 |\n| **空 frontmatter** | **172** |\n\n`.changeset/pre.json` 处于 `mode: pre` / `tag: rc`,记录了 860 个已被 `changeset version` 消费过的 changeset id。以此切分那 172 个空文件:\n\n- **140 个已记录在 `pre.json`** —— 即已被某次 RC 版本运行消费过、按 pre 模式保留在盘上的残留。这正是 `:95-101` 注释描述的、也是本闸门改用 `BASE_SHA` diff 计数所要绕开的那堆残留。\n- **32 个未记录** —— 属于下一次 release run 的**待消费输入**。逐个归因:\n  - **26 个在可见历史根提交 `b49ccfdf` 就已存在**。该提交无父提交(仓库历史起点),git 无法再往前归因。\n  - **6 个可归因,且其引入 PR 全部只碰非发布路径**:\n\n| 空 changeset | 引入提交 | 该提交碰的路径 |\n|:---|:---|:---|\n| `adr-0076-status-line-calibration.md` | `0c1660306` | `docs/` |\n| `ci-filter-implicit-success-guard.md` | `b8add3758` | `.github/` |\n| `pm-dispatch-three-axis-decision-frame.md` | `3681d2a7d` (#5453) | `.claude/` |\n| `showcase-register-contact-views.md` | `ed0d2aac0` (#5438) | `examples/` |\n| `tenancy-modes-doc-posture-rewrite.md` | `23e9c9004` | `content/` |\n| `widget-contract-theme-token-vocabulary.md` | `31b05372e` (#5454) | `content/` |\n\n**结论:未发现无主残留。** 每个可归因的待消费空 changeset 都来自一个只改非发布路径的 PR,即分诊评论所说的「正当存在的『releases nothing』声明」,按口径**一个都没有删**。\n\n**当前 `#4898` 的 0 秒分支并未被触发**:待消费的 changeset 里还有 **173 个非空**,所以 `hasNonEmptyChangesets` 为真。换句话说今天的残留是账面事实,不是正在燃烧的火。\n\n## 一条顺手核实、写进了新文案的事实\n\n新文案第 3 条里那句「空 changeset 也给不了你标签给不了的东西」不是修辞,是实测:\n\n- 取三个**已被消费过**的空 changeset(`adr-0044-revise-service-owned-note`、`ci-node-22-pin`、`duplicate-fix-guard`),把它们的正文原句拿去 grep 全仓 `CHANGELOG.md` → **各 0 处命中**;\n- 对照组:任取一个非空 changeset 的正文首句 → 命中 `packages/spec/CHANGELOG.md` 与 `packages/cli/CHANGELOG.md` **2 处**。\n\n即:空 frontmatter 不点名任何 package,正文因此进不了任何 CHANGELOG。它相对标签**没有任何正向收益**,却多出「是 action 真实输入」这一项风险 —— 这正是把它降为次选、而不是并列的依据。\n\n(顺带说明:这条事实同样加强了 issue 里那个「干脆禁止空 changeset 进 `.changeset/`」的备选方案。该方案按分诊口径**明确不在本单**,牵动发布机器语义,留给维护者裁定,本 PR 不做。)\n\n## 本 PR 自身怎么过这道门\n\n按 walking the talk,走**新文案的首选出路**:`skip-changeset` 标签(先例 PR #5290)。本 PR 只改 CI workflow 文案,不发布任何 package —— 正是新文案第 2 条描述的情形。故**不附 changeset**。\n\n`skip-changeset` 标签已随本 PR 一并加上(见 Labels),Check Changeset 因此对本 PR 豁免 —— 这正是新文案第 2 条推荐的走法。"
+}

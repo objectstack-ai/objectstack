@@ -1,0 +1,36 @@
+{
+  "number": 5487,
+  "kind": "pull_request",
+  "title": "fix(rest): 两个端点契约面只宣告匹配器实际会服务的集合 (#5224)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T14:05:34Z",
+  "updated_at": "2026-08-05T14:46:05Z",
+  "closed_at": "2026-08-05T14:46:04Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T14:46:04Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5487",
+  "body": "Fixes #5224\n\n## 前提重核（STEP 0，真实 boot 实测，先于任何编码）\n\n在 `origin/main`（含 #5464 `577cd27be`）上重跑了 issue body 的三条探针 —— **断链完全复现，前提成立**：\n\n```\nPUT /api/v1/meta/api/e8_backdoor            → 200 {\"success\":true,\"version\":\"sha256:9ad721f4...\",\"seq\":1,\"state\":\"active\"}\nGET /api/v1/apps/showcase/backdoor  (匿名)  → 404 {\"error\":\"Not found\"}\nGET /api/v1/apps/showcase/backdoor  (鉴权)  → 404 {\"error\":\"Not found\"}\nGET /api/v1/meta/api                        → 3 条，含 e8_backdoor GET /api/v1/apps/showcase/backdoor authRequired=false\nGET /api/v1/openapi.json                    → paths 含 /api/v1/apps/showcase/backdoor\n                                              {\"get\":{\"operationId\":\"e8_backdoor\",\"responses\":{\"200\":...},\"security\":[]}}\n```\n\n对派发词里点名的两处漂移的实测结论：\n\n1. **写入口仍然 200**。#5312 / #5206 step 2（PR #5279）之后，直写 `PUT /meta/api/{name}` 依旧成功，`version` 哈希与 body 记录的一模一样（`sha256:9ad721f4...`）。原因也查清了：`api` 现在**是**注册表条目，且带 `allowRuntimeCreate: true`（`packages/spec/src/kernel/metadata-plugin.zod.ts:760`）—— 运行时创建是**被声明允许的**，所以不需要换合法写入路径复测。\n2. **不是 E7b 的门在挡**。整轮 dev 日志里 `[EndpointMatcher] ... EXCLUDED` 一行都没有 —— 那条 row 压根没走到门口。E7b 依然正确必要；断链在它下面一层。\n\n同一时刻两条 stack artifact 端点服务正常（`/apps/showcase/tasks` 鉴权 200 / 匿名 401），确认「不误伤」这一侧有真实基线。\n\n## 改动（方向裁定：面只宣告匹配器实际会服务的集合）\n\n两个面在宣告前**问匹配器**，只宣告问回来的那一条。\n\n- 新增 `packages/rest/src/served-endpoints.ts` —— `selectServedEndpoints(items, authority, logger)`。它**不复刻**匹配器的判据（parse、ADR-0121 identity-free 发布门、重复路由裁决），而是逐条调用已有契约方法 `IMetadataService.matchEndpoint`。这是「不引入第二真相源」的唯一形状：判据只有一处，改了那一处两个面自动跟随。\n- **按 `name` 确认**，不是「有人占这条路由就算」：重复声明由匹配器裁决出唯一 owner，落败方不该被宣告。重复规则因此仍然只写在 `buildEndpointIndex` 一处。\n- **outage 不等于空集**：`matchEndpoint` 读不到 store 时抛错，这里原样上抛。吞成「什么都没声明」是同一类谎言的反向。\n- **每条被略去的声明都被点名**（`error`，每次调用聚合成一行）：说明它的路由 404、以及怎样把它变成真的（走 stack artifact 或 `publishPackage`）。\n- 接缝形状：`RestServer` 新增最后一个可选构造参数 `metadataServiceProvider`，`rest-api-plugin` 接线；解析链与 `resolveProtocol` / `resolveI18nService` 同款（多租户先问本请求的 kernel）。⛔ `matchEndpoint` / `EndpointMatcher` 的取数逻辑**一行未动**，`packages/runtime` 未动 —— 需要的只读接缝已经存在，不必新开。\n\n### 两处刻意保留原行为，都写在测试里\n\n- `GET /meta/api?preview=draft` 不过滤：这个面回答的是「什么在待发布」，按定义就不是服务集合，过滤会把它想展示的东西清空。codegen / SDK 读的是不带参数的那条。\n- 单条 `GET|PUT|DELETE /meta/api/{name}` 不过滤：一条不被服务的声明仍然要能被看到和删掉。\n\n### 为什么 `/meta/:type` 只对 `api` 特判\n\n对其他每一个 type，「列出来」和「生效」是同一个事实，由列出它的那个 reader 自己回答完了。`api` 不是：一条声明式路由由 `matchEndpoint` 服务，那是另一个 reader、另一个可见范围，并且是该判据的**唯一持有者**。所以特判的理由不是「api 特殊」，而是「api 是唯一一个服务判据不在本路由视野内的 type」。\n\n## 反向验证（方向先判后跑）\n\n预判：撤掉收窄 → 面①③ 变红；面② 本来就绿、且**应当**保持绿，因为它是「不误伤」的守卫 —— 一个会随修复变色的守卫是在钉修复而不是钉不变量。跑完与预判一致：\n\n```\n撤掉两处收窄后（12 个用例）：6 failed | 6 passed\n  × omits the runtime-written row the matcher cannot see, and the gate-excluded one\n  × applies to the PLURAL spelling too\n  × drops the runtime-written path that used to ship with `security: []`\n  × ships a document with no declared paths when the matcher serves nothing\n  × reports a store outage rather than an empty declaration set\n  × keeps enumerating and says so once when no matcher is reachable\n  ✓ keeps the served endpoint fully described — no collateral damage   ← 前后都绿，正确\n  ✓ leaves `?preview=draft` unfiltered                                  ← 前后都绿，正确\n  ✓ does not narrow any OTHER metadata type                             ← 前后都绿，正确\n```\n\n写这份报告时抓到一条**本来会绿得没有意义**的用例：原先那条「documents the matcher's parsed value, so `authRequired` is materialized」前后都绿 —— 因为 enrichment 自己也 parse，默认值两条路径都补得出来，它根本区分不了改动。已改写成真正有判别力的形状：让两个 reader 对同一条路由**持有不同状态**（枚举侧 `summary: 'STALE'` + `authRequired: false`，匹配器侧是真值），断言文档描述的是匹配器那一份。单独复跑确认它在撤掉收窄后确实变红。\n\n## 测试\n\n- `packages/rest/src/served-endpoints.test.ts`（10 例）—— 收窄语义：保留 / 丢弃 / 重复落败方 / 无 name 或 method 或 path / 空输入 / **outage 上抛** / 日志形状。\n- `packages/rest/src/rest-endpoint-surfaces-served-only.test.ts`（12 例，各自 `}, 60_000)`）—— 用**真实 `MetadataManager`** 而不是 stub，因为面①（manager 真的看不见）和面③（E7b 门真的排除）只有对真匹配器才有意义。日志里能看到真实的 `[EndpointMatcher] ... EXCLUDED ... ADR-0121 D6 ...` 那一行。\n- 全包：`pnpm --filter @objectstack/rest test` → **47 files / 698 tests passed**（合入 `origin/main`（含 #5477、#5459 —— 后者同改 `openapi-endpoints.ts`）之后复跑仍绿）。\n- 消费半径清扫：`packages/qa/dogfood/test/showcase-declarative-endpoints.dogfood.test.ts` → **14 passed**（它正是「两条 stack artifact 端点必须出现在 openapi 文档里」的既有 pin）。\n- `npx tsc --noEmit`（packages/rest）：只剩 `package-routes.ts` 那两条既有 TS2345，新文件零错。\n- `node scripts/check-nul-bytes.mjs` OK；另对本 PR 全部改动文件自查 `[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]`，无命中。\n\n### 打完补丁后的真实 boot 复测（同一套探针）\n\n```\nPUT /api/v1/meta/api/e8_backdoor            → 200（写入口不变，方向三是 #5206 的领地）\nGET /api/v1/apps/showcase/backdoor          → 404（匿名 / 鉴权，不变）\nGET /api/v1/meta/api                        → 2 条，e8_backdoor 已消失\nGET /api/v1/openapi.json                    → declared paths 2 条，/apps/showcase/backdoor 已消失\nGET /api/v1/apps/showcase/tasks             → 鉴权 200 / 匿名 401（合法端点照常服务、照常宣告）\ndev 日志                                     → \"declared api item(s) are OMITTED from this surface ...\n                                               'e8_backdoor' (GET /api/v1/apps/showcase/backdoor)\"\n```\n\n## 契约点：隐藏 vs 标注（按裁定实现了隐藏，但这里是代价）\n\n`/openapi.json` 这一侧没有第二种选择：一个 operation 要么在要么不在，「declared but not served」在 codegen 眼里表达不出来。`/meta/api` 这一侧本可以标注（items 已经带 `_diagnostics`），选择隐藏是为了和 OpenAPI 对称。\n\n代价说清楚：`api` 的注册表条目声明了 `allowRuntimeCreate: true`，所以运行时创建一条 `api` 是**被允许的**，而它永远不会被服务 —— 收窄之后作者在列表里也看不到自己刚存的那条了（单条 GET/DELETE 仍可达，日志也点名了它）。这不是本 PR 造成的破损：那条路由在改动前后都是 404，改的只是面不再谎报。真正的矛盾是「注册表允许运行时创建 / 匹配器永远看不见运行时创建的条目」，已按 Prime Directive #10 另行立项，也就是 issue 里的方向一。\n\n## 范围\n\n`packages/rest/src/**` + 测试 + changeset。未动 `matchEndpoint` / `EndpointMatcher` 取数逻辑，未动写入口，未动 `packages/runtime`。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016FNvXhtSdnEGEfLEsMmvxh)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 4827,
+  "kind": "issue",
+  "title": "[移交自 objectui] 登记 ADR-0087 D2 conversion 条目 `page-header-subtitle-alias`(`description` → `subtitle`)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T08:55:14Z",
+  "updated_at": "2026-08-05T16:12:09Z",
+  "closed_at": "2026-08-05T16:12:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4827",
+  "body": "Part of objectstack-ai/objectui#3226\n\n按 `/pm-dispatch` 的**跨分片移交协议**从 objectui 分片转来:共享契约面(`packages/spec` / ADR-0087 conversion 机制)单一 owner 是主 backlog PM,objectui 分片 PM 不自行派发。\n\n- 移交方:objectui 分片 PM,会话 `session_01NVPjPzmmAJ2Ngtvgg5MSRa`(账号 `xuyushun441-sys`,已在 #4604 登记接管 objectui 分片)\n- 源单:objectstack-ai/objectui#3226\n\n## 要做什么\n\n登记一条 ADR-0087 D2 conversion-layer 条目 **`page-header-subtitle-alias`**:加载时把 page-header 节点上的 `description` 改写成 canonical 的 `subtitle`。\n\n## 背景(为什么是 conversion 而不是直接删)\n\nobjectui 的 `page-header`(kebab 遗留别名,`@object-ui/layout`)与 `page:header`(协议键,canonical,`@object-ui/components`)对同一个\"页面副标题\"概念声明了**两套 authorable 键**:前者 `description`,后者 `subtitle`。消费端用一个裸 `??` 兜底(`const secondaryRaw = subtitle ?? description;`),这正是 Prime Directive #12 说的\"producer 写错、consumer 用 `??` 兜住\"。\n\n`@objectstack/spec` 的 `PageHeaderProps` 声明的是 `subtitle`。\n\n**关键判断:不能走\"直接删 `description`\"路线。** objectui 侧两任 PM 独立复核后一致:\n\n> 该别名存在的**全部理由**就是仓外的消费者 schema(注册点注释原文:*Legacy `page-header` alias. Kept for any consumer schemas that still…*)。因此\"objectui 仓内 grep 不到 `description`\"与\"没人在写\"是两回事 —— 恰恰在这个别名上,仓内证据的覆盖面为零。\n\n实测确认 objectui 仓内零命中(其余 `page-header` 命中都是 report designer 的同名不同概念、placeholder 清单、注册点自身、`data-testid`、CHANGELOG)。但按删除路线走,外部写 `description` 的页面会**静默丢副标题** —— 标题照常渲染、只是第二行消失,是最难被报障的失效形态。\n\n## 已经在 objectui 侧做掉的半边\n\nobjectui#3226 已派发并限定范围为**只收窄声明面**:让 `page-header` 的 registration `inputs` 不再宣告 `description`。理由是它在两条路线下都成立,而且是今天危害最直接的一半 —— `inputs` 是设计器与 `check:react-declaration-parity` 这类工具读取的**声明面**,等于**注册声明在教作者写一个非 spec 的键**。该改动不动运行时(裸 `??` 保留),对仓外消费者零破坏。\n\n## 本单落地后,objectui 侧的收尾(届时由 objectui 分片 PM 派)\n\nconversion 条目落地并随 spec 发布后,objectui 才能删掉 `PageHeader.tsx` 的 `subtitle ?? description` 与 `description` prop,消费端只读 `subtitle`。objectui#3226 会挂 `Blocked-by` 指向本单。\n\n## 参考位置(objectui 侧,供对照)\n\n- `packages/layout/src/index.ts` — `ComponentRegistry.register('page-header', …)` 的 `inputs`\n- `packages/layout/src/PageHeader.tsx` — `subtitle?` / `description?` 与 `subtitle ?? description`\n- `packages/components/src/renderers/layout/containers.tsx` — canonical `page:header`,只读 `subtitle`\n\n关联:objectui#3226、objectui#3223、objectui#3161 / #4115 batch 7、ADR-0087 D2、Prime Directive #12"
+}

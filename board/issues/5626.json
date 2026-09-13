@@ -1,0 +1,35 @@
+{
+  "number": 5626,
+  "kind": "pull_request",
+  "title": "fix(metadata): 坏文件不再被当作 `data: null` 广播 —— handleFileEvent 改走 loadDiagnosed (#5228)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T20:49:13Z",
+  "updated_at": "2026-08-05T21:36:23Z",
+  "closed_at": "2026-08-05T21:36:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T21:36:22Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5626",
+  "body": "Fixes #5228\n\n注:GitHub 的正文消毒器会把裸的单引号与尖括号在存储时转义,下面刻意避开了这两类字符,测试证据段落里的引号一律改用「」,箭头一律用 →,免得关键证据被存成实体后读不出来。\n\n## 一、前提核验(先于实现)\n\nissue 的前提在合并后的 `origin/main`(`e0b2ea7`,已含同日的 #5436)上 **仍然成立**,三处 file:line 证据:\n\n- `packages/metadata/src/metadata-manager.ts:2196` —— `load()` 的全部实现就是 `return (await this.loadDiagnosed(type, name, options)).data;`\n- `packages/metadata/src/metadata-manager.ts:2221-2233` —— `loadDiagnosed()` 的循环体整体包在 `try/catch` 里:loader 抛出的异常被 `errors.push(...)` 记账、`logger.warn` 一条,然后返回 `{ data: null, degraded: errors.length 非零, errors }`,**不重抛**。\n- `packages/metadata/src/loaders/filesystem-loader.ts:137-144` —— `FilesystemLoader.load()` 对坏 JSON 确实先 `logger.error` 再 `throw error`。\n\n串起来即 issue 所述:坏文件的异常在 `loadDiagnosed` 一层就被吃掉,`handleFileEvent` 的 `catch` 永不进入、`return` 永不执行、那句 `logger.error(Failed to load changed file)` 一次都没打印过,事件带着 `data: null` 广播出去。而 `data: null` 恰是「这份元数据合法地什么都没有」的线上形状 —— ADR-0110 D3 要分开的 miss 与 outage,在这个调用点被抹平成同一个形状。\n\n反向验证也把它钉死了:把源码退回改动前的版本,本 PR 新增的三条用例立刻变红(见第四节)。\n\n## 二、修法(PM 裁决的方向 A)\n\n`handleFileEvent` 改用 `loadDiagnosed()`,按 `degraded` 分三路:\n\n| 情况 | 判据 | 行为 |\n|:---|:---|:---|\n| **outage** | `degraded === true`(有 loader 抛异常且无人答出) | 走那条死了的 `catch` 本来要走的路:`logger.error` 带上 `filePath` / `metadataType` / `name` / `loadDiagnosed` 的 `errors[]`,**不广播** |\n| **干净 miss** | `data: null` 且未 degraded(文件已不在,或合法为空) | 保持现状语义,照旧广播 `data: null` |\n| **deleted** | 根本不读 | 照旧广播,`data` 保持 `undefined` |\n\n`data` 的静态类型顺手从 `any` 收到 `unknown`,与 `MetadataWatchEventSchema` 里的 `data: z.unknown().optional()` 对齐。\n\n## 三、失效动作与广播动作的先后(#5218 不回退)\n\nPM 特别点名的风险:提前 `return` 不得把缓存失效一起跳过。现状代码里 `invalidateForForeignWrite()` 排在读之后、广播之前,所以「读完发现 degraded 就 return」的朴素改法会连失效一起吞掉。\n\n因此本 PR 把 `invalidateForForeignWrite(type, name)` **上移到读之前**:失效是无条件的,广播才是有条件的,读的结论再也决定不了缓存掉不掉。这一步是安全的 —— `loadDiagnosed` 只走 loader,既不读也不写 `listCache` / `registry`。\n\n这样两件事同时成立:\n\n- #5218 的回归用例「still invalidates when the changed file cannot be parsed」保持绿;\n- `api` 端点索引在没有广播的情况下依然重建 —— `invalidateListCache` 对 api 类型的那一支是该索引的**第一条**失效缝(#5089,本来就负责覆盖 `{ notify: false }` 的写入),构造函数里 `subscribe` 注册的那条缝被跳过不产生任何代价。这条由新增用例直接钉住。\n\n## 四、测试与反向验证\n\n新增 `packages/metadata/src/node-metadata-manager-degraded-file-event.test.ts`(6 例),并订正 #5218 用例上那段已经过时的注释(它当时写的是「事件会带 `data: null` 广播出去,这是另一个单独的问题」)。\n\n反向验证的方向是**事先预判后跑的**,而且跑了两个方向,因为两种错法的红集合是不相交的:\n\n**方向一 —— 源码退回改动前**(预判:两条「不广播」用例 + 日志可达性用例变红,实测一致):\n\n```\n FAIL  announces nothing, and drops the caches anyway\n       → expected [ { type: 「added」, …(5) } ] to deeply equal []\n FAIL  finally reaches the logger.error that never printed once\n       → expected [] to have a length of 1 but got +0\n FAIL  a degraded api event still invalidates the endpoint index\n       → expected [ { type: 「added」, …(5) } ] to deeply equal []\n Tests  3 failed | 14 passed (17)\n```\n\n干净 miss / 可读文件 / deleted 三例在改动前后都是绿的 —— 它们本就不是判别项,是「没被顺手改坏」的保护栏,如实记在用例注释里。\n\n**方向二 —— 朴素改法**(先读、degraded 就 return,失效留在广播前),预判:#5218 自己的回归用例会红,实测一致:\n\n```\n FAIL  #5228 announces nothing, and drops the caches anyway\n       → expected [ 「view」 ] to deeply equal []\n FAIL  #5228 a degraded api event still invalidates the endpoint index\n       → expected undefined to match object { endpoint: { name: 「list_users」 } }\n FAIL  #5218 still invalidates when the changed file cannot be parsed\n       → expected [ 「view」 ] to deeply equal []\n Tests  3 failed | 14 passed (17)\n```\n\n也就是说:只有「失效在前、广播有条件」的实现能让 17 条全绿。注意 #5218 那条用例对本次改动**本身不具判别力**(改动前后都绿),这一点已写进它的注释里,免得下一个读者误以为它在守 #5228。\n\n绿色结果:\n\n```\npnpm --filter @objectstack/metadata test\n  Test Files  23 passed (23)\n       Tests  484 passed (484)\n```\n\n`pnpm check:type-check-coverage` 通过;`packages/metadata` 的 tsc 原始报错数在改动前后都是 92(即本次净增 0,新增测试文件自身 0 报错);`check-nul-bytes` 通过,并对四个改动文件做了超出门禁扫描面的自扫(含 DEL),无控制字节。\n\n## 五、消费者核验\n\n`notifyWatchers` 的仓内订阅者共 4 处,逐个核对「degraded 不广播」是否让它们的失效/重载逻辑失效:\n\n| 订阅者 | 读 `event.data` 吗 | degraded 不广播的影响 |\n|:---|:---|:---|\n| `metadata-manager.ts:391`(api → `endpointMatcher.invalidate()`) | 否 | **无** —— 由 `invalidateListCache` 这条缝覆盖,新增用例直接钉住 |\n| `objectql/src/plugin.ts:724`(object) | 否(回头 `get()` 重读) | **无** —— 坏文件重读也是 null,原本就只打一条 debug 后什么都不做 |\n| `plugin-email/src/email-plugin.ts:919`(email_template) | 是,`event?.data ?? await get(...)` | **无** —— `null` 是 nullish,原本就落到 `get()`,同样拿到 null 后 return |\n| `metadata/src/routes/hmr-routes.ts:98` → Studio SSE | 否(只转发 type/name/path/timestamp) | **有一处行为变化,见下** |\n\n相关套件全绿:`@objectstack/plugin-email` 20 files / 297 tests;`@objectstack/objectql` 的 `plugin.integration` / `plugin.step2` / `metadata-facade` / `metadata-diagnostics` 4 files / 61 tests。\n\n### 需要维护者知情的那一处行为变化\n\n`hmr-routes` 把事件当作纯粹的「有东西变了,去重读」信号转给浏览器,它不读 `data`;而浏览器侧的缓存不在 `invalidateForForeignWrite` 的覆盖范围内。所以:一个**被改坏且一直没修好**的文件,现在不再唤醒 Studio,左栏会继续显示上一次的好定义,直到下一个事件或手动刷新;改动前 Studio 会被唤醒、重读、看着这个视图消失。\n\n我判断这不构成 needs_decision,理由三条,但把它显式摆出来供否决:\n\n1. 这不是正确性回退,是有界且自愈的新鲜度差异 —— 编辑器把文件存完就会再来一个事件;\n2. 在 `added` + 坏文件这个绝大多数场景下,`list()` 前后本来就没变,唤醒本身零信息;\n3. 与此同时开发者第一次真正拿到了 `logger.error`(带 `errors[]`),被告知「文件读不出来」这件事本身,比看着视图无声消失更接近真相。\n\n若维护者更看重那条唤醒信号,最小改法是 degraded 时仍广播、但带 `data: undefined`(即 `applyRepoEvent` 已经在用的那个既有形状,不是新造第三种),约五行;按 PM 裁决与 issue 方向 A,本 PR 没有自行这么做。\n"
+}

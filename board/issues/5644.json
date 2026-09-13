@@ -1,0 +1,36 @@
+{
+  "number": 5644,
+  "kind": "issue",
+  "title": "`os doctor` 把「cloud-connection 没装」和「装了但加载不了」当成同一件事 —— ledger 目录在场也照打 clean bill(#5412 假 PASS 的上一层)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T21:34:08Z",
+  "updated_at": "2026-08-05T22:54:06Z",
+  "closed_at": "2026-08-05T22:54:06Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5644",
+  "body": "**发现于** #5612 的定性调查(PR #5643)。**不在 #5612 范围内**:那单修的是测试面的可读性,这条是产品面的判定契约,修法要先做决定。\n\n## 机制\n\n`packages/cli/src/commands/doctor.ts:869-878`,`readInstalledPackageEntries()`:\n\n```ts\ntry {\n  mod = await import('@objectstack/cloud-connection');\n} catch {\n  return { entries: [], skipped: [] };\n}\n```\n\n这个 catch 覆盖了**两件不同的事**:\n\n1. 该可选包**不可解析** —— 没装。静默是对的、也是刻意的:`os doctor` 必须能在从未装过它的 checkout 里跑完(有专门的用例钉这条)。\n2. 该包**在场但加载失败** —— dist 损坏、安装被中断、半装、产物与源码不匹配。这时 `.objectstack/installed-packages/` 目录可能明明在场、里面装着条目,doctor 却当作「什么都没装」,D5e advisory 无话可说,于是打出:\n\n```\n✓ Unique scope          No unconfirmed installation-wide uniques for this 'isolated' environment\n```\n\n**这正是 #5412 修掉的那个形状,只是上移了一层** —— 从 `readdir` 边界移到 `import` 边界。#5412 自己的说法是「A false PASS is worse than a missing check, because it tells the operator to stop looking」,那句话对这一层同样成立:isolated posture 下的 installation-wide unique 恰恰是最不该被假 PASS 掩盖的约束。\n\n## 证据(可直接复现)\n\n在一个已构建的 worktree 里:\n\n```\nmv packages/cloud-connection/dist /tmp/x\n```\n\n然后对着一个**有坏条目的** ledger 跑 `os doctor` —— 每一项照跑,`✓ Unique scope` 照打,ledger 相关的行(#5412 的目录级行、#5413 的条目级行)一行都不出现。#5612 正文里贴的那段输出就是这个状态下产生的,立单者由此得出「报告面丢了」的结论;实际上报告面完好,是这一层的静默把它盖住了。(完整对照见 PR #5643。)\n\n## 同仓内的反例:serve 就不静默\n\n`packages/cli/src/commands/serve.ts:1546-1569` 加载**同一个包**,同样用 try/catch,但失败时点名告警(告警文本里带上了 `err?.message`):\n\n```\n⚠ Marketplace/cloud-connection wiring failed: Failed to resolve entry for package \"@objectstack/cloud-connection\"\n```\n\n同一个 CLI、同一个可选包、同一种失败,serve 告诉你,doctor 不告诉你。两者至少该有一个说得出理由。\n\n## 可达性(诚实说明,不预判严重度)\n\n- **用户侧**:需要「装了但坏了」——中断的 install、损坏的 dist、被裁剪的镜像层。不常见,但不是不可能,且一旦发生就是无声的假 PASS。\n- **仓内开发侧**:天天可达。任何没构建 `packages/cloud-connection` 的 worktree 都处于状态 2,#5612 这张单本身就是这么产生的。\n\n## 修法需要先做决定(所以只立单,不顺手改)\n\n区分两者是可行的,但输出契约会变,方向不止一个:\n\n- **A. 先解析再加载**:用 `import.meta.resolve()`(或 `createRequire().resolve()`)判定 specifier 能否解析。解析不了 = 没装,继续静默;能解析但求值抛错 = 在场且坏,走 #5412 那条 `failure` 路径报成 warning 行。语义最准,代价是多一次解析调用和一点平台差异。\n- **B. 只在 ledger 目录在场时才把加载失败算作 finding**:`fs.existsSync(dir)` 为真却读不到包 → 报。实现最轻,但把「有没有装过东西」当成「包该不该在」的代理,语义是歪的。\n- **C. 维持现状,把它写成明确的已知取舍**,并在文档里说明 doctor 在这种状态下不体检 ledger。\n\n倾向 A(与 #5412/#5413 一路的「两件事就是两件事,结构上分开」),但这会新增一种 doctor 输出状态,且要顺带决定它算 warning 还是 error —— 交分诊定夺。\n\n## 相关\n\n- #5412 / #5413 / #5424:同一族的假 PASS,已修的两层。\n- #5429:同两行的另一个触发条件问题(posture 门禁),现象不同,不收敛。\n- #5612 / PR #5643:本条的发现路径。"
+}

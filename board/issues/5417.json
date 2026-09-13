@@ -1,0 +1,37 @@
+{
+  "number": 5417,
+  "kind": "issue",
+  "title": "lint: a form section with a `label` but no `name` can never be translated and nothing warns — 70/70 HotCRM form sections are in that state",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T10:27:25Z",
+  "updated_at": "2026-08-05T12:59:05Z",
+  "closed_at": "2026-08-05T12:59:05Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5417",
+  "body": "A form section authored with a `label` but **no `name`** is structurally\nuntranslatable — `_sections` is keyed by section name, so there is no key for a\nbundle to carry. Nothing in the toolchain says so: not the schema (`name` is\noptional), not `os lint`, and — after #5405 — not the coverage report either,\nbecause a walker that emits `sections[].name` emits nothing for a section that\nhas no name. The heading silently stays in the source locale in every locale,\nand coverage reads 100%.\n\n### The renderer keys off `name`, and correctly so\n\nobjectui resolves form section headings through the same resolver the detail\npage uses, `useObjectLabel().sectionLabel(objectName, section.name, authored)`:\n\n- `packages/plugin-form/src/ObjectForm.tsx:165-167` (`tSec`, feeding all five\n  form-type branches) and `:966-968` (stacked section divider)\n- `packages/plugin-form/src/ModalForm.tsx:588`, `:684`\n- detail half: `packages/plugin-detail/src/renderers/record-details.tsx:199`\n\nAll of them guard on `section.name` and fall back to the authored label when it\nis absent. That guard is right — the alternative (slugify the label and go\nfishing for a second key) would fossilize a second de-facto contract. The defect\nis that authoring a nameless section is **silently accepted** while being\npermanently unreachable by translation.\n\n### Why #5405 and #5415 do not cover this\n\nBoth operate on sections that HAVE names:\n\n- **#5405** adds a `section` kind whose second source is \"every `sections[].name`\n  under the object's pages/form views\". A nameless section contributes no name,\n  so no `ExpectedEntry` is emitted, so `computeI18nCoverage` cannot count it as\n  missing. Post-#5405 the report will say a bundle is complete while every one\n  of those headings renders English.\n- **#5415** fixes the opposite direction — a correctly named and translated\n  section wrongly reported as a stale target.\n\nThe set relationship #5415 states (\"every key the coverage walker DEMANDS must\nbe a key the reference validator ACCEPTS\") is about keys that exist. This issue\nis the third leg: **a rendered heading that no key can ever address.**\n\n### Measured impact (HotCRM @ `0899b4f`)\n\nEvery form-view section in the app — **70 of 70, across all 14 view files** —\nis authored with `label` (+ `columns`/`fields`) and no `name`:\n\n```\naccount 5/5   campaign 3/3   case 4/4      contact 3/3   contract 4/4\nevent 4/4     event_attendee 2/2           forecast 3/3  knowledge_article 3/3\nlead 25/25    opportunity 4/4              product 3/3   quote 4/4   task 3/3\nTOTAL: 70 sections, 0 named, 70 nameless\n```\n\nSo after objectstack-ai/hotcrm#697 brought all four locales to full declared\ncoverage, and after #5405 lands, HotCRM's form section headings will *still* be\nEnglish in all four locales with **zero** warnings — the gap is invisible to\nevery gate we are currently building.\n\nThis is also the actual cause of #5408, which was filed as a renderer bug: the\n`crm_case` **detail page** sections carry names (`info`/`status`/`description`\nin `src/pages/case_detail.page.ts`) and translate, while its **form view**\nsections (`{ label: 'Case' }`, `{ label: 'SLA' }`, `{ label: 'Resolution' }` in\n`src/views/case.view.ts`) carry none — producing exactly the reported\n`Case / SLA / Resolution` strip. The renderer half was verified correct against\nobjectui `origin/main` and is now pinned by objectstack-ai/objectui#3373.\n\n### Suggested fix shape\n\nA diagnostic at the producer, not tolerance at the consumer. Two candidates,\nnot mutually exclusive:\n\n1. **Lint rule** (`packages/lint`, alongside `validate-translation-references`):\n   a section that declares a `label` but no `name`, on an object that has any\n   translations at all, warns — \"this heading can never be translated; give the\n   section a stable `name`\". Cheap, non-breaking, and it is the rule that would\n   have caught all 70.\n2. **Schema** (`packages/spec`): consider requiring `name` on `FormSection`\n   outright. Stronger (declared = enforced, and it makes AI-authored metadata\n   hard to get wrong), but it is a breaking authoring change and needs the\n   usual migration — worth a maintainer decision rather than a drive-by.\n\nWhichever route, the co-derivation point from #5405 holds: the set of headings\nthe renderer displays should equal the set of headings the toolchain can\naddress.\n\nBlocked-by: #5405 (the walker's section-awareness is the natural place for the\nname-set to come from; this rule reads the same anchors).\n\nFound while verifying #5408 (whose stated renderer premise was disproven — see\nobjectstack-ai/objectui#3373). Related: #5415, #5164.\n"
+}

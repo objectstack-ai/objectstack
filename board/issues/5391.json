@@ -1,0 +1,35 @@
+{
+  "number": 5391,
+  "kind": "pull_request",
+  "title": "fix(cli): os validate / os build 展开 invalid_union,联合分支里的处方到达终端 (#5341)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T04:24:06Z",
+  "updated_at": "2026-08-05T04:39:32Z",
+  "closed_at": "2026-08-05T04:39:31Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T04:39:31Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5391",
+  "body": "Fixes objectstack-ai/objectstack#5341\n\n## 问题\n\nzod 把一个失败 union 的所有分支折进**一条**顶层 issue,它自己的 `message` 就是字面量 `\"Invalid input\"`;每个分支真正的判决(必填缺失、未知键处方)挂在 `issue.errors[]` 上,路径相对于 union 自身。\n\nCLI 的 `formatZodErrors`(`packages/cli/src/utils/format.ts`)只遍历顶层 issue —— 整个函数没有任何一处读 `issue.errors`。`os validate` / `os build`(compile) / `os plugin build` 三个命令都从这一个函数出终端,所以作者读到的是:\n\n```\n  views:\n    ✗ views.0.list.sort\n      invalid_union: Invalid input\n```\n\n而分支里那条 `direction` → `order` 的处方,每次都被生成、每次都没送达。终端因此是 #4001 战役里唯一一个策展散文到不了的读者面 —— 旁边的 `--json` payload 一直是全的。\n\n修好之后:\n\n```\n  views:\n    ✗ views.0.list.sort\n      invalid_union: Invalid input\n        ✗ views.0.list.sort.0.order: Invalid option: expected one of \"asc\"|\"desc\"\n        ✗ views.0.list.sort.0: Unrecognized key(s) on this sort entry: `direction`. … Did you mean `direction` → `order`?\n```\n\n## 形态:复用,不是第三份实现\n\n同一个缺陷的**第三个**消费者,三份各自独立的代码:\n\n| 消费者 | 文件 | 状态 |\n|---|---|---|\n| `formatZodError`(spec,`defineStack` 抛错走它) | `packages/spec/src/shared/error-map.zod.ts` | #4971 / PR #5342 |\n| `zodIssuesToFields`(REST wire) | `packages/rest/src/rest-server.ts` | #5014 / PR #5362 |\n| `formatZodErrors`(CLI 终端) | `packages/cli/src/utils/format.ts` | **本 PR** |\n\n分支挑选策略沿用前两次已落地的那套,不重新发明:丢弃只说「值的种类不对」的分支、按 issue 最少挑最接近的那支、`unrecognized_keys` 破平局、绝对路径、深度上限。\n\n区别在于**复用方式**。#5362 当时是抄一份而不是 import,理由写在它自己的注释里:spec 只导出字符串渲染器,而 wire 要的是结构化的 `{field, code, message}`。终端要的**恰好就是那个字符串**,所以这里是一行 `import { formatZodIssue } from '@objectstack/spec'` —— 不改 spec,只消费它。一个错误不会因为作者是从终端发布还是 POST 到 API 而拿到三份不同的处方。\n\n实现只有一个小函数 `unionBranchLines()`:非 union 直接返回空;union 则取 `formatZodIssue` 的渲染结果,**丢掉第 0 行**(那是 union 自己的判决,本文件已用自己的排版打过了),其余行整体缩进 4 格挂到 `invalid_union: Invalid input` 之下。\n\n## 严格增量\n\n- union 自己的 `✗ path` 与 `invalid_union: Invalid input` 两行照旧;\n- 非 union 的 issue 渲染逐字不变(`code:` / `expected:` / `received:` 都还在);\n- 页脚 `N validation error(s) total` 仍然数 `error.issues` —— 一个 union 无论用多少行解释都还是一条 issue,这正是页脚与旁边 `--json` payload 保持一致的原因;\n- `--json` 路径一个字节没动,它透传 `error.issues`,本来就是全的。\n\n## 测试\n\n新增 `packages/cli/test/format-zod-union.test.ts`(10 条):\n\n- 分支处方到达终端、绝对路径、union 套 union 展开;\n- **反回归**:一个未知键在 N 个分支的 union 上只报 **1 次**(#4001 批 6c 的老账,镜像 #4971 在 `error-map.test.ts` 里留的那颗钉);\n- kind-mismatch 分支被丢弃 —— 这条**成对**断言(先断言有信息的分支到了,再断言噪音没到),否则 `not.toContain` 会因为「什么都没产出」而空绿;\n- 非 union 渲染不变 + 页脚计数不变;\n- 真实标本走真二进制:`views[].list.sort` 是 `z.union([z.string(), z.array(严格 sort entry)])`,entry 声明了 #4721 的 `direction` → `order` 别名(写错会**静默反转**排序)。先用 schema 层控制断言「这个 stack 只失败一条,且就是这个 union」,再断言 `os validate` 终端里出现处方;\n- `--json` 断言 payload 仍是 1 条 issue、分支树完整、**没有**被展平成多行 `errors[]`。\n\n### 反向验证(方向先声明,后执行)\n\n把展开那一行去掉,预测 6 红 4 绿。实测完全一致:\n\n```\n× prints the failing branch prose under the union line\n× drops the kind-mismatch branch that carries no prescription\n× resolves branch paths against the union, not relative to it\n× expands a union nested inside a union\n× reports one unknown key ONCE, not once per branch\n× prints the prescription, not a bare `invalid_union: Invalid input`\nTests  6 failed | 12 passed (18)\n```\n\n保持绿的 4 条是**按设计**该绿的:非 union 渲染、页脚计数、schema 层控制、`--json` 透传(第三条验收标准量的就是一条本 PR 不碰的路径)。\n\n### #5380 回归守卫\n\n刚合并的 `packages/cli/test/metadata-type-schema-gate.test.ts`(B 组断言 `os validate` 输出含顶层 `unrecognized_keys` 的处方文本)全绿,反向验证那一轮里也全绿 —— 它量的是顶层路径,与 union 展开正交,本 PR 的输出形状变化没碰到它。\n\n### 命令\n\n```\npnpm --filter @objectstack/cli test    →  Test Files 73 passed (73) / Tests 670 passed (670)\npnpm --filter @objectstack/cli typecheck →  TYPECHECK_EXIT=0\nnode scripts/check-nul-bytes.mjs       →  OK (5407 files)\neslint(改动两文件,--no-inline-config) →  0 问题\n```\n\n(已合并 `origin/main`,含刚落地的 #5381 —— 同包不同文件,按 AGENTS.md §10 在合并树上重跑了整包。)\n\n## 前提核对(以 `origin/main` 为准)\n\nissue 的核心论断成立:`formatZodErrors` 确实只遍历顶层,三个调用点行号也没漂(`validate.ts:101` / `compile.ts:162` / `plugin/build.ts:114`)。\n\n一处需要更正:issue 正文举的 `compareTo` 例子**今天点不着** —— #5011 已经把 `compareTo` 从 union 收敛成 plain strict object(`dashboard-compareto.test.ts` 里有「产生 NO invalid_union issue」的钉),正是为了绕开这个缺陷。缺陷本身与那个例子无关,所以本 PR 换用仍然活着的 `views[].list.sort` 作标本复现。\n\n## 顺带\n\nissue 正文里那条休眠注记(`invalid_key` / `invalid_element` 把真实 issue 挂在 `issue.issues` 上,三个消费者一个都不下降;今天 `z.record(...)` 的键 schema 全是 `z.string()` 或 enum,所以点不着)已单独存档为 #5389(`finding`,未认领),免得随本单关闭一起埋掉。**不在本 PR 范围**。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01VkPSGsX9o17MsGv3Lbxu2w\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01VkPSGsX9o17MsGv3Lbxu2w)_"
+}

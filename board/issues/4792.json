@@ -1,0 +1,37 @@
+{
+  "number": 4792,
+  "kind": "issue",
+  "title": "嵌入式 host 直接 new AutomationEngine() 而不调用 sealNodeTypeVocabulary(),就完全拿不到节点类型校验 —— #4771 的连带回退,靠文档而非强制",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T06:49:00Z",
+  "updated_at": "2026-08-05T20:28:37Z",
+  "closed_at": "2026-08-05T20:28:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4792",
+  "body": "`Blocked-by: #4771`\n\n由 PM 在复核 PR #4791(修 #4771)时提出。**不阻塞那个 PR** —— 它让主路径从「永远说谎」变成「永远说真话」,净收益远大于本单描述的边缘回退。\n\n## 背景\n\n#4771 把 ADR-0018 §M1 的节点类型校验从 `registerFlow` 挪到了 `AutomationEngine.sealNodeTypeVocabulary()` —— 词汇表封闭的那一刻。这是对的:插件在自己的 `start()` 里贡献节点类型,而 flow 在此之前就被拉起来了,所以注册时的判断是在校验一个还没成型的世界。\n\n`AutomationServicePlugin` 在 `kernel:bootstrapped` 自动调用 seal,所以**走插件的部署(绝大多数)完全没问题**。\n\n## 问题\n\n直接 `new AutomationEngine()` 而不经过 `AutomationServicePlugin` 的嵌入式 host,**如果不自己调用 `sealNodeTypeVocabulary()`,就完全拿不到节点类型校验**。\n\n对这部分 host 来说这是净回退:\n\n- **修复前**:它们在 `registerFlow` 时就拿到校验。而且对「先注册执行器、再注册 flow」的 host(嵌入式场景里很常见,因为顺序完全由 host 自己控制)而言,那个校验当时是**准确的** —— 它们从来没经历过 #4771 的误报。\n- **修复后**:没有任何告警,除非读过 changeset 并主动加一行调用。\n\n也就是说这部分 host 用「不可靠的告警」换成了「没有告警」,而它们恰恰是那个告警本来可靠的人群。\n\n## 为什么值得单独修\n\nPR #4791 已经把这一点诚实地写进了 changeset 和 PR 描述,处理没有隐瞒。但**「文档写了」不等于「强制了」** —— 一个只有读过 changeset 的人才能拿到的检查,对没读的人就是静默消失的。这正是本仓一贯不接受的形态(ADR-0049、#4632、#4776 讨论的都是这一类)。\n\n危害程度诚实评估:**低**。受影响的是嵌入式 host 这一小群体,且失去的是一个告警而非功能。所以这是 P3 量级,不是要紧急处理的东西 —— 但它不该只靠纪律。\n\n## 一个廉价的缓解方向(供参考,不是裁定)\n\n在 `execute()` 首次运行时,若 `nodeTypeVocabularySealed` 仍为 `false`,告警一次:大意是「节点类型校验从未运行 —— host 应在插件装载完成后调用 `sealNodeTypeVocabulary()`」。\n\n理由:第一次真正执行 flow 的时刻,词汇表在实践上必然已经完整(不然那次执行本身就会 `NO_EXECUTOR` 失败),所以这个时点既安全又必然到达。它把「host 忘了调用」从静默变成响亮,而不需要引擎去猜 host 什么时候装完插件。\n\n也可以考虑在那一刻**顺带自动 seal**,但那会让「谁决定词汇表封闭」有两个答案,可能不如只告警干净 —— 接手者自行判断,两种都可接受。\n\n## 验收\n\n- 嵌入式 host(直接 `new AutomationEngine()`、注册 flow、从不 seal)在首次执行时得到一条明确告警;\n- 走 `AutomationServicePlugin` 的正常路径**不受影响**、不多打任何日志(有测试证明);\n- 已经显式调用过 `sealNodeTypeVocabulary()` 的 host 同样不多打日志。\n\n## 关联\n\n- #4771 / PR #4791 —— 引入该行为的修复(本单挂它,合并后再动手,否则会与其新增代码冲突)\n- #4776 —— 「启动期判断跑在提供方注册之前」这一族的结构性防线决策单。本单是该族的一个**镜像面**:#4776 谈的是「判断下得太早」,这里是「判断可能永远不下」"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 5562,
+  "kind": "pull_request",
+  "title": "docs(adr-0053): 把 #5517 之后失真的两处 mongo 覆盖陈述改成实话 (#5539)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T18:21:24Z",
+  "updated_at": "2026-08-05T18:39:20Z",
+  "closed_at": "2026-08-05T18:39:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T18:39:19Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5562",
+  "body": "Fixes objectstack-ai/objectstack#5539\n\nDocs-only。只动 `docs/adr/0053-date-and-datetime-semantics.md` 一个文件,`scripts/`、`packages/`、`content/docs/releases/` 一律未碰。\n\n## 前提复核(对 origin/main,不信 issue 快照)\n\n- PR #5538 = commit `4fdf480`,已在 `main` 上(`test(driver-mongodb): gate the mongod-backed suites behind an opt-in env var (#5517) (#5538)`)。\n- `packages/plugins/driver-mongodb/src/` 下 8 个文件 import `createTestMongod`,其中 7 个是真正需要 mongod 的套件,第 8 个 `mongodb-memory-server-gate.test.ts` 是钉住「闸门关闭时连库都不 import」的 pin test(默认跑)。\n- ADR 的两处陈述在合并后的 `main` 上仍是原文,行号与 issue 快照有偏移:coverage note 在 977-980(不是 977-979),backend 列表在 834-838。\n- issue 说「#5538 已把逐 marker 的真实状态记进 `scripts/check-driver-conformance.mjs` 的 ledger 注释」 —— **属实**,该注释按 marker 逐条写明 `FILTER_LOGIC_CASES` 仍默认跑、`PAGINATION_*` 与 `TEMPORAL_*` 仅 opt-in。本 PR 不动它。\n\n前提成立,按分诊建议 1 执行。\n\n## 改了什么\n\n两处都是**覆盖陈述**的事实修正,不是新裁决 —— ADR 的 Status 行、D-A3 / D-A3.1 / D-A3.2 的任何决定都没有增删改。\n\n**1. D-A3.1 的 backend 列表(834-838 行)之后,新增一段带日期的 correction note。**\n原句「Five backends consume it and assert row-id sets through their own real entry points」本身没错(consumer 确实还在、还在跑同一张表),失真的是那一格**何时**执行。所以原文保留,后面补一段说明:`driver-mongodb` 是唯一需要真实 server 进程的一格,该包 7 个套件已改 opt-in;点名受影响的 `mongodb-temporal-conformance.test.ts`(`TEMPORAL_CASES` + `TEMPORAL_TIME_CASES`,无 server-free 半边)与 `mongodb-datetime-storage.test.ts`(D-E4 的 row-result cover);写清闸门的由来(~123 MB 二进制下载竞态 → unhandled rejection → 绿跑变 `exit 1` → 踢掉无关 PR;维护者选择退役下载而非为 #5499 冻结的家族投单飞/预热);并说明 `check-driver-conformance` 为何仍报 CONSUMED(它按 import 判定),把读者指向该脚本的 ledger 注释;最后写明恢复条件挂在 #5499 解冻,解冻后本注记随之退役。\n\n**2. D-A3.2 结尾的 Coverage note(977-980 行)。**\n用本 ADR 已有的删除线惯例(文中多处 `~~...~~` + 结论)处理:把 「so it runs in CI and skips where no binary is available」 **划掉而非删掉**(保留记录),补上实话 —— 默认根本不在 CI 跑,binary 是否可达已不再是条件;开关是 `OS_TEST_MONGODB_MEMORY_SERVER_ENABLED=1`。原句最后一半(「The conversion itself is pinned by `mongodb-time-storage.test.ts`, which is pure and runs everywhere」)**仍然成立并保留** —— 已核实该文件不 import `createTestMongod`,不受闸门影响。\n\n## 验证\n\nDocs-only 无行为变化,跑的是相关的仓内闸门(全部前台阻塞执行):\n\n- `node scripts/check-nul-bytes.mjs --self-test && node scripts/check-nul-bytes.mjs` → `OK (scanned 5507 tracked text file(s); ... no raw ASCII control bytes)`\n- `node scripts/check-doc-authoring.mjs` → `✓ doc authoring guard: 362 files clean`\n- `node scripts/check-adr-anchors.mjs` → `OK (29 anchored file(s), every governing ADR still referenced)`\n- `node scripts/docs-audit/check-audit-scope.mjs` → `✓ docs-accuracy-audit scope is in sync`\n- `node scripts/check-driver-conformance.mjs` → `OK — 20 covered cell(s)`(确认本 PR 不改变该 gate 的判定,与注释所述一致)\n- 额外自扫控制字节:`grep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]' docs/adr/0053-date-and-datetime-semantics.md` → 无命中\n\n`pnpm test` / `pnpm typecheck` 对本 PR 无意义:改动是一个 markdown 文件里的散文,没有任何 TS 程序或测试读取它 —— 与其编造一段与本改动无关的绿输出,不如把这一点写明。\n\n## 一处刻意没改\n\nD-E4(785 行)那句 「Row-result cover lives in `mongodb-datetime-storage.test.ts` (against a real MongoDB via `mongodb-memory-server`)」 —— 该套件确实也已 opt-in,但这句话只陈述 cover **在哪里**、用什么跑,没有声称「在 CI 跑」,严格讲不算失真。没有单独改它(避免扩面),改用上面第 1 处的 correction note 点名该文件,让同一份文档自洽。\n\n## 无 changeset\n\nDocs-only、不发布任何包,按 `pr-automation.yml` 的首选路线走 `skip-changeset` 标签(工作流注释里 PREFERRED 的那条)。标签已挂(`skip-changeset` + `documentation`)。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WyvqvKMG6asi9aXjKE6xtx\n"
+}

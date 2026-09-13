@@ -1,0 +1,38 @@
+{
+  "number": 5580,
+  "kind": "issue",
+  "title": "Check Changeset 从事件载荷读 `skip-changeset` 标签:开 PR 后 5 秒内加标签,首个 run 永久红(重跑复用载荷)—— 一日三例",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T19:40:46Z",
+  "updated_at": "2026-08-05T21:11:32Z",
+  "closed_at": "2026-08-05T21:11:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5580",
+  "body": "发现于 devx 车道当日三个 PR 的同款竞态,按查重先行确认无既有单(`changeset-check label payload` 检索仅命中登记表)。\n\n## 签名(一日三例)\n\nPR 创建(`opened` 事件)后数秒内加 `skip-changeset` 标签,则:\n\n- `opened` 事件触发的 Check Changeset run 读**事件载荷**里的标签集(当时为空)→ 走计数路径 → 无 changeset → **红**;\n- 标签落上后,`labeled` 事件的新 run → skipped(正确);\n- 但首个红 run **永久红**:`rerun_failed_jobs` 复用原事件载荷(Operational notes 5 的语义),重跑多少次都不会看见后来的标签。\n\n| 现场 | 处置 |\n|:--|:--|\n| PR #5467(该门禁文案自己的修复 PR) | 红 run 被后续 skipped 取代,带着 stale 红合并 |\n| PR #5501 | dev 用一次真实 labeled/synchronize 事件顶掉 |\n| PR #5577 | 标签在位,stale 红挂着(非必需检查,不阻塞) |\n\n每例的直接成本:一个需要人/agent 停下来「认签名解释掉」的红检查 —— 恰好是 merge-queue-triage、PM 复核、事件订阅三方都会各自撞一次的噪音源。\n\n## 建议修法\n\n`pr-automation.yml` 的 changeset-check 在 job 内**实时读标签**(`gh api repos/$REPO/issues/$PR/labels` 或等价物)替代 `contains(github.event.pull_request.labels.*.name, ...)` 的载荷读法 —— 这样首个 run 也能看见「创建后、运行前」落上的标签;重跑也随实时状态收敛。事件载荷读法保留为 fast-path 亦可(载荷有标签 → 直接 skip,无标签 → API 再确认一次)。\n\n注意与该 job 现行「⛔ 不改计数逻辑」边界的关系:本单只动**标签读取时机**,不动 `BASE_SHA` diff 计数(#5292/PR #5467 的修正照旧)。\n\n## 关联\n\n- #5292 / PR #5467(文案修正,及其 dev 报告首次记录该竞态)、PR #5501 / #5577(再现)\n- Operational notes 5(rerun 复用原载荷的语义)"
+}

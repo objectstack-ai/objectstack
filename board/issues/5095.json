@@ -1,0 +1,36 @@
+{
+  "number": 5095,
+  "kind": "issue",
+  "title": "pm-dispatch 域分类表漏掉约 20 个包 —— 未列包按协议「不可被任何 PM 认领」",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T04:05:46Z",
+  "updated_at": "2026-08-05T13:23:42Z",
+  "closed_at": "2026-08-05T13:23:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5095",
+  "body": "## 问题\n\n`.claude/skills/pm-dispatch/SKILL.md`(第 313–325 行)的 `domain:*` 包家族表只覆盖了一部分包。协议同时规定「**未打标签的 issue 任何 PM 都不得认领**」,于是落在未列包上的 issue 处于一个死角:要么无法认领,要么每个 PM 各自临场判一次归属 —— 而车道协议的全部价值,正来自「一个 PM 的分诊结论被缓存成标签、其他 PM 直接读」。表本身也写明:未列包在首次分诊时定级,并**由 PR 更新表**。本单就是那个 PR。\n\n## 已知未覆盖清单(对 `origin/main` 清点)\n\n`packages/plugins/` 下:`plugin-email`、`plugin-dev`、`plugin-hono-server`、`plugin-pinyin-search`、`plugin-reports`、`embedder-openai`、`knowledge-memory`、`knowledge-ragflow`\n(`driver-*` 已归 engine;`plugin-approvals`/`plugin-webhooks` 已归 services;`plugin-audit`/`auth`/`security`/`sharing` 已归 identity)\n\n`packages/` 顶层:`adapters`、`apps`、`client`、`client-react`、`cloud-connection`、`console`、`create-objectstack`、`formula`、`mcp`、`observability`、`rest`、`sdui-parser`、`triggers`、`vscode-objectstack`\n\n## 首次分诊已产生的一条定级(照此写入表内)\n\n`packages/plugins/plugin-email` → **`domain:services`**(#5087 分诊时判定,依据是「域 = 修复落地的包」而非标题词汇;plugin-email 与 `packages/services/*` 同属服务family)。\n\n## 建议范围\n\n补全上表,每个包给出归属;确实无归属的(如 `apps`、`examples` 类)沿用表下已有的「按主要落地站点在分诊时判定」兜底句,但要在表里显式点名,免得读者以为是遗漏。**只改 SKILL.md 的表与说明,不改协议本身的其他条款。**\n\n~~Blocked-by: #5130~~(已解除:#5130 → PR #5453 于 2026-08-05 12:5xZ MERGED)\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 5435,
+  "kind": "issue",
+  "title": "`ChartDrillDownSchema.target` 少一个成员:objectui 的 ObjectChart 现在兑现 `'navigate'`,而 #5022 定型的联合按「chart 不读它」把它排除了",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T11:44:12Z",
+  "updated_at": "2026-08-05T19:28:48Z",
+  "closed_at": "2026-08-05T19:28:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5435",
+  "body": "从 objectui#3354 的实施中掉出来,**未指派**。#5022 已 closed,所以这条不作为它的子单,而是它落地后**测量前提发生变化**产生的独立跟改。\n\n## 事实\n\n#5022 第二轮维护者裁决把 chart drill 的形状定为「诚实子集」:\n\n> **形状**:chart 诚实子集 `{ enabled?, filter?, title?, target?: 'drawer' | 'dialog', columns?, maxRows? }`,**每键有 ObjectChart 读取点**\n\n`target` 排除 `'navigate'` 的理由是一条**测量**,不是设计偏好 —— 当时 objectui 的 `ObjectChart` 自绘抽屉只分支 `'dialog'`,`'navigate'` 静默落回 Sheet(这正是 objectui#3354 记录的缺陷之一)。\n\nobjectui#3354 把这条测量改掉了:objectstack-ai/objectui#3382 让 `ObjectChart` 真正兑现 `target: 'navigate'`(语义对齐 `DrillDownDrawer.navigateOnly`,host 未提供 navigation 时文档化回落 drawer)。于是现在:\n\n- **渲染器交付 3 个 target,协议只声明 2 个**;\n- `ChartDrillDownSchema` 是 strict 的,而且 `packages/lint/src/validate-react-page-props.ts` 会**真的 parse 它**去校验作者写的 `drillDown={{…}}` 字面量 —— 所以在 react 页面上写 `target: 'navigate'` 会被发布闸门**拒绝**,尽管渲染器兑现它。\n\n方向是 declared ≠ delivered 的**反向**:delivered but not declared。好消息是它响亮拒绝而不是静默失效;坏消息是被拒的那个值渲染器确实实现了。\n\n## objectui 侧这一轮**没有**擅自补齐\n\nobjectui#3382 刻意**没有**把 `'navigate'` 加进 `object-chart` 的 registry `inputs` 描述 —— 那会让设计器面板向作者推荐一个发布闸门随后拒绝的值,正是 #5022 开单要消灭的那类「平台权威指向自己闸门拒绝的键」。协议的联合先动,渲染器面板再跟,顺序不能反。\n\n## 建议\n\n`ChartDrillDownSchema` 的 `target` 扩成 `'drawer' | 'dialog' | 'navigate'`,additive(minor),并在 JSDoc 写清它的兑现条件与回退:host 需提供 drill navigation(objectui 侧是 `DrillNavigationContext.openRecordList`),缺失时回落 `'drawer'`。连带需要同步的生成物(按 #5022 那次的清单):`react-blocks.ts` 的类型串、`skills/objectstack-ui/contracts/react-blocks.contract.json`、`references/react-blocks.md`、`content/docs/references/ui/chart.mdx`,以及 `validate-react-page-props` 的用例。\n\n也可以反过来裁「chart 不应该有 `'navigate'`」,那就得回到 objectui 去掉那条分支 —— 但注意 `'navigate'` 在共享的 `DrillDownConfig` 上是**另外三个 widget(table / pivot / metric)已经兑现**的能力,由 `DrillDownDrawer.navigateOnly` 实现,收窄要按 widget 分型,不能一刀切。\n\n## 触发条件\n\nobjectstack-ai/objectui#3382 合并后此缺口即为现状(在此之前 `'navigate'` 在 chart 上本来就不兑现,拒绝它是正确的)。\n\n## 参考\n\n- #5022(`ChartDrillDownSchema` 的声明与两轮裁决)\n- objectui#3354 / objectstack-ai/objectui#3382(把测量改掉的那次改动)\n- `packages/spec/src/ui/chart.zod.ts`、`packages/lint/src/validate-react-page-props.ts`"
+}

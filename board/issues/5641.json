@@ -1,0 +1,35 @@
+{
+  "number": 5641,
+  "kind": "pull_request",
+  "title": "fix(runtime): callData 的 delete 兜底返回 spec 声明的 `{object, id, success}`,与 protocol 路径同形 (#5581)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T21:28:42Z",
+  "updated_at": "2026-08-05T21:54:14Z",
+  "closed_at": "2026-08-05T21:54:13Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T21:54:13Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5641",
+  "body": "Fixes #5581\n\n## 前提复核:成立\n\n`callData` 是 protocol 优先 + ObjectQL 兜底,两条路径对「删除成功」给的是两种形状:\n\n| 路径 | 此前 | 与 spec |\n|---|---|---|\n| protocol(`deleteData`) | `{ object, id, success: true }` | 合规范 |\n| ObjectQL 兜底(`action-execution.ts` delete 分支末行) | `{ object, id, deleted: true }` | `success` 缺失,`deleted` 未声明 |\n\n规范只有一个 —— `DeleteDataResponseSchema`(`packages/spec/src/api/protocol.zod.ts:472`)声明 `{ object, id, success }`,`deleted` 从未被任何 schema 声明。\n\n裁定方向(向 spec 收敛)在实现中额外得到一条独立佐证:**公开 HTTP 文档一直就写的是 `success`**。`content/docs/protocol/kernel/http-protocol.mdx:649` 明文 “Delete returns a `DeleteDataResponse`: the `object` name, the record `id`, and a `success` flag”,示例体也是 `{\"object\",\"id\",\"success\":true}`。所以 spec、protocol 实现、公开文档三者一致,**兜底是唯一的偏离方**,收敛方向没有第二种读法。\n\n## 改动\n\n1. **`packages/runtime/src/action-execution.ts`** —— 兜底 delete 分支末行 `deleted: true` → `success: true`。删除行为本身(含 #5138 落的「记录不存在 → 404 `RECORD_NOT_FOUND` 且不发出写」)一字未动,只改成功体这一个键。\n2. **`packages/runtime/src/domains/data.ts`** —— 那条 `// Spec: returns DeleteDataResponse = { object, id, deleted }` 改正为 `success`。这是该文件 get/update/delete 三条路由注释里唯一与自己的 schema 对不上的一条(87/94 两条本来就对),它把兜底的off-spec形状当成了规范。\n3. **测试(`action-execution-calldata-not-found.test.ts`,#5584 落的同族)** —— 新增 `#5581` describe 与两个消费面的成功用例;engine double 的 `assertEngineDeleteDispatch` 接法(#5615)原样保留未回退。\n4. **`packages/mcp` 两处 test double** —— 模拟 `callData('delete', …)` 返回值的 `remove()` 同步改口径。无断言读该键,纯粹是不给下一个读者留一份生产方已不再返回的形状。\n\n## 测试怎么钉的\n\n`z.object` 会剥掉未知键,所以**单靠 schema parse 抓不到残留的 `deleted`**;反过来只比较两条路径也会在「两边一起漂」时保持绿。因此三种断言都下了:\n\n- 两条路径各自 `DeleteDataResponseSchema.safeParse` 绿;\n- 跨路径成功体逐字段相等(照 #5584 的跨路径同一性先例);\n- 显式断言 `Object.keys(out).sort() === ['id','object','success']` —— 未声明的 `deleted` 不得残留。\n\n消费面两个都覆盖:`/data` 走真实 `HttpDispatcher` 的 DELETE 200 体,以及声明式端点执行器(#5092/#5136)。后者顺带钉住了**两个 `success` 是不同的事实**:`body.success` 是 HTTP 信封的 ok 标志(`successAnswer`),`body.data.success` 才是 `DeleteDataResponse` 的「删除发生了」—— 这个形状最容易被读串,所以两个都不留作隐含。\n\n## 反向验证(方向先判后跑,结果与预判一致)\n\n预判:兜底改回 `deleted: true` 应当**红**,且只红 fallback 侧 6 条;此处无 `??` 链、不涉及 schema 具名拒绝,兜底是字面量构造,不存在 #5018 那类反转风险。\n\n实测:\n\n```\n× a real delete still deletes, and answers the SPEC’s `success: true`\n× the fallback’s success body parses as DeleteDataResponse\n✓ the protocol’s success body parses as DeleteDataResponse      ← 预判保持绿\n× fallback success body === protocol success body, field for field\n× neither path carries the undeclared `deleted` key\n× [#5581] DELETE on a row that exists answers 200 with the spec’s `success` body\n× [#5581] a declared DELETE endpoint carries the spec’s `success` body too\n Tests  6 failed | 25 passed (31)\n```\n\n## `deleted` 读取方测绘(本单最大回归风险,先测后动)\n\n全仓(`packages/` / `examples/` / `apps/` / `packages/qa`,含 dogfood 与 http-conformance)搜 `.deleted` 读取方,**没有任何消费方从 `/data` delete 响应体里读这个键**:\n\n- `domains/data.ts` / `domains/mcp.ts` 的 `remove` / `endpoint-executor.ts:434` —— 三个 `callData('delete')` 调用点全是直通,不读键;\n- `packages/qa` 里 17 处 `DELETE /data/...` 只断言状态码与库内副作用,不读响应体的 `deleted`;\n- `domains/automation.ts:472` 的 `{name, deleted:true}`、`http-dispatcher.test.ts:295`、`spec/api/automation-api.zod.test.ts` —— 都是 **automation flow 注销**面,与本单无关,未动;\n- `protocol.delete-many.test.ts:18` 的 `{deleted:true}` 是 **engine.delete** 的返回(`IDataEngine.delete` → `Promise< any >`),不是 `callData` 的成功体,未动。\n\n## 分诊警示的结论:client 归一化与本单面**无交集**\n\n`packages/client` 五处 `if (res.status === 204) return { deleted: true }`(`index.ts` 3416 / 3467 / 3536 / 3590 / 3799)逐条核过路由,分别是 shares revoke、sharing rules delete、reports delete、report schedules unschedule、ai conversations delete —— **没有一条走 `/data/:object/:id`**。本单的 delete 面(`client.data.delete`,`index.ts:4300` / `4851`)走的是 200 + JSON 体,不经过任何 204 归一化。故收敛**不牵动 client 公开返回形状**,未扩面。\n\n测绘中另发现一条界外缺陷并已立单:`client` 的 `DeleteDataResult` 注释自称 `Spec: DeleteDataResponseSchema` 却声明 `deleted: boolean` —— 该类型是纯直通声明,在**装了 protocol 插件的常规部署上此前就已经是错的**(TS 使用方写 `r.deleted` 编译通过、运行时恒 `undefined`)。属 `@objectstack/client` 公开导出接口的破坏性重命名,blast radius 与 semver 判断都不同,故未搭车 → **#5638**。\n\n## 验证\n\n- `pnpm --filter @objectstack/runtime test`:**97 files / 1428 tests 全绿**\n- `pnpm --filter @objectstack/runtime typecheck`:绿(`tsc --noEmit` 无输出)\n- `pnpm --filter @objectstack/mcp test`:8 files / 83 tests 绿;`typecheck` 绿\n- `node scripts/check-nul-bytes.mjs`:OK;另做 `grep -naP` 控制字符自扫,改动文件全净\n\nchangeset:`@objectstack/runtime` patch,**行为变化写了升级须知**(仅影响未装 `MetadataPlugin` 的精简装配,`DELETE /data/:object/:id`、MCP `delete_record`、声明式 delete 端点三个面的成功体键由 `deleted` 改为 `success`)。未触碰 `content/docs/releases/`、spec、`packages/metadata-protocol`、`packages/client`。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016FNvXhtSdnEGEfLEsMmvxh\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016FNvXhtSdnEGEfLEsMmvxh)_"
+}

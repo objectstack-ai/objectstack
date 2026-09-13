@@ -1,0 +1,36 @@
+{
+  "number": 5242,
+  "kind": "issue",
+  "title": "`publish-drafts` 可见性翻转中途失败时,已翻转的 app 从响应里整批消失 —— `unhiddenApps` 丢了,`metadata:reloaded` 也漏播",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T11:59:57Z",
+  "updated_at": "2026-08-05T04:41:05Z",
+  "closed_at": "2026-08-05T04:41:05Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5242",
+  "body": "发现于 #4754 的实现期(修 `packages/runtime/src/domains/packages.ts` 那处静默 catch 时读到)。**未认领 —— 只是记录。观察类:操作幂等,重跑一次就好。**\n\n## 现象\n\n`POST /packages/:id/publish-drafts` 的 ADR-0045 可见性翻转段(`packages/runtime/src/domains/packages.ts`),结构是:\n\n```ts\nconst unhidden: string[] = [];\nfor (const app of apps) {\n    if (app?.hidden === true && typeof app.name === 'string') {\n        await protocol.saveMetaItem({ /* … hidden: false … */ });\n        unhidden.push(app.name);\n    }\n}\nif (unhidden.length > 0) result.unhiddenApps = unhidden;   // ← 只在循环全程无异常时才执行\n```\n\n`unhiddenApps` 的赋值在**循环之后、try 之内**。所以 5 个 app 里第 3 个 `saveMetaItem` 抛异常时:前 2 个**确实已经翻转并落盘了**,但 `unhidden` 数组随栈丢弃,`result.unhiddenApps` 压根不存在。\n\n## 后果(两层,都不大)\n\n1. **响应少报了真实发生的事。** 调用方看到的是「翻转失败」,看不到「其中 2 个已经成功」。属于 AGENTS.md「Route & surface ownership」第 4 条(machine-readable surfaces must not lie)的轻量版 —— 不是撒谎,是漏报。\n2. **`metadata:reloaded` 对这 2 个 app 漏播。** 紧跟其后的重绑定段读的正是这个字段:\n\n```ts\n...(((result as any)?.unhiddenApps ?? []) as string[]).map((n) => `app/${n}`)\n```\n\n   字段缺失 → 这 2 个已经变可见的 app 不进 `changed` → boot-cached 的消费者(首当其冲是 automation engine)不重新同步它们,得等下一次重启。\n\n## 为什么不塞进 #4754\n\n#4754 的范围是「`saveMetaItem` 进词表 + 逐处判持久性丢失」,那处 catch 已按范本改成 `error` 并写清后果与修复动作。本条是**同一段代码里的另一个缺陷**(部分进度的报告丢失),和日志级别无关,改它要动 `unhidden` 的作用域和响应语义 —— 与该单的清账互不依赖,单独立卡。\n\n## 建议做法\n\n把 `unhidden` 提到 try 之外,并在 catch 里一并回填:成功多少就报多少。重跑本身是幂等的(已翻转的 app `hidden !== true`,循环会跳过),所以这纯粹是让报告与事实一致,不改变恢复路径。\n\n## 关联\n\n#4754(同一段 catch 的日志级别清账)、ADR-0045(publish 让包 live 且可见)、AGENTS.md「Route & surface ownership」第 4 条。\n"
+}

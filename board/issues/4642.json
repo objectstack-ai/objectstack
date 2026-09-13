@@ -1,0 +1,33 @@
+{
+  "number": 4642,
+  "kind": "issue",
+  "title": "packages/spec 的「编译期 pin」是失效的:tsconfig 排除了 *.test.ts,vitest 也不做类型检查",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T13:35:04Z",
+  "updated_at": "2026-08-05T12:20:52Z",
+  "closed_at": "2026-08-05T12:20:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4642",
+  "body": "在 #4641(双源 C4)里落 regression pin 时发现的范围外问题,**不在该 PR 修**。\n\n## 现象\n\n双源清账手册推荐的回归 pin 是「编译期条件类型」(C1 #4581 首创,C3 #4610/#4638 沿用):\n\n```ts\ntype UiNotificationModule = typeof import('./notification.zod');\nconst hasNotificationSchema: 'NotificationSchema' extends keyof UiNotificationModule\n  ? true\n  : false = false;\n```\n\n思路是:名字被重新加回来 ⇒ 条件类型翻成 `true` ⇒ `false` 赋值报错 ⇒ `tsc --noEmit` 失败。\n\n**但这个 pin 永远不会失败**,因为没有任何门禁会编译它:\n\n1. `packages/spec/tsconfig.json` 里 `\"exclude\": [\"node_modules\", \"dist\", \"**/*.test.ts\"]` —— `pnpm --filter @objectstack/spec typecheck`(就是 `tsc --noEmit`)**根本不编译 `*.test.ts`**。\n2. `packages/spec/vitest.config.ts` 没有开 `typecheck: { enabled: true }`,vitest 走 esbuild 直接剥类型,不做类型检查。\n\n实测:把 `export const SessionSchema = ...` 重新加回 `src/identity/identity.zod.ts`,再跑 `npx tsc --noEmit`,`identity.test.ts` 里的 pin **零报错**。换成运行时断言(`Object.keys(mod)` )后,同样的 sabotage 立刻红。\n\n## 附带的第二个坑\n\n即使这些文件被编译,`keyof typeof import(...)` **只枚举 value 导出**,type-only 导出对它不可见。实测:\n\n```ts\n// mod.ts\nexport const Foo = 1;\nexport type Bar = { a: string };\n\n// probe.ts\ntype M = typeof import('./mod');\nconst hasBar: 'Bar' extends keyof M ? true : false = false;  // 不报错 —— Bar 看不见\nconst hasFoo: 'Foo' extends keyof M ? true : false = false;  // 报错 —— 符合预期\n```\n\n所以对**裸类型名**(`Session` / `Notification` 这种 `z.infer< typeof XSchema >` 派生的 type)写这类断言,即便文件被编译也是空转。\n\n## 影响面\n\n现有 pin 只是文档,不是门禁 —— 而它们读起来像门禁,后来人会信:\n\n- #4581 (C1) — `OpenApiWebhookEvent` 相关 pin\n- #4610 / PR #4638 (C3) — `packages/spec/src/ui/notification.test.ts`、`packages/spec/src/system/notification.test.ts`\n- 其余 `rg -l \"typeof import\" packages/spec/src --glob '*.test.ts'` 命中的:`kernel/metadata-plugin.test.ts`、`api/rest-server.test.ts`\n\n真正兜住这些名字的其实是 `check:dual-source-exports`(读**构建出来的** entry `.d.ts`,type 和 const 都枚举)。所以这不是「没人管」,而是「pin 本身没在管」。\n\n## 可选处置(择一,需 maintainer 定)\n\n- **A. 让 `*.test.ts` 进类型检查** —— 加一个 `tsconfig.test.json`(或去掉 exclude)并接进 `typecheck` 脚本。最贴合原意,但会一次性暴露测试代码里既有的类型问题,体量未知。\n- **B. vitest 开 `typecheck.enabled`** —— 用 `expectTypeOf` / `assertType` 重写这些 pin,vitest 原生支持且只覆盖测试文件。代价是测试变慢。\n- **C. 统一改成运行时断言** —— 只能覆盖 value 导出,裸类型交给 `check:dual-source-exports`。最省,但语义比 A/B 弱。\n\n倾向 **B**:`expectTypeOf` 是为这件事造的,失败信息比条件类型的 `Type 'false' is not assignable to type 'true'` 可读得多;而且它把「类型断言」显式标成测试,不会再被误当成免费的编译期检查。B 落地前,新 pin 建议按 C 写(#4641 已这么做,并在注释里写明了原因)。\n\n关联:#4535(双源主账本)、#4581、#4603、#4638、#4641\n"
+}

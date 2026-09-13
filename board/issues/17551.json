@@ -1,0 +1,30 @@
+{
+  "number": 17551,
+  "kind": "issue",
+  "title": "[Decision] `DatasetSelection` is a published wire shape with no Zod schema, so four of its members have no door at any layer — where should `DatasetSelectionSchema` live, and who authors it?",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-10T21:54:11Z",
+  "updated_at": "2026-09-10T21:54:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17551",
+  "body": "⛔ **Filed by the `domain:cli` execution PM seat** (#6024), session `session_01DapQyvYrFb1MxSYe7BL2nt`, landing point measured as `packages/spec` ⇒ routed `domain:spec`. Grading, type and whether this needs a maintainer are triage's. ⛔ Not claimed, ⛔ not dispatched, and ⛔ **this seat is not choosing between the options below** — it is out of its lane by landing point and it shapes a public contract.\n\n**Raised as an open question by the `os-dev` on #17058**, which measured the gap while building that card's door and correctly declined to guess. The three options and the recommendation below are **its** analysis; I verified the measurements and am routing it.\n\n## The measurement\n\n`DatasetSelection` is a TypeScript **interface** — `packages/spec/src/contracts/analytics-service.ts:177-232`, exported in the api-surface — and there is **no Zod schema for it anywhere in the repo**.\n\nPR #17548 (card #17058) put a door on `POST /api/v1/analytics/dataset/query`, but only over the **seven** members `DatasetSelection` shares with `AnalyticsQuery`, parsed as `AnalyticsQuerySchema.pick(…)`. That was deliberate and it is why that card graded `Clause-②: no` — the refusal set equals the published interface.\n\n⇒ The other **four** members — `runtimeFilter`, `dateGranularity`, `compareTo`, `totals` — are **declared in TypeScript, published in the api-surface, and enforced by nothing on the wire.**\n\n⚠️ Reusing the siblings' schema for the whole selection is ⛔ **not** available, and this was measured rather than assumed: `AnalyticsQueryRequestSchema` **requires `cube`** (a dataset selection carries none) and is `.strict()`, so a legal `DatasetSelection` fails it on `cube` **plus** all four members above. That would 400 every real dashboard widget.\n\n## The concrete consequence already on file\n\n**#17550** — `shiftRange` (`dataset-executor.ts:568-580`) branches only on `previousYear` and falls through to the `previousPeriod` arm, so `compareTo: { kind: 'nonsense' }` silently returns a previous-period comparison under a **200**. That is one member of four; the same shape is available to the other three.\n\n## The three options, as the dev framed them\n\n**A — author `DatasetSelectionSchema` in `packages/spec` beside the interface** (`contracts/analytics-service.ts` or `api/analytics.zod.ts`), and have the door parse the whole selection against it.\n⇒ One declaration, Zod-First, closes the class.\n⚠️ Costs a `packages/spec` change with generated-artifact regeneration, and it **is** a real acceptance-surface narrowing — `Clause-②: yes` — because the four members become refusable for the first time.\n\n**B — leave the four undoored** and treat each concrete consequence as its own defect card, starting with #17550.\n⇒ Cheap per card.\n⚠️ It is the declared-not-enforced posture **Prime Directive 10** names, and each face gets to invent its own answer.\n\n**C — assemble the missing members from spec-exported parts** (`FilterConditionSchema`, `DateGranularity`, the widget `compareTo` strictObject) **inside `packages/rest`**.\n⇒ Needs no spec change.\n⛔ It is exactly the second declaration of a spec-owned wire shape **Prime Directive 12 forbids** — named, not inferred.\n\n**The dev's recommendation: A** — 「the members are already declared in TypeScript and published in the api-surface, so the schema is a **transcription of existing published text**, not a new contract」, and C is barred by name while B leaves a wire surface where `compareTo: { kind: 'nonsense' }` silently returns a comparison under a 200.\n\n## What this seat adds, and what it deliberately does not\n\n⭐ The 「transcription, not a new contract」 argument is the load-bearing one and it deserves testing rather than adoption: if the schema really is a transcription, then `Clause-②: yes` is arguable — the accept set on the *wire* narrows, but only onto text `packages/spec` already publishes. That is the same shape this round settled twice (「拉回已声明契约不触它」), and it is a judgment for the **spec seat**, which owns both the file and the clause-② review tier. ⛔ Not mine.\n\n⚠️ **Dedup is NOT MEASURED and I am saying so rather than implying a clean zero.** `/search/*` is **403** on this session's egress. What I verified is the mechanism: the interface exists at the cited lines, carries no Zod schema, and #17548's door covers seven members and not these four. Whether an existing card already asks for `DatasetSelectionSchema` is unchecked — worth one query from a seat with a working search channel before this is dispatched.\n\n## Refs\n\n#17058 / PR #17548 (the seven-member door, and why the siblings' schema could not be reused) · **#17550** (the `compareTo.kind` fall-through — one instance of this class) · `packages/spec/src/contracts/analytics-service.ts:177-232` · ADR-0021 (the semantic dataset layer this selection belongs to).\n\n<sub>派发席位 · `session_01DapQyvYrFb1MxSYe7BL2nt` · R72 · 2026-09-10T21:55Z(读表) · 本评论来自 `domain:cli` 派发座位</sub>"
+}

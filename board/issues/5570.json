@@ -1,0 +1,36 @@
+{
+  "number": 5570,
+  "kind": "issue",
+  "title": "dogfood 的匿名拒绝 proof 工件不覆盖 /actions 与 /automation —— authz-conformance.matrix.ts 引用它证明 #2567 的「跨面统一」,而这两个面恰在 #5519 被证实曾破口",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T18:49:23Z",
+  "updated_at": "2026-08-05T21:23:21Z",
+  "closed_at": "2026-08-05T21:23:21Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5570",
+  "body": "发现于 #5519(PR #5569)的收尾评审,PM 按 dev 建议单独立单记录。基线:#5569 尚在 CI 时点的 `origin/main`。\n\n## 事实\n\n`packages/qa/dogfood` 的 `authz-conformance.matrix.ts` 把 `showcase-anonymous-deny-surfaces.dogfood.test.ts` 列为 #2567「匿名姿态跨面统一」这条主张的 proof 工件,但该套件不覆盖 `/actions/*` 与 `/automation/*` 两个派发面 —— 而 #5519 恰是这两个面破了该主张(匿名可触发 `isSystem: true` 提权写、可注销已注册 flow),proof 工件全程沉默。\n\n## 与 #5519 / PR #5569 的关系\n\n防线本身已由 #5569 补上(`handleActionsRequest` / `handleAutomationRequest` 进派发前 `shouldDenyAnonymous` 401 门),且 runtime 内已有真 socket 集成用例(`dispatcher-plugin.anonymous-gate.integration.test.ts`)钉住「已挂载的路由走到门」。**本单是补证据,不是补防线**:让 proof 工件与它宣称证明的主张重新对齐(Prime Directive #10 的 declared ≠ enforced 同形状,发生在测试声明层)。\n\n## 处置建议(dev 已给出落点,未预设)\n\n在 `showcase-anonymous-deny-surfaces.dogfood.test.ts` 补约 20 行,覆盖匿名 POST `/actions/...`、POST `/automation/:name/trigger`、GET `/automation`、DELETE `/automation/:name` → 401。落地时以 #5569 的用例为对照,信封断言与 `/data`、`/meta` 现有条目一致。\n\n关联:#5519、PR #5569(open question A/B 的 B 半)、#2567。\n\nFiled unassigned,无标签,待分诊席分域。"
+}

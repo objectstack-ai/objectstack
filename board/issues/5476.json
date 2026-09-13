@@ -1,0 +1,34 @@
+{
+  "number": 5476,
+  "kind": "issue",
+  "title": "`packages/metadata-core/test/types.test.ts` 的 `@ts-expect-error` 是幽灵检查:文件在 `include: [\"src/**/*\"]` 之外,没有任何 exclude 指向它",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T13:38:38Z",
+  "updated_at": "2026-08-05T20:24:58Z",
+  "closed_at": "2026-08-05T20:24:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5476",
+  "body": "在 #5286 为新的 `PINS_CHECKED` 不变式做全仓扫描时发现，记录备查，未认领。基线 `origin/main` @ `01c0baef9`。\n\n## 事实\n\n`packages/metadata-core/test/types.test.ts` 含 `@ts-expect-error` 指令，而该文件**不在该包 tsc program 里**：\n\n```\npackages/metadata-core/tsconfig.json\n  \"include\": [\"src/**/*\"]\n  \"exclude\": [\"node_modules\", \"dist\"]\npackage.json  \"typecheck\": \"tsc --noEmit\"\n```\n\n用 `tsc --showConfig` 解析实际 program，`test/` 树整体不在其中（program 里只有 `src/**`，例如 `./src/protocol-handshake.test.ts`、`./src/objects/sys-view-definition.object.test.ts`）。\n\n成因和 #5286 那一例**不同**，这一点是本单的要点：#5286 里 `packages/spec` 是被 `exclude: [\"**/*.test.ts\"]` 显式排除的；这里没有任何 exclude 指向它，它只是**落在 include 根之外**。后果是 `check:type-check-coverage` 的 `TESTS_COVERED` 也看不见它——那条不变式只统计 include 根之下的测试文件，所以这个包的 `testFiles` 计数是 0，既不报警也不进 `TEST_DEBT`。两种「未检查」形态，一种检测手段抓不住另一种。\n\n## 后果\n\n和 #5286 的结论一样：指令**从不被求值**。删掉那一行 `@ts-expect-error`，`pnpm typecheck`、`pnpm test`、`check:type-check-coverage` 全部照绿。它看起来像一条被钉住的契约，实际什么也没钉住。\n\n## 现状（已被记账，非未知）\n\n#5286 的 PR 新增了全仓不变式 `PINS_CHECKED`（`scripts/check-type-check-coverage.mjs`）：带 `@ts-expect-error` 的测试文件不得落在任何 tsc program 之外。本文件作为 seed 之一登记在 `PHANTOM_PIN_DEBT` 里，该台账**只减不增、对新条目关闭**，条目一旦不再成立（文件进 program / 指令消失 / 文件移动）RECONCILED 方向会强制删除。也就是说这条已经是「可数」的了，本单是给它一个可认领的修复入口。\n\n## 建议修复\n\n任选其一，都能让 `PHANTOM_PIN_DEBT` 的这条自动变红并被删除：\n\n1. 把 `include` 扩到 `[\"src/**/*\", \"test/**/*\"]`（最直接；需先看 `test/` 下还有多少现存类型错误）；或\n2. 按 #5286 的路子加一份 sibling `tsconfig.test.json` 并在 `typecheck` 脚本里指名（#5286 已让 `TESTS_COVERED` 识别被脚本链指名的 sibling 配置）。\n\n修完记得在同一个 PR 里删掉 `scripts/check-type-check-coverage.mjs` 中 `PHANTOM_PIN_DEBT` 的对应条目——不删会红。\n\n关联：#5286（不变式与台账来源）、#4311（typecheck 覆盖棘轮）、#5449（`packages/client` 那一例，另一种成因：exclude 显式排除）。\n"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 5496,
+  "kind": "issue",
+  "title": "`timeRelative` 描述符跑不通时 authoring 期零诊断 —— 两条 flow lint 一条只看非空、一条只看对象名(#4966 建议 2)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T14:19:43Z",
+  "updated_at": "2026-08-05T22:37:49Z",
+  "closed_at": "2026-08-05T22:37:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5496",
+  "body": "发现于 #4966(fixture 修正)的实测。属 PD #10 的范围外发现,#4966 内刻意不修(PM 明确把该 issue 的「建议 2」排除在那一单外),交 PM 定级。\n\n## 事实\n\n一个 flow start 节点写:\n\n```ts\nconfig: { timeRelative: { object: 'task', field: 'due_at', offsetDays: -1 } }\n```\n\n- `TimeRelativeTriggerSchema`(`packages/spec/src/automation/time-relative-trigger.zod.ts`)拒绝它,三条 issue:`dateField` 缺失、`offsetDays` 声明是 `z.array(z.number().int()).min(1)` 而这里是标量、`field` 是 unrecognized key(它出现在 `aliases` 表里,但 `strictObject` 的 `aliases` 只在 `unrecognized_keys` 诊断路径上被查阅 —— 是提示表,不是可接受键)。\n- `TimeRelativeTriggerPlugin.start()`(`packages/triggers/trigger-schedule/src/time-relative-trigger.ts:164`)在 **bind 期** `safeParse`,失败即 warn + `return` —— sweep 永远不装。\n- **authoring 期两条相关 lint 全部沉默。** 实测:stack 里 `task` 对象存在、flow `runAs: 'system'`、`status: 'active'`(即除描述符外一切合规):\n\n```\nlintFlowPatterns      = []\nflowTriggerReadiness  = []\n```\n\n原因:\n\n- `packages/lint/src/lint-flow-patterns.ts:185` —— `if (startCfg.timeRelative != null) return 'time-relative';`,只看非空,不看形状;\n- `packages/lint/src/validate-flow-trigger-readiness.ts` 的 §1b —— 已经读进描述符内部,但只校验 `timeRelative.object` 是不是本 stack 定义的对象,`dateField` / `withinDays` / `offsetDays` / 未知键一概不看。\n\n节点 `config` 按 ADR-0018 是开放槽,外层 flow 闸门看不进去;唯一能判定这个描述符的 schema 只在 bind 期跑。所以作者拿到的唯一反馈,是运行时服务器日志里的一行 warn。\n\n## 建议方向(供 PM 定级,不预设结论)\n\n1. **在 `validate-flow-trigger-readiness.ts` 里 `safeParse`(倾向)**:该文件已有 §1b 读进 `config.timeRelative`,失败叙事也完全一致(「the runtime stays quiet about it」)。新增规则 id 例如 `flow-time-relative-descriptor-invalid`;诊断文案直接转发 zod 的 issue 列表(schema 的 unknown-key 报错本身已带 surface 名 + 「Did you mean」),不需要在 lint 里重写一遍形状知识。severity 由 PM 定:从后果看(声明了 time-relative 触发、运行时永远不绑)接近 error,但该文件现有规则多为 warning。\n2. **放到 `lint-flow-patterns.ts`**:判定 time-relative 的代码在那里(`userLessTriggerKind`),但那个文件是「反模式/形状陷阱」层,直接依赖某个具体 spec schema 会改变它的定位。\n3. **什么都不做**:bind 期 warn 已经存在,而且 #4001 收紧之后那条 warn 会点名具体键。\n\n倾向 1 的理由在「让 AI 写的元数据难以写错」这一轴上:bind 期的 warn 只在服务器日志里出现一次,AI 作者的反馈回路通常看不到它;`os validate` 的输出才是它读的东西。同时这不引入任何消费端宽容(PD #12)—— 只是把 schema 已经作出的判定提前到 authoring 期,判定权仍然唯一地留在 `TimeRelativeTriggerSchema`。\n\n## 与 #5482 的关系(交叉引用)\n\n#5482 的方案 1(`multi: true` 且 `filter` 为空时告警)与本条同族:**flow 节点 config 里「schema 或引擎已经能判定、但 authoring 期无人报警」的约束**。两条若都采纳,建议落在同一层(同一文件、同一批规则 id 前缀),避免第三次各造一处。差别值得写清楚:#5482 那条是「合法但危险」(引擎接受、后果不可逆),本条是「非法且静默」(引擎拒绝、什么也没发生)。\n\n## 完成判据(若采纳 1)\n\n- 上面那个描述符在 `os validate` 下产生一条点名 `config.timeRelative` 的诊断,文案含 zod 给出的键名;\n- canonical 描述符(`{ object, dateField, offsetDays: [-1] }`)零诊断 —— showcase 的 `Task Due Reminder`(`examples/app-showcase/src/automation/flows/index.ts:1571`)与 `content/docs/**` 的例子必须保持干净;\n- 与 §1b 的 unknown-object 规则不重复报同一件事(对象名错 + 形状同时错时的输出要可读)。\n\n关联:#4966(本条的来源)、#5482(同族的另一条)、#4001、#1874、ADR-0078、ADR-0018。\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 5592,
+  "kind": "pull_request",
+  "title": "fix(metadata-core): 让 test/ 层真的进 tsc，`@ts-expect-error` 不再是幽灵检查 (#5476)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T20:02:34Z",
+  "updated_at": "2026-08-05T20:24:58Z",
+  "closed_at": "2026-08-05T20:24:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T20:24:57Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5592",
+  "body": "Fixes #5476\n\n## 前提复核（origin/main @ `e900015`）\n\n前提成立，两条事实都在：\n\n- `packages/metadata-core/tsconfig.json` 仍是 `include: [\"src/**/*\"]`，六个测试文件住在 sibling 的 `test/` 树里。**没有任何 `exclude` 指向它们**——它们只是落在 include 根之外，这正是本单与 #5286（spec 被 `**/*.test.ts` 显式排除）成因不同的地方；\n- `scripts/check-type-check-coverage.mjs` 的 `PHANTOM_PIN_DEBT` 里 `'packages/metadata-core/test/types.test.ts'` 条目仍在。\n\n后果也如实复现：`typecheck` 是裸 `tsc --noEmit`，读的就是那份 config，所以 `test/` 整棵树从没被任何类型检查器读过；`TESTS_COVERED` 只统计 include 根之下，本包 `testFiles` 计数为 0，既不报警也不进 `TEST_DEBT`。\n\n## 反向验证：常规方向（before green / after red），已跑\n\n指令在 `test/types.test.ts:51`，钉的是 `refKey` 的入参形状。\n\n- **新 program 下删掉那一行** → 红：\n\n  ```\n  test/types.test.ts(51,7): error TS2353: Object literal may only specify known properties,\n  and 'version' does not exist in type 'Pick< { org: string; type: ...; name: string;\n  version?: string | undefined; }, \"type\" | ... 1 more ... | \"name\" >'.\n  ```\n\n- **origin/main 的旧 program（裸 `tsc --noEmit`）下删掉同一行** → 退出码 0，全绿。\n\n也就是说：指令钉的是**真事实**（`refKey` 收的是 `Pick< MetaRef, 'org' | 'type' | 'name' >`，`version` 是多余属性），缺的只是编译它的程序。所以修法是**保留指令、补上程序**，而不是像 #5449 / PR #5546 那样删指令（那一例编译后报 TS2578 unused，方向是镜像的）。\n\n## 路线选择：路线 2（sibling config），因为路线 1 在本包会撞 emit 约束\n\n先量后定。直接把 `include` 扩成 `[\"src/**/*\", \"test/**/*\"]`（issue 的路线 1）实测报 **TS6059 x6**：\n\n```\nerror TS6059: File '.../test/cache.test.ts' is not under 'rootDir' '.../src'.\n```\n\n本包 `tsconfig.json` 带 `rootDir: \"src\"` + `outDir: \"dist\"`，而这份 config 是**要 emit 的**（`dev: \"tsc --watch\"`）。把 `rootDir` 放宽到包根会把 `dist/index.js` 挪成 `dist/src/index.js`（打断 `main` / `exports`），并开始写 `dist/test/**/*.test.js`——后者正是 ci.yml「No compiled test files in any dist」拦的东西。emit 约束属于 build config，所以路线 1 只能连 `rootDir` 一起改，代价不可接受。\n\n于是照两先例的既定形状走路线 2。\n\n## 改动\n\n### `packages/metadata-core/tsconfig.test.json`（新增）\n\nbuild config 的 sibling，`package.json` 的 `typecheck` **指名**它。相对 build config 只改两项，其余全部继承：\n\n- `rootDir` 由 `src` 放宽到包根 —— 只影响 emit 布局，而这个 program 不 emit（`noEmit: true`）；继承 `src` 时那六个 TS6059 是**检查配错**，不是测试写错；\n- `noEmit: true`。\n\n**module 语义刻意不动**，这是与 spec / client 两先例的唯一实质差异：那两个包没有 `\"type\": \"module\"`，build config 的 NodeNext 把 ESM 测试当 CJS 编，报出来的是关于「检查」的错（TS2835 / TS1470 / TS2550），换 `esnext` / `bundler` 是对齐 vitest 的保真。`@objectstack/metadata-core` **是** `\"type\": \"module\"`，NodeNext 本就按 ESM 读这些文件，而且比 `bundler` 更严——它守住本包必须发布的 `.js` 导入后缀（`bundler` 下漏后缀能编过、Node ESM 运行时才炸）。没有要修的，就不改。**strictness 一律继承，不放松**。\n\n### 没有 `test-typecheck-debt.json`，这是刻意的\n\n整个 test 层在新 config 下 **0 error**。逐文件 EXACT 收缩台账（`scripts/check-test-typecheck.mts`，spec 691 / client 6 才需要）在这里什么也装不下，却要给本包多加一个 `tsx` 依赖和两个脚本。零残余时裸 `tsc --noEmit -p tsconfig.test.json` 是**更强**的门：任何错误立即红，没有台账可加。将来真攒下改不动的残余，那时再接共享脚本。`check-type-check-coverage.mjs` 自己的 self-test fixture 就把 `tsc --noEmit && tsc --noEmit -p tsconfig.test.json` 列为合法形状。\n\n（为佐证不是偷懒：共享脚本对本包也跑得通，输出 `0 file(s) / 0 error(s) held in test-typecheck-debt.json`——它确实只是空转。）\n\n### `scripts/check-type-check-coverage.mjs`\n\n仅删 `PHANTOM_PIN_DEBT` 对应条目（RECONCILED 本来也会强制删），台账就此清空，并留一句说明「空是终态、下一例的入口是 PINS_CHECKED 变红而不是新增条目」。另有一处注释时态修正：`testCoverage` 的文档说「`packages/metadata-core/test/` **is** outside include」——本 PR 之后这句变成假的，改为过去时并标注 #5476。\n\n## 验证（全部前台跑完，真实输出）\n\n```\n$ (cd packages/metadata-core && npx tsc -p tsconfig.test.json --showConfig)\ninclude = ['src/**/*', 'test/**/*']\nrootDir = ./  noEmit = True  module = nodenext\ntest/ files in program: ['./test/cache.test.ts', './test/canonicalize.test.ts',\n './test/errors.test.ts', './test/in-memory-repository.test.ts',\n './test/layered-repository.test.ts', './test/types.test.ts']\n\n$ pnpm --filter @objectstack/metadata-core typecheck\n> tsc --noEmit && tsc --noEmit -p tsconfig.test.json\nTYPECHECK_EXIT=0\n\n$ pnpm --filter @objectstack/metadata-core test\n Test Files  8 passed (8)\n      Tests  103 passed (103)\n\n$ node scripts/check-type-check-coverage.mjs --self-test\nOK — 22 semantic case(s) + 11 observation case(s) hold.\n\n$ node scripts/check-type-check-coverage.mjs\ncheck-type-check-coverage: OK — 62/77 workspace packages type-checked (plus the root),\n15 in the DEBT ledger (358 frozen raw errors), 1 exempt.\n\n$ node scripts/check-nul-bytes.mjs\ncheck-nul-bytes: OK (scanned 5520 tracked text file(s); ... no raw ASCII control bytes).\n\n$ npx eslint scripts/check-type-check-coverage.mjs --no-inline-config   # exit 0\n$ pnpm --filter @objectstack/metadata-core build                        # exit 0，dist 无 *.test.js\n```\n\n**门是承重的，不是装饰**：把 `typecheck` 改回裸 `tsc --noEmit`（即台账已删、配置没被指名）后重跑 gate：\n\n```\ncheck-type-check-coverage: 1 problem(s)\n  • packages/metadata-core/test/types.test.ts: carries a `@ts-expect-error` directive but no\n    tsc program the `typecheck` script runs compiles it, ...\n```\n\n## 无 changeset\n\n照两先例的取舍：PR #5478 与 PR #5546 都没有 changeset。本 PR 只动 build / test 配置与仓库门，发布产物（`dist`）逐字节不变，对使用者不可见。\n\n关联：#5286（不变式与台账来源）、#4311（typecheck 覆盖棘轮）、#5449 / PR #5546（client，镜像方向的那一例）、PR #5478（spec，机制来源）。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01V7WetGmnfoXNn8cLieKKmx)_"
+}

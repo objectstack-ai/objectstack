@@ -1,0 +1,36 @@
+{
+  "number": 5544,
+  "kind": "issue",
+  "title": "`packages/client/tests/integration/` 不在任何 tsconfig 里,且其中的 `client.discovery` 是早已不存在的属性(集成套件对着一个不存在的 API 断言)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T16:50:54Z",
+  "updated_at": "2026-08-05T18:50:46Z",
+  "closed_at": "2026-08-05T18:50:46Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5544",
+  "body": "在 #5449 为 `@objectstack/client` 新建 `tsconfig.test.json` 时量到。基线 `origin/main` @ `9894a723e`。\n\n## 事实\n\n`packages/client/tsconfig.json` 的 `include` 是 `[\"src/**/*\"]`,`tsconfig.test.json`(#5449 新增)沿用同一个根。`packages/client/tests/integration/01-discovery.test.ts` 落在 `src/` 之外,**没有任何 exclude 指名它**,因此从来不在任何 tsc program 里 —— 与 #5476 记录的 `packages/metadata-core/test/` 是同一种形状(`include` 之外,不是 `exclude` 之内),而不是 #5286/#5449 那种「被排除区盖住」的形状。\n\n把它临时纳入编译后量到 1 文件 / 3 条错误:\n\n```\ntests/integration/01-discovery.test.ts(41,14): error TS18048: 'discovery.apiName' is possibly 'undefined'.\ntests/integration/01-discovery.test.ts(61,21): error TS2339: Property 'discovery' does not exist on type 'ObjectStackClient'.\ntests/integration/01-discovery.test.ts(62,21): error TS2339: Property 'discovery' does not exist on type 'ObjectStackClient'.\n```\n\n后两条是**真实的 API 漂移**:`ObjectStackClient` 上没有 `discovery` 这个属性(发现结果存在私有的 `discoveryInfo` 上,见 `packages/client/src/index.ts:361`)。集成套件在对着一个不存在的表面断言。\n\n## 为什么现在没人发现\n\n该套件由 `pnpm --filter @objectstack/client test:integration` 用 `vitest.integration.config.ts` 单独跑,需要一台在跑的服务器,CI 的常规 `test` 任务用 `vitest.config.ts` 明确把 `tests/integration/**` 排除掉。于是:vitest 不跑它,tsc 不读它 —— 两条通道都不看。\n\n## 处置建议(未在 #5449 的 PR 里做)\n\n#5449 的 PR 照 #5478 的先例把 `include` 停在 `src`,并在 `tsconfig.test.json` 的注释里写明这个洞留给独立单:那 3 条里有 1 条是真实缺陷,混进「把幽灵 pin 变真」的 PR 会把两件事搅在一起。该文件不含任何 `@ts-expect-error`,所以 PINS_CHECKED 不受影响,没有 pin 藏在里面。\n\n修的时候两件事一起:把 `tests/**/*` 纳入 `tsconfig.test.json` 的 `include`,并修 `discovery` 断言(改成读真实表面,或补上确实该有的公开 API —— 后者是契约面,需定案)。\n\n关联:#5449、#5476、#5286、#4311。\n"
+}

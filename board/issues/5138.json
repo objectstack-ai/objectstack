@@ -1,0 +1,36 @@
+{
+  "number": 5138,
+  "kind": "issue",
+  "title": "callData 的 ObjectQL 兜底路径对「记录不存在」给三种不同答案(get→200 null / update→500 / delete→200 deleted:true)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T05:59:54Z",
+  "updated_at": "2026-08-05T20:30:48Z",
+  "closed_at": "2026-08-05T20:12:27Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5138",
+  "body": "**观察类(`finding`)**:该分支在装了 MetadataPlugin(`@objectstack/metadata-protocol`,它注册 `protocol` 槽)的部署上不会跑到 —— `callData` 每个操作都优先走 protocol。所以今天没有用户撞得到,记录在案交分诊定级,不自行判轻重。\n\n## 事实(`packages/runtime/src/action-execution.ts`,#5092 阅读期间发现)\n\n`callData` 每个操作都是「protocol 优先,ObjectQL 兜底」。**兜底分支对同一个事实(id 指向的记录不存在)给出三种互不一致的答案**:\n\n- `get`(`action-execution.ts` get 分支):`find` 后 `match ? {...} : null` → 返回 `null`,`/data` 包成 **200 `{data: null}`**;\n- `update`:`if (!existing) throw new Error('[ObjectStack] Not Found')` —— 这个 Error **不带 `.status` / `.statusCode`**,两个 dispatcher 错误出口因此都兜底到 **500**。一个「记录不存在」被报成内部错误;\n- `delete`:**没有存在性检查**,直接 `ql.delete(...)` 然后返回 `{ deleted: true }` → **200**,对一条从未存在过的记录也回「删掉了」。\n\n三者本应是同一个答案(大概率 404),而 protocol 路径给的是什么、与兜底是否一致,也没有任何测试钉住 —— 两条路径对同一请求可能给不同状态码,而调用方(`/data`、MCP 桥、以及即将接线的声明式端点执行器)无从分辨自己走的是哪条。\n\n## 为什么值得记\n\n- `update` 的 500 会把一个 4xx 事实报成 5xx,并进入错误上报/告警;\n- `delete` 的「假成功」是最难发现的一类:集成方按 200 认定清理完成;\n- 声明式端点执行器(#5092 / PR #5136)按裁决**逐字节复用** `/data` 的委派形状,因此会原样继承这三种答案 —— 修在 `callData` 一处,两个面同时受益;在消费者侧各打补丁则正是 contract-first 禁止的形状。\n\n## 不在本单处置的原因\n\n#5092 的范围是端点目标委派,`action-execution.ts` 不在其文件面内;且此处要决定的是「记录不存在的规范答案是什么」,应有一次明确取舍(建议:三者统一成带 `.status = 404` 的抛出,protocol 路径同题对齐并补测试),不适合顺手改。\n"
+}

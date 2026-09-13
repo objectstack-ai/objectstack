@@ -1,0 +1,35 @@
+{
+  "number": 5556,
+  "kind": "pull_request",
+  "title": "feat(spec): `drillDown.target` 补上 `'navigate'` —— 渲染器已兑现的第三个 arm (#5435)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T17:22:57Z",
+  "updated_at": "2026-08-05T19:28:48Z",
+  "closed_at": "2026-08-05T19:28:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T19:28:47Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5556",
+  "body": "Fixes #5435\n\n## 三项前提逐条复核,全部成立\n\n以 `origin/main`(`5acb93add`)为准核过,没有一项过期:\n\n1. **`ChartDrillDownSchema` 是 strict 的,`target` 联合恰为两成员** —— `packages/spec/src/ui/chart.zod.ts:471` 原文 `z.enum(['drawer', 'dialog'], {…})`,且带一条**专为 `'navigate'` 定制的 error 回调**(判词:「不被 chart 支持…… 它渲染抽屉 regardless」)。这条回调 issue 正文没提,是本 PR 必须一并处理的死枝。\n2. **lint 真的 parse 它** —— `packages/lint/src/validate-react-page-props.ts:288` `ChartDrillDownSchema.safeParse(raw)`,所以作者写的 `drillDown={{…}}` 字面量确实过这道发布闸门。\n3. **触发前提** —— objectstack-ai/objectui#3382 已 **MERGED**(2026-08-05 11:53Z)。\n\n## 改了什么\n\n`target` 从 `'drawer' | 'dialog'` 扩成 `'drawer' | 'dialog' | 'navigate'`,**additive**,之前能解析的一律照旧解析。\n\n#5022 当初排除 `'navigate'` 的依据是一条**测量**而不是设计偏好:当时 ObjectChart 自绘抽屉只分支 `'dialog'`,`'navigate'` 静默落进 Sheet —— 声明一个渲染器不兑现的值,等于用协议承诺一次永远不会发生的跳转。objectui#3382 把这条测量改掉了,语义对齐 `DrillDownDrawer.navigateOnly`(table / pivot / metric 三个 widget 在共享 `DrillDownConfig` 上一直以来的行为)。测量失效,联合随之跟上。**顺序不可颠倒:先有渲染器兑现,协议才声明。**\n\nJSDoc 写明兑现条件与回退:`'navigate'` 是唯一带 **host 前提**的 arm,宿主须提供 drill navigation(objectui 侧 `DrillNavigationContext.openRecordList`),缺失时**文档化回落** `'drawer'` —— 既定行为而非故障。另注明 \"Open in list\" escape hatch 与本键无关,`'navigate'` 的意义是把跳转变成**默认**点击行为。\n\n### 顺手清掉的死枝\n\n那条定制 error 回调**整条删除**。它的判词现在是假的(chart 已经实现该 arm),留着就是一条对下一个作者撒谎的死枝 —— 而且它只在 `'navigate'` 被拒时才触发,一旦 `'navigate'` 合法就永不执行。删掉后 `target` 回落 zod 自己的 enum 报错,仍然按值拒绝。\n\n## 生成物:一律走生成器\n\n`gen:react-blocks` / `gen:schema` / `gen:docs`,无一手改:`react-blocks.ts` 类型串(手写源)、`react-blocks.contract.json`、`references/react-blocks.md`、`content/docs/references/ui/chart.mdx`。逐一 diff 过,**每处都只有这条联合的变化**。\n\n### 一处不属于本 PR 的生成物移动,已剔除\n\n`gen:schema` 顺带重写了 `packages/spec/authorable-surface.base.json`:`baseRev` 前移,并**新增三个与本改动无关的键**(`system/EmailServiceConfig:appName` / `defaultTemplateContext` / `queueDelivery` —— 来自已合并的 #5465)。本改动动的是 `target` 的**值联合**,不增删任何 authorable **键**(diff 里 chart/drill 相关 0 命中),所以这是 main 上既有的基线漂移搭车。已 `git checkout` 还原,**不随本 PR 提交**。已在 #5358 附上这份现场标本(该 issue 正是描述「任何无关 PR 都能因此静默推进删除门锚点」)。\n\n## 测试\n\n### 先证红\n\n改 schema **之前**先在 `validate-react-page-props.test.ts` 写下「`'navigate'` 应被接受」,跑出红 —— 闸门带着 #5022 的判词拒绝:\n\n```\n- []\n+ [ { \"rule\": \"react-chart-drilldown-invalid\",\n      \"message\": \"drillDown.target: `drillDown.target: 'navigate'` is not supported by a chart …\" } ]\n Tests  1 failed | 83 skipped (84)\n```\n\n改 schema 后同一例转绿:`Tests  84 passed (84)`。\n\n### 反向验证(方向先判后跑)\n\n预判:把联合改回两成员,`chart.test.ts` 应**恰好 3 例**红 —— accepts 表新增行、接受用例、三 arm 命名断言。跑出来:\n\n```\n× accepts target navigate\n× target: 'navigate' is ACCEPTED — objectui#3382 made the renderer deliver it (#5435)\n× a target outside the three declared arms is still rejected — widening is not loosening\n Tests  3 failed | 72 passed (75)\n```\n\n不多不少,方向一致。还原后 75/75 绿。\n\n### 用例分诊(不是整批重拼)\n\n两条钉着旧结论的用例按「整条替换」处理,而非改断言方向了事:\n\n- `chart.test.ts` 的「`'navigate'` 被拒」→ 换成接受用例,并**额外断言那条退休判词不复存在**(`not.toContain('objectui#3354')` / `not.toContain('not supported by a chart')`)—— 防的是 #5046 那种「断言通过是因为什么都没产生」。\n- 原「plain wrong VALUE 不被 navigate 判词污染」一例:判词删光后它会**空过**(vacuously green),故替换为真断言 —— 无效 `target` 仍按 `invalid_value` 被拒,且报错串恰好枚举三个 arm(`\"values\":[\"drawer\",\"dialog\",\"navigate\"]`),多出第四个成员会立刻红。\n\n### 消费半径清扫\n\n`validate-react-page-props` 的 fixture 面按**规则被消费的范围**扫,而非按改动包:全仓 `drillDown` 字面量在 `packages/lint` 与 `packages/spec` 之外 **0 命中**,无 cli/runtime fixture 需要跟改。\n\n### 正向\n\n- `pnpm --filter @objectstack/spec test` ⇒ **314 files / 8011 passed**\n- `pnpm --filter @objectstack/lint test` ⇒ **59 files / 1282 passed | 4 skipped**\n- `typecheck`(spec + lint)⇒ 均 Done\n- `check:react-blocks` ⇒ `✅ 2 generated files in sync with packages/spec`\n- `check-changeset-no-major` exit 0(本 changeset 为 minor,未被点名);`check-changeset-fixed` ⇒ 同步\n- `node scripts/check-nul-bytes.mjs` ⇒ OK(5501 文件);改动文件另做 `grep -naP` 自扫,0 命中\n\n## Changeset\n\n`.changeset/chart-drilldown-navigate-target.md` —— `@objectstack/spec: minor`(additive 协议面)。`@objectstack/lint` 未单列:它本体只动了注释与用例,行为变化经由 spec 依赖流入,parse 的是同一个 schema。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_018fxLGQdatPbBUvCgiVxg6D\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018fxLGQdatPbBUvCgiVxg6D)_"
+}

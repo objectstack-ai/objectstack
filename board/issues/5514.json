@@ -1,0 +1,35 @@
+{
+  "number": 5514,
+  "kind": "pull_request",
+  "title": "fix(spec): `automation/etl.zod.ts` 的九个别名回到 `X` / `XParsed` house convention (#4963)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T14:41:54Z",
+  "updated_at": "2026-08-05T16:12:09Z",
+  "closed_at": "2026-08-05T16:12:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T16:12:07Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5514",
+  "body": "Fixes #4963\n\n裁定按认领评论取 **A,一次做完**:裸名翻转为 `z.input`(作者写的形状),新增九个 `*Parsed` = `z.infer`(parse 之后的形状),两个 factory 回归设计意图,`SYNC_ARCHITECTURE.md` 两段示例修到可编译。\n\n## 前提复核(先证,再改)\n\n**九个别名现状** —— `origin/main` 上确认九个全是 `z.infer` 且零 `*Parsed` 对应物,issue 描述属实。\n\n**三仓零 importer** —— 三个仓都先 `git fetch`,再对各自 `origin/main` 用 `git -C` 复测(不用 `cd`):\n\n| 仓 | `origin/main` HEAD | ETL 符号命中 |\n|:---|:---|:---|\n| objectstack | `0285f7f99` | 仅 `packages/spec/src/automation/etl.{zod,test}.ts` 自身 + 文档/changeset/生成物;`etl.test.ts` 只 import schema,不 import 任何类型别名 |\n| objectui | `4ed825077` | 0 |\n| cloud | `71554418` | 0 |\n\n两个 sibling 仓均有权限,无需退回本仓证据。迁移面为空。\n\n## 为什么这不是纯风格问题(实测,不是目测)\n\n本文件六个键带 `.default()`,外加 `schedule` 是 `CronExpressionInputSchema`(transform,输出是 `{ dialect, source }` 信封)。在 `z.infer` 下这些全部必填、裸 cron 字符串被拒。把翻转前的 `etl.zod.ts` 放回、只留新测试跑一遍,编译器报的就是这些:\n\n```\ndoc-example-0:\n  TS2741: Property 'continueOnError' is missing in type '{ type: \"join\"; ... }'   (x3)\n  TS2322: Type 'string' is not assignable to type '{ dialect: \"cel\" | \"cron\" | \"template\"; ... }'\nauthor-source:\n  TS2741: Property 'enabled' is missing in type '{ cursorField: string; }'\nauthor-destination:\n  TS2741: Property 'writeMode' is missing in type '{ type: \"database\"; config: { table: string; }; }'\nauthor-run:\n  TS2739: Type '{}' is missing the following properties ...: recordsRead, recordsWritten, recordsErrored, bytesProcessed\n```\n\n翻转后全部为空。\n\n## 改了什么\n\n1. **九对别名**(`packages/spec/src/automation/etl.zod.ts`)。裸名 = `z.input`,新增九个 `*Parsed` = `z.infer`。四个 enum 别名(`ETLEndpointType` / `ETLTransformationType` / `ETLSyncMode` / `ETLRunStatus`)两者同型,仍然成对 —— 理由写在文件里:约定的价值就是读者不必先知道九个里哪个带默认值才能选注解,而一个 enum 日后加 `.transform()` 就会重开这个 issue。`ETLPipelineRun` 是 wire 形状,也照同一条规则走,与 `automation/` 里另一个 wire 形状 `FlowVersionHistory` 一致。\n2. **两个 factory 回归设计意图**。删掉 `enabled: true`(纯粹在复述 schema 自己的默认值,只因 `z.infer` 让键必填才写);`schedule` 直接透传,不再 `typeof s === 'string' ? { dialect: 'cron', source: s } : s` 预包装 —— 归一化本来就该在 parse 时发生。**保留**各自的 `syncMode` / `writeMode`:那是两个 helper 各自**决定**的东西(`incremental`+`upsert` vs `full`+`append`),这组对比正是这对 helper 存在的理由,读者不该为看懂它去查两个默认值。\n3. **`SYNC_ARCHITECTURE.md`**。三段 `ETLPipeline` 示例全部修到可编译并以「作者形状」示范(默认键省略)。issue 说翻转后「只剩 `source.config` 必填一个错误」—— 对 \"After (L2)\" 成立,对 **\"Before (L2)\" 不成立**:那段还缺 `name` 和 `destination`(两个都是必填、与默认值无关),一并补齐。\n4. **strictness 台账**(`docs/audits/2026-07-unknown-key-strictness-ledger.md`)。`etl.zod.ts` 行的\"仍未关闭\"尾巴改为已关闭,并记下这批分类留下的教训:「因为导出的类型就是授权门,所以是 authorable」是一个**需要编译验证的断言**,不是可以假定的事实 —— 批 12 门读对了,没人编译过。\n5. **生成物**:`gen:api-surface` 整体重生成,+9 −0,无手改。\n\n## 测试\n\n新增 `packages/spec/src/automation/etl-author-shape.test.ts`,走 compiler API 而不是类型级 pin —— #4642 已经确认 `packages/spec` 里的条件类型 pin 是 no-op(`tsconfig.json` 排除 `**/*.test.ts`,vitest 从不开 `typecheck`),所以 `@ts-expect-error` / `expectTypeOf` 在这个包里没人读。测试自带 anti-vacuity 守卫,含一个必须报错的 `harness-self-test` 探针,否则解析失败会表现为「三段示例全绿」。\n\n- `SYNC_ARCHITECTURE.md` 的三段 ETL 示例**逐字编译**(含 import 行,`@objectstack/spec/automation` 通过 `paths` 映射到 entry barrel),零诊断。块总数钉死为 6,新增块必须显式分类。\n- 同一份字面量在 `ETLPipeline` 下编译通过、在 `ETLPipelineParsed` 下必须红 —— 正负共用一份文档,所以红不可能是「字面量因为别的原因坏了」。\n- 顶层默认键单独一支:除 `syncMode` / `enabled` 外全部补齐的字面量,在 `ETLPipelineParsed` 下必须报 TS2739 并点名这两个键。(合并在上一支里做不到:TypeScript 只报它找到的最深层不匹配就停,嵌套的 `writeMode` / `continueOnError` 会把顶层两个键完全遮掉。)\n\n**反向验证的方向,是在跑之前先定的,结果分两类,如实报告:**\n\n- **常规红**:把翻转前的 `etl.zod.ts` 放回,`author-*` 探针和三段文档示例全红(诊断见上)。这一半按预期成立。\n- **红得不是地方**:同一次回退里,`parsed-*` 探针报的是 `TS2305: Module '\"@objectstack/spec/automation\"' has no exported member 'ETLPipelineParsed'` / `TS2724 … Did you mean 'ETLDestinationParsed' → 'ETLDestination'?` —— 名字根本不存在,红是红,但和「方向对不对」无关,**不构成证据**。所以另做了一次真正的 sabotage:实现打上之后,单把 `ETLPipelineParsed` 指向 `z.input`,预期这三条 pin 转红且报「本该有诊断却是空的」。实测:\n\n  ```\n  × rejects the same pipeline literal under `ETLPipelineParsed`\n      AssertionError: expected '' to contain 'writeMode'\n  × requires `syncMode` and `enabled` on `ETLPipelineParsed` — the top-level defaults\n      AssertionError: expected '' to contain 'TS2739'\n  × accepts a bare cron string only on the author side\n      AssertionError: expected '' to contain 'Type \\'string\\' is not assignable'\n   Test Files  1 failed (1)\n        Tests  3 failed | 13 passed (16)\n  ```\n\n  这才是 parsed 半边的 pin 是活的的证据。改回后 16/16 绿。\n\n命令与结果(合并 `origin/main` 之后重跑):\n\n```\npnpm --filter @objectstack/spec typecheck        → tsc --noEmit,无输出\npnpm --filter @objectstack/spec test             → Test Files 313 passed (313)\n                                                   Tests 7978 passed (7978)\npnpm --filter @objectstack/spec check:generated  → All 9 generated artifacts are up to date\npnpm --filter @objectstack/spec check:dual-source-exports\n                                                 → 4197 names / 0 accepted dual-source\npnpm --filter @objectstack/spec check:exported-any\n                                                 → 1822 types + 1560 schemas,无 any\npnpm check:doc-authoring / check:docs-audit-scope / check:type-check-coverage\n  / check:release-notes / check:nul-bytes        → 全绿\neslint packages/spec/src/automation/etl{.zod,-author-shape.test}.ts → 无输出\n```\n\n`packages/spec/api-surface.json` 相对 `origin/main` 的 delta:**+9 类型,0 移除**。\n\n## 范围外发现\n\n- #5507(`finding`):`automation/execution.zod.ts` 的七对 `X` / `XParsed` **两边都是 `z.infer`**,是纯同义词 —— 比 #4963 的原状更容易误导,因为成对的名字看起来就是约定已兑现。`ScheduleState` 上四个默认键 + 一个 cron transform 完整重现了本 issue 的失败面。**但迁移面不为空**(`service-automation` / `contracts/automation-service.ts` 在消费),`#4963` 的「零 importer 所以一次做完」论证在那里不成立,需要单独裁定。同一 issue 记了 `builtin-node-config.zod.ts` 的 `ScreenFieldConfig` 缺 `Parsed`(纯遗漏,一行)。\n\n## 未做的事\n\n`SYNC_ARCHITECTURE.md` 的三段 L3 `Connector` 示例不在本 PR 的编译门内 —— 它们属于 `integration/connector.zod.ts`,其中两段用裸 `...` 做省略(不是 TypeScript)。测试里把块总数钉死,就是为了让这条豁免不能悄悄扩大。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_018fxLGQdatPbBUvCgiVxg6D\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018fxLGQdatPbBUvCgiVxg6D)_"
+}

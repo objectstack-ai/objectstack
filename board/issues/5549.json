@@ -1,0 +1,32 @@
+{
+  "number": 5549,
+  "kind": "pull_request",
+  "title": "fix(automation): keep a wait timer's one-shot armed when the shot never consumed the pause (#5529)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T17:01:28Z",
+  "updated_at": "2026-08-05T17:29:29Z",
+  "closed_at": "2026-08-05T17:29:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T17:29:27Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5549",
+  "body": "Fixes objectstack-ai/objectstack#5529\n\n## 前提核对(合并 #5527 之后)\n\n分支切自 `origin/main`(含 PR #5527 = `f0d98e10`)。核对结果:\n\n- `waitTimerJobName` 提取、`onSuspensionReleased` 钩子都已存在;\n- issue 描述的 `finally` 无条件取消**仍在**(合并后位于 `wait-node.ts` L99-115,#5527 刻意保留并写明两者回答不同问题);\n- `engine.ts` 的两个返回码仍在:`RESUME_IN_PROGRESS`(L2854)、`STORE_UNAVAILABLE`(L2875)。`AutomationResult.code` 是 `packages/spec/src/contracts/automation-service.ts` L221 已宣告的公开字段,所以读它是契约内消费,**不动 `engine.ts`**。\n\n**一处需要更正 issue 的归因(重要,请复核)**:issue 把洞定位在 `wait-node.ts` L87-92,也就是**排班路径**的回调。但 `resumeInternal` 只在**热缓存未命中**时才读持久 store(`loadSuspendedRunStrict`:先 `this.suspendedRuns.get(runId)`,该缓存只在 `forgetSuspendedRun` 时才删),而 `once` 定时器就跑在排下它的那个进程里 —— 所以在排班路径上,run 一定在本进程缓存里命中,那条回调**拿不到** `STORE_UNAVAILABLE`。真正可达的是同文件里 `rearmSuspendedWaitTimers` 重排的那一枪(新进程、缓存为空、真的去读 store),而它带着**一模一样**的无条件 `finally` —— issue 只把 `rearmSuspendedWaitTimers` 当作自愈路径提及,没注意它同时也是同一缺陷的第二个现场。\n\n机制、修法、文件都与 issue 所述一致,所以前提成立;只是可达的那个现场是同文件的兄弟站点。两处合用一个 handler 修掉(排班路径那一支按构造是潜伏的,但留着两种「怎么收尾这一枪」的写法正是 #5512 刚收敛掉的漂移)。\n\n## 前置实测:once-job 回调结束后会不会再响(不猜)\n\n派发要求先实测再定形状。临时 harness 跑在 `service-job` 包里(已删除),结论:\n\n```\n[measure] fires after 400ms (no cancel): 1\n[measure] listJobs after the shot: [ 'm1' ]\n[measure] fires after 1000ms total: 1          ← 到点 +30ms,等到 1000ms 仍只响了一枪\n[measure] fires after manual trigger(): 2      ← 注册还在,trigger() 能再打一枪\n[measure] listJobs after cancel: []\n[measure] trigger after cancel threw; fires = 1\n[measure] sys_job after an uncancelled shot: {\"name\":\"flow-wait:run1:pause\",\"active\":true,\n          \"schedule_expression\":\"2026-08-05T16:45:20.837Z\",\"last_status\":\"success\",\"run_count\":1}\n[measure] sys_job after cancel: active = false\n```\n\n`once` 在 `IntervalJobAdapter` 里就是一个 `setTimeout`(`DbJobAdapter` 把全部定时机制委派给它),**打完一枪不会再响**。所以落到派发说明里的第二个分支:「不取消」**不构成自愈**。\n\n但实测同时显示「不取消」保住了 `cancel` 会销毁的两样东西,这是选择它的实据:\n\n1. `sys_job` 行保持 `active: true` 且带着 deadline —— 在这里这是**真话**(run 确实还在等);取消后翻成 `active: false`,读起来是「这个唤醒已经办完了」,而 run 还挂着。\n2. 注册还留在适配器里,于是 `trigger('flow-wait:{runId}:{nodeId}')` 能在 store 恢复后**不重启**地把这一枪重打一遍。取消之后 `trigger` 直接报 job not found,只剩下次启动的 overdue re-arm。\n\n所以最终形状 = 不取消 + error 日志,且日志把「这不是自动重试」和上面两条补救都写明,不暗示会自己好。\n\n## 改了什么\n\n`packages/services/service-automation/src/builtin/wait-node.ts` —— 抽出一个共用的 `makeWaitTimerJobHandler(...)`(返回 `() =` 大于 ` Promise< void >`),排班路径与 re-arm 路径共用,理由与 `waitTimerJobName` 只有一份声明相同。按返回码分流:\n\n- **`STORE_UNAVAILABLE`** —— 暂停没被消费(#4420 划的正是这条线:store 读不到绝不等于「没这个 run」),**不取消**,并记一条 **error**(此前完全静默:结果被回调丢弃,连 `warn` 都没有)。日志带 jobName、runId、原因,以及两条补救。\n- **其余照旧取消** —— 成功(暂停已消费)、`RESUME_IN_PROGRESS`(另一路 resume 正在消费,#5512 的 `onSuspensionReleased` 会顺带取消)、machine-state 失败(`RUN_NOT_FOUND` 等,没有暂停可服务),以及 `resume` **抛错**(抛错不是 store 故障,不给豁免)。\n\n按要求**没有**合并 `onSuspensionReleased` 与 `finally` 两个机制:前者答「RUN 离开了节点」,后者答「这个 JOB 打完了它唯一的一枪,且这一枪把暂停结清了」。`RearmLogger` 现在 `extends WaitTimerLogger`,`error` 仍是必需(#4632)。**未动 `engine.ts`**。\n\n## 反向验证(方向先判后跑)\n\n**预判**:把无条件取消恢复回去,应当**只有** 3 条新用例转红(两条「未被取消」断言 + 那条 error 日志断言),3 条「其余照旧」用例保持绿,既有用例全部不动。理由:这些 pin 断言的是旧代码**总会**执行的一次 cancel 之**缺席**,以及旧代码**从不**产生的一行日志 —— 没有反转,也没有「因为什么都没产生所以绿」的空壳。\n\n**实跑**(把 `if (result?.code === 'STORE_UNAVAILABLE')` 改成 `if (false)`)与预判一致:\n\n```\n× re-arm path: a STORE_UNAVAILABLE shot leaves the one-shot ARMED\n  → expected [ Array(1) ] to deeply equal []\n× re-arm path: the failed shot is reported at error, naming the job and the run\n  → expected [] to have a length of 1 but got +0\n× arming path: the same handler keeps the job armed on STORE_UNAVAILABLE\n  → expected [ Array(1) ] to deeply equal []\n✓ re-arm path: a shot that DOES resume still disarms the one-shot (unchanged)\n✓ RESUME_IN_PROGRESS still disarms — the other resume owns the pause\n✓ a thrown resume still disarms — a throw is not a store outage\n  Tests  3 failed | 22 passed (25)\n```\n\n既有 6 条 #5512 teardown 用例全程保持绿,说明本次是纯增量,没有顶掉别人的覆盖。\n\n## 测试\n\n新增 describe「wait timer one-shot vs. a shot that never consumed the pause (#5529)」6 条。可达的那条端到端用例走 re-arm 路径:进程 1 挂起 → 进程 2 冷启动、`load` 抛 `connection refused` 而其余委派(于是底层行仍可检查)→ re-arm 重排 → 手动触发这一枪,断言 run 仍挂着(`inner.list()` 仍含该 runId、下游节点没跑)、`cancelled` 为空、error 日志带 jobName/runId/两条补救。\n\n排班路径那条用例是**注入**返回码(改 `engine.resume`)而非诱发,用例注释里直说了为什么:本进程热缓存命中,引擎在这里产不出这个码;伪造一次缓存未命中去「证明」它,只会 pin 一个引擎并不存在的场景。它验证的是 handler 的分支,以及排班站点确实走了这个共用 handler 而不是自留 `finally`。\n\n```\npnpm --filter @objectstack/service-automation test\n  Test Files  57 passed (57)\n       Tests  695 passed (695)\n```\n\n`tsc --noEmit`(本包在 #4311 DEBT 台账内,`errors` 被冻结):改动前后均为 **5** raw errors,且 `wait-node*` 相关 **0** 条 —— 增量为零。另跑:`check:type-check-coverage` OK、`check:durability-log-level` OK(24 seams)、`check-nul-bytes` OK,并按控制字符自查规则对两个改动文件做了 `grep -naP` 扫描(干净)。改动文件 eslint 无输出。\n\n顺带说明:构建 spec 时 `packages/spec/authorable-surface.base.json` 被 `gen:schema` 重锚到当前 HEAD(与本次改动无关的生成物副作用),已 `git checkout` 还原,不在本 PR 内。\n\n## 范围外发现\n\n- 归档为 #5548(`finding`,未进 `pm:queue`):`DbJobAdapter.wrap()` 只按 handler 是否抛错判定结果,所以这类「内部降级、不抛错」的 handler 在 `sys_job_run` 上记成 `success`(实测行见上)。属 job 域审计面,不是本次 automation 域的面;#5529 之后该路径已有 error 日志且 job 保持 `active`,所以 run 卡住本身是可见的,缺的只是审计行里那一格。两种读法都成立,严重度交分诊。\n\n同包 #5048 / #4792 的面未触碰。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BWS4heBoAitLmzCLhcYdbK)_"
+}

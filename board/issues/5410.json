@@ -1,0 +1,35 @@
+{
+  "number": 5410,
+  "kind": "pull_request",
+  "title": "fix(cli): `os doctor` 说出配置载入失败的原因,不再只说一句「载入不了」(#5403)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T09:05:18Z",
+  "updated_at": "2026-08-05T09:17:14Z",
+  "closed_at": "2026-08-05T09:17:13Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T09:17:13Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5410",
+  "body": "Fixes #5403\n\n## 前提核验(先于实现)\n\nissue 引用的行号 `98369a86b:1212` 已因同日 churn 漂移,但**事实成立**。`origin/main`(`4b61cf3`)上该 catch 仍为:\n\n```\n      } catch {\n        printWarning('Could not load config for analysis (config checks skipped)');\n        hasWarnings = true;\n      }\n```\n\n`packages/cli/src/commands/doctor.ts:1320`。不带绑定,error 当场丢弃;这句话是裸 `printWarning`,不是 `HealthCheckResult`,所以 `--verbose` 根本没有 `fix` 可展开 —— issue 正文「没有任何旗标能让操作者看到更多」的判断经核实为真。\n\n## 采用的方案:PM 指定的方案二(未退回最小改法)\n\n裸 `printWarning` 改为一条常规 `HealthCheckResult`,与 `Environment files` / `Tenancy posture` 走**同一个渲染器**、同一条 `--verbose` 展开规则。\n\n方案二在本文件里有一处需要处理的时序事实,但**不构成语义冲突**:环境检查那个 `results.forEach` 在报告较早处就跑完了,而 config 载入发生在它之后 —— 把行 push 进 `results` 让老循环去打是打不出来的。解法不是重排报告(那会把结论挪离产生它的那一步,是超出判定面的输出契约变动),而是把**渲染规则**从循环体里提成具名函数 `renderHealthCheckResult()`,两处共用。这样「统一渲染 + 统一 verbose 展开 + 消灭裸 printWarning 旁路」三条都成立,报告顺序一字未动。行同时仍 push 进 `results`,让该轮的记录保持完整(今日惰性:末尾 fix 汇总按 `error` 过滤)。\n\n## 效果\n\n```\n$ cat objectstack.config.ts\nthrow new Error('this config is genuinely broken');\n\n$ os doctor\n  → Loading configuration for analysis...\n  ⚠ Config load          Could not load config for analysis (config checks skipped) — this config is genuinely broken\n\n⚠️  Environment is functional but has some warnings.\n   Run with --verbose to see fix suggestions.\n\n$ os doctor --verbose\n  ⚠ Config load          Could not load config for analysis (config checks skipped) — this config is genuinely broken\n      → `os serve` loads this same file the same way — bundle-require, under the `.env*`\n      cascade named above (#5397) — and prints this error in full, so a config that\n      lands here is one the server cannot boot either.\n      The config-aware checks were SKIPPED, not passed: spec version, circular\n      dependencies, unused objects, orphan views, dashboard integrity.\n      cause: this config is genuinely broken\n```\n\n(以上为真机 in-process 运行捕获的输出,非手写示意。)\n\n## 四条刻意的取舍\n\n- **原话照引,不改写**(#5390 姿态)。配置载入的失败来自四个不同权威:用户自己的 `throw`、esbuild 的打包诊断、Node 的模块解析、`loadConfig()` 自己的 \"no default export\"。doctor 没有立场把它们总结得比它们自己更好。\n- **cause 进 `message`,而不只进 `fix`。** `Environment files` 把 cause 只放 `fix` 是对的 —— 那一行本身已把结论说完整,cause 是脚注。这里 **cause 就是结论**:没有它,这一行只说了「出了点没被指名的问题」,默认运行仍然严格少于 `os serve`。所以平铺一行放收敛后的引文,`--verbose` 给未截断的原文。\n- **折叠而非取首行。** esbuild 的首行恰是它最没信息量的一句(`Build failed with 1 error:`,文件与原因在下一行)。空白折叠 + 超长截断,词序全是上游的,只有换行和过长的尾巴是我们的。\n- **档位不变。** 仍是 warning,doctor 跑完其余检查,仍 exit 0。那句话本身原样保留为该行开头 —— 它被两份 changeset 引用、被本文件四处注释引用,更要紧的是**兄弟测试用它的缺席表示「配置载入成功」**,改写会让那些断言在「没有任何东西能匹配」的空理由下继续变绿。\n\n## 反向验证(方向:红,事前预测)\n\n预测:仅把调用点回退为裸 `printWarning`(builder 保留导出),则 8 条 builder 单测**保持绿**(被测对象未动),3 条正向 e2e **转红**,2 条否定式 e2e **仍绿**(它们断言「不出现」,结构上不可能察觉该回退 —— 这正是正向用例存在的理由)。实测逐条命中:\n\n```\n ✓ ...quotes the thrown message, in the row AND in the verbose detail\n ✓ ...(其余 7 条 builder 单测全绿)\n × ...prints the cause on a plain run — the issue's own repro\n   → expected '…' to contain 'this config is genuinely broken'\n × ...expands the full detail under --verbose, and only under --verbose\n   → expected '…' to contain 'cause:'\n × ...surfaces a SYNTAX error's file and reason, not just \"build failed\"\n   → expected '…' to contain 'objectstack.config.ts'\n ✓ ...does NOT fire for a config that only needed its .env — #5397 is not regressed\n ✓ ...says nothing at all when the config loads\n```\n\n## 承重件:#5397 的 async overlay 未受影响\n\n`loadConfig()` 仍在 `withDotenvOverlayAsync` 内,一字未动 —— 同步 overlay 包不住 `bundleRequire` 的动态 `import()`。新增用例正面钉住:只因缺 `.env` 值才抛错的配置**不得**走到这条路径(否则该行会出现),且 overlay 事后不留残留。\n\n## 测试\n\n`packages/cli/src/commands/doctor-config-load-cause.test.ts`(新增 13 例,全部按车道纪律显式 `60_000` 超时):\n\n- builder 单测:引文进入 row 与 fix;那句话原样作为 row 开头;仍是 warning 且有 `name` 列;指向 `os serve` 且声明被跳过的检查「SKIPPED, not passed」;多行 cause 折叠后不丢信息行;超长 cause 行内截断而 `fix` 完整;`new TypeError()` 无 message 时不以裸破折号收尾;`throw 'boom'` / `throw 42` 等非 Error 也被报出。\n- e2e:issue 正文原样复现锚点;`--verbose` 展开且仅在 verbose 展开;语法错误报出文件名;#5397 未回归;配置正常时该行完全不出现。\n\n命令与逐条结果见本 PR 的「验证」评论(全包 728 例绿、typecheck 绿、六项仓库门禁与 eslint 绿)。\n\n## 越界情况\n\n改动仅落在 `packages/cli/src/commands/doctor.ts` + 同目录测试 + 一份 changeset,与派发口径的文件面一致。已按消费半径搜过 `Could not load config` / `config checks skipped` / `Loading configuration for analysis` 全仓引用:除本文件与测试外只剩两份**历史 changeset**(#5382 / #5397 的),它们记述当时事实,不应改写。\n\n顺带核验发现、**未在本 PR 修**的一条,已另行开单:#5412 —— 同文件 `readInstalledPackageEntries()` 的 catch 把「可选包没装」和「ledger 里的 manifest 损坏」当成同一件事,导致 ADR-0120 D5e 的 unique-scope 建议静默少报并打出 `✓ ... No unconfirmed installation-wide uniques`(false PASS)。同族、低一层,但属于另一处 catch、另一条检查的判定面,且「读不到 ledger 时还能否声称 clean」是需要判定的决策点,不宜夹带。\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 5484,
+  "kind": "issue",
+  "title": "os-dev.md 的「自扫」正则比门禁本身还窄:#5460 把 DEL 纳入扫描面后,那条指令会给出假绿",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T13:48:28Z",
+  "updated_at": "2026-08-05T19:58:12Z",
+  "closed_at": "2026-08-05T19:58:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5484",
+  "body": "发现于 #5460(PR #5479)的实施。按 Prime Directive #10 单独记录,未在那个 PR 里扩大范围。\n\n> 正文用 `U+007F` 这种不含反斜杠转义的写法指代字节 —— 理由见 #5460。\n\n## 事实\n\n`.claude/agents/os-dev.md`「Byte discipline」段末尾(⚠️ 行号已随 #5441/PR #5501 位移:原 :263,现约 :274 —— **按内容 grep,不按行号**)要求 dev agent 在改动涉及控制字符时,除了跑门禁还要**逐字节自扫**,并给出了具体命令:\n\n```\ngrep -naP '[ \\x00-\\x08 \\x0b \\x0c \\x0e-\\x1f ]' FILES\n```\n\n(实际文件里没有空格,这里加空格只是为了在 issue 正文里可读。)\n\n这个字符类等于 #5157 当时的扫描面。#5460 把 DEL(U+007F)加进了 `scripts/check-nul-bytes.mjs` 的扫描面,但这条指令里的字符类没跟着动 —— 于是它现在**比门禁本身还窄**。\n\n全仓陈述该模式的地方共三处,另两处都是对的:\n\n| 位置 | 状态 |\n|:--|:--|\n| `scripts/check-nul-bytes.mjs` | #5460 已更新(含 0x7f) |\n| `.changeset/control-byte-gate-scans-all-c0.md` | 历史文档,凝固在 #5157 当时的语义,正确 |\n| `.claude/agents/os-dev.md`(Byte discipline 段) | **未更新** |\n\n## 为什么这不只是文字陈旧\n\n那句指令的原话是「self-scan **beyond** the gate ... the gate's blind spots are exactly where these bytes hide」。它的**存在理由**就是覆盖门禁够不到的地方,而现在它覆盖的是门禁的真子集:\n\n- agent 写完一处 0x7f,按指令自扫 → **绿**;\n- 推上去,CI 的 `check:nul-bytes` → **红**。\n\n即这条指令会在它唯一被设计来防的那个场景里给出假绿,把本可在本地一秒发现的问题推迟一整个 CI 轮次。#5460 的实施过程里事故源复现了五次,每次都是靠这条自扫或工具校验当场抓住的 —— 这条指令是真在被使用的,不是死文档。\n\n这也正是 #4890 的教训在指令文件上的重演:**指令文件落在扫描面之外**,而它恰好是在讲这件事的那份文件。\n\n## 处置建议(仅供分诊参考,未实施)\n\n一行:把那个字符类补上 `\\x7f`。\n\n更值得一并考虑的是**为什么会漂**:同一个事实写在三处、靠人肉同步。#5461 已经承认这点(「语义变化写在脚本头、报错文案和 CI 步骤三处」),#5460 又手工同步了一轮 CI 注释。可选的根治方向是让门禁自己导出扫描面的可读拼写(脚本已有 `escapeFor()`/`hex()`),让指令与 CI 注释引用它而不是各抄一份;但那是独立的一单,成本远大于本条,交分诊判断是否值得。\n\n## 归类\n\n按 os-dev 归档口径这是 **observation-class**。裁定(2026-08-05):晋级 `pm:queue`,方向为一行字符类补 `\\x7f`。\n\n~~Blocked-by: #5460~~(已解除:PR #5479 MERGED)\n~~Blocked-by: #5441~~(已解除:PR #5501 于 2026-08-05 15:0xZ MERGED,`os-dev.md` 文件面释放)\n"
+}

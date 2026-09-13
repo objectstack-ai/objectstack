@@ -1,0 +1,35 @@
+{
+  "number": 5530,
+  "kind": "pull_request",
+  "title": "fix(rest): 缺表错误只在「缺的正是所请求对象」时才判为 unknown object (#5462)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T15:43:26Z",
+  "updated_at": "2026-08-05T16:22:55Z",
+  "closed_at": "2026-08-05T16:22:46Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T16:22:46Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5530",
+  "body": "Fixes #5462\n\n## 前提复核（先证后改）\n\n按 rule 6，在 #5464 与 #5487 都已落地的 `origin/main`（`308c70951`）上先重跑复现，**前提成立**，与 issue 描述一字不差：\n\n```\nPUT /api/v1/meta/object/acct   =>  404 {\"error\":\"Object not found\",\"code\":\"OBJECT_NOT_FOUND\"}\n                                   日志行数 0\nDELETE /api/v1/meta/object/acct => 500 {\"error\":\"Internal server error\"}   ← #5464 已修好的那一侧\n```\n\n真实 `ObjectQL` + 真实 `ObjectStackProtocolImplementation`，驱动每个方法都抛 `SQLITE_ERROR: no such table: sys_metadata`。顺手把逃逸错误的形状也证了（PR 里保留为 premise guard 用例）：\n\n```\nASYNC-THROW saveMetaItem status=undefined code=undefined name=Error\n            msg=SQLITE_ERROR: no such table: sys_metadata\n```\n\n`status` 与 `code` 都没有 —— 这正是 #5437/#5464 的「显式 5xx」分支看不见它、而由文本启发式代为裁决的原因，也是本单必须单独修的理由。Postgres 措辞 `relation \"sys_metadata\" does not exist` 结果完全一致（同样 404 + 0 行日志）。\n\n## 判据形状的取舍\n\nPM 给了两种可选形状。实测下来选了**归属判定（attribution）**这一种，理由写在这里以便复核：\n\n- **没选**「按驱动错误签名（`SQLITE_ERROR` / 连接类）先行短路到基础设施分支」。实测这条会连坐：真实 unknown object 的 SQLite 报文同样带 `SQLITE_ERROR:` 前缀，短路后 `no such table: ghost` 也变 500，直接破坏 ②「真 404 不能变响」。\n- **选了**「缺的那张表，是不是调用方点名的那个对象」。这是 issue 自己指出的语义差（「不区分**缺的是哪张表**」），并且判据不是又一层措辞猜测：Prime Directive #6 规定对象 `name` **就是**表名、没有 `tableName` 映射可洗，所以「缺的表 ≠ 你要的对象」确实等价于「故障不在你这个对象上」。\n\n新规则一句话：**缺表类报文只有在它点名的 relation 就是本次请求点名的对象时，才判为 unknown object。** 归属需要两半都成立 —— 有请求对象，且措辞里真的带得出 relation 名（`no such table: main.acct`、`relation \"public.acct\" does not exist`，schema 前缀剥掉、大小写不敏感）。\n\n归属不成立的一律落**已有的**消毒故障信封 `500 { \"error\": \"Internal data error\", \"code\": \"DATABASE_ERROR\" }` —— 不是新造的第三种措辞，是 SQL-leak 分支一直在发的那一个，这次抽成一处以免两边漂移。500 不在 `isExpectedDataStatus` 里，被静默吞掉的那行日志就是这么找回来的；驱动原文仍然一个字都不到客户端。\n\n覆盖到的不可归属情形：换了一张表、辅助表、**根本没有请求对象**（metadata / UI / discovery 全家都走 `handleRouteError(res, error)` 不带 object，正是本单复现的形状）、以及带不出 relation 名的措辞。\n\n## 刻意不动的三处\n\n- **真实 unknown object 仍然是静默 404 `OBJECT_NOT_FOUND`。** #3770 的两个产出方仍落同一个信封（registry gate；以及缺的表就是所请求对象时的驱动分支），仍然一行日志都不打（#4886：对象不存在是客户端错误，不该刷栈）。\n- **引擎自撰的分支不动。** `unknown object`、`object not found`、`[ObjectQL] No driver available for object '< name >'`（此处 `< name >` 的空格是为绕开 GitHub body 的 HTML 消毒器，代码里是紧挨的尖括号占位）、引号对象名兜底 —— 这些是我们自己关于某个具名对象的措辞，说什么就是什么。只有**数据库撰写**的那三条（它不可能知道调用方要的是哪张表）需要归属判定。\n- **显式 status 带不动。** #5437/#5464、#5423/#5436 都在 `resolveErrorResponse` 里先答，压根到不了启发式。\n\n⛔ 未动 `served-endpoints.ts`（#5487 刚落）。\n\n## 反向验证（方向先判后跑）\n\n预判：还原旧启发式后，① 的误报 pin 应当**红**，②③ 保持绿 —— 普通方向，不是倒置族也不是「诊断变多」族，因为断言的是新故障判决本身。\n\n实跑（把归属分支删掉、`looksLikeMissingRelation` 直接进 `looksLikeUnknownObject`）：\n\n```\n❯ src/rest-unknown-object-heuristic.test.ts (21 tests | 9 failed)\n  × PUT /meta/object/acct answers 5xx, not 404 OBJECT_NOT_FOUND\n      AssertionError: expected 404 to be 500\n  × the fault leaves exactly one log line, carrying the driver text\n      AssertionError: expected +0 to be 1          ← 0 行日志，issue 描述的静默\n  × the driver text still does not reach the client\n      expected { error: 'Object not found', ...(2) } to deeply equal\n               { error: 'Internal data error', ...(1) }\n  × Postgres phrasing lands identically\n  × no request object at all → fault\n  × a DIFFERENT table than the requested object → fault\n  × an auxiliary table of the requested object is still a fault, not a 404\n  × an empty-string object cannot be attributed to → fault\n  × a phrasing that names no relation cannot be attributed to → fault\n  Tests  9 failed | 12 passed (21)\n```\n\n方向如预判。**一处需要如实说明**：预判写的是「§1+§2 整段红」，实跑是 21 条里精确红掉 9 条 —— 剩下 3 条同段用例本来就该绿，不是漏网：premise guard 断言的是逃逸错误的形状（与本改动无关），另两条断言可归属的 relation 名（`main.acct` / 大小写）判 404，改动前后都是 404。这 3 条按「§1+§2 全红」的模板本该算失败，如实记在这里而不是去改用例迁就模板。还原后 ②③ 全绿，与预判一致。\n\n## 测试\n\n新增 `packages/rest/src/rest-unknown-object-heuristic.test.ts`（21 条，四段：真实 harness 走完整条路 / 归属规则的单元边界 / 真 unknown object 仍静默 404 / #5464+#5436 不回归），复用 #5464 的 harness，in-process 用例一律 `}, 60_000)`。\n\n```\npnpm --workspace-concurrency=2 --filter @objectstack/rest test -- --maxWorkers=2\n  Test Files  48 passed (48)\n       Tests  719 passed (719)\n```\n\n合并 `origin/main`（`4d573878a`）后重跑同样 719 绿；进来的提交没有一个碰 `packages/rest`，按 AGENTS.md §10 作范围化复核。\n\n`pnpm typecheck` 这一项**对本包不适用且我不打算伪造**：`@objectstack/rest` 没有 `typecheck` script，它在 `scripts/check-type-check-coverage.mjs` 的 DEBT + TEST_DEBT 台账里（#4311）。跑的是该台账自己的闸门，绿：\n\n```\ncheck-type-check-coverage: OK — 62/77 workspace packages type-checked (plus the root),\n  15 in the DEBT ledger (358 frozen raw errors), 1 exempt.\n```\n\n外加 `pnpm --filter @objectstack/rest build`（含 DTS）通过，`node scripts/check-nul-bytes.mjs` OK。\n\n## 消费半径扫描\n\n`mapDataError` 只有 `packages/rest` 一个真消费方（其余仓内引用全是注释）。跨包只经 HTTP 集成用例暴露，逐一核过：`packages/objectql` 的 `OBJECT_NOT_FOUND` 断言、`packages/qa/dogfood/registry-gate-wiring`、`packages/runtime/domains/error-passthrough` 全部是 gate 产出的显式 `code`+`status`，在启发式之上老远就被匹配走；`packages/qa/http-conformance` 的 fixture 已 `syncObjectSchema('task')`，其 `no such table` 只出现在讲历史的注释里，没有断言。\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_016FNvXhtSdnEGEfLEsMmvxh)_\n"
+}

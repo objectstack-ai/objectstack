@@ -1,0 +1,33 @@
+{
+  "number": 5454,
+  "kind": "pull_request",
+  "title": "docs(protocol): widget-contract 的 Theme 段停止教 #3494 已删除的 `density`,token 词表按 #5021 重写 (#5291)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T12:30:31Z",
+  "updated_at": "2026-08-05T12:45:36Z",
+  "closed_at": "2026-08-05T12:45:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T12:45:35Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5454",
+  "body": "Fixes objectstack-ai/objectstack#5291\n\n## 前提已核(against `origin/main` @ `01c0baef9`)\n\nissue 正文是线索不是规格,先证伪再动手。该页确实仍停在 #3494 之前:\n\n- `content/docs/protocol/objectui/widget-contract.mdx:319` 散文:「… and `density` is one of `compact`, `regular`, or `spacious`」\n- 同段 `:325` YAML 示例:`density: regular`\n- `packages/spec/src/ui/theme.zod.ts` 的 `THEME_RETIRED_KEY_GUIDANCE` 里 `density` 是一条 #3494 墓碑,`ThemeSchema` 自 #4001 批 15 起 `.strict()`\n\n派发口径的前置条件也已满足:PR #5289 已 MERGED,#5021 的退役面已在 `origin/main` 的 `theme.zod.ts` 上落定。\n\n## 用可执行的方式钉住「照抄即失败」\n\n把该页 `## Theme` 段的 YAML fence 抽出来喂给真正的 `ThemeSchema`(即 `defineTheme()` / `defineStack({ themes })` 跑的那一段)。**方向是在跑之前定的:改前红、改后绿**——这一单里被改的是示例本身,规则(`ThemeSchema`)没动,所以这是最普通的那个方向,没有反转。\n\n改前(`origin/main` 的页面),**两处**失败而不是一处:\n\n```\nRESULT: ThemeSchema.safeParse -> FAILURE\n  [invalid_type] path=[\"colors\"] :: Invalid input: expected object, received null\n  [unrecognized_keys] path=[] :: Unrecognized key(s) on this theme: `density`. …\n  • `density` was removed in #3494 — no renderer read it. Express compact/comfortable spacing as your own tokens under `customVars`.\n```\n\n`colors:` 底下只有一行注释,YAML 解析成 `null`,而 `colors` 必填、其 `primary` 必填。issue 只点了 `density`,但「照抄本页 = 构建失败」这条主张实际由两个缺陷共同成立,所以两个一起修——只修 `density` 的话,照抄的人仍然拿到一次失败,缺陷的标题依旧成立。\n\n改后(本分支):\n\n```\nRESULT: ThemeSchema.safeParse -> SUCCESS\nparsed keys: borderRadius, colors, customVars, label, mode, name, shadows, typography\n```\n\n## 词表刷新:每条断言逐键核过,不是照抄 issue 正文\n\n派发口径明确要求以 `origin/main` 的实际墓碑为准。退役面与活键都对着 `theme.zod.ts`、发出的 CSS 变量对着 objectui `packages/core/src/theme/ThemeEngine.ts` 核过:\n\n- `COLOR_TO_CSS_MAP` 确认改名:`surface` → `--card`、`text` → `--foreground`、`textSecondary` → `--muted-foreground`、`disabled` → `--muted`、`error` → `--destructive`\n- `generateBorderRadiusVars` / `generateShadowVars` 确认 `base` 发的是裸 `--radius` / `--shadow`\n- `generateTypographyVars` 确认 `fontFamily.base` 发 `--font-sans`\n- `customVars` 确认逐字发出(缺 `--` 前缀时补上)\n\n并用第二个 harness 把页面的主张与 schema 对齐扫了一遍——16 个退役键必须被拒、10 个活键必须被接受:\n\n```\n## RETIRED at the theme level — each must be REJECTED\n  spacing / breakpoints / logo / density / wcagContrast / rtl /\n  touchTarget / keyboardNavigation / animation / zIndex        rejected\n## RETIRED inside typography — each must be REJECTED\n  fontSize / fontWeight / lineHeight / letterSpacing            rejected\n  fontFamily.heading / fontFamily.mono                          rejected\n## LIVE — the ten keys the doc enumerates, each must be ACCEPTED\n  name / label / description / mode / colors / typography /\n  borderRadius / shadows / customVars / extends                 accepted\n\nOK — doc claims match the schema exactly.\n```\n\n两个 harness 都是一次性的,已在提交前删除,不进仓库。\n\n## 改了什么\n\n- 散文改为逐一列出 `ThemeSchema` 的**十个**可写键,并用一张表给出每个 token 键实际落到 document 上的 CSS 变量。\n- YAML 示例换成一份真能解析通过的完整主题(含 `shadows` / `typography.fontFamily.base` / `customVars` 三个此前没露过面的活键)。\n- 新增一段 `Callout type=\"warn\"`(与本页 `widget.performance` 那段同一形状)点名两批退役键:#3494 的八个,#5021(`@objectstack/spec` 17.0.0, ADR-0049)的 `animation` / `zIndex`、`typography` 四条排版标尺、`fontFamily.heading` / `mono`。处方统一是 `customVars`,并说明它是**逐字节等价**的替代,附 `os migrate meta --from 16`。\n- 末句由「they do not each carry a full set of color/typography props」改为不再暗示主题有一套 typography 词表可继承。\n\n范围严格限定在该页 Theme 段。⛔ 未碰 `content/docs/references/**`(生成物)与 `content/docs/releases/`。同页其它段落不在本单范围。\n\n## 门禁(真实输出)\n\n```\n✓ doc authoring guard: 362 files clean — no bare metadata literals.\ncheck-role-word: OK (43 baselined file(s), no new occurrences).\n✓ docs-accuracy-audit scope is in sync with content/docs/: 178 hand-written doc(s).\ncheck-nul-bytes: OK (scanned 5443 tracked text file(s); … no raw NUL bytes).\n✓ .changeset/config.json \"fixed\" group is in sync with 69 public workspace packages.\n```\n\n另外用 `@mdx-js/mdx` 单独编译了这一页(`MDX compile OK`),因为本次新增了表格与 Callout。`grep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]'` 自查该页无控制字节。\n\nChangeset:`.changeset/widget-contract-theme-token-vocabulary.md`(docs-only,空 frontmatter,releases nothing——沿用 `http-protocol-discovery-two-shapes.md` 的先例)。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01GX3sL71LFq8m2usg6VqTSE\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01GX3sL71LFq8m2usg6VqTSE)_"
+}

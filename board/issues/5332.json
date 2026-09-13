@@ -1,0 +1,36 @@
+{
+  "number": 5332,
+  "kind": "issue",
+  "title": "分析查询的 `{field: {$eq: null}}` / `{$ne: null}` 编译成 `col = ''` / `col != ''`,与同文件里 `{field: null}` 的 `IS NULL` 自相矛盾",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T23:35:34Z",
+  "updated_at": "2026-08-05T16:35:07Z",
+  "closed_at": "2026-08-05T16:35:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5332",
+  "body": "修 #5325(`filter-normalizer.buildNode` 的 `$not` NULL 安全 + 布尔常量)时,为了写 `$not` 的\n逐算子极性表必须逐个核对本文件每个算子**实际编译成什么**,在这一步发现的分叉。\n**不属于 #5325 的范围面**(那一单是 `$not` / 布尔单位元三条),按 Prime Directive #10\n单独记在这里,unassigned。\n\n## 位置\n\n`packages/services/service-analytics/src/strategies/filter-normalizer.ts` 的 `fieldLeaves`\n+ `stringifyForCube`。\n\n## 现象(实测)\n\n`stringifyForCube` 对 `null` 返回**空字符串** `''`:\n\n```ts\nfunction stringifyForCube(v: unknown): string {\n  if (v == null) return '';\n  …\n}\n```\n\n于是一个 `null` 比较数经算子映射后变成了一次**普通值比较**。同一个「这个字段是空」的意思,\n在同一个文件里有两个答案。经 `NativeSQLStrategy.generateSql` 实测(cube `deals`,列 `stage`):\n\n| `where` | 生成的 WHERE | 绑定值 | 应为 |\n|---|---|---|---|\n| `{ stage: null }` | `stage IS NULL` | `[]` | ✅ |\n| `{ stage: { $eq: null } }` | `stage = $1` | `['']` | `stage IS NULL` |\n| `{ stage: { $ne: null } }` | `stage != $1` | `['']` | `stage IS NOT NULL` |\n| `{ stage: { $null: true } }` | `stage IS NULL` | `[]` | ✅ |\n\n两条 objectql 路径同样:`renderFilterNodeSql` 回显 `stage = $1` / `['']`,\n`filterNodeToCondition` 交给引擎的是 `{stage: ''}`(经 `coerceFilterValueForObjectQL('')` →\n`''`),即拿空串去和存储里的 `null` 比 —— 永不匹配。\n\n## 为什么是 bug\n\n- **同文件自相矛盾**:`{field: null}` 走 `fieldLeaves` 的 `raw === null` 分支 → `notSet`\n  (`IS NULL`),而 `{field: {$eq: null}}` 走算子映射 → `= ''`。两种写法在\n  `filter.zod.ts` 里是同一个意思。\n- **与其他后端分叉**:`read-scope-sql.ts` 的 `compileOperator`(同包)对 `$eq: null` 明确\n  给 `IS NULL`、`$ne: null` 给 `IS NOT NULL`;`driver-sql` 的 `nullValueSatisfiesOperator`\n  也是按「`$eq: null` 就是 null 谓词」写的。这个包的另一半和它们一致,这一半不一致。\n- **后果是静默错行**,不是报错:一条「阶段为空」的 widget filter 取到零行(除非真有列\n  存了空串),作者看到的是「没有数据」而不是任何错误。\n- **对文本列尤其危险**:SQLite / MySQL 里 `''` 是一个**真实的值**,所以\n  `{stage: {$ne: null}}` 会把 `stage = ''` 的行排掉,而它本意是「非空」。\n\n## 与 #5325 的关系(为什么那一单没顺手改)\n\n#5325 的守卫表必须「跟随本文件的 emitter」而不是跟随 `read-scope-sql` 的 —— 这是\n`sql-driver.ts` 早就写明的不变量(每个 guard 匹配自己的 emitter)。所以那一单里\n`$eq` / `$ne` 的 null 比较数被当作**普通值比较**来定极性,并在 TSDoc 里注明\n「`''` 比较数本身是另一个缺陷,单独记录、本单不裁定」。本单就是那条记录。\n\n改法一旦落地,#5325 的 `nullValueSatisfiesOperator` / `operatorIsNullTotal` 需要同步补回\n`read-scope-sql` 里那两条 `value === null` 的 arm(`$eq: null` / `$ne: null` 变成 null-total\n→ guard `'none'`),两处一起改才自洽。`filter-normalizer-not-null-safe.test.ts` 里没有\n钉住 `{$not: {stage: {$eq: null}}}` 的行集,正是为了不把当前这个错误答案钉死。\n\n## 建议\n\n`fieldLeaves` 在算子循环里先判 `null` 比较数:`$eq: null` → `leaf('notSet', [])`、\n`$ne: null` → `leaf('set', [])`,与 `raw === null` 分支和 `read-scope-sql` 对齐。\n`stringifyForCube` 的 `v == null → ''` 保持不动(它还服务于别的调用点),或改成让\n`null` 无法进入值数组。\n\n严重度请 PM 按 triage 定 —— 我只测了它编译成什么和取到什么行,没有统计现网有多少\n`{$eq: null}` 形状的 widget。\n\n关联:#5325(同函数、同一轮核对里发现)、#5297 / `read-scope-sql.ts`(同包里正确的那一半)、\n#5146 / #5296(`$not` 的 NULL 语义)、#4128(同文件上一轮「算子静默丢失」)。\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 5468,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): 域分类表补全 22 个未列包,兜底位显式点名 (#5095)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T13:12:14Z",
+  "updated_at": "2026-08-05T13:23:43Z",
+  "closed_at": "2026-08-05T13:23:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T13:23:41Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5468",
+  "body": "Fixes objectstack-ai/objectstack#5095\n\n## 前提复核(先于实现)\n\n- 基线 `origin/main` @ `61fde5e44`。#5453 今日合并后域表已从 313 行移到 **359 行**,本 PR 基于合并后文本工作,第 8 步三轴段一字未动。\n- **对当前 `packages/` 树重新清点,未列包清单与 issue 正文(08-04 清点)完全一致**:`packages/plugins/` 下 8 个(`plugin-email`、`plugin-dev`、`plugin-hono-server`、`plugin-pinyin-search`、`plugin-reports`、`embedder-openai`、`knowledge-memory`、`knowledge-ragflow`)+ `packages/` 顶层 14 个(`adapters`、`apps`、`client`、`client-react`、`cloud-connection`、`console`、`create-objectstack`、`formula`、`mcp`、`observability`、`rest`、`sdui-parser`、`triggers`、`vscode-objectstack`)= 22。期间无包新增/移动/更名。**前提成立。**\n\n## 逐行定级依据(锚定规则:域 = 修复落地的包,读代码不读包名)\n\n| 包 | 域 | 依据(可复核) |\n|:--|:--|:--|\n| `packages/formula` | engine | 内容是 `matches-filter.ts` / `cel-to-filter.ts` / `rls-predicate.ts` —— ObjectQL 过滤与 RLS 的求值面;代码级消费方 objectql(5 文件)、driver-memory(3)、driver-sql(2)、core(2)、metadata-protocol(1);只依赖 spec |\n| `plugin-pinyin-search` | engine | `companion-projection.ts:96-97` 用 `engine.registerHook('beforeInsert'/'beforeUpdate')` 注册全局写钩子,依赖 `@objectstack/objectql` —— 与 #4775 的 hook-wrappers 同一条锚定先例 |\n| `packages/triggers/*` | services | `trigger-record-change/src/plugin.ts:8-21` 自述「automation 引擎的 `FlowTrigger` 接线」;`trigger-record-change` 被 `plugin-approvals`(services)消费 |\n| `plugin-email` | services | 沿用 #5087 首次分诊定级(评论区已记),IEmailService 与 `packages/services/*` 同族 |\n| `plugin-reports` | services | 与 plugin-email 同形:`sys_saved_report` + `IReportService`,依赖 core + platform-objects |\n| `embedder-openai` / `knowledge-memory` / `knowledge-ragflow` | services | 后两者直接依赖 `@objectstack/service-knowledge`;embedder 为同一知识族的嵌入实现 |\n| `packages/sdui-parser` | devx | 全仓唯一**代码**消费方是 `packages/lint/src/validate-jsx-pages.ts:23`(spec 侧只是 `page.zod.ts` 的注释提及);manifest 由 `scripts/gen-sdui-manifest.sh` 生成 |\n| `packages/vscode-objectstack` | devx | 编写期编辑器 DX(字段类型 hover、`.object.ts` 诊断),唯一运行依赖是 spec,受众与 `packages/lint` / `content/docs/**` 同一批 |\n| `apps/docs` | devx | 文档站应用,与既有 `content/docs/**` 同面 |\n| `packages/rest` | cli | #4886 先例,#5423(今日已合)沿用 |\n| `packages/mcp` | cli | 落点与 `packages/runtime/src/domains/mcp.ts` 同缝;由 `packages/cli/src/commands/serve.ts:410` 的能力注册表装配;门禁在 `packages/qa/dogfood` |\n| `packages/observability` | cli | 代码级消费方 runtime(8 文件)最大,其次 plugin-hono-server(4)、rest(2)、cli(1);属 boot 期接线 |\n| `packages/client` / `client-react` | cli | REST 线协议 SDK:`src/` 内是 `rest-route-ledger-coverage.test.ts` / `client.hono.test.ts` / `*-wire-dialect.test.ts`,即 rest + hono 传输面的一致性门;`client-react` 只依赖 `client`。(#5449 分诊时曾悬空,此处定下) |\n| `packages/cloud-connection` | cli | 沿用 cli 车道 2026-08-05 首次分诊(评论区已记):消费者为 cli `serve`/`doctor` 与 runtime boot(`rehydrate`/`handleList`)。**维护者另有裁定则以裁定为准** —— 按 issue 要求,这句只写在 PR 描述里,不入表 |\n| `packages/create-objectstack` | cli | 脚手架 CLI(`npx create-objectstack`),与 `os create` 的模板注册表同族(`packages/cli/src/commands/create.ts:9`) |\n| `packages/adapters/*`(现仅 `hono`) | cli | 依赖恰为 `plugin-hono-server` + `runtime` + `types`,三者全在 cli 行 |\n| `plugin-hono-server` | cli | HTTP 传输面;消费方 cli / runtime / verify / qa/http-conformance / adapters-hono 全在 cli 行 |\n| `plugin-dev` | cli | `os dev` 装配栈(port / seedAdminUser / authSecret / tenancy posture),`dev-plugin-tenancy-posture.test.ts` 与 cli 的 `serve-tenancy-posture-gate.test.ts`、`verify-tenancy-posture.test.ts` 同一面 |\n\n## 兜底位(表内新增一行,写明「不是遗漏」)\n\n- `packages/apps/*`(`setup`/`studio`/`account`):三个包今天只是 app manifest + plugin 壳,内容仍从 `@objectstack/platform-objects/apps` 再导出(`packages/apps/setup/src/index.ts:12-19` 自述为 transitional),落点可能在 platform-objects(engine)、这三个包本身、或控制台渲染面(`repo:objectui`)。\n- `packages/console`:仓内只跟踪 `package.json`/`README`/`CHANGELOG`,`dist/` 由 `scripts/build-console.sh` 从 `../objectui` 生成且禁止手改 —— UI 缺陷走 `repo:objectui`,仓内唯一可改面是 pin/刷新脚本,归 `scripts/`(门禁类)那一行。\n- `examples/*`:照表下原有那句。\n\n另补一句**表的适用范围**:本表只覆盖本仓的包;`objectui`/`cloud` 是仓库级分片,routing 用 `repo:*` 表达,不另打 `domain:*`。这一句直接回应评论区记录的 `domain:ui`(#5236)与 `repo:objectui` 语义重复问题的文本半边。\n\n## 刻意未做的一件事(请 PM 复核)\n\n评论区(`session_01N3uGFF8teXbpgtbEJ1aYXu`)要求随本 PR 补 **`domain:spec-tooling` 行**。**本 PR 未加**,因为两处在册定义互相冲突,加行等于替两个活跃车道拍板边界:\n\n- #5163 的 C 包卡上登记的文件面是 `scripts/**`、`packages/spec/scripts/**`、`packages/lint/**`、`content/docs/**`;\n- 而表内 `domain:devx` 行现在写的就是 `packages/lint`、`content/docs/**`、`scripts/`(门禁类),且 devx 车道现有在册 PM。\n\n两者**完全重叠**,与锚定规则「每个包恰好属于一个 domain」直接矛盾。按「不猜」纪律另立 issue 记录,不在本 PR 里替维护者/两条车道定边界。`domain:ui` 标签本身(#5236 上摘掉还是宣布为别名)同样是标签动作而非文本动作,留给 PM。\n\n## 验证\n\n- 写了一段机械核验脚本,按 `pnpm-workspace.yaml` 的 glob 枚举全部 **77** 个 workspace 包,再拿改后表格的每一行去匹配:`domain:engine` 13、`domain:services` 30、`domain:identity` 4、`domain:devx` 4、`domain:spec` 1、`domain:cli` 17、兜底行 8 —— **每个包恰好命中一行,零未覆盖、零重叠**。\n- `node scripts/check-nul-bytes.mjs` → OK(5447 个文件,无裸 NUL);`node scripts/check-doc-authoring.mjs` → 362 files clean;`check-changeset-fixed` / `check-changeset-no-major` 均 exit 0。\n- 控制字符自查 `grep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]'` 对改动两文件零命中。\n- 本次改动不落在任何 workspace 包内(只有 `.claude/` 文本 + changeset),故无「受影响包的 `pnpm test`/`typecheck`」可跑 —— 如实说明,不编造。\n\nchangeset 按仓惯例空 frontmatter(先例 `.changeset/pm-dispatch-three-axis-decision-frame.md`),不发布任何包。已发布镜像 `skills/objectstack-pm-dispatch/SKILL.md` 不含域表,无镜像漂移。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01GX3sL71LFq8m2usg6VqTSE\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01GX3sL71LFq8m2usg6VqTSE)_"
+}

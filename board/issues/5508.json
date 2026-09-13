@@ -1,0 +1,36 @@
+{
+  "number": 5508,
+  "kind": "pull_request",
+  "title": "chore(scripts): watch npm for the stable release that retires a prerelease pin (#5024)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T14:34:01Z",
+  "updated_at": "2026-08-05T15:04:50Z",
+  "closed_at": "2026-08-05T15:04:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T15:04:48Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5508",
+  "body": "Fixes objectstack-ai/objectstack#5024\n\n## 前提复核(先说结论:两条前提都仍然成立)\n\n派发口径要求先实测,结果如下:\n\n1. **pin 仍是预发布** —— `origin/main` 的 `pnpm-workspace.yaml` 里 better-auth 全家 11 条 override 全部指向预发布:family 在 `1.7.0-rc.2`,`@better-auth/scim` 按 #3653 的决定仍留在 `1.7.0-rc.1`。没有人做过 #3002。\n2. **npm 上今天还没有非预发布的 1.7.x** —— 三个包(以及另外 8 个 family 包)的 `1.7.x` 版本表里全是 `beta.0..beta.10` / `rc.0..rc.4`,`dist-tags` 是 `latest=1.6.26`、`rc=1.7.0-rc.4`。\n\n所以探针**首跑不命中**:本单不是白做,也不需要把解锁转给 identity 车道。逐包结论见下表(探针 `--verbose` 的真实输出):\n\n| 包 | pin | 1.7.x 稳定版 | 结论 |\n|:---|:---|:---|:---|\n| `better-auth` | 1.7.0-rc.2 | 无 | waiting |\n| `@better-auth/core` | 1.7.0-rc.2 | 无 | waiting |\n| `@better-auth/scim` | 1.7.0-rc.1 | 无 | waiting |\n| `oauth-provider` / `sso` / `telemetry` / 五个 adapter | 1.7.0-rc.2 | 无 | waiting |\n\n顺带一个**事实记录、非本单改动**:上游 `rc` 标签已经走到 `1.7.0-rc.4`,而我们钉在 `rc.2`。这不是缺陷(pin 是刻意的),探针也不会因此报警 —— 更新的预发布不是触发条件。留给 #3002 在真正回归时一并判断。\n\n## 做了什么\n\n新增 `scripts/check-prerelease-pin-watch.mjs`,由新的 `.github/workflows/prerelease-pin-watch.yml` 每晚 06:00 UTC 跑。它是个**观察者,不改 pin**:唯一职责是让 #3002 / #3653 的触发时点变成一条自动信号,而不是靠人记得。\n\n**监视清单是从 pin 推导出来的,不是硬编码的。** 脚本读 `pnpm-workspace.yaml` 的 `overrides`,取出所有 target 是预发布版本的条目。因此:新增一条预发布 pin 当天就被纳入监视,无需改脚本;某条 pin 回归稳定区间后自动离开清单;最后一条消失时探针报告 \"nothing to watch\" 并退出 0 —— 它会**自我退休**,而不是留待谁去删。硬编码三个包名的版本,会立刻和文件里实际存在的 11 条 pin 对不上。\n\n**判据是 semver,不是 `latest` 标签。** 命中条件是「无 prerelease 段、且大于等于 pin 的基线版本」。这两件事今天是真的不同:`latest` 还在 1.6.26,上游完全可以先发 `1.7.0` 而标签留在 1.6 好几天 —— 盯 `latest` 的探针会睡过它要抓的那一刻。`dist-tags` 只作为上下文打印,并显式标注 \"NOT the criterion\"。\n\n命中分两种形态,因为补救动作不同:\n\n- **in-line** —— pin 所在线(`1.7.x`)出了稳定版,就是 #3002 / #3653 写下的那个触发条件,机械地移 pin;\n- **later** —— pin 所在线始终没稳定,只有更高线(1.8+)有稳定版。也能让我们下预发布,但跨 minor 是**决策**不是 bump。单独成一类是为了堵住一个洞:否则上游稳定 1.8、放弃 1.7,探针会永远沉默 —— 那正是 #5024 的缺陷本身往旁边挪了一格。\n\n**三个退出码,因为「npm 读不到」和「还没发稳定版」是两件不同的事:**\n\n| 退出码 | 含义 | nightly 表现 |\n|:---:|:---|:---|\n| 0 | 还没有稳定版 | 一行,零噪音 |\n| 1 | 有稳定版 | job 红,`::error::` 点名 #3002 / #3653 并附动作清单 |\n| 2 | registry 读失败 | `::warning::` + step summary,job 绿 |\n\n**退出码 2 的取舍说明(这是刻意的,不是漏了)。** 这是无人值守的 nightly:一次 npm 5xx 把它刷红,就会教所有人跳过它,而「没人看的 nightly」恰恰是 #5024 要终结的状态。漏一晚最多损失一天 —— 下一跑从头重探,而「某版本已发布」是**永久事实**,不会被撤回成沉默。所以红色在这里只保留一个含义(稳定版出来了),探测失败则是「响亮但不阻塞」,而绝不会被当成「还没发布」报出去 —— 后者是它唯一不能做的事。真需要更硬的线时 `--strict` 把 2 提成 1,升级是一个 flag 而不是重写。\n\n对比 `check:objectui-pin-fresh`:那条是 release PR 上的必需门禁,读不到远端**必须**失败,因为沉默就等于放行它要抓的缺陷。语义相反是因为运行位置不同,脚本头里写明了。\n\n**挂载点的选择。** 没有进 `lint.yml`(探针要联网,本仓任何必需 PR 门禁都不该依赖第三方 registry 可用);也没有挂 `validate-deps.yml` —— 题材最近,但它是**每周一** 03:00 跑,而本单验收标准是「发布后第一个工作日内」,周计划可能压在事件上六天。于是新建一个极轻的独立 workflow(checkout + node + 一个脚本,**不装依赖**,脚本刻意零依赖,整个 job 约 15 秒)。PR 上只跑离线 `--self-test`(「改门禁就跑门禁」)。\n\n## 验证\n\n- `--self-test`(离线,47 条断言全绿):伪造 registry 响应覆盖三态、空清单、以及真实 CLI 的退出码;还断言**仓库真实的** `pnpm-workspace.yaml` 能解析出非空清单 —— 只读自己 fixture 的自测,会在被监视文件挪走时依然全绿。\n- **反向验证,走真实网络,方向先预测后运行**:\n  - 预测 exit 1 —— 用合成 pin(`better-auth` 钉在 `1.6.0-rc.1`,该线的稳定版在 npm 上真实存在)跑**真** registry:实得 exit 1,列出 `1.6.0 .. 1.6.26`、`trigger=in-line`、点名 #3002。证明的是命中路径的整条真实链路(网络读取 + semver 判定 + 退出码),不只是 fixture。\n  - 预测 exit 2 —— `--registry` 指向不可达主机:实得 exit 2,逐包打印 `fetch failed` 原文 + `::warning::`,且输出里不含 \"nothing to do\";加 `--strict` 得 exit 1。\n- 仓库既有门禁:`check-workflow-status-functions`(#5343 那条,含我的新 workflow 共 22 个文件,OK)、`check-node-version`(23 个 setup-node 步骤全 Node 22)、`check-nul-bytes`(5461 个文件,零控制字节)、`check-changeset-fixed`、`check-changeset-no-major` 全绿;另外按字节纪律用 `grep -naP` 对本 PR 四个文件做了越过门禁盲区的自扫,干净。\n- changeset 用空 frontmatter(工具链改动,先例 #5461 / #5477)。\n\n## 说明一处与模板预设不符的地方\n\n本单落点是仓库根的 `scripts/` 门禁,不属于任何 workspace package,因此 `pnpm test` / `pnpm typecheck` 对它**没有可跑的目标**(根 `typecheck` 是 `turbo run typecheck`,按包展开)。按本仓惯例,这类门禁的测试面就是脚本自带的 `--self-test`(与 `check-nul-bytes` / `check-objectui-pin-fresh` 同形),上面列的既有门禁运行则是外部证据。与其编一个「跑了 pnpm test」的假证据,这里如实说明。\n\n## 文件面\n\n`scripts/check-prerelease-pin-watch.mjs`(新)、`.github/workflows/prerelease-pin-watch.yml`(新)、`package.json`(加一条 `check:prerelease-pins`)、`.changeset/`(新)。未触 `lint.yml`、`.claude/**`、`packages/lint`,也未改任何 pin。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01GX3sL71LFq8m2usg6VqTSE\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01GX3sL71LFq8m2usg6VqTSE)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 5482,
+  "kind": "issue",
+  "title": "`multi: true` 且 `filter` 为空的 delete_record / update_record 是「按声明清空整个对象」,authoring 期零诊断 —— #3810 的守卫按「条件被抹掉」判定,不按「条件为空」判定",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T13:48:17Z",
+  "updated_at": "2026-08-05T23:25:53Z",
+  "closed_at": "2026-08-05T23:25:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5482",
+  "body": "发现于 #5393(给 flow `update_record` / `delete_record` 补 `multi` 批量意图键)的实现过程,PR 见该单。属 PD #10 的范围外发现,#5393 内刻意不修 —— 加这条守卫等于在该单里发明 issue 没要求的新语义,交 PM 定级。\n\n## 事实\n\n#5393 落地后:\n\n- `config: { objectName: 'lead', multi: true }`(**没有 `filter`**)会走到 `data.delete(objectName, { where: {}, multi: true })`,引擎按 `resolveEngineDeleteDispatch` 判为 `multi` → `driver.deleteMany({})` → 整表。\n- 这不是 bug,是**声明**:引擎自己的派发表就把 `{ what: 'multi with no predicate at all', options: { multi: true }, expect: 'multi' }` 列为合法(`packages/objectql/src/engine-delete-dispatch.ts`),平台层面「显式的整表删除」一直是可表达的。\n- #3810 的抹除守卫**不会**拦它,而且是刻意的:`packages/services/service-automation/src/builtin/crud-nodes.ts` 的注释写明「deliberately keyed on 'a condition the author wrote is gone', not on 'the filter is empty'」,`crud-filter-guard.test.ts` 还有一条用例专门钉住「an intentionally empty filter is still allowed (nothing was erased)」。\n\n在 #5393 之前这条路径**不可达**(执行器从不传 `options.multi`,引擎一律拒绝),所以「空 filter + 批量」此前从来不是一个真实的授权面。现在它是了。\n\n## 为什么值得看一眼\n\n防 AI 轴上,#5393 把最常见的错误从「filter 字段名拼错 → 引擎点名拒绝」挡住了,但没有覆盖另一个形状:**AI 写了 `multi: true` 却忘了写 `filter`**。此时:\n\n- 没有 authoring 期诊断(schema 里 `filter` 本来就是 optional,`multi` 与它之间没有任何约束);\n- 没有 lint 规则(`packages/lint/src/lint-flow-patterns.ts` 的 `DATA_NODE_TYPES` 只用于 runAs 相关判定,没有针对破坏性节点的约束检查);\n- 运行期只会成功,`acted` 报出被删的行数 —— 也就是说,反馈只在**删完之后**出现。\n\n对照 #3810 的原始事故:那次是「一个拼错的字段名静默清空对象」,修法是让抹除**拒绝执行**。这里是同一个后果,不同的入口。\n\n## 可选方向(供 PM 定级,不预设结论)\n\n1. **lint 规则(倾向)**:`multi: true` 且 `filter` 缺失/为空 → 告警(而非 fail),文案说明这是整表写,要么补约束,要么显式确认。放在 `packages/lint`,与 #5417 那类「声明了但没有可寻址键」的规则同一层。注意会撞上 #5383(flow lint 不进 loop 体)。\n2. **spec 层约束**:在两个 config schema 上加 refine —— `multi: true` 要求 `filter` 非空。最强,但会让「显式整表清理」这个引擎认可的合法意图在 flow 层不可表达,需要先确认没人要它。\n3. **什么都不做**:整表删除是显式声明的、可 grep 的,引擎层同样允许;把它留给 code review。\n\n## 完成判据(若采纳 1)\n\n- 规则命中 `delete_record` / `update_record` 且 `multi: true` 且 `filter` 无有效条件;\n- 明确不重复 #3810 的抹除守卫(那条是运行期拒绝,这条是 authoring 期告警),两者的诊断文案互相点名;\n- 例子:showcase 的清扫流(#5225 收尾后)必须保持零告警 —— 它是有 filter 的。\n\n关联:#5393(引入这条路径的单)、#3810(抹除守卫,以及它为什么不按「空」判定)、#5225(现场)、#5383(loop 体 lint 盲区)。\n"
+}

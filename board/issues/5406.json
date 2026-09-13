@@ -1,0 +1,37 @@
+{
+  "number": 5406,
+  "kind": "issue",
+  "title": "console: language choice is held in memory only — any reload reverts to `en`, so no locale is usable beyond a demo",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T08:55:46Z",
+  "updated_at": "2026-08-05T10:58:54Z",
+  "closed_at": "2026-08-05T10:58:54Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5406",
+  "body": "Switching the console language (avatar menu → Preferences → Language) takes\neffect immediately but is never persisted. A page reload — or opening the app in\na new tab — silently returns the whole UI to `en`.\n\n### Reproduction (17.0.0-rc.2)\n\n1. Log in, switch language to 中文. UI localizes correctly.\n2. Reload (F5) or `page.goto` anywhere.\n3. UI is back in English; the network shows the console requesting\n   `GET /api/v1/i18n/translations/en` again.\n\n### Analysis\n\nNothing is written on switch: no `localStorage` entry, no\n`sys_user_preference` row, no persisting request. The locale endpoints\nthemselves are correct — `GET /api/v1/i18n/locales` lists the app's locales and\nshort-code resolution works (`/translations/zh` → the `zh-CN` bundle). The\nselection is simply never stored anywhere, so it cannot survive a reload.\n\n### Impact\n\nEvery non-`en` locale is demo-only: a user cannot *be* a Japanese or Chinese\nuser of the product, only preview the translation until the next navigation.\nThis blocks localized trials outright — an app-side bundle can be 100% complete\n(HotCRM's four locales lint at zero) and it makes no difference after the first\nF5. It also complicates automated locale testing: any mid-run `goto` silently\nreverts the UI and manufactures false \"untranslated\" findings.\n\nAn app cannot work around this from metadata; persistence of a user preference\nis console/platform behaviour.\n\nDownstream: objectstack-ai/hotcrm#681."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 5198,
+  "kind": "issue",
+  "title": "finding(service-queue): `db-queue-adapter.test.ts` 的 engine-double DEBT 台账条目已可结清 —— 它自述的阻塞(缺 @objectstack/objectql devDependency)在 #5192 里已消失",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T08:32:37Z",
+  "updated_at": "2026-08-05T16:35:50Z",
+  "closed_at": "2026-08-05T16:35:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5198",
+  "body": "机械性 follow-up,来自 PR #5192(#5179)。**没在该 PR 里做**:派发指令明确只修被门禁点名的那一处。\n\n## 事实\n\n`scripts/engine-double-contract.baseline.json` 里 `db-queue-adapter.test.ts` 的条目:\n\n```\nkind:  DEBT\nwhy:   HAND-MIRRORS the guard already … but @objectstack/service-queue does not\n       depend on @objectstack/objectql, so replacing the copy with the\n       producer's predicate needs a devDependency change.\ncloses: add @objectstack/objectql to devDependencies, then replace the mirrored\n       `if` with assertEngineDeleteDispatch(options)\n```\n\nPR #5192 为了把新增的 `job-queue-retention.test.ts` 钉到 producer 谓词上,**已经把 `@objectstack/objectql` 加进了 `@objectstack/service-queue` 的 devDependencies**。于是:\n\n- 该条目的 `why`(阻塞理由)现在是**过期的**:依赖已经在了;\n- `closes` 里写的两步只剩第二步,一个 4 行改动:`db-queue-adapter.test.ts` 的 `delete()` 开头换成 `assertEngineDeleteDispatch(opts)`,按 dispatch 分支删除,然后删掉这条台账条目。\n- 门禁当前仍然是绿的(DEBT 条目就是给它开的口子),所以这不是 CI 红,只是台账上一条自述理由已不成立的债。\n\n## 建议\n\n作为 #5192 的收尾或独立小 PR 结清;真要保留则需重写 `why`(现在的措辞会误导下一个读它的人)。\n\nFound-during: #5179 / PR #5192\n"
+}

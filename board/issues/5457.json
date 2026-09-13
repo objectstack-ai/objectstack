@@ -1,0 +1,32 @@
+{
+  "number": 5457,
+  "kind": "issue",
+  "title": "showcase: `ContactViews` 从 views barrel 导出却从未登记进 config 的 `views:` —— 「创建表单 ≠ 编辑表单」这个被文档引用的示例根本不在运行的 stack 里",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T12:47:13Z",
+  "updated_at": "2026-08-05T12:48:40Z",
+  "closed_at": "2026-08-05T12:48:40Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5457",
+  "body": "发现于 #5417 的实测(PR #5455):跑新规则时,`examples/app-showcase` 全配置命中 14 条,但 `showcase_contact` 那条(`formViews.create` 的 `{ label: 'Who is this?' }`)**没有出现**。追下去发现原因不是规则漏了,而是那份元数据压根没进 stack。\n\n## 事实\n\n`examples/app-showcase/src/ui/views/index.ts` 导出五个视图容器:\n\n```\nTaskViews / ProjectViews / InquiryViews / BusinessUnitViews / ContactViews\n```\n\n`examples/app-showcase/objectstack.config.ts:196` 只登记了四个:\n\n```ts\nviews: [TaskViews, ProjectViews, InquiryViews, BusinessUnitViews],\n```\n\n`ContactViews` 不在其中,`contact.object.ts` 也没有内嵌 `views`,所以 `showcase_contact` 在运行的 stack 里**一个视图容器都没有**。`os validate` 的统计行也印证:`UI: 1 Apps  4 Views  28 Pages ...`。\n\n## 为什么这不是「无所谓的死代码」\n\n1. `src/ui/apps/index.ts:53` 的导航 `{ id: 'nav_contacts', type: 'object', objectName: 'showcase_contact', label: 'Contacts' }` 是**开着的** —— 点进去拿到的是平台派生的默认视图,而不是 `contact.view.ts` 里手写的那对。\n2. `contact.view.ts` 用约 30 行注释把自己定位成「创建表单 ≠ 编辑表单」这一模式的范本,并点名了 `content/docs/guides/solutions/create-vs-edit-form.mdx` 与 ADR-0047。文档指向的示例元数据,运行时从来没被加载过。\n3. 它的 `list.addRecord: { enabled: true, mode: 'form', formView: 'create' }` 指向的 `formViews.create` 同样不在 stack 里 —— 这条引用当前不悬空,只是因为整个容器都不在;一旦有人只把容器补进去而不检查,才会暴露。\n4. 没有任何门禁会说话:`views/index.ts` 的 barrel 导出没有消费者检查,config 的 `views:` 是一个手写数组,少一项和少写一行注释在工具链看来没有区别。\n\n`showcase_contact` 上还有一条相邻但不同的发现 #5443(九个字段声明了 `group` 却没有 `fieldGroups`)—— 那条讲对象侧的分组,本条讲视图容器根本没进 stack,两者不重叠;不过如果有人要修 `showcase_contact` 这一片,值得一起看。\n\n## 复现\n\n```\ncd examples/app-showcase && pnpm validate     # 统计行显示 4 Views\ngrep -n 'views:' objectstack.config.ts        # ContactViews 不在数组里\n```\n\n## 建议方向(供分诊,不预实现)\n\n要么把 `ContactViews` 补进 `views:`(然后确认它带来的告警 —— 按 #5417 的规则,`formViews.create` 那个无名段落会多一条 advisory,不 gate),要么把这个文件与它引用的文档一起下掉。哪一种是对的,取决于 showcase 是否还想 demo 这个模式,属产品判断。\n\n顺带值得问一句更一般的问题:是否需要一条门禁,检查 `src/ui/views/index.ts`(以及同类 barrel)导出的每个容器都真的被 config 登记 —— 「导出了、写了文档、却没进 stack」这一类漏,今天全靠人眼。\n\n---\n发现于 #5417 / PR #5455 的实测过程,超出该 issue 范围,按 Prime Directive #10 单独记录,不认领。\n"
+}

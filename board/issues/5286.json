@@ -1,0 +1,38 @@
+{
+  "number": 5286,
+  "kind": "issue",
+  "title": "`@ts-expect-error` 退役 pin 在 `packages/spec` 里是幽灵检查:tsconfig 把 `**/*.test.ts` 排除出唯一的 `tsc --noEmit`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T15:51:06Z",
+  "updated_at": "2026-08-05T16:00:25Z",
+  "closed_at": "2026-08-05T16:00:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5286",
+  "body": "在 #4938 的退役工作中发现,记录备查,**未认领**。基线 `origin/main` @ `3905c00`。\n\n## 事实\n\n`packages/spec/tsconfig.json` 的 `exclude` 含 `\"**/*.test.ts\"`,而该包的 `typecheck` 脚本就是裸 `tsc --noEmit`(读同一份 tsconfig):\n\n```\npackages/spec | typecheck=tsc --noEmit | exclude=[\"node_modules\",\"dist\",\"**/*.test.ts\"]\n```\n\n所以 **spec 测试文件里的任何类型层断言都不被任何 gate 求值**。vitest 走 esbuild 转译、直接剥类型,不做 typecheck(`vitest.config` 里没有 `typecheck` 段);CI 里也没有第二个把 spec 测试纳入编译的步骤。\n\n我是这样撞上的:给 #4938 的退役写了两条类型层 pin\n\n```ts\n// @ts-expect-error — `HttpServerConfig` was retired with its schema.\ntype _Retired = httpServer.HttpServerConfig;\n```\n\n`pnpm --filter @objectstack/spec typecheck` 通过。**把指令行删掉,它还是通过** —— 两种状态都绿,说明这一行从来没被编译过。若指令真的生效,类型存在时应报 TS2578(unused `@ts-expect-error`),类型不存在时应报 TS2694,两边都不可能静默。据此我把那两条 pin 从 PR 里撤了,改用 `api-surface.json` 作为类型导出的见证。\n\n## 为什么值得单独立单\n\n树上已经有 **4 个 spec 测试文件、约 14 条** `@ts-expect-error`,其中相当一部分正是**退役 pin** —— 即 spec-property-retirement playbook 明确倚重的那条 \"tsc 是最好的清扫器\" 通道:\n\n```\npackages/spec/src/data/object.test.ts:904   // @ts-expect-error — compactLayout was retired (#2536)\npackages/spec/src/data/object.test.ts:946   // @ts-expect-error — the detail block was removed (ADR-0085)\npackages/spec/src/data/object.test.ts:1119  // @ts-expect-error — compactLayout was retired by framework#2536\npackages/spec/src/data/object.test.ts:1130  // @ts-expect-error — `detail` was removed by ADR-0085\npackages/spec/src/data/hook.test.ts:837     // @ts-expect-error — `enabled` is not a hook key (#4207 guidance)\npackages/spec/src/system/translation-typegen.test.ts:102,119,128\npackages/spec/src/contracts/sharing-service.test.ts:30,49\n```\n\n这些行读起来像\"如果 `compactLayout` 回来了,typecheck 会红\",实际上**不会**。它们通过运行时断言恰好还有一半覆盖(`safeParse` 那半),但类型面完全无守卫 —— 属于 phantom check 类:看起来验证过,其实一次都没跑。\n\n`packages/runtime` / `packages/rest` 的 tsconfig 有同样的 exclude(`packages/rest` 甚至没有 `typecheck` 脚本);`packages/cli` 的 exclude 为空,是对照组。范围有多大需要一次横扫,不在本单臆断。\n\n## 可能的处置(供 triage,未裁决)\n\n- A. 给 spec 增加 `tsconfig.test.json`(`include` 含测试、`noEmit`),`typecheck` 跑两份 —— 不动 build 的 rootDir/exclude(那个 exclude 存在是有理由的:CI `ci.yml:824-849` 有一条\"编译产物里不得出现测试文件\"的 gate)。\n- B. 打开 vitest 的 `typecheck` 支持,让类型断言随测试一起跑。\n- C. 判定类型层 pin 不是本仓的守卫手段,把这 14 条改写成运行时断言或删除,并在 playbook 里写明\"tsc 清扫器只覆盖非测试源码\"。\n\n倾向 A:代价最小,且保住 playbook 依赖的那条通道;但这决定了退役工作以后能不能继续把 `tsc` 当清扫器用,应由维护者裁。\n\n关联:#4938、spec-property-retirement skill §1/§6、ADR-0049。\n"
+}

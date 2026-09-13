@@ -1,0 +1,35 @@
+{
+  "number": 5635,
+  "kind": "pull_request",
+  "title": "fix(lint): flow 规则族下钻 loop body 及所有嵌套区域 (#5383)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T21:03:58Z",
+  "updated_at": "2026-08-05T21:26:50Z",
+  "closed_at": "2026-08-05T21:26:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T21:26:49Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5635",
+  "body": "Fixes #5383\n\n## 问题\n\n`packages/lint` 的 flow 反模式规则族从 flow 顶层**平铺**读 `nodes` / `edges`，从不下钻 ADR-0031 容器（`loop` 的 `config.body`、`parallel` 的 `branches[]`、`try_catch` 的 `try`/`catch`）。整族因此对嵌套节点全盲。\n\n而\"扫一批记录、循环、逐条判断\"正是定时 flow 的标准形状——per-item 的 gate 几乎总在 loop 里。issue 的实测：某真实 app 里 8 个 `decision` 带着 `flow-inert-node-condition` 专门要抓的 inert 单数 `config.condition`，8 个全在 loop body 内，`pnpm lint` 一个都没报；同样的 key 放到顶层 decision 上立刻报。同 key、同节点类型，唯一区别是嵌套深度。\n\n盲区也解释了它自己为何能存活这么久：门禁在看得见的地方确实工作，所以顶层的副本被陆续清掉了，而嵌套的那些\"看起来像是被批准过的\"。\n\n## 改法\n\n`lintFlowPatterns` 改为迭代 `collectFlowGraphs`——引擎注册阶段用的同一个遍历（`validateNodeConfigKeys` / `validateFlowExpressions`），也是 `validate-expressions.ts` 在作者侧已经在用的那一个。没有新建第四份区域遍历：`region-slots.ts` 已经把\"区域槽位在哪\"收敛成一张表，图级遍历（nodes + edges 成对）按那张表的分工归 spec。\n\n每条 finding 的 `where` 前缀加区域 scope，消息仍然唯一定位到一个节点：\n\n```\nflow 'campaign_enrollment' · loop 'loop_leads' body · node 'check_not_enrolled' (decision)\n```\n\n顶层图的 `scope` 是空串，所以**顶层 finding 的文案逐字节不变**。\n\n覆盖到的规则：`flow-inert-node-condition`、`flow-decision-unconditional-branch`、`flow-branch-label-unmatched`、`flow-default-edge-with-condition`、`flow-multiple-default-edges`、`flow-double-brace-interpolation`、`flow-bare-dollar-reference`、`flow-date-equality-filter`、`flow-phantom-aggregation`、`flow-error-label-not-fault`，以及 `scanApprovalReviseLoops` / `scanErrorLabelledEdges` / `scanBranchRouting` 三个 scan 函数。其中 `flow-default-edge-with-condition` 是 `severity: 'error'`——这条修的正是 issue 点出的严重性不对称：一条会挡构建的规则此前看不见下一层写的矛盾。\n\n### 两处是承重的，不是顺手\n\n**1. 每个区域的 nodes 与 edges 必须成对。** branch-routing 族要把节点和它的出边一起判断，而区域是自洽子图。拍平成一个 nodes 袋 + 一个 edges 袋会两个方向都坏掉：\n\n- 嵌套 decision 的出边不在顶层 edges 里，于是它读起来\"没有出边\"，`outs.length === 0` 直接跳过——静默漏判；\n- 节点 id 只在**图内**唯一、不是 flow 内唯一，所以两个不同区域里同名的节点会被合并出边，凭空造出一个 fan-out 误报。\n\n第二种情况有专门的回归测试钉住（两个 parallel branch 各有一个同名 `gate` 各带一条 `isDefault` 出边，拍平实现会误报 `flow-multiple-default-edges`，成对实现保持安静）。\n\n**2. 容器自己的 config 在递归扫描时要剥掉区域槽位。** `collectTemplateStrings` 递归到字符串叶子，而容器的 config 物理上**包含**所有后代的 config。这里有个反直觉的事实：改动前 loop body 里的 `{{ }}` 其实**已经被看见了**，只是被归属到外层 `loop` 节点上——正是 #4380 给 `validate-flow-template-paths` 修过的同一种失败模式（看得见，但判在了错误的节点上）。所以如果只下钻而不剥离，就会变成**报两次**。剥离后 finding 落到真正携带该字符串的节点上，且仍然只报一次。\n\n`stripRegions` 从 `flow-walk.ts` 导出复用，没有复制第二份——\"config 去掉区域\"这个视图在包内只有一个定义。\n\n## 边界\n\n- **不动 `@objectstack/service-automation`**：引擎侧本来就是对的，本 PR 只让 linter 追上它。\n- **语义只加不改**：顶层行为与文案不回归，只新增嵌套命中（唯一的文案变化是上面那条 double-brace 的重新归属，属于修正而非回归，有测试钉住方向）。\n- `flow-runas-unscoped` **故意**保留只搜顶层节点的行为：它也有同族盲区（实测顶层报 1 条 error、挪进 loop body 报 0 条），但它是**会挡构建的 gating 规则**，放宽它的爆炸半径需要单独决策，已另开 #5633 记录（含实测 A/B）。\n- 相邻单 #5496 未触碰。\n\n## 验证\n\n**新 fixture 先红后绿**（方向在跑之前先声明，实际与预测一致：9 条新测试里 7 红 2 绿）。把两个源文件 stash 回 `origin/main`、只留测试：\n\n```\nTests  7 failed | 72 passed (79)\n```\n\n- 6 条\"嵌套可见性\"用例：`AssertionError: expected [] to have a length of 1 but got +0` —— 纯盲区。\n- double-brace 用例：**计数断言（第 985 行）通过**，只有 `where` 断言失败：\n  ```\n  Expected: \"flow 'campaign_enrollment' · loop 'loop_leads' body · node 'send_reminder' (notify)\"\n  Received: \"flow 'campaign_enrollment' · node 'loop_leads' (loop)\"\n  ```\n  即这条规则改动前后计数都是 1，变的是归属——所以对它而言\"先红\"红在 `where` 上，不在计数上。这与模板预设的\"计数 0 变 1\"不同，如实记录。\n- 2 条**改动前后都绿**、如实说明价值所在：顶层 A/B 孪生用例（非回归钉子）与反拍平对照用例（它防的是错误的实现方式，不是旧代码）。\n\n恢复源文件后：\n\n```\nTest Files  59 passed (59)\nTests  1293 passed | 4 skipped (1297)     # @objectstack/lint 全包\n```\n\n消费半径（该规则族由 `authoring-rules.ts` 供给 cli validate/lint/compile + runtime publish gate）：\n\n```\n@objectstack/metadata-protocol   42 passed (42) / 388 passed\n@objectstack/cli                 82 passed (82) / 807 passed\n```\n\ntypecheck / build / 字节纪律：\n\n```\npnpm --filter @objectstack/lint typecheck   → tsc --noEmit 无输出\npnpm --filter @objectstack/lint build       → Build success\nnode scripts/check-nul-bytes.mjs            → OK (5533 files, no raw ASCII control bytes)\neslint（三个改动文件）                        → 无告警\n```\n\n**真实 example app A/B**（Dogfood 门禁风险面）：`app-showcase` / `app-crm` / `app-todo` 共 34 条 flow，改动前后均 **0 findings**，无新增门禁失败。为证明这个 0 不是\"没走到\"，另做探针：往 showcase `showcase_batch_reminders` 的 `loop_tasks` body 里注入一个 inert condition，确认被抓到且 scope 正确：\n\n```\n[warning] flow-inert-node-condition @ flow 'showcase_batch_reminders' · loop 'loop_tasks' body · node 'send_reminder' (notify)\n```\n\n## changeset\n\n`.changeset/flow-lint-loop-body-descent.md` — `\"@objectstack/lint\": patch`。未触碰 `content/docs/releases/`。\n\n## 已知环境红（非本 PR）\n\nESLint job 当前全仓红，base 侧 #5604（`check:engine-double-contract` 挂在 `packages/runtime/src/action-execution-calldata-not-found.test.ts`，#5584 引入）。本 PR 未新增假引擎 `delete()`，不涉及 #5197 门禁。若遇 Check Changeset 竞态红见 #5580；merge queue 若出现 `ENOENT rename ...tgz.downloading` 签名见 #5517。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01GX3sL71LFq8m2usg6VqTSE)_"
+}

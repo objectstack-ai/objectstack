@@ -1,0 +1,35 @@
+{
+  "number": 5636,
+  "kind": "issue",
+  "title": "finding(service-automation): connector 降级路径(#3017)还有两处 `${err.message}` 单行插值,是 #5575 之外的第三个接缝",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T21:11:07Z",
+  "updated_at": "2026-08-05T23:22:13Z",
+  "closed_at": "2026-08-05T23:22:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5636",
+  "body": "做 #5575(PR 见下)时在同一个文件扫到的同类形态。#5575 的正文只点了 `fail()` 的两个调用点,这两处在**另一个方法**里(`degradeConnectorInstance`,#3017 的降级/重试路径),不在那一单的范围内,按 Prime Directive #10 单开。\n\n### 现象\n\n`packages/services/service-automation/src/plugin.ts`(origin/main `cc5b048a0`):\n\n1. **`plugin.ts:1272-1274`** — husk 注册失败:\n\n   ```ts\n   ctx.logger.warn(\n       `[Automation] could not register degraded husk for '${info.name}': ${(err as Error).message}`,\n   );\n   ```\n\n   `err` 来自 `engine.registerDegradedConnector(...)`,catch 注释自己写着「the entry's def no longer parses」—— 也就是说这里预期接到的正是解析类错误。\n\n2. **`plugin.ts:1277-1283`** — 降级公告:\n\n   ```ts\n   ctx.logger.error(\n       `[Automation] connector instance '${info.name}' … ` +\n           `; retrying with backoff, attempt ${attempts} (#3017): ${info.reason}`,\n   );\n   ```\n\n   `info.reason` 是 `reconcileDeclaredConnectors` 传进来的 `(err as Error).message`,来源是 provider factory 抛出的 `ConnectorUpstreamUnavailableError`。那个 message 由**第三方 factory** 构造(spec 只定义了错误类,不约束文本),完全可以是多行。\n\n两处都是把外来 `err.message` 插进日志 message,与 #5048 / #5575 同一类别:`ObjectLogger` 每次调用只写一条 `<ts> <LEVEL> <msg>` 记录,带换行的 message 溢出到不带等级头的物理行,按行工作的下游(文件 sink、`docker logs`/journald 送采集、`grep ERROR`)把续行读成无法归属的碎片。\n\n### 与 #5575 的差别(值得一起读)\n\n第 1 处是 **`warn`** → stdout,所以它比 #5575 那两处更糟一档:`serve` 的启动静默窗口只包了 `process.stdout.write`,而这条路径在冷启动就会跑(`materializeDeclaredConnectors(ctx, { fatal: true })` 里 upstream 不可达即降级,不抛),于是 `BootLogCapture.offer()` 会**直接丢掉**所有续行 —— 这正是 cloud#971 的原始形态,而不只是「不好解析」。第 2 处是 `error` → stderr,不经那个缓冲。\n\n### 可达性(为什么是 finding 而不是 bug)\n\n与 #5575 同样的理由:今天 `packages/connectors/*/src` 里没有 factory 做 Zod `.parse()`,`ConnectorUpstreamUnavailableError` 的 message 在 openapi / mcp / rest / slack 里都是我们自己写的单行文本。第一个在 factory 里用 Zod 校验、或直接把上游 SDK 的多行错误塞进 `ConnectorUpstreamUnavailableError` 的第三方插件会撞上;ADR-0097 明确鼓励第三方写 provider factory。\n\n### 建议的修法\n\nPR #5572 / #5575 已经把 helper 放在同包 `thrown-cause-diagnostics.ts`(`describeThrownForLog`,#5575 从 `flow-bind-diagnostics.ts` 泛化改名),直接复用即可:message 保持不含换行,cause 走 `meta`。注意 `Logger.error` 的第二参是 `Error`、第三参才是 `meta`(#5575 顺带修好了 `ObjectLogger` 丢弃第三参的缺陷),`warn` 的第二参就是 `meta`。新增字段名不得含 `key`/`token`/`secret`/`password` 子串(`ObjectLogger.redactSensitive` 按子串匹配,见 #5573)。\n\n### 关联\n\n#5575(同文件、`fail()` 的两处,已修)、#5048 / PR #5572(flow 绑定四+一处,已修)、#4632(被截断的诊断比没有诊断更贵)、#3017(降级/重试本身)、ADR-0097。"
+}

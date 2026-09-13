@@ -1,0 +1,35 @@
+{
+  "number": 5610,
+  "kind": "pull_request",
+  "title": "feat(spec,objectql): strictReadonlyWrites —— readonly 剥离的「响亮失败」出路 (#5126)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T20:24:07Z",
+  "updated_at": "2026-08-05T22:27:32Z",
+  "closed_at": "2026-08-05T22:27:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T22:27:30Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5610",
+  "body": "Fixes #5126\n\n按维护者两次一致的裁定(2026-08-04 拍板 + 2026-08-05 誊写)取 **B 方案**:`strictReadonlyWrites` 挂 `WriteObservabilityOptions`(进程内 TS 契约,`onFieldsDropped` 所在),违例抛 `ERR_READONLY_FIELD_REJECTED` 并带字段清单。A(可序列化 Zod 袋)/ C(部署级开关)/ D(objectql 私加)均未采纳。\n\n## 前置核实(issue 是线索,先在 origin/main 上验)\n\n| 前提 | 结论 |\n|:--|:--|\n| #4903 / PR #5123 已合入 | ✅ 2026-08-04 06:47 merged |\n| `WriteObservabilityOptions` + `onFieldsDropped` 在 `packages/spec/src/contracts/data-engine.ts` | ✅ 第 33 行 |\n| objectql 写路径剥离 readonly 并经 `onFieldsDropped` 上报 | ✅ `engine.ts` 的 `reportDroppedFields`,单条与 bulk 各两处(`readonly` / `readonly_when`) |\n| 存在 ERROR_CODE_LEDGER 及其登记纪律 | ✅ `packages/spec/src/api/error-code-ledger.zod.ts`,SCREAMING_SNAKE + 按包归属,`error-code-ledger.test.ts` 执行准入规则 |\n\n前提全部成立,未发现需要改写 issue 前提的情况。\n\n## 改了什么\n\n**spec**\n\n- `WriteObservabilityOptions` 新增 `strictReadonlyWrites?: boolean`(默认关)。TSDoc 写清三件事:语义(置位时「本会被剥离」的写入改为抛出,且**什么都不写**)、异常码与字段清单、以及 **strict 是进程内语义**——不跨 RPC / VDE,远程调用方既拿不到 `onFieldsDropped` 也拿不到 strict,其写入仍是「剥离后提交」的 200。\n- `ERROR_CODE_LEDGER` 在 `@objectstack/objectql` 名下登记 `ERR_READONLY_FIELD_REJECTED`(按既有纪律:字母序、SCREAMING_SNAKE、附一行说明)。\n\n**objectql**\n\n- 新增 `ReadonlyFieldRejectedError`(`readonly-strict-errors.ts`,`code = 'ERR_READONLY_FIELD_REJECTED'`,携带 `object` / `fields` / `drops`),从 index 导出;沿用仓库既有的「以 `code` 而非 `instanceof` 跨包识别」约定。\n- 在既有剥离接缝处兑现:置位且确有字段将被剥离 → 在**任何驱动调用之前**抛出;未置位 → 行为与此前完全一致(剥离 + 事件 + 提交)。单条与 bulk 两条路径各一处 `assertNoStrictDrops()`。\n- `ENGINE_UPDATE_OPTION_KEYS` 放行该键,并同步 `engine-unknown-option.test.ts` 的 drift pin —— 不做这一步,引擎会以「未知选项」拒掉一个契约已声明的键。\n\n## 三个需要维护者过目的判断\n\n**1. 覆盖两种剥离原因,不只静态 `readonly`。** 裁定原文是「被剥离时抛」,未限定原因;而它被明确锚在 `onFieldsDropped` 旁边,后者两种 reason 都发。更关键的是:静态剥离对 `isSystem` 调用方本就不生效,所以只覆盖静态一半,会让本特性对它最想服务的调用方 —— 已声明 `isSystem: true` 的可信 cron —— 近乎失效(它恰恰豁免了静态剥离,却仍在静默丢掉被 `readonlyWhen` 锁住的列)。两种原因累积进同一个异常,`fields` 是全量并集。**若维护者本意只覆盖静态 `readonly`,这是一处需要回退的判断**,改动面很小(去掉 `readonly_when` 那一路的累积)。\n\n**2. strict 置位时不再回调 `onFieldsDropped`。** `DroppedFieldsEvent` 的契约文字是「字段被丢弃、写入在没有它们的情况下完成」;strict 下写入并未完成,照发会让监听 drop 的 flow 步骤为一次根本没发生的写入报告「部分成功」。两者是同一接缝的**互斥**产物,不是先后关系。\n\n**3. INSERT 保持惰性。** 与 `onFieldsDropped` 同因同理:insert 对两种剥离都豁免,没有可拒绝的东西。已在 insert 处补注释说明这不是 #4371 意义上的「静默忽略」。\n\n## 验证\n\n**先证红。** 契约测试先行,在未改 engine 的代码上跑:\n\n```\nTest Files  1 failed | 118 passed (119)\n     Tests  9 failed | 1914 passed (1923)\n\nError: update('attendance') does not recognise option 'strictReadonlyWrites'.\n```\n\n**实现后转绿(objectql 全量)**\n\n```\nTest Files  119 passed (119)\n     Tests  1923 passed (1923)\n```\n\n**spec 全量**:`Test Files 315 passed (315) / Tests 8027 passed (8027)`\n\n**反向验证(先定方向,再跑)。** 两处,方向都事先写死并被证实:\n\n- *反 A 蔓延守卫非空转*:预测「把该键加进 `EngineUpdateOptionsSchema` 会让 shape 检查与 smuggle 检查双双转红」→ 实测 `Tests 2 failed | 10 passed`,两条正是预测的那两条。\n- *拒绝逻辑*:预测「保留选项合法性、只废掉 `assertNoStrictDrops` 的拒绝,应让 7 条期望拒绝的用例转红,5 条默认路径用例保持绿」→ 实测恰好 `Failed Tests 7`,全部报 `expected the write to be refused, but it resolved`。\n\n两次改动均已还原,已确认无残留。\n\n**typecheck / 闸门**\n\n```\npnpm --filter @objectstack/objectql --filter @objectstack/spec typecheck   # 干净\npnpm lint                                                                  # 干净\npnpm --filter @objectstack/spec check:generated                            # 10 个生成物闸门全过\nnode scripts/check-nul-bytes.mjs                                           # OK(5520 文件)\nnode scripts/check-error-code-casing.mjs                                   # OK(2928 文件)\n```\n\n## 生成物与一处刻意的「不改」\n\n新错误码进入 `ErrorCode` 联合,故重新生成了 `content/docs/references/api/*`(11 个文件)。逐行核对过:除 `error-code-ledger.mdx` 新增的一条条目外,其余全部只是枚举里多了 `ERR_READONLY_FIELD_REJECTED` 一个成员。\n\n`packages/spec/authorable-surface.base.json` **被我还原了**,尽管 `gen:schema` 会顺手改写它。它的改动(baseRev + 三条 `EmailServiceConfig` 键)源自别人已合入的 `system/email-config.zod.ts`,与本 PR 无关;`check:authorable-surface` 在还原后仍然通过,并自己说明「trails the merge base by 3 key(s) —— expected right after a surface change lands」。AGENTS.md 也明确反对无差别重生成(会把真实语义改动埋进机械 diff)。\n\n`content/docs/releases/` 未触碰。\n\n## Changeset\n\n`.changeset/strict-readonly-writes.md`:`@objectstack/spec` **minor** + `@objectstack/objectql` **minor**。两者都取 minor 而非 patch,因为两侧都是**新增的公开面**而非修复:spec 增加了一个契约成员与一个登记错误码,objectql 增加了一项选择加入的运行时行为与一个新导出的错误类。默认行为零变化,故不是 major。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_018fxLGQdatPbBUvCgiVxg6D\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018fxLGQdatPbBUvCgiVxg6D)_"
+}

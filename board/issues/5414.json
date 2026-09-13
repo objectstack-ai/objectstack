@@ -1,0 +1,35 @@
+{
+  "number": 5414,
+  "kind": "pull_request",
+  "title": "fix(cli): `os doctor` 不再在 installed-package ledger 读不到时打出 `✓ Unique scope` (#5412)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T10:16:12Z",
+  "updated_at": "2026-08-05T10:24:33Z",
+  "closed_at": "2026-08-05T10:24:32Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T10:24:32Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5414",
+  "body": "Fixes #5412\n\n## 先说前提核验的结果:issue 的**机制**判定对了一半,**复现路径**是错的\n\n按 origin/main (`b4872a868`) 核验,**必须先读这一段**再看实现。\n\nissue 说 `readInstalledPackageEntries()` 的 catch 覆盖了两件事,其中第 2 件是\n「目录存在但里面某个 manifest 损坏 / JSON 解析失败」。**这条具体路径够不着那个 catch。**\n\n`packages/cloud-connection/src/local-manifest-source.ts` 的 `LocalManifestSource.list()`\n自己有一层 per-file catch:\n\n```\n        for (const name of readdirSync(this.dir)) {\n            if (!name.endsWith('.json')) continue;\n            try {\n                const raw = readFileSync(join(this.dir, name), 'utf8');\n                out.push(JSON.parse(raw));\n            } catch { /* skip corrupt files */ }\n        }\n```\n\n跑真实实现(一好一坏两条目)实测:\n\n```\nA) truncated-entry list() DID NOT THROW; returned 1 entries: [ 'good' ]\n```\n\n也就是说:**损坏条目在生产方就被丢掉了**,`list()` 成功返回一个短列表,doctor 那边\n看到的是一次成功调用。issue 的复现路径(截断 JSON)按原样构造,`✓ Unique scope`\n照样会打 —— 但原因不在 doctor 的 catch,而在上游。\n\n**issue 的核心判定仍然成立**:那个 catch 确实把「可选包没装」和「ledger 读不到」\n混为一谈,而且确实产出 false PASS。只是够得着它的是**目录级**失败(路径被文件占住 =\nENOTDIR、文件系统拒绝、读目录失败),不是条目级损坏。实测:\n\n```\nfs.existsSync(dir) = true\nC) list() THREW: ENOTDIR | ENOTDIR: not a directory, scandir '…/.objectstack/installed-packages'\n```\n\n所以本 PR 修的是**目录级**那一半,并把条目级那一半**明确钉成边界**、另立 #5413,\n而不是把测试改成能过的形状然后声称整单做完。PM 裁定的口径(拆两个 catch、warning\n档、复用 `renderHealthCheckResult()`、`✓` 不得打印)一字未改地适用于目录级路径;\n只有 PM 要求的测试 ① 换了触发方式(ENOTDIR 而非截断 JSON),因为截断 JSON 在这一层\n根本不产生任何信号。\n\n## 改了什么\n\n`packages/cli/src/commands/doctor.ts`:\n\n- `readInstalledPackageEntries()` 拆成两个 try。`import('@objectstack/cloud-connection')`\n  保留自己的静默 catch —— 这一条注释写得对,doctor 必须能在没有该包的 checkout 里\n  跑完。目录解析之后的读取单独一个 try,抛错时带着 cause 回到调用方。\n  返回类型从 `any[]` 变为 `{ entries, failure? }`:空数组本身是歧义的(「没装过东西」\n  和「读不到」都产生它),第二种现在自带标记。\n- `findUnscopedGlobalUniques()` 相应返回 `{ advisories, ledgerFailure? }`。\n- 消费点:成功行是对建议**两半**(本项目 metadata + ledger 已装包)的断言,因此\n  只有两半都跑过才允许打印。ledger 失败时改打一条常规 `HealthCheckResult`,经\n  `renderHealthCheckResult()`(#5410 刚落地的那一个,没有发明第二套渲染),\n  `--verbose` 展开免费获得。已跑过的那一半的 findings 照常上报 —— 一处静默省略\n  不该换成另一处。\n- 新增 `installedPackageLedgerFailureCheck()`,warning 档,cause 按 #5390 体例引\n  上游原话不改写(`ENOTDIR: not a directory, scandir '…'` 本身就指名了挡路的那个\n  文件,doctor 编不出更好的句子)。\n- 该行占用 `Unique scope` 名字列而非新起一个名字:重点是操作者扫报告时那一行\n  **在**、且不是 `✓`;另起名字会让 `Unique scope` 干脆消失,那正是本单要治的沉默\n  换了顶帽子。\n- 小重命名:`configLoadHeadline` / `CONFIG_LOAD_HEADLINE_MAX` 现在有了第二个消费者\n  (ledger 的 cause 走同一个折行),名字改为 `reportRowHeadline` /\n  `REPORT_ROW_HEADLINE_MAX`。纯内部,无外部引用。\n\n## 反向验证(方向是先定后跑的)\n\n预期方向:**红**。把那个吞掉的 catch 恢复(第二个 try 的 catch 改回 `return { entries: [] }`),\n预期只有钉缺陷的 3 条 e2e 转红,4 条无回归用例保持绿 —— 后者若也变绿/变红都说明它们\n是因为「什么都没产出」而通过的。实跑结果与预期一致:\n\n```\n × withholds the clean bill of health when the ledger cannot be read\n × expands the detail under --verbose, and only under --verbose\n × still reports this project’s own findings when only the ledger half failed\n ✓ an intact ledger with nothing to report still prints the clean bill — no regression\n ✓ an intact ledger WITH a global unique is still reported the way it always was\n ✓ says nothing about the ledger when there is no ledger at all\n ✓ ⚠ SCOPE BOUNDARY: a CORRUPT ENTRY is still absorbed by the producer\n ✓ prints no ledger row when the optional package cannot be loaded\n Tests  3 failed | 12 passed (15)\n\nAssertionError: expected '…' not to contain 'No unconfirmed installation-wide uniq…'\nAssertionError: expected '…' to contain 'Could not read the installed-package …'\n```\n\n恢复后 15/15 全绿。\n\n## 测试\n\n新增 `packages/cli/src/commands/doctor-ledger-read-failure.test.ts`(15 条,e2e 沿用\n#5410 `doctor-config-load-cause.test.ts` 的 harness:temp cwd + `node_modules` 目录\n陷阱,每条 `}, 60_000)`)。覆盖 PM 点名的四项:\n\n1. ledger 读不到时 `✓ Unique scope` 那行**不出现**;\n2. warning 行出现、含 cause,`--verbose` 才展开 `cause:`;\n3. 可选包缺失仍**完全静默**(用 `vi.doMock` + `vi.resetModules()` 让模块求值抛错来\n   模拟不可解析;该场景下故意让 ledger 目录**存在**,这样若两个 catch 还共用,反方向\n   的混淆会冒出一条假 warning);\n4. ledger 完好时 D5e 正常路径不受影响 —— 无 findings 照打 `✓`,有 findings 照报\n   `installed package 'billing'`;另加「压根没有 ledger 目录」仍静默(不能把「从没装过」\n   过度矫正成 warning)。\n\n外加一条 `⚠ SCOPE BOUNDARY` 用例,把「条目级损坏仍被生产方吸收」钉住并注明\n#5413 落地时它**应当转红**。\n\n## 越界与另立单\n\n- 文件面严格限定在 `packages/cli/src/commands/doctor.ts` + 该包测试,未动\n  `packages/cloud-connection`。\n- 条目级损坏另立 **#5413**(未在本 PR 修):运行时后果比 doctor 更重 ——\n  `marketplace-install-local-plugin.ts` 的 `rehydrate()` 会让损坏条目对应的已装应用\n  在 boot 时**不被注册**且零日志,`handleList()` 的控制台已装列表也少一项。修法要动\n  `list()` 的公开返回契约(3 个消费者),已在 #5413 里列了 A/B/C 三个方案与倾向,\n  留给维护者拍板。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016FNvXhtSdnEGEfLEsMmvxh\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016FNvXhtSdnEGEfLEsMmvxh)_"
+}

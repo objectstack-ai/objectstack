@@ -1,0 +1,33 @@
+{
+  "number": 3820,
+  "kind": "issue",
+  "title": "lint: no reference-integrity for AI metadata (agent skills, skill tools) — R7, blocked on D1/D2",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T07:17:24Z",
+  "updated_at": "2026-08-05T12:23:41Z",
+  "closed_at": "2026-08-05T12:23:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3820",
+  "body": "Split out of #3583, which is otherwise closed: eight of its nine bug categories are now gated on `validate`/`lint`/`compile`, and the ninth (hook body write sets) is an accepted, documented gap. This is the one category with resolvable references and **no rule** — assessment R7 in `docs/audits/2026-07-app-metadata-reference-integrity-assessment.md` §3.\n\n## The gap\n\n`packages/lint/src` contains **zero** AI rules. Nothing checks that:\n\n- `agent.skills[]` names a skill the stack declares (`ai/agent.zod.ts`)\n- `skill.tools[]` — wildcard-aware — names a declared tool (`ai/skill.zod.ts`)\n- `agent.tools[].name` resolves to an action/flow by its declared type\n\n## Evidence on the real corpus (2026-07-28, hotcrm @ `8b28fa2`, v2.2.2)\n\n| Surface | Count |\n|---|---|\n| agents | 2 |\n| skills | 6 |\n| `agent.skills` references | 8 |\n| `skill.tools` references | 16 |\n| tools **declared by the stack** | **0** |\n\nSo all 16 skill→tool references are dead today — the original audit's \"agent skills listing 11 tools with no definitions\", still shipping. Every one passes `objectstack validate` and `objectstack lint` cleanly.\n\n## Two decisions come first (neither is a lint question)\n\n- **D2 — runtime-registered kernel skills/tools vs. static lint.** The `ask`/`build` kernel agents register their skills/tools via service at boot, so a stack can legitimately reference names no static analysis can see (same invisibility as plugin objects, which #3657 solved with the curated `PLATFORM_PROVIDED_OBJECT_NAMES` registry). Either extend that precedent with official skill/tool names, or run R7 at advisory severity. Small; take it when the rule starts.\n- **D1 — `agent.knowledge.indexes` has no definition site.** `KnowledgeSourceSchema` is never referenced by `stack.zod.ts`, so the namespace is unresolvable *by construction* — parsed, unmarked, and unenforceable, which is the state ADR-0049's trichotomy prohibits. Either add a `knowledgeSources` slot to the stack (spec change, ADR-worthy) or mark the fields `[EXPERIMENTAL — not enforced]`. **Linting a namespace with no definition site would institutionalise the gap**, so the knowledge half of R7 stays blocked until this lands. HotCRM carries 2 such references.\n\n## Out of scope\n\nThe \"hand-off to a nonexistent skill\" instance from the original audit: hand-off has no schema field anywhere — it lives in free-form prompt text, which has no structure to check (§7 non-goal).\n\n## Done looks like\n\n`validate-ai-references` in `@objectstack/lint`, appended to `REFERENCE_INTEGRITY_RULES` (one line — `validate`/`lint`/`compile` pick it up automatically), with fixtures from the HotCRM instances and a zero-false-positive pass over `examples/`. Note the verification lesson from #3806: the false-positive floor must be read **per branch** — an example corpus that declares no agents proves nothing about the agent branch.\n\nRefs #3583 · ADR-0049 · ADR-0072 · ADR-0078"
+}

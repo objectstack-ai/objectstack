@@ -1,0 +1,37 @@
+{
+  "number": 5341,
+  "kind": "issue",
+  "title": "`os validate` / `os build` 用的是 CLI 自己的 formatZodErrors,它同样把 union 分支的处方裁掉 —— #4971 修的不是这条路径",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T23:47:42Z",
+  "updated_at": "2026-08-05T04:39:32Z",
+  "closed_at": "2026-08-05T04:39:32Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5341",
+  "body": "发现于 #4971(`formatZodError` 展开 `invalid_union`)的实施过程,**未在该 PR 中修复**:那单的文件面锁在 `packages/spec`,而这里是 `packages/cli`。\n\n## 现象\n\n#4971 的前提句里有一处需要更正:`formatZodError`(`packages/spec/src/shared/error-map.zod.ts`)的 **JSDoc 用途**确实写着 CLI 输出,但 `os validate` / `os build`(compile)**并不调用它**。三个命令走的是 CLI 自己的那份:\n\n- `packages/cli/src/commands/validate.ts:101`\n- `packages/cli/src/commands/compile.ts:162`\n- `packages/cli/src/commands/plugin/build.ts:114`\n\n三处都调 `formatZodErrors`(复数)—— `packages/cli/src/utils/format.ts:167`。这个函数**只遍历顶层 issue**:\n\n```ts\nconst issues = error.issues || (error as any).errors || [];   // :168\n// ↑ 这个 `.errors` 是 ZodError 级的 zod v3 兼容别名,不是 issue 级的 `issue.errors`\nfor (const issue of sectionIssues) {\n  console.log(chalk.red(`    ✗ ${path}`));\n  console.log(chalk.dim(`      ${code}: ${msg}`));   // :189-190\n}\n```\n\n整个函数里没有任何一处读 `issue.errors`。所以一个失败的 union 在终端上是:\n\n```\n  compareTo:\n    ✗ compareTo\n      invalid_union: Invalid input\n```\n\n分支里那条策展处方(`Unrecognized key(s) on this comparison window: ...`)照样到不了作者。\n\n## 与已有两单的关系\n\n同一个缺陷家族的**第三个消费者**,三份各自独立的代码:\n\n| 消费者 | 文件 | 状态 |\n|---|---|---|\n| `formatZodError`(spec 公开导出,`defineStack` 抛错走它) | `packages/spec/src/shared/error-map.zod.ts` | #4971 已修 |\n| `zodIssuesToFields`(REST wire) | `packages/rest/src/rest-server.ts` | #5014 待修 |\n| `formatZodErrors`(CLI 终端,本单) | `packages/cli/src/utils/format.ts` | 未修 |\n\n不是 #5014 的子任务:那单的完成面是 `zodIssuesToFields` 与 ADR-0114 的 wire 契约(`fields[]` 条数会变),本单是终端渲染,不同包、无 wire 契约、互不依赖。也不依赖 #4971 —— 但 #4971 已经把分支选择策略写成可复用的实现(丢弃只报「值的种类不对」的分支、按 issue 最少挑最接近的那支、跨分支相同判决去重、绝对路径、深度上限),照抄比重新发明便宜,也能让两条路径的输出口径一致。最省事的形态可能是让 CLI 直接用 spec 的 `formatZodIssue`。\n\n## 顺带记下(休眠,不是本单必修)\n\n`invalid_key` / `invalid_element`(`z.record` 的**键** schema 失败、map/set 元素失败)同样把真实 issue 挂在 `issue.issues` 里,上述三个消费者一个都不下降。今天点不着:`packages/spec` 里 `z.record(...)` 的键 schema 全是 `z.string()` 或 enum(enum 键的坏键会走顶层 `unrecognized_keys`,实测过),所以没有任何 authoring 面能产出 `invalid_key`。哪天有人写了 `z.record(SnakeCaseIdentifierSchema, X)`,散文就同样消失。\n\n## 验收建议\n\n- `os validate` 对一个 union 分支内的未知键报错时,终端打印出该分支的处方(不是 `invalid_union: Invalid input`)。\n- 一个未知键不因 N 个分支被报 N 次(#4001 批 6c 的回归;#4971 的 `error-map.test.ts` 有现成的钉)。\n- `--json` 路径不受影响:它透传 `error.issues`,payload 一直是全的。\n"
+}

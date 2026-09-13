@@ -2,8 +2,8 @@
   "number": 16903,
   "kind": "issue",
   "title": "spec/data: getDriverConfigJsonSchemaById returns a truthy NON-schema (an empty object, or a string) for an off-vocabulary driver id that names an Object.prototype member",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "claude[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:spec",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -21,9 +20,13 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-09-08T15:29:08Z",
-  "updated_at": "2026-09-10T15:29:51Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-09-10T16:32:59Z",
+  "closed_at": "2026-09-10T16:21:44Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 3,
   "locked": false,

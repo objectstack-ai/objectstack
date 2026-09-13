@@ -1,0 +1,35 @@
+{
+  "number": 5569,
+  "kind": "pull_request",
+  "title": "fix(runtime): deny anonymous callers on /actions and /automation (#5519)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T18:46:29Z",
+  "updated_at": "2026-08-05T19:09:28Z",
+  "closed_at": "2026-08-05T19:09:27Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T19:09:27Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5569",
+  "body": "Fixes #5519\n\n## 前提复核(先证后改,rule 6)\n\n分诊席 15:54Z 核过一次;我在**动手时刻的 `origin/main`(9894a723e)** 上重新复现,结论:**前提成立,且比原单记录的更广**。\n\n复现方式是**真机等价**的 harness:`bootStack(showcaseStack, { automation: true, extraPlugins: [ConnectorRest/OpenApi/Mcp] })` —— 真 kernel、真 plugin-auth/plugin-security、真 Hono server、真端口、真 socket。全程不带任何凭证:\n\n| 请求(匿名) | 修复前 | 证据 |\n|---|---|---|\n| `POST /actions/showcase_task/showcase_mark_done/:id` | **200** `{\"ok\":true,\"id\":\"1XIijpV1PUjdN7ZB\"}` | script body 的 `ctx.api.object('showcase_task').update({done:true,progress:100})` 真的执行了(`isSystem:true` 提权) |\n| `POST /automation/showcase_reassign_wizard/trigger` | **200** `{\"status\":\"paused\",\"runId\":\"run_7de908b7-...\"}` | 匿名启动了真实 flow run |\n| `GET /automation` | **200** | 返回全量 flow 清单 |\n| `DELETE /automation/showcase_inquiry_janitor` | **200** `{\"deleted\":true}` | **匿名注销了一条已注册 flow —— 原单未提到的破坏性写** |\n| 对照:`GET /data/showcase_task` | **401** | 同一进程,数据面基线成立 |\n\n最后一行是本单判 p0 的核心:**同一个进程里两套注册路径,只有 rest 那套设了门**。\n\n## 门的落点\n\n两处,均只在 `packages/runtime/**`,复用 `@objectstack/core` 的 `shouldDenyAnonymous`(本体语义不改):\n\n1. `packages/runtime/src/domains/actions.ts` — `handleActionsRequest` 的**第一条语句**,在 405 之前。匿名调用者只得到 auth 基线,不泄露路由形状,与 `/data` 一致。\n2. `packages/runtime/src/domains/automation.ts` — `handleAutomationRequest` 顶部,**整域**而非逐路由,且在 `isServiceServeable` 探测**之前**(否则 501 与 401 的差异会泄露该部署是否挂了 automation)。\n\n信封与 `domains/ai.ts:127`、`domains/meta.ts:59`、`domains/security.ts:92` 完全一致:401 + `UNAUTHENTICATED` + `Authentication is required to access this endpoint.`\n\n`requiredPermissions`(ADR-0066 D4)、`ai.exposed`、ADR-0104 参数契约**语义一动不动**,只是排在匿名门之后。\n\n## 内部路径测绘(边界 1:内部/系统派发不许破)\n\n测绘方法是枚举 `handleActionsRequest` / `handleAutomationRequest` 的**全部调用者**,不是读注释:\n\n```\ngrep handleActionsRequest|handleAutomationRequest  ->  只有 http-dispatcher.ts 的两个 thin delegate\ngrep dispatch('POST', '/actions|/automation')      ->  只有 dispatcher-plugin.ts 的 HTTP 路由注册\n```\n\n结论:**这两个 handler 是纯 HTTP seam,没有任何内部派发路径经过它们**,逐条钉住:\n\n| 内部路径 | 实际入口 | 是否受影响 |\n|---|---|---|\n| MCP `run_action` | `action-execution.invokeBusinessAction`(`domains/mcp.ts` 直接接线) | 否。它的边界是 `ai.exposed` + `requiredPermissions` |\n| 声明式 endpoint 执行器(#5040 E5) | `buildAutomationContext` + `IAutomationService.execute`,挂在 transport 的 fallback seam,`dispatch()` 刻意看不到(#5090) | 否。它有自己的 `authRequired` 门(`endpoint-policy.ts` ②),`authRequired: false` 的公开 endpoint 仍然公开 |\n| flow 内部 / 记录变更 / 定时触发 | 引擎内部,根本不说 HTTP | 否 |\n| 系统上下文 `isSystem: true` | 就在这个 seam 上 | **照常通过**(且 `isSystem` 永远不可由 wire 设置) |\n\n上述每一条都有对应用例(见下),不是口头断言。\n\n## 反向验证(方向先判后跑)\n\n**预判**:摘掉门后,匿名用例转红,收到的状态码应为修复前的答案(已派发的 200、非 POST 的 405、gated action 的 403、无 automation 服务的 501);已认证/系统/`requiredPermissions`/内部路径用例两种情况下都绿。\n\n**实跑**:\n- handler 级:`12 failed | 13 passed`,红的收到 200 / 405 / 403 / 501 —— 与预判一致。\n- socket 级:`7 failed | 2 passed`,**7 条全部收到 200** —— 每一条已挂载的路由在修复前都真的为匿名调用者派发了。\n\n**一处偏差,如实申报**:第一版 object-less(`global`)用例复用了 `crm_contact` 上的声明,摘门后收到 **404**(ADR-0110 D3 的「无声明」出口)而非 200 —— 也就是说它的 `executeAction 未被调用` 断言是**因为本来就不会派发**而通过的,即 #5046 记录的「verdict 1 -> 0,断言因空而绿」。按 fixture 三分法这属于 **replace wholesale**:换成真正 object-less 的独立声明,并补一条已认证对照用例证明该 URL 确实会派发。改后摘门收到 200,断言才真正有牙。\n\n## 测试\n\n新增两个文件,**分层是刻意的**:\n\n- `domains/anonymous-gate-actions-automation.test.ts`(25 例)—— 钉**判定**:匿名(两种 ec 形状)/ 已认证 / 系统 / `requiredPermissions` 三态 / OPTIONS 预检不被吞 / 内部路径三条。\n- `dispatcher-plugin.anonymous-gate.integration.test.ts`(9 例)—— 钉**接线**,LiteKernel + 真 HonoServer + 真 dispatcher plugin + 真 socket。这一层不可省:门在 domain handler 里,但路由是 `dispatcher-plugin.ts` 直接挂到 host server 上的**另一条注册路径**;handler 级用例无法回答「**已挂载的**路由是否走到门」。AGENTS.md 对此有明文,#3913 就是站着的反例(域内正确、wire 上够不到)。\n\n**既有用例的三分法处置**(52 例受影响,全部逐条判,无批量重拼):\n- **Re-spell(48)**:主题是「哪条路径打到哪个 service 方法」的路由用例,只是**顺带**匿名(`{ request: {} }` 是能编译的最小上下文)。给它们一个 session,让每个文件继续测自己名字上的东西。\n- **Replace wholesale(4)**:主题**就是**匿名路径的用例。`#2701` 的「匿名 -> `system` principal」在 HTTP 上已不可达,若只改期望值,断言会读一个**从未发生的调用**的 `undefined` —— 空绿,比红更糟。改为:`system` principal 形状用**自调用 `isSystem` 上下文**钉住(这是唯一仍能无 `userId` 到达 body 的形态),匿名那半则明写成 401 + `executeAction` 未被调用。`ADR-0066 D4` 那条 403 -> 401 是本次**唯一可见的顺序变化**,注释写明了原因(旧的 403 描述了错误的问题,且暗示 session 存在)。\n\n**消费半径扫描**(不按被改的包扫):枚举 `/actions`、`/automation` 的全部 caller 与 fixture ——\n```\npackages/qa/dogfood   85 files / 506 passed   (真 showcase/CRM 启动,含 action-params-contract、flow-runas、flow-durable-suspend 等全部 flow 触发用例;无一条匿名驱动这两个面)\npackages/cli          82 files / 807 passed\npackages/adapters/hono                        (mock dispatcher,不受影响)\n```\n\n### 实跑记录\n\n```\npnpm --filter @objectstack/runtime test    ->  Test Files 96 passed (96) | Tests 1397 passed (1397)\npnpm --filter @objectstack/runtime typecheck -> tsc --noEmit,无输出(绿)\npnpm --filter @objectstack/dogfood test    ->  Test Files 85 passed | 1 skipped (86) | Tests 506 passed | 3 skipped (509)\npnpm --filter @objectstack/cli test        ->  Test Files 82 passed (82) | Tests 807 passed (807)\nnode scripts/check-nul-bytes.mjs           ->  OK (scanned 5496 tracked text files; no raw ASCII control bytes)\n```\n\n改动前基线已单独确认:把门改成 `if (false)` 后,受影响的 6 个既有文件 `371 passed (371)` —— 52 例失败**全部**归因于本次改动,`main` 上无既有红。\n\n## 行为变化(升级须知,已写进 changeset)\n\n之前拿到 200(或 gated action 的 403、405、501)的**未认证**调用,现在一律 401。若某部署依赖匿名调用 action / flow,受支持的替代是 `authRequired: false` 的声明式 endpoint、public-form grant 或 share-link token —— 而不是匿名 `/actions` POST。\n\n## 自限\n\n- 文件面**只在 `packages/runtime/**`**;未触碰 `packages/rest/**`(#5530 在飞)与 `packages/spec/**`。\n- `shouldDenyAnonymous` 本体未改,只复用。\n- 未触碰 `content/docs/releases/`。changeset:`@objectstack/runtime` patch。\n\n## 给 review 的一个取舍(不阻塞本 PR)\n\n`packages/qa/dogfood/test/authz-conformance.matrix.ts` 把 `showcase-anonymous-deny-surfaces.dogfood.test.ts` 列为 #2567「匿名姿态跨面统一」这条主张的 **proof 工件**,而本单恰恰是这两个面破了该主张。真机证据我已取得(见上表),但按派发的文件面自限没有落成常驻用例。本 PR 用 runtime 内的真 socket 集成用例满足了「boot the real composition」的要求;是否再把 `/actions` + `/automation` 补进那个 proof 工件,建议单独立单处理。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016FNvXhtSdnEGEfLEsMmvxh\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016FNvXhtSdnEGEfLEsMmvxh)_"
+}
