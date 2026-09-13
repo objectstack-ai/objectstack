@@ -2441,7 +2441,7 @@ export function needsRecordRead(pair) {
 }
 
 /** The `Reviewed-by:` key line, exactly as C4 reads it -- one spelling, not two. */
-const REVIEWED_BY_LINE = AUTHORSHIP_KEY_LINES.get('Reviewed-by');
+export const REVIEWED_BY_LINE = AUTHORSHIP_KEY_LINES.get('Reviewed-by');
 
 /**
  * The `Served-tier:` key line -- the THIRD provenance fact a verdict declares
