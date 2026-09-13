@@ -417,6 +417,103 @@ describe('#8050 merging a third source: no duplicates, and a stated precedence',
  * `where: { status: 'paused' }` scan the DB-backed store actually issues. That
  * is where "works against a Map, empty against a table" would hide.
  */
+/**
+ * ⚠️ [#17985] The authz objects a write here makes core's
+ * `resolveUserAuthzGrants` read. They belong to `@objectstack/plugin-auth` and
+ * `@objectstack/plugin-security`; they are spelled LOCALLY, with only the
+ * columns that resolver reads, so this fixture adds no dependency edge onto
+ * either package (the `find-envelope-limb-removal.test.ts` precedent, applied
+ * by PR #17982 to the two `plugin-auth` fixtures with the same defect).
+ *
+ * Without them the driver REFUSED every one of those reads — measured at
+ * `2f1a6f696`: 5 `refused a read on` driver lines, one per table.
+ * `tryFind` classifies a missing table as "not provisioned" and answers `[]`,
+ * so nothing went red: the assertions below passed over grant reads that never
+ * happened. ⛔ Registering the tables is what makes those reads SUCCEED; the
+ * fix is not to quieten the line.
+ *
+ * Columns, and why each is here — every other column of the real objects is
+ * deliberately absent, because no read on this path touches it:
+ *   `sys_user`                 id (filter), email (the RLS owner-email fallback)
+ *   `sys_member`               user_id / organization_id (filters), role
+ *   `sys_user_position`        user_id (filter), position, organization_id
+ *   `sys_user_permission_set`  user_id (filter), permission_set_id, organization_id
+ *   `sys_position`             name (filter), id, active (`isRowActive`),
+ *                              organization_id (the driver's tenant scope)
+ *
+ * ⛔ `sys_position_permission_set` and `sys_permission_set` are NOT here: the
+ * resolver reaches them only once a `sys_position` row resolves and a
+ * permission-set id is collected, and nothing here seeds either. The ADR-0091
+ * validity columns are absent for the reason `sys_member` lacks them today:
+ * `isGrantActive` reads an absent bound as unbounded, so declaring them would
+ * change no verdict here.
+ */
+const authzResolverObjects = [
+  {
+    owner: '@objectstack/plugin-auth',
+    def: {
+      name: 'sys_user',
+      label: 'User',
+      fields: {
+        id: { name: 'id', type: 'text' as const, primaryKey: true },
+        email: { name: 'email', type: 'text' as const },
+      },
+    },
+  },
+  {
+    owner: '@objectstack/plugin-auth',
+    def: {
+      name: 'sys_member',
+      label: 'Member',
+      fields: {
+        id: { name: 'id', type: 'text' as const, primaryKey: true },
+        user_id: { name: 'user_id', type: 'text' as const },
+        organization_id: { name: 'organization_id', type: 'text' as const },
+        role: { name: 'role', type: 'text' as const },
+      },
+    },
+  },
+  {
+    owner: '@objectstack/plugin-security',
+    def: {
+      name: 'sys_user_position',
+      label: 'User Position',
+      fields: {
+        id: { name: 'id', type: 'text' as const, primaryKey: true },
+        user_id: { name: 'user_id', type: 'text' as const },
+        position: { name: 'position', type: 'text' as const },
+        organization_id: { name: 'organization_id', type: 'text' as const },
+      },
+    },
+  },
+  {
+    owner: '@objectstack/plugin-security',
+    def: {
+      name: 'sys_user_permission_set',
+      label: 'User Permission Set',
+      fields: {
+        id: { name: 'id', type: 'text' as const, primaryKey: true },
+        user_id: { name: 'user_id', type: 'text' as const },
+        permission_set_id: { name: 'permission_set_id', type: 'text' as const },
+        organization_id: { name: 'organization_id', type: 'text' as const },
+      },
+    },
+  },
+  {
+    owner: '@objectstack/plugin-security',
+    def: {
+      name: 'sys_position',
+      label: 'Position',
+      fields: {
+        id: { name: 'id', type: 'text' as const, primaryKey: true },
+        name: { name: 'name', type: 'text' as const },
+        active: { name: 'active', type: 'boolean' as const },
+        organization_id: { name: 'organization_id', type: 'text' as const },
+      },
+    },
+  },
+] as const;
+
 describe('#8050 cold boot over the same sqlite file (full stack)', () => {
     let dir: string | undefined;
     const kernels: ObjectKernel[] = [];
@@ -444,6 +541,11 @@ describe('#8050 cold boot over the same sqlite file (full stack)', () => {
         });
         await driver.connect();
         ql.registerDriver(driver, true);
+        // [#17985] The authz resolver's own reads, registered before the sync so
+        // they are provisioned rather than refused.
+        for (const o of authzResolverObjects) {
+            (ql as any).registry.registerObject(o.def as never, o.owner);
+        }
         await ql.syncSchemas();
 
         const automation = kernel.getService<AutomationEngine>('automation');
