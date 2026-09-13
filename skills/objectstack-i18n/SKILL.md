@@ -193,12 +193,12 @@ for `options: [{ value: 'direct_mail', label: 'Direct Mail' }]` write
 `options: { direct_mail: '直邮' }` — both `'Direct Mail'` and `'direct-mail'`
 parse, ship, and resolve to nothing.
 
-`os validate` / `os lint` / `os compile` check this direction and report it as
-warnings (`translation-target-unknown`, `translation-option-key-unknown`): a key
-naming an object, field, view, tab, action, param, section, validation rule, app,
-nav item, dashboard, widget or flow screen that does not exist is listed alongside
-the names that do. A bundle keyed to something since renamed still parses — the label just
-renders silently in its source locale while every neighbouring one resolves.
+`os validate` / `os lint` / `os compile` check this direction: `translation-target-unknown`
+is an **error** and fails the run; `translation-option-key-unknown` is a warning.
+A key naming an object, field, view, tab, action, param, section, validation rule, app,
+nav item, dashboard, widget or flow screen that does not exist is listed alongside the names
+that do. A bundle keyed to something since renamed still parses — the label just renders
+silently in its source locale while every neighbouring one resolves.
 
 ---
 
