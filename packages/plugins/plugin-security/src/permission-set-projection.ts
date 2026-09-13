@@ -93,6 +93,7 @@
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { seedCtx, type SeedWriteRefusals } from './per-organization-catalog.js';
 import { buildExistingByName, type ExistingByNameIndex } from './seed-name-lookup.js';
+import type { PermissionSetNameCollisionDiagnostic } from './permission-set-name-collision.js';
 import {
   ENV_PROJECTION_MARKER,
   assertPermissionSetNotPackageDeclared,
@@ -219,6 +220,18 @@ export interface PermissionSeedOutcome {
   skippedForeign: number;
   /** Records retired because their definition was deleted from metadata. */
   deleted?: number;
+  /**
+   * [#17516] The diagnostic for each set counted in {@link skippedForeign} —
+   * the declaration was dropped WHOLE because another package owns that set
+   * name (ADR-0086 D4).
+   *
+   * ⚠️ This is the read-back half of that refusal, not a duplicate of the log
+   * line. The counter alone is what made the drop invisible: a caller holding
+   * it knows a number and nothing about which sets, which packages, or what to
+   * do about it. Absent — never `[]` — when the pass hit no collision, so a
+   * consumer can tell "none" apart from "this pass does not report them".
+   */
+  collisions?: readonly PermissionSetNameCollisionDiagnostic[];
 }
 
 /**

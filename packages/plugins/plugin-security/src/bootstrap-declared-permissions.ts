@@ -68,6 +68,12 @@ import {
   reportSeedWriteRefusals,
   type SeedWriteRefusals,
 } from './per-organization-catalog.js';
+import {
+  permissionSetNameCollisionDiagnostic,
+  permissionSetNameIsForeign,
+  reportPermissionSetNameCollisions,
+  type PermissionSetNameCollisionDiagnostic,
+} from './permission-set-name-collision.js';
 
 export type { PermissionSeedOutcome } from './permission-set-projection.js';
 
@@ -206,6 +212,14 @@ export async function upsertPackagePermissionSet(
      * materialized nothing).
      */
     refusals?: SeedWriteRefusals;
+    /**
+     * [#17516] Collects set-name collisions so the pass reports them ONCE
+     * instead of a line per dropped set. Passed by the boot catalog loop; the
+     * ADR-0086 P2 publish materializer passes nothing and the refusal is
+     * reported at the branch instead — ⛔ never dropped, which is the whole
+     * point of this card.
+     */
+    collisions?: PermissionSetNameCollisionDiagnostic[];
   },
 ): Promise<PermissionSeedOutcome> {
   const out: PermissionSeedOutcome = { seeded: 0, updated: 0, unchanged: 0, unreadable: 0, skippedEnvAuthored: 0, skippedForeign: 0 };
@@ -260,7 +274,7 @@ export async function upsertPackagePermissionSet(
   }
 
   if (existing.managed_by === 'package') {
-    if (existing.package_id === packageId) {
+    if (!permissionSetNameIsForeign(existing.package_id, packageId)) {
       // Our own row — re-seed so the record always reflects the shipped/published
       // declaration (idempotent; covers version bumps without bookkeeping).
       //
@@ -283,13 +297,40 @@ export async function upsertPackagePermissionSet(
         out.updated += 1;
       }
     } else {
-      // Package-namespaced object api names make set-name collisions a
-      // packaging bug, not a merge case — refuse loudly (ADR-0086 D4:
-      // a package never writes into a foreign record).
+      // [#17516] The SKIP is unchanged and correct — ADR-0086 D4: a package
+      // never writes into a foreign record. What changed is that it is no
+      // longer invisible.
+      //
+      // ⚠️ The premise this branch used to state — "Package-namespaced object
+      // api names make set-name collisions a packaging bug, not a merge case"
+      // — is FALSIFIED by ADR-0130 D1, which lets N packages co-own one
+      // namespace (the ADR records it under "What was NOT decided"). A
+      // collision is therefore a legal configuration that gets MORE common as
+      // co-ownership lands, not a packaging error that should never happen. So
+      // the author reading it is the normal case, not the pathological one.
+      //
+      // ⛔ And the old line did not refuse loudly, whatever it claimed:
+      // `logger?.warn?.(…)` is optionally chained TWICE, so a caller passing no
+      // logger produced NO OUTPUT AT ALL and an entire declared permission set
+      // disappeared with one counter moved. The report now goes through
+      // `reportPermissionSetNameCollisions`, which prints with no sink injected
+      // (#10556: silent-by-declaration is rejected), and the diagnostic RECORD
+      // travels back on the outcome so a caller that reads no log at all — a
+      // boot report, a test — can still ask what happened.
       out.skippedForeign += 1;
-      logger?.warn?.('[security] permission set name owned by another package — skipped', {
-        name: ps.name, declaredBy: packageId, ownedBy: existing.package_id,
+      const diagnostic = permissionSetNameCollisionDiagnostic({
+        name: String(ps.name),
+        declaredBy: packageId,
+        ownedBy: typeof existing.package_id === 'string' ? existing.package_id : null,
+        ...(organizationId ? { organizationId } : {}),
       });
+      out.collisions = [diagnostic];
+      // The boot loop collects and reports ONCE per pass. The ADR-0086 P2
+      // publish materializer upserts a single set and passes no collector, so
+      // it reports here — it has no pass to summarise, and inheriting the old
+      // silence is the one outcome this card forbids.
+      if (opts?.collisions) opts.collisions.push(diagnostic);
+      else reportPermissionSetNameCollisions(logger, [diagnostic], organizationId);
     }
     return out;
   }
@@ -344,13 +385,15 @@ export async function bootstrapDeclaredPermissions(
   // One log per pass, not per refused row: a legacy platform-wide unique index
   // refuses EVERY declared permission set, and a line each would bury the remedy.
   const refusals = createSeedWriteRefusals();
+  // [#17516] Declared sets dropped because another package owns the name.
+  const collisions: PermissionSetNameCollisionDiagnostic[] = [];
 
   for (const ps of sets) {
     if (!ps?.name) continue;
     // Registry provenance first (ADR-0010 `_packageId`), author-declared
     // spec `packageId` (ADR-0086 D3) as fallback.
     const packageId: string | undefined = ps._packageId ?? ps.packageId ?? undefined;
-    const r = await upsertPackagePermissionSet(ql, ps, packageId, options.logger, { existingByName, organizationId, residue, refusals });
+    const r = await upsertPackagePermissionSet(ql, ps, packageId, options.logger, { existingByName, organizationId, residue, refusals, collisions });
     out.seeded += r.seeded;
     out.updated += r.updated;
     out.unchanged += r.unchanged;
@@ -370,6 +413,11 @@ export async function bootstrapDeclaredPermissions(
   }
   // Before the counts, so an operator reads WHY the count is zero beside it.
   reportSeedWriteRefusals(options.logger, refusals, organizationId);
+  // [#17516] Said once per pass, and said even when no logger was injected —
+  // the whole defect was that this refusal reached nobody. The records go back
+  // on the outcome too, for a caller that reads no log at all.
+  reportPermissionSetNameCollisions(options.logger, collisions, organizationId);
+  if (collisions.length > 0) out.collisions = collisions;
   if (out.unreadable > 0) {
     // Said once, with the count: these sets were neither seeded nor reconciled
     // because the record could not be READ. Silence here would read exactly
