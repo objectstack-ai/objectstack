@@ -93,12 +93,14 @@
  *     `FIELD_TYPE_MAP` and a scalar column in `FIELD_TYPE_SQL_MAP` is a
  *     contradiction whoever is right, and `autonumber` was exactly that.
  *
- * ⚠️ Still NOT asserted, deliberately: the FILE_REFERENCE_TYPES family. Those
- * five ARE in the driver's `JSON_COLUMN_TYPES` today while this generator gives
- * them a varchar — but that is #14657's ADR-0104 D3 answer against a driver
- * that is still pre-D3, i.e. a decision about which side moves, not a wrong
- * value to correct. It is recorded below as a measured divergence so it cannot
- * be mistaken for coverage, and filed rather than fixed here.
+ * ⚰️ The FILE_REFERENCE_TYPES family used to be excluded from all of this,
+ * deliberately: those five were in the driver's `JSON_COLUMN_TYPES` while this
+ * generator gave them a varchar — #14657's ADR-0104 D3 answer against a driver
+ * that was still pre-D3, i.e. a decision about which side moves rather than a
+ * wrong value to correct. The ruling on #15041 decided it and #15989 landed it,
+ * so the exclusion below became coverage. [#17883] The width the two migration
+ * formats emit for the family is a second question and has a pin of its own —
+ * `generate-file-reference-width.pin.test.ts`.
  *
  * The runtime fallbacks (`|| 'unknown'`, `|| 'TEXT'`, `default:`) stay and are
  * NOT dead: they answer a `type` string that is not a `FieldType` at all, which
@@ -375,9 +377,18 @@ function sqlColumn(type: string): string | null {
   return m ? m[1] : null;
 }
 
-/** The `table.x('f_type')` call one field type contributes, or `null` for none. */
+/**
+ * The `table.x('f_type'[, …])` call one field type contributes, or `null` for
+ * none.
+ *
+ * [#17883] The argument list is part of the call and is captured with it. The
+ * reader used to stop at the name, so a SIZED call — `table.string(name, 2048)`,
+ * which is what the file family takes since #17883 — read as no column at all,
+ * and every assertion below would have been answering a question about absence
+ * instead of one about the column.
+ */
 function tsColumn(type: string): string | null {
-  const m = TS_OUT.match(new RegExp(`^ {4}(table\\.\\w+\\('f_${type}'\\)).*$`, 'm'));
+  const m = TS_OUT.match(new RegExp(`^ {4}(table\\.\\w+\\('f_${type}'(?:, [^)]*)?\\)).*$`, 'm'));
   return m ? m[1] : null;
 }
 
@@ -669,7 +680,12 @@ describe('#14828 — the SQL answers are the platform’s, not this file’s inv
 
     for (const type of FILE_REFERENCE_TYPES) {
       expect(sqlColumn(type)).toBe('VARCHAR(2048)');
-      expect(tsColumn(type)).toBe(`table.string('f_${type}')`);
+      // [#17883] Was a bare `table.string('f_type')` — knex's varchar(255),
+      // which left THIS generator's two formats disagreeing about the family
+      // after the driver had already moved to 2048. The width agreement itself
+      // is `generate-file-reference-width.pin.test.ts`; what stays here is the
+      // spelling, so the two pins fail in different sentences.
+      expect(tsColumn(type)).toBe(`table.string('f_${type}', 2048)`);
     }
   });
 });
