@@ -359,7 +359,7 @@ Type of resource being accessed
 | :--- | :--- | :--- | :--- |
 | **engine** | `Enum<'v8-isolate' \| 'wasm' \| 'container' \| 'process'>` | optional (default: `"v8-isolate"`) | Execution environment engine |
 | **engineConfig** | `{ wasm?: object; container?: object; v8Isolate?: object }` | optional |  |
-| **resourceLimits** | `{ maxMemory?: integer; maxCpu?: number; timeout?: integer }` | optional |  |
+| **resourceLimits** | `{ maxMemory?: integer; maxCpu?: number; timeoutMs?: integer }` | optional |  |
 
 ### Nested Shape: `RuntimeConfig.resourceLimits`
 
@@ -367,7 +367,8 @@ Type of resource being accessed
 | :--- | :--- | :--- | :--- |
 | **maxMemory** | `integer` | optional | Maximum memory allocation |
 | **maxCpu** | `number` | optional | Maximum CPU usage percentage |
-| **timeout** | `integer` | optional | Maximum execution time |
+| **timeoutMs** | `integer` | optional | Maximum execution time in milliseconds |
+| **timeout** | `never` | optional | [REMOVED] `RuntimeConfig.resourceLimits.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Its unit (milliseconds) lived in a source JSDoc only and the published description read "Maximum execution time", naming no unit at all, so a reader of the reference page could not tell 60000 milliseconds from 60000 seconds. Rename the key to `timeoutMs`; the value (milliseconds) is unchanged. |
 
 
 ---
@@ -394,7 +395,7 @@ Type of resource being accessed
 | :--- | :--- | :--- | :--- |
 | **engine** | `Enum<'v8-isolate' \| 'wasm' \| 'container' \| 'process'>` | optional (default: `"v8-isolate"`) | Execution environment engine |
 | **engineConfig** | `{ wasm?: object; container?: object; v8Isolate?: object }` | optional |  |
-| **resourceLimits** | `{ maxMemory?: integer; maxCpu?: number; timeout?: integer }` | optional |  |
+| **resourceLimits** | `{ maxMemory?: integer; maxCpu?: number; timeoutMs?: integer }` | optional |  |
 
 ### Nested Shape: `SandboxConfig.filesystem`
 
