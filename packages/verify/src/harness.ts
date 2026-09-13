@@ -86,6 +86,18 @@ const DEFAULT_ADMIN_PASSWORD = 'admin123';
 const DEFAULT_AUTH_SECRET = 'objectstack-verify-secret';
 
 /**
+ * The enterprise multi-org runtime this harness mounts under `multiTenant: true`
+ * — the one and only subject `bootStack` resolves from the host app, and the
+ * default of {@link BootOptions.organizationsPackage}.
+ *
+ * Exported for the host-resolution suite's premise case, which pins this value
+ * so a test seam can never quietly become the production subject. ⛔ Deliberately
+ * NOT re-exported from `./index.ts`: it is not part of this package's published
+ * API.
+ */
+export const ORGANIZATIONS_PKG = '@objectstack/organizations';
+
+/**
  * A booted stack: the HTTP surface (`api` / `raw` / `signIn` / `signUp` /
  * `apiAs`) plus the in-process handle (`hooks` / `validate` / `flows` /
  * `actions` / `seed` / `rows` / `metadata` / `tenancy` / `contextFor`) on the
@@ -347,6 +359,36 @@ export interface BootOptions {
    * array order. Default `[]`.
    */
   extraPlugins?: unknown[];
+  /**
+   * The specifier `multiTenant: true` resolves from the host app. Defaults to
+   * the real subject, {@link ORGANIZATIONS_PKG}; ⛔ production callers never
+   * pass it.
+   *
+   * ## Why it exists (#17911, the same repair #16539 / #16552 landed)
+   *
+   * Every verdict this boot path reaches is a statement about what a host root
+   * HAS and, just as load-bearing, what it has NOT got. Until ADR-0132 / #16215
+   * the second half came free: `@objectstack/organizations` was cloud-private,
+   * so a temp host that declared it and did not install it was unresolvable by
+   * construction. It is a tracked workspace package now; pnpm's hoisted store
+   * carries it and every `pnpm exec`-launched runner (vitest's bin shim
+   * included) exports a `NODE_PATH` that reaches that store. From then on a
+   * "declared, not installed" fixture's verdict was a function of whether an
+   * unrelated package had been BUILT — green on CI, whose test graph never
+   * builds it, red on any tree that had run a full local build.
+   *
+   * The visible half of that is a false red. The half that matters is the quiet
+   * one: a fixture whose subject is reachable is no longer deciding what the
+   * host root has, and nothing says so. So a case that needs the absence to be
+   * a property of ITS OWN directory hands in a name this workspace can never
+   * contain (`@fixture/*`) and proves the absence rather than assuming it — and
+   * no workspace name is safe from becoming one.
+   *
+   * ⛔ It does NOT rename the package in the operator-facing sentence: the error
+   * this boot throws names {@link ORGANIZATIONS_PKG} literally, because in every
+   * production boot that is the subject. Only the specifier moves.
+   */
+  organizationsPackage?: string;
 }
 
 /**
@@ -548,7 +590,11 @@ export async function bootStack(
     // package declares it — and it is what stops the next app-supplied
     // package added to this path from silently missing `packages/verify`'s own
     // dependencies.
-    const organizationsPkg = '@objectstack/organizations';
+    // #17911: the subject is a parameter with the real package as its default,
+    // so a fixture case whose whole content is "this host root does NOT have
+    // it" can hand in a name the workspace can never supply. Production callers
+    // pass nothing and get `ORGANIZATIONS_PKG` — see BootOptions.organizationsPackage.
+    const organizationsPkg = opts.organizationsPackage ?? ORGANIZATIONS_PKG;
     const hostRoot = opts.hostRoot ?? process.cwd();
     let mod: any;
     try {
