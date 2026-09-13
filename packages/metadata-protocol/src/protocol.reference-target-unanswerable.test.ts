@@ -125,8 +125,41 @@ describe('[#9327] a `field` TARGET is refused, not cleared', () => {
             `the message opens with a bracketed tag: ${err.message.slice(0, 48)}`,
         ).toBe(false);
         // …and the prose it opens with INSTEAD is asserted here too, so this pin
-        // cannot go green by the message becoming empty or generic.
-        expect(err.message).toMatch(/^References to a 'field' item cannot be computed\./);
+        // cannot go green by the message becoming empty or generic. [#17584]
+        // moved that opener: the ADR-0110 D3 prescription is now the FIRST
+        // clause, so this anchor moved with the sentence it guards.
+        expect(err.message).toMatch(
+            /^Ask the owning object instead: GET \/api\/v1\/meta\/object\/account\/references\./,
+        );
+    });
+
+    it('THE PIN [#17584]: the prescription is FRONT-LOADED — it precedes the explanation', async () => {
+        // The ORDER, pinned as an order rather than as a sentence. Since #16146
+        // this refusal crosses the REST boundary through #5423's shared
+        // `CLIENT_MESSAGE_MAX`, which truncates the TAIL; back-loaded, the
+        // remedy was what a long name cost the operator, measured at the wire
+        // in `rest-server-meta-references-refusal-envelope.test.ts` (37/37
+        // composed 502 characters and the URL arrived cut mid-path).
+        //
+        // ⚠️ This asserts POSITION, not wording: a later re-wording may rewrite
+        // every clause here and stay green, and may not push the answerable
+        // question behind the explanation. The bound itself is NOT re-derived
+        // in this package — the producer owes ordering, the wire pin owes the
+        // number, and a second copy of 500 here would drift.
+        const protocol = protocolWith({});
+
+        const err = await expectUnanswerableRefusal(
+            () => protocol.findReferencesToMeta({ type: 'field', name: 'account.owner' }),
+        );
+
+        const remedyAt = err.message.indexOf('GET /api/v1/meta/object/account/references');
+        const explanationAt = err.message.indexOf('cannot be computed');
+        expect(remedyAt, 'the refusal names no answerable question at all').toBeGreaterThanOrEqual(0);
+        expect(explanationAt, 'the refusal stopped saying it cannot compute').toBeGreaterThanOrEqual(0);
+        expect(
+            remedyAt,
+            'the remedy is back-loaded again — truncation will cost the operator their next step',
+        ).toBeLessThan(explanationAt);
     });
 
     it('the refusal is PRESCRIPTIVE — it names the answerable question (ADR-0110 D3)', async () => {

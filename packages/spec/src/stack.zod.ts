@@ -60,7 +60,7 @@ import { CubeSchema } from './data/analytics.zod';
 import { WebhookSchema } from './automation/webhook.zod';
 
 // System Protocol (additional)
-import { EmailTemplateDefinitionSchema } from './system/email-template.zod';
+import { EmailTemplateDefinitionSchema, EMAIL_TEMPLATE_FLOOR_LOCALE } from './system/email-template.zod';
 import { DocSchema } from './system/doc.zod';
 import { BookSchema } from './system/book.zod';
 
@@ -2230,51 +2230,14 @@ function validateCrossReferences(config: ObjectStackDefinition): string[] {
     }
   }
 
-  // Validate `type: 'page'` list view → page references (#13216).
-  //
-  // The THIRD surface in this function that names a page — after an app nav
-  // item's `pageName` and a modal action's `target` — and it is checked the
-  // same way for the same reasons, deliberately rather than incidentally: one
-  // reference kind should not answer to three different build-time policies.
-  // So it carries the identical `pageNames.size > 0` gate, whose meaning is
-  // stated once at the modal-action block above ("when no pages are defined the
-  // target may be provided by a plugin"), and `@objectstack/lint`'s
-  // `validateViewPageRefs` is what speaks when that gate has switched the check
-  // off — exactly the division `validate-nav-target-refs` already documents for
-  // the nav twin.
-  //
-  // A `page`-typed view whose `pageName` resolves to nothing is a view that
-  // appears in the object's view switcher and renders nothing when opened:
-  // unlike every other view type it has no rows to fall back to, so there is no
-  // degraded-but-visible state to notice it by. `ListViewSchema`'s own
-  // refinement has already guaranteed the key is present and well-formed by the
-  // time this runs; existence is the one question left, and only a whole-stack
-  // walk can ask it.
-  const checkViewPageRef = (listView: unknown, where: string): void => {
-    if (!listView || typeof listView !== 'object') return;
-    const lv = listView as { type?: unknown; pageName?: unknown };
-    if (lv.type !== 'page' || typeof lv.pageName !== 'string') return;
-    if (pageNames.size === 0 || pageNames.has(lv.pageName)) return;
-    errors.push(
-      `${where} mounts page '${lv.pageName}' which is not defined in pages.`,
-    );
-  };
-  if (config.views) {
-    for (const [i, view] of config.views.entries()) {
-      const viewLabel = view.name ? `View '${view.name}'` : `View[${i}]`;
-      checkViewPageRef(view.list, `${viewLabel} list`);
-      for (const [key, lv] of Object.entries(view.listViews ?? {})) {
-        checkViewPageRef(lv, `${viewLabel} listViews.${key}`);
-      }
-    }
-  }
-  if (config.objects) {
-    for (const obj of config.objects) {
-      for (const [key, lv] of Object.entries(obj.listViews ?? {})) {
-        checkViewPageRef(lv, `Object '${obj.name}' listViews.${key}`);
-      }
-    }
-  }
+  // [#17063] The `type: 'page'` list-view → page existence branch was REMOVED
+  // here with the mount itself (ADR-0049 enforce-or-remove, maintainer ruling
+  // 2026-09-09 「撤」). It was the THIRD surface in this function that named a
+  // page; the surviving two — an app nav item's `pageName` and a modal action's
+  // `target`, both below — are untouched, as is `pageNames` itself, which they
+  // share. A list view can no longer carry `pageName` at all (the key is a
+  // `retiredKey()` tombstone on `ListViewSchema`), so there is no reference
+  // left to resolve rather than a resolution left unchecked.
 
   if (config.actions) {
     for (const action of config.actions) {
@@ -2700,6 +2663,86 @@ function warnUnknownAuthoringKeys(raw: unknown): void {
   }
 }
 
+const warnedEmailTemplateFloors = new Set<string>();
+
+/**
+ * Report an `emailTemplates` bundle that carries rows for this stack's own
+ * `i18n.supportedLocales` but none tagged {@link EMAIL_TEMPLATE_FLOOR_LOCALE}.
+ *
+ * ## What goes wrong without this
+ *
+ * `IEmailService.sendTemplate` matches `(name, locale)` EXACTLY and retries
+ * exactly one rung — the literal `en-US`. There is no language-subtag folding,
+ * so a bundle whose English row is tagged `en` is unreachable from `en-US` and
+ * from every other tag it does not itself carry: each such delivery raises
+ * `TEMPLATE_NOT_FOUND`, which classifies **permanent**, so it dead-letters with
+ * no retry. `sys_user.locale` is user-editable free-text BCP-47 and is NOT
+ * constrained to `supportedLocales`, so the locales that can reach the lookup
+ * are not the ones the author enumerated — a recipient can break their own mail
+ * by setting a legal tag.
+ *
+ * ⭐ The trap is that the author does the CONSISTENT thing: a stack declaring
+ * `defaultLocale: 'en'` whose English row says `locale: 'en'` agrees with
+ * itself everywhere, validates, builds and installs clean, and still ships a
+ * bundle with no floor. The stack's own declared default locale is the wrong
+ * answer whenever it is not spelled `en-US`.
+ *
+ * ## Posture — advisory, and deliberately so
+ *
+ * Same seam and same posture as {@link warnUnknownAuthoringKeys}: this only
+ * WARNS. It moves no accept set — the parse above already succeeded and its
+ * result is returned unchanged — because refusing an `emailTemplates` shape
+ * that ships today would be a behaviour change on an authoring surface, which
+ * is a scheduled migration rather than something to slip in behind a lint. The
+ * resolver's ladder is fenced by a standing ruling and is NOT touched here: the
+ * remedy this points at is the bundle.
+ *
+ * Runs post-parse, on the value the schema produced. `locale` defaults to
+ * `en-US`, so a row that omits the key entirely already has the floor and must
+ * not be reported — the reader below mirrors that default rather than relying
+ * on the call site for it, so the two agree wherever this is called from.
+ * Warn-once per bundle, keyed by name plus the tags it actually carries.
+ */
+function warnEmailTemplateLocaleFloor(data: ObjectStackDefinition): void {
+  const supported = data.i18n?.supportedLocales;
+  if (!Array.isArray(supported) || supported.length === 0) return;
+  const templates = data.emailTemplates;
+  if (!Array.isArray(templates) || templates.length === 0) return;
+
+  const supportedSet = new Set(supported.map((l) => String(l)));
+
+  /** name → the locale tags that bundle carries, in authored order. */
+  const bundles = new Map<string, string[]>();
+  for (const tpl of templates) {
+    const name = typeof tpl?.name === 'string' ? tpl.name : '';
+    if (!name) continue;
+    const locale = typeof tpl?.locale === 'string' ? tpl.locale : EMAIL_TEMPLATE_FLOOR_LOCALE;
+    const tags = bundles.get(name);
+    if (tags) tags.push(locale);
+    else bundles.set(name, [locale]);
+  }
+
+  for (const [name, tags] of bundles) {
+    if (tags.includes(EMAIL_TEMPLATE_FLOOR_LOCALE)) continue;
+    const declared = tags.filter((t) => supportedSet.has(t));
+    if (declared.length === 0) continue;
+
+    const key = `${name} ${tags.join(',')}`;
+    if (warnedEmailTemplateFloors.has(key)) continue;
+    warnedEmailTemplateFloors.add(key);
+    console.warn(
+      `defineStack: emailTemplates '${name}' carries rows for ${declared.map((t) => `'${t}'`).join(', ')} ` +
+      `but none tagged '${EMAIL_TEMPLATE_FLOOR_LOCALE}', so this bundle has no fallback floor. ` +
+      `sendTemplate matches (name, locale) exactly and retries only the literal ` +
+      `'${EMAIL_TEMPLATE_FLOOR_LOCALE}' — there is no language-subtag folding, so every recipient ` +
+      `locale this bundle does not carry a row for raises TEMPLATE_NOT_FOUND, which is permanent ` +
+      `(dead-letter, no retry). Your stack's own i18n.defaultLocale is the wrong tag here unless ` +
+      `it is spelled '${EMAIL_TEMPLATE_FLOOR_LOCALE}': tag the English row '${EMAIL_TEMPLATE_FLOOR_LOCALE}' ` +
+      `and keep the other tags beside it.`,
+    );
+  }
+}
+
 export function defineStack(
   config: ObjectStackDefinitionInput,
   options?: DefineStackOptions,
@@ -2793,6 +2836,11 @@ export function defineStack(
     const lines = triggerErrors.map((e) => `  ✗ ${e}`);
     throw new StackTriggerCapabilityRequiredError(`${header}\n\n${lines.join('\n')}`, triggerErrors);
   }
+
+  // Post-parse and advisory: the stack is valid and is returned unchanged.
+  // `locale` carries a default, so this has to run AFTER the parse or a row
+  // that omits the key would read as a missing floor it actually has.
+  warnEmailTemplateLocaleFloor(data);
 
   return mergeActionsIntoObjects(data);
 }

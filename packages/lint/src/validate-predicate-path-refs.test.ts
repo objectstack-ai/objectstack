@@ -550,7 +550,13 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // Exactly two entries were added — `field :: valueDomain` and
     // `object :: valueDomain`, both `data.type in ['text']` — and NONE was
     // removed. Earlier measurements stay what they were: history, not the census.
-    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(53);
+    // It is 52 today, and this one is a REMOVAL: #17063 retired the
+    // `type: 'page'` list-view mount under ADR-0049 enforce-or-remove, and
+    // `view.form.ts`'s `page` section — the single `pageName` input gated
+    // `data.type == 'page'` — went with the key it configured. A form input for
+    // an unwritable key is the false-compliant UI half of a retirement, so the
+    // census falls by exactly one.
+    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(52);
 
     const findings = validatePredicatePathRefs(corrupted);
     expect(findings).toHaveLength(predicates);
@@ -624,11 +630,13 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // and `in`-list literals are deliberately not this rule's (see the anchor
     // note above) — exactly the #11566 (PR #11989) respell of the sibling
     // `maxLength` row, which took the measurement from 47 to 44. Earlier
-    // measurements stay what they were — history, not the census. It is 42
-    // today: #13216's `page` section in `view.form.ts` is gated by
-    // `data.type == 'page'`, one more `==` literal comparison of exactly the
-    // shape the seven sibling surface blocks already carry.
-    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(42);
+    // measurements stay what they were — history, not the census. It was 42
+    // when #13216's `page` section in `view.form.ts` carried a
+    // `data.type == 'page'` gate; it is 41 today because #17063 retired that
+    // section with the `type: 'page'` mount it configured (ADR-0049
+    // enforce-or-remove), taking that one `==` literal comparison with it. The
+    // seven sibling surface blocks that share its shape are untouched.
+    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(41);
 
     const rhsFindings = validatePredicatePathRefs(corrupted)
       .filter((f) => f.rule === PREDICATE_RHS_PATH_SHAPED);

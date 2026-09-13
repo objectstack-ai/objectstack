@@ -75,7 +75,9 @@ describe('showcase: external datasource auto-connects with no onEnable bridge (A
     // Why this is deliberately left as-is (maintainer ruling, 2026-08-12 on
     // #7834): the federated-read × org-walled intersection is accepted as
     // covered at the unit/seam tier ONLY. The single honest walled harness is
-    // `multiTenant: true` with the cloud-private `@objectstack/organizations`
+    // `multiTenant: true` with the real `@objectstack/organizations`, which
+    // ADR-0132's entitlement boundary keeps out of every framework package's
+    // manifest — the package is open core, but only a HOST may declare it
     // (`'posture-only'` stamps nothing and scopes no query — see
     // `BootOptions.multiTenant` — so it would assert nothing here); its
     // feasibility in this repo is untested, and one intersection does not

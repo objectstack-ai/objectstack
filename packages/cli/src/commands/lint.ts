@@ -15,6 +15,7 @@ import { scoreMetadata } from '../lint/score.js';
 import { checkHookBodyLowering } from '../lint/hook-body-lowering.js';
 import { lowerCallables } from '../utils/lower-callables.js';
 import { authoringRuleUnionStack } from '../utils/stack-collections.js';
+import { artifactPackages, packageBodyAsStack } from '../utils/artifact-packages.js';
 import { runMetadataEval } from '../lint/metadata-eval.js';
 import { DEFAULT_METADATA_EVAL_CORPUS } from '../lint/corpus.js';
 import {
@@ -166,150 +167,51 @@ function getViewLabel(view: any, viewPath: string): { label?: unknown; path: str
   return { path: `${viewPath}.list.label` };
 }
 
-// ─── Lint Engine ────────────────────────────────────────────────────
-
-export interface LintConfigOptions {
-  /**
-   * ADR-0080 SDUI component manifest, when the project ships one. Present, the
-   * JSX gate does full component/prop validation; absent, it stays parse-level.
-   * The `os lint` command resolves it; `scoreMetadata` deliberately does not —
-   * the scorer is a pure function of a stack and must not read the filesystem.
-   */
-  sduiManifest?: unknown;
-}
-
-export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue[] {
+/**
+ * The intra-package duplicate-name advisory (ADR-0048 §3.4), over the
+ * declarations of ONE package.
+ *
+ * ADR-0048 §3.4 retired the per-item CROSS-package throw: package ids are
+ * globally unique, so two installed packages shipping the same bare name
+ * (e.g. `page/home`) legitimately COEXIST under distinct composite keys and
+ * each caller resolves to its own via package-scoped resolution. A bare name
+ * is therefore NOT a collision risk and must not warn on its own.
+ *
+ * What the lint still earns its keep on is the narrow authoring-time hygiene
+ * case the ADR explicitly leaves to `os lint`: "an author shipping two
+ * `page/home` in one package". Two items of the same (type, name) declared
+ * within ONE package's config share a single composite registry key and
+ * shadow each other (last-write-wins) — so the legitimate signal is a genuine
+ * duplicate `(type, name)` pair within one package, never a unique bare name.
+ *
+ * ⚠️ [#17821] "Within one package" is the CALLER'S to establish, and this
+ * function judges exactly the stack it is handed. It used to be neither: the
+ * rule read the ONE flattened array a composed multi-package project carries
+ * at its top level (`composeStacks(…, { manifest: 'preserve' })`) while a
+ * comment right here asserted "we only see one package's config here". Two
+ * packages that each legitimately declared `home` were therefore reported as
+ * one package declaring it twice — prescribing a rename of a name that was
+ * already correct, with the OTHER package's namespace as the suggested prefix,
+ * under a closing sentence saying distinct packages may reuse a name freely.
+ * The call site below decides what a package is; this function no longer
+ * assumes it.
+ *
+ * Objects are already prefix-*enforced* (error) in defineStack; views are
+ * object-derived; `doc` has its own build lint — so they are excluded here.
+ *
+ * @param stack      one package's stack — its own collections at the top level
+ *                   and its own identity under `manifest`: the shape
+ *                   `packageBodyAsStack` builds, or the caller's whole stack
+ *                   when that stack IS one package.
+ * @param pathPrefix prepended to the emitted `path` AND to the back-pointer
+ *                   inside the message, so a finding raised on a multi-package
+ *                   artifact resolves in the file the author wrote. Empty —
+ *                   today's spelling, byte for byte — when the stack handed in
+ *                   is the whole one.
+ */
+function duplicateNameIssues(stack: any, pathPrefix = ''): LintIssue[] {
   const issues: LintIssue[] = [];
-
-  const push = (issue: LintIssue | null) => {
-    if (issue) issues.push(issue);
-  };
-
-  // ── Objects ──
-  const objects: any[] = Array.isArray(config.objects) ? config.objects : [];
-
-  for (let i = 0; i < objects.length; i++) {
-    const obj = objects[i];
-    const objPath = `objects[${i}]`;
-
-    // Object name must be snake_case
-    if (obj.name) {
-      push(checkSnakeCase(obj.name, `${objPath}.name`, 'Object name'));
-    }
-
-    // Object must have label
-    push(checkLabelExists(obj, `${objPath}.label`, 'Object'));
-
-    // Object label conventions
-    if (obj.label) {
-      push(checkLabelCase(obj.label, `${objPath}.label`));
-    }
-
-    // Fields
-    if (obj.fields && typeof obj.fields === 'object') {
-      const fieldNames = Object.keys(obj.fields);
-
-      if (fieldNames.length === 0) {
-        issues.push({
-          severity: 'warning',
-          rule: 'structure/empty-fields',
-          message: `Object "${obj.name || '?'}" has an empty fields map`,
-          path: `${objPath}.fields`,
-        });
-      }
-
-      for (const fieldName of fieldNames) {
-        const field = obj.fields[fieldName];
-        const fieldPath = `${objPath}.fields.${fieldName}`;
-
-        // Field key must be snake_case
-        push(checkSnakeCase(fieldName, fieldPath, 'Field name'));
-
-        // Field must have label
-        if (field && typeof field === 'object') {
-          push(checkLabelExists({ ...field, name: fieldName }, `${fieldPath}.label`, 'Field'));
-          if (field.label) {
-            push(checkLabelCase(field.label, `${fieldPath}.label`));
-          }
-        }
-      }
-    } else if (!obj.fields) {
-      issues.push({
-        severity: 'error',
-        rule: 'structure/no-fields',
-        message: `Object "${obj.name || '?'}" has no fields defined`,
-        path: `${objPath}.fields`,
-      });
-    }
-  }
-
-  // ── Views ──
-  const views: any[] = Array.isArray(config.views) ? config.views : [];
-  for (let i = 0; i < views.length; i++) {
-    const view = views[i];
-    const viewPath = `views[${i}]`;
-    if (view.name) {
-      push(checkSnakeCase(view.name, `${viewPath}.name`, 'View name'));
-    }
-    const viewLabel = getViewLabel(view, viewPath);
-    push(checkLabelExists({ label: viewLabel.label, name: view.name }, viewLabel.path, 'View'));
-    if (viewLabel.label) {
-      push(checkLabelCase(viewLabel.label, viewLabel.path));
-    }
-  }
-
-  // ── Apps ──
-  const apps: any[] = Array.isArray(config.apps) ? config.apps : [];
-  for (let i = 0; i < apps.length; i++) {
-    const app = apps[i];
-    const appPath = `apps[${i}]`;
-    if (app.name) {
-      push(checkSnakeCase(app.name, `${appPath}.name`, 'App name'));
-    }
-    push(checkLabelExists(app, `${appPath}.label`, 'App'));
-    if (app.label) {
-      push(checkLabelCase(app.label, `${appPath}.label`));
-    }
-  }
-
-  // ── Flows ──
-  const flows: any[] = Array.isArray(config.flows) ? config.flows : [];
-  for (let i = 0; i < flows.length; i++) {
-    const flow = flows[i];
-    const flowPath = `flows[${i}]`;
-    if (flow.name) {
-      push(checkSnakeCase(flow.name, `${flowPath}.name`, 'Flow name'));
-    }
-  }
-
-  // ── Agents ──
-  const agents: any[] = Array.isArray(config.agents) ? config.agents : [];
-  for (let i = 0; i < agents.length; i++) {
-    const agent = agents[i];
-    const agentPath = `agents[${i}]`;
-    if (agent.name) {
-      push(checkSnakeCase(agent.name, `${agentPath}.name`, 'Agent name'));
-    }
-  }
-
-  // ── Intra-package duplicate-name advisory (ADR-0048 §3.4) ──
-  // ADR-0048 §3.4 retired the per-item CROSS-package throw: package ids are
-  // globally unique, so two installed packages shipping the same bare name
-  // (e.g. `page/home`) legitimately COEXIST under distinct composite keys and
-  // each caller resolves to its own via package-scoped resolution. A bare name
-  // is therefore NOT a collision risk and must not warn on its own.
-  //
-  // What the lint still earns its keep on is the narrow authoring-time hygiene
-  // case the ADR explicitly leaves to `os lint`: "an author shipping two
-  // `page/home` in one package". Two items of the same (type, name) declared
-  // within ONE package's config share a single composite registry key and
-  // shadow each other (last-write-wins). We only see one package's config here,
-  // so the legitimate signal is a genuine duplicate `(type, name)` pair within
-  // it — never a unique bare name.
-  //
-  // Objects are already prefix-*enforced* (error) in defineStack; views are
-  // object-derived; `doc` has its own build lint — so they are excluded here.
-  const ns: string | undefined = config.manifest?.namespace;
+  const ns: string | undefined = stack.manifest?.namespace;
 
   // Bare-named UI/automation types that share the generic registry namespace.
   // Data-driven so a new bare-named type is one line.
@@ -369,7 +271,7 @@ export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue
   ];
 
   for (const { key, label, registryKey } of PREFIXED_TYPES) {
-    const items: any[] = Array.isArray(config[key]) ? config[key] : [];
+    const items: any[] = Array.isArray(stack[key]) ? stack[key] : [];
     // First occurrence of each registry key → its index, so a later duplicate
     // can point back at the original declaration.
     const firstSeen = new Map<string, number>();
@@ -383,9 +285,10 @@ export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue
         continue;
       }
       // Genuine intra-package duplicate: two items landing on ONE registry key
-      // in this package's config. They shadow each other. Renaming one with the
-      // package namespace prefix (`crm_home`) is the simplest fix; any distinct
-      // name works.
+      // in the config of the package this call was handed. They shadow each
+      // other. Renaming one with THAT package's namespace prefix (`crm_home` —
+      // `ns` is read off the same stack, so it is never a sibling package's)
+      // is the simplest fix; any distinct name works.
       const suggestion = ns && !name.startsWith(`${ns}_`) ? `${ns}_${name}` : undefined;
       // An action has a second, usually better remedy than renaming: the two
       // declarations collide only because they agree on `objectName` (or both
@@ -408,14 +311,244 @@ export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue
         rule: 'naming/namespace-prefix',
         message:
           `${label} "${name}" is declared more than once in this package ` +
-          `(also at ${key}[${original}].name). ${collapseText} ` +
+          `(also at ${pathPrefix}${key}[${original}].name). ${collapseText} ` +
           `(ADR-0048 §3.4) — ${remedy}. ` +
           `Distinct packages may reuse the same name freely; the namespace prefix ` +
           `is an optional convention, not a collision-avoidance requirement.`,
-        path: `${key}[${i}].name`,
+        path: `${pathPrefix}${key}[${i}].name`,
         ...(suggestion ? { fix: suggestion } : {}),
       });
     }
+  }
+
+  return issues;
+}
+
+// ─── Lint Engine ────────────────────────────────────────────────────
+
+export interface LintConfigOptions {
+  /**
+   * ADR-0080 SDUI component manifest, when the project ships one. Present, the
+   * JSX gate does full component/prop validation; absent, it stays parse-level.
+   * The `os lint` command resolves it; `scoreMetadata` deliberately does not —
+   * the scorer is a pure function of a stack and must not read the filesystem.
+   *
+   * ⚠️ That sentence is about the FILESYSTEM and about nothing else. It is not
+   * a decision about WHICH stack the scorer judges: the stack it is handed is
+   * still resolved to the collections the author declared, in either ADR-0130
+   * D4 shape, by the fold at `lintConfig`'s entry below. ⛔ Do not read it as a
+   * warrant for the scorer seeing an unfolded stack.
+   */
+  sduiManifest?: unknown;
+}
+
+/**
+ * `os lint`'s whole rubric: the hand-written checks below plus the shared
+ * author-time rule registry (#4409), over the stack the author DECLARED.
+ *
+ * ## Why the fold is here, at the entry, and not at the registry call alone
+ *
+ * #17069 taught the registry call inside this function to resolve `packages[]`
+ * and scoped itself the way `compile.ts` scopes it, writing down exactly what
+ * it left behind: "the hand-written checks above and `scoreMetadata` (which
+ * reaches `lintConfig` through `lint/score.js`) keep reading the caller's own
+ * stack". This is the other half of that staged change, not a reversal of it.
+ *
+ * The half it left was the sharper one. Under ADR-0130 D4 / option B every
+ * definition lives in `packages[]` and the top level carries none, so the
+ * hand-written family read an EMPTY stack: a project with a lower-case object
+ * label and no name field got `✓ All checks passed`, while the byte-identical
+ * top-level spelling of the same metadata got `convention/label-case` and
+ * `object/missing-name-field`. `scoreMetadata` reaches this same function, so
+ * an option-B project's metadata-quality rubric was computed over nothing and
+ * published `100/100 (A)` — the #15658 shape ("the linter found nothing" and
+ * "the linter never ran" collapsed into the better-looking one) arriving
+ * through the INPUT this time rather than through a swallowed crash.
+ *
+ * ## Why {@link authoringRuleUnionStack} and not a second fold
+ *
+ * `stack-collections.ts` is the ONE place this package resolves a
+ * package-owned collection, and its rule is present-wins: a key the top level
+ * already carries wins, because in today's additive shape that array already
+ * IS the union. A stack that carries its collections comes back BY IDENTITY,
+ * so every single-package project lints byte-identically to before. A second
+ * fold written here could not have that property without re-deriving it, and
+ * two folds that disagree is a worse defect than the one being removed.
+ *
+ * ## What this does NOT decide
+ *
+ * It does not choose between a per-project and a per-package metadata score.
+ * `scoreMetadata` already scores the whole project and always has: its schema
+ * half parses the artifact whole and reports `packages.0.manifest.objects.0:
+ * …` on an option-B stack today, with no fold anywhere, and on today's
+ * additive multi-package shape its lint half already reads the flattened union
+ * across every package. This fold makes the option-B shape agree with the
+ * additive one — the same thing computed, over a stack that is no longer
+ * empty — and raises no new scoping question.
+ */
+export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue[] {
+  // The stack as DECLARED, whichever ADR-0130 D4 shape it arrived in. ⛔ Never
+  // read `config.KEY` below this line — a check that skipped the fold is
+  // exactly the defect #17528 removed, and it would be invisible in every
+  // other check, because the run still exits 0 and still prints a score.
+  const stack: any = authoringRuleUnionStack(config as Record<string, unknown>);
+
+  const issues: LintIssue[] = [];
+
+  const push = (issue: LintIssue | null) => {
+    if (issue) issues.push(issue);
+  };
+
+  // ── Objects ──
+  const objects: any[] = Array.isArray(stack.objects) ? stack.objects : [];
+
+  for (let i = 0; i < objects.length; i++) {
+    const obj = objects[i];
+    const objPath = `objects[${i}]`;
+
+    // Object name must be snake_case
+    if (obj.name) {
+      push(checkSnakeCase(obj.name, `${objPath}.name`, 'Object name'));
+    }
+
+    // Object must have label
+    push(checkLabelExists(obj, `${objPath}.label`, 'Object'));
+
+    // Object label conventions
+    if (obj.label) {
+      push(checkLabelCase(obj.label, `${objPath}.label`));
+    }
+
+    // Fields
+    if (obj.fields && typeof obj.fields === 'object') {
+      const fieldNames = Object.keys(obj.fields);
+
+      if (fieldNames.length === 0) {
+        issues.push({
+          severity: 'warning',
+          rule: 'structure/empty-fields',
+          message: `Object "${obj.name || '?'}" has an empty fields map`,
+          path: `${objPath}.fields`,
+        });
+      }
+
+      for (const fieldName of fieldNames) {
+        const field = obj.fields[fieldName];
+        const fieldPath = `${objPath}.fields.${fieldName}`;
+
+        // Field key must be snake_case
+        push(checkSnakeCase(fieldName, fieldPath, 'Field name'));
+
+        // Field must have label
+        if (field && typeof field === 'object') {
+          push(checkLabelExists({ ...field, name: fieldName }, `${fieldPath}.label`, 'Field'));
+          if (field.label) {
+            push(checkLabelCase(field.label, `${fieldPath}.label`));
+          }
+        }
+      }
+    } else if (!obj.fields) {
+      issues.push({
+        severity: 'error',
+        rule: 'structure/no-fields',
+        message: `Object "${obj.name || '?'}" has no fields defined`,
+        path: `${objPath}.fields`,
+      });
+    }
+  }
+
+  // ── Views ──
+  const views: any[] = Array.isArray(stack.views) ? stack.views : [];
+  for (let i = 0; i < views.length; i++) {
+    const view = views[i];
+    const viewPath = `views[${i}]`;
+    if (view.name) {
+      push(checkSnakeCase(view.name, `${viewPath}.name`, 'View name'));
+    }
+    const viewLabel = getViewLabel(view, viewPath);
+    push(checkLabelExists({ label: viewLabel.label, name: view.name }, viewLabel.path, 'View'));
+    if (viewLabel.label) {
+      push(checkLabelCase(viewLabel.label, viewLabel.path));
+    }
+  }
+
+  // ── Apps ──
+  const apps: any[] = Array.isArray(stack.apps) ? stack.apps : [];
+  for (let i = 0; i < apps.length; i++) {
+    const app = apps[i];
+    const appPath = `apps[${i}]`;
+    if (app.name) {
+      push(checkSnakeCase(app.name, `${appPath}.name`, 'App name'));
+    }
+    push(checkLabelExists(app, `${appPath}.label`, 'App'));
+    if (app.label) {
+      push(checkLabelCase(app.label, `${appPath}.label`));
+    }
+  }
+
+  // ── Flows ──
+  const flows: any[] = Array.isArray(stack.flows) ? stack.flows : [];
+  for (let i = 0; i < flows.length; i++) {
+    const flow = flows[i];
+    const flowPath = `flows[${i}]`;
+    if (flow.name) {
+      push(checkSnakeCase(flow.name, `${flowPath}.name`, 'Flow name'));
+    }
+  }
+
+  // ── Agents ──
+  const agents: any[] = Array.isArray(stack.agents) ? stack.agents : [];
+  for (let i = 0; i < agents.length; i++) {
+    const agent = agents[i];
+    const agentPath = `agents[${i}]`;
+    if (agent.name) {
+      push(checkSnakeCase(agent.name, `${agentPath}.name`, 'Agent name'));
+    }
+  }
+
+  // ── Intra-package duplicate-name advisory (ADR-0048 §3.4) ──
+  //
+  // [#17821 / ADR-0130 D4-D5] An artifact registers PER PACKAGE, so the
+  // advisory is evaluated per package — the shape `compile.ts` step 3b-ii
+  // already runs the author-time rule table in, reached through the same two
+  // seams (`artifactPackages`, `packageBodyAsStack`) rather than a second copy
+  // of them.
+  //
+  // ⛔ This is NOT "skip the site per package" — `compile.ts`' own fence, and
+  // it binds here too. Every finding the advisory exists to raise is still
+  // raised, on the package that owns it; what changed is that a name is judged
+  // against ITS OWN package's declarations instead of against the union of
+  // every package's. The defect was missing attribution, never the signal.
+  //
+  // Fewer than two packages ⇒ the existing read already IS the per-package
+  // read, so it is kept verbatim: a stack with no `packages[]` is one package
+  // by definition, and with exactly one the top level carries that package's
+  // collections and nothing else, in its own order. Keeping it also keeps a
+  // hand-written top-level declaration that no package entry carries inside
+  // the advisory's reach, and keeps every finding's `path` in the same
+  // coordinates the rest of this function reports in.
+  //
+  // With two or more, the flattened top level MIXES packages and the
+  // per-package index is the only true one — so the path is written whole
+  // (`packages[1].manifest.apps[1].name`), which resolves in both ADR-0130 D4
+  // shapes, rather than as a bare `apps[1]` that in the additive shape points
+  // at a different item than the one being reported.
+  //
+  // ⚠️ The boundary, stated rather than implied: with two or more packages a
+  // top-level declaration that no package entry carries is outside every
+  // registration unit and is judged by neither leg. `composeStacks` cannot
+  // emit that shape — the flattened top level is exactly the union of the
+  // packages it composed.
+  const packageEntries = artifactPackages(stack);
+  if (packageEntries.length > 1) {
+    for (const pkg of packageEntries) {
+      issues.push(...duplicateNameIssues(
+        packageBodyAsStack(pkg.body, stack.packages),
+        `packages[${pkg.index}].manifest.`,
+      ));
+    }
+  } else {
+    issues.push(...duplicateNameIssues(stack));
   }
 
   // ── Protocol compatibility range (ADR-0087 D1) ──
@@ -427,7 +560,7 @@ export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue
   // Scoped to configs that declare a manifest — a bare metadata fragment (no
   // package identity) has nowhere to hang an engines range.
   {
-    const manifest = config.manifest as Record<string, any> | undefined;
+    const manifest = stack.manifest as Record<string, any> | undefined;
     const hasRange =
       typeof manifest?.engines?.protocol === 'string' ||
       typeof manifest?.engines?.platform === 'string' ||
@@ -456,7 +589,7 @@ export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue
   //
   // Reads FUNCTION values, so it must run on the normalized input before any
   // Zod parse — which is where `lintConfig` already sits.
-  issues.push(...checkHookBodyLowering(config as Record<string, unknown>));
+  issues.push(...checkHookBodyLowering(stack as Record<string, unknown>));
 
   // ── Data-model best practices (relationships / master-detail / roll-ups) ──
   // Cross-object rules that encode the conventions in ADR-0035 and the
@@ -523,14 +656,19 @@ export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue
   // a stack that still carries them comes back BY IDENTITY and every
   // single-package project lints exactly as before.
   //
-  // Scoped to this call, as it is in `compile.ts`: the hand-written checks
-  // above and `scoreMetadata` (which reaches `lintConfig` through
-  // `lint/score.js`) keep reading the caller's own stack, so nothing about
-  // what this function returns for a top-level stack moves.
-  const { lowered, loweredHookRefs } = lowerCallables(config as Record<string, unknown>);
+  // ⭐ #17069 scoped its fold to THIS CALL, as `compile.ts` scopes its own, and
+  // named the two things it deliberately left reading the caller's own stack:
+  // "the hand-written checks above and `scoreMetadata`". #17528 is the other
+  // half of that staged change — the fold now happens ONCE, at this function's
+  // entry, so every check in it and every caller of it (the `os lint` command
+  // and `scoreMetadata`) judge one stack. ⛔ There is still exactly one fold
+  // and one helper: `lowerCallables` shallow-clones the top level it is handed,
+  // so `lowered` already carries the folded collections and re-folding it here
+  // would be a second call that could only ever return by identity.
+  const { lowered, loweredHookRefs } = lowerCallables(stack as Record<string, unknown>);
   for (const f of runAuthoringRules('lint', {
-    normalized: authoringRuleUnionStack(config as Record<string, unknown>),
-    parsed: authoringRuleUnionStack(lowered),
+    normalized: stack,
+    parsed: lowered,
     sduiManifest: opts.sduiManifest,
     // [#16546] Same ref set `os build` computes from the same normalized
     // input — what lets `validateReadonlyHookWrites` / `validateHookBodyWrites`

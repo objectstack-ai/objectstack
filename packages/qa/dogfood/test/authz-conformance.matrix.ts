@@ -24,12 +24,40 @@
 // hand-curated regex table reaching 1 of 17 REST registrars and 4 of 17
 // dispatcher domain files.
 //
-// The population comes from `packages/rest/src/rest-route-ledger.ts` (94 rows
+// The population comes from `packages/rest/src/rest-route-ledger.ts` (91 rows
 // / 19 families) and `packages/runtime/src/route-ledger.ts` (82 rows / 21
 // domains) because those two are enumerated from a RUNNING server and guarded
 // in both directions by their own conformance tests — so a new family or
 // domain cannot be silently absent from them, and therefore cannot be silently
-// absent from here. Widening a regex instead was refused: it rots on the next
+// absent from here.
+//
+// [#17111] Those four figures are DERIVED, not hand-typed. The companion test
+// parses THIS sentence and asserts each number against a scoped read of the
+// ledger the sentence names, so a row, family or domain arriving or leaving
+// reds CI here instead of rotting into a false present tense. That pin is the
+// only reason the present tense above is safe to write at all; an undated
+// hand-typed count in this position is what #17111 was filed about, and what
+// #16307/#16954 were filed about before it.
+//
+// ⚠️ The pin folds the `//` continuations before it reads, because every
+// figure in this docblock WRAPS mid-phrase — the row/family phrase above is
+// split across two comment lines. A one-line literal search for it therefore
+// matches NOTHING in this file, and a zero from one is not a reading, it is
+// the instrument missing. ⛔ Do not re-flow these figures into a shape the
+// parser cannot anchor: it keys on the backticked ledger path immediately
+// followed by the parenthesised pair, and requires EXACTLY ONE of each, so a
+// second unpinned copy of either figure is red rather than a fresh carrier.
+//
+// ⚠️ The REST row count read 94 here until #17111 corrected it, and the
+// cause was NOT the route-guarding move (`cc837dbfec`) whose own stale figures
+// sat seven lines below it: guarding a route never changes its ledger
+// disposition, and reading this drift as the gate move's sends the next reader
+// to the wrong change. It moved when #14503 took the three REST package
+// read/delete rows out of the ledger — 94 rows → 91, `sdk` 84 → 81, with
+// families unmoved at 19 because all three departing rows carried
+// `family: packages`, which survives on the publish row. Two stale figures in
+// one docblock with two entirely different causes is the failure mode the pin
+// above ends. Widening a regex instead was refused: it rots on the next
 // added file, which is the mechanism this replaces. Deriving "gated" from
 // source syntax was refused too, on a measurement — 22 of 29 apparently
 // ungated `register(` sites in `rest-server.ts` are false, a 76% false-ungated

@@ -13,6 +13,11 @@
  * this behaviour, THIS PIN is the thing to update, and its update is the
  * repair's evidence.
  *
+ * ⭐ THAT RULING LANDED (#17601, 2026-09-11): option B — the discriminator's
+ * prose in `approval-service.ts` was scoped to this measurement and NO door was
+ * narrowed, so the doubling measured below is ACCEPTED RESIDUE and every
+ * assertion in this file stands exactly as it was.
+ *
  * ## The hypothesis, and what it tested
  *
  * `resolveRecordedContinuation` discriminates the two continuation issuers of a

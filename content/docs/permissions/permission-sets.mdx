@@ -131,6 +131,17 @@ the anchor decides *which* unit `unit*` means.
 > require the enterprise hierarchy resolver; without it they **fail closed to
 > `own`** (never fail-open).
 
+> **A depth axis beside the super-user bit that bypasses it is REFUSED.** The
+> read-scope resolver answers `org` on the super-user bit *before* it consults
+> the depth key, so such a declaration would be stored and never read — and a
+> capability census over the deployed shape would count it as coverage. The
+> accept set now rejects it at the offending key, naming both remedies. Note the
+> **asymmetry**, which follows the resolver exactly: `viewAllRecords` bypasses
+> READ only, so `readScope` beside `viewAllRecords: true` is refused while
+> `writeScope` beside it is **accepted and honoured**. `modifyAllRecords`
+> bypasses both, so both `readScope` and `writeScope` beside it are refused.
+> Declare the depth, or declare the bypass — not both on the same axis.
+
 ## Capabilities & required permissions (ADR-0066)
 
 - **Capabilities** are first-class `sys_capability` records — named privileges

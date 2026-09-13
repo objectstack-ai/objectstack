@@ -24,6 +24,10 @@ export const jaJP: TranslationData = {
         nav_account_sessions: { label: 'アクティブセッション' },
         nav_account_api_keys: { label: 'API キー' },
         nav_account_oauth_apps: { label: 'OAuth アプリケーション' },
+        // Contributed at runtime by `@objectstack/mcp` into
+        // `grp_account_developer`; the Setup twin's key does not answer for the
+        // Account app (one `apps.<app>.navigation` namespace per app).
+        nav_connect_agent: { label: 'エージェントを接続' },
       },
     },
     setup: {

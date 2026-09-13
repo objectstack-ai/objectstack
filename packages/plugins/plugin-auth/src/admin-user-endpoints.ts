@@ -62,16 +62,14 @@ export interface AuthContextLike {
       userId: string;
       providerId: string;
       /**
-       * better-auth 1.7 keys accounts on (issuer, accountId) and requires
-       * both. A local password account carries the synthetic issuer
-       * better-auth mints for itself, `local:credential` — write anything else
-       * and the row exists but no sign-in ever finds it.
-       *
        * `accountId` is the STABLE 1.7 spelling. `1.7.0-rc.2` briefly called it
        * `providerAccountId` and stable 1.7.0 renamed it back (#3002); the
        * rc.2 spelling here would have created accounts with no account id.
+       *
+       * With `providerId` it is the WHOLE account identity again since 1.7.3
+       * (#17440): the `issuer` this signature used to require was deleted
+       * upstream together with the model it keyed.
        */
-      issuer: string;
       accountId: string;
       password: string;
     }): Promise<unknown>;
@@ -172,7 +170,6 @@ export interface EndpointResult {
   };
 }
 
-import { CREDENTIAL_ISSUER } from './backfill-account-issuer.js';
 import { generatePlaceholderEmail } from './placeholder-email.js';
 import { reconcileMembership, type MembershipPolicy } from './reconcile-membership.js';
 import { resolveDefaultOrgId } from './tenancy-service.js';
@@ -666,7 +663,6 @@ export async function runAdminSetUserPassword(
       await authCtx.internalAdapter.createAccount({
         userId,
         providerId: 'credential',
-        issuer: CREDENTIAL_ISSUER,
         accountId: userId,
         password: hashed,
       });

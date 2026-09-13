@@ -40,19 +40,26 @@
  * distinct people, a submitter who is not an approver, an out-of-office
  * delegation decided under the delegate's own identity — was stuck on it, and
  * each rediscovered the same non-obvious cause: a password hash is not enough.
- * better-auth 1.7 keys accounts on `(issuer, accountId)`, so a
- * credential row whose `issuer` is not the local credential issuer is INVISIBLE
- * to sign-in, which then fails `INVALID_EMAIL_OR_PASSWORD` behind a misleading
- * "User not found" — pointing at the row, which is fine, instead of at the
- * account, which is not.
+ * A persona needs a better-auth ACCOUNT row, minted the way better-auth mints
+ * its own.
  *
  * `seed-approval-demo.ts` now provisions the credential account too
  * (`ensureCredentialAccount`), through better-auth's own `$context` — its
- * hasher, its `internalAdapter.createAccount`, and the issuer READ OFF the dev
- * admin's own credential row rather than re-spelled here. Reading it is what
- * keeps this app from carrying a second copy of a constant `plugin-auth` owns:
- * whatever better-auth minted for the admin in THIS runtime is by construction
- * the issuer a sign-in will look the personas up under.
+ * hasher and its `internalAdapter.createAccount` — rather than a hand-written
+ * `sys_account` insert that would have to reproduce better-auth's hash format
+ * and column mapping.
+ *
+ * ⚠️ [#17440] Between better-auth 1.7.0 and 1.7.2 there was a third thing to
+ * get right, and it was the one that bit: accounts keyed on
+ * `(issuer, accountId)`, so a credential row whose `issuer` was not the local
+ * credential issuer was INVISIBLE to sign-in, which then failed
+ * `INVALID_EMAIL_OR_PASSWORD` behind a misleading "User not found" — pointing
+ * at the `sys_user` row, which is fine, instead of at the account, which is
+ * not. Four checklist items rediscovered that independently. 1.7.3 removed the
+ * issuer-scoped identity outright and `sys_account.issuer` retired with it, so
+ * the key is `(provider_id, account_id)` and that entire class of silent
+ * lockout is gone. Kept here as the reason this file says "a password hash is
+ * not enough" at all.
  *
  * Both sign in with {@link DEMO_PERSONA_PASSWORD}.
  *

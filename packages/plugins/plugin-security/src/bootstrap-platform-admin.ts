@@ -80,6 +80,7 @@ import {
   reportLegacyPlatformAdminGrant,
   resolvePlatformAdminEmails,
 } from '@objectstack/core';
+import type { SeedSettlementSnapshot } from '@objectstack/spec/contracts';
 import { claimSeedOwnership } from './claim-seed-ownership.js';
 import {
   createSeedWriteRefusals,
@@ -120,6 +121,18 @@ interface BootstrapOptions {
    * (owned by package metadata).
    */
   resync?: boolean;
+  /**
+   * The seed pipeline's tally at the moment this bootstrap runs, read by the
+   * caller through the published `seed-settlement` contract.
+   *
+   * Handed straight to {@link claimSeedOwnership} and used for nothing else:
+   * the claim pass is the only step here whose answer depends on whether the
+   * platform's own seeder has finished writing, and a pass that cannot say so
+   * reports "claimed 0 of 0" for both "nothing to claim" and "nothing had
+   * landed yet". Absent for callers with no kernel context (`os meta resync`),
+   * which the claim reports as `unattested` rather than guessing.
+   */
+  seedSettlement?: SeedSettlementSnapshot | undefined;
 }
 
 const SYSTEM_CTX = { isSystem: true };
@@ -383,6 +396,24 @@ export async function bootstrapPlatformAdmin(
   reason?: string;
   /** Count of seeded rows re-owned to the freshly-promoted admin. */
   ownershipClaimed?: number;
+  /**
+   * WHO holds the unscoped `admin_full_access` grant after this pass — the user
+   * this pass promoted, or the holder the `already_have_admin` short-circuit
+   * found. Present on both, absent on every other return and under walled
+   * postures (where no grant row exists and standing is config-derived at
+   * request time, so there is no row-based answer to give).
+   *
+   * It exists because the seed-ownership claim is **not a single pass** and the
+   * later passes need a target. The claim hands seeded rows to this user; a
+   * bundle that overruns `OS_INLINE_SEED_BUDGET_MS` keeps writing rows after the
+   * promotion instant, and the re-run on `app:seeded` must re-own them to the
+   * SAME admin. Before this, the short-circuited pass knew the answer and threw
+   * it away, so the only way to re-own the missed rows was to re-derive the
+   * holder — a second implementation of the two-leg scan above, which is how the
+   * guard and its copy drift apart (#16861 is what that scan costs to get
+   * right). One owner, read by both passes.
+   */
+  adminUserId?: string;
   /** [#2705] Existing platform-owned rows reconciled to dist under `resync`. */
   resynced?: number;
   /** [#2705] Existing rows left untouched by `resync` (admin/package-owned). */
@@ -658,6 +689,10 @@ export async function bootstrapPlatformAdmin(
       seeded: seededCount,
       adminPromoted: false,
       reason: 'already_have_admin',
+      // The promotion is a no-op forever; the CLAIM is not. This pass is the
+      // only thing on a later boot that knows who the seeded rows belong to,
+      // and the seed-settle re-run needs that name (see `adminUserId` above).
+      ...(unscopedHolder.user_id ? { adminUserId: String(unscopedHolder.user_id) } : {}),
       ...resyncCounts,
       ...grantScanCounts,
     };
@@ -859,9 +894,19 @@ export async function bootstrapPlatformAdmin(
     // Hand seeded business records (owner_id NULL / usr_system) to the freshly
     // promoted admin so owner-keyed UX works out of the box. Best-effort and
     // idempotent — failures here must not undo the promotion above.
+    //
+    // ⚠️ This pass is NOT the last word, and does not pretend to be. The
+    // promotion instant is not the moment the seed is done: an app bundle that
+    // overruns `OS_INLINE_SEED_BUDGET_MS` keeps writing in the background, so
+    // rows can land after this walk and would stay ownerless forever. The
+    // settlement snapshot is what lets the pass SAY which of the two it was,
+    // and `security-plugin.ts` re-runs the claim on `app:seeded`.
     let ownershipClaimed = 0;
     try {
-      const claims = await claimSeedOwnership(ql, chosen.id, { logger });
+      const claims = await claimSeedOwnership(ql, chosen.id, {
+        logger,
+        seedSettlement: options.seedSettlement,
+      });
       ownershipClaimed = claims.reduce((sum, c) => sum + c.count, 0);
     } catch (e) {
       logger?.warn?.('[security] seed ownership handoff failed', { error: (e as Error).message });
@@ -871,6 +916,7 @@ export async function bootstrapPlatformAdmin(
       seeded: seededCount,
       adminPromoted: true,
       ownershipClaimed,
+      adminUserId: String(chosen.id),
       basis: audit.basis,
       ...resyncCounts,
       ...grantScanCounts,

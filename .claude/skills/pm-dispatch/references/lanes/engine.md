@@ -12,7 +12,7 @@
   driver-sqlite-wasm、driver-turso。
 - 红线:改元数据格式或接受面 ⇒ `domain:spec`,判据是改变接受面而不是碰到 spec。
 - `/meta` 路由本体在 `packages/rest` ⇒ `domain:cli`;`packages/services/**` ⇒ `domain:services`。
-- `content/docs/**` 与 `packages/lint` ⇒ `domain:devx`。
+- `content/docs/**` 与 `packages/lint` ⇒ `domain:devx`;`packages/lint` 的唯一例外见 SKILL.md 锚定规则。
 
 ## 常设承诺
 

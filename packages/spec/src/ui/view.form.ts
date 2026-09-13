@@ -103,26 +103,12 @@ export const viewForm = defineForm({
       visibleWhen: "data.type == 'chart'",
       fields: [{ field: 'chart', type: 'composite' }],
     },
-    {
-      // [#13216] The `page` surface. Unlike every sibling block above, this one
-      // is a single binding rather than a composite: a `page` view delegates
-      // its whole rendering to the named page, so there is nothing else about
-      // it to configure here — every other control on this form describes how
-      // to draw ROWS, which a page view does not do.
-      name: 'page',
-      label: 'Page',
-      description: 'The published page this view mounts.',
-      visibleWhen: "data.type == 'page'",
-      fields: [
-        {
-          field: 'pageName',
-          required: true,
-          helpText:
-            'Name of an already-published page (lowercase snake_case). The page renders in place of '
-            + 'the record list, so leave Columns empty.',
-        },
-      ],
-    },
+    // [#17063] The `page` section was REMOVED with the mount it configured
+    // (ADR-0049 enforce-or-remove, maintainer ruling 2026-09-09 「撤」). It bound
+    // the one input `pageName`, which is now a `retiredKey()` tombstone on
+    // `ListViewSchema` — a form input for an unwritable key is the false-compliant
+    // UI half of a retirement. To put a published page in front of users, author
+    // an app navigation item instead.
     {
       name: 'end_user_controls',
       label: 'End-user controls',

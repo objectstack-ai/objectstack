@@ -7,10 +7,14 @@
 // mounts the plugin without requesting a posture silently boots `single` (no
 // wall, default-org write stamping) and every multi-org fixture asserts against
 // the wrong posture — the regression this file pins. The enterprise package is
-// not installable in this workspace, so a fake stands in for it, registering
-// the same `org-scoping` service + entitlement surface; the proof that the REAL
-// plugin walls tenants lives in cloud's security-enterprise multi-org
-// integration test.
+// open core since ADR-0132 (Apache-2.0, on npm) — ⛔ "not installable here" is
+// no longer the reason. The reason is ADR-0132's entitlement boundary: no
+// framework package may declare `@objectstack/organizations`
+// (`no-framework-dependents.pin.test.ts` — "Apps declare it; packages do not"),
+// so `packages/verify` cannot depend on it and a fake stands in for it,
+// registering the same `org-scoping` service + entitlement surface; the proof
+// that the REAL plugin walls tenants lives in cloud's security-enterprise
+// multi-org integration test.
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { bootStack } from './harness.js';

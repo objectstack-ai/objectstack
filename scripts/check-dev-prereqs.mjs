@@ -91,6 +91,11 @@
  *
  *   THE INPUT SET, and why each part is in it:
  *     - every file under `<pkg>/src/` — what the build compiles;
+ *     - every file under `<pkg>/scripts/` when it has any (#16175) — the
+ *       package's own generators. `packages/spec`'s build opens with
+ *       `gen:schema && gen:openapi`, both of them scripts there, so an edited
+ *       generator that left this digest unmoved let a stamp written by the OLD
+ *       one vouch for output the new one emits differently;
  *     - `<pkg>/package.json` — entry points, exports map, build script itself;
  *     - `<pkg>/tsconfig.json`, `<pkg>/tsup.config.ts` when present — how it compiles;
  *     - turbo.json's own `globalDependencies` — READ from turbo.json, not copied

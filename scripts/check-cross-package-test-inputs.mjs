@@ -262,7 +262,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the INTERPOLATING TEMPLATE argument (#11487)': 4,
   'the INTERPOLATING TEMPLATE argument, `NEW_URL_LITERAL` sibling (#12085) ─': 7,
   'the RESOLVER half (#10452)': 43,
-  'the entry guard, driven for real': 2,
+  // Raised 2 -> 6: the four controls added beside the two original cases are
+  // what keep "prints nothing of its own" from being satisfied by a probe that
+  // looks at nothing. Floored, they cannot be dropped back out quietly.
+  'the entry guard, driven for real': 6,
   'the SPLIT test:repo task (#16466)': 16,
   'the node_modules REACH rule (#16555)': 18,
 });
@@ -2793,19 +2796,116 @@ function selfTest() {
   }
 
   battery('the entry guard, driven for real');
-  const importProbe = spawnSync(
+  //
+  // ── Why the noise floor is MEASURED and not pattern-matched ──────────────
+  //
+  // This probe inherits the batch's `NODE_OPTIONS`, and under some values the
+  // RUNTIME writes to the child's stderr before any user code runs. The
+  // measured case: `check-required-contexts.mjs --verify-required-set` exits
+  // 2 = NOT VERIFIED without `--use-env-proxy` and prescribes exactly that
+  // flag, citing #9642 for why the inference it prevents matters. Follow that
+  // correct advice and node opens EVERY child with two lines:
+  //
+  //   (node:NNN) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, ...
+  //   (Use `node --trace-warnings ...` to show where the warning was created)
+  //
+  // Both gates are derived for the same change surface, so they run in one
+  // batch under one `NODE_OPTIONS`. Asserting a LITERALLY empty stderr here
+  // therefore turned this case red for obeying the other gate -- a true
+  // assertion reporting a regression that does not exist, on a tree the seat
+  // had just changed. The other direction is worse and silent: a seat that
+  // reads gate A's exit 2 as noise never runs the required-set sweep at all.
+  //
+  // ⛔ The remedy is NOT to ignore this child's output -- that trades a true
+  // assertion for silence. ⛔ It is also not to match node's warning SHAPE:
+  // the hint line above carries no `[CODE] Warning:` at all, so a filter
+  // written to that description leaves it behind and the case stays red; and
+  // such a filter would swallow a line the MODULE wrote in that same shape.
+  //
+  // So the noise floor is measured. An identical child that imports NOTHING
+  // runs first, with the same argv shape and the same inherited env, and
+  // whatever IT prints is what this runtime prints unprompted. Anything the
+  // real probe prints BEYOND that came from the import. No pattern describes
+  // the noise, so this cannot rot when node changes its warning text, and any
+  // line the module writes still reds -- including one disguised as a node
+  // warning, which the positive controls below drive.
+  //
+  // The single normalisation is node's pid, which differs between the two
+  // children by construction. Nothing else about the text is touched.
+  const spawnImportProbe = (preamble) => spawnSync(
     process.execPath,
-    ['--input-type=module', '-e', `await import(${JSON.stringify(pathToFileURL(fileURLToPath(import.meta.url)).href)});\nconsole.log('ALIVE');`],
+    ['--input-type=module', '-e', `${preamble}\nconsole.log('ALIVE');`],
     { encoding: 'utf8' },
   );
+  const withoutPid = (stream) => (stream || '').replace(/^\(node:\d+\)/gm, '(node:PID)').trim();
+  /** What `probe` wrote on stderr BEYOND what this runtime writes unprompted. */
+  const stderrBeyondRuntime = (probe, baseline) => (
+    withoutPid(probe.stderr) === withoutPid(baseline.stderr) ? '' : withoutPid(probe.stderr)
+  );
+  const importOf = (target) => `await import(${JSON.stringify(pathToFileURL(target).href)});`;
+
+  const runtimeBaseline = spawnImportProbe('');
+  const importProbe = spawnImportProbe(importOf(fileURLToPath(import.meta.url)));
   ok(
-    'importing this module prints NOTHING -- the dispatch is behind the entry guard',
-    (importProbe.stdout || '').trim() === 'ALIVE' && (importProbe.stderr || '').trim() === '',
+    'importing this module prints NOTHING OF ITS OWN -- the dispatch is behind the entry guard',
+    (importProbe.stdout || '').trim() === 'ALIVE' && stderrBeyondRuntime(importProbe, runtimeBaseline) === '',
   );
   ok(
     'importing this module does not exit the importer -- it survives to run its own code',
     importProbe.status === 0 && (importProbe.stdout || '').includes('ALIVE'),
   );
+
+  // The controls that keep the case above from passing by ignoring everything.
+  // ⚠️ Without these, "prints nothing of its own" and "prints nothing that is
+  // ever looked at" are the same green.
+  {
+    const guardDir = mkdtempSync(join(tmpdir(), 'crosspkg-entryguard-'));
+    try {
+      const probeImporting = (file, source) => {
+        writeFileSync(file, source);
+        return spawnImportProbe(importOf(file));
+      };
+
+      const quiet = join(guardDir, 'quiet.mjs');
+      ok(
+        'NEGATIVE CONTROL: importing a module that writes nothing is clean under THIS runtime',
+        stderrBeyondRuntime(probeImporting(quiet, 'export const nothing = 1;\n'), runtimeBaseline) === '',
+      );
+
+      const noisy = join(guardDir, 'noisy.mjs');
+      ok(
+        'POSITIVE CONTROL: one line the module itself writes to stderr still reds',
+        stderrBeyondRuntime(
+          probeImporting(noisy, "console.error('a line this module wrote itself');\n"),
+          runtimeBaseline,
+        ).includes('a line this module wrote itself'),
+      );
+
+      // The case that separates a MEASURED baseline from a shape filter: this
+      // line is shaped exactly like one of node's own warnings. A filter
+      // matching that shape swallows it; subtracting a measured baseline
+      // cannot, because the baseline child never wrote it.
+      const disguised = join(guardDir, 'disguised.mjs');
+      ok(
+        'POSITIVE CONTROL: a module line DISGUISED as a node warning still reds',
+        stderrBeyondRuntime(
+          probeImporting(disguised, "console.error('(node:4242) [FAKE-CODE] Warning: written by the MODULE, not the runtime');\n"),
+          runtimeBaseline,
+        ).includes('written by the MODULE, not the runtime'),
+      );
+
+      // The stdout half is unchanged and stays an exact match, so a verdict
+      // printed on the importer's stdout -- the #4449 defect itself -- reds
+      // without consulting the baseline at all.
+      const stdoutLeak = join(guardDir, 'stdout-leak.mjs');
+      ok(
+        'POSITIVE CONTROL: a module that writes to STDOUT still reds -- that half is untouched',
+        (probeImporting(stdoutLeak, "console.log('a verdict on the importer stdout');\n").stdout || '').trim() !== 'ALIVE',
+      );
+    } finally {
+      rmSync(guardDir, { recursive: true, force: true });
+    }
+  }
 
   // The floor runs BEFORE the verdict below, so a success line can only be
   // printed by a run in which every declared battery registered its cases.

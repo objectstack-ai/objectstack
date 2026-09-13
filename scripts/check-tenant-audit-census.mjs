@@ -837,13 +837,30 @@ export function selfTest() {
     check(page.replace(UNENFORCED_MEASURED_AT.pattern, 'Measured on 2001-01-01 at `0000000ab`.'), counts)
       .length === 0);
 
-  // The unenforced PROSE figure: value free, sentence required.
+  // The unenforced PROSE figure: value free, sentence required. ⛔ The fixture is
+  // built from the PAGE's OWN stated number -- read with the exact same pattern
+  // the classifier uses (`UNENFORCED_PROSE_COUNTS[0]`) -- never from the live
+  // `census.declaredObjects`. That figure is declared unenforced precisely so it
+  // may drift from the tree without being a finding; a fixture pinned to the
+  // LIVE count made `.replace()` a silent no-op the moment page and tree
+  // disagreed, so this case failed for the PAGE rather than for the classifier
+  // it exists to pin (#17437).
+  const declaredObjectsRow = UNENFORCED_PROSE_COUNTS[0];
+  const declaredObjectsMatch = declaredObjectsRow.pattern.exec(page);
+  if (!declaredObjectsMatch) {
+    throw new Error(
+      `self-test fixture: the page no longer states "${declaredObjectsRow.name}" in the shape `
+      + `${declaredObjectsRow.pattern} looks for -- fix the page, or this pair of cases can no `
+      + 'longer build its fixture.',
+    );
+  }
+  const declaredObjectsSentence = declaredObjectsMatch[0];
   t('⭐ a stale unenforced prose number is NOT a finding',
-    check(page.replace(`Across ${census.declaredObjects} declared objects`, 'Across 4 declared objects'))
+    check(page.replace(declaredObjectsSentence, 'Across 4 declared objects'))
       .length === 0,
-    check(page.replace(`Across ${census.declaredObjects} declared objects`, 'Across 4 declared objects')).join(' | '));
+    check(page.replace(declaredObjectsSentence, 'Across 4 declared objects')).join(' | '));
   t('an unenforced prose claim reworded off the page IS a finding',
-    check(page.replace(`Across ${census.declaredObjects} declared objects`, 'Across the declared objects'))
+    check(page.replace(declaredObjectsSentence, 'Across the declared objects'))
       .some((p) => p.startsWith('[unenforced-prose-missing]')));
 
   // ── refusals ───────────────────────────────────────────────────────────────

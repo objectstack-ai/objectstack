@@ -153,9 +153,11 @@ async function request(headers: Record<string, string>) {
     await route!.handler({
         method: 'GET',
         // [#7280] A real adapter always sets `path`, and `enforceAuth`'s
-        // ADR-0069 branch reads it — `isAuthGateAllowlisted(undefined)` returns
-        // TRUE, so a request without one is treated as allow-listed and the gate
-        // never fires. Spelling it here keeps the wire fixture honest.
+        // ADR-0069 branch reads it. [#7898] `isAuthGateAllowlisted(undefined)`
+        // used to return TRUE, so a request without one read as allow-listed and
+        // the gate never fired; the predicate is fail-closed now, which reverses
+        // the consequence of omitting `path`. Either way, spelling it here keeps
+        // the wire fixture honest about what a real adapter sends.
         path: '/api/v1/data/task',
         params: { object: 'task' }, query: {}, headers,
     } as any, out.res);

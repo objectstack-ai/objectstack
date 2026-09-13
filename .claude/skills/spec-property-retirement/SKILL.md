@@ -52,23 +52,23 @@ preview renderer 不算消费者)与 AGENTS.md §"Touched `packages/spec`?"(八�
       conversion 表的 fixture 不相交契约(§3)会因叠放而失败。先例:
       `agent.knowledge` 在发布前吞掉了 `topics`→`sources` 改名。
 - [ ] **台账判它 `live-elsewhere` 吗?** 本仓实测无消费者、姊妹仓真在强制执行的
-      键 —— **永不是删除候选**。单读 `dead` 会批准一次删除,而它删掉的是姊妹仓某
-      道门的输入。该核的不是删除面,是它的佐证纪律:外仓指针、
+      键 —— **永不是删除候选**。该核的不是删除面,是它的佐证纪律:外仓指针、
       `evidenceScope: "cross-repo"`、带日期的 `verifiedAt`、180 天过期 —— 四条由
       `packages/spec/scripts/liveness/elsewhere.mts` 执行,出处见 README 的
       `live-elsewhere` 一节。
+- [ ] **零编写实例普查要并跑一个同族已知存活的键作对照**,两读数都报;同得零即没测出。
+- [ ] **拿 `cross-repo` 行当论据,就当刻重核路径与行号**:漂了读作重新取证,⛔ 不是 `dead`。
+- [ ] **「零编写实例」≠「没有代码读它」。** 前者答的是示例应用,后者才是退役的证据。
 
 ## 1. 裁判是构建,不是台账
 
-台账的 `dead` 裁定是删除的**输入**,不能替代构建自己的证明。它是一条带时间戳的声
-明,代码在它底下双向移动(`flow.status` 与 `action.undoable` 都被*低估*过)。
+台账的 `dead` 裁定是删除的**输入**,不能替代构建自己的证明。代码在它底下双向移动
+(`flow.status` 与 `action.undoable` 都被*低估*过)。
 
 所以:**先尝试删除,让构建来裁。** #3896 收尾里,`view.form.data` 挂在工作清单上是
-dead(「两个仓都没有 form 路径的读者」),而删除打断了 `gen:schema` —— `defineForm`
-往每个 `*.form.ts` 写 `data: { provider: 'schema', schemaId }`,`metadata-protocol`
-把它喂给 metadata-admin 管线。正确的回应**不是**硬删:把台账条目改回 `live`、附真实
-证据与 `verifiedAt`,收窄 conversion,钉上 non-warn。十四个键里有一个是这样被证伪的
-—— 给它留预算。
+dead(「两个仓都没有 form 路径的读者」),而删除打断了 `gen:schema`。正确的
+回应**不是**硬删:把台账条目改回 `live`、附真实证据与 `verifiedAt`,收窄
+conversion,钉上 non-warn。十四个键里有一个是这样被证伪的 —— 给它留预算。
 
 两条推论:
 
@@ -206,13 +206,14 @@ conversion 是消费者跟的。两个都要写。
       从它解析归属 —— 那个职责移给了上面的条目。#5898 起这对**每个**消费者都成立:门
       (c) 的 *aged-out tombstone* 证明曾是最后一个叶匹配者,现在也读同一张精确键
       表,再没有任何规则从 `surface` 解析归属。
-- [ ] **`retiredFromLoadPath: true`** —— 退役恒真。两种论证,不可互换:对*改名*它意
-      味着「没有 alias 窗口,故意的」(拒绝由墓碑负责;条目存在是为了
-      `spec-changes.json` 与 `os migrate meta` 仍携带它);对**默认值翻转**它承重正
-      确性 —— 自动应用 `field-required-notnull-explicit` 的 loader 会把 NOT NULL 盖
-      到 17 时代编写的 `required: true` 上,静默恢复 ADR-0113 删掉的三重绑定。只有
-      `migrate meta --from <old>` 可以应用翻转 —— 在那里「这份 source 早于拆分」是
-      事实而不是猜测。
+- [ ] **`retiredFromLoadPath: true`** —— 退役恒真,但管辖权只有 authoring 漏斗
+      `normalizeStackInput`;三处 data-at-rest seam 以 `includeRetired: true` 故意重放退役
+      条目,它**一处也拦不住**:`applyConversionsToStoredItem`(钉死)、automation
+      engine 的 flow rehydration、`applyArtifactForwardConversions`。对*改名*它意味着
+      「没有 alias 窗口,故意的」;对**默认值翻转**,只有确知输入早于翻转的 seam 才可重
+      放,其余按 id 退订 `excludeConversionIds` —— `app-hidden-to-unpublished` 在 artifact
+      门即如此。上一版样例栽在这:它教「只有 migrate meta 能应用翻转」,而 boot 时照样
+      应用,该 conversion 已撤(`packages/spec/CHANGELOG.md`)。
 - [ ] **一步 D3 链**,在 `packages/spec/src/migrations/registry.ts` —— 把 id 加进
       `MIGRATIONS_BY_MAJOR[N].conversionIds`,扩写该步的 `rationale`。
       `conversion.toMajor` **必须等于**该步的 major。⚠ 没有东西直接断言「每个
@@ -220,11 +221,10 @@ conversion 是消费者跟的。两个都要写。
       chain-replay 测试抓得到它,只因为没接线的 fixture 永远到不了自己的 `after`。
       所以把那个测试的失败读作「没接线」,不是「transform 坏了」。
 - [ ] **fixture 必须不相交 —— 两重。** 每个 fixture 都被整张表 replay,必须恰好等于
-      自己的 `after`,每条 notice 都归属自己的 id。`before` 保持最小、避开其它条目
-      的键(新的 `objects[].fields` fixture 不许带裸 `required: true`,否则 notNull
-      conversion 在它上面开火)。第二重容易漏:`retiredFromLoadPath` 的 fixture 还必
-      须不被任何 *live-window* conversion 碰到,因为另有测试断言它以零 notice 走过
-      默认加载路径。这条不相交契约正是逼出同 major 吸收(§0)的东西。
+      自己的 `after`,每条 notice 都归属自己的 id。`before` 保持最小、避开其它条目的
+      键。第二重容易漏:`retiredFromLoadPath` 的 fixture 还必须不被任何 *live-window*
+      conversion 碰到,因为另有测试断言它以零 notice 走过默认加载路径。这条不相交契
+      约正是逼出同 major 吸收(§0)的东西。
 - [ ] **幂等靠构造,不靠测试。** 没有测试把 conversion replay 两遍。`stripKeys` 删
       除天然幂等(`if (!(key in next)) continue`),`renameKey` 拒绝覆盖已存在的
       canonical 值;默认值翻转**不是**幂等安全的,靠它自己的守卫加

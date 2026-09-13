@@ -34,7 +34,7 @@
         },
         "type": {
           "status": "live",
-          "note": "objectui: ListView.tsx routes grid/kanban/calendar/gantt/gallery/timeline/chart/tree renderers (audit L16). [#13216] The enum also carries `page`, which routes nowhere in ListView by design — it delegates to the existing page renderer via the sibling `pageName` key (maintainer ruling 2026-08-29); the mount itself is objectui's half."
+          "note": "objectui: ListView.tsx routes grid/kanban/calendar/gantt/gallery/timeline/chart/tree renderers (audit L16). [#17063] The enum carried a ninth member, `page`, which routed nowhere in ListView — it was to delegate to the existing page renderer via the sibling `pageName` key (#13216, maintainer ruling 2026-08-29) and objectui's half was never built. Retired 2026-09-10 under ADR-0049 enforce-or-remove (maintainer ruling 2026-09-09 「撤」): the value is refused by name on the enum's own error map, which is where an enum-VALUE narrowing's prescription has to live. Every member listed above is still routed by that switch."
         },
         "data": {
           "status": "live",
@@ -119,10 +119,9 @@
           "note": "objectui: @object-ui/plugin-tree ObjectTree.tsx (spec CHANGELOG: 'Renderer ships in objectui @object-ui/plugin-tree')."
         },
         "pageName": {
-          "status": "live",
-          "verifiedAt": "2026-08-30",
-          "evidence": "packages/spec/src/ui/view.zod.ts#checkListViewPageMount (refuses a `type: 'page'` view that declares no `pageName`, refuses `pageName` on any other view type, and refuses a non-empty `columns` beside it — attached to all three list-view doors: ListViewSchema, ObjectListViewSchema, ListViewOverlayWireSchema); packages/spec/src/stack.zod.ts#validateCrossReferences (build-time refusal when the named page is not in `stack.pages`); packages/lint/src/validate-view-page-refs.ts#validateViewPageRefs (the same resolution on the CLI commands and, via `runtimeTypes: ['flow','view']`, on the runtime publish gate — `PUT /api/v1/meta/view`)",
-          "note": "[#13216] The page a `type: 'page'` view mounts. Enforcement is in-repo and cited above; the RENDER half is objectui's and is delegation rather than new code — the ruling of 2026-08-29 is explicit that a page view hands off to the existing page renderer (「渲染委托既有页面渲染器」), so the page keeps its own audience gate (`page.assignedProfiles`) and no new authorization surface is introduced. Necessary-not-sufficient in the ADR-0054 sense until the objectui mount lands: the refusals above are measured here, the pixels are not."
+          "status": "dead",
+          "verifiedAt": "2026-09-10",
+          "note": "REMOVED 2026-09-10 (#17063, ADR-0049 enforce-or-remove; maintainer ruling 2026-09-09, decision batch #107 item 1, verbatim 「撤」) — the enforcement the prior `live` row cited was real but circular: `checkListViewPageMount`, the `validateCrossReferences` branch and `validateViewPageRefs` all policed a mount NO RENDERER EVER PERFORMED. Only the spec half of #13216 landed (PR #13372); objectui's list-view switch shares its `default:` arm with `case 'grid'` and `isListViewVisualization('page')` is false, so a page view drew an empty grid and the named page was never reached. Necessary-not-sufficient in the ADR-0054 sense was the prior note's own verdict, and the mount half was never built (objectui#8429). Tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-18 view-page-mount-removed conversion, which also strips the `type: 'page'` value the key was bound to. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); to put a published page in front of users, author an app navigation item — `{ type: 'page', pageName }` on `PageNavItemSchema`, a different key on a different surface, and the page mount that has always rendered."
         },
         "map": {
           "status": "live",

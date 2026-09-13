@@ -11,12 +11,29 @@
  * human can log in as, so owner-keyed UX — "My" views, owner reports, owner
  * notifications — is empty out of the box.
  *
- * This helper runs **once**, right after `bootstrapPlatformAdmin` promotes the
- * first human user to platform admin, and transfers ownership of those orphan
- * rows to that admin. It is the ownership twin of org-scoping's
- * `claimOrphanOrgRows` (which back-fills `organization_id`): walk every
- * user-authored object that declares the canonical `owner_id` column, and
- * re-own the rows that no human owns yet.
+ * This helper runs right after `bootstrapPlatformAdmin` promotes the first human
+ * user to platform admin, and transfers ownership of those orphan rows to that
+ * admin. It is the ownership twin of org-scoping's `claimOrphanOrgRows` (which
+ * back-fills `organization_id`): walk every user-authored object that declares
+ * the canonical `owner_id` column, and re-own the rows that no human owns yet.
+ *
+ * ## ⚠️ It is NOT a single pass, and cannot be
+ *
+ * The promotion instant is not the moment the seed is done. `AppPlugin` races
+ * its inline seed against `OS_INLINE_SEED_BUDGET_MS` (default 8 s) and continues
+ * an over-budget bundle IN THE BACKGROUND so it does not block kernel start — so
+ * for any non-trivial app the seeder is *guaranteed* to still be writing while a
+ * promotion-time pass walks the registry. Registry order and seed order are
+ * unrelated, so which objects a single pass misses is arbitrary, deterministic
+ * per app, and permanent: nothing re-ran the claim, and the missed rows stayed
+ * `owner_id IS NULL` forever — invisible to every `readScope: 'own'` grant and
+ * answering 403 on every write at `modifyAllRecords: false`.
+ *
+ * A claim on admin promotion that races a seeder the platform itself deferred
+ * cannot be correct as a single pass. `security-plugin.ts` therefore re-runs
+ * this helper on `app:seeded` — the published settle signal for exactly that
+ * background continuation — and every pass reports whether its own reading was
+ * final ({@link reportClaimPass}).
  *
  * Mistake-proof by construction: authors write plain seed records (no
  * `owner_id`), and the platform — not the author — performs the handoff. There
@@ -86,12 +103,23 @@
 import type { ServiceObject } from '@objectstack/spec/data';
 import { BULK_PER_ROW_HOOK_LIMIT_ERROR_CODE, MAX_BULK_PER_ROW_HOOK_ROWS } from '@objectstack/spec/data';
 import { SystemUserId } from '@objectstack/spec/system';
+import type { SeedSettlementSnapshot } from '@objectstack/spec/contracts';
 
 interface ClaimOwnershipOptions {
   logger?: {
     info: (message: string, meta?: Record<string, any>) => void;
     warn: (message: string, meta?: Record<string, any>) => void;
   };
+  /**
+   * The seed pipeline's tally at the moment this pass starts, read through the
+   * published `seed-settlement` contract — `undefined` when no seed pipeline is
+   * registered on this kernel.
+   *
+   * This is what makes the pass's own report FALSIFIABLE; see
+   * {@link reportClaimPass} for why a pass that cannot say this is a detector
+   * that reports success for the one failure it exists to catch.
+   */
+  seedSettlement?: SeedSettlementSnapshot | undefined;
 }
 
 const SYSTEM_CTX = { isSystem: true };
@@ -294,6 +322,100 @@ async function claimPredicate(
 }
 
 /**
+ * Say what this pass did AND whether its reading was FINAL — once, always.
+ *
+ * ## Why "claimed nothing" used to be unsayable
+ *
+ * This function used to report only when it had re-owned at least one row, so a
+ * pass that walked every eligible object and matched nothing logged NOTHING at
+ * all. That silence is the shape the ordering defect hid behind: the claim ran
+ * while the platform's own seeder was still writing in the background
+ * (`OS_INLINE_SEED_BUDGET_MS`), matched the rows that happened to have landed,
+ * and the rows that had not yet landed were never seen by anything. Its own
+ * failure paths — the per-object `claimSeedOwnership failed for …`, the paging
+ * warnings, the affected-count warnings — cannot fire on that shape, because
+ * from the claim's point of view there was simply nothing to match. So a boot
+ * that left rows permanently ownerless and a boot with nothing to do produced
+ * BYTE-IDENTICAL evidence, and the banner was clean either way.
+ *
+ * ## What makes the two distinguishable
+ *
+ * Not the count — "claimed 0 of 0" is the same number in both. The discriminator
+ * is whether a seed source was still WRITING when the pass ran, which is exactly
+ * what the published `seed-settlement` contract answers
+ * ({@link SeedSettlementSnapshot}). It is the same distinction AGENTS.md's
+ * startup-registry rule draws: reading a store that is still filling is fine,
+ * but recording "there was nothing here" as a VERDICT, when the same boot can
+ * still contradict it, is the defect.
+ *
+ * So every pass says which of three things it is:
+ *
+ *  - **provisional** (`inFlight > 0`) — a seed source is still writing, so this
+ *    pass is a reading and not a verdict. Rows that land after it are NOT
+ *    covered by it. `warn`, because at the moment the line is printed those rows
+ *    are unowned and nothing else about the boot looks wrong; the re-run on
+ *    `app:seeded` is a promise, not yet a fact.
+ *  - **final** (`inFlight === 0`) — every source this boot writes has settled,
+ *    so "nothing matched" really does mean "nothing to claim". `info`.
+ *  - **unattested** (no snapshot) — no seed pipeline registered on this kernel,
+ *    or a host too old to publish the contract. Reported as its own state rather
+ *    than folded into either: a pass that cannot tell must not claim it can.
+ *
+ * ⚠️ `suppressed` sources deliberately never settle (multi-tenant replay,
+ * `skipSeedData`) and are NOT counted as in-flight here: they write no rows
+ * during this boot, so there is nothing for this pass to miss on their account.
+ * Keying finality on `pending` instead would mark every multi-tenant boot
+ * provisional forever — a permanent warning about behaviour that is correct by
+ * design, which is how a log level gets trained away.
+ *
+ * The `handed N seeded record(s) to first admin X` prefix is unchanged and now
+ * fires on every pass including `N = 0`: existing consumers match on it, and the
+ * finality clause is appended rather than replacing it.
+ */
+function reportClaimPass(
+  logger: ClaimOwnershipOptions['logger'],
+  adminUserId: string,
+  results: { object: string; count: number }[],
+  eligibleObjects: number,
+  seedSettlement: SeedSettlementSnapshot | undefined,
+): void {
+  const total = results.reduce((s, r) => s + r.count, 0);
+  const head =
+    `[security] handed ${total} seeded record(s) to first admin ${adminUserId} ` +
+    `(${results.length} of ${eligibleObjects} eligible object(s) had unowned rows)`;
+  const meta = {
+    adminUserId,
+    claimed: total,
+    eligibleObjects,
+    breakdown: results,
+    seedInFlight: seedSettlement?.inFlight,
+    seedSuppressed: seedSettlement?.suppressed,
+  };
+
+  if (seedSettlement && seedSettlement.inFlight > 0) {
+    logger?.warn?.(
+      `${head} — PROVISIONAL: ${seedSettlement.inFlight} seed source(s) were still writing when this ` +
+        'pass ran, so rows seeded after it are NOT covered by it and stay unowned until the claim ' +
+        're-runs on `app:seeded`. A count of 0 here is "nothing had landed yet", never "nothing to claim".',
+      meta,
+    );
+    return;
+  }
+  if (!seedSettlement) {
+    logger?.info?.(
+      `${head} — unattested: no seed-settlement probe is registered on this kernel, so this pass ` +
+        'cannot say whether a seed was still writing when it ran.',
+      meta,
+    );
+    return;
+  }
+  logger?.info?.(
+    `${head} — final: every seed source this boot writes has settled, so there was nothing left to claim.`,
+    meta,
+  );
+}
+
+/**
  * Re-own every orphan seed row (owner_id NULL or usr_system) to `adminUserId`.
  *
  * Walks `ql.registry.getAllObjects()`, filters to schemas that
@@ -325,6 +447,10 @@ export async function claimSeedOwnership(
 
   const schemas: ServiceObject[] = registry.getAllObjects();
   const results: { object: string; count: number }[] = [];
+  // Objects this pass actually WALKED, after the four skips below. Reported so
+  // "claimed 0" can be read against the size of what was examined — a pass over
+  // zero eligible objects and a pass over forty are different facts.
+  let eligibleObjects = 0;
 
   for (const schema of schemas) {
     if (!schema?.name) continue;
@@ -338,6 +464,7 @@ export async function claimSeedOwnership(
     // "no such table". Skip them entirely.
     if ((schema as any).external) continue;
     if (!hasOwnerField(schema)) continue;
+    eligibleObjects += 1;
 
     // Bound HERE, where `schema.name` is a literal argument at the call site —
     // see {@link ObjectWriter} for why that spelling is not incidental.
@@ -374,11 +501,6 @@ export async function claimSeedOwnership(
     if (updated > 0) results.push({ object: schema.name, count: updated });
   }
 
-  if (results.length > 0) {
-    const total = results.reduce((s, r) => s + r.count, 0);
-    logger?.info?.(`[security] handed ${total} seeded record(s) to first admin ${adminUserId}`, {
-      breakdown: results,
-    });
-  }
+  reportClaimPass(logger, adminUserId, results, eligibleObjects, options.seedSettlement);
   return results;
 }

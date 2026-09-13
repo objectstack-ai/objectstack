@@ -32,6 +32,7 @@
     "@objectstack/driver-sql": "workspace:*",
     "@objectstack/runtime": "workspace:*",
     "@objectstack/service-datasource": "workspace:*",
+    "@objectstack/service-i18n": "workspace:*",
     "@objectstack/spec": "workspace:*"
   },
   "devDependencies": {

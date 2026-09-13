@@ -34,6 +34,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Delivery",
         help: "FK → sys_notification_delivery (outbox row); null until P1"
       },
+      actor_id: {
+        label: "Actor",
+        help: "User who caused the event (mentioner, assigner) — same semantics as sys_notification.actor_id. Lets a client suppress its own receipts with a purely local comparison. Null on a digest row by construction: a collapsed group has no single actor."
+      },
       topic: {
         label: "Topic"
       },

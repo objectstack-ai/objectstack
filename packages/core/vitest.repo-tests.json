@@ -1,4 +1,5 @@
 [
   "src/security/authz-store-unavailable.test.ts",
+  "src/security/granted-permissions-not-enforced.pin.test.ts",
   "src/security/operation-private-keys.pin.test.ts"
 ]

@@ -90,6 +90,88 @@ const OBJECT_PERMISSION_RETIRED_KEY_RESIDUE = {
 } as const;
 
 /**
+ * [#16870] A depth axis declared beside the super-user bit that short-circuits
+ * it — refused, because nothing ever reads it.
+ *
+ * `PermissionEvaluator.getEffectiveScope` answers `org` on the super-user bit
+ * BEFORE it consults the depth key, and `getDeclaredScope` (the ADR-0090 D10
+ * delegated-path input) carries the identical short-circuit ahead of the
+ * identical read — so the declared narrowing is dropped on the direct read
+ * path AND from the delegation fold. Which pairs are unreadable is read off
+ * those two short-circuits exactly, and is asymmetric:
+ *
+ * - `readScope` beside `viewAllRecords: true` — unread (`opClass === 'read' &&
+ *   (op.viewAllRecords || op.modifyAllRecords)`).
+ * - `readScope` beside `modifyAllRecords: true` — unread, same disjunct.
+ * - `writeScope` beside `modifyAllRecords: true` — unread (`opClass ===
+ *   'write' && op.modifyAllRecords`).
+ * - `writeScope` beside `viewAllRecords: true` — READ AND HONOURED. The write
+ *   short-circuit does not name `viewAllRecords`, so this pair stays accepted;
+ *   refusing it would delete a legitimate grant.
+ *
+ * ## Why the accept set and not a warning
+ *
+ * Accepting-and-ignoring is the whole defect: the declaration materialises
+ * into `sys_permission_set.object_permissions` and a capability census reading
+ * the deployed shape counts it as coverage — the author declares a narrowing,
+ * the platform stores it, the audit reports the capability as exercised, and
+ * the read is still org-wide. A diagnostic raised after the shape is stored
+ * leaves that headline harm intact, so the refusal has to happen at the door
+ * (ADR-0049 `declared ≠ enforced`). ⛔ It does NOT change what
+ * `viewAllRecords: true` grants — the contradictory declaration is refused,
+ * the super-user semantics are untouched.
+ *
+ * The scope is ONE object-permission entry, which is exactly the resolver's
+ * input: `resolveObjectPermission` returns a single entry (explicit, else the
+ * `'*'` wildcard) and never merges two. A super-user bit in one set widening
+ * past another set's `readScope` is the documented additive "widest wins"
+ * semantics of ADR-0090, not a contradictory declaration, and is not judged
+ * here.
+ *
+ * Module-private on purpose: it has exactly one consumer, the schema below.
+ * Exporting it would put a refinement helper on the published API surface (the
+ * `security` barrel re-exports this module with `export *`) for no caller.
+ */
+function checkScopeAgainstSuperUserBits(
+  value: {
+    viewAllRecords?: boolean;
+    modifyAllRecords?: boolean;
+    readScope?: string;
+    writeScope?: string;
+  },
+  ctx: z.RefinementCtx,
+): void {
+  const bypassesRead = value.viewAllRecords === true || value.modifyAllRecords === true;
+  if (value.readScope !== undefined && bypassesRead) {
+    const bit = value.viewAllRecords === true ? 'viewAllRecords' : 'modifyAllRecords';
+    ctx.addIssue({
+      code: 'custom',
+      path: ['readScope'],
+      message:
+        `readScope: '${value.readScope}' is declared beside ${bit}: true, which already grants ` +
+        'org-wide read. The read-scope resolver answers `org` on the super-user bit before it ' +
+        'consults readScope, so this depth is never enforced on any read path — and the ' +
+        'delegated (ADR-0090 D10) fold drops it too. Accepting it would store a narrowing ' +
+        'that changes nothing and let a capability census count it as coverage. Delete ' +
+        `readScope if the org-wide read is intended, or set ${bit}: false if the narrowing is.`,
+    });
+  }
+  if (value.writeScope !== undefined && value.modifyAllRecords === true) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['writeScope'],
+      message:
+        `writeScope: '${value.writeScope}' is declared beside modifyAllRecords: true, which ` +
+        'already grants org-wide write. The write-scope resolver answers `org` on ' +
+        'modifyAllRecords before it consults writeScope, so this depth is never enforced on ' +
+        'any write path. Delete writeScope if the org-wide write is intended, or set ' +
+        'modifyAllRecords: false if the narrowing is. (writeScope beside viewAllRecords: true ' +
+        'is a DIFFERENT shape and stays accepted — viewAllRecords does not bypass write.)',
+    });
+  }
+}
+
+/**
  * The closed authoring shape, module-private: {@link ObjectPermissionSchema}
  * is this shape behind the #12840 residue-tolerance stage, and
  * {@link EffectiveObjectPermissionSchema} extends this (an `.extend()` needs
@@ -217,6 +299,15 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
    * and is STRIPPED by the residue stage on {@link ObjectPermissionSchema}
    * (`OBJECT_PERMISSION_RETIRED_KEY_RESIDUE`); the tombstones below never see
    * it. Every other value still lands here, prescription intact.
+   *
+   * [#17425] The accept set that leaves behind, stated exactly — the residue
+   * stage tolerates ONE value, the boolean literal `false`, compared by
+   * identity against the captured literal. **This is not a truthy/falsy
+   * split**: `"false"`, `0`, `''` and `null` are refused exactly like `true`
+   * is, with the same `code: 'invalid_type'` / `expected: 'never'` issue at
+   * the key's own path and the same guidance string. Anything that is not the
+   * captured literal is an authored claim, and authored claims are what the
+   * tombstone exists to refuse. The matrix is pinned in `permission.test.ts`.
    */
   allowRestore: retiredKey(
     '`objects.<object>.allowRestore` was removed in @objectstack/spec 17 (ADR-0049) — ' +
@@ -293,9 +384,48 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
  * tombstone with its prescription. Maintainer ruling 2026-08-28 (recorded on
  * objectstack-ai/cloud#1685): a retired key that had a schema default is
  * refused only when it carries a non-default value.
+ *
+ * ## [#17425] What a consumer of PARSED output can observe: effectively nothing
+ *
+ * Every spelling reachable from JSON is gone by the time you hold parsed data:
+ * `false` is stripped, and every other JSON-expressible value (`true`,
+ * `"true"`, `"false"`, `0`, `1`, `null`) throws before a parsed object exists.
+ * So on validated data `permissions.allowRestore` is always `undefined`, which
+ * makes `if (permissions.allowRestore)` and `permissions.allowRestore === true`
+ * dead code — a post-parse guard against either bit can never fire, and
+ * `=== true` is no fix for a truthiness check because a raw `true` never
+ * survives the parse either.
+ *
+ * ONE observation survives, and it is not reachable from JSON: an in-memory
+ * TS/JS input carrying an EXPLICIT `undefined` (`{ allowRestore: undefined }`
+ * — the shape a spread of an object that once carried the key produces) parses,
+ * and the key survives as an OWN property whose value is `undefined`. So
+ * `'allowRestore' in parsed` can be `true` while the value is still undefined;
+ * `JSON.parse(JSON.stringify(parsed))` drops it again. Measured and pinned in
+ * `permission.test.ts`.
+ *
+ * ⇒ A `false`-versus-other distinction has a live consumer only in PRE-PARSE /
+ * raw-source tooling — a linter or migration tool reading `objectstack.json`
+ * (or a `.ts` source) before validation, where `false` is inert legacy residue
+ * and any other value is a hard ADR-0049 violation. Those two facts deserve
+ * different messages; a presence or truthiness check on raw input conflates
+ * them, and the same check on parsed output measures nothing at all.
  */
 export const ObjectPermissionSchema = lazySchema(() =>
-  acceptRetiredDefaultResidue(ObjectPermissionBaseSchema, OBJECT_PERMISSION_RETIRED_KEY_RESIDUE),
+  acceptRetiredDefaultResidue(
+    // [#16870] The contradictory-pair refusal rides on the BASE, inside the
+    // residue stage, for two measured reasons. (1) In zod 4 `.superRefine()`
+    // on a `ZodObject` returns a `ZodObject` that keeps `.shape`, while the
+    // same call on the residue PIPE returns a schema with no `.shape` — and
+    // the pipe's read-through `shape` is what shape-reading consumers and the
+    // schema walkers duck-test. (2) `EffectiveObjectPermissionSchema` below
+    // extends `ObjectPermissionBaseSchema` — the UNREFINED base — so the WIRE
+    // surface stays tolerant, which is the #4001 authorable/wire split: a
+    // server still running an older toolchain may emit a stored pair in an
+    // effective-permission response, and an older client must not crash on it.
+    ObjectPermissionBaseSchema.superRefine(checkScopeAgainstSuperUserBits),
+    OBJECT_PERMISSION_RETIRED_KEY_RESIDUE,
+  ),
 );
 
 /**

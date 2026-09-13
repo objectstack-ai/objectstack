@@ -50,12 +50,17 @@ const contextStackKeys = Object.keys(
 );
 
 describe('the derived name-keyed set (#13390)', () => {
-  it('reproduces exactly the membership the hand list carried — four, in the same order', () => {
+  it('reproduces exactly the membership the hand list carried, in the same order', () => {
+    // [#13390] The hand list this replaced held four: `objects`, `permissions`,
+    // `books`, `pages`. [#17063] `pages` left the CONTEXT set with
+    // `validateViewPageRefs`, so the derivation drops it here too — which is
+    // the correct answer rather than a regression: a `page` write's snapshot
+    // again holds exactly one page, its own, so `pages[0]` IS that write and
+    // name-keying it would say nothing the index does not.
     expect(deriveNameKeyedStackKeys(contextStackKeys, WRITTEN_STACK_KEYS)).toEqual([
       'objects',
       'permissions',
       'books',
-      'pages',
     ]);
   });
 

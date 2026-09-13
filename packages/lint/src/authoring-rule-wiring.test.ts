@@ -596,10 +596,14 @@ describe('authoring-rule registry wiring (#4409)', () => {
       },
       {},
     );
-    expect(findings.map((f) => f.rule).sort()).toEqual([
-      'absolute-colspan-discouraged',
-      'form-field-unknown',
-    ]);
+    // [#17328] RE-JUDGED, not deleted: the fixture used to earn a second rule
+    // id, `absolute-colspan-discouraged`, which was withdrawn after browser
+    // measurement falsified the misalignment it asserted. The `colSpan: 2` is
+    // left on the fixture on purpose — an entry-object field is the shape this
+    // adapter has to survive — and `form-field-unknown` still carries the whole
+    // point of the test: the registry entry's `run` really returns the finding
+    // a broken stack earns, on all three commands.
+    expect(findings.map((f) => f.rule).sort()).toEqual(['form-field-unknown']);
   });
 
   it('every ledger entry is still an exported rule', () => {

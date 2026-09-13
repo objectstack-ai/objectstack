@@ -48,9 +48,52 @@ const PREAMBLE = [
 ].join('\n');
 
 const HEARTBEAT_NOTE =
-  'The `Swept` line above is this patrol\'s heartbeat: a timestamp that stops advancing means the '
-  + 'standing caller died, which is the failure this anchor exists to make visible. Read it before '
-  + 'you read the findings.';
+  'The `Swept` line above is this patrol\'s heartbeat, and it states the cadence that makes '
+  + '「stalled」 decidable: a timestamp still sitting there past the `next by` deadline beside it means '
+  + 'the standing caller died, which is the failure this anchor exists to make visible. ⛔ Do not '
+  + 'carry a cadence over from a sibling patrol anchor — they differ by up to 4× and each states its '
+  + 'own. Read it before you read the findings.';
+
+/**
+ * The EXPECTATION stamped beside the `Swept` timestamp — the schedule, the
+ * interval, and the deadline the next healthy heartbeat has to beat (#17720).
+ *
+ * The heartbeat note above asks the reader to judge whether the timestamp
+ * 「stops advancing」, and until this line existed the body withheld the only
+ * input that judgement takes. This patrol is nightly; `half-state-patrol.yml`'s
+ * anchor carries the same sentence and fires every six hours, so a reader who
+ * infers one cadence from the other is wrong by 4× in whichever direction they
+ * guessed.
+ *
+ * ## Why the schedule is an INPUT and not a literal here
+ *
+ * `release-coverage-patrol.yml` declares the cron, and it is the only caller.
+ * Restating it in this file would be a second declaration of one fact, free to
+ * drift into publishing a deadline nobody schedules — which is this card's own
+ * defect with a timestamp on it. The workflow passes its own `cron:` down
+ * instead, so the value has exactly one home, in the file that schedules it.
+ *
+ * ⛔ Only the DAILY form is computed, and anything else refuses loudly rather
+ * than falling back to a period nobody declared. The refusal is the safe
+ * direction: a wrong deadline reads exactly like a right one.
+ *
+ * @param {{ schedule: string, sweptAt: string }} input
+ * @returns {string} one ` · `-joined fragment, with no leading separator.
+ */
+export function expectedCadence({ schedule, sweptAt }) {
+  const text = String(schedule ?? '').trim();
+  const fields = /^(\d{1,2}) (\d{1,2}) \* \* \*$/.exec(text);
+  const at = new Date(sweptAt);
+  if (!fields || Number(fields[1]) > 59 || Number(fields[2]) > 23 || Number.isNaN(at.getTime())) {
+    return '⚠️ expected cadence UNSTATED — the caller passed `PATROL_SCHEDULE='
+      + `${text}\`, which is not the daily \`M H * * *\` form this renderer computes a deadline from,`
+      + ' so the heartbeat above is NOT decidable from this body';
+  }
+  const next = new Date(at);
+  next.setUTCHours(Number(fields[2]), Number(fields[1]), 0, 0);
+  if (next <= at) next.setUTCDate(next.getUTCDate() + 1);
+  return `expected every 24h (cron \`${text}\` UTC) · next by ${next.toISOString().slice(0, 16)}Z`;
+}
 
 /**
  * The advisory run's exit code is the INSTRUMENT verdict; the `--strict` run's
@@ -74,11 +117,14 @@ export function verdict({ advisoryCode, strictCode }) {
  * @param {string} input.errText  stderr of the advisory run
  * @param {string} input.provenance
  * @param {string} input.sweptAt  ISO timestamp
+ * @param {string} input.schedule the caller's own `cron:`, for the heartbeat deadline
  * @returns {string}
  */
-export function renderBody({ advisoryCode, strictCode, report, errText, provenance, sweptAt }) {
+export function renderBody({ advisoryCode, strictCode, report, errText, provenance, sweptAt, schedule }) {
   const state = verdict({ advisoryCode, strictCode });
-  const stamp = `_Swept ${sweptAt} · ${provenance}_`;
+  // The expectation rides the stamp itself, between the timestamp it qualifies
+  // and the provenance fields, so a reader cannot see one without the other.
+  const stamp = `_Swept ${sweptAt} · ${expectedCadence({ schedule, sweptAt })} · ${provenance}_`;
 
   if (state === 'did-not-run') {
     const classified = (errText || report || '(no output captured)').trim();
@@ -233,6 +279,7 @@ function selfTest() {
     report: 'check-release-section-coverage: 2 finding(s)',
     errText: '',
     provenance: 'run [1](http://x/1)',
+    schedule: '19 4 * * *',
     sweptAt: '2026-08-24T00:00:00.000Z',
   };
 
@@ -282,7 +329,40 @@ function selfTest() {
       + 'either',
       body.startsWith(MARKER) && body.includes('Swept 2026-08-24T00:00:00.000Z') && body.includes(HEARTBEAT_NOTE),
     );
+    // #17720: the heartbeat without its cadence is an instruction no reader can
+    // act on, and this renderer has THREE branches — a stamp that carried the
+    // expectation in two of them would be the #4690 shape one field along.
+    check(
+      `${name} — … and the cadence the heartbeat is judged against, on the Swept line itself`,
+      body.includes('_Swept 2026-08-24T00:00:00.000Z · expected every 24h (cron `19 4 * * *` UTC) · next by 2026-08-24T04:19Z · run [1](http://x/1)_'),
+    );
   }
+
+  // ── The deadline is COMPUTED from the passed clock, not a literal ─────────
+  check(
+    'cadence — the deadline is the caller\'s own cron slot after the sweep, same day when it is '
+    + 'still ahead',
+    expectedCadence({ schedule: '19 4 * * *', sweptAt: '2026-08-24T00:00:00.000Z' })
+      === 'expected every 24h (cron `19 4 * * *` UTC) · next by 2026-08-24T04:19Z',
+  );
+  check(
+    'cadence — … and tomorrow\'s once the day\'s slot has passed, which is the reading a scheduled '
+    + 'run always takes',
+    expectedCadence({ schedule: '19 4 * * *', sweptAt: '2026-08-24T04:19:07.000Z' })
+      === 'expected every 24h (cron `19 4 * * *` UTC) · next by 2026-08-25T04:19Z',
+  );
+  check(
+    'cadence — ⛔ an UNWIRED caller states no deadline and names the unwired input, rather than '
+    + 'inventing a period',
+    expectedCadence({ schedule: '', sweptAt: '2026-08-24T00:00:00.000Z' }).includes('expected cadence UNSTATED')
+    && !expectedCadence({ schedule: '', sweptAt: '2026-08-24T00:00:00.000Z' }).includes('next by'),
+  );
+  check(
+    'cadence — ⛔ a schedule outside the daily form refuses too: a six-hourly cron computed as if '
+    + 'it were daily would publish a deadline 4× wrong',
+    expectedCadence({ schedule: '37 1,7,13,19 * * *', sweptAt: '2026-08-24T00:00:00.000Z' })
+      .includes('expected cadence UNSTATED'),
+  );
 
   // Counted, never a literal: a hard-coded total silently stops matching the
   // moment a case is added, and a self-test that misreports its own size is the
@@ -368,6 +448,10 @@ function main(argv) {
     report: read('report.txt'),
     errText: read('report.err'),
     provenance: process.env.PROVENANCE || '(no provenance)',
+    // The caller's own `cron:`. Absent, `expectedCadence` refuses in the body
+    // rather than inventing a period — an unwired caller must be visible in the
+    // anchor, not papered over by a default.
+    schedule: process.env.PATROL_SCHEDULE || '',
     sweptAt: new Date().toISOString(),
   }));
   process.stdout.write('\n');

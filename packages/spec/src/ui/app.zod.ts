@@ -390,8 +390,16 @@ export const ObjectNavItemSchema = lazySchema(() => strictObject(navItemSurface(
    * When set, navigate straight to the detail page of this specific
    * record instead of the object's list view. Supports template
    * variables `{current_user_id}` and `{current_org_id}` resolved by
-   * the shell at render time. Mutually exclusive with `viewName`
-   * (viewName is ignored if both are set).
+   * the shell at render time.
+   *
+   * Combining it with `viewName` is TOLERATED, not refused — it is the one
+   * legacy pair {@link objectNavTargetExclusivity} deliberately lets through
+   * (that guard's own docblock names it), and `viewName` is ignored when both
+   * are set. Read as an exclusivity, this sentence would send an author away
+   * from a combination the platform accepts, or have them file a bug when it
+   * parses. The tolerance is deliberate and pinned by
+   * `app-nav-target-exclusivity-export.test.ts`; the combinations that ARE
+   * refused live on `filters` and `runAction`.
    */
   recordId: z.string().optional().describe(
     'Navigate directly to this record id instead of the list view. Supports template vars: {current_user_id}, {current_org_id}.',

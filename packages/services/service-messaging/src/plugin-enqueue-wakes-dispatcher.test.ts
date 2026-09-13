@@ -22,9 +22,14 @@
  * straight into the outbox table — no `emit()`, so no wake — is still
  * `pending` after a real wait. Without it, a dispatcher ticking fast for any
  * unrelated reason would pass the positive leg vacuously.
+ *
+ * #17623 put `HttpDispatcher` on the same loop, woken by `enqueueHttp()`. Its
+ * leg below has the same shape — the plugin's own wiring, a real engine, a
+ * negative control on the same boot — with `globalThis.fetch` stubbed, since
+ * that is what the plugin's HTTP dispatcher sends through.
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
 import { ObjectQLPlugin } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
@@ -33,6 +38,7 @@ import type { IDataEngine } from '@objectstack/spec/contracts';
 import { MessagingServicePlugin } from './messaging-service-plugin.js';
 import type { MessagingService } from './messaging-service.js';
 import { DELIVERY_OBJECT } from './sql-outbox.js';
+import { SYS_HTTP_DELIVERY } from './objects/http-delivery.object.js';
 import { hashPartition } from './backoff.js';
 
 /** No timer-driven tick inside the test's lifetime. */
@@ -64,6 +70,7 @@ afterEach(async () => {
     while (openDrivers.length) {
         try { await openDrivers.pop()?.disconnect?.(); } catch { /* noop */ }
     }
+    vi.unstubAllGlobals();
 });
 
 async function bootMessagingKernel() {
@@ -96,6 +103,19 @@ async function bootMessagingKernel() {
 async function statusOf(engine: IDataEngine, id: string): Promise<unknown> {
     const found = await engine.findOne(DELIVERY_OBJECT, { where: { id }, fields: ['status'] });
     return found?.status;
+}
+
+async function httpStatusOf(engine: IDataEngine, id: string): Promise<unknown> {
+    const found = await engine.findOne(SYS_HTTP_DELIVERY, { where: { id }, fields: ['status'] });
+    return found?.status;
+}
+
+async function eventually(predicate: () => Promise<boolean>, budgetMs: number): Promise<void> {
+    const deadline = Date.now() + budgetMs;
+    while (!(await predicate())) {
+        if (Date.now() > deadline) throw new Error(`condition not met within ${budgetMs} ms`);
+        await sleep(10);
+    }
 }
 
 describe('#17610 MessagingServicePlugin — emit() wakes the backed-off dispatcher', () => {
@@ -142,5 +162,57 @@ describe('#17610 MessagingServicePlugin — emit() wakes the backed-off dispatch
         await until(() => sent.length === 2, DELIVERY_BUDGET_MS);
         expect([...sent].sort()).toEqual(['user_loud', 'user_quiet']);
         expect(await statusOf(engine, 'dlv_unannounced')).toBe('success');
+    }, 20_000);
+});
+
+describe('#17623 MessagingServicePlugin — enqueueHttp() wakes the backed-off HTTP dispatcher', () => {
+    it('POSTs an enqueued delivery at once, while a row nobody announced stays pending', async () => {
+        const posted: string[] = [];
+        // The plugin constructs its HttpDispatcher without a fetchImpl, so it
+        // sends through `globalThis.fetch`.
+        vi.stubGlobal('fetch', async (url: string) => {
+            posted.push(url);
+            return { ok: true, status: 200, async text() { return 'ok'; } };
+        });
+        const { engine, messaging } = await bootMessagingKernel();
+
+        // NEGATIVE CONTROL — a ready `pending` row written straight into the
+        // outbox table, the way a process with no dispatcher of its own would.
+        const now = new Date();
+        await engine.insert(SYS_HTTP_DELIVERY, {
+            id: 'hdl_unannounced',
+            source: 'flow',
+            ref_id: 'ref_quiet',
+            dedup_key: 'quiet',
+            url: 'https://receiver.example/quiet',
+            method: 'POST',
+            payload_json: '{}',
+            partition_key: hashPartition('ref_quiet', PARTITIONS),
+            status: 'pending',
+            attempts: 0,
+            created_at: now,
+            updated_at: now,
+        });
+        await sleep(CONTROL_WAIT_MS);
+        expect(await httpStatusOf(engine, 'hdl_unannounced')).toBe('pending');
+        expect(posted).toEqual([]);
+
+        // The ingress: enqueueHttp() writes and wakes. The woken tick drains the
+        // whole partition, so the unannounced row goes out with it.
+        const id = await messaging.enqueueHttp({
+            source: 'flow',
+            refId: 'ref_loud',
+            dedupKey: 'loud',
+            url: 'https://receiver.example/loud',
+            payload: { title: 'loud' },
+        });
+
+        await until(() => posted.length === 2, DELIVERY_BUDGET_MS);
+        expect([...posted].sort()).toEqual(['https://receiver.example/loud', 'https://receiver.example/quiet']);
+        await eventually(
+            async () => (await httpStatusOf(engine, id)) === 'success'
+                && (await httpStatusOf(engine, 'hdl_unannounced')) === 'success',
+            DELIVERY_BUDGET_MS,
+        );
     }, 20_000);
 });

@@ -15,6 +15,11 @@ import {
   // the ONE refusal for a string outside it, shared with the SQL analytics
   // path so the two backends cannot answer one input differently again.
   resolveAnalyticsDateRangeString,
+  // [#17596] The ONE constructor for that envelope, reused for the ARRAY arm's
+  // own refusal: the shared conformance kit reads `code` + `status`, so the
+  // pair must have a single origin across every face. ⛔ Only the SENTENCE is
+  // this condition's own — see {@link explicitDateRangeWindow}.
+  analyticsDateRangeUnrecognizedError,
   // [#16178] The ONE forward bucket labeller, and the guard that says which
   // granularities it can label. Hoisted into core precisely so this driver can
   // bucket with the SAME rule the objectql aggregation path uses, without a
@@ -708,14 +713,90 @@ function readFieldPath(row: Record<string, any>, fieldPath: string): unknown {
  * so the two paths never had to share an answer.
  */
 interface ResolvedDateRange {
-  /** `[start, end]`, in the spelling the bounds are compared as. */
-  readonly bounds: readonly string[];
+  /**
+   * `[start, end]`, in the spelling the bounds are compared as.
+   *
+   * [#17596] A TUPLE, not a `readonly string[]`: both arms now produce exactly
+   * two bounds or throw, so the bound construction below needs no
+   * `if (range.length === 2)` — and that guard is precisely what used to drop
+   * an odd-sized array's window silently, selecting all of history.
+   */
+  readonly bounds: readonly [string, string];
   /**
    * Is `end` the first instant AFTER the window rather than its last instant?
    * `true` only for a window this driver RESOLVED; ⛔ never for one a caller
    * wrote out.
    */
   readonly endExclusive: boolean;
+}
+
+/**
+ * [#17596] The CALLER's explicit window as its two bounds — or the ADR-0112
+ * refusal.
+ *
+ * ## What this replaces
+ *
+ * The array arm used to hand `timeDim.dateRange` to the bound construction
+ * unexamined, behind an `if (range.length === 2)`. MEASURED on `49cd71548`,
+ * four rows spanning 2020…2099 and one authored document:
+ *
+ * | `dateRange` | rows selected | pipeline |
+ * |---|---|---|
+ * | `['2026-01-01', '2026-01-01']` (the window) | the one day | `$match` + `$group` |
+ * | `['2026-01-01']` | ALL FOUR | ⛔ byte-identical to no `dateRange` at all |
+ * | `[]` | ALL FOUR | ⛔ same |
+ * | `['2026-01-01', '2026-01-31', '2026-02-01']` | ALL FOUR | ⛔ same |
+ * | `[null, null]` | none | `$gte: 'null'`, which no instant sorts inside |
+ *
+ * ⇒ the "plot all of history" shape #3650 was filed about and #16322 repaired
+ * for the STRING arm, resurrected on the array arm of the same face — and
+ * invisible, because a dashboard that silently widens its window still renders
+ * a number.
+ *
+ * ## Why a refusal, and why THIS refusal
+ *
+ * ⛔ Not an alignment: all three readings the platform's five faces gave an
+ * odd-sized array are ungoverned, so teaching this face one of them is
+ * inventing a fourth. What IS governed is the contract the spec's own refusal
+ * wording states — *an explicit window is the two-element array [start, end]*
+ * — and PR #17593 already landed exactly this refusal on the
+ * `service-analytics` faces. ⭐ The shared kit's ARITY case
+ * (`ANALYTICS_DATE_RANGE_NOT_A_WINDOW`) is what now holds both to it, which is
+ * why this is the same envelope and not a driver dialect.
+ *
+ * ⛔ Bound VALUES are not judged here: a bare `YYYY-MM-DD` versus a full
+ * timestamp is this face's own calendar translation (#4042) and happens below.
+ *
+ * @param dateRange - the array arm as it reached the face, unparsed.
+ * @returns the two bounds, in the order the author wrote them.
+ * @throws the ADR-0112 `ANALYTICS_DATE_RANGE_UNRECOGNIZED` / 400 envelope when
+ *   the array is not exactly two non-empty string bounds.
+ */
+function explicitDateRangeWindow(dateRange: readonly unknown[]): [string, string] {
+  const refuse = (received: string): Error => {
+    const err = analyticsDateRangeUnrecognizedError(dateRange);
+    err.message =
+      `[driver-memory] dateRange ${JSON.stringify(dateRange)} ${received}. An explicit window `
+      + 'is the TWO-element array [start, end] of ISO dates or {date-macro} tokens — e.g. '
+      + '["2026-01-01", "2026-01-31"]; for a single day write both bounds, '
+      + '["2026-01-01", "2026-01-01"]. Refused (ANALYTICS_DATE_RANGE_UNRECOGNIZED / 400) '
+      + 'rather than guessed: this face used to build no window at all for such an array, '
+      + 'so the query read ALL of history — the same document another backend read as a '
+      + 'single day.';
+    return err;
+  };
+  if (dateRange.length !== 2) {
+    throw refuse(`is a ${dateRange.length}-element array, not a window`);
+  }
+  const [start, end] = dateRange;
+  for (const bound of [start, end]) {
+    if (typeof bound !== 'string' || bound.length === 0) {
+      throw refuse(
+        `has a bound that is not a date string (${bound === null ? 'null' : typeof bound})`,
+      );
+    }
+  }
+  return [start as string, end as string];
 }
 
 /**
@@ -870,62 +951,65 @@ export class MemoryAnalyticsService implements IAnalyticsService {
           // than being re-derived from the bounds themselves — which is not
           // possible, because a resolved window and a caller's window are
           // rendered identically (`toISOString()` on both sides).
+          // [#17596] The array arm is judged HERE, at the discriminator, and
+          // either yields two bounds or throws: a caller's window is the
+          // TWO-element [start, end], and any other shape used to fall past
+          // the `if (range.length === 2)` that stood under this line and reach
+          // the aggregation with NO time predicate emitted at all.
           const resolved: ResolvedDateRange = Array.isArray(timeDim.dateRange)
-            ? { bounds: timeDim.dateRange, endExclusive: false }
+            ? { bounds: explicitDateRangeWindow(timeDim.dateRange), endExclusive: false }
             : this.parseDateRangeString(timeDim.dateRange, query.timezone);
           const range = resolved.bounds;
 
-          if (range.length === 2) {
-            // The window matches BOTH stored forms of a datetime value — the
-            // in-memory table holds whatever the writer produced: `Date`
-            // objects from direct JS callers AND ISO strings (the driver's own
-            // `created_at` default, every REST/JSON write). Mingo compares
-            // cross-type as never-equal, so a single-form bound silently
-            // empties the other half — the same disease driver-sql's
-            // mixed-storage CASE repair cures, expressed as the `$or` a
-            // schemaless store allows.
-            //
-            // Both spellings are half-open on a bare-day end (#4042; the SQL
-            // twin is #3777): a `$lte`-at-midnight upper bound dropped the
-            // final day's rows for `Date` values and the string spelling
-            // inherits `<= day`'s whole-day intent via `< nextDay`.
-            const start = String(range[0]);
-            const end = String(range[1]);
-            // [#16179] The upper bound is EXCLUSIVE by exactly two routes, and
-            // they are mutually exclusive by construction:
-            //
-            //   - the RESOLVER produced the window, so `end` is already the
-            //     instant the window stops before -- `'today'`'s end is the
-            //     first instant of tomorrow. ⛔ It must NOT be widened again:
-            //     it is an instant, so `nextUtcCalendarDay` refuses it anyway
-            //     (`calendar-day.ts`, pinned by `calendar-day.test.ts`), and
-            //     asking is what would make a future bare-day resolver widen a
-            //     bound that was already exclusive.
-            //   - the CALLER wrote a bare `YYYY-MM-DD`, which denotes the WHOLE
-            //     day and widens to `< nextDay` (#4042; the SQL twin is #3777).
-            //
-            // Anything else -- a full timestamp the CALLER wrote -- keeps
-            // instant semantics and stays INCLUSIVE, byte for byte as before.
-            const widenedDay = resolved.endExclusive ? null : nextUtcCalendarDay(end);
-            const upperString = resolved.endExclusive ? end : widenedDay;
-            const upperDate = widenedDay != null
-              ? new Date(`${widenedDay}T00:00:00.000Z`)
-              : (resolved.endExclusive ? new Date(end) : null);
-            const stringBounds = upperString != null
-              ? { $gte: start, $lt: upperString }
-              : { $gte: start, $lte: end };
-            const dateBounds = upperDate != null
-              ? { $gte: new Date(start), $lt: upperDate }
-              : { $gte: new Date(start), $lte: new Date(end) };
-            pipeline.push({
-              $match: {
-                $or: [
-                  { [fieldPath]: stringBounds },
-                  { [fieldPath]: dateBounds },
-                ],
-              }
-            });
-          }
+          // The window matches BOTH stored forms of a datetime value — the
+          // in-memory table holds whatever the writer produced: `Date`
+          // objects from direct JS callers AND ISO strings (the driver's own
+          // `created_at` default, every REST/JSON write). Mingo compares
+          // cross-type as never-equal, so a single-form bound silently
+          // empties the other half — the same disease driver-sql's
+          // mixed-storage CASE repair cures, expressed as the `$or` a
+          // schemaless store allows.
+          //
+          // Both spellings are half-open on a bare-day end (#4042; the SQL
+          // twin is #3777): a `$lte`-at-midnight upper bound dropped the
+          // final day's rows for `Date` values and the string spelling
+          // inherits `<= day`'s whole-day intent via `< nextDay`.
+          const start = String(range[0]);
+          const end = String(range[1]);
+          // [#16179] The upper bound is EXCLUSIVE by exactly two routes, and
+          // they are mutually exclusive by construction:
+          //
+          //   - the RESOLVER produced the window, so `end` is already the
+          //     instant the window stops before -- `'today'`'s end is the
+          //     first instant of tomorrow. ⛔ It must NOT be widened again:
+          //     it is an instant, so `nextUtcCalendarDay` refuses it anyway
+          //     (`calendar-day.ts`, pinned by `calendar-day.test.ts`), and
+          //     asking is what would make a future bare-day resolver widen a
+          //     bound that was already exclusive.
+          //   - the CALLER wrote a bare `YYYY-MM-DD`, which denotes the WHOLE
+          //     day and widens to `< nextDay` (#4042; the SQL twin is #3777).
+          //
+          // Anything else -- a full timestamp the CALLER wrote -- keeps
+          // instant semantics and stays INCLUSIVE, byte for byte as before.
+          const widenedDay = resolved.endExclusive ? null : nextUtcCalendarDay(end);
+          const upperString = resolved.endExclusive ? end : widenedDay;
+          const upperDate = widenedDay != null
+            ? new Date(`${widenedDay}T00:00:00.000Z`)
+            : (resolved.endExclusive ? new Date(end) : null);
+          const stringBounds = upperString != null
+            ? { $gte: start, $lt: upperString }
+            : { $gte: start, $lte: end };
+          const dateBounds = upperDate != null
+            ? { $gte: new Date(start), $lt: upperDate }
+            : { $gte: new Date(start), $lte: new Date(end) };
+          pipeline.push({
+            $match: {
+              $or: [
+                { [fieldPath]: stringBounds },
+                { [fieldPath]: dateBounds },
+              ],
+            }
+          });
         }
       }
     }

@@ -74,13 +74,14 @@
 /**
  * The code carried by the "never registered" rejection.
  *
- * ⚠️ Spelled the ADR-0112 way, but deliberately NOT wire vocabulary: this value
- * is read in-process by the seam that catches the rejection and is never
- * serialized into an `error.code` envelope. `dispatcher-error-vocabulary.ts`
- * classifies it `door: 'none'` / `boot-refusal` for exactly that reason — the
- * same class as the migration-journal runner refusals. If a transport ever
- * needs to ANSWER with this fact, that is a registration question for #8846's
- * ledger, ⛔ not something to start doing at a door.
+ * Spelled the ADR-0112 way and REGISTERED in `ERROR_CODE_LEDGER` under
+ * `@objectstack/core` (#16649, under the #16404 door-or-no-door rule: every
+ * `code` that ships in `dist` carries a ledger row, whether or not a door
+ * answers with it). `door: 'none'` on this tree — this value is read
+ * in-process by the seam that catches the rejection and is never serialized
+ * into an `error.code` envelope, the same reachability as the
+ * migration-journal runner refusals. If a transport ever ANSWERS with this
+ * fact, `error.code` carries this spelling.
  */
 export const SERVICE_NOT_REGISTERED_CODE = 'SERVICE_NOT_REGISTERED';
 

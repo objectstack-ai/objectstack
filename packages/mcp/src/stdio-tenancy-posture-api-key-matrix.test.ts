@@ -564,3 +564,91 @@ describe('[#15348] §5 — the posture and the membership are both re-read per c
     await expect(getRecord(OBJECT, 'u_a1')).rejects.toThrow(/no longer valid/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// §6 [#17114] — the fold onto `classifyAdmissionTenancyPosture`, measured at
+// the two edges a fold can get wrong.
+//
+// §1 and §4 already pin the discrimination itself on the registry's own
+// rejections; what these arms pin is that the fold moved the CLASSIFICATION
+// and nothing else:
+//
+//  - the accessor is invoked INSIDE the shared classification, so a
+//    `getServiceAsync` that throws SYNCHRONOUSLY is classified exactly as its
+//    rejecting twin. A fold that resolved the service FIRST and handed the
+//    helper a settled value would need a `catch` of its own to get there —
+//    the per-seam copy this card deletes — and this arm is where that shows;
+//  - ⛔ the SYNC leg is NOT folded. Its host shape (`KernelBase` — no
+//    `getServiceAsync` at all) reports its one fault UNBRANDED, so routing it
+//    through the shared classification would mint a 503 outage out of a
+//    supported composition. That is the fence the card records, as a measured
+//    arm rather than a comment.
+//
+// Both rejection values are read out of a REAL kernel and then re-raised, so
+// neither arm is a hand-built brand at the seam under measurement (fixture
+// principle 4 above).
+// ---------------------------------------------------------------------------
+
+describe('[#17114] §6 — the classification is shared; the resolution is still this door\'s', () => {
+  /** Settle a real registry read to its rejection VALUE. */
+  const rejectionValue = (wiring: TenancyWiring): Promise<unknown> =>
+    makeKernel(makeFixture().engine, wiring)
+      .getServiceAsync('tenancy')
+      .then(() => undefined, (e: unknown) => e);
+
+  /**
+   * Boot with a host whose `getKernel()` answers a facade. Only
+   * `getServiceAsync`'s PRESENCE is read by the seam (`plugin.ts` calls
+   * `ctx.getKernel()` at exactly one place), so the facade carries the sync
+   * accessor plus whichever async shape the arm is measuring.
+   */
+  async function bootWithHost(
+    rawKey: string,
+    host: (kernel: ObjectKernel) => Record<string, unknown>,
+  ) {
+    process.env.OS_MCP_STDIO_API_KEY = rawKey;
+    const fixture = makeFixture();
+    const kernel = makeKernel(fixture.engine, { kind: 'unregistered' });
+    const ctx = { ...makeCtx(kernel), getKernel: vi.fn(() => host(kernel)) };
+    return { fixture, start: () => startStdio(ctx) };
+  }
+
+  it('a `getServiceAsync` that throws the branded rejection SYNCHRONOUSLY stays quiet — same answer as the rejected one', async () => {
+    const branded = await rejectionValue({ kind: 'unregistered' });
+    expect(isServiceNotRegisteredError(branded), 'fixture: the registry did not brand its miss').toBe(true);
+    const h = await bootWithHost(RAW_EXMEMBER_KEY, (kernel) => ({
+      getService: <T>(name: string): T => kernel.getService<T>(name),
+      getServiceAsync: () => { throw branded; },
+    }));
+    // The §4 CONTRAST answer, reached through a synchronous throw.
+    const { bridge } = await h.start();
+    expect((await readAll(bridge)).total).toBe(2);
+  });
+
+  it('a `getServiceAsync` that throws an UNBRANDED failure SYNCHRONOUSLY is the 503 outage, not a quiet admit', async () => {
+    const unbranded = await rejectionValue({ kind: 'factory-throws' });
+    expect(isServiceNotRegisteredError(unbranded), 'fixture: the failed build was branded').toBe(false);
+    const h = await bootWithHost(RAW_EXMEMBER_KEY, (kernel) => ({
+      getService: <T>(name: string): T => kernel.getService<T>(name),
+      getServiceAsync: () => { throw unbranded; },
+    }));
+    const err = await h.start().then(() => undefined, (e) => e);
+    expect(err, 'the door STARTED — a synchronous outage escaped the classification').toBeInstanceOf(Error);
+    expect((err as { code?: unknown }).code).toBe(AUTHZ_STORE_UNAVAILABLE_CODE);
+    expect((err as { status?: unknown }).status).toBe(AUTHZ_STORE_UNAVAILABLE_STATUS);
+    expect((err as { object?: unknown }).object).toBe('tenancy');
+  });
+
+  it('⛔ FENCE: a host with NO `getServiceAsync` takes the SYNC leg and stays quiet on its UNBRANDED miss', async () => {
+    // `ObjectKernelBase`'s sync accessor throws a plain `[Kernel] Service
+    // 'tenancy' not found` — unbranded, because it never reaches
+    // `PluginLoader.getService`. Folding this leg onto the shared
+    // classification would turn that one reportable fault into a 503 and break
+    // every embedder on a `KernelBase`-shaped host. This arm reddens if it is.
+    const h = await bootWithHost(RAW_EXMEMBER_KEY, (kernel) => ({
+      getService: <T>(name: string): T => kernel.getService<T>(name),
+    }));
+    const { bridge } = await h.start();
+    expect((await readAll(bridge)).total).toBe(2);
+  });
+});

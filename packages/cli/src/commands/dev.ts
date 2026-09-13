@@ -24,6 +24,18 @@ import { readEnvWithDeprecation, isMcpServerEnabled } from '@objectstack/types';
 // no range, no reader, no wording; a second copy of the bound is exactly what
 // #12620 and #12662 protected against.
 import { describePortSource, parseRequestedPort, formatInvalidPortNotice } from '../utils/port-contract.js';
+// The ONE dev-TLS contract, shared with the `serve` child this command spawns
+// (#16804). ⛔ Nothing about certificates is declared in this file, and ⛔ no
+// certificate is ever generated — the developer brings their own.
+import {
+  devTlsCertFlag,
+  devTlsKeyFlag,
+  resolveDevTlsIntent,
+  listenerProtocol,
+  devTlsChildArgs,
+  colorizeDevTlsNotice,
+  type ListenerProtocol,
+} from '../utils/dev-tls-contract.js';
 // The auth base-URL precedence chain, borrowed from the command that owns it
 // (#16734). ⛔ `dev` declares no chain of its own — see printMcpConnectHint.
 import { resolveAuthBaseUrl } from './serve.js';
@@ -106,8 +118,10 @@ export async function resolveDevDatabase(opts: {
  * here is no block at all: falling back to the bound socket would reprint, on
  * the same screen, the exact address the banner just refused to print.
  */
-export function printMcpConnectHint(opts: { boundPort: number | string; name: string }): void {
-  const { baseOrigin } = resolveAuthBaseUrl(opts.boundPort);
+export function printMcpConnectHint(
+  opts: { boundPort: number | string; name: string; boundProtocol?: ListenerProtocol },
+): void {
+  const { baseOrigin } = resolveAuthBaseUrl(opts.boundPort, opts.boundProtocol ?? 'http');
   if (baseOrigin === null) return;
   console.log();
   console.log(chalk.cyan('  🤖 MCP server — connect a coding agent:'));
@@ -115,6 +129,50 @@ export function printMcpConnectHint(opts: { boundPort: number | string; name: st
   console.log(`     Skill     ${baseOrigin}/api/v1/mcp/skill`);
   console.log(chalk.dim(`     Connect   claude mcp add --transport http ${opts.name} ${baseOrigin}/api/v1/mcp`));
   console.log(chalk.dim('     Disable   OS_MCP_SERVER_ENABLED=false'));
+}
+
+/**
+ * The hop outward: relay the `serve` child's `objectstack:seed-settled`
+ * announcement to `os dev`'s OWN parent (#17329).
+ *
+ * ## Why the hop exists at all
+ *
+ * `os dev` is a spawner. It runs `serve --dev` over
+ * `stdio: ['inherit','inherit','inherit','ipc']`, so the child's settle
+ * announcement lands HERE and stops — while the consumer that needs it (a demo
+ * script, a test harness, anything that spawns `os dev` and wants to print one
+ * line after the boot) holds a channel to `os dev`, not to a grandchild process
+ * it did not start and cannot name. One hop is the whole of the missing piece:
+ * the producer already exists, and the child already announces.
+ *
+ * ## Relayed verbatim, deliberately
+ *
+ * ⛔ Nothing here re-derives, re-summarises or re-grades the message. The child
+ * read the settlement tally off the kernel that did the seeding; this process
+ * has no kernel and could only guess. Passing the object through means `os
+ * dev`'s parent and the `serve` child can never be made to say two different
+ * things about one boot — the same rule the `MCP:` row above follows for the
+ * origin, and for the same reason.
+ *
+ * ## An IPC channel stays OPTIONAL for this command
+ *
+ * ⛔ A parent that holds no channel must be unaffected, and is: `process.send`
+ * is `undefined` under an ordinary terminal `os dev`, so this returns having
+ * done nothing, printed nothing, and changed no byte of that transcript. The
+ * `serve` child's own `announceListening` is best-effort for exactly this
+ * reason and this is its mirror — ⛔ this message does not make an IPC channel
+ * a requirement of running a published command.
+ *
+ * @returns `true` when the message was a settle announcement (handled here, and
+ *   the caller should stop) — `false` for every other message, which the
+ *   caller's own branches still own.
+ */
+export function forwardSeedSettledToParent(msg: unknown): boolean {
+  if ((msg as { type?: unknown } | null | undefined)?.type !== 'objectstack:seed-settled') return false;
+  try {
+    if (typeof process.send === 'function') process.send(msg);
+  } catch { /* the parent's channel closed — best-effort, exactly like the child's */ }
+  return true;
 }
 
 export default class Dev extends Command {
@@ -134,6 +192,11 @@ export default class Dev extends Command {
       options: ['debug', 'info', 'warn', 'error', 'fatal', 'silent'],
     }),
     port: Flags.string({ char: 'p', description: 'Server port (overrides $PORT)' }),
+    // #16804 — developer-supplied TLS, forwarded to the `serve` child. Declared
+    // through the shared contract so the two commands cannot drift on the flag
+    // names, the prose, or what half a pair means.
+    cert: devTlsCertFlag(),
+    key: devTlsKeyFlag(),
     preset: Flags.string({
       description: 'Plugin tier preset forwarded to `serve`: minimal | default | full',
     }),
@@ -211,6 +274,19 @@ export default class Dev extends Command {
     const { args, flags } = await this.parse(Dev);
     const packageName = args.package;
 
+    // ── The TLS pair, read ONCE, ahead of every child and every printer ──
+    // Refused here rather than one process later so half a pair is named under
+    // the spelling the operator typed, and resolved before the connect hint
+    // below so the parent's derived origin and the child's bound socket come
+    // from the same answer (#16804). ⛔ This reads no certificate — the child
+    // binds the socket, so the child owns the refusal for an unusable file.
+    const tlsIntent = resolveDevTlsIntent(flags);
+    if (tlsIntent.kind === 'incomplete') {
+      console.error(colorizeDevTlsNotice(tlsIntent.notice));
+      process.exit(1);
+    }
+    const boundProtocol: ListenerProtocol = listenerProtocol(tlsIntent);
+
     // Load .env files following Vite/Next.js convention (mirrors `serve`).
     // `dev` is always development mode, so prefer `.env.development*` over
     // `.env.production*`. Loaded BEFORE any env lookups.
@@ -270,6 +346,21 @@ export default class Dev extends Command {
         // from the `/runtimeModule` hash, which differs run-to-run regardless
         // (the bundle embeds `builtAt`). Pinned by
         // child-env-source-loader.pin.test.ts.
+        //
+        // ⚠️ WHAT THIS RULE NO LONGER CARRIES, so the next reader does not
+        // re-derive it: the CONSEQUENCE above was never conditional on a child
+        // being handed the variable. Writing no `NODE_ENV` here leaves the
+        // child inheriting whatever the parent has, so an operator who merely
+        // EXPORTED `NODE_ENV=development` reproduced every word of it — and on
+        // a direct `os serve --dev` or `os start`, which has no parent to scrub
+        // at all. That class is closed one level down, where it is actually
+        // decided: `bin/run.js` declares `settings.enableAutoTranspile = false`,
+        // so the built entry resolves its commands from `dist/` whatever
+        // `NODE_ENV` says (#12271 — its docblock carries the measurement).
+        // ⛔ This rule stays anyway and is not redundant: it keeps the CLI's own
+        // sources from ASSERTING a loader-activating value, which is a
+        // different claim from the entry refusing to act on one, and it is the
+        // half `child-env-source-loader.pin.test.ts` can see.
         const compileResult = spawnSync(
           process.execPath,
           [binPath, 'compile', '--output', artifactPath],
@@ -514,6 +605,10 @@ export default class Dev extends Command {
             'serve',
             '--dev',
             ...(port ? ['--port', port] : []),
+            // The PATHS, not the bytes: the child binds the socket, so it is
+            // the process that must fail when the certificate is unusable
+            // (#16804). One reader of the file, one owner of that refusal.
+            ...devTlsChildArgs(tlsIntent),
             ...(flags.ui ? ['--ui'] : []),
             ...(flags.verbose ? ['--verbose'] : []),
             ...(flags['log-level'] ? ['--log-level', flags['log-level']] : []),
@@ -530,6 +625,10 @@ export default class Dev extends Command {
         // its HTTP server is up. We surface it so the printed URL is correct
         // even when the port was auto-shifted (e.g. 3000 busy → 3001).
         child.on('message', (msg: any) => {
+          // #17329 — the hop outward. Handled first and exclusively: a settle
+          // announcement carries no port and has nothing to do with the block
+          // below. See {@link forwardSeedSettledToParent}.
+          if (forwardSeedSettledToParent(msg)) return;
           if (msg?.type === 'objectstack:listening' && msg.port) {
             const actual = String(msg.port);
             if (actual !== requestedPort) {
@@ -555,7 +654,14 @@ export default class Dev extends Command {
               // origin these lines carry is resolved from the runtime's own
               // precedence chain inside the printer, so the banner the child
               // prints and this block cannot name two different deployments.
-              printMcpConnectHint({ boundPort: actual, name: path.basename(process.cwd()) || 'objectstack' });
+              printMcpConnectHint({
+                boundPort: actual,
+                name: path.basename(process.cwd()) || 'objectstack',
+                // ⭐ From THIS process's own flags, which are the same flags it
+                // forwarded to the child — so the scheme the hint prints and the
+                // scheme the child bound cannot part company (#16804).
+                boundProtocol,
+              });
             }
           }
         });

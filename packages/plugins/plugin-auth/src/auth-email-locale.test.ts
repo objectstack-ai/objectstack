@@ -865,10 +865,13 @@ describe("#14641 — an invitation reads the INVITEE's own sys_user.locale", () 
  * recipient-keyed engine, not by asserting it about this send alone.
  *
  * Two branches, because a magic link is BOTH a sign-in for an existing account
- * and a sign-up for a new address (measured in the installed better-auth
- * 1.7.2: `/sign-in/magic-link` sends without looking the address up, and
- * `/magic-link/verify` creates the user unless `disableSignUp`). Branch 2 is
- * therefore a real state here, not a theoretical one.
+ * and a sign-up for a new address (re-measured 2026-09-11 in the installed
+ * better-auth 1.7.3, unchanged from 1.7.2: the `/sign-in/magic-link` handler
+ * takes `email` straight off the body, stores a verification value and calls
+ * `sendMagicLink` — no user lookup on that path at all — while
+ * `/magic-link/verify` reads `findUserByEmail` and, finding nobody, calls
+ * `createUser` unless `disableSignUp`). Branch 2 is therefore a real state
+ * here, not a theoretical one.
  *
  * ⛔ The request rung is kept, not replaced. Ruling D (#14788, 2026-09-03,
  * maintainer verbatim 「同意」) reads `sys_user.locale` when set → the
@@ -998,9 +1001,10 @@ describe("#15106 — the magic link reads the recipient's own sys_user.locale", 
   });
 
   it('matches the address better-auth itself will resolve the link with — lowercased', async () => {
-    // ⚠️ Measured against the installed better-auth 1.7.2, not assumed:
-    // `signInMagicLinkBodySchema` applies no case transform, so a typed
-    // `Ada@Example.com` arrives here verbatim, while
+    // ⚠️ Measured against the installed better-auth 1.7.3 (2026-09-11), not
+    // assumed, and unchanged from the 1.7.2 reading this replaces:
+    // `signInMagicLinkBodySchema` declares `email: z.email()` with no case
+    // transform, so a typed `Ada@Example.com` arrives here verbatim, while
     // `internalAdapter.findUserByEmail` — what `/magic-link/verify` resolves
     // this very link with — matches on `email.toLowerCase()`. The column must
     // be read for the row the link will sign into.

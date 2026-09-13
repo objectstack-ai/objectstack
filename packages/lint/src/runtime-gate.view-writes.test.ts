@@ -222,14 +222,13 @@ describe('a flattened list overlay at the runtime publish gate (#9313)', () => {
     const crossed = REFERENCE_INTEGRITY_RULES
       .filter((r) => (r.runtimeTypes ?? ['flow']).includes('view'))
       .map((r) => r.name);
-    // [#13216] `validateViewPageRefs` is the third crossing, and the first that
-    // is not a field-existence question: a `type: 'page'` view's `pageName`,
-    // resolved against `stack.pages` — a collection the per-write snapshot
-    // gained in the same change (`RuntimeStackContext.pages`), which is the
-    // precondition every crossing owes. The list is written out, not derived,
-    // precisely so a fourth crossing has to be argued here; this one's
-    // false-positive measurement is `runtime-gate.view-page-refs.test.ts`,
-    // which reproduces the phantom findings the collection removes.
+    // [#13216 / #17063] `validateViewPageRefs` was the third crossing, and the
+    // only one that was not a field-existence question: a `type: 'page'` view's
+    // `pageName`, resolved against `stack.pages` — a collection the per-write
+    // snapshot gained in the same change. It left this list with the view mount
+    // it resolved, and `RuntimeStackContext.pages` left with it, so no crossing
+    // reaches for a collection the snapshot does not carry. The list is written
+    // out, not derived, precisely so a change either way has to be argued here.
     // [#14107] The fourth crossing, argued here as this list demands. It is the
     // same KIND of crossing as the first two — a list view's field references,
     // resolved against `stack.objects`, the one collection every per-write
@@ -243,7 +242,6 @@ describe('a flattened list overlay at the runtime publish gate (#9313)', () => {
       'validateSearchableFields',
       'validateSortableFields',
       'validateListViewFieldRefs',
-      'validateViewPageRefs',
     ]);
     // And every member still judges flow snapshots — the #4463 P1 surface is
     // not narrowed by the member axis existing.

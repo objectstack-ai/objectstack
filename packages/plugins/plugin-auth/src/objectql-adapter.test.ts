@@ -86,16 +86,20 @@ describe('AUTH_*_CONFIG schema mappings', () => {
     });
   });
 
-  // better-auth 1.7 added the required `issuer`. Lookups key on
-  // (issuer, accountId), so a missing mapping here reads as "no such account"
-  // on every sign-in. The id field's NAME flip-flopped mid pre-release —
-  // `1.7.0-rc.2` called it `providerAccountId`, stable 1.7 calls it
-  // `accountId` again (#3002) — which is why it is pinned here.
+  // Lookups key on (providerId, accountId), so a missing mapping for either
+  // reads as "no such account" on every sign-in. The id field's NAME
+  // flip-flopped mid pre-release — `1.7.0-rc.2` called it
+  // `providerAccountId`, stable 1.7 calls it `accountId` again (#3002) —
+  // which is why it is pinned here.
+  //
+  // [#17440] `issuer` is deliberately ABSENT: 1.7.3 removed the column and the
+  // key it served. `toEqual` (not `objectContaining`) is what makes that
+  // absence an assertion — a stray mapping for a column better-auth no longer
+  // declares would fail here rather than sit inert.
   it('should map account camelCase fields to snake_case', () => {
     expect(AUTH_ACCOUNT_CONFIG.fields).toEqual({
       userId: 'user_id',
       providerId: 'provider_id',
-      issuer: 'issuer',
       accountId: 'account_id',
       accessToken: 'access_token',
       refreshToken: 'refresh_token',

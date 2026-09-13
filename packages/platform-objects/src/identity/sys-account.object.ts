@@ -154,33 +154,6 @@ export const SysAccount = ObjectSchema.create({
       description: 'OAuth provider identifier (google, github, etc.)',
     }),
 
-    // better-auth 1.7 keys account identity on (issuer, account_id) rather than
-    // on the provider id alone: the issuer names the authority that vouched for
-    // that id — an OIDC `iss` claim for federated logins, or a synthetic
-    // `local:credential` / `local:oauth:<provider>` for providers that have
-    // none. better-auth writes it on every new account; rows created before the
-    // 1.7 upgrade are stamped at boot by the auth plugin's issuer backfill.
-    //
-    // Deliberately NOT `required` even though better-auth always supplies it: a
-    // NOT NULL column cannot be added to a table that already holds rows, and
-    // schema sync runs before the backfill.
-    // [#11374] Bound = 2048, transitively from sys_sso_provider.issuer
-    // (maxLength: 2048, the landed contract for the widest producer): the SSO
-    // OIDC path writes the verified token's raw `iss` claim — or the provider's
-    // registered issuer — verbatim into this column, and SAML entityIDs are
-    // capped at 1024 by SAML metadata. Anything tighter would refuse a sign-in
-    // that sys_sso_provider's own contract admits. 2048 exceeds the 768-char
-    // utf8mb4 key-part ceiling, so this column deliberately stays TEXT and the
-    // (issuer, account_id) unique index still cannot exist on MySQL — that is
-    // #11627's hash-shadow-key territory, not a reason to guess a tighter
-    // number here.
-    issuer: Field.text({
-      label: 'Issuer',
-      required: false,
-      maxLength: 2048,
-      description: 'Authority that vouched for the provider account id — an OIDC issuer, or local:… for providers without one',
-    }),
-
     account_id: Field.text({
       label: 'Provider Account ID',
       required: true,
@@ -327,11 +300,19 @@ export const SysAccount = ObjectSchema.create({
   
   indexes: [
     { fields: ['user_id'], unique: false },
+    // #17440 — the ONLY account identity key. better-auth 1.7.3 rolled the
+    // issuer-scoped identity back (better-auth/better-auth#10909):
+    // `AccountKey` is `(providerId, accountId)` again and `account.issuer` is
+    // gone from its `get-tables`, so this pair is what `findAccountByKey`
+    // resolves on and what the physical table must enforce.
+    //
+    // ⚠️ It is NARROWER than the pair it replaces. Two rows sharing
+    // (provider_id, account_id) and differing only in the retired `issuer`
+    // were legal under the old key and collide under this one — which is why
+    // the column drop is gated behind the `os migrate` preflight
+    // (`sys-account-issuer-retirement`), never behind this constraint failing
+    // mid-apply.
     { fields: ['provider_id', 'account_id'], unique: true },
-    // better-auth 1.7 resolves accounts by (issuer, accountId) and
-    // declares that pair unique on its own `account` table — mirror it here so
-    // the physical table enforces the same identity key the auth code assumes.
-    { fields: ['issuer', 'account_id'], unique: true },
   ],
   
   enable: {

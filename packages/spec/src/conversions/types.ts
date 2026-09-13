@@ -142,13 +142,30 @@ export interface MetadataConversion {
   /** The protocol major that introduced the canonical shape. */
   toMajor: number;
   /**
-   * When `true`, this conversion is **retired from the load path**: the loader
-   * no longer accepts the old shape (the schema rejects or tombstones it), and
-   * the entry exists purely as graduated migration-chain history — replayed by
-   * `objectstack migrate meta` against *source* metadata, never at load. This
-   * is the ADR-0087 D2 window's second half ("retired in N+1 — but never
-   * deleted"), and it is also how a pre-launch one-step rename (which never had
-   * a load window at all) is preserved in the chain.
+   * When `true`, this conversion is **retired from the AUTHORING surface**: the
+   * authoring funnel (`normalizeStackInput` — `defineStack`, `validate`,
+   * `lint`, `compile`, `info`, `doctor`) no longer replays it, so an author
+   * writing the old shape meets the schema's rejection or its tombstone and is
+   * taught the canonical spelling. This is the ADR-0087 D2 window's second half
+   * ("retired in N+1 — but never deleted"), and it is also how a pre-launch
+   * one-step rename (which never had a load window at all) is preserved in the
+   * chain.
+   *
+   * ⚠️ The flag's name says "load path", but its reach is the authoring surface
+   * only — **data-at-rest load paths replay retired entries on purpose**:
+   * stored-row rehydration (`applyConversionsToStoredItem`, which pins
+   * `includeRetired: true` rather than offering it), flow rehydration in the
+   * automation engine, and the artifact-ingestion door
+   * (`applyArtifactForwardConversions`, inside its declared-floor window). A
+   * row, a stored flow or a built artifact has no author for a tombstone to
+   * teach, and refusing a shape that once worked would only break data — see
+   * ADR-0087's `## Addendum (2026-07-31)` and the #12772 ruling. `objectstack
+   * migrate meta` replays it too, against *source* metadata, but by id through
+   * `applyMetaMigrations` rather than through this flag.
+   *
+   * ⇒ Setting this does NOT confine a rewrite to history. For a conversion
+   * whose old and new shapes are both legal and mean different things (a
+   * default flip, not a rename), the data-at-rest seams will still apply it.
    */
   retiredFromLoadPath?: boolean;
   /** Dotted surface, e.g. `flow.node.type`, `page.kind`, `flow.node.config`. */

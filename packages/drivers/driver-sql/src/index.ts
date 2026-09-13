@@ -122,6 +122,30 @@ export type {
   FieldDef as DriftFieldDef,
 } from './schema-drift.js';
 
+// [#15989] The ADR-0104 file-family COLUMN step. Published for the same reason
+// `manualJsonConversionSql` is reachable from `os migrate multi-value-columns`:
+// the statements belong to the package that owns the dialects and MEASURED
+// them, and a second copy in the CLI could only ever go stale — which here
+// means a second copy of the clause the ruling's own text got wrong. The
+// command `await import()`s these at the point of use (⛔ never a static value
+// import of a driver package from a CLI command module — see
+// `schema-migrate.lazy-driver-import.test.ts`).
+export {
+  MEDIA_COLUMN_MOVE_DIALECTS,
+  MEDIA_COLUMN_MOVE_ROLLBACK_NOTES,
+  MEDIA_ID_MOVE_WIDTH,
+  isJsonColumnType,
+  mediaColumnMoveDialect,
+  mediaColumnMovePlan,
+} from './media-column-move.js';
+export type {
+  MediaColumnMoveDialect,
+  MediaColumnMoveKind,
+  MediaColumnMovePlan,
+  MediaColumnMoveRefusal,
+  MediaColumnMoveScan,
+} from './media-column-move.js';
+
 export default {
   id: 'com.objectstack.driver.sql',
   version: '1.0.0',

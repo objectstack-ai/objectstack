@@ -502,7 +502,7 @@ Sort field and direction pair
 | **cardFields** | `string[]` | optional | Fields rendered on each card |
 | **swimlaneField** | `string` | optional | Field for horizontal swimlanes (in addition to columns) |
 | **grouping** | `any` | optional | View grouping config; its first field is the swimlane fallback |
-| **quickAdd** | `boolean` | optional | Show the per-column quick-add affordance |
+| **quickAdd** | `never` | optional | [REMOVED] `object-kanban` property `quickAdd` was removed in @objectstack/spec 17 (ADR-0049) — the board forwarded it, but the per-column affordance is gated on both `quickAdd` and `onQuickAdd`, and `onQuickAdd` is a host-supplied function JSON cannot carry and no producer ever put on an `object-kanban` node, so authoring it was a parse-clean no-op. Delete the key. The quick-add control is unchanged on the `kanban-ui` block, where a React host supplies the `onQuickAdd` slot the control needs. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **coverImageField** | `string` | optional | Image field rendered as the card cover |
 | **conditionalFormatting** | `any` | optional | Card conditional formatting rules |
 

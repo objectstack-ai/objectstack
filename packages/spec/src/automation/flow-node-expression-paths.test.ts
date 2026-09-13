@@ -267,8 +267,13 @@ describe('every pre-#14149 entry resolves byte-identically (the ratchet\'s fixtu
     it('admits every string — what it SAYS is validateExpression\'s business', () => {
       expect(structuralConditionRefusal('record.rating >= 4')).toBeUndefined();
       expect(structuralConditionRefusal('{record.rating} >= 4')).toBeUndefined();
-      // Ruled correct, not a defect: a whitespace-only STRING means "not
-      // authored" on both sides and stays so.
+      // Still admitted — but on the SHAPE question only, and no longer because
+      // the blank is correct. #15662 admitted it as "not authored on both
+      // sides"; #15807 refused it at the edge door and #17322 rebound the node
+      // door at `registerFlow`, so a blank structural condition IS a defect
+      // today. It is refused there by the imported evaluated-slot rule sitting
+      // BESIDE this one, never by this function — which is exactly what these
+      // two assertions pin. See the docblock of `structuralConditionRefusal`.
       expect(structuralConditionRefusal('   ')).toBeUndefined();
       expect(structuralConditionRefusal('')).toBeUndefined();
     });

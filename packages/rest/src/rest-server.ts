@@ -1956,13 +1956,20 @@ export class RestServer {
         // Exemption requires a REAL, non-empty path — mirrors the sibling seam
         // (`shouldDenyAnonymous`, core/src/security/anonymous-deny.ts:122).
         //
-        // ⚠️ `isAuthGateAllowlisted(undefined)` returns `true` (it treats "no
-        // path" as allow-listed). Passed the raw value, a request whose `path`
-        // is absent or empty read as allow-listed on EVERY route, so the gate
-        // did not fire for a session policy says must be blocked — fail-OPEN by
-        // omission. No shipped transport reaches here without a `path` (the
-        // hono adapter sets it at all three request-construction sites), so this
-        // is the default being made safe, not a live bypass being closed (#7432).
+        // ⚠️ `isAuthGateAllowlisted(undefined)` USED to return `true` (it treated
+        // "no path" as allow-listed). Passed the raw value, a request whose
+        // `path` was absent or empty read as allow-listed on EVERY route, so the
+        // gate did not fire for a session policy says must be blocked —
+        // fail-OPEN by omission. No shipped transport reaches here without a
+        // `path` (the hono adapter sets it at all three request-construction
+        // sites), so this was the default being made safe, not a live bypass
+        // being closed (#7432).
+        //
+        // [#7898] The predicate itself is fail-closed at the source now, so this
+        // guard and it agree and this seam's behaviour is unchanged. ⛔ The guard
+        // stays: it is what keeps this seam's answer independent of what the
+        // predicate does with a falsy argument, and `rest-auth-gate.test.ts`
+        // still turns red without it.
         const pathExempt =
             typeof req?.path === 'string' && req.path.length > 0 && isAuthGateAllowlisted(req.path);
         if (gate && req?.method !== 'OPTIONS' && !pathExempt) {

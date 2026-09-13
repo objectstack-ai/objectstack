@@ -51,7 +51,7 @@ model: opus
    - 通道先探后选:同容器先测一条 repo-scoped REST 读;通 ⇒ 走 REST 列表端点 + 本地 grep。
    - 通道对照表见 `.claude/skills/pm-dispatch/references/rest-channel.md`,其 ✓ 按座位实测。
    - 403 ⇒ 改用一次定向 MCP `search_issues`,并在报告申报换道。
-   - 空结果要同会话一个已知必中的控制词答了命中才算读数。
+   - 空结果要同会话已知必中、与主张同主体同失效形态的控制词答了命中才算读数。
    - ⛔ 哪条通道都不宽表扫(全量翻页 `list_issues`、宽词搜):定向一击是上限。
    - 大宗读走零配额档:公开仓单卡网页内嵌 JSON payload 载原始 body + 全评论。
    - 其拼写与边界住 platform-readings;它只覆盖单卡读,⛔ 不拿它做 search。
@@ -169,9 +169,9 @@ model: opus
 - `set -o pipefail` 与 `${PIPESTATUS[0]}` 仅当下游读到 EOF 才安全。
 - `| head -N` 读满即关读端,生产者吃 SIGPIPE 以 0 退出:是管道改了生产者的退出码。
 - 此陷阱不限于门禁:任何 `cmd | head` 之后读退出码都中招(`git grep`、`node` 皆然)。
-- 引用门禁结果时点名它自己印的判定行,永不引裸 `$?`:判定行由门禁写,`$?` 由你的管道写。
 - 陷阱在 shell 用法里,不可机械化;⛔ 别等机械强制。
 - 两类跑了却没测到,都读作 NOT MEASURED,不读作绿也不读作红。
+- 证据已销毁(评论、卡或 PR 答 404)的复核项记 NOT MEASURED 并写因,⛔ 不记通过或「无旗」。
 - ① 包的 `typecheck` 可能 `exclude` 掉 `**/*.test.ts`;声称它覆盖你的测试前,用 `--listFiles` 数。
 - ② `MODULE_NOT_FOUND` 一类的 exit 1 不是红门禁:多半是脚本名或路径敲错,根本没进到门禁体。
 - 它与 `exit 99` / queue-timeout / `PREREQUISITE NOT MET` 同类:用真正的 `pnpm check:*` 命令重跑。
@@ -274,7 +274,7 @@ model: opus
 - driver/kernel 启动路径同此;那时跑 `--project integration` 并在报告里说明,否则写已声明给 CI。
 - 层是测出来的,不是列出来的:spawn CLI 或启动 driver 的测试按 `packages/cli/vitest-tiers.ts` 落。
 - 分区 pin `test/vitest-tiers-partition.test.ts` 在某个测试文件两层皆无或皆有时变红。
-- 用 `git push -u origin claude/issue-<n>-<slug>` 推上去,网络失败退避重试。
+- 用 `git push -u origin claude/issue-<n>-<slug>` 推上去,网络失败退避重试;pre-push 拒卡片 trailer。
 - Draft PR 指向 `main`,正文首行 `Fixes #<n>`;合并不应关卡时用 `Part of #<n>`,并说明留下哪一半。
 - ⛔ 永不 `Fixes` 一张还在决策箱的卡:合并会静默关掉它,而收件箱过滤只读 open。
 - ⛔ 不写否定式的关单句,它照样关掉点名的卡:解析器无视否定,只匹配关键词 + `#<n>`。
@@ -352,7 +352,7 @@ model: opus
 - 两种读法通向两种架构时同此;⛔ 不写投机代码。
 - 返回 `status: "needs_decision"`,把每个问题连同选项、成本与你的推荐写进 `open_questions`。
 - 升级分析的四轴决策框架由派发词携带,PM 从自己那份副本填入。
-- 已发布模板里它是 `rules/dev-template.md` 的 `{decision_frame}` 槽位。
+- 框架唯一副本在 pm-dispatch SKILL.md 〈升级与决策〉;派发词逐字粘贴,dev ⛔ 不留副本。
 - 每个方案逐轴分析,推荐也按那些轴给理由;派发词没带,停下向 PM 索取,⛔ 不自拟一套轴。
 - `main` 碎了、依赖未合并、CI 基础设施故障 ⇒ 报 `blocked` 附证据,重试到排除你的改动。
 

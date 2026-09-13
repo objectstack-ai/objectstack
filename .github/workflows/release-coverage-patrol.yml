@@ -102,6 +102,11 @@ on:
   # half-state-patrol.yml's `37 1,7,13,19` so two patrols never contend for the
   # same runner minute.
   schedule:
+    # ⚠️ Two readers, one fact. This value is also handed to the renderer as
+    # `PATROL_SCHEDULE` (the "Render the report" step below) so the anchor body
+    # can state the deadline its own heartbeat line is judged against (#17720).
+    # Change the cron and change that env in the same edit, or the anchor
+    # publishes a deadline nobody schedules.
     - cron: '19 4 * * *'
   workflow_dispatch: {}
   # Changes to the patrol itself get exercised before they merge — the same
@@ -238,6 +243,14 @@ jobs:
         env:
           ADVISORY_CODE: ${{ steps.sweep.outputs.advisory_code }}
           STRICT_CODE: ${{ steps.sweep.outputs.strict_code }}
+          # This workflow's own `cron:`, handed to the renderer so the anchor
+          # body states the cadence that makes its heartbeat line decidable
+          # (#17720). It lives HERE rather than in the script because the
+          # schedule is declared here: a second copy in the renderer would be a
+          # second place to drift from, and a drifted deadline reads exactly
+          # like a correct one. ⛔ Unset, the renderer says so in the body
+          # rather than assuming a period — it never guesses.
+          PATROL_SCHEDULE: '19 4 * * *'
           PROVENANCE: >-
             run [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
             · commit `${{ github.sha }}` · trigger `${{ github.event_name }}`

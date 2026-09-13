@@ -22,18 +22,37 @@
 //
 // ## The non-obvious half this file pins
 //
-// A password hash is not enough. better-auth 1.7 keys account identity on
-// `(issuer, accountId)`, so a credential row whose `issuer` is not the
-// local credential issuer is invisible to `findAccountByKey` — sign-in then
-// fails `INVALID_EMAIL_OR_PASSWORD` behind a "User not found" warn that points
-// at the `sys_user` row, which is fine, instead of at the account, which is not.
-// Four checklist items had that recorded as a knownGap, each rediscovering it.
-//
-// So this file asserts the ISSUER explicitly and then asserts the thing the
-// issuer exists for: a real sign-in over the real HTTP auth route, and a real
+// A password hash is not enough: a persona needs a better-auth ACCOUNT row that
+// `findAccountByKey` can actually resolve. This file asserts that the account
+// exists under the key sign-in resolves on, and then asserts the thing the
+// account exists for: a real sign-in over the real HTTP auth route, and a real
 // authenticated request driven with the returned token. Either half alone can
 // pass while the feature is broken — a correct-looking account nobody can use,
 // or a token minted for an identity that turns out to be the admin.
+//
+// ## [#17440] Why the ISSUER assertion went away, recorded rather than deleted
+//
+// This file used to assert `sys_account.issuer` explicitly, and it said why:
+//
+// > better-auth 1.7 keys account identity on `(issuer, accountId)`, so a
+// > credential row whose `issuer` is not the local credential issuer is
+// > invisible to `findAccountByKey` — sign-in then fails
+// > `INVALID_EMAIL_OR_PASSWORD` behind a "User not found" warn that points at
+// > the `sys_user` row, which is fine, instead of at the account, which is not.
+// > Four checklist items had that recorded as a knownGap, each rediscovering it.
+//
+// better-auth 1.7.3 removed the issuer-scoped account identity outright
+// (better-auth/better-auth#10909) and `sys_account.issuer` retired with it, so
+// that assertion no longer names a field — and the trap it guarded no longer
+// exists to be rediscovered a fifth time.
+//
+// ⛔ The assertion is REPLACED, not dropped. Its job was "the account is
+// resolvable under the key sign-in uses", and the key is now
+// `(provider_id, account_id)` — so that is what the case below asserts, with
+// the admin's own better-auth-minted account as the same positive control the
+// issuer case carried. The half that never depended on the key — a real
+// sign-in over the real HTTP auth route, driven with the returned token — is
+// untouched and is exactly as valuable as before.
 //
 // ## Why this boot passes `onEnable`
 //
@@ -99,22 +118,33 @@ describe('showcase demo personas are real logins (#9308 fixture 1)', () => {
     }
   });
 
-  it('each persona holds a credential account stamped with the SAME issuer better-auth minted for the admin', async () => {
+  it('each persona holds a credential account resolvable under the SAME key better-auth uses for the admin', async () => {
     const adminAccount = await credentialAccountOf(adminId);
-    const adminIssuer = adminAccount?.issuer;
-    // The control: better-auth really does stamp an issuer on the account it
-    // creates itself. Without this the assertions below could both be
-    // `undefined === undefined` and read as agreement.
-    expect(typeof adminIssuer, 'better-auth stamped an issuer on the dev admin credential').toBe('string');
-    expect(String(adminIssuer).length, 'and it is not empty').toBeGreaterThan(0);
+    // The control: better-auth really does write an account of this shape for
+    // the identity it creates itself. Without it the assertions below could
+    // all be `undefined === undefined` and read as agreement.
+    expect(adminAccount, 'better-auth wrote a credential account for the dev admin').toBeTruthy();
+    expect(adminAccount?.provider_id, "and it is keyed under the 'credential' provider").toBe('credential');
+    expect(
+      String(adminAccount?.account_id ?? ''),
+      "and its account id is the admin's own user id — the second half of the key",
+    ).toBe(adminId);
+
+    // [#17440] The retired column, asserted ABSENT. Without this the case
+    // would still pass on a runtime that kept writing a field the platform no
+    // longer declares, which is the shape a half-finished retirement takes.
+    expect(
+      Object.prototype.hasOwnProperty.call(adminAccount ?? {}, 'issuer'),
+      'sys_account.issuer retired with better-auth 1.7.3 — nothing should still be writing it',
+    ).toBe(false);
 
     for (const persona of [PHONE_DEMO_USER, AUDITOR_DEMO_USER]) {
       const account = await credentialAccountOf(persona.id);
       expect(account, `${persona.email} holds a credential account`).toBeTruthy();
       expect(
-        account?.issuer,
-        `${persona.email}'s credential issuer must equal the admin's — a different value is invisible to better-auth's findAccountByKey and sign-in fails INVALID_EMAIL_OR_PASSWORD`,
-      ).toBe(adminIssuer);
+        account?.provider_id,
+        `${persona.email}'s account must sit under the same provider the admin's does, or findAccountByKey never sees it`,
+      ).toBe(adminAccount?.provider_id);
       expect(account?.account_id, `${persona.email}'s account is keyed to its own user id`).toBe(persona.id);
     }
   });

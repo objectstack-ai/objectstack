@@ -9,6 +9,10 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
+  hasReservedComponentNamespace,
+  RETIRED_PAGE_COMPONENT_TYPES,
+} from '@objectstack/spec/ui';
+import {
   validateComponentTypes,
   COMPONENT_TYPE_UNKNOWN,
 } from './validate-component-types.js';
@@ -80,10 +84,9 @@ describe('leaves the declared vocabulary and the open arm alone', () => {
     // ComponentPropsMap rows that are NOT enum members: the measured
     // string-arm registrations that earned a row.
     'element:metadata_viewer',
-    // Retired at element grain with the row KEPT so the props gate dispatches
-    // the tombstones — the type stays accepted; the keys refuse (#9220 shape).
-    'element:filter',
-    'element:form',
+    // ⛔ The RETIRED types are deliberately NOT here — their kept
+    // `ComponentPropsMap` row makes them `isKnownComponentType`, and this rule
+    // used to read that as "accepted". They now have their own describe below.
     // The string-arm registration ledger (registered in objectui, row-less by
     // pinned decision).
     'record:line_items',
@@ -131,6 +134,96 @@ describe('leaves the declared vocabulary and the open arm alone', () => {
     expect(findings).toHaveLength(1);
     expect(findings[0].where).toBe('page "keyed_page" · nav:menue');
     expect(findings[0].message).toContain("'nav:menu'");
+  });
+});
+
+/**
+ * #17595 — the EXACT-name half of the retirement story.
+ *
+ * A retired type is `isKnownComponentType` on purpose (its `ComponentPropsMap`
+ * row is kept so the props door can dispatch the prescription), which is
+ * exactly what made this rule walk past it in silence while
+ * `PageComponentSchema.type` refuses the same name at the parse. Measured on
+ * both sides of the #17592 review: `element:filter` → no finding, before and
+ * after. This suite pins the report, and pins it BYTE-EQUAL to
+ * `RETIRED_PAGE_COMPONENT_TYPES` — the rule relays the spec's prescription, it
+ * does not author a second copy, so drift between the three doors is not
+ * expressible.
+ *
+ * Driven off the map rather than a restated list: a type retired tomorrow
+ * arrives here covered on the day it lands.
+ */
+describe('reports an EXACT retired component type, relaying the spec prescription (#17595)', () => {
+  // The `it.each` below is only a reading if the map is populated — a lit
+  // control for the loop itself, not decoration.
+  it('the retirement map is non-empty (control for the cases below)', () => {
+    expect(RETIRED_PAGE_COMPONENT_TYPES.size).toBeGreaterThan(0);
+  });
+
+  it.each([...RETIRED_PAGE_COMPONENT_TYPES.keys()])('flags %s', (type) => {
+    const findings = validateComponentTypes(page([{ type }]));
+    expect(findings).toHaveLength(1);
+    const f = findings[0];
+    expect(f.rule).toBe(COMPONENT_TYPE_UNKNOWN);
+    expect(f.severity).toBe('error');
+    expect(f.path).toBe('pages[0].regions[0].components[0].type');
+    expect(f.where).toBe(`page "p1" · ${type}`);
+    // Verbatim, not "contains": the relay is the contract.
+    expect(f.message).toBe(RETIRED_PAGE_COMPONENT_TYPES.get(type));
+    expect(f.hint).toContain(type);
+  });
+
+  /**
+   * The ordering pin. `RESERVED_COMPONENT_TYPE_NAMESPACES` is derived from the
+   * enum, and `user:profile` was the `user:` namespace's only member — so the
+   * namespace guard is FALSE for it and a retired-name check placed after that
+   * guard would report the two elements and stay silent on the member that has
+   * been refused longest. This asserts the reason, not just the outcome.
+   */
+  it('reaches `user:profile`, whose namespace left the reserved set with it', () => {
+    expect(hasReservedComponentNamespace('user:profile')).toBe(false);
+    const findings = validateComponentTypes(page([{ type: 'user:profile' }]));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toBe(RETIRED_PAGE_COMPONENT_TYPES.get('user:profile'));
+  });
+
+  it('reaches a retired type nested under a tab item, at its own path', () => {
+    const findings = validateComponentTypes(
+      page([
+        {
+          type: 'page:tabs',
+          properties: { items: [{ label: 'T', children: [{ type: 'element:form' }] }] },
+        },
+      ]),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe(
+      'pages[0].regions[0].components[0].properties.items[0].children[0].type',
+    );
+  });
+
+  it('stays silent on a source-authored page, like every other arm', () => {
+    const findings = validateComponentTypes({
+      pages: [
+        {
+          name: 'r1',
+          kind: 'react',
+          source: 'export default () => null',
+          regions: [{ name: 'main', components: [{ type: 'element:filter' }] }],
+        },
+      ],
+    });
+    expect(findings).toEqual([]);
+  });
+
+  it('does not re-author the prescription: no second copy of the guidance', () => {
+    // The hint is a located statement about the refusal, never a restatement
+    // of the map's own text (which would be the third copy the retirement
+    // explicitly forbids).
+    for (const [type, prescription] of RETIRED_PAGE_COMPONENT_TYPES) {
+      const f = validateComponentTypes(page([{ type }]))[0];
+      expect(f.hint).not.toContain(prescription);
+    }
   });
 });
 

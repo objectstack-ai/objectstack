@@ -105,13 +105,13 @@ import { validateSortableFields } from './validate-sortable-fields.js';
 import { validateListViewFieldRefs } from './validate-list-view-field-refs.js';
 import { validateObjectFieldRefs } from './validate-object-field-refs.js';
 import { validateActionNameRefs } from './validate-action-name-refs.js';
+import { validateActionDispatchContract } from './validate-action-dispatch-contract.js';
 import { validatePageFieldBindings } from './validate-page-field-bindings.js';
 import { validatePageVisualizationBindings } from './validate-page-visualization-bindings.js';
 import { validateChartBindings } from './validate-chart-bindings.js';
 import { validateDatasetReferences } from './validate-dataset-references.js';
 import { validateNavAccess } from './validate-nav-access.js';
 import { validateNavTargetRefs } from './validate-nav-target-refs.js';
-import { validateViewPageRefs } from './validate-view-page-refs.js';
 import { validateNavObjectServability } from './validate-nav-object-servability.js';
 import { validateTranslationReferences } from './validate-translation-references.js';
 import { validateTranslatableSections } from './validate-translatable-sections.js';
@@ -326,6 +326,21 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // an object's own field-name lists.
   { name: 'validateObjectFieldRefs', runtimeTypes: ['flow', 'object'], run: validateObjectFieldRefs },
   { name: 'validateActionNameRefs', run: validateActionNameRefs },
+  // [#17319] The same action name, one question on: `validateActionNameRefs`
+  // asks whether the name a list view's selection bar writes resolves to an
+  // action at all; this member asks whether the WIRING it resolves through
+  // matches the dispatch contract that action declares its body was written
+  // for. Placed directly after it so the two report together — a dead name
+  // first, then a live name delivered the wrong input shape.
+  //
+  // NO `runtimeTypes`, i.e. the frozen `flow` default, and for the same reason
+  // the member above it takes the default: it resolves against `stack.actions`,
+  // which no per-write snapshot carries. The failure it would take on a `view`
+  // crossing is the gentler one (this member returns early on an empty
+  // declaration map, so it would go silent rather than refuse), but a member
+  // that is structurally unable to judge the snapshot has no business being
+  // dispatched on it.
+  { name: 'validateActionDispatchContract', run: validateActionDispatchContract },
   { name: 'validatePageFieldBindings', run: validatePageFieldBindings },
   // [#14073] The same page, one question out. `validatePageFieldBindings`
   // above resolves the field NAMES an interface page writes; this member
@@ -364,24 +379,15 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // `action` is deliberately absent (validateActionNameRefs owns it) and so is
   // `component` (an unregistered ref renders a named diagnostic, not silence).
   { name: 'validateNavTargetRefs', run: validateNavTargetRefs },
-  // [#13216] The SAME reference — `{ type: 'page', pageName }` — one surface
-  // over: a `type: 'page'` list view mounting a published page. It restores the
-  // coverage its nav twin restores, when `defineStack`'s own check switches
-  // itself off, and carries the same advisory severity for the same reason (no
-  // curated cross-package page registry exists to tell "unresolved" from
-  // "provided by a package we cannot see").
-  //
-  // The first member crossed onto `view` snapshots for something that is not a
-  // field-existence question, and the crossing is the point rather than a
-  // bonus: the mount is authored through `PUT /api/v1/meta/view` by an agent
-  // that never runs a CLI (#13100's measured path), so a build-time-only rule
-  // would never reach its author. Safe to cross ONLY because the per-write
-  // snapshot now carries `pages` (`RuntimeStackContext.pages`, landed with this
-  // member) — without that collection the member would report every legitimate
-  // mount as dead, which is the missing-collection false-positive channel
-  // `runtimeTypes` exists to keep closed. Measured both ways in
-  // `runtime-gate.view-page-refs.test.ts`.
-  { name: 'validateViewPageRefs', runtimeTypes: ['flow', 'view'], run: validateViewPageRefs },
+  // [#17063] `validateViewPageRefs` stood HERE — the `{ type: 'page', pageName }`
+  // reference one surface over from the nav twin, on a `type: 'page'` list view.
+  // It was retired with the mount it resolved (ADR-0049 enforce-or-remove,
+  // maintainer ruling 2026-09-09 「撤」): a list view can no longer carry
+  // `pageName` at all, so there is no reference left to resolve. It was the only
+  // member whose `runtimeTypes` reached for `stack.pages`, and the live page
+  // universe left `RuntimeStackContext` in the same change — the widening and
+  // its retirement are one edit each, in the direction the runtime-gate docblock
+  // describes. The nav twin (`validateNavTargetRefs`, above) is untouched.
   // [#7912] The THIRD question about a nav entry, after "does the target
   // resolve?" (above) and "is it granted?" (`validateNavAccess`): can the
   // destination serve at all? An object's own `enable` block can make its list
@@ -397,8 +403,11 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // section authored with a `label` and no `name` renders a heading that
   // `_sections` (keyed by name) can never address, so neither the orphan check
   // nor the coverage walk can see it. A reference that cannot be written is
-  // still a reference question, and warning-only for the same reason its
-  // sibling is: one heading stays in the source locale, nothing breaks.
+  // still a reference question, and warning-only on its own reading — NOT on
+  // its sibling's any more: `translation-target-unknown` gates, because an
+  // orphan key is a confident-looking grep hit for a surface that no longer
+  // exists. Here the surface is real and present; only its heading stays in the
+  // source locale, so nothing is misdescribed and nothing breaks.
   { name: 'validateTranslatableSections', run: validateTranslatableSections },
   { name: 'validateFlowTemplatePaths', run: validateFlowTemplatePaths },
   { name: 'validateAiSurfaceAffinity', run: validateAiSurfaceAffinity },

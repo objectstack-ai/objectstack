@@ -2923,6 +2923,14 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // `source` receivers for the reason the entry above it records: a local
       // called `message` here would be excused into masking a genuine read.
       'shapeRefusal',
+      // [#17495] The blank-source half of the same structural refusal, and the
+      // same argument one line up: its keys are that helper's own
+      // `{ message, source }`, never metadata keys, and it is named to stay
+      // clear of the `message` / `source` receivers. The `safeParse` result it
+      // reads reuses the already-excused `verdict` name above — its keys there
+      // are `success` / `error`, SafeParseResult's own, so that excuse covers
+      // both locals for one reason and masks no metadata read either.
+      'blankRefusal',
       // [#14089] NOT a receiver at all — the tail of the `'./flow-variable-scope.js'`
       // import specifier, which this scan cannot tell from `scope.j…`. The two
       // entries above it in this set (`fields`, `guards`) are the same artefact
@@ -3943,14 +3951,182 @@ describe('structural condition shape (#15662)', () => {
       expect(condIssues({ edgeCondition: 'record.rating >= 4' }, "edge 'e1'")).toHaveLength(0);
     });
 
-    it('a whitespace-only STRING is untouched — ruled correct, not a defect', () => {
-      expect(condIssues({ decisionCondition: '   ' }, "node 'branch'")).toHaveLength(0);
-      expect(condIssues({ edgeCondition: '   ' }, "edge 'e1'")).toHaveLength(0);
+    it('a whitespace-only STRING is refused now (#17495) — the ruling MOVED, it was not deleted', () => {
+      // FLIPPED from "a whitespace-only STRING is untouched — ruled correct,
+      // not a defect". The pin was deliberate and it is kept in place, flipped,
+      // rather than removed: #15662 ruled the blank string correct on the
+      // ground that author time and run time AGREED about it — both admitted
+      // it. #15807 removed that ground at the edge door
+      // (`FlowEdgeSchema.condition` refuses a blank source at
+      // `FlowSchema.parse`), #17322 rebound the node door to the same rule at
+      // `registerFlow`, and #17495 is this pass catching up: a value the
+      // runtime refuses must not pass `objectstack validate`.
+      //
+      // It is NOT #15662's shape refusal that answers — a string is still a
+      // well-shaped condition — so this also pins that the two refusals stayed
+      // distinct, exactly as the registration-side pin does.
+      const node = condIssues({ decisionCondition: '   ' }, "node 'branch'");
+      expect(node).toHaveLength(1);
+      expect(node[0].severity).toBe('error');
+      expect(node[0].message).toBe(EVALUATED_EXPRESSION_SOURCE_REQUIRED);
+      expect(node[0].message.startsWith(STRUCTURAL_CONDITION_SHAPE_REFUSAL)).toBe(false);
+      expect(condIssues({ edgeCondition: '   ' }, "edge 'e1'")).toHaveLength(1);
+      // The EVALUATOR half of #15662's ruling is untouched and out of scope
+      // here: a stored blank condition still answers `false`. What changed is
+      // that it can no longer be authored past this pass.
     });
 
     it('a clean bare-CEL condition still passes', () => {
       expect(condIssues({ decisionCondition: 'record.rating >= 4' }, "node 'branch'")).toHaveLength(0);
     });
+  });
+});
+
+/**
+ * [#17495] The blank structural condition — `objectstack validate`'s half of
+ * the refusal #17322 landed in `registerFlow`.
+ *
+ * The gap this closes, measured on `main` at `d46deba195` with the runtime half
+ * already in: `validateStackExpressions` returned **0** for `condition: '   '`
+ * carried at BOTH structural slots (a start node's trigger gate and a decision
+ * node's predicate), and **0** for `''` — while `registerFlow` threw on the
+ * same value. An author ran validate, got a clean bill, deployed, and the flow
+ * never registered: each of the three boot paths in
+ * `service-automation/src/plugin.ts` wraps `registerFlow` in `try`/`catch`,
+ * logs one `warn` naming the flow, and continues. On a `start` node that key is
+ * the TRIGGER GATE, so the whole flow is armed by nothing.
+ *
+ * ⚠️ The rule is IMPORTED, never restated: `EvaluatedExpressionInputSchema` is
+ * the edge door's own schema (`FlowEdgeSchema.condition` composes it since
+ * #15807) and the one `registerFlow` asks, so the sentence below comes from the
+ * spec's published constant and the two doors cannot drift apart. A second
+ * hand-written notion of "blank" is precisely what the #15662 campaign built
+ * one shared refusal to prevent.
+ */
+describe('blank structural condition (#17495)', () => {
+  const objects = [
+    { name: 'crm_lead', fields: { rating: { type: 'number' }, status: { type: 'text' } } },
+  ];
+
+  const flowWith = (opts: { startCondition?: unknown; decisionCondition?: unknown; edgeCondition?: unknown }) => ({
+    objects,
+    flows: [{
+      name: 'gate_flow',
+      nodes: [
+        {
+          id: 'start', type: 'start',
+          config: {
+            objectName: 'crm_lead',
+            ...('startCondition' in opts ? { condition: opts.startCondition } : {}),
+          },
+        },
+        {
+          id: 'branch', type: 'decision',
+          config: { ...('decisionCondition' in opts ? { condition: opts.decisionCondition } : {}) },
+        },
+      ],
+      edges: [{
+        id: 'e1', source: 'start', target: 'branch',
+        ...('edgeCondition' in opts ? { condition: opts.edgeCondition } : {}),
+      }],
+    }],
+  });
+
+  /** Both structural NODE slots at once — the two the gap was measured over. */
+  const bothSlots = (condition: unknown) =>
+    validateStackExpressions(flowWith({ startCondition: condition, decisionCondition: condition }));
+
+  /**
+   * ⭐ The control trio, without which every zero below is void. Each drives
+   * the SAME probe over the SAME two slots with a value that is not blank, and
+   * each is answered by a DIFFERENT pass — so between them they prove the probe
+   * reaches the start node's trigger gate and the decision node's predicate,
+   * and that a clean condition is still clean.
+   */
+  describe('CONTROLS — the probe reaches both slots and still discriminates', () => {
+    it('RED CONTROL — the brace trap reports 2, one per slot (the CEL pass)', () => {
+      const control = bothSlots('{record.rating} >= 4');
+      expect(control).toHaveLength(2);
+      expect(control.map((i) => i.where.includes("node 'start'"))).toContain(true);
+      expect(control.map((i) => i.where.includes("node 'branch'"))).toContain(true);
+      for (const issue of control) expect(issue.message).toContain('template brace');
+    });
+
+    it('RED CONTROL — an `ast`-only envelope reports 2, one per slot (the SHAPE pass)', () => {
+      const control = bothSlots({ dialect: 'cel', ast: { kind: 'const', value: true } });
+      expect(control).toHaveLength(2);
+      for (const issue of control) {
+        expect(issue.message.startsWith(STRUCTURAL_CONDITION_SHAPE_REFUSAL)).toBe(true);
+      }
+    });
+
+    it('GREEN CONTROL — valid CEL on both slots reports 0', () => {
+      expect(bothSlots('record.rating >= 4')).toHaveLength(0);
+    });
+  });
+
+  it('refuses a blank condition on the START trigger gate and on the DECISION predicate', () => {
+    for (const blank of ['   ', '']) {
+      const issues = bothSlots(blank);
+      expect(issues, JSON.stringify(blank)).toHaveLength(2);
+      expect(issues.map((i) => i.where)).toEqual([
+        "flow 'gate_flow' · node 'start' (start) condition",
+        "flow 'gate_flow' · node 'branch' (decision) condition",
+      ]);
+      for (const issue of issues) expect(issue.severity).toBe('error');
+    }
+  });
+
+  it('refuses every spelling of blank on the same rule — tabs and newlines included', () => {
+    for (const blank of ['\t', '\n', ' \t\n ']) {
+      expect(bothSlots(blank), JSON.stringify(blank)).toHaveLength(2);
+    }
+  });
+
+  it('refuses a blank `source` INSIDE an envelope too — one seam, two keys, one rule', () => {
+    expect(bothSlots({ dialect: 'cel', source: '   ' })).toHaveLength(2);
+    // No dialect is still CEL at this slot (#4336), and still blank.
+    expect(bothSlots({ source: '' })).toHaveLength(2);
+  });
+
+  it('answers the EDGE door\'s own sentence, not a second one — the two doors do not drift', () => {
+    const [issue] = bothSlots('   ');
+    // The published constant, asserted from the spec's export rather than
+    // re-spelled here: this pass, `FlowSchema.parse` and `registerFlow` all say
+    // it because all three ask `EvaluatedExpressionInputSchema`.
+    expect(issue.message).toBe(EVALUATED_EXPRESSION_SOURCE_REQUIRED);
+    // The author's own text is the attribution, blank though it is.
+    expect(issue.source).toBe('   ');
+  });
+
+  it('refuses ONCE — the value-reading passes do not re-report it as an empty condition', () => {
+    expect(bothSlots('   ')).toHaveLength(2);
+  });
+
+  it('refuses it on an EDGE condition too — the third structural slot', () => {
+    // The edge door refuses this at `FlowSchema.parse` since #15807; on the raw
+    // input path `validateStackExpressions` walks, this pass is the gate.
+    const issues = validateStackExpressions(flowWith({ edgeCondition: '   ' }));
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toBe(EVALUATED_EXPRESSION_SOURCE_REQUIRED);
+  });
+
+  it('an ABSENT condition is still not a malformed one', () => {
+    expect(validateStackExpressions(flowWith({}))).toHaveLength(0);
+    expect(bothSlots(undefined)).toHaveLength(0);
+    expect(bothSlots(null)).toHaveLength(0);
+  });
+
+  it('a non-blank condition still earns its pre-existing verdict, never the blank one', () => {
+    // A shape violation is still the SHAPE refusal: the blank gate runs after
+    // it and must not swallow it.
+    const shaped = bothSlots(42);
+    expect(shaped).toHaveLength(2);
+    for (const issue of shaped) {
+      expect(issue.message.startsWith(STRUCTURAL_CONDITION_SHAPE_REFUSAL)).toBe(true);
+    }
+    // And a source that only LOOKS empty to a trimming reader is fine.
+    expect(bothSlots(' record.rating >= 4 ')).toHaveLength(0);
   });
 });
 

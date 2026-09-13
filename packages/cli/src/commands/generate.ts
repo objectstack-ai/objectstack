@@ -39,6 +39,7 @@ import {
 import { printHeader, printSuccess, printError, printInfo, printStep, createTimer, isReportedError, CLI_ALIAS } from '../utils/format.js';
 import { metadataFileName } from '../utils/metadata-file-name.js';
 import { findEmissionParseFailures } from '../utils/emitted-source-parses.js';
+import { findBarrelAliasRefusal } from '../utils/importable-binding.js';
 
 // ─── Metadata Type Templates ────────────────────────────────────────
 
@@ -966,6 +967,95 @@ async function runMetadataGeneration(type: string, name: string, flags: { dir?: 
       ));
       console.log(chalk.dim(
         '  and binds `orderLine`.',
+      ));
+      console.log('');
+      process.exit(1);
+    }
+
+    // ⛔ REFUSE a barrel alias no consumer can IMPORT BY NAME (#17410).
+    //
+    // The two checks above are each satisfied, correctly, by a name whose
+    // emitted binding is still unusable — and the comment on the parse check
+    // says why in its own words: a reserved word "is illegal as a `const`
+    // binding and legal as an `export { default as … }` alias". `class` is
+    // inside the charset (all lowercase letters), `const classViews:` parses,
+    // `export { default as class } from './class.view'` parses, and
+    // `import { class } from './views'` is a syntax error at the call site.
+    // So `os g view class` exited 0 and wrote a barrel entry that can never be
+    // named — the failure deferred into the author's own file, where it reads
+    // as their mistake.
+    //
+    // The question is the CONSUMER's, which is why it is asked here and not in
+    // the check above: that one asks whether the bytes we write parse, this one
+    // asks whether the binding those bytes publish can be imported. Both ask
+    // the compiler; neither states a rule of its own. ⛔ Not a third charset
+    // (the #16726 ruling forbids one, and none is added — no character is
+    // judged), and ⛔ not a sanitiser: it refuses and rewrites nothing, so the
+    // name the author wrote stays the name that lands.
+    //
+    // Placed LAST of the three on purpose. Each layer asks a strictly narrower
+    // question than the one before — legal characters, then parseable bytes,
+    // then an importable binding — and being last means it changes the verdict
+    // of neither: every name the layers in front already refuse still meets
+    // their diagnostic, with their wording, and `os g object class` is still
+    // the compiler's "not allowed as a variable declaration name" rather than
+    // this. It only ever narrows, and only for names all three would otherwise
+    // have admitted.
+    //
+    // Ahead of the dry-run branch for the same reason the parse check is: a
+    // preview that prints an unusable barrel and exits 0 is the same defect in
+    // preview form.
+    const barrelAlias = toCamelCase(name);
+    const aliasRefusal = await findBarrelAliasRefusal(barrelAlias);
+    if (aliasRefusal) {
+      printError('Refusing to generate — the barrel line this would write could not be imported');
+      console.log('');
+      console.log(`  ${chalk.dim('Name:')}       ${chalk.white(name)}`);
+      console.log(`  ${chalk.dim('Identifier:')} ${chalk.white(barrelAlias)}`);
+      console.log(`  ${chalk.dim('Barrel:')}     ${chalk.white(exportLine)}`);
+      console.log('');
+      console.log(`  ${chalk.white(path.join(dir, 'index.ts'))}`);
+      for (const diagnostic of aliasRefusal) {
+        console.log(chalk.dim(`    ${diagnostic}`));
+      }
+      console.log('');
+      console.log(chalk.dim(
+        `  That line parses — an export clause admits a reserved word as an alias — so`,
+      ));
+      console.log(chalk.dim(
+        `  it would have been written. What cannot be written is the other half: a`,
+      ));
+      console.log(chalk.dim(
+        `  consumer has to name it, and \`import { ${barrelAlias} } from …\` is what the`,
+      ));
+      console.log(chalk.dim(
+        '  compiler refused above. Nothing was written.',
+      ));
+      console.log('');
+      console.log(chalk.dim(
+        `  \`${barrelAlias}\` is a reserved word in this position. The rule is not this`,
+      ));
+      console.log(chalk.dim(
+        '  command\'s and it is not a charset: it is the compiler, asked whether the',
+      ));
+      console.log(chalk.dim(
+        '  binding your name publishes can be imported by that name. Reserved only in',
+      ));
+      console.log(chalk.dim(
+        '  some contexts — `type`, `as`, `from`, `async`, `get`, `set` — are accepted,',
+      ));
+      console.log(chalk.dim(
+        '  because a consumer can import those.',
+      ));
+      console.log('');
+      console.log(chalk.dim(
+        // ⛔ Deliberately NOT derived from what the author typed — a suggestion
+        // built from the refused name is the sanitiser this layer declines to
+        // be, arriving one keystroke later. Same reasoning as the #16726 gate.
+        `  Pick a name that survives as an import binding — \`${CLI_ALIAS} g ${type} order_line\``,
+      ));
+      console.log(chalk.dim(
+        '  works, and binds `orderLine`.',
       ));
       console.log('');
       process.exit(1);
@@ -2748,6 +2838,25 @@ async function runMigrationGeneration(configPath: string | undefined, flags: { o
 
 // ─── JSON Schema Generator ──────────────────────────────────────────
 
+/**
+ * Error messages for schema nodes that inherently have no JSON Schema form.
+ *
+ * ⛔ Deliberately the SAME single substring `packages/spec/scripts/build-schemas.ts`
+ * matches on, and for the same reason: zod names the offending node kind in the
+ * PREFIX (`Transforms …`, `Function types …`), so a list of kinds here would go
+ * stale against zod while the suffix is what all of them share. Anything this
+ * does NOT recognise is a real conversion failure, and every tier below
+ * re-raises it instead of degrading past it.
+ */
+const KNOWN_UNSUPPORTED_JSON_SCHEMA_PATTERNS = [
+  'cannot be represented in JSON Schema',
+];
+
+function isKnownUnsupportedJsonSchema(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  return KNOWN_UNSUPPORTED_JSON_SCHEMA_PATTERNS.some((p) => msg.includes(p));
+}
+
 async function runSchemaGeneration(flags: { output: string; dryRun?: boolean }): Promise<void> {
     printHeader('Generate Schema');
 
@@ -2759,9 +2868,64 @@ async function runSchemaGeneration(flags: { output: string; dryRun?: boolean }):
       const { ObjectStackDefinitionSchema } = await import('@objectstack/spec');
 
       printStep('Converting to JSON Schema...');
-      const jsonSchema = z.toJSONSchema(ObjectStackDefinitionSchema, {
-        target: 'draft-2020-12',
-      });
+
+      // [#17873] The three-tier ladder `packages/spec/scripts/build-schemas.ts`
+      // already runs for every schema it publishes, with the third tier spelled
+      // as `packages/metadata-protocol/src/protocol.ts`'s `unrepresentable: 'any'`
+      // rather than spec's union-branch projection (a spec-private helper).
+      //
+      // Before this, the call below was the ONE `toJSONSchema` call site in the
+      // repository that neither fell back nor used that convention — and
+      // `ObjectStackDefinitionSchema` has no JSON form in EITHER direction, so
+      // the bare call threw for every repository and every flag combination and
+      // the `catch` at the bottom of this function exited 1. The command could
+      // never reach its own `fs.writeFileSync`.
+      //
+      //   tier 1  output, strict — what this command asked for, kept first.
+      //   tier 2  input, strict  — an IDE schema describes what an author WRITES,
+      //                            and the input side of a transform pipe is
+      //                            plain data (build-schemas.ts carries the
+      //                            full argument).
+      //   tier 3  input, `unrepresentable: 'any'` — the callable leaves
+      //                            (`onEnable`, hook/function `handler`s) have no
+      //                            JSON form in any direction; widening THOSE
+      //                            LEAVES to "accepts anything" is what buys the
+      //                            other 40 members a published schema.
+      let jsonSchema: Record<string, unknown>;
+      let io: 'output' | 'input' = 'output';
+      let widenedUnrepresentable = false;
+      try {
+        jsonSchema = z.toJSONSchema(ObjectStackDefinitionSchema, {
+          target: 'draft-2020-12',
+        }) as Record<string, unknown>;
+      } catch (outputError) {
+        if (!isKnownUnsupportedJsonSchema(outputError)) throw outputError;
+        io = 'input';
+        try {
+          jsonSchema = z.toJSONSchema(ObjectStackDefinitionSchema, {
+            target: 'draft-2020-12',
+            io: 'input',
+          }) as Record<string, unknown>;
+        } catch (inputError) {
+          if (!isKnownUnsupportedJsonSchema(inputError)) throw inputError;
+          widenedUnrepresentable = true;
+          jsonSchema = z.toJSONSchema(ObjectStackDefinitionSchema, {
+            target: 'draft-2020-12',
+            io: 'input',
+            unrepresentable: 'any',
+          }) as Record<string, unknown>;
+        }
+      }
+
+      // Absence must be loud: a degraded artifact says so at the moment it is
+      // produced, rather than leaving an IDE user to discover that some subtree
+      // accepts anything.
+      if (io === 'input') {
+        printInfo('Converted in the authoring (input) direction — the output direction contains a transform with no JSON form');
+      }
+      if (widenedUnrepresentable) {
+        printInfo('Nodes with no JSON form (live callables) are published as unconstrained — they accept any value in this schema');
+      }
 
       // Add metadata
       const schema = {

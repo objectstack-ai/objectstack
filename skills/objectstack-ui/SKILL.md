@@ -46,7 +46,6 @@ App navigation, Dashboards, Reports, and Actions.
 | `map` | Geospatial records with `location` fields |
 | `chart` | Aggregate visualisation over the object (mini chart view) |
 | `tree` | Self-referencing hierarchy (tree-grid) |
-| `page` | Mounts a published Page (`pageName`); no rows of its own |
 
 ### Form Views
 

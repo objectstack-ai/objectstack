@@ -247,6 +247,24 @@ function isPathWithinPrefix(path: string, prefix: string): boolean {
 }
 
 /**
+ * The protocol-standard discovery route, and the canonical spelling of the API
+ * root (#17625).
+ *
+ * Read by exactly two sites — the root canonicalisation at the top of
+ * `dispatch()` and the discovery branch that serves it — so "which route does
+ * the bare root resolve to" is answered once. ⛔ Never re-spell either site as
+ * a literal: the whole defect #17625 repairs was two places disagreeing about
+ * what the empty path meant, and a third disagreement is one edit away if the
+ * value is typed twice.
+ *
+ * It is also the string the ADR-0069 gate sees for a root request, which is
+ * why the value has to be the ALLOW-LISTED route name rather than `'/'`:
+ * `ALLOW_ROUTES` in `packages/core/src/security/auth-gate.ts` carries
+ * `['discovery']` and nothing that matches a segment-less path.
+ */
+const DISCOVERY_ROUTE = '/discovery';
+
+/**
  * `services.search`'s in-process remedy string (#7939), kept out of the
  * shared `inProcessServiceMessage('search')` path on purpose: that helper's
  * wording ("Kernel-internal service — consumed in-process via the service
@@ -2498,6 +2516,48 @@ export class HttpDispatcher {
     async dispatch(method: string, path: string, body: any, query: any, context: HttpProtocolContext, prefix?: string): Promise<HttpDispatcherResult> {
         let cleanPath = path.replace(/\/$/, ''); // Remove trailing slash if present, but strict on clean paths
 
+        // ── The API root IS the discovery route, under a second spelling ──
+        // [#17625, the runtime half of #7898's ruling A] The trailing-slash
+        // strip above collapses BOTH root spellings the dispatcher accepts —
+        // `${prefix}/` (arriving as `'/'`) and `${prefix}` (arriving as `''`,
+        // the MSW/base-URL-stripped form) — onto `''`. That empty string then
+        // travelled through every cross-cutting stage below as a path that
+        // names no route, and only the discovery branch at the foot of this
+        // method knew it meant the API root. The gate does not read that
+        // branch, so the two disagreed the moment `isAuthGateAllowlisted`
+        // stopped exempting a falsy path (#7898): a gated session's
+        // `GET ${prefix}/` answered 403 instead of the discovery payload.
+        //
+        // WHY NORMALISING TO `'/'` IS NOT THE FIX, measured rather than
+        // assumed. `isAuthGateAllowlisted('/')` is `false` — `'/'` has no
+        // segments, so no `ALLOW_ROUTES` entry can match it — and the
+        // discovery branch tests `'/discovery'` or `''`, which `'/'` satisfies
+        // neither. `'' → '/'` therefore RELOCATES the 403 rather than removing
+        // it; both legs are pinned upstream in
+        // `packages/core/src/security/auth-gate.test.ts` ("does not exempt the
+        // dispatcher bare-root `cleanPath` — step 2 is #17625").
+        //
+        // So the root is canonicalised to the route it has always served
+        // instead, and the alias stops being a path that nothing recognises.
+        // ⛔ This is NOT a tolerance re-added to the allow-list: `packages/core`
+        // is untouched, `ALLOW_ROUTES` is unchanged, and the only input whose
+        // gate answer moves is the API root — which gains exactly the exemption
+        // `/discovery` already had, and gains it by BEING that route. Every
+        // other path, empty-but-not-root callers included, is unaffected: a
+        // caller that reaches the gate with no path at all is refused at the
+        // predicate, and that seam stays core's (`isAuthGateAllowlisted`
+        // fail-closed, `shouldDenyAnonymous` declaring the pathless case
+        // itself) — ⛔ not re-derived here.
+        //
+        // ⚠️ One spelling, read from one constant, deliberately: the branch
+        // below matches on `DISCOVERY_ROUTE` too, so the canonical form cannot
+        // drift from the route it canonicalises to. The branch keeps its `''`
+        // arm regardless — the scoped-URL strip further down re-creates `''`
+        // for `${prefix}/environments/<id>`, which is a different input class,
+        // is gated on its own scoped spelling BEFORE the strip, and is not
+        // touched by this card.
+        if (cleanPath === '') cleanPath = DISCOVERY_ROUTE;
+
         // ── Liveness carve-out — the ONE route family that runs no preamble ──
         // [#15910, maintainer ruling 2026-09-06 (decision batch #57), option C,
         // verbatim 「同意」] "Carve liveness out of the identity step. `/health`
@@ -2635,9 +2695,19 @@ export class HttpDispatcher {
         }
 
         // 0. Discovery Endpoint (GET /discovery or GET /)
-        // Standard route: /discovery (protocol-compliant)
-        // Legacy route: / (empty path, for backward compatibility — MSW strips base URL)
-        if ((cleanPath === '/discovery' || cleanPath === '') && method === 'GET') {
+        // Standard route: /discovery (protocol-compliant) — and, since #17625,
+        // the spelling the API root arrives here as: `${prefix}` / `${prefix}/`
+        // are canonicalised to `DISCOVERY_ROUTE` at the top of `dispatch()`, so
+        // the root reaches this branch under the same name the ADR-0069 gate
+        // allow-lists instead of as an empty path only this branch understood.
+        //
+        // The `''` arm is still LIVE and ⛔ must not be deleted as dead: the
+        // scoped-URL strip above re-creates `''` from
+        // `${prefix}/environments/<id>`, whose gate decision was already taken
+        // on its own scoped spelling before the strip ran. That is a different
+        // input class from the unscoped root and #17625 deliberately left it
+        // exactly as it was.
+        if ((cleanPath === DISCOVERY_ROUTE || cleanPath === '') && method === 'GET') {
              const info = await this.getDiscoveryInfo(prefix ?? '', context);
              return {
                  handled: true,

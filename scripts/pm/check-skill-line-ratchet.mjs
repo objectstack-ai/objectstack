@@ -733,7 +733,120 @@ export const CEILINGS = new Map([
   // line-neutral folds among this file's adjacent rule pairs, and re-wrap
   // funding is refused per the 2026-08-17 rule in any case. Landed count,
   // headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/platform-readings.md', 422],
+  // Raised 422 → 425 by the TENTH readings increment, again under the STANDING
+  // one-file exception quoted above rather than a fresh decision card, and again
+  // recorded as a `ruledRaises` record citing it. Spent at ONE line per
+  // deduplicated reading, each written in this file's voice: arming auto-merge on
+  // a PR whose checks are ALL complete enqueues AT ONCE — 28–60 s from the enable
+  // call to `added_to_merge_queue` measured here, 17–20 s enqueue→merge across a
+  // dozen PRs on the sibling repo the carrier card was filed from — so no window
+  // stands between arming and landing (+1); a call made before mergeability
+  // settles arms CLASSIC auto-merge WITHOUT enqueueing, and the settled call is
+  // the one that enqueues (+1); and a GitHub label description is capped at 100
+  // CHARACTERS, a longer one refused with `422`, measured on a maintainer ruling
+  // fixed verbatim at 133 characters and therefore unstorable (+1) = +3 exactly.
+  //
+  // ⚠️ The candidate set was FOUR, and the cut is the exception's own dedup
+  // condition doing its work rather than an author trimming. The fourth reading —
+  // that an `enable_pr_auto_merge` success line carrying an EMPTY method and
+  // timestamp is a real arming and not the documented graceful no-op — is already
+  // on the tree in a stronger and more general form, at the two rows reading
+  // 「`enable_pr_auto_merge` 对已 `mergeable_state: clean` 的 PR 照样成功,与工具描述
+  // 的优雅失败相反」 and 「回显两向不可靠,空回显不等于未挂上」. The carrier card's own
+  // measurement was taken against `:13–:14` alone, which carry the FIELD's
+  // instability rather than the ECHO's, so the reading it drew — that the
+  // disambiguation is absent — was falsified on the tree before any line was
+  // written. Candidates 4 / landed 3 / already present 1 / refused 0.
+  //
+  // ⛔ The carrier card's who-flips half lands NO line here in any form: it is
+  // closed by `references/landing-operations.md`, which already holds it, and a
+  // second copy is what the consolidation ruling above exists to refuse.
+  //
+  // Nothing was paid in place: the fourth increment MEASURED zero line-neutral
+  // folds among this file's adjacent rule pairs, and re-wrap funding is refused
+  // per the 2026-08-17 rule in any case. Landed count, headroom 0, same
+  // convention.
+  // Raised 425 → 449 by the ELEVENTH readings increment, again under the STANDING
+  // one-file exception quoted above rather than a fresh decision card, and again
+  // recorded as a `ruledRaises` record citing it. Its carrier was a FOLDED family
+  // of five cards, so the candidate set spans all five bodies and their grading
+  // comments; deduplicated against the file they land as 23 lines, one per
+  // reading, each written in this file's voice and each ≤ 120 bytes: the
+  // `needs:contract-review` label is a merge gate in its own right, `blocked`
+  // beside `mergeable: true` against a label-less sibling's `clean` (+1) and the
+  // two `mergeable_state` sequences a ready flip produces, with `unstable` named
+  // TRANSIENT rather than a failed check (+1); the queue ref's embedded parent is
+  // a SPECULATIVE base that need not be on `main` yet (+1); every REST write
+  // through the egress proxy needs an explicit `Content-Type: application/json`
+  // or the proxy answers 415 with nothing written (+1), with the discriminator
+  // that makes it the PROXY's refusal rather than GitHub's — the refusal's
+  // `documentation_url` (+1); a footerless body on the `PATCH /pulls` cell stores
+  // exactly one, which is that cell's prescription (+1); the MCP `issue_write`
+  // UPDATE path eats a trailing rule+footer block while the call returns an id
+  // and a url (+1); the bare-REST issue-body cell recognises a BLOCK, so a bare
+  // footer with no rule line above it is not one and a whole block is appended
+  // (+1), and the two cells left unmeasured are named as unmeasured (+1); a
+  // bracketed placeholder survives inside an inline code span, where an entity
+  // does not decode (+1); the wake relay's own escaping is not the artefact's, so
+  // a published body is judged from a `GET` (+1); a `failure` can be superseded
+  // by a LATER failure carrying a different diagnosis, so the latest-per-name
+  // collapse runs before any verdict (+1); an exit code is a field literal and
+  // the reading is the printed verdict line (+1), with the measured instance —
+  // `check-governed-merges` exit 3 is GOVERNED on `--test` and PREREQUISITE NOT
+  // MET elsewhere (+1); `check-half-states.mjs` does full-repo I/O even for
+  // `--help`, so an output file read early is EMPTY rather than clean (+1), and
+  // `nohup … &` inside a backgrounded tool call reports a false `exit 0` (+1); an
+  // unquoted heredoc delimiter expands every backtick in the body (+1) and
+  // `cmd | tail; echo $?` reads tail's status (+1); the PR-body `Check Changeset`
+  // gate reads the clause-② declaration tolerantly, per its own failure text
+  // (+1), while the claim-comment limb's axis is line-initial PLACEMENT (+1) with
+  // only a `#` heading and a mid-line key breaking it, verified by IMPORTING
+  // `readClause2Line` rather than counting contiguous strings (+1); and the claim
+  // marker itself, absent from this file until now — `CLAIM_COMMENT_MARKER` reads
+  // a line-beginning `Claim:`/`Claimed:` with optional whitespace or one `>` (+1)
+  // and a `**` or backtick before the word makes the comment invisible to the
+  // round-opening mutex readings and to the enqueue limb (+1); and the rider
+  // admitted in the family's own review — a bare-REST issue `PATCH` carrying
+  // `labels` and `type` in ONE body answers 500 and writes nothing, while the
+  // same two fields as two consecutive writes both answer 200 (+1) = +24 exactly.
+  //
+  // FOUR corrections are paid in place and buy nothing, each because a new cell
+  // contradicts the row rather than extending it: the success-sequence row, which
+  // keyed on `removed_from_merge_queue` being followed by `merged` within ~1 s
+  // when the two are measured arriving in the SAME second and in no fixed order;
+  // the issue-body `PATCH` row, whose 「总数恒一条」 holds for a full block and for
+  // no footer but NOT for a bare footer without its rule line; and the
+  // write-entities prescription, which is true of body prose and false inside an
+  // inline code span, where the entity does not decode and corrupts a verbatim
+  // quotation. The fourth is the reviewer's own, authorised in the family's
+  // review against seven draft PRs read across two repos: a draft's
+  // `mergeable_state` answers `clean`, `blocked` or `unknown` like any other
+  // PR's, and NOT the literal `draft` the row asserted it always returns.
+  //
+  // ⚠️ The candidate set was larger than what landed, and the cut is the
+  // exception's own dedup condition doing its work rather than an author
+  // trimming. Already present, no edit: the `POST /pulls` create leg, whose
+  // discriminator is the SENT body's tail and whose +90 append is already here in
+  // a stronger form (measured both directions on both channels) — the family's
+  // create-leg readings CORROBORATE that row rather than adding to it; the
+  // comment `PATCH` idempotence row; the comment-creation +58 append; the general
+  // 「exactly one footer, idempotent on its own form, a different spelling yields
+  // more」 rule, which this file already carries as the THREE-block reading for a
+  // body stacking the harness's two-line block over the footer; queue progress
+  // being read from the `event=merge_group` runs, and the queue's serial 15–30
+  // minutes per PR, which together are the whole of the 「a quiet `main` tip is
+  // not a stall」 reading; and the inert echoed `merge_method`, re-measured a
+  // fourth time this round and unchanged. Candidates 33 / landed 26 readings
+  // (24 new lines + 4 in-place corrections; two readings needed two lines each
+  // under the 120-byte cap) / already present 7 / refused 0. The last two of the
+  // 33 arrived in the family's review round — the rider card's 500 reading and
+  // the draft `mergeable_state` correction — and are counted here, not deferred.
+  //
+  // Nothing else was paid in place: the fourth increment MEASURED zero
+  // line-neutral folds among this file's adjacent rule pairs, and re-wrap funding
+  // is refused per the 2026-08-17 rule in any case. Landed count, headroom 0,
+  // same convention.
+  ['.claude/skills/pm-dispatch/references/platform-readings.md', 449],
   // Per-operation REST/GraphQL/git channel mapping — which fleet operation has
   // a REST twin (each row executed in a real session, provenance date carried
   // per row), the handful that are GraphQL-only, and the queue-routing
@@ -1066,7 +1179,24 @@ export const CEILINGS = new Map([
   // option A; recorded by the director on #16851 comment 5617189215, which also
   // rules the net budget of 6). AGENTS.md is not a CROSS_FILE_MOVES destination,
   // so no `ruledRaises` record applies. Landed count, headroom 0, same convention.
-  ['AGENTS.md', 1074],
+  //
+  // 1074 → 1075 (card #16973): the Post-Task Checklist's changeset rule gains the
+  // ruled exception — a bug fix in a released package takes `patch` UNLESS the PR
+  // declares `Clause-②: yes`, in which case at least `minor`. Until this line the
+  // two live authorities disagreed on the same PR — this item's sentence and the
+  // maintainer's own level ruling — and an author could satisfy either and cite it;
+  // the LEVEL axis of check-changeset-no-major.mjs has judged it the second way
+  // since #16055, so the text is being brought to the gate, not the gate to the
+  // text. +1 line against the ruled budget of 2, and forced: the item's paragraph
+  // measures 543 bytes of prose, which four lines cannot hold under the 120-byte
+  // rule above (4 × 120 = 480), so there is no lossless rewrap at any width.
+  // Maintainer ruling, verbatim and untranslated: 「其他同意」 (decision batch #111
+  // item 3, 2026-09-10, on analysis 5615846581 option A, forward-only; recorded by
+  // the director on #16973 comment 5617188486, which also rules the net budget of 2
+  // and holds the gate's LEVEL axis unchanged). AGENTS.md is not a CROSS_FILE_MOVES
+  // destination, so no `ruledRaises` record applies. Landed count, headroom 0, same
+  // convention.
+  ['AGENTS.md', 1075],
   // #9965: root CLAUDE.md is the other repo-root instruction file — same read
   // path (every seat session), same governance (Prime Directive #14). It is
   // structurally growth-prone in the way the ratchet is built for: it exists to
@@ -1285,6 +1415,40 @@ export const CROSS_FILE_MOVES = new Map([
             + '逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排」',
           date: '2026-09-10',
           delta: 3,
+        },
+        {
+          // The TENTH increment, under the same STANDING exception — the same
+          // words again, for the same reason: a record that quotes no ruling is
+          // RED and each record stands alone. The +3 is accounted for line by
+          // line beside this entry's ceiling above, and the exception's own
+          // conditions (per-item verification and the candidate / landed /
+          // already-present / refused counts) are carried by the raising PR's
+          // dedup table and the seat's ACCEPT.
+          ruling:
+            'the standing one-file exception for'
+            + ' `.claude/skills/pm-dispatch/references/platform-readings.md` — pm-dispatch'
+            + ' SKILL.md, verbatim and untranslated: 「唯一例外:`platform-readings.md`'
+            + ' 增量抬上限到落地行数,免决策卡,记 `ruledRaises` 引常设裁决。条件:席位验收评论'
+            + '逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排」',
+          date: '2026-09-10',
+          delta: 3,
+        },
+        {
+          // The ELEVENTH increment, under the same STANDING exception — the same
+          // words again, for the same reason: a record that quotes no ruling is
+          // RED and each record stands alone. The +24 is accounted for line by
+          // line beside this entry's ceiling above, and the exception's own
+          // conditions (per-item verification and the candidate / landed /
+          // already-present / refused counts) are carried by the raising PR's
+          // dedup table and the seat's ACCEPT.
+          ruling:
+            'the standing one-file exception for'
+            + ' `.claude/skills/pm-dispatch/references/platform-readings.md` — pm-dispatch'
+            + ' SKILL.md, verbatim and untranslated: 「唯一例外:`platform-readings.md`'
+            + ' 增量抬上限到落地行数,免决策卡,记 `ruledRaises` 引常设裁决。条件:席位验收评论'
+            + '逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排」',
+          date: '2026-09-12',
+          delta: 24,
         },
       ],
       sources: [

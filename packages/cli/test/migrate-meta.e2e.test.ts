@@ -510,15 +510,32 @@ export default {
   });
 
   it("names this build's protocol major, in majors", async () => {
-    const stdout = await runMeta(['--from', String(PROTOCOL_MAJOR)], labelDir);
+    // `--to` is pinned to PROTOCOL_MAJOR deliberately: the unqualified default
+    // is CHAIN_TERMINUS_MAJOR (the highest major ANY migration step is
+    // registered for), which legitimately runs ahead of PROTOCOL_MAJOR once a
+    // future major's steps are pre-authored (see migrate/meta.ts). This case
+    // is specifically the "already at this runtime's own major" no-op chain,
+    // so it names both ends explicitly rather than riding a default that is
+    // designed to drift.
+    const stdout = await runMeta(['--from', String(PROTOCOL_MAJOR), '--to', String(PROTOCOL_MAJOR)], labelDir);
     expect(stdout).toContain(
       `Chain:  protocol ${PROTOCOL_MAJOR} → ${PROTOCOL_MAJOR} (this runtime implements protocol ${PROTOCOL_MAJOR})`,
     );
   }, 120_000);
 
   it('prints no padded protocol semver in the human output, under any label', async () => {
+    // Deliberately NOT pinning `--to` here: the default climbs to
+    // CHAIN_TERMINUS_MAJOR, which is exactly what exercises the real risk
+    // surface this test guards — a hop's semantic `why:` prose (which may
+    // legitimately CITE a past release's bare semver, e.g. "measured on
+    // 17.0.0 GA …") printed verbatim into stdout. The instrument must not
+    // confuse that citation with the mislabelled-runtime defect the docblock
+    // above describes, so it targets the version-label surface (the `Chain:`
+    // line / the word "runtime") instead of the whole transcript.
     const stdout = await runMeta(['--from', String(PROTOCOL_MAJOR)], labelDir);
-    expect(stdout).not.toContain(PROTOCOL_VERSION);
+    const chainLine = stdout.split('\n').find((line) => line.includes('Chain:'));
+    expect(chainLine, 'the Chain: line must be present to assert against').toBeTruthy();
+    expect(chainLine).not.toContain(PROTOCOL_VERSION);
     expect(stdout).not.toMatch(/runtime \d+\.\d+\.\d+/);
   }, 120_000);
 

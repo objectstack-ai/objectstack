@@ -48,11 +48,18 @@ name: Platform-Checklist Watchdog
 # directions:
 #
 #   * Their heartbeat is what tells a reader the patrol is still alive — a
-#     `Swept` timestamp that stops advancing is how a dead caller is noticed.
-#     This workflow has no such tell, so a silent death here reads exactly like
-#     a clean checklist. What stands in for it: this job goes RED (and the
-#     Actions run list shows it) whenever the gate could not run or the report
-#     could not be delivered, and the run history itself is the record.
+#     `Swept` timestamp that stops advancing past the cadence the same line
+#     states is how a dead caller is noticed (#17720: the cadence is rendered
+#     because 「stalled」 is undecidable without it, and the four patrols here
+#     differ by 4×). ON GREEN this workflow has no such tell at all, because it
+#     has no card, so a silent death on a green tree reads exactly like a clean
+#     checklist. What stands in for it: this job goes RED (and the Actions run
+#     list shows it) whenever the gate could not run or the report could not be
+#     delivered, and the run history itself is the record. A card that DOES
+#     stand carries the heartbeat and its deadline like the other three — with
+#     the one ambiguity this workflow's shape implies, stated in the card
+#     itself: a stalled `Swept` there means the caller died OR the gate went
+#     green, and nothing closes the card either way.
 #   * In exchange, a green tree has no standing issue to prune, and the card the
 #     devx seat grades is minted only when there is something to grade.
 #
@@ -96,6 +103,12 @@ on:
     # workflows queue behind everyone else's `:00` cron — and off the three
     # sibling patrols' minutes, so two patrols never contend for the same runner
     # minute.
+    #
+    # ⚠️ Two readers, one fact. This value is restated as `PATROL_SCHEDULE` in
+    # the `env:` block below, where the report step computes the deadline the
+    # card's own `Swept` line is judged against (#17720). Change the cron and
+    # change that env in the same edit, or the card publishes a deadline nobody
+    # schedules.
     - cron: '51 2 * * *'
   # The manual fire, and the smoke test this card exits on.
   workflow_dispatch: {}
@@ -154,6 +167,18 @@ env:
   # cards this watchdog mints. Never rewritten on a refresh — grading is the
   # devx seat's and a refresh must not undo it.
   ANCHOR_ROUTING_LABELS: 'pm:queue,tooling'
+  # This workflow's own `cron:`, restated here so the report step can state the
+  # cadence that makes the card's `Swept` line decidable (#17720). The three
+  # sibling patrol anchors carry the same heartbeat reading and one of them
+  # fires every six hours, so a reader who carries a cadence over from a
+  # neighbour is wrong by 4× — which is why each anchor states its own rather
+  # than leaving the reader to go and read a workflow file.
+  #
+  # ⛔ A literal, not a parse of this file: the report body is inline
+  # `github-script` that no test reaches, so the cheapest honest route is the
+  # one with the least inline logic. The cost is the restatement above, and the
+  # comment at the `cron:` is what pays it.
+  PATROL_SCHEDULE: '51 2 * * *'
 
 jobs:
   watchdog:
@@ -313,12 +338,36 @@ jobs:
               ? (closed.find((i) => i.state_reason !== 'duplicate') ?? null)
               : null;
 
+            // The cadence that makes the `Swept` line below decidable (#17720).
+            // `PATROL_SCHEDULE` is this workflow's own `cron:`, restated in the
+            // `env:` block beside the other single-sourced card strings.
+            // ⛔ Only the daily `M H * * *` form is computed; anything else says
+            // so in the body rather than publishing a deadline derived from a
+            // schedule this did not read.
+            const sweptAt = new Date();
+            const schedule = String(process.env.PATROL_SCHEDULE ?? '').trim();
+            const cronFields = /^(\d{1,2}) (\d{1,2}) \* \* \*$/.exec(schedule);
+            let expectation = `⚠️ expected cadence UNSTATED — PATROL_SCHEDULE is \`${schedule}\`, which is not the daily \`M H * * *\` form this step computes a deadline from`;
+            if (cronFields && Number(cronFields[1]) <= 59 && Number(cronFields[2]) <= 23) {
+              const next = new Date(sweptAt);
+              next.setUTCHours(Number(cronFields[2]), Number(cronFields[1]), 0, 0);
+              if (next <= sweptAt) next.setUTCDate(next.getUTCDate() + 1);
+              expectation = `expected every 24h while this card stands (cron \`${schedule}\` UTC) · next by ${next.toISOString().slice(0, 16)}Z`;
+            }
+
             const body = [
               `${marker} — machine-findable marker for this generated view. ⛔ Do not delete this line: it is how the watchdog finds this card instead of filing a new one every day.`,
               '',
               `# \`check:platform-checklist\` is RED on \`main\``,
               '',
-              `_Swept ${new Date().toISOString()} · [run log](${runUrl}) · commit \`${process.env.GITHUB_SHA}\` · trigger \`${context.eventName}\` · gate exit ${gateExit}._`,
+              `_Swept ${sweptAt.toISOString()} · ${expectation} · [run log](${runUrl}) · commit \`${process.env.GITHUB_SHA}\` · trigger \`${context.eventName}\` · gate exit ${gateExit}._`,
+              '',
+              'The `Swept` line above is this watchdog\'s heartbeat, and it states the cadence that makes',
+              '「stalled」 decidable: while the gate stays red this card is refreshed on that schedule, so a',
+              'timestamp still sitting there past the `next by` deadline means either the standing caller',
+              'died or the gate went green — this watchdog files nothing and closes nothing on green, so',
+              'both readings end at this card. ⛔ Do not carry a cadence over from a sibling patrol anchor:',
+              'they differ by up to 4× and each states its own.',
               '',
               'The platform test checklist gate is red. It is **not** wired into per-PR CI (a standing',
               'maintainer decision — the checklist is a QA ledger, not a code gate), so this card is the',

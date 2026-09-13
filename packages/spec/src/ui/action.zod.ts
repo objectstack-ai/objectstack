@@ -13,6 +13,13 @@ import { FieldType } from '../data/field.zod';
 import { MULTI_CAPABLE_TYPES, isMultiValueField } from '../data/field-value.zod';
 import { checkLiteralDefaultValue } from '../data/default-value-shape';
 import { isActionParamValuePresent } from './action-params.zod';
+// #17319 — the action's `execution` declaration is the bulk def's OWN enum,
+// imported rather than re-declared: the maintainer ruling (decision batch #121
+// item 3) admits no third spelling of the two dispatch contracts, and sharing
+// the schema object is the only form of that which cannot drift. Imported
+// file-directly for the reason the neighbours above are: `bulk-action.zod`
+// reaches only `shared/` + `data/`, so it cannot close a cycle back to `ui/`.
+import { BulkActionExecutionSchema } from './bulk-action.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { ExpressionInputSchema } from '../shared/expression.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
@@ -857,6 +864,15 @@ const actionObject = () => strictObject({
     // author borrows for "the field values to write" (`values`, `set`, or the
     // verb itself) all rename onto the two declarative-update keys.
     op: 'operation', values: 'patch', set: 'patch', update: 'patch',
+    // #17319 — the words an author reaches for when declaring which bulk
+    // dispatch contract the body was written for. The card that filed the gap
+    // proposed `dispatch`, so that spelling is the one most likely to be
+    // typed; the canonical key is `execution`, the bulk def's own.
+    // ⛔ NOT `mode`: the def aliases `mode` onto `execution`, but on an ACTION
+    // `mode` is a DECLARED key (create/edit/delete/custom), so renaming it here
+    // would eat a real declaration.
+    dispatch: 'execution', dispatchContract: 'execution',
+    bulkExecution: 'execution', bulkDispatch: 'execution',
     // #5013 — `body` is DECLARED on this schema (the `script` action's L1/L2
     // hook body), so an alias filed under it could never run; `payload` is the
     // live spelling that still needs pointing at `bodyExtra`.
@@ -1116,6 +1132,62 @@ const actionObject = () => strictObject({
    * any user edit.
    */
   patch: z.record(z.string(), z.unknown()).optional().describe("For `operation: 'update'` — static field values written to the current record, merged UNDER the user-supplied `params` so a fixed value can be declared without exposing it in the dialog. Written on the data plane as the caller: object permissions, hooks and validations fire as for a user edit. Refused on an action without `operation: 'update'` (it would be silently dropped)."),
+
+  /**
+   * The **bulk dispatch contract this action's body is written for** (#17319,
+   * maintainer ruling, decision batch #121 item 3, 2026-09-12).
+   *
+   * A list view can wire the same declared action two ways, and the two hand
+   * the SAME body opposite input:
+   *
+   *  - `bulkActions: ['<name>']` — the bare-string form. The renderer promotes
+   *    the action to a def and dispatches it **once per selected row**; each
+   *    call carries that row's `recordId` and **no** `_selectedIds`.
+   *  - a `bulkActionDefs` entry with `execution: 'aggregate'` — **one**
+   *    dispatch for the whole selection; every id arrives in the builtin
+   *    `params._selectedIds` and there is **no** `recordId`.
+   *
+   * Until this key existed the action declared neither, so both mismatches
+   * failed quietly and in opposite directions: an aggregate body wired
+   * bare-string reads `_selectedIds` as `undefined`, falls into its
+   * single-record branch and reports success for one row out of ten; a
+   * per-record body wired aggregate finds no `recordId` and throws its own
+   * "nothing selected", which reads like a selection bug. **Nothing caught
+   * either**: the ADR-0104 strict params gate cannot, because `_selectedIds`
+   * and `recordId` are both `ACTION_PARAM_BUILTIN_KEYS` — admitted
+   * without a declaration, and never declarable — so the one key that decides
+   * the contract is exactly the key that gate is structurally blind to
+   * (pinned in `action-params.test.ts`). The cost was paid in prose: the
+   * reference CRM carried the distinction in hand-copied comment blocks, the
+   * largest surviving constraint block on its action surface.
+   *
+   * **The vocabulary is `bulkActionDefs`' own, deliberately — `execution`,
+   * `'perRecord' | 'aggregate'`, the very {@link BulkActionExecutionSchema}
+   * the def parses with.** Not a second spelling of one idea: an action and a
+   * def name the same two dispatches with the same word and the same two
+   * values, the way `operation` / `patch` already mirror the def's
+   * declarative update. Importing the def's enum rather than re-declaring it
+   * is what makes "no third spelling" structural instead of remembered.
+   *
+   * **Optional, and there is NO silent default** (the ruling's
+   * 「创业阶段不渐进」). An action that omits it is *undeclared*, not
+   * defaulted to either contract, and `@objectstack/lint` refuses nothing —
+   * undeclared is also the honest state of a body written to serve BOTH
+   * contracts (it reads `recordId` and `_selectedIds` and copes with either),
+   * which is why no third enum member was added for it. Existing actions get
+   * their declaration from the ADR-0087 semantic migration entry
+   * `action-bulk-dispatch-contract-undeclared`, which derives it from the
+   * view wirings where they are unambiguous and hands back a structured TODO
+   * where one action is wired both ways.
+   *
+   * ENFORCEMENT: authoring-time, by `@objectstack/lint`'s
+   * `validateActionDispatchContract` (`action-dispatch-contract-mismatch`,
+   * severity `error`) — a list view that wires a declared action under the
+   * OTHER contract is refused, naming the action, the view and both
+   * contracts. The key changes no dispatch by itself; it is the declaration
+   * the refusal is measured against.
+   */
+  execution: BulkActionExecutionSchema.optional().describe("The bulk dispatch contract this action's BODY is written for, in `bulkActionDefs`' own vocabulary: 'perRecord' = one dispatch per selected row carrying that row's `recordId` (the view's `bulkActions: ['<name>']` bare-string form); 'aggregate' = ONE dispatch for the whole selection carrying every id in `params._selectedIds` (a `bulkActionDefs` entry with `execution: 'aggregate'`). Optional with NO default — omit it only when the body genuinely serves both. A list view wiring a declared action under the other contract is refused by `@objectstack/lint` (`action-dispatch-contract-mismatch`)."),
 
   /**
    * [REMOVED in protocol 17 — #3855] The deprecated alias of `target`.

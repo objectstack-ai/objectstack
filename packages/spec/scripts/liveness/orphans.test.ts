@@ -15,6 +15,10 @@ import { findOrphanEntries, ORPHAN_GUIDANCE } from './orphans.mts';
 /** No property is a container unless a test says so. */
 const noChildren = () => null;
 
+/** A container map keyed by the dotted path the scan asks about. */
+const containers = (map: Record<string, readonly string[]>) => (path: readonly string[]) =>
+  map[path.join('.')] ?? null;
+
 describe('findOrphanEntries — rows it must catch', () => {
   it('catches a top-level row whose key left the schema (the strict-removal shape)', () => {
     const orphans = findOrphanEntries({
@@ -31,7 +35,7 @@ describe('findOrphanEntries — rows it must catch', () => {
       type: 'report',
       props: { layout: { children: { columns: { status: 'live' }, aria: { status: 'dead' } } } },
       shapeKeys: ['layout'],
-      childKeysOf: (key) => (key === 'layout' ? ['columns'] : null),
+      childKeysOf: containers({ layout: ['columns'] }),
     });
     expect(orphans).toEqual([{ key: 'report/layout.aria', level: 'child' }]);
   });
@@ -45,9 +49,40 @@ describe('findOrphanEntries — rows it must catch', () => {
         list: { children: { type: { status: 'live' }, responsive: { status: 'dead' } } },
       },
       shapeKeys: ['list'], // `gone` and `alsoGone` both left the schema
-      childKeysOf: (key) => (key === 'list' ? ['type'] : null),
+      childKeysOf: containers({ list: ['type'] }),
     });
     expect(orphans.map((o) => o.key)).toEqual(['view/gone', 'view/alsoGone', 'view/list.responsive']);
+  });
+
+  it('catches an orphan at DEPTH TWO — the level the scan used to stop above', () => {
+    // Before the walk recursed, a nested `children` map was ignored wholesale,
+    // so a row naming a key its container never had was not an orphan, not
+    // unclassified, and not printed. The scan has to follow the walk down.
+    const orphans = findOrphanEntries({
+      type: 'dashboard',
+      props: {
+        widgets: {
+          children: {
+            chartConfig: { children: { stacked: { status: 'live' }, sparkline: { status: 'dead' } } },
+          },
+        },
+      },
+      shapeKeys: ['widgets'],
+      childKeysOf: containers({ widgets: ['chartConfig'], 'widgets.chartConfig': ['stacked'] }),
+    });
+    expect(orphans).toEqual([{ key: 'dashboard/widgets.chartConfig.sparkline', level: 'child' }]);
+  });
+
+  it('keeps descending past a child that matches, to any depth the ledger declares', () => {
+    const orphans = findOrphanEntries({
+      type: 'dashboard',
+      props: {
+        a: { children: { b: { children: { c: { children: { gone: { status: 'live' } } } } } } },
+      },
+      shapeKeys: ['a'],
+      childKeysOf: containers({ a: ['b'], 'a.b': ['c'], 'a.b.c': ['kept'] }),
+    });
+    expect(orphans).toEqual([{ key: 'dashboard/a.b.c.gone', level: 'child' }]);
   });
 });
 
@@ -105,6 +140,28 @@ describe('findOrphanEntries — cases it must stay quiet on', () => {
       },
       shapeKeys: ['role'],
       childKeysOf: () => ['definitely', 'not', 'these'],
+    });
+    expect(orphans).toEqual([]);
+  });
+});
+
+describe('findOrphanEntries — depth, and where it stops', () => {
+  it("does NOT list an orphan's own subtree — the parent row is the single fix", () => {
+    const orphans = findOrphanEntries({
+      type: 'dashboard',
+      props: { widgets: { children: { ghost: { children: { x: { status: 'live' }, y: { status: 'dead' } } } } } },
+      shapeKeys: ['widgets'],
+      childKeysOf: containers({ widgets: ['real'] }),
+    });
+    expect(orphans).toEqual([{ key: 'dashboard/widgets.ghost', level: 'child' }]);
+  });
+
+  it('defers a non-container at depth two to the forward pass, exactly as at depth one', () => {
+    const orphans = findOrphanEntries({
+      type: 'dashboard',
+      props: { widgets: { children: { title: { children: { nope: { status: 'dead' } } } } } },
+      shapeKeys: ['widgets'],
+      childKeysOf: containers({ widgets: ['title'] }), // `title` is a string
     });
     expect(orphans).toEqual([]);
   });

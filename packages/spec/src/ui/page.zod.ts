@@ -20,6 +20,7 @@ import {
 
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
+import { ruleArrayFilterError } from './filter-rule-array';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 
 /**
@@ -222,7 +223,12 @@ export const ElementDataSourceSchema = lazySchema(() => strictObject({
    * form is refused at `filter`; the migration prescription is the
    * `element-data-source-and-object-block-filter-rule-array` semantic entry.
    */
-  filter: z.array(ViewFilterRuleSchema).optional()
+  filter: z.array(ViewFilterRuleSchema, {
+    error: ruleArrayFilterError({
+      surface: 'this element data source',
+      migration: 'element-data-source-and-object-block-filter-rule-array',
+    }),
+  }).optional()
     .describe('Additional filter criteria — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in ComponentPropsMap shares; AND-combined with the filter of the named view. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array`'),
   sort: z.array(SortItemSchema).optional().describe('Sort order'),
   limit: z.number().int().positive().optional().describe('Max records to display'),

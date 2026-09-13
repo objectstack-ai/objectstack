@@ -73,4 +73,4 @@ Also corrected: the vocabulary docblock described the `ComponentPropsMap` row
 set as a superset of the enum by "exactly" the string-arm registrations plus the
 two tombstoned elements — one member short since `user:profile` joined it.
 
-<!-- adr-0087: not-required (already-registered element-filter-removed, element-form-removed) both elements' retirement is already in the protocol-18 ledger — these two conversions plus all twelve retired-key tombstones; this change registers no new retirement, it closes the node-level half of those same entries and reuses their prescriptions verbatim -->
+<!-- adr-0087: registered element-filter-and-form-node-refused -->

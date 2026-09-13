@@ -32,6 +32,12 @@ describe('reference-integrity suite — membership', () => {
       // members with nothing to inspect on the click path.
       'validateObjectFieldRefs',
       'validateActionNameRefs',
+      // [#17319] The same action name, one question on: the name-ref member
+      // above asks whether the selection bar's name resolves to an action; this
+      // one asks whether the wiring it resolves through matches the dispatch
+      // contract that action declares. Placed beside it so a dead name and a
+      // live-but-mis-wired one report together.
+      'validateActionDispatchContract',
       'validatePageFieldBindings',
       // [#14073] The same page, one question out: the BINDING behind each
       // visualization `appearance.allowedVisualizations` whitelists, resolved
@@ -45,10 +51,10 @@ describe('reference-integrity suite — membership', () => {
       'validateDatasetReferences',
       'validateNavAccess',
       'validateNavTargetRefs',
-      // [#13216] The conscious edit this written-out list exists to force: the
-      // page reference on a `type: 'page'` list view, placed beside the nav
-      // twin that asks the identical question one surface over.
-      'validateViewPageRefs',
+      // [#17063] `validateViewPageRefs` sat HERE, beside the nav twin that asks
+      // the identical question one surface over. It left with the `type: 'page'`
+      // list-view mount it resolved — this written-out list is exactly where a
+      // removal has to be argued, the same way an addition is.
       'validateNavObjectServability',
       'validateTranslationReferences',
       'validateTranslatableSections',

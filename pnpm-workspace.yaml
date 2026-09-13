@@ -183,7 +183,7 @@ overrides:
   # `createOAuthAccountIssuer` and the whole `account.issuer` column from
   # `@better-auth/core/db` (better-auth/better-auth#10909 rolled the
   # issuer-scoped account identity back), and `@objectstack/plugin-auth`
-  # statically imports both names. A caret cannot express "the export surface
+  # statically imported both names. A caret cannot express "the export surface
   # we compile against", so `^` here means the tested version and the shipped
   # version are free to differ — which is exactly what happened: this
   # lockfile held 1.7.2 and every CI job was green while every consumer of
@@ -191,14 +191,21 @@ overrides:
   # all. The selectors keep their `<2.0.0` major boundary, so lifting the
   # family later is still a target-only edit.
   #
+  # The target IS 1.7.3 since #17440: the platform adopted the vendor's
+  # rollback rather than owning a fork of a model its author abandoned, so
+  # nothing here imports the two deleted names any more and `sys_account`
+  # no longer carries the column they served. What did NOT change is the rule
+  # above — the exact target stays exact for the reason 1.7.3 demonstrated,
+  # and 1.7.4 (published) is the next reviewed one-line lift, not a float.
+  #
   # These targets are held EQUAL to the ranges `@objectstack/plugin-auth`
   # declares (`scripts/check-override-consistency.mjs` cross-checks that the
   # declared range admits the target; `pnpm check:vendor-export-contract`
   # requires the declared range to be exact and to export what we import).
   # Move all eleven together, in one commit, or better-auth init throws and
   # every auth endpoint 500s.
-  'better-auth@<2.0.0': '1.7.2'
-  '@better-auth/core@<2.0.0': '1.7.2'
+  'better-auth@<2.0.0': '1.7.3'
+  '@better-auth/core@<2.0.0': '1.7.3'
   # scim carries the family's target — see the @better-auth/scim note
   # above. It was held at 1.7.1 EXACT, one deliberate step behind `^1.7.1`,
   # because `^1.7.1` then resolved scim to 1.7.2 while the installed family
@@ -229,15 +236,15 @@ overrides:
   # a lift whose new version drops a symbol `plugin-auth` imports.
   # What stays true: the whole family still moves as ONE line, and a bump that
   # moves scim alone is still the mistake the #3653 ruling named.
-  '@better-auth/scim@<2.0.0': '1.7.2'
-  '@better-auth/oauth-provider@<2.0.0': '1.7.2'
-  '@better-auth/sso@<2.0.0': '1.7.2'
-  '@better-auth/drizzle-adapter@<2.0.0': '1.7.2'
-  '@better-auth/kysely-adapter@<2.0.0': '1.7.2'
-  '@better-auth/memory-adapter@<2.0.0': '1.7.2'
-  '@better-auth/mongo-adapter@<2.0.0': '1.7.2'
-  '@better-auth/prisma-adapter@<2.0.0': '1.7.2'
-  '@better-auth/telemetry@<2.0.0': '1.7.2'
+  '@better-auth/scim@<2.0.0': '1.7.3'
+  '@better-auth/oauth-provider@<2.0.0': '1.7.3'
+  '@better-auth/sso@<2.0.0': '1.7.3'
+  '@better-auth/drizzle-adapter@<2.0.0': '1.7.3'
+  '@better-auth/kysely-adapter@<2.0.0': '1.7.3'
+  '@better-auth/memory-adapter@<2.0.0': '1.7.3'
+  '@better-auth/mongo-adapter@<2.0.0': '1.7.3'
+  '@better-auth/prisma-adapter@<2.0.0': '1.7.3'
+  '@better-auth/telemetry@<2.0.0': '1.7.3'
   'uuid@<12.0.0': '^11.1.1'
   'postcss@<9.0.0': '^8.5.10'
   'cookie@<0.8.0': '^0.7.0'

@@ -34,6 +34,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "投递记录",
         help: "外键 → sys_notification_delivery(发件箱行);P1 之前为空"
       },
+      actor_id: {
+        label: "执行人",
+        help: "触发该事件的用户(提及人、分配人)——与 sys_notification.actor_id 同语义。客户端据此可用纯本地比较抑制自己触发的回执。摘要行按构造为 null:合并后的一组没有单一执行人。"
+      },
       topic: {
         label: "主题"
       },

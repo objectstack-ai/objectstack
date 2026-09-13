@@ -129,8 +129,14 @@ this arm, on a control plane whose requested `isolated` posture had degraded to 
    `{ isSystem: true, tenantId }` passes.
 2. On a walled deployment running `plugin-security`, tenants already do not see NULL rows — Layer 0's
    strict equality ANDs over the arm and wins (#10103's symptom, the other face of the same coin).
-3. The measured leak's precondition — many organizations with Layer 0 inert — is today a refused boot
-   ([ADR-0093](./0093-tenancy-mode-and-membership-lifecycle.md) D5, cloud#1020, cloud#1664).
+3. The measured leak's precondition — many organizations with Layer 0 inert — is **reachable today**,
+   not a refused boot: a deployment that never *requests* a walled posture and merely *holds* more
+   than one `sys_organization` row under `single` boots and serves. Since #17010 (PR #17460)
+   `TenancyService` takes a `count(sys_organization)` census and **reports** that state at `error` at
+   boot — naming the posture the deployment declared, the count it holds and the two remedies — and
+   does not refuse it; [ADR-0093](./0093-tenancy-mode-and-membership-lifecycle.md) D5 refuses the
+   different case of a *requested*-but-absent wall (cloud#1020, cloud#1664). The discount this item
+   gives the leak therefore rests on a reported state, not a refused one.
 4. Beyond `sys_position`'s authorization read and the catalog's residue detection, the #12699
    deployment-level platform-global declaration depends on the arm: it disarms Layer 0 only, so a
    tenant's read of a declared-global object sees the deployment's NULL rows *through the driver*

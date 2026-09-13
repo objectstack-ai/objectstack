@@ -84,13 +84,18 @@
  */
 
 import { execFileSync, execSync, spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { PENDING_MARKER, entryForPath, ownerDir, ownerOf, ownerRunCommand } from './regen-artifacts.mjs';
-import { inspectBuildStamp, inspectDeclarationStamp } from './build-input-hash.mjs';
+import {
+  inspectBuildStamp,
+  inspectDeclarationStamp,
+  inspectSchemaStamp,
+  writeSchemaStamp,
+} from './build-input-hash.mjs';
 import { gitFreeEnv } from './git-env.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 import {
@@ -195,6 +200,55 @@ export function buildStamp(specDir = SPEC_DIR) {
 }
 
 /**
+ * Did a GENERATION produce `specDir/json-schema` from the sources on disk right
+ * now? Same three verdicts, same one-way meaning, same wrapping argument as the
+ * two stamp readers above — the repo root is supplied here so no caller can hash
+ * against the wrong one.
+ *
+ * The THIRD stamp file: `json-schema/.build-input-hash-schema`, written by
+ * `build-schemas.ts` at the end of its generation rather than by the build.
+ * `inspectSchemaStamp`'s docblock is the authority on why the generator has to
+ * be the writer and why neither `dist/` stamp can stand in for it.
+ */
+export function schemaStamp(specDir = SPEC_DIR) {
+  try {
+    return inspectSchemaStamp(REPO_ROOT, specDir);
+  } catch {
+    return { state: 'unstamped', recorded: null, actual: null };
+  }
+}
+
+/**
+ * Write the stamp `schemaStamp` reads — the ONE write point, called from the end
+ * of `packages/spec/scripts/build-schemas.ts`.
+ *
+ * Here rather than imported straight from `build-input-hash.mjs` for two
+ * reasons, and the first is the same one the readers give: the repo root is
+ * supplied at this single site, so a caller cannot hash against the wrong one —
+ * and a writer that hashed against the wrong root would not merely refuse, it
+ * would record a digest no reader can ever match, turning the acquittal channel
+ * off with nothing visible to notice. The second is mechanical: the generator
+ * imports from inside a tsc program (`tsconfig.scripts.json`), where an untyped
+ * `.mjs` import is TS7016, and this module is the one here that ships a
+ * hand-written `.d.mts` mirror (kept honest by `check:declaration-mirrors`).
+ *
+ * ⛔ It reports rather than throws, and the caller must keep it that way. Failing
+ * a generation because a performance stamp could not be written would convert an
+ * acquittal channel into a new way for the build to die; the conservative
+ * default already covers the failure — no stamp is `unstamped`, `unstamped` is
+ * no evidence, and no evidence leaves the mtime refusal standing.
+ *
+ * @returns the digest written, or `null` when nothing could be written.
+ */
+export function recordSchemaStamp(specDir = SPEC_DIR) {
+  try {
+    return writeSchemaStamp(REPO_ROOT, specDir);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Is `packages/spec/dist` older than the sources it claims to describe? Missing
  * counts as stale. Deliberately conservative: a false "stale" costs a build, a
  * false "fresh" costs a silently wrong artifact.
@@ -268,12 +322,42 @@ export function distIsStale(specDir = SPEC_DIR) {
  *     `build-schemas.ts` (it imports the namespace barrels), so counting them
  *     would send every test-only spec PR to a `gen:schema` it does not need —
  *     and a guard that cries wolf is a guard someone deletes.
- *   - the artifact side matches `.json`, the tree's only content.
+ *   - the artifact side matches `.json`, the tree's only content. The stamp
+ *     below is deliberately not `.json` and starts with a dot, so it is
+ *     invisible to `newestMtime` on both counts and cannot vouch for itself.
+ *
+ * ## The mtime rule accuses; the GENERATION stamp may acquit
+ *
+ * The blind spot both siblings document is shared here, and until #16175 this
+ * was the one rule of the three with NO evidence to answer it with. Measured on
+ * a tree whose `git status` was empty, after a bare `touch` of one `.zod.ts`:
+ * `pnpm --filter @objectstack/spec check:docs` exits 1 with `packages/spec/
+ * json-schema is older than packages/spec/src`, and the only remedy on offer was
+ * a full `gen:schema` — minutes under the shared verify lock — for a tree that
+ * was exactly current.
+ *
+ * ⛔ Neither `dist/` stamp could answer it, and reaching for one would be #7122's
+ * rejected direction relocated rather than a relaxation of it: both are written
+ * at the END of the build, whereas `gen:schema` is its FIRST step and is also
+ * run standalone (this rule's own refusal message says so) and again by
+ * `check:authorable-surface`. A `dist/` stamp is evidence about `dist/`.
+ *
+ * So the evidence had to be made, and `build-schemas.ts` makes it: one write
+ * point at the end of generation records the digest of the inputs that
+ * generation consumed, into the tree it just emitted. `inspectSchemaStamp`'s
+ * docblock is the authority on why that write point is sound for all three
+ * entry points and why the digest's input set (a strict superset of the sources
+ * this rule counts) can only ever withhold an acquittal.
+ *
+ * And it may only ACQUIT. `unstamped` — no stamp, unreadable, not 64 hex
+ * characters, or a generation that died before the end — leaves the mtime
+ * verdict standing (#4690), so nothing that passes today can start failing.
  */
 export function schemaTreeIsStale(specDir = SPEC_DIR) {
   const tree = newestMtime(join(specDir, 'json-schema'), (n) => n.endsWith('.json'));
   if (!tree) return true;
-  return newestMtime(join(specDir, 'src'), (n) => n.endsWith('.ts') && !n.endsWith('.test.ts')) > tree;
+  if (newestMtime(join(specDir, 'src'), (n) => n.endsWith('.ts') && !n.endsWith('.test.ts')) <= tree) return false;
+  return schemaStamp(specDir).state !== 'match';
 }
 
 /**
@@ -439,6 +523,107 @@ export function decide({ blocked, merging, deferral, allowDefer = true }) {
 }
 
 /**
+ * Shell words that name no executable, so their absence from disk proves nothing.
+ *
+ * The `stale` stub in this file's own fixture is spelled `exit 1`. A probe that
+ * judged that by resolution would classify the ONE control case here as a missing
+ * runner -- the grading inverted, in the direction that hides a real finding. So
+ * the probe DECLINES on these rather than guessing.
+ */
+const SHELL_BUILTINS = new Set([
+  ':', '.', '[', 'break', 'cd', 'continue', 'echo', 'eval', 'exec', 'exit', 'export',
+  'false', 'printf', 'pwd', 'read', 'readonly', 'return', 'set', 'shift', 'source',
+  'test', 'times', 'trap', 'true', 'type', 'ulimit', 'umask', 'unset', 'wait',
+]);
+
+/**
+ * The command a gate's script STARTS WITH, or `''` when it cannot be read off.
+ *
+ * Leading `FOO=bar` assignments are skipped -- shell syntax, not the command.
+ * Anything carrying a shell metacharacter is declined outright: a script spelled
+ * `(cd x && y)` or `a | b` has no single leading command whose absence would
+ * explain the failure, and a guess there is a wrong diagnosis rather than none.
+ */
+function leadingCommand(commandLine) {
+  for (const token of String(commandLine).trim().split(/\s+/)) {
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(token)) continue;
+    return /^[\w./@+-]+$/.test(token) ? token : '';
+  }
+  return '';
+}
+
+/**
+ * Is `cmd` absent from every directory the gate's runner could have come from?
+ *
+ * ⚠️ The set searched is deliberately a SUPERSET of the one pnpm builds, and the
+ * asymmetry is load-bearing. Measured inside a workspace package, `pnpm` puts two
+ * bin directories on `PATH`: that package's own `node_modules/.bin` and the
+ * repository root's. This walks EVERY ancestor's, plus `PATH` itself. A superset
+ * can only answer "found" where pnpm would have answered "not found", which costs
+ * one diagnosis and nothing else. The opposite mistake reports a gate that really
+ * did run, and really did find the artifact stale, as unmeasured -- a refusal
+ * that swallows the finding it was spawned for.
+ *
+ * A DANGLING symlink counts as present for the same reason: `lstatSync` does not
+ * follow, so a broken `node_modules/.bin` entry declines the claim instead of
+ * making it.
+ */
+function commandIsAbsent(cmd, cwd) {
+  const present = (p) => {
+    try {
+      lstatSync(p);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (cmd.includes('/')) return !present(resolve(cwd, cmd));
+  const dirs = [];
+  for (let dir = resolve(cwd); ;) {
+    dirs.push(join(dir, 'node_modules', '.bin'));
+    const up = dirname(dir);
+    if (up === dir) break;
+    dir = up;
+  }
+  for (const entry of String(process.env.PATH ?? '').split(':')) if (entry) dirs.push(entry);
+  return !dirs.some((dir) => present(join(dir, cmd)));
+}
+
+/**
+ * The gate's runner, when it can be PROVED absent; `null` when nothing is claimed.
+ *
+ * The one leg of the runner-missing diagnosis that reads neither the shell's prose
+ * nor an exit code (#16717). Both of those are written by something between the
+ * failure and this function -- a shell whose wording differs per platform, a pnpm
+ * that does not propagate 127 on every platform -- and each was independently
+ * blind on macOS. The gate's script, by contrast, is a string in a manifest this
+ * process can read, and "that command does not exist" is a fact about the disk.
+ *
+ * ⛔ Silent by design wherever the answer would be a guess: an undeclared script
+ * (measured, pnpm exits 254 and prints nothing -- `gateCwd`'s documented fail-safe,
+ * which reads as stale and must stay that way), an unreadable manifest, a builtin,
+ * a compound command. Every one of those falls through to the other two legs.
+ *
+ * @param {string} script the `check:` script name the gate is spawned as
+ * @param {string} cwd the directory pnpm is spawned in, whose manifest declares it
+ * @returns {string|null} the absent command, or `null` when nothing can be claimed
+ */
+function absentGateRunner(script, cwd) {
+  if (!script || !cwd) return null;
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(join(cwd, 'package.json'), 'utf8'));
+  } catch {
+    return null;
+  }
+  const commandLine = manifest?.scripts?.[script];
+  if (typeof commandLine !== 'string') return null;
+  const cmd = leadingCommand(commandLine);
+  if (!cmd || SHELL_BUILTINS.has(cmd)) return null;
+  return commandIsAbsent(cmd, cwd) ? cmd : null;
+}
+
+/**
  * A gate that could not RUN is not a verdict about the artifact (#15722).
  *
  * This check does not regenerate and does not compare bytes: it SPAWNS the
@@ -486,11 +671,15 @@ export function decide({ blocked, merging, deferral, allowDefer = true }) {
  * @param {string} output the child's combined stdout+stderr
  * @param {number} exitCode the child's exit status
  * @param {string} fromDir where to resolve from when the child named no importer
+ * @param {{ script: string, cwd: string } | null} [gate] the gate AS SPAWNED -- the
+ *   `check:` script name and the directory whose manifest declares it. Supplied by
+ *   the production call site; omitted where there is nothing on disk to resolve, in
+ *   which case the two prose-and-exit-code legs answer alone, as they used to.
  * @returns {null | { headline: string, detail: string[], fix: string, kind: string }}
  *   `null` when the gate RAN and reached a verdict of its own — the caller must
  *   keep reporting that as `stale`, which is what it is.
  */
-export function gateCouldNotRun(output, exitCode, fromDir) {
+export function gateCouldNotRun(output, exitCode, fromDir, gate = null) {
   const text = String(output ?? '');
 
   // -- Shape 3: the child already answered in this exact frame --
@@ -515,24 +704,58 @@ export function gateCouldNotRun(output, exitCode, fromDir) {
     };
   }
 
-  // -- Shape 1: the runner is not on PATH --
-  // Anchored on the shell's own line rather than on the words "not found", which
-  // a gate's prose may legitimately contain. `sh` (dash) writes `sh: 1: tsx: not
-  // found`; bash writes `bash: line 1: tsx: command not found`.
-  const runner = text.match(/^(?:sh|bash|dash|zsh): (?:line )?\d+: ([^:\n]+): (?:command )?not found$/m);
-  if (runner || exitCode === 127) {
-    const cmd = runner?.[1] ?? '';
+  // -- Shape 1: the gate's runner is not installed --
+  //
+  // THREE legs, ordered by how much each one can be trusted (#16717). The reading
+  // they exist to prevent is `stale`: a claim about the artifact that nothing
+  // measured, told to an operator whose real problem is a missing tool.
+  //
+  //   1. RESOLUTION -- the gate's script is on disk, in the manifest pnpm was
+  //      pointed at, so the command it starts with can simply be LOOKED FOR.
+  //      Reads no prose and no exit code: a filesystem fact, identical on every
+  //      platform, every shell and every pnpm.
+  //   2. The shell's own line, for what leg 1 declines to judge (a compound
+  //      script, a builtin, a script this manifest does not declare).
+  //   3. A raw 127, for a process chain that propagates the shell's exec failure.
+  //
+  // ⚠️ Legs 2 and 3 WERE the whole classification, and both miss on macOS --
+  // measured on Darwin 25.5.0 / pnpm 10.31.0, not hypothesised:
+  //
+  //   - macOS `/bin/sh` writes `sh: tsx: command not found`, with NO line-number
+  //     segment, which the matcher used to require. dash writes `sh: 1: tsx: not
+  //     found`, bash writes `bash: line 1: tsx: command not found`, and zsh writes
+  //     the command LAST (`zsh:1: command not found: tsx`) -- four spellings of one
+  //     event, and a fifth shell is free to invent a fifth.
+  //   - the immediate child is `pnpm`, not the shell, and pnpm reports 1 for this,
+  //     not 127. On Linux the same path yields 127, which is why CI stayed green
+  //     while every macOS checkout was red.
+  //
+  // So leg 3 is a property of the process chain and leg 2 of a shell's wording;
+  // either can change and reopen this hole silently, in the dangerous direction.
+  // Leg 1 depends on neither, which is why it is first.
+  const runner = text.match(/^(?:\S*\/)?(?:sh|bash|dash|ksh|zsh): (?:(?:line )?\d+: )?([^:\n]+): (?:command )?not found$/m)
+    ?? text.match(/^(?:\S*\/)?zsh:(?:\d+:)? command not found: (\S+)$/m);
+  const absent = gate ? absentGateRunner(gate.script, gate.cwd) : null;
+  if (absent || runner || exitCode === 127) {
+    const cmd = absent ?? runner?.[1] ?? '';
     return {
       kind: 'runner-missing',
       headline: cmd
         ? `the gate's runner \`${cmd}\` is not installed`
         : 'the gate\'s runner is not installed',
       detail: [
-        cmd
-          ? `The gate's script starts with \`${cmd}\`, and the shell could not find it. Runners`
-          : 'The shell could not find the command the gate\'s script starts with. Runners',
-        `like \`tsx\` live in \`node_modules/.bin\`, so a checkout with no \`node_modules\` has none`,
-        `of them and the gate's own code was never reached.`,
+        ...(absent
+          ? [
+            `\`${absent}\` is the first word of the gate's \`${gate.script}\` script, and it is in`,
+            `neither that package's \`node_modules/.bin\`, nor any parent's, nor \`PATH\` -- looked`,
+            `for on disk, rather than read off the shell's complaint, which is spelled`,
+            `differently on every platform.`,
+          ]
+          : cmd
+            ? [`The gate's script starts with \`${cmd}\`, and the shell could not find it.`]
+            : ['The shell could not find the command the gate\'s script starts with.']),
+        `Runners like \`tsx\` live in \`node_modules/.bin\`, so a checkout with no \`node_modules\``,
+        `has none of them and the gate's own code was never reached.`,
       ],
       fix: INSTALL_FIX,
     };
@@ -716,7 +939,7 @@ function main({ prePush = false } = {}) {
     // A gate that could not RUN answered nothing (#15722). It still counts as
     // BLOCKED — the artifact is not proven current, so the marker keeps it and the
     // refusal stands — but the line says what happened rather than naming the file.
-    const prereq = gateCouldNotRun(output, code, cwd);
+    const prereq = gateCouldNotRun(output, code, cwd, { script: check, cwd });
     if (prereq) {
       unmeasured.push({ check, paths, prereq });
       console.error(
@@ -1269,6 +1492,60 @@ function fixtureSelfTest() {
     // pre-fix code. Assert the DIAGNOSIS, which only the refusal produces.
     check('  …naming the command the shell could not find, in the diagnosis',
       /the gate's runner `os-regen-fixture-absent-runner` is not installed/.test(runnerMissing.out));
+
+    // ── #16717: what the runner-missing CLASSIFICATION rests on ──────────────
+    //
+    // The two cases above reach the classifier through the fixture, so between
+    // them they exercise exactly one (platform, shell, pnpm) combination: this
+    // machine's. That is how BOTH legs of this classification came to be broken
+    // on macOS while CI stayed green -- the fixture could not fail on the host
+    // that could. The rows below call the classifier DIRECTLY with the output
+    // other platforms produce, so every leg is judged on every host.
+    //
+    // Each row asserts the CLASSIFICATION. `runner-missing` is the verdict under
+    // test and `null` is the one that means `stale` -- the false claim -- so a
+    // row proving only that "something was returned" would accept the bug.
+    const probeDir = mkdtempSync(join(tmpdir(), 'os-regen-classify-'));
+    // The gate AS SPAWNED: a manifest declaring the script, in the directory pnpm
+    // would be pointed at. Written per row, so no row depends on which `runHook`
+    // ran last.
+    const gateWith = (command) => {
+      writeFileSync(
+        join(probeDir, 'package.json'),
+        `${JSON.stringify({ name: 'os-regen-classifier-probe', scripts: { 'check:spec-changes': command } }, null, 2)}\n`,
+      );
+      return { script: 'check:spec-changes', cwd: probeDir };
+    };
+    // `node x.mjs` on the prose rows deliberately RESOLVES, so the resolution leg
+    // declines and each row judges the spelling in front of it and nothing else.
+    for (const [label, command, out, code, named] of [
+      ['dash: a line number, no "command"', 'node x.mjs', 'sh: 1: tsx: not found', 1, 'tsx'],
+      ['bash: `line N`, with "command"', 'node x.mjs', 'bash: line 1: tsx: command not found', 1, 'tsx'],
+      // THE HOST BUG: macOS `/bin/sh` writes no line number at all.
+      ['macOS /bin/sh: NO line number', 'node x.mjs', 'sh: tsx: command not found', 1, 'tsx'],
+      // A FOURTH spelling, which no widening of the third would have reached.
+      ['zsh: the command written LAST', 'node x.mjs', 'zsh:1: command not found: tsx', 1, 'tsx'],
+      // THE LINUX LEG, constructed rather than reasoned about: there pnpm
+      // propagates 127, and this file may not recognise a word of the output.
+      ['a bare 127, prose in no spelling this file knows', 'node x.mjs', 'wrapper: cannot exec', 127, ''],
+      // THE RESOLUTION LEG, isolated: NEITHER signal macOS denies this gate is
+      // present, and the classification still holds.
+      ['neither prose nor 127 -- the runner is LOOKED FOR', 'os-regen-fixture-absent-runner --check', '', 1,
+        'os-regen-fixture-absent-runner'],
+    ]) {
+      const verdict = gateCouldNotRun(out, code, probeDir, gateWith(command));
+      check(`  …${label} → runner-missing`,
+        verdict?.kind === 'runner-missing' && (named === '' || verdict.headline.includes(`\`${named}\``)));
+    }
+    // THE CONTROLS for the legs above. A gate that RAN and reached a verdict of
+    // its own must stay `null`, which the caller prints as `stale`.
+    check('  …a gate that RAN is still `stale` when its OWN prose says "not found"',
+      gateCouldNotRun('  ✗ 3 declarations not found in dist', 1, probeDir, gateWith('node x.mjs')) === null);
+    check('  …and a script starting with a shell builtin is judged by resolution NOT AT ALL',
+      gateCouldNotRun('the artifact is out of date', 1, probeDir, gateWith('exit 1')) === null);
+    check('  …with no gate to resolve, the shell-line leg still answers on its own',
+      gateCouldNotRun('bash: line 1: tsx: command not found', 1, probeDir)?.kind === 'runner-missing');
+    rmSync(probeDir, { recursive: true, force: true });
 
     const gateRefused = runHook('gate-refused', ['--pre-push']);
     check('a gate that ALREADY refused with an unmet prerequisite is propagated, not relabelled',

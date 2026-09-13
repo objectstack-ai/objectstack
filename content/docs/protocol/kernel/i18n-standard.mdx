@@ -159,6 +159,64 @@ locale's bundle — a `zh-CN` workspace with a courtesy `en` bundle serves
 Chinese to `zh-CN` and English to `en`. See
 [Translations](/docs/ui/translations#how-a-locale-is-chosen).
 
+## Display Label Forms
+
+Every display label this protocol declares — an object's `label`, a field's
+`label` / `help` / `placeholder`, a view title, a component's `title`, an
+`ariaLabel` — is an `I18nLabel` (`I18nLabelSchema`,
+`packages/spec/src/ui/i18n.zod.ts`). The schema authorizes **two** forms, and a
+conforming producer, renderer or tool must handle both:
+
+| Form | Authored as | Where its other locales live | Resolver |
+|:---|:---|:---|:---|
+| **1 — plain string** | `label: 'Members'` | a translation bundle, under the key derived from the label's **position** in the metadata | `system/i18n-resolver.ts` |
+| **2 — inline locale map** | `label: { en: 'Members', 'zh-CN': '成员' }` | nowhere else — the map **is** every locale it carries | `resolveI18nLabel` (`ui/i18n-label-resolver.ts`); `pickLocalized` in ObjectUI |
+
+> Both are real; neither is deprecated by this schema.
+>
+> — `I18nLabelSchema`, `packages/spec/src/ui/i18n.zod.ts`
+
+A caller holding a label that may be either form resolves form 2 first, then
+looks the resulting string up in the bundle.
+
+### Form 1 is one locale's text
+
+A plain string is **the default locale's source text** — the rule
+[Locale Fallback](#locale-fallback) already states from the resolution side: a
+request for `defaultLocale` stops at the authored label and consults no bundle.
+Every *other* locale is reached through a bundle entry, and that entry's key
+comes from where the label sits in the metadata
+(`objects.<object>._views.<view>.label`, …) — never from the string the author
+wrote.
+
+### Form 2 is several locales' text at once
+
+An inline locale map carries each locale's text on the metadata document
+itself. The renderer tag-matches the requested locale against the map's own
+keys and consults no bundle for that prop. Keys are BCP-47-shaped language tags
+(`en`, `zh`, `zh-CN`, `pt-BR`, `zh-Hans-CN`) or the literal `default`, read as
+the untagged fallback entry.
+
+`key` and `defaultValue` are **rejected by name** as map keys. They spell the
+retired key-reference form, which no resolver ever looked up: both resolvers
+fall through to the first string value, so a label authored that way rendered
+its own raw dotted key on screen, in every locale.
+
+For the props that have no bundle key at all, the map is the **only**
+localisation route — a document localised that way is fully localised.
+
+**A map is never extracted, and no bundle key is synthesised for one.**
+`os i18n extract` scaffolds no row for a map and no key family exists for one;
+in particular **no key is derived from a node's position in the component
+tree** (maintainer ruling 2026-09-03, #14749), because an array index promoted
+to a bundle key would turn reordering two sibling components into a silent,
+all-green swap of their translations. The cost falls on the author: a
+translator working from the bundles will not find a map's strings, so every
+locale a map is to serve is one its author writes into the map.
+
+Which form to choose, and what each costs a translation workflow, is
+[Translations](/docs/ui/translations#current-boundaries).
+
 ## Translation Bundles
 
 Translations are stored in **JSON files** organized by locale and namespace.
@@ -888,11 +946,28 @@ Output:
     ...
 ```
 
+The unit is one **key** per locale, and for a key authored as an
+[inline locale map](#form-2-is-several-locales-text-at-once) the locales that
+count are **the map's own**. `os i18n check` and `os lint` compute the same
+report, so this holds for both:
+
+| What the metadata carries at a key | The default locale | A locale the map carries | A locale the map omits |
+|:---|:---|:---|:---|
+| nothing — the prop is absent | not counted: the key leaves the denominator entirely | — | — |
+| a plain string | covered — the string **is** the default locale's text | n/a: only a bundle entry covers another locale | missing |
+| an inline locale map | covered | **covered, with no bundle entry** | **missing** — reported like any other gap |
+
+A `help` written `{ en, 'zh-CN' }` under
+`supportedLocales: ['en', 'zh-CN', 'ja-JP']` therefore reports exactly one gap,
+`ja-JP`, and adding `'ja-JP'` to the map closes it. There is no bundle row to
+write for it: no bundle key exists for a map.
+
 ### Orphan Keys and Option Keys
 
-`os i18n check` runs in one direction — which keys the metadata expects that no
-bundle carries. The reverse direction (keys a bundle carries that no metadata
-claims) is checked by `os validate`, `os lint`, and `os compile`, which walk
+`os i18n check` runs in one direction — which keys the metadata expects that
+nothing supplies text for, whether that text would come from a bundle or from
+an inline locale map. The reverse direction (keys a bundle carries that no
+metadata claims) is checked by `os validate`, `os lint`, and `os compile`, which walk
 every bundle against the stack it ships with:
 
 | Key | Must name |

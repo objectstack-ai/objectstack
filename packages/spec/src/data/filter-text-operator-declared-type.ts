@@ -48,7 +48,10 @@
  *   value (multi-option, `multiple: true`) is the evaluators' own question
  *   beneath the door, not this table's.
  * - **Deferred** — no verdict, the filter proceeds unchanged: a `formula`
- *   whose `returnType` is absent (unreadable at the seam), and a DOTTED key
+ *   whose `returnType` this table cannot read (absent, or a spelling the
+ *   schema does not declare — but see the formula note below: at the engine
+ *   seam NO formula reaches this door at all, whatever its `returnType`), and
+ *   a DOTTED key
  *   (`address.city`), which is `filter-dotted-head`'s subject — its
  *   structured-JSON heads are deliberately unjudged there (live on two of
  *   three backends, #8371), and this door reading the head's declared type
@@ -60,6 +63,30 @@
  * `text` / `boolean` / `date`) is itself a `FieldType` member, so `text`
  * passes and the other three are refused through the same sets — no second
  * vocabulary ({@link FORMULA_RETURN_TYPE_AS_FIELD_TYPE}).
+ *
+ * ⚠️ THE FORMULA ROWS ARE A JUDGEMENT NO CONSUMER CURRENTLY REACHES. The
+ * sentence above states what {@link textOperatorDoorVerdict} answers, and it
+ * is the ruling's answer; it does NOT describe what an author observes today.
+ * At this door's only consumer — the engine's field-aware seam — a filter over
+ * a `formula` field never arrives: `assertFilterIsMaterializable` (#8296 /
+ * #4419) refuses EVERY one of them one door earlier, with `INVALID_FIELD` 400,
+ * for the broader reason that no driver materialises a column for a formula.
+ * Measured on the fixture below, `$contains` over each of the five formula
+ * fields — `returnType` `number` / `text` / `boolean` / `date` / absent —
+ * answers `INVALID_FIELD` 400 alike, so the `returnType` is never the deciding
+ * fact and none of the three verdicts above is observable. The non-formula
+ * rows of this table ARE observed at that seam, with this door's own
+ * `INVALID_FILTER` 400; the formula rows are the exception, not the rule.
+ *
+ * The rows are kept, not retired, and nothing here moves: the verdict function
+ * is still consulted through its `formula` branch by the engine door, so the
+ * day formula fields become filterable the answer is already correct, and the
+ * divergence is pinned by name in the engine package
+ * (`engine-text-operator-declared-type-door.test.ts`) so it goes red on that
+ * day. Making this door overtake #8296 for formula would answer ONE condition
+ * ("a formula field cannot be filtered") with TWO wire codes chosen by
+ * `returnType`, and would reopen #8296's recorded code assignment — a
+ * maintainer decision, deliberately not taken here.
  *
  * `multiple: true` does not change a verdict: the class is the ruling's axis.
  *
@@ -107,6 +134,14 @@
  *
  * Every case passes the SYNTAX door (`parseFilterAST` accepts each filter —
  * pinned in this module's test), so a refusal can only be this door's.
+ *
+ * ⚠️ EXCEPT the `formula` cases, which neither branch above describes: at the
+ * engine seam every one of them is refused by the EARLIER #8296 door with
+ * `INVALID_FIELD` 400 (see the formula note above), so the refusal is not this
+ * door's and no driver read runs either. A suite driving this table at that
+ * seam must therefore partition the formula cases out and assert the
+ * divergence deliberately, rather than fold them into the two branches above —
+ * which is what `engine-text-operator-declared-type-door.test.ts` does.
  *
  * ## Deliberately NOT a driver case-set
  *
@@ -219,9 +254,13 @@ export const FORMULA_RETURN_TYPE_AS_FIELD_TYPE: ReadonlyMap<string, string> = ne
  * - `door-refusal` — refused before any driver runs (`INVALID_FILTER` / 400).
  * - `passes` — a string-valued declared type; the filter proceeds unchanged.
  * - `deferred` — the door records NO verdict and the filter proceeds
- *   unchanged: the declared type is not readable at the seam (a `formula`
- *   without `returnType`), or the key is not this door's subject (a dotted
- *   path — `filter-dotted-head`'s).
+ *   unchanged: the declared type is not readable here (a `formula` without
+ *   `returnType`), or the key is not this door's subject (a dotted path —
+ *   `filter-dotted-head`'s).
+ *
+ * These are the answers of THIS function. For `formula` they are not what an
+ * author observes at the engine seam, where the earlier #8296 door refuses
+ * every formula filter first — see the module header's formula note.
  */
 export type TextOperatorDoorVerdict = 'door-refusal' | 'passes' | 'deferred';
 
@@ -350,7 +389,7 @@ export const TEXT_OPERATOR_DOOR_TYPE_CLASSES: readonly TextOperatorDoorTypeClass
     name: 'formula',
     types: new Set(['formula']),
     verdict: 'by-return-type',
-    note: 'Judged as the FieldType its declared `returnType` names (`text` passes; `number` / `boolean` / `date` are refused through the same sets); `returnType` absent ⇒ deferred, the declared type is not readable at the seam.',
+    note: 'Judged as the FieldType its declared `returnType` names (`text` passes; `number` / `boolean` / `date` are refused through the same sets); `returnType` absent ⇒ deferred. ⚠️ Unreachable at the engine seam: the earlier #8296 door refuses EVERY formula filter with INVALID_FIELD 400 whatever the `returnType`, so this row states the contract\'s answer, not an observable one — see the module header.',
   },
 ];
 
@@ -509,7 +548,7 @@ function caseFor(
         verdict,
         note: dotted
           ? 'A dotted path into a structured-JSON field is filter-dotted-head\'s subject (deliberately unjudged there, #8371); this door must not re-close that carve-out by reading the head\'s declared type.'
-          : 'The declared return type is not readable at the seam — the ruling judges formula only when it is.',
+          : 'The declared return type is not readable here — the ruling judges formula only when it is. ⚠️ Unreachable at the engine seam: #8296 refuses every formula filter one door earlier (INVALID_FIELD 400) — see the module header.',
       };
   }
 }

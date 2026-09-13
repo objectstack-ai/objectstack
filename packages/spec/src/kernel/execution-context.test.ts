@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { ExecutionContextSchema } from './execution-context.zod';
+import { ExecutionContextSchema, SEED_WRITE_EXECUTION_CONTEXT } from './execution-context.zod';
+import { EXPORT_ENTRY_POINTS, exportNamesOf, holdersOf } from '../../scripts/lib/export-origins-testkit';
 
 describe('ExecutionContextSchema', () => {
   it('should accept empty context (all optional)', () => {
@@ -197,5 +198,59 @@ describe('ExecutionContextSchema.preserveAudit — the published description (#6
   it('names the whitelist it admits on the UPDATE path', () => {
     expect(description).toMatch(/readonly/i);
     expect(description).toMatch(/audit|updated_at/i);
+  });
+});
+
+
+// ─── [#17178] SEED_WRITE_EXECUTION_CONTEXT — one spelling of the seed posture ─
+//
+// The seed-write context used to be a PRIVATE constant in three places
+// (`SeedLoaderService.SEED_OPTIONS`, `AppPlugin`'s `SEED_WRITE_OPTIONS`,
+// `@objectstack/verify`'s `SEED_CONTEXT`), and nothing held the three equal.
+// They now all read this export, so the copies are gone by construction; what
+// this block holds is the VALUE they read and the SURFACE it is read through.
+//
+// Why the value is pinned and not just documented: divergence here re-opens a
+// boot-wedging defect. `skipTriggers` is what suppresses "on create" automation
+// for seed rows — `isSystem` alone does NOT suppress dispatch — and a seed path
+// that lost it once seeded with automation live while the main path had it
+// suppressed, a self-trigger loop that wedged first boot (#3760). So "one flag
+// looks redundant, drop it" is exactly the edit that must go red.
+describe('[#17178] SEED_WRITE_EXECUTION_CONTEXT', () => {
+  it('is a valid ExecutionContext — the WHOLE value parses, not merely its key names', () => {
+    const parsed = ExecutionContextSchema.safeParse(SEED_WRITE_EXECUTION_CONTEXT);
+    expect(parsed.success, JSON.stringify('error' in parsed ? parsed.error : {})).toBe(true);
+  });
+
+  it('sets exactly the three seed flags and nothing else', () => {
+    expect(Object.keys(SEED_WRITE_EXECUTION_CONTEXT).sort()).toEqual([
+      'isSystem',
+      'seedReplay',
+      'skipTriggers',
+    ]);
+  });
+
+  it('sets `skipTriggers` — `isSystem` alone does NOT suppress trigger dispatch (#3760)', () => {
+    expect(SEED_WRITE_EXECUTION_CONTEXT.skipTriggers).toBe(true);
+  });
+
+  it('sets `seedReplay` — the state_machine exemption a mid-lifecycle seed row needs (#3433)', () => {
+    expect(SEED_WRITE_EXECUTION_CONTEXT.seedReplay).toBe(true);
+  });
+
+  it('sets `isSystem` — seeds target `sys_*` and declare their own tenancy columns', () => {
+    expect(SEED_WRITE_EXECUTION_CONTEXT.isSystem).toBe(true);
+  });
+
+  it('is reachable on exactly one public entry point — `./kernel`, the minimal widening', () => {
+    // Anti-vacuity first: the resolved surface must be the real one, or
+    // "exactly one holder" could pass by resolving nothing.
+    expect(EXPORT_ENTRY_POINTS, 'exports map must include ./kernel').toContain('./kernel');
+    const kernelNames = exportNamesOf('./kernel');
+    expect(kernelNames.length, './kernel must export a non-trivial surface').toBeGreaterThan(40);
+    expect(kernelNames, 'a neighbour that must stand').toContain('ExecutionContextSchema');
+
+    expect(kernelNames).toContain('SEED_WRITE_EXECUTION_CONTEXT');
+    expect(holdersOf('SEED_WRITE_EXECUTION_CONTEXT')).toEqual(['./kernel']);
   });
 });

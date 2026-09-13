@@ -7,14 +7,18 @@ import type { SemanticMigration } from '../../types.js';
 export const entry: SemanticMigration = {
   id: 'flow-edge-condition-evaluated-slot-source-required',
   surface:
-    'a flow edge predicate — edges[].condition on FlowEdgeSchema, the branch predicate '
-    + 'AutomationEngine.evaluateCondition runs at every traversal — authored either as an '
-    + 'expression envelope carrying only ast ({ dialect: \'cel\', ast: … } with no source), or '
-    + 'with a source that is blank after trimming, through the envelope key ({ dialect: \'cel\', '
-    + 'source: \'   \' }) or the bare-string shorthand for it (condition: \'   \'). Reachable '
-    + 'wherever a flow is authored or stored: defineStack({ flows }) sources, an exported stack '
-    + 'passed to objectstack validate, a POST /flows body, and a flow row already sitting in '
-    + 'sys_metadata',
+    'a structural flow condition, BOTH slots — edges[].condition on FlowEdgeSchema, the branch '
+    + 'predicate AutomationEngine.evaluateCondition runs at every traversal, and config.condition '
+    + 'on a flow NODE, which is a decision node predicate and on a start node the trigger gate — '
+    + 'authored either as an expression envelope carrying only ast ({ dialect: \'cel\', ast: … } '
+    + 'with no source), or with a source that is blank after trimming, through the envelope key '
+    + '({ dialect: \'cel\', source: \'   \' }) or the bare-string shorthand for it '
+    + '(condition: \'   \'). The node slot joined this entry with #17322 and #17495, which rebound '
+    + 'AutomationEngine.registerFlow and objectstack validate to the edge door\'s own rule rather '
+    + 'than deriving a second one; it is the same decision reaching the second slot, which is why '
+    + 'it is named here instead of in an entry of its own. Reachable wherever a flow is authored '
+    + 'or stored: defineStack({ flows }) sources, an exported stack passed to objectstack validate, '
+    + 'a POST /flows body, and a flow row already sitting in sys_metadata',
   replacement:
     'a non-blank `source` — `{ dialect: \'cel\', source: \'record.amount > 10\' }`, or the bare '
     + 'string `\'record.amount > 10\'` — if the edge was meant to branch; or REMOVE the '
@@ -54,23 +58,30 @@ export const entry: SemanticMigration = {
     + 'repo reading, which is why the notification is registered here rather than skipped. '
     + 'ADR-0087, ADR-0032.',
   acceptanceCriteria:
-    'Grep every authored `edges[].condition` — `defineStack({ flows })` sources, exported stacks, '
-    + '`POST /flows` bodies — and every flow row in `sys_metadata`, for an envelope with no '
-    + '`source` key and for a `source` (or bare string) that is empty after trimming. For each '
-    + 'hit decide, per the `replacement` note, whether the edge was meant to branch (author the '
-    + '`source`) or to be unconditional (remove the key) — do not default to removal. Two proofs, '
+    'Grep every authored structural condition — BOTH `edges[].condition` and a node\'s '
+    + '`config.condition` (a `decision` node\'s predicate, and on a `start` node the trigger '
+    + 'gate) — in `defineStack({ flows })` sources, exported stacks and `POST /flows` bodies, and '
+    + 'every flow row in `sys_metadata`, for an envelope with no `source` key and for a `source` '
+    + '(or bare string) that is empty after trimming. ⚠️ Sweeping only the edge key leaves the '
+    + 'node key unswept, and the node key is the one with no schema in front of it. For each '
+    + 'hit decide, per the `replacement` note, whether the condition was meant to branch (author '
+    + 'the `source`) or to be unconditional (remove the key) — do not default to removal; on a '
+    + '`start` node removal opens the trigger gate rather than preserving it. Two proofs, '
     + 'and the second is the one that matters for stored rows. (1) For a stack authored in config '
-    + 'files, `objectstack validate` is clean: it locates each offender at '
-    + '`flows.N.edges.N.condition` with the `EVALUATED_EXPRESSION_SOURCE_REQUIRED` sentence, and '
+    + 'files, `objectstack validate` is clean: it locates each offender with the '
+    + '`EVALUATED_EXPRESSION_SOURCE_REQUIRED` sentence — an edge at '
+    + '`flows.N.edges.N.condition`, and a node by the slot phrase the structural pass builds, '
+    + "e.g. `node 'gate' (start) condition` — and "
     + 'an `ast`-only envelope is also reported by the lint path as '
-    + '`STRUCTURAL_CONDITION_SHAPE_REFUSAL`. There is no CLI verb that lowers a stored row back '
+    + '`STRUCTURAL_CONDITION_SHAPE_REFUSAL`, which is the sentence the node slot earns for that '
+    + 'spelling as well. There is no CLI verb that lowers a stored row back '
     + 'into a config file, so this proof does not reach a flow that exists only in '
     + '`sys_metadata`. (2) Boot the stack and '
     + 'confirm each flow REGISTERS: no `failed to register flow` warn for it (the three boot '
     + 'paths spell it `[Automation] failed to register flow`, `[Automation] flow re-sync: failed '
     + 'to register flow` and `[Automation] cold-boot flow bind: failed to register flow`), and '
-    + 'its trigger is armed. That warn line IS the locator for a stored row: its `issues[].path` '
-    + 'names the offending edge as `edges[N].condition`. A flow that boots without that warn is '
-    + 'unaffected; every edge '
+    + 'its trigger is armed. That warn line IS the locator for a stored row: for an edge its '
+    + '`issues[].path` names `edges[N].condition`, and for a node the refusal carries that same '
+    + "slot phrase. A flow that boots without that warn is unaffected; every structural "
     + 'condition carrying a non-blank `source` parses byte-identically to before.',
 };

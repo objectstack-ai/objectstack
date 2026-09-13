@@ -54,6 +54,7 @@ import {
   FILE_REFERENCES_MIGRATION_ID,
   VALUE_SHAPES_MIGRATION_ID,
   isDataMigrationFlagVerified,
+  hasMovedFileColumns,
   renderOperationMessage,
   objectLabelKey,
   resolveBundleLocale,
@@ -264,6 +265,16 @@ import {
 interface MigrationFlagRead {
   verified: boolean;
   conclusive: boolean;
+  /**
+   * [#15989] Have the file-family COLUMNS on this deployment moved to the
+   * bare-id encoding — `hasMovedFileColumns` over the same row?
+   *
+   * Carried on the SAME read rather than fetched by a second one, because it
+   * is a second question about one row and two reads could answer them out of
+   * one another's date. It is `false` on every row that lacks the stamp, on an
+   * unverified row, and on every way of not having read a row at all.
+   */
+  columnsMoved: boolean;
 }
 
 /**
@@ -285,7 +296,8 @@ export interface AdmittedValueShapeViolationTally {
  * spec. `beforeFind`/`afterFind` cover both `find` and `findOne`; the write
  * events cover both single-id and bulk (`multi: true`) writes (#3195). A hook
  * subscribing to anything outside this set would silently never fire, so
- * `registerHook` warns rather than accepting it blindly.
+ * `registerHook` refuses it where the name is one of the engine's own
+ * ({@link UNDISPATCHED_LIFECYCLE_HOOK_EVENTS}, #17713) and warns otherwise.
  *
  * ## WHEN `after*` fires, relative to the commit (#7477)
  *
@@ -326,6 +338,85 @@ const DISPATCHABLE_HOOK_EVENTS: ReadonlySet<string> = new Set([
   'beforeUpdate', 'afterUpdate',
   'beforeDelete', 'afterDelete',
 ]);
+
+/**
+ * [#17713] Every verb the engine can put on an {@link OperationContext}, as
+ * DATA rather than as a second hand-written list.
+ *
+ * The type annotation is the weld: `Record<Union, true>` is exhaustive in both
+ * directions, so a new engine method that widens `OperationContext['operation']`
+ * fails to compile here until the verb is added, and a verb dropped from the
+ * union makes its entry an excess property. `pnpm typecheck` compiles this file
+ * (it is `src`, not the test layer), so the weld is enforced by the package's
+ * own type check and not only by a test.
+ *
+ * It exists so {@link UNDISPATCHED_LIFECYCLE_HOOK_EVENTS} below is DERIVED. A
+ * hand-written list of "the events we refuse" would be this card's own defect
+ * one layer up: it would go stale the moment a verb is added, and silently.
+ */
+const ENGINE_OPERATION_VERBS: Record<OperationContext['operation'], true> = {
+  find: true,
+  findOne: true,
+  insert: true,
+  update: true,
+  delete: true,
+  count: true,
+  aggregate: true,
+};
+
+/**
+ * [#17713] The engine's own lifecycle-event NAMESPACE — `before`/`after` × every
+ * verb in {@link ENGINE_OPERATION_VERBS}. Fourteen names, of which
+ * {@link DISPATCHABLE_HOOK_EVENTS} is the eight the engine actually dispatches.
+ */
+const ENGINE_LIFECYCLE_HOOK_EVENTS: ReadonlySet<string> = new Set(
+  Object.keys(ENGINE_OPERATION_VERBS).flatMap((verb) => {
+    const suffix = `${verb.charAt(0).toUpperCase()}${verb.slice(1)}`;
+    return [`before${suffix}`, `after${suffix}`];
+  }),
+);
+
+/**
+ * [#17713] The GAP: a name inside the engine's own lifecycle namespace that the
+ * engine never dispatches. Derived, never typed out — the difference of the two
+ * sets above.
+ *
+ * Today it is exactly six: `beforeFindOne` / `afterFindOne`, `beforeCount` /
+ * `afterCount`, `beforeAggregate` / `afterAggregate`. Registering one of them is
+ * REFUSED at the door ({@link assertDispatchableHookEvent}) rather than warned
+ * about, because each is a name an author reaches for while believing they are
+ * subscribing to an engine lifecycle event — and what they get back is an inert
+ * declaration (ADR-0078: no silently inert declaration), which on a read filter
+ * means a guardrail that was never armed.
+ *
+ * ⚠️ The refusal is deliberately scoped to THIS set, not to "anything outside
+ * `DISPATCHABLE_HOOK_EVENTS`". A name outside the namespace entirely
+ * (`'myPlugin:flush'`) is a plugin dispatching its own event through the public
+ * {@link ObjectQL.triggerHooks} — the legitimate reading that made this branch a
+ * warn in the first place (#3195). That reading survives untouched; what stops
+ * being accepted is a near-miss spelling of the engine's OWN vocabulary, where
+ * no such reading exists.
+ */
+const UNDISPATCHED_LIFECYCLE_HOOK_EVENTS: ReadonlySet<string> = new Set(
+  [...ENGINE_LIFECYCLE_HOOK_EVENTS].filter((event) => !DISPATCHABLE_HOOK_EVENTS.has(event)),
+);
+
+/**
+ * [#17713] Test-visible view of the three sets the refusal is computed from, so
+ * a pin can drive its population FROM THE ENGINE instead of restating it — the
+ * acceptance criterion this card wrote ("a test per event name the engine
+ * exposes but never dispatches") is only meaningful if the population is read,
+ * not typed.
+ *
+ * Module-level export, deliberately NOT added to the package barrel
+ * (`src/index.ts` names its exports one by one), so this widens no published
+ * surface.
+ */
+export const HOOK_EVENT_DISPATCH_VOCABULARY = {
+  dispatchable: DISPATCHABLE_HOOK_EVENTS,
+  lifecycleNamespace: ENGINE_LIFECYCLE_HOOK_EVENTS,
+  undispatchedLifecycle: UNDISPATCHED_LIFECYCLE_HOOK_EVENTS,
+} as const;
 
 /**
  * [#4346] The alias slots the ENGINE option bags still admit, cut from the
@@ -1933,6 +2024,87 @@ function assertValidUnscopedMultiWriteFlag(
   );
 }
 
+/**
+ * [#17713] The per-seam prescription for a refused lifecycle event — what the
+ * author should have written instead, named concretely.
+ *
+ * The two seams are different repairs, and an author who is told only "this
+ * never fires" cannot tell them apart:
+ *
+ *  - **`*FindOne`** — the capability EXISTS and the author already has it.
+ *    `beforeFind`/`afterFind` fire for `findOne` too (the event attaches to
+ *    record materialization, not to the engine method), so the fix is a
+ *    one-word rename and nothing is lost.
+ *  - **`*Count` / `*Aggregate`** — there is no hook seam at all, by design
+ *    (`HookEvent` in `@objectstack/spec/data` says so: read authorization and
+ *    row filtering are the middleware's job). `count()` and `aggregate()` run
+ *    the middleware chain with the query AST on the operation context, so the
+ *    repair is a DIFFERENT API, not a different event name. This is the half
+ *    that would have saved the consumer on #17713: their read filter sat on
+ *    `beforeCount`, so a `limit`ed list's `total` counted rows the caller could
+ *    not see, and a `groupBy` was not narrowed at all.
+ */
+function undispatchedLifecycleEventPrescription(event: string): string {
+  if (event === 'beforeFindOne' || event === 'afterFindOne') {
+    const covering = event === 'beforeFindOne' ? 'beforeFind' : 'afterFind';
+    return (
+      `\`${covering}\` already covers \`findOne\` — the read events fire for BOTH \`find\` and `
+      + `\`findOne\`, because the event attaches to record materialization, not to the engine `
+      + `method. Register on '${covering}' instead; the handler sees single-record reads there.`
+    );
+  }
+  const verb = event.startsWith('before') ? event.slice(6) : event.slice(5);
+  const method = `${verb.charAt(0).toLowerCase()}${verb.slice(1)}`;
+  return (
+    `\`${method}()\` dispatches no hook at all, by design — it runs the MIDDLEWARE chain only, `
+    + 'with the query AST on the operation context. Filter it with '
+    + '`engine.registerMiddleware(fn)`, reading `ctx.operation === \'count\' | \'aggregate\'` and '
+    + 'composing your predicate onto `ctx.ast.where` — the same seam RLS and sharing already use, '
+    + 'so the scoping applies to the driver call itself. ⚠️ A read filter written as a HOOK does '
+    + 'not narrow a `total` or a `groupBy`: those surfaces would keep answering over rows the '
+    + 'caller cannot see.'
+  );
+}
+
+/**
+ * [#17713] Registration-time refusal for an event inside the engine's OWN
+ * lifecycle namespace that the engine never dispatches — see
+ * {@link UNDISPATCHED_LIFECYCLE_HOOK_EVENTS} for how that population is derived
+ * and why the refusal stops there.
+ *
+ * This was a `warn` from #3195 until #17713. The warning was loud (~40 lines a
+ * boot on the reporting install) and still useless: the registration SUCCEEDED,
+ * so a downstream consumer's read filters on `beforeFindOne` and `beforeCount`
+ * sat inert through every boot while the surface reported them registered. That
+ * is ADR-0078's prohibited fourth state — parsed, unmarked, silently inert — on
+ * an authorable seam, and on this seam the inert declaration is a GUARDRAIL: the
+ * author believes they narrowed what a caller can see, and they did not.
+ *
+ * A throw rather than a strict-mode-only failure, on the same reading as the
+ * four asserts above: the shape is statically decidable at the call site, it
+ * carries no recoverable intent that a warning could preserve, and a mode nobody
+ * turns on is a rule nobody gets. The `after*` names are refused alongside the
+ * `before*` ones even though the card only measured the `before*` half — they
+ * are the same gap, and refusing half a derived set would reintroduce the
+ * hand-written list.
+ *
+ * ⛔ NOT a general "unknown event names are refused". An event outside the
+ * namespace is left exactly as it was — a warn, then registered — so a plugin
+ * that dispatches its own events through the public {@link ObjectQL.triggerHooks}
+ * keeps working. That is the reading #3195 wrote down as the reason not to
+ * reject, and it is untouched here: this narrows the accept set by six names,
+ * not to eight.
+ */
+function assertDispatchableHookEvent(event: string): void {
+  if (!UNDISPATCHED_LIFECYCLE_HOOK_EVENTS.has(event)) return;
+  throw new Error(
+    `[ObjectQL] Hook '${event}' is an engine lifecycle event name the engine never dispatches, `
+    + 'so the registration would succeed and the handler would never run (ADR-0078: no silently '
+    + `inert declaration). ${undispatchedLifecycleEventPrescription(event)} `
+    + `Dispatched events: ${[...DISPATCHABLE_HOOK_EVENTS].join(', ')}.`,
+  );
+}
+
 /** Function registry entry — see `registerFunction`. */
 export interface FunctionEntry {
   handler: HookHandler;
@@ -2799,6 +2971,14 @@ export class ObjectQL implements IObjectQLEngine {
 
   /**
    * Register a hook
+   *
+   * [#17713] `event` must be one of {@link DISPATCHABLE_HOOK_EVENTS}, or a name
+   * outside the engine's lifecycle namespace entirely (a custom event a plugin
+   * dispatches itself through {@link ObjectQL.triggerHooks}). An engine
+   * lifecycle name the engine never dispatches — `beforeCount`, `beforeFindOne`
+   * and their siblings — is REFUSED here rather than registered inert; see
+   * {@link assertDispatchableHookEvent}.
+   *
    * @param event The event name (e.g. 'beforeFind', 'afterInsert')
    * @param handler The handler function
    * @param options Optional: target object(s), objects to exclude, and priority
@@ -2837,10 +3017,18 @@ export class ObjectQL implements IObjectQLEngine {
     assertHookScopeNotSelfCancelling(options?.object, options?.excludeObjects, event);
     // [#9719/#9974] The unscoped-multi-write flag on an event whose dispatch never reads it.
     assertValidUnscopedMultiWriteFlag(options?.dispatchUnscopedMultiWrite, event);
-    // [#3195] Guard against enum-vs-dispatch drift: a hook on an event the
-    // engine never triggers would register "successfully" and then silently
-    // never fire. Warn loudly rather than swallow it. Not a hard reject — a
-    // custom driver/plugin may dispatch its own events via `triggerHooks`.
+    // [#17713] An event inside the engine's OWN lifecycle namespace that the
+    // engine never dispatches — `beforeCount`, `beforeFindOne` and their four
+    // siblings. #3195 warned and registered anyway; the handler then never ran,
+    // which on a read filter is a guardrail the author believes they armed.
+    // Refused at the door, with the per-seam repair named.
+    assertDispatchableHookEvent(event);
+    // [#3195] Guard against enum-vs-dispatch drift for every OTHER unknown
+    // name: a hook on an event the engine never triggers would register
+    // "successfully" and then silently never fire. Warn loudly rather than
+    // swallow it. Still not a hard reject here — a custom driver/plugin may
+    // dispatch its own events via `triggerHooks`, and outside the engine's own
+    // vocabulary that is the likely reading (#17713 keeps it intact).
     if (!DISPATCHABLE_HOOK_EVENTS.has(event)) {
       this.logger.warn(
         `Hook registered for '${event}', which the engine never dispatches — it will never fire. ` +
@@ -5795,6 +5983,7 @@ export class ObjectQL implements IObjectQLEngine {
     }
 
     this.drivers.set(driver.name, driver);
+    this.supplyFileColumnsMovedResolver(driver);
     this.logger.info('Registered driver', {
       driverName: driver.name,
       version: driver.version
@@ -5803,6 +5992,59 @@ export class ObjectQL implements IObjectQLEngine {
     if (isDefault || this.drivers.size === 1) {
       this.defaultDriver = driver.name;
       this.logger.info('Set default driver', { driverName: driver.name });
+    }
+  }
+
+  /**
+   * Hand a freshly-registered driver the ADR-0104 media arm — the kernel→driver
+   * supply seam (#15989, the ruling on #15041 step 2).
+   *
+   * ## Why here, and why a closure rather than a value
+   *
+   * `registerDriver` is the one funnel every driver this engine will ever
+   * route to passes through, and it is early: the resolver is installed before
+   * `init()` connects and long before schema sync calls `initObjects`, which
+   * is where a SQL driver asks the closure exactly once and freezes the
+   * answer. A VALUE could not be supplied here at all — the fact lives in a
+   * `sys_migration` row this very driver has not connected to yet — so what is
+   * handed over is the question, not the answer.
+   *
+   * ## Duck-typed, and silent when the driver has no such seam
+   *
+   * A driver with no media arm (memory, mongodb, a third-party one) exposes no
+   * `setFileColumnsMovedResolver` and is left alone. That is not a degradation
+   * to report: a driver that never asks the question keeps whatever encoding
+   * it always had.
+   *
+   * ## ⛔ A host declaration WINS — this only ever fills an empty slot
+   *
+   * If the host passed `fileColumnsMoved` to the driver's own config, the
+   * driver refuses this resolver and says so on its own terms. The asymmetry
+   * is deliberate and the safety argument runs one way only: a host that
+   * declared `true` while the ledger says otherwise is a host that knows
+   * something about its own storage that the ledger does not yet record, and
+   * the engine silently overruling it to `false` would have the driver write
+   * JSON into columns that have already been retyped. The reverse — the engine
+   * overruling a declared `false` to `true` — writes bare ids into a JSON
+   * column, which is the failure direction the whole mechanism exists to
+   * prevent. Neither is acceptable, so the more specific authority wins and
+   * the engine never contradicts an explicit composition.
+   */
+  private supplyFileColumnsMovedResolver(driver: IDataDriver): void {
+    const sink = driver as unknown as {
+      setFileColumnsMovedResolver?: (resolve: () => Promise<boolean>) => void;
+    };
+    if (typeof sink.setFileColumnsMovedResolver !== 'function') return;
+    try {
+      sink.setFileColumnsMovedResolver(() => this.haveFileColumnsMoved());
+    } catch (e: any) {
+      // Installing the question must never break a driver registration. A
+      // driver that did not take the resolver keeps its own default, which is
+      // the JSON arm — the same place every other way of not knowing lands.
+      this.logger.debug('Driver declined the ADR-0104 media-arm resolver', {
+        driverName: driver.name,
+        error: e?.message ?? String(e),
+      });
     }
   }
 
@@ -7992,13 +8234,54 @@ export class ObjectQL implements IObjectQLEngine {
    * short-circuits before any query.
    */
   async isFileReferencesMigrationVerified(): Promise<boolean> {
-    return this.readMigrationFlagMemoized(
+    return (await this.readFileReferencesFlagRow()).verified;
+  }
+
+  /**
+   * The one memoized read both file-flag questions come off (#15989).
+   *
+   * Written once so the two public readers cannot drift apart in the ARGUMENTS
+   * they pass — the slot and the migration id decide which row is read, and a
+   * second copy of them is a second way to read a different row.
+   */
+  private readFileReferencesFlagRow(): Promise<MigrationFlagRead> {
+    return this.readMigrationFlagRowMemoized(
       'fileReferencesMigrationVerified',
       FILE_REFERENCES_MIGRATION_ID,
       '[value-shape] this deployment has verified the file-as-reference migration — ' +
         'media value shapes are enforced and released field files may be collected ' +
         '(ADR-0104 / #3617)',
     );
+  }
+
+  /**
+   * Have this deployment's file-family COLUMNS moved to the bare-id encoding
+   * (#15989 — the ruling on #15041, step 2)?
+   *
+   * The kernel-side half of the arm a SQL driver writes on. The driver cannot
+   * ask this itself: the fact lives in a `sys_migration` row, which is a row
+   * in a table the driver is the one serving, and reading it needs the
+   * registry and the read pipeline this engine owns. So the engine answers,
+   * and {@link registerDriver} hands each driver a closure over this method —
+   * that is the whole kernel→driver supply seam.
+   *
+   * ## Every way of not knowing answers "not moved"
+   *
+   * No `sys_migration` object registered, no row, an unreadable table, a row
+   * whose `columns_moved_at` is null or empty, a row that is not verified —
+   * all `false`, which is today's JSON encoding on every deployment that
+   * exists. That direction is not a preference: a driver that guessed "moved"
+   * would write bare ids into a JSON column, which is the one failure this
+   * whole mechanism is shaped to prevent. ⛔ It is also why the answer is NOT
+   * the `adr-0104-file-references` flag alone — every creation-attested store
+   * since 17.0 carries that flag AND JSON-quoted ids.
+   *
+   * Shares one memo slot, and therefore one read, with
+   * {@link isFileReferencesMigrationVerified}: they are two questions about
+   * one row. `invalidateDataMigrationFlags()` drops both.
+   */
+  async haveFileColumnsMoved(): Promise<boolean> {
+    return (await this.readFileReferencesFlagRow()).columnsMoved;
   }
 
   /**
@@ -8048,8 +8331,27 @@ export class ObjectQL implements IObjectQLEngine {
     migrationId: string,
     verifiedLog: string,
   ): Promise<boolean> {
+    return (await this.readMigrationFlagRowMemoized(slot, migrationId, verifiedLog)).verified;
+  }
+
+  /**
+   * The same memoized read, handed back WHOLE (#15989).
+   *
+   * The row carries two facts a consumer can want — is the migration verified,
+   * and have the columns moved — and they must come from one read: two reads
+   * can straddle a `--apply` and answer out of one another's date, which for
+   * these two facts means "verified, columns not moved" (the JSON arm) and
+   * "not verified, columns moved" (an unreachable state) both become
+   * observable. {@link readMigrationFlagMemoized} is this function projected
+   * onto its first field, so the two can never disagree.
+   */
+  private async readMigrationFlagRowMemoized(
+    slot: 'fileReferencesMigrationVerified' | 'valueShapesMigrationVerified',
+    migrationId: string,
+    verifiedLog: string,
+  ): Promise<MigrationFlagRead> {
     const cached = this[slot];
-    if (cached) return (await cached).verified;
+    if (cached) return await cached;
     const pending = this.readMigrationFlagVerified(migrationId, verifiedLog);
     this[slot] = pending;
     const result = await pending;
@@ -8057,7 +8359,7 @@ export class ObjectQL implements IObjectQLEngine {
     // by identity so a concurrent `invalidateDataMigrationFlags()` (or a
     // re-read that already replaced this slot) is not undone here.
     if (!result.conclusive && this[slot] === pending) this[slot] = null;
-    return result.verified;
+    return result;
   }
 
   /**
@@ -8078,9 +8380,9 @@ export class ObjectQL implements IObjectQLEngine {
   private async readMigrationFlagVerified(
     migrationId: string,
     verifiedLog?: string,
-  ): Promise<{ verified: boolean; conclusive: boolean }> {
+  ): Promise<MigrationFlagRead> {
     if (!this._registry.getObject(DATA_MIGRATION_FLAG_OBJECT)) {
-      return { verified: false, conclusive: false };
+      return { verified: false, conclusive: false, columnsMoved: false };
     }
     try {
       const rows = await this.find(DATA_MIGRATION_FLAG_OBJECT, {
@@ -8089,19 +8391,28 @@ export class ObjectQL implements IObjectQLEngine {
         context: { isSystem: true } as ExecutionContext,
       });
       const row: any = rows?.[0];
-      if (!row || row.id !== migrationId) return { verified: false, conclusive: true };
-      const verified = isDataMigrationFlagVerified({
+      if (!row || row.id !== migrationId) {
+        return { verified: false, conclusive: true, columnsMoved: false };
+      }
+      const flag = {
         id: migrationId,
         last_run_at: String(row.last_run_at ?? ''),
         verified_at: row.verified_at == null ? null : String(row.verified_at),
         // A non-numeric count must read as "not zero", not as 0 — a bad
         // coercion lands on NaN, which fails the === 0 test.
         blocking: typeof row.blocking === 'number' ? row.blocking : Number(row.blocking ?? Number.NaN),
-      });
+        // [#15989] Read here so both questions come off ONE row: an absent or
+        // empty stamp is the JSON encoding, which is what every row written
+        // before the column step existed holds.
+        columns_moved_at: row.columns_moved_at == null ? null : String(row.columns_moved_at),
+      };
+      const verified = isDataMigrationFlagVerified(flag);
       if (verified && verifiedLog) this.logger.info(verifiedLog);
-      return { verified, conclusive: true };
+      return { verified, conclusive: true, columnsMoved: hasMovedFileColumns(flag) };
     } catch {
-      return { verified: false, conclusive: false }; // unreadable evidence → stay lenient, keep asking
+      // unreadable evidence → stay lenient, keep asking; and the columns read
+      // as NOT moved, which is the encoding every deployment already writes.
+      return { verified: false, conclusive: false, columnsMoved: false };
     }
   }
 
@@ -10636,8 +10947,14 @@ export class ObjectQL implements IObjectQLEngine {
             rowHookContexts[i].input.data = stripped;
           }
           // One line per CALL, not per row, and only when the exemption was
-          // ASKED FOR and something was actually removed — the union is
-          // faithful because the strip is schema-uniform.
+          // ASKED FOR and something was actually removed. Per CALL because a
+          // log line has no per-row slot: the union of what the batch lost is
+          // the only view one line can represent — ⛔ NOT because every row
+          // lost the same set. `hookWrittenKeys: rowHookWrittenKeys[i]` above
+          // is armed per ROW and its only power is to turn a strip into a
+          // KEEP, so a hook that stamps a protected key on some rows and not
+          // others makes those rows lose DIFFERENT sets. Read a name in this
+          // line as "at least one row lost this field", never "every row did".
           if (preserveAuditIgnored.length > 0) {
             this.logger.warn(preserveAuditIgnoredOnInsertWarning(object, preserveAuditIgnored));
           }
@@ -11091,10 +11408,18 @@ export class ObjectQL implements IObjectQLEngine {
    * outcome array — the records ARE written.
    *
    * `onFieldsDropped` (#3407) is forwarded to `insert`, so the runtime-owned
-   * strip (#5503) reports here too. The event carries no row index — it is the
-   * UNION over the batch — but the strip only ever removes keys the row itself
-   * supplied, so a caller holding the input rows can attribute each name back to
-   * the rows that carried it (`insertManyData` does exactly that).
+   * strip (#5503) reports here too. ⚠️ The event carries no row index — it is
+   * the UNION over the batch — and a caller holding the input rows CANNOT
+   * resolve it back to rows. "Which rows supplied N" is a different set from
+   * "which rows dropped N": since ruling C (#14147) the static-`readonly` strip
+   * runs after `beforeInsert` and exempts keys a hook assigned, per row
+   * (`hookWrittenKeys: rowHookWrittenKeys[i]`, above), so two rows that both
+   * supplied N can differ on whether N survived — and a row this method culled
+   * before the strip dropped nothing at all. Nor does the returned row answer
+   * it: a stripped `readonly` field is re-defaulted and a stripped `autonumber`
+   * is refilled, so the key is present on the row that did drop it. Read a
+   * reported name as "at least one row dropped this field"; `insertManyData`
+   * surfaces it at batch level for exactly this reason.
    */
   async insertMany(object: string, rows: any[], options?: DataEngineInsertOptions & WriteObservabilityOptions): Promise<InsertManyRowOutcome[]> {
     if (!Array.isArray(rows)) throw new Error('insertMany expects an array of rows');

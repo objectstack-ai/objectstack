@@ -68,7 +68,16 @@ async function lower(range: string | readonly string[]): Promise<LoweredDateRang
         timeDimensions: [{ dimension: 'events.createdAt', dateRange: range }],
     } as unknown as AnalyticsQuery);
     const m = /"\$gte":"([^"]+)","(\$lte|\$lt)":"([^"]+)"/.exec(String(result.sql));
-    if (!m) throw new Error(`no window in the memory pipeline dump: ${String(result.sql)}`);
+    // [#17596] ⛔ "no window" is not "a refusal", and the kit can only tell them
+    // apart by what this says: a pipeline with no `$match` stage selects EVERY
+    // row, which is the defect the ARITY case exists to catch on this face. The
+    // kit quotes this text whenever a thrown thing carries no ADR-0112 `code`.
+    if (!m) {
+      throw new Error(
+        'emitted NO window — the pipeline has no time predicate at all, so every row is '
+        + `selected: ${String(result.sql)}`,
+      );
+    }
     return { start: m[1], end: m[3], endExclusive: m[2] === '$lt' };
 }
 

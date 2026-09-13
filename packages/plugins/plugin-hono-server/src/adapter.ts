@@ -26,6 +26,12 @@ import { Hono } from 'hono';
 import { routePath } from 'hono/route';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
+// The TLS listener factory (#16804). `@hono/node-server` takes it as an
+// OPTION — its `Options` type is a union whose https arm is
+// `{ createServer: typeof https.createServer; serverOptions: https.ServerOptions }`
+// — so terminating TLS needs no bridging code here: the same `fetch` handler,
+// the same drain, one different server factory. See {@link HttpsListenerMaterial}.
+import { createServer as createHttpsServer } from 'node:https';
 import { matchesRoutePattern } from './route-pattern';
 // The ADR-0112 wire vocabulary, read as DATA rather than restated: `ErrorCode`
 // is the closed union (`StandardErrorCode` ∪ `ERROR_CODE_LEDGER`) a registered
@@ -81,6 +87,28 @@ export const DEFAULT_CORS_EXPOSE_HEADERS: readonly string[] = Object.freeze([
     'set-auth-token',
     'x-objectstack-dropped-fields',
 ]);
+
+/**
+ * PEM bytes for a TLS listener — the certificate and its private key, already
+ * read (#16804).
+ *
+ * ⭐ BYTES, ⛔ not paths, and that division is the contract. Whoever hands this
+ * adapter TLS material is the layer that knows WHY it has it — in the shipped
+ * case, `os dev --cert … --key …`, which owns the flag names and can therefore
+ * refuse an unreadable file by naming the flag the operator typed. A transport
+ * adapter that took paths would have to invent that refusal from a filename,
+ * and would own a second reader of the same file.
+ *
+ * ⛔ Nothing in this package generates a certificate, and nothing in it says
+ * anything about installing one into a trust store. Absent this option the
+ * listener is plain http, exactly as it always was.
+ */
+export interface HttpsListenerMaterial {
+    /** The certificate chain, PEM. */
+    cert: string | Buffer;
+    /** The certificate's private key, PEM. */
+    key: string | Buffer;
+}
 
 export interface HonoCorsOptions {
     enabled?: boolean;
@@ -414,8 +442,23 @@ export class HonoHttpServer implements IHttpServer {
          * `shutdownTimeout` so a slow request can't hang the whole shutdown.
          */
         private drainTimeoutMs: number = 10_000,
+        /**
+         * When present, {@link tryListen} binds a TLS listener instead of a
+         * plain one (#16804). Fixed at construction because it decides what
+         * the socket IS, not how a request is handled: every origin the boot
+         * advertises is derived from the same answer one layer up, so a
+         * mid-flight change would leave the process speaking one protocol and
+         * advertising another.
+         */
+        private tls?: HttpsListenerMaterial,
     ) {
         this.app = new Hono();
+        this.installErrorEnvelopeSeam();
+    }
+
+    /** The scheme this server binds — derived from {@link tls}, settable nowhere else. */
+    getProtocol(): 'http' | 'https' {
+        return this.tls ? 'https' : 'http';
     }
 
     // internal helper to convert standard handler to Hono handler
@@ -768,6 +811,148 @@ export class HonoHttpServer implements IHttpServer {
             // would otherwise reject `runHandler`'s own promise and turn a
             // clean 500 into Hono's opaque error page.
         }
+    }
+
+    /**
+     * Report a throw that escaped to the TRANSPORT seam — the diagnostic exit
+     * for the population {@link reportHandlerFailure} cannot see.
+     *
+     * Two reporters, DISJOINT populations: `wrap()` catches everything a
+     * {@link RouteHandler} throws and reports it there, so nothing reaching
+     * this method has been reported already and nothing it reports will be
+     * reported again. Hono's default handler wrote these to `console.error`;
+     * routing them through the host logger is what puts a raw-mount failure in
+     * the same stream as every other one.
+     *
+     * `error`, not `warn`, for the reason {@link reportHandlerFailure} states:
+     * an unhandled throw out of a handler is a server-side defect, and the
+     * AGENTS.md "handed to the CALLER" exemption does not apply to a throw
+     * nobody caught. Method and path only — never the body.
+     */
+    private reportTransportEscape(
+        c: any,
+        thrown: unknown,
+        rendered?: { status: number; code: unknown },
+    ): void {
+        try {
+            const method = typeof c?.req?.method === 'string' ? c.req.method : undefined;
+            const path = typeof c?.req?.path === 'string' ? c.req.path : undefined;
+            this.logger.error(
+                rendered
+                    ? '[hono] a throw escaped to the transport — request answered with the throw\'s declared ADR-0112 envelope'
+                    : '[hono] a throw escaped to the transport — request answered 500 INTERNAL_ERROR with no cause in the body',
+                toLoggableError(thrown),
+                rendered
+                    ? { method, path, status: rendered.status, code: rendered.code }
+                    : { method, path },
+            );
+        } catch {
+            // Same discipline as {@link reportHandlerFailure}: a host logger
+            // that throws would otherwise reject the error seam itself and
+            // hand the caller Hono's opaque page — precisely the answer this
+            // seam exists to remove.
+        }
+    }
+
+    /**
+     * Answer a throw that escaped to the TRANSPORT with the declared ADR-0112
+     * envelope — the seam a route mounted through {@link getRawApp} funnels
+     * through (#17411).
+     *
+     * ## The door this closes
+     *
+     * {@link wrap} catches everything a {@link RouteHandler} throws, so every
+     * route registered through {@link get} / {@link post} / … already answers
+     * the declared envelope (#16545). A route mounted on the framework handle
+     * passes through NEITHER `wrap()` nor any registrar wrapper, so its
+     * escaped throw reached Hono's own default handler — measured on
+     * `7d350a46`, one `HonoHttpServer`, the raw pair mounted the way
+     * `marketplace-install-local-plugin.ts` mounts:
+     *
+     * ```
+     * /raw/envelope   -> 500 text/plain; charset=UTF-8   Internal Server Error
+     * /raw/plain      -> 500 text/plain; charset=UTF-8   Internal Server Error
+     * ```
+     *
+     * Byte-identical: a throw that DECLARED `503` / `SERVICE_UNAVAILABLE` and
+     * a bare driver error answered the same thing, so the transport discarded
+     * the producer's own declaration — the half of the defect that is
+     * invisible from the producer's side, which is where anyone would look.
+     *
+     * ## Why the transport, and why this does not close the escape hatch
+     *
+     * {@link getRawApp}'s exemption is scoped to framework-native MOUNTING and
+     * to route introspection, never to the wire shape of a refusal. The
+     * contract says raw-handle mounts are "outside this table by construction
+     * … this answers 'what routes did I register', not 'what paths might
+     * respond'" ({@link IHttpServer.getMountedRoutes}), and the same contract
+     * requires the unmatched answer to carry "the shared not-found error body
+     * (the `errors.zod` envelope), never an adapter-native error page". An
+     * error seam on the handle leaves the hatch fully intact: consumers still
+     * mount natively, still stay outside `getMountedRoutes()`, still need no
+     * adapter verb. It is the reasoning {@link installHttpMetricsSeam}'s
+     * seam already rests on (#9650) — the transport is the one layer every
+     * inbound request converges on, whatever registered the handler.
+     *
+     * ## ONE rule, not a second one
+     *
+     * The render is {@link declaredEnvelopeForThrow}, the same gate `wrap()`
+     * opted into, so `/raw/*` and a direct-mount route answer the same shape
+     * for the same throw — the `ValidationError`-shape-as-declaration limb
+     * included. The fallback arm is the ADR-0112 `INTERNAL_ERROR` body
+     * carrying {@link INTERNAL_ERROR_MESSAGE}: a non-envelope throw still
+     * answers 500 with NO cause in the body, #16545's pinned invariant.
+     *
+     * ⛔ It deliberately does NOT copy `wrap()`'s literal `"No response from
+     * handler"`. That sentence describes a handler that wrote nothing — a
+     * state this seam never observes, because a Hono handler that returns
+     * nothing is Hono's own error, not ours. Copying it would put a false
+     * diagnosis on the wire; the `code` and the `status`, which are what a
+     * client branches on, agree with `wrap()` exactly.
+     *
+     * ## Hono's own declared-`Response` limb is preserved
+     *
+     * Hono's default handler honours a thrown value carrying its own
+     * `Response` (`HTTPException`) before falling back to
+     * `text('Internal Server Error', 500)`, and that limb is kept verbatim: an
+     * `HTTPException` is a framework-native refusal the producer DECLARED, and
+     * overriding it would be this card's own defect with the roles reversed.
+     * Measured at `7d350a46`: zero `HTTPException` producers anywhere in
+     * `packages/`, so this preserves behaviour rather than adding any.
+     *
+     * ## Installed from the constructor, and overridable on purpose
+     *
+     * Once, unconditionally, so a bare `HonoHttpServer` (cloud's serverless
+     * entrypoints, tests) gets it without wiring — the same reason
+     * {@link setLogger}'s default is a real logger. A consumer that calls
+     * `getRawApp().onError(...)` itself replaces it, which is the escape hatch
+     * working as designed.
+     */
+    private installErrorEnvelopeSeam(): void {
+        this.app.onError((err: Error, c: any) => {
+            // Hono's own precedence, unchanged — see the docblock.
+            if (err !== null && typeof err === 'object' && 'getResponse' in err) {
+                const declared = (err as unknown as { getResponse(): Response }).getResponse();
+                return c.newResponse(declared.body, declared);
+            }
+
+            const envelope = declaredEnvelopeForThrow(err);
+            this.reportTransportEscape(
+                c,
+                err,
+                envelope ? { status: envelope.status, code: envelope.body.error.code } : undefined,
+            );
+
+            return envelope
+                ? c.json(envelope.body, envelope.status)
+                : c.json(
+                    {
+                        success: false,
+                        error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE },
+                    },
+                    500,
+                );
+        });
     }
 
     get(path: string, handler: RouteHandler) {
@@ -1311,13 +1496,24 @@ export class HonoHttpServer implements IHttpServer {
         this.app.use('*', async (c, next) => {
             if (this.responseObservers.length === 0) return next();
             const startedAt = Date.now();
-            // Default 500: if `next()` rejects, Hono's error path renders the
-            // 500 and `c.res` is not yet set — reading it would synthesize a
-            // response and change what the caller receives.
+            // Default 500: if `next()` rejects, `c.res` is not yet set here —
+            // reading it would synthesize a response and change what the
+            // caller receives.
             let status = 500;
             try {
                 await next();
                 status = c.res.status;
+            } catch (err) {
+                // … and 500 stopped being the whole answer with #17411: the
+                // transport error seam ({@link installErrorEnvelopeSeam}) may
+                // render a DECLARED status for this throw, and it runs after
+                // this middleware unwinds. `HttpResponseObservation.status` is
+                // contracted as "the status of the response as sent", so the
+                // observer is owed that status — read off the SAME rule the
+                // seam renders from, never a second copy of it. The throw is
+                // re-raised untouched: observing is not handling.
+                status = declaredEnvelopeForThrow(err)?.status ?? 500;
+                throw err;
             } finally {
                 // An unrouted request executes only this adapter's own
                 // `use('*')` seams, so after `next()` `routePath(c)` reports
@@ -1391,13 +1587,30 @@ export class HonoHttpServer implements IHttpServer {
 
     private tryListen(port: number): Promise<void> {
         return new Promise<void>((resolve, reject) => {
-            const server = serve({
-                fetch: this.app.fetch,
-                port
-            }, (info) => {
-                this.listeningPort = info.port;
-                resolve();
-            });
+            // ⛔ The two arms are spelled out rather than assembled from a
+            // spread, because `@hono/node-server`'s `Options` is a UNION of
+            // per-protocol arms: a conditionally-built object widens to the
+            // union and loses the pairing between `createServer` and the
+            // `serverOptions` that factory accepts — which is the one thing a
+            // type can check here. Everything else about the two calls, and
+            // everything about `close()`, is identical.
+            const server = this.tls
+                ? serve({
+                    fetch: this.app.fetch,
+                    port,
+                    createServer: createHttpsServer,
+                    serverOptions: { cert: this.tls.cert, key: this.tls.key },
+                }, (info) => {
+                    this.listeningPort = info.port;
+                    resolve();
+                })
+                : serve({
+                    fetch: this.app.fetch,
+                    port
+                }, (info) => {
+                    this.listeningPort = info.port;
+                    resolve();
+                });
             this.server = server;
             server.on('error', (err: any) => {
                 reject(err);

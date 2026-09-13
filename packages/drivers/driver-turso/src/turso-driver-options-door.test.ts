@@ -63,6 +63,23 @@ import type { DriverOptions } from '@objectstack/spec/data';
 type IsAny<T> = 0 extends 1 & T ? true : false;
 
 /**
+ * [#17879] MEASURED — `Door<T>` below asks `IsAny`, which is a PHANTOM half
+ * against a NESTED regression, and swapping in `ContainsAny` (#17876) does
+ * NOT close it. Measured on the `find` row, on disk:
+ *
+ *   every one of the 17 doors resolves to `DriverOptions | undefined`
+ *   CONTROL  `options?: any`                 that row reds (TS1360) => fires
+ *   NESTED   `options?: Record<string, any>`  0 errors here — the row still
+ *                                             answers `'DriverOptions'`
+ *   the same NESTED run with `ContainsAny` inside `Door<T>`: still `'DriverOptions'`
+ *
+ * `ContainsAny` distributes over the `| undefined` every optional parameter
+ * carries, so the regressed door answers `boolean`, and `boolean extends true`
+ * is `false` — the detector reads it as "no `any` here". No swap was made;
+ * the two measured repairs are in the #17879 report.
+ */
+
+/**
  * Reports what a given `options` door actually is. `'any'` for a widened door,
  * `'DriverOptions'` for one that matches the base contract exactly.
  */

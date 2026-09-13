@@ -28,13 +28,34 @@
 // consumers read it (`build-docs.ts`, the pre-commit hook, the merge driver's
 // prescription), and two copies of "is this older than src" drift in the
 // direction that renders a confident page from a tree nobody rebuilt (#4675).
+//
+// ── Re-judged at #16175, not rewritten ──────────────────────────────────────
+//
+// The rule gained a second half: an mtime accusation can now be ANSWERED by
+// `json-schema/.build-input-hash-schema`, the digest `build-schemas.ts` writes
+// at the end of a generation. That was needed because the mtime half alone
+// refuses a tree whose bytes never moved — `git merge`, `git checkout` and
+// `git worktree add` re-check-out unchanged sources and bump their mtimes, the
+// build correctly does not run, and `check:docs` then costs a full regeneration
+// for a tree that is exactly current (measured: exit 1 on a checkout whose
+// `git status` was empty).
+//
+// ⛔ Every case below was re-judged against that change rather than deleted, and
+// every one of them still asserts what it was written to assert — because NONE
+// of these sandboxes carries a stamp. That is not an accident of the fixtures,
+// it is the property being pinned: no stamp is `unstamped`, `unstamped` is NO
+// EVIDENCE, and no evidence leaves the mtime verdict exactly where it stood
+// (#4690). So the original six cases now pin one MORE thing than they were
+// written for — that the acquittal channel cannot be reached without evidence —
+// and the block added after them supplies the evidence and pins what it may and
+// may not do with it.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { schemaTreeIsStale } from '../../../scripts/check-regen-pending.mjs';
+import { schemaStamp, schemaTreeIsStale } from '../../../scripts/check-regen-pending.mjs';
 
 /** A throwaway `packages/spec`-shaped directory: `src/` plus `json-schema/`. */
 let sandbox: string;
@@ -88,6 +109,12 @@ describe('schemaTreeIsStale — the json-schema/ freshness rule (#4723)', () => 
     // on every run; after it, this is what an unrebuilt tree looks like, and
     // answering `false` here is what would let `check:docs` report the docs in
     // sync with a `.describe()` it never read.
+    //
+    // Re-judged at #16175 and kept verbatim: this sandbox has no stamp, so the
+    // accusation has nothing to answer it and stands. It is now BOTH the
+    // false-green pin it always was and the pin for "absence of evidence is not
+    // licence to acquit" — which is exactly the shape the #16175 acquittal must
+    // not be able to reach on its own.
     write('json-schema/data/Object.json', '{}', OLD);
     write('src/data/object.zod.ts', 'export const x = 1;', NEW);
     expect(schemaTreeIsStale(sandbox)).toBe(true);
@@ -128,5 +155,125 @@ describe('schemaTreeIsStale — the json-schema/ freshness rule (#4723)', () => 
     // whose name merely starts with the word is still a source file.
     write('src/data/test-helpers.zod.ts', 'export const z = 3;', NEW);
     expect(schemaTreeIsStale(sandbox)).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #16175 — the accusation can now be ANSWERED, and only in one direction.
+//
+// `distIsStale` (#14985/#16176) and `bundlesAreStale` (#16240) each gained a
+// digest that may acquit a tree whose bytes never moved. This rule had nothing
+// to read: the two `dist/` stamps are written at the END of the build, while
+// `gen:schema` is its FIRST step and is also run standalone and by
+// `check:authorable-surface` — so a `dist/` stamp is evidence about `dist/` and
+// would have been silent in the common case. The evidence here is therefore new:
+// `build-schemas.ts` writes `json-schema/.build-input-hash-schema` as the last
+// thing it does, over the digest of the inputs that generation consumed.
+//
+// The direction is the whole ruling, in triage's words: 摘要只能赦免、不能指控
+// — the digest may only ever ACQUIT a tree the mtime rule has already accused.
+// So the cases below come in pairs: one that must go green with evidence, and
+// one that must STAY red without it, or with evidence that does not fit.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The digest a generation of `sandbox` would record, right now.
+ *
+ * Asked of the rule's own reader rather than hardcoded, for the reason
+ * `dist-freshness.test.ts` gives: the input set includes turbo.json's
+ * `globalDependencies` and the repo-relative path of every file, so a literal
+ * would rot on the next unrelated edit — and a rotted literal fails as
+ * `mismatch`, which reads exactly like the refusal these cases distinguish from.
+ *
+ * Two steps, because the reader computes `actual` only when a valid digest is
+ * recorded: seed a syntactically valid placeholder, read what the inputs really
+ * hash to, then let the caller write that.
+ */
+function currentDigest(): string {
+  write('json-schema/.build-input-hash-schema', `${'0'.repeat(64)}\n`, OLD);
+  const { actual } = schemaStamp(sandbox);
+  if (!actual) throw new Error('the sandbox digest could not be computed — the fixture is wrong');
+  return actual;
+}
+
+describe('schemaTreeIsStale — the generation stamp may acquit, never accuse (#16175)', () => {
+  it('clears a tree older than src when the stamp MATCHES — THE case', () => {
+    // The measured defect: `git merge` / `git checkout` / `git worktree add`
+    // re-checks-out a source file with identical bytes and bumps its mtime; the
+    // build correctly does not run (turbo hashes content); the tree is exactly
+    // current and the rule refused it, costing a full `gen:schema`.
+    write('json-schema/data/Object.json', '{}', OLD);
+    write('src/data/object.zod.ts', 'export const x = 1;', NEW);
+    // Without evidence this is the false-green case above, and stays refused.
+    expect(schemaTreeIsStale(sandbox)).toBe(true);
+
+    write('json-schema/.build-input-hash-schema', `${currentDigest()}\n`, OLD);
+    expect(schemaStamp(sandbox).state).toBe('match');
+    expect(schemaTreeIsStale(sandbox)).toBe(false);
+  });
+
+  it('keeps refusing when the stamp MISMATCHES — a real content change', () => {
+    // The half that makes the case above non-vacuous. If the acquittal were
+    // unconditional, this would pass too — and the rule would have gone blind
+    // rather than got smarter, which is indistinguishable from fixed by any
+    // assertion that only ever watches it stop refusing.
+    write('json-schema/data/Object.json', '{}', OLD);
+    write('src/data/object.zod.ts', 'export const x = 1;', NEW);
+    write('json-schema/.build-input-hash-schema', `${'a'.repeat(64)}\n`, OLD);
+
+    expect(schemaStamp(sandbox).state).toBe('mismatch');
+    expect(schemaTreeIsStale(sandbox)).toBe(true);
+  });
+
+  it('keeps refusing on a stamp that is not a digest — absence of evidence is not licence (#4690)', () => {
+    // Every way of not knowing collapses to `unstamped`: a truncated write, a
+    // merge marker, a half-flushed file. None of them may read as vouched for.
+    write('json-schema/data/Object.json', '{}', OLD);
+    write('src/data/object.zod.ts', 'export const x = 1;', NEW);
+    write('json-schema/.build-input-hash-schema', 'not-a-digest\n', OLD);
+
+    expect(schemaStamp(sandbox).state).toBe('unstamped');
+    expect(schemaTreeIsStale(sandbox)).toBe(true);
+  });
+
+  it('cannot conjure a tree: a MISSING tree stays stale however good the stamp', () => {
+    // The stamp speaks for a tree; it is not a substitute for one. A leftover
+    // stamp beside an emptied `json-schema/` — a failed clean, a partial cache
+    // restore — must not turn "nothing to render from" into "current".
+    write('src/data/object.zod.ts', 'export const x = 1;', OLD);
+    write('json-schema/.build-input-hash-schema', `${currentDigest()}\n`, NEW);
+
+    expect(schemaStamp(sandbox).state).toBe('match');
+    expect(schemaTreeIsStale(sandbox)).toBe(true);
+  });
+
+  it('never accuses: a MISMATCHED stamp cannot overturn an mtime verdict of fresh', () => {
+    // The one-way property stated as an assertion rather than as prose. The
+    // mtime rule is the only thing that convicts — the digest cannot see a
+    // hand-edited tree, a toolchain change or dependency drift, so letting it
+    // convict would make a rule that passes today start failing for reasons
+    // nobody measured.
+    write('src/data/object.zod.ts', 'export const x = 1;', OLD);
+    write('json-schema/data/Object.json', '{}', NEW);
+    write('json-schema/.build-input-hash-schema', `${'b'.repeat(64)}\n`, NEW);
+
+    expect(schemaStamp(sandbox).state).toBe('mismatch');
+    expect(schemaTreeIsStale(sandbox)).toBe(false);
+  });
+
+  it('cannot vouch for itself — the stamp is invisible to both sides of the mtime rule', () => {
+    // `newestMtime` skips dotted entries and the artifact side matches `.json`,
+    // so the stamp counts as neither artifact nor source. Were it counted on the
+    // artifact side, writing it would make every tree look newer than src and
+    // the rule would clear itself unconditionally.
+    write('src/data/object.zod.ts', 'export const x = 1;', NEW);
+    // A stamp NEWER than the sources, and nothing else in the tree.
+    write('json-schema/.build-input-hash-schema', `${currentDigest()}\n`, NEW + 60);
+    expect(schemaTreeIsStale(sandbox)).toBe(true);
+
+    // With one real artifact present but OLDER, the accusation still stands on
+    // its own terms and is answered only by the digest, never by the file's date.
+    write('json-schema/data/Object.json', '{}', OLD);
+    expect(schemaTreeIsStale(sandbox)).toBe(false);
   });
 });

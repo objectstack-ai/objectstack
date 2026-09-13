@@ -27,6 +27,7 @@ import {
   renameKey,
 } from './walk.js';
 import { resolveDriverId, type BuiltinDriverId } from '../data/driver/config-registry.zod.js';
+import { RETIRED_SUB_DAY_INTERVALS } from '../data/analytics.zod.js';
 import { deepEqualAuthored } from '../shared/deep-equal.js';
 
 /**
@@ -7465,6 +7466,112 @@ const metricFiltersRemoved: MetadataConversion = {
 };
 
 /**
+ * `dimensions.<dim>.granularities` — the three sub-day names `TimeUpdateInterval`
+ * declared until protocol 18 (#17296, ADR-0049 enforce-or-remove).
+ *
+ * A VALUE strip rather than a key strip: the key stays, and the three retired
+ * members are dropped from the authored list. Lossless in the only sense that
+ * matters here — no backend ever bucketed them, so a cube offering `hour`
+ * offered a granularity that answered 501 on `driver-memory` and
+ * `driver-mongodb` and one group per distinct timestamp on the engine's
+ * in-memory path. Deleting the offer preserves every observable answer.
+ *
+ * A dimension left with an EMPTY list after the strip drops the key entirely
+ * rather than declaring `granularities: []`: the key's own meaning is "the
+ * granularities this dimension offers", and an empty list is the one value
+ * that reads as "none" while the absent key reads as "all", which is what the
+ * cube meant before it named only sub-day ones it never had.
+ */
+const cubeSubDayGranularitiesRemoved: MetadataConversion = {
+  id: 'cube-sub-day-granularities-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  surface: 'analyticsCubes[].dimensions.<dim>.granularities',
+  summary:
+    "cube dimension granularities 'second' / 'minute' / 'hour' removed (#17296, ADR-0049 — no "
+    + 'backend bucketed them and none could advertise them: `supports.queryDateGranularity` is a '
+    + 'record over `DateGranularity`, which declares day, week, month, quarter, year. Offer the '
+    + 'coarsest interval that still answers the question)',
+  apply(stack, emit) {
+    return mapCollection(stack, 'analyticsCubes', (cube, path) => {
+      const dimensions = cube.dimensions;
+      if (!isDict(dimensions)) return cube;
+      let touched = false;
+      const nextDimensions: Record<string, unknown> = { ...dimensions };
+      for (const [name, dim] of Object.entries(dimensions)) {
+        if (!isDict(dim)) continue;
+        const list = dim.granularities;
+        if (!Array.isArray(list)) continue;
+        const kept = list.filter((g) => !(RETIRED_SUB_DAY_INTERVALS as readonly string[]).includes(g as string));
+        if (kept.length === list.length) continue;
+        const where = `${path}.dimensions.${name}.granularities`;
+        emit({ from: JSON.stringify(list), to: kept.length > 0 ? JSON.stringify(kept) : '(removed)', path: where });
+        const nextDim: Record<string, unknown> = { ...dim };
+        if (kept.length > 0) nextDim.granularities = kept;
+        else delete nextDim.granularities;
+        nextDimensions[name] = nextDim;
+        touched = true;
+      }
+      if (!touched) return cube;
+      return { ...cube, dimensions: nextDimensions };
+    });
+  },
+  fixture: {
+    before: {
+      analyticsCubes: [{
+        name: 'events',
+        sql: 'events',
+        measures: { count: { name: 'count', label: 'Events', type: 'count', sql: 'id' } },
+        dimensions: {
+          // Mixed list — the sub-day names go, the rest stays in its order.
+          created_at: {
+            name: 'created_at', label: 'Created At', type: 'time', sql: 'created_at',
+            granularities: ['hour', 'day', 'month'],
+          },
+          // Sub-day ONLY — the key goes rather than becoming an empty list.
+          touched_at: {
+            name: 'touched_at', label: 'Touched At', type: 'time', sql: 'touched_at',
+            granularities: ['second', 'minute'],
+          },
+          // Neither retired member nor the key at all: both ride through, and
+          // the copy-on-write contract keeps the references.
+          closed_at: {
+            name: 'closed_at', label: 'Closed At', type: 'time', sql: 'closed_at',
+            granularities: ['day', 'week'],
+          },
+          stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' },
+        },
+      }],
+    },
+    after: {
+      analyticsCubes: [{
+        name: 'events',
+        sql: 'events',
+        measures: { count: { name: 'count', label: 'Events', type: 'count', sql: 'id' } },
+        dimensions: {
+          created_at: {
+            name: 'created_at', label: 'Created At', type: 'time', sql: 'created_at',
+            granularities: ['day', 'month'],
+          },
+          touched_at: {
+            name: 'touched_at', label: 'Touched At', type: 'time', sql: 'touched_at',
+          },
+          closed_at: {
+            name: 'closed_at', label: 'Closed At', type: 'time', sql: 'closed_at',
+            granularities: ['day', 'week'],
+          },
+          stage: { name: 'stage', label: 'Stage', type: 'string', sql: 'stage' },
+        },
+      }],
+    },
+    // Two notices: the mixed list and the sub-day-only one. The two untouched
+    // dimensions are the fixture's own control — they prove the walk dispatches
+    // on a retired MEMBER rather than on the key's presence.
+    expectedNotices: 2,
+  },
+};
+
+/**
  * `record:highlights` highlight-field `icon` — a declared, advertised key with
  * zero read points (#10054, ADR-0049 enforce-or-remove; maintainer ruling
  * 2026-08-21, executing the 2026-08-20 census verdict).
@@ -8007,6 +8114,189 @@ const objectGridDefaultSortRemoved: MetadataConversion = {
     // Four notices: three wrap-and-renames (g1, the nested g3, the slotted g4)
     // and one strip (g2, where `sort` already won).
     expectedNotices: 4,
+  },
+};
+
+/**
+ * `object-kanban`'s per-column quick-add switch leaves the contract (protocol
+ * 18, #17260, ADR-0049 enforce-or-remove; the spec half of the objectui#8285
+ * director-seat ruling, decision batch #91, 2026-09-08 — ruled option B,
+ * `quickAdd` is retired from the board and stays only on the `kanban-ui`
+ * block, where a React host can supply the runtime function the control
+ * needs).
+ *
+ * **A pure lossless delete.** The key never had an effect to preserve.
+ * Measured at the `.objectui-sha` pin (`53ded82bf`): the board FORWARDS it —
+ * `ObjectKanban.tsx:931` spreads the authored bag into `KanbanRenderer`,
+ * which passes `quickAdd={schema.quickAdd}` alongside
+ * `onQuickAdd={schema.onQuickAdd}` (`plugin-kanban/src/index.tsx:196`) — but
+ * `KanbanImpl` gates the affordance on BOTH (`:355`, `:368`), and
+ * `onQuickAdd` is a host-supplied FUNCTION that JSON cannot carry and that no
+ * producer puts on an `object-kanban` node (`ObjectKanban.tsx` names neither
+ * half of the pair: 0 occurrences each, against 6 for the sibling
+ * `onCardClick` in the same file). So the gate was permanently false and
+ * deleting the key preserves observed behaviour exactly.
+ *
+ * ⚠️ Scoped by component `type`, never by key name. `quickAdd` is LIVE on the
+ * `kanban-ui` block — the same renderer chain, reached by a React host that
+ * hands in `onQuickAdd` — and the ruling keeps it there deliberately. That
+ * block is objectui-side and is not a component type this spec declares, so no
+ * stack this walk reaches can carry it; the type scoping is what keeps the
+ * strip from generalising into a name-keyed one if it ever is declared. The
+ * fixture's non-carrier control is an `object-grid` authoring the same key
+ * name.
+ *
+ * The neighbouring forwarded keys `coverImageField` and `conditionalFormatting`
+ * are LIVE and survive untouched (both are read on this very path, by
+ * `KanbanRenderer` / `bucketCardsIntoColumns`).
+ *
+ * Zero authored occurrences in this repo's corpora — no `object-kanban`
+ * component is authored anywhere under `examples/` or `apps/` at all (control:
+ * `object-grid` 3, `object-metric` 8 in the same corpora, same instrument) —
+ * so this entry exists for stored `sys_metadata` rows and for authors outside
+ * the repo, which the filing seat explicitly could not measure.
+ */
+const objectKanbanQuickAddRemoved: MetadataConversion = {
+  id: 'object-kanban-quick-add-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  surface: 'page.component.object-kanban.quickAdd',
+  summary:
+    "object-kanban component prop 'quickAdd' removed (#17260 — the affordance is gated on a "
+    + "host-supplied 'onQuickAdd' function no producer puts on an object-kanban node, so the key "
+    + "was accepted and dropped; the quick-add control stays on the React-host 'kanban-ui' block)",
+  apply(stack, emit) {
+    return mapPageComponents(stack, (component, path) => {
+      if (component.type !== 'object-kanban') return component;
+      const properties = component.properties;
+      if (!isDict(properties) || !('quickAdd' in properties)) return component;
+      const stripped = stripKeys(properties, ['quickAdd'], emit, `${path}.properties`);
+      return { ...component, properties: stripped };
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        {
+          name: 'delivery_board',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                // The carrier: an `object-kanban` authoring the retired key.
+                {
+                  type: 'object-kanban',
+                  id: 'k1',
+                  properties: { objectName: 'crm_task', groupBy: 'status', quickAdd: true },
+                },
+                // ⚠️ The same key name on a component that is NOT an
+                // `object-kanban` — not this entry's key. Untouched: the strip
+                // is scoped by component type, never by key name, which is what
+                // keeps the LIVE `kanban-ui` spelling out of its reach.
+                {
+                  type: 'object-grid',
+                  id: 'g1',
+                  properties: { objectName: 'crm_task', quickAdd: true },
+                },
+                // A board WITHOUT the key rides through untouched — the strip
+                // dispatches on key presence and the copy-on-write contract
+                // keeps the reference.
+                {
+                  type: 'object-kanban',
+                  id: 'k3',
+                  properties: { objectName: 'crm_task', cardFields: ['title'] },
+                },
+                // The nested position (#6775's lesson): a board inside a
+                // card's `children` is still a component.
+                {
+                  type: 'page:card',
+                  id: 'c1',
+                  properties: {
+                    children: [
+                      {
+                        type: 'object-kanban',
+                        id: 'k4',
+                        properties: { objectName: 'crm_lead', groupBy: 'stage', quickAdd: false },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        // The named-slot shape (#6776): a board authored into a slotted page.
+        {
+          name: 'delivery_board_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: {
+              type: 'object-kanban',
+              id: 'k5',
+              properties: { objectName: 'crm_task', groupBy: 'status', quickAdd: true },
+            },
+          },
+        },
+      ],
+    },
+    after: {
+      pages: [
+        {
+          name: 'delivery_board',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                {
+                  type: 'object-kanban',
+                  id: 'k1',
+                  properties: { objectName: 'crm_task', groupBy: 'status' },
+                },
+                {
+                  type: 'object-grid',
+                  id: 'g1',
+                  properties: { objectName: 'crm_task', quickAdd: true },
+                },
+                {
+                  type: 'object-kanban',
+                  id: 'k3',
+                  properties: { objectName: 'crm_task', cardFields: ['title'] },
+                },
+                {
+                  type: 'page:card',
+                  id: 'c1',
+                  properties: {
+                    children: [
+                      {
+                        type: 'object-kanban',
+                        id: 'k4',
+                        properties: { objectName: 'crm_lead', groupBy: 'stage' },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        {
+          name: 'delivery_board_detail',
+          kind: 'slotted',
+          regions: [],
+          slots: {
+            details: {
+              type: 'object-kanban',
+              id: 'k5',
+              properties: { objectName: 'crm_task', groupBy: 'status' },
+            },
+          },
+        },
+      ],
+    },
+    // Three notices: the region-level board, the nested one and the slotted
+    // one. The `object-grid` sibling and the board without the key emit none.
+    expectedNotices: 3,
   },
 };
 
@@ -8983,6 +9273,109 @@ const tursoConfigTimeoutToTimeoutMs: MetadataConversion = {
   },
 };
 
+/**
+ * The `type: 'page'` list-view mount leaves the spec (protocol 18, #17063 —
+ * maintainer ruling 2026-09-09, decision batch #107 item 1, verbatim 「撤」).
+ *
+ * `page` was added to the list-view `type` enum with a `pageName` binding so a
+ * view could render nothing of its own and delegate to an already-published
+ * page (#13216 direction 1). Only the spec half landed (PR #13372). No renderer
+ * ever routed the member: objectui's `ListView` switch shares its `default:`
+ * arm with `case 'grid'`, and `isListViewVisualization('page')` is false — so a
+ * `page` view has always drawn an empty grid where the page was supposed to be.
+ * ADR-0049 enforce-or-remove, on the principle that a published capability with
+ * zero consumers earns no exemption from its sunk cost.
+ *
+ * ## Why this STRIPS `type` rather than rewriting it to `'grid'`
+ *
+ * Deleting the key is not the platform choosing a view type: `type` carries
+ * `.default('grid')` on {@link ListViewSchema}, so a payload with no `type`
+ * parses to `grid` by the schema's own declared default — the same value, but
+ * declared in one place instead of guessed here. And it lands the row on
+ * exactly what it already rendered, so the conversion changes the document
+ * without changing a pixel. `stripKeys`-shaped deletion is idempotent by
+ * construction (a second replay finds nothing to remove).
+ *
+ * `pageName` is stripped unconditionally on a list payload, not only beside a
+ * `page` type: the key is retired on every list-view door, and a pre-#13372 row
+ * can carry it beside any type (the both-directions refusal that used to catch
+ * that is retired with the mount).
+ *
+ * `retiredFromLoadPath`: the enum refuses `'page'` by name and `pageName` is a
+ * `retiredKey()` tombstone, so a LIVE author is taught at parse rather than
+ * silently rewritten. The entry exists so stored 17.x rows replay clean through
+ * `applyConversionsToStoredItem`, and so `os migrate meta --from 17` lists the
+ * mechanical edits for author sources.
+ *
+ * ⚠️ Coverage boundary, stated rather than left to be discovered: this walks
+ * `stack.views[]` in all three persisted spellings ({@link mapViewPayloads}) —
+ * the same reach `view-export-options-pdf-removed` has, and the same reach the
+ * conversion walk offers. `objects[].listViews.*` is NOT reached by any
+ * conversion in this registry, so an object body carrying a page mount is
+ * refused at its own door rather than converted. Measured population for both:
+ * zero authored `type: 'page'` list views in this tree or any consuming app the
+ * seats can read (the 25 in-tree `type: 'page'` hits are app NAV items, a
+ * different key on `PageNavItemSchema` that stays).
+ */
+const viewPageMountRemoved: MetadataConversion = {
+  id: 'view-page-mount-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  surface: "view.list / view.listViews.* — the list-view type 'page' and its pageName binding",
+  summary:
+    "list-view type 'page' and its `pageName` binding removed (#17063 — the delegating render half "
+    + 'was never built, so a page view fell through to the grid branch and drew an empty table; '
+    + 'ADR-0049 enforce-or-remove)',
+  apply(stack, emit) {
+    const stripMount = (payload: Dict, path: string): Dict => {
+      const hasPageType = payload.type === 'page';
+      const hasPageName = 'pageName' in payload;
+      if (!hasPageType && !hasPageName) return payload;
+      const next = { ...payload };
+      if (hasPageType) {
+        // Deleted, not rewritten: `ListViewSchema.type` defaults to `'grid'`.
+        emit({ from: 'page', to: '(removed)', path: `${path}.type` });
+        delete next.type;
+      }
+      if (hasPageName) {
+        emit({ from: 'pageName', to: '(removed)', path: `${path}.pageName` });
+        delete next.pageName;
+      }
+      return next;
+    };
+    return mapViewPayloads(stack, (payload, kind, path) =>
+      kind === 'list' ? stripMount(payload, path) : payload);
+  },
+  fixture: {
+    before: {
+      views: [{
+        object: 'crm_contract',
+        // A complete page mount: both keys go, and the surviving `columns: []`
+        // is left alone — an empty column list is what the grid default
+        // derivation already reads as "no authored projection".
+        list: { type: 'page', pageName: 'contract_landing', columns: [] },
+        listViews: {
+          // A pre-#13372 row: `pageName` beside a type that never read it.
+          strays: { type: 'grid', pageName: 'contract_landing', columns: ['name'] },
+          // Neither key declared -> untouched, by reference.
+          all: { type: 'grid', columns: ['name'] },
+        },
+      }],
+    },
+    after: {
+      views: [{
+        object: 'crm_contract',
+        list: { columns: [] },
+        listViews: {
+          strays: { type: 'grid', columns: ['name'] },
+          all: { type: 'grid', columns: ['name'] },
+        },
+      }],
+    },
+    expectedNotices: 3,
+  },
+};
+
 export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConversion[]>> = {
   11: [flowNodeHttpRename, pageKindJsxToHtml, flowNodeFilterAlias, objectCompactLayoutRename],
   13: [stackRolesToPositions, owdLegacyReadAliases, sharingRecipientRoleToPosition],
@@ -9062,11 +9455,13 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     elementFormRemoved,
     fieldColumnListsCanonicalized,
     metricFiltersRemoved,
+    cubeSubDayGranularitiesRemoved,
     recordHighlightsFieldIconRemoved,
     mappingLookupParamsRemoved,
     translationComponentSubmitLabelRemoved,
     pageComponentResponsiveRemoved,
     objectGridDefaultSortRemoved,
+    objectKanbanQuickAddRemoved,
     permissionAllowRestorePurgeRemoved,
     formViewOptionDefaultRemoved,
     fieldReferenceToAlias,
@@ -9078,6 +9473,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     connectorHealthAndTriggerDurationsUnitInKey,
     memoryPersistenceAutoSaveIntervalToMs,
     tursoConfigTimeoutToTimeoutMs,
+    viewPageMountRemoved,
   ],
 };
 

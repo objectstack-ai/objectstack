@@ -4,17 +4,23 @@ import { randomUUID } from 'node:crypto';
 import type { IDataEngine } from '@objectstack/spec/contracts';
 import { hashPartition } from './backoff.js';
 import { toEpochMs } from './audit-timestamp.js';
-import { dispatcherAckOptions, dispatcherSweepOptions } from './outbox-dispatcher-scope.js';
+import { dispatcherAckCasOptions, dispatcherAckOptions, dispatcherSweepOptions } from './outbox-dispatcher-scope.js';
 import { deliveryBody, signBody } from './http-sender.js';
 import {
+    HttpAckError,
     HttpRedeliverError,
     assertEnqueueDeliverable,
+    assertHttpClaimCredential,
     assertRedeliverAllowed,
+    httpAckLostClaimMessage,
+    httpAckNotClaimedMessage,
     type EnqueueHttpInput,
     type HttpAckResult,
+    type HttpClaimCredential,
     type HttpClaimOptions,
     type HttpDelivery,
     type HttpDeliveryStatus,
+    type HttpReapOptions,
     type IHttpOutbox,
     type RedeliverOptions,
     type UndeliverableHttpInput,
@@ -95,9 +101,10 @@ interface DeliveryRow {
  * **No UPDATE here writes `updated_at`** (#4765) — same rule, same reason as
  * {@link SqlNotificationOutbox}: the platform's `sys_stamp_audit_update` hook
  * owns that column, a caller-supplied value is stripped as `readonly` (#2948)
- * with a WARN per call, and `claim()`'s unconditional reap UPDATE runs on every
- * dispatcher tick — so writing it turned an idle dev server into a console
- * firehose while changing nothing about the stored row.
+ * with a WARN per call, and the visibility-timeout reap is an unconditional
+ * UPDATE that runs on every dispatcher tick (`reap()`, or `claim()` unless told
+ * `skipReap`) — so writing it turned an idle dev server into a console firehose
+ * while changing nothing about the stored row.
  */
 export class SqlHttpOutbox implements IHttpOutbox {
     private readonly objectName: string;
@@ -202,20 +209,16 @@ export class SqlHttpOutbox implements IHttpOutbox {
         }
     }
 
+    async reap(opts: HttpReapOptions): Promise<void> {
+        await this.reapExpired(opts.now ?? Date.now(), opts.claimTtlMs);
+    }
+
     async claim(opts: HttpClaimOptions): Promise<HttpDelivery[]> {
         const now = opts.now ?? Date.now();
 
-        // 1. Reap stale in_flight rows — visibility-timeout recovery.
-        await this.engine.update(
-            this.objectName,
-            { status: 'pending', claimed_by: null, claimed_at: null },
-            // Environment-wide by design: recovers rows a crashed node abandoned,
-            // for every organization. Warrant in `outbox-dispatcher-scope.ts`.
-            dispatcherSweepOptions({
-                status: 'in_flight',
-                claimed_at: { $lt: now - opts.claimTtlMs },
-            }),
-        );
+        // 1. Reap stale in_flight rows — visibility-timeout recovery — unless the
+        //    caller already ran `reap()` for this pass (#17623).
+        if (!opts.skipReap) await this.reapExpired(now, opts.claimTtlMs);
 
         // 2. Pick candidate ids.
         const partitionFilter = opts.partition ? { partition_key: opts.partition.index } : {};
@@ -250,7 +253,29 @@ export class SqlHttpOutbox implements IHttpOutbox {
         // claim now owns — the one read that must see the authored map.
         const headerColumns = await this.readClaimedHeaderColumns(claimed.map((r) => r.id));
 
-        return claimed.map((r) => this.toDelivery(r, headerColumns));
+        // [#17634] The credential `ack()` takes back, stated explicitly: the
+        // read-back WHERE just proved (claimed_by, claimed_at) = (nodeId, now),
+        // so this restates what the query established — in the exact values the
+        // claiming UPDATE wrote, whatever form a dialect reads the column back in.
+        return claimed.map((r) => ({ ...this.toDelivery(r, headerColumns), claimedBy: opts.nodeId, claimedAt: now }));
+    }
+
+    /**
+     * The visibility-timeout reap: ONE predicate UPDATE returning every expired
+     * `in_flight` claim to `pending`. No partition in the predicate — it spans
+     * the whole table by construction.
+     */
+    private async reapExpired(now: number, claimTtlMs: number): Promise<void> {
+        await this.engine.update(
+            this.objectName,
+            { status: 'pending', claimed_by: null, claimed_at: null },
+            // Environment-wide by design: recovers rows a crashed node abandoned,
+            // for every organization. Warrant in `outbox-dispatcher-scope.ts`.
+            dispatcherSweepOptions({
+                status: 'in_flight',
+                claimed_at: { $lt: now - claimTtlMs },
+            }),
+        );
     }
 
     /**
@@ -305,48 +330,91 @@ export class SqlHttpOutbox implements IHttpOutbox {
         return engine.resolveInternalField(this.objectName, ids, 'headers_json');
     }
 
-    async ack(id: string, result: HttpAckResult): Promise<void> {
+    /**
+     * Record one attempt's outcome — see {@link IHttpOutbox.ack}.
+     *
+     * [#17634] Handed `claimed` — as `HttpDispatcher` always hands it — this is
+     * the compare-and-set `SqlNotificationOutbox.ack` performs (#11453, #11859):
+     * two deterministic refusals read before any write, the same two tests
+     * re-stated IN a conditional UPDATE (the half that holds under the race),
+     * and a read-back that reports a write which matched nothing instead of a
+     * silent success. Without `claimed` — the deprecated arity — it is the by-id
+     * write it always was ({@link ackById}).
+     */
+    async ack(id: string, result: HttpAckResult, claimed?: HttpClaimCredential): Promise<void> {
+        if (claimed === undefined) return this.ackById(id, result);
+        // The runtime half of the credential contract, for JS callers and
+        // casts: refused before any IO.
+        assertHttpClaimCredential(id, claimed);
+        const current = (await this.engine.findOne(this.objectName, {
+            where: { id },
+            fields: ['status', 'attempts', 'claimed_by', 'claimed_at'],
+        })) as Pick<DeliveryRow, 'status' | 'attempts' | 'claimed_by' | 'claimed_at'> | null;
+        // An id matching no row: no state to corrupt, no claim to lose.
+        if (!current) return;
+        // Not claimed at all — reaped back to the queue, already terminal, or
+        // never claimed. Refused BEFORE any write: the row is left byte-identical.
+        if (current.status !== 'in_flight') {
+            throw new HttpAckError(httpAckNotClaimedMessage(id, current.status ?? 'unknown'), 'DELIVERY_NOT_ELIGIBLE');
+        }
+        // Ownership, read half: claimed, but not by the claim being completed —
+        // reaped and re-claimed while the send ran. `status = 'in_flight'` alone
+        // matches the re-claiming node's live attempt, which is exactly the
+        // overwrite #17634 measured. The SAME test is re-stated in the write
+        // below, which is the half that actually holds under the race.
+        if (current.claimed_by !== claimed.claimedBy || current.claimed_at !== claimed.claimedAt) {
+            throw new HttpAckError(httpAckLostClaimMessage(id, current.status), 'DELIVERY_NOT_ELIGIBLE');
+        }
+
+        // Ownership, write half: the row transitions only if it is STILL
+        // `in_flight` AND still held by THIS claim. A row reaped and re-claimed
+        // between the read above and here matches nothing and is left alone,
+        // whoever re-claimed it. `attempts` moves only inside that condition, so
+        // it counts real dispatch attempts and nothing else.
+        const attempts = (current.attempts ?? 0) + 1;
+        const patch = attemptPatch(result, attempts);
+        await this.engine.update(
+            this.objectName,
+            patch,
+            // Predicate write (`updateMany`): on the by-id path every predicate
+            // but the id is silently discarded (#11009). Declared a global-sweep
+            // site — no request context exists on the tick that reaches here.
+            // Warrant in `outbox-dispatcher-scope.ts`.
+            dispatcherAckCasOptions(id, 'in_flight', claimed.claimedBy, claimed.claimedAt),
+        );
+
+        // Did the conditional write land? `IDataEngine.update` declares its
+        // return as `any`, so the row itself is the only contract-safe answer.
+        // The detector is the pair (status, attempts), not status alone: a retry
+        // ack's post-state IS `pending`, the status a reaped row already has, so
+        // only the recorded attempt tells the two apart.
+        const after = (await this.engine.findOne(this.objectName, {
+            where: { id },
+            fields: ['status', 'attempts'],
+        })) as Pick<DeliveryRow, 'status' | 'attempts'> | null;
+        if (!after || after.status !== patch.status || (after.attempts ?? 0) !== attempts) {
+            throw new HttpAckError(httpAckLostClaimMessage(id, after?.status ?? 'unknown'), 'DELIVERY_NOT_ELIGIBLE');
+        }
+    }
+
+    /**
+     * The deprecated credential-less ack (#17634): a by-id write with no
+     * ownership check, unchanged — kept so a caller written against the
+     * two-argument `ack()` keeps working. `HttpDispatcher` never takes this path.
+     */
+    private async ackById(id: string, result: HttpAckResult): Promise<void> {
         const current = (await this.engine.findOne(this.objectName, {
             where: { id },
             fields: ['attempts'],
         })) as { attempts?: number } | null;
         if (!current) return;
 
-        const now = Date.now();
-        let status: HttpDeliveryStatus;
-        let nextRetryAt: number | null;
-        let error: string | null;
-
-        if (result.success) {
-            status = 'success';
-            nextRetryAt = null;
-            error = null;
-        } else if (result.dead) {
-            status = 'dead';
-            nextRetryAt = null;
-            error = result.error ?? null;
-        } else {
-            status = 'pending';
-            nextRetryAt = result.nextRetryAt ?? null;
-            error = result.error ?? null;
-        }
-
         await this.engine.update(
             this.objectName,
-            {
-                status,
-                attempts: (current.attempts ?? 0) + 1,
-                last_attempted_at: now,
-                claimed_by: null,
-                claimed_at: null,
-                response_code: result.httpStatus ?? null,
-                response_body: result.responseBody ?? null,
-                next_retry_at: nextRetryAt,
-                error,
-            },
-            // Single-record dispatcher write, audited under the `update` op.
-            // Declared a global-sweep site — no request context exists on the
-            // tick that reaches here. Warrant in `outbox-dispatcher-scope.ts`.
+            attemptPatch(result, (current.attempts ?? 0) + 1),
+            // Single-record write, audited under the `update` op. Declared a
+            // global-sweep site — no request context reaches it. Warrant in
+            // `outbox-dispatcher-scope.ts`.
             dispatcherAckOptions(id),
         );
     }
@@ -468,4 +536,42 @@ export class SqlHttpOutbox implements IHttpOutbox {
             updatedAt: toEpochMs(r.updated_at),
         };
     }
+}
+
+/**
+ * The row patch that records one attempt's outcome — shared by both arities of
+ * {@link SqlHttpOutbox.ack}, so the conditional write and the by-id write cannot
+ * drift into two readings of one {@link HttpAckResult}. No `updated_at` (#4765 —
+ * see the class docs).
+ */
+function attemptPatch(result: HttpAckResult, attempts: number) {
+    let status: HttpDeliveryStatus;
+    let nextRetryAt: number | null;
+    let error: string | null;
+
+    if (result.success) {
+        status = 'success';
+        nextRetryAt = null;
+        error = null;
+    } else if (result.dead) {
+        status = 'dead';
+        nextRetryAt = null;
+        error = result.error ?? null;
+    } else {
+        status = 'pending';
+        nextRetryAt = result.nextRetryAt ?? null;
+        error = result.error ?? null;
+    }
+
+    return {
+        status,
+        attempts,
+        last_attempted_at: Date.now(),
+        claimed_by: null,
+        claimed_at: null,
+        response_code: result.httpStatus ?? null,
+        response_body: result.responseBody ?? null,
+        next_retry_at: nextRetryAt,
+        error,
+    };
 }

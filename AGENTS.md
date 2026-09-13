@@ -153,11 +153,11 @@ pull its build into `packages/console/`.
 Other scripts: `objectui:bump` (pull only), `objectui:build`, `objectui:clean`. ⛔ Never hand-edit
 `packages/console/dist/` or `.cache/objectui-*/` — regenerated.
 
-**Moving the pin has a second half: `pnpm sdui:manifest`.** ADR-0082 D4's spec↔registry declaration-parity ratchet
-reads objectui's `sdui.manifest.json`, which changes only when `.objectui-sha` moves — so the pin bump is the
-ratchet's trigger, and its only one. It is an **on-demand gate by decision**, never a CI job; `objectui:bump` and
-`objectui:refresh` both print the reminder. Needs Playwright chromium. Full procedure: `docs/releases-maintenance.md`
-→ "After the pin moves".
+**Moving the pin has a second half: regenerate the committed manifest** — `node scripts/gen-sdui-manifest-node.mjs
+--objectui-version {the @object-ui version the new pin ships}`; `scripts/check-sdui-manifest.mjs` reds until you do.
+ADR-0082 D4's spec↔registry declaration-parity ratchet reads that tracked artefact, so it gates **every PR**, not a
+pin bump alone. `pnpm sdui:manifest` is the separate browser dump of objectui's own registry (needs Playwright
+chromium); `objectui:bump` and `objectui:refresh` print it. Full procedure: `docs/releases-maintenance.md`.
 
 **Fast iteration on `../objectui` src (no commit/refresh loop):** run objectui's own console dev server —
 `cd ../objectui && pnpm --filter @object-ui/console dev` (Vite on **:5180**, HMR). Its `/api` proxy targets
@@ -438,8 +438,8 @@ recognised and the whole block lands under it, leaving two; the session-URL form
 verbatim and a bare one lands under it, leaving two. ⛔ A tail bare footer on a comment is the
 platform's, not your form downgraded. Which layer does this is unknown; don't go establishing
 it. **Commit message:** an agent commit ends with the model-free trailer pair
-`Claude-Session: https://claude.ai/code/session_<id>` and
-`Co-authored-by: Claude <noreply@anthropic.com>`; no model identifier lands in a PR title or body,
+`Claude-Session: https://claude.ai/code/session_<id>` and `Co-authored-by: Claude <noreply@anthropic.com>`,
+and the pre-push hook refuses a model identifier in that pair; no model identifier lands in a PR title or body,
 a comment, a changeset, a doc or a code comment. The one exemption is a REPORTING one: a harness-written
 `Co-Authored-By` trailer is not declared a deviation; the pair stays model-free; landed history is not rewritten.
 
@@ -530,8 +530,8 @@ Even inside your own worktree, operate defensively:
    A running dev server you didn't start probably belongs to another agent or the user;
    killing it (or its port) breaks their in-flight work. Spin up your own instance on a
    random high port (`pnpm dev -- --fresh -p <random>`) and **shut it down yourself when
-   the task is done** (`kill $(lsof -ti tcp:<port>)`). Don't leave orphan servers behind.
-   ⛔ One process table per container: **kill only a PID you recorded, never a name** (`guard-process-kill.sh`).
+   the task is done** (`kill $(lsof -ti tcp:<port>)`). ⛔ One process table per container: **kill only a PID you
+   recorded, and wait only on one, never a name** — `pgrep -f` matches the asking shell (`guard-process-kill.sh`).
 9. **After pulling `main` into a long-lived worktree, refresh its build state before you
    trust a single test or gate.** A worktree open across several merges accumulates
    artefacts stale relative to the source, and every one of them fails **as if your change
@@ -654,7 +654,7 @@ content/docs/     # 📝 Docs content
 | `Identity` | `identity/` | User, Organization, Profile |
 | `Security` | `security/` | Permission, Role, Policy |
 | `Kernel` | `kernel/` | Plugin lifecycle (PluginContext) |
-| `Cloud` | `cloud/` | Multi-tenant, deployment, environment |
+| `Marketplace` | `marketplace/` | Package, Version, Listing, Install, Template |
 | `QA` | `qa/` | Test, validation |
 | `Contracts` | `contracts/` | Cross-package interfaces |
 | `Integration` | `integration/` | External integrations |
@@ -748,14 +748,14 @@ Principles the wrapper encodes (its own output is the authority on detail):
 an implementation** — the props the spec zod schema declares vs the inputs the objectui
 registry config declares. A prop both sides declare and no renderer reads is, to this
 gate, perfect agreement. Its `spec-only` / `registry-only` / `missing` signals are real;
-just don't read it as proof anything renders. It is also the one gate `check:generated`
-cannot run at all (`EXTERNAL_INPUT_REQUIRED`): its right-hand side is objectui's
-`sdui.manifest.json`, produced only by `pnpm sdui:manifest` driving a real browser over
-objectui built at `.objectui-sha`, and it **exits 1** with no usable manifest — "could not
-run" is a failure, not a skip (Route & surface ownership §3). The manifest comes **not
-from CI**: it is an on-demand gate whose trigger is the **objectui pin bump**
-(`docs/releases-maintenance.md` carries the procedure). ⛔ Do not "fix" the red by
-re-adding a skip, and do not wire the gate into a workflow either.
+just don't read it as proof anything renders. Its right-hand side is the **tracked
+repo-root `sdui.manifest.json`**, written by `node scripts/gen-sdui-manifest-node.mjs`
+beside `scripts/sdui-manifest.record.json` and held honest in the required lint job by
+`scripts/check-sdui-manifest.mjs` (shape, sha256 vs that record, record pin ==
+`.objectui-sha`) — so `lint.yml` runs this gate `--strict` against it on every PR. It
+still **exits 1** with no usable manifest — "could not run" is a failure, not a skip
+(Route & surface ownership §3) — and `check:generated` files it `EXTERNAL_INPUT_REQUIRED`
+because that aggregate hands it none. ⛔ Do not "fix" a red by re-adding a skip.
 
 Two generators have **no** gate at all — `gen:openapi` and `gen:sbom`. Nothing verifies
 their output is current; the wrapper reports that each run rather than staying silent.
@@ -1040,7 +1040,8 @@ registry? Add it to `OPEN_CAPABILITY_REGISTRIES` in the same PR that fixes it.
 3. **Add a changeset for anything that publishes.** Feature, functional improvement or fix — run `pnpm changeset`
    (or add a `.changeset/*.md` entry) describing it before committing. A bug fix in a released package takes a
    **`patch`** changeset — never none, and ⛔ never `skip-changeset`: that label is for a diff that publishes
-   nothing from any released package.
+   nothing from any released package. A PR that declares `Clause-②: yes` takes at least **`minor`** instead —
+   the widening it declares is what makes it more than a patch, whatever else the diff fixes.
    **Breaking changesets must carry their migration.** If the change removes or renames anything an author can write (a
    spec key, an export, a config field), the changeset body must state the FROM → TO mapping and the one-line fix —
    this text ships to consumers as `CHANGELOG.md` inside the npm package and is what an upgrading agent greps after the

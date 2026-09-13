@@ -104,6 +104,22 @@ import { asLibsqlClient, makeLibsqlSqliteStub, type LibsqlSqliteStub } from './l
 
 /** `any` defeats ordinary assignability checks; this is the standard detector. */
 type IsAny<T> = 0 extends 1 & T ? true : false;
+
+/**
+ * [#17879] MEASURED — `transportUpdateIsAny` below is a PHANTOM half against
+ * a NESTED regression, and `ContainsAny` (#17876) does NOT close it. On disk,
+ * reverting only `RemoteTransport.update`:
+ *
+ *   door resolves to  `Record<string, unknown> | null`
+ *   CONTROL  `Promise<any>`                       2 errors (both legs)
+ *                                                  => the instrument fires
+ *   NESTED   `Promise<Record<string, any> | null>` 1 error (`Equals` only)
+ *   the same NESTED run with a `ContainsAny` leg alongside: still GREEN
+ *
+ * `ContainsAny` distributes over the not-found arm, so the regressed door
+ * answers `boolean`, which `= false` accepts. No swap was made; the two
+ * measured repairs are in the #17879 report.
+ */
 /** Exact (mutual, non-`any`) type equality. */
 type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
 
