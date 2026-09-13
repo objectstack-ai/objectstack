@@ -839,6 +839,16 @@ export {
   LIVENESS_LIVE_ELSEWHERE_PROPERTY,
 } from './lint-liveness-properties.js';
 
+export { validateRetiredPermissionResidue } from './validate-retired-permission-residue.js';
+export type { RetiredPermissionResidueFinding } from './validate-retired-permission-residue.js';
+export {
+  // [#17425] The one value #12840's residue stage accepts in silence, named at
+  // the authoring door. Published because `f.rule` is what `--json` consumers
+  // and `suppressWarnings` compare against — a rule id no barrel re-exports is
+  // unreachable (`rule-id-barrel-exports.test.ts`).
+  PERMISSION_RETIRED_LIFECYCLE_RESIDUE,
+} from './validate-retired-permission-residue.js';
+
 export { lintAutonumberFormats } from './lint-autonumber-formats.js';
 export type { AutonumberLintFinding } from './lint-autonumber-formats.js';
 export {
