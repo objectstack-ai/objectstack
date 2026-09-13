@@ -528,10 +528,10 @@
 // and CI went red on `Test Core` with the failing assertion inside the very
 // integration-tier file the local run had discarded.
 //
-// ⇒ `vitest-filter-preflight.ts` is wired into `reporters` below and now says
-// so: every named path that selected no test file is reported BY NAME, with the
+// ⇒ `vitest-filter-preflight.ts` runs at config load below and now says so:
+// every named path that will select no test file is reported BY NAME, with the
 // tier it really lives in and the command that runs it. It prints nothing at
-// all when every named path selected something, so a healthy narrowed run is
+// all when every named path selects something, so a healthy narrowed run is
 // byte-identical to what it was before this existed. ⛔ Before accepting a
 // narrowed run as pre-delivery verification, read that line — or run the full
 // `test` target above, which is the only one of the three whose green is a
@@ -643,7 +643,8 @@
 // `node_modules` exclusion: an exact-path list matches nothing it does not name.
 import { defineConfig } from 'vitest/config';
 import path from 'path';
-import { tierFilterPreflight } from './vitest-filter-preflight.js';
+import { parseCLI } from 'vitest/node';
+import { runFilterPreflight } from './vitest-filter-preflight.js';
 import { integrationTestFiles, unitTestFiles } from './vitest-tiers.js';
 
 // The two tiers, DERIVED from what the files DO — never written down — over
@@ -654,6 +655,22 @@ import { integrationTestFiles, unitTestFiles } from './vitest-tiers.js';
 // each array serve as its project's `include`.
 export const INTEGRATION_FILES = integrationTestFiles(__dirname);
 export const UNIT_FILES = unitTestFiles(__dirname, INTEGRATION_FILES);
+
+// #17853 — say so when a path named on the command line will run no tests. It
+// is invoked HERE, at config load, and ⛔ deliberately NOT as a `test.reporters`
+// entry: naming that option replaces vitest's own reporter defaulting instead
+// of extending it, which measurably changes a healthy run's output and would
+// drop the `github-actions` reporter in CI. `vitest-filter-preflight.ts` carries
+// both measurements. It reads the argv through vitest's own exported parser and
+// the SAME two derived arrays the projects below take as their `include` — ⛔
+// never a second derivation — and writes nothing whatever unless a named path
+// selects nothing.
+runFilterPreflight({
+  argv: process.argv,
+  root: __dirname,
+  populations: { unit: UNIT_FILES, integration: INTEGRATION_FILES },
+  parse: parseCLI,
+});
 
 export default defineConfig({
   resolve: {
@@ -732,21 +749,6 @@ export default defineConfig({
         external: [/packages[\/]types[\/]dist/],
       },
     },
-    // #17853 — the preflight the tier header above describes. `'default'` is
-    // vitest's own default reporter, restated because naming `reporters` at all
-    // replaces the default list rather than extending it; the second entry adds
-    // output ONLY when a path named on the command line selected no test file,
-    // so a run that loses nothing is byte-identical to one without it. The two
-    // populations are the SAME derived arrays the projects below use as their
-    // `include` — ⛔ never a second derivation, which would be a copy of a fact
-    // and would go stale exactly where this one cannot.
-    reporters: [
-      'default',
-      tierFilterPreflight({
-        root: __dirname,
-        populations: { unit: UNIT_FILES, integration: INTEGRATION_FILES },
-      }),
-    ],
     // The two tiers (#13504) — see the header section of the same name, and
     // "THE NIGHTLY TIERS" for the population both read. Both `extends: true`
     // so each project inherits the `resolve.alias` table and the
