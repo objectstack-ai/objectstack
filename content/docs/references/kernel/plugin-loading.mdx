@@ -43,7 +43,7 @@ Plugin loading lifecycle event
 | **type** | `Enum<'load-started' \| 'load-completed' \| 'load-failed' \| 'init-started' \| 'init-completed' \| 'init-failed' \| 'preload-started' \| 'preload-completed' \| 'cache-hit' \| … +5 more>` | ✅ |  |
 | **pluginId** | `string` | ✅ |  |
 | **timestamp** | `integer` | ✅ |  |
-| **durationMs** | `integer` | optional |  |
+| **durationMs** | `integer` | optional | Duration in milliseconds |
 | **metadata** | `Record<string, any>` | optional |  |
 | **error** | `{ message: string; code?: string; stack?: string }` | optional |  |
 

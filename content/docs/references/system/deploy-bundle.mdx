@@ -189,7 +189,7 @@ Ordered migration plan
 | **statements** | `{ sql: string; reversible: boolean; rollbackSql?: string; order: integer }[]` | optional (default: `[]`) | Ordered DDL statements |
 | **dialect** | `string` | ✅ | Target SQL dialect |
 | **reversible** | `boolean` | optional (default: `true`) | Whether the plan can be fully rolled back |
-| **estimatedDurationMs** | `integer` | optional | Estimated execution time |
+| **estimatedDurationMs** | `integer` | optional | Estimated execution time in milliseconds |
 
 ### Nested Shape: `MigrationPlan.statements[number]`
 

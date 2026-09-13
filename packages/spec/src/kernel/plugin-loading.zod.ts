@@ -101,7 +101,7 @@ export const PluginLoadingEventSchema = lazySchema(() => z.object({
   /**
    * Duration in milliseconds
    */
-  durationMs: z.number().int().min(0).optional(),
+  durationMs: z.number().int().min(0).optional().describe('Duration in milliseconds'),
 
   /**
    * Additional metadata
