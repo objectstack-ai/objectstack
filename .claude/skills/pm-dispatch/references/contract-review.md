@@ -6,7 +6,6 @@
 
 - 内容肢及于 published `skills/**`:作可证伪的算子或契约语义主张的改动挂标走本复核。
 - ⛔ 判据不是提到契约:纯算子清单、拼写、格式不触发。
-- 受管面人工合并 ⛔ 不替代复核,两道保障叠加。
 - `Clause-②: yes | no` 按设计临时:只定是否必过席内契约复核的保守方向,⛔ 非终审。
 - 删误拒的 `Clause-②: no` 附 `Contract-text:` 引已发布契约文本,双载体同载;缺引即缺申报。
 - 真闸门在 PR 或报告时点的席内复核;声明被复核推翻 ⛔ 不作席位过失。
@@ -45,6 +44,7 @@
 - 放宽 tell 由 `scripts/pm/check-widening-tells.mjs` 判,`no` 撞新键/成员/导出/登记即拒,附 file:line。
 - ③ PR 全部 check 全绿,⛔ 非 required 子集;例外:merge-base 上同名同失败签名的红不计。
 - 签名 = 失败步 + 首错行,读 base check runs 的 API ⛔ 不凭口述;主干红止血立单不变。
+- 规则层等维护者的字;受管路径全在 `.claude/skills/pm-dispatch/references/` 者达档过本三条入队。
 
 ## 降档保险丝(机读)
 
