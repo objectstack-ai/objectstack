@@ -278,15 +278,16 @@ describe(`[#17857] driver-sql — distinct() attributes an unresolvable column (
   // and stays green on every flat-filter pin above — so this case is the one
   // that tells the two designs apart.
   it('arm 2: a NESTED filter key is attributed to the filter, not dropped to the terminal', async () => {
-    for (const [shape, where] of [
+    const nested: ReadonlyArray<readonly [string, FilterCondition]> = [
       ['$or', { $or: [{ [MISSING_COLUMN]: 1 }, { rank: 99 }] }],
       ['$and', { $and: [{ [MISSING_COLUMN]: 1 }] }],
       ['nested $and inside $or', { $or: [{ $and: [{ [MISSING_COLUMN]: 1 }] }] }],
-    ] as const) {
-      const onDistinct = await caught(() => driver.distinct(TABLE, 'title', where as FilterCondition));
+    ];
+    for (const [shape, where] of nested) {
+      const onDistinct = await caught(() => driver.distinct(TABLE, 'title', where));
       expect(onDistinct.code, `${shape}: code`).toBe('INVALID_FILTER');
       expect(onDistinct.status, `${shape}: status`).toBe(400);
-      const onFind = await caught(() => driver.find(TABLE, { where: where as FilterCondition }));
+      const onFind = await caught(() => driver.find(TABLE, { where }));
       expect(String(onDistinct.message), `${shape}: the same sentence find() gives`).toBe(
         String(onFind.message),
       );
@@ -332,8 +333,9 @@ describe(`[#17857] driver-sql — distinct() attributes an unresolvable column (
     // The nested filter shapes arm 2 is pinned on must also still ANSWER when
     // every column in them resolves — otherwise that pin could be passing on a
     // filter this driver simply cannot compile.
+    const resolvableNested: FilterCondition = { $or: [{ rank: 5 }, { rank: 99 }] };
     expect(
-      await driver.distinct(TABLE, 'title', { $or: [{ rank: 5 }, { rank: 99 }] } as FilterCondition),
+      await driver.distinct(TABLE, 'title', resolvableNested),
       'a nested filter that resolves',
     ).toEqual(['Design']);
   });

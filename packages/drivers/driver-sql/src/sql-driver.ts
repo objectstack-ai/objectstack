@@ -9800,10 +9800,14 @@ export class SqlDriver implements IDataDriver {
    */
   protected unresolvableDistinctColumnRefusal(object: string, column: string, error: unknown): Error {
     const detail = (error as { message?: unknown } | null | undefined)?.message;
+    // The withholding rule is #7929's and this door's arm is #17857's — ids kept
+    // in the comment, never in the emitted string: a log line reaches operators
+    // and generated surfaces, where `#NNNN` resolves against nothing
+    // (`pnpm check:doc-authoring`).
     this.logger.warn(
       `[sql-driver] INVALID_FIELD — the listed distinct column could not be resolved on ` +
         `'${object}' ('${column}'). The dialect message below is kept server-side because it ` +
-        `inlines the statement bound literals (#7929, #17857): ` +
+        `inlines the statement bound literals: ` +
         `${typeof detail === 'string' ? detail : String(error)}`,
     );
     const err = new Error(
