@@ -274,6 +274,113 @@ jobs:
           echo "committed=${files}" >> "$GITHUB_OUTPUT"
           echo "pushed ${files} changed file(s) to board-archive"
 
+      # ## The copy that outlives the platform, not just the account
+      #
+      # The archive branch above survives an ACCOUNT suspension, because a
+      # branch belongs to the repository rather than to a user. It does not
+      # survive an action against the organisation or the repository itself,
+      # and that is the remaining hole. The maintainer's answer, verbatim and
+      # untranslated, in chat on 2026-09-13:
+      #
+      #   「那如果推 s3 呢？」 「Cloudflare R2」
+      #
+      # So this step mirrors the archive CHECKOUT — the same tree the commit
+      # above just pushed — into one R2 prefix. Two things follow from R2
+      # having NO bucket versioning:
+      #
+      #   - `--delete` makes the prefix equal to the branch tip and nothing
+      #     else, so a restore never reads a file the board no longer has;
+      #   - a mirror therefore keeps no HISTORY at all, so once per UTC day the
+      #     tree is also written as `snapshots/YYYY-MM-DD.tar.gz`. That key
+      #     lives OUTSIDE the mirrored prefix on purpose: inside it, the very
+      #     next `--delete` sync would remove it as an object with no local
+      #     counterpart, and the history would be exactly one day long.
+      #
+      # The daily tarball is decided by asking the bucket for today's key
+      # rather than by the clock, so a missed 02:07 run, a re-run and a
+      # `workflow_dispatch` all converge on one tarball per day.
+      #
+      # ## Unset secrets are a notice, not a failure
+      #
+      # The bucket and its scoped API token are the maintainer's to create.
+      # Until all four secrets exist this step prints one notice and exits 0,
+      # so this workflow keeps archiving to the branch and nothing here has to
+      # be merged in the same hour as the bucket. A CONFIGURED upload that then
+      # fails is the opposite case and goes red: a backup that silently stops
+      # copying is the failure mode this whole file exists to prevent.
+      #
+      # ⛔ The four secrets are read, never echoed, and never written to the
+      # summary; the run below also never touches the board, `main`, or the
+      # archive branch — it only reads the checkout that is already on disk.
+      - name: Upload the archive to R2
+        id: r2
+        if: github.event_name != 'pull_request'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          # R2 is S3-compatible with one fixed pseudo-region.
+          AWS_DEFAULT_REGION: auto
+          # S3-compatible endpoints other than S3 itself are the documented
+          # case for this setting: the CLI then sends an integrity checksum
+          # only where the API requires one, instead of on every request.
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${AWS_SECRET_ACCESS_KEY:-}" ] \
+             || [ -z "${R2_ACCOUNT_ID:-}" ] || [ -z "${R2_BUCKET:-}" ]; then
+            echo "status=skipped — no R2 credentials configured in this repository" >> "$GITHUB_OUTPUT"
+            echo "::notice::R2 upload skipped: R2_ACCOUNT_ID, R2_BUCKET, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY are not all set as repository secrets; this run is archived on the board-archive branch only."
+            exit 0
+          fi
+
+          endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          mirror="s3://${R2_BUCKET}/objectstack/board/"
+
+          # `archive/` is a linked worktree, so its `.git` is a FILE and the
+          # pattern `.git/*` does not match it; both spellings are excluded.
+          # No pipe between the command and `$?` — see the snapshot step.
+          set +e
+          aws s3 sync archive/ "$mirror" \
+            --endpoint-url "$endpoint" \
+            --delete --no-progress \
+            --exclude '.git' --exclude '.git/*' \
+            > "$RUNNER_TEMP/r2-sync.log" 2>&1
+          code=$?
+          set -e
+          if [ "$code" != "0" ]; then
+            cat "$RUNNER_TEMP/r2-sync.log" >&2
+            echo "status=FAILED — aws s3 sync exited $code" >> "$GITHUB_OUTPUT"
+            echo "::error::aws s3 sync to R2 exited $code. This run IS archived on board-archive; the out-of-GitHub copy is now behind and every later run will stay behind until this is fixed."
+            exit 1
+          fi
+          # One line per object moved. The first configured run moves the whole
+          # board and every later run moves a handful, so the log is truncated
+          # here and the counts below are taken over all of it.
+          transfers=$(wc -l < "$RUNNER_TEMP/r2-sync.log")
+          head -n 50 "$RUNNER_TEMP/r2-sync.log"
+          if [ "$transfers" -gt 50 ]; then
+            echo "... and $((transfers - 50)) further transfer line(s), not printed."
+          fi
+          uploaded=$(grep -c '^upload:' "$RUNNER_TEMP/r2-sync.log" || true)
+          deleted=$(grep -c '^delete:' "$RUNNER_TEMP/r2-sync.log" || true)
+
+          day=$(date -u +%Y-%m-%d)
+          tarball="s3://${R2_BUCKET}/objectstack/snapshots/${day}.tar.gz"
+          if aws s3 ls "$tarball" --endpoint-url "$endpoint" > /dev/null 2>&1; then
+            tarred="already written for ${day}"
+          else
+            tar -czf "$RUNNER_TEMP/${day}.tar.gz" --exclude=.git -C archive .
+            aws s3 cp "$RUNNER_TEMP/${day}.tar.gz" "$tarball" \
+              --endpoint-url "$endpoint" --no-progress
+            tarred="written for ${day}"
+          fi
+
+          echo "status=synced ${uploaded} object(s), deleted ${deleted}; daily tarball ${tarred}" >> "$GITHUB_OUTPUT"
+          echo "R2: synced ${uploaded} object(s), deleted ${deleted}; daily tarball ${tarred}"
+
       - name: Publish the run to the summary
         if: always()
         run: |
@@ -281,6 +388,8 @@ jobs:
             echo "### Board snapshot — exit ${{ steps.snapshot.outputs.exit_code }}"
             echo
             echo "Committed: ${{ steps.commit.outputs.committed || 'nothing (the run stopped before the commit step)' }}"
+            echo
+            echo "R2: ${{ steps.r2.outputs.status || 'not attempted (a pull_request run, or the job stopped before the upload step)' }}"
             echo
             echo '```'
             cat "$RUNNER_TEMP/snapshot.md" 2>/dev/null || echo '(no report produced)'
