@@ -273,7 +273,8 @@ localStorage / auth gotchas.
     uncertified recompute, drift or a hand-authored sibling keeps it governed. Unapproved, the bypass direct merge
     (人工直合) is the only landing. **Landing is tiered**: a PR whose governed paths all lie under
     `.claude/skills/pm-dispatch/references/` lands through the queue after the skills seat's contract-tier review; every
-    other governed path is the rules layer and waits for the maintainer's word. ⛔ **No agent seat submits an approving
+    other governed path is the rules layer and waits for the maintainer's word, which the director seat requests as ONE
+    batch of at most five rows — the approval stays the maintainer's click. ⛔ **No agent seat submits an approving
     review on a governed-surface PR, under any account** — an authorized account is agent-operated too; "CI is green"
     carries no information about a governance change.
 
