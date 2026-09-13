@@ -183,7 +183,7 @@ export function matchesVitestFilter(relFile: string, filter: string, root: strin
  * guessed past that would be the very defect this module exists to report.
  */
 export function parseInvocation(argv: readonly string[], parse: CliParse): Invocation {
-  let parsed: { filter: string[]; options: Record<string, unknown> };
+  let parsed: { filter: string[]; options: CliParseResultOptions };
   try {
     parsed = parse(['vitest', ...argv.slice(2)], { allowUnknownOptions: true });
   } catch {
@@ -198,11 +198,27 @@ export function parseInvocation(argv: readonly string[], parse: CliParse): Invoc
   return { filters: filter.map(splitLineSuffix), projects, opaque: false };
 }
 
+/**
+ * The three `parseCLI` options this module reads, typed STRUCTURALLY so that
+ * vitest's own `CliOptions` satisfies it without a cast.
+ *
+ * ⛔ Not `Record<string, unknown>`: an interface has no index signature, so
+ * vitest's `CliOptions` is not assignable to one, and the cast that would paper
+ * over it is exactly what stops a vitest upgrade from reporting a renamed
+ * option here as a type error. `packages/cli/test/…preflight.test.ts` passes the
+ * real `parseCLI` in unaltered, so this compatibility is pinned, not assumed.
+ */
+export interface CliParseResultOptions {
+  readonly project?: string | string[] | undefined;
+  readonly changed?: boolean | string | undefined;
+  readonly related?: string | string[] | undefined;
+}
+
 /** The shape of `parseCLI` from `vitest/node` that this module uses. */
 export type CliParse = (
   argv: string[],
   config?: { allowUnknownOptions?: boolean },
-) => { filter: string[]; options: Record<string, unknown> };
+) => { filter: string[]; options: CliParseResultOptions };
 
 /**
  * Which of the invocation's filters will select no test file at all, and which

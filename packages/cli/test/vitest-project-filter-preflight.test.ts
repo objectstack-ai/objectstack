@@ -72,7 +72,9 @@ const U1 = 'src/utils/format.exit-code.test.ts';
 const U2 = 'test/commands.test.ts';
 const I1 = 'test/i18n-extract-companion-orphan.test.ts';
 const POPULATIONS = { unit: [U1, U2], integration: [I1] };
-const parse = parseCLI as unknown as CliParse;
+// ⛔ No cast: vitest's real `parseCLI` is handed in unaltered, so this line is
+// itself the pin that `CliParse` still describes the parser vitest ships.
+const parse: CliParse = parseCLI;
 
 /** A real `vitest run …` command line, as `process.argv` would carry it. */
 const argv = (...args: string[]): string[] => ['/usr/bin/node', '/x/vitest.mjs', 'run', ...args];
