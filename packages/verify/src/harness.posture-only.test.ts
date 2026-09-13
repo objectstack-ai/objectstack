@@ -1,7 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // [#5261] `bootStack({ multiTenant: 'posture-only' })` — the stand-in that
-// activates the tenancy POSTURE without the cloud-private enterprise runtime.
+// activates the tenancy POSTURE without the enterprise runtime this package may
+// not declare (ADR-0132's entitlement boundary).
 //
 // Why it exists: since #5261 the `organization/create` gate reads the EFFECTIVE
 // tenancy posture (the `tenancy` service's answer), not the operator's env
@@ -9,9 +10,11 @@
 // into minting organizations by any env combination. That deliberately closed
 // the trick `org-create-default-team.dogfood.test.ts` (#3624's e2e half) used to
 // open the route with — flipping `OS_MULTI_ORG_ENABLED` after boot — and the
-// enterprise `@objectstack/organizations` package is not installable in this
-// workspace, so the fixture needed an honest way to be a walled deployment
-// rather than a single-tenant stack lying to one gate.
+// enterprise `@objectstack/organizations` package may not be declared by any
+// framework package — ADR-0132's entitlement boundary, pinned by
+// `no-framework-dependents.pin.test.ts`; the package itself is open core and on
+// npm — so the fixture needed an honest way to be a walled deployment rather
+// than a single-tenant stack lying to one gate.
 //
 // ⚠️ Deliberately NO `vi.mock('@objectstack/organizations')` here — unlike
 // `harness.posture.test.ts`, which fakes the module to exercise the REAL
