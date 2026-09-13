@@ -1596,22 +1596,108 @@ function rearmThroughProxy(args) {
 // are a FLOOR, never an equality — adding cases is ordinary work.
 // ---------------------------------------------------------------------------
 
+/**
+ * A board this file makes up, served through the same paths the live layer asks
+ * for. Ordering, paging, the `since` window and the `state` filter are modelled
+ * because those are what the walk is steering by — a stub that ignored them
+ * would agree with any walk order at all.
+ */
+function fakeBoard({ rows, openPulls = [] }) {
+  const calls = [];
+  const serve = (path) => {
+    if (path === '/repos/o/r') return { open_issues_count: rows.filter((r) => r.state === 'open').length };
+    const url = new URL(`https://board${path}`);
+    const q = url.searchParams;
+    const page = Number(q.get('page') ?? 1);
+    const perPage = Number(q.get('per_page') ?? PER_PAGE);
+    if (url.pathname === '/repos/o/r/pulls') return page === 1 ? openPulls : [];
+    const thread = /^\/repos\/o\/r\/issues\/(\d+)\/comments$/.exec(url.pathname);
+    if (thread) return page === 1 ? (rows.find((r) => r.number === Number(thread[1]))?.thread ?? []) : [];
+    if (/^\/repos\/o\/r\/pulls\/\d+\/(reviews|comments)$/.test(url.pathname)) return [];
+    if (url.pathname !== '/repos/o/r/issues') return [];
+    const sinceAt = q.get('since') ? Date.parse(q.get('since')) : null;
+    const matching = rows
+      .filter((r) => (q.get('state') === 'open' ? r.state === 'open' : true))
+      .filter((r) => sinceAt === null || Date.parse(r.updated_at) >= sinceAt)
+      .sort((a, b) => Date.parse(a.updated_at) - Date.parse(b.updated_at) || a.number - b.number);
+    return matching.slice((page - 1) * perPage, page * perPage);
+  };
+  return { calls, serve };
+}
+
+/**
+ * `snapshot()` driven end to end, offline.
+ *
+ * The walk ORDER and the budget SPLIT exist nowhere but inside `snapshot()`, so
+ * they are pinned by RUNNING it: a source-text pin goes green the moment
+ * someone reorders two statements and keeps the words around them.
+ *
+ * ⛔ No network and no token. The one read helper's `fetch` is replaced for the
+ * duration and restored in a `finally`, so a throwing case cannot leave the
+ * stub installed. The request counter is module-global, so it is zeroed on the
+ * way in and restored on the way out — a run that inherited a spent counter
+ * would report every budget as exhausted before its first request.
+ */
+async function driveSnapshot({ dir, board, options = {} }) {
+  const realFetch = globalThis.fetch;
+  const outerCount = requestCount.value;
+  requestCount.value = 0;
+  globalThis.fetch = (url) => {
+    const path = String(url).slice(API.length);
+    board.calls.push(path);
+    const body = board.serve(path);
+    return Promise.resolve({ ok: true, status: 200, headers: { get: () => null }, json: () => Promise.resolve(body) });
+  };
+  try {
+    return await snapshot('o/r', { out: dir, full: false, since: null, dryRun: false, limit: null, maxRequests: DEFAULT_MAX_REQUESTS, ...options });
+  } finally {
+    globalThis.fetch = realFetch;
+    requestCount.value = outerCount;
+  }
+}
+
+/** The manifest `board-archive` actually carried at tip b7c5f578, the run #18045 measured. */
+function measuredHistoryManifest(over = {}) {
+  return {
+    schema: ARCHIVE_SCHEMA,
+    repo: 'o/r',
+    generated_at: '2026-09-13T14:22:09.391Z',
+    walk_phase: 'history',
+    walk: {
+      open_set: { complete: true, completed_at: '2026-09-10T15:39:49.484Z', cursor: null },
+      history: { complete: false, cursor: '2026-08-03T11:51:21Z' },
+      ...over.walk,
+    },
+    since: '2026-07-31T12:14:43Z',
+    since_reason: 'the open set is complete — the closed history resumes at 2026-07-31T12:14:43Z',
+    next_since: null,
+    resume: { since: '2026-08-03T11:51:21Z', phase: 'history', stopped_by: 'budget', reason: 'the per-run budget of 800 requests is spent' },
+    counts: { issues_open: 0, issues_closed: 0, pulls_open: 0, pulls_closed: 0, records: 0 },
+    board: { open_issues_count: null, open_pull_requests: null, read_at: null },
+    count_check: { verdict: 'pending', reason: "the board's own count was not read this run, so there is nothing to compare the census with", expected: 0, archived: 0, shortfall: null, surplus: null, gone_ledger: 0, ok: null },
+    requests: 800,
+    run: { numbers_read: 400, files_written: 762, walk_complete: false, open_set_completed_here: false },
+  };
+}
+
 const SELF_TEST_BATTERIES = Object.freeze({
   'the record shapes: fixed key order, declared absence': 9,
   'the page walk: only a short page ends it': 10,
   'the walk plan: the open board first, then the closed history, then incremental': 15,
+  'the delta plan: which runs re-read the live board, and from where': 15,
   'idempotence: no change means no write': 9,
-  'the census and the count check': 15,
+  'the census and the count check': 17,
   'the restore payload: a rebuilt record says it is one': 9,
   'the refusals: a typo must never make this decision': 11,
   'the rate-limit stop, and the two properties that are structural': 8,
+  'the delta walk, driven: the archive catches up with the live board': 17,
 });
-const SELF_TEST_BATTERY_FLOOR = 8;
+const SELF_TEST_BATTERY_FLOOR = 10;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 let selfTestReachedVerdict = false;
 
-export function selfTest() {
+export async function selfTest() {
   const batterySeen = new Map();
   let openBattery = null;
   const battery = (name) => { openBattery = name; };
@@ -1734,6 +1820,47 @@ export function selfTest() {
   t('the manifest says WHICH phase and whether the open set is complete, so "open set complete, history resuming" is not "still in the open set"',
     phased.walk_phase === 'history' && phased.walk.open_set.complete === true && phased.resume.phase === 'history' && phased.resume.stopped_by === 'budget');
 
+  // -- the delta plan --------------------------------------------------------
+  battery('the delta plan: which runs re-read the live board, and from where');
+  const measured = measuredHistoryManifest();
+  const deltaHere = selectDeltaPlan(measured);
+  t('THE CASE #18045 NAMES: a manifest parked in the history phase plans a DELTA — the live board is re-read THIS run, not once the backfill finishes',
+    deltaHere.run === true);
+  t('…anchored on the instant the open set was last enumerated IN FULL, minus the skew — ⛔ never on the previous run stamp, which would skip every day between the two',
+    deltaHere.since === skewedSince('2026-09-10T15:39:49.484Z') && Date.parse(deltaHere.since) < Date.parse(measured.generated_at));
+  const withCursor = measuredHistoryManifest({
+    walk: {
+      open_set: { complete: true, completed_at: '2026-09-10T15:39:49.484Z', cursor: null },
+      delta: { complete: true, cursor: '2026-09-13T18:00:00Z', since: '2026-09-13T14:50:00Z', slice: DELTA_REQUEST_SLICE },
+      history: { complete: false, cursor: '2026-08-03T11:51:21Z' },
+    },
+  });
+  t('once the delta has a cursor of its own it resumes there exactly — `since` is inclusive, so the boundary row is re-read rather than skipped',
+    selectDeltaPlan(withCursor).since === '2026-09-13T18:00:00Z');
+  t('no delta while the open set is still being walked — that walk IS this run\'s read of the live board', selectDeltaPlan(midOpen).run === false);
+  t('no manifest, no delta: the first run enumerates the open board itself', selectDeltaPlan(null).run === false);
+  t('--full plans no delta — the whole board is being read again from the beginning', selectDeltaPlan(measured, { full: true }).run === false);
+  t('--since plans no delta — the walk the operator named IS the delta', selectDeltaPlan(measured, { override: '2026-01-01T00:00:00Z' }).run === false);
+  t('a board already walked once plans no SEPARATE delta — the incremental phase walk is it, with the entire budget',
+    selectDeltaPlan({ walk: { open_set: { complete: true }, history: { complete: true, cursor: 'c' } } }).run === false);
+  t('every delta plan carries a printable reason, whether it runs or not',
+    [deltaHere, selectDeltaPlan(null), selectDeltaPlan(midOpen), selectDeltaPlan(measured, { full: true })].every((p) => typeof p.reason === 'string' && p.reason.length > 0));
+  t('the skew moves a stamp BACK, and the result is still an ISO stamp the listing endpoint accepts',
+    Date.parse(skewedSince('2026-09-10T15:39:49.484Z')) === Date.parse('2026-09-10T15:39:49.484Z') - DELTA_SKEW_MS
+    && /^\d{4}-\d{2}-\d{2}T.*Z$/.test(skewedSince('2026-09-10T15:39:49.484Z')));
+  t('⛔ an unparseable stamp comes back unchanged, never a cursor built from NaN — the endpoint drops such a `since` and the delta would silently become a full walk',
+    skewedSince('not a date') === 'not a date' && skewedSince(null) === null);
+  t('THE SPLIT is declared, positive, and leaves the backfill the larger half — a delta that could take the whole budget would starve the history for good',
+    Number.isInteger(DELTA_REQUEST_SLICE) && DELTA_REQUEST_SLICE > 0 && DELTA_REQUEST_SLICE < DEFAULT_MAX_REQUESTS - DELTA_REQUEST_SLICE);
+  t('…and the plan carries the slice it was run under, so the manifest records that rather than whatever this file declares today',
+    deltaHere.slice === DELTA_REQUEST_SLICE);
+  t('a slice never reaches past the run budget — the delta cannot buy requests the run does not have',
+    sliceCeiling({ spent: 700, max: 800, slice: 300 }) === 800 && sliceCeiling({ spent: 0, max: 800, slice: 300 }) === 300);
+  t('…and it is taken from what is LEFT, so a delta after the open phase gets a slice of the remainder and not a second allowance',
+    sliceCeiling({ spent: 120, max: 800, slice: 300 }) === 420);
+  t('the delta asks for state=all — a closed card is exactly what a suspension destroys, and an open-only delta would archive none of them',
+    listingPath('o/r', { since: deltaHere.since }).includes('state=all'));
+
   // -- idempotence -----------------------------------------------------------
   battery('idempotence: no change means no write');
   const dir = mkdtempSync(join(tmpdir(), 'board-snapshot-'));
@@ -1803,6 +1930,10 @@ export function selfTest() {
       /behind the board/.test(countCheckPendingReason({ phase: 'incremental', openSetComplete: true, walkCompletedHere: false, boardCountRead: true })));
     t('no board count this run: pending, and the reason names the side that is missing',
       /own count was not read this run/.test(countCheckPendingReason({ phase: 'incremental', openSetComplete: true, walkCompletedHere: true, boardCountRead: false })));
+    t('THE CASE THE DELTA BUYS: a run whose delta caught up with the live board HAS a reading, in the very phase where the verdict had been permanently pending',
+      countCheckPendingReason({ phase: 'history', openSetComplete: true, openSetCompletedHere: false, deltaCompletedHere: true, walkCompletedHere: false, boardCountRead: true }) === null);
+    t('…and a delta still BEHIND the live board leaves it pending, with the reason naming the delta rather than only the clock',
+      /delta did not catch up/.test(countCheckPendingReason({ phase: 'history', openSetComplete: true, deltaCompletedHere: false, boardCountRead: true })));
     t('a verdict carries `reason: null`, so the key set is the same in every branch and the manifest diff stays stable',
       'reason' in countCheck({ openIssuesCount: 620, openPullRequests: 20, archivedOpenIssues: 600 })
       && countCheck({ openIssuesCount: 620, openPullRequests: 20, archivedOpenIssues: 600 }).reason === null);
@@ -1864,6 +1995,94 @@ export function selfTest() {
     !/method:\s*'(?:POST|PATCH|PUT|DELETE)'/.test(source) && !/\bmethod:\s*(?:method|options\.method)\b/.test(source));
   t('…and its only fetch is the one read helper', (source.match(/await fetch\(/g) ?? []).length === 1);
 
+  // -- the delta walk, driven ------------------------------------------------
+  battery('the delta walk, driven: the archive catches up with the live board');
+  const liveDir = mkdtempSync(join(tmpdir(), 'board-snapshot-delta-'));
+  const busyDir = mkdtempSync(join(tmpdir(), 'board-snapshot-split-'));
+  const stopDir = mkdtempSync(join(tmpdir(), 'board-snapshot-resume-'));
+  try {
+    // THE REGRESSION, driven from the manifest board-archive actually carried.
+    writeIfChanged(join(liveDir, MANIFEST_NAME), stableJson(measuredHistoryManifest()));
+    const movedIssue = RAW({ number: 18045, state: 'open', comments: 0, created_at: '2026-09-13T14:59:12Z', updated_at: '2026-09-13T14:50:00Z' });
+    const movedClosed = RAW({ number: 17999, state: 'closed', state_reason: 'completed', comments: 0, updated_at: '2026-09-12T09:00:00Z', closed_at: '2026-09-12T09:00:00Z' });
+    const movedPull = RAW({ number: 18043, state: 'open', comments: 0, updated_at: '2026-09-13T10:00:00Z', pull_request: { merged_at: null }, draft: true });
+    const oldClosed = RAW({ number: 900, state: 'closed', comments: 0, updated_at: '2026-08-03T12:00:00Z', closed_at: '2026-08-03T12:00:00Z' });
+    const liveRows = [movedIssue, movedClosed, movedPull, oldClosed];
+    const live = fakeBoard({ rows: liveRows, openPulls: [movedPull] });
+    t('the row is ABSENT before the run — the state #18045 measured, reproduced on disk', readArchivedCard(liveDir, 18045).ok === false);
+    const first = await driveSnapshot({ dir: liveDir, board: live });
+    t('THE REGRESSION: a row updated after the previous manifest stamp is archived on the VERY NEXT run, with the backfill still weeks from reaching it',
+      readArchivedCard(liveDir, 18045).ok === true && readArchivedCard(liveDir, 18045).issue.updated_at === '2026-09-13T14:50:00Z');
+    t('…and so is a CLOSED row that moved, and a pull request — the delta archives every row it sees, not the open issues alone',
+      readArchivedCard(liveDir, 17999).issue.state === 'closed' && readArchivedCard(liveDir, 18043).issue.kind === 'pull_request');
+    const listings = live.calls.filter((c) => c.startsWith('/repos/o/r/issues?'));
+    t('THE ORDER: the FIRST listing of the run is the delta, and the history listing comes after it — ⛔ a backfill placed first spends everything and the delta never runs',
+      listings[0].includes(encodeURIComponent(skewedSince('2026-09-10T15:39:49.484Z')))
+      && listings.findIndex((c) => c.includes(encodeURIComponent('2026-08-03T11:51:21Z'))) > 0);
+    t('the backfill still ran in the same run: its cursor moved and the closed row it was walking toward is on disk',
+      first.manifest.walk.history.cursor !== '2026-08-03T11:51:21Z' && readArchivedCard(liveDir, 900).ok === true);
+    t('the open set is untouched by any of it — complete, no cursor, and not re-enumerated',
+      first.manifest.walk.open_set.complete === true && first.manifest.walk.open_set.cursor === null && first.manifest.run.open_set_completed_here === false);
+    t('the manifest carries the delta cursor and its completeness BESIDE the history cursor, never merged into it',
+      first.manifest.walk.delta.complete === true && first.manifest.walk.delta.cursor === '2026-09-13T14:50:00Z' && first.manifest.walk.history.cursor !== first.manifest.walk.delta.since);
+    t('`next_since` is the DELTA high-water mark — handing the backfill February cursor over instead would replay months as an increment',
+      first.manifest.next_since === '2026-09-13T14:50:00Z');
+    t('the board own count is read every run now, so the history phase stops reporting `pending` for as long as the backfill lasts',
+      first.manifest.board.read_at !== null && first.manifest.board.open_issues_count === 2 && first.manifest.count_check.verdict === 'ok');
+
+    // THE SPLIT, driven: a delta with more to read than its slice.
+    writeIfChanged(join(busyDir, MANIFEST_NAME), stableJson(measuredHistoryManifest()));
+    const busyRows = Array.from({ length: DELTA_REQUEST_SLICE + 60 }, (_, i) => RAW({
+      number: 20000 + i,
+      state: 'open',
+      comments: 1,
+      updated_at: new Date(Date.parse('2026-09-11T00:00:00Z') + i * 60000).toISOString(),
+      thread: [RAW_COMMENT({ id: 900000 + i })],
+    }));
+    const busy = fakeBoard({ rows: [...busyRows, oldClosed] });
+    const split = await driveSnapshot({ dir: busyDir, board: busy });
+    t('THE SPLIT: a delta with more to read than its slice stops AT the slice, to the request',
+      split.manifest.run.delta_requests === DELTA_REQUEST_SLICE && split.manifest.walk.delta.complete === false);
+    t('…and a spent slice is NOT a run stop — the run carries on and spends past it', split.stopped === null && split.manifest.requests > DELTA_REQUEST_SLICE);
+    t('…so the backfill is slowed and never starved: its listing is still issued, and the closed row it was walking toward is archived in the same run',
+      busy.calls.some((c) => c.startsWith('/repos/o/r/issues?') && c.includes(encodeURIComponent('2026-08-03T11:51:21Z'))) && readArchivedCard(busyDir, 900).ok === true);
+    t('…and with the backfill still incomplete the next run resumes the delta at that cursor, rather than walking the window again from the start',
+      Date.parse(split.manifest.walk.delta.cursor) > Date.parse('2026-09-11T00:00:00Z')
+      && selectDeltaPlan({ ...split.manifest, walk: { ...split.manifest.walk, history: { complete: false, cursor: '2026-08-03T11:51:21Z' } } }).since === split.manifest.walk.delta.cursor);
+
+    // RESUME, unchanged for an interrupted HISTORY walk.
+    writeIfChanged(join(stopDir, MANIFEST_NAME), stableJson(measuredHistoryManifest({
+      walk: {
+        open_set: { complete: true, completed_at: '2026-09-10T15:39:49.484Z', cursor: null },
+        delta: { complete: true, cursor: '2026-09-13T14:50:00Z', since: '2026-09-10T15:09:49.484Z', slice: DELTA_REQUEST_SLICE },
+        history: { complete: false, cursor: '2026-08-03T11:51:21Z' },
+      },
+    })));
+    const historyRows = Array.from({ length: 5 }, (_, i) => RAW({
+      number: 800 + i,
+      state: 'closed',
+      comments: 1,
+      updated_at: `2026-08-03T1${2 + i}:00:00Z`,
+      closed_at: `2026-08-03T1${2 + i}:00:00Z`,
+      thread: [RAW_COMMENT({ id: 800000 + i })],
+    }));
+    const stop = await driveSnapshot({ dir: stopDir, board: fakeBoard({ rows: [...historyRows, movedIssue] }), options: { maxRequests: 6 } });
+    t('RESUME UNCHANGED: a history walk that runs out of budget still stops with its OWN cursor, named as the history walk and not as the phase',
+      stop.manifest.resume?.phase === 'history' && stop.manifest.resume.stopped_by === 'budget' && stop.manifest.resume.since === stop.manifest.walk.history.cursor);
+    t('…and `selectWalkPlan` reads that manifest back as a history resume from that cursor — the semantics the delta does not touch',
+      selectWalkPlan(stop.manifest).phase === 'history' && selectWalkPlan(stop.manifest).since === stop.manifest.walk.history.cursor);
+    t('…while the delta cursor survives the stop untouched, so the next run re-reads the live board before the backfill again',
+      stop.manifest.walk.delta.cursor === '2026-09-13T14:50:00Z' && selectDeltaPlan(stop.manifest).run === true);
+
+    // IDEMPOTENCE, end to end, with the delta in the path.
+    await driveSnapshot({ dir: liveDir, board: fakeBoard({ rows: liveRows, openPulls: [movedPull] }) });
+    const third = await driveSnapshot({ dir: liveDir, board: fakeBoard({ rows: liveRows, openPulls: [movedPull] }) });
+    t('IDEMPOTENCE survives the delta: a run over a board that has not moved writes nothing at all, manifest included',
+      third.written.length === 0 && third.manifestMoved === false && third.manifest.walk_phase === 'incremental');
+  } finally {
+    for (const d of [liveDir, busyDir, stopDir]) rmSync(d, { recursive: true, force: true });
+  }
+
   const declared = Object.keys(SELF_TEST_BATTERIES);
   const problems = [];
   if (declared.length < SELF_TEST_BATTERY_FLOOR) {
@@ -1887,23 +2106,34 @@ export function selfTest() {
     console.error(`x board-snapshot self-test: ${failed.length} of ${cases.length} case(s) failed.`);
     return 1;
   }
-  console.log(`OK board-snapshot self-test: ${cases.length} cases pass across ${declared.length} batteries (open-first walk order, walk re-anchor, the two phase cursors, idempotence, the three count-check verdicts and their predicate, the restore header, and the two structural properties).`);
+  console.log(`OK board-snapshot self-test: ${cases.length} cases pass across ${declared.length} batteries (open-first walk order, the delta-first run order and its budget split driven end to end, walk re-anchor, the three walk cursors, idempotence, the count-check verdicts and their predicate, the restore header, and the two structural properties).`);
   selfTestReachedVerdict = true;
   return 0;
 }
 
 if (isEntrypoint(import.meta.url)) {
   if (process.argv.includes('--self-test')) {
-    const code = selfTest();
-    if (!selfTestReachedVerdict) {
-      console.error(
-        '\nx board-snapshot self-test: selfTest() returned without reaching its verdict, so no success\n' +
-          'line was printed. Exiting 0 here would report a self-test that never finished as a self-test\n' +
-          'that passed.\n',
-      );
-      process.exit(1);
-    }
-    process.exit(code);
+    // `selfTest()` is async because the driven battery runs the real walk against
+    // an injected fetch. ⛔ The verdict guard stays on THIS side of the await: a
+    // `process.exit(promise)` would coerce to 0 and report a self-test that never
+    // ran as one that passed, and so would a rejection nobody caught.
+    selfTest().then(
+      (code) => {
+        if (!selfTestReachedVerdict) {
+          console.error(
+            '\nx board-snapshot self-test: selfTest() returned without reaching its verdict, so no success\n' +
+              'line was printed. Exiting 0 here would report a self-test that never finished as a self-test\n' +
+              'that passed.\n',
+          );
+          process.exit(1);
+        }
+        process.exit(code);
+      },
+      (err) => {
+        console.error(`\nx board-snapshot self-test: it THREW before reaching its verdict — ${err?.stack ?? err}\n`);
+        process.exit(1);
+      },
+    );
   } else {
     // ⛔ --restore is not re-exec'd: it reads the archive directory and makes no
     // request at all, so routing its transport would spawn a child to prove a
