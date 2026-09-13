@@ -2,6 +2,8 @@
 
 import type { IDataEngine } from '@objectstack/spec/contracts';
 import type {
+    ChannelAvailability,
+    ChannelAvailabilityQuery,
     Delivery,
     ErrorClass,
     MessagingChannel,
@@ -204,6 +206,44 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
 
     return {
         id: 'email',
+
+        /**
+         * Can this tenant send mail at all? (ruling on #17732 item 3.)
+         *
+         * Answered from the composition's transport configuration — the `email`
+         * service this channel was handed — and from nothing else. No delivery
+         * I/O, no recipient lookup, no settings read: a service-registry
+         * closure call, which is why fan-out consults it inline and holds no
+         * cache.
+         *
+         * ## The cost measurement the ruling asked for
+         *
+         * Mail configuration in this tree is the `mail` settings namespace, and
+         * that manifest declares `scope: 'global'`
+         * (`packages/services/service-settings/src/manifests/mail.manifest.ts`):
+         * one deployment-wide provider/transport, materialised ONCE into a
+         * single in-memory `IEmailTransport` on the `EmailService` and
+         * hot-swapped by the settings change bus (`EmailServicePlugin`'s
+         * `applySettings` → `setTransport`). So there is no per-tenant
+         * transport row to read, and the answer costs no round trip at all.
+         *
+         * ⇒ NO CACHE, for two independent reasons: it would save nothing, and
+         * it would be WRONG — a tick-scoped memo would keep answering
+         * "unavailable" straight through the settings save that fixed it.
+         *
+         * The query still takes the tenant context, because the seam outlives
+         * this measurement: the day mail configuration becomes tenant-scoped,
+         * the answer changes here and no published interface has to move again.
+         */
+        isAvailable(_ctx: MessagingChannelContext, _query: ChannelAvailabilityQuery): ChannelAvailability {
+            // A pure probe: no logging, no I/O, no side effects. The suppression
+            // it causes is announced ONCE per emit by the service and recorded
+            // durably on `sys_notification.suppressed_channels` — a line per
+            // emit here would be the noisy half of an answer already written down.
+            return opts.getEmail()
+                ? { available: true }
+                : { available: false, reason: 'transport_not_configured' };
+        },
 
         async send(ctx: MessagingChannelContext, delivery: Delivery): Promise<SendResult> {
             const email = opts.getEmail();
