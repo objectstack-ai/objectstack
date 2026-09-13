@@ -441,9 +441,24 @@ export const SchemaLevelIsolationStrategySchema = lazySchema(() => z.object({
     poolPerSchema: z.boolean().default(false).describe('Separate pool per schema'),
     
     /**
-     * Schema cache TTL in seconds
+     * Schema cache TTL in seconds.
+     *
+     * Renamed from `schemaCacheTTL` (#15939 ruling A, executing #14478): the unit
+     * lived in this JSDoc only, and `.describe()` — the text the reference pages
+     * publish — carried none. Spelled `Ttl`, not `TTL`, because that is how the
+     * suffixed family already spells it (`cacheTtlSeconds`, `ttlSeconds`,
+     * `defaultCacheTtlSeconds`). Tombstoned rather than deleted because this
+     * nested object is not `.strict()`.
      */
-    schemaCacheTTL: z.number().int().positive().default(3600).describe('Schema cache TTL'),
+    schemaCacheTtlSeconds: z.number().int().positive().default(3600).describe('Schema cache TTL in seconds'),
+    schemaCacheTTL: retiredKey(
+      '`performance.schemaCacheTTL` was renamed to `schemaCacheTtlSeconds` on ' +
+      '`SchemaLevelIsolationStrategy` in @objectstack/spec 17 — the unit of a duration-shaped ' +
+      'number lives in the key name, not only in the describe prose. Its unit (seconds) lived in a ' +
+      'source comment only and the published description named none, so a reader of the reference ' +
+      'page could not tell 3600 seconds from 3600 milliseconds. Rename the key to ' +
+      '`schemaCacheTtlSeconds`; the value (seconds) is unchanged.',
+    ),
   }).optional().describe('Performance settings'),
 }));
 

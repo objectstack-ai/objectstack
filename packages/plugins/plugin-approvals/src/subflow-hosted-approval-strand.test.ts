@@ -350,4 +350,65 @@ describe('#15556 — an approval hosted in a subflow child, whose parent bubble 
       finalized: true, decision: 'approve', runId: req.flow_run_id, repairable: true,
     });
   });
+
+  it('[#15970] the RECALL door carries the same parent strand — the door was the only difference', async () => {
+    // This shape's second door. #17908 landed `takeSubflowParentStrand` and
+    // wired it into `resumeRecordedOutcome`, which serves `decide` / `sendBack`
+    // / `resubmit`; `recall` resumes DIRECTLY and discarded the value the very
+    // same call already returned to it. The spec declares this door's answer
+    // for exactly this shape (`ApprovalRecallResult.resumed`: *"a resume that
+    // completed and then stranded a run further up (a subflow's parent, #15556)
+    // still answers `true`, with the strand told on `resumeFailure`"*), so a
+    // recall that reported nothing here was a declared contract with no
+    // producer.
+    throwOn.after_sub = DOWNSTREAM_FAILURE;
+    const automation = boot();
+
+    const started = await automation.execute('deal_parent', {
+      object: 'crm_deal', record: { id: 'd4', amount: 100 }, userId: 'submitter',
+    } as never);
+    const parentRunId = (started as any).runId as string;
+    const req = await pendingRequest();
+    const childRunId = req.flow_run_id as string;
+    expect(childRunId).not.toBe(parentRunId);
+
+    const outcome = await service
+      .recall(req.id, { actorId: 'submitter' }, SYSTEM_CTX)
+      .then(r => ({ ok: true as const, r }), (e: Error) => ({ ok: false as const, e }));
+
+    expect(outcome.ok, 'recall still does not throw — the ruling upholds that').toBe(true);
+    const answer = outcome.ok ? outcome.r : (undefined as never);
+
+    // The child ran its reject branch to completion; the PARENT is the casualty.
+    expect(answer.resumed, "this recall's own run — the child — really did resume").toBe(true);
+    expect(answer.runId, 'the id handed back is still the CHILD').toBe(childRunId);
+    expect(marks).toEqual(['mark_rejected']);
+    expect(await automation.hasSuspendedRun(parentRunId)).toBe(false);
+    expect((await automation.getRun(childRunId))?.status).toBe('completed');
+    expect(answer.request.status, 'and the withdrawal is durable either way').toBe('recalled');
+
+    // ── Both halves of the ONE telling, the PARENT's id on each.
+    expect(answer.resumeFailure).toEqual({
+      code: 'RESUME_FAILED',
+      runId: parentRunId,
+      status: 'stranded',
+      repairable: true,
+    });
+    expect(answer.resumeError).toContain('RESUME_FAILED');
+    expect(answer.resumeError).toContain(parentRunId);
+    expect(answer.resumeError).toContain(DOWNSTREAM_FAILURE);
+
+    // ⛔ No second log line from the approvals side: the engine's own `error`
+    // line already said this once, and the #16472 ruling left logging alone.
+    const durability = logger.lines.filter(
+      (l: any) => l.level === 'error' && String(l.msg).includes('STRANDED'),
+    );
+    expect(durability.length, "exactly one, and it is the engine's own line").toBe(1);
+    expect(logger.lines.filter(
+      (l: any) => l.level === 'error' && String(l.msg).includes('resume after recall failed'),
+    ), 'the recall catch never ran — this resume SUCCEEDED').toEqual([]);
+
+    // …and the repair the discriminator promises works on the run it names.
+    expect((await automation.restoreConsumedSuspension(parentRunId, { requestedBy: 'ops' })).restored).toBe(true);
+  });
 });
