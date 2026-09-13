@@ -254,38 +254,35 @@ localStorage / auth gotchas.
     record gains a one-line pointer. Files never move between registries and numbers are never reassigned.
 14. **⛔ A governed surface is confirmed and merged by the maintainer, by hand — no AI seat merges, queues, or arms
     auto-merge on a PR whose diff touches one.** The governed surfaces are `docs/adr/**`, `.claude/**` (agents, hooks
-    and settings — not only skills), `skills/**`, `AGENTS.md` and `CLAUDE.md` — the file you are reading is one
-    — and a mixed diff is governed whole on a single path hit. The register is the `GOVERNED_SURFACES` table in
+    and settings — not only skills), `skills/**`, `AGENTS.md` and `CLAUDE.md` — the file you are reading is one —
+    and a mixed diff is governed whole on a single path hit. The register is the `GOVERNED_SURFACES` table in
     `scripts/pm/check-governed-merges.mjs`; adding a surface is an edit *there*, never here, and `pnpm
-    check:pm-governed-prose` reds per-PR when this paragraph names fewer surfaces than the register — or more. When
-    it reds, name the surface **in this paragraph**. Print today's set rather than trusting this paragraph:
-    `node -e "import('./scripts/pm/check-governed-merges.mjs').then(m=>console.log(m.GOVERNED_SURFACES.map(s=>s.glob).join(' · ')))"`
+    check:pm-governed-prose` reds per-PR when this paragraph names fewer surfaces than the register — or more. When it
+    reds, name the surface here.
 
-    **Authoring stays open to every seat** — drafting the ADR, the skill or the instruction edit, pushing the
-    branch, opening the PR, revising it under review. What is reserved is the **landing**: on any PR whose diff
-    touches a governed surface, ⛔ never merge it, ⛔ never add it to the merge queue, ⛔ never call
-    `enable_pr_auto_merge`, ⛔ never flip it out of draft to make any of those possible. Judge it on the PR's **file
-    list**, not on its description, and a **mixed diff is not a proportion question** — one path hit is enough; if
-    the rest needs to land, split the governed files into their own PR. **Those four lift only for an authorized
-    APPROVED review** — by an account in `GOVERNED_APPROVERS` (`scripts/pm/check-governed-queue-guard.mjs`), on ANY
-    commit; the queue then lands it. A later push does not expire that approval, and this gate does not re-review it.
-    Hand-authored governed content needs that approval; a PR whose only governed paths are register rows the queue leg
-    regenerates byte-exact clears with zero approvals — an uncertified recompute, drift or a hand-authored sibling
-    keeps it governed. Unapproved, the bypass direct merge (人工直合) is the only landing. ⛔ **No agent seat
-    submits an approving review on a governed-surface PR, under any account** — an authorized account is
-    agent-operated too. Nothing else substitutes — "CI is green" carries no information about a governance change.
+    **Authoring stays open to every seat** — drafting, pushing, opening and revising the PR. What is reserved is the
+    **landing**: on a PR whose diff touches a governed surface ⛔ never merge, ⛔ never queue, ⛔ never arm
+    auto-merge, ⛔ never flip it out of draft to make any of those possible — judged on the PR's **file list**, not
+    its description; a **mixed diff is not a proportion question**, one path hit is enough; to land the rest, split off
+    the governed files. **Those four lift only for an authorized APPROVED review** — by an account in
+    `GOVERNED_APPROVERS` (`scripts/pm/check-governed-queue-guard.mjs`), on ANY commit and not dismissed. The queue then
+    lands it. A later push does not expire that approval, and this gate does not re-review it. Hand-authored governed
+    content needs that approval; a PR whose only governed paths are register rows the queue leg regenerates byte-exact
+    clears with zero approvals — an uncertified recompute, drift or a hand-authored sibling keeps it governed.
+    Unapproved, the bypass direct merge (人工直合) is the only landing. **Landing is tiered**: a PR whose governed
+    paths all lie under `.claude/skills/pm-dispatch/references/` lands through the queue after the skills seat's
+    contract-tier review; every other governed path is the rules layer and waits for the maintainer's word. ⛔ **No
+    agent seat submits an approving review on a governed-surface PR, under any account** — an authorized account is
+    agent-operated too; "CI is green" carries no information about a governance change.
 
-    **Already armed or queued when you read this?** Converting the PR back to **draft** is the only action that
-    reliably removes it from the merge queue; `disable_pr_auto_merge` alone drops the arming but **not** queue
-    membership. Do both, then confirm from the remote that it is in neither the queue nor `origin/main` (§7's
-    draft-flip re-arm note, run backwards). **Do not read draft as a barrier that holds by itself — the barrier is
-    this directive**, and a human merge IS the review record — ⛔ not a relaxation. Behind the directive sit
-    prevention and detection: the queue guard refuses an unpinned governed diff in the queue; `docs/adr/` in
-    CODEOWNERS routes review requests — the *only* governed surface routed there, so on the other four nothing
-    summons the maintainer automatically; the report-only post-merge audit (`scripts/pm/check-governed-merges.mjs`)
-    lists every governed-surface merge with its approver and merger for the PM round report — a merger the
-    maintainer does not recognise, or any agent approval, is a seat violation, filed and rolled back. The rule has no
-    exception for a seat to judge.
+    **Already armed or queued when you read this?** Convert it back to **draft** AND disable auto-merge — draft is
+    what removes queue membership, disabling alone drops only the arming — then confirm from the remote that it is in
+    neither the queue nor `origin/main`. **Draft is no barrier by itself — the barrier is this directive**, and a
+    human merge IS the review record, ⛔ not a relaxation. Behind it: the queue guard refuses an unpinned governed
+    diff; CODEOWNERS routes review requests for `docs/adr/` only, so nothing summons the maintainer on the other four;
+    the post-merge audit (`scripts/pm/check-governed-merges.mjs`) lists every governed-surface merge with its approver
+    and merger — a merger the maintainer does not recognise, or any agent approval, is a seat violation, filed and
+    rolled back. The rule has no exception for a seat to judge.
 
 15. **⛔ A version release is performed by the maintainer, by hand — no AI seat publishes, tags, cuts a Release, or
     triggers a release workflow, and none merges the Version Packages PR.** A rule that binds every seat lives here,

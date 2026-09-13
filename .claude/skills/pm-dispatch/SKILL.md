@@ -605,7 +605,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 路径面用 `get_files` 取,⛔ 不看报告自述;动手之前先分,不是事后对照。
 - governed 面统一定义:`docs/adr/**` + `.claude/**`(全量,含 agents/hooks/settings)+ `skills/**`。
 - governed 面同含 `AGENTS.md` + `CLAUDE.md`;agent 指令文件跨仓同判,仓集读 `GOVERNED_REPOS`,此处不列。
-- 路径面一条命中 ⇒ ACCEPT 换终局四件套,混合 diff ⛔ 不按比例判;要拆让 dev 单独开 PR。
+- 路径面命中规则层 ⇒ ACCEPT 换终局四件套,混合 diff ⛔ 不按比例判;要拆让 dev 单独开 PR。
 - ① 复核结论照常写在 issue 上;技能面 hunk 须由契约复审档的席复核,档外席先交 skills 席。
 - ② PR 留给维护者看得见地悬着;终局两条:人工直合即审核记录;授权批准 ⇒ 队列放行。
 - 看得见 = ACCEPT 同笔挂 `needs-user-decision` + 贴终稿「维护者速读」评论;①仍是审核记录。
@@ -621,9 +621,9 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 请审走免碰 draft 位的专用 REST 端点,MCP 兜底显式带 `draft: true`;端点事实住 platform-readings。
 - ④ 轮次报告单列 awaiting a human merge。
 - 已入队才读到本条 ⇒ 转 draft 与 disable 都做;出队以阳性探针答,ref 缺席只旁证。
-- skills 车道自有 PR 再按 diff 内容分流:diff 含任一 `.md` 文件 ⇒ 终局四件套照旧。
-- 纯代码面(`scripts/pm/`、`.claude/` hooks/workflows/settings、非 md 产物)⇒ 复核席为 skills 席自审。
-- skills 席自审按契约复审档、清单不减,然后直接落地(ready → 入队),⛔ 不推维护者。
+- skills 车道自有 PR:纯代码面如 `scripts/pm/` 由本席按达档自审(清单不减)后落地。
+- 受管面两层:事实层仅本技能 `references/`,其余为规则层(含发布 `skills/**` 与 SKILL.md)。
+- 规则层四件套等人合;事实层 PR(受管路径全在该目录)经席内达档复核后 ready → 入队。
 - 路径面干净的才转 ready → 入队;队列是唯一被认可的落地路径,⛔ 永不队列外合并。
 - 入队资格 = PR 上每一个 check 全绿,⛔ 不是 required 子集;required 集是队列强制的地板。
 - 非必查红是真缺陷或坏门,归 PM 入队前处置;第三种按设计而红,三条全立才可带红入队:
