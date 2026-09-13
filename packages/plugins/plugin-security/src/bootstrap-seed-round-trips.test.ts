@@ -431,7 +431,14 @@ describe('#10946 — a name declared twice in one batch keeps its loud refusal',
     expect(r.skippedForeign).toBe(1);
     expect(ql.rows).toHaveLength(1);
     expect(ql.rows[0].package_id).toBe('com.example.a');
-    expect(warns.some((w) => w.includes('owned by another package'))).toBe(true);
+    // [#17516] Re-anchored from the old prose to the stable token the report
+    // stamps — the assertion's substance (the refusal is REPORTED, not merely
+    // counted) is unchanged, and the record is asserted beside it so "loud"
+    // means reaching a reader rather than moving a counter.
+    expect(warns.some((w) => w.includes('permission_set_name_collision'))).toBe(true);
+    expect(r.collisions).toEqual([
+      expect.objectContaining({ name: 'shared_name', declaredBy: 'com.example.b', ownedBy: 'com.example.a' }),
+    ]);
   });
 });
 
