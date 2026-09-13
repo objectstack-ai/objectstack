@@ -1,0 +1,36 @@
+{
+  "number": 4813,
+  "kind": "issue",
+  "title": "内核的插件 init/start 超时守卫定时器从不清除也不 unref —— 每个进程在工作结束后还要空转 startupTimeout(CLI 挂 ~120s 才退出)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T08:20:04Z",
+  "updated_at": "2026-08-03T12:29:33Z",
+  "closed_at": "2026-08-03T12:29:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4813",
+  "body": "发现自 #4747 的实现过程。**未认领。** 与 #4747 是不同的 bug,但它正是 #4747 得以发生的前提条件。\n\n## 现象\n\n一条 `os migrate` 子命令的实际工作 **3 秒**就做完了(JSON 已输出、`✅ Graceful shutdown complete` 已打印),然后进程**再挂 120 秒**才被外部杀掉:\n\n```\n07:54:18.354   进程启动\n07:54:21.556   ✅ Graceful shutdown complete     ← 活干完了\n07:56:21.471   进程结束(被杀,退出码 214/238 不稳定)\n```\n\n## 原因\n\n`packages/core/src/kernel.ts` 的两处超时守卫:\n\n```ts\n// initPluginWithTimeout(), ~L544\nconst initPromise = plugin.init(this.context);\nconst timeoutPromise = new Promise< void >((_, reject) => {\n  setTimeout(() => {\n    reject(new Error(`Plugin ${plugin.name} init timeout after ${timeout}ms`));\n  }, timeout);\n});\nawait Promise.race([initPromise, timeoutPromise]);\n```\n\n`startPluginWithTimeout()` 里是同一段。**插件赢了这场 race 之后,那个 `setTimeout` 既没被 `clearTimeout`,也没被 `unref()`** —— 它带着 ref 一直挂到 `startupTimeout` 走完。\n\n`ObjectQLPlugin.startupTimeout = 120_000`,于是最长的那根定时器把进程钉住整整 120 秒。实测正是 8 根还带 ref 的 Timeout(4 个 init + 4 个 start):\n\n```\n[probe] 8 ref'ed timers still alive\n[probe] setTimeout: at ObjectKernel.initPluginWithTimeout  (packages/core/dist/index.js:1855)\n[probe] setTimeout: at ObjectKernel.startPluginWithTimeout (packages/core/dist/index.js:1891)\n```\n\n同一个文件里 `shutdown()` 自己的超时守卫**已经**做对了,连注释都写好了:\n\n```ts\nconst t = setTimeout(() => { reject(new Error('Shutdown timeout exceeded')); }, this.config.shutdownTimeout);\n// Don't let this timer keep the event loop alive\nif (t.unref) t.unref();\n```\n\n修法就在隔壁 30 行。清除(`finally { clearTimeout(t) }`)比 `unref()` 更彻底,两者都可以。\n\n## 为什么值得修\n\n1. **一次性 CLI 进程不退出。** `os migrate` / `os meta resync` 全家都是干完活挂 30–120 秒。脚本里串起来的 CI 步骤会白等,退出码还不稳定。\n2. **这是 #4747 的使能条件。** #4551 巡检的首次 sweep 排在启动后 60 秒;一个干完活就退出的进程永远碰不到它。正是这 120 秒的空转把进程留到了 60 秒定时器触发,才让巡检在连接池已关之后跑起来。#4747 已从生命周期契约那一侧修好(关停真正到达 LifecycleService),**不依赖本条**;但只要这些定时器还在漏,任何「启动后 N 秒才做的事」都会在一个自以为已经结束的进程里醒来。\n3. `os serve` 里同样漏,只是那里进程本来就长命,看不出来。\n\n## 复现\n\n```bash\ncd examples/app-crm\ntime OS_DATABASE_URL=\"file:/tmp/t.db\" node packages/cli/bin/run.js migrate recorded-by --json\n# JSON 与 \"Graceful shutdown complete\" 在 ~3s 出现;进程 ~120s 后才结束\n```\n\n挂 handle 的证据:\n\n```js\n// node --import ./probe.mjs packages/cli/bin/run.js migrate recorded-by\nconst t = setInterval(() => console.error(process.getActiveResourcesInfo()), 10000);\nt.unref();\n```\n\n## 边界\n\n- 只碰 `packages/core/src/kernel.ts` 的两个守卫。别顺手改 `startupTimeout` 的取值 —— 慢启动的插件需要那个上限,问题不在时长而在没人回收。\n- 建议加一条测试:插件正常 init/start 之后,`process.getActiveResourcesInfo()` 里不应留下这些守卫定时器(或直接断言守卫定时器被 clear)。\n\nRefs #4747。\n"
+}

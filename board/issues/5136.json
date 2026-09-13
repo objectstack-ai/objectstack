@@ -1,0 +1,35 @@
+{
+  "number": 5136,
+  "kind": "pull_request",
+  "title": "feat(runtime): 端点执行目标委派 —— endpoint-executor 纯模块(#5040 E5)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T05:58:26Z",
+  "updated_at": "2026-08-04T06:08:07Z",
+  "closed_at": "2026-08-04T06:08:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T06:08:06Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5136",
+  "body": "Fixes #5092\nPart of #5040(E 系列第 5 单);Blocked-by 已满足:E2 `ecc61ab`、E3 `2649ccb` 均在 main。\n\n## ⚠️ 本 PR **不接线**(有意为之)\n\n调度步(`api-endpoint-step.ts`)命中后**仍然答 501**,本 PR 一行都没碰它。把 501 分支换成「策略 → 执行」链是**随后的小型接线单**,在本单与 #5091(E4,策略键)两条 R3 PR 都合入 main 之后落地 —— 两单按 #4604 声明了互斥文件面并行开发,接线做成一次小改动比让两个 PR 争同几行更好审。\n\n叠加 publish 对非空 `apis:` 的硬拒(E7 前不撤),本模块**结构性不可达**:没有任何部署能触达它,现网行为零变更。测试按 #5040 §5 的规定用 stub 直接驱动模块。\n\n## 做了什么\n\n新增纯模块 `packages/runtime/src/endpoint-executor.ts`。它遵守 #5040 §4 的唯一裁决:**声明式端点 = 既有管线的「稳定 URL 别名 + 策略层」,零新执行语义**;同一操作经声明端点与经内建路由必须给同样的答案。\n\n### 1. `buildEndpointExecutionContext(...)` —— 请求上下文构造\n\n从兜底请求形状(`method/path/query/headers/body/remoteAddress`,E3 的 seam 已填 body 与 remoteAddress)+ `ApiEndpointMatch` + **显式传入**的服务依赖,投影出一个执行上下文。`query`/`headers`/`body` **原样直通**(规整化会在管线自己的入参处理前面再放一份更弱的拷贝);顺带构造 `HttpProtocolContext`(`{ request, environmentId, dataDriver, executionContext }`),因为 `buildAutomationContext` 本来就吃这个对象 —— 喂它同一个形状,而不是一个长得像的副本。\n\n`match.params` 恒 `{}`(词表无路径模板语法),携带但**不用于**取记录 id。\n\n### 2. `executeEndpointTarget(...)` —— 按 type 委派\n\n`object_operation` → `callData`,五个操作的参数形状逐条对齐 `/data`(注释里标了对照行号,可逐条核):\n\n| operation | 委派调用 | 对照 |\n|---|---|---|\n| `find`   | `('query',  { object, query: {…query} })` | `domains/data.ts:119` |\n| `get`    | `('get',    { object, id, select?, expand? })` | `domains/data.ts:87`(**只**放行 select/expand,防参数污染) |\n| `create` | `('create', { object, data: body })` | `domains/data.ts:126`(答 **201**,同 POST /data/:object) |\n| `update` | `('update', { object, id, data: body })` | `domains/data.ts:95` |\n| `delete` | `('delete', { object, id })` | `domains/data.ts:103` |\n\n- 记录 id 取 `query.id`(#5040 §2)—— `/data` 从路径段取,而声明式端点没有表达路径段的词表,执行器不发明一套。缺 `?id=` → 400 `VALIDATION_FAILED` + `fields[]`(复用 `validationFailure`),不是 500;`?id=` 重复出现直接拒,不静默挑一个。\n- `object` **只**来自 `objectParams.object`,请求改不动它(`/data` 的镜像缺陷见 #3946)。\n- **身份信封红线**:`executionContext` / `dataDriver` / `environmentId` 在五个操作上一律透传,五个操作各有一条测试钉住 —— #4936 摘除的死代码正是丢了这个参数,真跑起来会以 system 身份绕过 RLS。\n\n`flow` → `automationService.execute(target, buildAutomationContext(body, ctx))`。`buildAutomationContext` 从 `domains/automation.ts` **导出复用**(设计 §4 明确要求;E5 文件面本就含这一处):`{recordId, objectName, params}` 翻译 + 完整身份信封转发一并继承,`runAs:'user'` 的流程不会 fail-closed 被拒(#3760)或以他人身份运行(#1888)。槽为空 / 自称非 handler(`handlerReady:false`)/ 无 `execute` → **501**,携带 discovery 同款处方句(ADR-0076 D12、`domains/unavailable.ts`);`degraded` 占位者照常服务。\n\n### 3. 不支持子集 —— 结构化 501,不猜语义\n\n`script` / `proxy`,以及缺 `objectParams.object|operation` 的 `object_operation`、`target` 为空的 `flow`:一律 **501 NOT_IMPLEMENTED** + 处方。理由按 #5040 §7-3:automation 契约的 `execute` 注释虽提「flow or script」,但仓内没有任何证据表明 script 目标经它可达;`proxy` 是全新出网面(SSRF / 出口策略),必须单独安全裁决。\n\n这个「不支持子集」在 `planEndpointTarget` 里**只列一处**,**E7 的 publish 门可以直接照着这份清单写**,不必另行复述。\n\n### 4. 错误映射 —— 全走既有包络\n\n`endpointErrorAnswer` 是 `HttpDispatcher.errorFromThrown`(`http-dispatcher.ts:530`)在本模块答案类型上的重述:同样的状态优先级(`.status` → `.statusCode` → 校验失败 400 → 兜底 500)、同样的 `details` 组装(`code` / `issues` / `fields[]` 最后放,让 `VALIDATION_FAILED` 对仅凭 `name` 匹配的错误也生效)、同样的 5xx `looksLikeInternalErrorLeak` 消毒(#3867/#3918)。零新包络形状、零新错误码词表。新模块已加入 `error-envelope.conformance.test.ts` 的源码扫描名单(与 #5091 加的 `endpoint-policy.ts` 是不同行,git 可无冲突合并)。\n\n## 需要复核者留意的两处「设计文档内部打架」\n\n设计 §4 同时写了两句相互冲突的话,我按**更强、带测试的那句**(「与 `/data` 同请求同身份逐字节同结果」)取舍,并在此显式标出,请维护者在 E7/E8 验收时确认:\n\n1. **find 的成功体**:§4 括注写「`success(result.records, {total})`」,但同段红线要求与 `/data` 逐字节一致,而 `/data` 是 `success(result)`(整个 `FindDataResponse`)。**本 PR 取 `success(result)`** —— 重塑一遍会造出第二种方言,正是同段裁决要避免的。\n2. **`get` 未命中**:`/data` 对 `callData('get')` 返回 `null` 的情况答 **200 + `data: null`**。本 PR 照抄,**没有**发明一个 404 —— 在消费者侧发明语义正是 contract-first 禁止的。若产品要求集成面上 404,那是 `/data` 与端点面**一起**改的决定,应单独立卡。\n\n另:`create` 答 **201**(同 `/data` POST),其余 200。\n\n## 范围外(留给后续单)\n\n- **`inputMapping` / `outputMapping`(设计 §3.4 的 `api-mapping.ts`)**:设计总表把它列在 E5 行,但本单派发的文件面只含 `endpoint-executor.ts`。本 PR **未实现**映射;E7 翻转前必须补一单,否则两个键会处于「声明合法、执行忽略」的中间态。已在报告中标出。\n\n## 验证\n\n```\npnpm --filter @objectstack/runtime test         → 87 files / 1226 tests passed\npnpm --filter @objectstack/runtime typecheck    → tsc --noEmit, 干净\nnpx eslint <本 PR 三个文件>                       → 无输出\npnpm --filter @objectstack/spec check:generated  → ✓ All 8 generated artifacts are up to date\ncheck:route-envelope / error-code-casing / wildcard-fallthrough / slot-lookup / role-word → 全绿\n```\n\n新增 `endpoint-executor.test.ts` 49 例:每个 target 的委派调用形状(逐个参数断言)、成功映射、各失败类映射(404 / 403 statusCode / ValidationError→400+fields / 500 兜底 / 5xx 消毒 / 4xx 不消毒 / 生产者自带 code)、不支持类型判定、上下文构造(headers/query/body 直通、params `{}`、匿名不伪造身份)。\n\nChangeset:`.changeset/endpoint-execution-targets.md`(`@objectstack/runtime` minor)。未触碰 `content/docs/releases/`。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01EYGdmvWP1ieZSLqvAW6uyd\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01EYGdmvWP1ieZSLqvAW6uyd)_"
+}

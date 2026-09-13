@@ -1,0 +1,35 @@
+{
+  "number": 5275,
+  "kind": "pull_request",
+  "title": "fix(core)!: kernel:bootstrapped / kernel:listening 抛错在 LiteKernel 上也失败 boot(#5257)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T14:05:08Z",
+  "updated_at": "2026-08-04T14:23:15Z",
+  "closed_at": "2026-08-04T14:23:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T14:23:13Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5275",
+  "body": "Fixes objectstack-ai/objectstack#5257\n\n按 13:12Z 的 PM 裁定取 **A**,范围严格照单:两个 boot 路径钩子改传播,`kernel:shutdown` 保留 fail-soft 并把理由写在分发点。\n\n## 改了什么\n\n`packages/core/src/lite-kernel.ts` —— `kernel:bootstrapped` 与 `kernel:listening` 从隔离式 `triggerHook` 换成传播式 `triggerHookOrThrow`(#5170 / PR #5258 已落地的分发器,直接复用),并和 `kernel:ready` 一起收进同一个 try:一个 handler 抛错 ⇒ 该钩子后续 handler 不再跑、后面的 boot 钩子完全不触发、原始错误**不包装**地抛给调用方、`state = 'stopped'`、**不打印**「✅ Bootstrap complete」。这与 `ObjectKernel.bootstrap()` 的 `context.trigger`(裸 await 循环)完全同形,#5258 为 `kernel:ready` 立的就是这个形状。\n\n`kernel:shutdown` **保持** `triggerHook` 不变。分发点现在写着为什么:停机路径上排在失败 handler 后面的,正是其余订阅者的清理和逆序的 `destroy()` —— 冲刷缓冲、关连接、放锁。中断它等于把一个坏 handler 放大成资源泄漏和未落盘的写。这是**逐钩子写下来的判断**,不是继承来的默认值,所以两个分发器是按钩子挑的,而不是整体换掉。\n\n`packages/plugins/plugin-hono-server/**` 一个字没动 —— 传播本身就让它现有的代码是对的。\n\n## 为什么这条不只是对称性洁癖\n\n`HonoServerPlugin` 在 `kernel:listening` 里开监听套接字:`await this.server.listen(port)`,**故意**没有自己的 try/catch。它 reject 时(特权端口 EACCES、端口回退逻辑本身失败、edge/serverless 宿主上 listen 根本不可用),在 LiteKernel 上异常被吞 → `bootstrap()` 正常 resolve → 打印「✅ Bootstrap complete」→ **进程活着,没有任何 socket 在监听**。同一份插件代码在 ObjectKernel 上是 boot 失败。第一个发现不对的是紧随其后的健康检查,而它已经被告知启动成功了。\n\n「端口占用」从来触发不了这条(`server.listen` 内部会回退到随机端口),这正是它一直没被发现的原因。\n\n`kernel:bootstrapped` 上挂的是 reconcile / 审计类工作(objectql 的 `announceOpenMigrationGates`、service-automation 的 node-type 与触发器绑定审计、plugin-sharing 的开机回填),吞掉是同一个谎的安静版本:审计静默失效。\n\n## 证据闸(枚举 + 跑套件)\n\n非测试的 `kernel:bootstrapped` / `kernel:listening` 订阅者全表,以及各自在健康 boot 下会不会抛:\n\n| 订阅点 | 钩子 | 健康 boot 会抛吗 |\n| :--- | :--- | :--- |\n| `packages/objectql/src/plugin.ts:376` | bootstrapped | 否 —— `announceOpenMigrationGates()` 自带 `try { … } catch {}`,注释原文「An advisory must never be the reason a boot fails」 |\n| `packages/plugins/plugin-sharing/src/sharing-plugin.ts:661` | bootstrapped | 否 —— 五个回填/清扫**各自**包了 try/catch,失败只 warn |\n| `packages/plugins/plugin-pinyin-search/src/pinyin-search-plugin.ts:82` | bootstrapped | 否 —— 整个 handler 体在 try/catch 内,且 `if (!engine) return` |\n| `packages/services/service-automation/src/plugin.ts:843` | bootstrapped | 否 —— `if (!this.engine) return` 之后全是内存态读取(`sealNodeTypeVocabulary` / `getTriggerBindingAudit` / `getFlowRuntimeStates`)+ 日志 |\n| `packages/plugins/plugin-hono-server/src/hono-plugin.ts:605` | listening | **会** —— 这正是本单要传播的那一条 |\n| `examples/app-showcase/src/security/{bind-position-sets,seed-approval-demo}.ts` | bootstrapped | 否(健康 boot 下);且 showcase 走 ObjectKernel,那边本来就是传播 |\n\n没有任何现存测试依赖这个吞:**不需要 needs_decision**。#5258 的爆炸半径集合原样重跑,外加三个直接订阅这两个钩子的插件包,全绿:\n\n| 包 | 结果 |\n| :--- | :--- |\n| `@objectstack/core` | 27 files / **426** tests passed(main 上是 422,+4 为本 PR 新增) |\n| `@objectstack/runtime` | 89 files / **1313** passed |\n| `@objectstack/client` | 17 files / **222** passed |\n| `@objectstack/service-automation` | 55 files / **665** passed |\n| `@objectstack/http-conformance` | 2 files / **46** passed |\n| `connector-{rest,mcp,slack,openapi}` | 16/23/8/32 passed |\n| `plugin-hono-server` | 14 files / **164** passed |\n| `plugin-sharing` | 13 files / **347** passed |\n| `plugin-pinyin-search` | 2 files / **14** passed |\n\n闸门:`check:type-check-coverage`、`check:doc-authoring`、`check:release-notes`、`check:adr-anchors`、`check:nul-bytes`、`check:startup-registry-verdict`、`check:durability-log-level`、`check:init-service-contract` 全部 PASS。\n\n`@objectstack/core` 没有 `typecheck` script(#4311 的 DEBT 台账,冻结 91)。实测:main 基线 `tsc --noEmit` = 91,本分支 = 95,+4 全是两个测试文件里既有的那一类 TS7006「Parameter 'ctx' implicitly has an 'any' type」噪声(根因是 `./types` 相对导入缺 `.js`,由 #4311 统一处理),与新增用例数一一对应。台账不按数字设闸,故不改台账;在此明说以免日后重测时被当成新增漂移。\n\n## pin 的显式翻面\n\n#5258 留下的 pin 叫 `keeps fail-soft dispatch for hooks other than kernel:ready (#5170)`,一条断言同时盖住 bootstrapped / listening / shutdown 三个钩子 —— 因为 #5170 的派发词只裁 `kernel:ready`。本 PR 把它**拆成三条现在为真的用例**,逐钩子,让翻面在 diff 里看得见,而不是悄悄放宽:\n\n- `fails the boot when a kernel:bootstrapped handler throws (#5257)`\n- `fails the boot — and never logs \"Bootstrap complete\" — when a kernel:listening handler throws (#5257)`\n- `keeps fail-soft dispatch for kernel:shutdown — a failing handler must not block the remaining cleanup (#5257)`(旧 pin 幸存的那一半,连同理由一起附到它唯一适用的那个钩子上;顺带断言后面的 `destroy()` 也确实跑到了)\n\n前两条在 `kernel.test.ts` 里有对称的 ObjectKernel 双胞胎(照 #5258 的形状)。ObjectKernel 本来就是这个行为,加用例是因为:#5170/#5257 关掉的 bug 就是「一个钩子名在两个内核上是两个相反语义」,只有成对的用例才按得住 —— 任一内核回归都由一条**具名**用例接住,而不是靠另一条还绿着去推断。\n\n`kernel:listening` 那条额外断言「`Bootstrap complete` 从未被打印」:`bootstrap()` reject 只是契约的一半,另一半是**出门时没有任何东西宣告成功**。\n\n## 范围外发现(已单开,未认领)\n\n- **#5274** —— ObjectKernel 上一个抛错的 `kernel:shutdown` handler 会跳过**所有**插件 `destroy()` 并 `process.exit(1)`,日志还谎报「Shutdown timed out — forcing exit」。这就是本单要求「shutdown fail-soft 在两个内核上都 pin 住」时撞上的事实:ObjectKernel 那边**不是** fail-soft,`performShutdown()` 用的是传播式 `context.trigger`,异常冒到只为超时写的 catch 里。实测(临时探针,`vi.spyOn(process, 'exit')` 拦下退出,已删):`reached = [\"process.exit(1)\"]` —— 后一个 handler 和插件 `destroy()` 都没跑到。因此 shutdown 的 fail-soft pin 只在 LiteKernel 侧落地;在 ObjectKernel 侧写一条会 `process.exit` 的用例既不安全,改它也越界(本单硬约束:不得改这三个钩子以外的分发语义)。修法留给 #5274 分诊。\n\n## 文档\n\n`content/docs/kernel/events.mdx` —— #5258 加的那句诚实说明(「其余钩子两内核仍不同」)按新事实改写:三个 boot 路径钩子在两个内核上一致传播、且不会打印成功行;`kernel:ready` 仍是放 boot 断言的地方(注册表到那时才填完);`kernel:shutdown` 是**刻意的例外**并说明理由,同时诚实标注 ObjectKernel 停机路径尚未对齐(指向 #5274)。\n\nChangeset:`.changeset/kernel-boot-hook-failure-propagation.md`,`minor`(与 #5258 同级),受众提示照 #5258 形状(vitest / serverless / edge 宿主中 bootstrapped/listening handler 会抛的那些),外加本单的具体标题句 —— **`listen()` 失败不会再换来一句假的「Bootstrap complete」**。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Pbu27iNUfQCHeuS551Rqo7\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Pbu27iNUfQCHeuS551Rqo7)_"
+}

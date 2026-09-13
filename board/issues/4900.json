@@ -1,0 +1,36 @@
+{
+  "number": 4900,
+  "kind": "issue",
+  "title": "GitHub Release body 超 125k 上限:spec 的 rc 段已达 343k,RC 窗口内每次发布都会在 createGithubReleases 处失败(npm 已发出、Docker 被连带跳过)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "target:v17",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T14:55:59Z",
+  "updated_at": "2026-08-04T16:16:51Z",
+  "closed_at": "2026-08-04T16:16:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4900",
+  "body": "## 现象\n\nRelease [run 30823919428](https://github.com/objectstack-ai/objectstack/actions/runs/30823919428)(`89d2a4e`)第 16 步 `Create Release Pull Request or Publish to npm` 跑了 7 分 44 秒后 **failure**:\n\n```\nEverything up-to-date        ← 原子 tag 推送已完成,action 的逐个 tag push 全是 no-op(#2191 设计生效)\n##[error]HttpError: Validation Failed:\n  {\"resource\":\"Release\",\"code\":\"custom\",\"field\":\"body\",\n   \"message\":\"body is too long (maximum is 125000 characters)\"}\n  - https://docs.github.com/rest/releases/releases#create-a-release\n```\n\n**失败发生在 npm 发布完成之后**。实测注册表:\n\n```\n@objectstack/cli   dist-tags: {\"latest\":\"16.1.0\",\"rc\":\"17.0.0-rc.2\"}\n@objectstack/spec / runtime / console / create-objectstack  17.0.0-rc.2  均已发布\n```\n\n即包全发出去了、tag 也推了,只有 GitHub Release 创建失败 —— 但它把整个 step 标红,于是 `published` 输出没置为 `'true'`,`docker` job 按 `if: needs.release.outputs.published == 'true'` 被跳过。**17.0.0-rc.2 的运行时镜像因此没发**(已用 `docker-publish.yml` 的 `workflow_dispatch` 手动补发)。\n\n## 根因:changelog 段落早已超出 API 上限\n\n```\npackages/spec/CHANGELOG.md            1,517,277 字符(全文)\n  └─ ## 17.0.0-rc.2 这一节           342,911 字符   ← 上限 125,000,超 2.7 倍\n\npackages/cli/CHANGELOG.md               654,433\npackages/runtime/CHANGELOG.md           591,339\npackages/objectql/CHANGELOG.md          467,642\n```\n\n`createGithubReleases: true` 把对应版本的 changelog 段落原样塞进 Release body。spec 作为 fixed 组里条目最密集的包,rc 段已经远超上限。\n\n**这不是一次性故障**:段落只会随 RC 窗口推进继续变大,所以窗口内**每一次**发布都会在同一处失败,并且每次都以同样的方式连带丢掉 Docker 镜像。17.0.0 GA 那一次只会更大。\n\n## 可选方向(未决,需要维护者拍板)\n\n1. **自建 Release 并截断**:不用 action 自带的 `createGithubReleases`,改为发布后自己调 API 建 Release,body 超限时截断并附 `CHANGELOG.md` 的链接/锚点。彻底消除这类失败,且保住 ADR-0087 D4 —— spec-changes.json 仍有 Release 可挂。改动最大。\n2. **只对超限的包截断**:保留 action,但在它之前把超长的 changelog 段落改写成「摘要 + 链接」。会污染仓库里的 CHANGELOG 内容,不推荐。\n3. **关掉 `createGithubReleases`**:最省事,但 ADR-0087 D4 的 spec-changes.json 是附到 spec 的 GitHub Release 上的,没有 Release 就没有落点 —— 需要先给那个产物找新家。\n\n## 与 #4898 的关系\n\n#4898/#4899 修的是「空 changeset 导致 action 根本不进 publish 分支」,与本 issue 是**不同的失败**:那次是压根没发,这次是发了但 Release 创建失败。两者的共同后果都是 `published != 'true'` → Docker 丢失,这一点由 #4899 引入的 recovery 步骤负责兜底 —— 但该步骤当前有两个缺陷,会另行修复:\n\n- 不带状态函数的 `if:` 被 GitHub **隐式包了一层 `success()`**,所以 changesets 步骤失败后它被 skipped,恰恰漏掉了本 issue 这个场景;\n- 它的契约是「缺失就补发」,而今天 npm 上已有 rc.2,即使执行也是 no-op,不会把 `published` 置真、救不回 Docker。应改为守「当前版本必须在 npm 上**且**必须有对应镜像」这个不变量。"
+}

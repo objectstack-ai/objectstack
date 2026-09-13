@@ -1,0 +1,32 @@
+{
+  "number": 4892,
+  "kind": "issue",
+  "title": "把「跟到合并为止 / CI 诊断纪律 / 生成物同步」写进 pm-dispatch 与 spec-property-retirement skill",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T13:31:53Z",
+  "updated_at": "2026-08-03T14:08:07Z",
+  "closed_at": "2026-08-03T14:08:07Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4892",
+  "body": "今天(2026-08-03)一整天的 v17 协议变更派发里,有六处**已经付出过代价**的经验,现行 skill 里没有,或者只写了半截。逐条给出事故、缺口、和要补的规则。\n\n维护者已确认按此更新 skill。\n\n---\n\n## A. `pm-dispatch` —— 四条主项\n\n### A1. ACCEPT 的落地判据只到「进队列」就断了\n\n`SKILL.md` 第 7 步 ACCEPT 写的是「once every check is green, mark it ready and **add it to the merge queue**」,然后就结束了。没有任何一句说**怎么确认它真的落地**。\n\n**事故**:PR #4852 的 auto-merge 从 10:15 就挂着,我每轮查「`git grep origin/main`,判据在不在 main 上」,不在 → 记为「还在队列里排队」。实际上它**从来没进过队列** —— CI 是红的,auto-merge 永远不会触发。这样空转了 **100 分钟**。\n\n**根因**:「不在 main 上」这一个读数,**无法区分**「在队列里等」和「压根没进队列」。两者的处置完全相反(前者等,后者要动手)。\n\n**要补的规则**:落地检查必须是两个读数,不是一个 ——\n\n```bash\ngit ls-remote origin 'refs/heads/gh-readonly-queue/*'   # 真的在队列里?\ngit log --oneline -1 origin/main                          # 真的落地了?\n```\n\n队列分支名里带 PR 号(`gh-readonly-queue/main/pr-4878-<base-sha>`),而且**基 sha 串成链** —— 能同时读出「排第几」。另外:PR 一旦被转回 draft,auto-merge 与队列成员资格**都会掉**,不会自动恢复。\n\n### A2. `rerun_failed_jobs` 的语义:复用原 run 的合并 ref,不重算\n\nskill 全文没提重跑。但 PM 恰恰是按重跑按钮的那个人。\n\n**事故**:#4852 的 CI 红在 #4856(`testTimeout: 60_000`)落地**之前**。我重跑了,还是红;当时的判断是「队列慢 / flaky」。实际上 `rerun_failed_jobs` **复用原 run 的提交与合并 ref**,不会拿新的 main 重算 —— 重跑一百次都还是 5000ms 的那个基。\n\n**要补的规则**:当红的原因是「基上缺一个已经合并的修复」时,**重跑无效,只有推新提交才能带上新 main**(`git merge origin/main` 后 push)。区分方法:先看失败签名,再看那个修复的合并时间与本 run 的创建时间。\n\n> 与既有的 `.github/workflows/rerun-safety-nightly.yml` **无关** —— 那个查的是「同一 checkout 里跑两遍是否自洽」的测试污染,不是重跑语义。\n\n### A3. 入队前的生成物同步(`merge=os-regen` 静默吞并)\n\n第 3 步只保证「**同一批**内 file-disjoint」。它管不到**先后两单都碰 `packages/spec` 生成物**的情形 —— 而协议变更几乎必然如此。\n\n`.gitattributes` 把 `spec-changes.json` / `authorable-surface.json` / `json-schema.manifest.json` / `api-surface.json` / `api-surface-signatures.json` 路由到 `merge=os-regen`。这个驱动会让 merge **exit 0、零冲突标记**,却**静默丢掉一侧的改动**。只有重新生成才暴露。\n\n**今天在三个 PR 上各复现一次**:#4809、#4846、#4841。\n\n**要补的规则**(PM 侧,写进 ACCEPT 前的动作):任何碰这五个文件的 PR,入队前要求 dev ——\n\n1. `git merge origin/main`(⛔ 禁 rebase / force-push,AGENTS.md §3)\n2. `git checkout origin/main -- <五个生成物>`\n3. **整体重新生成**,⛔ 绝不做文本合并\n4. 断言**所有兄弟单的条目都还在**(今天 #4878 是四条 step17 条目并存)\n\n驱动本身另有缺陷,已单独立 #4868。\n\n### A4. CI 红了怎么诊断 —— 三条读日志的纪律\n\nskill 里没有任何 CI 诊断章节。今天我在这里犯了当天最严重的错误:公开断定四次 CI 红是**内核 OOM-killer 杀掉 DTS 构建**,并据此开了 PR #4853。**被 #4853 自己的 CI 推翻** —— 它挂着 8192 跑,红得一模一样。真因是 #4796 那一族的 5000ms 超时,由 #4856 修掉。完整更正见 #4845。\n\n三个叠加的错误,每一个都该成为一条规则:\n\n1. **`check-test-completeness.mjs` 的「all N accounted for」≠「测试通过」。** 它只断言没有 worker 静默死掉。workflow 自己的注释:*\"A red suite plus a GREEN completeness check means real test failures\"*。\n2. **turbo 并发输出的「相邻」≠「因果」。** `test` 的 `dependsOn` 只有 `[\"^build\"]`(上游),`packages/spec` 没有 `pretest`,所以 `--concurrency=4` 下 `spec#build`(DTS)与 `spec#test` 同时跑,GitHub 又给整组打同一个时间戳。`DTS Build start` 紧接着 `ELIFECYCLE` 完全可能来自两个无关进程。\n3. **下结论前拿完整日志归档,不要只看 tail。** 那次的 ~10 KB 尾巴被 `gen:schema` 的 1675 行清单吃光,真正的失败行根本不在里面。\n\n---\n\n## B. `pm-dispatch` —— 两条次项\n\n### B1. 同类基础设施修复的撞车,现有门禁盖不住\n\n`.github/workflows/duplicate-fix-guard.yml` 已经存在,它在**两个 PR 声明同一个 `Fixes #N`** 时把后开的那个判红(#4588 的产物)。\n\n**但它盖不住今天这一例**:PR #4864(我方)和 PR #4856(另一车道)修的是**同一个基础设施问题**,却挂在**不同的 issue 号**下 —— 门禁看不到任何重复。而且 #4856 先合了 60s,**我的 #4864 若合进去会把它降回 30s**,即一次静默回退。\n\n**要补的规则**:共享基础设施类修复(CI 配置、超时、构建脚本、门禁)在入队前,要按**症状**而不是 issue 号复查 main:`git log --oneline origin/main -- <该文件>`,确认在飞期间没有别人已经修掉。并明确点出现有门禁的覆盖边界。\n\n### B2. 读数纪律 —— 三条各自产出过一个我信了的错读数\n\n- **`cd X && cmd` 会短路。** Bash 工具每次调用 cwd 重置;`cd /home/user/objectui && git grep ...` 在路径不存在时 `cd` 失败但整条命令继续,于是**在当前仓里执行**,给出假的「objectui 零消费方」。⛔ 跨仓一律 `git -C <path> grep`。\n- **`git grep -c … | wc -l` 数的是文件数,不是命中数。** 曾据此得出「分支比 main 命中更多」的荒谬结论。\n- **裸名 grep 会被幸存家族当子串命中。** `system/EmailTemplate` 命中仍然活着的 `EmailTemplateDefinition` 一族;退役核验必须**带引号精确名**。\n- 统一原则:**空结果必须用「确定存在的邻近词」反查**,证伪「扫描器/路径坏了」这个解释,否则零命中不成立。\n\n---\n\n## C. `spec-property-retirement` —— 一条\n\n### C1. 两种退役形态在 ratchet 上的可见性是**相反**的\n\n今天各测到一例,可以互为对照:\n\n| 退役形态 | 四张 ratchet | 实例 |\n|---|---|---|\n| 枚举**值**收窄 | **字节完全相同**(不可见) | #4391 `crypto.hash` |\n| 整 **def** 删除 | **必须变化** | #4834:`api-surface −12` / `authorable −23` / `manifest −5` |\n\n**为什么重要**:验收时「ratchet 零变化」到底是正常还是异常,**完全取决于走的是哪条退役路线**。拿错对照就会把正常判成异常(白折腾),或者把异常判成正常(放过一个没真正删掉的 def)。\n\n这条属于退役形态判据,放 `spec-property-retirement`(第 2 节「the fork: which removal route」附近),`pm-dispatch` 的验收清单引用即可,不重复。\n\n---\n\n## 验收标准\n\n- `.claude/skills/pm-dispatch/SKILL.md` 覆盖 A1–A4、B1–B2,规则写成**可执行的命令 / 可核对的判据**,不是泛泛的告诫;每条带上事故编号,后来者能回溯。\n- `.claude/skills/spec-property-retirement/SKILL.md` 覆盖 C1。\n- B1 必须**明确写出 `duplicate-fix-guard.yml` 的覆盖边界**,不能让读者以为门禁已经管住了。\n- ⛔ 不碰 `content/docs/releases/`。\n- 空 frontmatter changeset(本 PR 不发布任何东西)。"
+}

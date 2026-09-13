@@ -1,0 +1,36 @@
+{
+  "number": 5270,
+  "kind": "pull_request",
+  "title": "feat(objectql)!: 批量写按行语义 —— after 型 hook 按行触发,record-change trigger 按行绑定 previous/record (#5038)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T13:46:46Z",
+  "updated_at": "2026-08-04T15:11:25Z",
+  "closed_at": "2026-08-04T15:11:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T15:11:24Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5270",
+  "body": "Fixes objectstack-ai/objectstack#5038\nCloses objectstack-ai/objectstack#4862\nCloses objectstack-ai/objectstack#4800\n\n2026-08-04 维护者在 #4800 / #4862 上的裁定(方案 A),已记入 ADR-0058 的 bulk-write addendum:**一次 predicate(`multi: true`)写就是 N 次记录变更**,所以其上每一条以记录为作用域的声明都按行求值 —— `record` 为该行的实际状态,`previous` 为该行的前置状态。validation 侧自 #3106 起就是这个形状;hook `condition` 与骑在同一批生命周期 hook 上的 record-change flow trigger 现在与之对齐。\n\n## 原先的问题\n\n`multi: true` 更新走到 `driver.updateMany`,它只解析出受影响行数。生命周期 hook 只触发**一次**,`previous` 从不赋值(只有单 id 分支会取前置行),`record` 退化成本次写入的裸 payload。于是文档、formula skill 和 showcase 里十条 flow 共同教的过渡条件 `status == \"done\" && previous.status != \"done\"`,在批量写上根本无法求值:\n\n- hook 条件会**拒绝该次写入**(#4775 / #5037 的止血诊断);\n- record-change flow trigger **是静默的** —— 要么不触发,要么按一条并不存在的记录触发一次。审计行的缺失是最难被发现的那种故障。\n\n## 实现\n\nengine 的批量 `update` / `delete` 分支把匹配行集**一次性**读出(复用 #3106 已有的那次 `driver.find`,只是把「本对象有 after 型 hook」并入它的取数条件),然后按匹配行逐行派发 `afterUpdate` / `afterDelete`,每次的上下文都是**单记录形状**:`input.id` 为该行、`previous` 为其前置像、`result` 为其状态。\n\n这正是 #2922 为批量 INSERT 定下的规则的复述(「单个数组形状的上下文把每一个按单记录形状写成的消费方都弄坏了」),也是**本修复在消费端一行代码都不需要改**的原因 —— `hook-wrappers` 的 `record`/`previous` 绑定、record-change trigger 的 `buildContext`、plugin-audit 的 diff 读的都是这四个字段,在**生产端**修好即全部随之正确。契约优先:缺陷在生产者,就不在消费者加宽容分支。\n\n- 按行派发对 after 型 hook **统一生效**,刻意不以「条件文本里有没有 `previous`」为开关 —— 裁定明确否决了那种让触发次数取决于条件字符串的隐性规则。\n- **`ctx.result` 按行为该行**,由已在手的前置像 `row ⊕ payload` 组合而成,因此整批仍只多一次查询,而非每行一次(issue 的性能护栏「行集读取一次完成,求值批内复用」)。批量 DELETE 没有后态,其按行上下文不设 `result`,消费方回落到 `previous` —— 那正是 delete 语境下 `record` 的含义。\n- **`onError` 无需新的按行含义** —— 它管的是跑在记录作用域上下文里的 handler,而按行派发正是终于给了它这样一个上下文:`abort` 失败整个操作(与单记录、批量 insert 两条路一致),`log` 吞掉该行、批次继续。\n- **资源上限以拒绝落地**:匹配行数超过 `MAX_BULK_PER_ROW_HOOK_ROWS`(10 000)时,对有 after 型 hook 的对象的 predicate 写在调用 driver **之前**被拒(`ERR_BULK_PER_ROW_HOOK_LIMIT`),不写入任何数据。绝不降级为整批一次派发 —— 那会静默漏掉 N-1 行的 hook,正是本系列要根除的形状。\n\n## 破坏性变更(方向即契约声明的方向)\n\n接受 predicate 写的对象上的 after 型 hook,现在按匹配行触发而不是按批次触发:通知类 hook 发 N 条,缓存失效类执行 N 次。没有 after 型 hook 的对象完全不受影响,也不付任何额外读取成本。写入自身的契约未变 —— predicate 写仍返回受影响行数,仍只发布一条聚合的 `data.records.updated`(#4639)。\n\n## ⚠️ 止血诊断只退役了一半 —— 请重点复核这一条\n\n派发词要求「核实退役对该诊断覆盖的每一种情形是否都成立;若某种情形并未被按行语义解决,则为该情形保留诊断并在报告中说明」。**核实结论:并非全部成立。**\n\n`before*` hook 仍是批次作用域,且这不是待补的缺口:`beforeUpdate` / `beforeDelete` 之所以整批触发一次,是因为它们**仍可能改写 payload**,而一次 `updateMany` 只有一份 payload —— 没有任何按行的东西可以交给它。这是 phase 的定义,不是版本落后。\n\n因此 #5037 的 `HookConditionError` 与其 `limitation` 判别字段(`bulk_write_previous_unbound` / `bulk_write_stored_state_unavailable`)**保留并收窄到该次派发**:\n\n- 文案不再承诺一个**已经兑现**的过期时间(原文「this rejection retires when #5038 lands」若留着,就是平台在毁约,作者会去等一个已经发布的版本);\n- 改为点名 **phase 就是原因**,并把对应的 `after*` 事件作为**第一条出路** —— 在那里同一条件按行求值、与作者所写完全一致;\n- 文案现在也把 record-change flow trigger 列为**真实**出路:#5037 依据实测拒绝这么写(当时该 trigger 共享同样未绑定的 `previous`,#4862),而这个事实已被本 PR 在生产端改变。**唯一根据事实反转的refusal,不是把约束放松了。**\n\n判别机制无需加 phase 判断:`isPredicateBulkWrite` 找的就是 `input.id`,而按行派发恰好提供它、批次派发恰好没有。\n\n## 验证面\n\n- **objectql**:新增 `bulk-write-per-row-hooks.test.ts`(23 例)—— 触发粒度、按行绑定、「行集只读一次 / 无 hook 不读」、资源上限拒绝且不写入、`onError` 两支、批量 delete 同契约。\n- **trigger-record-change**:新增 `bulk-write-per-row-context.test.ts`(4 例,整栈 kernel + objectql + automation + trigger)—— 逐条对应 #4862 正文的五点实测事实。**已验证其非空洞性:把 engine.ts 的改动 stash 掉并重建后,这 4 例全部失败。**\n- **app-showcase**:新增 `bulk-write-transition-flows.test.ts`(37 例)—— 从 `allFlows` 读**真实**元数据,用 automation engine 相同的变量形状求值。**showcase 的 10 条 transition flow 一个字都没改:它们从头到尾都是对的,错的是平台。** 因此测试从 flow 自己的条件文本生成两行(真过渡 / 已在目标态),而不是把期望手抄进测试(手抄会在 flow 改目标态时一起漂移还照样通过)。\n- 既有止血测试 `hook-condition-bulk-previous.test.ts` / `hook-condition-fail-loud.test.ts` / `hook-condition-previous-scope.test.ts` 按新契约重写,并显式钉住「不得再承诺已兑现的过期」。\n\n```\nobjectql               116 files / 1848 passed\nservice-automation      55 files /  665 passed\ntrigger-record-change    5 files /   55 passed\nexample-showcase        12 files /  120 passed\nplugin-audit / plugin-sharing / plugin-auth   51 files passed\nturbo typecheck + test (4 包,merge origin/main 之后重跑)  65 tasks successful\ncheck-adr-anchors / check-doc-authoring / check-doc-formula-expressions  OK\n```\n\n## 声明范围之外的两处改动(请一并复核)\n\n派发词的文件面未列 `docs/adr/**` 与 `scripts/adr-anchors.json`,但两者都是**关于本 PR 所改文件的记录性断言**,被本改动证伪;留着就是新造一个 `declared ≠ delivered`:\n\n1. `docs/adr/0058` addendum —— 原文写「implementation tracked by #5038;the rc window ships a named diagnostic in its place」「when #5038 lands … this rejection has nothing left to report」。后半句现在是**错的**(`before*` 仍有话要报)。已改为记录落地方式,并把 addendum 自己点名要求 price 的三项(`ctx.result` 形状、`onError` 按行含义、大批量上限)的答案写在提问的地方。\n2. `scripts/adr-anchors.json` 中 `hook-wrappers.ts` 的 invariant —— 原文「this rejection is a dated stopgap and its message says so」,同样被证伪,已按 before/after 的非对称改写。\n\n另:`examples/app-showcase/package.json` 加了 `@objectstack/formula` 为 devDependency —— showcase 的 flow 起始条件用的是裸标识符(`status == \"done\"`),只有 automation engine 的作用域能解析,故测试需要真实求值器而非 `wrapDeclarativeHook`。\n\n## 未触碰的禁区\n\n`packages/spec/**` 零改动(`HookContext` 的 `input`/`result`/`previous` 本就是开放形状,按行契约无需改 schema)、`metadata-protocol/src/protocol.ts` 零改动、`content/docs/releases/**` 未碰(输入是本 PR 的 changeset)、其余在飞面(plugin-email、service-settings、metadata loaders、objectql/src/validation、lint、rest-server/runtime)均未触及。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Pbu27iNUfQCHeuS551Rqo7\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Pbu27iNUfQCHeuS551Rqo7)_"
+}

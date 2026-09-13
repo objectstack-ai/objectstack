@@ -1,0 +1,35 @@
+{
+  "number": 5308,
+  "kind": "pull_request",
+  "title": "feat(spec): EmailProviderSchema 补上 'smtp',TSDoc 与 plugin-email 实际能力对齐 (#5104)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T17:23:28Z",
+  "updated_at": "2026-08-04T21:36:48Z",
+  "closed_at": "2026-08-04T21:36:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T21:36:46Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5308",
+  "body": "Fixes #5104\n\n## 先厘清派发中的矛盾:实测结论是 `smtp`,不是 `ses`\n\n本单正文(04:39Z)说要加 `'smtp'`;12:31Z 的释放认领评论却给了另一套派发包 ——「`EmailConfigSchema` 的 transport 判别联合加 `ses` 分支(`region` 必填、凭证可选走默认链)」。两者不能都当真,所以第一步是在 `origin/main`(@ 5993c5b)上实测 `@objectstack/plugin-email` 到底发布了什么。\n\n**实测结果(`packages/plugins/plugin-email/src/transports/index.ts`):**\n\n```\nexport const EMAIL_TRANSPORT_PROVIDERS = ['log', 'resend', 'postmark', 'smtp'] as const;\n```\n\n| 项 | 实测 |\n|:---|:---|\n| `SmtpTransport` | ✅ 已发布,`src/transports/smtp.ts`,`nodemailer` 惰性 import(ADR-0012) |\n| `SesTransport` | ❌ **不存在**,仓库里没有任何 SES transport 实现文件 |\n| `OS_EMAIL_SMTP_HOST` / `_PORT` / `_SECURE` / `_USER` / `_PASSWORD` | ✅ 全部存在(`packages/cli/src/commands/serve.ts`) |\n| `OS_EMAIL_SES_*` | ❌ 不存在 |\n| `OS_EMAIL_PROVIDER=ses` | ❌ **抛错**。`resolveEmailCapabilityArg` 用 plugin-email 的 `isEmailTransportProvider` 把关,`serve-email-capability.test.ts` 明确断言它 throw |\n| spec 里的 `EmailConfigSchema` / transport 判别联合 | ❌ **不存在**。`email-config.zod.ts` 只有 `EmailServiceConfigSchema`(平铺 `z.object`),没有任何判别联合 |\n\n更关键的是,`ses` 在 plugin-email 里是被**显式退役**的 tag,还带着迁移话术:\n\n```\nRETIRED_EMAIL_PROVIDERS = {\n  sendgrid: \"no SendGrid HTTP-API transport was ever implemented. Use provider='smtp' ...\",\n  ses:      \"no Amazon SES HTTP-API transport was ever implemented. Use provider='smtp' with host\n             email-smtp.REGION.amazonaws.com, port 587, and SES SMTP credentials ...\",\n}\n```\n\n**结论:** 12:31Z 评论说的「plugin-email 的 SES 支持已在」与 main 相反,它描述的 `EmailConfigSchema` 判别联合也不存在。按本单的硬规则(spec 不得承诺 main 上没有的 provider),给 spec 加 `ses` 会制造**反方向**的 declared != implemented —— 正好是 #5094 被立单的那个缺陷。因此本 PR 按**正文原始范围**执行:只加 `'smtp'`,并把 `ses` / `sendgrid` 的缺席写进 TSDoc 说明理由。本单正文的前提经复核**成立**。\n\n## 改动\n\n**运行时零改动。** plugin-email 与 CLI 未被修改;本 PR 在 plugin-email 下只新增了一个**测试文件**。\n\n1. `EmailProviderSchema` 增加 `'smtp'` —— 纯加值,已有配置不受影响,无需 ADR-0087 conversion / migration。\n2. 重写该段 TSDoc。原文写着「Self-hosted SMTP is intentionally NOT shipped in plugin-email; apps that need SMTP register a custom `IEmailTransport` themselves」—— #5087 之后整段为假。新文写明 SMTP 由 plugin-email 内置、`nodemailer` 惰性加载,并解释 `sendgrid` / `ses` 为何**不是**成员(从未实现 HTTP-API transport,都走 `provider: 'smtp'`)。\n3. `provider` / `options` 补 `.describe()`。原先这两格在生成文档里是**空的**;现在参考文档正面说明 `provider: 'smtp'` 的连接参数落在 `options` 的 `host`(必填)/ `port` / `secure` / `user` / `password`,与 `OS_EMAIL_SMTP_*` 一一对应。\n4. 重新生成 `content/docs/references/system/email-config.mdx`。\n\n### 关于「TSDoc 仍在劝人自带 transport」\n\n正文担心生成文档里还留着这句话 —— 实测**它从未出现在文档里**:`EmailProviderSchema` 的 schema 级 TSDoc 不参与 `build-docs.ts` 渲染,只有文件头块注释和 `.describe()` 会。所以那句假话的受害面是**读源码/IDE 悬浮的作者**(含 AI),文档侧的缺陷只是 Allowed Values 少一个值。两处都已修:枚举补值修文档,TSDoc 重写修源码,`.describe()` 则把 SMTP 的配置方式**正面**写进文档。\n\n## 测试:双向锁死 provider 词表\n\n按验收要求「把枚举的接受集钉到实测的运行时集合,让下一个 provider 必须两边都有意识地改」,分两侧:\n\n- **`packages/spec/src/system/email-config.test.ts`(新增)** —— 全部是**运行时 `safeParse`** 断言。packages/spec 的 `tsconfig.json` 排除了 `**/*.test.ts`,`tsc --noEmit` 根本不读这个文件(#5286),所以在这里写 `Assert< Equal< … > >` 一类类型级断言会是**幻检查**。已在文件顶部注明这一点。\n- **`packages/plugins/plugin-email/src/transports/spec-provider-parity.contract.test.ts`(新增,测试文件)** —— 跨包契约,把 `EmailProviderSchema.options` 与 `EMAIL_TRANSPORT_PROVIDERS` 双向比对,并要求 spec 声明的每个值都能被 `makeTransport` 真正造出来。\n\n这是同一词表的**第三条边**:`mail-manifest-providers.contract.test.ts` 已经把设置页下拉框钉到 transports,本 PR 把**授权契约**也钉上去。放在 plugin-email 而不是 spec,理由与那个既有测试写的一样 —— 两侧各钉一个字面量,永远可以靠改另一个字面量「修好」,而这正是 #5094 里两者漂移的方式。`@objectstack/spec` 本就是 plugin-email 的正式依赖,无新增运行时边。\n\n注意两侧的**不对称**:plugin-email 的 tsconfig **不排除**测试文件,所以那边的编译期见证是**真的** —— 下面已实证。\n\n## 反向验证:预判方向 = 红,三处全部命中\n\n动手前先预判:把枚举退回三个值,新测试应当变红(标准方向,非 #5046 的计数反转、也非 #5009 的倒置)。实测把 `email-config.zod.ts` 退回 `z.enum(['log', 'resend', 'postmark'])` 并重新构建 spec 后:\n\n**A. plugin-email 的 `typecheck`(编译期见证,证明它不是幻检查):**\n\n```\nsrc/transports/spec-provider-parity.contract.test.ts(47,92):\n  error TS2322: Type 'true' is not assignable to type 'never'.\n```\n\n**B. plugin-email 的契约测试(运行时集合相等):**\n\n```\nFAIL src/transports/spec-provider-parity.contract.test.ts\nAssertionError: expected Set{ 'log', 'resend', 'postmark' } to deeply equal Set{ 'log', 'resend', 'postmark', …(1) }\n Tests  1 failed | 294 passed (295)\n```\n\n**C. spec 侧测试:**\n\n```\n× accepts exactly the providers plugin-email can deliver through\n× accepts smtp — shipped by plugin-email since #5087 (ADR-0012)\n× type-checks a config for every deliverable provider\n× carries the SMTP connection on `options`, mirroring OS_EMAIL_SMTP_*\n Tests  4 failed | 3 passed (7)\n```\n\n随后已还原并重新构建。\n\n## 验证(合入 origin/main 之后重跑)\n\n```\npnpm --filter @objectstack/spec check:generated\n  ✓ 全部 9 项 —— All 9 generated artifacts are up to date.\n\npnpm --filter @objectstack/spec --filter @objectstack/plugin-email typecheck\n  packages/spec typecheck: Done\n  packages/plugins/plugin-email typecheck: Done\n\npnpm --filter @objectstack/spec --filter @objectstack/plugin-email test\n  packages/spec          Test Files 309 passed (309)   Tests 7951 passed (7951)\n  packages/plugins/plugin-email  Test Files 20 passed (20)  Tests 295 passed (295)\n```\n\n生成物纪律:`--fix` 只重算了被证明过期的那一项(`content/docs/references/**`);`check:api-surface`(无导出增删)、`check:authorable-surface`、`check:strictness-ledger` 本来就是绿的 —— 本 PR **没有新增可授权键**(只是给既有 `provider` 键的枚举加了一个值),所以 #5220 的分类账纪律不触发,`gen:strictness-ledger` 未运行、计数未变。\n\n同步:已 `git merge origin/main`(⛔ 无 rebase / force-push)带入 #5294。它只碰 plugin-auth / verify / qa,与本 PR 零重叠,`os-regen-pending` 为空;合并后 9 项闸门 + 两包 test/typecheck 已如上重跑。相对 origin/main 的 delta 恰为 5 个文件。\n\n`node scripts/check-nul-bytes.mjs` 通过;另对本 PR 全部文件做了闸门覆盖不到的自扫(`grep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]'`),无控制字节。\n\n## 范围外发现\n\n**#5307** —— `EmailServiceConfigSchema` 未声明 CLI 实读的 `queueDelivery` / `appName` / `defaultTemplateContext`,与本单**同族、不同键**(`queueDelivery` 是 #5160 落地的耐久队列开关,作者标注类型后写它会拿到类型错误)。不并进本 PR:那需要**新增可授权键**,要走 #5220 的 strictness-ledger 纪律,体量与风险都不同,合并会让本 PR 的 diff 失焦。已建议与本单串行(同文件 + 同 os-regen 生成物)。\n\nchangeset:`@objectstack/spec` minor(追平既成事实的加值型契约变更)。\n\n⛔ 未改 `content/docs/releases/`;未新增文档页面。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ErbEDVAg1No9gdg1pgDAGB\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ErbEDVAg1No9gdg1pgDAGB)_"
+}

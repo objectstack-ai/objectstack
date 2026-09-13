@@ -1,0 +1,36 @@
+{
+  "number": 4773,
+  "kind": "issue",
+  "title": "bug: 每次启动都报 `Driver already registered, skipping {\"driverName\":\"com.objectstack.driver.sql\"}` —— SQL driver 被注册了两次",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T05:28:17Z",
+  "updated_at": "2026-08-04T00:04:50Z",
+  "closed_at": "2026-08-04T00:04:50Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4773",
+  "body": "## 现象\n\n`pnpm dev`（showcase）每次启动，boot diagnostics 里固定有一条：\n\n```\nWARN Driver already registered, skipping {\"driverName\":\"com.objectstack.driver.sql\"}\n```\n\n冷启、热启都有，稳定复现。\n\n## 说明\n\n这条是 showcase 冷启 24 条启动告警之一，在排查 `pnpm dev` 控制台刷屏（#4765）时顺带发现的。**我没有深挖根因** —— 记录在这里，免得它继续以\"已知噪音\"的身份留在启动日志里。\n\n需要查清的是：\n\n1. 谁注册了第一次、谁注册了第二次？看起来至少有两条路径都在注册 `com.objectstack.driver.sql`（候选：`SqlDriver` 插件自身 / 运行时按 `OS_DATABASE_URL` 推断的驱动装配 / `defineStack` 里的 datasource 声明）。\n2. **第二次注册被跳过，赢的是第一次** —— 这两次注册的配置是否一致？如果不一致（比如一次带连接串、一次带不同的能力集），那\"skipping\"就不只是噪音，而是静默采用了其中一份配置。\n3. 如果两次注册本来就是设计内的幂等重入，那这条日志就不该是 `warn` —— 一个每次启动都出现、且不代表任何异常的 warn，只会训练人忽略 warn 这个级别。\n\n换句话说：要么它是真重复注册（修调用方），要么它是正常幂等（降级日志）。当前状态是两者都没确定。\n\n## 复现\n\n```bash\nrm -rf examples/app-showcase/.objectstack && pnpm dev\n```\n\n启动摘要的 `⚠ Boot diagnostics` 段落里能看到。"
+}

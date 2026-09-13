@@ -1,0 +1,39 @@
+{
+  "number": 5073,
+  "kind": "issue",
+  "title": "`userFilters.allowAddTab` 是 objectui 真读、spec 从未声明的活能力 —— promote 还是 reject?(挡住 #4001 批 18 的 UserFiltersSchema 收紧)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue",
+    "protocol:breaking",
+    "repo:objectstack",
+    "target:v17"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T02:15:27Z",
+  "updated_at": "2026-08-04T12:36:50Z",
+  "closed_at": "2026-08-04T12:36:50Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5073",
+  "body": "发现于 #4001 批 18。**这条挡住 `UserFiltersSchema` 的收紧**,而那是批 6e 点名留开、批 18 被指派去验证的那个形状。批 18 已把 6e 的验证做完(结论见下),卡点不是 strictness,是一条**能力声明**问题。\n\n## 事实(实测,非阅读推断)\n\nobjectui 的 `plugin-list` 渲染器**真读** `allowAddTab`:\n\n- `packages/plugin-list/src/UserFilters.tsx:182` —— `allowAddTab={config.allowAddTab}`\n- 同文件 `:742` —— `{allowAddTab && ( … )}`,渲染「新增 tab」控件\n- objectui 自己的 `UserFiltersSchema`(`packages/types/src/zod/objectql.zod.ts:265`)**声明**了这个键\n\nspec 的 `UserFiltersSchema`(`packages/spec/src/ui/view.zod.ts`)**没有**声明它。两边差集恰好就这一个键。\n\n## 为什么它今天是「工作的」而不是「已经被吃掉的」\n\n这一点是本条的关键,也是它与战役常规目标形状的**区别**:\n\n`saveMetaItem` 用 `safeParse` 校验,**然后原样存原始 body** —— `parsed.data` 被丢弃。`packages/metadata-protocol/src/protocol.ts` 的 \"Validation policy\" 写得很明确:\n\n> We do NOT replace the persisted document with `parsed.data`; the original payload is stored verbatim so Studio-only auxiliary fields (e.g. `isPinned`, `isDefault`, `sortOrder`) survive the round-trip.\n\n所以作者写的 `allowAddTab` 被 strip 掉的**只是那份被丢弃的解析结果**;存储里键还在,objectui 读到它,**控件真的渲染出来**。\n\n**结论:收紧 `UserFiltersSchema` 不是「把静默失效变响亮」,是把一个已发布、今天能用的能力变成 422。** 这与战役的授权(#4001 正文:杀掉静默剥离造成的虚假完成)方向相反,所以批 18 停手立案,没有猜。\n\n## 需要裁定\n\n`allowAddTab` 应当:\n\n- **A. Promote 进 spec 的 `UserFiltersSchema`**(additive,非破坏),然后收紧。\n- **B. 判为 objectui-only 扩展**,记进 objectui 的 `SANCTIONED_LOCAL` 并加理由,spec 收紧后明确拒绝它(需要同时决定 objectui 侧怎么继续支持存量配置)。\n\n⚠️ 这不是我们发明的分叉。objectui **自己的漂移闸门**把这个选择原样交给人:\n\n> When one of these fails, do NOT just edit the sets to make it green — decide whether the field belongs upstream in `@objectstack/spec` (promote it) or is a genuine objectui-only extension (add it to SANCTIONED_LOCAL with a rationale). See #2231.\n> —— `objectui/packages/types/src/__tests__/list-view-spec-parity.test.ts`\n\n### 两轴分析\n\n**长期健全性(本项目 / 北极星)**:A 更对。这是 metadata-driven 框架,`packages/spec` 是生产者与渲染器之间**唯一**的契约(Prime Directive #12)。一个渲染器读、契约不声明的键,正是 PD#10 说的「declared ≠ enforced」的镜像面 —— 能力存在但契约装作没有。B 把这个分歧固化成第二套事实来源(spec 一份、objectui 一份),而 #2231 当初做 derive-by-reference 统一,就是为了消掉这类分叉。\n\n**让 AI 写的元数据难写错**:也偏 A,但要看怎么做。A 之后 `allowAddTab` 是**声明的**,JSON Schema 会带上它,Studio 的 SchemaForm 能渲染它,AI 作者从 schema 就能发现这个能力 —— 而今天它只存在于一个 React 文件里,只有读过 objectui 源码的人知道。B 的风险是:strict 拒绝一个渲染器明明支持的键,作者照错误提示删掉它、能力消失,**而拒绝信息本身是「正确」的** —— 这正是本战役 finding 7 反复踩的「平台权威把作者引向坏结果」。\n\n**两轴不冲突,我推荐 A。** 但它是 additive protocol 变更(新增可授权键),按战役自己在 #5022 之后立的规矩,能力声明问题**立案不猜**,所以由维护者定。\n\n补充:A 是 additive,不占 v17 破坏性窗口,理论上任何时候都能做;但 `UserFiltersSchema` 的收紧**是**破坏性的,若希望它进 v17,A 需要先落地。\n\n## 顺带:批 6e 的验证结论(已完成,不必重做)\n\n6e 留开时问的是「是否有人靠这个 strip 来**收窄** page 形状的块」。**有,而且就在同一个文件里**:`ObjectUserFiltersSchema = UserFiltersSchema.omit({ tabs: true, showAllRecords: true })`,`.omit()` 继承基类姿态,所以关掉基类会把 `object-list-view.test.ts` 那条钉从「drops the page-only keys」翻成「rejects」。\n\n**那个翻转是想要的**:`packages/lint/src/validate-list-view-mode.ts` 早就在报 object view 上带 `tabs` 的 `userFilters`,所以今天两扇门互相矛盾 —— 兄弟守卫在警告,schema 在静默丢弃。收紧让两扇门一致。这条**不构成阻塞**,阻塞的只有 `allowAddTab`。\n"
+}

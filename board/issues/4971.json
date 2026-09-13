@@ -1,0 +1,37 @@
+{
+  "number": 4971,
+  "kind": "issue",
+  "title": "formatZodError 把 union 分支的拒绝信息压成 \"Invalid input\" —— #4001 策展的散文在 CLI 路径上到不了作者",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T17:33:34Z",
+  "updated_at": "2026-08-05T00:36:22Z",
+  "closed_at": "2026-08-05T00:35:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4971",
+  "body": "发现于 #4001 批 10（`automation/state-machine.zod.ts` 收紧），**未在该 PR 中修复**：改共享格式化器会改变全仓每一个 union 的 CLI 输出，不该搭在一个 spec 收紧 PR 上。\n\n## 现象\n\n`formatZodError`（`packages/spec/src/shared/error-map.zod.ts`，从包根导出）只 `map` 顶层 `error.issues`，**从不下降进 `invalid_union` 的 `issue.errors[]`**。zod 对 union 只抛一个 `invalid_union` issue，其 `message` 是字面量 `\"Invalid input\"`，各分支的真实 issue 嵌在下一层。\n\n实测，同一个文件里的对照组（批 10 的测试里就钉着这一对）：\n\n```\n=== formatZodError over a PLAIN strictObject rejection (control) ===\nTransition (1 issue):\n\n  ✗ (root): Unrecognized key(s) on this state transition: `guard`. … Did you mean `guard` → `cond`?\n\n=== formatZodError over a UNION branch rejection ===\nAction ref (1 issue):\n\n  ✗ (root): Invalid input\n```\n\n第二例的处方并没有丢，它就在 payload 里：\n\n```\nissues[0].errors[1][0].message\n  = \"Unrecognized key(s) on this action reference: `args`. Until #4001 …\"\n```\n\nREST 层（`packages/rest/src/rest-server.ts:610`）把 `error.issues` 整体透传，所以 API 消费者拿得到；`ZodError.message`（JSON 序列化）也带着。**只有压成单行的消费者会丢**，而 `formatZodError` 的文档用途正是 CLI 输出（`os validate` / `os compile`）。\n\n## 为什么值得单开\n\n这是本战役第三类教训（「仪器谎报覆盖率」）的一个变体，而且方向更糟：不是闸门漏报，是**拒绝信息本身在到达作者前被裁掉**。战役自己的规矩是「拒绝信息里的散文是行为，不是文档」—— 对 union 后面的每一个 schema，这条在 CLI 路径上今天不成立。\n\n受影响面不止 `ActionRef` / `GuardRef`：任何 union 成员是 `strictObject` 的地方都一样，`ui/view.zod.ts` 的 union 形状是最大的一处。随着 #4001 继续收紧，union 分支只会变多。\n\n## 处方（仅清点，未实施）\n\n`formatZodIssue` 对 `code === 'invalid_union'` 递归展开 `issue.errors`，每个分支缩进一层；或只展开**最有信息量的那个分支**（unrecognized_keys 优于 invalid_type，避免把 \"expected string\" 的噪音也印出来）。\n\n需要一并考虑的：\n1. `formatZodError` 是**公开导出**（`packages/spec/src/index.ts:128`），输出变化对下游是可见行为变化 —— 大概率要 changeset。\n2. 展开策略要有测试证明它不把 union 的 N 个分支全印一遍（`view` 曾经因为 union 遍历「一个未知键报两次」，见 #4001 批 6c 的记录）。\n3. 先证红：本 issue 的对照实验（plain vs union，同一格式化器）可以直接搬进测试。\n\n批 10 已就地钉住现状（`packages/spec/src/automation/state-machine.test.ts` 的 `CONTROL — a non-union shape renders its full prescription through formatZodError`），所以修好的那天这条钉会红，提醒把断言翻过来。"
+}

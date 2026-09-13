@@ -1,0 +1,35 @@
+{
+  "number": 5314,
+  "kind": "pull_request",
+  "title": "feat(types,cloud-connection,lint,cli): ADR-0120 17.x 收尾 —— isolated 安装期姿态硬门 + D5c advisory + 成文契约扫荡 + 三姿态 conformance (#5081)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T18:36:33Z",
+  "updated_at": "2026-08-05T01:23:34Z",
+  "closed_at": "2026-08-05T01:23:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T01:23:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5314",
+  "body": "Fixes #5081\n\nADR-0120 17.x 波的第三块,也是最后一块。前两块已在 main:#5212(driver 侧 D3+D4)、#5208(spec 词汇 + D5a/D5b lint)。\n\n前置核验(都对着 `origin/main` 实测,不是照抄 issue):#5212 的 `COALESCE(organization_id, '__global__')` 物化在 `driver-sql/src/schema-drift.ts` 与 `sql-driver.ts` 里在;#5208 的 `UniqueScopeSchema` = `boolean | 'global' | 'organization'` 与两条 lint 规则在;D5e 门**不存在**(反查零命中)。一个 issue 正文里的 D6 条目已经提前落地了:`syncDeclaredIndexes` 文档块的「VERBATIM」表述**已经**被 #5212 收窄到 `'global'` 了,所以本 PR 没动它 —— 记在这里免得 reviewer 找不到对应 diff。\n\n---\n\n## D5e —— 装进 `isolated` 环境的安装期硬门\n\n词汇本身是姿态无关的:作者说的是业务边界,没有任何索引形状读姿态。唯一的残留只在一个方向上 —— `isolated` 下组织就是**不同客户**,此时 app 业务对象上的 `'global'` 唯一既跨客户过度约束,又变成跨客户的存在性预言机(S10/S14)。\n\n落点(读代码定的,不是猜的):真正的安装链路是 `MarketplaceInstallLocalPlugin.handleInstall`(`POST /api/v1/marketplace/install-local`,`os package install` 打的就是它),而「安装清单」就是 `LocalManifestSource` 那本 ledger。门放在**冲突检查之后、hot-register 与任何 ledger 写入之前**。\n\n- 逐索引列出并硬停;确认按 ADR-0104 attestation 风格留痕在 `InstalledManifestEntry.globalUniqueAttestation`(确认了什么 / 谁 / 何时 / **在哪个姿态下问的**),**之后不复问**。\n- 停下的安装**什么都不留** —— 不注册、不写 ledger,作者改完元数据直接重试即可,不用先卸载。\n- 逐索引确认是有牙齿的:`confirmGlobalUniques` 收 `true` 或明确 id 数组,**只确认其中一条仍会在剩下那条上停住**。\n- 升级引入的**新**约束会被问,老答案继续算数。\n- 另一个姿态下给的确认**不算同意** —— `isolated` 那个问题在 `single` 下从没被问过,按未确认处理(唯一不会静默放行跨客户约束的方向)。\n- ⛔ **永不做成启动期告警**(#4884)。boot 期 rehydrate 不评估此门,并有一条专门的测试钉住这点。门够不到的两类存量(门禁上线前的安装、装后姿态变更)走 `os doctor` / `os migrate plan` 的 advisory。\n\n判定里有三条是承重的,请 review 时特别看一眼:\n\n| 拼写 | 算不算 finding | 依据 |\n|---|---|---|\n| 声明索引 `unique: true` | ✅ 算 | D1 说它**就是** `'global'` 的位置式拼写,物理形状完全一样。排除它 = 整个 17.x 可以靠拼写绕过这道门 |\n| 字段级 `unique: true` | ❌ 不算 | 它是 `'organization'`,Resolved #2 说永久合法 |\n| `sys_` / `base_` 对象 | ❌ 不算 | S5 那批引擎幂等键天然平台级,每次安装都问一遍就是 #4884 的误报类 |\n\n纯枚举函数放在 `@objectstack/types`(只依赖 spec),因为硬门在 `cloud-connection`、两个 advisory 在 `cli`,而 `cloud-connection` 不依赖 `lint` —— 放一处才能保证三个界面给出同一个判定。\n\nCLI:`os package install` 加 `--confirm-global-uniques`,并把 409 渲染成可读的逐条清单。\n\n## D5c —— 遗留手写组织复合索引的 advisory\n\n新规则 `unique/legacy-organization-composite`。`{ fields: ['name','organization_id'], unique: true }` 读起来像「每组织唯一」,物化出来却是普通复合索引,而 SQL UNIQUE 是 NULL-distinct 的:组织列为 NULL 的行上它**什么都不约束**(#5030)—— 单组织部署上那就是每一行。改写成 `unique: 'organization'`(`fields` **原样保留**,driver 把已列出的组织列**就地**变 NULL-safe)正是补洞的动作。\n\n**永远只是 advisory、永远不自动修**:老拼写永久合法、零强制 drift,opt-in 是真实的物理收紧,要走 D4 的 `recreate_index` + 重复预检。这条约束我写进了 adr-anchors 的 invariant 里。\n\n## D6 —— 成文契约扫荡\n\n- `content/docs/data-modeling/indexing.mdx`:§Two ways to say \"unique\" 全节按新词汇重写(含 `os:check` 代码块),并新增遗留复合索引与 `isolated` 安装两小节。\n- `content/docs/protocol/objectql/schema.mdx`:§Uniqueness and tenancy → §Uniqueness and scope。这里原本那句「单租户部署不受影响 —— 租户列是常量,复合索引退化为单列索引」正是 #5030 **证伪过的原话**(ADR D6.2 点名的那条),已替换为 D3 的 NULL-safe 事实。\n- `content/docs/deployment/cli.mdx`:`replace_unique_index` / `recreate_index` 两条补上 NULL-safe 形状与重复预检。\n- `content/docs/references/**`:经 `gen:schema && gen:docs` 再生成,未手改。\n- `skills/objectstack-data/**`:按 Resolved #2 的非规范性引导整体扫过,声明索引一律说清 scope,并新增一节讲 `'organization'` 的 NULL-safe 语义与「永远不写姿态」。顺带修掉那里长期在用的 `tenant_id` —— 平台的列叫 `organization_id`。\n\nthread 里那条 sweep 备注的核查结论:`examples/**`、`create-objectstack` 模板与 `os generate` **根本没有声明任何唯一约束**,所以无可扫 —— 这是核查结论,不是漏掉了。真正的引导面是 `skills/`,已扫。\n\n## 三姿态 conformance\n\n同一个 fixture app 在 `single | group | isolated` 三姿态下启动,逐 S 行用**真实的违规插入**断言 enforcement(S1/S2/S3/S4/S5/S6/S7/S8/S9/S11/S12),并逐姿态捕获物化出的索引键,断言三者**逐字节相同**。\n\n写在 driver 层而不是三次 kernel boot,是因为 driver 是唯一物化唯一约束的层 —— 姿态要是漏进形状里,只能漏在这里;三次 kernel boot 会用 100 倍的机器跑同一个 `initObjects`,却证明得更少(kernel boot 插不了那条违规记录)。\n\n相同性断言是那种「什么都没产出也会绿」的形状,所以配了一条对着期望键形状的**正向**断言 —— 三次都没建索引不会读成「一致」。这条不是纸面保险:第一次跑就是它红的(我把 `'organization'` 声明索引的名字写错了,driver 用的是**解析后**的列名)。\n\n外加 ADR 只要的那一条 transition smoke:`single` 下建库、`isolated` 下用一个全新 driver 重新打开(真实重启),drift op 为零。\n\n## Reverse verification(先定方向再跑)\n\n预测:把 `if (gate.blocked)` 短路掉,断言 409 的那几条**变红**;而 `single`/`group` 断言 200 的那几条、以及 #4884 那条 rehydrate 测试**仍然绿** —— 它们断言的是门的**缺席**,短路破坏不了。\n\n实测与预测一致:5 红 / 71 绿,红的正好是 HARD-STOPS、「停下的安装什么都不留」、「只问新约束」、「部分确认仍然停住」、「另一姿态的确认不算同意」。那几条绿的诚实价值是防**误报**(门开太宽),不是防漏报 —— 写在这里免得被读成比实际更强的保证。已还原并复跑绿。\n\n## 验证\n\n```\npnpm --filter @objectstack/types test        →  7 files / 109 tests passed\npnpm --filter @objectstack/lint test         → 57 files / 1198 tests passed\npnpm --filter @objectstack/cloud-connection test → 14 files / 89 tests passed\npnpm --filter @objectstack/driver-sql test   → 61 files / 800 passed | 44 skipped\npnpm --filter @objectstack/cli test          → 70 files / 641 tests passed\npnpm --filter @objectstack/spec test         → 308 files / 7944 tests passed\ntypecheck(types/lint/spec/cli/driver-sql)   → 全部 Done\ncheck:adr-anchors → OK(29 anchored)· check:nul-bytes → OK(5361 files)\ncheck:doc-authoring → 362 files clean · check:skill-examples → 204 examples ✓\nspec check:generated → All 9 generated artifacts up to date\n```\n\n## 生成物同步(os-regen 四步)\n\n中途 main 前进了 10 个 commit,按四步互保处理:`git merge origin/main`(⛔ 无 rebase / 无 force-push)→ `git checkout origin/main -- <全部生成物路径>` → 全量重跑 `gen:schema / gen:docs / gen:api-surface / gen:spec-changes / gen:upgrade-guide` → 核对在飞单的条目还在。\n\n结果:重跑后生成物相对 `origin/main` 的**唯一** delta 就是我自己那处 `validation.zod.ts` 文档块(7+/3-)。#5289 的 `references/ui/theme.mdx`、strictness counts ledger、`api-surface.json` 全部与 `origin/main` **逐字节相同**,即无一被吞。\n\n唯一的合并冲突在 `marketplace-install-local-plugin.ts` 的 import 块,与 #5302(「八处把被降级的 `OS_MULTI_ORG_ENABLED` 当是不是多组织在读」)相撞。解法是**丢掉** `resolveMultiOrgEnabled`:#5302 删掉了本文件里它最后一处用法,并加了注释禁止再读那个被降级的布尔;我这边合并后保留 `resolveTenancyPosture` + 它新引入的 `postureEnforcesWall`,再叠上 D5e 的 import。\n\n## 未随手修、已记录\n\n`packages/spec/src/data/object.zod.ts` 的 `TenancySchema.tenantField` 默认值是 `'tenant_id'`,而 driver 的 `computeTenantField` 隐式回落到 `organization_id` —— 声明的默认值几乎没有消费方。与 ADR-0120 的契约不相干,按 Prime Directive #10 另开 issue,不在本 PR 修。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ErbEDVAg1No9gdg1pgDAGB\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ErbEDVAg1No9gdg1pgDAGB)_"
+}

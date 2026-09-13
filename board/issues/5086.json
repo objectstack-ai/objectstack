@@ -1,0 +1,36 @@
+{
+  "number": 5086,
+  "kind": "issue",
+  "title": "metadata: allowRuntimeCreate:false is not enforced — PUT /meta creates job and agent items the registry declares code-only",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T03:17:52Z",
+  "updated_at": "2026-08-04T13:45:25Z",
+  "closed_at": "2026-08-04T13:45:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5086",
+  "body": "Found working the #3909 G8 checklist on `main` @ `a1a855a28` (the rc.3 train tip).\n\n`#4509` closed the door on runtime-created jobs by setting registry flags:\n\n```ts\n// packages/spec/src/kernel/metadata-plugin.zod.ts:658\n{ type: 'job', label: 'Background Job', …, supportsOverlay: false,\n  allowOrgOverride: false, allowRuntimeCreate: false, … }\n```\n\nand its changeset states the intent unambiguously:\n\n> - `allowRuntimeCreate: false` — **no \"create job\" in Studio or via `PUT /meta`**.\n> - `allowOrgOverride: false` — no per-org job fork…\n\n**`PUT /meta` still creates one.**\n\n```\nPUT /api/v1/meta/job/rc3_runtime_job\n    {\"name\":\"rc3_runtime_job\",\"label\":\"J\",\n     \"schedule\":{\"type\":\"cron\",\"expression\":\"0 0 * * *\"},\"handler\":\"nope\"}\n→ 200 {\"success\":true,\"message\":\"Saved customization overlay (env-wide) — type=job, name=rc3_runtime_job\"}\n\nGET /api/v1/meta/job\n→ listed, with handler \"nope\"\n```\n\n`handler: \"nope\"` names no function in any compiled bundle — precisely the record #4509 argues can never be scheduled, saved and reported as success.\n\n## Not job-specific — the gate looks unenforced generally\n\n`agent` is the only other type carrying `allowRuntimeCreate: false`. It behaves the same:\n\n```\nPUT /api/v1/meta/agent/rc3_agent_probe {\"name\":…,\"label\":\"A\",\"role\":\"assistant\",\"instructions\":\"be helpful\"}\n→ 200 {\"success\":true,\"message\":\"Saved customization overlay (env-wide) — type=agent, …}\n```\n\nSo both flagged types accept a runtime create. A minimal-payload PUT to `object` / `flow` / `job` all return 422, which is schema validation firing first — that is what makes this easy to miss: the gate never runs, and only a payload that *passes* the schema reveals it.\n\n`supportsOverlay: false` appears equally unenforced — the success message calls the row a \"customization overlay\" for a type declared not to support them.\n\n## Why it matters\n\nThis is the failure mode ADR-0049 exists to prevent, one level up: the *enforcement flag itself* is the silently-inert declaration. A reader of the registry (or of the #4509 changeset, or of the release notes) concludes Studio and `PUT /meta` refuse these types. Studio presumably reads `allowRuntimeCreate` to decide whether to show \"create\", so the UI honours it while the API underneath does not — the \"UI-hidden but server-open\" shape ADR-0066 D4 calls out for actions.\n\n## Expected\n\nThe metadata write path consults the registry's `allowRuntimeCreate` (and `supportsOverlay` / `allowOrgOverride`) before persisting, and refuses with a catalogued code naming the type and why it is code-only — the same shape the retired-key refusals in this same wave produce. A regression test per flagged type would pin it, since the flags are data and new types will keep arriving.\n\nFound during the #3909 rc.3 verification (G8).\n"
+}

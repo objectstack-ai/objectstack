@@ -1,0 +1,36 @@
+{
+  "number": 5257,
+  "kind": "issue",
+  "title": "core: kernel:listening / kernel:bootstrapped / kernel:shutdown 在 LiteKernel 上仍被吞 —— HonoServerPlugin 的 listen() 失败会得到一句「✅ Bootstrap complete」而没有监听端口",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T13:06:11Z",
+  "updated_at": "2026-08-04T14:23:15Z",
+  "closed_at": "2026-08-04T14:23:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5257",
+  "body": "发现于 #5170(统一 `kernel:ready` 失败语义)的落地期间。#5170 的派发词明确**只裁 `kernel:ready` 一个钩子**,其余钩子的语义不在该单范围内,故另开此单,**未在 PR 中修**。\n\n## 事实\n\n#5170 落地后,`LiteKernel.bootstrap()` 的三个钩子分发是这样的:\n\n| 钩子 | ObjectKernel | LiteKernel(#5170 之后) |\n| :--- | :--- | :--- |\n| `kernel:ready` | 传播,boot 失败 | 传播,boot 失败 ✅ 已统一 |\n| `kernel:bootstrapped` | 传播,boot 失败 | **吞** —— 一条 `Hook handler failed` 日志,boot 继续 |\n| `kernel:listening` | 传播,boot 失败 | **吞** —— 同上 |\n| `kernel:shutdown` | 传播 | **吞** |\n\n原因与 #5170 同源:`kernel.ts` 走 `this.context.trigger(...)`(裸循环、不 catch),`lite-kernel.ts` 这三处仍走 `kernel-base.ts` 的 `triggerHook`(每 handler try/catch,注释 \"Continue with other handlers even if one fails\")。#5170 只把 `kernel:ready` 换成了传播版分发器。\n\n## 为什么这条不只是对称性洁癖\n\n`kernel:listening` 是 HTTP 服务器**真正开监听**的锚点。`packages/plugins/plugin-hono-server/src/hono-plugin.ts`(约 605 行)里:\n\n    ctx.hook('kernel:listening', async () => {\n        const port = this.options.port ?? 3000;\n        await this.server.listen(port);\n        ...\n    });\n\n`await this.server.listen(port)` **没有自己的 try/catch**。它 reject 时(特权端口 EACCES、端口回退逻辑本身失败、edge/serverless 宿主上 listen 不可用等),在 LiteKernel 上的结果是:异常被 `triggerHook` 吞掉 → `bootstrap()` 继续 → 打印 `✅ Bootstrap complete` 并正常 resolve → **进程活着、没有任何 socket 在监听**。同一份插件代码在 ObjectKernel 上是 boot 失败。\n\n「端口占用」这一条不算(`server.listen` 内部有回退到随机端口的逻辑,实测日志 `Port 0 is in use, using port 39869 instead`),所以触发面比 `kernel:ready` 窄 —— 但失败模式更难看:健康检查前的那一句「启动成功」是假的。\n\n`kernel:bootstrapped` 上挂的是 objectql 的 `announceOpenMigrationGates`、service-automation 的 node-type 审计等 reconcile 类工作,吞掉的后果是审计静默失效,量级较轻。\n\n## 建议\n\n不是「把 `triggerHook` 整个改成传播」—— 每个钩子该 fail-soft 还是 fail-loud 是一次独立判断,#5170 已经把这个原则写进 `kernel-base.ts` 的两个分发器注释里,`triggerHookOrThrow` 也已就位可直接复用。这条单要裁的是:\n\n- **A**:`kernel:listening` 也改传播(与 ObjectKernel 一致),`kernel:bootstrapped` 同理;`kernel:shutdown` 保持吞(停机路径上一个 handler 失败不该阻断其余清理,这个 fail-soft 是有道理的)。\n- **B**:只改 `kernel:listening`(唯一有具体用户可见失败模式的那个),其余维持现状 + 文档写明。\n- **C**:全维持现状,文档承认差异。\n\n倾向 A:两轴都指向它 —— 长远轴上「同一钩子名在两个内核上给出相反答案」本身就是 declared ≠ enforced(#5170 的立论,原样适用);防 AI 犯错轴上,一个插件作者在 `kernel:listening` 里写 `await listen()` 不会想到要自己包 try/catch,而宽容的消费端正是这类错误藏身之处。`kernel:shutdown` 的 fail-soft 应当保留并在注释里说明理由,让「declared = enforced」是逐钩子写明的判断,而不是默认继承。\n\n落地时应与 #5170 一样,在 `lite-kernel.test.ts` 上留对称回归用例(#5170 已经 pin 了「其余钩子在 LiteKernel 上保持 fail-soft」,改哪个就改哪条 pin,让改动必须是显式的)。\n\n相关:#5170(`kernel:ready`,已修)、#5160 / PR #5173(触发这轮排查的 boot 门)。\n\n---\n_Filed by the os-dev agent while implementing #5170; 未认领,交 PM 分诊。_\n"
+}

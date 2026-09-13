@@ -1,0 +1,36 @@
+{
+  "number": 5115,
+  "kind": "issue",
+  "title": "dataset 跨 datasource JOIN 应在编译/发布期就被拒绝,而不是留到查询期才响亮失败(#5033 的后续)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T05:15:04Z",
+  "updated_at": "2026-08-04T16:15:13Z",
+  "closed_at": "2026-08-04T16:15:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5115",
+  "body": "## 背景\n\n\\#5033 修好了 `service-analytics` 的 `executeRawSql` 自动桥接 —— 它现在把 `object` 透传给 `ObjectQL.execute()`,于是 dataset 的原始 SQL 落在该对象自己的 datasource 上,而不是默认库。\n\n该修复带来一个**已被 PM 接受的行为变更**:`NativeSQLStrategy` 为点号维度(`account.region`)生成的 `LEFT JOIN`,如果 join 两端落在不同的 datasource 上,现在会在基对象自己的 datasource 上**响亮失败**,而不是像以前那样静默地读错库。PR 里已经把这个失败的措辞修正为指名真实原因(表 X 不在 datasource Y 上),并留了修复建议;degradation(真正缺表 → 空结果 + WARN)对基对象缺失的情形保持不变。\n\n## 这个 issue 要解决的\n\n**响亮失败发生在查询期,太晚了。** 这是一个纯粹的元数据错误:dataset 声明了一个物理上不可能在一条 SQL 里执行的 join,这件事在**编译/发布期**就完全可判定 —— 只需要问每个参与对象绑定在哪个 datasource 上。按 Prime Directive #12(contract-first,在 producer 端修、在 authoring/publish 期响亮拒绝),它应该在作者(尤其是 AI 作者)按下保存的那一刻就被拒绝,而不是等到某个看板 widget 在生产上炸掉。\n\n现状的成本:\n\n- 一个跨 datasource 的 dataset 可以被正常保存、发布、出现在看板里,只有真正查询时才失败 —— 而查询往往发生在别的环境、别的时间、别的人面前;\n- AI 生成的 dataset 元数据是这个错误最容易繁殖的地方:`include` 一个 lookup 看起来永远是合法的,除非有东西在 authoring 期告诉作者「这两个对象不在同一个库里」;\n- 「声明了但运行不了」正是 Prime Directive #10 点名的 declared ≠ enforced 形状。\n\n## 建议方向\n\n`compileDataset`(`packages/services/service-analytics/src/dataset-compiler.ts`)已经在校验 `include` 里的关系是否存在于基对象上,并且已经通过 `relationshipResolver` 拿到 join 目标对象名。再加一个**可选**的 datasource 解析器(#5033 已经为诊断文案在 `AnalyticsServiceConfig` 上引入了 `getObjectDatasource(objectName)`,plugin 侧从 `engine.getObject(name).datasource` 接出),就足以在编译期判定:\n\n- 基对象与每个 join 目标解析到不同 datasource ⇒ 拒绝,错误里指名两个对象、两个 datasource 和修法;\n- 解析器缺席或答不上来(无 data engine 的宿主、外部 datasource)⇒ 按仓里既有的 \"cannot answer, do not block\" 分级放行,由 #5033 的查询期防线兜底。\n\n需要一并想清楚的两点:\n\n1. **落点**:只在 `compileDataset` 里拒绝,还是也进入 metadata 发布闸门(publish-time lint),让保存 dataset 的那一刻就红?后者才真正满足「在 authoring 期拒绝」,前者只是把失败从查询期提前到注册期。\n2. **是否要给一条合法出路**:跨 datasource 的维度理论上可以由 analytics 层做两段读 + 内存 join(ObjectQL 路径已经有 FK-expand 的先例,见 `objectql-crossobj-expand.test.ts`)。如果决定支持,那就不是「拒绝」而是「换策略」,`NativeSQLStrategy.canHandle` 应当在 join 跨库时 decline(与它对 external 对象的既有姿态一致),把查询让给能跨库的路径。这条比单纯拒绝更贵,但它是唯一让跨库看板真正能工作的方案 —— 需要维护者定方向。\n\n## 出处\n\n从 #5033 的实现中分出。PM 在 #5033 的派发裁定里明确:本轮不做编译期拒绝,如分析认为需要则单独记账。这就是那笔账。\n\nObserved while implementing #5033 on `main` @ `c272e48be`。\n"
+}

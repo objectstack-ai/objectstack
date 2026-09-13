@@ -1,0 +1,35 @@
+{
+  "number": 5207,
+  "kind": "pull_request",
+  "title": "fix(auth): membership_policy 成为平台设置，且注册与回填读同一个来源",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T09:11:41Z",
+  "updated_at": "2026-08-04T09:30:15Z",
+  "closed_at": "2026-08-04T09:30:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T09:30:14Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5207",
+  "body": "Fixes objectstack-ai/objectstack#5152\n\n两个缺陷一起修——只修第一个会留下比现状更糟的分裂。\n\n## 缺陷一：这条策略没有运行期配置入口\n\n`membershipPolicy` 此前**只能**在 `AuthPlugin` 构造时传，而自托管栈的 AuthPlugin 由 CLI 注入（`cli/src/commands/serve.ts`），那里不传、也没有 env 兜底。于是自托管部署永远拿到 `'auto'`，`invite-only` 在自定义宿主之外事实上不可达。\n\n现在它是 `auth` 命名空间的平台设置，与 `signup_enabled` 并排——「能不能自助注册」和「注册之后落到哪」本就是同一类姿态的两半：\n\n- `packages/services/service-settings/src/manifests/auth.manifest.ts`：新增 `membership` 分组 + `membership_policy`（`type: 'select'`，值域封闭为 `auto` / `invite-only`，`default: 'auto'`）。**刻意不放进 `email_password` 分组、也不加 `visible` 门**：成员归属是每一条创建路径（邮箱注册、SSO 即时开通、管理员建号、批量导入）都要决定的事，藏在 `email_password_enabled` 后面会让最需要它的纯 SSO 部署根本配不到。\n- `translations/{en,zh-CN,es-ES,ja-JP}.ts`：分组标题 + 键标签 + help + 两个选项标签，四个语言包齐。\n- `bindAuthSettings()`：新增 `isExplicit('membership_policy')` 分支，形状对齐既有键。**只有显式设置才生效**——manifest 的 `auto` 是 UI 默认值，不得覆盖在代码里配好策略的部署。\n- env 覆盖免费到手：settings 服务的 `envKeyOf('auth', 'membership_policy')` 就是 `OS_AUTH_MEMBERSHIP_POLICY`，符合 Prime Directive #9 的 `OS_{DOMAIN}_{NAME}` 形状。\n\n**未按 issue 的可选项去 `serve.ts` 里另开一条 env 兜底**：那会造出第二个权威，正是 issue 否决 `defineStack` 时引用的那句话反对的形状。\n\n## 缺陷二：两个读取点来源不一致\n\n| 路径 | 改前读 | 改后 |\n|---|---|---|\n| 注册（`user.create.after` 的 reconciler） | `this.config.membershipPolicy ?? 'auto'` | `this.getMembershipPolicy()` |\n| 回填（ADR-0093 D6，批量绑定存量无成员用户） | `this.options.membershipPolicy ?? 'auto'`（构造选项，settings 够不到） | `manager.getMembershipPolicy()` |\n\n新增 `AuthManager.getMembershipPolicy()` 作为唯一来源，就是 `applyConfigPatch()` 的目标对象。回填侧**没有**保留 `?? this.options.…` 兜底——留一个第二读法正是缺陷本身；manager 从 `init()` 起就存在，所以那里的判空是前置条件而不是降级模式。\n\n### 顺带修掉一个由此暴露的时序问题\n\n两个 `kernel:ready` 钩子按注册顺序触发，而顺序恰好是反的：回填在 `init()` 注册（先），settings 绑定在 `start()` 注册（后）。照原样接上设置，**冷启动的第一趟回填仍会用绑定前的策略**——在一个存了 `invite-only` 的部署上批量绑定所有存量用户，而这一趟没人来得及观察。\n\n改法：抽出 `ensureAuthSettingsBound(ctx)`，两个钩子都 await 它，谁先到谁执行，memoize 的 promise 保证 `settings.subscribe` 不会注册两次。\n\n## 非法值被拒绝，不静默落回 `auto`\n\n两道：\n\n1. **写入 API**：manifest 声明了 options 表，`SettingsService.setMany` 已有的 `invalid_option` 校验（#5094/#5133）直接生效，报错带上允许值集合。\n2. **消费端**：`OS_AUTH_MEMBERSHIP_POLICY` 绕过上面那道校验（见下方 finding），所以 `bindAuthSettings` 用 `isMembershipPolicy()` 自己再判一次——非法值记 `error`（写清后果 + 合法值集）并**忽略**，保持部署当前策略。不写成 `auto`：把拼错的 `invite_only` 读成 `auto`，会让运维以为墙立起来了，而每一个新注册都在被自动绑定，直到有人发现组织里多了个陌生人才暴露。按 AGENTS.md 的分级标准，「事后系统看起来完全正常」正是 `error` 而非 `warn`。\n\n## 测试：每一条在没有本 PR 时是否失败\n\n新增 `packages/plugins/plugin-auth/src/membership-policy-setting.test.ts`（10 条）。把三个源文件回滚到 `origin/main`、只留测试跑一遍，**8 条失败、2 条通过**：\n\n| 测试 | 无本 PR 时 |\n|---|---|\n| 显式 `invite-only` 打进活策略 | ❌ 失败 |\n| 未显式设置时不动（`source: 'default'`） | ❌ 失败（`getMembershipPolicy()` 不存在） |\n| manifest 默认值不覆盖代码里配的策略 | ❌ 失败 |\n| 设置变更后免重启生效（走 `subscribe`） | ❌ 失败 |\n| 非法值被拒绝、不落回 `auto` | ❌ 失败 |\n| **`invite-only` 时新注册走 `policy-skip` 而非 `no-target-org`** | ❌ 失败 |\n| 未设置时新注册照常自动绑定 | ✅ 通过（回归护栏，本就该过） |\n| **回填遵守构造时未见过的 settings 策略** | ❌ 失败（读 `this.options`，把两个存量用户批量绑了） |\n| 未设置时回填照常绑定存量用户 | ✅ 通过（回归护栏） |\n| **两条路径都经 `getMembershipPolicy()` 解析** | ❌ 失败 |\n\n`auth.manifest.test.ts` 新增 2 条（options 表形状、写入 API 拒绝非法值），无本 PR 时**均失败**。\n\n### 关于 `policy-skip` 与 `no-target-org` 的区分\n\nissue 明确要求钉住**原因**而不只是「用户没有成员身份」——后者在有墙姿态下是 `defaultOrgId()` 返回 `null` 的副作用，今天就能通过，什么也证明不了。测试用 `vi.mock` 把 `reconcileMembership` / `backfillMemberships` 包成 spy 但**透传真实实现**，因此断言的是字面返回值：\n\n```js\nawait expect(reconcileSpy.mock.results[0].value).resolves.toEqual({ outcome: 'policy-skip' });\n```\n\n外加旁证：tenancy stub 的 `defaultOrgId` **一次都没被调用**——`no-target-org` 只能由「问了目标组织、答案是 null」到达，策略跳过根本不会去问。\n\n### 实测输出\n\n```\npnpm --filter @objectstack/plugin-auth --filter @objectstack/service-settings test -- --maxWorkers=2\n  packages/services/service-settings   Test Files  15 passed (15)   Tests  226 passed (226)\n  packages/plugins/plugin-auth         Test Files  33 passed (33)   Tests  721 passed (721)\n\npnpm --filter @objectstack/plugin-auth typecheck   → tsc --noEmit, Done\neslint（改动的 7 个文件 + translations/）           → 无输出\nnode scripts/check-startup-registry-verdict.mjs    → ✓ 40 seam(s), none recording a verdict\nnode scripts/check-durability-degradation-log-level.mjs → ✓ 14 seam(s), all loud\n```\n\n（`service-settings` 没有 `typecheck` script，在 `scripts/check-type-check-coverage.mjs` 里有登记条目，本 PR 不改这一状态。）\n\n## 未做的事\n\n- **没有碰 `packages/spec`**：`SpecifierType` 已含 `select` 且 superRefine 已强制 `options` 非空；`MembershipPolicy` 声明在 `plugin-auth/src/reconcile-membership.ts` 而非 spec。本 PR 是**使用**既有契约。\n- **没有碰 `defineStack` / `tenancy`**：issue 已否决，理由是 `stack-server.zod.ts` 的「What `server:` is NOT for」。\n- **没有碰 `content/docs/releases/`**。用户可见变更走 `.changeset/auth-membership-policy-setting.md`。\n\n## 文档\n\n- `content/docs/deployment/environment-variables.mdx`：新增 `OS_AUTH_MEMBERSHIP_POLICY` 一行（紧邻既有的 `OS_AUTH_*` settings 覆盖）。\n- `content/docs/permissions/authentication.mdx`：env 示例块里补一段。\n\n## 顺手记录的 out-of-scope finding（未在本 PR 修）\n\n- **#5204**（具体缺陷，未打标签待分诊）：env 来源的 settings 值**完全绕过** manifest 的 options 表校验——`SettingsService.get()` 的 env 分支只做 `coerceEnvValue` 形状转换，不看 `spec.options`。#5094 在写入 API 上堵住的洞，在 `OS_*` 覆盖这一侧原样敞开（`OS_MAIL_PROVIDER=sendgrid` 会被原样交给 mail 插件）。本 PR 只在 `membership_policy` 这一个键的消费端挡了一道，那是单点补丁，不是通路修复。\n- **#5205**（`finding` 标签，休眠）：`reconcileMembership` 用 `=== 'invite-only'`（词表外的值 fail-open，照常自动绑定），`backfillMemberships` 用 `!== 'auto'`（fail-safe，不绑）——同一输入两种相反姿态。本 PR 之后框架自身通路上不可达（唯一来源是 typed accessor），但两个函数都是包的公开导出。\n\n## 下游\n\n合并后 cloud 需要 pin bump（`scripts/bump-objectstack.sh`），cloud#1012 的剩余部分随后可做；其正文「S1」的表述已在该 issue 更正为「在该部署的 auth 设置里配置 invite-only」。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019TYoxKa8yFLiDDh7tkBqtu)_"
+}

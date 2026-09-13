@@ -1,0 +1,37 @@
+{
+  "number": 5334,
+  "kind": "issue",
+  "title": "analytics 是 #5158 拍板 C 漏掉的第五道门:`where` 为数组(FilterArray 糖)时被 `normalizeAnalyticsFilterTree` 静默丢弃,图表画全表",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T23:36:32Z",
+  "updated_at": "2026-08-05T00:48:35Z",
+  "closed_at": "2026-08-05T00:48:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5334",
+  "body": "修 #5325 时把 worktree 同步到含 #5329(#5158 拍板 C 第 2 步)的 `origin/main`,核对本次改动\n是否与之冲突,发现 analytics 这条路径不在那一单的门面清单里。**不属于 #5325 的范围面**,\n按 Prime Directive #10 单独记在这里,unassigned。\n\n## 位置\n\n`packages/services/service-analytics/src/strategies/filter-normalizer.ts` 的\n`normalizeAnalyticsFilterTree`:\n\n```ts\nconst where = (query as { where?: unknown }).where;\nif (!where || typeof where !== 'object' || Array.isArray(where)) return null;\n```\n\n`Array.isArray(where)` → `return null` —— **整条 `where` 消失**,不报错,不留痕。\n\n## 现象(实测)\n\n`NativeSQLStrategy.generateSql({ cube:'deals', measures:['total'], dimensions:['id'],\nwhere: [{ stage: 'won' }] })` 生成:\n\n```\nSELECT id AS \"id\", COUNT(*) AS \"total\" FROM \"deal\" GROUP BY id      -- 没有 WHERE\n```\n\n`params` 为空。作者写了筛选,图上画的是整个数据集 —— #3650 / #4128 反复付过学费的那一类\n静默放宽,只是入口换成了数组写法。\n\n## 为什么现在值得单独记\n\n#5329(#5158 拍板 C 第 2 步)刚刚把 `FilterArray` 定成 **INPUT-ONLY 的编写期糖**,并让\nengine 的六个入口(`find`/`findOne`/`count`/`aggregate`/`update`/`delete`)统一走\n`isFilterAST` → `parseFilterAST` 下沉,四个驱动的数组方言删除、改成响亮的\n`INVALID_FILTER` / 400;cloud 的 `RemoteTransport.buildWhereSQL` 自 cloud#1075 起也是拒收。\n那一单的结论是「一个 query 在哪条路上都只有一个答案」。\n\nanalytics 是**第五道门**:它自己就把 `where` 编译成 SQL(`NativeSQLStrategy`)或\n`FilterCondition`(`ObjectQLStrategy`),不经过 engine 的那道下沉。今天它给的是三个可能答案\n里最差的那个 —— 既不是 lower(照 `parseFilterAST` 解释),也不是 refuse(响亮 400),\n而是**静默丢弃**。\n\n## 两条路都行,需要拍板\n\n1. **Lower** —— 与 #5329 的 engine 入口一致:`isFilterAST(where)` 就先 `parseFilterAST`\n   再交给 `buildNode`。作者用哪种写法都得到同一份行集,与「FilterArray 是编写期糖」\n   的定性完全吻合。代价是 `service-analytics` 目前只依赖 `@objectstack/core` +\n   `@objectstack/spec`,要看 `parseFilterAST` 住在哪个包、会不会带进新依赖。\n2. **Refuse** —— 与四个驱动删除数组方言后的姿态一致,抛错而不是静默丢。实现最省,\n   且分析查询的 `where` 通常由 dashboard metadata 提供,编写期炸掉比运行期多画几万行好。\n\n个人倾向 **1(lower)**:#5158 的拍板 C 说的就是「在门口下沉」,analytics 只是当时没被点到\n的一道门;拒收会让同一份 dashboard metadata 在普通 `find()` 上能跑、在图表上报错。\n但这是契约位置的选择,不该由实现顺手定。\n\n## 未验证\n\n没有找到今天真的会给 analytics 传数组 `where` 的 producer(dashboard widget 的 `filter`\n走 FilterCondition 对象形状);这条是**面**的漏洞,不一定有现网触发。严重度请 PM 按 triage\n定,不代表我判断它低 —— #5158 那条路上的同类问题一开始也没有已知 producer。\n\n关联:#5158(拍板 C)、#5329(第 2 步,engine 六入口下沉 + 四驱动删方言)、\ncloud#1075(transport 侧早已拒收)、#5325(同函数、同一轮里发现)、#3650 / #4128\n(同类「谓词静默消失 → 画全表」)。\n"
+}

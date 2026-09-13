@@ -1,0 +1,36 @@
+{
+  "number": 4868,
+  "kind": "issue",
+  "title": "`merge.os-regen.driver` 指向「上一个装过依赖的 worktree」的绝对路径 —— 该 worktree 一删,全容器的生成物合并驱动就坏了",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T11:27:58Z",
+  "updated_at": "2026-08-03T15:40:52Z",
+  "closed_at": "2026-08-03T15:40:52Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4868",
+  "body": "## 现象\n\n在 worktree 里 `git merge origin/main`,合并驱动直接崩:\n\n```\nError: Cannot find module '/home/user/objectstack-issue-4796/scripts/git-merge-regen.mjs'\n    at Function._resolveFilename (node:internal/modules/cjs/loader:1383:15)\n  code: 'MODULE_NOT_FOUND'\n```\n\n而当时我的 worktree 是 `objectstack-issue-4391`,`objectstack-issue-4796` 早已不存在。\n\n## 根因\n\n`merge.os-regen.driver` 存在**共享的** `/home/user/objectstack/.git/config` 里(linked worktree 共用同一份 config),而且存的是**绝对路径**:\n\n```\n$ git config --show-origin --get merge.os-regen.driver\nfile:/home/user/objectstack/.git/config\tnode \"/home/user/objectstack-issue-4793/scripts/git-merge-regen.mjs\" %O %A %B %P\n```\n\n`pnpm install` 的 prepare 步骤(`. prepare: git integration registered (merge.os-regen.driver)`)每次都把它**重写成当前 worktree 自己的路径**。于是在多 agent 并行的容器里:\n\n1. agent A 建 worktree、`pnpm install` → 驱动指向 A 的 worktree;\n2. agent B 建 worktree、`pnpm install` → 驱动被改指向 B;\n3. **A 或 B 按规矩收尾删掉自己的 worktree**(AGENTS.md 要求 `git worktree remove`)→ 驱动指向一个不存在的路径;\n4. 此后**容器里所有 agent 的所有 merge**,只要碰到 `merge=os-regen` 映射的文件,驱动就 MODULE_NOT_FOUND。\n\n注意路径已经漂过至少两轮(报错里是 `-4796`,现在 config 里是 `-4793`),说明这不是偶发。\n\n## 为什么值得单独记一笔\n\n`merge=os-regen` 管的正是**生成物基线**(`json-schema.manifest.json` 等,#4675)。这些文件的合并语义是「不要文本合并,标记待重生成」。驱动一坏:\n\n- **本次是响亮的**:驱动崩溃后 git 把文件留成普通冲突,我看得见,于是按规矩 `git checkout origin/main -- <files>` 后整体重生成,没有出事;\n- 但**这是运气好**。这类基线最危险的失败模式恰恰是「无冲突标记地静默吞掉别人的删除」(#4616 已实证过一次:零冲突 merge 把 #4789 的改名在三张表里全吞了,只有 `gen:schema` 报得出来)。一个坏掉的驱动把「有保护」变成「没保护」,而下一个 agent 未必会去读 merge 的 stderr。\n\n`pnpm check:merge-driver` 跑的是 `--self-test`(用 `scripts/` 下的相对路径),**PASS**,照不出 config 里那条绝对路径已经悬空 —— 自检和真实调用路径不是同一条。\n\n## 建议方向(未实施,留给接手的人定)\n\n- 驱动命令改成**相对仓库根**的调用,或用 `!` shell 形式让 git 在当前工作树里解析(`!node \"$(git rev-parse --show-toplevel)\"/scripts/git-merge-regen.mjs ...`),这样它不再绑定到某个具体 worktree;\n- 或者让 `check:merge-driver` 额外断言 `merge.os-regen.driver` 里的脚本路径**当前可解析**,坏了就红 —— 现在这条断言不存在。\n\n## 复现\n\n```bash\ngit config --show-origin --get merge.os-regen.driver   # 看它指向哪个 worktree\nls \"$(git config --get merge.os-regen.driver | sed 's/^node \"//; s/\" .*//')\"   # 大概率 No such file\n```\n\n## 出处\n\n在 #4391(`crypto.hash` 退役)实施中撞到,与该单本身无关,按 Prime Directive #10 单独归档、不在那个 PR 里顺手改。\n"
+}

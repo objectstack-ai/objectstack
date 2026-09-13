@@ -1,0 +1,38 @@
+{
+  "number": 5063,
+  "kind": "issue",
+  "title": "ADR-0076 的状态行仍是 `Proposed`，但它已被 AGENTS.md、runtime 代码注释与多个在飞 issue 当作生效决定引用",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T01:32:58Z",
+  "updated_at": "2026-08-05T01:03:26Z",
+  "closed_at": "2026-08-05T01:02:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5063",
+  "body": "**观察类发现（observation-class）**，在起草 ADR-0121（#5060）核查 ADR-0076 时顺带发现，**未认领**，**不带 `pm:queue`** —— 今天没有任何用户或作者会撞上它，但它是 ADR-0078 状态行校准（#4787 → #4919）同一形状的问题，按 Prime Directive #10「不要把发现埋掉」记录备查，严重度交 PM 分诊定。\n\n基线：`origin/main` @ `94f7b6a`。\n\n## 事实\n\n`docs/adr/0076-objectql-core-tiering.md` 第 3 行：\n\n```\n**Status**: Proposed (2026-06-28, rev. 9) — D1–D12 below. ...\nVerified 2026-07-16: D1 (metadata-protocol extraction + back-compat re-export),\nD2 (core-boundary ratchet test), D9-step1 (segmented protocol interfaces) confirmed in code;\n... D12 framework side landed in #3028 ...\n```\n\n状态行自己就记着 D1 / D2 / D9-step1 / D12 已在代码中确认落地，而抬头仍是 `Proposed`。\n\n同一份 ADR 在仓内被当作**生效决定**引用（非穷举）：\n\n| 引用处 | 用法 |\n|---|---|\n| `AGENTS.md`（dev-stack 一节） | 「mount everything advertised (ADR-0076 D12)」—— 作为纪律陈述 |\n| `packages/runtime/src/domains/actions.ts` 文件头 | 「`/actions` domain — extracted dispatcher body (ADR-0076 D11 step ③, PR-9)」—— 该文件的存在理由 |\n| `packages/runtime/src/domains/*.ts` 一族 | D11 的 domain registry 分解即其产物 |\n| #4936 正文 | 「正是 ADR-0076「一条路由一个属主」小节点名的那类输入」 |\n| #4939 正文 | 「这本身就是 ADR-0076「一条路由一个属主」要防的形状」 |\n| #5040 设计文档 §1 | 保留前缀方案的论证前提 |\n| ADR-0121（本次起草，#5060） | 明确声明「扩充 ADR-0076，不取代」 |\n\n## 为什么值得记一笔\n\nPrime Directive #13 的原文是「**An accepted ADR binds** until a superseding ADR says otherwise」，而 AGENTS.md 把「改动 `docs/adr/` 治理的领域前先 grep ADR」写成每个 agent 的必做动作。这两条合起来，状态行就是读者判断「这条决定是否约束我」的唯一开关。一份实际上在约束 runtime 目录结构、被 AGENTS.md 引用、且正在被新 ADR 扩充的记录，抬头写着 `Proposed`，等于邀请下一个 agent 判定它可以绕过。\n\n这正是 #4787 对 ADR-0078 描述过的机制 ——「An ADR that says \"not built\" about a built gate is a live misinformation source: the next reader re-opens the project or routes around a gate that is already load-bearing」。方向相反（那次是 Proposed 说自己没建成，这次是 Proposed 说自己建成了一半），失效方式相同。\n\n## 建议处置（不预判，交分诊）\n\n按 #4919 的做法**逐条校准而不是整体翻牌** —— 一份分阶段 ADR 被整体标成「已完成」比标成「没开始」更坏，因为它会让人停止检查。ADR-0076 的分布本来就参差：\n\n- D1 / D2 / D9-step1 / D12：状态行自称已确认落地；\n- D11：#2462 系列（#3491–#3573）的 VERDICT 段落记录了 dispatcher 分解已完成、legacy if-chain 归零；\n- D3（capability/profile 契约）：状态行明写 `unbuilt`；\n- D7 / D10：明确 deferred（trigger-gated），是设计意图不是欠账。\n\n所以合理的形态大约是 `Accepted — D1/D2/D9-step1/D11/D12 implemented; D3 unbuilt; D7/D10 deliberately deferred`，逐条标注，与 ADR-0078 校准后的house form 一致。\n\n⚠️ 这是**纯文档动作**：不改任何代码、schema 或 `content/docs/releases/`。若要一并做，`scripts/adr-anchors.json` 可考虑为 D11 的 domain registry 落点补锚（PD #13 推论：让实现决定的文件指回决定），但那是可分开的第二步。\n\n关联：#4787 / #4919（ADR-0078 同形状的先例与做法）、#5060 / ADR-0121（本次起草，扩充 0076）、#4936、#4939、#5040。\n"
+}

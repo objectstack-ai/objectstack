@@ -1,0 +1,34 @@
+{
+  "number": 5205,
+  "kind": "issue",
+  "title": "finding(auth): reconcileMembership 与 backfillMemberships 对「词表外的 policy」判断相反 —— 一个 fail-open，一个 fail-safe",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T09:10:28Z",
+  "updated_at": "2026-08-04T17:11:24Z",
+  "closed_at": "2026-08-04T17:11:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5205",
+  "body": "观察类 finding，来自 #5152 的实现。**默认部署撞不到**：#5152 之后两个调用点都走 `AuthManager.getMembershipPolicy()`，返回类型是 `MembershipPolicy`，词表外的值进不来。留档是因为这两个函数是 `@objectstack/plugin-auth` 的公开导出（`index.ts` 的 `export * from './reconcile-membership.js'`），JS 侧调用方或 cloud 宿主可以绕过类型直接传。\n\n## 事实（`reconcile-membership.ts`）\n\n同一个策略字段，两个函数用相反的谓词：\n\n```\nreconcileMembership:   if (deps.policy === 'invite-only') return { outcome: 'policy-skip' };\nbackfillMemberships:   if (deps.policy !== 'auto')        return { ...summary, reason: 'policy' };\n```\n\n传入 `'inviteOnly'`（或任何拼错的值）时：\n\n| 函数 | 行为 |\n|---|---|\n| `reconcileMembership`（注册路径，逐个绑定） | 落到 `auto` 分支，**照常自动绑定** —— fail-open |\n| `backfillMemberships`（回填路径，批量绑定） | 判为非 `auto`，**不绑** —— fail-safe |\n\n两者对同一个输入给出相反的姿态。真正危险的方向是前者：调用方以为自己关掉了自动绑定，实际上没有。\n\n## 为什么现在只是 finding\n\n- #5152 之前这两处读的是两个不同来源，词表外的值有真实到达路径；#5152 把来源统一成一个 typed accessor 之后，框架自身的通路上不可能再出现非法值；\n- 但导出面还在，所以它是「休眠」而不是「不可达」。\n\n## 可能的形状\n\n1. `reconcileMembership` 改成与回填同向的 fail-safe：`if (deps.policy !== 'auto') return { outcome: 'policy-skip' };`。一行，语义收紧，且与「墙的默认姿态是有墙」一致。风险：`policy-skip` 这个 outcome 名对「值非法」这个原因是撒谎，排障时会误导；\n2. 两处都在入口用 `isMembershipPolicy()`（#5152 新增的类型守卫）显式判非法，给一个独立的 outcome/reason（如 `'invalid-policy'`）并记 `error`。信息量最足，改动面也最大（`ReconcileOutcome` 是导出的联合类型，加成员对下游是 minor）；\n3. 什么都不做——两个谓词的分歧记在这里，等哪天真有外部调用方再说。\n\n倾向 **2**：与 #5152 在 settings 边界上采取的姿态（非法值响亮拒绝、不静默强转）一致，且不会让 outcome 名撒谎。但它改的是导出的联合类型，属于契约变更，需要维护者定夺。\n\nFound-during: #5152\n"
+}

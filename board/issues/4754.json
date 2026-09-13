@@ -1,0 +1,36 @@
+{
+  "number": 4754,
+  "kind": "issue",
+  "title": "`saveMetaItem` 是 #4632 词表覆盖不到的持久性接缝:8 处 catch 完全静默吞掉元数据写入失败",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T02:30:25Z",
+  "updated_at": "2026-08-04T12:44:23Z",
+  "closed_at": "2026-08-04T12:44:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4754",
+  "body": "**发现于** #4669 的修复过程(PR 分支 `claude/issue-4669-permission-backfill-strict-spec`)。**未认领** —— 只是记录。\n\n## 背景\n\n#4632 立的规则(AGENTS.md「Degradation log levels」)由 `pnpm check:durability-log-level` 机械执行,但闸门自己声明了局限:它只认 `DURABILITY_CRITICAL_CALLEES` 这张显式词表,**发现不了**词表以外的持久性接缝。\n\n#4669 正是这个类:ADR-0094 D4 的 permission-set backfill 调 `protocol.saveMetaItem()`,失败被 catch 成一条 `warn`,计数器不动 —— 整条投影路径 100% 停摆,却一个红灯都没有,跨了一个发布周期才被人在无关的 bump 日志里偶然看见。修复(PR 见上)把那两处提到了 `error` + 计数,但 **`saveMetaItem` 本身没有进词表**,所以同类接缝仍然不受保护。\n\n## 测量:如果把 `saveMetaItem` 加进词表会怎样\n\n在本地把 `['saveMetaItem', …]` 加进 `DURABILITY_CRITICAL_CALLEES` 跑一次(探针脚本,未提交),得到 **8 处违规,分布在 3 个包 4 个文件**,而且全部是最糟的形态 —— **`catch` 里连日志都没有,完全静默**:\n\n| 文件 | 命中数 | 形态 |\n|---|---|---|\n| `packages/runtime/src/domains/packages.ts` | 3 | catch swallows the failure with no log at all |\n| `packages/rest/src/rest-server.ts` | 2 | 同上 |\n| `packages/metadata-protocol/src/protocol.ts` | 2 | 同上 |\n| `packages/runtime/src/domains/meta.ts` | 1 | 同上 |\n\n(`plugin-security` 的两处不在名单里 —— 它们已被 #4669 的 PR 修成 `error`。)\n\n## 为什么单独立一条\n\n- 加词表和修 8 处别人的调用点是一个**独立的清账**,塞进 #4669 的 PR 会把一个 3 文件的 bug 修复撑成跨 3 个包的横扫 —— 属于 Prime Directive #10 说的「太大不该顺手做」。\n- 每一处都要**逐个判断**:有的 catch 可能是合法的「探测失败,继续」(那要走 `durability-degradation.baseline.json`,附理由,shrink-only),有的是真丢数据。不能一把 sed 成 `error`。\n- 词表加一个条目会立刻让闸门变红,所以「加词表」和「修/基线化这 8 处」必须**同一个 PR**。\n\n## 建议做法\n\n1. 逐一读这 8 处,判定是持久性丢失还是功能性降级;\n2. 真丢失的:按范本(`packages/services/service-automation/src/plugin.ts` `start()`)改成 `error` + 写清后果与修复动作,或直接 rethrow;\n3. 判定为可接受的:写进 `scripts/durability-degradation.baseline.json`,注明理由与关闭条件;\n4. 同一 PR 里把 `['saveMetaItem', '元数据定义没有写进权威存储 —— 运行时看起来一切正常,重新 provision 时定义凭空消失。']` 加进 `DURABILITY_CRITICAL_CALLEES`。\n\n## 复现\n\n```bash\n# 把 ['saveMetaItem', '…'] 插进 scripts/check-durability-degradation-log-level.mjs\n# 的 DURABILITY_CRITICAL_CALLEES,然后:\nnode scripts/check-durability-degradation-log-level.mjs\n```"
+}

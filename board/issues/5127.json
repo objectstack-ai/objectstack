@@ -1,0 +1,36 @@
+{
+  "number": 5127,
+  "kind": "issue",
+  "title": "[metadata-protocol] seed-loader pass 2:目标解析成功但记录 id 找不到时,整条 deferred 回填被静默丢弃(既不计数也不打日志)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T05:29:59Z",
+  "updated_at": "2026-08-04T13:01:58Z",
+  "closed_at": "2026-08-04T13:01:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5127",
+  "body": "发现于 #4997(给「无 pass-2 时整条记录丢弃」补 `error` 日志)的同文件盘点。#4997 的判据是「进了 `errors`/`allErrors` 却没有任何日志」,本条**连计数都没有**,所以不在那个判据内,单独记录、不在 #4997 的 PR 里改。\n\n## 现象\n\n`packages/metadata-protocol/src/seed-loader.ts`,`resolveDeferredUpdates()`:\n\n```ts\nif (!stillUnresolved && resolvedItems.length > 0) {\n  const objectRecordMap = insertedRecords.get(deferred.objectName);\n  const recordId = objectRecordMap?.get(deferred.recordExternalId);\n\n  if (recordId) {\n    try { await this.writeDeferredReference(...); ... }\n    catch (err) { /* error 日志 + recordDeferredError */ }\n  }\n  // ← 没有 else:recordId 为 undefined 时,这条 deferred 回填直接消失\n}\n```\n\npass 2 **成功解析了目标**,却在 `insertedRecords` 里找不到源记录的内部 id(源记录在 pass 1 写失败、或其自然键在 `insertedRecords` 里没登记),于是:\n\n- 不写库 —— 引用永久保持 NULL;\n- 不进 `errors` / `allErrors` —— `success` 不受影响;\n- 不动 `errored`;\n- `referencesDeferred` 计数**永远停留在 pass 1 记的那一笔**(只有成功回填的分支才会 `resultEntry.referencesDeferred--`),所以结果对象里留下一个\"还悬着\"的数字,却没有任何一条错误解释它;\n- 一行日志都没有。\n\n也就是说:这是 #4997 那一类的更深一格 —— 那一处「计数有、日志无」,这一处「计数无、日志无」,只有 `referencesDeferred` 这个间接痕迹。\n\n## 为什么大多数时候看不见\n\n只有源记录写入失败(那一笔本身已按 #4729 在 `error` 上报过)、或自然键在 `insertedRecords` 中缺位时才会走到这里,所以它总是跟着另一个已上报的错误出现,不容易单独暴露。但两种情形并不重合:源记录写成功而自然键登记不上时(例如 `externalIdKey` 因组合键某个分量为空返回 `''`),就是一次纯粹的静默丢失 —— 行在库里,关联永远不来,结果对象只有一个说不清来历的 `referencesDeferred`。\n\n## 期望(待维护者确认)\n\n1. 补 `else` 分支:按同一客观判据把它计入 `recordDeferredError`(→ `errors`/`allErrors` + `errored`),并按 #4632 打一条 `error`,说清后果(源记录在本次 load 中没有可用 id,`<object>.<field>` 永久为 NULL)与修复动作;\n2. 或者判定「源记录已经失败过、这里再报一次属于 #4632 警告的过度施加」,那就至少让 `referencesDeferred` 不再挂账,并把这个取舍写进注释 + 用测试钉住(与 #4997 对 dry-run 分支的处理同构)。\n\n两条路的取舍点在于:重复上报会不会训练读者跳过 `error`。倾向 1 的理由是它不总是重复(见上一节),倾向 2 的理由是绝大多数情况下确实重复。\n\n## 门禁\n\n`check:durability-log-level` 同样扫不到 —— 这不是 `try`/`catch`,而是一个没有 `else` 的 `if`。#4997 的结论里也提了同一件事:是否值得为「非 catch 的静默丢弃」单开一个扫描器,值得单独讨论。"
+}

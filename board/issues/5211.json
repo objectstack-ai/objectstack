@@ -1,0 +1,35 @@
+{
+  "number": 5211,
+  "kind": "pull_request",
+  "title": "feat(plugin-email,platform-objects): sys_email 加 headers_json + 有界 attachments_json —— 自定义 header 与小附件取得队列投递资格 (#5177)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T09:17:21Z",
+  "updated_at": "2026-08-04T10:54:32Z",
+  "closed_at": "2026-08-04T10:54:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T10:54:31Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5211",
+  "body": "Fixes objectstack-ai/objectstack#5177\n\n## 为什么这是一处真实的数据丢失面\n\n耐久投递从来不是从内存里的消息投出去的,而是**从 `sys_email` 行**投出去的:`send()` 发布的是 `{ rowId }`(#5160),开机清扫重新读行(#5161),两条路径最后都走到 `rowToNormalized`。所以行装不下的部分,就是行式投递会**静默丢掉**的部分 —— 自定义 header 和附件正好是这两样。\n\n#5160 当时的处理是诚实的:带这两样的消息一律退回内联投递,至少能整封发出去。代价是**最值得做成耐久的邮件恰好被挡在耐久路径之外**(带签名的回执、`List-Unsubscribe`、发票 PDF)。本单把这道门打开。\n\n## A. `headers_json`(终态)\n\n- `sys_email` 新增可空列;`send()` **两种模式都落**(它既是投递输入也是审计证据);`rowToNormalized()` 重建;\n- header 不再是退回内联的理由。\n\n## B. `attachments_json`(一期:有界内联,schema 一次到位)\n\n元素形状:`{ filename, contentType?, size, hash, cid?, contentForm, inline?, storageKey? }`,内容 base64 落在 `inline`。\n\n- **上限 `SYS_EMAIL_ATTACHMENT_LIMIT_BYTES = 256 KiB`**(整封合计**原始**字节),从 `@objectstack/plugin-email` 导出,不做配置项。最坏情况列里 ~350 KB base64,行体积有界;\n- **超限维持现行为**:整封内联投出去(不剥附件),列里**什么都不写**,理由以 `info` 说明「合计超过 X 字节」。超限不是错误,最坏结果 = 今天的现状,所以是 `info` 不是 `error`;\n- `cid` 进形状 —— HTML 正文里用 `cid:` 引用的内联图,少了它就是坏图;\n- `storageKey` 一期**无生产者**,TSDoc 已注明由 #5172 跟踪,防 liveness 扫描误判为死键。将来支持大附件是给已声明字段补生产者,不动 schema、不迁移数据。\n\n## 一处对 issue 所给形状的补充,请维护者过目\n\nIssue 给的形状里 `contentType` 未标可选、也没有区分 `content` 两种形态的键。落地时这两点都需要动,理由都是**可实测的**:\n\n**1. `contentType` 改为「调用方给了才落」,不默认 `application/octet-stream`。**\n传输层在没有 contentType 时会按文件名推断(nodemailer:`report.pdf` → `application/pdf`)。若我们补一个默认值,同一封信走队列和走内联会拿到**不同的 MIME 类型**,直接违反验收里「附件完整还原」。\n\n**2. 新增必填 `contentForm`,取值 `string` 或 `buffer`。**\n契约是 `content: string | Buffer`,而 nodemailer 对两者的输出并不等价 —— 实测同一段 UTF-8 内容,附件那一节的 Content-Type 头分别是:\n\n```\nstring content →  Content-Type: text/plain; charset=utf-8; name=...\nBuffer content →  Content-Type: text/plain; name=...\n```\n\nbase64 正文完全一致,但 **`charset=utf-8` 声明没了**。把字符串附件还原成 Buffer 会让收件端客户端拿到一个再也认不出编码的 UTF-8 文件 —— 字节对了,内容烂了。所以行里记下发送时用的是哪一支,而不是猜(猜正是本模块拒绝做的那种静默强转)。这一条由 `sys-email-payload.wire.test.ts` 的 charset 用例直接钉住。\n\n若维护者更希望严格照原形状走(接受上述两处偏差),回退成本很小,请在 review 里说一声。\n\n## 解码为什么是「严格拒绝」\n\n这里每一种失败模式的后果都是「收件人收到的不是发出去的那封信」,而且**从外面完全看不出来**:行是 `sent`,SMTP 回 250。所以列在但内容对不上(JSON 坏、size/hash 与内容不符、缺 `contentForm`)一律**抛错**,由 `deliverPersistedRow` 落成带原因的 `failed` 行,而不是投一封缺零件的信。严到读时重算 sha256 —— `size`/`hash` 不是装饰,它们正是把「列被截断/被改写」变成一次响亮失败的东西。\n\n两列都不存在的**老行读取完全安全**,默认(内联)模式行为不变,既有断言零改动。\n\n## 清扫与订阅者路径\n\n两条路径都经 `rowToNormalized`,因此自动受益;各补了端到端用例(见下)。inline 模式也写这两列,正是因为 #5161 的开机清扫在 inline 模式下同样从行重投 —— 崩溃后残留的行若没带 header/附件,会被**再次剥光重发**,而这恰是本单要消灭的丢失类。\n\n## 测试\n\n- `sys-email-payload.test.ts`(24 例):编码/解码、原始字节计量(一个中文字是 3 字节而不是 1 个字符)、上限含边界、老行安全、以及 8 种「列在说谎」的拒绝路径;\n- `sys-email-payload.wire.test.ts`(4 例):**真 nodemailer + 进程内假 SMTP**(复用 `smtp.wire.test.ts` 的设施),断言「内联直发」与「经行重建后发」产出的 MIME **逐字节一致**、两个附件字节一致、中文文件名完好、text 附件 `charset=utf-8` 未丢、`Content-ID` 在;\n- `email-plugin.queue-delivery.test.ts`:`send()` → 真 `DbQueueAdapter` → worker 投递,header 与两种 content 形态的附件完整到达 transport;\n- `email-plugin.outbox-sweep.test.ts`:队列模式与 inline 模式各一条,搁浅行带 header/附件被完整重投;\n- `email-service.queue-delivery.test.ts`:小附件/header 现在入队并落列;超限**不落列**且仍整封内联发出;上限按整封合计而非单个附件;off-contract `content` 退回内联;inline 模式同样落列;两样都没有则两列都不写。\n\n`smtp.wire.test.ts` 只做了「假 SMTP server 与解码器搬进 `transports/fake-smtp.testkit.ts`」的机械抽取,断言零改动 —— 两份手写假服务器一定会漂移,而这套设施的全部价值就在于「传输层与线缆之间没有任何东西」。\n\n```\npnpm --filter @objectstack/plugin-email --filter @objectstack/platform-objects test\n  platform-objects  Test Files 9 passed (9)    Tests 266 passed (266)\n  plugin-email      Test Files 15 passed (15)  Tests 231 passed (231)\n\npnpm --filter @objectstack/plugin-email --filter @objectstack/platform-objects typecheck\n  platform-objects: Done      plugin-email: Done\n\npnpm check:engine-double-contract   OK — 17 pinned, 31 in the DEBT ledger, 1 exempt\npnpm check:durability-log-level     14 durability-critical catch seam(s), all loud or rethrowing\npnpm check:published-files          OK\npnpm check:nul-bytes                OK\n```\n\n## 边界\n\n- ⛔ `packages/spec` 未动(`headers`/`attachments` 本就在契约上);⛔ `content/docs/releases/` 未动;\n- 大附件 storage 引用 = #5172(二期,维护者暂缓),本 PR 只声明扩展点;\n- `sys_email` 是纯增列(两个可空 textarea),无需迁移。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_017MCKJaEomEqg4tvz4SzdNd"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 4550,
+  "kind": "issue",
+  "title": "测试替身比真实实现宽松：四个缺陷因此带着绿灯发布——需要一条把替身钉在真实契约上的闸门",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T02:31:50Z",
+  "updated_at": "2026-08-03T17:18:18Z",
+  "closed_at": "2026-08-03T17:18:18Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4550",
+  "body": "v17 验收批次（#4482）修完后回看，**四个缺陷共享同一个根因，而且这个根因本身没有被修**：测试替身（假引擎、夹具、桩件）比它替代的真实实现**更宽松**，于是缺陷在既有测试全绿的情况下发布。\n\n这不是四次巧合。它是一类可复现的失效模式，且当前没有任何闸门看得见它。\n\n## 四个实例\n\n| 缺陷 | 替身 | 它比真实实现宽松在哪 |\n|---|---|---|\n| #4434 | plugin-sharing 测试里的假引擎 | `deleteRule` 用谓词删 `sys_record_share`，既无标量 id 也无 `multi:true`——**正是真实 engine dispatch 唯一拒绝的形状**。既有测试 `deleteRule drops rule + all its grants` 一直在对着一个真服务器必然 500 的调用断言成功。 |\n| #4441 | dogfood `field-zoo` 夹具 | 注释直言 `// FK enforcement is off in this harness, so this asserts value fidelity`，并往 `lookup` 写 `acc_synthetic_0001` 等不存在的 id——**夹具依赖着平台正要禁止的那个缺陷**。 |\n| objectui#3134 | — | 设计器标签解析无对照 |\n| objectui#3129 | `ObjectTimeline.test.tsx` 把 `./renderer` 换成只渲染 `item.title` 的桩件 | 分桶结果只存在于真实渲染器输出的表头里，于是「uses spec-compliant startDateField」这条用例**无论日期绑定解析成功与否都通过**。同文件 `ListView.test.tsx` 只断言切换器里出现 Timeline 选项，从不检查转发下去的绑定。 |\n\n另有一条同形态的问题在 #4433 修复中暴露：`rule-rebind.test.ts` 的 `skips system-context writes` 用例**把缺陷行为本身钉成了断言**（用的是真实路径根本不会发送的 mock `session`）。\n\n## 为什么这类问题格外贵\n\n三重代价：\n\n1. **它让绿灯失去意义。** 缺陷发布时门禁是绿的，而且绿得理直气壮——测试确实跑了、确实通过了。\n2. **它自我复制。** 写新测试的人（尤其是 agent）会模仿既有测试的 mock 方式。一个宽松的假引擎会长出第二个、第三个。\n3. **它专挑最需要覆盖的路径。** 替身之所以被引入，正是因为真实实现在那里「不好测」——而不好测的地方往往就是契约最密的地方。\n\n## 已有的两处正确做法，可作为方向\n\n本批次的修复里已经出现了对的形状，可以推广而非从零设计：\n\n- **#4434 的修复**把假引擎的拒绝面对齐到真实 dispatch 守卫；对齐后，原先那条「一直绿」的测试**立刻变红**——证明对齐是有判别力的。\n- **#4455 的回归测试**刻意压在闸门而非 schema 上：种入序列化的内嵌记录 → 断言被扫描计入 → 断言 `valueShapeScanPassed()` 为 false → 再断言同一个值在 strict 下是写入拒绝，即**扫描与校验器必须用同一个谓词回答问题**。\n\n## 建议方向（未实现，待讨论）\n\n不是要禁用测试替身——那不现实。目标是让「替身与真实实现的契约差异」**可见且会报警**：\n\n1. **给关键替身加契约钉**：假引擎/假 driver 的**拒绝面**必须与真实实现的守卫对齐，并有测试证明「放松替身 → 某条既有断言变红」。#4434 的修复已经演示了这个形状。\n2. **禁止在断言目标本身上使用桩件**：objectui#3129 的教训——断言分桶结果就不能把渲染器换掉。可考虑一条 lint 规则或评审清单项。\n3. **夹具中「关闭平台约束」的注释视为欠债标记**：像 `FK enforcement is off in this harness` 这种，应当进入台账并被要求给出理由与到期条件，而不是长期沉默存在。\n\n第 3 条与仓库已有的 `UNWIRED_RULE_LEDGER`（#4449）、`NO_DATA_REACH`（objectui#3144）是同一个模式：**已知的不完整必须被声明，而不是被默认**。\n\n## 范围\n\n本 issue 只记录模式与方向，**未认领**。真正的闸门形态需要设计讨论——尤其第 1 条如何在不同包的替身之间通用，可能需要一个共享的「契约一致性」测试工具而非逐包手写。\n\n发现自 #4482 v17 验收批次。"
+}

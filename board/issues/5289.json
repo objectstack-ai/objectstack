@@ -1,0 +1,35 @@
+{
+  "number": 5289,
+  "kind": "pull_request",
+  "title": "feat(spec)!: 退役主题引擎发出但零消费方的 9 组 CSS 变量 (#5021)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T15:54:08Z",
+  "updated_at": "2026-08-04T17:25:39Z",
+  "closed_at": "2026-08-04T17:25:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T17:25:37Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5289",
+  "body": "Fixes #5021\n\n## 结论先说\n\n`ThemeSchema` 声明了一整套设计 token 词表——字号 / 字重 / 行高 / 字距四条排版标尺、动效标尺、z-index 标尺,外加 `fontFamily.heading` / `.mono`。objectui 的主题引擎多年来忠实地把它们全部降成 CSS 自定义属性。**缺的从来不是「发出」,而是「读取」。**\n\n2026-08-04 对 objectui `main` 复测(`git -C … grep … origin/main -- packages/`,排除 `ThemeEngine` 自身):\n\n| 变量组 | 消费方 |\n|---|---|\n| `--font-size-*` / `--font-weight-*` / `--line-height-*` / `--letter-spacing-*` | **0** |\n| `--duration-*` / `--timing-*` / `--z-*` | **0** |\n| `--font-heading` / `--font-mono` | **0** |\n| `--font-sans` / `--radius` / `--shadow` / `--primary` / `--background`(阳性对照,同一轮) | 1 / 9 / 1 / 21 / 9 |\n\n阳性对照是这次测量的关键:零命中不是仪器坏了。作者写下的排版标尺是真实的 CSS,却什么也没渲染。\n\n**这正是 #3494 那轮够不着它们的原因**:上一轮的判据是「引擎从不发出」,而这批**引擎确实发出**。够得着它们的是 ADR-0049 的判据——发出了,但没人读。\n\n## 处置:按裁决走选项 2(退役),处方指向 `customVars`\n\nissue 里那条重要反驳(CSS 自定义属性可被租户自己的样式表读取,所以「仓内零消费方」是比 spec 键更弱的证据)**被回答了,不是被忽略**——它恰恰是处方选 `customVars` 而不是\"直接删掉、恕不奉陪\"的原因。引擎把 `customVars` 每一项原样发成两个连字符加键名再冒号加值,因此任何真在读 `--z-modal` / `--font-size-lg` 的租户样式表都能**逐字节复现**同名变量。**能力无损**;失去的只是一套平台自己从未兑现的语义词表,而那正是 ADR-0049 要删的东西。\n\n## 退役套件\n\n- **schema** — 8 个键改为 `retiredKey()` 墓碑:写它既是 `tsc` 错误(输入类型为 `never`),也是携带完整处方的 parse 错误。`AnimationSchema` / `ZIndexSchema` 及 `Animation` / `ZIndex` 类型整体删除——各自唯一的消费方就是刚被墓碑化的那个键,而一个没有消费方的导出 schema 会被后来者读成一项能力(#3950)。\n- **⚠️ 为什么走墓碑而不是 `guidance`(尽管这些 shape 本来就 `.strict()`)** — 这是被门测出来的,不是风格选择。`guidance` 走 `unrecognized_keys`,要求键从 shape 里**消失**;而键一消失,`authorable-surface.json` 就少一条 LIVE 基线,`gen:schema` 的 #4650 删除检查直接拒绝(`the entry at BASE-REV was LIVE (never tombstoned)`)。棘轮看不见「这个父 shape 恰好是 strict 的」,而它防的那类错误在文件层面无法区分。墓碑两边都满足:键留在被遍历的 shape 里(基线拿到 `[RETIRED]` 标记而不是少一行),且比 strict 外壳**更响**——它带自己的处方,不是一句通用的 unknown key。\n- **别名** — 指向退役键的 5 个(`animations` / `motion` / `transitions` → `animation`,`layers` / `stacking` → `zIndex`)与指向退役排版标尺的 7 个,**随目标一起删除**,不做改指。留着会先答「你是不是想写 `zIndex`?」再拒绝 `zIndex`,把作者从一次响亮拒绝领进第二次——台账 finding 7 的精确形状,这个文件已经为它立过三次牌了。\n- **迁移** — `theme-inert-token-scales-removed`(ADR-0087 D2),挂进 protocol-17 链步骤,`retiredFromLoadPath: true`。它**删键 + 每键一条 notice**,不自动改写进 `customVars`:改写会塞回二十多个仍然没人读的变量,把一个死的语义槽位变成一个死的字面槽位,退役反而隐形(#4583 的形状)。哪些变量真的在用,只有作者能判断;notice 逐个点名。\n- **存量实测**(裁决要求先测) — `examples/**` 与 `apps/**` 里 authored 这些块的实例数为 **0**:showcase 的两个主题只写 `colors`。所以没有需要 D2 转写的在仓配置。(`examples/` 里那些 `fontSize:` 命中全部是 `responsiveStyles` 的行内 CSS,另一张面,不相干。)\n\n**`colors` / `borderRadius` / `shadows` / `typography.fontFamily.base` 有活消费方,不动。**\n\n## 四张棘轮的读数——先定路线,再定期待\n\n按 skill 的对照表,本次是**整 def 删除**(`AnimationSchema` / `ZIndexSchema` 不再被 emit),所以棘轮**必须**变化,而且它自己先开火了,这串输出就是路线的证据:\n\n```\n❌ 2 previously published schema(s) disappeared from this build:\n     - json-schema/ui/Animation.json\n     - json-schema/ui/ZIndex.json\n```\n\n按要求有意删除 manifest 两个 key 后重跑,per-key 棘轮自行判定为 #4650 路径 3:\n\n```\nℹ️  2 baseline deletion(s) since 0f2fdcde1e28 carry their own proof (#4650):\n     - ui/Animation:* (2 line(s)) — def no longer emitted by this build\n     - ui/ZIndex:* (8 line(s)) — def no longer emitted by this build\n```\n\n`authorable-surface.json` 同时**新增 8 条 `[RETIRED]` 标记**(墓碑路线的读数)。两种形态在同一个 PR 里各出现一次,正好互为对照。\n\n## strictness 台账\n\n数字全部由 `pnpm gen:strictness-ledger` 整体重算,未手改任何一个:\n\n| | before | after |\n|---|---|---|\n| Object sites | 484 | **476** |\n| `ui/` sites | 200 | **192** |\n| `ui/` strict | 120 | **112** |\n| `theme.zod.ts` sites | 14 | **6** |\n| strip sites | 221 | **221**(不变) |\n\n**注意这组算术没说的话**:8 个站点是从 `strict` 列离开的,`strip` 一动不动。退役拿掉的是**已经关好的门**,所以它不可能朝任何方向移动这条棘轮的欠账——两个战役自始至终不相交,这正是 批 15 当初拒绝顺手办掉它的理由。台账 `theme.zod.ts` 行的散文(「已归档、未在此回答」)已改写为「已在 #5021 回答」。\n\n## 反向验证——方向是**先预测后跑**的\n\n预测:把 `zIndex` 恢复成 live 键,新增的 `#5021` 钉子应当**变红**(常规方向),因为它们断言 `safeParse` 失败并携带处方。\n\n实测,与预测一致:\n\n```\nTests  5 failed | 52 passed (57)\nFAIL  src/ui/theme.test.ts > #5021 — retired theme token scales > ...\nAssertionError: expected [Function] to throw an error\n```\n\n5 条全部落在 `#5021` 钉子块内,恢复文件后 57/57 转绿。\n\n## 验证\n\n| 命令 | 结果 |\n|---|---|\n| `pnpm --filter @objectstack/spec test` | **308 files / 7953 tests passed** |\n| `pnpm --filter @objectstack/spec typecheck` | clean |\n| `pnpm --filter @objectstack/cli test` | **69 files / 626 tests passed** |\n| `pnpm --filter @objectstack/lint test` | **57 files / 1198 tests passed** |\n| 11 张 spec 门(liveness / empty-state / authorable-surface / docs / api-surface / spec-changes / upgrade-guide / skill-refs / skill-docs / skill-examples / strictness-ledger) | **全 PASS**(逐条捕获 exit code,未经管道) |\n| `node scripts/check-nul-bytes.mjs` + 控制字符自扫 | clean |\n\n消费半径已按「规则的调用方」而非「改动的包」扫过:cli / lint / metadata* / platform-objects / console / runtime 均无该 8 键的引用,无 `Animation` / `ZIndex` 类型导入。\n\n⚠️ `pnpm check:i18n` 在本 worktree 失败,但**与本 PR 无关**:已 stash 后在纯净 `origin/main` 上复现同样的 exit=1 / 9 个 `i18n:extract … not found`。本改动不碰任何 `*.form.ts`(theme 本来就没有 form),生成的 i18n bundle 一个字节都没变。\n\n## 范围\n\n仅 spec 侧。**未碰 objectui**——ThemeEngine 停发对应变量组的 follow-up 由 PM 单独立案挂 objectui 队列。两者没有先后依赖:一个没人读的变量本来就是惰性的,而本 PR 之后作者已无法往里放值,发射端也就没东西可发了。未碰 `content/docs/releases/`。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ErbEDVAg1No9gdg1pgDAGB\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ErbEDVAg1No9gdg1pgDAGB)_"
+}

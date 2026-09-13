@@ -1,0 +1,37 @@
+{
+  "number": 5325,
+  "kind": "issue",
+  "title": "service-analytics 的第二个 SQL 编译器 `filter-normalizer.buildNode` 仍带着 #5297 的三条分叉:`$not` 非 NULL-safe、`{$not:{}}` 不加 WHERE、`$or` 的 `{}` 析取项被丢",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T20:39:41Z",
+  "updated_at": "2026-08-04T23:49:46Z",
+  "closed_at": "2026-08-04T23:49:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5325",
+  "body": "修 #5297(`read-scope-sql.ts` 的 `compileNode`,PR 见下)时确认,**不在该 PR 的文件面内**\n—— PM 派发时给定的文件面是 `read-scope-sql.ts` + 该包 `__tests__` + changeset,而这一条的\n修法要动 `NormalizedFilterNode` 类型本身和两个 strategy 的编译器,是另一个形状的改动。\n这里单独记录,附实测。\n\n本条最早由 #5297 的评论\n(https://github.com/objectstack-ai/objectstack/issues/5297#issuecomment-5183709287)\n点出;#5297 的正文只覆盖 `compileNode`,所以那一单合入后这一条仍然在。\n\n## 位置\n\n`packages/services/service-analytics/src/strategies/filter-normalizer.ts` 的 `buildNode`。\n\n这是分析查询里**作者自己的 `where`** 的编译路径(`compileNode` 走的是 RLS read scope),\n两者是各自独立的函数。`filter-normalizer.ts` 自己的 TSDoc 写明是照着 `compileNode` 写的:\n\n> The combinator handling deliberately mirrors `read-scope-sql.ts`'s `compileNode`,\n> including its fail-closed empty-array rejection, so the two SQL-producing paths in this\n> package cannot drift apart about what a filter MEANS.\n\n—— 所以两者不会互相漂移,但在 #5297 修掉 `compileNode` 之后,这一份**同向偏离**了另外\n五个后端。\n\n## 实测\n\n`origin/main` @ `26e1029f5` + #5297 的分支,fixture 与 `driver-sql` 的\n`sql-driver-not-null-safe.test.ts` 逐行相同(行 3、4 的 `stage` 为 NULL,行 3 的 `amount`\n为 NULL,行 4 的 `owner` 为 NULL);经 `NativeSQLStrategy.generateSql` 生成 SQL 后在\nsql.js 上取行:\n\n| `where` | 生成的 WHERE | 实测行 | 应为(JS 家族 / #5296 后的 driver-sql) |\n|---|---|---|---|\n| `{ $not: { stage: 'won' } }` | `NOT (stage = $1)` | `2` | `2,3,4` |\n| `{ $not: { stage: { $in: ['won'] } } }` | `NOT (stage IN ($1))` | `2` | `2,3,4` |\n| `{ $not: {} }` | **没有 WHERE** | `1,2,3,4` | 零行 |\n| `{ $or: [{ stage: 'won' }, {}] }` | `stage = $1` | `1` | `1,2,3,4` |\n| `{ $not: { $or: [{stage:'won'},{owner:'u1'}] } }` | `NOT ((stage = $1 OR owner = $2))` | `2` | `2,4` |\n\n三条与 #5297 逐条同向:`$not` 发的是裸 `NOT (…)`(三值逻辑,NULL 行被丢);\n`buildNode({})` 返回 `null` 于是 `if (inner)` 为假、整条 `$not` 消失;`$or` 的 `{}` 分支\n在 `.filter((n) => n !== null)` 里被丢掉,整条 `$or` 收紧成剩余分支。\n\n宿主与 #5297 不同:这里是作者写的 `where`,不是权限边界。所以 `{$not:{}}` 的后果是\n「图表画了整个数据集」而不是越权 —— 但那正是 #3650 / #4128 反复付过学费的那一类静默放宽,\n而 `$not` 非 NULL-safe 的后果是同一条 widget filter 在分析查询与普通查询上给出不同的行集。\n\n## 为什么不是照抄 #5297 的补丁\n\n`buildNode` 的产物是 `NormalizedFilterNode` 树,**两个** strategy 各自编译它,一共三处\n`NOT (${inner})`:\n\n- `native-sql-strategy.ts` 的 `compileFilterNode`(编译成真正执行的 SQL);\n- `objectql-strategy.ts` 的 `filterNodeToCondition`(把 `$not` / `$or` **原样交给引擎**);\n- `objectql-strategy.ts` 的 `renderFilterNodeSql`(回显给浏览器的展示 SQL)。\n\n两件事因此需要先定,再动手:\n\n1. **守卫加在哪一层。** objectql 路径把 `$not` 交给引擎,而引擎背后的 driver-sql(#5296\n   之后)与 driver-memory 本来就已经是 NULL-safe 的 —— 在 `buildNode` 里加守卫会让那条\n   路径**双重加守卫**(结果仍正确但 SQL 冗余),只在 `native-sql-strategy` 加则把「一个\n   filter 是什么意思」的知识分到了两处。倾向前者(normalizer 是唯一的语义收敛点,与它\n   自己 TSDoc 里的立场一致),但这是个契约位置的选择,不该由实现顺手定。\n2. **`NormalizedFilterNode` 需要一个布尔常量。** 该联合类型今天只有\n   `leaf | and | or | not`,没有 FALSE 的表示法,`{$not:{}}` 就是因此只能编译成\n   「什么都不发」。加一个常量 kind 会同时改到上面三个编译器。\n\n## 关联\n\n- #5297 / 其 PR —— `read-scope-sql.ts` 的同三条,已修;本条是同包内的第二份拷贝。\n- #5146 / PR #5296 —— `$not` 的 NULL 语义已由维护者拍板,**不需要重新裁定**;\n  `sql-driver.ts` 的 `nullSafeNegationOperand` 是参照实现。\n- #5134 / PR #5243 —— 布尔单位元。\n- #5322 —— `$and: []` / `$or: []` 空组合子的独立裁定。`buildNode` 的空数组同样是\n  fail-closed 抛错,**不属于本条**,按 #5322 走。\n- `native-sql-filter-logic-conformance.test.ts` 同样遍历 `FILTER_LOGIC_CASES`;那张表\n  刻意不含 null 处理,所以这三条现有门禁都发现不了 —— 但 spec 车道(#5239)给该表补\n  null case 时,这个文件会单独变红。\n"
+}

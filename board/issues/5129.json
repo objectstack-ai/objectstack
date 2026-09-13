@@ -1,0 +1,36 @@
+{
+  "number": 5129,
+  "kind": "issue",
+  "title": "E5b(#5040 执行器):接线收拢 —— 派发步 501 分支替换为「策略链 → 执行委派」+ 真实 boot 集成测试",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "enhancement",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T05:39:40Z",
+  "updated_at": "2026-08-04T06:58:58Z",
+  "closed_at": "2026-08-04T06:58:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5129",
+  "body": "Part of #5040(E 系列 R3 收拢单,小型)。**Blocked-by: #5091(E4)+ #5092(E5)** —— R3 为避免两单同改 `api-endpoint-step.ts` 的必然冲突,按模块切面解耦(E4 独占派发步接线、E5 只出纯执行模块),本单在两者落 main 后做最后接线。\n\n## 范围(小)\n\n1. `api-endpoint-step.ts`:命中分支的 501 兜底替换为完整链 —— 匹配 → 策略链(E4,401/429/头已接)→ `executeEndpointTarget`(E5 模块)→ 响应映射;`cacheTtl` 计算头应用到真实执行结果上(E4 落地时如何暴露以其模块文档为准);\n2. per-environment metadata/services 解析:按 E5 落地报告的 followup 与 E3 注释(需要 `dispatch()` 的 resolver;单租户直取本 kernel 服务,多租户路径如超出小单范围,如实报告并留给 E8 前置);\n3. 真实 boot 集成测试(扩展 `dispatcher-plugin.endpoint-fallback.integration.test.ts`):命中执行(object_operation + flow 各一)、策略拒绝(401/429)短路不执行、未命中/前缀外仍逐字节不变;\n4. 台账 `* /apps/**` 行注记更新:「EXECUTION IS NOT WIRED」改为如实描述已接线状态(仍注明 publish 门未翻转,结构性不可达);\n5. changeset(`@objectstack/runtime` minor,仍零现网行为变更)。\n\n## 约束\n\n执行器车道程序卡(`session_01EYGdmvWP1ieZSLqvAW6uyd` 按序派发),**其它车道请勿认领**;词表与 spec 零触碰;E6(#5093)与 E7(#5111)的 Blocked-by 链随本单顺移(E6 实际前置 = 本单)。\n\n关联:#5091、#5092、#5090(seam)、#5040 设计 §3/§5。"
+}

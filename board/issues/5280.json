@@ -1,0 +1,37 @@
+{
+  "number": 5280,
+  "kind": "issue",
+  "title": "`app` 元数据表单仍然提供三个已 `retiredKey()` 退役的键（`sharing` / `embed` / `mobileNavigation`）—— 填了必然存盘失败，而 #3786 对账门看不见",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T15:23:01Z",
+  "updated_at": "2026-08-04T22:24:58Z",
+  "closed_at": "2026-08-04T22:24:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5280",
+  "body": "在 #5015（`EmbedConfigSchema` / `NotificationActionSchema` ADR-0049 退役）的前置核验中顺带测到，与该单无因果关系,单独立案。\n\n## 事实\n\n`packages/spec/src/ui/app.form.ts` 的「Access & sharing」「…」分区仍然给作者渲染三个 composite 输入:\n\n```\n{ field: 'sharing',          type: 'composite', helpText: 'Public/internal/restricted access control' }\n{ field: 'embed',            type: 'composite', helpText: 'iFrame embed configuration' }\n{ field: 'mobileNavigation', ... }\n```\n\n而这三个键在 `packages/spec/src/ui/app.zod.ts:1227/1233/1240` 早已是 `retiredKey()` 墓碑（17.0.0，2026-06 liveness audit / ADR-0049）。`retiredKey()` 是 `z.never({...}).optional()`,所以填进去不是「静默丢弃」,是**硬解析失败**。\n\n实测（`AppSchema` = `getMetadataTypeSchema('app')`,同一次运行带阳性对照）:\n\n```\nshape has \"sharing\": true\nshape has \"embed\": true\nshape has \"mobileNavigation\": true\nform offers: [ 'mobileNavigation', 'sharing', 'embed' ]\nAppSchema.safeParse with sharing: success=false :: `App.sharing` was removed in @objectstack/spec 17.0.0 …\nAppSchema.safeParse with embed:   success=false :: `App.embed` was removed in @objectstack/spec 17.0.0 …\ncontrol (no retired key): success= true\n```\n\n阳性对照（不带退役键的同一份 payload）通过,所以 `success=false` 是关于这三个键的事实,不是 payload 本身有问题。\n\n## 为什么门没开火 —— 这才是要记的那一半\n\n`packages/spec/src/system/metadata-form-zod-reconciliation.test.ts`(#3786)有一条正好针对这个形状的断言:\n\n> `%s: every field the form offers is a key the Zod accepts` —— *\"An offered key the schema does not declare is silently stripped on save\"*\n\n它用 `keysOf(root)` 取 shape 的键来判定。**`retiredKey()` 按设计把键留在 walked shape 里**(spec-property-retirement 套件里写明的那条:墓碑路线的 liveness 行必须保留,正因为键还在 shape 中)。于是墓碑键对这条断言永远是「Zod accepts」,门绿着,而作者拿到的是 422。\n\n即门的谓词写的是 `key ∈ shape`,要判的却是 `key 是真实可授权面`。两者在 `retiredKey()` 出现之前是同一件事,之后不是了。\n\n顺带:该断言的措辞（\"silently stripped on save\"）现在也只覆盖了两种失败里的一种 —— 未声明键静默丢弃、**墓碑键硬失败**,后者更响但更早,作者在控制台里根本不该看到这个控件。\n\n## 建议范围（PM 定,不在本单做）\n\n1. `app.form.ts` 摘掉这三个 `{ field: … }` 输入,按套件惯例在原位留一行注释说明退役出处;\n2. #3786 那条断言的谓词从 `key ∈ shape` 收紧为 `key ∈ shape 且不是 retiredKey`（`z.never` 内层判定即可),这样下一个墓碑键落地时门自己会红 —— 否则同样的漂移会在每一次 `retiredKey()` 退役后重演;\n3. 顺带扫一遍其余 `*.form.ts` 是否还有别的墓碑键在被提供（本单没有全量扫）。\n\n第 2 条是这单真正的价值:没有它,第 1 条只是把当前这三个擦掉,门依旧是瞎的。\n\n## 现场\n\n- `packages/spec/src/ui/app.form.ts`（约 51-59 行）\n- `packages/spec/src/ui/app.zod.ts:1227` / `:1233` / `:1240`\n- `packages/spec/src/system/metadata-form-zod-reconciliation.test.ts`（`every field the form offers is a key the Zod accepts`）"
+}

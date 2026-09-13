@@ -1,0 +1,38 @@
+{
+  "number": 4938,
+  "kind": "issue",
+  "title": "`system/HttpServerConfigSchema` 九个键全仓零 reader,且没有任何作者面入口(`defineStack` 无 `server:`,不在 config-schema)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue",
+    "protocol:breaking",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T16:51:08Z",
+  "updated_at": "2026-08-04T18:30:49Z",
+  "closed_at": "2026-08-04T18:30:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4938",
+  "body": "在 #4910 开工核查中发现,记录备查,**未认领**。基线 `origin/main` @ `2e284b2546`。\n\n## 事实\n\n`packages/spec/src/system/http-server.zod.ts:39` 的 `HttpServerConfigSchema` 声明九个键,`authorable-surface.json` 全部在册:\n\n```\nsystem/HttpServerConfig:bodyLimit / compression / cors / host / port /\n                        requestTimeout / security / static / trustProxy\n```\n\n**零 runtime reader**:\n\n```\n$ grep -rn \"HttpServerConfig\" --include=*.ts packages/ core/ examples/ apps/ | grep -v node_modules | grep -v /dist/\npackages/spec/src/shared/http.zod.ts:66,118,156        ← 只是 \"Used by:\" 注释\npackages/spec/src/system/http-server.zod.ts:39,85,86,358,359\npackages/spec/src/system/http-server.test.ts:3,13,15,26,47,48,49\n(spec 之外零命中)\n```\n\n**并且零作者面入口** —— 这一条比零 reader 更要紧,它意味着这个 schema 连「被写下去」都做不到:\n\n- `packages/spec/src/stack.zod.ts` **没有 `server:` / `httpServer:` 键**(`grep \"server:\\|serverConfig\\|httpServer\"` 零命中);\n- `packages/spec/config-schema.json` 里 `HttpServerConfig` / `rateLimit` **零命中**;\n- `packages/services/service-settings/src/manifests/` 没有 http/server manifest。\n\n真正决定端口/CORS/安全头的是三份**别的**形状:CLI `serve.ts` 的参数、`packages/adapters/hono/src/index.ts` 的 `ObjectStackHonoOptions`(自带第四份 `cors` 形状)、`DispatcherPluginConfig.securityHeaders`。`HttpServerConfigSchema` 与它们互不相识。\n\n## 为什么值得单独立单\n\n`authorable-surface.json` 把这九个键记为「作者可写」,`content/docs/references/` 会把它们渲染成协议文档,于是它同时满足两个坏条件:**文档承诺了一套配置**,而**没有任何路径能把这套配置送到运行时**,甚至没有路径能让作者写下它。这比 #4686 那种「写得下去、不生效」更彻底 —— 属于 ADR-0049 enforce-or-remove 里最干净的 remove 候选。\n\n其中 `security.rateLimit` 是 #4686 / #4910 点名的三个嵌入点之一;#4910 要求「接线三个嵌入点」,而这一个**没有可接的两端**:既没有产出端(作者写不进来),也没有消费端(runtime 不读)。\n\n## 建议(协议级,留给维护者裁决)\n\n1. **整面按 ADR-0049 摘除** `HttpServerConfigSchema`(以及只服务于它的 `RouteHandlerMetadataSchema.security.rateLimit` 一类),走完整退休套件。代价:`shared/http.zod.ts` 的 `CorsConfigSchema` / `StaticMountSchema` 需要复核是否还有别的嵌入点。\n2. **补作者面 + 接执行**:给 `stack.zod.ts` 加 `server:`(新公共面),并让 CLI / hono adapter / dispatcher 三处统一从它取值 —— 顺带收敛掉现存的三份 `cors` 形状。工作量大,但方向上是「一份契约取代 N 份方言」。\n3. **降级为纯类型**:标注为 host 实现者的参考类型、移出 `authorable-surface` 与作者文档。(最弱的一档,只是让文档不再说谎。)\n\n关联:#4686、#4910、#4936、ADR-0049、Prime Directive #10。\n"
+}

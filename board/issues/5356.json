@@ -1,0 +1,34 @@
+{
+  "number": 5356,
+  "kind": "pull_request",
+  "title": "docs(adr-0076): 状态行由 Proposed 校准为 Accepted —— 逐条核对 D1–D12 的真实落地状态",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T00:38:01Z",
+  "updated_at": "2026-08-05T01:02:30Z",
+  "closed_at": "2026-08-05T01:02:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T01:02:28Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5356",
+  "body": "Fixes #5063\n\nADR-0076 的抬头一直写着 `Proposed`，但它早已作为**生效决定**被引用：`AGENTS.md`(D12 的挂载纪律)、`packages/runtime/src/domains/*`(D11 自己的产物，文件头直接写 \"ADR-0076 D11 step ③\")、`packages/objectql` 的 core 边界棘轮，以及 ADR-0121。按 Prime Directive #13，accepted 决定在被 supersede 之前一直有效 —— 抬头在这里补上。\n\n参照 #4919 对 ADR-0078 的校准做法：**不整体翻牌**。每条决定都对着 `origin/main` 的源码单独判定，结果并不齐整 —— 有一条完全没建，有两条只落了一半，还有一条跑得比 ADR 记的更远。\n\n## 逐条核对（origin/main @ c89d18c16）\n\n| 决定 | 状态 | 证据 |\n|---|---|---|\n| **D1** 迁出 protocol | 已落地，但 OQ#2 未执行 | `packages/metadata-protocol/src/` 持有 `protocol.ts` / `sys-metadata-repository.ts` / `metadata-diagnostics.ts`；`packages/objectql/package.json:29` 单向依赖它。**但 `SysMetadataEngine` 从未搬进 metadata-core** —— 仍声明于 `packages/metadata-protocol/src/sys-metadata-repository.ts:136`，`packages/metadata-core/src/` 对该名字零命中 |\n| **D2** 边界棘轮 | 已落地 | `packages/objectql/src/core-boundary.ratchet.test.ts:19` `FORBIDDEN_PACKAGES = ['@objectstack/metadata-protocol']`，`FORBIDDEN_LOCAL = ['plugin','kernel-factory']`，从 `core.ts` 走全量 import 闭包 |\n| **D3** capability/profile 契约 | **完全未建** | `packages/objectql/src`、`packages/core/src`、`packages/spec/src/kernel` 中都没有 `profile: 'trusted' \\| 'internal'`；没有任何东西从对象声明推导所需能力；boot **不是** fail-closed —— `packages/core/src/kernel.ts:301` 只 `warn`(\"System started with degraded capabilities\")。仓库里那 7 处 `requiredCapabilities` / `provides` 属于无关的插件一致性 schema `packages/spec/src/kernel/plugin-capability.zod.ts:217` |\n| **D4** formula 留在 core | ratify，仍成立 | `packages/objectql/package.json:27` 依赖 `@objectstack/formula`，被 `engine.ts` / `hook-wrappers.ts` / `validation/rule-validator.ts` / `cel-fault.ts` 使用 |\n| **D5** 一套对象模型 | ratify，仍成立 | `packages/spec/package.json` 运行时依赖只有 `zod`；`examples/embed-objectql/src/index.ts:16` 用 `@objectstack/objectql/core` 启动，对象是普通 `ObjectSchema.create`(同时也是 Phasing P4 的落点) |\n| **D6** 能力统一挂载 | ratify，仍成立 | `packages/objectql/src/engine.ts:1439` `registerMiddleware(fn, options?)`；`plugin-security/src/security-plugin.ts:770,1770,2053,2079`、`plugin-sharing/src/sharing-plugin.ts:511` 正是走这里 |\n| **D7** engine 拆仓 | **按设计推迟，但已被仪表化** | `packages/objectql` 仍在 monorepo 内。rev.9 之后新增：`scripts/check-engine-split-ratio.mjs` + `.github/workflows/engine-split-metric.yml` 计算并上报触发比率；**刻意 report-only**，因为阈值本身还是 OQ#5 |\n| **D8** engine 保持无治理 | ratify，仍成立 | 治理仍由插件经 `registerMiddleware` 注入(见 D6)；`engine.ts` 中的 `organization_id` / `owner_id` 是 registry 注入的字段名与注释，不是执行逻辑。由 D2 棘轮守住 |\n| **D9** 拆分 god-interface | **已落地，且越过 step-1 抵达 rev.7 终态** | `packages/spec/src/api/protocol.zod.ts` 声明十个按域切分的契约(`DataProtocol`:1376、`MetadataProtocol`:1392、`AnalyticsProtocol`:1411、`AutomationProtocol`:1417、`PackageProtocol`:1422、`ViewProtocol`:1432、`PermissionProtocol`:1441、`RealtimeProtocol`:1452、`NotificationProtocol`:1462、`I18nProtocol`:1487)；**全仓不存在任何 `ObjectStackProtocol` 类型声明或导出** —— 过渡用的组合别名是被**解散**了，不是被弃用。消费侧也在收窄：`packages/rest/src/rest-server.ts:33` `export type RestProtocol = DataProtocol & MetadataProtocol` |\n| **D10** 分发实现、不留 facade | **只落一半** | 已落：feed 与 analytics 先后离开 facade(`packages/metadata-protocol/src/protocol.ts:6025` 的退役注记)，analytics 现在只有 `service-analytics` 一个实现(`packages/services/service-analytics/src/plugin.ts:632` `replaceService`)；OQ#7 决定保留包名。未落：本决定要废掉的中心 facade 类**仍然存在** —— `packages/metadata-protocol/src/protocol.ts:1800` `class ObjectStackProtocolImplementation implements DataProtocol, MetadataProtocol, PackageProtocol`，即 `DataProtocol` 实现并未搬到传输层，**OQ#6 仍未决** |\n| **D11** 拆解中心 dispatcher | **只落一半** | 已落：域体全部搬到 `packages/runtime/src/domains/*`(14 个模块)，路由走 `packages/runtime/src/domain-handler-registry.ts:220` 的 `DomainHandlerRegistry`，`http-dispatcher.ts` 从约 3.8k 降到 **1721** 行；多适配器由 `packages/qa/http-conformance` 验证(OQ#10)。未落：本决定点名的**第二个**中心路由生成器 `packages/rest/src/rest-server.ts` 现在是 **7693** 行 —— 比 ADR 里记的约 5.1k 更大，不是更小 |\n| **D12** 诚实能力 | framework 侧全落地；console 侧跨仓库，本仓无法核实 | `packages/spec/src/api/discovery.zod.ts:21-23` 的 `unavailable`/`degraded`/`stub` 枚举 + `ServiceSelfInfoSchema`:93 + `readServiceSelfInfo`:132；`packages/runtime/src/http-dispatcher.ts:1124` 的 `svcAvailable` 每个槽位都从 marker 推导 `status`/`handlerReady`(硬编码已清零)；`packages/runtime/src/service-serveable.ts:46` `isServiceServeable` 是域、挂载门与 discovery 共读的唯一判定。消费侧(\"只信 `handlerReady: true`\")在 cloud/objectui |\n\n零命中结论都做了反向对照：`derivedCapabilities` / `capability profile` 为 0 的同时，同一检索面上 `registerMiddleware`(35 文件)、`isServiceServeable`(16)、`__serviceInfo`(22) 均命中，说明检索面是活的。\n\n## 顺带修正的一处正文\n\nD9 的 back-compat 条目写着\"保留 `ObjectStackProtocol` 组合别名\"，而该别名已不存在 —— 若不修，新抬头会与正文自相矛盾。按本 ADR 既有的 `*(Update …)*` 惯例补了一条状态注记，指出其下方的 rev.7 refinement 已经是**现状**而非计划。其余正文未动。\n\n## 门与 changeset\n\n- `pnpm check:adr-anchors` → `OK (26 anchored file(s), every governing ADR still referenced)`\n- **抬头改成 `Accepted` 不会让任何门以不同方式对待本 ADR**：`scripts/check-adr-anchors.mjs` 对 `Status` / `Accepted` / `Proposed` 三个词零命中，它只做\"被治理文件是否仍提及该 ADR id\"的在场检查；且 ADR-0076 在 `scripts/adr-anchors.json` 中根本没有条目。全仓也没有其他脚本解析 ADR 状态行。\n- `pnpm check:nul-bytes` → OK(5368 文件)；另做了越过该门盲区的自查 `grep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]'`，两个改动文件均干净\n- `pnpm check:doc-authoring` / `check:docs-audit-scope` / `check:role-word` / `check:release-notes` 全绿\n- **changeset**：ADR 状态校准不发布任何包，但 `Check Changeset` 要求本 PR 至少新增一个 changeset 文件(空 frontmatter 是官方认可的\"本 PR 不发布\"声明)。已按 `.changeset/adr-0044-revise-service-owned-note.md` 的先例加空 frontmatter changeset；`node scripts/check-changeset-no-major.mjs` exit=0\n- 本 PR **零** `packages/**` 源码改动、**零** `content/docs/releases/` 改动，因此没有可跑的包级 `test` / `typecheck` —— 与其编造证据，这里如实说明\n\n## 拆出去的第二步\n\nissue 提到的可选第二步(为 D11 落点补 `scripts/adr-anchors.json` 锚点)另开 issue，不并入本 PR：该门自己的文档明确要求\"每条锚点必须挣得它的失败模式\"，而在 14 个 domain 模块 + registry + dispatcher 里挑出该锚哪几个是独立的判断，需要自己的核实过程。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01FTszibd6C8sUCCZnM4VcrL)_"
+}

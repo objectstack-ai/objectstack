@@ -1,0 +1,32 @@
+{
+  "number": 4881,
+  "kind": "pull_request",
+  "title": "docs: v17 docs sweep run 5 — rc.2 catch-up",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T12:55:56Z",
+  "updated_at": "2026-08-03T13:06:06Z",
+  "closed_at": "2026-08-03T13:06:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T13:06:05Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4881",
+  "body": "Follow-up to #4877. With the rc.2 release page written, I swept the hand-written docs against the same window (`2bafe62e..a2ebea2e`) for pages still teaching something the window changed — the run-5 counterpart to the run-4 rc.1 catch-up.\n\n**The sweep came back mostly clean**: `activationEvents`, `app.homePageId`, `translation.validationMessages`, the `script`-node `actionType` branches, `managedBy: 'system-data'`, `atomic` / `ROLLED_BACK` / `NOT_ATTEMPTED`, `findOne`'s throw-on-empty, the `bulk_update` / `bulk_delete` webhook pair and `datasourceMapping`-is-routing were all already updated by the PRs that changed them. Retired datasource blocks (`retryPolicy` / `healthCheck` / `capabilities` / `readReplicas`), `findStream`, `openApi31` and the dual-source renames have no hand-written doc references at all. Three pages had drifted.\n\n## 1. `data-modeling/validation.mdx` contradicted itself\n\nThe `has(x)` callout (added by #4763) says an unevaluable predicate is *\"rejected fail-closed\"*. Twelve lines below it, the `condition` paragraph still said:\n\n> A predicate that cannot be evaluated (parse error, unbound variable) is treated as a broken rule — it is logged and skipped rather than blocking the write.\n\nThat is precisely the fail-open behaviour #4649 reversed, and it is the sentence an upgrading author reads to decide whether their rules are enforcing anything. Rewritten to the shipped contract: rejection with `VALIDATION_FAILED` naming the rule and the offending key, `severity` still governing blocking, and the total stored-⊕-payload record that makes the `has()` callout true in the first place.\n\n## 2. `automation/hooks.mdx` had no coverage of the declarative `condition` gate\n\nOne passing clause under wildcard hooks, and nothing else — while three changes landed on it in this window, one of them breaking. Adds a **\"The `condition` gate\"** section:\n\n- **#4775** — an unevaluable condition now ABORTS the operation instead of warning and skipping the hook. Written with the reason the two outcomes had to split: swallowed into a `before*` guard the old behaviour silently let writes through; swallowed into an audit hook it silently dropped records.\n- **#4770** — the condition evaluates against stored ⊕ payload, total over declared fields, not the write's payload alone. Includes the concrete trap: `condition: \"record.done == true\"` did **not** fire on ordinary updates because `done` was not in the payload.\n- **#4784** — `previous` is bound, so a condition can express a transition; plus the upgrade note that `record.x == v` alone is now true on *every* update of an already-matching row.\n\n## 3. `concepts/metadata-lifecycle.mdx` did not list `job`\n\nThis is the page that explains the two-tier overlay / runtime-create gate, so it is where an author looks when \"create job\" disappears from Studio. #4509 set both `allowOrgOverride: false` and `allowRuntimeCreate: false` on `job`. Adds the row with its reasoning (`handler` names a compiled-bundle function a runtime writer has no way to reach, so a runtime-created job saved and was never scheduled) and the still-supported doors. Also notes that the standalone `validation` kind is gone under ADR-0088, since the paragraph below the table already discusses which types do not exist.\n\n## Filed, not fixed\n\n`content/docs/ui/apps.mdx` has **zero** coverage of `AppSchema.areas[]` — no mention of the word anywhere in the hand-written docs — despite three changes landing on it this window (#4667 `order`, #4651 the two fail-open area gates, #4722 server-side enforcement of item-level gates inside areas) and a load-bearing security asymmetry that now only exists in changesets and the spec's `.describe` strings: item-level `requiredPermissions` is server-enforced in both trees, while `visible` is client-only at every level. Writing that section is more than a sweep should invent, so it is **#4880**, cross-referenced with #4749 (which fixes the spec-side prescription wording for the same surface).\n\n## Verification\n\n- `node scripts/check-doc-authoring.mjs` — 215 files clean\n- `node scripts/check-release-notes.mjs` — OK\n- ADR link targets checked against `docs/adr/` filenames\n\nDocs-only; releases nothing.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01AaegKY1Y7GqTb8CKMm5GLC)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 5324,
+  "kind": "issue",
+  "title": "driver-memory 的实时查询路径根本不支持 `$not` —— mingo 抛无 code 的 MingoError,CEL `!expr` 降下来的 RLS scope 在该驱动上直接 500",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T20:36:28Z",
+  "updated_at": "2026-08-05T00:47:29Z",
+  "closed_at": "2026-08-05T00:47:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5324",
+  "body": "修 #5240(四后端对 `{ field: {} }` 拒收)时,为了确认 driver-memory 那一行的现场而实测了驱动的**真实**查询路径,发现这一处不属于 #5240 范围的缺陷。按 Prime Directive #10 单独记在这里,unassigned。\n\n## 现象\n\n`InMemoryDriver.find` 并不走 `memory-matcher.ts` 的 `match()` —— 它只从那个文件 import 了 `getValueByPath`,过滤实际由 `convertToMongoQuery()` → **mingo** 完成。而 mingo 是 MongoDB 语义的实现,**MongoDB 没有文档级 `$not`**,于是:\n\n```\nWHERE {\"$not\":{\"stage\":\"won\"}}              => THROW MingoError | code= undefined | status= undefined | unknown top level operator: $not\nWHERE {\"$or\":[{\"$not\":{\"stage\":\"won\"}}]}    => THROW MingoError | code= undefined | status= undefined | unknown top level operator: $not\nWHERE {\"$and\":[{\"$not\":{\"stage\":\"won\"}}]}   => THROW MingoError | code= undefined | status= undefined | unknown top level operator: $not\n```\n\n(实测原文,`InMemoryDriver` + `syncSchema('deal')` + 两行数据,worktree 基于 `26e1029f5`。)\n\n`normalizeFilterCondition` 对 `$not` 只是递归归一化后**原样透传** (`result[key] = ...`),没有任何 De Morgan 改写,所以 `$not` 在**任何位置**都失败,不只是顶层。\n\n## 为什么是 bug\n\n1. **`$not` 是已声明的协议算子。** spec `LOGICAL_OPERATORS` 声明它;driver-sql 实现它(#2704 加的分支,#5146 又把它改成 NULL-safe);driver-mongodb 专门有一层翻译(`mongodb-filter-logic-translation.test.ts`)正是为了绕开「MongoDB 没有文档级 `$not`」;`memory-matcher.match` 自己也实现了它。四个后端里只有 driver-memory 的**实时路径**没有。\n2. **它落在权限路径上。** `cel-to-filter.ts` 把 CEL `!expr` 编译成 `{ $not: {...} }`,这是 RLS read scope 的常规产物。driver-memory 是默认的开发/测试驱动 —— 一条带否定的 scope 在它上面不是「多返回/少返回几行」,而是整个查询抛异常。\n3. **异常逃出了 ADR-0112 信封。** `MingoError` 没有 `code` 也没有 `status`,于是 `mapDataError` 走 default 分支,客户端拿到的是 500 形状的裸 `{ error }` —— #4436 为这个驱动建立的 `INVALID_FILTER` / 400 envelope(见 `memory-filter-refusal-envelope.test.ts`)对这一类完全没覆盖到。\n\n## 为什么至今没被测出来\n\n`FILTER_LOGIC_CASES` 对 driver-memory 只经由 **`memory-matcher`**(`memory-matcher-or-semantics.test.ts`)跑,那是**参考实现**,不是驱动的实时路径;而 driver-sql / driver-sqlite-wasm / driver-mongodb 三家的同名 conformance 都是**穿过真驱动**跑的。表里第 `$not ANDs with its sibling keys inside a branch` 条(`filter-logic-conformance.ts:172`)因此从未在 `InMemoryDriver.find` 上执行过一次。\n\n即:一致性表覆盖了这个后端的一半,而没覆盖的那一半正好是用户真正用到的那一半。\n\n## 建议(不代裁决)\n\n两条路都要维护者/spec 车道拍板方向,故只列不选:\n\n- **实现它** —— 在 `normalizeFilterCondition` 里对 `$not` 做 De Morgan 下推(driver-mongodb 已有先例可抄),顺带把 #5146 的 NULL-safe 极性一并对齐(否则会新增一处与 driver-sql 的分叉,参见 #5297 在 service-analytics 上的同款)。\n- **响亮拒收** —— 在归一化阶段抛 `INVALID_FILTER` / 400,至少把 500 形状变成 catalogued 400;但这等于宣布 driver-memory 不支持一个已声明算子,与「参考实现」的定位冲突。\n\n另外无论走哪条,建议补一条 `FILTER_LOGIC_CASES` **穿过 `InMemoryDriver.find`** 的 conformance 套件 —— 覆盖缺口本身比这个 `$not` 更值钱(可与 #5239 同批考虑)。\n\n未验证的部分:我没有测 `driver-mongodb` 的翻译层是否已经覆盖全部 `$not` 形状,也没有量化今天有多少 RLS 规则真的编译出 `$not`。严重度请 PM 按 triage 定,不代表我判断它低。\n\n关联:#5240(实测出这一条的那一单)、#5146(driver-sql 的 NULL-safe `$not`)、#5297(service-analytics 的 `$not` 分叉)、#5239(一致性表)、#4436(driver-memory 的 refusal envelope)。"
+}

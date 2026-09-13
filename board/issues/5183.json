@@ -1,0 +1,35 @@
+{
+  "number": 5183,
+  "kind": "pull_request",
+  "title": "fix(metadata): DatabaseLoader 的读故障不再被吞成「什么都没声明」 (#5108)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T08:05:50Z",
+  "updated_at": "2026-08-04T09:22:11Z",
+  "closed_at": "2026-08-04T09:22:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T09:22:10Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5183",
+  "body": "Fixes objectstack-ai/objectstack#5108\n\n## 结论:走方向 2(loader 照实抛出),不新增 `loadManyDiagnosed`\n\nissue 给了两条路,PM 的初读偏向方向 1(给 loader 接口补 `loadManyDiagnosed`)。读完代码后我选了方向 2,理由是**代码证据在这一侧压倒性地一致**:\n\n1. **本包已经把这条规矩立过两次,判据是现成的。** `packages/metadata/src/utils/schema-sync-errors.ts` 就是为「哪些驱动错误可以被静默」这一个问题存在的模块,它的文档里写着 READ 路径的标准写法:\n\n   ```ts\n   catch (error) {\n     if (isMissingTableError(error)) return BENIGN_EMPTY_VALUE;\n     throw error;                     // caller reports the consequence\n   }\n   ```\n\n   `nextEventSeq()`(#4825)就在**同一个文件里**照这个形状写着,`@throws` 那行明说「the underlying driver error, unchanged」。本次修复只是把同一条规矩用到它旁边的五个读方法上,没有引入任何新词汇。更强的信号:`packages/metadata/src/errors.ts` 这个子路径**专门为导出 `isMissingTableError` 而存在**,文档里逐条论证了为什么不能有第二套「哪些驱动错误算良性」的判据。方向 1 不需要这个判据,方向 2 正好是它的第二个消费方。\n\n2. **#5089 落地的代码已经把裁决写死在注释里。** `listForIndex()` 的注释原文:「`DatabaseLoader` currently swallows its own read errors into `[]` (#5108), so a DB outage is invisible even here —— **that is a defect in the loader**, not a reason to soften this seam.」修法的落点已经被上一单指到 loader 了。\n\n3. **方向 1 并不能独立满足验收条件。** `listForIndex()` 调的是 `loadMany`,契约要求读不到存储必须**抛出**。哪怕补了 `loadManyDiagnosed`,只要 `loadMany` 还返回 `[]`,`matchEndpoint` 在 outage 下照样答 `undefined` → 404。也就是说方向 1 要成立,**必须先做方向 2**;做完方向 2 之后,`loadManyDiagnosed` 就只剩「manager 层已经有的 `try/catch` 的另一种写法」这一点价值了。\n\n4. **方向 1 的成本落在公共契约上。** 给 `MetadataLoader` 加必选方法会打断所有实现方(含外部);加可选方法则逼消费方在调用点写一个 `?.` + `??` 的宽容回退(先试 diagnosed 版本,没有就退回 `loadMany` 并假定 `degraded: false`)—— 正是 Prime Directive #12 禁止的 consumer-side 容忍。而且 `exists` / `stat` 没有自然的 diagnosed 对位物,只会变成接口膨胀。方向 2 **零接口改动、零 spec 改动**(`packages/spec/**` 未改一个字节)。\n\n「不能不动 spec 契约就修」这条没有发生,所以没有走 `needs_decision`。\n\n## 改了什么\n\n### `packages/metadata/src/loaders/database-loader.ts`\n\n五个读方法 —— `load` / `loadMany` / `exists` / `stat` / `list` —— 此前都是 `catch {}` 成各自的空值。issue 点名了其中三个(以及 `loadMany` 连 warn 都没有);实际上**五个全是同一形状**,多出来的两处是 issue 前提的修正,见下。\n\n新增一个私有判决方法 `rethrowUnlessTableUnprovisioned(error)`,五处 `catch` 统一走它:\n\n- **唯一良性**:`sys_metadata` 尚未 provisioned。那时确实没有行,「什么都没声明」就是事实,首次启动照旧返回空值、不报错、**不写缓存**(表随时可能出现,memoize 一个空值会活得比 provisioning 还久);\n- **其余全部**:连接断开、超时、权限不足、查询出错 —— 行还在、只是这次没读到,把驱动**原始异常原样抛出**。判据保守:无法正面识别为「表不存在」的错误一律当真故障(假的「良性」会静默答错一个安全问题,假的「真故障」只值一行 error)。\n\n### `packages/metadata/src/metadata-manager.ts`(最小触碰)\n\n- `list()` 的降级分支改走新的 `reportLoaderReadFailure()`,**级别从 `warn` 升到 `error`**。按 AGENTS.md「Degradation log levels」那一问:降级之后系统从外面看仍然正常,而它声称掌握的清单其实是残缺的 → `error`。日志同时给出**后果**(此后每次 list 都是把残缺集合当完整集合发出去;按消费方姿态不同,要么放行要么锁死,两种都静默)和**修法**(查该 loader 背后的 datasource:连接、凭证、表是否存在)。每次故障**只说一次**,loader 恢复时说一次 recovery;\n- `list()` 仍然尽力返回可读 loader 的内容 —— 这个 best-effort 姿态是刻意保留的,严格对位物是 `listForIndex()` 和 `loadDiagnosed()`;\n- 兄弟方法 `loadMany()` 的同一条缝复用同一个判决(**这一处超出了派单里写的「仅 list()」**,明说在这里:同一次存储故障在同一个文件里报出两个级别,是错的那个被抄走的方式。若认为该收回,单独 revert 第二个 commit 即可,不影响主修复);\n- `listForIndex()` 的注释里那段指向本 issue 的 ⚠️ 已经过期,改写成现状。\n\n⛔ `attachClusterPubSub` / `notifyWatchersLocal` / `listCache` 失效逻辑**一行未动**(#5109 的面)。\n\n## 上层三个机制第一次真的生效\n\n| 机制 | 修复前 | 修复后 |\n|:--|:--|:--|\n| `MetadataManager.list()` 的降级分支 | 形同虚设 —— loader 递上来的是一次「成功的空读」,`catch` 根本不进 | 进,且在 `error` |\n| `loadDiagnosed()`(ADR-0110 D3) | 对 `DatabaseLoader` 永远 `degraded: false` —— **单数读也一样被吞了** | 报出 `degraded` + `errors` |\n| `listForIndex()` / `matchEndpoint`(#5089) | 对 `MemoryLoader` / `RemoteLoader` 有效,对 `DatabaseLoader` 无效 | 对真实 datasource loader 也成立 |\n\n## issue 前提的两处修正(已按 origin/main 逐条核对)\n\n1. **行号漂移**(#5089 的 ecc61ab 今天落地所致):`loadMany` 是 `:729-753`(issue 写 740-753),`exists` `:756-773`,`stat` `:776-808`。缺陷本身逐字属实。\n2. **「`load` 至少让异常冒到 manager 那层被 warn 记下」这句不成立。** `DatabaseLoader.load()` 在 `:721` 同样把异常吞成 `{ data: null }`。也就是说 issue 引用为「单数读已经立过规矩」的那条 —— ADR-0110 D3 的 `loadDiagnosed` —— 对 `DatabaseLoader` **同样是失效的**:它拿到的也是一次成功的空读,`degraded` 永远是 `false`。本 PR 把 `load()` 一并修了(同一个文件、同一形状、同一条要求),否则 issue 举来当标准的那条先例自己还是坏的。loader 自己的 `list()`(`:833`)是第五处同形,`MetadataManager.listNames()` 走的正是它。\n\n## 行为变化(明说)\n\n`MetadataManager.exists()` 与 `listNames()` 本来就没有 `try/catch`,所以存储故障现在会从它们**抛出**,而不再静默答「不存在」/「空清单」。这正是本次修复要的姿态 —— 可用性故障不是一次「没有」。已核对:这两个方法在 `packages/**` / `apps/**` 里除测试外**没有生产调用方**。\n\n`list()` 那条 30s `listCache` 的注释记着一个真实场景:权限中间件在事务里调 `list('permission')`,knex 等满 `acquireConnectionTimeout` 才返回。那条路径现在会 throw → 被 `list()` 的 `catch` 接住 → **返回值与之前完全一致**(registry 部分),只是多了一行 error。没有新增任何会冒到中间件的异常。\n\n## 验证\n\n```\npnpm --filter @objectstack/metadata test          → 17 files, 403 tests passed\npnpm --filter @objectstack/metadata-protocol test → 38 files, 339 tests passed\npnpm --filter @objectstack/runtime test           → 88 files, 1270 tests passed\npnpm --filter @objectstack/cli test               → 69 files, 612 tests passed\n\npackages/metadata: npx tsc --noEmit → 92 errors\n  origin/main 同一套已构建依赖下同样 92 —— 零新增\n  (该包无 typecheck 脚本,在 #4311 的 DEBT ledger 里)\n\npnpm check:durability-log-level → 12 seam(s), all loud or rethrowing ✓\npnpm check:adr-anchors          → 20 anchored file(s) ✓\npnpm check:type-check-coverage  → OK ✓\npnpm check:error-code-casing    → OK ✓\npnpm check:nul-bytes            → OK ✓\nnpx eslint 三个改动文件          → clean\n```\n\n新增测试沿用 #4728 / #4825 「**两个方向都钉**」的姿态 —— 只证明故障够响是不够的,因为「一律抛出」也能单独通过,同时会让首次启动炸掉。要钉的是两者**被区分开**:\n\n- 真 outage(`ECONNRESET`):五个读方法逐个 rejects,驱动错误 `code` 原样带出,重试不吃毒化缓存;\n- 良性(`no such table: sys_metadata`):五个读方法逐个答空,不报错,**且不 memoize** —— 表后来被建出来时下一次读就能看见;\n- 同一调用点、相反裁决的对照;\n- manager 层:`list()` 照常返回可读内容 + `error` 一次(断言 `PARTIAL` / `never declared` / `reporting healthy` / `Fix:` 都在)、`warn` 零次;每次故障只说一次;恢复时 un-say;`loadDiagnosed` 报 `degraded`;干净的 miss **仍然** `degraded: false`;\n- **验收项**:破损驱动 + 真实 `DatabaseLoader` → `matchEndpoint` **rejects**,不再答那个会变成 404 的 `undefined`;即使别的健康 loader 里声明了该端点也照样 rejects(残缺的读证明不了它找到的就是对的);而**未 provisioned 的表不是 outage** —— `matchEndpoint` 照常答一次干净的 miss。\n\n原先 `error handling` 里那五条断言「读失败要答空值」的测试被改写了 —— 它们钉的正是本 issue 的缺陷本身。\n"
+}

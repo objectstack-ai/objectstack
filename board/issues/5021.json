@@ -1,0 +1,38 @@
+{
+  "number": 5021,
+  "kind": "issue",
+  "title": "主题引擎发出的 9 组 CSS 变量零消费方(`--font-size-*` / `--z-*` / `--duration-*` …):ADR-0049 该判去留",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue",
+    "protocol:breaking",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T00:06:37Z",
+  "updated_at": "2026-08-04T17:25:39Z",
+  "closed_at": "2026-08-04T17:25:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5021",
+  "body": "从 #4001 批 15 的门测量中分离出来,**未指派**。批 15 收紧了 `ui/theme.zod.ts` 的全部 14 个站点(授权门是真的:`defineStack({ themes })` + `defineTheme()`),但**收紧解决的是「键被静默丢弃」,解决不了「键被完整接收然后没人读」** —— 后者是 ADR-0049 的题目,单独归档。\n\n## 测量(2026-08-03,objectui `main`)\n\nobjectui 的 `ThemeEngine.generateThemeVars()` 把主题降成 CSS 自定义属性。逐组数消费方(`packages/**`,排除 `node_modules`/`dist`/`ThemeEngine` 自身):\n\n| 发出的变量 | 来源 schema 块 | objectui 内消费方 |\n|---|---|---|\n| `--primary` / `--background` / `--card` / `--foreground` / `--muted*` / `--border` … | `colors` | ✅ 全部被 `components/src/index.css` 等读取 |\n| `--radius*` | `borderRadius` | ✅ 11 处 |\n| `--shadow*` | `shadows` | ✅ 3 处 |\n| `--font-sans` | `typography.fontFamily.base` | ✅ 2 处 |\n| `--font-heading` | `typography.fontFamily.heading` | ❌ **0** |\n| `--font-mono` | `typography.fontFamily.mono` | ❌ **0** |\n| `--font-size-*` | `typography.fontSize`(8 个 stop) | ❌ **0** |\n| `--font-weight-*` | `typography.fontWeight`(5 个) | ❌ **0** |\n| `--line-height-*` | `typography.lineHeight`(4 个) | ❌ **0** |\n| `--letter-spacing-*` | `typography.letterSpacing`(5 个) | ❌ **0** |\n| `--duration-*` | `animation.duration`(3 个) | ❌ **0** |\n| `--timing-*` | `animation.timing`(5 个) | ❌ **0** |\n| `--z-*` | `zIndex`(8 个) | ❌ **0** |\n\n即:`ThemeSchema` 上 `typography`(除 `fontFamily.base` 外)、`animation`、`zIndex` 三个顶层块,作者写进去、引擎老老实实发出去、**平台自己没有任何一个组件或样式表读它们**。\n\n## 为什么这不是「和 #4001 一起顺手办了」\n\n两件事必须分开,否则会得出错误结论:\n\n- **未知键(#4001)**:作者写 `fontSize: { smal: … }`,过去被静默丢弃 → 批 15 后是响亮报错。已解决。\n- **本 issue(ADR-0049)**:作者写 `fontSize: { sm: … }`,一路正确抵达 `--font-size-sm`,然后没有任何东西读它。收紧一个键不会让它变活 —— 账本自己的话:*「strictness makes a dropped key loud, it cannot make a slot live」*。\n\n## 一条重要的反驳,必须先回答\n\n**CSS 自定义属性和普通 spec 键不同**:它发到文档上之后,**租户自己的样式表可以读**。所以「仓库内零消费方」对 CSS 变量而言是比对 spec 键**更弱**的证据 —— 不能照搬 #1878/#1893 那轮的判法直接删。\n\n需要判的是:这些变量是**对外承诺的公共 token 面**(那就该有文档、有稳定性保证,而不是靠九个巧合的命名),还是**没人接的半成品**(那就 ADR-0049 退役,或补上消费方)。\n\n`#3494` 已经用同样的理由删过八个 prop(`spacing`/`breakpoints`/`density`/`wcagContrast` …),留下的正是这批 —— 当时的判据是「引擎从不发出」,而这批**引擎确实发出**,所以上一轮的判据够不着它们,这是它们活到今天的原因。\n\n## 可选处置\n\n1. **补消费方** —— 让 shadcn/Tailwind 层真正读 `--font-size-*` / `--z-*`,主题就名副其实。工作量在 objectui。\n2. **退役** —— 按 ADR-0049 删掉 `typography.fontSize/fontWeight/lineHeight/letterSpacing`、`animation`、`zIndex`,作者改用已声明的 `customVars`(它本来就是发任意 CSS 变量的正门,而且**有真实消费者**:发什么就是什么)。\n3. **明确承诺为公共 token 面** —— 保留,但补文档与稳定性说明,并加一条测试钉死变量名。\n\n倾向 3 或 1:2 会拿掉一个语义化的 token 词表,而 `customVars` 是无结构的字符串对,AI 作者在它上面更容易出错(正是 #4001 关心的方向)。但这需要维护者定,不该由一次 strictness 批次顺手决定。\n\n## 参考\n\n- #4001 批 15(收紧 `theme.zod.ts` 全部 14 站点;该文件头部注释与账本 `ui/` 行都把本问题标为「已归档、未在此回答」)\n- #3494 / #1878 / #1893(上一轮主题 liveness 审计)\n- #4583(「一个被精确校验的死槽位是更有说服力的谎言」)\n- ADR-0049 enforce-or-remove\n"
+}

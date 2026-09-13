@@ -1,0 +1,34 @@
+{
+  "number": 4981,
+  "kind": "issue",
+  "title": "[metadata-protocol] SysMetadataRepository.publishDraft() 把 draft 清理的全部失败都当「并发发布者已抽走」,静默留下一条永远 pending 的 draft 行",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T18:28:41Z",
+  "updated_at": "2026-08-04T01:34:33Z",
+  "closed_at": "2026-08-04T01:34:33Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4981",
+  "body": "发现于 #4867(修同文件两个计数器的 `catch { return 1 }`)。**仅记录,未在该 PR 中修改** —— 不属于同一个编号家族,按 Prime Directive #10 单开,未指派。\n\n## 现象\n\n`packages/metadata-protocol/src/sys-metadata-repository.ts`,`publishDraft()` 里(origin/main 约 665–676 行,#4867 的 PR #4980 之后行号会下移):\n\n```ts\n    // Drop the draft row — it has been promoted. Tolerate races where\n    // a second publisher already drained it.\n    try {\n      await this.delete(ref, {\n        parentVersion: draft.hash,\n        actor: opts.actor,\n        source: opts.source ?? 'sys-metadata-repo.publish',\n        intent: opts.intent ?? 'override-artifact',\n        state: 'draft',\n      });\n    } catch {\n      // best-effort: a concurrent publisher may have already drained\n      // the draft; the active row's authoritative content is intact.\n    }\n```\n\n注释只点名了**一个**原因(并发发布者已经抽走了 draft —— 这时 `delete` 抛 `ConflictError`,确实良性),`catch` 却吞掉**全部**失败:连接抖动、超时、权限不足、驱动错误,以及 draft 在此期间被改写导致的 `parentVersion` 不匹配。这与 #4728 / #4825 / #4867 是同一族形状 —— **一个良性原因赦免了所有原因**,只是这里的数字换成了一行残留数据。\n\n## 后果\n\n`publishDraft()` **返回成功**,active 行也确实是对的(这一点注释说得没错),但 `sys_metadata` 里那条 `state='draft'` 的行还在:\n\n- Studio / Setup 会继续把这个 artifact 显示为「有未发布的改动」,而它其实已经发布了 —— 用户看到一个点了没用的按钮;\n- 下一次 `publishDraft()` 会拿这条陈旧 draft 当新内容**再发布一次**,写出一条内容与 active 完全相同的历史事件(甚至可能把已经被覆盖的旧 body 重新推成 active);\n- 没有任何日志,重试不修、重启也不修。\n\n按 AGENTS.md「Degradation log levels」的那一问:降级之后系统对外看起来完全正常,而它声称已经清理的东西并没有清理 —— 属于 **`error`** 那一类,不是 `warn`。\n\n## 建议(与 #4728/#4825/#4867 一致的形状)\n\n按错误类型判别,只赦免真正良性的那一个:\n\n- `ConflictError`(以及「行已不存在」)—— 并发发布者已抽走,静默,这正是注释里写的那个情况;\n- 其余失败 —— 以 `error` 上报后果(draft 行残留、UI 会继续显示未发布改动、下一次 publish 会重复发布)与修复动作,然后决定是抛出还是仅上报。**这里与 #4867 不同,`delete` 在 `put` 提交之后,抛出会把一次已经成功的发布报成失败**,所以「抛 vs 只报」需要判断,不能照抄 #4867 的结论 —— 这也是本条单开而不是塞进 #4867 的原因之一。\n\n## 参考\n\n- #4867(同文件,`nextEventSeq()`/`nextItemVersion()`,PR #4980)\n- #4825(`DatabaseLoader.nextEventSeq()`,PR #4872)、#4728(`ensureSchema()`)、#4632(降级日志级别规则 + gate)\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 5100,
+  "kind": "issue",
+  "title": "observation: runUpdateManyLoop 缺少 batchData update 分支那道 `!record.id` 守卫 —— 两个 by-id update 写面对畸形行的分类不一致(当前被路由 Zod 挡住,dormant)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "finding",
+    "tech-debt"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T04:25:54Z",
+  "updated_at": "2026-08-04T10:52:54Z",
+  "closed_at": "2026-08-04T10:52:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5100",
+  "body": "**观察类记录(observation-class),当前用户打不到**。读 #5088 时发现,如实登记,不建议单独排期。\n\n## 现状\n\n`packages/metadata-protocol/src/protocol.ts` 里两个 by-id 的 update 写面,对「行里没有 id」的处理不一致:\n\n- `runBatchDataLoop` 的 `update` 分支:`if (!record.id) throw rowRequiredIdError('update')` → `VALIDATION_FAILED` / 400。这是 #4793 特意加的,注释写着「a caller error, so it carries VALIDATION_FAILED / 400 rather than falling through toRowApiError's unclassified-throw default」。\n- `runUpdateManyLoop`:没有这道守卫,直接把 `record.id` 递给引擎。\n\n#5088 之后这条差异变得可见了一点:`updateMany` 里一个没有 id 的行,现在会先撞上存在性探针,拿到 `RECORD_NOT_FOUND` / 404,而同样一个行走 `batch` 的 update 分支拿到的是 `VALIDATION_FAILED` / 400。两者都不算\"错\",但对同一个 caller 错误给出两种分类,正是 #4620 对本文件立的规矩要避免的(\"must be ONE implementation, not three that agree today\")。\n\n## 为什么现在打不到\n\n`updateMany` 的唯一入口(`POST /api/v1/data/:object/updateMany`)在 `rest-server.ts` 里跑 `UpdateManyDataRequestSchema.safeParse`,而 `UpdateManyRecordSchema` 的 `id` 是必填(#3939 特意不复用宽松的 `BatchRecordSchema`)。所以没有 id 的行到不了协议层 —— 只有直接调用协议方法的进程内 caller 才可能构造出来。故归为 dormant / 口径漂移,不是活缺陷。\n\n## 建议(若将来收拢)\n\n在 `runUpdateManyLoop` 的循环开头补同一句 `if (!record.id) throw rowRequiredIdError('update')`,让两个写面对畸形行给出同一个分类。改动很小,但会改变一个(目前不可达的)错误码,所以不适合搭在 #5088 的修复里顺手带 —— 那单的验收面明确是\"每行自带 id\"的路径。\n\n发现于 #5088 的实现过程。\n\nhttps://claude.ai/code/session_01BotUP49pqhvqGY393n2HfU"
+}

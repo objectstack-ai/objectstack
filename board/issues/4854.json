@@ -1,0 +1,37 @@
+{
+  "number": 4854,
+  "kind": "issue",
+  "title": "View labels never resolve a translation — `resolveViewLabel` reads two fields the served view document does not have",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue",
+    "priority:p0"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T10:15:44Z",
+  "updated_at": "2026-08-04T07:48:55Z",
+  "closed_at": "2026-08-04T07:48:55Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4854",
+  "body": "`resolveViewLabel` (`packages/spec/src/system/i18n-resolver.ts:149`) cannot resolve any view authored through the normal path. Every view label in a running console falls back to its English literal, no matter what the translation bundle contains. Found while translating a customer-facing app; the app's twelve `_views` translation blocks turned out to have never been read.\n\nFiled unassigned — recording the finding, not claiming it.\n\n## Two independent mismatches, either one sufficient\n\n```ts\nfunction viewObjectName(view: ViewLike): string | undefined {\n  return view.objectName ?? view.data?.object;      // :141\n}\n\nconst objectName = viewObjectName(view);\nif (!bundle || !objectName) return fallback;        // :156\nconst candidate = data?.objects?.[objectName]?._views?.[view.name]?.label;  // :159\n```\n\nThis is what `GET /api/v1/meta/view?object=crm_account` actually serves:\n\n```json\n{\n  \"name\": \"crm_account.account_gallery\",\n  \"object\": \"crm_account\",\n  \"viewKind\": \"list\",\n  \"label\": \"Account Cards\",\n  \"config\": {\n    \"name\": \"account_gallery\",\n    \"label\": \"Account Cards\",\n    \"data\": { \"provider\": \"object\", \"object\": \"crm_account\" }\n  }\n}\n```\n\n1. **The object never resolves.** `objectName` is absent — the field is `object`. `data` is absent — it is nested at `config.data`. So `viewObjectName` returns `undefined` and line 156 returns the fallback before any lookup happens.\n\n2. **The key would be wrong even if it did.** The lookup uses `view.name`, which the served document namespaces to `crm_account.account_gallery`. Translations are keyed on the bare name — `objects.crm_account._views.account_gallery.label` — which is also what `config.name` carries.\n\nFixing only the first leaves every lookup missing; fixing only the second never runs.\n\n## Measured, not inferred\n\nIn an app with `objects.crm_account._views.all_accounts.label = '全部客户'` present in the served `zh-CN` bundle, the console renders **`All Accounts`**. The unit tests at `i18n-resolver.test.ts:127` pass because they construct `ViewLike` objects by hand with `objectName` and a bare `name` — a shape the runtime never produces.\n\n## Impact\n\nEvery list view's switcher tab, on every object, in every locale. On a Chinese-only deployment this is the most visible remaining English on the screen: it sits across the top of every list page, above data that is otherwise fully translated.\n\nThere is no workaround at the app layer other than authoring the labels in Chinese directly in `src/views`, which hard-codes one language into metadata and defeats the other three locales.\n\n## Worth deciding together with\n\n`report` and `dataset` have **no translator at all** — no entry in `METADATA_DOCUMENT_TRANSLATORS`, no key in `TranslationDataSchema`, and `defineStack` strips a `reports:` block while `tsc` rejects it as an excess property (TS2353). Dataset dimension and measure labels are what a dataset-bound dashboard widget renders its **table column headers** from, so those are permanently English too.\n\nOne clue suggesting the dataset case may not need a new surface: a dimension whose `name` matches a real field name on the bound object already renders the translated *field* label. In the same dashboard, `current_grade` (dimension name = field name) shows Chinese while `account_name` (dimension name ≠ field name `name`) shows `Customer`. If the resolver fell back to the field label whenever a dimension names one, most of these would resolve with no new translation surface at all."
+}

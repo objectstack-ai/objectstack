@@ -1,0 +1,39 @@
+{
+  "number": 4890,
+  "kind": "issue",
+  "title": "`.claude/skills/**` 的 markdown 不被任何门禁扫描 —— check:nul-bytes 只看 JS/TS,check:doc-authoring 的 ROOTS 不含 .claude/",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "ci/cd",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T13:14:47Z",
+  "updated_at": "2026-08-03T15:48:39Z",
+  "closed_at": "2026-08-03T15:48:39Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4890",
+  "body": "发现于 PR #4885(#4882,给 `pm-dispatch` skill 增补运行经验)的实施过程。**未认领,本会话只记录不派发**(属 devx 车道)。\n\n## 事情是这样发生的\n\n那个 PR 要写的其中一条经验,正是「不要写裸 NUL 字节」。dev 在写这条规则的过程中,**Edit 工具把转义写成了一个真的裸 NUL 字节**,落在 `.claude/skills/pm-dispatch/SKILL.md` 第 626 行。\n\n它没有被 `check:nul-bytes` 抓到 —— 是 dev 自己额外跑的控制字符扫描(`grep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]'`)抓到的。\n\n**一条关于裸 NUL 的规则,在写的过程中产生了一个裸 NUL,而负责拦裸 NUL 的门禁看不见它。**\n\n## 两个覆盖缺口(均已核实脚本源码)\n\n| 门禁 | 扫描范围 | `.claude/skills/*.md` |\n|:--|:--|:--|\n| `scripts/check-nul-bytes.mjs` | 只扫 JS/TS 源文件(本次实跑报告 `2986 tracked source file(s)`) | ❌ 不覆盖 |\n| `check:doc-authoring` | `ROOTS = ['skills', 'content']` | ❌ 不覆盖(是顶层 `skills/`,不是 `.claude/skills/`) |\n| eslint | `files` glob 只有 `**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}` | ❌ 不覆盖 md |\n\n也就是说 **`.claude/` 下的所有 markdown 处在全部门禁之外**。\n\n## 为什么这不是小事\n\n`check-nul-bytes.mjs` 自己的报错文案把理由写得很清楚:\n\n> A raw NUL makes grep/ripgrep treat the entire file as binary and silently return **ZERO matches**, so the file drops out of code search and out of every grep-based lint.\n\n这个后果**与文件是什么语言无关** —— 它是 grep 的行为,不是 JS 的行为。而 `.claude/skills/**` 恰恰是**每个 agent 会话都会加载、并且经常被 grep 检索**的内容:一个混进 SKILL.md 的裸 NUL 会让整份操作手册对 `grep -r` 隐形,而 agent 拿不到它本该遵守的规则,**且没有任何信号**。\n\n这与本仓正在系统性关掉的那一类是同一个形状:**声明了一条规则(不许裸 NUL),但强制它的机制覆盖不到规则自己所在的地方。**\n\n## 建议方向(择一,倾向 1)\n\n1. **把 `check-nul-bytes.mjs` 的扫描范围从「JS/TS 源文件」改成「所有被 git 跟踪的文本文件」**(用 `git ls-files` + 二进制探测排除真正的二进制资产)。最贴合该检查自己声明的理由 —— 它拦的是 grep 可见性,不是语法。代价是扫描面变大,需要确认耗时可接受。\n2. 保持范围不变,但把 `.claude/**/*.md` 显式加进去。成本最低,但把「为什么是这些文件」这个问题继续留在原地,下一个新目录还会漏。\n3. 顺带考虑 `check:doc-authoring` 的 `ROOTS` 要不要加 `.claude`。⚠️ **这条需要先判断**:该检查的规则(面向已发布文档的写作规范)是否适用于内部 agent 指令文件 —— 如果不适用,不要为了「覆盖率好看」硬加,那会制造一批需要豁免的噪音。**这一条不要和方向 1/2 捆绑决定。**\n\n## 一条独立的观察\n\n本次是**人(agent)在写规则时违反了规则**,靠一次额外的、非常规的自检才发现。这说明:凡是「工具生成的内容里可能混入不可见字节」的场景,检查范围应当按**载体**(所有文本文件)而不是按**用途**(源代码)来划。\n\n## 关联\n\n- PR #4885 / #4882 —— 发现于其实施过程,该 PR 最终交付物中裸 NUL 已改为 `` 文本,当前 main 无残留\n- `scripts/check-nul-bytes.mjs` 的既有文案与 `packages/rest/src/rest-server.ts:1065` 的转义约定\n- #4796 系列 —— 同属「门禁覆盖面与它自己声明的理由不一致」"
+}

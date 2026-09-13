@@ -1,0 +1,37 @@
+{
+  "number": 5235,
+  "kind": "issue",
+  "title": "spec 的 #4650 删除闸门在「按 SHA 钉住的消费者构建」里无法锚定 origin/main，硬失败 —— cloud 的镜像构建与 pin bump 全线卡死",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T11:43:55Z",
+  "updated_at": "2026-08-04T20:28:11Z",
+  "closed_at": "2026-08-04T20:28:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5235",
+  "body": "**这条挡住了 cloud 的所有 framework pin bump**（实测：objectstack-ai/cloud#1091，把 pin 从 `ad047d2e` 挪到 `586d6f70` 后，`verify-objectos-ee-image` 立刻红）。\n\n## 现象\n\ncloud 的 EE 镜像构建里，framework 的 `@objectstack/spec` build 直接失败：\n\n```\n@objectstack/spec:build: ─── Summary ───\n@objectstack/spec:build:   Generated: 1654 (135 as input shape)\n@objectstack/spec:build:   Skipped:   23 (unsupported types: function, date, bigint, custom)\n\n@objectstack/spec:build: ❌ Cannot resolve origin/main to anchor the authorable-surface deletion check (#4650).\n\n@objectstack/spec:build:    Deleted baseline lines are validated against authorable-surface.json at the\n@objectstack/spec:build:    merge base with origin/main — a baseline this commit cannot rewrite. Without\n@objectstack/spec:build:    that anchor the tombstone gate can be bypassed by hand-editing the file, so\n@objectstack/spec:build:    this build fails instead of silently skipping the check.\n\n@objectstack/spec:build:    Fix: `git fetch origin main` (or point refs/remotes/origin/main at your\n@objectstack/spec:build:    upstream main) and re-run.\n@objectstack/spec:build:  ELIFECYCLE  Command failed with exit code 1.\n\n@objectstack/spec#build:  ERROR  command (/repo/objectstack/packages/spec) pnpm run build exited (1)\n Tasks:    0 successful, 3 total\nFailed:    @objectstack/spec#build\n```\n\n## 归因（已逐条核过，不是推断）\n\n| 检查 | 结果 |\n|---|---|\n| 该报错字符串在 cloud 当前 pin `ad047d2e` 上存在吗 | **不存在**（`git grep` 零命中） |\n| 在 `586d6f70` 上呢 | 存在于 `packages/spec/scripts/build-schemas.ts` |\n| 同一个 CI job 在别的 cloud PR 上（仍是旧 pin）通过吗 | **全部通过**（近 10 次运行只有改 pin 的这次红） |\n| 本地在有 `origin/main` 远程引用的 framework worktree 里构建 `586d6f70` | **通过** —— 所以本地验证看不见它 |\n\n也就是说：**闸门是本区间新增的，且只在「没有 `origin/main` 远程引用」的构建环境里触发。**\n\n## 为什么消费者构建必然踩到\n\n`resolveSurfaceBase()` 先 `git rev-parse origin/main^{commit}`，失败则自愈式 `git fetch --depth=1 origin +refs/heads/main:refs/remotes/origin/main`，再失败就 fatal。\n\ncloud（以及任何按 SHA 消费 framework 的下游）拿到的 framework 树来自 `actions/checkout@v4` + `ref: <pinned SHA>`（默认 `fetch-depth: 1`）：**只有那一个 commit，没有 `refs/remotes/origin/main`**。cloud 三个 workflow 全是这个形状：\n\n- `.github/workflows/verify-objectos-ee-image.yml`（已实测红）\n- `.github/workflows/pin-smoke.yml`\n- `.github/workflows/test.yml`\n\n镜像那条更硬：framework 是被 `COPY objectstack/ /repo/objectstack/` 抄进 buildx 构建阶段再构建的，自愈 fetch 在那里也没成功。\n\n## 为什么这不只是「cloud 自己加个 fetch」就完事\n\n可以让 cloud 三处 checkout 都 `fetch-depth: 0`（或显式 fetch main）绕过去，但那给这个开源产物加了一条很难看的性质：\n\n**「构建一个按 SHA 钉死的 `@objectstack/spec` 发布树，必须能联网访问它自己 main 分支的当前状态。」**\n\n这会打断离线 / 气隙构建、fork 构建、以及任何按 tag 复现历史版本的构建——而在这些场景里闸门要防的事**根本不存在**：树是不可变的、已经合并过的，没有「我这个 PR 相对 main 删了什么」这个问题可问。闸门在消费者构建里既问不出答案，也没有要防的对象。\n\n同时也不该简单加个 `SKIP=1` 环境变量——那正是 #4650 要堵的旁路。\n\n## 建议方向（留给维护者定）\n\n1. **闸门只在「开发式检出」跑**：判据不是环境变量，而是可验证的事实——例如 `authorable-surface.json` 相对已提交状态有改动、或存在多于一个 commit / 存在分支引用。消费者构建里没有可删的基线，就没有要证明的删除。\n2. 或者**把基线锚点变成树内产物**：把 merge-base 那份基线在发布时固化进包内（如 `authorable-surface.base.json`），让闸门比对树内文件而不是远程分支——保持「PR 改不动的基线」这个性质，同时不依赖网络。\n\n两条都保留 #4650 的防旁路性质；第 2 条对下游最友好。\n\n## 影响面\n\n- cloud 的 `.objectstack-sha` **今天无法往前挪到任何含该闸门的 SHA**，pin 会一直停在 `ad047d2e`（现已落后 main 119+ commit），连带 staging 部署与所有等 pin 的 issue（如 cloud#1012）。\n- 同样的形状会打到 `release-objectos-ee.yml` 与 `deploy-*` 系列（都在 pin 住的 framework 检出上构建镜像）。\n\n## 出处\n\ncloud#1012 的 pin bump（PR objectstack-ai/cloud#1091，会话 `session_015W6nhsDrz6zWQc8je12a1t`）。失败 run：https://github.com/objectstack-ai/cloud/actions/runs/30905564626 。未指派，按 Prime Directive #10 归档。"
+}

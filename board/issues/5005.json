@@ -1,0 +1,36 @@
+{
+  "number": 5005,
+  "kind": "issue",
+  "title": "`composeStacks` silently drops every non-array top-level key — `api:` today, `server:` as of #4910",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T20:06:38Z",
+  "updated_at": "2026-08-04T01:46:46Z",
+  "closed_at": "2026-08-04T01:46:46Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5005",
+  "body": "发现于 #4910 开发过程(入站 rateLimit seam),与本单修复无关,按 Prime Directive #10 单独立单,**未认领**。\n\n## 事实\n\n`composeStacks`(`packages/spec/src/stack.zod.ts`)只合并三类东西:\n\n1. `manifest` —— 按 `manifest` 策略择一;\n2. `i18n` —— last-wins;\n3. `objects` + `CONCAT_ARRAY_FIELDS` 里列出的**数组**集合 —— 拼接。\n\n其余**一律不进 `composed`**。它从一个空对象 `{}` 开始逐项填充,所以任何既不是 `manifest`/`i18n`、也不在数组清单里的顶层键,合成后**直接消失**,没有告警。\n\n今天受影响的顶层键:\n\n| 键 | 谁消费它 | 合成后 |\n|---|---|---|\n| `api`(`enableProjectScoping` / `projectResolution` / `enforceProjectMembership`) | `objectstack serve`(`serve.ts`),转发给 REST + dispatcher | 丢 |\n| `server`(`security.rateLimit` / `trustProxy`,#4910 新增) | `objectstack serve` → dispatcher 的入站限流器 | 丢 |\n| `datasourceMapping` | 数据源路由 | 丢 |\n\n`datasourceMapping` 尤其值得一看:它**是**数组,只是没被列进 `CONCAT_ARRAY_FIELDS`(需实测确认)。\n\n## 为什么这是 declared ≠ enforced 的形状\n\n作者写下 `server.security.rateLimit`,单栈下真限流;把同一个栈丢进 `composeStacks([base, addon])`,限流**静默消失**,`defineStack` 不报错、`validate` 不报错、启动日志也不会说少了什么 —— 因为消费方看到的就是 `undefined`,与「没写过」无法区分。这正是 #4686 那一类缺陷换了个入口。\n\n`api.enforceProjectMembership` 走同一条路径,后果是**每环境成员 403 闸门**在合成栈里悄悄关掉,安全影响比限流更直接。\n\n## 复现(未跑,依据是源码 —— 请开工时先实测确认)\n\n```ts\nconst a = defineStack({ manifest, server: { security: { rateLimit: { enabled: true, maxRequests: 5 } } } });\nconst b = defineStack({ manifest });\ncomposeStacks([a, b]).server   // → undefined\n```\n\n注意 `composeStacks` 的短路:`stacks.length === 1` 时**原样返回**,所以单元素合成看起来是好的,只有真正 ≥2 个栈才丢 —— 这也解释了为什么至今没被发现。\n\n## 待裁决(不要猜)\n\n顶层标量/对象键的合成语义没有先例可循,需要维护者定一次,而不是每个键各定各的:\n\n- **A. last-wins**(与 `i18n` 一致)—— 最省事,但 `api` / `server` 是**安全配置**,后一个包静默覆盖前一个包的限流预算是危险的默认。\n- **B. 深合并 + 冲突报错** —— 两个栈都声明 `server.security.rateLimit` 且值不同 → `composeStacks` 抛错,和 `objectConflict: 'error'` 的既有姿态一致。\n- **C. 显式策略参数**(`ComposeStacksOptions` 加一项,默认 B) —— 最贵,但把选择权交给作者。\n\n另有一个与语义无关、无论选哪个都该做的:**合成时丢弃任何未处理的顶层键,应该至少 warn 一次并点名**。今天它是完全静默的,这才是真正让人查不出来的部分 —— 定了语义之后,凡是新增顶层键忘了接进 `composeStacks` 的,也会立刻自曝,而不是等下一次有人做 #4910 这样的活儿时偶然撞见。\n\n关联:#4910(引入 `server:` 的单)、#4686(三份 RateLimitConfig 零 reader)、Prime Directive #10 / #12。"
+}

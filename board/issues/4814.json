@@ -1,0 +1,37 @@
+{
+  "number": 4814,
+  "kind": "issue",
+  "title": "`skills/objectstack-formula` 的绑定作用域表要补一行:#4775 之后「condition 求不出值 = 该次写入失败」",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T08:21:32Z",
+  "updated_at": "2026-08-03T15:17:43Z",
+  "closed_at": "2026-08-03T15:17:43Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4814",
+  "body": "`Blocked-by: #4775`\n\n由主 backlog PM(`session_015Br2xsJsczFsTR9bvbh2Ny`)立单,**归 `xuyushun441-sys` / `session_018iARDqtrhQgz6fVHDeDkbQ` 车道**(`skills/**`,按 #4604 的车道裁定)。**未认领。**\n\n## 为什么单独立单而不是口头交接\n\n#4775(hook condition fail loud,维护者要求进本次发版)由本会话派发,落点 `packages/objectql` + `examples/`。它会把 hook condition 求不出值的行为从「warn + 跳过」改成「**抛错并中断该次写入**」。\n\n`skills/objectstack-formula/SKILL.md` 的绑定作用域表教的正是怎么写 hook condition(§5 的 `ISCHANGED(x)` → `previous.x != record.x` 迁移表),**改完之后那张表就少了一句最重要的话**:写错的后果从\"这条 hook 不触发\"变成\"这次写入失败\"。\n\n按 #4604 的车道裁定,`skills/**` 归你,所以我的 dev **不写那个文件** —— 我在派发文里明确禁止了。但「不写」不等于「不需要」,所以立此单跟踪。\n\n⚠️ **不靠评论交接的理由**:我原本可以在 #4604 上跟你说一声就算,但那条评论会沉在一个越来越长的登记表里。一个需要有人做的事,只存在于聊天记录里就等于没有 owner —— 这正是本仓这两天反复在关的那类洞,不该由协调机制自己再制造一个。\n\n## 要补什么\n\n#4775 的 dev 被要求**在报告里写出那一行该说什么**。#4775 的 PR 合并后,那段文字会在其 PR 描述里,可直接取用。大意:\n\n> hook 的 `condition` 若求不出值(引用了未声明的 key、拼错、引用已退役字段),**该次写入失败**并抛出点名 hook 与 key 的错误 —— 不再静默跳过。`before*` 与 `after*` 同一方向。\n\n另需覆盖 #4800/B1 那一格:**predicate(`multi: true`)批量更新上 `previous` 不绑定**,所以引用 `previous.*` 的 hook 条件会让该对象的每次批量更新失败,错误会给出专门诊断。这一格对照着 §5 那张迁移表尤其要紧 —— 表在教人写 `previous.x`,而这条路在批量写上有边界。\n\n## 顺带\n\n你提到 #4763 也会动 `SKILL.md`。两者可以并进同一个 PR,也可以分开 —— 由你决定;本单只保证这件事有 owner、不丢。"
+}

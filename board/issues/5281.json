@@ -1,0 +1,35 @@
+{
+  "number": 5281,
+  "kind": "pull_request",
+  "title": "fix(core): 隔离 kernel:shutdown 分发,并让「超时」只报真超时 (#5274)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T15:32:27Z",
+  "updated_at": "2026-08-04T16:15:13Z",
+  "closed_at": "2026-08-04T16:15:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T16:15:11Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5281",
+  "body": "Fixes objectstack-ai/objectstack#5274\n\n按 issue 上的裁定取 **A**(隔离式分发 + 收紧超时 catch);B(向调用方 reject)未实现 —— `shutdown()` 今天从不 reject,改这一点对既有调用方是 breaking。\n\n## 问题\n\n`ObjectKernel.performShutdown()` 用 `this.context.trigger('kernel:shutdown')`(裸 await 循环、从不 catch),第一个抛错的 handler 一路冒到 `shutdown()` 的 `Promise.race` 外层 catch;而那个 catch 只为**超时**写的,把所有异常一视同仁。于是一个插件的坏 handler 同时造成三件事:\n\n1. 其余 `kernel:shutdown` handler 不再执行;\n2. **每一个**插件的 `destroy()` 被跳过 —— 逆序销毁循环排在 trigger 之后,根本没走到;\n3. 宿主进程被 `process.exit(1)` 杀掉,日志却写 `Shutdown timed out — forcing exit`,而实际什么都没超时 —— 读到这行的人会直奔 `shutdownTimeout` 配置去查一个 handler 的 bug。\n\n## 改动\n\n与 #5257 刚在 LiteKernel 停机分发点写下的理由对齐:\n\n**1. `kernel:shutdown` 在 ObjectKernel 上也改隔离式分发。** 抛错的 handler 记 `Hook handler failed: kernel:shutdown`,其余 handler 照常跑,随后是逆序 `destroy()` 与 `onShutdown()` handler —— 后两个循环本来就已经逐插件/逐 handler 隔离了,这行是停机路径上唯一没隔离的一步。排在失败 handler 后面的正是冲刷缓冲、关连接、放锁的清理,所以一个坏 handler 不该放大成泄漏和未落盘的写。\n\n⚠️ **boot 路径分发未动**:`kernel:ready` / `kernel:bootstrapped` / `kernel:listening` 仍然传播、仍然让 boot 失败(#5170 / #5258、#5257 / #5275)。\n\n**关于「复用 `triggerHook`」的取舍(裁定里让我说明选择)**:代码证据不支持直接复用。`ObjectKernel` **并不继承** `ObjectKernelBase`(只有 `LiteKernel` 继承),它有自己的私有 `hooks` map 和自己的 `context.trigger`,所以 `protected triggerHook` 从这里够不着。把共享实现抽成自由函数需要动 `kernel-base.ts` —— 超出本单声明的文件面,且与该文件今天的两次改动(#5258/#5275)有冲突风险。因此在 `kernel.ts` 内以私有方法**镜像**同一语义,日志行逐字相同(`Hook handler failed: kernel:shutdown`),并在方法注释里写明「为什么不能直接复用」。两侧各有具名回归测试,正是 #5170/#5257 关掉的「同一个钩子名在两个 kernel 上含义相反」那类 bug 的防线。\n\n**2. 超时 catch 收紧到只处理真超时**,靠**对象身份**区分,而不是消息匹配或 `instanceof`:\n\n```ts\nconst shutdownTimeoutError = new Error('Shutdown timeout exceeded');\n// …setTimeout(() => reject(shutdownTimeoutError), …)\n} catch (error) {\n    this.state = 'stopped';\n    if (error === shutdownTimeoutError) { /* 原样保留:日志 + process.exit(1) */ }\n    else { /* 记 error,走正常路径返回,不 exit */ }\n}\n```\n\n只有那个 `setTimeout` 能产生这个对象,所以插件抛什么都冒充不了它 —— 连 handler 自己 `throw new Error('Shutdown timeout exceeded')` 也不行。\n\n- **真超时路径原样不动**:仍记 `Shutdown timed out — forcing exit`,仍 `process.exit(1)`。此时 `performShutdown()` 确实还在跑且不再推进,进程本来就会挂住并攥着没释放的东西。\n- **非超时异常**:记 `error`(说明后果:内核已 stopped、进程**不会**被退出、可能有清理没跑完),按正常路径返回,**不** `process.exit`。嵌入式宿主(cloud auth-proxy、CLI、测试进程)因此保住了自己收尾的机会。`shutdown()` 依旧从不 reject,调用方无需改动。\n\n区分这两条路径是本单的核心,所以两条都单独 pin 住了。\n\n## 测试\n\n三个具名的逐行为用例(`packages/core/src/kernel.test.ts`,`Graceful Shutdown` 块内),用 `vi.spyOn(process, 'exit')` 拦截退出 —— 这正是 #5257 的开发者当时无法把该用例落在那个 PR 里的原因。\n\n| 用例 | 钉住的行为 |\n|:---|:---|\n| `runs the remaining kernel:shutdown handlers, every destroy() and every onShutdown handler when one handler throws` | issue 正文的复现:`reached` 必须是 `['later-shutdown', 'plugin-destroy', 'shutdown-handler']`,进程未被 exit,`state === 'stopped'` |\n| `names the failing handler and never reports a timeout that did not happen` | 记 `Hook handler failed: kernel:shutdown`;**不**出现 `Shutdown timed out`;停机确实完成,所以 `✅ Graceful shutdown complete` 照常打 |\n| `still logs the timeout and still forces exit(1) when shutdown genuinely times out` | 真超时(`shutdownTimeout: 20` + 永不 settle 的 handler)仍记超时文案、仍 `process.exit(1)` |\n\n**反证(把 `kernel.ts` 暂时 stash 回改前状态跑同三个用例)**:\n\n```\n× runs the remaining kernel:shutdown handlers … (#5274)\n  → expected [] to deeply equal [ 'later-shutdown', …(2) ]\n× names the failing handler and never reports a timeout … (#5274)\n  → expected [ 'Shutdown timed out — forcing exit' ] to include 'Hook handler failed: kernel:shutdown'\n✓ still logs the timeout and still forces exit(1) … (#5274)   23ms\n```\n\n改前的日志与 issue 探针输出逐字一致:`ERROR Shutdown timed out — forcing exit {\"error\":{\"message\":\"shutdown boom\"…}}`。注意第三个用例在改前改后**都**通过 —— 这正是它作为「行为未变」之 pin 的意义。\n\n## 影响面验证\n\n分支已 merge 当时的 `origin/main`(含 #5270、#5277,均未触及 `packages/core`),在容器验证锁下跑:\n\n```\n@objectstack/core:               27 files / 429 tests   passed\n@objectstack/runtime:            89 files / 1313 tests  passed\n@objectstack/client:             17 files / 222 tests   passed\n@objectstack/service-automation: 55 files / 665 tests   passed\n@objectstack/http-conformance:    2 files / 46 tests    passed\nconnector-{mcp,rest,openapi,slack}: 11 files / 79 tests passed\nTasks: 40 successful, 40 total\n```\n\n`node scripts/check-durability-degradation-log-level.mjs` ✓、`check-startup-registry-verdict.mjs` ✓(本 PR 新增了 catch 块,故一并跑)。\n\n**typecheck**:`@objectstack/core` 无 `typecheck` script(#4311 DEBT 台账)。在同一棵合并树上两侧实测 `tsc --noEmit -p packages/core/tsconfig.json`:**改前 95 → 改后 98(+3)**。三个新增全部是 `kernel.test.ts` 里新用例的 `init: async (ctx)` 报 TS7006 implicit-any,成因是该文件既有的 TS2835(`import … from './kernel'` 缺 `.js` 扩展名)—— 正是 AGENTS.md 记的那个陷阱:导入不解析 ⇒ 符号退化成 `any` ⇒ 其上的回调逐个报 TS7006。`kernel.ts`(源码)零新增错误,零 code-tier 新增。该 config-tier 债已由 #4311 台账中 core 条目明文记载(`code-tier 3; the rest is config-tier (TS2835/TS2347) and noise (TS7006)`),故未在本 PR 顺手修 —— 修它会重排整个文件的错误读数,属于另一件事。台账只要求条目存在、不比对数值(main 自身已从 91 漂到 95)。\n\n## 文档\n\n`content/docs/kernel/events.mdx` 里那句「`ObjectKernel` 的停机路径尚未与之一致(见 #5274)」被本改动证伪,改为如实描述两个 kernel 现在一致,并写明 `process.exit(1)` 只留给真正的 `shutdownTimeout` 超时。最小改动,只动这一句。\n\n## 范围\n\n严格限于认领时声明的文件面:`packages/core/src/kernel.ts`、`kernel.test.ts`、`content/docs/kernel/events.mdx`(一句)、一个 changeset。未动 `packages/spec/**`、`content/docs/releases/**`,也未碰在飞的 `metadata-protocol/src/protocol.ts`、`metadata/src/metadata-manager.ts`、`objectql/**`、`triggers/**`、showcase。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Pbu27iNUfQCHeuS551Rqo7\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Pbu27iNUfQCHeuS551Rqo7)_"
+}

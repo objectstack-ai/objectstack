@@ -1,0 +1,33 @@
+{
+  "number": 5139,
+  "kind": "issue",
+  "title": "E5c(#5040 执行器):`inputMapping` / `outputMapping` —— api-mapping 模块 + 执行链应用(E7 前必须落地或入不支持子集)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T06:00:18Z",
+  "updated_at": "2026-08-04T06:01:32Z",
+  "closed_at": "2026-08-04T06:01:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5139",
+  "body": "Part of #5040(E 系列补充单)。**Blocked-by: #5129(E5b 接线)**。来源:E5(PR #5136)诚实标出的范围缺口 —— 设计总表把映射列在 E5 行,但 R3 为并行解耦只派了 `endpoint-executor.ts` 文件面,两个键现处于「词表已声明、执行将忽略」的中间态,**E7 翻转前必须二选一**:\n\n## 方案 A(本单,优先):实现\n\n1. `packages/runtime/src/api-mapping.ts`(设计 §3.4):`inputMapping`(请求 → 管线入参投影)与 `outputMapping`(管线结果 → 响应体投影),语义**以词表 describe 为唯一依据**,不发明超出词表的表达力;\n2. 应用点:执行链内(E5b 落定的 策略 → 执行 之间/之后,按设计 §3 序),`endpoint-executor` 保持纯委派不感知映射;\n3. 测试:投影命中/缺省直通/非法映射的结构化 400。\n\n## 方案 B(回退):E7 把两键列入不支持子集\n\n若本单未能先于 E7 就绪,E7 的 publish 门将声明了 `inputMapping`/`outputMapping` 的端点按不支持子集**响亮拒绝**(处方指向本单),17.x 后续放行 —— 零静默 no-op 原则下这是合法回退,但产品面弱一档。E7(#5111)派发词须按当时本单状态选定 A/B。\n\n执行器车道程序卡(`session_01EYGdmvWP1ieZSLqvAW6uyd` 按序派发),其它车道请勿认领。关联:#5092(缺口来源)、#5129、#5111、#5040 设计 §3.4。"
+}

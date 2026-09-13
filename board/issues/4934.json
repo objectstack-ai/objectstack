@@ -1,0 +1,34 @@
+{
+  "number": 4934,
+  "kind": "pull_request",
+  "title": "fix(tooling): check-doc-authoring 的死 ROOT 改为点名硬报错 (#4916)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T16:33:44Z",
+  "updated_at": "2026-08-03T16:55:17Z",
+  "closed_at": "2026-08-03T16:55:15Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T16:55:15Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4934",
+  "body": "Fixes #4916\n\n`scripts/check-doc-authoring.mjs` 的 `collectFiles()` 把每条 root 的遍历包在 `try { walk(r, files); } catch {}` 里。`.claude` / `skills` / `content` 任何一条被改名、移动或删除,ENOENT 就地被吞,门禁跑完**剩下的** root 然后打印 `✓ doc authoring guard: N files clean`,exit 0。从外部看,\"三个 root 都干净\"和\"其中一个压根没被打开\"是同一行绿字,只是 N 小了 —— 而没人读 N。\n\n## 缺陷实测(旧代码,当前这棵树)\n\n```\n=== OLD code, all roots present ===\n✓ doc authoring guard: 219 files clean — no bare metadata literals.\nexit=0\n=== OLD code, .claude renamed away ===\n✓ doc authoring guard: 215 files clean — no bare metadata literals.\nexit=0\n=== OLD code, --self-test with .claude renamed (still green) ===\n✓ check-doc-authoring self-test: scope wiring (.claude in, .claude/worktrees out) and detection both hold.\nexit=0\n```\n\n219 → 215,exit 仍是 0。第三段是本单相对 #4915 的增量所在:#4913 加的 `--self-test` 在**自己的临时树**上断言,所以仓库里真实的 `.claude/` 被改名时它照样绿。\n\n## 选的是硬报错,不是白名单 —— 理由\n\n**没有白名单,也没有 `optional: true` 开关**,这是刻意的:`.claude`、`skills`、`content` 三条都是 **git 跟踪的目录、里面有跟踪的文件**,所以任何一个能在仓库根跑 `pnpm check:doc-authoring` 的检出都不会合法地缺其中之一 —— 议题里假设的\"某个 root 在某些检出形态下合法缺席\"经核查**不存在**,白名单没有要装的东西。\n\n而\"先留着以防万一\"是有代价的:一个 `optional` 标记等于给下一个作者一条**受支持的**路去让这个失败闭嘴,而不是去跟进改名 —— 那就是空 `catch {}`,只是说得客气些。真有 root 变成合法缺席的那天,那是一个需要连同条件和测试一起记录的**决定**,不是把检查放松。\n\n顺带把 walk **内层**的容错也去掉了:遍历途中出错同样意味着语料只读了一半,那也不该打印成一次干净的扫描。\n\n新增 `assertRootsResolvable()` 在任何遍历之前跑,对每条 root 抛 `DeadRootError` 并带上名字(缺失 / 读不到 / 存在但不是目录三种判据分开)。\n\n## 双向证明\n\n**红 —— 真实仓库树,`.claude/` 改名走开:**\n\n```\n✗ doc authoring guard: declared ROOT(s) do not resolve, so the scan would have been silently narrower:\n\n  .claude — does not exist\n\nEvery entry in ROOTS (scripts/check-doc-authoring.mjs) must be a directory in the checkout,\nand this check runs from the repo root. If a corpus directory was renamed or moved, update\nROOTS to follow it; if it was deleted, remove the entry deliberately. Do NOT restore a\ntolerant skip: this used to be `catch {}`, and a dead root simply shrank the reported file\ncount while the gate kept printing green (#4916).\n\nexit=1\n```\n\n**红 —— 同时两条死根,两条都点名(存活的 root 不背锅):**\n\n```\n  .claude — does not exist\n  content — does not exist\nexit=1\n```\n\n**绿 —— 两条都恢复之后:**\n\n```\n✓ doc authoring guard: 219 files clean — no bare metadata literals.\nexit=0\n✓ check-doc-authoring self-test: ... and the dead-root hard error (red when a ROOT is renamed, green when restored) all hold.\nexit=0\n```\n\n**这条红-绿证明已经折进 `--self-test`,常驻每一次 CI**,不是只活在这段 PR 描述里:自检现在会在运行中途把一条 root 改名走开、要求判红**且点名那条 root、且不提及存活的两条**,再把另一条 root 换成同名文件、要求 `exists but is not a directory` 判据,然后两条都恢复、要求重新判绿。只观察到绿,对一个\"失败表现为少扫一点\"的门禁来说什么也证明不了 —— 所以自检每次都先观察红。\n\n## 对称方向的调查结论(#4851 的经验)\n\n#4851(PR #4921)在隔壁脚本上揭示的不只有 16 条死条目,还有 48 份从未被列过的文档。所以本单也查了反方向:**有没有真实存在、应当被这条规则约束、却从来不在 `ROOTS` 里的语料目录?**\n\n**有。** 全仓 md/mdx 逐个走 ts 围栏块统计后:\n\n- **`docs/`** —— `docs/notes/crm-development-standards.mdx`(16 个 ts 块 / 3 处 `defineX(`)、`docs/adr/0010`、`0015`、`0017`、`0057`、`docs/design/permission-model.md` 都在 ts 围栏里教 metadata 编写。这是 agent 会读的手写语料(Prime Directive #13 要求改 ADR 治下行为前先 grep ADR),和 #4913 把 `.claude` 纳入的理由是同一条。\n- **`.codex/`(#4913 的 dev 提过的同类目录)本检出里不存在**,且 `.gitignore:123` 就是 `.codex/` —— 纯本地不入库,CI 永远看不到,**不该进 ROOTS**(进了反而会让本 PR 的硬报错在没有 `.codex/` 的机器上误红)。这条查过了,是\"没有\"。\n- 核对过确认不是语料的:`examples/`、`apps/`、`packages/**/README.md`、根目录 md,零命中。\n- 全仓**当前零违规**,ROOTS 内外都是 —— 所以这些是**尚未腐烂的盲区**,不是已烂的现场。\n\n**本 PR 刻意没有改 `ROOTS`**:纳入哪些 `docs/` 子目录(`docs/audits/` / `docs/handoff/` 这类一次性过程记录纳入等于让历史快照永久受当前 lint 约束)是个范围决定,单独立单 **#4929** 交维护者定。\n\n## 顺带扫到的同形状(**未在本 PR 修**)\n\n三条 `check:*` 脚本是同一缺陷的更彻底版本 —— 扫描根读不到时 walker **返回空数组**,于是收集到 0 个文件、循环一次不进、exit 0:`check-single-authz-resolver.mjs:38`、`check-startup-registry-verdict.mjs:217`、`check-driver-conformance.mjs:147`。单独立单 **#4930**,顺手全改会让这条 PR 失焦。判定为**不同形状、不该一起改**的(glob 展开中途的跳过、已记账的跳过、已声明的 exit 0)在该单里逐条写明。\n\n## 验证\n\n```\n$ pnpm check:doc-authoring\n✓ check-doc-authoring self-test: scope wiring (.claude in, .claude/worktrees out), detection, and the dead-root hard error (red when a ROOT is renamed, green when restored) all hold.\n✓ doc authoring guard: 219 files clean — no bare metadata literals.\nexit=0\n\n$ npx eslint scripts/check-doc-authoring.mjs\nexit=0\n```\n\n## 范围\n\n只动了 `scripts/check-doc-authoring.mjs` 一个文件,外加一份空 frontmatter 的 changeset(tooling 改动,不发版)。**没有**改根 `package.json`,**没有**改 `.github/workflows/` —— `check:doc-authoring` 已经在 `package.json:36` 里是 `--self-test && 实跑` 的组合,`lint.yml:95` 已经调它,新的自检断言自动生效,无需碰这两个本仓最热的冲突点。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018iARDqtrhQgz6fVHDeDkbQ)_"
+}

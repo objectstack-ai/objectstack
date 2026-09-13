@@ -1,0 +1,39 @@
+{
+  "number": 5114,
+  "kind": "issue",
+  "title": "控制台保存筛选条件会 422:`ViewFilterRuleSchema` 拒绝 filter-builder 盖的 `id`,而 wire 成员的 `.strip()` 救不到嵌套块",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue",
+    "priority:p1",
+    "target:v17"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T05:08:16Z",
+  "updated_at": "2026-08-04T07:41:50Z",
+  "closed_at": "2026-08-04T07:41:50Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5114",
+  "body": "发现于 #4001 批 18,**现存于 `main`,不是本批引入的**。批 18 在自己的 `ListView.sort` 上撞到同一机制并及时回退,顺手把这条已落地的实测出来。\n\n## 事实(实测,非阅读推断)\n\n`ViewFilterRuleSchema` 在批 18 之前的某一批已收紧为 `strictObject`。objectui 的筛选构建器**每行都盖一个 `id`**:\n\n- `objectui/packages/components/src/custom/filter-builder.tsx:228` —— `id: crypto.randomUUID()`\n\n在 `origin/main` 上直接 parse:\n\n```\nViewFilterRuleSchema.safeParse({ id:'c0ffee00-…', field:'stage', operator:'equals', value:'won' })\n  => REJECTED  unrecognized_keys: [\"id\"]\n     \"Unrecognized key(s) on this view filter rule: `id`. …\"\n\nListViewSchema.safeParse({ columns:['name'], filter:[<同一行>] })            => REJECTED\nViewMetadataSchema.safeParse({ type:'grid', columns:['name'], filter:[…],\n                               name:'o.default', viewKind:'list', object:'o' }) => REJECTED\n```\n\n第三行是关键:那是**扁平化 personalization overlay** 的形状,也就是控制台 PUT 真正发出的 body。它命中 `ViewMetadataSchema` 的扁平成员——那个成员是刻意 `.strip()` 的——**然而依旧被拒**。\n\n## 机制(这条比这个 bug 本身更值钱)\n\n**`.strip()` 不递归,和 `.strict()` 一样不递归。**\n\n`ViewMetadataSchema` 用扁平成员上的 `.strip()` 来放行 Studio 的往返辅助键,`view.zod.ts` 里那段块注释也是这么写的。但 `.strip()` 只重新打开**顶层**。任何在 `ListViewSchema` 内部被收紧的**嵌套块**,仍然经由那个成员被解析——所以嵌套块里一个控制台盖的键,**无论成员姿态如何都会 422**。\n\n这意味着这个战役在 `view.zod.ts`(以及任何有 wire overlay 成员的形状)上收紧嵌套块时,`.strip()` 的救援是**够不到的**,而块注释读起来像是够得到。批 18 已就地把那段注释改成实测描述,并在 `view-strictness-batch18.test.ts` 里钉住了这条递归性质。\n\n## 影响\n\n控制台改一次筛选条件并保存 → `saveMetaItem` 的 `safeParse` 失败 → **422**。凡是经由 filter-builder 落盘的 view personalization 都受影响。\n\n⚠️ 我**没有**跑起真实 app 点一次筛选去端到端确认(批 18 的范围不在这)。上面是 schema 层的直接 parse 证据 + 产出端的 `randomUUID` 站点;端到端复现请按 `.claude/skills/dogfood-verification` 走一遍再动手。\n\n## 处方(倾向,不代劳裁定)\n\n与 #5074 同族,**别就地声明 `id` 了事**:它是 React 列表键,不是协议。声明它等于把 UI 造物放进可授权面,并且会教 AI 作者去生成一个 UUID —— 正是本战役要防的那类「声明即鼓励」。\n\n方向应当与 #5074 一致:**授权形状收紧、wire 形状单独开放**,且开放必须能**递归**到嵌套块(这正是当前 `.strip()` 做不到的那一半)。可选做法之一是让 personalization 写路径在校验前剥掉这类 UI 造物(与 `stripReadDecorations` 同款范式,只是方向相反——那边剥的是读路径装饰键)。\n\n## 复核用最小脚本\n\n```ts\nconst V = await import('@objectstack/spec/ui');\nconst row = { id: 'c0ffee00-dead-beef-cafe-000000000000', field: 'stage', operator: 'equals', value: 'won' };\nconsole.log(V.ViewFilterRuleSchema.safeParse(row).success);            // false\nconsole.log(V.ListViewSchema.safeParse({ columns:['name'], filter:[row] }).success); // false\n```\n"
+}

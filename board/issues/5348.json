@@ -1,0 +1,36 @@
+{
+  "number": 5348,
+  "kind": "issue",
+  "title": "driver-sql 把**文档级**未声明 `$op`(`{$where:…}`、`{$nor:[…]}`)当成列名编译,静默返回空结果集 —— #5324 的文档级一半在 SQL 侧还在",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T00:05:30Z",
+  "updated_at": "2026-08-05T02:17:26Z",
+  "closed_at": "2026-08-05T02:17:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5348",
+  "body": "修 #5324(driver-memory 的未知 `$op` 透传)时,把同一批输入喂给 driver-sql 做信封对照,发现 SQL 侧在**文档级**位置有同一条缝,且症状比 memory 侧更隐蔽。按 Prime Directive #10 单独记在这里,unassigned。\n\n## 实测原文\n\n`SqlDriver` + better-sqlite3 `:memory:`,单行 `{ id: '1', stage: 'won', score: 10 }`:\n\n```\nWHERE {\"$where\":\"return true\"}        =>  RESOLVED []      // 期望:INVALID_FILTER / 400\nWHERE {\"$nor\":[{\"stage\":\"won\"}]}      =>  RESOLVED []      // 期望:INVALID_FILTER / 400\n```\n\n对照组 —— **字段级**同类输入在 SQL 侧是正确的,一直都是:\n\n```\nWHERE {\"stage\":{\"$sounds_like\":\"won\"}}  =>  THROW code=INVALID_FILTER status=400\n        Unsupported filter operator \"$sounds_like\" on field \"stage\". Supported operators: …\nWHERE {\"score\":{\"$between\":5}}          =>  THROW code=INVALID_FILTER status=400\n        Operator \"$between\" on field \"score\" requires a [min, max] value array.\n```\n\n## 机制\n\n`FilterConditionSchema` 在**节点**位置只声明三个 `$` 键(`LOGICAL_OPERATORS`:`$and` / `$or` / `$not`),其余键都是字段名。`applyFilterCondition` 的分支结构正是按这个假设写的,但没有任何一处**检查**这个假设:\n\n- `reduceFilterKey`(#5134 的形状门)对一个不认识的 `$` 键直接 `return 'clause'` —— 注释写的是「A field key always contributes a predicate」,即它把 `$where` 当作了字段键;\n- 于是发射器落到最后的 else 分支,`remoteColumn(table, '$where', …)`,把 `$where` 当**列名**编译。\n\n结果不是报错,而是一个匹配不到任何行的谓词 —— **静默的空结果集**,和 #5328 在 driver-memory 上的 `$between` 是同一个症状。\n\n`{$nor:[…]}` 更值得看一眼:它的值是数组,连 `typeof value === 'object' && !Array.isArray(value)` 这一支都进不去,同样落到 else,同样静默。\n\n## 为什么是 bug\n\n1. **同一个驱动,两个位置两种答案。** 字段级未知算子响亮拒收(#3948 / #4436 的成果),文档级未知算子静默返回空 —— 而调用方分辨不出「真的没有匹配」和「过滤器根本没编译」。这与 #5041 记录的形状完全一致:那一条也是「查询编译了、跑了、返回零行」,并且当时的结论是「A silent wrong answer is what #3948 / #4209 settled is strictly worse than an error on a permission-scoped read」。\n2. **`$where` 这个名字不是随便举的例子。** driver-mongodb 的 `default` 分支注释专门点名 `$where` / `$function` / `$expr` 是 P0 —— 一个未声明的 `$op` 被后端当真求值会绕过查询意图。SQL 侧目前不会求值它(它变成了列名),但「未声明的键悄悄改变了 WHERE 的含义」这件事本身就该拒收。\n3. **四家后端现在只剩它。** driver-memory 在本轮(#5324)已经对文档级未声明 `$op` 抛 `INVALID_FILTER` / 400;driver-mongodb 的 `translateCondition` 至少不会把它编成列(落到 `default` 的字段分支);SQL 是唯一把它编成列名并静默的。\n\n## 建议(不代裁决)\n\n在 `reduceFilterKey` 里(而不是发射器里)补一条:节点位置上以 `$` 开头且不在 `LOGICAL_OPERATORS` 中的键,抛 `unsupportedFilterError`。理由与 #5240 把 `{field:{}}` 的拒收放在这条验证走查上完全相同 —— 这条走查是穷尽的、不短路的,放在发射器里会让「refused or ignored depending on its SIBLINGS」(该函数自己的注释)重演。\n\ndriver-memory 侧的实现可以逐字参照:`packages/plugins/driver-memory/src/filter-refusal.ts` 的 `unknownLogicalOperatorError` + `assertFilterConditionShape`。\n\n## 未验证的部分\n\n我只实测了 better-sqlite3 一个方言(其他方言把 `\"$where\"` 当列名的行为可能是**报错**而不是返回空 —— 那样症状不同但病因相同)。也没有清点仓内是否真有产出文档级未声明 `$op` 的生产者;这更像是 AI 生成的元数据或手写 scope 的失误路径。严重度请 PM 按 triage 定,不代表我判断它低。\n\n关联:#5324(driver-memory 的同一条缝,文档级 + 字段级都已修)、#5328、#5134(`reduceFilterNode` 形状门)、#5240(为什么拒收要放在走查上)、#5041(「编译了、跑了、返回零行」的先例)、#4436(信封)。"
+}

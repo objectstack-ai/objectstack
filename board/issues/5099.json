@@ -1,0 +1,35 @@
+{
+  "number": 5099,
+  "kind": "issue",
+  "title": "data: batchData 的 upsert 分支用「调用者可见性」而非「存在性」决定 update-or-insert —— RLS 作用域外的既有行会走插入分支",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T04:25:33Z",
+  "updated_at": "2026-08-04T08:40:47Z",
+  "closed_at": "2026-08-04T08:40:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5099",
+  "body": "读 #5088(by-id 批量写补存在性闸门)时在同一个循环里读到的相邻问题,**未在本次 PR 范围内修改**(#5088 的验收面只含 update / delete 两个分支)。\n\n## 现状\n\n`packages/metadata-protocol/src/protocol.ts`,`runBatchDataLoop` 的 `upsert` 分支,用**调用者的**执行上下文去问「这条记录在不在」:\n\n```ts\nconst existing = await this.engine.findOne(object, { where: { id: record.id }, ...ctxOpt } as any);\nif (existing) {\n    // update\n} else {\n    // insert,并把 record.id 一起写进去\n}\n```\n\n`ctxOpt` 就是 REST 透传下来的 caller context(#3455 特意接上的),所以 RLS / sharing 会收窄这次读。也就是说:**exists-or-insert 这个分岔是按「可见性」判的,不是按「存在性」判的。**\n\n同文件 `probeRecord` 的注释把这条区分写成了承重点(#4435):\n\n> Does this row EXIST? A fact about the database — deliberately NOT \"may this caller see it\".\n> …probing with the CALLER's context turns the existence gate into an authorization gate\n\n单记录 `updateData` 因此用系统上下文探针;`upsert` 这里是同一个区分**朝反方向**踩空。\n\n## 影响\n\n一个受行级作用域限制的调用者 upsert 一个**确实存在、但在他作用域之外**的 id 时,会进入 insert 分支:\n\n- 好一点的情况:主键唯一约束拒绝插入 → 非 atomic 路径的 catch 里还会再插一次(那里是 ADR-0119 D4 留的 fallback),最终以一个 duplicate-key 报错收场 —— 一个 authorization/update 语义的场景,被报成了主键冲突,和 #5088 里「用错误的诊断误导操作者」是同一类误导。\n- 差一点的情况:目标表/驱动没有对该 id 的唯一约束时,会写出重复行。\n\n顺带一提,即使不谈 RLS,这里也和 #5088 修完之后的 update / delete 分支口径不一致了:那两个分支现在问存在性,upsert 仍问可见性。#4620 对本文件的要求是三个 bulk 写面共用一份口径。\n\n## 需要拍板的地方(所以没有顺手改)\n\nupsert 的正确语义不是显然的,有两种读法,后果不同:\n\n1. **改用 `probeRecord`(存在性)**:作用域外的既有行走 update 分支,写不写得进去交回 `engine.update` 里 #1994 的 by-id 前像检查决定 —— 与 #4435 / #5088 的取向一致,授权判断留在写策略那一层。\n2. **维持可见性语义**:则至少要让 insert 失败时报出可理解的错误,而不是裸的 duplicate-key。\n\n倾向 1(和已确立的「探针只问存在性、授权归写策略」一致),但这会改变一个已发布端点在 RLS 部署下的可观察行为,按契约优先的规矩应由维护者定,不由实现方顺手决定。\n\n## 复现状态\n\n**据源码判读,未做端到端复现**(需要一套带行级策略的 fixture + upsert 批量请求)。分类与优先级请按 triage 轮次判定 —— 这里只做如实记录。\n\n发现于 #5088 的实现过程。\n\nhttps://claude.ai/code/session_01BotUP49pqhvqGY393n2HfU"
+}

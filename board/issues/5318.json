@@ -1,0 +1,35 @@
+{
+  "number": 5318,
+  "kind": "pull_request",
+  "title": "fix(spec): app 表单摘掉八个已退役的墓碑键输入,#3786 对账门改判「真实可授权面」(#5280)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T19:01:15Z",
+  "updated_at": "2026-08-04T22:24:58Z",
+  "closed_at": "2026-08-04T22:24:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T22:24:56Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5318",
+  "body": "Fixes #5280\n\n## 前提核验(origin/main @ de113a4,带阳性对照)\n\n三条都成立,但**范围比单子写的大**:issue 点名三个键(`sharing` / `embed` / `mobileNavigation`),按范围第 3 条全量扫下来,`app.form.ts` 一共在提供**八个** `retiredKey()` 墓碑键。\n\n```\napp.sharing:          in shape=true innerType=never isRetired=true\napp.embed:            in shape=true innerType=never isRetired=true\napp.mobileNavigation: in shape=true innerType=never isRetired=true\napp.navigation:       in shape=true innerType=union isRetired=false   ← 阳性对照\napp.label:            in shape=true innerType=string isRetired=false  ← 阳性对照\n\nform offers ∩ retired: [\"version\",\"homePageId\",\"mobileNavigation\",\"objects\",\"apis\",\"sharing\",\"embed\",\"aria\"]\n\nsafeParse sharing:          success=false :: `App.sharing` was removed in @objectstack/spec 17.0.0 …\nsafeParse embed:            success=false :: `App.embed` was removed in @objectstack/spec 17.0.0 …\nsafeParse mobileNavigation: success=false :: `App.mobileNavigation` was removed in @objectstack/spec 17.0.0 …\ncontrol (no retired key):   success=true\n```\n\n另外五个(`version` / `homePageId` / `objects` / `apis` / `aria`)与点名的三个同类同因:都是 17.0.0 的 `retiredKey()` 墓碑,处方都落在**别的层**(`manifest.version`;`navigation` 首项 + `isDefault`;`defineStack({ objects })`;`defineStack({ apis })`;渲染 DOM 的组件),没有一个部分映射到 App 自身的活键,所以八个的摘除都是机械操作,按范围第 3 条「发现的一并修」同 PR 处理。\n\n## 1) 表单(范围 1+3)\n\n八个 `{ field: … }` 输入全部移除,按套件惯例在原位留注释说明能力去向。另有两个分区描述本身还在宣传已退役能力(`Content` 的 \"Objects and APIs this app uses.\"、`Access & sharing` 的 \"…and how it can be embedded.\"),一并订正为真实语义。\n\n## 2) 门谓词(范围 2 —— 本单真正的价值)\n\n#3786 的断言用 `key ∈ shape` 判「Zod accepts」。`retiredKey()` **按设计**把键留在 walked shape 里(退役套件的 liveness 行正因为键还在才保留),于是墓碑键对该断言永远为真 —— 门绿着,作者拿到 422。\n\n谓词收紧为「∈ shape 且不是墓碑」,**双向都改**:\n\n- **form-only** 拆成两条独立断言,失败信息分得清「未声明 → 静默丢弃」与「墓碑 → 硬失败」。后者更响也更早,原断言的措辞(\"silently stripped on save\")只覆盖了两种失败里的一种。\n- **zod-only** 把墓碑键排除出「必须提供或立 ledger」的集合 —— 墓碑键的唯一正确处置就是不提供。此前 `object.fields.conditionalRequired` 没被要求回填,纯属被一条无关的 `subset` ledger 条目挡住,是运气不是设计。\n- **ledger 自检**(`omit` 的存在性、`subset` 的非空性)改用 authorable 键计数,免得墓碑撑住一条已失效的豁免。\n\n检测器判 **schema 节点**(optional 内层是否 `z.never`),不匹配键名 —— 键名清单本身就是 #3786 要消灭的手抄列表。这是 `build-schemas.ts` 里 JSON Schema 侧 `isRetired()`(`{ \"not\": {} }`)的 zod 侧孪生。union 取安全方向:只要有一个成员仍把该键声明为活键,就不算退役。\n\n## 3) RED-first 实证(方向先预测,后运行)\n\n预测:谓词收紧、表单未改时,`app` 那条用例**红**,恰好点名八个键;其余类型与两条 nested 方向不变。实测一致:\n\n```\n ❯ src/system/metadata-form-zod-reconciliation.test.ts (41 tests | 1 failed)\n     × app: every field the form offers is a key the author may write\n\nAssertionError: app: offered by the form but RETIRED in the Zod (retiredKey tombstone —\nfilling the control hard-fails the save)…: expected [ 'apis', 'aria', 'embed', …(5) ] to deeply equal []\n+   \"apis\", \"aria\", \"embed\", \"homePageId\", \"mobileNavigation\", \"objects\", \"sharing\", \"version\"\n\n Tests  1 failed | 40 passed (41)\n```\n\n摘掉输入后 `41 passed (41)`。\n\n自检钉在**合成 schema** 上而非当期某个墓碑:墓碑会随版本退场(`retired-key.ts` 写的约两个大版本),锚在活墓碑上的自检要么烂尾,要么在锚被删的那一版**悄悄空转** —— 一条什么都不过滤却依旧报绿的门。四条自检覆盖:墓碑留在 shape 里(即 `key ∈ shape` 为何是错谓词)、值被硬拒且带处方、按节点而非键名判定、union 成员仍 live 时不算退役。\n\n## 4) 全量扫(范围 3)\n\n17 个 `*.form.ts` 全部在册(`METADATA_FORM_REGISTRY` 覆盖),顶层 + 手写 nested 列表一起扫。修复后:\n\n```\ntombstone keys still offered by ANY form: 0\napp form final fields: name,label,description,icon,active,isDefault,navigation,areas,defaultAgent,branding,requiredPermissions\napp tombstones still in shape (必须保留 —— 墓碑路线): version,homePageId,objects,apis,sharing,embed,mobileNavigation,aria\n```\n\n其余带墓碑的类型(`field` / `view` / `dashboard` / `action` / `agent` / `skill` / `flow`)的表单**没有**在提供它们,本单无需改动。**未删除任何墓碑**,只删表单控件 —— liveness 行依赖键继续留在 shape 里。\n\n## 5) i18n\n\n表单输入变动会带走抽取键,四个 `*.metadata-forms.generated.ts` 按 merge 模式重生成(纯删除,每个 bundle 8 组 field 键)。两个分区描述的 leaf 值按「bundle 值可手写」的惯例手工订正 —— merge 模式不会用源文覆盖已有值,不改的话渲染出来的仍是旧文案(zh-CN 的 basics/navigation 甚至点名「版本」「首页」两个已退役键)。\n\n## 验证\n\n| 命令 | 结果 |\n|---|---|\n| `vitest run src/system/metadata-form-zod-reconciliation.test.ts` | 41 passed (41) |\n| `pnpm --filter @objectstack/spec test` | 308 files / 7959 tests passed |\n| `pnpm --filter @objectstack/spec check:generated` | 9/9 up to date |\n| `pnpm check:i18n` | OK(9 包全部 in sync) |\n| `pnpm check:i18n-coverage` | OK(660 baselined,none new) |\n| `pnpm --filter @objectstack/spec --filter @objectstack/platform-objects typecheck` | Done |\n| `pnpm --filter @objectstack/cli test` | 69 files / 626 tests passed |\n| `pnpm --filter @objectstack/lint test` | 57 files / 1198 tests passed |\n| `pnpm --filter @objectstack/platform-objects test` | 9 files / 266 tests passed |\n| `node scripts/check-nul-bytes.mjs` | OK(5343 文件,无裸 NUL) |\n\n消费半径按门的调用方扫过(不是按改动的包):`METADATA_FORM_REGISTRY` 的消费方是 `packages/cli` 的 i18n 抽取/覆盖率、`packages/lint` 的翻译引用校验、`packages/platform-objects` 的 bundle,三者的测试都跑过。\n\n已 `git merge origin/main`(合入 #5289 / #5293 / #5296 / #5302 / #5303),生成物整体重生成而非文本合并,合并后全部门重跑并确认兄弟 PR 的条目仍在。\n\n## 范围外发现\n\n- **#5313** —— `content/docs/ui/apps.mdx` 仍在教 `version` 与 `mobileNavigation` 两个墓碑键(含两个 `os:check` 示例块 + 属性表一行 + 整节 `## Mobile Navigation`);照抄「Basic Structure」示例实测 `parses: false`。`check:skill-examples` 看不见是因为它只跑 tsc,而这两个块是**无类型标注的对象字面量**,`never` 入参类型不参与推断。同类不同页已有 #5291。手写文档面不在本单范围内,未在本 PR 修改。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ErbEDVAg1No9gdg1pgDAGB\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ErbEDVAg1No9gdg1pgDAGB)_"
+}

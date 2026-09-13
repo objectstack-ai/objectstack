@@ -1,0 +1,36 @@
+{
+  "number": 4884,
+  "kind": "issue",
+  "title": "[schema-drift] Fresh DB boots \"drifted\": detector can't read COALESCE index columns, then tells the operator to --allow-destructive away a legitimate unique index",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T13:11:08Z",
+  "updated_at": "2026-08-03T17:55:06Z",
+  "closed_at": "2026-08-03T17:55:06Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4884",
+  "body": "## What happens\n\nBoot `examples/app-showcase` on a **brand-new empty SQLite file**\n(`os dev --seed-admin -d file:/tmp/fresh.db`). Before the server is even ready:\n\n```\n[schema-drift] sys_metadata: index 'idx_sys_metadata_overlay_active' is UNIQUE (type, name, organization_id)\n  but metadata declares UNIQUE (type, name, organization_id, package_id) — the additive sync skips it by name,\n  so it must be rebuilt. Creating the UNIQUE index can fail on existing duplicates: \"os migrate apply --allow-destructive\".\n\n[schema-drift] sys_metadata: index 'idx_sys_metadata_overlay_draft' UNIQUE (type, name, organization_id)\n  carries ObjectStack's generated naming but matches no declared index (orphaned) —\n  \"os migrate apply --allow-destructive\" to drop it.\n```\n\nA database created seconds ago, by this build, cannot meaningfully be *drifted*\nfrom its own declaration. Both warnings are false, and the second one is\nactively dangerous.\n\n## Both indexes are correct — the detector misreads them\n\nWhat is actually in the fresh DB:\n\n```sql\nCREATE UNIQUE INDEX idx_sys_metadata_overlay_active\n  ON sys_metadata (type, name, organization_id, COALESCE(package_id, '')) WHERE state = 'active';\nCREATE UNIQUE INDEX idx_sys_metadata_overlay_draft\n  ON sys_metadata (type, name, organization_id, COALESCE(package_id, '')) WHERE state = 'draft';\n```\n\nBoth are exactly what `protocol.ts` `ensureOverlayIndex` (~L2165-2190) is\n*designed* to create, and the ADR-0048 comment there explains why the\n`COALESCE(package_id,'')` form is the canonical one: a plain unique index treats\nNULLs as distinct, so package-less globals would not be unique among themselves.\n\n`sys-metadata.object.ts` (~L205-218) even says so outright — the\n`['type','name','organization_id','package_id']` declaration is *\"the fallback\nshape for drivers without the runtime migration\"*, not the shape the SQL driver\nis expected to end up with.\n\nSo two separate misreads:\n\n1. **`overlay_active`** — the detector cannot parse the `COALESCE(package_id, '')`\n   expression column. It drops it, reads the live index as\n   `(type, name, organization_id)`, and reports a mismatch against a 4-column\n   declaration. The 4th column is *there*; it is just an expression.\n2. **`overlay_draft`** — created by the same runtime path, has no counterpart in\n   the object declaration at all, so the detector classifies it as **orphaned**.\n\n## Why #2 is the dangerous one\n\nThe remedy printed for the \"orphaned\" index is:\n\n> `\"os migrate apply --allow-destructive\"` to drop it.\n\n`idx_sys_metadata_overlay_draft` is the unique index enforcing **draft-overlay\nuniqueness**. An operator following our own boot advice would drop a live data-\nintegrity guarantee — on a healthy database, to fix a problem that does not\nexist. That is the opposite of what a destructive-migration prompt should ever be\npointed at.\n\nIt also trains operators to treat `--allow-destructive` as routine boot hygiene,\nwhich is precisely the habit that makes the *next* real drift warning dangerous.\n\n## Suggested direction\n\n- Teach the drift comparator to normalize expression columns (`COALESCE(x,'')` ≡\n  `x` for identity purposes) before diffing, so the canonical runtime index\n  compares equal to its declaration.\n- Let a runtime-managed index declare itself as such, so `overlay_draft` is not\n  orphan-by-omission. Either add it to the `sys-metadata` declaration or give\n  `ensureOverlayIndex`-created indexes an exemption the detector honours.\n- Never emit an `--allow-destructive` remedy for an index the framework itself\n  created on this same boot.\n\n## Repro\n\n```\ncd examples/app-showcase\nnode ../../packages/cli/bin/run.js dev --ui --seed-admin -p 3000 -d file:/tmp/fresh.db\n# both [schema-drift] lines appear before \"Server is ready\"\nsqlite3 /tmp/fresh.db \".schema sys_metadata\" | grep overlay\n```\n\nObserved on `main` @ 0e96e46 with `SqlDriver(better-sqlite3)`, single-tenant.\n\nFound while browser-sweeping showcase + Studio for #4879."
+}

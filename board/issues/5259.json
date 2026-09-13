@@ -1,0 +1,36 @@
+{
+  "number": 5259,
+  "kind": "issue",
+  "title": "`unregister()` 先失效 listCache 再删 loader:删除落库前到达的并发 list() 会把「已删项」重新缓存满 30s,之后没有任何东西再失效它",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T13:13:26Z",
+  "updated_at": "2026-08-04T15:11:08Z",
+  "closed_at": "2026-08-04T15:11:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5259",
+  "body": "发现于 #5253(`list()` single-flight)实现期,**不在该单范围内**(改的是 `unregister()` 的顺序,不是 `list()`),故单独立卡。已验证为**既有缺陷**:在 `origin/main` @ `c794f789f`(含 #5251)与 #5253 的改动上表现完全一致,不是 single-flight 引入的。\n\n## 现象\n\n`packages/metadata/src/metadata-manager.ts` 的 `unregister()` 顺序是:\n\n1. 从 `registry` 删掉该项;\n2. `this.invalidateListCache(type)`;\n3. `await loader.delete(type, name)` —— 对每个可写的 `datasource:` loader;\n4. `publishRealtimeMetadataEvent` / `notifyWatchers`。\n\n第 2 步与第 3 步之间有一个真实的 await 窗口(一次 DB 往返)。窗口内到达的 `list(type)`:\n\n- 缓存刚被失效 ⇒ miss;\n- `registry` 已经没有该项,但 **loader 还有**(删除尚未落库);\n- 于是读出「已删项」,并按**完整读**写进 `listCache`,拿到 30s 的健康 TTL。\n\n第 3 步完成后**没有任何东西再失效一次** —— `notifyWatchers()` 只走 watch 回调(`notifyWatchersLocal` + 集群 publish),不碰 `listCache`;`invalidateListCache` 在本次 `unregister()` 里只被调用过那一次,而且是在删除落库**之前**。结果:一个已经从存储里删掉的项,继续从缓存里被 `list()` 端出来最多 30s。\n\n`register()` 没有这个问题:它先把新值写进 `registry`(第 1 步),而 `list()` 合并时 `registry` 优先于 loader,所以窗口内的读读到的是写后的值。只有删除方向是「registry 先空、loader 后空」,中间那段时间 loader 是唯一的真相来源,而它还是旧的。\n\n## 复现(已跑通)\n\n临时探针,`packages/metadata/src/` 下,vitest:\n\n```ts\n// loader:protocol 'datasource:'、capabilities.write = true、\n// delete() 挂在一个闸门上,release() 之后才真正从 store 里删。\nawait manager.register('view', 'doomed', { name: 'doomed' });\n\nconst removal = manager.unregister('view', 'doomed');  // 停在 await loader.delete 上\nawait Promise.resolve();\n\n// 窗口内的并发读:registry 已空,loader 还在\nconst during = await manager.list('view');\n// => [{ name: 'doomed' }] —— 并且被当作完整读缓存,30s TTL\n\nloader.release();\nawait removal;                     // 删除真正落库\n// loader.store.has('doomed') === false\n\nconst after = await manager.list('view');\nconsole.log(after);\n// 实际:[{\"name\":\"doomed\"}]   ← 存储里已经没有了,缓存还在端\n// 期望:[]\n```\n\n实际输出(两个版本各跑一次,完全一致):\n\n```\nAFTER DELETE, list(\"view\") = [{\"name\":\"doomed\"}]\n```\n\n## 影响\n\n`list()` 是枚举面的入口:REST `/api/v1/metadata/:type`、Studio 左栏、同步/导出、以及任何「按已声明集合判断存在性」的消费者(权限、共享规则、策略、api endpoint)都读它。删除后最多 30s 内,这些面会继续把一个已删项当作存在:\n\n- 管理员删掉一个 view/action 后刷新列表,它还在 —— 与 #5079 描述的困惑同一类(那张卡是 overlay 删除路径上的**顺序性**缺失,本卡是 `unregister()` 上的**并发窗口**,机制不同,故独立立卡而非子单);\n- 更要紧的是反向:门控类型(`permission` / api)的删除在这 30s 内对 `list()` 不可见,而 `get()` / dispatch 路径已经生效,于是不同面在同一时刻给出互相矛盾的答案。\n\n30s 是健康 TTL 的全长 —— 这条路径写进去的条目 `degraded: false`(所有 loader 都答了,没人抛),所以 #5184 的 2s 短 TTL 不适用,不会替它兜底。\n\n## 期望\n\n删除在**落到每个 loader 之后**再失效一次(或者把失效移到 loader 删除之后),使「registry 空 + loader 空」这个终态成为被缓存的那个状态。#5219 / #5229 立的那条线在这里同样适用:被事件叫醒的消费者不该同时看到事件和事件前的缓存 —— 这里连事件都还没发,缓存里就已经装进了事件前的答案。\n\n顺带值得一并看的:`unregister()` 里 `loader.delete()` 的失败只 `logger.warn` 后继续(`Failed to delete ...`),也就是删除失败时 registry 已经空了而存储还在 —— 下一次 TTL 过期后的 `list()` 会把它读回来。这是同一段代码的另一个语义问题,是否一并处理请分诊定夺。\n\n发现于 #5253 实现期(会话 `session_01Pbu27iNUfQCHeuS551Rqo7`);未认领,留给分诊。\n"
+}

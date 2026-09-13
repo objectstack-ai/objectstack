@@ -1,0 +1,35 @@
+{
+  "number": 5006,
+  "kind": "pull_request",
+  "title": "feat(spec,runtime,hono)!: 入站 rateLimit 从零建 seam —— 授权预算真正产生 429 (#4910, #4937)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T20:07:48Z",
+  "updated_at": "2026-08-03T20:30:12Z",
+  "closed_at": "2026-08-03T20:30:10Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T20:30:10Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5006",
+  "body": "Fixes objectstack-ai/objectstack#4910\nFixes objectstack-ai/objectstack#4937\n\n父单 #4686(「spec 两份 RateLimitConfig 全仓零 reader」)的**入站半边**;出站半边已由 #4911/#4947 摘除,两边文件面不相交。按 2026-08-03 维护者裁决(#4910 comment 5169379611)的四问组合执行:**Q1=B / Q2=B / Q3=C / Q4=B**,不再重议。\n\n## 前提修正:这不是「接线」,是「从零建 seam」\n\n立单假设 runtime 的 token bucket 已在服务 dispatcher 的 429 短路。上一轮开工核查推翻了它:`RateLimiter` **零调用点**(除自己的单测),全仓入站路径**没有任何 429**,而 `rate-limit.ts` 的注释用**现在时**描述了这条不存在的执行链,连它让你去调的 `DispatcherPluginConfig.rateLimit` 字段都不存在(#4937)。\n\n所以本 PR 同时关掉两个单:两个半成品各自都不算坏,它们只是**从未相连**,而**两边的文档都写得像已经相连**。\n\n## 作者写什么\n\n```ts\nexport default defineStack({\n  manifest: { /* … */ },\n  server: {\n    security: {\n      rateLimit: { enabled: true, windowMs: 60_000, maxRequests: 600 },\n    },\n    trustProxy: false,\n  },\n});\n```\n\n`server:` 是**新的**顶层 stack 键。此前无人声明得出来(全仓扫描:存量栈与示例应用零命中),所以**没有激活语义** —— 不存在「昨天惰性、今天开始吃 429」的配置,因此不需要 ADR-0087 D3 semantic migration,也不需要 upgrade guide 条目。\n\n它**刻意窄**:只承载 `security.rateLimit` 与 `trustProxy`,因为只有这两个键有消费者。它**不是**九键的 `HttpServerConfigSchema` —— 另外七个既无 reader 又无作者面,顺车挂上来等于一次性把七个死键变成可写(它们的存废仍归 #4938)。从出生即 strict(#4001 战役标准,走 `strictObject`),拼错的预算带修正被打回,`maxRequests: 0` 在 `defineStack` 就被拒。\n\n**没有 `server.port`。** 监听端口属于部署而非制品,`objectstack serve -p` 已经拥有它;两个权威争一个数字,配置就退化成建议。优先级规则提前写进 schema describe 与文档,避免日后逐调用点重议:**CLI 参数 > `server:` > 内置默认**。\n\n## 发生什么\n\n服务器路由的**每一个**入站请求(REST、dispatcher、service routes,全部)从令牌桶取token:`capacity = maxRequests`,`refillPerSec = maxRequests / (windowMs / 1000)`。桶空 → **429** + `Retry-After`(由桶自己的 `retryAfterMs` 算出,所以告诉客户端的等待就是桶真正需要的等待)+ 标准错误信封(`code: \"RATE_LIMIT_EXCEEDED\"`)。`OPTIONS` 预检永不计量。\n\n桶按 **已解析 principal** 计,匿名流量回落到 **调用方 IP**(Q3=C)。该 IP **仅在 `trustProxy: true` 显式声明时**取转发头,否则取传输层对端地址。未声明时那些头就是攻击者输入:默认相信它,等于给任何人无限量的新桶(绕过),同时允许他冒充受害者把别人的桶顶爆(武器化)。\n\n计数落在 kernel `cache`(ADR-0069 D2),复用 plugin-auth `createLazyCounterStore` 的**消费时惰性解析**范式,所以晚注册的 cache 插件照样被用上(#4772 的教训)。完全没有 cache 服务时回落到进程内存储,并**一次性**说清后果与补救:在共享 cache 到位之前,实际限额 = 声明预算 × 节点数,而部署看起来一切正常。\n\n## 顺带修好的:`IHttpServer.use()` 原本是个空壳\n\n建这个 seam 时发现,合约声明的中间件层在唯一的真实适配器里是 no-op:两条分支都把 `{} as any` 当 req/res 传进去,然后无条件 `next()` —— 中间件**读不到请求、写不出响应、拒绝不了继续**。没人发现,因为全仓**零生产调用点**。这就是 declared ≠ enforced 又下一层。\n\n现在它是真的:交付 method/path/query/headers 加传输层对端地址(`IHttpRequest.remoteAddress`,新增),并且尊重短路。`HonoHttpServer` 只挂**一个** Hono 中间件(链执行器),`use()` 往它按请求读取的链上追加;`HonoServerPlugin.init()` 在**末尾**放置这个执行器 —— 在 CORS/Server-Timing 之后(429 才带得上 CORS 头,否则浏览器只看到不透明的网络错误),在任何路由之前(路由全在 Phase 2 挂载)。因此 `use()` 的调用时机不再决定覆盖范围,限流器得以在 `start()` 安装 —— 那里「本 kernel 没有 http.server」是**既成事实**而非 Phase 1 中途的猜测,避开 #4771 那类「启动期记录一个 boot 还能推翻的判决」。\n\n## 明确**未**接线(Q2=B)\n\n`ApiEndpointSchema.rateLimit` 与 `ApiEndpointRegistrationSchema.rateLimit` 保持 **known-unwired**,写下去仍然什么也不发生;本 PR 也**不**退役它们。声明式 `apis:` 整面的存废尚未裁决(#4936),此刻退役一个键,若日后 #4936 选「接上执行」就要把墓碑刨掉重来。已在 `DispatcherPluginConfig.rateLimit` 的代码注释、schema describe 与文档中显式登记为「已知未接线,由 #4936 跟踪」—— 是**响亮的缺席**,不是静默。\n\n## 逐键活性\n\n| 键 | 消费者 | 断言 |\n|---|---|---|\n| `security.rateLimit.enabled` | `deriveBucketConfig` —— false/缺省时**完全不注册中间件** | 有 |\n| `security.rateLimit.maxRequests` | → `capacity` | 有(改它必须改动派生结果) |\n| `security.rateLimit.windowMs` | → `refillPerSec` | 有(同上) |\n| `trustProxy` | `resolveRateLimitKey` 的转发头分支 | 有(两向都测) |\n\n无静默残留键。\n\n## 测试\n\n先证红后证绿。`dispatcher-plugin.rate-limit.integration.test.ts` 的第一个 suite 用**同样的预算、同样的组合、不接线**启动,断言永不出现 429 —— 那就是本 PR 之前的 `origin/main`。不带这条对照,一句「观察到 429」可以来自任何地方。\n\n- `packages/runtime/src/dispatcher-plugin.rate-limit.integration.test.ts` —— 真实 kernel + 真实 socket:RED 对照;429 + `Retry-After` + 信封;**本插件不拥有的路由**也被闸住(证明是 server 级而非 dispatcher 级);**更早启动的插件挂的路由**也被闸住(`@objectstack/rest` 的形状);principal 各自计桶;预检不计量;`trustProxy` 两向分支。\n- `packages/runtime/src/security/inbound-rate-limit.test.ts` —— 派生、key 形状、共享计数(两节点同一预算)、降级日志只出一次且带后果与补救、惰性解析。\n- `packages/plugins/plugin-hono-server/src/middleware-seam.test.ts` —— 短路 / 透传 / 读请求三项能力,seam 位置的正反两面都钉住。\n- `packages/spec/src/system/stack-server.test.ts` —— 作者面:穿过 `defineStack`、只有两个键、七个未消费键各自带处方被拒、strict、零预算被拒。\n\n```\npackages/spec              Test Files 298 passed   Tests 7524 passed\npackages/runtime           Test Files  82 passed   Tests 1130 passed\npackages/plugins/plugin-hono-server  Test Files 13 passed  Tests 150 passed\npackages/plugins/plugin-auth         Test Files 29 passed  Tests 658 passed\npnpm typecheck             Tasks: 122 successful, 122 total\nspec check:generated       ✓ All 8 generated artifacts are up to date\nexample validate (crm / showcase / todo)  EXIT=0\n```\n\n另跑绿:`check:liveness`、`check:strictness-ledger`、`check:exported-any`、`check:dual-source-exports`、`check:empty-state`,以及仓级 `check:startup-registry-verdict`、`check:durability-log-level`、`check:init-service-contract`、`check:route-envelope`、`check:error-code-casing`、`check:service-providers`、`check:wildcard-fallthrough`、`check:doc-authoring`、`check:adr-anchors` 等 22 项。\n\n## 其他\n\n- changeset:`.changeset/inbound-rate-limit-seam.md`(spec/runtime/hono minor,auth/cli patch)。`.changeset/pre.json` 开工时已确认仍是 mode:pre / tag:rc。\n- 文档:`content/docs/protocol/kernel/http-protocol.mdx` 的 Rate Limiting 一节原本描述 `X-RateLimit-*` 头与 `THROTTLED` 信封并注明是「intended contract」—— 那些我们**不**发。改写为真实行为,并明确点名未实现的部分。⛔ 未碰 `content/docs/releases/`。\n- 已 os-regen 四步(merge origin/main → checkout origin/main 生成物 → 整体重生成 → 断言兄弟条目存活):`spec-changes.json` / `protocol-upgrade-guide.md` 与 main 逐字节一致(批 11/12 条目完好),我方 delta 恰为 6 个 authorable key + 7 个导出,**0 removed**。\n- 范围外发现已立单 **#5005**(未认领):`composeStacks` 静默丢弃一切非数组顶层键 —— `api:`(含 `enforceProjectMembership` 这个 403 闸门)今天就在丢,`server:` 从本 PR 起同样,合成语义需维护者裁一次。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Ehu85kbvMcrNTUJjwxvLJ9\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Ehu85kbvMcrNTUJjwxvLJ9)_"
+}

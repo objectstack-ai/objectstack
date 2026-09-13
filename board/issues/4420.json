@@ -1,0 +1,38 @@
+{
+  "number": 4420,
+  "kind": "issue",
+  "title": "[automation/approvals] 进程重启后审批决策静默失效:挂起 flow run 仍只存内存(#1518 标记 COMPLETED 但 17.0.0-rc.1 未生效),approve 落库却永不推进且零报错",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue",
+    "priority:p0"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T16:22:26Z",
+  "updated_at": "2026-08-04T00:37:23Z",
+  "closed_at": "2026-08-03T18:05:24Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4420",
+  "body": "## 版本\n\n- `@objectstack/*@17.0.0-rc.1`(service-automation 17.0.0-rc.1)\n- 复现于 os-project-titanwind-ehr,2026-07-31\n\n## 现象\n\n含 `approval` 节点的 record_change 流:**提交审批与审批决策跨进程重启时,决策静默失效**——\n\n1. 进程 A:record_change 触发 `qif_approval` 流,`approval` 节点挂起,`sys_approval_request` 落库(带 `flow_run_id`),镜像字段 stage=qc_director/status=pending;\n2. **dev 进程重启**(进程 B,同一 DB);\n3. 审批人在 Console 上「批准」→ `sys_approval_request.status` 翻成 `approved` **落库成功、UI toast 成功**;\n4. 但流**永不 resume**:下一节点的 approval request 不创建,记录镜像字段停在 `qc_director / approved` 成僵尸;**日志零报错**(`resume(runId)` 找不到 run 疑似被静默吞掉)。\n\n对照:同一进程内提交+审批的全链路正常(实测 NCR 三级流 ①→② 推进无恙)——问题只出在跨重启。\n\n## 定位\n\n- #1518(persist suspended flow runs / durable resume across restarts)2026-06-02 标记 **COMPLETED** 关闭;\n- 但 17.0.0-rc.1 的 `service-automation/dist/index.js` 里 `suspendedRuns = new Map()` **仍是纯内存**,resume 查不到即止;\n- dist 里出现的 `sys_automation_run` 标识符,在运行库中**根本没建表**(`no such table: sys_automation_run`)——持久化对象未注册或未走 schema 同步。\n\n## 影响\n\n审批流是天然的长挂起(人到岗才批,中间隔发版/重启是常态)。当前行为=**每次发版都可能把在途审批全部变僵尸**,且审批人侧毫无感知(approve 明明成功),属数据一致性级别的问题。\n\n## 期望\n\n1. 挂起 run 持久化 + 重启后可 resume(#1518 承诺的行为真正落地);\n2. 短期兜底:`resume(runId)` 找不到 run 时**必须显式报错**(approve 接口应失败或至少告警),不能落一半状态静默成功。"
+}

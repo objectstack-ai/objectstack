@@ -1,0 +1,36 @@
+{
+  "number": 5027,
+  "kind": "pull_request",
+  "title": "fix(lint): regex/JSON Schema 编译不过的校验规则改在发布期拒绝 —— 声明了却什么都不拦的两个静态产物 (#4762)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T00:28:48Z",
+  "updated_at": "2026-08-04T02:38:54Z",
+  "closed_at": "2026-08-04T02:38:52Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T02:38:52Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5027",
+  "body": "Fixes objectstack-ai/objectstack#4762\n\n## 问题\n\n对象校验规则的六种类型里,有两种带着**静态产物**,写入路径把它交给真正的编译器,外面套一层 `try/catch`,catch 里打一行日志然后 `return null`:\n\n- `format` 的 `regex` → `new RegExp(rule.regex)` → *\"Validation rule '…' has an invalid regex — skipped\"*\n- `json_schema` 的 `schema` → `ajv.compile(rule.schema)` → *\"Validation rule '…' has an uncompilable JSON Schema — skipped\"*\n\n\"skipped\" 的意思是:规则被声明了、出现在元数据里、出现在任何\"这个对象受什么保护\"的清单里 —— 然后对每一条记录都不拦任何东西,只要这份元数据还部署着就一直如此,唯一的信号是一行没人看的 WARN 日志。这正是 #4649 描述的形状,只是换了一种规则类型;#4761 把 CEL 谓词(`script` / `cross_field` / `conditional.when`)翻成了 fail-closed,并**刻意**留下了这两个,因为它们的爆炸半径不一样(见下)。\n\n## 做法:只走路线 1(作者期/发布期拒绝)\n\nPM 裁定:本 PR 只做 issue 里的**路线 1**。新增一条 `gating` 规则 `validateRuleCompilability`,登记进 `AUTHORING_RULES`,因此三个作者期命令(`os validate` / `os build` / `os lint`)一次性全覆盖,不需要任何按命令的手工接线。两个诊断 id:\n\n| id | 触发条件 |\n|:---|:---|\n| `validation-rule-regex-uncompilable` | `format` 规则的 `regex` 在 `new RegExp(...)` 里抛错 |\n| `validation-rule-json-schema-uncompilable` | `json_schema` 规则的 `schema` 在 `ajv.compile(...)` 里抛错 |\n\n每条 finding 点名**规则名、对象名、配置路径**,并原样带上**编译器自己的错误文本** —— 作者对着 \"invalid regex\" 无从下手,对着 `Invalid regular expression: /([/: Unterminated character class` 才能改。嵌在 `conditional` 的 `then` / `otherwise` 里的规则同样被判(`evaluateRule` 会递归进去并抵达同一个 checker),finding 会指出是哪一条分支。\n\n## 判定用的是真编译器,不是\"用一个模式去判另一个模式\"\n\n用正则去解析正则、或手写一遍 JSON Schema 的类型检查,等于对\"能不能编译\"造出**第二种意见**,而它只会和运行时的那一份漂移 —— 那就是在上一层新开一个 declared ≠ enforced 的口子。所以:\n\n- regex 用 `new RegExp(source)` 编译 —— 就是 `checkFormat` 发出的那一次调用,不带 flag;\n- schema 用 ajv 编译,构造参数和**运行时那个共享实例完全一致**(`{ allErrors: true, strict: false }`)。\n\n这组参数由一条 parity 测试从 `rule-validator.ts` 的源码里读回来比对,所以哪天有人改了运行时的 ajv 参数,是**这条测试变红**,而不是两边悄悄开始各说各话。`strict: false` 在两个方向上都吃重:它是作者写的 schema 能带 vendor 关键字的原因,一个跑 `strict: true` 的门会拒掉写入路径明明编得过的元数据 —— 一个会把正常元数据判红的门,最后会被关掉,然后什么都保护不了。测试里专门有这一例。\n\n`ajv` 是 `@objectstack/lint` 的新依赖,**懒加载**:只有真的声明了 `json_schema` 校验规则的 stack 才会付这个代价,和 `typescript` / `sucrase` 一样由本包的 `lazy-deps.test.ts` 钉住;内核启动路径(`@objectstack/lint/runtime`)则一次都不会加载它 —— 这一条本 PR 把它加进了 `runtime-lazy-deps.test.ts` 的 `LAZY_DEPS`,所以将来若把这条规则放宽到 `runtime-publish`,是这条断言先出声。\n\n## 运行时那一半是**刻意**不动的\n\n按 PM 裁定,路线 2 不在本 PR 范围内:\n\n- `packages/objectql/**` 零改动。`rule-validator.ts` 仍然对这两者 fail-open,`rule-fail-closed.test.ts` 里 `#4649 — unchanged neighbours` 的钉子和模块头那段 \"Deliberately NOT changed here\" 原样保留 —— 它们是\"运行时这一半仍然 fail-open\"的诚实记录,不该被本 PR 抹掉。\n- 理由用 issue 自己的话:坏 regex / 坏 schema 是**静态**的 —— 光看元数据就能判,手上不需要任何记录 —— 所以作者期这道门就能把这一类彻底关掉,且永远不会把一个跑着的部署砸掉;而在写入期拒绝,会把**碰到该字段的每一次写入**都拒掉,只要坏元数据还部署着。运行时是否还需要一个 backstop,留在 #4762 上给维护者定。\n\n另外零改动的还有:`packages/spec/**` 及其生成物、`packages/metadata-protocol/src/protocol.ts`、`content/docs/releases/`。分支相对 `main` 的 delta 就是本 PR 的 9 个文件。\n\n## 验证\n\n本地全跑,证据见下(均在合并 `origin/main` 之后重跑过一次):\n\n- `pnpm --filter @objectstack/lint test` → **57 files / 1079 tests passed**\n- `pnpm --filter @objectstack/lint typecheck` → 干净;`pnpm typecheck`(全仓)→ **123 tasks successful**\n- `pnpm lint`(ESLint 全仓)→ 通过\n- `pnpm build`(turbo 全仓)→ **71 tasks successful**\n- `pnpm --filter @objectstack/spec check:generated` → **All 8 generated artifacts are up to date**\n- 网关链:`check:nul-bytes` / `check:doc-authoring` / `check:adr-anchors` / `check:release-notes` / `check:published-files` / `check:type-check-coverage` / `check:engine-double-contract` / `check:merge-driver` / `check:node-version` / `check:i18n` / `check:i18n-coverage` / `check:docs-audit-scope` / `check:role-word` / `check:org-identifier` / `check:slot-lookup` —— 全部 PASS\n- 消费方:`@objectstack/cli`(68 files / 600 tests)、`@objectstack/metadata-protocol`(34 files / 301 tests)全绿\n- 运行时钉子未动:`packages/objectql` 的 `rule-fail-closed.test.ts` → 22 tests passed\n\n**出厂样例仍然干净**(非空验证 —— showcase 的 `account` 对象本来就带一条 `format` + regex 规则和一条 `json_schema` 规则):\n\n```\npnpm --filter @objectstack/example-showcase validate   ✓ Validation passed (870ms)   exit 0\npnpm --filter @objectstack/example-crm      validate   ✓ Validation passed (260ms)   exit 0\npnpm --filter @objectstack/example-todo     validate   ✓ Validation passed (184ms)   exit 0\n```\n\n**真 CLI 上的端到端拒绝**(临时 demo stack,三个命令都 exit 1):\n\n```\n✗ Author-time rules failed (3 issues)\n• object 'demo_account' · validation 'tax_id_format': `format` validation 'tax_id_format' on object\n  'demo_account' declares a `regex` that does not compile: Invalid regular expression: /([/:\n  Unterminated character class. The write path builds it with `new RegExp(rule.regex)` and SKIPS the\n  rule when that throws (rule-validator.ts `checkFormat`), so the rule is declared, listed in the\n  metadata, and enforces nothing on any record.\n    rule: validation-rule-regex-uncompilable  at objects.demo_account.validations.tax_id_format.regex\n• object 'demo_account' · validation 'support_config_shape': `json_schema` validation\n  'support_config_shape' on object 'demo_account' declares a `schema` ajv cannot compile: schema is\n  invalid: data/type must be equal to one of the allowed values, … The write path compiles it with\n  the same ajv (`new Ajv({ allErrors: true, strict: false })`) and SKIPS the rule when that throws\n  (rule-validator.ts `checkJsonSchema`), so the rule is declared and enforces nothing on any record.\n    rule: validation-rule-json-schema-uncompilable  at objects.demo_account.validations.support_config_shape.schema\n```\n\nChangeset:`.changeset/rule-compilability-publish-gate.md`(`@objectstack/lint` patch)。\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01NrmBxj8rK2uGCnh9aipjwX\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01NrmBxj8rK2uGCnh9aipjwX)_"
+}

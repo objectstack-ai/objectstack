@@ -1,0 +1,35 @@
+{
+  "number": 5196,
+  "kind": "pull_request",
+  "title": "fix(sharing): 记录删除时撤销该记录的全部 `sys_record_share`（不分 source）+ boot 期按记录存在性的孤儿清扫 (#5103)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T08:29:26Z",
+  "updated_at": "2026-08-04T08:51:35Z",
+  "closed_at": "2026-08-04T08:51:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T08:51:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5196",
+  "body": "Fixes objectstack-ai/objectstack#5103\n\n按维护者裁定（2026-08-04，issue 内）的**方案 A**：plugin-sharing 在所有启用 sharing 的对象上绑 `afterDelete`，撤销该记录的**全部** `sys_record_share` 行（rule + manual），同批补 boot 期按「记录还在不在」的孤儿清扫。方案 B（平台级多态弱引用级联）是另一条车道的设计卡 #5180，本 PR 不建任何平台机制；B 落地之日，这里的钩子可以收敛进去。\n\n## 修的是什么\n\n一条共享行说的是「主体 P 在（对象 O，记录 R）上有 L 级权限」。R 被删掉后这行什么也不描述了，但它会永远留在表里。\n\n#4779（PR #5102）已经补过一个 `afterDelete`，但它长在**规则**包里，被两层条件夹住：只撤 `source: 'rule'` 的行；而且 `bindRuleHooks` 只在 `sys_sharing_rule` 里出现过的对象上绑。于是一个 `sharingModel: 'private'`、只用手工共享、从没配过规则的对象，一个删除钩子都没有 —— **手工共享 + 记录删除 = 永久孤儿**。\n\n今天危害有限，**且只因为记录 id 永不复用** —— 这个假设没有任何门禁保护。自定义主键、保留原 id 的导入、或未来任何形式的 id 回收，都会让这些行立刻变成真实越权：新记录一落到旧 id 上，就直接继承了旧记录那批收件人。次要危害：`sys_record_share` 单调增长，Setup 的 Record Shares 列表展示指向不存在记录的行。\n\n## 怎么做的\n\n### 1. 绑定模型：不枚举，所以不会过期\n\n裁定要求「启用 sharing 的对象」由 `sharingModel` **运行期元数据**决定，并处理对象后来才开 sharing 的热更新情形。\n\n这里没有走「订阅 `metadata:reloaded` 然后重绑」，而是走了一条更强的路：**绑一对无 object 过滤的全局 `beforeDelete`/`afterDelete`，把姿态判断放进 handler，在每次删除时现算**。枚举这个动作根本没有发生，所以没有会过期的集合，也就没有需要记得重绑的时机 —— 一个运行期才打开 `sharingModel` 的对象，在它的下一次删除上就被覆盖了。（同仓先例：`plugin-pinyin-search` 的 companion 钩子也是全局绑 + 廉价早退，正是因为按对象枚举会过期。）\n\n判定函数 `objectCanCarryRecordShares` 单独导出、单独测试。它**故意比 `assertSharingEnforced` 宽**：那个门禁管的是「能不能新建一条手工共享」，而清扫要面对的是「表里可能存在哪些行」—— 包括对象改姿态之前写下的行，以及规则求值器以系统上下文直接 grant 出来、绕过了该门禁的行。清扫谓词比可能存在的行集窄，正是孤儿活下来的方式。\n\n明确写下的边界：**没有声明 `sharingModel` 的系统对象**（解析为 public，没有任何门禁会读它上面的共享）不走级联，以免把这个钩子压到平台最热的删除路径上。规则理论上仍可能在这种对象上物化出行 —— 那点残留归 boot 清扫管，它是被写下来的边界，不是没人注意到的洞。\n\n### 2. 有界删除同步撤，无界删除交给清扫\n\n谓词删除（`multi: true`）不带 id，落地后行也找不回来了 —— 这正是 #4779 用 `beforeDelete` 暂存解决过的问题。本 PR **复用**了它的解析器与 `HookContext` 键（把暂存从 `rule-hooks.ts` 搬到 `bulk-recompute.ts`，挨着解析器放），两个钩子包里谁先跑谁解析，另一个直接读同一个答案 —— 一次写入只解析一次谓词，不是两次。\n\n- **有界**（标量 id / `$in` / 谓词命中 ≤ 1000 行）→ 同步、集合式撤销，按 200 分块。\n- **无界**（完全没有 where，或超过 cap）→ 排队一次**对象范围的孤儿清扫**。这里**绝不**能照抄规则路径的「先全撤再异步重授」：那笔交易只在「重算能把授权放回去」时成立，而手工共享**任何东西都无法重建**。清扫改成逐行反问「你的记录还在吗」，根本不需要写入方给出 id 列表。\n\n系统上下文的删除**也**级联 —— 与规则重算故意跳过 `isSystem`（交给 boot backfill）不同，这里没有对等的兜底：记录反正是没了，一次 seed 清理或平台任务的删除，制造孤儿的方式和交互式删除完全一样。\n\n### 3. boot 期孤儿清扫：谓词是「记录」，不是「规则」\n\n`sweepOrphanedRecordShares` 是 `sweepOrphanedRuleGrants`（#4433）的孪生，形状照抄，**谓词换了**：那个问「规则行还在不在」，所以它结构上永远看不见一条手工共享；这个问「记录还在不在」，与 source 无关。它在 `kernel:bootstrapped` 上跑，覆盖三类：本 PR 之前的历史孤儿、钩子失败或进程中途死掉漏下的、以及级联故意跳过的那种姿态。\n\n按裁定要求做了限界：keyset 分页（不是 OFFSET —— 这个 walk 边读边删，offset 会让行滑过游标，#4363）、每页每对象**一次**批量 `id IN (…)` 存在性探测（不是每行一次）、每次 boot 有扫描上限并且**会报告自己被截断**。探测**失败**的对象，它的行原样留着 —— 「问不到」不等于「记录没了」，把瞬时驱动故障读成后者会造成不可逆的权限丢失（#4757 的教训反过来用）。\n\n## 没有改的\n\n**规则重算依然永不触碰手工共享**（#5102 钉住的不变量，本分支的测试里重新断言了一遍）。这条边界就是全部要点：只要记录还在，手工授权就是一个人做出的、规则求值无权推翻的决定。只有记录被**删除**才撤销它，而且仅仅因为已经没有任何东西可以被访问了。\n\n## 测试\n\n`packages/plugins/plugin-sharing/src/record-share-cascade.test.ts`，32 条，覆盖裁定点名的五项：\n\n- **(a)** 完全没有规则的对象上，手工共享随记录删除被撤销 —— 就是 #5102 没盖到的那块；\n- **(b)** 有规则的对象上，rule 与 manual 两条一起撤；\n- **(c)** 规则重算仍然不碰手工共享（#5102 的钉子保持绿）；\n- **(d)** boot 清扫按记录存在性清掉历史孤儿、留下有效行，且幂等、可截断、探测失败时不删；\n- **(e)** revert-proof / 变异检验，见下。\n\n假引擎钉在引擎自己导出的删除派发谓词上（`assertEngineDeleteDispatch`，#4434/#4550），并复现了三个真实语义：before/after 共用同一个 `HookContext`、无 `object` 选项的钩子对所有对象触发、谓词删除不填 `input.id`。\n\n**变异检验（两处，各自被杀）**\n\n| 变异 | 结果 |\n|---|---|\n| 撤销谓词加回 `source: 'rule'`（即 #5102 的行为） | 32 条中 7 条红 |\n| 清扫的 walk 加上 `source: 'rule'`（即老清扫的盲区） | 32 条中 11 条红 |\n\n两处还原后全绿。另有一条测试直接断言绑定**没有** object 过滤，一条断言运行期新开 `sharingModel` 的对象无需重绑即被覆盖 —— 任何回退到「boot 期按规则表枚举」的改动都会被这两条挡住。\n\n```\npnpm --filter @objectstack/plugin-sharing test    → Test Files 13 passed | Tests 305 passed\npnpm --filter @objectstack/plugin-sharing typecheck → tsc --noEmit, 0 errors\npnpm --filter @objectstack/plugin-security --filter @objectstack/verify test\n                                                  → 34 files / 731 tests, 3 files / 12 tests, all passed\neslint packages/plugins/plugin-sharing            → 0\npnpm check:durability-log-level                   → 12 seams, all loud\npnpm check:startup-registry-verdict               → 40 seams, none recording a contradictable verdict\n```\n\n已在 `origin/main` 上做过一次 merge（incoming 只动 `plugin-email` / `service-settings`，与本 diff 无重叠），merge 后重跑测试与 typecheck 仍全绿。\n\n## 文件面\n\n`packages/plugins/plugin-sharing/**` + 测试 + changeset。`packages/spec` 与 `packages/objectql` **零改动** —— 现有的钩子/注册表 seam（`registry.getAllObjects` 已是 `EngineSchemaRegistryView` 声明过的契约面、`triggerHooks` 的全局钩子匹配）够用，没有需要向下捅的地方。\n\n## 顺带发现（未在本 PR 修）\n\n- **#5190** —— `sys_share_link` 是同一族孤儿，而且更糟：`resolveShareLink` 逐项查 token/revoked/expires/audience/密码，**唯独不查记录是否还存在**，而分享链接是无身份的能力令牌，id 复用时谁持有谁生效。已按 PD #10 另开 issue（未认领），并写明它可以复用本 PR 建好的 `record-share-cascade` seam。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015W6nhsDrz6zWQc8je12a1t)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 5263,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): allowRuntimeCreate:false 在每一种 kernel 上都生效 —— PUT /meta 不再创建注册表声明为 code-only 的 job / agent (#5086)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T13:17:18Z",
+  "updated_at": "2026-08-04T13:45:25Z",
+  "closed_at": "2026-08-04T13:45:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T13:45:23Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5263",
+  "body": "Fixes objectstack-ai/objectstack#5086\n\n## 结论先说:门是有的,只是挂在了一个错误的条件上\n\n`saveMetaItem` 里 ADR-0005 的两级授权门(`not_overridable` / `not_creatable`)一直存在,也一直是对的 —— 但它整个包在 `if (this.environmentId !== undefined)` 里:\n\n```ts\nif (this.environmentId !== undefined) {\n    // …not_overridable / not_creatable…\n}\n```\n\n`environmentId` 是**行作用域键**(给 `sys_metadata` 打 `environment_id`),不是授权信号。凡是没有它的 kernel,这道门整个不跑。而这并不是什么冷门拓扑:\n\n- `objectstack.config.ts` 里带了已实例化插件(showcase 就是)⇒ `isHostConfig` 为真 ⇒ `shouldBootWithLibrary` 为假 ⇒ `createStandaloneStack` 那条分支被跳过;\n- 于是 CLI 的轻量装配走 `packages/cli/src/commands/serve.ts` 的自动注册:`new ObjectQLPlugin()`,**不带 environmentId**;\n- 结果就是旗舰 showcase(以及所有同形状的自托管 app server)—— 它的 `PUT /api/v1/meta/*` 面向的是最终用户 —— 整个 ADR-0005 授权门是关着的。\n\nissue 的复现正是在 \"a real showcase boot\" 上做的(#5145),所以拿到 200。\n\n补一条实测出来的、比推理更有说服力的细节:**这个洞恰好只对\"没有写通道的类型\"张开**。`hook` 这类 `allowRuntimeCreate: true` 的类型走 repository 写路径,`SysMetadataRepository.assertAllowed()` 在同一台无 environmentId 的 kernel 上照样 403(实测见下);而 `job` / `agent` 因为两个标志都是 false,`useRepoPath` 为假,落到了那条 legacy raw-engine 分支 —— **那条分支没有任何门**。声明得最严的两个类型,恰恰是唯一能穿过去的两个。\n\n## 改了什么\n\n注册表条目同时声明 `allowRuntimeCreate: false` 与 `allowOrgOverride: false` 的类型,等于声明\"没有任何运行时写通道\"。这个判断只取决于类型声明,与部署拓扑无关,所以它被提到 `environmentId` 判断之外,在落库前、draft 与 publish 一视同仁地拒绝:\n\n| 写入 | 之前 | 现在 |\n|---|---|---|\n| `PUT /meta/job/*`(单 kernel 宿主) | `200 success` | `403 NOT_CREATABLE` |\n| `PUT /meta/agent/*`(单 kernel 宿主) | `200 success` | `403 NOT_CREATABLE` |\n| 同上,但名字由代码包提供 | `200 success` | `403 NOT_OVERRIDABLE` |\n| project-scoped(cloud)kernel | `403` | `403`(不变) |\n\n拒绝语句点名类型、点名产生该判决的两个标志、给出**该类型自己注册表条目里的 `filePatterns`** 作为处方,并说明 `OS_METADATA_WRITABLE` 逃生舱 —— 处方从注册表读,新类型被打上标志的当天就有正确提示,这里没有第二份需要同步的表(Prime Directive #8)。\n\n落点为什么是 `packages/metadata-protocol/src/protocol.ts` 而不是 `packages/runtime/src/domains/meta.ts`:两个 HTTP 面(`rest-server.ts` 与 runtime dispatcher)都只是转调 `protocol.saveMetaItem`,`migrateStoredMetadata` / `duplicatePackage` 也从内部重入同一个方法。门放在这里,才是\"每个 surface 都必然经过\"的那一处。\n\n## 边界:哪些**没有**改,以及为什么\n\n- **ADR-0005 的单 kernel 让步保留。** 那句 \"Single-kernel deployments (no `projectId`) keep their existing behaviour (any type writable)\" 写的是 *overlay 白名单*(当时代码里只有 `OVERLAY_ALLOWED_TYPES = {view, dashboard}`),`allowRuntimeCreate` 那时还不存在。所以仍然可运行时创建的类型(`object` / `hook` / `field` / `seed` / `mapping` …)在单 kernel 上行为完全不变 —— 这也是本 PR 刻意不去动的部分:把 artifact-backed 的 `not_overridable` 一并放开,会让每个自托管部署的\"改包内 object\"当场 403,那是另一个量级的合同变更,不该搭车。\n- **`supportsOverlay` 判不了,所以没有假装判。** spec 自己的 TSDoc 写得很清楚:`supportsOverlay` 描述的是 *能力*(loader 能否合并 overlay),`allowOrgOverride` 才是 *许可*,并且明说 \"a write targets a type with this flag unset → 403 `not_overridable`\"。而且 `object` / `flow` / `action` / `seed` / `hook` 都是 `supportsOverlay: false` 却按设计可运行时写 —— 把它当写入门会把这些类型全部拒掉。issue 里提到的\"给 `supportsOverlay: false` 的行回一句 customization overlay\"是**文案**问题,已另开 #5265。\n- **`allowOrgOverride` 的 org 维度按 ADR-0005 PR-10d.7 两级模型不动。** \"无 artifact 的新建只需要 `allowRuntimeCreate`\" 是被 ADR 记录且被测试钉住的决定,不在本 issue 范围内推翻。\n- **`deleteMetaItem` 不同步收紧。** 删除一条本不该存在的 code-only 行是*修复*,必须保持可行 —— 这次 bug 已经在真实环境里造出过这种行。实测确认删除侧没有对应的洞:非 code-only 类型走 repository,`assertAllowed()` 照常拦;code-only 类型的 legacy 分支只会删 `sys_metadata` 里的行,删不到 artifact。\n\n## 验证\n\n单测(新增 22 条,数据驱动:code-only 集合从 `DEFAULT_METADATA_TYPE_REGISTRY` 推导,新类型被打标志时缺 probe 会直接红)+ **真实 showcase boot 实测**(`pnpm dev -- --fresh -p 39517`,issue 原样 payload):\n\n```\nPUT /api/v1/meta/job/rc3_runtime_job  → 403\n{\"error\":\"[not_creatable] Metadata type 'job' is code-only: … allowRuntimeCreate=false and\n allowOrgOverride=false … Declare it in source (**/*.job.ts) and redeploy. An operator may set\n OS_METADATA_WRITABLE=job …\",\"code\":\"NOT_CREATABLE\"}\n\nPUT /api/v1/meta/agent/rc3_agent_probe → 403 NOT_CREATABLE\nPUT /api/v1/meta/view/rc3_probe_view   → 200 (未被误伤)\nGET /api/v1/meta/job                   → 只剩 artifact 的 showcase_health_sweep\nPUT /api/v1/meta/hook/showcase_normalize_task_title (artifact-backed)\n                                       → 403 NOT_OVERRIDABLE(repository 侧,本 PR 之前就有)\n```\n\n套件:\n\n```\n@objectstack/metadata-protocol  40 files /  370 tests passed\n@objectstack/objectql          115 files / 1840 tests passed\n@objectstack/rest               40 files /  608 tests passed\n@objectstack/runtime            89 files / 1313 tests passed\npnpm check:type-check-coverage  OK (metadata-protocol 属 DEBT 台账,无 typecheck 脚本;DTS 构建通过)\n```\n\n回归性:把 `protocol.ts` stash 掉重跑新测试 → `10 failed | 12 passed`,恢复后 `22 passed`。\n\n`packages/objectql/src/overlay-precedence.test.ts` 里那条 \"single-kernel mode — gate bypassed\" 的标本从 `agent` 换成了 `hook`:它钉的决定是\"overlay 白名单在单 kernel 上不生效\",`agent` 只是当时挑的最戏剧化的标本;换成 `hook` 后那个决定原样保留,并在旁边补了一条 code-only 仍被拒的断言。\n\n## 顺带发现(已单独开 issue,未在本 PR 修)\n\n- #5264 — `saveMetaItem` 的 legacy raw-engine 分支在本 PR 之后已不可达(注释还宣称它为 control-plane 而存在);`deleteMetaItem` 里结构对称的那条**仍然可达且必要**,两条并排最容易读错。\n- #5265 — 保存回执一律自称 \"customization overlay\",包括 `supportsOverlay: false` 的类型;写路径其实已经算出了 artifact-backed / 新建 / org 三种事实,只是没说。\n\n`packages/spec/**` 零改动;未触碰 `seed-loader.ts`、`metadata-manager.ts`、#5079 的枚举失效面。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Pbu27iNUfQCHeuS551Rqo7"
+}

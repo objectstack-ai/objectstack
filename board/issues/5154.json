@@ -1,0 +1,35 @@
+{
+  "number": 5154,
+  "kind": "pull_request",
+  "title": "fix(spec): 重开 ViewFilterRuleSchema —— 控制台盖的 UI 行 id 让保存筛选条件 422(#5114 热修)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T06:37:15Z",
+  "updated_at": "2026-08-04T07:41:51Z",
+  "closed_at": "2026-08-04T07:41:49Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T07:41:49Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5154",
+  "body": "Fixes objectstack-ai/objectstack#5114\n\np1 热修:`ViewFilterRuleSchema` 被更早的一批收紧成 `strictObject`,而 objectui 的筛选构建器给每一行盖 `id: crypto.randomUUID()`(React 列表键),`saveMetaItem` 校验后**原样存原始 body**,所以那个 `id` 就在 wire 上 —— 闭合的形状把它变成 422。\n\n处理照 #4001 批 18 对 `ListView.sort` 的既定做法(#5070),不重议:**回退该站点为留开 + 三处落锚**,⛔ 不声明 `id`,正解由 #5074 承接。分支基于 #5070 落地后的 `origin/main`,已 merge 到 `bcfebb0`。\n\n> ⚠️ **dogfood 挖出来的、必须先说的一条:本 PR 必要,但**不足以**让「控制台保存筛选条件」通。** 真浏览器实测:控制台把**整个 `FilterGroup` 对象**存进 `filter`,而 spec 声明的是 `ViewFilterRule[]` —— 那是**外层类型错**,挡在 `id` 前面,属产出端(objectui)缺陷,已另案 **#5159**。两个缺陷叠在同一份 body 上,本 PR 修掉里层那个。证据见 §2。\n\n## 改了什么(4 文件)\n\n| 文件 | 改动 |\n|---|---|\n| `packages/spec/src/ui/view.zod.ts` | `ViewFilterRuleSchema`:`strictObject(…)` → `z.object(…)`,**只此一处** + 其 JSDoc |\n| `packages/spec/src/ui/view-filter-rule-wire-id.test.ts` | 新增 pin 测试 11 条 |\n| `docs/audits/2026-07-unknown-key-strictness-ledger.md` | `ui/` 行 + 表头 + 算术散文,**从存活行重算** |\n| `.changeset/view-filter-rule-console-id-hotfix.md` | `patch` |\n\n### ⛔ 为什么不顺手声明 `id`\n\n它是 React 列表键,不是协议。声明它 = 把 UI 造物放上可授权面,并**教 AI 作者给筛选行生成一个 UUID** —— 这是 `??` 兜底换了身 schema 外衣。批 18 Q1 的两轴否决在案、PM 已批。重开后 `id` 是被**丢弃**(不进 `parsed.data`),不是被声明;而 `saveMetaItem` 存原始 body,所以渲染器照样读得到它 —— 两条都钉在测试里。\n\n### 机理(比这个站点值钱,已写进 JSDoc)\n\n**`.strip()` 不递归,和 `.strict()` 一样不递归。** `ViewMetadataSchema` 靠扁平成员上的 `.strip()` 放行 Studio 往返辅助键,但那只重开**顶层**;嵌套块仍经由该成员被解析,所以嵌套块里一个控制台盖的键**无论成员姿态如何都会 422**。这正是本 bug 的成因,也是批 18 在 `ListView.sort` 上撞到的同一条。\n\n## 验证\n\n### 1. 三路径直接 parse —— 先证红,再证绿\n\n**修前**(分支起点 `origin/main`):\n\n```\n1 ViewFilterRuleSchema             REJECTED   unrecognized_keys path=[]            `id`\n2 ListViewSchema.filter            REJECTED   unrecognized_keys path=[\"filter\",0]  `id`\n3 ViewMetadataSchema (overlay)     REJECTED   invalid_union     path=[]            \"Invalid input\"\nALL THREE ACCEPT: false   (exit 1)\n```\n\n**修后**:\n\n```\n1 ViewFilterRuleSchema             ACCEPTED\n2 ListViewSchema.filter            ACCEPTED\n3 ViewMetadataSchema (overlay)     ACCEPTED\nALL THREE ACCEPT: true    (exit 0)\n```\n\n⚠️ 第 3 条修前那句 `Invalid input` 是 #5014 实测的那个压平:报错里**连 `id` 两个字都没有**。这就是这条 bug 能在 `main` 上活着没人发现的原因 —— 错误信息读不出病因。\n\n### 2. dogfood:真浏览器 + 真 `/_console` bundle\n\n`pnpm objectui:build` 出固定 pin(`f5bc4c78`)的真控制台 → showcase 起在自有端口(`--ui --seed-admin`,自有 DB)→ Playwright 真实登录 → `/_console/apps/showcase_app/showcase_task` → 点工具栏 `Filter` → `Add filter`。抓到的真实 PUT:\n\n```\nPUT /api/v1/meta/view/showcase_task.default  ->  422\n{\"code\":\"INVALID_METADATA\",\"issues\":[{\"path\":\"\",\"message\":\"Invalid input\",\"code\":\"invalid_union\"}]}\n\nbody.filter = {\"id\":\"root\",\"logic\":\"and\",\n               \"conditions\":[{\"id\":\"712135fb-58c5-4be4-a611-1925181509b0\",\n                              \"field\":\"title\",\"operator\":\"equals\",\"value\":\"\"}]}\n```\n\n`conditions[0]` 正是本 issue 那个形状。**把这份真 body 三变体回放到两个真实运行的 server**(只改 `filter`):\n\n| 变体 | 修前 | 修后(本 PR) |\n|---|---|---|\n| ① 原样(控制台发的 `FilterGroup` 对象) | 422 `invalid_union` | **422 `invalid_union`** ← #5159 |\n| ② 拆掉分组 → `rule[]`,**保留 UI 的 `id`** | **422** | **ACCEPTED** ← 本 PR |\n| ③ 拆掉分组 → `rule[]`,去掉 `id` | ACCEPTED | ACCEPTED(对照) |\n\n读法:两个缺陷**叠在同一份 body 上**。外层类型错(#5159,产出端)挡在前面;拆开之后,下一道就是本 PR 修的 `id`。②③ 的对照把变量锁死在 `id` 上 —— 本 PR 的效果就是把 ② 从 422 翻成通过,一分不多一分不少。\n\n另有一组不经浏览器、直打 `PUT /api/v1/meta/view/:name` 的对照(扁平 personalization overlay,filter 行带 `crypto.randomUUID()`):\n\n```\n[PRE-FIX]   A rule[] WITH console id -> REJECTED 422 invalid_union   |  C 无 id -> ACCEPTED\n[POST-FIX]  A rule[] WITH console id -> ACCEPTED (seq=1)             |  C 无 id -> ACCEPTED\n```\n\n#5114 正文里「未跑真实 app 端到端」的缺口到此补上 —— 并且正是这一跑,把 #5159 挖了出来。\n\n### 3. 仪器纪律 —— 断言两向都证过红\n\n| 破坏 | 结果 |\n|---|---|\n| 重新关闭 `ViewFilterRuleSchema` | **7 红**(三路径 + tab 载体 + `id` 被丢弃 + 顶层 aux) |\n| 台账行 6 → 5 | `check:strictness-ledger` EXIT=1 |\n| 台账表头 76 → 75 | `check:strictness-ledger` EXIT=1 |\n\npin 文件里那两条**机理对照**(顶层 aux 键随行 / 嵌套已关 `emptyState` 仍拒)刻意跑在**不带 filter** 的 overlay 上 —— 所以它们在两种姿态下都绿。断言红了、对照没红,那个落差本身就是「`.strip()` 不递归」这条发现。\n\n### 4. 门与套件(合并 `origin/main` 之后重跑)\n\n```\npackages/spec  vitest run          Test Files 305 passed (305) / Tests 7759 passed (7759)\n               tsc --noEmit        EXIT=0\n               check:generated     ✓ All 8 generated artifacts are up to date\n               check:strictness-ledger\n                 ✓ 67 file(s) / 5 director(ies) — site counts match, section totals balance\n                 ✓ remaining-strip map: 36 open file(s) / 235 strip site(s)   (批 18 落地时 234,+1 如期)\npackages/metadata-protocol  vitest run   Test Files 37 passed (37) / Tests 334 passed (334)\n```\n\n### 台账合并 —— 第 **11** 例「两边都对、合并都错」,方向和前十例相反\n\n与 **批 17**(#5068,把 `component.zod.ts` 29 站点整行改判 `no gate`)如期冲突。按既定纪律:**取 main 整段 + 重贴本单编辑 + 逐条断言对方条目存活 + 从存活行重算**。\n\n- `component.zod.ts` 行取 **main**(批 17 的 `no gate`),`view.zod.ts` 行取**本单**(批 18 文字的超集 + #5114)。\n- 存活断言逐条过:批 17 三处测量与 #5068、批 18 的 `ListView.sort` 回退段、`widget` no-door 行、`i18n` 5/6 split、#5055/#5056、「批 16 is the eighth instance」—— 全在。\n- **重算**:表头 `ui/` **76 strip of 198**;`29+6+9+2+7+5+4+4+4+3+1+1+1 = 76`,其中 **69** 属两类 no-parse(38 `no door` + 31 `no gate`),可授权半边 = `view` 6 + `app` 1 = **7 of 76**。\n\n前十例都是**关**站点把这行推低;本单是**开**一个站点把它推高 —— 我的分支算 `36 of 76`(批 17 未落地的树),main 算 `6 of 75`(本单未落地的树),合并是 **`7 of 76`**,两边都没写过。机理已记进散文。\n\n⛔ `content/docs/releases/` 零触碰;objectui 零改动(只读);os-regen 四步走完(merge → 取 main 生成物 → 整体重生成 → 断言兄弟条目存活),8 件生成物全绿。\n\n## 顺带发现(⛔ 未在本 PR 修)\n\n- **#5159**(p1,已立案,未指派)—— 控制台运行时工具栏把整个 `FilterGroup` 对象存进 `filter`,spec 声明的是 `ViewFilterRule[]`。产出端(objectui)缺陷,按契约优先应在产出端折平(Studio 侧 `widgets.tsx:1727` 已有同款转换),⛔ 不要放宽 `ListViewSchema.filter`。**本 PR 合并后控制台保存筛选条件仍会 422,直到 #5159 落地。**\n- 顺带记一条(已写进 #5159):`FilterGroup.logic: 'or'` 今天没有落盘表示,折平时会被静默降级成 `and`,修 #5159 时需一并判定。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Ehu85kbvMcrNTUJjwxvLJ9\n"
+}

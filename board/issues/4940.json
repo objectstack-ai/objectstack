@@ -1,0 +1,36 @@
+{
+  "number": 4940,
+  "kind": "issue",
+  "title": "plugin-auth 的两处审计注释断言「better-auth 写入绕过 plugin-audit 订阅的 ObjectQL 生命周期钩子」——同 #4802 一类的机制漂移,需核实",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T16:56:11Z",
+  "updated_at": "2026-08-03T18:20:56Z",
+  "closed_at": "2026-08-03T18:20:56Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4940",
+  "body": "在 #4802（`databaseHooks` 注释里「better-auth 适配器绕过 `ql.registerMiddleware` 链」已不成立）的核实过程中，发现**同一包内另一条同类断言**，落在不同的机制面上（生命周期钩子 / plugin-audit），与 #4802 的改动范围不重叠，按 Prime Directive #10 单独记录。\n\n## 断言（两处同源抄写）\n\n- `packages/plugins/plugin-auth/src/admin-user-endpoints.ts`（`writeAdminAudit` 上方）：\n\n  > Best-effort explicit audit row. better-auth writes bypass the ObjectQL lifecycle hooks that plugin-audit subscribes to, so admin identity operations would otherwise leave no compliance trail.\n\n- `packages/plugins/plugin-auth/src/admin-import-users.ts`（run-level audit 上方）：\n\n  > Run-level audit (better-auth writes bypass the ObjectQL hooks that plugin-audit subscribes to).\n\n## 初步反证（对着 `origin/main` 6bc93dc5c）\n\n1. `packages/objectql/src/engine.ts` — `insert()` 的 `triggerHooks('beforeInsert'/'afterInsert')` 在 `executeWithMiddleware()` 的 executor **内部**执行；better-auth 适配器走的就是普通 `dataEngine.insert(...)`（#4802 的逐跳核对已确认适配器与内核是同一个 ObjectQL 实例，且没有 bypass 选项）。\n2. `packages/plugins/plugin-audit/src/audit-writers.ts` — `writeAudit` 以 `engine.registerHook('afterInsert', writeAudit, { packageId })` 注册，**没有 object 过滤**；`SKIP_OBJECTS` 里有 `sys_account` / `sys_session`，**没有 `sys_user`**。\n3. 同包内已有反例：`auth-plugin.ts` 的 SCIM 身份来源印戳正是用 `engine.registerHook('afterInsert', …)` 去接 better-auth 适配器直写 `sys_account` 的那条路径——即注册在 ObjectQL 上的生命周期钩子对适配器写入**确实**会触发。\n\n即：`admin/create-user` 创建 `sys_user` 时，plugin-audit 的 `afterInsert` 看起来是会跑的，那两条注释给出的**理由**（\"bypass 生命周期钩子\"）与 #4802 是同一类过时机制断言。\n\n## 但结论不一定错——需要有人认真核一遍\n\n显式审计行大概率**仍然该留**，只是理由不同，候选理由至少有三条，需要核实后择一写进注释：\n\n1. **plugin-audit 是可选插件**——admin 端点不能假定它装了；不装就真的没有合规痕迹。\n2. **元数据不同**——显式行记录的是 `action: 'create' | 'update'` + admin actor + 结构化 metadata（以及 import 的 run-level 汇总），plugin-audit 的通用行记录的是逐行 diff，两者不是一回事。\n3. **可能反而是重复行**——如果 plugin-audit 装了且钩子确实跑，`sys_user` 上是否已经在写第二条审计行？这是个独立的、值得量一量的问题。\n\n## 建议做法\n\n与 #4802 同款：**保留纪律、更换理由**，把注释改成核实后真实成立的那条，并指向代码位置；同时确认（或否认）第 3 点的重复行。\n\n## 关联\n\n- #4802（`databaseHooks` 注释的同类漂移，已修）\n- objectstack-ai/cloud#1022（cloud 侧抄写）\n\n未指派——记录的 finding，谁开工谁认领。"
+}

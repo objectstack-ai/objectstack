@@ -1,0 +1,35 @@
+{
+  "number": 5336,
+  "kind": "pull_request",
+  "title": "fix(spec): 两条 area 退役处方在 #4722 之后改口径 —— 项级闸门在两棵树都由服务端剥离 (#4749)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T23:39:11Z",
+  "updated_at": "2026-08-05T00:35:03Z",
+  "closed_at": "2026-08-05T00:35:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T00:35:01Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5336",
+  "body": "Fixes #4749\n\n## 前提复核(改之前先证实)\n\nissue 是线索不是规格,两半都在 `origin/main`(`c7406b0`)上核过 —— 引用的行号确实因今日\nchurn 移位了:\n\n| issue 的说法 | origin/main 实际 | 结论 |\n|---|---|---|\n| 处方正文 `app.zod.ts:662` 仍写 \"the server does not walk `areas`\" | 实际在 `app.zod.ts:690` | 成立(行号移位) |\n| pin 断言 `app.test.ts:1374` | 实际在 `app.test.ts:1439` | 成立(行号移位) |\n| #4722 已让服务端走 `areas[].navigation` | `rest-server.ts:1811` 的 `[#4722] Applies the SAME item gate to every areas[].navigation tree`,实现在 1890 行的 `filterAreas`(复用同一个 `filterNav`) | 成立 |\n\n所以 `premise_still_valid: true`,处方正文把一个**已经关闭**的缺口描述成仍然存在。\n\n## 改了什么(两条处方,一次改完)\n\n### 1. `AREA_REQUIRED_PERMISSIONS_RETIRED` —— issue 点名的那条\n\n原本说:\n\n> Items nested under `areas[]` are gated in the shell only — the server does not walk\n> `areas` — so anything that must never reach the browser belongs in the top-level tree,\n> or in its own app.\n\n改后陈述当前事实:项级 `requiredPermissions` / `requiresService` 在**两棵树**(顶层\n`navigation` 与每一棵 `areas[].navigation`)都由服务端经同一个 filter 剥离(#4722),被闸住\n的条目不会进入 `/meta` 响应体。\n\n### 2. `AREA_VISIBLE_RETIRED` —— PM 复核时扩入本 PR 的姊妹条\n\nissue 正文本就把「核对 `AREA_VISIBLE_RETIRED`」列进本单,预判是「大概率不用改」;核对结果\n是**需要改**。它收尾句把服务端强制的落点枚举为:\n\n> use `requiredPermissions`: on the app itself, or on items of the app's top-level\n> `navigation` tree.\n\n其中没有假话(列出的两层确实被强制),但 #4722 之后这是一份**漏了第三项的枚举**,危害与上面\n那句同构:一个已经站在 area 内部、本可以就地把闸门写在该 area 项上的作者,被劝去重构导航树。\n现在两处落点都列全。\n\nPM 的裁定理由(记录在案):它与第 1 条同文件、同常量块、同一类缺陷;另开 PR 按同文件串行\n规则要等本 PR 合入,为六个词付一整轮;而且留着它 = 本 PR 把一条处方改对、把紧邻的另一条留错\n—— 正是下面 JSDoc 那步所依据的同一个自相矛盾。\n\n### 三件刻意保住的事\n\n1. **#4722 没有改变的那一半非对称性**:`visible`(CEL)与 `requiresObject` 在任何层级依然\n   只在客户端求值(服务端跑 CEL 需要读层没有的 `user` 绑定上下文)。这在 area 被服务端闸住\n   之后**反而更容易被误读**成「现在写 `visible` 也安全了」;在第 2 条里风险更高 —— 作者是攥着\n   一个 CEL 表达式走到那条报错前的,「就近改写成项级 `visible`」是此刻最顺手也最危险的落点。\n   故两条正文都把分工写死:`visible` 隐藏的是**已经发出去**的条目,`requiredPermissions` 才\n   让条目根本不被发出。两条都单独钉了 pin。\n2. **退役裁决不动**:被强制的是 area **内部的项**,area **级**键(#4651)保持退役、没有复活\n   —— 第 1 条正文里明写 \"the area-level key is not revived\"。\n3. **pin 是换钉不是删钉**(两条同样处理)。断言钉在**改正后的事实**上,并各加一条对旧措辞的\n   负向断言。只删旧断言会让一份「对 `areas[]` 闭口不谈」的处方照样通过,而作者读到闭口不谈时\n   的默认结论正是旧边界。\n\n措辞蓝本取自 #4722 已改写的 `packages/spec/liveness/app.json` 的 `areas.navigation` note。\n\n### 一处越出「仅处方字符串」的改动(PM 复核已批准)\n\n`app.zod.ts` 里这两个常量正上方的 JSDoc,用**现在时**陈述了同一个已过期的事实\n(\"reads … walks ONLY `item.navigation` … never touches `item.areas` at all\")。只改字符串\n会让同一段代码自相矛盾。故把该段改为**过去时的退役当时状态**,并补一段记录 #4722。没有动\nschema 形状、没有动任何别的键。\n\n## 验证\n\n- `vitest run src/ui/app.test.ts` → 98 passed;全量 `pnpm --filter @objectstack/spec test`\n  → **312 files / 8022 tests passed**(两轮改动后各跑一次,均全绿)\n- `pnpm --filter @objectstack/spec typecheck` → clean;`eslint` 两个改动文件 → clean\n- `check:generated` → **9/9 green**(build 之后一轮全过)。`check:api-surface` 在全新\n  worktree 上首轮报红是 AGENTS.md §9 记的 stale-dist 幻影,`build` 后即\n  \"public API surface + factory signatures unchanged\"。**没有生成物因本改动变 stale** ——\n  这两段文字只活在 Zod 的 error 字符串里,不投影进任何生成物,所以本 PR 不含重生成的产物。\n- **反向验证,两条各做一次,方向都是事前预测的「红」**:\n  - 还原第 1 条旧文本 → `AssertionError: expected 'Unrecognized key(s) on this navigatio…' to match /BOTH trees/s`,`Tests 1 failed | 97 skipped`\n  - 只还原第 2 条旧文本 → `AssertionError: expected 'Unrecognized key(s) on this navigatio…' to match /either navigation tree/s`,`Tests 1 failed | 97 skipped`\n  - 两次还原后复跑均全绿。\n- 消费半径扫过:`packages/cli` / `packages/lint` / `packages/rest` 及各 fixture 都没有钉这两段\n  措辞的断言。\n- `node scripts/check-nul-bytes.mjs` OK,并对三个改动文件做了越出该 gate 的控制字符自扫。\n\n## 仍留在 #5337 的越界发现(**不**在本 PR 修)\n\n`packages/spec/src/migrations/registry.ts` 的 protocol-17 rationale 仍写着 \"since the server\ndoes not walk `areas`\",并投影进生成的 `docs/protocol-upgrade-guide.md`(升级中的作者正在读\n的那份);同一句也留在待发布的 `.changeset/app-area-fail-open-gates-removed.md`。按 PM 复核\n裁定留给后续单:它要跑 `gen:upgrade-guide`,且该文档走 os-regen 驱动,不该混进本 PR。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01FTszibd6C8sUCCZnM4VcrL"
+}

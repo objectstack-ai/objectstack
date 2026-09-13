@@ -1,0 +1,37 @@
+{
+  "number": 5103,
+  "kind": "issue",
+  "title": "记录删除后 `source: 'manual'` 的 `sys_record_share` 仍是孤儿 —— #4779 的 afterDelete 只覆盖规则共享,且只覆盖有规则的对象",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T04:37:15Z",
+  "updated_at": "2026-08-04T08:51:35Z",
+  "closed_at": "2026-08-04T08:51:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5103",
+  "body": "在 #4779(PR #5102)的实现中发现。**未认领**,归属 `plugin-sharing`,不在 #5102 的范围内。\n\n## 现象\n\n#4779 的 issue 末尾记了「`rule-hooks` 没绑 `afterDelete`,记录删除后 `sys_record_share` 行会成为孤儿」。PR #5102 补上了 `afterDelete`,但它的覆盖面被两层条件夹住,剩下的两块仍然是孤儿:\n\n1. **只撤 `source: 'rule'` 的行。** 这是刻意的 —— 手工共享是人对某一条记录做的决定,任何规则重算都不会重建它,所以规则子系统去扫它属于越界删数据。但结果是:记录被删后,它的 `source: 'manual'` 共享行原样留在表里。\n2. **只在「至少有一条生效共享规则」的对象上绑。** `bindRuleHooks` 遍历的是 `rules` 里出现过的 `object_name`。一个 `sharingModel: 'private'`、只用手工共享、从没配过规则的对象,一个钩子都没有,删除后连规则共享的清理都不会发生(虽然它本来也没有规则共享)。\n\n即:**手工共享 + 记录删除 = 永久孤儿行**,对任何对象都成立。\n\n## 危害与前提\n\n和 #4779 记的那一条同源:今天危害有限,因为记录已经不存在,`buildReadFilter` 拼出来的 `record_id IN (...)` 匹配不到任何真实行。**但这个「有限」完全依赖一个假设:记录 id 永不复用。** 那个假设目前没有任何门禁保护 —— 一旦引入 id 复用、app 自定义主键、或者导入时保留原 id,这些孤儿行会立刻变成真实越权:新记录一落到旧 id 上,旧记录的共享对象就直接拿到了新记录的读/写权限。\n\n次要的:`sys_record_share` 单调增长,而 Setup 的 Record Shares 列表会展示指向不存在记录的行。\n\n## 建议方向(需要先定一件事)\n\n清理孤儿共享**该由谁负责**,有两个自然位置,选哪个决定了它是「共享插件的事」还是「平台的事」:\n\n- **A. plugin-sharing 在所有启用了 sharing 的对象上绑一个 `afterDelete`**,撤销该记录的**全部** `sys_record_share` 行(不分 source)。语义最干净 —— 记录没了,任何共享都不可能有效。代价是这个插件要在远比现在多的对象上挂写钩子,而「哪些对象启用了 sharing」是运行期由 `sharingModel` 决定的,和现在按规则表绑定的模型不一样。\n- **B. 走平台的 `deleteBehavior` / 级联机制**,把 `sys_record_share` 声明成指向任意对象的「弱引用」并在删除时清理。更通用(`sys_attachment`、`sys_comment`、`sys_approval_request` 等一族按 `(object_name, record_id)` 挂靠的系统表是同一形状),但需要一个当前不存在的多态级联能力。\n\n另外无论选哪条,都值得补一个 **boot 期的孤儿清扫**(`sweepOrphanedRuleGrants` 已经是这个形状,只是它按「规则行还在不在」判断,而这里要按「记录还在不在」判断),这样历史数据也能收敛。\n\n## 相关\n\n- #4779 / PR #5102 —— 谓词式写入重算,顺带补了规则共享的 `afterDelete`。\n- #4757、#4630 —— 同一 fail-open 家族的授权守卫。\n"
+}

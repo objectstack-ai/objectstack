@@ -1,0 +1,35 @@
+{
+  "number": 5035,
+  "kind": "pull_request",
+  "title": "fix(plugin-audit): 让 provisioning 说出表建到了哪个 datasource (#4887)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T00:34:00Z",
+  "updated_at": "2026-08-04T00:48:03Z",
+  "closed_at": "2026-08-04T00:48:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T00:48:02Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5035",
+  "body": "Fixes objectstack-ai/objectstack#4887\n\n## TL;DR —— issue 的表象不成立,真因在别的车道\n\n#4887 报告 \"plugin-audit 从不 provision `sys_audit_log` / `sys_activity`\",并猜测是 `provisionSystemTables()` 里那个静默的 `if (typeof sync !== 'function') return;` 提前返回了。\n\n**实测下来两条都不成立。** provisioning 是好的,`syncObjectSchema` 被正常调用、表被正常创建 —— 只是创建在了**另一个物理库**里。真正的缺陷在 `service-analytics` 的原始 SQL 桥接,已另开 #5033(未认领,不在本车道)。\n\n本 PR 只做本车道该做、且 issue 明确要求的那件事:**把 provisioning 的静默改成可听见**,让下一个人不必重走这条弯路。\n\n## 诊断:两个 sqlite 文件\n\n`examples/app-showcase`,`main` @ `e001a1f`,`SqlDriver(better-sqlite3)`,单租户:\n\n```\npnpm dev -- --database file:/tmp/os4887/fresh.db -p 39117\n```\n\n启动横幅 `Plugins: 47 loaded` 里同时有 `TelemetryDatasource` 和 `Audit`。这是关键 —— 磁盘上有**两个**库:\n\n```\n=== /tmp/os4887/fresh.db ===            主库,88 个对象(与 issue 报的 88 完全吻合)\n  sys_audit_log  : MISSING\n  sys_activity   : MISSING\n  sys_comment    : sys_comment\n\n=== /tmp/os4887/fresh.telemetry.db ===  ADR-0057 §3.6 兄弟文件,9 个对象\n  sys_audit_log  : sys_audit_log                              [table]\n  sys_activity   : sys_activity, sys_activity__r20260804      [view + 轮转分片]\n  sys_comment    : MISSING\n```\n\n原因是 **ADR-0057 §3.6**(P3 separation,#2791 已实现):`sys_audit_log` 的 `lifecycle.class` 是 `audit`,`sys_activity` 是 `telemetry`,引擎 `getDriver()` 第 3 步把这两类对象路由到名为 `telemetry` 的 datasource;而 `os dev` 在 file-backed sqlite 主库上**默认**provision 这个兄弟文件(`packages/cli/src/utils/telemetry-datasource.ts`:`dev.db` → `dev.telemetry.db`)。`sys_comment` 没有 `lifecycle.class`,留在主库 —— 所以报告人看到的正是\"两个缺、一个在\"。\n\n同一个对象,两条读路径给出两个答案:\n\n```\n# 走对象路由(engine.find → getDriver → telemetry 驱动)\nGET /api/v1/data/sys_audit_log?$top=200   → HTTP 200,49 条真实审计记录\n\n# 走 dataset 原始 SQL(engine.execute,没带 { object } → 默认驱动)\nPOST /api/v1/analytics/dataset/query      → HTTP 200,{\"rows\":[],\"fields\":[],\"totals\":[]}\n   服务端: WARN [Analytics] … no such table: sys_audit_log\n```\n\n**49 条记录真实存在,安全看板显示 0。** 这就是 issue 观察到的现象,但成因是 `service-analytics` 的 `executeRawSql` 自动桥接拿到了 `objectName` 却把它丢掉了(`packages/services/service-analytics/src/plugin.ts:267`),导致 dataset 的原始 SQL 永远打在默认 datasource 上。同一文件里的 `executeAggregate` 桥接调用 `engine.aggregate(objectName, …)`,路由是对的 —— 两条路径对\"这个对象在哪个库\"给出了不一致的答案。\n\n详细复现与建议方向见 **#5033**。那是 `packages/services/service-analytics/**`,不是本车道,本 PR 不碰。\n\n## 本 PR 改了什么\n\n`syncObjectSchema()` 返回 `void`,并且自己有**三个静默出口**(对象不在 registry / 没有驱动 / 驱动没有 `syncSchema`),都不抛错 —— 所以调用方只 catch 异常是分辨不出\"建好了\"和\"什么都没干\"的。再叠加本侧那个静默的 `typeof` 提前返回,结果是:provisioning **全跳过**和 provisioning **正常工作**,打出来的日志一模一样(都是空)。这正是本 issue 被误诊的机制。\n\n现在 provisioning 会自述:\n\n- **整体跳过改成 `warn`,并说清后果** —— 表退回\"首次 WRITE 时懒建\",先 READ 的环境(首页活动流在任何写入之前就查 `sys_activity`)会一直打 `no such table`;\n- **每次启动一行 `info`,列出每张表落到了哪个 datasource** —— 通过引擎自己的 `getDriverForObject` 解析,不靠推断;\n- **ADR-0057 拆分生效时再补一行 `info`**,明确说这些表在另一个 store(SQLite 上就是另一个**文件**),以及\"任何不指名对象去读它们的路径(默认 datasource 上的原始 SQL)会报 `no such table`,尽管 provisioning 是成功的\";\n- **对象解析不到驱动时是 `warn`** —— 这种情况 `syncObjectSchema()` 不发 DDL 也不抛错,per-object 的 `catch` 永远不会触发,从引擎外面只有这里能观测到。\n\n真实运行时的输出(本分支,`pnpm dev` 全新库):\n\n```\nINFO AuditPlugin: system tables provisioned — sys_audit_log→telemetry, sys_activity→telemetry, sys_comment→com.objectstack.driver.sql\nINFO AuditPlugin: sys_audit_log→telemetry, sys_activity→telemetry live on a NON-default datasource (ADR-0057 §3.6\n     lifecycle-class separation), not on 'com.objectstack.driver.sql'. Their tables exist in that store — on SQLite,\n     a different FILE. Anything that reads them without naming the object (raw SQL on the default datasource) will\n     report \"no such table\" even though provisioning succeeded.\n```\n\n行为本身没变:同样 sync 这三个对象,per-object 失败依然互相隔离,没有 on-demand DDL 的引擎依然降级而不是让 `start()` 失败。\n\n## 测试\n\n新增 `AuditPlugin — provisioning is audible (#4887)` 5 个用例,覆盖:整体跳过要 warn 且点名后果、逐对象 datasource 落点上报、全在默认 datasource 时不误报拆分、解析不到驱动要 warn、单个对象 sync 失败不影响其余上报。\n\n```\npnpm --filter @objectstack/plugin-audit exec vitest run --maxWorkers=2\n Test Files  7 passed (7)\n      Tests  99 passed (99)\n\npnpm --filter @objectstack/plugin-audit typecheck   → tsc --noEmit,无输出(通过)\npnpm --filter @objectstack/plugin-audit build       → CJS/ESM/DTS Build success\neslint (改动的两个文件)                              → 无输出(通过)\n```\n\n反向验证(防空转):把 `audit-plugin.ts` 还原成 `main` 的版本后重跑,新增 5 个用例**全部失败**、旧用例全绿 —— 新测试确实在测新行为。\n\n## 范围之外\n\n- **#5033**(已开,未认领):`service-analytics` 的 `executeRawSql` 桥接丢弃 `objectName`。这是 #4887 现象的真因,影响面覆盖所有 `lifecycle.class ∈ {audit, telemetry, event}` 的对象以及任何显式外挂 datasource 的业务对象。\n- #4887 后半段的 \"0 vs not-available\" widget 语义问题,涉及 analytics/UI 表面,一并记在 #5033 里,本 PR 不实现。\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_015W6nhsDrz6zWQc8je12a1t\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015W6nhsDrz6zWQc8je12a1t)_"
+}

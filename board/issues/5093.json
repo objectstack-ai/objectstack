@@ -1,0 +1,36 @@
+{
+  "number": 5093,
+  "kind": "issue",
+  "title": "E6(#5040 执行器):endpoint 文档进 rest-server enrichment 管线 + 摘除 dispatcher `generateOpenApi` 死分支 + 修正台账注记(并入 #5078)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "enhancement",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T03:57:54Z",
+  "updated_at": "2026-08-04T07:45:37Z",
+  "closed_at": "2026-08-04T07:45:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5093",
+  "body": "Part of #5040(E 系列第 6 单,按 2026-08-04 E6 设计修正执行)。**Blocked-by: #5092(E5)**(需端点执行面定型后再出文档面)。维护者已放行提前开发(见 #5080 认领评论;E7 翻转仍守 v17 分期)。\n\n## 范围(以 #5040 的 E6 设计修正评论为准,替代原设计 §3.5)\n\n1. **一路一主 = rest-server**(#5078 实测坐实:355KB 真文档、Host 注入、199 paths 展开):endpoint 的 `summary` / `description` / `operationId` 经 **rest-server 既有 enrichment 管线**进入 `GET /api/v1/openapi.json`(与 `{object}` 展开同根,按 `getMetaItems({type:'api'})` 出 `/apps/<ns>/…` 条目);**禁止**在 `IMetadataService` / `MetadataManager` 上实现 `generateOpenApi`(ADR-0076 第二属主);\n2. 摘除 `packages/runtime/src/http-dispatcher.ts:~1610` 的 `generateOpenApi` 探测死分支(双重死:零实现 + 零到达路由);\n3. 修正 `route-ledger.ts:252` 失准注记 —— **本单落地即关闭 #5078**(PR 写 `Fixes #5078`);\n4. 测试:enrichment 出条目(含空 api 集时文档不变的阴性对照)+ 死分支摘除后 dispatcher 测试面无残留引用。\n\n## 约束\n\nendpoint 条目仅在 publish 放行后才存在,故 17.x 翻转(E7)前文档条目为空集 —— 本单落地零现网文档变化;执行器车道程序卡(`session_01EYGdmvWP1ieZSLqvAW6uyd` 按序派发),**其它车道请勿认领**。\n\n关联:#5078(实测证据与并入)、ADR-0076、ADR-0121、#5040 E6 设计修正评论。"
+}

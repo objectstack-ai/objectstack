@@ -1,0 +1,35 @@
+{
+  "number": 5267,
+  "kind": "pull_request",
+  "title": "fix(auth): organization/create 判权威的 OS_TENANCY_POSTURE，不再判被降级的 OS_MULTI_ORG_ENABLED (#5233)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T13:26:24Z",
+  "updated_at": "2026-08-04T13:55:20Z",
+  "closed_at": "2026-08-04T13:55:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T13:55:18Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5267",
+  "body": "Fixes objectstack-ai/objectstack#5233\n\n## 问题\n\nADR-0105 D1 把 `OS_TENANCY_POSTURE`立为权威 knob,`OS_MULTI_ORG_ENABLED` 降级成 `resolveTenancyPosture()` 的**回落输入**。但 `AuthManager` 里有两个站点还在直接读那个被降级的布尔,于是一台**按文档只设权威 knob** 的部署(`OS_TENANCY_POSTURE=isolated`,遗留布尔不设)——组织墙整套挂上、tenancy 服务 `isolated`、D5 不报警——`POST /api/v1/auth/organization/create` 依然 **403 \"Creating additional organizations is disabled on this deployment.\"**\n\ncloud#1012 的维护者决策(方案 B)是自助注册**不**自动开通组织,org-less 用户由 console 导到引导式「Create your workspace」。**那条路径就是这个 403**,所以平台对「新注册之后怎么办」的唯一答案是死路。与 cloud#1020 同形状,换了一个站点。\n\n## 改法\n\n两个站点,都在 `packages/plugins/plugin-auth/src/auth-manager.ts`:\n\n1. **`organizationHooks.beforeCreateOrganization`** —— 改判 `postureEnforcesWall(resolveTenancyPosture())`,即 `serve.ts` 的 ADR-0093 D5 boot guard 用的同一个 knob。**意图完全不变**(单组织仍然拒绝),只是把 knob 从被降级的布尔换成权威的那个;判的仍然是「操作者**请求**的 posture」,与旧布尔同一个语义层级。判据抽成 `multiOrgPostureRequested()`,per-request live 读、不缓存。\n2. **`/auth/config` 的 `features.multiOrgEnabled`** —— 仍然优先读 `tenancy` 服务(它才知道墙是否**真的生效**),但它**没有服务时的 fallback** 原本也是 `resolveMultiOrgEnabled() ? 'isolated' : 'single'`,同一份过期契约;现在回落到 `resolveTenancyPosture()`。同时用 spec 自己的 `postureEnforcesWall()` 替掉手写的 `!== 'single'`。\n\n`packages/types/src/env.ts` 里 `resolveMultiOrgEnabled()` 那段「every site … MUST call this」的注释(写在降级**之前**,正是它把这两个站点带偏的)订正为反向指引:明确写「拿它回答『是不是多组织』就是 bug」,并指向 `postureEnforcesWall(resolveTenancyPosture())` / `tenancy` 服务。**纯注释,代码语义零改动** —— `resolveTenancyPosture()` 的 fallback 链原样保留(遗留布尔的 back-compat 全靠它)。\n\n`packages/spec/**` 零改动。\n\n## 兼容性\n\n不需要任何部署改配置:\n\n| 配置 | 改前 | 改后 |\n|---|---|---|\n| `OS_TENANCY_POSTURE=isolated`(遗留布尔不设) | **403** | **200** |\n| `OS_TENANCY_POSTURE=group` | **403** | **200** |\n| `OS_MULTI_ORG_ENABLED=true`(posture 不设) | 200 | 200(经 posture resolver 的回落) |\n| `OS_TENANCY_POSTURE=isolated` + `OS_MULTI_ORG_ENABLED=true`(此前的绕法) | 200 | 200 |\n| `single` / 都不设 | 403 | 403 |\n\ncloud 控制面无影响:它的 worker 本来就显式设 `OS_MULTI_ORG_ENABLED=true`,两种读法同解。\n\n## 测试\n\n新增 `packages/plugins/plugin-auth/src/org-create-posture-gate.test.ts`(19 例),走**真实 better-auth 管线** —— 真实 sign-up 拿 cookie,再 `POST /organization/create` 经 `AuthManager.handleRequest`,断言真实 HTTP status/body(遵循 #3585 / #4785 的先例:改真东西,别 stub 我们自己的代码)。只断言 hook 函数会重演原来的盲区:现场那个 403 是**挂载的路由**吐出来的,那就得由路由来回答。\n\n每个场景**同时**断言 `/auth/config` 的 `features.multiOrgEnabled`,末尾一张表把「flag 必须精确预测路由的答案」钉成不变量 —— #5233 之所以难看见,正是因为 flag 说 yes、路由说 no,而没有任何东西比对过这两者。\n\n**对未修复源码跑,19 例中 10 例失败**(`AssertionError: expected 403 to be 200`),修复后全绿。\n\n**下游证据:cloud PR #1091 在 cloud 侧落了一条 e2e,这个修复要把它从 403 翻成 200** —— 那是 cloud#1012 钉住的真实 `objectstack serve` + 真实 HTTP 探针,本仓跑不了它;本 PR 的框架侧测试是照那个形状写的。\n\n```\npnpm --filter @objectstack/plugin-auth test        → 34 files / 744 tests passed\nturbo typecheck --filter=@objectstack/plugin-auth --filter=@objectstack/types → OK\npnpm --filter @objectstack/spec check:generated    → 9/9 up to date(合了 origin/main 的 spec 改动后)\n@objectstack/dogfood org-create-default-team       → 1 passed(#3624 的回归,见下)\neslint(改动文件)/ check:adr-anchors / check:doc-authoring /\ncheck:org-identifier / check:role-word / check:startup-registry-verdict /\ncheck:durability-log-level                          → 全部 OK\n```\n\n## 两条刻意**没有**在本 PR 里做的事(已各自建 issue)\n\n**#5261 —— 闸门判「请求的」还是「实际生效的」posture?** 降级态(ADR-0093 D5:请求了墙但企业包缺席)下两者分叉:闸门放行、`/auth/config` 藏按钮。这个分叉**不是本 PR 引入的**(旧布尔同样是纯 env 读,在这里同样返回 true),改它是一次实打实的能力收缩 —— 没装企业包的 OSS 部署将完全无法建组织,并且 `packages/qa/dogfood/test/org-create-default-team.dogfood.test.ts`(#3624 的 e2e)靠「boot 后翻 env、闸门 live 读」开路,收紧之后无论如何都过不了、只能改写或删掉。那是维护者的决定,不是 knob 纠正,所以本 PR 把它**作为当前行为钉在测试里**(用例名带 \"pinned as CURRENT behaviour (#5261)\"),无论将来怎么定,都必须有意识地改那条断言。已验证 #3624 的 dogfood 在本 PR 下**仍然通过**。\n\n**#5262 —— plugin-auth 之外还有 6 处同类误读。** issue 要求的普查做完了:`objectql/src/registry.ts`(多租户系统字段注入)、`plugin-dev`(压根不加载 `@objectstack/organizations` → 直接掉进降级态)、`runtime/src/app-plugin.ts` 两处(inline seed / 热重载 seeder)、`driver-sql`(tenant-audit 告警,还把结果缓存了)、`cli/verify`。本 PR 的文件面被限定在 `plugin-auth` + `types` 的一条注释,一处未改,全部归档在 #5262,建议一处一处改并各自带测试。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_015W6nhsDrz6zWQc8je12a1t\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015W6nhsDrz6zWQc8je12a1t)_"
+}

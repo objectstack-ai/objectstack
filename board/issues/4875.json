@@ -1,0 +1,36 @@
+{
+  "number": 4875,
+  "kind": "issue",
+  "title": "`HealthMonitor.timeout()` 是 #4813 同一个漏法 —— 健康检查的超时守卫赢下 race 后也不清除",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T11:50:20Z",
+  "updated_at": "2026-08-03T17:55:05Z",
+  "closed_at": "2026-08-03T17:55:05Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4875",
+  "body": "发现自 #4813 的实现过程(PR #4874)。**未认领。** 与 #4813 是同一种形状的不同实例。\n\n## 位置\n\n`packages/core/src/health-monitor.ts`:\n\n```ts\n  /**\n   * Timeout helper\n   */\n  private timeout< T >(ms: number, message: string): Promise< T > {\n    return new Promise((_, reject) => {\n      setTimeout(() => reject(new Error(message)), ms);   // ← 从不 clearTimeout,也不 unref\n    });\n  }\n```\n\n调用点在 `:112`,健康检查那条 race:\n\n```ts\n        this.timeout(config.timeout, `Health check timeout after ${config.timeout}ms`)\n```\n\n与 #4813 修掉的两处一字不差:守卫 armed 之后就被扔掉,健康检查赢下 race 时那根定时器仍带着 ref 挂满 `config.timeout`。\n\n## 与 #4813 的差别:今天不发作,但机制相同\n\n#4813 的现象(一次性 CLI 进程空转 120 秒)这里**观察不到**,原因只是**健康监控不在 bootstrap 路径上启动** —— `startMonitoring()` 没有任何调用点在内核启动流程里,所以 `os migrate` 一类的进程根本不会 armed 这根定时器。\n\n也就是说这条今天是**潜伏**的:一旦健康监控真的被接进某个宿主(尤其是周期性检查,每轮一根),它就会变成 #4813 的翻版 —— 而且比 #4813 更糟,因为周期性调用会让孤儿定时器**持续累积**,不是启动时固定的 8 根。\n\n## 建议的修法\n\n用 #4874 引入的同一个私有 helper 收编,而不是在 `health-monitor.ts` 里再写第三种写法:\n\n```ts\n        try {\n            return await Promise.race([operation, timeoutPromise]);\n        } finally {\n            clearTimeout(guard);\n        }\n```\n\n⚠️ 注意别用 `unref()` —— #4874 实测确认那不是等价方案:unref'd 的守卫在「被守卫的操作永不 settle 且没有别的东西撑着事件循环」时**根本不会触发**,超时被静默吞掉。守卫必须在 race 未决期间保持 ref'd,在落定的那一刻被回收。理由完整写在 `ObjectKernel.raceStartupTimeout()` 的 doc comment 里。\n\nhelper 目前是 `ObjectKernel` 的私有方法。收编这条需要先决定它落在哪:提成 `packages/core/src/utils/` 下的共享函数,还是 `HealthMonitor` 各自持有一份。倾向前者 —— 这已经是仓里第三个同形状的超时守卫,再复制一次就该有人把它抽出来了。\n\n## 边界\n\n- #4813 / PR #4874 的边界写明只碰 `kernel.ts` 的两个守卫,所以那条 PR **没有**动这里,只在正文里记了一笔。\n- 不要顺手改 `config.timeout` 的取值 —— 与 #4813 一样,问题不在时长而在没人回收。\n\nRefs #4813(PR #4874)。\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 5189,
+  "kind": "issue",
+  "title": "MetadataManager.publishPackage 不经 E7 端点门 —— ADR-0121 D6「匿名须限流」在 Studio 发布路径上不成立",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "protocol:breaking"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T08:19:06Z",
+  "updated_at": "2026-08-04T11:26:56Z",
+  "closed_at": "2026-08-04T09:38:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5189",
+  "body": "越范围发现,记录于 #5111(E7 翻转)实现期,**不在该 PR 内修**(#5111 的文件面声明为 `packages/spec`)。\n\n## 事实\n\n#5111 把 `apis:` 的逐端点门挂在 `ObjectStackDefinitionSchema` 上,覆盖五条 stack 级 parse 路径(`defineStack` / `os validate` / lint 评分 / metadata 插件 artifact 摄入 / `EnvironmentArtifactSchema.metadata`)。\n\n但**逐条 metadata 条目的发布路径不经过 stack schema**:`MetadataManager.publishPackage`(`packages/metadata/src/metadata-manager.ts:~840`)的校验环节是逐条 `this.validate(item.type, item.data)`,即针对该类型自身的 schema(`api` 条目 → `ApiEndpointSchema`),而**不是** stack 级 parse。因此一个经 `metadata.register()` / metadata 写接口(Studio「全部发布」)创建的 `api` 条目,发布时**不受 E7 任何一道门约束**。\n\n## 影响(按门分)\n\n- 不支持子集(`script`/`proxy`/`transform`/缺 `objectParams`)、映射路径与互撞:**有运行时兜底** —— 执行链答结构化 501 并点名条目,是响亮的,不是静默的;\n- 命名空间门(D1/D2):路径落在 `apps/{ns}/` 之外的条目**永远匹配不上**(`isAppEndpointPath` 只把该挂载下的请求交给端点步),后果是死元数据,不是安全洞;\n- ⚠️ **D6(`authRequired: false` 必须伴随已装配限流)没有运行时对偶**:运行时忠实执行 `authRequired: false`(匿名放行),`rateLimit` 未装配则 `deriveBucketConfig` 返回 `null`、不计量(E4 已有测试钉住这是**声明即执行**的正确读法)。也就是说,经该路径发布的一条 `authRequired: false` 且无限流的端点,会得到一个**匿名可达、零配额的执行入口**,而 ADR-0121 D6 的原文是「publish 拒绝」。\n\n## 建议(不预判,交 PM/维护者定)\n\n`packages/spec/src/api/endpoint-publish-gate.ts` 里的门是纯函数(`validateApiEndpointDeclarations(endpoints, { namespace })`),按 stack 身份取命名空间。可选路线:\n\n- **A** —— `publishPackage` 在 `api` 条目上调用同一函数,命名空间取该 package 的 manifest;门的判据只此一处,不产生第二套;需要把该模块从 `packages/spec/src/api/index.ts` 导出(现为包内私有,#5111 刻意未进公共面);\n- **B** —— 只把 D6 一条(唯一没有运行时对偶的)接进 `publishPackage`;面小,但「哪些门在哪条路径上成立」变成需要维护的知识,正是本程序在消灭的形状;\n- **C** —— 把 D6 也做成运行时对偶(匹配器装载期拒绝「匿名 + 未装配限流」的条目并 error 点名),与其它门同姿态:publish 是第一道门,装载是兜底。\n\n倾向 **A + C**(判据单一 + 两端都不静默),但这是发布面/契约面的取舍,留给裁决。\n\n## 前置\n\n`packages/spec/src/api/endpoint-publish-gate.ts` 随 #5111(PR #5188)落地后本单才有可复用的门函数。\n"
+}

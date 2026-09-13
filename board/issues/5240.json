@@ -1,0 +1,36 @@
+{
+  "number": 5240,
+  "kind": "issue",
+  "title": "`{ field: {} }`(零个操作符的字段约束)在同仓有三个答案:driver-sql 组合子内 TRUE、顶层抛 INVALID_FILTER、formula/driver-memory FALSE",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T11:57:44Z",
+  "updated_at": "2026-08-04T21:18:00Z",
+  "closed_at": "2026-08-04T21:18:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5240",
+  "body": "修 #5134(driver-sql 的空 `$and`/`$or`/`$not` 单位元)时按纪律核对「编译成空」的全部成因,发现这一处**不属于本单范围**的分叉。按 Prime Directive #10 单独记在这里,unassigned。\n\n## 现象\n\n`{ a: {} }` —— 一个字段,后面跟零个操作符。`FilterConditionSchema` 的非递归半边是 `z.record(z.string(), z.unknown())`,所以这个形状是**声明合法**的。同一个 filter,同仓四条路径给三个答案:\n\n| 路径 | 代码位置 | 对 `{ a: {} }` 的答案 |\n|---|---|---|\n| `driver-sql`,**顶层** | `sql-driver.ts` `applyFilters` 的 plain-map 分支 → `assertCompilableComparand` | **抛 `INVALID_FILTER` / 400**(#5041 加的闸门) |\n| `driver-sql`,**组合子内**(`$or`/`$and`/`$not` 的分支里) | `sql-driver.ts` `applyFilterCondition` 的 `typeof value === 'object'` 分支 | 遍历零个操作符 → **不产出任何 SQL** → 实际语义 **TRUE** |\n| `formula` | `matches-filter.ts` `evalField`:`if (keys.length === 0 ¦¦ …) return false` | **FALSE**(fail closed,显式写死) |\n| `driver-memory` | `memory-matcher.ts` `checkCondition`:落到 `JSON.stringify(value) === JSON.stringify(condition)` | **FALSE**(结构相等,顺带为假) |\n\n`driver-sql` 自己**内部**就不自洽:同一个 `{ a: {} }`,写在顶层被响亮拒收,包进一层 `$or` 就变成静默的 TRUE。\n\n## 为什么这是个 bug 而不是洁癖\n\n在 `$or` 里,一个「什么都不产出」的分支会被 knex 连同分组一起丢掉,于是\n\n```\n{ $or: [ { a: {} }, { b: 2 } ] }\n```\n\n编译成 `(b = 2)` —— 而按 `{}` 是 TRUE 析取项的算法(#5134 刚刚为空节点确立的),它应当匹配**全部行**;按 formula/driver-memory 的 FALSE 判定,它应当只匹配 `b = 2`。两种读法结论不同,而当前 SQL 的结果是**碰巧**和后者一致、却是经由「丢弃子句」而非任何一种语义得到的 —— 和 #5134 修掉的那个成因完全同源。\n\n## 为什么 #5134 没顺手修\n\n因为**两个候选答案各有依据、且互相矛盾**,这是语义定调不是实现细节:\n\n- **TRUE** —— 布尔代数:零个约束的合取是空合取,空合取为真。#5134 对 `{}`(零个键的节点)正是这么定的,`{ a: {} }` 是它的直接推论。\n- **FALSE** —— formula 的 fail-closed 姿态(RLS `check` 用的就是它),`driver-memory` 也给 FALSE。两个「参照实现」当前一致地说 FALSE。\n- **拒收** —— driver-sql 顶层今天的做法,也是 PD #12「契约优先,在生产端响亮拒绝」最对味的那个;代价是这形状今天在 spec 层是合法的,拒收等于收紧已声明的契约。\n\n#5134 的实现刻意**不碰**它:归约函数把带字段键的节点一律判为 `'clause'`(而非 `'true'`),所以这次的单位元修复既没有把 `{ a: {} }` 悄悄升格为「匹配所有行」,也没有替它做任何裁决 —— 行为与修复前逐字节相同。代码里留了注释指向本单。\n\n## 建议\n\n三选一,需维护者/spec 车道拍板;拍板后四个后端一起对齐,并把该 case 补进 `FILTER_LOGIC_CASES`(见 #5239,那一单已经在扩这张表)。个人倾向 **拒收**:它让 AI 生成的 metadata 在**编写期**就炸,而不是在某个后端上安静地多返回或少返回几行 —— 与 #5041 已经在 driver-sql 顶层建立的先例一致,只是把同一条闸门补到组合子内部。若嫌收紧契约代价大,次选 **FALSE**(跟随两个参照实现,且方向 fail-closed)。\n\n未验证的部分:我没有找到今天真的会产出 `{ field: {} }` 的 producer(UI 筛选器里「选了字段还没选操作符」是最可能的来源,未实测)。严重度请 PM 按 triage 定,不代表我判断它低。\n\n关联:#5134(同函数、同「编译成空」家族,已修空组合子)、#5041(顶层那道闸门的由来)、#5239(一致性表扩条)、#3774。"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 4992,
+  "kind": "pull_request",
+  "title": "fix(lint): org-axis 红线读 spec 声明的 sharing-rule 键 —— ADR-0105 D6 两条门禁此前从不触发 (#4984)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T18:57:22Z",
+  "updated_at": "2026-08-03T19:11:20Z",
+  "closed_at": "2026-08-03T19:11:18Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T19:11:18Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4992",
+  "body": "Fixes #4984\n\n## 死态复现(before 证据,最新 main)\n\n`validateOrgAxisRedLines` 注册为 `input: 'parsed'`,即跑在 Zod parse 之后。它取 `rule.criteria ?? rule.filter` 与 `rule.sharedTo ?? rule.recipient`,而 `SharingRuleSchema` 是 `.strict()` 的、声明的键是 `condition` / `sharedWith` —— 那四个名字只作为**被拒别名**出现在 `sharingRuleUnknownKeyError` 里(那是给报错信息用的处方,不是被接受的键)。\n\n在 `c87ef7034`(本分支的基点)上实测:\n\n```\n=== 1. spec-valid 且违反 D6 ① 的 sharing rule(真实键名) ===\nsafeParse ok: true\n  {\"name\":\"hq_sees_children\",\"object\":\"work_order\",\"active\":true,\"accessLevel\":\"read\",\n   \"sharedWith\":{\"type\":\"team\",\"value\":\"hq\"},\"type\":\"criteria\",\n   \"condition\":{\"dialect\":\"cel\",\"source\":\"record.parent_organization_id == 'org_hq'\"}}\nfindings on PARSED stack: []          ← 判绿\nfindings on RAW (pre-parse) stack: [] ← 判绿\n\n=== 2. 现有测试 fixture 用的死键,过不了 schema ===\nname,object,criteria  => REJECTED: Unrecognized key(s) on this sharing rule: `criteria`.\nname,object,sharedTo  => REJECTED: Unrecognized key(s) on this sharing rule: `sharedTo`.\n\n=== 3. 平台级对象上的 BU 授权(真实键名,D6 ②) ===\nsafeParse ok: true\nfindings: []                          ← 判绿\n```\n\n即:一条声明为 `error`、以 ADR-0105 D6 红线为依据的门禁,在 sharing-rule 这条路径上**对任何 spec 合法的 stack 永不触发**;而**它自己的测试 fixture 用的正是那些被拒的死键,所以测试全绿、规则全死**。\n\n## 改了什么\n\n**1. 规则改读 canonical 键。** `rule.condition` / `rule.sharedWith`,不再有 `??` 别名兜底。别名已经在 `sharingRuleUnknownKeyError` 里有明确处方并被 parse 拒收 —— consumer 不该容忍 producer 契约拒绝的东西(Prime Directive #12)。新增一条测试把这个决定钉住:写 `criteria` / `filter` / `sharedTo` / `recipient` 的规则**不**判红,交给 spec 的拒收。\n\n**2. 语义按 D6 原文逐条搬,不是只换名字。** 别名与真键的形状确实不同:\n\n| | 死键 | 真键 | 形状差异 |\n|:--|:--|:--|:--|\n| 谓词 | `criteria` / `filter` | `condition` | `ExpressionInput` —— 裸串(作者态)/ `{ dialect, source }`(parse 后)/ `{ dialect, ast }`(compile 后),三种都要能取到文本,新增 `expressionText()` |\n| 收件人 | `sharedTo` / `recipient` | `sharedWith` | `.strict()` 的 `{ type, value }`;`id` 也是被拒别名 |\n\n`expressionText()` 刻意不读 `meta.rationale` —— 那段散文完全可能正当地提到它正在解释「本规则不使用」的那个字段,error 级门禁不能被注释误伤。\n\n`path` 从笼统的 `sharingRules[i]` 细化到 `sharingRules[i].condition` / `sharingRules[i].sharedWith`,两个槽位各自点名。\n\n**3. fixture/schema 漂移守卫(本单的结构性修复)。** 只改键名的话,同样的漂移下次还来。现在每个 sharing-rule fixture 都过 `sharingRule()`,它先用真的 `SharingRuleSchema` parse 再交给 lint;object fixture 同理走 `objectFixture()` → `ObjectSchema`。fixture 一旦与 spec 漂移就在 fixture 处判红,而不是去测一个作者写不出来的形状。元测试本身也自证不死:把 #4984 之前的两个 fixture 原样喂进去,断言它们**抛错**。\n\n## 反向验证\n\n| 场景 | 结果 |\n|:--|:--|\n| 真实键名的违规 stack(修复后) | 判红并点名 `sharingRules[0].condition` / `.sharedWith` |\n| 合法 stack(membership / BU / 非 BU 收件人) | 判绿 |\n| 把规则改回读死键,跑新测试 | **7 failed** —— 元测试与行为测试同时判红 |\n\n改回死键时的失败清单:\n\n```\n× flags a spec-valid sharing rule whose `condition` walks the org parent\n× flags the pre-parse `condition` shape too (`os lint` runs on the normalized stack)\n× flags the compiled `{ dialect, ast }` condition shape\n× flags a recipient that reaches for the org parent\n× does NOT resurrect the schema-rejected aliases — parse is that gate\n× flags a business-unit grant on a `tenancy.enabled: false` object\n× flags the `systemFields.tenant: false` spelling of the same opt-out\n Tests  7 failed | 11 passed (18)\n```\n\n## 真实元数据上是否有新红\n\n**没有。** D6 是 error 级,所以逐条核过:\n\n- `examples/app-showcase` / `examples/app-crm` 的全部 sharing rule:没有任何 `condition` 或 `sharedWith` 提到 `parent_organization_id`;\n- 全仓没有对象声明 `tenancy.enabled: false` 或 `systemFields.tenant: false`,所以 D6 ② 也无处触发;\n- `default-permission-sets.ts` 与 `examples/app-showcase/src/security/permission-sets.ts` 的 RLS `using`/`check`:只有 `assignee == current_user.email` / `owner == current_user.email` 一类,无 org 轴引用。\n\n## 验证\n\n```\n$ pnpm --filter @objectstack/lint test\n Test Files  54 passed (54)\n      Tests  987 passed | 4 skipped (991)\n\n$ pnpm --filter @objectstack/lint typecheck\n(clean)\n\n$ npx eslint packages/lint/src/validate-org-axis-red-lines{,.test}.ts --no-inline-config\n(clean)\n```\n\n## 顺手发现,已单独建单(未随本 PR 修)\n\n- **#4989** —— 同一文件的 `objects[].rowLevelSecurity` 分支也是死路径:`ObjectSchema` 根本不声明 `rowLevelSecurity`,`objects[0]` 带该键的 stack 被 parse 拒收。危害小于本单(permission-set 那段覆盖了 RLS 的唯一可授权落点,红线没有洞),但「删掉该段」还是「给 spec 加对象级 RLS 授权面」是 ADR 级取舍,不宜在本 PR 里替维护者决定。\n- **#4991** —— D6 ② 只拦 `business_unit` 收件人,漏了 `unit_and_subordinates`,而 ADR-0105 D6 ② 原文点名的正是后者,且它的授权面更大(整棵 BU 子树)。这是 error 级门禁的**扩张**,不随本单做;已核查按此扩张现有真实元数据不会产生新红。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018iARDqtrhQgz6fVHDeDkbQ)_"
+}

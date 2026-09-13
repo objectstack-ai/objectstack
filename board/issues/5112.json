@@ -1,0 +1,35 @@
+{
+  "number": 5112,
+  "kind": "issue",
+  "title": "E8(#5040 执行器):验收 —— showcase 端点回迁 `/apps/showcase/…` + RED-first e2e + 真实 boot 探针 + 升级文档安全复核",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "enhancement"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T05:04:45Z",
+  "updated_at": "2026-08-04T11:26:54Z",
+  "closed_at": "2026-08-04T11:25:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5112",
+  "body": "Part of #5040(E 系列第 8 单,收尾件,**v17 切版等本单绿**)。**Blocked-by: E7(翻转单)**。\n\n## 范围\n\n1. **showcase 回迁**:恢复被注释的 `apis:` 声明(#4936 时随硬拒注释),路径迁到命名空间前缀 `/api/v1/apps/showcase/…`,过 E7 的 publish 门;\n2. **RED-first e2e**:先写断言「声明的端点在真实 boot 上可达且语义正确」的失败测试,再让链条把它变绿 —— 覆盖:匹配命中执行(每种 target 类型至少一条)、`authRequired: false` 匿名可达 / 缺省需鉴权、`rateLimit` 429 + `Retry-After`、`cacheTtl` 响应头、未声明路径 404 形状与 #4936 前逐字节一致;\n3. **真实 boot 探针**(参照 #5078 的实测纪律,curl 非 grep):boot showcase → 逐端点 curl 断言 + `/api/v1/openapi.json` 含端点条目(E6 enrichment 生效证明)+ 阴性对照;\n4. **升级文档安全复核**(维护者裁决的落点):确认 upgrade-guide 中「审视历史 `apis:` 配置、尤其显式 `authRequired: false`」指引在场、准确、可被 AI 维护者据此执行 —— 按安全件验收,不是文案顺带;\n5. 覆盖真相:执行器代码「结构性不可达」豁免随本单终结,coverage 纳入正常门。\n\n## 约束\n\n执行器车道程序卡(`session_01EYGdmvWP1ieZSLqvAW6uyd` 按序派发),**其它车道请勿认领**;不改 `content/docs/releases/`。\n\n关联:#5040 设计 §6/§7、E7 翻转单、#5078(boot 实测纪律先例)。"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 5029,
+  "kind": "issue",
+  "title": "A `json_schema` validation rule's `format` keyword is silently IGNORED — ajv runs without `ajv-formats`, so `format: 'email'` enforces nothing",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T00:29:56Z",
+  "updated_at": "2026-08-04T09:21:54Z",
+  "closed_at": "2026-08-04T09:21:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5029",
+  "body": "Found while implementing #4762 (PR #5027) — filed unassigned, deliberately not fixed there: #4762's ruling scoped that PR to the two artifacts that **fail to compile**, and this is the opposite case (the schema compiles perfectly and one of its keywords is dropped).\n\n## What is unenforced\n\n`packages/objectql/src/validation/rule-validator.ts` builds its shared ajv as:\n\n```js\nconst ajv = new Ajv({ allErrors: true, strict: false });\n```\n\nNothing calls `addFormats(ajv)` and `ajv-formats` is not a dependency of `@objectstack/objectql`. In ajv 8 the `format` keyword is **not built in** — it ships in the separate `ajv-formats` package. Under `strict: false` an unknown format is not an error: ajv logs one line and **ignores the keyword**.\n\nSo a `json_schema` validation rule like this:\n\n```js\n{\n  type: 'json_schema',\n  name: 'support_config_shape',\n  field: 'support_config',\n  message: 'Support config must carry a valid contact email.',\n  schema: {\n    type: 'object',\n    properties: { email: { type: 'string', format: 'email' } },\n    required: ['email'],\n  },\n}\n```\n\n…compiles fine, runs on every write, enforces `type` and `required` — and enforces **nothing at all** for `format`. Reproduced with the repo's own ajv version and the runtime's own options:\n\n```\n$ node -e \"\nconst Ajv = require('ajv');\nconst ajv = new Ajv({ allErrors: true, strict: false });\nconst v = ajv.compile({ type: 'object', properties: { email: { type: 'string', format: 'email' } }, required: ['email'] });\nconsole.log('compiles OK:', typeof v === 'function');\nconsole.log('validates {email: not-an-email} =', v({ email: 'not-an-email' }));\n\"\nunknown format \"email\" ignored in schema at path \"#/properties/email\"\ncompiles OK: true\nvalidates {email: not-an-email} = true\n```\n\n## Why this is the #4649 / #4762 family, one level in\n\nSame shape, smaller blast radius: the rule is declared, it appears in the metadata, it appears in any \"what protects this object\" listing, it even **runs** — and one of the constraints the author wrote is silently dropped for every record. The only signal is a stderr line from ajv that names no rule and no object, emitted once at compile time. `format` is one of the most reached-for JSON Schema keywords (`email`, `uri`, `uuid`, `date`, `date-time`, `ipv4`), so this is not an exotic corner.\n\nNote the failure is **partial**, which is what makes it nastier than #4762's: the rule visibly rejects bad `type`/`required` payloads in dev, so it reads as working, while the `format` half never fires.\n\n## Why #4762's publish gate does not catch it\n\n#4762 (PR #5027) added `validateRuleCompilability`, which compiles every `json_schema` rule's schema with the **same** ajv options the runtime uses and rejects at authoring time what does not compile. That parity is deliberate and load-bearing — but it means a schema whose `format` the runtime ignores is a schema the gate also compiles happily. Correct behaviour for that gate; this is a different question, and it needs its own decision.\n\n## The decision this needs (not obvious — please rule)\n\n1. **Register `ajv-formats` in the runtime** (`addFormats(ajv)`), making `format` actually enforced. Closes declared ≠ enforced in the direction authors expect. Cost: a new runtime dependency, and it is a **behaviour change on deployed data** — records that pass today can start failing, so it needs a changeset saying so loudly. Also raises \"which format set?\" (`ajv-formats` full vs `fast` mode).\n2. **Reject `format` at authoring time** — the publish gate refuses a `json_schema` schema containing a `format` keyword, with a message saying the runtime does not enforce it and pointing at the `format` **validation-rule type** (`type: 'format'` with `regex` / a named `format`), which *is* enforced. Keeps the runtime untouched and keeps \"declared = enforced\" true by removing the declaration. Cost: rejects schemas that are valid JSON Schema, which authors will find surprising, and it is a narrowing of the authorable surface.\n3. Do nothing but document it. Named for completeness; it is the option that keeps a silent gap, so it should probably lose.\n\nRecommendation: (1) if the maintainer is willing to accept a behaviour change on existing data, because it makes the metadata mean what it says; otherwise (2), which is the ADR-0049 enforce-or-remove answer applied to a keyword rather than a property. What should not happen is the current state, where the keyword is authorable, documented by JSON Schema itself, and inert.\n\n## Acceptance sketch\n\n- A `json_schema` rule whose schema carries `format: 'email'` either **rejects** `not-an-email` at write time (option 1), or is **refused at publish** with a message naming the rule, the object and the keyword (option 2).\n- Whichever is chosen, a test pins it, and the `#4649` / `#4762` family gets one more closed case rather than a fourth open one.\n"
+}

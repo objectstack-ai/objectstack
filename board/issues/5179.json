@@ -1,0 +1,36 @@
+{
+  "number": 5179,
+  "kind": "issue",
+  "title": "service-queue: completed 任务行无人清理 —— purge() 零生产调用方、sys_job_queue 未声明 retention,队列表只增不减",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T07:51:43Z",
+  "updated_at": "2026-08-04T08:51:35Z",
+  "closed_at": "2026-08-04T08:51:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5179",
+  "body": "维护者在 #5160(邮件队列投递)复盘中质疑「发完不该删吗」,PM 核实后确认为真缺陷。\n\n## 事实(均对 `origin/main` 核过)\n\n- `DbQueueAdapter` 把成功任务标为 `status: 'completed'`(`db-queue-adapter.ts:338`)后**再无任何机制触碰它**;\n- `purge(queue)` / `purgeFailed(messageId)` 存在,但 `purge` 在生产代码里**零调用方**(仅测试),`purgeFailed` 只处理 dlq/failed 且是手动 API;\n- `sys_job_queue` 的对象定义未声明任何 retention;driver-sql 有现成的 retention/rotation 机制,该表没有用上;\n- 结论:每一次队列投递(#5160 落地后包括每一封队列模式的邮件)都在 `sys_job_queue` 留下一行永久的 `completed` 记录,表只增不减。\n\n## 一个必须尊重的既有语义\n\n`completed` 行不是纯垃圾:`db-queue-adapter.ts:106` 注明 completed/dlq 的**去重按 `created_at` 窗口**进行。清理必须保留 ≥ 去重窗口的近期行,否则窗口内的重复 publish 会被重新接受 —— 清理不能破坏这个约定,要有用例钉住。\n\n## 处置方向(PM 裁定,实现可反驳)\n\n- `completed` 行:超过保留窗(≥ 去重窗口,具体长度实现定并说明)即清,清理动作挂在适配器自己的 poll 周期上(它已有定时循环,不要新造调度器);\n- `dlq` / `failed` 行:**不动** —— 它们是死信队列,存在的意义就是等人看(`listFailed` / `purgeFailed` 是既有出口);\n- 清理量打 info 一行(清了几行、窗口多长),静默清理与静默堆积同样不可接受;\n- 若实现发现「声明式 retention(对象定义上)比适配器内清理更贴平台惯例」,可以反驳改道,但要说明为何该表适合声明式(它的写入方是适配器自己,不是用户数据)。\n\n## 与在飞单的关系\n\n落在 `packages/services/service-queue`,与 #5161 / #5177(plugin-email)、#5172(platform-objects + plugin-email)文件面不相交,可并批派发。\n\n## 验收\n\n- 长跑场景(N 次 publish→completed)后表行数有界;\n- 去重窗口内的行不被清、窗口语义有回归用例;\n- dlq 行永不被自动清;\n- 默认部署无需任何新配置即获得清理行为。"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 5160,
+  "kind": "issue",
+  "title": "plugin-email: 邮件投递接入持久化队列 —— send 走 email.send.async / sys_job_queue(重试+DLQ),可配置开关",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "enhancement",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T06:59:48Z",
+  "updated_at": "2026-08-04T08:03:36Z",
+  "closed_at": "2026-08-04T08:03:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5160",
+  "body": "维护者已拍板要队列(2026-08-04,PM 会话内决策)。本单是**接线**,不是造基建 —— 三块部件都已存在,缺的是把它们连起来并给出显式开关。\n\n## 现状(#5087 落地后)\n\n投递有三层,前两层同步、第三层无人使用:\n\n1. `SmtpTransport.send()` 同步跑完 SMTP 会话(超时默认 20s×3 段),调用方 await 里完成;\n2. `EmailService.deliverNormalized` 进程内重试:`retries + 1` 次、指数退避**封顶 2000ms**、全在同一个 await 里,进程一死重试即消失;`sys_email.status` 的 `queued` 只是发送前一瞬的预备状态,`failed` 是终态、无人再捞;\n3. `EmailServicePlugin` 已订阅 `email.send.async`(handler 里 `send()` 返回 failed 即抛、交队列重试/DLQ),`service-queue` 的 DB adapter + `sys_job_queue` 有完整测试(退避重试、maxAttempts 耗尽转 `dlq`、`listFailed`)——**但仓内没有任何生产者 `publish` 到这个主题**,直接调 `IEmailService.send()` 永远走内联。\n\n## 目标\n\n默认行为不变(内联投递);新增**队列投递模式**,开启后 `send()` 的语义变为:\n\n1. 先落 `sys_email` 行(`status: 'queued'`)—— 与现在相同;\n2. `publish('email.send.async', { rowId }, { maxAttempts, backoff })`,**引用已落的行**;\n3. 立即返回 `{ id, status: 'queued' }` —— `'queued'` 已在 `EmailDeliveryStatus` 枚举里,**因此不需要碰 `packages/spec`**;\n4. 队列 worker 用 `deliverPersistedRow(row)` 投递,把**同一行**推进到 `sent` / `failed`;`maxAttempts` 耗尽由队列转 DLQ。\n\n### 必须一并修的既有缺陷:现订阅者的重复插行\n\n现在的 `email.send.async` handler 是 `svc.send(msg.data)` —— 每次队列重试都会**插一条新的 `sys_email` 行**。改为按 `rowId` → `deliverPersistedRow`,一信一行,`attempt_count` 累计在同一行上。(兼容:老消息若带的是 sendInput 而非 rowId,按旧路径处理一个迁移窗口,由实现判断。)\n\n## 配置门(与 #5087 三门同构)\n\n- 构造期:`EmailServicePluginOptions.queueDelivery?: boolean`(命名可议,与现有选项风格对齐);\n- 设置页:`mail` 命名空间新增 toggle(保存热生效,走现有 `applyMailSettings` 路径);注意 #5151 已强制 select options,新增字段照 manifest 规范写;\n- CLI:`OS_EMAIL_QUEUE`(`OS_{DOMAIN}_{FEATURE}` 形状)是否值得加由实现判断,加了就要有测试。\n\n## 边界语义(PM 裁定,可反驳)\n\n- **`mail/test` 永远同步内联真发**,不入队 —— 测试按钮必须当场回答 SMTP 服务器的真实答复(535 等),回「已入队」等于回到 #5087 修掉的那种假信号。\n- **队列模式被显式开启、但 `queue` 服务不存在**:分两路,与本线既有判例一致 ——\n  - 设置页门:error 级日志(后果:投递不具持久化重试;修复:挂 queue capability 或关掉开关)+ **内联回退继续发信** —— 降的是持久性,不是投递,一次保存不该断邮件;\n  - 构造/CLI 门:**抛错,boot 失败**(#5132 判例:显式声明的意图无法兑现就响亮失败)。若你认为这条过硬(毕竟内联仍能发信),照实反驳。\n- 队列模式下 `send()` 返回的 `status:'queued'` 是真话 —— 行在库里、任务在 `sys_job_queue` 里,进程死了 worker 还会捞起来。这正是与现状 `queued` 一瞬即逝的本质区别。\n\n## 不在本单\n\n- `sys_email` 存量 `queued` 行的启动清扫 / drain 钩子吞错 —— 另单(同文件,串行在本单之后)。\n- ⛔ `packages/spec`(`'queued'` 已在枚举,无需动;车道另有四单在飞)、⛔ `content/docs/releases/`。\n\n## 验收\n\n- 开启队列模式:`send()` 立返 `queued`,worker 异步推进同一行到 `sent`(含 `message_id`);SMTP 535 时队列按 backoff 重试、耗尽转 DLQ,`sys_email` 行终态 `failed` 且 error 在案;\n- 默认(未开启):行为与今天逐字节一致,现有 236+ 用例不改一条断言;\n- 设置页开关热生效;队列服务缺失的两路语义各有用例;\n- 现订阅者重复插行的缺陷有回归测试钉死(同一消息重试 N 次 = 1 行,attempt_count 累计)。"
+}

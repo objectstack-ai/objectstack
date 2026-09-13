@@ -1,0 +1,35 @@
+{
+  "number": 5312,
+  "kind": "pull_request",
+  "title": "feat(spec): `api` 补进 DEFAULT_METADATA_TYPE_REGISTRY 与 BUILTIN_METADATA_TYPE_SCHEMAS (#5271)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T18:18:45Z",
+  "updated_at": "2026-08-05T02:32:06Z",
+  "closed_at": "2026-08-05T02:32:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T02:32:04Z",
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5312",
+  "body": "Fixes #5271\n\nPart of #5206（第 1 步,spec 车道)。engine 半边 PR #5279 **不依赖**本 PR,本 PR 也不动它的文件面。\n\n## 前提先验证:是,两处都真的缺,且直写通道今天是开的\n\n`origin/main` @ `88b9b2d`:\n\n- `DEFAULT_METADATA_TYPE_REGISTRY` 无 `api` 条目(反证:`view` / `flow` 在,行号可见);\n- `BUILTIN_METADATA_TYPE_SCHEMAS` 无 `api` 绑定;\n- 顺带发现 `MetadataTypeSchema` 枚举里也没有 `api` —— 子单正文没写这一条,但它是前置:注册表条目的 `type` 字段就是这个枚举。\n\n比子单正文更要紧的一条实情:**直写通道今天不是关着的,是开着且不校验**。`isRuntimeCreateAllowed`(`metadata-protocol/protocol.ts`)与 `assertAllowed`(`sys-metadata-repository.ts`)各有一条兜底 —— 「没有静态注册表条目的类型由 `getMetaTypes()` 合成为 `allowRuntimeCreate: true`,写入门必须一致」—— 而两处注释都**点名 `api`**。所以 `PUT /meta/api/:name` 一直返回 200,只是不过任何 schema。\n\n一处需要更正父单措辞:`getMetaTypes()` 其实**枚举得到** `api`(只要库里有行,`metadataService.getRegisteredTypes()` 就报它),只不过拿到的是合成描述符 —— `label: 'api'`、`filePatterns: []`、`domain: 'system'`、`schema: undefined`。所以 Studio 不是「看不到这个类型」,而是「看到一个没有 JSON Schema 的类型,只能给 raw-JSON 文本框」。缺口是真的,形状比正文描述的窄一点。\n\n## 证据闸(存量扫描):干净\n\n仓内可及的**全部** 4 条作者声明,逐条跑 `ApiEndpointSchema.safeParse`:\n\n```\nOK    showcase_task_feed          (examples/app-showcase/src/system/apis/index.ts)\nOK    showcase_inquiry_purge_api  (examples/app-showcase/src/system/apis/index.ts)\nOK    e8policy_public_notes       (packages/qa/dogfood/test/fixtures/endpoint-policy-fixture.ts)\nOK    e8policy_private_notes      (packages/qa/dogfood/test/fixtures/endpoint-policy-fixture.ts)\n\nscanned=4 dirty=0\n```\n\n⚠️ **线上部署的 `sys_metadata` 无法从本环境扫描** —— 这是可行范围的诚实边界,不是「扫过了没事」。changeset 里给了运维侧的处方:升级前跑 `GET /api/v1/meta/diagnostics?type=api`(该类型现在被这个 sweep 覆盖了)。\n\n## 旗标怎么定的(这是本单唯一的语义抉择)\n\n`allowRuntimeCreate: true` + `allowOrgOverride: false` —— **两个都等于今天的实际取值**,所以授权判决逐字节不变,本 PR 只加了一道形状门(422)。\n\ncode-only(`allowRuntimeCreate: false` + `allowOrgOverride: false`,即 `job` / `agent` 的形状)被证据否掉,三条:\n\n1. 它**移走一扇门**而不是校验一扇门 —— 今天的 200 变成 403,这个合同变更本链条上没有任何一单要求过;\n2. #5086(PR #5263)对 code-only 类型**在落库前、draft 与 active 一视同仁**地拒绝,于是 `api` draft 将无法创建,#5206 第 2 步(PR #5279)的 `publishPackageDrafts` 端点门**没有 draft 可门**;\n3. ADR-0121 的原文是「publish 拒绝」并附点名 key 的处方(D1/D2/D6),这预设了一个**能写出 draft 的作者**。「publish 拒绝」不等于「作者面拒绝」。\n\n`allowOrgOverride: false`:端点是发布方的**对外 URL 契约**,per-org fork 可以挪 `path`、翻 `authRequired`、摘 `rateLimit`,而对方系统已经按这个 URL 集成了。ADR-0005 默认 false 正是要让 opt-in 是刻意的。姿态与 `datasource` 一致。\n\n`executionPinned: false`(端点是**委派**,ADR-0121 D5,被 pin 的是目标 flow)、`loadOrder: 92`(在 flow 的 80 之后)。\n\nADR-0088 准入测试三条全过,且**不构成对 `router` 退役的翻案**:`router` 的交付形态是代码贡献,单条 `ApiEndpoint` 是声明式工件 —— 正是 ADR-0088 自己那一行预告的「第三种真实交付形态」。\n\n## 收紧被实测否掉(本 PR 最值得读的一段)\n\n`api` 进注册表后落入 #4001 收紧运动的两条不变量。**保护信封已补**(`...MetadataProtectionFields`);**未知键收紧尝试了、被测量否掉了**:\n\n```\nunrecognized_keys: ['packageId', 'state']\n```\n\n这个 schema 不只是作者面,它也是**存量行**的解析器(`buildEndpointIndex`、`gateApiItemsForPublish`),而存量行带着元数据层自己的记账键。`strictObject` 让 `packages/metadata` **10 条测试转红** —— 装载期兜底把端点整条排除(路由答 404),publish 门报 schema 错误而不是它本该给的 D6 判决。\n\n所以 `api` 与 `view` 同列 `STILL_STRIP`,**实测过程写进该列表自己的注释**(不是一句「暂不收紧」)。真正的修法是元数据层的信封/正文分离,另立 #5309 —— 而不是教作者词表认两个存储层的键,那正是这场运动拒绝的交易。\n\n## Fixture 逐条裁定,不是批量改写\n\n三条 `api` fixture,三种处置:\n\n| fixture | 处置 | 为什么 |\n|---|---|---|\n| `protocol-meta.test.ts` 的「plugin-registered types」 | **替换** | 留着会让断言经 `isRuntimeCreateAllowed` 的**另一条**分支(已静态注册且 `allowRuntimeCreate: true`)继续变绿,却仍宣称在证明「无静态条目」那条。`theme` / `webhook` 接手;`api` 另立两条专属断言(有效 → 200、无效 → 422) |\n| `sys-metadata-repository.test.ts` 的 runtime-only 标本 | **替换** | 同一形状,同一理由。换成 `webhook`,并另加一条「已静态注册的 `api` 走 runtime-only 仍可写」 |\n| `endpoint-matcher.test.ts` 的「strips storage annotations」 | **整条重写** | 它断言 `not.toHaveProperty('_lock')` —— 钉的正是「信封被丢弃」这个缺陷本身,而 `...MetadataProtectionFields` 修的就是它;且 fixture 里 `_lock: { managed: true }` 是 ADR-0010 从未定义过的形状。改为钉真正的分工:信封(已声明 ⇒ 存活)vs 记账键(⇒ 被 strip) |\n\n消费半径按**规则的调用方**扫的,不是按编辑的包:改在 `packages/spec`,坏掉的 fixture 在 `packages/metadata` 与 `packages/objectql`。\n\n## 反向验证(方向**先预测再跑**,其中一条是「变绿」)\n\n把注册表条目与 schema 绑定 stash 掉重跑:\n\n| 预测 | 实测 |\n|---|---|\n| 新 spec pin 测试 RED | ✅ 9 条红 |\n| 收紧计数 + STILL_STRIP 反向 pin RED | ✅ 2 条红 |\n| protocol-meta 的 422 断言 RED | ✅ 1 条红 |\n| **objectql sweep 保持 GREEN,`api` 那一行从表里消失** | ✅ 确认 —— sweep 枚举的是注册表,没有条目就没有那一行 |\n\n第 4 条是特意预测的:那是「因为什么都没产出所以通过」的绿。记在这里,免得下一个读者把它当成覆盖。\n\n## 验证\n\n```\n@objectstack/spec              309 files / 7963 tests passed  (typecheck clean)\n@objectstack/metadata           22 files /  478 tests passed\n@objectstack/metadata-protocol  41 files /  376 tests passed\n@objectstack/objectql          116 files / 1871 tests passed  (typecheck clean)\n@objectstack/runtime            89 files / 1313 tests passed\n@objectstack/rest               40 files /  608 tests passed\n@objectstack/example-showcase   12 files /  124 tests passed  (typecheck clean)\n```\n\nsweep 表新增的那一行(经真实 `saveMetaItem` 路径):\n\n```\ntype   schema  valid→200  invalid→422\napi    yes     ok         ok\n```\n\n生成基线**整体重生成**(gen:schema / api-surface / spec-changes / upgrade-guide / strictness-ledger),delta 只有 7 行,纯增量,是保护信封的 7 个键:\n\n```\n+ \"api/ApiEndpoint:_lock\" … \"api/ApiEndpoint:_provenance\"\n```\n\n`json-schema.manifest.json` / `spec-changes.json` / `api-surface*.json` / `protocol-upgrade-guide.md` / 台账 `.counts.md` **零变化**(全部 check 门通过)。`check:nul-bytes` OK,并对全部改动文件另跑了控制字符自扫(零命中)。\n\n## 顺带发现(已单独立单,均未指派,未在本 PR 修)\n\n- **#5309** —— `ApiEndpointSchema` 无法收紧:信封/正文未分离(本 PR 的实测就是它的证据)\n- **#5310** —— `path` 的 `.describe()` 举的例子 `/api/v1/customers` 会被 ADR-0121 D1 当场拒绝,而这段文案正是本 PR 让 Studio 表单开始显示的那段\n- **#5311** —— `saveMetaItem` 的 direct-active 写入是 `api` 的**第三条**门外通路:命名空间门与去重门在这条路上无人跑(装载期兜底按设计跳过这两道)。#5206 两步都落地后仍然存在\n\n未触碰 `content/docs/releases/`、#5206 的 engine 半边、PR #5279。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ErbEDVAg1No9gdg1pgDAGB\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ErbEDVAg1No9gdg1pgDAGB)_"
+}

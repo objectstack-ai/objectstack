@@ -1,0 +1,37 @@
+{
+  "number": 4984,
+  "kind": "issue",
+  "title": "validateOrgAxisRedLines 读的 sharing-rule 键是 spec 拒收的:ADR-0105 D6 ① 在 criteria 路径上从不触发",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T18:38:09Z",
+  "updated_at": "2026-08-03T19:11:20Z",
+  "closed_at": "2026-08-03T19:11:20Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4984",
+  "body": "发现于 #4698 的实现过程。同一缺陷类,只是方向反过来:不是 producer 写了没人读的键,而是 **consumer 读了没人写的键**。\n\n## 事实\n\n`packages/lint/src/validate-org-axis-red-lines.ts` 判 ADR-0105 D6 ①(禁止沿 org 树做权限继承)时,对 sharing rule 这样取值:\n\n```ts\nasArray(cfg.sharingRules ?? cfg.sharing).forEach((rule, rIndex) => {\n  const criteria = JSON.stringify(rule.criteria ?? rule.filter ?? '');\n  const sharedTo = JSON.stringify(rule.sharedTo ?? rule.recipient ?? '');\n  if (criteria.includes(ORG_PARENT_FIELD) || sharedTo.includes(ORG_PARENT_FIELD)) { /* error */ }\n});\n```\n\n但 `SharingRuleSchema`(`packages/spec/src/security/sharing.zod.ts`)是 `.strict()`,声明的键集是:\n\n```\nname, label, description, object, active, accessLevel, sharedWith, type, condition\n```\n\n`criteria` / `filter` / `sharedTo` / `recipient` 全部只作为**被拒别名**出现在 `sharingRuleUnknownKeyError` 的 `aliases` 映射里 —— 那是给报错信息用的处方,不是被接受的键。\n\n实测(build 后的 spec):\n\n```\ncondition => ACCEPTED keys=name,object,active,accessLevel,sharedWith,type,condition\ncriteria  => REJECTED: Invalid input\nsharedTo  => REJECTED: Invalid input\n```\n\n## 后果\n\n`validateOrgAxisRedLines` 在 registry 里是 `input: 'parsed'`,即跑在 Zod parse 之后。对任何 spec-valid 的 stack,`rule.criteria` / `rule.filter` / `rule.sharedTo` / `rule.recipient` **恒为 undefined**,`JSON.stringify(undefined ?? '')` 得 `'\"\"'`,`includes('parent_organization_id')` 恒为 false。\n\n于是:**一条声明为 `error`、以 ADR-0105 D6 红线为依据的 gate,在 sharing-rule criteria 这条路径上永远不会触发。** 作者写\n\n```ts\ndefineSharingRule({\n  name: 'hq_sees_children',\n  type: 'criteria',\n  object: 'work_order',\n  sharedWith: { type: 'team', value: 'hq' },\n  condition: \"record.parent_organization_id == 'org_hq'\",   // ← 正是 D6 ① 禁的形状\n})\n```\n\n会一路绿灯通过 `os validate` / `os build` / `os lint`。\n\n同一文件里 RLS 那两段(`permissions[].rowLevelSecurity[].using/check`、`objects[].rowLevelSecurity[]`)读的键是对的,只有 sharing-rule 这段错。`ORG_AXIS_CROSS_ORG_BU_GRANT`(②)也读 `rule.sharedTo ?? rule.recipient`,同样恒空 —— 那条同样从不触发。\n\n## 修法\n\n把两处取值改到 spec 的键上:`rule.condition`(而不是 `criteria`/`filter`)、`rule.sharedWith`(而不是 `sharedTo`/`recipient`)。\n\n两点值得在修的时候一起想清楚,不要机械替换:\n\n1. **是否保留别名读法。** 这条规则也会被 `os lint` 在 **normalized(pre-parse)**层跑一次,那一层理论上还能看见作者写的别名。但按 Prime Directive #12,别名不该在 consumer 侧用 `??` 容忍 —— 别名已经在 `strictUnknownKeyError` 里有明确处方并被 reject,parse 就是那道门。建议**只读 canonical 键**,别名交给 spec 的拒收信息。\n2. **`condition` 是 `ExpressionInputSchema`。** parse 之后它是 `{ dialect: 'cel', source }` 信封,pre-parse 时可能是裸字符串。两种形状都要能取到 source(可参照 #4698 那条新规则里的 `toCompilerInput`)。\n\n## 回归测试\n\n现有的 `validate-org-axis-red-lines.test.ts` 里 sharing-rule 那几例用的正是 `criteria` / `sharedTo`,所以**测试是绿的而规则是死的** —— 测试 fixture 和 schema 一起漂移了。修的时候必须把 fixture 也改成 spec-valid 的形状,否则换个键名照样测不到真东西。建议加一条元测试:每个 sharing-rule fixture 先过一遍 `SharingRuleSchema.safeParse`,不通过就 fail —— 这类 fixture-schema 漂移只有这样才不会再来一次。\n\n相关:#4698(母议题)、ADR-0105 D6、ADR-0057 D5。"
+}

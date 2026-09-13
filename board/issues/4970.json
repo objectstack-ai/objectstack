@@ -1,0 +1,35 @@
+{
+  "number": 4970,
+  "kind": "pull_request",
+  "title": "docs(plugin-auth): 纠正 admin 审计的「绕过生命周期钩子」断言,并把实测钉住 (#4940)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T17:32:45Z",
+  "updated_at": "2026-08-03T18:20:57Z",
+  "closed_at": "2026-08-03T18:20:55Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T18:20:55Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4970",
+  "body": "Fixes #4940\n\n议题的 open question 是「装了 plugin-audit 时,这两条路径是不是每次写两条审计」。**没有推理,只有实测**:开 showcase 栈 + `AuditPlugin`,打真实路由,读 `sys_audit_log`。\n\n## 一、实测结果\n\n驱动 `POST /auth/admin/create-user` / `set-user-password` / `import-users`,逐行 dump:\n\n| 路径 | 写入对象 | plugin-audit 通用行 | 显式行 | 是否重复 |\n|---|---|---|---|---|\n| `admin/create-user` | `sys_user`(better-auth adapter) | ✅ 1 条 `create`(整行快照进 `new_value`) | ✅ 1 条 `create`(`event: user.admin_created`) | **是** — 同一 `record_id` 上两条 `action:'create'` |\n| 同上,`must_change_password` 印戳 | `sys_user` | ✅ 1 条 `update`(字段 diff) | — | 否 |\n| `admin/set-user-password` | **`sys_account`**(credential) | **❌ 0 条** | ✅ 1 条 `update`(`event: user.admin_password_set`) | **否** |\n| `admin/import-users` 逐行 | `sys_user` | ✅ 每行 1 条 `create` | ❌ 无逐行显式行 | 否 |\n| `admin/import-users` run 级 | — | **结构上无法产出** | ✅ 1 条 `action:'import'`, `record_id: null` | **否** |\n\n原始输出(create-user 那三条):\n\n```\n{\"action\":\"create\",\"object_name\":\"sys_user\",\"record_id\":\"uEye…\",\"user_id\":\"YmNv…\",\n \"metadata\":\"{\\\"event\\\":\\\"user.admin_created\\\",\\\"email\\\":\\\"measure.4940@example.com\\\",…}\"}\n{\"action\":\"update\",\"object_name\":\"sys_user\",\"record_id\":\"uEye…\",\"user_id\":null,\n \"old_value\":\"{\\\"must_change_password\\\":false}\",\"new_value\":\"{\\\"must_change_password\\\":true}\"}\n{\"action\":\"create\",\"object_name\":\"sys_user\",\"record_id\":\"uEye…\",\"user_id\":\"YmNv…\",\n \"metadata\":null,\"new_value\":\"{\\\"id\\\":\\\"uEye…\\\",\\\"name\\\":\\\"Measure 4940\\\",\\\"email\\\":\\\"measure.4940@example.com\\\",…}\"}\n```\n\n第三条**只可能**由 `engine.registerHook('afterInsert', writeAudit)` 写出 —— 这就是对「绕过生命周期钩子」的直接反证。`sys_account`:该用户确有 1 条 credential 行,而以它的 id 查 `sys_audit_log` 得 **0** 条(`SKIP_OBJECTS` 含 `sys_account`)。议题提醒的「两个对象结论可能不同」**成立,而且正是决定性的那一半**。\n\n## 二、结论:保留纪律、更换理由(与 #4942 同款)\n\n有重复,但**不去掉显式行**。取舍依据就是上表:\n\n1. **plugin-audit 是可选插件** —— 本包不依赖它;不装则连 `sys_audit_log` 表都没有。admin 铸造一个可登录账号,其合规痕迹不该挂在可选插件上。\n2. **`sys_account` 在 `SKIP_OBJECTS` 里** —— `set-user-password` 真正写的是 credential,通用 writer 对它**零产出**。若按「钩子已覆盖」删掉显式行,「管理员重置了某人密码」这件事将**完全无痕**。这是最容易被误删的一条,所以写进注释也钉进测试。\n3. **两条行的 metadata 不是一回事** —— 通用行是字段 diff / 整行快照;显式行记的是管理员的**决策**(`passwordGenerated` / `mustChangePassword` / `placeholderEmail` / `membershipCreated`),从行快照里推不出来。\n4. **import 的 run 级行是补集而非重复** —— `actionFor` 只映射 afterInsert/Update/Delete → create/update/delete,`action:'import'` + `record_id: null` 这个形状通用 writer **结构上产不出**;它回答的是逐行台账回答不了的问题:谁跑了哪次导入、整体做了什么。\n\ncreate-user 上那唯一一处真重复(2 条 `create`)是**明知并接受**的,也写进了注释和测试的精确计数 —— 将来若冒出第三个写者,那是 finding,不是悄悄多出来的一行。\n\n## 三、原地驳斥而非删除\n\n与 #4942 一致:该断言已抄进 cloud(cloud#1022)。从抄写件过来的读者若在 framework 这边什么都没看到,无法区分「这句被删是因为它错了」和「这句本来就不在」—— 默认反而会假设 framework 的注释才是过时那份。所以点名 + 逐跳锚点。\n\n## 四、新增闸门(这次能钉住,#4942 不能)\n\n#4942 没加测试,理由是 plugin-auth **不依赖** objectql/plugin-audit,跨包事实钉不进本包。本单不受这个限制:`packages/qa/dogfood` 同时依赖两者,于是新增 `test/admin-identity-audit-trail.dogfood.test.ts`(3 例,W1–W4),打真实路由断言上表每一格。**纠正后的注释因此是套件强制的断言,而不是又一句无人核验的新claim** —— 议题本身就是「写下来却从没被钉住的机制断言」造成的。\n\n### 反向验证\n\n把 `sys_user` 临时塞进 plugin-audit 的 `SKIP_OBJECTS`(即**模拟旧注释描述的那个世界**:通用 writer 看不见 better-auth 的 `sys_user` 写入),重建 plugin-audit 后 3 例**全红**,且报错原文正好显出唯一幸存的那条显式行:\n\n```\n× POST /admin/create-user: plugin-audit's hook fires for the better-auth write… \n× POST /admin/set-user-password: sys_account is in SKIP_OBJECTS…\n× POST /admin/import-users: the run-level row complements the per-row rows…\nError: expected both a generic and an explicit create row — last saw 1 row(s):\n  [{\"a\":\"create\",\"m\":\"{\\\"event\\\":\\\"user.admin_created\\\",…}\"}]\nError: plugin-audit's per-row create row for the imported user — last saw 0 row(s): []\n Tests  3 failed (3)\n```\n\n即断言是承重的,不是恒真的。改动已还原,plugin-audit 已重建。\n\n## 五、同族扫尾\n\n全仓 grep 该措辞(`bypass.*hook` / `hooks that plugin-audit` / `plugin-audit subscribes`),**没有第四、第五处**。命中的其余各处是**另一类、且成立**的说法:`plugin-pinyin-search/companion-projection.ts` 与两个 dogfood 测试讲的是 **direct driver 写入**(确实不过 engine 钩子);#4942 已修的三处已随 main 合入。cloud 侧抄写由 cloud#1022 单独跟踪。\n\n## 改动\n\n- `packages/plugins/plugin-auth/src/admin-user-endpoints.ts` — `writeAdminAudit` 的 JSDoc\n- `packages/plugins/plugin-auth/src/admin-import-users.ts` — run 级审计旁的注释\n- `packages/qa/dogfood/test/admin-identity-audit-trail.dogfood.test.ts` — 新增闸门\n- `.changeset/auth-admin-audit-hook-bypass-claim-corrected.md`(空 frontmatter,不发版)\n\n仅注释 + 测试,**无运行时行为改变**。与 #4942 文件不相交;#4942 已合入 main,本分支已 merge 最新 main(带入了 objectql / spec 的改动)并重建、复跑全绿。\n\n## 验证\n\n```\n$ pnpm --filter @objectstack/plugin-auth typecheck\n> tsc --noEmit          # 无输出\n\n$ pnpm --filter @objectstack/plugin-auth test\n Test Files  29 passed (29)\n      Tests  658 passed (658)\n\n$ npx vitest run test/admin-identity-audit-trail.dogfood.test.ts --project isolated\n Test Files  1 passed (1)\n      Tests  3 passed (3)\n\n$ npx eslint <三个改动文件>     # 无输出,exit 0\n```\n\n一个小陷阱记下来:admin 身份路由在 better-auth `admin` 插件未开时返回 **501**,而 `bootStack` 不暴露 auth 插件覆写。唯一够得着的 env 是 `OS_SCIM_ENABLED` —— `buildPluginList` 里 `admin: pluginConfig.admin ?? scimEffective`(SCIM 强制打开 admin),属有据可依的推导,已在测试头注明。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018iARDqtrhQgz6fVHDeDkbQ)_"
+}

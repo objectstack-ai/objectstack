@@ -1,0 +1,35 @@
+{
+  "number": 5057,
+  "kind": "pull_request",
+  "title": "fix(objectql): 批量写上引用 previous 的 hook 条件 —— 点名「当前版本限制」的专门诊断 + ADR-0058 按行语义补遗 (#5037)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T01:13:40Z",
+  "updated_at": "2026-08-04T01:34:34Z",
+  "closed_at": "2026-08-04T01:34:32Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T01:34:32Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5057",
+  "body": "Fixes objectstack-ai/objectstack#5037\n\n维护者 2026-08-04 对 #4800 / #4862 的拍板里,本单是 **rc 止血半步**:契约(批量写按行求值、按行触发)记进 ADR,实现留给 #5038,rc 期把撞上限制时的报错从「像是作者写错了」改成「点名这是当前版本的限制」。\n\n## 先说清楚现状:第 1 项已部分落在 #4861 里\n\n派单文里描述的「批量写 + 引用 `previous` → 抛泛化的 `No such key: previous`」在 `origin/main` 上**已不成立**:PR #4861 在实现 #4775 的同时就带了 `predicateBulkWrite` 分支。实测(worktree 内跑现有用例)当前报错是:\n\n```\nHook 'bulk_breaker' could not evaluate its condition (type: Unknown variable: previous)\n— operation aborted. The condition reads 'previous', but this is a PREDICATE bulk write\n(multi: true): ... Rewrite the condition without 'previous', or target the write at one\nrecord (update by id). ...\n```\n\n所以本 PR 不是「补一条没有的诊断」,而是把这条诊断**对齐到 8-04 的裁定**,并补上裁定要求而当时没有的三样东西:契约口径、机器可读判别位、ADR 记录。这一点写在这里,免得 review 时按派单文原样核对。\n\n## 改了什么\n\n### 1. 文案:从「换个写法」改成「这是当前版本的限制」\n\n旧文案第一条出路是 *rewrite the condition without `previous`*。在 8-04 的裁定之后这句话是**错的建议**:作者写的过渡条件是合法的、平台已声明要支持的形状;去掉 `previous` 会把「刚变成 done」悄悄变成「是 done」,于是本来只该记一次的审计,在每一行早就 done 的记录上都会触发 —— 一个静默的语义改变,正是 #4649/#4775 一路在清的那类东西。\n\n现在的文案:点名批量写与「没有单一前置记录」(保留),然后说明**这是当前版本的限制而非契约**、引用契约出处(ADR-0058 补遗、#4800/#4862)与退役条件(#5038),先给今天可用的出路(改单记录写入,同一条件原样成立),再把「删掉 `previous`」标价而不是推荐。原有的「record-change flow trigger 不是绕路」一句保留 —— #4862 是实测结论,它订的是同一批生命周期 hook,批量上同样拿不到 `previous`。\n\n### 2. 判别位:`limitation`,并且**故意不叫 `code`**\n\n`HookConditionError` 新增 `limitation?: 'bulk_write_previous_unbound' | 'bulk_write_stored_state_unavailable'`(类型 `HookConditionLimitation` 一并导出),与既有的 `reason` / `predicateBulkWrite` 同族,调用方判分支不必再匹配文案。\n\n没有叫 `code`,是因为契约在别处:ADR-0112 把 `error.code` 定为闭集(`StandardErrorCode` ∪ `ERROR_CODE_LEDGER`,都在 `packages/spec/src/api/`),而 `rest-server.ts` 会把抛出错误的 `.code` 直接提升到响应封套上。在这里加一个 `.code`,等于以副作用的方式凭空造出一个未注册的线上错误码 —— 正是这一族错误要消灭的 `declared ≠ enforced` 形状。真要上线,应当走 ledger 注册这条路(本轮 `spec/**` 零改动,不做)。\n\n### 3. 检测:走解析后的 CEL AST,不再依赖 cel-js 的措辞\n\n「这条条件是否引用了 `previous`」改由 `collectCelRootIdentifiers`(#4972 的构建闸门用的同一个工具)在 wrap 时算一次,旧的 fault 文本判断降为兜底。实测两条路今天答案一致,收益是这条面向作者的诊断不再挂在上游库的错误措辞上;顺带修掉一类会错判的形状:`record.previous_status` 是 `record` 下的成员名,AST 给出的 root 只有 `record`,不会被当成 `previous` 引用(按文本匹配就会)。工具已知的 caveat(comprehension 绑定变量会被算作 root)在这里是惰性的:该答案只在报错路径上被读,而 `[1,2].exists(previous, previous > 1)` 自绑变量、求值正常,永远走不到报错路径 —— 已就此加了用例。\n\n### 4. ADR-0058 补遗 + anchors\n\n按 #4889 / PR #4972 的先例:**只追加,不改旧文**。补遗记的是契约本身(批量写上 after 型 hook 与 record-change flow trigger 按行求值、按行触发,与 validation 侧 #3106 同源)、今天引擎的实测行为、rc 期以本诊断止血及其退役条件(#5038),以及 #5038 实现时必须一并定的代价(hook 触发 N 次、`ctx.result` 形状、`onError` 的按行语义、大批量上限)。`scripts/adr-anchors.json` 把 ADR-0058 + ADR-0112 锚到 `hook-wrappers.ts`。\n\n## 回归测试\n\n新增 `packages/objectql/src/hook-condition-bulk-previous.test.ts`(17 例),覆盖派单要求的四项:\n\n- **(a)** 批量写 + 引用 `previous` → `limitation === 'bulk_write_previous_unbound'`、文案含批量限制/当前版本/ADR-0058/#5038/单记录出路;经真实引擎 `engine.update(..., { multi: true })` 仍然**写入失败**(诊断不是豁免);delete 形状的批量写同样命中;\n- **(b)** 同一 hook 的单记录写入:`previous` 绑定、条件成立则 handler 运行、不成立则安静跳过、引擎路径上更新照常落库 —— 完全不变;\n- **(c)** 不引用 `previous` 的批量写:条件为真照跑、为假照跳、未声明键仍报「拼错」且不提批量;声明了但本次没写的字段保留自己的 `bulk_write_stored_state_unavailable`;\n- **(d)** 该场景下泛化 CEL 措辞不再作为结论抵达调用方(`which this object does not declare` / `which is not bound for this operation` 均不出现,原始 fault 仍作为事实保留在 `fault` 字段),外加 AST 路线的两条钉子(混合拼错时两半都报;`record.previous_status` 不误判)。\n\n本地闸门(均在 `flock /tmp/os-heavy-verify.lock` 下、限堆、限包):\n\n```\npnpm --filter @objectstack/objectql typecheck   → tsc --noEmit 无输出(通过)\npnpm --filter @objectstack/objectql test        → Test Files 114 passed, Tests 1810 passed\nnode scripts/check-adr-anchors.mjs              → OK (20 anchored file(s))\nnode scripts/check-error-code-casing.mjs        → ✓ no lowercase error codes (2756 files)\nnode scripts/check-nul-bytes.mjs / check-release-notes.mjs / check-doc-authoring.mjs → OK\nnpx eslint <改动文件> --no-inline-config        → 无输出\n```\n\n合并 `origin/main`(含 #5045 动了 `packages/spec/src/contracts/objectql-engine.ts`)后重装、重建依赖包并**重跑** typecheck + 全量 objectql 测试,仍为 114/1810 全绿。\n\n## 约束核对\n\n- `packages/spec/**` 与生成物:**零改动**;`packages/metadata-protocol/src/protocol.ts`:**零改动**;`content/docs/releases/`:**未触碰**。\n- 改动面:`packages/objectql/src/{hook-wrappers,index,core}.ts` + 新测试、`docs/adr/0058-*.md`(仅追加补遗)、`scripts/adr-anchors.json`、一个 patch 级 changeset。`engine.ts` 未改 —— 批量分支的事实(`input.id` 缺失 + `options.multi`)已足够判定,不需要动那条同日被 #4972/#4993/#5007 改过的路径。\n\n## 已知的下游口径(留给 #5038,不在本单)\n\n`skills/objectstack-formula/SKILL.md` §5 目前把「两条出路」写成 *rewrite the condition without `previous`* 或改单记录写入,并把「过渡条件只写在单记录写入上」讲成永久规则;#5038 的验收面已包含「文档与 formula skill 的 transition 写法口径随之收口」。本 PR 不动它:改 SKILL.md 会带出 `gen:skill-docs` 的生成物,与本轮「spec/生成物零改动」冲突。\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01NrmBxj8rK2uGCnh9aipjwX\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01NrmBxj8rK2uGCnh9aipjwX)_"
+}

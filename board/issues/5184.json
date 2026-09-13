@@ -1,0 +1,36 @@
+{
+  "number": 5184,
+  "kind": "issue",
+  "title": "`MetadataManager.list()` 把「已知残缺」的降级结果照常写进 30s listCache,且 `listCache` 的注释描述的条件缓存代码里并不存在",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T08:09:01Z",
+  "updated_at": "2026-08-04T12:45:43Z",
+  "closed_at": "2026-08-04T12:45:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5184",
+  "body": "发现于 #5108(`DatabaseLoader` 读故障吞成空结果)实现期,**不在该单范围内**,故单独立卡。**未认领 —— 只是记录。**\n\n## 现象一:降级结果被当成正常结果 memoize\n\n`packages/metadata/src/metadata-manager.ts` 的 `list(type)` 收尾是无条件的:\n\n```ts\nconst result = Array.from(items.values());\nthis.cacheListResult(type, result);   // ← 不区分这次读是不是降级来的\nreturn result;\n```\n\n`#5108` 落地后,某个 loader 读不到存储时 `list()` 会走 `catch` 分支、在 `error` 记一行、然后**继续用剩下 loader 的内容拼出 `result`**(best-effort 姿态是刻意的,没有异议)。问题在下一行:这个**已知残缺**的结果照样进了 `listCache`,和一次完整成功的读没有任何区别。\n\n后果:\n\n- 故障期间第一次 `list('permission')` 记一行 error,**随后 30s(`LIST_CACHE_TTL_MS`)内的所有 `list('permission')` 直接命中缓存,loader 根本不再被调用** —— 既不重试、也不再有任何信号。那一行 error 覆盖的是一个 30s 的静默残缺服务窗口;\n- 存储恢复后,最长还要再等 30s 才会有人去问 loader,恢复 recovery 日志也跟着晚;\n- 缓存条目本身不带「这份是残缺的」标记,任何后续读者(含 `#5108` 新加的 error 报告的 once-only 判断)都无从分辨。\n\n## 现象二:注释描述的行为代码里没有\n\n`listCache` 字段的注释(`:138-148`)写着:\n\n> we only cache positive (non-empty) hits or repeated hits with a stable miss signature\n\n`cacheListResult()` 是无条件 `this.listCache.set(type, { ts: Date.now(), items })` —— 既不看 non-empty,也没有任何 \"stable miss signature\" 的概念。这段注释描述的是一套代码里不存在的策略。**注释即契约**,这是一处 declared ≠ enforced(Prime Directive #10 的形状,对准我们自己的内部文档)。\n\n## 为什么 #5108 里没有顺手改\n\n试过,然后否掉了 —— 而且否掉的理由本身就是这张卡要裁的东西。\n\n同一段注释记着这个缓存**为什么存在**:\n\n> Built primarily to break the deadlock that occurs when security/permission middleware calls `list('permission')` from inside a user-initiated DB transaction: the DatabaseLoader's `engine.find('sys_metadata', ...)` would then try to acquire a fresh knex connection while the transaction is still holding SQLite's single connection — knex waits the full `acquireConnectionTimeout` (60s) before returning []. The cache absorbs the repeated lookups so the loader is only hit once per TTL window.\n\n也就是说:**这个缓存吸收的恰好就是一类降级读**。「降级结果不入缓存」的直觉修法,会让上面那个事务内场景每次调用都重新烧一次 60s 超时 —— 从一个 30s 的静默窗口换成一个每次 60s 的挂起,明显更糟。\n\n所以这不是一个可以顺手改的一行,而是一个要裁的取舍。候选方向(**裁决留给维护者**):\n\n1. 降级结果照存,但**带上 `degraded` 标记 + 单独的、短得多的 TTL**(例如 1-2s):既保住 knex 那条路径的吸收效果,又把静默窗口压到接近零;\n2. 降级结果照存、TTL 不变,但**把注释改成代码真实做的事**,并在 `#5108` 的 error 文案里明说「此后 30s 内不会重试」—— 承认现状、只修 declared ≠ enforced;\n3. 按注释原本承诺的做:只缓存完整成功的读 —— 需要先确认 knex 那条路径今天是否还会真的走到(注释所指的 SQLite 单连接场景可能已随驱动演进而变),否则就是拿一个已修的死锁换回来。\n\n方向 1 看起来最合规矩(降级的东西显式标成降级,而不是混进正常缓存),但它要动 `listCache` 的数据形状,而那块面正被 #5109 占着 —— 两单同时改同一个字段会撞车,所以先记录、由 PM 排序。\n\n## 与 #5109 的关系\n\n**不是重复,也不是子集。** #5109 是「集群对端的写入不失效本节点的 `listCache`」—— 失效路径少了一个触发源;本卡是「本节点自己明知这次读是残缺的,却照常把它当完整结果缓存」—— 写入路径少了一个判据。#5109 完整落地也不会碰到 `cacheListResult` 的条件性。两者共用 `listCache` 这个字段,**建议串行做,别并行**。\n\n## 复现\n\n```ts\nconst manager = new MetadataManager({ formats: ['json'], loaders: [] });\nmanager.registerLoader(new DatabaseLoader({ driver: brokenDriver })); // 读全部 reject\nmanager.registerInMemory('permission', 'from_code', { name: 'from_code' });\n\nawait manager.list('permission');   // 记一行 error,返回 [from_code],残缺结果入缓存\nbrokenDriver.heal();                // 存储恢复\nawait manager.list('permission');   // 仍然是缓存里那份残缺结果,loader 没被问\n```\n\n## 关联\n\n#5108(发现处,已修 loader 层的吞异常)、#5109(同一个字段的另一条缺陷,建议串行)、AGENTS.md「Degradation log levels」、`packages/metadata/src/metadata-manager.ts` `:138-148` / `list()` / `cacheListResult()`。\n"
+}

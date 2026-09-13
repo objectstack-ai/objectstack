@@ -1,0 +1,39 @@
+{
+  "number": 5159,
+  "kind": "issue",
+  "title": "控制台「筛选」把整个 FilterGroup 对象存进 view 的 `filter`(spec 声明的是 `ViewFilterRule[]`)—— 真浏览器实测 422,#5114 热修修不到",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue",
+    "priority:p1",
+    "target:v17"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T06:55:00Z",
+  "updated_at": "2026-08-04T14:28:04Z",
+  "closed_at": "2026-08-04T14:27:57Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5159",
+  "body": "发现于 #5114 热修的 dogfood 浏览器端到端复核(真实 `/_console` bundle,objectui 固定 pin `f5bc4c78`,Playwright 驱动)。\n\n**与 #5114 是同一个「保存筛选条件」动作上的两个独立缺陷,叠在同一份 body 上。#5114 的重开修掉里层那个,修不到这一条。** 写下来免得下一个人以为热修合并后控制台就通了 —— 它不通。\n\n## 实测:真浏览器里点一次「Filter → Add filter」\n\nshowcase 起在自有端口,真实登录,`/_console/apps/showcase_app/showcase_task`,点工具栏 `Filter` → `Add filter`:\n\n```\nPUT /api/v1/meta/view/showcase_task.default  ->  422\n{\"error\":\"[invalid_metadata] view/showcase_task.default failed spec validation: root: Invalid input\",\n \"code\":\"INVALID_METADATA\",\"issues\":[{\"path\":\"\",\"message\":\"Invalid input\",\"code\":\"invalid_union\"}]}\n```\n\n抓下来的 body 里,`filter` 是这个:\n\n```json\n\"filter\": {\n  \"id\": \"root\",\n  \"logic\": \"and\",\n  \"conditions\": [\n    { \"id\": \"712135fb-58c5-4be4-a611-1925181509b0\", \"field\": \"title\", \"operator\": \"equals\", \"value\": \"\" }\n  ]\n}\n```\n\n**是 `FilterGroup` 对象,不是 `ViewFilterRule[]`。** 而 `ListViewSchema.filter` 声明的是 `z.array(ViewFilterRuleSchema)`。\n\n## 两个缺陷是叠着的 —— 把抓下来的真 body 三变体回放\n\n同一份 body,只改 `filter`,分别打到 修前(`origin/main`)/ 修后(#5114 热修)两个真实运行的 server:\n\n| 变体 | 修前 | 修后(#5114) |\n|---|---|---|\n| ① 原样(`FilterGroup` 对象) | 422 `invalid_union` | **422 `invalid_union`** |\n| ② 拆掉分组 → `rule[]`,**保留 UI 的 `id`** | 422 | **ACCEPTED** |\n| ③ 拆掉分组 → `rule[]`,去掉 `id` | ACCEPTED | ACCEPTED |\n\n读法:**外层类型错(本 issue)挡在前面;把它拆开之后,下一道就是 #5114 那个 `id`。** #5114 的重开让 ② 从 422 翻成通过 —— 必要,但不充分。外层不修,控制台保存筛选条件仍然 422。\n\n## 产出端链路(objectui,固定 pin 上逐跳可查)\n\n1. `components/src/custom/filter-builder.tsx` —— `handleChange(newGroup: FilterGroup)` → `onChange?.(newGroup)`,交出的是分组对象;`addCondition` 给每行盖 `id: crypto.randomUUID()`(`:228`)\n2. `plugin-list/src/ListView.tsx:2155-2161` —— `onChange={(newFilters) => { setCurrentFilters(newFilters); onFilterChange?.(newFilters) }}`,原样上抛\n3. `app-shell/src/views/ObjectView.tsx:1592-1595` —— `onFilterChange={(filter) => { persistViewPatch(viewDef.id, viewDef, { filter }); … }}`(同源另一处:`:1337`)\n4. `persistViewPatch`(`ObjectView.tsx:242`)→ `dataSource.updateViewConfig(objectName, viewId, { ...baseViewDef, ...merged })`\n5. `data-objectstack/src/index.ts:2608` → `client.meta.saveItem('view', viewId, merged)` → `PUT /api/v1/meta/view/:name`\n\n**对照:Studio 侧那条路今天是好的** —— `app-shell/src/views/metadata-admin/widgets.tsx:1727-1732` 的 `handle` 在写回前把每行压成 `{field, operator, value}`(顺带剥了 `id`),所以走 Studio 视图编辑器配筛选不会 422。缺的是**运行时工具栏**这条路的同一半转换。\n\n## 处方倾向(不代劳裁定)\n\n按 Prime Directive #12 契约优先,**修产出端**,⛔ 不要把 `ListViewSchema.filter` 放宽成 `union([rule[], FilterGroup])`:\n\n- **A(推荐)**:运行时工具栏在 `persistViewPatch` 之前把 `FilterGroup` 折成 `ViewFilterRule[]` —— **这个转换 Studio 侧已经写好了**(`widgets.tsx` 的 `handle`),反方向也有(`plugin-view/src/config/view-config-utils.ts` 的 `parseSpecFilter`/`toFilterGroup`);缺的就是写方向的这一半。代价小,且把「一个视图的 `filter` 在库里只有一种形状」这条守住。\n- **B**:如果分组语义(`logic: 'or'`、嵌套组)确实要进协议,那是一次**有意的 spec 扩展**(带 ADR + 迁移 + 读端全线更新),不是靠消费端容忍。\n\n选 B 之外的任何「放宽 schema」都会让 `filter` 在库里同时有两种形状,所有读端都得两边都认 —— 正是本仓一直在还的那类债。\n\n⚠️ 一并注意:`logic: 'or'` 今天**没有任何落盘表示**。修 A 之后 `and` 能正确折平,`or` 会被静默降级成 `and` —— 那是「声明 ≠ 生效」的另一面,建议在修 A 时一并判定(要么折平时对 `or` 显式报错,要么走 B)。\n\n## 关联\n\n- #5114(同一保存动作,里层 `ViewFilterRule.id`;热修已重开该 schema,**不覆盖本条**)—— PR #5154\n- #5074(授权/wire 递归拆分)—— 本条不是姿态问题、是**类型**问题,不在 #5074 范围内\n- #5014(union 报错被压平成 `Invalid input`)—— 本条的 422 正是那个形状:报错里读不出 `filter` 两个字,所以它在 `main` 上活着没人发现\n"
+}

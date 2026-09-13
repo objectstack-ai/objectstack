@@ -1,0 +1,36 @@
+{
+  "number": 5030,
+  "kind": "issue",
+  "title": "driver-sql: 单租户栈上 organization_id 恒为 NULL,#3696 的 (tenant, col) 复合 UNIQUE 因 NULL-distinct 而完全不生效 —— 字段级 unique: true 静默零约束",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "priority:p0"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T00:31:00Z",
+  "updated_at": "2026-08-04T12:02:22Z",
+  "closed_at": "2026-08-04T12:02:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5030",
+  "body": "**未认领。** 从 #4986 的调研中实测发现,与该 issue 的决策面相邻但独立,单独归档。\n\n## 现象(已实测复现,非推断)\n\n在 `packages/plugins/driver-sql` 里跑一个探针:对象带 `organization_id` 列(就是 `applySystemFields` 在单租户栈上注入的那一根),`email` 字段声明 `unique: true`,然后连写两行、都不带 `organization_id`:\n\n```\nPROBE RESULT >>> threw= null  second= {\"id\":\"HjLkz4HD9FF4Zk3X\", ... ,\"organization_id\":null,\"email\":\"dup@example.com\"}\n```\n\n第二行**创建成功**。字段级 `unique: true` 在这条路径上**一条约束都没有兑现**。\n\n## 成因链(四步,每一步单独看都正确)\n\n1. `packages/objectql/src/registry.ts` 的 `applySystemFields`:`wantTenant = sf?.tenant !== false && !tenancyDisabled` —— **与 `multiTenant` 开关无关**。注释自己写明了这次解耦的意图:「`organization_id` 列无条件供给……多租户开关现在只决定这列**是否建索引**」。所以单租户栈上这列**存在**。\n2. `SqlDriver.computeTenantField`:只要 `fields` 里有 `organization_id` 且没显式关租户,就返回 `'organization_id'` —— 单租户栈上**非 null**。\n3. `uniqueIndexesFromFields`(`schema-drift.ts`):`scoped = !isGlobalUnique && tenantField != null && tenantField !== name` → 成立,物化成 `UNIQUE (organization_id, email)`。\n4. 单租户栈上没有租户上下文,`organization_id` 每行都是 `NULL`。而 SQL 的 UNIQUE 是 **NULL-distinct** 的 —— 这一点 `sql-driver.ts` 的 `syncDeclaredIndexes` 文档块自己就写明了:「NULL-distinct semantics are the default across SQLite/Postgres/MySQL」。于是 `(NULL, 'dup@example.com')` 写多少行都不冲突。\n\n## 与规范陈述的冲突(declared ≠ enforced)\n\n`packages/spec/src/data/field.zod.ts` 的 `UniqueScopeSchema` 文档块声称:\n\n> On an object with no tenant column (`tenancy.enabled: false`, or simply no tenant field) both spellings materialize identically — single-column unique. **Single-tenant deployments are therefore unaffected: the tenant column is constant, so the composite index degenerates to the single-column one.**\n\n「租户列是常量,所以复合索引退化成单列索引」这句推理在常量取值为 **NULL** 时不成立:它退化成的不是单列索引,而是**没有索引约束**。而第 1 步已经保证了单租户栈上这列存在(不是「no tenant field」),所以这段豁免说明覆盖不到真实形状。\n\n`sql-driver-unique-tenancy.test.ts` 的头注也写着 `unique: true`, no tenant column → single-column (single-tenant: unchanged);对应的用例(`materializes a SINGLE-column unique when the object has no tenant column`)用的是一个**手写、完全没有 `organization_id` 字段**的 schema —— 它绕开了 `applySystemFields`,因此测的不是单租户栈上对象的真实形状。真实形状(有列、值为 NULL)没有任何用例覆盖。\n\n## 影响面\n\n- 任何单租户部署(以及多租户栈上由 sudo writer 在无租户上下文中写入的 platform-global 行)上,**每一个**字段级 `unique: true` 都是空约束。`email`、`code`、业务唯一键,全部可以重复落库。\n- 这是静默的:没有报错、没有 WARN,`os migrate plan` 也看不出问题(索引确实按声明建出来了,只是不约束)。\n- #3696 的初衷是修跨租户撞号,顺带明确承诺「单租户部署不受影响」。实测是单租户部署受影响最重。\n\n## 复现脚本\n\n探针文件已在调研中写过又删除(未提交),内容就是上面第 1 段描述的三十行 vitest:`SqlDriver` + `better-sqlite3` `:memory:`,`initObjects` 一个带 `organization_id` 和 `email: { type: 'text', unique: true }` 的对象,连 `create` 两次同 email、不传 organization_id。\n\n## 可能方向(未定,交维护者裁)\n\n- A. 写入期给 `organization_id` 落一个非 NULL 的 sentinel(驱动里已经有 `GLOBAL_TENANT = '__global__'` 这个常量,但目前只用于 autonumber 序列表,`sql-driver.ts:1831` 反而显式把它转回 `null` 再写列)。改动面涉及 RLS 读谓词与既有数据迁移,不小。\n- B. `computeTenantField` 在多租户未启用时返回 `null`,让单租户栈退回单列 UNIQUE —— 与规范文档块的原意一致,但会让多租户栈上的 platform-global NULL 行仍然漏。\n- C. 在 Postgres 上用 `NULLS NOT DISTINCT`(PG 15+),SQLite/MySQL 无对应语法,会造成方言语义分裂。\n- D. 索引列上用 `COALESCE(organization_id, '')` —— `schema-drift.ts` 已经有一整套 `COALESCE` 索引列的识别与归因逻辑(#4884 作业过),基础设施是现成的。\n\n我倾向 D 或 A:两者都让约束在所有方言上真正生效,且 D 的 drift 侧识别代码已经存在。但这条链跨 registry / driver / spec 文档三处,应由维护者定方向后再动手。\n\n## 关联\n\n- #3696(引入 `(tenant, col)` 复合 UNIQUE 的来源)\n- #4986(相邻决策:表级声明索引是否也补租户列 —— 若照补,本缺陷会从字段级扩散到 `sys_notification.dedup_key`、`http_delivery (source, dedup_key)`、`sys_presence.session_id`、`sys_job.name` 等一批 engine-owned 幂等键上)\n- #4884(同文件的 `COALESCE` 索引列识别,方向 D 的现成基础设施)\n"
+}

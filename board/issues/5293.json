@@ -1,0 +1,35 @@
+{
+  "number": 5293,
+  "kind": "pull_request",
+  "title": "refactor(spec)!: 退役 `HttpServerConfigSchema` —— 九个键零 reader 且没有任何作者面入口 (#4938)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T16:01:38Z",
+  "updated_at": "2026-08-04T18:30:49Z",
+  "closed_at": "2026-08-04T18:30:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T18:30:48Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5293",
+  "body": "Fixes #4938\n\n按 2026-08-04 维护者裁决(A —— 退役不可达面,`cors` 登记为窄形状首个准入候选)执行。\n\n## 前提复核(立单基线是 #5006 之前,已在当前 `origin/main` @ `3905c00` 重测)\n\n前提**成立**。零命中结果按要求做了反向对照:\n\n```\n$ git grep -n \"HttpServerConfig\" origin/main -- '*.ts' ':!*/node_modules/*' ':!*/dist/*'\npackages/spec/src/shared/http.zod.ts:66,118,156        ← 只是 \"Used by:\" 注释\npackages/spec/src/stack.zod.ts:368                     ← #5006 写下的说明性注释\npackages/spec/src/system/http-server.{zod,test}.ts\npackages/spec/src/system/stack-server.{zod,test}.ts    ← #5006 的「为什么不是它」\n(spec 之外零命中)\n```\n\n**阳性对照** —— 窄形状的 `trustProxy` 确实有大量 live reader,证明测法本身有效:\n\n```\npackages/cli/src/commands/serve.ts:2016            trustProxy: serverConfig.trustProxy === true,\npackages/runtime/src/dispatcher-plugin.ts:539,562,1365\npackages/runtime/src/endpoint-policy.ts:188,311\npackages/runtime/src/security/inbound-rate-limit.ts:123,166,246\npackages/plugins/plugin-hono-server/src/adapter.ts:628\n(+ 三个 runtime 测试文件)\n```\n\n`stack.zod.ts:374` 的窄 `server:` 键存在(`StackServerConfigSchema`),其 `guidance` 文本确实按名拒绝另外七个键。作者面另两项也复核过:`config-schema.json` 里 `HttpServerConfig` 零命中,`service-settings/src/manifests/` 无 http/server manifest。\n\n## 一处与派单预期不符:退役的是**容器**,不是整个文件\n\n派单说明预期「whole-file retirement of `system/http-server.zod.ts`(参照 #4834/#4878 形态)」。**这个形态会破坏两个 live consumer**,证据:\n\n```\npackages/rest/src/route-manager.ts:8       type RouteHandlerMetadata = System.RouteHandlerMetadata;\npackages/runtime/src/middleware.ts:4       import { MiddlewareConfig, MiddlewareType } from '@objectstack/spec/system';\n```\n\n裁决原文写的是「`HttpServerConfigSchema` 不可达面(七死键连同容器)」—— 容器,不是文件。所以本 PR 删的是 `HttpServerConfigSchema` / `HttpServerConfig` / `HttpServerConfigInput` 与 `HttpServerConfig.create()` helper,文件本身与其余导出留下。同文件里的 `ServerEvent*` / `ServerCapabilities` / `ServerStatus` 也零消费者,但它们是响应/能力形状而非 authorable 配置,不在本裁决范围内,未动。\n\n## 路线:不打 tombstone,也不注册 D2 conversion\n\nplaybook 路线 3(「nothing parses it → neither」),`#4834` / PR #4878 同形。理由不是省事:\n\n- tombstone 是给**写下这个键的人**的话。而唯一能写 server 键的面是 #5006 的 `StackServerConfigSchema`,它是 `strictObject`,七个键**早已按名拒绝并各带处方**。本 PR 把那些处方从「Not authorable — no runtime reads it (#4938)」刷新为指明退役与替代,并在 `stack-server.test.ts` 里加了一条统一断言(七条处方都必须含 `retired in v17`),让处方不会悄悄漂离它所代表的那次删除。\n- 没有任何**作者源**需要改写(这个形状从来不可达),所以 `os migrate meta` 无事可做,conversion fixture 只能凭空捏一个从未存在过的文档。代码消费者的通道是 `api-surface.json`(−3)接 release-time 的 `spec-changes.json` diff,加上 changeset。\n\ngate 侧也是这样判的,输出留在这里当路线证据:\n\n```\n❌ 1 previously published schema(s) disappeared from this build:\n     - json-schema/system/HttpServerConfig.json          ← #2978 ratchet 先开火,要求有意删 manifest key\n...\nℹ️  1 baseline deletion(s) since 3905c0064e13 carry their own proof (#4650):\n     - system/HttpServerConfig:* (9 line(s)) — def no longer emitted by this build; whole-schema\n       removals are adjudicated by json-schema.manifest.json (#2978) and check:api-surface.\n```\n\n四张 ratchet 的读数符合 playbook 里「整 def 删除 → 必须变化」那一栏:`api-surface.json` −3、`authorable-surface.json` −9、`json-schema.manifest.json` −1。`api-surface-signatures.json` 无变化(它哈希的是 `defineX` 工厂签名,本次没有工厂参与);`spec-changes.json` / `protocol-upgrade-guide.md` 无变化,因为提交态副本的 `added`/`removed` 只在 release 时用 `--previous-surface` 填充,这是设计而非漏跑。\n\n## 反向验证(方向在跑之前就定了)\n\n预测:把删掉的肢体粘回去,新 pin 应当**转红**(普通的红向,不是 #5046 那种「诊断变多」也不是 #5018 那种倒置)。实测一致 ——\n\n```\n× no longer exports the value `HttpServerConfigSchema` 7ms\n× no longer exports the value `HttpServerConfig` 1ms\n× does not re-export the removed shape from the system barrel either 2058ms\n Test Files  1 failed (1)      Tests  3 failed | 26 passed (29)\n```\n\n**一条要如实说明的**:我最初还写了两条类型层 `@ts-expect-error` pin 来守 `HttpServerConfigInput`(type-only,运行时 `in` 看不见)。它是**幽灵检查** —— 把指令行删掉,`typecheck` 仍然绿,两种状态都不报错,因为 `packages/spec/tsconfig.json` 的 `exclude` 含 `**/*.test.ts`,而该包的 `typecheck` 就是裸 `tsc --noEmit`。据此撤掉了那两条,改在注释里写明该类型的见证是 `api-surface.json`。这个 tsconfig 问题另行立单(见下),因为树上已有约 14 条同类退役 pin 正躺在同一个盲区里。\n\n## 验证\n\n- `pnpm --filter @objectstack/spec build` / `typecheck` — 通过\n- `pnpm --filter @objectstack/spec test` — `308 passed (308)` / `7946 passed (7946)`\n- 11 张 spec gate 全绿:`check:liveness` / `check:empty-state` / `check:authorable-surface` / `check:docs` / `check:api-surface` / `check:spec-changes` / `check:upgrade-guide` / `check:skill-refs` / `check:skill-docs` / `check:skill-examples` / `check:strictness-ledger`\n- 消费者侧:`@objectstack/runtime` typecheck 通过,`@objectstack/rest` build(含 DTS)通过\n- `node scripts/check-nul-bytes.mjs` 通过,并对改动文件做了越过 gate 盲区的自扫(`[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]`,零命中)\n- 无 liveness ledger 条目需要动(`http_server` 不是 metadata type,`packages/spec/liveness/` 里零命中);无 `.form.ts` 输入需要剪,故无 i18n 变化\n- strictness ledger 按 #5220 整体重跑 `gen:strictness-ledger`(未手改任何数字):`system/` 368 → 366,triaged 的 484 sites / authorable 15 不受影响(`system/` 属未 triage 目录)\n\n## 顺带发现(未在本 PR 修)\n\n- #5286 —— `packages/spec` 的 `@ts-expect-error` 退役 pin 是幽灵检查(tsconfig 把 `**/*.test.ts` 排除出唯一的 `tsc --noEmit`),`object.test.ts` 里守 `compactLayout` / `detail` 退役的那几条同样从未被求值。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ErbEDVAg1No9gdg1pgDAGB\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ErbEDVAg1No9gdg1pgDAGB)_"
+}

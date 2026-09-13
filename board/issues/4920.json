@@ -1,0 +1,33 @@
+{
+  "number": 4920,
+  "kind": "issue",
+  "title": "docs-accuracy-audit 会就地改写 content/docs/releases/**(9 页),与 AGENTS.md「release-owned,禁止在代码 PR 中编辑」直接冲突",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T16:15:28Z",
+  "updated_at": "2026-08-04T00:40:55Z",
+  "closed_at": "2026-08-04T00:40:55Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4920",
+  "body": "从 #4851 的实施中发现,不在该 PR 内顺手改(改它等于在本仓引入第二套「hand-written doc」定义,是一个需要维护者拍板的口径决定)。\n\n## 现象\n\n`docs-accuracy-audit` 工作流的交付物是**就地编辑 mdx**(`RULES` 第 1 条:\"Edit the doc FILE IN PLACE with Edit/Write. The edits to disk are the real deliverable\"),而它的审计范围定义是 `content/docs/**/*.mdx` 减去 `references/` —— 这个集合**包含 `content/docs/releases/**`**。\n\nAGENTS.md 的 Documentation Guardrails 与 CLAUDE.md 的三条硬规则之一说的是相反的话:\n\n> `content/docs/releases/` | RELEASE-OWNED | 不要在代码 PR 中编辑。发布说明在发布时集中撰写,由 changeset + ADR-0087 registries 编译而来。\n\n也就是说:跑一轮 full audit,LLM agent 会去改发布说明页,然后按 `scripts/docs-audit/README.md` 第 4 节的流程开 PR —— 正是 guardrail 要禁止的那种 PR。\n\n## 数量\n\n#4851 之前,那份手写清单里恰好只有 3 页 releases(`index`、`implementation-status`、`v9`),纯属清单烂掉的副产品(v12–v17 当时根本不在清单里)。#4851 把清单改为从目录派生后,范围变成 **9 页**(补齐 v12–v17)。所以这不是 #4851 引入的新冲突,但它把冲突从 3 页放大到 9 页,并且第一次让它变得显眼。\n\n## 需要拍板的问题\n\n审计范围要不要排除 `content/docs/releases/**`?\n\n- **A. 排除**:`releases/` 是 release-owned,审计器不该有编辑它的权限。代价是「hand-written doc」出现两个口径 —— `affected-docs.mjs`(只读、映射用,包含 releases 是无害甚至有用的)与审计范围(可写)。需要把这个区分明确写进 `scripts/docs-audit/`,否则下一个人会把它当成漂移又\"修\"回去。\n- **B. 不排除,改为只报不改**:让审计器对 `releases/**` 只产出 `residualInaccuracies`,不落盘编辑。保持单一范围口径,但审计器要区分「可写」与「只读」两类目标。\n- **C. 维持现状**:接受 full audit 会改发布说明,靠 PR review 兜住。\n\n倾向 **B**:它保住了单一的范围定义(#4851 刚刚证明了双口径清单会烂),同时让 guardrail 变成结构性约束而不是靠人记得 —— 审计器根本没有写 `releases/` 的路径,而不是\"约定上不写\"。A 的长期代价是两份定义要各自维护;C 把 guardrail 留在「声明了但没执行」的状态,正是本仓反复付费修的那一类。\n\n## 关联\n\n- 发现现场:#4851(把审计范围改为从目录派生)\n- guardrail 出处:AGENTS.md「Documentation Guardrails」表、CLAUDE.md「⛔ Never edit `content/docs/releases/` in a code PR」\n"
+}

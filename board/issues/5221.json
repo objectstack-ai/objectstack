@@ -1,0 +1,35 @@
+{
+  "number": 5221,
+  "kind": "pull_request",
+  "title": "feat(spec,lint): 声明 chart segment drill —— `ChartDrillDownSchema`,挂在真正读它的那一层 (#5022)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T10:56:00Z",
+  "updated_at": "2026-08-04T11:43:35Z",
+  "closed_at": "2026-08-04T11:43:34Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T11:43:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5221",
+  "body": "Fixes #5022\n\n## 背景:delivered but never declared\n\n`drillDown` 一直在驱动一个真实能力 —— 点 `<ObjectChart>` 的柱子/扇区,objectui 打开按点击类目过滤的记录抽屉。可是**协议里从来没有声明过它**:objectui 读的是 `(schema as any).drillDown`,`grep drillDown packages/spec` 只能搜到一条注释 —— 正是 #3752 写下的、把这个键当作迁移目标推荐给作者的那句话。批 15 已经就地修正了那句处方,底下的缺口留到这单。\n\n这是 Prime Directive #10 反过来的形态:不是「声明了没交付」,而是「交付了从没声明」。\n\n本 PR 声明它,**additive**,原先能 parse 的一律照旧。\n\n## 形状:ObjectChart 实测读的六个键\n\n`{ enabled?, filter?, title?, target?: 'drawer' | 'dialog', columns?, maxRows? }`\n\n每一个都反推自一个读取点:`isDrillEnabled`(缺省关,`{}` 开)、`computeDrillFilter`、`resolveDrillTitle`、`'dialog'` 分支、列映射、页大小。\n\nobjectui 自己的 `DrillDownConfig` 更宽,因为它是 table / pivot / metric 几个 widget 共用的。**没有照抄那个并集**:chart 一个额外键都不读,其中 `view` / `sort` 更是**任何** widget 都不读(objectui#3354)。照抄会把四个死键提升成带协议权威的能力。每个缺席的键都有一条 `guidance` 说明它属于哪儿,而不是给一个 rename 建议。\n\n## 落点:react 块契约,不是 chart config、也不是 widget 的 options 袋\n\nissue 里提的两个候选,实测在 dashboard 元数据面**都是死的**:\n\n- `widget.chartConfig.drillDown` —— `DashboardRenderer` 全文不读 `chartConfig`;`DatasetWidget` 只从里面转发一个键(`showLegend`),注释自陈 \"the rest of `chartConfig` stays unforwarded\"。\n- `widget.options.drillDown` —— `DashboardRenderer` 确实读,但只在 legacy 的 `isObjectProvider` 分支里;而 `DashboardWidgetSchema.dataset` 是必填,`datasetBound` 恒真,那份 component schema 恒被丢弃、从不渲染。\n\nADR-0021 dataset-bound widget 的 drill 是**从语义层派生**的,不认任何 drill 配置 —— 这一点 `content/docs/ui/dashboards.mdx` 早就写着(*there is no per-widget drill configuration in the dataset form*)。\n\n所以声明挂在 `react-blocks.ts` 的 interaction 覆盖层,**刻意不进 `ChartConfigSchema`**:后者的成员同时是 dashboard widget `chartConfig` 解析的东西,放进去就会造出一个「可写、parse 通过、没人读」的键。\n\n三个作者可能写错的地方,现在都会回答而不是耸肩:\n\n| 写在哪儿 | 现在得到什么 |\n|---|---|\n| `widget.chartConfig.drillDown` | 拒绝 + 指向 react-tier prop |\n| `widget.drillDown` / `widget.drilldown` | 拒绝 + 说明 dashboard drill 是 **AUTOMATIC** 的,并点名两个可配置的 drill 各在哪 |\n| `report.drillDown` | 拒绝 + 指回 chart prop |\n\n## 与 `ReportSchema.drilldown` 的双向消歧\n\n同一个词,差一个字母,两种能力:\n\n|  | `drillDown` | `drilldown` |\n|---|---|---|\n| 拼写 | camelCase | 全小写 |\n| 类型 | 配置对象 | 布尔 |\n| 面 | react `<ObjectChart>` prop | `ReportSchema` 键(ADR-0021 D2,默认开) |\n\n编辑距离在这儿是**帮倒忙**的:两个拼写距离为 1,裸的 \"did you mean\" 会把在 report 上写 `drillDown` 的作者送去 `drilldown`,然后他的配置对象在布尔槽位上被第二次拒绝。两边的 guidance 都点名**类型**差异,不只是拼写。\n\n## declared = enforced,同一个 PR 里\n\n`.strict()` 是 **parse 的属性**,而 react 面上此前没有任何东西调用过 parse。`packages/lint/src/validate-react-page-props.ts` 现在直接 **PARSE** 这个 schema(`react-chart-drilldown-invalid`),而不是像旁边 `aggregate` 的 `CHART_FUNCTIONS` 那样把规则再抄一遍 —— 这正是 strictness 台账 `chart.zod.ts` 那一行一直在等的修法,先在一个键上做出来。\n\n来自 React state、静态不可解的值照旧跳过:unresolvable ≠ wrong(ADR-0072 D1)。\n\n## 仪器\n\n- **批 15 的钉子是「改写」不是「放宽」**:`ChartInteractionSchema` 的处方仍然不许出现裸的 `drillDown` —— 理由换了:这个 schema 从两个 tier 都能到达且分辨不出自己在哪个上,裸处方对一半读者是死路。断言不动,justification 换了,并写进注释。\n- 新增约 20 条断言:逐键接受、`{}` 即开、缺席保持 optional、未知键带 surface 名被拒、每个非 chart 键带**理由**被拒(不是 rename)、`target:'navigate'` 有专属处方(而一个普通的错值**不会**被喷这段文字)、载体判定双向钉死、发布出去的 react 类型串由 schema shape 反查校验。\n- lint gate 10 条测试;台账行与站点计数更新(`ui/` 198 → 199)。\n\n## 顺带发现(已立单,未在此修)\n\n- **#5175** —— `widget.chartConfig` 在 dashboard 面只有 `showLegend` 落地,12 个已声明键里 11 个惰性;`liveness/dashboard.json` 那一行的证据措辞(\"chart-config bag forwarded\")高估了。\n- **objectui#3354** —— `DrillDownConfig.view` / `.sort` 无任何渲染器读取;`target: 'navigate'` 在 ObjectChart 上静默降级。\n\n## 配套 PR\n\nobjectui 半边:https://github.com/objectstack-ai/objectui/pull/3358 —— registry `inputs` 加上 `drillDown`(让 SDUI save gate 从 `unknown-prop` 变成正式契约),并把 `(schema as any)` 换成类型化读取。\n\n## 验证\n\n```\npnpm --filter @objectstack/spec test      → 305 files / 7839 passed\npnpm --filter @objectstack/lint test      → 57 files / 1190 passed (4 skipped)\npnpm --filter @objectstack/spec typecheck → clean\npnpm --filter @objectstack/lint typecheck → clean\ncheck:generated        → ✓ All 8 generated artifacts are up to date\ncheck:strictness-ledger → ✓ 67 files / 5 dirs — counts match, totals balance\ncheck:liveness          → ✓ every governed-type property classified\n```\n\n已在 `git merge origin/main`(未 rebase)之后重跑上述全部。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Ehu85kbvMcrNTUJjwxvLJ9"
+}

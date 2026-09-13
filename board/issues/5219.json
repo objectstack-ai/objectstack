@@ -1,0 +1,35 @@
+{
+  "number": 5219,
+  "kind": "pull_request",
+  "title": "fix(metadata): 集群对端的元数据写入现在会失效本节点的 listCache / registry (#5109)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T10:38:44Z",
+  "updated_at": "2026-08-04T10:54:32Z",
+  "closed_at": "2026-08-04T10:54:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T10:54:31Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5219",
+  "body": "Fixes objectstack-ai/objectstack#5109\n\n## 问题\n\n`attachClusterPubSub()` 的订阅回调在收到对端 `metadata.changed` 广播时,只做一件事 —— `notifyWatchersLocal()`。它既不碰 `this.registry`,也不碰 `this.listCache`。\n\n于是:节点 A 改一条 view/permission/flow,节点 B 的 watcher(ObjectQL SchemaRegistry 桥、HMR SSE)确实被叫醒了,但 B 上任何走 `list(type)` 的读在 `LIST_CACHE_TTL_MS = 30_000` 窗口内继续返回改动前的清单;被叫醒的 watcher 如果回头调 `list()` 重新拉取,拉到的还是旧的 —— 一份「失效通知」附带着失效数据。单机部署完全无感,只有多节点才暴露。\n\n这与该通道自己声明的用途相反(`ClusterMetadataChangedPayload` 的注释原文:\"consumed by peers to **invalidate their local caches**\",另见 `content/docs/kernel/cluster.mdx` §6.2、`metadata-lifecycle.mdx`)。\n\n## 修法:收敛到 `applyRepoEvent` 的既有形状\n\nissue 把 `applyRepoEvent()` 点名为「同文件内已做对的那条路径,可作修法样板」,本 PR 就照办 —— 并把两条「**外部写入**」缝(仓库 watch 循环、集群对端回放)提取到同一个私有方法 `invalidateForForeignWrite(type, name)`。两者的共同点正是这个方法的定义域:它们都是在得知一次**落在别处的写入**(repo head;另一个节点的 `sys_metadata`),而本节点手里的缓存已被那次写入悄悄作废。本地写入不走这里 —— `register()` / `unregister()` / `registerInMemory()` 把 registry 更新成自己刚写的值,并各自调 `invalidateListCache()`。\n\n`applyRepoEvent` 的行为不变(它原先直接 `listCache.delete(type)`,现在经 `invalidateListCache(type)`,顺带同步失效 `EndpointMatcher` 索引 —— 纯增量,原先靠 watcher 那条缝也会失效)。\n\n### 三个刻意的选择\n\n**1. 删除 registry 条目,而不预填。** 这正是 issue 里那句「要不要连 `registry` 一起删」的裁决点,答案沿用 `applyRepoEvent` 自 ADR-0008 PR-6 起的理由,并对集群路径再补一条:到手的 body 是**别人那次写入的快照**,可能已被后续写入取代;预填会与真实 head 竞态,并要求我们去规范化一份自己没有加载过的定义。删掉之后 `get()` 自然穿透到 loader / repository —— 真相所在。这条也是本 PR 能修复 `list()` 的必要条件:registry 条目在 `list()` 里**盖过** loader 的同名项,只清 `listCache` 会让 B 永远端着自己那份旧副本(测试 `drops B's stale registry entry…` 就是钉这一点的)。\n\n**2. 同步失效,且先失效再通知**(PR 描述里点名说明,对应 PM 指出的 async 接缝)。失效发生在收到消息的**当拍**,不在 `setImmediate` 内;通知仍然延迟一拍。理由:\n\n- `setImmediate` 的存在理由写在原注释里 —— 不让**消费方的 watcher 回调**(任意用户代码)背压 pubsub 派发循环。失效只是两次 `Map.delete`,不执行任何消费方代码,没有需要延迟的东西;\n- 把失效一起延迟,只会留下「已收到广播、尚未失效」的读窗口。请求处理器里任何一个 `await` 都足以撞进去 —— 那只是把 30 秒的 bug 缩短成一拍的 bug,不是修好它;\n- 先失效后通知,与本文件其他所有写入路径(`register` / `unregister` / `applyRepoEvent`)一致,于是回头 `list()` 的 watcher 拿到的是写后清单,issue 说的「失效通知与失效数据自相矛盾」才真正消解。\n\n测试 `invalidates SYNCHRONOUSLY on receipt — not inside the deferred replay` 把这个选择钉死:`await` 的恢复是 microtask,`setImmediate` 回调此刻还没跑(断言 watcher 尚未被调用),而缓存**已经**没了。把失效挪进 `setImmediate` 会让这条断言变红。\n\n**3. 无名事件只失效清单缓存。** `MetadataWatchEvent.name` 在 spec 里是 `optional`,所以无名事件是合法上线的。无名就无法定位 registry 条目;此时**不**把整个 type 的 registry 一并清掉 —— 那会驱逐 `registerInMemory()` 注册的、任何 loader 都无法恢复的代码态构件(`origin: 'code'` 的 datasource、stack 声明的 roles/permissions,ADR-0015 Addendum),拿一次不可恢复的丢失去换一个猜测。\n\n回环抑制(`originNode`)仍然在最前面短路,本节点自己的广播不会让自己白白重建缓存(有测试)。\n\n## 测试\n\n`packages/metadata/src/metadata-manager-cluster.test.ts` 新增 7 例,骨架就是 issue 的复现思路:两个 `MetadataManager` 接同一个 `IPubSub`,并共享**同一个 `datasource:` 协议的可写 loader** —— 两个副本共用一张 `sys_metadata` 的在测替身。\n\n> 为什么不能用 `MemoryLoader`:它的 protocol 是 `memory:`,而 `register()` 只持久化到 `datasource:` 且声明 `capabilities.write` 的 loader。没有共享的可写存储,A 的写入对 B 根本不可见,#5109 的回归也就无从观察。\n\n| 用例 | 钉住的行为 |\n|:---|:---|\n| B 预热 `list('view')` → A `register()` → B `list('view')` | issue 的原始复现,不等 30s TTL |\n| A `unregister()` → B `list('view')` | 删除方向同样传播 |\n| 同步失效、先于延迟回放 | 上文选择 2 |\n| watcher 在被叫醒后回头 `list()` | 拿到写后清单(矛盾消解) |\n| B 的 registry 旧副本被删,`get()` 穿透到共享存储 | 上文选择 1 |\n| 无名事件 | 只失效清单缓存,保留 `registerInMemory` 条目 |\n| 回环事件 | 本节点自己的广播不触发失效 |\n\n其中 6 例在 main 上是红的(第 7 例是回环守卫,两边都绿)。\n\n```\n# 有修复\n Test Files  1 passed (1)\n      Tests  13 passed (13)\n\n# git stash 掉 metadata-manager.ts 后\n     × B's pre-warmed list() sees A's register() without waiting out the 30s TTL\n     × propagates A's unregister() to B's list()\n     × invalidates SYNCHRONOUSLY on receipt — not inside the deferred replay\n     × a watcher that re-reads via list() on the wake-up gets the post-write set\n     × drops B's stale registry entry so get() falls through to the shared store\n     × a nameless remote event invalidates the list cache but keeps in-memory-only entries\n Test Files  1 failed (1)\n      Tests  6 failed | 7 passed (13)\n```\n\n全包与下游:\n\n```\npnpm --filter @objectstack/metadata test        → 18 files / 433 tests passed\npnpm --filter @objectstack/service-cluster test →  3 files /  45 tests passed\n```\n\n类型:`@objectstack/metadata` 无 `typecheck` 脚本(`scripts/check-type-check-coverage.mjs` 里的 DEBT 条目,87)。直接跑 `tsc --noEmit -p packages/metadata/tsconfig.json` 对比:**改动前 92 → 改动后 92**,净增 0(新测试的 import 带上了 `.js` 扩展名,回调参数显式标注,避免 AGENTS.md 记的那个「缺扩展名 → 全变 any → 一堆 TS7006」陷阱)。\n\n`eslint` 对两个改动的 TS 文件零输出。\n\n## 文档\n\n`content/docs/kernel/cluster.mdx` §6.2 只改了描述**对端收到广播后做什么**的那一段:原文「replay the watch event locally — there is currently no `version` / `name` / … field」会让人以为事件里根本没有名字信息(其实 `name` 在**内嵌的 watch event** 里,正是本修复用来定位 registry 条目的东西)。现在把「先同步失效、再延迟回放」写清楚,并把「没有 name 字段」限定回 payload 顶层。没有重写整节,`§6.2` 开头那句 \"Cross-node metadata invalidation already works\" 现在才真的成立。\n\n## 范围与不做的事\n\n- 只动 `packages/metadata/src/metadata-manager.ts` 的集群 pubsub / watcher 通知 / listCache 失效一段 + 本包测试 + 一个 changeset + 上面那段文档;\n- ⛔ 没有回改 #5183(#5108)今天落地的 loader 降级面(`loaders/**`、`reportLoaderReadFailure` / `reportLoaderReadRecovered`)—— 建立在它们之上,一个字没改;\n- ⛔ `packages/spec/**` 零改动;\n- **与 #5184 不冲突**:那单裁的是 `cacheListResult()` 要不要区分降级结果(写入路径的判据),本 PR 一行没碰 `cacheListResult`;本 PR 补的是失效路径的一个触发源。#5184 自己也写明两者「不是重复,也不是子集,建议串行」。\n\n## 顺带发现(未在本 PR 修)\n\n- **#5218** —— FS 监听改动同样不失效本节点的 `listCache`:`NodeMetadataManager.handleFileEvent()` 也是只 `notifyWatchers`、不失效,是 #5109 的**本地同形缺陷**(触发面是开发期 `watch: true`,不是生产多节点)。已按 Prime Directive #10 单独立卡、未认领,并在卡里注明可复用本 PR 落地的 `invalidateForForeignWrite` 作样板。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Pbu27iNUfQCHeuS551Rqo7\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Pbu27iNUfQCHeuS551Rqo7)_"
+}

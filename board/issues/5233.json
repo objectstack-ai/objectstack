@@ -1,0 +1,36 @@
+{
+  "number": 5233,
+  "kind": "issue",
+  "title": "organization/create 的闸门读的是被降级的 OS_MULTI_ORG_ENABLED，不是权威的 OS_TENANCY_POSTURE —— 只设权威 knob 的有墙部署，引导式「创建工作区」是死路",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T11:19:19Z",
+  "updated_at": "2026-08-04T13:55:20Z",
+  "closed_at": "2026-08-04T13:55:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5233",
+  "body": "发现于 cloud#1012 的端到端验收（cloud 侧 pin bump 到 `586d6f70` 之后，真实 `objectstack serve` + 真实 HTTP 探针）。**这是 cloud#1020 那个缺陷形状的原样重演，只是换了一个站点。**\n\n## 缺陷\n\n`packages/plugins/plugin-auth/src/auth-manager.ts` 的 `organizationHooks.beforeCreateOrganization` 用 `resolveMultiOrgEnabled()` 判断「本部署是不是单组织」：\n\n```ts\nbeforeCreateOrganization: async () => {\n  if (!resolveMultiOrgEnabled()) {\n    throw new APIError('FORBIDDEN', {\n      message: 'Creating additional organizations is disabled on this deployment.',\n    });\n  }\n},\n```\n\n而 `packages/types/src/env.ts` 里这两个函数的关系是（ADR-0105 D1）：\n\n```ts\nexport function resolveMultiOrgEnabled(): boolean {\n  const raw = readEnvWithDeprecation('OS_MULTI_ORG_ENABLED', []);\n  return String(raw ?? 'false').toLowerCase() !== 'false';   // 只读被降级的布尔，缺省 false\n}\n\nexport function resolveTenancyPosture(): TenancyPosture {\n  // OS_TENANCY_POSTURE 是 canonical knob；只有它 unset 时才回落到上面那个布尔\n  ...\n  return resolveMultiOrgEnabled() ? 'isolated' : 'single';\n}\n```\n\n`OS_TENANCY_POSTURE` 是**权威** knob，`OS_MULTI_ORG_ENABLED` 是被它取代、只在前者 unset 时才生效的遗留布尔。于是一个**只设权威 knob**的部署：\n\n- 组织墙整套挂上（`OrganizationsPlugin` 注册、tenancy 服务 `isolated`、ADR-0093 D5 不报警、许可闸门通过）；\n- 但 `POST /api/v1/auth/organization/create` 依然 **403 “Creating additional organizations is disabled on this deployment.”**\n\n`resolveMultiOrgEnabled()` 的文档注释还写着「the auth manager's /auth/config feature flag and org-create guard … MUST call this」—— 那句话写在 ADR-0105 D1 把该布尔降级**之前**，闸门是照着过期契约走的。\n\n## 复现（真实 serve，非推断）\n\n`apps/objectos-ee`（cloud 仓）+ 真实 Ed25519 企业许可，两次真实 `POST /api/v1/auth/sign-up/email`，第二个用户走引导式建工作区：\n\n| 配置（其余相同） | 组织墙 | `organization/create` |\n|---|---|---|\n| `OS_TENANCY_POSTURE=isolated` | 挂上 | **403 disabled on this deployment** |\n| `OS_TENANCY_POSTURE=isolated` **+** `OS_MULTI_ORG_ENABLED=true` | 挂上 | **200** → 用户成为该组织 owner；随后 invite-member / accept-invitation 全部 200，两个自助注册用户互相看不见对方的组织 |\n\n即：**遗留 knob 能用，权威 knob 不能用**——正好是声明的契约的反面。\n\n## 为什么这条要紧（不是纸面洁癖）\n\ncloud#1012 的维护者决策（方案 B）是：自助注册**不**自动开通组织，org-less 用户由 console 的 `RequireOrganization` 导到引导式「Create your workspace」自己命名。**那条路径就是这个 403。** 所以在一台按文档只设 `OS_TENANCY_POSTURE=isolated` 的 objectos-ee 上，新注册用户既没有组织、也无法创建组织——平台对「新注册之后怎么办」的唯一答案是死路。\n\n`sys_member` 侧一切正常（`membership_policy` 的 #5152 落地经复核工作正常），坏的只有这一个闸门。\n\n## 建议修法\n\n`beforeCreateOrganization` 改判 `resolveTenancyPosture() !== 'single'`（意图完全不变——「单组织模式下拒绝创建」——只是改成读权威 knob）。顺带把 `resolveMultiOrgEnabled()` 那段「every site … MUST call this」的注释订正到 ADR-0105 D1 之后的事实，并**普查同一文件/包内其它读该布尔当作「是不是多组织」的站点**（`objectql/src/registry.ts:735`、`runtime/src/app-plugin.ts:1045` 至少要各自判一次是不是同一类误读）。\n\n对 cloud 控制面无影响：它的 worker 本来就显式设 `OS_MULTI_ORG_ENABLED=true`，两种读法同解。\n\n## 出处\n\n- 探针与判定：cloud#1012 本轮开发（会话 `session_015W6nhsDrz6zWQc8je12a1t`），未指派，按 Prime Directive #10 归档到本仓。\n- 同形状前案：cloud#1020（EE 许可闸门写 `OS_MULTI_ORG_ENABLED` 而 `serve` 读 posture）。当时的结论就是「不能照它的形状再来一次」。"
+}

@@ -1,0 +1,38 @@
+{
+  "number": 4647,
+  "kind": "issue",
+  "title": "security/explain 与写入路径对同一条记录给出相反答案：VAMA 持有者对无主 private 记录 explain 答 allowed:true，PATCH 回 403",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T13:52:59Z",
+  "updated_at": "2026-08-04T06:04:46Z",
+  "closed_at": "2026-08-04T06:04:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4647",
+  "body": "在 hotcrm 侧排查 objectstack-ai/hotcrm#622 时实测确认的平台侧矛盾。按 hotcrm 的 PM 分工，本仓库不由应用侧改动，只在此记录证据。未认领。\n\n环境：`@objectstack/*` 17.0.0-rc.1，`objectstack dev --seed-admin`，sqlite(better-sqlite3) driver，capabilities 含 `sharing`。\n\n## 复现条件\n\n- 一个 `sharingModel: 'private'` 的用户所有对象（复现用 `crm_contract`）。\n- 一行记录的平台所有权列 `owner_id` 为 NULL（无主）。种子数据很容易落到这个状态：`SeedLoaderService.SEED_OPTIONS` 是 `{ isSystem: true }`，其文档明说这会关闭 `organization_id` / `owner_id` 的自动注入。\n- 当前 principal 持有 VAMA（本例是 `admin_full_access` 权限集的平台管理员）。\n\n## 两个答案\n\n同一个 principal、同一条记录、同一个 operation：\n\n```\nPOST /api/v1/security/explain\n  { \"object\": \"crm_contract\", \"operation\": \"update\", \"recordId\": \"…\" }\n→ 200\n  {\n    \"allowed\": true,\n    \"layers\": [\n      { \"layer\": \"owd_baseline\", \"verdict\": \"narrows\",\n        \"record\": { \"outcome\": \"excluded\",\n                    \"detail\": \"Private baseline admits only the owner; …\" } },\n      { \"layer\": \"sharing\", \"verdict\": \"widens\",\n        \"record\": { \"outcome\": \"excluded\",\n                    \"rowFilter\": { \"owner_id\": \"…\" },\n                    \"detail\": \"No ownership and no edit/full share grants write on this record.\" } },\n      { \"layer\": \"vama_bypass\", \"verdict\": \"widens\",\n        \"detail\": \"View/Modify All Data bypass held via [admin_full_access]\n                   — ownership and sharing checks are skipped\" }\n    ],\n    \"record\": { \"recordId\": \"…\", \"visible\": false, \"decidedBy\": \"sharing\" }\n  }\n```\n\n```\nPATCH /api/v1/data/crm_contract/…   { \"signed_by\": \"x\" }\n→ 403\n  { \"error\": \"FORBIDDEN: insufficient privileges to update crm_contract …\",\n    \"code\": \"FORBIDDEN\" }\n```\n\n同一条记录把 `owner_id` 填成该管理员之后，同样的 PATCH 回 200 —— 所以引擎的写入路径确实在执行记录级的 ownership 检查，而 `vama_bypass` 那一层写着这个检查被跳过了。\n\n附带（同一原因、同一条记录）：`POST /api/v1/data/sys_attachment` 因为门禁是 `canEdit(parent)`，回 403 `ATTACHMENT_PARENT_ACCESS`，与 PATCH 一致、与 explain 不一致。\n\n## 为什么值得单独修\n\n1. `explain` 正是管理员用来排查\"为什么这条记录改不动\"的工具。现在它对这个问题给出的答案，恰好是错的那一个：先说 `allowed: true`，再说\"ownership and sharing checks are skipped\"，而实际写入被拒。\n2. payload 内部自己也不自洽：顶层 `allowed: true` 与 `record.visible: false / decidedBy: \"sharing\"` 并存。消费方（Console、CLI `os explain`、任何 AI agent）读顶层还是读 `record`，会得到相反结论，而两者都没有被标注成\"只回答对象级\"或\"只回答记录级\"。\n3. 哪一侧是对的是一个产品决定，两种都说得通，所以更需要定下来而不是各自实现：\n   - 若按 Salesforce 语义 Modify All Data 应当允许管理员编辑任意记录而不论归属，则**写入路径**漏掉了 VAMA 旁路，`explain` 是对的；\n   - 若 private OWD 基线确实把无主行排除给所有人（含 VAMA 持有者），则**`explain` 的顶层 `allowed`** 不该在记录级判定为 excluded 时仍报 true，且 `vama_bypass` 那句 detail 是错的。\n\n## 期望\n\n- 顶层 `allowed` 与引擎写入路径在给定 `recordId` 时必须同源，或明确 `allowed` 只是对象级判定、记录级以 `record` 为准，并让 `vama_bypass` 的 detail 反映记录级实际行为。\n- 无论选哪条，`explain` 与 `data` 写入对同一 (principal, record, operation) 三元组不得给出相反结论；建议补一个跨两条路径的一致性测试，用\"VAMA 持有者 + private + 无主记录\"这个组合作为用例。\n\n参考：hotcrm 侧的对应修复是让种子记录不再无主（objectstack-ai/hotcrm#632），与本 issue 的判定无关 —— 无论哪一侧对，那些记录都应当有真实 owner。"
+}

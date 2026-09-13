@@ -1,0 +1,32 @@
+{
+  "number": 5296,
+  "kind": "pull_request",
+  "title": "fix(driver-sql): `$not` 取反前先把操作数编译成全域谓词,NULL 行不再被静默排除 (#5146)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/l"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T16:05:55Z",
+  "updated_at": "2026-08-04T17:45:14Z",
+  "closed_at": "2026-08-04T17:45:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T17:45:12Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5296",
+  "body": "Fixes #5146\n\n按维护者在 #5146 上的拍板落地 **engine 半边**:`$not` 在 driver-sql 上改为 NULL-safe,\n与 `driver-memory` / `formula`(2:1 的多数派)给出同一个答案。\n\n## 开工前的事实核对(issue 写于今晨,`sql-driver.ts` 当天被 PR #5243 大改)\n\nworktree 基于 `origin/main@88b9b2d5c`(含 #5243)。逐条实测,issue 正文引用的三处实现\n与实测 SQL **仍然成立**:\n\n| issue 的说法 | 现场实测(#5243 之后) | 结论 |\n|---|---|---|\n| `$not` → 裸 `not (…)`,NULL 行被排除 | `select id from deal where not (stage = 'won')` → 只返回 `stage='lost'` 的行 | 成立 |\n| `driver-memory` / `formula` 返回 NULL 行 | 两者对 `{ $not: { stage: 'won' } }` 都返回 stage 为 null / 缺失的行 | 成立 |\n| 分叉二 `$not: {}` → TRUE | 已修:`where 1 = 0` → 零行 | **已由 #5243 落地,本单一行不动** |\n\n**归约与 NULL-safe 改写没有互相够不到的问题。** #5243 的 `reduceFilterNode` 只对\n**空组合子**做三值归约(`$not` of TRUE → FALSE、`$not` of FALSE → TRUE),判定是结构性\n的、与 NULL 无关;带真实谓词的 `$not` 一律归约成 `'clause'` 并进入编译分支,正是本次\n改写生效的地方。改写发生在归约**之后**,且保证不改变任何节点的归约结论(每个加了守卫的\n合取项仍带字段键,`'clause'` 还是 `'clause'`),所以 #5243 钉住的行为全部原样保留 ——\n测试里对 `{ $not: {} }`、`$not` of `{$or: []}`、非 filter 节点操作数的 ADR-0112 拒收\n都各留了一条 pin。\n\n## 实现\n\n改动只有一处编译分支:`applyFilterCondition` 的 `$not` 在取反之前,先用新的纯函数\n`nullSafeNegationOperand` 把操作数改写成**全域(total)谓词** —— 永远 TRUE 或 FALSE,\n不会是 UNKNOWN。\n\n```sql\n-- 之前\nnot (`stage` = 'won')\n-- 现在\nnot ((`stage` is not null) and (`stage` = 'won'))\n```\n\n对 issue 给出的扁平形状,这与正文要求的 `NOT (…) OR col IS NULL` 完全等价。两点是刻意\n的、也是我唯一在 issue 文字之外做的判断:\n\n**1. 守卫下推到每个叶子,而不是挂在 `NOT` 旁边。** 二者只在扁平形状上等价。`$not` 内含\n`$or` 时,顶层的 `OR col IS NULL` 会把 JS 家族**排除**的行重新放进来 —— 某列为 NULL、\n但 `$or` 的另一个分支成立的行。下推之后 De Morgan 在两值叶子上成立,`$and` / `$or` /\n嵌套 `$not` 全部无需特例(嵌套 `$not` 由它自己的分支负责,`NOT 全域` 本身即全域)。\n测试里 `$not: { $or: [{stage:'won'},{owner:'u1'}] }` 就是这一条的 pin。\n\n**2. 守卫方向按算子逐个判定,不是一刀切。** `{ $not: { a: { $ne: 5 } } }` 的语义是\n「a 就是 5」,两个 JS 后端都把 NULL 行排除;无条件加 `OR a IS NULL` 会把这些行交回去 ——\n正是 #2704 / #5134 那一族的静默放松。所以:\n\n| 算子 | 缺值时 JS 家族的答案 | 编译形状 |\n|---|---|---|\n| `$eq` / 隐式 `=` / `$in` / `$gt` `$gte` `$lt` `$lte` / `$between` / `$contains` / `$startsWith` / `$endsWith` / `$regex` | false | `col IS NOT NULL AND (…)` |\n| `$ne` / `$nin` / `$notContains` | true | `col IS NULL OR (…)` |\n| `$null` / `$exists` / `$eq: null` / `$ne: null` | 本就是全域谓词 | 不加任何守卫 |\n\n所有取值都是**实测**得到的(对 `driver-memory` 与 `formula` 跑了同一张表),不是推断。\n\n## 行为变化(必读:这是可见集合的变化)\n\n**`{ $not: { col: v } }` 现在返回 `col IS NULL` 的行,以前不返回。**\n\n对 RLS 的意义:权限规则里的 CEL `!expr` 经 `packages/formula/src/cel-to-filter.ts` 降解\n成 `{ $not: {…} }`,所以同一条 read scope 在 SQL 数据源上的**可见集合会变大** ——\n变大的部分正好是「被否定的那一列没有值」的行。举例:read scope 写\n`!(stage == 'won')`,一条 `stage` 为空的记录以前在 SQL 后端上看不见、在内存后端 /\n写侧 `check` 上看得见;现在三者一致地**看得见**。\n\n需要留意的部署形态:如果某条 scope 事实上依赖了旧的「NULL 行被顺带排除」来隐藏数据,\n本次之后它不再隐藏 —— 那种依赖本来就是不可移植的(换个驱动就失效),正确的写法是把\n`col IS NOT NULL` 的意图显式写出来(`{ $and: [ { col: { $null: false } }, { $not: {…} } ] }`)。\nchangeset 里同样按「可观察行为变更」写明,不是内部重构。\n\n`$ne` / `$nin` 反向的一侧**没有**被放松:`{ $not: { a: { $ne: 5 } } }` 仍然只返回\n`a = 5` 的行。普通(非否定)比较的 SQL **逐字符不变**,测试里有直接的 SQL 文本断言;\n所以本次不会让任何非否定谓词失去索引利用,`$not` 路径上新增的 `IS NOT NULL` 守卫处在\n一个原本就不可 sargable 的 `NOT (…)` 里面。\n\n## 测试\n\n三包各一组 pin(覆盖:NULL/缺失行在 `$not` 下的去留、嵌套 `$and`/`$or`/双重否定、\n逐算子极性、以及非空行的既有行为不回归)。SQL 侧同时断言生成的 SQL 文本(沿用该目录\n既有的 knex `toString()` 断言先例)。\n\n- `packages/plugins/driver-sql/src/sql-driver-not-null-safe.test.ts`(新增,25 条)\n- `packages/plugins/driver-memory/src/memory-matcher-not-null-safe.test.ts`(新增,17 条)\n- `packages/formula/src/matches-filter-not-null-safe.test.ts`(新增,17 条)\n- `packages/plugins/driver-sql/src/sql-driver-null-operators.test.ts`:唯一一条**需要\n  改期望**的既有用例 —— 它原本把三值逻辑的结果(`['3']`)当成正确答案钉住,现在按新裁定\n  改为 `['2','3','4']`,并在注释里写明这就是行为变更本身。\n\n两个 JS 后端彼此不一致的角落(`$notContains` 对 null 值、`$exists` 对「键存在但值为\nnull」、`driver-memory` 对**缺键** `$nin`)按**实测**分别钉住,没有假装一致 —— 这几处\n不在 #5146 的裁定范围内,已另行记录(见下)。SQL 侧对 `$notContains` 跟随 `formula`,\n理由:那正是本驱动今天已有的答案,不借这次改写顺手裁定一个没人裁定过的语义。\n\n验证(均在共享锁下、`NODE_OPTIONS=--max-old-space-size=4096`):\n\n- `turbo test --filter=@objectstack/driver-sql --filter=@objectstack/driver-memory --filter=@objectstack/formula --filter=@objectstack/driver-sqlite-wasm` → 全绿(driver-sql 754 passed / 44 skipped;`driver-sqlite-wasm` 继承 `SqlDriver`,用真实 sql.js 引擎跑同一张 `FILTER_LOGIC_CASES`)\n- `turbo typecheck`(同三包)→ 全绿\n- `eslint`(改动的 5 个文件)→ 零告警\n- 连带面回归:`objectql`(1868)、`plugin-security`(731)、`service-storage`(283)、`plugin-audit`(108)→ 全绿\n\n## 范围说明\n\n- **分叉二(`$not: {}` → FALSE)不在本单** —— 已随 #5134 / PR #5243 落地,本 PR 未改动\n  相关代码,只补了 pin。\n- **spec 半边另计** —— `FilterConditionSchema` 的契约 TSDoc 与 `FILTER_LOGIC_CASES` 的\n  跨驱动 conformance case 归 spec 车道(建议随 #5239 与 driver-mongodb 同批落)。本 PR\n  未触碰 `packages/spec/`。engine 半边先落不会造成 declared ≠ enforced:它让实现满足\n  「同一算子同一答案」这条既有要求,spec 半边补的是把该答案写明。\n- **`packages/plugins/driver-mongodb/` 未触碰**(#5239 要求与 spec 那张表同时落地)。\n- **下游连带(cloud 车道,不在本仓修)**:cloud#1076 的 `RemoteTransport.buildWhereSQL`\n  当前跟随 SQL 家族发裸 `NOT (…)`。本 PR 合入后 framework 侧变为 NULL-safe,cloud remote\n  会成为新的少数派,需要同向跟进。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Pbu27iNUfQCHeuS551Rqo7)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 5152,
+  "kind": "issue",
+  "title": "membershipPolicy 无法作为平台设置配置，且注册路径与回填路径读的是两个来源",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T06:33:01Z",
+  "updated_at": "2026-08-04T09:30:15Z",
+  "closed_at": "2026-08-04T09:30:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5152",
+  "body": "> **本 issue 已于 2026-08-04 重写。** 原正文提议在 `defineStack` 增加 `tenancy.membershipPolicy`（cloud#1012 记的「S1 声明式接线口」）。**那个方案是错的**，理由见下「为什么不是 `defineStack`」——维护者指出后复核确认。原分析的技术事实（`membershipPolicy` 是构造选项、CLI 注入时不传）属实，但**漏查了构造后的 settings patch 通路**，因而把结论推到了错误的方向。\n\nobjectstack-ai/cloud#1012 的 framework 前置。该 issue 已定案方案 **B**：自托管 EE 复用引导式「Create your workspace」，新注册用户不自动绑定组织——即 EE 需要显式表达 `membershipPolicy: 'invite-only'`。\n\n下面每条对着 `a70cd0ae`（今天的 main）现查。\n\n## 缺陷一：这条策略没有任何运行期配置入口\n\n`membershipPolicy` 决定新注册用户是否被自动绑进默认组织（`reconcile-membership.ts:20/38`：`auto` 绑定，`invite-only` 不绑）。它今天**只能**在 `AuthPlugin` 构造时传（`auth-plugin.ts:113`、`auth-manager.ts:536`），而自托管栈的 AuthPlugin 由 CLI 注入（`cli/src/commands/serve.ts:1685`），那里**没传**它，也没有 env 兜底。\n\n于是自托管部署拿到的永远是缺省 `'auto'`，无法声明 invite-only。\n\n同类的 auth 平台策略**已经**有入口，就在同一个插件上：`bindAuthSettings()`（`auth-plugin.ts:997`）从 settings 服务读 `auth` 命名空间，构造 `patch: Partial<AuthManagerOptions>`，经 `applyConfigPatch()`（`auth-manager.ts:2632`）在**构造之后**打进 authManager，并通过 `settings.subscribe('auth', …)`（`auth-plugin.ts:1238`）实时重应用。已经跑在这条路上的有 `signup_enabled`、`require_email_verification`、`password_min_length` / `max_length` / `min_classes`、`password_reject_breached`、`password_require_complexity`、`password_history_count`。\n\n**`signup_enabled`（「是否允许自助注册」）与 `membershipPolicy`（「注册之后落到哪」）是同一类平台策略的两半**，前者已是设置项，后者不是。\n\n## 缺陷二：两个读取点来源不一致\n\n| 路径 | 读取 | 可否被 settings patch |\n|---|---|---|\n| **注册**（`auth-manager.ts:3650`，`user.create.after` 里的 `membershipReconciler`） | `this.config.membershipPolicy ?? 'auto'` | ✅ `this.config` 正是 `applyConfigPatch` 的目标 |\n| **回填**（`auth-plugin.ts:862`，ADR-0093 D6 给存量无成员用户补绑） | `this.options.membershipPolicy ?? 'auto'` | ❌ 读的是插件构造选项 |\n\n即使把设置接上，这两处仍会分裂：**注册按新策略、回填按旧策略**，且回填是批量绑定——比注册路径更危险。这是本 issue 必须一并解决的部分，不是可选项。\n\n## 为什么不是 `defineStack`（原方案的否决理由）\n\n1. **仓库已有明文教条。** `spec/src/system/stack-server.zod.ts` 的「What `server:` is NOT for」一节：\n   > Deployment knobs stay on the CLI. There is no `server.port` / `server.host` on purpose: the listening socket is a property of *where* a stack runs, not of the stack itself... **Two authorities for one number is how a config becomes advisory.**\n\n   「谁可以加入这个部署」与监听端口同类——属于部署，不属于「这个包声明了哪些元数据」。`defineStack` 的顶层键（`objects` / `apps` / `views` / `positions` …）全是元数据集合，`server:` 是刻意收窄的例外且明确拒收部署旋钮。\n\n2. **会造出第二个权威。** 平台设置里已有 `signup_enabled` 这类 auth 策略、且支持 env 覆盖；再加一个 app 侧声明，就是同一件事两个来源——正是上面那句话反对的形状，也是 ADR-0093 D4 在姿态问题上已经消灭过一次的东西。\n\n3. **原方案的技术前提不成立。** 「只能构造时传」对 `databaseHooks` 成立（better-auth 在构造时组合 hooks，确无事后注册表），但 `membershipPolicy` 只是 `AuthManagerOptions` 上的普通字段，`applyConfigPatch` 改得到。方案 A（自动开通，需要 `databaseHooks`）已被 cloud#1012 否决，所以那个约束随之失效——原分析没有在决策落定后重新收敛范围。\n\n## 期望\n\n1. **`membership_policy` 成为 `auth` 命名空间的平台设置**：在 `service-settings/src/manifests/auth.manifest.ts` 声明（形状对齐 `signup_enabled`，值域 `auto` / `invite-only` 封闭），补齐 `translations/{en,zh-CN,es-ES,ja-JP}.ts`；`bindAuthSettings()` 里按 `isExplicit()` 打进 patch —— **只有显式设置才生效**，与既有键一致，manifest 默认值不得覆盖部署意图。\n2. **统一两个读取点**：回填路径改为与注册路径同源，使设置变更对两者同时生效。\n3. **env 覆盖**（可选，若与既有 auth 设置的 env 约定一致）：按 `serve.ts` 记录的「env wins」先例处理。\n\n## 验收\n\n- 设置为 `invite-only`：新注册用户不被自动绑定，reconciler 走 **`policy-skip`** 而非 `no-target-org`（后者是有墙姿态下 `defaultOrgId()` 返回 `null` 的副作用路径，前者才证明策略真的生效）；\n- 未显式设置：行为**完全不变**（缺省 `auto`），不得成为破坏性变更；\n- 设置变更后**无需重启**即生效（`settings.subscribe` 已有此语义）；\n- **回填路径与注册路径读同一个来源** —— 有测试钉住二者不再分裂；\n- 非法值被 manifest/校验拒绝，不静默落回 `auto`。\n\n## 下游\n\n合并后 cloud 需要 pin bump（`scripts/bump-objectstack.sh`），随后 cloud#1012 的剩余部分才能做——但注意：**cloud#1012 正文里「接线口 S1（`defineStack` 声明式字段）」的表述需要随本 issue 一并更正**，其第 2 项（「`apps/objectos-ee` 声明 `membershipPolicy`」）在本方案下变成「该部署的 auth 设置里配置 invite-only」，不是改 app 配置文件。\n\nRefs: objectstack-ai/cloud#1012、cloud#962、ADR-0093 D1/D2/D3/D6、ADR-0069 D1（settings→plugin patch 的先例）、ADR-0049\n"
+}

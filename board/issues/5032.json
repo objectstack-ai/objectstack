@@ -1,0 +1,39 @@
+{
+  "number": 5032,
+  "kind": "issue",
+  "title": "`Validate Package Dependencies` is red on `main` — 8 FIXABLE OSV advisories (undici / hono / fast-uri), so every PR inherits a red required-ish check",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "ci/cd",
+    "dependencies",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T00:31:53Z",
+  "updated_at": "2026-08-04T01:34:33Z",
+  "closed_at": "2026-08-04T01:34:33Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5032",
+  "body": "Found while shipping #4762 (PR #5027) — filed unassigned, not fixed there (that PR touches `packages/lint` only and adds no resolved package).\n\n## Symptom\n\nThe `Validate Package Dependencies` job (`.github/workflows/validate-deps.yml` → `google/osv-scanner-action`, `--lockfile=pnpm-lock.yaml`) fails on PR #5027 with:\n\n```\nTotal 4 packages affected by 8 known vulnerabilities (0 Critical, 2 High, 6 Medium, 0 Low, 0 Unknown) from 1 ecosystem.\n8 vulnerabilities can be fixed.\n\n| OSV URL                             | CVSS | PACKAGE  | VERSION | FIXED VERSION |\n| https://osv.dev/GHSA-7p8r-x3mc-p8w7 | 7.5  | fast-uri | 3.1.4   | 3.1.5         |\n| https://osv.dev/GHSA-8j4g-w8fx-2239 | 5.3  | hono     | 4.12.32 | 4.12.34       |\n| https://osv.dev/GHSA-8j4g-w8fx-2239 | 5.3  | hono     | 4.12.33 | 4.12.34       |\n| https://osv.dev/GHSA-4cwx-7wf7-3272 | 7.4  | undici   | 7.28.0  | 7.29.0        |\n| https://osv.dev/GHSA-8xcm-r25x-g524 | 4.8  | undici   | 7.28.0  | 7.29.0        |\n| https://osv.dev/GHSA-jr45-8vmc-qm54 | 5.9  | undici   | 7.28.0  | 7.29.0        |\n| https://osv.dev/GHSA-m8rv-5g2x-5cg5 | 4.2  | undici   | 7.28.0  | 7.29.0        |\n| https://osv.dev/GHSA-v3r7-h72x-cjcm | 4.8  | undici   | 7.28.0  | 7.29.0        |\nExit code: 1\n```\n\n## It is `main`'s state, not the PR's\n\nPR #5027's entire `pnpm-lock.yaml` delta is **three lines** — an importer entry adding an already-resolved `ajv@8.20.0` to `packages/lint`. No new package is resolved. And every flagged package/version is present on `origin/main` verbatim:\n\n```\n$ for p in \"fast-uri@3.1.4\" \"hono@4.12.32\" \"hono@4.12.33\" \"undici@7.28.0\"; do\n    printf '%-18s on origin/main: ' \"$p\"\n    git show origin/main:pnpm-lock.yaml | grep -q \"^  $p:\" && echo PRESENT || echo absent\n  done\nfast-uri@3.1.4     on origin/main: PRESENT\nhono@4.12.32       on origin/main: PRESENT\nhono@4.12.33       on origin/main: PRESENT\nundici@7.28.0      on origin/main: PRESENT\n```\n\nSo every open PR branched off current `main` inherits this red check, and the signal is now uninformative: a PR that *does* introduce a vulnerable dependency looks exactly like one that does not. That is the failure mode a permanently-red gate always has.\n\nThe last **scheduled** run of this workflow on `main` (2026-08-03, `832047c5`) was green, so the advisories are recent and/or arrived with the last day's merges (`hono` moved to `4.12.33` with #5006). Nothing is wrong with the gate itself — it is reporting a true fact.\n\n## Distinct from #4965\n\n#4965 asks how the OSV gate should express **an advisory with no fix available**. This is the opposite case: the scanner says plainly *\"8 vulnerabilities can be fixed\"*, and names the fixed version for each. So the answer here is a dependency bump, not a policy decision — but it does want doing deliberately, because two of the three are transitive.\n\n## What needs deciding / doing\n\n- `hono` — a **direct** dependency (`@objectstack/plugin-hono-server`, adapters). Bump to `^4.12.34`. Two versions are resolved (`4.12.32` and `4.12.33`), so whatever pins the older one needs finding too.\n- `undici` — transitive. Needs a `pnpm-workspace.yaml` override (or an upstream bump) to `>=7.29.0`; note `scripts/check-override-consistency.mjs` gates that overrides resolve to their targets, so the override must be added the way that script expects.\n- `fast-uri` — transitive via `ajv`. Override to `>=3.1.5`.\n\nAcceptance: `pnpm exec osv-scanner --lockfile=pnpm-lock.yaml` (or the workflow) exits 0 on `main`, and `pnpm check:override-consistency` stays green.\n"
+}

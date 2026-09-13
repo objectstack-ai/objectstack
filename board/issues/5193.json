@@ -1,0 +1,35 @@
+{
+  "number": 5193,
+  "kind": "issue",
+  "title": "plugin-audit: `sys_job_queue` 不在 SKIP_OBJECTS 里 —— 每条队列消息的 insert/lease/complete 都写 audit_log + activity 行(兄弟表 sys_job / sys_job_run 都已排除)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T08:28:11Z",
+  "updated_at": "2026-08-04T09:18:37Z",
+  "closed_at": "2026-08-04T09:18:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5193",
+  "body": "在 #5179(队列表 completed 行清理)里核 `sys_job_queue` 的写入面时发现,与本 issue 无关、但同属 ADR-0057「停止放大器」那条决定的一个漏项。**未在本 PR 修**(越界)。\n\n## 事实(均对 `origin/main` 核过)\n\n- `packages/plugins/plugin-audit/src/audit-writers.ts:96` 的 `SKIP_OBJECTS`,第 (2) 组注释写的是「operational telemetry / plumbing (ADR-0057 — telemetry/transient/event)」,组内列了 `sys_job`、`sys_job_run`、`sys_automation_run`、`sys_notification*`、`sys_inbox_message`、`sys_http_delivery`、`ai_traces`;\n- **`sys_job_queue` 不在其中**,而它正是同一族里量最大的那张(它是 `sys_job_run` 的兄弟表,由 `service-queue` 用 SYSTEM_CTX 独占写入);\n- 审计写入器的三个钩子是全对象注册的(`audit-writers.ts:651-653` 的 `afterInsert`/`afterUpdate`/`afterDelete`),把关的只有 `SKIP_OBJECTS`(`:423`、`:461`)—— **没有任何「系统上下文写入不记审计」的豁免**,所以适配器自己的写入照记不误;\n- `DbQueueAdapter` 每条消息至少 3 次写:publish 的 insert、claim 的 `pending→running` update、完成的 `→completed` update(失败还要多几次 retry update)。每次写产生 audit_log + activity 行;\n- 另外 `captureBefore`(`:422`)会在每次 update 前多做一次 `findOne` 快照 —— 队列每次状态流转都白读一行;\n- 放大器在 #5160 之后接上了邮件:队列模式下**每封邮件**都走这条路。\n\n## 为什么算缺陷而不是口味问题\n\nADR-0057 决策 5 原话:「**Stop the amplifier**: operational telemetry is excluded from the audit ledger」,而 `audit-writers.ts:87` 的注释自己也说这组是「platform-internal」。`sys_job_queue` 是纯平台内部管道(`managedBy: 'engine-owned'`,`enable.apiMethods: ['get','list']` —— 用户根本写不了它),给它写审计/活动行没有任何合规价值,只是把队列流量按倍数灌进 `sys_audit_log` / `sys_activity`。\n\n注:这两张目标表本身有 retention/rotation,所以后果是**噪声与写放大**,不是无界增长;严重度请 PM 判。\n\n## 建议修法\n\n把 `'sys_job_queue'` 加进 `SKIP_OBJECTS` 的第 (2) 组(挨着 `sys_job` / `sys_job_run`),并在注释里注明它自 #5179 起声明了 `lifecycle.class: 'transient'`。顺带可以考虑:这组名单是手写的,和对象上的 `lifecycle.class` 没有任何机械关联,下一张 transient/telemetry 表还会漏 —— 是否改成按注册表里的 `lifecycle.class` 判定,值得单独定夺。\n\nFound-during: #5179 / PR #5192\n"
+}

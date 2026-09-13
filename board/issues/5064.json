@@ -1,0 +1,34 @@
+{
+  "number": 5064,
+  "kind": "pull_request",
+  "title": "docs(adr-0121): 声明式端点的路由归属与通道分工 —— 命名空间制 + actions/apis 按调用方分工 + `type: flow` 保留 (#5060)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T01:34:13Z",
+  "updated_at": "2026-08-04T01:49:32Z",
+  "closed_at": "2026-08-04T01:49:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T01:49:31Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5064",
+  "body": "Fixes objectstack-ai/objectstack#5060\n\n维护者 2026-08-04 三项裁决的持久记录落档。**docs-only —— 不改任何代码、schema 或生成物**；执行体由 #5040 的 E 系列（E7 翻转 PR 落 publish 门）实施。\n\n## 编号：0121，不是预计的 0120\n\n按验收要求以 `origin/main` + 开放 PR 双查：`origin/main` 的 `docs/adr/` 最大编号是 0119，但**开放 PR #5054 已占用 0120**（`docs/adr/0120-unique-scope-vocabulary-and-null-safe-tenant-uniqueness.md`，#4986/#5030）。故取下一空位 **0121**。0121 在 `origin/main` 与全部开放 PR 的改动文件中均未出现。\n\n## 落档内容\n\n| # | 决定 | 一句话 |\n|---|---|---|\n| D1 | 端点只能认领本应用的命名空间 | 路径收紧为 `运行前缀 + /apps/命名空间/子路径`，publish 期强制 |\n| D2 | 命名空间段派生，不是作者自由字段 | 派生自 stack 身份（`manifest.namespace`），作者只自由命名子路径 |\n| D3 | 通道按**调用方在哪**分工 | 调用方在平台内 → `actions`；调用方在平台外 → `apis` |\n| D4 | `type: flow` 保留在 `ApiEndpoint` | 「URL 触发 flow」是入站集成第一原语，摘除即逆北极星 |\n| D5 | 同管线红线 | flow 端点纯委派 automation 服务，与 action 触发零语义分叉 |\n| D6 | 匿名端点必须自带限流 | `authRequired: false` 未声明 `rateLimit` → publish 拒绝并附处方 |\n| D7 | 范围与非目标 | 不写实现细节；签名验证明示为将来词表候选，不预支 |\n\n## 起草时实核过的事实（全部以 `origin/main` @ `94f7b6a` 为准）\n\n起草要求「命名派生源要点名，不能含糊」，以下四条是 D1/D2 的地基，逐条核过：\n\n1. **`apps` 段确实可切**：domain registry 的前缀集（`/health` `/ready` `/data` `/meta` `/actions` `/mcp` `/ai` `/auth` `/analytics` `/i18n` `/notifications` `/security` `/keys` `/ui` `/share-links` `/packages` `/automation`，见 `packages/runtime/src/domains/*.ts` 与 `http-dispatcher.ts`）与 `LEGACY_CHAIN_PREFIXES`（`packages/runtime/src/route-ledger.ts`）中**均无 `/apps`**，切出即生效。\n2. **声明单位是 stack，不是 app**：`apis:` 是 `ObjectStackDefinitionSchema` 顶层键；`App.apis` 已于 spec 17.0.0 退役并留墓碑（`packages/spec/src/ui/app.zod.ts`：*\"Declarative endpoints belong to the stack (`defineStack({ apis })`), not the app shell.\"*）。所以身份键取 stack 身份，`AppSchema.name` 这一读法在结构上不成立。\n3. **规范身份键是 `manifest.namespace`**（`packages/spec/src/kernel/manifest.zod.ts`）—— stack 上唯一同时满足「URL 安全（`^[a-z][a-z0-9_]{1,19}$`）／带实例内唯一性契约／已作为每个对象名前缀被强制执行（`validateObjectNamespacePrefix`，`packages/spec/src/kernel/namespace-prefix.ts`，两处执行点）」的键。`manifest.id` 虽必填但是反向域名且 schema 上零字符集约束，不 URL 安全；同文件既有的 `deriveNamespaceFromPackageId` 说明「id → namespace」本就是既有规范化方向。\n4. **今天的 `path` 确实无归属约束**：`packages/spec/src/api/endpoint.zod.ts` 上只有 `z.string().regex(/^\\//)`。\n\n## 与既有 ADR 的关系（已逐份 grep 核对，无冲突）\n\n- **扩充 ADR-0076**（D11 一条路由一个属主），不取代：0076 答「一条已有路由归谁」，本 ADR 答「谁有资格认领哪片路由」。命名空间制把 first-registration-wins / 跨应用撞路径整类问题从「靠清单 + 一致性测试」升级为「靠构造」；\n- **落在 ADR-0049 的时序上**：v17 响亮拒绝（#4936）→ 17.x 执行器（#5040）→ E7 翻转 PR 实施本 ADR 的 publish 门；\n- **ADR-0028 状态是 Deferred**，本 ADR 只在端点这一面局部兑现其 §3（namespace 作为寻址段），**不解冻整体**，且形状不同（`apps/命名空间/…` 而非 0028 设想的裸命名空间段）—— 已在「非目标」写明；\n- ADR-0066 D4 / ADR-0104 / ADR-0078 均为引用，无反向影响。\n\n## 副作用：#5040 设计文档的两处收窄\n\nD1 生效后，#5040 设计 §1 的**保留前缀 pin 清单 + spec/runtime 双端一致性测试整体作废**（E1/E3 面缩小），§7-8「部署前缀与声明脱钩」大幅收窄。ADR 正文把「需要一个测试来防止腐坏的机制，本身就是腐坏的机制」写成了否决 O1 的理由。\n\n## Alternatives Considered（按要求收录，各自两轴分析）\n\n- **O1 自由路径 + 保留前缀门**（#5040 原方案）—— 否决：长远轴上是消费端补偿生产端问题，清单与实际路由表两处真相；防 AI 轴上要求作者掌握「哪些前缀被内建占了」这类会随版本变的平台内部知识。\n- **O3 actions 全面替代 / Dataverse 模式**—— 否决：与 #4936 已有裁决冲突（词表退役再重引入必然引回同一套），且把第三方 webhook 接收赶出元数据面、赶进不受 publish 门约束的手写 handler。\n- **O2 命名空间制** —— 采纳，两轴均最优；成本（URL 变长、应用段随 namespace 走、`apps` 段终身保留）在「后果」中如实列出。\n\n## Changeset\n\n按仓内近期 ADR PR 惯例实核后**随带** `.changeset/adr-0121-endpoint-routing-namespace.md`：docs-only 的 ADR 变更在本仓的先例（`adr-0078-status-calibration`、`adr-0044-revise-service-owned-note`、`adr-0104-attestation-adr-note` 等）一律是**空 frontmatter**（`---` / `---`）+ 正文散文 + 结尾「Documentation only; releases nothing.」，本 PR 照此形制。\n\n## 验收自检\n\n- [x] `docs/adr/0121-*.md`，头部格式对齐 ADR-0118（状态／日期／关联／执行项／动因 bullet 列表，中文正文）\n- [x] 状态 Accepted（2026-08-04，维护者裁决）；关联 ADR-0049/0076/0066/0104（+0078/0028）\n- [x] 执行项引 #4936 / #4939 / #5040，并写明 E7 翻转 PR 落 publish 门、describe 修改属 spec 车道执行项\n- [x] Alternatives Considered 收录 O1 与 O3 及两轴分析\n- [x] 未改 `content/docs/releases/`、未改任何 `.zod.ts` / runtime 代码 / 生成物（diff 仅 2 个新增文件）\n\n## 顺带记录的域外发现\n\n- **#5063**（观察类，未认领，无 `pm:queue`）：ADR-0076 状态行仍是 `Proposed`，但它已被 AGENTS.md、`packages/runtime/src/domains/actions.ts` 文件头与 #4936/#4939/#5040 当作生效决定引用 —— 与 #4787→#4919 对 ADR-0078 做过的状态行校准同形状。纯文档动作，未在本 PR 顺手做。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01EYGdmvWP1ieZSLqvAW6uyd\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01EYGdmvWP1ieZSLqvAW6uyd)_"
+}

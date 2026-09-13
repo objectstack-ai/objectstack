@@ -1,0 +1,37 @@
+{
+  "number": 5096,
+  "kind": "issue",
+  "title": "validate-rule-compilability.ts:239 也有同形的 `obj.validations ?? obj.validationRules` 别名读法(#5017 全包 grep 的第八处,第三个文件)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T04:09:31Z",
+  "updated_at": "2026-08-04T05:39:20Z",
+  "closed_at": "2026-08-04T05:39:20Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5096",
+  "body": "#5017 的全包 grep 顺带发现的第八处,落在**第三个文件**,不在 #5017(`validate-expressions.ts` / `validate-security-posture.ts`)的处置范围内,按 Prime Directive #10 单独记账。\n\n## 事实\n\n`packages/lint/src/validate-rule-compilability.ts:239`:\n\n```ts\n// `validations` is the spec key; `validationRules` is read for the same\n// …\nconst validations = obj.validations ?? obj.validationRules;\n```\n\n`ObjectSchema.shape` 只声明 `validations`,且是 strict —— 实测:\n\n```\nobjects[].validationRules parses? false\n  [\"objects.0: Unrecognized key(s) on this object: `validationRules`. …\n    Did you mean `validationRules` → `validations`?\"]\n```\n\n`validateRuleCompilability` 也是 `input: 'parsed'` 注册的规则,所以在 compile 路径上 `obj.validationRules` 恒为 `undefined`。canonical 排首位,别名 limb 不可达 —— 和 #5009 那四条、#5017 前六条完全同形。\n\n## 与 #5017 的关系\n\n#5017 已在另外两个文件把同族的七条收敛完毕(PR #5046),并落了两层结构性 meta-guard(declared-key ⊆ `schema.shape` + reachability)。这一条没有一并改,是因为:\n\n1. 它在**第三个文件**,#5017 的议题正文和验收条件都没有点名它;\n2. #5046 的真实元数据零新红、反向验证、变异测试都是围绕那两个文件做的,顺手带上第三个规则等于把没做过同等验证的改动混进已经绿了的 PR;\n3. 它自己那份 meta-guard 需要单独写(该规则的 finding 形状与两者又不同)。\n\n## 处置建议\n\n照 #5046 的模式办:\n\n1. 收敛为 `obj.validations`;\n2. 补 declared-key guard(该规则从 `obj` / 规则对象上读的每个键 ⊆ 对应 `.shape`)+ reachability guard;\n3. 反向验证注意方向:canonical 排首位,所以改动前对非法拼法**越权判红**,改动后让位给 schema 的具名拒绝 —— 与 #5018 的方向一致;\n4. 现有 fixture `validate-rule-compilability.test.ts:295` 用的正是 `validationRules:` 拼法,改动时要一并改成 canonical(否则该用例会静默失去覆盖 —— #5046 在 `runtime-gate.test.ts` 上正好踩到这个:别名拼法让\"上下文里有坏规则\"的 fixture 实际上一条 finding 都产生不了,断言 `toEqual([])` 通过的原因是**没有东西可减**而不是减法正确)。\n\n理由两条轴,与 #5017 同:\n\n- **长期正确性**:consumer 容忍 producer 明确拒绝的别名,是把一条具名拒绝降级成静默失效的分支;读代码的人(和照着写的 AI)会相信 `objects[].validationRules` 是真实的 authoring 面。\n- **让 AI 写的元数据难写错**:别名容忍属于 producer 的拒绝面,不属于 consumer(Prime Directive #12)。\n\n## 参考\n\n- #4984 / #5009 / #5017 / PR #5046(同族前三轮)、#5026(同族但非 `??` 链的 `f.formula`)、#4001(strict + 别名按名拒绝)"
+}

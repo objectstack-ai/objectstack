@@ -1,0 +1,35 @@
+{
+  "number": 4994,
+  "kind": "pull_request",
+  "title": "fix(cli): 启动 banner 的 `Tenancy:` 改读 resolveTenancyPosture(),不再打印被取代的布尔 (#4801)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T19:04:18Z",
+  "updated_at": "2026-08-03T19:23:43Z",
+  "closed_at": "2026-08-03T19:23:42Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T19:23:42Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4994",
+  "body": "Fixes #4801\n\n## 为什么读 posture 而不是布尔\n\nADR-0105 D1 之后,`OS_TENANCY_POSTURE` 是权威 knob,布尔 `OS_MULTI_ORG_ENABLED` 只是 `resolveTenancyPosture()` 在 posture unset 时的回退。`serve` 的**运行时接线**(`serve.ts` 里挂 `@objectstack/organizations` 的那段)早就读 `resolveTenancyPosture()`,但 banner 的 `Tenancy:` 行读的是 `resolveMultiOrgEnabled()` 返回的布尔 —— 同一个事实两个来源,于是它们漂了:\n\n```\n  Tenancy: single-tenant          ← banner 读布尔(OS_MULTI_ORG_ENABLED 未设 ⇒ false)\n  Plugins: 40 loaded\n           …, Organizations, …    ← 运行时按 posture=isolated 真的挂上了组织墙\n```\n\n这不是显示美化。这是「声明与执行不一致」(ADR-0049 那一类)落在**诊断面**上 —— 最坏的落点:一个可能撒谎的 banner,会让此后每一次排障都多花一轮去确认它有没有撒谎。cloud#1020 里就是靠人工比对插件表才发现的。\n\n`Tenancy:` 现在直接打印 posture 名(`single` / `group` / `isolated`),来源是运行时接线用的同一个 `resolveTenancyPosture()` 调用。\n\n## 布尔字段的去留:**删除**,不保留兼容项\n\n`ServerReadyOptions.multiTenant?: boolean` → `tenancyPosture?: TenancyPosture`。理由有三条,按重要性:\n\n1. **说不清它还为谁存在。** posture 是权威源;若保留布尔,议题已经规定「不一致时以 posture 为准」—— 那它就是一个**永远只能被忽略**的字段。一个存在但不可信的字段,正是本 bug 当初被写出来的方式:调用方看到 `multiTenant` 就填了个布尔进去,完全合理,而结果是错的。\n2. **删除把「错误接线」从运行期挪到编译期。** `tenancyPosture` 的类型是 `TenancyPosture`,`resolveMultiOrgEnabled()` 返回 `boolean` —— 现在把 banner 接回旧 knob **无法通过编译**,而不是产出一行看起来很合理的错话。这是本仓「在源头就不给出错的机会」的取向:结构上防止,而不是消费端兜底。\n3. **布尔在语义上本来就不够用。** tenancy 自 ADR-0105 起是三值谱系,布尔**根本没有 `group` 的拼法** —— 一个 `group` 部署只可能被误报。压扁本身就是漂移藏身的地方。\n\n影响面为零:`format.ts` 没有从 `@objectstack/cli` 的入口 re-export,`ServerReadyOptions` 是包内部接口;全仓 `printServerReady` 只有 `serve.ts` 一个调用点(已改齐,并顺手从 import 里去掉了因此不再使用的 `resolveMultiOrgEnabled`)。\n\n## 测试:三种场景 + 反向验证\n\n新增 `packages/cli/src/utils/format.tenancy.test.ts`。被断言的性质不是「这行看起来对」,而是 **banner 与 `resolveTenancyPosture()` 不可能不一致**:每个用例都从环境变量算出 `resolveTenancyPosture()`,再断言打印出的 token **就是**它。\n\n覆盖(前三条即议题点名的三种):\n\n| 场景 | `OS_TENANCY_POSTURE` | `OS_MULTI_ORG_ENABLED` | 期望 |\n|---|---|---|---|\n| posture 显式非 single(cloud#1020 那条) | `isolated` | unset | `Tenancy: isolated` |\n| posture unset、布尔 true(回退路径) | unset | `true` | `Tenancy: isolated` |\n| 两者矛盾 · posture 弱 | `single` | `true` | `Tenancy: single` |\n| 两者矛盾 · posture 强 | `isolated` | `false` | `Tenancy: isolated` |\n| 布尔表达不了的 posture | `group` | unset | `Tenancy: group` |\n| 默认 | unset | unset | `Tenancy: single` |\n| legacy 拼法 | `multi` | unset | `Tenancy: isolated` |\n\n外加:省略 posture 时整行不打印;任何 posture 下输出都不再出现 `multi-tenant`/`single-tenant` 措辞(**先断言该行存在再断言它不含旧措辞** —— 一个没有 `Tenancy:` 行的 banner 会让 `not.toMatch` 空转通过,那和本文件要抓的 bug 从外部看一模一样);以及两条 `@ts-expect-error`,在 `pnpm typecheck` 而非 review 阶段钉住形状。\n\n### 反向验证(把 `format.ts` stash 回改前,只留新测试与调用点)\n\n```\n$ git stash push -- packages/cli/src/utils/format.ts\n$ pnpm --filter @objectstack/cli exec vitest run src/utils/format.tenancy.test.ts\n\n  × posture explicitly isolated, boolean unset — the cloud#1020 lie 11ms\n  × posture unset, boolean true — the legacy fallback still reads isolated 2ms\n  × posture single while the boolean says true — posture wins 2ms\n  × posture isolated while the boolean says false — posture wins 1ms\n  × prints group — the posture a boolean can only misreport 1ms\n  × posture unset and boolean unset — single, the default 1ms\n  × accepts the legacy 'multi' spelling and prints its canonical name 1ms\n  × prints the posture verbatim for every posture the spec defines 1ms\n  × rejects the boolean shape at COMPILE time, not at review time 4ms\n\nAssertionError: expected undefined to be 'Tenancy: single'\nAssertionError: expected [ '  Tenancy: multi-tenant' ] to have a length of 2 but got 1\n\n Test Files  1 failed (1)\n      Tests  9 failed | 2 passed (11)\n```\n\n(注:上面这轮跑的是加强前的版本,当时「never flattens」那条空转通过;已按上一段所述改成先断言行存在。)\n\n改动在位后:\n\n```\n$ pnpm --filter @objectstack/cli exec vitest run src/utils/format.tenancy.test.ts\n Test Files  1 passed (1)\n      Tests  11 passed (11)\n```\n\n两条 `@ts-expect-error` 也做了同样的反向验证 —— 去掉其中一条,tsc 立刻报出被它挡住的那个错,证明指令是承重的而非装饰:\n\n```\npackages/cli/src/utils/format.tenancy.test.ts(174,79): error TS2322:\n  Type 'true' is not assignable to type '\"group\" | \"single\" | \"isolated\" | undefined'.\n```\n\n## 其它验证\n\n- ESLint:`npx eslint packages/cli/src/utils/format.ts packages/cli/src/utils/format.tenancy.test.ts packages/cli/src/commands/serve.ts` → 干净(无输出)。\n- Typecheck:本 worktree 里 `pnpm --filter @objectstack/cli typecheck` 会报一批 `TS2307: Cannot find module '@objectstack/runtime' | '@objectstack/core' | …`,这是**工作区未构建 dist 的既有环境噪音**(在未改动的 `origin/main` 树上同样复现),与本改动无关。改动涉及的两个文件已用一份把 `@objectstack/spec` / `@objectstack/types` 映射到**源码**的 tsconfig 单独 `tsc --noEmit` 过,结果零错误;CI 会先构建再 typecheck,是权威一轮。\n- 同理,`src/utils/` 里 7 个测试文件在本地因同样的未构建依赖而 collect 失败,`sqlite-occupancy.test.ts` 有 1 条环境相关失败 —— 均已通过 stash 全部改动、在等同 `origin/main` 的树上复跑确认为既有失败(`Tests 1 failed | 14 passed`,一字不差)。\n\n## 边界\n\n只做 banner 这半块。**未触碰** `serve.ts` 里的 tenancy 守卫逻辑(#4818 / PR #4858 刚改过),也未触碰 cloud#1020 那边仍在等维护者拍板的许可闸门决策 —— 正如议题开头所写,banner 无论那个决策怎么落都该修。已附 changeset(`@objectstack/cli` patch,CLI 输出为用户可见变化)。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018iARDqtrhQgz6fVHDeDkbQ)_"
+}

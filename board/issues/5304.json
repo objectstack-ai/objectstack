@@ -1,0 +1,35 @@
+{
+  "number": 5304,
+  "kind": "pull_request",
+  "title": "fix(spec): #4650 删除闸门改用树内基线锚点,按 SHA 钉住的离线消费者构建不再硬失败 (#5235)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T16:24:51Z",
+  "updated_at": "2026-08-04T20:28:11Z",
+  "closed_at": "2026-08-04T20:28:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T20:28:09Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5304",
+  "body": "Fixes #5235\n\n按维护者指示走**方向 2**:把删除闸门的基线锚点固化成树内产物,同时保住 #4650 的防旁路性质。\n\n## 问题\n\n`resolveSurfaceBase()` 只从 git 取基线(`origin/main` + 自愈 fetch),两条都拿不到就 `process.exit(1)`。对\"忘了 fetch 的开发者\"这是对的;对**一整类根本没有 GitHub 路由的构建环境**是错的——cloud 把 framework `COPY` 进 buildx 阶段再构建、气隙构建、fork、按 tag 复现历史版本。这些树是不可变的、已经合并过的,闸门要问的那句\"我这个 commit 相对 main 删了什么\"在那里**没有主语**,却照样把整个构建打红。\n\n## 方案\n\n新增提交进树的 `packages/spec/authorable-surface.base.json`:\n\n```json\n{ \"description\": \"…\", \"baseRev\": \"88b9b2d…(40 hex)\", \"keys\": [\"ai/Agent:model\", \"…\"] }\n```\n\n`keys` 就是 `authorable-surface.json` 在 `baseRev`(一个 origin/main 上的 commit)时的内容。\n\n- **能解析 origin/main(每个开发检出、每次 CI)**:行为完全不变——仍然锚在 merge base 上,#4650 的判定逻辑一行没动。**额外**校验树内锚点:`baseRev` 必须是 origin/main 的祖先,且它记录的 keys 必须**就是**那个 commit 的基线。\n- **解析不了 origin/main**:锚在树内文件上,构建继续。闸门**照跑**:锚点记着、而这次构建不再产出的 key,和以前一样是 fatal。\n\n## 防旁路性质为什么还在\n\n想靠改锚点作弊,只有两条路,都被上面那两条校验堵死:\n\n1. **从锚点里删一行** → keys 不再等于 `baseRev` 那个 commit 的基线 → 红。要让它不红,得让一个**已经合并的上游 commit** 少掉那一行,而 PR 做不到这件事。\n2. **把 `baseRev` 指到自己分支上的 commit**(那个 commit 的基线确实被改过) → 祖先校验红:它不是 origin/main 的祖先。\n\n再加一条写入侧的约束:**锚点只能由 git 解析出来的基线写**(`gitResolvedAnchor`),离线构建永远不写它——否则离线构建就能把锚点推进到\"自己现在的样子\",等于自己给自己做证。\n\n⛔ 没有 `SKIP=1` 之类的环境变量。两种锚点都拿不到时,构建仍然 exit 1(原来那条 test 改写成钉这一半)。\n\n## 刷新故事 / 怎么防漂移\n\n- **谁写**:`gen:schema`(写模式)。它在删除闸门**判完之后**才写——顺序是有意的:一次因为\"没证明的删除\"而退出的运行根本走不到写入那一行,所以锚点永远不可能被推过一个它没有放行的删除。\n- **写什么**:merge base 的基线,不是本分支的现状。\n- **什么时候变**:只有当 keys 真的变了才重写(`baseRev` 单独变化不触发),所以它的 churn 频率 = `authorable-surface.json` 自己的 churn 频率,不是每个 PR。\n- **滞后是合法的,不是错误**:在 `main` 上 merge base 就是 HEAD,所以这个文件**必然**比自己的 surface 落后一个 PR。因此 `--check` 只证明它**真实**(authentic),不要求它**最新**(current);落后时打一行 `ℹ️` 提示,由下一次 `gen:schema` 顺手补上。这一点在代码注释和 `regen-artifacts.mjs` 的条目里都写清楚了,免得下一个人把它\"修\"成 fatal 而在 main 上自伤。\n\n## 归属与配套\n\n- **os-regen 合并驱动**:已加(`.gitattributes` + `scripts/regen-artifacts.mjs`,`pnpm check:merge-driver` 双向自检通过)。理由:同一个生成器、同样的 8k 行有序数组、同样的冲突形状,解法永远是\"按合并后的树重算\",不是文本合并。条目注释里注明了它与邻居的**不同点**:陈旧不算错。\n- **`packages/spec/package.json` 的 `files` 不动**:`authorable-surface.json` 本来就不在发布清单里(闸门跑在仓库树上,不在 npm tarball 里),锚点跟它保持一致。\n- 未改任何 schema 源与其它生成物语义;未碰 `content/docs/releases/`。\n\n## 验证证据\n\n**1. RED(修之前,复刻消费者构建形状)** — 在没有可解析 git 的环境里跑 spec 构建:\n\n```\nGIT_DIR=…/absent.git tsx scripts/build-schemas.ts --check\n❌ Cannot resolve origin/main to anchor the authorable-surface deletion check (#4650).\nEXIT=1\n```\n\n与 issue 正文里 cloud 那条报错逐字一致。\n\n**2. GREEN(同一条命令,修之后)**:\n\n```\nℹ️  origin/main is not resolvable in this build environment — anchoring the authorable-surface\n   deletion check (#4650) on the committed authorable-surface.base.json: authorable-surface.json\n   as of 88b9b2d5cc8d, verified upstream when it landed (#5235).\n✅ Successfully generated 1655 schemas.\nEXIT=0\n```\n\n**3. 开发检出仍然绿**:`pnpm --filter @objectstack/spec check:authorable-surface` → exit 0。\n\n**4. 反篡改(在真实开发检出里手改锚点,删掉一行)** → 红:\n\n```\n❌ authorable-surface.base.json is not the baseline it claims to be (#4650, #5235):\n   it says it mirrors authorable-surface.json at 88b9b2d5cc8d, but 1 line(s) are missing\n   from it and 0 line(s) are not in that commit at all.\n     - data/Object:label  (at 88b9b2d5cc8d, absent here)\n```\n\n**5. 测试**:`packages/spec/scripts/build-schemas-check-mode.test.ts` → `Tests 18 passed (18)`;`pnpm --filter @objectstack/spec typecheck` → exit 0;`pnpm check:merge-driver` → 全绿。\n\n新增 6 条(沿用该文件已有的 sandbox:真 git 仓 + 伪造的 `refs/remotes/origin/main`,删掉这个 ref 就是消费者构建的忠实模型):离线能构建、离线**仍然会红**(锚点记着而本次构建产不出的 key)、离线写模式**不推进锚点**(成功和失败两条路都钉了)、手改锚点被抓、`baseRev` 指向本地 commit 被抓、锚点缺失时 `--check` 只报不写而 `gen:schema` 会生成。\n\n原有那条 \"fails LOUDLY when origin/main cannot be resolved\" 按新契约改写:它钉的性质(**没有任何锚点时不许静默跳过**)完好,只是触发条件从\"没有 origin/main\"收窄成\"两种锚点都没有\"。\n\n## 下游\n\ncloud 的 pin bump(cloud#1012 / cloud PR #1091)在这条合并后解锁。\n\n另外一条实测到的下游收益:cloud 已经用\"把 `.git` 放进构建上下文 + 在 builder 里 `git update-ref refs/remotes/origin/main HEAD`\"绕过这个闸门(cloud#1098 / cloud PR #1106),代价写在它自己的 dockerignore 注释里——`COPY objectstack/` 那层每次都变、缓存全失效、每次部署冷构建约 20 分钟,并把\"买回缓存\"记成了 cloud#1102。这条合并后那个绕法可以撤掉:锚点在树里,不需要 `.git`,也不需要那个 `update-ref`(顺带一提,它把 `origin/main` 指到 HEAD,等于让闸门拿自己比自己——树内锚点比它严格)。cloud 侧的清理不在本 PR 范围内。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ErbEDVAg1No9gdg1pgDAGB\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ErbEDVAg1No9gdg1pgDAGB)_"
+}

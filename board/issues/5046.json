@@ -1,0 +1,35 @@
+{
+  "number": 5046,
+  "kind": "pull_request",
+  "title": "fix(lint): 收敛 validate-expressions / validate-security-posture 的 spec 不声明键 `??` 别名读法 (#5017)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T00:43:57Z",
+  "updated_at": "2026-08-04T04:27:20Z",
+  "closed_at": "2026-08-04T04:27:18Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T04:27:18Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5046",
+  "body": "Fixes #5017\n\n#4984 → #5009 同族第三轮。两条规则都以 `input: 'parsed'` 注册(`authoring-rules.ts`),看到的是 `ObjectStackSchema` 解析后的产物 —— 未声明的键要么被 strip,要么被 strict 子 schema **按名整包拒绝**,所以读它的分支对任何能解析的 stack 都不执行。\n\n议题点名五条,按派发要求全包 grep 同形 `??` 别名链,又找出**两条**,一并处置。\n\n## 七条链,逐条核实\n\n每条都对着 live `.shape` + `safeParse` 实测过。\n\n| 位置 | 原读法 | spec 事实(实测) | 处置 |\n|:--|:--|:--|:--|\n| `validate-expressions.ts` 205/421 | `rule.expression ?? rule.predicate ?? rule.condition ?? rule.formula` | 四个别名全在 `validation.zod.ts` 的 `aliases: { formula/expression/predicate/rule: 'condition' }` 里按名拒绝;canonical **排第三** | 收敛为 `rule.condition` |\n| `validate-expressions.ts` 414 | `obj.validations ?? obj.validationRules` | `ObjectSchema.shape` 只有 `validations`;拒绝信息 \"Did you mean `validationRules` → `validations`?\" | 收敛 |\n| `validate-expressions.ts` 595 | `rule.condition ?? rule.criteria ?? rule.predicate` | `SharingRuleSchema.shape` = `accessLevel, active, condition, description, label, name, object, sharedWith, type`;`criteria` 是运行时 `criteria_json` 的拼法(#3896),`predicate` 直接拒绝 | 收敛 |\n| `validate-security-posture.ts` 94 | `obj.sharingModel ?? (obj.security)?.sharingModel` | **`ObjectSchema` 没有 `security` 键** —— `sharingModel` / `externalSharingModel` / `publicSharing` 是平铺的,且 strict:嵌套写法被整包拒绝 | **删除整个 fallback** |\n| `validate-security-posture.ts` 118 | `def.reference ?? def.reference_to` | `field.zod.ts:331` 把 `reference_to` 映射为 `reference` | 收敛 |\n| **额外找到** `validate-expressions.ts` 178 | `def.reference ?? def.referenceTo` | 同上一行的别名表 | 收敛 |\n| **额外找到** `validate-expressions.ts` 555 | `action.objectName ?? action.object` | canonical 是 `objectName`;\"Did you mean `object` → `objectName`?\" | 收敛 |\n\n## 关键差异:第一条不是死代码,是**活着的错**\n\n其余六条 canonical 都排首位,别名 limb 纯属不可达。这一条 canonical 排**第三**,所以别名会**短路**掉 canonical。改动前实测:\n\n```\nA) condition 干净 + expression 有错  => 报的是 expression 里的错\nB) condition 有错   + expression 干净 => 报的是 expression 的 null-guard,\n                                        condition 里的 `no_such_field` 从头到尾没被看过\n```\n\n也就是说:一条同时写了 `condition` 和被拒别名的规则,lint 校验的是 **schema 会拒绝的那个**,而作者声明的那个从未被读。producer 和 consumer 对同一份元数据给出两套说法。\n\n分两层说清:\n\n- **parsed 层**(`os compile` / `build` / `validate`):三个别名都让整包 stack 被拒,所以恒为 `undefined`,链必然落到 `condition` —— **与只读 canonical 完全等价,零行为差异**。\n- **normalized 层**(`os lint` 不 parse,两个 tier 都跑在 normalized 上):别名可达,上面的短路就在这里发生。改动后 lint 读 canonical,真实缺陷浮出来。\n\n测试里**重建了旧链**(`OLD_CHAIN`)来演示这个差异,而不是只描述它。\n\n## 反向验证:两个方向都测了\n\n#5018 的教训是方向会反过来。这里两种都有,各自 pin 住:\n\n- **canonical 排首位的六条**:改动前对非法拼法越权判红 → 改动后让位给 schema 指名道姓的拒绝。七条别名拼法逐条断言 schema 的拒绝文案 + lint 之后的输出。\n- **`def.reference ?? def.referenceTo`(178)**:这条喂的是**计数**不是谓词,所以删掉别名 limb 反而会让下游 `parent`-scope gate **新增**一条诊断(master 数从 1 变 0)。只发生在 pre-parse 层、且该 stack 已因这个键被 schema 按名拒绝 —— 是无效 stack 上的噪音,不是有效 stack 上的新判定。诚实 pin 住而不是留给后人发现。\n- **`action.objectName ?? action.object`**:删掉别名丢的是 action 的**对象绑定**而非谓词,所以对象无关的那半(裸引用作用域)照旧判红,字段存在性那半不再可能。`lintAfter` 逐条写明,没有统一假设。\n\n## 真实元数据零新红\n\n`app-crm` / `app-showcase` / `app-todo` + `plugin-security` 的 default permission sets,改动前后两条规则的 findings **逐字 diff 为空**(1 + 5 + 0 + 0 条安全 finding,0 条表达式 finding,全部不变)。\n\n## 两层 meta-guard(#4992 模式,#5018 形状)\n\n- **declared-key guard** —— 源码里从每个 receiver 上读的键 ⊆ 该 surface 自己的 `.shape`,且 `expected` 精确匹配(改名 loop 变量会静默解除扫描,所以强制回访表格)。另加一条 \"covers every receiver\" 元测试,防止**新** receiver 整个溜出表格。\n- **reachability guard** —— `validateSecurityPosture` 全部 15 个 `findings.push` 落点都被 fixture 触达。\n\n判据上有一处**刻意不照抄 #5018**:这里不要求 fixture `safeParse` 全绿,而是要求 schema **不报 `unrecognized_keys`**。因为这条规则被文档明确设计成也跑在 parse 前,好让 `os lint` 对 zod 会拒绝的**值**(`sharingModel: 'read'` → `invalid_value`)给出更好的信息 —— 强求 fixture 全绿会直接删掉四条正当规则。被拒的**值**和被拒的**键**是两回事:后者在 parsed 路径上压根到不了,而它出现在源码里就等于宣称\"存在这么一个 authoring 面\"。\n\n**覆盖范围写明**:`validate-security-posture.ts` 两层 guard **全覆盖**(15 个落点、除两个有据可查的非 schema receiver 外的全部 receiver)。`validate-expressions.ts` 的 declared-key guard 覆盖除 flow node `config` 外的全部 receiver(`cfg` / `startCfg` 排除的理由本身是 schema 事实:node config 按 `type` 判别、表达式槽走 `resolveFlowNodeExpressions` 描述符注册表;而 `functionName` 是 `schemaless-node-config.zod.ts` **声明**的键、由 ADR-0087 D2 转换 `flow-node-script-config-aliases`(#3796)在 load 时改写,退役五键是刻意在 pre-parse 层识别以给出具名替代 —— **读一个键是为了拒绝它**,与本单的缺陷正好相反)。reachability 那半限定在本单改动的读法及其所在 surface:该规则 660 行、`issues.push` 落点不带 rule id / path 模板(finding 形状早于 `{ rule, path, hint }`),#5018 式的落点扫描不能直接搬;完整落点清单属于议题自己的建议 3(所有 `input:'parsed'` 规则共用一条 guard)。\n\n七条读法各自做过**变异测试**:任意一条加回去,都至少有一条测试转红(M1–M8,分别 2/5/2/2/2/1/3/2 条红)。\n\n## 顺带发现,已另开单不在本 PR 修\n\n**#5026** —— 同文件的字段公式校验读 `f.formula`,而 `FieldSchema` 声明的是 `expression`(`formula` 正是它按名拒绝的别名)。**形状同族但不是 `??` 链**:代码里根本没有 canonical 读法,所以这段对任何 spec 合法 stack 从未跑过(真实元数据全部用 `expression:` 拼法)。收敛过去等于**启用一条从未跑过的检查** —— 是覆盖面扩大而非删死代码,可能对现有元数据判红,不该由本 PR 顺手带上。\n\n本 PR 里它是 declared-key guard 中**唯一一条显式记账的欠债**(`TRACKED_UNDECLARED_READS`,带 issue 号),并注明\"这个列表只能缩短,不能变长\"—— 而不是把 `f` 整个排除出表格。\n\n## 验证\n\n```\npnpm --filter @objectstack/lint test        → 56 files, 1127 tests passed\npnpm --filter @objectstack/lint typecheck   → tsc --noEmit, clean\neslint (四个改动文件)                        → exit 0\n真实元数据 before/after diff                 → 空\n变异测试 M1–M8                               → 全部转红\n```\n\n改动限于 `packages/lint`。未触碰 `content/docs/releases/`。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018iARDqtrhQgz6fVHDeDkbQ)_"
+}

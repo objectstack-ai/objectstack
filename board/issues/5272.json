@@ -1,0 +1,35 @@
+{
+  "number": 5272,
+  "kind": "issue",
+  "title": "单记录 delete 从不绑定 `hookContext.previous` —— 契约声明「for update/delete」,引擎只在 update 分支赋值;#5038 之后批量 delete 反而比单记录 delete 更完整",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T13:48:06Z",
+  "updated_at": "2026-08-04T16:16:12Z",
+  "closed_at": "2026-08-04T16:16:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5272",
+  "body": "在 #5038(批量写按行语义)实现过程中发现,PD #10 单独记录,**未在该 PR 内修复**。\n\n## 事实(对 `origin/main` 核实)\n\n`packages/spec/src/data/hook.zod.ts` 的 `HookContext.previous` 声明:\n\n> **Data Snapshot** — The state of the record BEFORE the operation (**for update/delete**).\n\n而 `packages/objectql/src/engine.ts` 里 `hookContext.previous` 的赋值**只有一处**,在 `update()` 的单 id 分支之后:\n\n```\nif (priorRecord) hookContext.previous = coerceBooleanFields(updateSchema, priorRecord);\n```\n\n`delete()` 全程不给 `hookContext.previous` 赋值。它确实会取一次前置行(`summaryPrev`),但那只在「本对象被 roll-up summary 聚合」时发生,且只喂给 `recomputeSummaries`,不进上下文。\n\n所以:**`previous` 在 delete 的任何阶段都是 `undefined`** —— `beforeDelete` 和 `afterDelete` 都一样,单记录写入也一样。\n\n## 为什么这不是无害的\n\n自 #4775 起「条件求不出值 = 该次操作失败」。一条完全合法、照契约写的 delete 侧过渡 hook:\n\n```ts\n{ events: ['afterDelete'], condition: P`previous.status == 'done'` }\n```\n\n会让该对象的**每一次单记录删除失败**,而错误文案走的是通用分支(`isPredicateBulkWrite` 为 false,因为 `input.id` 在),读起来像作者拼错了 key —— 但 key 没错,是引擎没绑。这与 #5037 要消除的「把平台限制说成作者的错」是同一形状,只是换了一条路径。\n\nplugin-audit 用 `(ctx as any).__previous` 自己在 `beforeDelete` 里补了一次快照,正说明这个洞已被绕过而不是被修复;而 `hook-wrappers.ts` 只读 `ctx.previous`,不读 `__previous`,所以 hook 条件拿不到那份兜底。\n\n## #5038 之后出现的反向不对称(这是现在值得处理的原因)\n\n#5038 让 **predicate 批量 delete 按行派发 `afterDelete`,每行绑定该行的 `previous`**(那正是删除审计所需)。于是:\n\n| 写入形状 | `afterDelete` 的 `previous` |\n|:--|:--|\n| `delete({ multi: true, where })` | ✅ 该行的前置像(#5038) |\n| `delete({ where: { id } })` | ❌ 恒 `undefined` |\n\n**单记录路径现在严格劣于批量路径**,这与 #4800/#4862 裁定所立的「作者写一遍,单/批含义一致」正好相反。#5038 没有顺手补这一格,因为它属于单记录路径、不在该单的范围内(越界即停)。\n\n## 既有测试为何没发现\n\n`packages/objectql/src/hook-condition-previous-scope.test.ts` 有一例\n「a delete-shaped context evaluates `previous` against the pre-image」,它通过是因为**测试自己手工构造了 `previous`**;引擎从不这么给。这是一份对着并不存在的行为写的绿灯,建议连同修复一起改成走真实引擎。\n\n## 可选方向(未拍板)\n\n- **A. `delete()` 按 update 的既有形状取前置行** —— 复用 `update()` 那条 demand-driven 门(`needsPriorRecord(schema) || 有 afterDelete hook`),单 id 分支取一次、赋给 `hookContext.previous`。语义正确且与 #5038 的批量侧对齐;代价是有 delete 侧 hook 的对象每次删除多一次读(`summaryPrev` 在部分场景下已经在读,可合并)。\n- **B. 收紧契约文案,声明 delete 不绑定 `previous`** —— 成本低,但把「删除审计拿不到被删的行」写死成平台性质,且与 #5038 刚落地的批量侧直接矛盾(同一平台对同一件事两个答案)。\n- **C. 让 `hook-wrappers` 回落读 `__previous`** —— 不采纳,记在这里只为列全:那是让消费端去容忍生产端的缺口,正是 #5038 反过来做的事。\n\n倾向 **A**,与 #5038 已落地的批量侧同源;若 A 的读取成本不可接受,B 也要求同步改 `HookContext.previous` 的契约文案与 `skills/objectstack-formula` §5 的绑定作用域表。\n\n## 关联\n\n- 发现于:#5038(批量写按行语义)/ PR #5270 —— 其中批量 delete 侧已按行绑定 `previous`\n- 先例:#4775(求不出值 = 失败)、#5037(把平台限制说成作者的错 = 缺陷)、#4649(`previous` 总全 + fail closed)\n- 契约面:`packages/spec/src/data/hook.zod.ts`(spec 车道)"
+}

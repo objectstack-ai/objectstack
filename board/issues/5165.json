@@ -1,0 +1,35 @@
+{
+  "number": 5165,
+  "kind": "pull_request",
+  "title": "fix(spec): 视图标签按运行时真实下发的文档形状解析(#4854)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T07:18:56Z",
+  "updated_at": "2026-08-04T07:48:56Z",
+  "closed_at": "2026-08-04T07:48:54Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T07:48:54Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5165",
+  "body": "Fixes #4854\n\n`resolveViewLabel` / `resolveViewDescription` 读的两个字段,运行时下发的视图文档一个都没有,所以**任何按 `defineView` 正常方式编写的视图,标签在任何语言下都只会落回英文字面量**。列表视图切换器横在每个对象列表页顶部,在纯中文部署里这是屏幕上最显眼的残留英文。\n\n> 说明:本文中形如 `< object >.< key >` 的写法,左尖括号后的空格是为了绕开 issue/PR 正文存储时的 HTML 标签清洗(左尖括号紧跟字母会被当作标签整段吞掉 —— 本 PR 正文初版就因此被截断了一半),实际字符串里没有这个空格。\n\n## 先测量,再动手 —— 下发形状确认属实(且有一处与 issue 描述不符)\n\n没有采信 issue 里贴的 JSON,而是回溯到真正组装下发文档的代码,并用真实的应用元数据跑了一遍。\n\n**组装者:`expandViewContainerWithDiagnostics`** —— `packages/spec/src/ui/view.zod.ts:2203`。每个展开项都由同一行产出,字段依次是 `name` / `object` / `viewKind` / `label` / `config`(作者原始配置的深拷贝)/ `order` / `scope`,其中 `name` 由 `${object}.${k}` 拼成,`k` 是 `listViews` / `formViews` 的**映射键**。\n\n链路后续都不改形状:\n\n- `packages/objectql/src/engine.ts:1875` —— 引擎把展开项原样 `registerItem` 进注册表;\n- `packages/rest/src/rest-server.ts` 的 `GET /meta/:type` —— 仅按 `viewKind` 存在且 `object` 等于查询参数来过滤、排序,再交给 `translateMetadataDocument` 翻译。\n\n对 `examples/app-crm/src/views/lead.view.ts`(真实编写的视图)实测下发结果:\n\n| 顶层 name | 顶层 object | viewKind | objectName | 顶层 data | config.name | config.data.object |\n|---|---|---|---|---|---|---|\n| `crm_lead.all` | `crm_lead` | list | 不存在 | 不存在 | **不存在** | `crm_lead` |\n| `crm_lead.pipeline` | `crm_lead` | list | 不存在 | 不存在 | **不存在** | `crm_lead` |\n| `crm_lead.web_to_lead` | `crm_lead` | form | 不存在 | 不存在 | **不存在** | `crm_lead` |\n| `crm_lead.default` | `crm_lead` | form | 不存在 | 不存在 | **不存在** | **不存在** |\n\n结论:\n\n- ✅ issue 说的**顶层 `object`** 属实 —— `objectName` 与顶层 `data` 确实都不存在,函数在 `if (!bundle || !objectName)` 处就返回了字面量,根本走不到查找;\n- ✅ issue 说的 **`name` 被命名空间化为 `< object >.< 裸名 >`** 属实;\n- ❌ **与 issue 描述不符:`config.name` 并不存在。** 上表四条真实视图没有一条带 `config.name`,仓库内所有示例应用的视图配置也都没有写内层 `name`。裸名的唯一可靠来源是**顶层 `name` 去掉 `< object >.` 前缀之后的部分**(即容器映射键);`config.name` 只是作者可选字段。最后那条默认 form 更能说明问题:它连 `config.data.object` 都没有,**顶层 `object` 是唯一能识别其对象的字段**。\n\n因此实现按**真实形状**做,而不是按 issue 的措辞:查找键**只**由顶层 `name` 剥前缀推导,不读 `config.name`。理由写进了代码注释 —— 当发生重名改写(组装器会把冲突的 `< object >.< key >` 改写成 `..._2`)时,`config.name` 指向的是**另一个**视图,优先读它会把译文张冠李戴。\n\n裸键这一侧同样有两个独立佐证:i18n 提取器 `pushViewEntries`(`packages/cli/src/utils/i18n-extract.ts:180`)写出的就是裸键;已发布的平台包 `packages/platform-objects/src/apps/translations/*.objects.generated.ts` 里也全是 `sys_user._views.all_users` 这样的裸键,没有任何带前缀的。\n\n## 改动\n\n1. **`viewObjectName`** 依次取 `objectName` → `object` → `data.object` → `config.data.object`。这个顺序刻意与 i18n 提取器自己的 `viewObjectName`(`i18n-extract.ts:163`)保持一致 —— **写** `_views` 键的那一端和**读**它的这一端,从此对「哪个字段代表对象」给出同一个答案。\n2. **新增 `viewTranslationKey`**:查找前剥掉 `${objectName}.` 前缀。这是对组装规则的**反解**,不是容错别名 —— 翻译包按裸键存放,而 `name` 携带的是注册表分配的全局唯一身份(`ViewItemNameSchema`)。没有前缀的名字(手工构造的视图)原样使用,行为不变。\n3. **`ViewLike`** 只新增两个可选字段(`object`、`config`),纯类型增量,非破坏性。\n4. `resolveViewDescription` 与 `resolveViewLabel` 共用这两个辅助函数,同一处缺陷一并修好 —— 只修标签会留下描述仍然失效。\n\n## 测试\n\n`packages/spec/src/system/i18n-resolver.test.ts` 新增一组用例,**fixture 由 `expandViewContainer` 现场生成,而不是从 issue 里抄 JSON**,所以它永远不会与真实下发路径漂移:组装器若改变身份拼写,断言随之改变,而不是继续描述一个运行时早已不产出的形状。\n\n覆盖:身份 pin(断言旧代码读的两个字段在真实文档里**不存在**,`config.name` 也不存在)、顶层 `object` 加裸键解析出译文、描述同样解析、locale 回退链、**负向对照**(对象存在但无对应 `_views` 条目 → 落回字面量)、无 `data` 的默认 form、经 `translateMetadataDocument` 的 REST 边界入口(并断言 `name` / `object` / `config` 原样保留)、前缀不属于本视图对象时不截断。\n\n反向验证(证明用例真的能抓到 bug):把 `i18n-resolver.ts` 还原成修复前版本重跑,4 条行为用例全部失败,修复后全绿。\n\n```\n× resolves a translation from top-level object + the bare view key\n× resolves the description the same way\n× translates through the REST boundary entry point\n× still resolves the retargeting case via config.data.object\nTests  4 failed | 95 passed (99)\n```\n\n门禁实测结果:\n\n```\npnpm --filter @objectstack/spec test              Test Files 303 passed (303) · Tests 7729 passed (7729)\npnpm --filter @objectstack/spec typecheck         tsc --noEmit(无输出,通过)\npnpm --filter @objectstack/spec check:generated   All 8 generated artifacts are up to date.\neslint(改动的两个文件)                            无输出,通过\n```\n\n未新增导出、未改动任何 zod schema 的 `.describe()`,故 8 项生成物无需重新生成 —— 这是用 `check:generated` 实测确认的,不是推断。\n\n## 范围\n\n按派发要求,**未触碰** issue 中「report / dataset 没有 translator」一节 —— 那是独立的 surface 设计题,由 PM 另立单跟踪。本 PR 不新增翻译面,不改 `METADATA_DOCUMENT_TRANSLATORS`。\n\n## 顺带发现(已另立 issue,未在本 PR 修复)\n\n**#5164** —— `_views` 键的拼写有三个生产方互不一致:只声明默认 `list`(没有 `listViews`)的容器,提取器写出的键是 `list`,而组装器给它的注册名是 `< object >.default`,两边对不上,本 PR 之后这一种形状仍解析不出译文。这是**生产方之间**的分歧,必须在生产端统一;在消费端再加一层 `default` 转 `list` 的兼容,正是 Prime Directive #12 明令禁止的做法,所以留给该 issue 决策(倾向:以运行时身份的裸键 `default` 为准,并同步收紧 lint)。`examples/app-crm` 之所以没暴露这个问题,只是因为它的默认 `list` 与 `listViews.all` 结构完全相同、被组装器的签名去重合并了,活下来的键正好是 `all`。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Ehu85kbvMcrNTUJjwxvLJ9\n"
+}

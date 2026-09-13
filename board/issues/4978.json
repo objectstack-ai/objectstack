@@ -1,0 +1,34 @@
+{
+  "number": 4978,
+  "kind": "pull_request",
+  "title": "chore(tooling): doc-authoring 守卫纳入 docs/ 活语料,历史快照按路径豁免 (#4929)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T18:17:20Z",
+  "updated_at": "2026-08-03T18:38:23Z",
+  "closed_at": "2026-08-03T18:38:22Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T18:38:22Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4978",
+  "body": "Fixes #4929\n\n## 这条修的是什么\n\n#4916 修的是**第一个方向**:声明在 `ROOTS` 里、却已经解析不到的 root(重命名/删除后被 `catch {}` 吞掉,扫描悄悄变窄却照样打印绿)。本单是它的**对称方向**:有没有一个真实存在、真的在教 metadata 编写、却**从来就没被声明过**的语料目录?\n\n有,是 `docs/`。议题正文对全仓逐个围栏块统计过:\n\n| 文件 | ts 围栏块 | `defineX(` |\n|---|---|---|\n| `docs/notes/crm-development-standards.mdx` | 16 | 3 |\n| `docs/adr/0015-external-datasource-federation.md` | 12 | 2 |\n| `docs/adr/0010-metadata-protection-model.md` | 9 | 2 |\n| `docs/adr/0057-system-data-lifecycle-and-retention.md` | 1 | 3 |\n| `docs/adr/0017-object-has-many-view.md` | 1 | 1 |\n| `docs/design/permission-model.md` | 1 | 3 |\n\nAGENTS.md Prime Directive #13 要求每个 agent 在改动 ADR 治下的行为前先 grep ADR。一份 ADR 里的裸字面量因此会被下一个 agent 原样抄进 app 代码 —— 和 `skills/` 里的一份坏样本没有任何区别,只是没人在看。\n\n## 范围:`docs` 进 ROOTS,三个历史目录按路径豁免\n\n```\nconst ROOTS = ['.claude', 'docs', 'skills', 'content'];\n```\n\n取 `docs` 而不是 `docs/adr` + `docs/design` + `docs/notes` 三条,理由和 #4913 取 `.claude` 而非 `.claude/skills` 是同一条:**以后新增的子目录一进来就在范围内**,不会以完全相同的方式被漏第二次。手写的顶层指南(`docs/protocol-upgrade-guide.md`、`docs/upgrading-to-11.md` 等)也因此落在范围内 —— 它们是给读者的现行指令,本来就该在。\n\n排除三个目录,走 #4915 引入的 `SKIP_PATHS`(按路径,不按目录名):\n\n```\nconst SKIP_PATHS = new Set([\n  '.claude/worktrees',\n  'docs/audits',\n  'docs/handoff',\n  'docs/plans',\n]);\n```\n\n注释里写明了**为什么这是永久豁免、不是待办**:它们是有日期的一次性过程记录 —— 某一天写下的、关于仓库当天状态的审计报告 / 交接note / 计划。里面没有任何一段是以「照这样写」提供给读者的,它们是**当时为真的证据**。把它们纳入等于让两个月前的一份 handoff 永久受今天的 lint 约束,而那种红只有两条出路:改记录(等于伪造史料),或者晚一场争论之后照样加豁免。判断线是「**这份文档现在是否在教你怎么写 metadata**」,不是「它是否在 `docs/` 下」;一份从 plan 长成现行指南的文档,该做的是把它移出 `docs/plans`,而不是就地豁免。\n\n时机:**纳入时全仓零违规**,所以现在纳入是零成本的。拖到有违规再纳入,就变成一次「要么改史料、要么加豁免」的争论。\n\n## 双向证明(要求 1)\n\n议题和 #4916 关注的缺陷家族,恰恰是「守卫在跑、是绿的、但结构上够不到它声称要查的东西」。所以只证明「加进去之后还是绿」等于什么都没证明 —— 那正是**没加上**时的输出。三段实测:\n\n**[1] 改前,fixture 在位 → 绿(守卫根本没打开 `docs/`)**\n\n```\n=== [1] BEFORE change, fixtures present ===\n✓ doc authoring guard: 3 files clean — no bare metadata literals.\nexit=0\n```\n\nfixture 树里 `docs/adr/0999-fixture-adr.md` 和 `docs/handoff/2026-06-fixture-handoff.md` 放的是**同一段**裸字面量正文。\n\n**[2] 改后,同一棵树 → 红,且只点名 `docs/adr`**\n\n```\n=== [2] AFTER change, docs/adr + docs/handoff fixtures present ===\n\n✗ Bare metadata-literal authoring found in docs/skills (#2035). Use the defineX factory instead:\n\n  docs/adr/0999-fixture-adr.md:4\n    export const dashboard: Page = {\n\n1 violation(s). Author via e.g. `definePage({ ... })` — ...\nexit=1\n```\n\n`docs/handoff` 里内容完全相同的那一份**没有**被报出来。\n\n**[3] 改后,只留被排除目录的 fixture → 保持绿**\n\n```\n=== [3] AFTER change, ONLY the excluded docs/handoff fixture present ===\n✓ doc authoring guard: 3 files clean — no bare metadata literals.\nexit=0\n```\n\n### 折进常驻 `--self-test`\n\n上面三段是一次性的;真正长期有效的是把它做成每次都跑的断言。self-test 的临时树里新增了 7 份 fixture,三个豁免目录放的是**和 `docs/adr` 完全相同的违规正文** —— 豁免哪天失效,这三份会直接变红说出来,而不是让两条断言都因为错误的原因通过。\n\n两半必须**一起**断言,因为任一半单独成立都会被一个方向错误的范围满足:「`docs/adr` 判红」对一个吞下整个 `docs/` 的范围同样成立,「`docs/handoff` 是绿的」对 #4929 之前那个从不打开 `docs/` 的范围同样成立。\n\n对 self-test 本身做了变异测试,确认它真的承重:\n\n```\n=== mutation A: drop 'docs' from ROOTS -> self-test must go red ===\n  ✗ self-test \"markdown files collected\": expected 8, got 4\n  ✗ self-test \"docs/adr is walked\": expected true, got false\n  ✗ self-test \"docs/notes is walked\": expected true, got false\n  ✗ self-test \"top-level docs guides are walked\": expected true, got false\n  ✗ self-test \"bare literal in docs/adr is a violation\": expected true, got false\nexit=1\n\n=== mutation B: drop the three docs SKIP_PATHS -> self-test must go red ===\n  ✗ self-test \"markdown files collected\": expected 8, got 11\n  ✗ self-test \"docs/audits is not walked\": expected false, got true\n  ✗ self-test \"docs/handoff is not walked\": expected false, got true\n  ✗ self-test \"docs/plans is not walked\": expected false, got true\n  ✗ self-test \"total violations\": expected 5, got 8\nexit=1\n```\n\n## main 上现存文件:零新增违规(要求 2)\n\n扫描文件数 **219 → 360**(+141 = `docs/` 177 份减去 audits 32 / plans 3 / handoff 1)。没有放宽任何规则,没有加任何 `SKIP_FILES`。\n\n```\n> pnpm check:doc-authoring\n\n✓ check-doc-authoring self-test: scope wiring (.claude and the live docs/ corpus in,\n  .claude/worktrees and docs/{audits,handoff,plans} out), detection, and the dead-root\n  hard error (red when a ROOT is renamed, green when restored) all hold.\n✓ doc authoring guard: 360 files clean — no bare metadata literals.\n```\n\nESLint 干净(`npx eslint scripts/check-doc-authoring.mjs --no-inline-config`,零输出)。\n\n## 顺带记一笔\n\n`SKIP_PATHS` 的条目**没有**死条目检测(`ROOTS` 有,#4916)。但这里的失效方向是安全的:某个豁免目录被重命名后,skip 静默失配,那批文件**进入**扫描 —— 变成一次响亮的红,不是一个安静的洞。已写进注释,没有为此扩大本 PR 的范围。\n\n## 改动范围\n\n- `scripts/check-doc-authoring.mjs`(+88 / −9)\n- `.changeset/doc-authoring-roots-docs.md`(空 frontmatter,纯工具链,不发布任何包)\n\n没有碰根 `package.json`、workflows,或 `content/docs/releases/`。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018iARDqtrhQgz6fVHDeDkbQ)_"
+}

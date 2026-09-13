@@ -1,0 +1,35 @@
+{
+  "number": 5156,
+  "kind": "pull_request",
+  "title": "feat(runtime): 端点链接线 —— 策略 → 执行,兜底器全上下文(#5040 E5b)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T06:44:01Z",
+  "updated_at": "2026-08-04T06:58:58Z",
+  "closed_at": "2026-08-04T06:58:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T06:58:57Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5156",
+  "body": "Fixes #5129\nPart of #5040(E 系列 R3 收拢单)。前置齐备:E4 `a70cd0a`、E5 `277eb36` 均在 main。\n\n## 做了什么\n\n把 E4(策略键)与 E5(执行模块)接成一条链,并把兜底器一直缺的三根线补齐。**现网行为零变更**:非空 `apis:` 在 publish / validate 仍被硬拒(E7 前不撤),整条链结构性不可达。\n\n### 1. `api-endpoint-step.ts`:策略通过分支 → 真正执行\n\n命中分支的 501 换成 `buildEndpointExecutionContext` + `executeEndpointTarget`,答复按执行结果映射。落点仍在**策略链之后**的那个分支里 —— 该分支没有策略上下文时不可达,denial 会短路它,所以「接了执行、忘了策略」不是一次改动能靠遗漏做到的事(E4 交接契约第 4 条,形状保持不变)。\n\n`verdict.responseHeaders`(`cacheTtl` 算出的 `Cache-Control`)**只**并进成功答复。错误答复一律不带:这个头描述的是「客户端可以重用的响应体」,让客户端把一个 401 / 429 / 400 缓存 30 秒比什么都不说更糟。\n\n两个「调用方没喂够东西」的 501 分支(无策略上下文 / 无执行接线)**保留**,措辞改成如实描述。它们在组合后的运行时里不可达 —— 这一点由集成测试钉住,而不是靠删掉诚实的报告来保证。\n\n### 2. `dispatcher-plugin.ts`:兜底器全上下文\n\n- **限流注册表在 `start()` 里建一次**,与 server 级限流器共用同一个 `resolveCache`。每请求新建会让降级 warn 每请求刷一次,并且丢掉限流器的桶缓存 —— 一个每次调用都重置的预算不是预算。\n- **每请求喂完整 `EndpointPolicyContext`**:`req.headers` / `req.remoteAddress` / `resolveSessionPrincipalId`(与 server 级限流器**同一个**会话查询,不另起一个)/ 注册表 / `config.rateLimit?.trustProxy`(与 server 级读同一份声明)/ `ctx.logger`。\n- **写出 `answer.headers`**:此前兜底器只写 `status` + securityHeaders + `json`,把 429 的 `Retry-After` 丢了。一个丢了 `Retry-After` 的 429 等于没说话。\n- **执行依赖**:`callData` 按 `EndpointExecutorDeps` 的文档绑定 —— `(action, params, driver, scope, ec) => callData(execDeps, action, params, driver, scope, ec)`,`execDeps` 是 dispatcher 已经在给每个域模块用的那一个对象(新增只读访问器 `HttpDispatcher.actionExecutionDeps`,窄口暴露 `ActionExecutionDeps` 视图)。`automation` 槽**每请求解析、不缓存**(#4771 类),且用**不带 envId** 的查法 —— 与 `POST /automation/:name/trigger` 读同一个占位者,否则「同操作同答案」(§4)就不成立了。`metadata` 则带 envId 解析,与 `callData` 为同一请求做 ADR-0049 暴露闸时的查法一致。\n\n### 3. 身份 / 环境:复用 `dispatch()` 的解析(多租户姿态)\n\n`dispatch()` 里那段「环境解析 + kernel 切换 + 身份解析」**原地抽出**为公开方法 `HttpDispatcher.resolveRequestScope(context, cleanPath)`,`dispatch()` 改为调用它,行为逐字节不变;兜底器调用同一个方法。抄一份到消费者侧会是第二份更弱的身份解析,而 #4936 正是「数据调用没有 `ExecutionContext`」的现场记录:它会以 system 身份读、绕过 RLS。\n\n顺序是结构性的:**解析必须在匹配之前**。多租户 host 上 `matchEndpoint` 必须问本请求自己的 kernel,否则一个租户的声明会决定另一个租户的 URL。\n\n**弃权姿态(本 PR 采用)**:`isMultiTenantHost()` 为真且解析不出 `environmentId` 时,该步**写不出任何东西**(保留传输层原本的 404)并 warn,而不是拿默认 kernel 的数据作答。多租户验收随 E8。\n\n代价控制:所有解析都在 `isAppEndpointPath()` **之后**才发生 —— 碰不到端点保留段的未匹配请求,今天花多少,现在还是花多少(零)。\n\n### 4. 台账\n\n`* /apps/**` 行的「EXECUTION IS NOT WIRED」改为如实描述:已接线(策略链 → 委派),`script` / `proxy` 与 `inputMapping` / `outputMapping` 不执行且答 501,publish 门仍未翻转所以结构性不可达(#5078 纪律)。\n\n## 验证\n\n```\npnpm --filter @objectstack/runtime test        → 88 files / 1270 tests passed\npnpm --filter @objectstack/runtime typecheck   → tsc --noEmit,干净\npnpm --filter @objectstack/plugin-hono-server test → 14 files / 164 passed\npnpm --filter @objectstack/hono test           → 2 files / 73 passed\nnpx eslint(本 PR 6 个文件)                     → 无输出\npnpm --filter @objectstack/spec check:generated → ✓ All 8 generated artifacts are up to date\ncheck:nul-bytes / route-envelope / error-code-casing / wildcard-fallthrough / slot-lookup / role-word → 全绿\ngit diff origin/main --numstat                 → 7 个文件,无 `- -`(无二进制)\n```\n\n**真实 boot 集成用例**(`dispatcher-plugin.endpoint-fallback.integration.test.ts`,LiteKernel + 真实 Hono + 真实兜底器,走真实 socket;stub 只打在 **kernel 服务边界**上,socket 到 stub 之间全是生产路径):\n\n- `object_operation` find → **200**,体是 `/data` 的体(`success(result)`,`{object, records, total}`),经真实 `action-execution.callData`(无 protocol 服务 → ObjectQL 回退路径);\n- `flow` → automation 槽被调用,上下文是 `buildAutomationContext` 的形状(`{recordId, objectName, params}` 翻译 + `< objectName >Id` 驼峰别名 + `userId` 身份);\n- `authRequired` 默认 → 匿名 **401 UNAUTHENTICATED**,带会话 → **200**;\n- `rateLimit` → 第二次 **429 且 `Retry-After` 在线上**(这是本 PR 补的丢头回归的钉子:步一级的断言一直是绿的,只有 socket 上的断言能抓住它);\n- `cacheTtl` → 成功答复带 `Cache-Control: private, max-age=30`;同样声明 `cacheTtl` 但执行失败(`get` 无 `?id=` → 400 `VALIDATION_FAILED` + `fields[]`)的答复**不带**;\n- 未命中 / 前缀外 / 无 matcher / 已注册路由不被遮蔽 / 405 + `Allow` → E3 的否定断言逐条保持;\n- `matchEndpoint` 抛错 → 5xx 包络;\n- 组合运行时**永不**产出两个「没接线」501(逐条扫响应正文)。\n\n## 范围外(已如实归档)\n\n- `inputMapping` / `outputMapping` 仍未实现 —— #5137 已在跟踪,E7 翻转前必须补;\n- **新填 #5155**:`HttpDispatcher` 把「本请求的 kernel」存在实例字段 `this.kernel` 上,多租户 host 上并发请求可跨 `await` 互相串改。**先于本单存在**,本单只是多了一个同样写法的写入方(解析块是原地抽出的);修法要穿过 `domainDeps` 的每个消费者,不该混进接线单。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01EYGdmvWP1ieZSLqvAW6uyd"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 4936,
+  "kind": "issue",
+  "title": "声明式 `apis:`(ApiEndpoint)入站面全链路零执行:元数据装载成功、路由从未挂载、`matchEndpoint` 全仓无实现",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "protocol:breaking"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T16:50:12Z",
+  "updated_at": "2026-08-04T06:40:13Z",
+  "closed_at": "2026-08-04T02:51:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4936",
+  "body": "在 #4910(入站 rateLimit 接执行)的开工核查中发现,记录备查,**未认领**。\n\n基线:`origin/main` @ `2e284b2546`。**证据是真实 boot,不是 grep 推断**(`pnpm dev -- --fresh -p 39147`,showcase,47 plugins)。\n\n## 事实\n\nshowcase 声明了两个 `ApiEndpoint`(`examples/app-showcase/src/system/apis/index.ts`),经 `defineStack({ apis })` → `ARTIFACT_FIELD_TO_TYPE.apis = 'api'` 装进元数据。**元数据端一切正常**:\n\n```\n$ curl -b cookies 'http://localhost:39147/api/v1/meta/api'\n{\"type\":\"api\",\"items\":[\n  {\"name\":\"showcase_task_feed\",\"path\":\"/api/v1/showcase/tasks\",\"method\":\"GET\",\n   \"type\":\"object_operation\",\"objectParams\":{\"object\":\"showcase_task\",\"operation\":\"find\"},\n   \"authRequired\":true,\"cacheTtl\":30, ...},\n  {\"name\":\"showcase_inquiry_purge_api\",\"path\":\"/api/v1/showcase/inquiries/purge\",\"method\":\"POST\",\n   \"type\":\"flow\",\"target\":\"showcase_inquiry_purge\",\"authRequired\":true, ...}]}\nHTTP 200\n```\n\n**执行端零命中** —— 同一个 boot、同一个会话 cookie:\n\n```\nGET  /api/v1/showcase/tasks            → HTTP 404 {\"error\":\"Not found\"}\nPOST /api/v1/showcase/inquiries/purge  → HTTP 404 {\"error\":\"Not found\"}\nGET  /api/v1/data/showcase_task?top=1  → HTTP 200   ← 阳性对照,同 cookie 同 prefix\n```\n\n## 两处断链(任一都足以致死,现在两处同时存在)\n\n**① 路径从未挂载。** `dispatcher-plugin.ts` 逐条显式注册路由(`/data`、`/meta`、`/ai/*` 通配等),**元数据声明的任意路径没有任何 catch-all**。`/api/v1/showcase/tasks` 根本进不了 `dispatcher.dispatch()`,直接落到 Hono 的 `notFound` —— 上面那个裸 `{\"error\":\"Not found\"}` 就是它,不是 dispatcher 的语义 404(`routeNotFound`)。\n\n**② 即便进得去,匹配器不存在。** `http-dispatcher.ts:1646` 的 `handleApiEndpoint` 这样开头:\n\n```ts\nconst metaSvc = await this.resolveService('metadata', context.environmentId);\nif (!metaSvc || typeof (metaSvc as any).matchEndpoint !== 'function') {\n    return { handled: false };\n}\n```\n\n全仓 `matchEndpoint` 只有 3 处命中,**全在 `http-dispatcher.ts` 自己身上**(1650 判断、1653 调用、1713 注释)。`MetadataManager` / `NodeMetadataManager` 都没有这个方法,任何 plugin 也没有补。所以这个分支恒等于 `{ handled: false }` —— 是 grep 找得到、运行时永不执行的死代码,正是 ADR-0076「一条路由一个属主」小节点名的那类输入。\n\n## 波及面:不止 rateLimit 一个键\n\n`ApiEndpointSchema`(`packages/spec/src/api/endpoint.zod.ts`)的**每一个键**都因此是 declared ≠ enforced,不只是 #4686 盯的 `rateLimit`:\n\n| 键 | 声明语义 | 实际 |\n|:--|:--|:--|\n| `path` / `method` | 路由地址 | 从未挂载 |\n| `type` / `target` / `objectParams` | 执行目标 | 从未执行 |\n| `authRequired` | 要求认证 | **零执行**(注意:这条是安全语义) |\n| `cacheTtl` | 响应缓存 | 零执行 |\n| `inputMapping` / `outputMapping` | 出入参映射 | 零执行 |\n| `rateLimit` | 限流 | 零执行(#4686 / #4910) |\n| `summary` / `description` | 文档 | 未进 `/openapi.json` |\n\n`examples/app-showcase/src/coverage.ts:181` 目前写着这套「executed by the runtime dispatcher (handleApiEndpoint)」并把它记作已覆盖能力 —— 这是 Prime Directive #10 明令禁止的「advertise a capability the runtime doesn't deliver」,同 PR 要一并修正。\n\n## 建议(协议级,留给维护者裁决,不要顺手做)\n\n1. **接上执行**:补 catch-all 挂载 + 在元数据服务上实现 `matchEndpoint`,并把 `authRequired` / `cacheTtl` / `inputMapping` / `outputMapping` 逐键接到执行器 —— 工作量远大于 #4910 的设想,且 `authRequired` 的默认值(`true`)一旦真生效就是 breaking 面。\n2. **按 ADR-0049 整面摘除**:`apis:` 从 `stack.zod.ts` 退役,走完整退休套件,showcase 的两个端点改为已经能跑的 code-mounted 形式(`src/system/server/` 里已有一个)。\n3. **先摘执行残骸**:保留声明面待日后实现,但删掉 `handleApiEndpoint` 这段永不执行的死代码 + `LEGACY_CHAIN_PREFIXES` 里的 `/__api-endpoint` 条目 + coverage.ts 的失实声明,让「未实现」变成响亮的缺席而不是看起来已实现。\n\n⚠️ 这条**阻塞 #4910**:#4910 要求「授权 rateLimit 配置经真实 dispatcher 路径产生 429」,而端点本身根本不经过 dispatcher。详见 #4910 的核查评论。\n\n关联:#4686、#4910、ADR-0049、ADR-0076、Prime Directive #10。\n"
+}

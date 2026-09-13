@@ -1,0 +1,36 @@
+{
+  "number": 5172,
+  "kind": "issue",
+  "title": "plugin-email: sys_email 无附件/自定义 header 列,带附件的邮件拿不到队列投递的持久化保证(#5160 落地后)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "enhancement",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T07:29:35Z",
+  "updated_at": "2026-08-04T13:52:15Z",
+  "closed_at": "2026-08-04T13:52:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5172",
+  "body": "Blocked-by: objectstack-ai/objectstack#5177(headers 半边先行;本单收窄为**只剩附件**)\n\n> **维护者已拍板(2026-08-04,PM 会话内)**:按「先 3 后 1」拆分执行 ——\n> 1. **headers_json 先行(终态方案,不是过渡)** = #5177;\n> 2. **附件走 storage 引用,保留期解耦**:内容经 storage capability 存储、行里存引用 + **永久元数据**(filename / size / hash / contentType,审计用);**附件内容的生命周期 = 行到达终态后可回收**(留宽限窗)—— 内容是投递工件,元数据才是审计工件,这一刀把 append-only 审计日志与二进制无限增长解耦。\n> 3. 明确否决:内容 base64 内联进 `sys_email`(append-only 表无界增长、MySQL 行大小/包大小风险、N 收件人 N 份拷贝)、内联但设大小上限的折中(一个功能两条路径 + 一个阈值,作者最容易在边界上出错)。\n> 4. 响亮性约束:队列模式 + 附件 + storage capability 缺失时不得静默 —— 维持退回内联并说明原因的现行为。\n>\n> 本单实现时需要回答的剩余细节(实现方判断,PR 里说明):storage key 的命名/前缀方案、宽限窗长度与回收的触发机制(终态时同步删 vs 清扫式)、上传失败时的语义(退回内联,响亮)。\n\n原文如下(现状与选项分析,选项部分已由上述拍板取代):\n\n---\n\n由 #5160(邮件队列投递)落地时暴露,PR 里已按\"不丢数据\"的方向处理,但**限制本身**需要单独跟踪。\n\n## 事实\n\n`sys_email`(`packages/platform-objects/src/audit/sys-email.object.ts`)有 `to_addresses` / `from_address` / `cc_addresses` / `bcc_addresses` / `reply_to` / `subject` / `body_text` / `body_html`,**没有附件列,也没有 header 列**。`rowToNormalized()` 因此只能重建这些字段。\n\n队列投递的载荷是 `{ rowId }` —— worker 靠行重建消息。于是 `send({ attachments })` 若真的入队,投递出去的邮件**没有附件**:静默丢数据。\n\n## #5160 的处置(不是本单要改的)\n\n带 `attachments` 或 `headers` 的消息在队列模式下**退回内联投递**,并在 info 级说明原因;有用例钉住。选这条是因为另一个选项是\"入队并投出剥掉附件的邮件\",那属于 AGENTS.md 反复点名的 declared ≠ delivered。\n\n代价说清楚:**这类邮件拿不到本次新增的持久化保证** —— 进程死在投递中途,它们和 #5160 之前一样丢。对\"发合同 PDF\"\"发导出报表\"这种恰恰最不该丢的邮件,这个洞的形状不太好看。\n\n## 相关\n\n- #5160 —— 队列投递(退回内联的处置与用例在此)\n- #5161 —— sys_email queued 行滞留清扫(同文件族,串行在 #5160 之后)\n- #5177 —— headers_json 先行单(本单的 Blocked-by)"
+}

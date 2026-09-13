@@ -1,0 +1,37 @@
+{
+  "number": 4811,
+  "kind": "issue",
+  "title": "null-guard 闸门(#4763)只覆盖了校验规则与 hook 条件 —— action / flow 条件两面待定,formula 面待判",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T08:11:33Z",
+  "updated_at": "2026-08-03T17:20:00Z",
+  "closed_at": "2026-08-03T17:20:00Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4811",
+  "body": "Filed unassigned as a follow-up to #4763 (PR #4810). Per that issue's own warning: **a gate that silently covers only some surfaces is the failure mode this whole family of issues is about** — so the uncovered surfaces are recorded here rather than left implied.\n\n## 已覆盖(#4810)\n\n`packages/lint/src/validate-null-guards.ts` 拒绝这样的谓词:对**声明为可空**的字段应用排序(`< <= > >=`)或算术(`+ - * / %`)运算符,而该操作数没有被同一布尔分支内的 `!= null` / `== null` / `!isBlank()` 守卫。`has(x)` 刻意不计入。\n\n接线在 `validateStackExpressions`(gating 规则,`os build` / `os validate` / `os lint` + 运行时发布闸门)。覆盖两面:\n\n- 对象**校验规则**,含 `conditional` 规则 `then` / `otherwise` 里嵌套的谓词;\n- 生命周期 **hook `condition`**。\n\n理由是这两面确实由 CEL 在**全量记录**(#4649)上求值,并且 fail-closed(#4761),因此 `null < null` 一定会 fault 并拒写。\n\n## 未覆盖,及各自需要先回答的问题\n\n### 1. Action 的 `visible` / `disabled` 谓词\n\n`validate-expressions.ts` 已经以 `record` 作用域走它们。**未接**是因为不确定运行时语义:ActionEngine 求值时记录是否也是\"对声明字段全量\"的?若不是,那么一个 PATCH 里没出现的键读到的是\"缺键\"而非 null,fault 的类别和信息都不同;若是,那么这一面与校验规则同类,应当一并拒绝。\n\n需要的判定:确认 ActionEngine 求值前是否走 `materializeDeclaredFields`(或等价路径),以及 fault 时的策略(目前理解是\"静默隐藏该 action\",即与 #4649 之前同一类\"看起来生效、实则什么都没做\"的陷阱)。\n\n### 2. Flow / flow-trigger 条件(扁平作用域)\n\n`config.condition` 与 edge `condition` 走的是 `scope: 'flattened'` —— 裸标识符**可能是 flow 变量而不是字段**,所以现在的判定过程无法安全地判断某个操作数是否为可空声明字段(会误报)。`examples/app-showcase/src/automation/flows/index.ts` 里 `budget > 100000`、`budget <= 500000` 这类条件正是这个形状:`showcase_project.budget` 可空,但 `budget` 在这里到底绑的是字段还是 flow 变量,需要先有一个能分辨的判据。\n\n需要的判定:扁平作用域下\"字段 vs flow 变量\"的解析规则(`introspectScope` 已经知道字段集,但变量集在运行期才确定),以及 flow 条件 fault 时引擎的策略。\n\n### 3. `Field.formula` 表达式\n\n刻意不接。formula 是 `value` 角色、天然可空,而且 `guard ? value : null` 是被祝福的写法(#3306 为它做了 `dyn(...)` 重写)。`record.budget - record.spent` 这类算术在 formula 里是否也应当强制守卫,是一个**产品判断**而不是接线遗漏 —— 现有示例(如 `showcase_project.budget_remaining`)写的是 `(record.budget == null ? 0 : record.budget) - ...`,说明约定已经是守卫,但把它变成硬闸门会影响面更大。\n\n### 4. 共享规则 `condition` —— **不需要覆盖,记录理由以免日后被当成遗漏**\n\ncriteria 共享规则的条件经 `compileCelToFilter` **下推成 SQL 过滤**,`NULL > 100000` 在三值逻辑下只是不匹配,不会 fault。`examples/app-showcase/src/security/sharing-rules.ts:45` 的 `record.health == 'red' && record.budget > 100000` 因此是正确的,不该被拒。若将来共享规则出现走 CEL 直接求值的回退路径(`matchesFilterCondition` 之外),这条结论需要重新评估。\n\n## 建议顺序\n\n先 1(与已覆盖两面同类、判定成本最低),再 2(需要先解决扁平作用域的解析歧义),3 单独作为产品判断提出。\n"
+}

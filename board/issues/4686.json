@@ -1,0 +1,34 @@
+{
+  "number": 4686,
+  "kind": "issue",
+  "title": "ADR-0049:spec 两份 RateLimitConfig 全仓零 reader,真正在限流的是 runtime 自己的第三份形状",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "protocol:breaking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T17:10:56Z",
+  "updated_at": "2026-08-03T20:31:24Z",
+  "closed_at": "2026-08-03T20:31:24Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4686",
+  "body": "在 #4684(双源清账 C9)的调研中发现,记录备查,**未认领**。\n\n## 事实\n\n`packages/spec` 声明了两份 `RateLimitConfig`,**两份都没有任何运行时读者**:\n\n```\n$ grep -rn \"RateLimitConfig\" --include=*.ts packages/ core/ examples/ apps/ \\\n    | grep -v node_modules | grep -v /dist/ | grep -v \"packages/spec/\"\n(无输出)\n```\n\n对具体键做同样的扫描(`windowMs` / `windowSeconds` / `maxRequests` / `burstCapacity` / `respectUpstreamLimits`),`packages/spec/src/**` 自己的测试之外同样零命中。\n\n四个嵌入点因此全部是「声明了但没人执行」:\n\n| 嵌入点 | 声明来源 |\n|:--|:--|\n| `ApiEndpointSchema.rateLimit`(`api/endpoint.zod.ts:47`) | `shared/http.zod.ts` |\n| `ApiEndpointRegistrationSchema.rateLimit`(`api/registry.zod.ts:379`) | `shared/http.zod.ts` |\n| `HttpServerConfigSchema.security.rateLimit`(`system/http-server.zod.ts:71`) | `shared/http.zod.ts` |\n| `ConnectorSchema.rateLimitConfig`(`integration/connector.zod.ts:674`) | `integration/connector.zod.ts` |\n\n前三个从 `stack.zod.ts` 的 `apis:` 可达,第四个从 `connectors:` 可达 —— 都是真实的作者面,作者写下去解析通过,然后什么也不发生。\n\n## 更值得注意的:真正干活的是第三份形状\n\n`packages/runtime/src/security/rate-limit.ts` 有一个手写的 in-memory token bucket,它**不 import spec**,自带一套接口:\n\n```ts\nexport interface RateLimitBucketConfig {\n  capacity: number;       // 对应不上 maxRequests\n  refillPerSec: number;   // 对应不上 windowMs / windowSeconds\n  defaultCost?: number;   // 两侧 spec 都没有\n}\n```\n\n所以现状是 **三份 rate-limit 形状、零条从作者面到执行面的通路**:两份在 spec 里给作者写,一份在 runtime 里真正限流,互不相识。这正是 Prime Directive #10 的「declared ≠ enforced」与 ADR-0049 的 enforce-or-remove 场景。\n\n## 建议(留给维护者裁决,不要顺手做)\n\n三选一,都是协议级决定:\n\n1. **接上执行** —— 让 dispatcher 从 `ApiEndpoint.rateLimit` / `HttpServerConfig.security.rateLimit` 推导出 `RateLimitBucketConfig`(`capacity = maxRequests`,`refillPerSec = maxRequests / (windowMs / 1000)`),connector 侧同理接到出站调用上。\n2. **按 ADR-0049 摘掉** —— 走完整退休套件(tombstone + D2/D3 + changeset)。\n3. **先只修 connector 侧**,API 侧接执行 —— 出站/入站两个方向的执行者本来就不是同一个。\n\n⚠️ 与 #4684 / #4535 的关系:C9 簇正在裁决这两份声明的**命名/收敛**路线。本单是**执行面**的问题,与命名路线正交,但两者的答案会互相影响 —— 如果结论是 2(摘掉一侧),C9 的双源就自动消失了。建议一起排期看。\n\n关联:#4684、#4535、ADR-0049、Prime Directive #10"
+}

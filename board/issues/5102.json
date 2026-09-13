@@ -1,0 +1,35 @@
+{
+  "number": 5102,
+  "kind": "pull_request",
+  "title": "fix(plugin-sharing): 谓词式(multi)写入重算共享规则 —— 批量更新后 sys_record_share 不再陈旧 (#4779)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T04:36:25Z",
+  "updated_at": "2026-08-04T04:53:15Z",
+  "closed_at": "2026-08-04T04:53:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T04:53:14Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5102",
+  "body": "Fixes objectstack-ai/objectstack#4779\n\n按维护者 2026-08-04 的裁定实现**方案 C**:超上界时同步撤销、异步重发;不退 A,不实现 B。\n\n## 第一步:异步重入执行路径的核实证据\n\n裁定要求「dev 第一步核实异步执行路径(job/queue/boot backfill 类)是否存在且可靠 —— 存在则实现 C,不存在则实现 A 并在 PR body 写明核实证据」。核实结果:**存在,因此实现 C**。证据三条:\n\n1. **`IJobService` 存在但不可靠** —— 契约在 `packages/spec/src/contracts/job-service.ts`(`schedule` / `trigger`),实现是 `packages/services/service-job` 的 `JobServicePlugin`。但它是**可选能力**:`packages/cli/src/commands/serve.ts` 的 `CAPABILITY_PROVIDERS` 把 `job` 和 `sharing` 列为**两个互不依赖的 token**,`plugin-sharing/package.json` 也不依赖 `@objectstack/service-job`。把重发路由过去,等于让「共享规则最终一致」这条保证在装了 job 的编排里成立、在没装的编排里静默不成立 —— 正是 PD #10 要禁的「声明 ≠ 强制」。所以**没有采用**它。\n2. **plugin-sharing 自己就有 boot backfill,而且是裁定点名的那一类** —— `sharing-plugin.ts` 的 `kernel:bootstrapped` 钩子跑 `backfillRuleGrants`,对**每一条**规则(#4433 起含 inactive)跑 `evaluateRule`;`evaluateRule` 是 diff 式的、幂等的。这就是补偿执行者:异步重发若因崩溃丢失,下次启动原样修复。\n3. **另有两条既有的自愈入口** —— 任何 `sys_sharing_rule` 写入都会触发 `bindRuleRebindTriggers` 里的 reconcile;`sweepOrphanedRuleGrants` 在每次 boot 扫孤儿。\n\n所以异步那一半用**进程内串行队列**(`RuleRegrantQueue`),不引入新依赖、不随编排变化,持久性由上面第 2 条兜底。失败方向是安全的:重发挂了是有人**暂时少看见**东西(会被报障),不是有人多看见(不会被报障)。\n\n## 缺陷\n\n`rule-hooks.ts` 的处理函数第一步就用单条 id 定位要重算的行:\n\n```ts\nconst id = String(data?.id ?? ctx?.input?.id ?? '');\nif (!id) return;\n```\n\n而 `ObjectQL.update()` 只在 `where.id` 是标量时填 `input.id`。谓词式(`multi: true`)更新走 `updateMany`,`input.id` 为 undefined,`input.data` 里也没有 id —— 于是**批量写入一次都不重算**。后果是授权侧的 fail open:基于 criteria 的规则发过 `sys_record_share`,管理员批量把这些记录改成不再匹配,重算没发生,共享行原样留着继续授权。反向(批量改成匹配却不发共享)同样断着。\n\n## 改法\n\n入口从「单条 id」换成「本次写入的**行集合**」。`beforeUpdate` / `beforeDelete` 用谓词解析出受影响的 id 并暂存到共享 hook ctx —— 必须在 before,因为写入本身就是让那些行变得查不到的那件事(`primary-bu-projection.ts` 的 `STASH_KEY` 同款,engine 的 before/after 复用同一个 `HookContext` 实例)。`after` 钩子再据此动作:\n\n| 行集合 | 做法 |\n|:---|:---|\n| **有界**(≤ `RULE_RECOMPUTE_ROW_CAP` = 1000) | 逐行 `evaluateAllForRecord`,**同步**。diff 式,所以两个方向都覆盖:移出 criteria 的撤销,移入的发放。 |\n| **无界**(超上界 / `multi` 且完全没有 `where` / 解析本身失败) | **同步**集合式撤销该对象所有 `source:'rule'` 的共享(一条语句,没有上界问题),再**异步**用 `evaluateAllRulesForObject` 把该有的补回来。 |\n\n**写入永不被拒绝。** 拒绝会把一个内部重算上界泄漏成「管理员一次能改多少行」的业务语义,而报错来自他从未配置过的子系统。它交易的不对称是:多给权限是安全事故,少给权限是可用性抖动 —— 所以安全那一半永远同步且完整,只有昂贵的恢复那一半异步。\n\n上界 1000 沿用同族守卫的既有先例(service-storage attachment hooks 的 `MULTI_DELETE_AUTH_LIMIT`,#4757;#4630 的 `sys_comment` resolve)。\n\n### 三个刻意的选择\n\n- **无界撤销按 `object_name` 整体撤,不按 `record_id: {$in: [...]}` 缩小。** 缩小需要完整 id 列表,而「拿不到完整 id 列表」正是走进这个分支的原因 —— 缩小会把上界重新塞回唯一一个本来没有上界的操作里。牵连未被写入的行是刻意的,方向安全:多几行暂时少看见,没有一行保住本该失去的权限。\n- **同步撤销放在 `afterUpdate` 而不是 `beforeUpdate`。** 放在 before 的话,一次因校验失败而整批回滚的写入会白白撤掉几千行的共享,而没有任何东西触发重发(after 钩子不会跑)。放在 after,撤销仍在 `update()` 返回给调用方之前完成 —— 对调用方而言就是同步的。\n- **「解析失败」当作无界处理,不当作「零行」。** 这是 #4757 自己的教训:「什么都没查到」和「查询压根没跑成」不是同一个判决,把后者读成前者就是 fail open。\n\n### 一并修掉的孤儿行(issue 末尾记的)\n\n`afterDelete` 补上了,撤销被删记录的规则共享。别的路径够不到它们:`evaluateRule` 遍历的是**还存在**的记录,所以记录一没,它发出的共享行就脱离了每一条 reconcile 路径,并且能活过重启。今天危害有限的前提是 id 不可复用 —— 那是个没有任何门禁保护的假设,所以边际成本很小的时候就该关掉。\n\n`SharingRuleService` 新增 `revokeRuleGrantsForObject` / `revokeRuleGrantsForRecords` / `evaluateAllRulesForObject`。集合式删除都带 `multi: true` —— 这不是装饰:`resolveEngineDeleteDispatch` 会拒绝没有声明批量意图的谓词删除,正是 #4434 里让每个 `DELETE /sharing/rules/:id` 都 500 的那个形状。三个方法都只碰 `source: 'rule'`,手工共享一行不动。\n\n## 测试\n\n新增 `bulk-recompute.test.ts`,24 例。fake engine 复现了这个修复真正依赖的两处管道语义:before/after 共用**同一个** `HookContext`,以及谓词更新不填 `input.id`;它的 `delete` 调用 `assertEngineDeleteDispatch`,所以集合式撤销是按真实 engine 的判决验的(`check:engine-double-contract` 已自动把这个文件收进 pinned 名单)。\n\n**revert-proof 已实测**:把 `afterUpdate` 换回旧的 `if (!id) return`,24 例中 **7 例转红**,包括正面复现那条(共享行从 0 变回 2)。改回后全绿。\n\n```\n Test Files  12 passed (12)          # pnpm --filter @objectstack/plugin-sharing test\n      Tests  267 passed (267)\n> tsc --noEmit                       # pnpm --filter @objectstack/plugin-sharing typecheck (clean)\n Test Files  83 passed | 1 skipped (84)   # @objectstack/dogfood 全量(真实 booted stack)\n      Tests  483 passed | 3 skipped (486)\n```\n\n仓内门禁:`check-engine-double-contract` OK(12 pinned,含本文件)、`check-durability-degradation-log-level` OK、`check-startup-registry-verdict` OK、改动文件 eslint 干净。\n\n`rule-rebind.test.ts` 里三处硬编码的「每对象 2 个钩子」改成具名常量 `RULE_HOOKS_PER_OBJECT = 5` —— 那几例断言的是 rebind 记账(绑上 → 解绑 → 重绑),不是需要哪些事件,不该看起来像后者变了。\n\n## 范围\n\n`packages/spec/**` 零改动,`content/docs/releases/` 零改动,`packages/objectql` 与 `packages/services/**` 零改动(只读地核实了 engine 的 hook 语义与 job 服务的可选性)。改动全部在 `packages/plugins/plugin-sharing/**` 加一个 changeset。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015W6nhsDrz6zWQc8je12a1t)_"
+}

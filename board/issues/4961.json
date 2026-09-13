@@ -1,0 +1,35 @@
+{
+  "number": 4961,
+  "kind": "pull_request",
+  "title": "ci(deps): pin brace-expansion to 5.0.9 for GHSA-rgw5-rvv9-x895 (#4945)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T17:16:30Z",
+  "updated_at": "2026-08-03T18:20:39Z",
+  "closed_at": "2026-08-03T18:20:38Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T18:20:38Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4961",
+  "body": "Fixes #4945\n\n## 问题\n\n`Validate Package Dependencies` 的 OSV-Scanner step 直接扫 `pnpm-lock.yaml`,命中任一 advisory 就 exit 1。**`main` 上它本身就是红的**,于是每个触发该 workflow(改动任意 `package.json` / `pnpm-lock.yaml` / 相关 script)的 PR 都白白背一条红 —— 在 #4944 上实测复现,而那个 PR 根本没碰 lockfile。\n\nAdvisory:[GHSA-rgw5-rvv9-x895](https://osv.dev/GHSA-rgw5-rvv9-x895)(CVSS 7.5,high),影响 `brace-expansion` 5.0.8,修复版本 5.0.9。\n\n讽刺之处在于 5.0.8 正是**上一条** advisory(`GHSA-mh99-v99m-4gvg`)的 pin 停靠的位置:`pnpm-workspace.yaml` 里原有那条 override 的区间上界恰好就是 5.0.8(开区间),把新受影响的版本排除在 override 之外,所以 5.0.8 岿然不动地留在 lockfile 里。\n\n## 传递路径\n\n纯传递依赖,没有任何 workspace 包直接声明它,全部经 `minimatch` 进来。`pnpm why brace-expansion --recursive`(修复前)节选:\n\n```\nbrace-expansion@5.0.8\n├─┬ minimatch@10.2.3\n│ ├─┬ @ts-morph/common@0.29.0\n│ │ └─┬ ts-morph@28.0.0\n│ │   └── @objectstack/cli@17.0.0-rc.2 (dependencies)\n│ ├─┬ @typescript-eslint/typescript-estree@8.65.0\n│ │ └─┬ @typescript-eslint/parser@8.65.0\n│ │   └── @objectstack/spec-monorepo@4.0.1 (devDependencies)\n│ ├─┬ @vscode/vsce@3.9.2\n│ │ └── objectstack-vscode@17.0.0-rc.2 (devDependencies)\n│ ├─┬ glob@13.0.6\n│ │ ├── @objectstack/metadata@17.0.0-rc.2 (dependencies)\n│ │ └── @vscode/vsce@3.9.2 [deduped]\n│ ├─┬ glob@7.2.3\n│ │ └─┬ archiver-utils@2.1.0 → archiver@5.3.2 → exceljs@4.4.0\n│ │     └── @objectstack/rest@17.0.0-rc.2 (dependencies)\n│ └─┬ readdir-glob@1.1.3 → archiver@5.3.2 [deduped]\n└─┬ minimatch@10.2.5\n  └─┬ eslint@10.8.0\n    └── @objectstack/spec-monorepo@4.0.1 (devDependencies)\n\nbrace-expansion@5.0.9\n└─┬ minimatch@10.2.6   (@eslint/config-array, @oclif/core — 已经在修好的版本上)\n```\n\n## 改法\n\n改动就是 `pnpm-workspace.yaml` 里**既有那一条** brace-expansion override 的一行:区间上界与 value 一起从 5.0.8 抬到 5.0.9(下界 5.0.0 与写法风格都不变)。精确文本见 Files changed —— 这里不重贴,因为 GitHub 的 body sanitizer 会把引号和尖括号转义成 HTML 实体,放进代码块反而显示成乱码。\n\npnpm v10 只从 `pnpm-workspace.yaml` 读 `overrides`,`package.json` 的 `pnpm.overrides` 会被静默忽略(该文件顶部注释已写明),所以 **没有新增 override 条目,也没有动根 `package.json`** —— 只是把既有条目的边界移动到新 advisory 之后。\n\n`pnpm install` 重新解析后,lockfile 的改动面就是这一个包:5.0.8 在 `packages` / `snapshots` 两处的条目整体消失,`minimatch@10.2.3` 与 `minimatch@10.2.5` 改指 5.0.9。其余依赖一行未动。\n\n由于是传递依赖,没有 published manifest 需要同步,`check-override-consistency.mjs` 无新增负担(仍然只有 1 条 published-manifest 声明需要核对,绿)。\n\n## 验证(双向)\n\n本地用 workflow 钉住的**同一个** scanner 版本(`google/osv-scanner-action` v2.3.8 → `osv-scanner_linux_amd64` v2.3.8)跑同一条命令。因本容器 egress 策略拦截 `api.osv.dev`(403),改用 `--offline --download-offline-databases` 走离线库,数据源等价、结论一致。\n\n**修复前(红,exit 1)** —— 与 issue 里贴的 CI 输出逐字一致:\n\n```\nScanned /home/user/objectstack-4945/pnpm-lock.yaml file and found 1503 packages\nTotal 1 package affected by 1 known vulnerability (0 Critical, 1 High, 0 Medium, 0 Low, 0 Unknown) from 1 ecosystem.\n1 vulnerability can be fixed.\n\n+-------------------------------------+------+-----------+-----------------+---------+---------------+----------------+\n| OSV URL                             | CVSS | ECOSYSTEM | PACKAGE         | VERSION | FIXED VERSION | SOURCE         |\n+-------------------------------------+------+-----------+-----------------+---------+---------------+----------------+\n| https://osv.dev/GHSA-rgw5-rvv9-x895 | 7.5  | npm       | brace-expansion | 5.0.8   | 5.0.9         | pnpm-lock.yaml |\n+-------------------------------------+------+-----------+-----------------+---------+---------------+----------------+\nEXIT=1\n```\n\n**修复后(绿,exit 0)**:\n\n```\nScanned /home/user/objectstack-4945/pnpm-lock.yaml file and found 1502 packages\nLoaded npm local db from /root/.cache/osv-scanner/npm/all.zip\n\nNo issues found\nEXIT=0\n```\n\n该 job 的其余 step 也照原样跑过:\n\n```\n$ pnpm install --frozen-lockfile --prefer-offline      → Done in 4.5s  (lockfile 自洽)\n$ node scripts/check-changeset-fixed.mjs               → ✓ fixed group in sync with 69 public workspace packages\n$ node scripts/check-override-consistency.mjs          → ✓ 1 published-manifest declaration(s) … resolve to their override targets\n```\n\n功能抽查(`brace-expansion` 是 `minimatch`/`glob` 系的传递依赖,挑两个重度依赖 glob 匹配的 check):\n\n```\n$ pnpm check:doc-authoring     → ✓ 219 files clean — no bare metadata literals.\n$ pnpm check:published-files   → ✓ 69 publishable package(s) … declare a files whitelist …\n```\n\n## 附带记录\n\nissue 的建议 2(「advisory 无可用修复版本时 `validate-deps.yml` 该怎么表达」)本 PR **不处理** —— 这条 advisory 有修复版本,属于另一个议题(现有机制是 `osv-scanner.toml` 的 `[[IgnoredVulns]]`,workflow 注释里已指明)。留给维护者决定是否单开。\n\n已附 changeset(空 frontmatter,不发版)。\n"
+}

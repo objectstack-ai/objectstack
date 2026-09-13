@@ -1,0 +1,33 @@
+{
+  "number": 4946,
+  "kind": "issue",
+  "title": "Validate Dependencies 因 brace-expansion 5.0.8 新公告判红 —— pnpm-workspace override 停在上一次公告的边界",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T17:01:46Z",
+  "updated_at": "2026-08-04T00:00:13Z",
+  "closed_at": "2026-08-04T00:00:13Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4946",
+  "body": "**未认领。** 实现 #4930(PR #4941)时撞到:那条 PR 只动了三个 `scripts/check-*.mjs` 和根 `package.json` 的一行,但 `**/package.json` 命中了 `validate-deps.yml` 的 paths 过滤,于是 `Validate Package Dependencies` 被触发并**判红**——红在 `pnpm-lock.yaml`,一个该 PR 从未碰过的文件。按 Prime Directive #10 单独归档,不在那条 PR 里顺手改。\n\n## 现象\n\n`google/osv-scanner-action` 扫 `pnpm-lock.yaml`:\n\n```\nTotal 1 package affected by 1 known vulnerability (0 Critical, 1 High, 0 Medium, 0 Low, 0 Unknown) from 1 ecosystem.\n1 vulnerability can be fixed.\n\n+-------------------------------------+------+-----------+-----------------+---------+---------------+----------------+\n| OSV URL                             | CVSS | ECOSYSTEM | PACKAGE         | VERSION | FIXED VERSION | SOURCE         |\n+-------------------------------------+------+-----------+-----------------+---------+---------------+----------------+\n| https://osv.dev/GHSA-rgw5-rvv9-x895 | 7.5  | npm       | brace-expansion | 5.0.8   | 5.0.9         | pnpm-lock.yaml |\n+-------------------------------------+------+-----------+-----------------+---------+---------------+----------------+\nExit code: 1\n```\n\nJob:https://github.com/objectstack-ai/objectstack/actions/runs/30834687809/job/91756879046\n\n## 原因\n\n`pnpm-lock.yaml:29` 已经有一条为**上一次**同包公告加的 override:\n\n```\nbrace-expansion@>=5.0.0 <5.0.8: ^5.0.8\n```\n\n新公告把 5.0.8 本身划进受影响区间(fixed 在 5.0.9),而这条 override 的上界正好停在 5.0.8,于是它不再覆盖。锁文件里 `brace-expansion@5.0.8` 与 `5.0.9` **同时存在**(5222/5226、12070/12074 行),说明仍有依赖解析到 5.0.8。修法应是把 `pnpm-workspace.yaml` 里对应的 override 区间推到 `<5.0.9: ^5.0.9` 并重装锁文件,而不是给扫描器加豁免。\n\n## 为什么之前没红\n\n`validate-deps.yml` 的 PR 触发是 paths 过滤的(`**/package.json`、`pnpm-lock.yaml`、`pnpm-workspace.yaml`、两个 check 脚本、工作流自身),schedule 是**每周一 03:00 UTC**。所以:\n\n- 最近一次 main 上的定时运行(2026-08-03 04:11Z)是绿的——公告应是在那之后进入 OSV 库的;\n- 同期合入的 #4934 完全没跑这个 job(它没碰任何被过滤的路径);\n- 只有恰好动了 `package.json` 的 PR 才会撞上。\n\n也就是说这条红**与改动内容无关**,是数据库时间线 + paths 过滤共同造成的:它会在下一次周一定时运行时(或任何一条动 `package.json` 的 PR 上)照样出现。副作用是,在修掉之前,**每一条改 `package.json` 的 PR 都会带着一条与自己无关的红**,这正是让人学会略过红勾的那种噪声。\n\n## 复现\n\n改任意 `package.json` 一行开 PR,或 `workflow_dispatch` 手动跑 `validate-deps.yml`。\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 4972,
+  "kind": "pull_request",
+  "title": "fix(objectql,lint): 服务端补上 parent 作用域 readonlyWhen 的绑定与执行 (#4889)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T17:33:54Z",
+  "updated_at": "2026-08-03T18:18:23Z",
+  "closed_at": "2026-08-03T18:18:22Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T18:18:22Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4972",
+  "body": "Fixes objectstack-ai/objectstack#4889\n\n## 结论先说:issue 的判断成立,而且原因就在它指出的地方\n\n`packages/objectql/src/validation/rule-validator.ts` 的 `isReadonlyWhenLocked()`\n只绑定了 `record` 与 `previous`,`parent` 从头到尾没有出现过。于是 showcase 里\n`showcase_invoice_line.{product,quantity,unit_price}` 上那三条\n``readonlyWhen: P`parent.status == 'paid'` `` —— 注释白纸黑字写着「发票一旦 Paid,\n行项目就冻结」 —— 每次求值都落到 `!res.ok` 分支,而该分支是 **fail-open**,\n写入照常落库。issue 里那条 PATCH 把已结清发票行的数量改成 9999、单价改成 0.01\n并且返回 200,是真实可复现的。\n\n同一对象族里 `record` 作用域的 `showcase_invoice.tax_rate` 一直是对的,这正是\n这个洞难被发现的原因:同一个「paid」条件,两种相反结果。\n\n按 ADR-0057 D10,服务端才是执行点、客户端只是礼貌层;这里被彻底反过来了 ——\n唯一在执行的是礼貌层。\n\n> 关于 #4861(今天刚重写过这个文件)的核对:`isReadonlyWhenLocked` 的\n> fail-open 分支在 `origin/main` 上原样健在,#4649 明确把自己限定在对象级校验\n> 谓词、并在模块头注释里写明「字段级 `readonlyWhen` 保持 fail-open」。前提没有\n> 过期。(本分支已 merge 当前 `main`,含 #4811 对 `validate-expressions.ts`\n> 的重构,冲突已按新形状解掉。)\n\n## 改动一:把 `parent` 绑上(主体)\n\n引擎在 strip 之前解析 master-detail 表头并作为 `parent` 传入,单条更新与\n`multi: true` 批量更新两条路径都覆盖(PD #10 的教训:`case` 标签不是执行,要看\n调用点)。\n\n- **表头 id 取值顺序是「先 payload、后 prior row」**。改挂到另一张表头的写入,\n  必须按它**落到**的那张表头判定,而不是它离开的那张。\n- **以 system 身份读取**。这个锁是表头状态的数据完整性属性,不是调用方对表头\n  的可见性;调用方能不能动这条明细,上游 RLS / `controlled_by_parent`\n  (ADR-0055)早已裁定过了。\n- **有门控,不白付代价**。只有当 payload 真的碰到了 `parent` 作用域的谓词才去读,\n  而「是否引用了 `parent`」由解析后的 CEL AST 判定(`collectCelRootIdentifiers`),\n  不是字符串扫描 —— 叫 `parent_id` 的字段、`'parent'` 字面量都不会误判。\n- **批量路径一次读完**。N 行可能挂在 M 张表头上,按 `id $in` 批量取一次,\n  不是每行一次。\n\n`parent` 的定义刻意收窄:**恰好一个** `master_detail` 关系才成立。零个显然无从\n绑定;两个的话元数据并没有说哪个是「the parent」,按字段声明顺序挑一个会让一条\n数据完整性锁取决于字段排序 —— 那正是 PD #12 说的「declared, not guessed」。\n\n## 改动二:绑不上的作用域不再等于「没锁」(次要,但刻意做窄)\n\n原来所有求值失败共用一个出口:WARN + `false`(未锁)。但这一个答案要服务两种\n完全不同的情形:\n\n| 情形 | 判断 | 本 PR |\n|:--|:--|:--|\n| 谓词在这条记录上**坏了**(未声明的 key、`null` 比较无重载、解析错误、引擎抛错) | 作者写错了,而且引擎故障作者也无从修 | **保持 fail-open**,一字未动 |\n| 谓词**合法且受支持**,只是这个求值点绑不上它命名的根 | 记录本身没有任何一处说这个字段没锁 —— 我们只是没能问 | **判为已锁**(strip) |\n\n两者用 cel-js 自己的错误就能区分,不需要猜:`Unknown variable: ‹root›` 对应后者,\n`No such key` / 重载 / 解析错误对应前者(复用 #4775 建立的 `cel-fault.ts`)。\n\n方向上与两个相邻的写入闸门一致 —— #4649(校验谓词)、#4775(hook `condition`),\n本 PR 把这次收窄连同那两次一起记进 **ADR-0058 D5 的 Addendum**(PD #13:推翻一条\n已记录的决定本身就是一个决定),并在 `scripts/adr-anchors.json` 留下锚点,免得下一\n个读到这段代码的人以为它「与 D5 表格不一致」而把它改回去。\n\n**但运行时分支只是兜底,不是方案。** `objectstack compile` 现在会**拒绝**:\n对象没有 `master_detail` 关系、或有两个,却写了 `parent` 作用域的 `readonlyWhen`。\n错误信息点名对象并给出改法。常见的作者失误在最便宜的地方就被挡住,根本走不到\n需要运行时判断的那一步。\n\n### 一处需要维护者知情的行为面扩大\n\nfail-closed 判据是「任何绑不上的根」,不只 `parent`。也就是说,一条\n``readonlyWhen: P`user.positions...` `` 这样的谓词(strip 从来不绑 `user`)\n以前是被**静默忽略**的,现在会把字段判为已锁。\n\n- 全仓扫过:**没有任何**这种写法存在,`readonlyWhen` 只用了 `record.` 和 `parent.`\n  两种形态,所以本仓零影响。\n- 我认为这个方向本身是对的:从「声明了但静默无效」变成「声明了且大声生效」,正是\n  这个 issue 要治的病。\n- 构建期 gate **没有**一并泛化到「只允许 record/previous/parent」。原因是实测\n  `collectCelRootIdentifiers` 对 `user.positions.exists(p, p == 'x')` 会把宏的\n  绑定变量 `p` 也算作根,泛化的 gate 会误伤推导宏并**挂掉构建**。宁可留一条运行时\n  兜底,也不要一条会误报的构建期红线。这一点如果维护者希望补上,值得单独一轮\n  (需要先让 root 提取区分宏绑定变量)。\n\n## 测试\n\n- `packages/objectql/src/engine-readonly-when-parent.test.ts`(新增,真实 driver\n  跑通引擎):issue 的 INV-1003 形状、`droppedFields` 上报、同一冻结行上未加锁字段\n  仍可写、draft 表头不误锁、**改挂**按落点判定、表头读不到时 fail-closed、批量路径\n  逐行绑定、以及 `record` 作用域对照组。\n- `packages/qa/dogfood/test/showcase-readonly-when-parent.dogfood.test.ts`(新增):\n  直接在**真实 showcase** 上、走**真实 HTTP** 重放 issue 的那条 PATCH。\n- `rule-validator.test.ts` / `validate-expressions.test.ts`:单元与构建期 gate。\n- **反证过**:把两处改动临时还原成改前行为后,10 条新用例全部转红;还原修复后\n  全绿 —— 这些用例确实钉住的是这个 bug,不是恒真断言。\n\n```\nobjectql:  Test Files 112 passed (112)   Tests 1779 passed (1779)\nlint:      Test Files  53 passed  (54)   Tests  983 passed  (984)\n           ↑ 唯一红的是 runtime-lazy-deps.test.ts 的 5s 超时,与本 PR 无关:\n             把 packages/lint 换回 origin/main 内容后同样超时(容器负载下的既有 flake)。\ndogfood:   showcase-readonly-when-parent  5 passed\ndogfood:   expression-conformance         3 passed\ntypecheck: @objectstack/objectql + @objectstack/lint — Done\ngates:     check:doc-authoring / nul-bytes / adr-anchors / release-notes /\n           type-check-coverage / role-word — 全绿\neslint --no-inline-config(全部改动文件)— 干净\n```\n\n## 未做 / 边界\n\n- **没有动 `packages/spec`**,一行都没有。`readonlyWhen` 的 Zod 声明本来就够用,\n  这是运行时没兑现声明,不是声明写错了。`packages/metadata-protocol/src/protocol.ts`\n  同样未触碰。\n- **`requiredWhen` 的同类缺口未修**:它同样只绑 `record`/`previous`,\n  `parent` 作用域的 `requiredWhen` 在服务端也评估不了。本轮 issue 的范围是\n  `readonlyWhen`,而且给 `requiredWhen` 加绑定会改变它的成败面(它当前的失败\n  策略是 skip),属于会扩大影响面的改动 —— 按纪律留在范围外,已在报告中记录。\n- 没有加 `@proof:` 标签:proof 注册表在 `packages/spec/scripts/liveness/` 下,\n  而本轮 spec 是零改动区,不去动它的 ratchet。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01NrmBxj8rK2uGCnh9aipjwX"
+}

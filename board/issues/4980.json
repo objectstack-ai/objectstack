@@ -1,0 +1,36 @@
+{
+  "number": 4980,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): never invent event_seq/version from a failed history read (#4867)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T18:28:10Z",
+  "updated_at": "2026-08-03T19:07:47Z",
+  "closed_at": "2026-08-03T19:07:45Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T19:07:45Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4980",
+  "body": "Fixes objectstack-ai/objectstack#4867\n\n## 问题\n\n`packages/metadata-protocol/src/sys-metadata-repository.ts` 的两个计数器各有一个同形的 `catch`,把读 `sys_metadata_history` 的**全部**失败折成同一个答案:\n\n```ts\n} catch {\n  // Table not provisioned yet (fresh DB) — start at 1.\n  return 1;\n}\n```\n\n这是 #4825 刚在 `DatabaseLoader`(TSDoc 自称 legacy、非事务的那条路径,PR #4872)上修掉的形状,原样长在 **canonical 路径**上。而且这里是两个数字:\n\n- **`event_seq`** —— 历史排序与 rollback 定位的依据。表里已有 N 行时,一次瞬时读失败(连接抖动、超时、权限)让下一条拿到 `1`,与既有行撞号;\n- **`version`** —— `nextItemVersion()` 的 TSDoc 明说它刻意从 history 取 MAX「so delete + recreate continues incrementing instead of restarting at 1」。一次读失败正好把它**恢复成它明确要避免的那个行为**;而 `MetadataManager.rollback(type, name, version)` 与 `POST /api/v1/meta/:type/:name/rollback` 正是按这个数字定位快照 —— 撞号之后回滚可能落到另一条记录的同号版本上。\n\n危害与 #4825 相同,是「**落盘的字节是错的**」而不是「字节没落盘」:insert 成功、日志一行没有、系统对外完全正常,重试不修、重启也不修。\n\n**「在事务里」并不能挡住它。** 事务解决的是*并发*撞号;它对「从一次失败的读推导出来的数字」没有任何意见,一个成功提交的事务照样把错号提交得同样持久。事务真正给出的是干净的补救:抛出去,整笔写入回滚,而不是提交一个编造的号。\n\n## 改动\n\n按**错误类型**判别,复用 #4825 的判别器,不另起一套:\n\n- **良性的「表还没建」** —— 没有行就没有可撞的号,`1` 确实是下一个号,静默返回,fresh DB 照常启动;\n- **其余一切读失败** —— 以 `error` 上报**后果**(写入已被中止、事务回滚、什么都没提交;若按旧行为发 `1` 会与既有行撞号,使版本顺序不可信、回滚目标可能指向另一条记录的同号版本)与**修复动作**(修数据源/驱动错误后重试),然后原样抛出让事务回滚。一次故障只说一次,恢复时补一条 `info`。\n\n判别逻辑集中在新的私有 `historyCounterVerdict()`,两个方法共用一个判别、一个报告开关。\n\n### `@objectstack/metadata/errors`(新增叶子子路径导出)\n\n`isMissingTableError()` 此前是 `@objectstack/metadata` 的内部工具,消费者在另一个包。依赖图已核:`@objectstack/metadata` 的依赖闭包(core / metadata-core / metadata-fs / platform-objects / spec / types)不含 `metadata-protocol`,**无环**。\n\n选「从现有归属地显式导出」:在 `metadata-protocol` 里复制一份会重建 #4825 刚消灭的双源问题(同一个问题两套「哪些驱动错误算良性」的词汇表,谁先学会一个驱动怪癖谁就先漂移);下沉到公共依赖本轮不可行(`packages/spec` 冻结、`packages/types` 有并行改动),且本次导出不妨碍之后再下沉。\n\n导出的是**叶子子路径**而非包入口:根入口会拖进 manager、全部 loader 与其 YAML/文件系统依赖,只为一个 40 行谓词付这个重量,正是把下一个作者推回「复制一份」的原因。仅导出 `isMissingTableError`;同族的 `isSchemaAlreadyExistsError` 包外无消费者,保持内部。\n\n## 测试\n\n新增 `packages/metadata-protocol/src/sys-metadata-repository.history-counters.test.ts`(11 例)。测试用的 engine fake 实现了**真实事务语义**(txn body 抛出则什么都不提交)—— 这是承重的,不是装饰:命题正是「事务中止而不是提交一个错号」,而忽略回滚的 fake 分不出中止与提交。\n\n- 良性:表不存在 → 两个计数器都发 1、静默、fresh DB 照常写入;\n- 真实读失败:put/delete 抛出,**committed 的 history 完全不变**(旧行为会多出一条 version 1 / event_seq 1 的撞号行),`sys_metadata` 行也一并回滚;\n- `error` 一行同时点名后果(`COLLIDES` / `= 1` / ordering untrustworthy / rollback)、已发生的事(`ABORTED` / rolled back)与修复动作,并携带原始驱动错误;\n- 一次故障只报一次 + 恢复 `info`,且恢复后从既有 MAX 续号(version 3 / event_seq 4),不从 1 重启;\n- 判别器 pin:`vi.mock` 证明消费的就是导出的那一个函数(翻转它的判决会翻转仓库行为),外加源码级断言 —— 本文件不得出现第二套驱动错误词汇表。\n\n变异验证(把 `catch` 改回等价的「一律 return 1」):11 例中 **7 例转红**,其中 4 例良性方向仍绿 —— 两个方向都被钉住。\n\n```\npnpm turbo run test --filter=@objectstack/metadata --filter=@objectstack/metadata-protocol\n  @objectstack/metadata:test           Test Files 15 passed (15) | Tests 336 passed (336)\n  @objectstack/metadata-protocol:test  Test Files 34 passed (34) | Tests 299 passed (299)\n```\n\n两包无 `typecheck` 脚本(均在 #4311 DEBT 台账内),类型面由 tsup 的 DTS build 覆盖:`turbo run build` 两包均绿。另跑 `check:published-files`、`check:durability-log-level`、`check:type-check-coverage`、`check:startup-registry-verdict`、`check:release-notes`,以及改动文件的 eslint —— 全绿。\n\n## 范围\n\n- `packages/spec/**` 与生成物:**零改动**。\n- `packages/metadata-protocol/src/protocol.ts`:**零改动**。\n- `content/docs/releases/`:未触碰;user-visible 部分走 changeset。\n\n同文件其余 `catch` 已复查:`close()` 与 `broadcast()` 的两处是 watcher 回调隔离(功能性降级,正确);`publishDraft()` 的 draft-drain 一处是同一族「一个良性原因赦免了所有原因」的形状,但不属于本 issue 的编号家族,且「抛 vs 只报」需要单独判断(它发生在 `put` 提交之后),按 Prime Directive #10 记为 #4981,**未在本 PR 修改**。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01NrmBxj8rK2uGCnh9aipjwX\n"
+}

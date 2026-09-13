@@ -1,0 +1,37 @@
+{
+  "number": 5009,
+  "kind": "issue",
+  "title": "validateOrgAxisRedLines 仍留着三条 spec 合法 stack 到不了的别名分支(objects[].rowLevelSecurity / .rls / permissionSets)—— #4984 修了 sharing 那一半",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T20:22:24Z",
+  "updated_at": "2026-08-04T00:04:11Z",
+  "closed_at": "2026-08-04T00:04:11Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5009",
+  "body": "发现于 #4983 的实现过程(为 `permissions[].rowLevelSecurity[].using/.check` 立 authoring gate 时,照着 `validateOrgAxisRedLines` 的遍历核对可授权面)。按 Prime Directive #10 单独记账 —— 不在那一单的范围内,且该文件当时正被 #4991 占用。\n\n## 事实\n\n`packages/lint/src/validate-org-axis-red-lines.ts`(main,含 #4984 与 #5004 之后)仍有三处 `??` 别名读法:\n\n```ts\nconst permissionSets = asArray(cfg.permissions ?? cfg.permissionSets);\n...\nasArray(object.rowLevelSecurity ?? object.rls).forEach(...)\n...\nasArray(cfg.sharingRules ?? cfg.sharing).forEach(...)   // 两处\n```\n\n对照 spec 实际声明的键:\n\n| 读法 | spec 现状 |\n|:--|:--|\n| `cfg.permissions` | ✅ `StackSchema` 唯一声明的 permission-set 键(`stack.zod.ts`) |\n| `cfg.permissionSets` | ❌ 未声明 |\n| `object.rowLevelSecurity` | ❌ **`ObjectSchema` 根本没有这个键** —— `rowLevelSecurity` 只声明在 `PermissionSetSchema` 上(`permission.zod.ts`),`authorable-surface.json` 里也只有 `security/PermissionSet:rowLevelSecurity` 一条 |\n| `object.rls` | ❌ 未声明;`rls` 只是 `PERMISSION_SET_KEY_ALIASES` 里 → `rowLevelSecurity` 的被拒别名 |\n| `cfg.sharingRules` | ✅ 声明 |\n| `cfg.sharing` | ❌ 未声明 |\n\n## 后果\n\n该规则是 `input: 'parsed'`。Zod object 默认 strip 未声明键,所以在 `os validate` / `os build` 这两道门上,`permissionSets` / `objects[].rowLevelSecurity` / `objects[].rls` / `sharing` 在规则看到 stack 之前就已经不存在了 —— 这几条分支对**任何 spec 合法的 stack 都永远不执行**。只有 `os lint`(不 parse,跑 normalized 层)才可能命中,而能命中的恰恰是 `os validate` / `os build` 会拒绝的 stack。\n\n这正是 #4984 的缺陷形状:红线读了被拒的别名,于是对每一个 schema 接受的 stack 都是惰性的。#4984 修掉了 sharing rule 那一半(`criteria` / `filter` / `sharedTo` / `recipient`),并在文件里写下了理由 ——\n\n> Alias tolerance belongs at the schema's refusal, not in a consumer (Prime Directive #12).\n\n—— 但同一文件里另外三处 `??` 没有一起清掉。其中 `objects[].rowLevelSecurity` 那一整段(约 20 行,连同 `objects[N].rowLevelSecurity[M].using` 这条 path 格式)是**整块**死代码:对象级 RLS 从来不是可授权面。\n\n危险不在漏报,在于误导:该段落 + `validate-org-axis-red-lines.test.ts` 里对应的用例,会让下一个作者(或 AI 作者)合理地相信 `objects[].rowLevelSecurity` 是一个真实的授权面并照着写,而运行期没有任何东西读它。\n\n## 建议\n\n1. 三处 `??` 收敛为声明键:`cfg.permissions`、`cfg.sharingRules`。\n2. 删掉 `objects[].rowLevelSecurity ?? objects[].rls` 那一整段遍历(以及测试里对应的两条用例),或者——如果对象级 RLS 是**想要**的授权面——那是一次 spec 变更(给 `ObjectSchema` 加键 + 运行期读者),不是 lint 里的一条 `??`。二选一,别两头都不落地。\n3. 顺带核对:`validate-security-posture.ts` 等邻居规则是否有同形别名读法。\n\n## 参考\n\n- #4984(sharing rule 那一半)、#4991 / #5004(同文件的覆盖面修复)\n- #4983 的 `validate-rls-predicate-enforceability.ts` 采取了相反做法:只读 `cfg.permissions`,并用一条测试钉住 `permissionSets` / `objects[].rowLevelSecurity` 判绿,理由写在该文件 `## Scope` 段。\n"
+}

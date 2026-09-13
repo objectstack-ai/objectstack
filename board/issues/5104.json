@@ -1,0 +1,38 @@
+{
+  "number": 5104,
+  "kind": "issue",
+  "title": "spec: EmailProviderSchema 缺 'smtp',TSDoc 仍称 SMTP 不随 plugin-email 发布(#5087 落地后为假)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T04:39:10Z",
+  "updated_at": "2026-08-04T21:36:47Z",
+  "closed_at": "2026-08-04T21:36:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5104",
+  "body": "Blocked-by: objectstack-ai/objectstack#5087\n\n由 #5087 的实现派生。修复落在 `packages/spec`,而 #5087 的 PR 被派发约束明确禁止碰 spec(同批 #5080 / #4001 正在 spec 内作业,避免撞车),故单独立单。\n\n> **PM 分诊(勿在解除前派发)**:除上面的 `Blocked-by` 外,还需等 spec 车道空出 —— #5080 / #4001 在飞期间本单不可进,因为本单要动的生成物 `content/docs/references/system/email-config.mdx` 走 `merge=os-regen`,会静默吞掉一侧改动。详见本单评论。\n\n## 现状\n\n`packages/spec/src/system/email-config.zod.ts`:\n\n- `EmailProviderSchema = z.enum(['log', 'resend', 'postmark'])` —— 不含 `'smtp'`。\n- 同文件该 schema 的 TSDoc 明写:「Self-hosted SMTP is intentionally NOT shipped in plugin-email; apps that need SMTP register a custom `IEmailTransport` themselves and pass it via `EmailServicePluginOptions.transport`.」\n\n#5087 落地后这两句都不再成立:`@objectstack/plugin-email` 已内置 `SmtpTransport`(ADR-0012,nodemailer 惰性加载),`EmailServicePluginOptions.provider` 与 CLI `OS_EMAIL_PROVIDER` 都接受 `'smtp'`,并新增了 `OS_EMAIL_SMTP_HOST` / `_PORT` / `_SECURE` / `_USER` / `_PASSWORD`。\n\n## 影响\n\n- 用 `EmailServiceConfig` 类型标注 `objectstack.config.ts` 的作者写 `provider: 'smtp'` 会拿到类型错误(运行时其实可用 —— CLI 直接读 `config.email`,不过这个 schema)。\n- 生成文档 `content/docs/references/system/email-config.mdx` 的 Allowed Values 仍只列三个值,注释也仍在劝人自带 transport。AI 作者读到的就是「SMTP 不受支持」—— 与运行时实际能力相反的 declared ≠ implemented。\n\n## 建议改动\n\n1. `EmailProviderSchema` 增加 `'smtp'`(纯加值,非破坏性,不需要 ADR-0087 conversion/migration)。\n2. 重写该段 TSDoc:SMTP 由 plugin-email 内置(ADR-0012),nodemailer 为惰性 import。\n3. 顺带说明 `EmailServiceConfig.options` 对 `provider: 'smtp'` 承载连接参数(`host` / `port` / `secure` / `user` / `password`),与 `OS_EMAIL_SMTP_*` 一一对应。\n4. 按 AGENTS.md:`pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec check:generated --fix`,提交被证明过期的生成物(至少 `email-config.mdx`)。\n\n## 验收\n\n- `EmailServiceConfig` 类型接受 `provider: 'smtp'`;\n- 生成的 email-config 参考文档列出 `smtp` 并且不再宣称 SMTP 需要自带 transport;\n- spec 的生成物门禁全绿。\n"
+}

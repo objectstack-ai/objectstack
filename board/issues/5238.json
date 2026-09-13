@@ -1,0 +1,33 @@
+{
+  "number": 5238,
+  "kind": "issue",
+  "title": "E9(#5040 收尾):文档与 skill 追平执行器 —— 摘除「apis 被拒」失真表述,objectstack-api skill 纳入端点能力",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T11:46:43Z",
+  "updated_at": "2026-08-04T12:32:25Z",
+  "closed_at": "2026-08-04T12:31:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5238",
+  "body": "Part of #5040(E 系列文档收尾,维护者点名:「相关文档和 skills 更新了吗,包括例子」)。例子已齐(E8 回迁);本单补齐其余三层:\n\n## 1. spec 内过时处方文本(源头修,经 regen 传播)\n\n- `App.apis` 的 retiredKey 墓碑文本(传播到 `content/docs/references/ui/app.mdx:89`):仍写「stack 级 defineStack({ apis }) 在 v17 也不可执行(#4936),非空数组被拒,等执行器……先用 contributes.routes」—— **对升级者是误导性指令**,执行器已落地(#5040 E 系列,`9f41ee6`)。改为:v17 起 `defineStack({ apis })` 经五道 publish 门后**真实服务**,指向 upgrade-guide 的 `declarative-apis-endpoints-live` 条目;\n- `stack-server` 描述里同类 #4936 表述(传播到 `references/system/stack-server.mdx:68`)同步修真;\n- os-regen 四步,只吸收本改动的生成物移动。\n\n## 2. 手写 content/docs\n\n- `content/docs/protocol/kernel/http-protocol.mdx:1042` 附近:「#4936 该面无执行器」段落改为现状(执行链:匹配 → 策略 → 委派;五道门;裸 404 恒等语义),含一个最小可跑的 `apis:` 声明示例;\n- `content/docs/getting-started/quick-reference.mdx`:补声明式端点速查条目(路径 carve-out 形状、authRequired 缺省 true、D6 配对义务)。\n\n## 3. 发布 skill\n\n- `skills/objectstack-api/SKILL.md`(及其 refs/evals 如有关联):按现状纳入声明式端点教学 —— 何时用 `apis:` vs `contributes.routes`、五道门与报错处方、D6(`enabled: true` 判据)、映射键最小语义;与 upgrade-guide 措辞对齐,不复述第二套规则(指向为主);skill 的既有 eval 若断言旧行为需同步。\n\n## 约束\n\n词表与运行时零触碰(纯文档/skill/处方文本);不动 `content/docs/releases/`;与 #5231(源码注释)不重叠。执行器车道程序卡,其它车道请勿认领。"
+}

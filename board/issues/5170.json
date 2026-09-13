@@ -1,0 +1,37 @@
+{
+  "number": 5170,
+  "kind": "issue",
+  "title": "core: kernel:ready 钩子抛错在 ObjectKernel 上失败 boot、在 LiteKernel 上被吞成一条 error 日志 —— 同一钩子两套失败语义",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T07:29:07Z",
+  "updated_at": "2026-08-04T13:29:35Z",
+  "closed_at": "2026-08-04T13:29:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5170",
+  "body": "发现于 #5160 实现期间(实现\"声明了队列投递却兑现不了就响亮失败\"的 boot 门时验证钩子语义),**与该单无关,未在该 PR 中修**。\n\n## 事实\n\n两个内核跑 `kernel:ready` 走的是**两个不同的分发器**:\n\n- `packages/core/src/kernel.ts` Phase 3 用 `this.context.trigger('kernel:ready')`。`context.trigger`(`kernel-base.ts` 约 123 行)是裸循环 `for (const handler of handlers) await handler(...)` —— **不 catch**,异常一路冒到 `bootstrap()` 的 try,置 `state = 'stopped'` 后重抛。**boot 失败。**\n- `packages/core/src/lite-kernel.ts` 约 84 行用 `this.triggerHook('kernel:ready')`。`triggerHook`(`kernel-base.ts` 约 254 行)每个 handler 套 try/catch,`logger.error('Hook handler failed: ...')` 后注释写着 \"Continue with other handlers even if one fails\"。**boot 继续。**\n\n同一个钩子名、同一份插件代码,失败语义相反,且两处都没有文档说明这是有意的。\n\n## 为什么是问题\n\n`kernel:ready` 是本仓插件断言\"我声明的前置条件到底兑现了没有\"的**唯一**正确时机 —— AGENTS.md「Startup registry reads」一节明确要求把裁决推迟到注册表填完,而 `init()` 期间注册表还在填。于是\"声明无法兑现就失败 boot\"(#5132 判例、#5160 的构造/CLI 门)这类断言只能写在 `kernel:ready` 里,而它在 LiteKernel 上会被降级成一条日志。\n\nLiteKernel 的定位是 vitest / serverless / edge(AGENTS.md Kernel 表)。serverless 上正是最需要\"配置不对就别起来\"的地方 —— 一个吞掉的 boot 断言意味着函数照常接流量,只是少了它声称有的那个保证。\n\n具体到 #5160:`EmailServicePlugin` 在 `queueDelivery: true` 但没有持久化队列时抛错。ObjectKernel 上 boot 失败(意图),LiteKernel 上只留一条 error 日志、服务器起来了、邮件退回内联投递。行为不算灾难(邮件照发),但\"响亮失败\"这个承诺在半数内核上是假的。\n\n## 需要裁决的是哪一条对\n\n不预设答案,两种都自洽:\n\n- **A. 统一为传播**(LiteKernel 也用 `context.trigger` 语义):`kernel:ready` 成为可以断言前置条件的钩子,与 ObjectKernel 一致。代价:今天靠 LiteKernel 吞异常才跑得起来的测试/边缘部署可能变红 —— 需要先摸底有多少。\n- **B. 统一为吞掉**:`kernel:ready` 永不失败 boot,那么 #5132 / #5160 这类门必须换个落点(`init()` 不行,见上;可能需要一个新的、契约上允许失败的生命周期锚点)。\n- **C. 明确成两套契约并写进文档**:LiteKernel 显式声明\"尽力而为,不做 boot 断言\"。代价最小,但每个写断言的插件作者都得知道这件事,而今天没有任何地方告诉他。\n\n倾向 A —— 「Absence must be loud / prefer failing to falling back」(AGENTS.md 路由与降级两节)是本仓反复付过学费的立场,而两个内核对同一钩子给出相反答案,本身就是 declared ≠ enforced 的一个实例。但改的是内核契约,影响面远超我这一单,交 PM / 维护者定。\n\n## 复现\n\n`packages/core/src/kernel.test.ts` 与 `lite-kernel.test.ts` 里已有对称的 `kernel:ready` 顺序用例(约 590 / 256 行),在两边各加一个\"handler 抛错\"的用例即可看到分叉。\n"
+}

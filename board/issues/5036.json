@@ -1,0 +1,35 @@
+{
+  "number": 5036,
+  "kind": "pull_request",
+  "title": "ci(deps): OSV 门禁的逃生口立三条约定,并把前两条做成机械门禁 (#4965)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "documentation",
+    "size/l",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T00:34:19Z",
+  "updated_at": "2026-08-04T00:43:39Z",
+  "closed_at": "2026-08-04T00:43:38Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T00:43:38Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5036",
+  "body": "Fixes #4965\n\nOSV 门禁对**无修复版本**的公告,唯一出路是 `osv-scanner.toml` 的 `[[IgnoredVulns]]`。但仓库里此前没有这个文件 —— 逃生口一次也没走过,也就没有任何约定:谁能加、写什么理由、多久复核。没有约定的逃生口会在第一次紧急情况下被随手用坏,然后永久留在那里。\n\n本 PR 按维护者裁决落三条约定,**前两条做成机械门禁,第三条明确标记为纪律**。\n\n## 落点\n\n| 文件 | 作用 |\n| --- | --- |\n| `osv-scanner.toml`(新) | 零豁免台账。三条约定写成文件头注释 + 一个注释掉的模板条目(id / ignoreUntil / reason 格式) |\n| `scripts/check-osv-exemptions.mjs`(新) | 约定 1、2 的强制门禁,带 `--self-test` 双向自证 |\n| `.github/workflows/validate-deps.yml` | 新增 check step(排在 scanner 之前);注释从\"指向一个不存在的文件\"改为指向新台账与三条约定;`paths` 触发器补上这两个新文件 |\n| `.changeset/osv-exemption-conventions.md` | 空 frontmatter,仅 CI,不发布任何包 |\n\n根 `package.json` **未改动**,没有新增依赖 —— 脚本零依赖,TOML 子集手写解析(与 `check-override-consistency.mjs` 手写 pnpm-workspace.yaml 解析同一套做法)。\n\n## 为什么必须有脚本:对 osv-scanner v2.3.8 的实测\n\n用真实二进制 + 离线 OSV 库,在一个故意命中 5 条公告的 lockfile 上逐项验证:\n\n| 台账写法 | scanner v2.3.8 的行为 |\n| --- | --- |\n| 缺 `ignoreUntil` | 公告被过滤、**退出 0、无任何告警**,永久有效 |\n| `ignoreUntil` 已过期 | 公告重新报出、**退出 1** |\n| `reason = \"probe\"` | 照单全收 —— scanner 从不读 reason |\n| `ignoreUntil` 加引号 | **整个配置文件被丢弃**(\"Ignored invalid config file ... toml: ...\"),扫描照跑 |\n\n源码侧对应 `internal/config/config.go` 的 `shouldIgnoreTimestamp`:`IgnoreUntil` 为零值时直接返回\"应当忽略\"。\n\n结论(回答 issue 的三个问题):**到期转红是 scanner 原生行为,机制本身不缺** —— 缺的是\"必须填\"。所以脚本不重复实现过期判定的语义,只保证每条豁免都带着一个合法、未过期、且不荒唐的日期存在,让原生机制真的有东西可到期。\n\n## 约定 1 的机械形状\n\n- `ignoreUntil` **必填**,必须是**裸 TOML 日期**(加引号会静默废掉整份文件里其它所有豁免);\n- 必须**未过期**(等于今天即判红 —— scanner 那时已经停止忽略了);\n- **默认 30 天,硬上限 90 天**。上限是维护者三条裁决之外我补的一个推论,请一并裁:没有上限的话,`ignoreUntil = 2099-01-01` 同样满足\"必须带过期时间\",只是给永久豁免戴了顶帽子。上限只会随时间推移越来越容易满足,不会把当初写下时合规的条目判红。数值在脚本顶部 `MAX_WINDOW_DAYS` 一行可调。\n\n## 约定 2 的机械形状\n\n`reason` 必填,且必须含至少一个 `https://` advisory 链接 + 链接之外至少 40 字符的真正理由。判据是\"复核的人能不能据此判断前提是否还成立\":`Not exploitable` 六个字给不了任何可核对的东西。\n\n另外拒绝 `[[IgnoredVulns]]` 以外的表:`[[PackageOverrides]]`(`ignore = true`)同样能压掉发现,而三条约定完全没有覆盖它 —— 留着就是绕过约定的现成后门。真要用,先定它的约定,再教这个脚本认它。\n\n## 约定 3:纪律,不是门禁\n\n\"豁免必须单独成 PR、打 `osv-exemption` 标签\"写进了台账文件头(加豁免的人必然读到)与 workflow 注释,并在有豁免存在时由脚本每次打印提醒 —— 但**没有做成门禁**。原因是便宜的机械形状会误伤好情形:\"`osv-scanner.toml` 必须单独改动\"会把\"终于修好依赖、顺手删掉豁免\"的 PR 也判红,而那正是我们最想鼓励的 PR。因此规则表述为:**删除**豁免可以夹带在修复 PR 里,**新增或续期**不行。\n\n`osv-exemption` 标签当前不存在(已确认 404),需要维护者建一个 —— 或者告诉我改用现成标签。\n\n## self-test(双向)\n\n```\n$ node scripts/check-osv-exemptions.mjs --self-test\ncheck-osv-exemptions self-test (both directions):\n  ✓ missing/empty ledger → green\n  ✓ comments-only ledger (zero exemptions) → green\n  ✓ well-formed exemption inside the window → green\n  ✓ multi-line reason → green\n  ✓ expired ignoreUntil → red\n  ✓ ignoreUntil == today → red (the scanner already stopped ignoring it)\n  ✓ missing ignoreUntil → red\n  ✓ quoted ignoreUntil → red\n  ✓ ignoreUntil beyond the ceiling → red\n  ✓ reason without an advisory link → red\n  ✓ reason that is only a link → red\n  ✓ untouched template placeholders → red\n  ✓ missing reason → red\n  ✓ unknown key → red\n  ✓ duplicate id → red\n  ✓ [[PackageOverrides]] escape hatch → red\n  ✓ top-level key outside a table → red\n\n✓ self-test passed: valid ledgers accepted, every convention breach rejected.\n```\n\n## 零豁免状态下门禁行为不变(实测)\n\n同一份 `pnpm-lock.yaml`,带 / 不带本文件,scanner 结果逐条一致:\n\n```\n=== WITH ledger ===\nLoaded filter from: /home/user/objectstack-4965/osv-scanner.toml\nTotal 4 packages affected by 8 known vulnerabilities (0 Critical, 2 High, 6 Medium, 0 Low, 0 Unknown) from 1 ecosystem.\nEXIT_WITH=1\n\n=== WITHOUT ledger ===\nTotal 4 packages affected by 8 known vulnerabilities (0 Critical, 2 High, 6 Medium, 0 Low, 0 Unknown) from 1 ecosystem.\nEXIT_WITHOUT=1\n```\n\n`Loaded filter from:` 一行同时证明了根目录的 `osv-scanner.toml` 确实被 `--lockfile=pnpm-lock.yaml` 这条扫描路径发现(scanner 只读被扫文件所在目录的配置,而 lockfile 就在根目录)。\n\n## 端到端演示:脚本抓住了 scanner 放行的东西\n\n在真实 lockfile 上临时插入一条缺 `ignoreUntil` 的豁免:\n\n```\n--- scanner ---\nGHSA-7p8r-x3mc-p8w7 and 1 alias have been filtered out because: ...\nFiltered 1 vulnerability from output          ← scanner 接受,永久生效\n\n--- checker ---\n  - exemption #1 (line 87): no `ignoreUntil`. OSV-Scanner reads a missing expiry\n    as \"ignore forever\" and says nothing — that is precisely the silent permanent\n    exemption #4965 forbids. Set one (default 30 days: `ignoreUntil = 2026-09-03`).\nCHECKER_EXIT=1\n```\n\n改为已过期的 `ignoreUntil = 2026-07-01`:scanner 重新报出该公告(原生到期),checker 同时以 `EXPIRED 34 day(s) ago` 判红,并要求重新裁决而不是顺手延期。\n\n## 顺带说明(不在本 PR 范围)\n\n本地扫描显示 `main` 当前有 8 条**都有修复版本**的公告(undici / hono / fast-uri),即 OSV 门禁此刻是红的;已由 #5032 记录,本 PR 不碰 —— 那些是\"有修复就吃修复\"的情形,恰恰不该走豁免。\n\n## 验证命令\n\n```\nnode scripts/check-osv-exemptions.mjs --self-test   # 17/17 通过\nnode scripts/check-osv-exemptions.mjs               # ✓ zero exemptions\nnpx eslint scripts/check-osv-exemptions.mjs         # 干净\n```\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018iARDqtrhQgz6fVHDeDkbQ)_"
+}

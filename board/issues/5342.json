@@ -1,0 +1,35 @@
+{
+  "number": 5342,
+  "kind": "pull_request",
+  "title": "fix(spec): formatZodError 展开 union 分支的拒绝信息 (#4971)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T23:48:51Z",
+  "updated_at": "2026-08-05T00:35:02Z",
+  "closed_at": "2026-08-05T00:35:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T00:35:01Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5342",
+  "body": "Fixes #4971\n\n## 前提复核(先证,再改)\n\nissue 的核心断言在 `origin/main`(c7406b0)上**成立**,并且是实测的:\n\n```\n=== ActionRefSchema.safeParse({ type: 'log', args: { a: 1 } }) ===\nissues[0] = { code: 'invalid_union', path: [], message: 'Invalid input',\n              errors: [ [ {code:'invalid_type', message:'... expected string ...'} ],\n                        [ {code:'unrecognized_keys', keys:['args'],\n                           message:'Unrecognized key(s) on this action reference: `args`. Until #4001 …'} ] ] }\n\nformatZodError →\nValidation failed (1 issue):\n\n  ✗ (root): Invalid input\n```\n\n`formatZodError` 只 `map` 顶层 `error.issues`,从不下降进 `issue.errors[]`(改前 `error-map.zod.ts:186`)。处方一直在 payload 里,丢的只是压成单行的消费者。\n\n**一处需要更正的前提(不影响本单结论)**:issue 说「`formatZodError` 的文档用途正是 CLI 输出(`os validate` / `os compile`)」—— JSDoc 确实这么写,但那两个命令实际调的是 CLI 自己的 `formatZodErrors`(`packages/cli/src/utils/format.ts:167`),它有**同样**的缺陷。已另单记录为 #5341(不在本单文件面内)。本单的修复并非空转:`defineStack` 的严格模式抛错走的就是 `formatZodError`(`packages/spec/src/stack.zod.ts:1250`),而任何加载 stack 配置的命令都会执行它 —— 作者在 union 里写错一个键,今天起就能读到处方。\n\n## 改了什么\n\n`formatZodIssue` 对 `code === 'invalid_union'` 递归展开 `issue.errors`,缩进一层、路径拼成绝对路径:\n\n```\nValidation failed (2 issues):\n\n  ✗ id: Identifier must be at least 2 characters\n  ✗ states.s.on.GO: Invalid input\n    ✗ states.s.on.GO.actions.0: Invalid input\n      ✗ states.s.on.GO.actions.0: Unrecognized key(s) on this action reference: `args`. Until #4001 …\n```\n\n**全印一遍是本单唯一必须避免的失败模式**(#4001 批 6c:一个未知键被 N 个分支各报一次,`view.zod.ts` 的 `submitBehavior` 因此改用 `discriminatedUnion`),所以分支是**挑**的,不是倒的:\n\n1. 只在自己根上抱怨「值的种类不对」的分支(`z.union([z.string(), SomeObject])` 里 `z.string()` 那支喊 `expected string, received object`)不携带处方,**丢弃**。当**所有**分支都是这一类时(`z.union([z.string(), z.number()])` 收到一个对象)完全不展开,输出与改前**逐字节相同** —— 原始类型 union 是全仓最常见的 union,给它加 N 行噪音换零处方是负收益。\n2. 其余分支里 **issue 最少的胜出**:作者真正在写的那个成员只抱怨那一个多余的键,其它成员还会抱怨判别式对不上和自己缺的必填项。这就是「一个未知键只报一次」的机制本身,不是额外的去重补丁。\n3. `unrecognized_keys` 破平局(策展散文在那儿),声明顺序兜底 —— 输出确定。\n4. 真正打平的分支**全部**渲染(上限 3,超出的印一行「… and N more branches rejected this value」):两个形状同样能解释失败时,按声明顺序偏袒第一个是在撒谎。跨分支**逐字相同**的判决只印一次。\n5. 嵌套 union 递归展开,深度上限 3 层(输出有界)。\n\n表头的 issue 数仍是 `error.issues.length` —— union 无论用几行解释都是一条 issue,CLI 与结构化消费者(REST 错误体、`ZodError.message`)对「错了几处」保持同一口径。\n\n## 反向验证(方向:红,如期)\n\n先写断言、临时把 `error-map.zod.ts` 还原成 `origin/main` 再跑:\n\n```\nFAIL src/automation/state-machine.test.ts &gt; [#4001] ActionRef / GuardRef — strict inside a union &gt; CONTROL — union and non-union shapes both render their prescription through formatZodError\nFAIL src/shared/error-map.test.ts &gt; … &gt; renders the failing branch prose under the union line\nFAIL src/shared/error-map.test.ts &gt; … &gt; resolves nested paths against the union, not relative to it\nFAIL src/shared/error-map.test.ts &gt; … &gt; expands a union nested inside a union\nFAIL src/shared/error-map.test.ts &gt; … &gt; reports one unknown key ONCE, not once per branch\nFAIL src/shared/error-map.test.ts &gt; … &gt; de-duplicates a verdict every tied branch reaches\nFAIL src/shared/error-map.test.ts &gt; … &gt; stops expanding after three levels of nesting\n Tests  7 failed | 38 passed (45)\n```\n\n上表 7 条 = **6 条新钉 + 1 条被翻转的 CONTROL 钉**。第 7 条新钉(`caps a wide tie and says how many branches it did not print`,后补,钉的是渲染上限那条此前无人到达的分支)单独按同样方式量过:\n\n```\nFAIL … &gt; caps a wide tie and says how many branches it did not print\nAssertionError: expected 'Validation failed (1 issue):\\n\\n  ✗ (…' to contain '… and 2 more branches rejected this v…'\n```\n\n所以新增的 10 条钉里 **7 条改前必红,全部实测**;另外 3 条(`drops the kind-mismatch branch…`、`leaves an all-kind-mismatch union exactly as it was`、`counts the union as the one issue zod raised`)**两边都绿是设计如此** —— 它们钉的是「不许变」的不变量(原始类型 union 输出不动、表头计数不动),不是本次的行为变更,如实记在这里而不是凑成「全红转全绿」。\n\n批 10 预言的那条钉(`state-machine.test.ts` 的 CONTROL)按其自述**翻转**:改前断言 `not.toContain('this action reference')`,现在断言它在,并额外钉住 `expected string` 这类噪音不被打印。\n\n## 消费半径普查\n\n`formatZodError` / `formatZodIssue` / `safeParsePretty` 在本仓的**唯一**非测试调用点是 `packages/spec/src/stack.zod.ts:1250`(`defineStack`);`objectui` / `cloud` 两个兄弟仓零引用(全文扫描)。`packages/cli` 与 `packages/core` 各有同名的**本地**格式化器,不经过这里(见 #5341)。`packages/spec` 全量测试通过,说明没有第二条钉在这次输出变化上变红。\n\n## 相关但**不**在本 PR 里修\n\n- **#5014**(同族,`packages/rest` 的 `zodIssuesToFields`)—— wire 契约改动,按派发另单处理,本 PR 不碰 `packages/rest/**`。\n- **#5341**(本次新记):`os validate` / `os build` / `os plugin build` 真正走的 CLI 本地格式化器有同样缺陷;顺带记了 `invalid_key` / `invalid_element` 的同类休眠缺口。\n- `docs/audits/2026-07-unknown-key-strictness-ledger.md` 的 `state-machine.zod.ts` 行还写着「`formatZodError` 把它压掉 —— 已记录,未在此修」,现已过时。该文件是 spec 车道的独占面,本 PR **不手改**,留给该车道随手更新。\n\n## 文件面\n\n- `packages/spec/src/shared/error-map.zod.ts` —— 分支选择 + 递归渲染\n- `packages/spec/src/shared/error-map.test.ts` —— 10 条新钉\n- `packages/spec/src/automation/state-machine.test.ts` —— CONTROL 钉翻转\n- `packages/spec/src/automation/state-machine.zod.ts` —— **仅注释**(声明的文件面外一处):该 JSDoc 原文陈述「`formatZodError` 是丢弃者之一,filed 而非在此修」,本 PR 之后这句是假的,留着会误导下一个读者\n- `.changeset/format-zod-error-union-branches.md` —— `@objectstack/spec: minor`(公开导出的输出行为变化)\n\n## 验证\n\n```\npnpm --filter @objectstack/spec test          → Test Files 312 passed (312) · Tests 8032 passed (8032)\npnpm --filter @objectstack/spec typecheck     → tsc --noEmit,无输出\npnpm --filter @objectstack/spec check:api-surface   → public API surface + factory signatures unchanged ✓\npnpm --filter @objectstack/spec check:exported-any  → 1845 types + 1592 schemas,无 any\nnpx eslint --no-inline-config (4 个改动文件)  → 无输出\nnode scripts/check-nul-bytes.mjs              → OK(5379 个文件,无裸 NUL);另按控制字符自查全部改动文件,零命中\n```\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01FTszibd6C8sUCCZnM4VcrL\n"
+}

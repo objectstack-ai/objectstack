@@ -1,0 +1,35 @@
+{
+  "number": 5237,
+  "kind": "pull_request",
+  "title": "feat(spec)!: promote `userFilters.allowAddTab`,随后收紧 UserFiltersSchema (#5073)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T11:46:32Z",
+  "updated_at": "2026-08-04T12:36:50Z",
+  "closed_at": "2026-08-04T12:36:49Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T12:36:49Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5237",
+  "body": "Fixes #5073\n\n按本单已记录的**维护者裁决 A**(2026-08-04)执行:promote `allowAddTab` 进 spec 的 `UserFiltersSchema`,**同 PR** 完成该 schema 的收紧。没有重新论证选项,也没有留中间态。\n\n实施前重新实测了裁决所依赖的前提,与 issue 记载一致:HEAD 上 `UserFiltersSchema` 仍是 `z.object`(strip),spec 声明 `{element, fields, tabs, showAllRecords}`,objectui 的 `packages/types/src/zod/objectql.zod.ts:265` 声明 `{element, fields, tabs, allowAddTab, showAllRecords}` —— **两边差集恰好就 `allowAddTab` 一个键**。\n\n## 为什么之前不能直接关\n\nobjectui 的渲染器真读 `config.allowAddTab` 并据此渲染「新增 tab」入口(`plugin-list/src/UserFilters.tsx:182` / `:742`)。而 `saveMetaItem` 用 `safeParse` 校验后**原样存原始 body**(丢弃 `parsed.data`,好让 Studio 辅助键活过往返),所以被 strip 掉的只是那份被丢弃的解析结果 —— 存储里键还在,渲染器读得到,**能力今天是工作的**。直接收紧不是「把静默失效变响亮」(战役的授权),而是把已发布、在用的配置变成 422,且 422 会点名一个作者本来写对了的键 —— finding 7 的形状。\n\n## 落地内容\n\n**1. `allowAddTab` 声明进 `UserFiltersSchema`(additive)。** 能力从此可从契约被发现:JSON Schema、Studio SchemaForm、参考文档、AI 作者都看得到,而不是只存在于一个 React 文件里。\n\n`.describe()` 刻意收窄到渲染器**真做的事** —— 「渲染出新增 tab 的入口」,不承诺点击后能创建预设。因为实测那个按钮**没有 click handler**(同一个 `return` 里预设 tab 有 `onClick`,它没有),写成「终端用户可以新增预设」就是 PD#10 的「宣传运行时不交付的能力」。渲染器那半边已另行立案 **#5236**(unassigned),不在本 PR 范围。\n\n**2. `UserFiltersSchema` 收紧**(`z.object` → `strictObject`),未知键从静默丢弃变为带处方的拒绝。\n\n**3. 批 6e 的翻转如期发生,并且补上了它自己制造的坑。** `ObjectUserFiltersSchema` 由 `UserFiltersSchema.omit()` 派生,`.omit()` 继承基类姿态,所以基类一关,对象视图上的 `tabs` / `showAllRecords` / `allowAddTab` 从「丢弃」翻成「拒绝」—— 这个翻转是想要的:CLI lint(`packages/lint/src/validate-list-view-mode.ts`)早就在报同一个配置,此前两扇门互相矛盾,现在一致。\n\n但 `.omit()` **连基类的错误映射一起继承**,而那份 `knownKeys` 是从基类形状读的、仍然含被 omit 掉的键。实测(改之前):\n\n```\n{ tab: 1 }  →  Unrecognized key(s) on these user filters: `tab`. … Did you mean `tab` → `tabs`?\n```\n\n把作者指向这个形状唯一拒绝的键 —— **用 finding 7 的修复制造了一次 finding 7**。而这次拒绝正是本 PR 造出来的,所以消息也是本 PR 的责任。对象变体改为携带自己的映射,候选池按 **omit 后**的形状构建(形状仍由 `.omit()` 派生,#2231 的 derive-by-reference 不变),三个 page-only 键各带 `guidance` 指向 `listViews`。现在:\n\n```\n{ tabs: [] }  →  … `tabs` presets are page-only: …Define each preset as a named entry\n                   under the object's `listViews` instead — every one renders as a segmented tab.\n{ tab: 1 }    →  …(不再建议 `tabs`)\n```\n\n## 未被打扰的既有姿态\n\n- **PR #5154 的 `ViewFilterRuleSchema`**(三处豁免:JSDoc + `view-filter-rule-wire-id.test.ts` 钉 + 台账行)—— 未触碰;该文件 7 条断言全绿。批 18 测试文件的头注补了一句,说明它是**另一个文件**里按另一份证据开着的,别把两组合并。\n- **`ViewItemSchema` ×2 / `FormFieldBaseSchema` / `ListView.sort`** —— 仍按各自的实测理由开着。\n\n## 台账(#5220 之后的新纪律)\n\n- **数字**:`gen:strictness-ledger` 整体重生成,未手改一个数。`ui/` sites 198→199、strict 117→119、strip 76→75;`view.zod.ts` sites 50→51、strip 6→5(新增的那个 site 是对象变体改用 `strictObject(` 的调用,它本身是 strict)。\n- **散文**:只改 `view.zod.ts` 那一行(#5221 动的是 `chart.zod.ts` 行,不同行,无冲突)。`Class` 按格式契约的词表从 `mixed · 6 authorable` 改为 `mixed · 5 authorable`,并把 `UserFiltersSchema` 从「still open」改写成结案记录(含裁定依据、describe 收窄的理由、以及上面那个继承错误映射的坑)。\n- `check:strictness-ledger` 绿。\n\n## 破坏性 + 迁移\n\n`.changeset/user-filters-allow-add-tab-promote-and-close.md`(**major**;`.changeset/pre.json` 已确认 mode:pre / tag:rc,v17 窗口开着),正文带 FROM → TO:\n\n1. `userFilters` 上的未知键 → 删除或改成想表达的已声明键(错误信息点名并给候选)。**`allowAddTab` 本身不需要迁移** —— 它现在是合法键。\n2. 对象视图的 `userFilters.tabs` → 对象的 `listViews` 具名条目;`showAllRecords` → 默认列表视图即「全部记录」入口;`allowAddTab` → ViewTabBar 自带的新增控件。\n\n## 验证\n\n```\npnpm --filter @objectstack/spec check:generated   →  ✓ All 9 generated artifacts are up to date.\npackages/spec        vitest run                   →  306 files / 7834 tests passed\npackages/lint        test                         →  57 files / 1184 tests passed\npackages/objectql    test                         →  115 files / 1839 tests passed\npackages/metadata-protocol test                   →  39 files / 348 tests passed\ntypecheck (spec + lint)                           →  Done\n```\n\n生成物经 `check:generated --fix` 只重生成被证明陈旧的 2 个(`gen:docs` / `gen:strictness-ledger`);`authorable-surface.json` 由 build 带出,新增一行 `ui/UserFilters:allowAddTab`。已合入 `origin/main`(未 rebase / 未 force-push),合并后重跑上述闸门仍全绿。\n\n## 顺带发现(未在本 PR 修)\n\n- **#5236** — objectui `allowAddTab` 渲染的按钮没有 click handler。方向(实现 / 移除)牵扯 ADR-0047 的 session-scoped 承诺与元数据写入权限,按「能力问题立案不猜」交维护者。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Ehu85kbvMcrNTUJjwxvLJ9\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Ehu85kbvMcrNTUJjwxvLJ9)_"
+}

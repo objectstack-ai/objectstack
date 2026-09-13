@@ -1,0 +1,37 @@
+{
+  "number": 5033,
+  "kind": "issue",
+  "title": "service-analytics 的 executeRawSql 自动桥接丢弃 objectName —— dataset 原始 SQL 永远打在默认 datasource 上,凡被路由到非默认 datasource 的对象一律读成 0",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T00:33:02Z",
+  "updated_at": "2026-08-04T05:34:56Z",
+  "closed_at": "2026-08-04T05:34:56Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5033",
+  "body": "## 结论先行\n\n`AnalyticsServicePlugin` 的 `executeRawSql` 自动桥接**收到了对象名却把它丢掉了**,于是 dataset 的原始 SQL 永远在**默认 datasource** 上执行,而不是在该对象自己解析出来的 datasource 上。任何被路由到非默认 datasource 的对象(ADR-0057 §3.6 的 `telemetry` 拆分、显式 `object.datasource`、`datasourceMapping` 规则),它的 dataset widget 都会读到 `no such table`,再被优雅降级成**一个自信的 `0`**。\n\n`packages/services/service-analytics/src/plugin.ts:267`:\n\n```ts\nexecuteRawSql = async (_objectName, sql, params) => {\n  const engine = tryGetExecutor();\n  ...\n  const result = await engine.execute(knexSql, { args: params });   // ← 没有 { object }\n```\n\n而 `ObjectQL.execute()`(`packages/objectql/src/engine.ts:5620` 附近)的驱动选择顺序是:\n\n```\n1. options.object     → getDriver(objectName)\n2. options.datasource → 显式驱动名\n3. 默认驱动\n```\n\n第 1 条永远走不到,所以永远落到第 3 条。\n\n对照组就在同一个文件里:`executeAggregate` 的自动桥接调用的是 `engine.aggregate(objectName, …)`,**路由是对的**。所以两条 dataset 执行路径对\"这个对象在哪个库里\"给出的答案不一致 —— 选中哪条策略决定了你读到的是真数据还是 0。\n\n## 复现(实测,不是推演)\n\n`examples/app-showcase`,`SqlDriver(better-sqlite3)`,单租户,分支基于 `main` @ `e001a1f`:\n\n```\npnpm dev -- --database file:/tmp/os4887/fresh.db -p 39117\n```\n\n启动横幅里 `Plugins: 47 loaded` 含 `TelemetryDatasource` 与 `Audit`。两个 sqlite 文件:\n\n```\n=== /tmp/os4887/fresh.db ===            (主库,88 个对象)\n  sys_audit_log  : MISSING\n  sys_activity   : MISSING\n  sys_comment    : sys_comment\n\n=== /tmp/os4887/fresh.telemetry.db ===  (ADR-0057 §3.6 兄弟文件,9 个对象)\n  sys_audit_log  : sys_audit_log                              [table]\n  sys_activity   : sys_activity, sys_activity__r20260804      [view + 轮转分片]\n  sys_comment    : MISSING\n```\n\n同一个对象,两条读路径,两个答案:\n\n```\n# 走对象路由(engine.find → getDriver('sys_audit_log') → telemetry 驱动)\nGET /api/v1/data/sys_audit_log?$top=200        → HTTP 200,49 条真实记录\n\n# 走 dataset 原始 SQL(engine.execute,无 { object } → 默认驱动)\nPOST /api/v1/analytics/dataset/query\n  { dataset: { object: 'sys_audit_log', measures: [{ name:'event_count', aggregate:'count' }] }, … }\n                                               → HTTP 200,{\"rows\":[],\"fields\":[],\"totals\":[]}\n```\n\n服务端同时打出:\n\n```\nWARN [Analytics] dataset \"sys_audit_log_metrics\" backing object \"sys_audit_log\" is unavailable\n  (SELECT action AS \"action\", COUNT(*) AS \"event_count\" FROM \"sys_audit_log\" GROUP BY action\n   - no such table: sys_audit_log); returning an empty result instead of failing the widget\n```\n\n**49 条审计记录真实存在,安全看板显示 0,前端全绿、无报错。**\n\n## 为什么这比日志噪音严重\n\n这正是 `rest-server.ts` 分析解析器注释里点名的 \"Total Spend: 0 on a populated table\" 失效模式,而且落在**安全看板**上:0 次登录 / 0 次权限变更 / 0 次配置变更,和\"确实没有发生过\"长得一模一样。`service-analytics` 的优雅降级(空结果而非 500)本身是对的 —— 它不该为一个真正缺表的 widget 炸掉整个看板 —— 但它现在掩盖的是一个**路由错误**,不是\"这个 kernel 没装这个对象\"。\n\n影响面不限于审计:任何 `lifecycle.class ∈ {audit, telemetry, event}` 的对象(`sys_job_run`、`sys_notification_delivery`、`sys_http_delivery`、`ai_traces` …),以及任何用 `object.datasource` / `datasourceMapping` 显式外挂到别的库的业务对象,只要有 dataset/看板读它,都是同一个 0。生产环境 `OS_TELEMETRY_DB=` 显式开启后同样中招。\n\n## 建议方向(未实现,留给该车道决策)\n\n1. **桥接把对象名透传下去** —— `engine.execute(knexSql, { args: params, object: objectName })`。改动最小,且与同文件 `executeAggregate` 的既有姿态一致:两条路径对\"这个对象在哪\"给同一个答案。\n2. 需要同时想清楚的:一条 dataset SQL 里带 `LEFT JOIN`(`NativeSQLStrategy` 为 `account.industry` 这类点号维度生成的),如果 join 两端落在不同 datasource 上,按 (1) 修完会在对象自己的 datasource 上**响亮地失败**,而不是像今天这样静默读错库。我认为响亮失败是对的(契约优先),但这是个需要确认的行为变更 —— 也可能该在编译期就拒绝跨 datasource 的 dataset join。\n3. 顺带值得决策的语义问题(#4887 后半段提出的):shipped 系统 dataset 在底层表**不可用**时,应该渲染成 \"not available\" 而不是一个自信的 `0`。空的审计图和零事件的审计图,对读安全看板的人意义完全不同。\n\n## 出处\n\n从 #4887 的诊断中分出。#4887 的表象(\"plugin-audit 从不 provision sys_audit_log / sys_activity\")经实测**不成立** —— provisioning 是好的,表建在了 telemetry datasource 里;#4887 的 PR 只把 provisioning 的去向写进了日志(让下一个人不必重走这条弯路),并未也不该在 `plugin-audit` 车道里修这里的路由缺陷。\n\nObserved on `main` @ `e001a1f`,`SqlDriver(better-sqlite3)`,single-tenant。\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 5201,
+  "kind": "pull_request",
+  "title": "fix(plugin-audit): 把 sys_job_queue 加进 SKIP_OBJECTS 的运维管道豁免组 (#5193)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T08:59:55Z",
+  "updated_at": "2026-08-04T09:18:38Z",
+  "closed_at": "2026-08-04T09:18:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T09:18:36Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5201",
+  "body": "Fixes objectstack-ai/objectstack#5193\n\n## 问题\n\n`audit-writers.ts` 的 `SKIP_OBJECTS` 第 (2) 组是 ADR-0057 决策 5「stop the amplifier」在写入器这一层的落点,组里已经有 `sys_job` / `sys_job_run` / `sys_automation_run`,唯独漏了同族里量最大的 `sys_job_queue`。\n\n审计钩子(`afterInsert`/`afterUpdate`/`afterDelete`)是**全对象注册**的,并且**没有任何「系统上下文写入不记审计」的豁免** —— 把关的只有 `SKIP_OBJECTS`。所以 `DbQueueAdapter` 自己用 SYSTEM_CTX 写的每一行都照记不误:\n\n- 一条消息至少 3 次写:publish 的 insert、claim 的 `pending → running`、完成的 `→ completed`(失败还要每次 retry 多一次 update),再加 #5192 reaper 对 completed 行的周期性 DELETE;\n- 每一次写产生 `sys_audit_log` **和** `sys_activity` 两行;\n- 每次 `beforeUpdate` 还额外做一次 `captureBefore` 的 `findOne` 快照 —— 队列每次状态流转都白读一行;\n- #5160 之后邮件走队列,于是**每封邮件**都过这条放大器。\n\n`sys_job_queue` 是纯平台内部管道(managedBy = engine-owned、enable.apiMethods = get/list、#5179 起 lifecycle.class = transient),用户根本写不了它,这些行没有任何合规价值,只是噪声与写放大。\n\n## 修法\n\n与兄弟表**完全同形**:把 `sys_job_queue` 加进第 (2) 组(紧挨 `sys_job_run`),注释里写清理由并引 #5193 与 ADR-0057 决策 5、上下游的 #5160 / #5179 / #5192。一个名字、一处清单,没有新分支、没有新配置。\n\n## 测试\n\n`packages/plugins/plugin-audit/src/audit-writers.test.ts` 新增一组(照该文件既有的 fake-engine 形状,不引入新设施;fake engine 没有 `delete` 方法,因此不触及 `assertEngineDeleteDispatch` 门禁):\n\n1. **端到端形态** —— 把 `service-queue` 为一条消息做的全部写按序打一遍(publish insert → lease update → complete update → reaper delete),断言 `created` 为**空数组**(不是「少了几行」,是零);\n2. **豁免组钉死** —— `sys_job` / `sys_job_run` / `sys_job_queue` / `sys_automation_run` 四张表同组同待遇;\n3. **省下的那次快照读** —— `beforeUpdate`/`beforeDelete` 不再对被跳过的对象做 `findOne`,并用一个业务对象(`crm_lead` 确实被快照)作对照,证明该断言**能**失败;\n4. **豁免不外溢** —— 普通业务写照常产出 `sys_audit_log` + `sys_activity`。\n\n变异验证:临时删掉那一行后,上述 1/2/3 三个用例全部转红(4 是对照,两种情况下都绿),确认测试钉的是修复本身。\n\n```\npnpm --filter @objectstack/plugin-audit typecheck   # tsc --noEmit,0 error\npnpm --filter @objectstack/plugin-audit test        # Test Files 7 passed (7) / Tests 103 passed (103)\n```\n\n## 越界发现(未在本 PR 修)\n\n`sys_upload_session` 同样声明了 lifecycle.class = transient(其自身注释即写「ephemeral state, never business truth」)却不在 `SKIP_OBJECTS` 里,分块上传每传一块就是一次 `updateSession` 全量写。已按一事一议单独立单:#5202(未指派,交 PM 分诊)。\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_017MCKJaEomEqg4tvz4SzdNd\n"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 4835,
+  "kind": "issue",
+  "title": "check:init-service-contract 只认 `getService`,不认 `getServiceAsync` —— #4772 就是从这个洞里溜过去的",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T09:33:20Z",
+  "updated_at": "2026-08-03T15:14:01Z",
+  "closed_at": "2026-08-03T15:14:01Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4835",
+  "body": "在 #4777 建门禁时顺带发现,**不在该 issue 范围内**,按 Prime Directive #10 单独记录。\n\n## 发现\n\n`scripts/check-init-service-contract.mjs`(#4471 / ADR-0116 的声明覆盖门禁)只匹配一个 callee:\n\n```js\n// scripts/check-init-service-contract.mjs\nif (ts.isPropertyAccessExpression(callee) && callee.name.text === 'getService') {\n```\n\n而 kernel 的服务解析有两个入口 —— `getService` 和 `getServiceAsync`\n(`packages/core/src/kernel.ts:505`)。**两者的排序风险完全相同**:插件 `init()` 的执行顺序\n决定能不能解析到,ADR-0116 的 `dependencies` / `optionalDependencies` / `requiresServices`\n对两者一视同仁地生效。但门禁只看得见前者。\n\n## 这不是理论问题 —— #4772 正是这么溜过去的\n\n`AuthPlugin.init()` 里(修复前,`f2eb85007^`):\n\n```ts\ncache = await (ctx as { getServiceAsync?: (n: string) => Promise< unknown > }).getServiceAsync?.('cache');\n```\n\n- `cache` 由 `CacheServicePlugin` 通过 `providesServices = ['cache']` 提供 —— 是一个\n  workspace 提供的服务,正是该门禁的判定对象;\n- 修复前的 `AuthPlugin` 声明里没有任何一条覆盖它(`requiresServices = ['data', 'manifest']`,\n  依赖里也没有 `com.objectstack.service.cache`);\n- 换句话说,这**本该**在 #4471 门禁下判红,却因为 callee 名字是 `getServiceAsync` 而完全不可见。\n  代价见 #4772:showcase 冷启里 21ms 的顺序差把 `undefined` 冻进了 better-auth 配置,\n  多节点部署的限流计数永远到不了共享存储(ADR-0069 D2 宣称了运行时没交付的能力)。\n\n## 当前是否已经红?\n\n否。今天 `packages/**` 里的 `getServiceAsync` 调用点(`rest/src/rest-server.ts`、\n`runtime/src/http-dispatcher.ts`、`runtime/src/dispatcher-plugin.ts`)都在请求期路径上,\n不在任何插件的 `init()` 里 —— 所以这是一个**潜伏的洞**,不是现存的红。\n补上词表大概率仍然是绿的,应该顺手做掉。\n\n## 建议\n\n把 `getServiceAsync`(以及 `hasService` 之类真正读注册表的入口,如果确认存在)加进该脚本的\nlookup 词表,并补一条 self-test:`init()` 里未声明的 `getServiceAsync('X')` 必须判红。\n需要顺带核对 `--list` 的边名输出(现在硬编码写作 `getService('X')`)。\n\n## 为什么不在 #4777 里一并做\n\n#4777 建立的是另一条规则(「读注册表可以,**记账**不行」),两条门禁互补:\n**#4471 说「你得声明」,#4777 说「你没声明就不许记账」。** 扩 #4471 的词表是它自己的\nscope,而且改动会波及一条与本次派发不同的判定语义,单独一 PR 更干净。\n\n发现于:PR #4833(#4777)。\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 4919,
+  "kind": "pull_request",
+  "title": "docs(adr-0078): 状态行与实现对齐 —— 完整性闸门已落地,逐阶段标注 (#4787)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T16:11:57Z",
+  "updated_at": "2026-08-03T16:18:55Z",
+  "closed_at": "2026-08-03T16:18:54Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T16:18:54Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4919",
+  "body": "Fixes #4787\n\nADR-0078 的状态行说「核心机制未建」,而那道机制早已合并四次。一份状态与实现相反的 ADR 本身就是误导源:后来者读到「未建」,要么重新立项,要么绕开一道**已经承重**的闸门。\n\n## 一、先核实前提,再动手\n\n不信议题的说法,逐条在 `origin/main`(`3edff5cf9`)上查证。\n\n**状态行现状** —— 仍是原文,没有被别人改过:\n\n> `**Status**: Proposed (2026-06-28) — philosophy adopted piecemeal, core mechanism unbuilt (2026-07-16 audit): the shared per-type completeness predicate in @objectstack/spec and the validate-functional-completeness lint do NOT exist`\n\n**闸门在哪(代码,不是议题的说法)：**\n\n| 层 | 文件 | 证据 |\n|---|---|---|\n| 共享谓词 | `packages/spec/src/kernel/functional-completeness.ts` | `checkFieldCompleteness` / `checkViewCompleteness` / `checkWebhookCompleteness`,规则 id 由 `FUNCTIONAL_COMPLETENESS_RULES` 钉住 |\n| 作者期闸门 | `packages/lint/src/validate-functional-completeness.ts` | 在 `packages/lint/src/authoring-rules.ts` 注册为 `tier: 'gating'` / `input: 'normalized'` / `commands: ALL` |\n| 注册期孪生 | `packages/objectql/src/registry.ts` | `import { … checkFieldCompleteness } from '@objectstack/spec/kernel'`,`[ADR-0078 Phase 4]` 一次性 per-object 诊断 |\n| 运行时二例 | `packages/plugins/plugin-webhooks/src/auto-enqueuer.ts` | 零 trigger 跳过点带 `webhook/without-triggers` 告警 |\n\n**CI 调用点:**\n\n- `.github/workflows/ci.yml` job **Test Core (shard/2)** → `pnpm turbo run test $FILTERS --concurrency=4`,覆盖 `functional-completeness.test.ts`(24 例)、`validate-functional-completeness.test.ts`(8 例)、`registry.test.ts`、`auto-enqueuer.test.ts`。\n- 闸门本身通过 `AUTHORING_COMMANDS = ['validate', 'build', 'lint']` 生效:`packages/cli/src/commands/{validate,compile,lint}.ts` 均调用 `runAuthoringRules(...)`,`gating` 层 error 级发现直接让命令非零退出。\n- `.github/workflows/lint.yml` 的 `pnpm check:i18n-coverage` 会在 CI 里用构建后的 CLI 跑 `os lint`(`scripts/check-i18n-coverage.mjs`),因此这条链路在 CI 内确实被执行到(该步只消费 `--json`,不以完整性发现为门,故上表把 gating 归到 CLI 命令自身)。\n- 本 PR 新增的锚点由 `.github/workflows/lint.yml` 的 `pnpm check:adr-anchors` 覆盖。\n\n**结论:议题前提成立**,且比议题描述更细 —— 并非四个阶段都在本仓落地(见下)。\n\n## 二、逐阶段核对(为什么不笼统标「已完成」)\n\n分阶段的 ADR 标成「全做完了」比标成「未开始」更有害,因为它会让人不再去查。按**本仓能证明的部分**打钩:\n\n| 阶段 | 判定 | 证据 |\n|---|---|---|\n| **Phase 1** 共享谓词 + `validate-functional-completeness` | ✅ 已落地 | #4547;规则 `field/summary-without-operations`、`field/formula-without-expression`、`field/relationship-without-reference`、`field/choice-without-options`(`select`/`radio` error,`checkboxes` warning)、`view/layout-without-binding`(warning) |\n| **Phase 2** 物化路径不得吞掉作者写的配置 | 🟡 **只落地框架侧** | #4577 加了 `BlueprintFieldSchema.expression` 槽位与 strict/lenient 键位对齐钉子;`objectBody`/`editBuildFieldDef` 的 allow-list 改写在 `cloud` 仓,**本 session 无该仓访问权,不予背书** |\n| **Phase 3** Tier-A 余项 + Tier-B 逐条验证 | ✅ 在验证支持的范围内 | #4565 落 `webhook/without-triggers`;action-`locations` / approval-approvers 核查后发现**早已**是独立校验器(`validate-action-locations.ts`、`validate-approval-approvers.ts`);nav target 归到 ADR-0072(#4574)。**故意未落**:`dataset` 零 measure、cron 合法性(均未验证);另有三项是运行时/驱动缺口,根本不是 authoring-lint 项 |\n| **Phase 4** 注册期诊断 / 生成式遍历 | ✅ 已裁决 | #4599:注册期诊断**建**(warn 不 throw),生成式规则遍历**否决而非推迟** |\n| **§2 cloud graph-lint 复用同一谓词** | ⬜ **仍未落地** | 框架已导出谓词,但本仓无法证明 cloud 在消费;正文标为「唯一会悄悄腐烂的开口」 |\n\n## 三、状态词的选择依据\n\n不自创。翻仓内已落地 ADR 的写法(`0007`/`0015`/`0023`/`0029` 等),house form 是:\n\n```\nAccepted — 〔已实现部分〕; 〔待办部分〕 pending (〔归属〕) (proposed YYYY-MM-DD · calibrated YYYY-MM-DD)\n```\n\n本 ADR 取:\n\n> `Accepted — framework implemented; the cloud half of §2/§3 pending (cloud) (proposed 2026-06-28 · calibrated 2026-08-03)`\n\n`Accepted` 而非 `Implemented`,因为仓内没有 `Implemented` 这个独立状态词;`framework implemented; … pending (cloud)` 精确对应「本仓已落地、cloud 侧未证」的实际形状。阶段状态的 ✅ 标注沿用 ADR-0010 的 `Phase N — ✅ **Implemented**` 写法。\n\n## 四、正文一并更新(否则只是把矛盾换个地方)\n\n- **§2** 两条 bullet 分别标 ✅ 已发(附注册的 `tier`/`input`/`commands`)与 ⬜ cloud 未落地;\n- **§3 / §4** 各加 landing note;§4 从「optional, ratcheted」改为「Phase 4 已建」,写明 choke point 是 `SchemaRegistry.registerObject`、**warn 不 throw** 的理由(§1 的 error 是「这个实例死了」,不是「系统死了」);\n- **新增决策 §6** —— 议题点名要求可见的两条纪律:\n  1. **一条规则只有带上让它成立的那行运行时静默跳过点才能上线**(fail-open sharing rule 三文件一读即崩;姊妹战役曾发出四条自信但错误的处方);\n  2. **运行时注释对空值的「祝福」必须另有证据证明该模式仍可达** —— webhook 跳过点祝福的 \"manual-only\" 模式已被 #3196 删除。\n  两条推论都**已有测试钉住**(`functional-completeness.test.ts:100` 钉 `multiselect` NON-rule;`:170` 断言 webhook 发现必须带第二处引证),正文如实写明;\n- **Phasing / Consequences / Non-goals** 逐条更新;生成式遍历在 Non-goals 里记为**否决而非推迟**。\n\n## 五、`scripts/adr-anchors.json`(唯一的 docs 之外改动)\n\nADR-0078 现为 Accepted,而 `check-adr-anchors.mjs` 的收录标准正是「一份已接受 ADR 的决策落在了单看代码会显得随意、甚至像是可以『改进』的地方」。谓词文件正是那种地方:一个善意的后来者很可能顺手补上 `multiselect` 无 `options` 的规则,而那恰恰是在**回退**一条决策。故加一条锚点,把 §6 与 NON-rule 的理由钉回实现文件。属于议题所说的「必要的关联引用」,未动根 `package.json`、未动 `.github/workflows/`。\n\n## 验证\n\n```\n$ node scripts/check-doc-authoring.mjs\n✓ doc authoring guard: 219 files clean — no bare metadata literals.\n\n$ node scripts/check-adr-anchors.mjs\ncheck-adr-anchors: OK (18 anchored file(s), every governing ADR still referenced).\n\n$ node scripts/check-changeset-fixed.mjs\n✓ .changeset/config.json \"fixed\" group is in sync with 69 public workspace packages.\n\n$ node scripts/check-release-notes.mjs\ncheck-release-notes: OK — every released major has a curated, navigable release page.\n\n$ npx vitest run src/kernel/functional-completeness.test.ts   # packages/spec\nTest Files  1 passed (1)      Tests  24 passed (24)\n\n$ npx vitest run src/validate-functional-completeness.test.ts # packages/lint\nTest Files  1 passed (1)      Tests  8 passed (8)\n```\n\n跑后两组是为了核实正文里写的每一句「已落地」都对得上真实通过的断言,而不是照抄 changeset。\n\nChangeset:`.changeset/adr-0078-status-calibration.md`,空 frontmatter(等价 `skip-changeset`) —— 仅文档,不发版。未触碰 `content/docs/releases/`。"
+}

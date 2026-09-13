@@ -1,0 +1,36 @@
+{
+  "number": 5173,
+  "kind": "pull_request",
+  "title": "feat(plugin-email): 邮件投递接入持久化队列 —— send 走 email.send.async / sys_job_queue,三门可配置 (#5160)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T07:30:31Z",
+  "updated_at": "2026-08-04T08:03:36Z",
+  "closed_at": "2026-08-04T08:03:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T08:03:34Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5173",
+  "body": "Fixes objectstack-ai/objectstack#5160\n\n接线单,不是造基建:三块部件都在,这里把它们连起来,并给出显式开关。默认行为不变。\n\n## 做了什么\n\n开启后 `send()` 的语义变为:落 `sys_email` 行(`queued`)→ `publish('email.send.async', { rowId }, …)` → 立即返回 `{ id, status: 'queued' }`;worker 用 `deliverPersistedRow(row)` 把**同一行**推到 `sent` / `failed`,`maxAttempts` 耗尽由队列转 DLQ。`'queued'` 已在 `EmailDeliveryStatus` 里,**没碰 `packages/spec`**。\n\n三门,全部默认关:\n\n| 门 | 写法 | 兑现不了时 |\n|---|---|---|\n| 构造期 | `new EmailServicePlugin({ queueDelivery: true })` | **抛错,boot 失败** |\n| CLI | `OS_EMAIL_QUEUE_ENABLED=true` / `config.email.queueDelivery` | 同上 |\n| 设置页 | Settings → Mail → Durable queue delivery(热生效) | error 日志 + 内联回退继续发信 |\n\n顺带修掉工单点名的既有缺陷:订阅者原本是 `svc.send(msg.data)`,每次队列重试**插一条新 `sys_email` 行** —— 重试 5 次留 5 行,4 行永久 `failed`,没有一行带真实尝试次数。改为按 `rowId` → `deliverPersistedRow`,一信一行,`attempt_count` 在同一行上累计。老载荷(裸 `SendEmailInput`)仍接受,走内联投递作为迁移窗口。\n\n## 三处对裁定的调整 / 反驳(请重点看)\n\n### 1. 行内重试与队列重试的关系 —— 收敛成一个预算\n\n工单要我想清楚这条。结论:**队列模式下队列独占重试,行内循环钉死为每次投递 1 次尝试;`maxAttempts` 由现有 `retries` 推导(`retries + 1`)**,不新开配置。\n\n理由:`retries` 今天的含义就是\"总共尝试 retries + 1 次\"。沿用它,翻开关改变的是重试**发生在哪里**(持久化、退避 1s→2s→4s 封顶 5min,而非进程内封顶 2s),而不是**发生几次** —— 两层永远不可能相乘成 5×5=25 次连接。用例 `honours maxAttempts:1 so the queue owns the retry` 直接钉这条。\n\n也没有让 `DbQueueAdapter` 的 `defaultMaxAttempts: 3` 兜底 —— 那会变成第二套没人写下来的配置;`publish` 每次都显式传算出来的值。另外 `maxAttempts` 和 legacy 的 `retries` **两个字段都填**且保持一致:`MemoryQueueAdapter` 只读 `retries`,只传 `maxAttempts` 会让它静默只试一次。两个字段都在 `QueuePublishOptions` 上声明着,这是把契约填完整,不是容忍方言。\n\n### 2. 构造/CLI 门抛错的**时机**:`kernel:ready`,不是 `init()`\n\n同意\"显式声明兑现不了就响亮失败\"(#5132 判例),但断言不能写在 `init()`:Phase 1 期间队列插件可能还没注册,内核的 core fallback 更是在 Phase 1 **之后**才注入 —— 那正是 AGENTS.md「never record a verdict the boot can still contradict」点名的形状(#4772/#4771/#4769)。放在 `kernel:ready`:注册表已定型,而 `ObjectKernel` 的 `context.trigger` 会把异常一路抛出 `bootstrap()`,boot 确实失败。\n\n**一处诚实说明**:`LiteKernel` 用的是 `triggerHook`,它 catch 住 handler 异常只记 error 日志。所以在 LiteKernel 上这个门降级成一条 error 而非 boot 失败。这不是本单能改的内核契约,已另立 #5170 记录这个不对称。\n\n### 3. \"有没有 `queue` 服务\"不是正确的判据 —— 必须问\"是不是持久化的\"\n\n这条最要紧。`ObjectKernel` 对没挂队列插件的 boot **总会**预注入一个内存 fallback(`createMemoryQueue`),它同步、不 await handler、**无持久化、无重试、无 DLQ**。裸判 `getService('queue')` 存在就 publish,等于让 `send()` 对一条谁也捞不回来的消息回答 `queued` —— #5087 在 transport 层修掉的那个洞,在上一层原样重开。\n\n所以 `resolveDurableQueue()` 读它自己挂出来的牌子(`__serviceInfo.status === 'degraded'`,ADR-0076 D12),把它当作\"没有队列\"。用例 `throws when the only queue is the kernel in-memory fallback` 就是钉这一条。\n\n## 其他边界\n\n- **`mail/test` 永远内联真发**:新增 `EmailService.sendInline()`,`mail/test` 与订阅者的 legacy 分支都走它。后者不只是风格问题 —— 队列模式下让 legacy 载荷走 `send()` 会把正在消费的消息重新 publish 出去,死循环。\n- **带附件 / 自定义 header 的消息在队列模式下退回内联**:`sys_email` 没有这两类列(`rowToNormalized` 重建不出来),入队等于投出一封被剥掉附件的邮件。选不丢数据。代价(这类邮件拿不到持久化保证)已另立 #5172。\n- 设置页的 error 只在**保存时**报,boot 首次 apply 不报 —— 同 §2 的理由,boot 期的\"没有队列\"还可能被这次 boot 自己推翻。真到发信时降级了,`EmailService` 自己有一次性 error 兜底。\n- `source: 'default'` 的 toggle 不覆盖构造期声明(沿用本文件对 `provider` 已有的 selected/default 读法),否则一次无关字段的保存就能悄悄关掉部署声明的模式。\n\n## 验证\n\n```\npnpm --filter @objectstack/plugin-email --filter @objectstack/service-settings exec vitest run\n  service-settings  15 files / 224 tests  passed\n  plugin-email      11 files / 170 tests  passed   (新增 16 + 21)\n\npnpm --filter @objectstack/cli exec vitest run src/commands/serve-email-capability.test.ts\n  17 tests passed   (新增 5)\n\npnpm --filter plugin-email --filter cli typecheck            Done\npnpm check:durability-log-level        12 seam(s), all loud or rethrowing\npnpm check:startup-registry-verdict    40 seam(s), none recording a contradictable verdict\npnpm check:init-service-contract / check:service-providers   ✓\n```\n\n`email-plugin.queue-delivery.test.ts` 跑的是**真的 `DbQueueAdapter`** 架在同时装 `sys_email` 和 `sys_job_queue` 的假引擎上,所以断言的是真实往返:SMTP 535 → 队列按退避重试 3 次 → 转 `dlq`,全程 `sys_email` **只有 1 行**、`attempt_count` 累计到 3、`error` 在案、`listFailed()` 能捞到。桩队列证不了两半是否一致,而两半不一致正是这单要修的缺陷。\n\n**默认路径逐字节一致**:`queueDelivery` 未设时 `queue` 为 `undefined`,`sendInternal` 里那段 `if (queue)` 整块跳过,其余语句与改前逐行相同。现有用例**一条断言都没改**(diff 里 `email-service.test.ts` / `email-plugin.mail-settings.test.ts` / `send-template.test.ts` 未被触及),新增用例只做加法。\n\n## 不在本单\n\n`sys_email` 存量 `queued` 行的启动清扫 = #5161(串行在本单之后);`packages/spec` 与 `content/docs/releases/` 未触碰。\n\n顺手记录、未在本 PR 修的三条:#5169(`managedRowIds` 泄漏 `persistedId`,观察级)、#5170(两个内核对 `kernel:ready` 抛错语义相反)、#5172(`sys_email` 无附件列)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_017MCKJaEomEqg4tvz4SzdNd\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017MCKJaEomEqg4tvz4SzdNd)_"
+}

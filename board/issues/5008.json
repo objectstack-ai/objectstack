@@ -1,0 +1,35 @@
+{
+  "number": 5008,
+  "kind": "pull_request",
+  "title": "feat(formula,lint): 把 RLS 判据上提到 formula,并接上 ADR-0056 D4 的 authoring gate (#4983)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T20:17:46Z",
+  "updated_at": "2026-08-03T20:39:57Z",
+  "closed_at": "2026-08-03T20:39:55Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T20:39:55Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5008",
+  "body": "Fixes #4983\n\n`isSupportedRlsExpression` 的 TSDoc 从 ADR-0056 D4 起就写着它存在的唯一理由:让 authoring 命令**拒绝**一条运行期会被静默丢弃的谓词。而它在仓内从来没有任何非测试消费者 —— 一个为了修 declared-but-never-read 而写的函数,自己就是 declared-but-never-read。本 PR 补上那个消费者,分两步,顺序是硬性的。\n\n## 第一步:判据上提(行为保持的搬迁)\n\n`sqlPredicateToCel` + `isSupportedRlsExpression` **FROM** `packages/plugins/plugin-security/src/rls-compiler.ts` **TO** `packages/formula/src/rls-predicate.ts`,可执行代码**逐字未动**,只换住址(参照 #4857 的做法)。`plugin-security` 改为从 `@objectstack/formula` 消费,**不留副本**;这两个符号从来没有出现在 plugin-security 的 entry point 导出里,所以两个包之外没有任何 import 路径变化。\n\n为什么必须先搬:`@objectstack/lint` 的包契约是 \"Depends on @objectstack/spec; never on a runtime\",判据住在 runtime 里时,lint 只剩下抄一份桥接这一条路。而桥接的边界条件(引号内字面量不重写、对 CEL 输入幂等)**就是**这道 gate 判红判绿的分界线 —— 两份实现漂移一格,linter 就会否掉运行期其实能执行的策略,是比漏报更糟的误伤方向。ADR-0058 D1 要的正是 \"a single canonical shape gate\",桥接属于那个 gate。\n\n## 第二步:lint 侧的 authoring gate\n\n新规则 `validateRlsPredicateEnforceability`,`error`,三个 authoring 命令全覆盖,作用于 `permissions[].rowLevelSecurity[].using` 与 `.check`:\n\n| id | 判据 | 修法 |\n|:--|:--|:--|\n| `rls-predicate-unenforceable` | 能解析成 CEL,但不在下推子集内(函数调用、算术、三元、跨对象路径) | 改写进可下推子集 / 把值反规范化到本对象 |\n| `rls-predicate-unparseable` | 过了遗留 SQL 桥接仍解析不了(SQL `AND` / `OR` / `LIKE`、子查询) | 改写成 canonical CEL(`&&`、双竖线) |\n\n模式照抄刚合入的 #4985:**不建模、不 grep**,直接调用消费者本人的判定 `isSupportedRlsExpression` —— 那正是 `RLSCompiler.compileFilter` 用来判断\"这条被丢弃的策略要不要 WARN\"的同一个函数,所以两边的判决按构造是同一个布尔值(测试里双向钉住)。\n\n### 报错文案说的是实测后果,不是\"不支持\"\n\n顺着 `plugin-security` 读出来的,不是推断:\n\n1. `compileExpression` → `compileCelToFilter` 返回 `!ok` → `null`,策略不贡献任何 filter;\n2. `compileFilter` 打一行请求期 WARN(`has an uncompilable predicate … and was DROPPED (no enforcement)`)—— 这是**全部**信号;\n3. **读路径(`using`)**:若它是该对象+操作下唯一适用的策略,`compileFilter` 返回 `RLS_DENY_FILTER` 哨兵并被 AND 进 where,于是该对象上每一次 select / update / delete 都**匹配零行**;若还有别的策略适用,它只是从 OR 里消失,写它的那份访问权根本不存在;\n4. **写路径(`check`,ADR-0058 D4)**:`computeWriteCheckFilter` 只收声明了 `check` 的策略,同样的丢弃让 post-image 谓词变成哨兵,`matchesFilterCondition` 必然为假,每一次 insert / update 抛 `PermissionDeniedError`。\n\n所以这不是安全漏洞 —— 运行期 fail closed,这正是它能一直活着的原因。它是一条**看起来在授权、实际在一律拒绝**的策略,而现场没有任何东西指向那一行:`os validate` / `os build` / `os lint` 今天全绿。\n\n与 sharing-rule 那条不同,CEL **语法**错误在这里报告而不是让给 `expression-invalid`:`validateStackExpressions` 根本不走 `rowLevelSecurity`,让给它等于让给没有人;而且它就算走了也判不对 —— `owner_id = current_user.id` 同时是一个 CEL 语法错误和一条能正常工作的 RLS 谓词,因为桥接先跑。\n\n## 双向证明\n\n**判红**:函数调用 / 跨对象路径 / 算术 / 三元 / SQL `AND` / 子查询,逐条点名 path(`permissions[0].rowLevelSecurity[0].using`)+ 说出后果 + 给修法。另有一条\"没有任何**别的** author-time 规则看得见这个 stack\"的测试 —— 把 fixture 灌进整张 `AUTHORING_RULES`,断言只有本规则开口,这就是 #4983 抱怨的\"过了整条工具链\"的机械化版本。\n\n**判绿**:实测扫过全仓每一条真实 RLS 谓词 —— `plugin-security` 的 `default-permission-sets.ts` 平台种子、`examples/`、dogfood fixtures、`skills/objectstack-data/SKILL.md` —— 全部可下推,**新 gate 不会让任何现有代码变红**。仓内所有不可下推的谓词都只出现在测试文件和 ADR 文档里。另外单独钉住桥接最锋利的那条边:`note = 'a = b'`(引号内的 `=` 不被重写)判绿。\n\n## 依赖方向\n\n方向是 `security → formula` 与 `lint → formula`,绝不反向。`formula/src/rls-predicate.test.ts` 用源码断言钉死:该模块的 import 说明符只能是 `['./cel-to-filter']`,且 `@objectstack/formula` 的 dependencies 只有 `@marcbachmann/cel-js` 与 `@objectstack/spec`。写成测试而不是注释,因为只在构建期出错的依赖方向不会产生任何失败断言。\n\n## 测试与验证(已 merge `origin/main` 后重跑)\n\n```\npnpm --filter @objectstack/formula test         → 14 files, 323 tests passed\npnpm --filter @objectstack/plugin-security test → 33 files, 717 tests passed\npnpm --filter @objectstack/lint test            → 56 files, 1052 tests passed\ntypecheck (formula / lint / plugin-security)    → Done ×3\neslint --no-inline-config(全部改动文件)         → clean\nnode scripts/check-adr-anchors.mjs              → OK\n```\n\n搬迁前后测试全绿:被搬函数的两个 shape 单测**逐字**跟着搬进 `formula/src/rls-predicate.test.ts`;`plugin-security` 保留消费侧断言 —— 新增一条\"编译器丢弃的谓词集合 == `isSupportedRlsExpression` 拒绝的集合\"的 corpus 测试,比把断言原样复制一份更强,也正好是新 gate 依赖的那句话。\n\n## 与 #4991 的重叠(已消解)\n\n#4991 在本 PR 推送前经 #5004 合入,且它只动了 `validate-org-axis-red-lines.ts` / `.test.ts`,**没有**碰 `authoring-rules.ts`。已 merge `origin/main`,零冲突,合并后 lint 全量 1052 tests 绿。本 PR 自始至终没有碰那两个文件。\n\n## 范围\n\n只覆盖 `permissions[].rowLevelSecurity[]`。`rowLevelSecurity` 仅声明在 `PermissionSetSchema` 上(`ObjectSchema` 没有这个键),`permissions` 是 `StackSchema` 声明的唯一 permission-set 键。顺手走一遍 `objects[].rowLevelSecurity` 或 `permissionSets` 会加进一条任何 spec 合法 stack 都到不了的分支 —— 正是 #4984 那个缺陷:读被拒别名的红线对每一个 schema 接受的 stack 都是惰性的。别名容忍属于 schema 的拒绝处,不属于消费者(Prime Directive #12)。\n"
+}

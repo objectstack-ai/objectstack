@@ -1,0 +1,33 @@
+{
+  "number": 4898,
+  "kind": "issue",
+  "title": "空 changeset 会静默卡死已 version 的发布:Release run 全绿,但 npm 和 Docker 什么都没发(17.0.0-rc.2 现在就卡着)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T14:28:38Z",
+  "updated_at": "2026-08-03T14:41:37Z",
+  "closed_at": "2026-08-03T14:41:37Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4898",
+  "body": "## 现状:17.0.0-rc.2 已 version 未发布\n\n#4422 于 14:19 合并(`3cfd9f0`),main 上所有包的 `package.json` 已经是 `17.0.0-rc.2`。随后的 Release [run 30822140425](https://github.com/objectstack-ai/objectstack/actions/runs/30822140425) **conclusion: success**。\n\n但注册表上什么都没有:\n\n```\nnpm  dist-tags: {\"latest\":\"16.1.0\",\"rc\":\"17.0.0-rc.1\"}\n     @objectstack/cli@17.0.0-rc.2 published? false\n\nghcr tags: 15.1.0, 15.1, 15, latest, 15.1.1, 16.0.0-rc.0, 16.0.0-rc.1,\n           16.0.0, 16.0, 16, 16.1.0, 16.1, 17.0.0-rc.1\n```\n\n即**版本号进了仓库,包没进注册表**,而流水线报绿。\n\n## 根因\n\n`Create Release Pull Request or Publish to npm` 这一步耗时 **0 秒**,只打了一行:\n\n```\n2026-08-03T14:23:19.5420695Z All changesets are empty; not creating PR\n```\n\nchangesets/action 的分派逻辑(简化)是:\n\n```js\nconst hasChangesets        = changesets.length !== 0;\nconst hasNonEmptyChangesets = changesets.some(c => c.releases.length > 0);\n\nswitch (true) {\n  case !hasChangesets && !hasPublishScript:  return;                  // 什么都不做\n  case !hasChangesets &&  hasPublishScript:  await publish(); return; // ← 唯一的发布入口\n  case  hasChangesets && !hasNonEmptyChangesets:\n    core.info(\"All changesets are empty; not creating PR\"); return;   // ← 落在这里\n  case  hasChangesets:                       await runVersion(); return;\n}\n```\n\n**publish 分支只在「零 pending changeset」时进入。空 changeset 依然计入 `hasChangesets`**,于是它既不产生版本 PR,也不发布 —— 静默 return,步骤成功,`published=false`,下游 `Extract published @objectstack/cli version` 和 `docker` job 全部按 `if: published == 'true'` skipped。\n\n当时 main 上的 pending 集合(用 `.changeset/pre.json` 的 `changesets` 数组扣掉已消费的 860 个后)恰好是:\n\n```\n磁盘 .md 总数: 862      已消费: 860      pending: 2\n  EMPTY  pm-skill-landing-and-ci-discipline.md   (#4892 / #4893)\n  EMPTY  release-pr-ci-gates.md                  (#4894 / #4896)\n```\n\n两个都是空 frontmatter。**任意一个单独存在都足以触发**,不是某个 PR 的个别失误。\n\n## 为什么这必然会反复发生\n\n`.github/workflows/pr-automation.yml` 的 `Check Changeset` 明确把空 changeset 定为受祝福的声明方式:\n\n> An empty-frontmatter changeset still counts — it is the sanctioned \"this PR releases nothing\" declaration, on par with the skip-changeset label.\n\n也就是说:**仓库在制度上鼓励产出的东西,恰好是会卡住发布器的输入**。只要在「版本 PR 合并 → 下一次 push 触发 publish」这个窗口里,main 上存在任何一个纯空的 pending changeset,这一轮发布就会消失,并且报绿。窗口不窄 —— 版本 PR 通常要等一段时间才合,期间落任何一个 docs/ci 类 PR 都会踩中。\n\n危险的不是卡住,是**卡住且报绿**:没有任何信号说「本该发布的东西没发」。\n\n## 修复方向\n\n**立即解堵**(小、明确):删掉 main 上这两个 pending 的空 changeset。空 frontmatter 的 changeset `releases` 为空,对任何包的 CHANGELOG 都不产生条目,删除不丢信息 —— 它唯一的作用是满足 `Check Changeset`,而那两个 PR 早已合并、闸门早已通过。删完后下一次 main push 走 `!hasChangesets && hasPublishScript` 分支,`changeset publish` 补发 17.0.0-rc.2,Docker job 随之触发。\n\n**系统性修复**(需要拍板,择一):\n\n1. **补一次幂等 publish**:在 changesets/action 之后加一步,当 `published != 'true'` 但工作区存在未发布版本时执行 `pnpm run release`。`changeset publish` 本身幂等 —— 已在 npm 上的版本会跳过。改动最小,直接消除「该发没发」这一类。\n2. **在 version 阶段就消费掉空 changeset**:让 `pnpm run version` 把空 changeset 记入 `pre.json` / 删除,使 pending 集合永不含纯空项。更贴近 changesets 的语义,但要处理 pre 模式下的记账。\n3. **换掉空 changeset 这个约定**:`Check Changeset` 不再接受空 changeset,只留 `skip-changeset` 标签一条路。最省事,但会让「本 PR 不发布」这件事失去仓库内的书面痕迹。\n\n无论选哪条,都建议**加一条断言**:Release job 在 main 的 `package.json` 版本不存在于 npm 时,若本次没有 publish,应当 `::error::` 而不是静默成功 —— 这才是今天真正缺失的那个信号。\n\n---\n\n发现于 #4894 / #4896 合并后跟进 #4422 的过程中。当前 17.0.0-rc.2 处于卡住状态,建议优先处理「立即解堵」。"
+}

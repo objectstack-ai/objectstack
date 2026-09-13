@@ -1,0 +1,36 @@
+{
+  "number": 4986,
+  "kind": "issue",
+  "title": "driver-sql: 表级 `{ fields, unique: true }` 在 tenant-scoped 对象上落成平台级 UNIQUE —— normalizeDeclaredIndex 不补租户列(#4698 实例 2 移交)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "priority:p0"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T18:43:27Z",
+  "updated_at": "2026-08-04T12:53:43Z",
+  "closed_at": "2026-08-04T12:53:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4986",
+  "body": "**未认领。** 从 #4698 移交(devx 车道核实、按锚定规则归 engine 车道):三例中唯一仍活着且不属 lint 层的一例。\n\n## 现象(#4698 的 dev 在当前 main 上复核过,非陈述转抄)\n\n对 tenant-scoped 对象声明表级唯一索引:\n\n```ts\nindexes: [{ fields: ['name'], unique: true }]\n```\n\n`normalizeDeclaredIndex`(`packages/plugins/driver-sql/src/schema-drift.ts:813`)**原样保留声明的列**,不补租户列 —— 产出的是**平台级** `UNIQUE(name)`:任意两个租户不能有同名记录。而字段级 `unique: true` 走的 `uniqueIndexesFromFields` 会构造 `(tenantField, col)` 复合索引,语义正确。同一个意图、两种写法、两种语义。\n\n## 为什么不能在 lint 层修(#4698 已论证,勿再试)\n\n判定需要的事实 —— \"这个对象是否 tenant-scoped\" —— **不在作者写的元数据里**:`organization_id` 由 kernel 在注册期注入。`packages/lint/src/data-model-rules.ts:110` 的 `lintUniqueDeclarations` 自己的注释就写明拒绝在 authoring 期猜租户性,猜一半会错一半。修复点只能在 driver-sql 的 normalize 一侧(注册期,租户注入已发生)。\n\n## 建议方向\n\n`normalizeDeclaredIndex` 在对象为 tenant-scoped 时把租户列并进声明的唯一索引(与 `uniqueIndexesFromFields` 同语义),或至少在产出平台级 UNIQUE 前响亮报错让作者显式选择。注意 schema-drift 检测两侧(declared vs actual)要同步改,否则会制造新的假漂移;#4884(drift 检测读不了 COALESCE 索引列)在同一文件作业过,先看它的结论。\n\n## 关联\n\n- #4698(来源,实例 2;实例 3 已由 PR #4985 落地)\n- #4884(同文件的 drift 检测缺陷)"
+}

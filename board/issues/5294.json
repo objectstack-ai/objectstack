@@ -1,0 +1,35 @@
+{
+  "number": 5294,
+  "kind": "pull_request",
+  "title": "fix(auth,verify)!: organization/create 判实际生效的 posture，降级部署不再产出无墙的组织 (#5261)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T16:02:20Z",
+  "updated_at": "2026-08-04T16:24:01Z",
+  "closed_at": "2026-08-04T16:23:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T16:23:59Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5294",
+  "body": "Fixes objectstack-ai/objectstack#5261\n\n维护者 2026-08-04 裁定：**选 B**（闸门改判「实际生效的 posture」），破坏性能力收缩，搭 **v17** 主版本车。\n\n## 问题\n\n#5233 修好之后，`auth-manager.ts` 的两个站点读的是**两个不同的事实**：\n\n| 站点 | 读什么 |\n|---|---|\n| `organizationHooks.beforeCreateOrganization` | `postureEnforcesWall(resolveTenancyPosture())` —— 操作者**请求**的 posture |\n| `/auth/config` 的 `features.multiOrgEnabled` | `tenancy?.posture ?? resolveTenancyPosture()` —— **实际生效**的 posture |\n\n只有一种形状让两者分叉，而那恰恰是最不该放行的一种 —— **ADR-0093 D5 降级态**：请求了 `isolated`/`group`，但企业包 `@objectstack/organizations` 缺席，`tenancy.posture` 解析为 `single` 且 `degraded=true`。此时闸门**放行**，`/auth/config` 却 `multiOrgEnabled=false` 把入口**藏起来**：UI 不给按钮而 API 打得通，且建出来的每个组织都是**没有任何引擎强制的租户边界** —— 声明了但没强制，ADR-0049 最讨厌的那一类，发生在部署层。\n\n一条独立佐证：`packages/spec` 的 `PUBLIC_AUTH_FEATURES` 早就声明 `multiOrgEnabled` 把守 `sys_organization.actions.create_organization`，并写明它 \"Reflects ACTUAL multi-tenancy capability … not just the requested posture\"。**出线的一直是路由**，不是 flag —— 本 PR 让路由回到它自己的声明契约上。\n\n## 改法（方案 B）\n\n`packages/plugins/plugin-auth/src/auth-manager.ts`，判据抽成一处、两个站点共用同一次求值：\n\n```ts\nprivate effectiveTenancyPosture(): TenancyPosture {\n  return this.config.getTenancy?.()?.posture ?? resolveTenancyPosture();\n}\nprivate multiOrgPostureEffective(): boolean {\n  return postureEnforcesWall(this.effectiveTenancyPosture());\n}\n```\n\n`tenancy` 服务权威，是因为只有它知道墙**是否真的立着**（它 probe 企业 `org-scoping` 运行时，把立不住的请求降解为 `single` + `degraded`）；只有从未注册该服务的精简嵌入才回落到 env 解析。`getPublicConfig()` 现在调用的是**同一个**方法 —— 两站点不再是「两处写法碰巧一致」，而是**一次求值**。\n\n仍是 per-request live 读、不缓存：`org-scoping` 在 plugin-auth 之后注册，墙确实是 boot 中途立起来的，冻结任何一层都会把部署钉死在立墙前的状态（AGENTS.md 的 startup-registry 规则）。\n\n## 两笔代价的处置\n\n**代价一（有意为之）**：没装企业包的部署将**完全无法创建组织**，任何 env 组合都不行。\n\n| 部署形状 | 改前 | 改后 |\n|---|---|---|\n| 有企业包，`isolated` / `group`（墙真立着） | 200 | **200**（不变） |\n| **请求了墙但企业包缺席（D5 降级态）** | 200 | **403** ⚠️ |\n| `single` / 两个 knob 都不设 | 403 | 403（不变） |\n| 未注册 `tenancy` 服务的精简嵌入 | 按 env | 按 env（不变） |\n\n`serve.ts` 本就在降级态**默认拒绝启动**（要 `OS_ALLOW_DEGRADED_TENANCY=1`），所以这条收缩命中的是一个已经需要显式选择才能到达的形状：从此那里的 org-create 路由也一并拒绝，而不是半通不通。cloud 控制面与任何装了企业包的部署不受影响。\n\n**代价二（未删测试）**：`packages/qa/dogfood/test/org-create-default-team.dogfood.test.ts`（#3624 回归）靠「boot 后翻 env、闸门 live 读」开路，本次收缩把这个绕法关死了。按 issue 自己的建议给它**另一条开路方式**：\n\n`@objectstack/verify` 的 `BootOptions.multiTenant` 新增取值 **`'posture-only'`** —— 注册一个内置的 `org-scoping` 服务替身（`SimulatedOrgScopingPlugin`），挂在企业插件自己的槽位上，于是 `tenancy` 服务解析出真实、**非降级**的 `isolated` posture，整个栈口径一致。\n\n这比原来的 env flip **更诚实**：原来是单租户栈只对一个闸门撒谎（BYPASS），现在模拟的是**真实的有墙部署**（DEPLOYMENT）。dogfood 因此新增一条「守卫的守卫」用例，直接断言 `tenancy.posture === 'isolated'`、`degraded === false` 且 `/auth/config` 的 `multiOrgEnabled === true` —— 若替身哪天失效，报出来的会是「前置条件塌了」，而不是把人引去查一个并不存在的 team-insert bug。\n\n⛔ 该选项**明确声明不做任何租户隔离**（不 stamp `organization_id`、不 scope 查询）：它让部署的 **posture** 为真，不是让**墙**为真。文档里写死了这条边界，并点名「用它断言跨租户隔离 = #4700 那个 constant-false 能力探针反过来戴一次面具」。跨租户隔离的唯一诚实证明仍是 `multiTenant: true` + 真实企业包，那些 gate 在本仓**继续 skip 而不是假装通过**。\n\n新增 `packages/verify/src/harness.posture-only.test.ts` 覆盖这个新公共 API，**刻意不 mock** `@objectstack/organizations`（与 `harness.posture.test.ts` 相反）—— 待证命题正是「它根本不需要企业包」，旁边摆一个 mock 会让该命题不可证伪。\n\n## 那颗自相矛盾的钉子\n\n`org-create-posture-gate.test.ts` 里带 `pinned as CURRENT behaviour (#5261)` 的用例是 #5267 **故意**钉住旧行为的，本次就是那个「将来」：断言、用例名、注释、文件头一起翻，**没有留下**说着「这是当前行为」却断言着新行为的钉子（全仓 grep `pinned as CURRENT behaviour` 只剩本 PR 里那句叙述历史的散文）。\n\n不变量表（#5267 建立的「flag 必须精确预测路由的答案」）现在**覆盖每一种形状、不再挖例外**：此前它显式排除降级行，因为那里两站点按设计答不同的事实；**例外的消失本身就是这次改动的证明**。新增三行降级用例（`isolated` 降级、`group` 降级、两个 env knob 一起喊 yes 的降级）。\n\n测试沿用 #5267 的形状：真实 better-auth 管线（真实 sign-up 拿 cookie → `POST /organization/create` 经 `AuthManager.handleRequest`），断言真实 HTTP status/body；每个场景同时断言 `/auth/config`。另加一条「墙在 plugin-auth **之后**才立起来」的 live-probe 用例。\n\n## 对抗性验证（真实执行）\n\n**1. 对未修复源码跑**（只把闸门判据回退成 `postureEnforcesWall(resolveTenancyPosture())`）：\n\n```\n FAIL  src/org-create-posture-gate.test.ts > DEGRADED (isolated requested, no enterprise runtime): the gate REFUSES — #5261\n AssertionError: expected 200 to be 403\n FAIL  … > sees the enterprise runtime that registers AFTER plugin-auth — the probe is live too\n FAIL  … > 'tenancy service: isolated requested +…' / 'group requested + DE…' / 'DEGRADED with both e…'\n\n Test Files  1 failed (1)\n      Tests  7 failed | 18 passed (25)\n```\n\n修复恢复后：`Test Files 1 passed (1) / Tests 25 passed (25)`。\n\n**2. 把 dogfood 换回旧的 env-flip 绕法**（证明新开路方式是承重的、代价二真实存在）：\n\n```\n × boots a genuinely walled posture …   AssertionError: expected 'single' to be 'isolated'\n × creates the org AND its default team without a 500\n   AssertionError: organization/create returned 403:\n   {\"message\":\"Creating additional organizations is disabled on this deployment.\"}\n Test Files  1 failed (1) / Tests  2 failed (2)\n```\n\n## 测试\n\n```\npnpm --filter @objectstack/plugin-auth test   → 34 files / 750 tests passed\npnpm --filter @objectstack/verify test        → 4 files / 17 tests passed\n@objectstack/dogfood（全量）                   → 85 passed | 1 skipped (86 files) / 506 passed | 3 skipped\nturbo typecheck --filter=plugin-auth --filter=verify --filter=dogfood → 63/63 OK\neslint --no-inline-config（改动文件）          → exit 0\ncheck:engine-double-contract                  → OK（22 pinned / 31 DEBT / 1 exempt）\ncheck:adr-anchors / check:doc-authoring / check:org-identifier /\ncheck:role-word / check:startup-registry-verdict → 全部 OK\n```\n\nchangeset：`@objectstack/plugin-auth` **major**（能力收缩讲清楚 + 迁移指引）、`@objectstack/verify` **minor**。⛔ 未触碰 `content/docs/releases/`。\n\n## 证据边界\n\n- 断言的是**框架侧**真实 HTTP 管线与 in-process dogfood 栈；没有跑真实 `objectstack serve` + 真实企业许可（本仓装不了 cloud-private 的 `@objectstack/organizations`）。\n- 因此「有企业包时墙真的立着并隔离数据」这条**不在本 PR 的证据范围内** —— 本 PR 只证明 posture 一旦生效闸门放行、不生效则拒绝。跨租户隔离的证明仍在 cloud 的 security-enterprise 集成测试。\n- `'posture-only'` 替身只让 posture 为真，不隔离任何数据；本 PR 没有任何一条断言依赖它去证明隔离。\n- 文件面严格遵守：未碰 `reconcile-membership.ts`(#5205)、`objectql`/`plugin-dev`/`runtime`/`driver-sql`/`cli`(#5262)、`packages/types/src/env.ts`、`content/docs/releases/`。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_015W6nhsDrz6zWQc8je12a1t\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015W6nhsDrz6zWQc8je12a1t)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 4910,
+  "kind": "issue",
+  "title": "「v17」入站 rateLimit 接执行:ApiEndpoint / HttpServer 的 RateLimitConfig 推导为 runtime token bucket 配置,dispatcher 生效(#4686 拆向之一)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "protocol:breaking"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T15:42:33Z",
+  "updated_at": "2026-08-03T20:30:11Z",
+  "closed_at": "2026-08-03T20:30:11Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4910",
+  "body": "Part of #4686。维护者裁决(2026-08-03,PM 会话 `session_01Ehu85kbvMcrNTUJjwxvLJ9` 经 AskUserQuestion):**拆向 —— 入站接执行,出站摘除**。本单是入站半边;出站半边(connector 侧摘除)见兄弟子单,两者相互独立、不共享文件面。\n\n## 事实基础(#4686 立单 + 2026-08-03 复核,C9 改名后)\n\n- `packages/spec/src/shared/http.zod.ts:127` 的 `RateLimitConfigSchema`,三个嵌入点全部从作者面可达:\n  - `api/endpoint.zod.ts` 的 `ApiEndpointSchema.rateLimit`\n  - `api/registry.zod.ts` 的 `ApiEndpointRegistrationSchema.rateLimit`\n  - `system/http-server.zod.ts` 的 `HttpServerConfigSchema.security.rateLimit`\n- **全仓零 runtime reader**(spec 之外零命中,阳性对照已验证扫描器有效)。作者写下去解析通过,然后什么也不发生。\n- `packages/runtime/src/security/rate-limit.ts` 有一个**真正在干活**的 in-memory token bucket(`RateLimitBucketConfig`:`capacity` / `refillPerSec` / `defaultCost`),服务入站 dispatcher 的 429 短路,但**不 import spec**。\n\n## 范围\n\n把作者面声明接到已存在的执行器上:\n\n1. 从授权配置推导 bucket 配置(#4686 给的推导:`capacity = maxRequests`,`refillPerSec = maxRequests / (windowMs / 1000)` —— 以实际 schema 键为准,开工先核 `origin/main` 现状)。\n2. 接线三个嵌入点;endpoint 级与 server 级的优先级语义由实现者提出并写进 schema describe + 文档(建议:endpoint 覆盖 server,与同文件既有 security 语义一致,不确定就升级)。\n3. **逐键活性**:接线后 `RateLimitConfigSchema` 的每个键要么被执行器消费、要么按 ADR-0049 退役 —— 不允许接了一半、剩下的键继续静默(#4001 战役的 declared = enforced 不变量)。哪些键 bucket 表达不了(如有 `burstCapacity` / `respectUpstreamLimits` 一类),逐键实测后处置,不猜。\n\n## ⚠️ 激活语义 = 本单的 breaking 面\n\n存量栈里写过 `rateLimit` 配置的,升级 v17 后从「惰性」变「真限流」—— 可能开始吃 429。这是有意的(declared = enforced 的强实现),但必须:\n\n- ADR-0087 **D3 semantic migration** 条目 + upgrade guide(走生成管线,不手编);\n- major changeset,FROM → TO 写清「你的配置将开始生效」;\n- **v17 窗口内落地**(`.changeset/pre.json` mode:pre / tag:rc 关闭后无 major 通道)。\n\n## 验收\n\n- 一条端到端测试:授权 `rateLimit` 配置经真实 dispatcher 路径产生 429(declared=enforced 探针,先证红:未接线时同配置不限流)。\n- 逐键消费证据或退役登记,无静默残留键。\n- spec 十道 `check:*` + 全仓 typecheck 绿;三个示例应用 `validate` 过。\n- ⛔ 不碰 `content/docs/releases/`;出站/connector 侧零改动(那是兄弟子单的面)。\n\n关联:#4686(父单,裁决记录)、#4684(C9 改名收敛,已关)、ADR-0049、ADR-0087、Prime Directive #10。"
+}

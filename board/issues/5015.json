@@ -1,0 +1,38 @@
+{
+  "number": 5015,
+  "kind": "issue",
+  "title": "ADR-0049 定去留:`NotificationActionSchema` / `EmbedConfigSchema` 实测没有授权门(#4001 批 14 改判的两个站点)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue",
+    "protocol:breaking",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T20:28:43Z",
+  "updated_at": "2026-08-04T19:43:18Z",
+  "closed_at": "2026-08-04T19:43:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5015",
+  "body": "与 #4988 同类。#4001 批 14 对 `ui/` 六个文件逐个做门测量,11 个 strip 站点里 **9 个是真门(已收紧)、2 个实测没有门**。这两个不收紧 —— *「一个被精确校验的死槽位是更有说服力的谎言」*(#4583)—— 但它们需要的判定是 ADR-0049 enforce-or-remove,不是棘轮。\n\n## 两个站点\n\n| schema | 文件 |\n|---|---|\n| `NotificationActionSchema` | `packages/spec/src/ui/notification.zod.ts` |\n| `EmbedConfigSchema` | `packages/spec/src/ui/sharing.zod.ts` |\n\n注意 `sharing.zod.ts` 是**同文件内劈开**的 —— 它的兄弟 `SharingConfigSchema` 是活门(`FormViewSchema.sharing` 承载,`rest-server.ts` 真的读 `sharing.allowAnonymous` / `sharing.publicLink` 来挂匿名表单路由,两个示例应用都在写),批 14 已收紧。这是账本第一次遇到一行两判,也是「per SCHEMA, not per file」这句话第一次真正生效。\n\n## 三条独立测量(2026-08-03,均带阳性对照,同一次运行)\n\n1. **承载键** —— `packages/spec/src` 里除 `ui/index.ts` barrel 外无任何模块 import 这两个模块……\n   - `ui/notification.zod` 的 importer 精确等于 `['ui/index.ts']`;\n   - `ui/sharing.zod` 的 importer 是 `['ui/index.ts', 'ui/view.zod.ts']`,而 `view.zod.ts` 点名的是 `SharingConfigSchema`;**全仓没有任何模块提到 `EmbedConfigSchema`**。\n   - (匹配器按 specifier **解析**而非子串比对 —— 仓里有两个 `sharing.zod`,子串法会把 `stack.zod.ts` / `security/index.ts` 误记为 UI 那个的 importer。这一条是先证红发现的。)\n2. **图可达性** —— 从 24 个 metadata-type root 加 `defineStack` 的 `ObjectStackSchema` 做 BFS(`build-schemas.ts` 给 #4650 删除检查用的同一套闭包),6860 个节点,两个都走不到。同一次运行里四个阳性对照 `PageSchema` / `ActionSchema` / `DashboardWidgetSchema` / `WebhookSchema` 全部 `root-graph`;注入一个合成承载键后两个都翻成 `root-graph`。**对照通过,所以「不可达」是关于图的事实。**\n3. **调用点** —— framework / objectui 里除各自单测外没有任何 `.parse()`。\n\n## 一个值得单独记的细节:objectui 消费的是 *shape*,不是 parse\n\n`NotificationActionSchema` 并非无人问津 —— objectui 的 `animation-notification-spec-parity.test.tsx` 读 `NotificationActionSchema.shape.variant`,双向 pin 它自己手写的 `NotificationActionButton` 接口。但那是把 schema 当**词汇表**用,和 posture 完全无关:收紧它不会让那条 pin 更强一分。\n\n这恰好说明「有消费者」不等于「有授权门」,也是这两个站点该走 ADR-0049 而不是走棘轮的原因。\n\n## 需要的判定\n\n- `EmbedConfigSchema`:iframe 嵌入从来没有承载键。是**补一个**(哪个 metadata type 该带 `embed`?),还是按 enforce-or-remove **退役**?\n- `NotificationActionSchema`:#4610 已经因为零消费者删掉了它的两个 wrapper(`NotificationSchema` / `NotificationConfigSchema`),这个 action 形状是那次留下的孤儿。留作纯词汇表(那就该在文件里说清它不是可授权面),还是一并退役?\n\n批 14 已在两处 schema 的 JSDoc + 测试 pin + 账本行三处留痕,pin 是**会红的**:任何人给这两个形状接上承载键,那条断言立刻红并把人指回这里。\n\n未指派。\n"
+}

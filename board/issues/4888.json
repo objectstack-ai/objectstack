@@ -1,0 +1,32 @@
+{
+  "number": 4888,
+  "kind": "issue",
+  "title": "app-showcase boots with three declared-but-inert wirings: a job with no handler, a capability that never materializes, and a retired retry alias",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T13:12:19Z",
+  "updated_at": "2026-08-03T18:18:23Z",
+  "closed_at": "2026-08-03T18:18:23Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4888",
+  "body": "## Context\n\n`examples/app-showcase` is the reference app — the thing the coverage test keeps\nhonest and the thing people copy. Three of its declarations are accepted at\nauthoring time and then quietly do nothing at runtime, each announced by a boot\nwarning. All three are the \"declared, not enforced\" shape the repo treats as a\nbug class (ADR-0049), so they read as noise but are really dead wiring.\n\n## 1. Scheduled job whose handler doesn't exist\n\n```\nWARN [AppPlugin] job handler not found in bundle.functions — skipping\n  {\"appId\":\"com.example.showcase\",\"job\":\"showcase_health_sweep\",\"handler\":\"sweepProjectHealth\"}\n```\n\n`src/automation/jobs/index.ts:11` declares `handler: 'sweepProjectHealth'`, and\nthat is the **only** occurrence of the string in the whole example — no function\nof that name is exported into the bundle. So `showcase_health_sweep` is\nregistered and **never runs**.\n\nThe showcase is where \"scheduled job\" is supposed to be demonstrated end-to-end,\nso this is a coverage hole as much as a warning: the capability appears exercised\nwhile nothing executes.\n\n## 2. Capability declared, referenced by a permission set, never materialized\n\n```\nWARN [security] capability has no owning package — not materialized {\"name\":\"showcase.export_data\"}\n```\n\n`src/security/capabilities.ts:32` declares `showcase.export_data`, and\n`src/security/permission-sets.ts:190` puts it in `OpsPermissionSet.systemPermissions`\nalongside the real `setup.access`.\n\nBecause it never materializes, that permission-set entry grants nothing — a\nsecurity declaration that reads as enforcement and isn't. Whatever the fix is\n(give it an owning package, or drop it and the reference together), it should not\nstay in the reference app in a state where copying it produces an inert grant.\n\n## 3. Retired retry alias in the flow definitions\n\n```\ndefineStack: flows[24].nodes[1].config.retry.backoffMs: 'retryDelayMs' → 'backoffMs'\n  (converted at load; conversion 'retry-policy-converged', retires in protocol 18).\n  Update the source to the canonical shape — the conversion stops running then.\n```\n\nTwo sites still use the old spelling:\n\n- `src/automation/flows/index.ts:984` — `{ maxRetries: 3, retryDelayMs: 1000, backoffMultiplier: 2, maxRetryDelayMs: 10000 }`\n- `src/automation/flows/index.ts:1176` — `{ maxRetries: 2, retryDelayMs: 500, backoffMultiplier: 2 }`\n\nThe conversion carries an explicit retirement deadline (protocol 18), and the\nexample is the worst place to keep a shape that is about to stop working. This\none is a mechanical rename.\n\n## Why file these together\n\nThey share a root posture rather than a root cause: each is a declaration the\nexample makes that the runtime cannot honour, and each is currently \"documented\"\nonly by a line in the boot warning block. Happy to split if that suits triage\nbetter.\n\nFound while browser-sweeping showcase + Studio for #4879 (boot warnings on\n`main` @ 0e96e46)."
+}

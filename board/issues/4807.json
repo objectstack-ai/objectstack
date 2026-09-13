@@ -1,0 +1,32 @@
+{
+  "number": 4807,
+  "kind": "issue",
+  "title": "objectui: metadata-admin 用错的 schema 校验 email_template 草稿 —— 注册的是被降级的 EmailTemplateSchema,而非 EmailTemplateDefinitionSchema",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T07:54:55Z",
+  "updated_at": "2026-08-04T04:59:57Z",
+  "closed_at": "2026-08-04T04:59:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4807",
+  "body": "实施 #4616(通知孤儿 schema 移除)时的范围外发现,按 Prime Directive #10 立案,**不在 #4616 PR 内修**(跨仓,且属 objectui 的 bug)。\n\n## 现象\n\n`objectui@785b8a5` `packages/app-shell/src/views/metadata-admin/clientValidation.ts:89`:\n\n```ts\nemail_template: async () => (await import('@objectstack/spec/system')).EmailTemplateSchema as unknown as ZodLikeSchema,\n```\n\nStudio 的 metadata-admin 客户端草稿校验,把 `email_template` 这个 kind 注册到了 **`EmailTemplateSchema`**。但该 kind 的规范 schema 是 **`EmailTemplateDefinitionSchema`** —— `BUILTIN_METADATA_TYPE_SCHEMAS`(`packages/spec/src/kernel/metadata-type-schemas.ts`)、runtime metadata protocol、`plugin-email` 的物化桥都解析这一个。\n\n两者形状不相交:\n\n| | `EmailTemplateSchema`(被移除的遗留形状) | `EmailTemplateDefinitionSchema`(规范) |\n|---|---|---|\n| 主键 | `id`(必填) | `name` + `locale` |\n| 正文 | `body` + `bodyType` | `bodyHtml` / `bodyText` |\n| 其他 | `attachments` | `label` / `category` / `active` / `fromOverride` / `replyTo` |\n| 严格性 | 非 strict(未知键静默剥离) | `strictObject` |\n\n结果:一份**合法**的 email_template 草稿在 Studio 里被报 `id` 缺失、`body` 缺失;而它真正的键(`name`/`label`/`bodyHtml`/…)因为非 strict 被静默剥离,不报错也不生效。\n\n## 这正是 spec 7.1.0 在框架侧修过的同一个缺陷\n\nspec 7.1.0 changelog 原文:`email_template` 曾有两个竞争 Zod schema(Prime Directive #8 违规),`TYPE_TO_SCHEMA` 与 `BUILTIN_METADATA_TYPE_SCHEMAS` 注册了遗留那个,\"which is why all the new fields (`name`, `label`, `category`, `locale`, `bodyHtml`, `bodyText`, …) were reported as 'declared in form layout but missing from schema'\"。框架侧当时改指到了 `EmailTemplateDefinitionSchema`,**objectui 侧从未跟进**。\n\n混淆源头已在 #4616 一并修正:`kernel/metadata-plugin.zod.ts:116` 原注释写的是 `// Outbound email templates (EmailTemplateSchema)`,指错了声明。\n\n## 修复\n\n`clientValidation.ts:89` 改为:\n\n```ts\nemail_template: async () => (await import('@objectstack/spec/system')).EmailTemplateDefinitionSchema as unknown as ZodLikeSchema,\n```\n\n同文件 `permission` 那条已有的注释(\"use PermissionSetSchema from /security, NOT PluginPermissionSchema from /kernel … See packages/spec/src/kernel/metadata-type-schemas.ts for the canonical mapping\")就是这里该照抄的先例 —— 建议同样留一行注释指向规范映射表。\n\n## 时序\n\n#4616 已从 `@objectstack/spec@v17` 移除 `EmailTemplateSchema`,所以在 objectui 升到 v17 的那一刻,上面这行会变成编译错误(命名空间上不存在该属性),而不是继续静默错校验 —— 这是刻意的:让错误落在唯一需要改的那一行上。**objectui 升 v17 前修掉即可**,不需要等 v17 发布。\n\n注意 `EmailTemplateDefinitionSchema` 是 `strictObject`,接上之后未知键会**响亮拒绝**而不是剥离,所以修复本身也可能暴露既有草稿里的脏键 —— 这是期望行为(contract-first),但值得在 PR 里实跑一遍 Studio 的 email_template 编辑页确认。\n\n关联:#4616(移除 PR)、spec 7.1.0(框架侧的同一修复)、Prime Directive #8 / #12。"
+}

@@ -1,0 +1,38 @@
+{
+  "number": 5014,
+  "kind": "issue",
+  "title": "union 分支里的 unknown-key 处方永远到不了作者:`zodIssuesToFields` 只映射顶层 issue,失败的 union 只剩 `Invalid input`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T20:28:14Z",
+  "updated_at": "2026-08-05T01:36:08Z",
+  "closed_at": "2026-08-05T01:35:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5014",
+  "body": "#4001 战役的每一条策展处方,只要它所在的 schema 被包在一个 `z.union([...])` 分支里,**在线上就是不可见的**。测量于 2026-08-03(批 14 收紧 `DashboardWidget.compareTo` 时,先写断言再证红,发现断言红在了意料之外的地方)。\n\n## 机制\n\nzod 把一个失配的 union 折叠成**一条**顶层 `invalid_union` issue,message 是裸的 `Invalid input`;各分支的真实错误挂在 `issue.errors`(每个分支一个数组)。\n\n而 `packages/rest/src/rest-server.ts` 的 `zodIssuesToFields` 是:\n\n```ts\nreturn issues.map((i: any) => ({\n    field: ..., code: zodIssueToFieldCode(i, ...), message: String(i?.message ?? 'Invalid value'),\n}));\n```\n\n—— 只走顶层。`invalid_union` 被映射成 `code: 'invalid_shape'`,`message: 'Invalid input'`,`issue.errors` 里的内容**整个丢掉**。\n\n## 实测\n\n`DashboardWidgetSchema.parse({ id, dataset, values, compareTo: { offset: '7d', granularity: 'month' } })`:\n\n顶层:\n```\ncode=invalid_union path=[\"compareTo\"] msg=Invalid input\n```\n\n而分支错误里躺着这条(批 14 新写的):\n```\nUnrecognized key(s) on this comparison window: `granularity`. Until #4001 closed this shape\nthese were dropped silently — the dashboard still rendered, without whatever the key was\nmeant to configure.\n```\n\n作者看到的是 `Invalid input`。\n\n## 为什么这是战役级问题而不是一个 widget 的问题\n\n拒绝本身是对的、也是 #4001 的收益(静默半丢弃 -> 硬失败)。问题是**处方**这一半:账本 finding 18 已经把它写成规则 —— *「prose in a rejection is behaviour, not documentation」*。战役花在 `aliases`/`guidance` 上的策展,一旦落在 union 分支内,就等于没写;而且没有任何测试会发现,因为对着 schema 断言 message 是能过的(错误确实被**产生**了,只是没被**传递**)。\n\n需要一次普查:`packages/spec` 里有多少条 `strictObject(` 落在 union 分支内(`compareTo`、`submitBehavior`、`view.zod` 的若干 union 成员等)。\n\n## 建议\n\n在 `zodIssuesToFields` 里展开 `invalid_union`:把每个分支的子 issue 提升为独立的 field 条目(path 需要拼上父 path),或者在只有一个分支「明显是作者意图的那支」时优先提升该分支。后者更难判定但输出更干净 —— 对象输入配对象分支,是一个可用的启发。\n\n⚠️ 这是 wire 契约的改动(`fields[]` 的条数会变),按 ADR-0114 需要和 `mapDataError` 保持同形。\n\n批 14 已在 `dashboard.zod.ts` 的 `compareTo` 处记下这条实测限制,并在测试里**分开** pin 了两件事:作者今天真正看到的裸 message,和等着被传递的处方文案 —— 免得一个绿测试冒充一条没人打印的消息。\n\n发现于 #4001 批 14 的范围外体检,未指派。\n"
+}

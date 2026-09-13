@@ -1,0 +1,37 @@
+{
+  "number": 5081,
+  "kind": "issue",
+  "title": "ADR-0120 17.x 收尾块:D5e isolated 安装期姿态硬门 + D6 文档/pin 测试扫荡 + 三姿态 conformance(阻塞于 #5030、#4986 的实现 PR)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T02:55:42Z",
+  "updated_at": "2026-08-05T01:23:34Z",
+  "closed_at": "2026-08-05T01:23:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5081",
+  "body": "**⛔ 阻塞中,勿认领**:依赖 ADR-0120 17.x 波前两块(#5030 的 driver 侧 D3+D4、#4986 的 spec 词汇 + lint)的 PR 合入。两者落地后本单解除阻塞。**不入 pm:queue,由维护者安排。**\n\nADR-0120(`docs/adr/0120-unique-scope-vocabulary-and-null-safe-tenant-uniqueness.md`,已 Accepted)17.x 波的第三块,范围:\n\n## D5e — isolated 安装期姿态硬门\n- 安装 app 进 `isolated` 姿态环境时,枚举其非 `sys` 对象上的 `'global'` 唯一(字段级与声明索引),逐索引硬停确认:「确认真平台级 / 改写为 `'organization'`」;\n- 确认**留痕**于安装清单(ADR-0104 attestation 风格),之后不复问;\n- `os doctor` / `os migrate plan` 保留 advisory 形态,只兜两类门够不到的存量:门禁上线前的安装、装后姿态变更的环境;\n- ⛔ 永不做成启动期告警(#4884 纪律)。\n\n## D6 — 剩余成文契约扫荡(前两块未覆盖部分)\n- `content/docs/data-modeling/indexing.mdx` §Two ways to say \"unique\" 全节按新词汇重写(含 `os:check` 代码块);\n- `content/docs/references/**` 走 `gen:schema && gen:docs` 再生成,不手改;\n- `packages/plugins/driver-sql/src/sql-driver.ts` `syncDeclaredIndexes` 文档块的「VERBATIM」表述收窄到 `'global'`;\n- 全仓 grep 清掉与旧契约相悖的残留表述。\n\n## 三姿态 conformance(ADR §Acceptance tests)\n- 同一 fixture app 在 `single | group | isolated` 三姿态启动,逐 S 行断言 enforcement;\n- 姿态翻转本身零 drift op 的 smoke 断言;\n- D5e 门演练:带 `'global'` 业务唯一的 fixture app 装进 `isolated` 环境 → 硬停、留痕、不复问;pre-gate 存量走 advisory 的断言;\n- `scripts/adr-anchors.json` 补 ADR-0120 锚点,`pnpm check:adr-anchors` 绿。\n\n## 关联\n- ADR-0120(决策来源,Accepted 2026-08-04);#4986 / #5030(前两块);#5054(ADR PR)"
+}

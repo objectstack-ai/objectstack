@@ -1,0 +1,36 @@
+{
+  "number": 4391,
+  "kind": "issue",
+  "title": "crypto.hash 能力声明了、构建期还会自动推断,但沙箱从没实现 —— 调用直接抛(declared ≠ enforced)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "protocol:breaking"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T10:43:09Z",
+  "updated_at": "2026-08-03T12:09:48Z",
+  "closed_at": "2026-08-03T12:09:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4391",
+  "body": "## 现象\n\n`crypto.hash` 是一个**声明了、推断了、类型也写了,但沙箱从没实现**的能力。作者声明它、CLI 为它通过构建、然后调用在 VM 里直接抛。\n\n```ts\ndefineHook({\n  name: 'fingerprint_lead',\n  object: 'crm_lead',\n  events: ['beforeInsert'],\n  body: {\n    language: 'js',\n    source: \"ctx.input.fingerprint = await ctx.crypto.hash('sha256', ctx.input.email);\",\n    capabilities: ['crypto.hash'],   // 构建接受\n  },\n});\n```\n\n`os build` 通过,能力被授予,记录写入时 hook 抛错。\n\n## 声明面(四层)\n\n| 层 | 位置 | 状态 |\n|---|---|---|\n| capability token | `packages/spec/src/data/hook-body.zod.ts:30` — `'crypto.hash'` 在 `HookBodyCapability` 枚举里 | ✅ 声明 |\n| 文档 | 同文件 `:19` — ``- `crypto.hash` — `ctx.crypto.hash(algo, data)` `` | ✅ 声明 |\n| 构建期推断 | `packages/cli/src/utils/extract-hook-body.ts:52` — `{ rx: /ctx\\.crypto\\.hash\\b/, cap: 'crypto.hash' }`,写了 `ctx.crypto.hash` 的 body 会**自动**拿到这个能力 | ✅ 声明 |\n| 运行时类型 | `packages/runtime/src/sandbox/script-runner.ts:117` — `hash?: (algo, data) => Promise<string>` | ✅ 声明 |\n| **沙箱实现** | `packages/runtime/src/sandbox/quickjs-runner.ts:607-618` — `cryptoObj` 上**只**装了 `randomUUID` | ❌ **没有** |\n\n`grep -n \"crypto.hash\" packages/runtime/src/sandbox/quickjs-runner.ts` 无结果。\n\n## 为什么值得单独记一笔\n\n这是 Prime Directive #10 的正面违反,而且是**比 declared ≠ enforced 更糟的一档**:不只是\"schema 说有、运行时不查\",而是**构建期主动帮作者把这个能力加上去**(extractor 认 `ctx.crypto.hash` 这个模式),等于系统在鼓励作者走进一条死路。\n\n唯一的记录是 `content/docs/automation/hook-bodies.mdx` 里一句 `_(not yet wired)_` 的表格备注 —— 而 spec、extractor、类型三处都不带任何标记。搜遍 issue 库,**这个缺口零跟踪**。\n\n跟 #4345 / #4271 / #4001 是同一族(声明的能力没有兑现),区别是这次连\"静默\"都算不上 —— 它会响亮地抛错,只是抛在**运行时**而不是作者时。\n\n## 两条路,需要决策\n\n**A. 实现。** 在 `installCtx` 里装 `ctx.crypto.hash`,用 `crypto.subtle.digest`(WebCrypto,边缘运行时都有,符合\"纯 JS、可跑边缘\"的约束)。\n\n- `ScriptContext.crypto.hash` 的签名已经写好:`(algo: string, data: string | Uint8Array) => Promise<string>`\n- 需要走 `installApiMethod` 那套 deferred-promise 通道(它是 async)\n- 需要定 algo 白名单(sha-256 / sha-512?)和返回编码(hex?base64?)—— 签名说 `Promise<string>` 但没说哪种\n- 成本:中等,一个 host 函数 + 能力门 + 测试\n\n**B. 裁掉。** 从 `HookBodyCapability` 移除 `'crypto.hash'`,删掉 extractor 那条模式和 `ScriptContext.crypto.hash` 类型。\n\n- 这是**移除一个可授权的 spec key**,要走 `spec-property-retirement` 那一整套(ADR-0049 enforce-or-remove):tombstone / `UNKNOWN_KEY_GUIDANCE`、带 FROM→TO 的 breaking changeset、生成物基线、liveness 台账处置\n- 已经声明它的 body 会在授权时被拒 —— 需要迁移话术\n\n倾向 **A**:签名已定、边缘可用的实现就在 `crypto.subtle` 里,而且哈希对\"指纹 / 幂等键 / 脱敏\"这类 hook 是真实需求;B 要付的退役成本比实现还高。但这是产品决策,不是我该独断的。\n\n## 附带\n\n无论走哪条,`hook-bodies.mdx` 那句 `_(not yet wired)_` 要一起改 —— 它现在是唯一诚实的地方,但也是唯一一处,作者不会先读文档表格再写 body。\n\n## 参考\n\n- `packages/spec/src/data/hook-body.zod.ts`(token + 文档)\n- `packages/cli/src/utils/extract-hook-body.ts`(构建期推断)\n- `packages/runtime/src/sandbox/quickjs-runner.ts` `installCtx`(实现缺口)\n- `packages/runtime/src/sandbox/script-runner.ts`(类型)\n- 同族:#4345、#4271、#4001\n"
+}

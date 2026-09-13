@@ -1,0 +1,36 @@
+{
+  "number": 4719,
+  "kind": "issue",
+  "title": "`createHostRequire` 认 NODE_PATH，于是 #4699 立下的「host app 必须自己声明」在 pnpm 工作区里根本没被强制",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T21:24:52Z",
+  "updated_at": "2026-08-03T19:48:50Z",
+  "closed_at": "2026-08-03T19:48:50Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4719",
+  "body": "发现于 cloud#1018 的实测。#4699 本身是对的，这条说的是它建立的契约**没有被执行**——一个没声明依赖的 app 照样能解析成功，于是 ADR-0093 D5 那道墙在最常见的部署形态里是假绿。\n\n## 契约 vs 实际\n\n`packages/cli/src/utils/import-from-host.ts` 的注释把契约写死了：\n\n> The fix is to resolve from the host app's root and import the resolved absolute path.\n\nD5 的报错也是这么教 operator 的：\n\n```\n• add @objectstack/organizations (the enterprise multi-org runtime) to THIS APP\n    — declare it in the app's package.json and install; the CLI resolves it from the\n      app, not from the framework it is linked out of\n```\n\n但 `createHostRequire` 返回的是一个 **CJS `require`**：\n\n```ts\nexport function createHostRequire(hostRoot: string = process.cwd()): NodeRequire {\n  return createRequire(join(hostRoot, 'package.json'));\n}\n```\n\n**CJS 解析认 `NODE_PATH`**（`Module.globalPaths`）。而 pnpm 生成的 bin shim 第一件事就是导出它——下面是 cloud 仓 `apps/objectos-ee/node_modules/.bin/objectstack` 的原文：\n\n```sh\nif [ -z \"$NODE_PATH\" ]; then\n  export NODE_PATH=\"/…/cloud/node_modules/.pnpm/node_modules\"\nelse\n  export NODE_PATH=\"/…/cloud/node_modules/.pnpm/node_modules:$NODE_PATH\"\nfi\n...\nexec node \"$basedir/../@objectstack/cli/bin/run.js\" \"$@\"\n```\n\n`pnpm dev` / `pnpm start` / `objectstack dev` spawn 出来的 `serve` 子进程，全都带着这个 `NODE_PATH`。任何**被工作区里任意一个包传递依赖到**的包，都躺在那个 hoisted 虚拟 store 里，于是 `hostRequire.resolve()` 成功——**跟 host app 声明了什么毫无关系**。\n\n## 实测（cloud 仓 `apps/objectos-ee`，它当时没有声明 `@objectstack/organizations`）\n\n```\n$ node -e \"…createRequire('apps/objectos-ee/package.json').resolve('@objectstack/organizations')\"\nhost resolve -> FAILED MODULE_NOT_FOUND\n\n$ NODE_PATH=<repo>/node_modules/.pnpm/node_modules node -e \"…同一行…\"\nhost resolve -> /…/cloud/packages/organizations/dist/index.cjs\n```\n\n对应到真实启动：\n\n- `pnpm start`（经 shim，带 NODE_PATH）→ **boot 成功**，插件表里有 `Organizations`，D5 一声不吭；\n- `node node_modules/@objectstack/cli/bin/run.js serve …`（不经 shim）→ `✖ FATAL: tenancy posture 'isolated' was requested but @objectstack/organizations could not be loaded` → `exit 1`。\n\n同一个 app、同一份 `package.json`、同一个 posture，**只因为进程是怎么被拉起来的**，走出两种结果。\n\n## 为什么这是「声明未被执行」而不是小事\n\n1. **守卫的强度取决于调用形状**。D5 存在的意义是「要求了隔离就不能假装有」，但它现在只在不经 pnpm shim 的调用里生效。经 shim 的那条路上，一个从没声明过依赖的 app 也能过关。\n2. **它靠的是别人的声明**。cloud 那台 EE 能解析到，是因为 `@objectstack/objectos-runtime`（它的依赖）声明了 `@objectstack/organizations`。那是一条**没人写下来的传递路径**：删掉别的包里的一行，这台 app 就炸，而 diff 里看不出任何关系。\n3. **报错会撒谎**。真出问题时 D5 说「declare it in the app's package.json」，但 CLI 从来没检查过那件事——照做当然能修好，可它并不是它检查的东西。\n4. 这正是「lenient 消费端把错误藏起来」的形状：宽松的不是 `??` 兜底，而是解析路径本身。\n\n## 可能的方向（需要 maintainer 定）\n\n1. **解析后校验来源**：`hostRequire.resolve(pkg)` 拿到路径后，确认它落在 host app 能看见的 `node_modules` 里（而不是 `NODE_PATH` 全局路径），否则按「未安装」处理。最贴近 #4699 的本意，代价是要判定「host app 能看见」的边界，pnpm / npm / yarn 布局各不相同。\n2. **先读 host 的 `package.json`**：只有当包名出现在 host app 声明的 `dependencies` / `devDependencies` 里才尝试解析。最严格、最像「声明即执行」，而且实现只有几行；代价是对「靠 hoisting 跑着的现有部署」是破坏性变更——但那些部署本来就在未声明状态下运行。\n3. **改用 ESM 解析**（`import.meta.resolve` 以 host `package.json` 为 parent）。ESM 不认 `NODE_PATH`，问题自然消失，且与 `import()` 实际使用的语义一致；代价是要处理 CJS-only 包的解析差异。\n\n倾向 **2**：它把契约变成机器可检的东西——「app 声明了才算数」——错误在启动那一刻就红掉，而不是等到某个换了调用形状的部署上才炸。1 是同一意图的弱化版（仍在猜「可见性」），3 修得干净但把一个解析语义问题换成另一个。无论选哪个，都建议在 fail-fast 的文案里区分「你没声明」和「你声明了但装的东西坏了」，这两种今天都塌成同一条 `MODULE_NOT_FOUND`。\n\n## 关联\n\n- #4699（本条说的是它建立的契约没被强制）\n- cloud#1013 / cloud#1018（下游表现：EE app 一直没声明，却因为 hoisting 一直能起来）\n- ADR-0093 D5、ADR-0049\n"
+}

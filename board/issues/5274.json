@@ -1,0 +1,36 @@
+{
+  "number": 5274,
+  "kind": "issue",
+  "title": "core: ObjectKernel 上一个抛错的 kernel:shutdown handler 会跳过所有插件 destroy() 并 process.exit(1),日志还谎报「Shutdown timed out」",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T13:50:06Z",
+  "updated_at": "2026-08-04T16:15:13Z",
+  "closed_at": "2026-08-04T16:15:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5274",
+  "body": "发现于 #5257(PR 分支 `claude/issue-5257-listening-bootstrapped-propagate`)的证据收集阶段。#5257 的派发词明确只裁 `kernel:listening` / `kernel:bootstrapped` 改传播、`kernel:shutdown` 在 **LiteKernel** 上保留 fail-soft;`ObjectKernel` 的停机路径不在该单范围内,故另开此单。\n\n## 事实(已实测复现)\n\n`ObjectKernel.performShutdown()` 用 `this.context.trigger('kernel:shutdown')`(裸 await 循环、不 catch),异常一路冒到 `ObjectKernel.shutdown()` 的 `Promise.race` 外层 catch —— 而那个 catch 只为**超时**写的:\n\n```\npackages/core/src/kernel.ts:429  await Promise.race([shutdownPromise, timeoutPromise]);\npackages/core/src/kernel.ts:441  } catch (error) {\n                                     this.logger.error('Shutdown timed out — forcing exit', error as Error);\n                                     this.state = 'stopped';\n                                     await this.logger.destroy();\n                                     process.exit(1);\n                                 }\n```\n\n一个插件的 `kernel:shutdown` handler 抛错,于是同时得到三件事:\n\n1. **其余 `kernel:shutdown` handler 不再执行**(裸循环在第一个抛错处断掉);\n2. **每一个插件的 `destroy()` 全部被跳过** —— `performShutdown()` 里销毁循环在 trigger 之后,根本没走到;\n3. **宿主进程被 `process.exit(1)` 直接杀掉**,日志写的是 `Shutdown timed out — forcing exit`,而实际上什么都没有超时。\n\n探针(临时 vitest,已删除;`vi.spyOn(process, 'exit')` 拦下退出)实测输出:\n\n```\nERROR Shutdown timed out — forcing exit {\"error\":{\"message\":\"shutdown boom\",\n  \"stack\":\"... at Object.trigger (packages/core/src/kernel.ts:156:27)\n           at ObjectKernel.performShutdown (packages/core/src/kernel.ts:678:28)\n           at ObjectKernel.shutdown (packages/core/src/kernel.ts:429:42)\"}}\nPROBE_RESULT reached= [\"process.exit(1)\"] state= stopped\n```\n\n`reached` 里既没有 `later-shutdown`(后一个 handler),也没有 `plugin-destroy`(插件 destroy)—— 二者都被跳过,只剩 `process.exit(1)`。\n\n## 为什么值得单开\n\n停机路径上排在后面的正是**释放资源的那部分工作**:其余订阅者的清理,以及逆序的 `plugin.destroy()`(冲刷缓冲、关连接、放锁)。让一个 handler 的失败中断整条队列,等于把「一个坏 handler」放大成「泄漏 + 未落盘的写」。#5257 在 LiteKernel 上把这条写成了显式的 per-hook 判断(`triggerHook` fail-soft,理由写在分发点注释里);`ObjectKernel` 是同一条停机路径上的相反行为,而且额外附带两个坏味道:\n\n- **误报**:错误信息说「超时」,但栈里根本是 handler 抛错,排查会直奔 `shutdownTimeout` 配置;\n- **越权**:一个库级别的 `shutdown()` 直接 `process.exit(1)`,嵌入式宿主(cloud auth-proxy、CLI、测试进程)没有机会做自己的收尾。注意这条 catch 对**真正的超时**也许还说得过去(进程本来就挂住了),对 handler 抛错则不成立。\n\n触发面:任何在 `ctx.hook('kernel:shutdown', ...)` 里没有自包 try/catch 的插件。目前仓库内的 `kernel:shutdown` 订阅者多数自己包了,所以这是一枚**尚未被踩到的雷**,而不是今天在冒烟的火 —— 但一旦踩到,表现是「进程被杀 + 数据没落盘 + 日志指向错误的原因」,三样都很难查。\n\n## 建议方向(留给 PM 分诊,不在此预判)\n\n大致两个选项,都需要一次显式裁定而不是顺手改:\n\n- **A**:`performShutdown()` 里改用隔离式分发(与 LiteKernel 对齐,#5257 已为该语义写下理由),并把「超时」catch 收紧到**只**处理超时(区分 `timeoutPromise` 的 reject 与其它异常),非超时异常记日志后按正常路径 `state = 'stopped'` 返回,不 `process.exit`。\n- **B**:保留传播,但让 `shutdown()` 把非超时异常向调用方 reject,由宿主决定要不要退出 —— 语义更诚实,但对现有调用方是 breaking(今天 `shutdown()` 从不 reject)。\n\n倾向 A:它同时消掉「跳过 destroy」和「谎报超时」两个后果,且与 #5257 刚刚为停机路径写下的原则(一个 handler 失败不该阻断其余清理)一致;`process.exit` 应当只留给真正挂住的超时路径。\n\n## 复现\n\n```ts\nconst kernel = new ObjectKernel({ logger: { level: 'error' }, gracefulShutdown: false, skipSystemValidation: true });\nawait kernel.use({\n  name: 'shutdown-thrower',\n  version: '1.0.0',\n  init: async (ctx) => {\n    ctx.hook('kernel:shutdown', async () => { throw new Error('shutdown boom'); });\n    ctx.hook('kernel:shutdown', async () => { console.log('later-shutdown'); });\n  },\n  destroy: async () => { console.log('plugin-destroy'); },\n});\nawait kernel.bootstrap();\nawait kernel.shutdown();   // 两条 log 都不会打印;进程 exit(1)\n```\n\n相关:#5257(LiteKernel 上 `kernel:shutdown` 保留 fail-soft 的裁定与理由)、#5170 / PR #5258(`triggerHookOrThrow` 与两个分发器的分工)。\n"
+}

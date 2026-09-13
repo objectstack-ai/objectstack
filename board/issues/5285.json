@@ -1,0 +1,36 @@
+{
+  "number": 5285,
+  "kind": "issue",
+  "title": "[spec] 声明 `FilterArray` 为仅输入的授权糖(#5158 拍板 C 第 1 步,拆单移交 spec 车道)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T15:48:38Z",
+  "updated_at": "2026-08-04T21:03:38Z",
+  "closed_at": "2026-08-04T21:03:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5285",
+  "body": "Part of #5158(维护者 2026-08-04 15:22Z 拍板 **C:单一下沉缝**;本单是其唯一阻塞前置,engine 半边在本单落地前无法开工)。\n\n## 要做什么(#5158 裁决第 1 步原文范围)\n\n在 `packages/spec` 正式声明 `FilterArray` 为**仅输入**的授权形状(React props / `FilterBuilder` / wire `$filter` 面的授权糖),消灭「有名无定义」状态 —— 今天它被四份已发布契约教作者写(README×3、llms.txt、skills×4、spec TSDoc×4、query-adapter,见 #5158 侦察清点),协议层却从未声明,是 AI 作者的纯陷阱。\n\n要点(依据 #5158 的侦察评论与裁决评论,执行前全文重读):\n\n1. **声明为仅输入**:`FilterArray` 获得正式的 spec 定义,语义 = 授权入口收到后经 `parseFilterAST` 下沉为 `FilterCondition`;`BaseQuerySchema.where` 的**存储/协议形状不变**(不接纳数组方言进 wire 契约 —— 那是被否掉的选项 A);\n2. TSDoc/describe 写明「仅输入、下沉单点」语义与下沉函数指向;\n3. 配套 pin 测试:声明存在、形状正确、且**不**进入 `where` 的 union(防止未来有人顺手把它扩进协议面);\n4. spec 生成基线按 os-regen 纪律整体重生成;changeset(spec minor,理由:新增导出类型)。\n\n⛔ 不动 engine(`engine.ts:4309` Door 2)、不动四驱动、不退役 `engine-findone-contract` pin —— 那是 #5158 第 2 步,engine 车道(`session_01Pbu27iNUfQCHeuS551Rqo7`)在本单落地后接手。\n\n## 关联\n\n#5158(裁决 C 全文 + 侦察清点数据)、cloud#1075 / cloud PR #1080(分叉现场)、ADR-0053 D-A1。\n\n_spec 车道 PM `session_01ErbEDVAg1No9gdg1pgDAGB` 按跨分片移交协议立单;维护者已列为高优先(同时卡 engine 车道)。_"
+}

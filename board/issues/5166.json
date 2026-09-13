@@ -1,0 +1,35 @@
+{
+  "number": 5166,
+  "kind": "issue",
+  "title": "chore(agents): pm-dispatch / os-dev 纪律修订——用本周期三起真实事故固化认领、查重、标签与验证方法论",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "tooling"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T07:19:12Z",
+  "updated_at": "2026-08-04T07:48:55Z",
+  "closed_at": "2026-08-04T07:48:55Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5166",
+  "body": "维护者已批准(2026-08-04)。改动仅限 `.claude/` 下两个文件,不碰产品代码。\n\n## 目标文件\n\n1. `.claude/skills/pm-dispatch/SKILL.md`(PM 纪律)\n2. `.claude/agents/os-dev.md`(开发纪律)\n\n## PM 侧新增(pm-dispatch)\n\n### A. 认领协议——三个 worked example(素材在各 issue 评论链,agent 自取)\n\n1. **#4829(选单前必须读完全部评论)**:PM 只读正文就建议删\"隐藏访问门\"并派发;评论区里有维护者 2026-08-03 的\"暂缓处理\"记录,且该门是 Accepted 的 ADR-0045 §3(4 条 pin 测试)。规则:评论区是裁决的落地处,跳过它等于跳过裁决。连带:限流时不允许\"先 assign、评论稍后补\"——认领 = assign + 含 session ID 与分支的评论,成对原子落地。\n2. **#5039(立单前必须查重)**:未搜索即为 OSV 公告立单,#5032 已存在且分析更全。规则:立单前按关键词/CVE 号/包名/报错串各搜一遍。\n3. **#5032(assign 后、动手前重读评论区)**:认领评论晚落 20 秒撞车。所有 agent 共享一个 GitHub 身份,assignee 字段分不出\"谁的\",判据只能是评论里 session ID 的先后。配套让路规程:后到者让路 + 留完整交接诊断。\n\n### B. 标签纪律\n\n- `pm:on-hold` 语义表:`needs-user-decision`=决定待做(不派发,可催问);`pm:on-hold`=决定已做、结论暂缓(不派发,不催问,等重启条件);`pm:queue`=可派。\n- 标签+评论成对落:挂 `pm:on-hold` 必须同时留三要素评论(日期/理由/重启条件)。\n- `pm:blocked` + 正文 `Blocked-by: #N`;阻塞单关闭时扫描解锁。\n- 标签消费者原则:标签存在当且仅当有查询/门禁读它。\n- 状态变更不过夜:不在\"标签挂了评论没落\"的混合状态下收工或限流挂起。\n\n### C. 派单措辞\n\nIssue 正文是线索不是规格:派发词必须明示\"先验证前提\";`premise_still_valid:false` 且不出 PR 是合法产出(实证:#4832/#4250/#5047/#4930 等 6+ 例)。\n\n## Dev 侧新增(os-dev)\n\n- **反向验证三向判据**:删死代码装回去,诊断可能变红(常规)/反而增多(别名喂 COUNT,#5009)/方向倒转(规则越权、schema 才是门,#4984)——验证前先想清该往哪个方向变。\n- **key-vs-value 可达性判据**:守\"键不可达\"用 `unrecognized_keys`,守\"值判决\"用完整 safeParse,判据跟着规则性质走。\n- **Fixture 三分法**:re-spell / add-declaration / replace(fixture 钉住的正是被删的肢、判决 1→0 时整体替换,#5096 的 :295)。\n- **消费半径扫描**:按规则的消费半径扫 fixture,不按被改包边界(#5046 返工:cli 包 parity fixture 用了被拒别名)。\n- **工具链陷阱**:`--workspace-concurrency=2` 放 `--filter` 前;新 worktree 先 `pnpm --filter '{pkg}^...' build` 防假红;overrides 只认 `pnpm-workspace.yaml`;OSV override 上界不用修复版排他写法。\n- **字节纪律**:控制字符一律写 `` 式转义;prompt 里描述转义不粘贴字节;PR 正文避免 `<`+字母(sanitizer 会吃)。\n- **模板是工具不是真理**:报告模板不合身时明说。\n\n## 验收\n\n- 两文件修订落地,worked example 引用真实 issue 号;\n- 不碰 `.claude/` 之外任何文件;不需要 changeset(`.claude/` 非发布包,若 CI 要求空 changeset 按仓库惯例处理);\n- PR 正文列出每条纪律对应的事故实证。"
+}

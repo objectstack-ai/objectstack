@@ -1,0 +1,36 @@
+{
+  "number": 5002,
+  "kind": "pull_request",
+  "title": "fix(qa,dx): 让 dogfood 的 strict tsconfig 真正被执行 —— 修 14 条积压并接进 turbo typecheck (#4855)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T19:54:57Z",
+  "updated_at": "2026-08-03T20:04:12Z",
+  "closed_at": "2026-08-03T20:04:10Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T20:04:10Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5002",
+  "body": "Fixes #4855\n\n## 问题\n\n`packages/qa/dogfood/tsconfig.json` 是一份认真的配置 —— `strict: true`、`module/moduleResolution: NodeNext`、`include` 覆盖 `test/**/*`。但 `packages/qa/dogfood/package.json` 的 scripts 里**只有 `test`**。根 `pnpm typecheck` 是 `turbo run typecheck`,只跑声明了该 script 的包;三个 qa 包里(`downstream-contract`、`http-conformance`、`dogfood`),这是唯一没声明的一个 —— 于是这份 strict 配置**从未被执行过**。\n\n这就是「declared ≠ enforced」在构建配置层的形状:读代码的人(和写代码的 agent)会合理假设它在 CI 里把关,照着它的严格度写;实际没有任何一步跑它。而 dogfood 是本仓最重的行为门,它的 fixture 类型漂移此前没有任何东西会挡。\n\n## 覆盖率闸门为什么没抓到\n\n抓到了,但记成了**冻结债务**而不是缺口。`scripts/check-type-check-coverage.mjs` 的 `DEBT` 账本里有:\n\n```\n'@objectstack/dogfood': {\n  errors: 12,\n  note: 'code-tier 8 (TS2322/TS2554) + 3 config-tier + 1 noise.',\n},\n```\n\n该闸门的 `COVERED` 不变式接受「声明了 `typecheck` script」**或**「有一条带实测错误数的 DEBT 条目」。dogfood 走的是后一条,所以闸门一路绿灯 —— 它诚实地记录了这个包没被检查,但记录不等于执行。\n\n**DEBT 是暂缓,不是豁免**,而且会漂移:账本冻结于 `b07d829`(2026-07-31)时是 12 条,我在最新 main(`7d0e7b5`)上实测是 **14 条**。多出来的 2 条正是「冻结不能长期替代执行」的直接证据 —— 门后的东西只会继续涨。所以本 PR 走的是账本注释里写明的毕业路径:修完错误 → 加 script → 同一个 PR 里删掉 DEBT 条目(否则 `RECONCILED` 不变式会失败)。\n\n## 实测的 14 条与修法\n\n| 类别 | 数量 | 修法 |\n| --- | --- | --- |\n| NodeNext 缺扩展名 TS2307(+1 条级联 TS7006) | 3 | 两处 `./field-zoo.matrix` 补 `.js` |\n| flow fixture 的 `type` 没收窄 TS2322 | 8 | 标注 `: Flow` |\n| 条件展开出的 headers TS2322 | 2 | 标注 `Record< string, string >` |\n| 连接器 handler 少传参 TS2554 | 1 | 按声明传两个参数 |\n\n**1. NodeNext 缺扩展名。** `field-zoo-roundtrip.dogfood.test.ts` 与 `field-zoo-value-shape.test.ts` 写 `from './field-zoo.matrix'`。文件确实在,但 `moduleResolution: NodeNext` 要求 `.js`。这不是风格问题:包内另外 **33 处**相对 import 全部带 `.js`,这两处是仅有的例外。未解析的 import 让符号退化成 `any`,回调参数随即报 implicit-any —— 补上扩展名同时消掉那条级联的 TS7006。\n\n**2. flow fixture 的 `type`。** 四个 fixture 里的 flow 是**裸对象字面量**,`type: 'autolaunched'` 推成 `string`,喂给 `defineStack` 时对不上字面量联合。修法不是 `as const`,而是按仓内既有写法(`examples/app-todo/src/flows/task.flow.ts`)标注:\n\n```ts\nimport type { Flow } from '@objectstack/spec/automation';\nexport const flowTouch: Flow = { ... };\n```\n\n差别是实质性的:`as const` 只让报错闭嘴,`: Flow` 让**整份 fixture** 被 spec 的真实契约检查。反向验证那一步(见下)正是靠这个标注才判红的。\n\n**3. headers。** `token ? { Authorization } : {}` 在匿名分支上推出 `Authorization?: undefined`,展开进 `headers` 后 `HeadersInit`(`Record< string, string >`)拒收。给该常量显式标注即可。\n\n**4. 连接器 handler —— 这条值得单独说。** `showcase-mcp-self-connection.dogfood.test.ts` 调 `handler!({})`,但契约声明的是两个参数:\n\n```ts\nhandlers: Record<\n    string,\n    (input: Record< string, unknown >, ctx: unknown) => Promise< Record< string, unknown > >\n>;\n```\n\n引擎侧也**始终**按两参数派发(`service-automation/src/builtin/connector-nodes.ts:90`:`await handler((cfg.input ?? {}) as Record< string, unknown >, handlerCtx)`),connector-mcp 自己的测试同样写 `handlers.create_issue({...}, {})`。这条调用一直「能跑」,**只是因为 MCP 这个 handler 的实现恰好忽略 `ctx`** —— 契约上它是错的,是一处被这道没人跑的门盖住的真实契约违反(运行时不炸,但它在冒充引擎的调用而少传了引擎必给的东西)。\n\n按契约优先修的是**调用方**:改成 `handler!({}, {})`。反方向(把 `ctx` 改成可选)会为了迁就一个测试而放松 connector-mcp 的公开契约,是错误方向,没有采纳。\n\n## 接进强制执行\n\n```json\n\"scripts\": {\n  \"typecheck\": \"tsc --noEmit\",\n  \"test\": \"vitest run\"\n}\n```\n\n外加删除 `check-type-check-coverage.mjs` 里的 DEBT 条目。闸门自测与实跑:\n\n```\n✓ check:type-check-coverage --self-test — 18 semantic case(s) hold.\ncheck-type-check-coverage: OK — 61/77 workspace packages type-checked (plus the root),\n  16 in the DEBT ledger (376 frozen raw errors), 1 exempt.\n```\n\n覆盖率 60/77 → **61/77**,DEBT 17 → **16** 个包。`turbo.json` 的 `typecheck` 任务与 lint.yml 的调用都已存在(闸门的 `RUNNABLE` 不变式在管),无需改动 —— 缺的只是这个包的 script。\n\n## 反向验证\n\n在 `flow-touch-fixture.ts` 里把 `type` 改成 `'not_a_real_flow_type'`,走**真实 CI 入口**:\n\n```\n$ npx turbo run typecheck --filter=@objectstack/dogfood\n@objectstack/dogfood:typecheck: test/fixtures/flow-touch-fixture.ts(49,3): error TS2322:\n  Type '\"not_a_real_flow_type\"' is not assignable to type\n  '\"api\" | \"schedule\" | \"autolaunched\" | \"screen\" | \"record_change\"'.\n Tasks:    60 successful, 61 total\nFailed:    @objectstack/dogfood#typecheck\n```\n\n改回后:\n\n```\n@objectstack/dogfood:typecheck: cache hit, replaying logs 238d29ba02f83710\n Tasks:    61 successful, 61 total\n```\n\n`238d29ba02f83710` 与注入前那次绿跑是同一个 turbo hash —— 证明状态被精确还原,绿不是残留缓存蒙对的。\n\n## 测试\n\n```\n$ pnpm --filter @objectstack/dogfood test\n Test Files  83 passed | 1 skipped (84)\n      Tests  481 passed | 3 skipped (484)\n```\n\n零行为改动:所有修改要么是类型标注,要么是补模块扩展名,要么是把调用补齐到既有契约(`ctx` 在这个 handler 的实现里本就未被读取)。ESLint 干净。\n\n## 改动范围\n\n限于 `packages/qa/dogfood`,加两个接线文件:\n\n- `scripts/check-type-check-coverage.mjs` —— **根目录共享文件**,只删掉 dogfood 那一条 DEBT 条目(账本注释里写明的毕业动作;不删则 `RECONCILED` 不变式失败)。未改动闸门的任何语义。\n- `.changeset/dogfood-typecheck-wired.md` —— 内部 qa 包 + dev script,按 `per-package-typecheck-coverage.md` / `ci-performance-optimization.md` 的先例用空 frontmatter,不发版。\n\n`turbo.json` 与 `.github/workflows/lint.yml` **未改动**。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018iARDqtrhQgz6fVHDeDkbQ)_"
+}

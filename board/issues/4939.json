@@ -1,0 +1,35 @@
+{
+  "number": 4939,
+  "kind": "issue",
+  "title": "`ApiRegistry` / `api-registry` plugin 只在 `packages/core/examples/` 里被装配,无任何真实 composition 挂载 —— `ApiEndpointRegistrationSchema` 因此整面零执行",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "protocol:breaking"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T16:51:33Z",
+  "updated_at": "2026-08-04T02:52:07Z",
+  "closed_at": "2026-08-04T02:51:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4939",
+  "body": "在 #4910 开工核查中发现,记录备查,**未认领**。基线 `origin/main` @ `2e284b2546`。\n\n## 事实\n\n`packages/core/src/api-registry.ts` 的 `ApiRegistry`(路由冲突检测、优先级解析、RBAC 集成、发现查询,约 500 行)由 `createApiRegistryPlugin()` 注册为 `api-registry` 服务。\n\n**装配点全部在示例文件里**:\n\n```\n$ grep -rn \"createApiRegistryPlugin\" --include=*.ts packages/ examples/ | grep -v node_modules | grep -v .test.\npackages/core/src/api-registry-plugin.ts:35,59      ← 定义处 + 文档注释\npackages/core/examples/api-registry-example.ts:21,167,287,374,446\n(无任何 packages/runtime、packages/cli、examples/app-* 的装配)\n```\n\n`'api-registry'` 服务的消费者同样只有 `packages/core/examples/api-registry-example.ts`。真实 boot 佐证:showcase 起 47 个 plugin(`pnpm dev -- --fresh`),plugin 列表里没有 api-registry。\n\n因此 `packages/spec/src/api/registry.zod.ts` 的 `ApiEndpointRegistrationSchema` **整面零执行**,不只是 #4686 盯的 `rateLimit`(`registry.zod.ts:379`),还包括 `requiredPermissions`(注释里承诺「the gateway layer automatically validates these permissions before allowing the request to proceed」—— 没有任何 gateway 层读它,这是安全语义)、`parameters`、`requestBody`、`responses`、`security`、`operationId`、`tags`。\n\n## 与 #4936 的关系(两份端点声明,都不执行)\n\n仓里有**两套**端点声明形状:`api/endpoint.zod.ts` 的 `ApiEndpointSchema`(从 `defineStack({ apis })` 可达,#4936 证明其执行链断在挂载与 `matchEndpoint` 两处)与本单的 `ApiEndpointRegistrationSchema`(从 `ApiRegistryEntrySchema` 可达,执行器压根没被装配)。两套都零执行 —— 这本身就是 ADR-0076「一条路由一个属主」要防的形状,只不过这里两个属主都没上岗。\n\n## 建议(协议级,留给维护者裁决)\n\n1. **按 ADR-0049 摘除** `ApiEndpointRegistrationSchema` / `ApiRegistryEntrySchema` 与 `ApiRegistry` 本身,示例一并删除。\n2. **装配 + 接执行**:让真实 composition 挂载 api-registry,并把 `requiredPermissions` 等键接到实际的 gateway 校验;先解决与 `ApiEndpointSchema` 的二选一(#4936),否则是把第二套方言也养大。\n3. **与 #4936 合并裁决**:两套端点声明的存废本就该一起决定,分开裁很容易留下第三份形状。\n\n⚠️ `requiredPermissions` 的注释以**现在时**承诺自动鉴权(`registry.zod.ts` 约 383 行起),对着这段注释写元数据的作者会以为端点受保护 —— 无论走哪条路线,这段注释都必须先改成事实。\n\n关联:#4686、#4910、#4936、#4938、ADR-0049、ADR-0076、Prime Directive #10。\n"
+}

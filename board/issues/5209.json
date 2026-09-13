@@ -1,0 +1,34 @@
+{
+  "number": 5209,
+  "kind": "issue",
+  "title": "[skill] pm-dispatch 增设 epic 子树车道:大任务(父单+子任务批)委托专职 PM,衍生问题三分法管理",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T09:17:03Z",
+  "updated_at": "2026-08-04T09:53:17Z",
+  "closed_at": "2026-08-04T09:53:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5209",
+  "body": "## 背景(维护者 2026-08-04 提出)\n\n现有 pm-dispatch 的分片单位只有两档:整仓分片、domain 车道(#4819,按修复落点的包横向切)。缺一种**纵向**切法:一个大开发 = 父 issue + 一批 sub-issue,整体委托给一个专职 PM 会话从立项跟到收尾;开发过程中会衍生新问题,需要明确的分流规则,否则要么衍生项没人管(epic 烂尾),要么 epic 无限膨胀吞掉整个仓。\n\n现行机制的两个具体缺口:\n\n1. **子树没有委托信号**:现行规则「已入队父单的 sub-issue 自动成为候选」(round loop step 1)意味着主/域 PM 会和 epic 负责人抢同一批子任务——没有任何标签能表达「这棵子树归某个会话管」。\n2. **衍生问题只有一条笼统出口**:`out_of_scope_findings` + 发现分诊轮管「顺带发现」,但「epic 验收所必需的衍生项」与「触 spec 的衍生项」没有成文去向。\n\n## 设计(与现有机制组合,不平行)\n\n- **新参数 `epic:#<n>`**:队列 = 父 issue 子树的 open 未认领 sub-issue,**每轮重读子树**(衍生任务的吸收机制,零新标签)。\n- **委托信号**:父单打新标签 `pm:epic` + 登记表(#4604)登记(会话 ID、父单号、声明的文件领地);其它 PM 的候选获取跳过 `pm:epic` 子树。标签被 step 1 的排除规则和登记表消费,符合「a label exists iff something reads it」。\n- **与 domain 车道组合**:epic 内 sub-issue 照常打 `domain:*`(共享路由信息),但认领权属 epic PM;认领评论照常声明文件面,全局在飞检查照常覆盖——epic 不豁免任何认领纪律。\n- **衍生问题三分法**,判据一句话:「不修它,epic 验收过不过得去?」\n  1. 不过 → 挂父单 sub-issue,epic PM 下轮自动派;\n  2. 过(顺带发现)→ 独立立单进主 backlog(查重先行、`finding` 分诊纪律照旧),epic 不吸收;\n  3. 触 spec/公共契约 → 按跨分片转移协议转主 PM 队列 + `Blocked-by:`(spec 单一所有者不变)。\n  与发现分诊轮的归挂限定(#4949)一致:仅有依赖关系、不属完成范围的,独立立单 + `Blocked-by:`。\n- **进度视图**:epic PM 每轮在父单维护 checklist 汇总评论;决策仍锚在具体 sub-issue(step 8 不变),维护者看父单一个入口。\n- **收尾/僵尸回收**:末个 sub-issue 关闭 → 父单总结、关闭、摘标签、登记表注销;登记在册但子树 ~48h 无认领/分支/PR 动静 → 询问一窗后收回。\n- **残余风险如实写进 skill**:epic 领地与其它车道的文件相交靠「声明 + 全局在飞检查」防,非机械保证,撞上由合并队列兜底——与 domain 车道同一风险形状。\n\n## 改动落点\n\n`.claude/skills/pm-dispatch/SKILL.md`:参数表加 `epic:#<n>`、one-time setup 加 `pm:epic` 标签、state model 表加一行、step 1 候选规则加子树排除、Domain lanes 之后新增「Epic 子树车道」一节。docs-only,不需要 changeset(与 #4824/#5174 等 skill 修订先例一致)。\n\n## 验收\n\n- 两个 PM(一个 epic、一个主/域)同时运行时,epic 子树的 sub-issue 不会出现在非 epic PM 的候选集;\n- 衍生问题三类各有唯一去向且与 #4949 归挂限定不矛盾;\n- `pm:epic` 的每一处消费点(排除规则、登记表、收尾)在 skill 内可指认。"
+}

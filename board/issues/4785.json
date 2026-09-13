@@ -1,0 +1,37 @@
+{
+  "number": 4785,
+  "kind": "issue",
+  "title": "decision(plugin-auth): 会话的「记录之处」到底在哪 —— better-auth secondaryStorage 一旦接上 cache，ADR-0069 D4 的会话管控就静默失效",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T06:20:29Z",
+  "updated_at": "2026-08-04T04:52:26Z",
+  "closed_at": "2026-08-04T04:52:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4785",
+  "body": "## TL;DR\n\n修 #4772 时确认了一个更大的、**从未被触发过所以从未被发现**的冲突：只要把 kernel `cache` 服务接成 better-auth 的 `secondaryStorage`，ADR-0069 **D4 的会话管控（空闲超时 / 绝对时长上限 / 并发会话数上限）就会静默失效**，同时 `sys_session` 表会变空。\n\n这不是 #4772 的功能洞（那个是限流计数器，已在 #4772 里修掉）。这是「会话的记录之处（session of record）在数据库还是在缓存」这个**架构问题**，需要维护者裁定 + 一条 ADR 修订。本 issue 只记录事实与选项，不自行决定。\n\n## 事实（better-auth 1.7.0-rc.2，代码证据）\n\n`node_modules/better-auth/dist/db/internal-adapter.mjs`:\n\n- `createSession`：`if (secondaryStorage && !storeInDb) { ... }` —— 设了 `secondaryStorage` 且未设 `session.storeSessionInDatabase` 时，**不写 `sys_session` 行**，会话只存在于缓存里。\n- `findSession`：先读 `secondaryStorage.get(token)`；命中就直接返回，**完全不查数据库**。即使打开 `storeSessionInDatabase`（两边都写），读路径依然以缓存快照为准。\n\n而 ObjectStack 这一侧（`packages/plugins/plugin-auth/src/auth-manager.ts`）：\n\n- `enforceSessionControls()`（ADR-0069 D4 空闲/绝对超时）：`engine.findOne('sys_session', ...)`，超限时 `engine.update('sys_session', { expires_at: 过去, revoked_at: now, revoke_reason })`；\n- `enforceConcurrentCap()`（D4 并发上限）：`engine.find('sys_session', ...)` 后同样用 update 撤销。\n\n两者都是**靠写数据库行来撤销会话**，且都是 best-effort（异常吞掉）。所以一旦会话读路径走缓存：\n\n1. `findOne` 查不到行 → 直接 return，**空闲/绝对超时不再生效**；\n2. 即便查得到（`storeSessionInDatabase: true`），写进数据库的撤销**不会被 better-auth 读到**，缓存快照最长活到会话 TTL（默认 7 天）；\n3. `sys_session` 空表还会牵连 `sys_presence` / `sys_oauth_access_token` / `sys_oauth_refresh_token` 三个对象上的 lookup 外键，以及会话列表/「登出其他会话」这类 UI。\n\n## 为什么一直没人发现\n\n`AuthPlugin.init()` 里的那次 `getServiceAsync('cache')` 探测跑在 `CacheServicePlugin` 注册之前（#4772 现场：早 21ms），所以标准 `serve` 组合下这个绑定**从来没成功过**。ADR-0069 的实现状态表却写着「shared multi-node rate-limit + session store … are landed」——声明与运行时不一致（Prime Directive #10 的经典形态）。#4772 里我把这条状态行改成了事实描述，并把该 issue 的修复限定在限流计数器上，**没有替维护者决定会话该放哪**。\n\n`packages/plugins/plugin-auth/src/auth-plugin.test.ts` 里有一条测试把当前行为钉住了：接上 cache 后**不**把它绑成 `secondaryStorage`。要改方向，先改这条测试。\n\n## 选项\n\n**A. 会话记录之处永远是 `sys_session`（数据库），缓存只做限流计数器（= #4772 落地后的现状）**\n- 长远合理性：`sys_session` 是一等平台对象（有视图、动作、三处外键、D4 管控）。只有一个权威存储，撤销就是写行，管控真的可执行。多节点下会话读走数据库（有 join），比缓存慢，但正确。\n- 防错：声明=强制。D4 说「写行即撤销」，运行时就真的这么做。\n- 代价：拿不到 better-auth 的会话缓存加速；`ADR-0092 D6` 的 identity-write-guard 快照刷新在默认组合下永远是 no-op（今天也是）。\n\n**B. 会话搬进缓存（真正启用 `secondaryStorage`），并把 D4 改写成通过 better-auth API 撤销 + 主动失效缓存**\n- 长远合理性：性能更好，多节点会话共享；但 D4 三个管控、`sys_session` 的外键与 UI 都要重做，且撤销必须双写（DB + 缓存失效），任何漏网路径都是**安全性问题**而不是性能问题。\n- 防错：更难写对 —— 「撤销」从一次写变成两处一致性，AI 生成的新管控极易只写一半。\n- 代价：工作量大，需要新 ADR。\n\n**C. 双写（`session.storeSessionInDatabase: true`）**\n- 看起来两全，实际是最差：行在库里（D4 的 `findOne` 查得到，看起来在工作），但读路径仍以缓存为准，所以撤销**看起来生效、实际不生效**。请勿选。\n\n## 建议\n\n**A**，并把 ADR-0069 D2 的「shared store」明确限定为**限流计数器**，会话存储另开一条决策（若将来要做 B，配套的撤销一致性要求写进同一条 ADR）。\n\n## 验收（无论选哪个）\n\n- ADR-0069 的相应 D 行 / 状态行更新，说明会话记录之处；\n- 有测试证明 D4 的三个管控在选定架构下**真的**能撤销一个活动会话（今天没有这样的端到端测试，这也是冲突长期隐形的原因之一）。\n\n相关：#4772（限流计数器惰性解析 cache）、ADR-0069 D2/D4、ADR-0092 D6。\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 5202,
+  "kind": "issue",
+  "title": "plugin-audit: `sys_upload_session` 同样声明 lifecycle.class: 'transient' 却不在 SKIP_OBJECTS —— 分块上传每传一块写一组 audit_log + activity 行",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T09:00:30Z",
+  "updated_at": "2026-08-04T10:54:49Z",
+  "closed_at": "2026-08-04T10:54:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5202",
+  "body": "在 #5193(把 `sys_job_queue` 加进 `plugin-audit` 的 SKIP_OBJECTS)里,按派发要求核了一遍「还有哪些表同样漏在豁免外」。**未在 #5193 的 PR(#5201)里修**(越界,一事一议)。\n\n## 事实(均对 `origin/main` 核过)\n\n把「声明了 lifecycle.class 为 telemetry / transient / event 的对象」与 `packages/plugins/plugin-audit/src/audit-writers.ts` 的 `SKIP_OBJECTS` 第 (2) 组对一遍,只剩两张表在豁免外:\n\n| 对象 | lifecycle.class | 在 SKIP_OBJECTS? | 判断 |\n|:--|:--|:--|:--|\n| `sys_upload_session`(`packages/services/service-storage/src/objects/system-upload-session.object.ts:132`) | transient | ❌ | **本单** |\n| `sys_file`(`.../system-file.object.ts:179`) | transient | ❌ | 不算漏 —— 其自身注释即写 “sys_file rows are mostly permanent business truth”,transient 只为收墓碑行/未完成上传;审计有合规价值 |\n\n`sys_upload_session` 的对象注释说的是另一回事:「an upload session is ephemeral state, **never business truth**」(ADR-0057 / #2970 item 4)—— 与 `sys_job_queue` 同类。\n\n写入面(`packages/services/service-storage/src/metadata-store.ts`):\n\n- `createSession()` → `engine.insert(sys_upload_session, full)`(`:146`);\n- `updateSession()` → `engine.update(sys_upload_session, merged, …)`(`:178`)—— 分块上传**每传一块**调一次,而且写的是 merged **全量**记录,含 `parts` 这个随块数增长的 JSON blob,所以每行 audit 的 `old_value`/`new_value` diff 也跟着变大;\n- `deleteSession()` → `engine.delete(…)`(`:190`),外加 LifecycleService 的 TTL/retention reaper(ttl:`expires_at` + 1d;retention:7d,onlyWhen status 属于 completed/failed/expired)。\n\n审计钩子全对象注册、无系统上下文豁免(`audit-writers.ts:651-653`,把关的只有 `:423` / `:461` 两处 `SKIP_OBJECTS.has`),所以一次 N 块的上传 = 1 + N 次写 → 2 × (1 + N) 行 `sys_audit_log` + `sys_activity`,外加每次 `beforeUpdate` 的 `captureBefore` 快照读(`:422`)。\n\n## 与 #5193 的差别(为什么单独立单而不是并进去)\n\n- 严重度低一档:上传频率远低于队列消息,#5160 那种「每封邮件都过」的常驻放大器在这里没有;\n- 治理声明也弱一档:`sys_job_queue` 有 managedBy = engine-owned + enable.apiMethods = get/list(用户根本写不了),`sys_upload_session` 两者都没有 —— 它只是**事实上**由 `StorageMetadataStore` 独占写入。要不要顺带补上治理声明,是这张表自己的问题,不该塞进审计豁免这单;\n- 目标表 `sys_audit_log` / `sys_activity` 本身有 retention/rotation,所以后果是**噪声与写放大**,不是无界增长。严重度请 PM 判。\n\n## 建议修法\n\n与 #5193 完全同形:把 `sys_upload_session` 加进 `SKIP_OBJECTS` 第 (2) 组,注释注明其 lifecycle.class = transient 与「never business truth」的自述。等 #5201 落地后做,避免同一处清单的行冲突。\n\n## 顺带(#5193 正文已提出,这里只做交叉引用)\n\n这份名单是**手写**的,与对象上的 lifecycle.class 没有任何机械关联 —— 本单就是这个耦合缺失的第二个实例(第一个是 #5193)。是否改成按注册表里的 lifecycle.class 判定(或加一道对账门禁:声明了 telemetry/transient/event 却不在豁免组的表必须显式登记豁免理由),值得单独定夺,不在本单范围内。\n\nFound-during: #5193 / PR #5201\nRelated: #5193(同类,`sys_job_queue`)\n"
+}

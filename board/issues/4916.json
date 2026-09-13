@@ -1,0 +1,37 @@
+{
+  "number": 4916,
+  "kind": "issue",
+  "title": "check-doc-authoring 的 walk 用 `catch {}` 吞掉不存在的 ROOT —— 目录一改名,门禁静默变瞎并继续报绿",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T15:57:24Z",
+  "updated_at": "2026-08-03T16:55:16Z",
+  "closed_at": "2026-08-03T16:55:16Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4916",
+  "body": "**未认领。** 审核 PR #4915(#4913)时发现,不在那条 PR 的范围内(它没有引入这个行为,只是把 ROOTS 从 2 个扩到 3 个),按 Prime Directive #10 单独归档。\n\n## 现状\n\n`scripts/check-doc-authoring.mjs` 的 `collectFiles()`:\n\n```js\nfor (const r of ROOTS) { try { walk(r, files); } catch {} }\n```\n\n`ROOTS` 现在是 `['.claude', 'skills', 'content']`。任何一条解析不到(目录改名、移动、被删),`walk` 抛出的 ENOENT 被 `catch {}` 原地吞掉,门禁继续跑完剩下的 root,然后打印:\n\n```\n✓ doc authoring guard: N files clean — no bare metadata literals.\n```\n\n**N 变小了,exit 仍是 0。** 从外部看,\"三个 root 都干净\"和\"其中一个 root 压根没被扫\"长得一模一样。\n\n## 为什么值得单独修\n\n这与 #4851 是**同一个缺陷**,只是在隔壁脚本里:`.claude/workflows/docs-accuracy-audit.js` 的 `ALL_HANDWRITTEN` 清单 11 条路径全部指向改名前的 `protocol/objectos/*`,于是内部文档审计静默漏审整个 `protocol/kernel` —— #4781 与 #4817 因此烂了约两个月才被发现。那次的代价是实测过的。\n\n本会话这两天已连关五个同族(#4690 无 MANIFEST 也 exit 0、#4804 判据写在 stderr 而 gate 从不读、#4835 词表少一个入口、#4868 自检与真实调用路径不是同一条、#4890 门禁看不见自己所在的目录)。共同形状:**检查在跑,而且是绿的,但结构上接触不到它的检查对象。**\n\n`.claude` 这条尤其脆:它是本地 agent 工具目录,比 `content/` / `skills/` 更可能被重组。\n\n## PR #4915 覆盖了什么、没覆盖什么\n\n#4915 新增的 `--self-test` 用真实 walker 从真实 `ROOTS` 走一遍临时树,断言 `.claude` 进得去、`.claude/worktrees` 进不去。所以:\n\n- ✅ 有人把 `.claude` 从 `ROOTS` 数组里删掉 → self-test 判红;\n- ❌ 仓库里真实的 `.claude/` 目录被改名 → `ROOTS` 数组没变,self-test 在临时树里照样绿,而真实扫描静默少一个 root。\n\n## 建议\n\n启动时校验每条 `ROOT` 都能解析,有一条不行就**报错退出并点名**,而不是继续跑。`catch {}` 若确有存在理由(例如某个 root 在某些检出形态下合法缺席),把那个理由写成显式的白名单,而不是一个吞掉一切的空 catch。\n\n⚠️ **必须双向证明**:故意改坏一条 ROOT,证明新校验判红;恢复后判绿。这个脚本本身就是\"一直绿、判据可能是空的\"的活标本,只观察到绿什么也证明不了。\n\n顺带看一眼仓内 `scripts/` 下还有没有同形状的 `catch {}` / 静默跳过(几个 `check:*` 脚本值得一起扫),有就在报告里列出来,由 PM 决定是纳入还是另立。\n\n## 关联\n\n- PR #4915 / #4913 —— 发现现场\n- #4851 —— 同一缺陷在 `.claude/workflows/docs-accuracy-audit.js`,已派发中\n- #4690 / #4804 / #4835 / #4868 / #4890 —— 同族先例"
+}

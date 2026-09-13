@@ -1,0 +1,36 @@
+{
+  "number": 4887,
+  "kind": "issue",
+  "title": "plugin-audit never provisions sys_audit_log / sys_activity — Setup \"System Overview\" audit widgets silently render zeros",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T13:11:58Z",
+  "updated_at": "2026-08-04T00:48:03Z",
+  "closed_at": "2026-08-04T00:48:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4887",
+  "body": "## What happens\n\nOn a freshly seeded database with `plugin-audit` loaded, every load of Setup →\n**System Overview** logs a burst of:\n\n```\nWARN [Analytics] dataset \"sys_audit_log_metrics\" backing object \"sys_audit_log\" is unavailable\n  (SELECT COUNT(*) AS \"event_count\" FROM \"sys_audit_log\" WHERE (action = 'login' AND …)\n   - no such table: sys_audit_log); returning an empty result instead of failing the widget\n```\n\n12 of these per dashboard load in my session (login / permission_change /\nconfig_change counters, plus the `GROUP BY action` and `GROUP BY user_id` charts).\n\nThe tables are genuinely absent:\n\n```\nsys_audit_log    MISSING\nsys_activity     MISSING\nsys_comment      EXISTS\n```\n\n(88 tables in the DB; `Audit` is in the loaded-plugin list.)\n\n## Why this is worse than log noise\n\nThe analytics layer degrades gracefully — empty result instead of a failed widget\n— so **the client sees nothing wrong**. My browser sweep recorded\n`/_console/apps/com.objectstack.setup/dashboard/system_overview` as completely\nclean: no failed requests, no console errors, no error text.\n\nSo the dashboard renders **0 logins, 0 permission changes, 0 config changes** and\nlooks authoritative doing it. That is the \"Total Spend: 0 on a populated table\"\nfailure mode `rest-server.ts` calls out by name in the analytics resolver comment\n— except here it is structural rather than a wrong-database mistake, and it is\nthe *security* dashboard reading zero.\n\n## The guard that should prevent this exists and isn't taking effect\n\n`plugin-audit/src/audit-plugin.ts` has `provisionSystemTables()` (~L168-198),\nadded for precisely this, with a docblock that describes today's symptom:\n\n> sys_audit_log / sys_activity / sys_comment are otherwise lazy-created on first\n> WRITE … A freshly provisioned env that READS one first … hits SQLite \"no such\n> table\" … The UI degrades to an empty feed, but the log is noisy and can mask\n> real errors.\n\nIt is wired at `kernel:ready` (~L80, L97) and loops `[SysAuditLog, SysActivity,\nSysComment]` calling `engine.syncObjectSchema(obj.name)`.\n\nTwo of its three tables are missing anyway, and **no** `AuditPlugin: could not\nprovision …` warning appears in the log — so the per-object `catch` never fired.\n`syncObjectSchema` does exist on the ObjectQL engine (`objectql/src/engine.ts:5628`),\nso the early `if (typeof sync !== 'function') return;` bail is the most likely\npath, but I did not confirm which of the two silent exits is taken — that belongs\nto the fix. `sys_comment` existing while the other two don't suggests it gets\ncreated by some other path rather than by this loop succeeding.\n\nWorth noting the early return is silent: if provisioning is skipped wholesale,\nnothing says so.\n\n## Suggested direction\n\n- Find why the `kernel:ready` provisioning doesn't reach `syncObjectSchema` for\n  these objects, and make both bail-outs **audible** (a `logger.warn` on the\n  `typeof sync !== 'function'` return) so a future skip isn't silent again.\n- Consider whether a shipped system dataset whose backing table may not exist\n  should surface as \"not available\" in the widget rather than a confident `0` —\n  an empty audit chart and a zero-events audit chart mean very different things\n  to whoever is reading a security dashboard.\n\n## Repro\n\n1. `os dev --ui --seed-admin -d file:/tmp/fresh.db` in `examples/app-showcase`\n2. Sign in, open `/_console/apps/com.objectstack.setup/dashboard/system_overview`\n3. Server log shows the `no such table: sys_audit_log` warnings; the dashboard\n   shows zeros with no error\n4. `sqlite3 /tmp/fresh.db \".tables\" | grep -E 'sys_audit_log|sys_activity'` → nothing\n\nObserved on `main` @ 0e96e46, `SqlDriver(better-sqlite3)`, single-tenant.\nFound while browser-sweeping showcase + Studio for #4879."
+}

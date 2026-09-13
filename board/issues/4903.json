@@ -1,0 +1,36 @@
+{
+  "number": 4903,
+  "kind": "issue",
+  "title": "[objectql] readonly 字段:服务端插件 data.update 直写被静默剥离(200但值不变),与 beforeUpdate Hook 补写可落库不对称",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T15:07:47Z",
+  "updated_at": "2026-08-04T06:47:04Z",
+  "closed_at": "2026-08-04T06:47:04Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4903",
+  "body": "## 现象\n\n服务端插件(cron/后台任务)经 `ctx.getService('data')` 的 `update()` 写 `readonly: true` 字段时,该字段被**静默剥离**——调用返回成功(REST 侧同样 200),其余字段正常落库,只有 readonly 字段悄悄丢弃,仅有一条 `logger.warn`(`Field 'x' is read-only — ignoring incoming change (#2948)`)。调用方拿不到任何机器可读的失败信号。\n\n下游项目实测现场(os-project-titanwind-ehr #750):考勤对象 `work_duration`(readonly,系统结算的工时)由超时自动下工 cron 落库,`data.update(att, { status, check_out_time, work_duration })` 返回正常,但 `work_duration` 恒为 null。表单/扫码等 REST 路径同字段一切正常,症状呈「只有 cron 写不进」的分裂状,排查成本高。\n\n## 根因\n\n`packages/foundation/objectql` core 的 update 管线(`stripReadonlyFields`):\n\n```js\nif (!opCtx.context?.isSystem) {\n  hookContext.input.data = stripReadonlyFields(updateSchema, preRo, suppliedKeys, this.logger, ...);\n}\n```\n\n- 剥离条件是 `!opCtx.context?.isSystem` + 字段 ∈ `suppliedKeys`;\n- 插件从 `ctx.getService('data')` 拿到的引擎**默认无 context**,即服务端可信代码与不可信客户端输入走同一条剥离路径;\n- 与 REST 路径行为不对称:REST 客户端 supplied 的 readonly 键在边界剥离,但 `beforeUpdate` Hook 内补写的键不在 suppliedKeys 里,**能落库**——同为服务端代码,Hook 里写可以、插件里写不行。\n\n## 期望(任一)\n\n1. **失败可见**:readonly 剥离不应只 `logger.warn`——至少在返回值/options 提供 strict 开关,让被丢字段以错误或 dropped-fields 清单形式回到调用方;\n2. **服务端插件默认可信**:`PluginContext.getService('data')` 出来的写路径给出显式的系统身份约定(或文档明确要求 `{ context: { isSystem: true } }`),消除「Hook 能写、插件不能写」的不对称;\n3. 或在文档把这条语义(剥离条件/suppliedKeys 口径/Hook 豁免)写清楚。\n\n## 复现\n\n1. 任一对象声明 `readonly: true` 字段(如 `work_duration`);\n2. 插件内 `ctx.getService('data').update(obj, { id, work_duration: 1.5, status: 'x' })`(不带 context);\n3. 返回成功,`status` 落库,`work_duration` 不落,仅服务端 warn 日志。\n\n传 `{ context: { isSystem: true } }` 后同一调用正常落库(项目侧已按此绕行)。\n\n版本:@objectstack/* 17.0.0-rc.1。下游登记:os-project-titanwind-ehr `docs/平台缺陷登记.md` PLAT-DEF-042。\n"
+}

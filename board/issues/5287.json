@@ -1,0 +1,35 @@
+{
+  "number": 5287,
+  "kind": "pull_request",
+  "title": "fix(service-analytics): 编译期拒绝 dataset 的跨 datasource JOIN (#5115)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T15:52:39Z",
+  "updated_at": "2026-08-04T16:15:13Z",
+  "closed_at": "2026-08-04T16:15:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T16:15:11Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5287",
+  "body": "Fixes #5115\n\n按维护者在 issue 里的拍板,本 PR **只做第 1 步**:`compileDataset` 在编译期拒绝跨 datasource 的 join。\n\n## 做了什么\n\n`compileDataset` 新增一个可选的 `DatasetCompileOptions`(第三个参数),里面是两个**早已存在**于 `AnalyticsServiceConfig` 上的探针:`getObjectDatasource`(#5033 为诊断文案引入)和 `isExternalObject`(ADR-0062 D6)。`AnalyticsService.registerDataset` —— 启动预注册、保存、Studio 草稿预览都要走的那一道门 —— 把它们交给编译器,于是被证明的冲突在任何 SQL 被构造之前就被拒绝。\n\n判定接在既有的 `include` 解析链路上:`resolveHop` 每解析出一个 join 目标就判一次,**没有另起一套关系解析**。多跳路径的每一跳都是同一条语句里的 join,所以每一跳都判(不只是最后一段)。\n\n错误文案点名两个对象、两个 datasource、出问题的 `include` 路径,以及两条出路:\n\n```\n[dataset-compiler] dataset \"revenue_by_region\" declares a JOIN that crosses datasources:\nits base object \"opportunity\" is on datasource \"billing_db\", but the joined object\n\"crm_account\" — reached via the `include` path \"account\" — is on datasource \"crm_db\".\nA dataset JOIN cannot cross datasources: the whole dataset is executed as ONE statement\non the base object's datasource, so \"crm_account\" is simply not there. Fix it by binding\nboth objects to the same datasource, or by dropping \"account\" from the dataset's\n`include` (and every dimension/measure that references it).\n```\n\n与 #5033 查询期那句同源(同样的「不能跨库 + 两条修法」),不会读成两个 bug。\n\n## 分级放行的判据(这是本 PR 最需要评审的部分)\n\n拒绝只在**元数据自己能证明冲突**时发生:基对象与某个 join 目标**各自显式声明**了 `object.datasource`,且两个名字不同(大小写不敏感比较)。以下一律放行,由 #5033 的查询期防线兜底:\n\n1. **宿主没接探针**(无 data engine)—— 编译行为与改动前完全一致。有专门的测试钉住:不传 `options`、传 `{}`、以及用 `new AnalyticsService({ relationshipResolver })` 直接注册,三种都照常编译。\n2. **探针答不上来**(对基对象或对某个 join 目标返回 `undefined`)。基对象答不上来时不判**任何** join —— 不能因为「问不出基对象」就拒绝所有 join。\n3. **任意一侧停在 `'default'`**。这条是本 PR 唯一一处需要判断力的地方,理由写在代码注释里:`ObjectQL.getDriver` 的解析顺序是「显式非 `'default'` 的 `object.datasource` → `datasourceMapping` 规则 → ADR-0057 §3.6 生命周期分流(audit/telemetry/event → `telemetry`)→ package 的 `defaultDatasource` → 全局默认」。也就是说 **`'default'` 是 schema 的默认值(`ObjectSchema.datasource` 带 `.default('default')`),不是一个路由决定**;声明 `'default'` 的对象仍然可能被 mapping 规则或生命周期分流落到别的库,甚至正好落到对面那个库。把 `'default'` 当成「主库」会误拒这类**今天能正常工作**的 dataset,还会让判定取决于该对象是否恰好被 Zod parse 过(parse 才会把默认值物化出来)。误放行的代价是一条已经存在的响亮运行时错误;误拒绝的代价是升级后看板直接变白 —— 所以这里选了「证明不了就不拒绝」。\n4. **任意一侧是 federated(external)对象**。`NativeSQLStrategy.canHandle` 本就 decline 这种 cube(base 或 join 目标为 external),查询由 ObjectQL FK-expand 路径(两段读 + 内存 join)承接,那条路径天然跨库。在这里拒绝会打断**今天能工作**的路径。\n\n## 明确不在范围\n\n- **第 2 步(换策略)不做**:让跨库看板真正能工作(`NativeSQLStrategy.canHandle` 在 join 跨库时 decline + 两段读内存 join)完全不在本 PR 内,也**没有为它预埋任何抽象**。顺带记录一个对第 2 步有用的现场事实:那条路径的机制**已经存在** —— `ObjectQLStrategy` 的 `executeCrossObject`(FK-expand,#3654)就是「按 FK 分组 + 单独读关联对象」,每一段各自按对象路由,因此天然跨库;第 2 步大概率是让 `NativeSQLStrategy` 在跨库时 decline,而不是新写一条路径。\n- **不碰 `packages/spec/**`、`packages/lint/**`**;`content/docs/releases/**` 未触碰,变更记录只走 `.changeset/`。\n\n## 发布闸门(publish-time lint)落点的调研结论 —— 只调研,不实现\n\n维护者要求本单只做注册期拒绝,发布闸门另立单。调研结论如下,供开那一单时直接用:\n\n- **落点**:`packages/lint`,进 `reference-integrity-suite.ts` 那一族(「metadata 里写下的名字能不能解析到东西」),新增一条形如 `dataset-cross-datasource-join` 的规则,由 suite 统一接到 `os validate` / `os lint` / `os compile` 三个入口(该文件的存在意义就是让新规则的接线是一行编辑,避免三处漂移)。\n- **需要的输入,发布期比运行期更全**:`StackSchema` 同时持有 `objects`(每个带 `datasource`)、`datasources`、`datasourceMapping` 和 `datasets`。也就是说 lint 规则能把 `getDriver` 五步里的**前两步**(显式绑定 + mapping 规则)都算出来,而运行期的 `compileDataset` 只能通过探针一次问一个对象、且看不见 mapping。**发布闸门天生能比本 PR 判得更准,而不只是更早。**\n- **仍然算不出的部分**:package `defaultDatasource`(跨 package 安装时才确定)与「`telemetry` datasource 是否真的注册」属于部署事实,规则应对这两类保持同样的「证明不了就不拒绝」姿态。\n- **一个前置缺口**(已单独记账:#5288):运行期没有权威的「对象的**有效** datasource」访问器,`getObjectDatasource` 只报告**声明值**。所以 #5033 催生本单的那个真实场景(`sys_audit_log` 靠 `lifecycle.class: 'audit'` 被分流到 telemetry,而不是靠显式字段)对本 PR 的闸门是**不可见**的 —— 补上那个访问器,本 PR 的判据可以在不引入误拒的前提下扩到隐式路由的对象。\n\n## STALE-PREMISE 核对(issue 基于 `c272e48be`,已对最新 `origin/main` 重核)\n\n- ✅ `getObjectDatasource` 在 `AnalyticsServiceConfig` 上,plugin 侧从 `engine.getObject(name).datasource` 接出 —— 仍然成立。\n- ✅ `compileDataset` 已校验 `include` 关系是否存在于基对象上,并已通过 `relationshipResolver` 拿到 join 目标对象名 —— 仍然成立,新判定就接在这条链上。\n- ✅ #5033 的查询期响亮失败文案仍在 `analytics-service.ts` 的 missing-source 分诊里,措辞未变。\n- ⚠️ 一处补正:issue 说「只需要问每个参与对象绑定在哪个 datasource 上」。现场比这句更微妙 —— `'default'` 不是一个绑定答案,而是「没有绑定」;真正的路由还要经过 mapping / 生命周期分流 / package 默认值。本 PR 因此把判据收窄到「双方都显式声明且不同」,并把理由写进代码注释与 changeset。\n\n## 行为变更(收紧)\n\n原本能编译通过、要到查询期才失败的跨库 dataset,现在在**注册期**就被拒。启动时预注册的 dataset 走既有的 per-dataset try/catch:记一条点名冲突的 WARN 并跳过,**同一宿主里其它 dataset 照常注册**,不会因此起不来。changeset 里写清了受影响面。\n\n## 验证\n\n- `pnpm --filter @objectstack/service-analytics test` —— **42 个文件 / 555 个用例全绿**(新增 17 个:`dataset-compiler.test.ts` 里 11 个判定与放行用例,`dataset-cross-datasource-registration.test.ts` 里 6 个接线用例)。\n- `tsc --noEmit -p packages/services/service-analytics/tsconfig.json` —— 与改动前**同样的 13 行既有报错**(全部在我未触碰的测试文件里:`analytics-service.test.ts`、`measure-source-field-gate.test.ts`、`objectql-timedimension-projection.test.ts`),**没有新增**。改动前后各跑一次对比确认。\n- `eslint --no-inline-config packages/services/service-analytics/src/` —— 干净;测试里没有 `as any`。\n- `pnpm --filter @objectstack/service-analytics build` —— 通过(含 DTS)。\n\n## 顺手记的账(不在本 PR 修)\n\n- **#5288** —— `getObjectDatasource` 报告的是**声明值**而非**有效 datasource**(`getDriver` 五步里它只覆盖第 1 步)。两个后果:#5033 的查询期文案对靠生命周期分流跨库的对象(比如 `sys_audit_log`)会点错库;本 PR 的闸门因此只能收窄到「双方都显式声明」。已按未分配、无标签提交 PM 分诊,本 PR 不依赖它。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

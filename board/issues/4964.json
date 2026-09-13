@@ -1,0 +1,38 @@
+{
+  "number": 4964,
+  "kind": "issue",
+  "title": "重试策略在仓里有三份形状、两种拼法：#4661 收敛了共享同一导出名的两份，`flow.errorHandling` 是匿名内联块，检查照不到它",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue",
+    "protocol:breaking",
+    "target:v17"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T17:27:45Z",
+  "updated_at": "2026-08-04T07:43:15Z",
+  "closed_at": "2026-08-04T07:43:15Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4964",
+  "body": "发现于 #4001 批 11 的载荷普查（为 `Flow.errorHandling` 的 alias 表找经验依据时撞到），**不在该批范围内，未修** —— 批 11 只是把 `backoffMs` 加进了拒绝信息的 alias 表，没有动任何一边的键。\n\n## 事实\n\n同一个「指数退避重试」概念，仓里有三份声明：\n\n| 形状 | 基础延迟的拼法 | 其余键 |\n|---|---|---|\n| `shared/retry-policy.zod.ts` `RetryPolicySchema`（`job.retryPolicy` + `try_catch` 节点的 `retry`） | **`backoffMs`** | `maxRetries` `backoffMultiplier` `maxRetryDelayMs` `jitter` |\n| `automation/flow.zod.ts` `Flow.errorHandling`（内联匿名块） | **`retryDelayMs`** | `maxRetries` `backoffMultiplier` `maxRetryDelayMs` `jitter` + `strategy` |\n| `integration/connector.zod.ts` `RetryConfigSchema` | **`initialDelayMs`** | `maxAttempts` `maxDelayMs` `backoffMultiplier` |\n\n前两份的键集**除了那一个词以外完全相同**。而 #4661 的整件事就是消除这一个词的分歧：它把 `retryDelayMs` 用 `retiredKey()` 立了墓碑，处方写着\n\n> the retry policy now has one spelling for its base delay across `job.retryPolicy` and a `try_catch` node's `retry`\n\n—— 注意这句话**自己就把范围划在两处**。第三处（flow 级 `errorHandling`）没有被收编，今天仍然只认 `retryDelayMs`。\n\n## 为什么它逃掉了\n\n#4661 出自 #4535 C8「dual-source」簇，判据是**两个入口发布了同一个导出名**（`./automation` 与 `./system` 各有一个 `RetryPolicy`，即 #4411 陷阱）。`Flow.errorHandling` 是 `FlowSchema` 里的一个**内联匿名 `z.object`**，没有导出名，所以按构造就不在 dual-source 检查的视野里。\n\n这是本战役第三类发现（「仪器谎报覆盖度」）的一个新变体：仪器没坏，它精确回答了自己被问的那个问题（「同名导出有几份」），而那个问题**不是**「同一概念有几份形状」。收敛做完之后，留下的那份分歧读起来像是被审视过并保留的。\n\n## 对作者的实际代价（批 11 前是静默的）\n\n一个作者先读了较新的 `shared/retry-policy.zod.ts`（那里 `retryDelayMs` 有墓碑、明确告诉他改用 `backoffMs`），然后在 flow 上写 `errorHandling: { strategy: 'retry', maxRetries: 3, backoffMs: 5000 }`：\n\n- **批 11 之前**：`backoffMs` 被静默剥离，`retryDelayMs` 落到默认 1000ms —— 退避是他写的 1/5，无任何提示；\n- **批 11 之后**：拒绝，并点名 `` `backoffMs` → `retryDelayMs` ``。\n\n即：**照着仓里较新的文件学，会在另一个文件里拿到相反的答案**，而这正是 AI 作者最容易复现的路径（它读到哪个文件是随机的）。\n\n## 待裁定的是方向，不是要不要做\n\n两条路都自洽，代价不同，请维护者定：\n\n- **A：`flow.errorHandling` 收编到 `RetryPolicySchema`**（`retryDelayMs` → `backoffMs` + `strategy` 留在外层）。长远最干净：一个概念一份声明，第三方言消失。代价是又一个 authorable key 的 breaking rename，需要 ADR-0087 转换（`retry-policy-converged` 已存在，可扩展），且必须赶 v17 窗口，否则要等 v18 —— 而错过窗口意味着这份分歧再活一个大版本。\n- **B：保留两份，把差异写进两边的 JSDoc + 保留批 11 的 alias**。零 breaking，代价是把「同一概念两种拼法」正式固化成设计，而这正是 #4535/#4411 判定为债务的东西。\n\n倾向 **A**，两条判据同向：长远上它是 #4661 未做完的后半段（该 PR 自己的论证「both drive `delay = base * multiplier^(n-1)`，两个 executor 实现的是同一个公式」对第三份同样成立）；防 AI 犯错上，别名表只在**拒绝时**帮忙，而收编让这个错**根本无法被写出来**——声明即强制，好过消费端宽容。但这是 breaking + 窗口敏感，由维护者定。\n\n顺带：`connector.RetryConfig` 的 `maxAttempts` **不能**并进去当同义词 —— 它含首次尝试，`maxRetries` 不含，直接改名会静默少跑一次。批 11 已经把这条差一位写进 guidance 而**没有**给 rename，任何收编都要保留这个区分。\n\n## 相关\n\n- #4661（`retryDelayMs` → `backoffMs` 收敛，#4535 C8）\n- #4411（同名双源导出陷阱）/ #4535（dual-source 簇）\n- #4247（flow 级 retry 的「一个默认值」与零次重试拒绝）\n- #4001 批 11（把 `backoffMs` / `initialDelayMs` / `maxDelayMs` 加进 `errorHandling` 的拒绝提示）\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 5090,
+  "kind": "issue",
+  "title": "E3(#5040 执行器):挂载 seam —— `IHttpServer.setFallbackHandler` 的 Hono 实现 + dispatcher 端点派发步 + 路由台账登记",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "enhancement",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T03:56:47Z",
+  "updated_at": "2026-08-04T05:36:21Z",
+  "closed_at": "2026-08-04T05:36:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5090",
+  "body": "Part of #5040(E 系列第 3 单)。**Blocked-by: #5080**(需 `IHttpServer.setFallbackHandler?` 契约成员先落)。维护者已放行提前开发(2026-08-04,见 #5080 认领评论;E7 翻转仍守 v17 分期)。\n\n## 范围(以 #5040 设计 §1 方案 C、§3 与总表 E3 行为准)\n\n1. `plugin-hono-server`:实现 `setFallbackHandler` —— 仅在全部显式路由未命中后调用;handler 收到的 `req.body` 可读(与 `use()` 中间件「body 不填充」契约区分,`adapter.ts:362` 一带);实测覆盖设计 §7-1 标注的 Hono 兜底行为风险;\n2. `dispatcher-plugin`:注册兜底 → `dispatch()` 端点匹配步(调 `matchEndpoint`,17.x 挂载前缀 `/apps/<ns>/…`);未命中维持现状 404 形状(**不改变既有 404 语义,收口另议**);\n3. `route-ledger.ts`:新增挂载面登记行,注记与实际一致(取 #5078 教训)。\n\n## 约束\n\n- 结构性不可达(publish 仍拒),零现网行为变更;含集成测试(fallback 触发顺序 / body 可读 / 未命中穿透);\n- 执行器车道程序卡(`session_01EYGdmvWP1ieZSLqvAW6uyd` 按序派发),**其它车道请勿认领**。\n\n关联:ADR-0121、#5080(E1)、#4910-Q1(`server:` seam 先例)、#5040 设计 §1/§3/§7-1。"
+}

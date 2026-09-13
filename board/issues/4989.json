@@ -1,0 +1,34 @@
+{
+  "number": 4989,
+  "kind": "issue",
+  "title": "validateOrgAxisRedLines 的 objects[].rowLevelSecurity 分支同样是死路径:ObjectSchema 不声明该键",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "needs-user-decision"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T18:56:16Z",
+  "updated_at": "2026-08-04T00:35:25Z",
+  "closed_at": "2026-08-04T00:35:25Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4989",
+  "body": "发现于 #4984 的实现过程(那一单只修 sharing-rule 那段,这条按 Prime Directive #10 单独记账,未随 PR 一起改)。\n\n## 事实\n\n`packages/lint/src/validate-org-axis-red-lines.ts` 的 ADR-0105 D6 ① 有三段扫描:\n\n1. `permissions[].rowLevelSecurity[].using/check` —— 键正确(`PermissionSetSchema.rowLevelSecurity`,`RLS_POLICY_KEYS` 含 `using`/`check`);\n2. `objects[].rowLevelSecurity ?? objects[].rls` —— **`ObjectSchema` 根本不声明 `rowLevelSecurity`**;\n3. `sharingRules[]` —— #4984 修的那段。\n\n实测(build 后的 spec):\n\n```\nObjectStackSchema.safeParse({\n  name: 'x', version: '1.0.0',\n  objects: [{ name: 'work_order', label: 'WO', fields: { n: { type: 'text', label: 'N' } },\n              rowLevelSecurity: [{ name: 'r', using: \"parent_organization_id = 'x'\" }] }],\n})\n=> REJECTED: objects.0: Unrecognized key(s) on this object: `rowLevelSecurity`.\n```\n\n`packages/spec/src` 里 `rowLevelSecurity` 只出现在 `security/permission.zod.ts`(permission set 的键)和 `conversions/registry.ts`(`permission.rowLevelSecurity.priority` 的退役转换),没有任何 hoist / normalize 把 `objects[].rowLevelSecurity` 搬到 `permissions[]`。\n\n## 后果\n\n规则注册为 `input: 'parsed'`,所以在 `os validate` / `os build` 上第 2 段扫描恒空 —— 与 #4984 同一缺陷类(consumer 读了 producer 不声明的键)。只有 `os lint`(不 parse,退回 normalized)那一层还能看见作者手写的 `objects[].rowLevelSecurity`,而那种写法本来就会被 spec parse 拒收。\n\n危害小于 #4984(第 1 段覆盖了 RLS 的唯一可授权落点,所以红线本身没有洞),但那段代码 + 它的测试 fixture 描述了一个不存在的授权面,读代码的人会以为对象上可以直接写 RLS 策略。\n\n## 待定的是「往哪边修」,所以没有顺手改\n\n两种方向,取舍不同:\n\n- **A. 删掉第 2 段** —— 承认 RLS 策略只挂在 permission set 上。最小、诚实,但如果将来要给 object 加 RLS 授权面,这段还得回来。\n- **B. 给 `ObjectSchema` 加 `rowLevelSecurity`** —— 让代码描述的授权面真的存在。这是 spec 公共契约的扩张,要先回答「对象级 RLS 与 permission-set 级 RLS 如何合并/优先」,属于 ADR 级决定。\n\n倾向 A(ADR-0049 enforce-or-remove:声明了没人兑现的东西就该退役;真要 B 也应该由一份 ADR 驱动而不是由一段 lint 代码倒逼)。请维护者定夺。\n\n同时:`validate-org-axis-red-lines.test.ts` 里对应的两个 fixture(`objects[0].rowLevelSecurity[...]`)不是 spec 合法形状。#4984 加的 fixture/schema 漂移守卫(`sharingRule()` / `objectFixture()`)因此**没有**覆盖它们 —— 修这条时应一并纳入守卫。\n\n相关:#4984、#4698、ADR-0105 D6、ADR-0049。\n"
+}

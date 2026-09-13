@@ -1,0 +1,32 @@
+{
+  "number": 4949,
+  "kind": "issue",
+  "title": "pm-dispatch / os-dev：发现类 issue 纪律——立单前查重、就近归挂 sub-issue、`finding` 分级与批量分诊出水口",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T17:02:42Z",
+  "updated_at": "2026-08-04T00:15:36Z",
+  "closed_at": "2026-08-04T00:15:36Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4949",
+  "body": "## 背景（维护者发起）\n\ncloud 分片一天的运行数据：关闭 14 条、新开约 19 条（其中 4 条当天闭环、1 条重复）。维护者观察「issue 越开发越多」，与 PM 复盘后定位：**病根不在 Prime Directive #10（发现即立单）本身**——本会话所有返工都来自大而含糊/过时的 issue，小而精确的单派发成功率接近 100%，P0 过滤器旁路正是顺手立单抓到的——而在三个可收紧的边缘：\n\n1. **无出水口**：issue 离开系统只有「修掉」和「关重复」两条路，没有任何机制裁定「不值得修，关闭」。生产者强、无下水道，总量单调增长。\n2. **重复立单**：并行 dev agent 互相不可见，cloud#1054 与 cloud#1031 同日重复立单（PM 兜底关闭）。\n3. **平级散落**：修法依赖已排队 issue 的发现开成平级单（如 cloud#1045/#1046 之于 cloud#1050），backlog 视觉膨胀且依赖关系靠正文文字维系。\n\n另有一条设计约束：**不引入「评论记录/台账 issue」类方案**——评论在状态机（issue+label）之外，是 silent fourth state；台账是 SKILL.md 自己禁止的 second tracker。立单时也是判级最不准的时刻（cloud#1004 的「转义细节」实为 P0；cloud#897 自己的影响面评估就是错的），所以不设「小事别报」门槛。\n\n## 修订内容\n\n**os-dev.md（立单纪律）**：\n- 立单前必须按关键词 + 文件路径搜索 open issues；命中则评论补充而非新开（并行竞态仍由 PM 兜底）。\n- 发现的修法属于某条已排队/在飞 issue 完成范围之内 ⇒ 开成它的 **sub-issue**；仅有依赖关系 ⇒ 独立立单 + `Blocked-by:`。\n- 观察类/暂无用户影响的发现打 `finding` 标签（不打 `pm:queue`）；具体缺陷照旧裸单交 PM 分诊。不自行判级压单。\n\n**SKILL.md**：\n- 一次性 setup 增加 `finding` 标签（三仓）。\n- backlog 扫描（step 0）的分类结果增加第三类：`finding`（已记录、不可派发、不占维护者收件箱）。\n- 新增**发现分诊轮**：每 ~5 轮或 `finding` 存量超阈值时批量过一遍——过时前提检查后三选一：晋级 `pm:queue` / **关闭 not planned（附一句理由，列入轮次报告，维护者可否决重开）** / 继续持有。\n- sub-issue 归挂的限定：已排队父单的 sub-issue 会自动成为派发候选（现有规则），故只有真属父单完成范围的才归挂，避免未分诊发现被静默送进派发池。\n- 轮次报告增加三个有界健康度指标：可派发队列库存趋势、`needs-user-decision` 收件箱大小、`finding` 中位年龄。总 open 数不是健康度指标——债务密集区发现率天然高。\n\n## 关联\n\ncloud#1054（重复立单实例）、cloud#1045/#1046（平级散落实例）、cloud#1049/#1051/#1057（等待分诊出水口的实例）、objectstack#4604（分片登记表）。"
+}

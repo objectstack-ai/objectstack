@@ -1,0 +1,35 @@
+{
+  "number": 5121,
+  "kind": "pull_request",
+  "title": "fix(lint): 收敛 validate-rule-compilability 的 spec 不声明键 `??` 别名读法 (#5096)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T05:25:52Z",
+  "updated_at": "2026-08-04T05:39:20Z",
+  "closed_at": "2026-08-04T05:39:19Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T05:39:19Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5121",
+  "body": "Fixes #5096\n\n#4984 → #5009 → #5017/PR #5046 同族**第八处**,落在**第三个文件**。改动限于 `packages/lint`,未触碰 `content/docs/releases/`。\n\n## 一条读法,实测核实\n\n`validate-rule-compilability.ts:239`:\n\n```ts\nconst validations = obj.validations ?? obj.validationRules;\n```\n\n对着 live `.shape` + `safeParse` 实测(与 #5046 那条 414 行是**同一份证据**):\n\n```\nObjectSchema.shape has `validations`?      true\nObjectSchema.shape has `validationRules`?  false\n\nobjects[].validationRules parses? false\n  [unrecognized_keys] objects.0: Unrecognized key(s) on this object: `validationRules`. …\n    Did you mean `validationRules` → `validations`?\n\nobjects[].validations parses? true\n```\n\n`validateRuleCompilability` 以 `input: 'parsed'` 注册(`authoring-rules.ts:864`),canonical 排**首位** —— 别名 limb 对任何能解析的 stack 不可达。收敛为 `obj.validations`。\n\n## 真实元数据:零行为变化\n\n三个 example 的对象面(该规则只读 `stack.objects`,所以对象 barrel 就是它的完整输入面):\n\n| stack | objects | validation rules | AFTER | BEFORE | diff |\n|:--|--:|--:|--:|--:|:--|\n| app-crm | 6 | 5 | 0 | 0 | EMPTY(逐字节相同) |\n| app-showcase | 21 | 10 | 0 | 0 | EMPTY |\n| app-todo | 1 | 2 | 0 | 0 | EMPTY |\n\n合计 28 个对象、17 条验证规则,改动前后 findings **逐字相同**。全包 grep `validationRules` 作对象键:真实元数据里**零命中**(仅剩 `validate-expressions.test.ts` 里 #5017 刻意 pin 住 schema 拒绝的那条 fixture,以及 `packages/spec/DEVELOPMENT_PLAN.md` 里 `FormViewSchema` 的同名键 —— 另一个 surface,与本单无关)。\n\n## fixture 陷阱:这次是 1 → 0,不是 0 → N\n\n议题提醒 `validate-rule-compilability.test.ts:295` 的 `validationRules:` 拼法可能\"绿但空转\"(runtime-gate 的先例)。**先测量再动手**,结果是相反的方向:\n\n| | findings |\n|:--|--:|\n| fixture :295 按原样(别名拼法),改动前 | **1** |\n| fixture :295 按原样,改动后 | **0** |\n| fixture :295 换 canonical,改动前后 | 1 |\n\n所以它**不是空转** —— 那条 `it('reads \\`validationRules\\` too …')` 断言的正是本 PR 要删掉的那条 limb,它真的在跑。因此它被**替换**而不是改拼写:把 key 换成 `validations` 只会留下一条主题(「本规则也读别名」)已不复存在的绿测试。替换成的三条断言分别 pin 住:schema 按名拒绝的原文、canonical 读法产出 1 条 / 别名拼法产出 0 条、以及重建的旧链(`OLD_CHAIN`)与新读法**只在 schema 已拒绝的那一种输入上**不同。\n\n## 反向验证的方向(#5018 的教训)\n\ncanonical 排首位,所以删掉别名 limb 在任何**有效** stack 上都不会丢 finding;它只在一条 schema 已经按名拒绝的 stack 上不再判红 —— 而那里 schema 的具名拒绝本来就是更好的诊断。两边都写进了断言,而不是断言一边、假设另一边。\n\n## 两层结构性 meta-guard(#4992 模式,#5017 形状)\n\n- **declared-key guard** —— 从 `stack` / `obj` / `rule` 上读的每个键 ⊆ 对应 surface 自己的 `.shape`,`expected` 精确匹配(改名 loop 变量会静默解除扫描),外加 \"covers every receiver\" 元测试与一条**反陈旧**断言(被豁免却已不再读任何东西的名字必须删掉 —— 否则豁免表迟早变成装饰)。\n- **计算属性专项** —— `flattenRules` 经 `rule[branch]` 下降,点号扫描看不见 `then` / `otherwise`,而那恰是本规则最有意思的读法。所以从源码里把字面量分支表读出来单独核对:漏掉它等于让这两个键坐在本文件所有 guard 之外。\n- **reachability guard** —— 两个 `findings.push` 落点都被一条 `ObjectStackSchema` **完整 parse 通过**的 fixture 触达,且是把 **parsed 产物**喂给规则(它在 compile 路径上拿到的就是这个)。\n\n判据这里用 #5018 的 `safeParse` 全绿,比 `validate-security-posture` 只能要求\"不报 `unrecognized_keys`\"**严一档**,理由是这条规则判什么:在 spec 眼里 `regex` 是任意字符串、`schema` 是任意 record,所以**编译不过的产物依然完全 spec 合法**。这条 gate 存在的理由正是 zod 看不见该缺陷,因此它永远不需要一条 zod 会拒绝的 fixture。\n\n顺带把源码扫描的字面量文本剥掉了:本规则的 message / hint 里全是 `objects.< name >.validations.< rule >.regex` 这类**给作者看的配置路径**和 `rule-validator.ts` 这类文件名,按字面扫会逼着把 `objects` / `validations` / `validator` 塞进\"plumbing\"豁免 —— 那正是让豁免表失去意义的那种填充。`${…}` 插值是真读法,保留。\n\n## 变异测试\n\n| 变异 | 转红 |\n|:--|:--|\n| M1:别名 limb 加回(`obj.validations ?? obj.validationRules`) | **2 条**(`reads the canonical key only …`、`every key read off \\`obj\\` is declared by ObjectSchema`) |\n| M2:改成纯别名读(`obj.validationRules`,#5026 那种形状) | **11 条** |\n\n## 全文件同族普查\n\n全文件只有这一条 `??`,别无同族链或纯别名读。其余 receiver(`err` / `import` / `process`)是 JS/Node 内建,已在 `NOT_SCHEMA_RECEIVERS` 里逐条写明理由。**无新增 out-of-scope 发现,未新开 issue。**\n\n## 消费半径\n\n`validation-rule-regex-uncompilable` / `validation-rule-json-schema-uncompilable` / `validateRuleCompilability` 在 `packages/lint/src/` 之外**零引用**。跨包 fixture(#5046 返工的教训)`packages/cli/test/authoring-rule-command-parity.test.ts` 与 `packages/cli/src/utils/collect-docs.test.ts` 都已是 canonical `validations:` 拼法(前者正是 #5046 顺手改的),实跑通过。\n\n## 验证\n\n```\npnpm --filter @objectstack/lint test        → 57 files, 1172 tests passed\npnpm --filter @objectstack/lint typecheck   → tsc --noEmit, clean\neslint(两个改动文件)                        → exit 0\npackages/cli 上述两个 test 文件              → 2 files, 37 tests passed\n真实元数据 before/after diff                 → 空(逐字节)\n变异 M1 / M2                                 → 2 / 11 条红\n```\n\n已 merge `origin/main`(3 个提交,均未触及 `packages/lint` / `packages/spec`;`pnpm-lock.yaml` 动过,已 `pnpm install --frozen-lockfile` 后重跑全绿)。\n\n⚠️ 一个新 worktree 的**假红陷阱**记录在此:`packages/cli` 的 parity 测试 import `@objectstack/lint`,在 lint 尚未 build 的新 worktree 里报的是 import 失败,与本改动无关 —— `pnpm --filter @objectstack/lint build` 后即绿。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018iARDqtrhQgz6fVHDeDkbQ)_"
+}

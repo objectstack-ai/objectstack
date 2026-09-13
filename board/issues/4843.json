@@ -1,0 +1,37 @@
+{
+  "number": 4843,
+  "kind": "issue",
+  "title": "objectui-range.mjs 默认仍按 feat|fix 类型过滤 —— 发布页 Console 段落同样会丢掉破坏性 refactor!",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T09:47:44Z",
+  "updated_at": "2026-08-03T15:18:37Z",
+  "closed_at": "2026-08-03T15:18:37Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4843",
+  "body": "**未认领。** 刷 #4731(`bump-objectui.sh` 的 pin changeset 改成读 objectui 声明的 changeset)时发现的邻近问题,不在那条 PR 的范围内,另立。\n\n## 现状\n\n`scripts/objectui-range.mjs` —— docs/releases-maintenance.md 里「两个平台版本之间前端改了什么」的聚合层,产物直接贴进发布页的 Console 段落 —— 用的还是同一套类型猜测:\n\n```js\nconst KEEP = ALL_TYPES ? null : new Set(['feat', 'fix']);\n```\n\n`--all` 是显式 opt-in,默认只收 `feat` + `fix`。\n\n## 后果\n\n与 #4731 同源:**破坏性变更是唯一被类型过滤挡在门外的一类**。在 #4731 实测的真实区间 `7d9734d5e321..785b8a5d432c` 里,默认输出会丢掉 13 条真正发版的提交,其中 6 条带 `!`(`refactor(layout)!: delete PageNodeRenderer`、burn ledger batch 2/4/5/6/7),外加 `chore(deps): lockstep the @objectstack family onto 17.0.0-rc.1`;同时会收进 5 条在 objectui 侧 release-nothing 的提交(两条 `fix(ci)`)。\n\n比 #4731 轻一点的地方:这里的过滤在 `--help` 里写明了,也有 `--all`,不是完全无声。重的地方:它的产物是**发布页正文**,读者拿到的是一份看不出被过滤过的 markdown —— 尾部没有「另有 N 条被类型过滤排除」的说明,`--all` 又不是默认。\n\n## 建议\n\n与 #4731 收敛到同一个判据:改用 `scripts/objectui-changeset-digest.mjs`(#4731 引入)的导出函数 —— `collectAddedChangesets()` / `parseChangeset()` —— 按 objectui 声明的 changeset 取「发版的前端改动」,级别也现成。若要保留按 commit 类型分组的呈现,至少让被排除的条数在产物尾部出声。\n\n## 关联\n\n- #4731 —— 同一失效模式,已在 `bump-objectui.sh` 侧修好(PR #4842)\n- #3340 —— 两者共同要防的洞"
+}

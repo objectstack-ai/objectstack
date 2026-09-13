@@ -1,0 +1,36 @@
+{
+  "number": 5106,
+  "kind": "pull_request",
+  "title": "feat(plugin-email): SmtpTransport —— 真实 SMTP 投递、设置热替换、不再说谎的 mail/test (#5087)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T04:44:05Z",
+  "updated_at": "2026-08-04T05:10:27Z",
+  "closed_at": "2026-08-04T05:10:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T05:10:25Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5106",
+  "body": "Fixes objectstack-ai/objectstack#5087\n\n## 做了什么\n\n设置页 **Mail Delivery** 一直把 SMTP 当默认 provider、给了完整的 host / port / TLS / user / password 表单,而后端什么都没有:`applyMailSettings` 对 `provider === 'smtp'` 是 no-op(「transport unchanged」),`mail/test` 无条件返回 `ok: true` +「Configuration looks valid … Wire `@objectstack/plugin-mail` for actual delivery」——一封没人发出的邮件的成功提示,还指向一个从来不存在的包。国内部署因此没有任何可用发信通道。\n\n本 PR 按 PM 决策(nodemailer,不自研 SMTP 客户端)落地:\n\n- **`SmtpTransport`**(`packages/plugins/plugin-email/src/transports/smtp.ts`),实现既有的 `IEmailTransport`,**未改 `packages/spec`**。`nodemailer` 是 `plugin-email` 的正式 dependency,但在**首次 send 时才 `await import('nodemailer')`**,所以不选 SMTP 的部署与非 Node 运行时不会加载 `node:net` / `node:tls`。\n- **TLS 只有一个开关,连接行为由端口推导**(各家服务商就是这么写文档的):`465` → 隐式 TLS(SMTPS);其它端口 → **强制** STARTTLS 升级(服务器不肯升级就让这封信失败,而不是把凭据明文发出去);`secure: false` → 明文连接,服务器提供 STARTTLS 才机会性升级。逃生舱 `transportOptions` 可直接透传 nodemailer 选项。\n- **三个入口共用同一个选项读取器**,不会各自漂移出不同的「Use TLS」语义:\n  - 设置页热替换(`smtp_host` / `smtp_port` / `smtp_secure` / `smtp_user` / `smtp_password`,保存即换,不重启);\n  - CLI `os serve`:`OS_EMAIL_PROVIDER=smtp` + 新增 `OS_EMAIL_SMTP_HOST` / `_PORT` / `_SECURE` / `_USER` / `_PASSWORD`(Prime Directive #9 的 `OS_{DOMAIN}_{FEATURE}` 形状,叠在 `config.email.options` 之上);\n  - 构造期:`new EmailServicePlugin({ provider: 'smtp', providerOptions: { host, ... } })`。\n- **响亮,不静默**(本 issue 的缺陷本身就是静默):\n  - 构造/CLI 路径缺 host **直接抛错**,启动失败——不再退回 LogTransport 让服务器「每封都发成功、一封都没发出去」;\n  - 设置热替换路径不抛错(一次保存不该把服务器打挂):保留旧 transport,但 **error 级日志**,并且按 AGENTS.md 的要求同时给出**后果**(SMTP 邮件没有在投递)和**修复**(Settings → Mail → Host / `OS_MAIL_SMTP_HOST`);\n  - 只有「provider 还停在 manifest 默认值 smtp、从没配过」这一出厂状态走 info,否则每次 dev 冷启动都打一条 error,反而把 error 训练成可以跳过的噪音。\n- **`mail/test` 真的发信**:`plugin-email` 注册的 handler(覆盖 service-settings 里的内置 stub,与 `storage/test` 同一套路)对 `smtp` 总是用屏幕上的那份配置**新建一次性 transport 去发**,如实回报成功或 SMTP 服务器自己的报错(`535 … authentication failed`),测试信同样落 `sys_email`;transport 用完即关。LogTransport 状态下不再报成功,而是 `ok: false` + warning 说明「只写了日志」。\n- **内置 stub 也不再说谎**:没挂 email 插件时它只能校验表单,于是返回 `ok: false` + 明确说明「没有发出任何测试邮件」,并指向 `email` capability。\n- 文档:`content/docs/deployment/environment-variables.mdx` 里「Real SMTP delivery requires the separate `@objectstack/plugin-mail-smtp` package」删除,补上新的 `OS_EMAIL_SMTP_*` 表格与设置页 / `OS_MAIL_*` 两条通道的关系;`email-plugin.ts` 同源注释一并改。**未碰 `content/docs/releases/`**。\n- changeset:`.changeset/smtp-transport-plugin-email.md`(用户可见新能力)。\n\n## 测试\n\n新增 32 个用例,`pnpm --filter @objectstack/plugin-email test` 由 77 → 109 全绿:\n\n- `transports/smtp.test.ts`(mock `createTransport`):缺 host / 非法端口拒绝构造;**首次 send 之前不加载 nodemailer**;587 默认 + requireTLS、465 隐式 TLS、`secure:false`、有 user 才带 auth、`transportOptions` 覆盖;字段映射;535 认证失败原样抛出;构造失败不被缓存(改完设置下一次 send 就能好);`describe()` 不含密码;`makeTransport('smtp')` 缺 host 抛错。\n- `transports/smtp.wire.test.ts`(**真 nodemailer + 进程内假 SMTP 服务器**,不出网):完整跑通 EHLO / AUTH / MAIL / RCPT / DATA;**中文主题按 RFC 2047 编码且能还原**、中文 HTML 正文经传输编码后可还原、`charset=utf-8`;AUTH 被拒(535)时 send 抛错且服务器一条 DATA 都没收到。\n- `email-plugin.mail-settings.test.ts`:设置里的 SMTP 真的被**换上**(`instanceof SmtpTransport` + 连接参数)、再保存一次能**再换**;换上后发信走 nodemailer 且 **`sys_email` 仍然记录**(queued → sent + message_id,中文主题/正文原样落库);缺 host 时保留旧 transport + error 日志(出厂默认态则不吵);构造期 `provider:'smtp'` 无 host **抛错**;`mail/test` 的四条路径(真发/535 失败/缺 host/LogTransport 不报成功,并断言旧文案已消失)。\n- `packages/cli/src/commands/serve-email-capability.test.ts`:新抽出的 `resolveEmailCapabilityArg`(与 `resolveStorageCapabilityArg` 同型)——`OS_EMAIL_SMTP_*` 组装、env 覆盖 `config.email.options`、`smtp` 不再落进「缺 apiKey → 退回 log」那条分支、缺 host 抛错;resend/postmark 旧行为保持不变。\n\n跑过:`pnpm --filter @objectstack/plugin-email test`(109 passed)、`typecheck` 干净;`pnpm --filter @objectstack/service-settings test`(197 passed);`pnpm --filter @objectstack/cli test`(69 files / 609 passed)、`typecheck` 干净;`eslint` 干净;`check:doc-authoring` / `check:published-files` / `check:durability-log-level` / `check:startup-registry-verdict` / `check:adr-anchors` 全绿。已 merge 最新 `origin/main`(#5097、#5046)后重建并复跑受影响包。\n\n## 顺带发现(未在本 PR 修)\n\n- #5104(本 issue 的 sub-issue):`packages/spec/src/system/email-config.zod.ts` 的 `EmailProviderSchema` 仍是 `['log','resend','postmark']`,TSDoc 还写着「Self-hosted SMTP is intentionally NOT shipped in plugin-email」——本 PR 落地后是假话。因派发约束禁止碰 `packages/spec`(#5080 / #4001 同批在飞)而单独立单。\n- #5105(`finding`):`content/docs/protocol/kernel/config-resolution.mdx` 的示例用了并不存在的 `provider: 'console'` / `OS_EMAIL_PROVIDER=mailhog` 与 `fromAddress` 键。\n- SendGrid / Amazon SES 的同形缺口已由 PM 记在 #5094,本 PR 不涉及。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_017MCKJaEomEqg4tvz4SzdNd\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017MCKJaEomEqg4tvz4SzdNd)_"
+}

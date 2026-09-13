@@ -1,0 +1,35 @@
+{
+  "number": 5323,
+  "kind": "pull_request",
+  "title": "fix(driver-mongodb): 空 `$and`/`$or`/`$not` 归约成布尔单位元,非 filter 节点先响亮拒收 (#5239)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T19:59:34Z",
+  "updated_at": "2026-08-05T03:29:14Z",
+  "closed_at": "2026-08-05T03:29:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T03:29:12Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5323",
+  "body": "Fixes #5239\n同批携带 **#5146 spec 半边**(已落地)与 **#5240 spec 半边(受限携带 → 实测后不进表)**。\n\n⚠️ **本 PR 交付的是 #5239 的硬约束半边(driver-mongodb 归约),四条一致性表行**没有**加进去** —— 前提复核推翻了「只差 mongodb 一家」这条。理由与实测在下面第 2 节,已另立 #5322 上交拍板。请连同该单一起验收。\n\n---\n\n## 1. 前提复核(先做的事)\n\n按仓规对 `origin/main`(`175d789`)逐后端实测四条 case,而不是照抄 issue 正文。实测方法本身有阳性对照:我的 driver-sql 探针复现了 PR #5296 / #5243 已落地 pin 的逐字结果(`{$not:{stage:'won'}}` → 行 2,3,4;`{$or:[]}` → 零行),说明测的是真行为不是我的假设。\n\n| 后端 | `{$and:[]}` | `{$or:[]}` | `{$or:[{a},{}]}` | `{$not:{}}` |\n|---|---|---|---|---|\n| **期望** | 全部行 | **零行** | 全部行 | **零行** |\n| `formula` | 全部行 | 零行 | 全部行 | 零行 |\n| `driver-memory` | 全部行 | 零行 | 全部行 | 零行 |\n| `driver-sql`(#5134/PR #5243) | 全部行 | 零行 | 全部行 | 零行 |\n| `driver-sqlite-wasm` | 全部行 | 零行 | 全部行 | 零行 |\n| `driver-mongodb`(改前) | **服务端报错** | **服务端报错** | 全部行 | 零行 |\n| **`read-scope-sql`** | **抛错** | **抛错** | **行 1,2** | **整表** |\n| **analytics `filter-normalizer`** | **抛错** | **抛错** | **行 1,2** | **整表** |\n\nissue 正文点名的「四个后端」里就含 `read-scope-sql`,而它和同包的 `filter-normalizer` 各红四格。两者都在册跑全量 `FILTER_LOGIC_CASES`(`read-scope-sql-conformance.test.ts`、`native-sql-filter-logic-conformance.test.ts`),所以四条一进表就是八格红。\n\n## 2. 为什么四条没进表\n\n那两处不是「没跟上」,是**成文的相反立场**:`filter-normalizer.ts` 的错误消息逐字写着「An empty combinator has no defensible reading — dropping it widens the query, and **treating it as \"match nothing\" silently empties a chart**」,而「match nothing」正是 #5134 给 `$or: []` 定的答案;`read-scope-sql.test.ts:86` 还用 `toThrowError(/non-empty array/)` 把这个抛错钉住了。\n\n「响亮拒收」本身是有先例的答案 —— #5240 对 `{ field: {} }` 取的就是它。所以这是两条已落地立场必须有一条让步,属公开契约定调,不是实现细节。**已立 #5322**(含两轴分析与推荐:取单位元 + 可选地在 publish/lint 面对字面量空组合子拒收,这样运行期语义单一而作者错误仍在编写期爆炸)。派发词的硬要求是「批次 PR 必须对自己的内容全绿」,所以红行不进表,实测矩阵原样留在 `filter-logic-conformance.ts` 里,下一位不必重测。\n\n同理另两族也没进表:\n\n- **#5146 NULL-safe `$not`**:`driver-sql`(PR #5296)、`driver-sqlite-wasm`、`driver-memory`、`formula`、`driver-mongodb` 五家已一致(实测 `{$not:{stage:'won'}}` → 行 2,3,4),但 `read-scope-sql` / `filter-normalizer` 仍发裸 `NOT (…)`,只返回行 2 —— 即 #5297,已在该单补注「`filter-normalizer.ts` 是同缺陷的第二份拷贝」。另外这一族还要改 fixture:`FILTER_LOGIC_ROWS` 每一列都非空,得先加一个可空列并在**七个** harness 里同步声明。\n- **#5240 `{ field: {} }`**:四后端闸门未实现,今天实测有四个不同答案。更根本的是 `FilterLogicCase` **没有办法表达「期望拒收」** —— `expected` 是行 id 列表,空列表的意思是「匹配到零行」,恰恰是裁定**没**取的 FALSE 答案。要进表得先扩表结构(加 `expectRejection` 判别式或另立姊妹表),按派发词不擅自发明,只留注记。\n\n## 3. 本 PR 实际改了什么\n\n### `driver-mongodb`(#5239 的硬约束半边)\n\n`translateFilter` 原样透传组合子数组,而 MongoDB 对空数组既不答 TRUE 也不答 FALSE,是**第三种行为:拒绝整条查询**。改成与 #5134 同一套**结构性三值归约**:先把整棵树判成 `true` / `false` / `clause`,再据此产出 —— 而不是「编译完再问有没有产出条件」,后者分不清「本来就是空」和「有东西没编译出来」。\n\n- 空 `$and` → TRUE,不产出条件。\n- 空 `$or` → FALSE,产出**真实的零行条件** `{ _id: { $in: [] } }`。这一格是关键:「什么都不产出」等于 `{}`,而 `find` / `updateMany` / `deleteMany` 把 `{}` 读作**全部文档**,方向正好相反。\n- `{}` 作 `$or` 分支仍是 TRUE 析取项,`{$not: {}}` 仍是零行 —— 这两条 MongoDB 本来就与布尔代数一致,所以归约按**结构**做而不是只判 `length === 0`(只判长度会有一半是蒙对的)。\n- 发出的每个 `$and` / `$or` 数组因此都保证非空(丢掉单位元成员 ≠ 发一个空数组)。\n\n**形状拒收在同一改动里,且先于归约**。单位元把「这个节点没有谓词」读作「匹配全部文档」,所以空节点必须只有一个成因。改前实测,这一格比 driver-sql 当年更糟 —— 不是「被静默忽略」,是**已经在放宽**:\n\n| 输入 | 改前译文 | 含义 |\n|---|---|---|\n| `{ $or: [new Date()] }` | `{ $or: [{}] }` | 每一份文档 |\n| `{ $or: 'x' }` | `{}` | 每一份文档 |\n| `{ $not: null }` | `{}` | 每一份文档 |\n| `{ $or: ['x'] }` | `{ $or: [{ '0': 'x' }] }` | 一个没有文档拥有的字段 |\n\n`updateMany` / `deleteMany` 走同一个 translate 层,在那里「放宽到全部文档」不是行数不对而是数据丢失。现按 ADR-0112 以 `INVALID_FILTER` / `status: 400` 拒收并点出位置(`filter.$or[0]`),消息不带 `[mongodb]` 前缀(#3867)。判定按**原型**而非 `typeof` —— `Date` / `RegExp` / class 实例都满足 `typeof x === 'object'` 却枚举为空。\n\n一处**刻意不动**:`{ field: {} }` 仍归为 `'clause'`,译文逐字节不变,不替 #5240 做任何裁决。\n\n### `packages/spec`(仅文档,零运行时改动)\n\n- `FilterConditionSchema` 的契约 TSDoc 写明 **#5146 拍板的 NULL-safe `$not`**:被比较列为 NULL 的行不满足被否定的条件、应当被返回,即 `NOT (…) OR col IS NULL`;并说明守卫必须下推到叶子(hoist 到顶会重新放行经由另一分支满足内层 `$or` 的行)。按 PD #10 如实写明 `read-scope-sql` / `filter-normalizer` 尚未合规并指向 #5297 —— 声明出来正是让这个缺口从隐形变成在册。\n- 同处写明**哪些刻意还没声明**(空组合子单位元、`{field:{}}`),避免制造新的 declared ≠ enforced。\n- `filter-logic-conformance.ts` 记下三族「已裁定但未进表」的 case、实测矩阵与阻塞单号。\n- ⛔ 未触碰 #5306 的 `FilterArray` 声明块(该 PR 仍未合入,且落点在 `parseFilterAST` 之后,与本 PR 无重叠)。\n\n## 4. 验证\n\n消费半径全跑(表钉住的每一个后端 + 本次改动包):\n\n```\n@objectstack/spec               309 files / 7949 tests passed\n@objectstack/driver-mongodb       8 files /  169 passed | 128 skipped\n@objectstack/driver-sql          60 files /  765 passed |  44 skipped\n@objectstack/driver-memory       11 files /  303 passed\n@objectstack/formula             15 files /  340 passed\n@objectstack/driver-sqlite-wasm  16 files /  232 passed\n@objectstack/service-analytics   42 files /  555 passed\ntypecheck (spec, driver-mongodb) 通过\ncheck:generated                  9/9 up to date(rebase 到 26e1029 后复跑)\ncheck:driver-conformance         4 drivers x 5 case-sets,20 covered,0 DEBT\ncheck:nul-bytes                  OK(另对改动文件做了 `[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]` 自扫,无命中)\n```\n\n**skip 不是 pass**:`driver-mongodb` 的 128 skipped 是需要真 mongod 的那半边 —— 本容器取不到 `mongodb-memory-server` 的二进制。所以新 pin 分两半,与本包既有惯例一致:译文断言**永远跑**(对这四条,发出的 document 就是语义:`{}` = 全部,`{_id:{$in:[]}}` = 零),真 mongod 那半边回答「服务端是否同意」,在 CI 能取到二进制时才跑。\n\n### 反向验证 —— 方向先预测,再跑\n\n预测:把 `mongodb-filter.ts` 还原成 `origin/main`,新 pin 里**除「existing translation is untouched」那组控制项外全红**。\n\n实测 **28 红 / 9 绿**,方向与预测一致。唯一偏差是我预测绿的数量写成 8 而实际 9 —— 差的那一条是 `a field constrained by zero operators is still not ruled on (#5240)`,它**本就该在还原后保持绿**(它钉的正是「`{stage:{}}` 前后逐字节不变」),是我数自己的控制项时漏数了一条,不是方向反了。红的 28 条覆盖三组单位元、嵌套组合、以及全部 15 条形状拒收。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ErbEDVAg1No9gdg1pgDAGB)_"
+}

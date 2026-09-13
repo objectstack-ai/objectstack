@@ -1,0 +1,37 @@
+{
+  "number": 5155,
+  "kind": "issue",
+  "title": "HttpDispatcher 把「本请求解析出的 kernel」存在实例字段上(this.kernel),多租户 host 上并发请求会互相串改",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T06:42:31Z",
+  "updated_at": "2026-08-05T03:41:06Z",
+  "closed_at": "2026-08-05T03:41:06Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5155",
+  "body": "发现于 #5129(E5b 端点链接线)的实现过程中,**不是本单引入的缺陷**,也不在本单范围内 —— 如实记录,交 PM 分诊。\n\n## 事实\n\n`packages/runtime/src/http-dispatcher.ts`:每个 host 只构造**一个** `HttpDispatcher`(`dispatcher-plugin.ts` 的 `start()` 里 `new HttpDispatcher(kernel, …)`,所有路由共享它),但「本请求解析到哪个 kernel」被写在**实例字段** `this.kernel` 上:\n\n```\nthis.kernel = (await this.kernelResolver.resolveKernel(context, this.defaultKernel)) ?? this.defaultKernel;\n```\n\n而 `resolveService()` / `getObjectQLService()` / `domainDeps.getRequestKernelService()` 全部从 `this.kernel` 读。域处理器在这一次赋值之后会跨多个 `await` 边界继续读它。\n\n于是在**多租户 host**(注册了 `kernel-resolver`)上,两个交错的请求 A(env-1)、B(env-2)可以是:\n\n1. A 解析 → `this.kernel = kernelOfEnv1`;\n2. A 在某个 `await`(会话解析、driver 查询)让出;\n3. B 解析 → `this.kernel = kernelOfEnv2`;\n4. A 恢复,`resolveService('objectql')` 读到的是 **env-2 的 kernel**。\n\nNode 单线程不保护这个字段 —— 保护的前提是「不跨 await 持有可变共享状态」,而这里恰好跨了。\n\n## 为什么今天不一定看得见\n\n单 kernel 部署里 `this.kernel === this.defaultKernel` 恒成立,赋值是幂等的,所以本地与 CI 都不会暴露。只有注册了 `kernel-resolver` 的多租户分发(`cloud`)才有第二个取值,而那条路径没有并发交错的回归测试。\n\n**我没有复现**,只有代码事实。严重度请分诊时判断:如果可达,它的形状是「一个租户的请求读到另一个租户的数据源」,不是性能问题。\n\n## 与 #5129 的关系\n\nE5b 把声明式端点步接到了同一个解析上(`HttpDispatcher.resolveRequestScope`,由 `dispatch()` 里原地抽出,行为逐字节不变),所以这个字段**多了一个写入方**。#5129 没有加重也没有减轻这个类:同样的赋值,同样的读法。之所以在这里记而不是在那条 PR 里顺手改,是因为修法(把 per-request 状态从实例字段挪到显式参数 / `AsyncLocalStorage`)会穿过 `domainDeps` 的每一个消费者,那是一单独立改动,不该混进一次接线单。\n\n## 可能的修法(留给分诊,不预设结论)\n\n- A:把 kernel 作为参数逐层传进域处理器(改 `DomainHandlerDeps` 契约,面大但显式);\n- B:`AsyncLocalStorage` 承载 per-request kernel(改动小,但引入隐式上下文);\n- C:每请求 new 一个轻量 dispatcher facade(分配成本 vs. 正确性)。\n\n先确认可达性(写一个多租户交错的回归测试)再选,比先选修法更省。"
+}

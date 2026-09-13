@@ -1,0 +1,34 @@
+{
+  "number": 5040,
+  "kind": "issue",
+  "title": "17.x 立项:建设声明式 ApiEndpoint 执行器(挂载 + matchEndpoint + authRequired/cacheTtl/inputMapping/outputMapping 逐键接线)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "enhancement",
+    "priority:p0"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T00:37:55Z",
+  "updated_at": "2026-08-04T15:28:29Z",
+  "closed_at": "2026-08-04T15:28:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 14,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5040",
+  "body": "维护者已于 #4936(2026-08-04 00:20Z 裁决)批准立项,本卡为裁决第 2 条的落项位,**不在 v17 窗口内执行**:\n\n> **17.x 内**:建设端点执行器(挂载 + matchEndpoint + `authRequired`/`cacheTtl`/`inputMapping`/`outputMapping` 逐键接线),建成后把拒绝换成执行——词表零折腾。执行器立项单独开卡,不挤本单。\n\nBlocked-by: objectstack-ai/objectstack#4936\n\n## 范围(自 #4936 裁决与实测证据继承)\n\n1. **路由挂载**:dispatcher-plugin 目前逐条显式注册路由,元数据声明的路径无 catch-all(#4936 实测两处断链之一)。执行器需要给元数据声明的端点一条真实进入 `dispatcher.dispatch()` 的通路。\n2. **`matchEndpoint`**:在元数据服务上真实实现(#4936 时全仓无实现,`handleApiEndpoint` 恒 `{ handled: false }`,该死分支已随 #4936 的 PR 摘除,本卡是重建而非复活旧代码)。\n3. **逐键接线**:`authRequired`(⚠️ 安全语义,默认 `true` 生效即 breaking 面)、`cacheTtl`、`inputMapping` / `outputMapping`;`rateLimit` 两键随 #4910-Q2 裁决在此接线(复用 #5006 建的 server 级 seam 范式:principal 优先 key、kernel-cache 计数)。\n4. **完成判据**:v17 落地的「非空 `apis:` publish/validate 硬拒」(#4936)换回执行;`ApiEndpointSchema` 词表零折腾(裁决依据:端点词表是行业极稳定形状)。\n\n## 分诊注记\n\n落点跨域:挂载在 `packages/runtime`(按域表归 `domain:cli`,取主落点标之)、`matchEndpoint` 在 `packages/metadata*`(`domain:engine`)、词表在 `packages/spec`(`domain:spec`)。**被取用时按 contract-first 拆分**(spec 子单先行),不整卡直派。17.x 窗口打开、#4936 的 PR 合入之前,本卡不入 `pm:queue`。\n\n关联:#4936(裁决全文)、#4939(ApiRegistry 同批退役,词表收敛为一套)、#4910 / PR #5006(server 级 rateLimit seam 范式)、ADR-0049、ADR-0076。"
+}

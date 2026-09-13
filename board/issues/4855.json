@@ -1,0 +1,37 @@
+{
+  "number": 4855,
+  "kind": "issue",
+  "title": "`packages/qa/dogfood` 的 tsconfig 没人跑 —— 14 个类型错误积在一个「声明了但未执行」的门后面",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T10:19:11Z",
+  "updated_at": "2026-08-03T20:04:12Z",
+  "closed_at": "2026-08-03T20:04:12Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4855",
+  "body": "发现于 #4700 的收尾验证(顺手跑了一次 `tsc --noEmit`),与那条 issue 无关,按 Prime Directive #10 单独归档,**未在 #4700 的 PR 里修**。\n\n## 现象\n\n`packages/qa/dogfood/tsconfig.json` 是一份认真的配置 —— `strict: true`、`module/moduleResolution: NodeNext`、`include: [\"src/**/*\", \"test/**/*\"]`。但 `packages/qa/dogfood/package.json` 的 scripts 只有 `test`:\n\n| 包 | scripts |\n| --- | --- |\n| `packages/qa/dogfood` | `test` |\n| `packages/qa/downstream-contract` | `typecheck`, `test` |\n| `packages/qa/http-conformance` | `test`, `typecheck` |\n\n根 `pnpm typecheck` 是 `turbo run typecheck`,只会跑声明了该 script 的包。于是 dogfood 这份 tsconfig **从来没有被执行过** —— 三个 qa 包里唯一漏掉的一个。\n\n## 积下来的量\n\n```\n$ cd packages/qa/dogfood && npx tsc --noEmit 2>&1 | grep -c \"error TS\"\n14\n```\n\n分三类:\n\n1. **NodeNext 缺扩展名(2 处)** —— `field-zoo-roundtrip.dogfood.test.ts:24` 与 `field-zoo-value-shape.test.ts:17` 都写 `from './field-zoo.matrix'`。文件确实在(`test/field-zoo.matrix.ts`),但 `moduleResolution: NodeNext` 要求 `'./field-zoo.matrix.js'`,所以报 `TS2307: Cannot find module`。vitest 能跑,tsc 不认。\n2. **fixture 里的 flow `type` 没收窄(多处)** —— `test/fixtures/flow-durable-suspend-fixture.ts:103`、`flow-function-effect-fixture.ts:71` 等,对象字面量推成 `type: string`,赋给 flow 那个字面量联合(`api | schedule | autolaunched | screen | record_change`)时失败。加 `as const` 或显式标注即可。\n3. **条件展开出的 headers 类型(2 处)** —— `attachments-permission-matrix.dogfood.test.ts:67,81`,`token ? { Authorization } : {}` 展开后与 `HeadersInit` 不兼容。\n\n## 为什么值得记一笔\n\n这就是「declared ≠ enforced」在构建配置层的形状:一份 `strict` 的 tsconfig 摆在那里,读代码的人(和写代码的 agent)会合理地假设它在 CI 里把关,于是照着它的严格度写;实际上没有任何一步跑它。dogfood 是这个仓最重的行为门,它的 fixture 类型漂移**没有任何东西**会挡。而且它是**可修的**:14 个错误都是机械性的,没有一个需要架构决定。\n\n## 建议\n\n1. 先把这 14 个修掉(三类都是小改)。\n2. 给 `packages/qa/dogfood/package.json` 加 `\"typecheck\": \"tsc --noEmit\"`,让它进 `turbo run typecheck` 的图 —— 与两个 sibling qa 包一致。\n3. 顺序不能反:先加 script 会直接把 typecheck 作业弄红。\n\n如果结论是「dogfood 故意不做类型检查」,那么该删的是这份 tsconfig(或把它降到非 strict),而不是让一份没人执行的严格配置继续留在那里误导人。\n\nRefs: #4700(发现处)、Prime Directive #10\n"
+}

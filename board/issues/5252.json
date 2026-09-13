@@ -1,0 +1,35 @@
+{
+  "number": 5252,
+  "kind": "pull_request",
+  "title": "fix(runtime,tooling): `saveMetaItem` 进入持久性词表 + 包发布可见性翻转不再静默丢写 (#4754)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T12:26:42Z",
+  "updated_at": "2026-08-04T12:44:23Z",
+  "closed_at": "2026-08-04T12:44:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T12:44:21Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5252",
+  "body": "Fixes objectstack-ai/objectstack#4754\n\n## 先说重测结果:issue 的清单要按当前 main 重读\n\nissue 的「8 处 / 3 包 4 文件」表是 08-03 测的。在 `origin/main`(基线 `718b229fa`,已合并至 `4addd9dd`)重跑探针,**总数与文件分布完全一致**,只有行号漂移 —— E6(#5093)对 rest-server enrichment 管线的改动没有增删这一族接缝:\n\n| 文件 | issue 的数 | 重测的数 | 说明 |\n|---|---|---|---|\n| `packages/runtime/src/domains/packages.ts` | 3 | 3 | 三处**指向同一个** `saveMetaItem()`(行 219),由三层嵌套 catch 各报一次 |\n| `packages/rest/src/rest-server.ts` | 2 | 2 | 行号 3671 / 4025 |\n| `packages/metadata-protocol/src/protocol.ts` | 2 | 2 | 行号 7631 / 8769 |\n| `packages/runtime/src/domains/meta.ts` | 1 | 1 | 行号 161 |\n\n但**逐处读完之后,结论和 issue 的预判差别很大**:issue 把「catch 里连日志都没有」这个**形态**当成了「真丢数据」这个**实质**,而 8 处里只有 1 处真的丢。下面是逐处判定。\n\n## 逐处判定\n\n### 真丢失(1 处)—— 已按范本改成 `error`\n\n**`packages/runtime/src/domains/packages.ts`,ADR-0045 可见性翻转。** 这是一次**搭别人便车的元数据写入**:草稿此时已经发布成功,所以 `POST /packages/:id/publish-drafts` 无论翻转成不成都答 200,写失败只在响应体里留下一个 `unhideError` —— 没有运维会读它。于是症状变成「我明明发布了,应用却没出现」,而且要过很久才有人把它和这里联系起来。这正是 #4669 的形状,AGENTS.md 的判据原问答案是**是**(系统看起来完全正常,而它声称写进去的东西没落盘)。\n\n现在按 `service-automation` `start()` 的范本在 `error` 级报告,一行里交清两件事:\n\n- **后果**:点名是哪个包;它的 app 仍以 `hidden: true` 存着,因而在启动器里不可见;而发布报告的是成功;没有任何东西会重试这次翻转;\n- **修复动作**:重跑 `POST /packages/:id/publish-drafts`(幂等),或直接对该 app 走 `PUT /meta/app/:name` 置 `hidden: false`;并带上原始错因。\n\n响应契约**不变** —— 仍然 200,仍然带 `unhideError`。\n\n### 不是降级、故障已答给调用方(3 处)—— 进 shrink-only 基线\n\n- **`packages/runtime/src/domains/meta.ts`** — `catch` → `deps.errorFromThrown(e, 400)`。`saveMetaItem` **就是这个请求的主操作**,失败原样回给调用方(保留协议自己的 `.status` 和结构化 `issues`)。没有任何路径在降级后继续,Studio 拿到的是字段级锚定的 4xx/422。\n- **`packages/metadata-protocol/src/protocol.ts` ×2** — 两处都是**契约就是逐项结果报告**的批量操作:`migrateStoredItems` 做 `report.failed++` 并把该行连原因一起 itemise;复制入包那处 `failed.push()` 并把聚合 `success` 翻成 `false`、填 `failedCount` / `failed[]`。这比一行日志**更响**,而且正是 #4669 自己采用的「`error` + 计数」形状,只不过以结构化数据交付。\n\n这三处**不能**升成 `error`:`meta.ts` 那条路径最常见的情况是作者提交了不合 spec 的 body,升级后每一次校验拒绝都会打一条持久性 `error` —— 正是 AGENTS.md 点名的镜像错误(「trains everyone to skim `error`」),也正是 #4420 那条 `warn` 当初没人读的成因。基线条目写清了理由与关闭条件,指向 #5241。\n\n> 基线键是 `file::callee`(**不含行号** —— 行号会因无关改动天天漂),所以 3 处站点合成 **2 个键**。条目里新增了 `sites` 字段列出复核过的站点集合,并在表头说明这个粒度的代价。\n\n### 闸门自身的误报(4 处)—— 修闸门,不写基线\n\n剩下 4 处根本不是代码的问题,是闸门看错了。**给正确代码写基线是有害的**:基线表头自己写着每条都要有「WHAT closes it」,而正确代码永远关不掉;更糟的是它给下一个作者立了「这闸门会误报,遇红先加基线」的范例 —— 而脚本自己的注释恰恰说,误报到让人绕过的闸门 *worth less than no gate, because it also reports success*。所以这两个缺陷是修掉的:\n\n**① 同文件 concise-arrow 报告器看不见。** 闸门文档明说 `catch` 一侧会追同文件 helper(不然「把失败藏到一层间接后面」就成了最省事的变哑办法),但遍历只访问**子节点**,而\n\n```ts\nconst logError = (...args: unknown[]) => (globalThis as any).console?.error(...args);\n```\n\n的函数体**就是**那个调用表达式本身。于是 `rest-server.ts` 里最响的两处 `/meta` PUT(`logError` + `sendError`)被判成「完全静默」。修完后它们如实显示 `loud (error@49 via logError())`。\n\n**② 一处接缝被按嵌套层数重复指认。** 一个已被内层 `catch` 消化掉的调用,仍然算在**每一层**外层 `catch` 头上。`packages.ts` 那一个 `saveMetaItem` 因此被报了三次 —— 真接缝一次,加上路由级和函数级两个**永远看不到它**的通用错误处理器。现在只有当内层 `catch` **每条路径都向外传播**时(复用已有的 `catchRecovers`),外层才算真正的守卫;内层 `catch`/`finally` 体里的调用仍然算外层的。**覆盖面一点没丢** —— 那个消化掉故障的内层 catch 本身照样被判。\n\n## 效果\n\n```\n词表加 saveMetaItem,闸门未修:  8 处命中\n仅修闸门两个精度缺陷:          4 处命中   ← 4 处误报消失,一行产品代码没动\n修掉真丢失那 1 处 + 3 处进基线: 绿\n```\n\n```\n$ pnpm check:durability-log-level\n✓ self-test: 19 case(s) passed\n✓ durability-degradation log levels: 22 durability-critical catch seam(s), all loud or rethrowing (2 baselined).\n```\n\n## 测试\n\n自测用例**双向钉住**(#4690:只绿过的闸门和什么都不匹配的闸门无法区分)。把两个修复分别单独回退,新用例确实失败:\n\n```\n=== 回退修复 ①(concise-arrow)===\n  ✗ passes: catch delegating to a loud CONCISE-ARROW helper (expression body):\n      expected violation=false, got violation=true count=1\n=== 回退修复 ②(嵌套遮蔽)===\n  ✗ passes: enclosing catch is not accused when an inner RECOVERING catch already consumed the call:\n      expected violation=false count=0, got violation=true count=1\n  ✗ flags: the inner catch itself is still judged (no coverage lost to shadowing):\n      expected violation=true count=1, got violation=true count=2\n```\n\n最后一条说明了为什么给自测加了 `expectCount`:**布尔断言区分不出「正确地报 1 次」和「按嵌套层数重复报 2 次」** —— 光看「还是红的」这个 bug 能完美蒙混过去。\n\n产品侧新增用例同样做了反向验证(去掉日志即失败:`expected \"error\" to be called 1 times, but got 0 times`):\n\n```\n$ pnpm --filter @objectstack/runtime test\n Test Files  89 passed (89)\n      Tests  1313 passed (1313)\n\n$ pnpm --filter @objectstack/runtime typecheck\n> tsc --noEmit          # 干净\n```\n\n以上均为合并 `origin/main`(`4addd9dd`)、`pnpm install --frozen-lockfile` + 重建依赖图之后重跑的结果;闸门在合并后仍是 22 seams,新入的 driver-sql schema-drift 改动没有新增这一族接缝。\n\n## 顺带发现(未在本 PR 修,已另立)\n\n- **#5241** — 闸门分不清「故障已答给调用方」和「故障被吞掉」,这正是本 PR 那 2 条基线的来由。根因是 `saveMetaItem` 和词表里其他条目**不是一类**:现有条目清一色是**背景副作用**(调用方不等结果),而 `saveMetaItem` 8 处里 7 处是**调用方直面的主操作**。观察类,`finding`。\n- **#5242** — 同一段代码的另一个缺陷:可见性翻转中途失败时,已经翻转成功的 app 从响应里整批消失(`unhiddenApps` 的赋值在循环之后、try 之内),连带 `metadata:reloaded` 对这几个 app 漏播。与日志级别无关,改它要动作用域和响应语义,故未夹带。观察类,`finding`。\n\n未触碰:`packages/metadata-protocol/src/seed-loader.ts`(#5127 同批)、`packages/spec/**`、`content/docs/releases/**`,以及派单列出的其余在飞面。`rest-server.ts` 与 `protocol.ts` 虽在声明文件面内,最终**没有改动**(①/基线已解决)。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Pbu27iNUfQCHeuS551Rqo7\n"
+}

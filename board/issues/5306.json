@@ -1,0 +1,35 @@
+{
+  "number": 5306,
+  "kind": "pull_request",
+  "title": "feat(spec): 声明 `FilterArray` 为仅输入的授权糖(#5158 拍板 C 第 1 步)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T17:07:01Z",
+  "updated_at": "2026-08-04T21:03:38Z",
+  "closed_at": "2026-08-04T21:03:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T21:03:36Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5306",
+  "body": "Fixes #5285\nPart of #5158(维护者 2026-08-04 15:22Z 拍板 **C:单一下沉缝**,第 1 步)。\n\n⛔ 本 PR **不动** engine(`engine.ts` Door 2)、不动四驱动、不退役 `engine-findone-contract` pin —— 那是第 2 步,engine 车道在本单落地后接手。\n\n## 前提复核(先做的事)\n\n按仓规先对 `origin/main`(`88b9b2d`)核实 issue 的两条前提,**都成立**:\n\n1. **`FilterArray` 确为「有名无定义」。** 全仓 `grep` 只在 `packages/spec/src/ui/react-blocks.ts:217,244` 命中,而且是**字符串字面量**(`type: 'FilterArray'`),不是任何 TS 类型或 Zod schema。对照countertest:邻居 `FilterCondition` 在 `data/filter.zod.ts:219/246` 有真实定义并出现在 `api-surface.json`。`malformedFilterArrayError`(protocol.ts)只是同名前缀的函数,不是声明。\n2. **`parseFilterAST` 是下沉函数。** 真实导出路径 `packages/spec/src/data/filter.zod.ts:646`,经 `data/index.ts` 的 `export * from './filter.zod'` 出现在 `@objectstack/spec/data`。协议门(`metadata-protocol/src/protocol.ts:4534`)正是 `isFilterAST()` 通过则 `parseFilterAST()`,否则 `400 INVALID_FILTER`。\n\n## 落点判断(以读码为准)\n\n放进 **`packages/spec/src/data/filter.zod.ts`**,紧接 `parseFilterAST` 之后。理由:算子词表(`AST_OPERATOR_MAP` / `VALID_AST_OPERATORS`)、结构判定(`isFilterAST`)、下沉函数(`parseFilterAST`)**全在这一个文件里**;声明必须由它们派生才不会漂移,放到别处只能靠复述。`query.zod.ts` 是 `BaseQuerySchema.where` 的家,而本形状恰恰**必须不出现在那里**,所以它不是落点。\n\n## 形状:三个独立权威互相印证,无歧义\n\n不是凭记忆写的。三处独立实现对结构的读法完全一致:\n\n| 权威 | 比较节点 | 逻辑组 | 扁平列表 |\n|---|---|---|---|\n| `isFilterAST`(运行时判定) | `[field, op, value]`,op ∈ `VALID_AST_OPERATORS` | `['and'\\|'or', ...children]` | `[[cond], [cond]]` |\n| `FilterBuilder`(`packages/client/src/query-builder.ts:18`,实测 16 个方法) | 同上,`push([field, '=', value])` | `['and', ...conditions]` | `getConditions()` 返回的数组 |\n| `packages/lint/src/validate-react-page-props.ts:607` `filterFieldRefs` | 同上(且要求 field 非空) | 同上 | 同上 |\n\n据此声明:\n\n- `FilterArrayComparison` —— 含**真实存在的二元形式**:空值判定的方向在算子名里(`['deleted_at', 'is_null']`),`convertComparison` 对这类根本不读 value 位,`isFilterAST` 只要求 `length >= 2`。\n- `FilterArrayGroup` —— 至少一个子条件(`['and']` join 不到任何东西,#4121 已专门堵过)。\n- `FilterArrayList` —— 非空;`[]` 意思是「没有过滤」,是本形状的**缺席**而非其实例。\n- `FilterArrayOperator` —— `keyof typeof AST_OPERATOR_MAP`,**派生而非复述**。为此把 `AST_OPERATOR_MAP` 的 `Record< string, string >` 注解换成 `satisfies`(保住字面量键集),两处运行时按 `string` 取值统一走新的 `astOperatorLowering()`。行为完全不变,全部驱动/协议测试为证。\n\n一处**由实测定调**的细节:算子必须**大小写不敏感**。`VIEW_FILTER_OPERATOR_ALIASES`(`ui/view.zod.ts:197`)明确记载已存储的 view 元数据携带 `startsWith` / `notEquals` / `greaterThan` 这类 camelCase 拼写,而每扇门都先 `toLowerCase()` 再查表。若这里用 `z.enum` 做大小写敏感校验,就会拒掉 wire 今天正常接受的过滤器。故 schema 用与 `isFilterAST` **逐字节相同**的谓词;TS 类型则只列**规范拼写**(与隔壁 `ViewFilterOperator` 只列规范、别名走 `*_ALIASES` 的既有分工一致,不是新发明)。\n\n## 仅输入 + 负向 pin\n\n`FilterArraySchema` 是**授权门**,`isFilterAST` 仍是**运行时判定门**。两者共用一套词表和一套大小写折叠,只在 **2 处**刻意更严(都是 `isFilterAST` 顺带容忍、没有任何生产者产出、且明显是作者笔误的形状):尾部多余元素 `['a','=',1,2]`(`convertComparison` 会静默丢弃)、空字段名 `['','=',1]`。这个差异清单在测试里逐条钉住,不能悄悄变长。\n\n**负向 pin(本 PR 的承重件)**:`filter-array-declaration.test.ts` 断言 `QuerySchema.safeParse({ object, where: <任一 FilterArray> })` **必须失败**,并对 `FilterConditionSchema` 再钉一层(防止绕过 `where` 直接放宽条件类型)。将来有人「顺手」把数组方言扩进协议面,这条立刻变红并指回 #5158 的裁决。同时反向钉住:同一个值经 `parseFilterAST` 下沉后 `where` **接受** —— 说明它不是「过滤器写错了」,而是「还没下沉」。\n\n## 验证\n\n- `pnpm --filter @objectstack/spec test` → **309 files / 7957 tests passed**(含新增 13 条)\n- `pnpm --filter @objectstack/spec typecheck` → 通过\n- `check:generated` → **9/9 up to date**(`api-surface.json` 新增 7 个导出、`json-schema.manifest.json` 新增 `data/FilterArray`、`content/docs/references/data/filter.mdx` 随 `.describe()` 重生成,全部由 `--fix` 窄重生成)\n- `check:exported-any` → 通过(1850 types / 1596 schemas,`FilterArray` 未落成 `any`)\n- 消费半径清扫(改动了 `canonicalAstOperator` / `convertComparison` 的查表):`driver-sql` 729 passed、`driver-memory` 286 passed、`metadata-protocol` 376 passed、`lint` 1198 passed、`objectql` 1868 passed、`client` 222 passed\n\n### 反向验证 —— 方向与模板预设不同,如实记录\n\n预测:把 `satisfies` 改回 `Record< string, string >`(算子类型放宽回 `string`)后,类型级断言应转红。**首次运行却全绿,预测失败**,而失败原因比预测本身更重要:\n\n`packages/spec/tsconfig.json` 的 `exclude` 含测试通配(`TEST_DEBT` 有实测条目:272 文件 / 902 错误),所以 `pnpm typecheck` **从不读取任何测试文件** —— 本 PR 里的两处 `@ts-expect-error` 在 CI 中是**惰性的**,即幻影断言。\n\n解除排除后重做,方向即与预测一致:基线 `exit 0`(两处断言都是活的);放宽算子类型后**有且仅有** `src/data/filter-array-declaration.test.ts(215,5): error TS2578: Unused '@ts-expect-error' directive.` —— 正是本声明新增的收窄。\n\n处理方式:**不伪造证据**。类型级断言保留(它们是对的,spec 从 `TEST_DEBT` 毕业当天即生效),但在测试文件里显式标注「CI 不做类型检查」、附上手工复现命令与结果,并把这一类问题(spec 测试层共 17 处 `@ts-expect-error` 全部惰性)按 Prime Directive #10 另立 **#5305**(观察类,`finding`,未认领)。请勿把 `pnpm test` 全绿读作该块已被验证。\n\n## changeset\n\n`.changeset/filter-array-input-only-declaration.md`,spec **minor**(新增导出类型)。无迁移:此前能用的过滤器一律照旧,只是补上了原本缺失的那道校验。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ErbEDVAg1No9gdg1pgDAGB\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ErbEDVAg1No9gdg1pgDAGB)_"
+}

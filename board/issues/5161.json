@@ -1,0 +1,36 @@
+{
+  "number": 5161,
+  "kind": "issue",
+  "title": "plugin-email: sys_email 的 queued 行崩溃后永久滞留 —— 无任何轮询者,且 drain 钩子把失败 warn 掉",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T07:00:12Z",
+  "updated_at": "2026-08-04T08:52:34Z",
+  "closed_at": "2026-08-04T08:52:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5161",
+  "body": "Blocked-by: objectstack-ai/objectstack#5160(同文件 `email-plugin.ts`,严格串行;且 #5160 落地后本单的正确修法才定形 —— 清扫出的行在队列模式下应交给队列,而不是自己直接投)\n\nPM 在回答维护者「邮件有没有队列」时读码发现,维护者已确认要修。\n\n## 现状\n\n`sys_email` 的 `status: 'queued'` 行只有一个消费时机:**insert 当时**的 `afterInsert` drain 钩子(`email-plugin.ts` ~390,`setTimeout(0)` 异步自投)。全仓 grep 过:没有任何定时任务、启动清扫或 worker 会再看一眼 `queued` 行。\n\n两个后果:\n\n1. **崩溃窗口**:进程在 insert 之后、投递完成之前死掉,该行永远停在 `queued`。一个叫 queued 的状态没有队列在消费它 —— declared ≠ delivered 的又一实例,只是这次声明的是状态词。\n2. **失败静默**:drain 钩子的两层 catch 都只 `logger.warn` 就吞掉(`outbox drain failed for …` / `outbox drain hook error`)。按 AGENTS.md degradation-log-level 标准,这是「投递没有发生」级别的失败,应为 error 且带后果与修复;warn 会被启动日志淹没。\n\n## 建议\n\n1. `kernel:ready` 时做一次启动清扫:捞 `status='queued'` 且非本进程 managed 的行 → 队列模式下 `publish` 给 `email.send.async`(#5160 的通道),内联模式下 `deliverPersistedRow`;清扫结果(捞了几行、成败各几)打 info 一行。\n2. 是否加周期性清扫由实现判断 —— 若 #5160 的队列模式已覆盖新写入的行,周期清扫可能只对内联模式有意义,不要为覆盖率造第二套调度。\n3. drain 钩子的失败升 error,消息含后果(这封信没有发出,行停在 queued)与修复(重试入口/清扫会捞)。\n\n## 验收\n\n- 人为构造「insert 后进程死亡」的行(直接插 queued 行不触发钩子即可模拟),重启后该行被推进到 sent/failed,不再永久滞留;\n- drain 失败的日志级别与文案有用例钉住;\n- 默认路径(正常 insert→投递)行为不变。"
+}

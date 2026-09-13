@@ -1,0 +1,37 @@
+{
+  "number": 4250,
+  "kind": "issue",
+  "title": "CI: `Test Core` stalls mid-suite with frozen log output — three occurrences in one day, each costing a manual diagnosis + rerun",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T00:46:15Z",
+  "updated_at": "2026-08-03T20:08:07Z",
+  "closed_at": "2026-08-03T20:08:07Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4250",
+  "body": "## 现象\n\n`Test Core` 进入一种**输出冻结但 job 不结束**的状态：日志停在某个测试文件，之后既没有新行、也没有失败，job 一直挂在 `in_progress`，直到有人取消或 timeout 兜底。\n\n一天之内命中三次，分属不同 PR、不同停摆位置：\n\n| 时间 | Run / Job | 最后一条输出所在文件 | 处置 |\n|---|---|---|---|\n| ~11:34Z | run 30539038818 / job 90859196790 | `metadata-validation-sweep.test.ts` | 人工取消 + rerun |\n| （同日早些） | — | `metadata-validation-sweep.test.ts` 附近 | 人工取消 + rerun |\n| 16:34Z | run 30562022449 / job 90937246030 | `src/protocol-unknown-query-param.test.ts` | 人工取消 + rerun |\n\n第三次的取证比较硬：**两次相隔 9 分钟的 `get_job_logs` 返回逐字节相同的内容** —— 同一 flush 时间戳 `16:42:31.7491868Z`、同一末行、`original_length` 同为 19071。累计静默 22 分钟、总运行 30 分钟。取消后 rerun 的 attempt 2 用 **11 分 41 秒**正常通过，同一 commit、同一套件、零改动。\n\n## 为什么值得单独立项\n\n1. **它不是慢，是停。** 正常 11-12 分钟，停摆时静默 20+ 分钟且日志长度不再增长 —— 两者可以用「flush 时间戳 + `original_length` 是否推进」机械区分，不需要猜。\n2. **#4156 的 job timeout 只兜底，不止损。** 有 timeout 意味着不会挂 6 小时，但每次仍然是：等到超时（或人工发现）→ 判断是不是自己 diff 的锅 → 取消 → rerun → 再等一轮。三次事故 = 三次人工诊断。\n3. **它把「CI 红」的信噪比压低了。** 停摆表现为「一直没结论」，与「测试真的很慢」在 UI 上无法区分，所以默认反应是继续等 —— 这正是最贵的反应。\n\n## 值得查的方向（未验证，仅按现象排序）\n\n- 两个停摆点（`metadata-validation-sweep`、`protocol-unknown-query-param`）都是**起真实 ObjectQL engine / 大量 registry 注册**的用例，日志里最后可见的都是引擎初始化序列（`ObjectQL Engine Instance Created` → `Driver connected` → `initialization complete` 反复多次）。怀疑与每用例新建引擎实例后未释放的句柄（driver 连接 / 定时器）有关 —— 句柄不释放会让 vitest 的进程池在收尾时等待而非退出。\n- 若确实是句柄泄漏，`--reporter=verbose` 配合 `detectOpenHandles` 一类的排查，或给 suite 级别加 teardown 断言，比继续加 timeout 更能根治。\n- 另一个可能是 CI runner 侧的 I/O 卡顿，但同一 commit rerun 就好、且三次分属不同 runner，指向套件的可能性更大。\n\n## 建议的最小动作\n\n不要求立刻根治。最低成本的改进是**让停摆自己说话**：给 `Test Core` 一个显著短于当前兜底值的 timeout（比如正常时长的 2-3 倍），这样它会以「超时失败」而不是「一直在跑」的形式呈现 —— 把一次需要人工判读日志时间戳的诊断，变成一条明确的红。\n\n## 相关\n\n- #4156 —— 加入 job timeout 的那次改动（兜底存在，但不解决信噪比）\n- 本次三例的 PR 上下文：#4100（第一次）、#4228（第三次）"
+}

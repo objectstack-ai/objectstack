@@ -1,0 +1,35 @@
+{
+  "number": 4985,
+  "kind": "pull_request",
+  "title": "feat(lint): 判红「声明了但运行期只会跳过」的 sharing-rule condition (#4698)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T18:40:53Z",
+  "updated_at": "2026-08-03T18:55:49Z",
+  "closed_at": "2026-08-03T18:55:48Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T18:55:48Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4985",
+  "body": "Fixes #4698\n\n范围已由 PM 收窄:**只做 `packages/lint` 内可判定的部分**。tenant-scoped unique-index 那条落在 objectql/driver-sql,不在本 PR(核实结论见下)。\n\n## 判据:为什么是这一面,而不是「未读键」通用检查\n\n议题给的不变式很好 —— *a key that nothing reads should not validate clean* —— 难的不是这句话,是**谓词**。「这个键被读了吗」只有在**消费面的决策过程拿得到手**时才是 lint 能回答的问题;多数时候拿不到:仓内 grep 找不到 reader 不构成没有消费者的证据(#4604 登记里那条方法学),消费者还可能住在另一个包、另一个仓,或者一个还没人装的插件里(#4914 的 hot-reload 案例)。\n\nsharing rule 的 `condition` 是**判据精确**的那一例,这也是它入选、邻居被推迟的全部理由:\n\n> stack 声明的 `sharingRules[].condition` 的唯一运行期消费者是 `bootstrapDeclaredSharingRules`(plugin-sharing),而它对这个键做的**唯一一件事**是 `compileCelToFilter(condition, { variables: {} })`。降不下来的 condition 不是被降级、不是被部分应用、也不是被延后 —— 整条规则被 **SKIP**(ADR-0049:绝不当作 match-all 种下去),永远进不了 `sys_sharing_rule`,一条 `sys_record_share` 都不会物化,现场只有启动日志里一行 WARN。\n\n所以这条规则不建模消费者、不猜、不 grep。它**调用消费者自己的决策过程**,同一个包(`@objectstack/formula`)、同一个输入、同一组 options。判定与 seeder 逐位一致 —— 没有会漂移的启发式,也没有「误报但不是真跳过」的可能。\n\n## 两条 rule id\n\n| id | reason | 形状 | 修法 |\n|---|---|---|---|\n| `sharing-rule-unlowerable-condition` | `unsupported` | 函数调用(`has(...)` / `size(...)`)、算术、三元、跨对象路径 | 改写进可下推子集 |\n| `sharing-rule-runtime-variable-condition` | `unresolved-variable` | 读了 `current_user.*` | 换机制(RLS),不是换拼法 |\n\n分成两个 id 而不是一个 id 两条文案:两者**成因不同、修法不同**,而 allowlist 和 `--json` 消费者是按 id 认的。\n\n第一条是议题实测的那一例:作者照着**对象校验规则**(那里是解释执行)正确的写法写 `has(record.x)`,到了这里(编译执行)就成了静默失效的安全元数据。第二条是 criteria sharing rule 被**物化**的必然结果 —— seeder 编译出一份静态 `criteria_json`,evaluator 据此写 `sys_record_share`,编译时根本不存在「当前用户」。\n\n`parse-error` 刻意**不报**:CEL 语法是 `validateStackExpressions` 的地盘,它已经在 gate 同一个字段,而且它的报错是专门写语法的,更好。一个字段,一句抱怨。\n\n## 为什么是 `error`\n\n`SharingRuleSchema` 自己的 docblock 立了这个 flag:\n\n> The whole authorable surface is enforced — nothing here validates and then silently does nothing (ADR-0078).\n\n在这条 PR 之前,这句话对这个 shape 的**每一部分都成立,唯独对承载作者意图的那一个字段不成立**。按 `lint-flow-patterns.ts` 顶部写明的严重度标准 —— 没有任何一种读法下元数据按它写的那样行为,就 gate —— 这是 `error`。它 fail closed(收件人少看见,而不是多看见),那是它能一直活着的原因,不是它可以接受的原因。\n\n## 双向证明\n\n**改后判红**,并点名声明位置(`path: sharingRules[0].condition`、`where: sharing rule \"x\" on object \"y\"`),报文说清楚启动时会发生什么(`SKIPS the rule at boot` / `never written to sys_sharing_rule`),而不只是「unsupported」。\n\n**真实被读的必须保持绿**(误伤比漏报更糟)—— 覆盖比较运算、`in`、`&&`/`||`/`!`、`== null`、字符串方法,以及**从 `examples/app-showcase` 与 `app-crm` 原样抄来的每一条 shipped condition**。\n\n**判据即消费者的判据**,不是它的模型 —— 一个共享语料上双向断言 lint 干净 ⟺ `compileCelToFilter({ variables: {} })` 成功:\n\n```ts\nconst seederWouldSeed = compileCelToFilter(source, { variables: {} }).ok;\nconst lintIsClean = validateSharingRuleEnforceability(ruleWith(source)).length === 0;\nexpect({ source, lintIsClean }).toEqual({ source, lintIsClean: seederWouldSeed });\n```\n\n**「改前判绿」这一半做成机械的,不是散文**。议题的抱怨正是这个 stack 能过**整条**工具链,所以只证明新规则判红不够,还得证明**此前没有任何东西判过它**。测试里跑一遍完整的 authoring registry,要求除本规则外**每一条**都保持沉默:\n\n```\n✓ no OTHER author-time rule sees this — which is exactly why the gate was missing\n```\n\n这句断言会一直成立下去:哪天有别的规则长到覆盖这个 shape,这条测试就会红,逼人决定归谁管,而不是让 stack 悄悄多出一条重复诊断。\n\n## 上线前实测:现存代码有没有被判红\n\n**没有。** 用 `isPushdownableCel` / `compileCelToFilter` 扫过 `examples/` 与 `packages/` 里每一条 sharing-rule `condition` 和每一条 RLS `using` / `check` 字面量(85 条),**全部可下推**。新 gate 不会让任何今天能工作的东西变红。\n\n## 三个实例在当前 main 上的复核\n\n| # | 实例 | 现状 | 归属 |\n|---|---|---|---|\n| 1 | `decision` 节点 `config.condition`(单数) | **已被修掉** —— #4414 的 `flow-inert-node-condition` 已经在判它,`schemaless-node-config.zod.ts` 的 strict 拒收也带了逐键处方 | 无需动作 |\n| 2 | tenant-scoped 对象上的表级 `{ fields: ['name'], unique: true }` | **仍然活着** —— `lintUniqueDeclarations` 只在**两种**声明同时出现时触发,只写表级形式的对象拿不到任何诊断 | 不在本 PR。落点在 `driver-sql` 的 `normalizeDeclaredIndex`;而且租户性是 kernel 在注册时注入的、不是作者写的,该规则自己的注释就说明了 lint 判不了 —— 归 engine 车道,请 PM 移交立单 |\n| 3 | sharing-rule condition 里的 `has(...)` | **仍然活着** | **本 PR** |\n\n## 刻意不做的三件事(已立单,没有猜)\n\n- **不重实现 `isMatchAllCriteria`。** seeder 的第二道闸(降下来但什么都不约束的 filter)住在 `plugin-sharing`,而 `@objectstack/lint` 不依赖 runtime。抄一份就是把 `rule-criteria.ts` 存在的意义 —— 「什么都不约束」的**唯一**定义 —— fork 掉。而且这道门根本到不了:编译器能降的每一个 AST 都产出具体字段谓词。这个论断在测试里**对着编译器 pin**,不是写在注释里。\n- **不判 RLS `using` / `check` → #4983。** 同一类、同一个编译器,ADR-0056 D4 还明确要求这道 gate —— 但 RLS 的决策过程 `isSupportedRlsExpression` 要先经 `sqlPredicateToCel` 桥接遗留 SQL-ish 子集,**两个都住在 `plugin-security`**。在 lint 里判它只有两条路:import 一个 runtime(禁止),或者抄一份桥接(fork 判据 —— 正是本文件开篇拒绝做的事)。顺带一提:`isSupportedRlsExpression` 除了自己的单测和一行一致性矩阵描述之外**没有任何消费者** —— 它自己就是一个 declared-but-never-read 实例,而它恰恰是为了修这个缺陷类写的。\n- **不碰 flow / hook 的 `condition`。** 那些是被 CEL 引擎**解释执行**的,不降成 filter,整个语言都在范围内,「不可下推」在那里什么都不意味着。把这条谓词复用过去会否掉能正常工作的元数据 —— 误伤方向,比缺口更糟。\n\n## 顺手发现,已立单不修(Prime Directive #10)\n\n- **#4983** —— ADR-0056 D4 的 RLS authoring gate 从未接线(见上)。\n- **#4984** —— `validateOrgAxisRedLines` 读的 sharing-rule 键是 spec 拒收的:它取 `rule.criteria ?? rule.filter` 和 `rule.sharedTo ?? rule.recipient`,而 `SharingRuleSchema` 是 `.strict()`、声明的是 `condition` / `sharedWith`,那四个只作为**被拒别名**存在。实测 `criteria` / `sharedTo` 都 `REJECTED: Invalid input`。所以 ADR-0105 D6 ① 在 sharing-rule criteria 这条路径上**对任何 spec-valid 的 stack 都不会触发**,② 同理。同一缺陷类,方向反过来:consumer 读了没人写的键。现有测试 fixture 用的正是这些废键,所以**测试绿而规则死** —— 立单里建议加一条 fixture 先过 `SharingRuleSchema.safeParse` 的元测试,免得再来一次。\n\n## 验证\n\n```\npnpm --filter @objectstack/lint test   → Test Files 55 passed · Tests 1007 passed\npnpm --filter @objectstack/lint typecheck → tsc --noEmit,干净\neslint(4 个改动文件)                  → 干净\npnpm --filter @objectstack/cli test    → Test Files 67 passed · Tests 588 passed\n```\n\n（CLI 那轮第一次跑出 31 个 collection 失败,是新 worktree 里工作区依赖没构建导致的假红 —— `Failed to resolve entry for package \"@objectstack/types\"`;`pnpm --filter '@objectstack/cli^...' build` 之后全绿。）\n\n改动限于 `packages/lint`(+ 对 `@objectstack/formula` / `@objectstack/spec` 的只读消费),外加一个 changeset。已从合入 #4951、#4973 之后的最新 main 开分支,并在推送前 merge 了一次 `origin/main`(带进了 #4972 对 `validate-expressions` 的改动,同包重叠,故重跑了整套 lint 测试)。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018iARDqtrhQgz6fVHDeDkbQ)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 5218,
+  "kind": "issue",
+  "title": "FS 监听改动同样不失效本节点的 `listCache` —— `handleFileEvent` 只通知 watcher(#5109 的本地同形缺陷)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T10:36:28Z",
+  "updated_at": "2026-08-04T11:49:46Z",
+  "closed_at": "2026-08-04T11:49:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5218",
+  "body": "发现于 #5109(集群对端广播不失效本节点缓存)实现期,**不在该单范围内**,故单独立卡。**未认领 —— 只是记录。**\n\n## 现象\n\n`packages/metadata/src/node-metadata-manager.ts` 的 `handleFileEvent()`(:88-131)在 chokidar 报告 `add` / `change` / `unlink` 之后,只做两件事:重新 `load()` 一次文件内容,然后 `notifyWatchers(type, event)`。\n\n```ts\n    let data: any = undefined;\n    if (eventType !== 'deleted') {\n      data = await this.load(type, name, { useCache: false });   // 只读,不写任何缓存\n    }\n    // ...\n    this.notifyWatchers(type, event);                            // 只通知\n```\n\n它**不碰** `this.listCache`,也不碰 `this.registry` —— 而 `load()` / `loadDiagnosed()`(`metadata-manager.ts`)是纯读路径,同样不写这两个缓存(registry 只由 `register` / `registerInMemory` / 回滚三处写入)。\n\n这与 #5109 是**同一形状、不同触发源**:本节点自己的 `register()` / `unregister()` 会 `invalidateListCache(type)` 再通知;文件系统改动只通知、不失效。\n\n## 后果\n\n`rootDir` 下手改一个 `view/&lt;name&gt;.json`(或任何被监听的元数据文件)之后:\n\n- `get(type, name)` 是新的 —— 它穿透到 FilesystemLoader;\n- `list(type)` 在 `LIST_CACHE_TTL_MS = 30_000` 窗口内**继续返回改动前的清单**(REST `/api/v1/metadata/:type`、Studio 左栏、`listViews()` 等一切走 `list()` 的读);\n- 被 HMR SSE 叫醒的前端如果回头拉 `list()` 重新渲染,拉到的还是旧的 —— 与 #5109 一样的「失效通知附带失效数据」。\n\n另外 `type === 'api'` 时,`EndpointMatcher` 索引也只经 watcher 那条缝失效(#5089 装的 `subscribe('api', …)` 覆盖了它),`invalidateListCache` 这条缝在此路径上是空的 —— 目前不构成额外缺陷,但两条缝的覆盖面在这里是不对称的,值得一并确认。\n\n## 触发前提(请在裁决时核实)\n\nFS 监听要开着才会命中。`MetadataPlugin` 的默认是 `watch: true`,仅在 `bootstrap: 'artifact-only'` 下被强制关掉(`packages/metadata/src/plugin.ts` :241-249);`packages/runtime/src/standalone-stack.ts` :341 显式传 `watch: false`。也就是说:**artifact 模式的 `os dev` 与 standalone 不受影响,非 artifact 的默认 `MetadataPlugin` 装配受影响**。命中面主要是开发期,不是生产多节点。\n\n## 修法(一行,与 #5109 同一样板)\n\n`notifyWatchers` 之前补 `invalidateListCache(type)`。`invalidateListCache` 目前是 `private`,`NodeMetadataManager` 是子类,需要放宽到 `protected`(或复用 #5109 落地的 `invalidateForForeignWrite(type, name)` —— FS 改动同样是「不是本进程写的」那一类,语义正好对上:删而不预填,穿透回 loader)。\n\nregistry 要不要一并删,这里比 #5109 更简单:FS 加载的条目本来就不进 registry,只有当同名条目此前被 `register()` / `registerInMemory()` 写过时才存在,而那种情况下删除同样是对的(穿透回 loader 就是文件的真相)。\n\n## 复现\n\n```ts\n// rootDir/view/v_a.json 存在\nconst mgr = new NodeMetadataManager({ rootDir, watch: true, formats: ['json'] });\nawait mgr.list('view');                 // 预热,返回 [v_a]\n// 此时在磁盘上写入 rootDir/view/v_b.json,等 chokidar 报告 add\nawait mgr.list('view');                 // 仍然是 [v_a],最长 30s\nawait mgr.get('view', 'v_b');           // 却能读到 —— 两个读接口彼此矛盾\n```\n\n## 关联\n\n#5109(集群那条同形缺陷,已修,`invalidateForForeignWrite` 即本单可复用的样板)、#5184(同一个 `listCache` 字段的第三条缺陷:降级结果照常入缓存)、`packages/metadata/src/node-metadata-manager.ts` `handleFileEvent()`、`packages/metadata/src/metadata-manager.ts` `invalidateListCache()`。\n\n三单共用 `listCache` 这一个字段,**建议串行**。\n"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 4779,
+  "kind": "issue",
+  "title": "共享规则 hook 对谓词式(multi)写入不重算:`if (!id) return` 让 `sys_record_share` 授权在批量更新后变陈旧",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T06:06:59Z",
+  "updated_at": "2026-08-04T04:53:15Z",
+  "closed_at": "2026-08-04T04:53:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4779",
+  "body": "在 #4757 的「同形状排查」中发现。**未认领**,归属 `plugin-sharing`,不在 #4757 的 PR 范围内。\n\n## 现象\n\n`packages/plugins/plugin-sharing/src/rule-hooks.ts` 的 `bindRuleHooks` 为每个有共享规则的对象绑定 `afterInsert` / `afterUpdate`,处理函数第一步就靠单条记录 id 定位要重算的行:\n\n```ts\nconst data = ctx?.result ?? ctx?.input?.data ?? {};\nconst id = String((data as any)?.id ?? ctx?.input?.id ?? '');\nif (!id) return;\nawait service.evaluateAllForRecord(objectName, id, SYSTEM_CTX as any);\n```\n\n`packages/objectql/src/engine.ts` 的 `update()` 只在 `where.id` 是标量时提取 `input.id`;谓词式(`multi: true`)更新走 `updateMany`,`input.id` 为 undefined,`input.data` 里通常也没有 id,`ctx.result` 是受影响行数而非行本身。于是**批量更新的每一行都不会重算共享规则**。\n\n后果与 #4757 同向 —— 是**授权侧的 fail open**,只是路径更隐蔽:\n\n- 一条基于 criteria 的共享规则给记录发过 `sys_record_share` 行;\n- 管理员用 `multi: true` 批量把这些记录改成**不再匹配该规则**的状态(改 owner、改 stage、改 region…);\n- 重算没有发生,`sys_record_share` 行原样留在表里 → 本应失去访问权的用户**继续能读/能改**这些记录。\n\n反向也一样(批量改成匹配规则却没发出共享),但那一侧是「少给权限」,危害小得多。\n\n## 复现方向\n\n对某对象定义一条 criteria 共享规则,插入命中的记录(hook 正常发共享),然后:\n\n```ts\nawait ql.update(obj, { where: { region: 'east' }, multi: true, data: { region: 'west' }, context: adminCtx });\n```\n\n再查 `sys_record_share`:原来的共享行仍在,`evaluateAllForRecord` 一次都没被调用。\n\n## 建议修法\n\n把「单条 id」的入口扩成「本次写入匹配的行集合」:在 `beforeUpdate` 阶段用谓词(带上界,超限告警或失败关闭)解析出受影响的 id 列表并暂存到 hook ctx(`primary-bu-projection.ts` 的 `STASH_KEY` 就是这个模式),`afterUpdate` 再逐行 `evaluateAllForRecord`。上界参考 attachment / comment 守卫的 1000 行。\n\n需要维护者裁定的一点:**超过上界时该怎么办** —— 是拒绝这次批量写入(fail closed,与 #4757 的姿势一致),还是放行但记一条显式告警并标记重算待办(共享规则重算本身是异步可补偿的)。这决定了它算「守卫」还是「投影」,建议在动手前先定。\n\n## 相关\n\n- #4757 —— `sys_attachment` 的 `beforeDelete` 无作用域多行删除(同一 fail-open 家族,已修)。\n- #4778 —— 审批记录锁对谓词式更新失效(同一排查)。\n- `rule-hooks` 只绑了 `afterInsert` / `afterUpdate`,没有 `afterDelete`:记录删除后 `sys_record_share` 行会成为孤儿。今天危害有限(记录已不存在),但若 id 可复用就是真实的越权,一并记在这里。\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 5137,
+  "kind": "issue",
+  "title": "E5 遗漏面:端点 inputMapping / outputMapping 未实现(设计 §3.4 的 api-mapping.ts),E7 翻转前必须补",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "enhancement",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T05:59:19Z",
+  "updated_at": "2026-08-04T07:30:43Z",
+  "closed_at": "2026-08-04T07:30:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5137",
+  "body": "## 事实\n\n#5040 设计总表把 **E5 行**写成「执行目标 **+ 映射**」,文件面含 `api-mapping.ts`(新)。但 E5 单(#5092)派发时声明的文件面只有 `packages/runtime/src/endpoint-executor.ts` + 测试 + changeset,PR #5136 因此**只做了目标委派,没有做映射**:\n\n- `endpoint-executor.ts` 把 `query` / `body` 原样送进委派调用,`endpoint.inputMapping` / `endpoint.outputMapping` **一次都没有被读取**。\n\n## 为什么必须在 E7(#5111)之前补\n\n`ApiEndpointSchema` 声明了这两个键(`{source, target, transform?}[]`),E7 的 publish 门按设计 §3.4 只拒绝 `transform` 子键,**放行** `source`/`target` 形式的映射。如果翻转时 runtime 侧没有实现:\n\n> 作者写了 `inputMapping`,publish 通过,端点跑起来,映射**什么也不做** —— 「解析通过然后什么也不发生」,正是 #5040 设计开篇要消灭的中间态,也是 ADR-0049 declared≠enforced 的教科书形状。\n\n对 AI 写元数据尤其糟:静默忽略的键不会有任何信号,错误会一直留在应用里。\n\n## 建议范围(与设计 §3.4 一致,不扩权)\n\n1. 新纯模块 `packages/runtime/src/api-mapping.ts`:`source`/`target` 按点路径 get/set;`inputMapping` 作用于 `{...query, ...body}` → 目标入参;`outputMapping` 作用于目标结果 → 响应体;无 mapping 则原样直通(与今日 `/data`、`/automation` 行为一致)。\n2. 在 `endpoint-executor.ts` 的委派前 / 结果映射后各接一处(该文件届时无并行占用)。\n3. `transform` **不实现**:全仓无「transformation function name」注册表,按设计 §3.4 由 E7 的 publish 门拒绝(带处方)。runtime 侧遇到带 `transform` 的条目应给结构化拒绝,不得静默忽略。\n4. 测试:点路径读写、缺失源字段的行为、query 与 body 的合并优先级、无 mapping 的直通、带 `transform` 的拒绝。\n\n## 关联\n\n- 依赖:PR #5136(E5,`endpoint-executor.ts` 落地)—— 接线点在该文件里。\n- Blocks:#5111(E7 翻转)—— 翻转前不补,两个键就会以「声明合法、执行忽略」的形态发出去。\n- 出处:#5040 设计 §3.4 与总表 E5 行;#5092 派发时的文件面收窄。\n"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 5047,
+  "kind": "issue",
+  "title": "runtime /packages domain 持久化不对称:enable/disable/uninstall 直写 in-memory registry,install/update 却走 protocol service 落 sys_packages",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T00:48:51Z",
+  "updated_at": "2026-08-04T05:32:09Z",
+  "closed_at": "2026-08-04T05:32:09Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5047",
+  "body": "**未认领,待核实定性。** #4311 runtime 片(PR #5045)实施中的观察,修复需改运行时行为、超出该片边界,按 PD#10 立案。\n\n## 观察(来自 `packages/runtime/src/domains/packages.ts` 的实读)\n\n- `install` / `updatePackageManifest`:优先走 protocol service 持久化到 `sys_packages`,服务缺席时才回落 in-memory;\n- `enable` / `disable` / `get` / `uninstall`:**直接读写 in-memory registry**,不经持久化路径。\n\n若属实,后果是:enable/disable/uninstall 的状态变更**重启即失** —— 管理员禁用一个包,进程重启后它复活。这与 install 路径的语义不一致,像是持久化通道接了一半。\n\n## 待核实\n\n1. enable/disable 状态是否确实只活在内存(有没有别的落库路径,例如 boot 时从 sys_packages 重放);\n2. 若 boot 重放存在,那么不对称只是\"写路径分裂\"而非数据丢失 —— 定性从 bug 降为一致性债;\n3. `sys_packages` 的行里有没有 enabled 字段可承接。\n\n核实第 1 条成立即标 `bug` 入队(维护者当前规则:只派 bug)。\n\n## 关联\n\n- PR #5045(发现现场)、#4404(EngineSchemaRegistryView 契约,同文件同批被修的六个成员声明)"
+}

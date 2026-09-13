@@ -1,0 +1,37 @@
+{
+  "number": 4990,
+  "kind": "issue",
+  "title": "未知键的「你是不是想写」兜底对 camelCase 键系统性偏弱:输入被小写化、候选没有 —— 每个大写字母白扣一次编辑距离",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T18:56:35Z",
+  "updated_at": "2026-08-05T01:37:18Z",
+  "closed_at": "2026-08-05T01:36:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4990",
+  "body": "从 #4001 批 13 拆出(发现,不是本批修复范围)。影响 #4001 整个战役已经落地的**每一条**未知键错误信息的兜底建议质量。\n\n## 缺陷\n\n`packages/spec/src/shared/suggestions.zod.ts` 的 `findClosestMatches()`:\n\n```ts\nconst normalized = input.toLowerCase().replace(/[-\\s]/g, '_');\n\nconst scored = candidates\n  .map((candidate) => ({\n    value: candidate,\n    distance: levenshteinDistance(normalized, candidate),\n  }))\n```\n\n**输入被小写化,候选没有。** 于是候选键里的每一个大写字母都要额外付一次替换代价。而 `strictUnknownKeyError` 给的预算是长度相对的 `Math.max(2, Math.floor(key.length / 3))` —— 对短键就是 2。两者一叠加,短的 camelCase 键上一个再普通不过的笔误就够不着了。\n\n按 AGENTS.md Prime Directive #3,「TS config keys → camelCase」是全仓约定,所以受影响的是**可授权面的大多数键**。\n\n## 实测(`origin/main` fe83042)\n\n```\n输入            预算   findClosestMatches 结果\nhideOn          2      []            ← hiddenOn,真实距离 2,加大写罚分后 3,超预算\nhiddenon        2      [\"hiddenOn\"]  ← 同一个词全小写反而给得出建议\nhiddenOnn       3      [\"hiddenOn\"]\nmaxLenght       3      [\"maxLength\"]\n```\n\n第二行是这个缺陷的完整刻画:**把键写成全小写的作者,拿到的建议比写对了大小写、只错一两个字母的作者更好。**\n\n暴露面是「真实距离 + 候选里的大写字母数 超过预算」的那一类,集中在**较短的 camelCase 键**上。`hideOn` → `hiddenOn` 就是标准样本:一个语义完全正确、只是少了个词尾的键,得到的信息里没有任何指向正确拼法的内容 —— 而这一战役的整个卖点,恰恰是「不只是大声,而是可修」。\n\n## 建议修法\n\n在同一处对候选做同样的归一化,并且**只用于打分**、回显仍用候选的原始拼写:\n\n```ts\nconst norm = (s: string) => s.toLowerCase().replace(/[-\\s]/g, '_');\nconst normalized = norm(input);\nconst scored = candidates\n  .map((candidate) => ({ value: candidate, distance: levenshteinDistance(normalized, norm(candidate)) }))\n```\n\n注意两点:\n\n1. `data/object.zod.ts` 的 `suggestKey` 是同一套长度相对上界的另一处实现,要一起检查是否同病。\n2. 这会让一批原本没有建议的错误开始给建议,也可能改变个别已有建议的选中项 —— 所以它会动到 #4001 已落地各批的**错误信息文案**,那些批次里有直接断言 message 内容的 pin 测试(如 `webhook.test.ts` / `etl.test.ts` / `control-flow` 系列)。属于横切改动,应独立成 PR 并跑全 spec 套件,不适合搭在某一批收紧上。\n3. 修的时候顺便加一条自证测试:同一个键的**全小写形式**不应比正确大小写形式得到更好的建议。这条不变量是本 issue 的实质。\n\n## 现状缓解\n\n#4001 批 13 在 `ui/responsive.zod.ts` 里为它自己遇到的那一例写了显式 alias(`hideOn: 'hiddenOn'`),并在注释里记了测量值。那是逐例绕行,不是修复 —— 每个 schema 都要为兜底够不着的短 camelCase 键手写 alias,正是 `strictObject` 引入时想消掉的那种重复。\n\n## 相关\n\n- #4001(战役)、#3746(`ActionParamSchema`,这套错误工厂的模板)\n- `packages/spec/src/shared/suggestions.zod.ts`、`packages/spec/src/data/object.zod.ts`\n\n按 AGENTS.md Prime Directive #10 归档,未指派。\n"
+}

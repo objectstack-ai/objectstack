@@ -1,0 +1,38 @@
+{
+  "number": 4945,
+  "kind": "issue",
+  "title": "CI red on every PR: `Validate Package Dependencies` fails on GHSA-rgw5-rvv9-x895 (brace-expansion 5.0.8 → 5.0.9)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T16:59:57Z",
+  "updated_at": "2026-08-03T18:20:39Z",
+  "closed_at": "2026-08-03T18:20:39Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4945",
+  "body": "## 现象\n\n`Validate Package Dependencies`(`.github/workflows/validate-deps.yml` 的 OSV 扫描)在**当前 `main` 上就是红的**,因此每个 PR 都带着这一条红。与被扫的 PR 内容无关 —— 在 #4944(只新增一个 `scripts/*.mjs` + 一个 workflow + 根 `package.json` 一行,**未触碰 `pnpm-lock.yaml`**)上复现:\n\n```\n+-------------------------------------+------+-----------+-----------------+---------+---------------+----------------+\n| OSV URL                             | CVSS | ECOSYSTEM | PACKAGE         | VERSION | FIXED VERSION | SOURCE         |\n+-------------------------------------+------+-----------+-----------------+---------+---------------+----------------+\n| https://osv.dev/GHSA-rgw5-rvv9-x895 | 7.5  | npm       | brace-expansion | 5.0.8   | 5.0.9         | pnpm-lock.yaml |\n+-------------------------------------+------+-----------+-----------------+---------+---------------+----------------+\nExit code: 1\n```\n\n失败 job:https://github.com/objectstack-ai/objectstack/actions/runs/30834560389/job/91756454199\n\n## 影响\n\n`brace-expansion` 是传递依赖(`minimatch` 一系),修法通常是一条 lockfile 层面的 `pnpm.overrides` 或 `pnpm update` 而不是改任何 manifest。\n\n值得单独修的原因不是这一条 advisory 本身,而是**一个长期红的必跑 job 会训练所有人无视它** —— 下一条真实的 advisory 到来时,它和今天这条在 PR 列表里长得一模一样。\n\n## 建议\n\n1. `pnpm update brace-expansion` 或加 `pnpm.overrides` 把它顶到 `5.0.9`,单独一个 PR,只动 `pnpm-lock.yaml`(+ 必要时根 `package.json` 的 `pnpm.overrides`)。\n2. 顺带确认 `validate-deps.yml` 在 advisory 无可用修复版本时的表达方式 —— 一个无法修复的 advisory 长期把必跑 job 钉红,和没有扫描等价。\n\n发现于 #3340 / PR #4944 的 CI,与该 PR 无关,按 Prime Directive #10 单独记录,**未认领**。\n"
+}

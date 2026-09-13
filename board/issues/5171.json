@@ -1,0 +1,35 @@
+{
+  "number": 5171,
+  "kind": "pull_request",
+  "title": "feat(rest): 端点条目进 OpenAPI enrichment;摘除 dispatcher 死分支(#5040 E6)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T07:29:34Z",
+  "updated_at": "2026-08-04T07:45:37Z",
+  "closed_at": "2026-08-04T07:45:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T07:45:36Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5171",
+  "body": "Fixes #5093\nFixes #5078\nPart-of #5040(E 系列第 6 单,按 2026-08-04 的 **E6 设计修正**执行,替代原设计 §3.5)\n\n## 一句话\n\n`apis:` 端点的文档面加入 **rest-server 既有的 OpenAPI enrichment 管线**(与 `{object}` 展开同根),同时摘除 `http-dispatcher` 里那条双重死的 `generateOpenApi` 探测分支、连同 `route-ledger` 里对应的失准行。**现网行为零变更**。\n\n## 为什么是 rest-server,而不是 `MetadataManager.generateOpenApi`\n\n原设计 §3.5 推荐在 metadata service 上实现 `generateOpenApi`。#5078 的真实 boot 把这条路否掉了:`GET /api/v1/openapi.json` **已经**由 `packages/rest` 完整拥有并应答 —— 355KB 的 OpenAPI 3.1 文档,三个指纹全部指向 rest-server(`servers[0]` 按 Host 头注入、`{object}` 展开出 199 条 paths、恰好 2 条 `x-template`)。在 metadata service 上再实现一个,就是 ADR-0076 第 1 条明令禁止的**第二属主**——也正是本单存在的意义。E1 的契约成员因此已剔除。\n\n所以本 PR 把文档面送进**已有属主自己的管线**,而不是新造一个生成器。\n\n## 改了什么\n\n### 1. `packages/rest/src/openapi-endpoints.ts`(新,纯函数)\n\n每条声明贡献一个 path 条目:\n\n| 出处 | 写进文档的东西 |\n|---|---|\n| 声明原样 | `path`(原样)、`method` 小写作 Operation 键、`operationId` = `name` |\n| 冻结词表**真有**的文档字段 | `summary` / `description` —— **缺省即缺省**,不生成替身(生成的句子和作者写的句子事后分不出来) |\n| 执行器的既定事实(逐条注明出处) | `object_operation` 的 `get`/`update`/`delete` documented 一个必填的 `id` **query** 参数(词表无路径模板语法,`requireRecordId` 就是这么取的);`create` 答 201、其余 200;`script` / `proxy` 与缺 `objectParams` 的 `object_operation` 答 **501** |\n\n**不编造任何 request / response schema。** 出厂文档的 `components.schemas` 是空的(见下面越范围发现 #5168),此处再写 `$ref` 只会多六个悬空引用。请求体一律 `type: object`(「一个 JSON 对象,形状此处不描述」——这是真话),且只在 `POST`/`PUT`/`PATCH` 上出现。\n\n**`authRequired` → security**:默认 `true` 由 schema parse 物化,为 true 的条目引用**从文档自身读出**的 security 方案(`doc.security` → 否则第一个 `securitySchemes`);在 rest 里硬写 `bearerAuth` 会造出第二处需要保持正确的地方,而且它失效时文档照样能解析、只是指向一个不存在的方案。为 false 的条目写显式 `security: []` —— review 时一眼能看见的那个形状。\n\n**响亮跳过**(与端点匹配器装载门同一姿态):不满足 `ApiEndpointSchema` 的条目点名跳过;同 `method+path` 撞车按「`name` 字典序在前者胜」裁决 —— 这是 `buildEndpointIndex` 的**同一条规则**,不这样文档就会指认一个运行时并不执行的端点;撞上内建 path+method 时内建保留、声明略过并报错(一路一主,在文档里同样成立)。\n\n### 2. `rest-server.ts`:接进管线\n\n`{object}` 展开与端点条目共用一次 protocol 解析,但**各自一个 `try`** —— 两者描述不同的面,一边枚举失败不该把另一边悄悄清空。\n\n### 3. `http-dispatcher.ts`:摘除死分支\n\n`generateOpenApi` 作为方法在本仓与两个兄弟仓**零实现**(同名命中只剩一个无关的 config 布尔键),且 boot 实测**没有任何路由**把 `/openapi.json` 送进 `dispatch()` —— 双重死。删除,原地留注明出处的注释。\n\n### 4. `route-ledger.ts`:台账修真\n\n⚠️ **与卡面 scope 的一处偏差,请复核**:卡面写「修正 `GET /openapi.json` 行的注记」,本 PR **删除了该行**(并从 `LEGACY_CHAIN_PREFIXES` 移除 `/openapi.json`),两处都留了注明出处的注释。理由:\n\n- 保留 prefix 会让 `LEGACY_CHAIN_PREFIXES` 说谎 —— 该常量的 docstring 自述为「`dispatch()` if-chain 尚未提升进 registry 的分支」,分支删了它就不是了。而这条 docstring 恰恰是 #5090 引用 #5078 写下的:「一张名字不再描述其内容的 pin 清单,正是台账注记悄悄变假的方式」。在**终结一次失准的同一个 PR 里**再造一次同类失准,不可接受;\n- 移除 prefix 但保留台账行,`route-ledger.conformance.test.ts` 会判定该行 stale 而红(它要求每个 ledger domain 必须是活 registry 前缀 / pinned legacy 分支 / pinned non-dispatch mount 三者之一)。为一条纯交叉引用行新造第四类,结构成本高于收益;\n- 该路由**唯一**准确的台账行在 `packages/rest/src/rest-route-ledger.ts`(`GET /api/v1/openapi.json`,一直是准的)。防漂移价值(「别再往 dispatcher 加 openapi 分支」)由两处注释承载,与 #4936 摘除 `/__api-endpoint` 时的处理方式一致。\n\n原注记「falls through **when** metadata service lacks a generator」读起来像有时有有时没有;实际**从来没有**,是 100% fall-through 穿了件条件句的外衣 —— 这就是 #5078 立单的那个点。\n\n## 空集不变量(本单最吃劲的测试)\n\npublish/validate 对非空 `apis:` 仍然硬拒(E7 前不撤),所以**今天枚举出的是空集**,本单必须在这个状态下完全不可见。三层钉住:\n\n1. `enrichOpenApiWithEndpoints(doc, [])` 返回**同一个对象**(`toBe`),不是等价对象 —— 字节相同由构造保证;\n2. 全部条目解析失败时同样返回同一个对象(退化的中间态);\n3. 路由级:同一个 handler,「协议有 `api` 类型但返回空集」与「协议根本不支持 `api` 枚举」(= 本改动前的世界)两份响应 `JSON.stringify` 逐字节相等。\n\n外加「加了端点时不得改动 base spec」(base spec 跨请求缓存,一次污染就会漏进之后每个响应)。\n\n## 验证\n\n```\npnpm --filter @objectstack/rest test        → 40 files / 608 tests passed(新增 31)\npnpm --filter @objectstack/runtime test     → 88 files / 1270 tests passed\npnpm --filter @objectstack/runtime typecheck→ clean(tsc --noEmit 无输出)\nnpx tsc --noEmit -p packages/rest           → 仅 2 条既有错误,均在未触碰的 package-routes.ts\neslint(6 个改动文件)                        → clean\npnpm --filter @objectstack/spec check:generated → ✓ All 8 generated artifacts are up to date\ncheck:nul-bytes / route-envelope / wildcard-fallthrough / adr-anchors\n  / error-code-casing / type-check-coverage → 全绿\ngit diff --numstat                           → 无 `- -`(零二进制条目)\n```\n\n## 越范围发现(已立单,未在本 PR 修)\n\n**#5168** —— 发布出去的 OpenAPI 文档 `components.schemas` **恒为空**,而 `paths` 里 6 个 `$ref` 全部悬空(覆盖 CRUD 全部请求/响应体)。根因已用对照实验坐实:`build-openapi.ts` 的收集判据 `typeof schema === 'object'`,而这些 schema 经 `lazySchema()` 包装后 Proxy target 是函数,`typeof` 为 `'function'` —— `OS_EAGER_SCHEMAS=1` 下同一条命令输出 `Components: 9`,默认输出 `Components: 0`。`gen:openapi` 是全仓两个完全无门禁的生成器之一,所以三层不自洽(空 components、悬空 ref、日志里明晃晃的 `Components: 0`)一处都没红。本单因此不 `$ref` 任何 components。\n\n## 未做\n\n- **未**在任何 metadata service 上实现 `generateOpenApi`(见开头);\n- **未**触碰 `api-endpoint-step.ts` / `api-mapping.ts` / `endpoint-policy.ts` / `endpoint-executor.ts` / `dispatcher-plugin.ts`(#5137 的文件面)与 `packages/spec`;\n- **未**触碰 `content/docs/releases/`。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01EYGdmvWP1ieZSLqvAW6uyd\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01EYGdmvWP1ieZSLqvAW6uyd)_"
+}

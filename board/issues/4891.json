@@ -1,0 +1,33 @@
+{
+  "number": 4891,
+  "kind": "issue",
+  "title": "app-showcase seed writes data: URIs into an image field, so ADR-0104's migration gate can never attest on a fresh datastore",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T13:15:31Z",
+  "updated_at": "2026-08-03T18:18:24Z",
+  "closed_at": "2026-08-03T18:18:24Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4891",
+  "body": "## What happens\n\nEvery boot of `examples/app-showcase` on a **brand-new empty database**:\n\n```\n[value-shape] cover has an invalid image value: Expected an opaque sys_file id — accepted for now\n  (ADR-0104 warn-first; run `os migrate files-to-references --apply` to migrate this deployment and enforce)\n\nWARN [migration] NOT attesting 'adr-0104-file-references' on this new datastore: this boot already wrote\n  10 value(s) that the migration's own contract rejects (showcase_task.cover: Expected an opaque sys_file id).\n  The store was created empty, but it is no longer empty and what it now holds contradicts the claim —\n  the gate stays open (warn-first). Fix the data, then run `os migrate files-to-references --apply` to\n  close it on real evidence (ADR-0104).\n```\n\n## Why it happens\n\n`showcase_task.cover` is `Field.image()` (`src/data/objects/task.object.ts:76`),\nand ADR-0104 requires an opaque `sys_file` id as its value.\n\nThe seed instead stores an inline SVG data URI\n(`src/data/seed/index.ts`, `placeholderCover()`):\n\n```js\nreturn `data:image/svg+xml,${encodeURIComponent(svg)}`;\n```\n\n10 task rows carry one.\n\nThe helper's own docblock explains the motivation, and it is a good one:\n\n> Task `cover` seeds used to point at picsum.photos, which renders as a wall of\n> broken images in offline/restricted-network environments (Gallery, All Views).\n> A data: URI needs no network at all…\n\nSo this is a sound fix for the offline-images problem that happens to collide\nhead-on with ADR-0104's value contract. Both constraints are legitimate; the seed\ncurrently satisfies one by violating the other.\n\n## Why it's worth fixing rather than tolerating\n\nThe interesting consequence is not the warning — it is the second line. ADR-0104's\nattestation is designed to close automatically on a **new** store, on the\nreasoning that a store created empty has no legacy values to migrate. The\nshowcase's own seed falsifies that in the same boot, so:\n\n- a fresh install of the reference app **can never** auto-attest\n  `adr-0104-file-references`; the gate stays open on day one,\n- the printed remedy (`os migrate files-to-references --apply`) is aimed at\n  migrating *legacy* deployments, and here it would be run against data our own\n  seeder just wrote,\n- anyone copying the showcase's image-seeding pattern inherits the same stuck gate.\n\nIt also means the warn-first gate is permanently noisy in the app most likely to\nbe someone's first ObjectStack experience, which erodes the signal for the\ndeployments the gate actually exists to catch.\n\n## Suggested direction\n\nSeed the cover through the storage service so `cover` holds a real `sys_file`\nid — keeping the offline property that motivated the data URI (the SVG bytes can\nbe registered as a `sys_file` at seed time; no network needed), and letting a\nfresh store attest cleanly.\n\nIf seeding real `sys_file` rows is out of scope for the example, the alternative\nis to drop `cover` from the seed and demonstrate the Gallery cover with an\nexplicit upload step — but that loses coverage the seed is deliberately providing,\nso the first option seems better.\n\nRelated to #4888 (other showcase declarations that don't survive to runtime),\nthough this one is seed data rather than a declaration and its blast radius is\nthe platform migration gate.\n\n## Repro\n\n```\ncd examples/app-showcase\nnode ../../packages/cli/bin/run.js dev --ui --seed-admin -p 3000 -d file:/tmp/fresh.db\n# both lines appear during boot, on an empty DB\n```\n\nObserved on `main` @ 0e96e46. Found while browser-sweeping showcase + Studio for #4879."
+}

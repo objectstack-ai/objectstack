@@ -1,0 +1,35 @@
+{
+  "number": 5001,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): seed-loader 中「计为错误」的失败一律记 error,不再自相矛盾地记 warn (#4729)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T19:49:16Z",
+  "updated_at": "2026-08-03T20:03:55Z",
+  "closed_at": "2026-08-03T20:03:54Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T20:03:54Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5001",
+  "body": "Fixes objectstack-ai/objectstack#4729\n\n## 问题\n\n`packages/metadata-protocol/src/seed-loader.ts` 的 pass-2 延迟引用回填,catch 上方的注释白纸黑字写着这次失败 \"must be a reported, counted error, **never a silent warning**\",紧跟着的调用却是 `this.logger.warn`。\n\n公允地说,它并不完全静默:`recordDeferredError(...)` 把它计入 `allErrors`,`success` 会变 `false`。但**日志行本身**是一次 seed 在宿主控制台上留下的唯一痕迹,而 `warn` 正是 #4420 证明没人读的那一级 —— 后果(引用停在 NULL、循环关系半写入)则一个字都没说。**计数与日志级别应当一致**,这是本单的判据。\n\n> issue 正文里的「本轮因包冻结未修」已失效:#4556 的冻结今晨关闭,同包 #4980、同文件 #4836 今天都已合入,本 PR 基于当前 `origin/main`。\n\n## 改了什么\n\n**1. 主接缝提到 `error`,并补齐一条 error 该有的两件东西**(AGENTS.md → \"Degradation log levels\",参照 #4823 / #4460 的文案形态):\n\n- **后果**:`对象.字段` 在具名记录上停在 `NULL`;行本身已经种下,所以**每一个行计数都是干净的**;循环关系处于 HALF-WRITTEN 状态,并点名它本该指向的 `目标对象.目标字段 = '自然键'`;\n- **修复动作**:没有任何东西会重试 —— 修掉下面那个写入错误(超出重试预算的瞬时故障,或某条 validation 规则否决了这次 update)后重跑 seed;\n- 原因(`err.message`)并入同一行,读者不必再翻第二处。\n\n实际打出来长这样(测试里逐段断言):\n\n```\n[SeedLoader] Deferred reference back-fill FAILED — audit_department.head_id stays NULL on record\n'Engineering'. The row itself was seeded, so every row counter looks healthy while the circular\nrelationship is HALF-WRITTEN: nothing links it to audit_worker.name = 'Alice'. Nothing retries\nthis — fix the write error below (a transient failure that outlasted the retry budget, or a\nvalidation rule vetoing the update) and re-run the seed to complete the link.\nCause: UPDATE rejected by validation rule\n```\n\n**2. 按同一判据盘完本文件其余 `logger.warn`。** 判据取「这次失败是否进 `errors`/`allErrors`(即是否让 `success` 变 false)」——`buildResult` 里 `success = !(errors.length 大于 0 || totalErrored 大于 0)`,所以这条线是客观的。另有五处「计为错误、日志 warn」,一并提到 `error`:\n\n| 位置 | 后果 |\n|:---|:---|\n| 批量插入的失败行 | 该记录没落盘 |\n| `cel` 表达式解析失败 | 整条记录被丢弃 |\n| 单值字段收到数组(引用被 DROP) | **行落了、关联没落,且行计数干净**(framework#3932) |\n| 引用值是对象(引用被 DROP) | 同上 |\n| 自引用数据集的顺序写 catch | 该记录没落盘 |\n| upsert/update 路径的 catch | 该行声明的值没落盘,原有内容原样留着 |\n\n两处 DROP 引用的行额外补上后果与修复动作 —— 那正是 #3932 注释自己描述的形态:「行计数一切正常,损失只在别处看得见」,也就是 #4632 第二类的教科书样子。\n\n**3. 三处维持 `warn`,并把审计结论写进注释**(免得下一个人再翻一遍):\n\n- `Halting on first error` —— 控制流通知,它所 halt 的那些错误各自已在 `error` 级别报过;为同一批失败再喊一次正是 AGENTS.md 警告的「过度适用」;\n- `NODE_ENV` 无法判定(#4836)—— 功能性、fail-open 降级;\n- roll-up summary 重算耗尽重试 —— 记录**确实**写进去了,不计数、`success` 仍为 true,不在本单判据内;陈旧汇总列是否属于 #4632 第二类另开 **#4998** 由维护者定夺(改它会改变一次**成功** seed 的输出,属于产品口径)。\n\n**4. 让门禁钉住,而不只是测试。** `pnpm check:durability-log-level` 按 callee 名匹配被 `try` 守护的接缝,且不下潜进嵌套函数体 —— 而原来的写入藏在 `withTransientRetry(() =&gt; ...)` 闭包里,AST 扫描根本看不见。于是把回填写入抽成 `writeDeferredReference`,与 `writeRecord` 一同登记进 `DURABILITY_CRITICAL_CALLEES`(各带一句「失败意味着什么」)。现在这两处 catch 若被降回 `warn`,CI 直接红:\n\n```\npackages/metadata-protocol/src/seed-loader.ts:813   guards writeRecord()@800              → loud (error@829)\npackages/metadata-protocol/src/seed-loader.ts:1085  guards writeDeferredReference()@1077  → loud (error@1098)\n✓ durability-degradation log levels: 10 durability-critical catch seam(s), all loud or rethrowing.\n```\n\n`durability-degradation.baseline.json` 保持空表(本 PR 不新增豁免)。\n\n## 测试\n\n`packages/metadata-protocol/src/seed-loader-deferred-failure.test.ts` 新增两条:\n\n- 回填写入失败时:断言**级别是 `error`**、消息点名 `audit_department.head_id`、含 `stays NULL` / `HALF-WRITTEN` / 目标 `audit_worker.name` / `re-run the seed` / 原始 cause,第二/三个实参分别是 `Error` 与 `{ object, field }`,并断言该失败**不再**出现在 `warn` 上;同时确认它仍被计数(`success: false`、`totalErrored` 大于 0、`errors` 里有 `head_id`);\n- 回填**成功**时:引用确实落盘、`success: true`,且 `logger.error` / `logger.warn` 一次都没被调用 —— 别把读者训练成跳过 `error`。\n\n两处既有断言随之更新(`runtime/src/seed-loader.test.ts` 的写入失败、`seed-loader-multi-value-reference.test.ts` 的 DROP 引用),后者顺带断言新的后果措辞。\n\n## 顺带记录(未在本 PR 修)\n\n- **#4997** —— 关掉 `multiPass` 时「引用解析不了 ⇒ 整条记录丢弃」计为 error 却**一行日志都不打**。同一条链的更深一格,但不在本单「盘 `logger.warn`」的判据内。\n- **#4998** —— 上面第 3 条提到的 roll-up summary 陈旧值,需要维护者拍板。\n\n两条都已在代码注释里留下指针。\n\n## 验证\n\n- `pnpm exec turbo run test --filter=@objectstack/metadata-protocol` → 34 files / **301 passed**(合入 `main` 后重跑一次,仍 301)\n- `packages/runtime`:`seed-loader.test.ts` + `app-plugin.seed.test.ts` + `seed-datasets.test.ts` → **53 passed**;`packages/objectql` 两个 seed 用例 → **8 passed**\n- `tsc --noEmit`:metadata-protocol 改动前后同为 156 行输出(全是 ledger 记录的既有 TS2835/TS7006 噪声),`seed-loader.ts` 零错误;runtime 无本文件相关错误\n- 门禁全绿:`lint`、`durability-log-level`、`startup-registry-verdict`、`init-service-contract`、`route-envelope`、`wildcard-fallthrough`、`error-code-casing`、`engine-double-contract`、`type-check-coverage`、`published-files`、`adr-anchors`、`slot-lookup`、`nul-bytes`、`doc-authoring`、`docs-audit-scope`、`role-word`、`org-identifier`、`authz-resolver`、`service-providers`、`objectui-changeset`、`release-notes`、`node-version`、`merge-driver`\n- `check:i18n` / `check:i18n-coverage` 本地未跑通:两者都要求**先做整仓 build**(CI 里就排在 build 步骤之后,报错是 `os` CLI 未构建),本 PR 不触碰任何 translation / 声明标签面\n\nchangeset:`.changeset/seed-loader-loud-failure-log-level.md`(`@objectstack/metadata-protocol` patch)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01NrmBxj8rK2uGCnh9aipjwX\n"
+}

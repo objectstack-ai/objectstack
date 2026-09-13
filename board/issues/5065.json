@@ -1,0 +1,35 @@
+{
+  "number": 5065,
+  "kind": "pull_request",
+  "title": "feat(spec,core,runtime)!: 声明式 `apis:` 响亮拒绝 + ApiRegistry 整面退役 (#4936, #4939)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T01:52:50Z",
+  "updated_at": "2026-08-04T02:51:07Z",
+  "closed_at": "2026-08-04T02:51:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T02:51:06Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5065",
+  "body": "Fixes objectstack-ai/objectstack#4936\nFixes objectstack-ai/objectstack#4939\n\n按维护者 2026-08-04 00:20Z 裁决(#4936 评论,改良第三路)执行,⛔ 不重议的四件均已照办:**硬拒路线、`ApiEndpointSchema` 词表保留、#4939 无条件退役、跟踪指针落 #5040**。\n\n## 为什么是「拒绝」而不是「退役」\n\n声明式 `apis:` 是**装载全绿、执行为零**的整面。元数据侧完美:`defineStack` 收下、`GET /api/v1/meta/api` 原样返回两个端点。执行侧一次都没响过 —— 声明的 path **从未挂载**,请求死在 Hono 的 `notFound`(那个裸 `{\"error\":\"Not found\"}`,不是 dispatcher 的语义 404);其后的 `handleApiEndpoint` 分支调用的 `matchEndpoint`,**全仓没有任何实现**提供过,恒等于 `{ handled: false }`。\n\n于是 `ApiEndpointSchema` 每个键都是 declared ≠ enforced ——— 包括 **`authRequired`**,一个解析全绿、把关为零的安全语义。这是 ADR-0049 要杀的 false compliance,不是欠债。\n\n裁决选了保留词表、拒绝授权:端点词表是行业极稳定形状,退役只会原样再引入一遍;响亮拒绝同样杀谎,还保住词表与元数据投资。\n\n## 五件套落地\n\n**1. 非空 `apis:` 硬拒(breaking)**\n\n拒绝点落在 `ObjectStackDefinitionSchema` 的 `apis` 字段本身 —— 这是 `defineStack`、metadata plugin 的 artifact 装载(`ObjectStackDefinitionSchema.parse`)、`os validate`、lint scorer、`EnvironmentArtifactSchema` **共同且唯一**的必经闸门,所以不存在「某条路径忘了检查」。空数组 / 缺省照旧通过。\n\n真实 CLI 上的实测(把 showcase 端点临时放回去跑 `objectstack validate`):\n\n```\n✗ defineStack validation failed (1 issue):\n✗ apis: `apis:` (declarative ApiEndpoint) is DECLARED BUT NOT EXECUTABLE in this runtime,\nso a non-empty array is rejected instead of silently accepted (#4936). Nothing mounts the\ndeclared `path`, no endpoint matcher exists, and therefore NO key on the endpoint takes\neffect — `authRequired` included, which would parse green while gating nothing.\nFix: delete the `apis:` entries (an empty array or an absent key is fine). To serve the\nroute today, mount it in code — a plugin manifest `contributes.routes` entry or an\n`http.server` route — which is the path the showcase now uses.\nThe `ApiEndpoint` vocabulary is deliberately KEPT: the executor ... is tracked by\nhttps://github.com/objectstack-ai/objectstack/issues/5040, and this rejection is replaced\nby real execution there — your endpoint definitions stay valid.\n```\n\n处方按裁决落 **#5040**(活跟踪位),#4936 作为裁决出处随本 PR 关闭。\n\n**2. 执行残骸摘除**\n\n`handleApiEndpoint` 整体删除;`tsc` 随即用 TS6133 指出它是 dispatcher 私有 `callData` 代理的**唯一**调用者,一并删除(其余数据路径本来就直接走 `actionExec.callData(deps, …)`,是 D11③ 的正规形状)。`/__api-endpoint` 从 `LEGACY_CHAIN_PREFIXES` 与 `ROUTE_LEDGER` 移除。⚠️ 今日已合 #5006 的入站 rateLimit seam **零触碰**。\n\n**3. #4939 无条件退役**\n\n`registry.zod.ts` 整个家族(12 个 JSON-Schema def、67 个 authorable key)、`packages/core` 的 `ApiRegistry` + `createApiRegistryPlugin` + 两者测试 + example、`API_REGISTRY.md`,以及 hono 那个**从未被读**的 `useApiRegistry` 选项。它只在 `packages/core/examples/` 装配过,所以 `requiredPermissions` 以现在时承诺的 gateway 校验从来没有 gateway 执行 —— 两套声明形状就此收敛为一套。\n\n⚠️ **`ConflictResolutionStrategy` 保留**,移入 `api/router.zod.ts`。它被两条互相独立的 ratchet 钉死为 `./api` 导出:仓内 `spec/src/automation/sync-retirement.test.ts`(#4738 的「第四个亲戚」),以及**跨仓** objectui 的 `offline-nav-performance-spec-parity.test.ts` —— 后者的 `useOffline` 正是因为这个名字被占用才改的名。退役它是一次跨仓变更,不在本单裁决范围内。\n\n退役套件按 `spec-property-retirement` skill 走完:#2978 manifest ratchet 先开火(12 条,自证「整 def 删除」路线),再按 gate (c) 路径 3(def 不再 emit)删 authorable 基线;生成物一律整体重生成。\n\n**4. showcase 处置**\n\n两个端点注释保留 + 缘由(便于 #5040 落地时原样恢复),`apis: []`;`coverage.ts` 那条 `demonstrated … executed by the runtime dispatcher (handleApiEndpoint)` 改为 waiver —— 它正是 Prime Directive #10 明禁的失实覆盖声明。`test/gap-fill.test.ts` 的断言**反转而非删除**:删掉只会让端点悄悄漂回来,而现在漂回来会直接打死 `objectstack validate`。\n\n**5. #5006 四处指针** → #5040(`dispatcher-plugin.ts`、`inbound-rate-limit.ts`、`stack-server.zod.ts` + 生成 mdx、`http-protocol.mdx`),只改跟踪位,不动 seam 逻辑。\n\n另修两处顺带被本变更证伪的记载:ADR-0088 `router` 行(原文把 `apis:` 记作「executed by `handleApiEndpoint`」)加了带日期的更正,ADR 决定本身不变;`PROTOCOL_MAP.md` 的 `registry.zod.ts` 行删除(其死链被 spec 自己的 gate 抓到)。\n\n## 验证\n\nmerge `origin/main`(含 #5045 把 runtime src 接进 turbo typecheck)之后全部重跑:\n\n| 项 | 结果 |\n|---|---|\n| `pnpm turbo run typecheck`(全仓) | **124/124 successful** |\n| spec `check:generated` 八件 | **8/8 up to date** |\n| spec 八件纯审计(liveness / empty-state / exported-any / dual-source-exports …) | **8/8 PASS** |\n| `@objectstack/spec` test | **7575 passed (299 files)** |\n| `@objectstack/runtime` test | **1131 passed (82 files)** |\n| `@objectstack/core` test | **419 passed (27 files)** |\n| `@objectstack/example-showcase` test | **83 passed (11 files)** |\n| client / plugin-hono-server / metadata test | 222 / 150 / 336 passed |\n| `objectstack validate`(showcase) | ✓ Validation passed |\n| 破坏性 sabotage(端点放回去) | 按上文原文拒绝 ✓ |\n\n`api-surface.json` delta 精确为 **−25 / +0**,零残留,幸存者 `ApiEndpointSchema` 与 `ConflictResolutionStrategy` 均在。\n\n新增 pin 测试两组:`apis-no-executor.test.ts`(拒绝含处方 + 指针为 #5040 + 空/缺省通过 + 词表零折腾的反空洞断言)、`registry-retirement.test.ts`(15 个退役名消失 + `ConflictResolutionStrategy` 值域逐个保真 + 单一属主)。\n\nChangeset 已加,`major` 语义,带 FROM → TO 与一行修法。⛔ 未触碰 `content/docs/releases/`。\n\n## CI 知会\n\n`Validate Package Dependencies` job 目前被 OSV 每日公告(fast-uri/hono/undici)打红,修复 #5039 在飞 —— 若本 PR 该 job 红,请先与 `main` 对照,非本变更引入。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01EYGdmvWP1ieZSLqvAW6uyd\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01EYGdmvWP1ieZSLqvAW6uyd)_"
+}

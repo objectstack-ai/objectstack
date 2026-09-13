@@ -1,0 +1,37 @@
+{
+  "number": 4991,
+  "kind": "issue",
+  "title": "ADR-0105 D6 ② 只拦 business_unit 收件人,漏了 unit_and_subordinates —— 同一个跨 org BU 授权,更宽的那个反而放行",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T18:56:38Z",
+  "updated_at": "2026-08-03T20:15:42Z",
+  "closed_at": "2026-08-03T20:15:42Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4991",
+  "body": "发现于 #4984 的实现过程(那一单只修被拒别名的读法,这条是覆盖面问题,按 Prime Directive #10 单独记账)。\n\n## 事实\n\n`packages/lint/src/validate-org-axis-red-lines.ts` 的 `ORG_AXIS_CROSS_ORG_BU_GRANT`(D6 ②)只对一种收件人类型判红:\n\n```ts\nconst recipientType = str(sharedWith?.type);\nif (recipientType !== 'business_unit') return;\n```\n\n而 `ShareRecipientType` 里有**两个**业务单元收件人:\n\n- `business_unit` —— 正好一个 BU 的成员(无子树);\n- `unit_and_subordinates` —— 一个 BU **加上其全部后代单元**的成员(ADR-0057 D5 子树扩张)。\n\nADR-0105 D6 ② 的原文点名的恰恰是后者:\n\n> Every BU mechanism — `unit_and_subordinates` sharing, `adminScope` delegation, depth scopes — operates within one organization. There is no cross-org tree.\n\n## 后果\n\n在 `tenancy.enabled: false`(或 `systemFields.tenant: false`)的平台级对象上:\n\n| 收件人 | 现状 |\n|:--|:--|\n| `sharedWith: { type: 'business_unit', value: 'bu_x' }` | 判红 ✅ |\n| `sharedWith: { type: 'unit_and_subordinates', value: 'bu_x' }` | **放行** ❌ |\n\n两者的缺陷完全相同 —— 平台级对象没有 organization 列可供 Layer 0 收口,授权跨到库里每一个 organization —— 而漏掉的那个授权面**更大**(整棵子树而非单个单元)。规则自己的文档注释也只写了 `business_unit`,所以这不像是有意的取舍,更像是照着一个收件人写完就没回头看枚举。\n\n注:#4984 之前这条规则读的是被拒别名 `sharedTo`/`recipient`,所以 ② 对任何 spec 合法的 stack 都从不触发;#4984 修好键名后这个覆盖面缺口才第一次变得可观察。\n\n## 建议\n\n把判定改为收件人类型 ∈ `{ business_unit, unit_and_subordinates }`,并在 message 里保留具体类型名。这是 error 级门禁的**扩张**,所以没有随 #4984 一起做 —— 需要先确认没有真实元数据踩中。\n\n已核查(#4984 分支上):`examples/app-showcase`、`examples/app-crm` 的全部 sharing rule 中只有一条 `unit_and_subordinates`(`share_new_inquiries_with_field_ops` → `showcase_inquiry`),而 `showcase_inquiry` 没有 `tenancy.enabled: false` / `systemFields.tenant: false`,仓库里也没有任何对象关掉 tenancy —— 因此按上述扩张改完,现有真实元数据**不会**产生新红。\n\n相关:#4984、ADR-0105 D6、ADR-0057 D5。\n"
+}

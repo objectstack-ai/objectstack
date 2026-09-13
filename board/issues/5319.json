@@ -1,0 +1,35 @@
+{
+  "number": 5319,
+  "kind": "pull_request",
+  "title": "feat(spec)!: ViewItemSchema 拆成授权门 + wire 变体,并让 wire 的开放递归生效 (#5074)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T19:12:04Z",
+  "updated_at": "2026-08-04T23:13:33Z",
+  "closed_at": "2026-08-04T23:13:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T23:13:31Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5319",
+  "body": "Fixes #5074\n\n按维护者裁决 **A —— 拆分**(2026-08-04 03:02Z)+ 执行范围追加(05:24Z 的递归开放硬要求)实施。这也关掉了 #4001 批 18 最后 2 个站点。\n\n## 前提复核(先验证再动手)\n\n在 `origin/main` 上逐条核过,裁决的前提全部成立:\n\n- `ViewItemSchema` 两个 arm 仍是 strip(`z.object` 无 `.strict()`),仍是 `ViewMetadataSchema` 的成员 1;\n- 批 18 的 B 态三处留痕都在(schema JSDoc、`view-strictness-batch18.test.ts` §5、台账 `ui/` 行)——本 PR 把三处**全部换成 A 态**,没有留半更新的;\n- `ViewFilterRuleSchema`(#5114 热修重开)与 `ListView.sort[]`(批 18 回退)都还开着;\n- #5154 的三处 wire 豁免、#5237 的 `allowAddTab` 收紧都没被碰(本 PR 不涉及那些站点)。\n\n## 改了什么\n\n**授权/wire 拆分。** `ViewItemSchema` 两个 arm 收紧为 `strictObject`,成为授权门(`defineViewItem` / objectui 建视图表单)。新增 `ViewItemWireSchema` —— `.strip()` 的 wire 变体,接替 `ViewMetadataSchema` 的成员 1,`isPinned` / `sortOrder` 在它上面**显式声明**,不再靠「没人关这个成员」隐式活着。\n\n**discriminatedUnion 双变体 vs 抽 base —— 选了抽 base,理由是代价。** `z.discriminatedUnion` 不能 `.extend()`,所以两套变体只能各写一遍 arm;抽出 `viewItemArmShape()` 后两个姿态共用同一份 shape,差异只剩两处、且都在调用点可见(未知键姿态 + wire 多声明的两个键)。这是 #2231 的 derive-by-reference:一份契约不该有两份誊写。\n\n**递归开放 —— 这才是姿态翻转做不到的那半。** `.strip()` 和 `.strict()` 一样不递归,成员顶层重开保护不了嵌套已关块。走的是范围追加里第二条被认可的路线:声明一份装饰键词表,在 wire 门**校验前**剥离。\n\n- 新增 `VIEW_CONSOLE_ROW_DECORATIONS` + `stripViewConsoleDecorations` —— `stripReadDecorations` 的写路径镜像;\n- 覆盖 `filter[]` / `sort[]` 在**任意深度**的所有载体(扁平 overlay、ViewItem 的 `config`、`tabs[]`、`userFilters.tabs[]`,以及以后新增的载体);\n- 于是两个被挡的站点都关掉了:`ViewFilterRuleSchema`(#5114 热修本就写明是「pending #5074」的临时态,本 PR 按正确结构重关)、`ListView.sort[]` 条目(连同 #4721 的 `direction` → `order` 别名一起回来 —— 那个别名拼错会让排序**静默反向**)。\n\n⛔ **`id` 依然没有被声明**(批 18 Q1 两轴否决在案):它是 React list key,声明它等于教 AI 作者给过滤规则发 UUID。故意**没有**做成第二棵并行 wire schema 树 —— 那是 PD#12 的分叉,而且下次有人给 `ViewFilterRuleSchema` 加载体时会静默腐化。\n\n## 验收(范围追加第 3 条)\n\n控制台列排序 PUT 与过滤器保存 PUT 的 body 直接 parse 通过,均复用了批 18 的 pin 与 #5114 的三路径探针;另加 8 个载体深度的参数化用例。两个具名地雷各有测试:`z.toJSONSchema()` 对新结构仍出四成员 `anyOf`(**input / output 两个方向都断言了** —— `/api/v1/meta/types/view` 喂 Studio SchemaForm 靠它),lazySchema Proxy 的 ADR-0089 D3a 崩溃未复发(每个新/改 schema 都**单独**转换,不只经由父节点)。\n\n## 反向验证的方向 —— 是**反转**的那一种,如实报告\n\n对两个嵌套站点,不是常见的「改前绿、改后红」。`ViewFilterRuleSchema.safeParse(consoleRow)` 改前**绿**(shape 开着)、改后**红**(授权门按名字拒绝)—— 这正是「关闭」本身。不该动的是 wire 门:控制台真正 PUT 的 body 改前改后都绿。所以诚实的反向检查是**按门分**,不是按 schema 分:\n\n- 把 `stripViewConsoleDecorations` 从 wire 门拿掉 → 新测试 §3 红、§2 绿;\n- 反过来把 `ViewFilterRuleSchema` 重新开放 → §2 红、§3 绿。\n\n`view-filter-rule-wire-id.test.ts` 的两条 mechanism 控制项(顶层 aux 键搭车、嵌套 `emptyState` 仍拒)**跨 #5114 重开与 #5074 重关都保持绿** —— 这才是它们作为控制项的价值。\n\n## 一个真实副作用,同 PR 修掉\n\n`z.preprocess` 落在注册根上,把两个 gate walker 送进了 **#4488 已经在 `check-liveness.mts` 修过的同一个盲点**:`metadata-authoring-lint.ts` 与 `metadata-form-zod-reconciliation.test.ts` 都无条件按 `def.in` 解管道,而 preprocess 的 IN 是 transform —— 两者都会把 `view` 判成「非键承载」,**静默停止覆盖它**。是被它们自己的覆盖率断言抓到的(`lintables.length >= 1`、`root schema is not key-bearing`),这正是那两条断言存在的意义。两处都按 #4488 的写法改成「取不是 transform 的那一侧」。**gate 变哑比 gate 变红更糟。**\n\n`build-schemas.ts` 的 `zodShapeOf` 有同一个盲点,**故意没在本 PR 动** —— 改它会移动生成基线(`translation` 是 preprocess 根),超出本单范围,已单独立案 #5317。\n\n## 台账\n\n按 #5220 格式:数字一律 `pnpm gen:strictness-ledger` 整体重跑;`view.zod.ts` 行的散文手写,B 态描述换成 A 态事实。Class cell 从 `mixed · 5 authorable` 变成 `mixed · 1 authorable, 2 wire` —— **算术本身是结论**:strip 站点 5 → 3,不是「又关了两个」,而是**关了四个、新增了两个**(`ViewItemWireSchema` 的两个 arm,strip 是设计意图)。这张表量的是姿态不是意图,所以意图写在散文里。\n\n## 验证\n\n| 命令 | 结果 |\n|:---|:---|\n| `pnpm --filter @objectstack/spec test` | 309 files / **7996 passed** |\n| `pnpm --filter @objectstack/spec typecheck` | 通过 |\n| `pnpm --filter @objectstack/objectql test` | 117 files / **1882 passed** |\n| `pnpm --filter @objectstack/metadata-protocol test` | 42 files / **388 passed** |\n| `pnpm --filter @objectstack/metadata-core test` | 8 files / **103 passed** |\n| `check:generated` / `check:strictness-ledger` | 全绿 |\n| `scripts/check-nul-bytes.mjs` + 控制字符自扫 | 干净 |\n\n消费半径是按**规则的调用方**扫的、不是按被改的包:objectql 的 `protocol-view-identity-overlay.test.ts` / `metadata-diagnostics.test.ts` 各自带着 `sort: [{ id, … }]` 的 fixture,都经 wire 门,全部仍绿。objectui 侧只读不改,已确认其 `createBuildBody` 只发声明键(收紧后仍全部通过),`clientValidation.viewShapes.test.ts` 的 fixture 同样只用声明键。\n\n## 附带发现(已立案,未在本 PR 修)\n\n- **#5316** — objectui `clientValidation.ts` 的 `view` loader 拿**授权 schema** 去判一份 **stored** body:给视图打过 pin 之后再进 metadata-admin 编辑器,客户端会对一份服务端接受的 body 报 `isPinned` 未识别。方向反了(客户端比服务端严)。建议编辑路改用 `ViewMetadataSchema` / `ViewItemWireSchema`,创建路保持 `ViewItemSchema`。\n- **#5317**(`finding`)— 上面说的 `build-schemas.ts` `zodShapeOf` 管道盲点。\n\n## Rider:#4959 前提实测(只验证、未改 `stack.zod.ts`)\n\n结论:**schema 层分歧属实,端到端不成立**。实测(`stack.zod.ts:250`,行号随 main 变动):\n\n| 探针 | 结果 |\n|:---|:---|\n| `ObjectStackSchema.views` ← ViewItem | **REJECT** `unrecognized_keys: [\"viewKind\",\"config\"]` @ `views[0]` |\n| `ObjectStackSchema.views` ← 容器 | ACCEPT |\n| `ViewMetadataSchema`(`saveMetaItem` 门)← ViewItem | **ACCEPT** |\n| `defineViewItem` / `ViewItemSchema` ← ViewItem | ACCEPT |\n\n所以确实存在两种「视图」形状:栈级 `views:` 只收**容器**,持久化门收 **ViewItem 记录**。但 #4959 那句「objectui 产出根 schema 拒绝的元数据」**在端到端上不成立**:objectui 从不产出栈文档,它走 `client.meta.saveItem('view', name, body)` → `saveMetaItem` → `ViewMetadataSchema`,而那正是 ADR-0017 的记录门,接受 ViewItem。两条是不同的生产者、不同的门。\n\n而且栈级的拒绝是**有处方的**,不是裸拒 —— `defineStack({ views: [ViewItem] })` 实测报:\n\n> `viewKind` belongs to a single VIEW, not to the container. Wrap it: `defineView({ list: { type, data, columns, … } })` …\n\n即「栈级 `views:` 只放容器」是刻意契约,且拒绝自带改法。\n\n两点值得 PM 在裁 #4959 走向时知道(都不是 #5074 的范围):\n\n1. **两个门对同一个数组的形状判断不一致**:授权 lint 把 `views` 集合映射到 `view` **元数据类型** schema(即那个接受 ViewItem 的 union),而 `ObjectStackSchema.views` 只收容器。方向是良性的(parse 更严,且报错的是它),但意味着 lint 的预解析告警**够不到**这一类拒绝。\n2. **运行时比 schema 宽**:`objectql/engine.ts` 的注册循环把 `views:` 数组里的每一项都注册为 `view` 类型,只在 `isAggregatedViewContainer` 为真时**额外**展开 —— 所以一个 ViewItem 放进 manifest 的 `views:` 数组在运行时能注册成功,而 `defineStack` 会拒。属 declared ≠ enforced 的「运行时接受得更多」方向,今天没有用户能撞到(授权门先拒,且带处方)。\n\n建议 PM 据此重裁 #4959:按原文的「objectui 产出根 schema 拒绝的元数据」是**前提不成立**;若要保留,应重新聚焦到上面第 1/2 条。\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ErbEDVAg1No9gdg1pgDAGB)_"
+}

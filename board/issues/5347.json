@@ -1,0 +1,36 @@
+{
+  "number": 5347,
+  "kind": "issue",
+  "title": "`$null` 的比较值不是布尔时,driver-sql 与 driver-memory 给出**完全相反**的答案(一个 IS NULL,一个 IS NOT NULL)—— 实测",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T00:04:50Z",
+  "updated_at": "2026-08-05T02:17:25Z",
+  "closed_at": "2026-08-05T02:17:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5347",
+  "body": "修 #5324 / #5328 时按 #5328 的建议「顺带查同一 `switch` 里其他有条件写入的 arm 是否同款(`$null`、regex 族)」清点,发现 `$null` 这一条不是「静默丢弃」而是**静默取反**。按 Prime Directive #10 单独记在这里,unassigned。\n\n## 实测原文\n\n同一个过滤器 `{ stage: { $null: 'yes' } }`,同一份数据(单行 `{ id: '1', stage: 'won' }`):\n\n```\ndriver-sql     (better-sqlite3 :memory:)   =>  RESOLVED []        // 编译成 stage IS NULL\ndriver-memory  (InMemoryDriver.find)       =>  RESOLVED [\"1\"]     // 编译成 stage IS NOT NULL\ndriver-memory  (memory-matcher.match)      =>  [\"1\"]              // 与 find 一致\n```\n\n对照组,证明分叉只出现在非布尔值上:\n\n```\n{ $null: true }   =>  sql []      memory []       ✅ 一致\n{ $null: false }  =>  (未测 sql)  memory [\"1\"]\n```\n\n## 机制:两边的默认分支挂在相反的一侧\n\n`driver-sql`(`sql-driver.ts` :6363)按 **`=== false`** 判定,即「不是 `false` 就当 true」:\n\n```ts\ncase '$null':\n  (builder as any)[opValue === false ? whereNotNull : whereNull](field);\n```\n\n`driver-memory`(`memory-driver.ts` `normalizeFieldOperators`)按 **`=== true`** 判定,即「不是 `true` 就当 false」:\n\n```ts\ncase '$null':\n  if (val === true) { result.$eq = null; } else { result.$ne = null; }\n```\n\n两个默认分支方向相反,于是每一个既不是 `true` 也不是 `false` 的比较值 —— `'yes'`、`1`、`null`、`undefined`、`{}` —— 都会拿到**两个互相矛盾的答案**。`driver-sql` 内部是自洽的(#5146 的 `nullValueSatisfiesOperator` 也写着 `case '$null': return value !== false`),`driver-memory` 内部也是自洽的(两个过滤面一致);分叉严格发生在两个后端之间。\n\n## 为什么是 bug\n\n1. **不是「丢一条约束」,是「答反了」。** #5328 那类静默是结果集变空或变全,还看得出不对;这一条返回的是一个**语义上恰好相反**的行结果集,两边都言之凿凿。\n2. **spec 声明的是布尔。** `FieldOperatorsSchema` 里 `$null: z.boolean().optional()`,所以非布尔值本就是越界输入 —— 但 `where` 走到驱动时没有任何一层按 `FieldOperatorsSchema` 校验过,所以越界输入是真的能到这里的。AI 生成的元数据把 `$null: \"true\"`(字符串)写出来是完全可能的,而字符串 `\"false\"` 是 truthy,于是 SQL 说 IS NULL、memory 说 IS NOT NULL。\n3. 它落在权限面上的概率与 `$not` 同级:`$null` 是 RLS scope 里判断「字段没值」的常规写法。\n\n## 建议(不代裁决)—— 这需要一次裁决,不能各改各的\n\n三条路,方向不同,**必须先定哪个是 canonical**,否则改一边只是把分叉换个位置:\n\n- **A. 两边都拒收非布尔比较值**(`INVALID_FILTER` / 400)。与 #5240 / #5324 / #5328 已确立的「无法求值就响亮拒收」同向,也与「declared = enforced」同向:spec 声明 `z.boolean()`,那就在驱动门口按声明拒收。代价是这是**收紧**,会让今天靠 truthy 巧合工作的调用方拿到 400。\n- **B. 统一到 `=== false` 判定**(采 driver-sql 的现状为准)。改动最小,但等于把「除 `false` 外都算 IS NULL」这条不成文规则固化成契约 —— 而 `$null: 0` 之类的输入在这条规则下读作 IS NULL,几乎肯定不是作者的意思。\n- **C. 统一到 `=== true` 判定**(采 driver-memory 的现状为准)。对称的问题。\n\n我个人倾向 **A**:它是唯一一条不需要在两个都很难自圆其说的巧合之间挑一个的路,也是唯一一条让「AI 写错的元数据在写入时就被拒」而不是「在两个后端上各跑出一个答案」的路。但这条会改变今天不报错的输入的行为,所以留给维护者拍。\n\n顺带记录:同一轮清点里,regex 族(`$contains` / `$startsWith` / `$endsWith` / `$notContains`)的比较值不是字符串时,两边都做 `String(val)` 字符串化(`[object Object]`),**方向一致、都是 fail-closed**,不构成分叉 —— driver-sql 的 #5041 注释也明确把这一族排除在守卫外。这条不需要动。\n\n## 未验证的部分\n\n我没有实测 `driver-mongodb` / `driver-sqlite-wasm` 在同一输入下的行为(sqlite-wasm 继承 `SqlDriver`,预期与 SQL 一致但没实测;mongodb 的 `$null` arm 写法与 memory 相同,预期与 memory 一致但没实测),也没有量化真实元数据里出现非布尔 `$null` 的频率。严重度请 PM 按 triage 定,不代表我判断它低。\n\n关联:#5324 / #5328(实测出这一条的那一单)、#5146(`$not` 的 NULL 语义裁决,同款「先定 canonical 再改」)、#5240(一个条件一种措辞)、#5298(非否定路径上的 NULL 语义分叉)。"
+}

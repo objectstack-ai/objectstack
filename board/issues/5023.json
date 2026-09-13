@@ -1,0 +1,34 @@
+{
+  "number": 5023,
+  "kind": "pull_request",
+  "title": "docs(protocol/objectui): widget-contract 不再教已删除的 `PerformanceConfig` (#4996)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T00:09:31Z",
+  "updated_at": "2026-08-04T00:39:37Z",
+  "closed_at": "2026-08-04T00:39:36Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T00:39:36Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5023",
+  "body": "Fixes #4996\n\n## 前提复核(先核实,再动手)\n\n议题的三条前提逐条验过,全部**仍然成立**(基线 `origin/main@bf1edeffd`):\n\n1. **该页仍在引用** —— `content/docs/protocol/objectui/widget-contract.mdx` 两处:第 159 行接口块里的 `performance?: PerformanceConfig;`,以及第 309 行「Performance」小节整句「supplied through the shared `PerformanceConfig` schema (`packages/spec/src/ui/responsive.zod.ts`)」。没有被别的 PR 顺手改过。\n2. **schema 确已不存在** —— `packages/spec/src/ui/responsive.zod.ts:331` 现在只有墓碑注释;`responsive.test.ts:94` 记着用例随 schema 一并移除。#3896 的理由写在 changeset 与 CHANGELOG 里:**每个 `performance` 载体都是「可写但无人读」** —— 没有任何 renderer 或 runtime 读过 performance 块,而一个没有消费者的导出 schema 会被发现它的人当成能力(#3950 先例)。\n3. **全仓活指针只剩这一处(半)** —— 见下。\n\n## 议题悬着的那个决定,用代码判掉了\n\n议题说「需要 objectui 分片确认一句再动笔」,因为不确定 manifest 的 `performance` 是 objectui 自己的字段还是被退役的那三个 spec 键。**不需要确认:`WidgetManifestSchema` 就住在本仓** —— `packages/spec/src/ui/widget.zod.ts:273`。所以那两个分支都不成立,真实情况比它们更强:\n\n```ts\n// packages/spec/src/ui/widget.zod.ts\nperformance: retiredKey(\n  '`widget.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ...',\n),\n```\n\n`retiredKey()` 返回的是一个带 `error` 提示的 `z.never()`(见 `packages/spec/src/shared/retired-key.ts:60`)。也就是说这个键**不只是「没了」,而是会在 parse 时被拒**:照着这份文档写 `performance:` 的 manifest 今天直接校验失败。\n\n而生成的 `content/docs/references/ui/widget.mdx:113` 早已如实标注 `[REMOVED] ... Delete the key.`。**生成面与手写面对同一个键给出相反指令** —— 这正是 #4914 那个形态:两套并存,读者(很可能是 AI 作者,ADR-0033)可能撞上死的那套。手写页不是生成物(`packages/spec/scripts/` 下没有生成器写它),所以没有闸门会自动纠正,它才活到今天。\n\n## 处置:改写,不是整段删\n\n议题给的两个分支之外还有第三种,也是正确的那种。虚拟滚动这个**真实用例并没有退役**,只是换了载体 —— 活的开关是 list 形态视图上的顶层布尔 `virtualScroll`(`ListViewSchema`,`packages/spec/src/ui/view.zod.ts:909`),#3896 的 release notes 也是这么写的。整段删掉会让记得旧键的作者失去落点,于是本节改成说真话:\n\n- 接口块里的 `performance?: PerformanceConfig;` **删除**(`aria?: AriaProps` 保留 —— schema 上它仍然活着);\n- 「Performance」小节改写为「manifest 上没有 performance 块,虚拟化配在**视图**上」,并给出 `virtualScroll` 的确切位置;\n- 加一条 `warn` callout 点明该键在 17.0.0 被移除、**现在会被拒**、请删掉 —— 与生成面的措辞对齐,让迁移中的作者不会把它再加回来。\n\n顺带修掉同一次删除留下的第二个活指针:`layout-dsl.mdx` 的 Related Resources 把 `/docs/references/ui/responsive` 描述成「Responsive and performance configuration」,而那页生成出来已经**零** performance 内容,改为「Breakpoint layout and scoped responsive styles」。同目录、同一个被删 schema 的余波,属任务允许的「必要的关联引用」。\n\n## 活指针 vs 历史记述(按 #4832 的区分标准)\n\n全仓复查 `PerformanceConfig`,其余出现**全部是历史记述,一律保留**:`responsive.zod.ts` 墓碑注释、`responsive.test.ts` 说明、`packages/spec/CHANGELOG.md`、两份既往 changeset、`content/docs/releases/v17.mdx`、`packages/spec/liveness/README.md` 台账、`docs/adr/0021` 当时的决策记录、`docs/audits/` 审计日志、`spec-property-retirement` skill 的举例。**未触碰 `content/docs/releases/`。**\n\n## 闸门\n\n```\n✓ doc authoring guard: 360 files clean — no bare metadata literals.\n✓ affected-docs self-test: 32 cases pass.\n✓ check-audit-scope self-test: 13 cases pass.\n✓ docs-accuracy-audit scope is in sync with content/docs/: 178 hand-written doc(s).\n[MDX] generated files in 40.82ms          # fumadocs-mdx 重编译,该页解析通过\n```\n\n`check:docs-audit-scope` 如预期不受影响 —— 改内容不改路径。附空 frontmatter changeset(纯文档,releases nothing)。\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 5305,
+  "kind": "issue",
+  "title": "[finding] packages/spec 的 tsconfig 排除测试层,使其中 17 处 `@ts-expect-error` 成为「幻影断言」——看起来钉住契约,实际什么都没钉",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T17:01:59Z",
+  "updated_at": "2026-08-04T17:22:46Z",
+  "closed_at": "2026-08-04T17:22:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5305",
+  "body": "观察类发现,来自 #5285(PR 中新增 `FilterArray` 声明时反向验证撞上)。**不是回归,今天没有用户会踩到**;记录的是一类断言的可信度问题。\n\n## 事实\n\n`packages/spec/tsconfig.json` 的 `exclude` 含 `**` + `/*.test.ts`,并在 `scripts/check-type-check-coverage.mjs` 的 `TEST_DEBT` 里有实测条目(`@objectstack/spec`: 272 个测试文件 / 902 个错误)。所以 `pnpm --filter @objectstack/spec typecheck` 从不读取任何测试文件。\n\n`TEST_DEBT` 记录的是「隐藏了 902 个错误」——**假阴性**。但同一个排除还有第二种、性质不同的后果,账本没有覆盖:\n\n> **它静默地解除了 `@ts-expect-error` 这类「负向断言」的武装。**\n\n一个 `@ts-expect-error` 的全部价值就在编译期。当文件根本不被 `tsc` 读取时,它既不会因为「该错误消失了」而报 TS2578,也不会以任何方式失败——**测试照常全绿,而它声称钉住的契约一行都没被检查**。这与「隐藏了已有错误」是相反的失败方向:那些是真 bug 被藏起来,这些是**假装存在的检查**。\n\n## 计量\n\n`packages/spec/src/` 测试层共 **17** 处 `@ts-expect-error`,分布在 5 个文件:\n\n- `data/object.test.ts`\n- `data/hook.test.ts`\n- `system/translation-typegen.test.ts`\n- `contracts/sharing-service.test.ts`\n- `data/filter-array-declaration.test.ts`(#5285 新增,已在文件内显式标注「CI 不做类型检查」并附手工验证记录)\n\n未逐一核实前 4 个文件里每一处当前是否仍然成立——那正是问题所在:**没有任何东西在核实它们**。\n\n## 复现(在 #5285 分支上实测)\n\n在 `packages/spec/` 下建一个继承自本包 tsconfig、`\"exclude\": []`、只 include 单个测试文件的临时配置:\n\n```\nnpx tsc -p tsconfig.typetest.tmp.json\n```\n\n- 排除解除后:`exit 0`,两处 `@ts-expect-error` 均为「活的」;\n- 把 `AST_OPERATOR_MAP` 的 `satisfies` 改回 `Record< string, string >` 注解(即把算子类型放宽回 `string`)后:报出且仅报出 `src/data/filter-array-declaration.test.ts(215,5): error TS2578: Unused '@ts-expect-error' directive.`\n\n同一改动在 `pnpm --filter @objectstack/spec typecheck` 下**全绿**——这就是幻影。\n\n## 为什么值得单独记一笔\n\n`TEST_DEBT` 的注记把这批包描述为「隐藏的是测试层,而 #4311 正是在测试层发现缺陷的」,读起来像是纯粹的「欠债规模」问题,毕业即可清偿。但对负向断言而言,后果不是「错误暂时看不见」,而是**一个写下来就永远不会失败的检查**——它会被后来的读者(以及 agent)当作既有保护读,这正是仓规反复付代价的 declared ≠ enforced 形状,只不过这次落在测试基础设施上。\n\n## 可能的处理方向(未定调,交 PM 分诊)\n\n1. **随 `TEST_DEBT` 毕业自然消解** —— 最干净,但 902 个错误的清理不是小工程,期间幻影一直存在;\n2. **把负向断言挪到已被类型检查的包**(spec 的类型可从任意包 import),代价是契约与其断言不同居;\n3. **给 spec 加一个只含 `@ts-expect-error` 测试文件的窄 tsconfig 门禁**(`check:type-level-pins` 之类),先把这一类断言救回来,与 `TEST_DEBT` 的整体毕业解耦——增量成本最小;\n4. 若判定不值得,**至少让排除本身变响亮**:在 `TEST_DEBT` 注记里写明「本包内的 `@ts-expect-error` 不生效」,使下一个作者不会误读。\n\n倾向 3 或 4:两者都不要求先还清 902 个错误,而 3 恰好把「负向断言」这一最容易被误读为已验证的子集单独救出来。请 PM 分诊定级。\n\nRefs: #5285(发现现场 + 手工验证)、#4311(类型检查覆盖率棘轮的由来)、`scripts/check-type-check-coverage.mjs` 的 `TEST_DEBT`。\n\n_由 #5285 的 os-dev 会话 `session_01ErbEDVAg1No9gdg1pgDAGB` 按 Prime Directive #10 立单,不认领。_\n"
+}

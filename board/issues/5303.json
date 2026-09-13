@@ -1,0 +1,35 @@
+{
+  "number": 5303,
+  "kind": "pull_request",
+  "title": "fix(auth): 两个 membership 入口对词表外的 policy 给出同向的拒绝 (#5205)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T16:24:27Z",
+  "updated_at": "2026-08-04T17:11:24Z",
+  "closed_at": "2026-08-04T17:11:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T17:11:22Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5303",
+  "body": "Fixes objectstack-ai/objectstack#5205\n\n## 问题\n\n`packages/plugins/plugin-auth/src/reconcile-membership.ts` 里，同一个 `policy` 字段被两个函数用**相反的谓词**判断：\n\n```\nreconcileMembership:   if (deps.policy === 'invite-only') return { outcome: 'policy-skip' };\nbackfillMemberships:   if (deps.policy !== 'auto')        return { ...summary, reason: 'policy' };\n```\n\n传入词表外的值（拼错的 `'inviteOnly'`、`undefined`、一个对象……）时：\n\n| 函数 | 旧行为 |\n|---|---|\n| `reconcileMembership`（注册路径，逐个绑定） | 落到 `auto` 分支，**照常自动绑定** —— fail-open |\n| `backfillMemberships`（回填路径，批量） | 判为非 `auto`，不绑 —— fail-safe |\n\n危险的是前者：调用方以为自己关掉了自动绑定，实际上没有，日志里也看不出来。\n\n#5152 之后框架自身通路上不可能再出现非法值（两个调用点都走 `AuthManager.getMembershipPolicy()`，返回类型是 `MembershipPolicy`），但 `index.ts` 有 `export * from './reconcile-membership.js'` —— JS 侧调用方或 cloud 宿主可以绕过类型直接传。所以这是「休眠」而不是「不可达」。\n\n## 为什么是形状 2，不是形状 1\n\n维护者 2026-08-04 在 #5205 上裁定进 v17、取形状 2。\n\n**形状 1**（把 `reconcileMembership` 一行收紧成 `!== 'auto'`）确实能消灭方向性错误，且改动最小。但 issue 自己写了它的代价：`policy-skip` 这个 outcome 名对「值非法」这个原因是**撒谎**。它的语义是「一个合法的策略说了不」，拿它报告「你传的这个值根本不是策略」，会把排障的人指向部署设置去看 —— 而那个设置好端端的。少写的那几行，日后要在一次线上排障里连本带利还回来。\n\n**形状 2**（两处入口用 `isMembershipPolicy()` 显式判非法 + 独立的 `'invalid-policy'` + 记 `error`）与 #5152 在 settings 边界上的姿态同源：非法值**响亮拒绝，不静默强转**。#5152 的 `auth-plugin.ts` 对一个词表外的 `OS_AUTH_MEMBERSHIP_POLICY` 就是这么做的（`logger.error` + 忽略 + 报出允许值），本 PR 只是把同一条纪律推到它下游的两个函数里，让这一层不再有第二种姿态。\n\n代价是它改导出的联合类型 —— 正因如此才搭 v17 这班主版本车。\n\n## 契约变更的影响面\n\n| 导出物 | 变更 |\n|---|---|\n| `ReconcileOutcome` | 新增成员 `'invalid-policy'` |\n| `BackfillMembershipsResult['reason']` | 新增成员 `'invalid-policy'` |\n| `BackfillMembershipsResult` | 新增可选字段 `error?: string` |\n| `reconcileMembership()` 返回值 | 新增可选字段 `error?: string` |\n| `ReconcileMembershipDeps['logger']` | 新增可选方法 `error?`（缺省回落到 `warn`） |\n\n对下游是 **minor**（changeset 按 minor 记）。唯一会被顶到的形状，是对这两个联合类型做**穷尽** switch 的消费者（`never` 收尾的 `default`，或 `Record< ReconcileOutcome, T >` 之类的全映射）—— 那种消费者需要补上新成员。\n\n仓内消费者已逐个查过，均不受影响：\n\n- `auth-manager.ts:3728` 忽略返回值（best-effort hook）；\n- `admin-user-endpoints.ts:308` 只读 `result.outcome === 'bound'` 与 `result.organizationId`；\n- `auth-plugin.ts:887` 只读 `res.bound`；\n- `packages/qa/dogfood/test/membership-reconciler.dogfood.test.ts` 只对合法值断言 `'policy-skip'` / `'policy'`，语义未动。\n\n`error` 记的是**哪个值非法**，且不吞原值 —— 同时进日志和返回值（后者是为了让没传 logger 的调用方也拿得到，拒绝本身不是日志的副作用）。策略是封闭词表、值很短，所以**字符串**原样回显（`'inviteOnly'` 与 `'invite-only'` 的区别正是这条消息的全部意义），并在 64 字符处截断；**非字符串**只报 `typeof`（`[object]`），因为那是脱离类型契约到达的任意调用方数据，日志行不是发现它带着用户字段的地方。\n\n## 对抗性验证\n\n新测试对**未修复的源码**（`origin/main` 的 `reconcile-membership.ts`，测试文件为本 PR 版本）真实执行：\n\n```\n FAIL  src/reconcile-membership.test.ts > … > policy = camelCase typo > reconcileMembership refuses — invalid-policy, nothing bound\n FAIL  src/reconcile-membership.test.ts > … > policy = snake_case typo > reconcileMembership refuses — invalid-policy, nothing bound\n FAIL  src/reconcile-membership.test.ts > … > policy = wrong case > reconcileMembership refuses — invalid-policy, nothing bound\n FAIL  src/reconcile-membership.test.ts > … > policy = empty string > reconcileMembership refuses — invalid-policy, nothing bound\n FAIL  src/reconcile-membership.test.ts > … > policy = undefined > reconcileMembership refuses — invalid-policy, nothing bound\n FAIL  src/reconcile-membership.test.ts > … > policy = null > reconcileMembership refuses — invalid-policy, nothing bound\n FAIL  src/reconcile-membership.test.ts > … > policy = boolean > reconcileMembership refuses — invalid-policy, nothing bound\n FAIL  src/reconcile-membership.test.ts > … > policy = object > reconcileMembership refuses — invalid-policy, nothing bound\n\nAssertionError: expected 'bound' to be 'invalid-policy' // Object.is equality\nAssertionError: expected 'policy' to be 'invalid-policy' // Object.is equality\nAssertionError: expected [ { …(2) } ] to have a length of +0 but got 1\n\n Test Files  1 failed (1)\n      Tests  30 failed | 19 passed (49)\n```\n\n`expected 'bound' to be 'invalid-policy'` 与 `to have a length of +0 but got 1` 是今天的 fail-open 被抓现行：一行 `sys_member` 真的写进去了。同一次运行里 **19 passed** —— 既有测试与新加的「合法值行为不变」表全绿，说明红的只有本 PR 要修的那条方向性错误。\n\n修复后同一文件：\n\n```\n Test Files  1 passed (1)\n      Tests  49 passed (49)\n```\n\n## 测试\n\n- 8 个词表外的值 × 3 条断言（`reconcileMembership` 拒绝 / `backfillMemberships` 拒绝 / 两者同向且都不绑），并显式断言 `outcome !== 'policy-skip'`、`reason !== 'policy'`；\n- 拒绝发生在**入口** —— `resolveTargetOrg` 一次都没被调用；\n- 非法值被记进日志与返回值；`error` 级而非 `warn`；只有 `warn` 的 logger 也收得到；完全不传 logger 时照样拒绝；\n- 非字符串值不把内容打进日志（`[object]`，断言 `ops@example.com` 不出现在消息与 meta 里）；超长字符串截断；\n- 前置条件仍然优先：缺 engine 时是 `skipped` / `engine-unavailable`，不是 `invalid-policy`（两个函数的检查顺序保持对称）；\n- **合法值逐条不变**：对 `MEMBERSHIP_POLICIES` 表驱动，钉住 `auto` → `bound` / 绑 1 行、`invite-only` → `policy-skip` / `reason: 'policy'` / 绑 0 行，外加一条断言保证这张表覆盖了整个声明词表（以后往词表里加值，这条会先红）。\n\n## 证据边界\n\n- `pnpm --filter @objectstack/plugin-auth` 全量：`Test Files 34 passed (34)` / `Tests 780 passed (780)`；`tsc --noEmit` 退出 0。\n- 门禁：`check:engine-double-contract`、`check:adr-anchors`、`check:doc-authoring`、`check:org-identifier`、`check:role-word`、`check:startup-registry-verdict` 全 PASS；改动两文件 eslint 退出 0。\n- 下游 `@objectstack/dogfood` 的 `tsc --noEmit`：`membership-reconciler.dogfood.test.ts` 对 `@objectstack/plugin-auth` 的 import **无报错**（该文件唯一的错是第 25 行 `@objectstack/verify` 的 `TS2307`）。该包剩余 181 条错全部是 `TS2307 Cannot find module`，指向本会话未构建、且本任务禁止触碰的兄弟包（`@objectstack/verify`、`plugin-security`、`plugin-audit` …，#5261 正在改），属沙箱构建状态，与本改动无关。**未**跑 dogfood 的运行时测试（要真实 DB）。\n- **未**跑仓库全量 test/build（资源纪律：按包 scope）。CI 由 PM 盯。\n\n## 文件面\n\n只碰了 `packages/plugins/plugin-auth/src/reconcile-membership.ts` 及其同名测试，加一个 changeset。`ReconcileOutcome` 的定义与导出都在这一个文件里（`index.ts` 经 `export * from './reconcile-membership.js'` 转出，未改）。未触碰 `auth-manager.ts`、`org-create-posture-gate.test.ts`、`packages/objectql`、`plugin-dev`、`runtime`、`driver-sql`、`cli`、`packages/types/src/env.ts`、`packages/qa/**`、`packages/verify/**`、`content/docs/releases/`。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_015W6nhsDrz6zWQc8je12a1t\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015W6nhsDrz6zWQc8je12a1t)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 5133,
+  "kind": "pull_request",
+  "title": "fix(service-settings,plugin-email): 邮件服务商下拉框只列真能投递的值 (#5094)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T05:45:58Z",
+  "updated_at": "2026-08-04T06:04:46Z",
+  "closed_at": "2026-08-04T06:04:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T06:04:45Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5133",
+  "body": "Fixes objectstack-ai/objectstack#5094\n\n按 PM 分诊裁定实现:**不新增 SendGrid / SES transport,改为把下拉框修实。** 动手前核对了裁定的技术前提,结论是**成立**,详见下面「裁定复核」一节。\n\n## 改了什么\n\n`Settings → Mail → Provider` 原本列 `SMTP | SendGrid | Amazon SES | Postmark`,而 `makeTransport` 只认 `log | resend | postmark | smtp`。选中 SendGrid/SES 的结果是:表单校验通过、保存成功、提示成功、一封信也不发 —— 与 #5087 同形,只是挪了一个字段。同一个字段还在**反方向**违反同一条不变量:`resend` 一直有可用 transport,却根本没被列出来。\n\n目标状态已达成 —— 下拉框 = **`SMTP | Resend | Postmark | None (log only — no real delivery)`**,与 `makeTransport` 能建出的集合**完全相等**。\n\n| 文件 | 改动 |\n|:--|:--|\n| `mail.manifest.ts` | 选项表收紧为上述四项(抽成 `PROVIDER_OPTIONS` 常量);`provider` 字段加 description 指路 SMTP;`api_key` 的 `visible` 改为正向;内置 `mail/test` 兜底拒绝表外取值 |\n| `plugin-email/transports/index.ts` | 新增 `EMAIL_TRANSPORT_PROVIDERS` 运行时数组(union 由它派生)、`isEmailTransportProvider`、`RETIRED_EMAIL_PROVIDERS`、`unsupportedProviderFix`;`makeTransport` 的 `default` 分支带上修复指引 |\n| `email-plugin.ts` | `applyMailSettings` 与 `mail/test` 各加一道不支持-provider 闸门 |\n| `translations/{en,zh-CN,ja-JP,es-ES}.ts` | 选项标签同步;`provider` 补 `help` |\n\n## 为什么移除 SendGrid / SES 不是移除能力\n\n两家都公开 SMTP 端点,#5087 落地 `SmtpTransport` 之后**今天就能用**,所以是把死路换成通路。字段 description 直接把迁移写在管理员眼前:\n\n| provider | host | port | 凭据 |\n|:--|:--|:--|:--|\n| SendGrid | `smtp.sendgrid.net` | 587 | 用户名 `apikey`,密码 = 你的 API key |\n| Amazon SES | `email-smtp.{region}.amazonaws.com` | 587 | SES **SMTP 凭据**(SES 控制台生成,不是 AWS access key) |\n\n## 关于 `log`:我决定列出来,理由\n\nissue 把这一项交给我判断。**列出来**,标签写成 `None (log only — no real delivery)`(与同类目下的 `sms.manifest.ts` 一致)。\n\n1. **它不构成本单要消灭的那个形态。** 「declared ≠ enforced」的要害是*声明了做不到的事*。`log` 声明的就是「不投递」:标签这么写,`LogTransport` 确实照做(仍写 `sys_email`),`mail/test` 对它返回 `ok: false`。它诚实。\n2. **它给了 AGENTS.md 要的那个「显式 opt-out」。** 不列的话,想关掉外发邮件的运维只能留一个填不全的 SMTP 表单 —— 那才是每次启动都刷 error 日志、还看不出是不是故意的状态。\n3. **决定性的一条:列上它,「可选集合」与「可投递集合」就完全相等,而不只是包含关系。** 于是守卫可以写成一句集合相等断言,同时钉死两个方向。少列 `log` 的话只能写成子集断言,`resend` 那种「有后端没 UI」的反向缺口就再也钉不住 —— 而那正是本单要一并修的另一半。\n\n## 存量 `sendgrid` / `ses` 工作区(硬约束 1)\n\n按 issue 要求,先读了 `applyMailSettings` 现有的「provider 有值但建不出 transport」形状,**照抄同一形状**,没有另起一套:保留既有 transport、不抛、`error` 级日志同时给出**后果与修复**。\n\n一处刻意的顺序安排:不支持-provider 的判断放在 **api_key 判断之前**。否则一个没存 key 的历史工作区会收到「请填 API key」—— 而那个 provider 根本没有东西可以接这把 key,是把人往错误方向指。\n\n- 已有可用 SMTP transport(`OS_EMAIL_SMTP_*` 配置)时,不会被这条拆掉,信照常发;但存量取值仍然报错,因为它确实需要人来修。\n- 改成 `smtp` 保存后,transport 当场热替换恢复,不用重启(有用例钉)。\n- `mail/test` 同口径拒绝,不发信,并给出 SMTP 迁移 —— 不是 `Failed to build sendgrid transport: unknown provider` 这种只讲症状的内部话。\n\n## 顺手修掉的一处会咬人的地方\n\n`api_key` 的 `visible` 从 `provider !== 'smtp'` 改成 `provider === 'resend' || provider === 'postmark'`。原写法只是碰巧成立(以前非 SMTP 的选项恰好都是 HTTP API)。`required` 在服务端是**按 visible 生效**的(`validatePatch`),所以照原样加进 `log` 之后,管理员选「None (log only)」会被要求先填一个永远不会被读的 API key 才准保存。\n\n## 测试\n\n守卫按验收判据本身写,并且**验证过它会红**(临时加 `mailgun` 选项 / 临时删掉 `resend`,两个方向都失败,已还原):\n\n- `packages/plugins/plugin-email/src/mail-manifest-providers.contract.test.ts`(新增,跨包):`new Set(manifest options)` 与 `new Set(EMAIL_TRANSPORT_PROVIDERS)` 相等,并对每个选项真的 `makeTransport` 建一次、断言 transport 类。**刻意做成跨包断言而不是两侧各钉一份字面量** —— 两份字面量可以靠改另一份「修好」,那正是当初漂移的方式。为此 `@objectstack/service-settings` 进了 plugin-email 的 `devDependencies`(仅测试,无运行时边)。\n- `packages/services/service-settings/src/manifests/mail.manifest.test.ts`(新增):选项表、`api_key` 与 SMTP 字段的可见性(用真的 `evaluateVisibility` 逐个 provider 求值,不是比字符串)、兜底 handler 的各条拒绝。放在这里是为了让改 manifest 的人**在自己动的那个文件里**看到红。\n- `email-plugin.mail-settings.test.ts`(扩充):存量 `sendgrid`/`ses` 不打挂 + error 含后果与修复、缺 key 时报的是 provider 不是 key、不拆掉在跑的 boot SMTP、typo 值给出可用列表、改回 smtp 后恢复、`provider=resend` 真能建出 `ResendTransport`、`mail/test` 拒绝存量取值。\n\n```\npnpm --filter @objectstack/service-settings exec vitest run --maxWorkers=2\n  Test Files  15 passed (15)\n        Tests  214 passed (214)\n\npnpm --filter @objectstack/plugin-email exec vitest run --maxWorkers=2\n  Test Files  8 passed (8)\n        Tests  127 passed (127)\n\npnpm --filter @objectstack/cli exec vitest run --maxWorkers=2 src/commands/serve-email-capability.test.ts\n  Test Files  1 passed (1)\n        Tests  9 passed (9)\n\npnpm turbo run typecheck --filter=@objectstack/plugin-email --filter=@objectstack/cli\n  Tasks:    55 successful, 55 total\n```\n\n（`service-settings` 无 `typecheck` 脚本,在 `scripts/check-type-check-coverage.mjs` 里是记账中的 DEBT,本单不动。）\n\n## 裁定复核(硬约束 3)\n\n裁定的技术前提逐条核过,**没有需要反驳的地方**:\n\n- `SmtpTransportOptions` 是 `host / port / secure / user / password / timeout / transportOptions`,SendGrid(587 + STARTTLS + `apikey` 用户名)与 SES(`email-smtp.{region}.amazonaws.com`,587 STARTTLS 或 465 隐式 TLS,SES SMTP 凭据)都能完整表达,`secure` 的语义(465 隐式 / 其余强制 STARTTLS)也对得上。裁定里「SES 的 SMTP 端点其实无法用现有字段表达」这个预设的反例不成立。\n- SES 的 HTTP API 确实需要 SigV4,与本仓纯 fetch 的 transport 家族不同源,长期负担的判断成立。\n\n## 边界\n\n- ⛔ 没有碰 `packages/spec`(`EmailProviderSchema` 加 `'smtp'` 是 #5104 的活)。\n- ⛔ 没有碰 `content/docs/releases/`。\n- 路过发现、已另行立单、**未在本 PR 修**:#5131(settings `select` 的 `options` 在保存期完全不校验,是同一条契约在 API 侧缺的闸门)、#5132(CLI 缺 apiKey 时静默降级 LogTransport,#5087 在 CLI 层的遗留同形缺口)。`config-resolution.mdx` 里那条 `provider: 'sendgrid'` 文档示例已被 #5105 覆盖,未开重复单。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_017MCKJaEomEqg4tvz4SzdNd\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017MCKJaEomEqg4tvz4SzdNd)_"
+}

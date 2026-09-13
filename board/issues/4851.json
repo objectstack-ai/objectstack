@@ -1,0 +1,37 @@
+{
+  "number": 4851,
+  "kind": "issue",
+  "title": "docs-accuracy-audit.js 的 ALL_HANDWRITTEN 清单 11 条全部指向改名前的 protocol/objectos/* —— 内部文档审计静默漏审整个 protocol/kernel 目录",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T10:08:35Z",
+  "updated_at": "2026-08-03T16:35:01Z",
+  "closed_at": "2026-08-03T16:35:01Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4851",
+  "body": "从 #4817 的实施记录中提出独立立单(此前只记在该 issue 正文里,没有自己的 owner —— 一件需要做的事只活在别的 issue 的叙述里,等于没有 owner)。\n\n## 现象\n\n`.claude/workflows/docs-accuracy-audit.js` 的 `ALL_HANDWRITTEN` 清单仍使用重命名前的 `content/docs/protocol/objectos/*` 路径。该目录早已改名为 `content/docs/protocol/kernel/`,清单里 **11 个条目全部指向不存在的文件** —— 于是这个内部文档准确性审计**静默跳过整个 `protocol/kernel` 目录**。\n\n## 为什么它值得修,且证据充分\n\n它不是假设的风险,而是**已经付过两次代价的实洞**:\n\n- #4781:`runtime-capabilities.mdx` 整页教一个 #3605 已删除的 schema,烂了近两个月无人发现;\n- #4817:`http-protocol.mdx` 把 dispatcher 的响应样例挂在 `/api/v1/discovery` 名下,同样无人发现。\n\n两页都在 `protocol/kernel/` 下 —— **不是没人查,是查它们的脚本以为那个目录不存在**。与 #4690(门禁无 MANIFEST 静默 skip)、#4804 的根因(lint 警告写 stderr 而门禁只读 throw 路径)同族:看的动作在发生,看的对象不在那里。\n\n## 修法\n\n1. 把 `ALL_HANDWRITTEN` 的 11 条路径更新为 `protocol/kernel/` 现状(注意 #4781 已删掉其中一页,清单应随之减一);\n2. **加一条自证**:清单中的路径若不存在,脚本必须报错退出而不是静默跳过 —— 否则下次目录改名,同样的洞原样重开。这是本仓 #4777 / #4804 / #4690 三单刚建立的同一条纪律:一个连「无事可查」都当成功的检查,与不存在的检查不可区分。\n\n## 验收\n\n- 清单路径全部指向存在的文件;\n- 人为在清单里塞一条不存在的路径,脚本非零退出并点名该条目(反向验证);\n- 对 `protocol/kernel/` 现有页面跑一轮审计,结果如实呈现(发现新的过期页就按 Prime Directive #10 立单,不在本 PR 里顺手改)。\n\n## 关联\n\n- 发现现场:#4817(修复记录在其正文「顺带」一节)\n- 代价实例:#4781、#4817\n- 同族纪律:#4690、#4777、#4804"
+}

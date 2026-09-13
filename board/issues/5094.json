@@ -1,0 +1,36 @@
+{
+  "number": 5094,
+  "kind": "issue",
+  "title": "plugin-email: SendGrid / Amazon SES 设置项同样后端无实现 —— #5087 的同形缺口",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T04:05:32Z",
+  "updated_at": "2026-08-04T06:04:46Z",
+  "closed_at": "2026-08-04T06:04:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5094",
+  "body": "Blocked-by: objectstack-ai/objectstack#5087\n\n## 问题\n\n由 #5087 的分诊派生,原 issue 已明确把这部分划出范围(「按一事一议另行处理」),故独立立单。\n\n`packages/services/service-settings/src/manifests/mail.manifest.ts` 的 provider 下拉列出 SendGrid 与 Amazon SES,但 `packages/plugins/plugin-email/src/transports/` 下只有 `resend.ts` 与 `postmark.ts`,`makeTransport` 也只认这两个值。选中 SendGrid / SES 保存后:\n\n- `applyMailSettings` 走的是 `provider !== 'smtp' && provider !== 'log'` 分支,拿 `api_key` 去 `makeTransport({ provider })`,而该 provider 值不被支持;\n- 用户侧观感与 #5087 一致 —— 表单校验通过、保存成功、邮件不发,declared-but-not-delivered。\n\n## 与 #5087 的关系\n\n`Blocked-by` 而非 sub-issue:两者是**依赖关系**而非同一完成范围。#5087 落地后本单的正确范围才能确定 —— SendGrid 与 SES 都提供 SMTP 端点,届时可能:\n\n1. 直接复用 #5087 的 `SmtpTransport`,把这两个选项映射成预置 host 的 SMTP 配置(工作量最小,且不新增 API 客户端);\n2. 或按各自 HTTP API 新增 transport(与 Resend/Postmark 同形,纯 fetch)。\n\n分诊时按 #5087 实际落地形态再定,不要现在预判。\n\n## 验收判据\n\nprovider 选中的每一个值,要么后端真的能投递,要么在**保存/校验期响亮拒绝**(而不是保存成功后静默不发)——不允许下拉框里存在只有前端、没有后端的选项。\n"
+}

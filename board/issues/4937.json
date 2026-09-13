@@ -1,0 +1,30 @@
+{
+  "number": 4937,
+  "kind": "issue",
+  "title": "`packages/runtime/src/security/rate-limit.ts` 零调用点,且注释断言了两个不存在的东西(429 短路 / `DispatcherPluginConfig.rateLimit`)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T16:50:40Z",
+  "updated_at": "2026-08-03T20:30:12Z",
+  "closed_at": "2026-08-03T20:30:12Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4937",
+  "body": "在 #4910 开工核查中发现,记录备查,**未认领**。基线 `origin/main` @ `2e284b2546`。\n\n## 事实\n\n`RateLimiter` 是一个写得很干净、单测很完整的 in-memory token bucket。它**从未被任何生产代码实例化**:\n\n```\n$ grep -rn \"new RateLimiter(\" --include=*.ts --include=*.mjs --include=*.js . | grep -v node_modules | grep -v /dist/\npackages/runtime/src/security/rate-limit.test.ts:23,39,54,65,77,86,97,98   ← 全部是它自己的单测\n(无其它命中)\n\n# 阳性对照,证明扫描器有效:\n$ grep -rn \"new DomainHandlerRegistry(\" --include=*.ts . | grep -v node_modules\npackages/runtime/src/http-dispatcher.ts:167   ← 真实调用点找得到\n```\n\n`DEFAULT_RATE_LIMITS` 同样只有单测 + barrel 导出两类命中。全仓入站路径**没有任何 429 短路**:\n\n```\n$ grep -rn \"429\" --include=*.ts packages/runtime/src packages/adapters packages/rest/src packages/core/src | grep -v .test.\npackages/runtime/src/security/rate-limit.ts:8   ← 注释里的那句话本身\npackages/rest/src/rest-server.ts:6897           ← [/^THROTTLED/, 429, 'THROTTLED'] 错误码映射,与本限流器无关\n```\n\n## defect:注释断言的两件事都不存在\n\n文件头和 `DEFAULT_RATE_LIMITS` 上方的注释写着:\n\n- `rate-limit.ts:8` — 「the dispatcher calls `consume(key)` … and **short-circuits with 429** if the bucket is empty」 —— 没有任何 dispatcher 调用 `consume`。\n- `rate-limit.ts:153` — 「Conservative — **tune via `DispatcherPluginConfig.rateLimit`** for your deployment」 —— `DispatcherPluginConfig`(`dispatcher-plugin.ts:23`)**没有 `rateLimit` 字段**。\n- `rate-limit.ts:157-163` — 「the dispatcher constructs the key from `${ip}:${bucket}`」 —— 没有任何代码构造这个 key。\n\n这不是「注释过期」这种无害漂移:它是**用现在时描述一条不存在的执行链**,而 #4686 的立单事实(「一个真正在干活的 token bucket,服务入站 dispatcher 的 429 短路」)与 #4910 的整个拆向裁决,正是建立在读到这段注释之上的。一段自称已接线的注释,让两张单据把「从零建执行点」误判成「把声明接到已有执行器」。\n\n## 建议(不要顺手做,与 #4686 的裁决绑在一起)\n\n- 若 #4686 的入站半边确定要接执行:本文件保留,注释改为**将来时/契约式**(「intended to be called by …」),并在同一个 PR 里补上真正的调用点,让注释与代码同时为真。\n- 若入站限流短期内不做:把这三段注释改成事实(「currently unreferenced — no dispatcher calls it yet, see #4686」),或按 ADR-0049 连同这个未接线的执行器一起处置。\n\n无论走哪条,**注释不能继续用现在时描述不存在的调用链** —— 这正是 Prime Directive #10 的 declared ≠ enforced,只不过这次说谎的是代码注释而不是 schema。\n\n关联:#4686、#4910、#4936、Prime Directive #10。\n"
+}

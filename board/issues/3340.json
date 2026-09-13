@@ -1,0 +1,37 @@
+{
+  "number": 3340,
+  "kind": "issue",
+  "title": "Release process: prevent frontend (objectui) changesets being missed when the console pin lags",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-20T02:16:06Z",
+  "updated_at": "2026-08-03T17:13:53Z",
+  "closed_at": "2026-08-03T17:13:53Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3340",
+  "body": "## Background / incident\n\nWhile curating the v16 release page (#3322), the Console section was written from the `@objectstack/console` **bundle-bump summaries**. Those summaries only cover up to the pinned objectui SHA (`.objectui-sha`). At that moment objectui `main` was **4 commits / 21 pending changesets ahead** of the pin, so **4 frontend changes — two of them `minor` features — were absent from the page** (fixed in #3331 by re-sourcing from objectui's own changesets):\n\n- objectui#2701 `import-wizard-auto-policy` (minor) — Console side of framework#3236\n- objectui#2708 `schema-fields-keyvalue` (minor) — Console side of framework#3304\n- objectui#2707 `action-param-upload-guard` (patch) — ADR-0059 follow-up\n- objectui#2706 `system-field-classifier-consolidation` (patch) — #2702 follow-up\n\nThis is a **structural gap**, not a one-off oversight.\n\n## Root cause — three blind spots in the pipeline\n\n```\nobjectui main ──(bump-objectui.sh pins SHA)──▶ .objectui-sha ──▶ @objectstack/console changeset ──▶ vN.mdx Console section\n     ① can lag                                  ② summarizes only up to the pin        ③ written from the bump summary\n```\n\n1. **`.objectui-sha` can lag** — a release can be cut while objectui `main` has newer commits / pending changesets.\n2. **The console bump changeset only covers up to the pin** — anything merged in objectui after the last bump never enters the changesets pipeline for that release.\n3. **`scripts/check-release-notes.mjs` only checks \"a page exists per major\"** — it does **not** verify the pin is current, nor that frontend changesets are covered. So a lagging pin is invisible to both the changelog pipeline and the drift guard.\n\n## Proposed fixes (prioritized)\n\n### P0 — pin-freshness gate (the only thing that hard-blocks this)\nAdd `scripts/check-objectui-pin-fresh.mjs`, wired as a required check on the Version-Packages / release PR. Fail when:\n- objectui's latest release tag (or `main` HEAD) is **ahead of** `.objectui-sha`, or\n- objectui has **pending `.changeset/*.md`** not yet bundled (list them).\n\nCI can read objectui state via `git ls-remote` + a lightweight API call.\n\n### P1 — auto-bump to structurally shrink the lag\nA scheduled (or on-objectui-merge) job that runs `scripts/bump-objectui.sh` whenever objectui `main` advances and opens a PR. If the pin is (near-)always current, the bump summary is always complete and manual reconciliation disappears. **This is the root-cause fix.**\n\n### P1 — change the source of truth\nMake the canonical \"write the Console section\" procedure read **objectui's own `.changeset/`** rather than the bump summary. Extend `scripts/objectui-range.mjs` to additionally:\n- emit the objectui changeset entries for the range, and\n- flag entries that are **merged but past the current pin** (i.e. \"landed, not yet bundled\").\n\n### P2 — coverage reconciliation (upgrade the guard from \"exists\" to \"complete\")\nAdd `scripts/check-release-coverage.mjs` (run at release time; **advisory checklist** first, not a hard gate, since prose coverage is fuzzy): enumerate every changeset PR number in the release range (backend spec/package + objectui range) and flag which are not referenced anywhere in `vN.mdx`.\n\n### P2 — release-cut checklist in the PR template\nDocument the ritual: ① freeze objectui, push the pin to objectui's release commit → ② `objectui-range.mjs <last-release>..<now>` into the Console section → ③ run the coverage check → ④ the pin-freshness gate is green.\n\n## Suggested sequencing\nP0 gate first (small: one script + one workflow, immediate value) → P1 auto-bump / source change (root cause) → P2 coverage + template.\n\n## References\n- `docs/releases-maintenance.md` (the three-layer model)\n- `scripts/bump-objectui.sh`, `scripts/objectui-range.mjs`, `scripts/check-release-notes.mjs`\n- Incident PRs: #3322 (initial v16 page), #3331 (frontend completion from objectui changesets)"
+}

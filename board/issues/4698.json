@@ -1,0 +1,37 @@
+{
+  "number": 4698,
+  "kind": "issue",
+  "title": "validate/lint have no check for \"declared but never read\" metadata — three instances found in one app in a day",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T18:59:27Z",
+  "updated_at": "2026-08-03T18:55:49Z",
+  "closed_at": "2026-08-03T18:55:49Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4698",
+  "body": "Reported from HotCRM, where a backlog sweep turned up the same failure shape five times in one day. Each instance passed `os validate`, `os lint`, `tsc`, and a full test suite. Filing the pattern rather than the instances, because the instances are app-side and the blind spot is not.\n\n## The shape\n\nA key is authored, is schema-valid, reads as meaningful to anyone opening the file — and is never consumed by the runtime. The declaration and the behaviour disagree, and nothing in the toolchain notices, because every check verifies that what is declared is *well-formed*, never that it is *read*.\n\n## Three measured instances\n\n**1. `decision` node `config.condition` (singular).** Every one of HotCRM's 24 flows spells a decision node's test as `config.condition`. The builtin decision executor reads `config.conditions` — plural array — and the edges. So the singular key is inert on all of them; branching happens to be correct only because the same expression is duplicated on the outgoing edges. Passes validate and lint. (hotcrm#642)\n\n**2. Table-level `{ fields: ['name'], unique: true }` on a tenant-scoped object.** `normalizeDeclaredIndex()` keeps declared-index columns verbatim, so this emits a platform-wide `UNIQUE (name)`; only *field-level* `unique: true` gets the `(organization_id, …)` composite. The result is that two organizations cannot both have an account named \"Acme Corp\" — a multi-tenancy defect authored in one line that looks identical to the correct spelling. The existing `unique/double-declaration` lint fires only when **both** forms are present, so an object carrying only the table-level form gets no diagnostic at all. (hotcrm#625)\n\n**3. `has(...)` inside a sharing-rule condition.** Sharing conditions are compiled to pushdown filters via `compileCelToFilter`; function calls are outside the translatable subset, so a guarded rule becomes untranslatable and the seeder **skips** it — the rule exists in metadata, is absent from `sys_sharing_rule`, and the only signal is one WARN line at boot. An author following the guidance that is correct for object validations produces silently inert security metadata. (hotcrm#621, #633)\n\nTwo more from the same sweep, same shape, different mechanism: a validation predicate that aborts is *skipped* rather than failed (objectstack#4649), and a flow variable that is declared is not thereby bound (objectstack#4697).\n\n## Why this is a platform concern\n\nThe app-side fixes are all in. What is not fixed is that the next app — or the next agent writing metadata for this one — will author the same shapes and get the same silence. These are exactly the errors generated metadata is most prone to: each is a plausible-looking key that a model would produce by analogy from a neighbouring declaration.\n\n## Suggested direction\n\nA conservative \"unread key\" diagnostic would have caught instances 1 and 3 outright: for each metadata node type, the set of keys the runtime actually consumes is knowable from the executors, and a key outside that set is either a typo or a misconception. Instance 2 wants a narrower rule — a declared unique index on a tenant-scoped object whose columns do not lead with the tenant field is almost certainly a mistake, and the existing lint already knows the concept, it just only fires in the two-declaration case.\n\nWhatever the mechanism, the useful invariant is the one the ledger discipline already applies to spec properties: **a key that nothing reads should not validate clean.**"
+}

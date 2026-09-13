@@ -1,0 +1,35 @@
+{
+  "number": 5007,
+  "kind": "pull_request",
+  "title": "fix(objectql): 区分「同一实例的幂等重入」与「真正的 driver 名字冲突」(#4773)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T20:13:48Z",
+  "updated_at": "2026-08-04T00:04:50Z",
+  "closed_at": "2026-08-04T00:04:49Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T00:04:49Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5007",
+  "body": "Fixes objectstack-ai/objectstack#4773\n\n## 逐条回答 issue 的三个问题\n\n### 1. 谁注册了第一次、谁注册了第二次?\n\n在真实 boot 上打桩 `ObjectQL.prototype.registerDriver` 抓调用栈,得到确定答案 —— **两次,不多不少**:\n\n```\n--- call #1  name=com.objectstack.driver.sqlite-wasm  isDefault=true\n    at DatasourceConnectionService.attemptConnect (services/service-datasource/dist/index.js:605)\n    at async DatasourceConnectionService.connect\n    at async DefaultDatasourcePlugin.init (runtime/dist/index.js:142)\n    at async ObjectKernel.initPluginWithTimeout\n\n--- call #2  name=com.objectstack.driver.sqlite-wasm  isDefault=false\n    at ObjectQLPlugin.start (objectql/dist/index.mjs:8527)\n    at ObjectKernel.startPluginWithTimeout\n    at ObjectKernel.bootstrap\n```\n\n对应源码位置:\n\n| | 调用方 | 源码 | `isDefault` |\n|---|---|---|---|\n| 第一次(**赢**) | `DatasourceConnectionService.attemptConnect()`,由 `DefaultDatasourcePlugin.init()` 驱动 | `packages/services/service-datasource/src/datasource-connection-service.ts:542`(经 `packages/runtime/src/default-datasource-plugin.ts:142`) | `true` |\n| 第二次(**被 skip**) | `ObjectQLPlugin.start()` 的 `driver.*` 服务发现循环 | `packages/objectql/src/plugin.ts:436` | `false` |\n\n中间那一跳是关键:`DefaultDatasourcePlugin.init()` 在连上之后,把**它刚从 engine 里读回来的那个对象**(`packages/runtime/src/default-datasource-plugin.ts:163-172`,`engine.getDriverByName(engine.getDefaultDriverName())`)重新注册成 `driver.{name}` kernel service —— 那是 `os migrate`(`schema-migrate.ts` 的 `SQL_DRIVER_SERVICES`)和 serve 存储探测定位主库用的面。于是 Phase 2 里 `ObjectQLPlugin.start()` 的发现循环把它又交回给 engine。**这是一趟往返的两条腿,不是两次独立注册。**\n\n`OS_DATABASE_URL` 推断和 `defineStack` 的 datasource 声明这两个候选都排除了:前者只产出**定义**(`standalone-stack.ts` 只做 URL→config 翻译,不建 driver),后者的非 default datasource 在 `attemptConnect` 里会被 `engineDriver.name = name` 打上自己的名字,天生不撞名。\n\n### 2. ⭐ 两次注册的配置是否一致?—— 一致到**对象同一性**这一级\n\n这是本单的承重问题,答案比「配置等价」更强:\n\n```\nSAME INSTANCE (call1.driver === call2.driver):  true\nsame name:  true\nsame version:  1.0.0 1.0.0\n```\n\n两次传进 `registerDriver` 的是**同一个 JS 对象引用**。没有第二份连接串、没有第二份能力集、没有任何一份配置被静默采纳或丢弃 —— 第二次调用在语义上是纯 no-op。(`supports` 两次读出来不是同一个对象,只因为它是 `get supports()` 每次现造一个,`sql-driver.ts:563`;实例本身同一。)\n\n所以这**不**是 issue 第 2 点担心的「静默采用其中一份配置」,是第 3 点的「设计内的幂等重入」。\n\n### 3. 那就该降级日志 —— 但**不是**一刀切降级\n\n按 #4632 的降级日志级别约定,一条每次启动都出现、且不代表任何异常的 `warn` 只会训练人忽略 warn。但直接把这行降成 debug 会连带吞掉**真正要命的那一类**:同一个名字下来了**两个不同的实例**时,「skipping」确实就是静默丢掉了两份配置中的一份 —— 而在今天的代码里,这两种情况打的是同一行、同一级别的日志,**读日志的人无法分辨**。\n\n所以按对象同一性把它劈成三支:\n\n- **同一实例重入** → `debug`,并在日志点注明这趟往返为什么存在;\n- **同名的不同实例** → 仍然 `warn`,而且现在说清楚**哪一份配置生效了、哪一份被丢了**(带双方 `version`),并给出修法(给第二个 datasource 起自己的名字);\n- **同一实例但带 `isDefault`、而 default 已被别人占着** → 也 `warn`:调用方的意图正在被无声丢弃。\n\n**注册行为零变化**,先到先得不变;变的只是哪一种值得运维看一眼。\n\n## 复现前后对照(issue 里给的 repro)\n\n`rm -rf examples/app-showcase/.objectstack && pnpm dev`(实跑在随机端口 `--fresh -p 38773/38774`,不占 3000):\n\n**before**\n```\n  ⚠ Boot diagnostics — 2 warnings logged during startup:\n    2026-08-03T19:53:14.434Z WARN Driver already registered, skipping {\"driverName\":\"com.objectstack.driver.sql\"}\n    2026-08-03T19:53:20.099Z WARN StorageServicePlugin: storage adapter swapped (LocalStorageAdapter → LocalStorageAdapter). ...\n```\n\n**after**\n```\n  ⚠ Boot diagnostics — 1 warning logged during startup:\n    2026-08-03T20:01:35.312Z WARN StorageServicePlugin: storage adapter swapped (LocalStorageAdapter → LocalStorageAdapter). ...\n```\n\n剩下那条是已在跟踪的 #4968,不在本单范围内。\n\n## 文件面(申报)\n\n- `packages/objectql/src/engine.ts` —— `registerDriver` 的守卫按对象同一性分三支 + 文档;\n- `packages/objectql/src/plugin.ts` —— **仅注释**:在第二个调用方(`driver.*` 发现循环)处交叉引用这趟往返,让两端都能查到;\n- `packages/objectql/src/engine-driver-registration.test.ts`(新)、`packages/runtime/src/default-datasource-plugin.test.ts` —— 回归测试;\n- `.changeset/driver-double-registration-log.md`。\n\n`packages/spec/**`、`protocol.ts`、`content/docs/releases/` 零改动;showcase 只读复现。\n\n## 测试\n\n新增 5 条 engine 单测(安静重入 / 重入不改变既有注册 / 同名不同实例仍然响且点名双方 / `isDefault` 意图被丢弃仍然响 / 重申已持有的 default 保持安静),外加 1 条**真 kernel boot** 的回归钉(`default-datasource-plugin.test.ts`)。\n\n那条 boot 钉两半都断言,避免空转:(a) 这趟往返**确实发生了** —— `registerDriver` 对 default 名字恰好被调 2 次、`isDefault` 依次为 `true`/`false`、第二次的实例 `toBe` 第一次的实例,且 `driver.{name}` kernel service `toBe` engine 里那一个;(b) 整个 boot 的 stdout 里没有对应的 WARN(拦 `process.stdout.write` 而不是 `console.warn` —— Node 下 `ObjectLogger` 直写 stdout,`serve` 的 boot-quiet 窗口拦的也是这一路;第一版拦 `console.warn` 就是空转的,负向对照当场抓出来了)。\n\n**负向对照**:把 `engine.ts` 换回 `origin/main` 重跑该钉 → `AssertionError: expected [ Array(1) ] to deeply equal []`,`Tests 1 failed`;换回本 PR → 通过。\n\n```\npnpm --filter @objectstack/objectql test    → Test Files 113 passed (113) | Tests 1793 passed (1793)\npnpm --filter @objectstack/runtime  test    → Test Files  80 passed  (80) | Tests 1095 passed (1095)\npnpm --filter @objectstack/objectql typecheck → tsc --noEmit clean\n```\n\n门禁链(合并 `origin/main` 后重跑):`check:engine-double-contract` OK(9 pinned / 30 DEBT / 1 exempt)、`check:durability-log-level` OK(10 seams)、`check:startup-registry-verdict` OK(47 seams)、`check:driver-conformance` OK(20 cells)、`check:adr-anchors` OK、`check:init-service-contract` OK、`check:service-providers` OK、`check:type-check-coverage` OK、`check:nul-bytes` / `check:release-notes` / `check:doc-authoring` / `check:error-code-casing` / `check:role-word` OK,改动文件 eslint 无输出。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01NrmBxj8rK2uGCnh9aipjwX\n"
+}

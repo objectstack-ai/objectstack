@@ -1,0 +1,36 @@
+{
+  "number": 5091,
+  "kind": "issue",
+  "title": "E4(#5040 执行器):策略键接线 —— `authRequired` / `rateLimit` / `cacheTtl` 全部复用既有原语,零新执行语义",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "enhancement",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T03:57:03Z",
+  "updated_at": "2026-08-04T06:18:35Z",
+  "closed_at": "2026-08-04T06:18:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5091",
+  "body": "Part of #5040(E 系列第 4 单)。**Blocked-by: #5089(E2)+ #5090(E3)**。维护者已放行提前开发(2026-08-04,见 #5080 认领评论;E7 翻转仍守 v17 分期)。\n\n## 范围(以 #5040 设计 §4 与总表 E4 行为准)\n\n在 dispatcher 端点派发步上逐键接线,**全部复用、零发明**:\n\n- `authRequired` → 既有 auth 上下文判定(与 data 域同根),未认证 → 既有 401 包络;\n- `rateLimit` → **#5006 已落的 `SharedTokenBucketLimiter` / `deriveBucketConfig` 原语**(`packages/runtime/src/security/inbound-rate-limit.ts`),bucket 维度按设计 §4(endpoint 粒度),超限 → 既有 429 包络 + `Retry-After`;\n- `cacheTtl` → 响应头语义(`Cache-Control: max-age`),**不实现服务端缓存**(设计 §4 已裁,避免发明缓存失效语义)。\n\n每键:命中/未命中/边界(0、缺省)测试。\n\n## 约束\n\n结构性不可达(publish 仍拒);词表冻结;执行器车道程序卡(`session_01EYGdmvWP1ieZSLqvAW6uyd` 按序派发),**其它车道请勿认领**。\n\n关联:ADR-0121(D4)、#5006(限流原语)、#5040 设计 §4。"
+}

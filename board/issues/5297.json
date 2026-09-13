@@ -1,0 +1,37 @@
+{
+  "number": 5297,
+  "kind": "issue",
+  "title": "read-scope-sql 的 `$not` 有两处与 SQL 驱动分叉:非 NULL-safe(#5146 后的最后一个异类),且 `{ $not: {} }` 编译成空 → RLS 整表放行",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T16:07:26Z",
+  "updated_at": "2026-08-04T20:53:11Z",
+  "closed_at": "2026-08-04T20:53:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5297",
+  "body": "修 #5146(driver-sql 的 `$not` 改 NULL-safe,PR #5296)时扫到,**不在该 PR 范围内**\n(`packages/services/service-analytics/**` 是 #5115 的在飞文件面)。这里只记录。\n\n## 位置\n\n`packages/services/service-analytics/src/read-scope-sql.ts` 的 `compileNode`:\n\n```ts\n} else if (key === '$not') {\n  const inner = compileNode(value, qAlias, params);\n  if (inner) clauses.push(`NOT (${inner})`);\n}\n```\n\n它是 RLS read scope 的**独立** SQL 降解器(与 driver-sql 的 `applyFilterCondition`\n不是同一段代码),被 `native-sql-strategy.applyReadScope` 与 `objectql-strategy` 用来\n给分析查询加可见性约束。\n\n## 分叉一:`$not` 非 NULL-safe\n\n发的是裸 `NOT (…)`。SQL 三值逻辑下,被比较列为 NULL 的行落进 UNKNOWN 而被排除;\n`driver-memory` / `formula` 返回这些行。#5146 已由维护者拍板取 **NULL-safe**,\nPR #5296 把 driver-sql 对齐到了 JS 家族(`NOT (col IS NOT NULL AND …)`,守卫按算子\n极性下推到叶子)。该 PR 合入后,**本文件是仓内最后一个仍按三值逻辑回答 `$not` 的\nSQL 家族实现** —— 也就是说:同一条 read scope,普通查询与分析查询会给出不同的可见\n集合。\n\n修的方向已经有现成参照:PR #5296 的 `nullSafeNegationOperand`(纯函数,逐算子极性\n表),照抄到这个编译器上即可,不需要重新裁定语义。\n\n## 分叉二:`{ $not: {} }` 编译成空字符串 → 整表\n\n`compileNode({})` 返回 `''`,于是 `if (inner)` 为假,整条 `$not` **不产出任何子句**;\n`applyReadScope` 又有 `if (!sql) return;`,所以一条 `{ $not: {} }` 的 read scope\n**完全不加 WHERE** —— 本该零行(`NOT TRUE ≡ FALSE`),实际整表。\n\n这正是 #5134 / PR #5243 在 driver-sql 上修掉的那条(那边现在编译成 `1 = 0`),\n方向是**静默放松**,而这里的宿主是 RLS。同一段循环里 `$and`/`$or` 的空数组是\nfail-closed 抛错的(第 54-56 行),所以缺的只有 `$not` 这一格。\n\n顺带(方向相反、危害小得多):`$or: [{}, {a: 1}]` 里的 `{}` 编译成 `''` 后被\n`.filter((s) => s.length > 0)` 丢掉,结果是 `(a = 1)`,而布尔代数上 `{}` 是 TRUE\n析取项、整个 `$or` 为 TRUE —— 静默收紧。\n\n## 建议\n\n两处都在同一个函数里,建议一次 PR 修完(与 #5115 的在飞改动错开或合并排期)。\n`packages/services/service-analytics/src/__tests__/read-scope-sql-conformance.test.ts`\n已经在跑 `FILTER_LOGIC_CASES`,但那张表**刻意不含 null 处理**,所以两条都不会被现有\n门禁发现 —— 跨驱动的 null case 归 spec 车道(#5239 / #5146 的 spec 半边)。\n\n## 关联\n\n#5146(`$not` NULL 语义拍板)、PR #5296(driver-sql 侧实现,可直接参照)、\n#5134 / PR #5243(布尔单位元)、#5115(该包在飞)。\n"
+}

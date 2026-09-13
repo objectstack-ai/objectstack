@@ -1,0 +1,37 @@
+{
+  "number": 5088,
+  "kind": "issue",
+  "title": "data: updateMany runs hooks for a nonexistent id — the row fails INTERNAL_ERROR from a hook-condition abort instead of RECORD_NOT_FOUND",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "priority:p0"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T03:54:58Z",
+  "updated_at": "2026-08-04T06:10:08Z",
+  "closed_at": "2026-08-04T05:09:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5088",
+  "body": "Found working the #3909 G3/G4 checklist on `main` @ `a1a855a28` (the rc.3 train tip), driving the showcase.\n\n`updateMany` runs record-change hooks for an id that does not exist. With no stored record to merge, the hook's condition evaluates against a payload-only record, the field it reads is absent, and #4775's new abort fires — so the row fails with `INTERNAL_ERROR` from a hook diagnostic instead of `RECORD_NOT_FOUND`.\n\n## Repro\n\nThe single-record path is correct (this is the #4435 fix, verified separately):\n\n```\nPATCH /api/v1/data/showcase_task/definitely_missing {\"progress\":1}\n→ 404 {\"code\":\"RECORD_NOT_FOUND\",\"error\":\"Record definitely_missing not found in showcase_task\"}\n```\n\nThe batch path is not:\n\n```\nPOST /api/v1/data/showcase_task/updateMany\n     {\"records\":[{\"id\":\"definitely_missing\",\"data\":{\"progress\":1}}]}\n→ 200, row 0 failed:\n  {\"code\":\"INTERNAL_ERROR\",\n   \"message\":\"Hook 'showcase_audit_task_completion' could not evaluate its condition\n              (runtime: No such key: done) — operation aborted. The condition reads 'done',\n              which this object does not declare — fix the hook's condition, or declare the field.\"}\n```\n\n`showcase_task` **does** declare `done`; the hook is correct. The message is wrong because the record it evaluated against was the patch payload alone.\n\nWith `atomic: true` the same shape poisons the whole batch — row 0 fails this way and every later row comes back `NOT_ATTEMPTED`:\n\n```\n{\"succeeded\":0,\"failed\":2,\"codes\":[\"INTERNAL_ERROR\",\"NOT_ATTEMPTED\"]}\n```\n\nReal ids behave correctly on the same route (`{\"succeeded\":2,\"failed\":0}`), so this is specific to the missing-record case.\n\n## Why it matters\n\nThree separate contracts this train shipped disagree here:\n\n- **#4435** — a write to a nonexistent record answers `RECORD_NOT_FOUND`. Honoured on PATCH, not on `updateMany`.\n- **#4770** — a hook condition evaluates against the complete record (stored ⊕ payload). With no stored side the merge is not \"complete\", and nothing detects that before running the predicate.\n- **#4775** — an unevaluable condition aborts. Correct behaviour firing on a case that should never have reached it, which turns a routine caller mistake into a diagnostic accusing a correct hook of naming an undeclared field.\n\nThe practical harm is the misdirection: an operator who batch-updates with one stale id is told their hook is broken and pointed at the object's field list. Under `atomic` they also lose every other row in the batch to `NOT_ATTEMPTED`, so a single stale id in a large batch reads as a platform failure.\n\n## Expected\n\n`updateMany` resolves each row's stored record before running hooks, and a row whose id resolves to nothing fails with `RECORD_NOT_FOUND` — matching the single-record path — rather than entering the hook pipeline with a payload-only record. If a hook must run for a missing record, the merged record should be recognisable as incomplete so #4775 does not attribute the gap to the hook's author.\n\nFound during the #3909 rc.3 verification (G3/G4).\n"
+}

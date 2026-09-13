@@ -1,0 +1,36 @@
+{
+  "number": 5039,
+  "kind": "issue",
+  "title": "Validate Package Dependencies 再次全线红:fast-uri / hono / undici 新 OSV 公告 —— 队列级阻塞,与 #4945 同型",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T00:37:52Z",
+  "updated_at": "2026-08-04T00:39:41Z",
+  "closed_at": "2026-08-04T00:39:41Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5039",
+  "body": "**插队优先。** #4917 的 dev 于 PR #5031 上实测:`Validate Package Dependencies` 红,osv-scanner 报 `pnpm-lock.yaml` 中 **fast-uri / hono / undici** 的既有公告;同一 job 在无关的 PR #5027 上同红,且 #5031 的 lockfile 增量只有本包 devDeps 的 importer 块 —— 即 main 上先存在,对每个触发该 job 的 PR 都红。\n\n与 #4945(brace-expansion,昨日已修)完全同型。修法同款:`pnpm why` 定传递路径,抬 lockfile 解析版本(或 `pnpm-workspace.yaml` override —— 注意 #4961 的教训:**override 上界不要写成 `<FIXED_VERSION` 排他形式**,那会在钉住的版本自己出公告时自我失效);若某条公告**无修复版本**,不要硬抬 —— 那正是 #4965(豁免约定,实施中)要管的场景,列出来等它。\n\n验证标准照 #4961:本地跑 workflow 同版本 scanner,before 红 / after 绿;`pnpm install --frozen-lockfile` 自洽;抽查受影响包的消费者(hono 是 rest 层的真实依赖,跑 `pnpm --filter @objectstack/hono test` 一类)。\n\n## 认领(PM 分派)\n\n- session:`session_018iARDqtrhQgz6fVHDeDkbQ`\n- 分支:`claude/issue-osv-fast-uri-hono-undici`\n- 车道:`domain:devx`(落点 `pnpm-lock.yaml`,与在飞 #4965 的 `osv-scanner.toml` 不相交)"
+}

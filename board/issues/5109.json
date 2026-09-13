@@ -1,0 +1,36 @@
+{
+  "number": 5109,
+  "kind": "issue",
+  "title": "集群对端的元数据写入不失效本节点的 `listCache` / registry —— 收到广播的节点最长 30s 继续服务旧定义",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T04:59:03Z",
+  "updated_at": "2026-08-04T10:54:32Z",
+  "closed_at": "2026-08-04T10:54:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5109",
+  "body": "发现于 #5089(#5040 E2 端点匹配器)实现期,**不在该单范围内**,故单独立卡。\n\n## 现象\n\n`packages/metadata/src/metadata-manager.ts` `attachClusterPubSub()`(:1800-1833)在收到对端的 `metadata.changed` 广播时,只做一件事:\n\n```ts\nsetImmediate(() => {\n  this.notifyWatchersLocal(p.type, p.event);\n});\n```\n\n`notifyWatchersLocal`(:1770-)只把事件派发给 `watchCallbacks`。它**不碰** `this.registry`,也**不碰** `this.listCache`。\n\n对比本节点自己的写入路径 —— `register()` / `unregister()` / `registerInMemory()` 都先 `invalidateListCache(type)` 再 `notifyWatchers(...)`;`applyRepoEvent()`(:1704-)更是显式地把 registry 条目删掉再 `listCache.delete(type)` 才通知。也就是说:**本地写会失效缓存,对端写只会通知 watcher。**\n\n后果:节点 A 改了一条 view/permission/flow,节点 B 收到广播,B 的 watcher 们(ObjectQL SchemaRegistry 桥、HMR SSE)确实被叫醒了,但 B 上任何走 `list(type)` 的读在 `LIST_CACHE_TTL_MS = 30_000` 窗口内**继续返回改动前的清单**。被叫醒的 watcher 如果自己回头调 `list()` 重新拉取,拉到的还是旧的 —— 失效通知与失效数据自相矛盾。\n\n## 为什么值得单独修\n\n- 这与 `cluster-semantics.mdx` §5 声称的语义不符:该通道的用途原文就是 \"consumed by peers to **invalidate their local caches**\"(见 `ClusterMetadataChangedPayload` 的注释),而实现只做了通知、没做失效;\n- 单机部署完全无感,只有多节点才暴露,属于「看着正常、其实供旧数据」那一类;\n- 修法看起来很小(在 `notifyWatchersLocal` 之前补 registry 条目删除 + `listCache.delete(type)`,即复用 `applyRepoEvent` 已有的那几行),但**要不要连 `registry` 一起删**牵涉语义选择(`applyRepoEvent` 的注释解释了它为什么选择「删而不预填」),所以不该顺手在别的单里带一刀。\n\n## 复现思路\n\n两个 `MetadataManager` 接同一个 `IPubSub`(memory 驱动即可),各自 `attachClusterPubSub(pubsub, nodeId)`;在 A 上 `list('view')` 预热 B 的缓存做不到 —— 直接在 B 上先 `list('view')` 预热,然后 A 上 `register('view', ...)`,再在 B 上 `list('view')`:返回的是预热时的旧清单。\n\n## 关联\n\n`cluster-semantics.mdx` §5、#5089(发现处)、`applyRepoEvent`(同文件内已做对的那条路径,可作修法样板)。"
+}

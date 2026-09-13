@@ -1,0 +1,35 @@
+{
+  "number": 4950,
+  "kind": "pull_request",
+  "title": "fix(core): 健康检查的超时守卫在 race 落定时被清除 (#4875)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T17:03:15Z",
+  "updated_at": "2026-08-03T17:55:06Z",
+  "closed_at": "2026-08-03T17:55:04Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T17:55:04Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4950",
+  "body": "Fixes objectstack-ai/objectstack#4875\n\n与 #4813(PR #4874)同一种漏法的另一个实例:守卫 armed 之后被扔掉。\n\n## 改了什么\n\n`packages/core/src/health-monitor.ts` —— 私有 `timeout()` 换成私有 helper\n`raceCheckTimeout()`,与 PR #4874 在 `packages/core/src/kernel.ts` 引入的\n`raceStartupTimeout()` **同形**(没有发明第三种写法):\n\n```ts\ntry {\n  return await Promise.race([check, timeoutPromise]);\n} finally {\n  clearTimeout(guard);\n}\n```\n\n原来的 `timeout()` 只此一处调用,一并删除。取值(`config.timeout`)一个都没动 —— 问题从来\n不在时长,而在没人回收。\n\n## 为什么这条比 #4813 更值得修,尽管今天看不到现象\n\n#4813 的现象(一次性 CLI 进程空转 120 秒)在这里观察不到,原因只是 `startMonitoring()`\n目前没有任何调用点在内核启动流程里。但机制一旦发作会更糟:内核那两处是**启动时一次性**的\n固定份额(4 个插件 = 8 根),健康检查是**周期性**的 —— 每个插件每一轮各留一根,`interval`\n越密、`timeout` 越长堆得越高。\n\n## 为什么是 `clearTimeout` 而不是 `unref()`\n\n沿用 #4874 评审已经记下的结论:`unref()` 让定时器不再钉住事件循环的同时,**也让它不再是一个\n守卫** —— 若检查永不 settle 且没有别的东西撑着事件循环,Node 会在定时器触发之前退出,超时被\n静默吞掉。守卫必须在 race 未决期间保持 ref'd、在落定那一刻被回收。\n\n## 测试(`packages/core/src/health-monitor.test.ts`,+3)\n\n断言的是**可观察后果**,不是源码里有没有 `clearTimeout`(后者是任何重构都能满足的同义反复):\n\n1. 检查赢下 race 后不留 ref'd 定时器 —— `process.getActiveResourcesInfo()` 只报当前**钉住\n   事件循环**的资源,正是让 `os migrate` 空转 120 秒的那个属性。\n2. 连跑 6 轮周期检查不累积守卫 —— fake timers 下 `vi.getTimerCount()` 计数。这一条能识破\n   `unref()` 式的假修复:fake-timer 计数**看得见** unref 掉的定时器。\n3. 检查真的挂住时超时照常上报(`Health check timeout after 100ms`,状态 `failed`)—— 回收\n   守卫不得等于解除守卫。\n\n前两条在改动前的源码上确认为**红**(`expected 2 to be 1`),第三条改动前后都绿(它防的是\n把修法做成 `unref()`)。\n\n## 验证\n\n```\npnpm --filter @objectstack/core test   →  Test Files 28 passed (28) / Tests 465 passed (465)\ntsc --noEmit -p packages/core/tsconfig.json  →  health-monitor.{ts,test.ts} 零报错\n                                                (该包在 #4311 的 DEBT 台账内,存量报错未增减)\npnpm check:nul-bytes / check:role-word / check:error-code-casing\n     / check:release-notes / check:type-check-coverage  →  全绿\n```\n\n## 顺手发现,未在本 PR 修(Prime Directive #10)\n\n扫了全仓的 `Promise.race` + `setTimeout` 守卫点:同形漏法还剩两处生产实例\n(`service-automation` 的 `executeWithTimeout` —— 每个流程节点一根;`core/hot-reload.ts`\n的 destroy 守卫),另有两处用 `unref()` 代替回收需要维护者判一次语义。已记在 #4952,\n不夹带进这个 PR。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01NrmBxj8rK2uGCnh9aipjwX\n"
+}

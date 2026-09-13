@@ -1,0 +1,36 @@
+{
+  "number": 5108,
+  "kind": "issue",
+  "title": "`DatabaseLoader` 把存储读故障吞成空结果 —— ADR-0110 D3 的 miss/outage 之分在复数读路径上不成立",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T04:58:37Z",
+  "updated_at": "2026-08-04T09:22:11Z",
+  "closed_at": "2026-08-04T09:22:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5108",
+  "body": "发现于 #5089(#5040 E2 端点匹配器)实现期,**不在该单范围内**,故单独立卡。\n\n## 现象\n\n`packages/metadata/src/loaders/database-loader.ts` 的三个读方法把**任何**存储异常吞成「没有」:\n\n- `loadMany(type)`(:740-753)—— `catch { return []; }`,**连 warn 都没有**;\n- `exists(type, name)`(:765-773)—— `catch { return false; }`;\n- `stat(type, name)`(:785-)—— 同形。\n\n于是 `sys_metadata` 所在库不可达时,`DatabaseLoader.loadMany('permission')` 与「这个环境一条 permission 都没声明」返回**完全一样的值**。上层 `MetadataManager.list()` 也无从分辨:它拿到的是一次「成功的空读」,不是一个异常,所以连它自己的 `logger.warn(...loader failed to loadMany...)` 降级分支都不会触发 —— 整条链上**没有任何一处**会说出「读失败了」。\n\n## 为什么这是缺陷而不是设计\n\nADR-0110 D3 已经为**单数**读路径立过这条规矩,理由写在 `MetadataManager.loadDiagnosed` 的注释里:\n\n> A miss and an outage are different facts with opposite security meanings, and plain `load` cannot express the difference: a loader that throws is warn-logged and skipped, so a database the metadata plane cannot reach returns the same `null` as a name that was never declared. Callers that gate on a declaration MUST NOT read that `null` as \"the author declared no gate\" — an availability failure would silently widen access (the REST `/actions` route's fail-open branch, #3935).\n\n`loadDiagnosed` 让**单数**读能分辨两者(`degraded` + `errors`)。**复数读没有对应物**,而且比单数读更糟:`load` 至少让异常冒到 manager 那层被 warn 记下,`loadMany` 在 loader 内部就把异常抹掉了,manager 那层的降级分支形同虚设。\n\n凡是「按已声明清单做判断」的消费方都吃这一口 —— 权限/策略/共享规则清单读成空,按消费方的姿态不同,后果要么是静默 fail-open(放行),要么是静默 fail-closed(全站锁死);两种都在外部看起来「一切正常」。这正是 AGENTS.md 降级日志分级那节点名的形状:系统看着正常,而它声称掌握的东西其实没读到。\n\n## 复现\n\n```ts\nconst loader = new DatabaseLoader({ driver: brokenDriver, tableName: 'sys_metadata' });\nawait loader.loadMany('permission'); // => []  (驱动抛错,零日志)\nawait loader.exists('permission', 'admin_all'); // => false\n```\n\n## 建议方向(裁决留给维护者)\n\n1. 复数读补齐 `loadDiagnosed` 的对位物(`loadManyDiagnosed` → `{ items, degraded, errors }`),`MetadataManager.list()` 至少把 `degraded` 记成 warn/error;\n2. 或者让 loader 层照实抛出,由 manager 现有的 `try/catch` 决定降级姿态 —— 这样至少 `logger.warn` 会真的响一次,消费方也能选择改用严格读。\n\n两条都不是本 issue 要定的;要定的是「读失败必须能被说出来」这一点。\n\n## 已知的一处下游影响(已在 #5089 里绕开,未修根因)\n\n`IMetadataService.matchEndpoint` 的契约文本明确要求「读不到存储必须抛出,不得伪装成 miss(miss 会变成 404)」。#5089 为此没有走 `list()`,而是新增了一个私有的 `listForIndex()`,**不**包 `try/catch`,让 loader 的异常冒到调用方。这在 `MemoryLoader` / `RemoteLoader` 上是有效的,但对 `DatabaseLoader` **无效** —— 它在自己内部就吞了,谁也看不见。`listForIndex()` 的注释已经把这条限制写明并指向本 issue。\n\n## 关联\n\nADR-0110 D3、#3935(fail-open 先例)、#5089(发现处)、AGENTS.md「Degradation log levels — `warn` vs `error`」。"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 4913,
+  "kind": "issue",
+  "title": "check:doc-authoring 的 ROOTS 不含 .claude —— agent 语料里的裸 metadata 字面量无人拦",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T15:46:23Z",
+  "updated_at": "2026-08-03T16:00:16Z",
+  "closed_at": "2026-08-03T16:00:16Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4913",
+  "body": "**未认领。** 从 #4890 的方向 3 拆出单独立单(该 PR 按派发要求未捆绑),依据是 #4890 的 dev 读脚本后给出的实测判断。\n\n## 现状\n\n`scripts/check-doc-authoring.mjs` 的 `ROOTS = ['skills', 'content']` —— 是**顶层** `skills/`,不含 `.claude/`。于是 `.claude/skills/**` 里的 markdown 不受这条检查约束。\n\n## 我先更正自己的一个错误裁定\n\n我在 #4890 的认领评论里把方向 3 排除掉了,理由是「那条检查的规则是面向**已发布文档**的写作规范,是否适用于内部 agent 指令文件需要单独判断,为了覆盖率好看硬加会制造一批需要豁免的噪音」。\n\n**这个前提是错的,而且我是从议题措辞推的,没读脚本。** 实际读下来:它不是通用的散文写作规范,而是一条很窄的规则 —— 只在 ` ```ts ` / ` ```tsx ` 围栏代码块里匹配 `export const X: <16 个 factory 域之一> = {` 这种**绕开 `defineX()` 工厂的裸 metadata 字面量**(#2035 / ADR-0059)。它管的是**代码样例的正确性**,不是文风。所以「已发布文档的规范是否适用于内部文件」这个疑虑对这条规则基本不成立。\n\n(这与我在 #4804 上犯过的是同一个错:从议题词汇猜性质/落点,而不是读代码定。记在这里,因为它是本仓 domain 锚定规则的反面教材。)\n\n## 为什么该加\n\n该脚本自己的文件头写着:\n\n> Skills are the corpus AI authors from, so a bad sample there is worse than one in app code\n\n`.claude/skills/**` 同样是 agent 每个会话都会加载、并照抄的语料。一个绕开工厂的 metadata 样例出现在那里,教坏 agent 的效果与出现在 `skills/` 完全一样 —— 而且这些文件恰恰是**给 agent 看的操作手册**。\n\n## 噪音实测:零\n\n`.claude` 下被跟踪的 markdown 共 **4 个**(`pm-dispatch` / `dogfood-verification` / `spec-property-retirement` 三个 `SKILL.md`,加 `agents/os-dev.md`),其中含 ts 围栏代码块的 **0 个**,按现规则的 would-be violations **0 个**。加进 `ROOTS` 后需要豁免的文件数是零 —— 这不是「为覆盖率好看硬加」,是一条现在就该在、加了也不吵的约束。\n\n## 实施注意(来自 #4890 dev 的实测)\n\n1. 范围建议写 **`.claude`** 而非只 `.claude/skills` —— 下一个子目录不该再漏一次。\n2. ⚠️ 该脚本用 `readdirSync` 递归而非 `git ls-files`。`.claude/worktrees/` 虽已在 `.gitignore` 里,**仍会被 walk 到** —— 需要进 `SKIP_DIRS`,否则会扫到其他 agent 的 worktree(那里面是整个仓库的副本,既慢又会报出与本仓无关的违规)。这一条不做的话,加 ROOTS 反而会把门禁变成噪音源。\n3. 既然 would-be violations 是 0,**必须做反向证明**:构造一个含裸 metadata 字面量的 `.claude/skills/**/*.md`,证明改前判绿、改后判红。否则无从区分「加对了」和「加了但仍然扫不到」——本仓这两天已经连关五个同族缺陷(#4690 / #4804 / #4835 / #4868 / #4890),都是门禁在跑、结构上却接触不到检查对象。\n\n## 关联\n\n- #4890 —— `check:nul-bytes` 的覆盖面(已修,PR #4907);本单是它正文里的方向 3\n- #2035 / ADR-0059 —— 该检查执行的规则本身"
+}

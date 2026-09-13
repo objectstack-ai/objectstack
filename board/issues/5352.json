@@ -1,0 +1,37 @@
+{
+  "number": 5352,
+  "kind": "issue",
+  "title": "analytics 的 filter 拒收到不了调用方:service 侧多数拒收没有 ADR-0112 信封,REST 面又用 message 正则嗅探,一律答 500",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T00:23:30Z",
+  "updated_at": "2026-08-05T02:05:00Z",
+  "closed_at": "2026-08-05T02:05:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5352",
+  "body": "实现 #5334(analytics 第五道门:`where` 数组下沉)时路过,**不属于该单范围面**,按 Prime Directive #10 单独记在这里,unassigned。\n\n## 一个缺陷的两半\n\n作者写错一条筛选(拼错算子、`{field: {}}`、无法下沉的数组),analytics 会**响亮拒收** —— 这是 #3948/#5240/#5325/#5334 一路建立的姿态,正确。但这个拒收**到不了调用方**:它以 `500 ANALYTICS_QUERY_FAILED` 落地,而不是 ADR-0112 的 `400 INVALID_FILTER`。两半各自成立,单修一半都不够。\n\n### 半 A —— 消费面:`/analytics/dataset/query` 不读 `code`/`status`,改用 message 正则\n\n`packages/rest/src/rest-server.ts`(analytics dataset 路由的 catch):\n\n```\n} catch (error: any) {\n    const msg = String(error?.message ?? error ?? '');\n    if (/not declared in the dataset|not backed by a declared relationship|.../.test(msg)) {\n        return res.status(400).json({ code: 'DATASET_INVALID', message: msg.slice(0, 1000) });\n    }\n    logError('[REST] Analytics dataset query error:', error);\n    res.status(500).json({ code: 'ANALYTICS_QUERY_FAILED', error: msg.slice(0, 500) });\n}\n```\n\n被抛出的错误**携带**的 `err.code` / `err.status` 被丢弃;是否 400 由一串写死的 message 子串决定。ADR-0112 的整个意义是错误自带机器可读的语义码,这里把它换成了字符串嗅探 —— 措辞一改,分类就变,而措辞在这一族单子里几乎每周都在改。\n\n### 半 B —— 生产面:`filter-normalizer.ts` 的多数拒收是裸 `Error`\n\n`packages/services/service-analytics/src/strategies/filter-normalizer.ts` 里已有的四处拒收都是 `throw new Error(...)`,不带 `code`/`status`:\n\n- `Unsupported filter operator \"$foo\" on \"col\"`(算子不在词表)\n- `\"col\" carries a field constraint with zero operators ({})`(#5240)\n- `\"$between\" on \"col\" needs a two-element [min, max] array`\n- `\"$and\"/\"$or\" requires a non-empty array` / branches must be filter objects\n\n对照:`driver-sql`、`driver-memory`、`driver-mongodb` 的同类拒收全部走 `unsupportedFilterError` → `INVALID_FILTER` / 400(ADR-0112),#5334 新落的数组拒收也是。所以同一个作者错误,走 `find()` 得 400,走图表得 500。\n\n## 现象\n\ndashboard widget 的筛选里拼错一个算子 → 前端看到 500 + `ANALYTICS_QUERY_FAILED`,读作「平台炸了」,而不是「你的筛选写错了」。运维告警按 5xx 计。#5334 之后新增的无法下沉数组拒收同样落进这条路:service 侧带着正确的 `INVALID_FILTER` / 400,REST 面把它降级成 500。\n\n## 建议(供分诊,不代表已定)\n\n顺序上先 B 后 A,或一并:B 让 analytics 的 filter 拒收统一走一个 `unsupportedFilterError` 等价物(该文件里 #5334 已落了 `invalidFilterError`,四处沿用即可);A 让 REST 面**先读 `error.status` / `error.code`**,正则名单退化成没有信封时的兜底(或直接删掉,等 B 落地后)。\n\n单修 A:今天只有 #5334 那一处拒收带信封,其余仍是 500。单修 B:REST 面照旧嗅探 message,信封仍被丢弃。\n\n## 未验证\n\n没有测量真实 dashboard 里作者写错筛选的频率;严重度请按 triage 定。搜过 open issues(`filter-normalizer` / `INVALID_FILTER` / `ADR-0112 analytics` / `ANALYTICS_QUERY_FAILED`),没有已存在的同题单。\n\n关联:#5334(第五道门,本发现的来源)、#5240、#5325、#3948、ADR-0112。\n"
+}

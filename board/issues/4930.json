@@ -1,0 +1,37 @@
+{
+  "number": 4930,
+  "kind": "issue",
+  "title": "三个 check:* 脚本的扫描根消失时返回空数组而不是报错 —— 目录一改名,门禁在零个文件上报绿",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T16:32:53Z",
+  "updated_at": "2026-08-03T17:14:59Z",
+  "closed_at": "2026-08-03T17:14:59Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4930",
+  "body": "**未认领。** 实现 #4916 时按议题要求顺带扫了 `scripts/` 下的同形状静默跳过,这三条与 #4916 是**同一个缺陷**,但在别的脚本里;不在那条 PR 的范围内(改了会让它失焦),按 Prime Directive #10 单独归档。\n\n## 形状\n\n和 #4916 一模一样:脚本声明**一个**扫描根,walker 在读不到该目录时**返回空**而不是抛错,于是根一改名 → 收集到 0 个文件 → 循环一次都不进 → `errors` 为空 → **exit 0,门禁绿**。区别只在于 #4916 的空 `catch {}` 让 N *变小*,这三条让 N *变成 0* —— 更彻底,同样安静。\n\n### 1. `scripts/check-single-authz-resolver.mjs:38`\n\n```js\nfunction walk(dir, out = []) {\n  let entries;\n  try { entries = readdirSync(dir); } catch { return out; }\n```\n\n唯一扫描根是 `walk(join(ROOT, 'packages'))`。`packages/` 改名 → 零文件 → \"没有重复的 authz resolver\",绿。\n\n值得注意的是**同一个文件里已经有正确写法**:第 71 行处理 `DELEGATORS` 缺失时是 `errors.push('Delegator missing: ' + rel)`,响亮。修法照抄本文件下方即可。\n\n### 2. `scripts/check-startup-registry-verdict.mjs:217-222`\n\n```js\nfunction collectSourceFiles(dir, out = []) {\n    let entries;\n    try { entries = readdirSync(dir); } catch { return out; }\n```\n\n第 846 行 `collectSourceFiles(scanRoot)` —— `scanRoot` 解析不到时同样静默返回 0 个文件。这个脚本的注释里写了整整一屏\"启动期把没验证的东西写成 verified 有多危险\",而它自己在扫不到源码时会给出一个空的 verdict。\n\n### 3. `scripts/check-driver-conformance.mjs:147-152`\n\n```js\nconst listDir = (dir) => { try { return readdirSync(dir); } catch { return []; } };\n```\n\n`DRIVERS_DIR = join(ROOT, 'packages', 'plugins')`(第 79 行)。`packages/plugins/` 改名 → 零个 driver → \"所有 driver 都合规\",绿。\n\n## 判定为**不同形状、不建议一起改**的\n\n- `scripts/check-changeset-fixed.mjs` / `check-override-consistency.mjs` —— `catch { continue; }` 出现在 **glob 展开**的中途(`readdirSync` 某个 `*` 段、`JSON.parse` 某个 `package.json`)。这是在遍历一个本来就可能不存在的候选集合,不是\"声明的根消失了\",跳过是对的。\n- `scripts/check-nul-bytes.mjs:168` —— 读不到时 `skipped.unreadable.push(file)`,**记账了**,不是静默。\n- `scripts/check-changeset-no-major.mjs:76` —— 没有 `.changeset/` 时明确 `console.log` 后 exit 0,是**声明过的**行为,不是吞掉。\n\n## 建议的修法\n\n和 #4916 落地的一致:扫描前先校验根可解析,不可解析就点名报错退出,**不要**加\"可选根\"开关;并把红-绿双向证明折进各脚本已有的自检(有的话)。三条可以一条 PR 一起改,也可以拆 —— 但**不要**和 #4916 合并,那条 PR 的范围是 `check-doc-authoring.mjs`。\n\n## 关联\n\n- #4916 —— 同缺陷,`scripts/check-doc-authoring.mjs`,已修\n- #4851 / PR #4921 —— 同缺陷,`.claude/workflows/docs-accuracy-audit.js`,已合\n- #4690 / #4804 / #4835 / #4868 / #4890 —— 同族先例"
+}

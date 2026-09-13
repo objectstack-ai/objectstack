@@ -1,0 +1,36 @@
+{
+  "number": 5328,
+  "kind": "issue",
+  "title": "driver-memory 对形状错误的 `$between` 静默不发谓词(匹配 0 行),driver-sql 同一过滤器抛错 —— 一个过滤器两个答案",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T21:55:39Z",
+  "updated_at": "2026-08-05T00:47:30Z",
+  "closed_at": "2026-08-05T00:47:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5328",
+  "body": "做 #5158 第 2 步(engine Door 2 下沉 + 四驱动数组方言删除)时,把 `memory-filter-ast-vocabulary.test.ts` 里原本经**数组路径**的用例迁到声明路径(`parseFilterAST` → 驱动)后,实测到这一处不属于 #5158 范围的缺陷。按 Prime Directive #10 单独记在这里,unassigned。\n\n## 现象\n\n同一个过滤器 `{ score: { $between: 5 } }`(`$between` 的 comparand 不是二元数组),两个后端两种答案:\n\n| 后端 | 行为 |\n|---|---|\n| `driver-sql` | **抛** `INVALID_FILTER` / 400 —— `Operator \"between\" on field \"score\" requires a [min, max] value array.` |\n| `driver-memory`(`InMemoryDriver.find`,即真实查询路径) | **不抛**,解析为「匹配 0 行」,`find` 返回 `[]` |\n\n实测原文(worktree 基于 `0f1711470`,`InMemoryDriver` + 两行数据):\n\n```\nawait find({ score: { $between: 5 } })   =>  resolves []      // 期望 rejects\n```\n\n## 机制\n\n`memory-driver.ts` 的 `normalizeFilterCondition` 里,`$between` 那条 arm 是有条件的:\n\n```ts\ncase '$between':\n  if (Array.isArray(val) && val.length === 2) {\n    result.$gte = store(val[0]);\n    ...\n  }\n  break;          // ← 形状不对时什么都不写,整条约束消失\n```\n\n`val` 不是二元数组时 arm 整个跳过,该字段归一化成 `{}`,mingo 把 `{ score: {} }` 当结构相等比较 —— 于是「匹配 0 行」。**没有任何一处报告这条谓词没被编译。**\n\n## 为什么是 bug\n\n1. **一个已声明算子,两个后端两个答案。** `$between` 是 spec 声明的算子;`driver-sql` 自 #3948 起把「无法编译的过滤器」定为**响亮拒收**,#4436 又给这类拒收统一了 ADR-0112 信封。driver-memory 在**对象路径**上从未有过这条 arm 的守卫 —— 它过去只在**数组路径**上有(`convertConditionToMongo` 的 `\"between\" on field \"…\" needs a two-element array`),而数组路径正是 #5158 删掉的那条。\n2. **静默方向是「匹配 0 行」,不是「匹配全表」** —— 比 #3948 的原始缺陷轻,但仍是**静默的错误答案**:调用方要的是一个区间,拿到的是空结果,而 `if (!rows.length)` 分辨不出「真的没有」和「过滤器根本没编译」。作为默认的开发/测试驱动,这会让一条写错的规则在本地看起来「没有匹配数据」。\n3. 它是 #5324 的邻居而不是同一条:#5324 是**透传**给 mingo 后抛出无信封的 `MingoError`(`default: result[op] = val`),这一条是 arm 被**吞掉**、连异常都没有。两者共用 `normalizeFilterCondition` 这个缝,修的时候值得一起看。\n\n## 为什么至今没被测出来\n\n`memory-filter-ast-vocabulary.test.ts` 里 “throws on a malformed between rather than emitting no predicate” 这条**一直是绿的** —— 但它走的是数组路径(`find([['score','between',5]])`),命中的是 `convertConditionToMongo` 的守卫。对象路径同一输入从未被断言过。#5158 把该用例迁到声明路径后,这一条立刻暴露。当前该用例已按**现状**钉住(`resolves.toEqual([])`)并在注释里指向本 issue,好让分叉是可见的而不是口口相传 —— 修好后请一并把它翻回 `rejects`。\n\n## 建议(不代裁决)\n\n- 在 `normalizeFilterCondition` 的 `$between` arm 上补 else 分支,抛 `unsupportedFilterError`(`filter-refusal.ts` 已有,自带 `INVALID_FILTER` / 400),措辞与 driver-sql 对齐 —— 「一个条件一种措辞」是 #5240 已经确立的规矩。\n- 顺带查同一 `switch` 里其他**有条件写入**的 arm 是否同款(`$null`、regex 族),别只修看见的这一条。\n- 一致性表(#5239)若能穿过 `InMemoryDriver.find` 跑,这类缺口下次会自己冒出来 —— 与 #5324 的同款建议。\n\n未验证的部分:我没有量化 `$between` 形状错误在真实元数据里出现的频率,也没有测 driver-mongodb / driver-sqlite-wasm 在同一输入下的行为(sqlite-wasm 继承 SqlDriver,预期与 SQL 一致,但没实测)。严重度请 PM 按 triage 定,不代表我判断它低。\n\n关联:#5158(实测出这一条的那一单)、#5324(同一 `normalizeFilterCondition` 缝的透传型缺陷)、#3948(no-silent-drop 的原则)、#4436(driver-memory 的 refusal envelope)、#5240(一个条件一种措辞)、#5239(一致性表)。"
+}

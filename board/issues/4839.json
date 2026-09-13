@@ -1,0 +1,37 @@
+{
+  "number": 4839,
+  "kind": "issue",
+  "title": "plugin-approvals 的 admin 豁免读 `session.roles`,而 ObjectQL 的 `buildSession()` 从不填充它 —— 记录锁/delegation 守卫的 admin 覆盖在真实引擎路径上永不生效",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T09:39:48Z",
+  "updated_at": "2026-08-04T01:34:33Z",
+  "closed_at": "2026-08-04T01:34:33Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4839",
+  "body": "在 #4778 的实现中发现(PR #4838),**未认领**,不在那条 issue 的范围内。\n\n## 现象\n\n`packages/plugins/plugin-approvals/src/lifecycle-hooks.ts` 有两处 admin 豁免,都读 `ctx.session.roles`:\n\n- `bindApprovalLockHook` 的记录锁:`if (Array.isArray(roles) && roles.includes('admin')) return;`\n- `bindDelegationWriteGuard`:`if (Array.isArray(roles) && roles.includes('admin')) return;`(admin 可以替他人声明 out-of-office 委托)\n\n而 `packages/objectql/src/engine.ts` 的 `buildSession()` 逐字段构造 HookContext 的 session(`userId` / `organizationId` / `positions` / `accessToken` / `isSystem` / `actor` / `skipTriggers` / `skipAutomations` / `preserveAudit`),**没有 `roles`**。全仓 `grep` 下来:\n\n- `session.roles` 的读取方只有上面两处(都在 plugin-approvals);\n- 没有任何地方往 HookContext 的 session 上写 `roles`(engine.ts 里唯一的 `roles:` 是 `ScopedContext.execute()` 传给 action 的 `roles: this.context.positions`,与 hook session 无关)。\n\n`roles` 在 `packages/spec/src/data/hook.zod.ts` 的 HookContext session 里是声明过的(`roles: z.array(z.string()).optional()`),所以这是一个典型的 declared ≠ enforced:字段存在、消费方在读、生产方从不写。\n\n## 后果\n\n两处都是**失败关闭**,不是越权 —— 所以不是安全洞:\n\n- 记录锁:admin 无法用「我是 admin」绕过审批期间的记录锁(#3424 的 admin 救援走的是 `ApprovalService.isOverrideActor`,与这里无关,那条路径是好的);\n- delegation 守卫:admin 无法替他人建立/修改委托,会被 403,只能本人操作。\n\n## 还有词汇不一致的问题\n\n同一个包里,`ApprovalService.isOverrideActor()` 判定特权 admin 的方式是 ADR-0095 的词汇:`context.permissions`(`admin_full_access` / `ORGANIZATION_ADMIN_GRANTS`)、`context.positions`(`BUILTIN_IDENTITY_PLATFORM_ADMIN` / `ORG_OWNER` / `ORG_ADMIN`)、以及派生的 `posture`。而这两个 hook 用的是 `roles.includes('admin')` 这个字符串。即便把 `roles` 接上,它也是第二套 admin 判定方言,与 ADR-0090 D3 / ADR-0095 D3 的方向相反。\n\n## 需要裁定的地方(所以这条不适合直接开修)\n\n三种方向,选哪一种改的是公共契约:\n\n1. **让两个 hook 改用 ADR-0095 的判定**(读 `permissions` / `positions` / `posture`,或直接复用 `isOverrideActor` 的那套判据)—— 与包内既有姿势一致,但会让 admin 覆盖**从「事实上不存在」变成「真的生效」**,这是一次实质的权限放宽,需要确认这正是设计意图(尤其记录锁:允许 admin 直接改被锁记录 vs 只允许通过 recall/reject 释放锁)。\n2. **让 `buildSession()` 填充 `roles`** —— 但 `roles` 到底映射到什么?better-auth 的成员层级(owner/admin/member)是 ADR-0057 D4 / ADR-0090 D3 / ADR-0095 D3 明令禁止作为 RBAC 权威的,填进去等于新开一条被 ADR 封掉的路。\n3. **删掉这两处 admin 豁免**(ADR-0049 enforce-or-remove),记录锁的 admin 救援已经由 `isOverrideActor` + recall/reject 覆盖;delegation 则确认「只能本人管理自己的委托」是不是可接受的最终语义。\n\n倾向 1 或 3,但两者对外可见行为不同,建议由维护者裁定后再开工。若最终选 3,`packages/spec` 里 HookContext 的 `session.roles` 是否一并退役(ADR-0049 / ADR-0087)也要一起决定 —— 它退役后就没有任何消费方了。"
+}

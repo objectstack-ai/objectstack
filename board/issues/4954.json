@@ -1,0 +1,35 @@
+{
+  "number": 4954,
+  "kind": "pull_request",
+  "title": "fix(driver-sql): 全新数据库不再\"开机即漂移\",也不再把 --allow-destructive 指向框架自己创建的索引 (#4884)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T17:04:41Z",
+  "updated_at": "2026-08-03T17:55:06Z",
+  "closed_at": "2026-08-03T17:55:04Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T17:55:04Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4954",
+  "body": "Fixes objectstack-ai/objectstack#4884\n\n## 问题复现与前提核实\n\n先验证 issue 的判断是否成立(证伪也是好结果)。用 better-sqlite3 直接建出 `ensureOverlayIndex` 的规范形状:\n\n```\nindex_list: [{\"name\":\"idx_sys_metadata_overlay_draft\",\"unique\":1,\"origin\":\"c\",\"partial\":1},\n             {\"name\":\"idx_sys_metadata_overlay_active\",\"unique\":1,\"origin\":\"c\",\"partial\":1}, ...]\n\nidx_sys_metadata_overlay_active -> index_info:\n  [{\"seqno\":0,\"name\":\"type\"},{\"seqno\":1,\"name\":\"name\"},{\"seqno\":2,\"name\":\"organization_id\"},\n   {\"seqno\":3,\"cid\":-2,\"name\":null}]        ← COALESCE(package_id,'') 这一列,名字是 null\n```\n\nissue 的两条判断都成立,而且根因比\"比较器不认识表达式\"更靠前一层:**探测层根本没把这一列读进来**。\n`introspectIndexes` 对 `PRAGMA index_info` 返回的 `name: null` 直接 `continue`,四列索引因此以三列的形态\n进入比较器;比较器再拿它去比四列声明,当然报 mismatch。所以修在比较器上只能治标——第 4 列必须先被读出来。\n\n## 三处修改,全部落在 `packages/plugins/driver-sql/`\n\n按 PM 给的优先级(危险的那一半必须落地),同时**没有改** `sys-metadata.object.ts`:\n它的注释白纸黑字写着那份四列声明是 *\"the fallback shape for drivers without the runtime migration\"*,\n改它会破坏其它驱动依赖的契约。走的是\"探测器承认 runtime-managed 标记\"这条路。\n`packages/metadata-protocol/src/protocol.ts` 与 `packages/spec/**` 零改动。\n\n### 1. 索引键按**定义**读,而不是按方言的逐列目录视图读\n\n`PRAGMA index_info` / `pg_attribute` / `STATISTICS.COLUMN_NAME` 三者都无法表达表达式键。现在:\n\n- SQLite 解析 `sqlite_master.sql`(约束自动索引 `sql` 为 NULL,退回 PRAGMA,那些本来就是纯列);\n- Postgres 改用 `pg_get_indexdef(indexrelid)` + `indpred IS NOT NULL`,不再 join `pg_attribute`\n  (`attnum = 0` 的表达式列正是被那个 join 丢掉的);\n- MySQL 读 `STATISTICS.EXPRESSION`,并对不认识该列的旧版 / MariaDB 回退到原查询——否则整表索引探测会一起失败。\n\n`COALESCE(col, < literal >)` 被认定为**就是键在 `col` 上**:ADR-0048 用它正是为了让无 package 的全局行\n彼此唯一(普通 UNIQUE 把 NULL 当互不相同),所以它对同一列的约束**严格更强**,不是缺了一列。\n识别范围刻意收窄——`lower(name)`、`a || b`、`COALESCE(a, b)` 一律判为\"无法归属\",不做任何猜测。\n\n### 2. 捕获 partial 谓词,并据此拒绝认领\n\n`syncDeclaredIndexes` 走 knex 的 `table.unique(fields)` / `table.index(fields)`:没有谓词,没有表达式。\n带 `WHERE` 或表达式键的索引,它**既造不出来、也重建不回来**。而本模块给索引开的每一个方子都建立在\n\"删掉还能按声明重建\"这个前提上(`drop_index` 是这样,`recreate_index` 先删后建更是这样)。\n\n于是新增 `isSyncReproducibleIndex()`:造不出来的索引,不认领、不判 orphan、不给一个自己收不了场的方子。\n这一条是**跨重启持久有效**的那一半保证。\n\n### 3. 驱动为自己执行过的索引 DDL 记账\n\n`ensureOverlayIndex` 是通过 `driver.execute(sql)` 下发迁移的。`execute()` 现在在语句**成功之后**记录\n`CREATE INDEX` / 注销 `DROP INDEX`。这是**事实台账**而不是启发式:一条记录的含义是\"本进程跑过这条 CREATE\n且成功了\"。它同时覆盖了那条 issue 里没提到的分支——方言拒绝 partial 时,`ensureOverlayIndex` 会回退成\n一条普通索引,此时定义本身已经无法为它辩护,只有台账能。\n\n进程内有效是设计如此;重启后由第 2 条兜底,两者互为独立证据。\n\n## 没有放松的部分\n\n真实漂移一条没丢:orphan 的生成索引、被改定义的声明索引、#3696 的 legacy unique 替换,\n探测结果与分级(`safe` / `needs_confirm` / `destructive`)完全不变——这三条各有回归测试守着。\n\n代价说清楚:一个**显式命名**的声明索引被从 metadata 里删掉后,若它恰好是 partial / 表达式索引,\n现在不再被报为 orphan(留一条陈旧索引,只损性能,不损正确性)。相对于\"开机建议删掉一条刚建好的唯一性保证\",\n这个方向是对的。\n\n## 测试\n\n`packages/plugins/driver-sql/src/sql-driver-overlay-index-drift.test.ts`(17 个用例),其中钉住的两条:\n\n- **全新数据库零漂移** —— 用真实的 `sys_metadata` 声明跑 `initObjects`,再原样下发\n  `ensureOverlayIndex` 的四条 SQL,`detectManagedDrift()` 必须返回空;\n- **不对框架创建的索引发 `--allow-destructive`** —— 断言没有任何 message 含该字样,\n  且不存在指向 `idx_sys_metadata_overlay_*` 的 `drop_index` / `recreate_index`。\n\n外加:第二次启动(换新 driver、台账为空、同一个文件库)仍然零漂移;`reconcileAndWarnDrift` 一条\n`[schema-drift]` 都不打;探测层读出四列 + `partial: true` + `expressions`;台账对带引号 / 带 schema 前缀的\nDDL 也解析正确;以及 `classifyIndexKeyPart` / `parseIndexDdl` 的纯单元用例(含 `pg_get_indexdef` 的\n`COALESCE((package_id)::text, ''::text)` 形态)。\n\n```\npnpm --filter @objectstack/driver-sql test\n Test Files  56 passed | 4 skipped (60)\n      Tests  653 passed | 44 skipped (697)\n\npnpm --filter @objectstack/driver-sql typecheck   # tsc --noEmit,零错误\n```\n\n## 顺带发现(未在本 PR 修)\n\n`IndexSchema.partial` 是可声明的,但没有任何驱动会发出 `WHERE` 子句——`sys-metadata.object.ts` 自己就是\n它的作者之一。已按 Prime Directive #10 单独立单:objectstack-ai/objectstack#4943(未指派)。\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01NrmBxj8rK2uGCnh9aipjwX\n"
+}

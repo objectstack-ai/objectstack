@@ -1,0 +1,36 @@
+{
+  "number": 5253,
+  "kind": "issue",
+  "title": "`MetadataManager.list()` 没有 in-flight 去重:冷缓存下 N 个并发调用各自完整走一遍 loader,`listCache` 承诺的「每个 TTL 窗口只打一次 loader」只对串行调用者成立",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T12:26:48Z",
+  "updated_at": "2026-08-04T13:41:58Z",
+  "closed_at": "2026-08-04T13:41:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5253",
+  "body": "发现于 #5184(降级结果的缓存策略)实现期,**不在该单范围内**,故单独立卡。**未认领 —— 只是记录。**\n\n## 现象\n\n`packages/metadata/src/metadata-manager.ts` 的 `list(type)` 是「查缓存 → 没有就走 loader → 写缓存」的裸结构,中间没有任何 in-flight promise 共享:\n\n```ts\nconst cached = this.readCachedList(type);\nif (cached) return cached.items;\n// …走完所有 loader…\nthis.cacheListResult(type, result, degraded);\n```\n\n缓存**只在读完成之后**才被写入。所以在第一次读返回之前发出的所有并发 `list(type)`,全都 miss、全都各自把每个 loader 完整走一遍。缓存吸收的是**后续**调用,不是**并发**调用。\n\n## 为什么这不只是「多花一点点」\n\n`listCache` 字段注释写明了这个缓存存在的理由,以及它承诺的效果:\n\n> The cache absorbs the repeated lookups so the loader is only hit once per TTL window.\n\n这句话对串行调用者成立,对并发调用者不成立。而注释描述的那个场景恰恰是并发最容易发生的地方 —— security/permission 中间件在请求路径上调 `list('permission')`,`DatabaseLoader` 的读在事务持锁时要等满 knex 的 `acquireConnectionTimeout`(60s)。在那 60s 里到达的每一个并发请求都会**自己再烧一次 60s**,因为还没有任何东西被写进缓存。\n\n也就是说:这个缓存是为「一次 60s 的挂起」设计的止血,但它止不住**同时**发生的那几次。\n\n日常影响则温和得多,但确实每天在跑:冷启动、每次 `register()` / `unregister()` 失效之后、#5109 的集群对端失效之后、#5218 的 FS 失效之后 —— 每一个失效点后面紧跟的那一小簇并发 `list()` 都会重复完整的 loader 遍历。健康路径下单次读很便宜,所以这部分是浪费而不是故障。\n\n## 与 #5184 的关系\n\n**不是重复。** #5184 裁的是「降级结果该不该进缓存、进多久、带不带标记」—— 写入路径的**判据**;本卡是「写入发生得太晚,并发者根本等不到它」—— 缓存的**时序**。#5184 完整落地(PR #5251)也不会碰到这一点。\n\n一处交互值得记一笔:#5251 把降级条目的 TTL 从 30s 收到 2s。这**不会**让并发问题变严重(并发窗口取决于一次读的耗时,不是 TTL),但它让「窗口开合更频繁」,所以每个窗口边界上的并发簇也更频繁。两者共用 `list()` 同一段代码,**建议排在 #5251 之后做**,别并行。\n\n`#5251` 已经在 `listCache` 注释里就这句承诺挂了指向本卡的说明,免得它读起来像一个无条件保证。\n\n## 候选方向(裁决留给维护者)\n\n1. **single-flight**:一张 `type` → `Promise` 的 in-flight 表,并发者共享同一个 promise,settle 后清掉。最小、最常规,但要想清楚 reject 语义 —— `list()` 现在是 best-effort 不抛的,共享 promise 后一个失败读会被所有并发者拿到同一份(残缺)结果,这大概率正是想要的,但要写成显式契约而不是巧合;\n2. 只对**已知昂贵**的 loader 做 single-flight(例如只有 `DatabaseLoader`),把普通 loader 的并发遍历留着 —— 复杂度换针对性,不见得划算;\n3. 什么都不做,但**把注释那句承诺改成真话**(「只对串行调用者成立」)。这至少消掉 declared ≠ enforced,代价是那个 60s 场景的并发放大原样留着。\n\n## 复现\n\n```ts\nconst manager = new MetadataManager({ formats: ['json'], loaders: [] });\nconst slow = new SlowLoader();          // loadMany 挂 100ms 再 resolve\nmanager.registerLoader(slow);\n\nawait Promise.all([\n  manager.list('permission'),\n  manager.list('permission'),\n  manager.list('permission'),\n]);\n\n// 期望:1(注释承诺的「每个 TTL 窗口只打一次 loader」)\n// 实际:3\nexpect(slow.loadManyCalls).toBe(1);\n```\n\n## 关联\n\n#5184 / PR #5251(发现处,同一段代码,建议串行)、#5108(`DatabaseLoader` 读故障不再被吞)、`packages/metadata/src/metadata-manager.ts` 的 `list()` / `readCachedList()` / `cacheListResult()` 与 `listCache` 字段注释。\n"
+}

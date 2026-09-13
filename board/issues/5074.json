@@ -1,0 +1,39 @@
+{
+  "number": 5074,
+  "kind": "issue",
+  "title": "`ViewItemSchema` 同时是授权形状和 Studio 往返的 wire 成员 —— 拆成两个 schema 还是保持宽松?(挡住 #4001 批 18 最后 2 站点)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue",
+    "protocol:breaking",
+    "repo:objectstack",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T02:16:10Z",
+  "updated_at": "2026-08-04T23:13:33Z",
+  "closed_at": "2026-08-04T23:13:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5074",
+  "body": "发现于 #4001 批 18。这是 finding 16(union `.extend()` 陷阱)的一个**更深的落点** —— 不在被 `.extend()` 的基类上,在 union 的**成员本身**。\n\n## 事实(端到端追踪,非推断)\n\n`ViewItemSchema`(`packages/spec/src/ui/view.zod.ts`)有两副身份:\n\n**授权门**(想要 strict):\n- `defineViewItem(config)` 直接 `.parse()`\n- objectui 的 view 创建表单把 `createBuildBody` 的产物按**真 spec `ViewItemSchema`** 校验(`app-shell/src/views/metadata-admin/view-create-body.test.ts`)\n\n**wire 门**(必须留开):它是 `ViewMetadataSchema` 的**成员 1** —— `saveMetaItem` 校验每一份持久化 `view` body 的那个 union。\n\n追踪链:\n\n1. objectui 的 pin 控件 → `dataSource.updateView(objectName, vid, { isPinned: pinned })`(`app-shell/src/views/ObjectView.tsx:882`)\n2. `updateView`(`data-objectstack/src/index.ts:2801`)先 GET 存储项,再 PUT `{ ...current, ...partial, name, object }`\n3. 独立 ViewItem 记录的 `current` 带 `viewKind` **且**带 `config` → 命中**成员 1**(扁平 overlay 成员被自己的 `config: z.undefined()` 守卫排除)\n4. 于是 body 带着 `ViewItemSchema` 未声明的 `isPinned` 到达\n\n今天:strip 掉(且 `parsed.data` 被丢弃、原始 body 原样落库),保存成功,pin 生效。\n收紧后:**给一个已保存视图打 pin 会 422。**\n\n## 一句已经过时且承重的散文(批 18 已就地修正)\n\n`view.zod.ts` 的块注释写:\n\n> Auxiliary Studio round-trip keys (`isPinned`, `sortOrder`, …) ride along on every shape: all four members strip-parse (no `.strict()`) …\n\n写的时候是对的,现在**一半错一半承重**:成员 2(容器 `ViewSchema`)自前几批收紧起就是 strict 的(实测 `{ list: …, isPinned: true }` 会 422)。那不是回归 —— `updateView` 会先 `if (current?.list) current = current.list` 把容器拆到内层 list config 再合并,所以容器 body 到不了这个 union。但**照着这句话推理会得出错误结论**,而它正是下一个人决定「成员 1 能不能关」时会读的那句。批 18 已把它换成实测描述。\n\n同时 `metadata-type-schemas.test.ts` 的 `STILL_STRIP` 收尾注释把「刻意开放的那个」说成**扁平 overlay**(成员 3/4,它们确实显式 `.strip()` 并写了理由)。成员 1 从来没被这样点名过 —— 它只是**碰巧**还是 strip。\n\n## 需要裁定\n\n- **A. 拆**:`ViewItemSchema` 收紧给授权门用;`ViewMetadataSchema` 里换成一个 `.strip()` 重新开放的 wire 成员 —— **与成员 3/4 已有的做法完全一致**(`ListViewSchema.extend(flattenedViewOverlayFields()).strip()`)。代价:`ViewItemSchema` 是 `z.discriminatedUnion`,不能直接 `.extend()`,需要两个变体(每个 arm 一份 strict + 一份 strip),或把 base shape 抽出来复用。\n- **B. 保持宽松**,在台账/JSDoc/测试三处把它记成 `wire`(批 18 当前做法),授权门的严格性靠 `config` 内层(`ListViewSchema`/`FormViewSchema` 都已 strict)与 `defineViewItem` 的类型层兜。\n\n### 两轴分析\n\n**长期健全性**:A 更对。这个文件里已经有一条被验证过的处理这种双身份的模式 —— 成员 3/4 就是「授权 schema `.extend(wire 字段).strip()`」。B 让**同一个 schema 名**同时承担两种契约,而这正是本战役反复付代价的形状(一份散文、两种姿态)。A 也让 `isPinned`/`sortOrder` 这些辅助键**有个明确的声明位置**,而不是靠「没人关这个成员」隐式活着。\n\n**让 AI 写的元数据难写错**:强烈偏 A。B 的失败模式很具体:`defineViewItem({ name, object, viewKind, confg: {…} })` —— `config` 打错一个字母,今天 strip 掉,得到一个**没有任何视图配置**的 ViewItem,parse 成功。这就是 #4001 正文里 `workflows: [...]` 那条(#1535)在 view 面的重演。A 之后作者会拿到点名的拒绝;B 之后这个洞永远留着,而且台账会把它记成「已决定」,再也不会有人来看。\n\n**代价要说实话**:A 是这两个选项里唯一需要真正设计的 —— discriminatedUnion 的两套变体不是一行改动,而且要确认 `z.toJSONSchema()` 对新结构仍能出 `anyOf`(`/api/v1/meta/types/view` 喂给 Studio 的 SchemaForm 靠它),以及 `lazySchema` Proxy 在新结构下不复发 ADR-0089 D3a 那次 `Cannot set properties of undefined (setting 'ref')`。\n\n**我推荐 A**,两轴同向;但它是**架构选择**(注册 `view` 门到底严不严),不是姿态翻转,所以批 18 立案不猜。若排期上 A 进不了 v17 窗口,B 是可接受的中间态 —— 批 18 已按 B 落地并三处留痕,A 落地时把留痕换掉即可。\n"
+}

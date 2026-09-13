@@ -1,0 +1,38 @@
+{
+  "number": 4988,
+  "kind": "issue",
+  "title": "ui/ 五个交互配置文件(22 个 z.object 站点)没有任何承载键:实测「无授权门」,按 ADR-0049 定去留",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue",
+    "protocol:breaking",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T18:56:04Z",
+  "updated_at": "2026-08-05T00:02:07Z",
+  "closed_at": "2026-08-05T00:02:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4988",
+  "body": "从 #4001 批 13 拆出(发现,不是缺陷修复)。批 13 的任务是把 `ui/` 六个交互/呈现配置文件从 `.strip` 收紧。其中五个在「收紧前先验证可授权性」这一步上**实测为负**,所以没有收紧 —— 本 issue 记录测量结果与它引出的那个真正的问题。\n\n## 测量结果\n\n| 文件 | z.object 站点 | 是否可从授权路径到达 |\n|---|---|---|\n| `packages/spec/src/ui/touch.zod.ts` | 7 | 否 |\n| `packages/spec/src/ui/animation.zod.ts` | 4 | 否 |\n| `packages/spec/src/ui/dnd.zod.ts` | 4 | 否 |\n| `packages/spec/src/ui/keyboard.zod.ts` | 4 | 否 |\n| `packages/spec/src/ui/offline.zod.ts` | 3 | 否 |\n| 合计 | **22** | |\n\n同批的第六个文件 `ui/responsive.zod.ts`(4 站点)测量为**可达**(`page.components[].responsive` / `.responsiveStyles`),已在 #4001 批 13 收紧,不在本 issue 范围内。\n\n## 三条独立证据(2026-08-03,`origin/main` fe83042)\n\n**1. 静态 —— 没有承载键。** `packages/spec/src` 里除了 `ui/index.ts` 这个 barrel 之外,**没有任何模块 import 这五个文件**。协议里不存在 `component.touch`、`page.dnd`、`app.motion` 这类槽位,也就是说作者在任何一份元数据里都写不出通向这些形状的键。\n\n**2. 图可达性 —— BFS 全不命中。** 用 `build-schemas.ts` 给 #4650 删除检查所用的同一套闭包(24 个 metadata-type root，来自 `listMetadataTypeSchemaTypes()`，外加 `defineStack` 的 `ObjectStackSchema`)对本次构建的内存 Zod 图做 BFS,6849 个节点,这 22 个 schema **一个都没走到**。同一次运行里三个阳性对照全部命中 `root-graph`:\n\n- `PageSchema`(metadata-type root)\n- `WebhookSchema`(批 11 判定「可授权」所依据的 `defineStack({ webhooks })` 那条门)\n- `StateMachineSchema`(批 10 判定「可授权」所依据的 `agent.lifecycle` 那条门)\n\n对照通过,说明「不可达」是关于图的事实,而不是仪器坏了 —— 这正是 #4852 重测留下的教训:先证明尺子是准的。\n\n**3. 调用点 —— 没有 parse。** `objectstack` / `objectui` / 三个示例应用里,除各文件自己的单测外,**不存在**对这些 schema 的 `.parse()` / `.safeParse()`。objectui 只 re-export 推断出的**类型**,并且明确写了不 re-export 校验器(`@object-ui/types`,#2561 的注释)。\n\n## 由此引出的问题\n\n这不是「要不要 strict」的问题。**strict 是 parse 的属性,而这里根本没有 parse** —— 收紧它们不会拦住任何东西,只会花掉一次 v17 的破坏性变更让文件「看起来完成了」,并留下本仓账本自己警告过的那件东西:*「一个被精确校验的死槽位是更有说服力的谎言」*(`docs/audits/2026-07-unknown-key-strictness-ledger.md`,#4583 `DatasourceCapabilities` 那一行)。\n\n真正要决的是 **ADR-0049 enforce-or-remove**:\n\n- **A. 退役。** 与 #4610 处理 `Notification` / `NotificationConfig`、#4738 删除 `automation/sync.zod.ts` 同类。代价:`@objectstack/spec/ui` 的公开导出面收缩,需要墓碑 + 变更集迁移说明;并且要和 objectui 协调 —— `@object-ui/core` 的 `DndProtocol` / `KeyboardProtocol` 与 `@object-ui/mobile` 的 `useSpecGesture` / `useTouchTarget` 都按这些**类型**写成(注意:这些 helper 本身在两个仓里也都**没有调用方**,只是导出的库 API),另有跨仓 parity 测试。\n- **B. 接上承载键。** 给某个可授权形状(最可能是 `ui/component.zod.ts` 的 SDUI 组件定义,或 `page.components[]`)加上 `touch` / `dnd` / `keyboard` / `animation` / `offline` 槽位,并让渲染器真的读。这是把 objectui 那几个 helper 从「导出但没人调」变成活的接线 —— 但那是一个真正的特性,不是清账。\n- **C. 维持现状并显式标注**,把它们记成 experimental 的客户端词汇表,不进 `authorable-surface.json`。\n\n## 为什么这条不能拖着不判\n\n`content/docs/references/ui/{touch,dnd,keyboard,animation,offline}.mdx` 是**已生成并已发布**的,读起来就是一张授权表(`| **dragItem** | … | optional | Configuration for draggable item |`)。`authorable-surface.json` 里也躺着这五个文件的 58 个键,而那份文件的自述是「every AUTHORABLE key in the spec — what a metadata author may write, which for this platform IS the third-party API」。\n\n也就是说,对 AI 作者而言,当前状态的失效模式**不是**「`DndConfigSchema` 里的静默剥离」,而是**文档在宣传一套没有承载键的词汇**:AI 照着 `dnd.mdx` 往页面组件上写一个 `dnd:` 块,会被 `PageComponentSchema.strict()`(ADR-0089 D3a)直接拒绝,因为任何组件上都没有 `dnd` 这个键。这正是 Prime Directive #10 那句「never advertise or demo a capability the runtime doesn't actually deliver」。\n\n## 相关\n\n- #4001(批 13 的账本行已按本测量改写 class)\n- #4610(`Notification` / `NotificationConfig` 零 importer 删除的先例)、#4738(`automation/sync.zod.ts` 整文件删除的先例)、#3896(`view.responsive` / `view.performance` 的 inert 清退)、#4876(`dashboard.widgets[].responsive` 清退,同日)\n- ADR-0049(enforce-or-remove)、ADR-0078(no-silently-inert-metadata)\n- 复现测量的探针写法见 #4001 批 13 的 PR 描述。\n\n按 AGENTS.md Prime Directive #10 归档,未指派。\n"
+}

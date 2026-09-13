@@ -1,0 +1,37 @@
+{
+  "number": 4749,
+  "kind": "issue",
+  "title": "AREA_REQUIRED_PERMISSIONS_RETIRED 的处方在 #4722 之后过时:仍写着「the server does not walk `areas`」",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T02:10:05Z",
+  "updated_at": "2026-08-05T00:36:34Z",
+  "closed_at": "2026-08-05T00:35:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4749",
+  "body": "从 #4722 的实现中记录的越界发现(未认领)。\n\n## 现象\n\n#4722 让服务端权威闸门 `filterAppForUser` 走 `areas[].navigation`,area 内导航项的\n`requiredPermissions` / `requiresService` 现在由服务端剥离。但 `packages/spec` 里两处\n仍然陈述改前的事实:\n\n1. `packages/spec/src/ui/app.zod.ts:662`(`AREA_REQUIRED_PERMISSIONS_RETIRED` 处方正文):\n\n   > `requiredPermissions` / `requiresService` on a navigation ITEM are stripped server-side\n   > from the app's **top-level** `navigation` tree and re-checked in the shell. Items nested\n   > under `areas[]` are gated **in the shell only — the server does not walk `areas`** — so\n   > anything that must never reach the browser belongs in the top-level tree, or in its own app.\n\n   这段话是作者写错 area 级键时唯一能读到的处方(strict schema 的 unknown-key 报错正文),\n   现在它把一个已经关闭的缺口描述成仍然存在。方向上是「过度保守」而非不安全(它劝作者把\n   敏感项挪到顶层树,这仍然可行),但它是错的,而且是**说给作者听的**那一份。\n\n2. `packages/spec/src/ui/app.test.ts:1374` 有一条断言把这个措辞钉死:\n\n   ```\n   // The honest caveat: the server does not walk areas, so an item gate\n   // INSIDE an area is shell-side only.\n   expect(msg).toMatch(/shell only|does not walk/is);\n   ```\n\n   所以改处方正文必须同时改这条 pin —— 两者是一个耦合改动。\n\n## 为什么没在 #4722 里顺手改\n\n#4722 的派发约束是 `packages/spec/**` **零改动**(单文件例外只开给\n`packages/spec/liveness/app.json` 的账本 note,已按预案改写)。处方正文是 `.describe` 级别的\n用户可见字符串,改它要连带 pin 与 spec 生成物(`gen:schema` / `gen:docs`)一起动,正是\n发布窗口里该避开的涟漪。故按 Prime Directive #10 独立记录。\n\n## 建议的修法(一次改完)\n\n- 改 `AREA_REQUIRED_PERMISSIONS_RETIRED` 正文:项级 `requiredPermissions` / `requiresService`\n  在**两棵树**(顶层 `navigation` 与 `areas[].navigation`)都由服务端剥离(#4722);仍然只在\n  客户端求值的是 `visible`(CEL)与 `requiresObject` —— 必须永不到达浏览器的东西写\n  `requiredPermissions`,不要写 `visible`。\n- 同步改 `app.test.ts` 那条断言(改成钉新的正确措辞,别只是删掉)。\n- 跑 `pnpm --filter @objectstack/spec check:generated`,按它报的 stale 项重新生成。\n- 顺带核对 `AREA_VISIBLE_RETIRED` 正文:它指向项级 `visible`,那一层**依然**只在客户端求值,\n  所以那段大概率不用改 —— 确认一下即可。\n\n区分清楚:退役的 **area 级**键(`areas[].visible` / `areas[].requiredPermissions`)不复活,\n本单只是把处方里关于 area **内部**项级闸门的那句事实改对。\n\n参考:#4722(实现)、#4651(退役裁决)、`packages/spec/liveness/app.json` 的\n`areas.navigation` note(已在 #4722 里改写,可作为正确措辞的蓝本)。\n"
+}

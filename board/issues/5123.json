@@ -1,0 +1,35 @@
+{
+  "number": 5123,
+  "kind": "pull_request",
+  "title": "fix(objectql): readonly 剥离改为「说清后果 + 给出出路」,并把写路径语义写进文档 (#4903)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T05:27:17Z",
+  "updated_at": "2026-08-04T06:47:04Z",
+  "closed_at": "2026-08-04T06:47:03Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T06:47:03Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5123",
+  "body": "Fixes objectstack-ai/objectstack#4903\n\n## 先说结论:这一轮落了什么、什么必须留给维护者\n\n| 方向(issue 三选一) | 本轮 | 说明 |\n|:---|:---|:---|\n| ① 失败可见 —— **dropped-fields 清单** | ✅ **早已存在**(#3407) | `options.onFieldsDropped` 每次剥离回调一次 `{ object, fields, reason }`,`readonly` / `readonly_when` 两种 reason 都发,单条 / 多行两条路径都发。issue 里「拿不到任何机器可读信号」这半句是**陈述过期**:信号在,只是**没写进文档、没人指得到**。本 PR 补了指路(日志 + 文档 + pin 测试)。 |\n| ① 失败可见 —— **strict 开关(写入直接报错)** | ⛔ **未落,需维护者决策** | 需要新增一个写选项键,而**两个可能的落点都在 `packages/spec/**`**(本轮硬约束零改动)。见下方「需要维护者拍板」。 |\n| ② 插件默认可信 | ⛔ 不做 | PM 已裁定:安全姿态放宽,只有维护者能授权。本 PR 不动任何默认值。 |\n| ③ 文档写清楚 | ✅ 已落 | `content/docs/protocol/objectql/security.mdx` §3。 |\n| (追加)剥离日志的级别与措辞 | ✅ 已落 | 见下。 |\n| (追加)Hook / 插件不对称 | ✅ **只加 pin 测试,不改行为** | 该不该对称是 open question,本 PR 把**现状和机制**钉住,让下一个人是「有意改」而不是「顺手改坏」。 |\n\n## 改了什么\n\n### 1. 剥离日志:从「我做了什么」改成「你付出了什么 + 怎么解决」\n\n原来只有:\n\n```\nWARN Field 'work_duration' is read-only — ignoring incoming change (#2948)\n```\n\n这句话说的是引擎的动作,没说调用方的代价,也没说出路 —— 于是下游看到的现象是「同一个字段 REST 写得进、cron 写不进」,读起来像 cron 坏了,而不是值被剥离了(os-project-titanwind-ehr#750)。现在这条 WARN 会指名对象与字段、明说 **update 已经在没有这个字段的情况下提交了**,并同时给出两条出路:可信服务端代码传 `{ context: { isSystem: true } }`;想要程序可读的信号就传 `options.onFieldsDropped`。\n\n**级别保持 `warn`,这是刻意的**,理由写进了代码注释:这个接缝**分不出**「恶意客户端伪造 `created_by`」和「可信 cron 写系统结算值」。`ExecutionContext` 里没有任何 origin / channel / transport 标记,`isSystem` 是唯一的信任位,而它恰恰就是豁免条件;「没有 context」也不能当作服务端代码的证据(插件完全可以代表某个用户写,匿名 REST 写同样没有 principal)。所以升到 `error` 等于把错误日志变成任何客户端都能按需灌满的通道,降到 `debug` 等于把静默丢弃再藏回去。**一个级别,选定并写明理由**;要改这一点,得先给 `ExecutionContext` 一个真正的来源标记,而不是从「没有 principal」去猜。\n\n行为零变化:剥什么、留什么、`onFieldsDropped` 报什么,全部同前。\n\n### 2. 文档(`content/docs/protocol/objectql/security.mdx` §3 新增小节)\n\n写清了 issue 要的四件事:\n\n- **剥离条件**:`readonly: true` 是 schema 级锁,权限集授不动;执行方式是**剥离而非拒绝**,所以写入成功(REST 200),该列保持原值;\n- **suppliedKeys 口径**:候选键在**引擎入口**快照,只有调用方送来的键才是候选;\n- **Hook 豁免及其原因**(已核实机制,不是照抄 issue 措辞):快照发生在中间件与 `beforeUpdate` hook **之前**,所以 hook **新增**的键根本不在快照里 —— 这正是 `updated_by` / `updated_at` 明明是 `readonly` 却能落库的原因。并写明这条是**按键不按值**:hook 能**补写**一个只读字段,但**救不回**调用方自己送来的那个键;\n- **插件写入的 `isSystem` 约定**:`ctx.getService('data')` 拿到的就是 REST 用的同一个引擎、执行上下文为空,所以服务端插件默认**不可信**,可信代码必须显式声明 —— 附带说明 `isSystem` 同时绕过权限检查,所以它的语义是「平台代码以平台身份写」,不是「这是插件写的」;\n- 以及 `onFieldsDropped` 的用法、`reason` 取值,和它**不跨 RPC / Virtual Data Engine 边界**这一限制。\n\n### 3. Pin 测试 `packages/objectql/src/engine-readonly-strip-signal.test.ts`(10 例)\n\n- 复现现场:无 context 的插件式写入,其余字段落库、`work_duration` 恒为 null,且调用不抛;传 `{ context: { isSystem: true } }` 后同一次写入完整落库;\n- `onFieldsDropped` 在**正是 issue 描述的调用形态**(进程内引擎、无 context)下确实回调,单条与 bulk 两条路径都钉;\n- 日志契约:断言「后果 + 两条出路 + 对象名字段名」都在,以及**只发一条 `warn`、不发 `error`**;\n- **不对称 pin**(PM 裁定 ⑤):hook 补写的只读字段落库、同名字段由调用方送来则被剥离 —— 并附一例把**机制**钉死(hook 改值救不回快照里的键)。注释里明说这是**钉住现状、不是背书**。\n\n## 需要维护者拍板:strict(写入直接拒绝)模式该落在哪里\n\n这是本轮唯一没做的实质项 —— 不是漏掉,是**做不了而不该猜**。strict 需要一个新的写选项键,而它的两个候选落点都在 `packages/spec/**`(本轮零改动约束):\n\n- `EngineUpdateOptionsSchema`(`packages/spec/src/data/data-engine.zod.ts`)—— 可序列化选项;\n- `WriteObservabilityOptions`(`packages/spec/src/contracts/data-engine.ts`)—— `onFieldsDropped` 就住在这里,因为函数无法进 JSON Schema。\n\n三个选项、两条固定轴(项目长期健壮性 / 让 AI 写的元数据应用难以出错)的分析写在 issue #4903 的报告里,推荐 **B(在 `WriteObservabilityOptions` 旁加 `strictReadonlyWrites?: boolean`,默认 false,per-call 显式选择,违例抛带 `code` 的错)**。请维护者确认后再开一轮。\n\n## 验证\n\n```\npnpm --filter @objectstack/objectql typecheck   # tsc --noEmit,干净\npnpm --filter @objectstack/objectql test        # Test Files 115 passed | Tests 1820 passed\npnpm lint                                        # eslint . --no-inline-config,干净\npnpm check:doc-authoring / check:docs-audit-scope / check:nul-bytes /\n  check:role-word / check:release-notes / check:durability-log-level /\n  check:engine-double-contract                   # 全绿\n```\n\n已合入当日 `origin/main` 并重跑上述 objectql 闸门(合入的提交不触及 `packages/objectql` / `packages/spec`)。\n\n## 约束遵守\n\n- `packages/spec/**`、生成物:**零改动**;\n- `packages/metadata-protocol/src/protocol.ts`(#5088 借道占用):**零改动**;\n- `packages/services/service-analytics/**`(#5033):**零改动**;\n- `content/docs/releases/`:**未触碰**;\n- 变更面:`packages/objectql/src/validation/rule-validator.ts` + 一个新测试文件 + 一页文档 + 一个 changeset。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01NrmBxj8rK2uGCnh9aipjwX\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01NrmBxj8rK2uGCnh9aipjwX)_"
+}

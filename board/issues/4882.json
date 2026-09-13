@@ -1,0 +1,37 @@
+{
+  "number": 4882,
+  "kind": "issue",
+  "title": "pm-dispatch SKILL.md 增补:2026-08-03 全天运行沉淀的八条 PM 操作经验(全部零覆盖)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T13:03:00Z",
+  "updated_at": "2026-08-03T13:28:41Z",
+  "closed_at": "2026-08-03T13:28:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4882",
+  "body": "今日(2026-08-03)主 backlog PM 会话跑完 12 单合并 + 8 单新立后,对照 `.claude/skills/pm-dispatch/SKILL.md`(624 行)逐条 grep:**以下八条经验现文本零覆盖**。每条都有当日 issue/PR 编号作证据,写进 skill 是为了让下一个 PM 会话不用重新踩一遍。\n\n> 维护者已批准本单作为收尾指示的一次明确例外落地。改动面:仅 `.claude/skills/pm-dispatch/SKILL.md` + changeset。先例:PR #4824(同文件,同为协议增补)。\n\n## 要写进去的八条(按建议落点分组)\n\n### A. 分诊 / 选批(落「2. Triage」「3. Select the batch」)\n\n**A1. 「无生产者」模式是分诊时要主动识别的一类。** 形状:声明了、消费端也有读取代码、gate 全绿,但**没有任何生产者传值**。一天命中五次:#4704(`Seed.env`,六个调用点漏传)、#4837(liveness 台账判据本身)、#4839(`session.roles` 全仓无一处写)、#4862(flow trigger 批量写上 `previous` 不绑定)、#4867。静态检查与类型系统只验消费方、不验生产方,所以这类洞在全绿下长期存活。分诊遇到 declared ≠ enforced 类 issue 时,顺手问一句「生产者在哪」往往就是根因。\n\n**A2. 同文件 issue 严格跨轮串行,且推迟的那条要当场把警告写上去。** #4820/#4821 同文件,刻意分轮;更关键的是:#4820 的 dev 发现 #4821 正文建议的修法(`JSON.stringify` 键法)会改掉类型强制语义、引入静默新缺陷,这条警告与 `Blocked-by:` **在 #4820 复核完成的同一轮就写到了 #4821 上** —— 若等下一轮,任何 PM 都可能先把它派出去。规则:推迟 ≠ 搁置,推迟时把已知的坑先钉在 issue 上。\n\n### B. 派发(落「5. Dispatch」)\n\n**B1. 「main 在当天已动过同一文件」要写进派发词。** 现有 Stale-premise check 是防 issue 过期;今天的变体是**同日**两次:#4808 派发前 #4806 刚改过同一个 guard,#4820 派发前 #4822 刚改过同一文件。派发词里点名「基于合并后的代码工作,issue 引用的片段可能已变」,两单都因此避开了返工。\n\n**B2. 被宿主中断的 dev agent 不可恢复,但成果在 worktree 里 —— 接手协议。** `/compact` 会把运行中的子 agent 连同挂起的工具调用一并杀死(今天 #4700/#4775 双双中招,停在同一秒)。接手方式:派**新** agent、明确告知「worktree 已存在,⛔ 不要新建,直接进入」、要求先通读既有提交/未提交改动**再决定接受还是修改**(不推倒重来、不盲信),并补跑前一个 agent 没跑过的验证。两单按此协议接手后均一次通过复核。\n\n### C. 复核(落「7. Review each report」)\n\n**C1. 「dev 证伪了 issue / 派发词」是好报告的标志,复核要专门检查前提核实。** 今天四例:#4808(issue 只写对一半,真截断在剪枝不在 TTL)、#4813(PM 给的技术理由被实测推翻,dev 的更硬;issue 正文归因错误 → 另立 #4873)、#4825(issue 的方向 2 被调用点证据否决)、#4790(前日,fixed-window 换算被拒)。复核清单加一条:**dev 是否核实了 issue 的前提?照单全收的报告反而要多看两眼。** PM 被纠正时公开认账,纠正记录留在 PR 评论里。\n\n**C2. PR diff 里 `+0/-0` 的文件未必是空文件 —— 可能是 NUL 字节让 git 判成二进制。** #4870 的 347 行测试文件在 diff 里显示 `+0/-0`,PM 一度误判为占位空文件;实为文件内一个裸 `0x00`(`check:nul-bytes` 会拦)。复核时见 `+0/-0` 先想 NUL,再想空文件。修法:写 `` 转义,不写裸字节。\n\n### D. 队列 / 平台(落「State model」或新增「Operational notes」小节)\n\n**D1. 判断 PR 是否在合并队列,看 `gh-readonly-queue/*` 分支,不看 `auto_merge` 字段。** 本仓 PR 进队后 REST 的 `auto_merge` 显示为 off(队列条目取代挂起的 auto-merge),该字段不可用于判断入队状态。实证命令:`git ls-remote --heads origin 'refs/heads/gh-readonly-queue/*'`。\n\n**D2. 队列踢出的处置是「先认签名再决定」,且已修 flaky 的旧签名再现 = 必须重新诊断。** 今天 #4796 那条 flaky 五次踢出无关 PR,确认签名后原样重投全部一次通过;但止血(#4856)合入后,**再出现同签名就不再是那条 flaky**,不许条件反射式重投。追记命中记录只在新信息改变修法作用域时才值得(第 3/4 次命中把靶面从一条用例扩到一个模板,值得;纯计数不值得)。\n\n**D3. GitHub MCP 的 GraphQL 配额(5000/时)极易爆,读操作与评论走 REST。** 今天三次归零(峰值 10402/5000),每次卡住的都是 `enable_pr_auto_merge` / draft 切换 / `list_issues` 这几个 GraphQL-only 操作。规程:读与评论优先 `curl` REST(core 配额 15000 独立计);配额爆掉时把 GraphQL 写操作排队,挂后台轮询 `https://api.github.com/rate_limit` 的 `resources.graphql.remaining`,恢复即执行;复核意见可先走 REST 评论发出,不等配额。\n\n**D4. 共享检出可能落后 origin/main 数十提交,核验 main 的事实必须 `git grep origin/main:` 或先 fetch。** 今天 PM 与一个 dev 都在共享检出的工作树上 grep 出假阴性(落后 63 提交)。这条也应进派发词提醒 dev。\n\n## 不要做的\n\n- ⛔ 不重写既有章节,增补融入现有结构(Arguments / round loop / Guardrails 的既有小节),文风与该文件一致(操作手册语气,每条是指令不是叙事,证据编号括注即可)。\n- ⛔ 不碰 `.claude/agents/os-dev.md`(B2 的接手协议写在 SKILL.md 的 Dispatch 节即可)。\n- ⛔ 不碰 `packages/**`、`skills/**`(顶层已发布目录)、`content/docs/**`。\n- changeset 跟随 #4824 先例(`.changeset/pm-dispatch-domain-lanes.md` 的包名与等级)。\n\n## 验收\n\n1. 八条全部落进 SKILL.md,落点合理、可检索(关键词:生产者 / worktree 接手 / gh-readonly-queue / rate_limit / origin/main / nul);\n2. 不破坏既有章节结构与既有内容;\n3. `git show` 该文件 diff 只有增补与最小上下文;\n4. changeset 与 #4824 同形。"
+}

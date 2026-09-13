@@ -1,0 +1,35 @@
+{
+  "number": 5229,
+  "kind": "pull_request",
+  "title": "fix(metadata): FS 监听改动同样失效本节点的 listCache/registry (#5218)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T11:09:30Z",
+  "updated_at": "2026-08-04T11:49:46Z",
+  "closed_at": "2026-08-04T11:49:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T11:49:45Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5229",
+  "body": "Fixes objectstack-ai/objectstack#5218\n\n## 问题\n\n`NodeMetadataManager.handleFileEvent()` 在 chokidar 报告 `add` / `change` / `unlink` 之后只做两件事:重新 `load()` 一次文件内容,然后 `notifyWatchers()`。它既不碰 `listCache` 也不碰 `registry` —— 而 `load()` 是纯读路径(它委托给 `loadDiagnosed`,后者只遍历 loader),两个缓存都不写。\n\n于是**同一个 manager 的两个读接口互相矛盾**。手改 `rootDir/view/x.json` 之后:\n\n- `get(type, name)` 是新的 —— 它穿透到 `FilesystemLoader`;\n- `list(type)` 在 `LIST_CACHE_TTL_MS`(30 秒)窗口内继续返回改动前的清单 —— REST `/api/v1/metadata/:type`、Studio 左栏、`listViews()` 等一切走 `list()` 的读。\n\n更糟的是被这次事件叫醒的消费者(Studio HMR/SSE、ObjectQL SchemaRegistry 桥)正是通过回头拉 `list()` 来响应的,于是这次唤醒**递回了它自己刚刚宣告已失效的那份数据**。\n\n## 修法\n\n与 #5109(集群对端那条同形缺陷,PR #5219 / `533a0a4`)是同一形状、不同触发源,因此**复用该修复落地的样板**而不是另起一套:`invalidateForForeignWrite(type, name)`,可见性由 `private` 放宽为 `protected`。\n\n文件改动正是「不是经由本 manager 写接口发生的写入」这个判据下的 foreign write —— 没有任何东西替它刷新过缓存;delete-而非-预填 的语义也正好对上:穿透回 loader 读到的就是文件的真相。\n\n两点与基类其余写路径一致的约束:\n\n- **先失效,再通知**。`register` / `unregister` / `applyRepoEvent` / 集群订阅者都是这个次序,使 watcher 不可能同时观察到事件与事件前的缓存(#5219 钉的同一条纪律)。\n- **registry 条目一并删除**,不只是列表缓存。FS 加载的条目本来就不进 registry,通常无可删;但当同名条目此前被 `register()` / `registerInMemory()` 写过时,它在 `get()` 和 `list()` 中都会**遮蔽** loader(两者都是 registry 优先合并),只删列表缓存会让那份陈旧副本一直应答下去。\n\n### 关于 PM 提出的「若复用不成立则退回只放宽 `invalidateListCache`」\n\n已核,**复用成立,无需退回**。逐个检查了 `registerInMemory` 的调用方(`default-datasource-plugin.ts` 的 `default` 数据源、`app-plugin.ts` 的 code-defined 数据源与 stack 声明的安全元数据),它们只会在 `rootDir/< type >/< name >.< ext >` 确实存在并触发事件时才被删中一个同名条目;而单名删除(不是整个 type store)正是该 helper 的既有契约,`registerInMemory` 产物按名字被保护。回归测试 `keeps in-memory-only entries of OTHER names intact` 钉住了这一点。\n\n反过来,**只放宽 `invalidateListCache` 是不够的**:遮蔽场景下 `get()` 仍会返回陈旧的 registry 副本(`drops a shadowing registry entry so reads fall through to the file` 用例覆盖)。\n\n### 关于 PM 提出的 EndpointMatcher 不对称性\n\n已核,并且确认它**不是缺陷**。`type === 'api'` 的文件事件此前已经由 #5089 装的 `subscribe('api', …)` 那条缝失效了端点索引;空的是 `invalidateListCache` 那条缝。本次改动把第二条缝接上,两条缝对称。\n\n实测:`api` 那个用例在改动前后**都通过**(移除本修复后 11 个用例失败 9 个,该用例是通过的 2 个之一),所以它是一道 guard 而不是回归钉 —— 测试注释已如实写明。重复失效幂等:`EndpointMatcher.invalidate()` 是两次赋 `undefined`(与 #5089 注释所述一致)。\n\n## 命中面\n\n主要是开发期,不是生产多节点。`MetadataPlugin` 默认 `watch: true`,仅在 `bootstrap: 'artifact-only'` 下被强制关闭(`plugin.ts` :240-249);`standalone-stack.ts` :341 显式传 `watch: false`。即 **artifact 模式的 `os dev` 与 standalone 不受影响,非 artifact 的默认 `MetadataPlugin` 装配受影响**(与单内「触发前提」一节一致,已按现网 `main` 复核)。\n\n## 测试\n\n新增 `packages/metadata/src/node-metadata-manager-fs-invalidation.test.ts`(11 个用例)。\n\n**驱动方式**:以合成事件直接调用 `handleFileEvent`,其余全部是真的 —— 真临时目录、真文件、默认的真 `FilesystemLoader`、真 `list()` / `get()` / `matchEndpoint` 读路径。理由是 `startWatching` 以 `interval: 1000` 轮询,每个用例都挂真 watcher 只会换来数秒等待而不增加对被测接缝的覆盖。合成事件唯一证明不了的事(chokidar 的回调确实抵达 `handleFileEvent`)由**末尾一个真 watcher 的端到端用例**钉住。\n\n该端到端用例需要先等 chokidar 的 `ready`:`ignoreInitial: true` 下,在初次扫描完成**前**创建的文件会被并入基线而永不触发 `add` —— 不等就是一个以 30 秒超时形式暴露的竞态(初版即如此,已修)。\n\n移除本修复后 **11 个用例失败 9 个**;通过的 2 个是负向对照(非元数据路径)与上述 `api` guard。\n\n```\n Test Files  19 passed (19)\n      Tests  444 passed (444)\n```\n\n`npx tsc --noEmit`(本包无 `typecheck` 脚本,按类型检查覆盖率账本计 DEBT):92 条报错,**全部**落在既有的其它测试文件(TS2835/TS7006 债务),本 PR 触碰的三个文件贡献 0 条 —— 与 `origin/main` 无增量。\n\n## 顺带发现(未在本 PR 修)\n\n已另立 #5228(`finding` 标签,休眠类):`handleFileEvent` 的 `try/catch` 对 loader 读/解析失败**不可达** —— `load()` 委托的 `loadDiagnosed` 按 ADR-0110 D3 把 loader 异常吞成 `{ data: null, degraded: true }`,所以坏文件被当作 `data: null` 广播出去,与「合法地什么都没有」同形。目前仓内无消费者读该 `data`(ObjectQL 订阅者回头 `get()` 重读),故今天无人踩到。是写第 8 个用例时按「会提前返回」写、实测失败才发现的;该用例已按真实行为改写并注明。\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Pbu27iNUfQCHeuS551Rqo7\n"
+}

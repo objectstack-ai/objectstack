@@ -1,0 +1,37 @@
+{
+  "number": 4787,
+  "kind": "issue",
+  "title": "[docs] ADR-0078 状态行仍写「Proposed/核心机制未建」——与 #4544 已落地的完整性闸门相反,需更新",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T06:22:13Z",
+  "updated_at": "2026-08-03T16:18:55Z",
+  "closed_at": "2026-08-03T16:18:55Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4787",
+  "body": "## 背景\n\n#4544(合法但惰性的元数据:ADR-0078 完整性闸门)的 4 个阶段已全部落地:\n\n- 共享谓词:`packages/spec/src/kernel/functional-completeness.ts`\n- lint 执行:`packages/lint/src/validate-functional-completeness.*`\n- objectql 注册时 runtime warn 接线(`registry.ts`)\n- 相关 PR:#4547 / #4577(+cloud#999)/ #4565 / #4574 / #4599\n\n但 `docs/adr/0078` 的 Status 行仍写着「Proposed……核心机制未建(2026-07-16 审计)」——**与现实相反**。一份状态与实现相反的 ADR 本身就是 AI agent(和人)的误导源:后来者读到「未建」会重新立项或绕开已有闸门。\n\n## 要做的事\n\n- 将 ADR-0078 状态行更新为已实施(Accepted/Implemented,按仓库 ADR 状态词汇),注明落地位置与关键 PR;\n- 顺带核对正文描述与最终落地形状是否一致(尤其「生成式规则遍历被永久否决、每条规则必须指名运行时静默跳过点」这两条纪律应在 ADR 中可见);\n- docs-only PR,不动 `content/docs/releases/`。\n\n## 验收\n\nADR-0078 状态行与实现一致;`grep \"Proposed\" docs/adr/0078*` 不再出现「核心机制未建」表述。\n\nPart of #4544 验收关闭。"
+}

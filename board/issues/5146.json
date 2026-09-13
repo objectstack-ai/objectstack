@@ -1,0 +1,35 @@
+{
+  "number": 5146,
+  "kind": "issue",
+  "title": "`$not` 的语义在 driver-sql 与 driver-memory / formula 之间分叉：NULL 行的去留相反，`$not: {}` 一个是 TRUE 一个是 FALSE",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T06:10:47Z",
+  "updated_at": "2026-08-04T17:45:14Z",
+  "closed_at": "2026-08-04T17:45:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5146",
+  "body": "修 cloud#1076（给 Turso remote 传输补 `$not`）时扫到，**不在该 PR 范围内**。cloud 那条按指示把远程模式钉到 SQL 家族（driver-sql）的行为上，但两族本身对同一条 `$not` 给出不同答案，这条记录该分叉。\n\n## 事实\n\n`packages/spec` 的 `FilterConditionSchema` 与 `$and` / `$or` 并列声明 `$not: FilterConditionSchema.optional()`，三处实现：\n\n- `packages/plugins/driver-sql/src/sql-driver.ts` `applyFilterCondition`（#2704 加的分支）→ Knex `whereNot(cb)` / `orWhereNot(cb)`；\n- `packages/plugins/driver-memory/src/memory-matcher.ts` `match()` → `if (filter.$not) { if (match(record, filter.$not)) return false; }`；\n- `packages/formula/src/matches-filter.ts` `evalNode()` → `if (evalNode(record, val)) return false;`。\n\n三者对**良构、且 schema 明确允许**的两种形状答案不一致。\n\n### 分叉一：被比较列为 NULL 的行\n\n以 `{ $not: { stage: 'won' } }`、某行 `stage IS NULL` 为例：\n\n- driver-sql：Knex 实测 `select * from \\`deal\\` where (not (\\`stage\\` = 'won'))`。SQL 三值逻辑下 `NULL = 'won'` 是 UNKNOWN，`NOT UNKNOWN` 仍是 UNKNOWN → **该行不返回**。\n- driver-memory / formula：`match(record, { stage: 'won' })` 里 `undefined !== 'won'` → false → 取反 true → **该行返回**。\n\n也就是同一条 RLS read scope（CEL `!expr` 经 `cel-to-filter.ts` 降解成 `{ $not: {...} }`），落在 SQL 驱动上会把「该列为空」的行整批排除，落在内存驱动 / 公式求值上则会把它们全部包含进来。对权限规则来说，这是「同一条规则在不同后端给出不同可见集合」。\n\n### 分叉二：`$not: {}`\n\n`FilterConditionSchema` 是 `z.record(z.string(), z.unknown()).and(z.object({…optional}))`，`{}` 合法，所以 `$not: {}` 是被声明允许的形状。\n\n- driver-sql：Knex 对空分组直接丢弃整条子句。实测 `knex('deal').where(qb => qb.whereNot(sub => {}))` → `select * from \\`deal\\``，即 **TRUE / 全表**。\n- driver-memory：`match(record, {})` 返回 true → 取反 → **FALSE / 零行**。\n- formula `matches-filter`：`evalNode(record, {})` 空对象循环不执行返回 true → 取反 → **FALSE / 零行**。\n\n按布尔代数 `NOT TRUE ≡ FALSE`，driver-memory / formula 是对的；driver-sql 的 TRUE 是 Knex「空分组不产出 SQL」的**副作用**，不像是有意的决定——而且它的方向是**放宽**（本该零行，实际全表），正是 #2704 / cloud#1073 那一族「静默 filter-bypass」。\n\n## 已经据此落地的东西（供交叉参考）\n\ncloud#1076 的 `RemoteTransport.buildWhereSQL`：\n\n- NULL 语义**跟随 driver-sql**（发 `NOT (…)`，不做 NULL-safe 改写）——远程模式与本地 SqlDriver 是同一族，先保证这两者一致；\n- `$not: {}` 取 **FALSE（`1 = 0`）**——与 driver-memory / formula 一致，也与 cloud#1073 定下的「子过滤器编译为空 = 真值单位元」纪律自洽。\n\n所以现在的状态是：远程 Turso 在 NULL 上跟 SQL 家族，在 `$not: {}` 上跟内存家族——**因为这两族在这两点上各自只有一边是站得住的**。这不是一个能长期维持的形状，需要在 framework 侧定一次。\n\n## 需要决定的\n\n1. **NULL**：`$not` 是否应当 NULL-safe（`NOT (…) OR col IS NULL`，即把「该列没有值」视为「不满足被否定的条件」，与 JS 家族一致），还是保持 SQL 三值逻辑、并把这条差异写进 spec 文档要求内存驱动改成三值？倾向前者——权限规则的作者写 `!(stage == 'won')` 时几乎不会预期「stage 为空的行被排除」，而且 SQL 家族是这里的少数派（2 : 1）。\n2. **`$not: {}`**：driver-sql 应改为显式 FALSE（在子分组编译为空时发方言的 FALSE 常量），与另外两家对齐。这个方向没有争议，只是要有人动 Knex 那段。\n\n两条都属于「declared = enforced」：`$not` 是 spec 声明的算子，声明了就该在所有驱动上给同一个答案。定完后建议在 `packages/formula` 或驱动共享的一致性测试里加一组跨驱动 pin，别只改实现。\n\n## 关联\n\ncloud#1076（远程传输补 `$not`）、cloud#1073 / cloud#1074（布尔单位元）、#2704（driver-sql 加 `$not` 分支）、`packages/formula/src/cel-to-filter.ts`（CEL `!expr` 的降解点）。\n"
+}

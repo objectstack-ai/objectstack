@@ -1,0 +1,36 @@
+{
+  "number": 5177,
+  "kind": "issue",
+  "title": "plugin-email/platform-objects: sys_email 加 headers_json + 有界 attachments_json —— 小附件与自定义 header 取得队列投递资格(#5172 一期)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "enhancement",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T07:49:09Z",
+  "updated_at": "2026-08-04T10:54:32Z",
+  "closed_at": "2026-08-04T10:54:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5177",
+  "body": "Blocked-by: objectstack-ai/objectstack#5161(同包串行:#5160 → #5161 → 本单;#5161 在 email-plugin.ts,本单主体在 email-service.ts + platform-objects,文件面基本不相交,但同包不同批)\n\n维护者两次拍板(2026-08-04,会话内):\n1. #5172 按「headers 先行、附件走 storage 引用」拆分;\n2. 追加:**邮件队列先不支持大附件** —— 小附件设上限内联进行,大附件维持退回内联投递;storage 引用降为二期(#5172,已移出派发队列)。\n\n本单因此覆盖两块同形改动(同三个文件里的加列 + 重建 + 资格判定,拆开纯属自我串行):\n\n## A. headers_json(终态方案)\n\n1. `sys-email.object.ts` 加 `headers_json`(可空 JSON 文本;老行读回 `undefined` 必须安全);\n2. `send()` 落行时持久化 `headers`(两种模式都落,兼有审计价值);\n3. `rowToNormalized()` 重建 `headers`;\n4. headers 不再是退回内联的理由。\n\n## B. attachments_json(一期:有界内联,schema 一次到位)\n\n1. `sys-email.object.ts` 加 `attachments_json`,元素形状**现在就设计成二期可扩展**:\n   ```\n   { filename, contentType, size, hash, inline?: string /* base64 */, storageKey?: string }\n   ```\n   一期只有 `inline` 有生产者;`storageKey` 是二期(#5172)的扩展点 —— 将来支持大附件是给已声明字段补生产者,不动 schema、不迁移数据。字段本身要有 TSDoc 说明 `storageKey` 现阶段无生产者、由 #5172 跟踪,免得被 liveness 扫描误判。\n2. **上限:整封合计 256KB 原始字节(PM 默认,dev 可凭实测理由调整并在 PR 说明)**;写成导出常量,不做配置项——少一个旋钮少一处漂移,有实证需求再提升为设置。\n3. 资格判定:`≤ 上限` → 入队(内容 base64 进 `inline`);`> 上限` → **维持现行为**(退回内联投递 + info 说明,理由文案更新为「附件合计超过 X」)。超限不是错误,最坏结果=今天的现状。\n4. `rowToNormalized()` 重建附件(含 `cid`——检查 `EmailAttachment.cid` 是否也要进元素形状,应该要,内联图片依赖它);\n5. `Buffer` 与 `string` 两种 `content` 形态都要正确编码/还原(契约是 `string | Buffer`)。\n\n## 不在本单\n\n- 大附件 storage 引用 + 内容随终态回收 = #5172(二期,维护者定为暂缓,勿动);\n- ⛔ `packages/spec` 无需动(`headers`/`attachments` 都在契约上)也不许动;⛔ `content/docs/releases/`。\n\n## 验收\n\n- `queueDelivery` 开 + `send({ headers })` → `queued`,worker 投递的消息含全部自定义 header;\n- `queueDelivery` 开 + 小附件(≤上限,含中文文件名、`cid` 内联图、Buffer 与 base64 两种 content)→ `queued`,worker 投递的消息附件完整还原(真 `DbQueueAdapter` + wire 测试断言字节一致);\n- 大附件(>上限)→ 退回内联 + info,文案说明超限,投递内容完整不剥附件;\n- 老行(两列皆无)读取安全;默认(内联)模式行为不变,既有断言零改动;\n- `sys_email` 行体积有界:附件列最坏 ~350KB(256KB 的 base64),有一条用例断言超限内容**不会**落列。"
+}

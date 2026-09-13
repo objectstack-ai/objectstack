@@ -1,0 +1,38 @@
+{
+  "number": 5077,
+  "kind": "issue",
+  "title": "`highlightFields` cannot declare read-only, so the detail page's header chips let users overwrite hook-maintained columns",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "enhancement",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T02:21:07Z",
+  "updated_at": "2026-08-04T10:41:12Z",
+  "closed_at": "2026-08-04T10:41:14Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5077",
+  "body": "## Summary\n\nThe header chip strip on a record detail page is built from the object's `highlightFields`. Those chips are inline-editable and the edits save. There is no way to declare a highlight field read-only, so columns that are exclusively maintained by hooks can be overwritten by anyone who clicks on them.\n\n## Why there is no authoring knob\n\n```ts\nhighlightFields: z.ZodOptional<z.ZodArray<z.ZodString>>;\n// → highlightFields?: string[] | undefined\n```\n\nA plain array of field names. No per-field options at all — no `readonly`, no `disabled`, nothing.\n\n## The three things an app can reach for, and why each fails\n\n1. **View-level `readonly` on the form view's section fields.** This works, but only for the form/dialog render path. The detail page's header chips are a different surface and do not consult it. That asymmetry is the reported symptom: *the create/edit dialog refuses the edit while the detail page accepts it.*\n\n2. **`readonly: true` on the object field.** `stripReadonlyFields` drops caller-supplied readonly keys for any non-`isSystem` context. Our columns are written by **cross-object hooks**, which inherit the acting user's non-`isSystem` context, so marking them readonly makes the hook's writes silently vanish and the columns never update again.\n\n3. **Field-level `editable: false` in a permission set.** `getFieldPermissions` has no super-user bypass — `modifyAllRecords` does not apply at field level, and field-level entries take precedence over the object-level decision. `plugin-security`'s `detectForbiddenWrites` then throws 403 for non-`isSystem` writes, which kills the same hook write-back. Turning it off for the admin turns it off for the hook.\n\nSo an app that has hook-maintained columns and wants them on the header strip has no legal way to protect them.\n\n## Reproduce\n\n1. Declare a column written only by an `afterInsert`/`afterUpdate` hook on another object.\n2. Put it in `highlightFields`, and mark it `readonly` on the form view's section field.\n3. Open the record detail page. The header chip for that column is editable; changing it and saving persists the value, overwriting what the hook computed. The create/edit dialog for the same record refuses the same edit.\n\n## Impact\n\nFor us these are derived business figures — a customer grade written back by a rating approval, and a supply-share percentage rolled up from two child objects. A user clicking a chip silently replaces a computed value with a typed one, with no indication that the column is machine-owned.\n\nA `readonly` flag on `highlightFields` entries — or having the header chips honour the form view's field-level `readonly` — would close this.\n\n## Environment\n\n`@objectstack/*` protocol `^17.0.0-rc.1`, console from `@objectstack/console`, driver-sql on SQLite.\n\nFiled from a downstream app (`hotcrm-heimao`), tracked there as issue #61."
+}

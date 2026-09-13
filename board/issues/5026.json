@@ -1,0 +1,37 @@
+{
+  "number": 5026,
+  "kind": "issue",
+  "title": "validate-expressions.ts 的 field-formula 校验读 `f.formula` —— spec 声明的是 `expression`,这段从未对任何 spec 合法 stack 跑过",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T00:19:53Z",
+  "updated_at": "2026-08-04T05:45:42Z",
+  "closed_at": "2026-08-04T05:45:42Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5026",
+  "body": "#5017 清理这两个文件里的 `??` 别名链时顺带发现的,**形状同族但不是 `??` 链**,所以按 Prime Directive #10 单独记账,不在 #5017 的 PR 范围内。\n\n## 事实\n\n`packages/lint/src/validate-expressions.ts` 的字段公式校验(#5017 分支上约 570-590 行,`if (f.formula) { … }` 整段)读的是 `f.formula`:\n\n```ts\nif (f.formula) {\n  const res = validateExpression('value', f.formula as ..., { objectName, fields, fieldTypes, scope: 'record' });\n  // → `object 'X' · field 'Y' formula` 的 error / warning\n}\n```\n\n`FieldSchema.shape` **没有 `formula` 键**。canonical 是 `expression`,而 `formula` 正是 `field.zod.ts:333` 里按名拒绝的别名:\n\n```\nformula: 'expression', calculation: 'expression', compute: 'expression',\n```\n\n实测(worktree 上 `ObjectStackSchema.safeParse`):\n\n```\nobject w/ field.formula parses? false\n  [\"objects.0.fields.a: Unrecognized key(s) on this field: `formula`. …\n    Did you mean `formula` → `expression`?\"]\nobject w/ field.expression parses? true\n  {\"type\":\"formula\",\"expression\":{\"dialect\":\"cel\",\"source\":\"record.x + 1\"},\"returnType\":\"number\", …}\n```\n\n该规则以 `input: 'parsed'` 注册(`authoring-rules.ts`),所以在 compile/build/validate 路径上看到的是解析产物 —— `f.formula` 恒为 `undefined`。\n\n## 和 #5017 那五条的差别:这条不是\"收敛为 canonical\",是\"canonical 从来没被读过\"\n\n#5017 的每一条都有 canonical limb 在链里,删掉别名 limb 对任何能解析的 stack 零行为变化。这条不同:代码里**根本没有** `f.expression` 的读法。所以\n\n- 现状:字段公式校验对任何 spec 合法 stack 都是**完全不执行**的;\n- 改成读 `f.expression`:等于**启用一条从未跑过的检查**,是覆盖面扩大,可能对现有真实元数据判红。\n\n真实元数据确实全部用 canonical 拼法,即这段今天一条都没覆盖到:\n\n| 位置 | 拼法 |\n|:--|:--|\n| `examples/app-showcase/src/data/objects/project.object.ts:67` | `expression: cel\\`(record.budget == null ? 0 : record.budget) - …\\`` |\n| `examples/app-showcase/src/data/objects/invoice.object.ts:243` | `expression: cel\\`record.quantity * record.unit_price\\`` |\n| `examples/app-showcase/src/data/objects/field-zoo.object.ts:132` | `expression: cel\\`…\\`` |\n| `examples/app-crm/src/objects/{lead,opportunity,contact}.object.ts` | `Field.formula({ expression: … })` |\n\n`validate-expressions.test.ts` 里现存的 7 处 `formula:` fixture(`{ type: 'formula', formula: '…' }`)也都不是 spec 合法的 —— 这段分支今天全部的覆盖来自不能解析的 fixture。\n\n## 需要决定的(所以没顺手改)\n\n1. **直接把 `f.formula` 换成 `f.expression`**:恢复本意的覆盖,但要先验证真实元数据零新红(`value` 角色 + `record` scope,#1928 裸引用告警会一起生效),并把 7 处 fixture 改成 canonical 拼法。\n2. **删掉整段**:与 #5009 删 object-level RLS 同款处置。但这里和那里不同 —— 字段公式**是**真实存在的授权/计算面,只是键名写错了,删掉会丢掉一条本应存在的 gate。\n3. 顺带要一并决定的:`validate-null-guards.ts` 里 `Field.formula` 被明确列为 excluded surface(理由是 `value` 角色天然可空、`guard ? value : null` 是祝福写法)。那条 ledger 说的是\"不给 null-guard gate\",不是\"不给语法/字段存在性校验\" —— 改动 1 不影响它,但注释里的 surface 名要跟着从 `formula` 改成 `expression`。\n\n倾向 **1**,理由两条轴:\n\n- **长期正确性**:这是 declared ≠ enforced 的镜像 —— enforced-against-nothing。规则文件里留着一段读不存在的键的校验,下一位作者(人或 AI)会相信 `field.formula` 是真实的authoring 面并照着写,正是 #5009 在 object-level RLS 上付过的代价。\n- **让 AI 写的元数据难写错**:字段公式是 AI 生成元数据里最容易出裸引用(`amount * probability` 而不是 `record.amount * record.probability`)的槽位之一,而这条检查恰恰是为此存在的(#1928)。让它真的跑起来,比留一条装饰性 gate 强得多。\n\n但 1 是覆盖面扩大、可能对现有真实元数据判红,不该由一个\"删死代码\"的 PR 顺手带上,所以在这里等 maintainer 拍板。\n\n## 参考\n\n- #4984 / #5009 / #5017(同族的 `??` 别名链)、#4001(strict + 别名按名拒绝)、#1928(裸引用/类型健全性)、#4763(null-guard gate)"
+}

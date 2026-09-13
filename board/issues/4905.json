@@ -1,0 +1,36 @@
+{
+  "number": 4905,
+  "kind": "pull_request",
+  "title": "fix(tooling): objectui-range 改读 objectui 声明的 changeset,不再按 commit 类型猜 (#4843)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T15:09:10Z",
+  "updated_at": "2026-08-03T15:18:37Z",
+  "closed_at": "2026-08-03T15:18:35Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T15:18:35Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4905",
+  "body": "Fixes #4843\n\n## 问题\n\n`scripts/objectui-range.mjs` 的产物是**发布页 Console 段落的正文**。它一直沿用 #4731 已经从 `bump-objectui.sh` 里拆掉的那套猜测:\n\n```js\nconst KEEP = ALL_TYPES ? null : new Set(['feat', 'fix']);\n```\n\n比 #4731 轻的地方:过滤在 `--help` 里写明了,也有 `--all`。重的地方:读者拿到的是一份**看不出被过滤过的 markdown** —— 尾部没有任何「另有 N 条被排除」的说明,而 `--all` 不是默认。\n\n## 实测(真实 objectui 检出,非构造)\n\n区间 `7d9734d5e321..785b8a5d432c`,53 个非 merge 提交。跑新旧两套逻辑做集合差:\n\n| | 条数 |\n|:---|---:|\n| 真正发版、但被类型过滤**丢掉** | **13** |\n| 其中带 `!` 的破坏性变更 | **6** |\n| 在 objectui 侧 release-nothing、却被类型过滤**误收** | **5** |\n\n丢掉的 13 条里包括 `refactor(layout)!: delete PageNodeRenderer`、burn ledger batch 2/4/5/6/7,以及 `chore(deps): lockstep the @objectstack family onto 17.0.0-rc.1`。误收的 5 条里有两条 `fix(ci)`(一条完全没有 changeset,一条 changeset 的 frontmatter 是空的)。\n\n**这三个数字与议题正文完全一致 —— 我用真实检出复核过,没有偏差。**\n\n破坏性变更是唯一被类型过滤**结构性**挡在门外的一类,而它出现在一份「以破坏性变更打头」的产物里。\n\n## 改动\n\n### 1. 两处收敛到同一个判据,而不是各写一份\n\n判据抽成 `scripts/objectui-changeset-digest.mjs` 导出的 `classifyRange()`,`buildDigest()`(即 `bump-objectui.sh` 走的路径)和 `objectui-range.mjs` 都走它。复制一份平行实现两边必然漂,而第一个漂掉的就是已经掉过一次的那一类。\n\n复用的既有导出:`collectAddedChangesets()` / `parseChangeset()` / `highestLevel()` / `clampSummary()`。对公开面只做了两处小幅扩展,没有新写平行逻辑:\n\n- `collectAddedChangesets()` 多返回 `commits`(区间内全部非 merge 提交)和 `commitsWithChangesetShas`,这样调用方能**点名**被排除的提交,而不只是数出来;\n- 新增 `classifyRange()`,把原先内嵌在 `buildDigest()` 里的分类循环提出来 —— `buildDigest()` 的返回字段和行为一字未改,它自己的 `--self-test` 20 条断言全绿即为证。\n\n### 2. 排除必须出声\n\n产物是发布页正文,所以**账目是无条件打印的**,零也打印:\n\n```\n_Derived from the changesets objectui declared over this range — 44 releasing of 48\nadded across 53 non-merge commit(s). Excluded as shipping no package code:\n4 release-nothing changesets, 7 commits carrying no changeset (run with `--all` to list them)._\n```\n\n只在「有东西被丢掉时」才出现的脚注,仍然让读者分不清「没丢东西」和「脚注没实现」。\n\n`--all` 语义随之改变:过滤已经不存在了,所以它从「包含所有 commit 类型」变成「**逐条点名**被排除的条目」(release-nothing 的 changeset + 无 changeset 的提交),`--help` 里写明。\n\n### 3. 分组是呈现,不是筛选\n\n标题按 objectui **声明的级别**分组(Breaking changes / Features / Fixes),正好对上发布页的结构(破坏性 → 迁移,minor → 新能力,patch → 修复)。没有任何一处再读 commit 类型来决定收不收 —— commit 的 scope 只用来生成 `_Largest areas_` 那一行和条目前缀,纯呈现。\n\n## 验证\n\n### `--self-test`(按 `scripts/` 既有惯例,折进已有的 `pnpm check:objectui-changeset`)\n\n构造一次性 git 仓库复刻实测到的五种形态,跑真实代码,断言**产物**:\n\n```\nobjectui-range --self-test\n  ✓ a BREAKING `refactor(...)!` commit IS in the pasteable list\n  ✓ breaking changes get their own leading section (declared major)\n  ✓ a releasing non-feat/fix `chore(deps)` commit IS in the list\n  ✓ commit type never filters: all 3 releasing changesets are listed\n  ✓ a `fix(ci)` with an EMPTY frontmatter changeset is NOT listed\n  ✓ a `fix(ci)` with no changeset at all is NOT listed\n  ✓ the release-nothing count is spoken IN THE MARKDOWN, not just in JSON\n  ✓ the no-changeset commit count is spoken IN THE MARKDOWN\n  ✓ the accounting footer is unconditional and states the totals\n  ✓ a range excluding nothing STILL prints the accounting (0, not silence)\n  ✓ `--all` itemizes the excluded commits by subject\n  ✓ the CLI markdown carries the breaking entry and not the ci noise\n  ✓ the CLI JSON reports the declared criterion and the excluded counts\n  ✓ every listed entry carries the level objectui declared\n✓ objectui-range --self-test: all checks passed\n```\n\n`objectui-changeset-digest --self-test` 的 20 条断言同样全绿(重构未改行为)。\n\n### 反向验证 —— 证明这些用例是有承重的\n\n把**同一份**构造 fixture 喂给 `origin/main` 上改动前的 `objectui-range.mjs`,再用新用例的断言去评它。改动前的产物长这样:\n\n```\n（下面第一行本是一条 HTML 注释,GitHub 正文会把它整行吞掉,这里去掉尖括号写出)\n!-- objectui 5b86f5727c8e..3d662d017506 — 3 commit(s) --\n\n_Largest areas: ci (2), grid (1)_\n\n### Features\n- **grid** — aggregate single-call mode for bulk actions (#3201)\n\n### Fixes\n- **ci** — never render a budget FAIL for a run that measured nothing (#3198)\n- **ci** — hand the cross-repo token to github-script (#3186)\n```\n\n失效模式在这几行里一览无余:破坏性的 `refactor(layout)!` 不见了,列出来的两条 `fix(ci)` 恰恰是 objectui 侧什么都不发版的两条,计数写的是「3 commit(s)」而真实区间有 5 条,而且没有任何一处提示这份清单被过滤过。\n\n断言评估结果:\n\n```\n  ✗ FAILS (load-bearing) — a BREAKING `refactor(...)!` commit IS in the pasteable list\n  ✗ FAILS (load-bearing) — breaking changes get their own leading section\n  ✗ FAILS (load-bearing) — a releasing non-feat/fix `chore(deps)` commit IS in the list\n  ✗ FAILS (load-bearing) — a `fix(ci)` with an EMPTY frontmatter changeset is NOT listed\n  ✗ FAILS (load-bearing) — a `fix(ci)` with no changeset at all is NOT listed\n  ✗ FAILS (load-bearing) — the release-nothing count is spoken IN THE MARKDOWN\n  ✗ FAILS (load-bearing) — the no-changeset commit count is spoken IN THE MARKDOWN\n  ✗ FAILS (load-bearing) — the accounting footer is unconditional and states the totals\n\n=> 8 of 8 new assertions FAIL against the pre-change script (0 would mean the tests assert nothing).\n```\n\n8/8 全部失败 —— 用例确实压在改动上,不是一组什么都断言不到的绿灯。\n\n### 其他\n\n- `npx eslint scripts/objectui-range.mjs scripts/objectui-changeset-digest.mjs --no-inline-config` → exit 0\n- `pnpm check:objectui-changeset` → exit 0(两个 self-test 串起来)\n- 在真实检出上跑了 `--json` / `--all` / `--help` / 无 objectui 检出的降级路径\n\n## ⚠️ 需要排队的共享文件\n\n本 PR 动了两个本仓最热的合并冲突点,已尽量压到最小:\n\n- `package.json` —— **改了 1 行既有的**(`check:objectui-changeset` 后面串上第二个 self-test),没有新增 script key;\n- `.github/workflows/lint.yml` —— **只加了 3 行注释**,step 名和 `run:` 都没动。\n\n请据此安排合并顺序。\n\n## 与议题描述的出入\n\n无。议题正文的三个数字(丢 13 / 其中 6 条带 `!` / 误收 5 条含两条 `fix(ci)`)我在真实 objectui 检出上逐条复核过,全部吻合。\n\n一处议题没提、实测才看到的事实值得记一笔:被排除的 7 条「无 changeset」提交里,有两条**确实改了已发布包的源码** —— `fix(charts): name the slices`(动了 `packages/plugin-charts/src/`、`packages/plugin-dashboard/src/`)和 `fix(i18n): resolve qualified view ids`(动了 `packages/i18n/src/`)。旧口径碰巧收了它们,但那是因为 subject 以 `fix` 开头,和是否发版无关;真正的洞在 objectui 侧没有「改了包源码就必须带 changeset」的门禁,以致这两条在 objectui 自己的 CHANGELOG 里也查不到。本 PR 之后它们至少不再无声(计数 + `--all` 点名),但出声不等于修好 —— 已按 Prime Directive #10 另立 **#4904**(未认领),未在本 PR 内扩范围。\n\n## 关联\n\n- #4731 / PR #4842 —— 同一失效模式的 `bump-objectui.sh` 侧,本 PR 复用其导出\n- #3340 —— 两者共同要防的洞\n- #4904 —— 本 PR 实测中发现的上游缺口(另立,未认领)\n"
+}

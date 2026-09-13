@@ -1,0 +1,34 @@
+{
+  "number": 4894,
+  "kind": "issue",
+  "title": "发布 PR(changeset-release/main)常红两处 CI:Check Changeset 结构性必失败 + Scaffold E2E 在 RC 窗口协议大版本错配",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T13:51:34Z",
+  "updated_at": "2026-08-03T14:08:07Z",
+  "closed_at": "2026-08-03T14:08:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4894",
+  "body": "复现于 #4422(`chore: version packages (rc)`,run 30818473499 / 30818474538)。两处失败都不是该 PR 的内容问题,而是两条 CI 闸门自身的缺陷,并且**每一个发布 PR 都会重现**。\n\n## 1. `Check Changeset` 对发布 PR 结构性必失败\n\n`.github/workflows/pr-automation.yml` 的 `changeset-check` 用 `git diff --diff-filter=A \"$BASE_SHA\" HEAD -- '.changeset/*.md'` 数「本 PR 新增了几个 changeset」。这个口径对普通 PR 是对的(#3373 修的就是全局 `find | wc -l` 在 RC 预发布模式下永远非空的问题),但 changesets 的发布 PR 是**消费** changeset 的那一侧,按定义新增数为 0:\n\n```\n##[error]This PR adds no changeset. Run 'pnpm changeset' ...\n```\n\n即闸门对 `changeset-release/main` 只能红,不能绿。发布 PR 由 changesets/action 以 `github-actions[bot]` 身份推送,没人会去给它打 `skip-changeset` 标签,于是 `mergeable_state: blocked` 一直挂着。\n\n**修法**:job 级 `if` 增加发布 PR 豁免,同时钉住分支名 **和** 作者,避免手工建同名分支拿它当逃生口。\n\n## 2. `Scaffold E2E / Scaffold with repo dist` 在 RC 窗口协议大版本错配\n\n日志链条:\n\n```\nnpm error notarget No matching version found for @objectstack/cli@^17.0.0-rc.2.\n##[warning]repo version not published yet — falling back to latest\n...\n✗ package 'e2e-app' targets protocol ^17 (engines.protocol) but this runtime is protocol 16.0.0.\n##[error]server never became healthy\n```\n\n`scaffold-e2e.yml` 的 install 步骤有一个既定的兜底:仓库版本尚未发布时,把生成工程里所有 `@objectstack/*` 依赖改写成 `latest` 再装一次。但兜底**只改依赖,没改 manifest**——脚手架模板的 `objectstack.config.ts` 由 `scripts/sync-template-versions.mjs` 在版本发布时刻死 `engines: { protocol: '^17' }`,而 `latest` dist-tag 在 17 的 RC 窗口里仍指向 16.x 稳定版(protocol 16)。于是 `os start` 的 ADR-0087 D1 握手正确地拒绝了启动。\n\n注意同一个 workflow 的 Docker 步骤**已经**认识到这一类偏移(它读取实际解析到的 CLI 版本来 pin 运行时镜像,而不是硬编码 `latest`),只是 boot 步骤没做对应的对齐。\n\n**修法**:兜底分支在第二次 `npm install` 之后,把生成工程 `objectstack.config.ts` 的 `engines.protocol` 重新盖成**实际装上的** `@objectstack/spec` 大版本(与 `protocol-version.ts` 声明的「protocol 与包自身 major 保持锁步」不变量一致,该不变量由 `protocol-version.test.ts` 守着)。只在兜底分支里改:正常路径下装的就是仓库版本,大版本天然一致,不需要也不应该放松这条断言。\n\n同时保留 `::notice`,让日志里能看出这一轮 e2e 跑的是降级后的协议版本,而不是静默改写。\n\n---\n\n两处都只动 CI workflow,不涉及运行时/发布产物。\n"
+}

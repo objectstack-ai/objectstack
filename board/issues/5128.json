@@ -1,0 +1,35 @@
+{
+  "number": 5128,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): 引用解析不了而整条丢弃的 seed 记录,现在会在 error 级别说出来 (#4997)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T05:31:17Z",
+  "updated_at": "2026-08-04T06:47:04Z",
+  "closed_at": "2026-08-04T06:47:03Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T06:47:03Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5128",
+  "body": "Fixes objectstack-ai/objectstack#4997\n\n## 问题\n\n`packages/metadata-protocol/src/seed-loader.ts` pass-1 的引用解析分支:引用解析不了、且 `multiPass` 关闭(没有 pass 2 来补救)时,**整条记录被丢弃** —— 这是正确的取舍(写下去要么把原始自然键塞进 FK 列,要么在 upsert UPDATE 路径上污染已有行)。丢弃被计数(`errored`)、被上报(`result.errors` → `success: false`),分支自己的注释还写着 \"LOUD\",但这里**没有任何 logger 调用**。\n\n结果就是:一次丢了 N 条记录的 seed,与一次干净的 seed 在控制台上一模一样。唯一的区别是调用方有没有去看 `result.success` —— 而 `packages/runtime` 的若干 seed 调用点只是 `await` 之后继续。\n\n#4729 盘的是本文件的 `this.logger.warn` 调用,所以看不到这一格;`check:durability-log-level` 只扫 `try`/`catch`,这里不是 catch,也扫不到。\n\n## 改动\n\n**1)pass-1 丢弃分支补 `error` 日志(按 AGENTS.md →「Degradation log levels」/ #4632 的两项义务)**\n\n一行里同时给出**后果**与**修复动作**:\n\n> `[SeedLoader] Cannot resolve reference: drop_order.customer_id = 'Ghost Inc' → drop_customer.name not found. drop_order record #1 was NOT seeded AT ALL — the WHOLE record is dropped, not just its \\`customer_id\\` link, because writing it would put the raw natural key 'Ghost Inc' into the FK column (or, on an upsert UPDATE, corrupt the row already there). Nothing retries this: pass 2 is off. Restore the record in one of three ways, then re-run the seed — seed drop_customer BEFORE drop_order so the target row exists; or enable \\`multiPass\\` so pass 2 back-fills the reference once every object is loaded; or fix the natural key in the drop_order seed data so it names a real drop_customer.name.`\n\n三条补救路径就是 issue 列的三条:先种目标对象 / 打开 `multiPass` 让 pass 2 回填 / 修掉 seed 里的自然键。注释里那句名不副实的 \"LOUD: counted + reported\" 也改写成现在真实成立的说法(计数 + 上报 + 日志三者齐了)。\n\n**2)dry-run 分支:维持安静,并把理由写进注释 + 用测试钉住**\n\ndry-run 什么都不写,没有任何损失;它的调用方按定义就是来读结果对象的(`validate()` 的全部意义)。为一次**模拟**结果打 `error`,正是 AGENTS.md 警告的过度施加 —— 训练读者跳过 `error`,而这恰恰是 #4420 那条 `warn` 没人读的成因。所以它保持安静,但这是一个**决定**而不是疏忽,因此有测试钉住:往这个分支加日志会立刻变红。\n\n**3)同一客观判据扫完本文件,顺手对齐了另一处**\n\n判据是 #5001 那一条:*这个结局有没有进 `errors`/`allErrors`?* 全文件只剩一处「进了、却一行日志都没有」—— `resolveDeferredUpdates()` 里的 **\"deferred reference unresolved after pass 2\"**(目标始终没出现)。它的孪生分支(回填 **写**失败)从 #4729 起就在 `error` 上报,而它计数完全相同、日志为零。现在也补上:说清行本身已经种下、关系永久缺失、以及怎么补齐。\n\n## 测试\n\n新增 `packages/metadata-protocol/src/seed-loader-unresolved-drop.test.ts`(5 例):\n\n- multiPass 关闭 + 引用解析不了 → `error` 日志点名 object / record #i / field / target 与三条补救;并且**仍然被计数**(`totalErrored: 1`、`success: false`、行计数仍与 `total` 对账、`referencesDropped` 保持 0 —— 丢的是记录不是字段);\n- 全部解析得开的 load → 控制台一片安静(不训练读者跳过 `error`);\n- dry-run → 结果对象里带着 `[dry-run] Reference may not resolve` 的完整说明,`engine.insert` 一次没调,控制台安静;\n- pass 2 之后仍未解析 → `error` 日志 + 已有计数。\n\n**变异钉(mutation pin)**,三处都验过:\n\n| 变异 | 结果 |\n|:---|:---|\n| 删掉 pass-1 新增的 `logger.error` | `expected \"vi.fn()\" to be called 1 times, but got 0 times` → 红 |\n| 删掉 pass-2 新增的 `logger.error` | 同上 → 红 |\n| 给 dry-run 分支**加**一条 `logger.error` | `expected \"vi.fn()\" to not be called at all, but actually been called 1 times` → 红 |\n\n跑过的命令(均在 `flock /tmp/os-heavy-verify.lock` 下,`NODE_OPTIONS=--max-old-space-size=4096`,`--maxWorkers=2`):\n\n- `pnpm --filter @objectstack/metadata-protocol test` → **37 files / 324 tests passed**\n- `pnpm --filter @objectstack/runtime exec vitest run src/seed-loader.test.ts`(下游消费方)→ **41 passed**\n- `tsc --noEmit`(本包在 #4311 的 DEBT 账本里,无 `typecheck` 脚本):改动前后同为 62 条,**新增 0** —— 新测试文件按 nodenext 用 `./seed-loader.js` 导入,不给账本添噪\n- 门禁:`check:durability-log-level`、`check:startup-registry-verdict`、`check:type-check-coverage`、`check:engine-double-contract`(13 pinned / 31 DEBT / 1 exempt,加文件前后一致)、`check:published-files`、`check:nul-bytes`、`check:doc-authoring`、`check:error-code-casing`、`check:role-word`、`check:adr-anchors`、`check:release-notes`、`check:merge-driver`、`check:docs-audit-scope`、`check:node-version`、`check:driver-conformance`、`check:wildcard-fallthrough`、`check:init-service-contract`、`check:route-envelope`、`check:service-providers`、`check:slot-lookup`、`check:authz-resolver`、`check:org-identifier`、`check:stall-guard`、`check:console-sha`、`check:objectui-changeset` 全绿;`eslint` 干净\n- 本地环境**先天**失败、与本改动无关(在原始树上 `git stash -u` 后复跑同样失败):`check:objectui-pin-fresh`(objectui pin 过期)、`check:i18n` / `check:i18n-coverage`(本 worktree 未全量 build)\n\n## 范围\n\n只动 `seed-loader.ts` + 新测试 + 一个 changeset(`@objectstack/metadata-protocol` patch)。`packages/spec/**` 与生成物零改动;`protocol.ts`(#5088 在飞)零改动;`content/docs/releases/` 未触碰。计数、结果对象形状、`result.errors` 里的 message 一律未变 —— 补的是本该有却没有的控制台输出,不是契约变更。\n\n## 顺带发现(已另开 issue,未在本 PR 修)\n\n- **#5127** —— 同文件 pass 2 里还有一处:目标解析成功、但源记录的内部 id 在 `insertedRecords` 里找不到(`if (recordId)` 没有 `else`),这条 deferred 回填**既不计数也不打日志**,只在结果对象里留下一个永远挂账的 `referencesDeferred`。它连计数都没有,不在本 issue 的判据内,故单开。\n- **门禁是否要扩**:`check:durability-log-level` 只扫 `try`/`catch`,看不到这一类「非 catch 的静默丢弃」。按 #5062 刚返修过该脚本、同文件避免连续改动的纪律,本 PR **不动它**。是否值得为这一形态单开一个扫描器,我的判断是**值得,但要单开 issue 单独讨论**:它需要的判据(「一个分支写了 `errors`/`allErrors` 却没有 logger 调用」)是可 AST 化的,而且这轮两条发现都出自人工盘点,说明这个形态会复发;但它的假阳性面比 catch 大得多(dry-run 这类「安静是正确答案」的分支必须先有基线/豁免机制),所以不适合作为本 PR 的搭车项。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01NrmBxj8rK2uGCnh9aipjwX)_"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 4800,
+  "kind": "issue",
+  "title": "批量写上 hook 的 previous:B1 已拍板(fail loud 无例外,并入 #4775);本条转为「批量写 hook 按行触发」设计卡孵化点",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T07:08:08Z",
+  "updated_at": "2026-08-04T15:11:25Z",
+  "closed_at": "2026-08-04T15:11:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4800",
+  "body": "## 来源\n\n\\#4784(PR #4799)把 hook `condition` 的 CEL 作用域扩成 `record` + `previous`。单记录 update 那条路已经完整:`previous` 搭 `engine.update` 既有的那一次 prior 取数,总全、不回灌、insert 上不绑定(与 validation 侧逐字一致)。\n\n**predicate(`multi: true`)批量更新这条路没有答案**,#4784 的拍板意见里也没有 —— 它恰恰是 issue 原文点名「要先定『拿不到时 `previous` 是什么』」的那一格。\n\n## 现状\n\n`engine.ts` 的批量分支:\n\n- hooks 只触发**一次**(`triggerHooks('afterUpdate', hookContext)`),`hookContext.previous` **从不赋值**(`if (priorRecord)` 只在单 id 分支成立);\n- 一次写入匹配 N 行,所以没有**单一**的前置记录可以绑给那一次 hook 调用;\n- 因此 #4799 之后,批量更新上 `previous` 保持**不绑定** —— 一条 `previous.done != true && record.done == true` 的条件不可求值,今天的表现是 warn + 当作 false(hook 跳过)。\n\n对照:validation 侧在批量上是**有**答案的 —— `rulesNeedRows` 逐行取 prior,`evaluateValidationRules` **每行调一次**(#3106)。hook 没有这个「每行一次」的形状,所以不能照抄。\n\n## 为什么现在值得单独定夺\n\n\\#4775 已拍板方案 B:条件求不出值 → **抛错中断该次操作**。落地之后,只要某个对象上有一条引用 `previous` 的 hook 条件,该对象的**每一次批量更新都会写入失败** —— 失败原因还指向一个跟这次写入无关的 hook。#4784 修好的是「照文档写的 hook 不再静默失效」,这一格是它剩下的、会在 #4775 之后变成事故的部分。\n\n派发 #4784 时给的成本提示是「引用 `previous` 会让 bulk predicate update 逐行取数」。逐行取数本身不难(复用 `rulesNeedRows` 那条路),难的是**取回来之后绑给谁** —— 一次 hook 调用配 N 行前态。所以 #4799 的文档写的是实际行为(bulk 上不绑定),没有写那句提示,以免又一次 declared ≠ delivered。\n\n## 可选方案(两条轴)\n\n### A. 批量写上按行触发带 `previous` 条件的 hook\n\n引用 `previous` 的条件 → 逐行取 prior → 该 hook 按行求值、按行触发,`ctx.previous` = 该行。\n\n- **长远合理性**:好 —— 语义上批量更新就是 N 次记录变更,审计/过渡类 hook 本来就该按行看到。与 validation 侧 #3106 的「一份 payload,N 个前态」同源。\n- **防 AI 写错**:好 —— 作者写的过渡条件在单记录和批量上含义一致,不需要记住「批量上这条不成立」。\n- **代价**:改变 hook 契约 —— 同一个 hook 在批量写上从触发 1 次变成 N 次,`ctx.result` 的形状也要跟着定(整批 vs 单行)。**只对引用 `previous` 的 hook 这么做会更糟**:行为取决于条件文本,那是隐性规则。要做就得想清楚是否对所有 after 型 hook 统一按行。\n\n### B. 明确批量上 `previous` 不可用,并给一条专门的诊断\n\n保持不绑定,但在 #4775 的 fail loud 里为这一格出一条点名的错误(「hook 条件引用了 `previous`,但这是一次 predicate 批量更新,没有单一前置记录;请改用单记录写入,或把过渡语义放到 record-change flow trigger」),而不是默认的 `No such key: previous`。\n\n- **长远合理性**:中 —— 不动 hook 契约,但把「过渡语义在批量写上不可表达」写死成平台性质。\n- **防 AI 写错**:中上 —— 错误响亮且指路,但 AI 仍会先写出错的形状再被拒。\n- **代价**:批量写入仍然会失败(只是失败信息有用了)。等于把成本转嫁给作者。\n\n### C. 批量写上跳过引用 `previous` 的条件(视作不适用,不阻断写入)\n\n- **长远合理性**:差 —— 这正是 #4775 判过死刑的「静默当 false」,只是换了个名字。\n- **防 AI 写错**:差 —— 审计漏记是不可见的缺失。\n- 记在这里只为把选项列全,不建议。\n\n## 建议\n\n**A**,若一次做不动则先上 **B**(它与 #4775 同批即可完成,成本低),把 A 留给「after 型 hook 在批量写上是否统一按行触发」那次更大的定夺。理由沿两条轴:长远上 A 才是让 hook 与 validation 对同一件事给同一个答案(#3106 已经在 validation 侧付过这笔设计成本);防 AI 写错上,A 让作者只需要记一套过渡写法,而 B 要求他们记住一条例外 —— 但 B 至少让例外**响亮**,远好过今天的静默。\n\n## 关联\n\n- 来源:#4784 / PR #4799(`previous` 进 hook condition 作用域)\n- 依赖方向:**#4775 落地前需要有答案**,否则批量写入会因为一条无关的 hook 条件而失败\n- 先例:#3106(validation 在批量写上逐行求值)、#4649(`previous` 总全 + fail closed)\n"
+}

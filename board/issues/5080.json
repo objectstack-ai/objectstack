@@ -1,0 +1,36 @@
+{
+  "number": 5080,
+  "kind": "issue",
+  "title": "E1(#5040 执行器契约面):`IMetadataService.matchEndpoint?` / `generateOpenApi?` + `IHttpServer.setFallbackHandler?` 可选契约方法与契约测试",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T02:52:58Z",
+  "updated_at": "2026-08-04T04:37:50Z",
+  "closed_at": "2026-08-04T04:37:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5080",
+  "body": "Part of objectstack-ai/objectstack#5040(E 系列第 1 单,contract-first 首件)。**⛔ Blocked-by: v17 切版** —— 按 #4936 裁决的分期(v17 = 响亮拒绝,17.x = 执行器),本单在 `.changeset/pre.json` 退出 `mode: pre` / `tag: rc`(即 v17 发版)之前**不可派发**;认领前先核该文件现状,窗口未关即让行。维护者已批准提前入队占位(2026-08-04)。\n\n## 范围(纯声明 + 契约测试,零行为变更)\n\n依 #5040 设计文档(§1-C / §2 / §3.5,[设计全文](https://github.com/objectstack-ai/objectstack/issues/5040#issuecomment-5173362383))与 ADR-0121:\n\n1. **`IMetadataService.matchEndpoint?`**(`packages/spec/src/contracts/metadata-service.ts`):可选成员,与既有 `watch?` 同风格。签名按设计 §2:\n\n   ```ts\n   matchEndpoint?(query: { path: string; method: string }): Promise<ApiEndpointMatch | undefined>;\n   interface ApiEndpointMatch {\n     endpoint: ApiEndpoint;            // ApiEndpointSchema.parse 后形状,默认值已物化\n     params: Record<string, string>;   // 17.x 恒 {};为未来路径模板预留,不定义模板语法\n   }\n   ```\n\n2. **`IMetadataService.generateOpenApi?`**:同文件,可选成员。⚠️ describe/注释中须注明:`GET /openapi.json` 现属主为 `packages/rest`(#5078 实测),该方法接线前必须先裁「一路一主」(E6 前置)—— 契约声明不预设裁决结果。\n3. **`IHttpServer.setFallbackHandler?`**(`packages/spec/src/contracts/http-server.ts`):设计 §1 方案 C 的传输层兜底 seam,可选方法;语义:仅在全部显式路由未命中后调用,handler 契约含 `req.body` 可读(与 `use()` 的「body 不填充」契约区分,`adapter.ts:362`)。\n4. 三者的契约测试(与既有 contracts 测试同风格),及生成物如受影响(`api-surface.json` 等)整体重生成 —— os-regen 四步纪律照旧。\n\n## 约束\n\n- 词表冻结:`ApiEndpointSchema` 零改动(ADR-0121;命名空间 publish 门属 E7,不在本单);\n- 可选方法 = 消费端 `typeof === 'function'` 探测,契约先行不阻塞 runtime 侧(E2/E3 `Blocked-by:` 本单);\n- 认领时按 #4604 协调要求声明完整文件面(contracts 两文件 + 测试 + 生成物)。\n\n## 关联\n\nADR-0121(D1–D7)、#5040(E 系列总表;E2/E3 待本单)、#4936 / #4939 / PR #5065(阶段一,已合入 `29c6c9d`)、#5078(E6 前置,`domain:cli`)、#4910-Q1(`server:` seam 先例)。\n\n来源:执行器车道 PM `session_01EYGdmvWP1ieZSLqvAW6uyd` 按维护者批准转交 spec 车道(跨车道转移协议:队列标签即通道)。"
+}

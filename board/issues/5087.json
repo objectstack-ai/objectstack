@@ -1,0 +1,37 @@
+{
+  "number": 5087,
+  "kind": "issue",
+  "title": "plugin-email: 实现 SMTP transport —— 设置页可选 SMTP 但后端无实现",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T03:46:08Z",
+  "updated_at": "2026-08-04T05:10:26Z",
+  "closed_at": "2026-08-04T05:10:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5087",
+  "body": "## 问题\n\n`plugin-email` 目前只有 Resend / Postmark 两个真实投递 transport,**没有 SMTP transport**。但 Mail Delivery 设置页(`packages/services/service-settings/src/manifests/mail.manifest.ts`)把 SMTP 列为默认 provider,并提供 host / port / TLS / username / password 完整表单——用户填完保存后,transport 实际原地不动(仍是 LogTransport),邮件只写日志和 `sys_email` 表,不会真正发出。界面承诺与后端实现之间存在缺口。\n\n代码里的现状注释(`packages/plugins/plugin-email/src/email-plugin.ts` → `applyMailSettings`):\n\n> No SMTP transport ships in core; … Users wanting real SMTP install `@objectstack/plugin-mail-smtp` and configure it via constructor opts.\n\n而 `@objectstack/plugin-mail-smtp` 这个包在仓库中**并不存在**,该指引目前无法落地。\n\n## 影响\n\n- 选择 SMTP 的用户会误以为已配置成功(表单校验通过、保存成功),实际邮件静默不发——declared-but-not-delivered。\n- **国内部署场景无任何可用发信通道**:Resend / Postmark 均为国外 SaaS,国内可达性与对国内邮箱(QQ / 163 等)的送达率均不可靠;国内正路是企业邮箱或阿里云邮件推送 / 腾讯云 SES 的 SMTP 通道,SMTP 一通即全部打通。\n\n## 建议范围\n\n1. 在 `plugin-email` 新增 `SmtpTransport`(实现 `IEmailTransport`),支持 host / port / secure(TLS) / user / password,与 `mail` 设置命名空间现有字段(`smtp_host` / `smtp_port` / `smtp_secure` / `smtp_user` / `smtp_password`)对齐。\n2. `applyMailSettings` 中 `provider === 'smtp'` 分支从「no-op + 日志」改为真实构建/热替换 SMTP transport;`mail/test` 动作(发送测试邮件)同步走通。\n3. CLI `serve` 装配路径(`OS_EMAIL_PROVIDER=smtp` + 相应 env)打通。\n4. 实现方式待定:引入 nodemailer 依赖,或按仓库零依赖偏好(Resend/Postmark 均为纯 fetch)自研最小 SMTP 客户端——需要权衡 STARTTLS / AUTH 的实现成本。\n\n## 不在本 issue 范围\n\n设置页还列出 SendGrid / Amazon SES 选项,同样后端无实现——属另一问题,按一事一议另行处理(SMTP 打通后,这两家也可直接走各自的 SMTP 端点作为过渡)。\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 5119,
+  "kind": "pull_request",
+  "title": "fix(service-analytics): executeRawSql 桥接透传 objectName —— dataset 原始 SQL 打回对象自己的 datasource (#5033)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T05:24:17Z",
+  "updated_at": "2026-08-04T05:34:56Z",
+  "closed_at": "2026-08-04T05:34:55Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T05:34:55Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5119",
+  "body": "Fixes objectstack-ai/objectstack#5033\n\n## 结论\n\n`AnalyticsServicePlugin` 的 `executeRawSql` 自动桥接收到了对象名却把它丢掉了 —— `engine.execute(knexSql, { args: params })`。`ObjectQL.execute()` 的驱动选择顺序是 `options.object` → `getDriver(object)`,其次 `options.datasource`,最后默认驱动;第 1 条永远走不到,于是**每一次 dataset 原始 SQL 读都打在默认 datasource 上**。凡被路由到别处的对象(ADR-0057 §3.6 telemetry 拆分、显式 `object.datasource`、`datasourceMapping` 规则)都读到 `no such table`,再被 widget 层的优雅降级换成一个自信的 `0` —— 而底下是真实存在的行。\n\n桥接现在传 `{ args: params, object: objectName }`,与同文件里一直路由正确的 `executeAggregate`(`engine.aggregate(objectName, …)`)同姿态。两条 dataset 执行路径从此对「这个对象在哪个库里」给**同一个答案**,选中哪条策略不再决定你读到的是数据还是零。\n\n顺带把 `DataEngineLike.execute` 的 options 从 `Record< string, unknown >` 展开成具名的 `{ args?, object? }`:这个键是承重的,应该在调用点就看得见,而不是藏在一个什么都收的索引签名里。\n\n⛔ `packages/spec/**` 与生成物零改动 —— `engine.execute` 的契约本来就声明了 `object` 优先级(见 `packages/objectql/src/engine.ts` 的 `execute()` 注释),本单只是把丢掉路由键的那个消费者修回声明,不需要动契约。`packages/objectql/**` 只读未改;`metadata-protocol/src/protocol.ts` 未触碰;`content/docs/releases/` 未触碰。\n\n## 已接受的行为变更:跨 datasource 的 dataset JOIN 现在响亮失败\n\n`NativeSQLStrategy` 为点号维度(`account.region`)生成 `LEFT JOIN`。语句现在跑在基对象自己的 datasource 上,join 目标要是不在那个库里,就会在那里失败 —— 而不再像以前那样静默读错库。这是对的(fail-loud),但它**必须以自己的身份失败**:如果继续报「backing object … is unavailable」并返回空结果,那就是换了个原因让同一个自信的 `0` 活下来,而且基表明明就在那儿。\n\n所以缺表分诊现在问的是「驱动指名的是**哪张**表」:\n\n| 驱动指名的关系 | 处理 |\n|:---|:---|\n| dataset 自己的 object | 降级成空结果 + WARN(**不变**,这正是降级存在的理由) |\n| 某张 join 表,但该 object 在本 kernel 根本没注册 | 降级(真实缺席,形状不变) |\n| 某张 join 表,且该 object **已注册** | 抛错,指名表 X、基对象所在的 datasource、X 实际所在的 datasource,以及修法 |\n\n第三行的实际文案:\n\n```\n[Analytics] dataset \"audit_by_actor\" cannot be executed as one statement:\ntable \"account\" is not on datasource \"telemetry\", which is where its base object\n\"sys_audit_log\" lives — \"account\" is registered on the default datasource.\nA dataset JOIN cannot cross datasources. Fix it by binding both objects to the\nsame datasource, or by dropping the cross-datasource relationship from the\ndataset's `include`/dimensions.\n```\n\n`AnalyticsServiceConfig` 为此新增一个**仅用于诊断**的可选钩子 `getObjectDatasource(objectName)`,由 `plugin.ts` 从 engine 的 schema registry 接出。它不参与任何驱动选择。\n\n> 派发裁定里的方向 3(widget 在底层表不可用时渲染 \"not available\" 而非 `0`)不在本单内 —— 那是跨 objectui 的 UI/契约语义问题。本单只保证:服务端对**真正缺表**的降级日志继续存在,而**被误路由**的那批场景修完后根本不会再走到降级路径。\n\n## 测试\n\n新增 `packages/services/service-analytics/src/__tests__/raw-sql-object-routing.test.ts`,沿用 `execution-context-bridge.test.ts` 立下的 `fakePluginContext` 惯例,**驱动真实的 plugin 装配**,对着一个「按 `execute()` 文档的顺序解析驱动」的 engine double 跑 —— 这个缺陷对每一个直接 stub `executeRawSql` 的测试都是不可见的,这也是它活到现在的原因。\n\n9 个用例:\n\n- 桥接把 `object` 交给 `engine.execute`(驱动选择的第一把钥匙);\n- **issue 的原样**:同一个 telemetry 路由对象,原始 SQL 路径与对象路由的 aggregate 路径**返回同一批行**;\n- 该场景不再触达降级路径(有行、无 `is unavailable` WARN);\n- 默认 datasource 的对象原地不动(指名对象后仍解析到同一个默认驱动);\n- 跨 datasource JOIN:拒绝而非降级成空结果;\n- 错误文案指名表 X + datasource Y + 修法,且**不是**误导性的旧形状;\n- 拓扑错误不打 widget 降级 WARN;\n- dataset 自己的 object 缺表 → 空结果 + WARN(降级存活);\n- join 目标 object 在本 kernel 未注册 → 降级而非抛错。\n\n### 本地闸门\n\n```\npnpm --filter @objectstack/service-analytics test\n  Test Files  40 passed (40)\n       Tests  529 passed (529)\n\nvitest run src/__tests__/raw-sql-object-routing.test.ts --reporter=verbose\n  Test Files  1 passed (1)\n       Tests  9 passed (9)\n\ntsc --noEmit -p packages/services/service-analytics/tsconfig.json\n  8 errors, 全部在本 PR 未触碰的文件里\n  (analytics-service.test.ts / measure-source-field-gate.test.ts /\n   objectql-timedimension-projection.test.ts) —— 本 PR 新增 0 个\n\neslint --no-inline-config <三个改动文件>   → clean\n\n23 个仓级 check 脚本:22 绿。唯一红的 check:i18n 与本 diff 无关 ——\n它经 CLI 跑 extract,而本 worktree 没有 packages/cli/dist,报的是\n\"command i18n:extract:… not found\"。已用 git stash 把工作树退回\norigin/main 复验:同样 EXIT=1。CI 全新 checkout + build,不受影响。\n```\n\n`@objectstack/service-analytics` 的 patch 级 changeset 已随本 PR 提交(`.changeset/analytics-raw-sql-object-routing.md`),内含上面那条行为变更的说明与迁移指引。\n\n## 范围外发现\n\n- **#5115** —— 跨 datasource 的 dataset JOIN 应当在**编译/发布期**就被拒绝,而不是留到查询期才响亮失败。这是纯元数据错误,在编译期完全可判定(问每个参与对象绑在哪个 datasource 上就够了),按 Prime Directive #12 属于「在 producer 端修、在 authoring 期响亮拒绝」。派发裁定明确本轮不做,单独记账。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01NrmBxj8rK2uGCnh9aipjwX\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01NrmBxj8rK2uGCnh9aipjwX)_"
+}

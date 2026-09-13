@@ -1,0 +1,35 @@
+{
+  "number": 5195,
+  "kind": "issue",
+  "title": "finding(objectql): lifecycle 的 settings 覆盖窗口没有下限校验 —— 运维把 maxAge 调到某个消费方的假设之下时,后果是静默的(以 sys_job_queue 去重窗为例)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T08:29:00Z",
+  "updated_at": "2026-08-04T10:51:54Z",
+  "closed_at": "2026-08-04T10:51:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5195",
+  "body": "观察类 finding,来自 #5179 的实现(PR #5192)。**默认部署撞不到**,只有运维主动下调覆盖窗口才会发生。\n\n## 事实(`origin/main` + #5192)\n\n- ADR-0057 P4 允许经 `lifecycle` settings 命名空间按环境/租户覆盖任一对象的 `retention.maxAge`(`lifecycle-service.ts:670` 的 `effectiveWindowMs`:覆盖值胜过声明值,只在**解析失败**时回落到声明值);\n- 也就是说覆盖只有「能不能解析」这一道校验,**没有任何下限**;\n- #5192 让 `DbQueueAdapter` 的去重契约建立在 `sys_job_queue` 声明的保留窗上(去重按 `created_at` 比 `idempotencyWindowMs`,reaper 按同一根轴切),并在构造时强制 `idempotencyWindowMs ≤ 声明保留窗`;\n- 但构造时读的是**对象声明**,读不到 settings 覆盖。运维把 `lifecycle.overrides.sys_job_queue.maxAge` 设成 `'1h'`,则 completed 行 1 小时就被清,而 publish 仍以为 24 小时内的重复会被挡 —— 窗口内的重复 publish 被重新接受,**日志里一行都没有**。\n- 这个形状不是队列独有:任何「消费方对保留窗有下限假设」的表都同理(#5192 的 README 只能写一句「Keep it ≥ your idempotency window」提醒人)。\n\n## 可能的形状(供定夺,别当成 #5179 的搭车)\n\n1. 声明侧加 `retention.minAge` / 或让 `LifecycleService` 在应用覆盖时 clamp 到声明值的某个下限,越界就 warn 并拒绝该覆盖(声明 = 契约,覆盖只能在契约允许的范围内动);\n2. 消费方侧:给需要下限的对象注册一个「窗口消费者」登记,sweep 时校验;\n3. 什么都不做,只在文档里写清楚 —— 但这正是 #5179 反对的那种「静默」。\n\n倾向 1:与「declared = enforced」一致,且把错误挡在配置时而不是几天后的重复投递上。\n\nFound-during: #5179 / PR #5192\n"
+}

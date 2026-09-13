@@ -1,0 +1,36 @@
+{
+  "number": 5131,
+  "kind": "issue",
+  "title": "service-settings: select 型 specifier 的 options 在保存期完全不校验 —— 声明的枚举不被强制",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T05:44:30Z",
+  "updated_at": "2026-08-04T06:51:52Z",
+  "closed_at": "2026-08-04T06:51:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5131",
+  "body": "做 #5094 时路过发现,与该 issue 的修复范围无关(#5094 只收紧了 `mail` 一个 manifest 的选项表),单独记录。\n\n## 现状\n\n`SettingsService.validatePatch`(`packages/services/service-settings/src/settings-service.ts`,约 618-700 行)的 docstring 写明它「fulfilling the spec promise that `required` is enforced server-side」,实际执行的校验只有两项:\n\n- `required` + visible + 空 → 拒绝;\n- `pattern`(text)不匹配 → 拒绝。\n\n**`select` 型 specifier 的 `options` 从头到尾没有参与校验。** 于是任意字符串都能被写进一个下拉字段:\n\n```ts\nawait svc.setMany('mail', { provider: 'sendgrid', from_email: 'a@b.com' }); // 成功\nawait svc.setMany('mail', { provider: '随便什么',  from_email: 'a@b.com' }); // 也成功\n```\n\n这不是 `mail` 专有的:`storage.adapter`、`sms.provider`、`ai.provider`、`localization.date_format` 等所有 `type: 'select'` 的键都一样。\n\n## 影响\n\nmanifest 里的 `options` 今天是纯前端约定 —— 控制台下拉框只会发出合法值,所以走 UI 的管理员碰不到;但 `PUT /api/settings/:ns` 是公开的可授权面,脚本、迁移工具、AI 写的初始化代码都可以直接写入枚举外的值,而且写入后**一路静默**:值存下来了,读回来了,消费端各自随机应对。\n\n#5094 处理的存量 `sendgrid` / `ses` 正是这种值的一个实例 —— 那批是历史 manifest 留下的,而这条缺口意味着**同样的值今天仍然可以被重新写进去**,#5094 在 manifest 侧收紧的契约在 API 侧没有对应的闸门。同类形态在本仓的判例是「declared ≠ enforced」:声明了枚举就要在写入期强制,否则声明只是注释。\n\n## 建议\n\n在 `validatePatch` 里给 `select`(以及 `multiselect`,如果有)加一条:值非空且不在 `options` 的 `value` 集合内 → `FieldError`,`code` 用新的 `invalid_option`(ADR-0114 要求 constraint kind 在失败点打戳,不要让路由层从文案反推),`constraint` 带上允许值列表,让客户端能自己组织文案。\n\n两个需要一起想清楚的点,建议实现时先给出判断:\n\n1. **存量越界值怎么办。** 只在「patch 触碰到该键」时校验(与现有 required/pattern 的 touch 语义一致),这样一个只改 `from_name` 的 patch 不会因为库里躺着一个老的 `provider` 值而被整体拒绝。否则任何带历史脏值的工作区都会被锁死在设置页里改不动任何东西 —— 那比现在更糟。\n2. **是否要有逃生舱。** 若某些 manifest 的 select 需要接受自定义值(未见实例,但值得确认),需要 spec 侧有 `allowCustom` 之类的显式声明,而不是靠消费端宽容。这一步会动 `packages/spec`,而 #4001 / #5011 正在 spec 内作业,车道未空 —— 若结论是需要 spec 改动,应拆单排队。\n"
+}

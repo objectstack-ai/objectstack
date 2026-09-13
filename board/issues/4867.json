@@ -1,0 +1,36 @@
+{
+  "number": 4867,
+  "kind": "issue",
+  "title": "[metadata-protocol] SysMetadataRepository 的 nextEventSeq()/nextItemVersion() 同样把读失败当「表还没建」，静默从 1 重新发号 —— #4825 在 canonical 路径上的同形缺陷",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T11:18:47Z",
+  "updated_at": "2026-08-03T19:07:46Z",
+  "closed_at": "2026-08-03T19:07:46Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4867",
+  "body": "发现于 #4825（修 `DatabaseLoader.nextEventSeq()`）。**仅记录，未在该 PR 中修改** —— 落点在另一个包（`packages/metadata-protocol`），按 Prime Directive #10 单开。\n\n## 现象\n\n`packages/metadata-protocol/src/sys-metadata-repository.ts` 有两个同形的 `catch`：\n\n```ts\n// nextEventSeq(ctx) — 约 1051 行\n    return max + 1;\n  } catch {\n    // Table not provisioned yet (fresh DB) — start at 1.\n    return 1;\n  }\n```\n\n```ts\n// nextItemVersion(ref, ctx) — 紧随其后\n    return max + 1;\n  } catch {\n    return 1;\n  }\n```\n\n两者都读 `sys_metadata_history`，都把**全部**读失败折成 `return 1`。\n\n## 为什么值得单开（比 #4825 更该修，不是更不该）\n\n#4825 修的是 `DatabaseLoader` —— TSDoc 自称 legacy、非事务的那条路径。**这里是 canonical 路径**：#4825 的正文与分诊都把 `SysMetadataRepository` 称作「历史写入应当收敛过去的地方」。同一个缺陷在目的地上原样存在。\n\n而且这里有两个数字，不是一个：\n\n- `event_seq` —— 历史排序 / 回滚定位的依据。已有 N 行时一次瞬时读失败让下一条拿到 `1`，与既有行撞号；\n- `version` —— `nextItemVersion()` 的 TSDoc 明说它刻意从 history 取 MAX「so delete + recreate continues incrementing instead of restarting at 1」。一次读失败正好把它**恢复成它明确要避免的那个行为**：lineage 从 1 重启，与既有 lineage 行撞号。而 `MetadataManager.rollback(type, name, version)` 与 `POST /api/v1/meta/:type/:name/rollback` 正是按 `version` 定位快照的 —— 撞号之后回滚可能指向另一条记录的同号版本。\n\n关键危害与 #4825 相同，是「**落盘的字节是错的**」而不是「字节没落盘」：insert 成功、日志一行没有、系统对外完全正常，错误只在版本顺序里，重试不修、重启也不修。\n\n有一点值得注意但不改变结论：这两个调用都在事务里（`put`/`delete` 的 txn body）。事务解决的是**并发**撞号，解决不了**读失败被折成 1**——一个成功提交的事务照样可以提交一个错号。\n\n## 建议\n\n与 #4825 落地的方案一致，直接复用它的判别器，不要另起一套：\n\n- `packages/metadata/src/utils/schema-sync-errors.ts` 里的 `isMissingTableError()`（#4825 新增，与 #4728 的 `isSchemaAlreadyExistsError()` 共用同一个 code / errno / message + `cause` 链匹配器）；\n- 只在**确实是表不存在**时返回 1；其余读失败按 AGENTS.md「Degradation log levels」以 `error` 上报后果（序号将从 1 重新发号、与既有行撞号、版本顺序与回滚目标不可信）并抛出，让调用方决定。\n\n⚠️ 跨包复用需要先定一件事：该判别器目前是 `@objectstack/metadata` 的**内部**工具（未从包入口导出），而 `@objectstack/metadata-protocol` 是另一个包。三个选项，值得在动手前定：\n\n1. 从 `@objectstack/metadata` 导出（最小改动，但把一个内部工具变成公共 API 面）；\n2. 下沉到两个包共同的依赖里（`@objectstack/types` 或 `@objectstack/spec/shared`）—— 注意 Prime Directive #2：`packages/spec` 不放业务逻辑，错误分类算不算，需要判断；\n3. 在 `metadata-protocol` 里复制一份 —— **不建议**，正是 #4825 刻意避免的「同一问题两套判别」。\n\n倾向 2（若落点合法）或 1，由维护者定。\n\n## 参考\n\n- #4825（`DatabaseLoader.nextEventSeq()`，同形，已修）\n- #4728（`ensureSchema()` 的同形缺陷，已修）、#4632（降级日志级别规则 + gate）、#4420（事故）、#4471（根因模式）\n"
+}

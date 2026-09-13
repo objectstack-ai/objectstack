@@ -1,0 +1,35 @@
+{
+  "number": 5070,
+  "kind": "pull_request",
+  "title": "feat(spec)!: view.zod.ts 子块收紧 —— 20 站点收 15 留 5(#4001 批 18)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T02:11:16Z",
+  "updated_at": "2026-08-04T05:44:24Z",
+  "closed_at": "2026-08-04T05:44:22Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T05:44:22Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5070",
+  "body": "Part of objectstack-ai/objectstack#4001 —— ui/ 波次批 18(`packages/spec/src/ui/view.zod.ts`,T1 必保)。\n\n账面 20 个 strip 站点,**收紧 15,留开 5**。留开的每一个都是实测判定,不是没做完 —— 三处落锚(schema JSDoc + `view-strictness-batch18.test.ts` + 台账 ui 行)。\n\n## ⚠️ 本批最有价值的一条:收了又退的 `ListView.sort`\n\n`sort` 一度收紧成功,还带着本批最好的一条策展 —— `direction → order`(#4721 给 `SortNodeSchema` 同一个二键元组定的别名;那边实测 `{field, direction:'desc'}` 解成 `{field, order:'asc'}`,**静默按相反方向排序**)。\n\n**全量套件把它抓了回来**:`view-metadata-schema.test.ts` 钉着 `sort: [{ id, field, order }]`,注释写明那是「控制台按列排序 PUT 时 `normalizeViewMetadata` 落盘的确切形状」,而那个 `id` 是 objectui 逐行盖的 UI 行标识(`components/src/custom/sort-builder.tsx:68` / `:94`,`crypto.randomUUID()`)。收紧 = **控制台点一次排序就 422**。\n\n### 机理(比这个站点本身值钱,且与本文件块注释所暗示的相反)\n\n**`.strip()` 不递归,和 `.strict()` 一样不递归。**\n\n`ViewMetadataSchema` 靠扁平成员上的 `.strip()` 放行 Studio 往返辅助键 —— 但那只重新打开**顶层**。任何在 `ListViewSchema` 内部被收紧的**嵌套块**仍经由该成员被解析,所以嵌套块里一个控制台盖的键**无论成员姿态如何都会 422**。块注释读起来像是救援能一路到底;它不能,现已就地改成实测描述,并在测试里钉住这条递归性质:\n\n```\n顶层 aux 键随行  -> ViewMetadataSchema.safeParse({...overlay, someStudioAuxKey:1}).success === true\n嵌套已关块仍拒   -> ViewMetadataSchema.safeParse({...overlay, emptyState:{title:'x', notAnEmptyStateKey:1}}).success === false\n```\n\n### 为什么**没有**顺手声明 `id`\n\n它是 React 列表键,不是协议。声明它等于把 UI 造物放进可授权面,并**教 AI 作者去生成一个 UUID** —— 正是本战役要杀的「声明即鼓励」。这是 `??` 兜底换了身 schema 外衣。故回退单个站点,终态是 #5074 的授权/wire 拆分**下沉一层**。\n\n### 同一机理向外追,抓到 main 上的现存 bug → #5114(已立案)\n\n`ViewFilterRuleSchema` 由**更早的批次**收紧,而 `filter-builder.tsx:228` 盖同款 `id`。实测三条路径(含扁平 overlay)全被拒 —— **今天在控制台保存筛选条件就会 422**。已如实标注「未跑真实 app 端到端复现」。\n\n## 门测量(批 13-15 口径)\n\nBFS 从 24 个 metadata-type root 加 `ObjectStackSchema` 出发,本文件每个目标 schema 解出 `root-graph`;阳性对照 `ViewSchema`/`FormViewSchema`/`ViewItemSchema`/`PageSchema` 可达,批 13 的 no-door 形状(`touch`/`dnd`)**同一次运行**里 UNREACHABLE。\n\n⚠️ **仪器先修再信**:`lazySchema` 返回 Proxy,承载点写 `X.optional()` 会解掉 Proxy,闭包里存的是真实例 —— 只比 Proxy 会把 `ViewDataSchema` 误判成不可达。靠它两个字面承载键交叉核对抓到的。\n\n⚠️ **按 #5056 复核**:批 18 每个目标都是**按 identity** 判 `root-graph`,**无一**依赖 `derived-clone` 共享属性桥。运行里唯一的 `derived-clone` 是 `ListViewSchema` —— 阳性**对照**而非目标,且经 `ObjectListViewSchema` 独立 identity 可达。\n\n## 收紧的 15 个\n\n`ViewDataSchema` 四个 provider 臂、`UserFilterField.options`、`GanttQuickFilter.options`、`GanttConfig.tooltipFields`、`ListView.conditionalFormatting` / `.emptyState`、`FormFieldBase.keyField`、`FormView.subforms`、`submitBehavior` 四个臂。\n\n策展锚定点名兄弟契约:option 上的 `count` 给**跨层处方**(objectui 每次渲染从快照算它)指向 `showCount`;`object` data source 上裸 `name` **刻意不设别名**(它是 view ITEM 上的真键,按 finding 7 宁可不指路)。\n\n**`submitBehavior` 改成 `discriminatedUnion('kind')`**(输入形状零变化)。朴素 union 的报错是 `invalid_union` 带四份子错误,#5014 实测渲染器压平成 \"Invalid input\";判别后顶层直接是 `unrecognized_keys`、路径就在 `submitBehavior` 上。副作用:`check:variant-docs` 因此**首次看见**这个一直可授权的词表 —— 判 **governed**(`ui/forms.mdx` 点名四个变体),非 exempt。\n\n## 留开的 5 个(⛔ 别顺手收掉)\n\n| 形状 | 类 | 依据 |\n|---|---|---|\n| `UserFiltersSchema` | 阻塞于能力声明 | 收紧会 422 掉 `allowAddTab`(#5073) |\n| `ViewItemSchema` ×2 | **wire** | Studio 的 `isPinned` 往返落在这个成员(#5074) |\n| `ListView.sort` | **wire 污染** | 控制台盖 UI 行 `id`(见上,#5114 同族) |\n| `FormFieldBaseSchema` | **base,门已关** | 唯一消费者已 `.strict()` + ADR-0089 错误映射 |\n\n**批 6e 点名的验证做了**:依赖真实存在 —— `ObjectUserFiltersSchema` 是 `UserFiltersSchema.omit(...)`,`.omit()` 继承姿态,关基类会把钉从「drop」翻成「reject」。**那个翻转是想要的**(CLI lint 早就在报),只卡在 `allowAddTab`:`saveMetaItem` 校验后**原样存原始 body**,所以被 strip 的只是被丢弃的解析结果,渲染器仍读得到 —— **能力今天是工作的**,收紧是删能力,不是把静默变响亮。\n\n## 仪器纪律:六类断言先证红\n\n| 破坏 | 结果 |\n|---|---|\n| 重开 `ListView.emptyState` | 2 红 |\n| 删 `direction` → `order` 别名 | 1 红(该站点后被回退) |\n| `discriminatedUnion` 退回 `union` | **首版没红** —— 抓到我自己断言的缺陷 |\n| 关 `UserFiltersSchema` | 2 红 |\n| 关 `ViewItemSchema` | 1 红 |\n| 补 finding-7 错别名 `name` → `object` | 1 红 |\n\n第 3 条:首版断言查「消息里有没有 `delayMs`」,而 union 子错误里**也有**,破坏后依然全绿;改成断言顶层 issue 的 **code** 与 **path** 后立刻红。**断言查错误的载荷而非错误的形状,看起来在测、实际什么都没锁住。**\n\n台账闸门两向各证红(行内 4→5;表头 84→85),恢复绿。\n\n## 台账(合并后重算)\n\n与 #5069(批 16)冲突如期发生。**取 main 整段 + 重贴批 18 三处编辑**,批 16 条目逐条断言存活(`widget` no-door 行、`i18n` 5/6 split 行、AriaProps 散文、#5055/#5056、「批 16 is the eighth instance」)。\n\n表头 **75 strip of 198**、可授权 **35 of 75**,**从存活行重算**:`29+5+9+2+7+5+4+4+4+3+1+1+1 = 75`。批 18 是第 **9** 例「两边都对、合并都错」—— 我的分支算 84、main 算 90,合并是 75,**两边都没写过这个数**。机理已记进散文:批 16 与批 18 为**相反原因**动了同两个数(16 改判 14 个它没碰的站点,18 关掉 15 个它碰的),合并值不可由任一 delta 推得。\n\n## 验证(合并后 HEAD `4d7d39d`,完整跑)\n\n```\nTest Files  303 passed (303)\n     Tests  7720 passed (7720)\n\ntsc --noEmit                     EXIT=0\ncheck:generated                  ✓ All 8 generated artifacts are up to date\n  spec-changes / upgrade-guide / skill-docs / skill-refs /\n  react-blocks / authorable-surface / api-surface / docs   全 ✓\n\ncheck:exported-any               EXIT=0\ncheck:dual-source-exports        EXIT=0\ncheck:empty-state                EXIT=0\ncheck:variant-docs               EXIT=0   (20 unions — 9 governed / 11 exempt)\ncheck:liveness                   EXIT=0\ncheck:react-declaration-parity   EXIT=0\ncheck:skill-examples             EXIT=0\ncheck:strictness-ledger          EXIT=0   36 open file(s) / 234 strip site(s)\n```\n\n`.changeset/pre.json` 仍 `mode=pre` / `tag=rc`;⛔ `content/docs/releases/` 零触碰;diff 面 5 文件。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Ehu85kbvMcrNTUJjwxvLJ9"
+}

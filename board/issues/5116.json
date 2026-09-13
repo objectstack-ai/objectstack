@@ -1,0 +1,38 @@
+{
+  "number": 5116,
+  "kind": "issue",
+  "title": "文档/博客里的公式样例写裸引用 —— #5026 激活字段公式校验后,照抄这两处的元数据会被 os build 判红",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "documentation",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T05:20:38Z",
+  "updated_at": "2026-08-04T07:04:35Z",
+  "closed_at": "2026-08-04T07:04:35Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5116",
+  "body": "#5026 把 `validate-expressions.ts` 的字段公式校验从 `f.formula`(spec 按名拒绝的别名)收敛到 `f.expression`,**激活了一条从未跑过的检查**。在做\"全部真实元数据零新红\"验证时顺带扫了 `skills/` 和 `content/` 里的公式样例 —— 三个 example app、`platform-objects`、default-permission-sets、`skills/` 全绿,但**文档和博客里有两处样例写的是裸引用**,按 Prime Directive #10 单独记账,不在 #5026 的 PR 范围内(那个 PR 限于 `packages/lint`)。\n\n## 事实\n\n把每条样例喂给激活后的 `validateExpression('value', src, { scope: 'record' })`:\n\n| 位置 | 源 | 判决 |\n|:--|:--|:--|\n| `content/docs/data-modeling/fields.mdx:230` | `'quantity * price * (1 - discount / 100)'` | **RED** |\n| `content/blog/context-window-is-the-constraint.mdx:108` | ``cel`amount * probability` `` | **RED** |\n\n两条的错误文本一样:\n\n```\nbare reference `quantity` — a formula/validation expression binds the record as\nthe `record` namespace, not at top level, so `quantity` resolves to nothing and\nthe expression silently evaluates to null. Write `record.quantity`.\n```\n\n同一批扫描里判绿的(即 canonical、无需改动)包括 `content/docs/data-modeling/formulas.mdx` 的全部样例、`field-types.mdx:408`、`getting-started/common-patterns.mdx:143`、`skills/objectstack-data/rules/field-types.md:300`、`skills/objectstack-data/rules/relationships.md:285`、`skills/objectstack-ui/SKILL.md:120`。所以这是两处孤立的漏网,不是文档整体的惯例问题。\n\n## 为什么值得修\n\n`fields.mdx` 是 data-modeling 章节里讲 `Field.formula()` 的入口页之一,而裸引用在 CEL 里**静默求值为 null**——这正是 #1928 建这条检查的原因。#5026 之后,照着这一行写出来的元数据会在 `os build` / `os lint` / `os validate` 上判红,文档教的写法和平台的门直接矛盾。博客那篇的调性是\"AI 照着 spec 写元数据\",样例本身写错更尴尬。\n\n顺带记一处**不算缺陷**但形状相同的:`packages/spec/src/data/field.test.ts:363` 的 `expression: 'first_name + \" \" + last_name'`。那个测试的被测对象是 `FieldSchema.parse` 能不能过,裸引用不影响它的断言,但它同样示范了错误拼法;改成 `record.` 前缀零成本。\n\n## 修法\n\n三处都是一行的事:\n\n- `fields.mdx:230` → `'record.quantity * record.price * (1 - record.discount / 100)'`\n- `context-window-is-the-constraint.mdx:108` → ``cel`record.amount * record.probability` ``\n- (可选)`field.test.ts:363` → `'record.first_name + \" \" + record.last_name'`\n\n`content/docs/` 是手写目录(非 auto-gen),按 AGENTS.md 的 Documentation Guardrails 可以直接改;注意**不要**碰 `content/docs/releases/`。\n\n值得一并考虑的更长期问题:`check:skill-examples` 只对标了 `<!-- os:check -->` 的块跑 `tsc --noEmit`,**不跑任何表达式语义校验** —— 所以这类\"能编译但 CEL 是错的\"样例目前没有任何门。把文档/skills 里的公式样例喂给 `validateExpression` 做一道门,是比逐条修更根本的处置,但那是另一个单子的体量。\n\n## 参考\n\n- #5026(激活字段公式校验;发现于其真实元数据扫描)、#1928(裸引用/类型健全性)、#5017(同族的别名收敛)\n"
+}

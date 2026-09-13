@@ -1,0 +1,34 @@
+{
+  "number": 4885,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): 增补 2026-08-03 全天运行沉淀的八条 PM 操作经验 (#4882)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T13:11:29Z",
+  "updated_at": "2026-08-03T13:28:42Z",
+  "closed_at": "2026-08-03T13:28:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T13:28:40Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4885",
+  "body": "Fixes objectstack-ai/objectstack#4882\n\n把 2026-08-03 主 backlog PM 会话跑完 12 单合并 + 8 单新立后沉淀的八条操作经验写进 `.claude/skills/pm-dispatch/SKILL.md`,让下一个 PM 会话不用重新踩。**纯插入,不重写既有章节**:`git diff --stat` 为 `134 insertions(+)`,既有行删除数为 0。\n\n## 落点与内容\n\n**step 2 分诊** — 新增「无生产者」形状的识别规则:声明了、消费端有读取、gate 全绿,却没有任何生产者写值;类型系统与 lint 只验消费方,所以这类洞在全绿下长期存活。当日五次命中(#4704 / #4837 / #4839 / #4862 / #4867)。遇到 declared ≠ enforced 类 issue,分诊时先问「生产者在哪」,答案通常就是根因,并会在派发前改掉 issue 的作用域与 `domain:*` 标签。\n\n**step 3 选批** — 同文件 issue 严格跨轮串行,并明确**推迟 ≠ 搁置**:#4820 的 dev 查出 #4821 正文建议的 `JSON.stringify` 键法会改掉类型强制语义、引入静默新缺陷,这条警告与 `Blocked-by:` 在 #4820 复核完成的**同一轮**就钉到了 #4821 上 —— 被推迟的 issue 在每次 sweep(包括别的 PM 的)里看起来都是可派发的,你知道的坑不写上去就等于不存在。\n\n**step 5 派发** — 两条:\n1. 「main 当天已动过同一文件」要写进派发词(现有 Stale-premise check 防的是 issue 过期,同日变体是另一回事):#4808 派发前 #4806 刚改过同一 guard,#4820 派发前 #4822 刚改过同一文件,两单都因派发词点名而避开返工。\n2. 新增 `#### Handing off an interrupted dev(worktree 接手协议)`:`/compact` 与宿主中断会把运行中的子 agent 连同挂起的工具调用一并杀死(#4700 / #4775 停在同一秒),**agent 不可恢复但 worktree/分支/提交完好**。接手 = 派新 agent + 明确「worktree 已存在,⛔ 不要新建」+ 先通读既有改动再逐块决定取舍 + 补跑从未跑过的验证 + 认领与分支不变。两单按此接手后均一次通过复核。\n\n**step 7 复核** — 两条:\n1. dev 证伪 issue 或派发词是**好报告**的标志,照单全收的报告反而要多看两眼(#4808 / #4813 / #4825 / #4790);PM 被纠正时公开认账,错误归因另立 issue(#4873)而不是静默丢弃。\n2. PR diff 里的 `+0/-0` 未必是空文件 —— 文件含 NUL 字节时 git 判为二进制。#4870 的 347 行测试文件即如此,PM 一度误判为占位空文件。判据落在 blob 不落在 diff;修法写转义 `\\\\u0000`(反斜杠 + u0000),不写裸字节。\n\n**新增 `## Operational notes(实测坑位)`(接在 State model 之后,中文,与 Domain lanes 节先例一致)** — 四条队列/平台层结论,共同点是「判据取命令输出,不取 API 字段字面值,也不取本地工作树现状」:\n- 判断 PR 是否在合并队列看 `gh-readonly-queue/*` 分支,不看 `auto_merge`(入队后该字段回落为 off,零信息量);\n- 队列踢出先认签名再决定重投(#4796 连踢五个无关 PR,原样重投全过);但止血 PR #4856 合入后**同签名再现即新问题**,禁止条件反射式重投;\n- GraphQL 配额 5000/时 极易打满(当日三次归零,峰值 10402/5000),读与评论走 REST,写操作排队并轮询 `rate_limit` 的 `resources.graphql.remaining`,复核意见先用 REST 发出不等配额;\n- 核验 main 的事实一律 `git grep ... origin/main` / `git show origin/main:` —— 共享检出可能落后数十提交(当日 PM 与一名 dev 都在落后 63 提交的树上 grep 出假阴性),这条同时写进派发词。\n\n## 验收自检\n\n| 验收项 | 结果 |\n|:--|:--|\n| 六个关键词可检索 | `生产者` ×2、`worktree 接手` ×1、`gh-readonly-queue` ×2、`rate_limit` ×2、`origin/main` ×9、`nul` ×5(不区分大小写) |\n| 八条(A1 A2 B1 B2 C1 C2 D1 D2 D3 D4)全部落地 | 全部当日证据编号均在文中命中 |\n| 不破坏既有结构与内容 | `134 insertions(+), 0 deletions`,既有行删除数 grep 得 0 |\n| changeset 与 #4824 同形 | 空 frontmatter(`---` / `---`),不发布任何包 —— 与 `.changeset/pm-dispatch-domain-lanes.md` 首 12 字节逐字节一致 |\n\n## 门禁\n\n`node scripts/check-nul-bytes.mjs` → `check-nul-bytes: OK (2986 tracked source file(s), no raw NUL bytes).`\n\n值得记一笔:写 C2 那条时编辑工具真的把转义写成了**裸 NUL 字节**(SKILL.md 第 626 行),先被控制字符扫描(`grep -naP '[\\\\x00-\\\\x08\\\\x0b\\\\x0c\\\\x0e-\\\\x1f]'`)抓住、按字节改写为转义文本后才提交 —— 该条经验在自己身上原样复现了一次;本 PR 正文首版的同一处也被 GitHub 吃掉过一次,现已修正。eslint 不覆盖 md(配置仅 `**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}` 等 JS/TS glob),`check:doc-authoring` 的 ROOTS 是 `skills` / `content`,不含 `.claude/`,故无其他适用门禁。\n\n改动面严格限于 `.claude/skills/pm-dispatch/SKILL.md` + 一个 changeset,未碰 `.claude/agents/os-dev.md`、`packages/**`、顶层 `skills/**`、`content/docs/**`。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_015Br2xsJsczFsTR9bvbh2Ny"
+}

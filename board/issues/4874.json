@@ -1,0 +1,35 @@
+{
+  "number": 4874,
+  "kind": "pull_request",
+  "title": "fix(core): 插件 init/start 超时守卫在 race 落定时被清除 —— 进程不再空转 `startupTimeout` (#4813)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T11:38:27Z",
+  "updated_at": "2026-08-03T12:29:34Z",
+  "closed_at": "2026-08-03T12:29:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T12:29:32Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4874",
+  "body": "Fixes objectstack-ai/objectstack#4813\n\n`initPluginWithTimeout()` / `startPluginWithTimeout()` 各自 `setTimeout` armed 一根超时守卫,然后**把它扔了**。插件赢下 race 之后那根定时器既没 `clearTimeout` 也没 `unref()`,带着 ref 一直挂到 `startupTimeout` 走完 —— 每个进程在活干完之后还要空转整整一个 `startupTimeout`。\n\n两处守卫合并成一个私有 helper `raceStartupTimeout()`,在 `finally` 里 `clearTimeout`。`startupTimeout` 的取值一个都没动。\n\n## 为什么是 `clearTimeout` 而不是 `unref()` —— 我验证过再决定的\n\nissue 提到「`finally { clearTimeout(t) }` 比 `unref()` 更彻底」,并猜测理由是 unref 的定时器仍会触发那个 reject,产生一个无人处理的 rejection。**这个猜测是错的,我实测否定了它** —— `Promise.race` 会给每个 arm 都挂上 handler,所以输掉的 timeout promise 后来 reject 时是**被处理过的**,不会有 unhandledRejection:\n\n```js\nprocess.on('unhandledRejection', r => console.log('UNHANDLED:', String(r)));\nconst work = Promise.resolve('done');\nconst guard = new Promise((_, reject) => {\n  setTimeout(() => reject(new Error('guard fired')), 300).unref();\n});\nawait Promise.race([work, guard]);\nsetTimeout(() => console.log('still alive at 600ms'), 600);\n// → race settled: done\n// → still alive at 600ms          ← 没有 UNHANDLED\n```\n\n真正的理由是另一条,而且更硬:**`unref()` 让定时器不再钉住事件循环,同时也让它不再是一个守卫。**\n\n```js\n// 一个永不 settle 的 hook,守卫用 unref():\nconst never = new Promise(() => {});\nconst guard = new Promise((_, reject) => {\n  const t = setTimeout(() => reject(new Error('start timeout after 500ms')), 500);\n  if (t.unref) t.unref();                       // shutdown() 的写法\n});\ntry { await Promise.race([never, guard]); }\ncatch (e) { console.log('GUARD FIRED:', e.message); }\nconsole.log('after await');\n```\n\n实际输出:**什么都没打印**,Node 直接退出(exit 13,`unsettled top-level await`)。守卫从来没有触发,超时被**静默吞掉**。若 hook 永不 settle 且没有别的东西撑着事件循环,`unref()` 的守卫就是个摆设 —— 这正是它要防的那种故障。\n\n所以正确语义是:守卫在 race **未决期间保持 ref'd**(它必须能触发),在 race **落定的那一刻被回收**。`finally { clearTimeout(guard) }` 恰好表达这个,`unref()` 表达不了。\n\n关于「保持同一种写法」:`shutdown()` 自己那处 `if (t.unref) t.unref();` **本 PR 没有动** —— issue 的边界写明只碰这两个守卫,而且改它会在一个边缘情形上改变行为(shutdown 卡死且事件循环空转时,现在静默退出 0,改成 clear 后会触发 `Shutdown timeout exceeded` → `process.exit(1)`)。那是一个独立的判断,不该搭本 PR 的车。理由与取舍写在 `raceStartupTimeout()` 的 doc comment 里,下一个读到 `shutdown()` 的人能看到两种写法各自的适用面。\n\n## 验收:真实 CLI,同一个构建链,唯一差别是本改动\n\n```bash\ncd examples/app-crm\nOS_DATABASE_URL=\"file:/tmp/t.db\" node ../../packages/cli/bin/run.js migrate recorded-by --json\n```\n\n| | 墙钟 |\n|:--|:--|\n| 修复前 | **122.4s** |\n| 修复后 | **3.1s** |\n\n两次 JSON 与 `✅ Graceful shutdown complete` 都在 ~3 秒出现;后面那 119 秒纯粹是 8 根孤儿定时器钉着事件循环。(为了拿到干净的 before,我把 `kernel.ts` stash 掉、只重建 `@objectstack/core`、跑同一条命令,再还原 —— 所以这一对数字之间没有别的变量。)\n\n## 测试:钉的是「定时器不再把进程钉住」,不是「代码里调了 clearTimeout」\n\n后者是同义反复,任何重构都能满足它而照旧漏定时器。新增 4 条,前 3 条**修复前全红**:\n\n```\nAssertionError: expected 3 to be 1     ← leaves no ref'd timer behind after the plugin wins the race\nAssertionError: expected 11 to be 3    ← reclaims one guard per lifecycle hook, for every plugin\nAssertionError: expected 2 to be +0    ← schedules no pending timer once bootstrap has settled\nTest Files  1 failed (1)\n     Tests  3 failed | 1 passed | 31 skipped (35)\n```\n\n- **`getActiveResourcesInfo()` 探针**(issue 自己的思路)。它只报告**当前正在维持事件循环存活**的资源,正是「进程为什么不退出」这个问题的直接答案。1 个插件 ⇒ 修前多出 2 根(init + start);**4 个插件 ⇒ 修前多出 8 根**,与 issue 里 probe 抓到的 `8 ref'd timers still alive` 一模一样。断言的是 delta 为 0,不是绝对值。\n- **假定时器那条是用来区分半修的**:`getActiveResourcesInfo()` 不计 unref'd 定时器,所以只有它无法分辨「守卫被回收了」和「守卫只是被摘下了循环」;`vi.getTimerCount()` 两者都计,`unref()` 方案过不了这一条。\n- **第 4 条是反向配对**:插件输掉 race 时守卫**照旧触发**(`Plugin hanging-plugin init timeout after 50ms`)。回收守卫不等于解除守卫 —— 没有这条,「把两个 `setTimeout` 删掉」也能让前 3 条变绿。\n\n```\n@objectstack/core     28 files /  462 tests passed\n@objectstack/runtime  80 files / 1092 tests passed\n@objectstack/cli      67 files /  585 tests passed\ntsc --noEmit (core)   120 errors — 与改动前 baseline 完全相同,本 PR 新增 0\n```\n\n`@objectstack/core` 没有 `typecheck` script,走 `check-type-check-coverage.mjs` 的 DEBT 棘轮,所以我按「改动前/改动后同一条命令」测了两次而不是只看绝对数。中途 helper 的形参一度写成 `Promise< T >` 而多出 2 个 TS2345 —— Plugin 契约允许**同步** hook(`init`/`start` 返回 `void | Promise< void >`),已改为 `T | PromiseLike< T >`,回到 baseline。\n\n## ⚠️ 本 PR 改变了 #4747 那条路径的时序 —— 请连带读这一段\n\n**#4747 已经独立修好了**(PR #4815,`127f09125`,已在 main 上),修的是生命周期契约那一侧:`ObjectQLPlugin` 的关停逻辑从内核根本不调用的 `stop()` 挪到 `destroy()`,`bootSchemaStack().shutdown()` 从 `(runtime as any).stop?.()` 改走 `kernel.shutdown()`。所以**本 PR 不会掩盖 #4747** —— 它已经不是靠时序活着的了。\n\n但这件事仍然值得写下来,因为**本 PR 确实会让 #4747 的现象即使在未修状态下也不再复现**:#4551 的巡检首次 sweep 排在启动后 60 秒,而正是这 120 秒空转把一次性 CLI 进程留到了 60 秒定时器触发。修好之后进程 3 秒就退出,**那条巡检路径不再被触发**。假如 #4815 没有先落地,本 PR 会让一个真实缺陷「看起来消失了」而根因原封不动。#4813 与 #4747 必须各自被各自的修复关闭,这是其中一半。\n\n推而广之:只要这些守卫还在漏,任何「启动后 N 秒才做的事」都会在一个自以为已经结束的进程里醒来 —— 反过来,修好之后,任何依赖「进程反正还活着」的周期性工作都会失去那个隐式的宽限期。目前仓里只有 ADR-0057 巡检这一处踩到,已由 #4815 从正确的一侧解决。\n\n## 超范围产出(未在本 PR 修)\n\n- **#4873(新开,未认领)**:`os migrate` **成功**时退出码是随机非零值。这是我为了拿 before/after 数字才看清的:issue #4813 把不稳定退出码(214/238)归因于「挂太久被外部杀掉」,**这个归因是错的** —— 修复后没有任何东西杀它,它 3 秒自行退出,退出码依旧随机(实测 62 / 169 / 208 / 171 / 176;修复前是 163)。同一个 `bin/run.js` 的 `--version` / `--help` 干净退出 0,所以问题在 `bootSchemaStack` 系子命令的退出路径上。对按退出码判断成败的 CI 是直接的假失败,且因为随机而无法特判兜底。\n- **`packages/core/src/health-monitor.ts:315` 的 `timeout()` 是同一个漏法**:`setTimeout(() => reject(...), ms)` 进 `Promise.race`(`:112` 的健康检查),赢下 race 之后同样不清除。它今天没造成 #4813 的现象,因为健康监控不在 bootstrap 路径上启动;但它是同一个形状,应当用同一个 helper 收编。issue 的边界写明只碰 kernel.ts 的两个守卫,故本 PR 未动 —— 如果维护者希望一并收,我可以在同一条分支上补。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_015Br2xsJsczFsTR9bvbh2Ny\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015Br2xsJsczFsTR9bvbh2Ny)_"
+}

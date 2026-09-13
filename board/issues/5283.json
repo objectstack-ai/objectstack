@@ -1,0 +1,35 @@
+{
+  "number": 5283,
+  "kind": "pull_request",
+  "title": "fix(objectql): 单记录 delete 绑定 `hookContext.previous` —— 让引擎符合契约已声明的「for update/delete」 (#5272)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T15:45:51Z",
+  "updated_at": "2026-08-04T16:16:12Z",
+  "closed_at": "2026-08-04T16:16:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T16:16:10Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5283",
+  "body": "Fixes #5272\n\n按 issue 的 **A 方向**实施(PM 已拍板):`delete()` 复用 `update()` 同款的 demand-driven 前置行门,在单 id 路径取一次前置行并赋给 `hookContext.previous`,覆盖 `beforeDelete` / `afterDelete` 两个阶段。⛔ 未触碰 `packages/spec/**`、`content/docs/releases/**`、`metadata-protocol/src/protocol.ts`、`core/src/kernel.ts`,也未改 plugin-audit 的 `__previous` 兜底。\n\n---\n\n## 一、STALE-PREMISE 事实核对(基于合并 #5270 之后的现场)\n\nworktree 基于 `3905c0064`(即 PR #5270 的合入点),逐条核对 issue 正文引用的行为:\n\n| issue 的说法 | 合并后现场 | 结论 |\n|:--|:--|:--|\n| `hookContext.previous` 的赋值**只有一处**,在 `update()` 单 id 分支 | 现在是**两处**:`update()` 单 id 分支(`engine.ts` 原 5300 行),**以及 #5270 新增的 `buildPerRowAfterContexts()`**(原 1225 行),后者为批量 update **和批量 delete** 的每行 after 上下文赋 `previous` | ⚠️ **已过时,但结论更强**:单记录 delete 是合并后**唯一**一条完全不绑 `previous` 的写入路径 |\n| `delete()` 全程不给 `hookContext.previous` 赋值 | 成立(修复前 `grep previous` 在 `delete()` 体内零命中) | ✅ 成立 |\n| `summaryPrev` 只喂 `recomputeSummaries`,不进上下文 | 成立(原 5551–5556 读,5611–5613 唯一消费点) | ✅ 成立 |\n| 报错走通用分支、读起来像作者拼错 key | 已用真实引擎复现,原文如下 | ✅ 成立 |\n\n复现原文(在 stash 掉本 PR 的 `engine.ts` 改动、只跑新测试时打印):\n\n```\nHook 'audit_completed_task_deletion' could not evaluate its condition\n(type: Unknown variable: previous) — operation aborted. The condition reads\n'previous', which is not bound for this operation — the scope holds 'record',\nplus 'previous' only when the record's prior state is in hand.\n```\n\n补充一条 issue 未提、实施中确认的事实:`summaryPrev` 走的是**引擎级 `this.findOne()`**(过中间件、RLS、formula 投影),而 `update()` 喂给 `recomputeSummaries` 的 `priorRecord` 是**裸 driver 读**。同一件事两条路两种语义 —— 合并成一次读时按 `update()` 的口径统一(见下)。\n\n---\n\n## 二、实现摘要(`packages/objectql/src/engine.ts`)\n\n前置行读取放在 `triggerHooks('beforeDelete')` **之前**:delete 的 before 阶段是唯一「除了 id 什么都没有」的阶段(`input` 无 `data`),而前像本来就必须在删除动作前取,一份数据两个阶段共用。\n\n**门(demand-driven)**:\n\n```\nhasHooksFor('beforeDelete', object) || hasHooksFor('afterDelete', object)\n  || getSummaryDescriptors(object).length > 0\n```\n\n- 用 `hasHooksFor(event, object)`(按对象)而不是 `update()` 那条 `this.hooks.get('afterUpdate')?.length > 0`(全局),与 #5038 批量 delete 侧同款,更省。\n- **刻意没有把 `needsPriorRecord(schema)` 放进门**,虽然 `update()` 的孪生门带着它:对象校验规则只在 insert/update 求值,`delete()` 一条都不跑 —— 带上它就是买一次没有读者的读。这是对 PM 指令中「同款条件」的一处有意收窄,理由记在代码注释里。\n\n**合并为一次读**:原先 roll-up summary 的 `summaryPrev` 是**另一次、更晚**的读(在 `beforeDelete` 之后)。现已删除,`recomputeSummaries` 直接吃这一次前置行。口径按 `update()` 统一为**裸 `driver.findOne`** —— `recomputeSummaries` 只取 `p?.[desc.fkField]`(存储列),裸读足够,且不会因调用方读权限被 RLS 收窄而静默跳过父行重算。\n\n**租户/事务安全**:裸 driver 读经 `buildDriverOptions(object, opCtx.context, hookContext.input.options)` 取得 options —— 这正是把开启中的事务和 `tenantId` 带到裸读上的那一层,`update()` 的前置读同理。少了它会读到事务外、甚至跨租户。\n\n**不臆造**:行不存在 → `previous` 保持 **unbound**(而非 `{}` / `null`),条件读它仍按 #4649/#4775 大声失败,而不是替一条没人读过的记录作答。\n\n**id 被改写/清空的收尾**:`beforeDelete` hook 可以改写甚至清空 `input.id`(#4550 的 reject 判定就是为此再问一次)。hook 跑完后若 `input.id !== id`,则重读(改写)或丢弃(清空)绑定 —— 陈旧前像绝不进入 `afterDelete` 或 summary 重算;清空后落到 predicate 分支,而批量派发按契约本就不该带任何单行前像(`hook-wrappers` 正是靠这个「两者皆无」来诊断批量派发)。\n\n**未动**:#5038 的批量 predicate delete 按行绑定路径逐字未改。\n\n---\n\n## 三、测试\n\n### 改造既有「开绿灯」的 pin(本单硬性要求)\n\n`hook-condition-previous-scope.test.ts` 的 `a delete-shaped context evaluates 'previous' against the pre-image` **手工构造 `previous`**,断言的是 wrapper 读没读它 —— 而引擎从不产出这份数据,于是它替一个不存在的行为发了绿灯,真正的故障(每一次带 `previous.*` 条件的单记录 delete 都被 #4775 打回)就藏在它后面。**已删除**,原位留下说明注释,替换为走真实引擎的端到端用例。\n\n### 新增 8 例(全部 insert → 真实 `engine.delete()` → 断言 hook 拿到什么)\n\n| 用例 | 断言 |\n|:--|:--|\n| `hands 'beforeDelete' the stored pre-image` | `ctx.previous` 等于数据库前像,不是 `undefined`、也不是 delete `input` 的裸 `{id}` |\n| `hands 'afterDelete' the same pre-image — by then the row is gone` | 同一份前像;并先断言此刻该行已读不到,坐实「必须提前取」 |\n| `evaluates a 'previous.*' delete-side condition instead of rejecting the delete (#4775)` | issue 原样的 `previous.status == 'done'`:两次 delete 都不被拒,且条件**有选择性**(只对 done 的那条触发) |\n| `is TOTAL over declared fields on a delete too` | 从未写过的列在 delete 侧同样物化为 null,不中断表达式 |\n| `does not leak materialised nulls into what the delete hook observes` | 引擎自己的 `ctx.previous` 不会多出该行从未有过的列 |\n| `reads the pre-image ONCE for both phases` | before+after 两个 hook 都在时,`findOne` 增量 **= 1**(合并读的成本护栏) |\n| `reads nothing at all when the object has no delete-side hook` | 增量 **= 0**(demand-driven 门) |\n| `leaves 'previous' UNBOUND when the row is not there` | 拿到 `undefined`,不臆造 |\n\n**反向验证(证明这些是真 pin,不是重言式)**:把 `engine.ts` 的改动 stash 掉单跑该文件 —— **6 failed | 17 passed**,失败原因正是 issue 描述的两类(`expected undefined to deeply equal {...}`、`HookConditionError ... Unknown variable: previous`);另 2 例(无 hook 不读、行不存在不绑)修复前后都应成立,故不失败。恢复改动后 23 例全绿。\n\n### 验证记录\n\n| 命令 | 结果 |\n|:--|:--|\n| `pnpm --filter @objectstack/objectql test` | `Test Files 116 passed (116)` / `Tests 1875 passed (1875)` |\n| `pnpm --filter @objectstack/objectql typecheck` | `tsc --noEmit`,无输出(通过) |\n| `pnpm exec eslint packages/objectql/src/engine.ts packages/objectql/src/hook-condition-previous-scope.test.ts` | 无输出(通过) |\n| `turbo run test --filter @objectstack/plugin-audit --filter @objectstack/trigger-record-change` | `plugin-audit` 108 passed;`trigger-record-change` 55 passed(两者都读 `ctx.previous`,是本改动的直接下游) |\n\n`summary-rollup.test.ts`(含 `recomputes when a child is deleted`)与 `engine-summary-retry.test.ts` 覆盖了被合并掉的那次读,均绿。\n\n重的构建/测试全程持 `flock /tmp/os-heavy-verify.lock` 并带 `NODE_OPTIONS=--max-old-space-size=4096`,`--maxWorkers=2` / `--concurrency=2`。\n\n---\n\n## 四、变更记录\n\n`.changeset/single-delete-binds-previous.md`(`@objectstack/objectql: patch`),写明行为变化与升级影响:原本因 #4775 被打回的 delete 侧 `previous.*` 条件现在正常求值;delete 侧 handler 开始收到 `ctx.previous`;若有人靠 `ctx.previous == null` 来判别「这是一次 delete」,该判据失效,应改读 `ctx.event`。未改 `content/docs/releases/**`。\n\n---\n\n## 五、范围外(未在本 PR 修,留给 PM 分诊)\n\n1. **plugin-audit 的 `(ctx as any).__previous` 兜底可退役**(PM 已记为后续 finding,本 PR 按指令不动)。`audit-writers.ts` 的 `captureBefore` 在 `beforeDelete` 里**自己再读一次**前像塞进 `__previous`;单记录 delete 的 `previous` 落地后,这次读在 delete 路径上已成重复(update 路径本来就重复)。退役它可省掉一次读,但属独立面。\n2. **`update()` 的前置行门仍是全局的**(`this.hooks.get('afterUpdate')?.length > 0`),而 delete 侧用的是按对象的 `hasHooksFor`。全局门意味着任一对象注册了 `afterUpdate`,**所有**对象的单 id update 都多付一次读。属可收窄的性能面,非缺陷,未在本单扩面。\n\n以上两条尚未开 issue —— 均为 PM 已知/已记项与纯优化面,按 #4949 的立项纪律先在此列明,若需要我可另开 `finding` 标签的观察类 issue。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Pbu27iNUfQCHeuS551Rqo7)_"
+}

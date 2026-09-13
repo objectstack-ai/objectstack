@@ -1,0 +1,35 @@
+{
+  "number": 5246,
+  "kind": "pull_request",
+  "title": "docs(spec,skills): 文档与 skill 追平端点执行器(#5040 E9)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T12:07:59Z",
+  "updated_at": "2026-08-04T12:31:01Z",
+  "closed_at": "2026-08-04T12:31:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T12:30:59Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5246",
+  "body": "Fixes #5238\nPart of #5040(E9 —— 文档收尾件;例子已由 E8 / #5230 补齐)\n\n> 本文中的路径占位符一律写作 `{namespace}` / `{subpath}` / `{ttl}`。仓库里的真身用尖括号,但 GitHub 的 issue/PR body 消毒器会把「左尖括号 + 字母」当 HTML 标签**在存储时**抹掉,首版 body 正是这样被吃掉了三处。以文件里的文本为准。\n\n## 这一单摘掉的是什么\n\n执行器已落(E1–E8),`apis:` 的整面硬拒已收窄为五道逐端点 publish 门。但三层散文仍在讲反话 —— 而对升级者(往往只有这段文字的 AI 维护者)那不是「过期」,是一条把人**指离一个已经能用的能力**的指令。\n\n## 1. spec 内两处处方文本(本单唯一随包发布的一半)\n\n**`App.apis` 的 retiredKey 墓碑**。原文:\n\n> Delete the key. Note the stack-level `defineStack({ apis })` this prescription used to redirect to is **ALSO not executable in v17** (#4936) … **until the endpoint executor ships** … Serve the route in code meanwhile。\n\n一条重定向式墓碑必须对它**指向的地方**说真话。这条在同一句里把目的地称作死的,于是照着做的下一步就是继续用 handler 代码写路由 —— 恰好绕开了 E 系列刚建好的东西。\n\n新文本只改失真的那一半:该面自 protocol 17 起真实服务、点名五道门、带上抬到 stack 级时必须做对的两件事(`/api/v1/apps/{namespace}/{subpath}` carve-out 与显式 `manifest.namespace`;`authRequired` 缺省 `true`,显式 `false` 是唯一打开匿名的开关,ADR-0121 D6 随即要求已装配 `rateLimit`),并指向 `declarative-apis-endpoints-live` 升级条目。\n\n**保留未动的两处**:移除那一半(`App.apis` 从未被读过,仍然是删)、以及 `#4936` 这段历史 —— 历史正是这条重定向存在的理由,修的是时态与指针,不是抹历史。\n\n**`defineStack({ server })` 模块头**。原写 #5040「wires endpoint-level `rateLimit` —— **still unwired today**」。已接线。顺带补上服务端预算的作者真正需要的那层关系:端点桶键在独立命名空间,两份预算**各计各的**,不共享计数器。\n\n两者经 `gen:docs` 传播到 `content/docs/references/{ui/app,system/stack-server}.mdx`。\n\n## 2. 手写文档\n\n**`protocol/kernel/http-protocol.mdx`** —— 原来那句「since #4936 that surface has no executor」的 callout 换成一节真正的 **Declarative Endpoints**:\n\n- 服务链:匹配(`{prefix}/apps/` 下,METHOD+path,去一个尾斜杠)→ 策略链(`rateLimit` → `authRequired` → `cacheTtl`,并写明为什么计量在鉴权**之前**)→ 委派到内建路由**同款**流水线(`callData` / automation),带调用者自己的 execution context,所以 RLS/FLS 与 ADR-0049 曝光门等价适用;\n- 策略答案表:401 `UNAUTHENTICATED` / 429 + `Retry-After` / 成功答案才有的 `Cache-Control: private, max-age={ttl}`(并写明 `private` 是安全规则而非调优)/ `cacheTtl: 0` → `no-store` / 错误答案永不带缓存指令也永不过 `outputMapping`;\n- **恒等语义**,最容易被误读的一条:未匹配路径 **与已声明路径上的方法不匹配**都保持传输层裸 `404` 逐字节不变 —— 因为这条缝是 Hono `notFound` 而不是注册路由,没有方法集可以报 `405`(已注册路由的 405 契约不变);\n- 五道门一览 + 一段最小可跑的 `apis:` 声明(照 showcase 回迁件裁短)。\n\n**`getting-started/quick-reference.mdx`** —— 按本页体例补一条速查:路径形状、显式 namespace、能执行的两种 `type`、`authRequired` 缺省与 D6 配对、`cacheTtl` 语义 + 一段最小示例。\n\n## 3. `objectstack-api` skill\n\n原文把声明式面写成一句四臂 `type` 联合(`flow` / `script` / `object_operation` / `proxy`)加 target —— 其中两臂在 17.x 根本不执行。改为按现状教学:\n\n- **何时 `apis:` 胜过 `contributes.routes`,以及何时不**(真需要 handler 代码时);\n- carve-out(以及「不从 `manifest.id` 推导」的理由);\n- 五道门当作「跑 `objectstack validate` 读报错处方」而不是背诵的条文 —— **报错自带处方,不在 skill 里复述第二套**;\n- D6 的 `enabled === true` 判据(而非键存在)明写;\n- 映射键最小语义:按点路径搬运/改名,仅此;`transform` 被拒、bodyless 操作上的 `inputMapping` 被拒、目标路径不得互相包含;\n- 升级段指向 `declarative-apis-endpoints-live`,单一真源。\n\n`evals/` 目前是**占位**(README 明写 \"Not yet implemented\"),没有断言旧行为的 eval 可跑;其目录规划里那条 `test-api-endpoint-types.md`(原注 `ApiEndpointSchema type/target/authRequired`)已按翻转改写,并补了 carve-out / `authRequired` 缺省 / D6 三条规划项。\n\n## 实测,不是相信\n\n三条文档断言都拿已构建的 spec 跑过 `defineStack`:\n\n```\nPASS: gates accepted the doc example; apis = [{\"name\":\"acme_lead_feed\",...,\"cacheTtl\":30}]\nPASS: omission shape accepted; authRequired resolved to true\nPASS: D6 refusal:\n  defineStack validation failed (1 issue):\n  x apis.0.rateLimit: Endpoint 'acme_open' (apis[0]) declares `authRequired: false`\n    without an ARMED rate limit. ...\n```\n\n墓碑新文本以**两侧**断言钉住(`packages/spec/src/ui/app.test.ts`):必须说新话(`EXECUTES from protocol 17`、carve-out、D6、升级条目 id)**且**不得再说已退休的那两句,同时 `#4936` 仍须在场 —— 只钉在场会被「底下又加回旧话」骗过,只钉缺席会被空串骗过。\n\n## 验证(真实输出)\n\n```\npnpm --filter @objectstack/spec build                   ✓\npnpm --filter @objectstack/spec check:generated         ✗ 1 of 9 stale: content/docs/references/**\npnpm --filter @objectstack/spec check:generated --fix   ✓ gen:docs  (只重生了被证明陈旧的那一个)\npnpm --filter @objectstack/spec check:generated         ✓ 9/9(复跑)\npnpm --filter @objectstack/spec check:skill-examples    ✅ 204 prose examples type-check\npnpm --filter @objectstack/spec test                    Test Files 306 passed / Tests 7858 passed\npnpm --filter @objectstack/spec typecheck               tsc --noEmit clean\neslint(三个改动的 TS 文件)                              clean\npnpm check:doc-authoring                                ✓ 362 files clean\npnpm check:docs-audit-scope                             ✓ in sync\npnpm check:nul-bytes                                    ✓ 5293 tracked text files, no raw NUL\npnpm docs:build                                         ✓(新 MDX 全部渲染,404+ 页)\n```\n\n生成物移动**只有**两页 reference,且逐字对应本单改的两段处方文本;numstat 无 `- -` 行。\n\n`check:skill-examples` 第一轮红过一次并已修:文档示例的 `manifest` 缺 `type`,补 `type: 'app'` —— 一个正好证明这道门有用的失败。\n\n## 顺手发现的、已单独立项的\n\n- **#5244**(挂为 #5231 子单,同为「注释必须与实际一致」)—— `examples/app-showcase/src/system/apis/index.ts:80` 的注释把 `cacheTtl` 的响应头写成 `Cache-Control: public, max-age=30`;运行时发的是 `private`(`computeCacheControl`),PR #5230 的真实 boot 探针 P1 也印着 `private`。而 `private` 在这条链上是**安全规则**,且这份文件是声明式端点唯一的一手示例。\n- **#5245**(`finding`)—— 十份 SKILL.md 的 `compatibility` 仍写 `Requires @objectstack/spec 16.x`,仓库已是 17.0.0-rc.2,且三道 skill 门都不看这一行。写法(改死 17 / 改范围 / 加对账门)是维护者的决定,不在本单里替你选。\n\n## 边界\n\n词表与运行时零触碰;未编辑 `content/docs/releases/`;与 #5231(源码注释)不重叠 —— 那批 `structurally unreachable` 措辞散在 `packages/runtime|metadata|rest` 内,本单一处未动。changeset 按纯处方文本的历史惯例记 `@objectstack/spec: patch`。\n\n现场已清:未起任何 dev server;worktree 在 PR 后移除。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01EYGdmvWP1ieZSLqvAW6uyd\n"
+}

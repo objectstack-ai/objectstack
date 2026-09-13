@@ -1,0 +1,35 @@
+{
+  "number": 5060,
+  "kind": "issue",
+  "title": "[ADR] 声明式端点路由归属与通道分工:命名空间制 + actions/apis 按调用方分工 + `type: flow` 保留(起草,预计编号 0120)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T01:18:01Z",
+  "updated_at": "2026-08-04T01:49:51Z",
+  "closed_at": "2026-08-04T01:49:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5060",
+  "body": "维护者 2026-08-04 已裁决三项(经执行器车道 PM 的对比分析,含主流平台调研;本 issue 正文即裁决的持久记录),需起草 ADR 落档。**docs-only PR,不改任何代码或 schema** —— 执行体(publish 门、describe 文案)由 #5040 的 E 系列与 E7 翻转 PR 按本 ADR 实施。\n\n## 三项裁决\n\n### ① 命名空间制(否决「任意路由」)\n\n声明式端点(`apis:` / `ApiEndpointSchema.path`)**不得认领任意路由**。路径收紧为:\n\n```\n/api/v1/apps/<应用名>/<子路径>\n```\n\n`apps` 为平台保留的唯一切出段;`<应用名>` 派生自声明方 stack/app 的规范身份(起草时从 `stack.zod.ts` 实核可用的身份键),作者只自由命名子路径。publish 期强制。\n\n**依据**:主流平台零例外 —— Salesforce Apex REST(`/services/apexrest/<ns>/…`)、ServiceNow Scripted REST(`/api/<scope>/<api_id>/…`)、MS Dataverse Custom API(纯名字派生)、Shopify App Proxy(`/apps/<子路径>`)、K8s CRD(group/version/kind 派生),没有一家让应用元数据认领任意路由。收益:#5040 设计 §1 的保留前缀 pin 清单、spec/runtime 双端一致性测试、跨应用撞路径整类问题在构造上消失;URL 自带应用名可反查;AI 需要掌握的平台内部知识归零。**时机红利:v17 硬拒(#4936)已清场,17.x 收紧零迁移成本。**\n\n### ② 通道分工:actions = 平台内命令,apis = 平台外集成面\n\n一句话判据(写进 ADR 与两侧 schema describe 的执行项):**调用方在平台内(有会话、懂平台方言:UI 按钮、AI/MCP、SDK)→ actions;调用方在平台外(第三方 webhook、合作方系统)→ apis(资源读写 + webhook 接收)。**\n\n依据:actions(`/actions/:object/:action`,POST-only)已具备参数契约(ADR-0104)、权限门(ADR-0066 D4)、HTTP 语义化错误(#3962)、AI/MCP 暴露(`ActionAiSchema`),是成熟的命令通道;而平台外调用方的三个硬特征(报文形状对方定 → 需 `inputMapping` 防腐、无平台会话 → 需 `authRequired: false` + 端点级 `rateLimit`、URL 是写进对方系统的对外契约 → 需稳定 + OpenAPI)actions 结构上均不满足。行业同构:Salesforce 内部 Invocable Actions / 对外 Apex REST;ServiceNow 内部 UI Action / 对外 Scripted REST。\n\n### ③ `type: flow` 保留在 ApiEndpoint,配三条纪律\n\n「URL 触发 flow」是入站集成的第一原语(Zapier/Make/n8n 的 webhook trigger 即此;showcase 自证案例 `POST …/inquiries/purge` 本身就是 flow 端点),摘除它 = 第三方 webhook 接收没有元数据故事,只剩代码逃生舱,逆北极星。保留,重叠带用三条纪律约束:\n\n1. **分工判据**(②的一句话)写进 ADR 与 `ApiEndpointSchema`/`ActionType` 两侧 describe(describe 修改属 spec 车道执行项,ADR 只立规则);\n2. **同管线红线**:flow 端点纯委派 automation 服务(与 action 触发同一条 `execute` + 身份转发管线,#5040 设计 §4 已立),零语义分叉 —— 保证选错通道只是风格问题,不是行为问题;\n3. **匿名端点防呆门**(E7 publish 门执行项):`authRequired: false` 的端点必须同时声明 `rateLimit`,否则 publish 拒绝并附处方;签名验证(webhook 真实需要)明示为**将来词表候选**,不在本 ADR 承诺。\n\n## ADR 关系与范围\n\n- **扩充 ADR-0076**(one route one owner:0076 答「一条路由归谁」,本 ADR 答「谁有资格认领哪片路由」),不取代;\n- **落在 ADR-0049 的时序上**:v17 响亮拒绝(#4936 裁决)→ 17.x 执行器(#5040)→ 翻转 PR(E7)实施本 ADR 的 publish 门;\n- **不写实现细节**:`matchEndpoint` 签名、cacheTtl 键形状、兜底 seam 等留在 #5040 设计文档;\n- Alternatives Considered 需收录 O1(自由路径 + 保留前缀门)与 O3(actions 全面替代 / Dataverse 模式)及两轴分析(项目长远合理性 / 防 AI 写元数据犯错)。\n\n## 验收\n\n- `docs/adr/<下一空位编号>-*.md`(起草时以 origin/main + 开放 PR 双查确认编号未被占用,预计 0120),头部格式对齐 ADR-0118(状态/日期/关联/执行项/动因);\n- 状态 Accepted(2026-08-04,维护者裁决),关联 ADR-0049/0076/0066/0104,执行项引 #4936/#4939/#5040(+ E7 届时补);\n- 是否随带 changeset 按仓内近期 ADR PR 惯例实核(`.changeset/adr-XXXX-*.md` 有先例);\n- ⛔ 不改 `content/docs/releases/`,不改任何 `.zod.ts` / runtime 代码。\n\n关联:#4936(裁决与实测)、#4939、#5040(设计全文)、#4910(四问依据)、ADR-0076、ADR-0049。"
+}

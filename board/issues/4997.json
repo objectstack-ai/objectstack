@@ -1,0 +1,36 @@
+{
+  "number": 4997,
+  "kind": "issue",
+  "title": "[metadata-protocol] seed-loader:无 pass-2 时「引用解析不了 ⇒ 整条记录丢弃」计为 error 却一行日志都不打(#4729 判据的更深一格)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T19:23:58Z",
+  "updated_at": "2026-08-04T06:47:04Z",
+  "closed_at": "2026-08-04T06:47:04Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4997",
+  "body": "发现于 #4729(把 seed-loader 里「计数为错、日志为 warn」的行对齐到 `error`)的同文件盘点。本条不在 #4729 的判据内(它盘的是 `this.logger.warn` 调用),所以只记录、不在那个 PR 里改。\n\n## 现象\n\n`packages/metadata-protocol/src/seed-loader.ts`,pass-1 引用解析、`multiPass` 关闭的分支:\n\n```ts\n} else {\n  // Cannot resolve and no pass 2 will run — skip the whole record\n  // (LOUD: counted + reported). Writing it anyway would either\n  // carry the raw natural-key string into the FK column or, on\n  // update, corrupt the existing row.\n  pushError(\n    `Cannot resolve reference: ${objectName}.${ref.field} = '${String(unresolvedItem)}' → ` +\n      `${ref.targetObject}.${ref.targetField} not found`,\n    unresolvedItem,\n  );\n  unresolvedRefError = true;\n}\n```\n\n`pushError` 把错误推进 `errors` / `allErrors`(⇒ `success: false`),随后 `unresolvedRefError` 让 `errored++` 并 `continue` —— **整条记录被丢弃,一行都没有种下去**。但这里**没有任何 logger 调用**:注释写的 \"LOUD\" 只兑现了「计入结果对象」,控制台上一个字都没有。\n\n## 为什么值得单开\n\n#4729 的论点是「计数与日志级别应当一致」:结果对象里数得到、日志却停在没人读的 `warn`。这一处是同一条链的更深一格 —— 计数有、日志级别是「无」。对只看 boot 日志的运维/agent 来说,一次丢了 N 条记录的 seed 与一次干净的 seed 在控制台上完全一样(区别只在调用方是否检查了 `result.success`,而 `packages/runtime` 的若干 seed 调用点只是 `await` 之后继续)。\n\n`check:durability-log-level` 把这种形态叫 `silent-swallow`,但那个门禁只扫 `try/catch`,而这里不是 catch,所以扫不到。\n\n## 期望(待维护者确认)\n\n- 在该分支补一条 `this.logger.error(...)`,按 #4632 的要求说清后果(`<object>` 第 #i 条记录整条未种下,因为 `<object>.<field>` 指向的 `<target>` 不存在)与修复动作(先种目标对象、或打开 `multiPass` 让 pass 2 回填、或修掉 seed 里的自然键);\n- 顺带确认 dry-run 分支(`[dry-run] Reference may not resolve`)是否也该有一行 —— 那一处同样只进结果对象、不进日志,但 dry-run 的调用方本来就是来读结果的,可能维持现状更合适。\n\n_未认领。_\n"
+}

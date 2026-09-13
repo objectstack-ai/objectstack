@@ -1,0 +1,37 @@
+{
+  "number": 4889,
+  "kind": "issue",
+  "title": "Parent-scoped `readonlyWhen` is unenforced server-side — the field lock fails open, so a paid invoice's frozen lines can be rewritten over the API",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "priority:p0"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T13:14:46Z",
+  "updated_at": "2026-08-03T18:18:23Z",
+  "closed_at": "2026-08-03T18:18:23Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4889",
+  "body": "## Summary\n\n`readonlyWhen: parent.<field> …` is enforced **only in the client grid**. The\nserver-side strip cannot evaluate the predicate — there is no `parent` binding in\nits evaluation context — and the failure path is **fail-open**, so the write goes\nthrough. The lock ADR-0036 / #1581 documents as a server guarantee does not exist\nfor the parent-scoped form.\n\nThe `record`-scoped form works correctly, which is what makes this easy to miss.\n\n## Reproduced end-to-end\n\n`showcase_invoice_line.{product,quantity,unit_price}` all declare\n`readonlyWhen: P\\`parent.status == 'paid'\\`` (`examples/app-showcase/src/data/objects/invoice.object.ts:201,219,225`),\ndescribed there as *\"once the header invoice is Paid, its lines are frozen\"*.\n\nAgainst `INV-1003`, **status `paid`**:\n\n```\nBEFORE: quantity=6  unit_price=49.99\n\nPATCH /api/v1/data/showcase_invoice_line/t7GzyZFFi-3Tiq7R\n  {\"quantity\":9999,\"unit_price\":0.01}\n→ HTTP 200\n\nAFTER (re-read): quantity=9999  unit_price=0.01     ← persisted\n```\n\nContrast — the **record**-scoped lock on the same object family,\n`showcase_invoice.tax_rate` with `readonlyWhen: P\\`record.status == 'paid'\\`` (L144),\non the same paid invoice:\n\n```\nBEFORE: tax_rate=8  status=paid\nPATCH {\"tax_rate\":99} → HTTP 200\nAFTER:  tax_rate=8                                  ← correctly stripped\n```\n\nSame object, same \"paid\" condition, opposite outcomes.\n\n## Root cause\n\n`packages/objectql/src/validation/rule-validator.ts` → `isReadonlyWhenLocked()`\n(~L296-311) evaluates with a two-key context:\n\n```js\nconst res = ExpressionEngine.evaluate<boolean>(toExpression(def.readonlyWhen!), {\n  record: merged,\n  previous,\n});\nif (!res.ok) {\n  logger?.warn?.(`readonlyWhen for '${name}' failed to evaluate — change allowed through`);\n  return false;          // ← fail-open\n}\n```\n\n`parent` is never bound — **`grep -n parent rule-validator.ts` returns nothing**.\nSo every `parent.*` predicate lands on the `!res.ok` branch and returns `false`\n(\"not locked\").\n\nThe docblock states the fail-open is deliberate (\"A broken predicate is\nfail-open … matching the strip's historical behaviour\"), which is defensible for\na *malformed* expression. But here the expression is well-formed and\nspec-sanctioned — the evaluator simply doesn't support its scope, so a supported\nauthoring construct is silently reclassified as \"broken\" and waved through.\n\n## Severity\n\n- **Silent.** The write returns 200 and the client grid still renders the cell\n  locked, so the UI agrees with the author's intent while the database does not.\n- **Server is supposed to be the authority.** Per ADR-0057 D10 the server is the\n  enforcement point and the client is courtesy. Here it is inverted: only the\n  courtesy layer enforces.\n- **Financial fields.** In the reference app the affected fields are quantity and\n  unit price on a settled invoice.\n- It is **audible but unread**: the server logged this warning 15 times during\n  ordinary seeding of the showcase app, so the condition is routine, not exotic.\n\n## Suggested direction\n\nTwo separable decisions:\n\n1. **Bind `parent`** for parent-scoped predicates in the server strip (the\n   master-detail header is resolvable from the child's lookup on the update path\n   the strip already runs on), so the construct is enforced where it is\n   documented to be enforced.\n2. **Reconsider fail-open for the \"unsupported scope\" case.** An expression the\n   evaluator cannot bind is different from one that threw. At minimum it should\n   not be silently permissive on a field the author declared locked — and a\n   predicate referencing a scope the runtime does not support should ideally fail\n   the build (Prime Directive #12: declared, not guessed) rather than warn at\n   runtime forever.\n\nIf parent-scoped `readonlyWhen` is *intended* to be client-only, then the spec\nand the showcase comment both need to say so plainly — right now\n`invoice.object.ts:195-201` tells the reader the opposite.\n\n## Repro steps\n\n1. `os dev --ui --seed-admin` in `examples/app-showcase`\n2. `POST /api/v1/auth/sign-in/email` as `admin@objectos.ai` / `admin123`\n3. Find an invoice with `status=paid`, take one of its `showcase_invoice_line` rows\n4. `PATCH /api/v1/data/showcase_invoice_line/<id>` with `{\"quantity\":9999}`\n5. Re-read → the value persisted; server log carries\n   `WARN readonlyWhen for 'quantity' failed to evaluate — change allowed through`\n\nObserved on `main` @ 0e96e46. Found while browser-sweeping showcase + Studio for #4879."
+}

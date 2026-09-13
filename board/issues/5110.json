@@ -1,0 +1,35 @@
+{
+  "number": 5110,
+  "kind": "pull_request",
+  "title": "feat(metadata): 端点匹配器 —— matchEndpoint 惰性索引实现(#5040 E2)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T05:00:53Z",
+  "updated_at": "2026-08-04T05:12:58Z",
+  "closed_at": "2026-08-04T05:12:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T05:12:57Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5110",
+  "body": "Fixes #5089\nPart-of #5040(E 系列第 2 单)\n\n## 做了什么\n\n给 `metadata` 槽位的实际占位者 —— `MetadataManager`(`packages/metadata`,不是卡面文字里的 `packages/runtime`;见下「口径修正」)—— 实装 `IMetadataService.matchEndpoint?`,背后是一个新的纯匹配模块 `packages/metadata/src/endpoint-matcher.ts`。契约文本(#5080 / #5097 落地)即规格,**逐字实现**:\n\n| 契约条款 | 实现 |\n|---|---|\n| `method` 大小写不敏感 | 请求动词大写规整后比较(`ApiEndpointSchema.method` 本就是大写枚举,所以只有查询侧会被改写 —— 这正是意图) |\n| `path` 去尾斜杠后整串精确 | 去掉**一个**尾斜杠,两侧同规则;`/x//` 与 `/x/` 仍是不同路径,孤零零的 `/` 不被削成 `\"\"`(否则查询 `\"\"` 会跟声明 `/` 撞上) |\n| 17.x 不解码 / 不规整 / 不折叠 | 原串即键。`/a%2Fb`、`/Tasks`、NFD 的 `/café` 全部原样入键,各有测试钉住 |\n| 返回 parse 后形状 | 每条经 `ApiEndpointSchema.safeParse`,默认值已物化 —— 作者省略 `authRequired` 时消费方拿到 `true`,不可能把「缺省」误读为放行 |\n| parse 失败响亮跳过 | `error` 级点名条目 + 后果(该路由将回 404)+ 处方,绝不返回半合法形状;坏条目不牵连同批好条目 |\n| `params` 恒 `{}` | 词表(ADR-0121)无模板语法,本单不发明 —— 只跑在实现里的语法就是隐藏方言(Prime Directive #12) |\n| `undefined` = miss,断存储必须 throw | 读不到存储时抛出,**不**伪装成 miss(miss 会变成 404)。构建失败不缓存,下次调用重试 |\n\n**重复声明**(#5040 设计 §1.3):两条条目声明同一 METHOD+path 时,`name` 字典序在前者保留路由,被弃者连同规则一并 `error` 级点名。确定性是因为掷硬币会让同一份部署在不同节点/不同启动上表现不同;响亮是因为「声明了却不服务」正是本仓一直在还的那笔账。\n\n**失效**用的是仓内**既有**机制,没有新造事件系统 —— 两条 seam 覆盖的是**不相交**的事件集,缺一不可:\n\n1. `invalidateListCache('api')` —— 全部本地写入,**包括** artifact 装载与 HMR reload 的 `{ notify: false }` 写入(它们按构造根本不经过 watcher);索引跟 list 缓存共享同一条失效不变量:同一类的清单缓存过期了,由它建的索引当然也过期了;\n2. `subscribe('api', …)` —— 集群对端的写入,`attachClusterPubSub` 只把它经 `notifyWatchersLocal` 回放,不走 (1)。\n\n## 零行为变更(结构性不可达)\n\n17.x 没有任何东西会调到 `matchEndpoint`:挂载 seam 是 #5090 的文件面(本 PR **完全没碰** dispatcher-plugin / plugin-hono-server / http-dispatcher),publish/validate 对非空 `apis:` 仍然硬拒(#4936)。测试直接驱动服务而不走 publish —— 这正是 #5040 设计选定的验收姿态:代码被充分锻炼,但在真实组合里零暴露。\n\n`packages/spec` **一个字没改**,词表冻结。\n\n## 口径修正(需 PM 知悉)\n\n#5089 卡面写的是「`packages/runtime` 内实现 `matchEndpoint`」,但仓内 `implements IMetadataService` 的唯一类是 `packages/metadata/src/metadata-manager.ts` 的 `MetadataManager`,#5040 设计 §2 与 §6 子单表也都把 E2 落在 `packages/metadata`(engine 域)。落点按设计表执行,卡面那句按笔误处理。\n\n## 一处必须解释的新增私有读\n\n契约要求「读不到存储必须抛出」,而 `MetadataManager.list()` 的姿态是**故意**相反的:它 warn 掉失败的 loader 继续服务能服务的部分(部分可用的元数据面仍应尽力工作)。这个姿态对 `matchEndpoint` 是错的 —— 它的 `undefined` 会变成 HTTP 404,一次「零声明」的静默空读会把每一条已声明端点变成「没人声明这条路由」。\n\n所以新增了私有的 `listForIndex(type)`:跟 `list()` 同源(registry + loaders,按 name 去重),但**不包 `try/catch`**。它不是第二个 `list()`,是 `list()` 的失败姿态为**唯一一个**「答案是可用性判断而非尽力列举」的调用方翻了个面 —— 与 `loadDiagnosed` 对单数读所做的完全同源(ADR-0110 D3)。\n\n⚠️ 这条 seam 只能暴露 loader **真的报出来**的失败。`DatabaseLoader` 在自己内部就把读故障吞成 `[]`,所以 DB 断了在这里依然看不见 —— 已单独立卡 **#5108**,代码注释指向它,**本 PR 不修根因**(那是全仓 `list()` 消费方共同的面,不该搭这趟车)。\n\n## 范围外发现(按 Prime Directive #10 立卡,均未在本 PR 修)\n\n- **#5108** —— `DatabaseLoader.loadMany` / `exists` / `stat` 把存储读故障吞成 `[]` / `false`(`loadMany` 连 warn 都没有)。ADR-0110 D3 的 miss/outage 之分在复数读路径上不成立;权限/策略清单读成空,按消费方姿态不同要么静默 fail-open 要么静默 fail-closed。\n- **#5109** —— 集群对端的元数据写入只经 `notifyWatchersLocal` 回放,**不失效**本节点的 `listCache` / registry,收到广播的节点最长 30s 继续服务旧定义;与 `cluster-semantics.mdx` §5 自述的 \"consumed by peers to invalidate their local caches\" 不符。同文件内的 `applyRepoEvent` 是做对了的那条路径,可作修法样板。\n\n## 验证\n\n```\npnpm --filter @objectstack/metadata exec vitest run --maxWorkers=2\n  Test Files  17 passed (17)\n       Tests  384 passed (384)          # 新增 48 个(336 -> 384)\n\nnpx tsc --noEmit -p packages/metadata/tsconfig.json\n  96 -> 92 errors，与 origin/main 基线 92 逐个持平（新增 0）\n  # 首轮多出的 4 条 TS2835 是测试相对 import 缺 .js 扩展，已补齐\n\npnpm --filter @objectstack/spec check:generated\n  ✓ All 8 generated artifacts are up to date.\n  git status 干净 —— 运行期改动不移动任何生成物，符合预期\n\npnpm check:type-check-coverage                       OK (62/77 + 15 DEBT + 1 exempt)\ncheck:nul-bytes / adr-anchors / route-envelope / error-code-casing /\nwildcard-fallthrough / durability-log-level / slot-lookup /\nservice-providers / startup-registry-verdict / release-notes   全部 PASS\n\neslint（4 个改动文件）                                 零告警\nturbo test --filter=@objectstack/objectql --filter=@objectstack/metadata-protocol\n  114 files / 1810 tests passed（最近的下游消费方)\n```\n\n测试覆盖(48 个)逐条对应契约条款:索引构建 / 命中 / 未命中→undefined / method 大小写 / 两侧去尾斜杠 / 默认值物化 / parse 失败响亮跳过且不牵连 / 断存储 throw(且不缓存失败)/ 失效重建(含 `notify:false`、`registerInMemory`、集群 watcher-only 三条路径)/ 重复声明确定性(含乱序同解)/ `params === {}` / 前缀不算命中 / 并发首调共享一次读。\n\n## 变更文件\n\n- `packages/metadata/src/endpoint-matcher.ts`(新)\n- `packages/metadata/src/endpoint-matcher.test.ts`(新)\n- `packages/metadata/src/metadata-manager-match-endpoint.test.ts`(新)\n- `packages/metadata/src/metadata-manager.ts`(+111)\n- `.changeset/endpoint-matcher-lazy-index.md`(minor)\n\n草稿 PR,**未入队**,等 PM 复核。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01EYGdmvWP1ieZSLqvAW6uyd\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01EYGdmvWP1ieZSLqvAW6uyd)_"
+}

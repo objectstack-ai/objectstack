@@ -1,0 +1,35 @@
+{
+  "number": 5255,
+  "kind": "pull_request",
+  "title": "refactor(spec,lint)!: 退役 dashboard widget 的 action 三键与 aria —— 连同那道「为不存在的按钮做引用完整性」的门 (#5010)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T13:00:14Z",
+  "updated_at": "2026-08-04T13:27:56Z",
+  "closed_at": "2026-08-04T13:27:54Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T13:27:54Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5255",
+  "body": "Fixes #5010\n\n#4956 给 `DashboardWidgetSchema` 的 22 个 widget 级键补上首次逐键裁决,其中 6 个 dead(`responsive` 已在 #4876 / PR #4995 退休)。本 PR 处置**其中 4 个**,`colorVariant` 交回裁决 —— 见末节。\n\n## 逐键处置\n\n| 键 | 处置 | 依据(2026-08-04 于 HEAD 复测,objectui@91757a7) |\n| :--- | :--- | :--- |\n| `widgets[].actionUrl` | **retired**(retiredKey 墓碑) | DashboardRenderer 里 14 处 `actionUrl` 全部限定在 `schema.header.actions[]`(DashboardHeaderAction,另一个 schema)。无任何代码读 `widget.actionUrl` |\n| `widgets[].actionType` | **retired** | 同上;唯一读它的是 lint 规则,用来给(渲染不出来的)`actionUrl` 挑解析规则 |\n| `widgets[].actionIcon` | **retired** | 最彻底的一个:两仓库里除自身声明与一行 objectui 类型注释外**零引用**,连 lint 都不看 |\n| `widgets[].aria` | **retired** | 两仓库均无 `widget.aria` 消费者。DashboardRenderer / DatasetWidget 里的 `aria-*` 是渲染器自己的 DOM 属性;objectui 唯一的 `.aria` 读取在 `plugin-view/ObjectView.tsx:989`,那是 **view** 的 |\n| `widgets[].colorVariant` | **kept —— 需裁决** | 见「不在本 PR 内」 |\n\n四个键躲过 #3896 sweep 的原因与 `responsive` 相同:台账当时对 `dashboard.widgets` 没有 `children`,widget 级键**一个都没被分类过** —— 是仪器有洞,不是键有豁免。\n\n## 一并处置的二阶成本(本单最值得读的一段)\n\n`packages/lint/src/validate-dashboard-action-refs.ts` 对 `widgets[].actionUrl` 做的是 **ERROR 级**引用完整性校验:目标解析不到就构建失败。它的 docblock 自称 `\"the per-widget button\"`、声称 mirrors objectui 运行时派发 —— **而那个按钮不存在**。\n\n于是今天一个作者可能因为一个**永远不会渲染**的控件指向一个不存在的 action 而被卡住构建。一条为消灭「假 affordance」而写的规则,自己维持着一个。\n\n这正是为什么本单选择**退役键**而不是「把这条规则放宽」:widget 分支随键一起删除,并留下两条 pin —— 一条断言它对旧的 widget 目标保持**静默**,一条(混合 stack)证明 header 目标**仍然**被检查,即键是被忽略而非被降级。\n\n## 退役套件(spec-property-retirement)\n\n- **四个 `retiredKey()` 墓碑**,与同 schema 内 `responsive`(#4876)一致。`DashboardWidgetSchema` **是** `.strict()`,直接删键也会响 —— 但只会响成泛化的 \"unrecognized key\";墓碑保留键声明,让拒绝携带**处方**,并把输入类型定为 `never` 使 `tsc` 先失败。action 三键**共用一条处方并互相点名**,避免作者删掉被告知的那一个后再撞两次。\n- **ADR-0087 D2 转换 + D3 链步** `dashboard-widget-action-aria-removed`(`retiredFromLoadPath`,`expectedNotices: 4` = 键数):`os migrate meta --from 16` 自动改写,存量看板 replay 干净而非在 load 时撞墓碑。独立条目而非并入 `dashboard-inert-keys-removed`(后者的身份是 #3896 sweep)。\n- **台账四行保留**(`status: dead` + `verifiedAt` + REMOVED note)—— 墓碑令键仍在被遍历的 shape 内(rls.priority 先例);去掉 `authorWarn`/`authorHint`,严格 parse 接管。ledger-driven 的 CLI advisory 测试改为断言**静默**,并保留 `colorVariant` 作阳性对照(否则「看板遍历整个坏掉」会被读成「退役成功」)。\n- **基线按键级移动**:`authorable-surface.json` 四行转 `[RETIRED]`;`json-schema.manifest.json` / `api-surface.json` / `api-surface-signatures.json` **按构造不动** —— 无 def 停止 emit、无导出移除(与 `responsive` 同形态)。\n- **`AriaPropsSchema` 未删除** —— 仍活在 `app.aria` / `page.components[].aria`,并有 CONTROL 测试守住。`i18n.zod.ts` 里那句「~30 个 live 载体」的实测快照同步订正(本 PR 让它变旧的)。\n- 手写文档 `content/docs/deployment/validating-metadata.mdx` 去掉 widget 侧承诺;`content/docs/references/**` 由 `gen:docs` 重生成。**未触碰 `content/docs/releases/`。**\n\n## 措辞对齐\n\n与今日同期落地的两处保持一个声音:#5175(`chartConfig` 在 dashboard 面 12 键惰性 11)与 PR #5221(`drillDown`/`drilldown`/`drill` guidance + 「dataset-form drill is derived, not configurable」)。本 PR 的 action 处方因此把「每行可点」指向 dataset-bound `table`/`pivot`(其下钻由语义层推导),而不是提示某个 per-widget 配置。\n\n## ⚠️ 不在本 PR 内:`colorVariant` 需裁决\n\n#4956 的分诊建议「优先 D2 改写到活位置(`widget.colorVariant` → `options.colorVariant`),不可行再墓碑」。**在 HEAD 复测后,D2 的前提不成立:**\n\n- `options` 只在 **inline 路径**经 `componentSchema`(`{ type: 'metric', ...options, label, value }`)到达渲染器;\n- 本 schema 的 `dataset` 是**必填**,`DashboardRenderer` 的 `datasetBound = !!widget.dataset` 因此对**每一个 spec 可授权 widget** 为真,一律走 `DatasetWidget`;\n- `DatasetWidget` **完全没有配色能力**(只有渲染器自算的 `categoryColors` 与 `showLegend`)。台账自己的 authorHint 也已写明这一点,却仍指向 `options`。\n\n即:`options.colorVariant` 对所有可授权 widget **同样是死的**。改写只会把 **16 处 authored**(`platform-objects` 7 + `app-showcase` 9,全部 `type: 'metric'` 且 dataset-bound)从一个死槽搬到另一个死槽,并**多造一个惰性键**(新台账行按诚实测量仍判 dead)。\n\n剩下两条真分叉,成本不同、且其一跨仓库,故不猜:\n\n1. **退役 `colorVariant`**(墓碑)—— ADR-0049 字面正确(无特性、无路线图),但删掉 16 处 authored 明确表达的意图,很可能在 v18 被重新加回,是同一大版本内的 churn。\n2. **enforce:让 `DatasetWidget` 支持 accent color**(objectui 侧)—— 让键**变真**,`declared = enforced` 由构造成立,16 处 authored 立刻名副其实;但属 objectui 净新增 UI 能力 + 跨仓库,超出本单文件面。\n\n## 验证\n\n```\npnpm --filter @objectstack/spec test   → 306 files / 7876 tests passed\npnpm --filter @objectstack/lint  test  →  57 files / 1198 tests passed\nturbo typecheck: spec / lint / platform-objects / example-showcase / example-crm → 全绿\n  (墓碑把 tsc 变成扫描器:examples 全绿 = 全仓零 authored 站点)\ncheck:generated / liveness / empty-state / authorable-surface / api-surface /\nspec-changes / upgrade-guide / strictness-ledger / docs / skill-examples / i18n → 全 PASS\n```\n\n台账数字面走 `gen:strictness-ledger`(counts.md 未变 —— 退役不移动 strip 站点,这正是散文行记下的那一点);仅 `dashboard.zod.ts` 一行散文手写。已 `git merge origin/main`(含 #5237/#5251/#5252/#5246)并按 os-regen 四步整体重生成。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Ehu85kbvMcrNTUJjwxvLJ9\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Ehu85kbvMcrNTUJjwxvLJ9)_"
+}

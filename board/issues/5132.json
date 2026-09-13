@@ -1,0 +1,36 @@
+{
+  "number": 5132,
+  "kind": "issue",
+  "title": "cli: OS_EMAIL_PROVIDER=resend/postmark 缺 apiKey 时静默降级为 LogTransport —— #5087 在 CLI 层遗留的同形缺口",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T05:44:55Z",
+  "updated_at": "2026-08-04T06:55:17Z",
+  "closed_at": "2026-08-04T06:55:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5132",
+  "body": "做 #5094 时读 `resolveEmailCapabilityArg` 路过发现,与该 issue 无关,单独记录。#5087 的 PR 已经在代码注释里点名了这一处「still does」,但看起来没有单独立单。\n\n## 现状\n\n`packages/cli/src/commands/serve.ts` 的 `resolveEmailCapabilityArg`(约 2900 行):\n\n```ts\nif (provider !== 'log' && provider !== 'smtp' && !apiKey) {\n  options.provider = 'log';\n  return {\n    options,\n    warning: `provider='${provider}' but no apiKey found (set OS_EMAIL_API_KEY or config.email.apiKey). `\n      + 'Falling back to LogTransport.',\n  };\n}\n```\n\n即:`OS_EMAIL_PROVIDER=resend`(或 `postmark`)而没有配 `OS_EMAIL_API_KEY` 时,CLI **把 provider 改写成 `log`**,打一条 `warning`,然后正常启动。\n\n同一函数里紧邻的 `smtp` 分支是相反的处理 —— `provider='smtp'` 无 host 直接 `throw`,让 boot 失败,并且函数自己的 docstring 明确写了为什么:\n\n> `provider='smtp'` with no host **throws**. The capability loop turns that into a boot failure, which is the point: the alternative (quietly substituting the LogTransport, **as this function's `resend`/`postmark` arm still does for a missing API key**) hands the operator a server that accepts every send, records it in `sys_email`, and delivers nothing — the exact declared-but-not-delivered gap #5087 closed inside the plugin.\n\n## 影响\n\n运维显式声明了要用 resend/postmark 投递,得到的却是一台「每次 send 都成功、`sys_email` 里全是 `sent`、一封信也没出去」的服务器。启动横幅之后那条 warning 很容易被 CI 日志淹没,而后果要等到用户报「收不到验证码」才暴露 —— 正是 AGENTS.md degradation-log-level 一节说的「系统从外面看一切正常」那一类。\n\n插件层(`EmailServicePlugin.resolveTransport` / `makeTransport`)在 #5087 之后已经是「建不出就抛」,所以这条降级是 CLI 单方面把一个本该响亮的失败按下去了。\n\n## 建议\n\n与 `smtp` 分支对齐:缺 apiKey 时抛,让 boot 失败,错误里同时给出后果与修复(设 `OS_EMAIL_API_KEY`,或显式改成 `OS_EMAIL_PROVIDER=log` 以表明「本环境不发信」)。`log` 这个显式取值的存在正是这条抛错的前提 —— 想要「不发信」的部署有一个说得出口的写法,不需要靠「配了 provider 但不配 key」来表达。\n\n需要一并确认(可能构成兼容性变更,因此没有直接顺手改):是否有既有部署/示例依赖这条降级来启动(例如只设了 `OS_EMAIL_PROVIDER` 的 CI 环境)。若有,至少应把日志级别从 `warning` 提到 `error` 并补上后果与修复两段,再按迁移窗口改成抛。\n\n`packages/cli/src/commands/serve-email-capability.test.ts` 已经有一条 `noKey = resolveEmailCapabilityArg({}, { OS_EMAIL_PROVIDER: 'postmark' })` 的用例在钉当前行为,改的时候要一起翻。\n"
+}

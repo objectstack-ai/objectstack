@@ -1,0 +1,36 @@
+{
+  "number": 4802,
+  "kind": "issue",
+  "title": "plugin-auth 的 `databaseHooks` 文档注释断言「better-auth 的适配器绕过 ObjectQL 中间件链」——已过时，今天 dataEngine 与 ql 是同一个实例",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T07:32:52Z",
+  "updated_at": "2026-08-03T17:12:53Z",
+  "closed_at": "2026-08-03T17:12:53Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4802",
+  "body": "跨分片移交：`Part of objectstack-ai/cloud#1022`（cloud 侧的两处同源抄写由 cloud 分片 PM 自派，framework 这处原文本仓改不动，转入本队列）。\n\n## 断言\n\n`packages/plugins/plugin-auth/src/auth-manager.ts`，`databaseHooks` 选项的文档注释：\n\n> better-auth fires these around its own adapter writes …, which the kernel-level ObjectQL middleware does **NOT** observe — better-auth's adapter goes through `dataEngine` directly, **bypassing the `ql.registerMiddleware` chain**.\n\n## 对着 `origin/main` 逐跳核对，这句今天不成立\n\n1. `packages/objectql/src/plugin.ts:243,245` — **同一个** `this.ql` 被注册两次：`registerService('objectql', this.ql)` 与 `registerService('data', this.ql)`（注释自己写着 \"ObjectQL implements IDataEngine\"）。\n2. `packages/plugins/plugin-auth/src/auth-plugin.ts:315` — `const dataEngine = ctx.getService<IDataEngine>('data')`，取到的就是同一个 `ql`。\n3. `packages/plugins/plugin-auth/src/objectql-adapter.ts:331,522` — 适配器写入是 `await dataEngine.insert(objectName, …)`，没有任何 bypass 选项。\n4. `packages/objectql/src/engine.ts` 的 `insert()` 内部走 `executeWithMiddleware(...)`，而 `registerMiddleware()` push 进的正是它 filter 的那个数组。\n\n即：`ql.registerMiddleware(fn, { object: 'sys_user' })` 在真实注册路径上**会**触发。原始事故当年大概率属实，之后引擎/适配器演进把它抹平了，没人回来更新这段注释。\n\n## 为什么值得修（不是注释洁癖）\n\n这条断言被抄进了 cloud 的 `AGENTS.md`「血的教训」与 `personal-org-hook.ts` 文件头，是每个 agent 动手前会读的文字。cloud#1012 的两轮实现调研都因为它把「中间件路线」直接判死。一条过时的机制断言会持续生产错误的架构结论——这正是 AI 作者最难自查的那类错误：文档说得斩钉截铁，代码早就变了。\n\n## 修法（结论保留，理由更换）\n\n**不要顺手改结论。**「成员身份不该由 `sys_user` 中间件维护」今天依然对，但正当理由是 **ADR-0093 D2**：membership 不变量有唯一 owner（`plugin-auth/reconcile-membership.ts`，composed 进 `user.create.after`），每条创建路径各写一遍正是 D2 消灭掉的形态。所以把注释里的机制描述改成事实（中间件今天会触发），纪律（用 `databaseHooks.user.create.after`）保留，理由改挂 ADR-0093 D2。\n\n实施前请**对着当时的 HEAD 重跑上面那条逐跳核对**——用一份别人两天前的核对结论去改文档，等于重演本单批评的错误。\n\n## 关联\n\n- 来源：objectstack-ai/cloud#1022（cloud 侧两处抄写，已在 cloud 队列）\n- ADR-0093 D2\n\n未指派——记录的 finding，谁开工谁认领。"
+}

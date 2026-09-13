@@ -1,0 +1,37 @@
+{
+  "number": 5017,
+  "kind": "issue",
+  "title": "validate-expressions / validate-security-posture 也有同形的 spec 不声明键的 `??` 别名读法(#5009 建议 3 的核对结果)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T20:40:59Z",
+  "updated_at": "2026-08-04T04:27:20Z",
+  "closed_at": "2026-08-04T04:27:20Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5017",
+  "body": "按 #5009 建议 3 顺带核对了邻居规则。`validate-org-axis-red-lines.ts` 的四条已在该单清掉;下面这些是**同一形状、不同文件**的读法,按 Prime Directive #10 单独记账,不在 #5009 的 PR 范围内。\n\n每一条都对着 spec 实际 `.shape` 核过。\n\n## `packages/lint/src/validate-expressions.ts`\n\n| 行 | 读法 | spec 现状 |\n|:--|:--|:--|\n| 205 / 421 | `rule.expression ?? rule.predicate ?? rule.condition ?? rule.formula` | 跨字段校验规则声明的键是 `condition`。`formula` / `expression` 是 `validation.zod.ts` 里 `aliases: { formula: 'condition', expression: 'condition' }` 明确**按名拒绝**的别名;`predicate` 连别名都不是。注意这里 canonical 的 `condition` 排在第三顺位 —— 前两个非法别名优先 |\n| 414 | `obj.validations ?? obj.validationRules` | `ObjectSchema.shape` 只有 `validations`,没有 `validationRules` |\n| 595 | `rule.condition ?? rule.criteria ?? rule.predicate` | `SharingRuleSchema` 只声明 `condition`;`criteria` 正是 `sharingRuleUnknownKeyError` 里 → `condition` 的被拒别名(#4984 在**另一个**文件里修的就是这一条) |\n\n## `packages/lint/src/validate-security-posture.ts`\n\n| 行 | 读法 | spec 现状 |\n|:--|:--|:--|\n| 94 | `obj.sharingModel ?? (obj.security)?.sharingModel` | `ObjectSchema.shape` 有 `sharingModel` / `externalSharingModel` / `publicSharing`,**没有 `security`** |\n| 118 | `def.reference ?? def.reference_to` | `field.zod.ts:331` 把 `referenceTo` / `relatedTo` / `target` 等映射为被拒别名 → canonical `reference` |\n\n## 为什么要记账\n\n两个文件都是 `input: 'parsed'` 注册的 gating 规则(见 `authoring-rules.ts`),看到的是 `ObjectStackSchema` 解析后的产物:stack 根 **strip** 未声明键,`.strict()` 子 schema 直接**整包拒绝**。所以这些别名 limb 对任何 spec 合法 stack 都不执行 —— 和 #4984 / #5009 完全同一种形状。\n\n危险同样不在漏报(canonical limb 通常也在读),在于:\n\n1. 读代码的人会相信 `objects[].validationRules`、`object.security.sharingModel` 是真实的授权/校验面;\n2. `validate-expressions.ts:205/421` 那条尤其糟 —— canonical 的 `condition` 排在两个被拒别名之后,只要作者写了被拒的 `expression`,规则读的就是它(在 normalized 层),而 `os validate` 会拒掉整个 stack。producer 和 consumer 对同一份元数据给出两套说法。\n\n## 建议\n\n1. 三处收敛为声明键:`condition`、`validations`、`sharingModel`、`reference`。\n2. 复用 #5009 落地的结构性 meta-guard:规则源码里从某个 surface 上读的每个键,必须出现在该 surface 自己的 Zod `.shape` 里(`validate-org-axis-red-lines.test.ts` 的 `READ_SURFACES` 表)。那条 guard 是通用的,搬过来即可,并且它扫的是**源码**不是行为 —— 不可达分支没有行为可断言,这正是问题本身。\n3. 顺带把该 guard 推广成所有 `input: 'parsed'` 规则共用的一条测试,是更彻底的做法(成本更高,可另议)。\n\n## 参考\n\n- #4984(sharing rule 字段层)、#5009(org-axis 规则剩下四条 + meta-guard 模式)、#4992(meta-guard 模式来源)"
+}

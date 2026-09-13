@@ -1,0 +1,37 @@
+{
+  "number": 4821,
+  "kind": "issue",
+  "title": "`mergeByDimensions` joins its dimension key with no delimiter, so two distinct groups can merge into one row",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T08:41:07Z",
+  "updated_at": "2026-08-03T17:55:05Z",
+  "closed_at": "2026-08-03T17:55:05Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4821",
+  "body": "Found while implementing #4708 (`packages/services/service-analytics/src/dataset-executor.ts`); unrelated to that fix, so filed rather than fixed in it.\n\n## Mechanism\n\n`mergeByDimensions` is the seam every multi-query dataset result is assembled through — supplementary measure-scoped queries and the `compareTo` pass both merge back onto the grid with it. Its key function:\n\n```ts\nconst keyOf = (row: Record<string, unknown>) =>\n  dimensions.map((d) => String(row[d] ?? '')).join('');\n```\n\nTwo problems in one line:\n\n1. **No delimiter.** With two or more dimensions, the concatenation is ambiguous. Rows `{ region: 'ab', segment: 'c' }` and `{ region: 'a', segment: 'bc' }` both key as `\"abc\"`, so the second row's measures are merged onto the first — one row silently absorbs another group's numbers, and the other group's measure column is left absent (which then renders blank, or gets an empty-group `0` filled into it after #4708).\n2. **`null` and `''` collapse.** `String(row[d] ?? '')` maps a genuinely null dimension value and an empty-string one onto the same key, merging \"unassigned\" into \"blank\".\n\nThe neighbouring `cross-object-rebucket.ts` already solved exactly this and documents why:\n\n```ts\n// JSON-encoded, so the empty bucket (`null` on both aggregation paths since\n// …) … `\"null\"` — plain interpolation renders both as `null` and would merge two\nfor (const f of baseDimFields) keyParts.push(`${f}=${JSON.stringify(row[f] ?? null)}`);\n```\n\nSo the repo has the right pattern one file over; `mergeByDimensions` predates it.\n\n## Impact\n\nOnly bites datasets grouped by **two or more** dimensions where the concatenation of adjacent values is ambiguous — a matrix report by `region` × `segment`, `owner` × `stage`, or any pair of free-text/`select` values. Single-dimension grids (the common case) are unaffected, which is presumably why it has survived. When it does bite, it is silent: the grid keeps the right number of columns and a plausible number of rows.\n\n## Suggested direction\n\nKey the same way `cross-object-rebucket` does — `dimensions.map((d) => `${d}=${JSON.stringify(row[d] ?? null)}`).join('&')` — which fixes both the delimiter and the null/empty-string conflation in one change. Needs a test with a colliding pair (`'ab'|'c'` vs `'a'|'bc'`) and one with a null-vs-empty dimension value.\n\nNote the fix changes only the *internal* join key, never a value in the response, so it is contained.\n\nRelated: #4708.\n"
+}

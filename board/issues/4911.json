@@ -1,0 +1,36 @@
+{
+  "number": 4911,
+  "kind": "issue",
+  "title": "「v17」ConnectorRateLimitConfig 出站限流词表按 ADR-0049 摘除 —— 执行引擎不存在(#4686 拆向之二)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "protocol:breaking"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T15:42:52Z",
+  "updated_at": "2026-08-03T17:59:04Z",
+  "closed_at": "2026-08-03T17:59:04Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4911",
+  "body": "Part of #4686。维护者裁决(2026-08-03,PM 会话 `session_01Ehu85kbvMcrNTUJjwxvLJ9` 经 AskUserQuestion):**拆向 —— 入站接执行,出站摘除**。本单是出站半边;入站半边见兄弟子单,两者相互独立、不共享文件面。\n\n## 事实基础(#4686 立单 + 2026-08-03 复核,C9 改名后)\n\n- C9(#4684)已把 connector 侧改名收敛为 `ConnectorRateLimitConfigSchema`(`packages/spec/src/integration/connector.zod.ts:337` 声明,`:711` 的 `ConnectorSchema.rateLimitConfig` 嵌入,从 `stack.zod.ts` 的 `connectors:` 可达 —— 真作者面)。\n- **全仓零 reader**(spec 之外零命中,阳性对照验证过扫描器)。\n- **出站限流引擎在 runtime 里根本不存在** —— runtime 的 token bucket 只服务入站 dispatcher。这不是「接线」问题,是给不存在的引擎养词表:与 #4834(plugin-runtime 五 schema)同形状,今天的裁决同向 —— implementation-first,词表随未来实现一起进 schema。\n\n## 范围\n\n按 `spec-property-retirement` skill + ADR-0087 走完整退役套件:\n\n1. `ConnectorSchema.rateLimitConfig` 键 + `ConnectorRateLimitConfigSchema` 形状摘除;整形状删除 vs `retiredKey` 墓碑的取舍按 skill 判(参考 #4878:形状整体移除时墓碑话术是「整个形状已移除」而非「该键已移除」)。\n2. **ADR-0087 转换逐条论证**:connector 是可作者化面,存量 connector 文档若带 `rateLimitConfig` 需 D2 conversion 或有据可查的 D3;可达性用 `gen:schema` 的 BFS 实证,不读散文。\n3. `authorable-surface.json` 行删除走 #4650 落地后的合法性门禁(带 `[RETIRED]` 前置或 conversion 登记),⛔ 禁手编基线。\n4. strictness-ledger 对应行同步;四张 ratchet 变化逐一自证(对照 #4878 的「异常信号未出现」核对法)。\n5. major changeset,v17 窗口内落地。\n\n## 验收\n\n- 三仓(objectstack / objectui / cloud)带引号精确名扫描零命中,每个零命中配邻近词阳性对照。\n- pin:符号身份断言(runtime 模块命名空间,#4642 教训:编译期 pin 空转),sabotage 实跑输出贴 PR。\n- spec 十道 `check:*` + 全仓 typecheck 绿;示例应用 `validate` 过。\n- ⛔ 不碰 `content/docs/releases/`;入站三个嵌入点(`shared/http.zod.ts` 的 `RateLimitConfigSchema` 及其可达面)**零改动** —— 那半边正在接执行,删错方向就是事故。\n\n关联:#4686(父单,裁决记录)、#4684(C9,已关)、#4834 / PR #4878(最近先例)、#4650(基线门禁,已落地)、ADR-0049、ADR-0087。"
+}

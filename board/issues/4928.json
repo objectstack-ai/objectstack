@@ -1,0 +1,39 @@
+{
+  "number": 4928,
+  "kind": "issue",
+  "title": "`filter` job 一旦失败,Test Core / Build Core / Dogfood 会全部 skipped 而分支保护判为通过 —— 隐式 success() 今天已第三次咬人",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T16:32:23Z",
+  "updated_at": "2026-08-05T00:32:00Z",
+  "closed_at": "2026-08-05T00:31:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4928",
+  "body": "## 问题\n\n`ci.yml` 的 7 个下游 job 都是这个形状:\n\n```yaml\n  test:\n    needs: filter\n    if: needs.filter.outputs.core == 'true'\n```\n\n`if:` 里没有状态函数,GitHub 会**隐式包一层 `success()`**。于是 `filter` 这个前置 job 一旦失败(checkout 抖动、`dorny/paths-filter` 故障、10 分钟超时),下游 `test` / `temporal-conformance` / `dogfood` / `dogfood-verify` / `build-core` / `build-docs` / `console-pin` **全部被跳过**。\n\n而聚合闸门无条件接受 skipped:\n\n```bash\ncase \"$result\" in\n  success|skipped|cancelled) echo \"Test Core gate satisfied ($result).\" ;;\n```\n\n**skipped 在分支保护里算通过**。合起来:一次 `filter` 的偶发失败 → 零测试运行 → `Test Core` / `Dogfood Regression Gate` 报「gate satisfied」→ PR 全绿可合。而且这个过程没有任何红色信号。\n\n## 作者意图已经写在代码里了,只是没覆盖到这一层\n\n`filter` 的 outputs 本身已经做了 fail-safe:\n\n```yaml\noutputs:\n  core: \"${{ steps.changes.outputs.core || 'true' }}\"\n```\n\n—— **存疑就全跑**。但这个兜底只覆盖「输出值缺失」,没覆盖「job 整体失败」。job 挂掉时 `needs.filter.outputs.core` 是空串,`'' == 'true'` 为假,再叠加隐式 `success()`,两条路都通向跳过。\n\n`dogfood-gate` 对 `cancelled` 的处理是这类推理的正例(有实验记录 run 30271824408,说明真实失败会 dominate 聚合结果所以接受 cancelled 是安全的)。`skipped` 缺的正是同一层论证:**它无法区分「路径过滤器说没碰核心代码」和「过滤器自己炸了」**。\n\n## 建议改法\n\n把下游条件从「显式为真才跑」改成「显式为假才跳」,与 `|| 'true'` 的意图完全一致:\n\n```yaml\n    if: ${{ !cancelled() && needs.filter.outputs.core != 'false' }}\n```\n\n`filter` 失败时 outputs 为空 → `'' != 'false'` → 跑全量;`!cancelled()` 压过隐式 `success()`。存疑就全跑,和作者原本的取舍一模一样。\n\n## 这是今天同一个 GitHub 语义陷阱的第三次出现\n\n| # | 位置 | 后果 |\n|:--|:--|:--|\n| 1 | `release.yml` 的发布完整性守卫(#4900) | changesets 步骤失败后守卫被跳过,恰恰漏掉最需要它的场景 |\n| 2 | `release.yml` 的 `docker` job(#4900) | 包已公开之后才发生的故障,把镜像一起带走 |\n| 3 | `ci.yml` 的 7 个核心 job(本 issue) | 核心闸门零运行却报通过 |\n\n值得沉淀成一条可检查的规则:**任何「上游失败时仍须执行」的 step/job,`if:` 必须显式带状态函数**(`!cancelled()` / `always()`)。这条可以静态扫出来 —— 我审计时就是这么找到全部三处的。"
+}

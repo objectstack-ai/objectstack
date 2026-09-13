@@ -1,0 +1,37 @@
+{
+  "number": 4774,
+  "kind": "issue",
+  "title": "bug(example-showcase): 启动日志暴露的 4 个 showcase 自身问题 —— 夜间 job 永不运行、权限集引用不存在的 capability、退役的 retry 字段、非法 cover 种子值",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T05:28:50Z",
+  "updated_at": "2026-08-03T18:18:23Z",
+  "closed_at": "2026-08-03T18:18:23Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4774",
+  "body": "## 背景\n\n排查 `pnpm dev` 控制台刷屏（#4765）时，把 showcase 冷启的 24 条启动告警逐条查证了一遍。其中平台侧的问题已分别开在 #4769 / #4770 / #4771 / #4772 / #4773。**剩下这 4 条是 showcase 自己的问题**，都在 `examples/app-showcase/`，可以一个 PR 收掉。\n\n## 1. `sweepProjectHealth` handler 根本不存在 —— 夜间 job 永不运行\n\n```\nWARN [AppPlugin] job handler not found in bundle.functions — skipping\n     {\"appId\":\"com.example.showcase\",\"job\":\"showcase_health_sweep\",\"handler\":\"sweepProjectHealth\"}\n```\n\n`src/automation/jobs/index.ts:11` 声明了 `handler: 'sweepProjectHealth'`，注释还写着 \"Handler is registered in defineStack({ functions })\"。但全仓搜 `sweepProjectHealth` **只有这一处引用** —— 函数从来没被定义，也没进 `functions`。\n\n所以这个 \"Nightly Project Health Sweep\" 从来没跑过。要么补上实现，要么删掉这个 job（showcase 的定位是\"每种能力至少出现一次\"，倾向补实现）。\n\n## 2. `showcase.export_data` capability 没有 owning package，永不 materialize\n\n```\nWARN [security] capability has no owning package — not materialized {\"name\":\"showcase.export_data\"}\n```\n\n×3（启动过程中重复 3 次）。\n\n- 声明处：`src/security/capabilities.ts:32`\n- 引用处：`src/security/permission-sets.ts:190` — `OpsPermissionSet.systemPermissions: ['setup.access', 'showcase.export_data']`\n\n结果是 `OpsPermissionSet` 引用了一个**不会存在的权限**。需要确认 capability 要怎样才算有 owning package（大概是要挂到 app/package 声明上），然后补齐 —— 或者如果这是平台侧的归属推断漏了 app 内声明的 capability，那就要拆一个平台 issue 出去。**这一点我没查到底**。\n\n## 3. `retryDelayMs` → `backoffMs`：用的是会在 protocol 18 失效的写法\n\n```\ndefineStack: flows[24].nodes[1].config.retry.backoffMs: 'retryDelayMs' → 'backoffMs'\n  (converted at load; conversion 'retry-policy-converged', retires in protocol 18).\n  Update the source to the canonical shape — the conversion stops running then.\n```\n\n两处：`src/automation/flows/index.ts:984`、`src/automation/flows/index.ts:1176`\n\n```ts\nretry: { maxRetries: 3, retryDelayMs: 1000, backoffMultiplier: 2, maxRetryDelayMs: 10000 }\nretry: { maxRetries: 2, retryDelayMs: 500, backoffMultiplier: 2 }\n```\n\n日志已经把该做的事写在脸上了：改成 `backoffMs`。showcase 是给人抄的样板，留着退役写法尤其不合适。顺带确认 `maxRetryDelayMs` 是不是也在同一次 `retry-policy-converged` 收敛里改了名（#4661 / C8）。\n\n## 4. `cover` 种子值不是 opaque `sys_file` id\n\n```\n[value-shape] cover has an invalid image value: Expected an opaque sys_file id\n  — accepted for now (ADR-0104 warn-first; run `os migrate files-to-references --apply` ...)\n```\n\n`src/data/seed/index.ts` 的 10 条 `showcase_task` 种子用 `placeholderCover(n, color)` 生成 `cover`，不是 opaque `sys_file` id。\n\n⚠️ **注意与 #4769 的关系**：这份数据是 #4769 的诱因 —— 它让\"第二次 `pnpm dev` 起 10 条 ERROR\"这个平台 bug 显形。把种子数据改干净会让这个部署不再触发它，但**不修复 #4769 本身**（部署在同一次启动里证明了一个它随即违反的契约）。\n\n所以顺序上建议 **#4769 先定方案**：如果那边决定\"让 seed 走同一套契约\"，这里的种子值就必须改成真正的 `sys_file` 引用（需要先建 file 记录）；如果决定\"推迟 attestation\"，这里改不改就只是 showcase 数据质量问题。别在 #4769 定案前先改这条，否则可能白做或做反。\n\n## 复现\n\n```bash\nrm -rf examples/app-showcase/.objectstack && pnpm dev\n```\n\n1/2 在启动摘要的 `⚠ Boot diagnostics` 段落；3/4 在 `Loading objectstack.config.ts...` 之后的行内输出。"
+}

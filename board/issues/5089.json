@@ -1,0 +1,35 @@
+{
+  "number": 5089,
+  "kind": "issue",
+  "title": "E2(#5040 执行器):端点匹配器 —— 惰性索引 + 元数据事件失效,精确路径匹配,`params` 恒空",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "enhancement"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T03:56:38Z",
+  "updated_at": "2026-08-04T05:13:22Z",
+  "closed_at": "2026-08-04T05:12:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5089",
+  "body": "Part of #5040(E 系列第 2 单)。**Blocked-by: #5080**(需 `IMetadataService.matchEndpoint?` 契约成员先落)。维护者已放行提前开发(2026-08-04,见 #5080 认领评论;E7 翻转仍守 v17 分期)。\n\n## 范围(以 #5040 设计 §2 与总表 E2 行为准)\n\n`packages/runtime` 内实现 `matchEndpoint`:从 `getMetaItems({type:'api'})` 构建 **method → exact-path → endpoint** 惰性索引;订阅元数据变更事件失效重建;17.x 仅精确路径匹配(**不实现路径模板**,`params` 恒 `{}`,模板语法留待未来 ADR);命中项返回 `ApiEndpointSchema.parse` 后形状(默认值已物化)。含单元测试(索引构建 / 失效重建 / 未命中 / method 维度)。\n\n## 约束\n\n- 零 HTTP 行为变更(挂载在 E3,翻转在 E7 —— publish 仍拒,本单代码结构性不可达);\n- 词表冻结:不改 `ApiEndpointSchema`;\n- 本单为执行器车道程序卡,由 `session_01EYGdmvWP1ieZSLqvAW6uyd` 按序派发,**其它车道请勿认领**。\n\n关联:ADR-0121、#5080(E1)、#5040 设计 §2。"
+}

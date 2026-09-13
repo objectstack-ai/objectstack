@@ -1,0 +1,36 @@
+{
+  "number": 5216,
+  "kind": "issue",
+  "title": "service-storage: `StorageMetadataStore` 把每一次引擎写入失败都静默吞掉并退回进程内存 —— `sys_file` 的「business truth」可能凭空消失且无一行日志",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T10:23:01Z",
+  "updated_at": "2026-08-04T11:47:43Z",
+  "closed_at": "2026-08-04T11:47:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5216",
+  "body": "在 #5202(把 `sys_upload_session` 加进 plugin-audit 的 SKIP_OBJECTS)里核对写入面时发现。**不在 #5202 的 PR 里修**(越界,一事一议;那单只动 `packages/plugins/plugin-audit/src/`)。\n\n## 事实(对 `origin/main` @ `b8503183c` 核过)\n\n`packages/services/service-storage/src/metadata-store.ts` 里,`StorageMetadataStore` 的**全部 8 处**引擎调用都套在同一个形状里 —— `try { await this.engine.X(...) } catch { /* ignore */ }`,catch 块里没有任何 `logger` 调用,异常不外抛:\n\n| 方法 | 行 | 调用 | catch 注释 |\n|:--|:--|:--|:--|\n| `createFile()` | `:83` | `engine.insert('sys_file', full)` | `engine not available or schema not migrated — keep in-memory only` |\n| `getFile()` | `:94` | `engine.findOne('sys_file', …)` | `fall through to memory` |\n| `updateFile()` | `:110` | `engine.update('sys_file', …)` | |\n| `deleteFile()` | `:122` | `engine.delete('sys_file', …)` | |\n| `createSession()` | `:146` | `engine.insert('sys_upload_session', full)` | |\n| `getSession()` | `:157` | `engine.findOne('sys_upload_session', …)` | |\n| `updateSession()` | `:178` | `engine.update('sys_upload_session', …)` | |\n| `deleteSession()` | `:190` | `engine.delete('sys_upload_session', …)` | |\n\n每个写方法在调引擎**之前**都先写了进程内的 `private readonly files = new Map(...)` / `sessions = new Map(...)`(`:68-69`),读方法则「先引擎、失败或未命中就退回 Map」。类注释(`:60-66`)把这个 fallback 说成:\n\n> Backed by `IDataEngine` (objectql) when available — otherwise falls back to a process-local Map (**suitable for tests and dev environments where the data engine isn't wired up**).\n\n## 问题:声明的意图与实际覆盖面不一致\n\n注释和 catch 里的措辞说的是**引擎不存在 / schema 未迁移**这两种启动期状态。但 `if (this.engine)` 已经把「引擎不存在」挡在外面了,所以这些 catch 实际捕获的是引擎**已接好之后**的运行期失败 —— 约束冲突、连接抖动、RLS 拒绝、驱动错误。这类失败被:\n\n1. **不上报** —— 调用方拿到的是正常返回值(`createFile` 返回 `full`,`updateSession` 返回 `merged`),HTTP 层照样 200;\n2. **不记录** —— catch 块里没有 logger,`this.engine` 也没有被标记降级;\n3. **被内存 Map 掩盖** —— 紧随其后的 `getFile()` / `getSession()` 会从 Map 里读到那条「以为写成功了」的记录,所以同进程内自检也看不出异常。\n\n后果按对象分两档:\n\n- **`sys_file`** —— #5202 的调查刚刚确认过这张表是 *mostly permanent business truth*、有合规价值(这正是它被刻意排除在审计豁免之外的理由)。一次被吞掉的 `createFile` insert = 文件字节进了 backend,持久元数据行**从来没存在过**,而 API 报告成功。重启或换 worker 之后那条 Map 记录也没了,附件从此无从寻址,且没有任何一行日志指向发生过什么。\n- **`sys_upload_session`** —— 多 worker 部署下,被吞掉的 `createSession` 让后续分块请求落到别的 worker 时查不到 session;失败表现为莫名其妙的上传中断,而不是一个可诊断的错误。\n\n## 为什么单独立单\n\n- 不是 #5202 的范围(那单只碰 `packages/plugins/plugin-audit/src/`,且是纯豁免清单改动);\n- 也不是「顺手加个 logger」就完事的改动:**要不要在引擎接好之后仍然静默降级到进程内存**是一个契约判断 —— 合理的方案至少有三种(A. 引擎在场时写失败直接抛,内存 Map 退化为纯测试替身;B. 仍降级但必须 `logger.error` + 打降级标记;C. 按方法分档,`sys_file` 写入抛、session 写入降级),各自对现有调用方的影响不同。请维护者/PM 定夺走哪条。\n\n我个人倾向 **A**:`if (this.engine)` 已经区分开了「没接引擎」与「接了引擎但写失败」,后者静默吞掉是把一个可诊断的错误变成一份丢失的业务真相,而 fallback 声称服务的对象(tests / dev)恰好是 `this.engine` 为 `null` 的那条分支 —— 也就是说这些 catch 对它们声称的用途并不必要。\n\n## 未验证\n\n我只做了静态阅读,**没有**构造一次真实的引擎写失败来观察端到端表现,也没有查是否有更上层的重试/补偿逻辑兜底。严重度请 PM 判。\n\nFound-during: #5202 / PR #5215\n"
+}

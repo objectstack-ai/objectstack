@@ -1,0 +1,35 @@
+{
+  "number": 5151,
+  "kind": "pull_request",
+  "title": "fix(service-settings): 保存期强制 select 声明的 options —— 声明即强制 (#5131)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T06:32:45Z",
+  "updated_at": "2026-08-04T06:51:52Z",
+  "closed_at": "2026-08-04T06:51:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T06:51:51Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5151",
+  "body": "Fixes objectstack-ai/objectstack#5131\n\n## 问题\n\n`SettingsService.validatePatch` 的 docstring 写明它「fulfilling the spec promise that `required` is enforced server-side」,实际只做两项校验:`required` + visible + 空,以及 `pattern` 不匹配。**manifest 声明的 `options` 表从头到尾不参与校验。**\n\n走控制台碰不到——下拉框只会发出合法值;但 `PUT /api/settings/:ns` 是公开的可授权面,脚本、迁移工具、AI 写的初始化代码可以直接写入枚举外的值,而且一路静默:值存下来了,读回来了,消费端各自随机应对。这不是 `mail` 专有的,`storage.adapter`、`sms.provider`、`ai.provider`、`localization.date_format` 等所有 `type: 'select'` 的键都一样。\n\n这正是 #5094 缺失的另一半。那一单把 `sendgrid` / `ses` 从 `mail` 的选项表里退役(本服务器无法通过它们投递),而没有写入期强制,**刚退役的值当天就能被重新写回去**——manifest 侧收紧的契约在 API 侧没有对应的闸门。\n\n## 改动\n\n`validatePatch` 增加第三条:`select` / `radio` / `multiselect` 的非空值不在声明的 `options` 表内 → `FieldError`,`code` 为 `invalid_option`,`constraint` 带上允许值集合。\n\n```\nProvider must be one of: smtp, resend, postmark, log. Received 'sendgrid'.\n  → { field: 'provider', code: 'invalid_option',\n      constraint: { allowed: 'smtp, resend, postmark, log' }, value: 'sendgrid' }\n```\n\n按 ADR-0114,constraint kind 在失败点打戳,不让路由层从文案反推;`constraint` 的键名与逗号连接形态取自 spec 自己文档化的例子(`errors.zod.ts` 里 `{ allowed: 'draft, sent' }`),也是 record validator 对同一个 code 已经发出的形态——同一个 code 不应该有两种线上形状。\n\n## 三个判断,请复核\n\n**1. `invalid_option` 不是新 code,不动 `packages/spec`。** issue 与裁定都说「用新的 `invalid_option`」,实际它**已经在** `FieldErrorCode` 这个闭合枚举里(`packages/spec/src/api/errors.zod.ts:257`,注释 `// not a member of the field's declared options`)。所以本单完全不需要碰 spec——四单在飞的车道没有被占用,这是好消息。\n\n**2. `multiselect` 存在,`radio` 也一并覆盖。** 裁定要求先确认 `multiselect` 是否真实存在:它在 `SpecifierType` 闭合枚举里(`settings-manifest.zod.ts:34`),`radio` 同理。更关键的是 `SpecifierSchema` 的 superRefine **恰好要求这三类**声明非空 `options`:\n\n```\n// select/radio/multiselect require options.\nif (['select', 'radio', 'multiselect'].includes(spec.type)) { ... }\n```\n\n所以强制的类型集合不是我在这里做的判断,而是抄 spec 自己的那一份——「必须声明选项表的类型」与「值要被拿去比对选项表的类型」指同一份清单,不存在第三份会漂移的列表。\n\n`radio` / `multiselect` 今天确实没有生产者 manifest(15 处 `select`,0 处另两种)。我仍然覆盖了它们,理由是这里不是**声明**一个没人生产的属性(那才是本仓反复在修的形态),而是让校验器的类型覆盖面等于 spec 已经闭合的枚举;只做 `select` 的话,第一个写 `radio` 的 manifest 会无声地重新打开这个洞。如果认为这仍算越界,删掉常量里的两个成员即可,测试会指出对应用例。\n\n**3. 不留逃生舱,按裁定执行。** 没有 `allowCustom` 之类的预留。\n\n## 兼容性:两条刻意的边界\n\n- **按 touch 语义校验**(裁定第 1 点),与既有 `required` / `pattern` 完全一致。存量越界值只让**写该键的那次 patch** 失败;只改 `from_name` 的 patch 不会因为库里躺着一个老的 `provider` 被整体拒绝。相反做法会把带历史脏值的工作区锁死在设置页里改不动任何东西,比现状更糟。全 null 的重置(`resetNamespace`)永不阻塞——脏值始终清得掉。\n- **没有声明 `options` 的 specifier 放行。** spec 在 parse 期就拒绝这种形状,但 `registerManifest` 是照单全收的(不走 Zod),所以手搓 manifest 会到达校验器。它说不出什么是合法的,于是保持宽容——与既有「`visible` 解析不了」「`pattern` 非法」两个分支同样的退让。\n\n另有两处细节:值按**字符串形态**比较,声明为 `value: 30` 的选项经 JSON 或表单往返读回 `'30'` 仍然匹配(否则强制的是传输层而不是枚举,与 record validator 对 objectui#2729 的处理一致);`encrypted` specifier 的越界值**不回显**(`encrypted` 在任何 specifier 上都可声明,而这条 message 会进日志)。\n\n## 测试\n\n`packages/services/service-settings` 新增 7 个用例 + envelope conformance 1 个:\n\n- `sendgrid` 今天仍能写进去 → 修复后以 `invalid_option` 被拒,且批次原子(合法的 `from_email` 也没落库);\n- 表内四个值(`smtp` / `resend` / `postmark` / `log`)逐个仍可保存;\n- **touch 语义**:先用加宽的 manifest 写入 `sendgrid`,再把收紧后的真 manifest 覆盖注册上去(#5094 的真实过程),此时只改 `from_name` 仍然成功、重写 `provider` 被拒、`resetNamespace` 仍能清掉;\n- 无 `options` 的 select 放行;`radio` / `multiselect` 逐元素校验;数字/布尔选项的字符串形态匹配;encrypted 不回显;\n- 路由层:400 的 `details.fields[0]` 能通过 `FieldErrorSchema.safeParse`,`code === 'invalid_option'`,`constraint` 如实到达客户端。\n\n反向验证过用例不是摆设:把强制类型集合临时置空后,恰好这 6 个断言拒绝的用例失败,两个断言放行的用例仍然通过。\n\n现有测试没有一条在钉「越界值可以保存」的现状,因此没有需要翻面的用例。`ai` manifest 那批写 `provider: 'cloudflare'` 的用例一度看着可疑,核对后 `cloudflare` 确实在选项表内(`ai.manifest.ts:50`),不受影响。\n\n```\npnpm --filter @objectstack/service-settings test   →  15 files, 222 passed\npnpm --filter @objectstack/plugin-email     test   →   8 files, 127 passed   (下游消费者)\npnpm --filter @objectstack/service-settings build  →  DTS build success\nnpx eslint packages/services/service-settings/src  →  clean\n```\n\n类型检查:该包没有 `typecheck` script,`npx tsc --noEmit -p tsconfig.json` 报 13 处错误——改动前后**逐字相同**,且没有一处落在本 PR 触碰的文件里(已用 stash 对比基线确认)。这 13 处是 #4311 那个缺口的实例,已作为数据点评论在该 issue 下,未在本 PR 内修。\n\n## 影响面\n\n写入路径的行为收紧,可能影响绕过控制台直接调 API 的脚本——但它们写入的正是本单要拦的越界值。读取路径、控制台交互、既有合法写入均不变。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_017MCKJaEomEqg4tvz4SzdNd\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017MCKJaEomEqg4tvz4SzdNd)_"
+}

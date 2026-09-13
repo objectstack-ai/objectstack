@@ -1,0 +1,35 @@
+{
+  "number": 5339,
+  "kind": "pull_request",
+  "title": "fix(spec): gen:docs 保留 passthrough 对象的已声明键 + 开放性标记,不再塌缩成 Record (#4912)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T23:44:42Z",
+  "updated_at": "2026-08-05T01:02:30Z",
+  "closed_at": "2026-08-05T01:02:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T01:02:28Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5339",
+  "body": "Fixes #4912\n\n## 前提复核(先证红)\n\n立案前提在 `origin/main`(c7406b0)上**成立**,用当前生成器复现:\n\n```\ncontent/docs/references/ui/bulk-action.mdx:98\n| **options** | `Record< string, any >[]` | optional | Static options for select-style widgets. …\n```\n\n而 `gen:schema` 给该节点产出的确实是「两者兼有」:\n\n```json\n{ \"type\": \"object\",\n  \"properties\": { \"label\": {...}, \"value\": {...} },\n  \"required\": [\"label\", \"value\"],\n  \"additionalProperties\": {} }\n```\n\n## 根因\n\n`build-docs.ts` 的 `formatType()` **先判 `additionalProperties`、后判 `properties`**,把两者当成了互斥的二选一:\n\n```ts\nif (prop.type === 'object' && prop.additionalProperties) {\n  return `Record< string, ${formatType(prop.additionalProperties, ctx)} >`;   // ← 先命中,已声明键再也读不到\n}\n…\nif (prop.type === 'object' && prop.properties) { /* 渲染形状 */ }\n```\n\nJSON Schema 把 `.passthrough()` / `.catchall()` 对象**同时**表达为 `properties` + `additionalProperties`,所以只要一个对象既有形状又开放,它的形状就被整个丢掉。**声明键与开放性是两个独立的事实**,渲染器把它们做成了互斥。\n\n全量语料扫描:130 个节点同时带 `properties` 与开放的 `additionalProperties`(全部是 `additionalProperties: {}`),分布在 40 个 schema 文件里。\n\n## 修法\n\n`{ 已声明形状 } & Record< …, … >` —— 声明形状在前(读者**必须**写的键),开放性在后:\n\n- 之前:`Record< string, any >[]`\n- 之后:`({ label: string; value: string | number | boolean } & Record< string, any >)[]`\n\n三个细节:\n\n1. **数组元素的括号是必需的。** `A & B[]` 在 TypeScript 里是 `A & (B[])`,不加括号等于声明了另一种类型。用 `hasTopLevelIntersection()` 做深度扫描(正确忽略 `{}` / `< >` / `[]` / `()` 内部的运算符)后再决定是否加括号。\n2. **`…` 与 `& Record` 不是一回事,单元格两者都印。** `…` = 还有更多**已声明**键(超过四个时省略);`& Record` = 还接受**未声明**键。\n3. **空的 `properties: {}` 不算形状**,继续走原来的 record / opaque 渲染,不会印出 `{  } & Record< … >`。语料里有 6 个这样的退化节点,行为逐字保持不变。\n\n渲染器从 `build-docs.ts` 抽到 `packages/spec/scripts/lib/format-type.ts` 并配单测。抽出前只能「跑完整个生成器再 grep 产出的 .mdx」才能断言它的输出 —— 这正是该塌缩能在整个 #4001 战役期间无人察觉的原因。**抽取本身先证明了行为中性**:仅搬移不改逻辑时重生成 244 个文件、diff 为空,然后才落修复。\n\n## 重生成影响面(逐页确认,共 6 页 12 个单元格)\n\n每一处都是**恢复被抹掉的声明键**,没有任何一页丢失形状:\n\n| 页面 | 属性 | 恢复出来的声明键 |\n|:---|:---|:---|\n| `ui/bulk-action` | `options` | `label` / `value`(**必填**,即立案样本) |\n| `ui/bulk-action` | `params` | `name` / `label` / `help` / `type` … |\n| `ui/view` | `gantt` ×2 | `startDateField` / `endDateField` / `titleField` …(ListView、ObjectListView 各一份) |\n| `ui/view` | `tree` ×2 | `parentField` / `labelField` / `fields` / `defaultExpandedDepth` |\n| `ui/dashboard` | widget `options` | `dateGranularity` / `sortBy` / `sortOrder` / `limit` … |\n| `api/protocol` | `messages` ×3 | `role` / `content` / `parts` |\n| `system/auth-config` | `socialProviders` | `clientId` / `clientSecret` / `enabled` / `scope`(嵌在 `Record< string, … >` 的值位) |\n| `kernel/startup-orchestrator` | `plugin` | `name` / `version` |\n\n130 个节点只落到 12 个单元格,是因为其余节点要么在深度限制之外(嵌套对象按设计保持 opaque),要么不出现在被渲染的属性表位置。\n\n## 反向验证(方向:红 —— 事前即如此预判)\n\n这些用例断言的是修复**产出的正形状**,不是「某个 finding 消失」,所以恢复缺陷应当让它们变红,而不是出现计数反转或倒置。把 lib 里的分支顺序改回「先 `additionalProperties`」并去掉数组括号后:\n\n```\n× renders an array of passthrough objects with BOTH the declared keys and the openness marker\n× parenthesizes an intersection element before suffixing `[]`, but not a plain one\n× marks required vs optional keys on an open object the same way a closed one does\n× keeps the typed catchall in the marker instead of widening it to `any`\n× still elides beyond the fourth declared key, and the marker survives the elision\n× keeps nested objects opaque so a table cell cannot explode\n Tests  6 failed | 6 passed (12)\n```\n\n绿的那 6 个正是「本来就渲染对的形状」(纯 record、`additionalProperties: false` 的封闭对象、无形状对象、空 `properties`、`$ref` 链接)—— 这也解释了缺陷为何能存活:渲染器在所有**有人想到去看**的形状上都是对的。\n\n## 备选渲染形态\n\nissue 里给了两种:`{ … } & Record< … >`,或「表格 + 一行『接受额外键』」。本 PR 取前者 —— 参考页的类型单元格历来就是一段可直接抄走的 TypeScript(`Enum< 'a' | 'b' >`、`{ a: string }[]`、`Record< string, any >` 都是既有惯例),交叉类型无需改动表格结构即可同时承载两个事实。后者要给每张表加一列或一行,收益只在于更显眼,代价是改动所有页面的表结构。\n\n## 顺带发现(未在本 PR 修)\n\n数组元素是**顶层联合**时有一模一样的优先级缺陷(`string | number[]` ≠ `( string | number )[]`),**164 处**。它早于本次改动,已按 PD#10 立案 **#5338**(未认领),`format-type.ts` 内留注释指向该单。一并修会让重生成 diff 从 12 行涨到约 170 行,把真正的 passthrough 修复埋掉。\n\n## 验证\n\n```\npnpm --filter @objectstack/spec typecheck        →  tsc --noEmit,无输出(通过)\npnpm --filter @objectstack/spec test             →  Test Files 313 passed / Tests 8034 passed\nvitest run scripts/format-type.test.ts           →  12 passed(新增)\npnpm --filter @objectstack/spec check:docs       →  ✅ 244 generated files in sync with packages/spec\nnode scripts/check-nul-bytes.mjs                 →  OK(5379 个文件,无裸 NUL)\n```\n\n未触碰 `packages/spec/src/**`(无 zod 源改动,故 `api-surface` / `authorable-surface` 不受影响)、未触碰 `docs/audits/2026-07-unknown-key-strictness-ledger*`、`content/docs/releases/` 零改动。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01FTszibd6C8sUCCZnM4VcrL)_"
+}

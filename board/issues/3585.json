@@ -1,0 +1,36 @@
+{
+  "number": 3585,
+  "kind": "issue",
+  "title": "plugin-auth: JWT plugin's EdDSA keygen breaks login on hosts without Ed25519 (WebContainer/StackBlitz)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T08:12:00Z",
+  "updated_at": "2026-08-04T02:38:19Z",
+  "closed_at": "2026-08-04T02:38:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3585",
+  "body": "## Summary\n\nOn any host whose WebCrypto lacks Ed25519, every authenticated request 500s as soon as the OIDC provider is enabled — which is the default whenever the MCP server is on. Reproduced on StackBlitz/WebContainer (Node 22.22.3) with `@objectstack/*` 16.1.0.\n\n## Symptom\n\nSign-in succeeds, then the first `/api/v1/auth/get-session` returns 500:\n\n```\n[Better Auth]: OperationError DOMException [OperationError]: The operation failed for an operation-specific reason\n    at Object.cfrgGenerateKey (builtins.js:74:3727)\n    at async SubtleCrypto.generateKey (builtins.js:90:10600) {\n  [cause]: TypeError: o.run is not a function\n      at Module.generateKeyPair (jose/dist/webapi/key/generate_key_pair.js:111:26)\n      at generateExportedKeyPair (better-auth/dist/plugins/jwt/utils.mjs:42:48)\n      at Module.createJwk (better-auth/dist/plugins/jwt/utils.mjs:61:58)\n      at resolveSigningKey (better-auth/dist/plugins/jwt/sign.mjs:76:26)\n}\n[AuthManager] better-auth returned error: 500\n```\n\n`GET /api/v1/auth/jwks` reproduces it with no credentials at all — that route generates the key pair on first use.\n\n## Root cause\n\n1. `plugin-auth` registers better-auth's JWT plugin as `jwt({ schema: buildJwtPluginSchema() })` — no `jwks.keyPairConfig`, so better-auth's default **EdDSA (Ed25519)** applies.\n2. WebContainer's WebCrypto has no Ed25519, so `cfrgGenerateKey` throws.\n3. The plugin's `after` hook on `/get-session` signs a `set-auth-jwt` header for **every** session, so the failure hits normal cookie login — not just OAuth clients.\n4. It is on by default in a plain dev server: `resolveOidcProviderEnabled(pluginConfig)` falls back to `isMcpServerEnabled()`, which defaults to `true`.\n\nSo an app that never asked for OIDC still gets an unusable login on such a host, and the error message points at better-auth rather than at the algorithm choice.\n\n## Workaround\n\n`OS_OIDC_PROVIDER_ENABLED=false` drops the plugin and login works (verified end to end: `sign-in/email` 200, `get-session` 200, `jwks` 404). Apps can't do better than this today because the algorithm isn't configurable through `AuthPluginConfig`.\n\n## Suggested fix\n\nAny of, roughly in order of preference:\n\n1. Pass an algorithm the host supports — e.g. probe `crypto.subtle.generateKey({name:'Ed25519'}, …)` once at startup and fall back to `ES256` when it throws.\n2. Expose `jwks.keyPairConfig` through `AuthPluginConfig` so an app can pin `ES256`/`RS256`.\n3. At minimum, catch the keygen failure and degrade the OIDC provider (there is already `getDegradedAuthFeatures`) instead of 500ing the whole session path — plus an error that names Ed25519.\n\n## Environment\n\n- `@objectstack/*` 16.1.0, Node 22.22.3, StackBlitz WebContainer\n- Downstream report and workaround: https://github.com/objectstack-ai/hotcrm/pull/486"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 5261,
+  "kind": "issue",
+  "title": "organization/create 的闸门判「请求的 posture」还是「实际生效的 posture」？降级部署(D5)下两者分叉，闸门放行而 /auth/config 隐藏",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T13:14:54Z",
+  "updated_at": "2026-08-04T16:24:00Z",
+  "closed_at": "2026-08-04T16:24:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5261",
+  "body": "从 #5233 的修复中分出来的一个**需要维护者定夺的语义问题**,#5233 本身没有改动它(那是纠正 knob,不是改能力边界)。\n\n## 事实\n\n修好 #5233 之后,`packages/plugins/plugin-auth/src/auth-manager.ts` 的两个站点读的是**两个不同的事实**,在一种部署形状下会分叉:\n\n| 站点 | 读什么 | 语义 |\n|---|---|---|\n| `organizationHooks.beforeCreateOrganization` | `postureEnforcesWall(resolveTenancyPosture())` | 操作者**请求**的 posture |\n| `/auth/config` 的 `features.multiOrgEnabled` | `tenancy?.posture ?? resolveTenancyPosture()` | **实际生效**的 posture(ADR-0093 D4) |\n\n只有一种形状让两者不同 —— **ADR-0093 D5 的降级态**:请求了 `isolated`/`group`,但企业包 `@objectstack/organizations` 不在(`org-scoping` 服务缺席),于是 `tenancy.posture` 解析为 `single` 且 `degraded=true`。此时:\n\n- 闸门:**放行**(请求的是 `isolated`);\n- `/auth/config`:`multiOrgEnabled=false`,console 把「创建组织」入口**藏起来**;\n- 结果:UI 不给按钮,但 API 打得通,并且创建出来的组织**没有任何引擎强制的墙**。\n\n## 这不是 #5233 引入的\n\n降级前闸门读 `resolveMultiOrgEnabled()`,那同样是一个纯 env 读,在这里同样返回 `true`、同样放行。#5233 只是把 knob 从被降级的布尔换成权威的 posture,**分叉是原样保留的**。已在 `packages/plugins/plugin-auth/src/org-create-posture-gate.test.ts` 里作为**当前行为**钉住(用例名带 \"pinned as CURRENT behaviour\"),所以无论怎么定夺,都必须是有意识地改这条断言。\n\n## 两个选项\n\n**A. 保持现状 —— 闸门判「请求的 posture」。**\n- 与 `serve.ts` 的 D5 boot guard 同源(它也是 `resolveTenancyPosture() !== 'single'`),两处口径一致。\n- 降级本来就已经是**显式选择**:`serve` 在降级时默认**拒绝启动**,要 `OS_ALLOW_DEGRADED_TENANCY=1` 才走;既然操作者已经明说「我接受没有墙」,那么再单独禁掉建组织意义不大。\n- 代价:`/auth/config` 藏按钮而 API 放行,这个分叉长期存在;而且降级部署里建出来的组织边界是「声明了但没强制」——ADR-0049 最讨厌的那一类。\n\n**B. 闸门改判「实际生效的 posture」(`tenancy?.posture ?? resolveTenancyPosture()`)。**\n- 两个站点从此同解,永不分叉;降级态不再产出无墙的组织边界(tenancy-service 文档里 cloud#957 那条「降级墙可以活,降级成跨租户写不行」的推论)。\n- 代价一:**没装企业包的 OSS 自托管部署将完全无法创建组织**。这是一次实打实的能力收缩,不是 knob 纠正。\n- 代价二:`packages/qa/dogfood/test/org-create-default-team.dogfood.test.ts`(#3624 的回归)靠的正是「boot 之后翻 env、闸门 live 读」这个技巧来打开路由;它跑在没有企业包的 workspace 里,选 B 之后**任何 env 组合都过不了这道闸门**,该 dogfood 只能改写或删掉,#3624 的端到端覆盖随之丢失。\n\n## 倾向\n\n倾向 **A**(即现状),因为降级已经是 `OS_ALLOW_DEGRADED_TENANCY` 的显式选择,B 的收益主要落在一个已经被 boot guard 拦住的形状上,却要付「OSS 部署失去建组织能力 + 丢掉 #3624 的 e2e 覆盖」这两笔。若要选 B,建议同时给 dogfood 一条别的开路方式(例如 verify harness 提供可注入的 tenancy stub),别让 #3624 的覆盖为此消失。\n\n不指派 —— 按 Prime Directive #10 归档,等维护者定夺。\n\n出处:#5233 的开发(会话 `session_015W6nhsDrz6zWQc8je12a1t`)。\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 4926,
+  "kind": "issue",
+  "title": "P0:5 个已发布模板对真实新用户是坏的 —— 脚手架的对象名前缀改写对所有远程模板静默跳过,夜间金丝雀连红 20 次无人察觉",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T16:30:45Z",
+  "updated_at": "2026-08-04T00:13:27Z",
+  "closed_at": "2026-08-04T00:13:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4926",
+  "body": "## 影响\n\n`npx create-objectstack@latest my-app -t <模板>` 对 **6 个模板里的 5 个**产出的工程连 `objectstack build` 都过不去(exit 2)。只有本仓库自带的 `blank` 是好的。\n\n```\nRegistry canary: todo         ✗ Object 'todo_task' is missing the package namespace prefix.\n                                 Rename it to 'canary_app_todo_task' (namespace = 'canary_app')\nRegistry canary: compliance   ✗ 4 issues\nRegistry canary: content      ✗ 9 issues\nRegistry canary: contracts    ✗ 3 issues\nRegistry canary: procurement  ✗ 4 issues\n```\n\n`Scaffold E2E` 的 `registry-canary` **最近 20 次定时运行全部失败**,连续至少从 2026-07-27 到今天([最近一次 run 30784751821](https://github.com/objectstack-ai/objectstack/actions/runs/30784751821))。\n\n## 为什么无人察觉\n\n`registry-canary` 的条件是 `if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'` —— **PR 永远不跑它**,只在夜里跑,而夜里的红灯没有任何人或机制去看。这个 workflow 的全部存在意义就是当新用户金丝雀,它红了一周多,首次使用体验一直是坏的。\n\n## 根因:同名文件、两套 schema\n\n`packages/create-objectstack/src/index.ts` 的 `rewriteProjectIdentity` 只从 `objectstack.manifest.json` 读模板原始 namespace:\n\n```ts\nif (typeof m.namespace === 'string') templateNamespace = m.namespace;\n…\nif (namespace !== templateNamespace && templateNamespace) { …改写 src/**/*.ts 里的对象名… }\n```\n\n而 `objectstack.manifest.json` 这个文件名对应**两种完全不同的文档**:\n\n| | 自带 `blank` | 远程模板(objectstack-ai/templates) |\n|:--|:--|:--|\n| schema | app 形态 | `$schema: …/template-manifest.json`(注册表文档) |\n| `namespace` 字段 | **有**(`\"blank\"`) | **没有** —— 只有 name/displayName/category/skills/translations |\n| 真实 namespace 在哪 | manifest + config | **只在 `objectstack.config.ts`** |\n\n于是对每个远程模板 `templateNamespace` 都是 `undefined`,守卫 `&& templateNamespace` 为假,**对象名改写整段被跳过**;而 `objectstack.config.ts` 的 `namespace:` 是**无条件**改写的。结果就是 `namespace: 'my_app'` 与 `name: 'todo_task'` 并存,直接违反 `packages/spec/src/kernel/namespace-prefix.ts` 的 `${namespace}_${shortName}` 规则。\n\n实测(把 `objectstack-ai/templates@960f24d` 的真实模板喂给新旧两套逻辑):\n\n| 模板 | 旧逻辑读到的 namespace | 新逻辑 | 应改写的对象名 | 旧逻辑实际改写 |\n|:--|:--|:--|--:|--:|\n| todo | `undefined` | `todo` | 7 | **0** |\n| compliance | `undefined` | `compliance` | 17 | **0** |\n| content | `undefined` | `content` | 22 | **0** |\n| contracts | `undefined` | `contracts` | 12 | **0** |\n| procurement | `undefined` | `procurement` | 16 | **0** |\n\n生产上共 **74 处**对象名从未被改写。\n\n代码注释本身就留了线索 —— 「Used to swap the **bundled** template's literal `blank_` object-name prefix」:这段逻辑从设计起就只考虑了自带模板,远程路径从未被覆盖。\n\n## 修复方向(PR 随后)\n\n1. **`objectstack.config.ts` 作为 namespace 的权威来源**,manifest 降为回退。config 里的 `namespace:` 正是脚手架自己要改写的那个字面量,两者不可能不一致。\n2. **改写完成后自我校验**。「静默什么都没做」和「本来就不需要做」在外部完全同形 —— 这个歧义正是本缺陷得以出厂的原因。残留任何旧前缀就直接报错退出,把失败拉回到脚手架现场,而不是留给用户的第一条 `objectstack build`。\n\n## 顺带发现:4 个模板完全没有自动化覆盖\n\n`objectstack-ai/templates` 里有 10 个包。脚手架 `TEMPLATES` 注册表只提供 5 个远程模板,金丝雀矩阵也只有这 5 个 + blank。而 **`expense` / `helpdesk` / `hr` / `project` 各自都有完整的 `objectstack.config.ts` 和 namespace**(`expense`/`helpdesk`/`hr`/`pm`),却既不对用户开放、也无任何 CI 覆盖。(`all` 没有 config,不是模板。)是有意暂不发布还是漏了,需要维护者确认 —— 另行记录。"
+}

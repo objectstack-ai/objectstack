@@ -1,0 +1,37 @@
+{
+  "number": 4983,
+  "kind": "issue",
+  "title": "ADR-0056 D4 的 RLS authoring gate 从未接线:isSupportedRlsExpression 没有任何非测试消费者",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T18:37:34Z",
+  "updated_at": "2026-08-03T20:39:57Z",
+  "closed_at": "2026-08-03T20:39:56Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4983",
+  "body": "发现于 #4698 的实现过程(`packages/lint` 侧已落地 sharing-rule 那条,见 PR)。这是同一缺陷类的**姊妹面**,但修不进那个 PR,原因写在下面。\n\n## 事实\n\n`isSupportedRlsExpression` (`packages/plugins/plugin-security/src/rls-compiler.ts`) 的 TSDoc 明确说明它存在的唯一理由:\n\n> ADR-0056 D4: exposed so an authoring-time gate (`objectstack compile`) can REJECT a predicate the runtime would silently drop — the class of bug where `owner == current_user.name` (`==`, unsupported) compiled to nothing and left an object unprotected. A `false` here means \"this predicate will never enforce\".\n\n仓内消费者盘点(`grep -rn isSupportedRlsExpression --include=*.ts packages/`):\n\n- `packages/plugins/plugin-security/src/rls-compiler.ts` — 定义处\n- `packages/plugins/plugin-security/src/security-plugin.test.ts` — 它自己的单测\n- `packages/qa/dogfood/test/authz-conformance.matrix.ts` — 一致性矩阵里的一行**描述文字**\n\n即:**那个 authoring gate 从来没有被任何 authoring 命令调用过**。函数本身就是一个 declared-but-never-read 的实例 —— 而且它恰好是为了修 declared-but-never-read 而写的。\n\n## 后果\n\n`stack.permissions[].rowLevelSecurity[].using` / `.check` 是可授权面(`PermissionSetSchema.rowLevelSecurity`)。一条不可下推的谓词在运行期走 `RLSCompiler.compileExpression` → `compileCelToFilter` 返回 `!ok` → `return null` → 单策略路径变成 `RLS_DENY_FILTER`(fail closed)。\n\n所以它不是安全漏洞,而是一条**看起来在授权、实际在拒绝**的策略:管理员写了一条 policy,用户被一律拒访,现场没有任何指向这条 policy 的诊断。`os validate` / `os build` / `os lint` 全绿。\n\n## 为什么没有随 #4698 一起做\n\n判据本身是可机械判定的(和 sharing rule 那条同一个编译器),但**判据的实现位置不对**:\n\n- RLS 的决策过程是 `isSupportedRlsExpression`,它先经 `sqlPredicateToCel` 把遗留 SQL-ish 子集(`=` → `==`,`IN` → `in`)桥接成 canonical CEL,再问 `isPushdownableCel`。\n- `sqlPredicateToCel` 和 `isSupportedRlsExpression` **两个都住在 `plugin-security`**,那是一个 runtime。`@objectstack/lint` 的包契约是 \"Depends on @objectstack/spec; never on a runtime\"。\n- 于是 lint 只有两条路:import 一个 runtime(禁止),或者把桥接逻辑抄一份到 lint(把唯一判据 fork 成两份 —— 正是 #4698 那条规则的文档开头拒绝做的事)。\n\n抄一份尤其危险:`sqlPredicateToCel` 是一个正则重写,它的 `IN` / `=` 边界条件(引号内字面量不重写、对 CEL 输入幂等)是这条规则**判绿判红的分界线**。两份实现只要漂移一格,lint 就会在 authoring 时否掉运行期其实能执行的策略 —— 误伤方向,比漏报更糟。\n\n## 建议做法(engine / security 车道)\n\n1. 把 `sqlPredicateToCel` 上提到 `@objectstack/formula`(它已经是 `isPushdownableCel` 的家,而且 lint 已经依赖它)。`plugin-security` 从那里 re-export 或直接引用,保持一份定义。ADR-0058 D1 说的就是 \"a single canonical shape gate\",桥接属于那个 gate 的一部分。\n2. 在 `packages/lint` 加一条规则,判据 = `isPushdownableCel(sqlPredicateToCel(expr))`,覆盖 `permissions[].rowLevelSecurity[].using` 和 `.check`,以及对象上直接授权的 `objects[].rowLevelSecurity[]`(`validateOrgAxisRedLines` 已经在走这两条路径,可以照抄遍历)。\n3. 严重度建议 `error`,理由同 sharing-rule 那条:没有任何一种读法下这条 policy 会按作者写的那样授权。\n4. 落地前先跑一遍全仓实测。我在实现 #4698 时已经扫过一次:`examples/` 与 `packages/plugins/plugin-security/src/objects/default-permission-sets.ts` 里现存的每一条 `using` / `check` 都能下推,**新 gate 不会让任何现有代码变红**。\n\n## 验证脚本(实测,非推断)\n\n```js\nimport { isPushdownableCel } from '@objectstack/formula';\nisPushdownableCel('owner == current_user.name');      // => { ok: true }  (#4171 时代的例子如今能下推)\nisPushdownableCel('size(record.tags) > 0');           // => { ok: false, reason: 'unsupported' }\nisPushdownableCel(\"record.account.region == 'EU'\");   // => { ok: false, reason: 'unsupported' }\n```\n\n相关:#4698(母议题,declared-but-never-read 的模式)、ADR-0056 D4、ADR-0058 D1。"
+}

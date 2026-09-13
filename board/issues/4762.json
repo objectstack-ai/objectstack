@@ -1,0 +1,36 @@
+{
+  "number": 4762,
+  "kind": "issue",
+  "title": "A `format` rule with an invalid regex, and a `json_schema` rule ajv cannot compile, still fail OPEN — the same trap #4649 closed, one rule type over",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T03:07:24Z",
+  "updated_at": "2026-08-04T02:38:53Z",
+  "closed_at": "2026-08-04T02:38:53Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4762",
+  "body": "Found while implementing #4649 (PR #4761). Filed unassigned, not fixed there — #4649's ruling scoped itself to the object-level **predicates**, and widening it in the same PR would have mixed two blast radii.\n\n## What is still fail-open\n\n`packages/objectql/src/validation/rule-validator.ts`:\n\n- `checkFormat` — a `regex` that `new RegExp(...)` throws on is logged and **skipped**:\n  ```\n  Validation rule '<name>' has an invalid regex — skipped\n  ```\n- `checkJsonSchema` — a schema `ajv.compile(...)` throws on is logged and **skipped**:\n  ```\n  Validation rule '<name>' has an uncompilable JSON Schema — skipped\n  ```\n\nBoth are the exact shape #4649 was filed about: the rule is declared, appears in the metadata, appears in any \"what protects this object\" listing, and enforces nothing — the only signal being a WARN in a log nobody reads. #4761 flipped the CEL predicates (`script` / `cross_field` / `conditional.when`) to fail closed and left these two deliberately unchanged, with a test pinning that they still fail open so the gap is visible rather than assumed closed:\n\n`packages/objectql/src/validation/rule-fail-closed.test.ts` › `#4649 — unchanged neighbours`.\n\n## Why it is a smaller problem than #4649 was, but still a problem\n\nA broken `regex` / schema is **static** — it is broken for every record, from the moment it is authored, not only for records of a particular shape. So it is far more likely to be noticed in dev than #4649's data-dependent fault was. That is an argument about *when* it is noticed, not about whether the rule enforces anything: on a deployed system it enforces nothing, silently, exactly as before.\n\n## Two ways to close it, and they are not exclusive\n\n1. **Authoring/publish time (preferred, contract-first).** A regex that does not compile and a JSON Schema ajv rejects are both decidable without a record. Rejecting them at publish — `packages/lint` — kills the rule class outright and never risks bricking a running deployment. This is the \"declared = enforced\" fix rather than a runtime policy fix.\n2. **Write time, to match #4649.** Reuse `unevaluableRuleError` from `rule-validator.ts`: reject with `reason: 'unevaluable'`, naming the rule. Note the blast radius differs from #4649's in an important way — an unevaluable *predicate* rejects only writes whose data triggers the fault, whereas a broken *regex* would reject **every** write touching that field, for as long as the bad metadata is deployed. That is a strong argument for doing (1) first, and only then deciding whether (2) is still worth having as a backstop.\n\n## Acceptance sketch\n\n- A `format` rule with `regex: '(['` is rejected at publish/lint with the rule name and the regex error.\n- Same for a `json_schema` rule whose schema ajv cannot compile.\n- If (2) is also taken: the `#4649 — unchanged neighbours` tests in `rule-fail-closed.test.ts` flip, and the module header's \"Deliberately NOT changed here\" paragraph is updated in the same PR — it is the record of this decision.\n"
+}

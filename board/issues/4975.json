@@ -1,0 +1,35 @@
+{
+  "number": 4975,
+  "kind": "pull_request",
+  "title": "fix(example-showcase): 让 4 条「声明了但运行时从不兑现」的接线真正生效 (#4774)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T17:35:25Z",
+  "updated_at": "2026-08-03T18:18:23Z",
+  "closed_at": "2026-08-03T18:18:22Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T18:18:22Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4975",
+  "body": "Fixes objectstack-ai/objectstack#4774\nFixes objectstack-ai/objectstack#4888\nFixes objectstack-ai/objectstack#4891\n\n启动日志里剩下的这 4 条是 showcase 自己的问题。它们的根因是同一类:声明在 authoring 期被接受,运行时却静默地什么也不做,只留一行 boot warning。参考应用最不该做的就是这个——它是给人抄的。\n\n## STALE-PREMISE 复核\n\nissue 是 08-01/08-02 的观察,而 #4794 今天改了首启 attestation 行为。所以先在当前 `origin/main`(6bc93dc)上原样冷启复现了一遍,4 条全部仍在:\n\n```\n⚠ Boot diagnostics — 8 warnings logged during startup:\n  WARN [migration] NOT attesting 'adr-0104-file-references' on this new datastore: this boot\n       already wrote 10 value(s) that the migration's own contract rejects\n       (showcase_task.cover: Expected an opaque sys_file id). …                        (×2)\n  WARN [security] capability has no owning package — not materialized\n       {\"name\":\"showcase.export_data\"}                                                  (×3)\n  WARN [AppPlugin] job handler not found in bundle.functions — skipping\n       {\"appId\":\"com.example.showcase\",\"job\":\"showcase_health_sweep\",\"handler\":\"sweepProjectHealth\"}\ndefineStack: flows[24].nodes[1].config.retry.backoffMs: 'retryDelayMs' → 'backoffMs' …   (×2)\n```\n\n第 4 条的现场确实按 #4794 预测变了:第二次启动的 10 条 ERROR 没有了,取而代之的是首启无法 attest。issue 正文描述的 value-shape 行仍在,结论不变。\n\n## 1. 夜间 job 从来没跑过 → 补实现\n\n`showcase_health_sweep` 声明 `handler: 'sweepProjectHealth'`,而全仓没有任何同名函数。按「每种能力至少出现一次」补了真实实现,而不是删掉声明。\n\n`healthFor()` 用**预算燃尽率与已交付进度的落差**判定:`burn = spent/budget`,`done = mean(task.progress)/100`,`drift = burn - done`;超预算或 drift ≥ 0.30 判红,≥ 0.15 判黄,否则绿。只扫 `active`/`on_hold`(`planned` 还没得烧,`completed`/`cancelled` 是已定的事实),且只写真正变了的行。\n\n**为什么引擎句柄要在 `onEnable` 里捕获**——这点值得说清楚,因为它是平台契约决定的,不是偷懒:job handler 和 `script` 节点走同一个 `defineStack({ functions })` 注册表(`collectBundleFunctions`),而 job service 调用它时给的上下文是 `IJobService` 的 `JobHandler` 形状 `{ jobId, data }`,**里面没有数据引擎**——flow function 默认是纯函数,返回值由下游声明式节点落库(#4343 / #4396)。后台 job 恰恰是这个契约没覆盖的情形:它下游没有任何节点会替它落库。所以它在 `onEnable`(app 唯一被交给活引擎的地方)拿句柄,并在 `functions` 里以 `effect: 'writes'` 声明。该声明不授予任何东西,它只是让这次运行报告「无法统计这些写入」,而不是静默地谎称没写过。\n\n## 2. `showcase.export_data` 永不 materialize → 先判归属,再补 app 侧\n\n按 PM 指示先把归属查到底。**结论是平台侧缺陷**,已拆出 #4967,没有在 showcase 里绕过去:\n\n- `bootstrapDeclaredCapabilities` 取 `cap._packageId ?? cap.packageId`。`_packageId` 这一半对 app 声明的 capability **永远不可能命中**:AppPlugin 走 `metadata.registerInMemory(...)`(不盖戳),而盖戳的那条路 `SchemaRegistry.registerItem(..., packageId)` 由 `ObjectQLEngine.use()` 的 `metadataArrayKeys` 驱动,那个列表里有 `permissions` 却**没有 `capabilities`**。所以 permission set 能 materialize、capability 不能,而 spec 里自称「fallback」的 `packageId` 实际上是必填的,却没有任何地方这么说。\n- 更锋利的一条:`declaredNames` 在 upsert 决定任何事情**之前**就无条件 push 了,而 `bootstrapSystemCapabilities` 拿它来跳过派生。于是一个**被拒绝**的声明照样抑制了向后兼容的派生——加上这条显式声明,比不声明还糟:本来会存在的占位符没有了,也没有东西补上,capability 在任何一行里都不存在。\n\nshowcase 侧能修的修掉:补上 ADR-0086 D3 的 `packageId`。这不是绕过——它是 spec 自己给出的作者声明入口(`packageId: '[ADR-0086 D3] Owning package id (author-declared fallback…)'`),顺带把这个字段也演示了;将来平台盖上 `_packageId` 后戳优先,两者一致。\n\n关于 #4632「是否该更响亮」:该改动落在平台包,按硬约束没有在本 PR 做,评估记在 #4967 第 3 节(倾向不是抬级别而是改措辞——现在的 warn 报的是 capability 名,没告诉读者后果,也没点名是哪个 permission set 在授予它)。\n\n## 3. `retryDelayMs` → `backoffMs`\n\n两处 `try_catch` 改为正名写法,不再依赖 load 时的 `retry-policy-converged`(该 conversion 在 protocol 18 退役)。\n\n顺带确认了 issue 里问的那点:**`maxRetryDelayMs` 不在这次改名范围内**。它是 `RetryPolicySchema` 的正式键(单次退避延迟的上限),#4661 的收敛只把 automation 侧的 `retryDelayMs` 并到 `backoffMs`。所以保留,并加了一条反向断言防止有人「为了对称」把它一起删掉。\n\n## 4. 非法 cover 种子值 → 移除,而不是编一个合形状的 id\n\n`Field.image()` 的存储形态是 opaque `sys_file` id;seed 写的是内联 `data:image/svg+xml` URI。代价不是噪音:由于一次启动不能证明它自己刚刚违反的契约(#4769 / `attestFreshDatastore`),**全新库因此永远无法 attest `adr-0104-file-references`**——参考应用的每一次全新安装,闸门从第一天起就开着。\n\n按 PM 裁定,seed 不需要建真正的 sys_file 记录。那么「改成合形状」只剩两条路,选了后者:\n\n- ❌ 编一个合形状但没有 sys_file 行支撑的 id:会被 ADR-0104 自己的对账(`os migrate files-to-references`)判为 `unowned_reference`——**阻断级**,比原来的 warn-first 更糟。而且「编一个看起来对的 id」正是参考应用最不该教的模式。\n- ✅ 移除种子值。`cover` 字段与 `gallery.coverField` 绑定**保留**(能力仍被演示),由上传真实封面来填充——那才是受管文件该有的来历。Gallery 在没有任何记录带封面时会收起封面区,所以卡片是干净的紧凑空态,不是破图。\n\n顺带发现:即便给它一个**完全正确**的值,objectui 的 gallery 也渲染不出来——`ObjectGallery.tsx` 把字段值当 URL 字符串读,而 ADR-0104 的读路径会把 id 就地展开成 `{ id, url, … }` 对象。已开 objectstack-ai/objectui#3317。\n\n## 验证\n\n全新库冷启(`objectstack dev --fresh`),启动告警 **8 → 2**,4 条症状全部消失:\n\n```\n⚠ Boot diagnostics — 2 warnings logged during startup:\n    WARN Driver already registered, skipping {\"driverName\":\"com.objectstack.driver.sql\"}\n    WARN StorageServicePlugin: storage adapter swapped (LocalStorageAdapter → LocalStorageAdapter). …\n```\n\n剩下 2 条与本单无关,改动前后完全一致,已另行立案(#4968 是其中的假告警)。\n\n`--log-level info` 下三条正向证据都在:\n\n```\nINFO [migration] new datastore attested at creation: adr-0104-file-references, adr-0104-value-shapes\n     — no legacy data can exist here, so the gated behaviour is enabled from birth\nINFO [AppPlugin] Scheduled background jobs {\"appId\":\"com.example.showcase\",\"count\":1,\"failed\":0}\nINFO [security] declared capabilities seeded into sys_capability (ADR-0066 D1)\n     {\"seeded\":1,…,\"declaredNames\":[\"showcase.export_data\"],\"total\":1}\n```\n\n`pnpm typecheck` / `pnpm test`(11 files, 84 tests)/ `pnpm validate` / `eslint` 全绿;`check:i18n-coverage`、`check:doc-authoring`、`check:release-notes`、`check:adr-anchors` 亦绿。\n\n## 测试\n\n新增 `test/inert-wirings.test.ts`(24 条)。四条守卫都验证过**能在修复前失败**,不是空转:\n\n- job:每个声明的 job,其 `handler` 必须是 `functions` 的键、必须可调用(这就是 AppPlugin 做的那次查表);健康判定规则的单元测试 + 一次对假引擎的完整 sweep(证明只扫在办项目、只写变化行)。\n- capability:每个声明必须解析出 owning package;任何 permission set 都不得授予未声明的 capability。\n- retry:**刻意读源码文本,不读解析后的 stack**。conversion 在 `defineStack` 期间就已经把退役拼写改写掉了,所以任何对解析结果的断言都会空转通过——真正要变、也真正会在 protocol 18 停止加载的,是作者写下的东西。(这一条最初就是照解析结果写的,跑负向验证时才发现它永远为真。)扫描时剥掉注释,好让文档可以自由地提到这个退役键。\n- seed:任何文件类字段的种子值都必须通过它自己的 ADR-0104 存储形态;外加一条更易读的:seed 里不得出现内联 `data:image/` 或 picsum/placehold 链接。\n\n## 范围\n\n只动 `examples/app-showcase/**` 与一个 changeset。`packages/**` 只读;`packages/spec/**`、`metadata-protocol/src/protocol.ts`、`content/docs/releases/` 零改动。\n\n本次拆出的平台/UI issue:#4967、#4968、objectstack-ai/objectui#3317。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01NrmBxj8rK2uGCnh9aipjwX\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01NrmBxj8rK2uGCnh9aipjwX)_"
+}

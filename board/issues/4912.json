@@ -1,0 +1,37 @@
+{
+  "number": 4912,
+  "kind": "issue",
+  "title": "gen:docs 把数组内的 passthrough 对象渲染成 `Record&lt;string, any&gt;[]`,抹掉已声明键 —— #4001 战役每个 open 分类站点都会复发",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T15:45:29Z",
+  "updated_at": "2026-08-05T01:03:21Z",
+  "closed_at": "2026-08-05T01:02:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4912",
+  "body": "从 PR #4909(bulk-action `options` → `.passthrough()`)的执行报告转立案,发现者为该单 dev,记录在报告的 out_of_scope_findings 里但未立案 —— 这里补上(PD#10)。**未认领。**\n\n## 症状\n\n`gen:docs` 对「数组元素是 `.passthrough()` 对象」的站点,把参考页上的类型渲染成 `Record<string, any>[]`,**把已声明键的形状整个抹掉**。实例见 PR #4909 的 `content/docs/references/ui/bulk-action.mdx` diff:\n\n```\n- | **options** | `{ label: string; value: string \\| number \\| boolean }[]` | …\n+ | **options** | `Record<string, any>[]` | …\n```\n\n`options` 仍有**两个必填键**(`label` / `value`,零容忍缺失,测试钉着),但作者面文档显示成「无形状」。一个有形状、部分开放的对象,在文档上退化成完全无形状 —— 正是 strip 时代那种「声明与呈现不符」反过来。\n\n## 为什么会复发\n\n#4001 战役的分类规则会持续产出「declared 键 + 刻意 passthrough」的站点(`dashboard` widget `config`、`BulkActionParamSchema` 本体等已是;后续 `data/` 的 mixed 裁定还会新增)。每个这样的站点落地那天,它的参考页都会把声明的键抹掉。#4909 用该键的 `.describe()` 手工补了散文 —— 那是逐点补偿,不是修复。\n\n## 建议修法\n\n渲染器对 passthrough 对象输出「声明键的完整形状 + 开放性标记」(如 `{ label: string; value: … } & Record<string, unknown>` 或表格 + 「接受额外键」一行),而不是塌缩成 `Record<string, any>`。落点在 `packages/spec/scripts` 的文档生成(build-docs / json-schema 投影),动之前按战役规矩先在 bulk-action 这个已知站点上证红。\n\n关联:#4001(战役)、PR #4909(实例与临时补偿)、#4852(台账重测)。"
+}

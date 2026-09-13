@@ -1,0 +1,36 @@
+{
+  "number": 5031,
+  "kind": "pull_request",
+  "title": "fix(vscode): 片段展开出来的 metadata 现在过得了 spec,并加了一条常驻 gate 让它别再过期 (#4917)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T00:31:39Z",
+  "updated_at": "2026-08-04T00:41:32Z",
+  "closed_at": "2026-08-04T00:41:30Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T00:41:30Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5031",
+  "body": "Fixes #4917\n\n## 先核实:议题点的两个键确实被拒,但坏掉的不止一个片段\n\n对着本分支基线 `bf1edef` 的 `ViewSchema` 实测,议题描述属实:\n\n```\n[unrecognized_keys] path=[\"list\"]  Unrecognized key(s) on this list view: `defaultSort`, `pageSize`.\n```\n\n但议题只实测了 `os-view-grid`。按派发要求把**全部 8 个片段**都展开过了一遍 safeParse,结果是 **5 个坏的**,不是 1 个:\n\n| 片段 | 被拒的东西 | 现在的 canonical 写法 |\n|---|---|---|\n| `os-view-grid` | `list.defaultSort`、`list.pageSize`;**外加** container 上的 `type` / `objectName` —— 后者正是 `ViewSchema` 自己的 guidance 点名的「把扁平 view 写在 container 位置」 | `defineView({ object, list: { …, sort: [{ field, order }], pagination: { pageSize } } })` |\n| `os-flow` | 节点的 `name` / `next`(键是 `label` + 一个 `edges` 数组),以及顶层 `trigger` 块 | `defineFlow`,对象绑定放在 START 节点的 `config: { objectName, triggerType }`,`edges` 显式声明 |\n| `os-agent` | `tools` —— 协议 17 已退役(#3894) | `skills: []` |\n| `os-stack` | `manifest` 缺必填的 `id` 和 `type` | `{ id, namespace, version, type, name, engines }` |\n| `os-field-lookup` | `reference: { object, labelField }` —— `reference` 是个裸对象名 | `reference: 'target_object'` + `displayField` |\n\n排序 / 分页现在声明在哪是**读 schema 定的**,没猜:`ListViewSchema.sort` 是 `{ field, order }[]`(注意是 `order`,不是片段原来写的 `direction`),`pageSize` 在 `PaginationConfigSchema` 里,挂 `list.pagination`。`list.defaultSort` 在 `ListViewSchema` 上从来没声明过 —— 议题的判断是对的,不是改拼写能解决的,是键的位置本来就错。\n\n## 一个议题没提、但更早就断的东西:import 那一行\n\n5 个整文件片段全部写着 `import { Data } from '@objectstack/spec'`(以及 `{ UI }` / `{ Automation }` / `{ AI }`)。这些**根命名空间 re-export 早就被删了**(Node ESM 下不可 tree-shake,`packages/spec/src/index.ts` 里有整段说明,还配了 `no-restricted-imports` 规则)。也就是说:片段的**第一行就解析不了**,根本轮不到 metadata 形状出问题。\n\n改成从 subpath 导入,并且一律走该 domain 的**校验工厂**（`ObjectSchema.create` / `defineView` / `defineFlow` / `defineAgent` / `defineStack`）—— 这是 examples 里的既有写法,也是 eslint 里 issue #2035 那条规则写明的理由:工厂在 `.parse()` 时就校验,而且是 **value import**,断了会硬报错,不会静默降级成 `any`。\n\n> 这一条超出了议题字面范围。判断:它跟议题是同一份文件、同一类「下游未跟随」缺陷,而且不修的话「修好的片段」依然一展开就报错,交不出去。所以修了,并在这里显式说明,而不是另开一单拖着。\n\n## 结构性问题的回答:之前**没有任何东西**在 CI 里 parse 过片段产物\n\n全仓搜 `snippets/objectstack.json` 只有三处命中:片段文件自己、`package.json` 的 contributes 声明、README 的表格。没有测试、没有脚本、没有 CI job 读过它。所以 #4001 关掉两个键的时候,不可能有任何东西变红 —— 下一批严格化会以完全相同的方式再打坏一个片段。\n\n本 PR 加的常驻校验(`packages/vscode-objectstack/test/snippets.test.ts` + `test/snippet-harness.ts`),接进该包自己的 `pnpm test`,跑一次 **2.5 秒**:\n\n1. **展开占位符。** `${n:default}` → `default`,`${n|a,b|}` → 第一个选项(VS Code 预选的那个),`${n}` → `pn`,`$0` → 空。这四种形式都是全定义的,所以「作者拿到的是什么」是一个确定的字符串;遇到表以外的形式(`$TM_FILENAME`、transform、嵌套占位)**直接抛**,而不是悄悄展开成没人会看到的文本 —— 这就是派发单里问的「占位符导致展开不平凡」的处理方式:不放弃,但把模型不了的形式变成红。\n2. **用真 spec 求值。** `ts.transpileModule` 转译 + `require` 走真正的 `@objectstack/spec`(不 stub —— stub 正是让 gate 停止跟踪它所守护的契约的办法)。工厂调用被录下来,拿到**作者写的那个字面量**(pre-parse、pre-defaults)。\n3. **过 schema。** 用运行时用的同一个 schema `safeParse` 那个字面量。\n4. **查 import 面。** 每个具名 import 绑定必须还在目标模块的导出面上 —— 这一项要读入口 `.d.ts`,因为 `Data` 是个**类型**命名空间,任何运行时检查都看不见它消失。这就是抓住上面那半个 bug 的那条。\n\n### 双向证明\n\n把片段文件换回本 PR 之前的版本再跑,**11 条判红**:\n\n```\n× [os-object]      expands to metadata Data.ObjectSchema accepts\n× [os-object]      imports only bindings @objectstack/spec still exports\n× [os-field-lookup] expands to metadata Data.FieldSchema accepts\n× [os-view-grid]   expands to metadata UI.ViewSchema accepts\n× [os-view-grid]   imports only bindings @objectstack/spec still exports\n× [os-flow]        expands to metadata Automation.FlowSchema accepts\n× [os-flow]        imports only bindings @objectstack/spec still exports\n× [os-stack]       expands to metadata ObjectStackDefinitionSchema accepts\n× [os-agent]       expands to metadata AI.AgentSchema accepts\n× [os-agent]       imports only bindings @objectstack/spec still exports\n× os-stack stamps the CURRENT protocol major in engines.protocol\n\n Tests  11 failed | 10 passed (21)\n```\n\n报错文案例:\n\n```\n`Data` is not exported by '@objectstack/spec'. Root namespace re-exports\n(Data / UI / AI / Automation …) were removed as untree-shakeable —\nimport from the subpath instead (see packages/spec/src/index.ts).\n```\n\n修好之后 **21/21 绿**。\n\n另外三条负控制常驻在测试文件里,所以「红」这件事本身也不依赖手动复现:重新引入 #4001 关掉的那两个键必须被拒、引入一个 spec 不再导出的绑定必须被查出、模型不了的占位符形式必须抛。\n\n### 两条结构性防护\n\n- **plan 表全覆盖**:每个 shipped 片段都必须在测试的 `PLANS` 里有条目,否则那条断言直接红 —— 新片段**没法**绕过 gate 落地。\n- **`engines.protocol` 锁步**:`os-stack` 里那个 `^17` 是硬编码的字面量,正是本议题这一类会烂掉的东西。`scripts/sync-template-versions.mjs` 只管 `create-objectstack` 的模板,不知道这个文件,所以锁步断言写在这条 gate 里,读 spec 自己的 `package.json` 大版本。大版本一升,这里就红。\n\n## 改动范围\n\n只动 VS Code 扩展包 + 一个 changeset。**没有碰 `lint.yml`、没有碰根 `package.json`、没有碰任何共享脚本或配置** —— 根 `pnpm test` / `pnpm typecheck` 就是 `turbo run test|typecheck`,该包新加的 `test` 脚本自动被 turbo 收进去(`test` 任务本来就 `dependsOn: [\"^build\"]`,spec 会先构建),CI 不需要任何改动。`pnpm-lock.yaml` 的变动仅来自该包新增的 devDependencies。\n\n测试放在自己的 tsconfig project(`tsconfig.test.json`):扩展本体必须是 CommonJS(VS Code host 要求),gate 是 ESM(要 `import.meta.url` 定位 shipped 的片段文件),两者没法共用一份 `compilerOptions`。`typecheck` 脚本串了两次 `tsc`,所以测试**没有**被排除在 `tsc --noEmit` 之外(AGENTS.md 那条)。`check:type-check-coverage` 已验证仍然 OK。\n\n## 验证\n\n```\npnpm --filter objectstack-vscode test        →  21 passed (21)\npnpm --filter objectstack-vscode typecheck   →  clean (tsc --noEmit && tsc -p ./tsconfig.test.json)\npnpm --filter objectstack-vscode build       →  clean（dist/ 只有 extension.*，测试不进产物）\npnpm exec eslint --no-inline-config packages/vscode-objectstack  →  0 errors / 0 warnings（含 test/ 与 vitest.config.ts）\nturbo run test typecheck --filter=objectstack-vscode             →  3 successful, 3 total\npnpm check:type-check-coverage / check:published-files / check:doc-authoring / check:release-notes / check:nul-bytes  →  全绿\n```\n\n## 顺手记的一个旁支(未修,已另开)\n\n**#5028** —— 扩展的 `contributes.jsonValidation` 指向 `./schemas/objectstack.schema.json`,这个文件在仓库里不存在,也没有任何脚本生成它;README 却写着 \"Validates `objectstack.json` files against the bundled schema\"。同一类 declared ≠ enforced,但落点和修法都不同(要决定扩展到底要不要 bundle 一份 JSON Schema),不塞进本 PR。已按 Prime Directive #10 未认领立单。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018iARDqtrhQgz6fVHDeDkbQ)_"
+}

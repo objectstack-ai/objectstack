@@ -1,0 +1,36 @@
+{
+  "number": 5117,
+  "kind": "pull_request",
+  "title": "fix(runtime): empty-env 早退跳过 disabled seed —— 禁用的包重启即复活 (#5047)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T05:22:07Z",
+  "updated_at": "2026-08-04T05:32:09Z",
+  "closed_at": "2026-08-04T05:32:08Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T05:32:08Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5117",
+  "body": "Fixes #5047\n\n## 问题\n\n议题原文的定性(「enable/disable 只写内存」)在 PM 核实中已被推翻:持久化存在且刻意设计(`package-state-store.ts` 写 `$OS_HOME/package-state/{environmentId}.json`),boot 回灌时序也自洽。本 PR 修的是核实过程中挖出的那个**更窄的真 bug**。\n\n`AppPlugin.init` 用「把 disabled 集合 seed 进 registry 的 initial-disabled 集」这一招,让**所有**注册路径(boot artifact 分解、`sys_packages` 重放、HTTP 安装)统一以 disabled 落位。但这个 seed 块位于 empty-env 早退**之后**:\n\n```\ninit()\n  ├─ installDefaultHookBodyRunner       ← 已因同样理由提前\n  ├─ installDefaultActionBodyRunner     ← 已因同样理由提前\n  ├─ installHookMetricsTiming           ← 已因同样理由提前\n  ├─ wireAuthoredTranslationSync        ← 已因同样理由提前\n  ├─ if (this.empty) return;   ← ✂️ 修复前 seed 在这条线之下\n  └─ … seed …\n```\n\n而 empty env(artifact 无 app 载荷)**恰恰**是 hydration-only 场景:该环境的包全部来自 Phase 2 从 `sys_packages` 的重放,或来自 HTTP 安装。于是纯 DB 驱动的环境里 initial-disabled 集永远是空的,**管理员禁用的包每次重启都以 enabled 复活**,且全程无任何报错 —— 禁用状态写盘完全正确,只是没人读。\n\n## 修法\n\n把 seed 提到早退之前,与上面四个因同一理由被提前的调用并列;顺手抽成 `seedPersistedDisabledPackages()` 并把 rationale 写在方法上。\n\n非 empty env 行为不变:`manifest.register()`(即分解发生的地方)在 init 末尾,seed 仍然先于它。seed 仍是 best-effort,在无 engine 的 kernel(metadata-only 一次性命令、mock-engine 测试)上静默降级。\n\n## 测试(本单的一半)\n\n这个 bug 能存在,直接原因是**全仓零测试**覆盖 `package-state-store` / `setInitialDisabledPackageIds` —— 往返的两头都没人断言。\n\n**`packages/runtime/src/package-state-store.test.ts`(12 例)**:写入/读取往返、重新启用移除条目、排序落盘、幂等、**环境隔离**(staging 的禁用不能影响 production)、`OS_ENVIRONMENT_ID` → `default` 回退链、环境 id 路径消毒(`../../etc/evil` 不得逃出目录)、文件缺失 / JSON 损坏 / 非对象载荷一律降级为空集而非抛异常。\n\n**`packages/runtime/src/app-plugin.disabled-seed.test.ts`(7 例)** —— 本 bug 的钉子,全部跑**真** kernel(`LiteKernel` + `ObjectQLPlugin` + empty-env `AppPlugin`)、**真**状态文件:\n\n1. boot 后注册的包以 `disabled` 落位(hydration-only 路径);\n2. 只 seed 持久化过的 id,其他包照常 enabled;\n3. **hydration 断言**:把真 registry 交给**真**的 `PackageServicePlugin.start()`,从 `sys_packages` 重放的包以 `disabled` 落位(SQL 层用 `hydration.test.ts` 同款 execute 替身,registry 与 boot 的是同一个);\n4. 重新启用后清除持久化状态,包回到 enabled;\n5. 无持久化状态时 empty env 照常 boot;\n6. **非 empty env 既有行为不变**(bundle 声明的包仍以 disabled 落位);\n7. 无 engine 的 kernel 上静默降级、仍能 boot。\n\n为第 3 例给 `@objectstack/runtime` 加了 `@objectstack/service-package` 的 **devDependency** + vitest alias(dev-only,与既有的 `@objectstack/service-job` 同款先例):这样重放路径断言的是真实 hydration 代码,而不是它的复刻品。\n\n**反向验证**(把 seed 挪回早退之后,重跑同一批测试):\n\n```\nFAIL  … a package registered after boot lands DISABLED — the hydration-only path\n-   \"enabled\": false,     -   \"status\": \"disabled\",\n+   \"enabled\": true,      +   \"status\": \"installed\",\n\nFAIL  … a package replayed from sys_packages by PackageServicePlugin lands DISABLED\n-   \"enabled\": false,     -   \"status\": \"disabled\",\n+   \"enabled\": true,      +   \"status\": \"installed\",\n\nTest Files  1 failed | 1 passed (2)\n     Tests  2 failed | 17 passed (19)\n```\n\n正好红在两个 empty-env 用例上,非 empty env 用例保持绿 —— 钉子钉在了它该钉的位置。\n\n## 验证\n\n| 命令 | 结果 |\n|---|---|\n| `pnpm --filter @objectstack/runtime test` | `Test Files 84 passed (84)` / `Tests 1150 passed (1150)` |\n| `pnpm --filter @objectstack/runtime typecheck` | 绿(`tsc --noEmit` 无输出) |\n| `pnpm --filter @objectstack/service-package test` | `4 passed` |\n| `eslint`(改动文件) | 干净 |\n| `check:init-service-contract` / `check:engine-double-contract` / `check:published-files` / `check:type-check-coverage` / `check:durability-log-level` / `check:service-providers` | 全绿 |\n\nChangeset:`.changeset/empty-env-disabled-package-seed.md`(`@objectstack/runtime` patch),写明用户可见后果。\n\n## 本 PR 不修(PM 评论已记录为债)\n\n- 状态跨两种介质(disabled 在 OS_HOME 文件、包在 DB),容器 / 多副本 / 临时文件系统下会漂移 —— 那是 `package-state-store.ts` rationale 的 ADR 级取舍;\n- `DELETE /packages/:id` 清理 `sys_packages` 但**不清理** disabled 条目 → 同 id 重装会静默以 disabled 回来;\n- `sys_packages` 无 lifecycle 列(raw-SQL 表,无 spec 定义),统一到 DB 需 schema 变更。\n"
+}

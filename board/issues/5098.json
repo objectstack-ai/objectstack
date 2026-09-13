@@ -1,0 +1,35 @@
+{
+  "number": 5098,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): by-id bulk writes refuse a row that names no record (#5088)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T04:22:53Z",
+  "updated_at": "2026-08-04T05:09:11Z",
+  "closed_at": "2026-08-04T05:09:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T05:09:09Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5098",
+  "body": "Fixes objectstack-ai/objectstack#5088\n\n## 问题\n\n`updateMany` 对一个不存在的 id 不做任何存在性检查,直接把该行送进 `engine.update`。写管线里没有可供叠加的存量记录,#4770 的记录物化(stored ⊕ payload)只剩 payload 一侧,hook 的 `condition` 读到任何本次未写入的字段都判为缺失,于是 #4775 的「条件不可求值即中止」触发 —— 该行以 `INTERNAL_ERROR` 失败,诊断信息还反过来指控一个**正确的** hook 引用了对象未声明的字段。操作者批量更新时带了一个过期 id,被告知的却是「你的 hook 坏了」,并被指向对象的字段清单;`atomic: true` 下这一行还会把整批拖成 `NOT_ATTEMPTED`,一个陈旧 id 读起来就像平台故障。\n\n按 PM 分诊复核,缺陷面比 issue 正文更宽 —— #4435 的「按行诚实」只落在本文件 5 个写面中的 2 个:\n\n| 写面 | 修前 |\n|:--|:--|\n| `runUpdateManyLoop` | ❌ 无探针,不存在的 id 进 hook 管线(本单症状) |\n| `runBatchDataLoop` 的 `update` 分支 | ❌ 同一缺口 |\n| `runBatchDataLoop` 的 `delete` 分支 | ❌ 丢弃 `engine.delete` 返回值,无条件 `success: true` —— 一批 typo 的 id 全部回报删除成功,与 #4435 正文描述的原始缺陷逐字同形 |\n| `runDeleteManyLoop` | ✅ 已修范本(`deleted === false`) |\n| 单记录 `updateData` | ✅ 已修范本(`probeRecord` 先探再写) |\n\n## 修法\n\n三个 by-id 写面补齐同一道闸门,**恢复既有不变量**,不引入新契约:\n\n- 抽出 `assertRecordExists(object, id)`,内部就是单记录路径那只 `probeRecord`。按 #4620 对本文件的要求,by-id 写面共用**一份**实现,而不是「今天恰好一致的三份」。\n- 探针问的是**存在性**,不是可见性(系统上下文读)。这是承重点:by-id 写的授权判断仍留在 `engine.update` 内的 #1994 前像检查里,`rls-by-id-write` 证明依然能报红。同样地,探针在写**之前**,不从 readback 为 null 反推 not-found —— `updateData` 的注释已说明后者会把一次成功的写(把 `owner_id` 改到自己作用域之外)误判成 404。\n- 事务内仍然读得到本批次自己的未提交状态:`engine.transaction` 在 ambient `txStore` 里执行回调(ADR-0034),`buildDriverOptions` 在上下文没有显式 `transaction` 时回落到该 store,所以探针与它所守护的写走同一条连接。\n- delete 侧照 `runDeleteManyLoop` 的 `=== false` 读法 —— 契约(`IDataDriver.delete`)的 positive not-found 值,不从 falsy 返回值推断,以免把「返回被删行」的第三方 driver 变成假 404。\n\n**刻意不动**:`upsert`(missing id 仍然插入)、predicate 批量写(`multi: true`,无逐行 id —— 属 #4800 / #4862 的未决设计卡)、`atomic` 的响应形状(causal row 位置不变,其后仍 `NOT_ATTEMPTED`)、以及所有真实 id 的行为。\n\n## 验收对照\n\n- ✅ `updateMany` 不存在 id 的行 → `errors[0].code === 'RECORD_NOT_FOUND'`,`httpStatus: 404`,消息与单记录路径**逐字**一致(`Record {id} not found in {object}`,花括号处为实际 id / 对象名);测试直接断言三条路径产出同一条消息。\n- ✅ hook 未被触发 —— 断言 `engine.update` 对该行**从未被调用**(不只是响应码对)。\n- ✅ `atomic: true` 下该行为 causal row,其余 `NOT_ATTEMPTED`;先行成功的行读回存储确认已回滚。\n- ✅ `batchData` 的 update / delete 分支同步补齐;整批 typo 的 id 现在 `succeeded: 0`。\n- ✅ 回归:真实 id 的 `succeeded` 计数、`droppedFields`、`returnRecords: false` 的裁剪、context 透传均不变。\n\n## 测试\n\n新增 `packages/metadata-protocol/src/protocol.bulk-record-not-found.test.ts`(15 例,三个写面 × 非 atomic/atomic + 回归)。fake engine 对未知 id 的写**逐字复现 #4775 的中止信息**,所以修复前的红是 issue 里那条 `INTERNAL_ERROR`,而不是某个抽象的断言差异。\n\n先证红再信绿 —— 只回退 `protocol.ts`、保留测试:\n\n```\nTest Files  1 failed (1)\n     Tests  11 failed | 4 passed (15)\nAssertionError: expected 'INTERNAL_ERROR' to be 'RECORD_NOT_FOUND'\nAssertionError: expected [ 'INTERNAL_ERROR', 'NOT_ATTEMPTED' ] to deeply equal [ 'RECORD_NOT_FOUND', 'NOT_ATTEMPTED' ]\nAssertionError: expected 3 to be 2            // batch delete 把 typo 的 id 也算成功\nAssertionError: expected 2 to be +0           // 整批 typo 的 id 全报删除成功\nAssertionError: expected 'Hook \\'showcase_audit_task_completion…' to be 'Record definitely_missing not found i…'\n```\n\n修复后全绿:`Test Files 37 passed (37) / Tests 334 passed (334)`(`@objectstack/metadata-protocol`),`@objectstack/rest` `577 passed (577)`,两包 `typecheck` 均通过(`--force`,无缓存)。\n\n两处既有 fixture 需要同步:`protocol.dropped-fields.bulk.test.ts` 的 `findOne` 是个「什么都不存在」的空桩(此前无人调用它),现在它就是写前的存在性探针,必须对它自称要更新的行给出答案;`protocol.batch-row-conformance.test.ts` 里那条断言从未分类的引擎抛错(`no such record`)改为断言目录化的 404 —— 那正是本 PR 要产生的改进。\n\n## 备注\n\n高频调用方需知:这三个写面的每个 by-id 行,现在写之前多一次存在性读。这与单记录路径自 #4435 起接受的代价同形,已写入 changeset。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01BotUP49pqhvqGY393n2HfU"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 4865,
+  "kind": "issue",
+  "title": "[移交自 objectui · v17 阻塞] `app.homePageId` 退役墓碑写着「no shell ever read it」,但 objectui 的 AppContent 正在读它",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T10:58:14Z",
+  "updated_at": "2026-08-03T13:53:32Z",
+  "closed_at": "2026-08-03T13:53:32Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4865",
+  "body": "Part of objectstack-ai/objectui#3287\n\n按 `/pm-dispatch` 跨分片移交协议从 objectui 分片转来:**共享契约面(`packages/spec` 的退役裁决)单一 owner 是主 backlog PM**,objectui 分片 PM 不自行处置。\n\n- 移交方:objectui 分片 PM,会话 `session_01NVPjPzmmAJ2Ngtvgg5MSRa`(账号 `xuyushun441-sys`,已在 #4604 登记)\n- 源单:objectstack-ai/objectui#3287(已标 `needs-user-decision`,在本单有结论前 objectui 侧不动任何一处)\n- ⚠️ **这是 objectui 升级到 `@objectstack/spec` 17.0.0 正式版的前置阻塞项**\n\n## 结论先行:#4667 的墓碑有一处**事实性错误**\n\n`packages/spec` 在 #4667 / #4680(ADR-0049 enforce-or-remove)把 `app.homePageId` 退役为 `retiredKey()` 墓碑,文案是:\n\n> `app.homePageId` was removed in @objectstack/spec 17.0.0 (#4667, ADR-0049) — **no shell ever read it**. An app's landing page IS its first navigation item (by `order`), and the root landing follows `isDefault` routing.\n\n**「no shell ever read it」不成立。** objectui —— 官方渲染器 —— 一直在读它:\n\n`packages/app-shell/src/console/AppContent.tsx:870-885`,`resolveLandingRoute()`:\n\n```ts\nfunction resolveLandingRoute(activeApp: any, ctx?: NavTemplateContext): string {\n  const homePageId: string | undefined = activeApp?.homePageId;\n  const navigation = activeApp?.navigation || [];\n  if (homePageId) {\n    const item = findNavItemById(navigation, homePageId);\n    const route = buildItemRoute(item, ctx);\n    if (route) return route;\n  }\n  return findFirstRoute(navigation, ctx);\n}\n```\n\n而且该函数的注释专门解释了它为什么存在:\n\n> Honors the app's explicit `homePageId` (Salesforce-style \"Default Landing\"); falls back to the first reachable nav item **only when** no homePageId is set or it points at something that doesn't yield a route. This is what lets the CRM example open on the Sales Dashboard instead of the Lead list.\n\n## 为什么这不只是文案问题\n\n墓碑的替代方案(「落地页就是 `navigation` 的第一项,按 `order`」)与被退役的键**语义不同**,不是同义改写:\n\n| | 退役前 | 退役后 |\n|:--|:--|:--|\n| 显式钉了 `homePageId` 的 app | 落在被指定的那一项 | 落在 nav 第一项 |\n\n也就是说,退役会让**所有显式设置过落地页的 app 静默改变落地位置**。CRM 示例原本落在 Sales Dashboard,退役后落在 Lead 列表。这不是\"删掉一个没人用的键\",是\"移除一个有真实消费者、且行为可观测的能力\"。\n\n## 大概率是跨仓 liveness 审计的盲区\n\n`homePageId` 的消费者**不在 objectstack 仓内**,而在 objectui 的 shell 里。仓内 grep 会得出「没有消费者」,这与我们在 objectui#3226 上刚遇到的形态是同一族:\n\n> 当一个键的消费者在仓外时,仓内 grep 不构成「没有消费者」的证据。\n\n建议核查 #4667 的 liveness 判定是**如何**得出「no shell ever read it」的 —— 如果它只扫了 objectstack 仓,那么**同一批退役里的其它键也可能有同样的盲区**,这比单个键的去留更值得先查一遍。\n\n## 需要拍板的\n\n**A. 裁决正确,objectui 跟随删除。** 落地语义统一为「nav 第一项 + 根落地看 `isDefault`」,作者改落地页靠重排 `navigation`。需要 `os migrate meta --from 16` 覆盖这次静默行为变化,并且墓碑文案应改掉「no shell ever read it」这句(它是错的,会误导后来者)。\n\n**B. 前提有误,该键不该退役**(或改为标准弃用周期而非直接移除)。若「显式指定落地页」是想要的能力,objectui 已经实现了它。\n\n我的倾向是**先确认事实再定去留** —— 无论最终选 A 还是 B,墓碑上那句断言都需要修正,因为它会让后来者以为这次移除没有消费者。\n\n## objectui 侧的影响面(A 路线下,7 处,届时一并改)\n\n1. `packages/app-shell/src/console/AppContent.tsx` — `resolveLandingRoute()` 的 `homePageId` 分支\n2. `packages/types/src/app.ts:415` — `homePageId?: string`\n3. `packages/types/src/__tests__/page-app-dashboard-spec-parity.test.ts:139` — 期望键清单\n4. `apps/console/src/preview-samples.ts:86` — 样例(objectui#3266 刚按当时的 spec 加上)\n5. `apps/console/src/__tests__/preview-samples-spec-valid.test.ts:162` — 其提示文案指向 `homePageId`,届时会指向一个同样已退役的键\n6. objectui#3275 / PR #3285 中 `AppPreview` 新增的 `homePageId` 读取\n7. `apps/console/src/components/RootLandingRedirect.tsx` 的注释\n\n⚠️ **在本单有结论前,objectui 侧不会单独动其中任何一处** —— 半改会造成预览、类型、运行时落地路由三者不一致。\n\n## 版本现状(实测)\n\n- objectui pin `^17.0.0-rc.1`,lockfile 解析到 `17.0.0-rc.1`,也是 npm 上最新已发布版本;\n- **该已发布构建里 `homePageId` 仍是合法可选键**(`dist/app.zod-*.d.ts:764`;`ObjectStackSchema.safeParse()` 带该键 PASS);\n- 退役只存在于 objectstack `main`,尚未发布。\n\n所以今天 objectui 读它是正确的,问题只在升级那一刻爆发。\n\n关联:objectui#3287、objectui#3275 / PR #3285、objectui#3266、#4001(移除 `landing`,当时的替代正是 `homePageId`)、#4667 / #4680、ADR-0049"
+}

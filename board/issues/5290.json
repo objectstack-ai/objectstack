@@ -1,0 +1,37 @@
+{
+  "number": 5290,
+  "kind": "pull_request",
+  "title": "ci(release): 自建 GitHub Release，body 截断到 125k 以内，并把 ADR-0087 D4 重新挂上 (#4900)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "skip-changeset",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T15:54:54Z",
+  "updated_at": "2026-08-04T16:16:51Z",
+  "closed_at": "2026-08-04T16:16:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T16:16:50Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5290",
+  "body": "Fixes objectstack-ai/objectstack#4900\n\n维护者裁定的**方向 1（自建 Release 并截断）**。\n\n## 问题\n\n`changesets/action` 的 `createGithubReleases` 把每个包的 changelog 段落原样作为 Release body 提交。`@objectstack/spec` 在一个 v17 RC 上的段落是 **342,893 字符**，上限 125,000，于是 POST 422。关键在于这个 throw 发生在 `runPublish` **内部** —— `changeset publish` 已经完全成功，但 action 还没来得及 `setOutput('published')`。所以步骤标红、`published` 停在 false、`docker` job 被跳过：npm 上有包，ghcr 上没镜像。\n\n段落只会变大，所以窗口内每次发布都在同一处失败。\n\n## 实测到的、比 issue 描述更严重的一点\n\n对着线上 API 逐个 tag 探过：\n\n| tag | Release | body 字符 | D4 附件 |\n|:---|:---|---:|:---|\n| `@objectstack/spec@16.0.0` | 200 | 62,886 | `spec-changes.json` ✅ |\n| `@objectstack/spec@16.1.0` | 200 | 1,523 | `spec-changes.json` ✅ |\n| `@objectstack/spec@17.0.0-rc.0` | **404** | — | ❌ |\n| `@objectstack/spec@17.0.0-rc.1` | **404** | — | ❌ |\n| `@objectstack/spec@17.0.0-rc.2` | **404** | — | ❌ |\n\n也就是说：**ADR-0087 D4 的 `spec-changes.json` 在整个 v17 RC 窗口里一直是没挂上的**，不只是 rc.2 那一次。`gh release upload` 需要一个已存在的 Release 作为落点，spec 的 Release 从 rc.0 起就没建成过。这条也正是方向 3（直接关掉 `createGithubReleases`）不可行的原因。\n\n## 改法\n\n`createGithubReleases: false`，改由 `scripts/release-github-releases.mjs` 建 Release。\n\n**对 action 行为保持忠实**：同样的 tag（`包名@版本`）、同样的 release name、同样的 `prerelease` 判据；body 提取是 action 自己 `getChangelogEntry` 的**逐行移植**（含它跳过代码围栏的逻辑 —— 本仓 changeset 正文里真的有 `## FROM → TO` 这种二级标题）。验证方式是拿线上真实的 `@objectstack/cli@17.0.0-rc.2` release body 逐字节比对，**73,993 字符完全一致**。\n\n在此之上补了它缺的三条性质：\n\n1. **有界**。超限时按行边界截断；截断处若把代码围栏切开，会补一个闭合围栏 —— 否则说明文字和 CHANGELOG 链接会被吞进代码块里，也就是截断唯一欠读者的东西恰好渲染不出来；不切断代理对；首尾各放一次指向完整条目的链接（锚点用 GitHub 的 heading slug，`17.0.0-rc.2` → `#1700-rc2`，与 `github-slugger` 对过）。\n   计量用 UTF-16 code unit，它对任何字符串都 ≥ code point 数，所以无论 API 把\"字符\"理解成哪一种都只会高估、不会低估（那段是 342,893 字符但 359,636 UTF-8 字节，API 报的是前者）。\n2. **幂等**。先按 tag 查，存在就 PATCH、不存在才 POST。rc.2 那次 70 个里已经建成了约 69 个，所以\"在半成品集合上重跑\"才是常态，不是例外 —— 重跑不会撞 `already_exists`。\n3. **按包隔离**。action 把整组丢进一个 `Promise.all`，第一个 reject 就把其余的丢掉了。现在顺序执行、收集失败、最后仍非零退出，所以某个包的坏 changelog 不会再连累 `@objectstack/spec` 拿不到 Release（也就是 D4 拿不到落点）。顺序执行同时避开 #2191 那类并发 ref 请求打架的老问题。\n\n### 顺带解掉 #2191 的成因\n\n关掉 `createGithubReleases` 同时也关掉了 action 自己的**逐个 tag `git push`** —— 那些调用就在 `runPublish` 里同一个 `if (createGithubReleases)` 块内。这是收益不是损失：`scripts/release-publish.sh` 早就用一次原子 `git push origin --tags` 抢在它前面，正是因为那批并发 push 会 race GitHub 的 ref 后端。现在那个 workaround 的成因本身没了（脚本保留，它仍是 tag 真正的推送方）。\n\n## D4 的挂载点怎么保住的\n\n- 新步骤排在 `Attach spec-changes.json` **之前**，顺序是 load-bearing 的，注释里写明了。\n- `release-spec-changes.sh` 原来只从 `publishedPackages` 取版本；新增 `RELEASE_VERSION` 兜底，于是**恢复路径（#4899/#4901 那条）也能挂上 D4**，这是以前做不到的（旧代码里那句 warning 明说\"这条路径不产生 Release 和 D4 附件\"，现已改写）。\n\n为此把恢复步骤的输出拆成两个语义：\n\n- `published` = \"docker job 必须构建\"（原义，未动，docker 的 gate 不变）；\n- `npm-published` = \"这里确实发了包，因此欠 Release\" —— 新增，Release/D4 两步用它做 gate；\n- `version` 改为**无条件**输出。原来它只在\"镜像缺失\"分支里才写，于是\"npm 补发了、但镜像恰好存在\"这条路径上版本号会丢。\n\n## 两个 recovery 缺陷\n\n派单里点名的那两条（隐式 `success()` 导致步骤被 skip、契约从\"缺失就补发\"改成守\"npm 有包且有镜像\"这个不变量）**已经由 #4901 落在 main 上了**（commit `db82f2e`，本单派发前合入）。本 PR 没有重复修，只在其之上做了上面那两处扩展（`npm-published` 与无条件 `version`）。新步骤自身按同样理由带 `!cancelled()`。\n\n## 验证\n\n新增 `pnpm check:release-body`（= 脚本的 `--self-test`），已接进 `lint.yml`。**49 条断言，走真实代码路径**：\n\n```\n✓ release-github-releases --self-test: 49 assertions\n  (real packages/spec/CHANGELOG.md 17.0.0-rc.2 section = 342893 chars -> 123938, limit 125000)\n```\n\n覆盖：真实超限段落截断后 ≤ 125,000 且含锚点链接 / 短段落逐字节原样通过 / 围栏闭合 / 不切代理对 / 锚点 slug / 围栏内的 `##` 不误判段落边界 / 两条输入路径的目标解析 / 缺条目时响亮失败 / 每个包都建 / 已存在则 PATCH 不 POST / 重跑零 POST / 单包失败不连累其余（并断言 spec 仍拿到 Release）。\n\n另外两项离线端到端验证：\n\n- **对着桩 GitHub API 跑真实的 `main()`**（本地 http server，按 GitHub 的规则真的在 125,000 处返回 422）：4 个包 → 3 created / 1 updated / 0 failed，spec 的 POST body 123,954 字符通过；请求序列确认了 by-tag 查询、`%2F` 编码、PATCH by id、`target_commitish`。\n- **全工作区 `--dry-run`**：69 个包全部成功规划、0 失败，其中**只有 spec 一个被截断**；其余每个包的 body 长度与线上已发布的 release 逐个吻合（cli 73,993、runtime 44,532、types 6,433、verify 10,426、trigger-schedule 3,650 —— 与 API 返回值一致）。\n\n其他门禁：`pnpm lint` 干净、`pnpm check:nul-bytes` OK、`pnpm check:node-version` OK、`pnpm check:type-check-coverage` OK、两个 workflow YAML 均可解析且 `if:`/outputs 连线已逐条打印核对。\n\n### 证据边界（明说）\n\n- `if:` 的隐式 `success()` 行为：依据 GitHub 文档中\"未包含状态检查函数时自动套用 `success()`\"这一条，以及 #4901 已在真实 run 上确认过的同一现象；**未用 `act` 或真实 run 验证本 PR 新增的两个 `if:`**。\n- `createGithubReleases: false` 的实际生效、以及\"关掉它同时关掉逐个 tag push\"，是读 `changesets/action@v1` 的 `src/run.ts` / `src/index.ts` 源码得出的（`getBooleanInput`、`if (createGithubReleases)` 块内含 `git.pushTag`），**未在真实发布中跑过**。\n- 因此整条链路真正的验证要等**下一次真实发布**；上面所有数值都来自离线 + 线上只读 API 探测。\n\n## 关于 changeset\n\n按仓库惯例用 **`skip-changeset` 标签**，不带 changeset：本 PR 只动 CI workflow 与根 `scripts/`，不向任何 npm 包发货。同类的 #4899、#4901 都是这么走的；而放一个空 changeset 恰好会重建 #4898 那个卡死发布的条件 —— #4899 的正文对此有明确说明。**（此处与派单里\"写 changeset\"的指示不同，理由如上，请维护者确认。）**\n\n## 未改动\n\n`packages/*/CHANGELOG.md`（方向 2 已否决）、`content/docs/releases/`，以及派单列明的禁触目录。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_015W6nhsDrz6zWQc8je12a1t\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015W6nhsDrz6zWQc8je12a1t)_"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 5190,
+  "kind": "issue",
+  "title": "记录删除后 `sys_share_link` 能力令牌仍然有效 —— 与 #5103 同族，但因为是无身份令牌所以更糟",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T08:25:51Z",
+  "updated_at": "2026-08-04T10:29:08Z",
+  "closed_at": "2026-08-04T10:29:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5190",
+  "body": "实现 #5103（记录删除级联撤销 `sys_record_share`）时发现。**未认领**，归属 `plugin-sharing`，不在 #5103 范围内（那个 issue 的标题与裁定都明确限定在 `sys_record_share`）。\n\n## 现象\n\n`ShareLinkService.resolveShareLink`（`packages/plugins/plugin-sharing/src/share-link-service.ts`）逐项检查 token 是否存在、`revoked_at`、`expires_at`、audience、密码，**唯独不检查 `(object_name, record_id)` 指向的记录是否还存在**。删除记录不会撤销、也不会过期它上面的分享链接：行原样留在 `sys_share_link` 里，`resolveShareLink` 照常返回 `{ link, redactFields }`，由调用方去读一条不存在的记录。\n\n`sys_share_link` 也没有任何 afterDelete 钩子 —— #5103 补的级联只覆盖 `sys_record_share`。\n\n## 为什么比 #5103 更严重\n\n#5103 的孤儿行是**有身份**的：`sys_record_share` 说的是\"用户 U 在记录 R 上有 L 级权限\"，复用 id 时受益者仍限于那批具名收件人。分享链接是**能力令牌**：谁持有 token 谁就有权限，不需要是任何人。所以一旦记录 id 被复用（自定义主键、保留原 id 的导入、未来引入的 id 回收），一个早已\"随记录一起消失\"的链接会直接对新记录生效，而持有者可能是当初被分享过的任意外部人员。\n\n即便没有 id 复用，次要危害同样存在：`sys_share_link` 单调增长；Setup 里的链接列表展示指向不存在记录的行；`use_count`/`last_used_at` 还会继续被 stamp。\n\n## 建议方向\n\n与 #5103 落点一致、代价很小的两条，建议同时做：\n\n1. **`resolveShareLink` 增加记录存在性检查** —— 这是 fail-closed 的那一半，不依赖任何钩子跑没跑过：记录不在了就返回 `null`（与 revoked/expired 同一分支，不区分，避免把\"记录存在与否\"泄露给未授权持有者）。\n2. **记录删除时级联撤销/删除链接行** —— #5103 已经在 `record-share-cascade.ts` 建好了 seam（全局 `beforeDelete` 暂存行集 + `afterDelete` 按 id 集合撤销，外加 boot 期按\"记录还在不在\"的清扫）。加一条 `sys_share_link` 的撤销走同一条路即可，不需要新机制。\n\n注意 #5180（平台级多态弱引用级联）落地后这两条钩子可以收敛进去，但和 #5103 的理由一样：不该让授权面的孤儿等一个尚未落地的平台能力。\n\n## 相关\n\n- #5103 / 本 PR —— `sys_record_share` 的记录删除级联 + boot 孤儿清扫（同一族，同一 seam）。\n- #4779 / #5102 —— 规则共享的谓词式重算与 afterDelete。\n- #5180 —— 平台级多态级联设计卡。\n"
+}

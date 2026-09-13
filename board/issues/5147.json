@@ -1,0 +1,35 @@
+{
+  "number": 5147,
+  "kind": "pull_request",
+  "title": "fix(spec)!: dashboard widget compareTo 收敛为执行器契约 { kind, dimension? } (#5011)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T06:16:21Z",
+  "updated_at": "2026-08-04T06:45:28Z",
+  "closed_at": "2026-08-04T06:45:26Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T06:45:26Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5147",
+  "body": "Fixes objectstack-ai/objectstack#5011\n\n按 2026-08-04 维护者裁决执行:**方案 1 + 执行器决议规则**。⛔ 不重议。\n\n## 问题\n\nwidget 声明了三个对比分支,TSDoc 写得很具体;分析执行器实现的是**另一份契约**,而且从来不是同一份。于是在 ADR-0021 dataset 路径(spec 自称「唯一面向作者的分析形态」)上**三个分支全废**,而且是两种不同的废法:\n\n- `compareTo: 'previousPeriod'` / `'previousYear'` —— 被 dataset 渲染器**静默丢弃**。基础数值照常渲染,作者要的对比列**不存在**。\n- `compareTo: { offset: '7d' }` —— 被原样转发进 `DatasetSelection.compareTo`,而那个契约是 `{ kind, dimension }`,里面**根本没有 `offset` 这个概念**,于是执行器抛 `compareTo requires a timeDimension \"undefined\"`,整块 widget 报错。\n\n三个分支只在**遗留内联图表路径**上真的能跑。同一个键两种命运,失败的那条恰是 spec 自己推荐的规范路径 —— 这比普通的「declared but unread」更靠后一档:**文档在自信地教一个会崩的形状**。\n\n## 改法\n\n`compareTo` 变成**已实现的那份契约的薄投影**:\n\n```ts\ncompareTo?: { kind: 'previousPeriod' | 'previousYear'; dimension?: string }\n```\n\n即 `DatasetSelection.compareTo`。widget 侧不再有第二套词表可以漂移,`declared = enforced` 由**构造**保证,而不是靠人盯。`DashboardWidgetOptionsSchema`(有意的 passthrough)与 `responsive` 墓碑均未触碰。\n\n### `dimension` 可省略 —— 决议规则在**执行器**,不在渲染器\n\n省略时由 `dataset-executor.ts` 的 `resolveCompareDimension` 决议,判据沿用执行器自己一直在用的那条(`timeDimensions` 条目带 `dateRange`):\n\n- 恰好一个候选 → 用它;\n- **零个** → 响亮报错:对比只在有界窗口上才有定义;\n- **两个及以上** → 响亮报错并**逐个列出候选名**,绝不静默取第一个。\n\n最后一条是最要紧的:作者想比 `close_date` 而系统挑了 `created_at`,得到的对比列是**错的**而不是**缺的** —— 后者会被发现,前者不会。这是**生产端**决议规则,不是 PD#12 反对的消费端宽容映射:dashboard widget、report、裸 `queryDataset` 三个调用方拿到同一个维度或同一个报错,没有任何渲染器处在「自己猜一个」的位置上。\n\n### `offset` 退休(ADR-0087)\n\n**先实测存量**(裁决要求):全仓 4 处 `compareTo` 作者实例,**全部是字符串形态**,全在 `examples/app-crm`;两个仓库里 `{ offset }` 实例为 **0**。符合预期 —— 规范路径上用过 `{ offset }` 的早就崩了,它根本无法在那里沉淀。\n\n| v16 | v17 | 处理 |\n|:--|:--|:--|\n| `compareTo: 'previousPeriod'` | `{ kind: 'previousPeriod' }` | D2 确定性改写 |\n| `compareTo: 'previousYear'` | `{ kind: 'previousYear' }` | D2 确定性改写 |\n| `compareTo: { offset: '1y' }` | `{ kind: 'previousYear' }` | D2 确定性改写 —— `1y` **就是** previousYear |\n| `compareTo: { offset: '7d' / '1M' / … }` | **无忠实目标** | **不改写**,登记为 `dashboard-widget-compareto-offset` 语义迁移 |\n\n最后一行是**刻意不改写**:`previousPeriod` 按 filter 解析出的窗口**自身长度**位移,只有当那个窗口恰好是 7 天时才等于 `7d`。机械改写会**悄悄改变对比列统计的是哪些行** —— 把一个响亮的失败换成一个错误的数字,正是本次收敛要终结的失败类。\n\n`retiredFromLoadPath: true`:旧拼法**不给接受窗口**。自动转换的 loader 会让 `compareTo: 'previousPeriod'` 继续解析通过,那就是 PD#12 禁止的宽容消费者,也正是让两套词表悄悄漂移一整个大版本的那个动力学。存量 `sys_metadata` 行仍被覆盖 —— 每个再水化缝都会通过 `applyConversionsToStoredItem` 重放已退休条目(#3903)。\n\n## 三个值得单说的点\n\n**1. 新形状不含联合,这不是外观问题。** zod 把失败的联合塌缩成一条裸 `Invalid input`,`zodIssuesToFields` 只映射顶层 issue —— 所以本战役写进联合 arm 里的每一条精心措辞的处方,都是写给一个收不到它的读者的(#5014)。批 14 的台账行为 `compareTo` 记下了这个限制;本 PR **消解**了它(而不是绕过),处方现在就在顶层。`#5014 对其他所有联合 arm 仍然成立` —— 台账行改成了「一个槽位的更正」,不是该 finding 的撤回。\n\n**2. 字符串形态的处方按 `issue.input` 分派**(`HookBodyCapability` / `object.managedBy: 'system'` 先例):只有**真的合法过**的两个拼法拿到「was removed」文案;写 `previosPeriod` 的人被告知的是拼错,而不是被告知一个他从没用过的东西「被移除了」。为此给 `strictObject` 加了一个窄的 `retiredForms` 钩子 —— `guidance` 到不了这个 case,因为输入根本不是对象时 `unrecognized_keys` 不会触发。\n\n**3. 台账更正而非重写。** liveness 的 `compareTo` 判定**仍是 `live`**,这点值得停一下:它从来就不是「declared but unread」—— 消费者一直都在,缺的是**对它消费什么的共识**。这是台账此前没有词汇描述的一类失败,它自己的 `compareTo` 行不得不用一整段散文来记录。`_note` 里写清楚了。\n\n## 跨分片交接(#4876 式)\n\n**objectui 遗留内联图表路径不在本 PR 内**,已按裁决**未认领**开单:**objectstack-ai/objectui#3337**,映射逐条写明:`CompareToConfig` 改型、`shiftFilterByCompareTo` 按 `.kind` 分派、`compareToTrendLabelKey`、以及**功能性的那一半** —— `DatasetWidget` 需要把已解析的日期窗口降成 `selection.timeDimensions[].dateRange`,否则执行器无窗口可移。该 issue 也记明:`DatasetWidget.tsx:163-168` 的字符串丢弃 workaround 在新形状下**不再需要**,应一并删除。\n\n## 验证\n\n- `check:generated` 8/8 up to date;十条 source-audit gate(`check:liveness` / `check:empty-state` / `check:strictness-ledger` / `check:skill-examples` / `check:skill-refs` / `check:skill-docs` / `check:react-declaration-parity` / `check:variant-docs` / `check:exported-any` / `check:dual-source-exports`)全 PASS。\n- `@objectstack/spec` 7745 tests、`service-analytics` 538 tests、`example-crm` 20 tests、CLI `migrate-meta.e2e` 12 tests 全绿;全仓 `pnpm typecheck` 124/124。\n- 三个 example app `objectstack validate` 通过(残留 warning 均为既有、与本改动无关)。\n- **每一个断言类先做过 sabotage-red**:spec 侧 17 条中 13 条在改前 schema 上红(其余 4 条是双边都成立的护栏);执行器侧 9 条中 8 条红(唯一绿的是刻意的 control)。\n- **ADR-0087 直解探针走 BUILT 产物、按 carrier slot 路径**(`getMetadataTypeSchema('dashboard')`),负控先证绿再断言退休形态不过关 —— dashboards 确实被 validate 覆盖,仍照 #5000 的纪律探一遍。\n- os-regen 四步已做:`git merge origin/main`(⛔ 未 rebase / 未 force-push)→ 把 os-regen 路径 checkout 回 origin/main → 整体重生成 → **实测 sibling 条目全部存活**(`spec-changes.json` 相对 origin/main 的增量恰好只有我这两条;`dashboard-widget-responsive-removed` / `view-inert-keys-removed` / `hook-body-crypto-hash-removed` 等各 2 处均在)。\n\nchangeset:`major`(spec + service-analytics),含 FROM → TO 映射与一行修法。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Ehu85kbvMcrNTUJjwxvLJ9\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Ehu85kbvMcrNTUJjwxvLJ9)_"
+}

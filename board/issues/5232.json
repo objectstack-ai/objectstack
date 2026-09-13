@@ -1,0 +1,36 @@
+{
+  "number": 5232,
+  "kind": "pull_request",
+  "title": "fix(service-storage)!: 引擎写入/读取失败不再伪装成功 —— sys_file 业务真相丢失时响亮失败 (#5216)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T11:13:08Z",
+  "updated_at": "2026-08-04T11:47:43Z",
+  "closed_at": "2026-08-04T11:47:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T11:47:41Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5232",
+  "body": "Fixes objectstack-ai/objectstack#5216\n\n按 PM 在认领评论里的裁定走 **方案 A + 读路径细化**:引擎在场时写失败直接抛,读路径区分 miss 与 outage,Map 退化为 engine 缺席时的替身。\n\n## 一处事实订正:是 6 写 / 2 读,不是 5 写 / 3 读\n\nIssue 正文的 8 行清单本身是准的,PM 派发词里的「5 处写 / 3 处读」是笔误。`metadata-store.ts` 的 8 处引擎调用是:\n\n| 方法 | 调用 | 分类 |\n|:--|:--|:--|\n| `createFile` | `insert('sys_file')` | 写 |\n| `getFile` | `findOne('sys_file')` | 读 |\n| `updateFile` | `update('sys_file')` | 写 |\n| `deleteFile` | `delete('sys_file')` | 写 |\n| `createSession` | `insert('sys_upload_session')` | 写 |\n| `getSession` | `findOne('sys_upload_session')` | 读 |\n| `updateSession` | `update('sys_upload_session')` | 写 |\n| `deleteSession` | `delete('sys_upload_session')` | 写 |\n\n6 写 2 读。裁定的形状逐处适用,不受这个计数影响。\n\n## 写路径(6 处):抛,并且不再往 Map 里写\n\n`if (this.engine)` 已经把「没接引擎」分流掉了,所以这些 catch 捕获的只可能是**已接好的引擎的运行期失败**。现在它们统一包成 `StorageMetadataStoreError` 抛出。\n\n**Map 残影的处理:引擎在场时根本不写 Map**,而不是「写了再回滚」。理由是这才是问题的机制本身 —— 旧代码是先 `this.files.set(...)` 再调引擎,所以引擎写丢了以后,紧随其后的 `getFile()` 从 Map 里读到那条「以为写成功了」的记录,同进程内的自检也看不出异常。回滚只能消除失败那一次的残影,消除不了「同一份数据有两个源」这件事;把 Map 写入整体收进 `if (!this.engine)` 分支之后,引擎在场时 Map 恒为空,残影在结构上不可能出现,而且读路径也不必再区分「Map 里的是权威还是影子」。这同时让类注释所声称的事第一次成为真的:Map 服务的对象就是 `engine === null` 的那条分支。\n\n## 读路径(2 处):miss 与 outage 分开,两处都判定为抛\n\n- **miss**(`findOne` 返回空)—— 设计内的答案,返回 `null`,REST 层照旧 404。**行为不变。**\n- **outage**(`findOne` 抛)—— 传播出去。\n\n两处都选「抛」而不是「error 日志后回退」,理由按调用方语义:`getFile` 的三个调用方(`/upload/complete`、`/files/:fileId/url`、`/files/:fileId`)和 `getSession` 的三个(chunk、complete、progress)在拿到 `null` 时一律回 **404 `FILE_NOT_FOUND` / `UPLOAD_SESSION_NOT_FOUND`**。也就是说,静默回退在这里不是「降级到旧数据」,而是把一次引擎故障翻译成「这个文件不存在」——把持久的业务真相报告为缺失,比 500 更糟,且调用方无从分辨。加上写路径改动之后引擎在场时 Map 恒为空,「回退到 Map」实际等价于「返回 null」,也就是等价于那个假 404。多 worker 下更明显:Map 只有本进程的影子,回退会让同一次读在不同 worker 上给出不同答案。\n\n## 上层调用方:一个都没改,并且这是被验证过的,不是假设\n\n`storage-routes.ts` 的每个 handler 本来就是 `try { … } catch (err) { sendError(res, 500, 'INTERNAL', err?.message) }`,所以 store 抛出的错误自然落成 500 —— REST 层不需要任何适配。`storage-routes.metadata-outage.test.ts` 直接驱动 handler 断言了这一点(500 且 `success: false`,而不是原来的 200)。\n\n仓库内 `StorageMetadataStore` 的构造点只有 `storage-service-plugin.ts:360` 一处;`packages/cli`、`plugin-dev`、`qa/dogfood` 只用 `StorageServicePlugin`,不碰这个 store。所以**本 PR 没有修改任何调用方**。\n\n没有引入新的错误码:一个专门的 `STORAGE_METADATA_UNAVAILABLE`(503 更诚实)需要在 `packages/spec` 的 `ERROR_CODE_LEDGER` 注册,而本单 ⛔ `packages/spec`。500 `INTERNAL` 已经满足「不再是 200」这个验收点,错误码收窄可以另立单。\n\n## 错误对象\n\n`StorageMetadataStoreError`(已从包根导出,连同 `StorageMetadataOperation` 类型):\n\n- `objectName` —— `sys_file` / `sys_upload_session`\n- `operation` —— `insert` / `update` / `delete` / `findOne`\n- `cause` —— 引擎自己的错误(本包编译在 `lib: ES2020`,早于 `Error.cause`,所以是自己声明的字段)\n- `message` —— 按 AGENTS.md「Degradation log levels」的要求,同时带**后果**与**修复**。日志级别那条规则本身在这里通过「rethrow」满足,所以没有给 store 加 logger 构造参数;后果与修复写进 message,反而能一路走到 500 的 body 和宿主的日志里。\n\n例:\n\n```\nStorageMetadataStore: sys_file insert failed against the data engine — the sys_file\nrow was NOT written, so the uploaded bytes have no durable record and are\nunaddressable after this process exits. Restore the data engine (connectivity /\npermissions / `sys_file` schema migration); the process-local Map fallback serves\nonly deployments with NO engine wired (tests, dev), so it cannot stand in here.\nCause: Error: …\n```\n\n## 关于 `DURABILITY_CRITICAL_CALLEES`:**故意不加**\n\nAGENTS.md 说发现新的 durability seam 要在同一个 PR 里登记进 `scripts/check-durability-degradation-log-level.mjs`。这里判断是不该加,理由两条:\n\n1. 修复方式是**把 catch 整个删掉**,这个文件里已经没有 catch 可供该 gate 检查;\n2. 该 gate 按**被调方法名**匹配。这里的被调方法是 `insert` / `update` / `delete` —— 引擎的通用数据面动词。把它们加进词表会命中全仓库每一个包着引擎写入的 catch,而其中绝大多数(包括 `storage-routes.ts` 自己那些 `catch → sendError(500)`,gate 看不出「回 500 给调用方」也是一种传播)会变成需要 baseline 豁免的假阳性 —— 那正好是把 baseline 变成没人信的清单的做法。\n\n本处的回归保护由新增的单元测试承担。\n\n## 测试\n\n- `src/metadata-store.test.ts`(16 例)—— `engine === null` 既有行为逐条不变;引擎在场且健康时不镜像 Map(用「另一个 worker 把行从引擎里删掉」证明 store 没有影子);6 个写方法、2 个读方法在引擎故障时各自抛且 `objectName`/`operation`/后果/修复/`cause` 都对;miss 仍然返回 `null` 不抛。\n- `src/storage-routes.metadata-outage.test.ts`(7 例)—— HTTP 可见的那一半:`/upload/presigned`、`/upload/chunked`、`/upload/complete` 在写失败时 500 而非 200;`/files/:fileId/url` 在读故障时 500 而在真 miss 时仍 404;`/upload/chunked/:id/progress` 同形;engine 为 null 时整条路由行为不变(仍 200)。\n- 两个假引擎的 `delete` 都以 `assertEngineDeleteDispatch(options)` 开头(#4550/#5197),这也是 `@objectstack/objectql` 进入 devDependencies 的原因 —— `check:engine-double-contract` 从 17 pinned 变成 19 pinned,DEBT 清单不动。\n\nchangeset:`.changeset/storage-metadata-loud-failure.md`,major,写明了 breaking 的影响面(能观察到的变化是「原本无人察觉的数据丢失现在变成一个 500」,没有需要迁移的东西)。\n\nhttps://claude.ai/code/session_017MCKJaEomEqg4tvz4SzdNd\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017MCKJaEomEqg4tvz4SzdNd)_"
+}

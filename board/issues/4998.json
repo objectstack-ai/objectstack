@@ -1,0 +1,36 @@
+{
+  "number": 4998,
+  "kind": "issue",
+  "title": "[metadata-protocol] seed-loader:roll-up summary 重算耗尽重试后只记 warn 且不计数 —— 落盘的汇总值与事实不符,seed 仍报 success: true",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T19:24:26Z",
+  "updated_at": "2026-08-04T02:40:24Z",
+  "closed_at": "2026-08-04T02:40:24Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4998",
+  "body": "发现于 #4729(seed-loader 的日志级别盘点)。本条**不在** #4729 的判据(「计数为错、日志为 warn」)内 —— 它压根不计数 —— 所以只记录,不在那个 PR 里动。\n\n## 现象\n\n`packages/metadata-protocol/src/seed-loader.ts` 的 `writeRecoveringSummary()`:\n\n```ts\nprivate async writeRecoveringSummary(fn: () => Promise<T>): Promise<T> {\n  try {\n    return await fn();\n  } catch (e: any) {\n    if (e?.code === 'ERR_SUMMARY_RECOMPUTE') {\n      this.logger.warn(\n        '[SeedLoader] roll-up summary recompute failed after retries; records were written (summary values may be stale)',\n        { failures: Array.isArray(e.failures) ? e.failures.length : undefined },\n      );\n      return e.written as T;\n    }\n    throw e;\n  }\n}\n```\n\n行本身的判断是对的(framework#3147:记录**确实**写进去了,不能重写,否则重复)。有疑问的是**后果的等级**:roll-up summary 是一列**已持久化的派生值**,重算耗尽重试后,库里存着的汇总数与被汇总的明细**不一致**,而:\n\n- 这次 seed 不计一条错(`errored` 不动、`allErrors` 不动),`result.success` 仍是 `true`;\n- 控制台上唯一的痕迹是一行 `warn`。\n\n## 判定问句(#4632 / AGENTS.md「Degradation log levels」)\n\n> 降级之后系统对外是否仍然「正常」,而某个声称已持久化的东西实际不对?\n\n我的读法是 **是**:一切看起来干净(`success: true`,行数全对),而一列已落盘的汇总值是错的,并且不会自己修 —— 直到下一次触发该 summary 重算的写入才可能纠正,而 seed 之后未必还有这种写入。这正是 #4420 的形态(那次是 in-flight approvals,这次是汇总列)。\n\n反方也有分量,所以我不想擅自改:\n\n1. 记录本身是**真的**落盘了,和 #4420「写入完全没发生」不同;\n2. 提到 `error` 会让一次除汇总外全部成功的 seed 打出 error 行,可能属于 AGENTS.md 明确警告的「过度适用」(把人训练成跳过 error);\n3. 也可以不动日志级别,而是把它计入结果(新增一个 `summariesStale` 计数或一条 `ReferenceResolutionError`),让**结果对象**诚实,日志维持 `warn`。\n\n## 期望(需要维护者拍板)\n\n在下面三条里选一条并落地 + 加测试:\n\n- **A** 提到 `error`,文案说清后果(`<object>` 的 roll-up summary 列现在是陈旧值,明细与汇总不一致,而 seed 报告 success)与修复动作(修掉下面的重算错误后重跑 seed / 触发一次该对象的写入以重算);\n- **B** 保持 `warn`,但计入结果对象(新增计数字段),让调用方能发现;\n- **C** 判定其为「功能性降级」,维持现状,并在注释里写明为何不属于 #4632 的第二类,免得下一个人再翻一遍。\n\n我的倾向是 **A + B**:后果确实是「已落盘的数据不对」,而且计数与日志级别应当一致(#4729 的同一条论点)。但这会改变一次成功 seed 的控制台输出,属于产品口径,不该由实现方顺手决定。\n\n_未认领。_\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 5044,
+  "kind": "pull_request",
+  "title": "fix(plugin-auth): choose a JWT signing algorithm the host supports (#3585)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T00:43:05Z",
+  "updated_at": "2026-08-04T02:38:19Z",
+  "closed_at": "2026-08-04T02:38:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T02:38:18Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5044",
+  "body": "Fixes objectstack-ai/objectstack#3585\n\n## 背景\n\n在 WebCrypto 缺少 Ed25519 的宿主上(报告来自 StackBlitz/WebContainer),**只要 OIDC provider 开着,登录后的第一个请求就 500**。而 OIDC provider 在 MCP server 打开时默认就是开的(`resolveOidcProviderEnabled` → `isMcpServerEnabled()`,默认 `true`),所以一个从没打算做 IdP 的应用,登录直接不可用。\n\n根因是一个**继承来的默认值**:`plugin-auth` 注册 better-auth 的 `jwt` 插件时没有传 `jwks.keyPairConfig`,于是 better-auth 的默认 **EdDSA / Ed25519** 生效,jose 向 WebCrypto 请求 `{ name: 'Ed25519' }`,宿主不支持就抛 `OperationError`。之所以会打到普通 cookie 登录(而不只是 OAuth 客户端),是因为该插件在 `/get-session` 上挂了 `after` hook,给**每一个** session 都签一个 `set-auth-jwt` 头。\n\n我已在 `origin/main`(以及 better-auth `1.7.0-rc.2` 的 `node_modules` 源码)上逐条复核过 issue 里引用的行:`jwt({ schema: buildJwtPluginSchema() })` 确实在 `auth-manager.ts:2175`;rc.2 的 `utils.mjs` 里默认值仍是 `options?.jwks?.keyPairConfig ?? { alg: \"EdDSA\", crv: \"Ed25519\" }`。**前提在 rc.2 上依然成立。**\n\n按 PM 的范围决定,本 PR 实现**方案 1 + 方案 3**,不碰 `packages/spec`(方案 2 属于协议面,另一条车道)。\n\n## 改动\n\n### 1. 按能力选算法,而不是继承默认值\n\n新增 `packages/plugins/plugin-auth/src/jwt-key-algorithm.ts`。在构建实例时探测一次 WebCrypto 能否生成 Ed25519 密钥对,支持则显式钉住 `EdDSA`/`Ed25519`,不支持则回退 **ES256**。\n\n探测用的是 jose 解析 `EdDSA` 时用的**同一个**算法描述符(`{ name: 'Ed25519' }`,见 jose `lib/jws_algorithms.js`)—— 探测和它所预测的操作必须问同一个问题,否则探测通过、签名照样炸。\n\n这里刻意**没有**复用文件里已有的 `isWebContainerRuntime()`:宿主名只是\"能不能做 Ed25519\"的代理变量,两头都错 —— 它漏掉其它没有 Ed25519 的运行时,也会在 WebContainer 补上支持后继续降级。\n\n### 2. 已经存在 EdDSA key 的部署(这一条最容易咬到真实部署)\n\n**只钉算法是不够的。** better-auth 的 `resolveSigningKey` 选 key 的方式是:\n\n```js\nconst primaryAlg = options?.jwks?.keyPairConfig?.alg ?? 'EdDSA';\nkey = await adapter.getLatestKeyByAlg(ctx, primaryAlg) ?? await adapter.getLatestKey(ctx);\n```\n\n后半段是**任意算法**的兜底。一个已经在 `sys_jwks` 里签发过 EdDSA key、随后迁到无 Ed25519 宿主的部署:`getLatestKeyByAlg('ES256')` 找不到 → 兜底拿到那把 EdDSA key → 下一行 `importJWK(privateWebKey, 'EdDSA')` 直接炸。所以单靠 `keyPairConfig` 会**修好全新部署、留着升级路径继续坏**。\n\n因此在无 Ed25519 的宿主上,额外接入 better-auth 有文档的 `adapter.getJwks` keyring seam,把本机无法 import 的 key 挡掉。于是 `getLatestKey()` 也返回空,`resolveSigningKey` 直接铸一把新的 ES256 key,部署**收敛到可用状态**,而不是一直坏着。\n\n- 行是**隐藏,不是删除** —— 迁回有 Ed25519 的宿主,原 key 立刻恢复可见。\n- 该宿主的 `/api/v1/auth/jwks` 也不再广播这些 key:它既签不了也验不了,广播就是\"机器可读表面撒谎\"(AGENTS.md 路由规则 #4)。\n- 这个 seam **只在需要的宿主上安装**。正常部署跑的是 better-auth 原生读路径,里面没有任何 ObjectStack 代码,没有可回归的面。\n\n### 3. 签名失败降级的是「头」,不是「session」\n\n`/get-session` 现在照常返回 session,只是不带 `set-auth-jwt`,不再 500。适用于任何原因的签名失败(两种算法都不可用、`sys_jwks` 不可写、`OS_AUTH_SECRET` 轮换后解不开旧 key)。\n\n失败**只播报一次**,错误信息点名算法、说明「登录和 cookie 认证不受影响」、并给出 `OS_OIDC_PROVIDER_ENABLED=false` 这个出口;同时进 `getDegradedAuthFeatures()`,用新 key `jwtSigning`。\n\n一个值得记下的坑:守卫必须返回 `runAfterHooks` 会读的 `{ headers, response }` 形状 —— 直接 `return undefined` 只是把 500 往上挪一帧(`result.headers` 是无保护读)。这一条已单独写了回归测试。\n\n守卫挂不上时会**大声报错**而不是静默放行 —— 一个悄悄停止守卫的守卫比没有守卫更糟。\n\n## 测试\n\n- `jwt-key-algorithm.test.ts`(29 个):探测/回退决策、legacy 行(`alg`/`crv` 为 null)从 key 材料判定曲线、过滤器在支持 Ed25519 时是 identity、守卫的返回形状与\"挂不上要返回 false\"。\n- `auth-manager.jwt-eddsa-fallback.test.ts`(8 个):跑**真实** better-auth 管线,把 `crypto.subtle.generateKey`/`importKey` 对 `{name:'Ed25519'}` 打成 `OperationError`。这比只 stub 我们自己的探测更强 —— 只 stub 探测的话,真实 WebCrypto 仍能 import Ed25519,\"错选了库存 EdDSA key\"这种回归会**测试通过、线上照炸**。其中包含真实升级路径:先让健康宿主用 better-auth 自己的 `createJwk` 铸一把真 EdDSA key,再切到无 Ed25519 宿主。\n- `better-auth-schema-parity.test.ts` 追加 4 条**升级绊线**:钉住 better-auth 仍默认 EdDSA/Ed25519、`/get-session` after-hook 仍是我们包装的形状、`adapter.getJwks` seam 仍在。升级动了任何一处,挂的是单测,不是线上登录。\n\n```\npnpm --filter @objectstack/plugin-auth test      → Test Files 31 passed (31), Tests 699 passed (699)\npnpm --filter @objectstack/plugin-auth typecheck → tsc --noEmit,无输出\nnode scripts/check-startup-registry-verdict.mjs  → ✓ 47 seam(s), none recording a contradictable verdict\nnode scripts/check-durability-degradation-log-level.mjs → ✓ 10 seam(s), all loud or rethrowing\n```\n\n已合入 `origin/main`(`cbc844e`)后重跑上述 test + typecheck,仍全绿;合入的三个提交与 `packages/plugins/plugin-auth`、`packages/spec` **零重叠**。\n\n## 范围\n\n- ⛔ `packages/spec/**` 零改动(方案 2 未实现)。\n- ⛔ `content/docs/releases/` 零改动;用户可见变更走 `.changeset/jwt-eddsa-host-fallback.md`。\n- `auth-manager.ts:155` 有一条 `Unused eslint-disable directive` 警告,在 `origin/main` 上就已存在(原第 149 行),不属于本 PR 范围,未动。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_015W6nhsDrz6zWQc8je12a1t\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015W6nhsDrz6zWQc8je12a1t)_"
+}

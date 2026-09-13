@@ -1,0 +1,35 @@
+{
+  "number": 5120,
+  "kind": "pull_request",
+  "title": "feat(runtime,hono): 挂载 seam —— setFallbackHandler 实现 + dispatcher 端点派发步(#5040 E3)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T05:24:18Z",
+  "updated_at": "2026-08-04T05:36:21Z",
+  "closed_at": "2026-08-04T05:36:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T05:36:20Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5120",
+  "body": "Fixes #5090\nPart-of #5040(E 系列第 3 单)。前置 #5080(E1 契约面)已在 `77be690` 落 main。\n\n给声明式 `apis:` 端点铺上**唯一一条**能进入处理器的通路,并且这条通路在构造上不可能遮蔽任何已注册路由。**零现网行为变更**:任何 stack 目前都无法发布非空 `apis:`(publish 硬拒,直到 E7 翻转),所以本 PR 新增的一切在真实组合里结构性不可达;新增的只有 seam 本身,且它对今天的每一个请求都是透明的。\n\n> 注:本文用 `{运行前缀}` / `{命名空间}` 这种花括号写法表示占位段(GitHub 会把 `<xxx>` 当 HTML 标签吞掉)。实际形状即 ADR-0121 D1 的 `{运行前缀}/apps/{命名空间}/{子路径}`。\n\n---\n\n## 1. `plugin-hono-server` —— `setFallbackHandler` 实现\n\n规格即 `packages/spec/src/contracts/http-server.ts` 上的契约文本(#5080 落),四条保证逐条兑现,每条一组测试(`src/fallback-seam.test.ts`,全部走真实 `app.fetch`):\n\n| 保证 | 实现 | 测试 |\n|:--|:--|:--|\n| 仅在全部显式路由未命中后调用 | 映射到 Hono `app.notFound` 钩子,**不是**通配路由 | 已注册路由不被遮蔽;**先装 fallback 后注册路由**结果不变(零顺序依赖) |\n| `req.body` 可读 | 与真实路由处理器共用同一段请求构造代码(`runHandler`),按 content-type 解析 | POST JSON / form-urlencoded 均可读,且与路由处理器拿到的 body **逐字段相同** |\n| 重复安装即替换 | 一个字段,钩子只挂一次(幂等)并按请求读取 | 只跑最后一个;装 3 次仍只跑 1 次 |\n| 不写响应即保持既有答案 | `unmatchedResponse()` 在 fallback 弃权后运行 | 404 body 与无 fallback 时**逐字节相同**;405 + `Allow` 完好 |\n\n**一处属主收敛(为什么必须动 `hono-plugin.ts`)**:404/405 应答此前由 `HonoServerPlugin.start()` 直接写在 `getRawApp().notFound(...)` 上。实测确认 `app.notFound` 是**后调用者覆盖**,而兜底 seam 落在同一个钩子上 —— 两个写入方意味着幸存者由插件启动顺序决定,静默损失其中之一。应答本体因此移入 `HonoHttpServer`(`installNotFoundSeam()` 与 `setFallbackHandler()` 在其中组合成 fallback → 既有答案),一个钩子一个属主,两者调用顺序任意。行为逐字节不变:`notfound-405.test.ts` 原样通过。\n\n**设计 §7-1 标注的风险,实测结论**(三条,均已进测试):\n1. Hono 把**方法不匹配**路由到与「路径不存在」**同一个** `notFound` 出口 —— 所以 fallback 也会看到这些请求,弃权后 405 必须完好(已钉);\n2. `c.req.param()` 在 `notFound` 上下文里 **抛异常**(无 match result,hono 4.12 `#getAllDecodedParams`),不是返回空 —— 已在 `readRouteParams()` 收口;\n3. `notFound` 返回 undefined → Hono 500「Context is not finalized」—— 所以该钩子必须永远返回 Response。\n\n顺带修好同一段代码上的两处不一致(均在改动路径上,不属于扩面):适配器构造的 `IHttpRequest` 现在一律带 `remoteAddress`(此前只有中间件 seam 有,同一个契约两种形状,E4 端点级限流要读它);处理器**同步**抛出与异步 reject 现在报同一种结果(此前同步抛出会逃到 Hono 自己的错误页,fallback 上这会让「抛错」和「弃权」无法区分)。\n\n## 2. `runtime` —— dispatcher 端点派发步\n\n`dispatcher-plugin` 在 `start()` 中探测 `typeof server.setFallbackHandler === 'function'` 并注册兜底器。派发步本体在新模块 `packages/runtime/src/api-endpoint-step.ts`:\n\n- 挂载前缀 `{运行前缀}/apps/` 按 ADR-0121 D1,**只在这一处拼写**(`APP_ENDPOINT_SEGMENT` / `appEndpointMountPrefix()`);按段判断,`/api/v1/appsx/...` 不入;\n- 前缀之下探测 `metadata` 服务的 `matchEndpoint`(#5089 的实现并行开发,本 PR **不依赖其落地顺序**,测试用实现契约的 stub;探测缺席是完整测过的穿透路径);\n- **命中** → `501 NOT_IMPLEMENTED`,经既有 `buildApiError` 包络,消息指明执行器随 17.x 落地;\n- **未命中 / 无 matcher / 无 metadata 服务 / 路径不在前缀下** → **不写任何响应**,传输层既有 404/405 原样成立;\n- `matchEndpoint` 抛错走 5xx 出口,**不**降级为 404 —— 契约明说「故障不得伪装成没有这条路由」。\n\n**派发步不重入 `dispatch()`**,这是刻意的:那条管线会解析环境与 `executionContext`、跑匿名拒绝门、并以语义 404 收尾;把全部未命中请求灌进去会改变今天未命中请求的答案(404 可能变 401,裸 404 body 变语义包络)。#5090 卡面把「裸/语义 404 收口」明确留待另议。\n\n`metadata` 服务按请求解析且不缓存(不记录会被后续启动推翻的判定,#4771 那一类)。多租户 per-environment 解析需要 `dispatch()` 的 kernel swap —— 执行器本来就需要它,故随 E5 一起落;今天派发步不经该服务读任何数据,不存在「答错环境」的可能,注释里写明了。\n\n## 3. 路由台账(#5078 教训:注记必须与实际一致)\n\n新增 `* /apps/**` 行 + `NON_DISPATCH_MOUNT_PREFIXES`(本包在 `dispatch()` 之外挂载的前缀集)。**没有**把它塞进 `LEGACY_CHAIN_PREFIXES` —— 那个列表的含义是「`dispatch()` if-chain 里尚未提升到 registry 的分支」,这不是;名字与内容脱钩正是注记变假的机制。注记如实写明:已接线的是 seam + 匹配探测 + 501,**执行未接线**(E4–E5),未命中不写响应,以及「今天结构性不可达,因为 publish 仍拒」。\n\n新增一致性断言钉住 ADR-0121 D1 赖以成立的事实:`/apps` 不是任何内建域前缀 —— 将来谁把内建域挂到 `/apps` 会静默遮蔽全部声明式端点,该断言让它变红而不是变静默。\n\n## 验证\n\n| 门 | 结果 |\n|:--|:--|\n| `plugin-hono-server` test | **14 files / 164 tests passed**(新增 `fallback-seam.test.ts` 14 例) |\n| `plugin-hono-server` typecheck | pass |\n| `runtime` test | **84 files / 1155 tests passed**(新增 `api-endpoint-step.test.ts` 13 例、`dispatcher-plugin.endpoint-fallback.integration.test.ts` 10 例 —— 后者真实 boot:LiteKernel + 真 Hono 传输 + 真 dispatcher plugin,走真实 socket) |\n| `runtime` typecheck | pass |\n| 下游 `metadata` / `http-conformance` / `hono` / `service-datasource` / `plugin-dev` test+typecheck | 全绿(已合入 `origin/main`,含刚落地的 #5089) |\n| `spec check:generated` | 8/8 up to date(runtime/plugin 改动不动任何生成物) |\n| `check:route-envelope` / `check:adr-anchors` / `check:durability-log-level` / `check:startup-registry-verdict` / `check:error-code-casing` | 全绿 |\n| eslint(全部改动文件) | 干净 |\n\nchangeset:`@objectstack/plugin-hono-server` + `@objectstack/runtime` 各 minor。未触碰 `packages/spec`、`packages/metadata`(#5089 的面)、`content/docs/releases/`。\n\n**草稿状态,等 PM 复核,未入队。**\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01EYGdmvWP1ieZSLqvAW6uyd"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 4917,
+  "kind": "issue",
+  "title": "VS Code 扩展的 `os-view-grid` 片段生成的 view 现在 parse 不过:`list.defaultSort` / `list.pageSize` 已被 #4001 关掉",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T16:02:55Z",
+  "updated_at": "2026-08-04T00:41:31Z",
+  "closed_at": "2026-08-04T00:41:31Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4917",
+  "body": "在 #4721 做 ADR-0087 载荷扫描时发现的旁支,与该单无关,单独记录(Prime Directive #10),**未认领**。\n\n## 现象\n\n`packages/vscode-objectstack/snippets/objectstack.json` 的 `os-view-grid`(「ObjectStack: Grid List View」)片段展开出来的 view 是这样的:\n\n```ts\nconst myObjectListView: UI.View = {\n  name: 'my_object_list',\n  label: 'My Object List',\n  type: 'list',\n  objectName: 'my_object',\n  list: {\n    type: 'grid',\n    columns: [{ field: 'name', width: 200 }],\n    defaultSort: { field: 'name', direction: 'asc' },\n    pageSize: 25,\n  },\n};\n```\n\n对着当前 `origin/main`(`89d2a4e`)的 `ViewSchema` 实测:\n\n```\nvscode os-view-grid snippet parses? false\nUnrecognized key(s) on this list view: `defaultSort`, `pageSize`. Until #4001 closed\nthese shapes an unknown key was dropped silently — the view still rendered, without\nwhatever the key was meant to configure.\n```\n\n即:**扩展交给作者的脚手架,一展开就是一份 validate 不过的 metadata**。#4001 把 `ListViewSchema` 收紧成 strict 之后,这两个键从「静默丢弃」变成了硬拒绝,而片段没跟着改。`list.defaultSort` 在 `ListViewSchema` 上从来没有声明过(`FormView.defaultSort` 是另一个键,已在 #3896 收尾里立碑退休);`list.pageSize` 同理。\n\n## 为什么值得单开\n\n这是 #4001 战役的一类「下游未跟随」缺口,而且落在最不该落的地方:strict 化的价值在于把错误提前到写的那一刻,但这里**写的那一刻的模板本身就是错的**——作者(人或 AI)按 IDE 提示写出来的第一份 view 就被拒绝,而拒绝信息说的是「#4001 关掉了这些形状」,读起来像平台坏了,不像片段过期了。\n\n## 需要决定的部分\n\n`defaultSort` / `pageSize` 表达的意图(列表默认排序、分页大小)在 `ListViewSchema` 上**是否有对应的活键**,得先查一遍再改片段:\n\n- 有 → 片段改成正确拼写;\n- 没有 → 片段直接删掉这两行,并判断这两个能力是不是本来就该有(那是另一单)。\n\n不要为了让片段能跑而给 schema 加回键——ADR-0049 / Prime Directive #12。\n\n## 建议顺手做的一件事\n\n整个 `snippets/objectstack.json` 有 8 个片段(`os-object` / `os-field-text` / `os-field-select` / `os-field-lookup` / `os-view-grid` / `os-flow` / `os-stack` / `os-agent`),本单只实测了 `os-view-grid`。既然 #4001 在按批次关 strict,片段文件会**反复**以同样方式过期。真正的修法是给它加一条 gate:把每个片段展开后(去掉 `${n:…}` 占位)对着对应 schema parse 一次,parse 不过就红。否则这单关掉之后,下一批 strict 化会再复现一次。\n\n关联:#4001、#3896、ADR-0049。发现于 #4721 的实现过程。\n"
+}

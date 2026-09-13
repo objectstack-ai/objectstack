@@ -1,0 +1,34 @@
+{
+  "number": 5054,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0120 — explicit unique-scope vocabulary (organization/global) and NULL-safe per-organization uniqueness (#4986, #5030)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T01:08:11Z",
+  "updated_at": "2026-08-04T03:08:10Z",
+  "closed_at": "2026-08-04T03:08:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T03:08:09Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5054",
+  "body": "## 这是什么\n\n#4986 维护者裁定后的 **ADR-0120 完整草案**(Status: Proposed),一张 ADR 同时覆盖 #4986(表级声明唯一索引的组织语义岔路)与 #5030(NULL 组织行上复合唯一约束蒸发)。**本 PR 仅新增 ADR 文档,零代码语义改动** —— D8 明确:ADR 被接受前,driver-sql / spec / lint 均不动。\n\n已含五轮维护者评审:①「app 元数据姿态可移植」为总纲(`single | group | isolated`,ADR-0105;每客户单库 = 环境级选择);② 词汇弃用 `'tenant'`;③ 姿态切换罕见、不自动化,执行交 AI 写升级脚本;④ 第三词 `'company'` 被否(记入 Alternatives #6),S14 改部署接缝处理;⑤ **四个遗留评审问题全部裁决**(见下),Open questions 节已转为 Resolved 决策记录。\n\n## 决定摘要(D1–D8)\n\n- **D1 词汇显式化**:`unique: 'global' | 'organization'` 两种写法通用,两词均不依赖姿态;声明索引裸 `true` 弃用(17.x 警告 → 协议 18 拒绝);字段级 `true` 永久合法,官方示例/脚手架一律输出 `'organization'`(非规范性引导)。\n- **D2 存量无感转换**:ADR-0087 D2 条目 `true → 'global'`,存量库零漂移;九个 engine-owned 幂等键钉死不变。\n- **D3 NULL 安全组织键**:物化为 `COALESCE(organization_id, '__global__')` —— 报错自述平台桶、与 autonumber 的 GLOBAL_TENANT 同词;组织创建保留该 token,存储仍为 NULL;**17.x 落地**。\n- **D4 迁移仪式**:纯收紧 `recreate_index` + 重复数据预检,预检不净永不自动应用。\n- **D5 门禁**:未表态 scope 的 lint/publish 拒绝 + R10 重写 + **D5e 安装期姿态硬门**(`'global'` 业务唯一装进 `isolated` 环境逐索引确认/改写,留痕不复问;doctor/plan 兜底存量与姿态变更)。\n- **D6 五处成文契约同波次改**。\n- **D7 分期**:17.x 增量(含 D3、D5e),协议 18 拒裸 `true`。\n- **D8 冻结令**:接受前零单侧语义改动。\n\n## 四个评审问题的裁决(2026-08-04,详见 ADR §Resolved review questions)\n\n1. **COALESCE 字面量 = `'__global__'`**(从 `''` 翻转):事故现场报错自述性 + 子系统词汇统一(#3696 教训)。\n2. **字段级裸 `true` 永久合法**:无歧义无陷阱,弃用只买 churn 不买安全;示例引导显式写法。\n3. **D3 落 17.x**:等待成本复利(重复数据越积越多),18 波本来就零物理漂移。\n4. **`isolated` 决策点 = 安装期硬门 + 留痕**:危险方向(跨客户唯一墙 + 存在性泄露)永不静默落地;advisory 只兜历史存量。\n\nADR 已无未决问题,可评审定稿(Proposed → Accepted)后拆实现波次。\n\nRefs #4986, #5030 · Amends #3696 · Relates #4698, #4884, ADR-0105\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Akrzh2mHi2siSNVPPtfTw7"
+}

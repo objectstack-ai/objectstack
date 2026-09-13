@@ -1,0 +1,37 @@
+{
+  "number": 5111,
+  "kind": "issue",
+  "title": "E7(#5040 执行器):翻转 —— publish 硬拒收窄为「不支持子集 + 命名空间门」,声明式端点随 v17 放行执行",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "pm:dispatched",
+    "protocol:breaking"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T05:04:33Z",
+  "updated_at": "2026-08-04T08:40:47Z",
+  "closed_at": "2026-08-04T08:40:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5111",
+  "body": "Part of #5040(E 系列第 7 单,**发布目标 v17**,维护者裁决 2026-08-04:执行器直接进 v17,v17 切版等 E 系列全绿)。**Blocked-by: #5091(E4)+ #5092(E5)+ #5093(E6)** —— 执行面齐备前 publish 不得放行。\n\n## 范围(以 #5040 设计与 ADR-0121 为准,spec 车道)\n\n1. **收窄 #4936 的整面硬拒**(`packages/spec/src/stack.zod.ts`):非空 `apis:` 不再一律拒绝,改为逐端点过门 ——\n   - **支持子集门**:仅放行 17.x 实际执行的形状(E2–E5 已落的匹配与委派能力);词表里声明了但执行器不支持的组合仍**响亮拒绝**(错误文案指向具体键与替代方案,不留 declared≠enforced 缝隙);\n   - **命名空间门**:`path` 必须落在本包命名空间的挂载前缀下(`/api/v1/apps/<ns>/…`),跨命名空间/越界路径拒绝(ADR-0076 一路一主在 publish 时即成立);同栈内重复 METHOD+path 拒绝(运行时的字典序裁决只兜 publish 之外的直写)。\n2. 生成物整体重生成(os-regen 四步;错误文案、spec-changes、**upgrade-guide** 均会动)。\n3. **升级文档 = 安全承载件**(维护者裁决:不加激活开关,靠文档让 AI 维护者知情):upgrade-guide 条目必须显式包含 —— v16 休眠 `apis:` 配置在 v17 会被校验并激活;指令 AI 维护者**审视历史配置,尤其显式 `authRequired: false` 条目**(词表缺省即 `true`,E1 已物化,漏写不构成风险);不改 `content/docs/releases/`(Prime Directive,发版说明由 changeset 集中编译)。\n4. Changeset:`@objectstack/spec` 相应级别,明确「v17 破坏面 = 校验从整面拒绝改为条件放行」。\n\n## 约束\n\n词表冻结(`ApiEndpointSchema` 零改动 —— 门是校验逻辑,不是新键);执行器车道程序卡(`session_01EYGdmvWP1ieZSLqvAW6uyd` 按序派发),**其它车道请勿认领**。\n\n关联:ADR-0121、#4936(被收窄的裁决)、#5089/#5090/#5091/#5092/#5093、#5040 设计 §6。"
+}

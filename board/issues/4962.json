@@ -1,0 +1,35 @@
+{
+  "number": 4962,
+  "kind": "issue",
+  "title": "`ETLPipeline.retry` is a third retry-policy vocabulary that #4661 的收敛没有覆盖到",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "protocol:breaking",
+    "target:v17"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T17:22:52Z",
+  "updated_at": "2026-08-04T07:43:16Z",
+  "closed_at": "2026-08-04T07:43:16Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4962",
+  "body": "发现于 #4001 批 12(`automation/etl.zod.ts` 的 strict 收紧),**不在该 PR 范围内**,按 Prime Directive #10 单独记录。\n\n## 事实\n\n#4661 把重试策略收敛成**一份声明** `shared/retry-policy.zod.ts`,因为 `automation/control-flow.zod.ts` 与 `system/job.zod.ts` 用**同一个导出名** `RetryPolicy` 发布了两个不同的形状(#4411 陷阱)。收敛后的词表是:\n\n```\nmaxRetries        // 初次尝试之后的重试次数,default 0(#4661 起 opt-in)\nbackoffMs         // 首次重试前的基础延迟\nbackoffMultiplier // 指数退避倍数\nmaxRetryDelayMs   // 单次退避延迟上限\njitter            // 抖动\nretryDelayMs      // 墓碑(retiredKey)→ backoffMs\n```\n\n`ETLPipelineSchema.retry`(`packages/spec/src/automation/etl.zod.ts`)是同一个概念的**第三份编码**,而 #4661 没有碰它:\n\n```ts\nretry: z.object({\n  maxAttempts: z.number().int().min(0).default(3).describe('Max retry attempts'),\n  backoffMs:   z.number().int().min(0).default(60000).describe('Backoff in milliseconds'),\n}).optional()\n```\n\n三处分歧,都是真实的:\n\n1. **次数键拼写不同** —— `maxAttempts` vs 收敛后的 `maxRetries`。语义相同(初次之后的重试数),只有拼写不同。\n2. **默认值方向相反** —— 这里 `default(3)`,收敛后的策略 `default(0)`。#4661 的理由写得很明确:重试会重放上一次尝试已经产生的副作用,所以\"不写 = 不重试\"必须是默认,隐式重试是最难在测试里抓到、在生产里最贵的失败模式,**而 LLM 写的 metadata 恰恰是\"没写出来的键\"藏身的地方**。ETL pipeline 的 retry 目前正好是被 #4661 判为错误的那个方向。\n3. **少三个键** —— 没有 `backoffMultiplier` / `maxRetryDelayMs` / `jitter`,所以 ETL 的退避是平的、无上限的、无抖动的。一条每天凌晨 2 点跑、失败后固定 60s 重试 3 次的仓库管道,正是 thundering-herd 的典型形状。\n\n之所以 #4661 漏掉它:那次收敛是按**导出名冲突**(#4411 / #4535 C8)驱动的,而 ETL 的 retry 是一个匿名内联 block,没有导出名,所以不在那次的雷达上。这是同一类债务的另一种外观 —— 一个概念三种词表 —— 只是不表现为 dual-source。\n\n## 为什么现在只是记录,不是顺手改\n\n`etl.zod.ts` 在本仓库/`objectui`/`cloud` 三仓**零 importer、零 parse 点**(与 #4738 删掉 L1 `sync.zod.ts` 时测到的形状相同,区别在于 ETL 不是任何东西的第二份声明,是 SYNC_ARCHITECTURE.md 的 L2 唯一一层,`sync-retirement.test.ts` 还显式 pin 了 `ETLPipelineSchema` 必须存活)。所以这里没有\"运行时行为\"可谈,改动纯粹是**可授权契约**的形状问题 —— 而契约形状是 needs-decision 级别的取舍,不该塞进一个 strictness 批次里顺手做掉。\n\n批 12 做的是把这个分歧**变吵**而不是变对:`retry` block 收紧成 strict 之后,`maxRetries` 走 alias 提示改写成 `maxAttempts`,`retryDelayMs` / `backoffMultiplier` / `maxRetryDelayMs` / `jitter` 各自带一条 guidance,明说\"这是 `shared/retry-policy.zod.ts` 上有、ETL 上**故意没有**的键,不是笔误\"。在本 issue 有结论之前,那四条 guidance 就是这份分歧的可见形式。\n\n## 三个选项\n\n**A. 让 `ETLPipeline.retry` 直接引用 `shared/RetryPolicySchema`。**\n- 长期正确性:最好。一个概念一份声明,#4661 已经付过这笔收敛的代价并写下了理由;ETL 是唯一没跟上的那个。`shared/retry-policy.zod.ts` 的 module JSDoc 里\"不进 `shared/index.ts`、由各 domain barrel 再导出以保住 def key\"的做法现成可用。\n- 让 AI 写的 metadata 不易出错:最好。作者在 job / try_catch / ETL 三个地方看到**同一套键和同一个默认语义**,不再需要记住\"哪个面上叫什么\"。\n- 成本:`maxAttempts` → `maxRetries` 是 breaking 的可授权键改名,需要 ADR-0087 D2 conversion + 墓碑 + changeset 迁移文案;默认值 3 → 0 是行为改变,但**此处零 parse 点**,所以没有已部署的 stack 会变(这一点和 #4661 当时必须写 `retry-policy-converged` conversion 的处境不同,便宜得多)。\n- 副作用:`automation/ETLPipeline:retry` 在 `authorable-surface.json` 的展开会变宽(2 键 → 5 键)。\n\n**B. 只统一拼写,不引用共享声明**(`maxAttempts` → `maxRetries`,默认值改 0,保持内联两键)。\n- 长期正确性:差。这是\"看起来收敛了\"的补丁 —— 词表对上了,声明还是三份,下一次给重试策略加键时 ETL 依然会被漏掉,和这次被漏掉的机制一模一样。付了 breaking 改名的代价却没买到\"一份声明\"这个唯一值钱的东西。\n- 让 AI 写的 metadata 不易出错:中等。拼写一致确实有帮助,但 `backoffMultiplier` / `jitter` 在别处能写、在这里不能写的坑原样保留。\n\n**C. 什么都不做,保留批 12 的 guidance。**\n- 长期正确性:差,但是**诚实的差**。分歧被写进了拒绝信息里,不再是静默的;债务可见、可检索、可排期。\n- 让 AI 写的 metadata 不易出错:中等偏下。作者会拿到明确的改写指示,但只在他**已经写错之后**;结构上并没有阻止他写错。\n- 成本:零。\n\n## 建议\n\n**A**,理由在两个轴上一致:它是 #4661 已经论证过的那个方向(一个概念一份声明),而且此处零 parse 点意味着 A 的迁移成本在整个仓库里此刻最低 —— 越晚做越贵,因为一旦真有 ETL 引擎落地,默认值 3 → 0 就从\"改一份 schema\"变成\"改所有已部署管道的行为\"。B 花掉了 A 的全部 breaking 预算却留下了 A 要解决的问题,不推荐。\n\n需要维护者裁决的是 A 里的默认值:`maxRetries` 跟随收敛后的 `0`(与 #4661 的 opt-in 论证一致),还是为 ETL 保留 `3`(与现状一致但重新引入\"隐式重试\")。我的读法是跟随 `0` —— #4661 的论证不依赖于是哪个 domain。\n\n/cc #4001 #4661 #4535\n"
+}

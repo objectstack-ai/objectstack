@@ -1,0 +1,36 @@
+{
+  "number": 4597,
+  "kind": "issue",
+  "title": "data: the `NOW()` defaultValue token is unresolved on non-SQL datasources — the engine stamps the literal string, and the record validator then rejects the insert",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T09:37:02Z",
+  "updated_at": "2026-08-03T19:25:13Z",
+  "closed_at": "2026-08-03T19:25:13Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4597",
+  "body": "发现于 #4560 的令牌家族盘点（DDL 侧把 `current_user` 当字面量下发的那条）。这是**同一条裂缝的镜像**：`current_user` 只有引擎认识、DDL 不认识；`'NOW()'` 只有 SQL 驱动认识、**引擎不认识**。\n\n## 现象\n\n`ObjectQL.applyFieldDefaults`（`packages/objectql/src/engine.ts:1343`）只特判两类 `defaultValue`：Expression 信封（`{ dialect, source }`）与 `current_user` 令牌。其余一律 `out[f.name] = dv` 原样落值——包括 `'NOW()'`：\n\n```ts\n} else if (isCurrentUserDefaultToken(dv)) {\n  ...\n} else {\n  out[f.name] = dv;   // 'NOW()' 从这里出去，是一个字面串\n}\n```\n\nSQL 驱动有兜底：`SqlDriver.formatInput`（`packages/plugins/driver-sql/src/sql-driver.ts` 的 \"Insert/update-time safety net\"）把任何等于 `NOW()` 的字符串换成真实 ISO 时间戳，注释写明「often because a field defaultValue leaked unresolved」——也就是说这条泄漏一直存在，只是被 SQL 驱动私下补住了。\n\n**非 SQL 数据源没有这个兜底。** `packages/plugins/driver-memory/src/memory-driver.ts` 全文没有任何 `defaultValue` / `NOW()` 处理，mongodb 驱动同理。\n\n## 复现（已实测）\n\n在 `packages/objectql` 内用一个最小内存驱动跑引擎：\n\n```ts\nengine.registry.registerObject({\n  name: 'probe_now',\n  fields: {\n    id: { name: 'id', type: 'text', primaryKey: true },\n    seen_at: { name: 'seen_at', type: 'datetime', defaultValue: 'NOW()' },\n  },\n});\nawait engine.insert('probe_now', {}, { context: { isSystem: true } });\n```\n\n结果不是「存了字面串」，而是**整条插入被拒**：\n\n```\nValidationError: S must be a valid datetime (ISO-8601)\n  at validateRecord packages/objectql/src/validation/record-validator.ts:792\n  at packages/objectql/src/engine.ts:3976\n```\n\n引擎自己填的默认值，被引擎自己的写入校验判为非法。\n\n## 影响\n\n- 任何 `Field.datetime({ defaultValue: 'NOW()' })`（平台对象里有 ~100 处这种声明）绑定到 memory / mongodb 数据源时，**每一次省略该字段的插入都会失败**。\n- 失败是响亮的（ValidationError），不像 #4560 那样静默写坏数据 —— 但它同样是「declared ≠ enforced」：`'NOW()'` 是被文档化的框架约定，却只在一个驱动上成立。\n- 用 memory 驱动做的单测/示例只要碰到这类字段就会踩到，且报错信息完全指不到根因（\"must be a valid datetime\"）。\n\n## 建议的修法方向（未认领，待决策）\n\n#4560 已经把令牌词汇表收敛到 `@objectstack/spec/data`（`DEFAULT_VALUE_TOKENS` / `isNowDefaultToken` / `isRuntimeDefaultToken`），所以这条现在有了单一落点。两个候选：\n\n**A. 引擎解析 `NOW()`。** 在 `applyFieldDefaults` 里像 `current_user` 一样特判，用已有的 `nowSnapshot` 落成规范 ISO-8601-Z。所有驱动一致，`formatInput` 的兜底退化为纯防御。代价：SQL 侧从此几乎总是拿到显式值，列 DEFAULT 只在绕过引擎的写入上生效（这与 `current_user` 的处理是同构的，不算退步）。\n\n**B. 保持「有原生对应物的令牌由驱动翻译」，但要求每个驱动都翻译。** 即把 `formatInput` 的兜底提升为驱动契约的一部分，memory/mongodb 各自实现。代价：N 份实现、N 次漂移机会，正是 #4560 的成因。\n\n倾向 **A**：令牌是应用层词汇，引擎是唯一所有权清晰的解析点；`nowColumnDefault` 仍然保留，用于服务真正绕过引擎的写入路径。但这会改变「省略 datetime 字段时值由谁产生」的既定分工，属于契约级选择，故不自决。\n"
+}

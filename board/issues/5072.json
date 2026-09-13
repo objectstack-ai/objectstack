@@ -1,0 +1,37 @@
+{
+  "number": 5072,
+  "kind": "issue",
+  "title": "台账 AST 计数器把 `strictObject(...).passthrough()` 读成 strict —— `postureOf()` 在 helper 惯用法上提前返回、不走链",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue",
+    "repo:objectstack"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T02:13:29Z",
+  "updated_at": "2026-08-04T11:12:44Z",
+  "closed_at": "2026-08-04T11:12:44Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5072",
+  "body": "发现于 #4001 批 18(`ui/view.zod.ts`),范围外,未在该 PR 修。\n\n## 缺陷\n\n`packages/spec/scripts/lib/strictness-ledger.ts` 的 `postureOf()` 第一行就对 campaign 自己的 helper 惯用法短路:\n\n```ts\nfunction postureOf(call: ts.CallExpression, idiom: string): Posture {\n  if (idiom === 'strictObject' || idiom === 'z.strictObject') return 'strict';\n  // ...只有走到这里才会遍历 .strict() / .passthrough() / .catchall() 链\n```\n\n对 `z.object(...)` 它会正确地走链;对 `strictObject(...)` 它**直接返回 `strict`,不看后面挂了什么**。于是 `strictObject(...).passthrough()` —— 一个运行期**开放**的形状 —— 在台账里被记为 **strict**。\n\n## 实测(非阅读推断)\n\n```\nGanttConfigSchema.parse({ startDateField:'a', endDateField:'b', titleField:'c', lockField:'x' })\n  => { startDateField:'a', endDateField:'b', titleField:'c', lockField:'x' }   // lockField 原样通过\nTreeConfigSchema.parse({ labelField:'a', parentField:'b', zzz:1 })\n  => { parentField:'b', labelField:'a', zzz:1 }                                 // zzz 原样通过\n```\n\n两者的 `.passthrough()` 都是**刻意**的(注释写明:让 renderer-ahead 的 config 旋钮到达 plugin-gantt / plugin-tree,不必等 spec 发版),objectui 侧也有对应记录(`types/src/zod/objectql.zod.ts` 的注释直接引用「the same reason the spec puts it on `GanttConfigSchema`/`TreeConfigSchema`」)。**问题不在这两个 schema,在读它们的尺。**\n\n## 影响面(AST 精确统计,全 `packages/spec/src`)\n\n**恰好 2 处**,都在 `ui/view.zod.ts`:`GanttConfigSchema`、`TreeConfigSchema`。\n\n⚠️ 统计这个数字本身踩了一次坑,值得记:用「站点行往后扫 N 行找 `}).passthrough()`」的正则法得到 **11**,因为窗口会捞到后面别的站点的链尾。改成真正沿 `parent` 走链的 AST 判定后是 **2**。**别用行窗口复核这条,会得到一个吓人的假数。**\n\n## 为什么值得修(而不是「只差 2 个,无所谓」)\n\n- 它**虚增 strict 计数**:`ui/` 的 strict 读数里有 2 个其实是 passthrough。战役的排期与「还剩多少」都读这个数。\n- 方向更糟的那一半:它让一个**开放**形状在地图上长得像**已关闭**。战役的整个判据是「未声明键会不会被静默吃掉」,而这把尺对 helper 惯用法给出的答案与运行期相反。\n- 这是台账自己的第 N 次「计数器返回一个错误的读数,遍历正确地尊重了那个读数」——与 #4852 修掉的那次(`time-relative-trigger` 折行写法计成 0、零站点文件被覆盖检查跳过)是**同一个形状**,只是这次盲区落在 posture 而不是 count 上。#4852 把 `idiomOf`/`nameOf` 都重建在 AST 上了,`postureOf` 是同一次重建里唯一保留了短路的那个。\n\n## 处方\n\n`postureOf()` 对 `strictObject` / `z.strictObject` 应当以 `'strict'` 为**初值**继续走链,而不是提前返回 —— 与 `z.looseObject` 同理(它也是提前返回 `'passthrough'`,同样挡住了 `.strict()` 覆写,虽然目前全仓无实例)。\n\n```ts\nlet posture: Posture =\n  idiom === 'strictObject' || idiom === 'z.strictObject' ? 'strict'\n  : idiom === 'z.looseObject' ? 'passthrough'\n  : 'strip';\n// …然后一律走链,让链上最后一个显式调用赢\n```\n\n修的时候请**先证红**:把 `GanttConfigSchema` 的期望姿态钉成 `passthrough`,确认 `scripts/strictness-ledger.test.ts` 在修之前是红的。改完 `ui/` 的 strict 计数会 −2、passthrough 计数 +2,台账表头需要同步(strip 计数不变,所以 remaining-strip 那张双向表不受影响)。\n\n顺带值得判一下:这两处是否该在台账里单列一类。它们既不是 `authorable`(已关)也不是留开的 strip —— 是**刻意开放的父 + 已关闭的子块**(批 18 关掉了 `GanttConfig.tooltipFields`,父仍开放)。现有四类(real door / no gate / no door / wire)都不完全贴。\n"
+}

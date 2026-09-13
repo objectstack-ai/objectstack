@@ -1,0 +1,35 @@
+{
+  "number": 4721,
+  "kind": "issue",
+  "title": "一个被静默丢弃的排序键对外部调用方仍然是静默的:`direction` 该 400 还是继续被丢掉(#4674 第 4 项)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T21:31:24Z",
+  "updated_at": "2026-08-03T17:30:29Z",
+  "closed_at": "2026-08-03T17:30:29Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4721",
+  "body": "从 #4674 的第 4 项拆出来——那一项写的是「值得单独决定」,这就是那个单独决定。#4720 修了两个内部站点,**没有**动这一类。\n\n## 类修复保护的不是同一批人\n\n#4674 提了两条路:\n\n1. 让 QueryAST 的排序 schema 在这条轴上拒绝未知键(`SortNodeSchema` 加 `.strict()`),`direction` 变成 400;\n2. 或者让 normalizer 专门识别 `direction`,以一条点名 `order` 的消息拒绝它。\n\n两条都住在**入站 `findData` normalizer** 上。而 #4674 自己的「为什么没被抓住」第 2 条已经确认:那条路径**对这次的两个站点根本不运行**——它们是协议直接调 `this.engine.find`,在自己的守卫**内侧**而非后面。\n\n所以这个类修复**不会抓住催生它的那个 bug**。这不构成放弃它的理由,但它把要解决的问题换了一个:\n\n| 调用方 | 被执行的渠道 | 现状 |\n|:--|:--|:--|\n| 内部(协议、插件、包内代码) | `tsc` — `EngineQueryOptions.orderBy` 是 `SortNodeSchema[]` | #4720 已恢复(两处 `as any` 删除) |\n| 外部(REST / RPC 上的 `orderBy`) | normalizer | **仍然静默丢弃 `direction`** |\n\n对内部调用方,真正的教训是「别擦除类型」,而不是「加个运行时闸」。本单只关心第二行。\n\n## 决定点\n\n`SortNodeSchema` 不是 `.strict()`,所以任何未知键都被丢掉,而不是被标记。给外部调用方发一个 `{ field: 'updated_at', direction: 'desc' }`,他们得到的是一个**看起来成功的升序响应**——带 `limit` 时还意味着返回了另一批行。没有任何信号。\n\n两个选项的代价不同:\n\n**(a) `SortNodeSchema` 加 `.strict()`** —— 覆盖面完整,但这是对已发布线协议的**破坏性**变更:今天任何在排序节点里多带一个键的客户端会开始收到 400。而且它把所有未知键一视同仁,而 `direction` 是唯一一个有已知正确译法的。\n\n**(b) 专门识别 `direction`,以点名 `order` 的消息拒绝** —— 窄,不破坏无关的多余键,并且**送达一条处方**而不只是一个拒绝。这正是 `retiredKey()` 的做法(通过一次 parse 把修复建议交到调用方手里),区别在于 `direction` 从来不是我们这条轴上的键,所以「墓碑」不是准确的词——它是一条**外来词汇提示**。\n\n倾向 (b),但 (a) 的「未知键一律拒绝」在别处是这个仓的既有姿态(#4371 让引擎拒绝未声明的选项键——只是在**顶层**,没有递归进排序节点),所以这里存在一致性论据,值得一并权衡。\n\n## 为什么值得做\n\n`direction` 不是一个凭空的拼写错误,它是**同一个概念的两套活词汇**:\n\n- `SortNodeSchema` — `{ field, order }` — QueryAST / `EngineQueryOptions`(`query.zod.ts:12`)\n- `IReportService.orderBy` — `{ field, direction? }` — 一份真正不同的契约(`report-service.ts:29`)\n\n`plugin-auth/objectql-adapter.ts:536` 已经显式地在两者间翻译。也就是说这个翻译是**已知必需**的,只是没有在任何地方被强制;调用方忘了翻译时,结果是一个静默的错误答案而不是一个错误。这就是 ADR-0049 的形状。\n\n## 顺带一提:一个更便宜的内部护栏\n\n如果要收紧内部这一侧,能想到的最小手段是一条 lint 规则,禁止对引擎查询选项做 `as any` / `: any` —— 是类型擦除而不是缺少运行时闸让 #4674 溜过去的。这是否值得单开一单,取决于树里这种擦除还有多少。\n\n关联:#4674、#4720、#4363、#4371、ADR-0049"
+}

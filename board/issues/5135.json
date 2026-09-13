@@ -1,0 +1,35 @@
+{
+  "number": 5135,
+  "kind": "pull_request",
+  "title": "feat(runtime): 端点策略键 —— authRequired / rateLimit / cacheTtl 接线(#5040 E4)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T05:55:13Z",
+  "updated_at": "2026-08-04T06:18:35Z",
+  "closed_at": "2026-08-04T06:18:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T06:18:34Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5135",
+  "body": "Fixes #5091\nPart-of #5040(E 系列第 4 单)。前置 E2(`ecc61ab`)/ E3(`2649ccb`)已在 main。\n\n> 排版注记:占位符一律写成 `{…}` 而非尖括号 —— GitHub 正文消毒器会把 `<` 后跟字母当 HTML 标签吞掉(本 PR 初版正文的 `max-age=<ttl>` 就被存成了 `max-age=`)。\n\n## 做了什么\n\n新增 `packages/runtime/src/endpoint-policy.ts` —— `ApiEndpointSchema` 三个策略键的**唯一读取方**;`api-endpoint-step.ts` 在「匹配命中」与「答复」之间插入策略链。三键全部复用既有原语,零发明:\n\n| 键 | 由谁回答 | 与谁共用 |\n|---|---|---|\n| `authRequired` | `shouldDenyAnonymous` + `ANONYMOUS_DENY_*` 常量 | `/meta`、`/ai`、`/security`(#2567、#3963) |\n| `rateLimit` | `deriveBucketConfig` / `resolveRateLimitKey` / `SharedTokenBucketLimiter` | server 级入站限流(#5006、#4910 Q3=C / Q4=B) |\n| `cacheTtl` | 一个 `Cache-Control` 响应头,仅此而已 | —— |\n\n### 链序:先限流、后鉴权(#5040 §3)\n\n按设计原文执行,并把理由写进代码:最需要计量的流量(撞库、令牌喷洒、爬取)恰恰是会被答 401 的那批;先鉴权后限流等于让扫号者的每次尝试都**绕开**计量。因此被拒的请求**确实消耗令牌** —— 这是预算的用途,不是它的漏洞。解析「谁在调用」与「据此设卡」是两件事:principal 先查一次(它给桶做键),再计量,再设卡,一次查询两处使用。\n\n### 三键的具体裁断\n\n- **`authRequired`**:值到达时已由 schema 物化(缺省即 `true`),执行器读不到「未声明」这个中间态 —— 漏写得到安全默认,`authRequired: false` 是唯一开门方式且在 diff 里可 review。\n  ⚠️ **请求 path 被刻意不传给 `shouldDenyAnonymous`**:它的可选 path 参数会豁免控制面路径,而 `isAuthGateAllowlisted` 把**任何含 `/auth/` 段的路径**都算作控制面。若传 path,应用只要把端点声明成 `/api/v1/apps/{ns}/auth/callback` 就能豁免自己的 `authRequired: true` —— 一个「声明期即可自助绕过平台默认拒绝」的口子。不传 = 声明路径根本够不到豁免。已配测试钉死。\n- **`rateLimit`**:桶键 `apiep:{端点名}:{principal 或 ip}`。命名空间前缀是**两份预算互相独立**的原因(server 级是全局底线,端点级是业务配额),共用键空间会让较小的那份被悄悄再砍一半。超限答与 server 级限流器**逐字节相同**的 429(同 message、同 `details`、同派生 code)+ `Retry-After`。armed 但不可用(`maxRequests`/`windowMs` ≤ 0)→ **fail closed**,报错点名端点。\n- **`cacheTtl`**:**仅响应头语义**(#5091 已裁掉服务端缓存 —— 缓存需要失效故事,给一个只有四个词的词表发明失效语义正是「运行时方言」的起点)。正值 → `private, max-age={秒数}`;`private` 是安全规则不是调优项,`authRequired: false` 的端点同样适用(任何响应都可能是按主体裁剪过的,共享缓存永远不该存);`0`/负值 → `no-store`(作者写了 `0` 就是说了话,让它等价于沉默正是本程序要消灭的静默 no-op);缺省 → 不发头;非 GET → 不发头 + warn 点名(GET-only 见设计 §3.3,publish 门在 E7)。\n\n### 501 与头的关系\n\n`Cache-Control` 描述的是**尚不存在的成功响应体**(执行是 E5),让客户端缓存一个 501 比什么都不说更糟 —— 所以它留在策略裁决对象上(`verdict.responseHeaders`)供执行器接线时应用,并在单测里直接断言这一暴露;`Retry-After` 则是**拒绝本身的一部分**,随答复走(`AppEndpointStepAnswer.headers`)。\n\n### 结构上防「接了执行、忘了策略」\n\n执行落点在策略链**之后**的分支里,而该分支在没有策略上下文时不可达 —— 后续接线要加执行调用,没有别的地方可放。\n\n## 未接的一段(留给 #5129,已在该单评论里交接)\n\n按 R3 文件面切分,本单不碰 `dispatcher-plugin.ts`,因此派发步目前**尚未拿到**策略上下文(headers / remoteAddress / principal 解析 / limiter 注册表),`answer.headers` 也还没被兜底器写出。这两处正是 #5129(E5b 接线收拢)的范围,交接契约已评论在该单。今日不构成任何缺口:没有策略上下文时的终态答复仍是 501 —— 没有任何请求会被**未经策略地服务**。\n\n## 结构性不可达 / 零现网行为变更\n\n非空 `apis:` 在 publish/validate 仍被硬拒(E7 翻转前);派发步在未获得策略上下文时的答复与此前逐字节相同 —— E3 的全部否定断言(未命中、前缀外、405 + `Allow`、裸 404)原样通过。\n\n## 验证\n\n```\npnpm --filter @objectstack/runtime exec vitest run --maxWorkers=2\n  Test Files  87 passed (87)\n       Tests  1206 passed (1206)\n\npnpm --filter @objectstack/runtime typecheck            → tsc --noEmit,零输出\npnpm check:route-envelope                               → 8 route module(s): 7 conformant, 0 ratcheted, 1 exempt\n                                                          Dispatcher domains — 16 audited, 0 ratcheted\npnpm --filter @objectstack/spec check:generated         → ✓ All 8 generated artifacts are up to date\npnpm exec eslint {本 PR 改动的 5 个文件} --no-inline-config → 零输出\n```\n\n新测试:`endpoint-policy.test.ts`(逐键 命中/未命中/边界:`authRequired` true-无会话 / true-有会话 / false、`/auth/` 自助豁免防线、限流 未到/到点/超限 + `Retry-After` 值 + 端点间与调用者间桶隔离 + 转发头须 `trustProxy` + 计量先于鉴权 + 计数存储故障的有界 fail-open + 零预算 fail-closed、`cacheTtl` 有/无/0/负/小数/非 GET)+ `api-endpoint-step.test.ts` 的链路接线用例(拒绝短路不出 501、429 带头、通过才到 501、501 不带 `Cache-Control`)。`endpoint-policy.ts` 已按 E3 加 `api-endpoint-step.ts` 的同样方式加入 error-envelope conformance 的 MODULES 扫描清单。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01EYGdmvWP1ieZSLqvAW6uyd"
+}

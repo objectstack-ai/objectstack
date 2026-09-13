@@ -1,0 +1,37 @@
+{
+  "number": 5107,
+  "kind": "issue",
+  "title": "strictness 台账「数字/散文分家」:计数与表头转生成物走 os-regen,Class 判定与依据保持手写 —— 终结「干净合并两边都错」(单日 7 例)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T04:54:29Z",
+  "updated_at": "2026-08-04T11:12:44Z",
+  "closed_at": "2026-08-04T11:12:44Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5107",
+  "body": "维护者 2026-08-04 同意方向后立单(讨论记录在 PM 会话;判据数据如下)。**未认领。**\n\n## 病历\n\n`docs/audits/2026-07-unknown-key-strictness-ledger.md` 是 2026-08-03/04 战役期间全仓最热的合并冲突点:并行批次的每一**对**重叠飞行冲突一次,表头/小计的「干净合并、两边都错」单日 **7 例**(automation 段 5、6 例与 ui 段第 7 例:批 13 写 119、批 14 写 110、批 15 写 100,正确值 91 三边都没写过)。成本有界(存活行重算 + `check:strictness-ledger` 仲裁,零丢失零错入 main),但每例吃掉一轮 dev 同步。\n\n## 药方(releases/ 页同款:逐变更文件 + 集中编译的变体)\n\n1. **数字转生成物**:remaining-strip 映射的行计数、各段表头、authorable 小计由 `gen:` 脚本从既有 AST 计数器(#4852,`scripts/lib/strictness-ledger.ts`)直接输出——它现在就在算这些数用于对账,只是改为写入;产物路径加进 `.gitattributes` 的 `merge=os-regen`,合并时整体重生成,该冲突类别结构性消失。\n2. **散文保持手写**:Class 列、判定依据、findings log、豁免记录留在文档——它们是承重判断(反向钉分不清「刻意 wire 地板」与「没做完」,只有 Class 列能),且全天只发生过一次冲突、还是有意义的(no door / no gate 词汇互斥)。\n3. **闸门职责反转**:从「验证手写数字与 AST 一致」改为「验证生成物新鲜 + 每条散文行有对应生成行」。双向闸(#4852 反向钉)语义保留。\n4. 先证红:改完后手动篡改生成物一处、删散文一行,两向各红一次再信绿。\n\n## 排期约束\n\n**批 17(#4001 component)与批 18(#5070)落地之后、data/ 波次(批 20-22)派发之前必落**——data/ 三批会同样密集地锤 data/ 段,手术晚于它们就白做一半。#5072(postureOf 把 `strictObject(...).passthrough()` 读成 strict)可顺带修,同一把尺。\n\n关联:#4852(AST 尺与双向闸)、#4001(战役主单,7 例记录在其台账散文)、#5072、CLAUDE.md 的 releases/ 禁令(同病同方)。"
+}

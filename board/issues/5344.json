@@ -1,0 +1,35 @@
+{
+  "number": 5344,
+  "kind": "pull_request",
+  "title": "fix(ci): 下游 job 改用显式状态函数,`filter` 失败不再静默跳过七个核心闸门 (#4928)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T23:59:10Z",
+  "updated_at": "2026-08-05T00:31:23Z",
+  "closed_at": "2026-08-05T00:31:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T00:31:22Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5344",
+  "body": "Fixes #4928\n\n## 改了什么\n\n`ci.yml` 的 7 个下游 job 原本都是 `if: needs.filter.outputs.core == 'true'` 这个形状。`if:` 里不出现状态函数时,GitHub 会隐式包一层 `success()`,于是 `filter` 一旦失败(checkout 抖动、`dorny/paths-filter` 故障、10 分钟超时),七个 job 会被一起跳过 —— 而 skipped 在分支保护里算通过。结果是零测试运行、全绿可合、没有任何红色信号。\n\n七处统一改成「只有过滤器**明确说 false** 才跳」,每个 job 保留自己的输出名:\n\n| job | 输出名 | 新条件 |\n|:--|:--|:--|\n| `test` | `core` | `!cancelled() && needs.filter.outputs.core != 'false'` |\n| `temporal-conformance` | `core` | 同上 |\n| `dogfood` | `core` | 同上 |\n| `dogfood-verify` | `core` | 同上 |\n| `build-core` | `core` | 同上 |\n| `build-docs` | `docs` | `... needs.filter.outputs.docs != 'false'` |\n| `console-pin` | `console` | `... needs.filter.outputs.console != 'false'` |\n\n这与 `filter` 自身 outputs 上 `|| 'true'` 的取舍完全一致 —— 存疑就全跑。作者意图本来就写在代码里了,只是那半只覆盖「输出值缺失」,没覆盖「job 整体失败」。\n\n## 真值表:只有一个状态改变了行为\n\n`filter` 的每种结局,旧条件 vs 新条件(模拟脚本按 GitHub 文档语义实现,两种「失败 job 的 outputs 是什么」的读法都跑了):\n\n| 状态 | `outputs.core` | 旧 | 新 |\n|:--|:--|:--|:--|\n| S1 `filter` 成功,核心路径有改动 | `'true'` | RUN | RUN |\n| S2 `filter` 成功,核心路径没改动 | `'false'` | SKIP | SKIP |\n| **S3 `filter` 失败(本 issue)** | `''` 或 `'true'` | **SKIP** | **RUN** |\n| S4 run 被取消(supersession) | `''` | SKIP | SKIP |\n| S5 merge_group(过滤步骤被跳过) | `'true'` | RUN | RUN |\n\n**只有 S3 变了**,其余四个状态逐字节同行为 —— 这是共享基础设施改动该有的爆炸半径。\n\nS3 那一行同时说明了为什么这个写法是稳的:「失败 job 的 outputs」有两种读法(null/空串,或者 `|| 'true'` 照常渲染),新条件在**两种读法下都跑**(`'' != 'false'` 与 `'true' != 'false'` 都为真);而旧条件在**两种读法下都跳**,因为隐式 `success()` 压过一切。修法不依赖于这个语义细节的判定结果。\n\n`!cancelled()` 只排挤隐式 `success()`,不改变取消语义:真正的 run 级取消(`cancel-in-progress`)仍然跳过,即 #3668 的 run-lifecycle 论证原样保留。超时的 job 结论是 `failure` 而非 `cancelled`,所以 issue 点名的第三种失败模式也被 S3 覆盖。\n\nrepo 内已有同形状的生产先例:`release.yml:342` 的 `docker` job 正是靠 `!cancelled() && needs.release.outputs.published == 'true'` 在上游 job 失败后仍然执行(#4900)。\n\n## 另一半:聚合闸门\n\nissue 自己的分析指出,`case \"$result\" in success|skipped|cancelled)` 分不清「路径过滤器说没碰核心代码」和「过滤器自己炸了」。只修 `if:` 会把这半个洞留着。\n\n`test-gate` 与 `dogfood-gate` 因此把 `filter` 纳入 `needs`,并在某条腿是 `skipped` 而 `filter` **未成功**时判红。这条分支在新 `if:` 下不可达 —— 留作**不变量的常驻断言**,因为它守的失败模式是静默的,而那七行 `if:` 距离被人手滑改回去只有一次编辑。`cancelled` 两侧仍然放行,理由与 `dogfood-gate` 里已有的那段一致。\n\n`build-core` / `build-docs` / `console-pin` / `temporal-conformance` 背后没有聚合闸门(它们自己的 name 就是必需检查),所以对这四个来说 `if:` 就是全部的修复。\n\n## 验证\n\nCI 配置没法靠跑本地测试套件证明,所以做了三件能真做的:\n\n**1. `actionlint` 1.7.7,改前改后都零发现**\n\n```\n### BASELINE (origin/main ci.yml) ###   baseline exit=0\n### CHANGED (this branch)      ###   changed  exit=0\n```\n\n绿色不是空转 —— 反向对照:故意把 `docs` 拼成 `doc`、把 `test-gate` 的 `needs` 去掉 `filter`,actionlint 立刻两条都点名:\n\n```\nci.yml:321:67: property \"filter\" is not defined in object type {test: {outputs: {}; result: string}} [expression]\nci.yml:998:29: property \"doc\" is not defined in object type {console: string; core: string; docs: string} [expression]\nnegative-control exit=1\n```\n\n也就是说它确实在逐条类型检查这些表达式:七处 `if:` 引用的输出名真的存在于 `filter` 的 outputs 上,两个闸门的 `needs.filter.result` 真的有 `needs:` 撑着。\n\n**2. YAML 解析 + job 图**\n\n`python3 yaml.safe_load` 通过,10 个 job 全部还在,`needs` / `if` 逐条 dump 核对,无环。\n\n**3. 两个闸门的 shell 脚本按真实结果状态跑遍**\n\n从 YAML 里抽出 `run:` 原文,替换表达式后交给真 bash 执行(不是重写一份等价逻辑)。`test-gate` 跑了 4×4 全交叉:\n\n```\ntest.result  filter.result  exit\nskipped      success        0      Test Core gate satisfied (skipped).\nskipped      failure        1      ::error::Test Core shards were skipped while the filter job did not succeed …\nskipped      cancelled      0      Test Core gate satisfied (skipped).\ncancelled    failure        0      Test Core gate satisfied (cancelled).\nfailure      success        1      ::error::Test Core shards did not pass (aggregate result: failure)\n```\n\n`dogfood-gate` 同样,并确认它不会短路 —— 一腿 pass 一腿 error 时两行都打出来且整体 exit 1。\n\n其余门禁:`check-nul-bytes` OK(5379 个文件),`check-changeset-fixed` OK,`check-changeset-no-major` exit 0,控制字符自查 `grep -naP` 零命中。\n\n## changeset\n\nCI-only,不发布任何包,所以用了仓库既有的**空 frontmatter** 写法(与 `ci-cache-tier1-optimizations.md` / `agents-releases-freeze-merge-queue.md` 同款)—— 这是 `Check Changeset` 明确认可的「本 PR 不发布任何东西」声明,门禁照常绿。\n\n## 并发核查\n\nOperational note 8:重跑 `git log --oneline origin/main -- .github/workflows/ci.yml`,最新仍是认领时那个 `b8503183c`(与本单无关),期间无人改动 `ci.yml`,不存在静默 revert 的风险。\n\n## 派生\n\n`#4928` 正文提到的「静态扫出来」那条规则拆成了 #5343 单独立单,没有塞进本 PR:落地它需要处理 `publish-smoke.yml:98` 这个唯一存量违规,而那里的 `resolve` job 没有 `|| 'true'` 兜底、`ref` 也由它算出,「存疑就全跑」会导致 checkout 落到错的 ref 跑一趟 45 分钟的 job —— 属于那个 workflow 自己的取舍,不该由本 PR 顺手拍板。#5343 里写了完整审计表和验收条件(含「输入缺失必须大声失败」的 #4690 约束)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01FTszibd6C8sUCCZnM4VcrL\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01FTszibd6C8sUCCZnM4VcrL)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 4921,
+  "kind": "pull_request",
+  "title": "fix(tooling): 文档审计范围改为从目录派生,清单与磁盘不一致时判红 (#4851)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T16:18:38Z",
+  "updated_at": "2026-08-03T16:35:01Z",
+  "closed_at": "2026-08-03T16:35:00Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T16:35:00Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4921",
+  "body": "Fixes #4851\n\n## 实情先行:议题说的是「11 条 objectos 路径」,实测烂得更彻底\n\n议题正文的写法本身就是本单要防的东西,所以我没有信它,而是从仓库现状重新测量:\n\n| | 数量 | 说明 |\n|:--|--:|:--|\n| 清单条目 | **146** | 不是文件头注释里写的 147 |\n| 指向 objectos/* 的死条目 | **10** | 不是 11(#4781 已删掉 `runtime-capabilities.mdx`) |\n| 全部死条目 | **16** | 除 objectos 那 10 条,还有 `ai/chatbot-integration`、`deployment/cloud-artifact-api`、`getting-started/cli`、`getting-started/validating-metadata`、`permissions/roles`、`ui/role-based-interfaces` |\n| 磁盘上存在但**根本不在清单里**的文档 | **48** | 含 `protocol/kernel/**` 全部 9 页、整个 `content/docs/capabilities/` 目录、`releases/v12`–`v17` 等 |\n| 实际手写文档总数 | **178** | |\n\n也就是说:一次打印 `FULL audit (no args.docs given)` 的运行,实际审的是 **178 篇里的 130 篇**。\n\n议题只问了第一个方向(死条目),而 **第二个方向(漏列)烂得多三倍**,并且没有任何人问起过 —— 这正是「手写清单」的性质:它两个方向同时腐烂,且两个方向都不出声。\n\n## 为什么这 16 条会烂,以及为什么烂了两个月没人知道\n\n清单头上原本写着「Keep in sync with `node scripts/docs-audit/affected-docs.mjs --all`」—— 一句**没有任何东西检查的承诺**。目录改名(`protocol/objectos/` → `protocol/kernel/`)是一次纯 `content/**` 的改动,不触发任何与该清单相关的门禁,清单就地失效。\n\n失效之后没有任何信号,是因为**审计 agent 拿到一条不存在的路径,读不到文件,返回 `fixCount: 0`** —— 在运行摘要里,这和「这篇审过了,没问题」**长得一模一样**。#4781(`runtime-capabilities.mdx` 整页教一个 #3605 已删的 schema)和 #4817(`http-protocol.mdx` 把 dispatcher 响应挂在 `/api/v1/discovery` 名下)两个真实失准就是这样在绿色的 full audit 底下活了约两个月。\n\n## 清单能不能派生?能 —— 但不能在运行时派生\n\n先回答议题里那个更根本的问题。答案分两半,分界线是**工作流脚本的执行环境**:\n\n- **内容上完全可派生**:审计范围就是 `content/docs/**/*.mdx` 减去 `references/`,没有任何人工挑选。这个定义已经存在于 `affected-docs.mjs --all`。\n- **位置上不可派生**:工作流脚本跑在一个 `node:vm` 上下文里,全局只有 `log`/`phase`/`console`/`budget`/定时器,加上 `agent`/`parallel`/`pipeline`/`workflow`/`args`,并且 `codeGeneration` 关闭 —— **没有 `require`、没有 `import`、没有文件系统、没有 `eval`**。所以脚本既无法自己遍历 `content/docs/`,也无法去读一个 JSON 产物。清单必须内联。\n\n结论:**在生成时派生**。清单改为一段**生成产物**,只是恰好住在一个手写文件里:\n\n```bash\nnode scripts/docs-audit/check-audit-scope.mjs --write   # 从文件系统重新生成\npnpm check:docs-audit-scope                             # CI 门禁:两个方向都比\n```\n\n派生源刻意**复用 `affected-docs.mjs --all`**(子进程调用)而不是再写一遍目录遍历 —— 「手写文档」只能有一个定义;第二次遍历就是下一个会漂移的东西。\n\n## 新校验的双向证明\n\n**绿(当前分支状态)**\n```\n$ node scripts/docs-audit/check-audit-scope.mjs\n✓ docs-accuracy-audit scope is in sync with content/docs/: 178 hand-written doc(s).\nexit=0\n```\n\n**红 #1 —— 把一条路径改回改名前的写法**\n```\n$ node scripts/docs-audit/check-audit-scope.mjs\n✗ .claude/workflows/docs-accuracy-audit.js: ALL_HANDWRITTEN has drifted from content/docs/.\n\n  1 listed path(s) do not exist — an audit agent pointed at one reads\n  nothing and reports \"0 fixes\", which in the run summary is indistinguishable\n  from a doc that was checked and found accurate:\n    - content/docs/protocol/objectos/http-protocol.mdx\n\n  1 hand-written doc(s) exist but are not listed — a run that calls\n  itself a \"FULL audit\" silently skips every one of them:\n    + content/docs/protocol/kernel/http-protocol.mdx\n\n  Fix: node scripts/docs-audit/check-audit-scope.mjs --write\nexit=1\n```\n\n**红 #2 —— 在磁盘上真的把目录改名回去(即 #4851 的原始机制本身)**\n```\n$ git mv content/docs/protocol/kernel content/docs/protocol/objectos\n$ node scripts/docs-audit/check-audit-scope.mjs\n✗ … 9 listed path(s) do not exist:\n    - content/docs/protocol/kernel/config-resolution.mdx\n    - content/docs/protocol/kernel/error-handling.mdx\n    … (9 条全部点名)\nexit=1\n```\n\n**红 #3 —— 把生成标记删掉(门禁找不到自己的审查对象)**\n```\n✗ .claude/workflows/docs-accuracy-audit.js: could not find the generated scope block.\n  Expected a region delimited by \"// < generated:docs-audit-scope >\" and \"// < /generated:docs-audit-scope >\".\n  … do NOT hand-maintain the list.\nexit=1\n```\n\n**红 #4 —— 手工从清单里删掉一条(清单本身没有死条目,只是漏列)**\n```\n✗ … 1 hand-written doc(s) exist but are not listed:\n    + content/docs/index.mdx\nexit=1\n```\n\n**恢复后重新判绿**,`git status` 干净。四种红都不是「跑完了报个漂亮的绿」,而是点名到具体条目。\n\n## CI 门禁只看得见默认清单 —— 所以另外补了两张网\n\n`args.docs` 是这个工作流最常见的调用方式(`affected-docs.mjs` 的输出直接传进来),而**没有任何 CI 门禁能看见调用方传了什么**。一条坏路径在那里失败的方式,和 #4851 里那份烂清单**完全一样**。\n\n1. **启动前置校验(Scope Preflight)**:解析出 `DOCS` 之后、进入昂贵的 pipeline 之前,先派一个 agent 机械地 `ls` 每一条路径,任何一条解析不到就 `throw` 并点名。这一步必须走 agent,因为 VM 没有文件系统 —— 也正因如此它是「报告」而不是「测量」,所以它自己的算术要被核对:返回的路径必须与 scope **不重不漏地一一对应**,对不上就按「前置校验失败」处理,而不是当成通过。(自检本身没人检 = #4868。)\n2. **真实读取路径上的 `docExists`**:每个审计 agent 现在必须报告它到底有没有打开成文件,任何一条 `false` 都让整轮 `throw`。前置校验和真正读文件的不是同一条调用路径,而 #4868 的教训正是:**跑在别处的自检,证明不了真实路径上的任何事**。\n\n于是三层各管一段:门禁管默认清单,前置校验管调用方的清单,真实读取路径两个都复核。\n\n## 扫到 `protocol/kernel` 之后有没有发现真实失准\n\n按 PM 要求**不顺手修**,只如实报告。我这边**跑不了那个 LLM 工作流**(Workflow 工具不在我的工具集里,且 9 页 ≈ 18 个 agent),所以做的是一轮**机械抽查**,不能替代真正的审计:\n\n- 9 页里 `HOUSE_FACTS` 词表(`os studio` / `client.ai.chat` / `/_studio` / `AUTH_SECRET` / `objectstack-ai/spec` / …)**零命中**;\n- 页面里出现的 `@objectstack/*` 包名逐一对照 workspace,3 处不存在的(`@objectstack/service-ai`、`@objectstack/ui`、`@objectstack/testing`)**都带着显式的 \"proposed / target / 不存在\" 说明**,不是失准;`@objectstack/service-ai` 那条更是与 `packages/spec/src/system/core-services.zod.ts:142` 逐字相符;\n- `objectos` 残留:0。\n\n**结论:机械抽查未发现新的失准。** 这不等于那 9 页干净 —— 真正的实现级审计还没跑过,建议合并后按正常流程跑一轮 scoped audit。\n\n## 顺带发现(已按 Prime Directive #10 立单,未在本 PR 修)\n\n**#4920** —— 审计工作流的交付物是**就地改写 mdx**,而它的范围包含 `content/docs/releases/**`,与 AGENTS.md「releases 是 release-owned,禁止在代码 PR 中编辑」直接冲突。这不是本 PR 引入的(旧清单里已有 3 页 releases),但派生后从 3 页变成 9 页,第一次显眼。修它等于在本仓引入第二套「手写文档」定义,是需要维护者拍板的口径决定,故立单不改。\n\n## 共享文件\n\n本 PR 触到两个本仓最热的冲突点,均为**新增一行/一步**,无改写:\n\n- `package.json`:新增 `check:docs-audit-scope`(合并 `main` 时与 #4915 在相邻行冲突过,已保留对方的 `--self-test` 改动);\n- `.github/workflows/lint.yml`:在 `lint` job 里新增一步。放这里是刻意的 —— **会打破这份清单的改动是一次文档改名**,`packages/**` 的 paths filter 会让门禁恰好对自己的失效模式失明(#4890 那一族)。\n\n## 验证\n\n```\n$ pnpm check:docs-audit-scope\n✓ affected-docs self-test: 32 cases pass.\n✓ check-audit-scope self-test: 13 cases pass.\n✓ docs-accuracy-audit scope is in sync with content/docs/: 178 hand-written doc(s).\n\n$ pnpm lint      # eslint . --no-inline-config,2990 文件(含 .claude/workflows/*.js)\nexit=0\n\n$ pnpm check:doc-authoring\n✓ doc authoring guard: 219 files clean.\n```\n\n新增的 `--self-test` 13 条用例是密封的(不依赖仓库状态),覆盖:标记缺失必须 throw、手写形态的数组必须 throw、渲染/解析往返、以及**差异的两个方向各自单独钉住**(议题只问了 `dead`,而 `unlisted` 才是三倍的洞)。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018iARDqtrhQgz6fVHDeDkbQ)_"
+}

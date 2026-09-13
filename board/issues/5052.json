@@ -1,0 +1,35 @@
+{
+  "number": 5052,
+  "kind": "pull_request",
+  "title": "ci(deps): OSV 批次 2026-08 —— undici 7.29.0 / hono 4.12.34 / fast-uri 3.1.5,把 main 上永远红的共享门禁修绿 (#5032)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T01:05:35Z",
+  "updated_at": "2026-08-04T01:34:33Z",
+  "closed_at": "2026-08-04T01:34:32Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-04T01:34:32Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5052",
+  "body": "Fixes objectstack-ai/objectstack#5032\n\n## 这批公告是什么\n\n8 条公告(2 High、6 Medium)命中 `origin/main` lockfile 里已解析的 4 个 package@version,**每一条都给出了修复版本**,所以走升级、不走豁免:\n\n| 公告 | CVSS | package | 原解析版本 | 修复版本 |\n|:---|---:|:---|:---|:---|\n| [GHSA-7p8r-x3mc-p8w7](https://osv.dev/GHSA-7p8r-x3mc-p8w7) | 7.5 | `fast-uri` | 3.1.4 | **3.1.5** |\n| [GHSA-8j4g-w8fx-2239](https://osv.dev/GHSA-8j4g-w8fx-2239) | 5.3 | `hono` | 4.12.32 | **4.12.34** |\n| [GHSA-8j4g-w8fx-2239](https://osv.dev/GHSA-8j4g-w8fx-2239) | 5.3 | `hono` | 4.12.33 | **4.12.34** |\n| [GHSA-4cwx-7wf7-3272](https://osv.dev/GHSA-4cwx-7wf7-3272) | 7.4 | `undici` | 7.28.0 | **7.29.0** |\n| [GHSA-8xcm-r25x-g524](https://osv.dev/GHSA-8xcm-r25x-g524) | 4.8 | `undici` | 7.28.0 | **7.29.0** |\n| [GHSA-jr45-8vmc-qm54](https://osv.dev/GHSA-jr45-8vmc-qm54) | 5.9 | `undici` | 7.28.0 | **7.29.0** |\n| [GHSA-m8rv-5g2x-5cg5](https://osv.dev/GHSA-m8rv-5g2x-5cg5) | 4.2 | `undici` | 7.28.0 | **7.29.0** |\n| [GHSA-v3r7-h72x-cjcm](https://osv.dev/GHSA-v3r7-h72x-cjcm) | 4.8 | `undici` | 7.28.0 | **7.29.0** |\n\n`Validate Package Dependencies` 的 OSV-Scanner step 直接扫 `pnpm-lock.yaml`,命中即 exit 1。**红在 main 自己身上**,于是每个碰 manifest / lockfile 的 PR 都白背一条红(#5027 上实测,那个 PR 的 lockfile 增量只有三行、没解析出任何新包)。永远红的门禁比没有门禁更糟:下一个真的引入了脆弱依赖的 PR,在列表里长得和其它 PR 一模一样。\n\n## 三个包各自的改法\n\n**`undici` —— 又一次踩中 #4945 那个坑。** 原有的 pin(`undici@>=7.23.0 <7.28.0` → `^7.28.0`,当初为 GHSA-vmh5-mc38-953g 加的)恰好停在 7.28.0,而这 5 条新公告影响的正是 7.28.0;开区间上界不再覆盖它自己钉出来的版本,override 就在那儿空转。所以**区间上界与 target 必须一起移动**,抬到 `<7.29.0` / `^7.29.0` —— 和 brace-expansion 5.0.8 → 5.0.9(#4961)是同一形状,我在 `pnpm-workspace.yaml` 的注释里把这个复发陷阱写明了。纯传递依赖(`@vscode/vsce` → `cheerio`),而 `@ai-sdk/provider-utils` 本来就解析 7.29.0,所以两份 dedupe 成一份;`jsdom` 的 undici 8.9.0 在 selector 之外,未受影响。\n\n**`fast-uri` —— 纯传递依赖**,经 `ajv@8.20.0`(声明 `^3.0.1`)进来,下游是 `@modelcontextprotocol/sdk` / `@objectstack/objectql` / `secretlint` / `table`。一条 `fast-uri@<3.1.5` → `^3.1.5` 覆盖全部。\n\n**`hono` —— 本批唯一不是纯传递的一个**,也是这个 changeset 会发版的原因。两个版本同时在树上:4.12.32 来自我们自己的包,4.12.33 由 `@modelcontextprotocol/sdk` 拉入。override 负责搬动传递的那份,**声明范围同步抬到 `^4.12.34`**(`plugin-hono-server` 的 dependency,加上 `@objectstack/hono` 与 `plugin-auth` 的 devDependency)—— overrides 不随已发布包出厂,声明范围如果留在旧值,下游装到的就是 CI 从未跑过的版本,这正是 `check-override-consistency.mjs` 存在的理由(它现在覆盖 2 条声明,绿)。\n\n`@objectstack/hono` 的 **peer 范围刻意保持宽松的 `^4.12.8`**:peer 说的是\"这个 adapter 能配合哪个宿主 hono 工作\",宿主自己钉了旧版就由宿主拥有那份副本;收窄它在本单里修不好任何东西,只会砍掉兼容性。\n\n## 验证 —— 用 workflow 钉住的同一个 scanner\n\n本容器 egress 拦 `api.osv.dev`,故按 #4961 的做法用真实二进制 + 离线库(`osv-scanner_linux_amd64` v2.3.8,与 workflow 的 action v2.3.8 同版本):\n\n修复前(与 issue 里贴的 CI 输出逐字一致):\n\n```\nScanned .../pnpm-lock.yaml file and found 1502 packages\nTotal 4 packages affected by 8 known vulnerabilities (0 Critical, 2 High, 6 Medium, 0 Low, 0 Unknown) from 1 ecosystem.\n8 vulnerabilities can be fixed.\nEXIT=1\n```\n\n修复后(已含 #5036 落地的 `osv-scanner.toml`,且该文件**零豁免** —— 绿是真升级换来的,不是被过滤掉的):\n\n```\nScanned .../pnpm-lock.yaml file and found 1500 packages\nLoaded filter from: /home/user/objectstack-issue-5032/osv-scanner.toml\nLoaded npm local db from /root/.cache/osv-scanner/npm/all.zip\n\nNo issues found\nEXIT=0\n```\n\n该 job 的其余 step 全部照原样本地跑过(含 #5036 新增的那条):\n\n```\npnpm install --frozen-lockfile --prefer-offline   → Done in 3s\nnode scripts/check-changeset-fixed.mjs            → ✓ fixed group 与 69 个 public 包同步\nnode scripts/check-override-consistency.mjs       → ✓ 2 published-manifest declaration(s) … 全部解析到 override target\nnode scripts/check-osv-exemptions.mjs --self-test → ✓ self-test passed\nnode scripts/check-osv-exemptions.mjs             → ✓ osv-scanner.toml holds zero OSV exemptions\n```\n\n`pnpm why` 前后对照:\n\n| package | before | after |\n|:---|:---|:---|\n| `hono` | `Found 2 versions`(4.12.32 我们的包 / 4.12.33 经 MCP SDK) | `Found 1 version` → 4.12.34 |\n| `fast-uri` | `Found 1 version` → 3.1.4 | `Found 1 version` → 3.1.5 |\n| `undici` | 7.28.0(cheerio)、7.29.0(ai-sdk)、8.9.0(jsdom) | **7.28.0 消失**,cheerio 与 ai-sdk 并到 7.29.0;jsdom 8.9.0 不动 |\n\n构建与受影响包的测试(全部在共享 verify 锁内、限堆跑,已 merge 当前 main 后重跑一遍):\n\n```\npnpm build --concurrency=2   → Tasks: 71 successful, 71 total   (exit 0)\npnpm --filter {plugin-hono-server,hono,plugin-auth,client,mcp,connector-mcp,objectql} test → exit 0\n    plugin-hono-server  13 files / 150 tests passed\n    plugin-auth         29 files / 658 tests passed\n    hono(adapter)        2 files /  73 tests passed\n    client              17 files / 222 tests passed\n    mcp                  8 files /  83 tests passed\n    connector-mcp        3 files /  23 tests passed\n    objectql           113 files / 1793 tests passed\npnpm --filter <同上> typecheck → exit 0\n```\n\n## 范围\n\n严格限于 #5032 列的这 8 条。#4965(**无修复版本**的公告该怎么表达)是另一个议题,刚由 #5036 落地了 `osv-scanner.toml` 的三条约定 —— 本批每条都有修复版,按那份约定的原话就该\"take the fix\",所以本 PR 不新增任何 `[[IgnoredVulns]]`。改动面:`pnpm-workspace.yaml` + 3 个 manifest 的 hono 范围 + `pnpm-lock.yaml` + 1 个 changeset。`packages/spec/**`、`metadata-protocol/src/protocol.ts`、`content/docs/releases/` 零改动。\n\n## 一处需要维护者知情的撞车\n\n本单有两条认领评论(00:39:44 本 session `session_01NrmBxj8rK2uGCnh9aipjwX`,00:40:04 另一 session `session_018iARDqtrhQgz6fVHDeDkbQ` 的分支 `claude/issue-osv-fast-uri-hono-undici`)。按 AGENTS.md「认领评论时间戳先者优先」的判据由本 session 实施;推送前再查一次,`origin` 上不存在该分支、也没有针对这批公告的其它 PR。若那边已有更完整的在飞改动,请直接关掉本 PR —— lockfile 是全仓最易冲突的单文件,两份并行改动比任何一份都糟。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01NrmBxj8rK2uGCnh9aipjwX)_"
+}

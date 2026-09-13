@@ -1,0 +1,37 @@
+{
+  "number": 4952,
+  "kind": "issue",
+  "title": "超时守卫「armed 之后扔掉」还剩两处生产实例(另有两处用 unref 代替回收)—— #4813 / #4875 的清仓",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T17:03:54Z",
+  "updated_at": "2026-08-03T18:57:30Z",
+  "closed_at": "2026-08-03T18:57:30Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4952",
+  "body": "发现自 #4875 的实现过程(PR #4950)。**未认领。** 与 #4813、#4875 是同一种形状的剩余实例。\n\n#4813(PR #4874,`kernel.ts` 的 init/start)和 #4875(PR #4950,`health-monitor.ts` 的健康检查)\n各修掉一处。修 #4875 时顺手扫了仓里所有 `Promise.race` + `setTimeout` 的守卫点,剩下这些:\n\n## A. 真·漏(守卫 armed 后既不 clear 也不 unref)\n\n**A1. `packages/services/service-automation/src/engine.ts:4296` `executeWithTimeout()`**\n\n```ts\n    private executeWithTimeout(\n        promise: Promise< NodeExecutionResult >,\n        timeoutMs: number,\n        nodeId: string,\n    ): Promise< NodeExecutionResult > {\n        return Promise.race([\n            promise,\n            new Promise< NodeExecutionResult >((_, reject) =>\n                setTimeout(() => reject(new Error(`Node '${nodeId}' timed out after ${timeoutMs}ms`)), timeoutMs),\n            ),\n        ]);\n    }\n```\n\n调用点在 `:3921`,**每个流程节点一根**。这是三处里最值得修的:节点执行是热路径,漏的量级随\n流程复杂度和触发频率线性增长,而且和 #4875 一样会把一次性进程(`os` CLI 里跑到 flow 的路径)\n按 `timeoutMs` 钉住。\n\n**A2. `packages/core/src/hot-reload.ts:275`** —— 插件 `destroy()` 的 shutdown 守卫:\n\n```ts\n        const shutdownPromise = plugin.destroy();\n        const timeoutPromise = new Promise((_, reject) => {\n          setTimeout(() => reject(new Error('Shutdown timeout')), config.shutdownTimeout);\n        });\n\n        await Promise.race([shutdownPromise, timeoutPromise]);\n```\n\n与 #4813 修掉的两处一字不差。热重载路径今天调用不多,但漏法相同。\n\n## B. 用 `unref()` 代替回收(需要一次判定,不一定是 bug)\n\n**B1. `packages/core/src/kernel.ts:430` `shutdown()`** —— PR #4874 的 changeset 已点名这处\n用的是 `unref()`,并写明为什么 `unref()` 在 init/start 那两处是错的:unref'd 的守卫不再钉住\n事件循环的同时**也不再是一个守卫** —— 若 hook 永不 settle 且没有别的东西撑着事件循环,Node\n会在定时器触发前退出,超时被静默吞掉。shutdown 是不是同一回事需要判一次:那里的语义可能是\n「进程反正要退了,吞掉也无所谓」,也可能同样应该改成 `finally { clearTimeout }`。\n\n**B2. `packages/objectql/src/engine.ts:2971` `checkDriversHealth()`** —— 显式 `unref()`,\n注释写着「Never hold the event loop open for a probe」。同样是 B1 的判定题:一个被静默吞掉的\n探针超时会让 `checkHealth` 挂死时**永远不返回**,而不是报超时。\n\n## 已经是对的(留档,免得下次重扫)\n\n- `packages/objectql/src/hook-wrappers.ts:236` —— `finally { clearTimeout }` ✅\n- `packages/runtime/src/app-plugin.ts:1159` —— race 后 `clearTimeout(timer)` ✅\n- `packages/services/service-job/src/run-with-policy.ts:50` —— `.finally(() => clearTimeout(timer))` ✅\n- `packages/plugins/driver-mongodb/src/test-mongod.ts:72` —— `finally { clearTimeout }` ✅\n\n## 建议\n\nA1/A2 直接按 #4874 的同形 helper 收编(`try { await Promise.race(...) } finally { clearTimeout(guard) }`),\n回归测试照 PR #4950 的三条写:赢下 race 不留 ref'd 定时器 / 多轮不累积(fake timers 计数,能识破\n`unref()` 式假修复)/ 真挂住时超时照常上报。B1/B2 需要维护者先判语义,再决定是否改。\n\n拆成一个 issue 而不是四个,是因为四处共用同一条判据和同一个修法;如果 B 组的判定结论是「保持\n`unref()`」,建议在那两处补一行注释指向 #4813 的理由,免得下一个扫仓的人再提一次。\n"
+}

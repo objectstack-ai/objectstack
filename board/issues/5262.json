@@ -1,0 +1,34 @@
+{
+  "number": 5262,
+  "kind": "issue",
+  "title": "普查:plugin-auth 之外还有 6 处把被降级的 OS_MULTI_ORG_ENABLED 当「是不是多组织」在读 —— 只设 OS_TENANCY_POSTURE 的部署会静默走错分支",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T13:15:44Z",
+  "updated_at": "2026-08-04T17:11:24Z",
+  "closed_at": "2026-08-04T17:11:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5262",
+  "body": "#5233 修的是 `plugin-auth` 里的两个站点(org-create 闸门 + `/auth/config` 的 fallback)。那个 issue 同时要求「普查其它读该布尔当作『是不是多组织』的站点」。**普查做完了,列在这里;#5233 的 PR 一处都没改**(文件面被限定在 `packages/plugins/plugin-auth/**` + `packages/types` 的一条注释),所以单独归档。\n\n## 共同的缺陷形状\n\nADR-0105 D1 把 `OS_MULTI_ORG_ENABLED` 降级成 `resolveTenancyPosture()` 的**回落输入**,`OS_TENANCY_POSTURE` 才是权威 knob。于是任何用 `resolveMultiOrgEnabled()` 回答「本部署是不是多组织」的站点,在一台**只设权威 knob**(`OS_TENANCY_POSTURE=isolated|group`,遗留布尔不设)的部署上都会读到 `false`,走单组织分支 —— 而 `serve.ts` 挂的是完整的组织墙。已知同形状前案:cloud#1020、#5233。\n\n正确读法是 `postureEnforcesWall(resolveTenancyPosture())`(`@objectstack/spec/security`),或在 kernel 内读 `tenancy` 服务。\n\n## 站点清单(按后果排序,行号以本 issue 建档时的 main 为准,按内容核对)\n\n| # | 站点 | 现在做什么 | 只设 posture 时的后果 |\n|---|---|---|---|\n| 1 | `packages/objectql/src/registry.ts` `SchemaRegistry` 构造函数(`this.multiTenant = resolveMultiOrgEnabled()`) | 决定是否自动注入多租户系统字段 | `multiTenant=false` → 组织墙要用的列/注入按单租户走,而 SecurityPlugin 那边 posture 是 `isolated`。**两层对同一事实的口径分叉,优先级最高** |\n| 2 | `packages/plugins/plugin-dev/src/dev-plugin.ts`(`const multiTenant = resolveMultiOrgEnabled()`) | 决定是否加载企业 `@objectstack/organizations` | 只设 posture 的 dev 栈**根本不加载** OrganizationsPlugin → 直接掉进 ADR-0093 D5 降级态 |\n| 3 | `packages/runtime/src/app-plugin.ts` seeder(`const multiTenant = resolveMultiOrgEnabled()`) | 多租户下跳过 inline seed,交给 per-org replay | 有墙部署仍然 inline seed,写出一批 NULL-org 行(注释自己说了这正是要避免的) |\n| 4 | `packages/runtime/src/app-plugin.ts` `registerHotReloadSeeder`(`if (resolveMultiOrgEnabled()) return;`) | 多租户下不装热重载 seeder | 同上,有墙部署装上了本不该装的 seeder |\n| 5 | `packages/plugins/driver-sql/src/sql-driver.ts` `isMultiTenantMode()` | 门控 tenant-audit 告警 | 有墙部署收不到 tenant-audit 告警。**另外它把结果缓存进 `_multiTenantMode`**,即 AGENTS.md「启动期登记表读数不要记成判决」那一条的形状 |\n| 6 | `packages/cli/src/commands/verify.ts`(`flags['multi-tenant'] \\|\\| resolveMultiOrgEnabled()`) | verify 跑不跑多租户套件 | 只设 posture 的部署上 `os verify` 静默跳过多租户校验 |\n\n另有 `packages/cloud-connection/src/marketplace-install-local-plugin.ts` 两处,需要各自判一下是「问 posture」还是「真的就想要那个遗留输入」。\n\n## 边界\n\n`resolveTenancyPosture()` 自己的回落**必须原样保留** —— 它是遗留布尔唯一正当的消费者,back-compat 全靠它。同理,任何刻意要回显「操作者到底打了什么」的报告面(banner、诊断)读遗留布尔是对的,这个清单不包括它们。\n\n`packages/types/src/env.ts` 上那句「every site … MUST call this」的注释已在 #5233 里订正为反向指引(明确写了别拿它当闸门),所以新代码不会再被它带偏;上面这 6 处是注释订正**之前**写下的存量。\n\n不指派 —— 按 Prime Directive #10 归档。建议一处一处改并各自带测试,别打成一个大 PR:1 和 2 后果最重,值得先做。\n\n出处:#5233 的开发(会话 `session_015W6nhsDrz6zWQc8je12a1t`)。\n"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 4729,
+  "kind": "issue",
+  "title": "[metadata-protocol] seed-loader 的「LOUD FAILURE」注释要求 error,代码却记 warn —— 第二类降级(#4632 规则),本轮因包冻结未修",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "repo:objectstack"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T00:40:16Z",
+  "updated_at": "2026-08-03T20:03:55Z",
+  "closed_at": "2026-08-03T20:03:55Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4729",
+  "body": "发现于 #4632(降级日志级别规则 + 盘点)。`packages/metadata-protocol/**` 本轮被冻结(#4556 正在改写入路径),因此**只记录不修**,按 PM 约束单开此单。\n\n## 现象\n\n`packages/metadata-protocol/src/seed-loader.ts`(约 953–966 行,pass-2 延迟引用回填):\n\n```ts\n} catch (err: any) {\n  // LOUD FAILURE (framework#2805): the target resolved but the\n  // back-fill WRITE failed (a transient error that outlasted the\n  // retry budget, a validation veto, …). The reference stays NULL —\n  // the very corruption pass 2 exists to prevent — so this must be a\n  // reported, counted error, never a silent warning. Swallowing it\n  // returned `success: true` / `totalErrored: 0` over a load that\n  // left a circular relationship half-written.\n  this.logger.warn('[SeedLoader] Failed to write deferred reference', {\n    object: deferred.objectName,\n    field: deferred.field,\n    error: err?.message,\n  });\n  this.recordDeferredError(deferred, allResults, allErrors, ...);\n}\n```\n\n**注释与代码直接矛盾**:注释明确写 \"this must be a reported, counted error, **never a silent warning**\",紧跟着的调用却是 `logger.warn`。\n\n## 为什么这是 #4632 的第二类降级\n\n按 #4632 的判定问句 ——「降级后系统对外表现是否仍然『正常』,而声称已持久化的东西实际没有落盘?」—— 答案是**是**,而且注释自己已经把后果说得比我更清楚:回填写入失败 ⇒ 引用字段停在 `NULL` ⇒ 循环关系半写入。这就是「记录看起来种下去了、关系实际没落盘」。\n\n一点公允之处:紧随其后的 `recordDeferredError(...)` 确实把它计入 `allErrors`,所以**不是**完全静默 —— 结果对象里数得到。但**日志行本身**是这次 seed 在控制台唯一可见的痕迹,`warn` 级别正是 #4420 里没人读的那一级。计数与日志级别应当一致。\n\n## 期望\n\n- 把该行提到 `error`,文案按 #4632 的要求说清**后果**(`<object>.<field>` 的引用停在 NULL,循环关系半写入)与**修复动作**(修掉下面的写入错误后重跑 seed;或检查 validation veto);\n- 顺带核对同文件其它 `this.logger.warn` 是否也属第二类 —— 至少 `writeRecoveringSummary`(约 1056 行,roll-up summary 重算耗尽重试)是明确的第一类:注释说明记录**已经写入**、只是 summary 值可能陈旧,`warn` 是对的,**不要**一起提。\n\n## 机械检查说明\n\n#4632 的 `pnpm check:durability-log-level` **不会**自动发现这一处 —— 该 gate 靠一份显式的「持久化关键操作」词表(`DURABILITY_CRITICAL_CALLEES`)判定,故意做窄以避免误报,而这里的写入走的是通用 `SEED_OPTIONS` 写路径,没有可识别的调用名。这是该 gate 已在脚本头部声明的局限(能防已知缝隙回退,不能发现新缝隙)。修本单时如果能给这条写路径一个稳定的命名入口,可一并加进词表。\n\n## 参考\n\n- #4632(规则 + gate)、#4460(点状修复范本)、#4420(事故)、#2805(注释里引用的原始 LOUD FAILURE 要求)"
+}

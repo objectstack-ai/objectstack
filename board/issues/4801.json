@@ -1,0 +1,37 @@
+{
+  "number": 4801,
+  "kind": "issue",
+  "title": "CLI 启动 banner 的 `Tenancy:` 读布尔 multiTenant，与 ADR-0105 D1 的权威 knob `OS_TENANCY_POSTURE` 对不上——isolated 会显示成 single-tenant",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "xuyushun441-sys"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T07:32:31Z",
+  "updated_at": "2026-08-03T19:23:43Z",
+  "closed_at": "2026-08-03T19:23:43Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4801",
+  "body": "跨分片移交：`Part of objectstack-ai/cloud#1020`（由 cloud 分片 PM 转入，本条**不含**那边正在等维护者拍板的许可闸门决策——banner 这半块无论决策怎么落都该修）。\n\n## 现象\n\n`packages/cli/src/utils/format.ts:412-414`：\n\n```ts\nif (opts.multiTenant !== undefined) {\n  console.log(chalk.dim(`  Tenancy: ${opts.multiTenant ? 'multi-tenant' : 'single-tenant'}`));\n}\n```\n\n打印的是布尔 `multiTenant`（即 `OS_MULTI_ORG_ENABLED` 那条线），而 ADR-0105 D1 之后权威 knob 是 `OS_TENANCY_POSTURE`，布尔只是它 unset 时的回退（`packages/types/src/env.ts` `resolveTenancyPosture()`）。serve 的实际接线读的是 `resolveTenancyPosture()`。\n\n## 实测证据（来自 cloud#1020 的 boot 日志，真实 CLI 非 mock）\n\n设 `OS_TENANCY_POSTURE=isolated`、未设 `OS_LICENSE_KEY` 启动，一屏之内同时出现：\n\n```\n  Tenancy: single-tenant          ← banner 读布尔\n  Plugins: 40 loaded\n           …, Organizations, …    ← 企业多组织运行时真的挂上了\n```\n\nbanner 说单租户，实际跑的是 isolated + 真墙。\n\n## 为什么值得修\n\n诊断信息一旦不可信，之后每一次排障都要多绕一圈——cloud#1020 就是靠人工比对插件表才发现 banner 在撒谎的。这不是显示美化，是**声明与执行不一致**（ADR-0049 那一类）在诊断面的实例。\n\n## 修法\n\n`Tenancy:` 改为读 `resolveTenancyPosture()` 的结果并直接打印 posture 名（`single` / `isolated` / `group` …），而不是把它压扁成一个布尔。调用点需要把 posture 传进 `opts`（今天传的是 `multiTenant` 布尔），是否保留布尔字段作为兼容项由实施者判断；若保留，两者不一致时应以 posture 为准。\n\n建议附一条断言 banner 输出与 `resolveTenancyPosture()` 一致的测试，否则下一个 knob 演进时同样会漂。\n\n## 关联\n\n- 来源：objectstack-ai/cloud#1020（EE 许可闸门只钉布尔，`OS_TENANCY_POSTURE=isolated` 可绕过）\n- ADR-0105 D1（posture 取代布尔）\n\n未指派——记录的 finding，谁开工谁认领。"
+}

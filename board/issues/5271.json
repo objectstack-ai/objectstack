@@ -1,0 +1,38 @@
+{
+  "number": 5271,
+  "kind": "issue",
+  "title": "[spec] `api` 补进 DEFAULT_METADATA_TYPE_REGISTRY 与 BUILTIN_METADATA_TYPE_SCHEMAS(#5206 第 1 步,拆单)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T13:47:02Z",
+  "updated_at": "2026-08-05T02:32:05Z",
+  "closed_at": "2026-08-05T02:32:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5271",
+  "body": "Part of #5206(按跨域拆单规则移交 spec 车道;第 2 步 publishPackageDrafts 门由 engine 车道在父单执行,两步互不依赖)。\n\n## 要做什么(#5206 第 1 步原文范围)\n\n1. `packages/spec/src/kernel/metadata-plugin.zod.ts` 的 `DEFAULT_METADATA_TYPE_REGISTRY` 补 `{ type: 'api', … }` 条目(旗标取值需按 E7/ADR-0121 语义定:runtime 直写是否允许 —— 参照 #5086 刚落地的 code-only 门语义);\n2. `packages/spec/src/kernel/metadata-type-schemas.ts` 的 `BUILTIN_METADATA_TYPE_SCHEMAS` 补 `api: ApiEndpointSchema`;\n3. 由此 `saveMetaItem` 既有 422 路径自动生效,`getMetaTypes()` 可枚举、Studio 表单可渲染 —— 一处修,两面得。\n\n## ⚠️ 非纯加性,带证据闸\n\n给此前不校验的类型接上 schema,会让越界存量行在下次写入时被 422 拒绝。**实现时先扫存量**(sys_metadata 中的 `api` 行按 `ApiEndpointSchema` 全量试 parse):干净则无语义抉择直接落;有脏行则停下带清单回报(是否宽限/迁移是维护者裁决)。\n\n## 关联\n\n#5206(父单,含全部代码证据)、#5189/PR #5203(装载期兜底与门函数导出,已合)、#5086/PR #5263(saveMetaItem 的 code-only 门,已合 —— 注意与其 hoist 出的授权块协同)、ADR-0121。\n\n_由 engine/services 车道 PM 拆单移交(会话 `session_01Pbu27iNUfQCHeuS551Rqo7`);labeling ≠ claiming,spec 车道经队列标签接手。_"
+}

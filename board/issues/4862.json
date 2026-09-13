@@ -1,0 +1,33 @@
+{
+  "number": 4862,
+  "kind": "issue",
+  "title": "record-change flow trigger 在 predicate 批量写上:`previous` 不绑定、`record` 只是裸 payload —— 官方文档与 showcase 正在教的 transition 起始条件在批量写上不成立",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "needs-user-decision"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T10:35:24Z",
+  "updated_at": "2026-08-04T15:11:26Z",
+  "closed_at": "2026-08-04T15:11:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4862",
+  "body": "## 来源\n\n#4775(hook condition fail loud)落地过程中,为核实 B1 错误文案能不能把「改用 record-change flow trigger」写成出路而做的实测。**核实结论是不能**,#4775 因此没有在错误信息里指这条路(维护者定的硬防线:不允许在修 `declared ≠ enforced` 的 PR 里于错误信息中再造一个同类缺陷)。核实过程本身暴露出这条独立缺陷,按 PD #10 单独记录。\n\n与 #4800 相邻但不是同一件事:#4800 是「批量写上 **hook** 要不要按行触发」的设计卡;本条是 **record-change flow trigger 这一层**,在批量写上交付给 flow 起始条件的上下文本身就是残缺的。\n\n## 事实(实测,非推断)\n\n对一次 predicate 批量写(`multi: true`,无 `id`):\n\n1. **引擎只在单 id 分支赋值 `previous`。** `packages/objectql/src/engine.ts:4888` 的 `if (priorRecord) hookContext.previous = ...`,而 `priorRecord` 仅在 `if (hookContext.input.id)` 分支内被 fetch;批量分支始终为 `null`。\n2. **plugin-audit 的 `__previous` 兜底也不覆盖批量。** `packages/plugins/plugin-audit/src/audit-writers.ts:425`:`if (!id) return; // bulk update/delete — too costly to snapshot every row here`。\n3. **flow trigger 读的正是这两个。** `packages/triggers/trigger-record-change/src/record-change-trigger.ts:291-293`:\n   `const previous = (ctx.previous ...) ?? ((ctx as ...).__previous ?? undefined);`\n   → 批量写上 `previous` 恒为 `undefined`。\n4. **`record` 在批量写上也不是行。** 引擎批量分支 `result = await driver.updateMany(...)` 返回的是**受影响行数**(number)。`buildContext` 的 `after && typeof after === 'object'` 因此为 false,`record` 退化成 `inputDoc` —— 即**本次写入的裸 payload**,而不是任何一行的状态。\n5. hook 只触发**一次**,所以即使匹配了 N 行,flow 也只被评估一次。\n\n## 为什么这条要单独立单\n\n这不是一个理论缺口 —— **官方文档与 showcase 正在教的写法,恰好就落在这一格上**:\n\n- `content/docs/data-modeling/formulas.mdx` 与 `skills/objectstack-formula/SKILL.md` §5 教的 transition 写法是 `previous.x != ... && record.x == ...`;\n- `examples/app-showcase/src/automation/flows/index.ts` 里至少 10 条 flow 的起始条件是 `status == \"done\" && previous.status != \"done\"` 这个形状(第 39/317/424/671/780/896/976/1064/1148/1463 行等)。\n\n对一次批量更新(例如把一批 task 一次性置为 done),这些 flow 的起始条件面对的是「`previous` 未绑定 + `record` 只有 payload」:该触发的自动化**要么不触发,要么按一条并不存在的『记录』触发一次**,而且没有任何东西会说出来。审计/通知类 flow 的缺失是不可见的缺失。\n\n与 #4775 的对照值得注意:hook `condition` 在这一格现在会**响亮地失败**(B1 专门诊断);而 flow trigger 这一格**依然是静默的**。同一个平台对同一个物理限制给了两种相反的处理。\n\n## 可选方向(未拍板,留给维护者)\n\n- **A. 按行触发** —— flow trigger 在批量写上取回匹配行集,按行构造上下文。语义最正确,与 #4800 的 A 方向同源(两者应一起定,否则又是两套规则);代价是批量写多一次 read + N 次 flow 评估。\n- **B. 响亮拒绝** —— 起始条件引用 `previous`(或引用 payload 未设置的字段)时,批量写直接失败,文案与 #4775 的 B1 同源。一致性最好,但把 flow 的声明错误变成写入失败,爆炸半径与 #4775 承担过的是同一类。\n- **C. 显式跳过 + 可观测** —— 保持不触发,但按 error 级别上报并计数,至少让缺失可见。成本最低,但保留了「声明了却没兑现」。\n\n倾向 **A**,并与 #4800 一起定方向;若 A 成本过高,B 比 C 更符合本仓已经选定的「declared = enforced」路线。\n\n## 关联\n\n- 起因:#4775(已实现,PR #4861)—— 其 B1 错误文案刻意**不**指向 flow trigger,依据即本条\n- 相邻:#4800(批量写 hook 按行触发的设计卡)\n- 文档面:#4814(SKILL.md §5 绑定作用域表)"
+}

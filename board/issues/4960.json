@@ -1,0 +1,36 @@
+{
+  "number": 4960,
+  "kind": "pull_request",
+  "title": "ci: stall guard 自证仍会触发,并修复从未真正执行的 SIGKILL 升级 (#4250)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T17:14:47Z",
+  "updated_at": "2026-08-03T20:08:07Z",
+  "closed_at": "2026-08-03T20:08:06Z",
+  "closed_by": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "merged_at": "2026-08-03T20:08:06Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4960",
+  "body": "Fixes #4250\n\n## 先核实前提:本单描述的症状已被覆盖,但覆盖它的那个机制本身没人验证\n\n先读了仓内四个既有 changeset(`test-core-stall-guard`、`stall-guard-rollout`、`temporal-conformance-stall-guard`、`stall-forensics-and-kernel-test-hygiene`)和 `.github/workflows/ci.yml` 里 `Test Core` 的现状。结论:\n\n**议题原始症状(日志冻结、job 一直 `in_progress`、等人工取消)现在不会再发生。** `Test Core` 已分片、job timeout 收到 30 分钟,两个测试步骤都走 `run-with-stall-guard.mjs`:静默超过 10 分钟就判定停摆,打印最后一行、做取证、杀进程组、退出 75。议题里「建议的最小动作」(给一个显著短于兜底值的 timeout,把停摆变成一条明确的红)不仅已落地,而且被取证机制超额完成 —— 第四、五次停摆就是靠它在 10 分钟内给出带包名的红,几分钟内定位到 `driver-mongodb` 的无上界下载等待(#4322)。\n\n**所以本 PR 不是再加一个 timeout。** 剩下没被覆盖的是另一类东西:\n\n**`run-with-stall-guard.mjs` 现在被五个 workflow 的六个 job 依赖,但它只在真实停摆时才执行到有意思的那条路径** —— 一个大约 5-10% 命中率、且本机无法复现的事件。两次真实停摆之间,没有任何东西断言它还有效。\n\n一个从没被触发过的 guard,和一个不存在的 guard 无法区分。一次重构可以悄悄解除 CI 唯一的停摆探测器,而所有 run 依旧全绿 —— 下一次真的卡住时,我们会退回到本议题描述的原始状态,外加一个「已经修好了」的错误信念。\n\n## 交付物一:`--self-test`,用合成停摆驱动 guard 自身\n\n`pnpm check:stall-guard`(接入 `lint.yml`,约 50 秒,不构建、不联网)。四类人为构造的卡死:\n\n| 合成用例 | 断言 |\n|---|---|\n| idle 挂起(promise 永不 settle) | 判 exit 75、判词引用最后一行、分类为 `idle`、SIGUSR2 取到栈 |\n| 同步自旋挂起(事件循环被阻塞) | 判 exit 75、分类为 `ON-CPU`、**没有报告**这一沉默被当成判词 |\n| 一行输出都没有的挂起 | 仍被抓到(计时从 spawn 起算,不是从首行输出起算) |\n| 截获 SIGTERM 的后代 | exit 75、后代没有活过 guard、SIGKILL 升级被点名 |\n\n反方向同样断言:健康的 run 退出 0、失败的套件透传自己的退出码(取代 `| tee` + `pipefail` 的那条不变量,回归了的话每个失败套件都会报绿)、持续输出永远不会被误判成停摆。\n\n## 交付物二:一个真实缺陷 —— SIGKILL 升级从来没有执行过\n\n写 harness 的过程中定位到的,不是猜的。证据链:\n\n原来的形状是 `killGroup` 先发 SIGTERM,再挂一个 `setTimeout(SIGKILL, 10s).unref()`,并在直接子进程的 exit 回调里 `process.exit()`。但**直接子进程(`pnpm` → `turbo`,或 `sh`)对 SIGTERM 立即死亡**,于是 guard 先退出了,那个定时器永远不会 fire。任何截获 SIGTERM 的**后代**都会活过 guard。\n\n复现(合成一个 `sh` 父进程 + 一个截获 SIGTERM 的 node 后代):\n\n```\nGUARD EXIT=75 (guard has now exited)\n  t=2s: pid 13702 STILL ALIVE state=S\n  t=15s: pid 13702 STILL ALIVE state=S\nRESULT: descendant survived the guard -- SIGKILL escalation never ran\n```\n\n这不是假想的形状:`ObjectKernelConfig.gracefulShutdown` 默认 true,在每个测试 boot 的 kernel 里装的正是这样一个 handler —— 本议题自己的根因排查数到**一次 objectql 套件运行 boot 47 个 kernel、截获 48 次 SIGTERM**。也就是说,最可能泄漏 worker 的停摆,恰好就是这个 guard 存在的理由。\n\n修法:guard 现在自己拥有停摆后的收尾**和**退出时机 —— SIGTERM 之后轮询 `/proc` 等进程组真正清空,对赖着不走的进程 SIGKILL,并在日志里点名它们(一个卡死**且**拒绝 SIGTERM 的进程,本身就是关于这次卡死的线索)。\n\n## 怎么验证这些断言真的会红:变异测试\n\n一个只会绿的自检,和它要防的问题是同一个毛病。所以对 guard 逐个注入缺陷,确认 self-test 会红:\n\n| 注入的缺陷 | 结果 |\n|---|---|\n| M1 恢复修复前的收尾(子进程一死就退出) | exit=1,2 条红(后代仍在运行 / SIGKILL 升级没被报告) |\n| M2 永不判定停摆 | exit=1,15 条红 |\n| M3 吞掉子进程退出码 | exit=1,`failing suite propagates its exit code — got 0` |\n| M4 输出不再重置计时 | exit=1,`steady output past the stall window is not a stall — exit 75` |\n| M5 子进程不独立进程组 | exit=1,5 条红 |\n| M6 关掉取证 | exit=1,4 条红 |\n\n变异测试当场抓到我自己的两个 bug,都已修:\n\n1. **self-test 里 `sleep` 的 TDZ**,绿色路径从没走到过那一行;\n2. **更要紧的一个** —— runGuard 收尾时顺手按 marker 清理残留进程,把 M1 要找的那个泄漏**擦掉了**(M1 一度只红 1 条而不是 2 条)。清理因此改到全部用例判完之后才做一次。这条教训写进了代码注释。\n\n顺带:M2(探测失效)最初让 self-test **自己挂死了** —— 在验证工具里复现了本议题的病。每个用例因此加了上界超时,超时就是一条带标签的红,并按 marker(本次 `mkdtemp` 路径,只匹配自己起的进程)回收残留;不按进程名杀,以免误伤并行 agent 的套件。\n\n## 验证\n\n- `pnpm check:stall-guard`:21/21 通过\n- ESLint(`--no-inline-config`)干净\n- `lint.yml` / `ci.yml` YAML 解析通过\n- 生产路径回归:用 CI 的完整参数(`--stall-minutes 10` 加 `--report-dir` 加 `NODE_OPTIONS`)包住真实套件 `@objectstack/lint`,966 通过 / 4 skipped,guard 退出 0,无误判;下游 `check-test-completeness.mjs` 读该 log 仍 `OK (970 declared, all 970 accounted for)`\n\n## 范围与共享文件\n\n改动三个文件加一个 changeset。**共享文件请注意**:`.github/workflows/lint.yml`(在既有 guard 步骤末尾新增一步)和根 `package.json`(在 `check:*` 块末尾新增一行)—— 同批有 agent 在 `packages/lint`、`packages/cli` 以及一个可能触及 `lint.yml` 的替身闸门脚本上作业。没有动 `ci.yml`。\n\n**这是取证与自检的加固,不是对原始三次停摆的根因修复。** 那三次的根因仍未知,#4341 的策略(等下一次真实停摆自己交出栈)依旧成立;本 PR 保证的是那套取证在被需要的时候确实还在工作。\n"
+}
