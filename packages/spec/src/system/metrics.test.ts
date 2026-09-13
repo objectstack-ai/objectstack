@@ -562,7 +562,12 @@ describe('metrics window and period lengths carry their unit (#15679)', () => {
     expect(MetricExportConfigSchema.parse({ type: 'prometheus', batch: { size: 500 } })
       .batch?.size).toBe(500);
     // The error-budget burn-rate `window` names no unit in its describe, so it is
-    // outside the gate population entirely and keeps its bare name.
+    // inside the gate's census and outside its verdict, and keeps its bare name.
+    // ⚠️ Its unit is not missing, only unpublished: the JSDoc above it says
+    // seconds. `check:duration-unit-keys` was ruled to refuse that divergence
+    // (2026-09-07, decision batch #65, on #15939), so this key is a rename
+    // waiting on that gate change — this pin asserts the CURRENT bare spelling
+    // and must be re-read, not trusted, when the rename lands.
     const slo = ServiceLevelObjectiveSchema.parse({
       ...sloBase,
       period: { type: 'rolling', durationSeconds: 2592000 },
