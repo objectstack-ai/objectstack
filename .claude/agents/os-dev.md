@@ -48,14 +48,13 @@ model: opus
    - 它们进 PR `## Acceptance notes`,报告 `out_of_scope_findings` 记 `noted, not filed: …`,席位 ACCEPT 读。
    - 写 `noted, not filed` 前先答哪一个 PR 或人会碰到这个文件;答不出就写明「承接者:无」。
    - 先搜再立:关键词 + 文件路径扫 open issues;并行 dev 同一小时立的卡只有这一搜能看见。
-   - 通道先探后选:同容器先测一条 repo-scoped REST 读;通 ⇒ 走 REST 列表端点 + 本地 grep。
+   - GitHub 写一律走 REST 代理(`curl` 带环境 `GITHUB_TOKEN`),署名恒 App 的 `claude[bot]`。
+   - 写预算四笔:`git push`、一次 `POST /pulls`(draft)、`POST /issues/{n}/labels`、`os-dev-report` 评论。
+   - ⛔ 不用任何 MCP GitHub 写工具:用户账号署名,封号即隐;⛔ 不枚举板面、不宽词搜。
+   - 卡与线程只走 payload 档(公开仓单卡网页内嵌 JSON,拼写住 platform-readings)或单卡 REST 读。
+   - 三类发现附查重词进报告交席位代立,dev 不 `POST /issues`;预算外零写,⛔ 不 `PATCH` 正文。
    - 通道对照表见 `.claude/skills/pm-dispatch/references/rest-channel.md`,其 ✓ 按座位实测。
-   - 403 ⇒ 改用一次定向 MCP `search_issues`,并在报告申报换道。
-   - 空结果要同会话已知必中、与主张同主体同失效形态的控制词答了命中才算读数。
-   - ⛔ 哪条通道都不宽表扫(全量翻页 `list_issues`、宽词搜):定向一击是上限。
-   - 大宗读走零配额档:公开仓单卡网页内嵌 JSON payload 载原始 body + 全评论。
-   - 其拼写与边界住 platform-readings;它只覆盖单卡读,⛔ 不拿它做 search。
-   - 卡与评论先走 git 与 payload 档,MCP 留给写 + 那一次查重;报告记 MCP 调用计数(`mcp_calls`)。
+   - 报告记 `api_writes`(次数 + 端点清单)与 `mcp_calls`(MCP GitHub 调用计数),席位对照预算核验。
    - 立不成 ⇒ 发现连同缘由写进报告交 PM 代立;⛔ 不查重硬立与静默弃报同为禁形。
    - PM 的去重读数随派发词下发,当既有事实用,只复核其后增量,⛔ 不重跑。
    - 归挂不散落:落在已排队 issue 完成范围内的发现,立成它的 sub-issue(自动进派发池)。
@@ -70,7 +69,7 @@ model: opus
 5. **Contract-first。** 修复若诱使你在消费端加宽容回退(`??` 别名、宽松解析),缺陷在上游。
    - 去生产者或 spec 修,或返回 `needs_decision`。
 6. **issue 正文是线索,不是规格。** 动手前对 `origin/main` 核验其前提。
-   - 点名的文件可能移走、归因可能错、能力可能已存在。
+   - 文件可能移走、归因可能错、能力可能已存在;零命中配同主体同失效形态的控制词。
    - 带 `premise_still_valid: false`、附证据、无 PR 的报告是一等交付物;证伪 issue 是好运行。
    - 把 PR 硬压在死前提上才是失败形态。
 
@@ -92,7 +91,7 @@ model: opus
 5. ⛔ 永不按进程名杀(`pkill -f` 会带走并行 agent 的运行);记下你启动的 PID,只对它操作。
 6. **整条流水线在前台跑。** build 与 test 都是本任务的步骤:阻塞运行、读真实输出、继续。
    - 宿主事实:你启动的后台作业、watcher、你请求的通知都不会唤醒你;结束一轮就是结束。
-   - 有可展示内容即 commit、push 并开 draft PR,不等验证结束;验证结果到达即补进正文。
+   - 有可展示内容即 commit、push 并开 draft PR,不等验证结束;验证结果到达即写进报告。
    - 带具名缺口的 PR 是交付进行中的常态,未读到的判决写 `NOT MEASURED: <family>, reason: …`。
    - 平台事实:容器把前台命令钉在约 10 分钟上限,超时 SIGTERM 杀掉(`exit 143`)。
    - 上限划定前台里放什么:重活走规则 1 的锁;仓级扫描归 CI(见本地验证范围节)。
@@ -299,7 +298,7 @@ model: opus
 - 其余实测:构建后 grep `files[]` 所列路径找符号,带正控;符号零命中、正控命中 ⇒ 不发布。
 - 本仓库:标签是真实机制,打标签是你的步骤、不是 CI 的,PR 一开出就打。
 - 写入首选加法端点(REST `POST .../issues/<n>/labels`,不碰已有标签);可达性按会话探,先探后用。
-- 被拒 ⇒ 走回退:MCP 读现值→并集→整组写→必做对比式读回,并申报换道。
+- 被拒 ⇒ 停下报 `blocked` 点名端点与状态码,⛔ 不换 MCP 写道;写后必做对比式读回。
 - 读回 diff 现集对 union(读集, 目标):union 有而回读缺 = 被剥的并发标签,重挂并写进报告。
 - 读回只检测剥除防不了,门语义标签被剥恰成绿灯;加法写同样必要不充分。
 - size-labeler 的整组 PUT 会抹掉正确的加法写;收尾一律读回、清单进报告;标签没了就重挂。
@@ -368,10 +367,11 @@ model: opus
   "summary": "what was implemented, 2-4 sentences",
   "tests": "commands run + pass/fail evidence (real output excerpts); ablation: rebuild + on-disk mutation proof",
   "mcp_calls": "<n> — your MCP GitHub call count for the whole run",
+  "api_writes": "<n> — REST proxy writes, each endpoint listed",
   "open_questions": [
     { "question": "…", "options": ["A …", "B …"], "recommendation": "A, because …" }
   ],
-  "out_of_scope_findings": ["filed as #<n>: one-line description", "noted, not filed: one-line observation"]
+  "out_of_scope_findings": ["to file (three classes, dedupe words attached): one-line description", "noted, not filed: one-line observation"]
 }
 ```
 
