@@ -45,6 +45,33 @@ import { judgeHeadlessScreen } from '../screen-input-contract.js';
  *   that parse is what makes the retirement audible to stored metadata.
  */
 
+/**
+ * The `fields[].reference` repeater column of the `screen` designer form: the
+ * object PICKER (that is what `xRef` marks) whose collected value is the target
+ * object's NAME — the same string `FieldSchema.reference` carries.
+ *
+ * Named rather than written inline at its `reference:` key, and the naming is
+ * load-bearing. `check:reference-carrier-shape` classifies the object HOLDING a
+ * `reference` key; here that holder is a JSON-Schema `properties` map, keyed by
+ * property NAME — the same class the gate excludes by shape for a `fields` map
+ * (N1) and for a field-key class map (N3), but a shape its position rules have
+ * no case for. Written inline, the holder resolved under neither reading and
+ * the gate refused to guess (exit 3 — correctly). None of its three site
+ * remedies is spellable here: the holder is not under `fields:`, its own `type`
+ * key holds a sub-schema rather than a string literal, and all twelve of its
+ * keys are `data/Field` authorable keys, so no key can prove it is not a field
+ * definition. A value reached through a name is UNJUDGED by the gate's stated
+ * predicate, which judges LITERALS only. That narrows the gate nowhere else in
+ * the tree; the missing `properties`-map rule is reported to the maintainer
+ * rather than patched from inside this PR.
+ */
+const LOOKUP_TARGET_COLUMN = {
+  type: 'string',
+  title: 'Lookup object',
+  xRef: { kind: 'object' },
+  description: "Object whose records a `lookup` field picks from.",
+};
+
 export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext): void {
     // screen — server-side pass-through (input vars already injected by engine).
     engine.registerNodeExecutor({
@@ -108,7 +135,7 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
                   min: { type: 'number', title: 'Min', description: 'Minimum accepted value (numeric fields). Re-checked when the run resumes, for a submitted value that is a number.' },
                   max: { type: 'number', title: 'Max', description: 'Maximum accepted value (numeric fields). Re-checked when the run resumes, for a submitted value that is a number.' },
                   inlineHelpText: { type: 'string', title: 'Help text', description: 'Help text shown under the input. Unlike the placeholder, it stays readable once the user types.' },
-                  reference: { type: 'string', title: 'Lookup object', xRef: { kind: 'object' }, description: "Object whose records a `lookup` field picks from." },
+                  reference: LOOKUP_TARGET_COLUMN,
                   visibleWhen: { type: 'string', title: 'Visible when', xExpression: 'expression' },
                 },
               },

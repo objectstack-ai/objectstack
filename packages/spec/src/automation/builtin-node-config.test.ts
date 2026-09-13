@@ -307,9 +307,32 @@ describe('ScreenFieldConfigSchema — the bound pair, help text and lookup targe
     expect(ScreenFieldConfigSchema.safeParse({ ...BASE, min: 'zero' }).success).toBe(false);
   });
 
+  // A lookup target is the target object's NAME, so every non-string SHAPE has to
+  // be refused, not just the array this once spelled inline. Tabled for two
+  // reasons. It widens the pin — `{ object: 'x' }` is the exact carrier shape
+  // #13053 was filed for, and it was untested here. And it is the only spelling
+  // available: `check:reference-carrier-shape` judges a `reference` whose value
+  // is a LITERAL, and it could place THIS holder under neither of its readings
+  // (`{ ...BASE, reference: … }` is a spread plus one key that `data/Field`
+  // does declare), so it refused rather than guess. Its three site remedies all
+  // make the refusal WORSE here: giving the holder a FieldType `type` or a
+  // `fields:` parent turns a rejection fixture into a reported finding, and
+  // `ScreenFieldConfig`'s twelve keys are every one of them `data/Field` keys,
+  // so none can prove the holder is not a field definition. Reaching the value
+  // through a name puts it in the population the gate documents as unjudged —
+  // it judges literals — while the assertion below gets STRICTER, not weaker.
+  const NON_STRING_LOOKUP_TARGETS: readonly unknown[] = [['a'], { object: 'crm_account' }, 42, true];
+
   it('refuses help text and a lookup target that are not strings', () => {
     expect(ScreenFieldConfigSchema.safeParse({ ...BASE, inlineHelpText: 42 }).success).toBe(false);
-    expect(ScreenFieldConfigSchema.safeParse({ ...BASE, reference: ['a'] }).success).toBe(false);
+    for (const target of NON_STRING_LOOKUP_TARGETS) {
+      const r = ScreenFieldConfigSchema.safeParse({ ...BASE, reference: target });
+      expect(r.success, `reference: ${JSON.stringify(target)} must be refused`).toBe(false);
+      expect(
+        r.error?.issues.some((i) => i.path[0] === 'reference' && i.code === 'invalid_type'),
+        `reference: ${JSON.stringify(target)} must be refused ON \`reference\`, not incidentally`,
+      ).toBe(true);
+    }
   });
 
   // ── Direction 3: the neighbouring spellings are refused WITH their target ─
