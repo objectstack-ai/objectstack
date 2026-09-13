@@ -111,6 +111,7 @@ import { SYS_USER_IMPORT_UPDATE_FIELDS } from './sys-user-writable-fields.js';
 import {
   applyUserManagerLink,
   type SetUserManagerDeps,
+  type SetUserManagerRefusal,
   type SetUserManagerRefusalReason,
 } from './admin-set-user-manager.js';
 
@@ -774,7 +775,24 @@ export async function runAdminImportUsers(
         // is the same derivation `POST /admin/set-user-manager` runs, and its
         // refusal — status, code and the `reason` discriminator — is reported
         // as it came back.
-        const refusal = await applyUserManagerLink(managerDeps, r.id, managerId);
+        let refusal: SetUserManagerRefusal | null;
+        try {
+          refusal = await applyUserManagerLink(managerDeps, r.id, managerId);
+        } catch (e) {
+          // Every identity in this batch is ALREADY written by now. An engine
+          // fault while linking them must not turn a 200 that created N users
+          // into a 500 reporting none of them — that is exactly the
+          // whole-import failure the ruling refuses. Per row, and loudly.
+          noteManagerFailure(
+            r,
+            'unresolved',
+            'MANAGER_UNRESOLVED',
+            `The manager link could not be written: ${(e as Error)?.message ?? String(e)}. `
+              + 'This row itself landed.',
+          );
+          managerLinks.unresolved++;
+          continue;
+        }
         if (refusal) {
           noteManagerFailure(r, refusal.reason, 'MANAGER_REFUSED', refusal.message);
           managerLinks.refused++;
