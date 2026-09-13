@@ -30,7 +30,7 @@ for both corollaries.
 | `object` | 51 | 0 | 0 | 0 | 1 | 52 |
 | `field` | 90 | 0 | 0 | 1 | 2 | 93 |
 | `flow` | 34 | 0 | 0 | 6 | 0 | 40 |
-| `action` | 43 | 0 | 0 | 3 | 2 | 48 |
+| `action` | 44 | 0 | 0 | 3 | 2 | 49 |
 | `hook` | 19 | 0 | 0 | 3 | 0 | 22 |
 | `permission` | 36 | 0 | 0 | 6 | 0 | 42 |
 | `position` | 12 | 0 | 0 | 0 | 0 | 12 |
@@ -63,4 +63,4 @@ for both corollaries.
 | `batch_endpoints` | 5 | 0 | 0 | 2 | 0 | 7 |
 | `route_generation` | 0 | 0 | 0 | 4 | 0 | 4 |
 | `realtime_subscription` | 0 | 0 | 0 | 6 | 0 | 6 |
-| **total** | **861** | **5** | **1** | **95** | **10** | **972** |
+| **total** | **862** | **5** | **1** | **95** | **10** | **973** |

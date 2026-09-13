@@ -420,7 +420,7 @@ const _warnedDegenerateDerivation = new Set<string>();
  * ## [#17501] Why this tries TWICE, and why only sometimes
  *
  * `/meta/types` served `action` as `{"$schema": "..."}` — an empty schema for a
- * type that accepts 47 keys — because `ActionSchema` is
+ * type that accepts 48 keys — because `ActionSchema` is
  * `lazySchema(() => actionObject().refine(...))`, a `ZodPipe`, and the OUTPUT
  * derivation of a pipe carries no properties. The hand-crafted fallback
  * declared for exactly this case never fired: conversion did not throw, it
