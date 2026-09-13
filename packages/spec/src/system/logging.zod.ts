@@ -23,6 +23,7 @@ import { z } from 'zod';
  * Standard RFC 5424 severity levels (simplified)
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 export const LogLevel = z.enum([
   'debug',
   'info',
@@ -233,6 +234,43 @@ export type FileDestinationConfig = z.input<typeof FileDestinationConfigSchema>;
 export type FileDestinationConfigParsed = z.infer<typeof FileDestinationConfigSchema>;
 
 /**
+ * Prescriptions for the three `HttpDestinationConfig` durations renamed in 17
+ * (#17782, ruling A on #15939 executing #14478).
+ *
+ * They carry NO `os migrate meta --from 17` sentence, because no ADR-0087 D2
+ * conversion covers them: `stack.zod.ts` declares no logging collection and
+ * neither `HttpDestinationConfigSchema` nor `LoggingConfigSchema` is referenced
+ * anywhere in `packages/spec/src` outside this file, so no rehydration seam
+ * replays a conversion over an authored logging document. Naming the command
+ * would promise an affordance that cannot apply.
+ */
+const HTTP_BATCH_FLUSH_INTERVAL_RETIRED =
+  '`HttpDestinationConfig.batch.flushInterval` was renamed to `flushIntervalMs` '
+  + 'in @objectstack/spec 17 — the unit of a duration-shaped number lives in the '
+  + 'key name, not only in the describe prose. Its unit (milliseconds) lived in a '
+  + 'source JSDoc only and the key carried no `.describe()` at all, so the '
+  + 'reference page published a bare 5000. Rename the key to `flushIntervalMs`; '
+  + 'the value (milliseconds) and the 5000 default are unchanged. This is the '
+  + 'batch flush on an HTTP log destination — `LoggingConfig.buffer.flushInterval` '
+  + 'is a different key with its own rename.';
+
+const HTTP_RETRY_INITIAL_DELAY_RETIRED =
+  '`HttpDestinationConfig.retry.initialDelay` was renamed to `initialDelayMs` in '
+  + '@objectstack/spec 17 — the unit of a duration-shaped number lives in the key '
+  + 'name, not only in the describe prose. Its unit (milliseconds) lived in a '
+  + 'source JSDoc only and the key carried no `.describe()` at all, so the '
+  + 'reference page published a bare 1000. Rename the key to `initialDelayMs`; '
+  + 'the value (milliseconds) and the 1000 default are unchanged.';
+
+const HTTP_TIMEOUT_RETIRED =
+  '`HttpDestinationConfig.timeout` was renamed to `timeoutMs` in '
+  + '@objectstack/spec 17 — the unit of a duration-shaped number lives in the key '
+  + 'name, not only in the describe prose. Its unit (milliseconds) lived in a '
+  + 'source JSDoc only and the key carried no `.describe()` at all, so the '
+  + 'reference page published a bare 30000. Rename the key to `timeoutMs`; the '
+  + 'value (milliseconds) and the 30000 default are unchanged.';
+
+/**
  * HTTP Destination Configuration
  */
 export const HttpDestinationConfigSchema = lazySchema(() => z.object({
@@ -273,9 +311,19 @@ export const HttpDestinationConfigSchema = lazySchema(() => z.object({
     maxSize: z.number().int().positive().optional().default(100),
 
     /**
-     * Flush interval in milliseconds
+     * Flush interval in milliseconds.
+     *
+     * Renamed from `flushInterval` (#17782, ruling A on #15939 executing
+     * #14478): the unit lived in this JSDoc only and the key carried no
+     * `.describe()` at all — the text `content/docs/references/**` publishes —
+     * so the reference page showed a bare 5000. Tombstoned rather than deleted
+     * because this nested object is not `.strict()`.
      */
-    flushInterval: z.number().int().positive().optional().default(5000),
+    flushIntervalMs: z.number().int().positive().optional().default(5000)
+      .describe('Flush interval in milliseconds'),
+
+    /** Tombstone for the rename above (#17782, ruling A on #15939). */
+    flushInterval: retiredKey(HTTP_BATCH_FLUSH_INTERVAL_RETIRED),
   }).optional(),
 
   /**
@@ -288,9 +336,19 @@ export const HttpDestinationConfigSchema = lazySchema(() => z.object({
     maxAttempts: z.number().int().positive().optional().default(3),
 
     /**
-     * Initial retry delay in milliseconds
+     * Initial retry delay in milliseconds.
+     *
+     * Renamed from `initialDelay` (#17782, ruling A on #15939 executing
+     * #14478): the unit lived in this JSDoc only and the key carried no
+     * `.describe()` at all, so the reference page showed a bare 1000.
+     * Tombstoned rather than deleted because this nested object is not
+     * `.strict()`.
      */
-    initialDelay: z.number().int().positive().optional().default(1000),
+    initialDelayMs: z.number().int().positive().optional().default(1000)
+      .describe('Initial retry delay in milliseconds'),
+
+    /** Tombstone for the rename above (#17782, ruling A on #15939). */
+    initialDelay: retiredKey(HTTP_RETRY_INITIAL_DELAY_RETIRED),
 
     /**
      * Backoff multiplier
@@ -299,9 +357,18 @@ export const HttpDestinationConfigSchema = lazySchema(() => z.object({
   }).optional(),
 
   /**
-   * Timeout in milliseconds
+   * Timeout in milliseconds.
+   *
+   * Renamed from `timeout` (#17782, ruling A on #15939 executing #14478): the
+   * unit lived in this JSDoc only and the key carried no `.describe()` at all,
+   * so the reference page showed a bare 30000. Tombstoned rather than deleted
+   * because this object is not `.strict()`.
    */
-  timeout: z.number().int().positive().optional().default(30000),
+  timeoutMs: z.number().int().positive().optional().default(30000)
+    .describe('Timeout in milliseconds'),
+
+  /** Tombstone for the rename above (#17782, ruling A on #15939). */
+  timeout: retiredKey(HTTP_TIMEOUT_RETIRED),
 }).describe('HTTP destination configuration'));
 
 export type HttpDestinationConfig = z.input<typeof HttpDestinationConfigSchema>;
@@ -572,6 +639,16 @@ export type StructuredLogEntry = z.input<typeof StructuredLogEntrySchema>;
  * Logging Configuration Schema
  * Main configuration for the logging system
  */
+const LOGGING_BUFFER_FLUSH_INTERVAL_RETIRED =
+  '`LoggingConfig.buffer.flushInterval` was renamed to `flushIntervalMs` in '
+  + '@objectstack/spec 17 — the unit of a duration-shaped number lives in the key '
+  + 'name, not only in the describe prose. Its unit (milliseconds) lived in a '
+  + 'source JSDoc only and the key carried no `.describe()` at all, so the '
+  + 'reference page published a bare 1000. Rename the key to `flushIntervalMs`; '
+  + 'the value (milliseconds) and the 1000 default are unchanged. This is the '
+  + 'in-process log buffer — `HttpDestinationConfig.batch.flushInterval` is a '
+  + 'different key with its own rename.';
+
 export const LoggingConfigSchema = lazySchema(() => z.object({
   /**
    * Configuration name
@@ -667,9 +744,19 @@ export const LoggingConfigSchema = lazySchema(() => z.object({
     size: z.number().int().positive().optional().default(1000),
 
     /**
-     * Flush interval in milliseconds
+     * Flush interval in milliseconds.
+     *
+     * Renamed from `flushInterval` (#17782, ruling A on #15939 executing
+     * #14478): the unit lived in this JSDoc only and the key carried no
+     * `.describe()` at all, so the reference page showed a bare 1000.
+     * Tombstoned rather than deleted because this nested object is not
+     * `.strict()`.
      */
-    flushInterval: z.number().int().positive().optional().default(1000),
+    flushIntervalMs: z.number().int().positive().optional().default(1000)
+      .describe('Flush interval in milliseconds'),
+
+    /** Tombstone for the rename above (#17782, ruling A on #15939). */
+    flushInterval: retiredKey(LOGGING_BUFFER_FLUSH_INTERVAL_RETIRED),
 
     /**
      * Flush on shutdown

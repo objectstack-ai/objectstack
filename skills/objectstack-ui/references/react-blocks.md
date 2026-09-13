@@ -67,7 +67,7 @@ Server-connected object table with toolbar and switchable visualizations (grid/k
 | `onNavigate` | `(recordId, action: 'view' \| 'edit') => void` | callback |  | Called for page-level navigation. |
 | `columns` | `string[] \| object[]` | data | ✓ | Fields to display as columns |
 | `type` | `'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'` | data |  |  |
-| `sort` | `string \| object[]` | data |  |  |
+| `sort` | `object[]` | data |  |  |
 | `searchableFields` | `string[]` | data |  | Fields enabled for search |
 | `userFilters` | `object` | data |  | End-user quick-filter bar: dropdown/toggle fields or tab presets. Omit to let the renderer derive filters from select/boolean fields |
 | `pagination` | `object` | data |  | Pagination configuration |

@@ -56,14 +56,22 @@ answer was a property of the dialect rather than of the data — the shape Prime
   measure never finishes compiling), and the three "cannot answer, do not block" tiers —
   no `sourceFieldMeta`, an unresolvable field, a `relationship.field` path.
 
-## ⚠️ Scope: the DERIVING aggregates. `min` / `max` are still not judged here
+## ⚠️ Scope: the DERIVING aggregates — and see #17560, which closed the other half
+
+> ⚠️ **Superseded within the same release window.** This section was accurate when it was
+> written and is kept as the record of why this change stopped where it did. #17560
+> (director ruling, decision batch #127, 2026-09-13) then judged `min` / `max` too, so at
+> the version that ships this entry **every** pair the table refuses is refused at the
+> compile door. Read that entry beside this one.
 
 `min` / `max` SELECT one of the stored values; `sum` / `avg` DERIVE a number. This is the
 line this package already draws — `measureResultType` branches on exactly that pair of
 aggregates — and the defect is about a derived number, so the deriving aggregates are its
 population.
 
-The `min` / `max` rows stay with **#17513**, and that is measured rather than assumed.
+The `min` / `max` rows stayed with the table-amendment card (then **#17513**, since closed
+as a duplicate of **#17560**, which ruled and landed them), and that is measured rather
+than assumed.
 Enforcing the residual whole was tried on this card: with `min` / `max` × the string
 classes subtracted, **15** cases in `measure-result-type.test.ts` still went red, every
 one of them on `min` × `json` — a pair the table refuses, in no ruling's scope, driven

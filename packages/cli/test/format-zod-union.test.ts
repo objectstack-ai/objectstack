@@ -141,13 +141,32 @@ describe('[#5341] formatZodErrors expands invalid_union branches', () => {
 /**
  * The live specimen, on the surface `os validate` actually parses.
  *
- * `views[].list.sort` is `z.union([z.string(), z.array(<strict sort entry>)])`
- * and the entry declares the #4721 alias `direction → order` — the same tuple
- * under a different word, which is worth a prescription precisely because
- * getting it wrong REVERSES the sort silently. Behind a union, that
- * prescription was produced on every run and delivered on none.
+ * `views[].list.gantt.tooltipFields[]` is
+ * `z.union([z.string(), <strict { field, label } entry>])` and the entry
+ * declares the aliases `name → field` / `fieldName → field` / `text → label` /
+ * `title → label` — the same tuple under a different word, which is worth a
+ * prescription precisely because edit distance cannot reach it and getting it
+ * wrong drops the tooltip field SILENTLY. Behind a union, that prescription is
+ * produced on every run and delivered on none.
+ *
+ * ## ⚠️ Why this specimen moved, and what a future red here means
+ *
+ * It was `views[].list.sort` until #17053 / PR #17914 retired the bare-string
+ * arm on that door. A two-arm union minus one arm is not a union: `sort` folded
+ * to the surviving `z.array(...)` and started emitting that arm's own issues
+ * DIRECTLY — two of them, neither `invalid_union` — so the three assertions
+ * below were pinning a shape the spec no longer produces. Deterministically red
+ * on `main`, on every tree, in both `pull_request` and `merge_group` events.
+ *
+ * ⛔ The fix for that class is NOT to teach these assertions the post-retirement
+ * shape. The guarantee this file holds is that a rejection **behind a union**
+ * reaches the terminal; re-pointing the assertions at a door that is no longer a
+ * union keeps them green while guarding nothing — the exact outcome #5341 was
+ * built to prevent. A retired arm means REPOINT the specimen at a door that is
+ * still a `z.union` with a prescription behind it. The first assertion below
+ * says so in its own failure message, where the next reader will be standing.
  */
-const SORT_ALIAS_STACK = {
+const TOOLTIP_ALIAS_STACK = {
   manifest: { id: 'union_probe', name: 'Union Probe', namespace: 'union_probe', version: '1.0.0', type: 'app' },
   views: [
     {
@@ -156,9 +175,16 @@ const SORT_ALIAS_STACK = {
       list: {
         name: 'union_probe_list',
         label: 'Union Probe',
-        type: 'grid',
+        type: 'gantt',
         columns: ['name'],
-        sort: [{ field: 'name', direction: 'desc' }],
+        gantt: {
+          startDateField: 'start_at',
+          endDateField: 'end_at',
+          titleField: 'name',
+          // `name` is the alias for `field` — what an author reaches for when
+          // naming the field a tooltip row shows.
+          tooltipFields: [{ name: 'owner' }],
+        },
       },
     },
   ],
@@ -199,35 +225,44 @@ describe('[#5341] `os validate` delivers a union branch prescription', () => {
   // runs first. If the stack failed for some unrelated reason the terminal
   // assertion below could pass on the wrong error entirely.
   it('the specimen fails on exactly one issue, and that issue is the union', () => {
-    const result = ObjectStackDefinitionSchema.safeParse(SORT_ALIAS_STACK);
+    const result = ObjectStackDefinitionSchema.safeParse(TOOLTIP_ALIAS_STACK);
     expect(result.success).toBe(false);
     const issues = result.success ? [] : result.error.issues;
-    expect(issues).toHaveLength(1);
+    // ⛔ A red here is a REPOINT, not a retune: see this specimen's docblock.
+    // The message carries the issues the count throws away, so the next reader
+    // can see which door stopped being a union without re-running anything.
+    expect(
+      issues,
+      'The specimen no longer fails AS A UNION — its door was most likely narrowed to a single arm.\n'
+      + '⛔ Do NOT retune these assertions to the shape below: that unguards #5341. Repoint the specimen\n'
+      + 'at a door that is still a `z.union` with a prescription behind it (see this constant\'s docblock).\n'
+      + `Issues actually produced: ${JSON.stringify(issues.map((i) => ({ code: i.code, path: i.path.join('.') })))}`,
+    ).toHaveLength(1);
     expect(issues[0]!.code).toBe('invalid_union');
     // The prescription exists in the payload — it always has. Delivery is the
     // only thing #5341 is about.
-    expect(JSON.stringify(issues[0])).toContain('`direction` → `order`');
+    expect(JSON.stringify(issues[0])).toContain('`name` → `field`');
   });
 
   it('prints the prescription, not a bare `invalid_union: Invalid input`', () => {
-    const { exitCode, output } = runCli('validate', SORT_ALIAS_STACK);
-    expect(exitCode, `os validate accepted a stack with an aliased sort key:\n${output}`).not.toBe(0);
-    expect(output).toContain('views.0.list.sort');
-    expect(output).toContain('`direction` → `order`');
+    const { exitCode, output } = runCli('validate', TOOLTIP_ALIAS_STACK);
+    expect(exitCode, `os validate accepted a stack with an aliased tooltip key:\n${output}`).not.toBe(0);
+    expect(output).toContain('views.0.list.gantt.tooltipFields');
+    expect(output).toContain('`name` → `field`');
   }, 120_000);
 
   it('leaves the `--json` payload exactly as it was — full, and nested', () => {
     // The machine path never had this defect: it passes `error.issues` through,
     // so the branch tree was always on it. Pinned here because the fix is one
     // `console.log` loop away from being "helpfully" moved into the payload.
-    const { exitCode, output } = runCli('validate', SORT_ALIAS_STACK, ['--json']);
+    const { exitCode, output } = runCli('validate', TOOLTIP_ALIAS_STACK, ['--json']);
     expect(exitCode).not.toBe(0);
     const payload = JSON.parse(output.slice(output.indexOf('{')));
     expect(payload.valid).toBe(false);
     expect(payload.errors).toHaveLength(1);
     expect(payload.errors[0].code).toBe('invalid_union');
     // The branch tree, untouched — and NOT flattened into extra `errors[]` rows.
-    expect(JSON.stringify(payload.errors[0].errors)).toContain('`direction` → `order`');
+    expect(JSON.stringify(payload.errors[0].errors)).toContain('`name` → `field`');
   }, 120_000);
 });
 

@@ -60,25 +60,45 @@ schema, not `os validate` / `os lint`, not the analytics service, not the render
 
 ## ⚠️ Scope: the compile leg executes the TEMPORAL rows only
 
+> ⚠️ **Superseded within the same release window.** This section was accurate when it was
+> written and is kept as the record of where the compile leg stopped. Two later cards
+> widened it before any of the three entries shipped, so at the version that compiles this
+> entry the scope below is no longer the platform's: **#16099** judged `sum` / `avg` over
+> every remaining field class (including `sum` over a `percent`), and **#17560** (director
+> ruling, decision batch #127, 2026-09-13) judged `min` / `max` over every class the table
+> refuses. ⇒ Three sentences in this section are false at that version and are corrected
+> where they stand: the string rows are **not** awaiting a table amendment, `sum` over a
+> `percent` does **not** compile as it did before, and `avg` / `sum` over a temporal field
+> are **not** the only pairs whose behaviour changes. Read all three entries together.
+
 The gate judges only a measure whose field is declared `date` / `datetime` /
 `time`; a field of any other class is never handed to the predicate. The
 verdict for the pairs it does judge is the table's — no row is restated — but
 which FIELDS are judged is narrower than the table, on purpose:
 
 - **String rows** (`min` / `max` over `text`, `select`, `lookup`,
-  `autonumber`, …) are **not enforced here**. They are under #16785, **ruled
-  C**: the table itself is to be amended to accept them, because
-  `measureResultType` (#15768) already types those results as `'string'` and
-  pins them end to end. Enforcing them from this card would pre-empt that
-  ruling.
+  `autonumber`, …) are **not enforced here**. ⚠️ This card recorded them as
+  「under #16785, **ruled C** — the table itself is to be amended to accept
+  them」, because `measureResultType` (#15768) already typed those results as
+  `'string'` and pinned them end to end, so enforcing them from here would
+  pre-empt that ruling. **Both halves of that sentence turned out to be
+  wrong.** `16785` resolves to no issue, and decision batch #127 (#17560,
+  2026-09-13) found no ruling C anywhere behind the citation — the one recorded
+  ruling on this table, decision batch #59, refuses the string rows. ⛔ The
+  table is **not** amended; #17560 enforces those rows and retires the
+  `measureResultType` opinion that disagreed with them.
 - **Boolean rows** are not a refusal at all any more: #16685 was ruled A and
   #16750 added `boolean` / `toggle` to `sum` / `avg` / `min` / `max`, so the
   table ACCEPTS them and this gate never judged them.
 - The table's `sum` × `percent` row is likewise **not** executed by this leg;
-  `sum` over a `percent` compiles exactly as it did before.
+  `sum` over a `percent` compiles exactly as it did before. ⚠️ True of this
+  card only — #16099 executes that row in the same release.
 
-⇒ The only pairs whose behaviour changes in this release are `avg` / `sum`
-over a `date` / `datetime` / `time` field. The full-table leg remains #16099's.
+⇒ The only pairs whose behaviour changes **because of this card** are `avg` /
+`sum` over a `date` / `datetime` / `time` field. ⚠️ ⛔ Not a statement about the
+release: the full-table leg is #16099's and landed, and the `min` / `max` leg is
+#17560's and landed, so at the shipping version every pair the table refuses is
+refused at the compile door.
 
 ## FROM → TO
 

@@ -197,7 +197,10 @@ describe('HttpDestinationConfigSchema', () => {
     
     expect(config.url).toBe('https://logs.example.com/v1/logs');
     expect(config.method).toBe('POST');
-    expect(config.timeout).toBe(30000);
+    // `timeout` → `timeoutMs` (#17782, ruling A on #15939 executing #14478).
+    // The 30000 default this pins is unchanged; only the key it is read under
+    // moved, so the pin follows the key rather than being dropped.
+    expect(config.timeoutMs).toBe(30000);
   });
 
   it('should accept authentication', () => {
@@ -218,12 +221,14 @@ describe('HttpDestinationConfigSchema', () => {
       url: 'https://logs.example.com/v1/logs',
       batch: {
         maxSize: 500,
-        flushInterval: 10000,
+        // `batch.flushInterval` → `batch.flushIntervalMs` (#17782, ruling A on
+        // #15939 executing #14478). Same 10000 milliseconds, new key.
+        flushIntervalMs: 10000,
       },
     });
     
     expect(config.batch?.maxSize).toBe(500);
-    expect(config.batch?.flushInterval).toBe(10000);
+    expect(config.batch?.flushIntervalMs).toBe(10000);
   });
 });
 
@@ -468,7 +473,9 @@ describe('LoggingConfigSchema', () => {
       buffer: {
         enabled: true,
         size: 5000,
-        flushInterval: 2000,
+        // `buffer.flushInterval` → `buffer.flushIntervalMs` (#17782, ruling A
+        // on #15939 executing #14478). Same 2000 milliseconds, new key.
+        flushIntervalMs: 2000,
       },
     };
     
@@ -490,5 +497,151 @@ describe('LoggingConfigSchema', () => {
       label: 'Test',
       destinations: [],
     })).toThrow();
+  });
+});
+
+// #15939 ruling A (executing #14478) — the four duration keys on this file that
+// named milliseconds in a source JSDoc and nowhere an author or a reference-page
+// reader could see it: `.describe()` was absent on all four, so
+// `content/docs/references/system/logging.mdx` published a bare number. Each is
+// renamed with the unit in the key and the old spelling left as a `retiredKey`
+// tombstone — none of the four enclosing objects is `.strict()`, so a bare
+// deletion would have stripped the value in silence.
+//
+// `flushInterval` was declared TWICE on this file, in two different defs with
+// two different defaults, so each def is pinned separately below: they are
+// different keys and each carries its own prescription.
+describe('logging duration keys → *Ms (#17782, #15939, #14478)', () => {
+  describe('HttpDestinationConfig.batch.flushInterval → flushIntervalMs', () => {
+    it('REFUSES the retired spelling with a rename naming `flushIntervalMs`', () => {
+      const result = HttpDestinationConfigSchema.safeParse({
+        url: 'https://logs.example.com/v1/logs',
+        batch: { flushInterval: 5000 },
+      });
+      expect(result.success).toBe(false);
+      const issue = result.error!.issues.find((i) => i.path.join('.') === 'batch.flushInterval');
+      expect(issue).toBeDefined();
+      expect(issue!.message).toMatch(
+        /`HttpDestinationConfig\.batch\.flushInterval` was renamed.*Rename the key to `flushIntervalMs`/s,
+      );
+    });
+
+    it('accepts the suffixed key at the magnitude the retired key carried, with the same default', () => {
+      const parsed = HttpDestinationConfigSchema.parse({
+        url: 'https://logs.example.com/v1/logs',
+        batch: { flushIntervalMs: 10000 },
+      });
+      expect(parsed.batch?.flushIntervalMs).toBe(10000);
+      expect(parsed.batch).not.toHaveProperty('flushInterval');
+      expect(
+        HttpDestinationConfigSchema.parse({
+          url: 'https://logs.example.com/v1/logs',
+          batch: {},
+        }).batch?.flushIntervalMs,
+      ).toBe(5000);
+    });
+
+    it('publishes the unit in the describe — the text the reference pages render', () => {
+      const batch = HttpDestinationConfigSchema.shape.batch.unwrap();
+      expect(batch.shape.flushIntervalMs.description).toBe('Flush interval in milliseconds');
+    });
+  });
+
+  describe('HttpDestinationConfig.retry.initialDelay → initialDelayMs', () => {
+    it('REFUSES the retired spelling with a rename naming `initialDelayMs`', () => {
+      const result = HttpDestinationConfigSchema.safeParse({
+        url: 'https://logs.example.com/v1/logs',
+        retry: { initialDelay: 1000 },
+      });
+      expect(result.success).toBe(false);
+      const issue = result.error!.issues.find((i) => i.path.join('.') === 'retry.initialDelay');
+      expect(issue).toBeDefined();
+      expect(issue!.message).toMatch(
+        /`HttpDestinationConfig\.retry\.initialDelay` was renamed.*Rename the key to `initialDelayMs`/s,
+      );
+    });
+
+    it('accepts the suffixed key at the magnitude the retired key carried, with the same default', () => {
+      const parsed = HttpDestinationConfigSchema.parse({
+        url: 'https://logs.example.com/v1/logs',
+        retry: { initialDelayMs: 2500 },
+      });
+      expect(parsed.retry?.initialDelayMs).toBe(2500);
+      expect(parsed.retry).not.toHaveProperty('initialDelay');
+      expect(
+        HttpDestinationConfigSchema.parse({
+          url: 'https://logs.example.com/v1/logs',
+          retry: {},
+        }).retry?.initialDelayMs,
+      ).toBe(1000);
+    });
+
+    it('publishes the unit in the describe — the text the reference pages render', () => {
+      const retry = HttpDestinationConfigSchema.shape.retry.unwrap();
+      expect(retry.shape.initialDelayMs.description).toBe('Initial retry delay in milliseconds');
+    });
+  });
+
+  describe('HttpDestinationConfig.timeout → timeoutMs (the one TOP-LEVEL key of the four)', () => {
+    it('REFUSES the retired spelling with a rename naming `timeoutMs`', () => {
+      const result = HttpDestinationConfigSchema.safeParse({
+        url: 'https://logs.example.com/v1/logs',
+        timeout: 30000,
+      });
+      expect(result.success).toBe(false);
+      const issue = result.error!.issues.find((i) => i.path.join('.') === 'timeout');
+      expect(issue).toBeDefined();
+      expect(issue!.message).toMatch(
+        /`HttpDestinationConfig\.timeout` was renamed.*Rename the key to `timeoutMs`/s,
+      );
+    });
+
+    it('accepts the suffixed key at the magnitude the retired key carried, with the same default', () => {
+      const parsed = HttpDestinationConfigSchema.parse({
+        url: 'https://logs.example.com/v1/logs',
+        timeoutMs: 45000,
+      });
+      expect(parsed.timeoutMs).toBe(45000);
+      expect(parsed).not.toHaveProperty('timeout');
+      expect(
+        HttpDestinationConfigSchema.parse({ url: 'https://logs.example.com/v1/logs' }).timeoutMs,
+      ).toBe(30000);
+    });
+
+    it('publishes the unit in the describe — the text the reference pages render', () => {
+      expect(HttpDestinationConfigSchema.shape.timeoutMs.description)
+        .toBe('Timeout in milliseconds');
+    });
+  });
+
+  describe('LoggingConfig.buffer.flushInterval → flushIntervalMs (a different key from the batch one)', () => {
+    const base = { name: 'app_logging', label: 'App logging', destinations: [] };
+
+    it('REFUSES the retired spelling with a rename naming `flushIntervalMs`', () => {
+      const result = LoggingConfigSchema.safeParse({
+        ...base,
+        buffer: { flushInterval: 1000 },
+      });
+      expect(result.success).toBe(false);
+      const issue = result.error!.issues.find((i) => i.path.join('.') === 'buffer.flushInterval');
+      expect(issue).toBeDefined();
+      expect(issue!.message).toMatch(
+        /`LoggingConfig\.buffer\.flushInterval` was renamed.*Rename the key to `flushIntervalMs`/s,
+      );
+    });
+
+    it('accepts the suffixed key at the magnitude the retired key carried, with its OWN default', () => {
+      const parsed = LoggingConfigSchema.parse({ ...base, buffer: { flushIntervalMs: 2000 } });
+      expect(parsed.buffer?.flushIntervalMs).toBe(2000);
+      expect(parsed.buffer).not.toHaveProperty('flushInterval');
+      // 1000 here, 5000 on `HttpDestinationConfig.batch` — the two same-named
+      // keys never shared a default and do not share one now.
+      expect(LoggingConfigSchema.parse({ ...base, buffer: {} }).buffer?.flushIntervalMs).toBe(1000);
+    });
+
+    it('publishes the unit in the describe — the text the reference pages render', () => {
+      const buffer = LoggingConfigSchema.shape.buffer.unwrap();
+      expect(buffer.shape.flushIntervalMs.description).toBe('Flush interval in milliseconds');
+    });
   });
 });

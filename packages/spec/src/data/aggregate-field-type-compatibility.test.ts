@@ -202,9 +202,12 @@ describe('isAggregateCompatibleWithFieldType — the pairs the card is about', (
     expect(loose(Symbol('count'), 'number')).toBe(false);
   });
 
-  it('records the one override of an existing opinion without changing the row: the string classes', () => {
-    // String classes: min/max refused here; measureResultType (#15768) types
-    // min/max over them as a supported 'string' result. Override recorded.
+  it('the string classes are refused as SETTLED ground — the overridden opinion is retired, not standing beside it', () => {
+    // The row is unchanged and was never in question: batch #59 refused it and
+    // decision batch #127 (#17560) declined to amend it. What moved is the
+    // OTHER declaration — `service-analytics`' `measureResultType` used to type
+    // `min` / `max` over these classes as a supported 'string' result, and that
+    // branch is retired, so this table is no longer overriding a live opinion.
     for (const t of ['text', 'select', 'lookup', 'autonumber']) {
       expect(isAggregateCompatibleWithFieldType('min', t)).toBe(false);
       expect(isAggregateCompatibleWithFieldType('max', t)).toBe(false);
