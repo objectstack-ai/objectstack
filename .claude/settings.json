@@ -48,6 +48,22 @@
       "Bash(curl -sS -X GET https://api.github.com/repos/objectstack-ai/objectui/commits/*/check-runs* *)",
       "Bash(curl -sS -X PATCH https://api.github.com/repos/objectstack-ai/objectstack/pulls/* *)",
       "Bash(curl -sS -X PATCH https://api.github.com/repos/objectstack-ai/objectui/pulls/* *)"
+    ],
+    "deny": [
+      "mcp__github__issue_write",
+      "mcp__github__create_pull_request",
+      "mcp__github__add_issue_comment",
+      "mcp__github__add_comment_to_pending_review",
+      "mcp__github__add_reply_to_pull_request_comment",
+      "mcp__github__pull_request_review_write",
+      "mcp__github__push_files",
+      "mcp__github__create_or_update_file",
+      "mcp__github__delete_file",
+      "mcp__github__create_branch",
+      "mcp__github__sub_issue_write",
+      "mcp__github__merge_pull_request",
+      "mcp__github__create_repository",
+      "mcp__github__fork_repository"
     ]
   },
   "hooks": {
