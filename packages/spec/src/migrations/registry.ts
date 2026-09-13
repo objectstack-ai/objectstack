@@ -5456,7 +5456,21 @@ const step18: MigrationStep = {
     'was wrong. A retiredKey tombstone on `ObjectKanbanPropsSchema` with one D2 conversion that ' +
     'is a pure lossless DELETE (the key never had an effect to preserve) scoped by component ' +
     '`type`: `quickAdd` stays LIVE on the `kanban-ui` block, where a React host supplies the ' +
-    'runtime slot, and the ruling keeps it there deliberately.',
+    'runtime slot, and the ruling keeps it there deliberately. ' +
+    'It also retires the bare STRING `sort` clause on the list-view doors (#17053; objectui#8221 '
+    + 'decision batch #77, 2026-09-07 — option B, one spelling, the array). This is the PRODUCER '
+    + 'half of the seam whose consumer half is objectui PR #8758: `convertSortToQueryParams` now '
+    + 'refuses a runtime string, so `ListViewSchema.sort` was minting documents its own consumer '
+    + 'rejects — a document that validated upstream failed downstream, and the author was told off '
+    + 'by the wrong layer. Like the `type` value above it is a VALUE narrowing with no tombstone to '
+    + 'hang a prescription on, so the surviving array member\'s own error map carries it, keyed on '
+    + '`issue.input` being a string. The D2 conversion REWRITES rather than strips, because the '
+    + 'clause is losslessly mechanical: `\'created_at desc\'` is the tuple `{ field, order }`, a bare '
+    + 'field name meant ascending and is written out as `order: \'asc\'`, and the comma-separated '
+    + 'multi-key form becomes one entry per key in the same order. A string that does not parse as '
+    + 'that grammar — the `\'-field\'` dialect above all — is left alone and meets the door instead: '
+    + 'that dialect belongs to `RecordRelatedListProps.sort`, never reaches '
+    + '`convertSortToQueryParams`, and retiring it was NOT ruled.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5484,6 +5498,7 @@ const step18: MigrationStep = {
     'memory-persistence-auto-save-interval-to-ms',
     'turso-config-timeout-to-timeout-ms',
     'view-page-mount-removed',
+    'list-view-sort-string-clause-to-array',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -6714,10 +6729,15 @@ const step18: MigrationStep = {
       surface: 'dataset measure `aggregate` × `field` pairs (`DatasetMeasureSchema`, the rows '
         + 'inside `Dataset.measures[]`) over a TEMPORAL field — `date`, `datetime`, `time` — '
         + 'whose aggregate that declared `FieldType` cannot carry: `avg` and `sum` over any of '
-        + 'the three. ⛔ The compile leg is scoped to that class and to nothing else: the '
-        + 'table\'s string rows are under #16785 (ruled C — the table itself is to be amended '
-        + 'to accept `min` / `max` over them) and its `sum` × `percent` row is not executed '
-        + 'here either, so no non-temporal pair changes behaviour',
+        + 'the three. ⚠️ This entry is ONE OF TWO on this leg, and its scope sentence is kept '
+        + 'as written: it covered the temporal class and nothing else when it was registered. '
+        + 'The non-temporal `sum` / `avg` rows followed under #16099, which registered NO '
+        + 'entry of its own — it declared `not-required (already-registered '
+        + 'dataset-measure-aggregate-field-type-refused)` against THIS id — so its widening '
+        + 'rides this entry\'s prescription rather than a separate one. The `min` / `max` rows '
+        + 'over every class the table refuses are the second entry, '
+        + '`dataset-measure-selecting-aggregate-field-type-refused` (#17560). ⇒ Read BOTH when '
+        + 'migrating; there is no third',
       replacement: 'an aggregate the field\'s type accepts, per '
         + '`AGGREGATE_FIELD_TYPE_COMPATIBILITY` (`@objectstack/spec/data`, #16353): '
         + '`min` / `max` for a temporal field — both return a real instant of the field\'s own '
@@ -6754,9 +6774,15 @@ const step18: MigrationStep = {
       acceptanceCriteria:
         'Every dataset measure over a `date` / `datetime` / `time` field pairs that field with '
         + 'an `aggregate` the temporal class accepts — `min`, `max`, `count`, `count_distinct` '
-        + '— and none pairs it with `avg` or `sum`. ⛔ The criterion reaches no further: a '
-        + 'measure over a field of any OTHER class is not judged by this leg at all, so a '
-        + 'string, boolean, percent or numeric pair is neither refused nor certified here. '
+        + '— and none pairs it with `avg` or `sum`. ⚠️ The criterion as WRITTEN reaches no '
+        + 'further: a measure over a field of any other class was not judged by the leg this '
+        + 'entry was registered for. It is covered all the same — by this entry\'s own '
+        + 'prescription, widened by #16099 (which registered `not-required` against this id '
+        + 'rather than an entry of its own) to `sum` / `avg` over every field class; and by '
+        + '`dataset-measure-selecting-aggregate-field-type-refused` (#17560) for `min` / '
+        + '`max`. ⛔ There is no third entry to look for. At protocol major 18 as a whole, '
+        + 'every refused pair in `AGGREGATE_FIELD_TYPE_COMPATIBILITY` is refused at the '
+        + 'compile door. '
         + 'Accepted pairs compile and execute byte-identically to before '
         + '(`avg` over `number` / `currency`, `min` / `max` over `datetime`, `count` over '
         + 'anything); a refused pair answers `400 DATASET_INVALID` naming the measure, the '
@@ -6764,6 +6790,80 @@ const step18: MigrationStep = {
         + 'stands down rather than guessing wherever the type cannot be resolved: no '
         + '`sourceFieldMeta` wired, an unknown field, or a `relationship.field` path whose '
         + 'column lives on a joined object.',
+    },
+    {
+      id: 'dataset-measure-selecting-aggregate-field-type-refused',
+      surface: 'dataset measure `aggregate` × `field` pairs (`DatasetMeasureSchema`, the rows '
+        + 'inside `Dataset.measures[]`) pairing `min` or `max` with a field whose declared '
+        + '`FieldType` that aggregate cannot carry — every type outside the numeric, temporal '
+        + 'and boolean classes. Named in full so an author can grep their own metadata: the '
+        + 'string family (`text`, `textarea`, `email`, `url`, `phone`, `password`, `secret`, '
+        + '`markdown`, `html`, `richtext`, `code`, `color`, `signature`, `qrcode`), the option '
+        + 'types (`select`, `radio`), the references (`lookup`, `master_detail`, `tree`, '
+        + '`user`), `autonumber`, the multi-option types (`multiselect`, `checkboxes`, `tags`), '
+        + 'the file family (`image`, `file`, `avatar`, `video`, `audio`), the structured-JSON '
+        + 'types (`json`, `composite`, `repeater`, `record`, `location`, `address`, `vector`) '
+        + 'and `formula` — 37 field types × 2 aggregates = 74 pairs',
+      replacement: 'an aggregate the field\'s type accepts, per '
+        + '`AGGREGATE_FIELD_TYPE_COMPATIBILITY` (`@objectstack/spec/data`, #16353), or a '
+        + 'different way of asking the question. ⚠️ There is no lossless rewrite, which is why '
+        + 'this is a semantic TODO and not a D2 conversion: nothing can compute "the smallest '
+        + 'text value" in a way every backend agrees on, so no transform can preserve the '
+        + 'answer. The three routes an author actually has, per intent: '
+        + '① the measure was COUNTING in disguise ("how many distinct owners") ⇒ '
+        + '`count` / `count_distinct`, which accept every type because they read neither '
+        + 'arithmetic nor order off the value; '
+        + '② the measure wanted a FIRST or LAST RECORD ("the earliest-titled task") ⇒ that is '
+        + 'a SORT on a list or report, which orders once in a declared direction, not an '
+        + 'aggregate that asks each backend for its own smallest value; '
+        + '③ the measure wanted a QUANTITY that happens to be stored as text or JSON ⇒ store '
+        + 'it as a numeric or temporal field (a computed column) and aggregate that. '
+        + 'A `derived` measure whose `of` names a refused measure is fixed by fixing that '
+        + 'measure, not the `derived` one',
+      reason:
+        '#17560, director ruling, decision batch #127 (2026-09-13). The table refused these '
+        + '74 pairs from the day it was declared and NOTHING executed the refusal: the compile '
+        + 'leg (`dataset-compiler`, `service-analytics`) carried an explicit scope condition — '
+        + '`if (!DERIVING_AGGREGATES.has(aggregate)) return;` — so `min` / `max` were never '
+        + 'judged whatever the field type, and `service-analytics`\' `measureResultType` went '
+        + 'further and typed `min` / `max` over the string classes as a supported `\'string\'` '
+        + 'result (#15768) and over a `formula` field from its declared `returnType` (#16236). '
+        + 'Four declarations, three answers, one pair — the worst shape of declared≠enforced, '
+        + 'because nobody could tell which sentence was the contract. ⭐ The divergence is '
+        + 'real and it is the ORDER rather than the arithmetic: string order is '
+        + 'collation-dependent, so two backends answer two different "smallest" values for one '
+        + 'metadata document, and `min(jsonb)` does not exist on PostgreSQL at all — the same '
+        + 'shape Prime Directive #12 exists to remove. The ruling settled all three '
+        + 'sub-questions together rather than per field class, because one shared fixture drove '
+        + 'members of both halves: the string classes stay REFUSED as decision batch #59 ruled '
+        + '(2026-09-06, 「`min`/`max` numeric plus `date`/`datetime`; everything else '
+        + 'refused」) and the table is NOT amended; the non-string classes are refused AND '
+        + 'enforced; and `formula` is refused on the table\'s own storage ground — it is '
+        + 'VIRTUAL in SQL storage, no column is emitted, so no aggregate can be lowered to it '
+        + 'whatever `returnType` says. ⚠️ The "ruled C — the table is to be AMENDED to accept '
+        + 'the string rows" note the tree carried in two test files, citing #17513, had no '
+        + 'ruling behind it: that card is closed as a duplicate with zero rulings on it, and '
+        + 'the one recorded ruling on this table says the opposite. Business pull was measured '
+        + 'and is zero — the shipped `min` / `max` cases were in-tree fixtures pinning a result '
+        + 'TYPE, not customer datasets reading one. ⚠️ Confidence gap, recorded rather than '
+        + 'hidden: customer datasets in the `cloud` repository were not readable when this was '
+        + 'decided.',
+      acceptanceCriteria:
+        'Every dataset measure declaring `aggregate: \'min\'` or `\'max\'` pairs it with a '
+        + 'field the class accepts — the numeric class (`number`, `currency`, `percent`, '
+        + '`rating`, `slider`, `progress`, `summary`), the temporal class (`date`, `datetime`, '
+        + '`time`) or the boolean class (`boolean`, `toggle`) — and none pairs it with a field '
+        + 'of any other declared type. Accepted pairs compile and execute byte-identically to '
+        + 'before, including `min` / `max` over a temporal field, which still carries '
+        + '`fields[].type: \'time\'`; a refused pair answers `400 DATASET_INVALID` naming the '
+        + 'measure, the field, its declared type and the accepted set, with no SQL emitted. '
+        + '⚠️ A `text` / `select` / `lookup` / `formula` field used as a DIMENSION — grouping, '
+        + 'labelling, bucketing, filtering — is untouched, and so is `count` / `count_distinct` '
+        + 'over one: this is about the two SELECTING aggregates only. The refusal stands down '
+        + 'rather than guessing wherever the type cannot be resolved: no `sourceFieldMeta` '
+        + 'wired, an unknown field, or a `relationship.field` path whose column lives on a '
+        + 'joined object. A measure column over such a pair also stops carrying a corrected '
+        + '`fields[].type`, because the pair no longer produces a column at all.',
     },
     {
       id: 'datasource-config-mongo-options-credential-refused',

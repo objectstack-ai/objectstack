@@ -102,7 +102,8 @@
  * CONTENT. A second declaration of that surface here would be a hand copy of a
  * register — the exact drift `check:pm-governed-prose` exists to stop one
  * family over. C1–C4 are all derivable from the declaration and the two
- * carriers alone, and none of them costs a changed-file listing.
+ * carriers alone, and none of them costs a changed-file listing. C7 costs none
+ * either: it reads a line out of a comment the C6 pass already fetched.
  *
  * ⭐ C5 (#16448) is the one row that reads a DIFF, and it is still not limb ①.
  * Limb ① asks "does this card's file surface suggest the contract tier?" and
@@ -150,8 +151,8 @@
  * passed". Precondition ① of the landing check is still a human reading a PASS
  * comment on the card.
  *
- * ⭐ C4 and C6 are the ONLY things this file reads out of a verdict comment, and
- * neither is the verdict. C4 reads the `Implemented-by:` / `Reviewed-by:`
+ * ⭐ C4, C6 and C7 are the ONLY things this file reads out of a verdict comment,
+ * and none of the three is the verdict. C4 reads the `Implemented-by:` / `Reviewed-by:`
  * identity pair the verdict declares about its own AUTHORSHIP (a session id on
  * both, or a `mode:subagent` dev's BRANCH on the left — the grammar note beside
  * AUTHORSHIP_KEYS), on a comment recognised in EITHER live dialect — the fenced
@@ -159,11 +160,18 @@
  * recognition shared with C6 (#17346, `isVerdictComment`). C6 (#17302) reads
  * that a review of record EXISTS on the
  * current head — H51's heading and head-sha facts, plus a `Reviewed-by:` line —
- * on a pair whose gate was already cleared. No PASS or FAIL token is read to
- * reach either, so the boundary above is narrowed by exactly two facts and not
- * crossed — a self-issued verdict is refused on WHO wrote it, an unrecorded one
- * on WHETHER it was written down, never on what it concluded — and both rows
- * are report-only like every other one here.
+ * on a pair whose gate was already cleared. C7 (#17915) reads the third
+ * provenance line, `Served-tier:` — WHAT served the round that produced the
+ * verdict, stamped by the harness into the reviewer's own transcript and copied
+ * into the record, ⛔ never the dispatch `model` parameter, which is
+ * configuration and not a reading — and refuses a clearance whose value is not
+ * EXACTLY `CONTRACT_REVIEW_TIER`, the comparison that constant's own docblock
+ * declares and that nothing in this tree performed before. No PASS or FAIL
+ * token is read to reach any of the three, so the boundary above is narrowed by
+ * exactly three facts and not crossed — a self-issued verdict is refused on WHO
+ * wrote it, an unrecorded one on WHETHER it was written down, an off-tier one on
+ * WHAT SERVED it, never on what any of them concluded — and all three rows are
+ * report-only like every other one here.
  *
  * ## How a COMPLETED review is told from a gate that never ran (#14155)
  *
@@ -586,8 +594,43 @@ import {
   refusalLines,
   wideningRefusal,
 } from './check-widening-tells.mjs';
+// The tier the strip is judged against. IMPORTED, never restated: its own
+// docblock makes `dispatch-gates.mjs` the one line in `scripts/pm/**` and
+// `.claude/skills/pm-dispatch/**` where the model id is spelled as a VALUE,
+// and a second value site here is exactly the drift that let the declared
+// tier and the served one differ unnoticed (#17915).
+import { CONTRACT_REVIEW_TIER } from './dispatch-gates.mjs';
 
-// dispatch-gates: no-path-population -- this gate reads no file in the tree at all; its whole input is the GitHub API (PRs, their labels, and the claim comments on their cards), so no card's file surface can predict it and the honest derivation is a repo-wide undetermined one (#13519)
+// -- Why this file no longer declares that it has NO path population (#17915) --
+//
+// It carried the `no-path-population` marker until C7 landed, on the reading
+// that this gate "reads no file in the tree at all; its whole input is the
+// GitHub API (PRs, their labels, and the claim comments on their cards), so no
+// card's file surface can predict it" (#13519). The INPUT half of that is still
+// exactly true -- nothing here opens a tracked file, and the three read paths
+// above are the whole of what this gate consumes.
+//
+// ⭐ The OTHER half stopped being true, and a declaration that stopped being
+// true is the shape C7 itself exists against. C7 compares against
+// `CONTRACT_REVIEW_TIER`, which is declared in `dispatch-gates.mjs` and
+// imported above, so a card editing that constant DOES predict this gate: it
+// moves the value every clearance is judged against, and the self-test that
+// pins the comparison is the thing that should run. Keeping the marker would
+// have said the opposite, in the file whose own row refuses exactly that.
+//
+// ⚠️ The import channel over-reaches on the way, and naming it here is the
+// honest half of the trade. A followed module contributes its OWN literals, so
+// this family now also inherits `.github/workflows` -- a directory this file
+// never opens, on a gate whose CI step runs the self-test only. The designed
+// narrowing (`inherited-population`, declared by the followed module) cannot
+// express this case: it is per-MODULE, and the same module's globs ARE a real
+// population for the sibling that reads them. So the lead is imprecise and
+// stated, rather than silenced by a declaration that is false.
+//
+// ⛔ Do NOT "fix" the inherited lead by restating the tier here. The constant
+// keeps exactly one value site across `scripts/pm/**` and
+// `.claude/skills/pm-dispatch/**`, and a second value site is precisely what
+// let the declared tier and the served one drift apart unnoticed.
 
 // -- The self-test's own battery roster and floor (#13489) ------------------
 //
@@ -618,6 +661,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the three read paths: ordered, offline-capable, and named in every refusal': 24,
   'C5: the direction claim checked against the diff (#16448)': 16,
   'C6: the review of record on this head, and the carrier the rule text names (#17302)': 40,
+  'C7: the tier that SERVED the verdict the strip stands on (#17915)': 42,
   'the exit register is distinct in every direction it must be': 6,
   'the argv contract and the board provenance (#16623)': 42,
   '#17366: the correction comment — the self-solvable exit, and the three things it is not': 65,
@@ -630,8 +674,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // Raised by exactly the one battery #16304 adds, again by exactly the one
 // #17302 adds, and again by exactly the one #17366 adds, so the roster's
 // existing slack is preserved rather than tightened or loosened as a side
-// effect, and once more by the one #17149 adds, and by the one #17098 adds.
-const SELF_TEST_BATTERY_FLOOR = 19;
+// effect, and once more by the one #17149 adds, by the one #17098 adds, and by
+// the one #17915 adds.
+const SELF_TEST_BATTERY_FLOOR = 20;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1942,12 +1987,20 @@ function isVerdictComment(body, headSha) {
  */
 export const AUTHORSHIP_KEYS = Object.freeze(['Implemented-by', 'Reviewed-by']);
 
-const AUTHORSHIP_KEY_LINES = new Map(
-  AUTHORSHIP_KEYS.map((key) => [
-    key,
-    new RegExp(`^[ \\t]*(?:>[ \\t]*)?(?:[-*][ \\t]+)?(?:\\*\\*)?\`?${key}\`?(?:\\*\\*)?[ \\t]*:(.*)$`),
-  ]),
-);
+/**
+ * A machine key line, in this file's ONE convention: the key is literal and
+ * case-sensitive, the decoration a seat writes without meaning anything by it
+ * (a leading blockquote, a list bullet, backtick or bold wrapping on the key
+ * and its colon) is tolerated, and the rest of the line is the raw value.
+ *
+ * Factored out rather than copied so a second key added later cannot arrive
+ * with a second convention -- the drift this file refuses one family over.
+ */
+function keyLineRegex(key) {
+  return new RegExp(`^[ \\t]*(?:>[ \\t]*)?(?:[-*][ \\t]+)?(?:\\*\\*)?\`?${key}\`?(?:\\*\\*)?[ \\t]*:(.*)$`);
+}
+
+const AUTHORSHIP_KEY_LINES = new Map(AUTHORSHIP_KEYS.map((key) => [key, keyLineRegex(key)]));
 
 /**
  * The value token — an IDENTITY, read immediately after the colon.
@@ -2391,6 +2444,115 @@ export function needsRecordRead(pair) {
 const REVIEWED_BY_LINE = AUTHORSHIP_KEY_LINES.get('Reviewed-by');
 
 /**
+ * The `Served-tier:` key line -- the THIRD provenance fact a verdict declares
+ * about itself, read with `Reviewed-by:`'s own discipline (#17915).
+ *
+ * ⭐ A fact about what PRODUCED the verdict, never the verdict. `Reviewed-by:`
+ * says WHO rendered it; this says WHAT SERVED the round that rendered it, and
+ * the rule text makes its value the harness-stamped served-model field of the
+ * reviewer's own transcript -- 「值取复核者转录的 harness `model` 盖章」 -- ⛔
+ * never the dispatch `model` parameter, which is CONFIGURATION and not a
+ * reading. That distinction is the whole defect: a passed parameter and a
+ * served tier can differ, and until this row nothing in the tree compared them,
+ * so a round served below tier cleared a carrier indistinguishably from one
+ * served at it.
+ *
+ * ⛔ The key is read ANYWHERE in the comment, on its own line. The rule text
+ * asks the author to put it FIRST (「同形含首行 `Served-tier:`」) because a
+ * reader should not have to hunt for it; a reader that REFUSED it below some
+ * line number would be rejecting correct records over decoration, which is the
+ * false-positive direction this file spends its self-test avoiding.
+ */
+const SERVED_TIER_LINE = keyLineRegex('Served-tier');
+
+/**
+ * The value token -- an opaque tier identifier.
+ *
+ * ⭐ Closed on an alphanumeric or a `]`, so a real id keeps its whole shape
+ * (a bracketed context suffix included) while a trailing `.` or `,` stays with
+ * the prose. What a seat writes AFTER the token is its argument, which this
+ * file does not read -- so a value that opens with prose reads as that prose
+ * and compares unequal, loudly, rather than being scanned for a model name
+ * somewhere in the sentence. ⚠️ That looseness is precisely the false-positive
+ * mode measured on the hand-rolled probes this row replaces: a bare model-name
+ * token matched inside a QUOTED prior record, and a correct verdict came one
+ * grep away from being voided.
+ */
+const TIER_TOKEN = /^([A-Za-z0-9](?:[A-Za-z0-9._:[\]-]*[A-Za-z0-9\]])?)/;
+
+/**
+ * The STAMP CONTROL that may precede the tier -- `N/M`, measured on the live
+ * corpus and named by the ruling itself.
+ *
+ * ⭐ Corrected from a fixture against the board, which is the correction this
+ * family has had to make before (#17346: the corpus moved and the discriminator
+ * did not). Every record the remediation rounds write spells the value
+ * `75/75 \`<tier>\`` -- the at-tier stamp count over the total, THEN the tier --
+ * and the ruling's own specimen is written the same way. A reader that demanded
+ * the tier token immediately after the colon would have refused every verdict
+ * produced under the rule it enforces, on its first day.
+ *
+ * ⛔ And the count is not decoration to be skipped: it IS the zero-hit control
+ * the discipline requires -- a stamp reading is void unless the same probe
+ * returned a non-zero count on the same transcript -- and a count that is not
+ * FULL is the 「回退证据」 whose own rule text voids the verdict entire. So it
+ * is read, and it is judged: absent, the tier alone decides (the ruling's
+ * minimum, and nothing the ruling permits is refused); present, it must be
+ * non-zero and total.
+ */
+const STAMP_CONTROL = /^(\d+)[ \t]*\/[ \t]*(\d+)(?![\d/])/;
+
+/**
+ * Does a declared stamp control STAND? Absent is vacuous; present must be
+ * total and non-zero. One predicate, so the row and the note cannot disagree.
+ */
+export function servedStampsHold(stamps) {
+  return stamps === null || (stamps.total > 0 && stamps.atTier === stamps.total);
+}
+
+/** The whole reading, as one verdict: at tier, on a control that stands. */
+export function servedTierStands(served) {
+  return served?.state === 'read' && served.value === CONTRACT_REVIEW_TIER && servedStampsHold(served.stamps);
+}
+
+/**
+ * What one comment declares about the tier that served it.
+ *
+ * @returns {{ state: 'missing', stamps: null }
+ *          | { state: 'unreadable', line: string, stamps: object|null }
+ *          | { state: 'read', value: string, stamps: object|null }}
+ *
+ * Every shape carries `stamps`, so a caller never has to test for the key.
+ *
+ * `stamps` is the `N/M` control when the value carried one, `null` when it did
+ * not -- read here, judged by `servedStampsHold`, so the reading and the
+ * verdict stay two steps.
+ *
+ * Three-valued for the reason `readVerdictAuthorship` is four-valued: a carrier
+ * that was never started and one that was started and left unreadable are
+ * different facts about the seat that wrote it, and they earn different
+ * remedies. Both are refusals -- neither is a reading equal to the constant.
+ */
+export function readServedTier(text) {
+  for (const line of String(text ?? '').split(/\r?\n/)) {
+    const m = SERVED_TIER_LINE.exec(line);
+    if (!m) continue;
+    let rest = stripValueDecoration(m[1]);
+    let stamps = null;
+    const control = STAMP_CONTROL.exec(rest);
+    if (control) {
+      stamps = { atTier: Number(control[1]), total: Number(control[2]) };
+      rest = stripValueDecoration(rest.slice(control[0].length));
+    }
+    const token = TIER_TOKEN.exec(rest);
+    return token
+      ? { state: 'read', value: token[1], stamps }
+      : { state: 'unreadable', line: quoteLine(line), stamps };
+  }
+  return { state: 'missing', stamps: null };
+}
+
+/**
  * The review of record for one pair -- read from the PR's thread AND the card's,
  * because the rule lets it live on either.
  *
@@ -2452,6 +2614,9 @@ export function reviewOfRecord(pair) {
     id: row?.id ?? null,
     sha: contractReviewHeadMatch(row?.body, head),
     at: row?.created_at ?? null,
+    // The provenance fact C7 judges, read off the SAME comment this row chose,
+    // so the two can never disagree about which verdict governs this head.
+    served: readServedTier(row?.body),
   };
   const signed = String(row?.body ?? '').split(/\r?\n/).some((line) => REVIEWED_BY_LINE.test(line));
   return signed ? { state: 'found', ...found } : { state: 'unsigned', ...found };
@@ -2526,8 +2691,124 @@ export function c6RecordNote(pair) {
     `review of record on this head: ${v.where} thread, ${v.id ? `comment ${v.id}` : 'a comment carrying no readable id'} ` +
     `(${v.at ?? 'undated'}) is a \`## Contract review\` comment naming \`${v.sha}\` and carrying a \`Reviewed-by:\` line -- ` +
     'cite it in the provenance comment beside the clear (「凡清标同笔留 provenance 评论,引记录 id 与所判 head」). ' +
+    (servedTierStands(v.served)
+      ? 'Its `Served-tier:` reads the declared tier' +
+        (v.served.stamps ? ` on a stamp control of ${v.served.stamps.atTier}/${v.served.stamps.total}` : '') +
+        ', so the strip stands on C7 as well as on this row. '
+      : 'Its `Served-tier:` does NOT stand — C7 says what it reads, and this pair is adverse. ') +
     '⚠️ Existence, not the verdict: whether it reads PASS is precondition ① of the landing check and stays human.'
   );
+}
+
+// ---------------------------------------------------------------------------
+// C7 -- the tier that SERVED the verdict the strip stands on (#17915)
+// ---------------------------------------------------------------------------
+
+/**
+ * C7 -- a carrier cleared on a verdict whose served tier is not the declared one.
+ *
+ * ## The defect, and why a comparison had to exist somewhere
+ *
+ * `CONTRACT_REVIEW_TIER`'s own docblock declares the comparison against the
+ * SERVED tier EXACT -- 「never a family or prefix floor」 -- and until this row
+ * NOTHING in the tree performed it. The dispatching seat passes a model as a
+ * parameter, and a parameter is CONFIGURATION, not a reading: the served tier
+ * can differ from it, silently. The docblock also said the re-review round's
+ * opening self-check reads the constant, and it does -- but a self-check is a
+ * prose instruction to the reviewer, so a round that simply does not run it
+ * produces a verdict INDISTINGUISHABLE from one that did. Measured over one
+ * fleet's transcripts on the harness-stamped served-model field: 11 rounds
+ * served below a declared tier across four days and eleven PRs, five of them
+ * the only clearance a merged `Clause-②: yes` pair ever had. ⇒ declared ≠
+ * enforced, on the gate that decides whether a public-contract widening was
+ * reviewed at all.
+ *
+ * ⭐ So the verdict carries the READING, and the strip is gated on it. The
+ * reviewer's transcript is not a thing a checker can open; the value it stamps
+ * is. Writing it into the verdict turns a per-seat habit into a carrier, and
+ * this row is the only consumer that habit now needs.
+ *
+ * ## The population -- exactly C6's, and that is the ruling's own scope
+ *
+ * A CLEARANCE JUDGMENT OF A HUNG CARRIER: `needsRecordRead`'s completed state
+ * -- declared `yes`, the gate BOUND and CLEARED on both carriers, head unmoved.
+ * That is the pair whose `needs:contract-review` came off, which is the only
+ * act this ruling gates. Three shapes are therefore deliberately untouched:
+ *
+ *   1. **A `Clause-②: no` pair that never carried the label** owes no verdict
+ *      at all, and is ⛔ never refused for lacking the line. It is not in the
+ *      candidate shape, so the row cannot reach it.
+ *   2. **A pair still carrying the gate** owes nothing yet -- the review is
+ *      pending, not below tier -- exactly as C6 reads it.
+ *   3. **An absent or unsigned record** is C6's row already, and no row owns a
+ *      fact twice. C7 speaks only about a record C6 FOUND: the two rows read
+ *      one comment, chosen once, by one recognition.
+ *
+ * ## The refusal, and what it is NOT
+ *
+ * ⛔ Still no verdict WORD. This row reads a provenance fact of the same family
+ * as `Reviewed-by:` -- what produced the verdict, never what it concluded -- so
+ * the file's 自查放行 boundary is narrowed by one more FACT and not crossed.
+ * Exit 4 (a limb not standing), ⛔ never 3: the environment answered fine, the
+ * limb did not stand.
+ *
+ * ⛔ And the comparison is EXACT, by the constant's own instruction: no family
+ * match, no prefix floor, no "close enough" -- widening a governance gate's
+ * accept set is the maintainer's decision, not a checker's convenience. A
+ * missing line and an unreadable one are refused beside a below-tier one,
+ * because 「无此行不成裁决」: a verdict that declares nothing about what served
+ * it is the pre-ruling shape, which is the shape with no reading in it at all.
+ *
+ * ⚠️ A historic record written before the rule landed reads MISSING and earns
+ * this row. That is the same transition C6 priced and it re-blocks no legal
+ * workflow: the sweep stays report-only, only a pair being LANDED is judged,
+ * and the pair owes exactly one act -- the reviewing seat posts the record
+ * again carrying the reading its own transcript already stamped.
+ */
+export function c7ServedTierBelow(pair) {
+  const v = reviewOfRecord(pair);
+  if (v.state !== 'found') return null;
+  if (servedTierStands(v.served)) return null;
+
+  const where =
+    `PR #${pair?.pr}${pair?.draft ? ' (draft)' : ''} / card #${pair?.card}: the verdict the clear stands on -- ` +
+    `${v.where} thread, ${v.id ? `comment ${v.id}` : 'a comment carrying no readable id'} ` +
+    `(${v.at ?? 'undated'}), naming head \`${v.sha}\``;
+  const stamps = v.served.stamps ?? null;
+  const control =
+    stamps === null
+      ? ''
+      : ` Its stamp control reads ${stamps.atTier}/${stamps.total}` +
+        (servedStampsHold(stamps)
+          ? ', which stands.'
+          : stamps.total === 0
+            ? ' -- a ZERO reading, which is void by the standing control: a zero counts only when the same probe ' +
+              'returns a non-zero stamp count on the same transcript.'
+            : ' -- NOT total, which is the 「回退证据」 the rule text voids a verdict entire for: some messages of ' +
+              'the round were served by something else.');
+  const reading =
+    v.served.state === 'read'
+      ? servedStampsHold(stamps)
+        ? `declares \`Served-tier: ${v.served.value}\``
+        : `declares the tier \`${v.served.value}\` on a stamp control that does not stand`
+      : v.served.state === 'unreadable'
+        ? `carries a \`Served-tier:\` line with no readable tier token (${v.served.line})`
+        : 'carries NO `Served-tier:` line at all, so it declares nothing about what served it';
+  const rule =
+    'The rule this row carries is `references/contract-review.md`\'s -- 「同形含首行 `Served-tier:`:值取转录 ' +
+    'harness `model` 盖章,可前置 N/N;无此行不成裁决」 and 「清标前 `--pair`:裁决 `Served-tier:` ≠ ' +
+    '`CONTRACT_REVIEW_TIER` ⇒ exit 4,点名 PR、评论、读数」. The value is the HARNESS-STAMPED served-model field ' +
+    'of the reviewing round\'s own transcript, ⛔ never the dispatch `model` parameter, which is configuration ' +
+    'and not a reading. The comparison is EXACT, never a family or prefix floor -- widening a governance gate\'s ' +
+    'accept set is the maintainer\'s decision.';
+  const remedy =
+    'Remedy: re-review this head at the declared tier and post the record carrying the reading, or -- if the round ' +
+    'WAS at tier -- post the record again with the line its transcript already stamped; the NEWEST heading comment ' +
+    'on this head governs, so a corrected record clears this row without touching the carrier.';
+  const boundary =
+    '⛔ Verdict-agnostic: no PASS or FAIL token is read to reach this -- what produced the verdict is measurable, ' +
+    'what it concluded stays human -- and the constant is read from `dispatch-gates.mjs`, never restated here.';
+  return `${where} -- ${reading}, and the declared tier is \`CONTRACT_REVIEW_TIER\`.${control} ${rule} ${remedy} ${boundary} ${NEVER_WRITES}`;
 }
 
 /**
@@ -2555,6 +2836,12 @@ export function pairRows(pair, pairs = null) {
   if (selfReview) rows.push({ code: 'C4', text: selfReview });
   const record = c6NoReviewOfRecord(pair);
   if (record) rows.push({ code: 'C6', text: record });
+  // ⭐ After C6 and never instead of it: C6 asks whether a record EXISTS on this
+  // head, C7 asks what served the round that wrote it. One comment, chosen once
+  // by `reviewOfRecord`, so the two rows can never disagree about which verdict
+  // the clear stands on -- and an absent record earns exactly one row, C6's.
+  const servedTier = c7ServedTierBelow(pair);
+  if (servedTier) rows.push({ code: 'C7', text: servedTier });
   return rows;
 }
 
@@ -3693,9 +3980,19 @@ export function selfTest() {
   // on C4 the moment C4 can see this dialect at all, which is a real carrier
   // defect and belongs on a defective specimen (the `ADOPTION` fixture below
   // keeps it), never on the reference one.
+  // ⭐ The `Served-tier:` line is part of the reference shape since #17915, for
+  // the same reason the independence pair is: this fixture is the pair that
+  // must read CLEAN under EVERY row, and a record that declares nothing about
+  // what served it is refused by C7 -- 「无此行不成裁决」. Its VALUE is the
+  // imported constant, never a spelled model id: the tier has exactly one value
+  // site in this tree and a fixture is not a second one.
   const RECORD = (
     sha,
-    lines = ['- **Implemented-by:** `claude/issue-13657-x`', `- **Reviewed-by:** \`${RECORD_SESSION}\``],
+    lines = [
+      '- **Implemented-by:** `claude/issue-13657-x`',
+      `- **Reviewed-by:** \`${RECORD_SESSION}\``,
+      `- **Served-tier:** 121/121 \`${CONTRACT_REVIEW_TIER}\``,
+    ],
     at = '2026-09-01T08:50:00Z',
     id = 3301,
   ) => ({
@@ -4241,6 +4538,87 @@ export function selfTest() {
   t('C6 is a FINDING — it rides the exit, not the notes', pairRows(bare({})).some((r) => r.code === 'C6') && pairNotes(bare({})).length === 0);
   t('the offline document serves the PR thread from the same `comments` bag, keyed by the PR number', Array.isArray(pairJsonReader({ pulls: DOC.pulls, comments: { 13910: [] } }).readCardComments('owner/name', 13910)));
   t('…and one it omits reads null — UNJUDGED, ⛔ never a missing record', pairJsonReader({ pulls: DOC.pulls }).readCardComments('owner/name', 13910) === null);
+
+
+  // -- C7: the tier that SERVED the verdict the strip stands on (#17915) -----
+  //
+  // ★ The declared comparison, performed. `CONTRACT_REVIEW_TIER`'s docblock
+  // calls the comparison against the SERVED tier EXACT and nothing performed
+  // it: 11 measured rounds served below a declared tier, five of them the only
+  // clearance a merged `Clause-②: yes` pair ever had. The three specimens the
+  // ruling names are pinned first -- at tier green, below tier red, line
+  // missing red -- then the EXACTNESS (no family, no prefix), then the
+  // populations this row must never reach, which are the ones that owe no
+  // verdict at all.
+  //
+  // ⛔ No specimen spells a real model id. The at-tier one uses the IMPORTED
+  // constant, the below-tier one an obviously synthetic value, and the
+  // near-miss ones are DERIVED from the constant -- the tier keeps exactly one
+  // value site in this tree, and a fixture is not a second one.
+  battery('C7: the tier that SERVED the verdict the strip stands on (#17915)');
+  const TIER_LINES = (value) => [
+    '- **Implemented-by:** `claude/issue-13657-x`',
+    `- **Reviewed-by:** \`${RECORD_SESSION}\``,
+    `- **Served-tier:** \`${value}\``,
+  ];
+  const SERVED = (value, at = '2026-09-01T08:50:00Z', id = 3401) => RECORD(HEAD_9AF9, TIER_LINES(value), at, id);
+  const NO_TIER_LINE = RECORD(HEAD_9AF9, TIER_LINES('x').slice(0, 2), '2026-09-01T08:50:00Z', 3402);
+  const BELOW = 'example-below-tier';
+  // the three the ruling names
+  t('⭐ AT TIER — the reference record declares the constant and earns NO C7 row', c7ServedTierBelow(bare({ prComments: [RECORD_ON_9AF9] })) === null, JSON.stringify(reviewOfRecord(bare({ prComments: [RECORD_ON_9AF9] })).served));
+  t('…and it declares it with the IMPORTED constant, so the tier still has ONE value site in this tree', RECORD_ON_9AF9.body.includes(CONTRACT_REVIEW_TIER));
+  const belowRow = c7ServedTierBelow(bare({ prComments: [SERVED(BELOW)] }));
+  t('⭐ BELOW TIER — a clearance standing on an off-tier verdict is a C7 row', typeof belowRow === 'string');
+  t('…naming the PR, the verdict comment and the served value — the three the refusal owes', says(belowRow, 'PR #13864') && says(belowRow, 'comment 3401') && says(belowRow, BELOW));
+  t('…and naming the required tier by its CONSTANT, never by its value', says(belowRow, '`CONTRACT_REVIEW_TIER`') && !says(belowRow, CONTRACT_REVIEW_TIER));
+  const missingRow = c7ServedTierBelow(bare({ prComments: [NO_TIER_LINE] }));
+  t('⭐ LINE MISSING — a verdict that declares nothing about what served it is refused too', typeof missingRow === 'string');
+  t('…and says so, rather than reporting a tier it never read', says(missingRow, 'NO `Served-tier:` line') && !says(missingRow, 'Served-tier: '));
+  t('…and is a DIFFERENT sentence from the below-tier row — two facts, two remedies', missingRow !== belowRow);
+  // the value reader, and the exactness the constant's own docblock declares
+  const unreadableRow = c7ServedTierBelow(bare({ prComments: [SERVED('')] }));
+  t('a `Served-tier:` line with no readable token is STARTED-and-unreadable, not missing', reviewOfRecord(bare({ prComments: [SERVED('')] })).served.state === 'unreadable' && typeof unreadableRow === 'string');
+  t('…and the row quotes the line back, so the residue is actionable', says(unreadableRow, 'no readable tier token'));
+  t('⛔ a FAMILY prefix is refused — the comparison is EXACT, never a floor', typeof c7ServedTierBelow(bare({ prComments: [SERVED(CONTRACT_REVIEW_TIER.split('-')[0])] })) === 'string');
+  t('⛔ …and so is a value that merely STARTS with the constant', typeof c7ServedTierBelow(bare({ prComments: [SERVED(`${CONTRACT_REVIEW_TIER}-example-suffix`)] })) === 'string');
+  t('the value must be FIRST after the colon — prose in front is read as the value and compares unequal', readServedTier(`Served-tier: read 139/139 as ${CONTRACT_REVIEW_TIER}`).value === 'read');
+  t('decoration around the key reads, exactly as it does for `Reviewed-by:`', readServedTier(`- **Served-tier:** \`${CONTRACT_REVIEW_TIER}\``).value === CONTRACT_REVIEW_TIER && readServedTier(`> Served-tier: ${CONTRACT_REVIEW_TIER}`).value === CONTRACT_REVIEW_TIER);
+  t('⛔ a different CASE is a different key — one convention for machine spellings', readServedTier(`SERVED-TIER: ${CONTRACT_REVIEW_TIER}`).state === 'missing');
+  t('the line is read anywhere in the comment — the rule asks the AUTHOR for the top, the reader refuses nobody over placement', c7ServedTierBelow(bare({ prComments: [RECORD(HEAD_9AF9, [...TIER_LINES(CONTRACT_REVIEW_TIER).slice(0, 2), '', 'some prose', ...TIER_LINES(CONTRACT_REVIEW_TIER).slice(2)])] })) === null);
+  t('the NEWEST record on this head governs — a corrected record clears the row without touching the carrier', c7ServedTierBelow(bare({ prComments: [SERVED(BELOW), SERVED(CONTRACT_REVIEW_TIER, '2026-09-01T08:53:00Z', 3403)] })) === null);
+  // the populations this row must never reach
+  t('⛔ a `Clause-②: no` pair that never carried the label is NEVER refused for lacking the line', c7ServedTierBelow(pair({ cardComments: [CLAIM('Clause-②: no')] })) === null);
+  t('⛔ a pair still carrying the gate owes nothing yet — the review is pending, not off tier', c7ServedTierBelow(pair({ prLabels: [L], cardLabels: [L], cardComments: [CLAIM('Clause-②: yes')] })) === null);
+  t('⛔ a never-hung gate is C3\'s row and reaches this one not at all', c7ServedTierBelow(declaredYes({ cardEvents: [], prEvents: [] })) === null);
+  t('⛔ a gate whose head MOVED after the clear is the 重挂 row, not this one', c7ServedTierBelow(bare({ prComments: [SERVED(BELOW)], headCommittedAt: '2026-09-01T10:30:00Z' })) === null);
+  t('⛔ an ABSENT record earns C6 and nothing else — one fact, one row', pairRows(bare({})).map((r) => r.code).join(',') === 'C6');
+  const unsignedCodes = pairRows(bare({ prComments: [RECORD(HEAD_9AF9, ['- **Implemented-by:** `claude/issue-13657-x`'], '2026-09-01T08:50:00Z', 3404)] })).map((r) => r.code);
+  t('⛔ an UNSIGNED record likewise — C7 speaks only about a record C6 FOUND', unsignedCodes.includes('C6') && !unsignedCodes.includes('C7'), JSON.stringify(unsignedCodes));
+  t('⇒ C6 and C7 can never BOTH fire — they read one comment, chosen once by `reviewOfRecord`', [bare({}), bare({ prComments: [SERVED(BELOW)] }), bare({ prComments: [NO_TIER_LINE] }), bare({ prComments: [RECORD_ON_9AF9] })].every((x) => pairRows(x).filter((r) => r.code === 'C6' || r.code === 'C7').length <= 1));
+  // the exit it rides, and the boundary it keeps
+  t('C7 is a FINDING — it rides the exit, and never arrives as a note', pairRows(bare({ prComments: [SERVED(BELOW)] })).some((r) => r.code === 'C7') && pairNotes(bare({ prComments: [SERVED(BELOW)] })).every((n) => n.code !== 'C7'));
+  t('…and an off-tier record never gets the C6-RECORD sentence that says the strip stands', !says(pairNotes(bare({ prComments: [SERVED(BELOW)] }))[0]?.text, 'the strip stands on C7'));
+  t('…and the exit a finding raises is 4, the limb-not-standing code, ⛔ never 3', EXIT_PAIR_ADVERSE === 4 && EXIT_PAIR_ADVERSE !== EXIT_PREREQUISITE_NOT_MET);
+  t('the row quotes the rule text it is the carrier for, in both halves', says(belowRow, '无此行不成裁决') && says(belowRow, '点名 PR、评论、读数'));
+  t('…and states the reading is the harness stamp, ⛔ not the dispatch parameter', says(belowRow, 'HARNESS-STAMPED') && says(belowRow, 'dispatch `model` parameter'));
+  t('…and is verdict-agnostic, and never writes', says(belowRow, 'what it concluded stays human') && says(belowRow, '自查放行'));
+  t('an at-tier clear prints the reading in the C6-RECORD note, so a reader of exit 0 can see the strip stood on it', says(pairNotes(completed)[0]?.text, 'Served-tier'));
+  // ⭐ The LIVE spelling, corrected from a fixture against the board. Every
+  // record the remediation rounds write, and the ruling's own specimen, put the
+  // STAMP CONTROL first: `75/75 \`<tier>\``. A reader that demanded the tier
+  // token immediately after the colon would have refused every verdict written
+  // under the rule it enforces, on day one.
+  t('⭐ the LIVE value shape — stamp control, then the tier — reads at tier and stands', servedTierStands(readServedTier(`Served-tier: 75/75 \`${CONTRACT_REVIEW_TIER}\``)));
+  t('…and the count is READ, not skipped', JSON.stringify(readServedTier(`Served-tier: 138/138 \`${CONTRACT_REVIEW_TIER}\``).stamps) === JSON.stringify({ atTier: 138, total: 138 }));
+  t('…on a bulleted, bolded key too — the shape the seats actually post', servedTierStands(readServedTier(`- **Served-tier:** 102/102 \`${CONTRACT_REVIEW_TIER}\``)));
+  t('⛔ a ZERO control is void — a zero counts only against a non-zero stamp count on the same transcript', servedTierStands(readServedTier(`Served-tier: 0/0 \`${CONTRACT_REVIEW_TIER}\``)) === false);
+  t('⛔ a control that is not TOTAL is 回退证据, and the tier alone does not rescue it', servedTierStands(readServedTier(`Served-tier: 12/133 \`${CONTRACT_REVIEW_TIER}\``)) === false);
+  t('⛔ …and that is a C7 row, whose text names the count rather than only the tier', says(c7ServedTierBelow(bare({ prComments: [SERVED(`12/133 \`${CONTRACT_REVIEW_TIER}\``)] })), '12/133') && says(c7ServedTierBelow(bare({ prComments: [SERVED(`12/133 \`${CONTRACT_REVIEW_TIER}\``)] })), '回退证据'));
+  t('⛔ a count with NO tier after it declares no tier — unreadable, never a reading', readServedTier('Served-tier: 75/75').state === 'unreadable');
+  t('⭐ an ABSENT control is vacuous, never a refusal — the ruling\'s minimum is the tier alone', readServedTier(`Served-tier: \`${CONTRACT_REVIEW_TIER}\``).stamps === null && servedStampsHold(null));
+  t('the control is judged by ONE predicate the row and the note both read', servedStampsHold({ atTier: 5, total: 5 }) && !servedStampsHold({ atTier: 5, total: 6 }) && !servedStampsHold({ atTier: 0, total: 0 }));
+  t('⛔ a below-tier value with a PERFECT control is still refused — the control never substitutes for the tier', typeof c7ServedTierBelow(bare({ prComments: [SERVED('99/99 example-below-tier')] })) === 'string');
+  t('the reference fixture itself carries the live shape, so the clean pair is clean for the right reason', says(RECORD_ON_9AF9.body, '121/121') && pairRows(completed).length === 0);
 
   battery('the exit register is distinct in every direction it must be');
   const codes = [EXIT_OK, EXIT_USAGE, EXIT_INCOMPLETE, EXIT_PREREQUISITE_NOT_MET, EXIT_PAIR_ADVERSE];

@@ -384,6 +384,38 @@ does both halves:
   conversion when lossless, a semantic TODO when not) in the same release.
   After GA the full D2 ladder applies: lossless breaks ship a live conversion
   entry or they do not ship.
+
+  **Amended 2026-09-13 (#18003) — the level half.** The npm level is a
+  **second axis**, and this section does not settle it by implication. Every
+  "major" above means a *protocol* major — the `PROTOCOL_VERSION` step D2 and
+  D3 are built around. The level a changeset declares is the *npm* version of
+  the lockstep `fixed` group, and the two move independently. Two director
+  rulings ~1.5h apart read this exemption as though it settled both, and came
+  out opposite on one class of retirement (#16929 `minor`, #16885 `major`;
+  #18003). So the level is stated here rather than inferred:
+
+  - **Pre-GA, a metadata-facing retirement or break ships `minor`**, carrying
+    the `**BREAKING**` banner and its ADR-0087 disposition entry. The level is
+    *not* the carrier of breaking-ness during the window — the banner and the
+    disposition are, and they are mandatory precisely because the level says
+    nothing.
+  - **An npm `major` is a planned act** — taken when the window closes and the
+    queued conversions activate together — ⛔ never a side effect of one
+    retirement card, however breaking that card is.
+  - **A tombstone names the npm release it ships in, ⛔ never the protocol
+    major.** The two numbers differ by construction while the window holds: a
+    retirement shipping `minor` lands in `17.x.y`, so prose dating it to
+    "`@objectstack/spec` 18" is wrong on the day it is written (#18021).
+
+  ⇒ **This is enforced, and the enforcement pre-dates both rulings.**
+  `scripts/check-changeset-no-major.mjs` refuses a PR that introduces a
+  `major` changeset (maintainer ruling 2026-09-04, decision batch #35, on
+  #15294; the `Check Changeset` step in `.github/workflows/pr-automation.yml`
+  carries the level prose an author is shown). That script's header is the
+  authority on every detail — the RC exemption, the `allow-major` escape
+  hatch, and the GA end condition that retires the guard and returns the group
+  to strict semver. ⛔ Do not restate its rules here: what was missing was
+  never the rule, only a pointer to it from the section both rulings read.
 - **The chain, backfilled:** steps 12–15 now exist. 12: the `api.requireAuth`
   default flip (semantic). 13: the ADR-0090 wave — `roles:`→`positions:`, the
   two unambiguous OWD aliases, and recipient `role`→`position` as retired
