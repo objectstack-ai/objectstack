@@ -24015,6 +24015,16 @@ async function selfTest() {
   const carrier64 = { number: 18045, html_url: 'https://example.invalid/18045' };
   const text64 = (kind, row, carrier) => ({ kind, row, carrier });
   const row64 = (text, more = 0) => String(h64UserAuthoredSeatContent(text, more) ?? '');
+  // ⛔ Every reader below goes through a wrapper, for the row-wrapper note's
+  // reason one level down: `seatSignature` and `artefactAuthor` are
+  // THREE-VALUED by design, so a bare `.kind` / `.isApp` throws while `t()`'s
+  // arguments are being evaluated the moment a change makes one answer null —
+  // which ABORTS the suite instead of reddening the case. Measured on this
+  // row's own ablation: removing the footer form aborted 4042 cases at the
+  // first `seatSignature(...).kind` instead of reddening the four it owns.
+  const sig64 = (body) => seatSignature(body)?.kind ?? null;
+  const isApp64 = (row) => artefactAuthor(row)?.isApp ?? null;
+  const message64 = (result, i = 0) => String(result?.rows?.[i]?.message ?? '');
 
   // ── Direction 1: the four measured specimens all FIRE ─────────────────────
   t('H64 fires: #18045 — a card body carrying a bare session id, authored by a user account', typeof h64UserAuthoredSeatContent(text64('card', card18045())), 'string');
@@ -24024,10 +24034,10 @@ async function selfTest() {
 
   // ── The two widenings the MEASUREMENT forced, pinned as measurements ──────
   t('H64 widening: the os-tesla specimen carries NO `Session:` line', /^\s*>?\s*Session\s*:/m.test(comment5652138683().body), false);
-  t('H64 widening: …so the claim form is `CLAIM_COMMENT_MARKER` alone, and the specimen still fires', seatSignature(comment5652138683().body).kind, 'claim');
+  t('H64 widening: …so the claim form is `CLAIM_COMMENT_MARKER` alone, and the specimen still fires', sig64(comment5652138683().body), 'claim');
   t('H64 widening: PR #18051 carries NO session id in its first three lines', SEAT_SESSION_ID.test(seatSignatureHead(pr18051().body)), false);
-  t('H64 widening: …so the FOOTER is a sixth form, and the specimen fires on it', seatSignature(pr18051().body).kind, 'footer');
-  t('H64 widening: ⛔ and the BARE footer — the one the platform appends itself — is NOT a signature', seatSignature(`prose\n\n---\n${BARE_FOOTER64}`), null);
+  t('H64 widening: …so the FOOTER is a sixth form, and the specimen fires on it', sig64(pr18051().body), 'footer');
+  t('H64 widening: ⛔ and the BARE footer — the one the platform appends itself — is NOT a signature', sig64(`prose\n\n---\n${BARE_FOOTER64}`), null);
 
   // ── Direction 2: the AUTHOR is what fires it — lit controls both ways ─────
   t('⛔ H64: the clean control — comment 5654046782, the same claim shape authored `claude[bot]`', h64UserAuthoredSeatContent(text64('comment', comment5654046782(), carrier64)), null);
@@ -24045,10 +24055,10 @@ async function selfTest() {
   t('H64 boundary: ⛔ the two approver logins appear NOWHERE in this row\'s source-level vocabulary', SEAT_SIGNATURE_FORMS.some((f) => /zhuang|hotlong/.test(String(f.what))), false);
 
   // ── `user.type` is the test; `user.login` is printed, never tested ────────
-  t('H64 author: a `Bot` type is an App, whatever its login', artefactAuthor({ user: { login: 'some-app[bot]', type: 'Bot' } }).isApp, true);
-  t('H64 author: a `User` type is a user account, whatever its login', artefactAuthor({ user: { login: 'claude[bot]', type: 'User' } }).isApp, false);
+  t('H64 author: a `Bot` type is an App, whatever its login', isApp64({ user: { login: 'some-app[bot]', type: 'Bot' } }), true);
+  t('H64 author: a `User` type is a user account, whatever its login', isApp64({ user: { login: 'claude[bot]', type: 'User' } }), false);
   t('⛔ H64 author: `github-actions[bot]` is an App and is NOT this row — the login test would have judged it a user', h64UserAuthoredSeatContent(text64('card', card18045({ user: { login: 'github-actions[bot]', type: 'Bot' } }))), null);
-  t('H64 author: …and the two tests are NOT equivalent, which is why the type one is trusted', 'github-actions[bot]' !== 'claude[bot]' && artefactAuthor({ user: { login: 'github-actions[bot]', type: 'Bot' } }).isApp, true);
+  t('H64 author: …and the two tests are NOT equivalent, which is why the type one is trusted', 'github-actions[bot]' !== 'claude[bot]' && isApp64({ user: { login: 'github-actions[bot]', type: 'Bot' } }) === true, true);
   t('⛔ H64 author: an unreadable `user` is DECLINED, never accused', h64UserAuthoredSeatContent(text64('card', card18045({ user: undefined }))), null);
   t('⛔ H64 author: …and a `user` with no `type` likewise', artefactAuthor({ user: { login: 'os-bill' } }), null);
   t('⛔ H64 author: …and one with no `login`', artefactAuthor({ user: { type: 'User' } }), null);
@@ -24067,19 +24077,19 @@ async function selfTest() {
   // ── The six signature forms, driven WHOLE so none is quietly dropped ──────
   t('H64 forms: the table is exercised whole — six forms', SEAT_SIGNATURE_FORMS.length, 6);
   t('H64 forms: the marker for a claim is the file\'s own, ⛔ not a second spelling', SEAT_SIGNATURE_FORMS[0].test('Claim: x') === CLAIM_COMMENT_MARKER.test('Claim: x'), true);
-  t('H64 forms: …and the report marker likewise', seatSignature('os-dev-report\n\n```json\n{}\n```').kind, 'report');
-  t('H64 forms: …and the review form needs BOTH halves', seatSignature('## Contract review — PASS\n\nReviewed-by: os-zhuang').kind, 'review');
-  t('⛔ H64 forms: …a review HEADING with no `Reviewed-by:` line is not the form', seatSignature('## Contract review — PASS\n\nLooks fine.'), null);
-  t('H64 forms: the filing header reads through its measured decorations', seatSignature('⛔ **Filed by the `domain:cli` execution PM seat** (#6024)').kind, 'filer');
-  t('H64 forms: …and a blockquoted one', seatSignature('> Filed by the PM seat via the maintainer direct-dispatch channel').kind, 'filer');
-  t('⛔ H64 forms: …but not a mention buried mid-paragraph', seatSignature('This card was in the end not Filed by the skills seat at all, it was filed by hand.'), null);
-  t('H64 forms: a bare session id in the head window reads', seatSignature('line one\nline two\nsession_01DAcomhvR9kKizeYgg89Vo8').kind, 'session');
-  t('⛔ H64 forms: …one on the FOURTH line does not — a quoted id mid-body is prose', seatSignature('one\ntwo\nthree\nsession_01DAcomhvR9kKizeYgg89Vo8'), null);
-  t('⛔ H64 forms: prose containing the word claim is not a claim', seatSignature('The seat will claim this next round.'), null);
-  t('⛔ H64 forms: an empty body carries no signature', seatSignature(''), null);
-  t('⛔ H64 forms: …and neither does a missing one', seatSignature(undefined), null);
-  t('H64 forms: ORDER — the filing header outranks the footer on one body', seatSignature(`Filed by the skills seat\n\n---\n${FOOTER64}`).kind, 'filer');
-  t('H64 forms: …and the claim outranks everything', seatSignature(`Claim: x\nFiled by the skills seat\n\n---\n${FOOTER64}`).kind, 'claim');
+  t('H64 forms: …and the report marker likewise', sig64('os-dev-report\n\n```json\n{}\n```'), 'report');
+  t('H64 forms: …and the review form needs BOTH halves', sig64('## Contract review — PASS\n\nReviewed-by: os-zhuang'), 'review');
+  t('⛔ H64 forms: …a review HEADING with no `Reviewed-by:` line is not the form', sig64('## Contract review — PASS\n\nLooks fine.'), null);
+  t('H64 forms: the filing header reads through its measured decorations', sig64('⛔ **Filed by the `domain:cli` execution PM seat** (#6024)'), 'filer');
+  t('H64 forms: …and a blockquoted one', sig64('> Filed by the PM seat via the maintainer direct-dispatch channel'), 'filer');
+  t('⛔ H64 forms: …but not a mention buried mid-paragraph', sig64('This card was in the end not Filed by the skills seat at all, it was filed by hand.'), null);
+  t('H64 forms: a bare session id in the head window reads', sig64('line one\nline two\nsession_01DAcomhvR9kKizeYgg89Vo8'), 'session');
+  t('⛔ H64 forms: …one on the FOURTH line does not — a quoted id mid-body is prose', sig64('one\ntwo\nthree\nsession_01DAcomhvR9kKizeYgg89Vo8'), null);
+  t('⛔ H64 forms: prose containing the word claim is not a claim', sig64('The seat will claim this next round.'), null);
+  t('⛔ H64 forms: an empty body carries no signature', sig64(''), null);
+  t('⛔ H64 forms: …and neither does a missing one', sig64(undefined), null);
+  t('H64 forms: ORDER — the filing header outranks the footer on one body', sig64(`Filed by the skills seat\n\n---\n${FOOTER64}`), 'filer');
+  t('H64 forms: …and the claim outranks everything', sig64(`Claim: x\nFiled by the skills seat\n\n---\n${FOOTER64}`), 'claim');
 
   // ── The pin: legacy is a CENSUS, judged is a row, undated is judged ───────
   t('⛔ H64 pin: a write created BEFORE the pin files no row', h64UserAuthoredSeatContent(text64('card', card18045({ created_at: '2026-09-12T23:59:59Z' }))), null);
@@ -24146,8 +24156,8 @@ async function selfTest() {
   ];
   const grouped64 = h64Sweep(THREAD64);
   t('H64 grouping: three offending comments on one carrier are ONE row', grouped64.counts.rows, 1);
-  t('H64 grouping: …naming the NEWEST of them', grouped64.rows[0].message.includes('comment `2`'), true);
-  t('H64 grouping: …and counting the other two', grouped64.rows[0].message.includes('2 further comment(s)'), true);
+  t('H64 grouping: …naming the NEWEST of them', message64(grouped64).includes('comment `2`'), true);
+  t('H64 grouping: …and counting the other two', message64(grouped64).includes('2 further comment(s)'), true);
   t('H64 grouping: …while the census still counts all three', grouped64.counts.judged, 3);
   t('⛔ H64 grouping: a comment with no readable carrier number is dropped from the rows, never mis-filed', h64Sweep([text64('comment', comment5652138683(), { number: undefined })]).counts.rows, 0);
 
