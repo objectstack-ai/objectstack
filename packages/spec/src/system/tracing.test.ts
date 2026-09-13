@@ -412,8 +412,8 @@ describe('OpenTelemetryCompatibilitySchema', () => {
         batch: {
           maxBatchSize: 1024,
           maxQueueSize: 4096,
-          exportTimeout: 60000,
-          scheduledDelay: 10000,
+          exportTimeoutMs: 60000,
+          scheduledDelayMs: 10000,
         },
       },
       resource: {
@@ -434,7 +434,7 @@ describe('OpenTelemetryCompatibilitySchema', () => {
       },
     });
     
-    expect(config.exporter.timeout).toBe(10000);
+    expect(config.exporter.timeoutMs).toBe(10000);
     expect(config.exporter.compression).toBe('none');
   });
 });
@@ -542,11 +542,148 @@ describe('Span.duration carries its unit (#15679)', () => {
     expect(SpanSchema.safeParse({ ...base, durationMs: -1 }).success).toBe(false);
   });
 
-  it('leaves the OTel exporter `timeout` alone — its describe names no unit, so it is outside the population', () => {
-    const config = OpenTelemetryCompatibilitySchema.parse({
-      exporter: { type: 'console' },
-      resource: { serviceName: 'test' },
+});
+
+// #17785, ruling A on #15939 (per-file remediation of #14478). The four tracing
+// durations whose unit lived in a source JSDoc only — and whose `.describe()`
+// did not exist at all, so the published reference row was a bare integer.
+//
+// This block REPLACES, and relocates, the guard that used to close the #15679
+// describe above: `it('leaves the OTel exporter timeout alone — its describe
+// names no unit, so it is outside the population')`. That pin was written to
+// catch exactly this sweep, so it succeeds by failing: its key, its "names no
+// unit" clause and its "outside the population" clause all go false here. It is
+// replaced by the three-part shape #15679 itself set on this file — a refusal
+// pin asserting the issue CODE and the prescription (never a bare `toThrow()`),
+// an acceptance pin at the same magnitude and the same default, and a describe
+// pin proving the unit now reaches the published channel — and moved out of a
+// describe headed `Span.duration carries its unit`, which is not its subject.
+//
+// These shapes are NOT `.strict()`, so `unrecognized_keys` was never the
+// alternative: a bare deletion would have been a silent strip that lands a
+// default on an exporter deadline.
+describe('the OTel exporter and performance durations carry their unit (#17785)', () => {
+  const otelBase = {
+    exporter: { type: 'console' as const },
+    resource: { serviceName: 'test' },
+  };
+  const tracingBase = { name: 'test_tracing', label: 'Test Tracing' };
+
+  /**
+   * `describe()` is what `content/docs/references/**` publishes; JSDoc is not.
+   *
+   * Descends by `shape`, unwrapping wrappers (`.optional()`, `.default()`) only
+   * to reach a CHILD — never on the leaf, whose `description` `.describe()` set
+   * on the outermost node and which an unwrap would discard.
+   */
+  const shapeOf = (node: unknown): Record<string, unknown> | undefined => {
+    let cur = node as { shape?: Record<string, unknown>; def?: { innerType?: unknown } };
+    while (cur && !cur.shape && cur.def?.innerType) cur = cur.def.innerType as typeof cur;
+    return cur?.shape;
+  };
+  const describeOf = (schema: unknown, path: readonly string[]): string | undefined => {
+    let cursor: unknown = schema;
+    for (const segment of path) {
+      const shape = shapeOf(cursor);
+      if (!shape) return undefined;
+      cursor = shape[segment];
+    }
+    return (cursor as { description?: string } | undefined)?.description;
+  };
+
+  it.each([
+    ['exporter.timeout', 'timeoutMs'],
+    ['exporter.batch.exportTimeout', 'exportTimeoutMs'],
+    ['exporter.batch.scheduledDelay', 'scheduledDelayMs'],
+  ] as const)('REFUSES the retired `%s` with the rename in the message', (retired, renamed) => {
+    const leaf = retired.split('.').pop()!;
+    const body = retired.startsWith('exporter.batch')
+      ? { ...otelBase, exporter: { ...otelBase.exporter, batch: { [leaf]: 1234 } } }
+      : { ...otelBase, exporter: { ...otelBase.exporter, [leaf]: 1234 } };
+    const result = OpenTelemetryCompatibilitySchema.safeParse(body);
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === `${retired}`);
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain(
+      `\`OpenTelemetryCompatibility.${retired}\` was renamed to \`${renamed}\``,
+    );
+  });
+
+  it('REFUSES the retired `performance.exportInterval` with the rename in the message', () => {
+    const result = TracingConfigSchema.safeParse({
+      ...tracingBase,
+      performance: { exportInterval: 1234 },
     });
-    expect(config.exporter.timeout).toBe(10000);
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues
+      .find((i) => i.path.join('.') === 'performance.exportInterval');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain(
+      '`TracingConfig.performance.exportInterval` was renamed to `exportIntervalMs`',
+    );
+  });
+
+  it('accepts the suffixed keys at the same magnitudes, and still applies the same defaults', () => {
+    const authored = OpenTelemetryCompatibilitySchema.parse({
+      ...otelBase,
+      exporter: {
+        ...otelBase.exporter,
+        timeoutMs: 10000,
+        batch: { exportTimeoutMs: 60000, scheduledDelayMs: 10000 },
+      },
+    });
+    expect(authored.exporter.timeoutMs).toBe(10000);
+    expect(authored.exporter.batch?.exportTimeoutMs).toBe(60000);
+    expect(authored.exporter.batch?.scheduledDelayMs).toBe(10000);
+
+    // The defaults the rename must not move: 10000 / 30000 / 5000.
+    const defaulted = OpenTelemetryCompatibilitySchema.parse({
+      ...otelBase,
+      exporter: { ...otelBase.exporter, batch: {} },
+    });
+    expect(defaulted.exporter.timeoutMs).toBe(10000);
+    expect(defaulted.exporter.batch?.exportTimeoutMs).toBe(30000);
+    expect(defaulted.exporter.batch?.scheduledDelayMs).toBe(5000);
+
+    const tracing = TracingConfigSchema.parse({ ...tracingBase, performance: {} });
+    expect(tracing.performance?.exportIntervalMs).toBe(5000);
+    expect(
+      TracingConfigSchema.parse({
+        ...tracingBase,
+        performance: { exportIntervalMs: 250 },
+      }).performance?.exportIntervalMs,
+    ).toBe(250);
+  });
+
+  it('still refuses a non-positive value on each renamed key', () => {
+    expect(OpenTelemetryCompatibilitySchema.safeParse({
+      ...otelBase,
+      exporter: { ...otelBase.exporter, timeoutMs: 0 },
+    }).success).toBe(false);
+    expect(OpenTelemetryCompatibilitySchema.safeParse({
+      ...otelBase,
+      exporter: { ...otelBase.exporter, batch: { exportTimeoutMs: -1 } },
+    }).success).toBe(false);
+    expect(OpenTelemetryCompatibilitySchema.safeParse({
+      ...otelBase,
+      exporter: { ...otelBase.exporter, batch: { scheduledDelayMs: 0 } },
+    }).success).toBe(false);
+    expect(TracingConfigSchema.safeParse({
+      ...tracingBase,
+      performance: { exportIntervalMs: -1 },
+    }).success).toBe(false);
+  });
+
+  it('publishes the unit in the `describe()` the reference pages render', () => {
+    expect(describeOf(OpenTelemetryCompatibilitySchema, ['exporter', 'timeoutMs']))
+      .toBe('Exporter request timeout in milliseconds');
+    expect(describeOf(OpenTelemetryCompatibilitySchema, ['exporter', 'batch', 'exportTimeoutMs']))
+      .toBe('Batch export timeout in milliseconds');
+    expect(describeOf(OpenTelemetryCompatibilitySchema, ['exporter', 'batch', 'scheduledDelayMs']))
+      .toBe('Delay between scheduled batch exports, in milliseconds');
+    expect(describeOf(TracingConfigSchema, ['performance', 'exportIntervalMs']))
+      .toBe('Background span-export interval in milliseconds');
   });
 });

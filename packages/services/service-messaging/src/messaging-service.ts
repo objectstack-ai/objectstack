@@ -3,6 +3,8 @@
 import type { IDataEngine } from '@objectstack/spec/contracts';
 import { isUniqueViolationError } from '@objectstack/types';
 import type {
+    ChannelAvailability,
+    ChannelUnavailableReason,
     MessagingChannel,
     MessagingChannelContext,
     Notification,
@@ -126,6 +128,29 @@ export interface EmitResult {
      */
     readonly enqueued: number;
     readonly failed: number;
+    /**
+     * Channels this emit deliberately did NOT fan out to, because the channel
+     * answered `{ available: false }` for the tenant (ruling on #17732).
+     *
+     * Empty on every path where nothing was suppressed — including an emit
+     * whose channels do not implement the availability member at all, which is
+     * the common case and stays byte-identical to the pre-#17732 behaviour.
+     *
+     * It is here because the alternative is a result that LIES: a two-channel
+     * emit that enqueued one row would otherwise report `enqueued: 1` with
+     * nothing saying the second channel was dropped, which is indistinguishable
+     * from a fan-out bug. The durable record of the same fact is
+     * `sys_notification.suppressed_channels`.
+     */
+    readonly suppressed: readonly ChannelSuppression[];
+}
+
+/** One channel a fan-out skipped, with the channel's own reason. */
+export interface ChannelSuppression {
+    /** The channel id that was not fanned out to (e.g. `email`). */
+    readonly channel: string;
+    /** Why — the closed vocabulary in `CHANNEL_UNAVAILABLE_REASONS`. */
+    readonly reason: ChannelUnavailableReason;
 }
 
 /** Context the service needs: a logger, plus data access for the L2 event. */
@@ -857,6 +882,13 @@ export class MessagingService {
      * never aborts the rest of the fan-out. A `dedupKey` that matches an
      * existing event short-circuits: the event id is returned and no new
      * deliveries are produced.
+     *
+     * A channel that answers `isAvailable: { available: false }` for the tenant
+     * is dropped BEFORE anything is written for it (ruling on #17732): no
+     * `sys_notification_delivery` row, no `send()` call, and the suppression
+     * plus its reason recorded on the `sys_notification` event row instead.
+     * Every other channel — including every channel that does not implement the
+     * member — fans out exactly as before.
      */
     async emit(input: EmitInput): Promise<EmitResult> {
         const data = this.ctx.getData?.();
@@ -868,9 +900,22 @@ export class MessagingService {
                 this.ctx.logger.info(
                     `[messaging] emit: dedupKey '${input.dedupKey}' already emitted (${existing}); skipping`,
                 );
-                return { notificationId: existing, deduped: true, deliveries: [], delivered: 0, enqueued: 0, failed: 0 };
+                return { notificationId: existing, deduped: true, deliveries: [], delivered: 0, enqueued: 0, failed: 0, suppressed: [] };
             }
         }
+
+        // 1b) Channel availability (ruling on #17732 item 2). Asked ONCE PER
+        //     CHANNEL — the answer is a property of (tenant × channel), not of a
+        //     recipient — and asked HERE, before the event write, so the
+        //     suppression lands in the SAME insert that creates the event row.
+        //     That is what keeps the whole feature at zero extra writes: no
+        //     follow-up `update` on `sys_notification`, and one fewer delivery
+        //     row for every channel that could only have dead-lettered.
+        const requestedChannels = input.channels?.length ? input.channels : ['inbox'];
+        const { available: channels, suppressed } = await this.resolveChannelAvailability(
+            requestedChannels,
+            input.organizationId,
+        );
 
         // 2) Write the L2 event (or synthesize an id when there is no data layer).
         //    The check at (1) is a fast-path. Where the driver materializes the
@@ -883,7 +928,7 @@ export class MessagingService {
         //    best-effort fast-path — the catch is then simply never taken.)
         let notificationId: string;
         try {
-            notificationId = await this.writeEvent(data, input);
+            notificationId = await this.writeEvent(data, input, suppressed);
         } catch (err) {
             if (input.dedupKey && data) {
                 const winner = await this.findEventByDedupKey(data, input.dedupKey);
@@ -891,7 +936,7 @@ export class MessagingService {
                     this.ctx.logger.info(
                         `[messaging] emit: dedupKey '${input.dedupKey}' raced; converged to ${winner}`,
                     );
-                    return { notificationId: winner, deduped: true, deliveries: [], delivered: 0, enqueued: 0, failed: 0 };
+                    return { notificationId: winner, deduped: true, deliveries: [], delivered: 0, enqueued: 0, failed: 0, suppressed: [] };
                 }
             }
             throw err;
@@ -904,13 +949,24 @@ export class MessagingService {
         });
         if (recipients.length === 0) {
             this.ctx.logger.warn(`[messaging] emit: topic '${input.topic}' resolved to 0 recipients`);
-            return { notificationId, deduped: false, deliveries: [], delivered: 0, enqueued: 0, failed: 0 };
+            return { notificationId, deduped: false, deliveries: [], delivered: 0, enqueued: 0, failed: 0, suppressed };
+        }
+
+        // 3a) Every requested channel is unavailable for this tenant. The event
+        //     is already written and carries the reasons — there is simply
+        //     nothing to enqueue. Said once, at `info`: the loss is FUNCTIONAL
+        //     and fully visible on the event row, not silent data loss.
+        if (channels.length === 0) {
+            this.ctx.logger.info(
+                `[messaging] emit: topic '${input.topic}' has no available channel ` +
+                `(${suppressed.map((s) => `${s.channel}: ${s.reason}`).join(', ')}); no delivery rows written`,
+            );
+            return { notificationId, deduped: false, deliveries: [], delivered: 0, enqueued: 0, failed: 0, suppressed };
         }
 
         // 3b) Preference filter (ADR-0030 P2): drop the (recipient × channel)
         //     pairs the user muted. Mandatory topics bypass; fail-open on error.
         const payload = input.payload ?? {};
-        const channels = input.channels?.length ? input.channels : ['inbox'];
         const targets = await this.preferences.filter(recipients, channels, {
             topic: input.topic,
             organizationId: input.organizationId,
@@ -918,7 +974,7 @@ export class MessagingService {
         });
         if (targets.length === 0) {
             this.ctx.logger.info(`[messaging] emit: topic '${input.topic}' suppressed for all recipients by preference`);
-            return { notificationId, deduped: false, deliveries: [], delivered: 0, enqueued: 0, failed: 0 };
+            return { notificationId, deduped: false, deliveries: [], delivered: 0, enqueued: 0, failed: 0, suppressed };
         }
 
         // 4) Either enqueue durable deliveries (P1 outbox) or fan out inline (P0).
@@ -938,6 +994,7 @@ export class MessagingService {
             return {
                 notificationId, deduped: false, deliveries,
                 delivered: 0, enqueued, failed: deliveries.length - enqueued,
+                suppressed,
             };
         }
 
@@ -949,7 +1006,11 @@ export class MessagingService {
             body: str(payload.body) ?? '',
             severity: input.severity ?? 'info',
             recipients,
-            channels: input.channels,
+            // The channels that SURVIVED the availability consult — a channel
+            // that answered unavailable is not advertised to the ones that did.
+            // Absent stays absent: a producer that named no channels still gets
+            // `undefined` here, exactly as before.
+            channels: input.channels ? channels : undefined,
             actionUrl: actionUrlFor(input, payload),
             // Who caused it, projected onto the per-recipient unit so a channel
             // can materialize it without reading `sys_notification` back.
@@ -960,7 +1021,63 @@ export class MessagingService {
         // Inline (P0): every channel has already answered, so `delivered` is a
         // real terminal count and nothing is left in flight.
         const { deliveries, delivered, failed } = await this.fanOut(notification, targets);
-        return { notificationId, deduped: false, deliveries, delivered, enqueued: 0, failed };
+        return { notificationId, deduped: false, deliveries, delivered, enqueued: 0, failed, suppressed };
+    }
+
+    /**
+     * Split the requested channels into the ones that can actually send for
+     * this tenant and the ones that answered they cannot (ruling on #17732).
+     *
+     * Three deliberate properties:
+     *
+     * 1. **A channel with no `isAvailable` is AVAILABLE.** The member is
+     *    optional precisely so every channel implementation that predates it —
+     *    ours and anyone else's — keeps working unchanged. Inverting this
+     *    default would mute every channel that has not been updated, which is a
+     *    far worse failure than the workless rows this exists to stop.
+     *    `channel-availability.test.ts` pins it from both sides.
+     * 2. **An UNREGISTERED channel is left alone.** It has no implementation to
+     *    ask, so it keeps today's path exactly: the inline fan-out reports it as
+     *    a failed delivery, the outbox enqueues a row the dispatcher
+     *    dead-letters. That is a real, separate defect — it is filed, ⛔ not
+     *    widened into this ruling.
+     * 3. **A throw is AVAILABLE.** Fail-open, matching the preference filter one
+     *    step down: a broken probe must degrade into today's behaviour, never
+     *    into a silent notification outage. Logged at `warn` — the degradation
+     *    is functional and self-announcing (the delivery still happens), not a
+     *    durability loss.
+     *
+     * Called once per channel per emit. ⛔ No cache: the probe is answered from
+     * in-memory composition state, and a tick-scoped cache here would serve a
+     * stale answer straight through a live settings change.
+     */
+    private async resolveChannelAvailability(
+        requested: readonly string[],
+        organizationId: string | undefined,
+    ): Promise<{ available: string[]; suppressed: ChannelSuppression[] }> {
+        const available: string[] = [];
+        const suppressed: ChannelSuppression[] = [];
+        for (const id of requested) {
+            const channel = this.channels.get(id);
+            if (!channel?.isAvailable) {
+                available.push(id);
+                continue;
+            }
+            let answer: ChannelAvailability;
+            try {
+                answer = await channel.isAvailable(this.ctx, { organizationId });
+            } catch (err) {
+                this.ctx.logger.warn(
+                    `[messaging] channel '${id}' availability probe threw (${(err as Error)?.message ?? String(err)}); ` +
+                    `treating it as available and fanning out as before`,
+                );
+                available.push(id);
+                continue;
+            }
+            if (answer.available) available.push(id);
+            else suppressed.push({ channel: id, reason: answer.reason });
+        }
+        return { available, suppressed };
     }
 
     /**
@@ -1035,7 +1152,11 @@ export class MessagingService {
      * Persist the L2 event and return its id. With no data layer (minimal/test
      * stacks) we warn and synthesize an id so fan-out can still be exercised.
      */
-    private async writeEvent(data: IDataEngine | undefined, input: EmitInput): Promise<string> {
+    private async writeEvent(
+        data: IDataEngine | undefined,
+        input: EmitInput,
+        suppressed: readonly ChannelSuppression[],
+    ): Promise<string> {
         if (!data) {
             this.ctx.logger.warn('[messaging] no data engine registered; event not persisted');
             return `evt_${Math.random().toString(36).slice(2)}`;
@@ -1054,6 +1175,21 @@ export class MessagingService {
             organization_id: input.organizationId ?? null,
             created_at: this.now(),
         };
+        // [#17732] The channels fan-out will not even attempt, and why —
+        // present ONLY when there is something to say.
+        //
+        // ⛔ Not `suppressed_channels: … ?? null` alongside the keys above. An
+        // insert names its columns, and naming a NEW one on EVERY emit makes
+        // every emit depend on every `sys_notification` schema in the world
+        // already carrying it: a stack whose object predates this column gets
+        // `INVALID_FIELD: Unknown field 'suppressed_channels'` and loses the
+        // whole notification — to record that nothing was suppressed. Written
+        // this way the common path's column set is byte-for-byte what it was
+        // before this change, and the column appears exactly when it carries
+        // information. The pin is in `channel-availability.test.ts`.
+        if (suppressed.length > 0) {
+            row.suppressed_channels = suppressed.map((s) => ({ ...s }));
+        }
         const created = await data.insert(NOTIFICATION_EVENT_OBJECT, row);
         const id = Array.isArray(created) ? created[0]?.id : created?.id ?? created;
         return id != null ? String(id) : `evt_${Math.random().toString(36).slice(2)}`;

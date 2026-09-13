@@ -886,8 +886,9 @@ export class AppPlugin implements Plugin {
                         },
                     );
                 } else {
-                    const rawSecurityBundle: any = this.collections.manifest
-                        ? { ...this.collections.manifest, ...this.collections }
+                    const manifestSource: any = this.collections.manifest;
+                    const rawSecurityBundle: any = manifestSource
+                        ? { ...manifestSource, ...this.collections }
                         : this.collections;
                     // [#12844] Same bytes, same conversion policy — one funnel.
                     //
@@ -923,11 +924,71 @@ export class AppPlugin implements Plugin {
                     let count = 0;
                     for (const [field, type] of SECURITY_FIELDS) {
                         const arr = securityBundle?.[field];
-                        if (!Array.isArray(arr)) continue;
-                        for (const item of arr) {
-                            if (!item?.name) continue;
-                            metadata.registerInMemory(type, item.name, item);
-                            count += 1;
+                        // [#18034] Which SOURCE the value above came from, decided
+                        // on the RAW inputs rather than on the flattened copy: the
+                        // manifest contributed this key only when the stack's own
+                        // collections do not declare it, because `{ ...manifest,
+                        // ...collections }` lets the stack win. Computed here and
+                        // not from `securityBundle` because the ADR-0087 pass can
+                        // rewrite a COLLECTION KEY (`roles` -> `positions`), and a
+                        // key the conversion produced came from the stack.
+                        const fromManifest = manifestSource !== undefined
+                            && manifestSource !== null
+                            && manifestSource[field] !== undefined
+                            && (this.collections as any)[field] === undefined;
+                        let dropped = 0;
+                        let members = 0;
+                        if (Array.isArray(arr)) {
+                            members = arr.length;
+                            for (const item of arr) {
+                                if (!item?.name) { dropped += 1; continue; }
+                                metadata.registerInMemory(type, item.name, item);
+                                count += 1;
+                            }
+                        }
+                        // The registrar wants ADR-0090 `PermissionSet[]`; the key
+                        // it just read off the MANIFEST means something else, and
+                        // skipping it is the right outcome. Saying nothing is not
+                        // (AGENTS.md, Route & surface ownership §3 — absence must
+                        // be loud). ⛔ The loop is NOT made tolerant of the other
+                        // reading: widening the key was rejected by name (#14242
+                        // road C, maintainer 2026-09-02).
+                        //
+                        // Measured against `ManifestSchema`, `permissions` is the
+                        // one `SECURITY_FIELDS` key that can arrive this way at
+                        // all: `capabilities` is a `retiredKey()` tombstone that
+                        // refuses any value at parse, and `positions` /
+                        // `sharingRules` are undeclared on a `strictObject`. The
+                        // report is written per field anyway, because a bundle
+                        // that never reached that parse can still carry them and
+                        // this block is the last reader before the value is gone.
+                        //
+                        // `warn`, not `error`: nothing here claimed to persist
+                        // anything — a permission set is simply not registered and
+                        // the next person to look for it finds out. Once per boot,
+                        // because `start()` runs once per app per kernel.
+                        if (fromManifest && (dropped > 0 || !Array.isArray(arr))) {
+                            ctx.logger.warn(
+                                `[AppPlugin] \`manifest.${field}\` reached the stack-declared \`${type}\` `
+                                + `registrar, which cannot read it: ${Array.isArray(arr)
+                                    ? `it dropped ${dropped} of ${members} entr${members === 1 ? 'y' : 'ies'}, `
+                                      + `because a \`${type}\` is identified by its \`name\` and `
+                                      + `${dropped === 1 ? 'that entry carries' : 'those entries carry'} none`
+                                    : `the value is ${arr === null ? '`null`' : `${/^[aeiou]/i.test(typeof arr) ? 'an' : 'a'} ${typeof arr}`}, `
+                                      + 'not a list, so the whole of it was skipped'}`
+                                + `. ${field === 'permissions'
+                                    ? 'Nothing is lost if an ADR-0025 §3.2 capability GRANT was meant — '
+                                      + '`manifest.permissions` is the manifest-stage grant a package requests '
+                                      + '(a flat list of permission strings, or `{ services, hooks, network, fs }`), '
+                                      + 'and this registrar only reads ADR-0090 permission sets. But if permission '
+                                      + 'sets were meant, none is registered, no audience-binding suggestion is '
+                                      + 'offered, and the boot goes on looking healthy'
+                                    : `\`${field}\` is not a key \`ManifestSchema\` declares, so this value reached `
+                                      + 'the runtime without passing an authoring parse'}`
+                                + `. Declare the collection at the stack's own top level — `
+                                + `\`defineStack({ ${field}: [ … ] })\` — not on the manifest.`,
+                                { appId, field, type, dropped, members, registrar: this.securityMetadataRegistrar },
+                            );
                         }
                     }
                     if (count > 0) {

@@ -36,11 +36,14 @@
  * compiles every measure in ONE dataset, a single refused pair reds the whole
  * section.
  *
- * ⇒ The `min` / `max` population is one question and it is #17513's. The line
- * this card cuts is the one this package already draws — `measureResultType`
- * branches on exactly `min` / `max`, because those SELECT a stored value while
- * `sum` / `avg` DERIVE a number — so the deriving aggregates are judged over
- * every field type and the selecting ones are not judged here at all.
+ * ⇒ The `min` / `max` population is one question. ⚠️ [#17560] It has since been
+ * ANSWERED, in one pass: the director ruling of decision batch #127
+ * (2026-09-13) refused all 74 of those pairs and enforced them through this
+ * same door — the string classes stay refused as batch #59 ruled, the
+ * non-string classes are refused and enforced, and `formula` is refused on the
+ * table's own storage ground. So the aggregate-class line this card cut is
+ * gone: every aggregate is judged over every field type, and the two cases at
+ * the foot of this file are where that move is visible.
  *
  * ## Dissolution verification — direction predicted BEFORE running
  *
@@ -59,7 +62,7 @@ import {
 } from '@objectstack/spec/data';
 import { DatasetSchema } from '@objectstack/spec/ui';
 import { AnalyticsService } from '../analytics-service.js';
-import { TEMPORAL_SOURCE_FIELD_TYPES, STRING_SOURCE_FIELD_TYPES } from '../measure-result-type.js';
+import { TEMPORAL_SOURCE_FIELD_TYPES } from '../measure-result-type.js';
 
 /**
  * One declared field per class the refusal population touches, plus the
@@ -154,25 +157,31 @@ describe('#16099 — the pairs this leg refuses are the TABLE\'s, not this packa
     expect(isAggregateCompatibleWithFieldType('avg', 'percent')).toBe(true);
   });
 
-  it('⭐ the residual set, enumerated with its subtraction — 107 pairs, 75 of them this leg\'s', () => {
-    // The arithmetic the PR body shows, asserted rather than narrated, so a
+  it('⭐ the refused set, enumerated by the card that enforced each part — 155 pairs, 0 left over', () => {
+    // The arithmetic the PR bodies show, asserted rather than narrated, so a
     // row moving upstream moves this count instead of leaving a stale claim.
-    let refusedByTable = 0, temporal = 0, minmaxString = 0, deriving = 0, selecting = 0;
+    // ⚠️ [#17560] The `minmaxString` / `selecting` split this case used to carry
+    // is retired with the reading behind it: the 42 string pairs were counted
+    // apart because they were "ruled to be AMENDED" under #17513, and decision
+    // batch #127 found no ruling behind that and declined to amend the table.
+    // The 42 and the 32 are one population again, enforced in one pass.
+    let refusedByTable = 0, temporal = 0, deriving = 0, selecting = 0;
     for (const a of Object.keys(AGGREGATE_FIELD_TYPE_COMPATIBILITY)) {
       for (const ft of FieldType.options) {
         if (isAggregateCompatibleWithFieldType(a, ft)) continue;
         refusedByTable++;
+        if (a === 'min' || a === 'max') { selecting++; continue; }
         if (TEMPORAL_SOURCE_FIELD_TYPES.has(ft)) { temporal++; continue; }
-        if ((a === 'min' || a === 'max') && STRING_SOURCE_FIELD_TYPES.has(ft)) { minmaxString++; continue; }
-        if (a === 'sum' || a === 'avg') deriving++; else selecting++;
+        deriving++;
       }
     }
     expect(refusedByTable).toBe(155);
-    expect(temporal).toBe(6);          // #16778's, already enforced
-    expect(minmaxString).toBe(42);     // #17513's, ruled to be AMENDED
-    expect(deriving).toBe(75);         // this card's
-    expect(selecting).toBe(32);        // reported, NOT enforced — see the header
-    expect(temporal + minmaxString + deriving + selecting).toBe(refusedByTable);
+    expect(temporal).toBe(6);          // #16778's — `sum`/`avg` over the temporal class
+    expect(deriving).toBe(75);         // #16099's — `sum`/`avg` over everything else
+    expect(selecting).toBe(74);        // #17560's — `min`/`max`, 42 string + 32 non-string
+    expect(temporal + deriving + selecting).toBe(refusedByTable);
+    // ⭐ And nothing is left declared-but-unenforced: one door judges all six.
+    expect(Object.keys(AGGREGATE_FIELD_TYPE_COMPATIBILITY).length).toBe(6);
   });
 });
 
@@ -258,23 +267,63 @@ describe('#16099 — the controls: every pair the table accepts still compiles',
     }
   }
 
-  it('⛔ `min` / `max` are NOT judged by this gate — #17513\'s population, untouched', async () => {
-    // Driven over one member of every class this gate refuses for `sum`/`avg`,
-    // INCLUDING `json` and `formula` — the two that are in no ruling's scope and
-    // are nonetheless pinned end to end by `measure-result-type.test.ts`. This
-    // is the case that goes red if a later change widens the gate past the
-    // deriving aggregates without moving that ruling first.
+  it('⭐ `min` / `max` ARE judged by this gate now — the pin FLIPPED, naming batch #59 and #17560', async () => {
+    // ⚠️ This case asserted the OPPOSITE until #17560, over exactly these pairs:
+    // "`min` / `max` are NOT judged by this gate — #17513's population,
+    // untouched", and its own comment predicted in writing that it "goes red if
+    // a later change widens the gate past the deriving aggregates WITHOUT
+    // MOVING THAT RULING FIRST". The ruling moved first: decision batch #127
+    // (2026-09-13, #17560) found that the "ruled C" the tree cited had no
+    // ruling behind it, that the one recorded ruling on this table — decision
+    // batch #59 (2026-09-06) — refuses these rows, and that all 74 unenforced
+    // `min` / `max` pairs are refused and enforced in one pass. ⛔ So the pin is
+    // FLIPPED rather than deleted: the same pairs, through the same door,
+    // asserting the answer the platform now gives.
     for (const aggregate of ['min', 'max'] as const) {
       for (const [field, declared] of [
         ['note', 'text'], ['stage', 'select'], ['owner_id', 'lookup'], ['case_no', 'autonumber'],
         ['payload', 'json'], ['margin', 'formula'], ['tags_list', 'multiselect'],
       ] as const) {
+        // Not vacuous: if the table ever ACCEPTED one of these the expectation
+        // below would be asserting the wrong contract.
+        expect(isAggregateCompatibleWithFieldType(aggregate, declared), `${aggregate} × ${declared}`).toBe(false);
         const { go, sqls } = run(aggregate, field, [{ status: 'open', probe_measure: 'x' }]);
+        const err = await refusalOf(go);
+        expect(err.code, `${aggregate} × ${declared}`).toBe('DATASET_INVALID');
+        expect(err.status, `${aggregate} × ${declared}`).toBe(400);
+        expect(err.message).toContain(declared);
+        // Refused BEFORE the driver — the assertion that would catch a gate
+        // that "refused" by returning an empty result instead.
+        expect(sqls.length, `${aggregate} × ${declared}`).toBe(0);
+      }
+    }
+  });
+
+  it('⭐ the negative control on the same axis: `min` / `max` over an ACCEPTED type still compiles', async () => {
+    // The case that fails if the widened gate started refusing everything
+    // rather than exactly what the table refuses.
+    for (const aggregate of ['min', 'max'] as const) {
+      for (const [field, declared] of [
+        ['cycle_days', 'number'], ['amount', 'currency'], ['submitted_at', 'datetime'],
+        ['is_urgent', 'boolean'], ['child_total', 'summary'],
+      ] as const) {
+        expect(isAggregateCompatibleWithFieldType(aggregate, declared), `${aggregate} × ${declared}`).toBe(true);
+        const { go, sqls } = run(aggregate, field, [{ status: 'open', probe_measure: 1 }]);
         const result: any = await go();
         expect(result.rows.length, `${aggregate} × ${declared}`).toBe(1);
         expect(sqls.length, `${aggregate} × ${declared}`).toBe(1);
       }
     }
+  });
+
+  it('the SELECTING remedy is the one a `min` / `max` refusal prints — not the deriving one', async () => {
+    // The messages are not interchangeable: `sum` over a text column diverges
+    // on ARITHMETIC, `min` over one diverges on ORDER, and the prescription
+    // differs with it (store a number vs sort the record list).
+    const err = await refusalOf(run('min', 'note').go);
+    expect(err.message).toContain('SELECTS one of the stored values');
+    expect(err.message).toContain('collation-dependent');
+    expect(err.message).not.toContain('derives a NUMBER');
   });
 
   it('`count` / `count_distinct` accept every type — they read no arithmetic off the value', async () => {

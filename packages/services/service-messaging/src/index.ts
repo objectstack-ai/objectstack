@@ -21,6 +21,7 @@ export type { MessagingServicePluginOptions } from './messaging-service-plugin.j
 // Service + types
 export { MessagingService, NOTIFICATION_EVENT_OBJECT } from './messaging-service.js';
 export type {
+    ChannelSuppression,
     DeliveryOutcome,
     EmitResult,
     EmitInput,
@@ -91,7 +92,14 @@ export type {
     Delivery,
     SendResult,
     ErrorClass,
+    // [#17732] The optional per-tenant availability query and its closed
+    // reason vocabulary — fan-out writes no delivery row for a channel that
+    // answers unavailable.
+    ChannelAvailability,
+    ChannelAvailabilityQuery,
+    ChannelUnavailableReason,
 } from './channel.js';
+export { CHANNEL_UNAVAILABLE_REASONS } from './channel.js';
 
 // Reliable delivery — outbox + dispatcher (ADR-0030 P1)
 export type {

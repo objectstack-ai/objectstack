@@ -2347,6 +2347,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           critical: "critical"
         }
       },
+      suppressed_channels: {
+        label: "Suppressed Channels",
+        help: "Channels fan-out skipped because they are unavailable for this tenant, as [{channel, reason}]; reason is the closed set: transport_not_configured"
+      },
       dedup_key: {
         label: "Dedup Key",
         help: "Idempotency key within a topic window; a repeat emit is a no-op"

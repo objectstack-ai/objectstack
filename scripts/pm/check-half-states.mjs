@@ -13666,6 +13666,440 @@ export function h61LandedCarrierStillGated(row) {
 }
 
 // ---------------------------------------------------------------------------
+// H62 (#17009) — a decision card whose FACE carries no machine-findable
+// four-facet block
+//
+// ## The invariant and where it is written
+//
+// `.claude/skills/pm-dispatch/references/decision-analysis.md`
+// 〈四棱卡面块固定形状〉 fixes the shape of a decision card's face and makes it a
+// FILING duty: 「落卡即带,⛔ 不留待维护者到场再补」. Two of that section's lines
+// are mechanical, and they are the two facts this row reads:
+//
+//   - 「首行机器可寻标记 `os-decision-facets`:纯文本单行与其 HTML 注释形等价,
+//     任一即满足。」 — the marker, in EITHER spelling.
+//   - 「四棱后一行:`Prior rulings read: …`;未搜成整行写 unresolved。」 — the
+//     prior-ruling reading, the SECOND fact the shape requires.
+//
+// ## Why a row at all — the marker was declared machine-findable and read by
+// NOTHING
+//
+// Measured by #17009's own D1 and re-measured here on `origin/main`:
+// `git grep -n os-decision-facets origin/main -- scripts .claude` returns
+// exactly ONE hit, the declaration itself, with a positive control
+// (`needs-user-decision` reaches seven files under `scripts/`). A marker
+// declared 机器可寻 with no reader is #10034's shape — a written step nobody
+// executes — and the card this row lands for exists because a decision reached
+// the maintainer over an option set an accepted ADR had already closed
+// (#16934 / ADR-0131 D8). The facet block and the prior-ruling line are what
+// make that visible ON THE CARD FACE, and nothing was checking that either had
+// been written: 5 of 27 open decision cards carried the marker at the D1
+// reading.
+//
+// ## Population, and why BODY only
+//
+// OPEN cards carrying `GOVERNED_PR_DECISION_LABEL` — the constant H48 and H52
+// already own, ⛔ never a second spelling. The listing is the UNSCOPED open one
+// (H13/H18/H31's channel) for their reason: `needs-user-decision` is not a
+// member of `SEEN_LABEL_PAGES`, so a decision card carrying no `pm:*` state is
+// first visible there.
+//
+// BODY only, and that is the shape's own decision rather than a saving:
+// 「落卡即带」 makes the block part of the card FACE, so a marker parked in a
+// comment is not the shape. This row therefore buys no thread at all, and says
+// in its sentence that the body is the whole of what it read — ⛔ never a silent
+// single-channel read of a two-channel duty (H4's contract, which does not
+// apply here because the duty itself is one-channel).
+//
+// ## The reading is a LITERAL grep, with no stripping and no position test
+//
+// The shape names its own extraction rule — 「写后回读,提取按字面 grep」 — and
+// forbids exactly ONE direction of error: 「⛔ 注释形读不到永不读作无四棱块」. A
+// literal containment test over the raw body satisfies both spellings at once,
+// which is why the declaration can call them 等价.
+//
+// Two tightenings are therefore refused by name, each because it produces the
+// forbidden direction on a real card:
+//
+//   - `stripMarkdownCode` (H7 reading 4's careful-author protection, right in
+//     its own place) would blank a marker a filer wrote inside a fenced block
+//     or a code span and report a card that HAS the block as having none.
+//   - a positional test (「首行」 read as the body's first line) would report as
+//     absent every card whose facet block sits where the template puts it —
+//     after the six-item prose — which is every correctly filed card.
+//
+// The cheap error in the other direction is accepted and stated: a card that
+// merely QUOTES the token (a card ABOUT the marker) reads as clean. That is the
+// trade the shape prescribes, and this row is report-only, so the cost of the
+// accepted error is one unreported card rather than a wrong write.
+//
+// ## The prior-ruling line is a SECOND READING on this row, never a second row
+//
+// The shape requires two facts, and they fail together far more often than
+// separately — but a card that carries the marker and not the line is NOT a
+// finding here. One breach is reported once, and the row this card was graded
+// for is the facet-block presence row; a second row over the second fact would
+// be a second family for one section of one protocol file. So the line is read
+// for every card this row fires on and named in the row text in three values:
+//
+//   `present`     a `Prior rulings read:` line whose value is a real reading
+//   `unresolved`  the line exists and says the search did not run — which the
+//                 shape spells deliberately so it can never be read as `none`
+//   `absent`      no such line at all
+//
+// `absent` and `unresolved` are different facts and the row keeps them apart
+// (#4690): one says nobody wrote the reading, the other says a seat wrote down
+// that it could not take it.
+//
+// The line's WRITER is `check-prior-rulings.mjs`'s `formatPasteLine`, and this
+// reader is coupled to it by SOURCE TEXT rather than by import, because NEITHER
+// import direction runs. That module imports THIS one (the board resolver and
+// the proxy plan), and both ways back were measured on this tree:
+//
+//   static   a cycle. `check-prior-rulings.mjs` derives module-level constants
+//            from what it imports here, so importing it from this file throws
+//            `ReferenceError: Cannot access … before initialization` the moment
+//            THIS file is the entry point — which it is on every patrol run and
+//            every `--self-test`.
+//   dynamic  a deadlock. `await import(…)` inside `selfTest()` cannot settle:
+//            this module's own top-level `await selfTest()` is still pending,
+//            so the sibling can never finish linking against it. Node reports
+//            `unsettled top-level await` and exits 13.
+//
+// So the self-test reads the writer's SOURCE — the way `familyRegistryCoverage`
+// reads this file's — and pins that it still prints the key this reader greps
+// and still spells the not-run reading `unresolved`. A rename of the line reds
+// there instead of silently emptying this row's second reading. ⛔ Do not
+// "upgrade" that pin to an import: both directions are measured above.
+//
+// ## Free, and report-only
+//
+// One label read and one body read on a card the unscoped listing already
+// holds — no request. ⛔ Never a label written from this script, ⛔ never a
+// remedy write, and ⛔ never a gate over the marker: WHICH ruling governs a
+// decision card is a seat's reading and the maintainer's (SKILL.md
+// 〈升级与决策〉③), and a blocking context over that judgement would be a
+// required-set change, which is the maintainer's.
+// ---------------------------------------------------------------------------
+
+/**
+ * The machine-findable marker a decision card's four-facet block carries.
+ * ⛔ ONE spelling of the token here, because the declaration makes the
+ * plain-text line and its HTML-comment form 等价 — the comment wrapper is
+ * decoration around this token, so a literal containment test reads both.
+ */
+export const DECISION_FACET_MARKER = 'os-decision-facets';
+
+/** The key of the line the shape puts after the four facets. */
+export const PRIOR_RULINGS_KEY = 'Prior rulings read';
+
+/**
+ * The value that says the search did not run. The shape spells it separately
+ * from `none` on purpose — `none` is a search that ran and found nothing, and
+ * collapsing the two would render "could not read the input" as clean (#4690).
+ */
+export const PRIOR_RULINGS_UNRESOLVED = 'unresolved';
+
+/**
+ * Does this body carry the four-facet block's marker, in either spelling?
+ *
+ * A literal containment test over the RAW body — the extraction rule the shape
+ * names for itself (「提取按字面 grep」). ⛔ Not code-stripped and ⛔ not
+ * positional; the banner above argues both refusals from the shape's own
+ * one-directional error rule.
+ */
+export function hasDecisionFacetMarker(body) {
+  return String(body ?? '').includes(DECISION_FACET_MARKER);
+}
+
+/**
+ * The prior-ruling line's reading: `'present'`, `'unresolved'` or `'absent'`.
+ *
+ * Read through `directiveValues`, so the decoration a seat writes around a line
+ * meant to be grepped (backticks, bold, a list marker) is tolerated exactly as
+ * it is for `Blocked-by:` and `Restart-when:` — one decoration contract for
+ * every directive line in this file.
+ *
+ * A card carrying several lines is `present` if ANY of them is a real reading:
+ * one unresolved attempt beside a completed one is a completed search.
+ */
+export function priorRulingsReading(body) {
+  const values = directiveValues(body, PRIOR_RULINGS_KEY);
+  if (values.length === 0) return 'absent';
+  const unresolved = new RegExp(`^${PRIOR_RULINGS_UNRESOLVED}\\b`, 'i');
+  return values.some((v) => !unresolved.test(v)) ? 'present' : 'unresolved';
+}
+
+/**
+ * Does H62 speak about this card at all? ISSUES only, never a PR; a CLOSED card
+ * is out (the label on it is residue, H22/H39's reading); an unreadable
+ * `labels` is out and never read as unlabelled (#4690).
+ */
+export function h62SpeaksAbout(issue) {
+  if (issue?.pull_request) return false;
+  if (issue?.state === 'closed') return false;
+  if (!Array.isArray(issue?.labels)) return false;
+  return labelNames(issue).includes(GOVERNED_PR_DECISION_LABEL);
+}
+
+/**
+ * H62 — null when the card is out of scope or its body carries the marker, else
+ * the finding sentence, which also carries the prior-ruling line's reading.
+ *
+ * ⛔ No angle-bracket placeholder in the sentence: it is rendered into a GitHub
+ * issue body and the platform mutates less-than fragments, so the HTML-comment
+ * spelling is named in WORDS and the self-test pins the absence.
+ */
+export function h62DecisionCardWithoutFacetBlock(issue) {
+  if (!h62SpeaksAbout(issue)) return null;
+  if (hasDecisionFacetMarker(issue?.body)) return null;
+  const prior = priorRulingsReading(issue?.body);
+  const second =
+    prior === 'present'
+      ? `And the second fact the shape requires IS on the face: a \`${PRIOR_RULINGS_KEY}:\` line ` +
+        'carrying a real reading. So what is missing here is the block and its marker, not the search.'
+      : prior === 'unresolved'
+        ? `And the \`${PRIOR_RULINGS_KEY}:\` line the shape puts after the four facets reads ` +
+          `\`${PRIOR_RULINGS_UNRESOLVED}\` — a seat recorded that the prior-ruling search did NOT run. ` +
+          'That is an honest reading and ⛔ not a second finding; it is why the facet block matters ' +
+          'more on this card, not less.'
+        : `And the \`${PRIOR_RULINGS_KEY}:\` line the shape puts after the four facets is ABSENT too — ` +
+          'so nothing on this face says whether a prior-ruling search was ever taken, which is the ' +
+          'exact gap #15929\'s text-level remedy left open and #16934 fell into (a card presented for ' +
+          'a question ADR-0131 D8 already decides).';
+  return (
+    `\`${GOVERNED_PR_DECISION_LABEL}\` and its BODY carries no \`${DECISION_FACET_MARKER}\` marker in ` +
+    'EITHER spelling — neither the plain-text line nor its HTML-comment form — so the four-facet block ' +
+    '〈四棱卡面块固定形状〉 requires is not machine-findable on the card face. 「落卡即带,⛔ 不留待维护者' +
+    '到场再补」: the block is a FILING duty, so a marker parked in a COMMENT is not the shape and this ' +
+    `row read the body alone. ${second} Remedy — WHO and HOW: the FILING seat, in one body edit that ` +
+    'adds the marker line and the four facets (`pnpm check:pm-prior-rulings` prints the prior-ruling ' +
+    'line ready to paste for the same card). ⛔ Report-only: never a label written from this script, ' +
+    'and ⛔ never a gate over the marker — WHICH ruling governs is a seat\'s reading and the ' +
+    'maintainer\'s (SKILL.md 〈升级与决策〉③). Boundaries: a card that CARRIES the marker is clean here ' +
+    'whatever else its face says — the prior-ruling line is a reading ON this row and never a row of ' +
+    'its own; closed-card residue is H22/H39\'s; a decision card nobody routed is H52\'s.'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The stale-`finding` screen — ONE rule, two readers (#16904)
+//
+// `finding` is defined by the state model as a TRANSIENT marker — 「观察类记录,
+// 恒 = 待首次定级;定级即离标;不占队列不进收件箱」 — so `label:finding` answers
+// exactly one question: what has not been graded yet. It does not. The filing
+// card measured 385 of 395 carriers already graded across both boards; a later
+// triage round re-measured 185 of 226; a hand strip cleared 38 more; and the
+// one-time sweep that closes the backlog left objectstack and objectui at 0.
+//
+// A population that was refilled three times by hand is a population that
+// refills, and the reason is an API shape rather than carelessness: the strip
+// has to be passed by the caller on every grading write, so forgetting it is
+// the default outcome. The write-path half of that fix is its own card. This is
+// the READ half: the row that makes the refill visible on the patrol instead of
+// being re-measured by whoever next happens to look.
+//
+// ## Why the rule LIVES HERE and the sweep imports it, rather than the reverse
+//
+// `scripts/pm/sweep-stale-finding.mjs` owns the one-time strip and exports this
+// screen. Reusing it BY IMPORT is the ruling, and 「⛔ never a second copy of the
+// rule」 is the reason — but the import can only point one way, and that was
+// measured on this tree rather than assumed:
+//
+//   this file importing the sweep   a MODULE CYCLE that crashes. The sweep
+//                                   derives module-level constants from
+//                                   `PM_STATE_LABELS`, which lives here, so
+//                                   with THIS file as the entry point — every
+//                                   patrol run, every `--self-test` — the
+//                                   sweep's body evaluates first and throws
+//                                   `ReferenceError: Cannot access
+//                                   'PM_STATE_LABELS' before initialization`.
+//   the sweep importing this file   already how it works, for four symbols.
+//
+// So the rule moves DOWN to the module that already owns the vocabulary it is
+// derived from, and the sweep re-exports it under the names its own callers and
+// self-test already use. One source, one arrow, no copy — and the row's
+// population is not an approximation of the sweep's target set, it IS that set,
+// which is what lets the row say "this is what the sweep would strip today".
+//
+// ## The three `pm:*` label sets in this file are NOT this one, and must not be
+//
+// A fourth question, with a fourth answer, stated so nobody unifies it with the
+// three the header already warns about:
+//
+//   `PM_STATE_LABELS`           (H13) does any label make this card VISIBLE to
+//                               a named reader? — carries `finding`, which is
+//                               exactly why H13 is SILENT on a graded carrier:
+//                               the card IS visible, to the grading round. This
+//                               row is what says it is visible to the WRONG
+//                               reader.
+//   `PM_RESIDUE_LABELS`         (H22) does this label CLAIM work is in flight?
+//                               — drops `finding`, a fine state to close in.
+//                               This row is OPEN-only, so the two never meet.
+//   `PM_EXCLUSIVE_STATE_LABELS` (H25/H29) is this a POSITION the card can be
+//                               in, such that two of them contradict? — drops
+//                               `finding` because it is a card KIND rather than
+//                               a position. ⚠️ That pin is the one this row
+//                               leans on hardest and ⛔ must not be read as
+//                               contradicted: this row does NOT claim `finding`
+//                               is a second position beside the grade. It
+//                               claims the KIND marker has outlived the one
+//                               meaning the state model gives it — 待首次定级 —
+//                               on a card that has plainly been graded. H29 is
+//                               correct and stays silent here.
+//   the screen below            has this card's `finding` marker outlived
+//                               「定级即离标」? — `finding` PLUS evidence of a
+//                               grade: a grading state (`PM_STATE_LABELS` minus
+//                               the three that are not grades) or any
+//                               `priority:*`.
+// ---------------------------------------------------------------------------
+
+/** The transient marker the state model spends as 「待首次定级」. */
+export const STALE_FINDING_LABEL = 'finding';
+
+/**
+ * Members of H13's state vocabulary that are NOT a grade, subtracted below.
+ *
+ *   `finding`   is the marker being judged — it cannot be its own trigger.
+ *   `pm:seat`   is a seat registry post, not a position in the grading flow.
+ *   `pm:epic`   is an index card: it says what a card IS, not that it has been
+ *               read and placed. An epic that HAS been graded carries a
+ *               `priority:*` too, and that is what puts it in the set.
+ */
+export const NOT_A_GRADE = Object.freeze([STALE_FINDING_LABEL, 'pm:seat', 'pm:epic']);
+
+/**
+ * The six states whose presence means a card has been graded — DERIVED from
+ * `PM_STATE_LABELS` rather than restated: a second copy is a second answer to
+ * one question, and this one would drift silently (a state added there and not
+ * here simply stops being a trigger, with no failing test anywhere).
+ */
+export const GRADING_STATE_LABELS = Object.freeze(
+  PM_STATE_LABELS.filter((name) => !NOT_A_GRADE.includes(name)),
+);
+
+/** ⛔ Never swept and never reported, whatever else the post carries. */
+export const NEVER_SWEPT_LABELS = Object.freeze(['pm:seat']);
+
+/** A grade written as a priority. The board spells them `priority:p0` … `priority:p3`. */
+export const PRIORITY_LABEL_SHAPE = /^priority:[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+/** The `priority:*` labels on this card, in the order the card carries them. */
+export function priorityLabelsIn(names) {
+  return (names ?? []).filter((name) => PRIORITY_LABEL_SHAPE.test(name));
+}
+
+/**
+ * Every label on this card that is evidence of a grade: a grading state first
+ * (in the imported vocabulary's order), then the priorities.
+ */
+export function gradeLabelsIn(names) {
+  const carried = new Set(names ?? []);
+  return [...GRADING_STATE_LABELS.filter((label) => carried.has(label)), ...priorityLabelsIn(names)];
+}
+
+/**
+ * The screen, over a listing row. Pure, and it is the whole judgement — neither
+ * reader needs a timeline, a compare or a second read to know whether a card is
+ * in the set.
+ *
+ * ⚠️ A card carrying NO priority is deliberately `ungraded`, never a synthesised
+ * `priority:p3`: a card missing a priority is a card nobody has read, and it
+ * belongs in the ungraded pool rather than in the queue. That constraint was
+ * learned by making the error once, on one card, during a hand sweep.
+ *
+ * @returns {{ verdict: 'stale'|'leave'|'skip', kind: string, triggers: string[],
+ *   detail?: string }}
+ */
+export function staleFindingScreen(issue) {
+  if (issue?.pull_request) return { verdict: 'skip', kind: 'pull-request', triggers: [] };
+  if (issue?.state !== 'open') return { verdict: 'skip', kind: 'not-open', triggers: [] };
+  const names = labelNames(issue ?? {});
+  if (!names.includes(STALE_FINDING_LABEL)) return { verdict: 'skip', kind: 'no-target-label', triggers: [] };
+  const excluded = NEVER_SWEPT_LABELS.filter((label) => names.includes(label));
+  if (excluded.length > 0) {
+    return {
+      verdict: 'skip',
+      kind: 'never-swept',
+      triggers: [],
+      detail: `carries ${excluded.map((l) => `\`${l}\``).join(', ')} — a seat registry post is not a card in the grading pool`,
+    };
+  }
+  const triggers = gradeLabelsIn(names);
+  if (triggers.length === 0) {
+    return {
+      verdict: 'leave',
+      kind: 'ungraded',
+      triggers: [],
+      detail: 'no grading state and no priority — this is the pool the index exists for, and it is honest about it',
+    };
+  }
+  return { verdict: 'stale', kind: 'graded', triggers };
+}
+
+// ---------------------------------------------------------------------------
+// H63 (#16904) — a graded card still wearing the ungraded marker
+//
+// The row over the screen above. ⛔ Report-only, like everything here: the
+// one-time sweep is the tool that strips, it is run once per board by the seat
+// that owns that board, and this row exists precisely because that run is a
+// point measurement of a population that refills. The remedy a row prescribes
+// is a grading write that also drops the marker, never a strip performed from
+// this script.
+//
+// ## Why it fires on the SWEEP's set exactly, `pm:seat` skip included
+//
+// The row's job is to make the refill visible, and "the refill" is only
+// meaningful against the thing that was emptied. A row whose population were
+// merely similar would drift from the tool's over the first change to either;
+// sharing the screen makes 「what the sweep would strip today」 the row's literal
+// reading. The `pm:seat` exclusion travels with it for the same reason it
+// exists in the tool: a seat registry post is not a card in the grading pool,
+// so its marker is not an ungraded card's marker, and reporting it would send a
+// reader to strip a label that is doing its job.
+//
+// ## Population and cost
+//
+// The UNSCOPED open listing (H13/H18/H31's channel), because `finding` is not a
+// member of `SEEN_LABEL_PAGES` — a carrier holding no `pm:*` state at all is
+// first visible there. One label read on a row that listing already holds: no
+// request, no body, no thread.
+// ---------------------------------------------------------------------------
+
+/**
+ * H63 — null when the card is out of scope, genuinely ungraded, or a post this
+ * screen never judges; else the finding sentence naming the triggers that put
+ * it in the set.
+ */
+export function h63StaleFindingBesideGrade(issue) {
+  const screen = staleFindingScreen(issue);
+  if (screen?.verdict !== 'stale') return null;
+  const triggers = screen.triggers.map((l) => `\`${l}\``).join(', ');
+  const states = screen.triggers.filter((l) => GRADING_STATE_LABELS.includes(l));
+  const placed =
+    states.length > 0
+      ? `it carries ${states.map((l) => `\`${l}\``).join(', ')}, a position on the work state machine`
+      : 'it carries a priority, which is written only by a seat that has READ the card';
+  return (
+    `open, graded, and still carrying \`${STALE_FINDING_LABEL}\` beside ${triggers} — the state model ` +
+    'makes that marker transient (「观察类记录,恒 = 待首次定级;定级即离标;不占队列不进收件箱」), so ' +
+    `a graded carrier is a half-written grading act: ${placed}, while the marker still says the card is ` +
+    'waiting for its first grade. The cost is not a wrong number — it is the index: `label:finding` is ' +
+    'the per-fire obligation 「每 fire 定完全部未定级 finding」, and an obligation whose only index ' +
+    'returns four wrong rows in five is discharged by sampling or skipped. Two lanes have already ' +
+    'declined to dispatch a card in this shape, which is the strict reading of 不占队列. Remedy — WHO ' +
+    'and HOW: the seat that next writes a grade on this card, dropping the marker in the SAME write ' +
+    '(「定级即离标」); the standing backlog is the one-time sweep\'s, run once per board by the seat ' +
+    'that owns it, ⛔ never a loop from here. ⛔ Report-only: no label is written from this script, and ' +
+    '⛔ no grade is ever synthesised — a card with no priority has not been read and belongs in the ' +
+    'ungraded pool, not in the queue. Boundaries: a card carrying ONLY the marker is the pool the ' +
+    'index exists for and is clean here; a `pm:seat` post is never judged; closed-card residue is ' +
+    'H22/H39\'s, and `finding` is deliberately not in that set; the two-positions contradiction is ' +
+    'H29\'s, which is correct to stay silent — this row does not claim the marker is a position.'
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -15113,6 +15547,34 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   // losing this row to the trim is 17 days on a P0 whose deployment had served
   // 503 for a day. ⛔ Not `inventory`: it alarms about one card, not a population.
   H52: 'stall',
+
+  // H62 is a `state`, and each of the other three bands is refused on its own
+  // criterion. ⛔ Not `gate`: that band exists for the row that can tell a
+  // STRIPPED gate from an ungated card — an ABSENCE reading as a GREEN LIGHT —
+  // and an absent facet block clears nothing; it leaves the maintainer reading
+  // a card whose analysis is not on its face, which is the opposite of a
+  // clearance. ⛔ Not `stall`: nothing is stopped — the card sits in the
+  // decision box exactly as it should, and no scan is waiting on the marker;
+  // whether a missing block DELAYS a ruling is unmeasured by this row and it
+  // claims no such thing. ⛔ Not `inventory`: it alarms about one card, not a
+  // population, even though the first reading found the marker on 5 of 27. What
+  // is left is `state`'s definition exactly — a LIVE card whose face is
+  // half-written against a shape it owes, the whole repair one body edit on the
+  // board, by the seat that filed it.
+  H62: 'state',
+
+  // H63 is a `state`, and the other three bands are refused on their own
+  // criteria. ⛔ Not `gate`: that band exists for the row that can tell a
+  // STRIPPED gate from an ungated card — an ABSENCE reading as a green light —
+  // and here nothing is absent: a label is PRESENT and says something that
+  // stopped being true. ⛔ Not `stall`: whether a card in this shape is actually
+  // stopped is a reading two lanes took and this row does not take for them —
+  // it claims a half-written grading act, not a halted card. ⛔ Not `inventory`:
+  // it alarms about one card; the population reading belongs to the one-time
+  // sweep, which reports it as counts. What is left is `state` exactly — a live
+  // card whose labels contradict each other, repaired on the board in one
+  // write — and it is H29's band, the row this one is careful not to duplicate.
+  H63: 'state',
 
   // H57 is a `stall` (#17132), and the three refusals are each taken on the
   // refused band's own criterion rather than on this subject's vocabulary —
@@ -19055,6 +19517,21 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     // never disagree about which PR delivers which card.
     const gateSplit = h31ContractReviewCarrierSplit(issue, openWindow);
     if (gateSplit) findings.push([issue, 'H31', gateSplit]);
+    // H62 (#17009) — the decision card's FACE. This listing for H31's reason
+    // one line up: `needs-user-decision` is not one of the labels the label
+    // loop pages (`SEEN_LABEL_PAGES`), so a decision card carrying no `pm:*`
+    // state at all is first visible HERE. Free — one label read and one body
+    // read on a row this listing already holds, and BODY ONLY by the shape's
+    // own rule (「落卡即带」), so it buys no thread.
+    const facelessDecision = h62DecisionCardWithoutFacetBlock(issue);
+    if (facelessDecision) findings.push([issue, 'H62', facelessDecision]);
+    // H63 (#16904) — the same listing for the same reason: `finding` is not one
+    // of the labels the label loop pages, so a carrier holding no `pm:*` state
+    // is first visible HERE. One label read on a row this listing already
+    // holds, through the screen the one-time sweep strips on — so the row's
+    // population IS the sweep's target set rather than an approximation of it.
+    const staleFinding = h63StaleFindingBesideGrade(issue);
+    if (staleFinding) findings.push([issue, 'H63', staleFinding]);
   }
 
   // H35 (#11881) — the EVENT behind the state H31 compares. One repo-wide
@@ -22714,6 +23191,201 @@ async function selfTest() {
   t('H61 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
   t('⛔ H61: the prerequisite-refusal exit code is unchanged — this row adds none', EXIT_PREREQUISITE_NOT_MET, 3);
   t('⛔ H61: and the band vocabulary is unchanged — `inventory` was already one of them', HALF_STATE_FAMILY_BANDS.map((band) => band.name).join(','), 'gate,unregistered,stall,state,inventory');
+
+  // -- H62 (#17009): a decision card whose FACE carries no four-facet block ---
+  //
+  // The two spellings the declaration calls 等价, the three-valued prior-ruling
+  // reading beside them, and — because the shape forbids exactly ONE direction
+  // of error (「⛔ 注释形读不到永不读作无四棱块」) — a lit control under every
+  // silence, so a row that went quiet is never mistaken for a card that is
+  // clean.
+  const FACET_PLAIN = `${DECISION_FACET_MARKER}\n① 项目长远合理性:不扩大特例。`;
+  const FACET_COMMENT = `<!-- ${DECISION_FACET_MARKER} -->\n① 项目长远合理性:不扩大特例。`;
+  const PRIOR_LINE = 'Prior rulings read: single,posture → 4 hits; ADR-0131 D8';
+  const facetCard = (over = {}) => ({
+    number: 16934,
+    state: 'open',
+    labels: [{ name: GOVERNED_PR_DECISION_LABEL }, { name: 'priority:p2' }],
+    body: '## 一句话问题\n单租户下谁是租户墙?\n',
+    ...over,
+  });
+  const row62 = (...args) => String(h62DecisionCardWithoutFacetBlock(...args) ?? '');
+
+  // ── Direction 1: it FIRES on the shape it exists for ─────────────────────
+  t('H62: an open decision card whose body carries no marker -> finding', typeof h62DecisionCardWithoutFacetBlock(facetCard()), 'string');
+  t('H62: …and the row names the marker, so a reader can grep for what is missing', row62(facetCard()).includes(`\`${DECISION_FACET_MARKER}\``), true);
+  t('H62: …and says it read the BODY alone, which is the shape\'s own rule', row62(facetCard()).includes('read the body alone'), true);
+  t('H62: …quoting 落卡即带 rather than paraphrasing the filing duty', row62(facetCard()).includes('落卡即带'), true);
+
+  // ── Direction 2: it is SILENT wherever the marker IS there, in EITHER
+  //    spelling — the one direction of error the shape forbids ─────────────
+  t('⛔ H62: the PLAIN-TEXT marker line clears the card', h62DecisionCardWithoutFacetBlock(facetCard({ body: FACET_PLAIN })), null);
+  t('H62 control: …and the SAME card with the marker deleted still fires, so the silence is the marker\'s', typeof h62DecisionCardWithoutFacetBlock(facetCard({ body: FACET_PLAIN.replace(DECISION_FACET_MARKER, 'four facets') })), 'string');
+  t('⛔ H62: the HTML-COMMENT spelling clears it too — the declaration calls them 等价', h62DecisionCardWithoutFacetBlock(facetCard({ body: FACET_COMMENT })), null);
+  t('H62 control: …and that same body without the token fires, so the comment wrapper is not what cleared it', typeof h62DecisionCardWithoutFacetBlock(facetCard({ body: FACET_COMMENT.replace(DECISION_FACET_MARKER, 'four facets') })), 'string');
+  t('⛔ H62: a marker inside a FENCED block still clears — ⛔ never code-stripped (the forbidden direction)', h62DecisionCardWithoutFacetBlock(facetCard({ body: `\`\`\`\n${DECISION_FACET_MARKER}\n\`\`\`` })), null);
+  t('⛔ H62: …and one in an inline code span likewise', h62DecisionCardWithoutFacetBlock(facetCard({ body: `see \`${DECISION_FACET_MARKER}\` above` })), null);
+  t('⛔ H62: the marker does NOT have to be the body\'s first line — a positional read would fire on every correctly filed card', h62DecisionCardWithoutFacetBlock(facetCard({ body: `## 一句话问题\n…\n\n${FACET_PLAIN}` })), null);
+  t('H62 control: …and the identical body with the token removed does fire', typeof h62DecisionCardWithoutFacetBlock(facetCard({ body: '## 一句话问题\n…\n\n① 项目长远合理性:不扩大特例。' })), 'string');
+
+  // ── Direction 2, continued: population boundaries, each with its control ──
+  t('⛔ H62: a card without the decision label is out of scope', h62DecisionCardWithoutFacetBlock(facetCard({ labels: [{ name: 'priority:p2' }] })), null);
+  t('H62 control: …and adding exactly that label to the same card fires it', typeof h62DecisionCardWithoutFacetBlock(facetCard({ labels: [{ name: 'priority:p2' }, { name: GOVERNED_PR_DECISION_LABEL }] })), 'string');
+  t('⛔ H62: a CLOSED decision card is out — the label on it is residue, H22/H39\'s reading', h62DecisionCardWithoutFacetBlock(facetCard({ state: 'closed' })), null);
+  t('⛔ H62: a PULL REQUEST row that slipped into the listing is not a card', h62DecisionCardWithoutFacetBlock(facetCard({ pull_request: {} })), null);
+  t('H62 control: …and the byte-identical row WITHOUT the `pull_request` field fires, so it is the PR-ness that excluded it', typeof h62DecisionCardWithoutFacetBlock(facetCard()), 'string');
+  t('⛔ H62: …and the decision label on a PULL REQUEST is H48\'s subject, whose own constant this is', GOVERNED_PR_DECISION_LABEL, 'needs-user-decision');
+  t('⛔ H62: an UNREADABLE `labels` is excluded, never read as unlabelled (#4690)', h62DecisionCardWithoutFacetBlock(facetCard({ labels: undefined })), null);
+  t('⛔ H62: a missing row does not crash', h62DecisionCardWithoutFacetBlock(undefined), null);
+  t('⛔ H62: an EMPTY body is a finding, not a crash — nothing was written at all', typeof h62DecisionCardWithoutFacetBlock(facetCard({ body: null })), 'string');
+
+  // ── The SECOND reading on the same row: present / unresolved / absent ─────
+  t('H62 second reading: no such line -> absent', priorRulingsReading(facetCard().body), 'absent');
+  t('H62 second reading: a real reading -> present', priorRulingsReading(`${PRIOR_LINE}\n`), 'present');
+  t('H62 second reading: the `none` reading is still a search that RAN', priorRulingsReading('Prior rulings read: a,b → 0 hits; none'), 'present');
+  t('H62 second reading: …and `unresolved` is kept apart from it (#4690)', priorRulingsReading(`${PRIOR_RULINGS_KEY}: ${PRIOR_RULINGS_UNRESOLVED}`), 'unresolved');
+  t('H62 second reading: a decorated line is read, like every other directive here', priorRulingsReading(`- **${PRIOR_LINE}**`), 'present');
+  t('H62 second reading: an unresolved line BESIDE a completed one is a completed search', priorRulingsReading(`${PRIOR_RULINGS_KEY}: ${PRIOR_RULINGS_UNRESOLVED}\n${PRIOR_LINE}`), 'present');
+  t('H62 second reading: mid-sentence prose naming the line is not the line', priorRulingsReading('seats park the Prior rulings read: line at the end'), 'absent');
+  t('H62 row: the absent reading names the gap and the card the class was measured on', row62(facetCard()).includes('ABSENT too') && row62(facetCard()).includes('#16934'), true);
+  t('H62 row: the unresolved reading says a seat RECORDED that the search did not run', row62(facetCard({ body: `${PRIOR_RULINGS_KEY}: ${PRIOR_RULINGS_UNRESOLVED}` })).includes('did NOT run'), true);
+  t('H62 row: …and ⛔ does not call it a second finding', row62(facetCard({ body: `${PRIOR_RULINGS_KEY}: ${PRIOR_RULINGS_UNRESOLVED}` })).includes('⛔ not a second finding'), true);
+  t('H62 row: the present reading says the search is NOT what is missing', row62(facetCard({ body: PRIOR_LINE })).includes('not the search'), true);
+  t('⛔ H62: a card that carries the MARKER and no prior-ruling line is NOT a finding — one breach, one row', h62DecisionCardWithoutFacetBlock(facetCard({ body: FACET_PLAIN })), null);
+  t('H62 control: …and the same card with the marker gone fires with the ABSENT second reading', row62(facetCard()).includes('ABSENT too'), true);
+
+  // ── The reader is pinned against the line's WRITER — by SOURCE TEXT, because
+  //    neither import direction runs. `check-prior-rulings.mjs` imports THIS
+  //    module (the board resolver and the proxy plan), and both ways back were
+  //    measured on this tree: a STATIC import is a cycle whose TDZ
+  //    `ReferenceError` fires the moment this file is the entry point (which it
+  //    is on every patrol run and every `--self-test`), and a DYNAMIC one
+  //    inside this function DEADLOCKS — the entry module's own top-level
+  //    `await selfTest()` has not settled, so the sibling can never finish
+  //    linking against it (`unsettled top-level await`, exit 13). What is left
+  //    is the writer's source, read the way `familyRegistryCoverage` reads this
+  //    file's: a rename of the line reds HERE instead of silently emptying this
+  //    reader's population.
+  let writerSource62 = '';
+  try {
+    writerSource62 = readFileSync(new URL('./check-prior-rulings.mjs', import.meta.url), 'utf8');
+  } catch {
+    writerSource62 = '';
+  }
+  t('H62 ↔ writer: the writer\'s source is readable at all (an unreadable one must not pass as clean)', writerSource62.length > 0, true);
+  t('H62 ↔ writer: it still prints the KEY this reader greps for', writerSource62.includes(`${PRIOR_RULINGS_KEY}: `), true);
+  t('H62 ↔ writer: …and still spells the not-run reading `unresolved`, kept apart from `none`', writerSource62.includes(`${PRIOR_RULINGS_KEY}: ${PRIOR_RULINGS_UNRESOLVED}`), true);
+  t('H62 ↔ writer: …and this reader accepts the exact line that self-test pins', priorRulingsReading('Prior rulings read: single,posture → 4 hits; ADR-0131 D8'), 'present');
+
+  // ── The row's text: the platform hazard, the remedy, the boundaries ───────
+  t('H62 text: ⛔ no less-than fragment — the body is written into a GitHub issue', /[<>]/.test(row62(facetCard())), false);
+  t('H62 text: …so the comment spelling is named in WORDS', row62(facetCard()).includes('HTML-comment form'), true);
+  t('H62 text: the label constant is printed, ⛔ never a re-typed literal', row62(facetCard()).includes(`\`${GOVERNED_PR_DECISION_LABEL}\``), true);
+  t('H62 text: …and it is the constant H48/H52 already own', GOVERNED_PR_DECISION_LABEL, 'needs-user-decision');
+  t('H62 text: WHO acts is the FILING seat, in one body edit', row62(facetCard()).includes('the FILING seat, in one body edit'), true);
+  t('H62 text: …and the prior-ruling reader is named as the paste source', row62(facetCard()).includes('check:pm-prior-rulings'), true);
+  t('H62 text: ⛔ never a label written from this script', row62(facetCard()).includes('never a label written from this script'), true);
+  t('H62 text: ⛔ and never a gate over the marker — the ruling stays the maintainer\'s', row62(facetCard()).includes('never a gate over the marker'), true);
+  t('H62 text: the neighbouring rows are named so nobody re-files one of theirs', ['H22/H39', 'H52'].every((code) => row62(facetCard()).includes(code)), true);
+
+  // ── Report-only: bands, loudness and exit codes are untouched ─────────────
+  t('H62: not a loud finding — it never escalates a sweep', isLoudFinding(h62DecisionCardWithoutFacetBlock(facetCard())), false);
+  t('H62 band: registered as `state` — a live card, the repair one body edit', familyBand('H62'), 'state');
+  t('H62 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H62'), true);
+  t('H62 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
+  t('H62 band: …and none is registered that the sweep never pushes', familyRegistryCoverage().extra.length, 0);
+  t('⛔ H62: the band vocabulary is unchanged — `state` was already one of them', HALF_STATE_FAMILY_BANDS.map((band) => band.name).join(','), 'gate,unregistered,stall,state,inventory');
+
+  // -- H63 (#16904): a graded card still wearing the ungraded marker ---------
+  //
+  // The row over the SHARED screen. Both directions, a lit control under every
+  // silence, and — because the point of sharing the screen is that the row and
+  // the one-time sweep can never disagree — a source-text pin that the sweep
+  // still ALIASES this definition instead of re-growing a copy of it.
+  const gradedCarrier = (labels, over = {}) => ({
+    number: 16904,
+    state: 'open',
+    labels: labels.map((name) => ({ name })),
+    ...over,
+  });
+  const row63 = (...args) => String(h63StaleFindingBesideGrade(...args) ?? '');
+
+  // ── Direction 1: it FIRES on the shape it exists for ─────────────────────
+  t('H63: `finding` beside a grading state -> finding', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:queue'])), 'string');
+  t('H63: …and the row NAMES the trigger that put the card in the set', row63(gradedCarrier(['finding', 'pm:queue'])).includes('`pm:queue`'), true);
+  t('H63: `finding` beside a lone `priority:*` -> finding, with no state at all', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', 'priority:p3'])), 'string');
+  t('H63: …and that row says a priority is written only by a seat that READ the card', row63(gradedCarrier(['finding', 'priority:p3'])).includes('has READ the card'), true);
+  t('H63: …while the state row calls the trigger a position on the work state machine', row63(gradedCarrier(['finding', 'pm:queue'])).includes('a position on the work state machine'), true);
+  t('H63: this very card\'s own shape fires — `finding` + `pm:queue` + `priority:p3`', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:queue', 'priority:p3', 'domain:skills'])), 'string');
+  t('H63: …naming BOTH triggers, state first', row63(gradedCarrier(['finding', 'pm:queue', 'priority:p3'])).includes('`pm:queue`, `priority:p3`'), true);
+  t('H63: every grading state is a trigger — `needs-user-decision` included', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', GOVERNED_PR_DECISION_LABEL])), 'string');
+
+  // ── Direction 2: it is SILENT where the sweep leaves the card, each silence
+  //    with a lit control on the byte-identical card ─────────────────────────
+  t('⛔ H63: `finding` ALONE is NOT a finding — that is the pool the index exists FOR', h63StaleFindingBesideGrade(gradedCarrier(['finding'])), null);
+  t('H63 control: …and the same card with one grading state fires', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:blocked'])), 'string');
+  t('⛔ H63: `finding` beside a `domain:*` alone is still ungraded — routing is not a grade', h63StaleFindingBesideGrade(gradedCarrier(['finding', 'domain:skills'])), null);
+  t('H63 control: …and adding a priority to that card fires it', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', 'domain:skills', 'priority:p2'])), 'string');
+  t('⛔ H63: `pm:blocking` is not a grade either — it is a derived cache', h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:blocking'])), null);
+  t('⛔ H63: nor is `pm:retriage`, an annotation ON a state', h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:retriage'])), null);
+  t('⛔ H63: a `pm:seat` post is NEVER judged, whatever else it carries', h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:seat', 'priority:p1'])), null);
+  t('H63 control: …and the identical card without `pm:seat` fires, so it is the seat post that silenced it', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', 'priority:p1'])), 'string');
+  t('⛔ H63: `pm:epic` is not a grade — an index card says what a card IS', h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:epic'])), null);
+  t('H63 control: …and a graded epic — the one carrying a priority — does fire', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:epic', 'priority:p2'])), 'string');
+  t('⛔ H63: a CLOSED card is out — a closed board is an archive, not an index', h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:queue'], { state: 'closed' })), null);
+  t('H63 control: …and the byte-identical OPEN row fires', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:queue'])), 'string');
+  t('⛔ H63: a PULL REQUEST row that slipped into the listing is not a card', h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:queue'], { pull_request: {} })), null);
+  t('⛔ H63: a card without the marker is not this row\'s business', h63StaleFindingBesideGrade(gradedCarrier(['pm:queue', 'priority:p2'])), null);
+  t('⛔ H63: an unreadable `labels` reads as no marker and is silent — the SCREEN\'s behaviour, shared with the tool that writes', h63StaleFindingBesideGrade(gradedCarrier([], { labels: undefined })), null);
+  t('⛔ H63: a missing row does not crash', h63StaleFindingBesideGrade(undefined), null);
+
+  // ── The screen itself, as the sweep judges it ────────────────────────────
+  t('H63 screen: a graded carrier is `stale`', staleFindingScreen(gradedCarrier(['finding', 'pm:queue'])).verdict, 'stale');
+  t('H63 screen: …the ungraded pool is `leave`, and REPORTED rather than dropped', staleFindingScreen(gradedCarrier(['finding'])).kind, 'ungraded');
+  t('H63 screen: …and the seat post is `skip`, with the reason on the row', staleFindingScreen(gradedCarrier(['finding', 'pm:seat'])).detail.includes('pm:seat'), true);
+  t('H63 screen: the grading vocabulary is DERIVED from H13\'s, never restated', GRADING_STATE_LABELS.every((l) => PM_STATE_LABELS.includes(l)), true);
+  t('H63 screen: …and it is exactly the six states, in H13\'s order', GRADING_STATE_LABELS.join(','), 'pm:queue,pm:dispatched,pm:blocked,pm:on-hold,pm:awaiting-maintainer,needs-user-decision');
+  t('H63 screen: ⛔ the marker is never its own trigger', GRADING_STATE_LABELS.includes(STALE_FINDING_LABEL), false);
+  t('H63 screen: a priority is a grade in every spelling the board uses', priorityLabelsIn(['priority:p0', 'priority:p3']).length, 2);
+  t('H63 screen: ⛔ and priority-ish prose is not a priority label', priorityLabelsIn(['priorities', 'priority', 'prioritypX']).length, 0);
+
+  // ── ONE rule, two readers: the sweep must still ALIAS this definition ─────
+  let sweepSource63 = '';
+  try {
+    sweepSource63 = readFileSync(new URL('./sweep-stale-finding.mjs', import.meta.url), 'utf8');
+  } catch {
+    sweepSource63 = '';
+  }
+  t('H63 ↔ sweep: the sweep\'s source is readable at all (an unreadable one must not pass as clean)', sweepSource63.length > 0, true);
+  t('H63 ↔ sweep: it ALIASES this screen rather than defining one', sweepSource63.includes('export const screenCard = staleFindingScreen;'), true);
+  t('H63 ↔ sweep: …and ⛔ has not re-grown a copy of the screen', /export function screenCard\s*\(/.test(sweepSource63), false);
+  t('H63 ↔ sweep: …nor a second copy of the grading vocabulary', /export const GRADING_STATE_LABELS\s*=/.test(sweepSource63), false);
+  t('H63 ↔ sweep: its target label is this constant, not a second literal', sweepSource63.includes('export const TARGET_LABEL = STALE_FINDING_LABEL;'), true);
+
+  // ── ⛔ The three `pm:*` sets stay four different questions ────────────────
+  t('H63: H13\'s visibility set carries the marker — which is why H13 is silent on a graded carrier', PM_STATE_LABELS.includes(STALE_FINDING_LABEL), true);
+  t('H63 control: …and H13 really is silent on one, because a pm-state is present', h13DomainWithoutPmState({ ...gradedCarrier(['finding', 'pm:queue', 'domain:skills']), updated_at: daysAgo(9) }, NOW), null);
+  t('H63: H22\'s residue set drops the marker — a fine state to close in', PM_RESIDUE_LABELS.includes(STALE_FINDING_LABEL), false);
+  t('H63: H29\'s exclusivity set drops it too — a card KIND, ⛔ not a position', PM_EXCLUSIVE_STATE_LABELS.includes(STALE_FINDING_LABEL), false);
+  t('H63 control: …and H29 stays silent on a carrier with exactly one position', h29PmStateExclusivity(gradedCarrier(['finding', 'pm:queue', 'priority:p3'])), null);
+  t('H63: …so this row is careful to say it does NOT claim the marker is a position', row63(gradedCarrier(['finding', 'pm:queue'])).includes('does not claim the marker is a position'), true);
+
+  // ── The row's text: the platform hazard, the remedy, the boundaries ───────
+  t('H63 text: ⛔ no less-than fragment — the body is written into a GitHub issue', /[<>]/.test(row63(gradedCarrier(['finding', 'pm:queue']))), false);
+  t('H63 text: the state model is QUOTED, not paraphrased', row63(gradedCarrier(['finding', 'pm:queue'])).includes('定级即离标'), true);
+  t('H63 text: WHO acts — the seat that next writes a grade, in the SAME write', row63(gradedCarrier(['finding', 'pm:queue'])).includes('SAME write'), true);
+  t('H63 text: …and the standing backlog is named as the one-time sweep\'s, ⛔ never a loop from here', row63(gradedCarrier(['finding', 'pm:queue'])).includes('⛔ never a loop from here'), true);
+  t('H63 text: ⛔ no label is written from this script', row63(gradedCarrier(['finding', 'pm:queue'])).includes('no label is written from this script'), true);
+  t('H63 text: ⛔ and no grade is ever synthesised — the constraint a hand sweep learned by breaking it', row63(gradedCarrier(['finding', 'pm:queue'])).includes('no grade is ever synthesised'), true);
+  t('H63 text: the marker constant is printed, ⛔ never a re-typed literal', row63(gradedCarrier(['finding', 'pm:queue'])).includes(`\`${STALE_FINDING_LABEL}\``), true);
+  t('H63 text: the neighbouring rows are named so nobody re-files one of theirs', ['H22/H39', 'H29'].every((code) => row63(gradedCarrier(['finding', 'pm:queue'])).includes(code)), true);
+
+  // ── Report-only: bands, loudness and exit codes are untouched ─────────────
+  t('H63: not a loud finding — it never escalates a sweep', isLoudFinding(h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:queue']))), false);
+  t('H63 band: registered as `state` — a live card, the repair one write', familyBand('H63'), 'state');
+  t('H63 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H63'), true);
+  t('H63 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
+  t('H63 band: …and none is registered that the sweep never pushes', familyRegistryCoverage().extra.length, 0);
 
   // -- H16: open non-draft PR stuck in a merge conflict (2026-08-19 incident) --
   // The single-PR payload shape, since `mergeable_state` is absent from the

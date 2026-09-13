@@ -146,7 +146,7 @@ describe('MetricDefinitionSchema', () => {
       type: 'summary',
       summary: {
         quantiles: [0.5, 0.9, 0.95, 0.99],
-        maxAge: 300,
+        maxAgeSeconds: 300,
       },
     };
     
@@ -351,8 +351,8 @@ describe('ServiceLevelObjectiveSchema', () => {
         enabled: true,
         alertThreshold: 75,
         burnRateWindows: [
-          { window: 3600, threshold: 14.4 },
-          { window: 86400, threshold: 6 },
+          { durationSeconds: 3600, threshold: 14.4 },
+          { durationSeconds: 86400, threshold: 6 },
         ],
       },
     };
@@ -382,21 +382,21 @@ describe('MetricExportConfigSchema', () => {
     });
     
     expect(config.type).toBe('prometheus');
-    expect(config.interval).toBe(60);
+    expect(config.intervalSeconds).toBe(60);
   });
 
   it('should accept HTTP push export', () => {
     const config = MetricExportConfigSchema.parse({
       type: 'http',
       endpoint: 'https://metrics.example.com',
-      interval: 30,
+      intervalSeconds: 30,
       auth: {
         type: 'bearer',
         token: 'secret-token',
       },
     });
     
-    expect(config.interval).toBe(30);
+    expect(config.intervalSeconds).toBe(30);
     expect(config.auth?.type).toBe('bearer');
   });
 });
@@ -420,7 +420,7 @@ describe('MetricsConfigSchema', () => {
     expect(config.enabled).toBe(true);
     expect(config.metrics).toEqual([]);
     expect(config.defaultLabels).toEqual({});
-    expect(config.collectionInterval).toBe(15);
+    expect(config.collectionIntervalSeconds).toBe(15);
   });
 
   it('should accept full configuration', () => {
@@ -468,7 +468,7 @@ describe('MetricsConfigSchema', () => {
         },
       ],
       retention: {
-        period: 604800,
+        durationSeconds: 604800,
       },
     };
     
@@ -557,22 +557,168 @@ describe('metrics window and period lengths carry their unit (#15679)', () => {
     }).period.durationSeconds).toBe(2592000);
   });
 
-  it('leaves the two non-duration keys on this file alone', () => {
-    // The exporter batch `size` is a COUNT of records, not a duration.
+  // Was `leaves the two non-duration keys on this file alone`, and it pinned two
+  // subjects. The exporter batch `size` (below) is unchanged and still true. The
+  // other was the error-budget burn-rate `window`, held bare on the reading that
+  // it is "outside the gate population entirely". #15939 ruling A settled that it
+  // is outside #15679's RENAME, not outside the population — its unit lived in
+  // the JSDoc channel the gate does not read — so this card renames it and that
+  // guard succeeds by failing. Its replacement pins are in the #15939 block
+  // below; the header is narrowed here rather than left asserting a second key
+  // that no longer stays bare.
+  it('leaves the exporter batch size — a COUNT of records — alone', () => {
     expect(MetricExportConfigSchema.parse({ type: 'prometheus', batch: { size: 500 } })
       .batch?.size).toBe(500);
-    // The error-budget burn-rate `window` names no unit in its describe, so it is
-    // inside the gate's census and outside its verdict, and keeps its bare name.
-    // ⚠️ Its unit is not missing, only unpublished: the JSDoc above it says
-    // seconds. `check:duration-unit-keys` was ruled to refuse that divergence
-    // (2026-09-07, decision batch #65, on #15939), so this key is a rename
-    // waiting on that gate change — this pin asserts the CURRENT bare spelling
-    // and must be re-read, not trusted, when the rename lands.
-    const slo = ServiceLevelObjectiveSchema.parse({
+  });
+});
+
+// #15939 ruling A (executing #14478) — the five durations on this file whose
+// unit lived in a source JSDoc only, a channel `check:duration-unit-keys` does
+// not read: four carried no `.describe()` at all and the fifth read "Window
+// size". Every old spelling is a `retiredKey()` tombstone (none of the five
+// enclosing shapes is `.strict()`, so a bare deletion would silently strip);
+// asserted on the issue CODE and the prescription, never on a bare `toThrow()`.
+// Three of the five new names are not the mechanical suffix: see the tombstone
+// prose on each key for why `windowSeconds`, `periodSeconds` and a bare
+// `intervalSeconds` were rejected.
+describe('metrics JSDoc-only durations carry their unit (#15939, #14478)', () => {
+  const sliBase = {
+    name: 'api_availability',
+    label: 'API Availability',
+    metric: 'http_requests_total',
+    type: 'availability' as const,
+    successCriteria: { threshold: 99.9, operator: 'gte' as const },
+  };
+  const sloBase = {
+    name: 'api_uptime_slo', label: 'API Uptime SLO', sli: 'api_availability', target: 99.9,
+  };
+
+  it('REFUSES `MetricDefinition.summary.maxAge` with a rename naming `maxAgeSeconds`', () => {
+    const result = MetricDefinitionSchema.safeParse({
+      name: 'response_time', type: 'summary', summary: { maxAge: 600 },
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'summary.maxAge');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toMatch(
+      /`MetricDefinition\.summary\.maxAge` was renamed.*Rename the key to `maxAgeSeconds`/s,
+    );
+    // The prescription must EXPLAIN why it is not `durationSeconds` like the
+    // three window lengths on this same file, or the next author "corrects" it.
+    expect(issue!.message).toContain('ageBuckets');
+  });
+
+  it('REFUSES the burn-rate `window` with a rename naming `durationSeconds`', () => {
+    const result = ServiceLevelObjectiveSchema.safeParse({
       ...sloBase,
       period: { type: 'rolling', durationSeconds: 2592000 },
       errorBudget: { burnRateWindows: [{ window: 3600, threshold: 14.4 }] },
     });
-    expect(slo.errorBudget?.burnRateWindows?.[0]?.window).toBe(3600);
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find(
+      (i) => i.path.join('.') === 'errorBudget.burnRateWindows.0.window',
+    );
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toMatch(/was renamed to\s+`durationSeconds`/s);
+    // Why not the mechanical `windowSeconds`.
+    expect(issue!.message).toContain('burnRateWindows');
+  });
+
+  it('REFUSES `MetricExportConfig.interval` with a rename naming `intervalSeconds`', () => {
+    const result = MetricExportConfigSchema.safeParse({ type: 'prometheus', interval: 60 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'interval');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toMatch(
+      /`MetricExportConfig\.interval` was renamed.*Rename the key to `intervalSeconds`/s,
+    );
+  });
+
+  it('REFUSES `MetricsConfig.collectionInterval` with a rename naming the qualified key', () => {
+    const result = MetricsConfigSchema.safeParse({
+      name: 'm', label: 'M', collectionInterval: 15,
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'collectionInterval');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toMatch(
+      /was renamed to `collectionIntervalSeconds`/s,
+    );
+    // Why the qualifier is kept rather than reusing the exporter's own key.
+    expect(issue!.message).toContain('MetricExportConfig.intervalSeconds');
+  });
+
+  it('REFUSES `MetricsConfig.retention.period` with a rename naming `durationSeconds`', () => {
+    const result = MetricsConfigSchema.safeParse({
+      name: 'm', label: 'M', retention: { period: 604800 },
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'retention.period');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toMatch(
+      /`MetricsConfig\.retention\.period` was renamed.*Rename the key to `durationSeconds`/s,
+    );
+    // Why not the mechanical `periodSeconds`.
+    expect(issue!.message).toContain('calendar vocabulary');
+  });
+
+  it('accepts every renamed key at the magnitude the retired one carried', () => {
+    expect(MetricDefinitionSchema.parse({
+      name: 'response_time', type: 'summary', summary: { maxAgeSeconds: 600 },
+    }).summary?.maxAgeSeconds).toBe(600);
+
+    const slo = ServiceLevelObjectiveSchema.parse({
+      ...sloBase,
+      period: { type: 'rolling', durationSeconds: 2592000 },
+      errorBudget: { burnRateWindows: [{ durationSeconds: 3600, threshold: 14.4 }] },
+    });
+    expect(slo.errorBudget?.burnRateWindows?.[0]?.durationSeconds).toBe(3600);
+    expect(slo.errorBudget?.burnRateWindows?.[0]).not.toHaveProperty('window');
+
+    expect(MetricExportConfigSchema.parse({ type: 'http', intervalSeconds: 30 })
+      .intervalSeconds).toBe(30);
+    expect(MetricsConfigSchema.parse({
+      name: 'm', label: 'M', collectionIntervalSeconds: 30, retention: { durationSeconds: 86400 },
+    }).retention?.durationSeconds).toBe(86400);
+  });
+
+  it('keeps every default the retired keys carried', () => {
+    expect(MetricDefinitionSchema.parse({ name: 'r', type: 'summary', summary: {} })
+      .summary?.maxAgeSeconds).toBe(600);
+    expect(MetricExportConfigSchema.parse({ type: 'prometheus' }).intervalSeconds).toBe(60);
+    const config = MetricsConfigSchema.parse({ name: 'm', label: 'M', retention: {} });
+    expect(config.collectionIntervalSeconds).toBe(15);
+    expect(config.retention?.durationSeconds).toBe(604800);
+  });
+
+  it('publishes the unit in every describe — the text the reference pages render', () => {
+    const summary = MetricDefinitionSchema.shape.summary.unwrap();
+    expect(summary.shape.maxAgeSeconds.description).toBe('Max age of observations in seconds');
+    expect(MetricExportConfigSchema.shape.intervalSeconds.description)
+      .toBe('Export interval in seconds');
+    expect(MetricsConfigSchema.shape.collectionIntervalSeconds.description)
+      .toBe('Collection interval in seconds');
+    expect(MetricsConfigSchema.shape.retention.unwrap().shape.durationSeconds.description)
+      .toBe('Retention duration in seconds');
+    const burn = ServiceLevelObjectiveSchema.shape.errorBudget.unwrap()
+      .shape.burnRateWindows.unwrap().element;
+    expect(burn.shape.durationSeconds.description).toBe('Window duration in seconds');
+  });
+
+  it('leaves the three same-named decoys on this file alone', () => {
+    // All three are `z.object({ … })`, not duration numbers, and two of them
+    // already hold a `durationSeconds` of their own from #15679.
+    expect(MetricAggregationConfigSchema.parse({ type: 'avg', window: { durationSeconds: 300 } })
+      .window?.durationSeconds).toBe(300);
+    expect(ServiceLevelIndicatorSchema.parse({ ...sliBase, window: { durationSeconds: 2592000 } })
+      .window.durationSeconds).toBe(2592000);
+    expect(ServiceLevelObjectiveSchema.parse({
+      ...sloBase, period: { type: 'rolling', durationSeconds: 2592000 },
+    }).period.durationSeconds).toBe(2592000);
   });
 });
