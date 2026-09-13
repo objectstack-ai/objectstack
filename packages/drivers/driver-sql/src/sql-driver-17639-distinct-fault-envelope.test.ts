@@ -75,9 +75,12 @@
  * compiled from `filters`. A blanket arm would tell the author of
  * `distinct(o, 'nosuchcol')` — who passed no filter at all — that their FILTER
  * was wrong. #11541 closed that gap for `aggregate()` with a clause-attributing
- * classifier; the `distinct()` half is filed as its own card. What this suite
- * pins is unchanged by that: an error the classifier does NOT claim still
- * leaves as this terminal envelope.
+ * classifier; #17857 has since closed the `distinct()` half the same way
+ * (`SqlDriver.distinctBackendFault`, pinned by
+ * `sql-driver-17857-distinct-unresolvable-column-refusal.test.ts`). What this
+ * suite pins was unchanged by that, exactly as this note anticipated: an error
+ * the classifier does NOT claim — a table that was never provisioned, a `json`
+ * column with no equality operator — still leaves as this terminal envelope.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';

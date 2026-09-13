@@ -1365,6 +1365,34 @@ export const CalendarConfigSchema = lazySchema(() => strictObject({
   endDateField: z.string().optional().describe('Field providing the event end date/time (defaults to a single-day event)'),
   titleField: z.string().optional().describe('Field displayed as the event title. Omit to fall back to the record display name (ADR-0079 resolver chain)'),
   colorField: z.string().optional().describe('Field to derive each event color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the calendar theme-aware palette color hashed from the value'),
+  /**
+   * [#17054] The fifth binding, and the one this schema was missing while two
+   * other faces of this same package already published it as a member: the
+   * `object-calendar` flat-key prescription names it verbatim
+   * (`OBJECT_CALENDAR_FLAT_FIELD_GUIDANCE` in `ui/component.zod.ts`) and that
+   * block's `calendar` prop `.describe()` spells the config as
+   * `{ startDateField, endDateField?, titleField?, colorField?, allDayField? }`
+   * — text that ships to `content/docs/references/ui/component.mdx`. An author
+   * who followed the prescription on a STORED VIEW was refused here by name.
+   *
+   * Declared rather than trimmed because the renderer honours it: at the
+   * objectui pin `53ded82b` this repo builds against, `ListView`'s
+   * `collectViewFields` reads `calendar.allDayField` into the fetch projection
+   * (`plugin-list/src/ListView.tsx`) and its calendar branch forwards the
+   * authored block onto the `object-calendar` node, where `getCalendarConfig`
+   * resolves it; objectui#8026 then makes it load-bearing in the render itself.
+   * It is a FIELD BINDING like its four neighbours, which is what separates it
+   * from `defaultView` — the renderer's initial view mode, a UI preference with
+   * its own declared home as an `object-calendar` component prop and no
+   * business on a field-binding config.
+   *
+   * ⛔ No default field name. An undeclared `allDayField` leaves the renderer's
+   * existing inference untouched (an event with no end date draws as all-day);
+   * a DECLARED one is absolute — a record whose flag is absent or false is not
+   * all-day, because letting the inference overrule a declared key is this
+   * card's own defect inverted.
+   */
+  allDayField: z.string().optional().describe('Field carrying the all-day flag for each event (names a boolean field, not a value): a record whose flag is true is drawn as an all-day band rather than at a clock time, and one whose flag is absent or false is not all-day. Omit to leave the renderer inference in place — an event with no end date draws as all-day'),
 }));
 
 /**

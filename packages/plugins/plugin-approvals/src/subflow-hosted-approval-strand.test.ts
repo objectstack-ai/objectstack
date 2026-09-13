@@ -1,12 +1,14 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #15556 — the REPRODUCTION: an approval hosted inside a SUBFLOW CHILD, whose
- * parent's continuation fails.
+ * #15556 — an approval hosted inside a SUBFLOW CHILD, whose parent's
+ * continuation fails.
  *
  * The card was filed NOT MEASURED — the seam and its swallowing `catch` were
  * found by reading `engine.ts`, and nobody had driven the composition. This
- * file is that drive, with its controls in the same run, and it reproduces.
+ * file is that drive, with its controls in the same run. It reproduced the
+ * defect, and now pins the fix (#16472 family ruling, maintainer 2026-09-07,
+ * decision batch #76, option A).
  *
  * ## The composition
  *
@@ -15,30 +17,32 @@
  * door resumes the child, the child completes, `bubbleToParent` resumes the
  * parent, and the parent's own downstream node throws.
  *
- * ## What is measured, and what is only characterised
+ * ## What was measured, and what the ruling fixed
  *
- * MEASURED FACT, now fixed engine-side: the parent lands on the engine's
- * stranded exit — `{ success: false, status: 'stranded' }`, journalled and
- * repairable — and `bubbleToParent` logged that at `warn`. The level is now
- * graded by that discriminator (`subflow-bubble-strand-log-level.test.ts` in
- * `service-automation` holds the pins, both directions).
+ * MEASURED, unchanged by this fix: the parent lands on the engine's stranded
+ * exit — `{ success: false, status: 'stranded' }`, journalled and repairable
+ * — and `bubbleToParent` logs that at `error`, naming the run and the repair
+ * verb (`subflow-bubble-strand-log-level.test.ts` in `service-automation`
+ * holds those pins, both directions; the #16472 ruling explicitly leaves the
+ * log alone).
  *
- * ⚠️ CHARACTERISED, NOT BLESSED: the decision door still answers full success.
- * Its resume-facing answer is IDENTICAL to the one a healthy composition
- * produces, so no caller can tell the two apart, and the `runId` it hands back
- * names the CHILD — which completed — never the stranded parent. Making that
- * truthful moves a public contract (`AutomationResult`,
- * `ApprovalDecisionResult`) and is #15556's open decision, the sibling one
- * level up of the #13807 ruling (maintainer 2026-09-04, decision batch #37).
- * ⛔ The assertions below record what the door does TODAY; whatever ruling
- * lands must turn them red on purpose.
+ * FIXED here: before this ruling the decision door's resume-facing answer was
+ * IDENTICAL to a healthy composition's — no caller could tell the two apart,
+ * and the `runId` it handed back named the CHILD, which completed, never the
+ * stranded parent. The door's status code still does not move (`resumed`
+ * stays `true` — the CHILD really did resume) but the answer now carries the
+ * strand behind it: `resumeFailure` names the PARENT's `runId` and
+ * `repairable`, and `resumeError` tells the same fact in prose. Read off
+ * `AutomationEngine.takeSubflowParentStrand` (added for this card), which
+ * `serviceResume` consults right after its own resume reports success.
  *
- * ## The control that makes the reading trustworthy
+ * ## The controls that make the reading trustworthy
  *
- * `CONTROL` drives the #13807 shape through the SAME door in the same run — no
- * subflow, the child's own branch throws — and the door throws `RESUME_FAILED`
- * with its stranded envelope. So the absence of a throw above is a fact about
- * the composition, not about a mis-wired harness.
+ * `CONTROL A` drives the healthy composition through the SAME door in the
+ * same run — proof that the two answers now genuinely DIVERGE, not that this
+ * test's plumbing merely stopped checking. `CONTROL B` drives the #13807
+ * shape — no subflow, the child's own branch throws — where the door still
+ * throws `RESUME_FAILED` with its stranded envelope, unaffected by this card.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -54,10 +58,11 @@ const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as any;
 const DOWNSTREAM_FAILURE = 'update_record(crm_leave_request) failed: Record 9SEmlyRfw8D9-J7Z not found';
 
 /**
- * The resume-facing answer a caller reads, minus the run id. Asserted by BOTH
- * the stranded composition and the healthy one — that shared literal, and not
- * a value smuggled between tests, is what carries the claim that the two are
- * indistinguishable at the door.
+ * The resume-facing answer a caller reads, minus the run id — CONTROL A's
+ * shape: a plain healthy resume with nothing behind it to tell. Before the
+ * fix this was ALSO the stranded composition's answer, byte for byte — the
+ * defect this file reproduced. It no longer is; the stranded test asserts
+ * its own, divergent shape below instead of reusing this constant.
  */
 const FULL_SUCCESS = { finalized: true, decision: 'approve', resumed: true, resumeError: undefined };
 
@@ -203,7 +208,7 @@ describe('#15556 — an approval hosted in a subflow child, whose parent bubble 
     finalized: r.finalized, decision: r.decision, resumed: r.resumed, resumeError: r.resumeError,
   });
 
-  it('the parent STRANDS while the door answers full success', async () => {
+  it('the parent STRANDS, and the door now tells the caller so on `resumeFailure`', async () => {
     throwOn.after_sub = DOWNSTREAM_FAILURE;
     const automation = boot();
 
@@ -253,18 +258,41 @@ describe('#15556 — an approval hosted in a subflow child, whose parent bubble 
       .toEqual(['on_approved']);
     expect((await data.find('sys_approval_request', { where: { id: req.id } }))[0].status).toBe('approved');
 
-    // ⚠️ CHARACTERISED, NOT BLESSED — see the file header. The door does not
-    // throw, reports `resumed: true`, carries no `resumeError`, and the run it
-    // names is the CHILD, which completed. Nothing in the response reaches the
-    // stranded parent.
-    expect(outcome.ok, 'today the door does not throw').toBe(true);
+    // FIXED — see the file header. The door still does not throw (#13807's
+    // status code does not move) and `resumed` stays `true` — this decision's
+    // OWN run, the child, really did resume. But it no longer reads as a
+    // clean success: `resumeFailure` names the PARENT, never the healthy
+    // child `runId` still names, and `resumeError` tells the same fact in
+    // prose.
+    expect(outcome.ok, 'the door still does not throw for this shape').toBe(true);
     const answer = outcome.ok ? outcome.r : (undefined as never);
-    expect(resumeFacing(answer)).toEqual(FULL_SUCCESS);
-    expect(answer.runId, 'the id handed back is the CHILD — the run that is fine').toBe(childRunId);
+    expect(answer.finalized).toBe(true);
+    expect(answer.decision).toBe('approve');
+    expect(answer.resumed, "this decision's own run — the child — really did resume").toBe(true);
+    expect(answer.runId, 'the id handed back is still the CHILD — the run that is fine').toBe(childRunId);
     expect(strandedDecisionDetails(answer as unknown)).toBeUndefined();
 
-    // The one artefact the operator gets, at the level AGENTS.md's durability
-    // rule requires, naming the run and the repair verb (#15556's shipped half).
+    // ── The machine-readable half: the PARENT's id, never the child's.
+    expect(answer.resumeFailure).toEqual({
+      code: 'RESUME_FAILED',
+      runId: parentRunId,
+      status: 'stranded',
+      repairable: true,
+    });
+    // ── The human-readable half — presence decided by the telling, never by
+    //    `resumed`, which is `true` right here (the spec docblock's rule).
+    expect(answer.resumeError).toContain('RESUME_FAILED');
+    expect(answer.resumeError).toContain(parentRunId);
+    expect(answer.resumeError).toContain(DOWNSTREAM_FAILURE);
+
+    // ── And the two answers now genuinely DIVERGE — no longer the shared
+    //    `FULL_SUCCESS` literal CONTROL A asserts below.
+    expect(resumeFacing(answer)).not.toEqual(FULL_SUCCESS);
+
+    // The one LOG artefact the operator gets, at the level AGENTS.md's
+    // durability rule requires, naming the run and the repair verb — the
+    // #16472 ruling left this log line alone; it is now a SIBLING to
+    // `resumeFailure`, not this card's only telling.
     const durability = logger.lines.filter(
       (l: any) => l.level === 'error' && String(l.msg).includes('STRANDED'),
     );
@@ -276,7 +304,7 @@ describe('#15556 — an approval hosted in a subflow child, whose parent bubble 
 
   });
 
-  it('CONTROL A — the healthy composition answers IDENTICALLY, which is the defect', async () => {
+  it('CONTROL A — a healthy composition answers plain success, with nothing behind it to tell', async () => {
     const automation = boot();
     const started = await automation.execute('deal_parent', {
       object: 'crm_deal', record: { id: 'd1', amount: 100 }, userId: 'submitter',
@@ -291,11 +319,15 @@ describe('#15556 — an approval hosted in a subflow child, whose parent bubble 
     expect((await automation.getRun(parentRunId))?.status).toBe('completed');
     expect(logger.lines.filter((l: any) => l.level === 'error')).toEqual([]);
 
-    // ⭐ The sharpest statement of the defect: the SAME literal the stranded
-    // composition asserted. A caller comparing the two answers has nothing to
-    // compare — only the run ids differ, and both name a healthy child.
+    // ⭐ Before the fix this was the SAME literal the stranded composition
+    // asserted — a caller comparing the two answers had nothing to compare.
+    // Kept here as the reverse control: it still holds for a run that really
+    // has nothing to report, which is what proves the stranded test's new
+    // divergent shape is about the strand and not a plumbing change that
+    // fires unconditionally.
     expect(resumeFacing(answer)).toEqual(FULL_SUCCESS);
     expect(answer.runId).toBe(req.flow_run_id);
+    expect(answer.resumeFailure, 'nothing to report — absence is the correct reading here').toBeUndefined();
   });
 
   it("CONTROL B — the #13807 shape still throws at this door, so the harness is live", async () => {

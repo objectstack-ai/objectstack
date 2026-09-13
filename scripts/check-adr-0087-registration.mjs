@@ -410,6 +410,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'TSO-N: the predicate set is pinned BY NAME, never by count': 3,
   'TSO-U: unit pins on predicate 4\'s readers': 30,
   'TSO-D (#15627): a DOTTED member path resolves through the object-literal nesting': 27,
+  'TSO-C (#17279): a DOTTED member path resolves through a CLASS body': 17,
   'G6: a changeset that was ALREADY breaking at base is inherited': 1,
   'R15: a changeset RENAMED AND turned breaking in the same commit': 5,
   'G10: a PURE rename of an ALREADY-breaking stock changeset': 3,
@@ -2069,7 +2070,8 @@ function metadataSurfaceFilesAt(rev, cwd) {
 
 const IDENT = '[A-Za-z_$][A-Za-z0-9_$]*';
 // A DOTTED MEMBER PATH: `oauth.applications.get`. The leading segments are the
-// object-literal nesting the member sits in; the last one is the member itself.
+// nesting the member sits in -- an object literal or a class (#17279); the last
+// one is the member itself.
 const MEMBER_PATH_RE = new RegExp(`^${IDENT}(?:\\.${IDENT})*$`);
 
 /**
@@ -2085,7 +2087,12 @@ const MEMBER_PATH_RE = new RegExp(`^${IDENT}(?:\\.${IDENT})*$`);
  * ⛔ A wider grammar over the old first-same-name reader would be strictly worse
  * than that refusal — writable but wrong — so `dotted` references are resolved
  * STRUCTURALLY (`resolveMemberPath`) and refused, never guessed, when the walk
- * finds zero or more than one candidate. ⛔ A line number is never the
+ * finds zero or more than one candidate. A leading segment names an object
+ * literal or a CLASS (#17279): reading only the first left the dotted spelling on
+ * `packages/objectql/src/engine.ts#ObjectRepository` unwritable, while the bare
+ * `packages/objectql/src/engine.ts#delete` answered about `ObjectQL.delete` — a
+ * member the diff never touched, which is #15627's own defect surviving its fix on
+ * the container kind that fix did not cover. ⛔ A line number is never the
  * disambiguator: this file's line numbers were measured to rot within one day.
  *
  * @returns {{ path: string, symbol: string, segments: string[], dotted: boolean }|null}
@@ -2228,15 +2235,17 @@ export function verifyRuntimeInterfaceOnly(refs, { rev, cwd, packages }) {
       continue;
     }
     // A DOTTED member path is meaningful only where a MEMBER is read (predicate 4).
-    // This category reads an exported `interface` / `type` / `class` / `enum`, which
-    // is top-level by construction, so a nesting walk has nothing to walk. Refused
+    // This category reads an exported `interface` / `type` / `class` / `enum` by
+    // NAME, which is top-level by construction, so a nesting walk has nothing to
+    // walk -- naming a class as a dotted segment (#17279) reaches its MEMBERS, and
+    // this category does not read one. Refused
     // by name rather than silently read as its last segment: `a.b.Result` quietly
     // becoming `Result` is exactly the "writable but wrong" reference #15627's
     // widening exists to prevent.
     if (parsedRef.dotted) {
       problems.push(
         `\`runtime-interface-only\` names "${ref}", a DOTTED member path. This category names an\n` +
-        '      exported type declaration, which is top-level -- there is no object-literal nesting to\n' +
+        '      exported type declaration, which is top-level -- there is no nesting to\n' +
         '      resolve through. The dotted spelling is accepted only by `type-surface-only`, which\n' +
         `      reads a member.\n${HOW(ref)}`,
       );
@@ -2639,7 +2648,7 @@ function memberDefinitionsIn(text, masked, symbol, from, to) {
  * `this.oauth = {` reached through a receiver is an assignment the walk does not
  * claim to read, and claiming it would be guessing.
  *
- * @returns {{ open: number, close: number }[]}
+ * @returns {{ open: number, close: number, kind: 'object literal' }[]}
  */
 function objectLiteralBodiesFor(structural, name, from, to) {
   const out = [];
@@ -2650,9 +2659,76 @@ function objectLiteralBodiesFor(structural, name, from, to) {
     const open = m.index + m[0].length - 1;
     const close = matchBracket(structural, open);
     if (close === -1) continue;
-    out.push({ open, close });
+    out.push({ open, close, kind: 'object literal' });
   }
   return out;
+}
+
+/**
+ * Every `{ … }` a CLASS DECLARATION named `name` opens inside `[from, to)`.
+ *
+ * The second container a member can sit in, and the one #15724's walker did not
+ * read (#17279). A published narrowing on a class method was therefore nameable
+ * only BARELY -- `<path>#findOne` -- which resolves to the FIRST same-named
+ * definition in the file, so on a file declaring the name twice the member had no
+ * addressable spelling at all: measured on `packages/objectql/src/engine.ts`,
+ * where `ObjectQL.findOne` is read for a diff that narrowed
+ * `ObjectRepository.findOne`. That is #15627's own defect, surviving its fix on
+ * the container kind the fix did not cover.
+ *
+ * Declaration forms only -- `export`, `export default`, `declare` and `abstract`
+ * prefixes, with or without `extends` / `implements` / type parameters. A CLASS
+ * EXPRESSION (`const X = class { … }`) is deliberately NOT read here: its name is
+ * the binding's, not the class's, and reading one would be guessing at which of
+ * the two a path's segment meant. The body is located with `declarationBodyStart`
+ * rather than by the first `{`, so `class C implements I<{ a: 1 }>` opens on the
+ * body and not inside its type arguments.
+ *
+ * @returns {{ open: number, close: number, kind: 'class' }[]}
+ */
+function classBodiesFor(structural, name, from, to) {
+  const out = [];
+  const key = new RegExp(
+    `(?:^|[^\\w$.])(?:export\\s+(?:default\\s+)?)?(?:declare\\s+)?(?:abstract\\s+)?class\\s+(${name})\\b`,
+    'g',
+  );
+  for (const m of structural.matchAll(key)) {
+    const identStart = m.index + m[0].length - m[1].length;
+    if (identStart < from || identStart >= to) continue;
+    const open = declarationBodyStart(structural, identStart + m[1].length);
+    if (open === -1) continue;
+    const close = matchBracket(structural, open);
+    if (close === -1) continue;
+    out.push({ open, close, kind: 'class' });
+  }
+  return out;
+}
+
+/**
+ * Every body a path segment named `name` can name inside `[from, to)`: an object
+ * literal or a class (#17279), in file order.
+ *
+ * ⚠️ The union is what makes the count meaningful. A segment naming BOTH an object
+ * literal and a class is AMBIGUOUS in exactly the way two object literals are, and
+ * counting the two kinds separately would let one of each through as "one of each
+ * kind" -- a silent pick, which is the "writable but wrong" reference the dotted
+ * spelling exists to avoid.
+ *
+ * @returns {{ open: number, close: number, kind: string }[]}
+ */
+function containerBodiesFor(structural, name, from, to) {
+  return [
+    ...objectLiteralBodiesFor(structural, name, from, to),
+    ...classBodiesFor(structural, name, from, to),
+  ].sort((a, b) => a.open - b.open);
+}
+
+/** How a refusal names a set of container bodies: by kind when they agree. */
+const BODY_PLURALS = Object.freeze({ 'object literal': 'object literals', class: 'classes' });
+function describeBodies(bodies) {
+  const kinds = new Set(bodies.map((b) => b.kind));
+  if (kinds.size === 1) return BODY_PLURALS[[...kinds][0]];
+  return 'object literals and class bodies';
 }
 
 /**
@@ -2660,8 +2736,8 @@ function objectLiteralBodiesFor(structural, name, from, to) {
  *
  * A dotted path's leading segments ARE the nesting the member sits in (the
  * `parseSymbolRef` grammar), so a definition that starts inside `[from, to)` but
- * inside a nested object literal OPENED within that region belongs to the deeper
- * path, ⛔ never to this one. Without this filter a direct member whose name recurs
+ * inside a nested CONTAINER -- an object literal or a class (#17279) -- OPENED
+ * within that region belongs to the deeper path, ⛔ never to this one. Without this filter a direct member whose name recurs
  * in a nested literal has NO addressable spelling at all: it is counted against
  * itself, refused as AMBIGUOUS, and told to "name a deeper path" -- an instruction
  * it cannot carry out, because it already sits at the depth the path names (#16571).
@@ -2673,14 +2749,15 @@ function objectLiteralBodiesFor(structural, name, from, to) {
  * reading is never reachable from here.
  *
  * `structural` MUST be the comment- and literal-masked projection, for the reason
- * `matchBracket` gives. `IDENT` is passed as the literal's NAME because every named
- * literal counts: the spans of literals nested inside those are contained in them,
- * so their union is the union of the top-level ones and one pass suffices.
+ * `matchBracket` gives. `IDENT` is passed as the container's NAME because every
+ * named container counts: the spans of containers nested inside those are
+ * contained in them, so their union is the union of the top-level ones and one
+ * pass suffices.
  *
  * @returns {{ index: number, annotation: string|null }[]} in file order, a subset.
  */
 function definitionsAtTopDepth(structural, defs, from, to) {
-  const nested = objectLiteralBodiesFor(structural, IDENT, from, to);
+  const nested = containerBodiesFor(structural, IDENT, from, to);
   return defs.filter((d) => !nested.some((b) => d.index > b.open && d.index < b.close));
 }
 
@@ -2693,10 +2770,15 @@ function definitionsAtTopDepth(structural, defs, from, to) {
  * ⛔ Never a line number, and never "the first same-named definition in the file":
  * both are what #15627 measured as unusable on `packages/client/src/index.ts`.
  *
- * A segment that opens zero or more than one object literal in the region is
- * REPORTED, never guessed at -- `packages` opens three in that file, and picking
- * one of them would be the "writable but wrong" reference this widening exists to
- * avoid.
+ * A segment names an object literal OR a class body (#17279). Both are containers
+ * a published member actually sits in, and reading only the first left a narrowing
+ * on a class method with no spelling at all -- #15627's defect, surviving its own
+ * fix on the container kind that fix did not cover.
+ *
+ * A segment that opens zero or more than one container in the region is REPORTED,
+ * never guessed at -- `packages` opens three object literals in that file, and
+ * picking one of them would be the "writable but wrong" reference this widening
+ * exists to avoid.
  *
  * This returns the REGION only. Which definitions inside it the LAST segment may
  * name is `definitionsAtTopDepth`'s rule: the region's own depth, never deeper.
@@ -2710,12 +2792,19 @@ export function resolveMemberPath(text, segments) {
   const walked = [];
   for (const seg of segments.slice(0, -1)) {
     const where = walked.length === 0 ? 'at the top of the file' : `inside \`${walked.join('.')}\``;
-    const bodies = objectLiteralBodiesFor(structural, seg, from, to);
+    const bodies = containerBodiesFor(structural, seg, from, to);
     if (bodies.length === 0) {
-      return { ok: false, reason: `no \`${seg}\` object literal (\`${seg}: {\` or \`${seg} = {\`) is declared ${where}` };
+      return {
+        ok: false,
+        reason: `no \`${seg}\` object literal or class (\`${seg}: {\`, \`${seg} = {\` or ` +
+          `\`class ${seg} {\`) is declared ${where}`,
+      };
     }
     if (bodies.length > 1) {
-      return { ok: false, reason: `\`${seg}\` opens ${bodies.length} object literals ${where}, so the path is AMBIGUOUS` };
+      return {
+        ok: false,
+        reason: `\`${seg}\` opens ${bodies.length} ${describeBodies(bodies)} ${where}, so the path is AMBIGUOUS`,
+      };
     }
     from = bodies[0].open + 1;
     to = bodies[0].close;
@@ -2732,8 +2821,12 @@ export function resolveMemberPath(text, segments) {
  * written before #15627 means. A DOTTED reference is resolved through the nesting
  * and read only inside it, at that nesting's OWN depth: `organizations.create` is
  * the direct member and `organizations.teams.create` the nested one, and neither
- * spelling can reach the other (#16571). A dotted path never names an exported
- * `interface` / `type` / `class` / `enum`, so only the member branch applies to it.
+ * spelling can reach the other (#16571). A dotted path's LAST segment is always a
+ * MEMBER, never an exported `interface` / `type` / `class` / `enum`, so only the
+ * member branch applies to it; its LEADING segments name the containers it sits
+ * in, and a class is one of them (#17279) -- `ObjectRepository.findOne` names the
+ * method on that class, and `ObjectRepository` itself stays unreachable by this
+ * grammar.
  *
  * ⚠️ Every refusal below states something the author can ACT on. "Name a deeper
  * path" is printed only where a deeper path exists to name; where the collision is
@@ -2777,10 +2870,10 @@ export function readTypeSurfaceRef(text, parsed) {
       surface: null,
       refusal: defs.length > 1
         ? `\`${spelling}\` is AMBIGUOUS: ${defs.length} \`${parsed.symbol}\` definitions sit inside ` +
-          `\`${parent}\`, every one of them inside a nested object literal. Name a deeper path that ` +
+          `\`${parent}\`, every one of them inside a nested container. Name a deeper path that ` +
           'resolves to exactly one.'
         : `\`${spelling}\` does not resolve: the one \`${parsed.symbol}\` definition inside \`${parent}\` ` +
-          'sits inside a nested object literal, not at the depth this path names. Name the deeper path.',
+          'sits inside a nested container, not at the depth this path names. Name the deeper path.',
     };
   }
   const { annotation } = here[0];
@@ -3119,9 +3212,11 @@ export function verifyTypeSurfaceOnly(refs, { base, head, cwd, bumps, packages, 
     '        <!-- adr-0087: not-required (type-surface-only ' +
     'packages/client/src/index.ts#queryDataset) why -->\n' +
     '      ...or, when the name is not unique in the file, as a DOTTED MEMBER PATH through the\n' +
-    '      object-literal nesting the member sits in (#15627):\n' +
+    '      nesting the member sits in -- an object literal (#15627) or a class (#17279):\n' +
     '        <!-- adr-0087: not-required (type-surface-only ' +
     'packages/client/src/index.ts#oauth.applications.get) why -->\n' +
+    '        <!-- adr-0087: not-required (type-surface-only ' +
+    'packages/objectql/src/engine.ts#ObjectRepository.findOne) why -->\n' +
     `      The symbol is what predicate 4 reads at BOTH revs${badRef ? ` (got: ${badRef})` : ''}.`;
 
   if (refs.length === 0) {
@@ -3174,10 +3269,10 @@ export function verifyTypeSurfaceOnly(refs, { base, head, cwd, bumps, packages, 
       problems.push(
         `\`type-surface-only ${ref}\` [predicate 4] cannot be resolved at HEAD in ${path}:\n` +
         `      ${read.refusal}\n` +
-        '      A dotted member path is walked through the object-literal nesting it names, and a walk\n' +
-        '      that lands on zero or on several candidates is REPORTED rather than guessed at -- a\n' +
-        '      reference that resolves to the wrong same-named member reads as a true sentence about\n' +
-        '      a member the diff never touched (#15627).\n' +
+        '      A dotted member path is walked through the nesting it names -- an object literal or\n' +
+        '      a class body (#17279) -- and a walk that lands on zero or on several candidates is\n' +
+        '      REPORTED rather than guessed at -- a reference that resolves to the wrong same-named\n' +
+        '      member reads as a true sentence about a member the diff never touched (#15627).\n' +
         HOW(null),
       );
       continue;
@@ -5153,6 +5248,169 @@ function selfTest() {
       },
     })),
     [/a DOTTED member path/]);
+
+  // ---- TSO-C (#17279): a DOTTED path resolves through a CLASS body ----------
+  //
+  // The RESIDUAL of #15627, left by its own fix. #15724 widened the grammar to a
+  // dotted member path AND widened the reader to walk it -- but the reader walks
+  // OBJECT-LITERAL nesting only, so a published narrowing on a CLASS method was
+  // back in the state #15627 was filed about: nameable only BARELY, and a bare
+  // name is the FIRST same-named definition in the file.
+  //
+  // Measured on `packages/objectql/src/engine.ts` (PR #17255, two members narrowed
+  // on the exported class `ObjectRepository`):
+  //   bare   `…/engine.ts#delete`                  -> `ObjectQL.delete`, a member the
+  //                                                  diff never touched
+  //   dotted `…/engine.ts#ObjectRepository.delete` -> "no `ObjectRepository` object
+  //                                                  literal is declared"
+  // Neither spelling could address the member, so the category the PR belonged to
+  // was unclaimable BY the PR -- the #16571 failure class, one container kind over.
+  //
+  // ⚠️ The population was not zero when this landed: 10 of the 42 live
+  // `type-surface-only` references in the tree already name a class member
+  // (`SqlDriver` and `TursoDriver`, five each), every one of them written BARELY
+  // and resolving only because that name happens to be unique in its file. TSO-C2
+  // is the pin that those ten did not move.
+  battery('TSO-C (#17279): a DOTTED member path resolves through a CLASS body');
+  const CLS_ENGINE =
+    'export class ObjectQL implements IObjectQLEngine {\n' +
+    '  async findOne(objectName: string): Promise<EngineRow | null> {\n' +
+    '    return null;\n' +
+    '  }\n' +
+    '\n' +
+    '  helpers = {\n' +
+    '    findOne: async (): Promise<HelperRow | null> => {\n' +
+    '      return null;\n' +
+    '    },\n' +
+    '  };\n' +
+    '}\n' +
+    '\n' +
+    'export class ObjectRepository implements IScopedObjectRepository {\n' +
+    '  async findOne(query: any = {}): Promise<ScopedRow | null> {\n' +
+    '    return null;\n' +
+    '  }\n' +
+    '}\n';
+  const CLS = (spelling) => `packages/objectql/src/engine.ts#${spelling}`;
+
+  // -- the reading the card could not write ----------------------------------
+  {
+    const r = readRef(CLS_ENGINE, CLS('ObjectRepository.findOne'));
+    assert(
+      r.refusal === null && r.surface?.type === 'Promise<ScopedRow | null>',
+      `TSO-C1: THE CARD'S SHAPE -- a member on the SECOND same-named class resolves through its CLASS body. Before this it read "no \`ObjectRepository\` object literal is declared", and the member had no spelling at all. Got: ${JSON.stringify(r)}`,
+    );
+  }
+  {
+    const r = readRef(CLS_ENGINE, CLS('findOne'));
+    assert(
+      r.refusal === null && r.surface?.type === 'Promise<EngineRow | null>',
+      `TSO-C2: THE NEGATIVE CONTROL -- a BARE \`findOne\` still reads the FIRST definition in the file (\`ObjectQL.findOne\`), NOT either of the two below it. Ten live references in the tree are exactly this spelling on a class member; if this moves, the widening silently changed what every one of them means. Got: ${JSON.stringify(r)}`,
+    );
+  }
+  {
+    const shallow = readRef(CLS_ENGINE, CLS('ObjectQL.findOne'));
+    const deep = readRef(CLS_ENGINE, CLS('ObjectQL.helpers.findOne'));
+    const other = readRef(CLS_ENGINE, CLS('ObjectRepository.findOne'));
+    assert(
+      shallow.refusal === null && shallow.surface?.type === 'Promise<EngineRow | null>',
+      `TSO-C3: the #16571 TOP-DEPTH rule holds inside a CLASS body too -- \`ObjectQL.findOne\` is the class's OWN method, not the same-named one in the \`helpers\` literal nested in it. Got: ${JSON.stringify(shallow)}`,
+    );
+    assert(
+      deep.refusal === null && deep.surface?.type === 'Promise<HelperRow | null>',
+      `TSO-C4: THE OTHER DIRECTION -- a class segment followed by an object-literal segment reaches the NESTED member. The widening adds a container kind to the walk; it takes nothing away from the kind already walked. Got: ${JSON.stringify(deep)}`,
+    );
+    assert(
+      new Set([shallow.surface?.type, deep.surface?.type, other.surface?.type]).size === 3,
+      `TSO-C5: THE PIN THAT MAKES THE SET A READING -- the three spellings resolve to THREE DIFFERENT definitions. Three green one-direction assertions are equally green when every path collapses onto one definition; this is the assertion that is not. Got: ${JSON.stringify([shallow, deep, other])}`,
+    );
+  }
+
+  // -- and the refusals, which are what keep the widening sound ---------------
+  {
+    const r = readRef(CLS_ENGINE, CLS('NoSuchClass.findOne'));
+    assert(
+      r.surface === null && /no `NoSuchClass` object literal or class/.test(r.refusal ?? '') &&
+      /`class NoSuchClass \{`/.test(r.refusal ?? ''),
+      `TSO-C6: a segment naming NEITHER container is refused, and the message names BOTH shapes the walk looked for -- an author told only about object literals cannot tell a missing class from an unsupported one. Got: ${JSON.stringify(r)}`,
+    );
+  }
+  {
+    const r = readRef(CLS_ENGINE, CLS('ObjectRepository.nosuch'));
+    assert(
+      r.surface === null && /no `nosuch` definition sits inside it/.test(r.refusal ?? ''),
+      `TSO-C7: THE NONSENSE CONTROL -- a member absent from a RESOLVED class is still refused by name, never resolved outward to the same-named member on the other class. So TSO-C1's green is a reading of the fixture, not of an unconditionally-resolving reader. Got: ${JSON.stringify(r)}`,
+    );
+  }
+  {
+    const twoClasses = CLS_ENGINE + 'export class ObjectRepository {\n  async findOne(): Promise<Other> { return {} as Other; }\n}\n';
+    const r = readRef(twoClasses, CLS('ObjectRepository.findOne'));
+    assert(
+      r.surface === null && /AMBIGUOUS/.test(r.refusal ?? '') && /opens 2 classes/.test(r.refusal ?? ''),
+      `TSO-C8: two classes of the same name is AMBIGUOUS and the refusal counts them BY KIND -- the same rule TSO-D12 pins for object literals, on the container kind added here. Got: ${JSON.stringify(r)}`,
+    );
+  }
+  {
+    const both = 'const dual = {\n  findOne: async (): Promise<Lit> => { return {} as Lit; },\n};\n' +
+      'export class dual {\n  async findOne(): Promise<Cls> { return {} as Cls; }\n}\n';
+    const r = readRef(both, CLS('dual.findOne'));
+    assert(
+      r.surface === null && /AMBIGUOUS/.test(r.refusal ?? '') && /opens 2 object literals and class bodies/.test(r.refusal ?? ''),
+      `TSO-C9: THE UNION PIN -- a segment naming one object literal AND one class is AMBIGUOUS. Counting the two kinds separately would let this through as "one of each", which is a silent pick between two real candidates. Got: ${JSON.stringify(r)}`,
+    );
+  }
+  {
+    const expr = 'const Boxed = class {\n  async findOne(): Promise<Boxed> { return {} as Boxed; }\n};\n';
+    const r = readRef(expr, CLS('Boxed.findOne'));
+    assert(
+      r.surface === null && /no `Boxed` object literal or class/.test(r.refusal ?? ''),
+      `TSO-C10: a CLASS EXPRESSION (\`const X = class { … }\`) is NOT walked -- that name belongs to the binding, not to the class, and reading it would be guessing at which of the two the segment meant. Refused, never guessed. Got: ${JSON.stringify(r)}`,
+    );
+  }
+  {
+    const generic = 'export abstract class Repo<T> extends Base<{ a: 1 }> implements IRepo<T> {\n' +
+      '  async findOne(): Promise<T | null> { return null; }\n' +
+      '}\n';
+    const r = readRef(generic, CLS('Repo.findOne'));
+    assert(
+      r.refusal === null && r.surface?.type === 'Promise<T | null>',
+      `TSO-C11: the BODY is located structurally -- \`abstract\`, \`extends Base<{ a: 1 }>\` and \`implements\` do not send the walk into a type argument's braces. Got: ${JSON.stringify(r)}`,
+    );
+  }
+
+  // -- end to end, through the shipping scan ----------------------------------
+  const CLS_BASE = CLS_ENGINE.replace('async findOne(query: any = {}): Promise<ScopedRow | null> {', 'async findOne(query: any = {}) {');
+  const CLS_PKGS = {
+    '@objectstack/spec': { dir: 'packages/spec', private: false },
+    '@objectstack/objectql': { dir: 'packages/objectql', private: false },
+  };
+  const CLS_BODY =
+    'fix(objectql): bind the scoped repository reader, whose published type was inferred\n\n' +
+    '**BREAKING**: an unannotated method infers a wider type than the one it returns.\n\n' +
+    '## Migration\n\n' +
+    '| you wrote | write instead |\n| --- | --- |\n' +
+    '| `(await repo.findOne(q)).id as string` | `(await repo.findOne(q))?.id` |\n';
+  const CLS_FIXTURE = (marker) => ({
+    pkgs: CLS_PKGS,
+    baseFiles: { 'packages/objectql/src/engine.ts': CLS_BASE },
+    files: {
+      'packages/objectql/src/engine.ts': CLS_ENGINE,
+      '.changeset/x.md': CS({ bumps: [['@objectstack/objectql', 'minor']], body: `${CLS_BODY}\n<!-- adr-0087: not-required (${marker}) ${TSO_WHY} -->\n` }),
+    },
+  });
+
+  green('TSO-C12 the #17279 shape, finally claimable: a dotted marker naming the CLASS member that actually narrowed',
+    run(mk(CLS_FIXTURE(`type-surface-only ${CLS('ObjectRepository.findOne')}`))));
+
+  // The SAME diff named BARELY lands on `ObjectQL.findOne`, which this diff never
+  // touches and which is already annotated -- a true sentence about the wrong
+  // member. Preserved here as the reason the class walk had to exist.
+  red('TSO-C13 the bare spelling on the same diff still lands on the FIRST same-named definition, which this diff never touched',
+    run(mk(CLS_FIXTURE(`type-surface-only ${CLS('findOne')}`))),
+    [/narrowed-from-erased/]);
+
+  red('TSO-C14 a class segment that does not resolve is still refused by predicate 4, never guessed at',
+    run(mk(CLS_FIXTURE(`type-surface-only ${CLS('NoSuchClass.findOne')}`))),
+    [/cannot be resolved at HEAD/, /no `NoSuchClass` object literal or class/]);
 
   // ---- G6: a changeset that was ALREADY breaking at base is inherited -------
   battery('G6: a changeset that was ALREADY breaking at base is inherited');
