@@ -975,6 +975,11 @@ const DELETED_AGED = `data/Object:${DELETED_AGED_LEAF} [RETIRED]`;
  *  fixture vacuous. */
 const DELETED_BY_RENAME_SOURCE_DEF = 'integration/FieldMapping';
 const DELETED_BY_RENAME = `${DELETED_BY_RENAME_SOURCE_DEF}:source`;
+/** The SAME property under the rename's TARGET def. The committed surface is the
+ *  post-rename snapshot, so it records this one and not `DELETED_BY_RENAME`; an
+ *  upstream anchor from before the rename is the mirror image, and holding both
+ *  at once is the #17383 collision. */
+const CARRIED_BY_RENAME = `${RENAMED_DEFS[DELETED_BY_RENAME_SOURCE_DEF]}:source`;
 
 describe('build-schemas.ts — deleted baseline lines must prove themselves (#4650)', () => {
   beforeAll(() => {
@@ -1266,13 +1271,80 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       expect(pristineSurface).toContain(
         `${RENAMED_DEFS[DELETED_BY_RENAME_SOURCE_DEF]}:source`,
       );
-      seedBase((s) => [...s, DELETED_BY_RENAME].sort());
+      // ⚠️ The old key is INJECTED and the carried one REMOVED, which is what an
+      // upstream anchor from before the rename really looks like: the property
+      // is recorded under the OLD def and not yet under the new one. Injecting
+      // alone left the base recording `source` under BOTH defs — a shape no
+      // real landing produces, and one #17383's collision guard now refuses
+      // outright (measured: the run exits 1 before this check is reached), so
+      // the fixture would have been asserting about a build that never got here.
+      seedBase((s) => [...s.filter((k) => k !== CARRIED_BY_RENAME), DELETED_BY_RENAME].sort());
       seedSurface((s) => s);
 
       const { status, output } = run(['--check']);
 
       expect(output).not.toContain('deleted without proof');
       expect(output).not.toContain('carry their own proof');
+      expect(status).toBe(0);
+    },
+  );
+
+  // ─── #17383 — a rename may MOVE keys, it may never MERGE two onto one ─────
+  // `checkRenameTable` validates the table against the defs the build EMITS, so
+  // this shape is invisible to it: one well-formed rename, source unemitted,
+  // target emitted. The damage is in the BASELINE, where the carry's plain
+  // `Map.set` collapses the two entries and drops one side's recorded retired
+  // state and default — before any ratchet below runs.
+
+  it(
+    'refuses a rename whose baseline records the same property under BOTH defs, and writes nothing',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // The target keeps `CARRIED_BY_RENAME`, so the base records `source` under
+      // the source def AND the target def. That is the collision.
+      seedBase((s) => [...s, DELETED_BY_RENAME].sort());
+      const surfaceBytes = seedSurface((s) => s);
+
+      const { status, output } = run(['--check']);
+
+      expect(status).toBe(1);
+      expect(output).toContain('would COLLAPSE keys of the upstream baseline');
+      expect(output).toContain(
+        `${DELETED_BY_RENAME_SOURCE_DEF} → ${RENAMED_DEFS[DELETED_BY_RENAME_SOURCE_DEF]}`,
+      );
+      expect(output).toContain('under the TARGET def — source');
+      // The remedy is the one the two-sources rule already prescribes.
+      expect(output).toContain('retiredKey()');
+      // A check reports; it does not write (#4711).
+      expect(readSurface()).toBe(surfaceBytes);
+    },
+  );
+
+  it(
+    'does NOT refuse a rename into a populated target when no property name is shared',
+    { timeout: SPAWN_TIMEOUT_MS },
+    () => {
+      // The cost this guard can impose, pinned: the target def is populated in
+      // the base (six other keys survive the filter below), and the carried
+      // property name is not one of them. `Map.set` collapses only entries that
+      // are the SAME key, so this merge writes every key exactly once and loses
+      // nothing. Refusing a populated target as such would redden most of the
+      // committed table.
+      const baseKeys = [
+        ...pristineSurface.filter((k) => k !== CARRIED_BY_RENAME),
+        DELETED_BY_RENAME,
+      ].sort();
+      const targetDef = RENAMED_DEFS[DELETED_BY_RENAME_SOURCE_DEF];
+      expect(
+        baseKeys.filter((k) => k.startsWith(`${targetDef}:`)).length,
+        'the target def must still hold keys in the base, or this pins nothing',
+      ).toBeGreaterThan(0);
+      seedBase(() => baseKeys);
+      seedSurface((s) => s);
+
+      const { status, output } = run(['--check']);
+
+      expect(output).not.toContain('would COLLAPSE keys');
       expect(status).toBe(0);
     },
   );
