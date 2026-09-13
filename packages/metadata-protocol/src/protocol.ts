@@ -3143,9 +3143,40 @@ const ARRAY_VALUED_LIST_QUERY_PARAMS: ReadonlySet<string> = (() => {
  * `limit: NaN` — driver-dependent behaviour under a 200, never an error. That
  * is the same class #6928 / PR #7299 refused one layer over on
  * `GET /api/v1/notifications`, and the same rule #6307 / #6877 landed in
- * `packages/rest` (`readSingleQueryValue`); the wording below is theirs
- * verbatim so a caller who repeats a parameter on two different routes is told
- * the same thing twice, not two things once.
+ * `packages/rest` (`readSingleQueryValue` / `repeatedQueryParamMessage`).
+ *
+ * ## The wording below is MODELLED ON theirs — it is not a verbatim copy
+ *
+ * A caller who repeats a parameter on two different routes is told the same
+ * RULE, in two texts that differ in two measured ways (#17813):
+ *
+ *  1. The parameter name is quoted differently — single quotes here
+ *     (`The 'top' query parameter …`), double quotes in `packages/rest`
+ *     (`The "top" query parameter …`) — so the two strings diverge at the
+ *     FIRST quoted character, shared prefix included.
+ *  2. This one appends the `It was NOT applied as a list: …` clause naming
+ *     the `Number(['1','2'])` coercion above. Additive, and absent there.
+ *
+ * ⛔ Neither delta is a stray to "repair" in passing: both texts are the
+ * published output of released endpoints, so aligning the two is a change to
+ * what two doors answer, not a comment fix.
+ *
+ * ## Why the text is copied at all, now that half the reason has gone
+ *
+ * #17672 published `repeatedQueryParamMessage` from `@objectstack/rest`'s
+ * entry, so the sentence that module owns became importable by a sibling
+ * package for the first time — but not from HERE. `@objectstack/rest` is in
+ * neither this package's `dependencies` nor its `devDependencies`, and the
+ * arrow points the other way: `@objectstack/rest` dev-depends on
+ * `@objectstack/metadata-protocol` (`query-multiplicity.ts`'s header records
+ * that as why it cannot derive the filter-slot spellings from here at
+ * runtime). Importing the message would invert a package dependency and
+ * settle where the sentence lives for THREE consumers — this normalizer, the
+ * rest handlers, and the dispatcher domain that already calls the message
+ * function — a layering question deliberately left open. Until it is
+ * answered, the copy is the only form reachable from this package, ⛔ nothing
+ * holds the two texts equal, and an edit to either one does NOT move the
+ * other.
  *
  * `INVALID_REQUEST` / 400 is what {@link conflictingQueryParamsError} in this
  * same normalizer already answers for the IDENTICAL condition reached the other
