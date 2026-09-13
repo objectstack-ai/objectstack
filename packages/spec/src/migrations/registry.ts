@@ -5456,7 +5456,21 @@ const step18: MigrationStep = {
     'was wrong. A retiredKey tombstone on `ObjectKanbanPropsSchema` with one D2 conversion that ' +
     'is a pure lossless DELETE (the key never had an effect to preserve) scoped by component ' +
     '`type`: `quickAdd` stays LIVE on the `kanban-ui` block, where a React host supplies the ' +
-    'runtime slot, and the ruling keeps it there deliberately.',
+    'runtime slot, and the ruling keeps it there deliberately. ' +
+    'It also retires the bare STRING `sort` clause on the list-view doors (#17053; objectui#8221 '
+    + 'decision batch #77, 2026-09-07 — option B, one spelling, the array). This is the PRODUCER '
+    + 'half of the seam whose consumer half is objectui PR #8758: `convertSortToQueryParams` now '
+    + 'refuses a runtime string, so `ListViewSchema.sort` was minting documents its own consumer '
+    + 'rejects — a document that validated upstream failed downstream, and the author was told off '
+    + 'by the wrong layer. Like the `type` value above it is a VALUE narrowing with no tombstone to '
+    + 'hang a prescription on, so the surviving array member\'s own error map carries it, keyed on '
+    + '`issue.input` being a string. The D2 conversion REWRITES rather than strips, because the '
+    + 'clause is losslessly mechanical: `\'created_at desc\'` is the tuple `{ field, order }`, a bare '
+    + 'field name meant ascending and is written out as `order: \'asc\'`, and the comma-separated '
+    + 'multi-key form becomes one entry per key in the same order. A string that does not parse as '
+    + 'that grammar — the `\'-field\'` dialect above all — is left alone and meets the door instead: '
+    + 'that dialect belongs to `RecordRelatedListProps.sort`, never reaches '
+    + '`convertSortToQueryParams`, and retiring it was NOT ruled.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5484,6 +5498,7 @@ const step18: MigrationStep = {
     'memory-persistence-auto-save-interval-to-ms',
     'turso-config-timeout-to-timeout-ms',
     'view-page-mount-removed',
+    'list-view-sort-string-clause-to-array',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by

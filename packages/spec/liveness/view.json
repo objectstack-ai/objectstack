@@ -48,10 +48,7 @@
           "status": "live",
           "note": "objectui: ListView.tsx client-side filter shaping (audit L15); no list-render prop reaches the server query (audit data-flow note)."
         },
-        "sort": {
-          "status": "live",
-          "note": "objectui: ListView.tsx (audit L15)."
-        },
+        "sort": {"status": "live", "note": "objectui: ListView.tsx (audit L15).", "children": {"field": {"status": "live", "verifiedAt": "2026-09-13", "evidenceScope": "in-repo", "note": "Read in this repo by `normalizeSortNodes` (packages/metadata-protocol/src/protocol.ts:3468, `fromElement`), which reads `el.field` off every sort entry and is the funnel every metadata ingress passes through; it lowers onto the engine `orderBy`. Drilled here rather than inherited because #17053 retired the bare string arm of this union, which is what made the entry's own keys visible to the walk."}, "order": {"status": "live", "verifiedAt": "2026-09-13", "evidenceScope": "in-repo", "note": "Read in this repo by `normalizeSortNodes` (packages/metadata-protocol/src/protocol.ts:3468) alongside `field`, and validated by its `direction()` helper (:3447) which refuses anything but 'asc'/'desc'. Divergence from `field` would be the signal worth recording; there is none \u2014 a sort entry is inert without both."}}},
         "searchableFields": {
           "status": "live",
           "note": "objectui: ListView.tsx (audit L15)."

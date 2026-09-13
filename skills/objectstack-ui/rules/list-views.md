@@ -243,10 +243,7 @@ that maintain it, and why a `formula` field cannot be the mirror — lives in
 ### Sorting
 
 ```typescript
-// Simple
-sort: 'created_at desc'
-
-// Multi-field
+// `order` is required.
 sort: [
   { field: 'priority', order: 'desc' },
   { field: 'created_at', order: 'asc' },
@@ -271,7 +268,7 @@ top-level `groupBy`**. The top-level `columns` is required on every list view
     summarizeField: 'estimate_hours',      // optional — summed at the top of each column
     columns: ['title', 'assignee', 'priority'],   // fields shown on each card
   },
-  sort: 'priority desc',
+  sort: [{ field: 'priority', order: 'desc' }],
 }
 ```
 

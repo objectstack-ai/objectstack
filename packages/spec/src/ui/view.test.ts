@@ -377,13 +377,83 @@ describe('ListViewSchema', () => {
     expect(() => ListViewSchema.parse(listView)).not.toThrow();
   });
 
-  it('should accept legacy string sort format', () => {
-    const listView: ListView = {
-      columns: ['name'],
-      sort: 'created_at desc',
-    };
+  /**
+   * [#17053] The bare string `sort` clause is RETIRED — objectui#8221's
+   * decision batch #77 (2026-09-07, option B: one spelling, the array), whose
+   * consumer half is objectui PR #8758 (`convertSortToQueryParams` refuses a
+   * runtime string). Until this landed, `ListViewSchema` was the PRODUCER of
+   * the documents that consumer refuses.
+   *
+   * This replaces the accept pin that used to live here. Both directions are
+   * pinned, because a refusal pin alone cannot tell "the string is refused"
+   * from "the whole key is broken":
+   *
+   *   - NEGATIVE — the string is refused AT `sort`, with the prescription that
+   *     names the surviving array form (not a bare `invalid_type` report);
+   *   - POSITIVE — the array form parses unchanged, value-for-value.
+   *
+   * The `unrecognized_keys` control on the same call is what makes the
+   * negative a verdict rather than a schema reporting nothing.
+   */
+  describe('[#17053] the legacy string `sort` clause is retired', () => {
+    const withSort = (sort: unknown) => ({ columns: ['name'], sort });
 
-    expect(() => ListViewSchema.parse(listView)).not.toThrow();
+    it('REFUSES the bare string clause at `sort`, prescribing the array form', () => {
+      const result = ListViewSchema.safeParse(withSort('created_at desc'));
+      expect(result.success).toBe(false);
+      const issue = result.error!.issues.find((i) => i.path.join('.') === 'sort');
+      expect(issue, JSON.stringify(result.error!.issues)).toBeDefined();
+      expect(issue!.code).toBe('invalid_type');
+      // The prescription, not a bare "expected array": it names what was
+      // removed, and the spelling that replaces it.
+      expect(issue!.message).toMatch(/bare string `sort` clause was removed.*`sort: \[\{ field: 'created_at', order: 'desc' \}\]`/s);
+    });
+
+    it("REFUSES the '-field' spelling at `sort` too — same clause, same door", () => {
+      const result = ListViewSchema.safeParse(withSort('-created_at'));
+      expect(result.success).toBe(false);
+      expect(result.error!.issues.some((i) => i.path.join('.') === 'sort')).toBe(true);
+    });
+
+    it('still ACCEPTS the array form, value-for-value', () => {
+      const sort = [
+        { field: 'created_at', order: 'desc' as const },
+        { field: 'name', order: 'asc' as const },
+      ];
+      const result = ListViewSchema.safeParse(withSort(sort));
+      expect(result.success, JSON.stringify(result.success ? {} : result.error.issues)).toBe(true);
+      expect(result.data!.sort).toEqual(sort);
+    });
+
+    it('keeps zod\'s default report for every OTHER invalid value', () => {
+      // The prescription is keyed on `issue.input` being a string, so a number
+      // is NOT told a clause it never wrote "was removed"…
+      const num = ListViewSchema.safeParse(withSort(42));
+      expect(num.success).toBe(false);
+      expect(num.error!.issues.find((i) => i.path.join('.') === 'sort')!.message)
+        .not.toMatch(/was removed/);
+      // …and neither is a string reaching a DESCENDANT of the array.
+      const bad = ListViewSchema.safeParse(withSort([{ field: 'a', order: 'descending' }]));
+      expect(bad.success).toBe(false);
+      expect(bad.error!.issues.some((i) => i.message.includes('was removed'))).toBe(false);
+    });
+
+    it('CONTROL: an undeclared key is still refused BY NAME on the same call', () => {
+      const result = ListViewSchema.safeParse({ ...withSort('created_at desc'), bogusProp: 1 });
+      expect(result.success).toBe(false);
+      expect(result.error!.issues.some(
+        (i) => i.code === 'unrecognized_keys' && JSON.stringify(i).includes('bogusProp'),
+      )).toBe(true);
+    });
+
+    it('the derived `ObjectListViewSchema` inherits the refusal', () => {
+      // `object.list` / `object.listViews.*` is the slot that actually feeds
+      // objectui's `deriveRelatedLists`, i.e. the producer end of the seam.
+      expect(ObjectListViewSchema.safeParse(withSort('created_at desc')).success).toBe(false);
+      expect(ObjectListViewSchema.safeParse(
+        withSort([{ field: 'created_at', order: 'desc' }]),
+      ).success).toBe(true);
+    });
   });
 
   it('should accept list view with searchable fields', () => {

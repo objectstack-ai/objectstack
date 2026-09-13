@@ -1745,6 +1745,46 @@ const LIST_VIEW_PAGE_NAME_RETIRED =
   + 'different surface and is the page mount that has always rendered. '
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
 
+/**
+ * [#17053] Prescription for the retired bare-string `sort` clause on the
+ * list-view `sort` union.
+ *
+ * The seam this closes, and the reason the grade sat on the ASYMMETRY rather
+ * than on the string: objectui ruled one sort spelling platform-wide — the
+ * array (decision batch #77, 2026-09-07, option B) — and objectui PR #8758
+ * executes it, so `convertSortToQueryParams` REFUSES a runtime string and
+ * names the array form in its diagnostic. Until this change `ListViewSchema`
+ * was the PRODUCER of exactly the documents that consumer refuses: a view
+ * authored with `sort: 'created_at desc'` validated here, cleanly, and then
+ * failed downstream — the contract minting a shape its consumer rejects, with
+ * the author told off by the wrong layer.
+ *
+ * Like {@link LIST_VIEW_TYPE_PAGE_RETIRED} and
+ * {@link LIST_VIEW_EXPORT_PDF_RETIRED}, this retires a VALUE spelling, not a
+ * key: `sort` survives, one union arm lighter, so there is no `retiredKey()`
+ * tombstone to hang a prescription on. The array member's own `error` map
+ * carries it, keyed on `typeof issue.input === 'string'` so only the spelling
+ * that used to be legal gets the "was removed" message — every other invalid
+ * value keeps zod's default report.
+ *
+ * ⛔ `RecordRelatedListProps.sort` is deliberately NOT moved with it: that
+ * string is the `'field'` / `'-field'` dialect normalised by objectui's own
+ * `RelatedList.normalizeSortSpec`, it never reaches
+ * `convertSortToQueryParams`, and retiring it was not ruled.
+ */
+const LIST_VIEW_SORT_STRING_RETIRED =
+  'The bare string `sort` clause was removed from `view.sort` in @objectstack/spec 17.5.0 '
+  + '(ADR-0049 enforce-or-remove) — the platform converged on ONE sort orthography, the array, '
+  + 'and the consumer that lowers a list view\'s sort into a query now refuses a runtime string '
+  + 'outright, so a view authored with the clause validated here and then failed at the renderer. '
+  + 'Rewrite the clause as the structured array: `sort: \'created_at desc\'` becomes '
+  + '`sort: [{ field: \'created_at\', order: \'desc\' }]`, and a bare field name '
+  + '`sort: \'created_at\'` meant ascending, so it becomes '
+  + '`sort: [{ field: \'created_at\', order: \'asc\' }]` — `order` is required on the entry and '
+  + 'is written out rather than omitted; a comma-separated clause becomes one array entry per '
+  + 'key, in the same order. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
 const VIEW_CALENDAR_ALLOWED_NEEDS_START_DATE =
   "`appearance.allowedVisualizations` includes 'calendar', so end users can switch this view to a "
   + 'calendar — but no `calendar:` block says which field supplies the event date. There is no '
@@ -1915,12 +1955,16 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
   ]).describe('Fields to display as columns'),
   filter: z.array(ViewFilterRuleSchema).optional().describe('Filter criteria (JSON Rules)'),
   /**
-   * Sort order. Prefer the structured `{ field, order }[]` form.
+   * Sort order — the structured `{ field, order }[]` array, and only that.
    *
-   * @deprecated The bare string form (`"field desc"`) is legacy and retained
-   * only for backward compatibility (it was the exact shape that crashed the
-   * renderer in objectui#2601 — kept covered by a live fixture). Removal will
-   * go through its own deprecation cycle; do not drop it here.
+   * [#17053] The bare string clause (`"field desc"`) was REMOVED here. It was
+   * carried "only for backward compatibility" pending its own deprecation
+   * cycle; objectui#8221's decision batch #77 (2026-09-07, option B — one
+   * spelling, the array) IS that cycle, and objectui PR #8758 already refuses
+   * the string at the consumer. Leaving the arm declared kept this schema
+   * minting documents its own consumer rejects. An enum-VALUE narrowing has no
+   * tombstone to hang a prescription on, so the array member's `error` map
+   * carries {@link LIST_VIEW_SORT_STRING_RETIRED}, keyed on `issue.input`.
    */
   /**
    * ⚠️ [#5074] CLOSED — the entry is the authoring shape and rejects the
@@ -1947,24 +1991,32 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
    * put a UI artifact on the authorable surface and teach an AI author to emit
    * one (批 18 Q1, two-axis rejection on record).
    */
-  sort: z.union([
-    z.string(), //Legacy "field desc"
-    z.array(strictObject({
-      surface: 'this sort entry',
-      history: VIEW_HISTORY,
-      aliases: {
-        // #4721: the same tuple under a different word. Edit distance cannot
-        // reach it, and getting it wrong reverses the sort silently.
-        direction: 'order',
-      },
-      guidance: {
-        id: VIEW_CONSOLE_ROW_ID_GUIDANCE,
-      },
-    }, {
-      field: z.string(),
-      order: z.enum(['asc', 'desc'])
-    }))
-  ]).optional(),
+  sort: z.array(strictObject({
+    surface: 'this sort entry',
+    history: VIEW_HISTORY,
+    aliases: {
+      // #4721: the same tuple under a different word. Edit distance cannot
+      // reach it, and getting it wrong reverses the sort silently.
+      direction: 'order',
+    },
+    guidance: {
+      id: VIEW_CONSOLE_ROW_ID_GUIDANCE,
+    },
+  }, {
+    field: z.string(),
+    order: z.enum(['asc', 'desc'])
+  }), {
+    // Only the spelling that used to be legal gets the retirement message; a
+    // number, an object, anything else keeps zod's default `invalid_type`.
+    // Guarded on the ARRAY's own issue (`invalid_type` at this node) so a
+    // string reaching a DESCENDANT — a misspelled `order`, say — is never
+    // answered with a prescription about a clause the author did not write.
+    error: (issue) => (
+      issue.code === 'invalid_type' && typeof issue.input === 'string'
+        ? LIST_VIEW_SORT_STRING_RETIRED
+        : undefined
+    ),
+  }).optional(),
   
   /** Search & Filter */
   searchableFields: z.array(z.string()).optional().describe('Fields enabled for search'),
