@@ -289,6 +289,49 @@ action — one that acts on a whole selection and has no single-record home by
 construction — exist at all.
 </Callout>
 
+## Declare the bulk dispatch contract
+
+A list view can wire the same action two ways, and the two hand your body
+**opposite** input:
+
+| wiring | dispatches | the body receives |
+| --- | --- | --- |
+| `bulkActions: ['<name>']` | once **per selected row** | that row's `recordId`, no `_selectedIds` |
+| `bulkActionDefs: [{ name: '<name>', operation: 'custom', execution: 'aggregate' }]` | **once** for the whole selection | `params._selectedIds: string[]`, no `recordId` |
+
+Say which one you wrote the body for, with the same key and the same two values
+the def uses:
+
+```typescript
+defineAction({
+  name: 'export_zip',
+  type: 'api',
+  target: '/api/v1/export/zip',
+  execution: 'aggregate',   // this body reads params._selectedIds
+});
+```
+
+`os validate` / `os lint` / `os build` then refuse a list view that wires it the
+other way (`action-dispatch-contract-mismatch`), naming the action, the view and
+both contracts. Without the declaration both mismatches fail **silently, in
+opposite directions**: an aggregate body wired bare-string reads `_selectedIds`
+as `undefined`, takes its single-record branch and reports success for one row
+out of ten; a per-record body wired aggregate finds no `recordId` and throws its
+own "nothing selected", which reads like a selection bug. Nothing else can catch
+it — `recordId` and `_selectedIds` are both built-in action params, so the
+strict params gate admits either bag without a word.
+
+<Callout type="warn">
+  There is **no default**. An action that omits `execution` is checked against
+  neither wiring — which is also the honest declaration for a body written to
+  serve both contracts (it reads `recordId` *and* `_selectedIds`). There is no
+  third value for "both": one call and N calls have different side effects, so
+  if the two wirings want different behaviour they are two actions.
+  Upgrading an existing app? `os migrate meta` emits the
+  `action-bulk-dispatch-contract-undeclared` TODO, which derives the
+  declaration from the wirings you already have.
+</Callout>
+
 ## Collect input and shape the UX
 
 - **`params`** — prompt the user for input before execution. Prefer

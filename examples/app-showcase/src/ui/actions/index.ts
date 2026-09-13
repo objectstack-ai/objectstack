@@ -52,6 +52,12 @@ export const MarkDoneAction = defineAction({
       "return { ok: true, id: id };",
     capabilities: ['api.write'],
   },
+  // #17319 — the dispatch contract this BODY is written for. It reads
+  // `ctx.recordId` and throws 'No record to mark done' without one, so an
+  // aggregate wiring would fail on every click with a message that reads like
+  // a selection bug. Declaring it makes that wiring a build-time refusal
+  // (`action-dispatch-contract-mismatch`) instead.
+  execution: 'perRecord',
   successMessage: 'Task marked done.',
   // Hide once the task is complete. Gate on `record.done` (the boolean this
   // action sets) so the button vanishes after a successful click and stays
@@ -127,6 +133,11 @@ export const RecalcEstimateAction = defineAction({
   objectName: task,
   type: 'api',
   target: '/api/v1/showcase/recalc',
+  // #17319 — one POST per record; the endpoint's per-record branch reads the
+  // single id. Its aggregate twin below is a SEPARATE action against the same
+  // endpoint, which is what the platform used to require: one body, one
+  // contract, and until this key no way to say which.
+  execution: 'perRecord',
   successMessage: 'Estimate recalculated.',
   locations: ['record_more', 'record_section'],
   // The endpoint is record-scoped and rejects a body without an id. On a
@@ -139,9 +150,11 @@ export const RecalcEstimateAction = defineAction({
 
 /**
  * api, AGGREGATE-dispatched — the `execution: 'aggregate'` specimen
- * (objectui#3139). The action itself is an ordinary api action; what makes it
- * aggregate is the VIEW's `bulkActionDefs` entry naming it with
- * `execution: 'aggregate'` (see `task.view.ts` → `bulk_actions`). The
+ * (objectui#3139). Since #17319 the ACTION declares the contract its body is
+ * written for (`execution: 'aggregate'`, below) and the VIEW performs the
+ * dispatch through a `bulkActionDefs` entry naming it with the same key and
+ * value (see `task.view.ts` → `bulk_actions`); a bare-string wiring of it is
+ * now refused at authoring time instead of quietly recalculating one row. The
  * renderer then dispatches it ONCE for the whole selection, with every
  * selected id in `params._selectedIds` — the recalc endpoint's batch branch
  * recomputes all of them in that single call (the "one zip for N devices"
@@ -175,6 +188,12 @@ export const RecalcSelectionAction = defineAction({
   objectName: task,
   type: 'api',
   target: '/api/v1/showcase/recalc',
+  // #17319 — ONE dispatch for the whole selection, every id in
+  // `params._selectedIds`. The view's `bulkActionDefs` entry still performs
+  // the dispatch; this declares what the body was written to receive, so a
+  // bare-string `bulkActions` wiring of it is refused rather than silently
+  // recalculating one row out of ten.
+  execution: 'aggregate',
   successMessage: 'Estimates recalculated for the whole selection.',
   locations: ['record_more'],
   recordIdParam: 'recordId',
