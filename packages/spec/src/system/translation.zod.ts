@@ -601,15 +601,26 @@ const TRANSLATION_KEY_GUIDANCE: Record<LegacyObjectFirstKey | 'validationMessage
  *
  * Both are keys an author reaches for from a neighbouring surface — `help` is
  * correct on an object FIELD translation and on a settings key, `options` on
- * both of those too — and on a screen field neither has anything behind it.
- * Written as `guidance` rather than aliases because there is no right key to
- * send them to: the copy does not exist on this surface at all, and pointing
- * at the nearest-looking one would translate the wrong string.
+ * both of those too.
+ *
+ * ⚠️ The REASON for the help exclusion changed with #17306 and the message
+ * below changed with it. It used to be that `ScreenFieldConfig` declared
+ * nothing help-shaped, so a `help` key here would have translated a string that
+ * did not exist. The schema now declares `inlineHelpText`, so the string is
+ * real; what is still absent is this TRANSLATION face's key for it, which is a
+ * ruled widening of its own (the #7646 enumeration) and not something a
+ * resolver-side accretion may grow. Until that lands, a `help` entry here would
+ * still translate nothing — the same refusal, on an honest reason.
+ *
+ * Written as `guidance` rather than an alias because there is still no right
+ * key on THIS surface to send them to: pointing `help` at `placeholder` would
+ * translate the in-input hint, a different string that means something else.
  */
 const FLOW_SCREEN_FIELD_NO_HELP =
-  'a screen field declares no help/hint copy — `ScreenFieldConfig` is '
-  + '`name`/`label`/`type`/`required`/`options`/`defaultValue`/`placeholder`/`visibleWhen`, so there is '
-  + 'nothing here to translate. Use `placeholder` for the in-input hint the field does declare.';
+  'the flows translation face carries `label` and `placeholder` only, so a help entry here would '
+  + 'translate nothing. The screen field itself does declare help copy '
+  + '(`ScreenFieldConfig.inlineHelpText`); what is missing is a translation key for it, not the '
+  + 'string. ⛔ Do not use `placeholder` instead — that is the in-input hint, a different string.';
 
 /**
  * The measured exclusion on `datasets.<name>.dimensions.<d>` and
@@ -1055,13 +1066,17 @@ const translationDataShape = () => ({
    * report.** Two of the three per-field keys the issue proposed are real
    * (`label`, `placeholder`); `help` is not:
    *
-   * - **`help` is not here** — `ScreenFieldConfigSchema` declares
-   *   `name`/`label`/`type`/`required`/`options`/`defaultValue`/`placeholder`/`visibleWhen`
-   *   and nothing help-shaped at all. Declaring it would parse clean and
-   *   translate nothing, the ADR-0078 shape #6080 removed from the page
-   *   component face for exactly this reason. It is `guidance` instead, so an
-   *   author who reaches for it is told the field has no such copy rather than
-   *   sent to a neighbouring key that means something else.
+   * - **`help` is not here.** Originally because `ScreenFieldConfigSchema`
+   *   declared nothing help-shaped at all, so the key would have parsed clean
+   *   and translated nothing — the ADR-0078 shape #6080 removed from the page
+   *   component face for exactly this reason. ⚠️ That premise expired with
+   *   #17306, which gave the screen field `inlineHelpText` (the object field's
+   *   own spelling). The copy now exists; this face's key for it does not, and
+   *   growing the face is a ruled step against the #7646 enumeration rather
+   *   than a resolver-side accretion. So the exclusion stands and the outcome
+   *   is unchanged — a `help` entry still translates nothing — but it is now a
+   *   NOT-YET, and the guidance says so rather than telling an author the field
+   *   has no help copy when it has.
    *
    * ⛔ **Runner chrome is NOT here** — the Cancel/Submit buttons the wizard
    * draws around the author's screen belong to the console's own message

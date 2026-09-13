@@ -162,6 +162,34 @@ export interface ScreenFieldSpec {
     defaultValue?: unknown;
     placeholder?: string;
     /**
+     * Numeric bound pair the client applies to a numeric input (#17306),
+     * spelled as the object field spells it (`FieldSchema.min` / `.max`).
+     *
+     * Unlike {@link visibleWhen}, these are NOT client-only: the server
+     * re-checks them when the run resumes (`validateScreenInputs`) — for a
+     * submitted value that is already a finite number, which is as far as this
+     * surface can judge, its `type` being an open widget hint. So a bound
+     * holds against a caller that skips the dialog and posts a NUMBER; a
+     * numeric string is not coerced and passes it. The client still applies
+     * them so the user is stopped at the input rather than at Submit.
+     */
+    min?: number;
+    max?: number;
+    /**
+     * Help text rendered under the input (#17306) — `FieldSchema`'s spelling.
+     * Distinct from {@link placeholder}, which the browser clears the moment a
+     * value is typed, and so cannot carry a constraint the user must keep
+     * reading.
+     */
+    inlineHelpText?: string;
+    /**
+     * Object whose records a `type: 'lookup'` field picks from (#17306) —
+     * `FieldSchema.reference`'s spelling. Absent ⇒ the client has no target to
+     * resolve a picker against and falls back to a plain input, which is what
+     * every `lookup` screen field did before this key existed.
+     */
+    reference?: string;
+    /**
      * Conditional-visibility predicate (ADR-0089's canonical key), evaluated by
      * the CLIENT against the screen's live collected values — not by the server,
      * which has no view of what the user has typed so far.

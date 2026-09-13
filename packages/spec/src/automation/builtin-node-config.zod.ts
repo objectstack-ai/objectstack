@@ -400,6 +400,27 @@ export const ScreenFieldConfigSchema = lazySchema(() => strictObject({
      */
     visible: 'visibleWhen',
     showWhen: 'visibleWhen',
+    /**
+     * The three intents #17306 added land on `FieldSchema`'s OWN spellings —
+     * one platform, one field vocabulary, so an author who has declared an
+     * object field already knows these names. These renames are the same ones
+     * `FieldSchema` carries for the same targets (`field.zod.ts`), repeated
+     * here because an alias table is per-shape: a spelling this surface does
+     * not answer is refused with the bare key list, and the neighbouring-
+     * surface spellings are exactly what an author arrives holding.
+     */
+    help: 'inlineHelpText', helpText: 'inlineHelpText', hint: 'inlineHelpText', tooltip: 'inlineHelpText',
+    relatedTo: 'reference', referenceTo: 'reference', target: 'reference',
+    targetObject: 'reference', lookupObject: 'reference',
+    /**
+     * `object` is NOT a `FieldSchema` alias — it earns a row here because this
+     * surface has two levels and they mean different things. On the screen NODE
+     * `object` renames to `objectName` (render this object's whole form); on a
+     * screen FIELD it can only mean the lookup target, which is `reference`.
+     * The report that filed #17306 reached for `object` at this level, so the
+     * spelling is measured, not hypothetical.
+     */
+    object: 'reference',
   },
 }, {
   /** Field name — an item with an empty name is dropped. */
@@ -424,6 +445,50 @@ export const ScreenFieldConfigSchema = lazySchema(() => strictObject({
   placeholder: z.string().optional().describe('Input placeholder text'),
   /** Bare-CEL predicate the client re-evaluates as values change (#3528). */
   visibleWhen: z.string().optional().describe('CEL predicate controlling visibility, evaluated client-side'),
+  /**
+   * Numeric bound pair (#17306), spelled as `FieldSchema` spells it.
+   *
+   * Forwarded into the `ScreenFieldSpec` the client renders AND re-checked
+   * server-side on resume (`validateScreenInputs`, `min_value` / `max_value`)
+   * for a value that arrives as a finite number: a screen field's declared
+   * contract is the ONLY contract behind it — there is no object schema to
+   * catch a bad bag downstream — so a bound that lived in the dialog alone
+   * would be bypassed by any caller that posts a number to `resume` directly,
+   * which is the gap #4477 closed for `required`. A numeric STRING is not
+   * coerced and passes the bound; the re-check is narrower than the words
+   * "enforced server-side" on their own would suggest.
+   *
+   * Unconditioned on `type`, exactly as `FieldSchema.min` / `.max` are: a
+   * screen field's `type` is an open widget hint with no closed vocabulary, so
+   * this schema cannot judge which types a bound is meaningful on. A bound on
+   * a non-numeric field constrains nothing the client renders; it is not an
+   * error this surface can detect.
+   */
+  min: z.number().optional().describe('Minimum accepted value (numeric fields); re-checked on resume when the submitted value is a number'),
+  max: z.number().optional().describe('Maximum accepted value (numeric fields); re-checked on resume when the submitted value is a number'),
+  /**
+   * Help text under the input (#17306) — `FieldSchema`'s spelling for the same
+   * intent, which is why it is not `helpText`: `FieldSchema` renames that (and
+   * `help` / `hint` / `tooltip`) onto `inlineHelpText`, so a screen field that
+   * declared `helpText` would make the platform answer one question with two
+   * names. Distinct from `placeholder`, which is the IN-INPUT hint and is gone
+   * the moment the user types — the carrier the reference app was forced to
+   * overload for a constraint that has to stay readable.
+   */
+  inlineHelpText: z.string().optional().describe('Help text displayed below the field'),
+  /**
+   * Lookup target (#17306) — the object whose records a `type: 'lookup'` screen
+   * field picks from, spelled as `FieldSchema.reference` spells it.
+   *
+   * OPTIONAL, and deliberately not required on `type: 'lookup'` the way
+   * `FieldSchema` requires it: screen fields declaring a bare `lookup` type
+   * with no target already exist in shipped apps (the reference app's own
+   * "Resolved by Article" field is one), and refusing them here would break
+   * flows that parse today. A `lookup` field without it keeps exactly its
+   * current behaviour — no picker target to resolve, the author's fallback
+   * prose intact.
+   */
+  reference: z.string().optional().describe("Target object name (snake_case) whose records a `type: 'lookup'` field picks from"),
 }));
 
 export type ScreenFieldConfig = z.input<typeof ScreenFieldConfigSchema>;

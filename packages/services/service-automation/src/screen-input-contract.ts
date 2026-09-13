@@ -83,6 +83,7 @@ export function screenDeclaresInputContract(screen: ScreenSpec | undefined): boo
  *
  * Enforced, and nothing beyond it:
  *  - `required` presence for every field the caller was actually asked for;
+ *  - the declared numeric bound pair `min` / `max` (#17306);
  *  - undeclared keys.
  *
  * `visibleWhen` is resolved FIRST, by the caller-supplied {@link visibility}
@@ -97,6 +98,12 @@ export function screenDeclaresInputContract(screen: ScreenSpec | undefined): boo
  *
  * Value SHAPE (`type`) is out of scope here: a screen field's `type` is a
  * widget hint with no closed vocabulary, unlike an action param's field type.
+ * The bound pair is NOT that case and is enforced: `min`/`max` are declared as
+ * numbers, so the constraint is closed even though the widget hint beside it is
+ * not. It fires only on a value that is already a finite number — a bound on a
+ * non-numeric field, or a non-numeric value under a bound, is left to the same
+ * open-`type` silence as everything else here rather than invented into an
+ * `invalid_number` this surface never promised.
  */
 export function validateScreenInputs(
   fields: readonly ScreenFieldSpec[],
@@ -121,6 +128,34 @@ export function validateScreenInputs(
       code: 'required',
       message: `Screen field "${field.name}" is required`,
     });
+  }
+
+  // Bound pair (#17306). Separate pass from `required` on purpose: a bound
+  // constrains a value that IS present, so an absent one is the `required`
+  // question and never this one — an optional bounded field left empty is
+  // conformant. A field the user was never shown is not bound-checked either,
+  // for the reason `required` is not: the client is the authority on what was
+  // on screen, and #3528's dead-end is the cost of getting that backwards.
+  for (const field of declared.values()) {
+    const value = bag[field.name];
+    if (typeof value !== 'number' || !Number.isFinite(value)) continue;
+    if (field.visibleWhen != null && String(field.visibleWhen).trim() !== '') {
+      if (visibility(field) !== true) continue;
+    }
+    if (typeof field.min === 'number' && value < field.min) {
+      issues.push({
+        field: field.name,
+        code: 'min_value',
+        message: `Screen field "${field.name}" must be at least ${field.min}`,
+      });
+    }
+    if (typeof field.max === 'number' && value > field.max) {
+      issues.push({
+        field: field.name,
+        code: 'max_value',
+        message: `Screen field "${field.name}" must be at most ${field.max}`,
+      });
+    }
   }
 
   for (const key of Object.keys(bag)) {

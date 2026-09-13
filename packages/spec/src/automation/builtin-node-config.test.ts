@@ -245,6 +245,100 @@ describe('ScreenConfigSchema / ScreenFieldConfigSchema — strict as of #4001 �
   });
 });
 
+describe('ScreenFieldConfigSchema — the bound pair, help text and lookup target (#17306)', () => {
+  const BASE = { name: 'discount', type: 'number' };
+
+  // ── Direction 1: the three intents are now expressible ──────────────────
+  it('accepts the bound pair, the help text and the lookup target', () => {
+    expect(ScreenFieldConfigSchema.safeParse({ ...BASE, min: 0, max: 20 }).success).toBe(true);
+    expect(ScreenFieldConfigSchema.safeParse({ ...BASE, inlineHelpText: 'Ceiling is 20%.' }).success).toBe(true);
+    expect(ScreenFieldConfigSchema.safeParse({
+      name: 'article', type: 'lookup', reference: 'crm_knowledge_article',
+    }).success).toBe(true);
+  });
+
+  it('reproduces the reference app\'s two prose workarounds as declared metadata', () => {
+    // hotcrm `quote_generation`: the discount ceiling lived in the label and
+    // the placeholder because no key carried it.
+    expect(ScreenFieldConfigSchema.safeParse({
+      name: 'discount', type: 'number', label: 'Discount', min: 0, max: 20,
+      inlineHelpText: 'Above 20% the quote is refused — this is a hard ceiling.',
+    }).success).toBe(true);
+    // hotcrm `close_case`: the picker asked a human to type a record id.
+    expect(ScreenFieldConfigSchema.safeParse({
+      name: 'resolved_by_article', type: 'lookup', label: 'Resolved by Article',
+      reference: 'crm_knowledge_article',
+    }).success).toBe(true);
+  });
+
+  it('leaves a `lookup` field with no `reference` parsing, as it did before', () => {
+    // NOT required the way `FieldSchema` requires it: shipped flows declare a
+    // bare `lookup` screen field, and refusing them would break metadata that
+    // parses today. The widening is additive or it is a breaking change.
+    expect(ScreenFieldConfigSchema.safeParse({ name: 'article', type: 'lookup' }).success).toBe(true);
+  });
+
+  // ── Direction 2: what must STILL be refused ─────────────────────────────
+  it('still refuses an undeclared key by name — the strict guard did not widen past these four', () => {
+    const message = unknownKeyMessage(ScreenFieldConfigSchema, { ...BASE, sparkles: true });
+    expect(message).toContain('this screen field');
+    expect(message).toContain('`sparkles`');
+  });
+
+  it('pins the declared key set exactly — four added, nothing else', () => {
+    // A `.strict` object that quietly grew a fifth key is the regression this
+    // catches; the enumeration is the only thing that can see it.
+    const declared = Object.keys(
+      (ScreenFieldConfigSchema as unknown as z.ZodObject<z.ZodRawShape>).shape,
+    ).sort();
+    expect(declared).toEqual([
+      'defaultValue', 'inlineHelpText', 'label', 'max', 'min', 'name',
+      'options', 'placeholder', 'reference', 'required', 'type', 'visibleWhen',
+    ]);
+  });
+
+  it('refuses a bound that is not a number', () => {
+    // The bound is a closed constraint even though the `type` beside it is an
+    // open widget hint — a string ceiling is the shape that would otherwise
+    // reach the client and compare as text.
+    const r = ScreenFieldConfigSchema.safeParse({ ...BASE, max: '20' });
+    expect(r.success).toBe(false);
+    expect(r.error?.issues.some((i) => i.code === 'invalid_type')).toBe(true);
+    expect(ScreenFieldConfigSchema.safeParse({ ...BASE, min: 'zero' }).success).toBe(false);
+  });
+
+  it('refuses help text and a lookup target that are not strings', () => {
+    expect(ScreenFieldConfigSchema.safeParse({ ...BASE, inlineHelpText: 42 }).success).toBe(false);
+    expect(ScreenFieldConfigSchema.safeParse({ ...BASE, reference: ['a'] }).success).toBe(false);
+  });
+
+  // ── Direction 3: the neighbouring spellings are refused WITH their target ─
+  it('sends the four help spellings to `inlineHelpText`, the object field\'s own key', () => {
+    for (const spelling of ['help', 'helpText', 'hint', 'tooltip']) {
+      const message = unknownKeyMessage(ScreenFieldConfigSchema, { ...BASE, [spelling]: 'x' })!;
+      expect(message, `${spelling} must name its landing key`).toContain('`inlineHelpText`');
+    }
+  });
+
+  it('sends every lookup-target spelling to `reference`', () => {
+    for (const spelling of ['object', 'referenceTo', 'targetObject', 'lookupObject', 'relatedTo', 'target']) {
+      const message = unknownKeyMessage(ScreenFieldConfigSchema, {
+        name: 'article', type: 'lookup', [spelling]: 'crm_knowledge_article',
+      })!;
+      expect(message, `${spelling} must name its landing key`).toContain('`reference`');
+    }
+  });
+
+  it('keeps the two levels apart: `object` means `objectName` on the node, `reference` on the field', () => {
+    // The same spelling, one level apart, with different answers — the trap the
+    // alias rows exist to disambiguate.
+    expect(unknownKeyMessage(ScreenConfigSchema, { object: 'showcase_task' }))
+      .toContain('`object` → `objectName`');
+    expect(unknownKeyMessage(ScreenFieldConfigSchema, { name: 'a', object: 'showcase_task' }))
+      .toContain('`object` → `reference`');
+  });
+});
+
 describe('MapConfigSchema — strict as of #4001 批 9', () => {
   it('accepts every declared key', () => {
     expect(MapConfigSchema.parse({

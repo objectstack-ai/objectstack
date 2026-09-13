@@ -3357,10 +3357,17 @@ export type FlowScreenCopyKey = typeof FLOW_SCREEN_COPY_KEYS[number];
 /**
  * The copy keys `flows.<flow>.screens.<node_id>.fields.<field_name>` carries —
  * the per-FIELD face of {@link FLOW_SCREEN_COPY_KEYS}, measured against
- * `ScreenFieldConfigSchema`. `help` is deliberately absent: the screen field
- * declares nothing help-shaped at all, so a `help` key would parse clean and
- * translate nothing (the ADR-0078 shape #6080 kept out of the page-component
- * face); `options` is absent because `ScreenFieldConfig.options[].value` is
+ * `ScreenFieldConfigSchema`.
+ *
+ * `help` is deliberately absent. ⚠️ Not for its original reason any more: the
+ * screen field used to declare nothing help-shaped, so a `help` key would have
+ * parsed clean and translated nothing (the ADR-0078 shape #6080 kept out of the
+ * page-component face). #17306 gave it `inlineHelpText`, so the string exists —
+ * what does not exist is a key on THIS face for it, and growing the face is a
+ * ruled step against the #7646 enumeration, never a resolver-side accretion.
+ * The exclusion therefore stands with the same outcome and a different reason.
+ *
+ * `options` is absent because `ScreenFieldConfig.options[].value` is
  * unconstrained, so a value-keyed map cannot address the labels. Both are
  * refused by name with guidance at the schema.
  */
