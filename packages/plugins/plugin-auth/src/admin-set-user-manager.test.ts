@@ -43,6 +43,29 @@ interface Recorded {
   options: Record<string, unknown> | undefined;
 }
 
+/**
+ * Equality on a field name — every predicate this module issues — and a LOUD
+ * refusal of everything else. A double that reads a combinator as a field name
+ * answers a question nobody asked, silently, and keeps the suite green while
+ * the real engine returns something else entirely.
+ *
+ * Lifted to module scope rather than closed over the fixtures on purpose: a
+ * matcher that closes over its own rows is unjudgeable by
+ * `check:where-matcher`, which is a worse answer than a wrong one.
+ */
+function matchesWhere(row: Row, where: Record<string, unknown>): boolean {
+  for (const [key, value] of Object.entries(where)) {
+    if (key.startsWith('$') || key === 'and' || key === 'or' || key === 'not') {
+      throw new Error(`engineDouble: unsupported WHERE combinator '${key}' — implement it or stop issuing it`);
+    }
+    if (value !== null && typeof value === 'object') {
+      throw new Error(`engineDouble: unsupported operator object on '${key}' — implement it or stop issuing it`);
+    }
+    if (String(row[key] ?? '') !== String(value ?? '')) return false;
+  }
+  return true;
+}
+
 function makeEngine(tables: Record<string, Row[]>) {
   const updates: Recorded[] = [];
   const failReads = new Set<string>();
@@ -59,9 +82,7 @@ function makeEngine(tables: Record<string, Row[]>) {
       const q = (query ?? {}) as { where?: Record<string, unknown>; limit?: number };
       const rows = tables[object] ?? [];
       const where = q.where ?? {};
-      const out = rows.filter((r) =>
-        Object.entries(where).every(([k, v]) => String(r[k] ?? '') === String(v ?? '')),
-      );
+      const out = rows.filter((r) => matchesWhere(r, where));
       return typeof q.limit === 'number' ? out.slice(0, q.limit) : out;
     },
     async update(object: string, data: unknown, options?: unknown): Promise<unknown> {
