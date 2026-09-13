@@ -1,0 +1,32 @@
+{
+  "number": 3701,
+  "kind": "issue",
+  "title": "`<ObjectChart>` aggregate result-column naming is undefined, so its axis bindings cannot be validated",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T15:00:59Z",
+  "updated_at": "2026-07-28T00:43:55Z",
+  "closed_at": "2026-07-28T00:43:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3701",
+  "body": "从 #3583 Phase 2(#3684)分出来的已知缺口。\n\n## 现状\n\n`#3684` 把 ADR-0021 的图表轴校验扩到了报表图表、列表视图图表和数据集绑定的页面图表组件。**react `<ObjectChart>` 块被刻意排除在外**,原因是一个真实的未决问题,不是工作量问题。\n\n`<ObjectChart>`(`packages/spec/src/ui/react-blocks.ts:103-115`)是**对象绑定**而非数据集绑定:\n\n```jsx\n<ObjectChart\n  objectName=\"showcase_invoice\"\n  aggregate={{ field: 'total', function: 'sum', groupBy: 'status' }}\n  title=\"Invoice value by status\"\n/>\n```\n\n它的 `dataProps` 含 `xAxis` / `yAxis` / `series`,这些绑定的是**聚合结果行的列名**。但 `aggregate` 在 spec 里只是一个描述字符串 `'{ field, function, groupBy }'` —— 从来没有 zod schema,仓库里也没有任何地方规定聚合后的输出列叫什么。\n\n数据集侧不存在这个问题:measure 有显式的 `name`,结果行按 measure 名索引(这正是 #3684 那条规则能判定的基础)。对象绑定这条路径没有等价物。\n\n所以「`yAxis.field` 应该解析成什么」目前没有可辩护的答案。猜一个约定就是在制造误报,而误报正是让作者不再信任 linter 的东西(ADR-0072 D1)。\n\n## 可做的部分\n\n即便不解决命名问题,`aggregate.field` 和 `aggregate.groupBy` 是**可以**按 `objectName` 的字段校验的 —— 它们确实是原始字段名。缺的是读取 JSX 属性**值**的能力:`validate-react-page-props` 目前只检查必需绑定是否存在和属性名拼写(`packages/lint/src/validate-react-page-props.ts:110-176`),从不读值。\n\n## 建议顺序\n\n1. 先定下(或明确记录)`aggregate` 的结果列命名约定 —— 这本身也该是 spec 决策,因为渲染器和作者都需要它。\n2. 有了约定,再给 `validate-react-page-props` 加属性值提取,校验 `aggregate.field` / `groupBy`,以及轴。\n\n## 关联\n\n- #3583(引用完整性审计)\n- #3684(Phase 2,本缺口的出处)\n- ADR-0021 / ADR-0072 D1 / ADR-0082"
+}

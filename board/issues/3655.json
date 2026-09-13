@@ -1,0 +1,32 @@
+{
+  "number": 3655,
+  "kind": "issue",
+  "title": "The `projects.*` SDK namespace targets the control plane, which no in-repo ledger can vouch for",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T13:10:27Z",
+  "updated_at": "2026-07-27T15:29:41Z",
+  "closed_at": "2026-07-27T15:29:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3655",
+  "body": "Surfaced by the capstone URL-conformance guard (#3642). Not a bug — a documented hole, filed so it doesn't read as \"audited and fine.\"\n\n## What the sweep found\n\nThe guard drives every `ObjectStackClient` method and matches the URL it builds against the union of all four in-repo ledgers. 196 of ~219 methods matched. Every single unmatched one was in `projects.*` — 23 methods, all targeting `/api/v1/cloud/*`:\n\n```\nprojects.list            → GET    /api/v1/cloud/environments\nprojects.create          → POST   /api/v1/cloud/environments\nprojects.get             → GET    /api/v1/cloud/environments/:id\nprojects.packages.*      → …/environments/:id/packages…\n…23 in total\n```\n\n## Why they legitimately match nothing here\n\n`/api/v1/cloud/*` is the **control plane**, served by the sibling `cloud` repo. This repo not only doesn't mount those routes, it actively refuses them — `packages/runtime/src/http-dispatcher.ts`:\n\n```ts\n// Guard against matching control-plane routes like /cloud/environments.\nif (path.includes('/cloud/environments/')) return undefined;\n```\n\nSo no ledger in this repository can honestly carry a row for them, and the guard exempts the `/api/v1/cloud/` prefix.\n\n## Why it still deserves tracking\n\nThis is the same posture the whole #3563 audit exists to eliminate — 23 SDK methods that are expressed, presumably working, and guarded by nothing. The audit just cannot reach them from this side of the repo boundary. `projects.updateVisibility` could be renamed on the cloud side tomorrow and nothing here would notice.\n\nThe exemption is bounded from both ends in the guard so it can't quietly widen: only `projects.*` may use the prefix (a non-`projects` method reaching `/cloud/` fails the suite), and the sweep asserts the namespace is still reaching it at all.\n\n## Options\n\n1. **A ledger in the `cloud` repo**, mirroring the tranche-1/2/3 shape, with its client half importing `@objectstack/client` and asserting the same URL conformance from that side. Correct, and the only option that actually closes it.\n2. **A published route manifest** from `cloud` that this repo can pin against — weaker (a manifest can drift from the routes it describes) but cheap, and it would at least catch a rename.\n3. Leave it exempt and accept that the control-plane SDK surface is unguarded.\n\nRecommendation: option 1, scoped as its own tranche in the `cloud` repo, since that is where the routes are declared and the tranche-1 lesson (each package verifies its own half) applies across the repo boundary the same way.\n\nRefs: #3642 (the guard), #3563 / #3587 / #3636 (the three in-repo tranches)."
+}

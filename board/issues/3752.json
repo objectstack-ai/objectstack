@@ -1,0 +1,30 @@
+{
+  "number": 3752,
+  "kind": "issue",
+  "title": "ChartConfig 剩余的 declared ≠ delivered 属性：stepSize / clickAction / zoom / description / height（#3729 收尾）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T02:01:24Z",
+  "updated_at": "2026-07-28T02:47:10Z",
+  "closed_at": "2026-07-28T02:47:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3752",
+  "body": "#3729 把 `<ObjectChart>` 的作者面切回 spec `ChartConfig` 形状，objectui#2883 让渲染器兑现了绝大部分。收尾盘点后仍有 5 个属性是**声明了但渲染器不读**的，按 ADR-0078 单独记账，不留在暗处。\n\n## 清单\n\n| 属性 | 现状 | 建议 |\n|---|---|---|\n| `ChartAxis.stepSize` | 完全无人读 | 实现（Recharts `ticks` / `tickCount`）——刻度密度是真实需求 |\n| `ChartInteraction.clickAction` | 完全无人读 | 渲染器已有 `onChartClick`，但没有「按 action id 触发」的接线。要么接上 action 派发，要么裁掉——`drillDown` 已覆盖大部分点击语义 |\n| `ChartInteraction.zoom` | 无 Recharts 原语，#3750 已在 schema description 里标注 declared-not-delivered | 保持标注，或按 #1475 先例裁掉；`brush` 是已交付的替代 |\n| `ChartConfig.description` | 无人读（无障碍描述） | 接到 `aria-label` / `<desc>`——成本极低，且是 a11y 缺口 |\n| `ChartConfig.height` | 只有 `ChartBarRenderer` 读；`AdvancedChartImpl`（真正的图表路径）不读 | 接上，或从 ChartConfig 裁掉并统一由容器控制高度 |\n\n## 为什么单独开\n\n#3729/#3750 的范围是**绑定**（轴/系列/结果列）与主要表现属性，已全部兑现并被测试锁定。上面 5 个是同一类问题的长尾：单个成本都很低，但混进那个 PR 会让它变成一次无边界的 ChartConfig 全量审计。按 PD #10「file, don't silently expand」拆出来。\n\n处理时请同时更新 `<ObjectChart>` 的 `dataProps`：裁掉的属性要一并从公布契约移除，实现的保持——否则又回到 declared ≠ delivered。\n\n## 关联\n\n- #3701（结果列命名约定）、#3725、#3729、#3750\n- objectui#2880 / objectui#2883（渲染器实现）\n- ADR-0078（no silently-inert metadata）、#1475（trim + implement 先例）"
+}

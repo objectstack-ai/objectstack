@@ -1,0 +1,35 @@
+{
+  "number": 3893,
+  "kind": "pull_request",
+  "title": "feat(cli,automation): catch `label: 'error'` written where `type: 'fault'` was meant (#3863)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T15:05:12Z",
+  "updated_at": "2026-07-28T15:09:46Z",
+  "closed_at": "2026-07-28T15:09:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T15:09:43Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3893",
+  "body": "Two of the three items left open on #3863. Both make the fault-edge contract legible; **neither changes routing behaviour**.\n\n## 1. New lint — `flow-error-label-not-fault`\n\n`type: 'fault'` is what routes a failure. `label` is cosmetic on an ordinary edge. So this, which reads exactly like error handling:\n\n```ts\n{ source: 'charge_card', target: 'flag_for_review', label: 'error' }\n```\n\nis an **ordinary out-edge** — and `traverseNext` runs every unconditional out-edge in parallel (`Promise.all`). The consequence is the opposite of the intent:\n\n| | intended | actual |\n| :--- | :--- | :--- |\n| node succeeds | handler idle | **handler runs**, in parallel with the success path |\n| node fails | handler runs | handler idle; **the run aborts** |\n\nSilent in both directions — the author believes failures are handled and never notices the handler firing when nothing went wrong. The misreading is especially natural for an AI author, since `label: 'error'` is precisely what the intent sounds like. That is what makes it worth a build-time diagnostic instead of a puzzled look at a run trace weeks later.\n\n**Deliberately narrow**, because a label *is* load-bearing on a branching node: a `decision` / `approval` executor returns a `branchLabel` and traversal then prefers the edge carrying it. Excluded from the rule:\n\n- edges out of `decision` / `approval` / `screen` / `try_catch` (the label is a real branch selector there)\n- conditional edges (a guarded path is not the unconditional footgun)\n- edges already typed `fault`\n\nMatches the obvious synonyms case-insensitively (`error`, `failure`, `failed`, `catch`, `on_error`, `fault`). Verified against the shipped showcase: **no findings**.\n\n**An alias was considered and rejected.** Accepting `label: 'error'` as if it were `type: 'fault'` would fix the immediate confusion but leave two spellings for one concept, which reads worse than one spelling plus a diagnostic that names the fix.\n\n## 2. Pinned: a handled failure does not consume a flow-level retry\n\nThe two recovery mechanisms have different scopes and must not compound:\n\n| | Scope | On failure |\n| :--- | :--- | :--- |\n| `fault` edge | one node | traversal continues from the handler; the run completes |\n| `errorHandling: { strategy: 'retry' }` | the whole flow | re-runs **from the start** |\n\nFlow-level retry replays every node that already succeeded — a second notification, a second created record. So a failure a fault edge handled must not *also* consume a retry, or declaring a handler would silently multiply upstream side effects.\n\nThat already held by construction (a routed failure never propagates out of `executeNode`, so the flow-level catch never fires). It was never asserted. Now a test runs a flow with `errorHandling.retry` configured plus a fault edge, and checks the upstream node ran **exactly once**.\n\n## Docs\n\n`content/docs/automation/flows.mdx` and the automation skill gain both points, plus a correction on the edge-property table: `label` does not select a path except on a branching node. That row previously read as though a label were generally meaningful, which is the belief this lint exists to correct.\n\n## Verification\n\n- `packages/cli` lint suite: **50 passed** (7 new, covering the flag, the synonyms, and all four exclusion cases).\n- `packages/services/service-automation`: **427 passed**, no regressions.\n- `objectstack validate` on `app-showcase`: 0 findings from the new rule.\n- ESLint clean; `tsc --noEmit` reports nothing in `lint-flow-patterns.ts`; `check-role-word` gate OK.\n\n## Still open on #3863\n\nThe third item — a `fault` edge that loops back. `registerFlow`'s cycle check skips only `type === 'back'`, and `type` is a single-valued enum, so an edge cannot be both `fault` and `back`. That makes \"fail → clean up → return to the node and retry\" **unexpressible** today. It needs either the cycle check to treat fault edges as declared back-edges (with a `maxRevisions`-style bound, since an unbounded fault loop is a new footgun) or `type` to become composable. That is a behaviour/schema decision and belongs in its own PR.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01EdCvGtER9SzJopS4Yh3Pa1)_"
+}

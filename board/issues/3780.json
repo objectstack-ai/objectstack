@@ -1,0 +1,36 @@
+{
+  "number": 3780,
+  "kind": "pull_request",
+  "title": "fix(i18n): translate the platform packages' declared surface; gate all nine bundles, not one (#3762)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T04:17:18Z",
+  "updated_at": "2026-07-28T05:20:32Z",
+  "closed_at": "2026-07-28T05:20:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T05:20:30Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3780",
+  "body": "Closes the fillable half of #3762. Follows #3370 → #3753 → #3768.\n\n## The finding that reframed this\n\nNine packages own a translation bundle. **One** was wired into a drift check. The other eight shipped a `scripts/i18n-extract.config.ts` that nothing ever ran — and four of them had already drifted out of sync with the schema:\n\n```\nplugin-approvals   in sync ✓\nplugin-security    4 locales out of date\nplugin-audit       4 locales out of date\nplugin-sharing     4 locales out of date\nplugin-webhooks    4 locales out of date\n```\n\nThat is precisely the silent staleness `pnpm check:i18n` exists to prevent, sitting one directory outside the only path it guarded.\n\n## Translated\n\n`plugin-security` (45 strings/locale), `plugin-webhooks` (15), `plugin-audit` (8), `plugin-sharing` (7), `service-storage` (7) — all now at **zero** untranslated declared strings across zh-CN / ja-JP / es-ES. 246 translations.\n\nMost of these were newly *visible* rather than newly missing: #3753 taught the coverage detector to walk action `params`, `resultDialog`, `listViews`, object `description`, field `help`/`placeholder`. This is what it found.\n\nWording was **harvested from the repo's own bundles** first — 1382 unambiguous en→locale mappings scraped from everything already translated — so `Created At` is `创建时间` here because that is what it is everywhere else. Only 59 strings had no existing precedent and were written by hand. Protocol tokens are deliberately left identical across locales: `GET` / `POST` / `PUT` / `PATCH` / `DELETE`, `ETag`, `ACL`, `URL`.\n\n## Gated\n\n`scripts/check-i18n-bundles.mjs` replaces the single-package `pnpm check:i18n` and covers all nine (40 bundles).\n\nIt does **not** restate each package's command. It parses the regenerate command out of that config's own docstring and runs exactly that, plus `--check` — so the documented command and the gate cannot diverge. Same anti-drift principle as making the coverage detector share the extractor's walker in #3753: one source, not two that agree today.\n\nThe coverage ratchet from #3768 grows the same way, `examples/*` → twelve configs:\n\n| config | baselined debt |\n|---|---:|\n| app-showcase / app-todo / app-crm | 456 / 212 / 97 |\n| platform-objects | 231 |\n| the other **eight** packages | **0** |\n\nEight at zero means the ratchet *is* the strict gate for them — any regression is immediately red, not merely visible.\n\nVerified both gates bite, not just run:\n- bundle gate: delete a key block the schema still declares → `DRIFTED`, exit 1; restore → exit 0. (A hand-edited *translation* correctly does **not** trip it — merge mode preserves it, and the gate is about schema drift.)\n- ratchet: proven in #3768 (97 → 99, exit 1).\n\n## A real truncation bug this exposed\n\nWiring the ratchet to `platform-objects` failed on unparseable JSON. The output was **exactly 65536 bytes** — one pipe buffer.\n\n`console.log(big)` followed by `process.exit(1)` tears the process down before an async pipe write drains. Interactively it looks perfect, because stdout to a TTY is written synchronously. Piped — i.e. every scripted consumer — it silently yields invalid JSON.\n\n`emitJson` (`packages/cli/src/utils/format.ts`) waits for the write callback and sets `process.exitCode` instead of calling `process.exit`. `lint`, `i18n check` and `i18n extract` use it; `os lint --json` on platform-objects goes from 65536 truncated bytes to 234603 that parse. **~30 other CLI commands share the pattern and are not touched here** — a mechanical sweep I could not verify command-by-command in this change.\n\nThe ratchet also captures to a file rather than a pipe regardless, since a gate that can read a truncated payload and report a smaller number is worse than no gate.\n\n## Also\n\nThe nine documented regenerate commands gain `--no-metadata-forms` (added in #3768) — the Studio metadata-form baseline belongs to `platform-objects` alone, not a copy in every plugin.\n\n## Not in scope\n\n`platform-objects`' own 77-per-locale gap is `apps.*` / `dashboards.*` navigation and widget labels. Those live **outside** the `objects` subtree, so the package's `--objects-only` extract cannot scaffold them — which is why its `--check` reports in sync while coverage reports 77 missing. That needs an emit decision (drop `--objects-only`, or a companion `<locale>.apps.generated.ts`) before any translating; it stays in #3762, and the 231 is frozen in the baseline meanwhile.\n\nAlso filed: **#3778** — the file-authored `objects.<name>` bundles and the runtime `translation` metadata type's `o.<object>` shape are unbridged, so translations cannot be authored in the product at all. Wants an ADR, not a patch.\n\n## Tests\n\nCLI suite 667 green (66 files). The five translated packages: plugin-security 673, service-storage 199, plugin-sharing 101, plugin-audit 46, plugin-webhooks 25 — all green, including their `bundle-ownership` guards. ESLint clean. Both gates green.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01BQwnjqgCyAhSQjhNriW3BW\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BQwnjqgCyAhSQjhNriW3BW)_"
+}

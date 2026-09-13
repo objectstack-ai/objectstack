@@ -1,0 +1,32 @@
+{
+  "number": 3583,
+  "kind": "issue",
+  "title": "lint: no reference-integrity or option-key validation for app metadata",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T08:09:04Z",
+  "updated_at": "2026-07-28T07:34:20Z",
+  "closed_at": "2026-07-28T07:33:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3583",
+  "body": "A full audit of HotCRM (objectstack-ai/hotcrm, ~18k lines of metadata) found ~20 shipped instances of one bug class — metadata referencing something that doesn't exist — all of which pass `objectstack validate` and `objectstack lint` cleanly and fail silently at runtime:\n\n- `object: 'user'` in a bulk-action lookup and four dashboard filters (the platform object is `sys_user`)\n- App navigation targeting `sys_approval_process`, which `@objectstack/plugin-approvals` never registers\n- `bulkActions: ['mass_update', 'mass_delete', 'assign_owner']` — no such actions defined\n- Page headers and KPI cards referencing fields that don't exist on the object (`{account}`, `total_revenue`, …)\n- A hook filtering `crm_lead` on a `campaign` field that doesn't exist; another hook writing `contact_email`/`contact_phone` to an object without those fields\n- Agent skills listing 11 tools with no definitions, a hand-off to a nonexistent skill, and agents referencing knowledge indexes defined nowhere\n- Chart `yAxis` naming raw fields instead of dataset measures\n- Navigation-exposed objects (`crm_forecast`, `crm_knowledge_article`) granted by no profile — permission-denied for every user including admin\n- Translation bundles keyed to nonexistent fields (`assigned_to`, `budget`, `image_url`, …) and select-option translations keyed by display label or by values that aren't in the field's option list (`direct-mail` vs `direct_mail`, `planned` vs `planning`)\n\nThe existing lint already checks some neighboring classes (`validate-dashboard-action-refs`, `validate-widget-bindings`, `validate-flow-template-paths`, `validate-capability-references`), but none of the categories above are covered. HotCRM comments document earlier instances of the same class being found and fixed one at a time.\n"
+}

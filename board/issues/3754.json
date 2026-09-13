@@ -1,0 +1,32 @@
+{
+  "number": 3754,
+  "kind": "issue",
+  "title": "[P2] `field.conditionalRequired` is the same alias-drift shape #3713 just fixed — and the spec pins the alias to SURVIVE parse",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T02:09:42Z",
+  "updated_at": "2026-07-28T02:58:47Z",
+  "closed_at": "2026-07-28T02:58:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3754",
+  "body": "Found while fixing #3713 (`action.execute` vs `target`). Same bug class, one field over — and this one is arguably worse, because the spec has no canonicalization at all.\n\n## The shape\n\n`requiredWhen` is canonical; `conditionalRequired` is its documented deprecated alias (`packages/spec/src/data/field.zod.ts`):\n\n```ts\nrequiredWhen: ExpressionInputSchema.optional().describe(\"… Canonical name for `conditionalRequired`.\"),\n/** @deprecated Alias of `requiredWhen` — kept for back-compat. */\nconditionalRequired: ExpressionInputSchema.optional().describe('… Alias of `requiredWhen`.'),\n```\n\nUnlike `action.execute`, there is **no transform folding it** — no lowering, no dropping. Both keys reach every consumer, so the precedence is re-implemented per reader instead of being decided once in the spec. That is precisely the condition that produced #3713.\n\nWorse, the alias surviving parse is **test-pinned**, i.e. the inverse of what #3713 just established for `action.execute` (`packages/spec/src/data/field.test.ts`):\n\n```ts\nexpect(result.conditionalRequired).toEqual({ dialect: 'cel', source: \"status = 'closed_won'\" });\n```\n\n## Current readers\n\n| Reader | Behavior |\n|---|---|\n| `packages/objectql/src/validation/rule-validator.ts` | `f.requiredWhen \\|\\| f.conditionalRequired` — canonical first ✅ |\n| `packages/lint/src/validate-expressions.ts` | iterates both keys to validate expressions — correct, order-independent ✅ |\n| Studio object designer (v15, #2571) | rewrites `conditionalRequired` → `requiredWhen` **on first edit** — UI-only, so code-authored metadata never passes through it |\n| objectui client-side required rendering | **unverified** (separate repo) — if it reads `conditionalRequired \\|\\| requiredWhen`, this is #3713 verbatim: server enforces one predicate, the form marks required by another |\n\nSo today the server direction is right, but nothing in the contract *makes* it right, and the one surface most likely to have picked the alias-first order is the same one that did in #3713.\n\n## Suggested fix\n\nApply the shape #3713 landed on, which is now the established pattern for this repo (and matches `agent.knowledge.topics` → `sources`, #1891):\n\n1. Add a transform to `FieldSchema` that folds `conditionalRequired` into `requiredWhen` when the canonical key is absent, and **drops the alias** from the parsed output. Canonical wins when both are set.\n2. Invert the pinning tests: assert `'conditionalRequired' in parsed === false` and that an alias-only field lands on `requiredWhen`.\n3. Simplify `rule-validator.ts` to read `requiredWhen` only — with the alias gone from parsed metadata, the `||` fallback is dead code (keep the raw-metadata path in mind if any caller bypasses parse).\n4. Authoring stays unchanged: `conditionalRequired` remains accepted on input (`z.input`), still documented, nothing to migrate in app metadata.\n\nNote this is a **minor** for `@objectstack/spec` on the same reasoning as #3742 — the parsed output loses a deprecated key, so any TS consumer reading `parsed.conditionalRequired` fails to compile instead of silently reading `undefined`.\n\n## Worth a sweep, not just a fix\n\n`action.execute` and `field.conditionalRequired` are two instances of one pattern: **a deprecated alias declared in the spec but left live in the parsed output**, leaving N consumers to each invent a precedence. The remaining `@deprecated`/alias declarations in `packages/spec/src` deserve the same audit — the ones that fold-and-drop are safe, the ones that merely coexist are latent #3713s. Related debt named in AGENTS.md Prime Directive #12: the `cfg.filter ?? cfg.filters` / `cfg.objectName ?? cfg.object` fallbacks in the flow executors.\n\nRefs #3713, #3742, #1891, #2571."
+}

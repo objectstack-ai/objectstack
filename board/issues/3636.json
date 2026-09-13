@@ -1,0 +1,30 @@
+{
+  "number": 3636,
+  "kind": "issue",
+  "title": "Route audit tranche 3: autonomously-mounted service routes (service-storage / service-i18n) — #3587 follow-up",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T11:57:43Z",
+  "updated_at": "2026-07-27T12:56:33Z",
+  "closed_at": "2026-07-27T12:56:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3636",
+  "body": "Split from #3587, same as #3587 was split from #3563. Tranches 1–2 are complete: the dispatcher ledger (27→0, #3569…#3579) and the REST ledger (mismatch 2→0 gap 43→0, #3609…#3633) both rest at zero with CI-pinned ratchets. One surface remains un-audited — the ledger header (`packages/rest/src/rest-route-ledger.ts`) records it as the known NOT-COVERED note:\n\n> services that autonomously mount routes on the host `IHttpServer` — `service-storage` (`storage-routes.ts`, the SDK's whole storage surface) and `service-i18n`.\n\n## The inventory (13 routes)\n\n**`packages/services/service-storage/src/storage-routes.ts`** — 10 mounts:\n\n| Route | Purpose |\n|---|---|\n| `POST {base}/upload/presigned` | presigned-URL issue (the SDK `storage.upload` path) |\n| `POST {base}/upload/complete` | post-upload finalize |\n| `POST {base}/upload/chunked` | chunked-upload session create |\n| `PUT {base}/upload/chunked/:uploadId/chunk/:chunkIndex` | chunk write |\n| `POST {base}/upload/chunked/:uploadId/complete` | chunked finalize |\n| `GET {base}/upload/chunked/:uploadId/progress` | chunked progress |\n| `GET {base}/files/:fileId/url` | download-URL resolve (the SDK `storage.download` path) |\n| `GET {base}/files/:fileId` | file metadata |\n| `PUT {base}/_local/raw/:token` | local-driver loopback write (likely `server-only`) |\n| `GET {base}/_local/raw/:token` | local-driver loopback read (likely `server-only`) |\n\n**`packages/services/service-i18n/src/i18n-service-plugin.ts`** — 3 mounts (behind the `registerRoutes` option):\n\n| Route | Purpose |\n|---|---|\n| `GET {base}/locales` | available locales |\n| `GET {base}/translations/:locale` | translation bundle |\n| `GET {base}/labels/:object/:locale` | object field labels |\n\nClient side today: `storage` (2 methods) and `i18n` (3 methods) namespaces exist and are exercised in production — but **no ledger row anywhere backs them**, so they are exactly the pre-#3563 posture: expressed, working, unguarded.\n\n## Method — tranche 1/2 recipe, one new seam\n\n1. These registrars bypass both `RouteManager` and the REST server entirely, so neither existing enumeration sees them. Add the enumeration seam the way tranche 2 did for direct-mounts: a conformance test registers the routes against a capturing mock `IHttpServer` and diffs the captured list against the ledger.\n2. Ledger location: these services are independent packages; a per-package mini-ledger next to each registrar (verified by that package's own tests) avoids cross-package edges — the tranche-1 lesson (`no runtime→client package edge`) applies verbatim.\n3. Client half: extend `rest-route-ledger-coverage.test.ts`'s pattern — every row naming a client method must resolve on `ObjectStackClient`.\n4. Expected dispositions: the 2 `_local/raw` loopbacks are `server-only` (driver-internal token URLs); the chunked-upload family needs a triage — the SDK currently speaks only the presigned path, so chunked is either a real `gap` (close it) or documented `server-only` for host apps.\n\n## Acceptance\n\n- Every autonomously-mounted route has a reviewed disposition in a CI-guarded ledger.\n- The `storage` / `i18n` SDK namespaces are backed by ledger rows (closing the last \"expressed but unguarded\" surface).\n- With all three surfaces ledgered, the strict reverse guard becomes possible: a client method whose target route exists on **no** surface can be flagged mechanically — file that as the capstone if it doesn't fall out naturally.\n\nRefs: `packages/rest/src/rest-route-ledger.ts` header (NOT COVERED note); #3563 (tranche 1), #3587 (tranche 2, closed at ratchet 0)."
+}

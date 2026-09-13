@@ -1,0 +1,36 @@
+{
+  "number": 3812,
+  "kind": "pull_request",
+  "title": "feat(spec): one canonical conformance table for the filter logical combinators",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T06:55:34Z",
+  "updated_at": "2026-07-28T07:30:12Z",
+  "closed_at": "2026-07-28T07:30:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T07:30:10Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3812",
+  "body": "Follow-up to #3774 / #3776. Closes the structural gap that bug exposed, rather than the bug itself.\n\n## Why\n\n`FilterCondition` is evaluated by **four** independent implementations:\n\n| Backend | Where |\n|---|---|\n| SQL compiler | `driver-sql` `applyFilterCondition` |\n| In-memory matcher | `driver-memory` `memory-matcher` |\n| Record-at-a-time evaluator | `formula` `matchesFilterCondition` (RLS write-side `check`) |\n| Read-scope SQL lowering | `service-analytics` `read-scope-sql` |\n\nNothing held them to a shared standard. #3774 was the cost: the SQL compiler OR-ed the contents *within* a `$or` branch instead of AND-ing them, widening every `$or` filter. The other three were correct — but by luck, not enforcement, and the divergence stayed invisible until someone ran a real query.\n\nThe #3774 fix left the setup for the next drift: **three near-identical shape tables copied across packages, and the fourth backend not covered at all.**\n\n## What\n\n`@objectstack/spec/data` now exports the table itself:\n\n- `FILTER_LOGIC_ROWS` — a 2x2 truth table over two columns, so a wrongly-OR-ed pair always shows up as extra ids rather than by luck of the data, plus the record-scope columns real read scopes are written against.\n- `FILTER_LOGIC_CASES` — 17 cases: keys within a branch, multiple operators on one field, `$and`/`$or`/`$not` nesting in **both** key orders, and the scope shapes that occur in shipped metadata.\n\nEach backend now has a thin test that feeds the shared rows through its own evaluator. **Adding a case to the table adds it to all four at once.**\n\nDependency direction is preserved — spec exports data, the backends import it. Nothing in spec imports a backend, per the precedent set in `api-methods-batch-conformance.test.ts`.\n\n## What it bought immediately\n\n**`read-scope-sql` is now covered at all.** It lowers RLS read scopes for the analytics path, and was previously checked only by asserting the emitted SQL *string*. It now also **executes** that SQL against a real in-memory engine and compares rows. It passes unchanged.\n\nThe two checks answer different questions, and I verified the difference rather than assuming it. My first draft of that file claimed a string assertion \"cannot catch an operator-precedence mistake\"; I tested that by deleting the grouping parens in `compileNode`, and **both** suites went red — so the claim was wrong and I rewrote it. The real distinction is what each one's correctness depends on: a string assertion's ceiling is the author's own reading of SQL (write the expected string with a missing paren and it locks the bug in, green), while this file's ceiling is the database, with expectations shared across all four backends.\n\n**Third-party driver authors** can now check a new backend against the same table — it is a public export, not a test fixture.\n\n## Deliberate scope\n\nLogical combinators only. Predicates are boring on purpose: string equality, `$in`, `$ne`, `$gte`/`$lt`. Nothing exercises null handling, dates, numeric coercion, `LIKE` escaping or case sensitivity — those legitimately differ between a SQL engine and a JS matcher, and folding them in would make the table unpassable rather than more useful. A case belongs in it only if **every** backend must agree. That rule is written into the module docblock so the next person adding a case has the criterion.\n\n## Verification\n\nThe gate is proven to bite, not just to pass:\n\n- Reverting the #3774 fix in `applyFilterCondition` turns **15 of 19** driver-sql cases red.\n- Deleting the grouping parens in `read-scope-sql`'s `compileNode` turns 2 conformance cases red.\n\nFull suites green: `spec` 6736 · `driver-sql` 401 · `service-analytics` 286 · `formula` 265 · `driver-memory` 120. Type gate via a real `pnpm build` (no `OS_SKIP_DTS`). `api-surface` snapshot regenerated — the check reports **4 added, 0 breaking**, hence `minor`.\n\n## Note\n\n`service-analytics` gains a `better-sqlite3` devDependency to execute the read-scope SQL. It is already in the repo as `driver-sql`'s optional dep."
+}

@@ -1,0 +1,30 @@
+{
+  "number": 3962,
+  "kind": "issue",
+  "title": "[17.0.0-rc] /actions reports business failures as HTTP 200 inside a double envelope — the only route of 12 that does; unify on real status codes before GA",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T23:53:06Z",
+  "updated_at": "2026-07-30T01:50:23Z",
+  "closed_at": "2026-07-30T01:50:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3962",
+  "body": "**Platform decision (maintainer):** ObjectStack is a third-party-facing platform; normalized API results are a hard requirement. This issue is the \"conscious, documented decision\" that #3937's contract test explicitly invited (\"flipping it later should be a conscious, documented decision\") — the 200-on-failure behavior is classified as a **bug**, not a contract.\n\n## Why it is a bug and not a contract\n\nProvenance, verified:\n\n1. **No requirement source exists.** No ADR (of 110+), no issue, no spec document ever specified that `/actions` failures return 200. Until last week the docs never described the failure shape at all.\n2. **It originated as an implementation detail** — the route's catch block reused `deps.success()` as its serializer. Across all 12 dispatcher domains (~85 `deps.success` call sites), `/actions` is the **only** route that wraps its real payload in a second `{success, data}` envelope.\n3. **The \"contract\" was ratified the same day it was questioned.** #3937 pinned the 200 in `actions-validation-envelope.test.ts` as a back-compat measure while fixing `fields[]` pass-through. Both premises it cited do not hold:\n   - *\"has always reported business failure in the payload\"* — the route already answered 405/400/403/503 before dispatch; only the catch block returned 200;\n   - *\"every caller branches on `data.success`\"* — three in-repo callers did not (the console's main action path, `marketplaceApi.installPackage`, the cloud-connection install proxy), which is exactly the symptom #3913 was filed about.\n\n## Harm to date — five bugs, one root cause\n\n| Bug | Mechanism |\n|:---|:---|\n| Console green toast on failed actions (#3913) | outer `success: true` read as success |\n| `redirectUrl` never fired, `opensInNewTab` tab spun forever (objectui#2967) | payload one level deeper than every reader assumed |\n| Marketplace could report a failed install as installed | same missed inner envelope |\n| Client SDK envelope divergence (#3927 exists purely to normalize it) | `/actions` shape ≠ `/data` shape |\n| Handler crashes invisible to gateways/APM/alerting (fixed for crashes in #3951) | 200 carries no failure signal |\n\nThe inner `success` flag's only job is to carry the failure signal that the status code was refused. The double envelope and the 200 are two faces of one decision; removing one removes the other.\n\n## Target contract (identical to `/data`)\n\n| Outcome | HTTP | Body |\n|:---|:---:|:---|\n| Ran, returned | **200** | `{success: true, data: <handler return value>}` — **single wrap** |\n| Ran, rejected (business rule / validation) | **400** | `{success: false, error: {message, code, details: {code?, fields?}}}` |\n| Never dispatched — unknown / denied / wrong type / unavailable | 404 / 403 / 400 / 503 | unchanged (already shipped in #3930/#3951) |\n| Crashed (`TypeError`, driver error, sandbox timeout) | **500** | unchanged (#3951) |\n\nThe crash-vs-rejection discriminator from #3951 (error `name`) stays — it now selects 400 vs 500 instead of 200 vs 500. A rejected flow regains `code: FLOW_FAILED` at 400.\n\n## Implementation checklist\n\n- [ ] `domains/actions.ts`: success exits single-wrap (`deps.success(result)`); deliberate rejections exit via `errorFromThrown(err, 400)` (carries `VALIDATION_FAILED` + `fields[]` into `details`, same as every other domain since #3925)\n- [ ] Flip `actions-validation-envelope.test.ts` citing this issue — the documented decision it asked for\n- [ ] `@objectstack/client`: `normalizeActionResult` reads the single wrap; narrow legacy-shape heuristic keeps a current SDK working against a pre-fix server; surface stays non-throwing\n- [ ] objectui `interpretActionResponse`: same single-wrap read + legacy heuristic; `ActionResult.data` depth self-heals on new servers\n- [ ] Docs: `error-catalog.mdx` Action Errors table collapses to \"status is the signal\"; `ui/actions.mdx`, `client-sdk.mdx`\n- [ ] Changesets with an explicit **BREAKING** migration note for raw-HTTP third parties: branch on the status code; `data` unwraps one level less\n\n**Migration (third parties using raw HTTP):** a failed action is no longer a 200 — read the status; on success, `data` is the handler's return value directly. Callers going through `@objectstack/client` need no change.\n\n17.0.0-rc is the window: this is the last cheap moment to fix the wire before GA."
+}

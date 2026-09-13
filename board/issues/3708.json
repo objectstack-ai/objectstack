@@ -1,0 +1,35 @@
+{
+  "number": 3708,
+  "kind": "pull_request",
+  "title": "test(lint): give the lazy-deps dist probes the same cold-load timeout as their sibling (#3662)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T15:20:51Z",
+  "updated_at": "2026-07-27T15:28:41Z",
+  "closed_at": "2026-07-27T15:28:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T15:28:39Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3708",
+  "body": "Closes #3662.\n\n## 问题\n\n`packages/lint/src/lazy-deps.test.ts` 的两条 dist 探针(行 81 / 行 90)各自 spawn 一个子 `node`,在子进程里冷加载 `sucrase`(~1.5 MB)与 `typescript`(~9 MB),用来证明这两个依赖不会在 import 时被带进来。这个冷加载本身在整仓 `pnpm test`(几十个 turbo 任务并行)下就会超过 vitest 默认的 5s ——issue 里实测 ESM 那条在 `execFileSync` 上耗时 **5928ms**。\n\n失败纯粹是延迟:断言只检查\"子进程的 require cache 里最终有哪些依赖\",与耗时无关。\n\n同一文件的 in-process 兄弟用例早就知道这件事,显式带了 `30_000` 并写了注释;两条 dist 探针做同样的冷加载却沿用默认 5s。\n\n## 改动\n\n把那段说明提成一个具名常量 `COLD_LOAD_TIMEOUT_MS = 30_000`,三条冷加载用例(两条 dist 探针 + in-process 兄弟)统一引用它。理由只写一次,不会再出现\"兄弟改了、探针没改\"的漂移。断言一行未动。\n\n```diff\n+// Every case below cold-loads sucrase + typescript (~1.5 MB / ~9 MB) — in-process\n+// for the behavioral case, in a spawned child `node` for the dist probes. On a\n+// loaded runner (dozens of parallel turbo tasks) that alone takes >5s, so vitest's\n+// default 5s timeout flakes while the assertion set is pure contract, not latency.\n+const COLD_LOAD_TIMEOUT_MS = 30_000;\n```\n\n## 验证\n\n先 `pnpm --filter @objectstack/lint... build` 把 dist 构建出来,让两条 `skipIf` 探针**真的跑起来**而不是被跳过:\n\n```\n✓ built CJS dist does not load a lazy dep until a react page is validated  908ms\n✓ built ESM dist does not load a lazy dep until a react page is validated  751ms\n✓ loads each dep lazily in-process and the gates still work              3211ms\n```\n\n空载机器上 in-process 那条已经 3.2s,离 5s 很近 —— 与 issue 描述的负载下越界一致。\n\n另外单独验证了\"第三参数超时经由 `it.skipIf(...)` 确实生效\"(vitest 4.1.10),用一次性探针跑同一段 6.5s 的 body:\n\n```\n✓ skipIf still honors a third-arg timeout (>5s default)   6509ms   ← 带 30_000\n× control: same body with the default 5s timeout must fail 5008ms  → Test timed out in 5000ms.\n```\n\n该探针文件已删除,不在本 PR 内。\n\n包内全量:`32 test files / 447 tests passed`;`eslint packages/lint/src/lazy-deps.test.ts` 干净。\n\n## 关于 changeset\n\n纯测试稳定性修复,不涉及运行时行为,按 AGENTS.md Post-Task Checklist #3 本身不需要发版说明。但 `Check Changeset` 门禁要求每个 PR **至少新增一个** changeset 文件,所以补了一个**空 frontmatter** 的 —— 工作流注释里明确把它列为\"this PR releases nothing\"的认可写法(仓库既有先例:`.changeset/authz-ledger-flow-runas.md`,同样是 test-only)。它声明的正是\"不发版\",与上面那条并不冲突。"
+}

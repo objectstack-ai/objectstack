@@ -1,0 +1,35 @@
+{
+  "number": 3832,
+  "kind": "pull_request",
+  "title": "fix(spec,client)!: `GetTranslationsRequest` is locale-only — drop the `namespace`/`keys` filters no server reads (#3676)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T08:56:14Z",
+  "updated_at": "2026-07-28T09:18:39Z",
+  "closed_at": "2026-07-28T09:18:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T09:18:36Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3832",
+  "body": "Closes #3676. Takes the issue's **option 1** (trim both), for reasons the issue could not have known when it was filed — see below.\n\n## The gap, re-verified\n\nEvery claim in #3676 checks out:\n\n| Claim | Verified at |\n| :--- | :--- |\n| Schema declares two optional filters | `protocol.zod.ts:957-961` |\n| Endpoint description promises `namespace` | `plugin-rest-api.zod.ts:1185` |\n| SDK sends both on the query string | `client/src/index.ts:3516-3519` |\n| Dispatcher reads only locale | `runtime/src/domains/i18n.ts:56-73` |\n| service-i18n reads only `params.locale` | `i18n-service-plugin.ts:~205-213` |\n| No caller passes either field | swept `packages` / `apps` / `examples` + `objectui`: zero |\n\n`rest-server.ts:1602` is *not* a third serving surface — it builds the metadata translation bundle on a different path. The issue's \"two surfaces\" framing is accurate.\n\n## Why trim, not implement\n\nThe issue left option 2 open, blocked on \"what a namespace prefix means against the flat `o.`\". **That blocker expired one day later.** #3778 (filed 7-28, closed by 4cca74c) retired the flat `o.` dialect and settled the tree on one nested `TranslationData` shape. So:\n\n- **`namespace` got *easier*.** It now lands exactly on `TranslationData`'s top-level groups — literally what its own description already said (\"e.g., objects, apps, messages\"). Implementation would be a one-line pick.\n- **`keys` got *harder*.** Under the flat dialect, `keys: ['o.account.label']` was an obvious selection. Under the nested shape a flat `string[]` is neither a path set nor a group set, and a filtered response must be rebuilt as a sparse nested tree to stay schema-valid. That is an unmade design decision with nothing waiting on it.\n\nTwo further counts against implementing:\n\n- **`keys` cannot deliver what it advertises.** `II18nService.getTranslations` (`contracts/i18n-service.ts:33`) takes only `locale`. A filter could therefore only post-filter an already-materialized bundle — saving wire bytes but none of the server work the name implies. Widening that contract breaks every implementer (`memory-i18n`, `file-i18n-adapter`) for a capability with no caller.\n- **The docs were already right.** `content/docs/api/client-sdk.mdx:333` and `skills/objectstack-i18n/SKILL.md:495` both describe `getTranslations(locale)` as a full-bundle snapshot. The schema was the outlier.\n\n`namespace` is trimmed alongside `keys` deliberately: re-adding an optional request field is additive and non-breaking the day the Studio's per-module views need it, whereas shipping an unexercised filter path now means dead code with tests to match. Per #3778's own reasoning — a declared-but-unread field is exactly the exemplar the next author copies.\n\n## Changes\n\n- `packages/spec/src/api/protocol.zod.ts` — `GetTranslationsRequestSchema` is `{ locale }`, with the rationale recorded where the next author will look.\n- `packages/spec/src/api/plugin-rest-api.zod.ts` — endpoint description no longer promises a namespace.\n- `packages/client/src/index.ts` — `getTranslations(locale)`; the query-param construction is gone.\n- `content/docs/references/api/protocol.mdx` — regenerated (`gen:schema && gen:docs`); the diff is exactly the two rows.\n- Changeset: `@objectstack/spec` + `@objectstack/client` minor, marked breaking.\n\n### On the tests\n\nThe client had a test asserting the query string was **built** (`client.test.ts:659`). It pinned the phantom rather than any behaviour — it asserted what was *sent*, which no server read. It is replaced by its inverse: a regression test that the request carries no filter query at all.\n\nThe spec test needed the same treatment for a subtler reason: `safeParse({ locale, namespace })` still **succeeds** after the trim, because `z.object` strips unknown keys. A success-only assertion would have stayed green whether or not the fields were removed, so the test now asserts the **parsed output** equals `{ locale }`.\n\n## Verification\n\n- `@objectstack/spec` — 259 files / 6745 tests pass\n- `@objectstack/client` — 13 files / 173 tests pass\n- `@objectstack/runtime`, `@objectstack/service-i18n` — pass (46 files / 665 tests)\n- `check:api-surface` — unchanged (the type still exists, only its fields shrank)\n- `check:docs` — 250 generated files in sync\n- `client-react`, `cli` (the downstream consumers of the trimmed signature) — build clean\n\n## Filed separately\n\nWhile verifying, I found an adjacent live defect and did not widen scope into it (Prime Directive #10): `packages/runtime/src/domains/i18n.ts:94` still scans the retired flat `o.<object>.fields.` prefix in its `getFieldLabels` fallback — the exact dead dialect 4cca74c removed from service-i18n, which that commit did not reach. That fallback therefore always returns `{}`. Arguably higher severity than this issue: #3676 returned a correct superset, that one returns silently-empty output. Filed as #3833."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 3998,
+  "kind": "pull_request",
+  "title": "refactor(spec)!: v17 close-out of the #3896 line — release notes, tool inert-key removal, ADR-0113 (Proposed)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T02:17:51Z",
+  "updated_at": "2026-07-30T03:33:30Z",
+  "closed_at": "2026-07-30T03:33:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T03:33:28Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3998",
+  "body": "The three follow-ups approved after #3990, one commit each: the v17 release documentation for the whole security-hardening arc, the tool-surface false-capability removal while the breaking window is open, and the ADR that generalizes the structural lesson — **left as Proposed for adjudication**.\n\n## 1. v17 release notes carry the security-hardening line (docs only)\n\n`releases/v17.mdx` had zero mention of the arc. Added, in the page's own voice:\n\n- A **Highlights** bullet: *\"A sharing rule with no criteria shares nothing, and a disabled RLS policy is disabled\"* — both were documented contracts whose real behaviour was wider, found by the ledger re-verification.\n- Two **breaking-change sections** with migration guidance: the empty-criteria fail-closed (three layers, revocation on reconcile, no data migration needed) and the RLS `enabled`/`priority` pair.\n- **Dead-cluster table rows** for `DynamicLoadingConfig` (#3950) and `rls.priority` (#3990); the dead-sweep Highlights bullet now names the four tool keys (part 2 below).\n- Two **Spec/kernel bullets**: the 44-entry security-subset re-verification (what it found, what it refuted, the two new proof bindings) and the `check:empty-state` gate.\n- Two **upgrade-checklist items** (sharing criteria; RLS) plus a tool item.\n- `implementation-status.mdx`: one sentence each on the sharing-criteria invariant and the RLS corrections.\n\n## 2. The four inert tool authoring keys are removed (breaking, changeset: major)\n\n`tool.category` / `permissions` / `active` / `builtIn` were authorable and inert — none is part of `AIToolDefinition`, no execution path read them (the ledger corrected all four to dead+authorWarn in #3686). Two were misleading in the dangerous direction, which is what makes this the v17 move rather than backlog:\n\n- **`permissions`** promised a capability gate on invocation. Nothing enforced it — a tool \"requiring\" capabilities ran for everyone. Real gates: `action.requiredPermissions` (ADR-0066), permission sets on the touched objects.\n- **`active: false`** read as \"withdrawn\" and withdrew nothing: `ToolRegistry.getAll()` returns everything, the tool kept reaching the LLM tool set, and `POST /ai/tools/:name/execute` kept running it — unlike `agent.active` / `skill.active`, which are enforced. **The same false-compliance shape as `rls.enabled`, resolved the same week.**\n\nRetirement kit, per the `requiresConfirmation` precedent (#3715): the `.strict()` ToolSchema rejects each key with its own prescription (6 new tests pin the rejections and that the two dangerous ones name the real mechanism); D2 conversion + D3 chain step (`tool-inert-authoring-keys-removed`) so `os migrate meta` strips them mechanically; `ToolCategorySchema`/`ToolCategory` removed with the key they typed (zero consumers — `action.zod.ts` keeps its own inline vocabulary on purpose); the Studio tool form drops the retired inputs (a form input for an unenforced gate is the UI half of false compliance — the objectui#2962 shape); ledger entries deleted, README tool row updated, both baselines edited deliberately.\n\n## 3. ADR-0113 (Proposed) — `required` as a write contract, the column constraint as its own axis\n\nThe structural lesson behind #3929's three imperative guards, written up for decision — **not implemented**. The tri-binding is cited at its exact sites: `required` today means the write check (`record-validator.ts`), the `NOT NULL` DDL (`sql-driver.ts:4901`), and the drift expectation (`schema-drift.ts:249`) through one knob, so tightening any invariant on a deployed object is a destructive migration blocked by the very legacy nulls that motivated it.\n\nProposed rulings: `required` keeps the write-time + UI meanings (insert must provide, update may not null out, legacy rows rest — the semantics #3929 hand-built, promoted to one word); an explicit `storage.notNull` owns the DDL and keeps the destructive-migration ceremony; drift reads the storage property; `criteria_json` is the first consumer and gets its required marker back. **Three open questions are flagged for the deciders** (spelling; the new-field default; `requiredWhen` interplay). Merging this PR accepts the *document*, not the design — the Status line says Proposed.\n\n## Verification\n\n- `packages/spec`: **6894 tests green** (chain-replay gate composes the new conversion with #3987's and everything since). `tsc` clean.\n- All gates green: `check:liveness`, `check:empty-state`, `check:authorable-surface` (baselines deliberate), `check:spec-changes`, `check:upgrade-guide`, `check:docs` (251 files in sync).\n- MDX parse-checked; regenerated projections have **zero drift** against the rebased main (verified after cherry-picking over #3989).\n- In-repo sweep for authors of the removed tool keys done the corrected way (files containing tool contexts, then key grep): zero hits outside the intentional conversion fixture.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QuViRSR1j6GJjf9qGbnqFX)_"
+}

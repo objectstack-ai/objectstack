@@ -1,0 +1,32 @@
+{
+  "number": 3714,
+  "kind": "issue",
+  "title": "[P3] liveness: `action.undoable` is marked experimental but has two real runtime readers",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T15:52:17Z",
+  "updated_at": "2026-07-28T09:16:43Z",
+  "closed_at": "2026-07-28T09:16:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3714",
+  "body": "Found while re-verifying the ledger (#3711). This one errs in the **understating** direction — the opposite of the preview-renderer over-claiming that #3685/#3711 fixed.\n\n## The claim vs the code\n\n`packages/spec/liveness/action.json:76-79`:\n```jsonc\n\"undoable\": {\n  \"status\": \"experimental\",\n  \"note\": \"Declared + demoed in #1992 (example-crm reassign) but no runtime reader yet: neither\n           service-automation nor objectui consume the action's `undoable` flag (objectui has an\n           UndoManager but does not key off this field). Promote to live once a consumer is wired.\"\n}\n```\n\n**objectui does key off this field — in two places, both gating real behaviour:**\n\n| Reader | Code |\n|---|---|\n| `packages/app-shell/src/hooks/useConsoleActionRuntime.tsx:409` | `if (action.undoable && obj && recId && rowRecord && Object.keys(fields).length > 0` — builds the undo operation that the success toast's Undo button calls (`:147`) |\n| `packages/app-shell/src/views/RecordDetailView.tsx:545` | `if (action.undoable && isThisRecord && pageRecord)` — restores the record's prior values (`:404`) |\n\nPlumbed in by `packages/components/src/renderers/action/action-button.tsx:113`, whose comment says it outright: *\"Forward `undoable` … without this the flag is dropped and the handler never builds the undo operation.\"* Authoring side: `ActionDefaultInspector.tsx:410` (\"Offer undo\" checkbox).\n\nSpec declaration: `packages/spec/src/ui/action.zod.ts:428`.\n\n## Why it matters\n\nAn author reading the ledger — or an AI consulting it — concludes `undoable` is aspirational and skips it, losing a working feature. The `authorWarn` machinery would fire on `experimental` too, so today authoring a *working* property produces a \"not enforced yet\" warning.\n\n## Fix\n\nOne-line ledger correction: `experimental` → `live`, evidence = the two readers above, note recording that #1992's \"no consumer yet\" was true when written and has since been wired. Also bump the `action` row in `packages/spec/liveness/README.md` (currently `33 | 1 | 2` after #3711 → would become `34 | 0 | 2`).\n\n## Why this keeps happening\n\nSame shape as `flow.status` (fixed in #3711): **a ledger entry is a claim with a timestamp, and code moves under it in both directions.** The 2026-07 sweep found entries that overstated liveness *and* entries that understated it. Worth considering a periodic re-verification pass rather than trusting entries indefinitely — the methodology section in `packages/spec/liveness/README.md` now documents how to verify without fooling yourself.\n\nRefs #3711, #1992."
+}

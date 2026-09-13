@@ -1,0 +1,34 @@
+{
+  "number": 3851,
+  "kind": "pull_request",
+  "title": "ci: fail the Node pin guard when the pinned runtime is out of support (#3825)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T11:42:48Z",
+  "updated_at": "2026-07-28T12:05:01Z",
+  "closed_at": "2026-07-28T12:04:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T12:04:59Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3851",
+  "body": "Follow-up to #3830. Closes the blind spot that PR left behind.\n\n## Consistency was only half the invariant\n\n`check-node-version` (added in #3830) proves all 18 workflows agree on a Node version. **It would have said `OK` just as cheerfully when all 18 agreed on Node 20, three months after that line went EOL** — which is exactly the state #3825 found the repo in.\n\nSo the guard as shipped defends against *drift* but not against *expiry*. If `.nvmrc` sits at 22 until 2027-04-30 and beyond, it stays green the whole way. The only thing that caught the last expiry was someone tripping over it by accident (#3812).\n\n## What the guard now also checks\n\n| Condition | Result |\n|---|---|\n| Pin is past EOL | **error** — an unpatched runtime is guarding every merge |\n| Pin is within 180 days of EOL | **`::warning::`** on the PR |\n| Pin is a major the guard has no dates for | **error** |\n\n**Warn-then-fail, not fail-early.** A hard failure months ahead of EOL would block unrelated PRs on a random day; 180 days of warnings visible on every PR make the bump scheduled work instead. The hard stop lands only when support actually ends — which is the thing we agreed must not happen.\n\n**Unknown major is an error, not a pass.** Adopting Node 26 forces you to record its dates rather than silently validating on a runtime this guard knows nothing about. Same fail-closed shape as the `${{ }}` case in #3830.\n\nDates come from `nodejs/Release` `schedule.json`, hardcoded on purpose: a required gate must not depend on the network, and they move once a year.\n\n## Verified — all four paths\n\n```\nGREEN     check-node-version: OK (18 setup-node step(s) across 16 workflow(s), all on Node 22).\n            Node 22 is in maintenance; supported until 2027-04-30 (276 days).\n\nEOL       .nvmrc pins Node 20, which reached end-of-life on 2026-04-30 (89 days ago).\n          Supported today: 22 (until 2027-04-30), 24 (until 2028-04-30), 26 (until 2029-04-30).\n\nUNKNOWN   .nvmrc pins Node \"99\", which this guard has no support dates for.\n          Add it to NODE_LIFECYCLE … Known: 18, 20, 22, 24, 26.\n\nWARNING   ::warning file=.nvmrc::Node 22 reaches end-of-life on 2027-04-30 (276 days)…\n```\n\n(The warning path was exercised by temporarily widening the 180-day threshold to 300, then restoring it.)\n\n## Worth knowing, but deliberately not acted on here\n\nThe new success line surfaces this:\n\n> `Node 22 is in maintenance; supported until 2027-04-30 (276 days).`\n\n**Node 22 entered maintenance on 2025-10-21, and Node 24 has been Active LTS since 2025-10-28.** So the runtime we just standardised on is already the older of the two supported LTS lines. #3825 raised this (\"Consider 24 instead if a longer window matters\") and chose 22 as the lower-risk move, which was right for that PR — 6 workflows already ran it.\n\nMoving to 24 is now a one-line `.nvmrc` edit plus whatever this guard lists. That is a separate decision; **nothing in this PR forces or schedules it.**"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 3662,
+  "kind": "issue",
+  "title": "flaky: lazy-deps 的两条 dist 探针用例在整仓并发下撞 5s 默认超时(兄弟用例已设 30s)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T13:19:43Z",
+  "updated_at": "2026-07-27T15:28:40Z",
+  "closed_at": "2026-07-27T15:28:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3662",
+  "body": "## 症状\n\n`packages/lint/src/lazy-deps.test.ts` 的这条用例在整仓 `pnpm test` 的并发负载下会失败,单独跑 `pnpm --filter @objectstack/lint test` 必过:\n\n```\nFAIL src/lazy-deps.test.ts > lazy dependency loading (kernel boot-path contract)\n     > built ESM dist does not load a lazy dep until a react page is validated\n ❯ src/lazy-deps.test.ts:90:51\n```\n\n失败点是 `execFileSync` 那一行,实测耗时 **5928ms**——刚好越过 vitest 默认的 5s 超时。\n\n## 原因\n\n这条用例 spawn 一个子 `node` 进程去 import 构建产物,并在子进程里冷加载 `sucrase` + `typescript`(各约 1.5MB / 9MB)。在几十个 turbo 任务并行的机器上,这个冷加载本来就会超过 5 秒。\n\n**同一文件的兄弟用例已经知道这件事**:行 106 的 in-process 版本显式带了 `30_000` 超时,注释写得很清楚:\n\n> Cold-loading sucrase + typescript in-process takes >5s on a loaded CI runner (dozens of parallel turbo tasks) — the default 5s timeout flakes there while the assertion set is pure contract, not latency.\n\n行 81 / 行 90 的两条 dist 探针做同样的冷加载、面临同样的延迟,却沿用默认 5s。这不是契约失败,纯粹是延迟。\n\n## 建议\n\n给两条 dist 探针用例补上与兄弟用例一致的超时(及同样的说明注释)。断言本身不必动——它们检查的是\"哪些依赖被加载了\",与耗时无关。\n\n## 影响\n\nCI 上目前是绿的(Test Core 的负载比本地整仓跑要低),所以这是本地开发者体验问题:任何跑整仓 `pnpm test` 的人(或 agent)会随机吃到一次红,然后要花时间确认它与自己的改动无关。我在 #3638 期间就撞了三次。\n\n发现于 #3638,与那个 PR 的改动无关,按 AGENTS.md Prime Directive #10 单独立此 issue 而不是就地扩大范围。"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 3827,
+  "kind": "issue",
+  "title": "连不上的 datasource 在运行时完全不可观测:`DatasourceSummary.status` 是硬编码常量,health 探针也看不见它",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T08:33:11Z",
+  "updated_at": "2026-07-28T09:16:30Z",
+  "closed_at": "2026-07-28T09:16:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3827",
+  "body": "## 一句话说明\n\nADR-0062 D5 承诺「an optional health probe surfaced in the admin list (`status`)」。**这个 `status` 从来没有实现过** —— `listDatasources()` 给每一条都填死 `'unvalidated'`。配合 `checkDriversHealth()` 只遍历**已注册**的 driver,结果是:一个连不上的 datasource,在运行时没有任何接口能告诉你它是死的。\n\n#3816 让「有对象显式绑定」的那类连不上时拒绝启动,所以那一类现在至少炸得响。但**降级放行的那两类**(`autoConnect: true`、设了 `OS_ALLOW_DRIVER_CONNECT_FAILURE`)恰恰落进这个观测盲区。\n\n## 事实核实\n\n**(1) `status` 是常量。** `packages/services/service-datasource/src/datasource-admin-service.ts:127`(`listDatasources`)与 `:302`:\n\n```ts\nsummaries.push({\n  name,\n  // ...\n  status: 'unvalidated',   // ← 无条件\n});\n```\n\n而契约 `contracts/datasource-admin-service.ts:68-82` 声明的是三态、并注释成 \"current health\":\n\n```ts\n/** A datasource with its provenance and current health (no secrets). */\nexport interface DatasourceSummary {\n  // ...\n  /** Validation health: `unvalidated` until the first validate/test runs. */\n  status: 'ok' | 'error' | 'unvalidated';\n}\n```\n\n全仓库没有任何地方把它写成 `'ok'` 或 `'error'`。声明三态、只发一态 —— Prime Directive #10 点名的 `declared ≠ enforced` 形状,这次发生在**返回值**而不是 `switch` 上。\n\n**(2) health 探针看不见它。** `packages/objectql/src/engine.ts:1984` 的 `checkDriversHealth()`(#3756)遍历的是 `this.drivers`:\n\n```ts\nreturn Promise.all(\n  Array.from(this.drivers, async ([driverName, driver]) => { /* ... */ }),\n);\n```\n\n一个 connect 失败的 datasource **从未被 `registerDriver`**,所以它不在 `this.drivers` 里 —— 探针不会报它 unhealthy,而是压根不提它。readiness probe 因此看到一片绿。\n\n## 影响\n\n一个 `autoConnect: true` 的 datasource 连不上(或者操作者设了 `OS_ALLOW_DRIVER_CONNECT_FAILURE` 让启动过去):\n\n- Setup → Datasources 里它显示 `unvalidated` —— 与一个**从没被测试过但完全健康**的 datasource 一模一样,两种状态在 UI 上无法区分。\n- `GET /api/v1/datasources` 同样。\n- readiness 探针不报它。\n- 唯一的痕迹是启动时滚过去的一行 warn / 一次 `DEGRADED BOOT` banner —— 进程活得越久,这条线索越不可能还在任何人的屏幕上。\n\n也就是说:**排查手段是重启服务器再看日志**。\n\n## 建议处置\n\n分两半,可以分开做:\n\n**A. `status` 说真话。** `DatasourceConnectionService` 已经为每次 connect 返回 `ConnectResult { status, reason }`(七种:`connected` / `already-registered` / `skipped-policy` / `skipped-no-infra` / `skipped-unsupported` / `failed-credentials` / `failed-degraded`),这些结果**当场被丢弃**。让服务留存最近一次结果,`listDatasources()` 读它。现有三态不够表达 —— `skipped-policy`(被拒)和 `failed-degraded`(连不上)在运维上是两回事,建议顺带扩 `DatasourceSummary.status` 并带上 `reason`。注意这是公开契约,要走 spec 变更而不是就地加字段。\n\n**B. 探针覆盖「应该连上但没连上」。** `checkDriversHealth()` 的语义是「已注册的 driver 现在能不能服务」,它没错;缺的是「有哪些 datasource 本该注册却没有」。倾向不要去改 `checkDriversHealth` 的遍历源(那会把两个问题混在一个返回值里),而是让 datasource 侧单独暴露未连接集合,由 readiness 端点合并。\n\n需要先定的:**一个 `autoConnect` datasource 没连上,readiness 该不该判 not-ready?** 倾向不该 —— `autoConnect` 的语义就是「能连就连」,没有对象声明依赖它,判 not-ready 会把一个可选副本变成整机下线开关。但它必须**可见**。这条如果定反了会很难回退,值得先决定再动手。\n\n## 关联\n\n- ADR-0062 D5(health probe 的出处)\n- #3756(`checkDriversHealth`)、#3758 / #3816(启动期判决)\n- Prime Directive #10 —— 「never advertise a capability the runtime doesn't actually deliver」"
+}

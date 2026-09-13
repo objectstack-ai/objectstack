@@ -1,0 +1,34 @@
+{
+  "number": 3713,
+  "kind": "issue",
+  "title": "[P2] action `execute` vs `target`: spec and objectui resolve the precedence in OPPOSITE directions",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T15:51:55Z",
+  "updated_at": "2026-07-28T02:07:15Z",
+  "closed_at": "2026-07-28T02:07:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3713",
+  "body": "Found while re-verifying the liveness ledger's `action.execute` entry (#3711). Not a ledger problem — a real behavioural divergence.\n\n## The divergence\n\n`execute` is the deprecated alias of `target`. Both sides handle \"author declared both\" — **in opposite directions**.\n\n**Spec keeps `target`** — `packages/spec/src/ui/action.zod.ts:576-581`:\n```ts\n}).transform((data) => {\n  // Auto-migrate deprecated `execute` → `target` for backward compatibility\n  if (data.execute && !data.target) {\n    return { ...data, target: data.execute };\n  }\n  return data;\n})\n```\nPinned by a test — `packages/spec/src/ui/action.test.ts:1032`, *\"should preserve target over execute when both are set\"* → asserts `result.target === 'preferredHandler'`.\n\n**objectui keeps `execute`** — `packages/core/src/actions/ActionRunner.ts:704`, inside `executeScript()`:\n```ts\nconst script = action.execute || action.target;\n```\n\n## Consequence\n\nAn action declaring both:\n```ts\ndefineAction({ type: 'script', target: 'preferredHandler', execute: 'legacyHandler', … })\n```\nruns **`preferredHandler` server-side** (the parsed metadata carries `target`) and **`legacyHandler` client-side** (ActionRunner prefers `execute`). Two different scripts for one action, with no error anywhere.\n\nLow frequency — it needs an author to set both, which only happens mid-migration or by copy-paste — but it is silent and the failure is \"the wrong code ran\", which is the worst kind to debug.\n\n## Suggested fix\n\nAlign objectui on the spec's rule (`target || execute`), since the spec's direction is the documented one (`execute` is the deprecated alias) and is test-pinned. Then either:\n- keep both readers permanently, or\n- have the spec transform **drop** `execute` from its output once it has been lowered, so the ambiguity cannot reach a renderer at all — the same \"canonical wins, alias disappears\" shape used for `agent.knowledge.topics` → `sources` (#1891), which asserts `'topics' in parsed === false`.\n\nThe second is stronger: it makes the divergence unrepresentable rather than merely agreed-upon.\n\n## Verification notes\n\nBoth sides read directly, not via the agent report that surfaced this. The ledger entry for `action.execute` (corrected in #3711) now cites both readers and records this divergence.\n\nRefs #3711, #3686."
+}

@@ -1,0 +1,30 @@
+{
+  "number": 3720,
+  "kind": "issue",
+  "title": "列表行级 edit/delete 与批量删除未接入服务端 effective 操作集(#3391 遗漏的第四个面)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T16:12:38Z",
+  "updated_at": "2026-07-28T02:47:05Z",
+  "closed_at": "2026-07-28T02:47:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3720",
+  "body": "#3391 的遗漏项(前端,objectui 仓)。在收口 #3546 时扫描全仓调用点发现。\n\n## 背景\n\n`/me/permissions` 的 effective 操作集(`apiOperations`)目前已接入三个面:\n\n- **工具栏**(PR-4,objectui#2823):`ObjectView` Import、`ListView`/`ObjectGrid` Export;\n- **detail / form**(#3546,objectui#2832 + #2876):header Edit/Delete、记录体 inline-edit、form 整表字段锁;\n- **相关列表**(#3546):`RelatedRecordActionsBridge` 的子对象 Create/Edit/Delete。\n\n**但主列表的「行级 CRUD」走的是一条完全独立、从未接入的链路** —— 它不经过 `resolveCrudAffordances`,因此上面三轮改动一次都没覆盖到它。\n\n## 问题\n\n`plugin-grid/src/rowCrudAffordances.ts:49` 的 `resolveRowCrudAffordances()` 签名里**没有** effective 集参数。行级门(`ObjectGrid.tsx:1479`)只由三项决定:\n\n```\noperations ?? { update: !!onEdit, delete: !!onDelete }   // ← 默认全开\n  ∧ userActions.{edit,delete} 显式 false 的 opt-out\n```\n\n而 `ObjectView` 是**无条件**下传 `onEdit` / `onDelete` 的,所以视图 JSON 未显式声明 `operations` 时该门恒为 true。另外:\n\n- `ObjectGrid` 的 `effectiveApiOps` 只喂给 **export**(`ObjectGrid.tsx:1266`、`2295`);`ListView.tsx:672` 同理 —— 这正是 PR-4 当时的范围。\n- `ObjectGrid` 内唯一的权限调用是**字段级** `perms.checkField`(`1238`),没有对象级 `can()`。\n- 同一个 `canDelete` 还驱动**批量删除**(`ObjectGrid.tsx:1615`:`canDelete && onBulkDelete → effectiveBulkActions = ['delete']`)。\n\n即:effective 集不含 `update` / `delete` 的调用者,主列表行 kebab 的 Edit/Delete **和批量删除**仍然照常显示。批量删除是破坏性操作,风险高于 #3546 修的那批按钮。\n\n顺带:该链路连 ADR-0103 的 bucket 锁也没接 —— `rowCrudAffordances.ts` 的注释写「bucket-level lock is applied upstream via the view's `operations.*`」,但上面的默认值说明并没有。建议一并确认。\n\n## 复现(已验证)\n\n写了一个针对真实 `ObjectGrid` 的组件级探针,mock `usePermissions().getObjectApiOperations`,**带控制组**:\n\n| 用例 | effective 集 | 行 Edit/Delete + 选择框 |\n|---|---|---|\n| A 基线 | `['get','list','create','update','delete']` | 出现 ✅ 符合预期 |\n| **B 本 issue** | `['get','list']` | **仍然出现** ❌ |\n| C 控制组 | full,但 `userActions:{edit:false,delete:false}` | 消失 ✅ |\n\nC 通过是关键:它证明断言确实能观测到「隐藏」,所以 B 不是假阳性。\n\n服务端侧也确认状态 B 真实可达 —— `annotateEffectiveApiOperations`(`plugin-hono-server/src/hono-plugin.ts:339`)在对象 `apiMethods` 收紧曝光、或 `allowExport:false` 时就会下发受限数组。\n\n⚠️ 说明:以上为**组件级 + 服务端代码走查**验证。未做端到端浏览器实测(本次会话缺少 preview 工具链),因此「真实 console 里点得到」这一步仍是推断。\n\n## 范围(objectui)\n\n- [ ] `resolveRowCrudAffordances()` 增加 effective 操作集入参,`canEdit` ∧ `update`、`canDelete` ∧ `delete`。\n- [ ] `ObjectGrid` 把已有的 `effectiveApiOps`(目前只喂 export)接到行级门 + 批量删除。\n- [ ] 确认 `ListView` / 移动端卡片等其他消费 `rowActions` 的面。\n- [ ] 确认 bucket 锁是否也需要在这条链路补上(见上)。\n- [ ] 测试:效仿 objectui#2876 的矩阵,并保留 `userActions` opt-out 的控制组用例。\n\n保持与前三轮一致的语义:**交集,永不并集**;effective 缺失(全开对象 / 旧后端 / 未挂 `PermissionProvider`)回退现行为。\n\n## 关联\n\n#3391(跟踪)、#3546(detail/form 面)、objectui#2823(PR-4 工具栏)、objectui#2832、objectui#2876。"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 3743,
+  "kind": "issue",
+  "title": "[P3] action `target` + `execute` both declared: the alias is discarded silently — no author-facing warning",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T01:16:53Z",
+  "updated_at": "2026-07-28T09:36:23Z",
+  "closed_at": "2026-07-28T09:36:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3743",
+  "body": "Follow-up to #3713 / #3742, filed per Prime Directive #10 rather than expanding that PR's scope.\n\n## What #3742 fixed, and what it didn't\n\n#3742 made the `target` / `execute` precedence consistent across all three readers and had the `ActionSchema` transform **drop** the alias from its parsed output, so the \"two different scripts for one button\" divergence is now unrepresentable.\n\nWhat it did **not** change: when an author declares both slots with *different* values, `execute` is discarded **silently**. That is now documented, tested and consistent — a big improvement on \"the wrong code ran\" — but the author still gets no signal that one of the two handlers they wrote is being thrown away.\n\nPer Prime Directive #12 (\"reject it at authoring/publish so the error surfaces loudly\"), that deserves a warning.\n\n## Why it wasn't done in #3742\n\nThe natural home is the CLI compile lint pipeline, which already has the right shape for this — advisory findings that never fail the build (`lintFlowPatterns`, `lintLivenessProperties`, `lintViewRefs` in `packages/cli/src/commands/compile.ts`).\n\nThe problem is ordering. Every one of those lints runs on the **parsed** stack:\n\n```ts\n// packages/cli/src/commands/compile.ts\nconst lowering = lowerCallables(normalized);            // ~L107  (pre-parse)\nconst result = ObjectStackDefinitionSchema.safeParse(lowering.lowered);  // ~L136\n…\nconst flowLint = lintFlowPatterns(result.data as Record<string, unknown>);  // ~L405  (post-parse)\n```\n\nBy the time the existing lints see the stack, the transform has already consumed `execute` — so a lint added alongside them is structurally blind to the conflict it is meant to report.\n\nThe string/string case (exactly the one #3713 describes: `target: 'preferredHandler', execute: 'legacyHandler'`) *is* still visible at line ~136, because `lowerCallables` deliberately leaves a string pair alone for the spec transform to resolve. So the fix is available — it just needs a **new pre-parse lint hook**, not another entry in the post-parse block. That's a structural change to the compile pipeline, which is more than the P2 fix warranted.\n\n## Suggested shape\n\n1. Add a pre-parse lint pass in `compile.ts` between lowering and `safeParse`, operating on `lowering.lowered`.\n2. First rule: `action.target` and `action.execute` both present as strings with **different** values → advisory warning naming both, stating that `target` wins and `execute` is discarded, and pointing at the one-line fix (delete `execute`). Equal values are harmless — stay quiet.\n3. Advisory only, never fails the build, consistent with `lintFlowPatterns` / `lintLivenessProperties`.\n\nWorth considering while there: a pre-parse hook is the only place any \"author wrote a deprecated alias that parse will consume\" warning can live, so the pass is likely to earn its keep beyond this one rule.\n\nRefs #3713, #3742, #1891."
+}

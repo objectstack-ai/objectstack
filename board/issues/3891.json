@@ -1,0 +1,32 @@
+{
+  "number": 3891,
+  "kind": "issue",
+  "title": "降级 analytics shim 把 ExecutionContext 丢在门口 —— `/analytics/query` 在没装 service-analytics 的装配里不注入 RLS/租户谓词，契约字段 `where` 也被静默忽略",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T14:47:18Z",
+  "updated_at": "2026-07-30T01:53:09Z",
+  "closed_at": "2026-07-30T01:53:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3891",
+  "body": "从 #3878 分出来的第二条分歧。#3878 是\"同一个 URL 两种请求体\"；这一条是**同一个 URL 两种作用域语义** —— 降级实现把调用者身份丢在门口，聚合以无主体身份落到引擎，RLS/租户谓词整条不注入。\n\n## 链路（逐跳，均核对于 `origin/main` @ 93f267f81）\n\n1. dispatcher 正确地把身份传了下去：\n   `packages/runtime/src/domains/analytics.ts:45` → `analyticsService.query(body, context?.executionContext)`\n   该行上方的注释正是 #2852 修真引擎时留下的：*\"Without it, `getReadScope(object, undefined)` returned no filter and the query ran UNSCOPED — an authenticated caller saw rows RLS would otherwise hide.\"*\n\n2. 降级 shim 的 `query` 是**一元函数**，第二个参数当场丢弃：\n   `packages/metadata-protocol/src/plugin.ts:139` → `query: async (body: any) => {`\n\n3. `analyticsQuery` 调引擎时也不带 context（`engine.aggregate` 的第三参 `EngineReadOptions` 没传，`query.context` 也没设）：\n   `packages/metadata-protocol/src/protocol.ts:3675` → `await this.engine.aggregate(object, { where, groupBy, aggregations })`\n\n4. 引擎侧把两个来源合并，两个都是 undefined：\n   `packages/objectql/src/engine.ts:3696` → `context: mergeReadContext(query?.context, options?.context)` → `undefined`\n   （引擎只有 `txStore` 一个 AsyncLocalStorage，用于事务；没有任何环境态身份兜底。）\n\n5. 安全中间件的空主体分支放行：\n   `packages/plugins/plugin-security/src/security-plugin.ts:847` → `positions.length === 0 && explicitPermissionSets.length === 0 && !opCtx.context?.userId` → `return next()`\n   RLS 过滤与租户谓词都不再注入。\n\n真引擎不走这条路：`AnalyticsService.query(query, context?)` 收下 context，并有自己的 fail-closed `getReadScope` 预解析（#3597 那一轮补的）。**#2852 / #3597 修的都是真引擎那一半，降级这一半从未跟上。**\n\n## 可达性（写清楚，免得高估也免得低估）\n\n需要同时满足三条：宿主挂了 HTTP dispatcher + 挂了 `SecurityPlugin` + **没**挂 `AnalyticsServicePlugin`。\n\n- ❌ `os serve` 默认/full preset：`serve.ts:202` 的 `ALWAYS_ON_CAPABILITIES` 含 `analytics`，真引擎装上，不受影响。\n- ❌ `os serve --preset minimal`：tiers 只剩 `['core']`，`serve.ts:1401` 的 `tierEnabled('auth')` 为 false，AuthPlugin/SecurityPlugin **都不装** —— 此配置下本来就没有 RLS 可绕，不构成越权。\n- ❌ 托管环境：宿主侧 `defaultRequires` 强制 `analytics`，真引擎装上。\n- ✅ **程序化嵌入**：`createStandaloneStack()` / `createObjectQLKernel()` + `SecurityPlugin` + dispatcher，但没有单独挂 `AnalyticsServicePlugin` —— 这是被文档支持的用法，且 analytics 槽位**默认已被 shim 占住**，作者不会收到任何\"你没装分析引擎\"的信号。\n- ✅ 任何按 `requires` 装配、而该 bundle 未声明 `analytics` 的多环境宿主。\n\n结论：**不是发行默认配置里的洞**，但落在一个合法且无提示的装配组合上，且没有任何一层会告诉部署者作用域已经失效 —— 它返回 200 和一份看起来正常的聚合。\n\n## 同一处的第二个后果：契约里的过滤条件被静默忽略\n\n`AnalyticsQuery` 的规范过滤字段是 `where`（`spec/data/analytics.zod.ts:154`，\"canonical Query DSL FilterCondition\"）。降级实现只读 `query.filters`（`protocol.ts:3661`），而 `filters` 根本不是 `AnalyticsQuery` 的字段。\n\n所以一个**完全符合契约**的带过滤请求，在降级路径上过滤条件被丢掉，返回全表聚合。objectui 的 dashboard 正是按契约发的（`payload.where = params.filter`）。两条叠加：既没有 RLS 谓词，也没有调用者自己的过滤 —— 返回的是该对象的**全量**聚合。\n\n## 修法\n\n倾向 **A**：按 #3878 的结论退役 shim，槽位空着，路由回到 `domains/analytics.ts:33` 已有的 404。一条路径消失，就不用再给它补第二遍安全门（#3770 vs #3875 已经补过一次两遍了）。\n\n若决定保留 shim，则至少要：`query` 收下第二参并原样传给 `analyticsQuery` → `analyticsQuery` 用 `engine.aggregate(object, ast, { context })` 传下去 → 同时认 `where`。并补一条门：**降级实现与真实现在同一份 RLS 断言下都要绿**，否则下次还是只修一半。\n\n关联：#3878（同一 URL 两种请求体）、#2852、#3597、#3770/#3866、#3867/#3875、ADR-0076 D10/D12。\n"
+}

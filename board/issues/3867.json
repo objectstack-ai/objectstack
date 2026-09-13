@@ -1,0 +1,30 @@
+{
+  "number": 3867,
+  "kind": "issue",
+  "title": "analytics /query 未做 cube 存在性校验,未注册名直达驱动当表名;且错误路径原样回显驱动 SQL(#3770 同类,另一子系统)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T12:36:11Z",
+  "updated_at": "2026-07-28T13:48:50Z",
+  "closed_at": "2026-07-28T13:48:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3867",
+  "body": "按 Prime Directive #10 记录。修 #3770(PR #3866)时做真实服务器验证顺带发现的,属于**另一个子系统**,故单独开单而不并入。\n\n> **2026-07-28 更新 —— 原文的保守结论被推翻,这是确认的任意表读取。**\n> 开单时我写「本次实测只报了语法错误,**没有**读到数据,不宜当成数据泄露断言」。那是因为我发的 payload 形状错了(把 `AnalyticsQuery` 裹进了 `{cube, query}` 信封 —— 那是降级 shim 的形状,真引擎直接收 `AnalyticsQuery`)。用正确形状重测,能读到数据。详见下方「实证(修订)」。修复见 PR #3875。\n\n## 背景\n\n#3770 修的是 protocol 数据面:`assertObjectRegistered` 现在覆盖 `findData`/`getData`/`createData`/… 以及 protocol 自带的 `analyticsQuery`。\n\n但 `analyticsQuery` 那一处只在**降级 shim** 路径上生效。`packages/metadata-protocol/src/plugin.ts` 注册的 `analytics` 服务自述 `status: 'degraded'`,并且注释写得很清楚:\n\n> AnalyticsServicePlugin replaces it (`ctx.replaceService`) with the real engine.\n\n装了 `@objectstack/service-analytics` 的部署(showcase / CRM 默认都装)走的是 `AnalyticsServicePlugin` 的真引擎,**不经过** protocol 的 `analyticsQuery`,因此不受 #3770 的闸门保护。\n\n## 实证(修订)\n\nCRM 示例应用(`pnpm dev:crm -- --fresh`,插件列表含 `AnalyticsServicePlugin`),已认证 admin,**正确的 `AnalyticsQuery` 形状**:\n\n```\nPOST /api/v1/analytics/query\n{\"cube\":\"sqlite_master\",\"measures\":[\"count\"],\"dimensions\":[\"type\"]}\n\nHTTP 200\n{\"rows\":[{\"type\":\"index\",\"count\":262},{\"type\":\"table\",\"count\":71},{\"type\":\"view\",\"count\":1}],\n \"sql\":\"SELECT type AS \\\"type\\\", COUNT(*) AS \\\"count\\\" FROM \\\"sqlite_master\\\" GROUP BY type\"}\n```\n\n`sqlite_master` 是 SQLite 的内部 schema 表:**物理上真实存在,永远不是任何已注册对象**。它被成功聚合并返回了真实行 —— 不是「名字进了 SQL 然后报错」,而是**连接能看到的任何表都能读**。\n\n同一台服务器上,#3770 修好的数据面对同类名字已经是干净的 404:\n\n```\nGET /api/v1/data/sqlite_master\nHTTP 404 {\"error\":\"Object 'sqlite_master' is not registered\",\"code\":\"object_not_found\"}\n```\n\n原文里那个 `sqlite_sequence` 的 500,现在也能解释清楚:一是 payload 形状错了导致 select 列表为空,二是那个库里恰好没有 autoincrement 表所以 `sqlite_sequence` 不存在。两者都不影响结论,只是让原文低估了严重性。\n\n## 两个问题\n\n**① cube 名未校验存在性,直达驱动当表名。** `AnalyticsService.ensureCube` 在没有已注册 Cube 时会**自动推断**一个最小 Cube,且 `cube.sql` 就是被查询的那个名字。这是有意支持的「对象上的指标」路径(`object-metric` KPI 磁贴查 `crm_account`,不需要谁去写 Cube),但它接受**任意字符串** —— 和 #3770 ①②同一类前提失效(注册表不是权威,名字即表名)。\n\n**② 错误路径原样回显驱动 SQL。** analytics 域走 `errorResponseBase`(`packages/runtime/src/dispatcher-plugin.ts`),它把 `e.message` 原封不动放进响应体。REST 数据面有 `mapDataError` 的 `looksLikeSqlLeak` 兜底,这个边界没有等价处理。\n\n这一条与 ① 独立:就算 cube 校验加上了,任何其它驱动错误照样会从这条路泄出去 —— 而且 `errorResponseBase` 是 dispatcher 插件挂载的**每一条**路由(`/analytics`、`/packages`、`/i18n`、`/storage`、`/automation`、`/auth`、`/notifications`、`/mcp`)的唯一错误出口,不止 analytics。\n\n**③ 修 ② 时另外发现的:`errorResponseBase` 只认 `statusCode`,不认 `status`。** 本仓库各层的域错误一律用 `status` 携带 HTTP 状态(protocol 的 `OBJECT_NOT_FOUND`/`RECORD_NOT_FOUND`/`CLONE_DISABLED`、plugin-sharing 的 `FORBIDDEN`……),`HttpDispatcher.errorFromThrown` 也是先读 `status`。所以经 dispatcher 路由抛出的**每一个有意的 4xx 都被渲染成 500** —— 包括 #3770 自己在 analytics 降级路径上抛的 `OBJECT_NOT_FOUND`。\n\n## 修复\n\nPR #3875,三条都修:\n\n1. `ensureCube` 的自动推断改为**必须命中已注册对象**,经新的 `AnalyticsServiceConfig.isRegisteredObject`(由 `plugin.ts` 从 `data` 引擎的 `getObject` 接上,与数据面同一份注册表)。已注册的 Cube 不受影响(它是被人写出来的,`sql` 声明成什么就是什么);未注册但是对象的名字照旧自动推断(KPI 路径不变);两者都不是 → 在任何 SQL 成形之前 404 `CUBE_NOT_FOUND`。`/analytics/sql` 一并收口。没配探针时闸门让路并 warn 一次 —— 沿用 #3770 对「注册表不可用」的分层。\n2. 泄露启发式从 `rest-server.ts` 提到 `@objectstack/types` 的 `looksLikeInternalErrorLeak`(两个包本来就都依赖它),两个 HTTP 边界共用一份;dispatcher 侧**只对 5xx** 生效,4xx 是有意的业务答复必须原样送达。脱敏不损失诊断:原始错误照旧经 `__obsRecordedError` 交给 `errorReporter`。\n3. `errorResponseBase` 改为先读 `status` 再读 `statusCode`,与 `errorFromThrown` 对齐。\n\n关联:#3770、PR #3866、PR #3875、ADR-0049、ADR-0076 D12。"
+}

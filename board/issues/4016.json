@@ -1,0 +1,35 @@
+{
+  "number": 4016,
+  "kind": "pull_request",
+  "title": "fix(client): retire the pre-#3842 parking-spot read; `category`/`retryable` read the declared spot (#4006, #4007)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T02:55:24Z",
+  "updated_at": "2026-07-30T03:20:22Z",
+  "closed_at": "2026-07-30T03:20:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T03:20:20Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4016",
+  "body": "Executes the maintainer ruling on #4007 — **delete now** (option A) — and lands #4006 in the same diff, as that issue's own text anticipated.\n\n## The ruling, and why it is right\n\nThe probe's legacy read protected the \"newer SDK, older server\" pairing. Two facts kill it:\n\n1. **One release train.** SDK and server ship as a changesets fixed group; the pairing is not a supported deployment. The objectui#2869 analogy the old comment leaned on does not carry: the console is a platform component with its own pin/release track (`.objectui-sha`), while the client SDK upgrades in the same `package.json` as the server it talks to.\n2. **Location-compat without value-compat protects nothing.** ADR-0112 batches 1–2 renamed the code *values*. A code dug out of an old server's parking spot (`permission_denied`, old catalog) matches no branch written against the current catalog (`PERMISSION_DENIED`) — so in the one scenario the read existed for, it delivered a value nobody can branch on.\n\n## Scope precision (narrower than the issues' shorthand)\n\n#4006/#4007 said \"three-location probe\"; the actual chain is:\n\n| Read | What it is | Fate |\n|---|---|---|\n| `errorBody.code` | **flat** envelope's declared spot (`@objectstack/rest`, live today) | stays |\n| `errorBody.error.details.code` | pre-#3842 parking spot — dug only when talking to a pre-#3842 server | **deleted** |\n| `errorBody.error.code` | **wrapped** envelope's declared spot (dispatcher, live today) | stays |\n\nThe two survivors are the two *live* envelopes' declared spots — a present-tense fact, not a fallback chain. Retiring the flat shape itself belongs to the envelope-convergence line (#3843 family), not here. Verified before deleting: `buildApiError`'s `splitSemanticCode` is move-semantics, so **no current server emits `error.details.code`** — the deleted read was `undefined` against every live surface.\n\n## D9b (#4006)\n\n`err.category` / `err.retryable` were read from the body **top level**, where no envelope ever put them — `undefined` against every conformant server. They now read from inside `error`, where `ApiErrorSchema` declares them. Per the #4007 ruling's own logic, they read the declared spot only — no top-level fallback to a location that has no producer (#4006 sketched a two-shape read; this is the deliberate tightening, same rationale as the deletion above).\n\n## Changes\n\n- `packages/client/src/index.ts` — delete the parking-spot read; rewrite the comment block (the \"NOT debt\" argument is retired with the read); `category`/`retryable` read `errorBody.error.*`.\n- `packages/client/src/client.test.ts` — the \"older server, newer SDK\" pin **flips** to pin the retirement (legacy shape → `code` undefined, everything else still normalises); \"all three envelopes\" becomes both live envelopes; two new cases pin the D9b reads (present and absent). 200/200 green (was 196).\n- `docs/adr/0112-error-code-vocabulary-and-ledger.md` — D5 amended in place: ruled and done, with the reasoning and the scope note, so the next agent working from the ADR sees the settled state instead of re-deriving either side.\n- `content/docs/api/client-sdk.mdx`, `wire-format.mdx` — stop describing the retired fallback.\n- `content/docs/api/error-catalog.mdx` — corrects the actions-rejection example to the real wire: envelope assembly *promotes* the thrown `code` into `error.code`; `details` carries `fields` only (the `details.code` wording came from #3969's shorthand).\n- `content/docs/releases/v17.mdx` — notes the retirement in the SDK entry; the derived-map example uses the post-rename spelling (`403` → `PERMISSION_DENIED`), the rider #4006 called for.\n- Changeset: `@objectstack/client` minor.\n\n## Verification\n\n- `@objectstack/client`: 14 files, **200/200** green; `tsc --noEmit` clean; eslint clean.\n- `@objectstack/spec`: **6890/6890** green (error-catalog headings lock unaffected).\n- `check:doc-authoring`, `check:release-notes` green.\n- Behavior against every **current** server pairing: unchanged (the deleted read was dead on live wires); `category`/`retryable` go from never-populated to populated.\n\nCloses #4006. Closes #4007.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_018u8vDQLWPJxBWQESznDpSj\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018u8vDQLWPJxBWQESznDpSj)_"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 3807,
+  "kind": "issue",
+  "title": "approvals: a `department` approver never resolves when the business unit has `organization_id = null` (every seeded BU)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T06:14:13Z",
+  "updated_at": "2026-07-28T07:11:59Z",
+  "closed_at": "2026-07-28T07:11:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3807",
+  "body": "## 问题\n\n`department` 审批人在真机上**恒解析为空**,落到死值 `department:<id>` —— 只要目标 `sys_business_unit` 行的 `organization_id` 是 `null`,而审批请求带着组织 id。这正是 seed 出来的组织架构的常态。\n\n`expandBusinessUnitUsers`(`packages/plugins/plugin-approvals/src/approval-service.ts:806`)第一步是「种子健全性检查」:\n\n```ts\nconst seed = await this.engine.find('sys_business_unit', {\n  filter: organizationId\n    ? { id: businessUnitId, organization_id: organizationId }   // ← 这里\n    : { id: businessUnitId },\n  fields: ['id', 'active'], limit: 1, context: SYSTEM_CTX,\n});\nconst seedRow = Array.isArray(seed) ? seed[0] : null;\nif (!seedRow || seedRow.active === false) return [];\n```\n\nBU 行 org 为 `null`、请求 org 为默认组织 → 等值比较不命中 → `return []` → 上层落到 `[`${a.type}:${a.value}`]` 死值。BFS 子节点那一段(L828-830)有同样的等值过滤。\n\n## 为什么这在真实应用里必然发生\n\nseed 写不出运行时才创建的默认组织 id。showcase 的 `src/data/seed/index.ts:199-204` 就是这么写的(5 个 BU 全部不带 `organization_id`),运行时 `AuthPlugin` 再建出 `Default Organization`。于是:\n\n- 设计器 Department 选择器列出的 5 个 BU **全部**是 `organization_id = null`;\n- 作者选任意一个,审批请求都路由到没有人的槽位。\n\n配合 #3508 刚落地的记录 lookup,这条路现在更容易被走到——以前是手填 id,现在是从选择器里点一下就得到一个死槽位。\n\n## 复现(真机,showcase + sqlite)\n\n```\nexamples/app-showcase $ PORT=3000 pnpm exec objectstack dev --seed-admin -p 3000\n```\n\n1. `POST /api/v1/data/sys_business_unit_member { business_unit_id: 'bu_hq_finance', user_id: 'usr_showcase_phone_demo' }`\n2. 建一个带 `{ type: 'department', value: 'bu_hq_finance' }` 审批人的 flow,触发它。\n3. `sys_approval_request.pending_approvers` → **`department:bu_hq_finance`**(死值,不是 `usr_showcase_phone_demo`)。\n\n同一条流水线上另外三种记录型审批人都正常解析(`user` → id、`team` → 成员、`position` → 机器名的持有者),只有 `department` 落空。\n\n**因果已证实**:把 BU 的 org 补上再触发一次(换一条记录以绕开 pending 去重),同一个 flow 立刻解析到正确的人:\n\n```\nPATCH /api/v1/data/sys_business_unit/bu_hq_finance { organization_id: 'org_ms48pbgs4lelo6q8' }\n\n前: usr_showcase_auditor_demo, <admin>, department:bu_hq_finance, <ops holder>\n后: usr_showcase_auditor_demo, <admin>, usr_showcase_phone_demo,  <ops holder>\n```\n\n## 同一文件里的口径不一致\n\n- `expandTeamUsers`(L791)**完全不按 org 过滤**;\n- `sys_business_unit_member` 的成员查询(L839)**也不按 org 过滤**;\n- 只有 BU 自身的种子检查 + BFS 子节点按 org 等值过滤。\n\n另外 `isOverrideActor` 的注释已经确立了平台口径:「a null-org request is global」。按同样的语义,**org 为 null 的 BU 应当是全局可见的**,而不是对任何带 org 的请求都不可见。\n\n## 建议\n\n二选一(倾向 A):\n\n**A. 引擎把 null-org 当全局**——种子检查与 BFS 过滤改成「本组织 ∪ 无组织」:\n\n```ts\nfilter: organizationId\n  ? { id: businessUnitId, $or: [{ organization_id: organizationId }, { organization_id: null }] }\n  : { id: businessUnitId }\n```\n\n与 `expandTeamUsers` 的宽松口径、以及 `isOverrideActor` 的 null-org=global 语义一致。\n\n**B. seed/bootstrap 给平台对象补 org 戳**——但 seed 阶段拿不到运行时组织 id,得挪到 `kernel:bootstrapped` 之后补写,成本更高且每个宿主应用都要各自照做。\n\n无论选哪条,`department` 目前属于「声明了、选得到、运行时不兑现」——正是 Prime Directive #10 要在生产者侧大声报错的那一类。\n\n## 关联\n\n- #3508 / #3536 / objectui#2834:设计器 Department 记录 lookup(本 issue 是在验收那次改动时发现的,不是它引入的)\n- #3424:审批路由到空槽位导致记录死锁——同一类失败的下游后果"
+}

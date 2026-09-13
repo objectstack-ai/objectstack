@@ -1,0 +1,35 @@
+{
+  "number": 3730,
+  "kind": "pull_request",
+  "title": "feat(client)!: delete `projects.listTemplates()` — nothing has ever mounted its route (#3702)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T00:52:45Z",
+  "updated_at": "2026-07-28T01:04:48Z",
+  "closed_at": "2026-07-28T01:04:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T01:04:46Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3730",
+  "body": "Closes #3702.\n\n## What was wrong\n\n`client.projects.listTemplates()` built `GET /api/v1/cloud/templates`. **Nothing mounts that path**, in either repo:\n\n- **cloud** — all 17 registrars in `cloud-artifact-api-plugin.ts` were enumerated for the control-plane ledger (#3655) by driving them against a capturing mock `IHttpServer`: 91 registrations, 90 distinct, none `/cloud/templates`. The ledger records the absence deliberately (`cloud-route-ledger.ts`: \"DELIBERATELY ABSENT\").\n- **framework** — the string occurred exactly once: the call itself.\n\nSo every invocation was a 404, behind a type signature promising a resolved value.\n\n**No caller anywhere.** `gh search code --owner objectstack-ai` returns only the definition, the two guards, and history — nothing in `objectui`, `cloud`, `templates`, `objectos`, `website`, `builder`, `crm`, `hotcrm`, `mobile`, `objectbase`.\n\n## Why option 1 (trim), not option 2 (mount)\n\nTemplates are real as **data** — `sys_package_templates`, the `is_starter = true` view over `sys_package`, rendered as a console page — but have never been an HTTP route, and cloud states the position explicitly (`sys-package.object.ts`: there \"is no separate 'template' concept\"; `apps/cloud/objectstack.config.ts`: \"No built-in environment templates: every environment is provisioned empty\"). The client's declared shape (`{ id, label, description, category? }`) does not match `sys_package`'s columns, so mounting a route means *first* deciding what a template is on the wire — a product call, not an implementation detail, and the wrong order for a method nobody calls. It returns when a route exists to back it, with an `sdk` ledger row proving so.\n\n## The class\n\nSixth instance of `the method exists ≠ the method can be called`, after `analytics.explain`/`analytics.meta` (#3584), `meta.getView` (#3611), `i18n.getTranslations`/`getFieldLabels` (#3636) — and the first one **only a cross-repo guard could see**: the framework capstone (#3642) exempts the `/api/v1/cloud/` prefix wholesale because this repo does not serve those routes, so the finding came from cloud's control-plane ledger (#3655), the one place the mounted set and the SDK are both in scope.\n\n## Changes\n\n- `packages/client/src/index.ts` — method deleted, tombstone comment in its place (same treatment the 21 dead methods got in #3616).\n- `packages/client/src/client-url-conformance.test.ts` — capstone prose records the finding as resolved (comment only).\n- `docs/audits/2026-07-dispatcher-client-route-coverage.md` — §13 finding annotated **Removed in #3702**; a \"23 methods\" count replaced with \"every `projects.*` method\" so it stops drifting.\n- Changeset: `@objectstack/client` **minor**, breaking-marked, carrying the migration line (read starter packages through the `sys_package` view).\n\n## Companion change required in `cloud` — after this merges\n\n`projects-namespace-coverage.test.ts` there drives the real SDK and will go red on the next `.objectstack-sha` bump: it asserts `methods.length >= 23` (becomes 22) and drives `projects.listTemplates` from its `DRIVE` table. The cloud PR bumps the pin **and** prunes the row in one commit (it cannot be green against the old pin, by design — that lockstep is the guard working):\n\n- drop the `UNMOUNTED_CLIENT_METHODS` entry → the list becomes `[]`, and the exact-pin assertion holds it there\n- drop `'projects.listTemplates': []` from `DRIVE`, `23` → `22`\n\n## Verification\n\n- `pnpm vitest run src/` in `packages/client` — **13 files / 175 tests pass**, including the capstone `client-url-conformance.test.ts` (its `controlPlane.length > 0` bound still holds; the remaining `projects.*` methods reach the control plane).\n- `pnpm build` — 71/71 tasks green with dts on (`OS_SKIP_DTS` unset); `packages/client/dist/index.d.ts` regenerated with zero `listTemplates` hits, which is the type-check for a method-removal.\n\n## Out of scope, filed separately\n\nThe same dead concept has a second, still-advertised half: `os env create --template` and `projects.create({ template_id })`. Filed as #3731.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

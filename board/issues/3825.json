@@ -1,0 +1,32 @@
+{
+  "number": 3825,
+  "kind": "issue",
+  "title": "CI validates every PR gate on Node 20 (EOL 2026-04-30) while release/publish runs Node 22",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T08:24:23Z",
+  "updated_at": "2026-07-28T09:20:58Z",
+  "closed_at": "2026-07-28T09:20:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3825",
+  "body": "## Summary\n\nEvery PR gate in this repo validates on **Node 20**, which reached end-of-life on **2026-04-30** (~3 months ago). Meanwhile the release and publish workflows run **Node 22**. So code is verified on one runtime and shipped from another, and the verifying one no longer receives security patches.\n\n## The split is not random — it is exactly gates vs. release\n\n| Node | Workflows | Role |\n|---|---|---|\n| **20** (12 sites) | `ci.yml:93,195,322,436,494` · `lint.yml:33,122` · `coverage-nightly.yml:29` · `docs-drift-check.yml:32` · `pr-automation.yml:66` · `spec-liveness-check.yml:36` · `validate-deps.yml:35` | **All PR gates** — Build Core, Test Core, TypeScript Type Check, Dogfood, ESLint, spec liveness, dep validation |\n| **22** (6 sites) | `release.yml:30` · `publish-smoke.yml:123,188` · `scaffold-e2e.yml:44,219` · `showcase-smoke.yml:25` | **Release + end-to-end** |\n\n`release.yml` and `publish-smoke.yml` being on 22 is the tell: whatever we publish has only ever been gated on 20.\n\n## Node release schedule (from `nodejs/Release` `schedule.json`)\n\n| Version | End |\n|---|---|\n| v20 (Iron) | **2026-04-30** — passed |\n| v22 (Jod) | 2027-04-30 |\n| v24 (Krypton) | 2028-04-30 |\n\n## How this surfaced\n\nWhile adding a WASM-SQLite conformance test in #3812, an earlier revision imported `better-sqlite3` in a test. It killed the vitest worker on CI with a **process-level abort** — no JS error, so the suite reported `Test Files 22 passed (23)` while 17 cases silently did not run. Reproduced locally with `nvm exec 20`.\n\n`better-sqlite3@13` declares `engines: >=22`. Note it currently **does** load fine on Node 20 in CI (I checked a passing `Test Core` log: zero WASM step-down warnings, so the native binding is genuinely in use) — `engines` is a declaration, not enforcement. **This is a latent mismatch, not an active outage.** #3812 sidestepped it by using `sql.js` (pure WASM, no ABI), so nothing is blocked on this issue.\n\nBut `better-sqlite3@13` is unlikely to be the last dependency to require Node 22.\n\n## Recommendation: raise CI to 22, do not downgrade the dependency\n\nDowngrading `better-sqlite3` to v12 (`engines: 20.x || … || 26.x`) would work, but it treats the symptom and pins the repo to an EOL runtime — and the next dependency that requires 22 starts the same conversation.\n\nProposed:\n\n1. **Move the 12 Node-20 sites to `'22'`**, matching what release already uses. This also removes the gates-vs-release split, so PRs are verified on the runtime we publish from.\n2. Consider **24** instead if a longer window matters (EOL 2028-04-30 vs 2027-04-30). 22 is the lower-risk move since 6 workflows already run it.\n\nLow risk of surprises: Node 22 is already exercised by `scaffold-e2e`, `showcase-smoke` and `publish-smoke`. The change is mechanical; the verification is simply that the full gate set stays green on the bump PR.\n\n## Separate, related decision — do not bundle\n\nRoot `package.json` declares `engines: { node: '>=18.0.0' }` (uniform across all 49 packages). **Node 18 went EOL 2025-04-30**, so the published compatibility promise covers two EOL runtimes.\n\nThat is a promise to *users*, independent of what CI tests, and tightening it is a breaking change requiring a major. It should be decided on its own rather than folded into a CI bump.\n\n## Notes\n\n- `lint.yml:33` uses `\"20\"` (double quotes) and `showcase-smoke.yml:25` uses bare `22` — a naive `node-version: '\\d+'` grep misses both. Worth normalizing quoting while touching these.\n- No `.nvmrc` / `volta` pin exists, so local dev runtime is unconstrained; contributors on Node 24/25 will not reproduce Node 20 gate failures. Adding a pin is worth considering alongside the bump."
+}

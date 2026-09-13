@@ -1,0 +1,30 @@
+{
+  "number": 3675,
+  "kind": "issue",
+  "title": "service-i18n error responses are bare `{ error }`, not the declared `{ success: false, error: {...} }` envelope",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T13:57:31Z",
+  "updated_at": "2026-07-27T14:43:58Z",
+  "closed_at": "2026-07-27T14:43:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3675",
+  "body": "Found while ledgering the autonomously-mounted i18n surface for #3636. That PR fixed the **success** envelope; this is the other half of the same drift, left out deliberately so the fix stayed scoped to what `unwrapResponse` keys on.\n\n## The drift\n\nThe `i18n` route group declares the `response_envelope` middleware (`plugin-rest-api.zod.ts`), and `BaseResponseSchema` (`contract.zod.ts`) defines the shape as `{ success, error?, meta? }`. The dispatcher's `/i18n` domain emits exactly that via its `error()` helper (`http-dispatcher.ts`):\n\n```ts\nbody: { success: false, error: { message, code, details } }\n```\n\n`service-i18n` emits a bare object instead — five sites in `i18n-service-plugin.ts`:\n\n| Line | Body |\n|---|---|\n| 170 | `{ error: error.message }` (500) |\n| 179 | `{ error: 'Missing locale parameter' }` (400) |\n| 185 | `{ error: error.message }` (500) |\n| 195 | `{ error: 'Missing object or locale parameter' }` (400) |\n| 218 | `{ error: error.message }` (500) |\n\nSo the same SDK method gets two different error shapes depending on which provider mounted the route — the exact asymmetry #3636 fixed on the success path, still live on the error path. A caller that reads `body.error.message` works against the dispatcher and gets `undefined` against service-i18n; one that reads `body.error` as a string works the other way round.\n\n## Why it wasn't fixed in #3636\n\n`ObjectStackClient.unwrapResponse` keys on the `success` flag, so only the success bodies were breaking the SDK's declared return type. Widening to error bodies would have been scope creep into a route-audit PR, and unlike the success fix it is not purely additive: `error` changes from `string` to `object`, so anything reading it as a string breaks.\n\n## What needs deciding\n\n1. **Align to the contract** — `{ success: false, error: { message, code } }` at all five sites. Correct per Prime Directive #12 (fix the producer, not the consumer), and matches the dispatcher. Needs a sweep for readers that assume `error` is a string; `storage-routes.ts` uses the same bare shape, so if this is done it should probably be done for both services at once rather than leaving a new inconsistency.\n2. **Leave it** and document the bare shape as intentional for autonomously-mounted service routes — cheaper, but it means the declared `response_envelope` middleware is not what these routes actually do, which is a `declared ≠ enforced` gap of its own.\n\nRecommendation: option 1, covering `service-i18n` and `service-storage` together, with a check on `@object-ui` error-surfacing paths first — the storage upload/download errors are the ones a user is most likely to see rendered.\n\nNote this is not something the route ledgers can catch: they audit which routes exist and whether the SDK can address them, not what the bodies look like. Worth knowing as a limit of the #3563 audit family rather than an oversight in it."
+}

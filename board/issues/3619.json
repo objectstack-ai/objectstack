@@ -1,0 +1,35 @@
+{
+  "number": 3619,
+  "kind": "pull_request",
+  "title": "fix(analytics): make the read-scope auto-bridge order-independent + first real e2e RLS gate (#3618)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T09:55:06Z",
+  "updated_at": "2026-07-27T10:27:48Z",
+  "closed_at": "2026-07-27T10:27:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T10:27:45Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3619",
+  "body": "Closes #3618. 端到端补上 #3597 我明确说过**没做**的那一环。\n\n## 起因:门先红了,但不是为 #3597 红的\n\n给 #3597 写真实栈端到端门时,member 的聚合在**两条 strategy 上都**返回全表 5 行 —— 连 #3601 刚修好的 NativeSQL 路径也漏。前提检查是过的(`GET /data/rls_note` 只返回 member 自己的 2 条),说明 owner 策略在普通读路径上生效。\n\n日志给出了答案:\n\n```\nWARN [Analytics] No getReadScope configured and no \"security\" service with getReadFilter found\nINFO [Analytics] Auto-bridged executeAggregate → \"data\" service\nINFO [Analytics] Auto-bridged executeRawSql → \"data\" service\n```\n\n另外两个桥都接上了,**只有 read-scope 桥没接**。\n\n## 缺陷:代码和它自己的注释矛盾\n\n`plugin.ts:277-306` 注释写着 *\"resolved at call time so plugin-init order does not matter\"*,但:\n\n```ts\nif (trySecurity()) {                                        // ← 卡在 init 时刻的探测\n  getReadScope = (object, context) => trySecurity()?.getReadFilter(object, context);\n}\n```\n\n闭包是懒的,可**赋值本身**被 init 时刻的探测卡住了。security 晚注册 ⇒ `getReadScope` 恒 `undefined` ⇒ `callCtx` 在 `analytics-service.ts:332` 直接 `return this.baseCtx` ⇒ 两条 strategy 都不加 scope。\n\n两个兄弟桥都是对的,只有它不是 —— `executeRawSql` 的注释甚至明写 *\"**Always wire the bridge**... plugin-init order does not matter\"*。\n\n## 影响面(诚实划界)\n\n**生产 CLI 不受影响**:`os serve` 里 SecurityPlugin 在 `serve.ts:1658`,analytics 由 capability resolver 在其之后加载,顺序正确。\n\n受影响的是:\n\n1. **自建 kernel 的 embedder** —— 框架按库分发,谁把 analytics 排在 security 前面就静默失去 analytics RLS,唯一提示是一条措辞还偏小的 WARN。\n2. **仓库自己的 `bootStack`** —— analytics 在 `harness.ts:159`,security 在 `:232`。**整个 dogfood/verify 套件的 analytics RLS 一直是关的**,那里写的任何 analytics RLS 断言都是空过的。\n\n## 修复\n\n`getReadScope` 无条件接线,探测只用来决定日志措辞 —— 与两个兄弟桥一致。顺带改掉 WARN 的错误措辞(原文说只影响 \"raw-SQL path\" 的 \"joined objects\";实际没 provider 时所有路径所有对象都不加 scope)。\n\n## 新增的门\n\n`packages/qa/dogfood/test/analytics-rls.dogfood.test.ts` —— **第一个真正跑通 `getReadScope → security.getReadFilter` 自动桥的测试**。此前所有 analytics RLS 测试都是往手搓的 `AnalyticsService` 注入假 `getReadScope`,所以这条桥零覆盖,这也正是缺陷能活下来的原因。\n\n断言的是**真实非管理员经 HTTP 拿到的行**,不是某个 filter 对象:\n\n- ObjectQL 路径(带 `dateGranularity`,NativeSQL 会声明失败)→ member 只数到自己的 2 行\n- NativeSQL 路径(无 granularity)→ 同样 2 行\n- 两条路径互相一致\n- **地基断言**:系统上下文下全表确有 5 行 —— 排除\"member 数到 2 是因为表里本来就只有 2 行\"这种假绿\n\n用 owner-scoped(`created_by`)而非 org-scoped 是刻意的:没有企业版 `org-scoping` 服务时,wildcard `organization_id` 策略会被**剥掉**,门会静默常绿。owner 策略引用 `current_user.id`,单租户 boot 下依然生效。\n\n## 验证\n\n- 新门 4/4 绿;**回退本 PR 的 `plugin.ts` 改动 → 红 3 个**;回退 #3601 的 strategy 改动 → ObjectQL 那条红。\n- `@objectstack/service-analytics` **179 passed**。\n- **完整 dogfood 门:61 files / 355 tests 全绿**(本地全仓 build 后跑的)。\n- `tsc --noEmit` 未引入新错误(该包 2 个存量错误在我没碰的测试文件里)。\n\n## 待核\n\n`cloud` 是独立仓库,我没检查它的插件注册顺序。**若任何已发布 composition 用了不利顺序,#3618 应升级到 p1。**\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

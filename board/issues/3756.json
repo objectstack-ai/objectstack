@@ -1,0 +1,30 @@
+{
+  "number": 3756,
+  "kind": "issue",
+  "title": "/ready 探针看不见数据库：driver 运行期掉线，k8s 不摘流量也不重启，而每个请求 500",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T02:17:14Z",
+  "updated_at": "2026-07-28T03:00:21Z",
+  "closed_at": "2026-07-28T03:00:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3756",
+  "body": "## 一句话说明\n\n`/health` 恒返回 `ok`，`/ready` 只看 kernel state 是不是 `running` —— 两者都从不碰 data driver。数据库在**启动之后**掉线，探针照样绿，负载均衡不摘这个副本、编排器不重启它，而它服务的每个请求都 500。\n\n#3741 / #3751 修掉了这个问题的**启动期**版本（连不上就拒绝启动）。**运行期**版本还在。\n\n## 事实核实\n\n`packages/runtime/src/http-dispatcher.ts:283-296` —— `/health`：\n\n```ts\nthis.domainRegistry.register({\n  prefix: '/health', match: 'exact', methods: ['GET'],\n  handler: async () => ({\n    handled: true,\n    response: this.success({\n      status: 'ok',\n      timestamp: new Date().toISOString(),\n      version: '1.0.0',\n      uptime: typeof process !== 'undefined' ? process.uptime() : undefined,\n    }),\n  }),\n});\n```\n\n同文件 `:302-311` —— `/ready`：\n\n```ts\nhandler: async () => {\n  const state: string = typeof (this.kernel as any)?.getState === 'function'\n    ? (this.kernel as any).getState()\n    : 'running';\n  return state === 'running'\n    ? { handled: true, response: this.success({ status: 'ready', state }) }\n    : { handled: true, response: this.error('Service not ready', 503, { state }) };\n},\n```\n\n三点：\n\n1. **两个探针都没有任何数据层依赖。** `/ready` 的 `state === 'running'` 在 kernel bootstrap 完成的那一刻置位，此后除非进入 `stopping`/`stopped` 否则永不改变 —— 它回答的是\"kernel 生命周期到哪一步了\"，不是\"这个副本现在能不能服务请求\"。\n2. **driver 的 `checkHealth()` 早就存在且很便宜**（`driver-sql` 是 `SELECT 1`，`driver-mongodb` 是 `db.command({ping:1})`），但只被 `datasource-admin` 的 `testConnection` 消费（`datasource-admin-plugin.ts:466`）。没有任何探针路径调用它。\n3. **`ObjectQL` 引擎根本没有健康检查面。** `drivers` 是 `private drivers = new Map<...>()`（`engine.ts:326`），没有 getter，没有聚合的 health 方法 —— 就算探针想问也没地方问。\n\n`PluginHealthMonitor`（`packages/core/src/health-monitor.ts`）管的是 plugin，不覆盖 driver 连接。\n\n## 影响\n\n数据库在进程启动后不可用（重启、failover、网络策略变更、连接池耗尽、凭据轮换）：\n\n- `/health` 200、`/ready` 200 → k8s 认为副本健康就绪，LB 继续打流量进来，而每个请求 500。\n- 滚动发布场景下更糟：新副本只要 kernel 起来了就被判定 ready 并接管流量，即使它连不上数据库 —— 旧副本此时已经开始下线。\n- **没有 lazy reconnect**（见 #3741 的核实，以及本批的第三个 issue），所以这不是\"抖一下就恢复\"：一旦断开就是永久的，只能靠外部重启。而恰恰是\"外部重启\"这条路，被一个恒绿的 liveness 探针堵死了。\n\n这跟 #3741 是同一个病的另一面：**声称在报告健康，实际没检查那个唯一重要的依赖。**\n\n## 建议处置\n\n关键是**不要把两个探针混为一谈** —— 它们的正确答案是相反的：\n\n**`/health` 保持不依赖数据库，并把这一点写进注释。** liveness 探测失败 → 编排器**重启 pod**。重启一个 pod 不会修好宕掉的数据库，只会让所有副本在数据库抖动期间陷入重启风暴，同时销毁掉本可以正常服务的 in-flight 请求。liveness 只该回答\"这个进程还活着吗\"。**现状是对的，缺的是说明它为什么对**，否则下一个人会\"顺手\"把 DB 检查加进去。\n\n**`/ready` 检查 data driver。** readiness 探测失败 → **把副本摘出 LB 轮转**，不重启。一个连不上数据库的副本 100% 的请求都会失败，摘掉它正是 readiness 存在的意义。具体：\n\n1. 给 `ObjectQL` 加一个公开的聚合健康检查（`drivers` 目前是 private，外部无从问起）。\n2. `/ready` 特性探测地消费它 —— 没有 data engine / 没有该方法（lite kernel、edge）就退回现有行为，不能因此把这些运行时判成 not-ready。\n3. **必须带超时。** `checkHealth()` 本身吞异常返回 `false`，但在一个死掉的连接池上，knex 的 `SELECT 1` 会一直等到 `acquireConnectionTimeout`（默认 60s）。一个挂住的探针和一个撒谎的探针一样糟 —— 超时即判 not-ready。\n4. **必须有短 TTL 缓存。** k8s 默认几秒一次探测 × 每个副本，不能每次都打一个 DB 往返。1 秒左右的 memo 就够，且不会让判定明显滞后。\n\n## 关联\n\n- #3741 / #3751（同一问题的启动期版本；那边的 issue 正文里\"健康端点可能还是绿的\"说的就是这里）\n- Prime Directive #10：never advertise a capability the runtime doesn't deliver"
+}

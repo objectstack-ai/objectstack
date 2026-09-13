@@ -1,0 +1,34 @@
+{
+  "number": 3644,
+  "kind": "pull_request",
+  "title": "fix(ci): 恢复稳定的 \"Dogfood Regression Gate\" 必需检查名 — 全仓 PR 死锁修复",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T12:31:52Z",
+  "updated_at": "2026-07-27T12:45:06Z",
+  "closed_at": "2026-07-27T12:45:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T12:45:03Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3644",
+  "body": "## 事故：全仓所有开放 PR 卡死\n\n复现：任取一个开放 PR，`mergeable: MERGEABLE`、所有 check 绿、`mergeStateStatus: BLOCKED`，合并按钮不可用（实测 #3637/#3638/#3639/#3640/#3401 全中）。\n\n**根因**：#3622 把 dogfood job 分片成 2 路矩阵，check 名变为 `Dogfood Regression Gate (1/2)` / `(2/2)`；而分支保护要求的是**裸名** `Dogfood Regression Gate`——现在没有任何 job 产出这个名字，该必需项**永远无法满足**。#3622 自己的注释写了\"若分支保护要求该名，必须更新为两个分片名\"，但那步没有执行。\n\n## 修法：契约留在代码里，不动保护设置\n\n新增一个极小的聚合 job 承载稳定名 `Dogfood Regression Gate`，`needs: dogfood`，按矩阵聚合结果判定：\n\n- `success` / `skipped`（filter 判定未触及 core 路径时矩阵合法跳过）→ 通过；\n- 其余 → 失败并打印聚合结果。\n\n好处：**将来再改分片数不会二次死锁**（不必每次同步改保护设置），且无需管理员改仓库配置。\n\n## 合并说明\n\n本 PR 修的正是\"阻止一切合并\"的那个门，存在鸡生蛋问题——需以管理员权限合入一次，此后所有 PR（含本 PR 之后的）恢复正常合并。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

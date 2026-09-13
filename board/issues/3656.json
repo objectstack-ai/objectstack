@@ -1,0 +1,30 @@
+{
+  "number": 3656,
+  "kind": "issue",
+  "title": "Enumerate the `/auth/**` dynamic route family — 54 SDK methods rest on a prefix claim, not a route",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T13:10:51Z",
+  "updated_at": "2026-07-27T13:54:24Z",
+  "closed_at": "2026-07-27T13:54:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3656",
+  "body": "Quantified by the capstone URL-conformance guard (#3642), which reports and ratchets exactly this weakness rather than hiding it.\n\n## The number\n\nThe guard matches each SDK-built URL against the union of the four ledgers, and separately counts how many matched **only** via a `**` wildcard row. That count is **60 of ~196** matched calls — roughly a third of the SDK:\n\n| Wildcard row | Methods it covers | Namespaces |\n|---|---|---|\n| `* /auth/**` | 54 | `auth` (26), `organizations` (~19), `oauth` (6), a few others |\n| `* /ai/**` | 3 | `ai.nlq`, `ai.suggest`, `ai.insights` |\n| `* /mcp/**` | 0 reached by the SDK sweep | — |\n\n`/auth/**` alone is 54. Those rows are honest — the routes really are built at runtime (better-auth's own table via `plugin-auth`; `service-ai buildAIRoutes()` at plugin start) — but a `**` row asserts only that a **prefix family is claimed**, not that any specific URL in it resolves.\n\n## Why this matters concretely\n\n`auth.me` and `auth.refreshToken` both build `GET /api/v1/auth/get-session`. The guard confirms the prefix is claimed; it cannot confirm better-auth actually exposes `get-session` under that name. Rename it upstream — better-auth is a third-party dependency on its own release cadence — and 26 `auth.*` methods start 404-ing with every guard in the repo still green. That is precisely the #3584 / #3611 / #3636 failure mode, just with an external trigger instead of an internal one, and it is concentrated on the most security-relevant namespace in the SDK.\n\nThe exposure is real rather than theoretical: this repo already had to chase better-auth 1.7 column drift in #3624 / #3647.\n\n## What would close it\n\n`plugin-auth` mounts better-auth's handler; the route table is obtainable at runtime rather than by hand:\n\n1. **Enumerate at start and ledger it** — the same seam tranche 3 used for the autonomous service mounts: drive the plugin's registration against a capturing mock `IHttpServer`, diff the captured list against an `auth-route-ledger.ts` in `plugin-auth`. Whether better-auth exposes its table cleanly is the thing to check first; if it mounts one catch-all, this collapses to option 2.\n2. **Pin the subset the SDK actually calls** — ~30 concrete paths — and assert each resolves against a booted auth plugin. Narrower than a full ledger, but it covers exactly what would break, and an integration-style assertion catches an upstream rename that a static list cannot.\n\nOption 2 is likely the better value here, because the risk is upstream drift and only a live check detects that.\n\nDoing either lowers the ratchet in `client-url-conformance.test.ts` (currently `toBeLessThanOrEqual(60)`); the bound is written so it can only shrink.\n\nRefs: #3642 (the guard and the ratchet), #3563 / #3587 / #3636 (the three ledger tranches), #3624 / #3647 (prior better-auth drift)."
+}

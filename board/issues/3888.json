@@ -1,0 +1,35 @@
+{
+  "number": 3888,
+  "kind": "pull_request",
+  "title": "feat(client,spec): `ai.agents.*` and `ai.pendingActions.*` — the AI routes the SDK could not reach (#3718)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T14:31:55Z",
+  "updated_at": "2026-07-28T14:46:42Z",
+  "closed_at": "2026-07-28T14:46:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T14:46:39Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3888",
+  "body": "#3718 deleted three `client.ai.*` methods whose URLs no route had ever mounted, then expressed the surface that does exist. It expressed **one builder's worth** of it.\n\n`service-ai` mounts seven. Widening its ledger (objectstack-ai/cloud#903) counted **ten** routes the SDK cannot reach — nine of which had simply never been counted, because nothing enumerated the other six builders.\n\nThis closes the six with the strongest evidence: **`objectui` already ships product on them**, over URLs it builds by hand because there is nothing to call.\n\n| | before | after |\n|---|---|---|\n| `ai.*` methods | 10 | **17** |\n| AI routes the SDK can reach | 12 | **18** |\n| gap rows in cloud's ledger | 10 | **4** (after the follow-up) |\n\n## `ai.agents`\n\n`/ai/chat` talks to the environment's default agent; these talk to one you name.\n\n- **`agents.list()`** — the agents this *caller* may chat with. The route filters by the caller's permissions (ADR-0049), so an **empty list is a legitimate answer** for a seat-less user, not an error to retry.\n- **`agents.chat(name, request)`** — forces `stream: false`, for the same reason `ai.chat` does: the route streams by default, so leaving the flag to the caller makes the JSON path the one you have to remember.\n- **`agents.chatStream(name, request)`** — same route, streaming mode. One route, two methods, mirroring `ai.chat` / `ai.chatStream` rather than inventing a third shape for the same endpoint.\n\n## `ai.pendingActions`\n\nThe human-in-the-loop approval queue. When a tool call needs a human decision the turn parks an action instead of executing it, and an app embedding the chat has to render and resolve that queue.\n\n- **`list(options?)`** — `status`, `conversationId`, `limit` **only**. `AIService.listPendingActions` also accepts `objectName`, but the route never forwards it; typing it here would offer a filter that silently does nothing.\n- **`get(id)`**\n- **`approve(id)`** — approves **and executes**. Check the returned `status`: a tool that fails after approval comes back `{ status: 'failed', error }` on **HTTP 200**, because the approval succeeded even though the execution did not. Code reading only `res.ok` reports a failed write as a success.\n- **`reject(id, reason?)`** — executes nothing.\n\nReads and decisions are separately permissioned server-side (`ai:read` vs `ai:approve`), so a caller that can list the queue may still be refused on approve. One does not imply the other.\n\n## Typed from what the routes return\n\nNot from what a client might like them to — the failure #3718 exists to punish. Every shape here was read off the handler in `cloud`:\n\n- Pending actions are the **persisted row**, `snake_case` on the wire because that is what it is, not a style slip.\n- Agent rows **require** `capabilities` — that object is what tells a UI which affordances to render, so a row without it is not a row this route returns.\n\n## Why the capstone still holds\n\n`client-url-conformance.test.ts` exempts `/api/v1/ai/` by prefix and says the evidence lives on the other side of the repo boundary. It does — and it now reaches these: cloud's ledger drives every `ai.*` method against the tables its builders really return, and since #903 that means all seven.\n\nThe comment there still described the **one-builder** version, under which `buildAgentRoutes()` and `buildPendingActionRoutes()` were invisible. Updated, because a comment that outlives its fact is how an exemption quietly becomes a wave-through — which is the original #3718 bug, not a hypothetical.\n\n## Verification\n\n- **client 184/184**, **spec 6836/6836**.\n- `protocol.test.ts` extended with the new shapes **including the negative cases**: an agent row without `capabilities`, a non-enum `status` filter, `approve` yielding `\"rejected\"` (that is the other route).\n- **Mutation-checked**: pointing `ai.pendingActions.get` off the AI prefix fails the capstone *by name* — proving the new methods are genuinely in its sweep rather than silently absent, which is the way a guard like this fails.\n- Generated artifacts regenerated: `api-surface.json` (**+20 exports, 0 breaking**) and `json-schema.manifest.json`.\n\n## Follow-up, not in this PR\n\ncloud's ledger flips those six rows `gap → sdk` and drops the ratchets to 0 — it needs this merged and the pin bumped first, the same sequencing as #3840 → cloud#902. `objectui` then replaces its hand-built URLs with `client.ai.*`; that one can be scheduled independently.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WJX6GnuNix7HisBc92THMN\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WJX6GnuNix7HisBc92THMN)_"
+}

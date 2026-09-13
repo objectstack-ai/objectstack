@@ -1,0 +1,32 @@
+{
+  "number": 3702,
+  "kind": "issue",
+  "title": "`client.projects.listTemplates()` targets `/api/v1/cloud/templates`, which nothing mounts",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T15:08:12Z",
+  "updated_at": "2026-07-28T01:04:47Z",
+  "closed_at": "2026-07-28T01:04:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3702",
+  "body": "Found by the control-plane ledger built for #3655 — the first thing that has ever been able to see this, because it is the first guard that spans the framework↔cloud boundary.\n\n## The gap\n\n```ts\nlistTemplates: async () => {\n  const res = await this.fetch(`${this.baseUrl}/api/v1/cloud/templates`);\n  return this.unwrapResponse<{ templates: Array<{ id; label; description; category? }>; total: number }>(res);\n},\n```\n\n`/api/v1/cloud/templates` is mounted by **nothing**:\n\n- **cloud repo** — all 17 registrars in `cloud-artifact-api-plugin.ts` were enumerated by driving them against a capturing mock `IHttpServer`. 91 registrations, 90 distinct. None is `/cloud/templates`.\n- **framework** — the string occurs exactly once in this repo: line 1282 of `packages/client/src/index.ts`, the call itself. `http-dispatcher.ts` has a `handleCloud` **doc block** listing the `/cloud/*` routes, left behind when those routes were relocated to cloud; it does not list templates either, and the method it documents no longer exists.\n\n\"Templates\" are real as a **data** concept — `sys_package_templates`, a filtered `sys_package` view where `is_starter = true`, rendered as a console page — but there has never been an HTTP route that lists them.\n\nSo the method 404s. It is the sixth instance of the `the method exists ≠ the method can be called` class this audit family has turned up, after `analytics.explain` / `analytics.meta` (#3584), `meta.getView` (#3611), and `i18n.getTranslations` / `getFieldLabels` (#3636).\n\n## Why nothing caught it\n\nThe capstone (#3642) drives every SDK method and matches its URL against the union of the in-repo ledgers, but exempts the `/api/v1/cloud/` prefix wholesale — the framework does not serve those routes and cannot vouch for them (#3655). `listTemplates` sat inside that exemption. The cloud-side ledger is what sees it, because it is the only place the mounted route set and the SDK are both in scope.\n\n## Options\n\n1. **Trim the method.** Nothing in either repo calls it, and the console reads starter packages through the `sys_package` view rather than an API. Smallest correct change; the blast radius is any external caller, who is 404-ing today regardless.\n2. **Mount the route in cloud.** Reasonable if templates are meant to be an API concept — but it needs a decision about what a \"template\" is on the wire. The client's declared shape (`{ id, label, description, category? }`) does not match `sys_package`'s columns, so it is not a straight passthrough, and picking the mapping is a product/spec call, not an implementation detail.\n3. Leave it and document the method as unimplemented — the weakest option, since the type signature promises a resolved value.\n\nRecommendation: **option 1**. Option 2 is defensible if starter templates are on the roadmap as an API, but shipping a route to satisfy a method nobody calls is the wrong order — add the method back with the route when there is a consumer.\n\n## Guard already in place\n\nWhichever way this goes, the cloud-side ledger already pins it: `UNMOUNTED_CLIENT_METHODS` asserts the method still matches **no** mounted route, so mounting the route fails the test and forces an `sdk` ledger row; and the list is asserted to equal exactly `['projects.listTemplates']`, so a second dead method cannot hide behind this one.\n\nRefs: objectstack-ai/cloud (control-plane ledger, #3655), #3642 (the capstone whose exemption hid this), #3563 (the audit family)."
+}

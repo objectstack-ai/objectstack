@@ -1,0 +1,32 @@
+{
+  "number": 3642,
+  "kind": "issue",
+  "title": "Route audit capstone: a strict reverse guard — every client URL must match a route some surface mounts",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T12:25:36Z",
+  "updated_at": "2026-07-27T13:26:35Z",
+  "closed_at": "2026-07-27T13:26:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3642",
+  "body": "The capstone #3636 anticipated (\"a client method whose target route exists on **no** surface can be flagged mechanically — file that as the capstone if it doesn't fall out naturally\"). It did not fall out naturally, and tranche 3 showed why it matters.\n\n## Where the audit now stands\n\nAll three server surfaces the SDK reaches are ledgered and CI-guarded:\n\n| Surface | Ledger | Tranche |\n|---|---|---|\n| Dispatcher | `packages/runtime/src/route-ledger.ts` | #3563 |\n| REST server | `packages/rest/src/rest-route-ledger.ts` | #3587 |\n| Autonomous service mounts | `service-storage/src/storage-route-ledger.ts`, `service-i18n/src/i18n-route-ledger.ts` | #3636 |\n\nEach guard runs **server → client**: enumerate what the surface mounts, demand a reviewed disposition, and for `sdk` rows demand the named client method exists.\n\n## The hole all three share\n\n*The method exists* is not *the method can be called.* No guard compares the URL the client **builds** against the patterns any server **mounts**, so a client method can name a real function, carry a green ledger row, and still 404 on every surface.\n\nThat is not hypothetical — it is the recurring bug this audit keeps rediscovering:\n\n- `analytics.explain` called `/explain`; nothing served it (#3584)\n- `analytics.meta` called `/meta/:cube`; no server mounted that shape (#3584)\n- `meta.getView` sent `?type=`; REST mounts only `/ui/view/:object/:type` (#3611)\n- `i18n.getTranslations` sent `/translations?locale=xx` and `i18n.getFieldLabels` sent `/labels/:object?locale=xx`; **every** surface mounts only the path form (#3636)\n\nFour instances, four tranches, one class. The i18n pair is the sharpest: `route-ledger.ts` has carried `sdk` rows for those two routes since tranche 1, and both methods were wire-level 404s the whole time. The dispatcher's own domain body happily accepts the query dialect — but nothing routes a bare `/translations` to that body, so the tolerance was unreachable.\n\n## What the guard should do\n\nUnion the three ledgers into one set of mounted patterns, then assert every URL the SDK constructs matches one of them.\n\nGetting the client's URLs mechanically is the real design question. Options:\n\n1. **Drive the client with a recording `fetch`.** A fixture calls every namespace method with dummy args and captures the URL; match each against the union, `:param` segments as wildcards. Pro: tests the real code path, catches dialect bugs exactly as they ship. Con: needs a call fixture per method, and the fixture list itself needs a completeness guard (every method on every namespace is invoked) or coverage rots silently — the same failure mode this whole audit is about.\n2. **Declare the target route per client method** and assert both ends. Cheap and total, but it is an assertion *about* the code rather than *of* it: a method could still be edited away from its declared route.\n3. **Static extraction** of template literals in `index.ts`. No fixtures, but brittle against the client's `getRoute()` indirection and dynamic segments.\n\nOption 1 is the honest one; option 2 is a reasonable stepping stone if the fixture cost bites. Whichever lands, the completeness check (\"no client method escaped the sweep\") is the part that must not be skipped.\n\nNote the union must stay a *union* — a route mounted by only one surface is still legitimately reachable, so the guard cannot demand a pattern appear in all three ledgers.\n\n## Acceptance\n\n- Every URL an `ObjectStackClient` method builds matches a pattern in some surface's ledger.\n- Every client method is provably included in the sweep.\n- Wired into CI at zero, like the tranche-1/2/3 ratchets.\n\nRefs: #3563 (tranche 1), #3587 (tranche 2), #3636 (tranche 3), #3584 / #3611 (prior instances of the class), `docs/audits/2026-07-dispatcher-client-route-coverage.md`."
+}

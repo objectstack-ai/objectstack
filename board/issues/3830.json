@@ -1,0 +1,36 @@
+{
+  "number": 3830,
+  "kind": "pull_request",
+  "title": "ci: validate on the runtime we publish from — pin every workflow to Node 22 (#3825)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T08:49:30Z",
+  "updated_at": "2026-07-28T09:20:58Z",
+  "closed_at": "2026-07-28T09:20:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T09:20:56Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3830",
+  "body": "Closes #3825.\n\n## The split\n\nCI ran two Node versions at once, and nobody had decided that. All 12 PR gates were on **Node 20** — EOL since **2026-04-30** — while `release.yml`, `publish-smoke.yml`, `scaffold-e2e.yml` and `showcase-smoke.yml` were on **22**. Code was verified on one runtime and shipped from another, and the runtime guarding every merge no longer received security patches.\n\nIt was drift, not policy. `release.yml` carried the receipt in a comment — *\"22 (not 20 like the other workflows)\"* — because a downstream clone pins `engines.node >=22` and pnpm aborted on 20. One workflow got bumped to clear one error; the other twelve stayed behind.\n\nNode 20 turned out to be used for **nothing else**: every shipped Docker image (`docker/Dockerfile`, the `blank` template, the self-hosting docs) is already `node:22-slim`. Node 20 existed solely in the gates.\n\n## This is not latent — Node 20 currently loses 380 tests, silently\n\nThe issue described this as \"a latent mismatch, not an active outage\". On `darwin-arm64` it is active today. `@objectstack/driver-sql` dev-depends on `better-sqlite3@13` (`engines: >=22`):\n\n```\nnode v20.20.2  exit=139  output=<EMPTY — silent abort>\nnode v22.22.3  exit=0    output=OK v13.0.1\n```\n\n`139` is SIGSEGV, with no JS error and no output at all.\n\n**This is not a stale-ABI artifact.** v13 does not compile locally — it ships prebuilds for every platform (`prebuilds/{darwin-arm64,linux-x64,linuxmusl-*,win32-*}.node`), so the same binary loads regardless of which Node ran the install. Confirmed the hard way: a **fresh `npm install` in a clean directory, performed under Node 20 and run under Node 20**, still segfaults with `exit=139`. npm emits only an `EBADENGINE` *warning* and installs anyway — `engines` is a declaration, not enforcement, exactly as the issue says.\n\nIts effect on the suite is the #3812 pattern at scale:\n\n```\ndriver-sql on Node 20:  Test Files  1 passed (40)\n                              Tests  21 passed (401)\n```\n\n**380 of 401 tests never ran**, and the summary still leads with \"passed\". Across the whole suite:\n\n| | test files | tests declared | tests actually run |\n|---|---|---|---|\n| **Node 22** | 963 | 16,678 | **16,678** ✅ |\n| **Node 20** | 537 (bailed early) | 10,422 | **10,042** — 380 missing |\n\nCI runs `linux-x64`, whose prebuild evidently does load (Test Core is green today), so this is a **contributor-facing** hole rather than proof CI is segfaulting. It is the same mechanism either way, and Node 22 closes it.\n\n## Changes\n\n- **All 18 `setup-node` steps → Node 22.** Quoting normalised (`lint.yml` used `\"20\"`, `showcase-smoke.yml` a bare `22`, so a `node-version: '\\d+'` grep missed both — the audit method was itself unreliable).\n- **`.nvmrc` (new) is the single source of truth.** There was no local pin at all, so a contributor on Node 24 could not reproduce a Node 20 gate failure.\n- **`check:node-version` (new)** holds every workflow to `.nvmrc`. A version pin is otherwise 18 independent string literals, which is why this drifted unseen. It lives in `lint.yml`'s ESLint job, which carries **no paths filter**, so it cannot go dormant.\n- `release.yml`'s comment rewritten — it contrasted against \"the other workflows\" being 20, which is now false. The load-bearing fact (hotcrm needs >=22) is kept.\n\nBumping Node is now a one-line `.nvmrc` edit plus whatever the guard reports.\n\n### Why the workflows still hold literals rather than `node-version-file: .nvmrc`\n\nThat was the first instinct, and it breaks one job: `setup-node` reads the file from the workspace, so it needs a checkout, and `scaffold-e2e.yml`'s `registry-canary` **deliberately has none** — it simulates a user running `npx create-objectstack@latest` on a clean machine. So the shape is *single source + guard* rather than *single source + runtime read*.\n\n### The guard fails three ways, each verified red before trusting it green\n\n| Drift | Message |\n|---|---|\n| A workflow left behind | `lint.yml:33 — pins Node 20, but .nvmrc says 22` |\n| `setup-node` pinning nothing | `showcase-smoke.yml:23 — declares no Node version — inherits the runner default` |\n| Version from `${{ }}` | `resolves its version from an expression … that this guard cannot evaluate` |\n\nThe third fails closed rather than waving through a matrix that could reintroduce the split deliberately.\n\n## Verification — every gate, forced uncached on Node 22\n\nTurbo's cache key does not include the Node version, so a cached run proves nothing here; the first `pnpm build` came back `FULL TURBO` / `71 cached` — zero lines actually compiled — and was discarded. All re-run with `--force`:\n\n| Gate | Result |\n|---|---|\n| Build Core (`pnpm build`, real DTS type gate) | ✅ 71/71, **0 cached** |\n| Test Core | ✅ 129/129, 963 files, **16,678/16,678 tests**, 0 cached |\n| Dogfood | ✅ 61/61, 381 passed, 0 cached |\n| ESLint + all 7 `lint`-job guards | ✅ |\n| `validate-deps` scripts | ✅ |\n| `check:node-version` | ✅ + 3 red modes proven |\n\nBecause this PR touches `ci.yml` and `package.json`, the `core` paths filter matches — so the bump PR runs the full gate set on the new runtime itself.\n\n## Deliberately not included\n\n`engines.node` stays `>=18.0.0` across all 49 packages. That is a promise to *users* about what ships, independent of what CI validates on, and tightening it is a breaking change — left for its own decision, as the issue asked."
+}

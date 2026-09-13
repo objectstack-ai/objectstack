@@ -1,0 +1,35 @@
+{
+  "number": 4005,
+  "kind": "pull_request",
+  "title": "fix(actions): mount the object-less /actions//:action shape; bump objectui to e651c936870e",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T02:30:22Z",
+  "updated_at": "2026-07-30T02:40:05Z",
+  "closed_at": "2026-07-30T02:40:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T02:40:02Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/4005",
+  "body": "Closes the #3913/#3962 arc at the HTTP surface, and ships the console halves. Both parts came out of **dogfooding the running showcase app** — the suite was green throughout.\n\n## 1. The object-less action shape was unreachable over HTTP\n\n#3913 taught `handleActionsRequest` to route a single-segment path — `POST /api/v1/actions//:action` — at the canonical `'global'` key. That code was correct and unit-tested, and **nothing ever delivered the path to it**:\n\n- the dispatcher mounts its routes explicitly (no catch-all);\n- `:object` does not match an empty path segment;\n- no registration covered the `//` form.\n\nSo over real HTTP the request fell through to Hono's `notFound` and answered a bare `{\"error\":\"Not found\"}` with the actions domain never running — **the exact URL #3913 was filed against still did not dispatch.**\n\nThe tests could not see it because they call `dispatcher.handleActions()` / `dispatcher.dispatch()` directly, bypassing the route table. That is precisely the class of bug `dispatcher-plugin.routes.test.ts` was created for, in its own words:\n\n> A `dispatch()` branch with no matching `server.<verb>()` registration is unreachable over HTTP and 404s before reaching the handler — which is exactly how `/mcp` and `/keys` shipped broken (unit tests called the handlers directly, hiding it).\n\nRegistered the route and extended that guard to the action shapes. Hono matches the literal `//` and does not shadow `:object/:action` — verified against the router directly before relying on it.\n\n**Before → after** (same server, same call):\n\n```\nPOST /api/v1/actions//definitely_not_registered\nbefore: 404 {\"error\":\"Not found\"}                       ← domain never ran\nafter:  404 {\"success\":false,\"error\":{\"code\":\"RESOURCE_NOT_FOUND\",\n             \"message\":\"Action '…' on 'global' has no declaration …\",\"httpStatus\":404}}\n```\n\nByte-identical to `POST /api/v1/actions/global/definitely_not_registered`. The two-segment route still names its own object (`showcase_task`), unshadowed.\n\n## 2. objectui pin `a136322f8723` → `e651c936870e`\n\nThe vendored console was missing the console-side halves of this work:\n\n- objectui#2971 — read #3962's single-wrapped `/actions` responses; PeoplePicker render-phase cursor fix\n- objectui#2972 — declared-response-envelope unwrap on the datasource page and the api-action runner\n\n`pnpm objectui:build` run at the new pin; `check:console-sha` green.\n\n## Browser verification (the real console, at the new pin)\n\n| Focus | Result |\n|:---|:---|\n| Validation-failing action anchors to the field | **400** `error.code: VALIDATION_FAILED`, `error.details.fields[] = [{field:'issued_on', code:'required'}]` |\n| A failing action must not show a green toast | **red** `data-type=\"error\"` toast \"ValidationError: issued_on is required\"; record stayed `Draft` |\n| Success is a single wrap | **200** `{success:true, data:{ok:true, id:'…'}}` — `data` IS the handler's return value |\n| Success path end-to-end | green toast, record flipped to `Sent`, 会签 approval opened (`In approval · editable`) |\n| Deliberate body `throw` | **400** with the clean business message, no sandbox debug wrapper |\n| Object-less routing | `/actions/global/:action` and `/actions//:action` now identical |\n\nScreenshots of the red-toast/`Draft` and green-toast/`Sent` states were captured and inspected.\n\n**`resultDialog` / `redirectUrl` risk — checked and closed.** I flagged in objectui#2967 that in-the-wild `resultDialog` paths might have adapted to the old envelope depth. They have not: **every** `resultDialog` in this repo sits on a `type: 'api'` action, which goes through the console's `apiHandler` (single-level unwrap of `/api/…`) — a separate code path from `serverActionHandler`, untouched by the `/actions` depth change. `redirectUrl` has zero producers in-repo, consistent with it never having worked before objectui#2967 fixed the read depth.\n\n**One gap worth noting, not fixed here:** the showcase is the \"one specimen of everything\" app and has **no object-less (`global`) action**, so that dispatch path has no live specimen to exercise — only routing could be verified end-to-end. Worth a showcase addition in its own PR.\n\n## Testing\n\n- runtime **889** passed (65 files, +1 new case); build green; eslint 0 errors.\n- `check:console-sha` in sync at `e651c936870e`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_011AvZj6cLX7APd7roh2eK4F\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_011AvZj6cLX7APd7roh2eK4F)_"
+}

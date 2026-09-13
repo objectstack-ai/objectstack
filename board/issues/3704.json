@@ -1,0 +1,35 @@
+{
+  "number": 3704,
+  "kind": "pull_request",
+  "title": "feat(spec)!: remove SkillSchema.permissions — it never gated anything (#3686)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T15:10:05Z",
+  "updated_at": "2026-07-27T15:35:22Z",
+  "closed_at": "2026-07-27T15:35:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T15:35:20Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3704",
+  "body": "Owner decision on the enforce-or-prune call filed in #3686: **prune**. Companion objectui PR: objectstack-ai/objectui#chore/drop-skill-permissions-preview.\n\n## Why prune rather than enforce\n\n`skill.permissions` was declared in the spec, surfaced in the Studio authoring form under a section labelled **\"Access — Required permissions to use this skill\"**, and echoed by the objectui preview as a *\"N required perms\"* pill — while **no runtime read it**. The cloud `SkillRegistry` selects skills by `active` / `triggerConditions` / `tools` only.\n\nThat combination is the worst case for this platform's audience: an author (or an AI writing metadata) sees a security-shaped field with a security-shaped label and reasonably concludes the skill is gated. It is not. Same disposition as agent `visibility` (#1901) and the `PolicySchema` tree (#2387) — *a security-shaped field that lies is dropped, not carried marked.*\n\nSkill-level gating was a documented intent (cloud has a comment \"Layer permissions via `Skill.permissions` independent of the agent's permissions\"), never an implementation. If it is wanted later it returns as a designed, enforced feature — the schema shape is trivial to re-add.\n\n## Removed\n\n| Surface | What |\n|---|---|\n| spec | the `permissions` property on `SkillSchema` |\n| spec form | the entire `Access` section (it existed **only** for this field) |\n| i18n | the generated `access` section + `permissions` field keys, removed **surgically** — a full `extract` rerun regenerates every existing block against the current schema and drags in unrelated drift |\n| liveness | the ledger entry + the count-table row (`skill 9/–/1` → `9/–/–`) |\n| skills doc | the prop-table row (replaced by a migration note) **and** the `permissions` line inside the `os:check` TypeScript block — that block compiles against the spec, so leaving it would fail `check:skill-examples` |\n| objectui | the preview's \"Required Permissions\" panel + header pill (companion PR) |\n\n## Migration — gate where it is actually enforced\n\n- **Agent level**: `access` / `permissions` on `defineAgent` **are** enforced at the chat route (403 when the caller lacks any, #1884). Bind a restricted skill only to a restricted agent.\n- **Action level**: gate the underlying actions the skill's tools invoke via permission sets (ADR-0066).\n\n`SkillSchema` is non-strict, so an existing `permissions:` key is silently stripped on parse — no boot break. A new regression test pins that behaviour.\n\n## Verification\n\n6688 spec tests · `check:liveness` / `check:docs` / `check:api-surface` / `check:skill-docs` / `check:skill-examples` all green.\n\n## Not in this PR\n\n`agent.knowledge` (the other half of #3686) is **paused** — not a priority this phase. It keeps the honest `dead` + `authorWarn` state set in #3685, so authors get a warning rather than a false promise.\n\nRefs #3686, #1878, #3685.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

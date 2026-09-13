@@ -1,0 +1,35 @@
+{
+  "number": 3775,
+  "kind": "pull_request",
+  "title": "fix(driver-sql): SQLite 上 `Field.datetime` 按存储的实例分桶,不再整体塌进一个 `(null)` 桶 (#3773)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T04:06:23Z",
+  "updated_at": "2026-07-28T04:12:37Z",
+  "closed_at": "2026-07-28T04:12:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T04:12:35Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3775",
+  "body": "Closes #3773. 续 #3650 / #3766 —— 那个 PR 修掉的是「窗口被丢弃」,把这条分桶 bug 原样 pin 成了 KNOWN GAP 断言;本 PR 是那条断言的兑现。\n\n## 验收门\n\n`sql-driver-aggregate-datetime-window.test.ts` 里那条断言,从坏值翻成真值:\n\n```diff\n-    expect(byMonth).toEqual({ null: 330 });\n+    expect(byMonth).toEqual({ '2026-01': 300, '2026-02': 30 });\n```\n\n**先红后绿**:翻完断言、未动实现前跑,`expected { null: 330 } to deeply equal { '2026-01': 300, '2026-02': 30 }`。\n\n## 根因\n\nbetter-sqlite3 把 `Field.datetime` 存成 INTEGER epoch **毫秒**,而 `buildDateBucketExpr` 对 SQLite 产出的是裸的 `strftime('%Y-%m', col)`。**SQLite 把裸 INTEGER 当 Julian day number 解释**,epoch-ms 远超合法范围 → `strftime` 对每一行都返回 NULL。\n\n没有任何一层察觉:SQLite 声明了 `queryDateGranularity.month`,所以 `engine.aggregate` 必然把分桶下推给 driver;它的内存兜底只在「granularity 未被声明」或「非 UTC 时区」时才接管,两条都不成立。\n\n修法是让 SQLite 表达式感知存储形态,**和 #2034 为同一个根因加的 filter 比较值强转共用同一个 `isEpochStoredDatetime` 谓词** —— 窗口和分桶对存储形态各执一词,正是「窗口筛对了、分桶全塌成 NULL」的由来。\n\n## 两个承重细节(各自有一条没它就红的测试)\n\n**1. 按每行实际存储的类型分派,而不是只看声明类型。**\nSQLite 的 `Field.datetime` 列是真·混合形态:`formatInput` 不碰 datetime 值,所以 JS `Date` 落成 INTEGER,而 ISO 字符串(含未解析的 `defaultValue: 'NOW()'`)落成 TEXT —— 这正是读路径 `normalizeSqliteDatetimeOutput` 已经在修的那套混合。对 TEXT 除以 1000 会把它强转成打头的年份,`'2026-01-10T…'/1000.0` = epoch 后 2.026 秒,把活数据归档到 1970 —— **比它替换掉的那个 NULL 更糟**。所以 `CASE typeof(...)` 是承重的,不是保险。\n\n**2. `/1000.0` 而非 `/1000`。**\n整数除法向零截断,`-1/1000 = 0`,一个 1969-12-31T23:59:59.999Z 的实例会浮到 1970-01-01 —— 日、季、年三个粒度全错,且只在负 epoch 上错。改成整数除法跑,9 条测试红。\n\n选 julian day 归一(而不是每处都写 `strftime(fmt, x/1000.0, 'unixepoch')`)是为了得到**一个**可复用标量,能原样塞进任何格式串,包括要引用列两次的 quarter 表达式。40000 天的午夜往返扫过零漂移。\n\n## parity:两条分桶路径必须给出同一个标签\n\n`bucketDateValue`(objectql 内存兜底)对数值 epoch-ms 走 `new Date(String(1767225600000))` → Invalid Date → `'(null)'`。只修 driver 不修它,等于把「两条路一起错」换成「两条路各错各的」—— `sql-driver-date-bucket.test.ts` 顶上那句 \"⚠️ Keep in sync\" 就是这条契约,它在 driver-sql 和 driver-sqlite-wasm 各有一份手抄件,三处一起改。\n\n## 覆盖\n\n新增 `sql-driver-date-bucket-storage.test.ts`,走 `driver.initObjects([{fields: {x: {type: 'datetime'}}}])` —— 现有 date-bucket 套件看不见这个 bug,正是因为它用 `knex.schema.createTable` + `t.string('ts')` 建表,存的全是 ISO TEXT,恰好是 `strftime` 能直接解析的那一半。\n\n- **day / month / quarter / year × datetime / date = 8 组**,期望值由同一份 `bucketDateValue` 参考实现算出(不是手打字符串),所以断的是 parity 本身;金额取 2 的幂,某个桶的和直接指认是哪几行落进去的。\n- 混合形态列:同一列里 INTEGER + ISO TEXT + zone-naive TEXT + NULL 四行各自归位。\n- 前置断言 `typeof(closed_at) ∈ {integer, real}` / `typeof(closed_on) = text` —— 万一 better-sqlite3 哪天改了绑定方式,这条先红并解释后面所有红。\n- 1969-12-31 那行钉住 `/1000.0`。\n- `sql-driver-temporal-dialect.test.ts` 补方言门:pg 保持 `(??)::timestamptz`、mysql 保持 `convert_tz`,都不含 `unixepoch`/`/1000`;外加一条「`??` 占位符数 == bindings 数」的结构门(quarter 表达式引用列 2 次,epoch 版 6 次,错位就是 knex 静默把 binding 塞进错误的槽)。\n- `driver-sqlite-wasm` 继承同一个 `buildDateBucketExpr`,所以同病同愈,单独钉一条。\n\n## Postgres / MySQL\n\n不受影响,并已用测试钉住:`defineColumn` 把 `Field.datetime` 映射成原生 timestamp(`table.timestamp`),这也正是 `temporalFilterValue` 在这两个方言上不做 epoch 强转的原因。\n\n**未实测**(本机无 PG/MySQL 实例,以下是从列映射推的):真碰上 bigint 列(external 表拿 `datetime` 声明一个整数列),PG 会直接拒掉 `bigint::timestamptz` 强转报错 —— 是 SQLite 没给的那种响亮失败;MySQL 的 `convert_tz` 在这种情况下会返回 NULL,但托管表上不会出现这种列。\n\n## 一处**未修**的既有分歧\n\nSQL 路径把 NULL 分桶产出 SQL NULL,内存路径产出字符串 `'(null)'`。这条在 TEXT 列上同样成立,与本 PR 无关、也未被本 PR 改变,在测试里就地标注,没有顺手扩大范围。\n\n## 测试\n\n`driver-sql` 355 ✅ / `objectql` 1128 ✅ / `driver-sqlite-wasm` 126 ✅ / `service-analytics` 267 ✅;`turbo build`(带 dts,非 `OS_SKIP_DTS`)三包通过;eslint 干净。\n"
+}

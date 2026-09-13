@@ -1,0 +1,32 @@
+{
+  "number": 3833,
+  "kind": "issue",
+  "title": "Dispatcher's `getFieldLabels` fallback still scans the retired flat `o.` prefix — always returns `{}`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T08:56:36Z",
+  "updated_at": "2026-07-28T11:37:44Z",
+  "closed_at": "2026-07-28T11:37:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3833",
+  "body": "Found while verifying #3676 (PR #3832). Filing rather than widening that PR — different defect, different severity.\n\n## The gap\n\n#3778 established that there is **one** translation shape: the nested `objects.<object>.fields.<field>.label`. The flat `o.`-dotted dialect was retired because no producer ever wrote it. Commit 4cca74c fixed the `getFieldLabels` fallback in `service-i18n` accordingly, and left a comment saying so:\n\n```ts\n// Fallback: read field labels out of the locale's translation data.\n// That data is NESTED (`objects.<obj>.fields.<field>.label`) — the\n// flat dotted `o.<obj>.fields.<field>` keys this used to scan were a\n// third translation dialect that no producer ever wrote, so the\n// fallback always returned `{}` (#3778).\nconst data = i18n.getTranslations(locale) as TranslationData | undefined;\nconst fields = data?.objects?.[objectName]?.fields ?? {};\n```\n\n**That fix did not reach the dispatcher's copy.** `packages/runtime/src/domains/i18n.ts:92-101` still does the pre-#3778 thing:\n\n```ts\n// Fallback: derive field labels from full translation bundle\nconst translations = i18nService.getTranslations(locale);\nconst prefix = `o.${objectName}.fields.`;\nconst labels: Record<string, string> = {};\nfor (const [key, value] of Object.entries(translations)) {\n    if (key.startsWith(prefix)) {\n        labels[key.substring(prefix.length)] = value as string;\n    }\n}\n```\n\nBy the same reasoning 4cca74c applied to the other copy, this loop can never match: the bundle's top-level keys are the `TranslationData` groups (`objects`, `apps`, `messages`, …), never `o.<object>.fields.<field>`. So `GET /i18n/labels/:object/:locale` served through the dispatcher returns `{ labels: {} }` whenever the i18n provider does not implement the optional `getFieldLabels`.\n\n## Reachability\n\nThe fallback is live, not dead code — `getFieldLabels` is optional on `II18nService`, and the branch guards on exactly that:\n\n```ts\nif (typeof i18nService.getFieldLabels === 'function') { … }\n// otherwise ↓ the broken scan\n```\n\nAny provider without the optional method takes it. Worth confirming which shipped providers actually land here (`memory-i18n` is the obvious candidate) — that determines whether this is user-visible today or only latent for third-party providers.\n\n## Severity note\n\nThis is a nastier class than #3676, which prompted the check. There, a declared filter was ignored and the caller got the full bundle — a **correct superset**, just not the optimization advertised. Here the caller gets a **silently empty result** that is indistinguishable from \"this object has no translated labels\". Nothing errors, nothing warns.\n\n## Fix\n\nPort 4cca74c's fallback to `packages/runtime/src/domains/i18n.ts` — read `data?.objects?.[objectName]?.fields` and pull `.label` off each entry, matching service-i18n exactly.\n\nWorth considering as part of the fix: these two fallbacks are the same logic maintained in two places, which is how this one got missed. Lifting it into a shared helper both surfaces call would keep the next shape change from having to be made twice."
+}

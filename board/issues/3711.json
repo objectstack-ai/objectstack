@@ -1,0 +1,34 @@
+{
+  "number": 3711,
+  "kind": "pull_request",
+  "title": "docs(liveness): re-verify the last ten preview-only live claims — 8 of 10 were wrong (#3686)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T15:30:49Z",
+  "updated_at": "2026-07-27T15:58:03Z",
+  "closed_at": "2026-07-27T15:58:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T15:58:01Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3711",
+  "body": "Closes the preview-claim sweep opened in #3685. Ledger-only; releases nothing.\n\n## Final tally: the preview-renderer standard was wrong 77% of the time\n\nOf the 13 properties a 2026-06 pass marked `live` citing only a `metadata-admin/previews/*Preview.tsx` panel, **10 were wrong**.\n\n### Corrected → `dead` + `authorWarn`\n\n| Property | Why it isn't live |\n|---|---|\n| `action.shortcut` | registered into `ActionEngine.shortcuts[]`, but `getShortcuts()`/`handleShortcut()` have **no non-test caller** and **no keydown listener** feeds them; objectui's real keyboard stack never touches ActionEngine |\n| `action.bulkEnabled` | same shape — `getBulkActions()`/`executeBulk()` uncalled. The multi-select toolbar is driven by the **list view's** `bulkActions`/`bulkActionDefs` |\n| `flow.active` | deprecated no-op. Sharper than inert: spec default is `false` while an unset flow **runs**, so the key reads as if it disabled the flow |\n| `skill.triggerPhrases` | a runtime path reads it — but only to hand it back to API clients. **Phrases are never matched against user messages**; activation is `triggerConditions` + the agent's `skills[]` + explicit `/skill-name` pinning |\n| `tool.category` / `active` / `builtIn` | not part of `AIToolDefinition`; tools reach the LLM as name/description/parameters only. `tool.active` is the sharp one — `agent.active` and `skill.active` **are** enforced, so the inconsistency is invisible to an author |\n| `tool.requiresConfirmation` | **safety-shaped and unenforced on every path** — see below |\n\n### Kept `live`, evidence corrected to the real reader\n\n- **`action.execute`** — `ActionRunner.ts:704` + the spec's `execute → target` transform. ⚠️ Records a **live divergence**: the transform prefers `target` when both are set, `ActionRunner` does `execute || target`. An action declaring both runs different code client- vs server-side.\n- **`flow.status`** — `engine.ts:1374-1382` gates binding *and* execution. The file-level `_note` claiming *\"status/active gate nothing\"* was **true when written** and falsified a month later by `497bda853`; rewritten.\n\n## ⚠️ `tool.requiresConfirmation` deserves its own note\n\nNothing pauses for confirmation on this flag — not the LLM tool set (`vercel-adapter.ts:263-272`), not `ToolRegistry.execute`, not `POST /ai/tools/:name/execute`, not the MCP bridge (which uses a hardcoded destructive-name list). Every real `requiresConfirmation` read in all three repos is `action.ai.requiresConfirmation` — a *different*, genuinely live property.\n\nWhat makes it worse than inert: **the authoring surface teaches reliance on it.** `tool.form.ts:36-42` puts it in a section titled *\"Access & safety\"* with helpText *\"Ask user to approve before executing (for destructive actions)\"*, and `skills/objectstack-ai/SKILL.md:547` tells authors to use it for destructive operations.\n\n**ADR-0033 already resolved this** (`:31`, `:60`): it records the flag as never-enforced and states *\"We **delete** the unenforced `requiresConfirmation` placeholder\"* — the draft/publish workspace is the real approval gate. That deletion was never executed. This PR marks it honestly; **the prune is proposed as a follow-up** (same disposition the owner just chose for `skill.permissions` in #3704).\n\n## Also in this PR\n\nCount tables synced (action `33/1/2`, flow `26/–/5`, skill `8/–/2`, tool `5/1/5`) and the methodology section extended with:\n- the final tally and **both** failure directions — most entries overstated liveness, but `flow.status` was *understated*, because code moved under a correct-at-the-time note;\n- the three search traps that produced false negatives during this work, including that **macOS `git grep -E` silently ignores `\\b`** (`git grep -cE \"\\.active\\b\"` returns nothing on a file with three `.active` hits);\n- the rule that fell out of it: a grep proves presence only — to prove absence, close the call graph by hand, or author the property and watch the running app.\n\n`check:liveness` green.\n\nRefs #3686, #3685, #1878.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

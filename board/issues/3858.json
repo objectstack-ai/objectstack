@@ -1,0 +1,35 @@
+{
+  "number": 3858,
+  "kind": "pull_request",
+  "title": "feat!: require Node.js 22 — promise the runtime we actually test (#3825)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T11:59:10Z",
+  "updated_at": "2026-07-28T12:11:05Z",
+  "closed_at": "2026-07-28T12:11:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T12:11:02Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3858",
+  "body": "Closes the deliberately-deferred half of #3825. Follow-up to #3830.\n\n## The promise and the evidence had stopped overlapping\n\nEvery published package declared `engines.node: \">=18.0.0\"`. **Node 18 went EOL 2025-04-30 and Node 20 on 2026-04-30** — so the compatibility promise covered two runtimes nobody patches. #3830 then moved CI to Node 22, which removed the last thread connecting the promise to any evidence:\n\n| | Node |\n|---|---|\n| What CI validates every PR on | **22** |\n| What `release.yml` publishes from | **22** |\n| What every shipped Docker image runs (`docker/Dockerfile`, `blank` template, self-hosting docs) | **22** |\n| What `engines.node` promised users | **>=18** |\n\n**No overlap at all.** We were telling users the packages support runtimes we have never once built or tested them on. #3825 correctly said this was a separate decision from the CI bump and should not be folded in — this is that decision.\n\n`engines.node` is now `>=22.0.0` across all **50 manifests**. That is the honest floor: the only runtime these packages are built, tested and shipped on.\n\n## Migration\n\n**On Node 22+? Nothing changes.** Node 24 (Active LTS since 2025-10-28) and Node 26 both satisfy the range.\n\nOn Node 18 or 20 — both past end-of-life — upgrade:\n\n```bash\nnvm install 22 && nvm use 22\n```\n\nnpm and pnpm surface an unsatisfied `engines` as an **`EBADENGINE` warning, not a hard failure**, so existing installs will not break the moment this lands. That is worth stating plainly *and* worth not relying on: the runtime is no longer tested, and the failures are the kind that do not announce themselves. #3812 is the worked example — a native dependency whose `engines` required a newer Node loaded anyway on the older one, then killed the vitest worker at the process level with no JS error and a summary that still read `passed`.\n\n## Full blast radius, not just the manifests\n\nThe \"Node 18+\" prerequisite was restated in **ten user-facing places** — `README.md`, `CONTRIBUTING.md`, four getting-started/deployment docs, the todo example, and the `objectstack-platform` skill's `compatibility` field. All now say 22. A half-done version rename is worse than none: it leaves the docs contradicting the manifest with no error anywhere.\n\nChangelogs and ADRs are historical records and were deliberately left alone.\n\n## Why `major` does not block anyone\n\nShipped as a changesets `major`. The repo is in **pre-release (`rc`) mode**, where `check-changeset-no-major` stands aside by design — accumulating breaking changes is what an RC window is *for*. Verified locally:\n\n```\n✓ Changesets is in pre-release mode (tag: rc) — `major` bumps are the expected\n  product of an RC window; skipping the no-major guard.\n```\n\nFour other majors are already pending in the same window, so this is routine here rather than novel. No `allow-major` label needed.\n\n## Verification (Node 22)\n\n| | Result |\n|---|---|\n| `pnpm build` | ✅ 71/71, **0 cached** (the manifest edits invalidated every hash, so it genuinely rebuilt) |\n| Full test suite | ✅ 129/129, **0 cached** |\n| Test completeness | ✅ **16921 declared, all 16921 accounted for** — cross-checked with the guard from #3852 |\n| `check-changeset-no-major` / `check-changeset-fixed` | ✅ |\n| Generated skill docs / refs | ✅ in sync |\n\nAlso confirmed no test pins the old value (every `engines` assertion in the suite is about the unrelated `engines.protocol` / `engines.platform`), and that `@objectstack/client-react`'s `\"react\": \">=18.0.0\"` peer was not caught by the sweep.\n"
+}

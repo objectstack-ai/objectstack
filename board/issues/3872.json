@@ -1,0 +1,35 @@
+{
+  "number": 3872,
+  "kind": "pull_request",
+  "title": "fix(spec,cli): conversion deprecation notices reach the author, not just `os validate` (#3855)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T13:19:47Z",
+  "updated_at": "2026-07-28T13:32:34Z",
+  "closed_at": "2026-07-28T13:32:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T13:32:32Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3872",
+  "body": "Groundwork for #3855, and a live gap on its own. Non-breaking.\n\n## The gap\n\nThe ADR-0087 D2 conversion layer rewrites an old-shape key to its canonical spelling at load and emits a structured `ConversionNotice` per rewrite. A conversion being silent about **fixing** the shape is the point — zero consumer action. Being silent about having **had** to is not: the notice is the one signal that says *this spelling retires in protocol N, and your metadata stops loading then*.\n\nTwo of the three surfaces that run the pass discarded every notice:\n\n| Surface | Before | After |\n|---|---|---|\n| `os validate` | passed a sink, printed them | unchanged |\n| `os build` / `os compile` | **no sink — every notice dropped** | prints them; `--json` gains a `conversions` array under the same key `os validate --json` already uses |\n| `defineStack` | **no sink — every notice dropped** | warns once per distinct conversion site |\n\nThis is the #3782 parity class one layer down: not \"does this command run the gate\" but *\"does it listen to what the gate says\"*. And it is not hypothetical — **five conversions are live today** (protocol 11 and 15, the rest are `retiredFromLoadPath`). An author on one of those shapes was told by one command and not the other two, and `defineStack` is where that author actually is, since it runs inside their own config module.\n\n## Notes on the two fixes\n\n**`defineStack` warns in both strict and non-strict mode.** The conversion happens on the shared `normalizeStackInput` call that runs *before* the strict branch, and `strict: false` does not make the old shape any less retiring. (Contrast the #3743 alias warning right next to it, which deliberately stays quiet under `strict: false` — there, with no parse, nothing has been discarded yet. Different reason, different behaviour, both intentional.)\n\n**`os build --json` uses the same `conversions` key as `os validate --json`** so a CI consumer reads one shape from either command rather than learning two.\n\n## Why the new test is source-level\n\n`validate-build-gate-parity.test.ts` already guards this class at the source level, on the stated reasoning that it should fail *\"when a gate is ADDED to the build without being added to validate, which is the moment the mistake is cheap to fix\"*. The new assertion extends it from \"runs the gate\" to \"listens to it\": it fails if either command calls `normalizeStackInput` without an `onConversionNotice` sink.\n\nVerified non-vacuous — stripping the sink from `compile.ts` and re-running the matcher flips it red:\n\n```\ncompile.ts as written   | matched: true | has sink: true\ncompile.ts sink removed  | matched: true | has sink: false\nvalidate.ts as written  | matched: true | has sink: true\n```\n\n## A sharp edge the tests document\n\nThe notice path is **index-based** (`flows[i].nodes[j].type`) — a flow's *name* never enters it — and the warn-once set is process-scoped by design. So test fixtures must occupy distinct node indices, or they silently reuse an earlier case's dedupe key and assert nothing. My first draft did exactly that and two cases passed vacuously; the fixtures now take the index as a parameter and the reason is written down.\n\n## Changes\n\n- `packages/cli/src/commands/compile.ts` — sink + printed notices + `conversions` in `--json`\n- `packages/spec/src/stack.zod.ts` — `warnConversionNotice` (warn-once, mirroring `warnGenericPasswordFields`) wired into `defineStack`'s `normalizeStackInput` call\n- `packages/cli/test/validate-build-gate-parity.test.ts` — the sink-parity assertion\n- `packages/spec/src/stack.test.ts` — 4 cases: warns naming the retirement major, nags once per site, reports a second distinct site separately, stays quiet when already canonical\n- changeset\n\n## Testing\n\n- `@objectstack/spec` 6822 passed · `@objectstack/cli` 739 passed · examples typecheck + tests pass, **including app-showcase's `no-startup-warnings.test.ts`** — the real apps are all on canonical shapes, so nothing converts and nothing warns\n- Every ESLint-job and typecheck-job gate run locally: `lint`, `check:nul-bytes`, `check:doc-authoring`, `check:role-word`, `check:org-identifier`, `check:authz-resolver`, `check:release-notes`, spec `tsc --noEmit`, `check:docs`, `check:skill-refs`, `check:react-blocks`, `check:api-surface`, `check:liveness`, examples typecheck, downstream-contract typecheck\n\n## Relationship to #3855\n\n#3855 retires the three deprecated aliases by graduating them into this conversion layer. Once they move, **this is their only warning channel** — so it has to work on all three surfaces before that change, not after. Landing it separately also keeps the breaking half of #3855 reviewable as one coherent change.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JqC9ckaLbmhmytt65Gxi96)_"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 3757,
+  "kind": "issue",
+  "title": "设计:批量写路由的 405 兜底与导入不对称 —— data-objectstack 直接 rethrow,用户看到硬报错",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T02:17:20Z",
+  "updated_at": "2026-07-28T07:13:39Z",
+  "closed_at": "2026-07-28T07:13:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3757",
+  "body": "## 问题\n\n同样是「对象未开放某操作」的 405(`OBJECT_API_METHOD_NOT_ALLOWED`),前端两条路径的处理**方向相反**:\n\n| 路径 | 405 处理 | 用户看到 |\n|---|---|---|\n| **导入**(ImportWizard) | 有独立谓词 `isImportNotAllowed`,四个 catch 点先于 unsupported 判定,命中即终止并出 `grid.import.notAllowed` 专用文案(objectui#2823 / #3391 P0) | 「该对象未开放导入」 |\n| **批量写**(`updateMany` / `deleteMany`) | `data-objectstack` 适配器**直接 rethrow**(`packages/data-objectstack/src/index.ts` 约 `:1100-1102` / `:1150-1152`);逐行回退只在**客户端方法不存在**时触发,405 不触发 | 一个原始错误弹窗 |\n\n这个不对称正是 #3745 那个 bug**表现成\"硬报错\"而不是\"降级慢一点\"**的原因:8 个对象缺 `bulk` 原语 → 多选删除 → 405 → 适配器 rethrow → Setup 网格直接报错。#3745 修了那 8 个对象,但**适配器这一侧的行为没动** —— 下一个缺 `bulk` 的对象(或第三方应用里刻意只开单条写的对象)还会撞上同样的体验。\n\n## 需要先定的设计问题\n\n不是「照抄一行 405 判定」那么直接,建议先定调:\n\n1. **回退还是终止?** 逐行回退能让用户\"慢一点但成功\",但代价是**丢掉原子性** —— 后端一次 `deleteMany` 是一个批,拆成 N 次单删就是 N 个独立事务,中途失败会留下部分完成的状态。批量删除尤其危险。倾向:**不回退,给独立文案**(与导入侧的 405 处理同构),但需要明确写下来。\n2. **文案落在哪一层?** 导入侧的文案在 ImportWizard 里(`grid.import.notAllowed` + 10 locale)。批量写的调用点分散(网格多选工具栏、列表页、可能还有详情页),文案是放适配器(统一但离 UI 远)还是放各调用点(贴近场景但要维护 N 处)?\n3. **要不要在按钮层就压制?** `/me/permissions` 已下发 per-object `apiOperations`(#3498),前端已经能知道某对象不支持 `bulk` —— 那么\"多选删除\"按钮本可以像 Import/Export 一样按 effective 集隐藏/禁用,**根本不让用户点到 405**。这才是与 #3026 契约一致的做法(按钮谓词 = `effective.api(op) ∧ affordance(op) ∧ can(user, 基础权限)`),405 文案只作为兜底。倾向:**两者都做** —— 按钮层压制是主路径,405 文案是兜底(权限可能在页面打开后才收紧)。\n4. **`createMany` 呢?** 上表只列了 update/delete,`createMany` 的路径要一并确认是否同样 rethrow。\n\n## 可复用的东西\n\n- `isImportNotAllowed` 谓词(objectui,ImportWizard)—— 405 判定逻辑可直接复用,注意**不要**并进 `isUnsupportedImportJob`:404(路由不存在→回退)与 405(未开放→终止)语义相反,这个坑 #3391 P0 已经踩过一次。\n- `resolveCrudAffordances(obj, effectiveApiOperations?)` 第二参(objectui#2823 已铺路)—— 问题 3 的按钮层压制接这里,和 Import/Export 同一条路。\n- `getObjectApiOperations` + `check()` 映射(objectui permissions)。\n\n## 关联\n\n- #3745(8 个对象缺 `bulk`,本 issue 的触发案例)、#3026(UI 按钮 ↔ 白名单一致性契约)、#3391 P1(bulk 门禁 `bulk ∧ child`;P0 的导入侧 405 文案)\n- objectui#2823(前端消费 effective 集 + ImportWizard 405 文案)\n- 主要改动落在 objectui 仓,本 issue 记在框架仓是因为契约与触发案例都在这里;定调后可拆一个 objectui 侧的实现 issue。"
+}

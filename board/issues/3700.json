@@ -1,0 +1,32 @@
+{
+  "number": 3700,
+  "kind": "issue",
+  "title": "Hook body writes are not statically checkable — accept the gap or give `HookSchema` a structured `writes` declaration",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T15:00:37Z",
+  "updated_at": "2026-07-28T01:01:43Z",
+  "closed_at": "2026-07-28T01:01:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3700",
+  "body": "从 #3583 的引用完整性工作中分出来(方案文档 §5 D4)。\n\n## 现状\n\nHotCRM 审计里有一类问题:hook 往对象上写它没有的字段(`contact_email` / `contact_phone`)。这一类**目前静态查不出来,而且短期内也查不出来**。\n\n原因是写入面没有结构:\n\n- `HookSchema.body`(`packages/spec/src/data/hook-body.zod.ts`)是 `ExpressionBodySchema | ScriptBodySchema` 的联合,两者的 `source` 都是不透明 `z.string()`。\n- `HookSchema.handler`(已废弃)是函数名或函数本身。\n- 任何地方都没有「这个 hook 写哪些字段」的声明。\n\n对比之下 flow 侧能查,是因为节点**结构化地**声明了写入:`validate-readonly-flow-writes`(`FLOW_UPDATE_READONLY_FIELD`)和 `validate-flow-template-paths`(`FLOW_TEMPLATE_UNKNOWN_FIELD`)读的是 `update_record` 节点的 `fields` 配置,不是 JS 源码。\n\n读取侧已经覆盖了:`validate-expressions` 会按对象字段检查 `hook.condition`,#3657 起也支持数组形态的 `hook.object`。缺的只有写入侧。\n\n## 三个选项\n\n1. **接受缺口并写进文档。** 这是 #3583 九类问题里唯一没有静态答案的一类;明说比让作者以为有覆盖要好。\n2. **给 `HookSchema` 加结构化 `writes: string[]` 声明,并由运行时强制。** 契约优先(Prime Directive #12):作者声明这个 hook 会写哪些字段,lint 校验字段存在,运行时拒绝声明之外的写入。这样既可静态检查,又能给出真正的安全属性。代价是新的 spec 面 + 运行时改动 + 存量迁移。\n3. **注册期开发态诊断**(ADR-0078 §4)。与授权面无关,但成本最低。ADR-0078 已把它列为 deferred / evidence-gated。\n\n## 建议\n\n短期取 1(记录已接受的缺口),把 2 作为独立提案讨论 —— 它是真正的能力增强,不该被塞进 lint 任务里顺手做掉。\n\n## 关联\n\n- #3583(引用完整性审计)\n- ADR-0078 §4"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 3927,
+  "kind": "pull_request",
+  "title": "fix(client): normalize both server error envelopes so err.code / err.fields mean one thing (#3918 follow-up)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T10:05:20Z",
+  "updated_at": "2026-07-29T10:24:54Z",
+  "closed_at": "2026-07-29T10:24:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-29T10:24:52Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3927",
+  "body": "Third and last piece of the #3918 chain (after #3920 and #3925). This is the one that makes the original report's symptom — no per-field error display on dispatcher-served forms — actually go away for a caller.\n\n⚠️ **This one contains a deliberate SDK behaviour change.** It's small and I believe it's a strict fix, but it's a contract change rather than a pure bug fix, so it deserves a real look — see the last section.\n\n## The bug\n\n#3920 put `fields[]` on the wire for dispatcher-served routes. A caller still couldn't get at it, because two envelopes are in play and they disagree about where the semantic code and the field list live:\n\n```\n@objectstack/rest, flat:\n  { error, code: 'VALIDATION_FAILED', fields: [...] }\n\nruntime dispatcher, wrapped:\n  { success: false, error: { message, code: 400,\n      details: { code: 'VALIDATION_FAILED', fields: [...] } } }\n```\n\n`error.code` in the **wrapped** form is the HTTP status, not a semantic code. `packages/client/src/index.ts` read it straight through (`errorBody?.code || errorBody?.error?.code`), so `err.code` was the **number `400`** where the flat envelope gave `'VALIDATION_FAILED'`.\n\nThe consequence is that the branch **our own documentation teaches** — `content/docs/protocol/kernel/http-protocol.mdx:923` —\n\n```js\nif (result.code === 'VALIDATION_FAILED') {\n  result.fields.forEach(f => showFieldError(f.field, f.message));\n}\n```\n\n…never matched on a dispatcher-served surface, and the field list was sitting unreachable at `err.details.error.details.fields`.\n\n## The fix\n\nNormalized once, at the throw site:\n\n- **`err.code` is always the semantic string.** Read from the flat `code`, else the wrapped `error.details.code`, else a *string* `error.code`. A numeric value is never reported as a code. The HTTP status is on `err.httpStatus`, where it always was.\n- **`err.fields` is the per-field list** from either envelope. Left **unset** (not `[]`) when the server sent none, so `if (err.fields)` is a safe test for \"this failure is field-anchored\".\n- **`err.details`** prefers a top-level `details` (unchanged), then the wrapped envelope's own `details`, then the whole body. The flat envelope has no top-level `details`, so it keeps falling through to the whole body exactly as before — only the wrapped shape changes, and only from \"the entire response\" to the structured object it actually carries.\n\n`content/docs/api/client-sdk.mdx` enumerates the properties attached to a thrown error, so it's updated in the same commit: `err.fields` documented with a worked example, plus a note that `err.code` is always semantic and the status is only ever on `err.httpStatus`.\n\n## Verification\n\n- **8 new tests** in `client.test.ts` covering both envelopes symmetrically: semantic code from each, `fields[]` from each, `fields` unset when absent, no numeric code even with no `details` to fall back on, and three `details` cases (flat unchanged / wrapped structured / top-level `details` still honoured).\n- **The 4 that target the wrapped envelope fail against the pre-fix source**; the other 4 are anti-regressions that correctly pass both ways.\n- Full client suite green: **192 tests / 14 files**. Package builds; eslint clean.\n\n## The behaviour change — please sanity-check this call\n\nCode reading `err.code` from a dispatcher-served route previously got a **number** and now gets a **string** (or `undefined` where the server sent no semantic code).\n\nMy reasoning for treating this as a fix rather than a break: `err.httpStatus` was always the correct and documented source for the status, `err.code` carrying two different types depending on which surface answered was the actual defect, and I grepped the repo — nothing branches on a numeric `err.code`. But a downstream consumer outside this repo that did `err.code === 400` would need `err.httpStatus === 400`, and that's called out in the changeset.\n\nIf you'd rather keep the numeric value reachable, say so and I'll leave `err.code` alone and expose the semantic one as a new property instead — but then the documented `err.code === 'VALIDATION_FAILED'` branch stays broken for dispatcher routes, which is what this chain set out to fix.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01LeZ7DmSKjiKmQzYh8L5CJS)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 3672,
+  "kind": "pull_request",
+  "title": "feat(analytics): cross-object grouping via FK-expand + generateSql scope preview (#3654 residual 2 + capability)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T13:47:52Z",
+  "updated_at": "2026-07-27T14:33:57Z",
+  "closed_at": "2026-07-27T14:33:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3672",
+  "body": "#3654 收尾:残留 2(SQL 预览)+ 能力项(跨对象分组)。两个独立 commit。\n\n## Commit 1 — 残留 2:generateSql 渲出 read scope(展示层)\n\n`ObjectQLStrategy.generateSql`(回显给 `/analytics/sql`)#3588 后已渲 WHERE,但**只含查询 filter,漏了 execute 注入的 tenant/RLS scope** —— 预览低估真实约束。现在把 base 对象 scope 也渲进 WHERE(参数化,`$and`)。不执行、不泄露。\n\n## Commit 2 — 能力项:信封内跨对象分组走 FK 展开(#3654 主体)\n\n引擎不会 join,所以 ObjectQL 回退路径(日期分桶 / in-memory / federated)此前**拒绝**跨对象分组如 `revenue by account.region`(#3664 止血)。现在直接**服务**常见情形:\n\n1. 按 lookup FK 列(`account`)分组跑 base 聚合(引擎能做),加 base 对象 scope;\n2. 用**被引用对象自己的 RLS scope** 读该对象,把 FK id 解析成属性(`region`);\n3. 内存按属性重并桶,重组度量(sum/count 相加,min/max 取极值)。\n\n**受限行归 `(restricted)` 桶**(你拍板的语义):读不到被引用记录的行,度量仍计入、**总计守恒**,但隐藏记录的属性名**绝不出现** —— 无泄露(ADR-0021 D-C / #3602 类)。`/analytics/sql` 渲出等价 `LEFT JOIN`。\n\n**刻意有界 —— 信封外继续 LOUD 拒绝(绝不静默错答)**:跨对象出现在**度量/过滤器**(需真 join)、**多跳**(`a.b.c`)、**avg/count_distinct**(跨桶不可重组)配跨对象维。NativeSQLStrategy(正常 SQL 路径)不变。\n\n## 测试\n\n- **纯 rebucket**(6):重组 sum/count/min/max、restricted 总计守恒、null≠restricted、多维、双跨对象维。\n- **展开集成**(3):真实 `AnalyticsService` + 两次 aggregate stub,断言 base 与 FK 解析**都加 scope**、restricted 桶成形、`/analytics/sql` 渲 LEFT JOIN。**回退策略 → 三个全红**。\n- **信封外拒绝**(3):跨对象度量 / 跨对象过滤 / avg 配跨对象维 —— 均 LOUD 拒绝且未触引擎。\n- **残留 2**(4):scope 渲进 WHERE、与 filter `$and`、无 provider 不变、信封外预览拒绝。\n- service-analytics **218 passed**;`tsc` 无新增错误。\n\n## 边界(诚实)\n\n未加真栈 dogfood e2e:能力的正确性核心(重聚合)已被纯函数测穷举,编排 + 双 scope 已被真实 AnalyticsService 集成测覆盖,真实引擎 FK 分组与被引用 scoped 读均由既有合并工作在栈内证过。若需端到端 capstone 可后补。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 3624,
+  "kind": "issue",
+  "title": "org creation over HTTP 500s when teams are enabled: better-auth 1.7.0-rc.1 default team carries memberCount, sys_team lacks the column/mapping",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T10:24:46Z",
+  "updated_at": "2026-07-27T12:54:24Z",
+  "closed_at": "2026-07-27T12:54:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3624",
+  "body": "Found by the cloud-side group-posture showcase (objectstack-ai/cloud#880) while driving `POST /api/v1/auth/organization/create` on a real multi-org boot.\n\n## Symptom\n\nWith the organization plugin's `teams: { enabled: true }` (auth-manager default), better-auth 1.7.0-rc.1 auto-creates a default team on organization create. That insert fails:\n\n```\ninsert into `sys_team` (`created_at`, `id`, `memberCount`, `name`, `organization_id`, `updated_at`)\nvalues (…) - table sys_team has no column named memberCount\n```\n\nThe org row is already committed at that point, so the API returns 500 with a half-created organization (row exists, no default team, client sees an error). Every multi-org deployment's create-org UX hits this at current `main`.\n\n## Root cause\n\nbetter-auth 1.7.0-rc.1's team model gained a `memberCount` field. The framework's `sys_team` platform object (`packages/platform-objects/src/identity/sys-team.object.ts`) and `buildOrganizationPluginSchema()`'s field mapping predate it, so the adapter emits a camelCase `memberCount` column that neither the mapping nor the physical table know.\n\nNote the ADR-0092 D7 collision guard (derives better-auth's surface from `getAuthTables()`) catches *collisions*, not *missing* columns — a better-auth upgrade that adds a brand-new field sails through the build and fails at runtime, which is exactly what happened here.\n\n## Expected\n\nEither map + provision `member_count` on `sys_team` (and mirror in `buildOrganizationPluginSchema()`), or disable better-auth's default-team creation if the platform doesn't want auto-teams. Consider extending the D7 guard to also diff for better-auth fields the platform tables don't provision, so the next upgrade fails the build instead of the runtime.\n\n## Repro\n\ncloud `apps/ee-group-showcase` — swap its seeded org setup for the better-auth `organization/create` route and the 500 reproduces on the second org (the first goes through the OrganizationsPlugin default-org bootstrap, which doesn't create teams).\n\nRefs: #3541 (ADR-0105 tracking); cloud#880."
+}

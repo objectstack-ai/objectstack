@@ -1,0 +1,36 @@
+{
+  "number": 3632,
+  "kind": "pull_request",
+  "title": "chore(deps)!: better-auth 1.7.0-rc.2 + the production-dependency batch (#3517)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T11:13:59Z",
+  "updated_at": "2026-07-27T11:20:35Z",
+  "closed_at": "2026-07-27T11:20:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T11:20:32Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3632",
+  "body": "Replaces dependabot #3517 (its base is ~40 commits stale, and its three red checks are all fixed here) and additionally carries the better-auth family from `1.7.0-rc.1` to `1.7.0-rc.2`.\n\n## Why #3517 was red\n\n| Check | Cause | Status here |\n|---|---|---|\n| Validate Package Dependencies | OSV found 10 advisories (react-router, sharp, @sveltejs/kit, brace-expansion, @hono/node-server) | Fixed on main by #3614; OSV-Scanner is clean on the regenerated lockfile |\n| Check Changeset | Dependabot adds none | Changeset added |\n| Scaffold with repo dist | `docker.io` i/o timeout pulling `node:22-slim` | Infra flake, not a code failure |\n\n## The dependency batch\n\n`@oclif/core` 4.13.0, `@hono/node-server` 2.0.12, `hono` 4.12.32, `tar` 7.5.22, `jose` 6.2.4, `pinyin-pro` 3.28.2, plus the private docs app's fumadocs 16.12.1 / next 16.2.12 / react 19.2.8 / lucide-react 1.27.0. `js-yaml` was already at 5.2.2 on main.\n\n## BREAKING — better-auth 1.7.0-rc.2 account identity\n\nrc.2 renames `account.accountId` to `account.providerAccountId`, adds a **required** `account.issuer`, and resolves every account by `(issuer, providerAccountId)`. An unmapped or unstamped issuer is not a type error — it is a silent \"no such account\" on every sign-in.\n\n- `AUTH_ACCOUNT_CONFIG` maps `providerAccountId` onto the existing `account_id` column (same value, renamed upstream — no data moves) and adds `issuer`.\n- `sys_account` gains the `issuer` column, plus the unique `(issuer, account_id)` index better-auth declares on its own table. The column is deliberately nullable: a NOT NULL column cannot be added to a table that already holds rows, and schema sync runs before the backfill.\n- `internalAdapter.createAccount()` now passes `issuer` + `providerAccountId`; credential accounts carry better-auth's own `local:credential`.\n- `/unlink-account` narrowed to `{ accountId }`, where `accountId` is the account **row** id — the `sys_account` row action and `client.auth.accounts.unlink()` follow, and `accounts.list()` now returns `issuer` + `providerAccountId`.\n\n### Upgrading an existing deployment\n\nRows written before 1.7 have no issuer and are invisible to sign-in, so the auth plugin runs an idempotent boot-time backfill (`backfillAccountIssuer`, also exported for hosts that migrate on their own schedule). It stamps what it can derive:\n\n| Account | Issuer |\n|---|---|\n| password | `local:credential` |\n| configured social provider | `local:oauth:<providerId>` |\n| registered SSO provider | the IdP's real `iss` from `sys_sso_provider` |\n\nAccounts from a federated IdP that is no longer registered **cannot** be derived. They are logged with provider id and row count rather than guessed — a wrong issuer is indistinguishable from a missing one at sign-in, and it also occupies the unique slot the correct row needs. Those users sign in again through that provider once the row is stamped with the IdP's issuer or removed so a fresh login re-links it.\n\n## Also required by 1.7\n\n`SecondaryStorage` gained two mandatory methods, both now implemented over the kernel cache service: `getAndDelete` (single-use verification values) and `increment` (fixed-window rate-limit counter — `rateLimit.storage: 'secondary-storage'` throws at boot without it). Neither cache primitive is atomic; each carries a comment stating the exact race it leaves open and that an adapter with GETDEL/INCR closes both.\n\n## @better-auth/scim stays at 1.7.0-rc.1\n\nrc.2 replaces the SCIM plugin wholesale: code-defined connections + static credentials instead of runtime-generated tokens, the `scimProvider` model and `generate-token` endpoint gone, six new models (`scimUser`, `scimGroup`, `scimGroupMember`, `scimSubject`, `scimConnectionBinding`, `scimIdentityTombstone`). Adopting it means new platform objects, retiring `sys_scim_provider`, and a new way for a tenant to register a connection — an ADR-0071 feature migration, not a version bump. rc.1's peer range accepts rc.2 core and it still carries the GHSA-j8v8-g9cx-5qf4 fix. Flagged in `pnpm-workspace.yaml` so nobody \"aligns\" it by reflex.\n\n## Verification\n\n- `pnpm test` — 132/132 turbo tasks green; `pnpm build` green; `eslint` clean; `tsc --noEmit` clean.\n- OSV-Scanner v2.3.8 on the regenerated lockfile: **no issues found**. `check-override-consistency` and `check-changeset-fixed` pass.\n- Real boot (showcase stack, in-memory SQLite): sign-up writes `issuer` on `sys_account`, sign-in resolves the account, and the backfill stamps a legacy issuer-less row through the real ObjectQL engine. The existing OIDC authorization-code dogfood flow (authorize → code → token) passes against rc.2.\n- New unit coverage for the backfill (derivation, non-guessing, idempotence, failure reporting) and for both new SecondaryStorage methods (fixed window not extended, restart after expiry, corrupt-envelope recovery).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WmLE2YnDZKh1jXy5KFFE3e)_"
+}

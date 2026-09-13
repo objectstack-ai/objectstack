@@ -1,0 +1,32 @@
+{
+  "number": 3668,
+  "kind": "issue",
+  "title": "CI: Dogfood Regression Gate 把 cancelled 当失败 —— 每次连续推送都产生一条假红",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T13:39:43Z",
+  "updated_at": "2026-07-27T14:11:13Z",
+  "closed_at": "2026-07-27T14:11:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3668",
+  "body": "## 现象\n\n`dogfood-gate` 在 dogfood 矩阵被**取消**时报失败。因为 CI 开了 `cancel-in-progress`，**任何一次「推了新提交、旧运行还在跑」的连续推送都会产生一条假红**。\n\n在 #3660 上连续观察到两次，日志完全一致：\n\n| Job | HeadSHA | 日志 |\n|:---|:---|:---|\n| [89988965549](https://github.com/objectstack-ai/objectstack/actions/runs/30269574062/job/89988965549) | `7972cb3` | `dogfood matrix aggregate result: cancelled` |\n| [89990688709](https://github.com/objectstack-ai/objectstack/actions/runs/30269699427/job/89990688709) | `793ee5e` | `dogfood matrix aggregate result: cancelled` |\n\n两次都是被后续提交取代的运行，代码本身没有任何问题——同一分支最终 18 项检查全绿并合并。\n\n## 成因\n\n```yaml\n# .github/workflows/ci.yml:14-16\nconcurrency:\n  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}\n  cancel-in-progress: true\n```\n\n```yaml\n# .github/workflows/ci.yml:270-277\n- name: Verify dogfood shard results\n  run: |\n    result=\"${{ needs.dogfood.result }}\"\n    echo \"dogfood matrix aggregate result: $result\"\n    case \"$result\" in\n      success|skipped) echo \"Dogfood gate satisfied.\" ;;\n      *) echo \"::error::Dogfood shards did not pass (aggregate result: $result)\"; exit 1 ;;\n    esac\n```\n\n`skipped` 已被正确豁免（`filter` 判定无 core 变更时），但 `cancelled` 落进了兜底的 `*)` 分支。dogfood 分片跑约 7½ 分钟，是 CI 里最长的任务之一，所以它几乎总是「还在跑」的那个，被取消的概率最高。\n\n## 影响\n\n不阻塞合并（被取代的运行挂在旧 SHA 上，分支保护看的是最新 SHA），但：\n\n- **假红会触发失败通知**，看到的人（或盯 PR 的 agent）必须去翻日志才能确认「这不是真失败」。本次两条告警各花掉一个来回。\n- **噪声会训练出对该 gate 的忽视**——一个经常假红的必需检查，真红时也会被当成噪声划过去，而这恰恰是回归门最不该有的属性。\n\n## 建议修法\n\n把 `cancelled` 并入放行分支：\n\n```yaml\n    case \"$result\" in\n      success|skipped|cancelled) echo \"Dogfood gate satisfied.\" ;;\n```\n\n**安全性论据**（需要确认后再落地）：矩阵里若有分片**真的失败**，GitHub 给出的聚合 `result` 是 `failure` 而非 `cancelled`（fail-fast 取消掉的兄弟分片不会把聚合结果降级成 `cancelled`）。若该前提成立，则 `cancelled` 只可能来自**整个运行被外部取消**（并发组取代、手动取消），放行它不会漏掉任何真实回归。**这一点建议先用一次 fail-fast 实验验证**，别直接照搬我的推断。\n\n### 不建议的替代方案\n\n把 gate 的 `if: always()` 改成 `if: !cancelled()`。这样运行被取消时 gate 自身被跳过，**必需检查上下文就不会发布**。对被取代的旧 SHA 无所谓，但一旦出现**同 SHA** 被取消的情况（重跑、排队重复），该 SHA 上就永远缺这个上下文 → PR 卡死。这正是 ci.yml:250-259 注释里记载的 #3622 死锁场景，不应重蹈。\n\n## 备注\n\n`grep 'needs\\..*\\.result' .github/workflows/*.yml` 只有这一处命中，所以该模式目前仅此一个聚合门，改动面很小。\n\n关联：#3622（分片化 + 稳定必需检查名的由来）、#3660（本次观察到的两条假红）。"
+}

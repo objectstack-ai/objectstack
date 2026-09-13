@@ -1,0 +1,35 @@
+{
+  "number": 3958,
+  "kind": "pull_request",
+  "title": "feat(runtime,objectql,metadata)!: ADR-0110 — action identity is `name`; refuse undeclared executables (#3935)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T23:34:05Z",
+  "updated_at": "2026-07-30T00:14:55Z",
+  "closed_at": "2026-07-30T00:14:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T00:14:53Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3958",
+  "body": "Implements all six rulings of [ADR-0110](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0110-action-identity-and-declaration-admission.md) (merged in #3949). Closes #3935.\n\n**Ships in lockstep with objectstack-ai/objectui#2970 — merge together.** The client half posts `name` instead of `target`; this half derives the handler key from the declaration so both addressings resolve.\n\n## The defect\n\n`POST /api/v1/actions/:object/:action` resolved the **declaration** from the URL segment as a `name`, but dispatched the **handler** using that same segment as a registry key. For a target-bound action (`{ name: 'complete_task', target: 'completeTask' }`) those are different strings, so the two documented callers each worked on exactly the half the other broke:\n\n| Caller | URL segment | Handler dispatch | D4 gate + 0104 params |\n|---|---|---|---|\n| Documented curl (`name`) | `complete_task` | ❌ 404 — handler is `completeTask` | ✅ resolved |\n| Console (`target \\|\\| name`) | `completeTask` | ✅ runs | ❌ **silently skipped** |\n\n`content/docs/ui/actions.mdx` claims \"the Console button and the API call run the same gate and handler\". That was false in both directions, and nobody noticed because each caller took the path that worked for it.\n\n## What changed\n\n**D1/D2 — resolve, then address.** `resolveActionHandlerKeys` + `executeRegisteredAction` extract the candidate rotation the MCP `run_action` bridge already used; the REST route now calls the same helper. REST previously rotated only the *object* key (`objectName → global → *`) and never the *handler* key — strictly weaker than MCP, and the reason the documented curl 404ed.\n\n**D3 — resolution is a trichotomy, and only one branch dispatches.** The old `try { … } catch { /* no gate to enforce */ }` collapsed three states with opposite meanings into one fail-open path:\n\n- *declared* → gate against it, then dispatch (unchanged);\n- *metadata plane unreachable* → **503**. `MetadataManager.load` warn-logs a throwing loader and returns `null`, making an outage indistinguishable from a miss — so a database the metadata plane can't reach silently ungated every action it couldn't see. New `loadDiagnosed` reports whether the answer is trustworthy (`degraded` when a loader threw and none answered; a clean miss is *not* degraded).\n- *genuinely undeclared* → **404** naming the `defineAction` to add. An undeclared handler has no `requiredPermissions` to enforce, no param contract, and materialises no `action_<name>` tool (ADR-0109) — yet executes TRUSTED.\n\n**D5 — the inventory.** `ObjectQLEngine.listRegisteredActions` (new) + `reconcileActionRegistrations` run on `kernel:ready`, logging registered-but-undeclared handlers and declared-script-actions-bound-to-nothing. Reconciliation derives keys through the *same* `resolveActionHandlerKeys` dispatch uses, so the inventory can't disagree with the router.\n\n**D6 —** `OS_ALLOW_UNDECLARED_ACTIONS` is opt-**out** of enforcement (`OS_ALLOW_*`), warning per invocation, removed in 18.\n\n**D4 + migration —** headless \"declare it, then hide it\" section in `actions.mdx`, a `v17.mdx` breaking entry alongside its two siblings, ADR status flipped to `Accepted — implemented` with evidence.\n\n## Superseded tests — updated, not worked around\n\nTwo existing assertions encoded the behaviour D3 rules out (*\"still runs an UNDECLARED action through the handler registry\"*, and a standalone-declaration case asserting it \"falls through to the registry\"). Both now assert the refusal, plus new cases for the valve and the 503.\n\n`actions-global-key.test.ts` (12 cases) tests the **addressing** axis with fixtures that declare nothing. Rather than weaken D3, its double now declares whatever name it is asked for — bound to its own name, i.e. the very key the URL segment used to be taken as, so the probe orders those tests pin are unchanged. One new case pins that the object-less route is *not* exempt from governance.\n\n## Verification\n\nobjectql 276 · runtime + metadata 1163 · eslint clean on all changed files.\n\n## One finding, left alone deliberately\n\nThe D5 reconciliation flagged real orphans in a shipped example on its first run: `examples/app-todo` registers `deferTask` and `setReminder`, but their declarations are `type: 'modal'` with `target` naming the *modal*, so no declaration addresses those keys. **Pre-existing and unreachable through the Console before this change too** — not a regression, and not fixed here (Prime Directive #10). It does surface an adjacent contradiction worth its own issue: objectui's `modalActionHandler` documents falling through to \"the server-side handler ... how a modal action bound to `engine.registerAction(...)` still runs\", while the framework's `headlessActionTypeError` rejects `type: 'modal'` over REST with a 400. Same \"declared ≠ enforced\" family, different axis.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01DTTKgYriDB6RVrkYjxxnG1"
+}

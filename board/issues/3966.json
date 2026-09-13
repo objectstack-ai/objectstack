@@ -1,0 +1,35 @@
+{
+  "number": 3966,
+  "kind": "pull_request",
+  "title": "chore(spec): scan platform-object definitions for permissive empty states (#3896 follow-up)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T00:05:51Z",
+  "updated_at": "2026-07-30T00:21:20Z",
+  "closed_at": "2026-07-30T00:21:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T00:21:18Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3966",
+  "body": "Follow-up to #3945 (merged). That PR built a gate requiring any *\"empty = permissive\"* statement in the spec to be classified on purpose. Its scan scope had a hole big enough to miss the bug it was built for.\n\n## The gate could not see its own crime scene\n\nThe sentence that shipped #3896 — *\"leave empty to share every record\"* — was the `description` of `sys_sharing_rule.criteria_json`. That field lives in **`plugin-sharing`**, not in `packages/spec`. #3945 scanned `packages/spec/src/**/*.zod.ts` only.\n\nSo the ratchet was real but it was pointed slightly away from where the class actually lives: **platform-object field descriptions** are the surface authors and models read most directly, and they sit in plugins.\n\n**Now scans `**/*.object.ts` anywhere under `packages/`** — plugins, `platform-objects`, `metadata-core`, and the `create-objectstack` templates (a starter file is the highest-leverage thing a model copies from). 214 → 290 files.\n\n## It immediately found a real one\n\n`sys_user_permission_set.organization_id`:\n\n> `description: 'Optional organization scope. NULL = applies in every org context.'`\n\nA user↔permission-set grant with no org scope applies **everywhere**. That is deliberate and load-bearing rather than an oversight, and the reason is worth stating precisely: **ADR-0095 D3 / ADR-0068 D2 derive the `platform_admin` posture from an *unscoped* `admin_full_access` user grant specifically**, and an org-scoped grant of the same set must *not* confer it.\n\nSo the empty state here is not merely wider — it is the distinguishing input to the highest privilege in the system. Registered `open` with that rationale and both enforcement sites cited (`resolveAuthzContext.hasPlatformAdminGrant` as the single source of truth; `explain-engine.ts`, which replicates the identical predicate on purpose so the explain panel cannot sit higher than enforcement). The point is that the answer now lives somewhere other than a maintainer's memory.\n\nNo behaviour is changed here — this is a classification, and the classification is that the current behaviour is intended.\n\n## Three fixes the new surface forced\n\nEach was the gate being wrong in a way that mattered, and each was found by running it rather than by reasoning about it.\n\n**1. Repudiated prose no longer fires.** #3929's own comment on `criteria_json` reads:\n\n> `// Deliberately NOT \"leave empty to share everything\" (#3896): an empty`\n\nThe gate flagged the sentence recording why the gate exists. Negation now covers the imperative form as well as the token form (`deny-all`, which had the same bug in #3945 and was fixed there). The escape is **deliberately narrow** — the negator must be attached to the phrase, not merely present in the line, so `\"If not set, leave empty to share every record\"` is still caught. A false negative here is a missed over-share, which is strictly worse than a false positive; there's a test pinning both directions.\n\n**2. The owning property is found by nesting, not by a list of key names.** A platform-object field is a nested call, so the first attempt answered `description` for every hit — a name that is not a property and would key every entry in a file to the same string. Adding a doc-slot skip list then answered `required`: the *sibling* config key above it. What actually separates a field from its own config is **indentation**, so the resolver takes the nearest key at a shallower indent. Direction matters too — a JSDoc block sits at the *same* indent as the property below it, so forward search allows equality where backward search must not.\n\n**3. The property-search window is per-surface.** A platform-object `description:` can sit 15+ lines below its field name; a `.zod.ts` statement sits on or beside its property. Widening globally would let `.zod.ts` narrative be mis-attributed to a distant property — turning a correct non-failing note into a wrong failure — so `.object.ts` gets a wider window and the schema surface keeps its tight one.\n\n## Also: evidence resolution is now honest\n\nEntries are parsed with the liveness ledger's own `checkEvidence`, so prose around the paths works, several paths can be cited, and another repo's path (`objectui: …`) is recorded without being resolved here. #3945's README already promised evidence resolved \"like the ledger's\" — a single raw-path `existsSync` quietly did not, and would have rejected exactly the prose-plus-paths form the ledger documents.\n\n## Verification\n\n- **6 new unit tests** (32 total) covering the platform-object field block, the repudiated-phrase escape *and* the case it must not suppress, and the per-surface window.\n- `packages/spec`: **263 files, 6862 tests, all passing.** `tsc --noEmit` clean.\n- Both gates green — `check:empty-state` reports 20 statements across 290 files, all classified (1 closed, 2 open, 4 output, 9 scope); `check:liveness` unaffected.\n- No runtime behaviour changes.\n\n## Still not in scope\n\n- **Locale bundles.** Field descriptions are translated (`translations/*.objects.generated.ts`), so a permissive-empty claim could survive in a non-English bundle after the source is fixed. Those files are generated, so the right fix is at the generator, not the gate — a separate change.\n- **Decoupling `required` (write-time) from `NOT NULL` (storage)**, still the outstanding ergonomics item behind #3929's imperative write guards.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QuViRSR1j6GJjf9qGbnqFX)_"
+}

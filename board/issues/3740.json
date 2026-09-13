@@ -1,0 +1,34 @@
+{
+  "number": 3740,
+  "kind": "pull_request",
+  "title": "docs(ai): stop tool.requiresConfirmation promising a gate it does not provide (#3715)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T01:08:44Z",
+  "updated_at": "2026-07-28T01:21:24Z",
+  "closed_at": "2026-07-28T01:21:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T01:21:21Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3740",
+  "body": "Owner call on #3715: **defer the prune-or-wire decision, stop the false promise now.** No behaviour change — nothing read the flag before, nothing reads it now.\n\n## Why defer rather than prune\n\nADR-0033 already resolved to delete this placeholder, on the reasoning that **the draft/publish workspace is the real approval gate** (AI never publishes; a human clicks Publish). That reasoning was sound *when the only tools were metadata mutators* — and it still describes cloud's 24 `*.tool.ts` today, all of which declare `category: 'data'` (17) or `'utility'` (7).\n\nBut the declared tool surface anticipates more. `ToolCategory` (`packages/spec/src/ai/tool.zod.ts:17-25`) includes:\n\n| Category | Draft/publish covers it? |\n|---|---|\n| `action` — *\"Side-effect actions (send email, create record)\"* | ❌ a sent email does not come back |\n| `integration` — *\"External API / webhook calls\"* | ❌ |\n| `flow` — *\"Trigger a visual flow\"* | ❌ |\n\nSo the moment a first-class side-effect tool exists, a per-tool confirmation gate stops being a placeholder and becomes a requirement — and removing the shape now means re-adding it later (the cost the `field-encryption` precedent exists to avoid). Hence: keep the shape, kill the promise, decide when the tool surface's role is settled.\n\n## What changed (promise only)\n\n| Surface | Before | After |\n|---|---|---|\n| spec `.describe()` | *\"Require user confirmation before execution\"* | `[EXPERIMENTAL — not enforced]` + \"NOTHING pauses on this flag (#3715) — use the action-level `ai.requiresConfirmation` + approval queue\" |\n| Studio form section | **\"Access & safety\"** — *\"Permissions and confirmation requirements.\"* | **\"Declarative metadata (not enforced)\"** — *\"Recorded on the tool definition but read by no execution path\"* |\n| form helpText | *\"Ask user to approve before executing (for destructive actions)\"* | \"NOT ENFORCED (#3715) … For a real gate use the action-level `ai.requiresConfirmation` + approval queue; AI metadata edits are already gated by draft/publish.\" |\n| `skills/objectstack-ai/SKILL.md:547` | *\"put a human in the loop — `requiresConfirmation: true` on the tool\"* | lists the **enforced** gates first, then ⚠️ do not rely on the tool-level flag |\n| `MCP_GUIDE.md`, `packages/spec/README.md` | recommended it for side effects | point at `approval: 'always'` / action-level `ai.requiresConfirmation` |\n\nThe section's *other* field, `permissions` (already `dead` in the ledger), got the same treatment — it was sitting under the same \"Access & safety\" banner making the same implicit promise.\n\n## Verification\n\n6710 spec tests · `check:liveness` / `check:docs` / `check:api-surface` / `check:skill-docs` / `check:skill-examples` / `check:i18n` / `check:role-word` all green.\n\nThe four i18n bundles were regenerated (the form copy changed) and the diff verified line-by-line: **only** the tool form's `label` / `description` / `helpText` keys moved — no unrelated block was rewritten, which a full `i18n:extract` can otherwise do.\n\nRefs #3715, #3711, ADR-0033.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 3677,
+  "kind": "pull_request",
+  "title": "docs(audits): recheck the §3 naming-drift list; fix the os doctor lookupFilters hint (#1878)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T13:59:15Z",
+  "updated_at": "2026-07-27T14:16:04Z",
+  "closed_at": "2026-07-27T14:16:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T14:16:01Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3677",
+  "body": "Third and last recheck of the 2026-06 liveness audit's problem clusters (after §1 security-props #3503 and the §2 report slice #3496). Companion objectui fix: objectstack-ai/objectui#2867.\n\n## Finding: six of nine were already resolved — the list was stale, not the code\n\nRe-verified every §3 item against current code in **both** repos, including the `<!-- os:check -->` TypeScript blocks inside `skills/*/SKILL.md` (they compile against the spec and are real consumers — the gap that bit #3605).\n\n| Resolved (list stale) | Evidence |\n| --- | --- |\n| `referenceFilters` | removed #2377/ADR-0049; successor `lookupFilters` is read + scopes the picker |\n| `maxRating` | pruned; builder emits `max`, `RatingField` reads `max` |\n| page `visibility` | spec folds → `visibleWhen`; `SchemaRenderer` consumes it |\n| dashboard `title`/`label` | renderer dual-reads; widget keys additionally **hard-fail** via `.strict()` + naming error map (#1894) |\n| flow `http` | spec enum canonical; runtime registers `HTTP_TYPE='http'` |\n| agent `knowledge.topics` | #1891 folds the alias into `sources`; test asserts `'topics' in parsed === false` |\n| webhook `object`/`isActive` | #3489 materializes with an explicit mapping |\n| action `disabled` | fixed across all six surfaces this month (objectui#2863 + #3643) |\n| skill `requiredPermissions` | **never a drift** — the key never existed on `SkillSchema`; the original audit described prose/label drift in the docs |\n\n**Still real** (fixed in the companion objectui PR): the coupled page pair `type`→`pageType` + `label`→`title`, which mis-renders **every non-record page today** (showcase `capability_map`, `active_projects`, `command_center_jsx`), plus two snake-only `max_length` readers.\n\n## The systemic finding\n\nFor every item, authoring the wrong key is **silently stripped** — `FieldSchema` and `PageSchema` are bare `z.object` (verified empirically: parsing a page with `pageType` + `title` returns neither, no error). The **dashboard-widget `.strict()` + fixable naming error map (#1894) is the only mechanism in the codebase that turns a silent no-op into a teaching error.** Extending it to `PageSchema`/`FieldSchema` is the structural fix for this whole class; per-item wiring is the tactical one.\n\n## Changes\n\n- **Add** `docs/audits/2026-07-naming-drift-recheck.md` — per-item verdicts with file:line evidence, the gate-coverage analysis, and three items left as owner decisions.\n- **Annotate** README §3 with the recheck summary.\n- **Fix `os doctor`** — its snake→camel table advised \"Use `referenceFilters`\", a key removed in #2377 that the schema silently strips. Now matches both spellings and names the live `lookupFilters`.\n\n## Left as decisions (recorded, not fixed)\n\n1. **app `badge`/`badgeVariant` + nav `separator` — surface-conditional, port rather than prune.** The capability is fully implemented in `layout/src/NavigationRenderer.tsx` (`:906` separator, `:983-985` badge), a publicly exported + SDUI-registered (`navigation-renderer`) component. It is missing from `UnifiedSidebar`, which is what actually renders `app.navigation` in the console. So the same authored key works on one surface and silently vanishes on the other. *(An earlier revision of this PR claimed `NavigationRenderer` had been deleted — that was wrong, from a truncated grep; corrected in the second commit.)*\n2. **`skill.permissions` has no gate** — mis-filed as naming drift; it's an aspirational-config item (§4). The ledger marks it `live` on a *preview renderer*'s evidence while the identically-unenforced `tool.permissions` is `dead` + `authorWarn`, so authors get silence where they should get a warning. Note the cloud runtime documents the intent in a comment (\"Layer permissions via `Skill.permissions` independent of the agent's permissions\") without implementing it.\n3. **`agent.knowledge` is inert** — naming fixed by #1891, but `search_knowledge` takes `sourceIds` from the LLM's tool-call args, never from the authored block, so a declared knowledge scope constrains nothing.\n\nRefs #1878, #3503, #3496.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

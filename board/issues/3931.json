@@ -1,0 +1,35 @@
+{
+  "number": 3931,
+  "kind": "pull_request",
+  "title": "feat(approvals): decisionOutputs may be declared required (objectui#2955)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T10:37:32Z",
+  "updated_at": "2026-07-29T12:13:32Z",
+  "closed_at": "2026-07-29T12:13:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-29T12:13:30Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3931",
+  "body": "Closes the platform half of https://github.com/objectstack-ai/objectui/issues/2955 (no separate issue here).\n\n## Why\n\n`decisionOutputs` exists so an approver's decision can route the next step —\n`approvers: [{ type: 'expression', value: 'vars.lead_review.next_reviewers' }]` — but nothing made the approver actually answer. A skipped output resumed the run with the key absent, and the next node either faulted with `EXPRESSION_FAILED` or resolved an empty slate and stalled on `onEmptyApprovers: 'admin_rescue'` — long after the one person who could have filled it in had moved on. `onEmptyApprovers` is a recovery mechanism, not a contract.\n\n## What\n\nA typed `decisionOutputs` entry may now carry `required: true`. Unlike `type` / `multiple`, which only shape the input widget, this one is enforced by the runtime.\n\n- **`@objectstack/spec`** — `DecisionOutputDefSchema` gains `required`; `normalizeDecisionOutputs` carries it through, so it reaches clients on `decision_output_defs` and a decision UI can block locally instead of round-tripping to a 400.\n- **`@objectstack/plugin-approvals`** — `decide()` rejects an approve with no value, or a blank one (`''`, whitespace, `[]`, an array of blanks), with `VALIDATION_FAILED` **before any write**: neither the audit row nor the request moves.\n\n### Semantics (deliberate, documented)\n\n- **Approve only.** A reject leaves down the `reject` edge where nothing reads the outputs — demanding routing data to say \"no\" would trap the rejection. Outputs still ride a reject when the approver filled them in.\n- **No elevation bypass.** A one-click email action link and an `auto_approve` SLA escalation both fail rather than advance into a node that would resolve nobody. The escalation sweep already isolates a throwing request, so that decision stays pending and visibly overdue instead of silently breaking the run downstream.\n- **Per decision.** On a `unanimous` / `quorum` node every approver supplies the required outputs, and the finalizing decision's values are what the flow resumes with.\n\nDocs: the generated reference table, `content/docs/automation/approvals.mdx` and `skills/objectstack-automation/SKILL.md`. The showcase's dynamic-approval flow now declares the flag — the honest shape for that demo, whose co-sign node is `onEmptyApprovers: 'fail'`.\n\n## Tests\n\n8 new service tests + 4 spec normalizer tests. Full suites for every touched package: spec 6827, plugin-approvals 326, lint 540, rest 419 — all green.\n\n## Verified on the showcase runtime\n\n| Check | Result |\n|---|---|\n| `POST …/approve` with no outputs | `400 VALIDATION_FAILED`, request still pending, audit table holds only the `submit` row |\n| `POST …/approve` with `{ next_reviewers: [] }` | same 400 |\n| filled approve | goes through; the co-sign node's `expression` approver resolves to the picked user |\n\nThe console side is objectstack-ai/objectui#2955 (marks the field required so the approver is stopped at the empty field rather than by this 400).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

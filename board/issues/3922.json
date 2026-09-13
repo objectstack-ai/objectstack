@@ -1,0 +1,35 @@
+{
+  "number": 3922,
+  "kind": "pull_request",
+  "title": "fix(runtime): bind action-body ctx.api/ctx.engine to a real execution context (#3914)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T09:27:57Z",
+  "updated_at": "2026-07-29T09:56:09Z",
+  "closed_at": "2026-07-29T09:56:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-29T09:56:06Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3922",
+  "body": "Fixes #3914.\n\n## The defect\n\nAn action body's `ctx.api` was never bound. `buildSandboxApi` walked its whole 3-way fallback — no `actionCtx.api`, and the raw `ObjectQL` engine has no `.object()` (that lives on `ScopedContext`, reachable only via `engine.createContext()`, which the action path never called) — and landed on a repo facade that proxied every call to the engine with **no `context`**. `ctx.engine` (`buildActionEngineFacade`) had the identical hole.\n\nContext-less is not \"trusted\", it is **identity-less**, and identity-less is strictly worse than either coherent posture:\n\n- plugin-sharing's `canEdit` short-circuits on `!context.userId` — there is no user to own anything;\n- its bypass needs `context.isSystem` — which was never set.\n\nSo every owner-scoped write from an action body died `FORBIDDEN: insufficient privileges to update <object>` — as the built-in admin — while the `[action-audit]` line on the same request announced RLS-bypassing TRUSTED execution. Objects with a `public` sharing model, no owner field, or a bypass listing passed the gate early, which is why only *some* actions broke and the defect read as object-dependent flakiness.\n\n## The fix\n\nBoth dispatch paths — REST `/actions/:object/:action` and MCP `run_action` — now bind `ctx.api` to `engine.createContext(...)` and thread the same envelope through `ctx.engine`, matching what hook bodies already get from the engine's `buildHookApi`.\n\nThe envelope (`buildActionExecutionContext`) is **the caller's ExecutionContext elevated with `isSystem: true`**. Of the two coherent options the issue offered, this is the one that matches the documented model: elevation is the posture #2849 already documents and gates for at invoke time (capability gate + `ai.exposed`), so RLS-scoping instead would silently break bodies that legitimately act beyond the caller.\n\nOne refinement on the bare `{ isSystem: true }` that hooks fall back to — the caller's fields are spread **first**, so writes stay:\n\n- attributable — `userId` stamps `created_by` / `updated_by`;\n- org-scoped — `tenantId` stamps the org column and drives driver-level tenant isolation;\n- transactional — an open `transaction` handle is joined,\n\ninstead of the unattributable, org-less rows bare elevation would write.\n\nThe sandbox's last-resort repo facade is elevated from the same envelope via `ctx.executionContext`, so a host predating `createContext` is not left proxying context-less either. The `[action-audit]` wording now describes what the body actually gets (\"system-elevated context\") rather than the false \"context-less engine\".\n\n## Changes\n\n| File | Change |\n|:---|:---|\n| `packages/runtime/src/action-execution.ts` | New `buildActionExecutionContext` + `buildActionApi`; `buildActionEngineFacade` takes the caller envelope and threads `context` through every verb; MCP `actionContext` gains `api` + `executionContext`; audit line + stale security-model comments corrected |\n| `packages/runtime/src/domains/actions.ts` | REST path drops its duplicated inline facade for the shared (context-carrying) one, gains `api` + `executionContext`, audit line corrected |\n| `packages/runtime/src/sandbox/body-runner.ts` | `buildSandboxApi` prefers `ql.createContext(ctx.executionContext)`; the last-resort repo facade threads that context through every call |\n| `packages/runtime/src/action-body-identity.test.ts` | New — 15 regression tests |\n| `content/docs/ui/actions.mdx` | The trusted-facade callout named only `engine`; now covers `ctx.api` and states the elevation posture |\n\n## Verification\n\nThe regression tests use an engine stub that refuses a write carrying neither `userId` nor `isSystem`, the way the real sharing gate does. Reverting just the domain wiring reproduces the reported failure verbatim:\n\n```\nFAIL src/action-body-identity.test.ts > REST /actions dispatch binds ctx.api and ctx.engine\nError: FORBIDDEN: insufficient privileges to update crm_case\n```\n\nWith the fix, full monorepo suite green — **132/132 turbo tasks**, including runtime (735 tests), objectql (1163), and the dogfood suite (395 passed / 3 skipped). ESLint clean on the changed files.\n\n## Out of scope\n\n- The HTTP-200-on-failure half (#3913) is untouched.\n- No changeset — AGENTS.md exempts pure bug fixes.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01TufbW1LBcSwpta4gfX7Uso)_"
+}

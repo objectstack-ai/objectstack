@@ -1,0 +1,32 @@
+{
+  "number": 3741,
+  "kind": "issue",
+  "title": "ObjectQLEngine.init() 吞掉 driver 连接失败：连不上数据库的服务器照常启动，driver 的启动期致命错误被降级成运行时报错",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T01:09:46Z",
+  "updated_at": "2026-07-28T02:10:36Z",
+  "closed_at": "2026-07-28T02:10:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3741",
+  "body": "## 一句话说明\n\n`ObjectQLEngine.init()` 对每个 driver 的 `connect()` 做 try/catch，失败只 log 一条 error 就继续启动。结果：数据库连不上的服务器会\"启动成功\"，然后所有请求在查询时炸；更糟的是，**driver 没有任何办法通过 `connect()` 拒绝启动**——任何启动期致命校验都会被这层 catch 降级。\n\n在 #3724 落地方案 B（PR #3734）时撞到，按 Prime Directive #10 拆出来单独跟踪。\n\n## 事实核实\n\n`packages/objectql/src/engine.ts:1868-1888`：\n\n```ts\nconst failedDrivers: string[] = [];\nfor (const [name, driver] of this.drivers) {\n  try {\n    await driver.connect();\n    this.logger.info('Driver connected successfully', { driverName: name });\n  } catch (e) {\n    failedDrivers.push(name);\n    this.logger.error('Failed to connect driver', e as Error, { driverName: name });\n  }\n}\n\nif (failedDrivers.length > 0) {\n  this.logger.warn(\n    `${failedDrivers.length} of ${this.drivers.size} driver(s) failed initial connect. ` +\n    `Operations may recover via lazy reconnection or fail at query time.`,\n    { failedDrivers }\n  );\n}\n```\n\n两点值得注意：\n\n1. **\"lazy reconnection\" 是一句空头承诺。** 全仓 grep `reconnect`，除了这条 warning 字符串本身，`driver-sql` / `driver-mongodb` 里没有任何重连实现。所以现实中只剩下 \"fail at query time\" 这一半。\n2. **调用点紧接着就做 DDL。** `packages/objectql/src/plugin.ts:418` `await this.ql?.init()`，下一步（同文件 431）就是 `syncRegisteredSchemas(ctx)` —— 对一个没连上的 driver 跑建表/建索引。\n\n## 影响\n\n1. **生产误配静默通过**：错的 `OS_DATABASE_URL`、轮换过的密码、没开的网络策略 —— 服务器照常起来、健康端点可能还是绿的，然后每个请求 500，报出的错误跟真实原因（数据库连不上）相距很远。\n2. **driver 失去了\"拒绝启动\"的能力**，这是更结构性的一条。任何 driver 想在启动期做致命校验（不只是网络不可达：许可、版本、配置不兼容、能力缺失），走 `connect()` 抛错都会被这层 catch 吃掉，降级成运行时错误。\n\n   #3734 就是被这一点逼出来的：driver-mongodb 检测到多租户模式必须拒绝启动，但只放在 `connect()` 里的话，\"拒绝启动\"会退化成\"启动了、之后在查询时炸\"——只好把守卫挪进**构造函数**。这个绕法能用，但它不是下一个 driver 作者会知道要复制的模式，而且构造函数不是所有启动期校验都放得进去的地方（需要连接才能查到的信息就不行）。\n\n## 建议处置\n\n**A. `init()` 默认 fail-fast** —— 任一 driver `connect()` 失败即向上抛，boot 中止并打印哪个 driver、什么原因。要保留宽容行为的话，做成显式 opt-in（`OS_ALLOW_*` 形态的逃生阀，且启动时 loud 标注处于降级状态），而不是默认。\n\n**B. 至少区分错误种类** —— 网络类瞬时失败保留现状，但**必须真的实现** lazy reconnect，否则那条 warning 是在骗人；driver 主动拒绝（带 `code` 的语义性失败）直接抛。\n\n倾向 **A**：它同时修好两件事，且和平台已有的取向一致 —— `resolveTenancyPosture()` 对非法值拒绝启动、ADR-0093 D5 的 degraded-tenancy 拒绝启动、`serve.ts` 对 `UnsupportedDriverError` 拒绝启动，都是\"宁可不启动，也不带着说不清的状态服务流量\"。这里是同一个决定，只是还没做。\n\n无论选哪个，**\"lazy reconnection\" 那句话要么兑现、要么删掉** —— 它现在是 declared ≠ enforced 的一个小样本。\n\n## 关联\n\n- #3724 / #3734（发现处；那边把守卫挪进构造函数正是为了绕开本 issue）\n- Prime Directive #10：never advertise a capability the runtime doesn't deliver"
+}

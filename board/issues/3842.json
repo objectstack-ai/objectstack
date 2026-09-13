@@ -1,0 +1,32 @@
+{
+  "number": 3842,
+  "kind": "issue",
+  "title": "The dispatcher puts the HTTP status in `error.code` and parks the real code in `details` — pinned in #3687, still unfixed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T09:21:57Z",
+  "updated_at": "2026-07-30T00:36:20Z",
+  "closed_at": "2026-07-30T00:36:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3842",
+  "body": "The second \"Related, not the same\" item from #3689, filed on its own now that #3837 has closed that issue. Blocked on #3841 (which vocabulary the code should be written in) — fixing this one first would mean picking a dialect by accident.\n\n## The drift\n\n`HttpDispatcher.error()` (`packages/runtime/src/http-dispatcher.ts:451`) takes the HTTP status as its `code` parameter and writes it straight into the field `ApiErrorSchema` reserves for a semantic string:\n\n```ts\nprivate error(message: string, code: number = 500, details?: any) {\n    return {\n        status: code,\n        body: { success: false, error: { message, code, details } }\n    };\n}\n```\n\n`ApiErrorSchema` (`packages/spec/src/api/contract.zod.ts`) declares:\n\n```ts\ncode: z.string().describe('Error code (e.g. validation_error)'),\n```\n\nSo `error.code` comes back as `400`/`403`/`503` — a number, duplicating `response.status`, and occupying the field a caller is meant to branch on.\n\n**The dispatcher already works around its own field being taken**, which is the tell that the number is in the wrong place:\n\n| Site | Real code goes to |\n|---|---|\n| `http-dispatcher.ts:679` | `details.code` — `this.error(gate.message, 403, { code: gate.code })` |\n| `http-dispatcher.ts:1379` | `details.code` — `{ code: 'PERMISSION_DENIED', …e.details }` |\n| `routeNotFound()` (`:485`) | `error.type` — a *third* spelling, `'ROUTE_NOT_FOUND'`, sibling to the numeric `code` |\n| project-membership gate | `details.type` — `'PROJECT_MEMBERSHIP_REQUIRED'` |\n\nFour sites, three different parking spots (`details.code`, `details.type`, `error.type`), because the declared one is full.\n\n## Why it was pinned rather than fixed\n\n#3687 chose to nail the deviation down to exactly one field instead of moving it, and said so in `http-dispatcher.test.ts`:\n\n```ts\nconst parsed = ApiErrorSchema.safeParse(body.error);\nexpect(parsed.success).toBe(false);\nexpect(parsed.error!.issues.map((i) => i.path.join('.'))).toEqual(['code']);\nexpect((body.error as { code: unknown }).code).toBe(400);\n```\n\n`toEqual(['code'])` is deliberately exact: a second deviating field fails it, and so does fixing the dispatcher — at which point the pin should be deleted rather than updated.\n\nThe reason for pinning was blast radius: `error.code` is read by the SDK's error path, by the console, and by the dogfood suite. That has not changed, so this is still a real change with a consumer sweep, not a rename.\n\n## What needs deciding\n\n1. **Move the semantic code into `error.code`, drop the number.** The status is already on the HTTP response and in `meta`; duplicating it into the body's one semantic slot buys nothing. Every `details.code` / `details.type` / `error.type` parking spot collapses into the declared field. Requires #3841 first (which dialect), plus a sweep of readers that currently expect a number there.\n2. **Rename the number to `httpStatus` and free `code`.** `EnhancedApiErrorSchema` already declares an `httpStatus` field, so this has precedent in the spec. Same consumer sweep, but the number stays available for anyone reading it today.\n3. **Change the spec to match** — declare `code` as `z.union([z.string(), z.number()])`. Cheapest, and wrong: it blesses two meanings for one field and gives the conformance suites nothing to assert.\n\nRecommendation: **option 2** then **option 1** — introduce `httpStatus`, move the semantic codes into `code`, keep `details` for genuine context only. Doing it in that order means no window where a caller has neither field.\n\n## Scope note\n\nThis is the dispatcher only. The autonomously-mounted service routes (`storage-routes.ts`, `i18n-service-plugin.ts`) already emit a semantic string in `error.code` as of #3687 — they were never the problem here. Fixing the dispatcher is what finally makes the two providers of the same SDK method agree on what `error.code` *means*, which is the last piece of the asymmetry #3636 → #3675 → #3689 has been closing one layer at a time."
+}

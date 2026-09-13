@@ -1,0 +1,32 @@
+{
+  "number": 3897,
+  "kind": "issue",
+  "title": "`deleteManyData` 把请求体的 `options` 展开在 `where` 之后 —— body 可覆盖 id 谓词,把\"删这几条\"放大成\"删调用者可见的全部\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T15:19:42Z",
+  "updated_at": "2026-07-29T11:02:22Z",
+  "closed_at": "2026-07-29T11:02:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3897",
+  "body": "从 #3878 的同类扫查里出来的：请求体里的一个键，能把一次\"按 id 删除\"改写成\"按调用者可见范围全删\"。\n\n## 代码\n\n`packages/metadata-protocol/src/protocol.ts:3808`：\n\n```js\nasync deleteManyData(request: DeleteManyDataRequest): Promise<any> {\n    this.assertObjectRegistered(request.object); // [#3770]\n    // This expects deleting by IDs.\n    return this.engine.delete(request.object, {\n        where: { id: { $in: request.ids } },\n        ...request.options          // ← 展开在 where 之后，可以把它替换掉\n    });\n}\n```\n\n而 `request.options` 是**调用者给的**：`packages/rest/src/rest-server.ts:6814` 把整个 body 原样摊进请求对象 ——\n\n```js\nconst result = await p.deleteManyData!({\n    object: req.params.object,\n    ...req.body,\n    ...\n});\n```\n\n所以：\n\n```json\nPOST /api/v1/data/:object/deleteMany\n{\"ids\":[\"a\"], \"options\":{\"multi\":true,\"where\":{}}}\n```\n\n到达 `engine.delete` 时 `where` 已经是 `{}`。注释里那句 \"This expects deleting by IDs\" 描述的是意图，不是它实际保证的东西。\n\n## 影响范围\n\n写路径仍然过引擎中间件（RLS/sharing 会往 AST 上叠谓词），所以炸的不是\"删全表\"，而是**把一次范围明确的删除放大成\"这个调用者能删的一切\"**。对一个已经有 delete 权限的普通用户来说，这是 3 条 → 全部可见记录的差别。我没有实跑确认最终行数 —— 中间件的组合结果需要真实 RLS 策略才能定量 —— 但 body 能覆盖 `where` 这一点在源码上没有歧义。\n\n## 修法：接一行 parse 就没了\n\n`DeleteManyDataRequestSchema` 已经存在（`packages/spec/src/api/protocol.zod.ts:538`），其 `options` 是 `BatchOptionsSchema`，只允许 `atomic` / `returnRecords` / `continueOnError` / `validateOnly`（`packages/spec/src/api/batch.zod.ts:60-65`）。**Zod 默认对象模式会剥掉未知键**，所以在入口 `.parse()` 之后 `options.where` 根本到不了协议层。\n\n更彻底一点：把展开顺序倒过来（`{ ...request.options, where: {...} }`），让谓词无论如何都是最后写入的 —— 两处都做更好，一处防越权、一处防将来又有新入口绕过校验。\n\n## 顺带：happy path 本身也是坏的\n\n一个**格式完全正确**的 `{\"ids\":[...]}` 会走到 `engine.ts:3524` 抛 `'Delete requires an ID or options.multi=true'` —— 因为 `deleteManyData` 从不设置 `multi`。也就是说这个端点的正常用法目前是不通的，只有传了 `options.multi` 的（即触发上述覆盖的）请求才走得通。这两件事应该一起修。\n\n<sub>核对于 `origin/main` @ 93f267f81。未实跑验证行数，已在上文标注。</sub>\n"
+}

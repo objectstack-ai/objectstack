@@ -1,0 +1,32 @@
+{
+  "number": 3508,
+  "kind": "issue",
+  "title": "审批节点「处理人 Value」应改为记录 lookup(现查 metadata 端点→只能手填);附 approver value 语义核实 + queue 未实现",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T01:23:01Z",
+  "updated_at": "2026-07-30T02:19:34Z",
+  "closed_at": "2026-07-28T06:15:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3508",
+  "body": "## 问题\n\n流程设计器里,审批节点(approval)的 **Approvers → Value** 目前是个 datalist 组合框,数据源接的是\n`client.list(type)` → `GET /api/v1/meta/:type`(**metadata 注册表**端点)。\n\n但 `user / team / department / queue` 这些处理人是**数据记录**(躺在 `sys_user` / `sys_team` /\n`sys_business_unit` 等系统对象里),**不在 metadata 注册表**里。结果候选恒为空,控件退化成\n**纯手填**——作者只能手动敲 userid / 团队 id,失去了\"选择\"能力。\n\n设计器本应按 spec 里已声明的 `xRef`(`approval.zod.ts` 的 `value.meta.xRef`,把每个 type 映射到\nuser/position/team/… picker)出**记录选择器**,现实现图省事接到了 metadata 端点。\n\n### 实测证据(console preview-gallery,无后端)\n\n在 flow 设计器加一个 approval 节点,把 Type 切成 **User**:\n\n- Value `<input>` 实测 `list = null`、候选数 `= 0` → 就是个纯文本框;\n- 抓到它发的请求:`GET /api/v1/meta/user`(注册表端点,列不出用户记录)。\n\nType=Team / Department / Queue 同理(都查 `/meta/:type`,恒空)。\n\n---\n\n## 三点核实结论(以引擎为准,不是 zod 描述)\n\n数据来源:`packages/plugins/plugin-approvals/src/approval-service.ts` 的\n`resolveApproverSpec()` + 各 `expand*Users()`。\n\n### 1. 是否全单选 —— 是\n\n引擎里每个 approver 行的 `value` 一律是**单个标量**(全程 `String(a.value)`,没有哪种类型在一行里吃\n数组)。**多个审批人 = `approvers` 数组里多行**。所以设计器控件应为「每行单选」。\n\n> 注:`field` 类型运行时能展开成多人,但那是**记录字段里存了多个 id**(`csvSplit(record[value])`),\n> 不是设计器里在一行里多选出来的。\n\n### 2. Value 各类型到底存什么(引擎确认)\n\n| Type | 引擎如何使用 value | 存值 |\n|---|---|---|\n| `user` | `applyOooDelegation(String(value))`(L442) | `sys_user` **id** |\n| `team` | `find('sys_team_member', { team_id: value })`(L486) | `sys_team` **id** |\n| `department` | `find('sys_business_unit', { id: value })`(L502) | `sys_business_unit` **id**(注意不是 sys_department) |\n| `position` | `find('sys_user_position', { position: value })`(L550) | `sys_position` **name(机器名)**,非 id |\n| `org_membership_level` | 展开 owner/admin/member 三档 | 枚举串,**非记录** |\n| `manager` | `record[value] ?? record.owner_id`(L470) | **字段名**(可选,通常留空) |\n| `field` | `record[value]` 取用户 id/ids | 触发对象**字段名** |\n| `queue` | **引擎里没有 queue 分支** → 落到 `['queue:'+value]` 死值 | **运行时未实现** |\n\n### 3. 是否只有 position 存 name —— 不完全是\n\n- 在「要查记录」的类型里:`user`/`team`/`department` 存 **id**,**只有 `position` 存 name** —— 这句成立。\n- 但「非 id 值」不止 position:`org_membership_level` 是枚举、`field`/`manager` 是字段名 ——\n  它们根本不是记录,不该套记录 lookup。\n- 另有 **`queue` 在引擎里未实现**(`resolveApproverSpec` 无 queue 分支,只有 BFS 里一个同名局部变量),\n  选了也不会解析到任何人。\n\n---\n\n## 建议修复\n\n**A. 设计器(objectui `packages/app-shell`)—— 主体改动**\n\n复用 `@object-ui/fields` 的 `LookupField`(单选,`useAdapter()` 提供 DataSource),按类型分组渲染\nApprovers 的 Value:\n\n- **记录 lookup(单选)**:\n  - `user` → `sys_user`,存 **id**\n  - `team` → `sys_team`,存 **id**\n  - `department` → `sys_business_unit`,存 **id**\n  - `position` → `sys_position`,**存 name(非 id)**\n- **不做记录 lookup**:\n  - `org_membership_level` → 严格 `Select`(owner/admin/member 闭合枚举,顺手防 `sales_manager` 这类脏值)\n  - `field` → 维持对象字段选择器(现状可用)\n  - `manager` → Value 框禁用 + 提示「由提交人上级自动解析」(或作为可选字段名)\n  - `queue` → 暂保留手填 + 提示「运行时未支持」(见 B)\n\n涉及:\n- `packages/app-shell/src/views/metadata-admin/inspectors/FlowReferenceField.tsx`\n  (`KIND_TO_META_TYPE` / `useMetadataListOptions` 现在把这些类型接到 `/meta/:type`)\n- `packages/app-shell/src/views/metadata-admin/inspectors/flow-node-config.ts`(approvers 列定义)\n\n**B. 引擎(framework `plugin-approvals`)—— queue 决策**\n\n`resolveApproverSpec` 缺 `queue` 分支。要么补上 queue 展开逻辑,要么把 `queue` 从\n`approval.zod.ts` 的 approver type 枚举里移除/标注 deprecated,别让设计器提供一个运行时不生效的选项。\n\n---\n\n## 风险 / 待确认\n\n- 设计器过去是纯 metadata、不查数据;接 lookup 后要在设计器里查 `sys_user` 等记录(需当前用户有读权限)。\n- 预览画廊无后端,这几类仍会退化成手填(可接受,离线态)。\n- `position` 存 name、`department`→`sys_business_unit` 这两处映射需重点测。\n\n## 验收\n\n- 设计器审批节点:User/Team/Department 能弹记录选择器并选中,提交后 value 是对应 **id**;\n- Position 选中后 value 是 `sys_position.name`;\n- org_membership_level 为严格三选一;manager 无输入框;queue 处理见 B;\n- 每种类型改动后在真机(带后端)逐一验证解析到正确的人。\n"
+}

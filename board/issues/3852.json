@@ -1,0 +1,35 @@
+{
+  "number": 3852,
+  "kind": "pull_request",
+  "title": "ci: assert every test vitest counted actually ran (#3825)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T11:47:35Z",
+  "updated_at": "2026-07-28T12:05:51Z",
+  "closed_at": "2026-07-28T12:05:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T12:05:48Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3852",
+  "body": "Follow-up to #3830 / #3812.\n\n## The failure mode\n\nA vitest worker can die at the **process level** — a native module segfault, OOM, an abort inside a binding. There is no JS error to catch, so the cases that worker owned never run, and the summary reports only what survived:\n\n```\nTest Files  1 passed (40)\n      Tests  21 passed (401)\n```\n\nThat leads with **\"passed\"**. It is **380 tests short**.\n\n#3812 hit exactly this shape (17 cases silently skipped, reported as `22 passed (23)`) and it was found by a human reading the log closely — which is not a control.\n\n## Being precise about the risk\n\nI want to be accurate rather than oversell this: **the run does exit non-zero, so the gate goes red.** This is not a false green.\n\nThe failure mode is **a red that reads like a pass**. Someone triaging sees \"passed\" and a plausible file count and concludes one file flaked — rather than that a fifth of the suite never executed. This PR turns that into a specific, quantified error naming the package and the shortfall. It also covers the genuinely dangerous variant, where a crash lands somewhere that does not propagate a non-zero exit at all.\n\n## How\n\n`scripts/check-test-completeness.mjs` reads a saved `turbo run test` log and asserts, per package, that the tallies (`passed | skipped | failed`) sum to the declared total. Reading the log rather than wrapping vitest means **no change to the 60+ per-package vitest configs**.\n\nWired into `ci.yml`'s Test Core (both PR and push steps) and both Dogfood shards, each as a separate `if: always()` step so it runs **when the suite failed** — that is when it earns its keep:\n\n| Suite | Completeness | Means |\n|---|---|---|\n| red | green | real test failures |\n| red | **red** | **a worker died; those cases never ran** |\n\n## Two load-bearing details\n\n**1. `set -o pipefail` is not optional.** The test steps now `tee`, and GitHub runs them with `bash -e`, which does **not** set pipefail — so `turbo … | tee` would report *tee's* exit status and a failing suite would go green. That is the same class of bug this guard exists to catch, so it must not be introduced by the catching. Verified both ways:\n\n```\nwith    pipefail → step exits 7   ✅\nwithout pipefail → step exits 0   ❌\n```\n\nAlso confirmed the log still exists when the suite fails, so the `always()` guard can still read it.\n\n**2. Zero summaries is a pass with an explicit note**, not a silent one — `turbo run test --affected` legitimately runs nothing when a PR touches no package. A vacuous pass that *looks* like a real one is the thing we are trying to eliminate, so it says so.\n\n## Validation — real data, not fixtures\n\nRun against the actual logs captured during #3830's Node 20 vs 22 comparison:\n\n```\nNode 22 log:  check-test-completeness: OK (68 package(s), 16678 test(s) declared\n                                        and all 16678 accounted for).           exit 0\n\nNode 20 log:  check-test-completeness: 2 summaries report fewer results than it counted\n                • @objectstack/driver-sql -- Test Files: 1 of 40 accounted for, 39 missing\n                • @objectstack/driver-sql -- Tests: 21 of 401 accounted for, 380 missing\n                                                                                exit 1\n```\n\nThat Node 20 log is a real worker segfault, not a constructed one.\n"
+}

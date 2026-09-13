@@ -1,0 +1,30 @@
+{
+  "number": 3933,
+  "kind": "issue",
+  "title": "updateMany 让请求体覆盖路径上的 object —— 暴露闸门查的是 A,写进去的是 B",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T10:40:05Z",
+  "updated_at": "2026-07-29T11:02:23Z",
+  "closed_at": "2026-07-29T11:02:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3933",
+  "body": "从 #3897 的修复里带出来的:那个 issue 的成因是\"body 展开在受信任的值之后\",而同一个展开在**同一段代码**里还覆盖了另一个东西 —— 路径上的 `object`。\n\n## 代码\n\n`packages/rest/src/rest-server.ts:6820`(updateMany 路由):\n\n```js\nconst result = await p.updateManyData!({\n    object: req.params.object,   // ← 受信任的值,先写\n    ...req.body,                 // ← body 展开在它之后,可以把它替换掉\n    ...(environmentId ? { environmentId } : {}),\n    ...(context ? { context } : {}),\n});\n```\n\n而它上一行的闸门读的是**路径**上的对象名 —— `enforceApiAccess` 里 `const objectName = req?.params?.object`(`rest-server.ts:1211`)。所以 `enable.apiEnabled` / `enable.apiMethods`(ADR-0049 / #1889)是在 A 上判的,`updateManyData` 拿到的是 body 里的 B。\n\n## 实跑复现\n\n在 CRM dev 环境(`pnpm dev:crm -- --fresh`),已登录的普通调用者:\n\n```\nPOST /api/v1/data/crm_account/updateMany\n{\"object\":\"crm_contact\",\"records\":[{\"id\":\"gg92PD4PHl4XM-ol\",\"data\":{\"last_name\":\"PWNED\"}}]}\n\n→ {\"success\":true,\"operation\":\"update\",\"total\":1,\"succeeded\":1,...}\n→ crm_contact 那条记录的 last_name 确实变成了 PWNED\n```\n\n路径指向 `crm_account`,写进去的是 `crm_contact`。把路径换成任意一个 `apiEnabled` 开着的对象,body 里填一个 `apiEnabled:false` 或 `apiMethods` 不含 `update` 的对象,闸门就整个绕过去了 —— 闸门在 A 上放行,写落在 B 上。\n\n要说明的是这**不是**一个越权写:引擎中间件仍然按 B 跑 RLS/FLS,`assertObjectRegistered` 也仍然按 B 查注册表。破的是 `apiEnabled`/`apiMethods` 这一层 —— 也就是 ADR-0049 明确要求\"声明了就必须真的拦得住\"的那一层(Prime Directive #10)。\n\n## 第二件事:body 里的 `context`\n\n同一个展开也接受 `context`。它排在 `...(context ? { context } : {})` **之前**,所以只要 `resolveExecCtx` 解析出了 context,真 context 就会盖回去 —— 我在已登录的会话上试过,`updated_by` 写的是真实用户 id,body 里的 `{\"isSystem\":true}` 没有生效。\n\n有风险的是解析不出 context 的那一档:`requireAuth: false` 的部署上匿名请求走到这里,`context` 是 undefined,body 里那个就成了唯一的 context,原样喂给引擎当执行身份(`isSystem` / `userId` / `roles` 都在里面)。**这一档我没有实跑复现**,只是从 `?:` 的短路条件上读出来的,需要一个匿名可达的部署才能量化。\n\n## 范围\n\n同一批路由里只有 updateMany 中招:\n\n| 路由 | body 怎么进的 | 覆盖 `object`? | 覆盖 `context`? |\n|:--|:--|:--|:--|\n| `POST /:object/updateMany` | `...req.body` | **是** | 是(仅当没解析出 context) |\n| `POST /:object/deleteMany` | `...req.body` | 是 | 是 | ← #3897 已改成按 schema parse,但 parse 的入参仍是 `{object: req.params.object, ...req.body}`,**`object` 还是会被覆盖**,同一个 PR 里一起修 |\n| `POST /:object/createMany` | `records: req.body \\|\\| []` | 否 | 否 |\n| `POST /:object/batch` | `request: req.body`(套一层) | 否 | 否 |\n\n## 修法\n\n跟 #3897 同一招,而且刚好是同一个教训的两半:**受信任的值最后写**。把 body 按契约 `.parse()`(`UpdateManyDataRequestSchema`,Zod 默认剥未知键,顺手把 `context` 挡在门外),再把 `object: req.params.object` 放在展开**之后**,让路径上的对象名成为唯一的答案 —— 闸门查的和写进去的从此是同一个对象,不是靠调用者不去填那个键。\n\n<sub>核对于 `origin/main` @ 98e7cc7,`crm_contact` 那条实跑于 `claude/delete-many-data-options-override-1wbjzj` 上 #3897 修复后的构建。</sub>\n"
+}

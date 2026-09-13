@@ -1,0 +1,33 @@
+{
+  "number": 3520,
+  "kind": "pull_request",
+  "title": "chore(deps)(deps): bump chalk from 5.6.2 to 6.0.0",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "dependabot[bot]",
+    "id": 49699333,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T02:29:38Z",
+  "updated_at": "2026-07-27T11:45:54Z",
+  "closed_at": "2026-07-27T11:45:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T11:45:51Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3520",
+  "body": "Bumps [chalk](https://github.com/chalk/chalk) from 5.6.2 to 6.0.0.\n<details>\n<summary>Release notes</summary>\n<p><em>Sourced from <a href=\"https://github.com/chalk/chalk/releases\">chalk's releases</a>.</em></p>\n<blockquote>\n<h2>v6.0.0</h2>\n<h3>Breaking</h3>\n<ul>\n<li>Require Node.js 22  8a94e0e</li>\n</ul>\n<h3>Improvements</h3>\n<ul>\n<li>Add underline styles and underline colors (<a href=\"https://redirect.github.com/chalk/chalk/issues/689\">#689</a>)  4c304dd</li>\n<li>Improve performance  5729845 fa5cff2</li>\n</ul>\n<h3>Fixes</h3>\n<ul>\n<li>Treat a numeric <code>FORCE_COLOR</code> as an exact level (<a href=\"https://redirect.github.com/chalk/chalk/issues/688\">#688</a>)  e912931</li>\n<li>Downsample <code>ansi256()</code> and <code>bgAnsi256()</code> to 16 colors at level 1 (<a href=\"https://redirect.github.com/chalk/chalk/issues/687\">#687</a>)  ff549c5</li>\n</ul>\n<hr />\n<p><a href=\"https://github.com/chalk/chalk/compare/v5.6.2...v6.0.0\">https://github.com/chalk/chalk/compare/v5.6.2...v6.0.0</a></p>\n</blockquote>\n</details>\n<details>\n<summary>Commits</summary>\n<ul>\n<li><a href=\"https://github.com/chalk/chalk/commit/661317e6f91fe7c90306c2c48ea9354562ee9146\"><code>661317e</code></a> 6.0.0</li>\n<li><a href=\"https://github.com/chalk/chalk/commit/5729845f33d357e0c21b29b2b16849b72fb8cec4\"><code>5729845</code></a> Improve performance</li>\n<li><a href=\"https://github.com/chalk/chalk/commit/4c304dd72cce5a036c02e5dd8af52996ae98501f\"><code>4c304dd</code></a> Add extended underline styles and underline colors (<a href=\"https://redirect.github.com/chalk/chalk/issues/689\">#689</a>)</li>\n<li><a href=\"https://github.com/chalk/chalk/commit/e91293130c7d642c7b91152c3c942743a3b910a7\"><code>e912931</code></a> Fix: Treat a numeric <code>FORCE_COLOR</code> as an exact level (<a href=\"https://redirect.github.com/chalk/chalk/issues/688\">#688</a>)</li>\n<li><a href=\"https://github.com/chalk/chalk/commit/8a94e0ebfc495dda27f7090fb1a012790b15a76d\"><code>8a94e0e</code></a> Require Node.js 22</li>\n<li><a href=\"https://github.com/chalk/chalk/commit/fa5cff280e821c928dab716a03beff06529ffaf3\"><code>fa5cff2</code></a> Optimize 2-argument calls (<a href=\"https://redirect.github.com/chalk/chalk/issues/670\">#670</a>)</li>\n<li><a href=\"https://github.com/chalk/chalk/commit/ff549c534c413a9225322c1ff4e5fc0d97ae5610\"><code>ff549c5</code></a> Fix: Downsample <code>ansi256()</code> and <code>bgAnsi256()</code> to 16 colors at level 1 (<a href=\"https://redirect.github.com/chalk/chalk/issues/687\">#687</a>)</li>\n<li><a href=\"https://github.com/chalk/chalk/commit/678e5505458d0cf40134e205aed4454e0eeac45c\"><code>678e550</code></a> Tweaks</li>\n<li><a href=\"https://github.com/chalk/chalk/commit/aa06bb5ac3f14df9fda8cfb54274dfc165ddfdef\"><code>aa06bb5</code></a> Fix typos (<a href=\"https://redirect.github.com/chalk/chalk/issues/664\">#664</a>)</li>\n<li>See full diff in <a href=\"https://github.com/chalk/chalk/compare/v5.6.2...v6.0.0\">compare view</a></li>\n</ul>\n</details>\n<br />\n"
+}

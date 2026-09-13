@@ -1,0 +1,32 @@
+{
+  "number": 3676,
+  "kind": "issue",
+  "title": "`GetTranslationsRequest` declares `namespace` / `keys` that no server reads — declared ≠ enforced",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T13:57:58Z",
+  "updated_at": "2026-07-28T09:18:37Z",
+  "closed_at": "2026-07-28T09:18:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3676",
+  "body": "Found while ledgering the i18n surface for #3636.\n\n## The gap\n\n`GetTranslationsRequestSchema` (`packages/spec/src/api/protocol.zod.ts`) declares two optional filters:\n\n```ts\nnamespace: z.string().optional().describe('Translation namespace (e.g., objects, apps, messages)'),\nkeys: z.array(z.string()).optional().describe('Specific translation keys to fetch'),\n```\n\nand the endpoint's own description promises them: *\"Returns translation strings for the specified locale and optional namespace\"* (`plugin-rest-api.zod.ts`).\n\n**No server reads either one.** Both serving surfaces return the whole bundle for the locale regardless:\n\n- `packages/runtime/src/domains/i18n.ts` — reads only `parts[1]` / `query.locale`\n- `packages/services/service-i18n/src/i18n-service-plugin.ts` — reads only `req.params.locale`\n\nThe SDK dutifully sends them (`client.i18n.getTranslations(locale, { namespace, keys })` puts both on the query string), the server ignores them, and the caller gets the full bundle back with no indication the filter did nothing. This is Prime Directive #10's \"never advertise a capability the runtime doesn't deliver\", in the same shape as the validation-rule types trimmed in #1475.\n\n## Why it's more than cosmetic\n\n`keys` in particular reads as a payload optimization — the reason to pass it is to avoid shipping a large bundle. A client author who uses it believes they cut the response size and did not. `namespace` has the same problem for the Studio's per-module translation views.\n\n## Options\n\n1. **Trim both** from `GetTranslationsRequestSchema`, the endpoint description, and the client signature. Honest and small; the client params are optional so nothing breaks at runtime, though the signature change is technically breaking for TS callers passing them. Nothing in this repo passes them (checked), and the pre-#3636 `?locale=` dialect means any caller that DID pass them was 404-ing anyway — so the real-world blast radius is nil.\n2. **Implement both** — filter the bundle in the shared i18n path so it holds for the dispatcher and service-i18n alike. `keys` is trivial (pick from the resolved bundle); `namespace` needs a decision about what a namespace prefix means against the flat `o.<object>.fields.<field>` key convention, which is why it probably never got built.\n\nRecommendation: **trim** (option 1). `keys` is a micro-optimization with no requester, and `namespace` cannot be implemented without first defining what it means against the current key convention — which is a spec decision, not an implementation task. If the Studio later needs per-module translation slices, that is worth designing deliberately rather than honoring a two-word `describe()` string written before the key convention settled.\n\nRefs: #3636 (where the i18n surface was audited and the two dialect 404s were fixed), Prime Directive #10, #1475 (the trim-what-cannot-be-enforced precedent)."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 3742,
+  "kind": "pull_request",
+  "title": "fix(action): one precedence for `target` vs deprecated `execute` — lower the alias, then drop it (#3713)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T01:16:26Z",
+  "updated_at": "2026-07-28T02:07:16Z",
+  "closed_at": "2026-07-28T02:07:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T02:07:14Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3742",
+  "body": "Closes #3713.\n\n## The divergence\n\n`execute` is the deprecated alias of `target`. **Three** readers resolved \"the author declared both\" in **two opposite directions** — #3713 found two of them; the third turned up while verifying:\n\n| Reader | Preferred | Recorded in #3713? |\n|---|---|---|\n| `ActionSchema` transform — `packages/spec/src/ui/action.zod.ts` | `target` | ✅ |\n| objectui `ActionRunner.executeScript` — `execute \\|\\| target` | `execute` | ✅ |\n| CLI compile step — `lowerCallables` (`packages/cli/src/utils/lower-callables.ts`) | `execute` | ❌ **new** |\n\nSo `defineAction({ type: 'script', target: 'preferredHandler', execute: 'legacyHandler' })` ran `preferredHandler` server-side and `legacyHandler` client-side — two different scripts for one button, silently.\n\nThe CLI half was the nastiest of the three: with a function inlined in **both** slots it bundled the `execute` one and then overwrote `action.target` with that ref, so the function the author actually declared on `target` was silently dropped from the build.\n\n## What changed\n\n`target` wins everywhere, **and the transform drops the alias from its output** — the issue's second (stronger) option: the conflict becomes *unrepresentable* rather than merely agreed-upon. Same \"canonical wins, alias disappears\" shape as `agent.knowledge.topics` → `sources` (#1891), which asserts `'topics' in parsed === false`.\n\nTwo findings from verification that make dropping clearly the right call:\n\n- **The server runtime never read `execute` at all.** `isHeadlessInvokableAction` gates on `target || body` and the dispatch candidate chain probes `target`/`name` (`packages/runtime/src/action-execution.ts`). Authoring `execute` worked *solely* because the transform lowered it — so `target` was already the de-facto canonical slot server-side, and dropping the alias costs the server nothing.\n- **It fixes unpatched renderers by construction.** An `execute || target` reader falls through to `target` once `execute` is absent, so the spec-side fix alone resolves the divergence for any client receiving parsed metadata — the objectui change is defence-in-depth for paths that bypass parse (cached payloads, raw metadata-fs reads), not a prerequisite.\n\n## Compatibility\n\n**Authoring is unchanged.** `execute` is still accepted on input (`ActionInput` = `z.input`), still lowered to `target`, still listed in the reference docs and JSON Schema. Nothing to migrate in app metadata.\n\n**Consumers of the parsed metadata** must read the canonical slot:\n\n- FROM `parsedAction.execute` → TO `parsedAction.target`\n- One-line fix: `action.execute || action.target` becomes `action.target`\n\n`z.infer<typeof ActionSchema>` no longer carries `execute`, so a stale reader fails to compile rather than silently reading `undefined`. Swept this repo: no consumer reads `execute` off a parsed action, and no example/skill/platform-object authors it.\n\n## Files\n\n- `packages/spec/src/ui/action.zod.ts` — transform lowers **and** drops; `.describe()` + TSDoc updated\n- `packages/cli/src/utils/lower-callables.ts` — probe `target` first, drop the alias after binding\n- `packages/spec/src/ui/action.test.ts` — the drop is pinned (`'execute' in result === false`, key list, JSON round-trip, and `execute`-only still lowering for a `target`-required type)\n- `packages/cli/src/utils/lower-callables.test.ts` — **new**; 5 cases covering both-callable precedence, alias drop, `execute`-only back-compat, string/string left to the spec, and object-nested actions\n- `packages/spec/liveness/action.json` + `liveness/README.md` — divergence recorded as resolved; evidence corrected to the parse-time lowering (and now resolves cleanly against the gate's path check)\n- `content/docs/protocol/objectui/actions.mdx` + regenerated `content/docs/references/ui/action.mdx`\n\n## Verification\n\n| Suite | Result |\n|---|---|\n| `@objectstack/spec` | 258 files / 6711 tests ✅ |\n| `@objectstack/cli` | 64 files / 652 tests ✅ (5 new) |\n| `@objectstack/runtime` | 46 files / 655 tests ✅ |\n| `@objectstack/lint` | 32 files / 467 tests ✅ |\n| `pnpm build` | 71/71 tasks ✅ (incl. showcase artifact) |\n| `check:liveness` | ✅ all classified |\n| `check:docs` / `check:skill-docs` | ✅ in sync |\n\nA concurrent `pnpm test` run also flagged `driver-mongodb`, `driver-sql`, `plugin-hono-server`, `service-analytics`, `service-automation`, `service-package` and `metadata-protocol`; each passes standalone (verified for `metadata-protocol` and `lint`) — resource contention from running 98 vitest tasks in parallel in the container, unrelated to this change.\n\n## Follow-ups\n\n- **objectui** (separate repo, separate PR): flip `ActionRunner.ts` `executeScript` to `const script = action.target || action.execute;`. Not a prerequisite — see \"fixes unpatched renderers\" above — but it closes the parse-bypassing paths.\n- Filed separately: an author-facing warning when both slots are declared. Discarding `execute` is now documented, tested and consistent, but still silent, and the compile-time lints all run *post*-parse (`compile.ts` lints `result.data`) where the alias is already gone — surfacing it needs a pre-parse hook, which is a bigger change than this fix warrants (Prime Directive #10).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JDwRktLBFwgtV5Svxm4LJm)_"
+}

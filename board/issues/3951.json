@@ -1,0 +1,35 @@
+{
+  "number": 3951,
+  "kind": "pull_request",
+  "title": "fix(actions): an action that CRASHED is a 500, not a 200 reporting success:false (#3913 follow-up)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T12:33:07Z",
+  "updated_at": "2026-07-29T12:52:14Z",
+  "closed_at": "2026-07-29T12:52:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-29T12:52:12Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3951",
+  "body": "Follow-up to #3930 / #3913. Implements the one part of the 200-vs-status question I think is uncontested — see the [analysis in #3913](https://github.com/objectstack-ai/objectstack/issues/3913#issuecomment-5117039474) for the wider argument, which this PR deliberately does **not** settle.\n\n## What #3937 argued, and what it also covered\n\n#3937 settled that a failed action reports in the payload at HTTP 200:\n\n> an action that \"fails\" is a normal outcome, not a transport error\n\nThat is a statement about the action **rejecting** — a business rule saying no. Correct, and nothing here touches it. But the same exit was also covering a third case it never argued for: a `TypeError` in a handler, a driver blowing up, a sandbox timeout.\n\nThose are not outcomes the action *chose* to report. They are the server failing to produce one. Serving them as 200 hid **every handler crash** from the layers that exist to catch server faults — gateway error rates, retry and circuit-breaker policy, APM auto-capture, alerting, `fetch().ok`. For a platform whose main extension surface is customer-authored script bodies, \"customer action bodies are throwing\" had no signal short of body-parsing at every hop.\n\nThey are **500** now, through the same `errorFromThrown` exit every other domain catch has used since #3925. A side benefit: a driver dump finally goes through the internal-error-leak sanitiser (#3867) instead of reaching the client verbatim inside a 200 body.\n\n## Nothing #3937 put in the payload moves\n\nRejection and crash are told apart by the error's **name** — the signal `@objectstack/rest` already uses on this exact distinction:\n\n> non-default names (`TypeError: …`) […] signal a genuine script bug rather than a deliberately thrown business rule\n\n| Thrown | Verdict | Wire |\n|:---|:---|:---|\n| `new Error(msg)` — a registered handler rejecting | rejection | 200 + payload |\n| `SandboxError` with `innerMessage` — a body's deliberate throw | rejection | 200 + payload |\n| Anything carrying `code` / `fields`, or a `ValidationError` by name | rejection | 200 + payload |\n| A throw with no `name` at all | *not confidently a fault* | 200 + payload |\n| `TypeError` / `ReferenceError` / `SqliteError` / a driver's class | crash | **500** |\n| `SandboxError` with no `innerMessage` — timeout, capability denial | crash | **500** |\n\nDeliberately the narrow direction: only what is *certainly* a fault moves; everything uncertain keeps the 200 it has today. In particular a plain `throw new Error('Lead already converted')` from a `registerAction` handler stays a 200 payload — a naive \"no sandbox marker ⇒ fault\" rule would have broken it, and there is a test pinning that.\n\n## One related fix in the same exit\n\nAn error carrying its own `status` / `statusCode` — a plugin's `FORBIDDEN` with `status: 403` — is now served with it rather than buried in a 200 payload. That status was the one thing the thrower was unambiguous about. Record `ValidationError`s deliberately carry no `.status` (see `validation-failure.ts`), so #3937's cases never reach that branch.\n\n## Testing\n\n- `pnpm build` green (71 tasks).\n- runtime **832**, objectql **1163**, client **194**, rest **440**, mcp **83** — all passing, **including #3937's `actions-validation-envelope.test.ts` untouched**.\n- New `domains/actions-fault-vs-rejection.test.ts` (12 cases) pins **both** sides, because the whole risk here is over-reach — every shape #3937 put in the payload has a case asserting it stays there.\n\nTwo of my own first-draft assertions were wrong and the code was right; one of them exposed the `.status` gap above, which is why that fix is in this PR.\n\n## Docs\n\nNew **Action Errors** section in `api/error-catalog.mdx` with the full status table and the two-check pattern a raw `fetch` caller needs:\n\n```typescript\nif (!res.ok) throw new Error(json.error?.message);             // never dispatched, or crashed\nif (json.data?.success === false) showToast(json.data.error);  // ran and rejected\n```\n\nThat contract previously lived only in test comments — four in-repo callers got it wrong, so it belongs where callers actually look. `ui/actions.mdx` updated to match.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_011AvZj6cLX7APd7roh2eK4F\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_011AvZj6cLX7APd7roh2eK4F)_"
+}

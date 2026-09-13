@@ -1,0 +1,35 @@
+{
+  "number": 3628,
+  "kind": "pull_request",
+  "title": "feat(spec): IHttpServer 软扩展与未匹配语义成文 (#3607)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T11:08:42Z",
+  "updated_at": "2026-07-27T11:20:44Z",
+  "closed_at": "2026-07-27T11:20:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T11:20:42Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3628",
+  "body": "## OQ#10 尾巴收口（加性小活，非 breaking）\n\n三个两适配器**已实现**、此前仅靠 conformance 套件经验锁定的行为升格为接口正式契约：\n\n1. **`IHttpResponse.write`/`end`**（SSE/分块流）：首次 write 即 flush 头、不得缓冲到 end、提供 write 必须提供 end；消费方 feature-detect 缺席回退 buffered send。\n2. **`IHttpServer.getPort()`**：`listen()` 后返回真实绑定端口（含 `listen(0)` 临时端口）。\n3. **未匹配语义**（接口级 JSDoc 契约段）：path 未命中 → 404 共享 not-found body；method 未命中 → 405 + `Allow` 头。新适配器必须过 conformance 套件。\n\nconformance 断言注释从\"观察到的一致性\"升级为**契约引用**（指向 spec JSDoc）。\n\n## 验证\n\n全仓 forced build 绿；conformance 41 断言绿（两适配器零代码变化即满足）；api-surface 重生成**零 diff**（optional 成员不改导出清单）。\n\nCloses #3607。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

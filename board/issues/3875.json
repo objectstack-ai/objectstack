@@ -1,0 +1,35 @@
+{
+  "number": 3875,
+  "kind": "pull_request",
+  "title": "fix(analytics,runtime,types): gate cube auto-inference on object existence; stop the dispatcher boundary returning raw SQL (#3867)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T13:34:08Z",
+  "updated_at": "2026-07-28T13:48:50Z",
+  "closed_at": "2026-07-28T13:48:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T13:48:48Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3875",
+  "body": "Closes #3867. Takes both recommendations from the issue, and the live check upgraded one of them: what I filed as \"未验证能否真的返回行\" **is** a confirmed arbitrary-table read.\n\n## What the live server actually did, before this change\n\nAuthenticated admin on a stock CRM dev server:\n\n```\nPOST /api/v1/analytics/query {\"cube\":\"sqlite_master\",\"measures\":[\"count\"],\"dimensions\":[\"type\"]}\n\n200 {\"rows\":[{\"type\":\"index\",\"count\":262},{\"type\":\"table\",\"count\":71},{\"type\":\"view\",\"count\":1}],\n     \"sql\":\"SELECT type AS \\\"type\\\", COUNT(*) AS \\\"count\\\" FROM \\\"sqlite_master\\\" GROUP BY type\"}\n```\n\nSQLite's internal schema table — never a registered object — read successfully through the analytics endpoint. My issue write-up hedged that the repro only produced a syntax error; that was because I sent a malformed payload shape. With the correct `AnalyticsQuery` shape, **any table the connection can see was readable.**\n\n## ① Cube auto-inference now requires a registered object\n\n`AnalyticsService.ensureCube` infers a minimal Cube when none is registered, with `cube.sql = <the queried name>`. That is the intended \"metric over an object\" path — an `object-metric` KPI widget queries `crm_account` with no authored Cube — but it accepted *any* string.\n\nNote this was **not** covered by #3770: that gated the protocol's `analyticsQuery`, which is the *degraded fallback*. A deployment with `@objectstack/service-analytics` installed runs the real engine instead (`ctx.replaceService`), which is the path that was exposed.\n\nInference is gated on the same schema registry the data path consults, via a new optional `AnalyticsServiceConfig.isRegisteredObject` wired in `plugin.ts` from the `data` engine's `getObject` — so \"which objects exist\" has one answer across `/data` and `/analytics`. Three-way rule:\n\n| Queried name | Behaviour |\n|:---|:---|\n| A registered Cube | runs untouched — it was authored, its `sql` is whatever it declares |\n| Not a Cube, but IS a registered object | auto-infers exactly as before (the KPI path, unchanged) |\n| Neither | `CUBE_NOT_FOUND` / 404, raised **before any SQL exists** |\n\nWith no probe configured the gate stands down and warns once — the tiering #3770 took for a missing registry. `generateSql` (`/analytics/sql`) is gated too; leaving it open would hand back SQL naming an arbitrary table.\n\n## ② The dispatcher boundary no longer returns `err.message` verbatim\n\n`errorResponseBase` is the single error exit for **every** route the dispatcher plugin mounts — `/analytics`, `/packages`, `/i18n`, `/storage`, `/automation`, `/auth`, `/notifications`, `/mcp`. `@objectstack/rest` has guarded its data routes against driver dumps forever (`mapDataError`); this boundary guarded nothing.\n\nThis half is **unconditional** — it holds regardless of whether the cube is valid, which is why it's fixed separately rather than as fallout from ①.\n\nThe heuristic moved from `rest-server.ts` into `@objectstack/types` as `looksLikeInternalErrorLeak` (both packages already depend on it), so the two boundaries share one predicate instead of one having a guard and the other none. `mapDataError` behaviour is unchanged. At the dispatcher it applies **only to 5xx** — a 4xx message is a deliberate business/validation answer and must reach the caller intact. Sanitising costs no diagnostics: the untouched error still reaches `errorReporter` through the existing `__obsRecordedError` side-channel.\n\n## ③ Not in the issue — `errorResponseBase` ignored `status`\n\nIt read only `err.statusCode`, while domain errors across this codebase carry `status` (and `HttpDispatcher.errorFromThrown` already reads `status` first). So every deliberate 4xx thrown through a dispatcher route rendered as a **500** — including **#3770's own `OBJECT_NOT_FOUND`** on the analytics fallback path. Now reads `status` then `statusCode`.\n\nI hit this by accident mid-verification: a half-reverted build left my gate live against a baseline dispatcher, and the 404 came back as a 500. Worth knowing it was there before this PR, on every dispatcher route.\n\n## Verified live, before → after on the same server\n\n| Case | Before | After |\n|:---|:---|:---|\n| `crm_account` KPI (control) | 200, rows | **200, rows — unchanged** |\n| `sqlite_master` count | 200 `{count:334}` | 404 `CUBE_NOT_FOUND` |\n| `sqlite_master` grouped by `type` | 200, real rows | 404 `CUBE_NOT_FOUND` |\n| malformed payload on a real object | raw SQL in the body | `Internal server error` |\n| `/analytics/sql` on `sqlite_master` | ungated | 404 `CUBE_NOT_FOUND` |\n\n## Tests\n\n- `cube-inference-gate.test.ts` (7) — **4 red without ①**. Covers rejection, the registry not being poisoned by a rejected name, the KPI path still inferring, an authored cube never being gated, `generateSql`, and the stand-down tier.\n- `dispatcher-plugin.error-envelope.test.ts` (6) — **4 red without ②/③**. Drives the real registered route handler through the real dispatcher.\n- `error-leak.test.ts` (17) — both halves of the predicate: catches driver dumps, leaves business messages alone (the `startsWith` anchoring matters — \"Cannot **update** this record while it is locked\" must not trip it).\n\n`pnpm test` green across the monorepo (132/132 turbo tasks).\n\n**One pre-existing assertion narrowed, flagging it for review:** `analytics-service.test.ts` asserted `logger.warn` was never called *at all*, which the gate's stand-down warning trips. It now asserts against the no-cube-registered message it is actually about — matching how its sibling case already asserts, and keeping the log-level regression it exists to catch.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01EWHv5StvA4KDkHhx19xufX\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01EWHv5StvA4KDkHhx19xufX)_"
+}

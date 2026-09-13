@@ -1,0 +1,35 @@
+{
+  "number": 3919,
+  "kind": "pull_request",
+  "title": "fix(actions): dispatch on the declared action type over REST (#3915)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T09:23:31Z",
+  "updated_at": "2026-07-29T09:28:58Z",
+  "closed_at": "2026-07-29T09:28:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-29T09:28:56Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3919",
+  "body": "Closes #3915.\n\n## The gap\n\n`POST /api/v1/actions/:object/:action` had **no action-type branching at all** — every action went to `ql.executeAction`, the script-handler registry — while the MCP `run_action` bridge has implemented the `flow` branch since #2849 (`action-execution.ts`). The spec is unambiguous that every non-`script` type dispatches on `target` (`packages/spec/src/ui/action.zod.ts`), so a REST/SDK caller who followed it and invoked a `type: 'flow'` action got\n\n```\nAction '' on object '*' not found\n```\n\nand had to know, out of band, to call `POST /api/v1/automation/:target/trigger` themselves.\n\nIt is worse than \"the branch is missing\" for the Studio-authored case: `resyncAuthoredActions` deliberately registers **no** handler for a flow-typed action (`skippedNoHandler`, \"no body (target/flow/url action)\"), so there was never anything in the registry to find.\n\nA second, related gap surfaced while fixing it: the route resolved declarations **only** from `object.actions[]`, so a standalone declaration's `requiredPermissions` was declared-but-unenforced on REST while MCP honoured it (ADR-0066 D4, Prime Directive #10 \"declared ≠ enforced\").\n\n## The fix\n\nBoth headless surfaces now share **one** dispatch implementation.\n\n| `type` | Over REST |\n|:---|:---|\n| `script` | Handler registry — unchanged. An action with no resolvable declaration is handler-only by definition and keeps this path. |\n| `flow` | `automation.execute(action.target, …)` via the new shared `dispatchFlowAction` (the MCP path now calls it too). The caller's identity (`userId`/`positions`/`permissions`/`tenantId`) is forwarded, so a `runAs: 'user'` flow enforces RLS as the invoker instead of falling into the user-less UNSCOPED path (ADR-0049). No automation service on the kernel → **503**, not a `{ success: false }` body. |\n| `api` | **400** naming the `target` endpoint to call directly. |\n| `url` / `modal` / `form` | **400** — client-side navigation, nothing for the server to run. |\n\nThe route also resolves **standalone declarations**: `defineAction` artifacts in the ObjectQL registry and Studio-authored `action` metadata rows, neither of which appears in any object's `actions[]`. A standalone declaration is accepted only when it belongs to the routed object or to the `'global'` wildcard — the same key rotation the handler lookup performs.\n\nOrdering is deliberate: the **ADR-0066 D4 gate still runs before the type check**, so an unauthorized caller learns nothing about how an action dispatches (pinned by a test). The trusted-mode `[action-audit]` line stays on the script branch only — RLS/FLS-bypassing elevation is a script-**body** property; a flow does not get it.\n\n## Files\n\n- `packages/runtime/src/action-execution.ts` — new `dispatchFlowAction` (extracted from the MCP path, which now calls it), `headlessActionTypeError`, `resolveAutomationService` / `flowActionUnavailableError`, `resolveRouteActionDeclaration` (3-source declaration resolution).\n- `packages/runtime/src/domains/actions.ts` — type dispatch + the new declaration source.\n- `packages/runtime/src/domains/mcp.ts` — `listActions` uses the shared automation probe (which also requires a usable `.execute`, closing a latent \"service present but not usable\" hole).\n- `content/docs/ui/actions.mdx` — \"Call it over REST\" now documents the per-type behaviour + a troubleshooting row.\n- `.changeset/rest-actions-type-dispatch.md`.\n\n## Tests\n\nNew `packages/runtime/src/http-dispatcher.actions-type-dispatch.test.ts` (16 cases): flow dispatch instead of the registry, identity forwarding, no `object` key for `/actions/global/:action`, flow-failure envelope, the 503, the four client-side types' 400s, the gate-before-type ordering, `script` + undeclared-action regression guards, standalone declarations via both the registry and the metadata service, a cross-object standalone that must **not** match, and the 403 on a standalone `requiredPermissions`.\n\nOne existing fixture was corrected: the ADR-0066 D4 gate suite declared its gated action as `type: 'api'` with no `target` (not spec-valid) and asserted the handler ran — now `type: 'script'` + `target`, since an `api` action legitimately never reaches `executeAction`.\n\nLocal runs, all green: `runtime` 736/736 · `objectql` 1163/1163 · `spec` 6823/6823 · `rest` 419/419 · `turbo build` (incl. DTS typecheck) · eslint on the changed files.\n\n## Behaviour change to note\n\nA caller invoking a `url`/`modal`/`form`/`api` action through this endpoint used to get `{ success: false, error: \"Action '' on object '*' not found\" }` (HTTP 200) and now gets a 400 that says what to call instead. No spec-faithful action changes behaviour.\n\nOut of scope: the HTTP-200 error envelope (#3913) is untouched — a flow's business failure still returns the existing `{ success: false }` 200 envelope, consistent with the script path.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01DTTKgYriDB6RVrkYjxxnG1\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01DTTKgYriDB6RVrkYjxxnG1)_"
+}

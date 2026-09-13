@@ -1,0 +1,32 @@
+{
+  "number": 3913,
+  "kind": "issue",
+  "title": "[17.0.0-rc.0] Global actions unreachable: registered under key 'global', REST fallback probes '*' — and handler failures return HTTP 200 {success:true,data:{success:false}}",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T08:32:30Z",
+  "updated_at": "2026-07-29T12:05:47Z",
+  "closed_at": "2026-07-29T12:05:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3913",
+  "body": "Found upgrading HotCRM to 17.0.0-rc.0 (tag commit `fc156fa4a`). **Upgrade blocker.** Two independent defects that compound.\n\n## Defect 1 — registration key vs lookup key\nGlobal (objectName-less) actions are registered under the literal key **'global'** by both writers:\n- `packages/runtime/src/app-plugin.ts:640-644` — `action.object || 'global'` → `ql.registerAction(objectKey, ...)`\n- `packages/objectql/src/plugin.ts:1345-1350` (`actionObjectKey`) → `'global'`, used at `:1550`\n\nBut the REST dispatcher's fallback probes **'*'** (`packages/runtime/src/domains/actions.ts:195-204`), and `executeAction` is an exact-string Map lookup with no wildcard semantics (`packages/objectql/src/engine.ts:731-746` — the error template there is verbatim the observed `Action 'log_call' on object '*' not found`).\n\nResult: `POST /api/v1/actions/<any-object>/log_call` always fails. `POST /api/v1/actions/global/log_call` works **by accident** (path segment matches the registration key). Doc comments disagree with each other about which key is canonical (`domains/actions.ts:15/:39` say `'*'`; `objectql/src/plugin.ts:1348` and `action-execution.ts:694-698` say `'global'`).\n\n## Defect 2 — every handler failure is wrapped as transport success\nBoth the success and failure paths call `deps.success(...)` (`domains/actions.ts:205` / `:215`), and `success()` always emits `{status: 200, body: {success: true, data}}` (`packages/runtime/src/http-dispatcher.ts:444-449`). Wire result for any handler error (including the FORBIDDEN from the ctx.api issue filed separately):\n\n```json\n{\"success\":true,\"data\":{\"success\":false,\"error\":\"Action 'log_call' on object '*' not found\"}}\n```\n\nThe client SDK documents this envelope and deliberately does not throw (`packages/client/src/index.ts:2882/:4304`) — so every caller that doesn't manually check `data.success` silently swallows failures. The shipped console does exactly that on its main action path (objectui issue to follow), so global-action failures produce a **green success toast**.\n\n## Suggested fix direction\nPick one canonical key ('global'), make the fallback probe it (or add wildcard semantics in `executeAction`), and route handler failures through `deps.error` with a real status code."
+}

@@ -1,0 +1,30 @@
+{
+  "number": 3650,
+  "kind": "issue",
+  "title": "analytics: ObjectQLStrategy 静默忽略 timeDimensions[].dateRange —— 恰好是 date-granularity 图表必走的那条路",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T12:48:47Z",
+  "updated_at": "2026-07-28T03:50:49Z",
+  "closed_at": "2026-07-28T03:50:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3650",
+  "body": "从 #3602 的第 3 项(让 `ObjectQLStrategy.generateSql` 预览与实际执行相符)里发现的相邻缺口。为了让预览\"忠实\",我需要确认 `execute()` 到底施加了哪些谓词 —— 结果发现它根本不读 `dateRange`。\n\n## 现象\n\n`ObjectQLStrategy.execute()` 只把 `query.where` 送进 engine:\n\n```ts\n// objectql-strategy.ts — timeDimensions 只被读了 granularity\nfor (const td of query.timeDimensions ?? []) {\n  if (td.granularity) granByDim.set(td.dimension, td.granularity);   // ← 只有 granularity\n}\n...\nconst filter = {};                                   // ← 只来自 normalizeAnalyticsFilters(query)\n```\n\n而 `normalizeAnalyticsFilters` 只读 `query.where`(`filter-normalizer.ts` 的 `normalizeAnalyticsFilters`),`dateRange` 从来不在 `where` 里 —— `dataset-executor.ts` 的 `buildQuery` 把 `selection.timeDimensions` 原样透传成 `q.timeDimensions`,`q.where` 是独立的另一支。\n\n对比另外两条路,它们都老老实实处理了:\n\n- `NativeSQLStrategy`:`td.dateRange` → `col BETWEEN $n AND $n+1`(还顺带做了 SQLite epoch 的 storage 强转)。\n- `preview-evaluator.ts`:`// 1. Row-level filters: where, then timeDimension dateRanges.`\n\n只有 ObjectQL 这条路把它丢了。\n\n## 为什么这个特别值得修\n\n不是\"少数驱动才会踩\"的边角:**带 `dateGranularity` 的查询会强制走到这条路上**。`NativeSQLStrategy.canHandle` 对任何携带 granularity 的查询直接 decline,于是即便在 Postgres/SQLite 这种完全支持原生 SQL 的部署上,一个按天/周/月分桶的趋势图也会落到 ObjectQLStrategy。\n\n而\"按时间分桶的趋势图\"恰恰是最可能同时带 `dateRange` 的查询形态(近 12 个月、本季度……)。所以实际后果是:\n\n> 一个限定了时间范围的趋势图,在任意驱动上都会画出**全量历史**,而不是所选区间。\n\n没有任何报错,图表看上去正常,只是数字不对 —— 静默的错误结果比抛异常更难被发现。\n\n## 不是越权\n\n`dateRange` 是展示性过滤,不是安全边界;read scope 与 `ExecutionContext` 两条带子(#3601 / #3602)都不受影响。这是**正确性**问题,不是泄露。\n\n## 落点\n\n`objectql-strategy.ts` 的 `execute()`,把 `timeDimensions[].dateRange` 编进送往 `engine.aggregate` 的 `filter`,大致对应 `NativeSQLStrategy` 那段:\n\n```ts\nfor (const td of query.timeDimensions ?? []) {\n  if (!td.dateRange) continue;\n  const range = Array.isArray(td.dateRange) ? td.dateRange : [td.dateRange, td.dateRange];\n  // → filter[field] = { $gte: range[0], $lte: range[1] }  (与既有同字段合并逻辑一致,勿覆盖)\n}\n```\n\n两处要当心:\n\n1. **同字段多操作符的合并**。`execute()` 里已有的 merge 逻辑(`{...existing, ...converted}`)是为 `{$gte,$lte}` range 准备的 —— dateRange 必须走同一条合并路径,否则会和用户自己写的 `where` 里同字段条件互相覆盖。\n2. **值的存储形态**。NativeSQL 走 `coerceTemporal` 是因为它绕过了驱动的 CRUD 强转;ObjectQL 经 `engine.aggregate` 应当由驱动自己处理,但需要验证 —— SQLite 的 `Field.datetime` 存 epoch 整数,ISO 字符串比较是 affinity 陷阱(参见 native-sql-strategy 里那段注释描述的 \"No rows\" bug)。\n\n修完后 #3602 第 3 项里 `generateSql` 那段\"故意不渲染 BETWEEN\"的注释需要同步更新 —— 届时预览应当把 dateRange 一起渲染出来。\n"
+}

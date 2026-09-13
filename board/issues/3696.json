@@ -1,0 +1,32 @@
+{
+  "number": 3696,
+  "kind": "issue",
+  "title": "多租户缺陷:unique 物化为全局唯一索引、无视 tenancy,与按租户分裂的 autonumber 序列自相矛盾(跨租户必然撞号 + 存在性探测泄露)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T14:46:24Z",
+  "updated_at": "2026-07-28T00:32:23Z",
+  "closed_at": "2026-07-27T16:12:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3696",
+  "body": "# 一句话说明\n\n`unique: true` 被物化成**不带租户列的全局唯一索引**，与平台自己**按租户分裂的 autonumber 序列**直接矛盾：多租户部署下，各租户从 1 起发号 → 撞进全局唯一索引 → `SQLITE_CONSTRAINT_UNIQUE`。**不需要用户做错任何事**，平台左手发的号被平台右手拒掉。\n\n（下游项目实测记录:steedos-labs/os-project-titanwind-ehr#599,排查「导入用户报错」时定位到）\n\n# 两段平台代码互相打架\n\n| 子系统 | 行为 | 位置(16.1.0 dist) |\n|---|---|---|\n| 发号 | `_objectstack_sequences` 主键含 `tenant_id`(object, tenant_id, field, scope),每个租户各自从 1 起 | driver-sql 序列表 |\n| unique 物化 | 只建**单列**唯一索引,永不掺租户列 | `driver-sql/dist/index.js` 两处,见下 |\n\n建表路径(`createTable`):\n\n```js\nif (field.unique) col.unique();   // index.js:2860 — 单列 UNIQUE\n```\n\n重建路径(schema-drift rebuild):\n\n```js\nif (field?.unique && keptSet.has(name)) {\n  const idx = `uniq_${table}_${name}`;\n  await this.knex.raw(\"CREATE UNIQUE INDEX IF NOT EXISTS ?? ON ?? (??)\", [idx, table, name]);  // index.js:1993\n}\n```\n\n两条路径都无视对象的 `tenancy: { enabled, tenantField }` 元数据。租户隔离的承诺在读侧、写侧、发号器三个环节都兑现了,唯独 unique 物化不兑现。\n\n# 影响面\n\n1. **功能:全平台所有多租户部署的所有 unique 字段**。任何 `unique: true` 字段(编号、编码、工号、名称…)在多租户下变成「全平台抢注」:租户 A 占了 `PROD-00001`,其他所有租户永远插不进同值。配合租户分裂的 autonumber,是**必然撞**而非偶然撞。\n2. **安全:跨租户存在性探测 oracle**。租户 B 插入时收到 UNIQUE 冲突 = 平台告诉 B「某个别的租户已有这个值」。拿邮箱/编码/名称批量试探即可枚举其他租户的数据存在性——多租户平台的经典泄露口。\n3. **语义:与业界 SaaS 口径相反**。Salesforce 等平台 unique 默认是 **org 内唯一**,全局唯一才是显式特例(如微信 openid、平台级账号标识)。当前默认恰好反了,且没有任何语法能表达「租户内唯一」。\n\n# 建议修法\n\n1. driver 物化 unique 时(建表 + rebuild + declared indexes 三条路径),对 `tenancy.enabled` 的对象自动升为 **`(tenantField, field)` 复合唯一**。\n2. 真需要全局唯一的字段给显式语法,例如 `unique: 'global'`(openid 这类平台级身份)。`unique: true` 默认 = 租户内唯一。\n3. 单租户部署零影响:租户列恒定,复合唯一退化等价于单列唯一。\n\n# 存量迁移:纯放松,零数据处理\n\n旧「全局唯一」严格于新「租户内唯一」,**存量数据天然满足新约束**。迁移只需 drop 旧 `uniq_<table>_<field>` 单列索引 → create 复合索引,无需查重、无需清洗、不可能失败。建议进 `os migrate` 的 plan/apply。\n\n# 验证方式\n\n1. 开多租户,两个租户各建同编码记录:修前第二个租户报 `SQLITE_CONSTRAINT_UNIQUE`,修后各自成功。\n2. 同一租户内建同编码记录:修前修后都应被拒(租户内唯一不放松)。\n3. `unique: 'global'` 字段跨租户同值:仍被拒。\n"
+}

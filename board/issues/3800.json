@@ -1,0 +1,30 @@
+{
+  "number": 3800,
+  "kind": "issue",
+  "title": "approvals: the acting identity must be resolved server-side, not taken from the request payload",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T05:59:24Z",
+  "updated_at": "2026-07-28T06:44:13Z",
+  "closed_at": "2026-07-28T06:42:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3800",
+  "body": "Found while reviewing #3783's blast radius. Hardening task.\n\n**Detail is deliberately withheld here.** This is a public repo with published\npackages; the full analysis, the verification and the impact assessment live in a\nprivate draft advisory under the repo's Security tab, per this repo's\nsplit-disclosure convention. This issue tracks the *requirement* and the design.\n\n## Requirement\n\nOn every `ApprovalService` entrypoint the acting identity must be resolved\n**server-side from the authenticated execution context**. Today it is taken from\nthe request payload (`actorId`), which REST forwards verbatim, and the service's\nown checks then read that same value. An identity the caller supplies must never\nbe the thing that satisfies the check that gates the action.\n\n#3783 touched the adjacent seam and pinned the *data-write* identity to the\ncontext (`actingUserId`), but scoped itself there and characterised the remaining\naudit-row use as tolerable. That characterisation was too generous: the same\nfield is read by the authorization checks, so it needs the same treatment.\n\n## Why the rule cannot be \"`actorId` must equal `context.userId`\"\n\nA slot is not always keyed by a user id, so strict equality would reject\nlegitimate approvers:\n\n- `resolveApproverSpec` stores the `type:value` literal when a graph lookup\n  yields nothing, so a slot can read `position:finance`.\n- The showcase documents deciding with exactly that form.\n- The Console picks from the caller's own identity list — id, **email**, or\n  `role:<r>` — and gates its buttons on that set client-side.\n\n## Design\n\nThe rule is **\"the actor must be an identity the server can prove belongs to the\ncaller\"**, implemented as `ApprovalService.resolveActor`:\n\n- **system context** → keeps its explicit actor (the SLA sentinel, the ADR-0043\n  action-link token, both of which derive their actor server-side already).\n  Unchanged.\n- **no identity at all** → `FORBIDDEN`.\n- **no `actorId`, or `actorId === context.userId`** → the caller. The common path.\n- **anything else** → allowed only when it matches `position:<p>` / `role:<p>`\n  for a position on the server-resolved context, or the caller's own email (one\n  lazy `sys_user` read, only when nothing cheaper matched). Otherwise\n  `FORBIDDEN`.\n\nREST keeps forwarding the body value — it becomes a *hint the service validates*,\nwhich is what preserves the email and `type:value` slot cases.\n\nThis also makes two existing claims true that were previously aspirational:\n`sys-approval-request.object.ts` (\"`actorId` defaults to the caller server-side…\nThe service remains the authority on who may act\"), and `attachViewers`' claim\nthat `can_act` \"mirrors the exact authorization the decision methods enforce.\"\n\n## Note for reviewers of the fix\n\nA number of existing tests fail against it, every one because it acted with a\ncontext that named nobody, or named someone other than the actor it claimed —\n`approval-revise.test.ts` shared one context with no `userId` across all its\ncalls, and `approval-service.test.ts` called as one user while passing another\nas `actorId`. Each was updated to present the acting user's own context. Same\nshape as #3760, where tests had likewise pinned the old behaviour.\n\nRefs #3783, #3760. Fix in #3805.\n"
+}

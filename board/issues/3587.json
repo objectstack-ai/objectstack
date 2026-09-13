@@ -1,0 +1,32 @@
+{
+  "number": 3587,
+  "kind": "issue",
+  "title": "Route audit tranche 2: the @objectstack/rest surface (search / forms / reports / sharing / …) — #3563 follow-up",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T08:12:30Z",
+  "updated_at": "2026-07-27T11:57:57Z",
+  "closed_at": "2026-07-27T11:57:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3587",
+  "body": "Split from #3563. The dispatcher tranche is complete (gap ratchet 27→0, #3569 #3571 #3575 #3577 #3579), but the dispatcher is **not the only server surface**: `@objectstack/rest` mounts a second, larger route set the client also reaches — and it has never been audited with the same rigor.\n\n## Known zero-expression routes (from the PR-1 sweep, `rest-server.ts` line refs in the audit doc)\n\n| Route family | Routes |\n|---|---|\n| `GET /search?q&objects&limit&perObject` | 1 |\n| `POST /email/send` | 1 |\n| `forms/:slug` (get / submit / lookup) | 3 |\n| Record shares `GET/POST/DELETE /data/:object/:id/shares[/:shareId]` | 3 |\n| `POST /data/:object/:id/clone` | 1 |\n| `POST /analytics/dataset/query` | 1 |\n| `sharing/rules` (incl. `/evaluate`) | 5 |\n| `reports` (incl. `/run`, `/schedule`, `/schedules`) | 8 |\n| `external-datasource/*` (`external-datasource-routes.ts`) | family |\n\nPlus the reverse direction that tranche 1 deliberately left out of scope: client surfaces that target REST-only routes (`views` CRUD, `permissions`, `workflow`, `approvals`, `realtime`, notification devices/preferences, presigned storage, import jobs) — currently expressed but with **no ledger row anywhere** asserting their server side exists.\n\n## Proposed method — same as tranche 1, one new problem to solve\n\n1. Enumerate the REST mounts (rest-server.ts is large; the mounts are `server.<verb>()` calls — scriptable).\n2. Extend the ledger (or add a sibling `rest-route-ledger.ts` in `packages/rest`) with per-route dispositions.\n3. Guard on both sides, same split as #3569: enumeration-side conformance next to where routes are declared; client-method existence next to the SDK. The tranche-1 lesson applies verbatim: **no runtime→client package edge** (build cycle) — each package verifies its own half.\n4. New problem tranche 1 didn't have: REST route registration is method calls, not a registry with `.list()`. Either add an introspection seam to the REST server (preferred — mirrors `DomainHandlerRegistry.list()`), or pin the mount list the way `LEGACY_CHAIN_PREFIXES` pins the if-chain.\n\n## Acceptance\n\n- Every REST-mounted route has a reviewed disposition.\n- A ratchet equivalent to tranche 1's, wired into CI.\n- The reverse direction closed: every client method's target route provably exists on some server surface.\n\nRefs: audit doc `docs/audits/2026-07-dispatcher-client-route-coverage.md` §8; ledger scope note at `packages/runtime/src/route-ledger.ts` header."
+}

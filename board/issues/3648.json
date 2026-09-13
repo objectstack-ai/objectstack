@@ -1,0 +1,35 @@
+{
+  "number": 3648,
+  "kind": "pull_request",
+  "title": "feat(spec): resolve page metadata i18n — page:header title/subtitle (#3589)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T12:41:08Z",
+  "updated_at": "2026-07-27T13:13:03Z",
+  "closed_at": "2026-07-27T13:13:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T13:13:01Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3648",
+  "body": "Closes #3589. Implements **方案 A**（framework 通用解析）from that issue.\n\n## The gap\n\nThree plugin-carried Setup pages hard-code their `page:header` copy in metadata:\n\n| Page | Source |\n|---|---|\n| Installed Apps | `packages/cloud-connection/src/marketplace-ui.ts` |\n| Cloud Connection | `packages/cloud-connection/src/cloud-connection-ui.ts` |\n| Connect an Agent | `packages/mcp/src/connect-ui.ts` |\n\nEvery other metadata type is localized at the REST boundary, but `page` was not — so those headers stayed English in every locale while the matching nav labels translated correctly.\n\nTwo things were missing, and shipping only one would have been another no-op:\n\n1. The `pages` namespace existed **only** on `AppTranslationBundleSchema`, whose accessors (`getAppBundle` / `loadAppBundle`) are optional on `II18nService` and have zero implementations. The schema the runtime actually serves — `TranslationData`, via `getTranslations(locale)` — had no `pages` key.\n2. There was no resolver behind it. `translateMetadataDocument` dispatched five types; `page` fell through unchanged.\n\n## Approach\n\nOption A over a console-side point fix, because the server already has every seam this needs and the console needs none:\n\n- `TranslationDataSchema` gains `pages.<name>.{label,description,title,subtitle}`, alongside `dashboards`.\n- New `translatePage` in `@objectstack/spec/system` translates a page's own `label` / `description` and overlays `title` / `subtitle` onto every `page:header` in the page's regions. Immutable overlay, mirroring `translateDashboard`. Registered in `translateMetadataDocument`.\n- `page` added to `TRANSLATABLE_META_TYPES` in `rest-server.ts` — a one-token change. `Accept-Language` extraction, the locale-keyed ETag (#1319) and `Vary: Accept-Language` already applied to every metadata type on both the list and single-item routes.\n- `objectstack i18n extract` now emits page entries so the new namespace is not invisible to the tooling.\n- zh-CN / ja-JP / es-ES copy for the three pages.\n\nTwo design choices worth review:\n\n- **Header copy is keyed by page name, not component id.** `page:header` instances carry no stable `id`, so the page name is the only addressable identifier on the document.\n- **`title` falls back to `pages.<name>.label`.** For all three pages the header title and the nav label are the same string; requiring both would just invite drift. An explicit `title` still wins when the two genuinely differ.\n\n## Also fixed\n\n`nav_cloud_connection` and `nav_connect_agent` existed only in `zh-CN.ts` — added to `en` / `ja-JP` / `es-ES`.\n\n## No console change needed\n\nPages arrive already localized from the server, so `page:header` renders translated copy with no `@object-ui` change. Two bonuses fall out for free: `transformSpecTranslations` forwards unknown top-level keys verbatim, so `pages.*` reaches the client catalog, where `useObjectLabel().pageLabel` already probes `pages.<name>.label` — page breadcrumbs pick up the translations too.\n\n## Compatibility\n\nAuthoring is unchanged and English literals stay in metadata as the fallback: a page with no `pages` entry renders exactly as before. The English bundle entries are byte-identical to the plugin literals, so `en` requests are a no-op.\n\n## Testing\n\n`translatePage` (11 cases): header title/subtitle overlay, non-header components untouched, `icon` and other props preserved, explicit-title precedence, untranslated-page passthrough, no input mutation, no-bundle fallback, region-less pages, dispatch through `translateMetadataDocument`, BCP-47 chain (`zh` → `zh-CN`). Plus `TranslationDataSchema.pages` acceptance, two REST-boundary cases (envelope + list), and a CLI extraction case asserting the exact emitted key set.\n\nSuites run green: `spec` 1096, `rest` 173, `cli` 635, `platform-objects` 215, `lint` 359.\n\n## Known consideration (pre-existing, not introduced here)\n\nTranslating on the read path means a Studio round-trip could persist localized strings back into metadata. That is already true for `object`, `app`, `dashboard`, `view` and `action`; `page` now joins that set rather than diverging from it. Worth a separate fix if it bites — it needs a read-path bypass for the editor, which does not exist today for any type.\n\n## Follow-ups (not in this PR)\n\n- `CloudConnectionPanel.tsx` (the Cloud Connection page **body**) has no i18n at all and no `cloudConnection.*` namespace in any of objectui's 10 locale packs. #3589 assumed the widget bodies were mostly translated; that one is not, so that page stays mixed-language below the header until it is done. Belongs in objectui.\n- A parity test pinning the plugin page literals against the `en` bundle would catch drift, but wiring it needs a package that depends on both `cloud-connection` and `mcp` — `platform-objects` should not.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01TubWYdWquVkS9dj733sDmC\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01TubWYdWquVkS9dj733sDmC)_"
+}

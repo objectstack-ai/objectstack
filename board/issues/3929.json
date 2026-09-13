@@ -1,0 +1,36 @@
+{
+  "number": 3929,
+  "kind": "pull_request",
+  "title": "fix(sharing)!: a rule with no criteria shares NOTHING, not every record (#3896)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T10:34:37Z",
+  "updated_at": "2026-07-29T11:05:19Z",
+  "closed_at": "2026-07-29T11:05:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-29T11:05:18Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3929",
+  "body": "Closes #3896.\n\n## The bug, and where it actually was\n\n`SharingRuleSchema` requires `condition` and states the invariant plainly: a predicate the compiler cannot lower is *\"skipped and logged — never seeded as a permissive match-all (ADR-0049)\"*. The seed path honoured that. **Three** other paths did not:\n\n1. **`SharingRuleService.defineRule`** — validated `name` / `label` / `object` / `recipientType` / `recipientId`, and not `criteria`. This is what `POST /api/v1/sharing/rules` plucks its body into; the schema is never on that path. A missing, `null`, or misspelled (`criterias`) key was stored as `criteria_json: null`, answered `201` with no warning, and evaluated as `find(object, { filter: {} })` under `SYSTEM_CTX` — every record of the object, up to 5000, granted to the recipient.\n2. **A direct `sys_sharing_rule` insert** — which is what authoring a rule in Setup issues. It never reaches `defineRule` at all, so fixing only the REST entry would have left this open.\n3. **The seed bootstrap's own `// Empty condition = match-all (intentional)` branch** — the one line contradicting its file header.\n\nSame failure mode, one more way in: a CEL source typed into the Criteria textarea. `parseCriteria` returns `undefined` for unparsable strings, so it also evaluated as match-all.\n\nTriggering any of these took a typo, not an attacker.\n\n**Route correction for anyone following the issue:** it is `POST /api/v1/sharing/rules`, not `/api/v1/data/sharing/rules` as the title says — sharing-rule routes anchor on the API base because they administer rules tenant-wide rather than acting on one CRUD object. Same handler, same bug.\n\n## The fix\n\nThree layers, because the three entries fail differently:\n\n- **`defineRule` rejects a match-all criteria** with `VALIDATION_FAILED`, alongside its other required fields. Covers the REST endpoint, programmatic callers, and the seeder. Rejected: missing / `null` / `''` / `{}` / `[]` / `{ $and: [] }` / unparsable JSON.\n- **The evaluator matches NOTHING** for such a rule and logs why — in both `findMatchingRecords` and `recordMatches`. This is the layer that matters for already-deployed tenants: a row stored before this gate under-shares instead of over-sharing, and the next reconcile *revokes* the grants it had materialised.\n- **`bindRuleCriteriaGuard`** fails `sys_sharing_rule` inserts as a field-level `VALIDATION_FAILED` (a 400 naming `criteria_json`), so Setup reports the problem instead of saving a rule that merely does nothing (ADR-0078). Updates are checked only when the patch supplies `criteria_json` — switching an over-broad legacy rule *off* must not require inventing a criteria for it first.\n\nPlus: the bootstrap's empty-condition branch is gone, and the endpoint now accepts `criteria_json` as an alias for `criteria`, matching the snake_case aliases it already took for the other fields.\n\n## Is empty criteria ever legitimate? No — and now it says so\n\nThe issue asked for this to be adjudicated. There is no \"share every record\" sharing rule; that shape only ever existed as a failure mode. Object-wide read is the object's organization-wide default (`sharingModel`).\n\n`criteria_json` stays `required: true`-in-substance but `required: false` in metadata, **deliberately**: the column is nullable in every deployed tenant, so flipping it produces a *destructive* `NOT NULL` migration that those very nulls block (`schema-drift.ts` classifies it as `severity: error` / `category: destructive`). The invariant is enforced in the two places that can also explain themselves. Its field description — and all four locale bundles — said *\"leave empty to share every record\"*; that was never a feature, only a name for the bug.\n\n`docs/audits/2026-06-metadata-functional-completeness.md` closed this candidate as \"verified false\" with a residual of *\"only a hand-crafted envelope or a direct row could reach the match-all branch — not a P0\"*. The residual was larger than that; the audit note now records what it missed and why.\n\n## Verification\n\n- **17 new unit tests** in `sharing-rule.test.ts`, including the gate the issue asked for — a criteria-less rule produces no `sys_record_share` row — plus revocation of grants an already-materialised match-all rule had issued, and the reported `criterias` typo.\n- **A new dogfood test** POSTs the issue's exact body against a booted showcase stack. It caught something a unit test could not: the engine guard rejected my own attempt to seed a legacy row, which is itself proof the Setup path is closed. (The legacy-row case now reproduces by dropping the guard hooks for one insert.)\n- **Full dogfood suite: 163 files, 400 passed, 0 failed.** plugin-sharing 151/151, spec 6823/6823, rest and downstream-contract green. `tsc --noEmit` and eslint clean on every changed file.\n\n## Migration\n\nA rule that relied on the empty shape must state its predicate (`criteria: { stage: 'won' }`), or — if the object really should be readable by everyone — use `sharingModel`. Rows already stored with a null `criteria_json` need **no data migration**: they stop granting on the next evaluation and their existing grants are revoked. One example fixture was updated accordingly (`showcase-bu-hierarchy-sharing`, which had been relying on match-all to share \"all private notes\").\n\n## Known follow-ups (not in this PR)\n\n- **The Setup form lives in `objectui` / `cloud`**, outside this repo. The server now rejects an empty Criteria field, so unless that form marks it required, admins will hit a server-side 400 rather than client-side validation.\n- **Log volume on legacy rows**: the per-record write-hook path warns on every evaluation, so a tenant with one null-criteria rule logs a warning on *every write* to that object. The behaviour is correct (loud beats silent), but if a boot-time aggregate report plus per-rule dedupe is preferred, that is a small change.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QuViRSR1j6GJjf9qGbnqFX)_"
+}

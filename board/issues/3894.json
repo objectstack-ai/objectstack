@@ -1,0 +1,35 @@
+{
+  "number": 3894,
+  "kind": "pull_request",
+  "title": "feat(spec,lint)!: accept ADR-0109, remove agent.tools[], lint agent authoring, model AI exposure in tool resolution (#3820)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T15:07:47Z",
+  "updated_at": "2026-07-28T16:02:28Z",
+  "closed_at": "2026-07-28T16:02:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T16:02:25Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3894",
+  "body": "Completes the #3820 positioning work: **ADR-0109 is accepted**, the two structural holes it left open are closed, and a bug in the rule merged by #3885 is fixed.\n\n## 1. ADR-0109 → Accepted — implemented (Phase 1)\n\nEvidence recorded in the ADR: the registry + reference rule (#3885), conformance tests in cloud (objectstack-ai/cloud#908), and **the first app ported to the model** — objectstack-ai/hotcrm#512, which went from 16 tool references with 10 dead to **22 references, 0 findings**.\n\n## 2. Fix: the rule blessed references the agent can never call\n\n`validate-ai-tool-references` resolved `action_<name>` against **every** declared action. The runtime is far stricter (ADR-0011): a tool materialises only when the action\n\n| Requirement | |\n|---|---|\n| opts in | `ai.exposed: true` **and** `ai.description` |\n| has a headless path | type `script` / `api` / `flow` — `url` / `modal` / `form` are UI-only |\n| is dispatchable | a `target` (or a `body`, for `script`) |\n\nThe permissive version therefore produced a false *pass* — the exact failure the rule exists to catch, one layer down. **Found while porting HotCRM**, where 3 of the 5 actions its skills wanted are `type: 'modal'`; the rule had already green-lit my own rewrite before I checked the runtime.\n\nUnresolved `action_*` names now get a distinct message and fix, because \"the action exists but isn't exposed\" and \"the name is fictional\" need different answers. The hint says plainly that a modal action staying human-driven is **a design answer, not a gap**.\n\n## 3. Breaking: `agent.tools[]` removed\n\nADR-0064's invariant is *\"an agent's tool set is the union of its surface-compatible skills' tools; nothing falls through to the global registry\"* — and this legacy inline slot was the one seam that broke it. The runtime resolved `agent.tools[].name` against the **full** registry with no surface check, so an `ask`-surface agent could name an authoring tool and get it. Removing the field makes the invariant *structural* — there is no second slot to disagree with the skills — rather than a rule every reader has to remember (ADR-0049 design+enforce-or-remove).\n\n`AIToolSchema` and the `AITool` type go with it; the json-schema manifest key is deregistered in the same PR, as that gate requires. Authoring `tools` remains a silent no-op rather than a parse error, so existing stacks keep parsing. Migration: attach capability through `skills`.\n\n## 4. New rule: `validate-ai-agent-authoring` (warning)\n\nADR-0063 §2 withdrew tenant agents and the runtime enforces it on both paths (catalog filter + objectstack-ai/cloud#904's load gate) — but `defineStack` still accepted the array, so an app could ship agents that parse, validate, and never run. HotCRM did, for months. This is the missing **authoring-time** signal (ADR-0078: loud at the producer, tolerant at the consumer); the runtime remains the gate, which is why it warns rather than errors — a platform package legitimately authors agent records and the rule can't tell which is which from the stack alone. Joins `REFERENCE_INTEGRITY_RULES`.\n\n## 5. Docs teach the default path\n\n`content/docs/ai/agents.mdx` gains a worked **Action → skill** example with no `defineTool` anywhere, the three conditions above as a table, and the point that naming *reasoning* (\"analyse the pipeline\", \"score this lead\") as a tool is the most common authoring mistake — it produces an assistant that claims abilities it does not have.\n\n## Verification\n\n- `@objectstack/spec`: 262 files / 6817 tests · `tsc --noEmit` clean · `check:docs`, `check:skill-refs`, `check:react-blocks`, `check:skill-examples` in sync · `check:api-surface` correctly flagged both removals as breaking before the snapshot was regenerated (changeset is `major`).\n- `@objectstack/lint`: 37 files / 540 tests (11 for the exposure predicate + 6 for the new rule).\n- `@objectstack/cli`: 72 files / 737 tests — both new rules reach `validate`/`lint`/`compile` through the suite.\n- Full workspace `pnpm build` green.\n\nRefs #3820 · #3885 · ADR-0109 · ADR-0064 · ADR-0011 · ADR-0078 · ADR-0049\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01BHjroNkLkajskKbJaidko4\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BHjroNkLkajskKbJaidko4)_"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 3946,
+  "kind": "issue",
+  "title": "全仓扫查\"body 展开在受信任值之后\":runtime 的 /data/:object/query 也中了,其余 8 处已核实无问题",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T12:13:19Z",
+  "updated_at": "2026-07-29T23:33:16Z",
+  "closed_at": "2026-07-29T23:33:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3946",
+  "body": "#3897 和 #3933 是同一个形状的两次:**受信任的值先写进对象字面量,调用者控制的 bag 展开在它之后**。两次都出在同一段代码里,所以把全仓扫了一遍。\n\n## 扫查方法\n\n三个要素同时具备才算命中:\n\n1. 受信任/服务端派生的值(`object` / `context` / `where` / `environmentId` / `userId` / `isSystem` / `id`)写进对象字面量;\n2. 调用者控制的 bag(`req.body` / `query` / `params` / `args` / `input` / `options` / `payload`)展开在它**之后**;\n3. 结果流向安全相关的消费端(引擎选项、协议请求、权限判定的目标)。\n\n脚本扫 `git ls-files 'packages/**/*.ts'` 的全部 **1313** 个非测试文件,同时覆盖多行和**单行**字面量(第一版只查多行,漏了 runtime 那处 —— 它就写在一行里),得到 **9** 处候选,逐个走到消费端确认。\n\n## 命中 1 处\n\n`packages/runtime/src/domains/data.ts:56` —— dispatcher 的 `/data` 域:\n\n```js\n// POST /data/:object/query\nconst result = await actionExec.callData(deps, 'query', { object: objectName, ...body }, …);\n```\n\n`objectName` 来自 URL 路径,`...body` 展开在它之后。`{\"object\":\"other\", …}` 就把查询挪到了别的对象上。\n\n同一个文件里其他 handler 都是把 body 套一层(`data: body` / `query: normalized`),只有这一处平铺;而且紧邻的 GET-by-id 分支还专门写了 allowlist,注释是 *\"All other query parameters are discarded to prevent parameter pollution\"* —— 这个文件知道这个坑,只是没应用到 POST body 上。\n\n**范围要说准:这不是越权。** `callData` 的暴露闸门读的是 `params.object`(`action-execution.ts:63`),也就是 body 里那个 —— 闸门和查询看的是同一个对象,所以不像 #3933 那样是\"A 上判、B 上写\"。坏的是**URL 不再描述这次操作**:审计、日志、以及任何按路径归类的中间件看到的是对象 A,读的却是 B。同时它让同一个端点有了第二种方言 —— REST 那边刚统一成\"路径对象说了算\"。\n\n## 顺带一处加固(不是活的 bug)\n\n`packages/plugins/plugin-webhooks/src/auto-enqueuer.ts:337` —— 出站 webhook 信封的自有键可被事件 payload 覆盖:\n\n```js\npayload: { object: event.object, recordId, action, timestamp, ...payload },\n```\n\n**我确认过引擎自己的发布者不会撞**:`data.record.*` 的 payload 是 `{ recordId, after, changes }`,记录字段嵌在 `after` 里,顶层没有 `object`/`action`/`timestamp`。所以这不是活的 bug,只是形状脆 —— 换个把记录字段平铺在顶层的发布者就会改写订阅方收到的信封。把信封键挪到最后,对现有发布者是**行为中性**的。\n\n## 已核实无问题的 7 处(记下来,免得下次重扫)\n\n| 位置 | 为什么不是 |\n|:--|:--|\n| `objectql/engine.ts:2656` `{ object, ...query }`(find) | `ast.object` **没有任何驱动读**。`driver.find(object, ast, opts)` 的表名走的是独立的第一个参数 —— sql-driver `getBuilder(object)`、memory-driver `getTable(object)` 都只用它。AST 上那个 key 是死字段 |\n| `objectql/engine.ts:2801`(findOne) | 同上 |\n| `rest/rest-server.ts:4847` `{ ...body, ...(sentBy 兜底) }` | 受信任的戳写在**最后**,且只在调用者没给时才补 —— 注释里是明说的设计 |\n| `plugin-auth/admin-import-users.ts:288` | `{ ...body, writeMode, matchFields, runAutomations: false, … }` —— 受信任值写在展开**之后**。这是正确写法的范本 |\n| `plugin-reports/report-service.ts:348` `{ id: input.id, ...payload }` | `payload` 是本函数就地构造的(`object_name`/`query_json`/`format`/`owner_id`/`updated_at`),**不含 `id`**;上面还有一道 owner 校验 |\n| `runtime/http-dispatcher.ts:1452 / 1464` | 受信任的 `_request` / `request` 写在最后;被展开的是用户自定义 API 端点的输入,本来就该由调用者给 |\n| `metadata/loaders/database-loader.ts:217/224/231` | private 内部 helper,`table` 内部派生,不是入口 |\n| `protocol.ts:5990`、`spec/identity/eval-user.zod.ts:154` | `...(x ? {k:v} : {})` 条件展开惯用法 —— 只加一个已知键,不是任意 bag |\n\n## 没查的相邻面(留着,不在本次范围)\n\n`findData` 里 `expand` 的\"高级用法\"允许调用者直接传一个 `Record<string, QueryAST>`,其中每个子 AST 自带 `object`。expand 是否对每个关联对象重跑暴露闸门 / RLS,**我没有验证** —— 需要单独走一遍才能下结论,不在这次扫查的形状里。\n\n## 修法\n\n跟 #3933 一样:**受信任的值最后写**。两处都是一行。\n\n<sub>核对于 `origin/main` @ c2bbd97。扫查脚本一次性用完即弃,方法记录在上文以便复现。</sub>\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 3843,
+  "kind": "issue",
+  "title": "Envelope drift is not just service-storage: four more route modules emit bare bodies, two of them the pre-#3675 `{ error: '<string>' }`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T09:22:25Z",
+  "updated_at": "2026-07-30T02:35:43Z",
+  "closed_at": "2026-07-30T02:35:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3843",
+  "body": "Found while fixing #3689 (PR #3837). That issue scoped itself to `storage-routes.ts`, and #3675 covered `service-i18n` alongside it — but neither asked whether the same drift exists elsewhere. It does, and in two modules it is the *older* shape, the one #3675 already declared wrong.\n\n## The survey\n\nCounting `res.json(...)` call sites against the two envelope halves, on `main` at 88ef03e:\n\n| Module | `res.json` calls | carry `success: true` | bare `{ error: '<string>' }` |\n|---|---:|---:|---:|\n| `packages/services/service-settings/src/settings-routes.ts` | 5 | 0 | 0 |\n| `packages/services/service-datasource/src/admin-routes.ts` | 12 | 0 | **3** |\n| `packages/rest/src/external-datasource-routes.ts` | 7 | 0 | **1** |\n| `packages/rest/src/package-routes.ts` | 16 | 3 | **3** |\n| *(fixed)* `service-storage/src/storage-routes.ts` | 2 (both helpers) | ✅ | 0 |\n\n### What each one actually emits\n\n**`settings-routes.ts`** — the shape #3675's changeset described: nested `error`, no `success` flag.\n\n```ts\nres.status(status).json({ error: { code, message, ...extra } });   // :50\nawait res.json({ manifests });                                     // :65  — bare success\nawait res.json({ values: result });                                // :118 — bare success\n```\n\n**`service-datasource/admin-routes.ts`** — `error` is a **string**, i.e. exactly the pre-#3675 shape, and the codes are lowercase snake (relevant to #3841):\n\n```ts\nres.status(503).json({ error: 'datasource_admin_unavailable' });   // :49\nres.status(400).json({ error: 'datasource_admin_error', message }); // :52 — message a SIBLING of error\nres.status(404).json({ error: 'not_found' });                      // :110\nres.json({ datasources });  res.json({ drivers: … });  res.json({ tables });  // bare successes\n```\n\nA caller reading `body.error.message` gets `undefined` here and the real message from the dispatcher — the identical asymmetry #3675 opened on.\n\n**`rest/external-datasource-routes.ts`** — same bare-string error, plus its own private success word, the `ok` that #3689 just retired from storage:\n\n```ts\nres.status(503).json({ error: 'external_service_unavailable' });        // :41\nres.json({ ok: results.every((r: any) => r.ok), results });            // :100\n```\n\n**`rest/package-routes.ts`** — partially converted, which is arguably worse than untouched: 3 of 16 bodies carry `success: true`, so the same module answers two shapes depending on which route you hit.\n\n## Why the ledgers and the existing suites miss it\n\nSame reason #3675 and #3689 give: the route ledgers audit which routes **exist** and whether the SDK can address them, not what comes back. And the two conformance suites that *do* check bodies (`error-envelope.conformance.test.ts`, `success-envelope.conformance.test.ts`) are per-package — they live in `service-storage` and `service-i18n` and scan only their own module's source. Nothing generalises them.\n\n## What needs deciding\n\n1. **Convert all four, module by module**, to the `sendError` / `sendOk` helper pair `storage-routes.ts` now uses, with a conformance suite per module. Correct and mechanical, but it is four PRs and the `{ error: '<string>' }` → `{ error: { code, message } }` move is breaking for each module's consumers, exactly as it was in #3687.\n2. **Convert the two `{ error: '<string>' }` modules only** (`admin-routes.ts`, `external-datasource-routes.ts`) and leave the merely-missing-`success` ones. Cheaper; closes the dialect that actually breaks `body.error.message` readers, leaves a smaller `declared ≠ actual` gap behind.\n3. **Lift the guard instead of the code** — one shared conformance harness (a package the service packages can import, or a lint rule) that fails any route module emitting a body outside `BaseResponseSchema`, then fix what it reports. Front-loads the work but is the only option that stops the next module from drifting.\n\nRecommendation: **3 then 1**. Three passes of the same hand-rolled suite (storage, i18n, and now four more) is the signal that the harness wants to be shared rather than copied. The scan in `success-envelope.conformance.test.ts` is already module-agnostic — it strips comments, counts `.json(` call sites, and asserts each envelope half is built in exactly one place; generalising it is mostly a matter of parameterising the path.\n\nWorth sequencing after #3841 and #3842, since converting a bare `{ error: 'not_found' }` means choosing a code vocabulary, and that is #3841's call."
+}

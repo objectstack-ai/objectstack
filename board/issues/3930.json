@@ -1,0 +1,35 @@
+{
+  "number": 3930,
+  "kind": "pull_request",
+  "title": "fix(actions): reach global actions at their real registration key, and 404 an action that never dispatched (#3913)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T10:36:26Z",
+  "updated_at": "2026-07-29T12:05:48Z",
+  "closed_at": "2026-07-29T12:05:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-29T12:05:45Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3930",
+  "body": "Fixes #3913.\n\n> **Rebased onto #3937.** This PR originally moved *every* `/actions` failure to a real status, which is what #3913 asks for. #3937 landed the opposite decision 40 minutes earlier and asserted it in `actions-validation-envelope.test.ts` so it could not drift silently. I've merged main and narrowed this PR to the part that does not contradict it — see [Where the line is](#where-the-line-is). The wider question is raised in #3913 rather than settled here.\n\n## Defect 1 — registration key vs lookup key\n\nBoth writers register an objectName-less action under the literal `'global'` — `AppPlugin` (`action.object || 'global'`) and `ObjectQLPlugin.actionObjectKey`. The REST fallback probed `'*'`, and `engine.executeAction` is an exact-string `Map` lookup with no wildcard semantics, so that probe could only ever miss:\n\n```\nAction 'log_call' on object '*' not found\n```\n\n`POST /api/v1/actions/global/log_call` worked by **accident** (the path segment happened to spell the registration key); `POST /api/v1/actions//log_call` never worked at all, and neither did falling back from an object-scoped route to a global handler.\n\n- `'global'` is now the canonical key (`GLOBAL_ACTION_OBJECT_KEY`).\n- One probe order — `actionHandlerObjectKeys(objectName)` → `[routed object, 'global', '*']`, deduped — serves **both** the REST route and the MCP `run_action` bridge, which had the same `'*'` rotation. The legacy `'*'` stays last so a handler registered directly against it still resolves.\n- A single-segment path (`/actions//:action`) routes at `'global'` instead of 400-ing.\n- The doc comments that disagreed about which key is canonical are corrected at every site.\n\n## Defect 2 — \"no such action\" was reported as a success\n\nThe not-found exit called `deps.success(...)`, which always emits `{status: 200, body: {success: true, data}}`. A request naming an action that does not exist came back as:\n\n```json\n{\"success\":true,\"data\":{\"success\":false,\"error\":\"Action 'log_call' on object '*' not found\"}}\n```\n\nAny caller that did not hand-unwrap the INNER envelope read the outer `success: true` and reported a success that never happened — including the shipped console (fixed on that side in objectstack-ai/objectui#2963).\n\nThat exit is a **404** now, and it names the **routed** object rather than whichever probe ran last.\n\n## <a name=\"where-the-line-is\"></a>Where the line is\n\n**Did a handler run?**\n\n| | |\n|:---|:---|\n| **It ran and rejected** — body `throw`, flow rejection, `ValidationError` | HTTP **200**, `data: {success: false, error, code?, fields?}` — **unchanged**, #3937's envelope |\n| **It never dispatched** — no handler under any key | **404** ← the only thing this PR moves |\n| **It never dispatched** — denied / wrong action type / unavailable | **403 / 400 / 503** — already the case before this PR |\n\n#3937 is right that a handler which ran and rejected is a business outcome and belongs in the payload. That reasoning does not reach an unregistered action: nothing ran, there is no outcome to report, and it is indistinguishable from a typo'd URL. The route already answers every *other* pre-dispatch failure with a status, so the not-found exit is joining them rather than opening a new contract.\n\nReverted from the original version of this PR to honour #3937: the 400 for an action-body throw, the 400 + `FLOW_FAILED` for a rejected flow, and the `errorFromThrown` 500 fallback.\n\n## Client SDK\n\n`client.actions.invoke` / `invokeGlobal` still do **not** throw — and the catch added here is now load-bearing rather than cosmetic. `client.fetch` throws on every non-2xx, so without it the routes that just gained a status would start propagating exceptions into callers that only ever checked `result.success`.\n\n## Testing\n\n- `pnpm build` green (71 tasks).\n- Suites after merging main: runtime **816**, objectql **1163**, client **194**, rest **419**, mcp **83** — all passing, **including #3937's `actions-validation-envelope.test.ts`**, which this branch previously broke.\n- `http-dispatcher.actions-global-key.test.ts` (13 cases). The engine double is deliberately faithful on the one point that matters: a real `Map` keyed `<object>:<action>` that throws `engine.ts`'s verbatim miss message — a double that resolved any key would have passed while the bug was live. Two of its cases assert the 200 side of the line, so the 404 cannot later be widened into \"every action failure is a 4xx\" by someone reading only this file.\n\n## Migration\n\nA caller that hand-checked `data.success` is unaffected. A caller that treated any 200 as success now sees a 404 for an action that does not exist — which is the bug being fixed. Callers going through `@objectstack/client` need no change.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_011AvZj6cLX7APd7roh2eK4F"
+}

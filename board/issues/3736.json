@@ -1,0 +1,35 @@
+{
+  "number": 3736,
+  "kind": "pull_request",
+  "title": "feat(client)!: remove the `ai` namespace — three methods, none of which ever worked (#3718)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T01:05:17Z",
+  "updated_at": "2026-07-28T02:37:26Z",
+  "closed_at": "2026-07-28T02:37:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T02:37:25Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3736",
+  "body": "Resolves the removal half of #3718.\n\n> **Rescoped.** This PR originally removed four methods. While it sat un-CI'd, **#3702 landed on `main` independently** and removed `projects.listTemplates` with near-identical reasoning — that was the merge conflict (both sides deleted the method and left a comment in its place; I took main's wording). Three methods now, not four.\n\n## Three methods, none of which ever worked\n\n| Removed | Built | Why it 404ed |\n|---|---|---|\n| `client.ai.nlq` | `POST /api/v1/ai/nlq` | declared in `DEFAULT_AI_ROUTES`, which has **no runtime consumer** — only the spec's own test reads it; `aiNlq?` is an optional protocol method nothing implements |\n| `client.ai.suggest` | `POST /api/v1/ai/suggest` | same |\n| `client.ai.insights` | `POST /api/v1/ai/insights` | same |\n\nFound by the AI route ledger (#3718, in `cloud`, where `service-ai` lives), which reads the table `buildAIRoutes()` returns and matches the SDK's URLs against it.\n\n**The two sets are disjoint.** The real AI surface is 12 routes — `chat`, `chat/stream`, `complete`, `models`, `status`, `effective-model`, and six `conversations` routes. The SDK expressed none of them.\n\n## Removed, not deprecated\n\nA typed method that always throws is worse than no method: it costs a runtime round-trip to discover, where absence is a compile error. **No working code can break, because there was no working behaviour.**\n\nOn the major bump: I hesitated, then checked `.changeset/` — **`@objectstack/client` is already taking a major on the v17 train**. So this is not *forcing* a major, it is landing a breaking removal in the window already open for one, which is when it should land.\n\nExpressing the real surface is tracked on #3718 as **new** API, not a rename of this one. For chat, `useChat()` (`@ai-sdk/react`) already speaks the Data Stream Protocol `POST /api/v1/ai/chat` serves.\n\n## Two things removed that I had added hours earlier\n\n- **The `AI_PLANE` capstone exemption** (from #3727). With no method targeting `/api/v1/ai/`, an exemption there is a hole with nothing to cover. The wildcard-only bound stays `0` and now reaches 0 with nothing exempted to get there.\n- **The four AI tests in `client.test.ts`** — replaced, not deleted. They were the exact shape this audit keeps finding behind green suites: mock `fetch`, assert the URL the client *built*, never assert that anything answered it. They passed against three endpoints that did not exist. The replacement asserts the one thing worth defending — the namespace is gone and must not return without a route behind it.\n\n## Types kept\n\n`Ai{Nlq,Suggest,Insights}{Request,Response}` are still re-exported straight from `@objectstack/spec/api`, so anyone holding those types keeps them. Retiring the spec-side declarations (`DEFAULT_AI_ROUTES`, the optional protocol methods) is a separate change.\n\n## Docs\n\n`client-sdk.mdx` carried three copy-pasteable examples that 404ed. `plugin-endpoints.mdx` had the AI surface **inverted** — it tabled the three phantom routes and explicitly denied `/ai/chat`, which is mounted. It now lists the 12 real ones.\n\n## ⚠️ Required follow-up in `cloud`, which cannot be done before this merges\n\n`UNMOUNTED_AI_CLIENT_METHODS` pins these exact three methods as existing-but-unmounted. When cloud's `.objectstack-sha` moves past this commit, **that guard goes red — correctly, by design** — and the pin must be emptied in the same PR as the bump.\n\nThat coupling is the ledgers working: an SDK surface change forces the control plane to acknowledge it. Flagging it so the next pin bump isn't surprised. (The pin moved three times during this session alone.)\n\n## Why this PR had no CI for an hour\n\nIt had a **merge conflict**, so GitHub could not compute the merge ref and never fired `pull_request` workflows — zero runs, while Vercel (a different integration) fired on every push. I chased the trigger config instead of checking `mergeable_state: \"dirty\"`, which was sitting in the API response the whole time. Noted here because \"CI never started\" and \"CI failed\" look identical from a distance and are diagnosed in completely different places.\n\n## Tests\n\n`@objectstack/client` — **122 passed** on the merged tree (`client.test.ts` + `client-url-conformance.test.ts`); full package 173 passed before the merge.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01K35y3ovfWtCkBHYFCqUfAt"
+}

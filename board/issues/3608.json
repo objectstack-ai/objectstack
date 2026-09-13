@@ -1,0 +1,30 @@
+{
+  "number": 3608,
+  "kind": "issue",
+  "title": "runtime: adapter 枚举 DomainHandlerRegistry 挂显式路由（裁决：有意不排期）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T09:15:49Z",
+  "updated_at": "2026-07-27T12:51:23Z",
+  "closed_at": "2026-07-27T12:51:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3608",
+  "body": "从 #2462 拆出，**状态=deliberately unscheduled**（ADR-0076 OQ#9 终裁 #3576）——本 issue 是防重新发明的台账，不是待办。\n\n## 设想\n\nHTTP adapter 枚举 `DomainHandlerRegistry.list()` 为每个 prefix 挂显式路由（`app.all(prefix + route.prefix + '/*')`），catch-all 只剩真 404——HTTP 层可打印自己的路由表。\n\n## 为什么不做（#3576 裁决）\n\ndispatch() 的关卡序（env 解析→身份→auth gate→membership→scope strip）是横切的：显式路由后每条路由仍须过全部关卡 ⇒ 关卡必须 middleware 化或逐 handler 重复——重构成本大、行为面风险回归，而收益（路由可打印）已由 `DomainHandlerRegistry.list()` 可枚举性 + route-parity 门（declared===enforced e2e）+ conformance 41 断言基本覆盖。\n\n## 重启条件（满足其一再议）\n\n- 关卡序因**其他独立动机**被 middleware 化；\n- 出现必须在 adapter 层做 per-prefix 差异化（限流/超时/中间件）的真实需求。"
+}

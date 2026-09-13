@@ -1,0 +1,30 @@
+{
+  "number": 3939,
+  "kind": "issue",
+  "title": "批量写路由的 \"max 200\" 一处都没在拦 —— 而且同一个端点有两份互相矛盾的 Zod",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T11:06:38Z",
+  "updated_at": "2026-07-29T12:02:06Z",
+  "closed_at": "2026-07-29T12:02:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3939",
+  "body": "从 #3897 的收尾里出来的。#3897 把 `deleteMany` 从\"一条 bulk SQL\"改成了**逐条按主键删**(为了 cascade 和逐条 `results`),于是\"一次请求能塞多少条\"从一个纸面问题变成了真问题 —— 而这个上限一处都没在拦。\n\n## 1. 上限只写在 schema 里,而 schema 根本没参与校验\n\n四个批量写路由都在文档和 Zod 里声明了 `max 200`:\n\n```js\n// batch.zod.ts:88   BatchUpdateRequestSchema\nrecords: z.array(BatchRecordSchema).min(1).max(200)   // 'max 200 per batch'\n// batch.zod.ts:110  UpdateManyRequestSchema\nrecords: z.array(BatchRecordSchema).min(1).max(200)\n// batch.zod.ts:211  DeleteManyRequestSchema\nids: z.array(z.string()).min(1).max(200)              // 'max 200'\n```\n\n但没有一条路由拿这些 schema 校验:\n\n| 路由 | 实际校验 | 拦上限? |\n|:--|:--|:--:|\n| `POST /:object/createMany` | 无(`records: req.body \\|\\| []`) | ❌ |\n| `POST /:object/updateMany` | `UpdateManyDataRequestSchema`(#3933) | ❌ 那份没有 `.max()` |\n| `POST /:object/deleteMany` | `DeleteManyDataRequestSchema`(#3897) | ❌ 同上 |\n| `POST /:object/batch` | 无(`request: req.body` 直接透传) | ❌ |\n| `POST /batch`(跨对象) | `CrossObjectBatchRequestSchema` | ✅ `rest-server.ts:6630` |\n\n跨对象那条是唯一在拦的,而且它拦的是**配置值** `batch.maxBatchSize ?? 200`,不是 schema 里那个硬编码的 200。\n\n所以 `POST /data/:object/deleteMany` 收一个 10k 的 `ids` 数组,#3897 之后就是 10k 次顺序引擎删除,一个请求打满一个 worker。声明了 max 200,一处都没拦 —— PD #10 的原话。\n\n## 2. 顺带:一个端点两份 Zod,而且形状不一致(PD #7)\n\n不只是上限对不上,**记录形状本身就矛盾**:\n\n| | `batch.zod.ts` | `protocol.zod.ts` |\n|:--|:--|:--|\n| updateMany 的 record | `BatchRecordSchema` —— `id?` / `data?` **全可选** | `{ id: string, data: record }` **都必填** |\n| deleteMany 的 ids | `.min(1).max(200)` | 无上下界 |\n\n`updateManyData` 的实现读的是 `record.id` 和 `record.data`,两个都必需 —— 也就是说 `UpdateManyRequestSchema` 声明的是一份**会接受 `{}` 的**、和实现不符的契约,而它正是 `BatchApiContracts.updateMany.input` 和路由表 `requestSchema` 指向的那份。真正在把关的是 protocol.zod 那份。\n\n`plugin-rest-api.zod.ts:918` 的 `requestSchema: 'CreateManyRequestSchema'` 还指着一个**从未定义过**的名字,顺手记一笔。\n\n## 修法\n\n- **上限归路由,按部署配置判**。`maxBatchSize`(`rest-server.zod.ts:337`,1..1000,默认 200)是部署策略,不该硬编码进 spec —— 把 `.max(200)` 从 schema 里拿掉,四条路由统一按配置值拦,和跨对象那条一个写法、一个错误码。schema 只管形状。\n- **一个端点一份 Zod**(PD #7)。protocol.zod 那份带 `object`(路径来的),batch.zod 那份是 body 形状;让前者 `.extend({ object })` 后者,drift 就没地方长了。方向只能是这个 —— protocol.zod 已经在 import batch.zod,反过来会成环。\n- `.min(1)` 一并去掉:空批次是 no-op 不是错误,#3897 之后 `{total:0, succeeded:0}` 已经是它的答案了。\n\n<sub>核对于 `origin/main` @ f734677。</sub>\n"
+}

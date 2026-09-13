@@ -1,0 +1,35 @@
+{
+  "number": 3602,
+  "kind": "issue",
+  "title": "analytics: 让 executeAggregate 桥携带 ExecutionContext(#3597 的纵深防御第二层)+ 两处残留无 scope 调用",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T09:09:00Z",
+  "updated_at": "2026-07-27T13:45:08Z",
+  "closed_at": "2026-07-27T13:14:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3602",
+  "body": "从 #3597 / #3601 拆出的后续项。#3601 已从 **analytics 层**堵死泄露(ObjectQLStrategy 现在把 read scope AND 进 filter),本 issue 处理**第二层**以及同一接缝上的两处残留。\n\n## 1. 主项:让 `executeAggregate` 契约携带 `ExecutionContext`\n\n#3597 的根因之一是 analytics→engine 的桥**不传 context**:\n\n```ts\n// services/service-analytics/src/plugin.ts:197-208\nconst rows = await engine.aggregate(objectName, {\n  where: filter, groupBy, aggregations, timezone,   // ← 无 context\n});\n```\n\nengine 侧本来是支持的 —— `BaseEngineOptionsSchema`(`spec/src/data/data-engine.zod.ts:56-59`)带 `context: ExecutionContextSchema.optional()`,`engine.ts:3339` 会 `mergeReadContext`。但 `.optional()` 意味着类型系统从不强迫调用方传,于是 analytics 桥就没传,进而命中 plugin-security 的无 principal fall-open(`security-plugin.ts:775-781`),把 engine 自己的 RLS 注入整个跳过。\n\n**为什么值得做(即便 #3601 已堵住泄露):**\n\n- **纵深防御**。目前 analytics 的安全性单靠 strategy 自觉调用 `getReadScope`。#3597 正是\"某个 strategy 忘了调\"导致的;第 3 个 strategy 出现时会重演。context 一旦传下去,engine 侧 RLS 就是无条件兜底。\n- **能解掉 #3601 的 fail-closed 限制**。#3601 对\"引用了带 scope 的联表对象\"的查询选择拒绝,因为 `engine.aggregate` 的 `where` 只寻址基对象。若 engine 拿到 context,它可以按自己的对象图逐对象施加 RLS,这类查询就能正常跑而不是被拒。\n- 契约层面 `StrategyContext` 目前只有预解析好的 read-scope map,**不带 user/session**,这本身就是个表达力缺口。\n\n**落点(需要动 `packages/spec`,会碰 api-surface 门,建议独立 PR):**\n\n- `spec/src/contracts/analytics-service.ts:241-252` —— `executeAggregate` options 加 `context?: ExecutionContext`。\n- `StrategyContext` —— 透传 `ExecutionContext`(或至少把 context 一路带到桥)。\n- `services/service-analytics/src/plugin.ts:197-208` —— 桥转发 context。\n- `analytics-service.ts` 的 `callCtx` 已经拿到了 `context`,只是没往下带。\n\n**注意**:这条不能替代 #3601。engine 侧 RLS 与 analytics 的 `getReadScope` 是两套解析(前者走中间件,后者走 `security.getReadFilter`),两者都保留才是纵深防御;而且没装 plugin-security 的部署只有 analytics 这一层。\n\n## 2. 残留:`fetchRecordLabels` 走的是同一条无 scope 的桥\n\n```ts\n// services/service-analytics/src/plugin.ts:348-364\nconst rows = await executeAggregate(targetObject, {\n  groupBy: ['id', displayField],          // ← 每条记录一行\n  aggregations: [{ field: 'id', method: 'count', alias: '_c' }],\n  filter: { id: { $in: ids } },           // ← 无 read scope、无 context\n});\n```\n\n`groupBy: ['id', displayField]` 等于逐记录返回**真实显示名** —— 粒度上是行级而非聚合级。\n\n**当前是否越权:否。** #3601 之后聚合本身已加 scope,喂进来的 `ids` 已被限制在调用者可见范围内。所以这是**潜在债**而非活漏洞:一旦 `ids` 的来源变宽(新调用方、新 strategy),它会立刻变成行级泄露,且没有任何一层会拦。\n\n建议:要么让它也吃 read scope,要么在 #1 落地后靠 context 兜底。\n\n## 3. 残留:`ObjectQLStrategy.generateSql` 预览不含 scope\n\n`objectql-strategy.ts:117-149` 生成的展示性 SQL **完全没有 WHERE 子句**,所以 `/analytics/sql` 的预览与实际执行的语义不符(实际执行在 #3601 后是加了 scope 的)。\n\n**不构成泄露**(该 SQL 不执行,只用于展示),但会误导排查者。修的话需要把 `FilterCondition` 编成 SQL —— `read-scope-sql.ts` 的 `compileScopedFilterToSql` 已有能力,只是 ObjectQL 的 `generateSql` 没有 NativeSQL 那套 alias 体系,需要小心。优先级最低。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

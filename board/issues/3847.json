@@ -1,0 +1,32 @@
+{
+  "number": 3847,
+  "kind": "issue",
+  "title": "`GetFieldLabelsResponse` declares rich label entries; both surfaces emit bare strings",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T09:41:15Z",
+  "updated_at": "2026-07-28T12:56:46Z",
+  "closed_at": "2026-07-28T12:56:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3847",
+  "body": "Found while fixing #3833 (PR #3846). Filing rather than folding in — that one is a correctness fix, this changes the wire shape.\n\n## The gap\n\n`GetFieldLabelsResponseSchema` (`packages/spec/src/api/protocol.zod.ts`) declares each label as an **object**:\n\n```ts\nlabels: z.record(z.string(), z.object({\n  label: z.string().describe('Translated field label'),\n  help: z.string().optional().describe('Translated help text'),\n  options: z.record(z.string(), z.string()).optional().describe('Translated option labels'),\n})).describe('Field labels keyed by field name'),\n```\n\nBoth serving surfaces emit `Record<string, string>` — a bare label per field:\n\n- `packages/runtime/src/domains/i18n.ts` (after #3846, via `resolveObjectFieldLabels`)\n- `packages/services/service-i18n/src/i18n-service-plugin.ts`\n\nSo a client typed against `GetFieldLabelsResponse` reads `labels[field].label` and gets `undefined`, because the value is the string itself. The declared `help` and `options` never appear at all, though the underlying data **has** them — `FieldTranslationSchema` carries `label`, `help`, `placeholder`, and `options`, and bundles populate them. The endpoint drops them on the floor.\n\n## Why it survived\n\nThe bare-string shape is consistent across both surfaces, so nothing looks inconsistent from the outside — it is only wrong against the schema. And there is currently no consumer to notice: `objectui` does not call this endpoint, and in-repo callers are limited to the client SDK method plus its wire-dialect tests, which assert URL shape rather than body shape.\n\nNote this is the *third* declared ≠ enforced gap on this one endpoint family, after #3676 (request filters no server read) and #3833 (a derivation scanning a retired dialect). Whatever check catches this class should probably be pointed at `/i18n` first.\n\n## Options\n\n1. **Emit the declared shape** — `{ label, help?, options? }` per field, sourced straight from `FieldTranslationSchema`, which already has all three. Makes the response match its contract and stops discarding data the bundle carries. Breaking for anyone reading `labels[field]` as a string; the sweep above suggests that is nobody today, which makes this the cheap moment to do it.\n2. **Narrow the schema to `Record<string, string>`** — declare what is served. Smaller, but it locks the endpoint out of ever returning `help`/`options` without another breaking change, and those are exactly what a localized form needs.\n\nOption 1 looks right on the same reasoning #3676 used in reverse: there the declared thing could not be delivered and no one wanted it, so it was trimmed; here the declared thing *can* be delivered, the data is already loaded, and it is the more useful surface. But it is a wire-shape change and should be a deliberate call, not a side effect.\n\nWorth deciding alongside whether `placeholder` (present on `FieldTranslationSchema`, absent from the response schema) belongs in the response too."
+}

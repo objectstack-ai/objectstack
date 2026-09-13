@@ -1,0 +1,35 @@
+{
+  "number": 3860,
+  "kind": "pull_request",
+  "title": "fix(automation): resume gate follows `map:` too; the route stops accepting engine-internal variables (#3853)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T12:03:11Z",
+  "updated_at": "2026-07-28T12:50:44Z",
+  "closed_at": "2026-07-28T12:50:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T12:50:42Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3860",
+  "body": "Closes #3853. Follow-up to #3822 — two holes in the gate that PR shipped, **both demonstrated with a repro before fixing**, not reasoned.\n\n## 1. The chain walk missed `map:`\n\n`resumeInternal` handles the two linked-run correlations **oppositely** (`engine.ts:2080`):\n\n```ts\nif (run.correlation?.startsWith('map:')) {\n    await this.executeNode(node, flow, variables, context, steps);   // RE-RUN the map node\n} else {\n    await this.traverseNext(node, flow, variables, context, steps, signal?.branchLabel);\n}\n```\n\nThe gate's chain walk followed only `subflow:`. A run parked on a `map` node was therefore judged on `map` itself — `resumeAuthority: 'any'` — and let through even while the item it was waiting on sat on an `approval`.\n\n`map` is the **batch-approval** shape (ADR-0037 A2, `showcase_release_signoff`), and the map parent's run id is the one a launcher holds. `$mapState.started` is advanced past the in-flight item *before* the suspend (`map-node.ts:155-156`), and the re-entry records a result only when `$mapItemDone` is set (`map-node.ts:113-118`), so an empty-body resume of the parent **skipped that item's approval outright**:\n\n```\nbefore:  { started: 1, results: [] }\nPOST .../runs/{parentRunId}/resume   {}\nafter:   { started: 2, results: [] }      ← item 1 skipped, never decided\nsuspended child runs: 2                   ← item 1 orphaned (request still pending) + item 2\n```\n\nKnock-on: item 1's eventual real decision bubbles into a parent now waiting on item 2, so its output lands under the wrong index and the misalignment cascades.\n\n**Fix.** The walk follows both prefixes. The unifying rule is that a linked-run pause is waiting on a **child**, so the child's node carries the authority — the gate reads *the item, not the loop*. They differ only in what continuing would mean (lands on the child vs. advances past it), which the refusal message now distinguishes.\n\n## 2. Resume `inputs` could write the engine's `$` namespace\n\n`signal.variables` are applied as **bare** flow variables, so a caller could set the exact handoff keys `bubbleToParent` uses — with the node id readable from `GET /automation/:name` (an SDK route) — and have the map record a per-item result for a decision nobody made:\n\n```jsonc\nPOST .../runs/{parentRunId}/resume\n{ \"inputs\": { \"signoffs.$mapItemDone\": true,\n              \"signoffs.$mapItemOutput\": { \"result\": \"FORGED — never approved\" } } }\n→ { started: 2, results: [ { \"result\": \"FORGED — never approved\" } ] }\n```\n\nThe same reached `$runId`, which `approval` / `wait` nodes read to correlate external state back to a run. `$` is the engine's namespace throughout (`$runId`, `$flowName`, `$flowLabel`, `$record`, `$error`, `$parentRunId`, `$parentMapNode`, `$parentOutputVariable`, `<nodeId>.$mapState`); authors never write there.\n\n**Fix.** The **route** answers **400** for a reserved name (`$…` or a `.$` segment). Deliberately at the transport and not in the engine: `bubbleToParent` legitimately writes those keys in-process, and this is the same trust split the gate itself uses — strict at the untrusted boundary, unrestricted for code that already holds the authority. Refuse rather than silently strip, so a mis-authored screen input fails at the door instead of many nodes downstream.\n\nNote (2) is **not** fixed by (1): a map whose pending item sits on an ungated `screen`/`wait` is still resumable, and the handoff keys were still writable there.\n\n## Consumer impact\n\nAuthor-declared variables are unaffected — `{ new_assignee: 'ada' }` and dotted names like `collect.note` still pass (covered by a test). If you were driving a batch-approval `map` by resuming the map's own run id, resume the **item's** run through its owning service instead (`client.approvals.approve`) — the map advances itself when the item completes.\n\n## Tests\n\n`resume-authority-gate.test.ts` grows a `through a map pause` block (14 total): the map parent is refused while an item is gated **and nothing is consumed** (`$mapState` unchanged, both runs still suspended); the item completing *through its owning service* still advances the map and runs the item's downstream (no regression to the bubble); a map over ungated items stays resumable. `http-dispatcher.test.ts` covers the 400 for the three reserved shapes plus the \"ordinary inputs still pass\" control, and asserts the engine is never reached on refusal.\n\nVerified: `service-automation` (35 files), `plugin-approvals` (12 files), `runtime` (47 files / 696 tests) all green; `eslint --no-inline-config` clean; `check:doc-authoring` and `check:docs` in sync.\n\nDocs: the `flows.mdx` gate section now describes the linked-run walk in both directions plus the `$`-namespace rule; the batch-approval section says the map's own run id is refused while an item is open; ADR-0019 gains a `#3853` addendum and the `#3801` addendum's chain-walk bullet is corrected.\n\nDistinct from #3823 (revise-window `wait`), which needs a per-suspension owner claim rather than a chain walk.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_013gvN32u1EiuvY9uQEMJiMR)_"
+}

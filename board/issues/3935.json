@@ -1,0 +1,32 @@
+{
+  "number": 3935,
+  "kind": "issue",
+  "title": "REST /actions resolves declarations by `name` only, so a target-bound action's ADR-0066 D4 gate + ADR-0104 param contract are silently skipped",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T10:45:19Z",
+  "updated_at": "2026-07-30T00:14:55Z",
+  "closed_at": "2026-07-30T00:14:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3935",
+  "body": "Found while verifying #3919 (the #3915 type-dispatch fix) against the objectui client. Latent today — no shipped declaration triggers it — but the code path is real and it fails **open**, so filing per Prime Directive #10 rather than leaving it buried in a PR thread.\n\n## The mismatch\n\nThe console POSTs the action's **handler key**, not its declarative name:\n\n```ts\n// objectui packages/app-shell/src/hooks/useConsoleActionRuntime.tsx:504,590\nconst targetName = action.target || action.name;\n…\n`${baseUrl}/api/v1/actions/${encodeURIComponent(obj)}/${encodeURIComponent(targetName)}`\n```\n\n`packages/runtime/src/domains/actions.ts` resolves the declaration behind that URL by **declarative name** — all three sources in `resolveRouteActionDeclaration` are keyed that way:\n\n```ts\nobj.actions.find((a) => a.name === actionName)   // object-embedded\nql.registry.getItem('action', actionName)        // standalone artifact\nmeta.load('action', actionName)                  // Studio-authored row\n```\n\nSo for a `target`-bound action (`{ name: 'complete_task', target: 'completeTask' }`) the URL segment is `completeTask`, no declaration matches, and `actionDef` is `undefined`. The handler still runs — `ql.executeAction(obj, 'completeTask', ctx)` finds it registered under the target key — but with `actionDef` undefined:\n\n- **ADR-0066 D4** — `actionPermissionError(deps, undefined, …)` returns `null`. A declared `requiredPermissions` is **not enforced**.\n- **ADR-0104 D2** — `enforceActionParams(deps, undefined, …)` returns `null`. The declared param contract is **not checked**.\n\nBoth are declared-but-unenforced on this path, and both fail open.\n\nNote the MCP surface does **not** have this gap: `invokeBusinessAction` resolves the declaration by name *first*, gates on it, and only then probes `target`/`name`/`*` for the handler. This is the same REST-vs-MCP asymmetry #3915 was about, one layer down — the gate rather than the dispatch.\n\n## Why it is latent, not live\n\nA scan of `packages/platform-objects` + `examples` finds **no** action declaring action-level `requiredPermissions` together with a `target` (the `requiredPermissions` hits in `sys-sso-provider` / `sys-scim-provider` are object-level, ADR-0066 D3, enforced elsewhere). So nothing ships broken today. It bites the first author who writes:\n\n```ts\ndefineAction({\n  name: 'issue_license',\n  target: 'issueLicense',                    // handler key ≠ name\n  requiredPermissions: ['manage_platform_settings'],\n})\n```\n\n— the Console hides the button correctly (the UI reads the declaration it has in hand), while the endpoint the same button posts to accepts anyone. That is precisely the \"dual-surface gate\" inversion ADR-0066 D4 exists to prevent.\n\n## Repro sketch\n\n```bash\n# an action declared with target ≠ name and requiredPermissions\ncurl -X POST /api/v1/actions/<object>/<target> -d '{}'   # → runs, ungated\ncurl -X POST /api/v1/actions/<object>/<name>   -d '{}'   # → 403 as declared\n```\n\n## Suggested fix\n\nExtend `resolveRouteActionDeclaration` to also match a declaration whose `target` equals the URL segment, after the by-name lookups. One wrinkle to settle first: `target` is not unique — two actions on the same object may bind the same handler — so the by-target match needs a defined tie-break (or should refuse to resolve on ambiguity and keep failing open loudly rather than gating on the wrong declaration).\n\nWorth deciding alongside it whether the client should be posting `name` rather than `target` in the first place; the endpoint's `:action` segment naming a handler key is what makes the declaration unfindable, and the framework already rotates `name`/`target` candidates on the MCP side."
+}

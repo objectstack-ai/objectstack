@@ -1,0 +1,35 @@
+{
+  "number": 3747,
+  "kind": "pull_request",
+  "title": "fix(auth): app-declared org roles are storable, not just registerable (#3723)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T01:38:40Z",
+  "updated_at": "2026-07-28T02:44:53Z",
+  "closed_at": "2026-07-28T02:44:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T02:44:51Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3747",
+  "body": "Closes #3723.\n\n## 问题\n\n`additionalOrgRoles` 会把 stack 声明的每个 `permission` / `position` 名字注册进 better-auth 的 organization plugin,所以 `POST /organization/invite-member { role: 'sales_rep' }` 能通过角色校验 —— 然后写入失败,因为 `sys_invitation.role` 和 `sys_member.role` 是只列了 `owner|admin|member` 的封闭 select:\n\n```\nValidationError: role must be one of: owner, admin, member\n  { field: 'role', code: 'invalid_option', options: ['owner','admin','member'] }\n```\n\nselect 在写入时是**强制生效**的,而 better-auth 自己的 insert 并不豁免(它们同样走 ObjectQL 校验器,校验器排在安全中间件之后,`isSystem` 上下文不起作用)。所以任何声明了角色名的部署,注册的都是「能被请求、永远存不下来」的角色 —— `declared ≠ enforced`(Prime Directive #10),就发生在声明的下一层。\n\n## 方案\n\nIssue 里列了三个选项,这里走的是 (2) —— 契约优先(Prime Directive #12):**一份清单,物化进两个消费方**。不是把两个字段改成自由文本(那会丢掉 picker 的选项列表和写入侧的护栏),也不是只加 lint(那能把不一致喊出来,但 app 角色照样不可用)。\n\n- `spec/identity/membership-role.ts` —— 内置角色常量 + 它们的 select options。`MEMBERSHIP_ROLE_DELEGATED_ADMIN` 从 `eval-user.zod` 挪到这里(包级导出路径不变,api-surface 快照确认 0 breaking)。\n- `plugin-auth/org-roles.ts` —— 派生逻辑的唯一归属。`normalizeAdditionalOrgRoles` 是唯一的归一化入口,它的输出**同时**喂给 better-auth 的 roles map 和两个 select 的 options(`withMembershipRoleOptions`,注册 manifest 时物化,copy-on-write)。两边都不再各自持有清单,自然不可能一边接受、另一边拒绝。\n- `sys_invitation` / `sys_member` 只声明内置基线(`BUILTIN_MEMBERSHIP_ROLE_OPTIONS`),app 角色启动时追加。\n- `collectStackOrgRoles` 是唯一的生产侧遍历。\n\n## 四个宿主,一个遍历\n\n`AuthPlugin` 从 stack 启动的地方有四处,其中**两处从来没传过角色**:\n\n| 宿主 | 改动前 | 性质 |\n|:---|:---|:---|\n| `objectstack serve` | 自己走一遍 stack | 就是 issue 报的错配 |\n| `@objectstack/verify` harness | **完全不传** | 唯一驱动真实 HTTP 路由的验证面,对这类 bug 失明 |\n| `DevPlugin` | **完全不传** | 自称等价于完整栈,却把 app 角色排除在外 |\n| `AuthPlugin` 自身 | 直接吃调用方数组 | 未归一化 |\n\nharness 那处是要害:#3722 的单测能证明 roles map 构建正确,却仍然发布了一个不可用的角色,正是因为唯一能发现它的那层自己没开这个功能。\n\n注意 harness / DevPlugin 两处**不是错配**(两边都只有内置角色,一致),而是**功能缺席** —— 更安静,所以更该修。\n\n## 角色 label 走声明值\n\ntitle-case 机器名会制造**第三处真相**:position 声明了 `{ name: 'exec', label: 'Executive' }`,picker 却渲染成 `Exec`,和它自己的元数据打架;非英文栈更糟,`销售代表` 会变成 `Sales Rep`。\n\n`collectStackOrgRoles` 把声明的 label 带出来,`additionalOrgRoles` 放宽为接受 `string | { name, label }`(**向后兼容**,`string[]` 调用方不受影响)。better-auth 经 `orgRoleNames` 只拿名字,存储值永远是 name;label 纯展示,title-case 降级为「宿主没提供 label 时」的兜底。\n\n想做多语言覆盖仍走翻译包 —— 运行时追加的选项**会**被 i18n resolver 按 value 查询(`objects.sys_member.fields.role.options.<name>`),这条路径已写进文档。\n\n## 一处行为变化\n\n不符合机器名规范(`/^[a-z][a-z0-9_]*$/`,最少 2 字符)的声明名,现在**两边都不注册**,并在启动时告警。`Field.select` 会把 `[a-z0-9_]` 之外的字符剥掉,所以 `showcase.export_data` 会被原样注册、却被存成 `showcaseexport_data` —— 名字对得上、值对不上,是同一个 bug 换了个写法。拒绝之后,邀请会在入口处以 `ROLE_NOT_FOUND` 明确失败,而不是拖到 insert。通过 `SnakeCaseIdentifierSchema` 的名字不受影响。\n\n## 关于能力通道(未扩大范围)\n\n让 app 角色可存储之后,`mapMembershipRole` 会把它投射进 `current_user.positions`,同名的 `sys_position_permission_set` 绑定就会解析出权限集 —— 这正是 app 声明这些角色的目的。签发侧的封顶不变:`invitation-role-cap.ts` 仍然把 admin 级以下的签发者限制为只能邀请 `member`。Issue 中提到的「owner/admin 签发者仍可授予 app 角色」这一通道保持原样,未在此扩大。\n\n## 验证\n\n- `packages/qa/dogfood/test/app-org-role-invite.dogfood.test.ts` —— 在 showcase stack 上驱动真实邀请路由:position 名(`contributor`)与 PermissionSet 名(`showcase_manager`)两条声明路径都能邀请成功、两个 select 选项一致、成员行能持有同一角色、picker 显示 `Executive` 而非 `Exec`;并保留反向对照 —— 未声明的角色仍被拒绝(字段没有被简单放开)。\n- **确认这是一道真闸门**:临时移除物化步骤后重跑,5 条里 4 条失败,报的正是 issue 里那条 `role must be one of: owner, admin, delegated_admin, member`。\n- `org-roles.test.ts` 24 条单测覆盖归一化 / label 优先级 / 选项构建 / copy-on-write / stack 遍历,含「静态定义只含内置角色」的防漂移断言;`auth-manager.test.ts` 新增一条:写不进去的名字也不会注册进 better-auth。\n- 16 个 CI check 全绿。本地 spec (6696) / plugin-auth (598) / cli (642) / lint (447) / platform-objects (223) / verify (7) / plugin-dev (7) / dogfood 全过;`check:i18n`、`check:role-word`、`check:api-surface`、`check:doc-authoring` 均通过。\n- 全量 `turbo test` 跑了两轮,各有一个**不同的**包偶发失败(`plugin-audit` zh-CN 摘要、`cloud-connection` marketplace seed);两者单独重跑及干净工作树上重跑均通过,与本改动无关(都不涉及成员角色)。\n\n## 文档\n\n`positions.mdx` 的成员层级列表原本就漏了 `delegated_admin`,本改动又让它漏了 app 角色,已修正(措辞控制在 ADR-0090 D3 的 role-word 配额内,未动该页基线)。展开说明放在 `authentication.mdx` 的 better-auth 边界页,基线 2 → 5。\n\n## 后续(已立项,不在本 PR)\n\n**objectstack-ai/cloud#897** —— `ArtifactKernelFactory` 是第**五**个宿主,同样不传 `additionalOrgRoles`,即托管环境下 app 角色依然不可邀请(功能缺席,非错配)。已核实并附修复方向与两个待确认前提。\n\n那个 issue 里也提了更根本的一点:五个宿主里三个曾经忘了传,说明**按宿主分发本身就是缺陷模式** —— 每加一个 embedder 就多一次静默失效的机会。更耐久的形状是让 `AuthPlugin` 自己从 metadata service 派生,宿主什么都不用传;建议在 framework 侧单独立项。"
+}

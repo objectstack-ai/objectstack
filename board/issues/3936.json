@@ -1,0 +1,35 @@
+{
+  "number": 3936,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol,rest): deleteMany selects on the id list only, and bulk writes bind to the path object (#3897, #3933)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T10:45:33Z",
+  "updated_at": "2026-07-29T11:02:23Z",
+  "closed_at": "2026-07-29T11:02:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-29T11:02:21Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3936",
+  "body": "Closes #3897,closes #3933。\n\n两个 issue 是同一个教训的两半:**受信任的值先写、body 展开在它之后**。#3897 覆盖掉的是 `where`,#3933 覆盖掉的是路径上的 `object`,而且就在同一段代码里。\n\n---\n\n## #3897 — deleteMany:body 可以替换掉 id 谓词\n\n```js\nreturn this.engine.delete(request.object, {\n    where: { id: { $in: request.ids } },\n    ...request.options          // ← 展开在 where 之后\n});\n```\n\n`request.options` 是调用者给的(REST 路由把整个 body 摊进协议请求),所以 `{\"ids\":[\"a\"],\"options\":{\"multi\":true,\"where\":{}}}` 到达引擎时是一次无谓词的 bulk delete。\n\n**实跑量化了 issue 里标注\"未确认\"的那部分** —— 在修复前的构建上,CRM dev 环境、admin 身份:\n\n```\nids=[T-1] + options:{multi:true, where:{}}  → 响应 8,对象里 8 行全没了\nids=[T-2, T-3]  (正常用法)                  → \"Delete requires an ID or options.multi=true\"\n```\n\nRLS 会把范围收敛到调用者可见集,这里 admin 的可见集就是全部。happy path 确实不通。\n\n### 修法\n\n没有只把展开顺序倒过来 —— 那样 `options` 仍然会流进引擎选项,`context`(伪造 principal)照样能挤进去。改成结构上不可能:\n\n- **协议层**:引擎选项只从校验过的 id 列表构造,调用者的 `options` 根本不参与合并(`BatchOptions` 的四个键没有一个是 `engine.delete` 认识的,合并它只可能夹带引擎键)。id 必须是标量,`{\"ids\":[{\"$ne\":null}]}` 这种低一层的谓词放大也堵掉。\n- **REST 入口**:按 `DeleteManyDataRequestSchema` `.parse()`,Zod 剥未知键,`options.where` / 顶层 `where` / body 里的 `context` 活不过 ingress。\n\n两处都做,正如 issue 里建议的。\n\n### 顺带修好的 happy path\n\n改成**按 id 逐条删**(和 `batchData` 的 `delete` 分支、`updateManyData` 的循环一致),而不是补一个 `multi: true`。这样连带补上两个原本埋着的洞:\n\n1. bulk 分支不走 `cascadeDeleteRelations` —— 就算当初补上 `multi`,`deleteBehavior` 的 `cascade`/`set_null`/`restrict` 依然不会生效;\n2. 声明的 `BatchUpdateResponse` 契约(逐条 `results`、`atomic`、`continueOnError`)从一个 bulk 行数里根本实现不出来。\n\n---\n\n## #3933 — updateMany:body 可以替换掉路径上的 object\n\n修 #3897 时发现的。同一个展开覆盖的不只是 `context`:\n\n```js\nobject: req.params.object,   // 受信任的值,先写\n...req.body,                 // ← 展开在它之后\n```\n\n而上一行的 `enforceApiAccess` 读的是 `req.params.object`(`rest-server.ts:1211`)。**闸门在 A 上判,写落在 B 上。**\n\n实跑复现(已登录的普通调用者):\n\n```\nPOST /api/v1/data/crm_account/updateMany\n{\"object\":\"crm_contact\",\"records\":[{\"id\":\"gg92…\",\"data\":{\"last_name\":\"PWNED\"}}]}\n→ succeeded:1,crm_contact 那条记录真的变成了 PWNED\n```\n\n路径挑一个 `apiEnabled` 开着的对象,body 里填一个关掉的,ADR-0049 那层就绕过去了。这不是越权写(RLS/FLS 仍按 B 跑,`assertObjectRegistered` 也按 B 查),破的是对象级暴露策略 —— PD #10 里\"声明了就必须拦得住\"的那一层。\n\n**#3897 的修复本身也中了同一招**:`safeParse({ object: req.params.object, ...req.body })` —— body 里的 `object` 照样赢,实跑验过 contact 被删掉了。同一个 PR 里一起修:路径对象**最后写**。\n\n`context` 那条也一起堵了,但范围要说清楚:已登录时真 context 会盖回去(实跑确认 `updated_by` 是真实用户 id),**只有 `requireAuth:false` + 匿名那一档**才是唯一 context。那一档我没有实跑复现,是从 `?:` 短路条件读出来的,issue 里如实标注了。\n\n### 未受影响\n\n| 路由 | body 怎么进的 | 覆盖 `object`? | 覆盖 `context`? |\n|:--|:--|:--|:--|\n| `updateMany` | `...req.body` | 是 → 已修 | 是 → 已修 |\n| `deleteMany` | `...req.body` | 是 → 已修 | 是 → 已修 |\n| `createMany` | `records: req.body \\|\\| []` | 否 | 否 |\n| `batch` | `request: req.body`(套一层) | 否 | 否 |\n\n---\n\n## 行为变更\n\n- `deleteMany` 返回 `BatchUpdateResponse`(`{success, operation, total, succeeded, failed, results}`),此前返回驱动的裸行数 —— 在它有返回值的那些路径上。\n- 调用者的执行 context 现在会透传到每一次 delete,RLS/FLS 在这条路径上终于跑在调用者身份下。\n- `updateMany` / `deleteMany` 的畸形 body 现在是 `400 VALIDATION_FAILED`,此前会更深地失败在协议层。\n- body 里的 `object` 键从\"生效\"变成\"被忽略\"。\n\n## 顺带对齐的信封形状\n\n两个新入口最初把 Zod 失败报成 `issues[]`(照抄 cross-object batch 路由),但数据面 `VALIDATION_FAILED` 的**文档化**信封是 `fields[]`(`{field, code, message}`,wire-format §7),也是 `mapDataError` 对校验器抛出的那种所发的形状(#3918)。一个 wire code 两种形状,意味着按 `fields` 取值的客户端在这两条路由上会静默地什么都读不到。新增 `zodIssuesToFields`,两处统一 —— `code: 'VALIDATION_FAILED'` 在数据面只有一个意思,不管是哪一层发现的。\n\n## 验证\n\n- 新增 24 条测试:`protocol.delete-many.test.ts`(11)、`rest-delete-many-ingress.test.ts`(7)、`rest-bulk-path-object.test.ts`(6,其中一条直接把 apiEnabled 闸门绕过演出来)。\n- **验过新测试在未修代码上会红** —— #3933 那 6 条里 5 条失败(`expected 'locked' to be 'open'` 等),第 6 条是正常路径两边都绿。\n- `@objectstack/rest` 432 条、`@objectstack/metadata-protocol` 82 条全绿;改动文件 ESLint 干净。\n- 两个 issue 的载荷都在真机(`pnpm dev:crm -- --fresh`)上跑过修复前 / 修复后的对照,数字见上文。dev 服务器已自行拆除。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01TzLE9cw4gZKNyPN2ZP4iTt\n"
+}

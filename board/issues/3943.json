@@ -1,0 +1,34 @@
+{
+  "number": 3943,
+  "kind": "pull_request",
+  "title": "docs(spec): state what the action requiredPermissions server gate does NOT cover (#3923)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T11:14:16Z",
+  "updated_at": "2026-07-29T12:14:16Z",
+  "closed_at": "2026-07-29T12:14:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-29T12:14:14Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3943",
+  "body": "Closes the documentation half of #3923. Behaviour is unchanged.\n\n## The problem\n\n`ActionSchema.requiredPermissions` documented itself as a dual-surface gate whose server half is \"the source of truth\":\n\n> the server (action route) rejects the call with 403 when the caller's systemPermissions don't cover these (the source of truth)\n\nAn app author reasonably reads that as \"any action I declare this on is enforced somewhere\". It isn't.\n\nServer enforcement (`actionPermissionError`) sits on the **platform action route** — `POST /api/v1/actions/<object>/<action>` and the MCP/AI path — which is where `type: 'script' | 'flow' | 'modal'` actions execute. A `type: 'api'` action whose `target` is a self-authored endpoint is fetched by the browser directly: that request never reaches the platform, so nothing checks the declaration server-side, and the endpoint has to re-check the capability itself.\n\n## The change\n\nThe doc comment, the `describe()` string (which is what surfaces in generated schema docs and editor tooltips), and ADR-0066 D4 now say exactly that. ADR-0066 D4 also records the UI half's real scope — every action surface, not just the engine — which is fixed in [objectui#2965](https://github.com/objectstack-ai/objectui/pull/2965).\n\n`packages/spec` tests (262 files / 6823 cases) and `tsc --noEmit` green.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 3914,
+  "kind": "issue",
+  "title": "[17.0.0-rc.0] Action body ctx.api is bound to a context-less engine facade — every owner-scoped write dies FORBIDDEN while the audit line claims TRUSTED",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T08:33:30Z",
+  "updated_at": "2026-07-29T09:56:07Z",
+  "closed_at": "2026-07-29T09:56:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3914",
+  "body": "Found upgrading HotCRM to 17.0.0-rc.0 (tag commit `fc156fa4a`). **Upgrade blocker.**\n\n## Symptom\nA `type:'script'` object action whose body calls `ctx.api.object('crm_case').update(...)` (declared `capabilities:['api.write']`) fails with `FORBIDDEN: insufficient privileges to update crm_case <id>` — as the built-in admin. Meanwhile the server logs, on the same request:\n\n```\n[action-audit] REST action 'crm_case/close_case' — body executes TRUSTED (context-less engine, RLS/FLS-bypassing) for user '<id>'\n```\n\n## Root cause — identity is absent, not insufficient\n1. The `actionContext` handed to the handler has no `api` key (`packages/runtime/src/domains/actions.ts:178-184`); the audit line at `:187-190` is printed unconditionally and describes `ctx.engine`, not what `ctx.api` actually does.\n2. `buildSandboxApi` falls through its 3-way fallback (`packages/runtime/src/sandbox/body-runner.ts:187-202`): `actionCtx.api` absent; `ql.object` is not a function (raw `ObjectQL` engine — `ScopedContext.object()` exists only via `engine.createContext()`, which the runtime action path never calls); → `buildEngineRepoFacade` (`:161-184`).\n3. That facade calls `ql.update(objectName, data, opts)` with **no `context` and no `isSystem`**. `engine.update` passes `opCtx.context = undefined` (`packages/objectql/src/engine.ts:3158/:3193-3198`).\n4. plugin-sharing's write gate then denies: `canEdit` short-circuits on `!context.userId` (`packages/plugins/plugin-sharing/src/sharing-service.ts:255`; bypass at `:413-417` needs `context.isSystem`). Admin-ness is never consulted — the FORBIDDEN message text originates at `sharing-plugin.ts:612-635`.\n\n## The asymmetry that proves the defect\nHook bodies get exactly what the audit line promises: `buildHookApi` falls back to `{ isSystem: true }` and returns a real `ScopedContext` (`packages/objectql/src/engine.ts:978-981`). Action bodies never do. The MCP path has the identical hole (`packages/runtime/src/action-execution.ts:416-440`, `:578-584`).\n\n## Notes\n- Object-dependent: objects with `sharing model 'public'`, no owner field, or bypass-listed pass `canEdit` early (`sharing-service.ts:249-254`) — so some actions appear to work, which masks the bug.\n- The record pre-load at `domains/actions.ts:127` DOES thread the caller's executionContext — only the body's own writes lose identity, matching the observed \"action runs, write fails\".\n- Related: the failure is returned as HTTP 200 — see #3913.\n\n## Suggested fix direction\nBind `ctx.api` to `engine.createContext(callerExecutionContext)` (RLS-scoped, honest) or to the `isSystem:true` ScopedContext (matching the audit claim + hook behavior) — either is coherent; the current state is neither."
+}

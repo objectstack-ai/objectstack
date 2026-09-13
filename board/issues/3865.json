@@ -1,0 +1,33 @@
+{
+  "number": 3865,
+  "kind": "issue",
+  "title": "fix(sharing): 「完全访问」声明了删除/转移/共享，实现上与「编辑」等价",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "baozhoutao",
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T12:19:37Z",
+  "updated_at": "2026-07-28T16:02:15Z",
+  "closed_at": "2026-07-28T16:02:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3865",
+  "body": "## 问题\n\n`sys_sharing_rule.access_level` / `sys_record_share.access_level` 提供三档：`read` / `edit` / `full`。spec 里 `full` 的注释写着 **Full Access (Transfer, Share, Delete)**：\n\n```ts\n// packages/spec/src/security/sharing.zod.ts:42\n'full'       // Full Access (Transfer, Share, Delete)\n```\n\n但**没有任何一处代码因为 `full` 而授予删除、转移或再共享**。它在实现中与 `edit` 完全等价。\n\n管理员在 Setup 里选「完全访问」，合理地以为授予了删除权；实际什么都没多给，也没有任何提示。\n\n## 代码证据\n\n`'full'` 在 sharing / security / spec 三块出现的**全部**位置：\n\n| 位置 | 性质 |\n|---|---|\n| `plugin-sharing/src/sharing-service.ts:223` | `access_level: { $in: ['edit', 'full'] }` — 读路径 |\n| `plugin-sharing/src/sharing-service.ts:278` | `access_level: { $in: ['edit', 'full'] }` — `canEdit` 写门 |\n| `plugin-sharing/src/objects/sys-record-share.object.ts:157` | 枚举声明 |\n| `plugin-sharing/src/objects/sys-sharing-rule.object.ts:182` | 枚举声明 |\n| `plugin-security/src/explain-engine.ts:196` | 类型声明 |\n| `spec/src/security/explain.zod.ts:102` | 类型声明 |\n| `spec/src/security/sharing.zod.ts:42` | 上面那条注释 |\n\n只有前两处是真逻辑，且两处都把 `full` 和 `edit` 并列处理。\n\n## 实测\n\nshowcase 上把一条共享规则的访问级别设为「完全访问」，以接收人身份问判定引擎：\n\n```\nread:   allowed=true  record.visible=true   decidedBy=sharing\nupdate: allowed=true  record.visible=true   decidedBy=sharing\ndelete: allowed=false record.visible=false  decidedBy=object_crud\n```\n\n注意 `decidedBy=object_crud`：**删除在轮到 sharing 层之前，就被对象级 CRBD 门拒了**。也就是说即使补上 `full` 的判断，也绕不过这一层——这不是加个 `if` 能解决的，需要先定清楚 sharing 能否越过对象级 CRUD 授权。\n\nUI 上的表现：接收人在「编辑」和「完全访问」两档下看到的界面完全一致（都有编辑按钮、都没有删除项）。\n\n## 两条路\n\n**A. 实现它** — 让 `full` 真的授予删除 / 转移 / 再共享。需要先回答上面那个安全模型问题：行级共享能不能提供对象级 CRUD 没给的能力。属于功能设计，建议单独讨论。\n\n**B. 先把 `full` 从可选项里摘掉** — 同一个文件里就有先例：`sys_sharing_rule.recipient_type` 的 `queue` 正是因为「声明了但求值器不认，提供它等于让人写出一条静默失效的规则」而被移除（ADR-0078）：\n\n```ts\n// packages/plugins/plugin-sharing/src/objects/sys-sharing-rule.object.ts\n// `queue` was removed: it is declared-but-unenforced (the evaluator returns\n// no users for it), so offering it would author a silently-inert rule\n// (ADR-0078). The five values below are the ones the evaluator expands.\n```\n\n`full` 处境完全相同。\n\n个人倾向 **B 先行、A 另议**：当前状态的问题不是「缺一个功能」，而是**界面在误导管理员**——他以为授予了删除权。消除误导应当优先。摘除时需要考虑存量数据（已有 `access_level='full'` 的 `sys_record_share` / `sys_sharing_rule` 行）如何迁移，行为上它们本来就等同 `edit`。\n\n## 关联\n\n- 由 #3821 的 UI 验证过程中发现（三档访问级别逐档实测时）\n- 已在 #3850 的 PR 描述中作为 \"Known gap\" 记录，未在该 PR 中修复\n"
+}

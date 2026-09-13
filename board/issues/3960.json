@@ -1,0 +1,30 @@
+{
+  "number": 3960,
+  "kind": "issue",
+  "title": "findData 从请求体里取执行上下文 —— `context.isSystem` 能整条跳过安全中间件(expand 本身已核实是干净的)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T23:49:36Z",
+  "updated_at": "2026-07-29T23:59:46Z",
+  "closed_at": "2026-07-29T23:59:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3960",
+  "body": "来自 #3946 留的那条尾巴:去查 `expand` 的\"高级用法\"(调用者可直传 `Record<string, QueryAST>`,每个子 AST 自带 `object`)是否是跨对象越权读通道。\n\n## 先说 expand:干净的,而且防得相当到位\n\n我的怀疑是错的,`expandRelatedRecords`(`engine.ts:2361`)四道防线都在:\n\n1. **目标对象不由调用者决定。** expand 的**键**必须是父对象 schema 上真实存在的字段,且带 `reference`、类型是 `lookup`/`master_detail`/`user`;读的目标是 `fieldDef.reference` —— **从 schema 来的**。调用者子 AST 里那个 `object` 键**根本没人读**(和 #3946 里排除 `ast.object` 的理由一样)。\n2. **走引擎自己的 `this.find`**(#2850 有意如此),所以被引用对象的 RLS + FLS 中间件照跑。\n3. **id 谓词不会被顶掉** —— 子 AST 的 `where` 是用显式 `$and` 合并的,注释里还专门写了\"浅展开会 clobber 掉 id 约束\",正是本系列的那个坑。\n4. `MAX_EXPAND_DEPTH = 3`;`__expandRead` 豁免面很窄(只 `find`、只非 private 对象,只免掉对象级 CRUD/requiredPermissions 闸门,RLS 注入和 FLS 掩码照跑)。\n\n**结论:expand 无需改动。**\n\n## 但第 4 条那句\"`__expandRead` 是服务端设的,`executionContext` 从不由客户端构造\"不成立\n\n`packages/metadata-protocol/src/protocol.ts:2661`:\n\n```js\nconst options: any = { ...request.query };\n// …\nif (request.context !== undefined) {      // ← 条件赋值\n    options.context = request.context;\n}\n```\n\n- `request.query` 在每个入口上都是**调用者的原始 bag** —— REST 的 `POST /data/:object/query` 直接把 `req.body` 当 `query` 传进来(`rest-server.ts:3733`);\n- `context` 在下面的 `knownParams` 集合里,所以它**也不会**被扫进隐式过滤桶,原样留在 `options` 上;\n- 赋值是**条件的**,所以当没有服务端 context 解析出来时,调用者那个 `context` 就是这次操作的执行上下文。\n\n而它承载的东西是全部:\n\n```js\n// plugin-security/src/security-plugin.ts:722\nif (opCtx.context?.isSystem) {\n    return next();        // 整条 RLS / FLS / CRUD 链跳过\n}\n```\n\n`__expandRead: true` 同理能拿到上面那个豁免。**两者在读路径上都不会被 schema 剥掉** —— `ExecutionContextSchema.parse` 只在 `engine.createContext()` 里用,读写热路径不走它。\n\n## 协议层已实测确认\n\n用真实的 `ObjectStackProtocolImplementation` + 假引擎,按匿名形状调用:\n\n```js\nawait p.findData({ object: 'invoice', query: { context: { isSystem: true, userId: 'root', __expandRead: true } } });\n// 修复前 engine.find 收到的 options.context:\n//   { isSystem: true, userId: 'root', __expandRead: true }   ← 原样\n```\n\n## 可达性:**端到端匿名复现我没做成,如实说明**\n\n拦在中间的是路由层 `enforceAuth` —— 默认 `requireAuth: true` 会先 401 掉匿名数据请求。要走通需要部署显式设 `requireAuth: false`(一个有文档、REST 插件启动时还会告警的 opt-out)。\n\n我试过在 `examples/app-crm/objectstack.config.ts` 上加 `api: { requireAuth: false }` 起服务器实打,**没生效** —— `dev` 命令这条路径没把 stack 的 `api` 键读到(`serve.ts:1724` 读 `(config as any).api`,但 `dev` 不走那段),四个探测都仍是 401。所以:\n\n- **已实测确认**:协议层会把请求体里的 `context` 原样喂给引擎(上面那段);\n- **已代码确认**:`isSystem` 短路整条中间件、读路径不做 schema 剥离;\n- **未实测**:匿名数据请求在真实部署上确实可达 —— 这一环依赖 `requireAuth: false`,我没能在 dev CLI 上把这个开关打开。\n\n所以这是一个**被上层闸门挡住的 fail-open 默认**,不是一个当场可打的洞。但协议层不该依赖上面那道闸门一直是开着的 —— 这正是它自己拥有的不变量。\n\n## 修法\n\n`findData` 在(条件)赋值**之前**无条件 `delete options.context`。执行上下文只能来自 `request.context`。\n\n已核对不会破坏任何合法调用方:`import-runner` 的 `findArgsBase`(`rest/src/import-runner.ts:245`)把 `context` 放在**顶层**、不在 `query` 里;仓库里没有任何调用方从 query bag 里传 context。`getData` 等兄弟方法是从零构造 options 的,不受影响 —— 只有 `findData` 是\"调用者 bag 就是 options bag\"。\n\n<sub>核对于 `origin/main` @ a225ef5。</sub>\n"
+}

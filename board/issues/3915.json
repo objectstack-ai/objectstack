@@ -1,0 +1,32 @@
+{
+  "number": 3915,
+  "kind": "issue",
+  "title": "[17.0.0-rc.0] REST /api/v1/actions/:object/:action has no type dispatch — flow-typed actions can only hit the script registry (MCP path handles them)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T08:34:16Z",
+  "updated_at": "2026-07-29T09:28:58Z",
+  "closed_at": "2026-07-29T09:28:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3915",
+  "body": "Found upgrading HotCRM to 17.0.0-rc.0 (tag commit `fc156fa4a`).\n\n## Symptom\nInvoking a `type:'flow'` action (per spec, dispatches on `target` — `packages/spec/src/ui/action.zod.ts:226/:248/:693`) through the generic REST action endpoint fails with `Action '<name>' on object '*' not found` (wrapped in the HTTP-200 envelope, see #3913).\n\n## Root cause — path asymmetry\n- The **MCP/AI path** implements flow dispatch: `packages/runtime/src/action-execution.ts:538-565` (`// ── flow dispatch ──` → `automation.execute(action.target, …)`, converting `result.success === false` into a throw at `:562`).\n- The **REST path** has no action-type branching at all: `packages/runtime/src/domains/actions.ts` (217 lines) greps clean of `type`/`flow`; its only execution point is `ql.executeAction(obj, actionName, ctx)` (`:107`), i.e. the script-handler registry.\n\nA REST/SDK caller that faithfully follows the spec (\"all non-script types dispatch on target\") cannot invoke a flow action through the actions endpoint; they must know to call `POST /api/v1/automation/:target/trigger` themselves (`packages/runtime/src/domains/automation.ts:146-195`).\n\n## Suggested fix\nPort the MCP path's flow-dispatch branch (and the other target-dispatching types where meaningful) into `domains/actions.ts`, or document loudly that the REST actions endpoint is script-only."
+}

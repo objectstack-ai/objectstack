@@ -1,0 +1,30 @@
+{
+  "number": 3623,
+  "kind": "issue",
+  "title": "group posture: SQL driver's native tenant scoping collapses union reads to active-org equality (ADR-0105 D2 never reaches the wire)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T10:24:31Z",
+  "updated_at": "2026-07-27T11:55:31Z",
+  "closed_at": "2026-07-27T11:55:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3623",
+  "body": "Found by the cloud-side group-posture showcase (objectstack-ai/cloud#880) — the first end-to-end boot of `group` posture against a real driver. Part of ADR-0105 tracking #3541.\n\n## Symptom\n\nBoot a real stack (`@objectstack/verify` `bootStack` + `@objectstack/organizations`, `OS_TENANCY_POSTURE=group`), seed one group org + three plant orgs, a group admin holding memberships in all four. Every read that group admin makes returns **only the active organization's rows**; `organization/set-active` MOVES their read reach. That is `isolated` semantics — the ADR-0105 D2 union (`organization_id IN accessible_org_ids`) never applies.\n\n## Root cause\n\nThe Layer 0 side is correct end-to-end — instrumenting `computeLayeredRlsFilter` during the failing reads shows `posture: 'group'` and the full 4-org `accessible_org_ids` set arriving on the context. The collapse happens BELOW it:\n\n- `packages/objectql/src/engine.ts` (~line 861): whenever the object is tenancy-enabled and `execCtx.tenantId` is set, the engine unconditionally propagates it into `DriverOptions.tenantId` — no posture awareness.\n- `packages/plugins/driver-sql/src/sql-driver.ts` (`tenantFieldByTable` doc, ~line 393): with `DriverOptions.tenantId` set, the driver natively scopes reads/updates/deletes/aggregates to `organization_id = tenantId`.\n\nSo the driver ANDs an active-org **equality** under the Layer 0 **union**, and equality wins. The unit suite (`tenant-layer.test.ts`) proves the pure filter compiler; the driver's independent native scoping is only exercisable in a full boot with the enterprise runtime — which the open-core dogfood deliberately skips (`rls-multitenant.dogfood.test.ts`: \"enterprise/cloud CI, which ships the package, runs this\").\n\n## Expected\n\nUnder `group` posture the driver-level scope must not narrow reads below the Layer 0 union: either don't propagate the active-org equality scope to the driver for reads when `postureUsesUnionScope(posture)` (the Layer 0 filter already carries the wall), or propagate the accessible set so native scoping can compile `IN`. Write-side stamping (insert default from active org) must keep its current behavior.\n\n## Repro\n\n`apps/ee-group-showcase` in cloud (added by the PR attached to cloud#880): `test/group-posture.dogfood.test.ts` pins the two collapsed assertions as `it.fails` — bumping cloud's `.objectstack-sha` past the fix flips them red, which is the signal to un-pin and assert the real union semantics.\n\nRefs: ADR-0105 D1/D2, #3541, #3559, #3570; cloud#880."
+}

@@ -1,0 +1,30 @@
+{
+  "number": 3680,
+  "kind": "issue",
+  "title": "Dataset `order` sorts a select/lookup dimension by its stored value, not the label the user reads",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T14:14:31Z",
+  "updated_at": "2026-07-27T14:59:26Z",
+  "closed_at": "2026-07-27T14:59:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3680",
+  "body": "Follow-up from #3588 / #3652. Known, deliberately-accepted behaviour today — filing it so the next person who hits it doesn't have to re-derive the cause.\n\n## Behaviour\n\n`DatasetSelection.order` (what a widget's `options.sortBy` lowers to) sorts on the **stored** dimension value. For a `select` or `lookup` dimension the user never sees that value — the response carries a resolved display label, and the chart axis / table cell shows the label. So a sort that is internally correct can read as arbitrary.\n\nThe gap is one of ordering-in-the-pipeline, not of comparison logic:\n\n- `DatasetExecutor.executeSelection` applies the ordering as the last step of its own work — `dataset-executor.ts:457` (`applyOrdering`), then `applyWindow`.\n- `AnalyticsService.queryDataset` resolves dimension values → display labels **afterwards** — `analytics-service.ts:634` (`resolveDimensionLabels`).\n\nSo by construction the sort key is the pre-resolution value.\n\n## Impact, by dimension type\n\n| Dimension type | Sorted by | Visible effect |\n| :--- | :--- | :--- |\n| `lookup` / `master_detail` | the FK **id** (e.g. `8eqtuKI4G9IhUsPS`) | **Worst case.** Ids are opaque and effectively random, so \"sort by Account\" produces an arbitrary order that still presents as sorted. |\n| `select` | the stored option value (`needs_analysis`) | Diverges from label order whenever the two don't share a prefix ordering — most visibly with localized labels, where value is ASCII and the label is not (`active` → `合作中`). |\n| `date` | the bucket key (`2026-04`, `2026-Q2`) | **Fine.** Bucket keys are chosen to be sort-stable, so lexicographic order is chronological. |\n| `string` / `number` / `boolean` | the value itself | Fine — value and label are the same thing. |\n\n## Repro\n\nAny dataset with a lookup dimension, e.g. the showcase `showcase_project_metrics.account`:\n\n```jsonc\nPOST /api/v1/analytics/dataset/query\n{\n  \"datasetName\": \"showcase_project_metrics\",\n  \"selection\": {\n    \"dimensions\": [\"account\"],\n    \"measures\": [\"project_count\"],\n    \"order\": { \"account\": \"asc\" }\n  }\n}\n```\n\nRows come back ordered by the account FK id; the `account` column in the response has already been rewritten to the account **name**, so the output reads as an unsorted list of names.\n\n## Why it is this way\n\nSorting in the executor is what makes ordering work at all on the ObjectQL aggregate path (no ordering grammar) and over derived measures (no SQL column) — see the rationale block at the top of `dataset-executor.ts`. Moving the sort after label resolution would fix the key but re-open the question of where `limit` applies, since the two must stay adjacent: ordering and windowing have to be one step, or a \"top 10 by account name\" truncates the wrong ten.\n\nCurrently noted only in a code comment; there is no author-facing documentation of it.\n\n## Options\n\n1. **Sort after label resolution for label-bearing dimensions.** Move `applyOrdering` + `applyWindow` up into `queryDataset`, after `resolveDimensionLabels`. Keeps one sort site, but the executor's totals/compareTo paths would need to keep their own ordering-free contract, and the executor stops being self-contained for non-dataset callers.\n2. **Resolve labels before sorting when the order key is a label-bearing dimension.** Narrower: only pays the resolution cost when someone actually sorts by such a dimension. Needs the label resolver reachable from the executor, which today it isn't (deliberately — the executor is \"pure query shaping + arithmetic\").\n3. **Document it and leave the behaviour.** Cheapest; the sort is at least deterministic and stable. Would want a line in the dashboards guide's `sortBy` notes stating that select/lookup dimensions sort by stored value.\n\nOption 2 looks like the best cost/benefit if we want it fixed; option 3 is defensible for select dimensions but weak for lookups, where the order is genuinely meaningless to the reader.\n\n## Not affected\n\nSorting by a **measure** (the common case — \"top 10 industries by revenue\", the original #3588 scenario) is unaffected: measures have no label mapping, so the value sorted on is the value displayed."
+}

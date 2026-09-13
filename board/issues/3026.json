@@ -1,0 +1,34 @@
+{
+  "number": 3026,
+  "kind": "issue",
+  "title": "设计:UI 操作按钮与 enable.apiMethods 白名单的前后端一致性契约",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-16T05:59:32Z",
+  "updated_at": "2026-07-28T01:24:46Z",
+  "closed_at": "2026-07-28T01:24:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3026",
+  "body": "## 问题\n\nconsole 列表页**无条件**渲染 Import/Export 按钮,不读对象的 `enable.apiMethods`;后端 REST 数据面却按 ADR-0049 严格执行该白名单——不在白名单的操作直接 405(`OBJECT_API_METHOD_NOT_ALLOWED`)。\n\n结果就是\"前端放行、后端拒绝\":用户看得见按钮,点了才报错(首例:#3025 业务单元导入)。\n\n## 需要设计的契约\n\n1. **一致性规则**:UI 是否应按对象元数据里的 `apiMethods` 隐藏/禁用 Import、Export(以及其它操作入口)?还是约定\"平台对象默认放开这些操作、白名单只用于显式收紧\"?两边必须取其一,不能各自为政。\n\n2. **白名单语义**:`import` 本质是批量 create/upsert,`export` 本质是批量 read。是让它们**隐含跟随** `create`+`update` / `list`,还是保持独立操作、要求逐对象显式声明(现状)?现状下所有平台对象的白名单都是样板 CRUD 五件套,全仓库没有任何对象声明过 `import`/`export`——说明显式声明模式在实践中会被普遍遗漏。\n\n3. **缺口盘点**:`ApiMethod` 枚举里 `upsert` / `bulk` / `aggregate` / `history` / `search` / `restore` / `purge` 同样不在样板白名单里,而对象上却开着对应能力开关(`trash: true` 但无 `restore`/`purge`、`searchable: true` 但无 `search`、`trackHistory: true` 但无 `history`)。能力开关与 API 白名单的组合是否自洽,需要整体过一遍。\n\n4. **逐对象决策**:契约定下来后,哪些 sys_* 对象开放数据可携带性操作(如 `sys_business_unit` HRIS 组织树场景)、哪些必须继续封死(token / jwks / oauth-consent 类),给出清单。\n\n## 关联\n\n- #3025 业务单元导入 405(本设计的首个触发案例,点状修复可先行)\n- ADR-0049(no unenforced security properties —— `apiMethods` 强制执行的出处)\n"
+}

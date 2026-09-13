@@ -1,0 +1,30 @@
+{
+  "number": 3773,
+  "kind": "issue",
+  "title": "SQLite 上 `Field.datetime` 的 dateGranularity 分桶恒为 NULL —— 趋势图塌成一根柱子",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T04:03:31Z",
+  "updated_at": "2026-07-28T04:12:36Z",
+  "closed_at": "2026-07-28T04:12:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3773",
+  "body": "SQLite 上任何按天/周/月/年分桶的趋势图,只要分桶列是 `Field.datetime`,**全部记录塌进一个 `(null)` 桶** —— 图上只剩一根柱子。度量总额是对的,坏的只有分桶键。`Field.date`(ISO TEXT 存储)不受影响,所以同一个仪表盘里两种列并排放着,一个正常一个全塌。\n\n真实 SQLite 已复现,并由 #3650(PR #3766)pin 成 `sql-driver-aggregate-datetime-window.test.ts` 里的 \"KNOWN GAP\" 断言 —— 断言当时写的就是坏值 `{ null: 330 }`。\n\n## 根因链\n\n1. better-sqlite3 把 `Field.datetime` 存成 INTEGER epoch **毫秒**(knex 把 JS `Date` 绑成 `.getTime()`)。\n2. `SqlDriver.buildDateBucketExpr`([sql-driver.ts:526](../blob/main/packages/plugins/driver-sql/src/sql-driver.ts#L526))对 SQLite 产出裸的 `strftime('%Y-%m', ??)`。**SQLite 把裸 INTEGER 当 Julian day number 解释**,epoch-ms 远超合法范围 → `strftime` 返回 NULL。表达式对列的存储形态一无所知。\n3. **engine 不兜底**:`engine.aggregate`([engine.ts:3633](../blob/main/packages/objectql/src/engine.ts#L3633))只在「该 granularity 未被 `supports.queryDateGranularity` 声明」或「非 UTC 时区」两种情况下才回落到 `applyInMemoryAggregation`。SQLite 声明了 `day/month/quarter/year = true`,所以 UTC 下必然下推给 driver;driver 返回 NULL 桶,没有任何一层察觉。\n\n## 为什么现有测试没抓到\n\n`sql-driver-date-bucket.test.ts` 建表用的是 `knex.schema.createTable` + `t.string('ts')` —— 存的是 ISO TEXT,而 TEXT 恰好是 `strftime` 能直接解析的那一半。它**从没走过** `driver.initObjects([{fields: {x: {type: 'datetime'}}}])` 那条真实路径,所以四个粒度全绿,而生产里 100% 的 `Field.datetime` 列全坏。\n\n`SqliteWasmDriver extends SqlDriver`,继承同一个 `buildDateBucketExpr`,所以 wasm 驱动同病,且它的 date-bucket 测试用的是同一套 TEXT fixture。\n\n## 同族前置\n\n#2034(commit db02bd5bd)为**同一个 epoch-vs-TEXT 根因**给 driver 加过 storage-aware 的 `temporalFilterValue`,修的是 filter 比较值那一半。分桶表达式这一半漏了 —— 于是 window 正确、分桶全 NULL:窗口内的总额,整个堆在一个 `(null)` 柱子上。两个 bug 叠加时(#3650 之前),SQLite 上的按月趋势图 = 一根柱子 + 全量历史。\n\n## 顺带:两条分桶路径的 parity 漂移\n\n`bucketDateValue`(objectql 内存兜底)对数值 epoch-ms 输入走 `new Date(String(1767225600000))` → Invalid Date → `'(null)'`。修好 driver 而不修它,只会把「两条路一起错」换成「两条路各错各的」—— `sql-driver-date-bucket.test.ts` 顶上那句 \"⚠️ Keep in sync\" 就是这条契约。\n\n## 其它方言\n\nPostgres / MySQL 的分支不受影响:`defineColumn` 把 `Field.datetime` 映射成原生 timestamp(`table.timestamp`),这也正是 `temporalFilterValue` 在这两个方言上不做 epoch 强转的原因。真要碰上 bigint 列(external 表拿 `datetime` 声明一个整数列),Postgres 会直接拒掉 `::timestamptz` 强转 —— 是 SQLite 没给的那种响亮失败。\n\n## 验收\n\n`sql-driver-aggregate-datetime-window.test.ts` 里那条断言从 `{ null: 330 }` 改成 `{ '2026-01': 300, '2026-02': 30 }`,并覆盖 day/month/quarter/year 四个粒度 × datetime/date 两种存储。\n"
+}

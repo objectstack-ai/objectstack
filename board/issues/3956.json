@@ -1,0 +1,32 @@
+{
+  "number": 3956,
+  "kind": "issue",
+  "title": "Import dry-run skips field-level validation: `dryRun:true` reports `ok:1` for a row the same endpoint then rejects",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T15:45:45Z",
+  "updated_at": "2026-07-30T04:11:19Z",
+  "closed_at": "2026-07-30T04:11:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3956",
+  "body": "## Summary\n\n`POST /api/v1/data/:object/import` runs **field-level validation only on the real write**, not on the dry run. The exact same request body with `dryRun:true` reports the row as valid; with `dryRun:false` it fails. The Console import wizard surfaces the dry run as \"验证数据 / 导入前在服务端逐行校验\", so users are told their file is clean and then watch the import drop every row.\n\nVersion: `@objectstack/* 17.0.0-rc.0`.\n\n## Reproduce\n\n1. Declare a `number` field with a bound:\n\n```ts\npenalty_amount: { type: 'number', label: '处罚金额', precision: 12, scale: 2, required: true, min: 0, max: 9999999.99 }\n```\n\n2. In the Console list view → 导入 → upload a CSV whose row violates the bound (`处罚金额 = -500`).\n3. On the preview step click **校验数据** (the dry run).\n4. Then click **导入 1 行** (the real write).\n\n## Actual\n\nDry run — `POST /api/v1/data/os_tianshun_ehr_penalty_standard/import`:\n\n```json\n{\"object\":\"os_tianshun_ehr_penalty_standard\",\"dryRun\":true,\"writeMode\":\"insert\",\n \"total\":1,\"ok\":1,\"errors\":0,\"created\":1,\"updated\":0,\"skipped\":0,\n \"results\":[{\"row\":1,\"ok\":true,\"action\":\"created\"}]}\n```\n\nUI shows **「全部 1 行均有效。」**\n\nReal write — same endpoint, same payload, only `dryRun` flipped:\n\n```json\n{\"object\":\"os_tianshun_ehr_penalty_standard\",\"dryRun\":false,\"writeMode\":\"insert\",\n \"total\":1,\"ok\":0,\"errors\":1,\"created\":0,\"updated\":0,\"skipped\":0,\n \"results\":[{\"row\":1,\"ok\":false,\"action\":\"failed\",\n             \"error\":\"penalty_amount must be ≥ 0\",\"code\":\"VALIDATION_FAILED\"}]}\n```\n\nUI shows **「已导入 0 条 / 已跳过 1 条 · 第 1 行：penalty_amount must be ≥ 0」**.\n\nNote the dry run even claims `created: 1`.\n\n## Expected\n\nThe dry run should run the same `validateRecord` pass as the write path and report `ok:0, errors:1` with the same per-row error. A dry run that does not validate is worse than no dry run — it converts \"your file has a problem\" into a false all-clear.\n\n## Scope\n\nNot specific to `min`/`max` — the dry run appears to cover only mapping/lookup resolution (it *does* catch `申请部门: 找不到匹配 \"X\" 的记录` and required-lookup misses). Anything enforced by `validateRecord` (numeric range, string length, type checks) is invisible to it, so the same false all-clear should reproduce with e.g. `maxLength`.\n\n## Impact\n\nFound while adding range guards to the settlement fields of a production MES app (25 objects). The import wizard is the primary bulk-data path during implementation; a green pre-check that doesn't predict the write outcome makes the whole pre-check step untrustworthy, and reviewers can't use it as acceptance evidence.\n\nRelated: the per-row `error` string is hardcoded English + API field name — filed separately."
+}

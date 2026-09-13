@@ -1,0 +1,33 @@
+{
+  "number": 3637,
+  "kind": "pull_request",
+  "title": "docs(hono): catch-all 现场裁决锚点 (#3608 归档前置)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T12:06:23Z",
+  "updated_at": "2026-07-27T12:50:36Z",
+  "closed_at": "2026-07-27T12:50:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T12:50:34Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3637",
+  "body": "一行防撞锚点：想把 catch-all\"改进\"成显式 per-prefix 挂载的人，第一现场是这行代码而非 issue 列表。注释指向 ADR-0076 OQ#9 裁决（#3576）与 naive split 会触发的 #2852 RLS 泄漏类故障模式；重启条件归档于 #3608（本 PR 合并后按 deliberately-unscheduled 关闭）。\n\n纯注释，零行为变化。skip-changeset。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

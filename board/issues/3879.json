@@ -1,0 +1,30 @@
+{
+  "number": 3879,
+  "kind": "issue",
+  "title": "automation: `signal.output` reopens the reserved-variable forgery #3853 closed on `inputs`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T13:59:10Z",
+  "updated_at": "2026-07-28T14:30:22Z",
+  "closed_at": "2026-07-28T14:30:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3879",
+  "body": "Found reviewing my own #3860. **Demonstrated with a repro**, not reasoned.\n\n## The hole\n\n#3853 guarded `signal.variables` **at the route**. `signal.output` is passed through unchecked:\n\n```ts\nif (b.output && typeof b.output === 'object') signal.output = b.output;   // no check\n```\n\nand `output` keys are merged under the suspended node's id (`engine.ts:2214-2218`):\n\n```ts\nvariables.set(`${run.nodeId}.${key}`, value);\n```\n\nFor a run parked on a `map` node, `run.nodeId` **is** the map node id. So the same forgery lands through the other field:\n\n```jsonc\nPOST /api/v1/automation/{flow}/runs/{parentRunId}/resume\n{ \"output\": { \"$mapItemDone\": true, \"$mapItemOutput\": { \"result\": \"FORGED via output\" } } }\n→ { started: 2, results: [ { \"result\": \"FORGED via output\" } ] }\n```\n\n## Scope\n\nThe #3853 **map gate still holds**: a batch whose pending item sits on an `approval` is refused before any of this, so the **approval bypass remains closed**. The residual is forging the recorded result of an item parked on an *ungated* `screen` / `wait` — map-state corruption, not a decision bypass. `output` also cannot reach bare `$runId` / `$record` (it is always node-prefixed); that path stays covered by the `inputs` guard.\n\n## Root cause — worth more than the patch\n\nThis is the **second** escape with the same shape (the first: the gate followed `subflow:` but not `map:`). The seam has three open-coded writers into one variable map — `output` prefixed, `variables` bare, and the engine's own map handoff — so \"guard the field that was exploited\" invites the next field.\n\nFix should be structural: **one chokepoint** where a resume signal reaches the variable map, taking both fields, checking once, applying all-or-nothing before the suspension is consumed; the rule in the **engine** (so the SDK and every future transport inherit it) with the transport only mapping the verdict onto a status; and engine-built signals exempted by a marker the transport cannot mint.\n\nNote the placement argument in #3853 was the error: *\"strict at the untrusted boundary\"* is right about where a rule BINDS, not where it LIVES.\n\nRefs #3801, #3853, #3860."
+}

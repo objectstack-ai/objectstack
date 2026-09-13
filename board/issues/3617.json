@@ -1,0 +1,34 @@
+{
+  "number": 3617,
+  "kind": "issue",
+  "title": "平台形态的迁移门禁:带自检的数据迁移 + 部署级标记 —— file-as-reference 回收与 strict 翻转都依赖它",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "approvals"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T09:46:46Z",
+  "updated_at": "2026-07-27T13:19:06Z",
+  "closed_at": "2026-07-27T13:19:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3617",
+  "body": "把 ADR-0104 D3 wave 2 收尾时暴露出来的**同一类问题**合并成一条。核心是一个**设计前提错了**,而它同时卡住了两件事:file-as-reference 的回收(#3459 PR-5b)和 D1/D2 的 strict 默认值翻转(#3438)。\n\n---\n\n## 一、错在哪\n\nwave 2 给回收定的验收门是这样的:\n\n> 在真实租户上跑回填 → `verifyFileReferences` **连续 ≥7 天零阻断项** → 才允许开启回收。\n\n这是一份 **SaaS 形态的运维 runbook**,隐含前提是\"我们运营那个租户、我们能观察它、我们来翻开关\"。\n\n**但 ObjectStack 是开发平台。** 第三方开发者在上面开发元数据应用,版本交付出去之后,每个部署自己决定何时升级;他们的数据我们看不到,也不该看到。**根本不存在一个\"我们的观察窗口\"可以让所有人等。**\n\n## 二、正确的结论:证据要求不能取消,只能换地方\n\nR4 的本质没变——**一本账在被证明与现实一致之前,不能授权删除字节**。改变的是**产生证据的主体**:从\"我们\"变成\"每个部署自己\"。\n\n所以需要的不是一段一次性脚本(跑完可以无视输出,等于没有门禁),而是:\n\n> **一个带自检门禁的数据迁移步骤——回收开关由「这个部署自己跑过并通过了」来打开,而不是由版本号打开。**\n\n### 形状\n\n```\nos migrate files-to-references\n  1. 回填(默认 dry-run,--apply 才写)\n  2. verifyFileReferences\n  3. 仅当零阻断项 → 写入部署级标记\n       { id: 'adr-0104-file-references', verified_at, blocking: 0 }\n  4. reap guard / strict 开关读这个标记,而不是读全局 flag\n```\n\n### 由此得到的性质\n\n- **升级到新版本不会自动打开回收。** 装了新版 ≠ 开始删字节。\n- 第三方开发者**不需要理解 R4**。跑 `os migrate`,绿了就完事;红了报告直接指出哪条记录持有一个没人拥有的文件。\n- **没跑 / 没通过 → 文件继续永生。** 浪费存储,零数据丢失——\"fail toward retention\" 这条默认值在**部署维度**同样成立。\n- 叠加已有的 30 天墓碑窗口,**每个部署有自己独立的 30 天回头路**,不需要共享任何人的观察期。真正不可逆的时刻是各自开启后的第 30 天,不是升级那天。\n\n## 三、⚠️ 同一个错误在 #3438 也埋着\n\n**D1/D2 的 strict 默认值翻转有一模一样的问题。**\n\n我们不能替所有第三方部署决定「从现在起拒绝遗留 inline blob」。一个部署如果还没回填完,strict 一开,任何改写 media 字段的 update 都会被拒——**正常工作的应用会挂,而且是我们替他们做的决定**。\n\n所以 #3438 也该走同一个机制:**这个部署回填完、对账干净了,strict 才对它生效**,而不是某个版本号一到就全体翻转。\n\n**两件事应当共用同一个「本部署已完成 file-as-reference 迁移」标记。** 这也是把它们合并成一条 issue 的原因——分开做会做出两套不兼容的门禁。\n\n## 四、现实的缺口(真正的工作量在这)\n\n查过当前 main(`d2a8695`):\n\n| 现状 | 结论 |\n|---|---|\n| `os migrate` = `plan.ts` / `apply.ts` / `meta.ts`,围绕 `ChangeSet` | **纯 DDL**(加字段/改字段/建对象/执行 SQL) |\n| `packages/spec/src/system/migration.zod.ts` | 只有 schema 操作类型,**没有「带校验门禁的数据迁移」概念** |\n| 运行时迁移状态 | **不存在**(`sys_migration` 只有 spec 层类型,没有运行时表) |\n| `backfillFileReferences` / `verifyFileReferences` | 已实现(#3535 / #3534),但**只是库函数,没有命令行入口**,运维跑不了 |\n\n## 五、工作项与顺序\n\n| # | 事项 | 规模 | 备注 |\n|---|---|---|---|\n| **1** | `os migrate files-to-references` 命令(包装两个已有库函数,dry-run 只读) | 小 | **建议先做**:零风险,第三方下个版本就能跑,立刻拿到真实数据规模和外部 URL 清单 |\n| **2** | 数据迁移 + 门禁基础设施(部署级标记的持久化与读取) | **比 PR-5b 本身大** | #3438 也要用 |\n| **3** | PR-5b 回收:改读标记而非全局 flag | 小 | 两半必须同一 change,见 #3459 |\n| **4** | #3438 strict 翻转:改读同一个标记 | 小 | |\n\n之前 #3459 里把讨论集中在第 3 项,顺序是反的——**真正卡住第三方的是第 1、2 项**。\n\n## 六、有一类东西自动化不了,但不阻断\n\n回填里的**外部 URL**(`https://cdn…`)要不要迁到显式的 `url` 字段,是**建模决定**,只能由应用作者做。好在它们天然不阻断:外部 URL 根本不是 `sys_file`,进不了 GC。所以报告里单列为 advisory 即可(PR-6 已经是这么设计的:`external_url_skipped` 是 advisory 不是 blocking),不卡住回收门禁。\n\n## 相关\n\n- #3459 — wave 2 序列(PR-5b 的两条硬约束仍然有效:放松护栏与扩展 reap guard 复核**必须同一个 change**)\n- #3438 — strict 默认值翻转(**本 issue 认为它需要改成按部署生效**)\n- #3580 / #3599 / #3505 — wave 2 收尾时发现并修复的三个问题\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

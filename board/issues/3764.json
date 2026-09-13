@@ -1,0 +1,35 @@
+{
+  "number": 3764,
+  "kind": "pull_request",
+  "title": "fix(field): fold deprecated `conditionalRequired` into `requiredWhen` and drop the alias (#3754)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T02:34:27Z",
+  "updated_at": "2026-07-28T02:58:48Z",
+  "closed_at": "2026-07-28T02:58:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T02:58:46Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3764",
+  "body": "Closes #3754. Follows #3742 — same bug class, one field over, found while verifying that fix.\n\n## The shape\n\n`requiredWhen` is canonical, `conditionalRequired` is its documented deprecated alias. Unlike `action.execute`, `FieldSchema` had **no canonicalization at all** — no lowering, no dropping. Both keys stayed live in the parsed output, so the precedence was re-implemented per consumer instead of being decided once in the contract. That is exactly the condition that produced #3713.\n\nAnd the alias surviving parse was **test-pinned**, including one case named literally:\n\n> `it('requiredWhen and its alias conditionalRequired can coexist', …)`\n\n— the inverse of the contract #3742 had just established one field over.\n\n## Honest framing: this is hardening, not a live-bug fix\n\nEvery reader I could inspect already prefers the canonical key:\n\n| Reader | Behavior |\n|---|---|\n| `packages/objectql/src/validation/rule-validator.ts` | `requiredWhen ?? conditionalRequired` — canonical first ✅ |\n| `packages/lint/src/validate-expressions.ts` | iterates both keys to validate expressions — order-independent ✅ |\n| Studio object designer (#2571) | rewrites the alias on first edit — UI-only, so code-authored metadata never passes through it |\n| objectui client-side required rendering | not verifiable from this repo (separate repo) |\n\nSo no button is currently misbehaving. The problem is that nothing in the contract *made* the server right — the one surface most likely to have picked alias-first order is the same one that did in #3713, and it's the one I can't inspect from here. Folding once, in the schema, removes the chance rather than a defect. I'd rather state that plainly than dress this up as a bug fix.\n\n## What changed\n\n`FieldSchema` gains a transform that lowers `conditionalRequired` into `requiredWhen` and drops the alias; `requiredWhen` wins when both are declared. Same shape as `action.execute` → `target` (#3742) and `agent.knowledge.topics` → `sources` (#1891).\n\n**`objectql`'s fallback is deliberately kept.** `evaluateValidationRules` is also handed raw, unparsed field definitions — its own test suite does exactly that (`rule-validator.test.ts`, the `conditionalRequired` case) — so the alias-reading path still has real inputs. I commented it in place so it doesn't read as dead code, and noted that the order must stay canonical-first. This is the same defence-in-depth reasoning used for objectui in #3742, and it's why I did **not** follow step 3 of my own suggestion in #3754.\n\n## Compatibility\n\n**Authoring is unchanged.** `conditionalRequired` is still accepted on input, still lowered, still listed in the reference docs and JSON Schema. Nothing to migrate in app metadata.\n\n**Consumers of the parsed metadata** must read the canonical slot:\n\n- FROM `parsedField.conditionalRequired` → TO `parsedField.requiredWhen`\n- One-line fix: `field.conditionalRequired || field.requiredWhen` becomes `field.requiredWhen`\n\n`z.infer<typeof FieldSchema>` no longer carries the alias, so a stale reader fails to compile rather than silently reading `undefined`.\n\nOne naming note: I added `FieldParseInput` (`z.input<typeof FieldSchema>`) for the author-facing shape. `FieldInput` was already taken by an unrelated factory-helper type (`Omit<Partial<Field>, 'type'>`) further down the same file — worth knowing before reaching for that name.\n\n## Risk that needed checking\n\nThis is the **first** transform on `FieldSchema`, which turns it from a `ZodObject` into a wrapped schema. Two things that would have broken:\n\n- **Schema composition** — `.shape` / `.extend` / `.partial` / `.omit` / `.pick` don't exist on a transform-wrapped schema. Swept the repo: no such use of `FieldSchema`. ✅\n- **The liveness gate's schema walker** — if it couldn't unwrap the wrapper, every `field` property would go UNCLASSIFIED and the gate would fail. It unwraps generically (as it already must for `action`). ✅ Gate passes.\n\n## Verification\n\n| Suite | Result |\n|---|---|\n| `@objectstack/spec` | 258 files / 6719 tests ✅ |\n| `@objectstack/objectql` | 75 files / 1119 tests ✅ |\n| `@objectstack/runtime` | 46 files / 655 tests ✅ |\n| `@objectstack/metadata` | 13 files / 276 tests ✅ |\n| `@objectstack/lint` | 32 files / 471 tests ✅ |\n| `pnpm build` | 71/71 tasks ✅ (incl. showcase artifact) |\n| `check:liveness` | ✅ all classified; the new evidence string resolves cleanly against the gate's path check |\n| `check:docs` | ✅ 250 generated files in sync |\n\n## Follow-ups\n\n- Removing the input key entirely is still the endgame for both aliases (`field.conditionalRequired` and `action.execute`). Now that neither reaches a renderer, that becomes a bounded change: drop the key, add a tombstone to the relevant `UNKNOWN_KEY_GUIDANCE` map so the rejection carries the fix, and ship the migration note in the changeset (AGENTS.md Post-Task Checklist #3).\n- The broader sweep proposed in #3754 still stands: the remaining `@deprecated`/alias declarations in `packages/spec/src` should be audited — fold-and-drop ones are safe, merely-coexisting ones are latent #3713s.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JDwRktLBFwgtV5Svxm4LJm)_"
+}

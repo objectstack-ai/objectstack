@@ -1,0 +1,30 @@
+{
+  "number": 3665,
+  "kind": "issue",
+  "title": "[RETRACTED — not a regression] cloud service-ai embedder failure was a local build artifact, not f1a8114",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T13:23:20Z",
+  "updated_at": "2026-07-27T13:34:50Z",
+  "closed_at": "2026-07-27T13:34:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3665",
+  "body": "Found while bumping cloud's framework pin for the #3624 follow-up. **Currently live on framework `main`.**\n\n## 症状\n\ncloud 的 `@objectstack/service-ai` 有一个测试断言:配置了 provider 时,embedder 会经由 `EMBEDDER_SERVICE` 构建并注册。对着 framework `main` 跑,它红了:\n\n```\nFAIL  src/__tests__/ai-service.test.ts > AIServicePlugin > embedder binding\n      > builds and registers embedder via EMBEDDER_SERVICE when provider is configured\n\nAssertionError: expected undefined to be defined\n ❯ src/__tests__/ai-service.test.ts:2059:26\n    2057|  const services = ctx.getServices();\n    2058|  const embedder = services.get('embedder') as any;\n    2059|  expect(embedder).toBeDefined();\n```\n\n同一个测试文件里还打了一行:`[AI] Metadata service not available: Service \"metadata\" not found`。\n\n## 二分结果\n\n同一份 cloud 工作副本、同一份 `node_modules`,只切换 framework 构建:\n\n| framework SHA | `@objectstack/service-ai` |\n|:---|:---|\n| `bc17d39` (#3647 合入点) | ✅ 563 passed (44 files) |\n| `ce1f100` (当时的 `main` 顶端) | ❌ 1 failed / 562 passed |\n\n区间里只有两个提交:\n\n- `f1a8114` — `fix(client,service-i18n): ledger the autonomous service-mount surface; two i18n SDK calls reached nothing (#3636) (#3646)`\n- `ce1f100` — `fix(rest): emit the projected export header on an empty result set (#3547) (#3649)`\n\n**首要嫌疑是 `f1a8114`。** 失败的正是\"服务是否被注册/挂载\"这件事,而那个提交改的就是 autonomous service-mount 的登记方式;`ce1f100` 只动 REST 导出表头,与服务注册无关。我没有为区分这两个再跑一次完整 framework 构建,所以这一条是强推断而非已验证的二分终点 —— 谁接手可以只构建 `f1a8114` 来钉死。\n\n## 为什么 framework CI 没抓到\n\n`embedder` / `EMBEDDER_SERVICE` 的这条注册路径由 **cloud** 的 `@objectstack/service-ai` 覆盖,framework 仓库里没有对应测试。cloud CI 又把 framework 钉在 `.objectstack-sha`(当时是 `6ba3788`),所以直到有人抬 pin 才会撞上 —— 也就是现在。\n\n## 影响\n\n任何把 framework pin 抬过 `f1a8114` 的 cloud 升级都会红。#3624 的 cloud 侧跟进 PR 因此**刻意**只把 pin 抬到 `bc17d39`(最小、且已验证干净),而不是 `main` 顶端 —— 抬到顶端就会连带吞下这个回归。\n\n## 建议\n\n1. 确认 `f1a8114` 是不是真凶(单独构建那个 SHA 跑 cloud 的 service-ai)。\n2. 修 framework 侧的注册,或修正 cloud service-ai 对新 mount 契约的用法 —— 取决于哪一边才是对的。\n3. 考虑把这条注册路径在 framework 侧也补一个测试,否则同类回归还会以同样的方式(只有抬 pin 时才暴露)再来一次。\n\nRefs #3624, #3647, #3646。"
+}

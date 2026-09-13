@@ -1,0 +1,34 @@
+{
+  "number": 3996,
+  "kind": "pull_request",
+  "title": "fix(rest): import dry run must bound-check values, not just coerce them (#3956)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T02:06:38Z",
+  "updated_at": "2026-07-30T04:11:20Z",
+  "closed_at": "2026-07-30T04:11:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T04:11:18Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3996",
+  "body": "Closes #3956.\n\n## The problem\n\nThe same request body, with only `dryRun` flipped, produced two different verdicts. A `number` field declaring `min: 0` received `-500`:\n\n```jsonc\n// dryRun: true\n{\"ok\":1,\"errors\":0,\"created\":1,\"results\":[{\"row\":1,\"ok\":true,\"action\":\"created\"}]}\n// → Console wizard renders 「全部 1 行均有效」\n\n// dryRun: false — same payload\n{\"ok\":0,\"errors\":1,\"created\":0,\n \"results\":[{\"row\":1,\"ok\":false,\"error\":\"penalty_amount must be ≥ 0\",\"code\":\"VALIDATION_FAILED\"}]}\n```\n\nA pre-check that cannot predict the write is worse than no pre-check: it turns \"your file has a problem\" into a false all-clear, and reviewers can't use it as acceptance evidence.\n\n## Root cause\n\nThe dry-run branch in `runImport` returned before any field-constraint check ran. Only two gates stood in front of it, and neither looks at a declared bound:\n\n- `coerceRow` — pure value conversion (is this cell a number at all, does this select option exist, does this lookup resolve). `-500` is a perfectly good number.\n- `firstMissingRequiredField` — required-presence only.\n\nEverything the engine's `validateRecord` enforces lives past that branch, on the write path only.\n\n## The fix\n\n- `ExportFieldMeta` now carries `min` / `max` / `minLength` / `maxLength`. `buildFieldMetaMap` was dropping them, so the runner could not have checked a bound even if it wanted to.\n- `firstConstraintViolation` mirrors `validateRecord`'s numeric-range and string-length rules — same type applicability, same comparison, same `code` and `message` text — so both paths report a violation identically.\n- The runner consults it on the **dry run only**. The write path already has the engine's own validation, which runs *after* `beforeInsert` hooks; a pre-hook copy there could reject a row a hook would have made legal. The dry run has no such backstop.\n\nCovers all three consumers of the shared runner: the synchronous import route, the async import-job worker, and plugin-auth's user import.\n\n## Deliberately not a full mirror\n\nFormat checks (email/url/phone), object-level `validations` rules, uniqueness and the state machine still surface only on the real write. Closing those means validating **through the engine** — a `validateOnly` write path, which `BatchOptions.validateOnly` already declares in the spec but nothing implements — rather than growing this copy.\n\nThe bounded-type lists are the engine's own, not the spec's wider `NUMERIC_VALUE_TYPES` / `STRING_VALUE_TYPES`: `progress` and `summary` are numeric per the spec but unchecked by the engine, and using the wider set would trade the false all-clear for a false alarm.\n\n## Tests\n\n- 8 unit tests on `firstConstraintViolation` (bounds both ways, boundary values, absent values, system/readonly skip, unparseable numbers left to `coerceRow`, engine-list type applicability).\n- 3 real-engine integration tests on the actual `POST /data/:object/import` route, using the issue's exact repro (`penalty_amount min: 0`, value `-500`): dry run and real write now agree, field/code/message included; `maxLength` behaves the same; update-mode rows are bound-checked too.\n- Verified the tests catch the regression: with the fix stubbed out, all 3 integration tests fail; restored, they pass.\n- `packages/rest` full suite: 447 passed. The 4 failures in `rest.test.ts` / `rest-env-resolution.test.ts` are pre-existing in this worktree (missing `looksLikeInternalErrorLeak` / `ISecurityService` exports from stale sibling builds) and reproduce identically with these changes stashed.\n- `plugin-auth` user-import suite (shares the runner): 26 passed.\n\nPure bug fix — no changeset per AGENTS.md.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

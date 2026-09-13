@@ -1,0 +1,35 @@
+{
+  "number": 3792,
+  "kind": "pull_request",
+  "title": "test(service-storage): give the attachment read-visibility harness real Filter Protocol semantics",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T05:42:28Z",
+  "updated_at": "2026-07-28T05:52:12Z",
+  "closed_at": "2026-07-28T05:52:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T05:52:10Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3792",
+  "body": "## Problem\n\n`packages/services/service-storage/src/attachment-read-visibility.test.ts` faked its engine with a matcher that understood implicit equality and `$in` — and nothing else. No `$and`, no `$or`, no `$not`.\n\nEvery assertion in the file could therefore only check the **shape** of the filter `computeParentVisibilityFilter` emits, never the rows that filter selects. That is a poor bargain for a predicate whose entire job is narrowing: it pairs a discriminator with an id list per branch, and anything that widens `$or` loosens that pairing while leaving every shape assertion green.\n\n## Changes\n\n- **Real Filter Protocol semantics in the harness matcher**, mirroring [`memory-matcher.ts`](packages/plugins/driver-memory/src/memory-matcher.ts) and [`matches-filter.ts`](packages/formula/src/matches-filter.ts): every key inside one filter object ANDs, a `$or` array ORs its branches, and a branch's contents still AND. `$and` / `$not` handled too; field specs support `$eq`/`$ne`/`$in`/`$nin`.\n- **Unimplemented operators now throw** instead of being silently ignored. A test double that quietly under-implements the protocol is precisely the failure mode this PR closes, so incompleteness is loud.\n- **A row-level assertion** — the case the old harness structurally could not express. A fixture with a visible and an invisible record per parent type, plus a row whose `parent_object` belongs to one branch while its `parent_id` appears only in the *other* branch's id list. The emitted scope must return `['a1','a3']`; nothing but a genuine per-branch AND excludes the other three.\n- **A conformance block for the matcher itself**, on the same 2x2 fixture and the same expectations as `memory-matcher-or-semantics.test.ts`, `matches-filter-or-semantics.test.ts` and `sql-driver-or-filter.test.ts`, so the four evaluators cannot drift apart — plus a case proving the matcher actually distinguishes a correctly paired scope from a widened one.\n\n## Proof the gate can go red\n\nI temporarily flattened each `$or` branch's keys into key-level ORs in the matcher and re-ran. **9 tests failed**, the row assertion loudest:\n\n```\n× the multi-parent $or admits only rows matching BOTH keys of one branch\n  AssertionError: expected [ 'a1', 'a2', 'a3', 'a4', 'a5' ] to deeply equal [ 'a1', 'a3' ]\n```\n\nEvery row in the fixture, where two should match. The injection was reverted; a `BUG INJECTION` grep over the branch returns nothing.\n\n## Verification\n\n- `@objectstack/service-storage`: **212/212 passing**, 17/17 files.\n- Baseline check: the 58 failures seen on a fresh worktree reproduce identically at pristine `HEAD` and are stale-`dist` artifacts (`isFileIdToken` / `RAW_FILE_VALUES_CONTEXT_KEY` exist in `packages/spec/src` but not in the Jul-25 `dist`). Rebuilding `spec` + `platform-objects` clears all of them.\n- The changed file is type-clean; `pnpm --filter @objectstack/service-storage build` succeeds with DTS.\n\nTest-only — no runtime change, hence an empty-frontmatter changeset (releases nothing).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

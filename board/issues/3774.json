@@ -1,0 +1,32 @@
+{
+  "number": 3774,
+  "kind": "issue",
+  "title": "driver-sql: `$or` branch contents are OR-ed instead of AND-ed, widening every `$or` filter",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T04:06:04Z",
+  "updated_at": "2026-07-28T05:15:55Z",
+  "closed_at": "2026-07-28T05:15:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3774",
+  "body": "## Summary\n\n`SqlDriver.applyFilterCondition` passes `logicalOp='or'` **into** each `$or` branch's recursive call. That flag is only supposed to decide how a branch attaches to its parent query builder — but inside the branch it also selects `orWhere` for the branch's *own* contents. So a branch's field keys, and the operators of a single field, OR each other instead of AND-ing.\n\nThe Filter Protocol rule this breaks is Mongo's: **everything inside one filter object is AND-ed, at every depth.** A `$or` array OR-s its *branches*; it does not change how the contents *within* a branch combine.\n\n`packages/plugins/driver-sql/src/sql-driver.ts` — the `$or` arm of `applyFilterCondition`.\n\n## Reproduction\n\nTable `t`, four rows: `1={a:x,b:y}` `2={a:x,b:zz}` `3={a:qq,b:y}` `4={a:qq,b:zz}` (in-memory better-sqlite3).\n\n| Filter | Expected | Actual | Compiled SQL (before) |\n|---|---|---|---|\n| `{$or:[{a:'x', b:'y'}]}` | `[1]` | `[1,2,3]` | `(a = 'x' or b = 'y')` |\n| `{$or:[{$and:[{a:'x'},{b:'y'}]}, {a:'qq',b:'zz'}]}` | `[1,4]` | `[1,2,3,4]` | `((a='x' and b='y')) or (a='qq' or b='zz')` |\n| `{$or:[{a:'x',b:'y'}, {$and:[{a:'qq'},{b:'zz'}]}]}` | `[1,4]` | `[1,2,3,4]` | `(a='x' or b='y') or ((a='qq' and b='zz'))` |\n| `{$or:[{$or:[{a:'x',b:'zz'}]}]}` | `[2]` | `[1,2,4]` | `((a='x' or b='zz'))` |\n\n**A single-key branch is affected too**, because the operator map is looped with the same flag:\n\n| Filter | Expected | Actual |\n|---|---|---|\n| `{$or:[{d:{$gte:X, $lt:Y}}]}` | rows in `[X,Y)` | **every row** (`d >= X OR d < Y`) |\n\n## Why it matters\n\nEvery miscompile **widens** the result set — it never narrows it. Two consequences worth calling out:\n\n1. **Scoping filters that pair a discriminator with an id list per branch** — `{$or:[{parent_object, parent_id:{$in:[…]}}, …]}` and similar — were not holding the pairing, so a filter of that shape returned rows outside the intended scope. Filters used for read visibility are written in exactly this shape.\n2. **The abutting `$gte`/`$lt` window pattern** that `skills/objectstack-automation/SKILL.md` recommends and `lint-flow-patterns` blesses for multi-tier scheduled flows. \"Abutting windows tile the timeline so each record matches exactly one tier\" is false on the SQL path today — each tier matched every row.\n\nSharing-rule `criteria_json` is run verbatim (`sharing-rule-service.ts` `findMatchingRecords`), and a \"match ANY of these groups\" criteria builder emits multi-key branches. That path *writes* `sys_record_share` grants, so an over-match there materializes durable grants that a driver fix alone does not retract.\n\n## Scope\n\n`driver-sql` is the **only** divergent backend. `driver-memory` (`memory-matcher.ts`), `driver-mongodb` (`mongodb-filter.ts`), the analytics `read-scope-sql.ts` compiler, and the write-side `matchesFilterCondition` evaluator all already AND per node — verified. `driver-sqlite-wasm` extends `SqlDriver` and inherits the bug, so Postgres, MySQL, SQLite and sqlite-wasm are all affected; Mongo and in-memory deployments are not.\n\nThis divergence also contradicts the comment at `plugin-security/src/security-plugin.ts` claiming \"the engine find-path and the analytics raw-SQL path enforce identical scoping.\"\n\n## Secondary: `$and` ignores `logicalOp`\n\nThe `$and` arm uses an unconditional `builder.where(...)` while the adjacent `$or`/`$not` arms select `orWhere`/`orWhereNot` per `logicalOp`. This is **not** independently observable: each `$or` branch is already wrapped in its own group, and knex drops the boolean flavor of a group's first clause — so `where` vs `orWhere` is indistinguishable there. It is a latent inconsistency (one combinator deaf to the flag) that should be fixed alongside, not a second live defect. Verified by dumping SQL for both key orderings.\n\n## Why it went unnoticed\n\nEvery existing `$or` test in the repo uses single-key branches, asserts filter *shape* against a fake engine rather than executing on a driver, or (in `sql-driver-advanced.test.ts`) asserts only `toBeGreaterThan(0)`. No test encodes the buggy semantics as its expected result, so the fix breaks nothing.\n\n## Found via\n\nVerifying that nested `$and` is honored by a real driver while working on #3650 / #3766. The `$and` path (sibling field keys + nested `$and`) is correct; this is an independent defect."
+}

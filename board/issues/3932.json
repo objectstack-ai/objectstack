@@ -1,0 +1,30 @@
+{
+  "number": 3932,
+  "kind": "issue",
+  "title": "seed-loader: a dropped reference FIELD is invisible in the summary — `totalErrored` counts dropped records only, so the boot banner reads clean",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T10:39:09Z",
+  "updated_at": "2026-07-29T12:00:30Z",
+  "closed_at": "2026-07-29T12:00:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3932",
+  "body": "Split out of #3911 per Prime Directive #10 — out of scope for the fix in #3926, but it is the reason that bug *felt* silent to the reporter.\n\n## The gap\n\n`SeedLoaderService` has two distinct failure outcomes, and only one of them is counted:\n\n| Outcome | `errors[]` | `errored` / `totalErrored` | Row written? |\n| :--- | :--- | :--- | :--- |\n| Record dropped (unresolvable ref, no pass 2; write threw; unresolvable CEL) | ✅ | ✅ | no |\n| **Field dropped** (invalid reference value → `delete record[ref.field]`) | ✅ | ❌ **not incremented** | **yes, minus the association** |\n\nThe field-drop paths (`packages/metadata-protocol/src/seed-loader.ts`) push a `ReferenceResolutionError` and log a warn, but never `errored++`. `result.success` does flip to `false` (it reads `allErrors.length`), so the load is not *silent* — but every **count** understates the damage.\n\n## Why it matters downstream\n\n`packages/runtime/src/app-plugin.ts` feeds the CLI boot banner from the summary:\n\n```ts\nrecordSeedOutcome(ctx, { source, inserted, updated, skipped, rejected: totalErrored });\n```\n\nA seed that writes 10 rows, 3 of which lost a lookup, reports `rejected: 0`. The banner (the one signal that survives `os dev`'s boot-quiet window and the default `warn` log level — the whole point of #3415/#3430) reads clean. And the warn that *does* fire says:\n\n```\n[Seeder] Seed loading completed with 0 dropped record(s) and 1 error(s) for <app>\n```\n\n\"0 dropped record(s)\" is literally true and actively misleading: nothing was dropped — a *field* was.\n\n## Repro\n\nAny invalid reference value on a lookup field, e.g. the wrapper form:\n\n```ts\ndefineSeed(Contact, { externalId: 'email', records: [\n  { email: 'a@example.com', account: { externalId: 'Acme' } },  // object, not a natural key\n]});\n```\n\n→ row lands without `account`; `summary.totalErrored === 0`; banner shows `rejected: 0`.\n\nBefore #3926 a natural-key array on a `multiple: true` lookup hit the same path — which is exactly why #3911 was reported as \"记录落库但整个关联字段缺失 … 仅在日志出现一条 warn\".\n\n## Suggested direction\n\nNot just `errored++` on the field-drop paths — that would overstate the other direction (the row *was* written, so counting it as a rejected record makes `inserted + updated + skipped + rejected` stop reconciling against `total`). Probably a distinct counter, e.g. `referencesDropped` on `SeedLoadResult` / `SeedLoaderSummary`, surfaced by `recordSeedOutcome` as its own banner column so \"wrote the row, lost the link\" is a first-class, countable outcome rather than an inference from `success: false`.\n\nWorth deciding deliberately since it touches the `SeedLoaderResult` contract in `packages/spec/src/data/seed-loader.zod.ts`."
+}

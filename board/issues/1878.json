@@ -1,0 +1,36 @@
+{
+  "number": 1878,
+  "kind": "issue",
+  "title": "[P0] Metadata property liveness audit: ~half of all spec properties are dead; a cluster of security props is parsed-but-unenforced",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "priority:p0",
+    "security"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-06-15T06:03:56Z",
+  "updated_at": "2026-07-27T12:05:30Z",
+  "closed_at": "2026-07-25T03:41:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/1878",
+  "body": "## Summary\n\nA protocol-level audit of **every metadata type** cross-referenced each schema property's spec definition against its **actual consumers** (`file:line`) in the runtime + renderers, to determine **(1) does it take effect?** and **(2) is it necessary/reasonable?** Liveness = code consumption, not browser observation.\n\n**Result: roughly half of all metadata properties are DEAD** — defined in the protocol but read by neither the runtime nor the renderers, so authoring them is a **silent no-op**. The full evidence (17 per-type reports + cross-type synthesis, each with `file:line`) is in **PR #1864** → `docs/audits/` (`README.md` is the index).\n\nThis issue is the umbrella; the checklists below are scoped so they can be split into separate issues/ADRs.\n\n---\n\n## 🔴 P0 — Parsed-but-UNENFORCED security props (latent access-control gaps)\nProperties that imply a security boundary but enforce nothing. **Either enforce or remove** — shipping them as-is is a compliance/security liability.\n\n- [ ] **`PolicySchema` is 100% dead** — password complexity, session idle/absolute timeout, `forceMfa`, IP allow-list (`trustedRanges`/`vpnRequired`), audit retention/redaction all parsed, none enforced; not even registered as a metadata type. `better-auth` (`auth-manager.ts:458`) runs hardcoded defaults instead → **false sense of compliance**.\n- [ ] **Permission lifecycle ops ungated** — `allowTransfer` / `allowRestore` / `allowPurge` omitted from `OPERATION_TO_PERMISSION` (`permission-evaluator.ts:8-16`); ownership transfer, undelete, and hard-delete/GDPR purge are not gated by RBAC.\n- [ ] **Agent access control is a no-op** — `agent.permissions` / `visibility` / `access` never enforced; the chat route hardcodes `['ai:chat','ai:agents']` (`agent-routes.ts:109`). \"Who can chat with this agent\" enforces nothing.\n- [ ] **Flow `runAs` never switches execution identity** (`service-automation` engine ignores it) — a flow declaring `runAs: system` does not elevate/de-elevate.\n- [ ] **Object `apiEnabled` / `apiMethods` not enforced by REST** — an object cannot actually be hidden from the API via these flags.\n- [ ] **Action `disabled` (CEL form) silently ignored** — renderers read a non-spec `enabled` (`action-button.tsx:56`); the predicate form of `disabled` has zero consumers.\n- [ ] **Role `parent` dead** (`team-graph.ts:27` does not walk it) — the documented \"managers see subordinates' data\" rollup is unimplemented.\n- [ ] **`SharingRuleSchema` disconnected from the live engine** — runtime enforces a divergent `sys_sharing_rule` model (JSON `criteria_json`, recipient enum `user/team/department/role/queue`); the spec's CEL `condition` + `role_and_subordinates`/`guest` recipients are never compiled (unparsable CEL → \"match nothing\").\n\n## 🔴 P1 — Finish the ADR-0021 analytics migration\nSpec moved to `dataset`+`values`/`dimensions`, but renderers/Studio still read the *removed* legacy shape:\n\n- [ ] **Chart view variant dead-on-arrival** — `ListView.tsx:1413` / `ObjectView.tsx:754` read legacy `xAxisField`/`yAxisFields`/`aggregation`; spec exposes `dataset`/`dimensions`/`values` → a spec-compliant chart renders nothing.\n- [ ] **Dashboard renderer + Studio `WidgetConfigPanel` still author/read** legacy `object/categoryField/valueField/aggregate` while `dashboard.zod.ts:153` declares `dataset`+`values` required → Studio emits widgets the spec rejects.\n- [ ] **Report `chart` dead on the dataset path**; `ReportColumnSchema`/`ReportGroupingSchema`/`ReportChartSchema` are obsolete type-only re-exports.\n- [ ] (Same debt that invalidated the showcase dashboard/report seeds.)\n\n## 🟠 P2 — Spec hygiene\n- [ ] **Naming drift → silent no-ops**: field `maxLength`/`minLength`/`referenceFilters`/`maxRating`; page `type→pageType` & `label→title` & `visibility`; dashboard `title` vs `label`; app reads `accentColor`/`badgeVariant`/`separator` **not declared in spec**; flow `http` vs deprecated `http_request` (Studio authors the alias); skill `requiredPermissions` vs `permissions`; agent `knowledge.{topics→sources}`; webhook `object→object_name`/`isActive→active`.\n- [ ] **Write-only / disconnected metadata**: `tool` metadata is a one-way projection (can't author a working tool as metadata — no `implementation`/`handler` field, no executor loads it); `EmailTemplateSchema` is registered but the runtime reads a differently-shaped `sys_email_template`; the `spec-bridge` page/dashboard bridges are orphaned (their exclusive props dead).\n- [ ] **Aspirational config (rich spec, zero runtime) — prune or mark `experimental`**: field enhanced-type configs (barcode/qr/slider/rating/color/location) + governance (encryption/masking/audit/dataQuality); object `enable`/versioning/partitioning/cdc/softDelete/search; agent autonomy (memory/guardrails/structuredOutput/lifecycle, except `planning.maxIterations`); tool `outputSchema`; job `retryPolicy`/`timeout`; theme `spacing`/`breakpoints`/`logo`/`rtl`/`density`; translation `messageFormat:'icu'` (no ICU engine), `supportedLocales`, `cache`; **PortalSchema (entire — not registered, no route, no renderer)**.\n- [ ] **Renderer reads UNDECLARED props (inverse drift)** — dashboard `component`/`data`/`rowField`/`columnField`; view `ObjectView` form-adapter keys; app `accentColor`/`badgeVariant`/`separator`. These break a strict `Schema.parse()`.\n- [ ] **Designer authoring gaps (live prop, no Studio editor)** — dataset `filter`/`format`/`derived`/`dateGranularity`; skill `triggerConditions` (the activation-critical field); flow `notify` (absent from the static palette).\n\n---\n\n### Healthiest vs worst (from the audit)\n- **Healthiest** (near-total liveness): `hook`, `validation`.\n- **Worst**: `policy` (100% dead), `portal` (100% dead), `tool` (write-only).\n\nEvidence + per-property recommendations: **PR #1864**, `docs/audits/*.md`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

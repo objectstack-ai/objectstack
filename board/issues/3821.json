@@ -1,0 +1,32 @@
+{
+  "number": 3821,
+  "kind": "issue",
+  "title": "fix(sharing): 共享规则新建页 — 自定义 widget 未国际化，且「接收方」永远无可选项",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T07:26:14Z",
+  "updated_at": "2026-07-28T14:16:58Z",
+  "closed_at": "2026-07-28T14:16:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3821",
+  "body": "## 现象\n\nConsole「新建共享规则」(`sys_sharing_rule`) 弹窗有两个问题：\n\n1. **部分文案未国际化** — 字段标签全是中文（来自 `plugin-sharing` 的翻译包），但控件内部文案是硬编码英文：`Select an object`、`Select an object first.`、`Select a user`、`Search…`、`No matches`。\n2. **「接收方」永远显示 `No matches`** — 无论接收方类型选什么，下拉里一个候选都没有，规则无法创建。\n\n## 根因\n\n### A. 三个自定义 widget 从未接入 i18n（objectui）\n\n`sys_sharing_rule` 用 `widget:` 指定了三个自定义控件（`packages/plugins/plugin-sharing/src/objects/sys-sharing-rule.object.ts`）：`object-ref` / `filter-condition` / `recipient-picker`。实现都在 objectui `packages/fields/src/widgets/`，全部硬编码英文字面量：\n\n- `ObjectRefField.tsx` — `Loading objects…` / `Select an object` / `Search objects…` / `No objects found`\n- `RecipientPickerField.tsx` — `Select a recipient type first.` / `` `Select a ${type}` `` / `Search…` / `No matches` / `Loading…`\n- `FilterConditionField.tsx` — `Select an object first.` / `All records` / `Invalid JSON — …` / `Edit as JSON` / `Use visual builder`\n\n同目录下已有 `useFieldTranslation`（`LookupField` / `SelectField` / `RecordPickerDialog` / `CapabilityMultiSelectField` 都在用），这三个是漏网的。\n\n另外 `RecipientPickerField` 把枚举值拼进英文句子（`Select a ${recipientType.replace(/_/g,' ')}`），这种写法天生不可翻译，必须改成按 type 取键。\n\n### B. 字符串 `$orderby` 被逐字符展开（objectui）— 接收方为空的直接原因\n\n`RecipientPickerField.tsx` 调用：\n\n```ts\nawait dataSource.find(mapping.object, { $top: 500, $orderby: 'name asc' })\n```\n\n但 `QueryParams['$orderby']` 的类型是 `Record<string,'asc'|'desc'> | string[] | Array<{field,order}>`（`packages/types/src/data.ts`），**不含裸字符串**。`ApiDataSource.queryParamsToRecord`（`packages/core/src/adapters/ApiDataSource.ts`）在 else 分支对字符串做 `Object.entries`，逐字符展开成：\n\n```\n$orderby=0 n,1 a,2 m,3 e,4  ,5 a,6 s,7 c\n```\n\n服务端按不存在的列排序 → 返回空数组 → widget 渲染 `emptyText='No matches'`。**与权限、与 `sys_user` 数据无关。**\n\n同一个坑还波及 `plugin-grid/src/ObjectGrid.tsx`（三处把 sort 写成字符串赋给 `$orderby`），视图里用字符串 sort 会静默空表。\n\n### C. 未知排序列被静默吞成空结果（framework）— 放大器\n\n`packages/plugins/driver-sql/src/sql-driver.ts` 的 `find()` 捕获 `no such column` 后，只有 `query.fields`（SELECT 投影）那条路会重试；**ORDER BY 引起的同一个错误落到 `else { return []; }`**，静默返回空页。count 走另一条 SQL，所以 `total` 仍是真实值 —— UI 上表现为「有数据但一条都不显示」。和 #2926 修掉的 `$` 参数静默变过滤器是同一族 footgun。\n\n### D. zh-CN 翻译包相对源码过期（framework）\n\n`packages/plugins/plugin-sharing/src/translations/zh-CN.objects.generated.ts`：`recipient_type.help` 仍写 `department`（枚举里是 `business_unit`），`recipient_id.help` 仍写「队列名」（`queue` 已按 ADR-0078 移除）。同文件的 en 版本是新的。\n\n## 复现（本地 showcase + sqlite，`--seed-admin`）\n\n```\nGET /api/v1/data/sys_user?$top=5&$orderby=name asc            → records 3, total 3   ✅\nGET /api/v1/data/sys_user?$top=5&$orderby=0 n,1 a,2 m,...     → records 0, total 3   ❌ HTTP 200，不报错\nGET /api/v1/data/sys_user?$top=5&$orderby=nosuchfield asc     → records 0, total 3   ❌ 同上\n```\n\n第二行正是 widget 实际发出的请求。\n\n## 修复范围\n\n**objectui**\n- `packages/core/src/adapters/ApiDataSource.ts` — `$orderby` 归一化增加字符串直通分支（服务端 `metadata-protocol` 本来就能解析 `'name asc'`）\n- `packages/types/src/data.ts` — `$orderby` 联合类型补 `string`\n- `packages/fields/src/widgets/{ObjectRefField,RecipientPickerField,FilterConditionField}.tsx` — 接入 `useFieldTranslation`，接收方占位按 type 取键\n- `packages/fields/src/widgets/useFieldTranslation.ts` + `packages/i18n/src/locales/*.ts` — 补齐各语言键\n\n**framework**\n- `packages/plugins/driver-sql/src/sql-driver.ts` — 未知 ORDER BY 列不再静默返回空（降级为不排序，或明确报错）\n- `packages/plugins/plugin-sharing/src/translations/zh-CN.objects.generated.ts` — 对齐源码\n\n## 验收\n\n在 framework showcase (`examples/app-showcase`) 的 Console 里打开「新建共享规则」：\n- 控件内文案随界面语言切换，中文界面无残留英文\n- 接收方类型选「用户 / 团队 / 业务单元 / 岗位」时，下拉都能列出候选并可选中保存\n"
+}

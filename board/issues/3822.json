@@ -1,0 +1,35 @@
+{
+  "number": 3822,
+  "kind": "pull_request",
+  "title": "fix(automation,approvals): gate the generic run-resume route on the suspended node (#3801)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T07:35:23Z",
+  "updated_at": "2026-07-28T08:21:03Z",
+  "closed_at": "2026-07-28T08:21:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T08:21:00Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3822",
+  "body": "Closes #3801.\n\n## The hole\n\n`POST /api/v1/automation/:name/runs/:runId/resume` forwards a caller-supplied `{ inputs, output, branchLabel }` straight into `AutomationEngine.resume`, and `resumeInternal` validated **machine state only** — the concurrent-resume latch, the run exists, the flow exists, the suspended node still exists. Nothing asked *who*.\n\nApproval nodes suspend and resume through exactly that mechanism, so a resume carrying `branchLabel: 'approve'` walked the approve edge with **no approver check, no `sys_approval_action` row and no status mirror** — the `sys_approval_request` row and the run then disagreed permanently. The only thing standing between the route and the approvals rules was convention, spelled out in a showcase comment; a comment in an example is not an access control.\n\n## Why not \"remove the route\"\n\nIt is load-bearing for **screen flows** — the UI flow-runner posts `{ inputs }` there to advance a paused `screen` node. So the gate discriminates by **what the run is parked on**, not by the route.\n\n## The gate\n\n- **`ActionDescriptor.resumeAuthority`** (`'any'` | `'service'`, default `'any'`) — a pausing node declares who may continue it. `approval` declares `'service'`; `screen` / `wait` keep the default and behave exactly as before.\n- **The suspension carries its own node type.** `SuspendedRun.nodeType` / `sys_automation_run.node_type`, captured at suspend time rather than re-derived from the live flow, so a flow republished mid-pause cannot re-type the node out from under the gate. Rows written before this fall back to the flow definition. A deprecated ADR-0018 alias resolves through `aliasOf` to its canonical type, so renaming is not an escape hatch either.\n- **The marker is a symbol.** `RESUME_AUTHORITY_SERVICE` (`@objectstack/spec/contracts`) is stamped on the `ResumeSignal` by the owning service. The transport builds its signal out of a JSON body and no JSON body can produce a symbol-keyed property, so the route cannot forge it — the gate never has to trust a caller's claim about itself. `ApprovalService` stamps it in **one** place (`serviceResume`), on the tail of a decision it has already authorized and recorded, so a future outcome path cannot quietly ship a resume the gate then rejects at runtime.\n- **The gate follows the subflow chain.** A parent parked on a `subflow` node *delegates* the signal to its suspended child, so the gate resolves the effective suspension first and judges the node the signal actually lands on. Resuming the parent is not a way around it.\n- **Refusal is an authorization answer.** `resume` returns `{ success: false, code: 'forbidden' }`; the route answers **403** rather than a 200 carrying `success: false` (which reads as \"your resume ran and the flow failed\"). Nothing is consumed — the request stays pending and the run stays parked, so the real decision still lands.\n\nEngine-internal continuations (subflow delegation and up-bubble, `map` re-entry, the wait-timer wake) go through the private `resumeInternal` and are **not** re-gated — they continue work an already-authorized call started.\n\n## Consumer impact\n\n- **FROM:** `client.automation.resume(flow, runId, { branchLabel: 'approve' })` to finish an approval → **TO:** `client.approvals.approve(requestId, …)` / `.reject` / `.recall`. The old call now answers 403 and changes nothing.\n- Registering your own pausing node whose continuation belongs to a service? Declare `resumeAuthority: 'service'` on its descriptor and stamp `RESUME_AUTHORITY_SERVICE` from that service.\n\nChangeset carries the same FROM → TO mapping.\n\n## Known adjacent gap (deliberately out of scope)\n\nADR-0044's revise window parks the run on an **ordinary author-placed `wait` node** (signal flavor), which a type-keyed gate cannot distinguish from any other wait — a raw resume there still forces a resubmit without a `sys_approval_action` row. Recorded in the ADR-0019 addendum; closing it needs a per-suspension owner claim rather than a node-type one, so it is filed separately rather than widening this PR.\n\n## Tests\n\nNew `packages/services/service-automation/src/resume-authority-gate.test.ts` (11): refusal leaves the run parked and downstream unrun; the marker lets the owner through; ungated (`screen`/`wait`) and descriptor-less pauses unchanged; the tag is recorded; the gate survives a restart via the durable store and falls back for pre-tag rows; a deprecated alias of a gated type is still gated; machine-state errors (unknown run) are still machine-state errors; **subflow** — resuming the parent over a gated child is refused with neither run consumed, while an ungated child still delegates.\n\nPlus: end-to-end in `plugin-approvals` (real engine + real `ApprovalService`) proving a raw resume leaves the request `pending` with only the `submit` action recorded and the later real decision still landing; the 403 mapping (and the *non*-403 for an ordinary failed resume) in `http-dispatcher.test.ts`; `resumeAuthority` default/parse in the spec.\n\nVerified: `spec` (6739), `service-automation` (381), `plugin-approvals` (279), `runtime` (663) all green; eslint clean; `check:docs` / `check:api-surface` / `check:spec-changes` / `check:skill-refs` / `check:skill-docs` / `check:upgrade-guide` / `check:skill-examples` / downstream-contract typecheck all in sync (reference docs + api-surface snapshot regenerated, not hand-edited).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_013gvN32u1EiuvY9uQEMJiMR)_"
+}

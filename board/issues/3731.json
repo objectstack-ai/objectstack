@@ -1,0 +1,30 @@
+{
+  "number": 3731,
+  "kind": "issue",
+  "title": "`os env create --template` and `projects.create({ template_id })` send a field no control plane reads",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T00:53:10Z",
+  "updated_at": "2026-07-28T01:11:42Z",
+  "closed_at": "2026-07-28T01:11:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3731",
+  "body": "Found while trimming `projects.listTemplates` (#3702 / #3730). That method's doc comment was the thread: *\"Templates are seeded into the project database once at provisioning time when `template_id` is supplied.\"* Neither half of that sentence is true anymore, and the **listing** route was only the half that 404'd loudly.\n\n## The gap\n\nThe framework still ships the *writing* half of the template concept:\n\n- `packages/client/src/index.ts:1081` — `projects.create()` declares `template_id?: string` on its body and POSTs it to `/api/v1/cloud/environments`.\n- `packages/cli/src/commands/environments/create.ts:34` — `--template` is advertised as **\"Built-in template id (e.g. crm, todo, blank)\"**, and line 83 forwards it as `template_id`.\n\nNothing consumes it:\n\n- In `cloud` (origin/main), `template_id` / `templateId` appears in **zero** non-test `.ts` files.\n- `sys_environment.object.ts` has no such column — the value is not even stored.\n- `sys_package.object.ts:246` states the position outright: there \"is no separate 'template' concept\"; CI promotes `examples/app-*` packages by setting `is_starter`.\n- `apps/cloud/objectstack.config.ts`: *\"No built-in environment templates: every environment is provisioned empty. Apps/content come from the App Marketplace (`sys_package`).\"*\n\nThe `blank` / `crm` / `todo` registry the flag names was the `apps/server` `createTemplatesRoutePlugin` snapshot (see CHANGELOG ~L1143), which went away when the control plane moved to the `cloud` repo. The flag outlived the registry.\n\nSo `os env create --name X --template crm` is accepted, sent, and has no effect — no seeding, no error, no stored trace. This is the CLI advertising a capability the runtime does not deliver (AGENTS.md Prime Directive #10 corollary), and it is worse than the `listTemplates` 404 it is a sibling of: a 404 tells the caller something is wrong; a silently ignored flag reports success.\n\n## Options\n\n1. **Trim both** — drop `--template` from the CLI and `template_id` from the `projects.create` body type. Smallest correct change; the only behaviour lost is a no-op. A script passing `--template blank` starts erroring instead of silently doing nothing, which is the point.\n2. **Implement it** — resolve `template_id` to a marketplace package and install it at provisioning. Defensible: the `is_starter = true` view already exists and `projects.packages.install` already does the install post-provisioning, so this is mostly a \"do it during provisioning\" wiring job. But it needs the product decision `listTemplates` also needed — which packages are starters on the wire, and by what id — plus a route to list them, or the flag is unusable without out-of-band knowledge of the ids.\n3. Leave it and document the flag as inert — weakest; the flag's own help text is the false claim.\n\n**Recommendation: option 1**, for the same reason #3702 took it: implement the concept when there is a consumer and a decided wire shape, not to justify an existing flag. Option 2 is a reasonable roadmap item if starter templates are meant to be a product surface — in which case it should land *with* a route and an `sdk` ledger row, and re-add both halves together.\n\n## Guard note\n\nNothing catches this class today. `projects.create` targets a route that *is* mounted, so both the framework capstone (#3642) and cloud's control-plane ledger (#3655) are green: they compare **URLs**, not **request bodies**. A body field the server never reads is invisible to a route-level guard — which is worth recording as the next edge of the audit family (#3563), not just as this one bug."
+}

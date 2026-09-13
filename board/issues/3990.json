@@ -1,0 +1,35 @@
+{
+  "number": 3990,
+  "kind": "pull_request",
+  "title": "refactor(spec)!: close the three #3980 triage items — remove rls.priority, bind tabPermissions + writeScope proofs",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T01:37:27Z",
+  "updated_at": "2026-07-30T02:09:49Z",
+  "closed_at": "2026-07-30T02:09:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T02:09:47Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3990",
+  "body": "The three items #3980 (merged) flagged for the v17 window, one commit each.\n\n## 1. `rls.priority` removed — it promised conflict resolution that cannot exist\n\nThe audit corrected `priority` to dead; this finishes the disposition. It was documented as *\"Policy priority for conflict resolution\"* — but applicable policies **OR-combine** (any match allows access, most permissive wins, per the schema's own describe), so there is never a conflict to order and evaluation order cannot change an outcome. Nothing ever read it. A semantically-void knob on a security policy is worse than dead: an author — very often an AI (ADR-0033) — reads it as a precedence lever and reasons about policy interactions that do not exist.\n\nRemoved per the #3715/#3950 precedent, with the full retirement kit:\n\n- **Tombstoned, not silently stripped** (`retiredKey`, #3855): an authored `priority` fails `tsc` (input type `never`) and rejects at parse with the prescription itself. Both directions pinned in `rls.test.ts`.\n- **ADR-0087 D2 conversion + D3 chain step** (`permission-rls-priority-removed`): `os migrate meta` deletes the key mechanically — a pure lossless delete, `expectedNotices: 1`, replayed by the chain-composability gate. `spec-changes.json` and the protocol upgrade guide carry the entry.\n- Policy factory helpers, the showcase example's permission sets, and `content/docs/permissions/rls.mdx` no longer author it. The docs table's `enabled` row now states the (since-#3980-enforced) contract: *\"`false` switches the policy off — a disabled policy is not evaluated.\"*\n- `authorable-surface.json` records the key `[RETIRED]`; reference docs regenerated (the table shows the prescription).\n\n**Changeset: major** — folds into the unreleased 17.0.0, which is the point of doing it this week.\n\n## 2. `permission.tabPermissions` bound to the me-apps proof — after making the proof author it\n\nThe precondition #3980 named (\"确认 proof 作者面是 permission-set 侧\") **failed on inspection**: the me-apps dogfood test only *mentioned* `tabPermissions` in its header while exercising the route and `app.requiredPermissions`. Binding it as-is would have been the exact anti-pattern the proof-registry documents — owner-anchor binds `modifyAllRecords` which it exercises, NOT the sibling `allowTransfer` it only mentions in a comment.\n\nSo the proof was extended first: it now **authors the property on the permission-set side** — a set whose only content is `tabPermissions: { showcase_app: 'hidden' }` drops the app from `/me/apps` for its holder, a second more-visible grant wins it back (pinning hono's tabRank most-visible-wins merge), and an unrelated principal is asserted untouched. 6/6 against a booted stack.\n\nThen bound: `app-tab-permissions` → `bound: true`, `ledgerBindings: [{permission, tabPermissions}]` (the governed surface; `app` remains ungoverned). Ledger entry carries the proof ref; README's bound/unbound tables updated. From now on, deleting or renaming that dogfood test fails the liveness gate.\n\n## 3. `writeScope` gets its runtime proof — the only scope axis without one\n\n`readScope` has carried a proof since ADR-0054 phase 1; `writeScope` was live on two confirmed readers but nothing re-proved it end-to-end. New dogfood file (`showcase-scope-depth-write`, 9/9), asserting **post-state** (a system read of the row after each attempt), not just HTTP status:\n\n- `writeScope: 'unit'` → a BU co-member's note **is** editable; a child-BU member's note is **not** ('unit' does not descend).\n- **Absent `writeScope` under a `'unit'` readScope** → the co-member's note is *readable yet not editable* — the write axis defaults to `'own'` and gates independently of how wide reads are. This is the case that isolates the property.\n- The hierarchy seam **fails closed**: same 'unit' grant, no enterprise resolver → co-member edit denied, never fail-open.\n\nRegistered + bound as the `scope-depth-write` class; ledger entry carries the proof.\n\n## Verification\n\n- `packages/spec`: **6879 tests green** (incl. the migration chain-replay gate, now composing #3987's flow-node conversions with this one). `tsc` clean here and in `plugin-security`.\n- All gates green: `check:liveness` (both new proof bindings resolve), `check:empty-state`, `check:authorable-surface`, `check:spec-changes`, `check:upgrade-guide`, `check:docs`.\n- Dogfood: me-apps 6/6, scope-depth-write 9/9, each against a booted showcase — which also proves the showcase still parses with the `priority` tombstone in place.\n- Rebased over #3987 (both added protocol-17 conversions; union-merged, chain replay green).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QuViRSR1j6GJjf9qGbnqFX)_"
+}

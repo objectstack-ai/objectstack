@@ -1,0 +1,35 @@
+{
+  "number": 3671,
+  "kind": "pull_request",
+  "title": "fix(ci): dogfood gate passes cancelled runs through — a cancelled matrix is not a failed one",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T13:47:50Z",
+  "updated_at": "2026-07-27T14:11:14Z",
+  "closed_at": "2026-07-27T14:11:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T14:11:12Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3671",
+  "body": "Fixes #3668.\n\n## Why\n\nWith `cancel-in-progress` on, every consecutive push cancels the in-flight run — and the dogfood matrix, as the longest job in the workflow, is almost always the one still running. The gate's catch-all `*)` branch turned `needs.dogfood.result == \"cancelled\"` into `exit 1`, painting a **false red on every superseded SHA** (two observed on #3660 alone, logs identical: `dogfood matrix aggregate result: cancelled`). False reds on a regression gate train people and agents to ignore the one check that must never be ignored.\n\n## What\n\nThe issue's prescribed one-line fix: `cancelled` joins the pass branch —\n\n```\nsuccess|skipped|cancelled) echo \"Dogfood gate satisfied ($result).\" ;;\n```\n\n— plus an inline comment recording the evidence and the rejected alternative.\n\n## Safety premise — verified experimentally before landing, per the issue's own ask\n\nThe fix is only safe if a **real** shard failure can never surface as an aggregate `cancelled`. Ran the experiment ([run 30271824408](https://github.com/objectstack-ai/objectstack/actions/runs/30271824408), temporary workflow since removed from the branch): a `fail-fast: true` matrix where shard 1 exits 1 immediately and shard 2 sleeps until fail-fast cancels it mid-run — the harshest version of \"failure and cancellation coexist\".\n\nResult: shard 1 concluded `failure`, shard 2 concluded `cancelled`, and the aggregate observer printed **`needs.matrix.result = failure`**. Failure dominates. An aggregate of `cancelled` therefore only occurs when the whole run is stopped from outside (concurrency supersession or manual cancel) with no leg having failed — passing it masks no regression.\n\nNotes recorded in the inline comment:\n- **Manual cancel of a head run now turns the gate green** — the issue's accepted trade-off (the superseded-SHA case, which is the overwhelming majority, is irrelevant to merging since branch protection evaluates the latest SHA).\n- **`if: !cancelled()` on the job was deliberately rejected** (as the issue prescribes): a skipped gate publishes no required-check context on that SHA — the #3622 merge-deadlock again.\n- `grep 'needs\\..*\\.result' .github/workflows/*.yml` confirms this is the only aggregate gate of this shape, so no sibling occurrences to fix.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ECTCrcCdZpCHw5zFSgcmGt"
+}

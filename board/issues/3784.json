@@ -1,0 +1,35 @@
+{
+  "number": 3784,
+  "kind": "pull_request",
+  "title": "fix(automation)!: refuse data ops for a run with no trigger user (#3760)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T04:32:25Z",
+  "updated_at": "2026-07-28T05:15:07Z",
+  "closed_at": "2026-07-28T05:15:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T05:15:05Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3784",
+  "body": "Closes #3760.\n\n## The finding that changed the decision\n\nThe issue offered four options and favoured **Option 1** — \"inherit the triggering write's posture → run explicitly `isSystem`; effective permissions unchanged, so breakage is close to zero.\"\n\n**That premise is false.** `isSystem: true` is strictly *wider* than the principal-less context these runs carry today. The security middleware's `isSystem` short-circuit is at [`security-plugin.ts:722`](../blob/main/packages/plugins/plugin-security/src/security-plugin.ts#L722) — **before** four fail-closed gates a principal-less context still has to clear:\n\n| line | gate | principal-less | `isSystem` |\n|---|---|---|---|\n| 795 | package-managed row | runs | **skipped** |\n| 809 | system row (`sys_position`/`sys_capability`) | runs | **skipped** |\n| 817 | audience anchor | runs | **skipped** |\n| 844 | delegated admin (RBAC link tables) | **throws** on no `userId` | **skipped** |\n| 852 | empty-principal fall-open | → `next()` | — |\n\nConcretely: today one of these cascade flows **cannot** write `sys_user_position` — [`delegated-admin-gate.ts:172`](../blob/main/packages/plugins/plugin-security/src/delegated-admin-gate.ts#L172) throws, and the repo already has a test locking that. Under Option 1 it could. So Option 1 is a real privilege escalation, not a relabel.\n\n**Option 3 as literally written also doesn't work**: a manufactured `{isSystem:false, positions:[], permissions:[]}` satisfies the line-852 predicate exactly and falls open again. Genuine \"restricted\" needs a middleware change.\n\nMaintainer chose **Option 2 (runtime fail-closed)**.\n\n## What ships\n\n`resolveRunDataContext` — the documented single place every data node resolves its context — now throws `UnscopedRunDataAccessError` instead of handing back a principal-less envelope. The error names `runAs:'system'` as the fix.\n\nThis is not a new policy: **ADR-0073 D5 already ruled** that \"user-less + `runAs:'user'` is a configuration error\". It deferred the runtime half on two grounds this PR falsifies:\n\n1. *\"An unprivileged user cannot trigger a schedule, so there is no untrusted-input path.\"* True of schedules, but schedules were never the boundary. The predicate is `runAs !== 'system' && !userId`, and the dominant shape is a **record-change flow fired by a write that carried no user** — `isSystem` does **not** suppress trigger dispatch, only `skipTriggers` does, and exactly three first-party paths set it. Every plugin/service system write, the approvals status mirror, and a `runAs:'system'` flow's own data node dispatched record-change flows with `userId: undefined`. Submitting for approval mirrors a status onto the target record — so ordinary users reach it.\n2. *\"Fail-closed breaks legitimate scheduled CRUD — 2/3 example flows relied on the default.\"* Those flows were fixed as part of #2308; every first-party schedule-triggered flow now declares `runAs:'system'`. The stated cost expired.\n\nADR-0073 is amended in place rather than quietly contradicted, and the refusal is marked **interim** and forward-compatible: when its `automation` principal lands, the refusal point becomes the place that resolves it.\n\n### Also in this PR\n\n- **`flow-schedule-runas-unscoped` → `flow-runas-unscoped`, and it now fails the build.** `compile.ts` documented in-line that the flow lint \"NEVER fails the build\" — it read as a gate and behaved as a comment, which is close to no net for the audience it protects. Extended to `time_relative` and `api` (ADR-0073 D5). It still cannot cover `record_change` — undecidable at authoring time, which is exactly why the runtime refusal exists; that limit is pinned by a test so nobody \"fixes\" the gap by guessing.\n- **Three seed writes stopped firing automation.** The seed loader's pass-2 deferred-reference back-fill and both `AppPlugin` basic-insert fallbacks inlined a bare `{isSystem:true}` instead of the shared seed options, seeding with record-change automation live — the self-trigger vector `skipTriggers` exists to prevent, on the writes that skipped it.\n- **#3712's user-less provenance path is subsumed, not broken.** Those runs are refused before the approvals lock is consulted; a schedule reaches its own record via `runAs:'system'`, which the lock hook exempts on its own `isSystem` branch. The `flowRunId` exemption stays live and load-bearing for what #3703 built it for — a `runAs:'user'` run that *does* have a user.\n\n## Migration (breaking)\n\nA flow reacting to system writes that must act beyond one user's grants declares `runAs: 'system'` — one line of metadata, and the elevation becomes explicit and audit-attributable. Otherwise ensure the trigger supplies a user. Flows touching no data are unaffected. The failure is isolated: the record-change trigger already swallows flow errors, so **the originating write still succeeds**, and the engine warns at run *setup*, before any node executes.\n\n## Verification\n\n- `pnpm build` (real type-check, no `OS_SKIP_DTS`) and `pnpm test` — **132/132 tasks green**.\n- **Both new gates proven able to go red.** Reverting the refusal turns the new end-to-end test red with `expected 'done' to be undefined` — the flow really did write the record under the old behaviour; reverting the seed fix turns its test red too.\n- The **live dogfood stack** ([`flow-runas-schedule.dogfood.test.ts`](../blob/main/packages/qa/dogfood/test/flow-runas-schedule.dogfood.test.ts)) previously **pinned the fail-open explicitly**, asserting a user-less run reads and writes an admin-owned record a member cannot touch. Its own header said a fail-closed change must turn it red and \"force the product decision to be revisited deliberately\" — that is what happened; it is inverted to pin the refusal, with the unchanged-record assertion carrying the weight.\n- Generated spec docs regenerated (`gen:schema` + `gen:docs`); `check:api-surface` clean.\n\n## Filed separately (Prime Directive #10)\n\n- #3782 — `os validate` runs none of the flow lints, so a build-failing flow passes `validate`.\n- #3783 — the approvals status mirror drops the acting user, pushing every downstream record-change flow to `runAs:'system'`; `approval-node.ts:152` already shows the fix.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

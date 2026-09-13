@@ -1,0 +1,32 @@
+{
+  "number": 3770,
+  "kind": "issue",
+  "title": "曝露 gate 对未知对象放行所依赖的「data path 会 404」并不成立 —— findData 无存在性校验(#3545 同类前提)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T03:57:11Z",
+  "updated_at": "2026-07-28T12:49:45Z",
+  "closed_at": "2026-07-28T12:49:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3770",
+  "body": "按 Prime Directive #10 记录。#3545 复查(PR #3748)时顺带查了 #3391 家族里**同一类论证结构**的其它前提 —— 「这层放行没问题,因为另一层会兜住」。找到一条不成立的。\n\n## 前提\n\n`packages/rest/src/rest-server.ts:1141`,`enforceApiAccess` 里逐字:\n\n```ts\nif (!obj) return false; // unknown object → let the data path 404\n```\n\n对象不在元数据 items 里 → **跳过整个 API 曝露 gate**,把兜底交给 data path 的 404。\n\n## 前提不成立\n\n**① `findData` 没有存在性校验。** 全仓 `OBJECT_NOT_FOUND` 只有一处抛出(`packages/metadata-protocol/src/protocol.ts:2931`),在 **`cloneData`** 里;背书它的测试(`objectql/src/protocol-data.test.ts:589`)测的也是 `cloneData`。`findData` 直接 `this.engine.find(request.object, options)`,中间无校验。\n\n**② 引擎对未注册对象不拒绝**,拿 name 当表名(`engine.ts:1693` `resolveObjectName`):\n\n```ts\nconst schema = this._registry.getObject(name);\nif (schema) return StorageNameMapping.resolveTableName(schema);\nreturn StorageNameMapping.resolveTableName({ name });   // ← 未注册:name 即表名\n```\n\n**③ 404 只靠匹配驱动错误字符串**(`rest-server.ts:334-341`:`no such table` / `relation ... does not exist` / …)。也就是说 404 是**驱动报错的副产品**,不是 data path 的性质 —— 驱动不报错就没有 404。\n\n## 实证\n\n真实 `ObjectQL` 引擎 + 真实 `protocol.findData`(list 路由实际调用的那个),内存驱动:\n\n| 案例 | 结果 |\n|---|---|\n| A — 对象未注册,物理表也不存在 | `threw: false` → 返回 `200 []`,**不是 404** |\n| B — **物理表存在但对象未注册** | `threw: false` → **返回数据** `{ id: 'r1', secret: 'classified' }` |\n\n案例 A 依赖驱动:SQL 驱动会报 `no such table` → 经 ③ 映射成 404,所以 A 在生产上通常确实是 404。**案例 B 与驱动无关**,是真正的缺口:元数据注册表与物理表集合一旦发散(带外建表、注册竞态、注册失败但表已 sync),曝露 gate 被静默跳过,且无任何一层把它变成 404。\n\n## 现状风险(已被 #3545 修复大幅收窄)\n\nPR #3748 之后,`getObjectSecurityMeta` 对不可解析对象返回 `unresolved`,中间件 **fail-closed**。所以:\n\n- ✅ **已装 plugin-security + 已认证且已解析出授权的调用方** → 现在被拒(姿态不可解析)。这条路已经关上了。\n- ⚠️ **匿名 / 无主体上下文** → 中间件在姿态检查**之前**就短路(`positions/permissions 皆空且无 userId` → `return next()`),不受保护。实际可达性取决于部署是否放行匿名读(`enforceAuth`)。\n- ⚠️ **未装 plugin-security 的部署** → 根本没有中间件。\n\n所以**当前真正兜住这件事的是 #3545 的修复,不是注释里说的那个 404**。这正是要记一笔的原因:注释在引导后来者依赖一个不存在的兜底,下一个人很可能据此做出错误的放宽决定。\n\n## 建议(未做决策,留给维护者)\n\n1. **最小且诚实**:改掉那句注释 —— 说明放行的真实理由是「未注册对象没有可执行的曝露策略,由安全中间件的姿态 fail-closed 兜底」,而不是「data path 会 404」。\n2. **收紧**:给 `findData`(及同类无校验的 data 入口)加与 `cloneData` 一致的注册表存在性校验 → 统一 `OBJECT_NOT_FOUND` 404。好处是不再依赖驱动错误字符串匹配(那本身就脆:换驱动、换语言环境就可能失配),坏处是要确认没有合法路径依赖「查询未注册对象」。\n3. **兼顾匿名面**:若采纳 2,案例 B 对匿名与无 plugin-security 部署也一并关闭。\n\n倾向 1 + 2:2 才是把「declared ≠ enforced」真正收口,1 无论如何都该做。\n\n## 同批复查中**成立**的前提(记录备查)\n\n- **#3543**(`apiMethods` 非数组 → fail-closed):成立。`resolveEffectiveApiMethods` 现解析为 `deny-all`,即便可达也是关的。\n- **#3547**(`getReadableFields` fail-soft):成立且契约写得很清楚 —— `undefined` = 没答案(调用方自己兜底),`[]` = 真答案「一列都不可读」;消费方 `rest-server.ts:4427` `if (Array.isArray(readable))` 处理正确。其「投影只是在已发生的强制之上做装饰性收窄」这一理由,在 #3545 修复后更强(姿态不可解析时整个读已被拒)。\n- **#3760**(user-less fail-open 比 lint 更宽):同类问题,已由维护者独立记录,不重复。\n\n关联:#3545、#3391、#3498、PR #3748、ADR-0049。"
+}

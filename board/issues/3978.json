@@ -1,0 +1,32 @@
+{
+  "number": 3978,
+  "kind": "issue",
+  "title": "`os migrate plan/apply` forever lists formula (virtual) fields as pending add_columns — the plan promises work apply can never do",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T00:44:38Z",
+  "updated_at": "2026-07-30T03:19:44Z",
+  "closed_at": "2026-07-30T03:19:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3978",
+  "body": "在复现 #3955 时发现(与已关闭的 #3954 是同一家族、但方向相反的缺陷:#3954 是计划**少报**了 apply 会做的事,本条是计划**多报**了 apply 永远做不了的事)。\n\n## 现象\n\n对一个刚刚由 `os migrate apply` 完整创建、随后未做任何改动的数据库再次运行 `os migrate plan`(examples/app-crm,当前 main):\n\n```\n  New (additive — created when you apply)\n    + crm_contact [add_columns: full_name]\n    + crm_lead [add_columns: is_closed]\n    + crm_opportunity [add_columns: expected_revenue, days_to_close]\n\n  ℹ 0 table(s) to create, 4 column(s) to add\n```\n\n这四个字段全部是 `Field.formula(...)`(虚拟字段,读取时计算)。`createColumn` 对 `formula` 直接 `return`(不物化任何列),所以这 4 个 \"add_columns\" 每次 plan 都会出现、每次 apply 都\"执行\"却什么也不发生,永远无法收敛。刚 apply 完立即再 plan,输出如上——操作者会以为 apply 没有生效。\n\n## 根因\n\n`previewDeferredSchemaWork()`(`packages/plugins/driver-sql/src/sql-driver.ts`)对已存在的表用\n\n```ts\nconst declared = Object.keys(obj.fields ?? {});\n```\n\n与物理列做差集,没有把「不会物化的字段」排除掉。真正执行 DDL 的路径(`initObjects` → `createColumn`)对 `formula` 是跳过的,两条路径对\"哪些字段会变成列\"的判断不一致——preview 报告的是 apply 永远不会做的工作。`create_table` 分支同理(列数把 formula 也计入)。\n\n## 建议方向\n\npreview 与 `createColumn` 共用同一个「会物化为列」的判定(至少排除 `formula`;若后续出现其他虚拟类型,应从单一来源导出),使 plan 报告的 additive 工作与 flush 实际执行的 DDL 恒等。可加一个回归测试:apply 后立即 plan,`pendingSchemaWork` 必须为空。\n\n/cc #3954(同一 `PendingSchemaWork` 报告面;该条已把「preview 必须如实反映 apply」定为约束)"
+}

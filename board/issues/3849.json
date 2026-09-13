@@ -1,0 +1,30 @@
+{
+  "number": 3849,
+  "kind": "issue",
+  "title": "非空分组桶的键两条路也不一致:下推 SQL 保留原类型,内存兜底 `String()` 强转(布尔是语义分歧,不只是类型)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T09:42:57Z",
+  "updated_at": "2026-07-28T12:17:17Z",
+  "closed_at": "2026-07-28T12:17:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3849",
+  "body": "#3839 收敛了**空**分组桶的键(两边现在都是真 `null`)。同一个函数里紧挨着的**非空**分支还有第二条分歧,爆炸半径更大,#3839 刻意没碰。\n\n`packages/objectql/src/in-memory-aggregation.ts` 的 `projectGroupValue`:\n\n```ts\nreturn v == null ? null : String(v);\n```\n\n`String(v)` 把**每一个**分组键都强转成字符串。下推 SQL 不转 —— 驱动原样交出列值。\n\n## 实测(better-sqlite3,两行)\n\n```\ngroupBy ['qty']  SQL: 3(number)              in-memory: \"3\"(string)               ❌ DIVERGES\ngroupBy ['won']  SQL: 0(number) 1(number)    in-memory: \"false\"(string) \"true\"(string)  ❌ DIVERGES\n```\n\n- **数字列**:类型分歧。`3` vs `\"3\"`。\n- **布尔列**:**语义**分歧,不只是类型 —— SQLite 存 0/1,SQL 侧交出 `0`/`1`,内存侧交出 `\"false\"`/`\"true\"`。这两组字面量**没有任何重叠**,任何按键查表/配色/取标签的消费方,换一条路就全部落空,不是\"格式不一样\"而是\"认不出来\"。\n\n选路条件与 #3839 完全相同(`engine.aggregate`:驱动是否声明该 granularity、是否非 UTC 时区、驱动有没有原生 aggregate),所以同一份数据换个时区、换个粒度、换个驱动就换一种键形状。\n\n## 为什么 #3839 没有一起修\n\n#3839 的爆炸半径是可枚举的:三个仓里没有任何生产代码依赖 `'(null)'`,而且所有消费方本来就写的是 `== null`。这一条不是 —— 它动的是**每一个**非空桶的键,包括 select 选项值、lookup 外键 id、布尔、数字。要先确认:\n\n1. 有没有消费方依赖\"键一定是 string\"(例如直接 `key.startsWith(...)` / 拿去做对象属性名 / `localeCompare` 排序)?\n2. 反过来,`dimension-labels.ts` 把桶键翻译成显示标签、`bucketKeyToCalendarRange` 反解日期桶键,这些拿到 number/boolean 还对不对?\n3. 收敛方向:让内存侧**不转**(与 SQL 对齐,类型更诚实),还是让 SQL 侧转成字符串(每个驱动都要实现,且会把数字键变成字符串键)?\n\n日期分桶那一支不受影响 —— `bucketDateValue` 本来就产出规范字符串标签,两边一致。\n\n## 门\n\n`checkDateBucketParity`(`packages/verify/src/date-bucket-parity.ts`)只覆盖日期分桶,天然够不着。#3839 新加的 `packages/qa/dogfood/test/empty-group-bucket-parity.test.ts` 覆盖了普通 `groupBy` 的**空**桶,把它扩到非空桶是最省的落点。\n\n注意:那个门里的 `labelCounts` / `shape` 目前用 `String(...)` 折叠标签,会把这条分歧**抹平**。要守这一条必须连键的**类型**一起比 —— 不能只比字面量。\n\n不阻塞任何东西:度量值两边一直都对,坏的只有键的形状。"
+}

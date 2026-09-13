@@ -1,0 +1,30 @@
+{
+  "number": 3692,
+  "kind": "issue",
+  "title": "A one-line change to a generated file in platform-objects costs ~60min of CI: 89 turbo tasks of affected tests",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T14:33:49Z",
+  "updated_at": "2026-07-28T08:38:07Z",
+  "closed_at": "2026-07-28T08:38:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3692",
+  "body": "实测数据,记录下来供 CI 维护者判断是否值得优化。不是故障报告 —— 行为是正确的,只是成本可能高于预期。\n\n## 测到了什么\n\n`platform-objects` 被绝大多数包依赖。改动它的**内容**会让 turbo 缓存对整棵依赖子树失效,于是 `Test Core` 的 `Run affected tests (PR)`(`turbo run test --filter='...[origin/main]'`)要真跑几十个包。\n\n本地用与 CI 相同的命令复现(#3670 分支,改动**只有生成的翻译 `.ts` 文件**):\n\n```\nTasks:    89 successful, 89 total\n26 个含测试的包全部通过,0 失败\n耗时约 60 分钟\n```\n\nCI 侧同一 job 的耗时与之吻合。\n\n## 为什么值得看一眼\n\n触发它的改动可以非常小 —— #3670 是**纯生成文件**的翻译 bundle 更新,零运行时语义变化,却付了整整一轮全量 affected 测试。这类改动会随 `pnpm i18n:extract` 的常规使用反复出现(#3683 现在还把它变成了 CI 门禁,所以以后每次 schema 改 label 都会带出 bundle 改动)。\n\n## 一个真实的副作用\n\n耗时本身不是问题,**难以与故障区分**才是。同一个 job 在缓存热的 PR 上只要 7 分钟,冷的时候 60 分钟 —— 我在 #3670 上正是因为这个反差把它误判成挂起,做了一次无意义的 cancel+rerun,又推了一次并不需要的分支更新。最后是靠**本地跑同一条命令**才确认它只是慢。\n\n如果这个成本是刻意接受的,那没问题;只是值得让人知道\"慢\"是预期内的,免得下一个人重复我的误判。\n\n## 可能的方向(仅供参考,未验证)\n\n- 对**纯生成产物**的改动走更窄的 filter(比如翻译 bundle 只影响消费它们的包,而不是 platform-objects 的全部下游)。\n- 或者接受成本,但在 job 里打一行说明预期耗时区间,让\"慢\"可读。\n\n前者是真优化,后者几乎零成本且直接解决误判问题。\n\n## 复现\n\n```bash\n# 在一个只改了 platform-objects 生成文件的分支上\npnpm exec turbo run test --filter='...[origin/main]' --concurrency=2\n```\n\nRefs #3670, #3683。"
+}

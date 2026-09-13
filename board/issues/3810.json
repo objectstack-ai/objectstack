@@ -1,0 +1,32 @@
+{
+  "number": 3810,
+  "kind": "issue",
+  "title": "Flow node filters silently blank date macros: the template engine consumes `{…}` before the query engine sees it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T06:34:18Z",
+  "updated_at": "2026-07-28T12:04:36Z",
+  "closed_at": "2026-07-28T09:52:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3810",
+  "body": "Found while implementing #3582 (PR #3809). Out of scope there; filing rather than widening that PR.\n\n## What happens\n\nA flow node's `config.filter` is run through the flow template interpolator (`service-automation/src/builtin/template.ts`) before it reaches the data engine. That interpolator owns `{…}` in this position, and a whole-string token it cannot resolve becomes `undefined`:\n\n```ts\n// find_records node\nconfig: {\n  objectName: 'opportunity',\n  filter: { close_date: { $gte: '{current_year_start}' } },\n}\n```\n\n`interpolateString('{current_year_start}', …)` takes the single-token fast path, finds no flow variable of that name, and returns `undefined`. The engine then receives `{ close_date: { $gte: undefined } }`.\n\n`{30_days_ago}` fails the same way by a different route: it does not match the dotted-path grammar, so it falls into the arithmetic branch, `_days_ago` is substituted with `null`, and `new Function('return (30null)')` throws — also `undefined`.\n\nEither way the bound silently disappears. No warning at registration, none at run time.\n\n## Why it matters now\n\nBefore PR #3809 nothing resolved filter placeholders server-side at all, so this was one instance of a general gap. That PR makes `{current_year_start}` / `{current_user_id}` work everywhere else on the server — the ObjectQL read path and the analytics dataset executor — which leaves flow filters as the one server-side surface where a filter token is still silently dropped. That inconsistency is worse than the uniform gap was: an author who has just learned the tokens work will reasonably try one in a flow.\n\nA one-line caveat now sits in `skills/objectstack-query/rules/filters.md`, but documentation is a poor substitute for a diagnostic here — the failure mode is exactly the silent-zero class #3574 and #3582 were about.\n\n## Repro\n\n```ts\ndefineFlow({\n  name: 'ytd_deals',\n  nodes: [\n    { id: 'start', type: 'start', config: { triggerType: 'manual' } },\n    { id: 'q', type: 'find_records', config: {\n        objectName: 'opportunity',\n        filter: { close_date: { $gte: '{current_year_start}' } },\n    } },\n  ],\n  edges: [{ id: 'e1', source: 'start', target: 'q' }],\n});\n```\n\nExpected: rows closing this year. Actual: the bound is dropped, every row matches, no diagnostic.\n\n## Options\n\nTwo dialects meet in this one config slot, so the decision is which owns it — worth deciding deliberately rather than by accident of evaluation order:\n\n1. **Pass through** — the interpolator leaves a whole-string token alone when `isKnownFilterToken()` accepts it and no flow variable shadows the name, letting `resolveFilterTokens()` handle it downstream. Makes flow filters consistent with every other surface. The cost is one cross-dialect exception, narrowly scoped to filter-bearing config keys.\n\n2. **Reject at registration** — extend `validateFlowExpressions` / `validate-flow-template-paths` to flag a filter-token spelling inside a flow filter, telling the author to compute the bound in an earlier node. Keeps the dialects separate; the token stays unsupported, but loudly.\n\nEither beats today's silence. (1) is what an author expects; (2) is the cheaper and more conservative change. Flagging the trade-off rather than picking one, since it is a contract decision about who owns `{…}` in a flow config."
+}

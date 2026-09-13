@@ -1,0 +1,35 @@
+{
+  "number": 3870,
+  "kind": "pull_request",
+  "title": "fix(runtime,i18n)!: `/i18n/locales` answers in one shape, plus the success-envelope conformance gate that found it",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T13:14:49Z",
+  "updated_at": "2026-07-28T13:32:07Z",
+  "closed_at": "2026-07-28T13:32:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T13:32:05Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3870",
+  "body": "Follow-up to #3676 / #3833 / #3847 — the generalizable part of that trilogy, plus the fourth gap it immediately caught.\n\n## Why a gate, not another one-off fix\n\nThose three defects were each *a body that did not match the schema declaring it*. All three survived a green suite, for one shared reason:\n\n**Every test asserted the emitted body against a hand-written literal.** Comparing output to a literal proves the code does what the test author believed. It cannot prove the code does what the contract declares. Nothing had ever put the emitted value and the declared schema in the same assertion.\n\nThat is not three bugs, it is one missing check.\n\n## The gate\n\n`packages/runtime/src/i18n-success-envelope.conformance.test.ts` — the missing success-path twin of service-i18n's `error-envelope.conformance.test.ts`, and the same pairing storage got in #3689 (`success-envelope.conformance.test.ts`, whose header notes i18n went through the error half in #3675 and never the success half).\n\nEvery `/i18n` success body is parsed against `BaseResponseSchema` *and* against the schema `plugin-rest-api` names for that route — `responseSchema: 'GetLocalesResponseSchema'`, etc. — imported rather than restated. A body that parses is a body the SDK's published return type does not lie about.\n\n## It found a fourth gap on its first run\n\n`GET /i18n/locales` passed `getLocales()`'s raw `string[]` straight through the dispatcher, while `GetLocalesResponseSchema` declares `{ code, label, isDefault }[]` — and **service-i18n, the other provider of this identical route, already emitted descriptors.**\n\nOne endpoint, two shapes, decided by which plugin mounted it, with the dispatcher's form contradicting the SDK's own `GetLocalesResponse` type.\n\nThat is the same split #3833 found in the field-labels derivation, one route over, and for the same reason: two surfaces, one mapping, kept twice. So the mapping is now shared as `toLocaleDescriptors` in `packages/spec/src/system/i18n-resolver.ts`, next to `resolveObjectFieldLabels`, and both surfaces call it.\n\n`label` is the locale code. No display-name source exists in the tree and the schema requires the field; inventing an ICU display-name table here would be a product decision, not an implementation detail.\n\n## Verified by reverting, not by passing\n\nSame discipline as #3846. The fix was reverted and the suite confirmed to fail on it:\n\n```\nlocales body does not match its declared schema:\n  [{\"expected\":\"object\",\"code\":\"invalid_type\",\"path\":[\"locales\",0],\n    \"message\":\"Invalid input: expected object, received string\"}, …]\n Tests  3 failed | 3 passed (6)\n```\n\nA regression test never observed failing is just another assertion.\n\nFive existing tests pinned the bare `string[]`. They now assert on `.map(l => l.code)` — the codes stay pinned, the *shape* is owned by the schema. That is the intended division: literals for values, schemas for shapes.\n\n## Verification\n\n- `@objectstack/spec` — 262 files / 6822 tests pass\n- `@objectstack/runtime` — 48 files / 702 tests pass\n- `@objectstack/service-i18n` — 5 files / 63 tests pass\n- Conformance suite confirmed **failing against pre-fix code**, passing after\n- `check:api-surface` — regenerated (0 breaking, `toLocaleDescriptors` + `LocaleDescriptor` added), re-verified clean\n- `check:docs` — 250 generated files in sync\n- `@objectstack/client` builds clean\n\n## Breaking\n\n`GET /i18n/locales` served by the dispatcher now returns `[{ code, label, isDefault }]` instead of `['en', …]`. Callers on the service-i18n mount already received this shape, and the SDK's published `GetLocalesResponse` type has always described it — this ends a divergence rather than starting one.\n\n## Worth generalizing\n\nThis suite covers one route family. The same check is mechanically available repo-wide **today**: `plugin-rest-api.zod.ts` already carries a `responseSchema` name on essentially every route (29 declarations across 28 handlers), so the route → declaring-schema mapping needed to drive it exists and is currently unused by any check.\n\nNote the existing `check:liveness` gate does *not* cover this: it is registry-rooted over authorable **metadata types**, not API request/response schemas. That is exactly the blind spot all four gaps lived in.\n\nAlso swept while here, per #3833's follow-up: every remaining reader of a translation bundle (`rest-server.ts:1681`, the two i18n surfaces, the two adapters) is accounted for — no third consumer is still on the retired `o.` dialect.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_0196gwfwMK5vW8RToPyzGMJo)_"
+}

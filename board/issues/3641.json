@@ -1,0 +1,32 @@
+{
+  "number": 3641,
+  "kind": "issue",
+  "title": "Storage: `GET {base}/_local/file/:key` is built in three places but mounted nowhere",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T12:24:44Z",
+  "updated_at": "2026-07-27T13:00:05Z",
+  "closed_at": "2026-07-27T12:56:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3641",
+  "body": "Found while ledgering the autonomously-mounted storage surface for #3636 (route audit tranche 3).\n\nThree call sites build a `_local/file/:key` URL and hand it out as a real download link:\n\n| Site | What it does |\n|---|---|\n| `packages/services/service-storage/src/local-storage-adapter.ts:270` | `getPresignedUpload()` returns it as the descriptor's `downloadUrl` |\n| `packages/services/service-storage/src/storage-routes.ts:530` | `GET /files/:fileId/url` falls back to it when the adapter has neither `getPresignedDownload` nor `getSignedUrl` |\n| `packages/services/service-storage/src/storage-routes.ts:570` | `GET /files/:fileId` (the 302) — same fallback |\n\n**No registrar mounts that path.** `registerStorageRoutes` mounts `_local/raw/:token` (PUT + GET) and nothing else under `_local`; a repo-wide search for `_local/file` returns only the three builders above. So whenever one of these values is followed, it 404s.\n\nThis is the same shape as the bugs tranche 1 and 2 closed (`analytics.explain` calling `/explain`, `analytics.meta` calling `/meta/:cube` — #3584): a URL that exists in code, looks right, and is served by nothing.\n\n### Why it hasn't bitten yet\n\nBoth live adapters dodge it. `LocalStorageAdapter` and the S3 adapter each implement `getPresignedDownload` *and* `getSignedUrl`, so the `storage-routes.ts` fallback branch is unreachable for them, and nothing in-tree reads `PresignedUploadDescriptor.downloadUrl` — `POST /upload/presigned` builds its own `downloadUrl: {base}/files/{fileId}/url` rather than passing the adapter's through. It is latent, not live: a third-party adapter implementing only `upload`/`download` gets dead links out of both download endpoints.\n\n### Decision needed\n\nEither mount it, or delete it — the ledger should not have to carry a route that half-exists:\n\n1. **Delete (probably right).** Point the `storage-routes.ts` fallback at the same `{base}/files/:fileId` redirect the rest of the system uses as its stable URL, and drop the unread `downloadUrl` from `getPresignedUpload`'s descriptor. Nothing in-tree loses a capability.\n2. **Mount it.** Add `GET {base}/_local/file/:key` serving bytes by key. Note this would be an *unsigned, key-addressed* read — the reason the `_local/raw/:token` pair is HMAC-token-gated in the first place — so it would need the same `authorizeFileRead` treatment the `/files/*` endpoints get, and probably shouldn't exist in that form at all.\n\nRecommendation: option 1.\n\nTracked as a follow-up rather than folded into #3636, which is scoped to giving mounted routes reviewed dispositions. The tranche-3 ledger notes the absence explicitly (`storage-route-ledger.ts` header) so the guard doesn't read as \"this URL was audited and approved.\""
+}

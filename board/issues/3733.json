@@ -1,0 +1,30 @@
+{
+  "number": 3733,
+  "kind": "issue",
+  "title": "ComputedFieldCacheSchema 是 2026-06 字段剪除留下的第二个孤儿(#3726 表格误记为「已清理」)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T00:58:47Z",
+  "updated_at": "2026-07-28T02:32:43Z",
+  "closed_at": "2026-07-28T02:32:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3733",
+  "body": "## 一句话说明\n\n`cached` 字段键在 2026-06 的 dead-surface 剪除里被删掉了,但 `ComputedFieldCacheSchema` 及其类型**仍留在 `@objectstack/spec` 的公开 API 面上**,零消费者。形态与 #3726 的 `DataQualityRules` 完全一致。\n\n在 #3726 上做剪除时发现(PR #3732),按 Prime Directive #10 单独跟踪 —— 没有在那个 PR 里顺手扩大公开 API 的移除范围。\n\n## 更正 #3726 的核对表\n\n#3726 列了张表核对 tombstone 里的五项,把 `cached` 记为「❌ 已清理」。实际没有:\n\n| 剪除项 | schema 是否仍导出 | #3726 表格 | 实际 |\n|---|---|---|---|\n| `encryptionConfig` | ❌ | 不是残留(system 层另一个独立 schema) | 一致 |\n| `maskingRule` | ❌ 已清理 | 已清理 | 一致 |\n| `auditTrail` | ❌ 已清理 | 已清理 | 一致 |\n| `cached` | ✅ **残留** | 已清理 | **误记** |\n| `dataQuality` | ✅ 残留 | 残留 | 一致(#3726 / #3732 已处置) |\n\n所以那批剪除留下的是**两个**孤儿,不是一个。\n\n## 事实核实\n\ntombstone 在 `packages/spec/src/data/field.zod.ts`,`cached` 在列:\n\n```\n// docs/audits/2026-06-dead-surface-disposition-plan.md (P0/P2 field prune):\n// encryptionConfig, maskingRule, auditTrail, cached, dataQuality.\n```\n\n`cached` 作为 `FieldSchema` 的键确实没了(全文件仅剩注释里这一处)。disposition plan 也把 `cached` 列进了 P2 剪除清单。但 schema 本体和类型还活着,且在公开 API 快照里(`packages/spec/api-surface.json:195-196`):\n\n```\n\"ComputedFieldCache (type)\",\n\"ComputedFieldCacheSchema (const)\",\n```\n\n定义在 `field.zod.ts`(含一段 `@example`)+ 类型导出一行,并发布了 `data/ComputedFieldCache.json`(`json-schema.manifest.json:674`),以及生成的参考文档 `content/docs/references/data/field.mdx` 里的 `## ComputedFieldCache` 一节。\n\n全仓消费者:**零**。剔除 `node_modules` / `dist` 后的全部引用:\n\n```\npackages/spec/src/data/field.zod.ts   (定义 + 类型导出)\npackages/spec/api-surface.json        (生成物)\npackages/spec/json-schema.manifest.json (生成物)\ncontent/docs/references/data/field.mdx  (生成物)\n```\n\n## 为什么值得修\n\n与 #3726 同理,不重复展开。一点补充:`FieldSchema` **不是** `.strict()`(#3726 的第 1 条理由在这里写错了,已在 #3732 更正),所以作者按参考文档写 `cached: { enabled: true, ttl: 3600 }` 不会报错 —— **解析成功,键被静默丢弃**。对缓存配置来说这个失败模式格外难察觉:作者会以为公式字段结果被缓存了 1 小时,实际什么都没发生,而且没有任何信号。这正是 `field.zod.ts` 里 `accept` / `maxSize` 注释点名的 ADR-0104 失败类。\n\n## 建议处置\n\n与 #3726 相同的两条路,二选一:\n\n1. **删除**(与其余四项一致):移除 `ComputedFieldCacheSchema` + `ComputedFieldCache`,跑 `pnpm --filter @objectstack/spec gen:api-surface` 更新快照,从 `json-schema.manifest.json` 删掉 `data/ComputedFieldCache` 键(json-schema ratchet #2978 会拦下停发,这是它要求的 deliberate-retirement 步骤),配 changeset。公开面少 2 条。\n2. **enforce**(ADR-0049 的另一侧):真做计算字段缓存 —— 接上消费者,并把 `cached` 键加回 `FieldSchema`。\n\n当前这种「schema 公开、键不存在、无人消费」的中间态是三者里最差的一种。\n\n参考实现:#3732 对 `DataQualityRules` 做的就是路线 1,步骤可以照搬。\n\n## 关联\n\n- #3726 / #3732(同批剪除的另一个孤儿;本 issue 更正了 #3726 核对表里的 `cached` 一行)\n- `docs/audits/2026-06-dead-surface-disposition-plan.md`(P0/P2 field prune)\n- ADR-0049 enforce-or-remove\n- #2978(json-schema ratchet)"
+}

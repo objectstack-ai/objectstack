@@ -1,0 +1,32 @@
+{
+  "number": 3793,
+  "kind": "issue",
+  "title": "启动横幅对 DSN 形式的 datasource 显示 `→ (unknown)`：describeRegisteredDriver 不认 `connectionString`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T05:45:27Z",
+  "updated_at": "2026-07-28T07:32:22Z",
+  "closed_at": "2026-07-28T07:32:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3793",
+  "body": "在 #3791 里验证启动横幅有没有被我的改动搞坏时发现的。**不是回归 —— 在干净的 `main` 上同样复现**,按 Prime Directive #10 单独记账。\n\n## 现象\n\n```bash\nOS_DATABASE_URL=\"postgres://u:p@127.0.0.1:59437/nope\" \\\nOS_ALLOW_DRIVER_CONNECT_FAILURE=1 npx os serve\n```\n\n启动横幅:\n\n```\n  Driver:  SqlDriver(pg)  → (unknown)\n```\n\ndriver 类型认出来了(`SqlDriver(pg)` 是对的),但**连接地址丢了**。横幅存在的意义正是\"让开发者一眼看到自己连的是哪个库\",这一半失效了 —— 而它恰好在数据库连不上、最需要确认地址的时候失效。\n\n## 根因\n\n`packages/cli/src/commands/serve.ts` 的 `describeRegisteredDriver` 只认三种 `connection` 形状:\n\n```ts\nconst conn = cfg.connection;\nlet url = '';\nif (typeof conn === 'string') {\n  url = conn;\n} else if (conn && typeof conn === 'object') {\n  url = conn.filename\n    ?? (conn.host ? `${conn.host}${conn.port ? `:${conn.port}` : ''}${conn.database ? `/${conn.database}` : ''}` : '');\n}\n// …\nreturn { label, url: url || '(unknown)' };\n```\n\n字符串 ✓、`{ filename }`(SQLite)✓、`{ host, port, database }` ✓ —— 但**没有 `{ connectionString }`**。\n\n而 `packages/services/service-datasource/src/default-datasource-driver-factory.ts:83-86` 正是产出这个形状的地方:\n\n```ts\nconst url = (cfg.url as string | undefined) ?? (cfg.connectionString as string | undefined);\nif (url) {\n  return spec.secret ? { connectionString: url, password: spec.secret } : { connectionString: url };\n}\n```\n\n所以任何**以 DSN 声明的 pg datasource**(`config.url` / `config.connectionString`),经由 `DatasourceConnectionService` → `defaultDatasourceDriverFactory` 建起来的 driver,横幅都读不出地址。用离散字段(`host`/`port`/`database`)声明的则正常。\n\n顺带一提,#3791 之后 `SqlDriver` 交给 knex 的那份配置也会是 `{ connectionString, connectionTimeoutMillis }` —— 但 `driver.config` 仍保持作者传入的原形状(有测试钉住),所以横幅读的那一份没变,**#3791 没有让这个问题变严重**。不过它确实说明这个形状会越来越常见。\n\n## 建议处置\n\n`describeRegisteredDriver` 补上 `connectionString` / `uri` 分支,并对 DSN 做凭据脱敏 —— 现在 `typeof conn === 'string'` 那条分支是**原样打印整个 URL 的**,包含密码:\n\n```\nDriver:  SqlDriver(pg)  → postgres://admin:hunter2@db.example.com:5432/app\n```\n\n这在共享终端 / CI 日志 / 截图里是个小的凭据泄露面。修 `(unknown)` 的时候顺手把两种形状统一走一个\"取 host/port/database、丢弃 user:password\"的格式化函数,比只补一个分支更值。\n\n优先级不高(纯展示),但两处都很小。\n\n## 关联\n\n- #3791(发现处;那里如实记录了这是既存问题而非回归)\n- #3769 / #3781(同一批连接可靠性工作)"
+}

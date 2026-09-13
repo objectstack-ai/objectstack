@@ -1,0 +1,35 @@
+{
+  "number": 3630,
+  "kind": "pull_request",
+  "title": "feat(spec)!: remove the orphaned FeatureFlagSchema module (kernel/feature.zod)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T11:12:57Z",
+  "updated_at": "2026-07-27T11:37:01Z",
+  "closed_at": "2026-07-27T11:36:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T11:36:59Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3630",
+  "body": "Follow-through of the capabilities-descriptor prune (objectstack-ai/objectstack#3605), which left `kernel/feature.zod.ts` a confirmed orphan. Umbrella #1878 family.\n\n## Why\n\n`FeatureStrategy` / `FeatureFlagSchema` / the `FeatureFlag` factory had **zero runtime consumers**, and their only protocol home — the static `ObjectStackCapabilities.system.features` descriptor — was itself removed as dead in #3605 (no endpoint ever served it). The module was a compile-checkable shape with nowhere to go: not authorable (`defineStack` has no `features` key; strict parsing strips it), not registered, not read by any engine. The platform skill even documented it as living *only* on the removed descriptor.\n\n**The live surfaces** (runtime configuration, not authored metadata):\n- `feature_flags` **settings manifest** (`@objectstack/service-settings`, ADR-0007) — org-tunable `ai_enabled`/`beta_*`, env-overridable via `OS_FEATURE_FLAGS_*`\n- `PUBLIC_AUTH_FEATURES` registry + `requiresFeature` sugar (unchanged, live)\n- `GET /api/v1/discovery` for runtime capability discovery\n\n## Changes\n\n- Delete `feature.zod.ts` + `feature.test.ts`; kernel index export dropped with a removal note (house pattern); manifest keys `kernel/FeatureFlag` + `kernel/FeatureStrategy` dropped; `PROTOCOL_MAP.md` row dropped; `SKILL_MAP` entry dropped and skill references regenerated.\n- Docs: `references/kernel/feature.mdx` removed by regeneration; hand-written quick-reference row removed; the platform skill's Feature Flags section rewritten to point at the settings surface; `public-auth-features.ts` \"not to be confused\" comment updated.\n- api-surface: **4 exports, pure removal**. Changeset (`minor` per launch-window policy) carries the removed-shape → settings-manifest migration table.\n- No cross-repo work: objectui/cloud import none of these symbols (verified incl. markdown/os:check blocks this time).\n\n## Verification\n\n6663 spec tests green · `tsc --noEmit` clean · `check:docs` / `check:api-surface` / `check:skill-refs` / `check:skill-docs` / `check:react-blocks` / `check:skill-examples` all in sync · downstream-contract typecheck clean.\n\nRefs #1878, #3605.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

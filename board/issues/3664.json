@@ -1,0 +1,35 @@
+{
+  "number": 3664,
+  "kind": "pull_request",
+  "title": "fix(analytics): fail closed on cross-object aggregation the ObjectQL path cannot join (#3654)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T13:23:11Z",
+  "updated_at": "2026-07-27T13:35:54Z",
+  "closed_at": "2026-07-27T13:35:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T13:35:52Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3664",
+  "body": "Closes #3654(止血部分)。把静默出错的跨对象聚合从\"塌成 `(null)` 桶\"变成响亮拒绝。\n\n## 问题(#3654)\n\n`engine.aggregate()` **没有 join** —— 不展开 lookup,SQL driver 的 aggregate 也不发 `JOIN`。于是点号维度/度量(如 `account.region`)到了 `ObjectQLStrategy`(NativeSQL 声明失败时的回退:**日期分桶** / in-memory driver / federated)就**静默出错**:\n- in-memory:`row['account.region']` 平铺取值恒 undefined → 所有行塌进**一个 `(null)` 桶**,度量被**全表加总** —— 数字看着有值,其实是错标成 `(null)` 的全表汇总;\n- native SQL:未解析列 → 报错。\n\n已用 `applyInMemoryAggregation` 纯函数在 #3654 里复现坐实。\n\n## 修法(fail-closed 止血)\n\n`ObjectQLStrategy` 在查询到达引擎**之前**,无条件拒绝任何跨对象引用,给出清晰错误。\n\n这**泛化并涵盖了 #3601 的 guard**(`assertJoinedScopesEnforceable`):旧 guard 只在被联对象**带 read scope 时**拒绝,且**无 read-scope provider 时直接早返回** —— 所以无安全 / in-memory 环境下静默 `(null)` 照旧发生。新 guard 无条件,且天然涵盖 #3597 的安全关切:被拒绝的查询从不加载联表 → 没有未加 scope 的联表数据可泄露。\n\n检测基于**解析后**的字段名(`resolveFieldName` 之后),所以被 cube 拍平成真实列的点号维度**不误伤**,只拦真正未解析的关系遍历。\n\n跨对象数据集在 **NativeSQLStrategy** 上不受影响(它手编 LEFT JOIN 且逐 join 加 scope)。本 PR 只改回退路径:静默错答 → 响亮报错。**aggregate 路径的完整 lookup 遍历能力留作后续**(#3654 方向 1)。\n\n## 测试\n\n三个跨对象用例现在都**拒绝**(经真实 `AnalyticsService.query()` → 策略选择 → guard;executeAggregate stub 故意\"不拦就返回垃圾 `(null)` 桶\",所以通过=证明拒绝):\n- 被联对象带 scope;\n- 只有基对象带 scope;\n- **无 provider(security off)—— #3654 静默 `(null)` 的正核心**。\n\n**回退 guard → 三个全红**。service-analytics **185 passed**;`tsc` 无新增错误(2 存量在未触文件)。路由(granularity 让 NativeSQL 退场 → ObjectQL)已被现有 `analytics-rls.dogfood.test.ts` 的 ObjectQL 用例覆盖。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

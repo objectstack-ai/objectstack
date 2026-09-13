@@ -1,0 +1,30 @@
+{
+  "number": 3828,
+  "kind": "issue",
+  "title": "被 connect policy 拒绝的 datasource,查询时报的错说不出原因:`getDriver` 只会说 \"is not registered\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T08:33:51Z",
+  "updated_at": "2026-07-28T09:16:30Z",
+  "closed_at": "2026-07-28T09:16:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3828",
+  "body": "## 一句话说明\n\n`DatasourceConnectPolicy` 拒绝一个 datasource 后,它停在 metadata-only(这是对的 —— 见 #3816 里 ADR-0062 D5 的修订说明:拒绝是「决定」,不是「失败」,不该 fail-fast)。但**引擎不知道发生过拒绝**,所以绑定到它的对象在查询时抛的是一句无差别的 `Datasource 'x' is not registered.` —— 跟真实原因(「你的套餐/egress 策略不允许连接外部数据源」)相距很远。\n\n这是 #3758 那个形状的残余:那次修的是「静默启动」,这次剩下的是「错得不知所云」。\n\n## 事实核实\n\n**拒绝路径。** `packages/services/service-datasource/src/datasource-connection-service.ts:251`:\n\n```ts\nif (!decision.allow) {\n  this.logger?.info?.(`datasource '${name}': connect denied by policy${decision.reason ? ` (${decision.reason})` : ''}`);\n  return { name, status: 'skipped-policy', reason: decision.reason };\n}\n```\n\n`decision.reason` 是 policy 提供的、面向人的原因(契约里 `DatasourceConnectDecision.reason` 注释为 \"Human-readable reason, surfaced in logs when a connect is denied\")。它只进了一条 `info` 日志,**返回值当场被丢弃**,引擎从头到尾没听说过这件事。\n\n**查询路径。** `packages/objectql/src/engine.ts:1756-1765`:\n\n```ts\nprivate getDriver(objectName: string): IDataDriver {\n  const object = this._registry.getObject(objectName);\n  if (object?.datasource && object.datasource !== 'default') {\n    if (this.drivers.has(object.datasource)) {\n      return this.drivers.get(object.datasource)!;\n    }\n    throw new Error(`[ObjectQL] Datasource '${object.datasource}' configured for object '${objectName}' is not registered.`);\n  }\n  // ...\n```\n\n这一句错误覆盖了四种完全不同的情况,而调用方无从区分:\n\n| 实际发生了什么 | 用户看到 |\n|:---|:---|\n| policy 拒绝(套餐 / egress 隔离) | `Datasource 'x' is not registered.` |\n| 连不上但被 `OS_ALLOW_DRIVER_CONNECT_FAILURE` 放行 | 同上 |\n| datasource 根本没声明(拼错了名字) | 同上 |\n| 声明了但 `active: false` | 同上 |\n\n第三种是**作者的 bug**,前两种是**部署环境的状态** —— 给同一句话是把这两类问题混成一类。\n\n## 影响\n\n多租户 host 按 plan 挡掉外部 datasource 时,租户的体验是:某些页面报 `Datasource 'analytics' is not registered`。这句话会把人引向「是不是我 datasource 名字写错了 / 是不是没部署好」,而正确答案是「升级套餐」或「联系管理员开 egress」。support ticket 的成本全在这里。\n\n自建部署里,第 2 种(设了逃生阀)同理:操作者明知数据库连不上才设的旗标,但**他的用户**看到的仍是 \"not registered\"。\n\n## 建议处置\n\n让引擎知道「这个 datasource 被声明过,但当前不可用,以及为什么」。倾向的形状:\n\n- `DatasourceConnectionService` 在 `skipped-policy` / `failed-*` 时,除了返回 `ConnectResult`,再向引擎登记一条**不可用记录**(datasource 名 + 类别 + `reason`)。`engine.registerDatasourceDef()` 这个 sink 已经存在,可以扩,而不是新开一条通路。\n- `getDriver` 命中未注册分支时先查这份记录,分情况抛:\n  - 有拒绝记录 → `Datasource 'analytics' is not available: <policy reason>`(policy 自己写的话,host 可控)\n  - 有连接失败记录 → `Datasource 'analytics' failed to connect at startup: <cause>. The server was started with OS_ALLOW_DRIVER_CONNECT_FAILURE.`\n  - 无记录 → 保持今天这句(确实是没声明 / 名字写错)\n- 错误里**不能**泄露连接串、凭据或内部主机名。policy 的 `reason` 由 host 提供,默认应假定它会被租户看到 —— 这一点要在 `DatasourceConnectDecision.reason` 的契约注释里写明,现在它只说 \"surfaced in logs\",与新用法不符。\n\n需要先定的两件事:\n\n1. **错误码。** 目前是裸 `Error`。这类「配置/环境导致的不可用」应该映射成什么 HTTP 状态?`503` 比 `500` 合理,但要确认 REST 层现有的错误分类不会把它归到 4xx(参考 `d0fea33` 把 ObjectQL `ValidationError` 映射到 4xx 的做法)。\n2. **`reason` 的可见性边界。** host 侧 policy 的 `reason` 直接回给终端用户是不是可接受,还是需要 host 显式标记「这条可外露」。倾向后者(默认不外露,opt-in 才进错误消息),但这会让 cloud 侧要改一处 policy 实现。\n\n第 2 点牵涉 cloud 仓库的实际 policy,落地前需要与 cloud 侧对齐。\n\n## 关联\n\n- #3758 / #3816(同一形状的启动期部分,已修)\n- ADR-0062 D5 修订说明中「policy 拒绝不是失败」的边界\n- `DatasourceConnectPolicy` / `DatasourceConnectDecision` 契约(`contracts/connect-policy.ts`)\n- Prime Directive #10"
+}

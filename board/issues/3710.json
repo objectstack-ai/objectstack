@@ -1,0 +1,32 @@
+{
+  "number": 3710,
+  "kind": "issue",
+  "title": "定时报表的 CSV 附件绕过用户级 export 权限轴(#3544 的第二道出数据的门)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T15:24:50Z",
+  "updated_at": "2026-07-27T16:32:54Z",
+  "closed_at": "2026-07-27T16:32:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3710",
+  "body": "在做 #3544(用户级 export 权限轴的服务端执法,PR #3709)时发现的范围外问题,按 AGENTS.md 铁律 #10 单开,不在那个 PR 里扩范围。\n\n## 问题\n\n#3709 把 `allowExport` 轴接到了对象数据导出这道门上(`GET /api/v1/data/:object/export` → 403 `EXPORT_NOT_PERMITTED`)。但那不是唯一一处把整表变成 CSV 递出去的地方。\n\n`plugin-reports` 的定时报表会把结果作为 CSV 附件邮件发出:\n\n- `packages/plugins/plugin-reports/src/report-service.ts` `dispatchDue()` → `executeReport({ ...report, format: 'csv' }, runContext, false)`,再 `email.send({ attachments: [{ contentType: 'text/csv', … }] })`。\n- `runContext` 是报表 owner 的上下文(#2849/#2980 修掉了 RLS 提权,owner 解析不出来会 fail closed),所以行级/字段级都还在。\n- 但走的仍然是普通读路径,和导出路由一样看不到 `allowExport`。\n\n结果:一个在权限集里被显式设了 `deal.allowExport: false` 的用户,仍然可以建一张 `deal` 的报表、配一个 csv 格式的 schedule、把整表定时发到自己邮箱。轴在主门上生效了,侧门还开着。\n\n## 复现\n\n1. 权限集里给某用户 `objects.deal = { allowRead: true, allowExport: false }`。\n2. 确认 `GET /api/v1/data/deal/export` → 403(#3709 之后的预期行为)。\n3. 以该用户建一张 `deal` 报表,建 `sys_report_schedule`,`format = 'csv'`,recipients 填自己。\n4. 触发 `dispatchDue()` → 邮件带着整表 CSV 附件到达。\n\n## 需要先定的设计问题\n\n不是「照抄一行 `canExport`」那么直接,建议先定调再动手:\n\n1. **轴的粒度对不上。** `allowExport` 是**按对象**的;报表可能跨对象(join / 关联),要判定的是报表读到的**每一个**对象,还是只判定主对象?\n2. **谁被判定。** 定时执行时没有请求上下文,`runContext` 是报表 owner。判定应当落在 owner 身上(和 RLS 一致),还是落在**建 schedule 的人**身上?两者可以不是同一个人。\n3. **csv 之外算不算导出。** `html_table` 格式的报表邮件同样把行发出去了,只是不是附件。轴要不要覆盖它?(倾向:`allowExport` 管的是「可机读的批量副本」,html 内联表格不算 —— 但需要明确写下来,否则就是另一个模糊地带。)\n4. **判定时机。** 在 `dispatchDue()` 里判定(到期时拒,`last_status: 'failed'` + 原因),还是在建/改 schedule 时就拒(更早失败、可解释)?倾向两者都要:创建时拒是 UX,派发时拒才是执法 —— 权限可能在 schedule 建好之后才收紧。\n\n## 可复用的东西\n\n`ISecurityService.canExport(object, context)` 在 #3709 里已经加好了,和引擎中间件同一套权限集解析,`isSystem` / 零权限集放行、其余 fail closed。报表侧真正要写的是上面 4 个问题的答案,不是判定本身。\n\n关联:#3544、#3709、#2849、#2980。"
+}

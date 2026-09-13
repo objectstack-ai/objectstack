@@ -1,0 +1,32 @@
+{
+  "number": 3718,
+  "kind": "issue",
+  "title": "The SDK's entire `ai` namespace is dead, and the entire real AI surface is unreachable from the SDK — the two sets are disjoint",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T15:53:56Z",
+  "updated_at": "2026-07-28T11:44:11Z",
+  "closed_at": "2026-07-28T11:44:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3718",
+  "body": "Found by enumerating the `/ai/**` family for #3708 — the last dynamic family of the #3563 audit, and the one the capstone's wildcard row had been covering for.\n\n## The two sets\n\n| | |\n|---|---|\n| `client.ai` methods | **exactly 3**: `nlq`, `suggest`, `insights` |\n| URLs they build | `/api/v1/ai/{nlq,suggest,insights}` |\n| Places any repo mounts those paths | **zero** |\n| Routes `buildAIRoutes()` really mounts | **12**: `chat`, `chat/stream`, `complete`, `models`, `status`, `effective-model`, `conversations` ×6 |\n| Of those 12, expressed by the SDK | **zero** |\n\nThey do not overlap at any point. The SDK's AI namespace is entirely dead; the AI service that was actually built is entirely unreachable through the SDK.\n\n## Evidence\n\n- `service-ai` / `buildAIRoutes()` live in the `cloud` repo (Cloud/EE package). Its returned table is the 12 routes above; `nlq`, `suggest`, `insights` are not among them — the strings do not appear in `packages/service-ai/` at all.\n- In this repo, `/nlq` `/suggest` `/insights` appear in exactly three places: `client/src/index.ts` (the calls), `client/src/client.test.ts` (which asserts `expect(url).toContain('/api/v1/ai/nlq')` — the URL the client *builds*, not whether anything answers it), and `spec/src/api/plugin-rest-api.zod.ts` (`DEFAULT_AI_ROUTES`).\n- **`DEFAULT_AI_ROUTES` has no runtime consumer.** The only references outside its own definition are in `plugin-rest-api.test.ts`, which validates its shape. Nothing mounts from it.\n- `aiNlq` / `aiSuggest` / `aiInsights` are declared as **optional** protocol methods (`protocol.zod.ts:1259`, `aiNlq?(…)`). No service in either repo implements them.\n\nDeclared in the spec, expressed by the client, mounted by nothing. Instances 7–9 of the `the method exists ≠ the method can be called` class, after `analytics.explain` / `analytics.meta` (#3584), `meta.getView` (#3611), `i18n.getTranslations` / `getFieldLabels` (#3636), `projects.listTemplates` (#3702).\n\n## Why the guard missed it until now\n\nThe capstone (#3642) matched these three against the `* /ai/**` **wildcard** row. A wildcard asserts the family is claimed, not that the URL resolves — so all three counted as matched, and the wildcard-only ratchet (3) read as \"weak evidence pending enumeration\".\n\nIt was not weak evidence. It was **wrong** evidence. The row's note even asserted the client \"expresses nlq/suggest/insights against the REST AI routes\" — never verified, and false.\n\n#3708 replaces it with a bounded prefix exemption plus a real ledger in `cloud`, and drops the ratchet to **0**: every remaining matched call now rests on an exact enumerated route.\n\n## Also user-visible\n\nThe console's developer API-discovery panel (`objectui apps/console/src/pages/developer/hooks/useApiDiscovery.ts`) lists `/nlq`, `/suggest` and `/insights` alongside the real endpoints with \"try it\" bodies. It is advertising three endpoints that always 404 — Prime Directive #10 in the literal sense. Worth fixing with whichever option below is chosen.\n\n## What needs deciding\n\nThis is a **product** decision, not a cleanup, which is why it is filed rather than fixed:\n\n1. **Implement the three endpoints** in `service-ai`. NLQ (natural language → query AST), field suggestions and record insights are genuine capabilities with a declared request/response contract already in spec, and an LLM adapter already wired. If they are on the roadmap, the SDK surface and the spec are already written.\n2. **Remove the namespace** — delete `client.ai.*`, `DEFAULT_AI_ROUTES`, and the three optional protocol methods, and drop the three entries from the console's discovery panel. Correct if these were an early design that the `chat` / `conversations` surface superseded (which the shape of what was actually built suggests).\n3. **Express the real surface instead** — give the SDK `ai.chat` / `ai.conversations.*` / `ai.models`, which is where the 10 `gap` rows in cloud's new `ai-route-ledger.ts` point. This is a superset of option 2 and the only one that makes the SDK useful for AI at all.\n\nRecommendation: **2 + 3** — retire the three unbuilt methods and express what exists. Option 1 only if NLQ/suggest/insights are genuinely planned; shipping three endpoints to satisfy methods nobody can be calling (they 404 today) is the wrong order.\n\nEither way the guard is already in place: cloud's `UNMOUNTED_AI_CLIENT_METHODS` asserts all three still match nothing, so implementing any of them **fails the test** and forces an `sdk` ledger row.\n\nRefs: #3708 (the enumeration), #3642 (the capstone whose wildcard hid this), #3563 (the audit family), objectstack-ai/cloud `packages/service-ai/src/ai-route-ledger.ts`."
+}

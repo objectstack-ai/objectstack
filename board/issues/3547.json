@@ -1,0 +1,32 @@
+{
+  "number": 3547,
+  "kind": "issue",
+  "title": "security 服务 getReadableFields 查询面(export 列投影的长期正解)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T03:36:47Z",
+  "updated_at": "2026-07-27T12:58:42Z",
+  "closed_at": "2026-07-27T12:58:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3547",
+  "body": "#3391 的独立 follow-up ④。\n\n## 背景\n\nP1 让 export 的**列投影**与 list 的字段级权限(FLS)对齐,方案是「**从 masked 行推导**」:取首块 masked 行的键并集 ∩ schema 字段,作为导出表头(`packages/rest/src/rest-server.ts` export 路由,#3498)。这是当时半径可控的方案,但有已知妥协:\n\n- 首块行里某可读字段若恰好**全为 null**(且驱动省略 null 键),该列表头会消失(纯外观问题)。\n- 空结果集退回全 schema 表头。\n\n## 长期正解\n\n给 security 服务加一个 **`getReadableFields(object, context)` 查询面**,直接返回该 context 下的可读字段集,export 用它做列投影,而不是从数据行反推。\n\n## 为什么当时没做\n\nREST 层只有 protocol 句柄,够不到 kernel 的 security 服务;加这个查询面 P1 半径过大。需要:\n- [ ] 在 security 服务(plugin-security)暴露 `getReadableFields(object, context)`(复用 FieldMasker 的可读判定,与读中间件同源,杜绝漂移)。\n- [ ] 让 REST export 路由能拿到该服务句柄(kernel 服务解析),用它替换「从 masked 行推导」。\n- [ ] 回归:导出列 = list 可读列,且不受 null 值/空结果影响。\n\n关联:#3391、#3498(现「从 masked 行推导」实现 + 阻塞性列投影测试)。"
+}

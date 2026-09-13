@@ -1,0 +1,35 @@
+{
+  "number": 3965,
+  "kind": "pull_request",
+  "title": "fix(sharing)!: give the share-management surface the authorization layer it never had (ADR-0111 P0, #3902)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T00:04:56Z",
+  "updated_at": "2026-07-30T00:20:12Z",
+  "closed_at": "2026-07-30T00:20:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T00:20:10Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3965",
+  "body": "## What this is\n\nThe **P0 implementation** of [ADR-0111](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0111-record-share-management-authority-and-verb-boundary.md) (merged in #3952), fixing **#3902**'s first finding and the surfaces the ADR widened it to. Before this change, every `/data/:object/:id/shares` and `/sharing/rules` route authenticated the caller and then ran the sharing services under `SYSTEM_CTX` — any signed-in user could revoke anyone's share (#3902 ①), enumerate who-can-see-what (②), write self-grants (③), and define/evaluate **org-wide sharing rules** (the widened finding).\n\n## The rulings this lands\n\n- **D1/D2 — management authority.** `ISharingService.canManageShares(object, recordId, context)`: system, the record's **owner**, or a holder of **Modify All Data** — probed via the new fail-closed `ISecurityService.hasWriteBypass` (explicit `modifyAllRecords` only, deliberately *not* `getEffectiveScope`, whose unmatched-object case fails open to `'org'`). Enforced **in the service**, so every present and future caller is covered; a deployment without plugin-security fails closed to owner-only.\n- **D4 — revoke.** Symmetric with grant (no granter exception), validates the share belongs to the URL's record (mismatch → 404), and refuses non-`manual` rows (409 — a rule-materialised grant would be silently re-granted by the next reconcile). System callers keep delete-by-id (the reconciliation path).\n- **D5 — listing.** `listShares` is management-gated (invisible record → 404, visible-but-not-manager → 403; missing and invisible indistinguishable). The previously wide-open `/data/sys_record_share` read surface is **self-scoped** in the middleware: non-admin callers see only rows naming them as recipient or grantor.\n- **D6 — sharing rules.** The whole `/sharing/rules` surface (list/create/get/delete/**evaluate**) requires the new capability, enforced in `SharingRuleService`.\n- **D7 — no inert grants.** `recipientType` narrowed to `user` (the only type any gate consults — ADR-0078); grants on objects sharing never enforces (public model / no `owner_id` / bypass / `controlled_by_parent`) fail with 422 `SHARING_NOT_ENABLED`; the manual upsert keys on `(object, record, recipient, source)` so manual and rule rows coexist instead of clobbering each other.\n- **D9 — `manage_sharing` capability** (org scope), seeded into `admin_full_access`; `manage_platform_settings` honoured as the legacy equivalent everywhere the new gate checks.\n\nOne coordinated fix: the explain engine (`listRecordShares` binding) now reads share rows under system context — its own caller authorization (D12 `manage_users`) already ran, and the record story must keep share attribution for non-manager principals.\n\n## Breaking\n\nCallers that relied on the missing gate now get 403/404/409/422 instead of silent success, and `ISharingService.revoke` gained an optional `scope` parameter. Carried in the changeset. **Not here:** the verb boundary (edit ≠ delete, D3) — that is the separate P1 the ADR's rollout names; D8 (share-link rulings) likewise follows.\n\n## Testing\n\n- **#3902 Mallory reproduction** as unit-integration tests (`sharing-service.test.ts`): ① revoke of another's share → `PERMISSION_DENIED` (owner still can); ② enumeration → `PERMISSION_DENIED`; ③ self-grant → `PERMISSION_DENIED`, nothing persisted.\n- `canManageShares` matrix (owner / probe / throwing probe / missing record / principal-less), D4 scope-mismatch + rule-source-409 + system no-op, D7 refusal matrix + manual/rule coexistence, D5 middleware self-scope (user / admin caps / anonymous / system / filter composition), D6 gate suite over all five rule verbs.\n- Full suites green: plugin-sharing **179**, plugin-security **673**, rest **440**, spec **6856**. Builds green for all four packages; spec generated-artifact checks (`skill-docs` / `spec-changes` / `upgrade-guide` / `authorable-surface`) pass.\n\n## Docs\n\n`services.sharing` runtime-service page (authority model + full error table), sharing-rules permissions page (D6 gate), kernel services index.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_012P3RFCpjjiSQ7WuamSDW7W\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012P3RFCpjjiSQ7WuamSDW7W)_"
+}

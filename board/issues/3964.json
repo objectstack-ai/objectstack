@@ -1,0 +1,35 @@
+{
+  "number": 3964,
+  "kind": "pull_request",
+  "title": "fix(cli,driver-sql): os migrate plan lists the datetime storage convergence (#3954)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T00:02:14Z",
+  "updated_at": "2026-07-30T00:20:58Z",
+  "closed_at": "2026-07-30T00:20:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T00:20:56Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3964",
+  "body": "Closes #3954. Follow-up to #3953.\n\n## The gap\n\nThe datetime canonicalisation (#3912/#3942) added two steps to `initObjects`' physical path: a row-rewriting backfill on SQLite and a `TIMESTAMP` → `DATETIME(3)` column rebuild on MySQL. Both already respected the DDL deferral (#3917), so `plan` performed neither and `apply` performed both — **the behaviour was never wrong.** The reporting was.\n\n`PendingSchemaWork.kind` could only express `create_table` / `add_columns`, so neither step could appear in the plan. An operator saw two added columns, confirmed, and `apply` additionally rewrote every row of a datetime column — or took a metadata lock to rebuild one on a large table. The plan promises to show what apply will do.\n\n## What changed\n\n**Two new kinds, plus a size.** `normalize_datetime_storage` and `widen_datetime_columns`, with an optional `rows` carrying how much data the step touches: row-writes for the backfill, the table's size for the rebuild. `ALTER … MODIFY` is a full rebuild holding a metadata lock, so the table's size is precisely the number that decides \"now\" versus \"in a maintenance window\".\n\n**The preview measures without performing.** Each probe reuses the exact predicate its migration uses — the backfill's whole `WHERE`, the widening's own `information_schema` filter (extracted to `legacyMysqlTimestampColumns` and now shared) — so the plan and the apply cannot name different sets. A probe that cannot run is swallowed to an unlisted step, never to a failed plan: under-reporting costs one line, throwing would cost the create/add entries too.\n\n**Two sections in the CLI, not one.** The existing heading reads *\"New (additive — created when you apply)\"* and its contract comment says the work is *\"purely additive and never data-losing\"*. That promise must not silently come to cover a row rewrite, so the in-place kinds get their own heading and their counts:\n\n```\n  New (additive — created when you apply)\n    + widgets [create_table, 2 column(s)]\n    + orders  [add_columns: note]\n\n  In place (existing rows converged when you apply)\n    ~ evt     [normalize_datetime_storage: at — 1,234,567 row update(s)]\n    ~ legacy  [widen_datetime_columns: at, created_at — 42 row table rebuild]\n```\n\n`summarizePendingSchemaWork` — the line read just before typing `y` — never omits in-place work, and is byte-identical when there is none.\n\n## Cost\n\nThe convergence probe counts rows, so `plan` is more than metadata lookups on a database that has not been migrated yet. That is the right trade for a command the operator ran *in order to be told the size of the job*, and it is paid by `plan`/`apply` only — never on a normal boot, which is still gated behind `deferredDdl`.\n\n## Testing\n\n- **SQLite** (`sql-driver-deferred-datetime-convergence.test.ts`): the step is listed with the right columns and row count; only the column that actually holds non-canonical rows is named; the preview does **not** perform it; flushing converges exactly what was planned and a re-plan is then empty; the `add_columns` + convergence combination the gap was worst in; and the swallowed-probe path still returns the additive entries. 3 of 7 fail without the driver change.\n- **CLI** (`schema-migrate.pending-render.test.ts`): the two-section split, that a row rewrite never renders under the additive heading, that an unmeasured count reads as `?` rather than `0`, and that the summary line is unchanged for purely additive work but never omits in-place work.\n- **MySQL**, verified against a real MariaDB 10.11 (`default_time_zone='+08:00'`): plan lists all three columns and 5 rows **without touching the schema**, apply performs exactly that, re-plan is empty. Added to the opt-in `OS_TEST_MYSQL_URL` suite (15/15 green live).\n- `pnpm build` + `pnpm test` green (132 tasks).\n\n## Note for review\n\n`PendingSchemaWork` gained a doc line saying the plan's promise makes this type the place anything added to `initObjects`' physical path must be representable — the invariant whose absence caused this issue.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01TPxNwPnjcn599ujXpU3ibJ\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01TPxNwPnjcn599ujXpU3ibJ)_"
+}

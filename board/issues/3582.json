@@ -1,0 +1,32 @@
+{
+  "number": 3582,
+  "kind": "issue",
+  "title": "Template tokens in filter values and notification templates are not evaluated at runtime",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T08:09:00Z",
+  "updated_at": "2026-07-28T07:15:21Z",
+  "closed_at": "2026-07-28T07:15:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3582",
+  "body": "Observed on `@objectstack/*` 16.1.0 while building HotCRM (objectstack-ai/hotcrm). Several template-token forms that app metadata naturally reaches for are not evaluated at runtime, and each has produced silent wrong results:\n\n- **Date/CEL tokens in filter values are not evaluated.** View filters and dashboard widget filters like `{ field: 'close_date', operator: 'greater_than', value: '{current_year_start}' }` (also `{12_months_ago}`, `{30_days_ago}`, `{this_quarter_start}`) pass validation but match nothing at runtime. Apps currently work around this by computing dates at module load (hotcrm `src/reports/opportunity.report.ts:5-9`, `churn.report.ts:6-13`), which freezes the dates into the built artifact.\n- **`{current_user}` silently never matches**; only `{current_user_id}` resolves in filters (hotcrm `src/views/forecast.view.ts:66-67`).\n- **Flow notification templates cannot traverse lookups.** `to: ['{record.owner.manager}']` or body text `{record.crm_account.name}` interpolate the literal string \"undefined\" instead of failing validation or resolving (hotcrm `src/flows/case-escalation.flow.ts:46-49`).\n\nIn all three cases the metadata validates cleanly and the failure is only observable as empty widgets, unfiltered queries, or \"undefined\" in notification text.\n"
+}

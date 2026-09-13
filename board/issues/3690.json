@@ -1,0 +1,30 @@
+{
+  "number": 3690,
+  "kind": "issue",
+  "title": "2FA lockout is hardcoded to better-auth's defaults while the password lockout is operator-configurable — the second factor ignores the settings UI",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T14:33:23Z",
+  "updated_at": "2026-07-27T15:29:07Z",
+  "closed_at": "2026-07-27T15:29:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3690",
+  "body": "Found while adding end-to-end coverage for the 2FA lockout path (#3667).\n\n## 现状不一致\n\n**密码阶段的锁定是可配的**,而且有完整的 Setup UI(`packages/services/service-settings/src/manifests/auth.manifest.ts`):\n\n| 设置项 | 默认 | 范围 |\n|:---|:---|:---|\n| `lockout_threshold` | `0`(关闭) | 0–20 |\n| `lockout_duration_minutes` | `15` | 1–1440 |\n\n它们经 `auth-plugin.ts` 解析进 `manager.config.lockoutThreshold` / `lockoutDuration`,驱动 ADR-0069 D2 的 `sys_user.failed_login_count` / `locked_until`。\n\n**第二因子的锁定完全不可配。** `auth-manager.ts` 构造 twoFactor plugin 时只传了 schema:\n\n```ts\nplugins.push(twoFactor({\n  schema: buildTwoFactorPluginSchema(),\n}));\n```\n\n没有传 `accountLockout`,所以 better-auth 的默认值原样生效(见 `verify-two-factor.mjs` 的 `resolveAccountLockoutConfig`):\n\n| | 值 | 来源 |\n|:---|:---|:---|\n| `enabled` | `true` | better-auth 默认 |\n| `maxFailedAttempts` | `10` | better-auth 默认 |\n| `durationSeconds` | `900`(15 分钟) | better-auth 默认 |\n\n这些写进 `sys_two_factor.failed_verification_count` / `locked_until`(#3647 才补上的列)。\n\n## 为什么值得改\n\n1. **运维预期会落空。** 一个把 `lockout_threshold` 调成 3 的管理员,合理地以为整个登录流程都收紧了 —— 实际上第二因子仍然是 10 次。**更严的那道门反而更松**,而且 UI 上没有任何提示。\n2. **默认是\"开启\"而密码侧默认是\"关闭\"。** `lockout_threshold` 默认 0(不锁),2FA 侧默认锁。两者的默认姿态相反,却没有任何地方说明。\n3. **这是安全控制项。** 阈值/时长属于部署应当能按自身风险画像调整的东西,尤其是 NIST SP 800-63B §5.2.2 明确把它当作可配置策略。\n\n## 可能的方向\n\n- 最小改动:把现有的 `lockout_threshold` / `lockout_duration_minutes` 复用到 `accountLockout`(语义一致,UI 不用动),注意 `0` 在密码侧表示\"关闭\",要映射成 `enabled: false`。\n- 或者:新增一对独立的 `two_factor_lockout_*` 设置,承认两个阶段可以有不同策略,并在 manifest 里把两者的关系写清楚。\n\n前者更简单也更符合直觉;后者更灵活。倾向前者,但这是产品决定,不该由实现顺手定。\n\n## 现有覆盖\n\n行为本身已经有端到端测试(#3667,`packages/qa/dogfood/test/two-factor-lockout.dogfood.test.ts`)—— 输错计数、输对清零、耗尽预算后落锁、锁定期间拒绝正确验证码、过期锁自动清理。**那些断言目前依赖 better-auth 的默认值(5 次/challenge、10 次/账户)**,所以改成可配之后需要一并更新,让它读实际配置而不是硬编码常量。\n\nRefs #3647, #3667, ADR-0069 D2。"
+}

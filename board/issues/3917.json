@@ -1,0 +1,32 @@
+{
+  "number": 3917,
+  "kind": "issue",
+  "title": "[17.0.0-rc.0] os migrate apply: no occupancy/lock detection for SQLite, and boot-time DDL runs before the confirmation prompt",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T08:34:27Z",
+  "updated_at": "2026-07-29T09:58:34Z",
+  "closed_at": "2026-07-29T09:58:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3917",
+  "body": "Found upgrading HotCRM to 17.0.0-rc.0 (tag commit `fc156fa4a`). Operational-safety report, not a crash.\n\n## Facts (verified in source)\n1. **No occupancy detection anywhere on the path**: `packages/cli/src/commands/migrate/apply.ts:64-160` gates only on `--allow-destructive` and the `[y/N]` prompt; `packages/cli/src/utils/schema-migrate.ts:72-115` connects with no lock/`-wal`/PID check. Zero hits for `busy_timeout` / `SQLITE_BUSY` / \"database is locked\" handling across `packages/cli/src` and `packages/plugins/driver-sql/src`.\n2. **DDL before consent**: `schema-migrate.ts:100` `await runtime.start()` boots the full plugin set, which runs `syncRegisteredSchemas` (`packages/objectql/src/plugin.ts:431/:456`) — create-table/add-column DDL is issued against the target DB *before* the drift plan is rendered and the confirm prompt is shown (`apply.ts:130`).\n3. For scope calibration: `replace_unique_index` is plain index DDL (`sql-driver.ts:2704-2733`), and the SQLite column-op table rebuild (`:2816-2877`) swaps tables *within* the file inside one transaction — the DB file inode is never replaced. So the exposure with a live dev server on the same file is stale prepared statements / schema-cookie churn / `SQLITE_BUSY` during exclusive transactions, not a swapped-out file.\n\n## Ask\n- Detect a live writer (e.g. `-wal`/`-shm` presence + PRAGMA-based probe, or an advisory lock) and warn/refuse without `--force`.\n- Defer all DDL (including boot-time schema sync) until after the plan is confirmed, or run the plan phase against a read-only connection."
+}

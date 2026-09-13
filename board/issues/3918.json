@@ -1,0 +1,32 @@
+{
+  "number": 3918,
+  "kind": "issue",
+  "title": "[17.0.0-rc.0] Runtime dispatcher error paths drop ValidationError.fields[] and downgrade status to 500 (rest-server maps it correctly)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T08:34:58Z",
+  "updated_at": "2026-07-29T09:31:51Z",
+  "closed_at": "2026-07-29T09:31:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3918",
+  "body": "Found while investigating form UX during the HotCRM 17.0.0-rc.0 upgrade (tag commit `fc156fa4a`). Minor but it forecloses per-field error display for any surface served by the runtime dispatcher.\n\n## Facts\n- `ValidationError` carries `.code='VALIDATION_FAILED'` and `.fields[]`, but no `.status`/`.statusCode`/`.issues` (`packages/objectql/src/validation/record-validator.ts:106-122`).\n- `@objectstack/rest` maps it correctly → **400** with top-level `fields[]` (`packages/rest/src/rest-server.ts:134-143`).\n- The runtime dispatcher's two error exits do neither:\n  - `packages/runtime/src/http-dispatcher.ts:495-506` (`errorFromThrown`): status falls back to **500** (no `.status` on the error), `details` reads only `.issues` (absent) → `fields[]` lost.\n  - `packages/runtime/src/dispatcher-plugin.ts:378-410` (`errorResponseBase`): same status fallback; body carries only `{message, code}`, and `:402` replaces the message with the generic INTERNAL_ERROR_MESSAGE on 5xx — so the caller gets a 500 \"internal error\" for a user-input validation failure.\n\n## Ask\nTeach both dispatcher exits the `VALIDATION_FAILED` shape (status 400 + `fields[]` passthrough), matching rest-server."
+}

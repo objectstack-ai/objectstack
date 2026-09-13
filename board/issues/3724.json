@@ -1,0 +1,32 @@
+{
+  "number": 3724,
+  "kind": "issue",
+  "title": "driver-mongodb 完全没有行级租户隔离:读不加谓词、写不打戳,多租户下跨租户可读写",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T00:27:19Z",
+  "updated_at": "2026-07-28T01:10:21Z",
+  "closed_at": "2026-07-28T01:10:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3724",
+  "body": "## 一句话说明\n\n`@objectstack/driver-mongodb` **没有任何行级租户隔离** —— 它从不读 `DriverOptions.tenantId`，读路径不加租户谓词，写路径不打租户戳。SQL driver 兑现的租户承诺，Mongo driver 一条都没兑现。\n\n在 #3696 修 `unique` 租户作用域时发现（PR #3717），当时按 Prime Directive #10 拆出来单独跟踪。\n\n## 事实核实\n\n整个 `packages/plugins/driver-mongodb/src/` 里，除了 #3717 留下的一条解释性注释外，`tenant` / `tenantId` / `organization_id` / `tenancy` **零匹配**：\n\n```\n$ grep -rniE \"tenant|organization_id|tenancy\" packages/plugins/driver-mongodb/src/*.ts | grep -v '\\.test\\.'\n（只有 mongodb-schema.ts 里 #3717 写的注释）\n\n$ grep -n \"tenantId\" packages/plugins/driver-mongodb/src/mongodb-driver.ts\n（无匹配）\n```\n\n对比 SQL driver 的对应实现：\n\n| 环节 | driver-sql | driver-mongodb |\n|---|---|---|\n| 租户列解析 | `computeTenantField()` → `tenancy.enabled:false` / 声明的 `tenantField` / 隐式 `organization_id` | 无 |\n| 读作用域 | `applyTenantScope()` 注入 `WHERE tenantField = ?` | 无 |\n| 写打戳 | insert 时 stamp 租户列 | 无 |\n| 发号器分裂 | `_objectstack_sequences` 按 `(object, tenant_id, field, scope)` | 不适用（无 autonumber 实现） |\n| unique 物化 | `(tenantField, field)` 复合（#3696 起） | 单字段 |\n\n## 影响\n\n多租户部署一旦把 datasource 指到 Mongo：\n\n1. **跨租户读**：任何查询返回所有租户的行 —— 没有谓词把它们分开。\n2. **跨租户写/更新/删除**：按 id 或 filter 的写操作能命中别的租户的文档。\n3. **上层防护不覆盖这里**：plugin-security 的 RLS 层工作在引擎 seam，但 driver 级的 native scoping 是 SQL driver 自己实现的一层（`resolveTenantField` + `applyTenantScope`）。Mongo 少的正是这一层。\n\n这不是\"declared ≠ enforced\"的常见形态（声明看起来是活的、实现是空的），而是**整个能力在这个 driver 上根本不存在**，同时平台其它部分（对象元数据的 `tenancy` 块、`applySystemFields` 注入的 `organization_id`）都在按\"租户隔离是平台保证\"的前提运作。\n\n## #3696 为什么没顺手一起修\n\n`unique: true` 在 #3696 后于 SQL driver 上物化为 `(tenantField, field)` 复合唯一。Mongo 侧**刻意没跟进**：\n\n在一个不加租户谓词、不打租户戳的 driver 上造 `(tenant, field)` 复合索引，会**假装**有隔离 —— 比单字段索引更糟，因为它读起来像已经修好了，而 `organization_id` 字段可能压根没被写入（没有写路径去打戳）。索引形态得在真隔离落地时跟着一起改，不能提前。\n\n现状注释就写在 `mongodb-schema.ts` 的 `FieldDef.unique` 上，明确指向本 issue。\n\n## 建议处置(二选一,都可接受)\n\n**A. 实现行级租户隔离** —— 对齐 SQL driver 的三件事：租户列解析（复用 `computeTenantField` 的规则）、读路径注入 `{ [tenantField]: tenantId }`、写路径 stamp。同时把 `unique` 物化改成 `(tenantField, field)` 复合。\n\n**B. 显式声明不支持多租户** —— 如果这个 driver 定位就是单租户/嵌入式场景，那就在启动时**硬失败**：检测到多租户模式（`OS_MULTI_ORG_ENABLED` / 对象带 `tenancy.enabled: true`）就拒绝启动并给出明确信息，而不是静默地不隔离。\n\n倾向 **B 优先**：它成本低、立刻消除静默失败，且不必先赌 Mongo 的多租户需求真实存在。真有需求时再做 A。\n\n无论选哪个，当前状态——**能在多租户下启动、且不隔离**——都不该保留。\n\n## 关联\n\n- #3696 / #3717（`unique` 租户作用域；发现处）\n- Prime Directive #10：never advertise a capability the runtime doesn't deliver"
+}

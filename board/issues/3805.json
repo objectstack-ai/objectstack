@@ -1,0 +1,35 @@
+{
+  "number": 3805,
+  "kind": "pull_request",
+  "title": "fix(approvals): an approval action is recorded against the authenticated caller (#3800)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T06:02:48Z",
+  "updated_at": "2026-07-28T06:45:51Z",
+  "closed_at": "2026-07-28T06:42:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T06:42:44Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3805",
+  "body": "Closes #3800.\n\n**Public text kept neutral on purpose.** This is a public repo with published\npackages; the analysis and impact assessment live in a private draft advisory\nunder the repo's Security tab, per this repo's split-disclosure convention.\nThis description covers the requirement and the design only.\n\n## Requirement\n\nOn every `ApprovalService` entrypoint the acting identity must be resolved\n**server-side from the authenticated execution context**. It was taken from the\nrequest payload (`actorId`, forwarded verbatim by REST at all nine call sites)\nand the service's own checks then read that same value — so the thing that\nsatisfied the check was supplied by the caller.\n\n#3783 pinned the *data-write* identity to the context (`actingUserId`), scoped\nitself there, and characterised the remaining payload use as tolerable. Too\ngenerous: the same field is read by the authorization checks, so it needed the\nsame treatment.\n\n## The fix\n\n`ApprovalService.resolveActor` pins the actor server-side on all nine\nentrypoints.\n\n**The rule is deliberately not \"`actorId` must equal `context.userId`.\"** A slot\ncan legitimately be keyed by something else — `resolveApproverSpec` stores the\n`type:value` literal when a graph lookup finds no holders, the showcase\ndocuments `{ actorId: 'position:finance' }`, and the Console picks from the\ncaller's own identity list (id, **email**, or `role:<r>`), gating its buttons on\nthat set client-side rather than on the server's `viewer.can_act`. A strict-uid\nrule would 403 real approvers. So:\n\n| Caller | Outcome |\n|:---|:---|\n| System context | Keeps its explicit actor — SLA sentinel, ADR-0043 action-link token, both already server-derived. Unchanged. |\n| No identity at all | `FORBIDDEN`. |\n| No `actorId`, or one naming the caller | Resolves to the caller. The common path. |\n| Anything else | Allowed only if the server can prove the caller holds it — `position:`/`role:` against the resolved authz context, or their own email (one lazy `sys_user` read, only when nothing cheaper matched). Else `FORBIDDEN`. |\n\nREST keeps forwarding the body value; it is now a *hint the service validates*,\nwhich is what preserves the email and `type:value` slot cases. A comment at the\nroute says so, so nobody reads it as unchecked again.\n\n## Verification\n\nA new suite covers the rule across all nine entrypoints — 16 cases, of which 12\nwere red before this change and all 16 pass now.\n\nIt deliberately keeps 4 of them as load-bearing negatives — the real approver\ndeciding their own slot, the real submitter recalling, the SLA sentinel under a\nsystem context, and an admin override — so \"reject every `actorId` that isn't\nthe caller\" cannot pass by breaking the feature instead of securing it.\n\nNote the pre-existing `approval-service.test.ts:653` (\"blocks a non-approver in\na non-system context\") only ever exercised a **non-approver**, so it passed\nwhile the case this PR closes went uncovered.\n\n`pnpm test`: **132/132 turbo tasks green**, dogfood included.\n\n### The 24 existing tests that failed against the fix\n\nWorth reading as evidence rather than noise — **every one acted with a context\nthat named nobody, or named someone other than the actor it claimed**:\n\n- `approval-revise.test.ts` used a single `USER_CTX = { isSystem: false,\n  positions: [], permissions: [] }` — **no `userId`** — for all 32 calls,\n  pinning the old permissive behaviour in place.\n- `approval-service.test.ts` called as `CTX` (`u1`) while passing\n  `actorId: 'u9'` in 11 places.\n\nEach now presents the acting user's own context via an `asUser(id)` helper. Two\nneeded real thought rather than a mechanical fix:\n\n- The #3590 echo-back test relied on a user-less non-system context, which is\n  now unreachable. Split into the authenticated case (the approver's own write\n  echoes back even though approving clears them from `pending_approvers` — a\n  stronger guard for #3590's actual intent) and the service-to-service case\n  under a system context.\n- The #3783 \"never takes the identity from the caller-supplied `actorId`\" test\n  described a scenario that can no longer happen. It now asserts the call is\n  refused *and* that the mirror identity did not follow the body, so neither\n  line can regress silently behind the other.\n\nSame shape as #3760, where tests had likewise pinned the prior behaviour.\n\n## Filed separately, not fixed here\n\n#3801 — the generic run-resume route validates machine state only and needs an\nauthorization gate of its own, keyed on what the run is parked on. It is a\ndifferent shape (the route is load-bearing for screen flows) and belongs in its\nown change.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

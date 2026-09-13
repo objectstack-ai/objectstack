@@ -1,0 +1,35 @@
+{
+  "number": 3834,
+  "kind": "pull_request",
+  "title": "fix(approvals,rest): tell the truth about approval writes — lock policy, dropped fields, and the batch create ingress (#3794, #3835)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T08:58:44Z",
+  "updated_at": "2026-07-28T16:04:42Z",
+  "closed_at": "2026-07-28T16:04:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T16:04:39Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3834",
+  "body": "Closes #3794 (the framework half — the Console half is objectstack-ai/objectui#2914) and #3835.\n\nAn approval flow reported record writability wrong in **both** directions: what the user *could* change said \"locked\", and what they *couldn't* said \"updated successfully\". Neither was wrong *behaviour* — the server did the right thing and told nobody. Pulling on the second thread turned up a third problem on the same write path, where the server was **not** doing the right thing (#3835).\n\n## 1. `locks_record` on the approval request (#3794 problem 1)\n\nThe `beforeUpdate` lock hook decides on exactly one thing: the node config snapshot's `lockRecord` (`=== false` ⇒ the update goes through). Nothing exposed it, so a client saw only \"a request is pending\" and had to guess whether that means locked — and the Console guessed \"locked\", every time. A `lockRecord: false` node exists *precisely* so an approver can amend the record while deciding on it; painting \"Locked for approval\" over that hides the whole feature and approvers never try.\n\n`rowFromRequest` now emits `locks_record`, read from the **same** snapshot the hook reads with the **same** default-true, so the two cannot disagree. It flows through `getRequest` / `listRequests` and therefore `GET /api/v1/approvals/requests`. Optional in the contract for version skew (absent ⇒ assume locked).\n\n## 2. `droppedFields` on `POST /batch` (#3794 problem 2)\n\nThe engine strips writes to `readonly` (#2948) and `readonlyWhen`-locked (#3042) fields and completes the write without them. Every write path already reports what it dropped (#3431/#3455) — **except** the cross-object transactional batch, which never wired `onFieldsDropped` at all.\n\nThat is not a marginal path: it is the Console record form's save for a master-detail record, i.e. the one surface where a **user** edits a `readonlyWhen` field. They changed it, the form said \"updated successfully\", the value never moved, and nothing anywhere said so — the exact symptom in #3794.\n\nThe response now carries a top-level `droppedFields` list, each event tagged with the `index` of the operation that produced it (`results` entries are bare record echoes, with no envelope to hang a per-row list on). Omitted entirely when nothing was dropped, so the shape stays backward-compatible; the batch still commits either way — a strip is legal semantics, not an error.\n\n## 3. …and that batch was not enforcing `readonly` on create at all (#3835)\n\nWiring up (2) surfaced it: `POST /batch` called `ql.insert` directly, and the engine's INSERT path is static-`readonly`-exempt **by design** (#3413 — the #3043 strip deliberately lives one layer up, at the protocol's create ingress). So `readonly` meant two different things depending on which create endpoint you used.\n\nMeasured on the showcase, `showcase_contact.lead_score` (`readonly: true`), same signed-in non-system user, identical payload:\n\n| | before | after |\n|---|---|---|\n| `POST /data/showcase_contact` | `lead_score = null`, `droppedFields` reported | unchanged |\n| `POST /batch` (`action: 'create'`) | **`lead_score = 999` written, nothing said** | `null`, `droppedFields` reported |\n\nCreate ops now go through `p.createData` — the ingress itself — rather than a second copy of the strip at the REST layer. Routing beats re-implementing here for a concrete reason: `stripReadonlyForInsert` carries a **deliberate scope carve-out** a copy would have lost. Platform objects (`sys_` / `managedBy`) are exempt on purpose, because their own guards must **reject** a forged value with 403 (ADR-0086's `managed_by`/`package_id`, #3004's `owner_id` anchor) — silently swallowing it would eat the very payload the guard exists to refuse. `isSystem` is exempt for the same class of reason. That also rules out the \"sink the strip into the engine\" option floated in #3835: the engine has no notion of that boundary. One create ingress, and a future change to its policy covers the batch for free (AGENTS.md PD #12).\n\nMechanics that had to keep working, and do: `trxCtx` is passed as the context so the insert joins this batch's transaction and rolls back with it; `{ $ref: <opIndex> }` still resolves (verified live — an invoice + line batch produced a line pointing at the invoice created in the same request); the ingress's `droppedFields` fold into the per-op list from (2).\n\nUpdate ops are untouched throughout — the engine enforces both strips on its own update path.\n\n## Tests\n\nNew: 3 in `approval-service.test.ts` (`locks_record` default-true, explicit `false`, omitted key — through `openNodeRequest` / `listRequests` / `getRequest`), 5 in `rest-batch-endpoint.test.ts` (tagged drop events; omit-when-clean; creates go through the ingress *with the transaction context*; a forged `readonly` column never reaches the engine and is reported; `$ref` still resolves through the ingress).\n\nGreen: `spec` 6736 · `rest` 413 · `plugin-approvals` 280 · `metadata-protocol` 71.\n\n## Browser-verified on the showcase\n\nSame signed-in user, `pnpm dev` showcase + the objectui console dev server:\n\n| scenario | result |\n|---|---|\n| `showcase_invoice_signoff` (`lockRecord: false`), pending | API returns `locks_record: false`; band reads \"审批中（可编辑）\"; PATCH **200** |\n| `showcase_dynamic_approval` lead_review (`lockRecord: true`), pending | `locks_record: true`; band reads \"审批中已锁定\"; PATCH **400 RECORD_LOCKED** |\n| record form: `状态 → Paid` + `税率` in one save | commits, `tax_rate` unchanged, and the Console now warns which field did not land |\n| batch create forging `lead_score` | stripped and reported, matching `POST /data/:object` |\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

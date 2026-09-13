@@ -1,0 +1,35 @@
+{
+  "number": 3857,
+  "kind": "pull_request",
+  "title": "fix(spec): liveness stale-evidence check was ~100% false positives — and was burying a real one",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T11:55:41Z",
+  "updated_at": "2026-07-28T12:52:28Z",
+  "closed_at": "2026-07-28T12:52:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T12:52:26Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3857",
+  "body": "Follow-up to #3845. The `verifiedAt` clock landed there is only useful if the gate's warnings are trusted — and one of them was pure noise.\n\n## The bug\n\nThe stale-evidence check was one line:\n\n```ts\nconst file = String(led.evidence).split(':')[0];\nif (/\\//.test(file) && !existsSync(join(repoRoot, file))) → flag\n```\n\nIt assumes every `evidence` string is exactly `path/to/file.ts:123`. Almost none are:\n\n| Real evidence string | What `split(':')[0]` produced |\n|---|---|\n| `packages/spec/src/stack.zod.ts (mergeActionsIntoObjects stable-sorts each group)` | the whole string, incl. the prose |\n| `objectui: packages/app-shell/src/views/RecordDetailView.tsx:573` | `objectui` — the attribution eaten as a filename |\n| `packages/objectql/…/rule-validator.ts (UPDATE strip); packages/metadata-protocol/…` | first path + prose; second path never checked |\n\n**48 of 227 entries flagged, and every one was a parse artefact or a deliberate cross-repo pointer.** I checked all 48 by hand: 11 were objectui paths that already said `objectui:`, 27 were `packages/services/service-ai/…` (the closed cloud runtime — `packages/services/` here ships every sibling *except* it), and the rest were paths with a parenthetical after them that do exist.\n\n## The real one it was burying\n\n`object.enable.clone` cited `packages/objectql/src/protocol.ts:2259`. That file is gone — `cloneData()`'s `enable.clone` gate now lives at `packages/metadata-protocol/src/protocol.ts:2938` (verified; behaviour still guarded by `protocol-clone-real-engine.test.ts`). The claim never stopped being true, the pointer rotted, and **the check that exists to catch exactly this could not be heard over 47 false ones**. Pointer repaired and dated.\n\nThat's the same failure this ledger keeps documenting, one level up: a signal nobody trusts is a signal nobody reads.\n\n## The fix\n\nNew `evidence.mts` extracts repo-rooted paths properly and honours the cross-repo attribution entries were *already writing in prose*:\n\n- a realm marker (`objectui`, `cloud`, `ee`) attributes the paths that follow it, up to the next clause boundary (`;` or `)`) — so one string can cite both repos, and `framework` switches back explicitly;\n- `packages/services/service-ai/…` is always foreign, wherever it appears;\n- non-repo-rooted tokens (`app-shell/MetadataProvider.tsx`, `action-button/-group`) read as prose — neither resolved nor reported.\n\nBoth parenthesised (`(objectui packages/core/…)`) and colon (`objectui: packages/…`) marker forms are handled; the corpus uses both.\n\n```\nevidence paths: 156 resolved against this checkout, 36 attributed to another repo (objectui / cloud — not resolvable here).\n✓ all governed-type properties are classified; all bound high-risk proofs resolve.\n```\n\nDown from 48 warnings that said nothing, to **zero** — with the two counts printed every run, so the parser silently degrading to \"extracts nothing\" is visible rather than vacuously green. A unit test asserts that too (`expect(local).toBeGreaterThan(100)`).\n\nThe ledger README's advice to write objectui paths \"as prose to avoid false stale-flags\" was a *workaround for this bug*; it now documents the realm-prefix convention.\n\n## Verification\n\n- Parser validated against all 227 real evidence strings before wiring it in — 158 local paths resolved, 38 attributed foreign, exactly 1 genuinely missing (the `enable.clone` rot). All 11 objectui paths confirmed present in `objectstack-ai/objectui@732b1bf`; `packages/services/service-ai/` confirmed absent from this repo.\n- `pnpm --filter @objectstack/spec check:liveness` — exits 0, zero stale evidence.\n- `pnpm --filter @objectstack/spec test` — 262 files, 6796 tests passed (17 new in `evidence.test.ts`, incl. a contract test over the shipped ledgers).\n\n## Not in this PR\n\nThe gate's other permanently non-empty warning — **13 unregistered dogfood `@proof:` tags** — is left alone deliberately. Registering them is not clerical: several (`attachments-permission-matrix`, `flow-runas-schedule`) look like they should be *bound* to a ledger entry rather than merely registered as unbound, and deciding that per-proof is its own reviewable change.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Ajwvrmd1hDC9RBofYBhGuR)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 3703,
+  "kind": "pull_request",
+  "title": "fix(approvals): a dead approval run no longer leaves the record RECORD_LOCKED (#3456)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T15:10:00Z",
+  "updated_at": "2026-07-27T15:32:12Z",
+  "closed_at": "2026-07-27T15:32:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T15:32:10Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3703",
+  "body": "Closes #3456 — the #3424 follow-up, expected-behavior item 3. Implements **option 3 (both)** from the issue: exempt the owning run's writes *and* release the lock when a run dies anyway.\n\n## The gap\n\nThe record lock keys on a **pending** `sys_approval_request` and cannot tell *the run that owns that request* from *an unrelated user editing the record*. So a flow that touched its own target record while its own approval was still pending — a manual `resume` with no decision, or a node writing the record between opening the approval and the decision — died on its own `RECORD_LOCKED`, and the record stayed locked behind the dead run. Recovery existed (#3424 lets an admin `recall`/`reject`), but nothing made it self-healing.\n\nOnly one of the two options would have left a hole, so both are here: option 1 stops the run from dying, option 2 cleans up the runs that die for reasons option 1 can't prevent (a process crash being the clearest).\n\n## ① Prevention — the owning run may write its own record\n\nThe engine stamps `flowRunId` onto the run context at setup, alongside `runAs` — same lifetime, same single construction point (`resolveRunContext`). It rides `resolveRunDataContext` into every data node's ObjectQL context, through `buildSession` into `ctx.session`, and the lock hook exempts a write whose `flowRunId` matches the pending request's `flow_run_id`. Because it lives on the run context, it is persisted with a suspended run and survives pause/resume, including a cold resume after a restart.\n\n**Keyed on run identity, not elevation** — deliberately. Widening the write to `isSystem` would have been the easy fix and the wrong one: a `runAs:'user'` run must stay RLS-scoped while it writes. `flowRunId` is pure provenance — server-constructed like `isSystem` (this envelope is built from the authenticated session, never from request input), read by no security middleware, and it authorizes exactly one thing: a write to the single record its own run already holds a pending request against. A stray `flowRunId` against a request with no `flow_run_id` is not a skeleton key; there is a test for that.\n\n## ② Recovery — release records held by runs that died anyway\n\nA pending request whose owning run has reached a terminal state can never be decided, so it is finalised as `recalled` — which releases the lock — and audited under the reserved actor `system:dead-run` with the run id and its status in the comment, so it is never mistaken for a submitter's withdrawal. `recalled` is reused because it is already the platform's terminal state for *a live request that ended without a decision*; the history view lists it, and no new `ApprovalStatus` value has to enter the spec.\n\nIt runs on the existing approvals sweep clock (`Promise.allSettled` alongside the SLA scan, so neither leg can short-circuit the other), which also gives it the boot catch-up the crash case needs.\n\n**Fail-safe by construction.** It acts only on an explicit terminal status from a closed set. `paused` — the normal state of every live approval — plus `running`, an unrecognised status, an unknown run, a `getRun` that throws, and a deployment with no automation engine are all read as \"still alive\". The failure mode is \"a dead run's lock survives until an admin recalls it\" (today's behaviour), never \"a live approval is destroyed\". `completed` sits in the terminal set with the failure states because the approval node only writes a request row on the path where it also suspends, and every in-band transition finalises the request *before* resuming the run — so a completed run with a pending request means someone resumed it out of band.\n\n## A prerequisite bug this surfaced\n\n`AutomationEngine.getRun` returned the **first** log entry for a run id. A run that pauses and later finishes records **two** entries under one id (`paused`, then the terminal one), so every suspend-then-finish run — every approval, screen and wait flow — reported itself as `paused` forever. That is user-visible on the Runs observability surface (`runtime/src/domains/automation.ts`), not just an obstacle to this sweep: without the fix the sweep could never have seen a dead approval run, because those are exactly the runs that pause first. Fixed to take the latest entry.\n\n## Verification\n\n`plugin-approvals` **229**, `service-automation` **365**, `objectql` **1092**, `lint` **390** — all green, and all four changed packages build clean through DTS.\n\nEvery new guard was **mutation-verified** — each fix reverted in turn, confirming the tests go red for the right reason:\n\n| reverted | tests that go red |\n|---|---|\n| the owning-run exemption | `allows the OWNING run to write its own target record` |\n| the closed terminal-status set (treat any status as dead) | the three \"leaves it alone\" cases — `paused`, unrecognised, `running` |\n| the `getRun` latest-entry fix | both suspend-then-finish cases |\n\nNew coverage includes the end-to-end proof — a user edit is refused while the dead run holds the lock and succeeds after the sweep — and an integration test asserting `flowRunId` reaches the ObjectQL context and equals the engine's own run id, for both `runAs` modes, plus a check that the stamp never leaks back onto a caller-reused context object.\n\nOn the full-workspace `pnpm test`: touching `packages/spec` makes turbo rebuild it concurrently with dependents' tests, and those tests transiently fail with `Cannot find package '@objectstack/spec/integration'` while `dist` is being rewritten. It is a build/test race, not a regression — the failing package differed run to run, and every affected package passes standalone once spec's `dist` is stable.\n\n## Residual, deliberately not changed\n\nA `runAs:'user'` run with **no trigger user** (a schedule) passes no ObjectQL context at all, so it carries no `flowRunId` and is still subject to the lock. Manufacturing a context just to carry the run id would flip that run from its documented unscoped fail-open (#1888) to baseline-member RLS — a separate and larger behaviour change. The sweep is what recovers that shape. Recorded in a code comment at `resolveRunDataContext`, in the changeset, and here.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JGXCuBt5mSXbN3Gc8yfbRv)_"
+}

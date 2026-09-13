@@ -1,0 +1,35 @@
+{
+  "number": 3980,
+  "kind": "pull_request",
+  "title": "fix(security)!: a disabled RLS policy no longer grants — security-subset liveness re-verification (#3896 follow-up)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T00:51:14Z",
+  "updated_at": "2026-07-30T01:20:53Z",
+  "closed_at": "2026-07-30T01:20:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-30T01:20:52Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3980",
+  "body": "The security-subset re-verification of the liveness ledger, and the defect it found. Timed for the v17 window on purpose: if an audit like this turns up false compliance, the remedies (enforce / remove) are exactly the changes a major-release RC makes cheap.\n\n## The defect: `rowLevelSecurity.enabled` was a no-op, in the over-share direction\n\n`RowLevelSecurityPolicySchema.enabled` promises, verbatim:\n\n> *\"Whether this policy is currently active. **Disabled policies are not evaluated.** Useful for temporary policy changes without deletion.\"*\n\n**Nothing read it.** Not the collection site (`security-plugin.ts` pushes every policy, filtering only platform-tenant provenance), not the projection round-trip (verbatim JSON), not the compiler (`getApplicablePolicies` matched on object / positions / operation only).\n\nDirection matters: applicable policies **OR-combine — \"any match allows access\"** (`rls-compiler.ts`'s own doc). Each policy is a permissive grant widening row visibility. So a policy an admin switched off **kept contributing its grant** — disabling a too-permissive policy silently changed nothing. That is the #3896 shape one layer up: a documented security control whose real behaviour is wider than its written contract, discoverable only by reading the code.\n\nThe ledger, meanwhile, claimed `live` with evidence pointing at `rls-compiler.ts` — a file that never mentioned the property. Exactly the \"claim with a timestamp; code moves under it\" failure the ledger README warns about, on the entry class where it costs most.\n\n### The fix\n\n`getApplicablePolicies` now excludes `enabled === false` before any matching — the single choke point both the find path and the analytics path flow through, and the same spot where the formerly-unenforced `positions` domain got the identical ADR-0049 enforce-or-remove treatment. Exact `=== false` on purpose: the schema defaults `enabled` to true and rows round-tripped through `sys_permission_set` may omit the key, so **absent stays active** — no legacy row changes behaviour.\n\nAccess-narrowing only: no policy grants more after this change. Nothing in-repo authors `enabled: false` (checked examples/seeds), and the Studio permission form doesn't render a toggle for it, so no tenant flips it expecting the old (broken) behaviour. Four tests pin both directions, including \"a disabled policy no longer contributes its OR-branch to the compiled filter\".\n\n## The audit around it\n\nAll **44 entries** of the ledger's security subset — `permission` (33), `position` (4), `object` sharing/access (7) — call-graph-closed by hand per the README method (declaration → registration → accessor → non-test caller; grep only proves presence) and stamped `verifiedAt: 2026-07-30`. Repo-wide dated entries: 4 → 48. This subset had never been re-verified; the last sweep that leaned on preview-renderer citations went 10-for-13 wrong.\n\n**Corrections beyond `enabled`:**\n\n| Entry | Was | Now | Why |\n|---|---|---|---|\n| `rls.priority` | live (evidence never read it) | **dead + authorWarn** | Semantically void, not merely unimplemented: OR-combination means most-permissive-wins (the schema's own describe says so), so there is no conflict to order and evaluation order cannot affect outcomes. **Remove candidate** per the #3715/#3950 precedent — flagging for the v17 window, not done here. |\n| `rls.label` / `description` / `tags` | live, no evidence | dead (benign) | No consumer in either repo. objectui's facets editor and preview echo authored input — an authoring surface is not a runtime consumer (README §preview-renderer). Not authorWarn'd: benign display metadata. |\n| `tabPermissions` | live, **no evidence**, note \"only 'hidden' is read\" | live, evidence + corrected note | UNDERSTATED: hono's `tabRank` merge reads all four visibility values across resolved sets. The `me-apps-and-everyone-baseline` dogfood test exercises it; noted as a proof-binding candidate (the proof registry currently records it against the ungoverned `app` type). |\n| `object.ownership` | live, evidence `registry.ts:272` | live, `registry.ts:292` | Line rot — the citation no longer pointed at the read. |\n\n**Suspicions the audit REFUTED** (worth recording so nobody re-suspects them):\n\n- `allowExport` is not projection-only. The export route carries its own caller-level 403 gate (`enforceExportPermission` → `canExport` → `checkObjectPermission('export')`), fail-closed when the security service is present but cannot answer, separate from the object-level 405. The code comment even names the hazard: *\"without this the bit would only hide the client's Export button while `curl` still drained the table.\"*\n- `allowTransfer` / `allowRestore` / `allowPurge` notes are accurate: M2 operations still unshipped (no such ops in `packages/objectql`), and the RBAC gates are pre-mapped with a `DESTRUCTIVE_OPERATIONS` fail-closed backstop, so they cannot ship ungated.\n\n`position.json`: all four entries verified, no corrections. `object.json`: seven security entries re-cited and stamped (`sharingModel`'s fail-closed default — no `sharingModel` + not system ⇒ `private` — confirmed in `sharing-service.ts`).\n\n## Verification\n\n- `plugin-security`: **32 files / 677 tests green** (4 new).\n- `tsc --noEmit` clean, eslint clean on touched files.\n- `check:liveness` green — 48 dated entries, every evidence path resolves, all bound proofs resolve.\n- README counts table regenerated for the permission row (29 live / 4 dead).\n\n## For the v17 triage (decisions this PR flags but does not take)\n\n1. **Remove `rls.priority`?** Semantically void; the breaking window is open now. Small schema-removal PR on request.\n2. **Bind `permission.tabPermissions` to the me-apps proof** once its authored surface is confirmed to be the permission-set side (ADR-0054 \"bind only what the proof authors\").\n3. **`writeScope` proof** — sibling of proofed `readScope`, stamped live with two confirmed readers but no dogfood proof of its own.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QuViRSR1j6GJjf9qGbnqFX)_"
+}

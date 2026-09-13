@@ -1,0 +1,30 @@
+{
+  "number": 3992,
+  "kind": "issue",
+  "title": "ADR-0062 终局翻转:cloud 收敛已落地,header 与 D1 的 \"remaining second site\" 表述过时(docs-only)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T01:54:16Z",
+  "updated_at": "2026-07-30T02:33:29Z",
+  "closed_at": "2026-07-30T02:33:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3992",
+  "body": "## 一句话说明\n\n#3826 已由 #3968(main `c3bcb42`)+ cloud#915(cloud main `fb1bfcc`)关闭:control-plane preset、`artifact-kernel-factory`(objectos 每租户主库)、`DefaultEnvironmentKernelFactory` 两条路径全部收敛到 `DefaultDatasourcePlugin` + `createPrebuiltDriverFactory`。但 ADR-0062 是在 cloud PR 合并**之前**更新的,两处表述已经过时——这个 ADR 在 #3826 期间已经两次被抓到状态与实现不符(#3836 时高估,#3869/#3886 后低估),别让它第三次漂。\n\n## 需要改的两处(`docs/adr/0062-external-datasource-runtime.md`)\n\n1. **Header**:\"the cloud repo's own stack composition is the last remaining second site, and the parity guard stays until it converges\" —— cloud 侧已收敛,D1 应标 fully implemented(跨两仓)。\n2. **D1 的 \"Remaining second site\" 段**(fourth-pass 上方):应从「余项」改写为**完成记录 + 逃生舱分类清单**:残余的 `DriverPlugin` 使用全部为命名辅助/逃生舱类——framework 的 telemetry sibling、cloud 的 proxy `cloud` datasource(`registerAsDefault:false`)、objectos host 路由 shell、artifact 工厂旁挂的 `'cloud'` 别名 metadata 注册、测试注入——不再存在 default 路径的第二实现。\n3. 同段对 parity guard 的表述顺带对齐:`degraded-boot-parity.test.ts` 的头注释(#3968 已重写)现在说它守的是「只要 `ObjectQLEngine.init()` 还能抛 connect 判决(boot 再验证 + 逃生舱 driver),它就必须与 service 判决一致」——ADR 正文应与之一致,即 guard 在收敛后**保留**,角色从「未收敛的第二实现不漂移」变为「逃生舱不漂移」。\n\n## 建议处置\n\ndocs-only 小 PR,空 frontmatter changeset(#3373 惯例)。\n\n## 关联\n\n- #3826(已关闭)、#3968、cloud#915\n- ADR-0062 D1、`packages/runtime/src/degraded-boot-parity.test.ts`"
+}

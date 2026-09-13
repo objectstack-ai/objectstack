@@ -1,0 +1,30 @@
+{
+  "number": 3928,
+  "kind": "issue",
+  "title": "SQLite datetime ORDER BY is wrong on mixed-storage columns: INTEGER-epoch rows always sort before ISO-TEXT rows",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T10:12:03Z",
+  "updated_at": "2026-07-29T13:15:03Z",
+  "closed_at": "2026-07-29T13:15:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3928",
+  "body": "Found while fixing #3912 (filter comparands vs. storage form). Same root cause family — a SQLite `Field.datetime` column is genuinely mixed-form — but a **different code path**, so it is not covered by that fix.\n\n## Symptom\n\nSorting on a `Field.datetime` column ignores the instant whenever the column holds both storage forms. SQLite's type ordering is `NULL < INTEGER/REAL < TEXT < BLOB`, so **every** `Date`-written row sorts before **every** ISO-string-written row, regardless of when they actually happened.\n\n## Repro\n\n```ts\nconst d = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });\nawait d.initObjects([{ name: 'p', fields: { at: { type: 'datetime' } } }]);\n\nawait d.create('p', { id: 'int-2026', at: new Date('2026-01-01T00:00:00Z') }); // INTEGER epoch\nawait d.create('p', { id: 'txt-2024', at: '2024-01-01T00:00:00.000Z' });        // ISO TEXT\n\nawait d.find('p', { orderBy: [{ field: 'at', order: 'asc' }] });\n// actual:   ['int-2026', 'txt-2024']\n// expected: ['txt-2024', 'int-2026']\n```\n\nVerified on `claude/sqlite-datetime-filter-empty-hradlv` (i.e. **with** the #3912 fix applied), so this is independent of it.\n\n## Why the mix exists\n\nExactly as documented in #3912: a JS `Date` binds as INTEGER epoch, while a REST/JSON write carries an ISO string (JSON has no `Date`) and a `defaultValue: 'NOW()'` slot stamps ISO TEXT. The platform's own `created_at` / `updated_at` are stamped as ISO strings (`sql-driver.ts:1329`/`:1364`) while being declared `datetime` (`packages/objectql/src/registry.ts:319`/`:340`), so any object that mixes seeded/imported rows with API-written rows is affected — and `created_at` is the default sort on a lot of list views.\n\n## Blast radius beyond ordering\n\nCursor/keyset pagination built on a datetime sort key inherits the wrong order, so pages can skip or repeat rows rather than merely presenting them out of order.\n\n## Fix direction\n\nThe same storage-form-aware treatment the other two paths now have — `sqliteTemporalArg` for bucketing (#3773) and `sqliteEpochMsSql` / `filterColumnExpr` for filters (#3912) — applied to the ORDER BY compilation. `SqlDriver.sqliteEpochMsSql` is already the shared normaliser and is directly reusable here.\n\nWorth weighing as part of it: this trades index-ordered scans for an expression sort on SQLite datetime columns. The durable alternative is to stop producing the mix at all — normalise `Field.datetime` on write in `formatInput` (which currently leaves datetime untouched, `sql-driver.ts:4386`) plus a migration for existing TEXT rows — after which all three read paths could drop their CASE. That is a bigger change than either issue, but it is the one that removes the whole class."
+}

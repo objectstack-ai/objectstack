@@ -1,0 +1,35 @@
+{
+  "number": 3921,
+  "kind": "pull_request",
+  "title": "feat(analytics): order the time axis by default, give reports a sort declaration (#3916)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T09:27:55Z",
+  "updated_at": "2026-07-29T10:03:45Z",
+  "closed_at": "2026-07-29T10:03:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-29T10:03:43Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3921",
+  "body": "Fixes #3916.\n\n## The problem\n\nA matrix report with a date dimension across rendered its columns in arbitrary order (`2026-07-01, 2026-07-05, …, 2026-07-02`). Declaring `dateGranularity` made the bucket keys *sortable* (`2026-07`, `2026-Q3`) without making anything *sort* them.\n\nNothing in the chain supplied an order:\n\n- `resolveOrdering` returned `undefined` unless the selection carried `order` explicitly (`dataset-executor.ts:318-344`).\n- The ObjectQL aggregate path has no ordering grammar, so buckets came back in Map-insertion order (`in-memory-aggregation.ts:84`), and native SQL declines every granularity query (`native-sql-strategy.ts:30`) — so bucketed queries always land there.\n- The console pivot builds column headers in row-arrival order.\n\nAnd the author could not ask: `DatasetSelection.order` existed on the wire, but `ReportSchema` had no ordering field at all. Dashboard widgets had their own `options.sortBy` channel; reports had nothing.\n\nOne correction to the issue's diagnosis: `ObjectQLStrategy` *does* render `ORDER BY` in its echoed SQL, but that string is documentation — execution goes through `engine.aggregate()`, which never receives an ordering. The practical gap is exactly as reported.\n\n## The fix\n\n**Server default — the symptom fix.** When a selection states no `order` (and no `limit`, whose existing fallback already ordered by every dimension), each selected dimension the cube types as `time` now defaults to ascending, in selection order. Bucket keys are minted sort-stable (`2026-07`, `2026-Q3`, `2026-W31`) precisely so ascending *is* chronological. This lands on both strategy paths: a real `ORDER BY` where native SQL serves the query, the executor's post-pass where a bucketed query goes to the ObjectQL path. Null / empty buckets stay last, as everywhere else.\n\nDeliberately narrow — only time dimensions get a default, so grids with nothing wrong with them are not reordered. For the reported matrix (`rows: [owner]`, `columns: [closed_month]`) that makes the column dimension the sole sort key, so the pivot's arrival-order headers come out strictly chronological. Sorting the row dimension too would have put one owner's months first and appended everyone else's out of order.\n\n**Author surface.** `ReportSchema.order` / `blocks[].order` — a list of `{ by, direction }` sort keys, most significant first. An array rather than a `Record` because key order is the contract and JSON object key order should not have to be. `by` must name a dimension the report groups by (`rows`/`columns`) or a measure it displays (`values`); anything unknown, or a duplicate, fails at authoring time rather than becoming an ordering that silently does nothing. A `joined` report orders per block — declaring `order` on the container is an error. `reportSelectionOrder()` lowers the list into the `DatasetSelection.order` a renderer posts, returning `undefined` for an empty list so the runtime's own defaults still apply.\n\nAn explicit `order` still wins outright — the chronological default is a default, not a policy, so \"newest month first\" is one declaration away.\n\n## Liveness classification — please read\n\n`report.order` ships as **`planned` + `authorWarn`**, not `live`. The framework half is complete and live (schema, `reportSelectionOrder`, executor), but objectui's `DatasetReportRenderer` builds the selection it posts and does not yet carry `report.order` into it. Marking it `live` would be the exact failure the gate exists to catch. This needs a follow-up objectui PR to flip.\n\nThe time-axis default needs no renderer change and is live now — it is what actually closes the reported bug.\n\n## Out of scope here\n\nThe console pivot (`packages/console`) ships as a prebuilt bundle with no source in this repo, and the report→selection lowering lives in objectui. Neither is reachable from this change.\n\n## Also\n\nCorrected `docs/audits/2026-06-reportschema-property-liveness.md:21` — the note claiming the retired `sortOrder` \"now lives on the dataset\" was wrong, as the issue observed. No dataset-level sort field ever existed.\n\n## Testing\n\n- 13 new executor cases (`dataset-time-axis-order.test.ts`) pinning the default and its boundaries: time-only, selection order, explicit-order precedence, the bare-limit fallback, native-SQL `ORDER BY` emission, quarter/year keys, nulls last.\n- 9 new schema cases covering `order`, its validation, and `reportSelectionOrder`.\n- Full suites green: service-analytics 312, spec 6832, downstream-contract 14.\n- Regenerated artifacts (`json-schema.manifest.json`, `authorable-surface.json`, `api-surface.json`, `references/ui/report.mdx`); `check:liveness`, `check:spec-changes`, `check:upgrade-guide`, `check:skill-docs`, `check:skill-refs`, `check:skill-examples`, `check:docs`, `check:api-surface`, `check:react-blocks`, `check:doc-authoring` all pass.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01CYJ5WSiCgd522s1zCWtmFT\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01CYJ5WSiCgd522s1zCWtmFT)_"
+}

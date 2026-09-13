@@ -1,0 +1,36 @@
+{
+  "number": 3651,
+  "kind": "pull_request",
+  "title": "feat(analytics,spec): executeAggregate 桥携带 ExecutionContext —— ADR-0021 D-C 第二层带子 (#3602)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T12:54:02Z",
+  "updated_at": "2026-07-27T14:12:09Z",
+  "closed_at": "2026-07-27T14:12:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T14:12:06Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3651",
+  "body": "Closes #3602.\n\nanalytics→engine 的桥现在把请求的 `ExecutionContext` 转发给 `engine.aggregate`,于是 **engine 自己的中间件链**会独立于 analytics 层的 `getReadScope` 给聚合读加 scope。\n\n> **与 #3639 的关系**:本 PR 开出去之后,#3639 先一步落地了 #3602 的**残留 1**(给 label 查询加引用对象自己的 read scope)。已 merge main 并**完整保留 #3639 的设计**(`LabelScopeResolver` + `scope` 参数,fail-closed 逐维度跳过),本 PR 在其之上叠加 `context` —— 同一个 hook 上的两条带子,与聚合路径的切分一致。\n\n## 为什么\n\n`BaseEngineOptions.context` 一直是 `.optional()`,所以类型系统从没强迫这座桥传它 —— 它也确实没传。一次已认证的聚合到达 engine 时不带任何 principal,plugin-security 的无 principal fall-open 跳过了自己的 RLS 注入,于是唯一还在起作用的就只剩\"strategy 记得调 `getReadScope`\"这一条。#3597 就是某个 strategy 没调,两条带子同时失效。\n\n`getReadScope` 保留:两者走的是**不同的解析路径**(engine 中间件 vs `security.getReadFilter`),而且没装 plugin-security 的部署只有 analytics 这一层。这是纵深,不是替代。\n\n## 改了什么\n\n**主项 —— context 贯通**\n\n- `StrategyContext` 新增 `context?: ExecutionContext`,由 `AnalyticsService.callCtx` 逐请求绑定。**无条件绑定**,包括没有配置 read-scope provider 的情况 —— 恰恰是那种部署最需要 engine 帮它兜底,不能让第二条带子依赖第一条是否接上。\n- `StrategyContext.executeAggregate` 以及 plugin / service 两处 `executeAggregate` 配置项新增 `context?: ExecutionContext`;auto-bridge 转发给 `engine.aggregate`。纯增量 —— 自定义桥忽略它的话行为与之前完全一致。\n\n**残留 1 —— `fetchRecordLabels` 的第二条带子**\n\n#3639 已给它接上 analytics 层的带子(引用对象自己的 read scope)。本 PR 在 `fetchRecordLabels` / `resolveDimensionLabels` 上再加一个尾部 `context` 参数并转发进 `executeAggregate`,让 engine 也独立 scope 这次行级读。\n\n**残留 2 —— `ObjectQLStrategy.generateSql`**\n\n之前完全不生成 WHERE,于是 `/analytics/sql` 的预览读起来像一次无 scope 全表扫描,而实际执行(#3601 之后)是加了 scope 的 —— 排查\"这行为什么不见了\"的人拿到的是一段无法复现结果的 SQL。现在渲染调用方的 filter + read scope,并跑与 `execute()` 相同的联表 scope 守卫(不该渲染一条 `execute()` 会拒绝的查询)。这段 SQL 从不执行,所以此前是误导性输出,不是泄露。\n\n## 验证\n\n- 新增单测 `execution-context-bridge.test.ts`(14 例):context 转发、**无 read-scope provider 时仍转发**、同实例多租户各自拿到自己的 context、auto-bridge 落到 `engine.aggregate`、label 查询上**两条带子落在同一次 engine 调用**(#3639 与本 PR 各自的单测都覆盖不到的交叉点)、`generateSql` 的 WHERE / 参数 / 联表拒绝。\n- 新增端到端 dogfood 门禁:`BootOptions.analytics` 让 harness 可以把 **analytics 那条带子显式关掉**(`getReadScope: () => undefined`)启动,断言 member 仍然只数到自己的行 —— 此时唯一在起作用的就是桥递给 engine 的 context。\n  **确认它真的会咬**:把 `context: ctx.context` 临时改回 `undefined`,该用例数到 5(全表)而非 2,正是 #3597 的泄露形状。\n- merge main 之后重跑:`service-analytics` 198 例全绿(含 #3639 新增用例)、两个 analytics dogfood 门禁 8 例全绿、`pnpm build` 71/71、`pnpm lint` 干净、`check:api-surface` 通过。\n\n## 顺带发现,未在此修\n\n`ObjectQLStrategy.execute()` **完全忽略 `timeDimensions[].dateRange`**(只有 `where` 会到 engine),而 NativeSQL 和 preview-evaluator 都处理了。因为带 `dateGranularity` 的查询会强制 NativeSQL decline,所以任意驱动上的时间分桶趋势图都会画出全量历史。属于正确性 bug,与本 issue 正交 —— 已按 Prime Directive #10 单独开 #3650。`generateSql` 里也因此**故意不渲染 BETWEEN**(渲染出来就是编造一条执行路径从不施加的谓词),代码注释里引了该 issue。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_013st2KArjmLQSuVzpDS91jj\n"
+}

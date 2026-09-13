@@ -1,0 +1,32 @@
+{
+  "number": 3841,
+  "kind": "issue",
+  "title": "Two error-code vocabularies are both live: `StandardErrorCode` is lowercase snake_case, the servers emit SCREAMING_SNAKE",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T09:21:30Z",
+  "updated_at": "2026-07-30T02:29:21Z",
+  "closed_at": "2026-07-30T01:42:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3841",
+  "body": "Noted as \"Related, not the same\" in #3689 and carried out of it when #3837 landed, so it is filed here rather than left buried in a closed issue. This one is a **spec decision**, not a bug fix, and it should be settled *before* #3689's other sibling (`error.code` occupied by the HTTP status) is touched — otherwise that fix has no vocabulary to migrate to and would have to be redone.\n\n## The drift\n\n`packages/spec/src/api/errors.zod.ts` declares `StandardErrorCode` as a closed enum of **lowercase snake_case** codes:\n\n```ts\nexport const StandardErrorCode = z.enum([\n  'validation_error', 'invalid_field', 'missing_required_field', …\n  'unauthenticated', 'invalid_credentials', 'expired_token', …\n  'permission_denied', 'insufficient_privileges', …\n]);\n```\n\nIt is the declared type of `FieldErrorSchema.code` and `EnhancedApiErrorSchema.code`, and `content/docs/api/error-catalog.mdx` documents it as *the* catalog.\n\nMeanwhile the wire is majority SCREAMING_SNAKE. Counting distinct literals in non-test source under `packages/`:\n\n| Vocabulary | Distinct codes | Examples |\n|---|---:|---|\n| SCREAMING_SNAKE | **139** | `AUTH_REQUIRED`, `FILE_NOT_FOUND`, `INVALID_REQUEST`, `PERMISSION_DENIED`, `ATTACHMENT_DOWNLOAD_DENIED`, `UPLOAD_SESSION_NOT_FOUND` |\n| lowercase snake_case | **~100** | `validation_error`, `forbidden`, `bad_request`, `driver_missing`, `checksum_drift` |\n\n(The lowercase count includes a handful of false positives — `code: 'custom'`, `code: 'finance'` — but the shape of the split is not in doubt.)\n\nThe split runs through a single request path. `http-dispatcher.ts:1379` parks `{ code: 'PERMISSION_DENIED' }` — SCREAMING — in `details`, while the enum that names the same condition calls it `permission_denied`. Neither `ApiErrorSchema.code` nor the routes reference `StandardErrorCode` at all: `ApiErrorSchema` declares a bare `z.string()`, so nothing is validated and both dialects pass.\n\n## Why it matters now, not before\n\n#3687 (for #3675) and #3837 (for #3689) moved the storage and i18n services into the declared **envelope** without reconciling the **vocabulary** — deliberately, because the envelope was mechanical and this is not. With the envelope settled on both paths, the code field is the remaining unenforced part of `ApiErrorSchema`, and it is the part consumers actually branch on: the console's attachment panel maps `ATTACHMENT_DOWNLOAD_DENIED` / `AUTH_REQUIRED` to user-facing copy, and the dogfood suite asserts on them.\n\n## What needs deciding\n\n1. **Adopt SCREAMING_SNAKE** — rename the enum's members, rewrite `error-catalog.mdx`. Matches what 139 codes already emit and what every consumer already reads, so no runtime migration. But `StandardErrorCode` is an exported spec type, so this is a breaking rename for anyone importing it, and the ~100 lowercase emitters still need a sweep.\n2. **Adopt lowercase snake_case** — keep the enum, migrate the 139 emitters. Consistent with the documented catalog and with the repo's `snake_case`-for-data-values convention (Prime Directive #3), but it changes strings the console and the dogfood suite branch on, so it needs the consumers in hand.\n3. **Declare them different things** — `StandardErrorCode` stays the *field-level validation* vocabulary (`FieldErrorSchema`), and top-level `error.code` gets its own declared enum in the other dialect. Honest about current usage; costs one more concept.\n\nRecommendation: **option 1**, on the grounds that the wire is the harder thing to move and 139 > 100. Whichever wins, `ApiErrorSchema.code` should stop being `z.string()` and start referencing the chosen enum — otherwise this reopens the first time someone types a new code, and the conformance suites added in #3687/#3837 have nothing to assert the *value* against, only the shape.\n\n## Guard note\n\n`error-envelope.conformance.test.ts` and `success-envelope.conformance.test.ts` (service-storage, service-i18n) already drive every branch and parse against the imported spec schemas. Once `code` is a real enum they get the value check for free — the schema tightens, the suites do not change."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 3868,
+  "kind": "pull_request",
+  "title": "feat(spec): register the 13 orphan dogfood proofs — five advance the ADR-0054 ratchet, eight say why they can't",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T13:01:17Z",
+  "updated_at": "2026-07-28T13:16:43Z",
+  "closed_at": "2026-07-28T13:16:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T13:16:40Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3868",
+  "body": "Follow-up to #3857 — the gate's second permanently-non-empty warning.\n\nThe gate flagged 13 `@proof:` tags under `packages/qa/dogfood/test/**` that no class in `proof-registry.mts` claimed. Silencing that is trivial and worthless. The useful question is the one ADR-0054 §3 actually asks: **is there an authorable property whose `live` status this proof gates?** I re-read all 13 against it.\n\n## Five had one — bound (ratchet: 10 → 17 bound paths)\n\nA `live` classification on these entries now *requires* its proof.\n\n| Proof | Now gates | Why it qualifies |\n|---|---|---|\n| `attachments-permission-matrix` | `object.enable.files` | the #2727 opt-in gate in **both directions** — the fixture carries a deliberate non-declaring object (`att_nofiles`) that must be refused `403 FILES_DISABLED` |\n| `showcase-d3-d4-capabilities` | `permission.rowLevelSecurity.check` | authors `check: 'owner == current_user.email'` and proves the write **post-image** is validated — distinct from `using`, which filters the pre-image |\n| `showcase-scope-depth` | `permission.objects.readScope` | authors `unit` / `unit_and_below` profiles, proves the owner-match widens and cross-BU stays isolated |\n| `owner-anchor-and-bulk-writes` | `permission.objects.modifyAllRecords` | member denied the transfer, privileged caller allowed |\n| `semantic-roles-served` | `object.highlightFields`, `.stageField`, `.fieldGroups` | all three survive `defineStack → artifact → registry → REST` verbatim (incl. `stageField: false` as a strict `false`, not dropped) |\n\nThree of those five gate **access-widening or capability** properties — `readScope`, `modifyAllRecords`, `enable.files` — where \"declared but not applied\" fails in the safe-*looking* direction and so goes unnoticed longest.\n\n## Eight did not — registered with an honest reason\n\nSame shape the registry already used for `permission-set-projection`:\n\n- **`flow-runas-schedule`**, **`showcase-scope-depth-fallback`** — guard `flow.runAs` and `permission.objects.readScope`, both *already* bound to a sibling proof. A ledger entry carries one `proof` ref, so a second gate on the same property isn't representable; they run unconditionally instead.\n- **`me-apps-and-everyone-baseline`** — enforces `app.requiredPermissions` / `app.tabPermissions`; `app` isn't a governed type yet (it's on the rollout list). Bind when it lands.\n- **`showcase-agent-intersection`**, **`showcase-agent-scope-ceiling`** — runtime principal-resolution invariants (`onBehalfOf` reconstruction, OAuth scope → ceiling set), not authorable metadata.\n- **`showcase-bu-hierarchy-sharing`**, **`showcase-declarative-rbac-seeding`** — act on stack-level `roles`/`sharingRules`, not a per-type property surface.\n- **`showcase-permission-zoo`** — a breadth guard over the whole ADR-0090 surface; binding it to any one entry would misrepresent both what it covers and what that entry is proven by.\n\n## One deliberate non-binding worth naming\n\n`owner-anchor-and-bulk-writes` binds `modifyAllRecords`, **not** the sibling `allowTransfer`. The proof only *mentions* `allowTransfer` in a header comment — it never authors it, and exercises `modifyAllRecords ⇒ transfer` instead. Binding a property a proof doesn't exercise is the same false comfort as a preview renderer standing in for a runtime consumer, which is the error #3686 spent its length unwinding. The temptation was real: `allowTransfer` is the more *obvious* match by name.\n\n## Verification\n\n- Confirmed the bound proofs actually run — a bound-but-skipped proof would be precisely the false comfort this ratchet exists to prevent. The only `skipIf` among the five covers `attachments-permission-matrix`'s **enterprise cross-tenant block**; the `FILES_DISABLED` assertion the binding rests on runs unconditionally.\n- `pnpm --filter @objectstack/spec check:liveness` — exits 0, and now prints **zero warnings**: the orphan list joins the stale-evidence list at empty, so both mean something again.\n- `pnpm --filter @objectstack/spec test` — 262 files, 6821 tests passed. `proof-registry.test.ts`'s bound-path contract test failed first (it pins the exact list — the ratchet working as designed) and was updated with the 7 new paths.\n\nAlso: the README's ratchet table was itself stale — 5 classes listed against 10 actually bound. Now complete, with the unbound set and its reasons alongside.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Ajwvrmd1hDC9RBofYBhGuR)_"
+}

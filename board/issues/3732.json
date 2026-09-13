@@ -1,0 +1,34 @@
+{
+  "number": 3732,
+  "kind": "pull_request",
+  "title": "refactor(spec)!: 补完 2026-06 字段剪除 — 删除两个孤儿 value schema (#3726, #3733)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T00:58:16Z",
+  "updated_at": "2026-07-28T02:32:43Z",
+  "closed_at": "2026-07-28T02:32:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T02:32:41Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3732",
+  "body": "Closes #3726。Closes #3733。两个 issue 是同一批剪除留下的同一种残留,处置完全同构,合并在本 PR 一起走。\n\n## 改了什么\n\n从 `@objectstack/spec` 公开面上移除:\n\n| 移除项 | issue |\n|---|---|\n| `DataQualityRulesSchema` (const) / `DataQualityRules` (type) / `DataQualityRulesInput` (type) | #3726 |\n| `ComputedFieldCacheSchema` (const) / `ComputedFieldCache` (type) | #3733 |\n\n以及随之停发的 `data/DataQualityRules.json` 和 `data/ComputedFieldCache.json`。`api-surface.json` 4383 → 4381,恰好是两个 issue 各自预言的 3 + 2 条。\n\n## 那批剪除留下的是两个孤儿,不是一个\n\n2026-06 剪掉五个字段键(`encryptionConfig` / `maskingRule` / `auditTrail` / `cached` / `dataQuality`),tombstone 声明它们 \"dead in both layers\"。实际**三个**带走了自己的 value schema,**两个**没有:\n\n| 剪除项 | schema 是否仍导出 | #3726 表格记录 | 实际 |\n|---|---|---|---|\n| `encryptionConfig` | ❌ | 不是残留(system 层另一个独立 schema) | 一致 |\n| `maskingRule` | ❌ | 已清理 | 一致 |\n| `auditTrail` | ❌ | 已清理 | 一致 |\n| `cached` | ✅ **残留** | 已清理 | **误记** → #3733 |\n| `dataQuality` | ✅ 残留 | 残留 | 一致 → #3726 |\n\n`cached` 那一行是 #3726 核对表里唯一记错的。两者形态完全一致:键早已从 `FieldSchema` 删除,schema 仍在公开面 + 生成的参考文档里,全仓消费者为零。\n\n## 一处事实更正:`FieldSchema` 并不是 `.strict()`\n\n#3726 的第 1 条理由说,作者若误写会因 `.strict()` 直接 parse 报错。实测不是这样 —— `FieldSchema` 是普通 `z.object({...})`,没有 `.strict()`。两个键都实测过:\n\n```\nFieldSchema.safeParse({ name: 'ssn', type: 'text',\n                        dataQuality: { uniqueness: true } })\n→ parse success: true      dataQuality key survived? false\n\nFieldSchema.safeParse({ name: 'total', type: 'formula',\n                        cached: { enabled: true, ttl: 3600 } })\n→ parse success: true      cached key survived? false\n```\n\n**解析成功,键被静默丢弃**。这比报错更糟:报错至少给作者信号,静默剥离让「source 里写了 / 契约里没有 / 没人执行」同时成立且零反馈 —— 正是 `field.zod.ts` 里 `accept` / `maxSize` 注释点名的 ADR-0104 失败类。结论不变,剪除的理由反而更强。commit message、changeset、代码 tombstone 均按实测事实措辞。\n\n两者各有一处尖角:\n\n- **`DataQualityRules.uniqueness`** 描述为 \"Enforce unique values across all records\",读起来恰好像 `unique: 'global'` 真正提供的全平台唯一(#3696),是最容易被误选的那个。\n- **`ComputedFieldCache`** 更安静因而更难察觉:作者在公式字段上写 `ttl: 3600`,会以为结果缓存了一小时,没有报错,也永远看不到「什么都没发生」的信号。\n\n## 验证\n\n| 检查 | 结果 |\n|---|---|\n| `pnpm build`(全仓) | ✅ 71/71 |\n| `pnpm test`(全仓) | ✅ 132/132 |\n| `check:api-surface` | ✅ 恰好少两个 issue 预言的 5 条 |\n| `check:docs` | ✅ 250 files in sync |\n| `check:liveness` | ✅ all governed-type properties classified |\n| `check:spec-changes` / `check:upgrade-guide` / `check:skill-refs` / `check:skill-docs` | ✅ |\n\n第一个 commit 推上去后的 CI 也是全绿(含 Spec property liveness、Check Changeset、Check Generated Artifacts、Build Docs、ESLint)。\n\njson-schema ratchet(#2978)两次都如设计般拦下了停发,manifest 键的移除是它要求的 deliberate-retirement 步骤。生成物(`api-surface.json`、`json-schema.manifest.json`、`content/docs/references/data/field.mdx`)均由脚本重新生成,未手改。\n\n## 破坏性 & 迁移\n\n已配 changeset(`@objectstack/spec: minor` + `!` 标记,随 v17 major 发车,沿用 `apimethod-enum-shrink` 的先例),覆盖两次移除。\n\n无运行时行为可迁移 —— 两个 schema 都从未被 `FieldSchema` 引用,都没有消费者。字段级唯一性用 `unique`(`true` = 租户内、`'global'` = 全平台,#3696);`completeness` / `accuracy` / 计算字段缓存(`enabled` / `ttl` / `invalidateOn`)无替代,本就从未实现。\n\n`field.zod.ts` 的 tombstone 已改写为覆盖两个孤儿,并写明:若将来真做数据质量治理或计算字段缓存,键与 schema 必须**连同消费者一起**加回(ADR-0049 enforce 侧),不要单独恢复 schema —— 那个中间态正是这两个 issue 的由来。五个键至此在两层都真的死了,与 tombstone 一直以来的声明相符。"
+}

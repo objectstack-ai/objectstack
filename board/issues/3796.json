@@ -1,0 +1,32 @@
+{
+  "number": 3796,
+  "kind": "issue",
+  "title": "[P3] Six flow-node config aliases bypass `readAliasedConfig` — no warning, no ledger, no retirement path",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T05:52:56Z",
+  "updated_at": "2026-07-30T01:09:52Z",
+  "closed_at": "2026-07-30T01:09:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3796",
+  "body": "Found while auditing the alias debt named in AGENTS.md Prime Directive #12 (follow-on to #3713 / #3742 / #3754 / #3795).\n\n## Context — the shim exists and works\n\n`packages/services/service-automation/src/builtin/config-aliases.ts` was built exactly for this problem. `FlowNodeSchema.config` is an unconstrained `z.record(z.string(), z.unknown())`, so the spec blesses **no** key — the executor is the only thing that gives `config` a shape at runtime. `readAliasedConfig(cfg, nodeType, canonical, aliases, logger)` gives that shape a declared contract: canonical wins, the alias still works for already-stored flows, and each alias warns once so authors get steered to the canonical key.\n\nIts own doc block sets the retirement path, and it has been followed: `filters` → `filter` graduated out of the shim into the ADR-0087 D2 conversion layer (`flow-node-crud-filter-alias`, rewritten at load including the `AutomationEngine.registerFlow` rehydration seam), leaving `object` → `objectName` in `crud-nodes.ts` as the named next candidate.\n\n## The gap\n\nSix alias fallbacks in the same directory never went through the shim — they are still open-coded `??` chains:\n\n| file | line | fallback |\n|---|---|---|\n| `builtin/notify-node.ts` | 143 | `cfg.recipients ?? cfg.to` |\n| `builtin/notify-node.ts` | 144 | `cfg.title ?? cfg.subject` |\n| `builtin/notify-node.ts` | 145 | `cfg.message ?? cfg.body` |\n| `builtin/notify-node.ts` | 149 | `cfg.actionUrl ?? cfg.url` |\n| `builtin/screen-nodes.ts` | 166 | `cfg.function ?? cfg.functionName` |\n| `builtin/screen-nodes.ts` | 229 | `cfg.inputs ?? cfg.input` |\n\nTheir **precedence is fine** — canonical is first in every one, so nothing is running the wrong branch today. That is not what makes them debt.\n\nWhat they lack is everything the shim provides:\n\n- **No warning.** An author who writes `to:` instead of `recipients:` gets a flow that works forever and is never told they are on a deprecated key — the exact \"fossilizes the wrong shape into a de-facto second contract and hides metadata-generation bugs\" failure `config-aliases.ts` describes in its own header.\n- **Nothing declares which key is canonical.** With `config` unconstrained in the spec, the `??` order in the executor is the *only* statement of intent, and it is invisible to authoring tools, `graph-lint`, and skills.\n- **No retirement path.** The shim's ledger is what makes removal schedulable; these six can never \"graduate\" because nothing tracks them.\n- **`graph-lint` cannot gate them** for the same reason — there is no declared alias list to lint against.\n\n## Suggested fix\n\n1. Route all six through `readAliasedConfig` with the canonical key each `??` chain already implies, so they join the ledger and start warning.\n2. Add them to whatever list `graph-lint` consults, so newly published flows are rejected rather than silently accepted.\n3. Confirm the canonical choice per pair while doing it — `inputs`/`input` and `function`/`functionName` in particular deserve a deliberate answer rather than inheriting whatever the `??` happened to put first.\n4. Then treat them like `object` → `objectName`: candidates to graduate into the D2 conversion layer once the window elapses.\n\nLow priority — nothing is broken at runtime. It is filed so the sweep's result is recorded rather than rediscovered, per PD #10.\n\n## Note for AGENTS.md\n\nPrime Directive #12 currently reads:\n\n> The existing `cfg.filter ?? cfg.filters` / `cfg.objectName ?? cfg.object` in the flow executors are **debt to pay down, not a pattern to copy**.\n\nBoth halves have moved on since that was written: `filters` is retired into the conversion layer, and `object` → `objectName` is no longer a raw `??` — it sits behind `readAliasedConfig` with a warning and a documented graduation path. The sentence is worth refreshing so it points at the shim and the conversion layer as the *established* retirement mechanism (and at this issue for the stragglers), rather than at two examples that no longer look the way it describes.\n\nRefs #3713, #3742, #3754, #3795, ADR-0087."
+}

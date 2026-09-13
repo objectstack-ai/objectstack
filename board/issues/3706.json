@@ -1,0 +1,35 @@
+{
+  "number": 3706,
+  "kind": "pull_request",
+  "title": "fix(auth): make the second factor obey the operator's lockout policy (#3690)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T15:14:35Z",
+  "updated_at": "2026-07-27T15:29:08Z",
+  "closed_at": "2026-07-27T15:29:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T15:29:06Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3706",
+  "body": "Closes #3690.\n\n## 问题\n\n`auth-manager.ts` 构造 `twoFactor()` 时只传了 schema:\n\n```ts\nplugins.push(twoFactor({ schema: buildTwoFactorPluginSchema() }));\n```\n\n没传 `accountLockout`,所以 better-auth 的内置默认值(开启 / 10 次 / 15 分钟)原样生效,**与管理员的配置无关**。\n\n一个把 **Setup → 认证 → 账户锁定阈值** 收紧到 3 的管理员,得到的是:密码阶段 3 次锁定,第二因子仍然 10 次。**更严的那道门反而更松**,而且 UI 上没有任何提示。\n\n## 方案:以 better-auth 的契约为准\n\n复用现有的 `lockout_threshold` / `lockout_duration_minutes`,投影到 better-auth 自己的字段形状:\n\n| better-auth | 来源 | 换算 |\n|:---|:---|:---|\n| `maxFailedAttempts` | `lockout_threshold` | 直接 |\n| `durationSeconds` | `lockout_duration_minutes` | ×60 |\n| `enabled` | — | 见下 |\n\n**没有**新增一对 `two_factor_lockout_*` 设置。理由:一个策略、一个心智模型;而且贴着 upstream 的字段形状走,将来 better-auth 再加字段(比如按因子区分)是多一个 option,而不是和自造的并行策略打架。\n\n投影走 `applyConfigPatch` —— 它会清掉缓存的 better-auth 实例,下一个请求用新策略重建,所以**改设置不需要重启**。\n\n### 阈值 0 不映射成 `enabled: false`\n\n`0` 是**密码阶段**的\"关闭\"。一个部署可能有意让密码阶段不锁(前面有限流、验证码或 IdP),但第二因子是签发会话前的最后一道校验 —— 不应该被一个从未提及它的设置顺手关掉。所以阈值为 0 / 未设置时**不传 `accountLockout`**,better-auth 的默认值原样接管。两个阶段都仍然可显式配置,只有\"未配置\"这一档不同,而且是往**锁**的方向不同。\n\n### 顺带:阈值不再藏在 `email_password_enabled` 后面\n\n两步验证在无密码部署里同样存在,原来的 `visible` 条件会让那种部署**完全够不到**这个设置。`lockout_duration_minutes` 保留 `lockout_threshold > 0` 的条件(没有阈值时时长确实无意义),只是不再依赖密码提供方。\n\n### 一个到不了的上限\n\n插件在每个 challenge 内硬编码 5 次上限(`beginAttempt(5)`),没有任何 option 能改。阈值设到 5 以上并不会抬高它 —— 只是攻击者每 5 次要重开一次登录流程,账户级预算才是跨 challenge 累加的那个。已在 manifest 帮助文本、文档和代码注释里写明。\n\n## 第二个提交:Unlock 也得覆盖第二因子\n\n做完上面这一条之后发现的直接后果。`unlockUser` 只重置 `sys_user` —— 两个阶段的计数器是独立的,所以**锁在第二因子上的用户,管理员根本没有出口**,只能等时长走完。\n\n这在第二因子需要 10 次失败时还能忍;现在阈值可配、3 是个合理选择,这就是管理员会经常撞上的锁。所以 **Unlock Account 现在同时清两个阶段**。\n\n第二因子那部分是 best-effort 且排在主写之后:没有 2FA 注册记录、或者环境里根本没开过 2FA 的账户,仍然要正常解锁。\n\n## 测试\n\n**单元(`auth-manager.test.ts`,+6)**\n\n- 构造出的插件选项:分/秒换算、只给阈值时回落 15 分钟、阈值 0 与完全未配置两种情况都留空;\n- `unlockUser`:两条注册记录都被清;查询失败时**不**拖垮解锁。\n\n**端到端(`two-factor-lockout.dogfood.test.ts`,4 → 5)** —— 这里是关键修正。原来的断言硬编码了 better-auth 的默认值(10 次 / 15 分钟),所以它**分辨不出\"配置成 10\"和\"配置被忽略\"** —— 正是 #3690 从它眼皮底下溜过去的原因。\n\n现在整个文件跑在一个显式策略下(**7 次 / 40 分钟**),两个值都刻意区别于所有默认值,断言全部由它推导:\n\n- `7` 高于每 challenge 的硬编码 5,所以耗尽预算仍然必须跨 challenge —— 被测列背后的账户级计数器还是被真正走到;\n- `7 ≠ 10`,配置一旦失效就锁不上;\n- `40 ≠ 15`,×60 一旦丢失,时长断言立刻落空。\n\n新增的第 5 个用例走完整条出口:重新锁上 → 调 `/auth/admin/unlock-user` → 两个计数都归零 → 再登录成功。它**在重新上锁之前**取管理员会话 —— 锁上之后就再也拿不到了,而这恰恰是这条出口必须存在的原因。\n\n**验证过它会失败**:临时删掉 `accountLockout` 那一行重建后跑,`locked_until` 始终为 null,两个预算相关的测试如期失败;恢复后 5/5 通过。\n\n## 影响面\n\n- `plugin-auth` 545/545,`service-settings` 176/176,dogfood 该文件 5/5。\n- 三个语言的设置文案(zh-CN / ja-JP / es-ES)、`content/docs/permissions/authentication.mdx` 与 `administrator-guide.mdx` 一并更新,说明两个阶段共用阈值、各自独立计数、0 的含义,以及 Unlock 覆盖两者。\n\nRefs #3647, #3667, ADR-0069 D2。"
+}

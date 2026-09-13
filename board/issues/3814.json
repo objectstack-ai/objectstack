@@ -1,0 +1,30 @@
+{
+  "number": 3814,
+  "kind": "issue",
+  "title": "approvals: 审批请求行不暴露节点的 `lockRecord`，客户端只能假定「有 pending 就是锁死」",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T07:02:10Z",
+  "updated_at": "2026-07-28T14:15:51Z",
+  "closed_at": "2026-07-28T14:15:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3814",
+  "body": "## 现象\n\n审批节点声明 `lockRecord`（默认 `true`），记录锁由 `plugin-approvals` 的 `beforeUpdate` 钩子严格执行 —— `lockRecord: false` 的节点上，记录在整个等待期间都可以正常写入。**服务端行为一直是对的。**\n\n但这个策略**没有出现在任何对外读取的字段上**，客户端拿不到。\n\n`rowFromRequest`（`packages/plugins/plugin-approvals/src/approval-service.ts:236`）确实解析了 `node_config_json`：\n\n```ts\nconst cfg = parseJson<any>(row.node_config_json, undefined);\n```\n\n但它只从里面挑白名单几项出来 —— `__flowLabel` / `__nodeLabel` / `__round` / `escalation.timeoutHours` / `decisionOutputs` —— **`lockRecord` 从来不在这个列表里**，`ApprovalRequestRow`（`packages/spec/src/contracts/approval-service.ts:34`）上也没有任何其它字段承载锁信息。\n\n于是 `GET /api/v1/approvals/requests` 的消费方能知道的最强事实只有「存在一条 pending 请求」，从这里只能推出「记录被锁」。\n\n## 影响\n\n这个推断在每一个 `lockRecord: false` 的节点上都是错的。而一条串了不同策略节点的 flow 会让它错得肉眼可见：同一个 UI 状态既表示「你可以随便改」，也表示「你按保存会被 `RECORD_LOCKED` 打回来」。\n\n客户端没有第三条路 —— 反过来猜就会放出一个必然在保存时死掉的编辑入口。\n\n下游具体表现见 objectui#2902：Console 详情页对所有 pending 节点一律渲染「审批中已锁定」band，并且连带把行内编辑整个禁掉。实际业务里审批链上的单人节点（部门负责人 / 厂长）通常正是配 `lockRecord: false`，本意就是让审批人在审批时补充内容 —— 这个能力等于从 UI 上消失了。\n\n## 复现\n\n1. 一条 `record_change` flow 串两个 approval 节点，A 配 `lockRecord: false`，B 配 `lockRecord: true`\n2. 触发审批，停在节点 A\n3. `GET /api/v1/approvals/requests?object=<obj>&recordId=<id>`\n\n**实际**：返回的行里没有任何字段能区分 A 和 B 的锁策略。\n**预期**：行上带出当前节点的 `lockRecord`，且与钩子读的是同一来源、同一默认值。\n\n## 方案\n\n`ApprovalRequestRow` 增加 `lock_record?: boolean`，在 `rowFromRequest` 里从**钩子读的那同一份 `node_config_json` 快照**取值，用**同一个 `!== false` 默认**（`lockRecord` 的 schema 默认就是 `true`）：\n\n```ts\nlock_record: cfg?.lockRecord !== false,\n```\n\n这样客户端渲染的标志和服务端执行的规则不可能漂移。`openNodeRequest` / `getRequest` / `listRequests` 三条读路径都带上。\n\n纯增量、向后兼容，无需迁移。老客户端忽略即可；新客户端读 `request.lock_record`，`undefined`（老后端）按锁死处理 —— 也就是现状行为。\n\n顺带把 showcase 的 `showcase_budget_approval` 变成这个能力的 dogfood：单人的 Manager Review 配 `lockRecord: false`，多人会签的 Executive Review 保持 `true`，一条 flow 同时覆盖两种策略。\n\n## 环境\n\n- `@objectstack/plugin-approvals` 16.1.0\n- 该行为自 Phase B autopilot 引入 `lockRecord` 起就存在，不是回归"
+}

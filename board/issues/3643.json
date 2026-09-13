@@ -1,0 +1,33 @@
+{
+  "number": 3643,
+  "kind": "pull_request",
+  "title": "feat(showcase): add the action disabled-predicate specimen (Archive)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T12:29:55Z",
+  "updated_at": "2026-07-27T12:42:03Z",
+  "closed_at": "2026-07-27T12:42:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T12:42:01Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3643",
+  "body": "Companion to objectui `fix/action-disabled-all-renderers` (the #1885 follow-through). Refs #1878 (§3 naming-drift item \"action `disabled`\").\n\n## What\n\n`showcase_archive_task` — the `disabled`-predicate specimen. Where MarkDone's `visible: '!record.done'` **hides** once done, Archive's `disabled: 'record.done != true'` stays on screen and **greys** until the task is done. Added to the task-detail `record:quick_actions` bar (`actionNames` is an explicit list — a new action doesn't surface without being named; that discovery cost one round of dogfooding).\n\n## Why\n\n`report.chart` taught us the lesson (#3496): a live path with no showcase coverage rots invisibly. The spec `disabled` field had **zero** first-party usage, which is exactly why five objectui rendering surfaces could ignore it undetected. This specimen keeps the wire hot.\n\n## Verification\n\nBrowser-verified against the objectui fix worktree:\n- **In-progress task** (Build homepage): Archive rendered **disabled** (greyed), Mark Done / Log Time active.\n- **Done task** (Audit current IA): Archive **clickable**; Mark Done hidden by its own `visible` — the hide-vs-grey contrast on one screen.\n- Showcase suite 58/58 green (coverage test walks `allActions` and picked the new action up automatically).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

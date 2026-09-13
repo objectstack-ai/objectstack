@@ -1,0 +1,32 @@
+{
+  "number": 3728,
+  "kind": "issue",
+  "title": "unique 索引迁移在启动时静默执行 DDL,os migrate plan 看不到 —— 运维无预检手段",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T00:32:07Z",
+  "updated_at": "2026-07-28T02:08:34Z",
+  "closed_at": "2026-07-28T02:08:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3728",
+  "body": "## 一句话说明\n\n#3696 / #3717 把遗留的全局唯一索引改成了租户内复合唯一，迁移逻辑落在 **schema sync 时就地收敛**。结果是：一次 DROP + CREATE 索引的 DDL 在**启动时静默发生**，只留一行日志，`os migrate plan` 完全看不到它。想在 DDL 落库前审查的运维没有任何预检手段。\n\n原 issue #3696 明确建议「进 `os migrate` 的 plan/apply」，本条是那部分未落地的残留。\n\n## 现状\n\n`SqlDriver.syncTableIndexes()` → `dropLegacyGlobalUniques()` 在 `initObjects` 期间执行：\n\n```\nDROP CONSTRAINT / DROP INDEX  <table>_<col>_unique      ← knex 旧命名\nDROP INDEX                    uniq_<table>_<col>        ← 旧 rebuild 路径命名\nCREATE UNIQUE INDEX           uniq_<table>_<tenant>_<col>\n```\n\n唯一的可观测信号是一行 log：\n\n```\n[sql-driver] dropped legacy global unique index '<name>' on '<table>' —\n<table>.<col> is now unique per '<tenantField>' (#3696).\n```\n\n而 `os migrate plan` 输出为空 —— `detectManagedDrift()` 只做**列级**差异（`ManagedDriftEntry` 带 `column` 字段，`ManagedDriftOp` 的联合类型只有 `relax_not_null` / `tighten_not_null` / `drop_column` / varchar 宽窄），根本没有索引维度。\n\n## 为什么当初选就地收敛(以及为什么它仍然不够)\n\n选择的理由是实在的：**没跑过 `os migrate` 的部署会一直坏着**，而故障形态是多租户下插入被拒 —— 用户什么都没做错却写不进数据。等一个需要人主动触发的迁移，等于让这批部署无限期带病运行。\n\n而且这次迁移是**纯放松**：旧的全局约束严格强于新的租户内约束，存量数据天然满足替换约束，不可能失败。这让\"自动执行\"变得安全。\n\n**但\"安全\"不等于\"该隐形\"。** 缺的是：\n\n1. **无预检**。生产 DBA 想在 DDL 执行前看一眼改什么，现在做不到。`os migrate plan` 的存在意义就是这个，而它对此沉默。\n2. **无事后清单**。跑完之后也没有结构化记录说明哪些表被改了 —— 只有散落的日志行。\n3. **与 `os migrate` 的心智模型冲突**。ADR / CLI 都把 `os migrate plan` 呈现为\"物理 schema 与元数据的差异全集\"。现在它有一类差异永远不出现在里面，因为在被观察前就自愈了。\n\n## 建议处置\n\n给 `ManagedDriftOp` 加索引维度的 op（例如 `replace_unique_index`，携带 `{ table, dropIndexNames, createColumns }`），归类为 **`safe`**（纯放松），并让：\n\n- `detectManagedDrift()` 把「物理上存在遗留单列 unique、而元数据要求复合」检出为一条 drift；\n- `os migrate plan` 渲染它；\n- `os migrate apply` 能执行它。\n\n**就地收敛保留还是移除，是个需要决定的取舍：**\n\n- **保留 + 同时可见**：drift 检出与就地收敛并存。启动时仍自愈（不回退到\"带病运行\"），但 `plan` 在收敛发生前的窗口里能显示它，且新部署/新表接入时可见。缺点是 plan 里的条目可能在你去 apply 之前就已经被下次启动消化掉，读起来会困惑。\n- **移除就地收敛，只走 migrate**：语义干净、完全可审查，但退回原来的问题——没跑 migrate 的部署持续撞号。除非同时加一条**启动时的显式告警**（检出但不修，WARN 并指向 `os migrate`），否则不建议。\n\n倾向后者 + 启动告警：`plan` 恢复成完整的差异全集，运维保有控制权，而告警确保没人在不知情的情况下带病运行。但这是个产品取舍，需要 owner 拍板。\n\n## 附带发现\n\n`detectManagedDrift()` 没有任何索引维度，这不只影响 unique 迁移 —— 声明式 `indexes[]` 的漂移（元数据声明了索引但物理库里没有、或物理库有多余索引）同样不可见。`syncDeclaredIndexes` 一直是只增不减、且不上报。本 issue 若要做，可以顺带把这块补齐。\n\n## 关联\n\n- #3696（原 issue，建议「进 `os migrate` 的 plan/apply」）\n- #3717（实现；就地收敛的决定与理由）\n- #2186（managed-schema drift 的原始 issue）"
+}

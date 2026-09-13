@@ -1,0 +1,35 @@
+{
+  "number": 3840,
+  "kind": "pull_request",
+  "title": "feat(client,spec)!: express the AI surface that exists, retire the declarations that never did (#3718)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T09:20:24Z",
+  "updated_at": "2026-07-28T09:43:43Z",
+  "closed_at": "2026-07-28T09:43:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T09:43:41Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3840",
+  "body": "Closes the second half of #3718. Recommendation there was **2 + 3**; v17 (#3736) did option 2's client half, this does the rest of 2 and all of 3.\n\n## The finding, restated\n\n| | before v17 | after v17 | after this PR |\n|---|---|---|---|\n| `client.ai` methods | 3 (`nlq`, `suggest`, `insights`) | 0 | **10** |\n| …of which any repo mounts | **0** | — | **10** |\n| mounted AI routes with SDK expression | 0 / 12 | 0 / 12 | **10 / 12** |\n\nThe two sets were disjoint. v17 deleted the dead methods; this expresses the surface `service-ai` really mounts.\n\n## What the SDK gains\n\n| Method | Route |\n|---|---|\n| `ai.chat(request)` | `POST /api/v1/ai/chat` — sends `stream: false`, so the JSON mode is what you get |\n| `ai.chatStream(request)` | `POST /api/v1/ai/chat` — `AsyncIterable` of UI Message Stream frames |\n| `ai.complete(request)` | `POST /api/v1/ai/complete` |\n| `ai.models()` | `GET /api/v1/ai/models` (ADR-0028 plan-filtered picker list) |\n| `ai.conversations.create/list/get/update/delete/addMessage` | the six `/api/v1/ai/conversations` routes |\n\nTwo details worth review:\n\n- **`chat` forces `stream: false`.** The endpoint streams unless told otherwise, so a \"JSON\" method that stayed silent would hand `res.json()` an SSE body.\n- **`chatStream` returns `Promise<AsyncIterable<…>>`, not an async generator.** The request is issued — and an HTTP error thrown — when you call it, not when you first iterate. Its parser reads the body **line by line, not frame by frame**: the encoder also emits single-`\\n` `g:` reasoning lines that a `\\n\\n` split would glue onto the next event.\n\nThe two routes left unexpressed are deliberate and noted in the ledger: `GET /status` and `GET /effective-model` are operator diagnostics (`server-only`), and `POST /chat/stream` is the generic-SSE twin of `/chat` without the tool loop or persistence — a second near-identical streaming method would buy a consumer nothing but a wrong default.\n\n## Breaking: the spec's dead AI declarations are retired\n\nNone had an implementation anywhere, and none had a runtime consumer.\n\n- `Ai{Nlq,Suggest,Insights}{Request,Response}[Schema]` → replaced by the wire shapes of the real routes (`AiChat*`, `AiStreamChunk`, `AiCompleteRequest`, `AiModelsResponse`, `AiConversation`, `AiMessage`, `{Create,List,Update}AiConversation*`). The six retired JSON Schemas leave `json-schema.manifest.json` deliberately (#2978).\n- `DEFAULT_AI_ROUTES` → deleted; `getDefaultRouteRegistrations()` returns 8 groups. Re-declaring the *real* routes there would recreate the same illusion — they are mounted from another repo, and this table has no runtime consumer at all.\n- `AiProtocol` (`aiNlq?` / `aiSuggest?` / `aiInsights?`) → deleted. Nothing implemented it, nothing dispatched through it. The real server contract is `IAIService` + `IAIConversationService` in `@objectstack/spec/contracts`.\n\nAlso corrected: a `manifest.zod.ts` JSDoc example that used `['aiNlq', 'aiChat']` as its illustration of protocol method names.\n\n## The guard — why a prefix exemption is not a wave-through\n\n`/api/v1/ai/` becomes a bounded prefix exemption in the capstone (#3642), alongside the control plane, and bounded from both ends: only `ai.*` may use it, and the namespace must still be reaching it. The reachability check lives where the routes are — cloud's `packages/service-ai/src/ai-route-ledger.conformance.test.ts` reads the table `buildAIRoutes()` returns and drives *this* SDK against it, so an `ai.*` URL that stops resolving fails a test in the repo that mounts it (objectstack-ai/cloud#…, branch `claude/ai-namespace-unreachable-0qbyx2`).\n\nThe wildcard-only bound stays **0**: these URLs are checked *before* `matches()`, so they never touch the `* /ai/**` row that certified three dead methods for years.\n\n## Tests\n\nThe four replaced client tests mocked `fetch` and asserted the URL the client *built*, never that anything answered it — they passed for years against endpoints that did not exist. The new ones assert only what this repo can honestly know (verb, path, and the body decisions the SDK makes for the caller: `stream: false`, the 204 on `delete`, SSE frame parsing) and leave \"does it resolve\" to the ledger next to the routes.\n\nVerified locally: `spec` 6745/6745, `client` 178/178, `runtime` 665/665, full `pnpm build` green. The cloud half was run against this branch's build — 18/18 in the ledger conformance file, 581/581 in `service-ai` — and mutation-checked: repointing `ai.models` at `/modelz` fails exactly two tests there, naming the method and the URL it built.\n\n## Cross-repo ordering\n\nLand this first, then bump `.objectstack-sha` in the cloud PR. Cloud's pin drives staging deploys, so it must move to a `main` commit, never a feature branch.\n\n## Not in this PR\n\nThe console's developer API-discovery panel (`objectui apps/console/src/pages/developer/hooks/useApiDiscovery.ts`) still lists `/nlq`, `/suggest`, `/insights` with \"try it\" bodies — three endpoints that always 404. `objectui` is outside this session's repo scope; it needs the same trim plus the real routes, and is the last piece of #3718.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WJX6GnuNix7HisBc92THMN\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WJX6GnuNix7HisBc92THMN)_"
+}

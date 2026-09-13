@@ -1,0 +1,30 @@
+{
+  "number": 3758,
+  "kind": "issue",
+  "title": "显式绑定的 datasource 连不上只降级成一条 warning：绑上去的对象在启动后全废，直到查询时才炸",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T02:17:49Z",
+  "updated_at": "2026-07-28T08:22:20Z",
+  "closed_at": "2026-07-28T08:22:20Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3758",
+  "body": "## 一句话说明\n\n`DatasourceConnectionService.handleFailure()` 只在「external + `validation.onMismatch: 'fail'`」时 fail-fast，其余一律降级成 warning。但被 `object.datasource === name` **显式绑定**的 datasource 连不上，等于那批对象全部不可用 —— 而这些对象**不会**回落到 `default` driver，它们在查询时直接抛。于是又是一次\"启动静默通过、请求时才炸\"。\n\n#3741 / #3751 刚在 `ObjectQLEngine.init()` 那一层把同样的形状修掉了。这一层的边界还画在旧位置。\n\n## 事实核实\n\n`packages/services/service-datasource/src/datasource-connection-service.ts:330-349`：\n\n```ts\nprivate handleFailure(\n  record: ConnectableDatasource,\n  status: ConnectStatus,\n  reason: string,\n  context?: DatasourceConnectContext,\n): ConnectResult {\n  const isExternal = record.schemaMode && record.schemaMode !== 'managed';\n  const failFast =\n    context?.trigger === 'declared-auto' &&\n    isExternal &&\n    record.external?.validation?.onMismatch === 'fail';\n  const msg = `datasource '${record.name}': connect failed — ${reason}`;\n  if (failFast) {\n    throw new Error(\n      `${msg}. (schemaMode=${record.schemaMode}, validation.onMismatch='fail' ⇒ fail-fast per ADR-0062 D5)`,\n    );\n  }\n  this.logger?.warn?.(`${msg} — degrading (datasource left unconnected)`);\n  return { name: record.name, status, reason };\n}\n```\n\n配合同文件的 D2 gate（`isDatasourceAddressed`，:140-168），boot 期会自动连接三类 datasource：\n\n| | 条件 | 连不上时 |\n|:---|:---|:---|\n| (a) | external（`schemaMode !== 'managed'`） | `onMismatch: 'fail'` → 抛；否则 warning |\n| (b) | **有对象显式 `datasource: '<name>'` 绑定它** | **一律 warning** |\n| (c) | `autoConnect: true` | 一律 warning |\n\n问题在 (b)。同文件 :151-159 自己的注释写明了后果：\n\n> External datasources and explicit `object.datasource` bindings **never resolved to `default`（they throw when unregistered）**\n\n也就是说：显式绑定到某个 datasource 的对象，在该 datasource 没连上时**没有任何回落路径** —— 每一次针对它们的查询都会抛\"driver 未注册\"。启动时只留下一条 warning。\n\n## 影响\n\n一个 app 声明 `datasource: 'analytics'` 并把 20 个对象绑上去，`ANALYTICS_URL` 配错或那台库没起来：\n\n- 服务器正常启动，没有任何非零退出、没有任何显式信号。\n- 那 20 个对象的所有读写全部失败，报的是\"driver 未注册\"这种跟真实原因（连不上 analytics 库）相距很远的错。\n- 剩下的对象工作正常，所以整体看起来\"服务是好的\"，只是\"某些页面坏了\" —— 比整体宕机更难定位。\n\n这跟 #3741 修掉的是同一个决定，只是发生在另一个 datasource 注册路径上。#3751 让 boot 期主 driver 连不上就拒绝启动，而这里一个被 20 个对象依赖的 datasource 连不上，只值一条 warning。\n\n## 建议处置\n\n**\"boot 期主库 vs runtime 加的可选副本\"的区分是对的，但 (b) 落错了边。** 显式 `object.datasource` 绑定表达的是一个硬依赖 —— 作者已经明说了这些对象只能从这里读 —— 它跟主库失联没有本质区别。\n\n倾向：**把 (b) 提升为 fail-fast**，与 (a)+`onMismatch:'fail'` 并列，理由是它同样没有回落路径。(c) `autoConnect: true` 保持宽容（那是\"能连就连\"的语义，没有对象声明依赖它）。\n\n需要一并决定的：\n\n- **逃生阀是否共用 `OS_ALLOW_DRIVER_CONNECT_FAILURE`。** 倾向共用 —— 操作者的意图是同一个（\"我知道数据库连不上，照样起\"），两个旗标只会让人漏设一个。\n- **`isDatasourceAddressed` 里 (b) 的判定发生在 `connect()` 之前**，绑定对象列表已经算好并传进 `connect(ds, { objects: bound })`，所以 `handleFailure` 拿得到\"有几个对象依赖它\" —— 错误消息里应该直接列出来，而不是只给 datasource 名。\n- 现有行为是 ADR-0062 D5 明文写下的，改动需要同步更新 ADR，而不是只改代码。\n\n## 关联\n\n- #3741 / #3751（`ObjectQLEngine.init()` 层的同一形状，已按方案 A 修）\n- ADR-0062 D5（当前 failure policy 的出处）\n- Prime Directive #10"
+}

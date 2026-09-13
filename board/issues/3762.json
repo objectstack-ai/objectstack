@@ -1,0 +1,32 @@
+{
+  "number": 3762,
+  "kind": "issue",
+  "title": "i18n: the app / navigation / dashboard / widget surface is untranslated across the platform packages (159 keys × 3 locales)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T02:28:06Z",
+  "updated_at": "2026-07-28T06:28:21Z",
+  "closed_at": "2026-07-28T06:28:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3762",
+  "body": "> **Correction (rewritten).** The original text of this issue claimed `platform-objects` declares 55 inline action labels with \"no `objects` translation bundle at all\". **That was wrong.** I grepped `src/metadata-translations/` — which only re-exports the metadata-form baseline — and missed `src/apps/translations/*.objects.generated.ts`, where the object bundles actually live. All 55 inline action labels **are** translated in zh-CN / ja-JP / es-ES; `os i18n check` reports **0 action issues** for the package. The wrong claim was also cited in #3753's body and in #3768's commit message as \"the first installment\" — treat those references as pointing at the corrected scope below. Apologies for the noise.\n\n## The real gap\n\nMeasured with `os i18n check <extract config> --json` against every package that has one, counting only user-authored surfaces (the platform metadata-form baseline is excluded — `platform-objects` owns and ships that):\n\n| package | missing per locale | breakdown |\n|---|---:|---|\n| `platform-objects` | 77 | navigation 49, widget 20, app 6, dashboard 2 |\n| `plugin-security` | 45 | field 31, action 11, view 3 |\n| `plugin-webhooks` | 15 | option 11, field 4 |\n| `plugin-audit` | 8 | field 6, view 2 |\n| `service-storage` | 7 | field 7 |\n| `plugin-sharing` | 7 | field 4, option 3 |\n| `plugin-approvals` | **0** | — |\n| `service-messaging` | **0** | — |\n| `service-realtime` | **0** | — |\n| **total** | **159** | × 3 locales (zh-CN / ja-JP / es-ES) = **477 strings** |\n\nMost of this was invisible before #3753, which taught the coverage detector to walk the whole declared surface rather than its own narrower copy.\n\n## Two distinct problems, which want different fixes\n\n**1. The objects-subtree gaps are a plain fill** — `plugin-security` (45), `plugin-webhooks` (15), `plugin-audit` (8), `plugin-sharing` (7), `service-storage` (7). These keys live under `objects.*`, so `os i18n extract` already scaffolds them; the bundles just have not been regenerated and filled. Four of these packages' bundles are in fact **already out of date** against the schema (`--check` fails on `plugin-security`, `plugin-audit`, `plugin-sharing`, `plugin-webhooks`), so this is regenerate-then-translate.\n\n**2. `platform-objects`' 77 cannot be scaffolded at all today.** They are `apps.*` / `dashboards.*` navigation and widget labels, which live *outside* the `objects` subtree — and the package extracts with `--objects-only`, so a fresh extract never writes them. That is why `--check` reports the package in sync while coverage reports 77 missing per locale: extract and coverage disagree about whether those keys are even in scope for this bundle. Needs a decision before any translating: emit the full `TranslationData` (drop `--objects-only`), or add a companion `<locale>.apps.generated.ts` next to the objects and metadata-forms bundles.\n\n## Also worth doing\n\nOnly `platform-objects` is wired into a CI check (`pnpm check:i18n`). The other **eight** packages have an `i18n-extract.config.ts` that nothing runs, which is how four of them drifted unnoticed. The `#3768` ratchet covers `examples/*` only. Extending both gates to all nine configs is what stops this recurring — tracked as part of the work here.\n\n## Vocabulary check first\n\nBefore translating `platform-objects`' navigation labels into three languages, it is worth a pass on the source strings themselves — locking wording across four locales makes it markedly more expensive to change later.\n\nRefs: #3370 (the gate), #3753 (walker unification + server-side inline-action translation), #3768 (examples ratchet)."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 3683,
+  "kind": "pull_request",
+  "title": "feat(cli): gate generated translation bundles with `os i18n extract --check`",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T14:15:45Z",
+  "updated_at": "2026-07-27T14:29:17Z",
+  "closed_at": "2026-07-27T14:29:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T14:29:15Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3683",
+  "body": "接 #3670。那个 PR 清掉了翻译 bundle 里积压的漂移,但**没有任何东西阻止它再次积压** —— 本 PR 补上这个 gate。\n\n## 为什么需要\n\n生成的翻译 bundle 此前没有新鲜度检查。落后于 schema 时不会有任何东西变红,所以只有当某个人**恰好**重跑一次 extractor 才会被发现。等到真有人跑的时候(#3670),已经同时攒了三类漂移:\n\n| 类型 | 实例 |\n|:---|:---|\n| schema 已**移除**、bundle 仍留着翻译 | `enable.trash` / `enable.mru`(#2377)、agent `visibility`(#1901)—— schema 现在直接拒绝这些 key |\n| schema 已**新增**、bundle 完全没有条目 | `summaryOperations.*`、ADR-0105 D8 的 invitation-placement 字段、#3647 的 better-auth 1.7 列 |\n| 提交成**空字符串** | `sys_migration` 在 ja-JP / es-ES 下的 label —— 渲染成空白,而不是回退到可读文本 |\n\n**这和 #3624 是同一个形状**:产物和来源之间没有 gate,所以缺口只能靠偶然发现。#3647 用\"推导出期望面 + 构建失败\"关掉了 better-auth 列的那一个;本 PR 对翻译做同样的事。\n\n## 实现\n\n`--check` 渲染的内容与真实 extract **完全一致** —— 两个分支迭代的是同一份 rendered set,所以 check 不可能和 writer 产生分歧。它不写文件,而是与 `--out` 里已提交的内容比对,列出每个过期/缺失的文件,并打印出该跑的重新生成命令:\n\n```\n✗ out of date: packages/platform-objects/src/apps/translations/en.objects.generated.ts\n\n✗ Translation bundles have drifted from the schema. Regenerate and commit:\n  os i18n extract packages/... --locales=zh-CN,ja-JP,es-ES --fill=default --out=packages/...\n```\n\n以 **merge 模式**运行(和任何一次普通 extract 一样),所以它**永远不会要求任何人重新翻译**:一个最新的 bundle 重新 extract 出来是逐字节相同的。\n\n**flag 放在 CLI 而不是仓库脚本里** —— 任何 ship 生成 bundle 的消费者(cloud、各 app)都能用同样的方式加 gate。本仓库里是 `pnpm check:i18n`,接在 lint.yml 里其他 post-build consumer gate 旁边(它通过 extract config 读取已构建的 spec dist,所以必须在 build 之后)。\n\n## 文档\n\n`os i18n check` 此前在文档和 skill 里都是以\"**那个** CI gate\"的身份出现的 —— 但它是**覆盖率** gate,回答\"字符串翻了没有\"。对于提交生成 bundle 的人来说,另一半始终没有防护:改个 label、加个对象、删个 spec key,覆盖率仍然 100%,而 bundle 已经悄悄过期。\n\n所以在两处都把它们作为**一对**来写(`content/docs/ui/translations.mdx` 和 `skills/objectstack-i18n/SKILL.md` —— 后者会通过 `npx skills add` 分发给第三方),并在 AGENTS.md 的 Documentation Guardrails 里加了一行标明这些文件是生成的。\n\n## 验证\n\n| 场景 | 结果 |\n|:---|:---|\n| 当前 main(bundle 是新鲜的) | ✅ `8 bundle(s) are in sync` |\n| 删掉一个 schema 里存在的 key(`sys_team.member_count`) | ✅ 报 `out of date` + exit 1 |\n| 注入一个 schema 已不存在的死 key | ✅ 报 `out of date` + exit 1 |\n| `@objectstack/cli` | ✅ 637 passed (61 files) |\n| `check:skill-refs` | ✅ 9 generated files in sync |\n\n三类漂移的两个方向都能抓到。\n\n> **一条已解决的说明。** 本 PR 正文早先记录了 `@objectstack/cli` 有 16 个本地测试失败(`data-model-rules.test.ts` / `lint-namespace-prefix.test.ts`),并存疑是否与本 PR 有关。**已排除:干净重建依赖后 637/637 全过**,那 16 个失败纯粹是我本地 dist 过期的产物。当时我先确认了\"带改动与不带改动的失败数完全相同(都是 16)\",再做的重建复核 —— 记在这里以免留下悬念。\n\nRefs #3670, #3624, #3647, #2377, #1901。"
+}

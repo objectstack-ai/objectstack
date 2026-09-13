@@ -1,0 +1,35 @@
+{
+  "number": 3766,
+  "kind": "pull_request",
+  "title": "fix(analytics): ObjectQLStrategy 施加 timeDimensions[].dateRange —— date-granularity 图表必走的那条路 (#3650)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T03:00:18Z",
+  "updated_at": "2026-07-28T04:07:49Z",
+  "closed_at": "2026-07-28T03:50:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T03:50:48Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3766",
+  "body": "Closes #3650\n\n## 问题\n\n`ObjectQLStrategy.execute()` 的 filter 只来自 `normalizeAnalyticsFilters(query)`,而后者只读 `query.where`。`dateRange` 是 `where` 的**兄弟**,从不被折进去 —— 所以窗口谓词被整个丢掉。没有报错,图表照常渲染,只是画的是全量历史。\n\n而且这不是\"少数驱动才踩\"的边角:`NativeSQLStrategy.canHandle` 对任何带 `granularity` 的查询直接 decline,所以**按天/周/月分桶的趋势图在任何驱动上都落到这条路**(Postgres、SQLite 都一样)—— 而\"按时间分桶的趋势图\"恰恰是最可能同时带 `dateRange` 的形态。另外两条路一直是好的(`NativeSQLStrategy` 编成 `BETWEEN`,`preview-evaluator` 逐行过滤),只有这条丢。\n\n**issue 里没写到的第二个后果:`compareTo` 结构性死亡。** `runCompare` 生成对比期查询的唯一手段是 shift `dateRange`,其余参数逐字相同([dataset-executor.ts:615](packages/services/service-analytics/src/dataset-executor.ts:615))。窗口被忽略 ⇒ 主查询与对比查询发出**完全一样**的 aggregate ⇒ `<measure>__compare` 恒等于主列 ⇒ 同比/环比永远显示 0%。而 `compareTo` 必然带时间维度、必然走这条路,所以是 100% 命中而非概率问题。\n\n## 修复\n\n窗口下沉为解析后字段上的闭区间 `{$gte, $lte}` —— 与 NativeSQL 绑定的 `BETWEEN`、memory driver 构造的 `$match` 同形,于是同一个 dashboard 在任何驱动上读数一致。\n\n**不做 storage 强转**,这是刻意的:`NativeSQLStrategy` 需要 `coerceTemporal` 是因为它绕过驱动直接绑进裸 SQL,才不得不知道 SQLite 的 `Field.datetime` 是 INTEGER epoch(#2034);这条路经 `engine.aggregate()`,驱动自己的 CRUD filter 强转会生效 —— 正是那条今天已经让同一列上的 `where` 边界能工作的强转。**这是关于驱动而非策略的假设,所以用真实 SQLite 钉住了**(见下)。\n\n### 顺带修:同字段操作数的合并\n\n窗口让这个碰撞变成常态,所以一并修了。原来的合并靠 `{...existing, ...converted}` 展开,后写的静默胜出:\n\n- `close_date` 上一个 `where` 下界 + 一个窗口下界 → 其中一个被抹掉(窗口更松时**静默放宽查询**);\n- `where` 自己通过 `$and` 两次点名同一字段(`{$and: [{stage: 'won'}, {stage: {$ne: 'lost'}}]}`)—— **今天就已经丢掉第一个操作数**。\n\n现在:操作数名字**不同**的操作符仍然共用一个字段条目;**碰撞**的成为自己的 `$and` conjunct,由引擎取交集,而不是策略层挑一个赢家。\n\n### 其余\n\n- `generateSql()` 同步把窗口渲染成参数化 `BETWEEN`。原注释解释的是\"为什么故意不渲染 BETWEEN\" —— 那在 `execute()` 丢窗口时是对的,现在反过来了。边界值绑成 `$n` 占位符不内联(回显字符串会送到浏览器)。\n- 跨对象时间维度上的窗口仍然被拒,但现在报的是它本来的**分桶**错误,而不是其降级谓词看起来像的 \"cross-object filter\"。`execute()` 与 `/analytics/sql` 继续接受/拒绝同一集合。\n- 相对短语(\"Last 7 days\")仍然不解析,裸字符串 `dateRange` 退化为一个点 —— 与 `NativeSQLStrategy` 完全一致,不在驱动无关的这条路上另发明一套解释。\n- 唯一有意的分叉:**单元素数组**(schema 把 `dateRange` 定为裸 `string[]`,所以它能通过校验)。NativeSQL 会把这种窗口整个丢掉 —— 但\"丢掉窗口\"就是\"画全量历史\",正是本 PR 修的那个故障,所以这里退化为一个点,朝更窄的方向兜底。\n\n## 验证\n\n**新测试先证明能红。** 把 `objectql-strategy.ts` 还原到修复前,新增的 15 条里 **11 条红**(其余 4 条覆盖的是本来就工作的行为:granularity 下沉、无 dateRange、跨对象拒绝)。\n\n```\n× confines a date-bucketed trend to the requested window\n× applies a window on a time dimension that is not also a selected dimension\n× degenerates a bare-string dateRange to a single point, like NativeSQLStrategy\n× ANDs the read scope around the window rather than replacing it\n× intersects a window with a disjoint-operator where bound\n× intersects a window with a COLLIDING where bound instead of widening\n× keeps both operands when a bare equality meets an operator object\n× shifts the comparison window instead of re-running the identical query\n× renders the window as a parameterised BETWEEN\n× numbers window placeholders after the caller's own filters\n× scopes the BASE aggregate of an FK-expand to the window\n```\n\n测试用的 aggregate bridge 是**诚实的** —— 它真的施加拿到的 filter,所以缺谓词会产生真实的多余行,而不是被宽容 stub 掩盖的假象。\n\n### 两处跨层验证:策略层绿 ≠ 真驱动对\n\n本 PR 依赖两个**关于下游的**断言,都用内存 SQLite 钉住,而不是靠 stub 自证:\n\n1. **`sql-driver-aggregate-datetime-window.test.ts` —— storage 强转假设。** `Field.datetime` 列在 better-sqlite3 上存 INTEGER epoch ms;未强转的 ISO TEXT 比较**什么都匹配不到**,那样本 PR 在 dashboard 最常用的列类型上就是个 no-op。**假设成立**:`datetime` 与 `date` 两种存储上窗口都正确生效。\n2. **`sql-driver-nested-and-filter.test.ts` —— 新引入的 filter 形状。** 碰撞操作数落进 `filter.$and`,`withReadScope` 再包一层 `$and`,于是产生「同级字段键 + 嵌套 `$and`」。全仓此前**没有任何测试**把这个组合喂给真实的 filter 编译器(只有 schema 层的嵌套解析,和子对象只含单键的 `$or`)。数据构造成每层谓词各排除一行,任何一层被吞都会多出行。\n\n这两个是**契约锁**而非回归门 —— 改动前后都绿,锁的是本 PR 依赖的下游行为。\n\n**回归面**\n\n| 范围 | 结果 |\n|---|---|\n| `service-analytics` 全包 | 22 files / 267 tests ✅ |\n| `driver-sql` 全包 | 36 files / 333 tests ✅ |\n| `turbo test` 两包全下游(含 dogfood 65 files / 369 tests) | 78 tasks ✅ |\n| 类型门(**不带** `OS_SKIP_DTS` 的 `turbo build`) | 6 tasks ✅ DTS 通过 |\n\n## ⚠️ 写验证时撞出的既存 bug(本 PR 不修,已 pin)\n\n**SQLite 上,`Field.datetime` 列的日期分桶恒为 `NULL`** —— 所有记录塌进一个桶,趋势图只剩一根柱子。度量总额是对的,坏的只是分桶键。\n\n- `buildDateBucketExpr` 对 SQLite 产出 `strftime('%Y-%m', ??)`,而 SQLite 把裸 INTEGER 当 **Julian day number** 解释,epoch-ms 远超合法范围 → NULL。\n- **engine 不兜底**:[engine.ts:3576-3596](packages/objectql/src/engine.ts:3576) 只在「granularity 未被 `supports.queryDateGranularity` 声明」或「非 UTC 时区」时才回落到 in-memory 分桶。SQLite 声明了 `month/day/quarter/year`,所以 UTC 下必然下推,没有任何一层察觉。\n- 现有 `sql-driver-date-bucket.test.ts` 漏掉它,是因为它建表用 `t.string('ts')` 存 ISO TEXT,从没走过 `initObjects({type: 'datetime'})` 那条真实路径。\n\n与 #3650 无关、也不是本 PR 引入的,但**落在同一个查询形态上**:两者叠加时 SQLite 的按月趋势图 = 一根柱子 + 全量历史,本 PR 修掉后半截。已作为 `KNOWN GAP` 测试钉在 `sql-driver-aggregate-datetime-window.test.ts` 里,注释写明修复后该断言应变成什么 —— 免得日后被当成\"dateRange 那个修复没用\"重新发现。\n\n## 另一处已知的相邻不一致(本 PR 不动)\n\n`preview-evaluator` 对窗口上界用的是 inclusive-end-**day** 语义(`v <= \\`${end}~\\``),而两条执行路径(NativeSQL、现在的 ObjectQL)都是裸 `$lte`。对 `datetime` 列这意味着 `['2026-04-01','2026-06-30']` 会把 6/30 当天 00:00 之后的记录排除在执行结果外、却包含在草稿预览里。这是既存分叉,本 PR 让两条**执行**路径先对齐;要不要把 end 补齐成 end-of-day 是独立的语义决策,值得单开。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

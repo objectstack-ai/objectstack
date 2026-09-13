@@ -1,0 +1,30 @@
+{
+  "number": 3607,
+  "kind": "issue",
+  "title": "spec/runtime: IHttpServer 契约补写 SSE 软扩展与 404/405 语义（OQ#10 尾巴）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T09:15:47Z",
+  "updated_at": "2026-07-27T11:20:43Z",
+  "closed_at": "2026-07-27T11:20:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3607",
+  "body": "从 #2462 拆出。ADR-0076 OQ#10 多适配器验证（#3037）时发现消费方依赖两个**未写进 `IHttpServer` 契约**的软扩展，一致性目前只靠 `@objectstack/http-conformance`（41 断言，packages/qa/）经验锁定：\n\n1. **SSE 流**：`res.write` / `res.end`（AI 流式、dispatcher stream result 依赖）。\n2. **`getPort()`**（boot 期端口回读）。\n3. **404/405 语义**（两适配器现为实测一致，未成文）。\n\n## 待办（小活，1-2 小时级）\n\n- `spec` 的 `IHttpServer` 接口正式声明上述成员/语义（optional 成员 + JSDoc 契约文字）。\n- conformance 套件的对应断言从\"经验锁定\"升级为\"契约引用\"（注释指向 spec 定义）。\n- hono 与 node:http 两适配器类型对齐（应零代码变化——它们已实现这些行为）。\n\n参考：packages/qa/http-conformance/、docs/adr/0076 OQ#10 段。"
+}

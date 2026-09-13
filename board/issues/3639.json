@@ -1,0 +1,35 @@
+{
+  "number": 3639,
+  "kind": "pull_request",
+  "title": "fix(analytics): scope the dimension-label lookup to the referenced object's RLS (#3602 residual 1)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T12:15:18Z",
+  "updated_at": "2026-07-27T13:05:10Z",
+  "closed_at": "2026-07-27T13:05:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T13:05:07Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3639",
+  "body": "#3602 残留 1。写 #3597 端到端门时定性的那个更窄的真实泄露,单独修。\n\n## 泄露\n\n数据集按 lookup/master_detail 维度分组时,analytics 要把分组的 FK id 解析成关联记录的**显示名** —— 走的是一次\"按 id 分组\"的 per-record 读,套在 aggregate 桥上(`plugin.ts` 的 `fetchRecordLabels`)。这次读**不带任何 read scope**。\n\n- id 来自 #3597 之后**已加 scope**的聚合结果,所以同对象、以及\"被引用对象更宽松\"的情形本就安全;\n- **但当被引用对象的 RLS 严于基对象时**(用户能看自己的 deal,却无权直接读它指向的某个 vendor),取名就会泄露用户读不到的关联记录名。这是真实的窄跨对象泄露。\n\n## 修法(自足,不碰 spec)\n\n取名读现在应用**被引用对象自己的** read scope —— 用 aggregate 路径同一个 `getReadScope` provider 绑定到本请求,`$and` 组合(非 key 合并,id 谓词顶不掉它)。**fail-closed**:该对象 scope 解析失败则跳过这一维的取名(渲染原始 id),绝不无 scope 取。无 provider 时行为不变。\n\n改动全在 service-analytics 内:`DimensionLabelDeps.fetchRecordLabels` 加可选 `scope`、`resolveDimensionLabels` 加可选 `resolveScope`,都是**包内部类型,不动 spec 契约**。\n\n## 测试\n\n- **dimension-labels 单测**(4):证明被引用对象的 scope 被穿进 `fetchRecordLabels`;`resolveScope` 抛错时**fail-closed 跳过取名**(不发生无 scope 读);select 维度不受影响;无 resolver 时维持旧行为。\n- **query-dataset 集成**(1):`getReadScope` 按对象返回**不同** scope,断言取名收到的是**被引用对象** `crm_account` 的 scope 而非基对象的 —— **回退 `analytics-service.ts` 接线即变红**(已验)。\n- service-analytics 184 passed(原 179 + 5);`tsc` 无新增错误(2 个存量在未触文件)。\n\n## 一并做的诚实更正(见 #3602 评论)\n\n引擎侧独立追查确认 **`engine.aggregate` 根本没有 join/lookup 遍历**能力。因此:\n- 我在 #3602 原文和 #3601 注释里\"传 context 可解掉联表 fail-closed / engine 经 lookup 遍历\"的说法**是错的**,已在 #3602 评论更正;\n- #3602 主项(穿 ExecutionContext 作纵深防御第二层)**重估后建议 won't-do**:join 解锁的理由已塌,只剩基对象\"同一条谓词加两遍\",还背 double-scoping 发散风险 + spec 门成本;\n- 附带暴露一个**既有功能缺口**(与 RLS 无关):跨对象聚合在 ObjectQL 回退路径上本就不工作(SQL 报错 / `(null)` 静默塌桶),值得单独跟进。\n\n本 PR 只做残留 1。残留 2(`generateSql` 补 WHERE,纯展示)未做,优先级最低。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

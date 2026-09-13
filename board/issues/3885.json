@@ -1,0 +1,35 @@
+{
+  "number": 3885,
+  "kind": "pull_request",
+  "title": "feat(spec,lint): ADR-0109 revised + Phase 1 — skills-only default path, tool-name registry, advisory skill.tools lint (#3820 R7)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T14:21:40Z",
+  "updated_at": "2026-07-28T14:41:21Z",
+  "closed_at": "2026-07-28T14:41:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T14:41:19Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3885",
+  "body": "Follow-up to #3871, per maintainer direction on the #3820 thread. Two things happen here: **ADR-0109 is revised** to the stronger conclusion that surfaced in review, and its **Phase 1 ships** — which unblocks and delivers the R7 `skill.tools` branch this issue was blocked on.\n\n## The revision\n\nThe first draft framed third-party tools as *authored binding records* (`tool` → action/flow). Review surfaced that the runtime **already materialises** a tool per declarative action (`action_<name>` — the family `actions_executor` subscribes to with `action_*`), so the binding the draft proposed already exists implicitly for every action. Revised decision:\n\n> **The default third-party path needs no tool records at all.** A skill's `tools[]` names either a platform-registered tool or a materialised `action_<name>` tool from the app's own actions. The executable, its authz, and its audit stay on the action/flow the app already ships — AI capability ≡ application capability. Tool records are demoted to an **optional AI-presentation refinement layer** (Phase 2: LLM-directed descriptions, parameter narrowing, flow exposure, execution policy — noting `requiresConfirmation` was just removed in #3876 as unenforced and returns only with enforcement).\n\n\"Third-party AI extension = write a skill\" becomes the entire story: one concept to document and teach, and one less namespace an AI author can hallucinate into.\n\n## Phase 1 implementation\n\n1. **`PLATFORM_PROVIDED_TOOL_NAMES`** (`@objectstack/spec/system`, new `platform-tool-names.ts`) — curated registry of the 30 statically-named tools the cloud AI runtime registers (`service-ai`: 6, `service-ai-studio`: 24), plus `PLATFORM_TOOL_FAMILY_PREFIXES` (`action_`) and `isPlatformProvidedToolName()`. Exact mirror of the `PLATFORM_PROVIDED_OBJECT_NAMES` precedent; the owning packages live in the `cloud` repo, so — like `CLOUD_PROVIDED_OBJECT_NAMES` — the conformance half of the contract lives there (sibling cloud PR adds those tests). This repo pins the list's internal invariants (snake_case, no cross-package collisions, no static name inside a family namespace, sorted groups).\n\n2. **`validate-ai-tool-references`** (`@objectstack/lint`) — the R7 `skill.tools` branch: wildcard-aware resolution against `stack.tools` ∪ registry ∪ materialised `action_<name>` family (stack-level and object-level actions). Severity **warning** per the ADR-0078 advisory-first ratchet — a runtime plugin outside the registry is statically invisible, and the runtime deliberately tolerates unresolved names. Appended to `REFERENCE_INTEGRITY_RULES`, so `validate`/`lint`/`compile` all pick it up with no CLI changes.\n   - **Corpus check (per-branch FP floor, #3806):** on the HotCRM corpus the rule yields exactly the 10 fictional references and 0 false positives on the 6 that resolve via the registry — the 37.5% FP rate that blocked the original R7 spec is gone by construction.\n   - A dedicated near-miss suggestion catches naming the raw action where the materialised tool is meant (`triage_case` → `action_triage_case`) — the mistake edit distance can't reach (the prefix alone is 7 edits).\n\n3. **`composeStacks` no longer drops `tools`** — the slot joins `CONCAT_ARRAY_FIELDS`, so a declared record at least survives composition.\n\n4. `stack.tools` and the AI-slot prose now teach the ADR-0109 model.\n\n## Verification\n\n- `@objectstack/spec`: 263 files / 6841 tests pass; `tsc --noEmit` clean; api-surface regenerated (new public exports); `check:docs` / `check:skill-refs` / `check:react-blocks` all in sync.\n- `@objectstack/lint`: 36 files / 530 tests pass (7 new rule tests + suite wiring updates).\n- `@objectstack/cli`: 72 files / 739 tests pass (all three commands pick up the rule through the suite).\n- Full workspace `pnpm build` green.\n\n## Out of scope\n\n- Phase 2 (ToolSchema `binding`, flow exposure, boot-mirror provenance guard, metadata-type flag revisit, warning→error ratchet) — gated on ADR acceptance.\n- Cloud registry conformance tests — sibling PR in `cloud` (feature-detects the new spec export; activates fully when `.objectstack-sha` advances past this change).\n- HotCRM's 10 fictional tool references now surface as advisory warnings; implementing or removing them is a product decision for that repo.\n\nRefs #3820 · #3871 · ADR-0109 · ADR-0078 · ADR-0063 · ADR-0064\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01BHjroNkLkajskKbJaidko4\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BHjroNkLkajskKbJaidko4)_"
+}

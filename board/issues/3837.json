@@ -1,0 +1,35 @@
+{
+  "number": 3837,
+  "kind": "pull_request",
+  "title": "fix(service-storage): emit the declared success envelope on all eight routes (#3689)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T09:02:23Z",
+  "updated_at": "2026-07-28T09:16:27Z",
+  "closed_at": "2026-07-28T09:16:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T09:16:25Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3837",
+  "body": "Closes #3689 — the other half of #3675.\n\nTakes **option 1** from the issue (normalize all three shapes), which is what the issue recommends and what `packages/spec` being the source of truth requires: the SDK's declared return types are inferred from these schemas, so leaving two routes as \"declared exceptions\" (option 2) or rewriting the schemas to match the drift (option 3) both keep a surface where the contract and the wire disagree.\n\n## The drift\n\n| Route(s) | Was | Now |\n|---|---|---|\n| `/upload/presigned`, `/upload/complete`, `/upload/chunked`, `…/chunk/:i`, `…/complete`, `…/progress` | `{ data: {…} }` | `{ success: true, data: {…} }` |\n| `GET /files/:fileId/url` | `{ url }` | `{ success: true, data: { url } }` |\n| `PUT /_local/raw/:token` | `{ ok: true, key }` | `{ success: true, data: { key } }` |\n\n`storage.zod.ts` declared every one of these as `BaseResponseSchema.extend({ data })`, and `PresignedUrlResponse` and friends are `z.infer`red from those schemas and published as the SDK's return types. The declaration said `success: boolean`; the wire said nothing. It broke nothing only because the storage SDK methods returned `res.json()` raw — `any`, so the compiler could not see the gap and nothing relied on the declaration. That is the posture i18n was in before #3636, right up until something did.\n\n## Why it needed its own PR\n\nThe payload **moves** on the last two, so this is not the find-replace the six upload routes would have been. Every in-repo consumer was fixed first, so the two repos are not coupled by merge order — the same approach the error path took:\n\n- **`client.storage.getDownloadUrl()`** now reads through `unwrapResponse`, the SDK's one standard envelope seam — it strips the envelope when present and returns the body untouched when not, so a client either side of this server change resolves the same URL. Deliberately *not* a bespoke `??` grown for this route (PD #12); every other enveloped SDK method already goes through it. The remaining storage methods hand back the whole envelope by design and were already correct.\n- **The console's two attachment openers** (`RecordAttachmentsPanel`, `ApprovalsInboxPage`) already read `body?.url ?? body?.data?.url`. objectui#2913 pins that as deliberate rather than incidental — it is tests and comments only, nothing to fix there.\n- **`attachments-permission-matrix.dogfood.test.ts`** read the bare `.url` and is updated.\n\n`ok` is **dropped**, not kept beside `success` — it was a second, private word for the same thing, on a route mounted under `/api/v1/storage` like any other. Nothing reads that body: the SDK and the console both PUT there opaquely, exactly as they would an S3 presigned URL, and check only the status.\n\n## Two schemas that never existed\n\n`FileDownloadUrlResponse` and `RawUploadResponse` are now declared, and `getDownloadUrl` joins `StorageApiContracts` — it had never been in the registry despite being ledgered `disposition: 'sdk'`, and that absence is *how* its shape drifted outside the envelope unnoticed. The `_local/raw/:token` pair stays out of the registry on purpose: it is the local adapter's own presign loopback, ledgered `server-only` and addressed as an opaque signed URL rather than as an API, so it gets a declared shape without being promoted to a client contract.\n\n## The guard\n\n`success-envelope.conformance.test.ts` holds the new shape in place the way `error-envelope.conformance.test.ts` holds the error one — same harness, same imported spec, three directions:\n\n1. every route is driven and its body parsed against **the declared schema it answers to**, imported rather than restated, so a body that parses is a body the published SDK type does not lie about;\n2. the retired shapes are asserted dead (no top-level `url`/`ok`/`key`), so a revert cannot pass quietly;\n3. the module source is scanned — exactly two `.json(` call sites, one `success: true`, one `success: false`, no `ok: true` — so a new route cannot bypass the single `sendOk` helper. Without (3) the suite would only ever cover the routes that existed the day it was written.\n\nMutation-checked: reverting one route to `res.json({ url })` fails 3 of its tests.\n\nAs with #3675, the route ledgers cannot catch this class of drift — they audit which routes exist and whether the SDK can address them, not what comes back.\n\n## Not in scope\n\nThe two items the issue flags as *related, not the same* are untouched and still open questions: the dispatcher putting the HTTP status number in `error.code`, and the `StandardErrorCode` snake_case-vs-SCREAMING_SNAKE vocabulary split. Both are spec decisions, not envelope shape.\n\n## Verification\n\n- `service-storage` 222 ✅ (incl. the new 10-case suite) · `client` 179 ✅ · `spec` 6752 ✅ · `runtime` 665 ✅\n- `check:docs`, `check:api-surface`, `check:spec-changes`, `check:upgrade-guide` ✅ — `storage.mdx`, `api-surface.json` and the schema manifest regenerated and committed\n- eslint clean on every changed file\n- Changeset included, carrying the FROM → TO mapping for the two moved payloads\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01RmnSQC8KxxsoZQe3oDEHjG\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01RmnSQC8KxxsoZQe3oDEHjG)_"
+}

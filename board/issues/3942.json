@@ -1,0 +1,30 @@
+{
+  "number": 3942,
+  "kind": "issue",
+  "title": "MySQL: Field.datetime maps to TIMESTAMP (range ends 2038-01-19) and binds a Date in the process-local timezone",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T11:09:26Z",
+  "updated_at": "2026-07-29T13:15:03Z",
+  "closed_at": "2026-07-29T13:15:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3942",
+  "body": "Found while evaluating whether #3912 (SQLite datetime storage form) applied to the other dialects. SQLite and Postgres are addressed on `claude/sqlite-datetime-filter-empty-hradlv`; MySQL is not, and has two defects of its own.\n\n**This is source analysis, not measurement.** No MySQL was installable in the environment where the evaluation ran (Docker unavailable, no server binaries), so both findings below need confirming against a real server before a fix lands.\n\n## 1. `Field.datetime` cannot represent an instant past 2038-01-19\n\n`createColumn` maps `datetime` to `table.timestamp(name)` (`packages/plugins/driver-sql/src/sql-driver.ts`). knex's MySQL column compiler emits a literal `timestamp`:\n\n```js\n// knex/lib/dialects/mysql/schema/mysql-columncompiler.js\ntimestamp(precision) {\n  return typeof precision === 'number' ? `timestamp(${precision})` : 'timestamp';\n}\n```\n\nMySQL `TIMESTAMP` is a 32-bit epoch: **1970-01-01 00:00:01 UTC through 2038-01-19 03:14:07 UTC**. Any `Field.datetime` outside that window — a contract end date, a subscription expiry, a retention horizon, a pre-1970 birth-adjacent timestamp — is rejected or truncated depending on `sql_mode`. On SQLite and Postgres the same field accepts it (the driver's own bucket tests carry a `1969-12-31T23:59:59.999Z` fixture that MySQL cannot store at all).\n\nThere is also no `precision`, so sub-second detail is discarded: `TIMESTAMP` defaults to 0 fractional digits, and the platform's canonical form carries milliseconds.\n\nLikely fix: `datetime(3)` — MySQL's `DATETIME` spans 1000-01-01 to 9999-12-31, and `(3)` keeps milliseconds. That is a column-type migration on existing tables, which is why it wants its own change rather than riding along with #3912.\n\n## 2. No connection timezone, so a `Date` is serialised in the process-local zone\n\nThe knex connection config sets no `timezone`, so mysql2 uses its default `'local'` and renders a bound JS `Date` as a wall-clock string in the **Node process's** zone. MySQL then interprets that against the session `time_zone`. Two app servers in different zones writing the same instant record different values, and the value depends on deployment topology rather than the data.\n\nThis is the same family as the Postgres finding fixed in #3912 (there, a zone-naive string was resolved against the *server's* `TimeZone`, measured 8 hours off on `Asia/Shanghai`). `formatInput` now sends a canonical zone-explicit `…Z` string on every dialect, which should remove the ambiguity for string binds — but MySQL only accepts an offset in a datetime literal from **8.0.19** onward, so the behaviour on older servers needs checking, as does whether `timezone: 'Z'` should be pinned on the connection regardless.\n\n## Suggested verification\n\nThe opt-in harness added for Postgres in #3912 is the template — `packages/plugins/driver-sql/src/sql-driver-datetime-postgres-timezone.test.ts`, gated on `OS_TEST_POSTGRES_URL` and skipped when unset. A MySQL twin (`OS_TEST_MYSQL_URL`) should assert:\n\n- a `Field.datetime` past 2038 and before 1970 round-trips to the same instant;\n- millisecond precision survives a write/read cycle;\n- a `Date`, an ISO-`Z` string and a zone-naive string all record the same instant, with the process timezone and the session `time_zone` both set to something other than UTC;\n- a bare `YYYY-MM-DD` filter comparand means UTC midnight, matching SQLite and Postgres — the cross-dialect divergence #3912 measured."
+}

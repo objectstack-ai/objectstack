@@ -1,0 +1,32 @@
+{
+  "number": 3691,
+  "kind": "pull_request",
+  "title": "feat(analytics): serve in-envelope cross-object grouping by FK-expand (#3654)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/l"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T14:33:35Z",
+  "updated_at": "2026-07-27T14:40:58Z",
+  "closed_at": "2026-07-27T14:40:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T14:40:56Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3691",
+  "body": "Closes #3654(能力项)。取代 #3672 —— 那个基于旧 main、与 #3651/#3652 冲突;本 PR 在当前 main 上干净重叠加,单 commit。\n\n## 背景\n\n`engine.aggregate()` 不会 join,所以 ObjectQL 回退路径(日期分桶 / in-memory / federated)此前**拒绝**跨对象分组如 `revenue by account.region`(#3664 止血)。本 PR 直接**服务**常见情形。\n\n**残留 2(generateSql 渲 scope)已由 #3652 在 main 上做掉;第二带子(executeAggregate 携带 context)已由 #3651 做掉。本 PR 只加能力项,并在这两者之上重叠加。**\n\n## 做法(FK 展开)\n\n单跳跨对象**维度** + 可重组度量:\n1. 按 lookup FK 列(`account`)分组跑 base 聚合(引擎能做),加 base 对象 scope + 透传 ExecutionContext(#3651 第二带子);\n2. 用**被引用对象自己的 RLS scope** 把 FK id 解析成属性(`region`);\n3. 内存按属性重并桶,重组度量(sum/count 相加,min/max 取极值)。\n\n**受限行归 `(restricted)` 桶**(用户拍板语义):读不到被引用记录的行,度量仍计入、**总计守恒**,隐藏属性名**绝不出现** —— 无泄露(ADR-0021 D-C / #3602 类)。`/analytics/sql` 渲等价 `LEFT JOIN`,预览与执行拒同一集。\n\n## 刻意有界 —— 信封外继续 LOUD 拒绝(绝不静默错答)\n\n跨对象在**度量/过滤器**(需真 join)、**多跳**(`a.b.c`)、**avg/count_distinct** 配跨对象维。NativeSQLStrategy(正常 SQL 路径)不变。\n\n## 测试\n\n- **纯 rebucket**(6):重组 sum/count/min/max、restricted 总计守恒、null≠restricted、多维、双跨对象维。\n- **展开集成**(3):真实 `AnalyticsService` + 两次 aggregate stub,断言 base 与 FK 解析**都加 scope**、restricted 桶成形、`/analytics/sql` 渲 LEFT JOIN。**回退策略 → 三个全红**。\n- **信封外拒绝**(3):跨对象度量 / 过滤 / avg 配跨对象维。\n- 更新 main 的 `execution-context-bridge` parity 测试:信封内现渲 JOIN,parity 改用信封外度量。\n- service-analytics **242 passed**;`tsc` 无新增错误(剩 1 存量在未触文件)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

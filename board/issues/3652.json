@@ -1,0 +1,35 @@
+{
+  "number": 3652,
+  "kind": "pull_request",
+  "title": "feat(analytics): honour widget dateGranularity, sortBy/sortOrder, and limit in dataset queries (#3588)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T12:54:21Z",
+  "updated_at": "2026-07-27T13:24:44Z",
+  "closed_at": "2026-07-27T13:24:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T13:24:41Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3652",
+  "body": "Fixes #3588 (framework side). The companion renderer change is objectstack-ai/objectui#claude/analytics-query-builder-params-vi64vw.\n\n## The problem\n\nThree widget options were accepted by the metadata layer and then dropped by the analytics query builder. They reached no SQL and raised no error, so the only way to notice was to read the `sql` a dataset response echoes — a dashboard could declare `dateGranularity: 'month'` and quietly render one bar per record.\n\nThe issue's framing was right on two of three counts; the third turned out to sit in the renderer, not here:\n\n| # | Issue's ask | Where it actually lands |\n|---|---|---|\n| 1 | push `dateGranularity` into GROUP BY | here (+ the renderer had to send it at all) |\n| 2 | emit ORDER BY from `sortBy`/`sortOrder`, make `limit` depend on it | here |\n| 3 | give funnels a defined stage order | objectui only — `AdvancedChartImpl` re-sorted funnel data by value, so any ordering this layer produced was overridden client-side |\n\n## Changes\n\n**`dateGranularity` now buckets.** `DatasetSelection` gained an optional `dateGranularity`, applied to every selected `date` dimension. Precedence per dimension: an explicit `timeDimensions` granularity → the selection's → the dataset dimension's own default. A widget can bucket a trend by month without the dataset committing every other consumer to that granularity.\n\n**`order` / `limit` / `offset` now apply on every path.** They are applied to the *assembled* grid — after measure-scoped sub-queries merge, after `compareTo` columns attach, and after derived measures are computed. Two consequences that motivated doing it here rather than only in SQL:\n\n- a derived measure (a win-rate ratio, say) becomes a valid sort key even though no single statement computes it;\n- the ObjectQL aggregate path orders identically to native SQL. That path has no ordering grammar at all (`EngineAggregateOptions` has nowhere to put one), and native SQL *declines* granularity — so every date-bucketed query is handed to it. Ordering a bucketed trend was unreachable in SQL by construction.\n\nA single-query selection still pushes the window down into the statement, so the database does the work and the echoed SQL shows it; the post-pass is then a no-op re-sort.\n\n**`limit` is deterministic.** Without an `order`, a limit orders by the selected dimensions first, so it truncates a reproducible window rather than an arbitrary subset. An `order` key naming nothing the selection projects is rejected as a 400 instead of silently ignored.\n\n**Widget `options` is a contract again.** The four query-affecting keys plus `stageOrder` are declared on a new `DashboardWidgetOptionsSchema`, so `sortDirection` or `granularity` is an author-time error rather than an option that reads as if it works. The bag stays open (`passthrough`) — `icon`, `columns`, `striped`, `density` and friends pass through untouched, and every existing widget still validates.\n\n## Two latent bugs found on the way\n\nNeither was reachable before, which is why they were quiet:\n\n- **`order`/`limit` were forwarded to every sub-query.** A measure-scoped supplementary query selects *one* measure, so an inherited `ORDER BY` named a column it never selected, and an inherited `LIMIT` truncated it before the merge — dropping rows from the assembled grid. Nothing hit this only because nothing passed `order`.\n- **`compareTo` skipped granularity resolution.** It hand-built its query instead of going through `buildQuery`, so a month-bucketed primary grid was merged against raw-timestamp comparison rows. No dimension key matched and every `<measure>__compare` column came back empty. Found by a test written for the granularity work.\n\n## SQL echo\n\n`ObjectQLStrategy` now attaches a representative `sql` (with `date_trunc`, `WHERE`, `ORDER BY`, `LIMIT`). Without this the fix would have *removed* the `sql` field from exactly the responses the issue used to diagnose the bug — that path returned none, and bucketing routes queries to it. Filter values are rendered as `$n` placeholders and returned in `params`, never inlined, since the echoed statement travels to the browser.\n\n## Testing\n\n- New `dataset-selection-window.test.ts` — 20 tests over granularity precedence (including the compareTo merge), ordering on both strategy paths, deterministic limit, derived-measure sort keys, the sub-query regression guard, and the SQL echo.\n- Full `@objectstack/service-analytics` suite: **199 passed** (179 pre-existing, unchanged).\n- `@objectstack/spec` dashboard suite green; `spec`, `service-analytics` and `rest` all build (dts typecheck) clean.\n\nNot verified in a running browser — the rendered result depends on the objectui companion PR, so end-to-end confirmation belongs there.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01SEZLBGyNoJMLvtGPqsMPRC)_"
+}

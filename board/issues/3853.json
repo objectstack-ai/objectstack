@@ -1,0 +1,30 @@
+{
+  "number": 3853,
+  "kind": "issue",
+  "title": "automation: the #3801 resume gate follows `subflow:` but not `map:`, and the resume body can write engine-internal variables",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T11:50:46Z",
+  "updated_at": "2026-07-28T12:50:44Z",
+  "closed_at": "2026-07-28T12:50:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3853",
+  "body": "Found while reviewing the seam #3822 just closed. **Demonstrated, not merely reasoned** —\na repro runs green against `main` @ `57a3bb3`; see below.\n\nTwo defects in the same trust boundary, one of them a hole in the gate #3822 shipped.\n\n## 1. The gate does not follow the `map:` correlation chain\n\n`resumeInternal` treats the two linked-run correlations **oppositely**\n(`packages/services/service-automation/src/engine.ts:2080`):\n\n```ts\nif (run.correlation?.startsWith('map:')) {\n    await this.executeNode(node, flow, variables, context, steps);   // RE-RUN the map node\n} else {\n    await this.traverseNext(node, flow, variables, context, steps, signal?.branchLabel);\n}\n```\n\n`resolveEffectiveSuspension` (the gate's chain walk) only follows `subflow:`. A run parked\non a `map` node is therefore judged on `map` itself — `resumeAuthority: 'any'` — and let\nthrough, even when the item the map is waiting on is parked on an `approval`.\n\n`map` is the **batch-approval** shape (ADR-0037 A2, `showcase_release_signoff`), so the\nrun id a launcher holds is the map parent's. `state.started` is already incremented past\nthe in-flight item before the suspend (`builtin/map-node.ts:155-156`), and the re-entry\nonly records a result when `$mapItemDone` is set (`map-node.ts:113-118`). So an empty-body\nresume of the parent **skips the pending item's approval entirely**:\n\n```\nbefore:  { started: 1, results: [] }\nPOST /api/v1/automation/release_signoff/runs/{parentRunId}/resume   {}\nafter:   { started: 2, results: [] }      ← item 1 skipped, no result recorded\nsuspended child runs: 2                   ← item 1 orphaned (its request stays pending) + item 2\n```\n\nKnock-on: when item 1's approval is eventually decided, `bubbleToParent` resumes the parent —\nwhich is now waiting on item 2 — so that output lands under the wrong index and the\nmisalignment cascades.\n\n## 2. `signal.variables` can write the engine's reserved `$` namespace\n\n`signal.variables` (the route's `inputs`) are applied as **bare** flow variables, so a caller\ncan write the exact handoff keys `bubbleToParent` uses. The node id is readable from\n`GET /api/v1/automation/:name` (an SDK route). That upgrades the skip above into **forging\nthe recorded outcome**:\n\n```jsonc\nPOST /api/v1/automation/release_signoff/runs/{parentRunId}/resume\n{ \"inputs\": { \"signoffs.$mapItemDone\": true,\n              \"signoffs.$mapItemOutput\": { \"result\": \"FORGED — never approved\" } } }\n```\n```\nafter:  { started: 2, results: [ { \"result\": \"FORGED — never approved\" } ] }\n```\n\nDownstream reads `config.outputVariable` and believes that item was signed off with the\nattacker's value. `$` is the engine's namespace generally — `$runId`, `$flowName`,\n`$flowLabel`, `$record`, `$error`, `$parentRunId`, `$parentMapNode`,\n`$parentOutputVariable`, `<nodeId>.$mapState` — none of which a transport caller should be\nable to set. `$runId` in particular is what `approval` / `wait` nodes read to correlate\nexternal state back to the run.\n\nNote (2) is **not** fixed by (1): a map whose pending item is parked on an ungated `screen`\n/ `wait` node is still resumable, and the handoff keys are still writable there.\n\n## Control\n\nResuming the **child** run directly is correctly refused (`code: 'forbidden'`) — #3822's gate\nworks on that side. The gap is exactly the parent-side path, which is the id a launcher holds.\n\n## Fix\n\n1. `resolveEffectiveSuspension` follows `map:` as well as `subflow:`, judging the child the\n   map is waiting on. The semantics land right: *\"this item's decision is still open, so you\n   may not advance the map past it.\"*\n2. The **route** rejects caller-supplied variable names in the engine namespace (`$…` or a\n   `.$` segment). Filtering at the transport, not in the engine, keeps `bubbleToParent`'s\n   in-process handoff working — it is the same \"strict at the untrusted boundary\" split the\n   resume gate already uses.\n\nRefs #3801, #3822. Distinct from #3823 (revise-window `wait`), which needs a per-suspension\nowner claim rather than a chain walk."
+}

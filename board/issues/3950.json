@@ -1,0 +1,35 @@
+{
+  "number": 3950,
+  "kind": "pull_request",
+  "title": "refactor(spec)!: remove the plugin sandboxing / integrity / approval config that never existed (#3896 follow-up)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T12:30:25Z",
+  "updated_at": "2026-07-29T23:36:04Z",
+  "closed_at": "2026-07-29T23:36:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-29T23:36:02Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3950",
+  "body": "Follow-up to #3945 (merged). Found while building the empty-state gate: `allowedSources` documented `[]` as admitting every source, and checking who enforced that turned up nobody.\n\n## A security control set that was never wired to anything\n\n`DynamicLoadingConfigSchema`, `PluginDiscoveryConfigSchema` and `PluginDiscoverySourceSchema` declared:\n\n| Key | What it promises |\n|---|---|\n| `defaultSandbox` | sandbox dynamically loaded plugins |\n| `requireIntegrity` | require integrity-hash verification for remote sources |\n| `allowedSources` | restrict which plugin source types may load |\n| `discovery.requireApproval` | require admin approval before loading a discovered plugin |\n\n**None of it was ever wired to anything.** The three schemas were an island — not composed into any parent schema, not read by any runtime, referenced only by their own round-trip tests. They were nonetheless published into `json-schema/` and the authorable key surface, where an author (very often an AI, ADR-0033) reads them as capabilities this platform has.\n\nSomeone reading the spec could reasonably conclude ObjectStack sandboxes dynamically loaded plugins. It does not.\n\nThat is the ADR-0049 false-compliance shape, and the precedent for a SAFETY-shaped instance is to **remove** rather than mark dead: `tool.requiresConfirmation` was pruned in #3715 because it was *\"unenforced on every path, so it was false compliance, not merely dead\"*. Same case, one layer up.\n\n## No tombstones, deliberately — and how the guard was cleared\n\n`build-schemas.ts` guards removals in two stages, and both fired:\n\n1. **Schema-level** — three published schemas disappeared. The guard's own prescribed remedy for a deliberate removal is to drop the keys from `json-schema.manifest.json` in the same PR. Done.\n2. **Key-level** — 15 authorable keys disappeared. The prescribed remedy is `retiredKey()` tombstones + a D2 conversion + a major changeset.\n\n**Stage 2's remedy is not applicable here, and the exemption is the interesting part of this PR.** A tombstone earns its keep by making a removal audible at a parse the author actually reaches — and *nothing parses these schemas*. The prescription could never be delivered. Meanwhile the silent-strip the guard exists to prevent was already these keys' permanent condition: writing one has always been a no-op, because no parent schema ever accepted them. Removing them does not create that failure mode; it removes the documentation of a thing that never worked.\n\nSo the baseline entries in `json-schema.manifest.json` and `authorable-surface.json` are dropped here as the deliberate removal both files document as legitimate, rather than tombstoning 15 keys nobody could have successfully authored. The file itself carries a block comment recording this reasoning where the schemas used to be, so the next reader does not have to reconstruct it.\n\n## Breaking, in the narrow sense\n\n`packages/spec/src/kernel/index.ts` re-exports the module with `export *`, and `./kernel` is a published subpath — so `DynamicLoadingConfig`, `PluginDiscoveryConfig`, `PluginDiscoverySource` and their schemas were importable as types. Nothing in this repo imported them. Marked `major` because removing a public export is breaking regardless of use; in practice it folds into the unreleased `17.0.0`.\n\n## Scope — what is deliberately left alone\n\n`ActivationEventSchema` stays: it is the one export in this file with real consumers (7).\n\nThe remainder — `DynamicLoadRequest`, `DynamicUnloadRequest`, `DynamicPluginResult`, `PluginSource`, `DynamicPluginOperation` — **also has no runtime consumer today**, so the whole file except `ActivationEventSchema` is dead surface. It is left in place because those are *operation contracts*, not security promises: the enforce-or-remove call on them is a design decision, not a correction, and the `requiresConfirmation` precedent draws its line at exactly that distinction.\n\nRebuilding this surface is a design job, not a schema job: write the runtime first, then declare only what it enforces.\n\n## Verification\n\n- `packages/spec`: **263 files, 6856 tests, all passing** (−2: the removed schemas' round-trip tests). `tsc --noEmit` clean.\n- All six spec gates green: `check:docs`, `check:liveness`, `check:empty-state`, `check:spec-changes`, `check:upgrade-guide`, `check:skill-docs`.\n- `check:authorable-surface` passes with the baselines updated — 1784 → 1782 schemas, 8599 → 8584 keys.\n- The `allowedSources` entry added to the empty-state registry in #3945 is removed with its schema, and that gate re-verified green (19 statements, all classified).\n- Reference docs regenerated; `content/docs/references/kernel/plugin-runtime.mdx` loses the three sections.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QuViRSR1j6GJjf9qGbnqFX)_"
+}

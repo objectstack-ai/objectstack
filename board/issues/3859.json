@@ -1,0 +1,35 @@
+{
+  "number": 3859,
+  "kind": "pull_request",
+  "title": "fix(i18n)!: field labels emit the entry shape they declare, and stop discarding help/options (#3847)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T12:00:30Z",
+  "updated_at": "2026-07-28T12:56:47Z",
+  "closed_at": "2026-07-28T12:56:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T12:56:44Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3859",
+  "body": "Closes #3847. Third and last of the declared ≠ enforced gaps on this endpoint family, after #3676 (request filters no server read) and #3833 (a derivation scanning a retired dialect).\n\n## The gap\n\n`GetFieldLabelsResponseSchema` has always declared each label as an object:\n\n```ts\nlabels: z.record(z.string(), z.object({\n  label: z.string(),\n  help: z.string().optional(),\n  options: z.record(z.string(), z.string()).optional(),\n}))\n```\n\nBoth serving surfaces emitted `Record<string, string>` — a bare label per field. A client typed against `GetFieldLabelsResponse` read `labels[field].label` and got `undefined`, because the value *was* the string. **The SDK's type was right the whole time; the servers were wrong.**\n\n## Why it is more than a type mismatch\n\n`FieldTranslationSchema` carries `help` and `options`, bundles populate them, and the endpoint threw them away.\n\nThe issue asked whether this endpoint is even worth keeping, which turned on how objectui gets field labels. It does **not** call this route. It pulls the whole bundle from `/i18n/translations/:locale` and resolves client-side — `packages/i18n/src/utils/spec-translations.ts` transforms `TranslationData` into i18next resources, and `useObjectLabel` reads `fields.<obj>.<fld>`.\n\nThat transform reads `label` **and** `options` (as `fieldOptions.<obj>.<fld>.<value>`). So the data this endpoint was discarding is exactly the data its most likely consumer needs — it could not have served objectui even if objectui wanted it, because the loss happened at the emit site.\n\nThat answers the \"should it exist\" question in favor of fixing it: the declared shape is the useful one, and the endpoint was the only thing standing between it and a caller. Option 1 from the issue.\n\n## The fix\n\nOne change at the shared emit site, `resolveObjectFieldLabels` — which both surfaces already call as of #3833, so this covers the dispatcher and service-i18n together. That is the payoff from sharing it last time: this fix would otherwise have been two edits with one of them easy to miss, which is exactly how #3833 happened.\n\n- `help` and `options` attach **only when non-empty**. An `options: {}` would claim a field has translated options and hand back none; a `help: ''` would erase a caller's source help text.\n- Fields with no non-empty `label` are still omitted entirely — which is what lets `ResolvedFieldLabel.label` be a required `string` rather than optional.\n\n**The response schema is unchanged.** This moves the implementation onto the contract, not the contract onto the implementation — `check:docs` reports the 250 generated files byte-identical for that reason, and `check:api-surface` shows 0 breaking / 1 added (the new `ResolvedFieldLabel` type).\n\n### On `placeholder`\n\nDeliberately left out. `FieldTranslationSchema` has it; the response schema does not. Emitting it would be *widening* the contract rather than satisfying it, and that is a separate decision with no consumer asking. Adding an optional response field later is additive and non-breaking — the same low-regret reasoning that justified trimming `namespace` in #3676 rather than implementing it speculatively.\n\n## The regression guard\n\nThe part worth keeping:\n\n```ts\nconst response = { object: 'contact', locale: 'en-US', labels: resolveObjectFieldLabels(data, 'contact') };\nexpect(GetFieldLabelsResponseSchema.safeParse(response).success).toBe(true);\n```\n\nNothing had ever put the **emitted value** and the **declared contract** in the same assertion. That is precisely how a bare string sat under an object schema unnoticed across three issues in this area — the tests asserted emitted-vs-expected-literal, never emitted-vs-declared.\n\nThis is the small version of the CI gate worth generalizing: fixture and response bodies validated against the Zod schema that declares them would have caught this one, and would also have caught #3833's fixture (flat `o.` data cannot parse as `TranslationDataSchema`).\n\n## Verification\n\n- `@objectstack/spec` — 261 files / 6790 tests pass\n- `@objectstack/runtime` — 47 files / 694 tests pass\n- `@objectstack/service-i18n` — 5 files / 63 tests pass\n- `check:api-surface` — regenerated (0 breaking, 1 added), re-verified clean\n- `check:docs` — 250 generated files in sync, unchanged\n- `@objectstack/client` builds clean — its `GetFieldLabelsResponse` type already described this shape\n\n## Breaking\n\n`labels[field]` is now `{ label, help?, options? }` rather than a string. No consumer in this repo or objectui read it — objectui never calls the route, and in-repo use is the SDK method plus URL-shape tests — so the practical blast radius is nil, and this is the cheap moment to align it.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_0196gwfwMK5vW8RToPyzGMJo)_"
+}

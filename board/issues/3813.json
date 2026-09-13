@@ -1,0 +1,36 @@
+{
+  "number": 3813,
+  "kind": "pull_request",
+  "title": "feat(verify): checkDateBucketParity —— 钉住「下推 SQL 分桶 ↔ 内存分桶」那条没人守的接缝 (#3773 收尾)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T06:55:39Z",
+  "updated_at": "2026-07-28T07:08:54Z",
+  "closed_at": "2026-07-28T07:08:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T07:08:52Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3813",
+  "body": "#3773 / #3797 的收尾:**把那道没人守的接缝钉住**,不修任何现有 bug。\n\n## 先纠正我自己的提法\n\n我原先说要加「文本一致性门」—— 假设三份 `bucketDateValue` 手抄件是逐字复制。**查了,不是。** 副本彼此逐字相同,但和 objectql 原版根本不同:原版带 `timezone` 参数、走 `calendarPartsInTzOrUtc`,副本是 UTC-only 内联版。文本门对着源头开箱就假阳性。\n\n而真正的风险方向也不是\"副本乱改\":副本改坏了,驱动测试会**红**(SQL 对不上改坏的副本)。危险的是**改了 objectql 原版、副本没跟** —— 此时副本和 SQL 彼此自洽、双双是旧的,**全绿**。注释治不了这个,只有行为门能。\n\n## 门是什么\n\n`checkDateBucketParity(driver)`(`@objectstack/verify`):对驱动**声明支持**的每个粒度,拿它下推的 SQL 结果去比**真的** `applyInMemoryAggregation` 跑它自己 `find()` 行的结果。\n\n契约的措辞很重要:驱动 `supports.queryDateGranularity[g]` 是在告诉 `engine.aggregate`「这个粒度可以下推」。于是它俩就**不是两个特性,是一个特性的两份实现**,引擎按查询逐次挑一份 —— 声明了的走 SQL,没声明的走内存,非 UTC 时区一律走内存。仪表盘的一次 drill-down 就能跨过这条缝。\n\n- 两种存储形态在**同一个 probe 对象**下:`Field.datetime` 和 `Field.date` 指同一批日历日,于是\"存储形态泄漏\"会表现为**两列分桶不一致**,即使各自和自己的内存参考都自洽。\n- 驱动**没声明**的粒度直接跳过,不追究 —— 引擎本来就把它路由到内存,驱动能不能做不属于这个契约。\n\n形状照抄 `checkReadCoercion`:返回人类可读的 problems(空 = 合规)、不依赖 test runner、结构化接受任意驱动 —— 所以 **cloud 的 `driver-turso` 能拿去跑同一份契约**。这条最重要:Turso 是远程 SQLite,正是这次出事的那种 epoch 存储。\n\n## 验红:拿真回归验,不是只拿假驱动\n\n把 #3773 的修复退回去重跑,门在**两个驱动上都红**,诊断直接点名塌掉的桶:\n\n```\nField.datetime 'at' @ month: pushed-down SQL and in-memory bucketing disagree\n  — 2024-01: sql=— in-memory=1, …, null: sql=7 in-memory=—\n```\n\n跨列那道也同时开火(8 条 = 4 粒度 × 2 驱动),而 per-column 那道**只**点名 `'at'`,从没误伤 TEXT 存储的 `'on'`。恢复后全绿,`git diff` 对驱动源码为空。\n\n另配 4 条反向对照钉住 checker 的能力边界:全塌成 null(#3773 原形)、声明了却抛错、一列对一列塌(存储形态泄漏)、**什么都不声明必须保持沉默**。\n\n## 注释改了两处,分工写清楚\n\n三份手抄件的 `⚠️ Keep in sync` 现在明说**它自己检测不了漂移**(副本和 SQL 会彼此自洽地一起错),并指向可执行的门。同样的指针也加在 `bucketDateValue` 本体上 —— **那才是漂移的起点**,改的人在那儿。\n\n## 一处刻意不覆盖\n\nfixture 里**没有** null 实例。NULL 分桶键是既有分歧(SQL 给 SQL NULL,内存给字面量 `'(null)'`),与分桶正确性正交、在 TEXT 列上同样成立。放进来会让门为一个它不负责的理由而红。这一点写在 fixture 注释里,好让\"没有 null\"读起来像决定而不是疏忽。\n\n## 测试\n\n新门 6 条 ✅(2 真驱动 + 4 反向对照);driver-sql 401 ✅ / objectql 1128 ✅ / sqlite-wasm 126 ✅ / verify 7 ✅;`turbo build --force`(绕缓存跑真 DTS)通过;eslint 干净。\n\ndogfood 全量跑有 **2 条既有红**:`attachments-permission-matrix` 的两条 `AUTH_REQUIRED`。已用 `git stash` 隔离到**纯净 origin/main 上同样红**,与本 PR 无关(本分支基点 9e4bad509 正是改那个附件 harness 的提交)。\n"
+}

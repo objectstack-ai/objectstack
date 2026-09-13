@@ -1,0 +1,32 @@
+{
+  "number": 3923,
+  "kind": "issue",
+  "title": "Action.requiredPermissions 在 Console 端形同虚设：会话不下发 systemPermissions + 客户端 fail-open（17.0.0-rc.0）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T09:49:01Z",
+  "updated_at": "2026-07-30T03:24:29Z",
+  "closed_at": "2026-07-30T03:24:29Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3923",
+  "body": "## 版本\n\n`@objectstack/{spec,runtime,console}@17.0.0-rc.0`\n\n## 期望（按 spec 注释）\n\n`src/ui/action.zod.ts` 里 `requiredPermissions` 的注释写明这是 ADR-0066 D4 的**双面门禁**：\n\n> System capabilities required to INVOKE this action — a dual-surface gate from ONE declaration: the server (action route) rejects the call with 403 when the caller's systemPermissions don't cover these (the source of truth), and the objectui ActionRunner hides/disables the button using the same requirement.\n\n即：一处声明 → 服务端 403 + 客户端隐藏/禁用按钮。配套的授予侧是权限集的 `systemPermissions`（`src/security/permission.zod.ts:279`）。\n\n## 实测结果：按钮照常显示、照常可点\n\n复现（本地 dev，`objectstack dev`，Console 以内置管理员登录）：\n\n1. 给某对象的 `record_header` 动作加一个**谁都没有**的能力：\n\n```ts\n{\n  name: 'set_parallel_positions',\n  label: '设置并行会审岗位',\n  locations: ['record_header'],\n  type: 'api',\n  method: 'POST',\n  target: '/api/v1/ts/record-action/<obj>/${param._rowRecord.id}',\n  requiredPermissions: ['ehr_probe_capability'],   // 没有任何权限集声明过它\n  visible: \"record.approval_stage == 'qc_director' && record.approval_status == 'pending'\",\n}\n```\n\n2. `objectstack compile` → 打开该记录详情页。\n3. **按钮正常出现在页头，可点、可提交**。\n\n## 原因（两处）\n\n### ① 客户端 fail-open\n\n`packages/console` 打包产物 `dist/assets/framework-*.js` 的 `getActionsForLocation`：\n\n```js\n.filter(e => {\n  let t = e.action.requiredPermissions;\n  if (!Array.isArray(t) || t.length === 0) return true;\n  let n = this.runner.getContext()?.user?.systemPermissions;\n  return !Array.isArray(n) || t.every(e => n.includes(e));   // ← 拿不到就放行\n})\n```\n\n会话里没有 `systemPermissions` 时直接放行。对「隐藏按钮」这类安全语义，fail-open 等于门禁不存在。\n\n### ② 会话根本没带 systemPermissions\n\n同一页面里 Console 连续两次 `POST /api/v1/security/explain → 401 Unauthorized`（**已登录**的 admin 会话），客户端上下文的 `user` 上也取不到 `systemPermissions`。服务端 `resolveAuthzContext` 明明解析出了 `{ positions, permissions, systemPermissions }`（`packages/runtime` dist `index.js:5155` 附近），但这份信息没有到达 Console。\n\n### 附带：服务端那半边并不覆盖所有 action\n\n`actionPermissionError` 只在平台自己的 action 调用路径上生效（`packages/runtime` dist `index.js:2922 / 4393 / 4752`，即 `ql.executeAction` 路由与 MCP/AI 路径）。`type: 'api'` 指向自建 endpoint 的动作**不经过**它，因此这类动作即使声明了 `requiredPermissions` 也没有任何服务端兜底。spec 注释里「the server (action route) rejects…the source of truth」的措辞容易让人误以为任何 action 都被兜底。\n\n## 影响\n\n`requiredPermissions` 是目前**唯一**的声明式「按能力/岗位控制按钮显隐」手段——动作的 `visible` 只绑 `record` 命名空间（写 `has(current_user.id)` 直接编译失败：`bare reference current_user — … binds the record as the record namespace, not at top level`；运行期实测 `has(user.id)` / `has(user.permissionSets)` / `has(user.positions)` 的探针按钮全部不显示，只有 `visible: 'true'` 显示）。这条路一旦空转，应用侧就只能自己写 Hook 在服务端兜底，UI 上无法把按钮对无权用户藏起来。\n\n## 建议\n\n1. 会话（或 `/api/v1/security/explain`）向 Console 下发调用方的 effective `systemPermissions`，并修掉已登录会话下 `security/explain` 401。\n2. 客户端在拿不到 `systemPermissions` 时 **fail-closed**（或至少提供显式配置），避免「声明了门禁但静默失效」。\n3. 文档/注释明确：服务端 403 只覆盖平台 action 路由，`type: 'api'` 自建 endpoint 需自行校验。"
+}

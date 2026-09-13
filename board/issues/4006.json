@@ -1,0 +1,30 @@
+{
+  "number": 4006,
+  "kind": "issue",
+  "title": "`@objectstack/client` reads `category`/`retryable` from the body top level — the contract puts them inside `error` (ADR-0112 D9b, unowned after the batch split)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T02:35:55Z",
+  "updated_at": "2026-07-30T03:20:21Z",
+  "closed_at": "2026-07-30T03:20:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4006",
+  "body": "[ADR-0112](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0112-error-code-vocabulary-and-ledger.md) ruling **D9b** names this defect and scheduled it to be \"fixed when the probe area is touched in batch 3\". It fell between the batches: batch 3 (#3971) touched that exact area but landed **10 seconds after** the ADR merged, so its author never saw the ruling; batch 1 (#3988) deliberately scoped to `spec,core,runtime,docs` — no client. Verified still present on `main` after both. This issue gives it an owner.\n\n## The defect\n\n`packages/client/src/index.ts:4485-4488` attaches error metadata for programmatic access:\n\n```ts\nerror.code = errorCode;                    // three-location probe, both shapes ✅\nerror.category = errorBody?.category;      // ❌ top level only\nerror.httpStatus = res.status;             // transport truth ✅\nerror.retryable = errorBody?.retryable;    // ❌ top level only\n```\n\nThe contract (`ApiErrorSchema`, and the flat envelope every conformant route emits) carries `category` and `retryable` **inside `error`**: `{ success: false, error: { code, message, category?, retryable? } }`. Nothing conformant puts them at the body top level. So for every server that follows its own contract, `err.category` and `err.retryable` are `undefined` — the SDK documents them as branch points and they never fire.\n\nThe inconsistency is local and visible: three lines down, `error.details` already does the two-shape read this issue asks for —\n\n```ts\nerror.details = errorBody?.details ?? errorBody?.error?.details ?? errorBody;\n```\n\n— and `error.code` goes through the full multi-location probe. `category`/`retryable` are the only two fields on this block that read one (wrong) location.\n\n## Fix shape\n\nSame pattern as the neighbours, nested-first with top-level fallback for legacy/non-conformant servers:\n\n```ts\nerror.category = errorBody?.error?.category ?? errorBody?.category;\nerror.retryable = errorBody?.error?.retryable ?? errorBody?.retryable;\n```\n\nPlus a test asserting both fields arrive from the enveloped shape (the existing client error-path suites drive the flat envelope already; today no test can assert these because they never populate).\n\n## Rider (same sweep, one line)\n\n`content/docs/releases/v17.mdx:563` — the #3971 release entry's derived-map example still reads `` `403` → `permission_denied` ``; #3988 renamed the derived codes, so the current spelling is `PERMISSION_DENIED`. One-line doc correction, cheapest carried by whichever PR fixes this issue.\n\n## Non-scope\n\nThe retirement of the three-location probe itself is a separate, open **decision** (ADR-0112 D5 says delete after batch 3; the code comment now argues legacy-server fallback) — tracked in its own issue, not here. This issue is only the two mis-nested reads, which are wrong under **either** outcome of that decision."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 3588,
+  "kind": "issue",
+  "title": "Analytics query builder ignores widget dateGranularity, sortBy/sortOrder, and funnel stage order",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T08:24:10Z",
+  "updated_at": "2026-07-27T13:24:42Z",
+  "closed_at": "2026-07-27T13:24:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3588",
+  "body": "## Description\n\nThree separate widget options on the Executive Overview dashboard are accepted by the metadata layer but never reach the generated SQL. They share one root cause — the analytics query builder ignores presentation/ordering options declared on the widget — so grouping them here.\n\nEach response from `POST /api/v1/analytics/dataset/query` echoes its `sql`, which is where the omissions are visible.\n\n## Steps to Reproduce\n\n1. `pnpm dev` and open `/_console/apps/app.objectstack.hotcrm/dashboard/executive_dashboard`\n2. Read the `sql` field of the dataset query responses\n\n## Expected vs Actual\n\n### 1. `options.dateGranularity: 'month'` produces no date truncation\n\n`revenue_trend` and `new_accounts_by_month` both declare `options: { dateGranularity: 'month' }`, but the query groups by the raw column:\n\n```sql\n-- revenue_trend\n... GROUP BY \"crm_opportunity\".\"close_date\"\n-- new_accounts_by_month\nSELECT created_at AS \"created_at\", COUNT(*) AS \"account_count\" FROM \"crm_account\"\nWHERE created_at >= $1 GROUP BY created_at\n```\n\nExpected a `date_trunc('month', …)`-equivalent grouping.\n\nVisible consequences: `revenue_trend`'s x-axis is labelled by day (7月6日 / 7月12日 / 7月18日) rather than by month. `new_accounts_by_month` returns five rows that all carry `created_at = \"2026-07-27\"` and `account_count = 1` — one row per record rather than one bar per month, because grouping on the untruncated timestamp never collapses same-day rows. The chart consequently renders five identical bars and a fractional y-axis (0.8, 1).\n\n### 2. `options.sortBy` / `sortOrder` produce no `ORDER BY`\n\nThe `accounts_by_industry` table declares `sortBy: 'annual_revenue_sum', sortOrder: 'desc'`:\n\n```sql\nSELECT industry AS \"industry\", SUM(annual_revenue) AS \"annual_revenue_sum\", COUNT(*) AS \"account_count\"\nFROM \"crm_account\" GROUP BY industry\n```\n\nNo `ORDER BY`. Rows arrive in industry alphabetical order (Finance 3.5M, Healthcare 8M, Manufacturing 12M, Technology 30M), which happens to be ascending revenue — the exact opposite of the requested `desc`. `options.limit: 10` should be checked too: with no deterministic ordering, a `LIMIT` would truncate an arbitrary subset.\n\n### 3. Funnel stages are not ordered by the sales pipeline\n\n`pipeline_by_stage` is a `funnel` widget and receives rows in alphabetical order:\n\n`Needs Analysis → Negotiation → Proposal → Qualification`\n\nThe real pipeline order is `Qualification → Needs Analysis → Proposal → Negotiation`. A funnel chart implies a monotonically narrowing sequence, so rendering alphabetically produces a shape that reads as a pipeline but is not one. Either the picklist's declared option order should drive funnel ordering, or the widget needs a way to state it explicitly.\n\n## Environment\n\n- Branch `main` @ 00c83e9f, dev server on :4001\n- Affected file: `src/dashboards/executive.dashboard.ts` (also reproduces on the CRM and Sales dashboards, which use the same options)\n\n## Suggested Fix\n\nThese need framework work in the analytics query builder rather than metadata changes here:\n\n- push `dateGranularity` down into the `GROUP BY` as a date truncation\n- emit `ORDER BY` from `sortBy` / `sortOrder`, and make `limit` depend on it\n- give funnel widgets a defined stage order (picklist order by default)\n\nIf any of these are intentionally view-layer-only rather than query-layer, the metadata in this repo should be corrected instead — right now the options read as if they work.\n"
+}

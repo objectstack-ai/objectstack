@@ -1,0 +1,30 @@
+{
+  "number": 3759,
+  "kind": "issue",
+  "title": "driver 没有任何重连：数据库抖一下，进程就永久失效，只能靠外部重启",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T02:18:25Z",
+  "updated_at": "2026-07-28T03:43:45Z",
+  "closed_at": "2026-07-28T03:43:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3759",
+  "body": "## 一句话说明\n\n`driver-sql` / `driver-mongodb` 里没有任何重连实现。连接一旦断开（数据库重启、failover、网络抖动、连接池被服务端掐掉），这个进程就永久性地服务不了那个 datasource，直到有人从外部重启它。\n\n#3751 处理这件事的方式是**删掉那句声称有重连的话**（它是假的），而不是实现它。删得对 —— 但缺失的能力本身还在，值得单独定夺要不要补。\n\n## 事实核实\n\n#3741 之前，`ObjectQLEngine.init()` 在连接失败时打印：\n\n```\nOperations may recover via lazy reconnection or fail at query time.\n```\n\n全仓 grep `reconnect`，除了这条 warning 字符串本身，`driver-sql` / `driver-mongodb` 里没有任何重连实现 —— 命中的全是 WebSocket（`spec/src/api/websocket.zod.ts` 的 `reconnectInterval` 等）、metadata HMR 的 SSE、以及 automation 的 MCP connector 重连，都跟 data driver 无关。\n\n#3751 已经把这句话删掉了（并把启动期连接失败改成拒绝启动）。所以现在的状态是**诚实但缺能力**，而不是之前的**declared ≠ enforced**。\n\n驱动层现状：\n\n- `SqlDriver.checkHealth()`（`sql-driver.ts:697`）是 `SELECT 1`，只报告状态，不做任何恢复。\n- `MongoDBDriver.checkHealth()`（`mongodb-driver.ts:170`）是 `db.command({ping:1})`，同样只报告。\n- 两者都没有重试/重建连接池的路径。\n\n## 影响\n\n以下都属于\"数据库短暂不可用、之后自己恢复了\"的常见情形：\n\n- 托管数据库的计划内维护窗口 / 版本升级。\n- Postgres 主备 failover（秒级到数十秒）。\n- 网络分区、安全组/网络策略短暂变更。\n- 服务端主动掐掉空闲连接（`idle_in_transaction_session_timeout`、云厂商的连接回收）。\n\n数据库恢复之后，**进程不会恢复** —— 它会一直用一个死掉的连接池服务 500，直到外部重启。\n\n严重程度取决于部署形态：\n\n- **k8s / 有编排器**：可接受 —— 前提是探针能发现（目前不能，见本批第一个 issue）。摘流量 + 重启是标准做法，进程内重连只是优化。\n- **单机自托管 / 长驻进程**（`os serve` 直接跑、systemd、Docker 单容器无健康检查）：没有编排器兜底，一次 30 秒的 failover 变成永久宕机，直到人工介入。这才是真正的痛点。\n\n## 建议处置\n\n先定性再动手 —— 这是**要不要新增一个能力**的决定，不是修 bug：\n\n**选项 A：不做，明确声明由编排器负责。** 把\"driver 不重连，恢复依赖编排器重启\"写进 `data-modeling/drivers.mdx` 和生产就绪清单，并要求配 liveness/readiness 探针。前提是探针得先能发现（本批第一个 issue）。成本最低，且对 k8s 部署是正确答案。\n\n**选项 B：在 driver 层做有界重连。** knex 自带连接池，`SELECT 1` 失败后重建 pool 是可行的；mongodb 官方 driver 其实自带 auto-reconnect，需要先核实我们的用法有没有把它关掉或绕过。要点：指数退避 + 上限、不能让重连风暴打垮刚恢复的数据库、必须可观测（重连中/已恢复要有明确信号，不能又变成一个\"声称能恢复\"的黑盒）。\n\n倾向 **A + 把 B 限定在自托管形态**：k8s 场景下重连是重复造轮子，而单机场景才是没有兜底的那个。但这需要先确认单机自托管是不是我们要支持的一等形态。\n\n无论选哪个，**不要重新引入那句\"may recover via lazy reconnection\"**，除非它真的成立。\n\n## 关联\n\n- #3741 / #3751（删掉了这句假承诺；本 issue 跟踪能力本身）\n- 本批第一个 issue（探针看不见数据库 —— 选项 A 成立的前提）\n- Prime Directive #10"
+}

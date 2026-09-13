@@ -1,0 +1,33 @@
+{
+  "number": 3370,
+  "kind": "issue",
+  "title": "i18n: extract + gate declared action/UI labels (they leak English in a zh-CN workspace)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-20T15:42:37Z",
+  "updated_at": "2026-07-28T02:41:53Z",
+  "closed_at": "2026-07-28T02:41:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3370",
+  "body": "## Problem\n\nIn a zh-CN workspace, the platform **chrome** is localized (审批中心, 待审批, 全部标记为已读, toasts…), but **author/plugin-declared metadata labels leak English**:\n\n- The `sys_approval_request` decision actions render **`Approve / Reject / Reassign / Send back / Request info`** in the drawer's `DeclaredActionsBar`, right next to the inbox's own localized **通过 / 拒绝** buttons — mixed *and* inconsistent within one screen.\n- Some field labels surface raw (e.g. `Owner Id` on the record card).\n\nFound in the #3358 sweep (§7 i18n). The Console renders a declared action's `label` verbatim, so an un-translated declared label shows in the source language regardless of the viewer's locale.\n\n## Ask — extend i18n coverage + a gate to declared labels\n\n- [ ] **`os i18n extract`** covers declared **action** labels (and other declared UI-facing strings not currently extracted), so they land in the translation bundles.\n- [ ] Ship translation bundles for **platform/plugin-declared actions** — starting with the `@objectstack/plugin-approvals` decision actions (`approval_approve` / `approval_reject` / `approval_reassign` / `/revise` / request-info / remind / recall / resubmit).\n- [ ] **A lint check** (natural extension of `os lint` i18n / `--include-platform`) that flags a declared action/label string with **no translation** in a configured target locale — so this can't regress silently.\n\n## Why\n\"Declared metadata is localizable\" should hold for the *whole* declared surface, not just object/field labels. Closes the mixed-language experience and makes it a build-time signal.\n\nRefs: #3358 (sweep, §7 · #3347 covered action **result-dialog** copy but not action **labels**). Console symptom tracked in objectstack-ai/objectui#2762.\n"
+}

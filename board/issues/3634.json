@@ -1,0 +1,34 @@
+{
+  "number": 3634,
+  "kind": "pull_request",
+  "title": "chore(deps)(deps): bump the production-dependencies group across 1 directory with 2 updates",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "dependabot[bot]",
+    "id": 49699333,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xs"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T11:25:46Z",
+  "updated_at": "2026-07-27T11:51:18Z",
+  "closed_at": "2026-07-27T11:51:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3634",
+  "body": "[//]: # (dependabot-start)\n⚠️  **Dependabot is rebasing this PR** ⚠️ \n\nRebasing might not happen immediately, so don't worry if this takes some time.\n\nNote: if you make any changes to this PR yourself, they will take precedence over the rebase.\n\n---\n\n[//]: # (dependabot-end)\n\nBumps the production-dependencies group with 2 updates in the / directory: [fumadocs-core](https://github.com/fuma-nama/fumadocs) and [fumadocs-ui](https://github.com/fuma-nama/fumadocs).\n\nUpdates `fumadocs-core` from 16.12.1 to 16.13.0\n<details>\n<summary>Commits</summary>\n<ul>\n<li><a href=\"https://github.com/fuma-nama/fumadocs/commit/b939cc7c3a57694984bf8288b88586170a55f114\"><code>b939cc7</code></a> Version Packages (<a href=\"https://redirect.github.com/fuma-nama/fumadocs/issues/3439\">#3439</a>)</li>\n<li><a href=\"https://github.com/fuma-nama/fumadocs/commit/5929a5c3d78d5aa22e97c546d80685b50aeaf464\"><code>5929a5c</code></a> fix(core): better negotation for Markdown</li>\n<li><a href=\"https://github.com/fuma-nama/fumadocs/commit/3085a024549ca47881d02a1d809fd700d168c6fc\"><code>3085a02</code></a> fix(ui): registry build error</li>\n<li><a href=\"https://github.com/fuma-nama/fumadocs/commit/ef278055825490afa68f9f0915e71e0a03780f2c\"><code>ef27805</code></a> feat(notion): support notion content source</li>\n<li><a href=\"https://github.com/fuma-nama/fumadocs/commit/6cbfe21b155a90fd102446ee889a917620c93d53\"><code>6cbfe21</code></a> feat(ui): shortcut for theme toggle</li>\n<li><a href=\"https://github.com/fuma-nama/fumadocs/commit/417caa544b31e2cd2fd198677124e68e45f66a3c\"><code>417caa5</code></a> feat(obsidian): css preset</li>\n<li><a href=\"https://github.com/fuma-nama/fumadocs/commit/ff3272452fc9c54e14916a90e394c0a9746414a6\"><code>ff32724</code></a> Merge pull request <a href=\"https://redirect.github.com/fuma-nama/fumadocs/issues/3435\">#3435</a> from fuma-nama/tegami/version-packages</li>\n<li><a href=\"https://github.com/fuma-nama/fumadocs/commit/6d7ba929487d30f88bb6d86c06579393556679b2\"><code>6d7ba92</code></a> fix react router</li>\n<li>See full diff in <a href=\"https://github.com/fuma-nama/fumadocs/compare/fumadocs@16.12.1...fumadocs@16.13.0\">compare view</a></li>\n</ul>\n</details>\n<br />\n\nUpdates `fumadocs-ui` from 16.12.1 to 16.13.0\n<details>\n<summary>Commits</summary>\n<ul>\n<li><a href=\"https://github.com/fuma-nama/fumadocs/commit/b939cc7c3a57694984bf8288b88586170a55f114\"><code>b939cc7</code></a> Version Packages (<a href=\"https://redirect.github.com/fuma-nama/fumadocs/issues/3439\">#3439</a>)</li>\n<li><a href=\"https://github.com/fuma-nama/fumadocs/commit/5929a5c3d78d5aa22e97c546d80685b50aeaf464\"><code>5929a5c</code></a> fix(core): better negotation for Markdown</li>\n<li><a href=\"https://github.com/fuma-nama/fumadocs/commit/3085a024549ca47881d02a1d809fd700d168c6fc\"><code>3085a02</code></a> fix(ui): registry build error</li>\n<li><a href=\"https://github.com/fuma-nama/fumadocs/commit/ef278055825490afa68f9f0915e71e0a03780f2c\"><code>ef27805</code></a> feat(notion): support notion content source</li>\n<li><a href=\"https://github.com/fuma-nama/fumadocs/commit/6cbfe21b155a90fd102446ee889a917620c93d53\"><code>6cbfe21</code></a> feat(ui): shortcut for theme toggle</li>\n<li><a href=\"https://github.com/fuma-nama/fumadocs/commit/417caa544b31e2cd2fd198677124e68e45f66a3c\"><code>417caa5</code></a> feat(obsidian): css preset</li>\n<li><a href=\"https://github.com/fuma-nama/fumadocs/commit/ff3272452fc9c54e14916a90e394c0a9746414a6\"><code>ff32724</code></a> Merge pull request <a href=\"https://redirect.github.com/fuma-nama/fumadocs/issues/3435\">#3435</a> from fuma-nama/tegami/version-packages</li>\n<li><a href=\"https://github.com/fuma-nama/fumadocs/commit/6d7ba929487d30f88bb6d86c06579393556679b2\"><code>6d7ba92</code></a> fix react router</li>\n<li>See full diff in <a href=\"https://github.com/fuma-nama/fumadocs/compare/fumadocs@16.12.1...fumadocs@16.13.0\">compare view</a></li>\n</ul>\n</details>\n<br />\n\n\nDependabot will resolve any conflicts with this PR as long as you don't alter it yourself. You can also trigger a rebase manually by commenting `@dependabot rebase`.\n\n[//]: # (dependabot-automerge-start)\n[//]: # (dependabot-automerge-end)\n\n---\n\n<details>\n<summary>Dependabot commands and options</summary>\n<br />\n\nYou can trigger Dependabot actions by commenting on this PR:\n- `@dependabot rebase` will rebase this PR\n- `@dependabot recreate` will recreate this PR, overwriting any edits that have been made to it\n- `@dependabot show <dependency name> ignore conditions` will show all of the ignore conditions of the specified dependency\n- `@dependabot ignore <dependency name> major version` will close this group update PR and stop Dependabot creating any more for the specific dependency's major version (unless you unignore this specific dependency's major version or upgrade to it yourself)\n- `@dependabot ignore <dependency name> minor version` will close this group update PR and stop Dependabot creating any more for the specific dependency's minor version (unless you unignore this specific dependency's minor version or upgrade to it yourself)\n- `@dependabot ignore <dependency name>` will close this group update PR and stop Dependabot creating any more for the specific dependency (unless you unignore this specific dependency or upgrade to it yourself)\n- `@dependabot unignore <dependency name>` will remove all of the ignore conditions of the specified dependency\n- `@dependabot unignore <dependency name> <ignore condition>` will remove the ignore condition of the specified dependency and ignore conditions\n\n\n</details>"
+}

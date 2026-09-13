@@ -1,0 +1,30 @@
+{
+  "number": 3611,
+  "kind": "issue",
+  "title": "UI view route speaks two dialects — REST's path-param form is unreachable by the SDK's query-param form (#3587 finding)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T09:23:47Z",
+  "updated_at": "2026-07-27T10:37:48Z",
+  "closed_at": "2026-07-27T10:37:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3611",
+  "body": "Found by the #3587 tranche-2 audit; ledgered as `mismatch` in `packages/rest/src/rest-route-ledger.ts` (PR #3609).\n\n## The split\n\n- **REST** mounts `GET /api/v1/ui/view/:object/:type` — type as a **path segment** (`rest-server.ts:3396`; 501 when `protocol.getUiView` is absent).\n- **The SDK** (`client.meta.getView`, `packages/client/src/index.ts:522-524`) sends `GET /ui/view/:object?type=` — type as a **query param**.\n- **The dispatcher** `/ui` domain accepts both forms (`domains/ui.ts:32-50`; dispatcher ledger row `GET /ui/view/:object/:type?`).\n\nSo the SDK's request pattern (two path segments, not three) never matches REST's route; it falls through to the dispatcher, which answers. REST's route is dead weight for the SDK — and in project-scoped mode, where REST is the only surface registered under `/api/v1/environments/:environmentId`, a scoped query-dialect call would have no server at all (the scoped client currently exposes no `getView`, so this is latent, not live).\n\n## Fix options\n\n- **A (recommended): client switches to the path dialect** — `meta.getView` builds `/ui/view/:object/:type`. Both surfaces already accept it (dispatcher's `:type?` is optional-typed), no server change, non-breaking on the wire. One-line client change + tests.\n- **B: REST additionally registers the query form** (`GET /ui/view/:object`). Keeps two dialects alive forever.\n- **C: retire REST's ui route** and let the dispatcher own `/ui`. Blocked on scoped-mode coverage (the dispatcher does not strip `/environments/:id`, `http-dispatcher.ts:1223`).\n\n## Acceptance\n\n- `meta.getView` provably reaches both surfaces (unit test asserts the built URL; conformance row flips `mismatch` → `sdk`).\n- Both route ledgers updated and green.\n\nRefs: #3587, PR #3609."
+}

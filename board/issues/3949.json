@@ -1,0 +1,34 @@
+{
+  "number": 3949,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0110 — action identity is `name`; declaration-admission gate for executables (#3935)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T12:24:42Z",
+  "updated_at": "2026-07-29T12:33:30Z",
+  "closed_at": "2026-07-29T12:33:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-29T12:33:28Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3949",
+  "body": "Design record for #3935 and the fail-closed retirement of \"handler-only\" dispatch. Docs-only — no runtime change in this PR (empty-frontmatter changeset per the #3373 convention).\n\n**Targeted at protocol 17**, which is in RC now (`@objectstack/spec@17.0.0-rc.0`). Revised from the first draft, which staged the inversion across two majors — see *Fail-closed in 17* below.\n\n## Why an ADR and not just the fix\n\n#3935's narrow fix (REST resolves declarations by `name`, then rotates handler-key candidates the way MCP already does) needs no new decision — it implements contracts the spec and ADR-0066 D4 already state. What *does* need a decision is everything around it: the fail-open `catch` in `domains/actions.ts` currently reads \"no declaration resolved\" as \"author wanted no gate\", which collapses three states with opposite meanings (declared-but-missed, metadata-plane-unreachable, genuinely undeclared) into one ungated branch. Flipping that default is a breaking behavioral contract change, and in this repo those carry ADR numbers so the next \"this catch is inconvenient\" PR can't silently revert it.\n\n## The finding that motivates it\n\nThe REST route's `:action` segment does double duty — declaration lookup treats it as a `name`, handler dispatch treats it as a registry key. For a target-bound action those are different strings, so **the two documented callers each work on exactly the half the other breaks**:\n\n| Caller | URL segment | Handler dispatch | D4 gate + 0104 params |\n|---|---|---|---|\n| Documented curl (`name`) | `complete_task` | ❌ not found | ✅ resolved |\n| Console (`target \\|\\| name`) | `completeTask` | ✅ runs | ❌ **silently skipped** |\n\nThe docs' claim that \"the Console button and the API call run the same gate and handler\" is currently false in both directions. Nobody noticed because each caller took the path that worked for it.\n\n## The six rulings (D1–D6)\n\n1. **D1** — invocation identity is the declarative `name` on every surface; `target` is a binding expression (polymorphic, interpolatable, non-unique) and never an identity key. **No transitional target-acceptance path** — objectui ships lockstep inside the same major, so that window is empty.\n2. **D2** — resolve-then-address: declaration first, handler-key candidates derived from it; the MCP rotation becomes a shared helper both surfaces consume.\n3. **D3** — resolution trichotomy: found → gate + dispatch; metadata plane unreachable → **503** (an availability failure is not an authorization decision); genuinely undeclared → **refuse, fail-closed in 17**, with `OS_ALLOW_UNDECLARED_ACTIONS=1` as a documented migration valve slated for removal in 18.\n4. **D4** — \"declared but hidden\" is the blessed headless pattern; `registerAction` without a declaration has no remaining legitimate use (server-internal logic is a plain function).\n5. **D5** — `registerAction` ↔ declaration reconciliation lint + boot inventory, in both directions — the mechanised **converse of ADR-0078**: 0078 outlaws declarations nothing executes (silently inert); 0110 outlaws executables nothing declares (silently ungoverned). Together: everything declared runs, everything that runs is declared.\n6. **D6** — security-gate strictness is opt-**out**, never opt-in: `OS_ALLOW_*` is the sanctioned shape for security escape hatches; `OS_*_STRICT_ENABLED` stays reserved for non-security contracts (existing flags not renamed).\n\n## Fail-closed in 17, not staged across 17→18\n\nThe first draft staged this (warn in 17, CI-only, refuse in 18). Rejected on timing: 17 is in RC, so the breaking window the staging was waiting for is the one already open, and waiting would hold a known authorization hole through an entire extra major — parked in exactly the \"parses but does not enforce\" state ADR-0049 prohibits. It also joins two siblings already in the v17 breaking set: *\"A flow run with no trigger user may not touch data\"* (#3760) and *\"A datasource that cannot connect fails the boot\"* (#3741/#3758/#3826). A third fail-closed inversion belongs in the same release.\n\nWhat the staging was really protecting — never refusing a *correctly declared* action — is preserved directly as the **D2-first invariant**: refusal must land on top of correct resolution, never before it. Three things ship together in 17 or the refusal is undiagnosable: D2's rotation, the D5 lint (find orphans at build time, pre-upgrade), and the boot inventory (a hard failure with a checklist instead of a support ticket).\n\n## Lineage\n\nDeliberately positioned as an extension of standing rulings, not a new invention: ADR-0049 (enforce-or-remove — a gate that parses but does nothing manufactures false compliance), ADR-0078 (the converse, see D5), ADR-0096 (missing *identity* must not fail open; this ADR applies the same posture to missing *declaration*), ADR-0109 (an undeclared action materialises no `action_<name>` tool, so the AI surface already can't see it — REST is the one surface that lets it run anyway).\n\n## Review focus\n\n- **D3's blast radius.** A scan of `packages/platform-objects` + `examples` finds no action declaring action-level `requiredPermissions` together with a `target`, so the gate gap is latent rather than live today — but the refusal also hits genuinely undeclared handlers. Anyone aware of those in real apps beyond the examples?\n- **The valve's removal target (18).** Stated so it doesn't silently become permanent. Reasonable, or should it be removal-on-evidence instead of removal-by-version?\n- **The deferred alternative** — registration-time dual-key aliasing instead of dispatch-time rotation. Deferred, not rejected; objections welcome now if the registry migration is actually cheap.\n\nCloses nothing by itself; #3935 stays open to track the implementation.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01DTTKgYriDB6RVrkYjxxnG1"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 3604,
+  "kind": "issue",
+  "title": "ADR-0076 D7: 引擎分仓触发门控（周指标观测伞）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T09:15:03Z",
+  "updated_at": "2026-07-27T12:16:41Z",
+  "closed_at": "2026-07-27T12:16:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3604",
+  "body": "从 #2462 拆出的唯一余项。**这不是待办，是门控观测**——除非指标达标，否则无人力投入。\n\n## 目标（ADR-0076 D7）\n\n当 ObjectQL 引擎核心定型后，按 **objectui 模式**（sibling link、不发版）把引擎抽为独立地基仓（含 spec/对象根），framework 与 objectbase 共享。\n\n## 触发条件\n\n`engine.ts` / `registry.ts` 的**跨包提交比例**降到低位并稳定（引擎 API 不再与平台共演化）。\n\n- **指标机制**：`.github/workflows/engine-split-metric.yml`（每周一 03:17 UTC 自动跑 `scripts/check-engine-split-ratio.mjs --days 90`，读数落 run summary）。\n- **当前读数**：**95.2%**（118/124，90 天窗口，2026-07-27 实测）；ADR 定稿时 ~88%。趋势仍是高位——引擎在持续吸收平台演化。\n- **阈值未决**（ADR-0076 OQ#5）：达到\"低位\"的具体数字待定，建议指标进入 <40% 且连续 4 周稳定时再议。\n\n## 为什么现在不分（决策依据，防重新发明）\n\n- 88-95% 跨包比例 = 分仓后每个引擎改动都是跨仓原子提交的拆分，维护地狱重演（正是当年 @objectql/core 独立仓合并回来的原因——但这次根因是引擎不稳定，非工具差）。\n- objectui 能分是因为它是**稳定下游叶子**；引擎是上游地基。\n- 轻量嵌入诉求已由 `@objectstack/objectql/core` 精简入口满足（零 protocol、tree-shakeable，D1/D2 边界 ratchet 在位）。\n\n## 历史脉络\n\n全部背景与已完成工作见 #2462（D1-D12、Step 2 三腿、D11 拆解十刀均已收官）及 docs/adr/0076-objectql-core-tiering.md。\n\n_触发时的执行配方也在 ADR：sibling-link 模式、含 spec/对象根、framework+objectbase 双消费方。_"
+}

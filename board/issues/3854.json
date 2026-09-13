@@ -1,0 +1,35 @@
+{
+  "number": 3854,
+  "kind": "pull_request",
+  "title": "feat(spec): cover all three fold-and-drop aliases, not just `execute` (#3743 follow-up)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T11:53:33Z",
+  "updated_at": "2026-07-28T12:07:27Z",
+  "closed_at": "2026-07-28T12:07:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T12:07:25Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3854",
+  "body": "Follow-up to #3838 (closed #3743).\n\n## Why\n\n#3838 introduced `lintDeprecatedAliases` — the pre-parse pass that reports an alias **the parse itself is about to consume** — with exactly one rule, for `action.execute`. #3743 predicted the pass would earn its keep beyond that rule:\n\n> a pre-parse hook is the only place any \"author wrote a deprecated alias that parse will consume\" warning can live, so the pass is likely to earn its keep beyond this one rule.\n\nIt does. `execute` was never special. Grepping the spec for fold-and-drop transforms returns exactly three, and the other two are structurally identical:\n\n| Transform | Alias → canonical | Drop condition |\n|---|---|---|\n| `ui/action.zod.ts` | `execute` → `target` (#3713/#3742) | `if (execute && !rest.target)` — **covered by #3838** |\n| `data/field.zod.ts` | `conditionalRequired` → `requiredWhen` (#3754/#3764) | `if (conditionalRequired && !rest.requiredWhen)` |\n| `ai/agent.zod.ts` | `knowledge.topics` → `knowledge.sources` (#1878/#1891) | `if (rest.sources === undefined && topics !== undefined)` |\n\nAll three: canonical wins, alias vanishes from the parsed output. Declare both slots with different values and one is discarded with **no signal** — and no downstream check can report it, because the parse already erased the evidence. That is the whole reason the pass exists as a rule *set* rather than one hard-coded rule.\n\n## What's added\n\nTwo rules, same shape, same advisory severity, same two surfaces (`defineStack` at authoring time; `os build` / `os validate` for stacks that skip strict `defineStack`). Neither fails the build; both name the two values and give the one-line fix.\n\n**`field-requiredwhen-conditionalrequired-conflict`** — the discarded predicate never gates the field.\n- Covers fields on objects **and** on object extensions (same `FieldSchema`, same transform, same silent discard).\n- Compares the predicate **text**, so `'record.paid'` and `{ dialect: 'cel', source: 'record.paid' }` are recognised as the same predicate and stay quiet — the envelope is what a bare string lowers into, so neither form loses anything.\n\n**`agent-knowledge-sources-topics-conflict`** — the discarded list names RAG sources the agent never recruits from.\n- Compares by **set**: `sources: ['a','b']` beside `topics: ['b','a']` recruits the same context, so nothing is lost and the rule stays quiet. Order and repetition are not meaningful for either slot.\n\nThe three findings now share one builder, so they phrase the common half identically (which slot wins, that the alias is dropped, delete it) while each still names what its own discarded value would have done.\n\n## A docs bug found on the way\n\n`content/docs/ai/agents.mdx` documented `knowledge` as `{ topics: string[], indexes: string[] }` and used `topics:` in **all three** code examples — teaching the deprecated alias as if it were the canonical key, and contradicting `skills/objectstack-ai/SKILL.md`, which already said \"`sources` (canonical; `topics` is a deprecated alias)\". The human docs and the AI-authoring skill disagreed, and the human docs were the wrong one. Examples now use `sources`; the field table names both and says which is which.\n\n`content/docs/data-modeling/fields.mdx` gains the same warning note #3838 added to the objectui actions reference.\n\n## Changes\n\n- `packages/spec/src/shared/deprecated-aliases.ts` — two rules + the shared finding builder and the expression/list helpers they need\n- `packages/spec/src/index.ts`, `packages/spec/api-surface.json` — two new rule-id exports (0 breaking, 2 added)\n- `content/docs/ai/agents.mdx`, `content/docs/data-modeling/fields.mdx`\n- changeset\n\nNo CLI change: both call sites already loop over whatever the pass returns, so the new rules reach `os build` / `os validate` and `defineStack` with no rewiring — which is what \"severity modelled from day one\" bought.\n\n## Testing\n\n- `packages/spec/src/shared/deprecated-aliases.test.ts` — 26 cases (was 13). New: both-declared for each rule, one-slot-only, envelope-vs-string equivalence, envelope on both slots, object extensions, set-equality in any order, empty list treated as undeclared, missing `knowledge` block, all three rules firing independently in one pass, and a canonical-keys-only stack returning nothing.\n- `packages/spec/src/stack.test.ts` — a **field** alias surfaces through `defineStack` on the same terms as an action alias, proving the wiring is rule-agnostic and not action-shaped, and the parse still drops the alias.\n- `@objectstack/spec` 6796 passed · `@objectstack/cli` 738 passed · all example apps typecheck and pass.\n- Every ESLint-job and typecheck-job gate run locally: `lint`, `check:nul-bytes`, `check:doc-authoring`, `check:role-word`, `check:org-identifier`, `check:authz-resolver`, `check:release-notes`, spec `tsc --noEmit`, `check:docs`, `check:skill-refs`, `check:react-blocks`, `check:api-surface`, `check:liveness`, examples typecheck, downstream-contract typecheck.\n\nAll three rules against the built spec:\n\n```\n• action 'convert' on object 'crm_task'\n    Action declares both 'target' ('preferredHandler') and the deprecated alias 'execute'\n    ('legacyHandler'). 'target' wins: … so 'legacyHandler' never runs.\n    rule: action-target-execute-conflict\n\n• field 'due_date' on object 'crm_task'\n    Field declares both 'requiredWhen' (`record.stage == \"closed\"`) and the deprecated alias\n    'conditionalRequired' (`record.amount > 0`). 'requiredWhen' wins: … so `record.amount > 0`\n    never gates the field.\n    rule: field-requiredwhen-conditionalrequired-conflict\n\n• agent 'support_bot' knowledge\n    Agent knowledge declares both 'sources' (['faq', 'policies']) and the deprecated alias\n    'topics' (['legacy_kb']). 'sources' wins: … so ['legacy_kb'] is never recruited into RAG context.\n    rule: agent-knowledge-sources-topics-conflict\n```\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JqC9ckaLbmhmytt65Gxi96)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 3850,
+  "kind": "pull_request",
+  "title": "fix(sharing,driver-sql): a rule authored in Setup actually applies — and switching it off actually withdraws access",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T11:04:17Z",
+  "updated_at": "2026-07-28T14:16:59Z",
+  "closed_at": "2026-07-28T14:16:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T14:16:56Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3850",
+  "body": "Closes #3821 (server-side half). UI half: objectstack-ai/objectui#2920.\n\n## What was broken\n\n**A rule authored in Setup did nothing to the records already there.** Writing a `sys_sharing_rule` rebound the per-record hooks, which only makes the rule reach records written *from then on*. An admin who created a rule and switched it on watched the recipient's list stay empty until somebody happened to touch each record.\n\n**Switching a rule off did not withdraw access.** Deactivating — or deleting — left every grant it had already issued in place, and boot backfill only reconciles ACTIVE rules, so those grants outlived restarts *while the UI displayed the rule as disabled*. The reconcile existed, but only behind `POST /sharing/rules/:id/evaluate`, which the Console never calls and offers no button for.\n\n**An unsortable query lost its rows, not just its order.** `SqlDriver.find()` already recovered from a SELECT projection naming a missing column; the identical failure one clause over — an unknown ORDER BY column — fell through to `return []`. Because `count()` is a separate statement, the list endpoint answered `200` with `records: []` and `total: 3`: the rows are there, none are shown, nothing is logged. Same family as the `$`-param footgun closed by #2926.\n\n## The fixes\n\n- Every **non-system** write to `sys_sharing_rule` now reconciles that rule's grants, chained behind the existing rebind. Insert/update run the same diff-based `evaluateRule` the REST endpoint runs (it purges when the rule is inactive); delete purges via the new `SharingRuleService.revokeRuleGrants`, because `evaluateRule` throws `RULE_NOT_FOUND` once the row is gone — which is also why a rule deleted through the plain data API used to orphan its grants. Seeding / package bootstrap write with `isSystem` and are skipped (`kernel:bootstrapped` backfills those). Best-effort: a failed reconcile logs and never fails the authoring write.\n- **Rows outrank their order.** The unknown-column retry ladder drops the projection first (likelier culprit, cheaper to lose), then the sort, then gives up. An unsortable query returns its rows **unordered instead of empty**. Errors that aren't about an unknown column still propagate.\n- zh-CN / ja-JP / es-ES `sys_sharing_rule` help text refreshed — it still described `recipient_type` in terms of `department` (the enum value is `business_unit`) and told admins to enter a queue name for `recipient_id` (`queue` was removed in ADR-0078); es-ES rendered `position` / `unit_and_subordinates` as \"rol\".\n\n## Verification\n\nBrowser-driven against `examples/app-showcase` — all data, accounts and rules created through the Console UI:\n\n- Enabling a rule now grants the recipient **every** matching record immediately (before: only records that happened to be touched afterwards)\n- Switching it off takes them all away (before: still visible, and still visible after a restart)\n- Criteria authored in the visual builder is honored: `{\"pinned\":true}` on an owner-private object granted exactly the matching records\n- Access levels: `read` → readable, write refused; `edit` → writable and saves\n- Driver: `$orderby=nosuchfield asc` now returns 3 rows instead of 0\n\nTests: `plugin-sharing` 108 ✓ (7 new reconcile regressions), `driver-sql` 407 ✓ (6 new recovery regressions). Both new suites verified to fail without their fix.\n\n## Known gap, not fixed here\n\n`access_level: 'full'` is **declared but not distinct** — the spec comment says \"Full Access (Transfer, Share, Delete)\", but `sharing-service.ts` only ever tests `{ $in: ['edit','full'] }`, so `完全访问` behaves exactly like `编辑`. Worth its own issue; implementing delete/transfer/share semantics is a feature decision, not a bug fix.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

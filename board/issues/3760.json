@@ -1,0 +1,32 @@
+{
+  "number": 3760,
+  "kind": "issue",
+  "title": "The #1888 user-less fail-open is wider than the lint that guards it — record-change flows fired by a system write run UNSCOPED, unlinted",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T02:20:02Z",
+  "updated_at": "2026-07-28T05:15:06Z",
+  "closed_at": "2026-07-28T05:15:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3760",
+  "body": "Filed per Prime Directive #10 to capture the decision #3712 deliberately left open. #3749 (which closed #3712) decoupled write **provenance** from **identity**, so the fail-open can now be decided on its own merits instead of being forced by an unrelated fix — but it did not decide it.\n\n## The claim as it stands today\n\nADR-0049 / #1888 document the user-less fail-open as a *schedule* problem, guarded by two nets: a loud runtime `[runAs]` warning, and the build-time lint `flow-schedule-runas-unscoped`. Investigating both nets, neither is as strong as the narrative implies.\n\n### Net 1 — the lint never fails the build\n\n`packages/cli/src/commands/compile.ts:400-405`, verbatim:\n\n> Flow authoring anti-pattern lint (#1874) — advisory warnings … **NEVER fails the build.**\n\nIt prints. Nothing stops a publish. For the audience this rule exists to protect — very often an AI generating flow metadata in bulk — an advisory line is close to no net at all.\n\n### Net 2 — the lint covers one shape; the runtime hole has more\n\nThe lint's predicate (`packages/cli/src/utils/lint-flow-patterns.ts:311`):\n\n```ts\nconst runAs = typeof flow.runAs === 'string' ? flow.runAs : 'user';\nif (isScheduleTriggered(flow, startCfg) && runAs !== 'system') { … }\n```\n\nThe runtime's predicate (`packages/services/service-automation/src/runtime-identity.ts`):\n\n```ts\nexport function runIsUnscopedUserMode(context) {\n  return context?.runAs !== 'system' && !context?.userId;\n}\n```\n\n`isScheduleTriggered` ⊊ `!userId`. Anything that resolves no trigger user is unscoped at runtime; only the schedule shape is flagged at authoring time.\n\n## The unlinted path\n\n`packages/triggers/trigger-record-change/src/record-change-trigger.ts:325` forwards the writer's identity with **no fallback**:\n\n```ts\nuserId: session.userId,\n```\n\nand dispatch is suppressed only for `skipTriggers` (line 233) — **`isSystem` does not suppress it**. So:\n\n1. a write carrying `isSystem` and no `userId` — a plugin/service write, the approvals status mirror, or a `runAs:'system'` flow's own data node — lands;\n2. it dispatches the record-change flows bound to that object with `userId: undefined`;\n3. if such a flow left `runAs` at **the spec default `'user'`**, its data nodes run **UNSCOPED**.\n\nNothing flags this at authoring time, and nothing can: whether the triggering write carries a user is only knowable at run time.\n\nGiven that record-change is the most common flow type and `runAs` defaults to `'user'`, this is plausibly the *dominant* real-world shape of the fail-open — not the schedule case the docs and the lint both centre on.\n\n## Exposure\n\nFirst-party content is clean: every schedule-triggered flow in the repo (`examples/app-todo` ×2, `examples/app-showcase`) already declares `runAs: 'system'`, with comments citing ADR-0049. The exposure is third-party and AI-authored metadata.\n\n## Options\n\nA pure authoring-side fix cannot close this — the record-change path is not statically decidable. The convergence point has to be the runtime.\n\n1. **Inherit the posture of the triggering write.** A cascade whose triggering write was `isSystem` runs explicitly `isSystem`; only a genuinely origin-less run (a schedule) is fail-closed or must declare. Effective permissions are unchanged (today's behaviour *is* unscoped), so breakage is close to zero — but the elevation stops being accidental and becomes intentional and audit-attributable, which is what ADR-0049 actually asks for.\n2. **Runtime fail-closed.** User-less + effective `runAs:'user'` → refuse the data op, with an error naming `runAs:'system'` as the fix. Retires the footgun outright, but converts today's working record-change flows into run-time failures that no build surfaces.\n3. **Baseline-member RLS.** Run restricted instead of unscoped. No elevation, but flows that see every row today would silently see fewer or none — a quieter failure mode than an error, and harder to diagnose. This is the outcome #3712 predicted for \"manufacturing a context\".\n4. **Author-side hardening only.** Make the lint blocking and extend it to every statically-decidable shape. Zero breakage, but explicitly leaves the record-change path open.\n\nOption 1 looks like the best breakage-to-benefit ratio; option 2 is the most thorough and the most disruptive.\n\nWhichever is chosen, two fixes stand on their own:\n\n- the `flow-schedule-runas-unscoped` lint should say what it does — today it reads as a gate and behaves as a comment;\n- ADR-0049 / #1888's framing should stop describing this as schedule-specific.\n\nRefs #1888, #3712, #3749, #3456, ADR-0049."
+}

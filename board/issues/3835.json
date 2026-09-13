@@ -1,0 +1,32 @@
+{
+  "number": 3835,
+  "kind": "issue",
+  "title": "跨对象事务批 `POST /batch` 绕过 create 侧的 `readonly` 入口剥离（#3043）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T08:59:40Z",
+  "updated_at": "2026-07-30T03:23:39Z",
+  "closed_at": "2026-07-30T03:23:39Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3835",
+  "body": "## 现象\n\n`POST /api/v1/batch`（跨对象事务批，ADR-0034 / #1604）在事务里**直接调 `ql.insert` / `ql.update`**：\n\n```ts\n// packages/rest/src/rest-server.ts — /batch handler\nif (op.action === 'create') {\n    out.push(await ql.insert(op.object, data, { context: trxCtx, onFieldsDropped }));\n}\n```\n\n而单条创建走的是 `protocol.createData`，它在进引擎**之前**先跑一次 `stripReadonlyForInsert`：\n\n```ts\n// packages/metadata-protocol/src/protocol.ts — createData\nconst data = stripReadonlyForInsert(\n    this.engine.registry?.getObject(request.object),\n    request.data,\n    request.context,\n);\n```\n\n这层入口剥离存在的原因是引擎的 INSERT 路径**对静态 `readonly` 免疫**（#3413：`stripReadonlyFields` 只在 update 分支跑）。也就是说：\n\n- `POST /api/v1/data/:object` → 非系统调用者塞 `readonly` 列 → 被剥离；\n- `POST /api/v1/batch`（`action: 'create'`）→ 同一个列 → **原样落库**。\n\n同一个语义，两条写路径两个结果。\n\n## 复现思路\n\n对象 A 上声明一个 `readonly: true` 字段（例如 `approval_status`），以普通用户身份：\n\n1. `POST /api/v1/data/A  {\"approval_status\":\"approved\", ...}` → 该字段被丢弃，取默认值（并在 `droppedFields` 里报出来）；\n2. `POST /api/v1/batch  {\"operations\":[{\"object\":\"A\",\"action\":\"create\",\"data\":{\"approval_status\":\"approved\", ...}}]}` → 该字段被写进去。\n\n## 影响\n\n`readonly` 在 #2948/#3043 之后是**写路径约束**，不只是渲染提示。批量创建这条路留着口子，意味着任何能调 `/batch` 的客户端都能给审计戳、来源字段、审批状态镜像等只读列赋任意值——而这类字段常常正是别处逻辑信赖的。Console 的主记录表单（master-detail）走的就是 `/batch`，所以这不是一条冷门路径。\n\n## 建议方向\n\n按 PD #12「修生产者、别在消费者兜底」：把 create 侧的入口剥离**提到两条路共用的位置**，而不是在 `/batch` 里再抄一遍 `stripReadonlyForInsert`。两种可行落点：\n\n- 让 `/batch` 的 create 分支走 `protocol.createData` 的同一层（而不是裸 `ql.insert`）；或\n- 把静态 `readonly` 的 INSERT 剥离下沉进引擎（撤销 #3413 的 insert 豁免），入口层那次剥离随之退化为冗余并可移除。\n\n第二种更接近「一个契约一处执行」，但要先确认 #3413 当初豁免 insert 的理由（系统种子 / seed 写入路径）在下沉后仍走得通——那批调用是 `isSystem`，本来就在剥离的豁免名单里。\n\n## 来源\n\n在 #3794 排查中发现（修复 PR：#3834，该 PR 只给 `/batch` 接上了 `onFieldsDropped` 的写可观测性，**没有**动这里的剥离行为——按 AGENTS.md PD #10 单独立此 issue，不扩大原范围）。"
+}

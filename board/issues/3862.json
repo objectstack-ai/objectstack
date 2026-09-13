@@ -1,0 +1,30 @@
+{
+  "number": 3862,
+  "kind": "issue",
+  "title": "Explicit syntax for a legitimately optional filter condition (design only — no implementation until a real request)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T12:05:02Z",
+  "updated_at": "2026-07-28T13:50:52Z",
+  "closed_at": "2026-07-28T13:50:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3862",
+  "body": "**Status: design placeholder. Do not implement until a real user asks.** Filed so the next person who hits the guard finds the reasoning instead of re-deriving it — or worse, relaxing the guard.\n\n## The gap\n\nSince #3810, a CRUD node refuses to run when interpolation erased any authored filter condition. That is correct as a default: an absent condition does not narrow a query, it widens it (see the decision note on #3810 for why `get_record` keeps the hard failure).\n\nBut it closes off a shape that is sometimes genuinely intended:\n\n> Filter by `campaign` **if** the run received one; otherwise return all rows.\n\nToday that is inexpressible. `{ campaign: '{campaignId}' }` on a run without `campaignId` is indistinguishable — to the guard and to a reader — from `{ campaign: '{campiagnId}' }`, a typo. Both erase a condition; the guard refuses both, which is the right call precisely because it cannot tell them apart.\n\n## The constraint any design must respect\n\n**Fail-closed stays the default.** The author must say \"this condition is optional\" explicitly, at authoring time. An implicit or inferred optionality re-opens the fail-open direction #3810 closed, and the typo case is far more common than the optional case.\n\n## Options sketched (not chosen)\n\n**A. An `$optional` marker on the condition**\n\n```ts\nfilter: { campaign: { $optional: '{campaignId}' } }\n```\n\n- Local and readable; the intent sits exactly where the risk is.\n- Needs a spec addition and a runtime branch in `resolveNodeFilter` (drop this key when it does not resolve, keep refusing on every other erasure).\n- The lint in #3861 must learn the marker or it will error on a deliberately-optional filter at build time.\n- Question: does an unresolved `$optional` drop the condition, or is there a fallback value slot?\n\n**B. Branch to two `get_record` nodes**\n\n- Zero new syntax; a `decision` node routes on whether the variable is set, each branch carrying its own fully-literal filter.\n- Both queries are explicit and greppable — arguably the clearest thing to read.\n- Verbose, and it duplicates the rest of the filter across both branches. Gets ugly with two or more optional conditions (2^N branches).\n\n**C. Author-side default at the variable, not the filter**\n\n- Give the flow variable a declared default (`campaignId ?? '*'`) so the token always resolves.\n- Requires a filter semantic for \"match anything,\" which is a bigger and riskier change than either of the above.\n\n## Recommendation if this ever gets picked up\n\nStart from **A**, and require it to be inert unless explicitly written. **B** already works today with no platform change — point people at it in the meantime; it is the honest answer for the one-or-two-condition case.\n\n## Do not\n\nRelax the #3810 guard or downgrade it to a warning to serve this use case. That trades a deterministic build/run failure for a silent data-widening bug, and the optional case is the rare one. See the decision note on #3810.\n\n## Related\n\n- #3810 — the guard, and why it fails closed\n- #3861 — raises the build-time lint to `error` for filter positions\n- #3863 — node-level error branches, which would lower the cost of strict guards generally"
+}

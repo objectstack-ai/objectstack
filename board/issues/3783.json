@@ -1,0 +1,32 @@
+{
+  "number": 3783,
+  "kind": "issue",
+  "title": "Approvals status mirror drops the acting user, forcing every downstream record-change flow to `runAs:'system'`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T04:28:29Z",
+  "updated_at": "2026-07-28T05:40:01Z",
+  "closed_at": "2026-07-28T05:40:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3783",
+  "body": "Found while surveying #3760's blast radius.\n\n`approval-service.ts:977` writes the decision back onto the target business record with a bare system context:\n\n```ts\nawait this.engine.update(object, { id: recordId, [field]: status }, { context: SYSTEM_CTX });\n```\n\nwhere `SYSTEM_CTX` (`:144`) is `{ isSystem: true, positions: [], permissions: [] }` — **no `userId`**. Six call sites stamp a status this way: `:1230` (pending), `:1432` (approved/rejected), `:1539` (recalled), `:1639` (revision budget exhausted), `:1677` (returned), `:2335` (dead-run sweep).\n\nEvery one of those is an action **a specific human just took** — a submitter submitting, an approver approving. The identity is known at the call site and thrown away.\n\nConsequence, now that #3760 refuses user-less data ops: any record-change flow bound to that object — \"when the invoice is approved, do X\", the single most natural approvals automation — has no trigger user, so it must declare `runAs: 'system'` or be refused. Authors are pushed to blanket elevation for a case where a perfectly good scoped identity existed.\n\n**The fix already has a first-party precedent in the same plugin.** `approval-node.ts:152-157` re-attaches the acting user onto the system context:\n\n```ts\n{ ...SYSTEM_CTX, userId: context?.userId }\n```\n\nDoing the same on the status mirror would let those cascades run as the deciding user with RLS enforced, instead of requiring elevation. Worth checking the other `SYSTEM_CTX` writers in that file against the same standard.\n\nNote the mirror write must stay `isSystem` (the submitter generally cannot edit a locked/submitted record) — this is about adding attribution to it, not removing elevation.\n\nRefs #3760, #3703."
+}

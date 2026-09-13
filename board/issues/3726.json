@@ -1,0 +1,32 @@
+{
+  "number": 3726,
+  "kind": "issue",
+  "title": "DataQualityRulesSchema 是 2026-06 字段剪除留下的孤儿:字段键已删,schema + 类型仍公开导出",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T00:27:52Z",
+  "updated_at": "2026-07-28T02:32:42Z",
+  "closed_at": "2026-07-28T02:32:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3726",
+  "body": "## 一句话说明\n\n`dataQuality` 字段键在 2026-06 的 dead-surface 剪除里被删掉了，但 `DataQualityRulesSchema` 及其两个类型**仍留在 `@objectstack/spec` 的公开 API 面上**。没有任何东西引用它们 —— 它是那批剪除里唯一的残留。\n\n在 #3696 排查 `unique` 语义时顺带发现（PR #3717），按 Prime Directive #10 单独跟踪。\n\n## 事实核实\n\n剪除的 tombstone 注释就在 `packages/spec/src/data/field.zod.ts:543-546`：\n\n```ts\n// Pruned 2026-06 (dead in both layers — aspirational governance with no runtime\n// consumer; encryption/masking implied at-rest protection that never happened —\n// the real channel is type:'secret'). See\n// docs/audits/2026-06-dead-surface-disposition-plan.md (P0/P2 field prune):\n// encryptionConfig, maskingRule, auditTrail, cached, dataQuality.\n```\n\n`dataQuality` 作为 `FieldSchema` 的键确实没了：\n\n```\n$ grep -n \"dataQuality\" packages/spec/src/data/field.zod.ts\n546:  // encryptionConfig, maskingRule, auditTrail, cached, dataQuality.\n```\n\n只剩注释里那一处。但 schema 本体和类型还活着，而且**在公开 API 快照里**（`packages/spec/api-surface.json:254-256`）：\n\n```\n\"DataQualityRules (type)\",\n\"DataQualityRulesInput (type)\",\n\"DataQualityRulesSchema (const)\",\n```\n\n定义在 `field.zod.ts:183-215`（含一段 `@example`）+ `645-646` 的类型导出。全仓消费者：**零**（除自身定义与类型导出外无引用）。\n\n## 这批剪除里只有它残留\n\n核对了 tombstone 列出的五个：\n\n| 剪除项 | schema 是否仍导出 | 说明 |\n|---|---|---|\n| `encryptionConfig` | ❌ | `EncryptionConfigSchema` 仍在，但那是 `system/encryption.zod.ts` 里**另一个独立的**系统级加密配置，有自己的测试，不是字段级键的残留 |\n| `maskingRule` | ❌ 已清理 | |\n| `auditTrail` | ❌ 已清理 | |\n| `cached` | ❌ 已清理 | |\n| **`dataQuality`** | ✅ **残留** | `DataQualityRulesSchema` + 2 个类型仍公开 |\n\n## 为什么值得修(虽然很小)\n\n1. **误导作者**。`DataQualityRules` 出现在公开 API 和生成的参考文档里，带着 `uniqueness` / `completeness` / `accuracy` 三个看起来很实在的治理选项。作者据此以为可以写 `dataQuality: { uniqueness: true }` —— 而 `FieldSchema` 是 `.strict()` 的，这会直接 parse 报错；就算不报错也不会有任何执行。\n\n2. **`uniqueness` 与刚厘清的 `unique` 语义打架**。#3696 刚把 `unique` 的作用域讲清楚（`true` = 租户内、`'global'` = 全平台）。同时还飘着一个描述为 \"Enforce unique values across all records\" 的死 `uniqueness` 字段，正是最容易被误选的那个 —— 它的措辞听起来恰好像\"全平台唯一\"。\n\n3. **剪除本身没做完**。tombstone 声明这些是 \"dead in both layers\"，但其中一个的 schema 还在对外发布。\n\n## 建议处置\n\n删掉 `DataQualityRulesSchema`、`DataQualityRules`、`DataQualityRulesInput`，与其余四项一致。这会是一次公开 API 的移除（`api-surface.json` 少 3 条），需要走 `pnpm --filter @objectstack/spec gen:api-surface` 更新快照并配 changeset。\n\n若判断该保留（比如打算真做数据质量治理），那就走另一半：接上真实消费者，并把 `dataQuality` 键加回 `FieldSchema` —— 即 enforce-or-remove（ADR-0049）的 enforce 那一侧。**当前这种\"schema 公开、键不存在、无人消费\"的中间态是三者里最差的一种。**\n\n## 关联\n\n- `docs/audits/2026-06-dead-surface-disposition-plan.md`（P0/P2 field prune）\n- ADR-0049 enforce-or-remove\n- #3696 / #3717（发现处；`unique` 作用域厘清）"
+}

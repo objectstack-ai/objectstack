@@ -1,0 +1,35 @@
+{
+  "number": 3845,
+  "kind": "pull_request",
+  "title": "feat(spec): `verifiedAt` re-verification clock; re-verify `action.undoable`/`type` against objectui (#3714 follow-up)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T09:28:52Z",
+  "updated_at": "2026-07-28T10:26:46Z",
+  "closed_at": "2026-07-28T10:26:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T10:26:43Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3845",
+  "body": "Follow-up to #3829 / #3714, covering the three next steps agreed there. The objectui repo was added to the session for this pass, so the claims below are verified against `objectstack-ai/objectui@732b1bf` rather than carried over from the issue.\n\n## 1. `action.undoable` re-verified — call graph closed by hand\n\nBoth readers stand. The evidence now records the whole chain rather than two isolated gates:\n\n1. `app-shell/useConsoleActionRuntime.tsx:409` and `app-shell/RecordDetailView.tsx:573` each gate `if (action.undoable …)` on building `result.undo`;\n2. `core/ActionRunner.ts:640-643` pushes it onto `globalUndoManager` **and** passes `undo` to the toast handler;\n3. the toast's Undo button calls `undoCtl.undo()` → `useGlobalUndo` → `UndoManager` → `dataSource`.\n\nThat's the \"close the call graph by hand\" standard this ledger's own methodology section asks for, short of booting the app.\n\n**The cited line numbers had already drifted** — `RecordDetailView` moved 545→573 and 404→432 in the ~1 day between the issue being filed and this pass. Nothing behavioural, but it's a live demonstration of why an evidence string with bare line numbers rots. objectui-side evidence now pins the commit (`objectui @732b1bf`).\n\n## 2. `content/docs/ui/actions.mdx` — the same understatement, one page over\n\nThe page told authors:\n\n> The schema also accepts `api` and `form` types, but they have **no runtime executor / renderer today** — stick to the four above.\n\nBoth are false at objectui HEAD: `api` → `executeAPI` (`ActionRunner.ts:974`, string-or-`ApiConfig` endpoint with `method`/`headers`/`queryParams`/`responseType`), `form` → `executeForm` (`:920`, routes to `/forms/:target?recordId=…`). The ledger's own `action.type` entry has recorded `form` as live since #2377 — the doc and the ledger have been contradicting each other.\n\n- Added `api` and `form` rows to the type table.\n- Kept the true half of the callout: `shortcut` and `bulkEnabled` really are unwired, with the reason for each, plus a link to the ledger.\n- Added `undoable` to the UX property list — the author-facing payoff of #3714, which nothing in the guide mentioned.\n- `action.type` ledger entry re-verified and dated.\n\n## 3. `verifiedAt` — the re-verification clock\n\nTwo entries have now been falsified by code moving under them (`flow.status` #3711, `action.undoable` #3714), both *understated*, and both found only because a sweep aimed at the opposite failure walked past them. Nothing in the gate asked how old a claim was.\n\nEntries may now carry `\"verifiedAt\": \"YYYY-MM-DD\"`. **The asymmetry is the design:**\n\n| | Behaviour |\n|---|---|\n| **Age** | Never fails CI — re-verification is a worklist, not a merge gate. One summary line per run; `pnpm check:liveness --stale-verification[=days]` prints the worklist, stale oldest-first then undated. Default 180d. |\n| **Malformed / future date** | **Fails CI.** An unparseable date silently exempts that entry from every staleness window — the same silent-no-op shape this ledger exists to catch. Calendar-invalid dates are rejected too, since `new Date('2026-02-30')` rolls over to March 2 rather than throwing. |\n\nNew pure module `verification.mts` (injectable `now`/threshold, so the gate, the tests and any future sweep share one arithmetic) + `verification.test.ts`.\n\nCurrently 2 of 401 entries are dated. The rest predate the field and report as undated — the README says to date them as you re-verify rather than back-fill guesses.\n\n```\nre-verification clock: 2 entr(ies) carry `verifiedAt` (0 older than 180d), 399 undated.\n  run with --stale-verification[=days] for the worklist.\n```\n\n## Verification\n\n- `pnpm --filter @objectstack/spec check:liveness` — exits 0.\n- Failure path exercised directly: temporarily set `verifiedAt: \"2026-13-99\"` → `✗ 1 malformed \\`verifiedAt\\` value(s)`, gate exits 1. Value restored.\n- `pnpm --filter @objectstack/spec test` — 260 files, 6763 tests passed (includes the 11 new `verification.test.ts` cases).\n- `pnpm vitest run src/utils/lint-liveness-properties.test.ts` (cli) — 15 passed.\n- ESLint: `packages/spec/scripts/**` is outside the lint config (pre-existing, same as `check-liveness.mts`).\n\n**Not done:** booting the app and clicking Undo. The static chain is closed end to end, which the README treats as sufficient for a presence claim — but it also says the decisive check is \"author the property, boot the app and look.\" Worth a `dogfood-verification` pass before this pattern gets copied to other objectui-backed entries.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Ajwvrmd1hDC9RBofYBhGuR)_"
+}

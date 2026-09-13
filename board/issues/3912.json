@@ -1,0 +1,32 @@
+{
+  "number": 3912,
+  "kind": "issue",
+  "title": "[17.0.0-rc.0] SQLite datetime window filters return empty: filter comparands coerced to epoch-ms while writes store ISO TEXT",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T08:31:35Z",
+  "updated_at": "2026-07-29T13:15:03Z",
+  "closed_at": "2026-07-29T13:15:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3912",
+  "body": "Found while upgrading a production app (HotCRM) from 16.1.0 to 17.0.0-rc.0. Verified against tag commit `fc156fa4a`. **Upgrade blocker.**\n\n## Symptom\nAny window filter on a `Field.datetime` column returns an empty set on SQLite (better-sqlite3). e.g. a dashboard `dateRange: last_30_days` on `created_date` shows 0 while 29 matching rows exist. `Field.date` columns are unaffected.\n\nDirect evidence: the emitted SQL `WHERE created_date >= ? AND created_date <= ?` returns 29 rows when bound with ISO strings, 0 rows when bound with epoch-ms integers — and the driver binds epoch-ms.\n\n## Root cause (write/read disagree on storage form)\n- **Read/filter path** coerces datetime comparands to epoch-ms **unconditionally by declared type**: `temporalFilterValue` → `coerceFilterValue` (`packages/plugins/driver-sql/src/sql-driver.ts:3669` / `:3456`, datetime branch `:3487-3491`), gated only by `isEpochStoredDatetime` (`:3518`) which checks dialect + declared type — never the column's actual stored form.\n- **Write path** does NOT normalize datetime at all: `formatInput` (`sql-driver.ts:4361`) explicitly leaves datetime untouched (`:4386`). So REST/JSON writes (ISO strings — JSON has no Date) land as **TEXT**; `NOW()` defaults land as TEXT ISO too (`:4135-4143`, `:4368`). Only JS `Date` objects land as INTEGER epoch.\n- The platform's own audit columns hit this: `created_at`/`updated_at` are declared datetime (`packages/objectql/src/registry.ts:319/:340`) but stamped as ISO strings (`sql-driver.ts:1329/:1364`) — filtering on `created_at` is equally broken on SQLite.\n- The **bucketing** path already handles mixed storage at runtime via `typeof()` (`sqliteTemporalArg`, `sql-driver.ts:3638`, fixed in #3773); the filter path has no equivalent.\n\n## Why it surfaces in 17.0\nThe epoch coercion itself dates to 9.10.0 (#2034). What changed in 17.0: server-side `{token}` placeholder resolution (#3582 / PR #3809) now resolves `{30_days_ago}` etc. into ISO comparands on the server read path and hands storage-form translation to the driver — so filters that previously failed silently (literal token strings) now consistently hit the mismatched coercion.\n\n## Test coverage gap\n`packages/plugins/driver-sql/src/sql-driver-datetime-filter.test.ts:39-41` inserts fixtures exclusively with `new Date(...)` (\"so better-sqlite3 stores them as INTEGER milliseconds\"). The ISO-TEXT-stored + filtered combination — the REST-write reality — is never tested.\n\n## Suggested fix direction\nMirror the bucketing path: make the filter comparand storage-form-aware (e.g. the `typeof()` CASE from `:3638`), or normalize datetime on write in `formatInput` (with a migration for existing TEXT rows)."
+}

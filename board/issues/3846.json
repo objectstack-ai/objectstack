@@ -1,0 +1,35 @@
+{
+  "number": 3846,
+  "kind": "pull_request",
+  "title": "fix(runtime,i18n): field labels read the bundle shape producers write — one shared derivation (#3833)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T09:40:53Z",
+  "updated_at": "2026-07-28T11:37:46Z",
+  "closed_at": "2026-07-28T11:37:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T11:37:43Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3846",
+  "body": "Closes #3833. Found while verifying #3676 (PR #3832) and filed rather than folded into it.\n\n## The bug\n\n`GET /i18n/labels/:object/:locale` served through the dispatcher returned `{ labels: {} }` for **every** provider. `packages/runtime/src/domains/i18n.ts:94` scanned for flat `o.<object>.fields.<field>` keys — the dialect #3778 retired. No producer has ever written it, and a real bundle's top-level keys are the `TranslationData` groups (`objects`, `apps`, `messages`, …), so the prefix matched nothing. `4cca74c` fixed the identical derivation in `service-i18n` and did not reach the dispatcher's copy.\n\n## It is not a rare fallback — it is the only path\n\nThe branch guards on `typeof i18nService.getFieldLabels === 'function'`. That method is **optional on `II18nService` and implemented by nothing** — swept the repo: neither `memory-i18n` nor `file-i18n-adapter` has it, and there is no other provider. So the dedicated-method branch is dead in production, and the broken derivation is what every request reaches.\n\nThat answers the reachability question the issue left open: this is live, not latent. Any stack served by the dispatcher — the AppPlugin in-memory provider auto-registered for stacks declaring translation bundles — got an empty map, indistinguishable from *\"this object has no translated labels\"*. Nothing errored, nothing warned.\n\nWorse than the class it was found beside: #3676 ignored a declared filter and returned the full bundle — a correct superset. This returned nothing and said it was fine.\n\n## The fix\n\nThe derivation now lives once, as `resolveObjectFieldLabels` in `packages/spec/src/system/i18n-resolver.ts`, beside the other resolvers that read `TranslationData`. Both surfaces call it.\n\nSharing it is the point, not a tidy-up: two copies of the same logic is exactly how one got fixed by #3778 and the other did not. The next bundle-shape change now has one place to land.\n\nIt is distinct from the existing `lookupObjectFieldAttr`, which answers *\"what is this one field called\"* against a whole bundle and a locale chain. This answers *\"which fields does this locale translate at all\"* — an enumeration no per-field lookup can produce.\n\nFields carrying no non-empty `label` stay omitted rather than emitted blank. Partial translation is the normal state (per `ObjectTranslationDataSchema`'s own reasoning), and callers merge this map over their source labels, where a `''` would erase them.\n\n## The tests were fiction on both sides\n\nThis is the part worth reviewing.\n\nThe dispatcher's fallback test fed flat `o.contact.fields.first_name` keys and asserted labels came back. It passed on data that **cannot occur**, while production returned `{}` — the same failure mode as the client test retired in #3676, which asserted a query string was built that no server read. Two consecutive issues in this area were both protected by a green test built on a fiction.\n\nSo this test was verified the other way round: **reverted the fix, ran the new test, confirmed it fails** —\n\n```\nAssertionError: expected {} to deeply equal { first_name: 'First Name', …(1) }\n Tests  1 failed | 197 skipped (198)\n```\n\n— then restored the fix and confirmed green. A regression test that was never observed failing is just another assertion.\n\nThe same suite's mock also declared a `getFieldLabels` no shipped provider has, and returned flat-dialect data from `getTranslations`. Both now reflect what a real provider does, with a note where the divergence stays deliberate (the tests covering a hypothetical provider that *does* supply the method are kept — that path is contractually allowed, just unused).\n\nThe shared helper carries its own unit tests, including one pinning that the retired flat dialect resolves to `{}`.\n\n## Verification\n\n- `@objectstack/spec` — 259 files / 6756 tests pass\n- `@objectstack/runtime` — 47 files / 694 tests pass\n- `@objectstack/service-i18n` — 5 files / 63 tests pass\n- New dispatcher test confirmed **failing against pre-fix code**, passing after\n- `check:api-surface` — regenerated (1 added export, 0 breaking) and re-verified clean\n- `check:docs` — 250 generated files in sync\n\n## Deliberately out of scope\n\n`GetFieldLabelsResponseSchema` declares `labels` as `Record<string, { label, help?, options? }>`, but **both** surfaces emit `Record<string, string>` — a third declared ≠ enforced gap on this same endpoint, which also means the `help` and `options` the bundle already carries are dropped. Fixing it changes the wire shape, which is breaking and orthogonal to a correctness fix, so it is filed as #3847 rather than folded in here."
+}

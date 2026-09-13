@@ -1,0 +1,32 @@
+{
+  "number": 3545,
+  "kind": "issue",
+  "title": "元数据不可解析时的 fail-open 残余风险评估(api-exposure / rest-server)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T03:36:19Z",
+  "updated_at": "2026-07-28T02:07:37Z",
+  "closed_at": "2026-07-28T02:07:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3545",
+  "body": "#3391 的独立 follow-up ②。\n\n## 背景\n\nAPI 曝露 gate 在**元数据不可解析/暂不可用**时故意 fail-open(回退到 schema 默认 `apiEnabled:true` / 无 `apiMethods`),以免元数据短暂不可用时阻断流量。位置:\n- `packages/runtime/src/api-exposure.ts`(`checkApiExposure`:`def` 为空 → `{ allowed: true }`)。\n- `packages/rest/src/rest-server.ts`(`loadObjectItems` 取不到元数据时返回 `[]` → gate 默认放行;`enforceApiAccess` 对未知对象放行交由数据层 404)。\n\n## 目标\n\n评估这条 fail-open 路径的**残余安全风险**并决定是否收紧:\n- [ ] 枚举「元数据取不到」的真实成因(冷启动、注册竞态、scoped 服务未就绪、真实故障),判断哪些应 fail-closed。\n- [ ] 权衡:fail-closed 会不会在正常启动窗口误伤流量?是否可用「元数据已就绪」信号区分「暂时缺」与「确实没有」。\n- [ ] 若收紧,给出分级策略(例如:对象存在但 enable 不可解析 → fail-closed;整个元数据服务未就绪 → 短暂 fail-open + 告警)。\n\n非阻塞项 —— P1 未改变这条既有行为,此 issue 仅做评估 + 决策。\n\n关联:#3391、#3498、ADR-0049。"
+}

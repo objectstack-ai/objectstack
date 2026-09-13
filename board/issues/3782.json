@@ -1,0 +1,32 @@
+{
+  "number": 3782,
+  "kind": "issue",
+  "title": "`os validate` runs none of the flow authoring lints, so a build-failing flow passes validate",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T04:28:10Z",
+  "updated_at": "2026-07-28T05:57:24Z",
+  "closed_at": "2026-07-28T05:57:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3782",
+  "body": "Found while making `flow-runas-unscoped` blocking in #3760.\n\n`lintFlowPatterns` has exactly one call site — `packages/cli/src/commands/compile.ts:411`. `os build` inherits it (`build.ts` extends `Compile`), but **`os validate` does not run it at all**.\n\nThat was tolerable while every flow-lint finding was advisory. Since #3760 one of them (`flow-runas-unscoped`) **fails the build**, so the surfaces now disagree:\n\n```\nos validate   → clean\nos build      → fails\n```\n\n`os validate` is documented as the read-only superset of `os build`'s gates (see the comment at `validate.ts:566`, which says the security-posture check is \"the same gate \\`os compile\\`/\\`os build\\`\" runs), so this is a real \"validate says OK, build fails\" trap — worst for CI setups that gate on `validate`.\n\n**Fix**: run `lintFlowPatterns` in `validate.ts` alongside the other 3x gates, failing on `severity: 'error'` and printing the rest as warnings — mirroring what `compile.ts` now does.\n\n**Why it wasn't done in #3760**: wiring the lint into `validate` surfaces *all* its rules there for the first time, including the advisory ones, which is a behavior change for existing projects beyond that PR's scope.\n\nRefs #3760, #1874."
+}

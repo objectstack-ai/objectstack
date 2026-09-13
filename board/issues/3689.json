@@ -1,0 +1,32 @@
+{
+  "number": 3689,
+  "kind": "issue",
+  "title": "service-storage success bodies are three shapes, none carrying `success: true` — the other half of #3675",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T14:32:26Z",
+  "updated_at": "2026-07-28T09:16:26Z",
+  "closed_at": "2026-07-28T09:16:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3689",
+  "body": "Found while fixing the error envelope in #3675 (PR #3687), and deliberately left out of it because — unlike the error fix and unlike #3636's success fix — this one is **not additive**.\n\n## The drift\n\n`storage-routes.ts` returns three different success shapes, none of which carries the `success` flag `BaseResponseSchema` declares and `ObjectStackClient.unwrapResponse` keys on:\n\n| Route(s) | Body |\n|---|---|\n| `/upload/presigned`, `/upload/complete`, `/upload/chunked`, `…/chunk/:i`, `…/complete`, `…/progress` | `{ data: {…} }` |\n| `GET /files/:fileId/url` | `{ url }` — bare, no `data` |\n| `PUT /_local/raw/:token` | `{ ok: true, key }` |\n\nMeanwhile `storage.zod.ts` declares every one of these as `BaseResponseSchema.extend({ data: … })`, i.e. `{ success: boolean, data: {…} }`. `PresignedUrlResponse` and friends are `z.infer`red from those schemas and used as the SDK's declared return types, so the declaration says `success: boolean` and the wire says nothing.\n\n## Why it is not currently breaking\n\nChecked before filing: the storage SDK methods `return res.json()` **raw** — they do not call `unwrapResponse` — so they hand back exactly what the server sent and nothing throws. TypeScript cannot catch it because `res.json()` is `any`. The one method that reads into the body, `getDownloadUrl`, does `(await res.json()).url` and matches the bare `{ url }` shape, so it works too.\n\nIn other words this is a live `declared ≠ actual` gap that happens to be harmless *because* the SDK never relies on the declaration. That is the same posture i18n was in before #3636 — right up until something did rely on it.\n\n## Why it is not additive\n\nAdding `success: true` to the `{ data }` routes **is** additive and safe (callers destructure `.data`; adding a sibling key changes nothing). The other two are not:\n\n- `{ url }` → `{ success: true, data: { url } }` **moves the payload** and breaks `getDownloadUrl` plus objectui's `body?.url ?? body?.data?.url` reader.\n- `{ ok: true, key }` → likewise, and `ok` overlaps in meaning with `success`, so it is a naming decision as much as a shape one.\n\nSo it needs a deliberate pass with the consumers in hand, not a find-replace.\n\n## What needs deciding\n\n1. **Normalize all three to `{ success: true, data }`** and update `getDownloadUrl` + the objectui reader. Correct per the contract; needs the console change to ship tolerantly (read both) so the two repos are not coupled by merge order — the same approach objectui#2869 used for the error path.\n2. **Add `success: true` only where it is additive**, leaving `{ url }` and `{ ok, key }` as declared exceptions. Cheap and safe, but the `storage.zod.ts` schemas would still be lying about two routes.\n3. **Fix the schemas instead** — declare what the routes actually return. Honest, but gives up the shared envelope for this surface.\n\nRecommendation: option 1, since `packages/spec` is the source of truth and the SDK's declared return types are generated from it. Worth doing together with whatever addresses the `code` vocabulary split noted below.\n\n## Related, not the same\n\n- The dispatcher puts the HTTP status number in `error.code` where `ApiErrorSchema` declares a semantic string, and parks the real code in `details` to work around its own occupied field. #3687 pins that deviation to exactly one field in `http-dispatcher.test.ts` rather than fixing it — `error.code` is read by the SDK, the console and the dogfood suite.\n- `error-catalog.mdx` documents `StandardErrorCode` as lowercase snake_case (`validation_error`), while the REST server and the service routes both emit SCREAMING_SNAKE. #3687 moved codes into the declared *envelope* without reconciling the two *vocabularies*; that is a spec decision.\n\n## Guard note\n\n`error-envelope.conformance.test.ts` (added in #3687) covers the error path only. Extending it to the success path is straightforward — same harness, same imported `BaseResponseSchema` — and should land with whichever option is chosen, otherwise the new shape has nothing holding it in place.\n\nAs with #3675: the route ledgers cannot catch this. They audit which routes exist and whether the SDK can address them, not what comes back."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 3725,
+  "kind": "pull_request",
+  "title": "feat(spec,lint): pin `<ObjectChart>` aggregate result-column naming and validate its axes (#3701)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T00:27:24Z",
+  "updated_at": "2026-07-28T00:43:55Z",
+  "closed_at": "2026-07-28T00:43:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T00:43:54Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3725",
+  "body": "Closes #3701.\n\n#3684 extended ADR-0021 axis checking to report charts, list-view charts and dataset-bound page chart components, but had to leave the react `<ObjectChart>` block out: it is OBJECT-bound (`objectName` + an inline `aggregate`), `aggregate` existed in the contract only as the description string `'{ field, function, groupBy }'`, and nothing in the repo said what the aggregated result columns were called. With no columns to resolve against, its axis bindings could not be validated — and inventing a convention would have manufactured false positives (ADR-0072 D1).\n\n## 1. The convention, recorded rather than invented\n\nEvery path that can serve an object-bound chart already agreed; it was simply never written down:\n\n| path | category column | value column |\n|---|---|---|\n| engine `aggregate()` w/ structured `groupBy` (objectui `ObjectChart`) | `groupBy.alias ?? groupBy.field` | the aggregation `alias`, set to `field \\|\\| function` |\n| legacy analytics/cube query | `groupBy` | remapped back to `field` |\n| client-side fallback (`aggregateRecords`) | `groupBy` | `field` |\n| the console's own object chart-view wiring (`ObjectView`) | `xAxisKey: groupBy` | `series[].dataKey: field` |\n\nSo: **an object-bound aggregate returns rows keyed by the RAW FIELD NAMES** — `groupBy` for the category column, `field` for the value column, the literal `count` for a fieldless count, plus `<field>__comparison` under a comparison overlay. That is the deliberate opposite of the dataset path, whose rows are keyed by the declared measure `name` (`sum_amount`) — the trap `chart-measure-unknown` catches. Only the dataset path has an author-chosen name to key by.\n\n- `chart.zod.ts` — `ChartAggregateSchema` / `ChartGroupBySchema` / `ChartAggregateFunctionSchema` replace the description string, and reject a non-`count` function with no `field` (which reached the renderer as `sum(undefined)` and drew a blank chart).\n- `chart-aggregate.ts` — records the convention and exports the derivations (`chartAggregateCategoryKey` / `chartAggregateValueKey` / `chartAggregateResultKeys`) so producers and checkers cannot drift apart by re-deriving the rule separately.\n\n## 2. `<ObjectChart>`'s contract now names the props the block actually reads\n\n`ChartConfig`'s `xAxis` / `yAxis` / `series` shapes reached this block and were silently dropped — it consumes `xAxisKey` and `series[].dataKey`. Advertising them violated ADR-0078 (a prop the author writes is honored or rejected, never silently dropped), and validating `yAxis[].field` would have meant validating a prop that does nothing. They leave `dataProps`; `chartType`, `xAxisKey` and `series` join the React overlay where the other bindings live, per ADR-0082 decision 3.\n\n(`chartType` was not published at all before, so an author following the contract had no way to pick anything but the default bar chart.)\n\n## 3. The prop gate now reads attribute VALUES\n\n`validate-react-page-props` previously only checked prop *names*. For `<ObjectChart>` it now evaluates static literal values:\n\n| rule | severity | what it catches |\n|---|---|---|\n| `react-chart-field-unknown` | error | `aggregate.field` / `aggregate.groupBy` naming a field the bound object does not declare |\n| `react-chart-aggregate-invalid` | error | an unimplemented aggregation function, or a non-`count` function with nothing to aggregate |\n| `react-chart-axis-unknown` | error | an axis naming a column the aggregate never returns (incl. a dataset-style `sum_total`), or a category axis bound to the value column |\n| `react-chart-axis-inert` | warning | the `xAxis` / `yAxis` shapes this block never reads |\n\nValue reading is opt-in per block and evaluates **only static literals**. Skipped silently, to keep false positives at zero: a prop driven by React state or a variable, an object literal with a shorthand or spread property, a usage carrying `{...spread}`, a chart given inline `data` (its columns are the author's own), and objects another package defines.\n\n## Verification\n\n- `@objectstack/spec` 6702 tests, `@objectstack/lint` 467 tests — all pass.\n- All seven generated-artifact gates in sync: `check:react-blocks`, `check:api-surface`, `check:skill-refs`, `check:skill-docs`, `check:docs`, `check:spec-changes`, `check:skill-examples`.\n- The golden page (`renewals-pipeline.page.ts`) now binds its axes explicitly, so the ADR-0082 chain is proven end to end — swapping `total` for `sum_total` there fails `os validate`:\n\n```\n✗ React-source page prop check failed (1 issue)\n  • page \"showcase_renewals_pipeline\" › <ObjectChart>: \"sum_total\" is not a column this\n    aggregate returns, so the axis plots nothing. Object-bound aggregate rows are keyed by\n    the RAW FIELD NAMES (unlike a dataset, whose rows are keyed by measure name).\n```\n\n- Showcase `os validate` otherwise passes clean (remaining warnings are pre-existing and unrelated).\n\n## Companion PR\n\nobjectstack-ai/objectui — the convention exposed a real bug: a fieldless `count` keyed its value column `undefined` in three of the four runtime paths, and the legacy analytics path additionally deleted the `count` the server had returned. Since this PR's lint and skill docs now recommend the fieldless form, that had to be fixed rather than advertised (Prime Directive #10).\n\n## Out of scope — follow-ups worth filing\n\nFound while auditing what this block actually honors; not fixed here to keep the change proportionate (Prime Directive #10 says file, don't silently expand):\n\n1. `<ObjectChart>`'s remaining inert config props — `showLegend` is read by nothing, and `title` is only used for the drill-down drawer title, never rendered as a chart title.\n2. `validate-chart-bindings` §3 validates `properties.yAxis[].field` for dataset-bound page chart components, but the same renderer ignores `yAxis` there too — so that rule checks a no-op prop.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01UMHZBHTjH4rw8xmDYirFC7\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01UMHZBHTjH4rw8xmDYirFC7)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 3789,
+  "kind": "pull_request",
+  "title": "fix(cli): `os validate` runs the four authoring lints `os build` runs (#3782)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T05:27:16Z",
+  "updated_at": "2026-07-28T05:57:24Z",
+  "closed_at": "2026-07-28T05:57:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T05:57:23Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3789",
+  "body": "Closes #3782.\n\n## The bug is bigger than the issue\n\nThe issue frames this as a problem #3760 *will* create once `flow-runas-unscoped` becomes blocking. It was already a problem: `lintFlowPatterns` is one of **four** authoring lints wired into `compile.ts` only, and **two of the other three already failed the build** before #3760 landed.\n\n| Lint | Emits `severity: 'error'` | `os build` | `os validate` (before) |\n|---|---|---|---|\n| `lintAutonumberFormats` | **yes** | ✓ | — |\n| `lintViewRefs` (#2554) | **yes** | ✓ | — |\n| `lintFlowPatterns` (#1874) | **yes**, since #3784 | ✓ | — |\n| `lintLivenessProperties` | no | ✓ | — |\n\nReproduced verbatim against `examples/app-todo` — one autonumber field interpolating a nonexistent field, with `validate.ts` at its pre-fix state:\n\n```\nos validate  →  ✓ Validation passed (46ms)\nos build     →  ✗ Autonumber format validation failed (1 issue)\n```\n\n## Why it drifted\n\nEvery *other* gate on both commands is a shared `@objectstack/lint` import. These four are CLI-local `../utils/lint-*` modules that only `compile.ts` ever imported — so \"add a gate to the build\" never implied \"add it to validate\", and nothing anywhere asserted otherwise.\n\n## The fix\n\n**1. Wiring** — `validate.ts` runs all four, mirroring `compile.ts`'s per-lint severity handling: `error` → exit 1, everything else → advisory print, and into the `warnings` array under `--json`.\n\n**2. The actual fix for the class of bug** — a source-level test asserts every `lintFoo(`/`validateFoo(` call site in `compile.ts` also appears in `validate.ts`, failing with the list of missing gates and how to fix it. A `BUILD_ONLY_GATES` allowlist exists for checks that genuinely cannot run without emitting an artifact; it is empty, and that is the healthy state.\n\n**3. The #3760 seam** — both surfaces filter on `FlowLintFinding.severity`, so promoting a rule gates them together.\n\n## The headline case, verified end-to-end\n\nThis branch was rebased **after** #3784 landed. The seam needed no follow-up wiring — flipping `TaskReminderFlow`'s `runAs: 'system'` → `'user'` (a user-less schedule trigger) now fails **both**:\n\n```\nos validate → ✗ Authoring lint failed (1 issue)\n              • flow 'task_reminder' · runAs: schedule-triggered flow runs as\n                `runAs:'user'`, but a schedule run has no trigger user …\n                rule: flow-runas-unscoped\nos build    → ✗ Flow authoring check failed (1 error)\n                rule: flow-runas-unscoped\n```\n\nBefore this PR that flow failed `os build` and passed `os validate` — the exact trap #3782 reports. Fault reverted; `app-todo` validates clean.\n\n## Behavior change\n\n`os validate` now surfaces every rule these four lints carry, including advisory ones, so existing projects may see new warnings. **Only** `error` findings change the exit code — and any project they now fail was already failing `os build`. This is the issue's anticipated \"surfaces all its rules there for the first time\".\n\n## Verification\n\n- **Gate proven red before green** — temporarily unwired `lintViewRefs` from `validate.ts`; the parity test failed with `os build runs 1 gate(s) that os validate does not: lintViewRefs`. Restored.\n- **A/B on the autonumber trap** — with `validate.ts` at `origin/main` → validate passes, build fails; with this branch → both fail identically.\n- **Headline flow case** — proven post-rebase, above.\n- `pnpm build` (full, no `OS_SKIP_DTS` — the real typecheck gate): 71/71\n- `pnpm test`: 132/132 tasks; `@objectstack/cli` 675 tests across 67 files post-rebase\n- `os validate` clean on all three examples (app-todo, app-crm, app-showcase)\n- `pnpm lint`, `check:role-word`, `check:doc-authoring`, `check:nul-bytes`, `check:org-identifier`: pass\n- `pnpm docs:build`: pass (docs table + sample output updated; its \"will not fail `os build`\" claim is now true)\n\n## Note on the rebase\n\nThe predicted conflict with #3784 materialized in `lint-flow-patterns.ts` (both PRs added `severity?`). Resolved in favor of #3784's wording, with a sentence added noting both surfaces filter on it.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

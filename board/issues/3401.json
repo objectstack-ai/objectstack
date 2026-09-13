@@ -1,0 +1,30 @@
+{
+  "number": 3401,
+  "kind": "pull_request",
+  "title": "chore: version packages (rc)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-22T01:48:32Z",
+  "updated_at": "2026-07-28T17:58:43Z",
+  "closed_at": "2026-07-28T17:58:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T17:58:41Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3401",
+  "body": "This PR was opened by the [Changesets release](https://github.com/changesets/action) GitHub action. When you're ready to do a release, you can merge this and the packages will be published to npm automatically. If you're not ready to do a release yet, that's fine, whenever you add more changesets to main, this PR will be updated.\n\n⚠️⚠️⚠️⚠️⚠️⚠️\n\n`main` is currently in **pre mode** so this branch has prereleases rather than normal releases. If you want to exit prereleases, run `changeset pre exit` on `main`.\n\n⚠️⚠️⚠️⚠️⚠️⚠️\n\n# Releases\n\n> The changelog information of each package has been omitted from this message, as the content exceeds the size limit.\n\n## @objectstack/cli@17.0.0-rc.0\n\n\n## @objectstack/client@17.0.0-rc.0\n\n\n## create-objectstack@17.0.0-rc.0\n\n\n## @objectstack/platform-objects@17.0.0-rc.0\n\n\n## @objectstack/plugin-auth@17.0.0-rc.0\n\n\n## @objectstack/plugin-reports@17.0.0-rc.0\n\n\n## @objectstack/plugin-security@17.0.0-rc.0\n\n\n## @objectstack/service-automation@17.0.0-rc.0\n\n\n## @objectstack/spec@17.0.0-rc.0\n\n\n## @objectstack/console@17.0.0-rc.0\n\n\n## @objectstack/core@17.0.0-rc.0\n\n\n## @objectstack/formula@17.0.0-rc.0\n\n\n## @objectstack/lint@17.0.0-rc.0\n\n\n## @objectstack/metadata-protocol@17.0.0-rc.0\n\n\n## @objectstack/objectql@17.0.0-rc.0\n\n\n## @objectstack/driver-mongodb@17.0.0-rc.0\n\n\n## @objectstack/driver-sql@17.0.0-rc.0\n\n\n## @objectstack/plugin-approvals@17.0.0-rc.0\n\n\n## @objectstack/plugin-audit@17.0.0-rc.0\n\n\n## @objectstack/plugin-hono-server@17.0.0-rc.0\n\n\n## @objectstack/plugin-sharing@17.0.0-rc.0\n\n\n## @objectstack/plugin-webhooks@17.0.0-rc.0\n\n\n## @objectstack/rest@17.0.0-rc.0\n\n\n## @objectstack/runtime@17.0.0-rc.0\n\n\n## @objectstack/service-analytics@17.0.0-rc.0\n\n\n## @objectstack/service-datasource@17.0.0-rc.0\n\n\n## @objectstack/service-i18n@17.0.0-rc.0\n\n\n## @objectstack/service-job@17.0.0-rc.0\n\n\n## @objectstack/service-storage@17.0.0-rc.0\n\n\n## @objectstack/trigger-record-change@17.0.0-rc.0\n\n\n## @objectstack/types@17.0.0-rc.0\n\n\n## @objectstack/verify@17.0.0-rc.0\n\n\n## @objectstack/hono@17.0.0-rc.0\n\n\n## @objectstack/account@17.0.0-rc.0\n\n\n## @objectstack/setup@17.0.0-rc.0\n\n\n## @objectstack/studio@17.0.0-rc.0\n\n\n## @objectstack/client-react@17.0.0-rc.0\n\n\n## @objectstack/cloud-connection@17.0.0-rc.0\n\n\n## @objectstack/connector-mcp@17.0.0-rc.0\n\n\n## @objectstack/connector-openapi@17.0.0-rc.0\n\n\n## @objectstack/connector-rest@17.0.0-rc.0\n\n\n## @objectstack/connector-slack@17.0.0-rc.0\n\n\n## @objectstack/mcp@17.0.0-rc.0\n\n\n## @objectstack/metadata@17.0.0-rc.0\n\n\n## @objectstack/metadata-core@17.0.0-rc.0\n\n\n## @objectstack/metadata-fs@17.0.0-rc.0\n\n\n## @objectstack/observability@17.0.0-rc.0\n\n\n## @objectstack/driver-memory@17.0.0-rc.0\n\n\n## @objectstack/driver-sqlite-wasm@17.0.0-rc.0\n\n\n## @objectstack/embedder-openai@17.0.0-rc.0\n\n\n## @objectstack/knowledge-memory@17.0.0-rc.0\n\n\n## @objectstack/knowledge-ragflow@17.0.0-rc.0\n\n\n## @objectstack/plugin-dev@17.0.0-rc.0\n\n\n## @objectstack/plugin-email@17.0.0-rc.0\n\n\n## @objectstack/plugin-pinyin-search@17.0.0-rc.0\n\n\n## @objectstack/service-cache@17.0.0-rc.0\n\n\n## @objectstack/service-cluster@17.0.0-rc.0\n\n\n## @objectstack/service-cluster-redis@17.0.0-rc.0\n\n\n## @objectstack/service-knowledge@17.0.0-rc.0\n\n\n## @objectstack/service-messaging@17.0.0-rc.0\n\n\n## @objectstack/service-package@17.0.0-rc.0\n\n\n## @objectstack/service-queue@17.0.0-rc.0\n\n\n## @objectstack/service-realtime@17.0.0-rc.0\n\n\n## @objectstack/service-settings@17.0.0-rc.0\n\n\n## @objectstack/service-sms@17.0.0-rc.0\n\n\n## @objectstack/trigger-api@17.0.0-rc.0\n\n\n## @objectstack/trigger-schedule@17.0.0-rc.0\n\n\n## @objectstack/sdui-parser@17.0.0-rc.0\n\n\n## objectstack-vscode@17.0.0-rc.0\n\n\n## @objectstack/example-crm@4.0.92-rc.0\n\n\n## @objectstack/example-showcase@0.3.14-rc.0\n\n\n## @objectstack/example-todo@4.0.92-rc.0\n\n\n## @objectstack/example-embed-objectql@0.0.32-rc.0\n\n\n## @objectstack/dogfood@0.0.40-rc.0\n\n\n## @objectstack/downstream-contract@0.0.38-rc.0\n\n\n## @objectstack/http-conformance@0.0.6-rc.0\n\n"
+}

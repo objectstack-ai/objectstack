@@ -1,0 +1,35 @@
+{
+  "number": 3771,
+  "kind": "pull_request",
+  "title": "fix(automation): put a screen field's `visibleWhen` on the wire (#3528)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T03:59:46Z",
+  "updated_at": "2026-07-28T05:18:38Z",
+  "closed_at": "2026-07-28T05:18:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T05:18:37Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3771",
+  "body": "Server half of #3528. Console half: objectui#2899.\n\n## The reported issue was triaged as explained, but the explanation did not fit the reporter's app\n\n#3528 was attributed to the `object-form` lazy-chunk teardown fixed in objectui#2830. That mechanism cannot fire on HotCRM's flows:\n\n| Claim in triage | HotCRM's actual metadata |\n|---|---|\n| \"a lead-conversion `object-form` wizard\" | `lead_conversion` / `schedule_followup` are **flat-field** screens — no `object-form` step |\n| lazy field widgets suspend → host remounts | the flat path (`ScreenView.FieldInput`) renders statically-imported `Input`/`Select`/`Checkbox`/`Textarea` — nothing suspends |\n| `refreshAfter: true` racing the pause | already guarded at the 16.1.0 console pin `cf2d56e`: `flowHandler` returns early on `paused` without refreshing |\n\nSo the reporter's path had a different cause, still live. I reproduced it in Chromium against a real HotCRM dev server — **on both the console shipped with 16.1.0 and current objectui main** (HMR console pointed at the same backend). Identical:\n\n```\n→ POST /api/v1/automation/lead_conversion/trigger      200 {status: paused, screen}\n   dialog renders: [\"Create Opportunity? *\", \"Opportunity Name *\", \"Opportunity Amount\"]\n   click Submit (checkbox untouched)\n→ (nothing)\nRESUME calls: 0        dialog still open: true\n```\n\nZero network requests on Submit, run paused forever — the reported symptom exactly.\n\n## Root cause: a declared property that never reached the wire\n\n`visibleWhen` has been on the `screen` node's designer form since #3304 — `screen-nodes.ts:66`, typed `xExpression`, documented one comment above as bare CEL, offered to authors in Studio. The executor's field mapper built the paused payload from `name` / `label` / `type` / `required` / `options` / `defaultValue` / `placeholder` and **dropped it**. `ScreenFieldSpec` in the contract stopped at `placeholder` too — objectui's client-side type mirrors it exactly, because it is a faithful copy of what the server actually sends.\n\nSo no client was ignoring the predicate; none ever received it. Authors wrote conditional visibility, every field rendered unconditionally, and nothing errored anywhere. The key had zero test coverage.\n\n**Why this is fatal rather than cosmetic:** `required` *is* honoured. A field that is optional-by-design but required *when shown* becomes permanently required once its predicate is dropped, and a runner validating the full field list blocks Submit on input the user was never asked for. HotCRM's screen is precisely that shape:\n\n```ts\n{ name: 'createOpportunity', type: 'boolean', required: true },\n{ name: 'opportunityName',   type: 'text', required: true,\n  visibleWhen: 'createOpportunity == true' },\n```\n\nLeave the checkbox unticked and `opportunityName` — which should not be on screen at all — dead-ends the flagship lead-conversion journey.\n\n## This PR\n\n- **`ScreenFieldSpec.visibleWhen`** joins the contract (`@objectstack/spec`), documented as **client-evaluated bare CEL** over the screen's own field names, and states the rule an implementor needs: a hidden field is not collected, so it must not be enforced as `required`. Honouring one without the other is the dead-end above.\n- **The `screen` executor forwards it raw** — deliberately uninterpolated. The predicate is re-evaluated on every keystroke against values only the client holds; resolving it here against flow variables would bake in one verdict and freeze the field for the life of the screen. A test pins that (a predicate embedding a live `{recordId}` token comes back verbatim).\n- **Tests for the screen wire payload**, which had none for this key.\n\nNo engine, route, or resume-path changes — those halves work, and `automation.resume` has been on the SDK since #3552.\n\n## Test plan\n\n- `packages/services/service-automation` — **368 passed** (33 files), 3 new.\n- `packages/spec` contracts + automation — **523 passed** (45 files).\n- Both new forwarding assertions **verified to fail without the fix**: deleting the one added line yields `expected [undefined, undefined, undefined]` and `expected undefined to be 'tier == \"gold\" && \"{recordId}\" != \"\"'`.\n- ESLint clean on all changed files.\n\n**End-to-end, with this change applied to the running server** (equivalent patch into HotCRM's installed 16.1.0 dist) plus objectui#2899 and the HotCRM authoring fixes:\n\n```\n→ POST .../lead_conversion/trigger                 (paused)\n   rendered: [\"Create Opportunity? *\"]              ← conditional fields correctly hidden\n   click Submit\n→ POST .../runs/run_63d43c4c.../resume  {\"inputs\":{\"createOpportunity\":false}}\n   toast \"Done\", dialog closed, 0 server errors     ← flow ran to completion\n```\n\n## Follow-ups, not in this PR\n\n- **objectui** must evaluate the predicate and skip hidden fields when enforcing `required` — objectui#2899. Until it ships, this change is inert on that surface: the field arrives but nothing reads it.\n- **HotCRM authored the wrong dialect** — `'{createOpportunity} == true'` (flow `{var}` interpolation) rather than the bare CEL this key declares — and its `create_account` node copies `industry` into an enum that holds only 6 of the lead's 15 values, aborting conversion for nine industries. Both fixed in a HotCRM PR.\n- **`FlowNodeSchema.config` is `z.record(z.unknown())`**, so nothing validates screen field keys at author time. A `visibleWhen` typo — or the wrong dialect above — is silently accepted today. That is the gap that let HotCRM ship a predicate no layer would ever have complained about.\n\n### Correction\n\nAn earlier revision of this description claimed the blocked-Submit path surfaces no toast. That was wrong — a measurement artifact. My probe polled 5s after the click and sonner's error toast lasts ~4s. Polling tightly shows it at ~250ms: `\"Please fill: What is the next step?, Due Date\"`. There is no separate silent-block defect; the real signal was always the zero network requests.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_0122xvfanLmniNbsAPtg5hk3"
+}

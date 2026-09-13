@@ -1,0 +1,32 @@
+{
+  "number": 3456,
+  "kind": "issue",
+  "title": "Approval: a dead approval run can leave the record RECORD_LOCKED (#3424 follow-up, expected-behavior 3)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-24T15:19:26Z",
+  "updated_at": "2026-07-27T15:32:11Z",
+  "closed_at": "2026-07-27T15:32:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3456",
+  "body": "## Summary\n\nFollow-up to #3424. That issue's **expected-behavior item 3 — \"unlock on terminal failure\"** — is intentionally *not* covered by the admin-override PR (#3451), because it concerns the **flow-engine write context vs. the record-lock hook**, not approver resolution. Tracking it here so it isn't lost.\n\n## Context\n\nThe record lock is a global `beforeUpdate` hook keyed on a **pending** `sys_approval_request` (`packages/plugins/plugin-approvals/src/lifecycle-hooks.ts`): while a record has a pending request and `lockRecord !== false`, a non-system, non-admin edit is rejected with `RECORD_LOCKED`.\n\nIn the **normal** path this is correct — `decideNode` finalizes the request (status → `approved`/`rejected`) *before* `decide()` resumes the run, so any post-approval node (`mark_approved`, a status write, …) runs when there is no longer a pending request.\n\nThe gap is the **abnormal** path: if the owning run writes the target record *while its own request is still pending* — e.g. a manual `resume` without a decision, or a flow that touches the record between opening the approval and the decision — the flow's own write hits `RECORD_LOCKED`. The lock hook can't distinguish \"the run that owns this approval\" from \"an unrelated user edit\", so the run can die with the record left locked.\n\n## Options (decide before implementing)\n\n1. **Exempt the owning run's writes.** The automation engine already carries run/flow identity; thread it (or a scoped system flag) so a write from the run that owns the pending request bypasses the lock, instead of relying on the caller being `isSystem`.\n2. **Release the lock on terminal run failure.** When a run that opened a pending approval reaches a failed terminal state, finalize/cancel the request (or clear the lock) so the record isn't orphaned.\n3. Both.\n\n## Impact\n\nLow-frequency but real: a record can be left locked by a dead approval run. The #3424 **admin override** is the recovery escape hatch today (an admin can `recall`/`reject` to release the lock), so this is robustness hardening, **not** a data-availability dead-end.\n\n## Notes\n\n- Do **not** re-open #3424 — this is a distinct concern.\n- Relevant code: `lifecycle-hooks.ts` `bindApprovalLockHook`; `approval-service.ts` `decideNode` / `decide`."
+}

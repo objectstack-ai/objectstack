@@ -1,0 +1,35 @@
+{
+  "number": 3937,
+  "kind": "pull_request",
+  "title": "fix(runtime): carry code/fields across the sandbox boundary so form actions can anchor validation errors (#3918 follow-up)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T10:49:58Z",
+  "updated_at": "2026-07-29T10:57:26Z",
+  "closed_at": "2026-07-29T10:57:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-29T10:57:23Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3937",
+  "body": "Follow-up to the #3918 chain (#3920, #3925, #3927). **Found by dogfooding the merged chain against a running app**, not by reading code — this is the gap that made the original report's symptom survive all three merged PRs.\n\n## What dogfooding turned up\n\nSubmitting a record that fails validation through a form **action** came back as:\n\n```\nHTTP 200\n{ \"success\": true, \"data\": { \"success\": false,\n                             \"error\": \"ValidationError: issued_on is required\" } }\n```\n\nNo status a client could branch on, no code, no `fields[]`. The chain's dispatcher fixes could not help here: **the field list was already gone before any dispatcher exit ran.** It was lost at the QuickJS boundary, twice —\n\n1. **host → VM** (`quickjs-runner.ts`, the `ctx.api.object(x).<op>()` rejection): `vm.newError({ name, message })` dropped every other property, so a body reaching a record `ValidationError` saw bare prose.\n2. **VM → host** (the L2 wrapper's reject handler): flattened the error to the string `` `<name>: <message>` `` before the host ever saw it.\n\nReproduced on the showcase app: `showcase_submit_signoff` sets `status: 'sent'` on an invoice whose `issued_on` is empty, and `issued_on` declares `requiredWhen: record.status in ['sent','paid']`.\n\n## The fix\n\nBoth hops now carry an explicit **allowlist** — `code` and `fields` — alongside the message, and `SandboxError` exposes them as `.code` / `.fields`. `/actions` then surfaces them:\n\n```\nHTTP 200\n{ \"success\": true, \"data\": { \"success\": false,\n                             \"error\": \"ValidationError: issued_on is required\",\n                             \"code\": \"VALIDATION_FAILED\",\n                             \"fields\": [ { \"field\": \"issued_on\", \"code\": \"required\", … } ] } }\n```\n\n**The allowlist is a security boundary, not a style choice.** Host errors routinely hang driver state, connection details or whole record payloads off themselves, and anything crossing INTO the VM is readable by untrusted sandboxed code. Copying the error's own enumerable keys would leak all of it. There's a test asserting a `ValidationError` decorated with `{ internal: { dsn }, record: { ssn } }` crosses with *only* `name`/`message`/`code`/`fields` visible.\n\n## The `/actions` wire contract is deliberately unchanged\n\nStatus stays **200**, `success: false` remains the failure signal. That route has always reported business failure in the payload — an action that \"fails\" is a normal outcome, not a transport error — and every caller branches on `data.success`. Making it a 4xx would be a break in exchange for a strictly additive fix, so the fix is additive: `code` and `fields` are omitted when absent, and a caller that ignores them sees exactly what it saw before. There's a test pinning this so it can't drift silently; flipping it later should be a conscious, documented decision.\n\nMessage channels are byte-identical too: `.message` keeps the `` `<kind> '<name>' threw:` `` debug wrapper for server logs, `.innerMessage` stays the plain toast text. The structured payload rides alongside them, never instead of them.\n\n## Also: pinning the chain against the real `ValidationError`\n\n`dispatcher-validation-error.real.test.ts` drives both dispatcher exits with the **genuine** objectql `ValidationError` instead of a hand-built fixture — including asserting its deliberate **absence** of `.status`, which is the assumption the whole #3918 fix rests on.\n\nThe existing fixture-based tests *restate* that contract (deliberately — they prove the duck-typing predicate accepts the shape, including for hand-thrown errors). These *check* it. Give `ValidationError` a `.status` one day, or rename `.fields`, and every fixture test keeps passing while production quietly regresses; now a test fails instead.\n\n## Verification\n\n- **19 new cases** across three files: sandbox host→VM and VM→host, the `/actions` envelope, and the real-`ValidationError` pinning.\n- **7 fail against the pre-fix source** — verified by reverting `quickjs-runner.ts` + `actions.ts` and re-running. (The real-`ValidationError` file passes both ways by design: it asserts an existing contract.)\n- Full runtime suite green: **798 tests / 58 files** (was 764/54). Package builds; eslint clean.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01LeZ7DmSKjiKmQzYh8L5CJS)_"
+}

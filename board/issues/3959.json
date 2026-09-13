@@ -1,0 +1,32 @@
+{
+  "number": 3959,
+  "kind": "issue",
+  "title": "A `type: 'modal'` action's server-side handler is unreachable: objectui falls through to `/actions`, the framework 400s it — and app-todo ships two orphaned handlers as a result",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T23:38:15Z",
+  "updated_at": "2026-07-30T00:40:43Z",
+  "closed_at": "2026-07-30T00:40:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3959",
+  "body": "Found while implementing ADR-0110 (#3958). The D5 reconciliation flagged real orphans in a shipped example on its very first run, and tracing why exposed a contradiction between the client and the framework about whether a `modal` action has a server half.\n\nPre-existing and **not** a regression from #3958 — these handlers were already unreachable through the Console. Filing rather than widening that PR's scope (Prime Directive #10).\n\n---\n\n## ✅ RESOLVED — option 2 (`modal` stays client-only)\n\nFixed by objectstack#3974 (`c5c78bb`) and objectui#2973 (`a136322`).\n\n**Why option 2.** The spec's own wording settles it — a `modal` action's `target` is \"the modal/page name to open\", i.e. a thing to *render*, and `SERVER_DISPATCHED_ACTION_TYPES` deliberately excludes it. `actions.mdx` had already documented the correct alternative in its `body`-belongs-to-`script` callout: *\"To collect input and run logic, use `type: 'script'` with `params` — the same dialog is collected, then the body runs with those values.\"* The client's fallthrough was the outlier, not the framework's 400.\n\n**What changed.**\n\n- **objectui** — `modalActionHandler` no longer falls through to `serverActionHandler`. An unresolvable target is reported as the authoring mistake it is, naming the action, the dud target, and the way out. The superseded test (which asserted the fallthrough POSTed `/actions`) now asserts the refusal.\n- **framework** — `app-todo`'s `defer_task` / `set_reminder` are `type: 'script'` with `target` pointing at their real handler keys. They already declared exactly the `params` their handlers read (`new_due_date` / `reason`, `reminder_date`), so they were always \"collect input, then run server-side\" — only the type was wrong. `deferTask` and `setReminder` now execute for the first time.\n- **docs** — the action-type table said `modal` meant \"collect input, then submit to a handler\", contradicting the same page's REST table (`modal` → 400, \"nothing for the server to run\"). That inconsistency is very likely why the example was written the way it was; corrected to point at `script` + `params`.\n\n**Reconciliation after the fix**, using the same key derivation dispatch uses:\n\n```\nregistered:            cloneTask, completeTask, deferTask, deleteCompletedTasks,\n                       exportTasksToCSV, massCompleteTasks, setReminder, startTask\nUNDECLARED handlers:   none\nscript declarations with NO handler: none\n```\n\nClean in both directions — the example no longer trips the `[action-governance]` boot warning it was about to start emitting, so nothing scaffolded from it inherits the broken shape.\n\nBoth Dogfood Regression Gate shards passed on the framework side, which is the meaningful confirmation here: that gate exercises `app-todo` directly.\n\n---\n\n<details>\n<summary>Original report</summary>\n\n## The contradiction\n\n**objectui said a modal action falls through to its server handler.** `packages/app-shell/src/hooks/useConsoleActionRuntime.tsx`:\n\n```ts\n/**\n * `type: 'modal'` dispatch. The action's `target` names the page to open\n * (spec: \"the modal/page name to open\"), so try to render it client-side\n * first. When it names neither a page nor an object there is nothing to\n * render — the modal was the param dialog the runner already collected — so\n * complete the action through its server-side handler, which is how a modal\n * action bound to `engine.registerAction(...)` (or an inline `body`) still\n * runs.\n */\nconst modalActionHandler = useCallback(async (action, context) => {\n  const schema = action.modal ?? action.target ?? action.params?.schema;\n  const descriptor = schema != null ? await resolveModalTarget(schema) : null;\n  if (descriptor) return modalHandler(descriptor);\n  return serverActionHandler(action, context);   // ← the documented fallthrough\n}, [...]);\n```\n\n**The framework said it has none.** `packages/runtime/src/action-execution.ts`:\n\n```ts\nexport function headlessActionTypeError(deps, action, objectName) {\n    const type = action?.type ?? 'script';\n    if (SERVER_DISPATCHED_ACTION_TYPES.has(type)) return null;\n    ...\n    return `Action '${name}'${on} is \\`type: '${type}'\\` — a client-side action with no server dispatch. `\n         + `The renderer opens its \\`target\\`; there is nothing for the server to run.`;\n}\n```\n\n`modal` is not in `SERVER_DISPATCHED_ACTION_TYPES`, so the fallthrough landed on a **400** — the one path objectui documented as \"how a modal action bound to `engine.registerAction(...)` still runs\" was the exact path the server refused.\n\n## What it already cost: two dead handlers in `examples/app-todo`\n\n| Handler key | Declaration | Its `target` |\n|---|---|---|\n| `deferTask` | `defer_task` (`type: 'modal'`) | `defer_task_modal` |\n| `setReminder` | `set_reminder` (`type: 'modal'`) | `set_reminder_modal` |\n\n`task.handlers.ts` exported real bodies for both. Nothing could invoke them — through the Console the modal either rendered (server never called) or fell through to a 400; over REST `/actions/todo_task/defer_task` resolved the declaration → `type: 'modal'` → 400, and `/actions/todo_task/deferTask` found no declaration → 404 since ADR-0110 D3.\n\n</details>"
+}

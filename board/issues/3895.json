@@ -1,0 +1,36 @@
+{
+  "number": 3895,
+  "kind": "pull_request",
+  "title": "fix(spec): ratchet the authorable key surface — the one contract no witness watched (#3855)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/xl",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T15:15:54Z",
+  "updated_at": "2026-07-28T15:33:01Z",
+  "closed_at": "2026-07-28T15:32:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T15:32:59Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3895",
+  "body": "Follow-up to #3883. Non-breaking — a new gate plus a corrected docblock.\n\n## The gap\n\nFor a metadata-driven platform the third-party API is **what an author may write**: the keys inside each schema. Nothing guarded them.\n\n| Witness | Records | Sees a removed key? |\n|---|---|---|\n| `api-surface.json` | exported `name (kind)` | ❌ a key inside a schema is not an export |\n| `api-surface-signatures.json` | hash of each `defineX` factory's type | ❌ hashes `checker.typeToString()`, which prints a type **reference** (`z.input<typeof ActionSchema>`) and never expands it structurally |\n| `spec-changes.json` `removed[]` | diff of `api-surface.json` | ❌ inherits the same blind spot |\n| downstream-contract fixture | frozen third-party consumer | ❌ only what it happens to exercise |\n| `json-schema.manifest.json` | whole schemas | ❌ `AIKnowledge` still exists after `topics` goes |\n\nVerified concretely: **#3883 narrowed `defineAction`'s input by three keys and `api-surface-signatures.json` did not change** — its last commit is still the unrelated #3735.\n\nAnd this is not only a \"deliberate change slipped a gate\" story. **#3733 was the accidental version**: `dataQuality` / `cached` outlived their keys, stayed discoverable on the API surface and in the reference docs, and an author writing them got a clean parse with the key silently stripped.\n\nADR-0059 §5 named the trigger:\n\n> A signature-level snapshot is **deferred until a narrowing actually slips both** (evidence-gated, like ADR-0054's Phase 3).\n\nIt has now, twice.\n\n## The gate\n\n`authorable-surface.json` — a committed ratchet of all **8588** authorable keys, derived from the walk that already emits the JSON Schemas. One level deeper, no new introspection, one pass.\n\nIt distinguishes three states for free, because a tombstoned key (`retiredKey()`, from #3883) is `z.never()`, which Zod renders as `{ \"not\": {} }`:\n\n```\nai/AIKnowledge:topics [RETIRED]\ndata/Field:conditionalRequired [RETIRED]\nui/Action:execute [RETIRED]\nui/Action:body\nui/Action:target\n…\n```\n\n| State | Meaning |\n|---|---|\n| live | a normal property — the author may write it |\n| `[RETIRED]` | present but unwritable, carrying its own upgrade prescription |\n| absent | gone from the contract with nothing left to say |\n\n## Three failure modes, each proven non-vacuous\n\nI simulated all three rather than assuming they fire — the whole point of this PR is that a gate can look present and be dead.\n\n**1. A key vanishes with no tombstone** — the silent-strip class.\n\n```\n❌ 1 authorable key(s) disappeared from the contract:\n     - ui/Action:phantomLegacyKey\n\n   These schemas are NOT .strict(), so Zod silently STRIPS an unknown key: an author\n   who keeps writing one gets a clean parse and a setting that never takes effect —\n   no error, nothing to grep, nothing pointing at the changelog (#3733, ADR-0104).\n```\n…followed by the full retirement protocol (tombstone → D2/D3 entry → `major` changeset).\n\n**2. A key is tombstoned with no registered migration** — audible to whoever hits it, but the change documentation is still empty.\n\n```\n❌ 1 key(s) were tombstoned with no registered migration:\n     - ai/AIKnowledge:indexes\n\n   The tombstone makes the removal audible to whoever hits it, but the change\n   documentation is the primary channel and it is still empty: spec-changes.json\n   (ADR-0087 D4) is a projection of the conversion + migration registries…\n```\n\nThis is the rule that mechanizes what I did by hand in #3883 — where nothing would have stopped me skipping it.\n\n**3. An addition is left uncommitted** (`--check` mode).\n\n```\n❌ authorable-surface.json is out of date (1 key(s) not recorded).\n     + ui/Action:aria\n```\nAn unrecorded key is invisible to the ratchet forever after, since it can only detect the disappearance of something it once saw.\n\nFailures `process.exit(1)` **before** the snapshot write, so a red run never clobbers the baseline.\n\n## Where it runs\n\n- **`check:docs`** (`gen:schema && build-docs --check`) already runs in lint.yml's typecheck job, which has **no paths filter and is a required check** — the job whose own comment says \"the gate cannot go dormant\". Removal detection lands there for free.\n- **`check:authorable-surface`** as an explicit step in `Check Generated Artifacts`, with the `generated` paths filter widened to `packages/spec/src/**` + the script + the snapshot — per that filter's own rule that \"a path missing here makes that gate dormant on exactly the PRs that can break it, so keep the two in lockstep\".\n\n## Scope, deliberately\n\nValue-level narrowing (an enum losing a member, a union narrowing) stays **ungated**, per ADR-0059 §5's evidence gate — no such narrowing has slipped yet, and snapshotting it would churn on every internal tweak, which is exactly why the signature hash was scoped to factories in the first place. Noise kills a ratchet faster than a gap does.\n\nWhat I did fix is the **over-promise**: `build-api-surface.ts` advertised its signature snapshot as answering *\"did the accepted authoring shape narrow?\"*. It does not, and believing it did is what let this gap sit. The docblock now states the scope and points at the new ratchet.\n\n## Testing\n\n- `@objectstack/spec` 6818 passed · spec `tsc --noEmit` clean\n- Every ESLint-job and typecheck-job gate green locally, including the two the new snapshot could disturb: `check:docs`, `check:api-surface`, plus `check:spec-changes` / `check:upgrade-guide` / `check:liveness` / `check:skill-refs` / `check:react-blocks`\n- The three simulations above, each reverted afterwards; the committed snapshot is byte-identical to a clean regeneration\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JqC9ckaLbmhmytt65Gxi96)_"
+}

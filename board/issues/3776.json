@@ -1,0 +1,35 @@
+{
+  "number": 3776,
+  "kind": "pull_request",
+  "title": "fix(driver-sql): AND the contents of each `$or` branch (#3774)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T04:06:40Z",
+  "updated_at": "2026-07-28T05:15:55Z",
+  "closed_at": "2026-07-28T05:15:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T05:15:54Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3776",
+  "body": "Closes #3774\n\n## The bug\n\n`applyFilterCondition` passed `logicalOp='or'` **into** each `$or` branch's recursive call. That flag should only decide how a branch attaches to its parent builder; inside the branch it also selected `orWhere` for the branch's own contents. So a branch's field keys — and the operators of a single field — OR-ed each other instead of AND-ing.\n\n```js\n{ $or: [{ a: 'x', b: 'y' }] }              // → a = 'x' OR b = 'y'   (want AND)\n{ $or: [{ d: { $gte: X, $lt: Y } }] }      // → d >= X OR d < Y      (matches every row)\n```\n\nEvery miscompile **widens** the result set, never narrows it — so scoping filters written in that shape returned rows outside the intended scope, and the abutting-window pattern the automation docs recommend for scheduled flows matched the whole table instead of one tier.\n\n## The fix\n\nTwo lines in `sql-driver.ts`, both in `applyFilterCondition`:\n\n- **`$or` arm** — recurse into each branch with `'and'`. The `qb.orWhere(…)` at the branch site is what OR-s the branches together; the branch *body* must still compile with AND, because everything inside one filter object AND-s at every depth.\n- **`$and` arm** — honor `logicalOp` like `$or`/`$not` already did.\n\nThe second is not independently observable (knex drops the boolean flavor of a group's first clause, so the `$and` arm's hardcoded `where` was indistinguishable from `orWhere` there). It ships anyway because the two are **only correct together**: applying the `$and` change alone actually *regresses* the `{b, $and:[…]}` key ordering, which I confirmed by reverting each half independently. Leaving one combinator deaf to the flag is how the rules drifted apart in the first place.\n\n## Tests\n\nRed-then-green proven by reverting the fix: **15 of 19 new cases fail without it**, the 4 that pass being the controls.\n\n`packages/plugins/driver-sql/src/sql-driver-or-filter.test.ts` — 19 cases on real in-memory better-sqlite3 over a 2x2 truth table, so a wrongly-OR-ed pair is always visible as extra rows: keys within a branch, multiple operators on one field, `$and`/`$or`/`$not` nested in a branch (both key orderings), read-scope shapes, and the multi-tier date-window pattern. Four controls pin the shapes that were already correct.\n\nBecause the fix is about **cross-backend agreement**, the same shape table is now pinned on the two sibling evaluators — `driver-memory/src/memory-matcher-or-semantics.test.ts` and `formula/src/matches-filter-or-semantics.test.ts`. Both passed unchanged (they were already correct); they exist so the three in-repo evaluators cannot silently drift apart. This matters because `matchesFilterCondition` decides the RLS `check` on writes while this compiler decides the `where` on reads — a disagreement there means a record can be writable but unreadable, or the reverse.\n\n## Verification\n\nFull suites, all green: `driver-sql` 344 · `driver-sqlite-wasm` 125 (inherits `SqlDriver`) · `driver-memory` 113 · `formula` 258 · `objectql` 1126 · `plugin-security` 665 · `plugin-sharing` 101 · `service-storage` 199 · `service-analytics` 252 · `driver-mongodb` filter tests. Type gate via a real `pnpm build` (no `OS_SKIP_DTS`).\n\nI also swept every `$or` occurrence in tests, fixtures, seed data and example apps repo-wide: **no existing test depended on the broken semantics**, which is why nothing needed adjusting. They uniformly use single-key branches, assert filter *shape* against a fake engine rather than executing on a driver, or assert only `toBeGreaterThan(0)`.\n\n## Notes for the reviewer\n\n- `logicalOp` is now never `'or'` on any internal path — the `$or` arm was its only producer. The remaining `logicalOp === 'or' ? … : …` ternaries are consequently unreachable today. I kept the parameter (it is `protected`, so it is subclass API) and made all four combinators honor it uniformly rather than pruning it in a security fix; a follow-up can decide whether to remove it.\n- Two pre-existing, unrelated failures in this worktree, neither caused by this change: `service-storage/files-to-references-migration.test.ts` fails against a stale `@objectstack/platform-objects` build (passes after `pnpm build --filter @objectstack/platform-objects`), and `driver-mongodb`'s tenancy-guard suites fail on an unlinked `@objectstack/types` workspace dep."
+}

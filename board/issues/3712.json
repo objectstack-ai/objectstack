@@ -1,0 +1,32 @@
+{
+  "number": 3712,
+  "kind": "issue",
+  "title": "Approval: a schedule-triggered run still can't write its own locked record — it carries no ObjectQL context to hold `flowRunId` (#3456 residual)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T15:47:29Z",
+  "updated_at": "2026-07-28T02:13:03Z",
+  "closed_at": "2026-07-28T02:13:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3712",
+  "body": "Residual left deliberately by #3703 (which closed #3456). Filing per Prime Directive #10 so it is tracked rather than living only in a code comment.\n\n## What #3703 fixed, and where it stops\n\n#3703 made the approvals record lock exempt **the run that opened the pending request**, so a flow can write its own target record mid-approval instead of dying on its own `RECORD_LOCKED`. The exemption is keyed on `flowRunId`, which the automation engine stamps onto the run context and which travels into `ctx.session` via each data node's ObjectQL `context`.\n\nThat last hop is the catch. `resolveRunDataContext` (`packages/services/service-automation/src/runtime-identity.ts`) returns **`undefined`** for one shape:\n\n```ts\nif (context?.runAs === 'system') { /* … carries flowRunId … */ }\nif (!context?.userId) return undefined;   // ← here\n```\n\nAn effective `runAs:'user'` run with **no trigger user** — a schedule-triggered flow being the canonical case — passes **no `context` at all** to the data engine. No context means no `flowRunId`, so the lock hook cannot recognise the write as the owning run's, and the run is refused with `RECORD_LOCKED` exactly as before.\n\n## Why it wasn't just fixed there\n\nManufacturing a context solely to carry the run id would change that run's **authorization**, not only its provenance. Today the missing context is what makes the data security middleware skip — the documented, deliberate fail-open from #1888 (the run executes UNSCOPED, with a loud warning, and the `flow-schedule-runas-unscoped` lint flags the shape at build time). Passing `{ isSystem: false, positions: [], permissions: [], flowRunId }` would flip it to baseline-member RLS, which is a different and larger decision than #3456 was scoped to make.\n\n## Impact\n\nLow. This is the intersection of three conditions — a scheduled (or otherwise user-less) trigger, an approval node with `lockRecord`, and the flow writing its own target record while its request is pending. And it is not a dead end: the dead-run sweep from #3703 releases the record once the run reaches a terminal state, and the #3424 admin override remains the manual escape hatch.\n\n## Options\n\n1. **Give the identity-less case a provenance-only context.** Cleanest for #3456, but requires deciding what happens to the #1888 fail-open — either accept the flip to baseline-member RLS, or find a way to carry `flowRunId` without presenting an identity the middleware keys on.\n2. **Resolve the #1888 fail-open first** (make user-less `runAs:'user'` runs an authoring error, or default them to an explicit posture) and let this fall out of it. Larger, but it retires a footgun rather than routing around it.\n3. **Leave it.** The sweep already recovers the record; document the shape and close.\n\nOption 2 is the one that removes the underlying ambiguity; option 1 is the narrow fix if the fail-open is being kept.\n\n## Where it is recorded today\n\n- code comment at `resolveRunDataContext` in `packages/services/service-automation/src/runtime-identity.ts`\n- `.changeset/approval-dead-run-record-lock.md`\n- the #3703 PR body\n\nRefs #3456, #3424, #1888, #3703."
+}

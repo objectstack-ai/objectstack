@@ -1,0 +1,32 @@
+{
+  "number": 3916,
+  "kind": "issue",
+  "title": "[17.0.0-rc.0] Matrix report date columns are unordered — no server-side ordering, no ORDER BY in aggregate SQL, and the report schema offers no sort declaration",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T08:34:21Z",
+  "updated_at": "2026-07-29T10:03:44Z",
+  "closed_at": "2026-07-29T10:03:44Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3916",
+  "body": "Found upgrading HotCRM to 17.0.0-rc.0 (tag commit `fc156fa4a`).\n\n## Symptom\nA matrix report with a date dimension as columns renders them in arbitrary order (e.g. 2026-07-01, 07-05, …, then 07-02, …). Declaring `dateGranularity` on the dataset dimension makes the keys sortable (2026-07, 2026-Q3) but nothing sorts them.\n\n## Root cause — nobody orders, and the author cannot ask for it\n- Server: `resolveOrdering` returns `undefined` unless the selection explicitly carries `order` (`packages/services/service-analytics/src/dataset-executor.ts:318-344`); `applyOrdering` passes through (`:271-273`).\n- Aggregate SQL emits no ORDER BY (`packages/plugins/driver-sql/src/sql-driver.ts:1706-1735`).\n- With a granularity declared, native SQL refuses the query (`strategies/native-sql-strategy.ts:30`) → in-memory aggregation, whose bucket order is Map insertion order (`packages/objectql/src/in-memory-aggregation.ts:84`).\n- The console pivot builds column headers in row-arrival order with no sort (verified in the shipped bundle).\n- Crucially, the **report schema has no ordering field at all**: `packages/spec/src/ui/report.zod.ts:105-118` (only rows/columns/values/runtimeFilter/drilldown). `DatasetSelection.order` exists (`packages/spec/src/contracts/analytics-service.ts:152-162`) but is unreachable for report authors. Dashboard widgets have their own channel (`dashboard.zod.ts:143-151` options.sortBy/sortOrder) — reports don't.\n\n(Historical note: the retired `ReportGroupingSchema` had `sortOrder`; the liveness audit `docs/audits/2026-06-reportschema-property-liveness.md:21` says ordering \"now lives on the dataset\" — but no dataset-level sort field exists for this either.)\n\n## Suggested fix\nEither default-sort time-bucketed dimensions ascending in `executeSelection`, or expose an ordering declaration reachable from report/dataset metadata (and have the pivot honor it).\n\nRelated but separate: the null-bucket key change `'(null)'` → real `null` (#3839) is a documented breaking change and not part of this report; noting it here only because both alter matrix column sets after upgrade."
+}

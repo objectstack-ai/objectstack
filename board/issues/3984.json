@@ -1,0 +1,30 @@
+{
+  "number": 3984,
+  "kind": "issue",
+  "title": "/meta 的每个按类型闸门只在单数拼写下生效 —— 复数(PD #3 的规范拼写)整条绕过,含 book audience、app RBAC、dashboard 能力门",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T00:58:23Z",
+  "updated_at": "2026-07-30T01:52:05Z",
+  "closed_at": "2026-07-30T01:52:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3984",
+  "body": "在为 #3963 摸清 `book.audience: 'public'` 的执行链时撞到的,**现在就活着**。\n\n## 成因\n\n`GET /meta/:type` 和 `GET /meta/:type/:name` 的每一个按类型分支都拿 `req.params.type` 跟**字面单数**比:\n\n```js\nif (req.params.type === 'book') { /* ADR-0046 §6.7 audience 闸门 */ }\nif (req.params.type === 'app')  { /* RBAC 过滤:隐藏 Studio / Setup 和受限导航 */ }\n```\n\n而协议层的 `getMetaItems` 会做单数↔复数归一化(`protocol.ts:1737`,`PLURAL_TO_SINGULAR`),**两种拼写都照样返回数据**。再叠上 Prime Directive #3 —— \"REST endpoints → plural\" —— **复数才是规范拼写、也是客户端最可能用的那个**,而它把闸门全跳过了。\n\n## 三个是授权闸门\n\n| 闸门 | 复数拼写下发生什么 |\n|:--|:--|\n| **ADR-0046 §6.7 book / doc audience**(三处:列表、单项读、doc 有效 audience 并集) | `GET /meta/books` 把 `{ permissionSet }`-gated 的书(*Admin Guide*)返回给**不持有该权限集**的调用者;`GET /meta/books/admin_guide` 返回 **200**,而单数拼写返回 **401**。在公开服务的部署上,同一个跳过把 `org` 书交给匿名读者 |\n| **app RBAC 过滤** | `GET /meta/apps` 跳过 —— 特权 app(Studio、Setup)和受限导航项对没有相应授权的调用者可见 |\n| **dashboard `requiresService` 门**(ADR-0057 D10) | `GET /meta/dashboards` 跳过 |\n\n另外两处是行为性的(doc 的 i18n locale 折叠、列表响应默认剥 `content`),同样在两种拼写间不一致。\n\n## 实测\n\n```\nGET /api/v1/meta/book   → ['manual']                    ← gated 的被挡住\nGET /api/v1/meta/books  → ['admin_guide', 'manual']     ← 泄露\nGET /api/v1/meta/book/admin_guide   → 401\nGET /api/v1/meta/books/admin_guide  → 200               ← 泄露\n```\n\n(单元测试级,`{ permissionSet: 'crm_admin' }` 的书 + 匿名调用者。测试已随修复提交,并**验过在未修代码上会红**。)\n\n`app` / `dashboard` 那两条我没有单独构造\"已登录但无授权\"的 harness 去量化 —— 它们跳过的是**同一个缺失的调用**,不是另一套机制,所以结论从\"闸门整个没执行\"直接得出,而非另行推断。\n\n## 修法\n\n每个 handler **顶部归一一次**,后续所有闸门都用归一后的值:\n\n```ts\nprivate static metaTypeSingular(type: unknown): string {\n    const t = typeof type === 'string' ? type : '';\n    return PLURAL_TO_SINGULAR[t] ?? t;\n}\n```\n\n用的是协议层同一张 `PLURAL_TO_SINGULAR` 表 —— 不引入第二个真相源。这样\"同一条路由的两种拼写\"再也没法分叉,下一个新增的按类型闸门也不会忘。\n\n<sub>核对于 `origin/main` @ ad303ed。修复见随后的 PR;与 #3963 独立(那是删开关的提案,本 issue 是当前就存在的越权读)。</sub>\n"
+}

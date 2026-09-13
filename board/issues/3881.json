@@ -1,0 +1,35 @@
+{
+  "number": 3881,
+  "kind": "pull_request",
+  "title": "fix(automation): a `fault` edge must not switch off a guardrail (#3863)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T14:06:37Z",
+  "updated_at": "2026-07-28T14:15:37Z",
+  "closed_at": "2026-07-28T14:15:35Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T14:15:35Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3881",
+  "body": "## What this turned out to be\n\n#3863 was filed to *build* node-level error branches. On opening the engine, they already exist and work: `type: 'fault'` is in the edge schema, `executeNode` routes both the thrown and the returned failure paths to the handler, `$error` is populated, and there are tests. So the feature was not the gap.\n\n**The gap was that it routed everything — including guard refusals.** That is the fail-open hole flagged as the hard design constraint when the issue was promoted, and it is live in `main` today.\n\n## The bug, reproduced before fixing\n\nAttach a `fault` edge to a `delete_record` whose filter has a typo:\n\n```ts\n{ id: 'op', type: 'delete_record',\n  config: { objectName: 'deal', filter: { owner: '{record.ownr}' } } },   // typo\n{ id: 'e_fault', source: 'op', target: 'handler', type: 'fault' },\n```\n\n`{record.ownr}` does not resolve, so the only condition is erased and the filter would collapse to `{}` — every row. #3810's guard correctly refuses the node. The fault edge then **swallowed the refusal**, ran the handler, and the run reported `success: true`.\n\nOne declared edge silently disabled the platform's protection against emptying an object. That is precisely the fail-open direction #3810 was opened to close, and it is the first thing an AI authoring loop reaches for when trying to make a diagnostic go away — the same suppression dynamic that got the `$optional` proposal (#3862) closed as not planned.\n\nThe test asserting this lands in the tree **failing**, then passes with the fix.\n\n## The fix: failures carry a class\n\n`NodeExecutionResult.errorClass` — `'runtime'` (default) or `'guard'`.\n\n| Class | Examples | Routable by a `fault` edge |\n| :--- | :--- | :--- |\n| `runtime` | `http` 404, connector rate-limit, data engine rejected a write | **yes** |\n| `guard` | filter lost a condition (#3810), data node names no object, run would execute unscoped (ADR-0049/#1888) | **no — stays fatal** |\n\nDefaulting to `runtime` means every existing executor keeps its current routing; this is not a behaviour change for anything except the guards.\n\n**Thrown guards are covered too.** `resolveNodeFilter` *returns* its refusal; `UnscopedRunDataAccessError` *throws* one. Both paths are contained, via a shared `guard-refusal` module (its own file because `engine.ts` already imports `runtime-identity.ts`, so the guard cannot import the engine back). Otherwise the catch path would simply become the bypass the return path no longer is.\n\nMarked guard-class: the three `resolveNodeFilter` refusals, the four `objectName required` refusals, and `UnscopedRunDataAccessError`. Genuine engine failures (`get_record(x) failed: …`) stay runtime-class and keep routing.\n\n## Also in scope (the rest of the issue's v1)\n\n- **`{<nodeId>.error}`** now carries a failed node's message alongside run-wide `{$error}`. `$error` names only the most recent failure, so a handler shared by two fault edges could not tell which node it was handling; `{charge_card.error}` is addressable from any downstream template. Purely additive — `$error` is unchanged.\n- **Run history**: already correct. A run taking a fault branch reports success, and the failed step keeps `status: 'failure'` with its message — verified with a test, since the #3356/#3407 lesson is that recovery must not erase the record.\n- **Documentation**: fault edges were undocumented. Added to `content/docs/automation/flows.mdx` and the automation skill, including the routable/not-routable table. The skill says plainly not to add a fault edge to silence a guard error — that is the misuse the class split now makes impossible, and the skill is what an AI author reads.\n\n## Verification\n\n- New `fault-edge-guard-containment.test.ts` — 6 tests: guard refusal contained with a fault edge present; runtime failure on the same shape still routes; thrown ADR-0049 guard also contained; guard fatal without a fault edge; `{<nodeId>.error}` published; failed step still traced after recovery.\n- `packages/services/service-automation` full suite: **407 passed**, no regressions — the pre-existing fault-edge tests still pass, which is the point of defaulting to `runtime`.\n- ESLint clean on all changed files; `check-role-word` gate OK.\n- `tsc --noEmit` on the package reports 2 errors, both in `engine.test.ts` about `resumeAuthority` — confirmed pre-existing by stashing this branch's changes and re-running on the base.\n\n## Deferred (still tracked on #3863)\n\nInteraction with flow-level `errorHandling.retry`; error edges that loop back (needs the ADR-0044 `type: 'back'` cycle treatment); whether `label: 'error'` should be an accepted alias.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01EdCvGtER9SzJopS4Yh3Pa1)_"
+}

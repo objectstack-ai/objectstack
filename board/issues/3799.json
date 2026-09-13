@@ -1,0 +1,34 @@
+{
+  "number": 3799,
+  "kind": "pull_request",
+  "title": "docs(driver-sql): say why `applyFilterCondition` keeps `logicalOp` after #3776",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T05:57:43Z",
+  "updated_at": "2026-07-28T06:44:35Z",
+  "closed_at": "2026-07-28T06:44:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T06:44:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3799",
+  "body": "Follow-up to #3776 / #3774. **Comment-only — no behavior change.**\n\n## What #3776 left behind\n\nThe `$or` arm was `logicalOp`'s only producer. Now that it recurses with `'and'`, all four call sites pass `'and'`:\n\n| Site | Arg |\n|---|---|\n| `applyQueryFilters` (sole external caller) | `'and'` |\n| `$and` arm | `'and'` |\n| `$or` arm | `'and'` |\n| `$not` arm | `'and'` |\n\nSo `logicalOp === 'or'` is unreachable, and the ~15 ternaries spanning `$eq`/`$ne`/`$gt`/`$gte`/`$lt`/`$lte`/`$in`/`$nin`/`$between`/`$null`/`$exists` and the bare-value path are dead code.\n\n## Decision: keep the parameter, document it\n\nI considered removing it. Blast radius is genuinely small — across `framework`, `objectui` and `cloud` there are **zero external callers and zero overrides**; the only references are the four above. But:\n\n- `applyFilterCondition` is `protected`, so it is **subclass API**. Real subclasses exist (`SqliteWasmDriver` here, `TursoDriver` in `cloud`), and out-of-repo ones may too.\n- TypeScript rejects an override declaring *more* parameters than the base, so removal is **source-breaking** for any subclass on the four-parameter signature. Under this repo's lockstep versioning that is a **whole-stack major** — steep for deleting a flag that changes no behavior.\n- The edit would touch ~15 lines of a security-critical filter compiler for zero gain, immediately after a security fix. Every one of those lines is a chance to reintroduce exactly the #3774 class of bug.\n- The flag is a real composition seam: an override attaching a condition into an OR group needs it.\n\nThe hazard worth closing is the *other* one — that a future reader sees fifteen unreachable arms and \"fixes\" them by making a branch propagate `'or'` again, which **is** the #3774 miscompile. A method-level note closes that at a fraction of the risk.\n\n## Verification\n\n- `sql-driver-or-filter.test.ts` — **19/19 pass** (the cases that pin the semantics making the flag dead)\n- full `driver-sql` suite — **386/386 across 39 files**\n- type gate — `turbo build` **without** `OS_SKIP_DTS` (that env skips dts/typecheck), DTS built clean\n- ESLint — clean\n\nEmpty-frontmatter changeset, the sanctioned \"releases nothing\" declaration per the Check Changeset gate.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

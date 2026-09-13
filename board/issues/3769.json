@@ -1,0 +1,30 @@
+{
+  "number": 3769,
+  "kind": "issue",
+  "title": "黑洞型数据库端点：每个查询挂 30 秒，然后报一句指向错误方向的 \"the pool is probably full\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T03:43:18Z",
+  "updated_at": "2026-07-28T05:49:56Z",
+  "closed_at": "2026-07-28T05:49:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3769",
+  "body": "从 #3759 的实测里掉出来的**真**问题 —— #3759 本身的前提（\"driver 不会重连\"）已被实验推翻并关闭，但过程中撞到了这个。\n\n## 一句话说明\n\n当数据库端点**接受 TCP 但不完成握手**（过载的实例、半开的防火墙、卡住的 LB、failover 中途的 VIP），每个查询挂满 **30 秒**才失败，报的是 `Knex: Timeout acquiring a connection. The pool is probably full` —— 而池并没有满。运维照这个提示会去调 `pool.max`，问题却在网络。\n\n## 事实核实\n\n`packages/cli/src/utils/storage-driver.ts:214-219` 构造 pg driver：\n\n```ts\nnew SqlDriver({\n  client: 'pg',\n  connection: databaseUrl,          // ← 字符串 URL\n  pool: { min: 0, max: 5 },         // ← 没有任何超时设置\n  autoMigrate: isDev ? 'safe' : undefined,\n})\n```\n\n`SqlDriver` 构造函数（`sql-driver.ts:568-572`）原样透传给 knex，不注入任何默认超时。于是三个边界全部来自库的默认值。\n\n用一个\"接受连接后永远不说话\"的监听器实测四种配置：\n\n```\nA. today (no bound set)             30024ms  Knex: Timeout acquiring a connection. The pool is proba…\nB. acquireConnectionTimeout 3s       3003ms  Knex: Timeout acquiring a connection. The pool is proba…\nC. pool.createTimeoutMillis 3s       3004ms  Knex: Timeout acquiring a connection. The pool is proba…\nD. connection.connectionTimeoutMillis 3s   3006ms  timeout expired\n```\n\n两个结论：\n\n1. **不是无界，是 30 秒** —— tarn 的 `createTimeoutMillis` 默认值兜住了。（我一开始以为是无界，那是因为测量上限只有 12 秒；如实修正。）\n2. **只有 D 给出准确的诊断。** B/C 都在 knex 层限时，吐出的都是那句关于池子的误导性文案。D 在 node-postgres 自己那层限时，说的是 `timeout expired` —— 连接尝试超时，正是实情。\n\n## 影响\n\n- `pool: { max: 5 }` + 每次 30 秒：6 个并发请求打到一个黑洞端点，池就被占满，**后续请求开始排队**，这时候\"pool is probably full\"才变成真的 —— 但那是继发症状，不是病因。诊断被引向错误方向。\n- 30 秒远超任何合理的请求超时。用户看到的是卡住的页面，不是快速失败。\n- 这也是 #3765 里 `checkDriversHealth()` 必须自带 2 秒上限的原因。我当时把它写成\"防御性设计\"，**其实它是在绕过这个 bug** —— 探针有界了，业务查询路径仍然没有。\n\n## 建议处置\n\n原则：**平台在请求路径上发起的每一次网络操作，都该有一个我们自己选定的上限，而不是从库的默认值里继承一个。**\n\n1. `storage-driver.ts` 是我们自己从 URL 构造配置的地方，改用对象形式并设 `connectionTimeoutMillis`（建议 10s，与 driver-mongodb 既有的 `connectTimeoutMS ?? 10_000` 对齐）。实测该形式在 `?sslmode=require` 下同样正确限时。\n2. 注意副作用：改成 `{ connectionString, … }` 后 `connectionSettings` 不再被 knex 预解析成 `{host, port, database}`，`serve.ts` 的 `describeRegisteredDriver` 读 `conn.host` 会退化成 `(unknown)` —— 启动横幅要同步适配。\n3. `SqlDriver` 自身补一个 dialect 无关的 `pool.createTimeoutMillis` 默认值作为兜底，覆盖那些自行组装 driver 的宿主（cloud/EE）。\n4. 顺带复核 `acquireConnectionTimeout`（knex 默认 60s）在请求路径上是否也偏长。\n\n## 关联\n\n- #3759（已关闭；本 issue 是从它的实测里分离出来的真问题）\n- #3765（`/ready` 探针；那里的 2s 上限就是在绕开本 issue）\n- #3741 / #3751（启动期 fail-fast）"
+}

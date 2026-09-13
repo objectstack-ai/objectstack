@@ -1,0 +1,34 @@
+{
+  "number": 3738,
+  "kind": "pull_request",
+  "title": "feat(cli,client)!: drop `os environments create --template` and the `template_id` body field (#3731)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T01:07:55Z",
+  "updated_at": "2026-07-28T01:11:43Z",
+  "closed_at": "2026-07-28T01:11:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T01:11:41Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3738",
+  "body": "Closes #3731. Sibling of #3702 / #3730 — the same dead concept, other half.\n\n## What was wrong\n\n`#3702` removed `projects.listTemplates()` because nothing mounted its route. The **writing** half survived, and it fails worse:\n\n- `packages/cli/src/commands/environments/create.ts` advertised `--template` as *\"Built-in template id (e.g. `crm`, `todo`, `blank`)\"* and forwarded it as `template_id`.\n- `packages/client/src/index.ts` declared `template_id?: string` on the `projects.create()` body.\n\nNothing reads it:\n\n- `template_id` / `templateId` appears in **zero** non-test `.ts` files in `cloud`.\n- `sys_environment` has no such column — the value is not even stored.\n- The create route whitelists what it consumes (`environment-lifecycle.ts`): `displayName`/`display_name`, `organizationId`/`organization_id`, `isDefault`, `hostname`, `metadata`, `environmentType`/`environment_type` — then hardcodes `driver: 'turso'`, `plan: FREE_PLAN`, `storageLimitMb: 1024`, `visibility: 'private'`. `template_id` is not in the list.\n- `sys_package.object.ts` states the position: there \"is no separate 'template' concept\"; `apps/cloud/objectstack.config.ts`: *\"No built-in environment templates: every environment is provisioned empty.\"*\n\nThe `blank`/`crm`/`todo` registry the flag named was the `apps/server` `createTemplatesRoutePlugin` snapshot (CHANGELOG ~L1143), removed when the control plane moved to `cloud`. The flag outlived the registry by an entire architecture.\n\nSo `os env create --name X --template crm` was accepted, sent, and dropped — no seeding, no error, no trace. **Worse than the 404** its listing counterpart returned: a 404 tells the caller something is wrong; a silently ignored flag reports success. That is the \"never advertise a capability the runtime doesn't deliver\" corollary of Prime Directive #10.\n\n## Migration\n\n`os environments create --template <id>` → drop the flag; it never did anything. Starter content comes from the App Marketplace: create the environment, then install the package (`sys_package` rows with `is_starter = true` — `client.projects.packages.install(envId, { packageId })`), which is what the console already does. TypeScript now rejects `template_id` on `projects.create()`, which is the point — the field was being discarded on the wire.\n\n**Not** the same `--template` as `os init` / `create-objectstack` (`app` / `plugin` / `empty` scaffolds). Those are local scaffolding, alive, and untouched — including every doc that mentions them. No doc references `os environments create --template`, so there was nothing to sweep.\n\n## Verification\n\n- `packages/cli` — **62 files / 642 tests pass**; `packages/client` — **13 / 175 pass**.\n- `pnpm build` 71/71 with dts on; `packages/client/dist/index.d.ts` no longer carries the property (the one remaining hit is the tombstone comment).\n- Behavioural, on the built CLI: `--template` is gone from `environments create --help`, and `os environments create --org x --name y --template crm` now exits with `Error: Nonexistent flag: --template` instead of silently \"succeeding\".\n\n## Found on the way, filed separately\n\nThe audit that produced this found that `template_id` is not the only unread field in that body — see #3739 for the full table (`clone_from_environment_id` unread, `is_default` sent in a dialect the handler does not accept, `env_type` likewise, `slug`/`region`/`project_type`/`is_system` never read, `driver`/`plan`/`storage_limit_mb` overridden by policy while typed as settable). That one needs decisions, not just a trim, and both route-level guards are blind to it because they compare URLs, not request bodies.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

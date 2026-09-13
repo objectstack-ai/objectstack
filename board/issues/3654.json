@@ -1,0 +1,32 @@
+{
+  "number": 3654,
+  "kind": "issue",
+  "title": "analytics/objectql: 跨对象(点号 lookup)维度聚合在 ObjectQL 路径上静默塌成 (null) 桶 / native SQL 报错",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T13:08:23Z",
+  "updated_at": "2026-07-27T13:35:53Z",
+  "closed_at": "2026-07-27T13:35:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3654",
+  "body": "调查 #3597/#3602 时,对引擎 aggregate 做独立 trace 发现的**功能 bug**(与 RLS 无关):**跨对象(点号/lookup 遍历)维度的聚合在 ObjectQL 路径上根本不工作** —— native SQL driver 上报错,in-memory 上**静默塌进一个 `(null)` 桶算错**。\n\n## 根因:`engine.aggregate` 没有 join 能力\n\n- `engine.aggregate`(`packages/objectql/src/engine.ts` 的 aggregate 方法)只用 `{object, where, groupBy, aggregations}` 建 AST,**从不解析点号、从不填 joins、从不展开 lookup**。对比 `find` 有 `expandRelatedRecords` 会对被引用对象重跑读取(`engine.ts:2007-2133`),aggregate 一次都不调。\n- SQL driver 的 `aggregate`(`packages/plugins/driver-sql/src/sql-driver.ts:1562-1622`)方法里**没有任何 `.join()`**;`joins:true` 是广告了但未实现的能力位。把 `account.region` 丢给 knex → 生成 `\"account\".\"region\"`,但 FROM 里只有基表 → **SQL 报错**(account 不在 FROM)。\n- in-memory 聚合(`packages/objectql/src/in-memory-aggregation.ts:81-88` 的 `projectGroupValue`)对 `field='account.region'` 做 `row['account.region']` **平铺取值** → 基对象行里没有这个键 → 恒 `'(null)'` → 所有行**塌进一个 `(null)` 桶**。\n\n## 已复现(in-memory 路径)\n\n对 `applyInMemoryAggregation` 直接调用(纯函数,无 mock):\n\n```ts\nimport { applyInMemoryAggregation } from './in-memory-aggregation.js';\n\nconst rows = [\n  { account: 'acc_west', amount: 10 },\n  { account: 'acc_east', amount: 20 },   // 不同 account/region\n];\nconst out = applyInMemoryAggregation(rows, {\n  groupBy: ['account.region'],\n  aggregations: [{ function: 'sum', field: 'amount', alias: 'revenue' }],\n});\n// 期望:两个桶(West:10, East:20)\n// 实际:\n//   [{ 'account.region': '(null)', revenue: 30 }]   ← 全塌成一个 (null) 桶\n```\n\n`expect(out).toEqual([{ 'account.region': '(null)', revenue: 30 }])` **通过** —— 坐实塌桶。native SQL 路径的报错未跑真库复现,是代码追查(driver 无 JOIN → 未解析列),但机制清楚。\n\n## 触发面 / 用户影响\n\n跨对象数据集**只在 NativeSQLStrategy**(手编 LEFT JOIN)上工作。一旦 NativeSQL 声明失败回退到 ObjectQLStrategy,跨对象查询就坏:\n\n- **日期分桶的跨对象 dashboard**(`timeDimensions[].granularity` 让 NativeSQL 退场,`native-sql-strategy.ts:30`)—— 最常见的触发;\n- in-memory driver(dev/demo/测试);\n- external/federated 对象(ADR-0062 D6)。\n\n`ObjectQLStrategy` 对点号维度走 `lookupMember` 兜底 `return { sql: member }`,把 `account.region` **原样**当 groupBy 字符串传给引擎(`packages/services/service-analytics/src/strategies/objectql-strategy.ts` 的 `lookupMember`/`resolveFieldName`),于是命中上述引擎缺口。\n\n**症状**:图表要么 500,要么显示一个标着 `(null)`、把所有组的度量**加总到一起**的假桶 —— 静默出错,数字看着\"有值\"却是全表汇总。\n\n## 与既有工作的关系\n\n- #3601 的 `assertJoinedScopesEnforceable` 只在\"被联对象带 read scope\"时把这种查询**拒绝**掉(换成一条干净的安全错误);当被联对象无 scope / 无安全时,查询照旧走到引擎缺口。#3601 注释里\"engine 经 lookup 遍历\"的措辞据此**是错的**(行为=拒绝,正确;措辞错),值得顺手更正。\n- 详细背景见 #3597 / #3602(#3602 评论里已记这条缺口)。\n\n## 可能的方向(未实现,供讨论)\n\n1. **让 ObjectQL 聚合路径支持 lookup 遍历**:engine.aggregate 学会展开点号维度(driver-native join,或 in-memory expand 后再聚合)—— 与 `find` 的 `expandRelatedRecords` 对齐。工作量最大但治本。\n2. **fail-closed**:ObjectQLStrategy 在检测到点号/跨对象维度且本路径无法 join 时**显式拒绝**(不论有无 scope),给出清晰错误,而不是塌成 `(null)` 静默算错。轻量、防止静默错误。\n3. 至少给 in-memory `projectGroupValue` 的点号平铺取值加护栏 + 告警。\n\n倾向 (2) 作为止血(把静默错误变成响亮错误),(1) 作为后续能力。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

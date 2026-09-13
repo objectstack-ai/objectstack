@@ -1,0 +1,30 @@
+{
+  "number": 4007,
+  "kind": "issue",
+  "title": "Decide when the client's three-location `code` probe retires — ADR-0112 D5 says \"after batch 3\", the code now says \"legacy-server fallback, NOT debt\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T02:36:21Z",
+  "updated_at": "2026-07-30T03:20:21Z",
+  "closed_at": "2026-07-30T03:20:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4007",
+  "body": "Two authoritative texts now disagree about the same lines of code, and each was written without seeing the other (they merged 10 seconds apart). This issue is where a maintainer picks one, and the loser gets amended — otherwise the next agent that works from the ADR will delete the probe in good faith, and the next one that works from the code comment will restore it.\n\n## The two positions\n\n**[ADR-0112](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0112-error-code-vocabulary-and-ledger.md) D5 / Rollout batch 3:** *\"The client's three-location probe is deleted only after both\"* the dispatcher-occupation fix and the `error.type` retirement. Both landed in #3971. By the ADR's letter the probe (`packages/client/src/index.ts`, the `errorCode` resolution above the error construction at ~`:4455`) is deletable **today**: every current server puts the semantic code in `error.code`, so the extra locations read as dead lookups.\n\n**The code comment (rewritten in #3971, same merge):** the probe is *\"now a legacy-server fallback rather than the primary read\"* and *\"NOT debt: an SDK build talks to whatever server version it is pointed at, so a client newer than its server must still find the code where that server put it. Same reasoning as the console's two-dialect read in objectui#2869.\"* Pre-#3971 servers (all of v16, v17 rc.0) put the dispatcher's semantic code in `details.code` / `error.type`; a probe-less SDK pointed at one resolves `err.code` to `undefined` — silently, since nothing throws.\n\n## What decides it\n\nHow real is the skew window? Arguments each way:\n\n- **For deleting now (A):** the repo releases as a changesets fixed group — SDK and server ship on the same train, and v17 is still in pre-mode, so \"old server\" today means an rc, not a GA deployment anyone keeps around.\n- **For keeping one major (B):** trains ship together but *deployments don't upgrade atomically* — an app bumps its SDK dependency independently of when its backend redeploys, which is exactly the window objectui#2869 tolerated on the console surface. The probe is ~10 lines with a comment that now tells the truth; its cost is reading, not risk.\n\n**Recommendation: B** — keep through v17, delete in the v18 breaking window. The deletion then rides the same PR that drops other v17-compat reads, and the D9 cleanup completes there (by then #4006 should have fixed the `category`/`retryable` nesting reads; if not, that fix and the probe deletion are the same ten lines).\n\n## Whichever way it goes\n\n1. Amend ADR-0112 (one line on D5/Rollout batch 3) to record the outcome and, for option B, the retirement trigger (\"v18\").\n2. If **A**: delete the probe *and* its comment block together, and land #4006's nesting fix in the same diff — the probe's replacement read is where `category`/`retryable` get read correctly.\n3. If **B**: tag the probe comment with the retirement condition so v18's breaking-window sweep greps straight to it.\n\nRefs: #3971 (batch 3), #3988 (batch 1), #4006 (the D9b nesting fix, valid under either outcome), objectui#2869 (the precedent both sides cite)."
+}

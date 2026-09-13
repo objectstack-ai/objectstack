@@ -1,0 +1,35 @@
+{
+  "number": 3866,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol,rest): gate the data path on object existence — the 404 the exposure gate assumed (#3770)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T12:34:09Z",
+  "updated_at": "2026-07-28T12:49:45Z",
+  "closed_at": "2026-07-28T12:49:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T12:49:43Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3866",
+  "body": "Closes #3770. Takes the issue's recommended **1 + 2**: fix the dishonest comment *and* close the gap it pointed at.\n\n## The premise that didn't hold\n\n`enforceApiAccess` (`rest-server.ts`) passes through any object it can't find in metadata:\n\n```ts\nif (!obj) return false; // unknown object → let the data path 404\n```\n\nThe data path did not 404, for the three reasons the issue laid out — all confirmed:\n\n1. **`findData` had no existence check.** The repo's only `OBJECT_NOT_FOUND` throw was in `cloneData`.\n2. **The engine doesn't reject unregistered names.** `resolveObjectName` falls back to `StorageNameMapping.resolveTableName({ name })` — the object name *is* the table name.\n3. **The 404 was a driver-error side effect**, recognised by string-matching the driver's message in the REST layer.\n\nSo the 404 held only while the table happened not to exist. **Case B** — a physical table present under an unregistered name (out-of-band DDL, a registration that failed after `syncObjectSchema` had already run, a registration race) — was served, with the exposure gate silently skipped and nothing turning it into a 404.\n\nVerified on a live server before/after, using a table that genuinely exists but is not a registered object:\n\n```\nGET /api/v1/data/sqlite_sequence\nbefore → reaches the driver as a table name\nafter  → 404 {\"error\":\"Object 'sqlite_sequence' is not registered\",\"code\":\"object_not_found\",\"object\":\"sqlite_sequence\"}\n```\n\n## The gate\n\n`ObjectStackProtocolImplementation.assertObjectRegistered` runs before storage is touched, on `findData`, `getData`, `createData`, `cloneData`, `updateData`, `deleteData`, `batchData`, `createManyData`, `insertManyData`, `updateManyData`, `deleteManyData` and `analyticsQuery`. An object absent from the schema registry → `OBJECT_NOT_FOUND` / 404 — an authoritative answer from the registry, raised *before* the name becomes a table name, rather than an inference from driver prose. `cloneData`'s open-coded check becomes that shared gate; its envelope is unchanged.\n\nIt sits at the protocol ingress, the same boundary `apiEnabled` guards: internal callers (hooks, flows, migrations, raw ObjectQL) go to the engine directly and are deliberately unaffected.\n\n**Tiering**, mirroring the #3545 decision recorded in `api-exposure.ts`:\n\n| Situation | Behaviour | Why |\n|:---|:---|:---|\n| Registry present, object absent | **fail closed** (404) | `object` is `allowOrgOverride: false`, so no per-org overlay lives outside the process-wide registry; boot hydration and runtime authoring both register before the table is reachable |\n| No registry on the engine at all | **skip**, warn once per process | Nothing to consult — the check cannot answer. Failing closed would break registry-less hosts for no security gain; the warning keeps it from being a *silent* blanket-allow |\n\nConfirmed the gate is active in production shape: a real booted server emits no such warning.\n\n## One wire code\n\n`mapDataError` maps `OBJECT_NOT_FOUND` to the canonical `object_not_found` `ApiErrorCode` — byte-identical to the envelope the driver-string branch already produced — so a client keying on `code` sees *what happened*, not *which layer noticed*. `sendError` defers to it so both funnels agree. The driver-string branch stays, now scoped to the failure it actually covers: an object that **is** registered but whose physical table is missing.\n\n⚠️ Callers reading `cloneData`'s 404 as `code: 'OBJECT_NOT_FOUND'` on the wire now get `object_not_found`. Status is 404 either way.\n\n## The comment\n\nReplaced with what actually closes the hole — this gate for *existence*, plugin-security's `unresolved` posture (#3545) for *authorization* — plus a note not to widen the exposure gate on the assumption that some other layer 404s. That assumption is what produced this issue.\n\n## Behaviour change\n\nA REST data request for an object not in the schema registry now returns `404 object_not_found` even when a table of that name exists; previously it returned that table's rows. A deployment reading a table with no registered object should register the object — its schema is what exposure, RBAC/FLS/RLS and field projection all already need in order to enforce anything.\n\n## Tests\n\n- **`packages/objectql/src/protocol-unregistered-object.test.ts`** (new) — real `ObjectQL` engine + in-memory driver, with a table seeded under an unregistered name. **4 of its 6 cases fail without this change**, including case B resolving and returning `{ id: 'r1', secret: 'classified' }`. Covers case A, case B, 404-before-query-parse, every data entry point, and no-regression for registered objects.\n- **`protocol-data.test.ts`** — pins the decision rule: registry present ⇒ registry answers; no registry ⇒ gate stands down.\n- **`rest.test.ts`** — pins that the gate and the driver-string branch emit an identical envelope.\n\n`pnpm test` green across the monorepo (132/132 turbo tasks). Re-ran the affected packages against the final build: metadata-protocol 71, objectql 1160, rest 414, runtime 694, dogfood 387.\n\n## Follow-up filed\n\nThe live check turned up a **separate** subsystem with the same shape: `POST /api/v1/analytics/query` on a deployment running `AnalyticsServicePlugin` bypasses the protocol shim this PR gated, reaches the driver with the cube name as a table name, and returns a **500 with raw SQL in the body** instead of a clean 404. Filed rather than folded in (Prime Directive #10) — different service, different resolution path, and it carries its own SQL-leak defect.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01EWHv5StvA4KDkHhx19xufX\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01EWHv5StvA4KDkHhx19xufX)_"
+}

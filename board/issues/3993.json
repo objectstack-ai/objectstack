@@ -1,0 +1,30 @@
+{
+  "number": 3993,
+  "kind": "issue",
+  "title": "ADR-0062 D5 收尾:kernel 优雅关闭时没人 disconnect `default` pool;teardown 归一需要 owned vs adopted 语义",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T01:54:52Z",
+  "updated_at": "2026-07-30T02:33:29Z",
+  "closed_at": "2026-07-30T02:33:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3993",
+  "body": "## 一句话说明\n\n#3826 把 `default` 的 **connect** 与失败判决收敛成了一份实现,但 D5 点名的另一半——**pool 生命周期的 disconnect**——两边都没人做:kernel 优雅关闭时,declared `default`(以及旧 `DriverPlugin` 路径)的驱动池根本无人断开。connect 归一之后,这是 D5 剩下的最后一处分叉,而且严格说是「分叉成零份实现」。\n\n## 事实核实(#3826 收尾过程中逐一读码确认)\n\n- `DriverPlugin`(`packages/runtime/src/driver-plugin.ts`)**从来没有 `stop()`**——只有 init/start。#3826 原帖 fork 表里 \"pool teardown: kernel shutdown via `DriverPlugin`\" 这一行描述的机制并不存在。\n- `DefaultDatasourcePlugin`(`packages/runtime/src/default-datasource-plugin.ts`)同样只有 init/start,无 stop。\n- `ObjectQLPlugin.stop`(`packages/objectql/src/plugin.ts:511`)只停 lifecycle sweep 与 metadata 订阅,**不 disconnect 任何 driver**。\n- `DatasourceConnectionService.disconnect()` 存在且会清掉留存判决(#3836:\"免得一个已删除的 pool 还在解释自己\"),但 boot 路径上没有任何调用方在 shutdown 时调它。\n- 后果:单进程 serve 靠进程退出兜底(socket 由 OS 收走,pg/mysql 服务端等 idle 超时);**cloud 的 kernel-manager 按 LRU/TTL evict kernel(`kernel.shutdown()`)时**,被 evict 的 kernel 名下的池同样无人显式断开——今天不炸是因为那些实例本来就是跨 kernel 共享/缓存的(见下),但这恰恰说明 teardown 语义从未被认真定义过。\n\n**待核实**:`DatasourceAdminServicePlugin` 停机时是否对 declared(非 default)datasource 调 `disconnect` —— 我没查这半边;归一时一并盘点。\n\n## 设计约束(这是为什么不能顺手加个 stop)\n\ncloud#915 的收养式收敛引入了一个 teardown 必须尊重的事实:**被收养的实例的生命周期比单个 kernel 长**——control driver 兼任每个环境 kernel 的 proxy 基座,每环境 driver 在 registry 里跨 kernel 重建缓存。若 `DefaultDatasourcePlugin.stop()` 无条件 `disconnect('default')`,cloud 每次 LRU evict 一个环境 kernel,就会把共享池从其他所有消费者脚下抽走。\n\n所以 teardown 归一必须区分:\n\n- **owned**(factory 现场构建,如开源 standalone/serve 的 default)→ kernel stop 时经 `DatasourceConnectionService.disconnect` 断开,一条 teardown 路径;\n- **adopted**(`createPrebuiltDriverFactory` 收养的宿主实例)→ kernel stop **绝不**断开,生命周期归宿主(registry TTL/进程退出)。\n\n语义的自然载体就是接缝本身:`createPrebuiltDriverFactory` 产出的 handle 天然知道自己是收养的——例如 handle 或 factory 声明 `ownership: 'host'`,`DefaultDatasourcePlugin.stop()` 只对 owned 走 disconnect。这样 cloud 侧零改动即得到正确行为。\n\n## 建议处置\n\n1. `DatasourceDriverHandle`(或 factory 契约)增加 ownership 标记,`createPrebuiltDriverFactory` 标 host-owned;\n2. `DefaultDatasourcePlugin` 增加 `stop()`:owned → 经共享/本地 `DatasourceConnectionService.disconnect('default')`(清留存状态),adopted → no-op + debug log;\n3. 盘点 declared datasource 的停机路径(admin plugin),归入同一条 disconnect 实现;\n4. `degraded-boot-parity` 式的小测试钉住:owned 停机断开、adopted 停机不断开、断开后留存状态被清。\n\n非回归(#3826 之前也没有 teardown),不紧急;但按 PD#5,别在下一个「连接泄漏」bug 报进来时才用临时补丁修。\n\n## 关联\n\n- ADR-0062 D5(\"owns connect/disconnect (graceful shutdown)\" —— disconnect 半边至今未兑现)、#3826(已关闭,connect 半边)\n- #3968(接缝:`createPrebuiltDriverFactory`)、cloud#915(收养式收敛,约束来源)\n- `packages/services/service-datasource/src/datasource-connection-service.ts`(disconnect + 留存状态清理)"
+}

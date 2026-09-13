@@ -1,0 +1,36 @@
+{
+  "number": 3790,
+  "kind": "pull_request",
+  "title": "fix(approvals): the status mirror names the human who caused the transition (#3783)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T05:35:03Z",
+  "updated_at": "2026-07-28T05:40:02Z",
+  "closed_at": "2026-07-28T05:40:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T05:40:00Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3790",
+  "body": "Closes #3783.\n\n## The problem\n\n`approval-service.ts` mirrors a request's status onto the target business record whenever `approvalStatusField` is configured. That write is what fires the object's **record-change flows** — it is the seam that \"when the invoice is approved, do X\" runs through. It presented a bare `{ isSystem: true }` context with **no `userId`**, at six call sites that each know exactly who acted: a submitter submitting or recalling, an approver approving, rejecting, or sending back.\n\nSince #3760 a `runAs:'user'` run with no trigger user has its data operations refused. So the most natural approvals automation there is could not be written in its obvious form — the cascade inherited no user, and the author's only way forward was `runAs: 'system'`: blanket elevation for a case where a perfectly good scoped identity existed at the call site all along.\n\n## The change\n\nThe mirror carries the acting user. It **stays `isSystem`** — the record is normally locked while its approval is live, so only a platform write can land the status. Elevation and anonymity are separate choices, and this write only ever needed the first.\n\n**The identity is the authenticated principal, never the request body's `actorId`.** `actorId` arrives as `body.actorId ?? context.userId` from the REST routes and the service only checks that it names a *pending approver*, never that it is the caller. Tolerable on an audit row; promoting it to the identity of an RLS-scoped write would have turned a mislabelled audit trail into identity spoofing. The rule lives in one helper (`actingUserId`) with that reasoning attached.\n\n**Approval-by-email-link is attributed too.** ADR-0043 action links carry no session, so they used to decide as pure system. Their token is single-use, hashed at rest, bound to exactly one approver, and re-checked against the live slate at redemption — that *is* an authentication. So the redemption now names that approver on the context, and an emailed approval cascades identically to one made in the UI. This is the \"trustworthy actor with no session\" case, fixed at the seam where the identity is established rather than by teaching the mirror to trust `actorId`.\n\n**Two transitions stay user-less on purpose**: the SLA escalation's auto-decision and the dead-run sweep. `system:sla` and `system:dead-run` are reserved audit actors, not users; presenting one as a user would put a non-user in `updated_by` and in every downstream flow's identity. A flow that wants to react to those declares `runAs:'system'` — the honest answer, and now a deliberate one rather than an artefact. The `actorId` parameter is required, so a future call site cannot drop the actor silently.\n\n**Attribution only — the write is not newly org-scoped.** On an ExecutionContext `tenantId` is a driver-scoping knob rather than attribution (`buildDriverOptions` turns it into a tenant predicate), so carrying the request's org would have silently no-op'd the mirror on a record whose org differs. The automation engine already back-fills a run's `tenantId` from the resolved user's own grants.\n\n## The rest of the file, per the issue's ask\n\nAll 73 `SYSTEM_CTX` uses in `approval-service.ts` were audited. `mirrorStatusField` is the **only** write to a business object; everything else is a read, or a write to an engine-owned `sys_approval_*` table that is closed to generic CRUD and already stamps its actor in an `actor_id` column. The three business-object *reads* (`loadLiveRecord`, `enrichRows`) bypass RLS deliberately and document why — left alone.\n\n## Verification\n\n- **`status-mirror-cascade.integration.test.ts`** (new) stubs no hop: a real `ObjectKernel` with the real ObjectQL engine, the real record-change trigger, the real automation engine and the real `ApprovalService`. An actual decision produces the mirror, and the `runAs:'user'` flow bound to the object now runs its `update_record`. The negative control is load-bearing — it fires the **same** flow off the dead-run sweep's user-less mirror and shows it is still refused, so the positive case proves the cascade runs *because* the identity arrived, not merely that it runs.\n- **10 unit tests** pin the identity at every site: submit, decide, recall, send-back, budget-exhausted auto-reject, action link, the two machine sweeps, `isSystem` survival, and that the caller-supplied `actorId` is never the identity.\n- Both new files were confirmed to go **red** without the source change (7 unit failures; the integration test fails with `expected undefined to be 'yes'` — the cascade never ran).\n- `pnpm build` (full, with DTS) and `pnpm test` green: 132/132 turbo tasks.\n\n## Doc accuracy\n\n#3760's runtime doc and the trigger's end-to-end test both cited \"the approvals status mirror\" as *the* example of a user-less system write. That is no longer true for the human-driven paths, so both were corrected in place rather than left to mislead the next reader.\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 3686,
+  "kind": "issue",
+  "title": "[P2] AI scope keys declared but unenforced: skill.permissions + agent.knowledge (enforce-or-prune)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T14:27:16Z",
+  "updated_at": "2026-07-27T15:53:31Z",
+  "closed_at": "2026-07-27T15:53:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3686",
+  "body": "Split out of the #1878 §3 naming-drift recheck (#3677). The ledger has been made honest about these (#3685 marks both `dead` + `authorWarn`); this issue tracks the actual **enforce-or-prune** decision, which needs a product call and a cloud-side change.\n\n## Common shape\n\nBoth are **declarative scope keys in the AI domain whose declaration face is in the open spec while their enforcement face would live in the closed cloud runtime** — and the wire between them was never connected.\n\n### 1. `skill.permissions` — no gate\n\n- Spec: `packages/spec/src/ai/skill.zod.ts:121`\n- Consumers: `skill.form.ts` (authoring input) + objectui `SkillPreview.tsx:48` (echo). **No gate.** The cloud `SkillRegistry` reads `active`, `triggerConditions`, `tools`, labels/instructions/`triggerPhrases` — never `permissions`.\n- The Studio form labels the section **\"Access / Required permissions to use this skill\"** — a security-shaped promise with nothing behind it.\n- Cloud *documents the intent* without implementing it — `packages/service-ai-studio/src/skills/metadata-authoring-skill.ts:15`:\n  > `- Layer permissions via` `Skill.permissions` `independent of the agent's permissions.`\n- Note the live sibling: agent-level `access`/`permissions` **are** enforced (`evaluateAgentAccess` → 403, #1884). So the mechanism exists; skill-level was simply never wired.\n\n**Decision needed:** is skill-level gating a real requirement (the argued case: one agent serving different users should expose different skills — e.g. a `refund` skill only to managers), or is agent-level gating sufficient?\n- **Yes** → wire it in cloud (registry filters the skill set by the caller's permissions), then flip the ledger back to `live` with a real proof.\n- **No** → prune `permissions` from `SkillSchema` (breaking, `minor` per launch-window policy) and drop the misleading form section. Precedent: agent `visibility` was pruned for exactly this \"security-shaped field that lies\" reason (#1901).\n\n### 2. `agent.knowledge` — declares a scope the runtime ignores\n\n- Spec: `packages/spec/src/ai/agent.zod.ts:35-48` (the `topics`→`sources` naming drift itself is fixed, #1891).\n- The retrieval path takes `sourceIds` from the **LLM's tool-call arguments** (cloud `service-ai/src/tools/knowledge-tools.ts:96`), never from the agent record. So an agent declared with `knowledge: { sources: ['public_faq'] }` can still search any other source the service exposes.\n- This is arguably not just inert config but a **scope gap**: the author declared a boundary and the model can step outside it.\n\n**Decision needed:** wire `agent.knowledge.sources` as the default/ceiling for `sourceIds` (small change at the tool seam — but it is a *behaviour* change: today the LLM chooses freely), or mark it experimental and rely on knowledge-source-level access control.\n\n## Also worth scheduling: verify the other ten preview-only `live` claims\n\nThe same 2026-06 sweep marked 13 properties `live` citing only a preview renderer. Three were re-verified and all three were wrong or misleading (see #3685). The remaining ten are **unverified**:\n\n`action.execute` / `action.shortcut` / `action.bulkEnabled`, `flow.status` / `flow.active`, `skill.triggerPhrases`, `tool.category` / `tool.requiresConfirmation` / `tool.active` / `tool.builtIn`\n\nEach needs the same treatment: find a real runtime reader or downgrade to `dead` + `authorWarn`.\n\nRefs #1878, #3677, #3685, #1884, #1891."
+}

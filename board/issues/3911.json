@@ -1,0 +1,32 @@
+{
+  "number": 3911,
+  "kind": "issue",
+  "title": "seed-loader: 多值 lookup（multiple: true）的自然键数组被静默丢弃，记录落库但整个关联字段缺失",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T05:34:19Z",
+  "updated_at": "2026-07-29T12:00:29Z",
+  "closed_at": "2026-07-29T12:00:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3911",
+  "body": "## 环境\n\n- `@objectstack/metadata-protocol` 16.1.0（17.0.0-rc.0 亦复现）\n- 种子经 `defineSeed()` 定义，随应用启动加载\n\n## 最小复现\n\n```ts\n// author.object.ts\nexport const Author = ObjectSchema.create({\n  name: 'author',\n  fields: { name: Field.text({ label: 'Name', required: true }) },\n});\n\n// book.object.ts\nexport const Book = ObjectSchema.create({\n  name: 'book',\n  fields: {\n    name: Field.text({ label: 'Title', required: true }),\n    authors: Field.lookup('author', { label: 'Authors', multiple: true }),\n  },\n});\n\n// seeds\nconst authors = defineSeed(Author, {\n  mode: 'upsert', externalId: 'name',\n  records: [{ name: 'Alice' }, { name: 'Bob' }],\n});\nconst books = defineSeed(Book, {\n  mode: 'upsert', externalId: 'name',\n  records: [{ name: 'Refactoring', authors: ['Alice', 'Bob'] }],\n});\n```\n\n启动应用（`objectstack dev`）触发种子加载。\n\n## 实际结果\n\n- `book` 记录成功落库，但 `authors` 字段整个缺失（查库 / `GET /api/v1/data/book` 均无该字段值）\n- 种子加载不报错、不中断，仅在日志出现一条 warn：\n\n```\n[SeedLoader] Invalid reference for book.authors: expected a author.name natural-key string but got an object. Pass the target's name value as a plain string.\n```\n\n- 提示 \"Pass … as a plain string\"，但该字段是 `multiple: true`，无法用单个字符串表达多个关联\n- 对比：单值 lookup 传字符串自然键（如 `crm_account: 'Acme'` 形式）解析正常\n\n## 预期结果\n\n多值 lookup 字段传自然键**数组**时，能像单值字段的字符串自然键一样逐个解析为目标记录 id 并写入；或至少加载结果向调用方明确报错，而不是记录成功、字段静默消失。"
+}

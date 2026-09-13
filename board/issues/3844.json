@@ -1,0 +1,35 @@
+{
+  "number": 3844,
+  "kind": "pull_request",
+  "title": "fix(rest): route batch creates through the create ingress so `readonly` is enforced (#3835)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T09:22:36Z",
+  "updated_at": "2026-07-28T09:27:59Z",
+  "closed_at": "2026-07-28T09:27:57Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3844",
+  "body": "Closes #3835.\n\n> **Stacked on #3834** — it touches the same `/batch` handler block and this branch is cut from it, so the diff shows both until #3834 lands. Merge #3834 first; I'll rebase this to a single commit.\n\n## `readonly` meant two different things depending on which create endpoint you used\n\n`POST /data/:object` runs the #3043 ingress strip, so a non-system caller cannot seed a read-only column — the field is dropped and reported. The cross-object transactional batch called `ql.insert` directly and skipped that ingress, and the engine's INSERT path is static-`readonly`-exempt **by design** (#3413 — the strip deliberately lives one layer up). So nothing enforced it on that route.\n\nMeasured on the showcase, `showcase_contact.lead_score` (`readonly: true`), same signed-in non-system user, identical payload:\n\n| | before | after |\n|---|---|---|\n| `POST /data/showcase_contact` | `lead_score = null`, `droppedFields` reported | unchanged |\n| `POST /batch` (`action: 'create'`) | **`lead_score = 999` written, nothing said** | `null`, `droppedFields` reported |\n\n## Why route to the ingress instead of re-applying the strip here\n\nReading `stripReadonlyForInsert` turned up a **deliberate scope carve-out** that a second copy would have lost: platform objects (`sys_` / `managedBy`) are exempt on purpose, because their own guards must **reject** a forged value with 403 (ADR-0086's `managed_by`/`package_id`, #3004's `owner_id` anchor) — silently swallowing it would eat the very payload the guard exists to refuse. `isSystem` is exempt for the same class of reason.\n\nThat rules out the \"sink the strip into the engine\" option I floated in the issue: the engine has no notion of that boundary. So the batch's create ops now go through `p.createData` — the ingress itself. One create ingress, and a future change to its policy covers the batch for free (AGENTS.md PD #12: fix the producer, don't grow a second de-facto contract).\n\nMechanics that had to keep working, and do:\n\n- **Transaction** — `trxCtx` is passed as the context, so the insert joins this batch's transaction and rolls back with it (asserted in a test: the ingress receives the trx context, not a bare one).\n- **`{ $ref: <opIndex> }`** — `results` now holds the ingress's echoed record instead of the raw engine return; `$ref` resolves off `.id` either way. Verified live: an invoice + line batch produced a line whose `invoice` points at the invoice created in the same request.\n- **`droppedFields`** — the ingress's events fold into the batch's per-op list (#3794), so a batch create reports strips the way an update does.\n\nUpdate ops are untouched — the engine enforces `readonly` (#2948) and `readonlyWhen` (#3042) on its own update path.\n\n## Tests\n\n3 new in `rest-batch-endpoint.test.ts`: create ops go through the ingress with the transaction context; a forged `readonly` column never reaches the engine and comes back in `droppedFields` tagged with its op index; `$ref` still resolves through the ingress. The harness's protocol mock gained a `createData` that delegates to the same `ql.insert`, so existing assertions still read off `ql.insert`.\n\n`rest`: 413 passing.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

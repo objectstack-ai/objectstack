@@ -1,0 +1,32 @@
+{
+  "number": 3794,
+  "kind": "issue",
+  "title": "审批场景下记录可写性的反馈全线失真:能改的显示「已锁定」,改不了的提示「更新成功」",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T05:49:11Z",
+  "updated_at": "2026-07-28T16:04:41Z",
+  "closed_at": "2026-07-28T16:04:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3794",
+  "body": "审批场景下,平台对「这条记录/这个字段我现在能不能改」的反馈在**两个相反方向上同时失真**:\n\n- **能改的,界面说「已锁定」** —— `lockRecord: false` 的审批节点上照样渲染「审批中已锁定」band\n- **改不了的,界面说「更新成功」** —— `readonlyWhen` 命中的字段被静默丢弃,接口仍返回 200\n\n这两半合起来,用户在整条审批链上完全丧失了判断依据:该编辑的不敢试,不该抱期望的以为成功了。我们排查这个问题时,测试同学先是得出「整个审批流程都锁记录」的错误结论,后来又出现「明明改了但下游没生效」——两次误判分别来自这两条。所以放在一个 issue 里说明,虽然修复落点在两个包。\n\n---\n\n## 问题一:`lockRecord: false` 的节点仍显示「审批中已锁定」band\n\n**修复落点:objectui `packages/plugin-detail`**\n\n服务端行为是**正确的** —— `plugin-approvals` 的 `beforeUpdate` 锁钩子里明确 `if (config?.lockRecord === false) return;`,`lockRecord: false` 的节点真的放行编辑。\n\n但 Console 记录详情页顶部的「审批中已锁定 / Locked for approval」band + 「撤回审批 / Recall approval」按钮,在**所有** pending 节点上都照常渲染,不区分当前节点的 `lockRecord`。同一个 band 在「记录能改」和「记录被锁死」两种完全相反的状态下长得一模一样。\n\n### 复现\n\n1. 定义一个 `record_change` flow,串两个 approval 节点:节点 A `lockRecord: false`、节点 B `lockRecord: true`\n2. 提交审批,流程停在节点 A,打开记录详情页\n\n**实际**:渲染「Locked for approval」band 和「Recall approval」按钮。但从「编辑」进去改任意字段保存 —— **成功落库**。\n\n3. 审批通过进入节点 B,再打开详情页 —— **band 与节点 A 完全一致**,但此时保存会被服务端拒:\n   `RECORD_LOCKED: record is locked while an approval is in progress`\n\n**预期**:当前 pending 节点 `lockRecord` 为 `false` 时不渲染锁定 band;或让文案区分「审批中(可编辑)」与「审批中已锁定」。\n\n### 线索\n\n- band 渲染在 objectui `packages/plugin-detail`(参见 `src/__tests__/DetailView.approvalBand.test.tsx`),i18n key `detail.lockedByApproval`\n- 疑似回归来源:objectui#2618 `fix(detail): show the \"Locked for approval\" band on request-tracked backends` —— 那次让 band 在存在 pending approval request 时显示,疑似未带上节点 `lockRecord` 判定\n- 不需要新接口:节点配置快照已经在 `sys_approval_request.node_config_json` 里,band 从同一来源读 `lockRecord` 即可\n\n---\n\n## 问题二:`readonlyWhen` 命中的字段被静默丢弃,但仍返回 200\n\n**修复落点:objectstack(`stripReadonlyWhenFields`)**\n\n字段声明 `readonlyWhen`、谓词为真时,写入被丢掉 —— 这没问题。**问题是丢掉之后不告诉任何人**:同一次 PATCH 里其他字段照常写入,接口返回 200,响应体里没有任何「哪些字段被丢弃」的信息,Console 据此弹「更新成功」。\n\n### 复现\n\n1. 对象 A 上字段 `f` 声明 `readonlyWhen`(例如 `previous.status != \"draft\"`),另有普通字段 `g`\n2. 把记录置为谓词为真的状态\n3. 在记录详情页点「编辑」,**同一个弹窗里同时修改 `f` 和 `g`**,保存\n\n**实际**:提示「更新成功」;刷新后 `g` 变了、`f` 原样不动;全程无任何提示。\n\n我们的实测对照(16.1.0,同一次 PATCH):普通文本字段写入成功、配了 `readonlyWhen` 的多值 lookup 完全没变、`updated_by` / `updated_at` 正常刷新 —— 确认是**字段级剥离**,不是前端没提交。\n\n**预期**(二选一):\n\n- (a) 请求里含「被 `readonlyWhen` 命中且值确实有变化」的字段时返回 4xx,并指明字段;或\n- (b) 仍返回 200,但响应体带上被剥离字段清单(如 `strippedFields: ['f']`),让前端能提示「字段 f 当前不可编辑,未保存」\n\n### 关于「静默」是否是有意设计\n\n我们理解对**权限**类拦截而言静默剥离是合理默认(避免通过报错反推字段存在与否)。但 `readonlyWhen` 不是权限 —— 它是记录状态驱动的、对用户完全可见的业务规则,字段就明晃晃摆在表单里。这种情况下沉默没有安全收益,只有认知成本。\n\n### 线索\n\n- `stripReadonlyWhenFields`;契约说明见 `packages/spec/src/contracts/data-engine.ts` 中关于 `readonly`(#2948)与 `readonlyWhen`(#3042)的部分\n- lint 侧已经意识到该语义:`packages/lint/src/validate-readonly-flow-writes.ts` —— 「`readonlyWhen` is per-record-state — it strips」\n\n---\n\n## 真实影响\n\n我们的审批流场景,两条各踩一次:\n\n**问题一** —— 审批链上单人节点(部门负责人 / 厂长)配 `lockRecord: false`,本意就是允许审批人在审批时补充内容。但审批人看到「已锁定」根本不会去尝试编辑,这个能力等于不存在。反过来,真正锁死的并行会审节点,用户得点进编辑表单填完一屏,才在点保存时被拒。\n\n**问题二** —— 「并行会审岗位」字段配了「提交审批后只读」,而按流程设计,部门负责人在自己的审批节点上恰恰就该改这个字段(选出下一级由哪几个部门会审)。他点掉一个岗位、保存、看到「更新成功」—— 实际什么都没发生,也没有任何线索。这类问题在生产上几乎不可能被用户自己发现,只会表现为「明明改了但下游没生效」的疑难杂症。\n\n## 环境\n\n- `@objectstack/plugin-approvals` 16.1.0\n- Console(objectui)随该版本\n"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 3610,
+  "kind": "issue",
+  "title": "POST /api/v1/packages is a publish-vs-install shape collision — REST registers first and shadows the dispatcher (#3587 finding)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T09:23:34Z",
+  "updated_at": "2026-07-27T10:37:48Z",
+  "closed_at": "2026-07-27T10:37:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3610",
+  "body": "Found by the #3587 tranche-2 audit; ledgered as `mismatch` in `packages/rest/src/rest-route-ledger.ts` (PR #3609). This is the only route in the monorepo where the same verb+path carries **two different semantics** on two surfaces.\n\n## The collision\n\n- **REST** (`packages/rest/src/package-routes.ts:49`): `POST /api/v1/packages` = **registry publish**. Requires `{manifest, metadata}` in the body; 400 `Missing required fields: manifest, metadata` otherwise.\n- **Dispatcher** (`packages/runtime/src/domains/packages.ts`): `POST /packages` = **install** — different body, different semantics; `client.packages.install` targets this shape (dispatcher route ledger row `POST /packages → packages.install`).\n- **Registration order decides**: the production stack (`packages/cli/src/commands/serve.ts:1748-1780`) registers the REST plugin FIRST, the dispatcher second, and the underlying routers are first-match-wins with no specificity sorting (documented at `rest-server.ts:1866-1877`).\n\n## Consequence\n\nIn any stack where the `package` service resolves (REST's package routes are service-gated, `rest-api-plugin.ts:300-321`), `client.packages.install`'s POST lands on the **publish** handler and should 400 — the SDK's install path is broken exactly in the fullest deployments. In stacks without `service-package`, the dispatcher serves install fine, which is why nothing obviously screams. (Not yet reproduced end-to-end — the audit is static; a boot-and-call repro should be the first step.)\n\nThe other three REST package routes (`GET /packages`, `GET /packages/:id`, `DELETE /packages/:id`) shadow their dispatcher twins **compatibly** (list additionally merges registry + database), so only POST is semantically wrong.\n\n## Options\n\n- **A (recommended): consolidate on the dispatcher domain.** Port what's unique in the REST handlers (registry+db merge on list; `protocol.deletePackage` full uninstall, #2747) into `domains/packages.ts`, then delete `package-routes.ts` and its plugin wiring. Kills a RouteManager-bypassing registrar too (the ledger's `direct-mount` source shrinks to external-datasource only). The dispatcher domain is the audited, 17-route, ledgered surface — one owner for `/packages`.\n- **B: rename REST's publish** to `POST /packages/publish` and keep both surfaces. Smaller, but leaves two owners for one prefix and the shadowing hazard for future routes.\n\n## Acceptance\n\n- One surface owns `POST /api/v1/packages`; a boot-level test proves `client.packages.install` works in a full stack (package service present).\n- Both route ledgers updated (`mismatch` row resolved; conformance suites green).\n\nRefs: #3587, PR #3609; audit background `docs/audits/2026-07-dispatcher-client-route-coverage.md`."
+}

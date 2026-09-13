@@ -1,0 +1,35 @@
+{
+  "number": 3709,
+  "kind": "pull_request",
+  "title": "feat(security): 让用户级 export 权限轴真正在服务端生效 (#3544)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T15:24:13Z",
+  "updated_at": "2026-07-27T15:44:49Z",
+  "closed_at": "2026-07-27T15:44:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T15:44:47Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3709",
+  "body": "## 背景:#3553 只做了一半\n\n#3553 已经把 #3544 的清单打勾了 —— spec 加了 `allowExport` 位,`/me/permissions` 按它计算 `userExportAllowed` 并下发 `apiOperations`,前端据此隐藏 Export 按钮。但**服务端一行都没有拦**。\n\n因为 `export ⊆ list`:REST 导出路由 `GET /data/:object/export` 是通过 `findData` 流式读的,引擎安全中间件看到的是一次普通 `find`,只按 `allowRead` 放行。全仓没有任何代码路径读过 `allowExport`。所以今天:\n\n```bash\n# 权限集里 deal.allowExport = false —— 页面上 Export 按钮消失了\ncurl -H \"Cookie: <该用户的会话>\" \\\n  'http://localhost:3000/api/v1/data/deal/export?format=csv&limit=50000'\n# → 200,整表 CSV 照样流出来\n```\n\nIssue 里写的「接上后,不再是『能 list 即能导出』」并没有成立 —— 少的正是 AGENTS.md 铁律 #10 说的那一层:**`declared ≠ enforced`,`case` 标签不是执法,要看调用点**。这个 PR 补的就是调用点。\n\n## 改动\n\n- **plugin-security** `checkObjectPermission('export', …)` 成为真正的判定:**读权限 ∧ 未被显式拒绝**。\n  `allowExport` 刻意**不**进 `OPERATION_TO_PERMISSION` —— 那张表的语义是「该位必须为真」,套上去会让**所有在本轴之前写的权限集**瞬间失去导出。新导出的 `resolveUserExportAllowed()` 做三态折叠(`true` > `false` > 未设),与 `/me/permissions` 的对象合并逐例一致。\n- **spec** `ISecurityService` 新增 `canExport(object, context)` —— 引擎中间件之外的批量出数据的门,在读之前必须问的那个问题。**fail CLOSED**;`isSystem` 与「解析出零个权限集」放行,与中间件的 `if (permissionSets.length > 0)` 保持一致。\n- **rest** 导出路由在**取第一个 chunk 之前**返回 **403 `EXPORT_NOT_PERMITTED`**。与对象级 405 分开、且 405 仍在前:405 = 这个对象不暴露 export,403 = 你这个人不能用。\n- **plugin-hono-server** 注解在对象条目没有自己的 `allowExport` 时回落到 `'*'` 条目的位 —— 服务端 `resolveObjectPermission` 本来就会回落到通配符,不跟上就会出现「按钮给你、请求 403」的客户端/服务端分歧(和 `foldWildcardSuperUser` 要解决的是同一类问题)。\n- **docs** `content/docs/permissions/permission-sets.mdx` 的「对象权限位」表一直没有 `allowExport`(#3553 只重生成了 auto-gen 的 reference)。既然现在真的会执法了,把三态、跨权限集的合并规则、「只收窄不放宽」、以及「403 与前端隐藏按钮是同一个判定」写清楚。\n\n## 兼容性\n\n`allowExport` 仍是**无默认值的 opt-out**:未设 = 继承 read,现有权限集行为逐字不变。只有显式写了 `allowExport: false` 的权限集会变 —— 而且现在是在**服务端**变,这正是本 issue 的目的。\n\n`ISecurityService` 的实现方需要补 `canExport`(接口成员为必选,与 #3547 加 `getReadableFields` 的做法一致);消费方仍然 feature-detect,部分实现是降级而不是抛错。\n\n## 测试\n\n新增 25 条,全部针对本轴:\n\n- `plugin-security/src/export-permission-axis.test.ts`(18) —— 三态折叠(含 `'*'` 通配符回落、ADR-0066 D2 private 对象不吃非超级用户通配符)、`export ⊆ list`(给了 `allowExport:true` 但没有读权限 → 仍然拒)、超级用户通配符**不能**绕过显式的按对象 export 拒绝、拒绝 export 时 read 保持授予(Salesforce \"Export Reports\" 形状)。\n- `rest/src/rest-export-permission-gate.test.ts`(7) —— 403 的同时**断言 `findData` 从未被调用**(拒绝不能先漏出第一个 chunk);无 security 服务 → 放行;服务在但没有 `canExport` → 放行;`canExport` 抛错 → 403(fail closed);对象级 405 仍然优先。\n\n回归:spec 6687 / plugin-security 626 / rest 408 / plugin-hono-server 114 全绿;三个包 `tsc --noEmit` 干净;`check:api-surface`(surface unchanged)、`check:docs`(250 个生成文件 in sync)、`check:doc-authoring`(213 files clean)通过。\n\n> `packages/rest/src/package-routes.ts` 上有两条 `string | string[]` 的 tsc 报错,是本分支之前就有的、与本次改动无关(该文件未被触碰,tsup DTS 构建通过)。\n\n## 一个刻意留在范围外的发现 → #3710\n\n`plugin-reports` 的定时报表会把 CSV 作为附件邮件发出(`report-service.ts` `dispatchDue`),它走的是报表所有者上下文 + RLS,**同样不经过本轴**。也就是说 `allowExport:false` 的用户仍可以建一张报表、定时把 CSV 发给自己。报表有自己的归属/共享模型(而且跨对象报表该判定哪个对象、判定 owner 还是建 schedule 的人,都得先定调),把导出轴延伸过去是另一件事,按铁律 #10 开了 **#3710**,没有在这里扩范围。\n\n关联:#3544(本 issue)、#3553(前半程)、#3391、#3498、#3710(follow-up)、objectui#2823。"
+}

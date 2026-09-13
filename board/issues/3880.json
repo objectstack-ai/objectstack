@@ -1,0 +1,35 @@
+{
+  "number": 3880,
+  "kind": "pull_request",
+  "title": "fix(automation): one chokepoint for the resume signal — `output` reopened the hole `inputs` had just closed (#3879)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T14:03:00Z",
+  "updated_at": "2026-07-28T14:30:24Z",
+  "closed_at": "2026-07-28T14:30:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T14:30:21Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3880",
+  "body": "Closes #3879. Third pass on the same seam (#3801 → #3853 → here), and the reason it needed a third is the point of the PR.\n\n## The hole\n\n#3853 guarded `signal.variables` **at the route** and passed `signal.output` through unchecked. But `output` keys are merged under the suspended node's id (`engine.ts:2214`):\n\n```ts\nvariables.set(`${run.nodeId}.${key}`, value);\n```\n\nand for a run parked on a `map` node `run.nodeId` **is** the map node — so the same forgery lands through the other field:\n\n```jsonc\nPOST .../runs/{parentRunId}/resume\n{ \"output\": { \"$mapItemDone\": true, \"$mapItemOutput\": { \"result\": \"FORGED via output\" } } }\n→ { started: 2, results: [ { \"result\": \"FORGED via output\" } ] }\n```\n\n**Scope, stated precisely.** The #3853 map gate still held: a batch whose pending item sits on an `approval` is refused before any of this, so the **approval bypass stayed closed**. The residual was forging the recorded result of an item on an *ungated* `screen`/`wait` pause — map-state corruption, not a decision bypass. `output` also can't reach bare `$runId`/`$record` (it is always node-prefixed).\n\n## Why this isn't a third patch\n\nTwo escapes with one shape is a design signal. The seam had **three** open-coded writers into one variable map — `output` prefixed, `variables` bare, and the engine's own map handoff — so \"guard the field that was exploited\" was always going to invite the next field.\n\n- **`applyResumeSignal` is the one place a resume signal reaches the variable map.** Both fields are collected into a single write list — already in final, prefixed form — checked, then applied. A new signal field is covered by construction rather than by remembering.\n- **All-or-nothing**, and checked *before* the suspension is consumed: a rejected signal applies nothing (not even legitimate keys sent alongside) and the run stays parked, so the real continuation still lands.\n- **The engine owns the rule; the transport maps the verdict.** `resume` returns `{ success: false, code: 'invalid_signal' }`; the route answers 400 and its own copy of the check is deleted. The SDK and any future adapter inherit it — implemented in one transport it protected exactly one transport, and one field of it.\n- **Engine-built signals are exempt via a module-private symbol** (`ENGINE_BUILT_SIGNAL`), stamped by `bubbleToParent` and the subflow output mapping — the only legitimate writers of the handoff keys, unreachable from a transport. Deliberately *not* `RESUME_AUTHORITY_SERVICE`: that marker answers \"the owning service authorized this decision\", and a service still has no business writing engine internals. Two questions, two markers.\n\nThis corrects #3853's placement argument in the ADR: *\"strict at the untrusted boundary\"* is right about where a rule **binds**, not where it **lives**.\n\n## Consumer impact\n\n`AutomationResult.code` gains `'invalid_signal'` alongside `'forbidden'` — a `switch` over it needs a new arm; a plain read doesn't. Authoring is unchanged: ordinary variables pass, `$` mid-name (`price$`) and dotted names (`collect.note`) included; only `$…` or a `.$` segment is refused.\n\n## Tests\n\n`resume-authority-gate.test.ts` (19): the forgery is refused through **both** fields via `it.each` — the point being that they are one rule, not two — with `$mapState` unchanged and the pause still live; the legitimate engine bubble still writes the handoff (proving the guard didn't break the mechanism it protects); a bare `$runId` rewrite on an ordinary screen resume is refused **and** the legitimate key alongside it is not applied (all-or-nothing); ordinary author names still pass. `http-dispatcher.test.ts` (200) now asserts the route *forwards both fields unfiltered* and maps `invalid_signal` → 400 — the rule is tested where it lives, not twice.\n\nVerified: `service-automation` (35 files), `plugin-approvals` (12), `spec` (262), `runtime` (50 files / 716 tests) green; `eslint --no-inline-config` clean; `check:docs`, `check:api-surface`, `check:doc-authoring`, `tsc --noEmit` on spec all clean.\n\n## Separately\n\nWhile verifying this I checked the run **read** routes: `GET /automation/:name/runs/:runId` and `.../screen` have **no per-run authorization** — access stops at environment membership, so any member can read any run's screen or step log by id. I have not judged whether that's acceptable (run ids are uuids; membership may be the intended boundary), so it is *not* claimed as a vulnerability here and nothing in this PR changes it. Flagging for a product call.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_013gvN32u1EiuvY9uQEMJiMR)_"
+}

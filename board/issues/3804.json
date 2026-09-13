@@ -1,0 +1,35 @@
+{
+  "number": 3804,
+  "kind": "pull_request",
+  "title": "fix(driver-sql,analytics): `aggregate()`/`distinct()` 不再把 SQLite 的裸 epoch 漏出去 (#3797)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T06:02:33Z",
+  "updated_at": "2026-07-28T06:07:14Z",
+  "closed_at": "2026-07-28T06:07:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T06:07:12Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3804",
+  "body": "Closes #3797。#3773 的直接续作 —— 同一个根因(绕过 `formatOutput` 的读路径,在唯一「存储 ≠ 呈现」的方言上漏原始形态),换了个出口。\n\n## 症状\n\n`aggregate()` 和 `distinct()` 都直接 `return await builder`,不过 `formatOutput`:\n\n| 调用 | 修前 | 修后 |\n| --- | --- | --- |\n| `find()` | `\"2026-01-10T09:00:00.000Z\"` | 不变 |\n| `distinct('closed_at')` | `[1768035600000]` | `[\"2026-01-10T09:00:00.000Z\"]` |\n| `aggregate()` `max(closed_at)` | `1768035600000` | `\"2026-01-10T09:00:00.000Z\"` |\n| `aggregate()` `groupBy: ['closed_at']` | 键 `1768035600000` | 键 `\"2026-01-10T09:00:00.000Z\"` |\n\n`Field.date` 从来不受影响 —— 它在每个方言上都是 ISO TEXT,存储形态本来就等于呈现形态。\n\n**可达面**:`_max`/`_min` 度量(`inferMeasure` 认这两个后缀,所以「最近成交时间」KPI 磁贴显示 `1768035600000`),以及对裸 datetime 维度的 `groupBy` —— 后者同时是一条 **parity 漂移**:内存兜底 `applyInMemoryAggregation` 吃的是已 `formatOutput` 过的 `find()` 行,同一个数据集换条路走桶键类型都不一样。这正是 #3773 为 date-bucket 那一半刚钉下的契约。\n\n## 修法上的陷阱(两个方向各有一条测试)\n\n不能事后按列名匹配声明字段,两头都会错:\n\n- `min()` 的结果落在 **alias** 下(`latest`),**永远不叫**字段名 —— 按名字找根本够不着。\n- #3773 之后,带 `dateGranularity` 的分桶列**恰恰**叫字段名,但它的值是**标签**(`'2026-01'`)不是实例 —— 按名字规范化会把标签喂进 datetime 呈现器。\n\n所以「哪些列装的是实例」在**建语句时**就记下来,那是列名和语义同时已知的唯一时刻。\n\n`distinct()` 另外做了呈现后去重:SQL `DISTINCT` 比的是**存储值**,而一个 SQLite datetime 列同时装 INTEGER 和 TEXT 两种形态,同一个实例的两行能双双活过 `DISTINCT` 然后呈现成同一个值。它**目前全仓零调用方**,修它是为了不在驱动里留第二套约定,不是紧急度。\n\n## 顺带修掉一个我自己会造出来的回归\n\n`cross-object-rebucket` 的 `recombine()` 对每个操作数 `Number()` 强转,**这是在暗中依赖收到的是 epoch**:\n\n- 喂给它驱动现在返回的 ISO 字符串 → `Number('2026-01-10T…')` = **`NaN`**;\n- 而在 Postgres/MySQL 上(knex 返回 `Date`)它一直把值拍回 epoch 整数 —— 等于在驱动上面一层**又漏了一次**。\n\n改成:`min`/`max` 按实例排序、返回**进来时那个形状**的获胜值;`sum`/`count` 保持数值。**先验红**:把新逻辑关掉重跑,两条时态用例如实吐出 `NaN`。\n\n这条不是顺手扩范围 —— 是「把 min/max 呈现对」这个改动直接制造出来的回归,归我修。\n\n## 测试\n\n新增 `sql-driver-aggregate-temporal-output.test.ts`(15 条),先红后绿:未修时 **8 红 6 绿**,而绿的正好是本来就该对的那几条(date 列、非时态列、分桶标签、数值聚合),说明测试有鉴别力而不是一律断言。覆盖 `distinct` / `min`+`max` / 裸 `groupBy` / 结构化无 granularity 的 `groupBy` / 混合 `groupBy` / 与 `find()` 的一致性 / 与内存兜底键的一致性 / 混合存储去重,外加两条反向断言(分桶标签**不**被规范化、数值聚合**不**被规范化)。\n\n`cross-object-rebucket.test.ts` 加两条(ISO 字符串、`Date` 对象)。\n\ndriver-sql 401 ✅ / service-analytics 269 ✅ / driver-sqlite-wasm 126 ✅;`turbo build --force`(**绕开缓存**跑真 DTS,因为 `OS_SKIP_DTS` 不进缓存键、本会话早前用它建过 driver-sql)通过;eslint 干净。\n"
+}

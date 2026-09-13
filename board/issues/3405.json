@@ -1,0 +1,36 @@
+{
+  "number": 3405,
+  "kind": "issue",
+  "title": "动作参数弹窗:内联 lookup 参数无法声明引用目标(配置被静默剥离 + 文案谎报「即将上线」)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "priority:p1"
+  ],
+  "assignees": [
+    "baozhoutao",
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-22T12:07:29Z",
+  "updated_at": "2026-07-30T02:25:31Z",
+  "closed_at": "2026-07-30T02:19:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3405",
+  "body": "## 问题\n\n动作参数弹窗（`ActionParamDialog`）里的 `type: 'lookup'` 参数，如果是**内联声明**（不带 `field:`），永远渲染成纯文本框，提示「粘贴 xxx 的记录 ID（UUID）」，并附一句「可视化选择器即将上线」。\n\n真机场景（PLAT-DEF-005，天顺 EHR 质检派工）：质检主管点【指派】/【转派】，需要选一个质检员，结果拿到的是要求粘 UUID 的文本框——得先跑到别处把人的 UUID 复制出来再粘回去，对真人基本不可用。同一套引用字段在新建/编辑记录弹窗里是正常的搜索式选择器。\n\n**关键点：不是用户没配。用户配了，被平台静默吃掉了，还回了一句假话。**\n\n租户侧原样（`os-tianshun-ehr/src/objects/quality_dispatch.ts`）：\n\n```ts\nparams: [\n  { name: 'inspector', label: '质检员', type: 'lookup', reference: 'sys_user', required: true },\n]\n```\n\n`reference: 'sys_user'` 意图明确，但它被丢了两次，且全程零反馈。\n\n## 三个平台侧缺陷\n\n### 1. 内联 lookup 参数无法声明引用目标 —— 能力缺口\n\n`packages/spec/src/ui/action.zod.ts` 的 `ActionParamSchema` 全量键是：\n\n`name / field / objectOverride / label / type / required / options / placeholder / helpText / defaultValue / multiple / accept / maxSize / defaultFromRow / visible / requiresFeature`\n\n**没有引用目标这一项。** 讽刺的是 schema 里已经有一段注释写着「Widget config for inline params」，把 `multiple` / `accept` / `maxSize` 专门补给了内联参数——唯独漏了 lookup 需要的那一个。于是 file/image 类内联参数能配全，lookup 内联参数配不全。\n\n消费端 `objectui/packages/app-shell/src/utils/paramToField.ts:59`：\n\n```ts\nif (LOOKUP_WIDGET_TYPES.has(type) && !param.referenceTo) type = 'text';\n```\n\n而 `referenceTo` 目前唯一的来源是 `resolveActionParams.ts` 的**字段引用分支**（从对象字段的 `reference_to ?? reference` 抄过来）；内联分支（`resolveActionParams.ts:161-176`）的返回对象里根本没有这一项，`RawActionParam` 接口也没声明它。\n\n所以内联 lookup 参数 100% 必然降级成文本框，与作者怎么写无关。\n\n### 2. 未知键静默剥离，配错零反馈 —— 校验缺陷\n\n`ActionParamSchema` 是 zod `.strip`，`reference` 这种未知键在服务端解析时直接丢弃，不报错、不告警。作者写了一个语义完全正确、且与 `FieldSchema.reference` 同名的键，得到的唯一反馈是一个文本框。\n\n这是这次排查跑偏的根源：现象看起来像「平台功能没做」，实际是「配置被吃了」。\n\n### 3.「可视化选择器即将上线」是假话 —— 文案缺陷（objectui）\n\n`objectui/packages/i18n/src/locales/zh.ts:2219`：\n\n```\nlookupHelpText: '请输入引用记录的 ID。可视化选择器即将上线。'\nlookupPlaceholder: '粘贴 {{label}} 的记录 ID（UUID）'\n```\n\n选择器**早就上线了**（字段引用式 lookup 参数走的就是 `<LookupField>`，搜索式选择器）。这句话把「你这个参数的写法拿不到选择器」谎报成「平台还没做这功能」，把用户和排查的人一起带沟里。共 10 个语种：en / zh / ja / ko / de / fr / es / pt / ru / ar。\n\n## 方案\n\n### framework（本仓）\n\n1. **`ActionParamSchema` 增加 `reference`**，键名与 `FieldSchema.reference`（`packages/spec/src/data/field.zod.ts:292`）保持一致——这样租户已经写出来的那行代码原样就是合法的，不用让用户改写成第二种拼法。放在现有「Widget config for inline params」注释块里，和 `multiple` / `accept` / `maxSize` 并列：\n\n   ```ts\n   /** Reference target for inline `lookup` / `master_detail` params (field-backed params inherit it from the referenced field). Mirrors FieldSchema.reference. */\n   reference: SnakeCaseIdentifierSchema.optional(),\n   ```\n\n2. **`type: 'lookup' | 'master_detail'` 且拿不到引用目标时报校验错误**（内联参数没写 `reference`，或字段引用参数解析不到目标）。加在 `ActionParamSchema` 现有的 `.refine()` 链上，和 `'ActionParam requires either \"name\" or \"field\"'` 同级。让配错在构建期炸出来，而不是运行期悄悄降级。\n\n3. （评估）**未知键从 `.strip` 收紧为报错或告警**。这条影响面比前两条大得多，可能踩到其他既有元数据，建议单独评估、必要时拆出去做；前两条不依赖它。\n\n### objectui（`objectstack-ai/objectui`，同一 PR 组内跟进）\n\n4. `RawActionParam` 补 `reference?: string`，`resolveActionParam()` 内联分支透传为 `referenceTo`（字段引用分支已有的映射逻辑不动）。\n5. `paramToField.ts:59` 的 text 降级只保留「确实拿不到引用目标」的兜底，配上开发期 `console.warn`。\n6. 改掉 `lookupHelpText` / `lookupPlaceholder` 的假话文案，10 个语种一起改：不再说「即将上线」，改成指明这个参数缺引用目标。\n\n### 验收\n\n- 内联 `{ name:'inspector', type:'lookup', reference:'sys_user' }` 在动作参数弹窗里渲染出搜索式选择器（能按姓名/邮箱搜人），与新建/编辑记录弹窗一致。\n- 内联 lookup 参数漏写 `reference` → 构建期校验报错，而不是静默变文本框。\n- 10 个语种再无「即将上线 / coming soon」这类描述。\n- PLAT-DEF-005 场景真机复现：质检主管点【指派】能直接搜人选人，全程不接触 UUID。\n\n## 备注\n\n- 天顺 EHR 侧目前**不做绕行**（对象上虽有 `inspector` / `supervisor` 两个 lookup→`sys_user` 字段，改成 `{ field: 'inspector' }` 字段引用式能立刻出选择器）。按决定走平台正解，租户配置保持原样不动。\n- 关联：`objectui` 侧 ADR-0059（动作参数复用表单字段 widget 渲染器）。\n"
+}

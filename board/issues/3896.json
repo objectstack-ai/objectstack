@@ -1,0 +1,32 @@
+{
+  "number": 3896,
+  "kind": "issue",
+  "title": "`POST /data/sharing/rules` 绕过 `SharingRuleSchema`:`criteria` 缺失或拼错静默变成\"共享该对象全部记录\",与 ADR-0049 \"never seeded as a permissive match-all\" 直接冲突",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T15:18:03Z",
+  "updated_at": "2026-07-29T11:05:19Z",
+  "closed_at": "2026-07-29T11:05:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3896",
+  "body": "从 #3878 的同类扫查里出来的。这一条不是\"可能是有意设计\"—— 规范里已经写死了不许这样，只是 REST 入口没走那条规范。\n\n## 声明的不变式\n\n`packages/spec/src/security/sharing.zod.ts`：\n\n- `SharingRuleSchema = CriteriaSharingRuleSchema`，其中 **`condition` 是必填**（`:104`）。\n- 文件头 `:22`：*\"`criteria` is the single enforced rule form\"*。\n- `SharingRuleSchema` 的文档注释写得更直接：*\"A `condition` the compiler cannot lower (functions, cross-object traversal) is **skipped and logged — never seeded as a permissive match-all (ADR-0049)**.\"*\n\n也就是说：**编译不出谓词的规则宁可不生效，也绝不能变成\"匹配全部\"。** seed 路径按这条执行。\n\n## REST 入口绕过了它\n\n`POST /api/v1/data/sharing/rules`：\n\n1. `packages/rest/src/rest-server.ts:5786` —— 逐字段 pluck，`criteria: body.criteria`，**没有任何 schema 校验**。`SharingRuleSchema` 在这条路上从未被调用。\n2. `packages/plugins/plugin-sharing/src/sharing-rule-service.ts:87-92` —— `defineRule` 校验 `name` / `label` / `object` / `recipientType` / `recipientId`，**唯独不校验 criteria**。\n3. 同文件 `:98-100` —— `input.criteria == null ? null : JSON.stringify(...)`，缺失就存 `criteria_json: null`。\n4. 求值时 `:264`：\n   ```js\n   const filter = (rule.criteria ?? {}) as any;\n   const rows = await this.engine.find(rule.object_name, {\n       filter, fields: ['id'], limit: 5000, context: SYSTEM_CTX,\n   });\n   ```\n   空 filter + `SYSTEM_CTX` → 该对象**全部记录**（上限 5000）逐条 `expandRecipient` 授予收件人。\n   `recordMatches`（`:280`）同理：`{ ...(criteria ?? {}), id: recordId }` 对任意记录都命中。\n\n## 触发它不需要恶意，只需要打错一个字母\n\n```json\nPOST /api/v1/data/sharing/rules\n{\n  \"name\": \"won_deals\", \"label\": \"Won Deals\", \"object\": \"crm_opportunity\",\n  \"recipientType\": \"position\", \"recipientId\": \"sales_rep\",\n  \"criterias\": { \"stage\": \"won\" }\n}\n```\n\n意图是共享\"已赢单\"。实际是把 `crm_opportunity` 的**全部**记录共享给 `sales_rep`。返回 201，没有 warning，`criteria` 这个多出来的键被静默丢弃 —— 因为入口是 pluck 不是 parse。\n\n同样的结果还可以由\"忘了带 criteria\"、\"criteria 传了 `null`\"、\"前端表单没填完就提交\"产生。\n\n#3850 刚让\"在 Setup 里授述的规则真正生效、关掉真正撤销\"落地，这条路径现在是活的。\n\n## 修法\n\n入口接上已有的 `SharingRuleSchema`（或至少：`criteria` 缺失/为空对象时 `defineRule` 直接 `VALIDATION_FAILED`，与 `name`/`label` 等同级对待）。Zod 的默认对象模式会剥掉 `criterias` 这类未知键 —— 若希望拼错也能被指出来，用 `.strict()`。\n\n需要一并裁定的：**空 `criteria` 是否存在合法语义**。规范目前的答案是\"不存在\"（`condition` 必填、单一 enforced 形态）。如果确实要保留 owner-based 那样的\"全对象共享\"，它应当是一个**显式的规则类型**，而不是\"字段没填\"的副作用 —— 这正是 ADR-0049 那句话要防的东西。\n\n门：一条断言\"`criteria` 缺失的规则不产生任何 `sys_record_share`\"的用例；目前 `plugin-sharing` 的测试没有覆盖空 criteria 这一支。\n\n<sub>核对于 `origin/main` @ 93f267f81。</sub>\n"
+}

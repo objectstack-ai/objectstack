@@ -1,0 +1,35 @@
+{
+  "number": 3876,
+  "kind": "pull_request",
+  "title": "feat(spec)!: remove `tool.requiresConfirmation` — a safety flag nothing enforced (#3715, ADR-0033 §2)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T13:36:42Z",
+  "updated_at": "2026-07-28T14:07:06Z",
+  "closed_at": "2026-07-28T14:07:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-28T14:07:03Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3876",
+  "body": "The enforce-or-remove the ledger flagged as its most severe entry.\n\n## The property\n\n`ToolSchema.requiresConfirmation` accepted `true` and **no execution path ever read it**:\n\n| Path | What it does with the flag |\n|---|---|\n| LLM tool set (`vercel-adapter.ts`) | nothing — a tool reaches the model as name/description/parameters only |\n| `ToolRegistry.execute` | nothing |\n| `POST /ai/tools/:name/execute` | nothing |\n| MCP bridge (`mcp-server-runtime.ts`) | nothing — derives `destructiveHint` from a hardcoded name list |\n\nFor an ordinary dead property that's untidy. For a **safety** property it's false compliance — the case ADR-0049 exists for. An author gates a destructive tool, sees the flag accepted, and ships believing a human is in the loop.\n\nWhat makes it worse than most dead surface is the near-miss: **`action.ai.requiresConfirmation` has the same name and does work** (`runtime/src/action-execution.ts:264`). So the mistake reads as correct in review, and every grep for the identifier lands on hits that are genuinely live. ADR-0033 §2 already resolved this: *\"We **delete** the unenforced `requiresConfirmation` placeholder on metadata tools.\"*\n\n## Migration\n\n- **FROM** `requiresConfirmation: true` on a tool definition\n- **TO** put the operation behind an action and set `ai.requiresConfirmation: true` there — the flag the HITL approval queue reads, and the only path that actually stops execution.\n- For AI *metadata* mutations, nothing to migrate: the ADR-0033 draft/publish workspace is the gate — nothing is live until a human publishes.\n\n## `ToolSchema` is now `.strict()` — this is the load-bearing part\n\nRemoving a key from a **non-strict** schema swaps one silent no-op for another: zod strips it wordlessly, the author keeps writing `requiresConfirmation: true`, and the safety flag goes on meaning nothing. That's the \"silent strip\" ADR-0032 / #1535 closed for objects, and it would have made this PR a rename of the problem rather than a fix.\n\nSo the retired key now **rejects**, carrying the FROM → TO above — a parse error is the one channel every consumer bumping `@objectstack/spec` is guaranteed to hit. This follows the house pattern (`ObjectCapabilities`, `tenancy`): the tombstone lives in a `TOOL_RETIRED_KEY_GUIDANCE` map wired through a `$ZodErrorMap`.\n\nSide benefit: a typo on a tool definition (`buildIn`, `catagory`) is now a located parse error instead of a silently dropped field.\n\n## Also removed\n\n- the Studio form row (`tool.form.ts`);\n- **its four generated locale bundles** — `en`/`zh-CN`/`ja-JP`/`es-ES` still carried *\"Ask user to approve before executing (for destructive actions)\"*, a **translated** false promise. The vocabulary test only checks retired *groups*, not fields, so nothing would have caught this;\n- the liveness-ledger entry (tool `dead` 5 → 4);\n- the generated reference-doc row (`pnpm gen:docs` — exactly one line, no churn).\n\n## Verification\n\n- `pnpm --filter @objectstack/spec test` — 262 files, 6828 passed. Three new tests pin the behaviour: the key **rejects** rather than being stripped, the message names `ai.requiresConfirmation` and `#3715`, and an unrelated unknown key rejects too (strictness isn't special-cased to the tombstone).\n- `check:liveness` — exits 0, zero warnings, `tool` now 18 classified (13 live / 4 dead / 1 experimental).\n- Strictness blast radius checked: **no `defineTool` / `ToolSchema.parse` call sites exist** outside spec itself, so nothing in-repo constructs a Tool with extra keys.\n- `@objectstack/mcp` and some `platform-objects` suites fail in this sandbox on unbuilt workspace deps (`@objectstack/core`, `@objectstack/formula`). Confirmed pre-existing by re-running them on a stashed tree — identical failure. CI builds first.\n\n## Follow-up in objectui\n\n`ToolPreview.tsx` reads the field as `!!d.requiresConfirmation`, so it degrades to \"badge not shown\" with no error — no break, but removing that badge (and the `preview-samples.ts` entry) is a follow-up in that repo. Worth noting it was a *preview* renderer, which by this ledger's own doctrine was never evidence of a consumer in the first place.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Ajwvrmd1hDC9RBofYBhGuR)_"
+}

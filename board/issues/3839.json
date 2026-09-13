@@ -1,0 +1,32 @@
+{
+  "number": 3839,
+  "kind": "issue",
+  "title": "空分组桶的键两条路不一致:下推 SQL 给 `null`,内存兜底给 `\"(null)\"`(不限日期分桶)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T09:16:58Z",
+  "updated_at": "2026-07-28T11:39:28Z",
+  "closed_at": "2026-07-28T11:39:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3839",
+  "body": "同一个数据集,同一个查询,分组键为空的那个桶,**下推 SQL 给 `null`,内存兜底给字符串 `'(null)'`**。`engine.aggregate` 按查询逐次在两条路之间挑一条,所以同一个仪表盘会因为走了哪条路而拿到不同类型的桶键。\n\n实测(better-sqlite3,两行:一行有值、一行 `at`/`stage` 均为 NULL):\n\n```\n--- 日期分桶 groupBy (dateGranularity: 'month') ---\n  SQL      : [{\"key\":null,     \"type\":\"null\",   \"total\":2}, {\"key\":\"2026-01\",\"type\":\"string\",\"total\":1}]\n  in-memory: [{\"key\":\"(null)\", \"type\":\"string\", \"total\":2}, {\"key\":\"2026-01\",\"type\":\"string\",\"total\":1}]\n\n--- 普通 groupBy (['stage']) ---\n  SQL      : [{\"key\":null,     \"type\":\"null\",   \"total\":2}, {\"key\":\"won\",\"type\":\"string\",\"total\":1}]\n  in-memory: [{\"key\":\"(null)\", \"type\":\"string\", \"total\":2}, {\"key\":\"won\",\"type\":\"string\",\"total\":1}]\n```\n\n**比最初以为的宽**:这不是日期分桶专属。普通 `groupBy` 对空值列一样分歧 —— 度量总额两边都对(2 和 1),坏的只有键的**类型和字面量**。\n\n## 两侧各自来自哪\n\n- **内存侧**产出 `'(null)'`,两个来源:\n  - `packages/objectql/src/in-memory-aggregation.ts:87` — `projectGroupValue`:`v == null ? '(null)' : String(v)`(普通 groupBy)\n  - `packages/objectql/src/in-memory-aggregation.ts:211` — `bucketDateValue`:`if (value == null) return '(null)'`(日期分桶)\n- **SQL 侧**产出 SQL NULL:分组列本身为 NULL,或 `strftime(...)` 对 NULL 输入返回 NULL。驱动不做转换,原样交出。\n\n## 引擎按什么挑路\n\n`engine.aggregate`(`packages/objectql/src/engine.ts`)下推的条件是:每个结构化 groupBy 项的 granularity 都被 `supports.queryDateGranularity` 声明,**且**不是非 UTC 时区。否则走 `driver.find()` + `applyInMemoryAggregation`。所以同一个数据集:\n\n- SQLite + UTC + month → 下推 → 键是 `null`\n- 同一个查询换成 `week`(SQLite 不声明)或换个非 UTC 时区 → 内存 → 键是 `'(null)'`\n- driver-rest / driver-memory / Turso remote(`queryDateGranularity: {}`)→ 恒内存 → 恒 `'(null)'`\n\n也就是说**换一个时区、换一个粒度、换一个驱动,同一份数据的空桶键就换一种形状**。\n\n## 与 #3773 的关系:正交,且刻意未纳入\n\n#3773/#3813 修的是\"桶标签算错\"。这一条不是算错——两边都正确地表示了\"空\",只是表示法不同。所以 `checkDateBucketParity`(`packages/verify/src/date-bucket-parity.ts`)的 fixture **刻意不含 null 实例**,并在注释里写明了理由:放进去会让那道门**为一个它不负责的原因而红**。\n\n→ **修这条时,顺带把那条排除去掉**,让 fixture 带一个 null 实例,门就能长期守住收敛后的约定。落点在 `date-bucket-parity.ts` 的 `FIXTURE` 注释处。\n\n## 往哪边收敛:未定,而且现有依据站不住\n\n注释 `in-memory-aggregation.ts:25` 说 `'(null)'` 是「to remain consistent with the client `useReportData` hook」。核实结果:\n\n- `useReportData` 确实存在,在 **objectui** 的 `packages/plugin-report/src/index.tsx`;\n- 但该文件里 **`grep \"(null)\"` 无任何命中** —— 这个字面量不在它里面。\n\n所以\"客户端约定\"这条依据需要重新核实,不能直接拿来定方向。两个方向都要先回答\"谁在依赖现状\":\n\n1. **内存侧改成产出 `null`** —— 与 SQL 对齐,类型也更诚实(空就是空)。风险:任何按 `'(null)'` 字符串匹配的下游会静默失配。\n2. **SQL 侧改成产出 `'(null)'`** —— 与现有内存约定对齐,前端不必区分。风险:把一个哨兵字符串塞进本可为 null 的数据列,且要在每个驱动上实现。\n\n一个已知的相关点:`packages/services/service-analytics/src/strategies/cross-object-rebucket.ts:124` 用 `String(row[f] ?? '(null)')` 构造**内部**分组键,所以它在重新分桶时会把两种形状**合并**成同一个桶(不会因为形状不同而分裂);但输出仍然 `bucket[f] = row[f]`,原样保留,所以分歧照旧传到下游。\n\n## 建议\n\n先做**调查**再改:枚举 `'(null)'` 与\"空桶键\"的全部消费方(framework + objectui + cloud 三仓),确认现状到底有没有人依赖,再定方向。这条不阻塞任何东西 —— 度量值一直是对的,坏的只有一个空桶的标签形状。\n"
+}

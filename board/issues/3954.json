@@ -1,0 +1,32 @@
+{
+  "number": 3954,
+  "kind": "issue",
+  "title": "`os migrate plan` omits the datetime storage-convergence work, so the plan understates what apply will do",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T12:43:16Z",
+  "updated_at": "2026-07-30T00:20:57Z",
+  "closed_at": "2026-07-30T00:20:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3954",
+  "body": "Found while merging #3953 (datetime canonical storage) against the deferred-DDL work from #3917. Filed rather than bundled, because fixing it means changing an exported type and the CLI renderer that #3917 just landed.\n\n## The gap\n\n`previewDeferredSchemaWork()` builds the plan from `PendingSchemaWork`, whose `kind` is a closed union:\n\n```ts\nexport interface PendingSchemaWork {\n  table: string;\n  kind: 'create_table' | 'add_columns';\n  columns: string[];\n}\n```\n\n#3953 adds two convergence steps that run inside `initObjects` alongside the create/alter path:\n\n- `backfillCanonicalDatetimes` — a row-rewriting `UPDATE` per SQLite `Field.datetime` column.\n- `migrateMysqlDatetimeColumns` — `ALTER TABLE … MODIFY … DATETIME(3)` per legacy MySQL `TIMESTAMP` column.\n\nBoth correctly respect the deferral (they sit after the `if (this.deferredDdl) continue` gate, and `flushDeferredSchemaDdl` re-enters `initObjects` with it disarmed), so **`plan` performs no work and `apply` performs all of it** — the behaviour is right.\n\nWhat is wrong is the *reporting*: neither step can be expressed in `PendingSchemaWork`, so `os migrate plan` shows nothing for them. An operator sees a plan listing, say, two added columns, confirms it, and `apply` additionally rewrites every row of a datetime column or rebuilds a column on a large table. That is exactly the kind of surprise #3917 exists to remove — the plan promises to show what apply will do.\n\n## Why it matters more than it looks\n\nA `DATETIME(3)` `ALTER … MODIFY` on MySQL is a table rebuild: it takes a metadata lock and can run for a long time on a large table. Being told about it beforehand is the difference between a planned maintenance window and an unexplained stall.\n\nThe SQLite backfill is cheaper (one scan, and zero writes once converged) but still worth naming, if only so the operator can correlate the one-time boot cost.\n\n## Suggested direction\n\nWiden the union and give each new kind the detail an operator needs to judge cost:\n\n```ts\nkind: 'create_table' | 'add_columns' | 'normalize_datetime_storage' | 'widen_datetime_columns'\n```\n\n`columns` already carries the per-column list for both, so the shape may not need more than the new labels plus renderer cases. Worth checking whether the plan should also estimate row counts for the rewriting steps — that is the number that decides whether to run it now or in a window.\n\nAnything that adds work to `initObjects`' physical path from here on has the same obligation, so it may be worth a short note next to `PendingSchemaWork` saying so."
+}

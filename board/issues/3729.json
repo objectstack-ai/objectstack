@@ -1,0 +1,30 @@
+{
+  "number": 3729,
+  "kind": "issue",
+  "title": "图表绑定方言统一：ObjectChart 运行时兑现 ChartConfig 后，把 react 契约与 lint 切回 spec 形状（#3701 后续）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T00:40:52Z",
+  "updated_at": "2026-07-28T02:00:46Z",
+  "closed_at": "2026-07-28T02:00:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3729",
+  "body": "从 #3701 / #3725 的评估分出来的方向性 issue。#3725 把 `<ObjectChart>` 的公布面裁剪成运行时实际读取的 props（`xAxisKey` + `series[].dataKey`），这是对现状的诚实记录（ADR-0078 / ADR-0080 capability≠contract）——但**不是终态**。终态应当是运行时兑现 `ChartConfigSchema`（ADR-0082 决策 1：spec 是协议；Prime Directive #12：contract-first），本 issue 跟踪切换。\n\n## 现状：图表绑定有五种方言\n\n| Surface | 作者形状 |\n|---|---|\n| Dashboard widget | ChartConfig（`xAxis.field` / `yAxis[].field` / `series[].name`），渲染层翻译 |\n| Report chart | `xAxis`/`yAxis` 裸字符串（`ReportChartSchema` 收窄） |\n| List-view chart | `dataset`/`dimensions`/`values` |\n| Dataset 页面图表组件 | dimensions/values + `yAxis[{field}]` 混合 |\n| React `<ObjectChart>` | `xAxisKey` + `series[].dataKey`（Recharts 实现细节泄漏进作者面） |\n\n一个作者跨 surface 要换五种写法，这正是 PD #12 反对的 N 方言状态。\n\n## 主流平台参照（为什么这个方向是对的）\n\n图表协议在业界分两个原型，ObjectStack 的两半各归其一，且各自都订立得正统：\n\n- **表现层协议**（ECharts / Highcharts / Vega-Lite）：`ChartConfigSchema` 按此原型订立——轴对象带 min/max/format/log、双轴、`series[].stack`/`annotations`。词汇库中立（`field`/`series[].name`，非 Recharts 的 `dataKey`）。超前于参考渲染器 ≠ 定义错误。\n- **语义层绑定**（Salesforce / Looker / Superset / Metabase / Power BI / Grafana）：轴绑定 = **结果帧的确定性列名**。匿名聚合各家都给派生名（Salesforce `s!Amount`、Superset `SUM(amount)`、Metabase `count`）；#3701 的「原始字段名 + 字面量 `count`」与 Metabase/Grafana 同族。inline/dataset 两级设计对应 Superset adhoc metric / Power BI implicit measure，skill 的 Level A/B 论述与之一致。\n\n**主流没有对应物的，恰是本 issue 要消除的两件事**：五方言并存（原型 B 平台全部收敛到单一作者形状——Salesforce=report、Looker=explore、Superset=form_data），以及实现词汇泄漏进作者面（相当于把 Highcharts 内部 series 结构写进 Salesforce 元数据——换渲染器即换协议）。\n\n## 协议约束（评估沉淀，切换时固化）\n\n**inline `aggregate` 永远保持单测度**（一图一个 function+field）。#3701 的原始字段名约定之所以不需要 `sum_amount` 式装饰名，正因为单测度不会碰撞；多测度需要派生名消歧，而那是 dataset measure 的职责边界（Level B）。此约束应写进 `chart-aggregate.ts` 的约定文档，防止未来好心的「顺手支持多测度」把命名约定推翻。\n\n## declared ≠ honored 清单（react 注入路径，props 直通渲染器）\n\n| 契约声明 | 运行时现状 |\n|---|---|\n| `type`（ChartConfig 必填） | 实际读 `chartType` |\n| `xAxis: { field, … }` | 实际读 `xAxisKey`（裸字符串） |\n| `yAxis: [{ field, min, max, format, logarithmic, … }]`（双轴） | 不读；combo 左右轴由 series 类型隐式决定 |\n| `series[].name / color / stack / yAxis` | 不读；读的是 `dataKey/label/variant/opacity/dashArray/chartType` |\n| `annotations` / `interaction` | 无实现 |\n| `title` | 仅用于下钻抽屉标题，从不渲染为图表标题 |\n| `showLegend` | 无人读 |\n| `showDataLabels` | 待盘点 |\n\n其中 `title`/`showLegend` 与 `validate-chart-bindings` §3 对 dataset 页面图表组件校验的 `properties.yAxis[].field`（渲染器同样不读 → 校验的是 no-op 属性）是 #3725 记录的两条越界发现，归入本 issue 一并解决。\n\n## 方案（分级，先 objectui 后 framework —— ADR-0078 §5 verify-then-enforce）\n\n**objectui 侧实施**：objectstack-ai/objectui#2880（S1/S2/S3 详情在那边）。\n\n**S1 绑定对齐（小，立即）**：ObjectChart 入口一处规范化——`chartType ??= type`、`xAxisKey ??= xAxis?.field`、`series[].dataKey ??= name`；dataset 页面路径同吃 `yAxis[].field`（使 §3 校验变为真实校验）。内部 props 保留为内部管线契约（DashboardRenderer/ObjectView 继续用），作者面以 spec 形状为准。核心收益是 AI 作者面：北极星是 16k token 装下整个应用，方言就是上下文税。\n\n**S2 表现属性（中，按需排序）**：`format`→tickFormatter、`min/max`→domain、双轴 `position` + `series[].yAxis` **优先**；`logarithmic`/`showGridLines` 次之；`showLegend`、`title/subtitle` 真实渲染、`showDataLabels` 盘点——Recharts 均有原生能力。\n\n**S3 实现或裁减（优先级：`stack` > `annotations` > `interaction`）**：\n- `series.stack` **提为最优先**：堆叠/分组柱是所有 BI 的桌面赌注；`chart.zod.ts` 的 taxonomy 注释自己也承认裁掉 stacked 变体是渲染器缺陷而非协议取舍。实现后 stacked-bar/stacked-area 可回归 taxonomy。\n- `annotations`（ReferenceLine/ReferenceArea）次之。\n- `interaction`（zoom/brush/clickAction）最可裁——实现不了就按 #1475 先例从 schema 裁掉（deliberate spec change，走 changeset）。\n\n**framework 侧切换（objectui S1 落地后）**：\n- [ ] `react-blocks.ts`：`xAxis`/`yAxis`/`series` 恢复进 `dataProps`（从 `ChartConfigSchema` 生成），`type` 取代 overlay 的 `chartType`；`xAxisKey`/`series[].dataKey` 标注 deprecated/内部\n- [ ] `validate-react-page-props`：轴校验改读 spec 形状（`xAxis.field`/`yAxis[].field`/`series[].name`）；结果列解析复用 `chartAggregateResultKeys`，逻辑不变\n- [ ] `react-chart-axis-inert` 警告退役\n- [ ] `chart-aggregate.ts`：固化单测度约束（见上）\n- [ ] `title`/`showLegend`/`showDataLabels`：objectui 实现后保留，否则从 `dataProps` 裁减\n- [ ] skill 契约 / eval / golden page（`renewals-pipeline.page.ts`）切回 spec 形状并重新生成\n\n## 关联\n\n- #3701（结果列命名约定——本 issue 的前提，与 prop 形状正交）\n- #3725（当前公布面 + lint，切换后局部重做）\n- #3684 / #3583（dataset 侧轴校验）\n- ADR-0078 / ADR-0080 / ADR-0082 / PD #12；#1475（trim + implement 先例）"
+}

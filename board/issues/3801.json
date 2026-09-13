@@ -1,0 +1,32 @@
+{
+  "number": 3801,
+  "kind": "issue",
+  "title": "automation: the generic run-resume route needs an authorization gate keyed on the suspended node",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T06:00:47Z",
+  "updated_at": "2026-07-28T08:21:02Z",
+  "closed_at": "2026-07-28T08:21:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3801",
+  "body": "Found while working on #3800. Separate seam, same trust boundary — filing rather\nthan widening that PR's scope.\n\n**Detail is deliberately withheld here**, same convention as #3800: the analysis\nlives in the private draft advisory under the repo's Security tab. Note it is\n**reasoned from code, not demonstrated** — no repro was written, so treat the\nseverity as strong-but-unproven until someone does.\n\n## Requirement\n\n`POST /api/v1/automation/:name/runs/:runId/resume`\n(`packages/runtime/src/domains/automation.ts`) forwards a caller-supplied\n`branchLabel` into `AutomationEngine.resume`. `resumeInternal` validates\n*machine* state only — the concurrent-resume latch, the run exists, the flow\nexists, the suspended node still exists — and nothing about **who is asking**.\n\nApproval nodes suspend and resume through exactly this mechanism, so the route\nneeds an authorization gate of its own; today the only thing standing between it\nand the approvals rules is convention. The showcase spells that convention out in\na comment (\"decide via the approvals API, never a raw engine `resume`\"), and\n`route-ledger.ts` lists the route as SDK-exposed — a comment in an example is not\nan access control.\n\nBeyond authorization, a resume that goes around the service also leaves no\n`sys_approval_action` row and no status mirror, so the request row and the run\ncan end up permanently disagreeing.\n\n## Why it is not simply \"remove the route\"\n\nThe route is load-bearing for **screen flows**: the UI flow-runner posts\n`{ inputs }` to advance a paused `screen` node, which is its whole reason to\nexist. The gate has to discriminate by **what the run is parked on**, not by the\nroute — a run suspended on an `approval` node should be resumable only through\n`ApprovalService` (which records the decision and enforces the slate), while a\n`screen` node keeps working as it does now.\n\nSketch, for discussion rather than a settled design: have the engine tag a\nsuspension with the node type that produced it, and have the resume route refuse\na suspension whose owner declares itself service-gated, with the service-side\nresume passing an internal marker the route cannot forge.\n\nRefs #3800.\n"
+}

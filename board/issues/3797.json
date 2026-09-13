@@ -1,0 +1,30 @@
+{
+  "number": 3797,
+  "kind": "issue",
+  "title": "aggregate()/distinct() 不过 formatOutput —— SQLite 上 `Field.datetime` 的裸 epoch 从聚合出口漏出去(#3773 同根不同出口)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T05:54:04Z",
+  "updated_at": "2026-07-28T06:07:13Z",
+  "closed_at": "2026-07-28T06:07:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3797",
+  "body": "`SqlDriver.aggregate()` 和 `distinct()` 都直接 `return await builder`,**不过 `formatOutput`**。所以在 SQLite 上,`Field.datetime` 列的原始存储形态(INTEGER epoch 毫秒)会从这两个出口原样漏给调用方 —— 而 `find()` 同一列返回的是规范化的 ISO-`Z`。\n\n实测(better-sqlite3,一行 `closed_at = 2026-01-10T09:00:00Z`):\n\n| 路径 | 返回 |\n|---|---|\n| `find()` | `\"2026-01-10T09:00:00.000Z\"` ✅ |\n| `distinct('closed_at')` | `[1768035600000]` ❌ 裸 epoch |\n| `aggregate()` `max(closed_at) as latest` | `1768035600000` ❌ |\n| `aggregate()` `groupBy: ['closed_at']`(无 granularity) | `{closed_at: 1768035600000}` ❌ |\n\n`Field.date` 四条全对 —— 它在每个方言上都是 ISO TEXT,存储形态本来就等于呈现形态。和 #3773 是**同一个根因的不同出口**:凡是绕过 `formatOutput` 的读路径,在唯一「存储 ≠ 呈现」的方言上都会漏。\n\n## 可达面\n\n- **min/max 度量**:analytics 的 `inferMeasure` 认 `_min`/`_max` 后缀(`analytics-service.ts:952`),所以 `closed_at_max` 这样的「最近成交时间」KPI 磁贴在 SQLite 上会显示 `1768035600000`。\n- **无 granularity 的 `groupBy`**:桶键是裸 epoch。这同时是一条 **parity 漂移** —— 内存兜底 `applyInMemoryAggregation` 吃的是 `driver.find()` 的行(已经 `formatOutput` 过),它给的是 ISO 字符串。同一个数据集换条路走,桶键类型都不一样,drill-down 跨不过去。这正是 #3773 刚为 date-bucket 那一半钉下的契约。\n- **`distinct()`**:扫了全仓,**零调用方**(除驱动自身测试)。漏是真漏,但没有用户可达路径 —— 顺手修保持一致即可,不构成紧急度。\n\n## 修法上的一个陷阱\n\n不能简单地「对着输出行跑一遍 `formatOutput`」,也不能按列名匹配声明字段:\n\n- #3773 之后,带 `dateGranularity` 的分桶表达式是 **aliased AS 字段名**的,它的值是**标签**(`'2026-01'`)而不是实例。按名字规范化会把标签喂进 `normalizeSqliteDatetimeOutput`。\n- `min`/`max` 的输出列叫 `alias`(如 `latest`),不叫 `closed_at`。按名字匹配根本够不着它。\n\n所以规范化必须由**「这一列是什么产生的」**驱动 —— 在建查询时就记下每个输出列的语义,而不是事后按名字猜。\n"
+}

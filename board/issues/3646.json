@@ -1,0 +1,35 @@
+{
+  "number": 3646,
+  "kind": "pull_request",
+  "title": "fix(client,service-i18n): ledger the autonomous service-mount surface; two i18n SDK calls reached nothing (#3636)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T12:36:59Z",
+  "updated_at": "2026-07-27T12:56:34Z",
+  "closed_at": "2026-07-27T12:56:32Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T12:56:31Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3646",
+  "body": "Closes #3636 —— #3563 路由审计的第三批,也是最后一个未审计的服务端表面。\n\n## 为什么这个表面此前谁都看不见\n\n前两批的账本各自停在自己的包边界上:dispatcher 账本只看 `http-dispatcher.ts`,REST 账本只看 `RouteManager` + 两个 direct-mount 注册器。而有两个 service 是绕过两者的——它们在 `kernel:ready` 时去取 `http-server` 服务,直接往 `IHttpServer` 上挂路由,所以 `RouteManager` 和 `RestServer.getRoutes()` 都从未见过它们。结果是 **SDK 的整个 storage 表面加上全部 i18n**,一直停在 #3563 之前的状态:能用、在跑、但没有任何东西守着。\n\n## 账本与守卫\n\n每个包一份迷你账本,放在注册器旁边,不产生任何跨包依赖边(第一批的教训原样适用):\n\n| 文件 | 路由数 |\n|---|---|\n| `service-storage/src/storage-route-ledger.ts` | 10 |\n| `service-i18n/src/i18n-route-ledger.ts` | 3 |\n| `client/src/service-route-ledger-coverage.test.ts` | 客户端一半 |\n\n两侧的枚举都是**真枚举**,不是手写清单:让注册器对着一个会记录调用的 mock `IHttpServer` 跑一遍,它的注册调用本身就是路由集合。i18n 这边进一步走插件真实的 `init → start → kernel:ready` 生命周期,这样那个延迟注册的行为本身也持续被覆盖到。两份账本的 `gap` 与 `mismatch` 都以 0 上棘轮。\n\n账本跨包时按相对源码路径导入(它们是纯数据、零 import),不建 service→client 的包依赖——CI 的分包测试任务只构建自己的依赖闭包,真加一条边会直接构建不出来。\n\n## 顺带查出并修掉的两个线上 404\n\n`i18n.getTranslations` 发的是 `/i18n/translations?locale=xx`,`i18n.getFieldLabels` 发的是 `/i18n/labels/:object?locale=xx`;而**所有**提供服务的表面——本插件的挂载、dispatcher 的 HTTP 挂载、以及 `plugin-rest-api.zod.ts` 里声明的契约——挂的都只有 path 形式。这两个调用从来就没有任何东西能应答。\n\n值得注意的是:它们从第一批起就在 dispatcher 账本里各挂着一行绿色的 `sdk`。因为那个守卫问的是\"客户端**方法**在不在\",而不是\"它拼出来的 URL 有没有人挂\"。dispatcher 的 domain handler 内部其实同时接受 query 方言,但没有任何路由会把裸 `/translations` 送到那段代码——这份宽容根本到达不了。\n\n客户端改为发 path 方言(和 #3611 给 `meta.getView` 的处理一致)。新增的 `i18n-wire-dialect.test.ts` 把真实 client 打到真实 router 上,并断言旧方言在线上就是 404,所以回退改不掉这条守卫。\n\n**三处独立佐证 path 形式才是既定契约**,client 是唯一跑偏的一方:\n\n- `plugin-rest-api.zod.ts` 的 endpoint 声明:`/translations/:locale`、`/labels/:object/:locale`\n- 已发布文档:`content/docs/api/plugin-endpoints.mdx`、`content/docs/kernel/services-checklist.mdx` 写的都是 path 形式(所以本 PR 无需改文档)\n- `packages/qa/http-conformance/src/adapter.test.ts` 早就断言 `/api/v1/i18n/labels/task` 匹配不上 `/labels/:object/:locale`\n\n## 一处响应体形状修正\n\n`service-i18n` 的成功响应少了 `unwrapResponse` 用来判断信封的 `success` 标志,于是同一个 SDK 方法:对着这个 provider 返回的是没拆开的 `{ data: … }`,对着 dispatcher 返回的却是声明的解包形状——**一个方法两种形状,取决于当时是哪个插件挂的路由**。三个 handler 现在统一发 `i18n` 路由组声明的 `{ success: true, data }` 信封(`plugin-rest-api.zod.ts` → `response_envelope`)。`data` 位置没动,直接读 body 的调用方不受影响。\n\n## Storage 审计结果:干净\n\n7 条 SDK 已表达,3 条 `server-only`(objectql 写进 file 字段载荷、由 `<img src>` 直接跟随的浏览器能力 URL,以及两条 local-driver 回环)。#3636 里点名需要甄别的分块上传家族,实际查下来 SDK 已完整表达(`initChunkedUpload` / `uploadPart` / `completeChunkedUpload` / `resumeUpload`),没有 gap 要补。\n\n## 只登记未修的两项\n\n- **#3641** —— `GET {base}/_local/file/:key` 有三处在拼这个 URL,却没有任何注册器挂过它。两个 in-tree adapter 都恰好绕开了那条 fallback 分支,所以是潜伏而非已发作。账本头部显式写明这条路由的缺席,免得守卫被读成\"审过并认可\"。\n- **#3642(收口项)** —— 三份账本共有的空洞:没有任何守卫拿客户端**拼出**的 URL 去比对各表面**挂载**的 pattern。这一类 bug 已经被一次一个地发现了四回(#3584 ×2、#3611、本次 ×2)。把它机械化就是整个审计的收口。\n\n## 验证\n\n- CI 全绿:16 项检查全部完成,14 成功 / 2 被 path filter 正常跳过 / 0 失败(含 Test Core、Build Core、TypeScript Type Check、ESLint、CodeQL、Dogfood Regression Gate ×2)\n- 本地 `turbo run test --filter=...@objectstack/service-i18n --filter=...@objectstack/service-storage` —— 76/76 通过\n- 新增守卫单独跑:storage 5 项、i18n 8 项、client 侧 8 项,全绿\n- `check-nul-bytes` / `check-doc-authoring` / `check-role-word` / `check-org-identifier` 均通过\n\n三个表面至此全部入账,审计文档 `docs/audits/2026-07-dispatcher-client-route-coverage.md` 新增 §9 记录本批结论。`objectui` 不调用 SDK 的 i18n 命名空间,本任务无需改动该仓库。"
+}

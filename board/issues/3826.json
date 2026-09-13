@@ -1,0 +1,32 @@
+{
+  "number": 3826,
+  "kind": "issue",
+  "title": "ADR-0062 D1 收尾:`default` driver 的 connect 与失败判决仍是第二份实现(阻塞点已定位)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T08:32:37Z",
+  "updated_at": "2026-07-30T00:58:28Z",
+  "closed_at": "2026-07-30T00:58:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3826",
+  "body": "## 一句话说明\n\nADR-0062 D1 要求「exactly one *definition → live driver* code path」。**构造那一半已经收敛**(`standalone-stack` 走共享的 `createDefaultDatasourceDriverFactory`),但 **connect 与连接失败判决那一半没有**:`default` driver 被包成 `DriverPlugin` 在引擎前注册,它的 `connect()` 发生在 `ObjectQLEngine.init()`;声明式 datasource 的 `connect()` 发生在 `DatasourceConnectionService`。于是「连不上该怎么办」这个决定有**两份独立实现**。\n\n## 事实核实\n\n`packages/runtime/src/standalone-stack.ts:168-245` 的注释自己划了这条线:\n\n> 用户可见的四种 kind 走 **SHARED** datasource driver factory(ADR-0062)…… This stack still owns what's standalone-specific: URL→config translation, filesystem prep (`mkdir`), and **`DriverPlugin` registration (pre-engine — unchanged)**.\n\n两条路径:\n\n| | `default` | 声明式 datasource |\n|:---|:---|:---|\n| 构造 | `createDefaultDatasourceDriverFactory().create()` ✅ 共享 | 同上 ✅ |\n| 注册 | `new DriverPlugin(driver)`,引擎 init 前 | `engine.registerDriver()`,在 `connect()` 内 |\n| connect | `ObjectQLEngine.init()`(`engine.ts:1924`) | `DatasourceConnectionService.connect()` |\n| 失败判决 | `DriverConnectError` + 聚合(#3741) | `handleFailure()`(`datasource-connection-service.ts:385`) |\n| 逃生阀 | `OS_ALLOW_DRIVER_CONNECT_FAILURE` | 同一个(#3816 起) |\n\n#3816 之后两边的**行为**已经对齐了(同一判据方向、同一旗标、同一 `emitDegradedBootBanner`),但那是靠两处代码各自写对来维持的一致,不是结构上的一致。\n\n## 影响\n\n不是当下的 bug,是**结构性漂移风险**:任何一次对连接失败策略的改动都要记得改两个地方。这次 #3758 就是活例子 —— #3741 在 `init()` 那层修了,`DatasourceConnectionService` 那层的边界原封不动地留了三个月,直到有人再报一次。第三次改动没有理由更幸运。\n\n同样分叉的还有:pool 生命周期(D5 说 `DatasourceConnectionService` owns connect/disconnect,但 `default` 的 disconnect 走 `DriverPlugin`/kernel shutdown)、连接策略(`DatasourceConnectPolicy` 完全看不到 `default`)。\n\n## 建议处置\n\n按 ADR-0062 D1 的原计划把 `default` 收敛到 `DatasourceConnectionService`。ADR 自己标注了这是**风险最高的一步**(§Risk:\"Phase 1's `default`-driver refactor is the riskiest single step (the hot boot path for all apps) — mitigated by landing auto-connect for declared datasources first, refactoring `default` onto the shared service last, behind the dogfood gate\")。前置条件现在都满足了:声明式 auto-connect 已上线并有 dogfood gate 覆盖,失败策略也已在两边对齐 —— 意味着这次重构是**纯搬迁,不带行为变更**,是它风险最低的时刻。\n\n需要一并想清楚的:\n\n- **注册时机**。`default` 目前是引擎 init **之前**注册(`DriverPlugin`),声明式 datasource 是 `AppPlugin.start()` 里。`default` 必须在 schema sync 之前就位,不能简单挪到 start()。\n- **`DriverPlugin` 是否保留**。它还承担 `--fresh` / 测试注入的口子,不宜直接删。\n- **`DatasourceConnectPolicy` 要不要看到 `default`**。倾向不要 —— policy 是给多租户 host 做 egress 隔离的,主库不在它管辖范围内;但这需要写进 ADR 而不是靠默认行为。\n\n## 关联\n\n- ADR-0062 D1 / D5、§Risk\n- #3741 / #3751(引擎层)、#3758 / #3816(连接服务层)\n- Prime Directive #5(不要临时补丁)、#10"
+}

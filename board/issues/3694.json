@@ -1,0 +1,34 @@
+{
+  "number": 3694,
+  "kind": "pull_request",
+  "title": "feat(showcase): nav separator + badge specimens; correct the §3 item-8 verdict (#1878)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T14:41:04Z",
+  "updated_at": "2026-07-27T14:48:30Z",
+  "closed_at": "2026-07-27T14:48:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-27T14:48:27Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3694",
+  "body": "Follow-up to #3677. **This PR retracts a claim that PR and its merged doc made** — and adds the specimen that settles it.\n\n## The correction\n\n#3677's recheck said app `badge`/`badgeVariant` + nav `separator` were unconsumed by the console sidebar, and recommended porting three render branches into `UnifiedSidebar`. **That was wrong.** The keys are live:\n\n- `NavigationRenderer` implements them (`:906` separator, `:983-985` badge)\n- `UnifiedSidebar` **delegates the whole app-navigation tree to it** — `UnifiedSidebar.tsx:437`, passing `processedNavigation`, which only re-orders/pins and spreads every other key through\n\n**Browser-verified against an unmodified objectui checkout**: with the specimen below, the divider draws and the `NEW` pill renders. The port this PR was originally scoped to do would have duplicated existing capability.\n\n## Changes\n\n- **showcase**: `nav_sep_reports` (separator) + `badge: 'NEW'` / `badgeVariant: 'secondary'` on *Hours by Status*, in the Analytics group. Same rationale as the report-chart and `showcase_archive_task` specimens: a live key with no first-party usage rots invisibly.\n- **`2026-07-naming-drift-recheck.md`**: item 8 → **ALIGNED**; disposition rewritten; plus a **methodology note** on how the item was got wrong twice.\n- **`audits/README.md`** §3 annotation corrected accordingly.\n\n## How it was got wrong (recorded in the doc)\n\n| Round | Search | Read as | Reality |\n|---|---|---|---|\n| 1 | `git grep -rln NavigationRenderer \\| head -3` → 3 CHANGELOG hits | \"the component was deleted\" | `head -3` truncated the source hit |\n| 2 | `git grep -n NavigationRenderer -- 'packages/*/src'` → empty | \"orphan, nobody imports it\" | the glob never matched the nested `packages/app-shell/src/layout/…` |\n| 3 | author a specimen, boot the stack, look | — | **settled: it renders** |\n\nBoth bad rounds share one shape: **a strong negative claim resting on a search whose result set was silently truncated or filtered.** A grep can only prove presence; absence needs an exhaustive search you have verified *is* exhaustive — or, decisively, a runtime observation. For liveness questions specifically, authoring the key and looking is usually cheaper *and* sound.\n\nShowcase suite 58/58 green.\n\nRefs #1878, #3677, #3685, #3686.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

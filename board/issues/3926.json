@@ -1,0 +1,35 @@
+{
+  "number": 3926,
+  "kind": "pull_request",
+  "title": "fix(seed-loader): multi-value lookup natural keys, and count the references they used to lose (#3911, #3932)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-29T10:03:57Z",
+  "updated_at": "2026-07-29T12:00:30Z",
+  "closed_at": "2026-07-29T12:00:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-07-29T12:00:28Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/3926",
+  "body": "Fixes #3911. Fixes #3932.\n\nThree pieces: the resolution bug, a showcase example, and the reporting gap that made the bug feel silent.\n\n---\n\n## 1. Multi-value lookups drop their natural-key array (#3911)\n\nA `multiple: true` lookup / `user` field stores an **array** of ids, so its seed value is an array of natural keys (`authors: ['Alice', 'Bob']`). Reference resolution only ever accepted a single string:\n\n```ts\nif (typeof fieldValue === 'object') { /* report + delete record[ref.field] */ }\n```\n\nAn array **is** an object in JS, so the value tripped that guard, emitted impossible-to-act-on advice (\"Pass the target's `name` value as a plain string\" — for a field that holds *several* references), and was dropped from the record. The row landed with the whole association missing. The loader had no notion that a reference field could be multi-value: `buildDependencyGraph` never carried `multiple` into `ReferenceResolution`.\n\n**Fix**\n\n- **`ReferenceResolution` gains an optional `multiple` flag**, populated in `buildDependencyGraph` from the spec's shared `isMultiValueField`. `lookup` / `user` with `multiple: true` are recognized; `master_detail` (inherently single) correctly is not. Additive and defaulted-absent.\n- **New `resolveReferenceItem`** resolves *one* reference value — records seeded this load → DB probe → miss — and **both passes share it**, so an element deferred to pass 2 resolves by exactly the same rules. An array is just N calls to it.\n- **The field lands as an array of target ids.** A lone string is accepted as one-element shorthand, because that is the shape the field stores.\n- **Deferral stays all-or-nothing per field.** One unresolved element defers the *whole authored array*; pass 2 re-resolves every element and back-fills. A key that never materializes is a reported error naming *that element*, not the whole array stringified.\n- **An array on a single-value field is still rejected**, now with actionable advice. The field is dropped (never nulled), preserving the replay-safety invariant the file documents.\n\n## 2. Showcase demonstrates it (#3911)\n\n`field_zoo` covered every field type with a real seeded value *except* a multi-value reference — the one shape this bug was about. Adds `f_lookups: Field.lookup('showcase_account', { multiple: true })`, seeded from `['Northwind', 'Contoso']`. That completes the specimen and doubles as a boot-time regression guard, which is what `field_zoo` exists for.\n\nThe multi-value **user** field (`f_users`) stays unseeded, with the reason now recorded on the object: `sys_user` rows come from **sign-up**, not seeds (see `security/seed-approval-demo.ts` — \"users can't be seeded (they sign up)\"), so on a fresh boot no human user exists for a natural key to resolve against. Authoring one would make the whole showcase seed load report `success: false` on every first boot. The multi-value reference mechanics the two fields share are covered by `f_lookups`.\n\n## 3. A dropped reference field was invisible in every count (#3932)\n\nThe loader had two failure outcomes and counted one. A record it cannot write lands in `errored`. But an unusable reference **value** is removed from the record — never written as NULL, which would sever an existing link on upsert replay — and the row is written **without it**. Nothing counted that.\n\nSo a load that quietly severed N associations reported `totalErrored: 0`, and every count-driven surface read clean. The CLI boot banner — the one seed signal that survives `os dev`'s boot-quiet window and the default `warn` level — printed `showcase 42 rows`, and the warn line said `0 dropped record(s)`: true, and useless. That reporting gap is *why* #3911 was reported as silent.\n\nAdds `SeedLoadResult.referencesDropped` + `SeedLoaderSummary.totalReferencesDropped`, deliberately **not** folded into `errored` (the row *was* written, so that would break the `inserted + updated + skipped` reconciliation against `total`). Threaded through both seed-summary producers — AppPlugin's inline seed and the marketplace heal — to the banner:\n\n```\n⚠ Seeds:   showcase 42 ok / 3 lost links ⚠\n```\n\n**Scoped out deliberately:** a pass-2 deferred reference that never resolves already bumps `errored` and reports loudly, so it is not invisible. Re-classifying it would change existing behavior and the #2805 regression test for no gain here.\n\n---\n\n## Verification\n\n- **`seed-loader-multi-value-reference.test.ts`** (new, 14 cases) — the issue's repro, DB-side resolution, internal-id passthrough mixed with natural keys, pass-2 back-fill via a circular graph, all-or-nothing deferral, the no-`multiPass` drop, single-value rejection, wrapper objects, replay idempotence, the graph flag, and the three #3932 counter cases (including that `inserted + updated + skipped + errored == total` still reconciles).\n- **`seed-multi-value-lookup-real-driver.integration.test.ts`** (new, 3 cases) — better-sqlite3 + the real ObjectQL engine. A `multiple: true` lookup lands in a JSON column, so the id array takes a serialize → TEXT → parse round-trip the in-memory mock never performs, and that round-trip is what the replay comparison reads back on the next boot. Proves the stored shape, that a second load skips all rows (no `updated_at` churn, no duplicate), and resolution against pre-existing rows.\n- **`format.seed-summary.test.ts`** (3 new cases) — the banner names lost links even when every row landed, is singular-aware, and stays quiet at zero.\n\nBoth new suites were confirmed to **fail against pre-fix code**. For the real-driver one that required rebuilding `metadata-protocol`'s `dist` from the reverted source — the runtime tests resolve that package from `dist`, so a source-only revert proves nothing.\n\nAlso green: full `spec` (6823), `metadata-protocol` (84), `runtime` (754), `cli` (764), `cloud-connection` (64), and `example-showcase` (58) suites.\n\n## Docs\n\n`content/docs/data-modeling/seed-data.mdx` gains a \"Multi-Value Lookups (`multiple: true`)\" section covering the array shape, the one-element shorthand, and the all-or-nothing deferral. Generated spec references regenerated. Two changesets included.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Gusro3gdGv4wgbBnaFy9ah"
+}

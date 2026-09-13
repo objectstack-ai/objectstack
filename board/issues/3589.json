@@ -1,0 +1,32 @@
+{
+  "number": 3589,
+  "kind": "issue",
+  "title": "自定义系统页 page:header 未国际化 (Installed Apps / Cloud Connection / Connect an Agent)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T08:32:58Z",
+  "updated_at": "2026-07-27T13:13:02Z",
+  "closed_at": "2026-07-27T13:13:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3589",
+  "body": "## 问题\n\n若干「自定义系统页」的标题/副标题直接写死在 metadata 的 `page:header` 组件 `properties.title` / `properties.subtitle` 里,在非英文 locale 下始终显示英文。当前 **i18n-resolver 没有 page / 组件级解析链路**:`packages/spec/src/system/translation.zod.ts` 已有 `pages` 命名空间(`{ title, description }` keyed by page name),但没有任何 resolver 把它应用到 page metadata,console 也原样渲染 `page:header` 的 properties。\n\n对应设置导航里的这几个页(截图均为中英混排):\n\n| 页面 | 来源 | 写死文案 |\n|---|---|---|\n| Installed Apps | `packages/cloud-connection/src/marketplace-ui.ts` | title `Installed Apps` / subtitle `Marketplace packages currently installed into this runtime's kernel.` |\n| Cloud Connection | `packages/cloud-connection/src/cloud-connection-ui.ts` | title `Cloud Connection` + 一大段 subtitle |\n| Connect an Agent | `packages/mcp/src/connect-ui.ts` | title `Connect an Agent` + 一大段 subtitle |\n\n> 注:这些页的**左侧导航项** label 已走 app 翻译包(`apps.setup.navigation.*`)正常中文化;缺的是**页内 `page:header` 的 title/subtitle**。页正文 widget(InstalledListWidget / CloudConnectionPanel / ConnectAgentWidget)大多已 i18n。\n\n## 方案(待设计)\n\n给 `page:header`(或 `pages` 命名空间)补一条翻译解析链路,二选一或结合:\n- **A. framework 通用解析**:在 `i18n-resolver` 落地 pages / page:header 的 title/subtitle 解析(按 page name 或组件),补三页对应译文。通用,插件页也能受益;需动 spec/resolver + console 渲染,测试面较大。\n- **B. console 本地化已知页**:console 对这几个已知系统 page name 做定点翻译映射。快、风险低;不通用。\n\n## 关联\n\n- 母 issue(系统设置 i18n 总),另含 P1(service-settings 译文补全)、P2(console 硬编码接 i18n):objectstack-ai/objectui#2851\n"
+}
