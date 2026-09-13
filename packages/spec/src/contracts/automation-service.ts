@@ -166,12 +166,13 @@ export interface ScreenFieldSpec {
      * spelled as the object field spells it (`FieldSchema.min` / `.max`).
      *
      * Unlike {@link visibleWhen}, these are NOT client-only: the server
-     * re-checks them when the run resumes (`validateScreenInputs`) — for a
-     * submitted value that is already a finite number, which is as far as this
-     * surface can judge, its `type` being an open widget hint. So a bound
-     * holds against a caller that skips the dialog and posts a NUMBER; a
-     * numeric string is not coerced and passes it. The client still applies
-     * them so the user is stopped at the input rather than at Submit.
+     * re-checks them when the run resumes (`validateScreenInputs`), so a bound
+     * holds against a caller that skips the dialog — with no "if the value
+     * happens to be a number" qualifier, because on a `type: 'number'` field a
+     * present non-number is refused outright (`invalid_type`) rather than
+     * passing the bound it cannot be compared against. ⛔ Not coerced. The
+     * client still applies them so the user is stopped at the input rather
+     * than at Submit.
      */
     min?: number;
     max?: number;
@@ -184,9 +185,17 @@ export interface ScreenFieldSpec {
     inlineHelpText?: string;
     /**
      * Object whose records a `type: 'lookup'` field picks from (#17306) —
-     * `FieldSchema.reference`'s spelling. Absent ⇒ the client has no target to
-     * resolve a picker against and falls back to a plain input, which is what
-     * every `lookup` screen field did before this key existed.
+     * `FieldSchema.reference`'s spelling.
+     *
+     * Optional HERE and required on the authoring side: `ScreenFieldConfigSchema`
+     * refuses a `type: 'lookup'` field that declares no `reference` (maintainer
+     * ruling A′, 2026-09-13), so a screen reaching a client through a parsed
+     * flow always carries it. This is the WIRE shape, and it stays optional for
+     * the reason every key on it is: it also describes a `ScreenSpec` rehydrated
+     * from a run SUSPENDED before the upgrade, which was stored under the old
+     * accept set. A client that meets one has no target to resolve a picker
+     * against and falls back to a plain input — the pre-#17306 behaviour, kept
+     * reachable on purpose rather than turned into a client-side crash.
      */
     reference?: string;
     /**

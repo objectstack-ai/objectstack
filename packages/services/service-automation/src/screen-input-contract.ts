@@ -32,10 +32,12 @@ export interface ScreenInputIssue {
   field: string;
   /**
    * Which constraint the bag violated, from the field-level catalog
-   * (ADR-0114 D2) — `required` and `unknown_field`. Typed as `FieldErrorCode`
-   * rather than a local literal union for the reason `ActionParamIssue` gives:
-   * a screen field, an action param and a record column must not drift into
-   * three vocabularies for the same two conditions.
+   * (ADR-0114 D2) — `required`, `invalid_type`, `min_value`, `max_value` and
+   * `unknown_field`. Typed as `FieldErrorCode` rather than a local literal
+   * union for the reason `ActionParamIssue` gives: a screen field, an action
+   * param and a record column must not drift into three vocabularies for the
+   * same conditions. ⛔ Every member here is one the catalog ALREADY declares —
+   * #17306 added three conditions to this surface and no code to that catalog.
    *
    * NOT an `error.code` (ADR-0112 D1). These are FIELD-ADDRESSED validator
    * codes that ride inside the refusal's message; the refusal's own machine
@@ -83,6 +85,7 @@ export function screenDeclaresInputContract(screen: ScreenSpec | undefined): boo
  *
  * Enforced, and nothing beyond it:
  *  - `required` presence for every field the caller was actually asked for;
+ *  - the VALUE SHAPE of a `type: 'number'` field (#17306);
  *  - the declared numeric bound pair `min` / `max` (#17306);
  *  - undeclared keys.
  *
@@ -96,14 +99,30 @@ export function screenDeclaresInputContract(screen: ScreenSpec | undefined): boo
  * degradation is loud rather than silent. Its KEY stays accepted either way —
  * the author declared it, so it is never "undeclared".
  *
- * Value SHAPE (`type`) is out of scope here: a screen field's `type` is a
- * widget hint with no closed vocabulary, unlike an action param's field type.
- * The bound pair is NOT that case and is enforced: `min`/`max` are declared as
- * numbers, so the constraint is closed even though the widget hint beside it is
- * not. It fires only on a value that is already a finite number — a bound on a
- * non-numeric field, or a non-numeric value under a bound, is left to the same
- * open-`type` silence as everything else here rather than invented into an
- * `invalid_number` this surface never promised.
+ * Value SHAPE (`type`) is out of scope here with ONE closed exception, and the
+ * exception is the maintainer's (ruling A′, 2026-09-13): a screen field's
+ * `type` is an open widget hint, so no member of it constrains a value —
+ * EXCEPT `'number'`, whose meaning is not a rendering preference but a value
+ * domain the bound pair beside it already assumes. A present value for a
+ * `type: 'number'` field that is not a finite JSON number is refused with
+ * `invalid_type`, the catalog's existing member for a value of the wrong
+ * primitive type (ADR-0114 D2 — no new code, and deliberately not
+ * `invalid_number`, which names a PARSE failure rather than a type mismatch).
+ * It is refused, ⛔ never coerced: `"25"` is the author's client sending the
+ * wrong shape, and quietly reading it as `25` would make the bound's verdict
+ * depend on a coercion no part of this contract declares.
+ *
+ * That closes the gap the bound pass alone left open. The bound pass compares
+ * numbers, so before this every non-number slipped past BOTH — under a `max`
+ * of 20, `"25"` was conformant. The refusal now lands on the shape, and the
+ * bound pass is left comparing numbers only, which is all it can do.
+ *
+ * ⚠️ Narrow on purpose in two directions. It keys off `type: 'number'`, not
+ * off the presence of a bound: a bound declared on a non-numeric field still
+ * constrains nothing (`FieldSchema.min`/`.max` are unconditioned on `type`
+ * too), and no other widget hint is read as a value domain. And it is a
+ * PRESENCE-conditioned check, like the bound: an absent value is `required`'s
+ * question, and a field the caller was never shown is nobody's.
  */
 export function validateScreenInputs(
   fields: readonly ScreenFieldSpec[],
@@ -127,6 +146,28 @@ export function validateScreenInputs(
       field: field.name,
       code: 'required',
       message: `Screen field "${field.name}" is required`,
+    });
+  }
+
+  // Value shape for a `type: 'number'` field (#17306, ruling A′). Its own pass,
+  // BEFORE the bound: a value that is not a number cannot be compared against
+  // one, so the shape is the first thing true or false about it. A caller that
+  // posts `"25"` under a `max` of 20 gets one issue naming the shape, not a
+  // silent pass and not a bound verdict computed on a string.
+  for (const field of declared.values()) {
+    if (field.type !== 'number') continue;
+    const value = bag[field.name];
+    // Absent is `required`'s question (see the bound pass below for the same
+    // split), and a field the user was never shown is neither's.
+    if (!isPresent(value)) continue;
+    if (field.visibleWhen != null && String(field.visibleWhen).trim() !== '') {
+      if (visibility(field) !== true) continue;
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) continue;
+    issues.push({
+      field: field.name,
+      code: 'invalid_type',
+      message: `Screen field "${field.name}" must be a number`,
     });
   }
 

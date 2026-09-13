@@ -69,7 +69,7 @@ const LOOKUP_TARGET_COLUMN = {
   type: 'string',
   title: 'Lookup object',
   xRef: { kind: 'object' },
-  description: "Object whose records a `lookup` field picks from.",
+  description: "Object whose records a `lookup` field picks from. Required on a `lookup` field — a picker with no target object resolves nothing.",
 };
 
 export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext): void {
@@ -132,8 +132,8 @@ export function registerScreenNodes(engine: AutomationEngine, ctx: PluginContext
                   // a form that omitted them would leave the keys authorable
                   // only by hand. `builtin-node-form-zod-ledger.test.ts`
                   // reconciles this column set against the Zod both ways.
-                  min: { type: 'number', title: 'Min', description: 'Minimum accepted value (numeric fields). Re-checked when the run resumes, for a submitted value that is a number.' },
-                  max: { type: 'number', title: 'Max', description: 'Maximum accepted value (numeric fields). Re-checked when the run resumes, for a submitted value that is a number.' },
+                  min: { type: 'number', title: 'Min', description: 'Minimum accepted value (numeric fields). Enforced when the run resumes.' },
+                  max: { type: 'number', title: 'Max', description: 'Maximum accepted value (numeric fields). Enforced when the run resumes.' },
                   inlineHelpText: { type: 'string', title: 'Help text', description: 'Help text shown under the input. Unlike the placeholder, it stays readable once the user types.' },
                   reference: LOOKUP_TARGET_COLUMN,
                   visibleWhen: { type: 'string', title: 'Visible when', xExpression: 'expression' },

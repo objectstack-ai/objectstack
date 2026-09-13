@@ -28,6 +28,7 @@ import {
   DeleteRecordConfigSchema,
   GetRecordConfigSchema,
   MapConfigSchema,
+  SCREEN_FIELD_LOOKUP_REFERENCE_REQUIRED,
   ScreenConfigSchema,
   ScreenFieldConfigSchema,
   UpdateRecordConfigSchema,
@@ -271,11 +272,46 @@ describe('ScreenFieldConfigSchema — the bound pair, help text and lookup targe
     }).success).toBe(true);
   });
 
-  it('leaves a `lookup` field with no `reference` parsing, as it did before', () => {
-    // NOT required the way `FieldSchema` requires it: shipped flows declare a
-    // bare `lookup` screen field, and refusing them would break metadata that
-    // parses today. The widening is additive or it is a breaking change.
-    expect(ScreenFieldConfigSchema.safeParse({ name: 'article', type: 'lookup' }).success).toBe(true);
+  // ── REVERSED (ruling A′, 2026-09-13): this pin used to assert the OPPOSITE ──
+  // It read `leaves a \`lookup\` field with no \`reference\` parsing, as it did
+  // before`, and its comment argued that shipped flows declare a bare `lookup`
+  // so refusing one would be a breaking change. The maintainer ruled the other
+  // way: ADR-0078's own example of silently-inert metadata IS a `lookup` with
+  // no `reference`, and a degraded shipped twin is not a reason to bend the
+  // contract. The assertion is inverted in place rather than deleted, so a
+  // later re-widening has to come back through this case.
+  it('refuses a `lookup` field with no `reference` — and names the key', () => {
+    const r = ScreenFieldConfigSchema.safeParse({ name: 'article', type: 'lookup' });
+    expect(r.success).toBe(false);
+    const issue = r.error?.issues.find((i) => i.path[0] === 'reference');
+    expect(issue, 'the refusal must be ADDRESSED to `reference`').toBeDefined();
+    expect(issue!.message).toBe(SCREEN_FIELD_LOOKUP_REFERENCE_REQUIRED);
+    // The wording is the contract an author meets: it must name the key and
+    // show the spelling, and ⛔ must not carry a tracker id (check:doc-authoring).
+    expect(SCREEN_FIELD_LOOKUP_REFERENCE_REQUIRED).toContain('`reference`');
+    expect(SCREEN_FIELD_LOOKUP_REFERENCE_REQUIRED).not.toMatch(/#\d{3,5}\b/);
+    // An empty or blank target is the same absence, not a declared one.
+    for (const blank of ['', '   ']) {
+      expect(ScreenFieldConfigSchema.safeParse({ name: 'article', type: 'lookup', reference: blank }).success,
+        `reference: ${JSON.stringify(blank)}`).toBe(false);
+    }
+  });
+
+  it('requires it on `lookup` ONLY — every other widget hint is untouched', () => {
+    // The requirement reads one member of an open `type` vocabulary. A field
+    // with no `type`, or any other one, still parses with no `reference`.
+    for (const type of [undefined, 'text', 'number', 'select']) {
+      expect(ScreenFieldConfigSchema.safeParse({ name: 'article', ...(type ? { type } : {}) }).success,
+        `type: ${String(type)}`).toBe(true);
+    }
+  });
+
+  it('keeps `.shape` enumerable — the refinement did not change the key set', () => {
+    // `superRefine` is a CHECK, not a wrapper: the ledger test and the pin
+    // below both read `.shape`, and a ZodEffects here would break them
+    // silently by making the key set unreadable rather than wrong.
+    expect(Object.keys((ScreenFieldConfigSchema as unknown as z.ZodObject<z.ZodRawShape>).shape))
+      .toContain('reference');
   });
 
   // ── Direction 2: what must STILL be refused ─────────────────────────────

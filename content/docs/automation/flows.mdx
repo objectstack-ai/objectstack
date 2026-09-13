@@ -404,9 +404,9 @@ field means the same thing here:
 
 | Key | Type | What it does |
 |:---|:---|:---|
-| `min` / `max` | `number` | Numeric bound. Applied by the client at the input **and re-checked server-side on resume when the submitted value is a number**. |
+| `min` / `max` | `number` | Numeric bound. Applied by the client at the input **and enforced server-side when the run resumes**. |
 | `inlineHelpText` | `string` | Help text under the input. Unlike `placeholder`, it stays readable after the user types. |
-| `reference` | `string` | Object whose records a `type: 'lookup'` field picks from, so the field renders a record picker. |
+| `reference` | `string` | Object whose records a `type: 'lookup'` field picks from, so the field renders a record picker. **Required** on a `lookup` field. |
 
 ```typescript
 {
@@ -424,18 +424,19 @@ field means the same thing here:
 }
 ```
 
-**The bound is re-checked on resume — for a value that arrives as a number.**
-`min` / `max` ride to the client so the user is stopped at the input, and
-`validateScreenInputs` re-checks them on resume, so a caller that skips the
-dialog and posts a *number* to `resume` directly is refused too (`min_value` /
-`max_value`, inside the run's `INVALID_SCREEN_INPUT`). A screen field's declared
-contract is the only contract behind it — there is no object schema to catch a
-bad bag downstream.
+**The bound is not advice.** `min` / `max` ride to the client so the user is
+stopped at the input, and `validateScreenInputs` re-checks them on resume, so a
+caller that skips the dialog and posts to `resume` directly is refused too
+(`min_value` / `max_value`, inside the run's `INVALID_SCREEN_INPUT`). A screen
+field's declared contract is the only contract behind it — there is no object
+schema to catch a bad bag downstream.
 
-⚠️ The re-check reads only finite numbers. `"25"` — the same quantity as a
-*string* — is not coerced and passes the bound in silence, for the reason the
-next list gives: this surface has no closed `type` vocabulary and so does not
-judge value shape. Outside that, the bound is the client's alone.
+That sentence carries no "if the value is a number" qualifier, because the
+shape is checked first: on a `type: 'number'` field a submitted value that is
+not a JSON number is **refused** on resume with `invalid_type`. `"25"` — the
+same quantity as a *string* — is **not coerced** into `25` and does not reach
+the bound; it is rejected as the wrong shape. The bound then compares numbers
+only, which is all a bound can do.
 
 **What these keys refuse:**
 
@@ -450,17 +451,23 @@ judge value shape. Outside that, the bound is the client's alone.
   (render that object's whole form), on a screen **field** it can only mean the
   lookup target.
 - **A non-string `inlineHelpText` or `reference`.**
+- **A `lookup` field with no `reference`.** A picker with no target object
+  resolves nothing, which is ADR-0078's own example of silently-inert
+  metadata, so `reference` is **required** when `type` is `lookup` — as it is
+  on an object field. The refusal names the key and shows the spelling.
+  ⚠️ This is a **narrowing**: a stored flow declaring a bare `lookup` screen
+  field parsed before this release and does not now. There is no lossless
+  conversion — nothing in the metadata says which object the author meant — so
+  the migration chain carries it as a structured TODO
+  (`screen-field-lookup-reference-required`) naming the flow and the field,
+  not an automatic rewrite.
 
 **What they deliberately do NOT refuse:**
 
-- **A `lookup` field with no `reference`.** Unlike an object field — where the
-  reference is required — this stays optional, because screen fields declaring a
-  bare `lookup` type already exist in shipped flows and refusing them would break
-  metadata that parses today. Such a field keeps its current behaviour: no
-  picker target to resolve.
-- **A bound on a non-numeric field, or a non-numeric value under a bound.** A
-  screen field's `type` has no closed vocabulary, so neither this schema nor the
-  resume check judges value shape; the bound simply never fires.
+- **A bound on a non-numeric field.** A screen field's `type` has no closed
+  vocabulary, so this schema cannot judge which types a bound is meaningful on.
+  A bound on a `text` field constrains nothing and is not an error — the shape
+  check above reads `type: 'number'` alone, never the presence of a bound.
 - **An absent value.** A bound constrains a value that is present — an optional
   bounded field left empty is conformant. Presence is `required`'s question.
 - **A bound on a field the user was never shown.** Like `required`, a bound on a
