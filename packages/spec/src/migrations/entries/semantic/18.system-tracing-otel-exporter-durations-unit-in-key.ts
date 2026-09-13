@@ -1,0 +1,77 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+import type { SemanticMigration } from '../../types.js';
+
+export const entry: SemanticMigration = {
+  id: 'system-tracing-otel-exporter-durations-unit-in-key',
+  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+  // code span AND a table cell.
+  surface: 'the four tracing-configuration durations whose unit lived in a source JSDoc only: '
+    + 'OpenTelemetryCompatibility.exporter.timeout, '
+    + 'OpenTelemetryCompatibility.exporter.batch.exportTimeout, '
+    + 'OpenTelemetryCompatibility.exporter.batch.scheduledDelay and '
+    + 'TracingConfig.performance.exportInterval (system/tracing.zod.ts)',
+  replacement: 'timeoutMs, exportTimeoutMs, scheduledDelayMs and exportIntervalMs — rename each '
+    + 'key; all four values (milliseconds) and their 10000 / 30000 / 5000 / 5000 defaults are '
+    + 'unchanged',
+  reason:
+    'Director-seat ruling A on #15939, 2026-09-11, carrying the maintainer\'s 「同意」 (decision '
+    + 'batch #115), executing the #14478 rule per file. It follows '
+    + 'system-tracing-span-duration-unit-in-key on this same file and does not amend it: that '
+    + 'entry retired Span.duration under ruling B, whose population was the describe channel, '
+    + 'and these four keys were never in it — they are the JSDoc-only channel #15939 opened, '
+    + 'which is why one file carries two rounds. Each key named milliseconds in its JSDoc — '
+    + '"Timeout in milliseconds", "Export timeout in milliseconds", "Scheduled delay in '
+    + 'milliseconds", "Background export interval in milliseconds" — and the JSDoc above a key '
+    + 'is NOT what content/docs/references/** renders; .describe() is. Measured on this tree: '
+    + 'all four carried NO .describe() at all, so the published reference row for each was a '
+    + 'bare integer with no unit anywhere on the page — a strictly worse channel than the '
+    + 'unit-in-prose shape #14478 already refuses, since here the reference reader had no prose '
+    + 'to misread. The magnitudes make the guess plausible in both directions: 10000, 30000, '
+    + '5000 and 5000 are all defensible as seconds and as milliseconds, and an operator who '
+    + 'reads seconds sets an exporter deadline 1000x short. The suffix is the family spelling, '
+    + 'counted in key position across packages/spec/src: 281 *Ms declarations over 42 distinct '
+    + 'names, timeoutMs 65 of them and intervalMs 14, against 0 key-position timeoutSeconds; '
+    + 'the Delay-plus-Ms pairing is likewise already attested (maxDelayMs, initialDelayMs, '
+    + 'retryDelayMs, delayMs, debounceDelayMs) with no competing scheduledDelay spelling '
+    + 'anywhere. Note this file is milliseconds throughout and its own landed precedent is '
+    + 'Span.duration to durationMs, the opposite of the sibling metrics card whose rows were '
+    + 'seconds. exporter.timeoutMs and exporter.batch.exportTimeoutMs are deliberately allowed '
+    + 'to sit one nesting level apart: the pair pre-exists the rename — the batch sub-object is '
+    + 'the OpenTelemetry batch span processor\'s own four knobs (max batch size, max queue '
+    + 'size, scheduled delay, export timeout) beside the exporter\'s own request deadline — so '
+    + 'renaming either to something more distinctive would depart from the vocabulary the shape '
+    + 'mirrors, and the nesting already disambiguates every read point '
+    + '(exporter.timeoutMs vs exporter.batch.exportTimeoutMs). All four old spellings are '
+    + 'retiredKey() tombstones: neither OpenTelemetryCompatibilitySchema nor TracingConfigSchema '
+    + 'nor any object nested inside them is .strict(), so a bare deletion would be a SILENT '
+    + 'STRIP (#3733, ADR-0104) — and the stripped value lands on an export deadline and a '
+    + 'background export period. Why a semantic entry and not a D2 conversion: the conversion '
+    + 'chain walks a normalized STACK, and neither def is an authorable surface — stack.zod.ts '
+    + 'declares no tracing collection, no metadata-type binding or manifest embed carries '
+    + 'either, and a tracing configuration is never a stored sys_metadata row — so a conversion '
+    + 'would be a transform with no seam that ever runs. That is the same disposition '
+    + 'system-tracing-span-duration-unit-in-key recorded for the other key on this file. '
+    + 'Measured on 98bd7986fe: NO in-repo reader exists outside packages/spec — '
+    + 'OpenTelemetryCompatibility, TracingConfig and all three batch key names occur 0 times '
+    + 'across the whole tree excluding packages/spec and the generated reference pages, against '
+    + 'a lit control of 20875 Schema occurrences on the same corpus; inside packages/spec the '
+    + 'only occurrences are tracing.zod.ts, its test, and the generated rows in '
+    + 'content/docs/references/system/tracing.mdx, which this rename regenerates. And the '
+    + 'pinned objectui checkout — `.objectui-sha` = `53ded82bf7a494f54e344e19099dbf00854b8694` — names none of it: all 37 exports of '
+    + 'tracing.zod.ts and each of the four key names occur 0 times across its 6409 tracked '
+    + 'files (the 404 Span and 40 SpanSchema hits are objectui\'s own HTML text-span component, '
+    + 'TextSpanSchema, an unrelated name), against lit controls objectstack 10171 and '
+    + '@objectstack/spec 3479 on the same corpus.',
+  acceptanceCriteria:
+    'Every author and reader of an OpenTelemetryCompatibility spells exporter.timeoutMs, '
+    + 'exporter.batch.exportTimeoutMs and exporter.batch.scheduledDelayMs, and every one of a '
+    + 'TracingConfig spells performance.exportIntervalMs. Authoring any old spelling fails to '
+    + 'compile (input type `never`) and fails to parse with the rename prescription naming the '
+    + 'suffixed key — not with a generic unrecognized_keys issue, which these non-strict shapes '
+    + 'could never have raised anyway. Behaviour is unchanged: the same milliseconds, the same '
+    + '10000 / 30000 / 5000 / 5000 defaults and the same int().positive() bounds, and all four '
+    + 'published describes now name milliseconds where before there was no describe at all. '
+    + 'The authorable-surface and authorable-defaults ledgers move nothing: every one of the '
+    + 'four is NESTED, and those artifacts record top-level keys per def only.',
+};
