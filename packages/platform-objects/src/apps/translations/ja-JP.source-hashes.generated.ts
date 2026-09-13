@@ -285,6 +285,8 @@ export const jaJPGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_notification.fields.severity.options.critical": "7ff0ff69c0abaf81",
   "objects.sys_notification.fields.severity.options.info": "3e0c8611029f253b",
   "objects.sys_notification.fields.severity.options.warning": "2673ee95caf83284",
+  "objects.sys_notification.fields.suppressed_channels.help": "1fbbc17b95ea75d2",
+  "objects.sys_notification.fields.suppressed_channels.label": "910cb46f687f6270",
   "objects.sys_notification.fields.topic.help": "80e1790edfda49df",
   "objects.sys_notification.fields.topic.label": "819afdb3853e9d80",
   "objects.sys_oauth_access_token.fields.authorization_code_id.help": "84ad4d5d8c4c1cee",
