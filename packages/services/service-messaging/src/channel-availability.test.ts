@@ -339,8 +339,14 @@ describe('channel availability at fan-out (#17732)', () => {
 
     it('leaves an UNREGISTERED channel on its existing path — ⛔ not folded into suppression', async () => {
         // Out of the ruling's scope on purpose: an unregistered channel has no
-        // implementation to ask, so it keeps today's behaviour exactly. Pinned
-        // so the boundary is deliberate rather than accidental.
+        // implementation to ask, so it is not a SUPPRESSION. Pinned so the
+        // boundary is deliberate rather than accidental.
+        //
+        // ⚠️ This is the INLINE path, and it is unchanged. #18050 later gave the
+        // DURABLE path the same answer this one already gave — a failed
+        // `DeliveryOutcome` and no row — so "keeps today's behaviour exactly" is
+        // no longer true of the outbox half; `unregistered-channel.test.ts`
+        // pins that half, including that it still records no suppression.
         const data = capturingEngine();
         const service = new MessagingService({ logger: silentLogger(), getData: () => data.engine });
         service.registerChannel(channelDouble('inbox').channel);
