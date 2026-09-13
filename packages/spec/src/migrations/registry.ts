@@ -10318,6 +10318,87 @@ const step18: MigrationStep = {
         + 'it too has over-applied the rule and stripped a declared exemption.',
     },
     {
+      id: 'system-metrics-jsdoc-durations-unit-in-key',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface: 'the five remaining metrics durations whose unit lived in a source JSDoc only: '
+        + 'MetricDefinition.summary.maxAge, ServiceLevelObjective.errorBudget.burnRateWindows[].window, '
+        + 'MetricExportConfig.interval, MetricsConfig.collectionInterval and '
+        + 'MetricsConfig.retention.period (system/metrics.zod.ts)',
+      replacement: 'summary.maxAgeSeconds, errorBudget.burnRateWindows[].durationSeconds, '
+        + 'intervalSeconds, collectionIntervalSeconds and retention.durationSeconds — rename each '
+        + 'key; every value is unchanged',
+      reason:
+        'This entry FINISHES what system-metrics-window-durations-unit-in-key started on this file, '
+        + 'and the two are meant to be read as a sequence — this one does not amend that record, '
+        + 'which stays a true account of what #15679 did. #15679 renamed the three metrics window '
+        + 'and period lengths whose describe named no unit, and recorded that the error-budget '
+        + 'burn-rate window was "outside this rename, not outside the gate population", naming the '
+        + 'JSDoc-channel gap #15939 as where it would be settled. #15939 is now ruled and this is '
+        + 'its remediation: director-seat ruling A, 2026-09-11, carrying the maintainer\'s 「同意」 '
+        + '(decision batch #115), which remediates the 21-row JSDoc-channel population per file and '
+        + 'lands the widened gate (#17635) last, into a tree already clean. ⚠️ One consequence for '
+        + 'readers of the older entry: its acceptanceCriteria says the burn-rate window keeps its '
+        + 'name and that a sweep renaming it has over-applied the rule. That sentence was true of '
+        + '#15679 and is superseded here, by the ruling it itself pointed at; the other key it '
+        + 'names, the exporter batch size, is a COUNT of records and still does not move. All five '
+        + 'keys here share one defect: the unit (seconds) was stated in the JSDoc above the key, a '
+        + 'channel check:duration-unit-keys does not read — it reads .describe() and '
+        + '.meta({ description }) — and four of the five carried no describe at all while the fifth '
+        + 'read "Window size". So the reader who most needs the unit, the reader of the published '
+        + 'reference page, got a bare integer: 600, 3600, 60, 15 and 604800 are each a plausible '
+        + 'number of seconds and a plausible number of milliseconds, and nothing on the page decided '
+        + 'it. Each key is renamed and its describe corrected in the same stroke, because under the '
+        + '#14478 rule moving the unit into the describe alone is itself a violation. Three of the '
+        + 'five spellings are not the mechanical suffix, and each departure has a reason this file '
+        + 'already supplied: burnRateWindows[].window becomes durationSeconds, not windowSeconds, '
+        + 'because the enclosing array is already called burnRateWindows so the key would stutter — '
+        + 'the objection #15679 recorded against window.windowSeconds — and because on this tree '
+        + 'windowSeconds is not an authorable key at all, its only key-position occurrence being an '
+        + 'alias-map entry in ServerRateLimitConfigSchema that maps the spelling AWAY to windowMs; '
+        + 'retention.period becomes durationSeconds, not periodSeconds, because period is calendar '
+        + 'vocabulary elsewhere in this spec (ServiceLevelObjective.period.type selects rolling or '
+        + 'calendar, PluginRegistryEntry.pricing.billingPeriod is monthly or yearly) so periodSeconds '
+        + 'would keep the ambiguous half of the name; and collectionInterval keeps its qualifier as '
+        + 'collectionIntervalSeconds so it stays distinct from the MetricExportConfig.intervalSeconds '
+        + 'this same card creates one def over. The two mechanical spellings are attested: '
+        + 'maxAgeSeconds is the token AccessControlConfig.maxAgeSeconds already carries after this '
+        + 'same rule renamed it on system/object-storage.zod.ts, and it keeps the age stem the '
+        + 'sibling ageBuckets counts buckets of; intervalSeconds is the token four seconds-valued '
+        + 'cadences already carry. Counted on this tree, key-position seconds suffixes across '
+        + 'packages/spec/src run Seconds 40, Sec 1 and S 0, so Seconds is the family. All five are '
+        + 'retiredKey() tombstones; none of the five enclosing shapes is strict, so a bare deletion '
+        + 'would strip in silence. Why a semantic entry and not a D2 conversion: stack.zod.ts '
+        + 'declares no metrics collection, and none of a metric definition, an SLO, an export config '
+        + 'or a metrics config is a registered metadata kind stored as a sys_metadata row — the same '
+        + 'reading #15679 recorded for the three keys it renamed. Measured on fc28c1d38: no in-repo '
+        + 'code consumer reads any of the five — outside packages/spec the only occurrences of every '
+        + 'distinctive key on these shapes (burnRateWindows, errorBudget, downsampling, '
+        + 'collectionInterval, cardinalityLimits, maxLabelCombinations, ageBuckets) are in the '
+        + 'generated content/docs/references/system/metrics.mdx, which this rename regenerates, '
+        + 'against a lit control of 1195 defineStack occurrences on the same corpus; and the objectui '
+        + 'checkout this repo builds against — this is the pin, '
+        + '`.objectui-sha` = `53ded82bf7a494f54e344e19099dbf00854b8694`, re-read from this tree — '
+        + 'spells all six metrics def names and both distinctive keys 0 times across 6409 tracked '
+        + 'files, against lit controls window 2710, timeout 832, period 160, interval 156 and '
+        + 'metrics 301 on that same corpus, so no pin bump is owed. '
+        + '#15939, #15679, #14478, ADR-0087.',
+      acceptanceCriteria:
+        'Every metric definition spells summary.maxAgeSeconds, every error-budget burn rate window '
+        + 'spells durationSeconds, every metric export config spells intervalSeconds, and every '
+        + 'metrics config spells collectionIntervalSeconds and retention.durationSeconds. Authoring '
+        + 'any of the five old spellings fails to compile (input type `never`) and fails to parse '
+        + 'with the rename prescription naming the suffixed key — not an unrecognized_keys issue. '
+        + 'Behaviour is unchanged: collectionIntervalSeconds: 15 collects every fifteen seconds '
+        + 'exactly as collectionInterval: 15 did, and every default (600, 60, 15, 604800) and '
+        + 'positive-integer bound rides along with its renamed key. Each new describe names the unit, '
+        + 'so the reference page carries it. Verify the same-named decoys on this one file apart: '
+        + 'MetricAggregationConfig.window and ServiceLevelIndicator.window are objects that already '
+        + 'hold a durationSeconds of their own, and ServiceLevelObjective.period is an object holding '
+        + 'a durationSeconds and a calendar — none of the three moves, and a sweep that renamed any '
+        + 'of them has over-applied this rule.',
+    },
+    {
       id: 'system-metrics-window-durations-unit-in-key',
       surface: 'the three metrics window/period lengths whose name carried no unit: '
         + 'MetricAggregationConfig.window.size, ServiceLevelIndicator.window.size and '
@@ -13169,6 +13250,76 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // declares no `metrics` collection and an aggregation config is not a stored
     // metadata row. See `system-metrics-window-durations-unit-in-key`.
     'system/MetricAggregationConfig:window.size',
+    // #15939 ruling A (per-file remediation of #14478). `summary.maxAge` said "Max
+    // age of observations in seconds" in a source JSDoc and carried no
+    // `.describe()` at all, so the reference page published a bare 600 and the
+    // gate listed the key among the duration-shaped ones without judging it.
+    // Renamed to `maxAgeSeconds`, the same token `AccessControlConfig.maxAgeSeconds`
+    // on `system/object-storage.zod.ts` already carries after this same rule renamed
+    // it — NOT `durationSeconds`, the spelling the three window lengths on this file
+    // take, because the sibling key `ageBuckets` counts buckets of this very age and
+    // dropping the `age` stem would orphan the pair. The value is unchanged.
+    // Tombstoned with `retiredKey()`: the nested `summary` object is not strict, so
+    // a bare deletion would silently strip the key. A NESTED site: the
+    // authorable-surface ratchet walks top-level def properties only, so no
+    // `[RETIRED]` row exists for it and gate (b) of `build-schemas.ts` neither
+    // demands nor refuses this entry — it is here for the spec-changes /
+    // upgrade-guide projection. No D2 conversion: `stack.zod.ts` declares no metrics
+    // collection and a metric definition is not a stored metadata row.
+    // See `system-metrics-jsdoc-durations-unit-in-key`.
+    'system/MetricDefinition:summary.maxAge',
+    // #15939 ruling A (per-file remediation of #14478). `MetricExportConfig.interval`
+    // said "Export interval in seconds" in a source JSDoc and carried no
+    // `.describe()` at all — one of the three sites the #15939 filing named — so the
+    // reference page published a bare 60, a plausible number of seconds and a
+    // plausible number of milliseconds. Renamed to `intervalSeconds`, the token
+    // every seconds-valued cadence in this spec already carries (`intervalSeconds`
+    // on `ai/model-registry`, `api/auth-endpoints`, `data/driver/turso` and
+    // `integration/connector`); no competing `intervalSec` or `intervalS` spelling
+    // exists. The 60 default is unchanged. Tombstoned with `retiredKey()`: this
+    // object is not strict, so a bare deletion would silently strip the key. A
+    // TOP-LEVEL site, so the authorable-surface ratchet moves: the row becomes
+    // `system/MetricExportConfig:interval [RETIRED]` beside a new
+    // `system/MetricExportConfig:intervalSeconds`, and the authorable-defaults row
+    // moves with it. No D2 conversion: `stack.zod.ts` declares no metrics collection
+    // and an export config is not a stored metadata row.
+    // See `system-metrics-jsdoc-durations-unit-in-key`.
+    'system/MetricExportConfig:interval',
+    // #15939 ruling A (per-file remediation of #14478). `MetricsConfig.collectionInterval`
+    // said "Collection interval in seconds" in a source JSDoc and carried no
+    // `.describe()` at all, so the reference page published a bare 15. Renamed to
+    // `collectionIntervalSeconds` and not to a bare `intervalSeconds`: the qualifier
+    // distinguishes it from `MetricExportConfig.intervalSeconds`, a different cadence
+    // one def over that this same card renames, and the qualifier-plus-IntervalSeconds
+    // compound is the attested form (`syncIntervalSeconds`, `refreshIntervalSeconds`,
+    // `healthCheckIntervalSeconds`). The 15 default is unchanged. Tombstoned with
+    // `retiredKey()`: this object is not strict, so a bare deletion would silently
+    // strip the key. A TOP-LEVEL site, so the authorable-surface ratchet moves: the
+    // row becomes `system/MetricsConfig:collectionInterval [RETIRED]` beside a new
+    // `system/MetricsConfig:collectionIntervalSeconds`, and the authorable-defaults
+    // row moves with it. No D2 conversion: `stack.zod.ts` declares no metrics
+    // collection and a metrics config is not a stored metadata row.
+    // See `system-metrics-jsdoc-durations-unit-in-key`.
+    'system/MetricsConfig:collectionInterval',
+    // #15939 ruling A (per-file remediation of #14478). `MetricsConfig.retention.period`
+    // said "Retention period in seconds" in a source JSDoc and carried no
+    // `.describe()` at all, so the reference page published a bare 604800. Renamed to
+    // `durationSeconds`, not to the mechanical `periodSeconds`: `period` is calendar
+    // vocabulary elsewhere in this spec — `ServiceLevelObjective.period.type` selects
+    // rolling or calendar and `PluginRegistryEntry.pricing.billingPeriod` is monthly
+    // or yearly — so `periodSeconds` would have kept the ambiguous half of the name
+    // and bolted a unit onto it, the same objection #15679 raised against
+    // `sizeSeconds`. `durationSeconds` is what this file already calls a length of
+    // time, in three places. The 604800 (7 day) default is unchanged. Tombstoned with
+    // `retiredKey()`: the nested `retention` object is not strict, so a bare deletion
+    // would silently strip the key. A NESTED site: the authorable-surface ratchet
+    // walks top-level def properties only — the top-level row is
+    // `system/MetricsConfig:retention` and it does not move — so gate (b) of
+    // `build-schemas.ts` neither demands nor refuses this entry. No D2 conversion:
+    // `stack.zod.ts` declares no metrics collection and a metrics config is not a
+    // stored metadata row.
+    // See `system-metrics-jsdoc-durations-unit-in-key`.
+    'system/MetricsConfig:retention.period',
     // #15679 (stack card 4/6 of #14478) — ruling B. `QueueConfig.rateLimit.duration`
     // said "Duration in milliseconds" in prose and nothing else — while
     // `TaskResult.durationMs`, ninety lines earlier in the SAME file, already spelled
@@ -13253,6 +13404,34 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // is unchanged. Tombstoned with `retiredKey()`; no D2 conversion.
     // See `system-metrics-window-durations-unit-in-key`.
     'system/ServiceLevelIndicator:window.size',
+    // #15939 ruling A (per-file remediation of #14478). The error-budget burn-rate
+    // `window` said "Window size in seconds" in a source JSDoc while its
+    // `.describe()` read "Window size" and named no unit — the exact site #15939
+    // was filed on. Renamed to `durationSeconds`: it is the fourth window length on
+    // this file, and #15679 already settled that a window length here is spelled
+    // `durationSeconds` so the measurements read alike. `windowSeconds` is rejected
+    // for the reason #15679 recorded against `window.windowSeconds` — the enclosing
+    // array is already called `burnRateWindows`, so the key would stutter — and
+    // because on this tree `windowSeconds` is not an authorable key at all: its only
+    // key-position occurrence is an entry in `ServerRateLimitConfigSchema`'s alias
+    // map that maps the spelling AWAY to `windowMs`. The value is unchanged.
+    // Tombstoned with `retiredKey()`: this array-element object is not strict, so a
+    // bare deletion would silently strip the key.
+    //
+    // The path crosses an ARRAY (`errorBudget.burnRateWindows` is a `z.array`) and
+    // is spelled with plain dots, no bracket token, because that is the only
+    // notation this table uses: of its rows none carries a bracket, and the two
+    // historical rows that crossed an array — `system/RollbackPlan:steps.…` and
+    // `system/ChangeRequest:implementation.steps.…` — spelled it this way (their
+    // schemas have since been retired, so the precedent cannot be re-read on this
+    // tree; flagged for the contract review). A NESTED site: the authorable-surface
+    // ratchet walks top-level def properties only, so no `[RETIRED]` row exists for
+    // it and gate (b) of `build-schemas.ts` neither demands nor refuses this entry.
+    // No D2 conversion: an SLO is not a stack collection member and not a stored
+    // metadata row — the reading `system-metrics-window-durations-unit-in-key`
+    // already recorded for this same def.
+    // See `system-metrics-jsdoc-durations-unit-in-key`.
+    'system/ServiceLevelObjective:errorBudget.burnRateWindows.window',
     // #15679 (stack card 4/6 of #14478) — ruling B. `ServiceLevelObjective.period.duration`
     // said "Duration in seconds" in prose and nothing else. Renamed to
     // `durationSeconds`; the value is unchanged. This key is why the two `window.size`
