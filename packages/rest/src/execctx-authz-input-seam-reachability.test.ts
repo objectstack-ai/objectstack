@@ -88,7 +88,7 @@
  *    outside vitest (it needs git history) and is recorded on the card.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
@@ -102,6 +102,14 @@ import {
 import type { RouteHandler } from '@objectstack/spec/contracts';
 import { registerPackageRoutes } from './package-routes.js';
 import { RestServer } from './rest-server.js';
+
+// [#17865] This file observes the REST fault log, so it declares the level it
+// asserts against instead of inheriting the suite's quiet one. 'info' is the
+// SHIPPED default — what a real caller gets. Paired by
+// scripts/check-rest-log-spy-declared.mjs: an observer that declares nothing
+// is a finding by name.
+beforeAll(() => { vi.stubEnv('OS_REST_LOG', 'info'); });
+afterAll(() => { vi.unstubAllEnvs(); });
 
 const PKGS = '/api/v1/packages';
 const HERE = dirname(fileURLToPath(import.meta.url));

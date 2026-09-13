@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, beforeAll, afterAll } from 'vitest';
 import { RouteManager } from './route-manager';
 import { RestServer, mapDataError } from './rest-server';
 import { createRestApiPlugin } from './rest-api-plugin';
@@ -8,6 +8,14 @@ import type { RestApiPluginConfig } from './rest-api-plugin';
 import { loadXlsxWorkbook } from './xlsx-test-loader.js';
 import { httpRequestForRoute } from './http-request-test-builder.js';
 import { httpResponseTestDouble } from './http-response-test-builder.js';
+
+// [#17865] This file observes the REST fault log, so it declares the level it
+// asserts against instead of inheriting the suite's quiet one. 'info' is the
+// SHIPPED default — what a real caller gets. Paired by
+// scripts/check-rest-log-spy-declared.mjs: an observer that declares nothing
+// is a finding by name.
+beforeAll(() => { vi.stubEnv('OS_REST_LOG', 'info'); });
+afterAll(() => { vi.unstubAllEnvs(); });
 
 // ---------------------------------------------------------------------------
 // Mocks & Helpers

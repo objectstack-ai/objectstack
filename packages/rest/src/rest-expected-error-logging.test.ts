@@ -33,8 +33,16 @@
 // bug is never silent — is the same one, and is now carried by the status band
 // rather than by the absence of a `code`.
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
 import { RestServer } from './rest-server';
+
+// [#17865] This file observes the REST fault log, so it declares the level it
+// asserts against instead of inheriting the suite's quiet one. 'info' is the
+// SHIPPED default — what a real caller gets. Paired by
+// scripts/check-rest-log-spy-declared.mjs: an observer that declares nothing
+// is a finding by name.
+beforeAll(() => { vi.stubEnv('OS_REST_LOG', 'info'); });
+afterAll(() => { vi.unstubAllEnvs(); });
 
 const META_ITEM = '/api/v1/meta/:type/:name';
 const DATA_LIST = '/api/v1/data/:object';

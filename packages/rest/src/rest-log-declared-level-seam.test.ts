@@ -28,7 +28,7 @@
 // root `env` block of that config for why the suite's own value is the shipped
 // default and not a quieter one.
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, beforeAll, afterAll } from 'vitest';
 import {
     logError,
     logWarn,
@@ -37,6 +37,14 @@ import {
     REST_LOG_DEFAULT_LEVEL,
     type RestLogLevel,
 } from './log.js';
+
+// [#17865] This file observes the REST fault log, so it declares the level it
+// asserts against instead of inheriting the suite's quiet one. 'info' is the
+// SHIPPED default — what a real caller gets. Paired by
+// scripts/check-rest-log-spy-declared.mjs: an observer that declares nothing
+// is a finding by name.
+beforeAll(() => { vi.stubEnv('OS_REST_LOG', 'info'); });
+afterAll(() => { vi.unstubAllEnvs(); });
 
 let errorSpy: ReturnType<typeof vi.spyOn>;
 let warnSpy: ReturnType<typeof vi.spyOn>;

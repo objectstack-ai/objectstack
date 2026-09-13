@@ -48,7 +48,7 @@
 // redden, so it can only be defended by being written down. Confirmed by
 // running it; see the PR.
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
 import { ErrorCode, standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
 import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 // `.js` extension deliberately: this package resolves `nodenext`, so an
@@ -56,6 +56,14 @@ import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 // suites omit it and are part of this package's frozen TEST_DEBT — a new file
 // must not add to a shrink-only ratchet.
 import { mapDataError, sendThrownError, sendDeclaredFault } from './error-response.js';
+
+// [#17865] This file observes the REST fault log, so it declares the level it
+// asserts against instead of inheriting the suite's quiet one. 'info' is the
+// SHIPPED default — what a real caller gets. Paired by
+// scripts/check-rest-log-spy-declared.mjs: an observer that declares nothing
+// is a finding by name.
+beforeAll(() => { vi.stubEnv('OS_REST_LOG', 'info'); });
+afterAll(() => { vi.unstubAllEnvs(); });
 
 // ---------------------------------------------------------------------------
 // Vehicles
