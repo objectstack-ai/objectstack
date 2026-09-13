@@ -43,26 +43,31 @@
  *
  * ## ⚠️ The compile leg lands SCOPED, and #16099 has since moved where the line sits
  *
- * The verdict is the table's; what is scoped is which PAIRS the gate judges.
- * #16737 landed that scope as the TEMPORAL source-field class and said why:
- * executing every row would refuse `min` / `max` over the STRING classes —
+ * The verdict is the table's; what used to be scoped is which PAIRS the gate
+ * judges. #16737 landed that scope as the TEMPORAL source-field class and said
+ * why: executing every row would refuse `min` / `max` over the STRING classes —
  * typed `'string'` by `measureResultType` (#15768) and pinned end to end in
- * `measure-result-type.test.ts` — which this platform answers on purpose, and
- * which are ruled to be AMENDED into the table rather than executed (#17513).
+ * `measure-result-type.test.ts` — which this platform answered on purpose, and
+ * which were said to be ruled to be AMENDED into the table rather than executed
+ * (#17513). **#16099 then re-cut that scope along the AGGREGATE instead**: the
+ * DERIVING aggregates over every field type, `min` / `max` not judged at all.
  *
- * **#16099 has since re-cut that scope along the AGGREGATE instead**, and the
- * two boundary cases at the foot of this file are where the move is visible:
- * the gate now judges the DERIVING aggregates (`sum` / `avg`) over EVERY field
- * type, and does not judge `min` / `max` at all. So `sum` × `text` — which this
- * file pinned as compiling, and predicted in writing would go red when the gate
- * widened — is now refused, while `min` × `text` still compiles and keeps its
- * row's ruling intact. The BOOLEAN rows were never a collision in either
- * scope: #16685 was ruled A and #16750 added `boolean` / `toggle` to the
- * `sum` / `avg` / `min` / `max` rows (maintainer ruling #11152 — booleans
- * aggregate as numbers on every backend), so the table ACCEPTS them and nothing
- * refuses them anywhere. The non-temporal deriving population is pinned in
- * `aggregate-nontemporal-measure-refusal.test.ts`; this file keeps the temporal
- * population and the boundary.
+ * ⚠️ **[#17560] There is no scope left, and the two boundary cases at the foot
+ * of this file are where the last move is visible.** The director ruling of
+ * decision batch #127 (2026-09-13) read the tree's "ruled C" citation back to
+ * its source and found nothing there: #17513 is closed as a duplicate with no
+ * ruling on it, and the one recorded ruling on this table — decision batch #59,
+ * 2026-09-06 — refuses the string rows. ⛔ The table is not amended. All 74
+ * unenforced `min` / `max` pairs are refused and enforced in one pass, so
+ * `min` × `text` — which this file pinned as compiling, deliberately and
+ * conditionally on a ruling landing first — is now refused beside `sum` × `text`.
+ *
+ * The BOOLEAN rows were never a collision in any scope: #16685 was ruled A and
+ * #16750 added `boolean` / `toggle` to the `sum` / `avg` / `min` / `max` rows
+ * (maintainer ruling #11152 — booleans aggregate as numbers on every backend),
+ * so the table ACCEPTS them and nothing refuses them anywhere. The non-temporal
+ * population is pinned in `aggregate-nontemporal-measure-refusal.test.ts`; this
+ * file keeps the temporal population and the boundary.
  *
  * ## Dissolution verification — direction predicted BEFORE running
  *
@@ -487,26 +492,52 @@ describe('#16737 — the gate stands down rather than guessing', () => {
 // The scope boundary, pinned — so it cannot widen (or narrow) unnoticed
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('#16737 — the compile leg is SCOPED, on purpose; #16099 moved where the line sits', () => {
-  it('a `min` over a TEXT field still compiles here — WHATEVER the table says about that pair', async () => {
-    // ⚠️ Not an endorsement of the pair, and ⛔ deliberately NOT a pin on the
-    // table's verdict for it. `min` × `text` is the row ruled C — the table is
-    // to be AMENDED to accept it, tracked as **#17513** — so asserting today's
-    // `false` here would make this file go red when that ruling lands, and
-    // would make a test of this card the thing standing in the way of a
-    // decision this card does not own. What this case owns is one fact, true on
-    // either side of that amendment: a `min` / `max` measure is not judged by
-    // this gate, so the measure compiles and reaches the driver. #16099 widened
-    // the gate to every field type, but only for the DERIVING aggregates, and
-    // `min` / `max` stayed outside it precisely so this row keeps its ruling.
+describe('#16737 — the compile leg WAS scoped; #16099 and then #17560 moved where the line sits', () => {
+  it('⭐ a `min` over a TEXT field is now REFUSED — the pin FLIPPED, naming batch #59 and #17560', async () => {
+    // ⚠️ This case asserted the OPPOSITE until #17560. It read "a `min` over a
+    // TEXT field still compiles here — WHATEVER the table says about that
+    // pair", and it was deliberate and conditional: "`min` × `text` is the row
+    // ruled C — the table is to be AMENDED to accept it, tracked as #17513 — so
+    // asserting today's `false` here would make this file go red when that
+    // ruling lands, and would make a test of this card the thing standing in
+    // the way of a decision this card does not own."
+    //
+    // ⛔ The condition is discharged, in the other direction. Decision batch
+    // #127 (2026-09-13, #17560) read that citation back to its source: #17513
+    // carries no ruling, and the one recorded ruling on this table — decision
+    // batch #59 (2026-09-06, 「`min`/`max` numeric plus `date`/`datetime`;
+    // everything else refused」) — refuses the row. The table is NOT amended and
+    // the gate now judges every aggregate, so the pin is FLIPPED rather than
+    // deleted: the same pair, through the same door, asserting the answer the
+    // platform now gives.
+    expect(isAggregateCompatibleWithFieldType('min', 'text')).toBe(false);
     const { svc, sqls } = makeService([{ status: 'open', first_note: 'Archive the backlog' }]);
-    const result: any = await svc.queryDataset(
-      dataset([{ name: 'first_note', aggregate: 'min', field: 'note' }]),
-      { dimensions: ['status'], measures: ['first_note'] },
+    const err = await refusalOf(() =>
+      svc.queryDataset(
+        dataset([{ name: 'first_note', aggregate: 'min', field: 'note' }]),
+        { dimensions: ['status'], measures: ['first_note'] },
+      ),
     );
-    expect(result.rows[0].first_note).toBe('Archive the backlog');
-    // Not vacuous: the gate refuses BEFORE any SQL, so a widened gate would
-    // leave `sqls` empty and this assertion is what would catch it.
+    expect(err.code).toBe('DATASET_INVALID');
+    expect(err.status).toBe(400);
+    expect(err.message).toContain('first_note');
+    expect(err.message).toContain('text');
+    // Not vacuous: the refusal happens BEFORE any statement is emitted, which
+    // is what makes it a rejected DECLARATION rather than an empty answer.
+    expect(sqls.length).toBe(0);
+  });
+
+  it('⭐ the negative control beside it: `min` over a TEMPORAL field still compiles', async () => {
+    // The row the same ruling left accepted — `min`/`max` over the temporal
+    // class return a real instant of the field's own type — so the flip above
+    // is about the pairs the table refuses and not about `min` itself.
+    expect(isAggregateCompatibleWithFieldType('min', 'datetime')).toBe(true);
+    const { svc, sqls } = makeService([{ status: 'open', first_submitted: '2026-05-19T00:00:00.000Z' }]);
+    const result: any = await svc.queryDataset(
+      dataset([{ name: 'first_submitted', aggregate: 'min', field: 'submitted_at' }]),
+      { dimensions: ['status'], measures: ['first_submitted'] },
+    );
+    expect(result.rows[0].first_submitted).toBe('2026-05-19T00:00:00.000Z');
     expect(sqls.length).toBe(1);
   });
 
