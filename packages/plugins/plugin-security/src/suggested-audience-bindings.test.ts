@@ -494,3 +494,124 @@ describe('[#12981] a refused suggestion write is distinguishable from a settled 
     expect(warns).toEqual([]);
   });
 });
+
+// ────────────────────────────────────────────────────────────────────────
+// #18031 — `permissions` carries two incompatible readings in ONE registry
+// slot: the ADR-0025 §3.2 capability GRANT at the authoring stage, and the
+// ADR-0090 permission-SET collection at the assembled stage. Source 2 reads
+// the assembled one. Handed the authoring one it used to return nothing and
+// say nothing — the structured arm fell out of `Array.isArray`, and every
+// member of the legacy `string[]` arm fell out of `consider`'s first line.
+// AGENTS.md "Route & surface ownership" §3: absence must be loud.
+// ────────────────────────────────────────────────────────────────────────
+describe('manifest `permissions` in the ADR-0025 reading is reported, never dropped silently (#18031)', () => {
+  const STRUCTURED_PACKAGE = {
+    enabled: true,
+    manifest: {
+      id: 'com.example.plugin',
+      // ADR-0025 §3.2 — an OBJECT, so `Array.isArray` is false.
+      permissions: { services: ['object', 'http'], hooks: ['record.beforeInsert'], network: [], fs: [] },
+    },
+  };
+  const LEGACY_PACKAGE = {
+    enabled: true,
+    manifest: {
+      id: 'com.example.legacy',
+      // The legacy flat arm — bare strings, none of which has a `name`.
+      permissions: ['system.user.read', 'system.data.write'],
+    },
+  };
+
+  function capture() {
+    const warns: Array<{ msg: string; meta?: any }> = [];
+    return { warns, logger: { warn: (msg: string, meta?: any) => { warns.push({ msg, meta }); } } };
+  }
+
+  it('names the STRUCTURED arm, what it means, what is lost and where the sets belong', async () => {
+    const ql = makeQl([STRUCTURED_PACKAGE]);
+    const { warns, logger } = capture();
+
+    const out = await syncAudienceBindingSuggestions(ql, undefined, logger);
+
+    // The declaration really did produce nothing — the silence, not the
+    // outcome, is what this card repairs.
+    expect(out.created).toBe(0);
+    expect(ql.tables.sys_audience_binding_suggestion).toHaveLength(0);
+
+    expect(warns).toHaveLength(1);
+    expect(warns[0].msg).toContain('ADR-0025');
+    expect(warns[0].msg).toContain('CONSEQUENCE');
+    expect(warns[0].msg).toContain('REMEDY');
+    expect(warns[0].msg).toContain('defineStack({ permissions: [ … ] })');
+    expect(warns[0].meta).toMatchObject({
+      packages: [{ packageId: 'com.example.plugin', arm: 'adr-0025-structured', entries: 0 }],
+    });
+  });
+
+  it('names the LEGACY string arm and counts the members it dropped', async () => {
+    const ql = makeQl([LEGACY_PACKAGE]);
+    const { warns, logger } = capture();
+
+    const out = await syncAudienceBindingSuggestions(ql, undefined, logger);
+
+    expect(out.created).toBe(0);
+    expect(warns).toHaveLength(1);
+    expect(warns[0].meta).toMatchObject({
+      packages: [{ packageId: 'com.example.legacy', arm: 'adr-0025-legacy-strings', entries: 2 }],
+    });
+  });
+
+  it('reports a PARTIALLY readable array — the readable set still lands, the dropped strings are still named', async () => {
+    const ql = makeQl([{
+      enabled: true,
+      manifest: {
+        id: 'com.example.mixed',
+        permissions: [
+          'system.user.read',
+          { name: 'mixed_readonly', isDefault: true, objects: { crm_account: { allowRead: true } } },
+        ],
+      },
+    }]);
+    const { warns, logger } = capture();
+
+    const out = await syncAudienceBindingSuggestions(ql, undefined, logger);
+
+    expect(out.created).toBe(1);
+    expect(warns).toHaveLength(1);
+    expect(warns[0].meta).toMatchObject({
+      packages: [{ packageId: 'com.example.mixed', arm: 'adr-0025-legacy-strings', entries: 1 }],
+    });
+  });
+
+  it('says it ONCE per engine per package — a shape that cannot change does not repeat on every list call', async () => {
+    const ql = makeQl([STRUCTURED_PACKAGE]);
+    const { warns, logger } = capture();
+
+    await syncAudienceBindingSuggestions(ql, undefined, logger);
+    await syncAudienceBindingSuggestions(ql, undefined, logger);
+    await syncAudienceBindingSuggestions(ql, undefined, logger);
+
+    expect(warns).toHaveLength(1);
+
+    // A DIFFERENT engine is a different ledger — the dedupe is per kernel, not
+    // per process, so a second tenant kernel is still told.
+    const other = makeQl([STRUCTURED_PACKAGE]);
+    await syncAudienceBindingSuggestions(other, undefined, logger);
+    expect(warns).toHaveLength(2);
+  });
+
+  it('adds no noise on the readable shape — a package declaring permission SETS is never reported', async () => {
+    const ql = makeQl([CRM_PACKAGE]);
+    const { warns, logger } = capture();
+
+    const out = await syncAudienceBindingSuggestions(ql, undefined, logger);
+
+    expect(out.created).toBe(1);
+    expect(warns).toEqual([]);
+  });
+
+  it('is silent with no logger — passing none is the caller’s choice, not a second channel', async () => {
+    const ql = makeQl([STRUCTURED_PACKAGE]);
+    await expect(syncAudienceBindingSuggestions(ql)).resolves.toMatchObject({ created: 0 });
+  });
+});
