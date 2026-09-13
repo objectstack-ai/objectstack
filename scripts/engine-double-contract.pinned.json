@@ -2892,6 +2892,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/permission-set-name-collision.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/permission-set-overlay-discard.test.ts",
       "verb": "delete",
       "pinned": 1

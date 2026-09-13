@@ -3227,15 +3227,18 @@ export const ROOT_WALK_RESIDUE_LEDGER = [
       + '(the pnpm script would drag the scan in with it). The repo-root default parameter belongs to the scan half '
       + 'CI does not schedule, so a whole-tree row for this family would advertise work no workflow performs.',
   ],
-  [
-    'check:pm-half-states',
-    'lint.yml runs the SELF-TEST HALF and never the sweep — the npm script is `check-half-states.mjs '
-      + '--self-test`. The `git ls-files` oracle that vouches for the root walk is read ONCE PER LIVE SWEEP, after '
-      + 'the board gathering, so it belongs to the networked half-state patrol that no lint job schedules; a '
-      + 'whole-tree row here would advertise work this family never performs. It became a member under #15753: it '
-      + 'used to be placed BY PATH on every changeset card, through the gate\'s own noise-floor constant read as a '
-      + 'watch surface — a placement that said the opposite of what the constant declares.',
-  ],
+  // ⚖️ `check:pm-half-states` LEFT this population under #16904's D2 and its row
+  // is gone with it — a listed family that stops being a member reds here, and
+  // a stale exclusion is an exclusion nobody measures. It is now placeable BY
+  // PATH, and truthfully: `check-half-states.mjs`'s self-test reads two sibling
+  // sources as program text — `scripts/pm/sweep-stale-finding.mjs` and
+  // `scripts/pm/check-prior-rulings.mjs` — to pin that the sweep still ALIASES
+  // the one stale-`finding` screen rather than re-growing a copy, and that the
+  // prior-ruling line's writer still prints the key the patrol greps. So a card
+  // touching either sibling really does owe this gate, which is the opposite of
+  // the #15753 placement this row was written about: that one came from a
+  // noise-floor constant and said the opposite of what the constant declares,
+  // while these two literals are exactly what the self-test reads.
   [
     'scripts/symbol-anchors.mjs --self-test',
     'a shared grammar-and-extractor LIBRARY, invoked by CI only as its own self-test; its `git ls-files` runs over a '

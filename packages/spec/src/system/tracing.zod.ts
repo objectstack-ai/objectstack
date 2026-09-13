@@ -536,9 +536,25 @@ export const OpenTelemetryCompatibilitySchema = lazySchema(() => z.object({
     headers: z.record(z.string(), z.string()).optional().describe('HTTP headers'),
 
     /**
-     * Timeout in milliseconds
+     * Per-export request deadline, in milliseconds.
+     *
+     * Renamed from `timeout` (#17785, ruling A on #15939 executing #14478):
+     * the unit lived in this JSDoc only and the key carried no `.describe()`
+     * at all, so the reference page published a bare 10000. Tombstoned rather
+     * than deleted because this nested object is not `.strict()`.
      */
-    timeout: z.number().int().positive().optional().default(10000),
+    timeoutMs: z.number().int().positive().optional().default(10000)
+      .describe('Exporter request timeout in milliseconds'),
+
+    /** Tombstone for the rename above (#17785, ruling A on #15939). */
+    timeout: retiredKey(
+      '`OpenTelemetryCompatibility.exporter.timeout` was renamed to `timeoutMs` in '
+      + '@objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, '
+      + 'not only in the describe prose. Its unit (milliseconds) lived in a source JSDoc '
+      + 'only and the key carried no describe at all, so the reference-page reader got a '
+      + 'bare 10000 and could not tell it from 10000 seconds. Rename the key to `timeoutMs`; '
+      + 'the value (milliseconds) and the 10000 default are unchanged.',
+    ),
 
     /**
      * Compression
@@ -560,14 +576,44 @@ export const OpenTelemetryCompatibilitySchema = lazySchema(() => z.object({
       maxQueueSize: z.number().int().positive().optional().default(2048),
 
       /**
-       * Export timeout in milliseconds
+       * Batch-processor export deadline, in milliseconds.
+       *
+       * Renamed from `exportTimeout` (#17785, ruling A on #15939 executing
+       * #14478): the unit lived in this JSDoc only and the key carried no
+       * `.describe()` at all. Tombstoned rather than deleted because this
+       * nested object is not `.strict()`.
        */
-      exportTimeout: z.number().int().positive().optional().default(30000),
+      exportTimeoutMs: z.number().int().positive().optional().default(30000)
+        .describe('Batch export timeout in milliseconds'),
 
       /**
-       * Scheduled delay in milliseconds
+       * Delay between two scheduled batch exports, in milliseconds.
+       *
+       * Renamed from `scheduledDelay` (#17785, ruling A on #15939 executing
+       * #14478): the unit lived in this JSDoc only and the key carried no
+       * `.describe()` at all. Tombstoned rather than deleted because this
+       * nested object is not `.strict()`.
        */
-      scheduledDelay: z.number().int().positive().optional().default(5000),
+      scheduledDelayMs: z.number().int().positive().optional().default(5000)
+        .describe('Delay between scheduled batch exports, in milliseconds'),
+
+      /** Tombstones for the two renames above (#17785, ruling A on #15939). */
+      exportTimeout: retiredKey(
+        '`OpenTelemetryCompatibility.exporter.batch.exportTimeout` was renamed to '
+        + '`exportTimeoutMs` in @objectstack/spec 17 — the unit of a duration-shaped number '
+        + 'lives in the key name, not only in the describe prose. Its unit (milliseconds) '
+        + 'lived in a source JSDoc only and the key carried no describe at all, so the '
+        + 'reference-page reader got a bare 30000. Rename the key to `exportTimeoutMs`; the '
+        + 'value (milliseconds) and the 30000 default are unchanged.',
+      ),
+      scheduledDelay: retiredKey(
+        '`OpenTelemetryCompatibility.exporter.batch.scheduledDelay` was renamed to '
+        + '`scheduledDelayMs` in @objectstack/spec 17 — the unit of a duration-shaped number '
+        + 'lives in the key name, not only in the describe prose. Its unit (milliseconds) '
+        + 'lived in a source JSDoc only and the key carried no describe at all, so the '
+        + 'reference-page reader got a bare 5000. Rename the key to `scheduledDelayMs`; the '
+        + 'value (milliseconds) and the 5000 default are unchanged.',
+      ),
     }).optional(),
   }).describe('Exporter configuration'),
 
@@ -718,9 +764,25 @@ export const TracingConfigSchema = lazySchema(() => z.object({
     asyncExport: z.boolean().optional().default(true),
 
     /**
-     * Background export interval in milliseconds
+     * Background span-export interval, in milliseconds.
+     *
+     * Renamed from `exportInterval` (#17785, ruling A on #15939 executing
+     * #14478): the unit lived in this JSDoc only and the key carried no
+     * `.describe()` at all. Tombstoned rather than deleted because this
+     * nested object is not `.strict()`.
      */
-    exportInterval: z.number().int().positive().optional().default(5000),
+    exportIntervalMs: z.number().int().positive().optional().default(5000)
+      .describe('Background span-export interval in milliseconds'),
+
+    /** Tombstone for the rename above (#17785, ruling A on #15939). */
+    exportInterval: retiredKey(
+      '`TracingConfig.performance.exportInterval` was renamed to `exportIntervalMs` in '
+      + '@objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, '
+      + 'not only in the describe prose. Its unit (milliseconds) lived in a source JSDoc '
+      + 'only and the key carried no describe at all, so the reference-page reader got a '
+      + 'bare 5000. Rename the key to `exportIntervalMs`; the value (milliseconds) and the '
+      + '5000 default are unchanged.',
+    ),
   }).optional(),
 }).describe('Tracing configuration'));
 

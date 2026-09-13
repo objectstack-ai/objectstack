@@ -84,6 +84,70 @@ function newDbFile(): string {
   return join(dir, 'identity.sqlite');
 }
 
+/**
+ * [#17897] The three authorization objects a REAL sign-in makes core's
+ * `resolveUserAuthzGrants` read, which the auth manifest does not declare —
+ * they belong to `@objectstack/plugin-security`. Spelled locally with only the
+ * columns the resolver reads (the `find-envelope-limb-removal` /
+ * `signup-existing-address-refusal` precedent), so a fixture adds no dependency
+ * edge from plugin-auth to plugin-security.
+ *
+ * Why they belong in a file about a column on `sys_account`: the cases below
+ * sign in through the real auth route, and `AuthManager`'s session-payload
+ * callback resolves the principal's grants on the way out. Against a fixture
+ * that registered only `authIdentityObjects`, all three of those reads were
+ * REFUSED by the driver — measured at `225197cdb`: two sign-in cases x
+ * `sys_user_position` / `sys_user_permission_set` / `sys_position` = six
+ * `DATABASE_ERROR` lines per run. `tryFind` classifies a missing table as "not
+ * provisioned" and answers `[]`, so nothing went red: the resolver leg of a
+ * sign-in was never actually exercised here, and the suite reported a green it
+ * had not earned. Registering the tables is what makes those reads SUCCEED —
+ * ⛔ the fix is not to quieten the line.
+ *
+ * ⛔ `sys_position_permission_set` and `sys_permission_set` are deliberately
+ * NOT here. The resolver reaches them only once a `sys_position` row resolves
+ * and a permission-set id is collected; these cases seed neither, so both reads
+ * are skipped and registering the objects would add fixture surface no read in
+ * this file touches.
+ *
+ * The ADR-0091 validity columns (`valid_from` / `valid_until`) are absent for
+ * the same reason `sys_member` lacks them today: `isGrantActive` reads an
+ * absent bound as unbounded, so declaring them would change no verdict here.
+ */
+const sysUserPosition = {
+  name: 'sys_user_position',
+  label: 'User Position',
+  fields: {
+    id: { name: 'id', type: 'text' as const, primaryKey: true },
+    user_id: { name: 'user_id', type: 'text' as const },
+    position: { name: 'position', type: 'text' as const },
+    organization_id: { name: 'organization_id', type: 'text' as const },
+  },
+};
+
+const sysUserPermissionSet = {
+  name: 'sys_user_permission_set',
+  label: 'User Permission Set',
+  fields: {
+    id: { name: 'id', type: 'text' as const, primaryKey: true },
+    user_id: { name: 'user_id', type: 'text' as const },
+    permission_set_id: { name: 'permission_set_id', type: 'text' as const },
+    organization_id: { name: 'organization_id', type: 'text' as const },
+  },
+};
+
+const sysPosition = {
+  name: 'sys_position',
+  label: 'Position',
+  fields: {
+    id: { name: 'id', type: 'text' as const, primaryKey: true },
+    name: { name: 'name', type: 'text' as const },
+    label: { name: 'label', type: 'text' as const },
+    active: { name: 'active', type: 'boolean' as const },
+    organization_id: { name: 'organization_id', type: 'text' as const },
+  },
+};
+
 async function bootEngine(filename: string, objects: unknown[]): Promise<ObjectQL> {
   const engine = new ObjectQL();
   engines.push(engine);
@@ -95,6 +159,12 @@ async function bootEngine(filename: string, objects: unknown[]): Promise<ObjectQ
   for (const object of objects) {
     engine.registry.registerObject(object as never, '@objectstack/plugin-auth');
   }
+  // The authz resolver's own reads, on BOTH engines: the pre-upgrade one signs
+  // the account up, the upgraded one signs it back in, and either may resolve
+  // grants.
+  engine.registry.registerObject(sysUserPosition as never, '@objectstack/plugin-security');
+  engine.registry.registerObject(sysUserPermissionSet as never, '@objectstack/plugin-security');
+  engine.registry.registerObject(sysPosition as never, '@objectstack/plugin-security');
   await engine.syncSchemas();
   return engine;
 }

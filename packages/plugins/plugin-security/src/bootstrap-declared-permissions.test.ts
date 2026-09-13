@@ -105,7 +105,16 @@ describe('bootstrapDeclaredPermissions (ADR-0086 D5)', () => {
     });
     expect(r.skippedForeign).toBe(1);
     expect(ql.rows[0].package_id).toBe('com.example.crm');
-    expect(warns.some((w) => String(w.m).includes('owned by another package'))).toBe(true);
+    // [#17516] Re-anchored from the old prose ('owned by another package') to
+    // the stable token the report now stamps. The substance this pin asserts is
+    // unchanged — the refusal is reported — but the token is what an operator
+    // greps and what the sibling doors key on, so prose drift can no longer
+    // quietly unpin it. The read-back half is asserted beside it: a counter
+    // with no record is what made this drop invisible.
+    expect(warns.some((w) => String(w.m).includes('permission_set_name_collision'))).toBe(true);
+    expect(r.collisions).toEqual([
+      expect.objectContaining({ name: 'crm_sales_rep', declaredBy: 'com.example.other', ownedBy: 'com.example.crm' }),
+    ]);
   });
 
   it('skips a declared set with no resolvable owning package (warned, not seeded)', async () => {

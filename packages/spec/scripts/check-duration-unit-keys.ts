@@ -67,6 +67,44 @@
  * talking about time. `--list` still prints the unit-nowhere keys so the
  * population stays visible; closing it is a describe-by-describe decision.
  *
+ * ⛔ "No unit anywhere" now means no unit in EITHER prose channel — see the
+ * JSDoc section below. A key whose describe is silent but whose JSDoc names a
+ * unit is not this shape at all: its unit IS written down, just not where the
+ * reader can see it, and that is the divergence class rather than this one.
+ *
+ * ## The SECOND prose channel: a JSDoc that names a unit the describe does not
+ *
+ * A key's unit can be written in two places, and only one of them is governed.
+ * `.describe()` / `.meta({ description })` is what `content/docs/references/**`
+ * renders and what rides into the published dist; the JSDoc block above the key
+ * is developer commentary that stops at the source file. Ruled 2026-09-07
+ * (decision batch #65, on #15939): JSDoc is NOT "prose" in the sense of this
+ * rule, so this gate does not read it as a unit channel — a key whose unit
+ * lives only in a JSDoc has NOT satisfied the rule, and option 1 of that card
+ * ("read the JSDoc too") was not adopted.
+ *
+ * What the ruling did adopt is the DIVERGENCE: when the JSDoc names a unit and
+ * the describe names none (or there is no describe at all), the two channels
+ * disagree about whether this number's unit is written down anywhere a reader
+ * can reach — and the channel that is silent is the published one. That is
+ * refused as `unit-in-jsdoc-not-in-describe`, and the remedy is to move the
+ * unit into the describe, where the rule above then applies and puts it in the
+ * key NAME.
+ *
+ * ⛔ SO THE JSDoc IS READ IN EXACTLY ONE DIRECTION: to refuse, never to
+ * satisfy. Nothing about the #14519 shape moves — a duration-shaped key with
+ * no unit in EITHER channel is still listed and still not judged. The
+ * divergence branch tests for a unit PRESENT in the JSDoc; it never tests for
+ * one absent from the describe, which is what would have made it option 1.
+ *
+ * Why the divergence is worth a refusal and the blindness was not: the card
+ * that filed it measured the cost. #15678 recorded in its changeset that
+ * `RuntimeConfig.resourceLimits.timeout` "names no unit anywhere in its prose"
+ * — and the JSDoc two lines above it says milliseconds. The blindness did not
+ * merely miss the key; it produced a confident, wrong, PINNED explanation of
+ * why it was missed. A gate that cannot see a channel writes falsehoods about
+ * it.
+ *
  * ## The two exemptions, DECLARED ON THE SCHEMA (#15676, ruling B)
  *
  * The rule governs every authored and every runtime-emitted duration MINUS two
@@ -304,6 +342,10 @@ export interface DurationKey {
   describe: string | undefined;
   /** units the describe prose names (canonical) */
   proseUnits: string[];
+  /** the JSDoc block written immediately above the key, when there is one */
+  jsdoc: string | undefined;
+  /** units that JSDoc block names (canonical) — read ONLY to refuse a divergence, never to satisfy the rule */
+  jsdocUnits: string[];
   /** units the key name carries (canonical) */
   keyUnits: string[];
   /** true when a sibling `unit` key sits on the same object literal */
@@ -320,7 +362,8 @@ export interface Finding {
   rule:
     | 'unit-in-prose-not-in-name'
     | 'name-unit-contradicts-prose'
-    | 'instant-unit-contradicts-schema';
+    | 'instant-unit-contradicts-schema'
+    | 'unit-in-jsdoc-not-in-describe';
   message: string;
 }
 
@@ -467,6 +510,31 @@ function concatLiteral(e: ts.Expression): string | undefined {
   return undefined;
 }
 
+/**
+ * The JSDoc block written immediately above a property — the SECOND prose
+ * channel, read only so a divergence can be refused (#15939, ruling 2026-09-07).
+ *
+ * Read through `ts.getJSDocCommentsAndTags`, not through a leading-comment scan,
+ * because the two differ exactly where it matters. A `//` line comment above a
+ * key is NOT a JSDoc block and must not be read as one, and — the hazard that
+ * would make this reader silently over-fire — an enclosing declaration's JSDoc
+ * must not be inherited by the first property of the object literal it
+ * introduces. Both are measured: a schema whose own docblock says
+ * "timeouts in milliseconds" contributes NOTHING to the bare `timeout` key
+ * declared first inside it, and the self-test pins that direction.
+ *
+ * The whole block's SOURCE TEXT is taken (leading asterisks, tags and all)
+ * rather than just the description: a unit named in an `@default 60 seconds`
+ * tag is the same divergence as one named in the summary line, and
+ * {@link unitsInProse}'s word-boundary matching is unbothered by the
+ * comment punctuation carried along with it.
+ */
+function jsdocTextOf(node: ts.Node, sf: ts.SourceFile): string | undefined {
+  const docs = ts.getJSDocCommentsAndTags(node).filter((d): d is ts.JSDoc => ts.isJSDoc(d));
+  if (docs.length === 0) return undefined;
+  return docs.map((d) => d.getText(sf)).join('\n');
+}
+
 /** Every numeric-chain property in one source text. */
 export function collectDurationKeys(fileName: string, code: string): DurationKey[] {
   const sf = ts.createSourceFile(fileName, code, ts.ScriptTarget.ES2022, /* setParentNodes */ true, ts.ScriptKind.TS);
@@ -486,12 +554,15 @@ export function collectDurationKeys(fileName: string, code: string): DurationKey
           // what every site in this tree writes, and where a key carries both,
           // the describe is the one an author reads at the declaration.
           const describe = describes.length ? describes[describes.length - 1] : metaDescription;
+          const jsdoc = jsdocTextOf(node, sf);
           out.push({
             file: fileName,
             line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
             key: name,
             describe,
             proseUnits: unitsInProse(describe),
+            jsdoc,
+            jsdocUnits: unitsInProse(jsdoc),
             keyUnits: unitsInKey(name),
             valueUnitPair,
             durationShaped: isDurationShaped(name),
@@ -560,6 +631,32 @@ export function judge(site: DurationKey): Finding | undefined {
       };
     }
     return undefined;
+  }
+
+  // The DIVERGENCE class (#15939, ruling 2026-09-07, decision batch #65).
+  //
+  // Reached only when the describe named no unit at all — the branch above
+  // returns for every key whose describe did. A duration-shaped key whose
+  // JSDoc names a unit its describe does not is refused: the two prose
+  // channels disagree about whether this number's unit is written down, and
+  // the one that is published is the one that is silent.
+  //
+  // ⛔ The JSDoc is NEVER read as a way to SATISFY the rule — that was option
+  // 1 and it was not adopted. It is read in one direction only: to refuse.
+  // A key with no unit in EITHER channel stays "listed, not judged" (the
+  // #14519 shape), which is why this branch tests `jsdocUnits`, never the
+  // absence of `proseUnits` alone.
+  if (site.durationShaped && site.jsdocUnits.length > 0) {
+    return {
+      site,
+      rule: 'unit-in-jsdoc-not-in-describe',
+      message: `${where} — the JSDoc above the key names ${site.jsdocUnits.join('/')} but the describe names no unit`
+        + `${site.describe === undefined ? ' (there is no describe at all)' : ` (${JSON.stringify(site.describe)})`}. `
+        + 'The JSDoc is developer commentary; the describe is what `content/docs/references/**` publishes, so the '
+        + 'reader who most needs the unit is the one who cannot see it. Move the unit into the describe — the '
+        + 'existing rule then applies and the unit goes into the key NAME too, with an ADR-0087 conversion if the '
+        + 'key is published.',
+    };
   }
   return undefined;
 }
@@ -773,6 +870,88 @@ function selfTest(): number {
       return sites.length === 1 && sites[0].externalVocabulary === 'RFC 9111' && sites[0].proseUnits.join() === 'seconds';
     })());
 
+  // ── the DIVERGENCE class (#15939, ruling 2026-09-07, decision batch #65) ──
+  //
+  // The three POSITIVE CONTROLS are the three sites the card measured, reduced
+  // to their shape. They are the reason this class exists, so they are pinned
+  // here rather than described: if the reader ever stops seeing them, these
+  // cases go red instead of the population quietly shrinking by three.
+  //
+  // ⛔ The direction is load-bearing. The JSDoc is read ONLY to refuse, never
+  // to satisfy — option 1 (read JSDoc as a unit channel) was NOT adopted, and
+  // the case below that keeps a JSDoc-plus-describe key failing
+  // `unit-in-prose-not-in-name` is what stops this reader drifting into it.
+
+  expect('REFUSED (divergence): JSDoc names ms, describe names none → unit-in-jsdoc-not-in-describe',
+    rulesOf(`const S = z.object({\n  /**\n   * Execution timeout in milliseconds\n   */\n  timeout: z.number().int().min(0).optional().describe('Maximum execution time') });`)
+      .join() === 'unit-in-jsdoc-not-in-describe');
+  expect('REFUSED (divergence): JSDoc names seconds, describe names none → unit-in-jsdoc-not-in-describe',
+    rulesOf(`const S = z.object({\n  /**\n   * Window size in seconds\n   */\n  window: z.number().int().positive().describe('Window size') });`)
+      .join() === 'unit-in-jsdoc-not-in-describe');
+  expect('REFUSED (divergence): JSDoc names seconds and there is NO describe at all',
+    rulesOf(`const S = z.object({\n  /**\n   * Export interval in seconds\n   */\n  interval: z.number().int().positive().optional().default(60) });`)
+      .join() === 'unit-in-jsdoc-not-in-describe');
+
+  expect('compliant (negative control): the unit is in BOTH channels and in the name',
+    rulesOf(`const S = z.object({\n  /**\n   * Cache TTL in milliseconds\n   */\n  ttlMs: z.number().int().default(60_000).describe('Cache TTL in milliseconds') });`)
+      .join() === '');
+  expect('compliant: JSDoc names a unit the describe ALSO names — no divergence, nothing to refuse',
+    rulesOf(`const S = z.object({\n  /**\n   * Duration in milliseconds\n   */\n  durationMs: z.number().describe('Elapsed time in milliseconds') });`)
+      .join() === '');
+
+  // ⛔ The JSDoc never SATISFIES the rule. A key whose describe names the unit
+  // and whose name does not is still a rename, JSDoc or no JSDoc — otherwise
+  // this reader would have quietly implemented option 1 by the back door.
+  expect('the JSDoc does NOT satisfy the rule: describe names the unit, name does not → still unit-in-prose-not-in-name',
+    rulesOf(`const S = z.object({\n  /**\n   * Cache TTL in seconds\n   */\n  ttl: z.number().describe('Cache TTL in seconds') });`)
+      .join() === 'unit-in-prose-not-in-name');
+
+  // Unchanged by this class, and pinned again from the JSDoc side: no unit in
+  // EITHER channel stays a census row (the #14519 shape). The divergence
+  // branch tests for a unit IN the JSDoc, never for its absence in the describe.
+  expect('listed, not judged: a JSDoc that names no unit leaves the #14519 shape exactly where it was',
+    (() => {
+      const sites = collectDurationKeys('fixture.ts', `const S = z.object({\n  /**\n   * Session timeout\n   */\n  sessionTimeout: z.number().int().positive().default(3600).describe('Session timeout') });`);
+      return sites.length === 1 && sites[0].durationShaped && sites[0].jsdocUnits.length === 0 && judge(sites[0]) === undefined;
+    })());
+
+  // The two ways this reader could OVER-fire, both measured against the AST
+  // rather than assumed. Either one would manufacture offenders out of prose
+  // that is not attached to the key at all.
+  expect('a `//` line comment above a key is NOT a JSDoc block and is not read as one',
+    rulesOf(`const S = z.object({\n  // Execution timeout in milliseconds\n  timeout: z.number().describe('Maximum execution time') });`)
+      .join() === '');
+  expect('an ENCLOSING declaration\'s JSDoc is not inherited by the first property inside it',
+    rulesOf(`/**\n * The whole schema, timeouts in milliseconds\n */\nexport const S = z.object({ timeout: z.number().describe('Maximum execution time') });`)
+      .join() === '');
+
+  // The idiom suppressions that keep `unitsInProse` honest apply to this
+  // channel too — it is the SAME reader, deliberately, so a calendar position
+  // or a rate cannot become an offender by being written in a JSDoc instead.
+  expect('skipped in the JSDoc channel too: a calendar position is not a duration',
+    rulesOf(`const S = z.object({\n  /**\n   * Hour of the day (0-23)\n   */\n  windowHour: z.number().describe('Start hour') });`)
+      .join() === '');
+  expect('skipped in the JSDoc channel too: a rate is not a duration',
+    rulesOf(`const S = z.object({\n  /**\n   * Heartbeats per second\n   */\n  heartbeat: z.number().describe('Heartbeat rate') });`)
+      .join() === '');
+
+  expect('the divergence class is DURATION-SHAPED only: a non-duration name with a unit in its JSDoc is not refused',
+    rulesOf(`const S = z.object({\n  /**\n   * Sampled over 30 seconds\n   */\n  sampleCount: z.number().describe('Samples taken') });`)
+      .join() === '');
+  expect('exempt (i) survives the new class: an `EpochMs` instant with an ms JSDoc is not newly refused',
+    rulesOf(`const S = z.object({\n  /**\n   * Creation timestamp in milliseconds\n   */\n  createdAt: EpochMs });`)
+      .join() === '');
+  expect('REFUSED (ii) extends here: an `externalVocabulary` marker waives the RENAME, never the divergence',
+    rulesOf(`const S = z.object({\n  /**\n   * Maximum cache age in seconds\n   */\n  maxAge: z.number().meta({ externalVocabulary: 'HTTP Cache-Control max-age (RFC 9111)' }) });`)
+      .join() === 'unit-in-jsdoc-not-in-describe');
+
+  expect('a divergent site carries its JSDoc units in the census, not just in the verdict',
+    (() => {
+      const sites = collectDurationKeys('fixture.ts', `const S = z.object({\n  /**\n   * Window size in seconds\n   */\n  window: z.number().describe('Window size') });`);
+      return sites.length === 1 && sites[0].jsdocUnits.join() === 'seconds' && sites[0].proseUnits.length === 0
+        && sites[0].jsdoc !== undefined && sites[0].jsdoc.includes('Window size in seconds');
+    })());
+
   expect('a describe declared through `.meta({ description })` is READ — no exemption by blindness',
     rulesOf(`const S = z.object({ timeout: z.number().meta({ description: 'Timeout in milliseconds' }) });`)
       .join() === 'unit-in-prose-not-in-name');
@@ -894,6 +1073,7 @@ function main(argv: string[]): number {
   if (argv.includes('--list')) {
     for (const s of durationSites) {
       const marks = [
+        s.jsdocUnits.length ? ` [jsdoc: ${s.jsdocUnits.join('/')}]` : '',
         s.valueUnitPair ? ' [value/unit pair]' : '',
         s.instant ? ` [instant: ${INSTANT_ROOT}]` : '',
         s.externalVocabulary !== undefined ? ` [${EXTERNAL_VOCABULARY_META_KEY}: ${s.externalVocabulary}]` : '',

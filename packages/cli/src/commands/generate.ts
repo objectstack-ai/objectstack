@@ -1372,13 +1372,36 @@ async function runClientGeneration(configPath: string | undefined, flags: { outp
  *                 other two moved would have manufactured a fresh within-file
  *                 contradiction of exactly the kind this card exists to close.
  *
- * ⛔ NOT in scope here, and filed rather than mirrored: the FILE_REFERENCE_TYPES
- * family (`file` / `image` / `avatar` / `video` / `audio`) is in the driver's
- * `JSON_COLUMN_TYPES` today while this table gives it `VARCHAR(2048)`. That is
- * a real disagreement, but it is #14657's ADR-0104 D3 answer against a driver
- * that is still pre-D3 — a decision about which side moves, not a wrong value
- * to correct. `generate-field-type-vocabulary.pin.test.ts` names the exclusion
- * so it cannot be mistaken for coverage.
+ * ## #17883 — the FILE_REFERENCE_TYPES exclusion is closed
+ *
+ * This paragraph used to hold the family (`file` / `image` / `avatar` /
+ * `video` / `audio`) out of scope, "filed rather than mirrored": the family was
+ * in the driver's `JSON_COLUMN_TYPES` while this table gave it `VARCHAR(2048)`,
+ * which was #14657's ADR-0104 D3 answer against a driver that was still pre-D3
+ * — a decision about which side moves, not a wrong value to correct.
+ *
+ * It was decided, and it landed. ADR-0104 records the ruling: "The driver is
+ * the side that moves; the generator's `VARCHAR(2048)` already states the ruled
+ * end-state and stands." #15989 moved the driver — the family left
+ * `JSON_COLUMN_TYPES`, and `createColumn` now builds
+ * `table.string(name, MEDIA_ID_VARCHAR_CHARS)` at 2048.
+ *
+ * What that left was the same fork one level down and INSIDE this file, which
+ * is the defect #17883 names: the typescript format below spelled the family's
+ * column as a bare `table.string(name)` — knex's `varchar(255)`, as the
+ * `autonumber` note above states in as many words — so ONE `os generate
+ * migration` answered ONE field with `varchar(2048)` under `--format sql` and
+ * `varchar(255)` as typescript, and a deployment scaffolded from the typescript
+ * half stood at a width `os migrate files-to-references --apply` retypes away
+ * from. The typescript format now reads its width off THIS table — see
+ * {@link fileReferenceVarcharChars} — so the two formats of one command cannot
+ * answer the same field differently again.
+ *
+ * ⛔ The five entries below did NOT move, and must not: 2048 is the
+ * already-shipped target that the driver (`MEDIA_ID_VARCHAR_CHARS`) and the
+ * `os migrate files-to-references` retype (`MEDIA_ID_MOVE_WIDTH`) were brought
+ * to. The repair is the typescript half joining it, ⛔ never the two halves
+ * meeting in the middle.
  */
 const FIELD_TYPE_SQL_MAP: Record<string, string | null> = {
   // #16091 — TEXT, not VARCHAR(255). `text` heads the SAME text-family arm as
@@ -1907,6 +1930,37 @@ function declaredVarchar(maxLength: unknown): VarcharAnswer {
   const n = typeof maxLength === 'string' ? Number(maxLength) : maxLength;
   if (typeof n !== 'number' || !Number.isInteger(n) || n <= 0) return { kind: 'default' };
   return n > MAX_VARCHAR_CHARS ? { kind: 'unbounded' } : { kind: 'sized', chars: n };
+}
+
+/**
+ * The `varchar(n)` width a FILE_REFERENCE_TYPES column takes, READ from this
+ * file's own SQL vocabulary rather than transcribed beside it (#17883).
+ *
+ * ⛔ Never a second literal. The width is a decision this file already carries
+ * once — {@link FIELD_TYPE_SQL_MAP}'s `VARCHAR(2048)`, which ADR-0104 calls the
+ * ruled end-state and which `driver-sql` moved to in #15989 — and a copy of
+ * `2048` in the typescript format would be free to drift from it exactly as the
+ * bare `table.string(name)` it replaces did. One source, so "the two formats of
+ * one command agree" is true BY CONSTRUCTION and not by a reviewer noticing.
+ *
+ * It throws rather than falling back, for the same reason {@link numericSqlType}
+ * does: a file-reference entry this reader cannot parse means the SQL half has
+ * changed shape, and the only wrong answer is a plausible width emitted anyway.
+ * `generate-file-reference-width.pin.test.ts` measures both halves against each
+ * other, so the parting is named in CI before it can reach an author.
+ */
+function fileReferenceVarcharChars(fieldType: string): number {
+  const stated = FIELD_TYPE_SQL_MAP[fieldType];
+  const width = typeof stated === 'string' ? /^VARCHAR\((\d+)\)$/.exec(stated) : null;
+  if (!width) {
+    throw new Error(
+      `generate: FIELD_TYPE_SQL_MAP states no VARCHAR width for the file-reference type ` +
+        `'${fieldType}' (it says ${JSON.stringify(stated)}), so the typescript format has no ` +
+        'width to agree with. Restore the entry, or stop routing this type through the ' +
+        'file-reference arm.',
+    );
+  }
+  return Number(width[1]);
 }
 
 /**
@@ -2697,8 +2751,9 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
         // `user` references sys_user, whose id is a text identifier (not a uuid),
         // so store it as a string column — consistent with the runtime sql-driver.
         // #14657 — `tree` is the same REFERENCE_VALUE_TYPES class pointing at the
-        // object's own id, and the FILE_REFERENCE_TYPES class stores an opaque
-        // `sys_file` id string (ADR-0104 D3). `autonumber` is a RENDERED string
+        // object's own id. (FILE_REFERENCE_TYPES rode this arm too until #17883
+        // gave it its own below: its value is not another row's id, and the sql
+        // format states a width of its own for it.) `autonumber` is a RENDERED string
         // (prefix + counter + suffix), which is both what `FIELD_TYPE_MAP` says
         // and what `driver-sql` emits — a SERIAL could not hold `INV-0001`.
         //
@@ -2716,9 +2771,29 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
         // for type uuid` on the very first insert.
         case 'lookup': case 'master_detail':
         case 'user': case 'tree':
-        case 'image': case 'file': case 'avatar': case 'video': case 'audio':
         case 'autonumber':
           colMethod = `table.string('${fieldName}')`;
+          break;
+        // #17883 — FILE_REFERENCE_TYPES takes an arm of its own, at the width
+        // the sql format above already states for it.
+        //
+        // It used to ride the reference arm, and that arm's derivation was
+        // never this family's: a reference column holds the TARGET row's `id`,
+        // which `driver-sql` emits as `table.string('id').primary()` = knex's
+        // varchar(255), while a file-reference column holds an opaque
+        // `sys_file` id and the sql format states `VARCHAR(2048)` for it. So
+        // ONE `os generate migration` gave one field two widths depending on
+        // `--format`, and the typescript one was the outlier: ADR-0104 ruled
+        // the generator's 2048 the end-state, #15989 moved `driver-sql` to it
+        // (`table.string(name, MEDIA_ID_VARCHAR_CHARS)`), and
+        // `os migrate files-to-references --apply` retypes to it
+        // (`MEDIA_ID_MOVE_WIDTH`) — a typescript-scaffolded deployment was the
+        // one place left standing at 255.
+        //
+        // ⛔ The width is READ, never retyped here: see
+        // {@link fileReferenceVarcharChars}.
+        case 'image': case 'file': case 'avatar': case 'video': case 'audio':
+          colMethod = `table.string('${fieldName}', ${fileReferenceVarcharChars(fType)})`;
           break;
         default:
           // Reachable only through the UNVALIDATED authoring door — a `type`

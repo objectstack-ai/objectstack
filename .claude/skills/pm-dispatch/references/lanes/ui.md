@@ -22,7 +22,7 @@
 - 凡触 `packages/spec` 一律转 `domain:spec` 座位,见 SKILL.md 〈多仓协调〉。
 - `scripts/pm/**` 单写手恒在 objectstack 侧 ⇒ 本席的工具需求走上游卡带 `Blocked-by:` 回链。
 - 受管面五项含仓根发布 `skills/**`,清单、判据与禁令见 objectui AGENTS.md §9 受管面段。
-- ⇒ 命中即整 PR 停在 draft 等人合,⛔ 不 ready、不入队、不 auto-merge、不自合、不留批准。
+- ⇒ 命中即停 draft;⛔ 未获授权批准不 ready 不入队不自合、永不批准,获批后认领席落地。
 - 未命中的 PR 按同节走合并队列落地;changeset 与版本纪律见 objectui AGENTS.md §9。
 - 半状态巡查在本仓有载体:定时 workflow 与 sweeper 皆在,自 objectstack 移植。
 - 锚 issue 未配置 ⇒ 写锚步骤 skip,发现只落 run summary,绿不等于已交付读锚腿。
@@ -35,4 +35,4 @@
 - 零读数恒配点亮的正控,且正控须经被测机制本身生效;本仓 search 假零,查重只引命中。
 - 脚本能滚动不证明用户能滚动:可达性断言必须驱动真实输入管道。
 - 落地验证按内容,正控须在合并前证明会响,⛔ 不按 sha 判已落地。
-- 档位与复核豁免边界读源码与 `references/contract-review.md`,⛔ 不凭记忆或继承的注记。
+- 条款②复核本席适用:默认判断档自审加门禁,标照挂;豁免只有独立性件与降档保险丝。

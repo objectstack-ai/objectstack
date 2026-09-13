@@ -101,6 +101,34 @@ export const SysNotification = ObjectSchema.create({
       group: 'Event',
     }),
 
+    // [#17732] Channels fan-out did not even attempt, and why.
+    //
+    // A channel the tenant cannot send on (no transport configured) used to get
+    // one `sys_notification_delivery` row per recipient that dead-lettered on
+    // its first attempt. Fan-out now asks the channel first
+    // (`MessagingChannel.isAvailable`) and writes no delivery row at all; the
+    // fact is recorded HERE instead, so the suppression stays auditable at the
+    // event level rather than disappearing.
+    //
+    // Value: `[{ channel, reason }]`, NULL when nothing was suppressed (the
+    // overwhelmingly common path). JSON rather than a `select` because one
+    // event fans out to several channels and each carries its OWN reason — a
+    // scalar column would have to drop either the channel or the reason.
+    //
+    // `reason` is a CLOSED set, inlined here: `transport_not_configured`.
+    // `packages/platform-objects` is a lower layer than service-messaging and
+    // cannot import its `CHANNEL_UNAVAILABLE_REASONS`, so the two copies are
+    // held equal by an executable assertion in
+    // `packages/services/service-messaging/src/channel-availability.test.ts`
+    // — ⛔ a comment is not what keeps them in step.
+    suppressed_channels: Field.json({
+      label: 'Suppressed Channels',
+      required: false,
+      description:
+        'Channels fan-out skipped because they are unavailable for this tenant, as [{channel, reason}]; reason is the closed set: transport_not_configured',
+      group: 'Event',
+    }),
+
     dedup_key: Field.text({
       label: 'Dedup Key',
       required: false,

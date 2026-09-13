@@ -431,7 +431,25 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
    * ObjectGuard: Security Layer
    */
   positions: z.array(PositionSchema).optional().describe('Positions — flat capability-distribution groups (ADR-0090 D3)'),
-  permissions: z.array(PermissionSetSchema).optional().describe('Permission Sets'),
+  /**
+   * Permission Sets — the ADR-0090 app-category collection.
+   *
+   * ⚠️ **`permissions` is one key with two incompatible readings**, and this is
+   * the collection half. The other half is
+   * `ManifestSchema.permissions` (`kernel/manifest.zod.ts`): at the AUTHORING
+   * stage the same key is the ADR-0025 §3.2 capability GRANT a plugin requests
+   * (`string[]`, or `{ services, hooks, network, fs }`). When a stack is
+   * assembled, the flatten order puts this collection on top — the stage table
+   * at {@link AssembledPackageBodySchema} states that precedence — so a
+   * manifest-stage `permissions` has no expression in an assembled body, and
+   * writing permission sets on the manifest instead of here reaches no reader.
+   *
+   * Both readings land in the SAME registry slot: `SchemaRegistry.installPackage`
+   * records `manifest.permissions` whichever stage produced it, so a consumer
+   * reading it off an installed-package row must name the stage it wants and
+   * report the other rather than dropping it silently.
+   */
+  permissions: z.array(PermissionSetSchema).optional().describe('Permission Sets — the ADR-0090 collection half of `permissions`; at the manifest/authoring stage the same key is the ADR-0025 capability grant instead (`ManifestSchema.permissions`)'),
   /**
    * [ADR-0066 D1] Authorization capabilities this package DEFINES.
    *

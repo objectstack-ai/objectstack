@@ -97,6 +97,42 @@ export interface SendResult {
     readonly error?: string;
 }
 
+/**
+ * Why a channel is not available for a tenant.
+ *
+ * A SMALL CLOSED SET, deliberately: it is recorded on `sys_notification`, so
+ * every value here is a column value an operator filters and reports on. The
+ * same literals are inlined on the object's `suppressed_channels` field
+ * description (`packages/platform-objects/src/audit/sys-notification.object.ts`)
+ * — `packages/platform-objects` is a LOWER layer than this package and cannot
+ * import from it, so the two copies are held equal by an executable assertion
+ * (`channel-availability.test.ts`) rather than by a shared import.
+ *
+ * ⛔ Not a free-text field: a reason nobody declared is a reason nothing can
+ * aggregate.
+ */
+export const CHANNEL_UNAVAILABLE_REASONS = ['transport_not_configured'] as const;
+
+/** One value of {@link CHANNEL_UNAVAILABLE_REASONS}. */
+export type ChannelUnavailableReason = (typeof CHANNEL_UNAVAILABLE_REASONS)[number];
+
+/**
+ * The tenant context an availability query is answered against.
+ *
+ * Carries the organization and nothing else: availability is a property of
+ * `(tenant × channel)`, not of a recipient or a topic, which is what lets
+ * fan-out ask ONCE PER CHANNEL PER EMIT instead of once per delivery.
+ */
+export interface ChannelAvailabilityQuery {
+    /** Tenant whose configuration decides the answer; absent on single-tenant / background emits. */
+    readonly organizationId?: string;
+}
+
+/** A channel's answer to {@link MessagingChannel.isAvailable}. */
+export type ChannelAvailability =
+    | { readonly available: true }
+    | { readonly available: false; readonly reason: ChannelUnavailableReason };
+
 /** Minimal context handed to a channel — just a logger in M1. */
 export interface MessagingChannelContext {
     readonly logger: {
@@ -119,4 +155,33 @@ export interface MessagingChannel {
 
     /** Optional: classify a thrown error for the (future) outbox. */
     classifyError?(err: unknown): ErrorClass;
+
+    /**
+     * Optional: can this tenant send on this channel AT ALL right now?
+     *
+     * Consulted by fan-out BEFORE any `sys_notification_delivery` row is
+     * written. A channel that answers `{ available: false }` gets no delivery
+     * rows for that emit; the suppression and its reason are recorded on the
+     * `sys_notification` event instead. Without it, every such row is work the
+     * pipeline is guaranteed to fail at — a delivery record that exists only to
+     * dead-letter.
+     *
+     * OPTIONAL, and absence means AVAILABLE — today's behaviour, unchanged, for
+     * every channel implementation that never heard of this member. ⛔ That
+     * default is not a convenience: inverting it would silently mute every
+     * channel a third party ships.
+     *
+     * This is a PRE-SEND fact, not a send attempt: it must not perform the
+     * delivery's own I/O, and it is called once per channel per emit, never per
+     * recipient. A channel whose answer is expensive is responsible for its own
+     * caching — fan-out holds none, because a cache here serves a stale answer
+     * across a live configuration change.
+     *
+     * A throw is treated as AVAILABLE (fail-open) and logged: an availability
+     * probe that breaks must not become a notification outage.
+     */
+    isAvailable?(
+        ctx: MessagingChannelContext,
+        query: ChannelAvailabilityQuery,
+    ): ChannelAvailability | Promise<ChannelAvailability>;
 }

@@ -81,6 +81,7 @@
     "check:pm-widening-tells": "node scripts/pm/check-widening-tells.mjs --self-test",
     "check:pm-prior-rulings": "node scripts/pm/check-prior-rulings.mjs --self-test",
     "check:pm-closed-card-sweep": "node scripts/pm/sweep-closed-cards.mjs --self-test",
+    "check:pm-stale-finding": "node scripts/pm/sweep-stale-finding.mjs --self-test",
     "check:pm-post-stamped": "node scripts/pm/post-stamped.mjs --self-test",
     "check:pm-board-snapshot": "node scripts/pm/board-snapshot.mjs --self-test",
     "check:pm-changeset-deadline-census": "node scripts/pm/changeset-deadline-census.mjs --self-test",

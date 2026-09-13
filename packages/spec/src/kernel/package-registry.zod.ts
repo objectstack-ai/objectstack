@@ -53,10 +53,37 @@ export type PackageStatus = z.input<typeof PackageStatusEnum>;
  * This is the "row" in the installed packages table.
  */
 export const InstalledPackageSchema = lazySchema(() => z.object({
-  /** 
-   * The full package manifest (source of truth for package definition).
+  /**
+   * The package manifest at the AUTHORING stage — this row's manifest is
+   * `ManifestSchema`, and that is a STAGE, not "whatever was stored".
+   *
+   * ⚠️ **Do not read this declaration as the shape of every registry row.**
+   * `SchemaRegistry.installPackage` records whatever its caller handed it, and
+   * two callers hand it two different stages:
+   *
+   *  - `POST /api/v1/packages` declares `manifest: ManifestSchema` and passes
+   *    the AUTHORING manifest — the stage this row names, whose `objects` and
+   *    `datasources` are glob patterns and whose `permissions` is the ADR-0025
+   *    capability grant;
+   *  - a `defineStack()` host reaches the same table through
+   *    `ObjectQL.registerApp`, which installs the ASSEMBLED body — `objects`
+   *    and `datasources` are DEFINITIONS and `permissions` is the ADR-0090
+   *    `PermissionSet[]` collection.
+   *
+   * The assembled stage has its own declaration rather than a widening of this
+   * one: `AssembledInstalledPackageSchema` (`../api/package-api.zod.ts`) over
+   * `AssembledPackageBodySchema` (`../stack.zod.ts`), the maintainer's road B
+   * of 2026-09-02 — «declare the assembled stage rather than widen the
+   * authoring one». The read doors (`GET /packages`, `GET /packages/:id`)
+   * therefore serve `InstalledPackageAtEitherStageSchema`, a union of two whole
+   * closed stages, and a consumer parsing a registry row against THIS schema
+   * alone will refuse every row a `defineStack()` host installed.
+   *
+   * ⛔ Never relax this branch — or `ManifestSchema` — to make an assembled row
+   * fit. Widening a key into a union of both spellings was road C and was
+   * rejected by name: it makes neither stage checkable (Prime Directive #12).
    */
-  manifest: ManifestSchema.describe('Full package manifest'),
+  manifest: ManifestSchema.describe('Package manifest at the AUTHORING stage; a row installed by a `defineStack()` host carries the assembled body instead — see `AssembledInstalledPackageSchema` / `InstalledPackageAtEitherStageSchema`'),
 
   /**
    * Current lifecycle status.

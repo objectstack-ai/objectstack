@@ -6729,10 +6729,15 @@ const step18: MigrationStep = {
       surface: 'dataset measure `aggregate` × `field` pairs (`DatasetMeasureSchema`, the rows '
         + 'inside `Dataset.measures[]`) over a TEMPORAL field — `date`, `datetime`, `time` — '
         + 'whose aggregate that declared `FieldType` cannot carry: `avg` and `sum` over any of '
-        + 'the three. ⛔ The compile leg is scoped to that class and to nothing else: the '
-        + 'table\'s string rows are under #16785 (ruled C — the table itself is to be amended '
-        + 'to accept `min` / `max` over them) and its `sum` × `percent` row is not executed '
-        + 'here either, so no non-temporal pair changes behaviour',
+        + 'the three. ⚠️ This entry is ONE OF TWO on this leg, and its scope sentence is kept '
+        + 'as written: it covered the temporal class and nothing else when it was registered. '
+        + 'The non-temporal `sum` / `avg` rows followed under #16099, which registered NO '
+        + 'entry of its own — it declared `not-required (already-registered '
+        + 'dataset-measure-aggregate-field-type-refused)` against THIS id — so its widening '
+        + 'rides this entry\'s prescription rather than a separate one. The `min` / `max` rows '
+        + 'over every class the table refuses are the second entry, '
+        + '`dataset-measure-selecting-aggregate-field-type-refused` (#17560). ⇒ Read BOTH when '
+        + 'migrating; there is no third',
       replacement: 'an aggregate the field\'s type accepts, per '
         + '`AGGREGATE_FIELD_TYPE_COMPATIBILITY` (`@objectstack/spec/data`, #16353): '
         + '`min` / `max` for a temporal field — both return a real instant of the field\'s own '
@@ -6769,9 +6774,15 @@ const step18: MigrationStep = {
       acceptanceCriteria:
         'Every dataset measure over a `date` / `datetime` / `time` field pairs that field with '
         + 'an `aggregate` the temporal class accepts — `min`, `max`, `count`, `count_distinct` '
-        + '— and none pairs it with `avg` or `sum`. ⛔ The criterion reaches no further: a '
-        + 'measure over a field of any OTHER class is not judged by this leg at all, so a '
-        + 'string, boolean, percent or numeric pair is neither refused nor certified here. '
+        + '— and none pairs it with `avg` or `sum`. ⚠️ The criterion as WRITTEN reaches no '
+        + 'further: a measure over a field of any other class was not judged by the leg this '
+        + 'entry was registered for. It is covered all the same — by this entry\'s own '
+        + 'prescription, widened by #16099 (which registered `not-required` against this id '
+        + 'rather than an entry of its own) to `sum` / `avg` over every field class; and by '
+        + '`dataset-measure-selecting-aggregate-field-type-refused` (#17560) for `min` / '
+        + '`max`. ⛔ There is no third entry to look for. At protocol major 18 as a whole, '
+        + 'every refused pair in `AGGREGATE_FIELD_TYPE_COMPATIBILITY` is refused at the '
+        + 'compile door. '
         + 'Accepted pairs compile and execute byte-identically to before '
         + '(`avg` over `number` / `currency`, `min` / `max` over `datetime`, `count` over '
         + 'anything); a refused pair answers `400 DATASET_INVALID` naming the measure, the '
@@ -6779,6 +6790,80 @@ const step18: MigrationStep = {
         + 'stands down rather than guessing wherever the type cannot be resolved: no '
         + '`sourceFieldMeta` wired, an unknown field, or a `relationship.field` path whose '
         + 'column lives on a joined object.',
+    },
+    {
+      id: 'dataset-measure-selecting-aggregate-field-type-refused',
+      surface: 'dataset measure `aggregate` × `field` pairs (`DatasetMeasureSchema`, the rows '
+        + 'inside `Dataset.measures[]`) pairing `min` or `max` with a field whose declared '
+        + '`FieldType` that aggregate cannot carry — every type outside the numeric, temporal '
+        + 'and boolean classes. Named in full so an author can grep their own metadata: the '
+        + 'string family (`text`, `textarea`, `email`, `url`, `phone`, `password`, `secret`, '
+        + '`markdown`, `html`, `richtext`, `code`, `color`, `signature`, `qrcode`), the option '
+        + 'types (`select`, `radio`), the references (`lookup`, `master_detail`, `tree`, '
+        + '`user`), `autonumber`, the multi-option types (`multiselect`, `checkboxes`, `tags`), '
+        + 'the file family (`image`, `file`, `avatar`, `video`, `audio`), the structured-JSON '
+        + 'types (`json`, `composite`, `repeater`, `record`, `location`, `address`, `vector`) '
+        + 'and `formula` — 37 field types × 2 aggregates = 74 pairs',
+      replacement: 'an aggregate the field\'s type accepts, per '
+        + '`AGGREGATE_FIELD_TYPE_COMPATIBILITY` (`@objectstack/spec/data`, #16353), or a '
+        + 'different way of asking the question. ⚠️ There is no lossless rewrite, which is why '
+        + 'this is a semantic TODO and not a D2 conversion: nothing can compute "the smallest '
+        + 'text value" in a way every backend agrees on, so no transform can preserve the '
+        + 'answer. The three routes an author actually has, per intent: '
+        + '① the measure was COUNTING in disguise ("how many distinct owners") ⇒ '
+        + '`count` / `count_distinct`, which accept every type because they read neither '
+        + 'arithmetic nor order off the value; '
+        + '② the measure wanted a FIRST or LAST RECORD ("the earliest-titled task") ⇒ that is '
+        + 'a SORT on a list or report, which orders once in a declared direction, not an '
+        + 'aggregate that asks each backend for its own smallest value; '
+        + '③ the measure wanted a QUANTITY that happens to be stored as text or JSON ⇒ store '
+        + 'it as a numeric or temporal field (a computed column) and aggregate that. '
+        + 'A `derived` measure whose `of` names a refused measure is fixed by fixing that '
+        + 'measure, not the `derived` one',
+      reason:
+        '#17560, director ruling, decision batch #127 (2026-09-13). The table refused these '
+        + '74 pairs from the day it was declared and NOTHING executed the refusal: the compile '
+        + 'leg (`dataset-compiler`, `service-analytics`) carried an explicit scope condition — '
+        + '`if (!DERIVING_AGGREGATES.has(aggregate)) return;` — so `min` / `max` were never '
+        + 'judged whatever the field type, and `service-analytics`\' `measureResultType` went '
+        + 'further and typed `min` / `max` over the string classes as a supported `\'string\'` '
+        + 'result (#15768) and over a `formula` field from its declared `returnType` (#16236). '
+        + 'Four declarations, three answers, one pair — the worst shape of declared≠enforced, '
+        + 'because nobody could tell which sentence was the contract. ⭐ The divergence is '
+        + 'real and it is the ORDER rather than the arithmetic: string order is '
+        + 'collation-dependent, so two backends answer two different "smallest" values for one '
+        + 'metadata document, and `min(jsonb)` does not exist on PostgreSQL at all — the same '
+        + 'shape Prime Directive #12 exists to remove. The ruling settled all three '
+        + 'sub-questions together rather than per field class, because one shared fixture drove '
+        + 'members of both halves: the string classes stay REFUSED as decision batch #59 ruled '
+        + '(2026-09-06, 「`min`/`max` numeric plus `date`/`datetime`; everything else '
+        + 'refused」) and the table is NOT amended; the non-string classes are refused AND '
+        + 'enforced; and `formula` is refused on the table\'s own storage ground — it is '
+        + 'VIRTUAL in SQL storage, no column is emitted, so no aggregate can be lowered to it '
+        + 'whatever `returnType` says. ⚠️ The "ruled C — the table is to be AMENDED to accept '
+        + 'the string rows" note the tree carried in two test files, citing #17513, had no '
+        + 'ruling behind it: that card is closed as a duplicate with zero rulings on it, and '
+        + 'the one recorded ruling on this table says the opposite. Business pull was measured '
+        + 'and is zero — the shipped `min` / `max` cases were in-tree fixtures pinning a result '
+        + 'TYPE, not customer datasets reading one. ⚠️ Confidence gap, recorded rather than '
+        + 'hidden: customer datasets in the `cloud` repository were not readable when this was '
+        + 'decided.',
+      acceptanceCriteria:
+        'Every dataset measure declaring `aggregate: \'min\'` or `\'max\'` pairs it with a '
+        + 'field the class accepts — the numeric class (`number`, `currency`, `percent`, '
+        + '`rating`, `slider`, `progress`, `summary`), the temporal class (`date`, `datetime`, '
+        + '`time`) or the boolean class (`boolean`, `toggle`) — and none pairs it with a field '
+        + 'of any other declared type. Accepted pairs compile and execute byte-identically to '
+        + 'before, including `min` / `max` over a temporal field, which still carries '
+        + '`fields[].type: \'time\'`; a refused pair answers `400 DATASET_INVALID` naming the '
+        + 'measure, the field, its declared type and the accepted set, with no SQL emitted. '
+        + '⚠️ A `text` / `select` / `lookup` / `formula` field used as a DIMENSION — grouping, '
+        + 'labelling, bucketing, filtering — is untouched, and so is `count` / `count_distinct` '
+        + 'over one: this is about the two SELECTING aggregates only. The refusal stands down '
+        + 'rather than guessing wherever the type cannot be resolved: no `sourceFieldMeta` '
+        + 'wired, an unknown field, or a `relationship.field` path whose column lives on a '
+        + 'joined object. A measure column over such a pair also stops carrying a corrected '
+        + '`fields[].type`, because the pair no longer produces a column at all.',
     },
     {
       id: 'datasource-config-mongo-options-credential-refused',
@@ -10562,6 +10647,91 @@ const step18: MigrationStep = {
         + 'it too has over-applied the rule and stripped a declared exemption.',
     },
     {
+      id: 'system-metrics-jsdoc-durations-unit-in-key',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface: 'the five remaining metrics durations whose unit lived in a source JSDoc only: '
+        + 'MetricDefinition.summary.maxAge, ServiceLevelObjective.errorBudget.burnRateWindows[].window, '
+        + 'MetricExportConfig.interval, MetricsConfig.collectionInterval and '
+        + 'MetricsConfig.retention.period (system/metrics.zod.ts)',
+      replacement: 'summary.maxAgeSeconds, errorBudget.burnRateWindows[].durationSeconds, '
+        + 'intervalSeconds, collectionIntervalSeconds and retention.durationSeconds — rename each '
+        + 'key; every value is unchanged',
+      reason:
+        'This entry FINISHES what system-metrics-window-durations-unit-in-key started on this file, '
+        + 'and the two are meant to be read as a sequence — this one does not amend that record, '
+        + 'which stays a true account of what #15679 did. #15679 renamed the three metrics window '
+        + 'and period lengths whose describe named no unit, and recorded that the error-budget '
+        + 'burn-rate window was "outside this rename, not outside the gate population", naming the '
+        + 'JSDoc-channel gap #15939 as where it would be settled. #15939 is now ruled and this is '
+        + 'its remediation: director-seat ruling A, 2026-09-11, carrying the maintainer\'s 「同意」 '
+        + '(decision batch #115), which remediates the 21-row JSDoc-channel population per file and '
+        + 'lands the widened gate (#17635) last, into a tree already clean. ⚠️ One consequence for '
+        + 'readers of the older entry: its acceptanceCriteria says the burn-rate window keeps its '
+        + 'name and that a sweep renaming it has over-applied the rule. That sentence was true of '
+        + '#15679 and is superseded here, by the ruling it itself pointed at; the other key it '
+        + 'names, the exporter batch size, is a COUNT of records and still does not move. All five '
+        + 'keys here share one defect: the unit (seconds) was stated in the JSDoc above the key, a '
+        + 'channel check:duration-unit-keys does not read — it reads .describe() and '
+        + '.meta({ description }) — and four of the five carried no describe at all while the fifth '
+        + 'read "Window size". So the reader who most needs the unit, the reader of the published '
+        + 'reference page, got a bare integer: 600, 3600, 60, 15 and 604800 are each a plausible '
+        + 'number of seconds and a plausible number of milliseconds, and nothing on the page decided '
+        + 'it. Each key is renamed and its describe corrected in the same stroke, because under the '
+        + '#14478 rule moving the unit into the describe alone is itself a violation. Three of the '
+        + 'five spellings are not the mechanical suffix, and each departure has a reason this file '
+        + 'already supplied: burnRateWindows[].window becomes durationSeconds, not windowSeconds, '
+        + 'because the enclosing array is already called burnRateWindows so the key would stutter — '
+        + 'the objection #15679 recorded against window.windowSeconds — and because on this tree '
+        + 'windowSeconds is not an authorable key at all, its only key-position occurrence being an '
+        + 'alias-map entry in ServerRateLimitConfigSchema that maps the spelling AWAY to windowMs; '
+        + 'retention.period becomes durationSeconds, not periodSeconds, because period is calendar '
+        + 'vocabulary elsewhere in this spec (ServiceLevelObjective.period.type selects rolling or '
+        + 'calendar, PluginRegistryEntry.pricing.billingPeriod is monthly or yearly) so periodSeconds '
+        + 'would keep the ambiguous half of the name; and collectionInterval keeps its qualifier as '
+        + 'collectionIntervalSeconds so it stays distinct from the MetricExportConfig.intervalSeconds '
+        + 'this same card creates one def over. The two mechanical spellings are attested: '
+        + 'maxAgeSeconds is the token AccessControlConfig.maxAgeSeconds already carries after this '
+        + 'same rule renamed it on system/object-storage.zod.ts, and it keeps the age stem the '
+        + 'sibling ageBuckets counts buckets of; intervalSeconds is the token four seconds-valued '
+        + 'cadences already carry. Counted in key position across packages/spec/src at fc28c1d38, '
+        + 'the base of this change, the seconds suffixes run Seconds 40, Sec 1 (maxExecutionTimeSec) '
+        + 'and S 0 — the two bare S keys on that corpus, maxCommitTimeMS and enableRLS, are a '
+        + 'millisecond spelling and a boolean — so Seconds is the family; this change takes Seconds '
+        + 'to 45 at 9b62f54671. All five are '
+        + 'retiredKey() tombstones; none of the five enclosing shapes is strict, so a bare deletion '
+        + 'would strip in silence. Why a semantic entry and not a D2 conversion: stack.zod.ts '
+        + 'declares no metrics collection, and none of a metric definition, an SLO, an export config '
+        + 'or a metrics config is a registered metadata kind stored as a sys_metadata row — the same '
+        + 'reading #15679 recorded for the three keys it renamed. Measured on fc28c1d38: no in-repo '
+        + 'code consumer reads any of the five — outside packages/spec the only occurrences of every '
+        + 'distinctive key on these shapes (burnRateWindows, errorBudget, downsampling, '
+        + 'collectionInterval, cardinalityLimits, maxLabelCombinations, ageBuckets) are in the '
+        + 'generated content/docs/references/system/metrics.mdx, which this rename regenerates, '
+        + 'against a lit control of 1195 defineStack occurrences on that same corpus at fc28c1d38 '
+        + '(1195 again at 9b62f54671); and the objectui '
+        + 'checkout this repo builds against — this is the pin, '
+        + '`.objectui-sha` = `53ded82bf7a494f54e344e19099dbf00854b8694`, re-read from this tree — '
+        + 'spells all six metrics def names and both distinctive keys 0 times across 6409 tracked '
+        + 'files at that sha, against lit controls window 2710, timeout 832, period 160, '
+        + 'interval 156 and metrics 301 on that same corpus and sha, so no pin bump is owed. '
+        + '#15939, #15679, #14478, ADR-0087.',
+      acceptanceCriteria:
+        'Every metric definition spells summary.maxAgeSeconds, every error-budget burn rate window '
+        + 'spells durationSeconds, every metric export config spells intervalSeconds, and every '
+        + 'metrics config spells collectionIntervalSeconds and retention.durationSeconds. Authoring '
+        + 'any of the five old spellings fails to compile (input type `never`) and fails to parse '
+        + 'with the rename prescription naming the suffixed key — not an unrecognized_keys issue. '
+        + 'Behaviour is unchanged: collectionIntervalSeconds: 15 collects every fifteen seconds '
+        + 'exactly as collectionInterval: 15 did, and every default (600, 60, 15, 604800) and '
+        + 'positive-integer bound rides along with its renamed key. Each new describe names the unit, '
+        + 'so the reference page carries it. Verify the same-named decoys on this one file apart: '
+        + 'MetricAggregationConfig.window and ServiceLevelIndicator.window are objects that already '
+        + 'hold a durationSeconds of their own, and ServiceLevelObjective.period is an object holding '
+        + 'a durationSeconds and a calendar — none of the three moves, and a sweep that renamed any '
+        + 'of them has over-applied this rule.',
+    },
+    {
       id: 'system-metrics-window-durations-unit-in-key',
       surface: 'the three metrics window/period lengths whose name carried no unit: '
         + 'MetricAggregationConfig.window.size, ServiceLevelIndicator.window.size and '
@@ -10601,7 +10771,15 @@ const step18: MigrationStep = {
         + 'it is outside this rename, not outside the gate population; that JSDoc-channel gap is '
         + '#15939; '
         + 'and the exporter batch size is a COUNT of records, not a duration, so it has no unit '
-        + 'to carry. Both keep their names.',
+        + 'to carry. Both keep their names. '
+        // Pointer, not a rewrite (Prime Directive #13): the sentence above is #15679's, left
+        // word for word. The burn-rate window it names is renamed in this same, still-unreleased
+        // protocol-18 step, so a reader arriving here through `migrate meta` needs the successor.
+        + 'One of those two moves after all, in this same protocol step: the error-budget '
+        + 'burn-rate window is renamed to durationSeconds by '
+        + 'system-metrics-jsdoc-durations-unit-in-key, the remediation of the JSDoc-channel gap '
+        + '#15939 named just above. Read that entry with this one; the exporter batch size is '
+        + 'still a COUNT of records and still does not move.',
     },
     {
       id: 'system-object-storage-durations-unit-in-key',
@@ -10666,6 +10844,85 @@ const step18: MigrationStep = {
         + 'too-small interval or timeout is still refused. The pair on RegistryUpstream is the '
         + 'one to check by hand rather than by search-and-replace: after the migration a reader '
         + 'can tell at the authoring site that 300 and 30000 are not the same kind of number.',
+    },
+    {
+      id: 'system-tracing-otel-exporter-durations-unit-in-key',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface: 'the four tracing-configuration durations whose unit lived in a source JSDoc only: '
+        + 'OpenTelemetryCompatibility.exporter.timeout, '
+        + 'OpenTelemetryCompatibility.exporter.batch.exportTimeout, '
+        + 'OpenTelemetryCompatibility.exporter.batch.scheduledDelay and '
+        + 'TracingConfig.performance.exportInterval (system/tracing.zod.ts)',
+      replacement: 'timeoutMs, exportTimeoutMs, scheduledDelayMs and exportIntervalMs — rename each '
+        + 'key; all four values (milliseconds) and their 10000 / 30000 / 5000 / 5000 defaults are '
+        + 'unchanged',
+      reason:
+        'Director-seat ruling A on #15939, 2026-09-11, carrying the maintainer\'s 「同意」 (decision '
+        + 'batch #115), executing the #14478 rule per file. It follows '
+        + 'system-tracing-span-duration-unit-in-key on this same file and does not amend it: that '
+        + 'entry retired Span.duration under ruling B, whose population was the describe channel, '
+        + 'and these four keys were never in it — they are the JSDoc-only channel #15939 opened, '
+        + 'which is why one file carries two rounds. Each key named milliseconds in its JSDoc — '
+        + '"Timeout in milliseconds", "Export timeout in milliseconds", "Scheduled delay in '
+        + 'milliseconds", "Background export interval in milliseconds" — and the JSDoc above a key '
+        + 'is NOT what content/docs/references/** renders; .describe() is. Measured on this tree: '
+        + 'all four carried NO .describe() at all, so the published reference row for each was a '
+        + 'bare integer with no unit anywhere on the page — a strictly worse channel than the '
+        + 'unit-in-prose shape #14478 already refuses, since here the reference reader had no prose '
+        + 'to misread. The magnitudes make the guess plausible in both directions: 10000, 30000, '
+        + '5000 and 5000 are all defensible as seconds and as milliseconds, and an operator who '
+        + 'reads seconds sets an exporter deadline 1000x short. The suffix is the family spelling, '
+        + 'counted in key position at 98bd7986fe over packages/spec/src *.ts (reproduce with '
+        + 'git grep -hoE on that ref): 281 *Ms declarations over 42 distinct names, timeoutMs 65 of '
+        + 'them and intervalMs 14, against 0 key-position timeoutSeconds and 77 *Seconds of any '
+        + 'name; the Delay-plus-Ms pairing is likewise already attested on that same ref '
+        + '(maxDelayMs 9, initialDelayMs 9, maxRetryDelayMs 5, debounceDelayMs 2, delayMs 2, '
+        + 'retryDelayMs 1) with 0 occurrences of any competing exportTimeout, scheduledDelay or '
+        + 'exportInterval spelling, suffixed or Seconds. Note this file is milliseconds throughout '
+        + 'and its own landed precedent is '
+        + 'Span.duration to durationMs, the opposite of the sibling metrics card whose rows were '
+        + 'seconds. exporter.timeoutMs and exporter.batch.exportTimeoutMs are deliberately allowed '
+        + 'to sit one nesting level apart: the pair pre-exists the rename — the batch sub-object is '
+        + 'the OpenTelemetry batch span processor\'s own four knobs (max batch size, max queue '
+        + 'size, scheduled delay, export timeout) beside the exporter\'s own request deadline — so '
+        + 'renaming either to something more distinctive would depart from the vocabulary the shape '
+        + 'mirrors, and the nesting already disambiguates every read point '
+        + '(exporter.timeoutMs vs exporter.batch.exportTimeoutMs). All four old spellings are '
+        + 'retiredKey() tombstones: neither OpenTelemetryCompatibilitySchema nor TracingConfigSchema '
+        + 'nor any object nested inside them is .strict(), so a bare deletion would be a SILENT '
+        + 'STRIP (#3733, ADR-0104) — and the stripped value lands on an export deadline and a '
+        + 'background export period. Why a semantic entry and not a D2 conversion: the conversion '
+        + 'chain walks a normalized STACK, and neither def is an authorable surface — stack.zod.ts '
+        + 'declares no tracing collection, no metadata-type binding or manifest embed carries '
+        + 'either, and a tracing configuration is never a stored sys_metadata row — so a conversion '
+        + 'would be a transform with no seam that ever runs. That is the same disposition '
+        + 'system-tracing-span-duration-unit-in-key recorded for the other key on this file. '
+        + 'Measured at 98bd7986fe: NO in-repo reader exists outside packages/spec — '
+        + 'OpenTelemetryCompatibility, TracingConfig and all three batch key names occur 0 times '
+        + 'across the whole tree at that ref excluding packages/spec and content/docs/references, '
+        + 'against a lit control of 18920 Schema occurrences on exactly that corpus and ref — both '
+        + 'counts from one git grep -o over 98bd7986fe with those two pathspec exclusions — and a '
+        + 'dark control of 0; inside packages/spec the '
+        + 'only occurrences are tracing.zod.ts, its test, and the generated rows in '
+        + 'content/docs/references/system/tracing.mdx, which this rename regenerates. And the '
+        + 'pinned objectui checkout — `.objectui-sha` = `53ded82bf7a494f54e344e19099dbf00854b8694` — names none of it: all 37 exports of '
+        + 'tracing.zod.ts and each of the four key names occur 0 times across the 6409 files '
+        + 'tracked at that sha (the 404 Span and 40 SpanSchema hits are objectui\'s own HTML '
+        + 'text-span component, TextSpanSchema, an unrelated name), against two lit controls on '
+        + 'that same corpus and sha: 10171 hits for the bare token objectstack, and 3479 for the '
+        + 'package specifier @objectstack/spec.',
+      acceptanceCriteria:
+        'Every author and reader of an OpenTelemetryCompatibility spells exporter.timeoutMs, '
+        + 'exporter.batch.exportTimeoutMs and exporter.batch.scheduledDelayMs, and every one of a '
+        + 'TracingConfig spells performance.exportIntervalMs. Authoring any old spelling fails to '
+        + 'compile (input type `never`) and fails to parse with the rename prescription naming the '
+        + 'suffixed key — not with a generic unrecognized_keys issue, which these non-strict shapes '
+        + 'could never have raised anyway. Behaviour is unchanged: the same milliseconds, the same '
+        + '10000 / 30000 / 5000 / 5000 defaults and the same int().positive() bounds, and all four '
+        + 'published describes now name milliseconds where before there was no describe at all. '
+        + 'The authorable-surface and authorable-defaults ledgers move nothing: every one of the '
+        + 'four is NESTED, and those artifacts record top-level keys per def only.',
     },
     {
       id: 'system-tracing-span-duration-unit-in-key',
@@ -13062,11 +13319,19 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // said "Process timeout in ms" in prose and nothing else. Renamed to
     // `timeoutMs`; the value is unchanged. Tombstoned with `retiredKey()` inside
     // the live `process` block. ⚠️ Note for anyone grepping this file: the
-    // neighbouring `RuntimeConfig.resourceLimits.timeout` is a DIFFERENT key whose
-    // describe names no unit at all, so it is outside the gate's population and is
-    // untouched here. No D2 conversion: a `SandboxConfig` is the isolation
-    // argument a host or a plugin security manifest constructs, never a stack
-    // collection member or a stored row. See
+    // neighbouring `RuntimeConfig.resourceLimits.timeout` is a DIFFERENT key and is
+    // not covered by this entry. It was never "outside the gate's population", the
+    // reason this note gave until #15939: its unit lived in a source JSDoc only
+    // ("Execution timeout in milliseconds") while the `.describe()` the reference
+    // pages publish read "Maximum execution time" and named none, so
+    // `check:duration-unit-keys` listed the key in its census and never judged it.
+    // Ruling A on #15939 remediated that JSDoc-channel population per file, so that
+    // key is renamed to `timeoutMs` as well — landed, not pending — under its own
+    // entry `kernel/RuntimeConfig:resourceLimits.timeout`; see
+    // `kernel-runtime-config-timeout-unit-in-key` for its record.
+    // No D2 conversion: a `SandboxConfig` is the isolation argument a host or a
+    // plugin security manifest constructs, never a stack collection member or a
+    // stored row. See
     // `kernel-plugin-security-durations-unit-in-key`.
     'kernel/SandboxConfig:process.timeout',
     // #15678 (stack card 3/6 of #14478) — ruling B. `StartupOptions.timeout` said
@@ -13522,6 +13787,112 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // declares no `metrics` collection and an aggregation config is not a stored
     // metadata row. See `system-metrics-window-durations-unit-in-key`.
     'system/MetricAggregationConfig:window.size',
+    // #15939 ruling A (per-file remediation of #14478). `summary.maxAge` said "Max
+    // age of observations in seconds" in a source JSDoc and carried no
+    // `.describe()` at all, so the reference page published a bare 600 and the
+    // gate listed the key among the duration-shaped ones without judging it.
+    // Renamed to `maxAgeSeconds`, the same token `AccessControlConfig.maxAgeSeconds`
+    // on `system/object-storage.zod.ts` already carries after this same rule renamed
+    // it — NOT `durationSeconds`, the spelling the three window lengths on this file
+    // take, because the sibling key `ageBuckets` counts buckets of this very age and
+    // dropping the `age` stem would orphan the pair. The value is unchanged.
+    // Tombstoned with `retiredKey()`: the nested `summary` object is not strict, so
+    // a bare deletion would silently strip the key. A NESTED site: the
+    // authorable-surface ratchet walks top-level def properties only, so no
+    // `[RETIRED]` row exists for it and gate (b) of `build-schemas.ts` neither
+    // demands nor refuses this entry — it is here for the spec-changes /
+    // upgrade-guide projection. No D2 conversion: `stack.zod.ts` declares no metrics
+    // collection and a metric definition is not a stored metadata row.
+    // See `system-metrics-jsdoc-durations-unit-in-key`.
+    'system/MetricDefinition:summary.maxAge',
+    // #15939 ruling A (per-file remediation of #14478). `MetricExportConfig.interval`
+    // said "Export interval in seconds" in a source JSDoc and carried no
+    // `.describe()` at all — one of the three sites the #15939 filing named — so the
+    // reference page published a bare 60, a plausible number of seconds and a
+    // plausible number of milliseconds. Renamed to `intervalSeconds`, the token
+    // every seconds-valued cadence in this spec already carries (`intervalSeconds`
+    // on `ai/model-registry`, `api/auth-endpoints`, `data/driver/turso` and
+    // `integration/connector`); no competing `intervalSec` or `intervalS` spelling
+    // exists. The 60 default is unchanged. Tombstoned with `retiredKey()`: this
+    // object is not strict, so a bare deletion would silently strip the key. A
+    // TOP-LEVEL site, so the authorable-surface ratchet moves: the row becomes
+    // `system/MetricExportConfig:interval [RETIRED]` beside a new
+    // `system/MetricExportConfig:intervalSeconds`, and the authorable-defaults row
+    // moves with it. No D2 conversion: `stack.zod.ts` declares no metrics collection
+    // and an export config is not a stored metadata row.
+    // See `system-metrics-jsdoc-durations-unit-in-key`.
+    'system/MetricExportConfig:interval',
+    // #15939 ruling A (per-file remediation of #14478). `MetricsConfig.collectionInterval`
+    // said "Collection interval in seconds" in a source JSDoc and carried no
+    // `.describe()` at all, so the reference page published a bare 15. Renamed to
+    // `collectionIntervalSeconds` and not to a bare `intervalSeconds`: the qualifier
+    // distinguishes it from `MetricExportConfig.intervalSeconds`, a different cadence
+    // one def over that this same card renames, and the qualifier-plus-IntervalSeconds
+    // compound is the attested form (`syncIntervalSeconds`, `refreshIntervalSeconds`,
+    // `healthCheckIntervalSeconds`). The 15 default is unchanged. Tombstoned with
+    // `retiredKey()`: this object is not strict, so a bare deletion would silently
+    // strip the key. A TOP-LEVEL site, so the authorable-surface ratchet moves: the
+    // row becomes `system/MetricsConfig:collectionInterval [RETIRED]` beside a new
+    // `system/MetricsConfig:collectionIntervalSeconds`, and the authorable-defaults
+    // row moves with it. No D2 conversion: `stack.zod.ts` declares no metrics
+    // collection and a metrics config is not a stored metadata row.
+    // See `system-metrics-jsdoc-durations-unit-in-key`.
+    'system/MetricsConfig:collectionInterval',
+    // #15939 ruling A (per-file remediation of #14478). `MetricsConfig.retention.period`
+    // said "Retention period in seconds" in a source JSDoc and carried no
+    // `.describe()` at all, so the reference page published a bare 604800. Renamed to
+    // `durationSeconds`, not to the mechanical `periodSeconds`: `period` is calendar
+    // vocabulary elsewhere in this spec — `ServiceLevelObjective.period.type` selects
+    // rolling or calendar and `PluginRegistryEntry.pricing.billingPeriod` is monthly
+    // or yearly — so `periodSeconds` would have kept the ambiguous half of the name
+    // and bolted a unit onto it, the same objection #15679 raised against
+    // `sizeSeconds`. `durationSeconds` is what this file already calls a length of
+    // time, in three places. The 604800 (7 day) default is unchanged. Tombstoned with
+    // `retiredKey()`: the nested `retention` object is not strict, so a bare deletion
+    // would silently strip the key. A NESTED site: the authorable-surface ratchet
+    // walks top-level def properties only — the top-level row is
+    // `system/MetricsConfig:retention` and it does not move — so gate (b) of
+    // `build-schemas.ts` neither demands nor refuses this entry. No D2 conversion:
+    // `stack.zod.ts` declares no metrics collection and a metrics config is not a
+    // stored metadata row.
+    // See `system-metrics-jsdoc-durations-unit-in-key`.
+    'system/MetricsConfig:retention.period',
+    // #15939 ruling A (per-file remediation of #14478). `exporter.batch.exportTimeout`
+    // said "Export timeout in milliseconds" in a source JSDoc and carried NO
+    // `.describe()` at all, so the published reference page showed a bare 30000.
+    // Renamed to `exportTimeoutMs`; the value and the 30000 default are unchanged.
+    // Tombstoned with `retiredKey()`: the nested `batch` object is not strict, so a
+    // bare deletion would silently strip the key. No D2 conversion: not a stack
+    // collection member, not a stored row. See
+    // `system-tracing-otel-exporter-durations-unit-in-key`.
+    'system/OpenTelemetryCompatibility:exporter.batch.exportTimeout',
+    // #15939 ruling A (per-file remediation of #14478). `exporter.batch.scheduledDelay`
+    // said "Scheduled delay in milliseconds" in a source JSDoc and carried NO
+    // `.describe()` at all, so the published reference page showed a bare 5000.
+    // Renamed to `scheduledDelayMs`, the plain suffix: counted in key position across
+    // `packages/spec/src` at `98bd7986fe`, the Delay-plus-Ms pairing is already the
+    // family spelling (`maxDelayMs` 9, `initialDelayMs` 9, `maxRetryDelayMs` 5,
+    // `debounceDelayMs` 2, `delayMs` 2, `retryDelayMs` 1) and neither
+    // `scheduledDelayMs` nor `scheduledDelaySeconds` occurs there at all.
+    // The value and the 5000 default are unchanged. Tombstoned with `retiredKey()`:
+    // the nested `batch` object is not strict, so a bare deletion would silently
+    // strip the key. No D2 conversion: not a stack collection member, not a stored
+    // row. See `system-tracing-otel-exporter-durations-unit-in-key`.
+    'system/OpenTelemetryCompatibility:exporter.batch.scheduledDelay',
+    // #15939 ruling A (per-file remediation of #14478). `exporter.timeout` said
+    // "Timeout in milliseconds" in a source JSDoc and carried NO `.describe()` at
+    // all, so the `content/docs/references/**` page published a bare 10000 with no
+    // unit anywhere on it. Renamed to `timeoutMs`; the value and the 10000 default
+    // are unchanged. It keeps the plain suffix even though its `exporter.batch`
+    // sibling becomes `exportTimeoutMs`: the two are the OpenTelemetry exporter's
+    // own request deadline and the batch processor's export deadline, two distinct
+    // knobs the shape already spelled apart, and the nesting keeps every read point
+    // unambiguous. Tombstoned with `retiredKey()`: the nested `exporter` object is
+    // not strict, so a bare deletion would silently strip the key and let a 10000 ms
+    // default land on an exporter deadline the operator had deliberately changed.
+    // No D2 conversion: not a stack collection member, not a stored row. See
+    // `system-tracing-otel-exporter-durations-unit-in-key`.
+    'system/OpenTelemetryCompatibility:exporter.timeout',
     // #15679 (stack card 4/6 of #14478) — ruling B. `QueueConfig.rateLimit.duration`
     // said "Duration in milliseconds" in prose and nothing else — while
     // `TaskResult.durationMs`, ninety lines earlier in the SAME file, already spelled
@@ -13606,6 +13977,34 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // is unchanged. Tombstoned with `retiredKey()`; no D2 conversion.
     // See `system-metrics-window-durations-unit-in-key`.
     'system/ServiceLevelIndicator:window.size',
+    // #15939 ruling A (per-file remediation of #14478). The error-budget burn-rate
+    // `window` said "Window size in seconds" in a source JSDoc while its
+    // `.describe()` read "Window size" and named no unit — the exact site #15939
+    // was filed on. Renamed to `durationSeconds`: it is the fourth window length on
+    // this file, and #15679 already settled that a window length here is spelled
+    // `durationSeconds` so the measurements read alike. `windowSeconds` is rejected
+    // for the reason #15679 recorded against `window.windowSeconds` — the enclosing
+    // array is already called `burnRateWindows`, so the key would stutter — and
+    // because on this tree `windowSeconds` is not an authorable key at all: its only
+    // key-position occurrence is an entry in `ServerRateLimitConfigSchema`'s alias
+    // map that maps the spelling AWAY to `windowMs`. The value is unchanged.
+    // Tombstoned with `retiredKey()`: this array-element object is not strict, so a
+    // bare deletion would silently strip the key.
+    //
+    // The path crosses an ARRAY (`errorBudget.burnRateWindows` is a `z.array`) and
+    // is spelled with plain dots, no bracket token, because that is the only
+    // notation this table uses: of its rows none carries a bracket, and the two
+    // historical rows that crossed an array — `system/RollbackPlan:steps.…` and
+    // `system/ChangeRequest:implementation.steps.…` — spelled it this way (their
+    // schemas have since been retired, so the precedent cannot be re-read on this
+    // tree; flagged for the contract review). A NESTED site: the authorable-surface
+    // ratchet walks top-level def properties only, so no `[RETIRED]` row exists for
+    // it and gate (b) of `build-schemas.ts` neither demands nor refuses this entry.
+    // No D2 conversion: an SLO is not a stack collection member and not a stored
+    // metadata row — the reading `system-metrics-window-durations-unit-in-key`
+    // already recorded for this same def.
+    // See `system-metrics-jsdoc-durations-unit-in-key`.
+    'system/ServiceLevelObjective:errorBudget.burnRateWindows.window',
     // #15679 (stack card 4/6 of #14478) — ruling B. `ServiceLevelObjective.period.duration`
     // said "Duration in seconds" in prose and nothing else. Renamed to
     // `durationSeconds`; the value is unchanged. This key is why the two `window.size`
@@ -13633,6 +14032,19 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // connection is host configuration, not a stored metadata row.
     // See `system-object-storage-durations-unit-in-key`.
     'system/StorageConnection:timeout',
+    // #15939 ruling A (per-file remediation of #14478). `performance.exportInterval`
+    // said "Background export interval in milliseconds" in a source JSDoc and
+    // carried NO `.describe()` at all, so the published reference page showed a bare
+    // 5000. Renamed to `exportIntervalMs`; the value and the 5000 default are
+    // unchanged. `intervalMs` is the family spelling already attested 14 times in key
+    // position across `packages/spec/src` at `98bd7986fe` (0 `exportIntervalMs` and 0
+    // `exportIntervalSeconds` there, so nothing competes), so the suffix lands on a
+    // name the surface already uses.
+    // Tombstoned with `retiredKey()`: the nested `performance` object is not strict,
+    // so a bare deletion would silently strip the key and hand a background exporter
+    // its default period. No D2 conversion: not a stack collection member, not a
+    // stored row. See `system-tracing-otel-exporter-durations-unit-in-key`.
+    'system/TracingConfig:performance.exportInterval',
     // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
     // retire per family). One of the hour/minute/day-shaped deadline keys of the
     // incident-response / training / change-management families: declared on the

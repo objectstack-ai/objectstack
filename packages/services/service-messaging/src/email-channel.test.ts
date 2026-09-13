@@ -571,4 +571,62 @@ describe('email channel', () => {
             expect(email.templated[0]).not.toHaveProperty('organizationId');
         });
     });
+
+    describe('availability at fan-out (#17732)', () => {
+        // The channel's half of the ruling: fan-out asks BEFORE it writes a
+        // delivery row, and this channel answers from the transport it was
+        // handed — no I/O, so the service holds no cache (see the member's
+        // TSDoc for the measurement).
+        it('answers unavailable with a declared reason when no email service is registered', () => {
+            const data = fakeData();
+            const ch = createEmailChannel({
+                getEmail: () => undefined,
+                getData: () => data,
+                store: new NotificationTemplateStore({ getData: () => data }),
+            });
+            expect(ch.isAvailable?.(silentCtx(), { organizationId: 'org_1' }))
+                .toEqual({ available: false, reason: 'transport_not_configured' });
+        });
+
+        it('answers available once an email service is registered', () => {
+            const data = fakeData();
+            const email = fakeEmail();
+            const ch = createEmailChannel({
+                getEmail: () => email.service,
+                getData: () => data,
+                store: new NotificationTemplateStore({ getData: () => data }),
+            });
+            expect(ch.isAvailable?.(silentCtx(), { organizationId: 'org_1' })).toEqual({ available: true });
+        });
+
+        it('re-reads the transport on every call — an answer is never memoized', () => {
+            // The transport is hot-swapped by the mail settings change bus, so a
+            // cached answer would outlive the configuration that produced it.
+            const data = fakeData();
+            const email = fakeEmail();
+            let installed: ReturnType<typeof fakeEmail>['service'] | undefined;
+            const ch = createEmailChannel({
+                getEmail: () => installed,
+                getData: () => data,
+                store: new NotificationTemplateStore({ getData: () => data }),
+            });
+            expect(ch.isAvailable?.(silentCtx(), {})).toEqual({ available: false, reason: 'transport_not_configured' });
+            installed = email.service;
+            expect(ch.isAvailable?.(silentCtx(), {})).toEqual({ available: true });
+        });
+
+        it('performs no data access to answer — the probe is not a send', async () => {
+            const data = fakeData();
+            const email = fakeEmail();
+            const ch = createEmailChannel({
+                getEmail: () => email.service,
+                getData: () => data,
+                store: new NotificationTemplateStore({ getData: () => data }),
+            });
+            const before = data.findOnes.length;
+            ch.isAvailable?.(silentCtx(), { organizationId: 'org_1' });
+            expect(data.findOnes.length).toBe(before);
+            expect(email.sent).toHaveLength(0);
+        });
+    });
 });

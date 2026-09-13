@@ -13666,6 +13666,903 @@ export function h61LandedCarrierStillGated(row) {
 }
 
 // ---------------------------------------------------------------------------
+// H62 (#17009) — a decision card whose FACE carries no machine-findable
+// four-facet block
+//
+// ## The invariant and where it is written
+//
+// `.claude/skills/pm-dispatch/references/decision-analysis.md`
+// 〈四棱卡面块固定形状〉 fixes the shape of a decision card's face and makes it a
+// FILING duty: 「落卡即带,⛔ 不留待维护者到场再补」. Two of that section's lines
+// are mechanical, and they are the two facts this row reads:
+//
+//   - 「首行机器可寻标记 `os-decision-facets`:纯文本单行与其 HTML 注释形等价,
+//     任一即满足。」 — the marker, in EITHER spelling.
+//   - 「四棱后一行:`Prior rulings read: …`;未搜成整行写 unresolved。」 — the
+//     prior-ruling reading, the SECOND fact the shape requires.
+//
+// ## Why a row at all — the marker was declared machine-findable and read by
+// NOTHING
+//
+// Measured by #17009's own D1 and re-measured here on `origin/main`:
+// `git grep -n os-decision-facets origin/main -- scripts .claude` returns
+// exactly ONE hit, the declaration itself, with a positive control
+// (`needs-user-decision` reaches seven files under `scripts/`). A marker
+// declared 机器可寻 with no reader is #10034's shape — a written step nobody
+// executes — and the card this row lands for exists because a decision reached
+// the maintainer over an option set an accepted ADR had already closed
+// (#16934 / ADR-0131 D8). The facet block and the prior-ruling line are what
+// make that visible ON THE CARD FACE, and nothing was checking that either had
+// been written: 5 of 27 open decision cards carried the marker at the D1
+// reading.
+//
+// ## Population, and why BODY only
+//
+// OPEN cards carrying `GOVERNED_PR_DECISION_LABEL` — the constant H48 and H52
+// already own, ⛔ never a second spelling. The listing is the UNSCOPED open one
+// (H13/H18/H31's channel) for their reason: `needs-user-decision` is not a
+// member of `SEEN_LABEL_PAGES`, so a decision card carrying no `pm:*` state is
+// first visible there.
+//
+// BODY only, and that is the shape's own decision rather than a saving:
+// 「落卡即带」 makes the block part of the card FACE, so a marker parked in a
+// comment is not the shape. This row therefore buys no thread at all, and says
+// in its sentence that the body is the whole of what it read — ⛔ never a silent
+// single-channel read of a two-channel duty (H4's contract, which does not
+// apply here because the duty itself is one-channel).
+//
+// ## The reading is a LITERAL grep, with no stripping and no position test
+//
+// The shape names its own extraction rule — 「写后回读,提取按字面 grep」 — and
+// forbids exactly ONE direction of error: 「⛔ 注释形读不到永不读作无四棱块」. A
+// literal containment test over the raw body satisfies both spellings at once,
+// which is why the declaration can call them 等价.
+//
+// Two tightenings are therefore refused by name, each because it produces the
+// forbidden direction on a real card:
+//
+//   - `stripMarkdownCode` (H7 reading 4's careful-author protection, right in
+//     its own place) would blank a marker a filer wrote inside a fenced block
+//     or a code span and report a card that HAS the block as having none.
+//   - a positional test (「首行」 read as the body's first line) would report as
+//     absent every card whose facet block sits where the template puts it —
+//     after the six-item prose — which is every correctly filed card.
+//
+// The cheap error in the other direction is accepted and stated: a card that
+// merely QUOTES the token (a card ABOUT the marker) reads as clean. That is the
+// trade the shape prescribes, and this row is report-only, so the cost of the
+// accepted error is one unreported card rather than a wrong write.
+//
+// ## The prior-ruling line is a SECOND READING on this row, never a second row
+//
+// The shape requires two facts, and they fail together far more often than
+// separately — but a card that carries the marker and not the line is NOT a
+// finding here. One breach is reported once, and the row this card was graded
+// for is the facet-block presence row; a second row over the second fact would
+// be a second family for one section of one protocol file. So the line is read
+// for every card this row fires on and named in the row text in three values:
+//
+//   `present`     a `Prior rulings read:` line whose value is a real reading
+//   `unresolved`  the line exists and says the search did not run — which the
+//                 shape spells deliberately so it can never be read as `none`
+//   `absent`      no such line at all
+//
+// `absent` and `unresolved` are different facts and the row keeps them apart
+// (#4690): one says nobody wrote the reading, the other says a seat wrote down
+// that it could not take it.
+//
+// The line's WRITER is `check-prior-rulings.mjs`'s `formatPasteLine`, and this
+// reader is coupled to it by SOURCE TEXT rather than by import, because NEITHER
+// import direction runs. That module imports THIS one (the board resolver and
+// the proxy plan), and both ways back were measured on this tree:
+//
+//   static   a cycle. `check-prior-rulings.mjs` derives module-level constants
+//            from what it imports here, so importing it from this file throws
+//            `ReferenceError: Cannot access … before initialization` the moment
+//            THIS file is the entry point — which it is on every patrol run and
+//            every `--self-test`.
+//   dynamic  a deadlock. `await import(…)` inside `selfTest()` cannot settle:
+//            this module's own top-level `await selfTest()` is still pending,
+//            so the sibling can never finish linking against it. Node reports
+//            `unsettled top-level await` and exits 13.
+//
+// So the self-test reads the writer's SOURCE — the way `familyRegistryCoverage`
+// reads this file's — and pins that it still prints the key this reader greps
+// and still spells the not-run reading `unresolved`. A rename of the line reds
+// there instead of silently emptying this row's second reading. ⛔ Do not
+// "upgrade" that pin to an import: both directions are measured above.
+//
+// ## Free, and report-only
+//
+// One label read and one body read on a card the unscoped listing already
+// holds — no request. ⛔ Never a label written from this script, ⛔ never a
+// remedy write, and ⛔ never a gate over the marker: WHICH ruling governs a
+// decision card is a seat's reading and the maintainer's (SKILL.md
+// 〈升级与决策〉③), and a blocking context over that judgement would be a
+// required-set change, which is the maintainer's.
+// ---------------------------------------------------------------------------
+
+/**
+ * The machine-findable marker a decision card's four-facet block carries.
+ * ⛔ ONE spelling of the token here, because the declaration makes the
+ * plain-text line and its HTML-comment form 等价 — the comment wrapper is
+ * decoration around this token, so a literal containment test reads both.
+ */
+export const DECISION_FACET_MARKER = 'os-decision-facets';
+
+/** The key of the line the shape puts after the four facets. */
+export const PRIOR_RULINGS_KEY = 'Prior rulings read';
+
+/**
+ * The value that says the search did not run. The shape spells it separately
+ * from `none` on purpose — `none` is a search that ran and found nothing, and
+ * collapsing the two would render "could not read the input" as clean (#4690).
+ */
+export const PRIOR_RULINGS_UNRESOLVED = 'unresolved';
+
+/**
+ * Does this body carry the four-facet block's marker, in either spelling?
+ *
+ * A literal containment test over the RAW body — the extraction rule the shape
+ * names for itself (「提取按字面 grep」). ⛔ Not code-stripped and ⛔ not
+ * positional; the banner above argues both refusals from the shape's own
+ * one-directional error rule.
+ */
+export function hasDecisionFacetMarker(body) {
+  return String(body ?? '').includes(DECISION_FACET_MARKER);
+}
+
+/**
+ * The prior-ruling line's reading: `'present'`, `'unresolved'` or `'absent'`.
+ *
+ * Read through `directiveValues`, so the decoration a seat writes around a line
+ * meant to be grepped (backticks, bold, a list marker) is tolerated exactly as
+ * it is for `Blocked-by:` and `Restart-when:` — one decoration contract for
+ * every directive line in this file.
+ *
+ * A card carrying several lines is `present` if ANY of them is a real reading:
+ * one unresolved attempt beside a completed one is a completed search.
+ */
+export function priorRulingsReading(body) {
+  const values = directiveValues(body, PRIOR_RULINGS_KEY);
+  if (values.length === 0) return 'absent';
+  const unresolved = new RegExp(`^${PRIOR_RULINGS_UNRESOLVED}\\b`, 'i');
+  return values.some((v) => !unresolved.test(v)) ? 'present' : 'unresolved';
+}
+
+/**
+ * Does H62 speak about this card at all? ISSUES only, never a PR; a CLOSED card
+ * is out (the label on it is residue, H22/H39's reading); an unreadable
+ * `labels` is out and never read as unlabelled (#4690).
+ */
+export function h62SpeaksAbout(issue) {
+  if (issue?.pull_request) return false;
+  if (issue?.state === 'closed') return false;
+  if (!Array.isArray(issue?.labels)) return false;
+  return labelNames(issue).includes(GOVERNED_PR_DECISION_LABEL);
+}
+
+/**
+ * H62 — null when the card is out of scope or its body carries the marker, else
+ * the finding sentence, which also carries the prior-ruling line's reading.
+ *
+ * ⛔ No angle-bracket placeholder in the sentence: it is rendered into a GitHub
+ * issue body and the platform mutates less-than fragments, so the HTML-comment
+ * spelling is named in WORDS and the self-test pins the absence.
+ */
+export function h62DecisionCardWithoutFacetBlock(issue) {
+  if (!h62SpeaksAbout(issue)) return null;
+  if (hasDecisionFacetMarker(issue?.body)) return null;
+  const prior = priorRulingsReading(issue?.body);
+  const second =
+    prior === 'present'
+      ? `And the second fact the shape requires IS on the face: a \`${PRIOR_RULINGS_KEY}:\` line ` +
+        'carrying a real reading. So what is missing here is the block and its marker, not the search.'
+      : prior === 'unresolved'
+        ? `And the \`${PRIOR_RULINGS_KEY}:\` line the shape puts after the four facets reads ` +
+          `\`${PRIOR_RULINGS_UNRESOLVED}\` — a seat recorded that the prior-ruling search did NOT run. ` +
+          'That is an honest reading and ⛔ not a second finding; it is why the facet block matters ' +
+          'more on this card, not less.'
+        : `And the \`${PRIOR_RULINGS_KEY}:\` line the shape puts after the four facets is ABSENT too — ` +
+          'so nothing on this face says whether a prior-ruling search was ever taken, which is the ' +
+          'exact gap #15929\'s text-level remedy left open and #16934 fell into (a card presented for ' +
+          'a question ADR-0131 D8 already decides).';
+  return (
+    `\`${GOVERNED_PR_DECISION_LABEL}\` and its BODY carries no \`${DECISION_FACET_MARKER}\` marker in ` +
+    'EITHER spelling — neither the plain-text line nor its HTML-comment form — so the four-facet block ' +
+    '〈四棱卡面块固定形状〉 requires is not machine-findable on the card face. 「落卡即带,⛔ 不留待维护者' +
+    '到场再补」: the block is a FILING duty, so a marker parked in a COMMENT is not the shape and this ' +
+    `row read the body alone. ${second} Remedy — WHO and HOW: the FILING seat, in one body edit that ` +
+    'adds the marker line and the four facets (`pnpm check:pm-prior-rulings` prints the prior-ruling ' +
+    'line ready to paste for the same card). ⛔ Report-only: never a label written from this script, ' +
+    'and ⛔ never a gate over the marker — WHICH ruling governs is a seat\'s reading and the ' +
+    'maintainer\'s (SKILL.md 〈升级与决策〉③). Boundaries: a card that CARRIES the marker is clean here ' +
+    'whatever else its face says — the prior-ruling line is a reading ON this row and never a row of ' +
+    'its own; closed-card residue is H22/H39\'s; a decision card nobody routed is H52\'s.'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The stale-`finding` screen — ONE rule, two readers (#16904)
+//
+// `finding` is defined by the state model as a TRANSIENT marker — 「观察类记录,
+// 恒 = 待首次定级;定级即离标;不占队列不进收件箱」 — so `label:finding` answers
+// exactly one question: what has not been graded yet. It does not. The filing
+// card measured 385 of 395 carriers already graded across both boards; a later
+// triage round re-measured 185 of 226; a hand strip cleared 38 more; and the
+// one-time sweep that closes the backlog left objectstack and objectui at 0.
+//
+// A population that was refilled three times by hand is a population that
+// refills, and the reason is an API shape rather than carelessness: the strip
+// has to be passed by the caller on every grading write, so forgetting it is
+// the default outcome. The write-path half of that fix is its own card. This is
+// the READ half: the row that makes the refill visible on the patrol instead of
+// being re-measured by whoever next happens to look.
+//
+// ## Why the rule LIVES HERE and the sweep imports it, rather than the reverse
+//
+// `scripts/pm/sweep-stale-finding.mjs` owns the one-time strip and exports this
+// screen. Reusing it BY IMPORT is the ruling, and 「⛔ never a second copy of the
+// rule」 is the reason — but the import can only point one way, and that was
+// measured on this tree rather than assumed:
+//
+//   this file importing the sweep   a MODULE CYCLE that crashes. The sweep
+//                                   derives module-level constants from
+//                                   `PM_STATE_LABELS`, which lives here, so
+//                                   with THIS file as the entry point — every
+//                                   patrol run, every `--self-test` — the
+//                                   sweep's body evaluates first and throws
+//                                   `ReferenceError: Cannot access
+//                                   'PM_STATE_LABELS' before initialization`.
+//   the sweep importing this file   already how it works, for four symbols.
+//
+// So the rule moves DOWN to the module that already owns the vocabulary it is
+// derived from, and the sweep re-exports it under the names its own callers and
+// self-test already use. One source, one arrow, no copy — and the row's
+// population is not an approximation of the sweep's target set, it IS that set,
+// which is what lets the row say "this is what the sweep would strip today".
+//
+// ## The three `pm:*` label sets in this file are NOT this one, and must not be
+//
+// A fourth question, with a fourth answer, stated so nobody unifies it with the
+// three the header already warns about:
+//
+//   `PM_STATE_LABELS`           (H13) does any label make this card VISIBLE to
+//                               a named reader? — carries `finding`, which is
+//                               exactly why H13 is SILENT on a graded carrier:
+//                               the card IS visible, to the grading round. This
+//                               row is what says it is visible to the WRONG
+//                               reader.
+//   `PM_RESIDUE_LABELS`         (H22) does this label CLAIM work is in flight?
+//                               — drops `finding`, a fine state to close in.
+//                               This row is OPEN-only, so the two never meet.
+//   `PM_EXCLUSIVE_STATE_LABELS` (H25/H29) is this a POSITION the card can be
+//                               in, such that two of them contradict? — drops
+//                               `finding` because it is a card KIND rather than
+//                               a position. ⚠️ That pin is the one this row
+//                               leans on hardest and ⛔ must not be read as
+//                               contradicted: this row does NOT claim `finding`
+//                               is a second position beside the grade. It
+//                               claims the KIND marker has outlived the one
+//                               meaning the state model gives it — 待首次定级 —
+//                               on a card that has plainly been graded. H29 is
+//                               correct and stays silent here.
+//   the screen below            has this card's `finding` marker outlived
+//                               「定级即离标」? — `finding` PLUS evidence of a
+//                               grade: a grading state (`PM_STATE_LABELS` minus
+//                               the three that are not grades) or any
+//                               `priority:*`.
+// ---------------------------------------------------------------------------
+
+/** The transient marker the state model spends as 「待首次定级」. */
+export const STALE_FINDING_LABEL = 'finding';
+
+/**
+ * Members of H13's state vocabulary that are NOT a grade, subtracted below.
+ *
+ *   `finding`   is the marker being judged — it cannot be its own trigger.
+ *   `pm:seat`   is a seat registry post, not a position in the grading flow.
+ *   `pm:epic`   is an index card: it says what a card IS, not that it has been
+ *               read and placed. An epic that HAS been graded carries a
+ *               `priority:*` too, and that is what puts it in the set.
+ */
+export const NOT_A_GRADE = Object.freeze([STALE_FINDING_LABEL, 'pm:seat', 'pm:epic']);
+
+/**
+ * The six states whose presence means a card has been graded — DERIVED from
+ * `PM_STATE_LABELS` rather than restated: a second copy is a second answer to
+ * one question, and this one would drift silently (a state added there and not
+ * here simply stops being a trigger, with no failing test anywhere).
+ */
+export const GRADING_STATE_LABELS = Object.freeze(
+  PM_STATE_LABELS.filter((name) => !NOT_A_GRADE.includes(name)),
+);
+
+/** ⛔ Never swept and never reported, whatever else the post carries. */
+export const NEVER_SWEPT_LABELS = Object.freeze(['pm:seat']);
+
+/** A grade written as a priority. The board spells them `priority:p0` … `priority:p3`. */
+export const PRIORITY_LABEL_SHAPE = /^priority:[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+/** The `priority:*` labels on this card, in the order the card carries them. */
+export function priorityLabelsIn(names) {
+  return (names ?? []).filter((name) => PRIORITY_LABEL_SHAPE.test(name));
+}
+
+/**
+ * Every label on this card that is evidence of a grade: a grading state first
+ * (in the imported vocabulary's order), then the priorities.
+ */
+export function gradeLabelsIn(names) {
+  const carried = new Set(names ?? []);
+  return [...GRADING_STATE_LABELS.filter((label) => carried.has(label)), ...priorityLabelsIn(names)];
+}
+
+/**
+ * The screen, over a listing row. Pure, and it is the whole judgement — neither
+ * reader needs a timeline, a compare or a second read to know whether a card is
+ * in the set.
+ *
+ * ⚠️ A card carrying NO priority is deliberately `ungraded`, never a synthesised
+ * `priority:p3`: a card missing a priority is a card nobody has read, and it
+ * belongs in the ungraded pool rather than in the queue. That constraint was
+ * learned by making the error once, on one card, during a hand sweep.
+ *
+ * @returns {{ verdict: 'stale'|'leave'|'skip', kind: string, triggers: string[],
+ *   detail?: string }}
+ */
+export function staleFindingScreen(issue) {
+  if (issue?.pull_request) return { verdict: 'skip', kind: 'pull-request', triggers: [] };
+  if (issue?.state !== 'open') return { verdict: 'skip', kind: 'not-open', triggers: [] };
+  const names = labelNames(issue ?? {});
+  if (!names.includes(STALE_FINDING_LABEL)) return { verdict: 'skip', kind: 'no-target-label', triggers: [] };
+  const excluded = NEVER_SWEPT_LABELS.filter((label) => names.includes(label));
+  if (excluded.length > 0) {
+    return {
+      verdict: 'skip',
+      kind: 'never-swept',
+      triggers: [],
+      detail: `carries ${excluded.map((l) => `\`${l}\``).join(', ')} — a seat registry post is not a card in the grading pool`,
+    };
+  }
+  const triggers = gradeLabelsIn(names);
+  if (triggers.length === 0) {
+    return {
+      verdict: 'leave',
+      kind: 'ungraded',
+      triggers: [],
+      detail: 'no grading state and no priority — this is the pool the index exists for, and it is honest about it',
+    };
+  }
+  return { verdict: 'stale', kind: 'graded', triggers };
+}
+
+// ---------------------------------------------------------------------------
+// H63 (#16904) — a graded card still wearing the ungraded marker
+//
+// The row over the screen above. ⛔ Report-only, like everything here: the
+// one-time sweep is the tool that strips, it is run once per board by the seat
+// that owns that board, and this row exists precisely because that run is a
+// point measurement of a population that refills. The remedy a row prescribes
+// is a grading write that also drops the marker, never a strip performed from
+// this script.
+//
+// ## Why it fires on the SWEEP's set exactly, `pm:seat` skip included
+//
+// The row's job is to make the refill visible, and "the refill" is only
+// meaningful against the thing that was emptied. A row whose population were
+// merely similar would drift from the tool's over the first change to either;
+// sharing the screen makes 「what the sweep would strip today」 the row's literal
+// reading. The `pm:seat` exclusion travels with it for the same reason it
+// exists in the tool: a seat registry post is not a card in the grading pool,
+// so its marker is not an ungraded card's marker, and reporting it would send a
+// reader to strip a label that is doing its job.
+//
+// ## Population and cost
+//
+// The UNSCOPED open listing (H13/H18/H31's channel), because `finding` is not a
+// member of `SEEN_LABEL_PAGES` — a carrier holding no `pm:*` state at all is
+// first visible there. One label read on a row that listing already holds: no
+// request, no body, no thread.
+// ---------------------------------------------------------------------------
+
+/**
+ * H63 — null when the card is out of scope, genuinely ungraded, or a post this
+ * screen never judges; else the finding sentence naming the triggers that put
+ * it in the set.
+ */
+export function h63StaleFindingBesideGrade(issue) {
+  const screen = staleFindingScreen(issue);
+  if (screen?.verdict !== 'stale') return null;
+  const triggers = screen.triggers.map((l) => `\`${l}\``).join(', ');
+  const states = screen.triggers.filter((l) => GRADING_STATE_LABELS.includes(l));
+  const placed =
+    states.length > 0
+      ? `it carries ${states.map((l) => `\`${l}\``).join(', ')}, a position on the work state machine`
+      : 'it carries a priority, which is written only by a seat that has READ the card';
+  return (
+    `open, graded, and still carrying \`${STALE_FINDING_LABEL}\` beside ${triggers} — the state model ` +
+    'makes that marker transient (「观察类记录,恒 = 待首次定级;定级即离标;不占队列不进收件箱」), so ' +
+    `a graded carrier is a half-written grading act: ${placed}, while the marker still says the card is ` +
+    'waiting for its first grade. The cost is not a wrong number — it is the index: `label:finding` is ' +
+    'the per-fire obligation 「每 fire 定完全部未定级 finding」, and an obligation whose only index ' +
+    'returns four wrong rows in five is discharged by sampling or skipped. Two lanes have already ' +
+    'declined to dispatch a card in this shape, which is the strict reading of 不占队列. Remedy — WHO ' +
+    'and HOW: the seat that next writes a grade on this card, dropping the marker in the SAME write ' +
+    '(「定级即离标」); the standing backlog is the one-time sweep\'s, run once per board by the seat ' +
+    'that owns it, ⛔ never a loop from here. ⛔ Report-only: no label is written from this script, and ' +
+    '⛔ no grade is ever synthesised — a card with no priority has not been read and belongs in the ' +
+    'ungraded pool, not in the queue. Boundaries: a card carrying ONLY the marker is the pool the ' +
+    'index exists for and is clean here; a `pm:seat` post is never judged; closed-card residue is ' +
+    'H22/H39\'s, and `finding` is deliberately not in that set; the two-positions contradiction is ' +
+    'H29\'s, which is correct to stay silent — this row does not claim the marker is a position.'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H64 (#18069) — a seat- or dev-signed artefact whose GitHub AUTHOR is a user
+// account rather than the App.
+//
+// ## The defect, and why it is a half-state rather than a style note
+//
+// Every agent on this board shares one protocol identity, and that identity has
+// two spellings on the API. Content written through the MCP GitHub tools is
+// authored by a USER account; content written through the REST proxy is
+// authored by `claude[bot]`, whose `user.type` is `Bot`. Measured 2026-09-13 on
+// this board: #18045 and objectui#9404 authored `os-project-manager` with
+// bodies signed by the skills seat, PR #18051 authored `os-project-manager`
+// with a dev-signed body, comment 5652138683 on objectui#9370 authored
+// `os-tesla`; and comments 5654046782 / 5654227341 / 5654347747 authored
+// `claude[bot]` as the clean side of the same pair.
+//
+// The two spellings are not interchangeable, and the inequality is the
+// half-state: a SUSPENDED user account hides everything that account authored.
+// The card, the claim and the report stay in the database and leave every
+// reader's view at once — so a seat's own record of what it did is held by an
+// account the protocol does not control. The artefact says a seat wrote it,
+// GitHub says a person did, and the two carriers disagree about one live
+// artefact with the repair on the board. That is `state`'s definition exactly.
+//
+// ## The artefact is recognised STRUCTURALLY — ⛔ and never from a roster
+//
+// The roster refusal is H44's, taken for H44's reason, and it is restated here
+// because this is the row that looks like it needs one: there is no seat roster
+// in this repo (the only frozen account list is `GOVERNED_APPROVERS`, the
+// APPROVER set), one account is simultaneously a seat and the maintainer's own
+// login (H43's header), and the seat-post sticker login does not match comment
+// authorship. ⚠️ The direction is what makes the two rows agree rather than
+// collide: H44 refused an author test for FINDING seat artefacts and that
+// refusal stands — this row finds them exactly the structural way H44, H33, H34
+// and H37 do, and reads the author only as the DEFECT, never as the way in.
+//
+// ## The six signature forms, and the TWO the measurement widened
+//
+// Four forms reuse a marker this file already owns, so 「what is a claim」 has
+// one answer here and not two: `CLAIM_COMMENT_MARKER`, `OS_DEV_REPORT_MARKER`,
+// `CONTRACT_REVIEW_HEADING_MARKER` beside a `Reviewed-by:` directive line, and
+// `directiveValues`' decoration contract. Two are this row's own: the filing
+// header, and a session id.
+//
+// ⚠️ Two of the filing card's five forms were MEASURED against the specimens it
+// named and would not reach them. Both widenings are recorded here because a
+// reader comparing the card to the code must see the reason, not a drift:
+//
+//   the claim form  the card wrote 「a `Claim:` block with a `Session:` line」.
+//                   Comment 5652138683 — the card's own os-tesla fixture —
+//                   opens `Claim: objectui#9370 …` and carries NO `Session:`
+//                   line anywhere in its 35 lines. Requiring the line excludes
+//                   the specimen, so the form is `CLAIM_COMMENT_MARKER` alone,
+//                   which is also the marker every other claim reader here uses.
+//   the session form  the card wrote 「a bare session id in the first three
+//                   lines」. PR #18051 — the card's own dev-signed fixture —
+//                   carries its ONLY session token on line 45 of 45, in the
+//                   attribution footer. Measured over the 9 open PRs on this
+//                   board, the first-three-lines window fires on 0 of them and
+//                   the footer form on 4. So the footer is a SIXTH form rather
+//                   than a widening of the fifth: the head window stays narrow
+//                   (a session id quoted mid-body is prose), and the footer is
+//                   matched as the attribution URL `claude.ai/code/session_…`,
+//                   which is written by a Claude Code session and by nothing
+//                   else. ⛔ The BARE footer — the platform's own appended
+//                   `claude.ai/code` with no session id — is deliberately NOT a
+//                   signature: the platform appends it to comments, so reading
+//                   it would make the row fire on the platform's own byte.
+//
+// ## `user.type` is the test; `user.login` is printed, never tested
+//
+// The card offered them as equivalents (「`user.type !== 'Bot'`, equivalently
+// `user.login !== 'claude[bot]'`」) and they are not. `user.type` is the account
+// KIND: it answers `Bot` for EVERY App-authored artefact, so a second App on
+// this board is judged correctly the day it appears and an App rename changes
+// nothing. The login test is a one-name roster wearing an equality sign — it
+// judges `github-actions[bot]`, which authored 2 open cards and 1 open PR here,
+// as a user account. Measured: those three artefacts carry no signature at all,
+// so the two tests agree on TODAY's board and would diverge on the first
+// workflow-authored artefact that carries one. This row trusts `user.type`, and
+// prints `user.login` because naming the author is the row's job.
+//
+// An author that cannot be read is DECLINED, never accused: a row whose `user`
+// is missing or malformed is counted in the clause and judged by nobody (#4690
+// in the direction that matters here — an unknown must not become an
+// accusation).
+//
+// ## The channel is INFERRED where the payload carries it, and UNREAD where it
+// does not
+//
+// `performed_via_github_app` rides issue rows and comment rows: a slug means
+// the write went through that App's tools under a user token (the MCP GitHub
+// tool), an absent one means a user PAT. ⚠️ The `/pulls` listing does not serve
+// the field AT ALL — measured over all 9 open PRs — so a PR's channel is
+// reported as UNREAD with both candidates named, rather than inferred from an
+// absence that means nothing here. ⛔ No per-PR fetch is bought to close it.
+//
+// ## The pin, and why everything before it is a CENSUS
+//
+// H55's shape, for H55's reason. The write-shape discipline is 2026-09-13's
+// ruling; the board in front of it was written under the older practice, and
+// 「re-post it through the proxy」 is not a remedy anyone will perform 164 times.
+// So `created_at` before `USER_AUTHORED_WRITE_SINCE` is COUNTED in the summary
+// clause and files no row, and on/after it is judged. Measured at the pin: 33
+// open card bodies + 1 open PR body judged, against 164 cards + 3 PRs in the
+// census reaching back to 2026-08-07. An unreadable `created_at` is judged,
+// never silently legacy.
+//
+// `created_at` rather than H55's `updated_at`, and the difference is the
+// subject: H55 judges an ENTRY into a label state, which has no creation
+// instant of its own, while this row judges a WRITE, which does. ⚠️ Declared
+// residual: an EDIT re-writes a body through the same channel without moving
+// `created_at`, so an edited artefact is judged at the instant it was first
+// written. This row does not read edit history and buys no timeline page.
+//
+// ## Why this family CAPS its rows — the renderer's ordering, not a preference
+//
+// `renderMarkdown` sorts rows by band rank and then by card number ASCENDING,
+// and the body trim eats the TAIL. For every other family that is neutral. For
+// this one it is inverted: the newest write carries the highest number, so the
+// artefact this row exists to surface within the hour is the FIRST thing the
+// trim removes. Changing that sort belongs to every family and is not this
+// row's to take, so the row bounds ITSELF instead: the judged findings are
+// ordered NEWEST-first and the freshest `H64_ROW_CAP` are filed. The clause
+// prints the full judged count on every run, so a reader can never mistake the
+// rendered rows for the population.
+//
+// ## Population and cost — ZERO requests
+//
+// Open card bodies (the unscoped listing and the label pages, both in hand),
+// open PR bodies (`seenPrs`, in hand), and the card comment threads
+// `commentCache` already holds when this pass runs — H44's and H56's corpus
+// exactly, which is why this pass sits beside them and BEFORE H46's leg (b)
+// widens the cache: three clauses describing one population is worth more than
+// a few extra threads. ⚠️ Declared residual, H44's and stated again because it
+// is this row's too: a PULL-REQUEST comment thread is not read here — H48 and
+// H51 buy those for a different population, and folding them in would make this
+// row's corpus depend on which PRs happened to be governed or gated.
+//
+// One row per CARRIER for comments (H44's choice), naming the NEWEST offender
+// rather than H44's oldest: the remedy is one re-post per comment either way,
+// and the row that reaches a reader should be the one whose subject is still
+// this hour's.
+//
+// ## Boundaries, pinned rather than described
+//
+// An authorized REVIEW (os-zhuang / hotlong) and the maintainer's own prose are
+// out of this population TWICE: a review is a `/pulls/{n}/reviews` object this
+// row never reads, and neither carries a seat signature, so the structural gate
+// excludes them before the author is ever consulted. ⛔ That is by construction
+// and not by exemption — this row has no exemption list and cannot acquire one
+// without acquiring the roster it refuses.
+// ---------------------------------------------------------------------------
+
+/**
+ * The instant from which a seat- or dev-signed write owes the App channel — the
+ * UTC day of the ruling that put the write-shape discipline in force. Pinned as
+ * data for `MAINTAINER_ACTION_LINE_SINCE`'s reason: the board in front of it was
+ * written under the older practice and is a census, not a worklist.
+ */
+export const USER_AUTHORED_WRITE_SINCE = '2026-09-13T00:00:00Z';
+
+/**
+ * How many of the freshest judged findings this family files per run. See the
+ * banner's ordering argument — the cap is what keeps the newest write from
+ * being the first row the body trim removes, never a budget preference. Ten is
+ * one patrol window's measured arrivals with headroom: 34 judged artefacts on
+ * the pin day against `PATROL_CADENCE_HOURS`-spaced runs is ~8.5 per window.
+ */
+export const H64_ROW_CAP = 10;
+
+/** A Claude Code session id, as a signature writes it. ⛔ No `g` flag. */
+export const SEAT_SESSION_ID = /session_01[0-9A-Za-z]{22}/;
+
+/** How many opening lines of a body count as its HEAD for the bare-id form. */
+export const SEAT_SIGNATURE_HEAD_LINES = 3;
+
+/**
+ * The attribution footer's SESSION form. ⛔ Deliberately not the bare
+ * `claude.ai/code` footer, which the platform appends to comments itself — see
+ * the banner.
+ */
+export const SEAT_SIGNATURE_FOOTER = /claude\.ai\/code\/session_01[0-9A-Za-z]{22}/;
+
+/**
+ * The filing header — `Filed by the … seat` / `… dev`, line-anchored with a
+ * bounded decoration prefix so the measured spellings (`**`, `⛔ **`, a
+ * blockquote, an HTML small-text tag) all read while a mention buried in a
+ * paragraph does not.
+ */
+export const SEAT_SIGNATURE_FILER = /^[^\n]{0,24}Filed by the\b[^\n]{0,80}?\b(?:seat|dev)\b/im;
+
+/** The key the contract-review heading's second half writes. */
+export const REVIEWED_BY_KEY = 'Reviewed-by';
+
+/** A body's opening lines — the window the bare-session-id form reads. */
+export function seatSignatureHead(text, lines = SEAT_SIGNATURE_HEAD_LINES) {
+  return String(text ?? '').split('\n').slice(0, lines).join('\n');
+}
+
+/**
+ * The six signature forms, as data so the self-test can drive each by name and
+ * a reader can check the banner against the tests. Ordered most specific first:
+ * the form a row NAMES is the first that matches, and the footer is last
+ * because every body a Claude Code session writes carries one.
+ *
+ * `what` is rendered into a GitHub issue body, so ⛔ no less-than fragment
+ * appears in it (the platform mutates those) — the self-test pins the absence.
+ */
+export const SEAT_SIGNATURE_FORMS = Object.freeze([
+  Object.freeze({
+    kind: 'claim',
+    what: 'a `Claim:` block',
+    test: (text) => CLAIM_COMMENT_MARKER.test(text),
+  }),
+  Object.freeze({
+    kind: 'report',
+    what: 'an `os-dev-report` marker',
+    test: (text) => OS_DEV_REPORT_MARKER.test(text),
+  }),
+  Object.freeze({
+    kind: 'review',
+    what: 'a `## Contract review` heading with its `Reviewed-by:` line',
+    test: (text) =>
+      CONTRACT_REVIEW_HEADING_MARKER.test(text) && directiveValues(text, REVIEWED_BY_KEY).length > 0,
+  }),
+  Object.freeze({
+    kind: 'filer',
+    what: 'a `Filed by the … seat` / `… dev` header',
+    test: (text) => SEAT_SIGNATURE_FILER.test(text),
+  }),
+  Object.freeze({
+    kind: 'session',
+    what: `a bare session id in its first ${SEAT_SIGNATURE_HEAD_LINES} lines`,
+    test: (text) => SEAT_SESSION_ID.test(seatSignatureHead(text)),
+  }),
+  Object.freeze({
+    kind: 'footer',
+    what: 'a Claude Code attribution footer carrying a session id',
+    test: (text) => SEAT_SIGNATURE_FOOTER.test(text),
+  }),
+]);
+
+/**
+ * Which seat/dev signature this text carries, or `null` for ordinary prose.
+ *
+ * @param {string} body
+ * @returns {{ kind: string, what: string }|null}
+ */
+export function seatSignature(body) {
+  const text = String(body ?? '');
+  if (!text) return null;
+  for (const form of SEAT_SIGNATURE_FORMS) {
+    if (form.test(text)) return { kind: form.kind, what: form.what };
+  }
+  return null;
+}
+
+/**
+ * The author of a REST row, or `null` when the payload does not carry a
+ * readable one — declined, never read as a user account (#4690 in the direction
+ * that matters here: an unknown must not become an accusation).
+ *
+ * @returns {{ login: string, type: string, isApp: boolean }|null}
+ */
+export function artefactAuthor(row) {
+  const user = row?.user;
+  const login = typeof user?.login === 'string' ? user.login.trim() : '';
+  const type = typeof user?.type === 'string' ? user.type.trim() : '';
+  if (!login || !type) return null;
+  return { login, type, isApp: type === 'Bot' };
+}
+
+/**
+ * Which channel this write implies, read off `performed_via_github_app`.
+ *
+ * Three states, never two: `'app'` (a slug — the MCP GitHub tool under a user
+ * token), `'pat'` (the field is served and empty — a user PAT), `'unread'` (the
+ * payload does not carry the field at all, which is every row the `/pulls`
+ * listing serves). ⛔ An unread field is never reported as a PAT.
+ *
+ * @returns {{ kind: 'app'|'pat'|'unread', slug: string|null }}
+ */
+export function artefactChannel(row) {
+  if (!row || typeof row !== 'object' || !('performed_via_github_app' in row)) {
+    return { kind: 'unread', slug: null };
+  }
+  const slug = row?.performed_via_github_app?.slug;
+  if (typeof slug === 'string' && slug.trim()) return { kind: 'app', slug: slug.trim() };
+  return { kind: 'pat', slug: null };
+}
+
+/**
+ * Where a write falls against the pin, read from `created_at`: `'legacy'`
+ * (before it — census), `'judged'` (on/after — a row candidate), `'undated'`
+ * (unreadable — judged, never silently legacy).
+ */
+export function h64EntryClass(row, since = USER_AUTHORED_WRITE_SINCE) {
+  const at = Date.parse(row?.created_at ?? '');
+  if (!Number.isFinite(at)) return 'undated';
+  return at < Date.parse(since) ? 'legacy' : 'judged';
+}
+
+/**
+ * Does H64 speak about this text at all? A readable body carrying a signature,
+ * whose author is readable and is NOT an App. The pin is judged separately, so
+ * this predicate answers membership and `h64EntryClass` answers freshness.
+ *
+ * @param {{ kind: string, row: object }} text
+ */
+export function h64SpeaksAbout(text) {
+  if (typeof text?.row?.body !== 'string') return false;
+  if (!seatSignature(text.row.body)) return false;
+  const author = artefactAuthor(text.row);
+  if (!author) return false;
+  return !author.isApp;
+}
+
+/** How the row names each artefact kind. */
+export const H64_ARTEFACT_KINDS = Object.freeze(['card', 'pull request', 'comment']);
+
+/**
+ * H64 — `null` when the text is out of scope or legacy, else the finding
+ * sentence naming the artefact, its author, the channel implied and the remedy.
+ *
+ * ⛔ No less-than fragment in the sentence: it is rendered into a GitHub issue
+ * body and the platform mutates those, so every placeholder is spelled in
+ * words and the self-test pins the absence.
+ *
+ * @param {{ kind: string, row: object, carrier?: object }} text
+ * @param {number} more — further offending comments on the same carrier.
+ * @param {string} since
+ */
+export function h64UserAuthoredSeatContent(text, more = 0, since = USER_AUTHORED_WRITE_SINCE) {
+  if (!h64SpeaksAbout(text)) return null;
+  const entry = h64EntryClass(text.row, since);
+  if (entry === 'legacy') return null;
+  const signature = seatSignature(text.row.body);
+  const author = artefactAuthor(text.row);
+  const channel = artefactChannel(text.row);
+  const kind = H64_ARTEFACT_KINDS.includes(text.kind) ? text.kind : 'artefact';
+  const subject =
+    kind === 'comment'
+      ? `comment \`${String(text.row?.id ?? 'an unread id')}\` on this card`
+      : `this open ${kind}`;
+  const channelClause =
+    channel.kind === 'app'
+      ? `The write went through the \`${channel.slug}\` App's tools under that account's token — the MCP ` +
+        'GitHub tool channel'
+      : channel.kind === 'pat'
+        ? 'The payload carries no `performed_via_github_app`, so the write was made with a user PAT rather ' +
+          'than through an App'
+        : 'The channel is UNREAD rather than inferred: the `/pulls` listing this row reads does not serve ' +
+          '`performed_via_github_app` at all, so this write is either the MCP GitHub tool or a user PAT and ' +
+          'no absence here decides which';
+  const moreClause =
+    more > 0
+      ? ` ${more} further comment(s) on this carrier carry the same defect; this is the NEWEST.`
+      : '';
+  const dated =
+    entry === 'undated'
+      ? ' ⚠️ Its `created_at` could not be read, so it is judged rather than counted as a legacy write — an ' +
+        'unknown reading must not present as a clean one.'
+      : '';
+  return (
+    `${subject} carries ${signature.what} — a seat/dev artefact — while GitHub records its author as ` +
+    `\`${author.login}\`, a USER account (\`user.type\` = \`${author.type}\`, not \`Bot\`). ${channelClause}. ` +
+    'The two carriers disagree about one artefact: the text says a seat or a dev wrote it, the account ' +
+    'field says a person did. The cost is not attribution tidiness — a user account that is SUSPENDED ' +
+    'hides everything it authored, so the card, the claim or the report leaves every reader at once while ' +
+    'staying in the database, and the protocol side controls neither the account nor the moment. Content ' +
+    'written through the REST proxy is authored `claude[bot]` (`user.type` `Bot`) and is not affected.' +
+    `${moreClause}${dated} Remedy — WHO and HOW: the seat or dev that owns the artefact re-posts it ` +
+    'through the REST proxy; the original STAYS as history and is neither deleted nor edited into a ' +
+    'redirect, because a re-post is a second durable copy and a deletion is one fewer. ⛔ Report-only: ' +
+    'this row writes nothing, relabels nothing and re-posts nothing on anyone\'s behalf. Boundaries: an ' +
+    'authorized review and the maintainer\'s own prose are out of this population by CONSTRUCTION rather ' +
+    'than by exemption — a review is an object this row never reads and neither carries a signature, so ' +
+    'the structural gate excludes them before the author is consulted, and ⛔ this row holds no roster of ' +
+    `accounts to exempt from. Writes created before ${since} are COUNTED in the summary clause and file ` +
+    'no row: the board in front of the pin was written under the older practice, and this row is the ' +
+    'alarm for what happens now, not a worklist over what happened then.'
+  );
+}
+
+/**
+ * The whole family over one run's corpus — census and rows in one pure pass, so
+ * the two can never describe different populations.
+ *
+ * Comments are grouped per CARRIER (H44's choice) and the NEWEST offender wins
+ * the row; bodies stand alone. Judged rows are ordered newest-first and cut to
+ * `cap` — the banner's ordering argument.
+ *
+ * @param {{ kind: string, row: object, carrier?: object }[]} texts — every text
+ *   this sweep read, bodies and comments alike.
+ * @returns {{ counts: object, rows: { subject: object, message: string }[] }}
+ */
+export function h64Sweep(texts, { since = USER_AUTHORED_WRITE_SINCE, cap = H64_ROW_CAP } = {}) {
+  const counts = {
+    texts: 0,
+    signed: 0,
+    user: 0,
+    legacy: 0,
+    unreadAuthor: 0,
+    oldest: null,
+    judged: 0,
+    rows: 0,
+  };
+  const carriers = new Map();
+  const direct = [];
+  for (const text of texts ?? []) {
+    counts.texts += 1;
+    const body = typeof text?.row?.body === 'string' ? text.row.body : '';
+    if (!seatSignature(body)) continue;
+    counts.signed += 1;
+    const author = artefactAuthor(text.row);
+    if (!author) {
+      counts.unreadAuthor += 1;
+      continue;
+    }
+    if (author.isApp) continue;
+    counts.user += 1;
+    const entry = h64EntryClass(text.row, since);
+    if (entry === 'legacy') {
+      counts.legacy += 1;
+      const at = String(text.row.created_at ?? '');
+      if (at && (counts.oldest === null || at < counts.oldest)) counts.oldest = at;
+      continue;
+    }
+    counts.judged += 1;
+    const at = Date.parse(text.row?.created_at ?? '');
+    const stamp = Number.isFinite(at) ? at : 0;
+    if (text.kind !== 'comment') {
+      direct.push({ text, stamp, more: 0 });
+      continue;
+    }
+    const key = Number(text.carrier?.number);
+    if (!Number.isFinite(key)) continue;
+    const held = carriers.get(key);
+    if (!held) {
+      carriers.set(key, { text, stamp, more: 0 });
+      continue;
+    }
+    const more = held.more + 1;
+    if (stamp > held.stamp) carriers.set(key, { text, stamp, more });
+    else held.more = more;
+  }
+  const ordered = [...direct, ...carriers.values()].sort(
+    (a, b) =>
+      b.stamp - a.stamp ||
+      Number(b.text?.row?.id ?? b.text?.row?.number ?? 0) -
+        Number(a.text?.row?.id ?? a.text?.row?.number ?? 0),
+  );
+  const rows = [];
+  for (const entry of ordered.slice(0, Math.max(0, cap))) {
+    const message = h64UserAuthoredSeatContent(entry.text, entry.more, since);
+    if (!message) continue;
+    rows.push({ subject: entry.text.carrier ?? entry.text.row, message });
+  }
+  counts.rows = rows.length;
+  return { counts, rows };
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -13984,6 +14881,24 @@ export const SWEEP_COUNT_KEYS = [
   'linkageCardsRead',
   'linkageUnread',
   'linkageShort',
+  // H64's census and coverage set (#18069). `seatSignedTexts` is how many texts
+  // this row judged at all (open card and PR bodies plus the card threads
+  // already in `commentCache`), `seatSignedSigned` how many carried a seat/dev
+  // signature and `seatSignedUser` how many of THOSE are authored by a user
+  // account — the finding population, legacy and judged together.
+  // `seatSignedLegacy`/`seatSignedOldest` are the census behind the pin,
+  // `seatSignedUnreadAuthor` the rows whose `user` could not be read (declined,
+  // never accused) and `seatSignedRows` how many of the judged findings this
+  // family actually FILED under its own cap — without that last number a capped
+  // run and a quiet board render identically.
+  'seatSignedTexts',
+  'seatSignedSigned',
+  'seatSignedUser',
+  'seatSignedJudged',
+  'seatSignedLegacy',
+  'seatSignedOldest',
+  'seatSignedUnreadAuthor',
+  'seatSignedRows',
   'refBeyond',
 ];
 
@@ -14456,6 +15371,22 @@ export function summaryLine(counts, findingCount) {
     // purchase in this file that is a per-card timeline page, its cap, and the
     // measured fact that the commit leg fires on nothing here.
     `Merged-PR closing linkage (H59): ${h59LinkageClause(counts)} ` +
+    // H64's census and coverage set (#18069). UNCONDITIONAL like every other
+    // window's, and it is the only place three of this row's readings are
+    // visible at all: the population behind the pin (a census that files no
+    // row), the authors that could not be read (declined, never accused), and
+    // how many judged findings the family's own cap left unfiled.
+    `User-authored seat content (H64): ${counts.seatSignedSigned ?? 0} of ${counts.seatSignedTexts ?? 0} ` +
+    `text(s) read carry a seat/dev signature; ${counts.seatSignedUser ?? 0} of those are authored by a ` +
+    `USER account rather than \`claude[bot]\` — ${counts.seatSignedJudged ?? 0} created on/after ` +
+    `${USER_AUTHORED_WRITE_SINCE} and judged, ${counts.seatSignedRows ?? 0} filed as rows under this ` +
+    `family's own ${H64_ROW_CAP}-row cap (newest first, because the body trim eats the highest card ` +
+    `numbers), and ${counts.seatSignedLegacy ?? 0} counted here as a CENSUS` +
+    `${counts.seatSignedOldest ? ` reaching back to ${counts.seatSignedOldest}` : ''}. ` +
+    `${counts.seatSignedUnreadAuthor ?? 0} signed text(s) carried no readable \`user\` and were ` +
+    'DECLINED rather than accused. It fetches NOTHING of its own: the corpus is the open card and PR ' +
+    'bodies in hand plus the card threads H44 and H56 read, so a PULL-REQUEST comment thread is outside ' +
+    'it by construction and these numbers are a LOWER BOUND. ' +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
 }
@@ -14518,6 +15449,7 @@ export const SUMMARY_CLAUSE_ANCHORS = [
   ['h57Scheduled', 'Scheduled non-blocking workflows (H57): '],
   ['h58RulingMarkers', 'Queued ruling markers (H58): '],
   ['h59Linkage', 'Merged-PR closing linkage (H59): '],
+  ['h64SeatSigned', 'User-authored seat content (H64): '],
   ['reportOnly', 'Report-only: '],
 ];
 
@@ -15113,6 +16045,50 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   // losing this row to the trim is 17 days on a P0 whose deployment had served
   // 503 for a day. ⛔ Not `inventory`: it alarms about one card, not a population.
   H52: 'stall',
+
+  // H62 is a `state`, and each of the other three bands is refused on its own
+  // criterion. ⛔ Not `gate`: that band exists for the row that can tell a
+  // STRIPPED gate from an ungated card — an ABSENCE reading as a GREEN LIGHT —
+  // and an absent facet block clears nothing; it leaves the maintainer reading
+  // a card whose analysis is not on its face, which is the opposite of a
+  // clearance. ⛔ Not `stall`: nothing is stopped — the card sits in the
+  // decision box exactly as it should, and no scan is waiting on the marker;
+  // whether a missing block DELAYS a ruling is unmeasured by this row and it
+  // claims no such thing. ⛔ Not `inventory`: it alarms about one card, not a
+  // population, even though the first reading found the marker on 5 of 27. What
+  // is left is `state`'s definition exactly — a LIVE card whose face is
+  // half-written against a shape it owes, the whole repair one body edit on the
+  // board, by the seat that filed it.
+  H62: 'state',
+
+  // H63 is a `state`, and the other three bands are refused on their own
+  // criteria. ⛔ Not `gate`: that band exists for the row that can tell a
+  // STRIPPED gate from an ungated card — an ABSENCE reading as a green light —
+  // and here nothing is absent: a label is PRESENT and says something that
+  // stopped being true. ⛔ Not `stall`: whether a card in this shape is actually
+  // stopped is a reading two lanes took and this row does not take for them —
+  // it claims a half-written grading act, not a halted card. ⛔ Not `inventory`:
+  // it alarms about one card; the population reading belongs to the one-time
+  // sweep, which reports it as counts. What is left is `state` exactly — a live
+  // card whose labels contradict each other, repaired on the board in one
+  // write — and it is H29's band, the row this one is careful not to duplicate.
+  H63: 'state',
+
+  // H64 is a `state` (#18069), and the other three bands are refused on their
+  // own criteria rather than on this subject's vocabulary. ⛔ NOT `gate`: that
+  // band exists for the row that can tell a STRIPPED gate from an ungated card
+  // — an ABSENCE reading as a green light — and here nothing is absent and
+  // nothing clears: both carriers are PRESENT and legible, a signed text and an
+  // account field, and they disagree. That is H54's refusal, taken for H54's
+  // reason. ⛔ NOT `stall`: nothing is stopped. The claim claimed, the report
+  // reported, the PR is open — whether a user-authored artefact DELAYS anything
+  // is unmeasured by this row and it claims no such thing; what is at risk is
+  // the artefact's survival, not its motion. ⛔ NOT `inventory`: it alarms about
+  // ONE artefact, and the population reading — how many writes sit behind the
+  // pin — is a summary census that takes no band at all (H39's shape). What is
+  // left is `state`'s definition exactly: a LIVE artefact whose two carriers
+  // contradict each other, the repair a re-post on the board.
+  H64: 'state',
 
   // H57 is a `stall` (#17132), and the three refusals are each taken on the
   // refused band's own criterion rather than on this subject's vocabulary —
@@ -19055,6 +20031,21 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     // never disagree about which PR delivers which card.
     const gateSplit = h31ContractReviewCarrierSplit(issue, openWindow);
     if (gateSplit) findings.push([issue, 'H31', gateSplit]);
+    // H62 (#17009) — the decision card's FACE. This listing for H31's reason
+    // one line up: `needs-user-decision` is not one of the labels the label
+    // loop pages (`SEEN_LABEL_PAGES`), so a decision card carrying no `pm:*`
+    // state at all is first visible HERE. Free — one label read and one body
+    // read on a row this listing already holds, and BODY ONLY by the shape's
+    // own rule (「落卡即带」), so it buys no thread.
+    const facelessDecision = h62DecisionCardWithoutFacetBlock(issue);
+    if (facelessDecision) findings.push([issue, 'H62', facelessDecision]);
+    // H63 (#16904) — the same listing for the same reason: `finding` is not one
+    // of the labels the label loop pages, so a carrier holding no `pm:*` state
+    // is first visible HERE. One label read on a row this listing already
+    // holds, through the screen the one-time sweep strips on — so the row's
+    // population IS the sweep's target set rather than an approximation of it.
+    const staleFinding = h63StaleFindingBesideGrade(issue);
+    if (staleFinding) findings.push([issue, 'H63', staleFinding]);
   }
 
   // H35 (#11881) — the EVENT behind the state H31 compares. One repo-wide
@@ -19415,6 +20406,40 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   stats.stampComments = h56Judged;
   stats.stampUnjudged = h56Unjudged;
   stats.stampAmbiguous = h56Held;
+
+  // H64 (#18069) — the user-authored seat/dev write. Placed HERE, after H56 and
+  // BEFORE H46, for H56's reason in H56's words: H46's leg (b) widens
+  // `commentCache`, so judging this row after it would hand H64 a comment
+  // corpus H44 and H56 never saw and the three clauses would stop describing
+  // one population. It buys NOTHING — every body and every thread it reads was
+  // already paid for by a row above it, and the summary clause states the one
+  // thing that costs: a PULL-REQUEST comment thread is outside the corpus.
+  //
+  // The card union is H46's, built the same way one pass below for the same
+  // reason (a card can arrive on a label page or on the unscoped listing, and
+  // a number must be judged once). Both listings filter `!i.pull_request`, so
+  // the `card` and `pull request` legs cannot judge one row twice.
+  const h64Cards = new Map();
+  for (const [number, issue] of seenUnscoped) h64Cards.set(number, issue);
+  for (const [number, issue] of seen) h64Cards.set(number, issue);
+  const h64Texts = [];
+  for (const issue of h64Cards.values()) h64Texts.push({ kind: 'card', row: issue });
+  for (const pr of seenPrs.values()) h64Texts.push({ kind: 'pull request', row: pr });
+  for (const [number, rows] of commentCache) {
+    const carrier = h64Cards.get(number);
+    if (!carrier) continue;
+    for (const row of rows ?? []) h64Texts.push({ kind: 'comment', row, carrier });
+  }
+  const h64 = h64Sweep(h64Texts);
+  for (const row of h64.rows) findings.push([row.subject, 'H64', row.message]);
+  stats.seatSignedTexts = h64.counts.texts;
+  stats.seatSignedSigned = h64.counts.signed;
+  stats.seatSignedUser = h64.counts.user;
+  stats.seatSignedJudged = h64.counts.judged;
+  stats.seatSignedLegacy = h64.counts.legacy;
+  stats.seatSignedOldest = h64.counts.oldest;
+  stats.seatSignedUnreadAuthor = h64.counts.unreadAuthor;
+  stats.seatSignedRows = h64.counts.rows;
 
   // H46 — the claim-less implementation. Placed HERE, AFTER H44, deliberately:
   // leg (b) adds threads to `commentCache`, and H44's corpus is whatever the
@@ -22714,6 +23739,472 @@ async function selfTest() {
   t('H61 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
   t('⛔ H61: the prerequisite-refusal exit code is unchanged — this row adds none', EXIT_PREREQUISITE_NOT_MET, 3);
   t('⛔ H61: and the band vocabulary is unchanged — `inventory` was already one of them', HALF_STATE_FAMILY_BANDS.map((band) => band.name).join(','), 'gate,unregistered,stall,state,inventory');
+
+  // -- H62 (#17009): a decision card whose FACE carries no four-facet block ---
+  //
+  // The two spellings the declaration calls 等价, the three-valued prior-ruling
+  // reading beside them, and — because the shape forbids exactly ONE direction
+  // of error (「⛔ 注释形读不到永不读作无四棱块」) — a lit control under every
+  // silence, so a row that went quiet is never mistaken for a card that is
+  // clean.
+  const FACET_PLAIN = `${DECISION_FACET_MARKER}\n① 项目长远合理性:不扩大特例。`;
+  const FACET_COMMENT = `<!-- ${DECISION_FACET_MARKER} -->\n① 项目长远合理性:不扩大特例。`;
+  const PRIOR_LINE = 'Prior rulings read: single,posture → 4 hits; ADR-0131 D8';
+  const facetCard = (over = {}) => ({
+    number: 16934,
+    state: 'open',
+    labels: [{ name: GOVERNED_PR_DECISION_LABEL }, { name: 'priority:p2' }],
+    body: '## 一句话问题\n单租户下谁是租户墙?\n',
+    ...over,
+  });
+  const row62 = (...args) => String(h62DecisionCardWithoutFacetBlock(...args) ?? '');
+
+  // ── Direction 1: it FIRES on the shape it exists for ─────────────────────
+  t('H62: an open decision card whose body carries no marker -> finding', typeof h62DecisionCardWithoutFacetBlock(facetCard()), 'string');
+  t('H62: …and the row names the marker, so a reader can grep for what is missing', row62(facetCard()).includes(`\`${DECISION_FACET_MARKER}\``), true);
+  t('H62: …and says it read the BODY alone, which is the shape\'s own rule', row62(facetCard()).includes('read the body alone'), true);
+  t('H62: …quoting 落卡即带 rather than paraphrasing the filing duty', row62(facetCard()).includes('落卡即带'), true);
+
+  // ── Direction 2: it is SILENT wherever the marker IS there, in EITHER
+  //    spelling — the one direction of error the shape forbids ─────────────
+  t('⛔ H62: the PLAIN-TEXT marker line clears the card', h62DecisionCardWithoutFacetBlock(facetCard({ body: FACET_PLAIN })), null);
+  t('H62 control: …and the SAME card with the marker deleted still fires, so the silence is the marker\'s', typeof h62DecisionCardWithoutFacetBlock(facetCard({ body: FACET_PLAIN.replace(DECISION_FACET_MARKER, 'four facets') })), 'string');
+  t('⛔ H62: the HTML-COMMENT spelling clears it too — the declaration calls them 等价', h62DecisionCardWithoutFacetBlock(facetCard({ body: FACET_COMMENT })), null);
+  t('H62 control: …and that same body without the token fires, so the comment wrapper is not what cleared it', typeof h62DecisionCardWithoutFacetBlock(facetCard({ body: FACET_COMMENT.replace(DECISION_FACET_MARKER, 'four facets') })), 'string');
+  t('⛔ H62: a marker inside a FENCED block still clears — ⛔ never code-stripped (the forbidden direction)', h62DecisionCardWithoutFacetBlock(facetCard({ body: `\`\`\`\n${DECISION_FACET_MARKER}\n\`\`\`` })), null);
+  t('⛔ H62: …and one in an inline code span likewise', h62DecisionCardWithoutFacetBlock(facetCard({ body: `see \`${DECISION_FACET_MARKER}\` above` })), null);
+  t('⛔ H62: the marker does NOT have to be the body\'s first line — a positional read would fire on every correctly filed card', h62DecisionCardWithoutFacetBlock(facetCard({ body: `## 一句话问题\n…\n\n${FACET_PLAIN}` })), null);
+  t('H62 control: …and the identical body with the token removed does fire', typeof h62DecisionCardWithoutFacetBlock(facetCard({ body: '## 一句话问题\n…\n\n① 项目长远合理性:不扩大特例。' })), 'string');
+
+  // ── Direction 2, continued: population boundaries, each with its control ──
+  t('⛔ H62: a card without the decision label is out of scope', h62DecisionCardWithoutFacetBlock(facetCard({ labels: [{ name: 'priority:p2' }] })), null);
+  t('H62 control: …and adding exactly that label to the same card fires it', typeof h62DecisionCardWithoutFacetBlock(facetCard({ labels: [{ name: 'priority:p2' }, { name: GOVERNED_PR_DECISION_LABEL }] })), 'string');
+  t('⛔ H62: a CLOSED decision card is out — the label on it is residue, H22/H39\'s reading', h62DecisionCardWithoutFacetBlock(facetCard({ state: 'closed' })), null);
+  t('⛔ H62: a PULL REQUEST row that slipped into the listing is not a card', h62DecisionCardWithoutFacetBlock(facetCard({ pull_request: {} })), null);
+  t('H62 control: …and the byte-identical row WITHOUT the `pull_request` field fires, so it is the PR-ness that excluded it', typeof h62DecisionCardWithoutFacetBlock(facetCard()), 'string');
+  t('⛔ H62: …and the decision label on a PULL REQUEST is H48\'s subject, whose own constant this is', GOVERNED_PR_DECISION_LABEL, 'needs-user-decision');
+  t('⛔ H62: an UNREADABLE `labels` is excluded, never read as unlabelled (#4690)', h62DecisionCardWithoutFacetBlock(facetCard({ labels: undefined })), null);
+  t('⛔ H62: a missing row does not crash', h62DecisionCardWithoutFacetBlock(undefined), null);
+  t('⛔ H62: an EMPTY body is a finding, not a crash — nothing was written at all', typeof h62DecisionCardWithoutFacetBlock(facetCard({ body: null })), 'string');
+
+  // ── The SECOND reading on the same row: present / unresolved / absent ─────
+  t('H62 second reading: no such line -> absent', priorRulingsReading(facetCard().body), 'absent');
+  t('H62 second reading: a real reading -> present', priorRulingsReading(`${PRIOR_LINE}\n`), 'present');
+  t('H62 second reading: the `none` reading is still a search that RAN', priorRulingsReading('Prior rulings read: a,b → 0 hits; none'), 'present');
+  t('H62 second reading: …and `unresolved` is kept apart from it (#4690)', priorRulingsReading(`${PRIOR_RULINGS_KEY}: ${PRIOR_RULINGS_UNRESOLVED}`), 'unresolved');
+  t('H62 second reading: a decorated line is read, like every other directive here', priorRulingsReading(`- **${PRIOR_LINE}**`), 'present');
+  t('H62 second reading: an unresolved line BESIDE a completed one is a completed search', priorRulingsReading(`${PRIOR_RULINGS_KEY}: ${PRIOR_RULINGS_UNRESOLVED}\n${PRIOR_LINE}`), 'present');
+  t('H62 second reading: mid-sentence prose naming the line is not the line', priorRulingsReading('seats park the Prior rulings read: line at the end'), 'absent');
+  t('H62 row: the absent reading names the gap and the card the class was measured on', row62(facetCard()).includes('ABSENT too') && row62(facetCard()).includes('#16934'), true);
+  t('H62 row: the unresolved reading says a seat RECORDED that the search did not run', row62(facetCard({ body: `${PRIOR_RULINGS_KEY}: ${PRIOR_RULINGS_UNRESOLVED}` })).includes('did NOT run'), true);
+  t('H62 row: …and ⛔ does not call it a second finding', row62(facetCard({ body: `${PRIOR_RULINGS_KEY}: ${PRIOR_RULINGS_UNRESOLVED}` })).includes('⛔ not a second finding'), true);
+  t('H62 row: the present reading says the search is NOT what is missing', row62(facetCard({ body: PRIOR_LINE })).includes('not the search'), true);
+  t('⛔ H62: a card that carries the MARKER and no prior-ruling line is NOT a finding — one breach, one row', h62DecisionCardWithoutFacetBlock(facetCard({ body: FACET_PLAIN })), null);
+  t('H62 control: …and the same card with the marker gone fires with the ABSENT second reading', row62(facetCard()).includes('ABSENT too'), true);
+
+  // ── The reader is pinned against the line's WRITER — by SOURCE TEXT, because
+  //    neither import direction runs. `check-prior-rulings.mjs` imports THIS
+  //    module (the board resolver and the proxy plan), and both ways back were
+  //    measured on this tree: a STATIC import is a cycle whose TDZ
+  //    `ReferenceError` fires the moment this file is the entry point (which it
+  //    is on every patrol run and every `--self-test`), and a DYNAMIC one
+  //    inside this function DEADLOCKS — the entry module's own top-level
+  //    `await selfTest()` has not settled, so the sibling can never finish
+  //    linking against it (`unsettled top-level await`, exit 13). What is left
+  //    is the writer's source, read the way `familyRegistryCoverage` reads this
+  //    file's: a rename of the line reds HERE instead of silently emptying this
+  //    reader's population.
+  let writerSource62 = '';
+  try {
+    writerSource62 = readFileSync(new URL('./check-prior-rulings.mjs', import.meta.url), 'utf8');
+  } catch {
+    writerSource62 = '';
+  }
+  t('H62 ↔ writer: the writer\'s source is readable at all (an unreadable one must not pass as clean)', writerSource62.length > 0, true);
+  t('H62 ↔ writer: it still prints the KEY this reader greps for', writerSource62.includes(`${PRIOR_RULINGS_KEY}: `), true);
+  t('H62 ↔ writer: …and still spells the not-run reading `unresolved`, kept apart from `none`', writerSource62.includes(`${PRIOR_RULINGS_KEY}: ${PRIOR_RULINGS_UNRESOLVED}`), true);
+  t('H62 ↔ writer: …and this reader accepts the exact line that self-test pins', priorRulingsReading('Prior rulings read: single,posture → 4 hits; ADR-0131 D8'), 'present');
+
+  // ── The row's text: the platform hazard, the remedy, the boundaries ───────
+  t('H62 text: ⛔ no less-than fragment — the body is written into a GitHub issue', /[<>]/.test(row62(facetCard())), false);
+  t('H62 text: …so the comment spelling is named in WORDS', row62(facetCard()).includes('HTML-comment form'), true);
+  t('H62 text: the label constant is printed, ⛔ never a re-typed literal', row62(facetCard()).includes(`\`${GOVERNED_PR_DECISION_LABEL}\``), true);
+  t('H62 text: …and it is the constant H48/H52 already own', GOVERNED_PR_DECISION_LABEL, 'needs-user-decision');
+  t('H62 text: WHO acts is the FILING seat, in one body edit', row62(facetCard()).includes('the FILING seat, in one body edit'), true);
+  t('H62 text: …and the prior-ruling reader is named as the paste source', row62(facetCard()).includes('check:pm-prior-rulings'), true);
+  t('H62 text: ⛔ never a label written from this script', row62(facetCard()).includes('never a label written from this script'), true);
+  t('H62 text: ⛔ and never a gate over the marker — the ruling stays the maintainer\'s', row62(facetCard()).includes('never a gate over the marker'), true);
+  t('H62 text: the neighbouring rows are named so nobody re-files one of theirs', ['H22/H39', 'H52'].every((code) => row62(facetCard()).includes(code)), true);
+
+  // ── Report-only: bands, loudness and exit codes are untouched ─────────────
+  t('H62: not a loud finding — it never escalates a sweep', isLoudFinding(h62DecisionCardWithoutFacetBlock(facetCard())), false);
+  t('H62 band: registered as `state` — a live card, the repair one body edit', familyBand('H62'), 'state');
+  t('H62 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H62'), true);
+  t('H62 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
+  t('H62 band: …and none is registered that the sweep never pushes', familyRegistryCoverage().extra.length, 0);
+  t('⛔ H62: the band vocabulary is unchanged — `state` was already one of them', HALF_STATE_FAMILY_BANDS.map((band) => band.name).join(','), 'gate,unregistered,stall,state,inventory');
+
+  // -- H63 (#16904): a graded card still wearing the ungraded marker ---------
+  //
+  // The row over the SHARED screen. Both directions, a lit control under every
+  // silence, and — because the point of sharing the screen is that the row and
+  // the one-time sweep can never disagree — a source-text pin that the sweep
+  // still ALIASES this definition instead of re-growing a copy of it.
+  const gradedCarrier = (labels, over = {}) => ({
+    number: 16904,
+    state: 'open',
+    labels: labels.map((name) => ({ name })),
+    ...over,
+  });
+  const row63 = (...args) => String(h63StaleFindingBesideGrade(...args) ?? '');
+
+  // ── Direction 1: it FIRES on the shape it exists for ─────────────────────
+  t('H63: `finding` beside a grading state -> finding', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:queue'])), 'string');
+  t('H63: …and the row NAMES the trigger that put the card in the set', row63(gradedCarrier(['finding', 'pm:queue'])).includes('`pm:queue`'), true);
+  t('H63: `finding` beside a lone `priority:*` -> finding, with no state at all', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', 'priority:p3'])), 'string');
+  t('H63: …and that row says a priority is written only by a seat that READ the card', row63(gradedCarrier(['finding', 'priority:p3'])).includes('has READ the card'), true);
+  t('H63: …while the state row calls the trigger a position on the work state machine', row63(gradedCarrier(['finding', 'pm:queue'])).includes('a position on the work state machine'), true);
+  t('H63: this very card\'s own shape fires — `finding` + `pm:queue` + `priority:p3`', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:queue', 'priority:p3', 'domain:skills'])), 'string');
+  t('H63: …naming BOTH triggers, state first', row63(gradedCarrier(['finding', 'pm:queue', 'priority:p3'])).includes('`pm:queue`, `priority:p3`'), true);
+  t('H63: every grading state is a trigger — `needs-user-decision` included', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', GOVERNED_PR_DECISION_LABEL])), 'string');
+
+  // ── Direction 2: it is SILENT where the sweep leaves the card, each silence
+  //    with a lit control on the byte-identical card ─────────────────────────
+  t('⛔ H63: `finding` ALONE is NOT a finding — that is the pool the index exists FOR', h63StaleFindingBesideGrade(gradedCarrier(['finding'])), null);
+  t('H63 control: …and the same card with one grading state fires', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:blocked'])), 'string');
+  t('⛔ H63: `finding` beside a `domain:*` alone is still ungraded — routing is not a grade', h63StaleFindingBesideGrade(gradedCarrier(['finding', 'domain:skills'])), null);
+  t('H63 control: …and adding a priority to that card fires it', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', 'domain:skills', 'priority:p2'])), 'string');
+  t('⛔ H63: `pm:blocking` is not a grade either — it is a derived cache', h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:blocking'])), null);
+  t('⛔ H63: nor is `pm:retriage`, an annotation ON a state', h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:retriage'])), null);
+  t('⛔ H63: a `pm:seat` post is NEVER judged, whatever else it carries', h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:seat', 'priority:p1'])), null);
+  t('H63 control: …and the identical card without `pm:seat` fires, so it is the seat post that silenced it', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', 'priority:p1'])), 'string');
+  t('⛔ H63: `pm:epic` is not a grade — an index card says what a card IS', h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:epic'])), null);
+  t('H63 control: …and a graded epic — the one carrying a priority — does fire', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:epic', 'priority:p2'])), 'string');
+  t('⛔ H63: a CLOSED card is out — a closed board is an archive, not an index', h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:queue'], { state: 'closed' })), null);
+  t('H63 control: …and the byte-identical OPEN row fires', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:queue'])), 'string');
+  t('⛔ H63: a PULL REQUEST row that slipped into the listing is not a card', h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:queue'], { pull_request: {} })), null);
+  t('⛔ H63: a card without the marker is not this row\'s business', h63StaleFindingBesideGrade(gradedCarrier(['pm:queue', 'priority:p2'])), null);
+  t('⛔ H63: an unreadable `labels` reads as no marker and is silent — the SCREEN\'s behaviour, shared with the tool that writes', h63StaleFindingBesideGrade(gradedCarrier([], { labels: undefined })), null);
+  t('⛔ H63: a missing row does not crash', h63StaleFindingBesideGrade(undefined), null);
+
+  // ── The screen itself, as the sweep judges it ────────────────────────────
+  t('H63 screen: a graded carrier is `stale`', staleFindingScreen(gradedCarrier(['finding', 'pm:queue'])).verdict, 'stale');
+  t('H63 screen: …the ungraded pool is `leave`, and REPORTED rather than dropped', staleFindingScreen(gradedCarrier(['finding'])).kind, 'ungraded');
+  t('H63 screen: …and the seat post is `skip`, with the reason on the row', staleFindingScreen(gradedCarrier(['finding', 'pm:seat'])).detail.includes('pm:seat'), true);
+  t('H63 screen: the grading vocabulary is DERIVED from H13\'s, never restated', GRADING_STATE_LABELS.every((l) => PM_STATE_LABELS.includes(l)), true);
+  t('H63 screen: …and it is exactly the six states, in H13\'s order', GRADING_STATE_LABELS.join(','), 'pm:queue,pm:dispatched,pm:blocked,pm:on-hold,pm:awaiting-maintainer,needs-user-decision');
+  t('H63 screen: ⛔ the marker is never its own trigger', GRADING_STATE_LABELS.includes(STALE_FINDING_LABEL), false);
+  t('H63 screen: a priority is a grade in every spelling the board uses', priorityLabelsIn(['priority:p0', 'priority:p3']).length, 2);
+  t('H63 screen: ⛔ and priority-ish prose is not a priority label', priorityLabelsIn(['priorities', 'priority', 'prioritypX']).length, 0);
+
+  // ── ONE rule, two readers: the sweep must still ALIAS this definition ─────
+  let sweepSource63 = '';
+  try {
+    sweepSource63 = readFileSync(new URL('./sweep-stale-finding.mjs', import.meta.url), 'utf8');
+  } catch {
+    sweepSource63 = '';
+  }
+  t('H63 ↔ sweep: the sweep\'s source is readable at all (an unreadable one must not pass as clean)', sweepSource63.length > 0, true);
+  t('H63 ↔ sweep: it ALIASES this screen rather than defining one', sweepSource63.includes('export const screenCard = staleFindingScreen;'), true);
+  t('H63 ↔ sweep: …and ⛔ has not re-grown a copy of the screen', /export function screenCard\s*\(/.test(sweepSource63), false);
+  t('H63 ↔ sweep: …nor a second copy of the grading vocabulary', /export const GRADING_STATE_LABELS\s*=/.test(sweepSource63), false);
+  t('H63 ↔ sweep: its target label is this constant, not a second literal', sweepSource63.includes('export const TARGET_LABEL = STALE_FINDING_LABEL;'), true);
+
+  // ── ⛔ The three `pm:*` sets stay four different questions ────────────────
+  t('H63: H13\'s visibility set carries the marker — which is why H13 is silent on a graded carrier', PM_STATE_LABELS.includes(STALE_FINDING_LABEL), true);
+  t('H63 control: …and H13 really is silent on one, because a pm-state is present', h13DomainWithoutPmState({ ...gradedCarrier(['finding', 'pm:queue', 'domain:skills']), updated_at: daysAgo(9) }, NOW), null);
+  t('H63: H22\'s residue set drops the marker — a fine state to close in', PM_RESIDUE_LABELS.includes(STALE_FINDING_LABEL), false);
+  t('H63: H29\'s exclusivity set drops it too — a card KIND, ⛔ not a position', PM_EXCLUSIVE_STATE_LABELS.includes(STALE_FINDING_LABEL), false);
+  t('H63 control: …and H29 stays silent on a carrier with exactly one position', h29PmStateExclusivity(gradedCarrier(['finding', 'pm:queue', 'priority:p3'])), null);
+  t('H63: …so this row is careful to say it does NOT claim the marker is a position', row63(gradedCarrier(['finding', 'pm:queue'])).includes('does not claim the marker is a position'), true);
+
+  // ── The row's text: the platform hazard, the remedy, the boundaries ───────
+  t('H63 text: ⛔ no less-than fragment — the body is written into a GitHub issue', /[<>]/.test(row63(gradedCarrier(['finding', 'pm:queue']))), false);
+  t('H63 text: the state model is QUOTED, not paraphrased', row63(gradedCarrier(['finding', 'pm:queue'])).includes('定级即离标'), true);
+  t('H63 text: WHO acts — the seat that next writes a grade, in the SAME write', row63(gradedCarrier(['finding', 'pm:queue'])).includes('SAME write'), true);
+  t('H63 text: …and the standing backlog is named as the one-time sweep\'s, ⛔ never a loop from here', row63(gradedCarrier(['finding', 'pm:queue'])).includes('⛔ never a loop from here'), true);
+  t('H63 text: ⛔ no label is written from this script', row63(gradedCarrier(['finding', 'pm:queue'])).includes('no label is written from this script'), true);
+  t('H63 text: ⛔ and no grade is ever synthesised — the constraint a hand sweep learned by breaking it', row63(gradedCarrier(['finding', 'pm:queue'])).includes('no grade is ever synthesised'), true);
+  t('H63 text: the marker constant is printed, ⛔ never a re-typed literal', row63(gradedCarrier(['finding', 'pm:queue'])).includes(`\`${STALE_FINDING_LABEL}\``), true);
+  t('H63 text: the neighbouring rows are named so nobody re-files one of theirs', ['H22/H39', 'H29'].every((code) => row63(gradedCarrier(['finding', 'pm:queue'])).includes(code)), true);
+
+  // ── Report-only: bands, loudness and exit codes are untouched ─────────────
+  t('H63: not a loud finding — it never escalates a sweep', isLoudFinding(h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:queue']))), false);
+  t('H63 band: registered as `state` — a live card, the repair one write', familyBand('H63'), 'state');
+  t('H63 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H63'), true);
+  t('H63 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
+  t('H63 band: …and none is registered that the sweep never pushes', familyRegistryCoverage().extra.length, 0);
+
+  // -- H64 — a seat- or dev-signed artefact authored by a USER account (#18069)
+  //
+  // ⛔ The self-test never touches GitHub. Every fixture below is an OFFLINE row
+  // whose fields are the specimens measured on this board 2026-09-13: #18045 and
+  // objectui#9404 (cards authored `os-project-manager`, bodies signed by the
+  // skills seat), PR #18051 (authored `os-project-manager`, signed by a dev
+  // session in its attribution footer), comment 5652138683 on objectui#9370
+  // (authored `os-tesla`), and comment 5654046782 on #18045 as the clean
+  // `claude[bot]` control. Every fire has a lit control differing in exactly one
+  // feature, and every silence has one too.
+  const user64 = (login) => ({ login, type: 'User' });
+  const APP64 = { login: 'claude[bot]', type: 'Bot' };
+  const FOOTER64 = '_Generated by [Claude Code](https://claude.ai/code/session_01DAcomhvR9kKizeYgg89Vo8)_';
+  const BARE_FOOTER64 = '_Generated by [Claude Code](https://claude.ai/code)_';
+
+  // #18045 — the bare session id on the FIRST line; ⛔ `Filed and claimed by`
+  // is not the filing header, which is why this specimen fires on the id alone.
+  const card18045 = (extra = {}) => ({
+    number: 18045,
+    state: 'open',
+    created_at: '2026-09-13T14:59:12Z',
+    user: user64('os-project-manager'),
+    performed_via_github_app: { slug: 'claude' },
+    body:
+      '**Maintainer direct dispatch** — the maintainer in the skills seat\'s chat session at ' +
+      '2026-09-13T14:58Z. Filed and claimed by the skills seat (session ' +
+      '`session_01DAcomhvR9kKizeYgg89Vo8`) under the direct-dispatch channel.\n\n' +
+      '## Symptom\n- the archive walk is behind\n',
+    ...extra,
+  });
+  // objectui#9404 — the FILING HEADER, which outranks the id on the same line.
+  const card9404 = (extra = {}) => ({
+    number: 9404,
+    state: 'open',
+    created_at: '2026-09-13T15:31:22Z',
+    user: user64('os-project-manager'),
+    performed_via_github_app: { slug: 'claude' },
+    body:
+      'Filed by the skills seat (session `session_01DAcomhvR9kKizeYgg89Vo8`) as a bare card in this ' +
+      'round\'s filing batch: ⛔ not routed, not graded.\n\nDedupe keywords: `checklist`.\n',
+    ...extra,
+  });
+  // PR #18051 — the `/pulls` shape: ⛔ NO `performed_via_github_app` key at all,
+  // and the ONLY session token is in the footer on the LAST line.
+  const pr18051 = (extra = {}) => ({
+    number: 18051,
+    state: 'open',
+    created_at: '2026-09-13T15:50:36Z',
+    user: user64('os-project-manager'),
+    body: `Fixes #18019\n\nThree governed lines still carried pre-ruling text.\n\n---\n${FOOTER64}`,
+    ...extra,
+  });
+  // Comment 5652138683 — a `Claim:` block with ⛔ NO `Session:` line anywhere.
+  const comment5652138683 = (extra = {}) => ({
+    id: 5652138683,
+    created_at: '2026-09-13T08:11:05Z',
+    user: user64('os-tesla'),
+    performed_via_github_app: { slug: 'claude' },
+    body:
+      'Claim: objectui#9370 — move the three published guides off the retired root\n' +
+      'Clause-②: yes\n\n**Claimed by the `domain:ui` PM seat — dispatched this round.**\n\n---\n' +
+      BARE_FOOTER64,
+    ...extra,
+  });
+  // Comment 5654046782 — the clean control: the SAME claim shape, authored by
+  // the App.
+  const comment5654046782 = (extra = {}) => ({
+    id: 5654046782,
+    created_at: '2026-09-13T14:59:48Z',
+    user: APP64,
+    performed_via_github_app: { slug: 'claude' },
+    body:
+      'Claim: PM loop round 1\nSession: `session_01DAcomhvR9kKizeYgg89Vo8` (GitHub ' +
+      '`os-project-manager`, skills seat), claimed at 2026-09-13T14:59Z\n' +
+      'Branch: `claude/issue-18045-archive-walk`\n',
+    ...extra,
+  });
+  const carrier64 = { number: 18045, html_url: 'https://example.invalid/18045' };
+  const text64 = (kind, row, carrier) => ({ kind, row, carrier });
+  const row64 = (text, more = 0) => String(h64UserAuthoredSeatContent(text, more) ?? '');
+  // ⛔ Every reader below goes through a wrapper, for the row-wrapper note's
+  // reason one level down: `seatSignature` and `artefactAuthor` are
+  // THREE-VALUED by design, so a bare `.kind` / `.isApp` throws while `t()`'s
+  // arguments are being evaluated the moment a change makes one answer null —
+  // which ABORTS the suite instead of reddening the case. Measured on this
+  // row's own ablation: removing the footer form aborted 4042 cases at the
+  // first `seatSignature(...).kind` instead of reddening the four it owns.
+  const sig64 = (body) => seatSignature(body)?.kind ?? null;
+  const isApp64 = (row) => artefactAuthor(row)?.isApp ?? null;
+  const message64 = (result, i = 0) => String(result?.rows?.[i]?.message ?? '');
+
+  // ── Direction 1: the four measured specimens all FIRE ─────────────────────
+  t('H64 fires: #18045 — a card body carrying a bare session id, authored by a user account', typeof h64UserAuthoredSeatContent(text64('card', card18045())), 'string');
+  t('H64 fires: objectui#9404 — the filing header, same account', typeof h64UserAuthoredSeatContent(text64('card', card9404())), 'string');
+  t('H64 fires: PR #18051 — a dev-signed body on the pulls shape', typeof h64UserAuthoredSeatContent(text64('pull request', pr18051())), 'string');
+  t('H64 fires: comment 5652138683 — an os-tesla claim on a card thread', typeof h64UserAuthoredSeatContent(text64('comment', comment5652138683(), carrier64)), 'string');
+
+  // ── The two widenings the MEASUREMENT forced, pinned as measurements ──────
+  t('H64 widening: the os-tesla specimen carries NO `Session:` line', /^\s*>?\s*Session\s*:/m.test(comment5652138683().body), false);
+  t('H64 widening: …so the claim form is `CLAIM_COMMENT_MARKER` alone, and the specimen still fires', sig64(comment5652138683().body), 'claim');
+  t('H64 widening: PR #18051 carries NO session id in its first three lines', SEAT_SESSION_ID.test(seatSignatureHead(pr18051().body)), false);
+  t('H64 widening: …so the FOOTER is a sixth form, and the specimen fires on it', sig64(pr18051().body), 'footer');
+  t('H64 widening: ⛔ and the BARE footer — the one the platform appends itself — is NOT a signature', sig64(`prose\n\n---\n${BARE_FOOTER64}`), null);
+
+  // ── Direction 2: the AUTHOR is what fires it — lit controls both ways ─────
+  t('⛔ H64: the clean control — comment 5654046782, the same claim shape authored `claude[bot]`', h64UserAuthoredSeatContent(text64('comment', comment5654046782(), carrier64)), null);
+  t('H64 control: …and the byte-identical comment under a USER login fires, so it is the ACCOUNT that decides', typeof h64UserAuthoredSeatContent(text64('comment', comment5654046782({ user: user64('os-tesla') }), carrier64)), 'string');
+  t('⛔ H64: #18045 authored by the App is clean', h64UserAuthoredSeatContent(text64('card', card18045({ user: APP64 }))), null);
+  t('⛔ H64: an UNSIGNED body under a user account is not this row — no signature, no population', h64UserAuthoredSeatContent(text64('card', card18045({ body: 'The archive walk is behind. Please look.' }))), null);
+  t('H64 control: …and the same prose with one claim line fires', typeof h64UserAuthoredSeatContent(text64('card', card18045({ body: 'Claim: PM loop round 1\nThe archive walk is behind.' }))), 'string');
+
+  // ⭐ The boundary the filing card asked to be pinned: approver reviews and the
+  // maintainer's own prose are out by CONSTRUCTION, ⛔ never by exemption.
+  t('⛔ H64 boundary: the maintainer\'s own prose carries no seat signature and is out', h64UserAuthoredSeatContent(text64('comment', comment5652138683({ user: user64('hotlong'), body: '同意,按这个方向做。' }), carrier64)), null);
+  t('H64 boundary: …and the SAME login carrying a signature DOES fire — the row holds no exemption list', typeof h64UserAuthoredSeatContent(text64('comment', comment5652138683({ user: user64('hotlong') }), carrier64)), 'string');
+  t('⛔ H64 boundary: an approver\'s review text carries no signature either — a `Reviewed-by:` line alone is not the form', h64UserAuthoredSeatContent(text64('comment', comment5652138683({ user: user64('os-zhuang'), body: 'Reviewed-by: os-zhuang\n\nLooks right to me.' }), carrier64)), null);
+  t('H64 boundary: …and the same text UNDER the review heading is a seat artefact and fires', typeof h64UserAuthoredSeatContent(text64('comment', comment5652138683({ user: user64('os-zhuang'), body: '## Contract review — PASS\n\nReviewed-by: os-zhuang\n' }), carrier64)), 'string');
+  t('H64 boundary: ⛔ the two approver logins appear NOWHERE in this row\'s source-level vocabulary', SEAT_SIGNATURE_FORMS.some((f) => /zhuang|hotlong/.test(String(f.what))), false);
+
+  // ── `user.type` is the test; `user.login` is printed, never tested ────────
+  t('H64 author: a `Bot` type is an App, whatever its login', isApp64({ user: { login: 'some-app[bot]', type: 'Bot' } }), true);
+  t('H64 author: a `User` type is a user account, whatever its login', isApp64({ user: { login: 'claude[bot]', type: 'User' } }), false);
+  t('⛔ H64 author: `github-actions[bot]` is an App and is NOT this row — the login test would have judged it a user', h64UserAuthoredSeatContent(text64('card', card18045({ user: { login: 'github-actions[bot]', type: 'Bot' } }))), null);
+  t('H64 author: …and the two tests are NOT equivalent, which is why the type one is trusted', 'github-actions[bot]' !== 'claude[bot]' && isApp64({ user: { login: 'github-actions[bot]', type: 'Bot' } }) === true, true);
+  t('⛔ H64 author: an unreadable `user` is DECLINED, never accused', h64UserAuthoredSeatContent(text64('card', card18045({ user: undefined }))), null);
+  t('⛔ H64 author: …and a `user` with no `type` likewise', artefactAuthor({ user: { login: 'os-bill' } }), null);
+  t('⛔ H64 author: …and one with no `login`', artefactAuthor({ user: { type: 'User' } }), null);
+  t('⛔ H64 author: a missing row does not crash', artefactAuthor(undefined), null);
+  t('⛔ H64: a missing text does not crash', h64UserAuthoredSeatContent(undefined), null);
+
+  // ── The channel: three states, ⛔ never two ───────────────────────────────
+  t('H64 channel: a slug means the App\'s tools under a user token', artefactChannel(card18045()).kind, 'app');
+  t('H64 channel: …and the row names that slug', row64(text64('card', card18045())).includes('`claude` App'), true);
+  t('H64 channel: the field served and EMPTY means a user PAT', artefactChannel({ performed_via_github_app: null }).kind, 'pat');
+  t('H64 channel: the field ABSENT is UNREAD — the `/pulls` shape, ⛔ never inferred as a PAT', artefactChannel(pr18051()).kind, 'unread');
+  t('H64 channel: …and the PR row says UNREAD rather than guessing', row64(text64('pull request', pr18051())).includes('The channel is UNREAD rather than inferred'), true);
+  t('H64 channel: …naming both candidates so a reader is not left with an absence', row64(text64('pull request', pr18051())).includes('either the MCP GitHub tool or a user PAT'), true);
+  t('H64 channel: a missing row is UNREAD, never a PAT', artefactChannel(undefined).kind, 'unread');
+
+  // ── The six signature forms, driven WHOLE so none is quietly dropped ──────
+  t('H64 forms: the table is exercised whole — six forms', SEAT_SIGNATURE_FORMS.length, 6);
+  t('H64 forms: the marker for a claim is the file\'s own, ⛔ not a second spelling', SEAT_SIGNATURE_FORMS[0].test('Claim: x') === CLAIM_COMMENT_MARKER.test('Claim: x'), true);
+  t('H64 forms: …and the report marker likewise', sig64('os-dev-report\n\n```json\n{}\n```'), 'report');
+  t('H64 forms: …and the review form needs BOTH halves', sig64('## Contract review — PASS\n\nReviewed-by: os-zhuang'), 'review');
+  t('⛔ H64 forms: …a review HEADING with no `Reviewed-by:` line is not the form', sig64('## Contract review — PASS\n\nLooks fine.'), null);
+  t('H64 forms: the filing header reads through its measured decorations', sig64('⛔ **Filed by the `domain:cli` execution PM seat** (#6024)'), 'filer');
+  t('H64 forms: …and a blockquoted one', sig64('> Filed by the PM seat via the maintainer direct-dispatch channel'), 'filer');
+  t('⛔ H64 forms: …but not a mention buried mid-paragraph', sig64('This card was in the end not Filed by the skills seat at all, it was filed by hand.'), null);
+  t('H64 forms: a bare session id in the head window reads', sig64('line one\nline two\nsession_01DAcomhvR9kKizeYgg89Vo8'), 'session');
+  t('⛔ H64 forms: …one on the FOURTH line does not — a quoted id mid-body is prose', sig64('one\ntwo\nthree\nsession_01DAcomhvR9kKizeYgg89Vo8'), null);
+  t('⛔ H64 forms: prose containing the word claim is not a claim', sig64('The seat will claim this next round.'), null);
+  t('⛔ H64 forms: an empty body carries no signature', sig64(''), null);
+  t('⛔ H64 forms: …and neither does a missing one', sig64(undefined), null);
+  t('H64 forms: ORDER — the filing header outranks the footer on one body', sig64(`Filed by the skills seat\n\n---\n${FOOTER64}`), 'filer');
+  t('H64 forms: …and the claim outranks everything', sig64(`Claim: x\nFiled by the skills seat\n\n---\n${FOOTER64}`), 'claim');
+
+  // ── The pin: legacy is a CENSUS, judged is a row, undated is judged ───────
+  t('⛔ H64 pin: a write created BEFORE the pin files no row', h64UserAuthoredSeatContent(text64('card', card18045({ created_at: '2026-09-12T23:59:59Z' }))), null);
+  t('H64 pin: …and one created ON the pin instant fires', typeof h64UserAuthoredSeatContent(text64('card', card18045({ created_at: USER_AUTHORED_WRITE_SINCE }))), 'string');
+  t('H64 pin: the class of a pre-pin write is `legacy`', h64EntryClass(card18045({ created_at: '2026-08-07T15:16:20Z' })), 'legacy');
+  t('H64 pin: …a post-pin one is `judged`', h64EntryClass(card18045()), 'judged');
+  t('H64 pin: …and an unreadable `created_at` is `undated`, ⛔ never silently legacy', h64EntryClass(card18045({ created_at: 'nope' })), 'undated');
+  t('H64 pin: an undated write is JUDGED and the row says why', row64(text64('card', card18045({ created_at: 'nope' }))).includes('could not be read, so it is judged'), true);
+  t('H64 pin: the row names the pin so a reader knows what the census holds', row64(text64('card', card18045())).includes(USER_AUTHORED_WRITE_SINCE), true);
+  t('H64 pin: it is `created_at` that is read — a WRITE has a creation instant', h64EntryClass({ created_at: '2026-09-13T00:00:01Z', updated_at: '2020-01-01T00:00:00Z' }), 'judged');
+
+  // ── The sentence: what it must carry, and what it must not ───────────────
+  t('H64 row: it names the author login', row64(text64('card', card18045())).includes('`os-project-manager`'), true);
+  t('H64 row: …and the field it actually read', row64(text64('card', card18045())).includes('`user.type` = `User`'), true);
+  t('H64 row: …and names the artefact — a comment by its id', row64(text64('comment', comment5652138683(), carrier64)).includes('comment `5652138683`'), true);
+  t('H64 row: …a PR as a pull request', row64(text64('pull request', pr18051())).includes('this open pull request'), true);
+  t('H64 row: …and a card as a card', row64(text64('card', card18045())).includes('this open card'), true);
+  t('H64 row: it names the SIGNATURE it matched, not merely that one exists', row64(text64('card', card9404())).includes('`Filed by the … seat` / `… dev` header'), true);
+  t('H64 row: the cost is stated as SUSPENSION, not attribution tidiness', row64(text64('card', card18045())).includes('SUSPENDED'), true);
+  t('H64 row: the remedy is a re-post through the REST proxy', row64(text64('card', card18045())).includes('re-posts it through the REST proxy'), true);
+  t('H64 row: …and the original STAYS as history', row64(text64('card', card18045())).includes('original STAYS as history'), true);
+  t('H64 row: ⛔ report-only — it writes, relabels and re-posts nothing', row64(text64('card', card18045())).includes('writes nothing, relabels nothing and re-posts nothing'), true);
+  t('H64 row: the clean side is named so a reader knows what good looks like', row64(text64('card', card18045())).includes('`claude[bot]`'), true);
+  t('H64 row: the boundary is stated as CONSTRUCTION, ⛔ not exemption', row64(text64('card', card18045())).includes('by CONSTRUCTION rather than by exemption'), true);
+  t('H64 row: …and it says it holds no roster', row64(text64('card', card18045())).includes('holds no roster'), true);
+  t('H64 row: a second offending comment on one carrier is COUNTED, and the named one is the NEWEST', row64(text64('comment', comment5652138683(), carrier64), 3).includes('3 further comment(s) on this carrier carry the same defect; this is the NEWEST'), true);
+  t('H64 row: ⛔ no less-than fragment — the sentence is written into a GitHub issue body', /[<>]/.test(row64(text64('card', card18045()))), false);
+  t('H64 row: ⛔ nor in any form\'s description, which the sentence quotes', SEAT_SIGNATURE_FORMS.some((f) => /[<>]/.test(String(f.what))), false);
+  t('H64 row: not a loud finding — it never escalates a sweep', isLoudFinding(h64UserAuthoredSeatContent(text64('card', card18045()))), false);
+  t('H64 row: not an UNJUDGED row either — the author WAS read', isUnjudgedFinding(h64UserAuthoredSeatContent(text64('card', card18045()))), false);
+
+  // ── The whole family over a corpus: census, grouping, order and the cap ───
+  const legacy64 = (n) => text64('card', card18045({ number: n, created_at: '2026-08-07T15:16:20Z' }));
+  const fresh64 = (n, at) => text64('card', card18045({ number: n, created_at: at }));
+  const CORPUS64 = [
+    text64('card', card18045()),
+    text64('card', card9404()),
+    text64('pull request', pr18051()),
+    text64('comment', comment5652138683(), carrier64),
+    text64('comment', comment5654046782(), carrier64),
+    text64('card', card18045({ number: 1, body: 'ordinary prose with no signature' })),
+    text64('card', card18045({ number: 2, user: undefined })),
+    legacy64(3),
+    legacy64(4),
+  ];
+  const sweep64 = h64Sweep(CORPUS64);
+  t('H64 sweep: every text handed in is counted, signed or not', sweep64.counts.texts, 9);
+  t('H64 sweep: …the signed ones are separated from the rest', sweep64.counts.signed, 8);
+  t('H64 sweep: …the user-authored signed ones are the finding population', sweep64.counts.user, 6);
+  t('H64 sweep: …of which the pre-pin ones are a CENSUS and file no row', sweep64.counts.legacy, 2);
+  t('H64 sweep: …and the census names the oldest it saw', sweep64.counts.oldest, '2026-08-07T15:16:20Z');
+  t('H64 sweep: …the unreadable author is declined and counted, ⛔ never accused', sweep64.counts.unreadAuthor, 1);
+  t('H64 sweep: …the judged population is what is left', sweep64.counts.judged, 4);
+  t('H64 sweep: …and the App-authored control is in NONE of those numbers but the first two', sweep64.rows.some((r) => r.message.includes('5654046782')), false);
+  t('H64 sweep: four rows filed — three bodies and ONE per comment carrier', sweep64.counts.rows, 4);
+  t('H64 sweep: a comment row is filed against its CARRIER, so the reader lands on the card', sweep64.rows.some((r) => r.subject === carrier64), true);
+  t('H64 sweep: a body row is filed against the artefact itself', sweep64.rows.some((r) => r.subject.number === 18051), true);
+
+  // Grouping: one row per carrier, the NEWEST offender named, the rest counted.
+  const THREAD64 = [
+    text64('comment', comment5652138683({ id: 1, created_at: '2026-09-13T08:00:00Z' }), carrier64),
+    text64('comment', comment5652138683({ id: 2, created_at: '2026-09-13T09:00:00Z' }), carrier64),
+    text64('comment', comment5652138683({ id: 3, created_at: '2026-09-13T07:00:00Z' }), carrier64),
+  ];
+  const grouped64 = h64Sweep(THREAD64);
+  t('H64 grouping: three offending comments on one carrier are ONE row', grouped64.counts.rows, 1);
+  t('H64 grouping: …naming the NEWEST of them', message64(grouped64).includes('comment `2`'), true);
+  t('H64 grouping: …and counting the other two', message64(grouped64).includes('2 further comment(s)'), true);
+  t('H64 grouping: …while the census still counts all three', grouped64.counts.judged, 3);
+  t('⛔ H64 grouping: a comment with no readable carrier number is dropped from the rows, never mis-filed', h64Sweep([text64('comment', comment5652138683(), { number: undefined })]).counts.rows, 0);
+
+  // The cap, and the ordering that makes it the right rows.
+  const MANY64 = [];
+  for (let i = 0; i < H64_ROW_CAP + 4; i++) {
+    MANY64.push(fresh64(19000 + i, `2026-09-13T${String(10 + i).padStart(2, '0')}:00:00Z`));
+  }
+  const capped64 = h64Sweep(MANY64);
+  t('H64 cap: a board with more judged findings than the cap files exactly the cap', capped64.counts.rows, H64_ROW_CAP);
+  t('H64 cap: …while the judged count still states the whole population', capped64.counts.judged, H64_ROW_CAP + 4);
+  t('H64 cap: the rows kept are the NEWEST — the oldest of the batch is NOT filed', capped64.rows.some((r) => r.subject.number === 19000), false);
+  t('H64 cap: …and the newest IS', capped64.rows.some((r) => r.subject.number === 19000 + H64_ROW_CAP + 3), true);
+  t('H64 cap: a cap of zero files nothing and still censuses everything', h64Sweep(MANY64, { cap: 0 }).counts.judged, H64_ROW_CAP + 4);
+  t('H64 cap: …filing no row', h64Sweep(MANY64, { cap: 0 }).counts.rows, 0);
+  t('H64 sweep: an empty corpus is a clean reading, ⛔ not a crash', h64Sweep([]).counts.texts, 0);
+  t('H64 sweep: a missing corpus likewise', h64Sweep(undefined).counts.rows, 0);
+
+  // ── Adjacency: ⛔ this row restates no neighbour's verdict ────────────────
+  t('H64 adjacency: H44\'s roster refusal is intact — membership never consults a login', h64SpeaksAbout(text64('card', card18045({ user: user64('someone-nobody-has-heard-of') }))), true);
+  t('H64 adjacency: …and the same text under an App login leaves the population, which is the whole test', h64SpeaksAbout(text64('card', card18045({ user: APP64 }))), false);
+  t('H64 adjacency: H2 still owns the claim MARKER — this row imports it rather than re-spelling it', CLAIM_COMMENT_MARKER.test(comment5652138683().body), true);
+  t('H64 adjacency: H52 still owns the report marker', OS_DEV_REPORT_MARKER.test('os-dev-report\n{}'), true);
+  t('H64 adjacency: H51 still owns the review heading marker', CONTRACT_REVIEW_HEADING_MARKER.test('## Contract review — PASS'), true);
+
+  // ── Registry, counters and the clause ────────────────────────────────────
+  t('H64 band: registered as a STATE row — two carriers on one live artefact, the repair a re-post', familyBand('H64'), 'state');
+  t('H64 band: ⛔ NOT `stall` — this row claims nothing is stopped', familyBand('H64') === 'stall', false);
+  t('H64 band: ⛔ NOT `gate` — both carriers are PRESENT, so no absence reads as a green light', familyBand('H64') === 'gate', false);
+  t('H64 band: ⛔ NOT `inventory` — it alarms about ONE artefact; the population is a census clause', familyBand('H64') === 'inventory', false);
+  t('H64 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H64'), true);
+  t('H64 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
+  t('H64 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
+  t('H64 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
+  t('H64 band: a gate row still outranks it, so H31/H35 survive the trim longer', familyRank('H31') < familyRank('H64'), true);
+  t('H64: all eight count keys ride the enumerated forwarding contract', ['seatSignedTexts', 'seatSignedSigned', 'seatSignedUser', 'seatSignedJudged', 'seatSignedLegacy', 'seatSignedOldest', 'seatSignedUnreadAuthor', 'seatSignedRows'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+  t('H64 summary: the corpus pair is reported', saidBy('h64SeatSigned', summaryLine({ seatSignedSigned: 197, seatSignedTexts: 526 }, 0)).includes('197 of 526 text(s) read'), true);
+  t('H64 summary: …and how many of those are user-authored', saidBy('h64SeatSigned', summaryLine({ seatSignedUser: 197 }, 0)).includes('197 of those are authored by a USER account'), true);
+  t('H64 summary: …split into the judged half', saidBy('h64SeatSigned', summaryLine({ seatSignedJudged: 34 }, 0)).includes('34 created on/after'), true);
+  t('H64 summary: …how many were FILED under the cap, so a capped run is visible', saidBy('h64SeatSigned', summaryLine({ seatSignedRows: 10 }, 0)).includes(`10 filed as rows under this family's own ${H64_ROW_CAP}-row cap`), true);
+  t('H64 summary: …and the census half with its reach', saidBy('h64SeatSigned', summaryLine({ seatSignedLegacy: 167, seatSignedOldest: '2026-08-07T15:16:20Z' }, 0)).includes('167 counted here as a CENSUS reaching back to 2026-08-07T15:16:20Z'), true);
+  t('H64 summary: …the declined authors, which nothing else reports', saidBy('h64SeatSigned', summaryLine({ seatSignedUnreadAuthor: 2 }, 0)).includes('2 signed text(s) carried no readable `user` and were DECLINED'), true);
+  t('H64 summary: …that it buys nothing', saidBy('h64SeatSigned', summaryLine({}, 0)).includes('It fetches NOTHING of its own'), true);
+  t('H64 summary: …and that a PR comment thread is outside the corpus, so these are a LOWER BOUND', saidBy('h64SeatSigned', summaryLine({}, 0)).includes('LOWER BOUND'), true);
+  t('H64 summary: the clause renders on EVERY run, not just interesting ones', saidBy('h64SeatSigned', summaryLine({}, 0)).includes('0 of 0'), true);
+  t('H64 summary: a bare line renders numbers, never `undefined`', saidBy('h64SeatSigned', summaryLine({}, 0)).includes('undefined'), false);
+  t('H64 summary: ⛔ and no census reach is claimed when nothing legacy was seen', saidBy('h64SeatSigned', summaryLine({}, 0)).includes('reaching back to'), false);
 
   // -- H16: open non-draft PR stuck in a merge conflict (2026-08-19 incident) --
   // The single-PR payload shape, since `mergeable_state` is absent from the
