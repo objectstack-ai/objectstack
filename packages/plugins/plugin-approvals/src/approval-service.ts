@@ -47,6 +47,7 @@ import type {
   ApprovalResubmitResult,
   ApprovalStatus,
   ApprovalCancelReason,
+  ResumeFailureReport,
 } from '@objectstack/spec/contracts';
 // [#7135] The full `resolveAuthzContext` envelope — what `IApprovalService`
 // declares for every one of these context parameters since #6523 (the #6206
@@ -226,6 +227,26 @@ export interface ApprovalResumeSurface {
     | { repairable: true }
     | { repairable: false; reason: 'RUN_SUSPENDED' | 'SNAPSHOT_DROPPED' | 'NO_CONSUMED_SUSPENSION' }
   >;
+  /**
+   * [#15556; the #16472 family ruling] The subflow PARENT strand that
+   * `childRunId`'s own completion bubbled into, if the engine's up-bubble
+   * hit the `'stranded'` exit — read, and CLEARED, by
+   * {@link ApprovalService.resumeRecordedOutcome} right after a resume it
+   * issued reports success, so a decision whose OWN run advanced can still
+   * tell the caller a run further up the chain did not.
+   *
+   * ⚠️ Declares a method `AutomationEngine` ALREADY implements publicly
+   * (`takeSubflowParentStrand`); it widens no wire surface — the engine's
+   * generic `resume()` / `AutomationResult` answer is UNCHANGED by this
+   * member's existence, which is exactly why a caller must ask for it by
+   * name instead of finding it riding the resume result.
+   *
+   * `runId` here is the PARENT's — never `childRunId` itself, and never the
+   * run a caller of `decide`/`resumeRecordedOutcome` was resuming. Optional:
+   * an engine that predates this member simply never reports a bubbled
+   * strand, exactly as before this card.
+   */
+  takeSubflowParentStrand?(childRunId: string): { runId: string; repairable: boolean; error: string } | undefined;
 }
 
 /** What {@link ApprovalResumeSurface.inspectConsumedSuspension} answers. */
@@ -668,8 +689,10 @@ export interface StrandedContinuationSignal {
  * Outcome of {@link ApprovalService.continueRestoredRun} (#15389).
  *
  * ⚠️ Deliberately its own shape rather than a reuse of `ApprovalDecisionResult`:
- * that contract is the subject of an OPEN maintainer ruling on #15556, and this
- * card must not pre-empt it. Nothing here changes what `decide` answers.
+ * the #16472 family ruling settled that contract for `decide` (#15556) and
+ * `recall` (#15970) by name, and this repair-replay verb is neither of those
+ * doors — reusing their shape here would answer a question nobody asked.
+ * Nothing here changes what `decide` answers.
  */
 export interface ApprovalContinuationResult {
   /** True when the restored pause was consumed and the flow moved on. */
@@ -3113,11 +3136,19 @@ export class ApprovalService implements IApprovalService {
    * how an approval could be recorded, reported as resumed, and leave its flow
    * stranded forever (#4420). The thrown error carries {@link resumeCodeOf}'s
    * `resumeCode` so callers can tell a benign duplicate from a dead run.
+   *
+   * [#15556; the #16472 family ruling] On the SUCCESS path this also asks
+   * {@link ApprovalResumeSurface.takeSubflowParentStrand} whether resuming
+   * `runId` bubbled into a parent that then stranded — a fact the engine's
+   * own `resume()` answer never carries (its `AutomationResult` is unchanged
+   * by this card, on purpose: that value can also reach a raw REST resume
+   * caller verbatim, and this is not a wire member). `undefined` on every
+   * other outcome, exactly like the surface member itself.
    */
   private async serviceResume(
     runId: string,
     signal: { output?: Record<string, unknown>; branchLabel?: string },
-  ): Promise<void> {
+  ): Promise<{ runId: string; repairable: boolean; error: string } | undefined> {
     const result = await this.automation!.resume!(runId, { ...signal, [RESUME_AUTHORITY_SERVICE]: true });
     const reported = result as
       { success?: boolean; code?: string; error?: string; status?: string } | undefined;
@@ -3132,6 +3163,7 @@ export class ApprovalService implements IApprovalService {
       err.resumeStatus = reported.status;
       throw err;
     }
+    return this.automation?.takeSubflowParentStrand?.(runId);
   }
 
   /** The engine failure code behind a {@link serviceResume} rejection, if any. */
@@ -3279,6 +3311,26 @@ export class ApprovalService implements IApprovalService {
    * happen", which is the misreading that makes a caller retry or escalate
    * against a decision that IS durable.
    *
+   * ## A resume that SUCCEEDED can still carry a strand (#15556)
+   *
+   * #13807 above is about THIS run failing to resume. A DIFFERENT run can
+   * strand as a side effect of this one succeeding: `runId` parks inside a
+   * subflow, so resuming it can bubble into a PARENT that consumed ITS OWN
+   * suspension and then failed downstream (`AutomationEngine.bubbleToParent`,
+   * `service-automation`). Before the #16472 family ruling that fact reached
+   * nobody — `resumed: true`, no `resumeError`, and the `runId` this method
+   * returns names the run that is genuinely fine, never the stranded parent.
+   * The ruling (option A): the door's status code still does not move — this
+   * method still returns normally — but `resumeFailure` on the return value
+   * carries the PARENT's `runId` and `repairable`, read via
+   * {@link serviceResume}'s post-success
+   * {@link ApprovalResumeSurface.takeSubflowParentStrand} check, and
+   * `resumeError` carries the same event in prose. Absent on every OTHER
+   * success — a plain resume, or one whose subflow parent (if any) advanced
+   * cleanly — so a caller reading this member sees a report only when there
+   * is one to make, exactly {@link ApprovalDecisionResult.resumeFailure}'s
+   * absence rule.
+   *
    * @param what - how the recorded outcome reads in the error, e.g.
    *   `"the approve decision"`.
    * @param decision - the outcome label for the machine-readable envelope
@@ -3293,11 +3345,35 @@ export class ApprovalService implements IApprovalService {
     what: string,
     signal: { output?: Record<string, unknown>; branchLabel?: string },
     decision: string,
-  ): Promise<{ resumed: boolean; resumeError?: string }> {
+  ): Promise<{ resumed: boolean; resumeError?: string; resumeFailure?: ResumeFailureReport }> {
     const missing = this.missingRunCapability(runId, requestId, what, 'resume');
     if (missing) return { resumed: false, resumeError: missing };
     try {
-      await this.serviceResume(runId, signal);
+      const bubbleStrand = await this.serviceResume(runId, signal);
+      if (bubbleStrand) {
+        // #15556: this door's OWN resume succeeded — `runId` really did
+        // advance — but the subflow parent it bubbled into did not. Told on
+        // BOTH halves of the ONE telling (spec docblock, `ApprovalDecisionResult`):
+        // `resumeFailure` for a machine, `resumeError` for a human, never
+        // gated on `resumed`, which stays `true` here. ⛔ No NEW log line: the
+        // #16472 ruling left logging alone — `bubbleToParent`'s own `error`
+        // line (`service-automation`) already said this ONCE, with the
+        // consequence and the fix, per AGENTS.md's "say it once" durability
+        // rule; a second statement here would be the same event twice.
+        return {
+          resumed: true,
+          resumeError:
+            `RESUME_FAILED: ${what} was recorded on request ${requestId} and its own flow run '${runId}' ` +
+            `resumed, but the subflow parent above it — run '${bubbleStrand.runId}' — consumed its ` +
+            `suspension and is now stranded: ${bubbleStrand.error}`,
+          resumeFailure: {
+            code: 'RESUME_FAILED',
+            runId: bubbleStrand.runId,
+            status: 'stranded',
+            repairable: bubbleStrand.repairable,
+          },
+        };
+      }
       return { resumed: true };
     } catch (err: any) {
       const reason = err?.message ?? String(err);
@@ -3360,6 +3436,7 @@ export class ApprovalService implements IApprovalService {
 
     let resumed = false;
     let resumeError: string | undefined;
+    let resumeFailure: ResumeFailureReport | undefined;
     // No `typeof this.automation?.resume === 'function'` guard here (#4420):
     // skipping the call when no engine is attached is precisely how a decision
     // against a parked run returned 200 / `resumed: false` with nothing logged.
@@ -3383,6 +3460,7 @@ export class ApprovalService implements IApprovalService {
       );
       resumed = outcome.resumed;
       resumeError = outcome.resumeError;
+      resumeFailure = outcome.resumeFailure;
     }
 
     return {
@@ -3392,6 +3470,11 @@ export class ApprovalService implements IApprovalService {
       runId: result.runId,
       resumed,
       ...(resumeError ? { resumeError } : {}),
+      // [#15556; #16472 ruling] Additive — see the field's own docblock in
+      // `@objectstack/spec/contracts`'s absence rule: omitted entirely rather
+      // than `undefined`, so a consumer that merely checks `'resumeFailure'
+      // in result` reads presence correctly.
+      ...(resumeFailure ? { resumeFailure } : {}),
     };
   }
 

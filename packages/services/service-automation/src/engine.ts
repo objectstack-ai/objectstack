@@ -1505,6 +1505,28 @@ export interface ConsumedSuspension {
 }
 
 /**
+ * [#15556] What {@link AutomationEngine.bubbleToParent} records — under the
+ * CHILD's own run id — when resuming that child's completion up-bubbles into
+ * a PARENT that consumed its suspension and then failed downstream. Read once
+ * via {@link AutomationEngine.takeSubflowParentStrand}: exported only so the
+ * class's public method can name its return type in this file's declaration
+ * output, never re-exported from this package's index — the shape a consumer
+ * reads is this file's own return value, not a type it imports.
+ *
+ * Recorded on exactly the arm {@link AutomationResult.status} calls
+ * `'stranded'` — never on `RESUME_IN_PROGRESS` / `STORE_UNAVAILABLE`, which
+ * stay the functional degradation #15556's ruling left alone.
+ */
+export interface SubflowParentStrand {
+    /** The run that is actually stranded — the PARENT, never the child that just completed. */
+    runId: string;
+    /** Always `true`: the one arm that records an entry is the one the engine journals a repair snapshot for. */
+    repairable: true;
+    /** The parent's own downstream failure text, verbatim — `resumeInternal`'s `error` for that run. */
+    error: string;
+}
+
+/**
  * Why {@link AutomationEngine.restoreConsumedSuspension} declined (#13909).
  *
  * Every value is EARNED BY A SPECIFIC OBSERVATION, not by a catch-all "bad
@@ -2165,6 +2187,21 @@ export class AutomationEngine implements IAutomationService {
      * holds a whole suspension, and the durable copy is the record.
      */
     private consumedSuspensions = new Map<string, ConsumedSuspension>();
+    /**
+     * [#15556] The subflow PARENT strand a child's completion bubbled into,
+     * keyed by the CHILD run id — i.e. exactly the run id a caller resuming
+     * the child already holds. {@link bubbleToParent} writes an entry only on
+     * its `'stranded'` exit (never on the tolerated `RESUME_IN_PROGRESS` /
+     * `STORE_UNAVAILABLE` arms, which stay functional per #15556's ruling);
+     * {@link takeSubflowParentStrand} is the one reader, and it deletes on
+     * read so an entry nobody asks for does not accumulate forever.
+     *
+     * Bounded by {@link MAX_CONSUMED_SUSPENSIONS} for the same reason that
+     * bound exists one field up — a caller that never asks (a bare `resume()`
+     * with no subflow-aware consumer) must not leak memory across restarts of
+     * the same long-lived process.
+     */
+    private subflowParentStrands = new Map<string, SubflowParentStrand>();
     /**
      * [#13909] Run ids currently mid-RESTORE — the same synchronous in-process
      * guard shape as {@link resuming}, so two operators racing the verb produce
@@ -6657,6 +6694,17 @@ export class AutomationEngine implements IAutomationService {
      * the parent's own completion bubbles multi-level chains. Best-effort —
      * a failed parent continuation is logged, never thrown back at the
      * caller who resumed the child.
+     *
+     * [#15556] Best-effort at the ENGINE layer only, since this call never
+     * throws either way: on the `'stranded'` exit — the one #15556's ruling
+     * names — it also records a {@link SubflowParentStrand} under the CHILD's
+     * own run id in {@link subflowParentStrands}, so the caller who resumed
+     * that child (`resumeInternal` returns before this method's caller sees
+     * anything beyond `success: true`) can retrieve it via
+     * {@link takeSubflowParentStrand} and tell its OWN caller the truth. The
+     * two tolerated arms below (`RESUME_IN_PROGRESS` / `STORE_UNAVAILABLE`)
+     * record nothing — #15556's ruling is scoped to the strand, and those two
+     * stay the functional degradation the old verdict already had right.
      */
     private async bubbleToParent(
         run: SuspendedRun,
@@ -6722,14 +6770,26 @@ export class AutomationEngine implements IAutomationService {
                 // ONE exit that journalled a snapshot, so it is the one an
                 // operator can and must act on.
                 //
-                // ⚠️ This is the LOG half only. What the child's resumer — and
-                // through it the approvals decision door — is TOLD is
-                // unchanged and still reads as full success; making that
-                // truthful moves a public contract (`AutomationResult`,
-                // `ApprovalDecisionResult`) and is #15556's open decision, the
-                // sibling one level up of the #13807 ruling (2026-09-04,
-                // decision batch #37). ⛔ Not decided here.
+                // #15556 family ruling (#16472, maintainer 2026-09-07, decision
+                // batch #76, option A): the LOG half stays exactly as it was
+                // (below, unchanged) — the door's status code does not move —
+                // and the strand is ALSO recorded here, under the CHILD's own
+                // run id, so `takeSubflowParentStrand` can hand it to whichever
+                // caller resumed that child. Not a widening of what this
+                // method tells ITS OWN caller (still `void`, still never
+                // thrown) — a sibling side-channel, read only by a caller that
+                // asks for it by name.
                 if (parentRes.status === 'stranded') {
+                    this.subflowParentStrands.set(run.runId, {
+                        runId: parentRunId,
+                        repairable: true,
+                        error: parentRes.error ?? 'unknown error',
+                    });
+                    while (this.subflowParentStrands.size > MAX_CONSUMED_SUSPENSIONS) {
+                        const oldest = this.subflowParentStrands.keys().next().value;
+                        if (oldest === undefined) break;
+                        this.subflowParentStrands.delete(oldest);
+                    }
                     // THIRD argument per the `Logger` contract
                     // (`error(message, error?, meta?)`); the `Error` slot stays
                     // empty on purpose (#5575). The message owes the two things
@@ -6774,6 +6834,32 @@ export class AutomationEngine implements IAutomationService {
                 describeThrownForLog(err),
             );
         }
+    }
+
+    /**
+     * [#15556] Read — and clear — the {@link SubflowParentStrand}
+     * {@link bubbleToParent} recorded for `childRunId`'s most recent
+     * completion, if any. `undefined` on every other outcome: no parent, a
+     * parent that resumed cleanly, or a parent bubble that hit the tolerated
+     * `RESUME_IN_PROGRESS` / `STORE_UNAVAILABLE` arms (#15556's ruling leaves
+     * those functional, not reported here).
+     *
+     * Delete-on-read on purpose: this is a hand-off to the ONE caller that
+     * resumed `childRunId` and is about to answer its OWN caller, not a
+     * durable record — the durable half is the parent's own consumed-
+     * suspension journal and terminal history row, both already readable via
+     * {@link inspectConsumedSuspension} / {@link getRun} against the
+     * PARENT's run id, which this method is what hands a caller in the first
+     * place (nothing else names it).
+     *
+     * ⚠️ Never populated for `childRunId`'s OWN failure — only for a PARENT
+     * this child's completion bubbled into. A child that itself stranded is
+     * reported on `childRunId`'s own {@link AutomationResult}, unchanged.
+     */
+    takeSubflowParentStrand(childRunId: string): SubflowParentStrand | undefined {
+        const found = this.subflowParentStrands.get(childRunId);
+        if (found) this.subflowParentStrands.delete(childRunId);
+        return found;
     }
 
     /**
