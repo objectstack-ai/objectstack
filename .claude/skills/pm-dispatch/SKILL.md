@@ -283,7 +283,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 平台事实变化 → references 事实表改一行。
 - 三类以 `finding` 入 skills 车道由该席分诊;三类之外默认关 not planned。
 - 接管/移交 = 改正文 + 审计评论(只作审计);收尾清单等细则见 `references/seat-post-protocol.md`。
-- epic 委托不入座位贴体系;`packages/spec` 恒归 spec 座位。
+- epic 委托不入座位贴体系;新 `packages/spec` 工作恒归 spec 座位。
 
 ## Epic 子树车道
 
@@ -296,7 +296,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 离开子树(交车道或转 spec 座位)同一笔标签写摘 `pm:epic` 加 `pm:queue`。
 - `pm:epic` + `pm:queue` 同卡 = 半状态(保留兼移交);后者即已移交,取回走全套认领协议含重读。
 - 单车道仓(无 `domain:*`)开卡即认领合法;多车道仓域标签前置照旧,子树标记即保留。
-- 触 `packages/spec`/公共契约(sub-issue 或衍生)⇒ 照旧转 spec 座位队列,epic 侧写 `Blocked-by:`。
+- 新立 spec/公共契约 sub-issue 照旧转 spec 座位队列,epic 侧写 `Blocked-by:`;衍生按三分留席。
 - 顺带发现 ⇒ 独立立单进修复落地仓,附查重词;⛔ 不借 sub-issue 通道塞未分诊卡进池子。
 - 每次分流留一行审计评论;父单维护 checklist 汇总评论,决策仍锚在具体 sub-issue。
 - 收尾四步、僵尸回收与领地防撞细则见 `references/seat-post-protocol.md`。
