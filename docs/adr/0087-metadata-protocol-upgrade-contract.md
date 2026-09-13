@@ -758,9 +758,16 @@ checks all four by name (`published`, `no-spec-diff`, `no-metadata-surface-diff`
    was closed to them by the grammar rather than by any judgement about the claim,
    and the gate answered a true sentence about a member the diff never touched
    (#15627). A reference may therefore also be written `<path>#<a>.<b>.<member>`:
-   the object-literal nesting the member sits in, walked **structurally** from the
-   top of the file over a comment- and literal-masked projection, with the member's
-   definition taken from inside the resolved body. Bare references keep their exact
+   the nesting the member sits in, walked **structurally** from the top of the file
+   over a comment- and literal-masked projection, with the member's definition taken
+   from inside the resolved body. A leading segment names an **object literal or a
+   class** — both are containers a published member actually sits in, and reading
+   only the first left a narrowing on a class method in the state #15627 was filed
+   about: measured on `packages/objectql/src/engine.ts`, the dotted spelling was
+   refused outright while the bare `#delete` answered a true sentence about
+   `ObjectQL.delete`, a member the diff never touched (#17279). A **class
+   expression** (`const X = class { … }`) is deliberately not walked — that name
+   belongs to the binding, not to the class. Bare references keep their exact
    previous meaning. ⛔ A line number is never the disambiguator — this file's line
    numbers were measured to rot within one day. A dotted path that resolves to
    **zero** candidates, or to **more than one**, is reported by name and refused,

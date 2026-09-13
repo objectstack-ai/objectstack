@@ -197,7 +197,7 @@ Cache warmup strategy
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional (default: `false`) | Enable cache warmup |
-| **strategy** | `Enum<'eager' \| 'lazy' \| 'scheduled'>` | optional (default: `"lazy"`) | Warmup strategy: eager (at startup), lazy (on first access), scheduled (cron) |
+| **strategy** | `Enum<'eager' \| 'lazy'>` | optional (default: `"lazy"`) | Warmup strategy: eager (at startup), lazy (on first access) |
 | **patterns** | `string[]` | optional | Key patterns to warm up (e.g., "user:*", "config:*") |
 | **concurrency** | `number` | optional (default: `10`) | Maximum concurrent warmup operations |
 
@@ -220,7 +220,7 @@ Distributed cache configuration with consistency and avalanche prevention
 | **encryption** | `boolean` | optional (default: `false`) | Enable encryption for cached data |
 | **consistency** | `Enum<'write_through' \| 'write_behind' \| 'write_around' \| 'refresh_ahead'>` | optional | Distributed cache consistency strategy |
 | **avalanchePrevention** | `{ jitterTtl?: object; circuitBreaker?: object; lockout?: object }` | optional | Cache avalanche and stampede prevention |
-| **warmup** | `{ enabled: boolean; strategy: Enum<'eager' \| 'lazy' \| 'scheduled'>; patterns?: string[]; concurrency: number }` | optional | Cache warmup strategy |
+| **warmup** | `{ enabled: boolean; strategy: Enum<'eager' \| 'lazy'>; patterns?: string[]; concurrency: number }` | optional | Cache warmup strategy |
 
 ### Nested Shape: `DistributedCacheConfig.tiers[number]`
 
@@ -260,7 +260,7 @@ Rule defining when and how cached entries are invalidated
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional (default: `false`) | Enable cache warmup |
-| **strategy** | `Enum<'eager' \| 'lazy' \| 'scheduled'>` | optional (default: `"lazy"`) | Warmup strategy: eager (at startup), lazy (on first access), scheduled (cron) |
+| **strategy** | `Enum<'eager' \| 'lazy'>` | optional (default: `"lazy"`) | Warmup strategy: eager (at startup), lazy (on first access) |
 | **patterns** | `string[]` | optional | Key patterns to warm up (e.g., "user:*", "config:*") |
 | **concurrency** | `number` | optional (default: `10`) | Maximum concurrent warmup operations |
 
