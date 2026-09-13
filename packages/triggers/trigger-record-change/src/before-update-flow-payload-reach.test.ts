@@ -894,7 +894,7 @@ describe('[#15356/#14744] S5 on the real SQL driver — the mutation reaches no 
     // [#17985] The authz resolver's own reads, registered before the sync so
     // they are provisioned rather than refused.
     for (const o of authzResolverObjects) {
-      objectql.registry.registerObject(o.def as never, o.owner);
+      (objectql.registry as unknown as TestObjectRegistry).registerObject(o.def as never, o.owner);
     }
     await objectql.syncSchemas();
 
