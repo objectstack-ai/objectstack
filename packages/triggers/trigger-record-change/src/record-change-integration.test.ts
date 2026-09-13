@@ -69,18 +69,28 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * the ONLY read refusals whose log frames may be withheld here.
  *
  * Every `it` below boots a kernel with no datasource, attaches sqlite late, and
- * registers exactly its own test object. The authz resolver
- * (`core/src/security/resolve-authz-context.ts`) and
- * `ObjectQL.probeInstallOrganizations` then probe these six on every write.
- * Both probes are fail-soft by construction, so the reads are EXPECTED — but
- * the driver and the engine each log the fault on the way out.
+ * registers its own test object. `ObjectQL.probeInstallOrganizations` then
+ * probes `sys_organization` on every write. That probe is fail-soft by
+ * construction, so the read is EXPECTED — but the driver and the engine each
+ * log the fault on the way out.
  *
- * ⛔ This list is MEASURED, not copied from the probers' source: a run of this
- * file at `logger: { level: 'info' }` emitted 84 `refused a read on '<t>'`
- * driver lines and 84 matching `ERROR Find operation failed` engine frames,
- * split sys_user 15 / sys_member 15 / sys_user_position 15 /
- * sys_user_permission_set 15 / sys_position 15 / sys_organization 9. A read
- * this file stops provoking therefore shows up as a CHANGED SET (red
+ * ⚠️ [#17985] The five authz tables the resolver
+ * (`core/src/security/resolve-authz-context.ts`) reads USED TO BE on this list.
+ * They are not any more, because `attachSqlite` now provisions them (see
+ * `authzResolverObjects` below) — the outcome this channel's own contract
+ * names: "a table that started resolving means the fixture now provisions it".
+ * Their refusal was never only noise: `tryFind` answers `[]` for a missing
+ * table, so every write below resolved its grants from reads that never
+ * happened. ⛔ The count fell because the reads SUCCEED, not because anything
+ * was quietened.
+ *
+ * ⛔ This list is MEASURED, not copied from the probers' source: before this
+ * file provisioned anything, a run at `logger: { level: 'info' }` emitted 84
+ * `refused a read on '<t>'` driver lines and 84 matching `ERROR Find operation
+ * failed` engine frames, split sys_user 15 / sys_member 15 / sys_user_position
+ * 15 / sys_user_permission_set 15 / sys_position 15 / sys_organization 9. The
+ * 75 authz ones are gone; the one channel left is the one declared below. A
+ * read this file stops provoking still shows up as a CHANGED SET (red
  * `silentChannels()`), not as a silence.
  *
  * ## Why a capture instead of the blanket `silent` this replaces
@@ -94,13 +104,96 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * real console, and COUNTS what it withheld so `afterAll` can assert the
  * expected reads still happen. A capture nobody asserts is a mute.
  */
-const EXPECTED_ABSENT_PROBE_TABLES = [
-  'sys_user',
-  'sys_member',
-  'sys_user_position',
-  'sys_user_permission_set',
-  'sys_position',
-  'sys_organization',
+const EXPECTED_ABSENT_PROBE_TABLES = ['sys_organization'] as const;
+
+/**
+ * ⚠️ [#17985] The authz objects a write here makes core's
+ * `resolveUserAuthzGrants` read. They belong to `@objectstack/plugin-auth` and
+ * `@objectstack/plugin-security`; they are spelled LOCALLY, with only the
+ * columns that resolver reads, so this fixture adds no dependency edge onto
+ * either package (the `find-envelope-limb-removal.test.ts` precedent, applied
+ * by PR #17982 to the two `plugin-auth` fixtures with the same defect).
+ *
+ * Columns, and why each is here — every other column of the real objects is
+ * deliberately absent, because no read on this path touches it:
+ *   `sys_user`                 id (filter), email (the RLS owner-email fallback)
+ *   `sys_member`               user_id / organization_id (filters), role
+ *   `sys_user_position`        user_id (filter), position, organization_id
+ *   `sys_user_permission_set`  user_id (filter), permission_set_id, organization_id
+ *   `sys_position`             name (filter), id, active (`isRowActive`),
+ *                              organization_id (the driver's tenant scope)
+ *
+ * ⛔ `sys_position_permission_set` and `sys_permission_set` are NOT here: the
+ * resolver reaches them only once a `sys_position` row resolves and a
+ * permission-set id is collected, and nothing here seeds either. The ADR-0091
+ * validity columns are absent for the reason `sys_member` lacks them today:
+ * `isGrantActive` reads an absent bound as unbounded, so declaring them would
+ * change no verdict here.
+ */
+const authzResolverObjects = [
+  {
+    owner: '@objectstack/plugin-auth',
+    def: {
+      name: 'sys_user',
+      label: 'User',
+      fields: {
+        id: { name: 'id', type: 'text' as const, primaryKey: true },
+        email: { name: 'email', type: 'text' as const },
+      },
+    },
+  },
+  {
+    owner: '@objectstack/plugin-auth',
+    def: {
+      name: 'sys_member',
+      label: 'Member',
+      fields: {
+        id: { name: 'id', type: 'text' as const, primaryKey: true },
+        user_id: { name: 'user_id', type: 'text' as const },
+        organization_id: { name: 'organization_id', type: 'text' as const },
+        role: { name: 'role', type: 'text' as const },
+      },
+    },
+  },
+  {
+    owner: '@objectstack/plugin-security',
+    def: {
+      name: 'sys_user_position',
+      label: 'User Position',
+      fields: {
+        id: { name: 'id', type: 'text' as const, primaryKey: true },
+        user_id: { name: 'user_id', type: 'text' as const },
+        position: { name: 'position', type: 'text' as const },
+        organization_id: { name: 'organization_id', type: 'text' as const },
+      },
+    },
+  },
+  {
+    owner: '@objectstack/plugin-security',
+    def: {
+      name: 'sys_user_permission_set',
+      label: 'User Permission Set',
+      fields: {
+        id: { name: 'id', type: 'text' as const, primaryKey: true },
+        user_id: { name: 'user_id', type: 'text' as const },
+        permission_set_id: { name: 'permission_set_id', type: 'text' as const },
+        organization_id: { name: 'organization_id', type: 'text' as const },
+      },
+    },
+  },
+  {
+    owner: '@objectstack/plugin-security',
+    def: {
+      name: 'sys_position',
+      label: 'Position',
+      fields: {
+        id: { name: 'id', type: 'text' as const, primaryKey: true },
+        name: { name: 'name', type: 'text' as const },
+        active: { name: 'active', type: 'boolean' as const },
+        organization_id: { name: 'organization_id', type: 'text' as const },
+      },
+    },
+  },
 ] as const;
 
 /** [#11081] Shared by every kernel this file boots; asserted once in `afterAll`. */
@@ -161,6 +254,13 @@ async function attachSqlite(objectql: any): Promise<any> {
   // The engine exists only after `kernel.bootstrap()`, which every caller has
   // already run; the probed reads all happen later, per write.
   noise.captureEngine(objectql);
+  // [#17985] Registered on the ONE seam every boot site in this file goes
+  // through, before any caller's `syncSchemas()`, so each write below resolves
+  // its grants from reads that HAPPEN rather than from `tryFind`'s empty answer
+  // for a missing table.
+  for (const o of authzResolverObjects) {
+    objectql.registry.registerObject(o.def as any, o.owner);
+  }
   openDrivers.push(driver);
   return driver;
 }
