@@ -252,10 +252,11 @@ localStorage / auth gotchas.
     When a cloud decision's **mechanism half** governs open code here, this repo carries its own ADR — own number, a
     `## Provenance` section naming the cloud record and its date, the commercial half left in cloud — and the cloud
     record gains a one-line pointer. Files never move between registries and numbers are never reassigned.
-14. **⛔ A governed surface is confirmed and merged by the maintainer, by hand — no AI seat merges, queues, or arms
-    auto-merge on a PR whose diff touches one.** The governed surfaces are `docs/adr/**`, `.claude/**` (agents, hooks
-    and settings — not only skills), `skills/**`, `AGENTS.md` and `CLAUDE.md` — the file you are reading is one —
-    and a mixed diff is governed whole on a single path hit. The register is the `GOVERNED_SURFACES` table in
+14. **⛔ A governed surface is confirmed and merged by the maintainer, by hand — or confirmed by an authorized
+    approval and then landed by the owning seat; before that approval no AI seat merges, queues, or arms auto-merge on a
+    PR whose diff touches one.** The governed surfaces are `docs/adr/**`, `.claude/**` (agents, hooks and settings —
+    not only skills), `skills/**`, `AGENTS.md` and `CLAUDE.md` — the file you are reading is one — and a mixed diff
+    is governed whole on a single path hit. The register is the `GOVERNED_SURFACES` table in
     `scripts/pm/check-governed-merges.mjs`; adding a surface is an edit *there*, never here, and `pnpm
     check:pm-governed-prose` reds per-PR when this paragraph names fewer surfaces than the register — or more. When it
     reds, name the surface here.
@@ -265,15 +266,16 @@ localStorage / auth gotchas.
     auto-merge, ⛔ never flip it out of draft to make any of those possible — judged on the PR's **file list**, not
     its description; a **mixed diff is not a proportion question**, one path hit is enough; to land the rest, split off
     the governed files. **Those four lift only for an authorized APPROVED review** — by an account in
-    `GOVERNED_APPROVERS` (`scripts/pm/check-governed-queue-guard.mjs`), on ANY commit and not dismissed. The queue then
-    lands it. A later push does not expire that approval, and this gate does not re-review it. Hand-authored governed
-    content needs that approval; a PR whose only governed paths are register rows the queue leg regenerates byte-exact
-    clears with zero approvals — an uncertified recompute, drift or a hand-authored sibling keeps it governed.
-    Unapproved, the bypass direct merge (人工直合) is the only landing. **Landing is tiered**: a PR whose governed
-    paths all lie under `.claude/skills/pm-dispatch/references/` lands through the queue after the skills seat's
-    contract-tier review; every other governed path is the rules layer and waits for the maintainer's word. ⛔ **No
-    agent seat submits an approving review on a governed-surface PR, under any account** — an authorized account is
-    agent-operated too; "CI is green" carries no information about a governance change.
+    `GOVERNED_APPROVERS` (`scripts/pm/check-governed-queue-guard.mjs`), on ANY commit and not dismissed. That word is
+    spent once per PR: the OWNING seat then lands it, later pushes included, re-queuing after an ejection or a rebase on
+    its own pre-landing check; this gate does not re-review it. Hand-authored governed content needs that approval; a PR
+    whose only governed paths are register rows the queue leg regenerates byte-exact clears with zero approvals — an
+    uncertified recompute, drift or a hand-authored sibling keeps it governed. Unapproved, the bypass direct merge
+    (人工直合) is the only landing. **Landing is tiered**: a PR whose governed paths all lie under
+    `.claude/skills/pm-dispatch/references/` lands through the queue after the skills seat's contract-tier review; every
+    other governed path is the rules layer and waits for the maintainer's word. ⛔ **No agent seat submits an approving
+    review on a governed-surface PR, under any account** — an authorized account is agent-operated too; "CI is green"
+    carries no information about a governance change.
 
     **Already armed or queued when you read this?** Convert it back to **draft** AND disable auto-merge — draft is
     what removes queue membership, disabling alone drops only the arming — then confirm from the remote that it is in
@@ -488,7 +490,7 @@ Even inside your own worktree, operate defensively:
    re-verification, done by the platform, race-free. **Arm only what is already green
    and accepted.**
 
-   ⛔ **Two classes of PR never enter this path, however green:** (a) a diff touching any
+   ⛔ **Two classes of PR never enter this path on green alone:** (a) a diff touching any
    **governed surface** (**Prime Directive #14**, which names them and holds the current
    list — **this file and `CLAUDE.md` are on it**, so re-read it rather than recalling
    it); (b) the **Version Packages** PR, or any PR whose merge performs a release
@@ -1031,9 +1033,9 @@ registry? Add it to `OPEN_CAPABILITY_REGISTRIES` in the same PR that fixes it.
    the PR is accepted — arm auto-merge so the queue lands it (Multi-agent discipline
    §7: never straight to `main`; never arm a PR that isn't green yet). A finished task
    = a merged PR, not a dirty working tree. ⛔ **Except a diff touching a governed
-   surface** (Prime Directive #14 names them — more than ADRs): push it, open the PR,
-   and stop there, landing it is the maintainer's, by hand. For that class, a
-   finished task = a PR left visibly awaiting a human merge.
+   surface** (Prime Directive #14 names them — more than ADRs): push it, open the PR, and stop
+   there; landing waits for the maintainer's word. For that class, a finished task = a PR
+   left visibly awaiting that word.
 3. **Add a changeset for anything that publishes.** Feature, functional improvement or fix — run `pnpm changeset`
    (or add a `.changeset/*.md` entry) describing it before committing. A bug fix in a released package takes a
    **`patch`** changeset — never none, and ⛔ never `skip-changeset`: that label is for a diff that publishes
