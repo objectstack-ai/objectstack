@@ -29,22 +29,26 @@ still not judged (the #14519 shape, unmoved). The new branch tests for a unit
 PRESENT in the JSDoc; it never tests for one absent from the describe, which is
 what would have made it the option the ruling declined.
 
-**Measured population delta on this tree: 0 → 21 offenders**, among an
-unchanged 211 duration-shaped numeric keys across 2433 source files. Every one
-was read rather than pattern-matched; none is a detector false positive. Three
-need only their describe corrected (the key name already carries `Ms`); the
-other eighteen name no unit in the key either, so each is a rename of a
-published key under an ADR-0087 conversion. ⛔ **No offender is exempted to
-reach green** — there is no baseline here by ruling, and the remediation is
-sequenced separately rather than hidden.
+**The population this rule adds was remediated before the rule landed.** When
+the gate was written it found **21** offenders. Ruling A on #15939 sequenced
+those out of this change and into seven per-file cards (#17780–#17786), all
+merged: eighteen were renames of published keys, each carrying its own ADR-0087
+conversion and `retiredKey()` tombstone, and the other three needed only their
+describe corrected. On this tree the gate reads **zero offenders** among **211**
+duration-shaped numeric keys across **2482** source files (6 declared `EpochMs`
+instants, 11 declared `externalVocabulary` mirrors). ⛔ **No offender was
+exempted to reach that zero** — there is no baseline in this gate by ruling, and
+none was added.
 
-**Two wrongly-recorded reasons repaired, both comment-only.** The blindness did
-not merely miss keys, it produced confident wrong prose about why they were
-missed: the retired-key entry for `SandboxConfig:process.timeout` and the
-burn-rate `window` pin comment in `metrics.test.ts` both said the neighbouring
-key was "outside the gate's population", when it is inside the census and
-outside the verdict — and its unit is not missing, only unpublished. Both now
-say that and name the JSDoc unit. `registry.ts` regenerated to mirror the
-entry; no pin assertion, title or body changed.
+**One wrongly-recorded reason repaired, comment-only.** The blindness did not
+merely miss keys, it produced confident wrong prose about why they were missed:
+the retired-key entry for `SandboxConfig:process.timeout` said the neighbouring
+`RuntimeConfig.resourceLimits.timeout` was "outside the gate's population", when
+that key was inside the census and merely never judged — its unit lived in a
+source JSDoc only. That note now records the true reason, and points at the
+neighbour's own entry rather than describing a landed rename as pending.
+`registry.ts` regenerated to mirror it. The same wrong reason in the
+`metrics.test.ts` burn-rate pin was corrected by #17783 when it renamed that
+key, so nothing is owed there.
 
 ⛔ No published key, accept set, default or runtime behaviour moves.
