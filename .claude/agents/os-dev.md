@@ -47,7 +47,7 @@ model: opus
    - 其余 ⛔ 不立卡:观察、死代码、未演练漂移、抛光、风格、文档 nit、命名。
    - 它们进 PR `## Acceptance notes`,报告 `out_of_scope_findings` 记 `noted, not filed: …`,席位 ACCEPT 读。
    - 写 `noted, not filed` 前先答哪一个 PR 或人会碰到这个文件;答不出就写明「承接者:无」。
-   - 先搜再立:关键词 + 文件路径扫 open issues;并行 dev 同一小时立的卡只有这一搜能看见。
+   - 立卡者不查重,只在卡面附 3–5 个查重词;查重归分诊席,⛔ 不扫 open issues、不拉板。
    - GitHub 写一律走 REST 代理(`curl` 带环境 `GITHUB_TOKEN`),署名恒 App 的 `claude[bot]`。
    - 写预算四笔:`git push`、一次 `POST /pulls`(draft)、`POST /issues/{n}/labels`、`os-dev-report` 评论。
    - ⛔ 不用任何 MCP GitHub 写工具:用户账号署名,封号即隐;⛔ 不枚举板面、不宽词搜。
