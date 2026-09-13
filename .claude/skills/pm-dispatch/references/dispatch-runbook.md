@@ -4,7 +4,6 @@
 
 ## 车道取卡全序与 `pm:blocking`
 
-- 级序理由:p0 是显式裁定,blocking 一张挡多张,bug 是已坏的不变量先于增强,卡龄防饿死。
 - 级别半边:p1–p3 是分诊已裁的显式排序;无级末位是分诊缺口,不是一个已裁的低优先级。
 - `pm:blocking` 的写入与摘除都在分诊轮 sweep,依赖者全关即摘。
 - 手工挂上的按误标处理,sweep 对着索引校正。
@@ -82,16 +81,19 @@
 
 - 裁决记录四件补遗:鲜度门可内联声明分歧代替调和正文。
 - 对过期正文记录的裁决按过期论;四件本体、记录座位全责、维护者裁与代裁同规。
-- 出决策箱须引可取回的裁决 id:转出那一笔的评论须带台账条目或卡上裁决评论 id。
+- 出决策箱须引可取回的裁决 id:认领与派发带 `Ruling-ref: <评论 id>`,指向同卡裁决评论。
 - 且该 id 同趟取回过,取这一下就是判据;带 id 不等于可取回。
 - 读侧对称:决策复读命中无可取回 id 的出箱按未裁处理,同笔转回、⛔ 不派。
 - 结论只落可核性,⛔ 不断成因。
 - 裁决执行中新生的问题另立卡并回链已裁卡,⛔ 不给已裁卡重挂 `needs-user-decision`。
-- 理由两条:标签说不出是哪个问题;母卡一关就把这问题的可见性一起带走。
 - 机械两旗 report-only,归半状态巡查;接线是另一张卡的事,⛔ 不随协议文本改脚本。
 - 旗一:open 卡标题带决策标记或线程含裁决记录,却仍挂 `needs-user-decision`。
 - 旗二:`pm:blocked` 卡的 `Blocked-by:` 目标已关闭。
 - 交付了一半的阻塞是判断不是 grep,归四件之③,⛔ 不进机械旗。
+- 发布窗口判据:已上膛 = 开着的 head `changeset-release/main` PR,`is:pr is:open head:changeset-release`。
+- 点亮对照 `git ls-remote origin changeset-release/main` 必中;⛔ title 永不是判据。
+- 两仓 title 不同、由 action 配置:objectui `chore: release packages`、objectstack `chore: version packages`。
+- 上膛与否不足:真判据是本卡 changeset 已否折进该 head `CHANGELOG.md`,即「离永久还有多远」。
 - 卡上 re-check 命令两条硬线:① 每条 grep 自带阳性对照。
 - 对照取同文件里确定存在、且 ⛔ 绝不是被测词子串的一个词。
 - 对照未通过的零记没读到,⛔ 不记不存在。
@@ -183,9 +185,7 @@
 
 ## 派发词构造细则
 
-- 三分区各自的 dev 义务:裁决区 dev 执行不重开。
-- 机制假设区动手前验证,证伪照实报告并按裁决意图换实现路径,⛔ 不许为顺从假设硬做。
-- 建议路线区有更好的就换,⛔ 不得因派发令写了照做。
+- 三分区各自的 dev 义务单源见 SKILL.md 与 os-dev 定义,派发词 ⛔ 不复述。
 - 兄弟 dev 报告里的成本或形状估计一律落机制假设区并注明须复测。
 - ⛔ 不得穿裁决的衣服转述:被当事实搬运的估计会把错误方向写死,而天真测试照绿。
 - 前提含 spec 有这个槽位 ⇒ 派发前先读安装包内的活性账本对应行。
@@ -210,14 +210,14 @@
 - ⛔ 仓内任何文件不得另立第三份,`check:skill-frame-sync` 全树扫;os-dev 定义没带就停下索取。
 - 文件面两句原文照抄:预期落点是 X。
 - 若实测表明真正的生产者在别包,直接按生产者侧修,落点与理由写进报告和 PR 正文。
-- ⛔ 不在消费者侧打补丁;只写一个路径名,是要求 dev 在守约与修对之间二选一。
 - 跨包常等于跨车道,PM 事后补跨座位声明。
 - 模型标识只禁内容工件:PR 标题与正文、代码注释、文档、changeset、评论。
-- 豁免不再申报为偏差:一是 harness 的 `Co-Authored-By` 尾注,免的是申报,trailer pair 仍 model-free。
-- 另一条是 `.claude/agents/*` frontmatter 的 `model:`,`check:agent-model-declared` 要求。
+- 豁免:`.claude/agents/*` frontmatter 的 `model:`,`check:agent-model-declared` 要求。
+- 新 changeset 文件名用 `<issue>-<slug>.md`,⛔ 不用随机词对名。
 - same-day churn 行:派发时 `git log origin/main --oneline -20 -- <paths>` 见当天合并即加一行。
 - 该行原文:基于合并后的代码工作,issue 引用的片段可能已变,先核对当前 main。
 - 在飞重叠每轮拦截:main 新落 PR 与在飞申报文件面求交,相交即发四句警告。
+- 另一腿:本轮删/改名标识符 grep 每个在飞 PR 的 diff,命中同发,⛔ 不因文件面不相交跳过。
 - 四句:合 main 重跑测试矩阵、读对方 diff 重划边界、只补它没覆盖的、被完全覆盖就停下。
 - ⛔ 不硬造 diff。中途收窄标准条款须点名替换承接人与时点,缺一 dev 报 blocked 不半执行。
 - 全仓 pin 清扫两句原文:① grep 错误码与错误消息全仓扫同语义 pin,一轮翻完,不只改本包。

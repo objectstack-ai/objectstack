@@ -981,12 +981,20 @@ describe('check:liveness — the drill recurses past one level (#17424)', () => 
   // depth-two container is now VISIBLE. Before the walk recursed, a container
   // sitting under a drilled child was neither classified, nor deferred, nor
   // recorded — it was not in any population at all, which is why nothing could
-  // ever have gone red about it. `dashboard/widgets.chartConfig` is the #17385
-  // coordinate that could not be drilled until this landed.
-  it('SEES a container that sits under a drilled child — the coordinate #17385 is blocked on', () => {
+  // ever have gone red about it. `dashboard/widgets.chartConfig` was the #17385
+  // coordinate that could not be drilled until this landed — and it has since
+  // BEEN drilled, on that card, which is why this pin no longer names it. Two
+  // coordinates stand in its place and the pair is deliberate: `widgets.compareTo`
+  // is its exact structural replacement (a container that is a drilled child, the
+  // shape that was invisible before the recursion), and `widgets.chartConfig.xAxis`
+  // is one level deeper again — a container under TWO drilled levels, which exists
+  // only because the #17385 drill landed. A pin naming a coordinate that a card is
+  // about goes stale the moment that card lands; naming the SHAPE does not.
+  it('SEES a container that sits under a drilled child, at either depth', () => {
     const r = report();
     const seen = [...r.undrilled.map((u: any) => u.key), ...r.deferredContainers.map((d: string) => d.split(' → ')[0])];
-    expect(seen).toContain('dashboard/widgets.chartConfig');
+    expect(seen).toContain('dashboard/widgets.compareTo');
+    expect(seen).toContain('dashboard/widgets.chartConfig.xAxis');
   });
 
   it('is green against a verbatim copy of the shipped ledgers', () => {
@@ -1011,15 +1019,20 @@ describe('check:liveness — the drill recurses past one level (#17424)', () => 
   it('classifies the depth-2 keys, moving the verdict counts a blanket entry could not move', () => {
     const control = report(freshRoot('depth2-counts-control')).types.dashboard;
     const root = freshRoot('depth2-counts');
-    nestChildren(root, 'dashboard', 'widgets', 'chartConfig', {
-      title: { status: 'experimental', evidence: 'packages/spec/liveness/README.md:1', verifiedAt: '2026-09-12' },
+    nestChildren(root, 'dashboard', 'widgets', 'options', {
+      dateGranularity: { status: 'experimental', evidence: 'packages/spec/liveness/README.md:1', verifiedAt: '2026-09-12' },
     });
-    setChildField(root, 'dashboard', 'widgets', 'chartConfig', 'childrenDefault', 'live');
+    setChildField(root, 'dashboard', 'widgets', 'options', 'childrenDefault', 'live');
     const after = report(root).types.dashboard;
-    // One coordinate in, fourteen out: the blanket verdict on `chartConfig` is
-    // replaced by a verdict per key, and one of them is a status the container
-    // never carried. That difference is the whole point of drilling.
-    expect(after.classified).toBe(control.classified + 13);
+    // One coordinate in, five out: the blanket verdict on `options` is replaced
+    // by a verdict per key, and one of them is a status the container never
+    // carried. That difference is the whole point of drilling. (This read
+    // `chartConfig` until #17385 drilled it in the shipped ledger — the control
+    // tree then already carried the fourteen verdicts the mutation was supposed
+    // to introduce, so the delta collapsed to zero and the arithmetic measured
+    // nothing. The subject has to be a container the shipped ledger has NOT
+    // drilled, or the test grades the fixture instead of the walk.)
+    expect(after.classified).toBe(control.classified + 4);
     expect(after.byStatus.experimental ?? 0).toBe((control.byStatus.experimental ?? 0) + 1);
   });
 

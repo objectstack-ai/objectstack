@@ -418,6 +418,19 @@ export default class Start extends Command {
     if (flags.artifact) delete localEnv.OS_ARTIFACT_URL;
     // NODE_ENV is only forced to production when the user has not set it.
     // Allows `NODE_ENV=development objectstack start` to work for debugging.
+    //
+    // ⚠️ That second sentence was a FALSE ADVERTISEMENT for as long as #12271
+    // was open, and it is worth recording which half was wrong. This line was
+    // always correct: the operator's value does reach the child. What did not
+    // work was the invocation the sentence names — measured at
+    // `examples/app-crm`, `NODE_ENV=development objectstack start` exited 1 on
+    // `Cannot find module './registry'`, because the ambient value made
+    // @oclif/core resolve the CLI's OWN commands from `src/` in this process,
+    // before `localEnv` was ever built. It is honoured again because
+    // `bin/run.js` now declares `settings.enableAutoTranspile = false`; the
+    // sentence is held true by
+    // `test/published-entry-node-env-source-reroute.test.ts`, ⛔ not by this
+    // comment.
     if (!localEnv.NODE_ENV) localEnv.NODE_ENV = 'production';
 
     // Single-node self-host quickstart: forcing production above would make

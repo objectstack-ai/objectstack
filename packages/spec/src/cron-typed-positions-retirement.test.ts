@@ -80,7 +80,11 @@ const EXPORT_WELL_FORMED = {
 const STATE_WELL_FORMED = { id: 'sched_001', flowName: 'daily_report', createdAt: '2026-01-01T00:00:00Z' };
 const SYNC_WELL_FORMED = { strategy: 'incremental' as const, direction: 'bidirectional' as const, batchSize: 500 };
 const CONNECTOR_WELL_FORMED = { name: 'sap_erp', label: 'SAP ERP', type: 'saas' as const, syncConfig: SYNC_WELL_FORMED };
-const WARMUP_WELL_FORMED = { enabled: true, strategy: 'scheduled' as const, patterns: ['config:*'] };
+// [#17157] was `strategy: 'scheduled'` — that enum member was itself retired one card
+// later, in this same major, precisely because the cron key stripped below was its
+// only referent. A fixture must be well-formed under the CURRENT schema, so it now
+// carries `eager`; what this file pins is the absence of `schedule`, unchanged.
+const WARMUP_WELL_FORMED = { enabled: true, strategy: 'eager' as const, patterns: ['config:*'] };
 const CACHE_WELL_FORMED = {
   enabled: true,
   tiers: [{ name: 'l1', type: 'memory' as const }],

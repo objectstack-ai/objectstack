@@ -196,7 +196,24 @@ describe('AuthManager – optional better-auth plugin isolation', () => {
     const response = await manager.handleRequest(
       new Request('http://localhost:3000/api/v1/auth/get-session'),
     );
-    expect(response.status).toBe(200);
+
+    // ⚠️ [#17238] This request is ANONYMOUS, so "survives" is now a 401 with
+    // the declared refusal envelope, not a 200. The claim under test is
+    // unchanged — the route reached better-auth and came back with its own
+    // answer instead of collapsing into a 500 because an optional plugin
+    // failed to construct — but the vehicle for it moved, so the assertion
+    // moved with it.
+    //
+    // Asserting the CODE as well as the status is what keeps this test honest
+    // after the move: a bare `401` is also what a degraded instance could
+    // plausibly answer for the wrong reason, while `UNAUTHENTICATED` is
+    // specifically the anonymous-session refusal, and only the intact path
+    // produces it.
+    expect(response.status).toBe(401);
+    expect(((await response.json()) as any)?.error?.code).toBe('UNAUTHENTICATED');
+    expect(manager.getDegradedAuthFeatures()).toEqual([
+      expect.objectContaining({ feature: 'oidcProvider' }),
+    ]);
   });
 
   it('core plugin (bearer) still fails hard — no fail-open for security-bearing plugins', async () => {

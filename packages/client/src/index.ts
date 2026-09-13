@@ -1505,14 +1505,18 @@ const SET_AUTH_TOKEN_HEADER = 'set-auth-token';
  *   session would not change which credential lands here — it would invent a
  *   `token` on a route that served none, which is a different lie.
  *
- * ⚠️ **Known residue — `data.session` on `/sign-in|sign-up/email` (#17234).**
- * Those two routes serve no session object and no session id or expiry
- * anywhere, body or header, so `login` and `register` return a `data` with no
- * `session` and still do not parse as the full declared `SessionResponse`. The
- * only place a session is obtainable is a SECOND call to `/get-session`
- * (`auth.me`), and manufacturing one here would put a fabricated id and expiry
- * under a declared type — the card stays open for that shape decision rather
- * than being closed by an invention.
+ * ⚠️ **`data.session` on `/sign-in|sign-up/email` is no longer residue —
+ * closed server-side (#17234).** Those two routes now serve a `session`
+ * member too: `plugin-auth`'s `after` hook (`session-envelope-completion.ts`)
+ * reads the row `internalAdapter.createSession` already committed, back by
+ * the response's OWN token — the same seam `/get-session` uses — and attaches
+ * it, rather than this lift inventing one. So `login` and `register` now
+ * parse as the full declared `SessionResponse`, with one gap that is NOT
+ * this: `data.user.image` served `null` against a declared
+ * `string | undefined` (#17235, tracked separately). This does not touch the
+ * `data.token` rule above: `session.token` is the SAME unsigned string the
+ * body's own `token` already carried, not a second credential, and
+ * `data.token` is still never synthesized FROM a session.
  *
  * The `!body` guard is what carries the anonymous answer: `null` is falsy and
  * is returned untouched rather than wrapped into a signed-in-looking envelope
@@ -2768,9 +2772,16 @@ export class ObjectStackClient {
    * - GET    /api/v1/cloud/environments            → list environments
    * - GET    /api/v1/cloud/environments/:id        → get one (with database info)
    * - POST   /api/v1/cloud/environments            → provision a new environment
-   * - PATCH  /api/v1/cloud/environments/:id        → update (displayName, plan, status, …)
+   * - PATCH  /api/v1/cloud/environments/:id        → update (display_name, is_default, metadata)
    * - POST   /api/v1/cloud/environments/:id/activate → set as session's active environment
    * - POST   /api/v1/cloud/environments/:id/credentials/rotate → rotate credential
+   *
+   * That PATCH accept-set is the WHOLE set. `plan`, `status` and `visibility`
+   * are read-only on the control plane, and an unknown or read-only key is
+   * answered with a **400** — ⛔ it is NOT dropped silently. A plan change goes
+   * through the billing routes, a status change through the lifecycle actions
+   * (archive / restore / suspend / resume), and `visibility` is server-owned.
+   * Per-field detail, and the provenance of that 400, live on `update` below.
    *
    * @see docs/adr/0002-environment-database-isolation.md
    */
@@ -2929,7 +2940,32 @@ export class ObjectStackClient {
     },
 
     /**
-     * Update an environment (display_name, plan, status, is_default, metadata).
+     * Update an environment. The control plane accepts exactly three keys on
+     * this route: `display_name`, `is_default` and `metadata`.
+     *
+     * ⛔ Every other key is REFUSED, ⛔ not silently dropped — an unknown or
+     * read-only key is answered with a **400**. Silent-drop is the assumption
+     * a caller reasonably makes today, and it is the wrong one: the write does
+     * not half-succeed, the whole call fails loudly.
+     *
+     * - `plan` — read-only column. Plan changes go through the billing routes,
+     *   never through this call.
+     * - `status` — read-only column. Use the lifecycle actions instead:
+     *   archive / restore / suspend / resume.
+     * - `visibility` — server-owned, `private` today. The control plane forces
+     *   it at create time and refuses the column here; a write entry arrives
+     *   with the public-listing feature, on its OWN endpoint rather than this
+     *   generic update (2026-09-12 maintainer ruling). See `updateVisibility`
+     *   below, which is subject to exactly this refusal.
+     *
+     * ⚠️ That 400 is an INHERITED reading, not one measured from this repo:
+     * `/api/v1/cloud/*` is served by `objectstack-ai/cloud`, which is not
+     * readable from here, so no gate in this repo can check it — the same
+     * constraint the namespace docblock above records for the wire's casing.
+     *
+     * `patch` stays `Record<string, unknown>` deliberately. Narrowing it to a
+     * named type would narrow a published accept-set, which is a breaking
+     * change to this SDK and the maintainer's ruling to make, not a doc fix's.
      */
     update: async (id: string, patch: Record<string, unknown>) => {
       const res = await this.fetch(`${this.baseUrl}/api/v1/cloud/environments/${encodeURIComponent(id)}`, {
@@ -3050,6 +3086,21 @@ export class ObjectStackClient {
      * still allows anonymous artifact downloads when the URL includes an
      * exact `?commit=<id>` (share-by-link). `public` lists the environment and
      * freely exposes all revisions.
+     *
+     * ⛔ CURRENT STATE — this call is refused today, so the paragraph above
+     * describes a capability that does not exist yet. It PATCHes the generic
+     * `/api/v1/cloud/environments/:id` route with `{ visibility }`, and
+     * `visibility` is one of the server-owned columns that route rejects with
+     * a 400 (see `update` above). The 2026-09-12 maintainer ruling keeps
+     * `visibility` server-owned and forced to `private` until the
+     * public-listing feature ships, at which point it gets its OWN endpoint
+     * rather than this generic update.
+     *
+     * ⚠️ Note only. The signature and body below are deliberately untouched:
+     * retiring this method, re-signing it, or making it throw is a breaking
+     * change to a published SDK method and is the maintainer's ruling to make.
+     * ⚠️ The refusal is an INHERITED reading — see the provenance note on
+     * `update` above. It was NOT measured from this repo.
      */
     updateVisibility: async (id: string, visibility: 'private' | 'public') => {
       const res = await this.fetch(`${this.baseUrl}/api/v1/cloud/environments/${encodeURIComponent(id)}`, {
@@ -4090,11 +4141,32 @@ export class ObjectStackClient {
        * performs no such split — `redirect_uris` must arrive **pre-split**,
        * one entry per URL, which is what an SDK caller holds anyway.
        *
+       * ## ⚠️ `redirect_uris` is OPTIONAL here, and that is measured parity (#17215)
+       *
+       * It used to be the one required member on this type. It was never a
+       * deliberate guard — it is residue from the method's first commit, which
+       * declared `client_name` required too; the same-day follow-up relaxed
+       * `client_name` and left this one behind, and no comment, test, ADR or
+       * review thread ever asserted a reason for it.
+       *
+       * Re-introspected at runtime against `@better-auth/oauth-provider@1.7.3`
+       * — instantiate `oauthProvider()`, walk `endpoints`, read `options.body`
+       * — the member is `optional`, and a body omitting it entirely parses
+       * `ok`. All 21 members of that schema are optional.
+       *
+       * ⚠️ Optional does NOT mean `[]` will do. The vendor refuses an empty
+       * array, so when the member is present it must be non-empty: omitting it
+       * and passing `[]` are different requests, and only the first is legal.
+       * ⚠️ Nor does it mean a client registered without redirect URIs is
+       * usable — it cannot complete an `authorization_code` flow. This type
+       * states what the route accepts, never that every accepted call yields a
+       * client fit for every grant.
+       *
        * Pinned by `oauth-applications-register-request-members.test.ts`.
        */
       register: async (req: {
         client_name?: string;
-        redirect_uris: string[];
+        redirect_uris?: string[];
         token_endpoint_auth_method?: 'none' | 'client_secret_basic' | 'client_secret_post';
         grant_types?: string[];
         response_types?: string[];
@@ -6233,9 +6305,28 @@ export class ObjectStackClient {
    *
    * `service-ai` is a **Cloud/EE package in the `cloud` repo**. This repo's
    * dispatcher only proxies `/api/v1/ai/**` to whatever `buildAIRoutes()`
-   * mounted, and 404s `AI service is not configured` when the service is
-   * absent (the open-source default) — so treat every method here as
-   * plugin-provided and check `discovery.services` first.
+   * mounted. When the service is absent (the open-source default) those
+   * routes are still mounted, so a request reaches a handler with nothing
+   * behind it and the answer is **501**, not 404 — 404 would mean the path
+   * does not exist, which for `/ai/*` is false.
+   *
+   * Two arms are narrower than that, and a caller branching on status needs
+   * both:
+   *
+   * - An **anonymous** caller is refused **401** first. The 501 and the
+   *   `/ai/agents` courtesy below are both capability disclosures, and
+   *   neither is owed to a caller who has not authenticated.
+   * - **`GET /ai/agents` answers `200`** with an empty list (`{ agents: [] }`
+   *   under the envelope's `data`), not 501. It is a deliberate courtesy: a
+   *   console polls it on every navigation to decide whether to show AI
+   *   affordances, and an empty catalog conveys "no AI service here" without
+   *   looking like a fault.
+   *
+   * The 501 body is not a local string — it comes from the shared
+   * `serviceUnavailableMessage`, the same sentence `discovery.services.ai`
+   * reports for the slot, so the two cannot drift into naming different
+   * remedies. Treat every method here as plugin-provided and check
+   * `discovery.services` first.
    *
    * That split is also why the guard for these URLs lives on the other side of
    * the repo boundary: `cloud`'s `packages/service-ai/src/ai-route-ledger.ts`

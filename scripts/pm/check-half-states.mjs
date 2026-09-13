@@ -2412,14 +2412,30 @@ export function h8MergedPrStillDispatched(issue, mergedPrs, openPrs) {
 // classifies on its SPELLING alone, whatever #N's reachability; the paragraph
 // above says why that ruling is not this card's to make.
 //
-// The ruling spelling stays fireable: a value carrying an issue reference
-// (`#N` or `owner/repo#N`) is `issue-ref`, tested BEFORE the two unfireable
-// classes, so `Restart-when: #N rules on X` reads exactly as it did. That
-// order has a measured price — on the 2026-09-11 census of the 104 open holds,
-// four values name a tracked repo path and read clean on an unrelated issue
-// mention (#8753, #8607, #8589, #6009). Recorded here, not worked around: the
-// alternative is to rank `tracked-path` above `issue-ref`, which would make
-// the advertised ruling spelling fire, and that is the question above.
+// The ruling spelling stays fireable, and it is read at the DECLARATION
+// POSITION (#17605): a value that STARTS with an issue reference (`#N` or
+// `owner/repo#N`, after the leading decoration `partOfDeclarationRe`
+// tolerates) is `issue-ref`, tested BEFORE the two unfireable classes, so
+// `Restart-when: #N rules on X` reads exactly as this header advertises it. A
+// reference the value merely CARRIES mid-sentence is a mention, not an exit,
+// and falls through to `command` / `tracked-path` / `prose`.
+//
+// That position test is what RETIRED the price this note used to record. On
+// the 2026-09-11 census of the 104 open holds, four values name a tracked repo
+// path and read clean on an unrelated mid-sentence issue mention (#8753,
+// #8607, #8589, #6009); under the declaration test all four classify
+// `tracked-path` and get the rewrite row the class exists for. ⛔ The CLASS
+// ORDER was NOT the instrument and is unchanged: ranking `tracked-path` above
+// `issue-ref` would make the advertised ruling spelling fire, and that is the
+// ruled question above. Narrowing the POSITION costs no ruling because it
+// preserves that spelling literally — and it is the shape this file already
+// carries for `Part of #N` (`partOfDeclarationRe`), not a new one.
+//
+// The `prose` row moves with it: a value that mentions a card without
+// declaring one is prescribed the DECLARATION (「declare it: `Restart-when: #N
+// rules on X`」) beside the generic 「mark it `manual` or name the event」,
+// because an author who wrote a number down was not missing an event — they
+// wrote it where nothing reads.
 //
 // ## H9's path test is WIDER than H17's, deliberately
 //
@@ -2501,6 +2517,59 @@ export function restartWhenTrackedPaths(value, isTracked = () => false) {
 }
 
 /**
+ * An issue reference a `Restart-when:` value CARRIES anywhere.
+ *
+ * The anywhere-form, kept as a LABEL and never as the class test: it is what
+ * lets the `prose` row say 「this value mentions a card」 and prescribe the
+ * declaration, instead of reporting a missing event to an author who plainly
+ * had one in mind. Same pair as `partOfRe` / `partOfDeclarationRe`, with the
+ * roles reversed — there the wide form classifies and the narrow one labels;
+ * here the narrow one classifies and the wide one labels.
+ */
+function restartWhenIssueRefRe() {
+  return /#\d+\b/;
+}
+
+/**
+ * The same reference, restricted to the DECLARATION POSITION — the value
+ * STARTS with `#N` or `owner/repo#N`, after the leading decoration
+ * `partOfDeclarationRe` tolerates (blockquote markers, a list bullet, a
+ * markdown emphasis run).
+ *
+ * ## Why this is a class TEST here, where the `Part of` one is only a label
+ *
+ * `partOfDeclarationRe`'s docblock refuses to narrow its relation, and on its
+ * own corpus that refusal is right: narrowing there EMPTIES a set and drops a
+ * row through to a fallback channel, so a real declaration written second on
+ * a line is a finding LOST. Nothing is lost here. `classifyRestartWhen` is
+ * total — every value lands in one of six classes — so a value that fails
+ * this test is not dropped, it falls through to `command` / `tracked-path` /
+ * `prose` and fires a row carrying the remedy for the shape it actually has.
+ * The direction of the error is therefore opposite: the wide form here loses
+ * findings (a mention CLEARS the card), the narrow one gains them.
+ *
+ * ## The measured reason (#17605)
+ *
+ * On the 2026-09-11 census of the 104 open `pm:on-hold` cards, the wide form
+ * read four tracked-path holds clean on an unrelated issue number mentioned
+ * mid-sentence — #8753, #8607, #8589 and #6009, every one of them a misfiled
+ * `Restart-touch:` line, exactly the class #17377 built a row for. The
+ * declaration position is H9's own advertised spelling (`Restart-when: #N
+ * rules on X`) read literally, so the narrowing costs no ruling: #13718
+ * (`#13651 closes …`) and #3267 (`objectstack-ai/cloud#861 … is scheduled`)
+ * both start with their reference and stay `issue-ref`.
+ *
+ * The qualifier is this file's one reference grammar (`referenceRe`) — a full
+ * `owner/repo`, never a bare single segment, because `/` is what separates a
+ * cross-repo reference from a path segment. The NUMBER test is left exactly as
+ * the wide form spelled it (`#\d+\b`): this card narrows the POSITION and
+ * nothing else.
+ */
+function restartWhenIssueDeclarationRe() {
+  return /^[ \t]*(?:>[ \t]*)*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?[*_]{0,3}(?:[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*)?#\d+\b/;
+}
+
+/**
  * Which of the six shapes is this `Restart-when:` value? (#17377)
  *
  * The ORDER is the contract, and each step is here because a later one would
@@ -2510,9 +2579,12 @@ export function restartWhenTrackedPaths(value, isTracked = () => false) {
  *                      the one-word spelling can never be rescued by anything
  *                      that follows it
  *   2. `closed-ref`   the unlock sweep's own literal form
- *   3. `issue-ref`    any issue reference the value CARRIES — the ruling
- *                      spelling H9's header admitted (`#N rules on X`), which
- *                      is why it is tested before the two unfireable classes
+ *   3. `issue-ref`    an issue reference the value DECLARES — one it opens
+ *                      with, which is the ruling spelling H9's header admitted
+ *                      (`#N rules on X`) read literally, and why it is tested
+ *                      before the two unfireable classes. A reference merely
+ *                      CARRIED mid-sentence is a mention, not an exit, and
+ *                      falls through to 4/5/6 (#17605)
  *   4. `command`      a backticked opening span, or one of the measured bare
  *                      heads — a one-line executable predicate
  *   5. `tracked-path` some token is a tracked repo file: a misfiled
@@ -2531,7 +2603,7 @@ export function classifyRestartWhen(value, isTracked = () => false) {
   if (!v) return 'prose';
   if (/^manual\b/i.test(v)) return 'manual';
   if (/^closed\b[^\n]*?#\d+\b/i.test(v)) return 'closed-ref';
-  if (/#\d+\b/.test(v)) return 'issue-ref';
+  if (restartWhenIssueDeclarationRe().test(v)) return 'issue-ref';
   if (/^`[^`\n]+`/.test(v)) return 'command';
   if (RESTART_WHEN_COMMAND_HEADS.includes(v.split(/\s+/)[0].toLowerCase())) return 'command';
   if (restartWhenTrackedPaths(v, isTracked).length > 0) return 'tracked-path';
@@ -2640,9 +2712,15 @@ export function h9OnHoldNoRestartWhen(issue, commentBodies, isTracked = () => fa
         '`closed <owner/repo>#N`. Rewrite the line as `Restart-touch: <path>` (one path per line) ' +
         'and give `Restart-when:` a real exit or `manual`'
       : classes.includes('prose')
-        ? 'its `Restart-when:` is prose naming no issue, no tracked path and no runnable ' +
-          'command — a `manual` in disguise; nothing schedules the actor it waits on. Mark it ' +
-          '`manual` or name the event'
+        ? values.some((v, i) => classes[i] === 'prose' && restartWhenIssueRefRe().test(v))
+          ? 'its `Restart-when:` is prose that MENTIONS an issue reference mid-sentence but ' +
+            'DECLARES none — a mention is not an exit; `issue-ref` is read at the declaration ' +
+            'position, so nothing schedules the actor this value waits on. If the mentioned ' +
+            'card IS the exit, declare it: `Restart-when: #N rules on X` (the reference ' +
+            'first). Otherwise mark it `manual` or name the event'
+          : 'its `Restart-when:` is prose naming no issue, no tracked path and no runnable ' +
+            'command — a `manual` in disguise; nothing schedules the actor it waits on. Mark it ' +
+            '`manual` or name the event'
         : values.length > 0
           ? 'its only `Restart-when:` is `manual`, which no mechanism can fire'
           : commentsRead
@@ -12197,6 +12275,58 @@ export function cronPeriodHours(crons, fromMs = Date.now()) {
 }
 
 /**
+ * The first fire of the UNION of these crons STRICTLY AFTER `fromMs`, or `null`
+ * when no cron here can be read or none fires inside the horizon.
+ *
+ * The same expansion `cronPeriodHours` walks, asked a different question: that
+ * one measures the widest gap, this one names the next instant. A reader of a
+ * `Swept` line cannot act on a period alone — 「stalled」 is decidable only
+ * against a DEADLINE — so the renderer stamps this beside the period rather
+ * than leaving the arithmetic to whoever is reading the anchor at 03:00.
+ *
+ * ⛔ `null` is rendered as a refusal by the caller, never as a default: a
+ * deadline nobody declared would make the heartbeat reading a fiction, which is
+ * the defect this whole line exists to close.
+ *
+ * @param {string[]} crons
+ * @param {number} fromMs — the instant to search forward from, UTC.
+ * @returns {number|null}
+ */
+export function nextCronFire(crons, fromMs) {
+  const list = Array.isArray(crons) ? crons : [];
+  if (list.length === 0 || !Number.isFinite(fromMs)) return null;
+  const parsed = list.map(parseCron);
+  if (parsed.some((p) => !p)) return null;
+  const day = new Date(fromMs);
+  day.setUTCHours(0, 0, 0, 0);
+  let best = null;
+  for (let d = 0; d < H57_CRON_HORIZON_DAYS; d++) {
+    const at = new Date(day.getTime() + d * 86_400_000);
+    const month = at.getUTCMonth() + 1;
+    const dom = at.getUTCDate();
+    const dow = at.getUTCDay();
+    for (const cron of parsed) {
+      if (!cron.month.includes(month)) continue;
+      // POSIX cron, the same rule `cronPeriodHours` applies: with BOTH day
+      // fields restricted the day matches when EITHER does.
+      const domHit = cron.dom.includes(dom);
+      const dowHit = cron.dow.includes(dow);
+      const dayHit =
+        cron.domRestricted && cron.dowRestricted ? domHit || dowHit : domHit && dowHit;
+      if (!dayHit) continue;
+      for (const h of cron.hour) {
+        for (const m of cron.minute) {
+          const fire = at.getTime() + h * 3_600_000 + m * 60_000;
+          if (fire > fromMs && (best === null || fire < best)) best = fire;
+        }
+      }
+    }
+    if (best !== null) return best;
+  }
+  return null;
+}
+
+/**
  * Is this workflow in H57's population at all, and if not, why not — one
  * three-valued answer so the sweep never has to re-derive the reason for the
  * clause that reports it.
@@ -13152,6 +13282,259 @@ export function h60ClaimBranchUnparsed(issue, governance) {
     'which is the treadmill this row replaces. ⚠️ If a whole shift of claims reads this way, the ' +
     'cause is the SEAT TEMPLATE rather than a typo, and the fix is upstream of any one card. ' +
     'Report-only: ⛔ never a label written from this script.'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H61 — a LANDED carrier: a MERGED pull request, or a CLOSED card, still
+// wearing `needs:contract-review`.
+//
+// ## The class, and why it is not any row already here
+//
+// `references/contract-review.md` 载体纪律 states the invariant this row reads,
+// verbatim and untranslated: 「开着的载体恒 = 真实待审」 — an OPEN carrier is a
+// real pending review — and the clearing act that keeps it true: 「清标即落地:
+// PASS ⇒ 同席同笔剥双载体;凡清标同笔留 provenance 评论,引记录 id 与所判 head。」
+// So the carrier's whole meaning is tied to a live increment. When the
+// increment LANDS and the stroke is never written, the label outlives the thing
+// it was hung on: the PR is merged, the review it announces can no longer be
+// owed, and the sentence the board still reads is 「真实待审」.
+//
+// That is residue rather than a bypass, and the distinction is the point. The
+// FRONT end is closed: the queue guard's carrier leg (`33e07f7c`, PR #17484)
+// refuses a merge group whose queued PR still carries the label, so from that
+// commit forward a gated PR cannot enter the queue. What no reader has is the
+// list of carriers already past it — and a later reader (a seat, a post-merge
+// tier audit, a candidate query that forgets to scope `state=open`) reads each
+// one as a review still owed.
+//
+// Every neighbouring row declines this population for a stated reason of its
+// own, so none of them is a narrower version of this one:
+//
+//   H31  compares the gate's TWO CARRIERS on an OPEN card against its OPEN
+//        delivering PRs. Its own population test excludes a merged delivering
+//        PR by name, and a closed card by name.
+//   H35  reads the gate REMOVAL event — 「被剥」 vs 「从未挂过」. Here nothing
+//        was removed; the label is still on.
+//   H51  reads a carrier still present on an OPEN PR whose thread already holds
+//        a verdict for the CURRENT head. `h51SpeaksAbout` excludes a merged or
+//        closed PR in as many words — 「载体不迁移」 leaves nothing to repair on
+//        a PR that is gone — so the moment the PR merges, H51 goes silent and
+//        nothing takes over. This row is that handover.
+//   H53  reads an OPEN card carrying the gate with NO increment behind it.
+//        Opposite end: there the increment never existed, here it landed.
+//   H8   reads a MERGED PR whose card still says `pm:dispatched` — the same
+//        window, a different label and a different duty.
+//   H22  reads `pm:*` residue on a CLOSED card and files no row at all since
+//        #14072; `needs:contract-review` is not a `pm:*` state label and is not
+//        in that reading.
+//
+// The ask is the director seat's, on #17040 (comment 5597753733, 2026-09-09,
+// leak sweep of every first-parent merge since 03:28Z), quoted verbatim: 「A
+// `check-half-states` row for a **closed card still carrying `pm:*` or a
+// carrier** (row 1 left #16231 closed with `pm:queue` + `needs:contract-review`;
+// row 2 left the carrier on a merged PR).」 The `pm:*` half of that sentence is
+// H22's and stays there; the CARRIER half is this row.
+//
+// ## The population, measured 2026-09-12 across both installs
+//
+// `GET /repos/{o}/{r}/issues?state=closed&labels=needs:contract-review`, one
+// page each, both complete (39 and 29 rows, under the 100-row page):
+//
+//   objectstack  39 = 23 merged PRs + 2 closed-UNMERGED PRs + 14 closed cards
+//   objectui     29 = 17 merged PRs +  0 closed-UNMERGED PRs + 12 closed cards
+//   ──────────────────────────────────────────────────────────────────────────
+//   both         68 = 40 merged PRs + 2 closed-UNMERGED PRs + 26 closed cards
+//
+// Oldest closure carrying the label: 2026-08-20T23:58Z (objectstack),
+// 2026-08-30T17:32Z (objectui). ⚠️ That is the whole standing backlog and it is
+// NOT what this row reports — see the window note below. The card that asked
+// for the row named three specimens (objectstack #16783 / #17036, objectui
+// #8779); the class is an order of magnitude larger, and stating the two
+// numbers apart is the point of this paragraph.
+//
+// ## Closed-UNMERGED PRs are EXCLUDED, and the exclusion is measured
+//
+// Two of the 68 (objectstack #16733, #14923; objectui 0 — 2.9%) are pull
+// requests CLOSED without merging, carrier still on. They are deliberately not
+// this row's subject and are ⛔ not folded into the merged count:
+//
+//   ① The harm model does not reach them. This row exists because a gate label
+//      on a LANDED increment tells a later reader a review is owed on work that
+//      is already in `main`; the post-merge tier audit is the consumer. A PR
+//      closed unmerged delivered nothing, owes no post-merge verdict, and is
+//      the shape H51's header already calls moot — 「载体不迁移」.
+//   ② The data path does not hold them. `listRecentlyMergedPullRequests`
+//      SELECTS on `merged_at` and its own header says why in as many words: an
+//      unmerged closed PR is an abandoned attempt, not a delivery. Widening
+//      that selector would change what H8 and H49 are handed, which is a change
+//      to two other rows' inputs and ⛔ not this row's business.
+//   ③ Size. 2 of 68 measured, both on one install, neither inside the window
+//      this row reads. A separate count rendered on every run for a class that
+//      contributes nothing to it is a number a reader has to learn to ignore.
+//
+// A reader who wants them has the one-line query above; this header carries it.
+//
+// ## What this row costs: NOTHING — both populations are already in hand
+//
+// ⛔ No new fetch, no new request class, no page bought. The sweep already
+// holds both halves by the time this row runs:
+//
+//   merged PRs    `seenMerged` / `mergedWindow`, from
+//                 `listRecentlyMergedPullRequests` — H8's 8-day window. List
+//                 rows carry `labels`, `merged_at` and `head.sha`, so the
+//                 carrier test, the stamp and the head all ride the row.
+//
+// ⚠️ The sha printed is `head.sha`, ⛔ never `merge_commit_sha`, and the two
+// were confused in this row's own dispatch. 载体纪律 says a clearing write cites
+// 「所判 head」 and H51 resolves a verdict against `pr.head.sha`, so the head is
+// the only sha a contract-review record can be matched on. Measured on the
+// three specimens that filed this row: #16783 head `47eea7a8` / merge commit
+// `854639b3`, #17036 head `530469ff` / merge commit `e4fd55d9`, objectui
+// #8779 head `a04441f7` / merge commit `6cc48c4e` — the three shas quoted on
+// the card are the merge commits, and a reader searching a thread for one of
+// them finds nothing.
+//   closed cards  `seenClosed`, from `listRecentlyClosedIssues` — H22's 3-day
+//                 window, already filtered to non-PR rows, carrying `labels`
+//                 and `closed_at`.
+//
+// ⚠️ So the row's REACH is those two windows and not the standing backlog: a
+// merged carrier is visible for 8 days after it lands, a closed-card carrier
+// for 3. At the patrol's 6-hour cadence that is ~32 and ~12 consecutive sweeps
+// respectively — every new carrier is seen, and seen repeatedly, which is what
+// the consumer asked for ("a list instead of a memory"). What ages out is the
+// long tail already on the board on the day this landed. ⛔ That is a
+// deliberate boundary, not an oversight: the alternative is a
+// `state=closed&labels=…` listing, which is a new fetch class AND a second
+// closed-card reader beside `pmLabelListingPath`, whose `state=open` scoping is
+// the entire mechanism by which maintainer ruling 批 #13 holds.
+//
+// ## The repo is NOT printed on the row
+//
+// Each install sweeps its OWN repository — `resolveSweepRepo` off the runner's
+// `GITHUB_REPOSITORY`, one token, one board, ⛔ no cross-repo credential
+// anywhere — so this row can never see more than one and a repo column would be
+// a constant. The two-install figures above are a HAND measurement taken for
+// this header, not something a run can reproduce.
+//
+// ## Band: `inventory`, and each of the other three is refused by its own test
+//
+// ⛔ Not `gate`: that band exists for the row that can tell a STRIPPED gate
+// from an ungated card — an ABSENCE reading as a green light. Here the carrier
+// is PRESENT and legible; nothing was removed, which is also why H35 is silent.
+// ⛔ Not `stall`: nothing is stopped. The increment merged. There is no forward
+// motion for a later sweep to free, and this row claims none.
+// ⛔ Not `state`: that band's own definition says a LIVE card, and every
+// subject here is merged or closed — ARCHIVE, in the word ruling 批 #13 uses
+// for exactly this population.
+// ⇒ `inventory` — the band's own word is 「residue」, which is the grading
+// comment's word for this class too (5624070035). Being first in line for the
+// body trim is CORRECT for it: a landed carrier is the least urgent thing on
+// the board, and the trim callout names the family and the omitted count rather
+// than dropping rows silently.
+//
+// ⚠️ The row text is deliberately SHORT for this file. A verbose row is right
+// where a family fires once or twice; this one fires per carrier, and 20 of the
+// 23 objectstack merged carriers measured above sit inside the 8-day window on
+// the day it lands. The reasoning that would pad each row lives up here, where
+// it is read once and costs the rendered body nothing.
+//
+// ## Report-only, and emphatically — the subject is a GATE
+//
+// ⛔ This script never writes a label, and least of all this one. Clearing a
+// carrier is 清标即落地: a seat's audited act, taken in the same write as the
+// provenance comment naming the record id and the head it judged. A sweeper
+// stripping a review gate would be issuing the verdict.
+// ---------------------------------------------------------------------------
+
+/**
+ * Which MERGED pull requests this row can speak about at all.
+ *
+ * `labels` unreadable ⇒ OUT, never read as unlabelled — H31's rule, kept here
+ * so an unread field can never manufacture a clean reading (#4690).
+ *
+ * A closed-UNMERGED PR is OUT by decision, measured in the header above.
+ * `merged_at` is the test rather than `state`, which is the same field
+ * `prMergedWithinWindow` selects on, so this row and H8 can never disagree
+ * about what a merge is.
+ */
+export function h61SpeaksAboutMergedPr(pr) {
+  if (!Number.isFinite(Date.parse(pr?.merged_at ?? ''))) return false;
+  if (!Array.isArray(pr?.labels)) return false;
+  return labelNames(pr).includes(CONTRACT_REVIEW_LABEL);
+}
+
+/**
+ * Which CLOSED cards this row can speak about at all.
+ *
+ * TWO refusals stand between this leg and a pull request, because a PR reaches
+ * it wearing two different disguises and only one of them was obvious:
+ *
+ *   `pull_request`  a PR as it appears on an ISSUES listing. This is the shape
+ *                   `listRecentlyClosedIssues` already filters out, and the one
+ *                   that would read a closed-unmerged PR back in by the side
+ *                   door.
+ *   `head`          a PR as it appears on a PULLS listing — where there is no
+ *                   `pull_request` field at all, while `state` is `closed` and
+ *                   `closed_at` is readable on a merged and an abandoned PR
+ *                   alike. Without this refusal the card leg accepts every row
+ *                   of `mergedWindow`, and a closed-UNMERGED PR — the one shape
+ *                   this row EXCLUDES by decision — walks straight in. ⚠️ Caught
+ *                   by the self-test case written for that exclusion, ⛔ not by
+ *                   reading the sweep, where the two collections happen never
+ *                   to cross. A population test that is only correct because of
+ *                   its caller is one refactor from being wrong.
+ *
+ * A card list row carries neither field, so nothing legitimate is lost.
+ */
+export function h61SpeaksAboutClosedCard(issue) {
+  if (issue?.pull_request) return false;
+  if (issue?.head) return false;
+  if (String(issue?.state ?? '') !== 'closed') return false;
+  if (!Number.isFinite(Date.parse(issue?.closed_at ?? ''))) return false;
+  if (!Array.isArray(issue?.labels)) return false;
+  return labelNames(issue).includes(CONTRACT_REVIEW_LABEL);
+}
+
+/**
+ * H61 — null when the carrier is out of scope or clean, else the finding
+ * sentence.
+ *
+ * One entry point over both shapes, because they are one duty: the stroke that
+ * 载体纪律 calls 同笔剥双载体 clears BOTH carriers, so a reader handed two
+ * differently-worded rows would have to work out that they name one unwritten
+ * act.
+ *
+ * @param {{ number?: number, merged_at?: string|null, closed_at?: string|null,
+ *   state?: string, labels?: any[], head?: { sha?: string },
+ *   pull_request?: object }} row — a merged-PR list row (`mergedWindow`) or a
+ *   closed-card list row (`seenClosed`). Both carry everything read here, so
+ *   this row costs no request.
+ */
+export function h61LandedCarrierStillGated(row) {
+  const merged = h61SpeaksAboutMergedPr(row);
+  const closed = !merged && h61SpeaksAboutClosedCard(row);
+  if (!merged && !closed) return null;
+
+  const head = String(row?.head?.sha ?? '');
+  const what = merged
+    ? `MERGED ${row.merged_at} (head \`${head ? head.slice(0, 10) : 'UNREAD'}\`)`
+    : `CLOSED ${row.closed_at}`;
+  const which = merged ? 'pull request' : 'card';
+
+  return (
+    `${what} and STILL carrying \`${CONTRACT_REVIEW_LABEL}\` — the gate outlived the increment it ` +
+    `was hung on. 载体纪律: 「开着的载体恒 = 真实待审」, so this ${which} still announces a real ` +
+    'pending contract review over work that is already landed or closed; a seat, a post-merge tier ' +
+    'audit or any candidate query that forgets to scope `state=open` reads it as a review still ' +
+    'owed. ⛔ Not a bypass: the queue guard\'s carrier leg refuses a gated PR at enqueue, so this ' +
+    'is RESIDUE behind a closed front end. Remedy — WHO and HOW: the seat that owns the landing, ' +
+    'with one write — 「清标即落地」, 同笔剥双载体 plus the provenance comment naming the record id ' +
+    'and the head it judged (`references/contract-review.md` 载体纪律). ⛔ Report-only: never a ' +
+    'label written from this script — striking a review gate from a sweeper would be issuing the ' +
+    'verdict. Boundaries: an OPEN carrier is H31/H51/H53\'s, a REMOVED one is H35\'s, `pm:*` ' +
+    'residue is H22\'s, and a PR closed UNMERGED is out of this row by decision (its header says ' +
+    'why, with the count).'
   );
 }
 
@@ -14217,6 +14600,42 @@ export function normalizeProvenance(text) {
     .slice(0, 300);
 }
 
+/**
+ * The EXPECTATION stamped beside the `Swept` timestamp — the schedule, the
+ * interval, and the deadline the next healthy heartbeat has to beat.
+ *
+ * The heartbeat sentence under the stamp asks the reader to judge whether the
+ * `Swept` line 「stops advancing」. That judgement takes an input the body used
+ * to withhold: this patrol fires every 6h while three of its sibling anchors
+ * fire daily, so a reader who learns one cadence from a neighbour reads a
+ * healthy anchor as a dead caller in one direction and three missed runs as
+ * healthy in the other. Rendering the deadline is what turns the instruction
+ * into something a reader can act on without going and reading a workflow file.
+ *
+ * ⛔ A cron this file cannot read refuses LOUDLY rather than falling back to
+ * `PATROL_CADENCE_HOURS` alone: a deadline computed from a schedule nobody
+ * could parse would be a fiction with a timestamp on it, which is worse than
+ * the silence this line replaces.
+ *
+ * `cron` is a parameter with the constant as its default for ONE reason: the
+ * refusal branch below is unreachable while `PATROL_CRON` parses, and a branch
+ * no case can enter is a branch nothing pins. The self-test drives it through
+ * this seam; every caller uses the default.
+ *
+ * @param {Date} sweptAt — the same clock the stamp is rendered from.
+ * @param {string} [cron] — the schedule to compute the deadline from.
+ * @returns {string} one ` · `-joined fragment, with no leading separator.
+ */
+export function renderCadenceExpectation(sweptAt, cron = PATROL_CRON) {
+  const schedule = `expected every ${PATROL_CADENCE_HOURS}h (cron \`${cron}\` UTC)`;
+  const next = nextCronFire([cron], sweptAt.getTime());
+  if (next === null) {
+    return `${schedule} · ⚠️ next fire UNCOMPUTED — \`${cron}\` did not parse, so this body states`
+      + ' no deadline and the heartbeat above is NOT decidable from it';
+  }
+  return `${schedule} · next by ${new Date(next).toISOString().slice(0, 16)}Z`;
+}
+
 // ---------------------------------------------------------------------------
 // The ROW-FAMILY REGISTRY and the trim's priority order (#13947)
 //
@@ -14387,6 +14806,19 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   // stopped, and it fires on a card whose dev may be working perfectly well;
   // what is broken is the READING, not the dispatch.
   H60: 'state',
+
+  // H61 is an `inventory`, and each of the other three bands is refused by its
+  // own criterion — the row's header carries the argument in full. In short:
+  // ⛔ not `gate`, which exists for a row that can tell a STRIPPED gate from an
+  // ungated card (here the carrier is PRESENT); ⛔ not `stall`, because nothing
+  // is stopped — the increment merged; ⛔ not `state`, whose own definition says
+  // a LIVE card, while every subject of this row is merged or closed, i.e.
+  // ARCHIVE in ruling 批 #13's own word for this population. What is left is the
+  // band whose word is 「residue」, which is also the grading comment's word for
+  // the class. Being first in line for the body trim is CORRECT: a landed
+  // carrier is the least urgent thing on the board, and the ledger's callout
+  // names the family and the omitted count rather than dropping rows silently.
+  H61: 'inventory',
 
   // H51 is a `state` and ⛔ NOT a `gate`, and the distinction is the gate band's
   // own criterion rather than the subject's vocabulary. That band exists for the
@@ -14856,11 +15288,14 @@ export function renderMarkdown(findings, counts, options = {}) {
       ' state. Each predicate and the protocol clause it enforces are documented in' +
       ' `scripts/pm/check-half-states.mjs`.',
     '',
-    `_Swept ${sweptAt.toISOString()}${provenance ? ` · ${provenance}` : ''}_`,
+    `_Swept ${sweptAt.toISOString()} · ${renderCadenceExpectation(sweptAt)}` +
+      `${provenance ? ` · ${provenance}` : ''}_`,
     '',
-    'The timestamp above is the patrol\'s own heartbeat: a `Swept` line that stops advancing means the' +
-      ' standing caller died, which is the failure this anchor was created to make visible. Read it' +
-      ' before you read the rows.',
+    'The timestamp above is the patrol\'s own heartbeat, and the line states the cadence that makes' +
+      ' 「stalled」 decidable: a `Swept` line still sitting there past the `next by` deadline beside it' +
+      ' means the standing caller died, which is the failure this anchor was created to make visible.' +
+      ' ⛔ Do not carry a cadence over from a sibling anchor — the four patrols differ by 4× and each' +
+      ' states its own. Read it before you read the rows.',
     '',
   ];
 
@@ -16099,6 +16534,23 @@ export function sweepOverlap(coverageDays, cadenceHours = PATROL_CADENCE_HOURS) 
 
 /** The scheduled patrol's period — `cron: '37 1,7,13,19 * * *'` in the workflow. */
 export const PATROL_CADENCE_HOURS = 6;
+
+/**
+ * The standing caller's schedule, verbatim, as `half-state-patrol.yml` declares
+ * it. Stated here rather than passed in like `--provenance`, and the split is
+ * deliberate: provenance is the CALLER'S IDENTITY (run 123, commit abc) which
+ * this repo-agnostic sweeper genuinely cannot know, while the cadence is a fact
+ * about the sweep itself that this file ALREADY asserts one line above — a
+ * second route for the same fact would be a second place to drift from.
+ *
+ * ⚠️ Its one obligation: `half-state-patrol.yml` is copied VERBATIM into
+ * sibling repos together with this script, so the pair travels as a unit and
+ * the two stay equal by construction. Change one and change the other in the
+ * same edit — this constant and `PATROL_CADENCE_HOURS` are what the anchor
+ * body's own heartbeat deadline is computed from, and a stale one publishes a
+ * deadline nobody schedules.
+ */
+export const PATROL_CRON = '37 1,7,13,19 * * *';
 
 // ---------------------------------------------------------------------------
 // The shared window vocabulary (#13606) — what DID fall out of converting the
@@ -18278,6 +18730,31 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     seenClosed.set(issue.number, issue);
   }
   stats.closedFloor = CLOSED_FLOOR.raw;
+
+  // H61 (#17510) — the LANDED contract-review carrier, over BOTH windows this
+  // sweep already holds. Placed here because this is the first point at which
+  // both exist: `mergedWindow` was assembled for H8 above, `seenClosed` one
+  // line up. ⛔ No fetch, no page, no new request class — every field the row
+  // reads (`labels`, `merged_at`/`closed_at`, `head.sha`) rides a list row
+  // that was already bought.
+  //
+  // Two loops rather than one concatenation, so each leg's population test is
+  // the one its own predicate declares and a closed-UNMERGED PR cannot reach
+  // the card leg through an issues-shaped row (the header says why it is out).
+  // Counted as well as judged: a family that fires on nothing must be
+  // distinguishable from a family whose input was never read (#4690).
+  for (const pr of mergedWindow) {
+    if (!h61SpeaksAboutMergedPr(pr)) continue;
+    stats.landedCarriers = (stats.landedCarriers ?? 0) + 1;
+    const residue = h61LandedCarrierStillGated(pr);
+    if (residue) findings.push([pr, 'H61', residue]);
+  }
+  for (const card of seenClosed.values()) {
+    if (!h61SpeaksAboutClosedCard(card)) continue;
+    stats.landedCarriers = (stats.landedCarriers ?? 0) + 1;
+    const residue = h61LandedCarrierStillGated(card);
+    if (residue) findings.push([card, 'H61', residue]);
+  }
 
   // H23 — the commit-message surface (#10942). The counting is not incidental:
   // this row's measured yield is ~6 in 1,546, so a silent H23 is the normal
@@ -20598,6 +21075,77 @@ async function selfTest() {
   t('gate: the ruling spelling still buys nothing', needsRestartWhenComments(hold('Restart-when: #13651 rules on it'), h9Tracked), false);
   t('gate: the reserved `closed …#N` class still buys nothing', needsRestartWhenComments(hold(`Restart-when: ${v5499}`), h9Tracked), false);
 
+  // -- H9: `issue-ref` is the DECLARATION position (#17605) -------------------
+  // The wide form (`/#\d+\b/`) read a MENTION as an exit, so four live holds
+  // whose value names a tracked repo path cleared H9 on an unrelated issue
+  // number written mid-sentence. Every value below is VERBATIM from the live
+  // card on 2026-09-12, pinned as a literal string for the reason the #17377
+  // specimens are: a later reader sees what the position test was measured
+  // against, not a paraphrase of it. Both directions, on the same four.
+  const v8753 =
+    'any PR makes provisionTenantScopeIndex in packages/objectql/src/registry.ts read ' +
+    'injected-column provenance (#7865 convergence map resumes), or a gate begins pinning ' +
+    '/meta/object/:name index accuracy';
+  const v8607 =
+    'the ADR-0087 changeset-gate family is reworked (scripts/check-adr-0087-registration.mjs ' +
+    'and siblings, e.g. out of #8299), or a second breaking-behavior changeset lands unmarked';
+  const v8589 =
+    'buildMcpBridge in packages/runtime/src/domains/mcp.ts reaches the engine other than ' +
+    'through callData, a third McpDataBridge implementation appears, or the #7823 tripwire is ' +
+    'narrowed or moved off the protocol ingress path';
+  const v6009 =
+    'any PR touches sqliteCanonicalDatetimeSql or backfillCanonicalDatetimes in ' +
+    'packages/drivers/driver-sql/src/sql-driver.ts (price the backfill-SET-side guard, NOT the ' +
+    'cloud#1005-rejected shared-read heuristic), or unresolvedEpochTextRows counts non-zero on ' +
+    'real data, or a bare-numeric-TEXT Field.datetime site is reported';
+  const v13718 = '#13651 closes (ask 1 lands and reports the count of constants an app cannot reach)';
+  const v3267 =
+    'objectstack-ai/cloud#861 (Phase 3 EE governance) is scheduled, or a real customer / ' +
+    'example scenario needs durable suspension inside a parallel branch (parallel approval, ' +
+    'wait signal, or a subflow containing a pause)';
+  // The census oracle: the one tracked path each of the four names, and
+  // nothing else — the fixture states the tracked set rather than inheriting
+  // whatever this checkout happens to hold (`h9Tracked`'s reason).
+  const censusTracked = (p) =>
+    ['packages/objectql/src/registry.ts', 'scripts/check-adr-0087-registration.mjs',
+      'packages/runtime/src/domains/mcp.ts',
+      'packages/drivers/driver-sql/src/sql-driver.ts'].includes(p);
+
+  t('H9 class: #8753 — a mid-sentence mention is not an exit', classifyRestartWhen(v8753, censusTracked), 'tracked-path');
+  t('H9 class: #8607 — same, the gate family it names is tracked', classifyRestartWhen(v8607, censusTracked), 'tracked-path');
+  t('H9 class: #8589 — same, and the mention sits after the path', classifyRestartWhen(v8589, censusTracked), 'tracked-path');
+  t('H9 class: #6009 — same, on a cross-repo `cloud#N` mention', classifyRestartWhen(v6009, censusTracked), 'tracked-path');
+  // The other direction: with no oracle the same four collapse into `prose` —
+  // same verdict, the less specific row — which is what the wide form's
+  // false-clean was hiding in BOTH oracle states.
+  t('H9 class: #8753 with no oracle is prose, never fireable', classifyRestartWhen(v8753), 'prose');
+  t('H9 class: #8607 with no oracle is prose, never fireable', classifyRestartWhen(v8607), 'prose');
+  t('H9 class: #8589 with no oracle is prose, never fireable', classifyRestartWhen(v8589), 'prose');
+  t('H9 class: #6009 with no oracle is prose, never fireable', classifyRestartWhen(v6009), 'prose');
+  // ⛔ And the narrowing does NOT reach a value that DECLARES its reference —
+  // the advertised spelling, read literally, in both its forms.
+  t('H9 class: #13718 declares its reference first -> still `issue-ref`', classifyRestartWhen(v13718, censusTracked), 'issue-ref');
+  t('H9 class: #3267 declares a cross-repo one -> still `issue-ref`', classifyRestartWhen(v3267, censusTracked), 'issue-ref');
+  t('H9 class: …and the decoration a declaration may carry is the `Part of` one', classifyRestartWhen('> **#13651** rules on it'), 'issue-ref');
+  t('H9 class: a bare single-segment qualifier is a path segment, not a repo', classifyRestartWhen('cloud#861 is scheduled'), 'prose');
+  // The four are H9 ROWS now, each prescribing the rewrite its class names.
+  t('H9: #8753 is a finding, not a legal hold', typeof h9OnHoldNoRestartWhen(hold(`Restart-when: ${v8753}`), undefined, censusTracked), 'string');
+  t('H9: …and the row names the tracked path it misfiled', h9row(hold(`Restart-when: ${v8753}`), undefined, censusTracked).includes('`packages/objectql/src/registry.ts`'), true);
+  t('H9: …and prescribes the `Restart-touch:` rewrite', h9row(hold(`Restart-when: ${v8753}`), undefined, censusTracked).includes('Rewrite the line as `Restart-touch: <path>`'), true);
+  t('H9: #13718 stays clean — a declaration is an exit', h9OnHoldNoRestartWhen(hold(`Restart-when: ${v13718}`), undefined, censusTracked), null);
+  t('H9: #3267 stays clean too', h9OnHoldNoRestartWhen(hold(`Restart-when: ${v3267}`), undefined, censusTracked), null);
+  // The prose row's remedy follows the value: a MENTION gets the declaration
+  // prescribed, a value with no reference at all keeps the #10102 sentence.
+  const mentionProse = 'the design session rules the question below, with #5493 context on the table';
+  t('H9: a prose value that MENTIONS a card is prose', classifyRestartWhen(mentionProse, censusTracked), 'prose');
+  t('H9: …and its row prescribes the DECLARATION', h9row(hold(`Restart-when: ${mentionProse}`), undefined, censusTracked).includes('declare it: `Restart-when: #N rules on X`'), true);
+  t('H9: …saying in as many words that a mention is not an exit', h9row(hold(`Restart-when: ${mentionProse}`), undefined, censusTracked).includes('MENTIONS an issue reference mid-sentence'), true);
+  t('H9: …while still naming the event as the other branch', h9row(hold(`Restart-when: ${mentionProse}`), undefined, censusTracked).includes('mark it `manual` or name the event'), true);
+  t('H9: a reference-free prose value does NOT gain the clause', h9row(h3739, undefined, h9Tracked).includes('declare it: `Restart-when: #N rules on X`'), false);
+  t('H9: …and keeps the #10102 sentence verbatim', h9row(h3739, undefined, h9Tracked).includes('Mark it `manual` or name the event'), true);
+  // ⛔ The class ORDER is untouched — B was never the instrument (#17605).
+  t('H9 class: the fireable set is STILL exactly the three', FIREABLE_RESTART_WHEN_CLASSES.join('|'), 'closed-ref|issue-ref|command');
+
   // -- H10: stale unclaimed p0 (routing-gap backstop) -------------------------
   const NOW = Date.parse('2026-08-16T12:00:00Z');
   const hoursAgo = (h) => new Date(NOW - h * 3_600_000).toISOString();
@@ -21843,6 +22391,81 @@ async function selfTest() {
   t('⛔ H60: …and the blockquoted template spelling too', h60ClaimBranchUnparsed(dispatchedCard(), gov60([claimRow60(1, '2026-09-01T00:00:00Z', 'Claim: PM loop\n> Branch: `claude/issue-6752-x`')])), null);
   t('H60 band: the row is registered as a `state`, beside H34\'s claim-shape row', familyBand('H60'), familyBand('H34'));
 
+  // -- H61: a LANDED carrier — a merged PR or a closed card still gated (#17510)
+  //
+  // The specimens are the three the card was filed on, quoted from the live
+  // board on 2026-09-12, plus the closed card the director seat named in
+  // 5597753733. ⚠️ The shas are the HEADS, ⛔ not the merge commits the card's
+  // own text quotes — see the row's header for the measurement of both.
+  const gated61 = (labels = [CONTRACT_REVIEW_LABEL]) => labels.map((name) => ({ name }));
+  const mergedPr61 = (extra = {}) => ({
+    number: 16783,
+    html_url: 'https://github.com/objectstack-ai/objectstack/pull/16783',
+    state: 'closed',
+    merged_at: '2026-09-09T06:36:36Z',
+    head: { sha: '47eea7a805763efa533cb22f1325d9df25db6413' },
+    labels: gated61(['documentation', 'size/xl', 'tests', 'tooling', CONTRACT_REVIEW_LABEL]),
+    ...extra,
+  });
+  const closedCard61 = (extra = {}) => ({
+    number: 16231,
+    html_url: 'https://github.com/objectstack-ai/objectstack/issues/16231',
+    state: 'closed',
+    closed_at: '2026-09-09T06:36:37Z',
+    labels: gated61([CONTRACT_REVIEW_LABEL, 'domain:engine', 'priority:p3']),
+    ...extra,
+  });
+  const row61 = (subject) => String(h61LandedCarrierStillGated(subject) ?? '');
+
+  // ── Direction 1: it FIRES, on both shapes ────────────────────────────────
+  t('H61: a MERGED PR still carrying the gate -> finding', typeof h61LandedCarrierStillGated(mergedPr61()), 'string');
+  t('H61: …and the row prints the merge stamp', row61(mergedPr61()).includes('MERGED 2026-09-09T06:36:36Z'), true);
+  t('H61: …and the HEAD sha, abbreviated', row61(mergedPr61()).includes('`47eea7a805`'), true);
+  t('H61: …⛔ and NOT the merge commit the card quoted', row61(mergedPr61()).includes('854639b3'), false);
+  t('H61: a CLOSED card still carrying the gate -> finding', typeof h61LandedCarrierStillGated(closedCard61()), 'string');
+  t('H61: …and the row prints the closure stamp', row61(closedCard61()).includes('CLOSED 2026-09-09T06:36:37Z'), true);
+  t('H61: …and says `card`, not `pull request`', row61(closedCard61()).includes('this card still announces'), true);
+  t('H61: objectui#8779 — the sibling install\'s specimen fires the same way', typeof h61LandedCarrierStillGated(mergedPr61({ number: 8779, merged_at: '2026-09-09T06:42:59Z', head: { sha: 'a04441f7' } })), 'string');
+
+  // ── Direction 2: it is SILENT everywhere it must be ──────────────────────
+  t('⛔ H61: an OPEN PR carrying the gate is NOT this row — H51 owns it', h61LandedCarrierStillGated({ ...mergedPr61(), state: 'open', merged_at: null }), null);
+  t('⛔ H61: …and H51 still speaks about exactly that PR, so nothing fell between them', h51SpeaksAbout({ ...mergedPr61(), state: 'open', merged_at: null }), true);
+  t('⛔ H61: …while H51 is silent on the merged one, which is the handover', h51SpeaksAbout(mergedPr61()), false);
+  t('⛔ H61: an OPEN card carrying the gate is NOT this row — H53\'s population', h61LandedCarrierStillGated({ ...closedCard61(), state: 'open', closed_at: null }), null);
+  t('⛔ H61: a MERGED PR WITHOUT the gate label is clean', h61LandedCarrierStillGated(mergedPr61({ labels: gated61(['documentation', 'size/xl']) })), null);
+  t('⛔ H61: a CLOSED card without it is clean too', h61LandedCarrierStillGated(closedCard61({ labels: gated61(['domain:engine']) })), null);
+  t('⛔ H61: a CLOSED-UNMERGED PR is out by decision (#16733), read as a pulls row', h61LandedCarrierStillGated({ ...mergedPr61(), number: 16733, merged_at: null, closed_at: '2026-09-08T06:17:13Z' }), null);
+  t('⛔ H61: …and out through the ISSUES-shaped row too, so it cannot enter by the card leg', h61LandedCarrierStillGated({ ...closedCard61(), number: 16733, pull_request: { merged_at: null }, closed_at: '2026-09-08T06:17:13Z' }), null);
+  t('⛔ H61: …nor can a MERGED PR reach the card leg by wearing a `pull_request` field', h61SpeaksAboutClosedCard({ ...closedCard61(), pull_request: { merged_at: '2026-09-09T06:36:36Z' } }), false);
+  t('⛔ H61: …nor by arriving from the PULLS listing, where there is no `pull_request` field to refuse', h61SpeaksAboutClosedCard(mergedPr61()), false);
+  t('⛔ H61: …which is exactly how the closed-UNMERGED PR would have entered', h61SpeaksAboutClosedCard({ ...mergedPr61(), number: 16733, merged_at: null, closed_at: '2026-09-08T06:17:13Z' }), false);
+  t('⛔ H61: an UNREADABLE `labels` is excluded, never read as unlabelled (H31\'s rule)', h61LandedCarrierStillGated(mergedPr61({ labels: undefined })), null);
+  t('⛔ H61: …on the card leg as well', h61LandedCarrierStillGated(closedCard61({ labels: undefined })), null);
+  t('⛔ H61: an unreadable `merged_at` is not a merge this row can place in time', h61LandedCarrierStillGated(mergedPr61({ merged_at: 'nope' })), null);
+  t('⛔ H61: an unreadable `closed_at` likewise', h61LandedCarrierStillGated(closedCard61({ closed_at: 'nope' })), null);
+  t('⛔ H61: a missing row does not crash', h61LandedCarrierStillGated(undefined), null);
+
+  // ── The row's text: the remedy, the spelling, the boundaries ─────────────
+  t('H61: the row names the invariant the carrier breaks', row61(mergedPr61()).includes('开着的载体恒 = 真实待审'), true);
+  t('H61: …and the clearing act by name', row61(mergedPr61()).includes('清标即落地'), true);
+  t('H61: …as a DOUBLE-carrier stroke, which is what 载体纪律 asks for', row61(mergedPr61()).includes('同笔剥双载体'), true);
+  t('H61: …plus the provenance comment the same write owes', row61(mergedPr61()).includes('provenance comment naming the record id'), true);
+  t('H61: …and WHO acts — a seat, not this script', row61(mergedPr61()).includes('the seat that owns the landing'), true);
+  t('H61: …and forbids a label written from this script', row61(mergedPr61()).includes('never a label written from this script'), true);
+  t('H61: …and calls the class RESIDUE behind a closed front end, ⛔ not a bypass', row61(mergedPr61()).includes('RESIDUE behind a closed front end'), true);
+  t('H61: …naming every neighbouring row so the reader never re-files one of theirs', ['H31/H51/H53', 'H35', 'H22'].every((code) => row61(mergedPr61()).includes(code)), true);
+  t('H61: the gate constant is the one H31 already owns, not a second spelling', CONTRACT_REVIEW_LABEL, 'needs:contract-review');
+  t('H61: …and the row prints THAT constant rather than a re-typed literal', row61(closedCard61()).includes(`\`${CONTRACT_REVIEW_LABEL}\``), true);
+  t('H61: …which the gate-label family also still shares (H35\'s pin, from this side)', GATE_SEMANTIC_LABELS.includes(CONTRACT_REVIEW_LABEL), true);
+
+  // ── Report-only: bands and exit codes are untouched by this row ──────────
+  t('H61: not a loud finding — it never escalates a sweep', isLoudFinding(h61LandedCarrierStillGated(mergedPr61())), false);
+  t('H61 band: registered as `inventory` — residue, ⛔ not a live-card `state`', familyBand('H61'), 'inventory');
+  t('H61 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H61'), true);
+  t('H61 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
+  t('⛔ H61: the prerequisite-refusal exit code is unchanged — this row adds none', EXIT_PREREQUISITE_NOT_MET, 3);
+  t('⛔ H61: and the band vocabulary is unchanged — `inventory` was already one of them', HALF_STATE_FAMILY_BANDS.map((band) => band.name).join(','), 'gate,unregistered,stall,state,inventory');
+
   // -- H16: open non-draft PR stuck in a merge conflict (2026-08-19 incident) --
   // The single-PR payload shape, since `mergeable_state` is absent from the
   // listing rows this sweep otherwise runs on.
@@ -22521,6 +23144,33 @@ async function selfTest() {
   t('provenance: absent leaves the swept line alone', renderMarkdown([], counts).includes('_Swept ') && !renderMarkdown([], counts).includes(' · undefined'), true);
   t('provenance: present is stamped after the timestamp', renderMarkdown([], counts, { provenance: 'run 7' }).includes(' · run 7_'), true);
   t('markdown: the sweep timestamp is the patrol heartbeat', renderMarkdown([], counts, { sweptAt: new Date('2026-08-19T06:00:00Z') }).includes('_Swept 2026-08-19T06:00:00.000Z'), true);
+
+  // ── The heartbeat's EXPECTATION (#17720) ──────────────────────────────────
+  // 「a `Swept` line that stops advancing means the caller died」 is an
+  // instruction no reader can act on while the body withholds the interval that
+  // makes 「stalled」 decidable — and this patrol fires 4× more often than the
+  // three sibling anchors that carry the same sentence, so a cadence carried
+  // over from a neighbour is wrong in both directions. These cases pin the
+  // deadline itself, computed from a FIXED clock: a rendered interval nothing
+  // pins is prose again the first time the schedule moves.
+  t('#17720 next fire: the first slot strictly after the clock', nextCronFire([PATROL_CRON], Date.parse('2026-08-19T06:00:00Z')), Date.parse('2026-08-19T07:37:00Z'));
+  t('#17720 next fire: STRICTLY after — standing on a fire returns the NEXT one, never itself', nextCronFire([PATROL_CRON], Date.parse('2026-08-19T01:37:00Z')), Date.parse('2026-08-19T07:37:00Z'));
+  t('#17720 next fire: the last slot of the day rolls to tomorrow', nextCronFire([PATROL_CRON], Date.parse('2026-08-19T19:38:00Z')), Date.parse('2026-08-20T01:37:00Z'));
+  t('#17720 next fire: a month boundary rolls too', nextCronFire([PATROL_CRON], Date.parse('2026-08-31T23:00:00Z')), Date.parse('2026-09-01T01:37:00Z'));
+  t('#17720 next fire: a daily cron reads the same way', nextCronFire(['19 4 * * *'], Date.parse('2026-08-19T06:00:00Z')), Date.parse('2026-08-20T04:19:00Z'));
+  t('#17720 next fire: ⛔ an unreadable cron refuses rather than guessing a period', nextCronFire(['every six hours'], Date.parse('2026-08-19T06:00:00Z')), null);
+  t('#17720 next fire: ⛔ no cron at all refuses too', nextCronFire([], Date.parse('2026-08-19T06:00:00Z')), null);
+  t('#17720 cadence: the declared interval is rendered', renderCadenceExpectation(new Date('2026-08-19T06:00:00Z')).includes('expected every 6h (cron `37 1,7,13,19 * * *` UTC)'), true);
+  t('#17720 cadence: …with the deadline computed from that same clock', renderCadenceExpectation(new Date('2026-08-19T06:00:00Z')).includes('next by 2026-08-19T07:37Z'), true);
+  t('#17720 cadence: the deadline MOVES with the clock — it is computed, not a literal', renderCadenceExpectation(new Date('2026-08-19T14:00:00Z')).includes('next by 2026-08-19T19:37Z'), true);
+  t('#17720 cadence: ⛔ an unreadable schedule states NO deadline and says so', renderCadenceExpectation(new Date('2026-08-19T06:00:00Z'), 'every six hours').includes('next fire UNCOMPUTED'), true);
+  t('#17720 cadence: ⛔ …and never renders a `next by` it could not compute', renderCadenceExpectation(new Date('2026-08-19T06:00:00Z'), 'every six hours').includes('next by'), false);
+  t('#17720 cadence: the cron literal equals the interval it is declared beside', cronPeriodHours([PATROL_CRON], Date.parse('2026-08-19T00:00:00Z')), PATROL_CADENCE_HOURS);
+  const heartbeat17720 = renderMarkdown([], counts, { sweptAt: new Date('2026-08-19T06:00:00Z'), provenance: 'run 7' });
+  t('#17720 stamp: the expectation rides the `Swept` line itself', heartbeat17720.includes('_Swept 2026-08-19T06:00:00.000Z · expected every 6h (cron `37 1,7,13,19 * * *` UTC) · next by 2026-08-19T07:37Z · run 7_'), true);
+  t('#17720 stamp: …and the provenance field is still last, intact', heartbeat17720.includes(' · run 7_'), true);
+  t('#17720 sentence: the heartbeat instruction now POINTS at the rendered deadline', heartbeat17720.includes('past the `next by` deadline beside it'), true);
+  t('#17720 sentence: …and warns off the sibling anchors\' 4×-different cadences', heartbeat17720.includes('Do not carry a cadence over from a sibling anchor'), true);
 
   // -- H17 section rendering, both media (#10034) ---------------------------
   // The section has three states and two of them read identically if you are

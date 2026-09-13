@@ -26,6 +26,12 @@ import { Hono } from 'hono';
 import { routePath } from 'hono/route';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
+// The TLS listener factory (#16804). `@hono/node-server` takes it as an
+// OPTION — its `Options` type is a union whose https arm is
+// `{ createServer: typeof https.createServer; serverOptions: https.ServerOptions }`
+// — so terminating TLS needs no bridging code here: the same `fetch` handler,
+// the same drain, one different server factory. See {@link HttpsListenerMaterial}.
+import { createServer as createHttpsServer } from 'node:https';
 import { matchesRoutePattern } from './route-pattern';
 // The ADR-0112 wire vocabulary, read as DATA rather than restated: `ErrorCode`
 // is the closed union (`StandardErrorCode` ∪ `ERROR_CODE_LEDGER`) a registered
@@ -81,6 +87,28 @@ export const DEFAULT_CORS_EXPOSE_HEADERS: readonly string[] = Object.freeze([
     'set-auth-token',
     'x-objectstack-dropped-fields',
 ]);
+
+/**
+ * PEM bytes for a TLS listener — the certificate and its private key, already
+ * read (#16804).
+ *
+ * ⭐ BYTES, ⛔ not paths, and that division is the contract. Whoever hands this
+ * adapter TLS material is the layer that knows WHY it has it — in the shipped
+ * case, `os dev --cert … --key …`, which owns the flag names and can therefore
+ * refuse an unreadable file by naming the flag the operator typed. A transport
+ * adapter that took paths would have to invent that refusal from a filename,
+ * and would own a second reader of the same file.
+ *
+ * ⛔ Nothing in this package generates a certificate, and nothing in it says
+ * anything about installing one into a trust store. Absent this option the
+ * listener is plain http, exactly as it always was.
+ */
+export interface HttpsListenerMaterial {
+    /** The certificate chain, PEM. */
+    cert: string | Buffer;
+    /** The certificate's private key, PEM. */
+    key: string | Buffer;
+}
 
 export interface HonoCorsOptions {
     enabled?: boolean;
@@ -414,9 +442,23 @@ export class HonoHttpServer implements IHttpServer {
          * `shutdownTimeout` so a slow request can't hang the whole shutdown.
          */
         private drainTimeoutMs: number = 10_000,
+        /**
+         * When present, {@link tryListen} binds a TLS listener instead of a
+         * plain one (#16804). Fixed at construction because it decides what
+         * the socket IS, not how a request is handled: every origin the boot
+         * advertises is derived from the same answer one layer up, so a
+         * mid-flight change would leave the process speaking one protocol and
+         * advertising another.
+         */
+        private tls?: HttpsListenerMaterial,
     ) {
         this.app = new Hono();
         this.installErrorEnvelopeSeam();
+    }
+
+    /** The scheme this server binds — derived from {@link tls}, settable nowhere else. */
+    getProtocol(): 'http' | 'https' {
+        return this.tls ? 'https' : 'http';
     }
 
     // internal helper to convert standard handler to Hono handler
@@ -1545,13 +1587,30 @@ export class HonoHttpServer implements IHttpServer {
 
     private tryListen(port: number): Promise<void> {
         return new Promise<void>((resolve, reject) => {
-            const server = serve({
-                fetch: this.app.fetch,
-                port
-            }, (info) => {
-                this.listeningPort = info.port;
-                resolve();
-            });
+            // ⛔ The two arms are spelled out rather than assembled from a
+            // spread, because `@hono/node-server`'s `Options` is a UNION of
+            // per-protocol arms: a conditionally-built object widens to the
+            // union and loses the pairing between `createServer` and the
+            // `serverOptions` that factory accepts — which is the one thing a
+            // type can check here. Everything else about the two calls, and
+            // everything about `close()`, is identical.
+            const server = this.tls
+                ? serve({
+                    fetch: this.app.fetch,
+                    port,
+                    createServer: createHttpsServer,
+                    serverOptions: { cert: this.tls.cert, key: this.tls.key },
+                }, (info) => {
+                    this.listeningPort = info.port;
+                    resolve();
+                })
+                : serve({
+                    fetch: this.app.fetch,
+                    port
+                }, (info) => {
+                    this.listeningPort = info.port;
+                    resolve();
+                });
             this.server = server;
             server.on('error', (err: any) => {
                 reject(err);

@@ -14,6 +14,7 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import * as fs from 'fs';
 import * as path from 'path';
 import { createOriginMatcher, hasWildcardPattern, isLocalhostOrigin } from './pattern-matcher';
+import type { HttpsListenerMaterial } from './adapter';
 import { readEnvWithDeprecation } from '@objectstack/types';
 import {
     PerfTiming,
@@ -35,6 +36,16 @@ export interface StaticMount {
 
 export interface HonoPluginOptions {
     port?: number;
+    /**
+     * Terminate TLS on this server's own socket, using the caller's PEM bytes
+     * (#16804).
+     *
+     * Absent — the overwhelmingly common case, and the only one before this
+     * option existed — the listener is plain http and nothing about the boot
+     * changes. ⛔ This package neither generates a certificate nor says anything
+     * about trusting one; see {@link HttpsListenerMaterial}.
+     */
+    tls?: HttpsListenerMaterial;
     staticRoot?: string;
     /**
      * Multiple static resource mounts
@@ -245,8 +256,11 @@ export class HonoServerPlugin implements Plugin {
             spaFallback: false,
             ...options
         };
-        // We handle static root manually in start() to support SPA fallback
-        this.server = new HonoHttpServer(this.options.port);
+        // We handle static root manually in start() to support SPA fallback.
+        // `undefined` for staticRoot and the drain window keeps both at the
+        // adapter's own defaults — named positionally only because `tls`
+        // follows them (#16804).
+        this.server = new HonoHttpServer(this.options.port, undefined, undefined, this.options.tls);
     }
 
     /**

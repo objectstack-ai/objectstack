@@ -7,7 +7,8 @@
  * The first defect: `serve` loaded `@objectstack/organizations` with a BARE
  * `import()`. Node ESM resolves that against the importer's own realpath — the
  * framework package's, inside the framework workspace — while the package is
- * cloud-private and only ever exists in the host app's `node_modules`. It could
+ * host-supplied and only ever exists in the host app's `node_modules` (ADR-0132's
+ * entitlement boundary forbids any framework package declaring it). It could
  * therefore never resolve, and every walled tenancy posture died on the ADR-0093
  * D5 fail-fast. #4700 found the same bare import in two more framework packages
  * (`@objectstack/verify`'s `bootStack`, the dogfood multi-org probes), which is

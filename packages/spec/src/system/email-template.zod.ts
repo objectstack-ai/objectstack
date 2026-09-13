@@ -23,6 +23,24 @@ import { strictObject } from '../shared/strict-object';
  */
 
 /**
+ * The one locale tag with standing in an email-template bundle: the schema
+ * default for {@link EmailTemplateDefinitionSchema}.`locale` AND the sole rung
+ * `IEmailService.sendTemplate` retries after an exact `(name, locale)` miss.
+ *
+ * Named because those two roles are the same fact and authors keep reading it
+ * as neither: the resolver does no language-subtag folding, so this literal —
+ * not the stack's `i18n.defaultLocale`, not a bare `en` — is what makes a
+ * bundle reachable from a recipient locale nobody authored a row for. A bundle
+ * without a row at this tag has no fallback floor at all.
+ *
+ * ⚠️ `@objectstack/plugin-email` spells the same value as its own
+ * `DEFAULT_TEMPLATE_LOCALE` (that package implements the ladder; this one only
+ * declares the contract). The two must stay equal — the ladder's shape is a
+ * settled ruling, so this constant tracks it rather than the other way round.
+ */
+export const EMAIL_TEMPLATE_FLOOR_LOCALE = 'en-US';
+
+/**
  * Logical grouping; surfaces as a filter facet in Studio listings.
  */
 export const EmailTemplateDefinitionCategorySchema = lazySchema(() => z.enum([
@@ -79,11 +97,39 @@ export const EmailTemplateDefinitionSchema = lazySchema(() => strictObject({
   category: EmailTemplateDefinitionCategorySchema.default('custom'),
 
   /**
-   * IETF BCP-47 locale tag. Multiple rows with the same `name` but
-   * different `locale` form an i18n bundle; the service picks the
-   * best match for the recipient's locale, falling back to `en-US`.
+   * IETF BCP-47 locale tag — the second half of the bundle key.
+   *
+   * Multiple rows sharing one `name` form an i18n bundle. The resolver
+   * (`IEmailService.sendTemplate`) matches `(name, locale)` **exactly** and
+   * then retries exactly one rung: the **literal** string
+   * {@link EMAIL_TEMPLATE_FLOOR_LOCALE}. There is no language-subtag folding
+   * on that path — `en-US` does not fall back to `en`, and `en` is not
+   * reachable from `en-US`.
+   *
+   * ⚠️ So `en-US` is the bundle's FLOOR, and a bundle carrying no `en-US` row
+   * has none: every recipient locale the bundle does not itself carry a row
+   * for raises `TEMPLATE_NOT_FOUND`, which classifies **permanent** — the
+   * delivery dead-letters with no retry. The reachable locale set is not the
+   * set the author enumerated either: `sys_user.locale` is user-editable
+   * free-text BCP-47, unconstrained by the stack's `i18n.supportedLocales`,
+   * so a recipient can select a legal tag nobody authored.
+   *
+   * ⛔ The stack's own declared `i18n.defaultLocale` is the WRONG tag here
+   * whenever it is not spelled `en-US`. An app that declares
+   * `defaultLocale: 'en'` and then authors `locale: 'en'` has done the
+   * consistent thing throughout and still shipped a bundle with no floor —
+   * it validates, builds and installs clean. Author the English row at the
+   * `en-US` default and add the other tags beside it; `defineStack` reports a
+   * bundle that carries `supportedLocales` rows without an `en-US` one.
    */
-  locale: z.string().default('en-US').describe('BCP-47 locale (e.g. en-US, zh-CN)'),
+  locale: z.string().default(EMAIL_TEMPLATE_FLOOR_LOCALE).describe(
+    'BCP-47 locale (e.g. en-US, zh-CN) — the bundle key the resolver matches EXACTLY, with one '
+    + 'retry rung: the literal `en-US`. No language-subtag folding, so `en` and `en-US` are '
+    + 'different bundles and neither reaches the other. A bundle with no `en-US` row therefore has '
+    + 'no fallback floor: any recipient locale it does not carry a row for raises '
+    + 'TEMPLATE_NOT_FOUND, which is permanent — the delivery dead-letters with no retry. Your '
+    + "stack's own `i18n.defaultLocale` is the wrong tag here unless it is spelled `en-US`.",
+  ),
 
   /** Subject line; supports `{{var.path}}` placeholders. */
   subject: z.string().describe('Subject template'),

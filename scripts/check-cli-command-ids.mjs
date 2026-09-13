@@ -112,6 +112,11 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { isEntrypoint } from './invoked-as.mjs';
+import { requireDefaultExport } from './import-prerequisite.mjs';
+const ts = await requireDefaultExport('typescript', () => import('typescript'), import.meta.url, {
+  measures: 'whether every module under a CLI package\'s `src/commands/` default-exports a command class (#17869)',
+});
+import { parseSourceFile } from './ts-parse.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
 //
@@ -146,11 +151,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the dispatch-gates declaration (#12016\'s own landing obligation)': 5,
   'bin names come from declared data': 3,
   'the live repo returns a verdict, and it is green': 4,
+  'the command-class predicate, against a scratch tree (no repo state)': 10,
+  'the command-module duty on the live repo, by name': 8,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 8;
+const SELF_TEST_BATTERY_FLOOR = 10;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -360,6 +367,94 @@ export function binNamesOf(pkg) {
 }
 
 /**
+ * ## The SECOND duty (#17869): every module in that walk must BE a command
+ *
+ * The walk above already opens `packages/cli/src/commands/**` and already derives an id
+ * per file. What it never asked is whether the file on the other end of that id is a
+ * command at all -- and `packages/cli/package.json` declares the oclif command table as
+ * a GLOB over the emitted tree:
+ *
+ *     "commands": { "strategy": "pattern", "target": "./dist/commands", "glob": "**\/*.js" }
+ *
+ * so oclif takes EVERY emitted module under `src/commands/` to be a command. A helper
+ * dropped beside the command it serves -- the obvious place to put it -- has no
+ * default-exported command class, and oclif then writes this to STDERR on every single
+ * `os` invocation, whatever the user actually ran:
+ *
+ *     (node:1922) Warning: Error
+ *     module: @oclif/core@4.13.3
+ *     task: findCommand (migrate:file-column-move)
+ *     plugin: @objectstack/cli
+ *     message: command migrate:file-column-move not found
+ *
+ * ⛔ It is not cosmetic. `os validate --json` writes its payload to stdout; a consumer
+ * that reads stdout and stderr together -- which this repo's own CLI test helper does,
+ * and which is the ordinary shape for `execFileSync` error handling -- gets valid JSON
+ * followed by that warning, and `JSON.parse` fails on it. Measured on PR #17859 before
+ * the fix: ONE red in 3247 cases (`packages/cli/test/format-zod-union.test.ts`), and the
+ * misplaced module was in `src/commands/migrate/`, nothing to do with `os validate`. A
+ * misplaced file that happens NOT to break a `--json` parse ships that warning silently
+ * to every user of every command.
+ *
+ * ## Why the existing duty could not catch it, on the same population
+ *
+ * Duty one asks whether a command-id STRING LITERAL outside the CLI resolves to a
+ * derivable command path. A module with no command class still yields a derivable path,
+ * so it reads as a perfectly valid id. Same walk, same files, opposite question --
+ * which is why this lands here and not as a new gate: a gate that covers a population
+ * does not thereby cover every question on that population.
+ *
+ * ## ⭐ The predicate follows the INHERITANCE CHAIN, and that is load-bearing
+ *
+ * Two modules in the tree today extend another COMMAND class rather than oclif's
+ * `Command`: `src/commands/build.ts` extends `Compile` (from `./compile.js`) and
+ * `src/commands/migrate/index.ts` extends `MigratePlan` (from `./plan.js`). A predicate
+ * that only accepts a literal `extends Command` reports both as violations -- a FALSE
+ * RED on correct code, and the reliable way to get a guard switched off. So the check
+ * resolves the base class: same-file declaration, or a relative import followed into its
+ * own source, until it reaches a binding imported from `@oclif/` under the exported name
+ * `Command`.
+ *
+ * ## ⭐ It reads SOURCE, never `dist`
+ *
+ * Deliberately, and it is the reason this gate needs no build and inherits no stale
+ * artefact. `tsc` does not delete outputs for sources that have been removed, so a
+ * deleted `src/commands/x/helper.ts` leaves `dist/commands/x/helper.js` behind and a
+ * local rebuild does not clear it -- anything read through `dist` would score a file the
+ * tree no longer has. Source has no such state.
+ */
+const OCLIF_BASE_SPECIFIER_RE = /^@oclif\//;
+
+/** The one base-class export name that ends the chain. */
+const OCLIF_COMMAND_EXPORT = 'Command';
+
+/** Directories under `src/commands/` the CLI build does not emit -- so oclif never loads them. */
+const UNEMITTED_DIR_NAMES = new Set(['__tests__']);
+
+/**
+ * A file under `src/commands/` that the CLI BUILD EMITS -- and therefore a module the
+ * oclif glob loads as a command.
+ *
+ * `packages/cli/tsconfig.build.json` includes `src` and excludes exactly
+ * `src/**\/*.test.ts`, `src/**\/*.spec.ts` and `src/**\/__tests__/**`, so the emitted set
+ * under `src/commands/` is every `.ts`/`.tsx` that is not one of those. The coupling is
+ * pinned in `--self-test` against that file rather than asserted here, so a new exclude
+ * reds instead of silently shrinking this population.
+ *
+ * ⛔ This is DELIBERATELY WIDER than the id-derivation rule above, and the gap is the
+ * whole point. The id rule drops a dotted base (`foo.helpers.ts`) and a base that is not
+ * lower-kebab (`_shared.ts`, `Helper.ts`) because such a file cannot BE a command id --
+ * but `tsc` emits it and the glob loads it, so those are exactly the shapes a misplaced
+ * helper takes. Scoring this duty on the id population would leave the guard blind at
+ * precisely its own subject.
+ */
+export function isEmittedCommandModule(name) {
+  if (!/\.tsx?$/.test(name)) return false;
+  if (/\.d\.ts$/.test(name)) return false;
+  return !/\.(?:test|spec)\.tsx?$/.test(name);
+}
+
+/**
  * The set of ids a commands dir yields: every command FILE, plus every TOPIC directory.
  * `readDir`/`statOf` are injectable so `--self-test` can pin this against a scratch tree.
  */
@@ -368,14 +463,27 @@ export function commandIdsUnder(commandsDir, readDir = readdirSync, statOf = sta
 }
 
 /**
- * `{ ids, topics }` for a commands dir. `topics` is every DIRECTORY name -- the
+ * `{ ids, topics, modules }` for a commands dir. `topics` is every DIRECTORY name -- the
  * distinction `resolveId` needs: a word following a TOPIC is a subcommand attempt and
  * must resolve, while a word following a LEAF command is an argument and is ignored.
+ *
+ * `modules` is the SECOND duty's population (#17869): every file this walk passes that
+ * the CLI build emits, judged by `isEmittedCommandModule`. It comes out of the SAME
+ * traversal -- there is no second walk, and the two duties cannot disagree about which
+ * files exist.
+ *
+ * ⭐ `deriveIds` is what keeps the two populations from contaminating each other. A
+ * directory that cannot name a command id (`__helpers`, `Shared`) used to end the
+ * traversal; it is now DESCENDED with id derivation switched off, because `tsc` emits
+ * what is inside it and the oclif glob loads it. Not one id can be added from such a
+ * subtree -- `ids`/`topics` are untouched under `deriveIds: false` -- so duty one is
+ * bit-for-bit what it was, while duty two stops being blind below a badly-named folder.
  */
 export function commandSurfaceUnder(commandsDir, readDir = readdirSync, statOf = statSync) {
   const ids = new Set();
   const topics = new Set();
-  const walk = (abs, segs) => {
+  const modules = [];
+  const walk = (abs, segs, deriveIds) => {
     let entries;
     try { entries = readDir(abs); } catch { return; }
     for (const name of entries) {
@@ -383,12 +491,19 @@ export function commandSurfaceUnder(commandsDir, readDir = readdirSync, statOf =
       let st;
       try { st = statOf(child); } catch { continue; }
       if (st.isDirectory()) {
-        if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) continue;
-        ids.add([...segs, name].join(' ')); // the topic itself
-        topics.add([...segs, name].join(' '));
-        walk(child, [...segs, name]);
+        if (UNEMITTED_DIR_NAMES.has(name)) continue; // the build excludes it -- oclif never sees it
+        const namesATopic = deriveIds && /^[a-z0-9][a-z0-9-]*$/.test(name);
+        if (namesATopic) {
+          ids.add([...segs, name].join(' ')); // the topic itself
+          topics.add([...segs, name].join(' '));
+          walk(child, [...segs, name], true);
+        } else {
+          walk(child, segs, false);
+        }
         continue;
       }
+      if (isEmittedCommandModule(name)) modules.push(child);
+      if (!deriveIds) continue;
       const m = /^(.+)\.(?:ts|tsx|js|mjs|cjs)$/.exec(name);
       if (!m) continue;
       const base = m[1];
@@ -398,9 +513,270 @@ export function commandSurfaceUnder(commandsDir, readDir = readdirSync, statOf =
       ids.add(base === 'index' ? segs.join(' ') : [...segs, base].join(' '));
     }
   };
-  walk(commandsDir, []);
+  walk(commandsDir, [], true);
   ids.delete('');
-  return { ids, topics };
+  return { ids, topics, modules };
+}
+
+/**
+ * `COMMAND_MODULE_EXEMPTIONS`: a module under `src/commands/` that is legitimately not a
+ * command, declared by path with its cause.
+ *
+ * ⭐ DECLARATIVE AND SELF-RETIRING, both halves. An exemption is visible in one place a
+ * reviewer reads, and it CANNOT rot: `main` fails when a listed entry stops reproducing
+ * -- either because the file is no longer in the walked population (moved, renamed,
+ * deleted) or because it now DOES export a command class. That is the same shape the two
+ * ledgers above carry, for the same reason: an exemption that has outlived its cause is
+ * a claim nobody is checking.
+ *
+ * EMPTY, and that is the tree's measured state rather than a list nobody kept -- every
+ * command module under `src/commands/` default-exports a command class today. ⛔ The
+ * remedy for a helper is `packages/cli/src/utils/`, not an entry here; an entry is for a
+ * module that must sit under `src/commands/` and still is not a command, and it owes the
+ * reason why.
+ */
+const COMMAND_MODULE_EXEMPTIONS = [];
+
+const isModuleExempt = (file) => COMMAND_MODULE_EXEMPTIONS.some((e) => e.file === file);
+
+/**
+ * Parsed sources, keyed by path and re-parsed when the bytes change.
+ *
+ * `audit()` is called several times per run (the self-test alone calls it repeatedly),
+ * and the chain resolution reads base-class files more than once. Keying on the TEXT as
+ * well as the path keeps the cache correct if a caller rewrites a file mid-process -- a
+ * stale tree would answer about a source that is no longer there, which is the exact
+ * class of defect `ts-parse.mjs` exists to refuse.
+ */
+const parseCache = new Map();
+
+function parseFileCached(absPath) {
+  let text;
+  try { text = readFileSync(absPath, 'utf8'); } catch { return null; }
+  const hit = parseCache.get(absPath);
+  if (hit && hit.text === text) return hit.sf;
+  const sf = parseSourceFile(absPath, text, absPath.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+  parseCache.set(absPath, { text, sf });
+  return sf;
+}
+
+const modifiersOf = (node) => (node && Array.isArray(node.modifiers) ? node.modifiers : []);
+const hasModifier = (node, kind) => modifiersOf(node).some((m) => m.kind === kind);
+
+/** `local name -> { specifier, imported }`; `imported` is the EXPORTED name, or `default`. */
+function importBindingsOf(sf) {
+  const out = new Map();
+  for (const st of sf.statements) {
+    if (!ts.isImportDeclaration(st) || !st.importClause) continue;
+    if (!ts.isStringLiteral(st.moduleSpecifier)) continue;
+    const specifier = st.moduleSpecifier.text;
+    const clause = st.importClause;
+    if (clause.name) out.set(clause.name.text, { specifier, imported: 'default' });
+    const nb = clause.namedBindings;
+    if (nb && ts.isNamedImports(nb)) {
+      for (const el of nb.elements) out.set(el.name.text, { specifier, imported: (el.propertyName ?? el.name).text });
+    }
+  }
+  return out;
+}
+
+/**
+ * The class a module exports under `name` (`'default'` for the default export), as
+ * `{ kind: 'class', node }`, or a forwarding record the caller follows, or `null`.
+ *
+ * ⭐ This is why the check PARSES instead of matching `export default class` in text.
+ * Three command modules in this tree -- `create.ts`, `generate.ts` and `init.ts` -- are
+ * SCAFFOLDERS whose template literals carry the line `export default ...` as emitted
+ * code, and in all three that text appears HUNDREDS of lines before the module's own
+ * real `export default class`. A text scan reading the first match answers about a
+ * string the scaffolder prints, not about the module. A parser cannot make that mistake:
+ * a template literal is not a statement.
+ */
+function exportedBinding(sf, name) {
+  for (const st of sf.statements) {
+    if (ts.isClassDeclaration(st) && hasModifier(st, ts.SyntaxKind.ExportKeyword)) {
+      const isDefault = hasModifier(st, ts.SyntaxKind.DefaultKeyword);
+      if (name === 'default' ? isDefault : (!isDefault && st.name && st.name.text === name)) {
+        return { kind: 'class', node: st };
+      }
+    }
+  }
+  if (name === 'default') {
+    for (const st of sf.statements) {
+      if (!ts.isExportAssignment(st) || st.isExportEquals) continue;
+      return ts.isIdentifier(st.expression)
+        ? { kind: 'local', name: st.expression.text }
+        : { kind: 'not-a-class', detail: 'its default export is an expression, not a class' };
+    }
+  }
+  for (const st of sf.statements) {
+    if (!ts.isExportDeclaration(st) || !st.exportClause || !ts.isNamedExports(st.exportClause)) continue;
+    for (const el of st.exportClause.elements) {
+      if (el.name.text !== name) continue;
+      const local = (el.propertyName ?? el.name).text;
+      if (st.moduleSpecifier && ts.isStringLiteral(st.moduleSpecifier)) {
+        return { kind: 'reexport', name: local, specifier: st.moduleSpecifier.text };
+      }
+      return { kind: 'local', name: local };
+    }
+  }
+  return null;
+}
+
+/** A class declared (not necessarily exported) in this file. */
+function localClass(sf, name) {
+  for (const st of sf.statements) {
+    if (ts.isClassDeclaration(st) && st.name && st.name.text === name) return st;
+  }
+  return null;
+}
+
+/** The `extends` clause's root identifier name, or `null`. */
+function extendsIdentifierOf(classNode) {
+  for (const clause of classNode.heritageClauses ?? []) {
+    if (clause.token !== ts.SyntaxKind.ExtendsKeyword) continue;
+    const expr = clause.types[0] && clause.types[0].expression;
+    if (!expr) return null;
+    if (ts.isIdentifier(expr)) return expr.text;
+    if (ts.isPropertyAccessExpression(expr)) return expr.name.text;
+    return null;
+  }
+  return null;
+}
+
+/**
+ * Map an ESM specifier as WRITTEN (`./compile.js`, NodeNext) onto the source file it
+ * names. ⛔ Looking for `./compile.js` on disk finds nothing and would read as
+ * "unresolvable base class" on two correct files.
+ */
+function sourceFileFor(fromFile, specifier) {
+  if (!specifier.startsWith('.')) return null;
+  const base = join(dirname(fromFile), specifier);
+  const candidates = [
+    base.replace(/\.js$/, '.ts'),
+    base.replace(/\.js$/, '.tsx'),
+    base.replace(/\.mjs$/, '.mts'),
+    `${base}.ts`,
+    `${base}.tsx`,
+    join(base, 'index.ts'),
+    base,
+  ];
+  for (const c of candidates) {
+    try { if (statSync(c).isFile()) return c; } catch { /* try the next candidate */ }
+  }
+  return null;
+}
+
+/** How far the chain is followed before the gate says so rather than looping. */
+const MAX_CHAIN_DEPTH = 12;
+
+/**
+ * Does the binding `name` exported by `absPath` resolve to a class whose inheritance
+ * chain reaches oclif's `Command`?
+ *
+ * Returns `{ ok, chain, reason }`. `chain` is the class names walked, in order, so the
+ * green line and any failure both SAY which route was taken rather than asserting one.
+ */
+export function commandClassVerdict(absPath, name, chain = [], depth = 0, seen = new Set()) {
+  if (depth > MAX_CHAIN_DEPTH) {
+    return { ok: false, chain, reason: `its inheritance chain is deeper than ${MAX_CHAIN_DEPTH} -- refusing to keep following it` };
+  }
+  const key = `${absPath}\u0000${name}`;
+  if (seen.has(key)) return { ok: false, chain, reason: 'its inheritance chain is circular' };
+  seen.add(key);
+
+  const sf = parseFileCached(absPath);
+  if (!sf) return { ok: false, chain, reason: `it could not be read (${absPath})` };
+
+  const binding = exportedBinding(sf, name);
+  if (!binding) {
+    return {
+      ok: false,
+      chain,
+      reason: name === 'default' ? 'it has no default export' : `it does not export \`${name}\``,
+    };
+  }
+  if (binding.kind === 'not-a-class') return { ok: false, chain, reason: binding.detail };
+  if (binding.kind === 'reexport') {
+    const next = sourceFileFor(absPath, binding.specifier);
+    if (!next) {
+      return { ok: false, chain, reason: `\`${name}\` is re-exported from '${binding.specifier}', which this gate cannot follow to a source file` };
+    }
+    return commandClassVerdict(next, binding.name, chain, depth + 1, seen);
+  }
+
+  let classNode = binding.kind === 'class' ? binding.node : localClass(sf, binding.name);
+  if (!classNode) {
+    const imported = importBindingsOf(sf).get(binding.name);
+    if (!imported) {
+      return { ok: false, chain, reason: `its default export \`${binding.name}\` is not a class declared or imported here` };
+    }
+    const next = sourceFileFor(absPath, imported.specifier);
+    if (!next) {
+      return { ok: false, chain, reason: `its default export comes from '${imported.specifier}', which this gate cannot follow to a source file` };
+    }
+    return commandClassVerdict(next, imported.imported, chain, depth + 1, seen);
+  }
+
+  const here = [...chain, classNode.name ? classNode.name.text : '(anonymous)'];
+  const baseName = extendsIdentifierOf(classNode);
+  if (!baseName) {
+    return { ok: false, chain: here, reason: `\`${here[here.length - 1]}\` is a class but extends nothing -- an oclif command extends \`Command\`` };
+  }
+
+  const via = importBindingsOf(sf).get(baseName);
+  if (via && OCLIF_BASE_SPECIFIER_RE.test(via.specifier)) {
+    const reachesCommand = via.imported === OCLIF_COMMAND_EXPORT
+      || (via.imported === 'default' && /^@oclif\/core\/command$/.test(via.specifier));
+    return reachesCommand
+      ? { ok: true, chain: [...here, `${baseName} (${via.specifier})`], reason: null }
+      : { ok: false, chain: here, reason: `it extends \`${baseName}\`, imported from '${via.specifier}' as \`${via.imported}\` -- not oclif's \`Command\`` };
+  }
+
+  if (localClass(sf, baseName)) return commandClassVerdict(absPath, baseName, here, depth + 1, seen);
+
+  if (via) {
+    const next = sourceFileFor(absPath, via.specifier);
+    if (!next) {
+      return { ok: false, chain: here, reason: `it extends \`${baseName}\` from '${via.specifier}', which this gate cannot follow to a source file` };
+    }
+    return commandClassVerdict(next, via.imported, here, depth + 1, seen);
+  }
+
+  return { ok: false, chain: here, reason: `it extends \`${baseName}\`, which is neither declared nor imported in this file` };
+}
+
+/**
+ * Judge every emitted module under one CLI package's `src/commands/`.
+ *
+ * `cli.modules` comes from the SAME walk that derives the ids -- no second traversal,
+ * and no second definition of what the population is.
+ */
+function auditCommandModules(root, cli) {
+  const examined = [];
+  const violations = [];
+  for (const abs of cli.modules) {
+    const file = relative(root, abs).split(sep).join('/');
+    const verdict = commandClassVerdict(abs, 'default');
+    examined.push({ file, ok: verdict.ok, chain: verdict.chain, reason: verdict.reason });
+    if (!verdict.ok && !isModuleExempt(file)) {
+      violations.push({ file, reason: verdict.reason, chain: verdict.chain, cli: cli.dir });
+    }
+  }
+  return { examined, violations };
+}
+
+/**
+ * An exemption that no longer reproduces. Two ways an entry rots, and BOTH red:
+ * the file left the walked population, or the module now exports a command class.
+ */
+function staleModuleExemptions(examinedByFile) {
+  return COMMAND_MODULE_EXEMPTIONS.flatMap((e) => {
+    const seen = examinedByFile.get(e.file);
+    if (!seen) return [{ ...e, why_stale: 'no module at that path is in the walked population -- moved, renamed or deleted' }];
+    if (seen.ok) return [{ ...e, why_stale: 'this module DOES export a command class now -- the exemption has outlived its cause' }];
+    return [];
+  });
 }
 
 /** Discover every oclif CLI package in the repo from DECLARED `oclif.bin`. */
@@ -428,8 +804,8 @@ function discoverClis(root = REPO_ROOT) {
     if (!bins.length) continue;
     const commandsDir = join(root, dir, OCLIF_COMMANDS_DIR);
     if (!existsSync(commandsDir)) continue;
-    const { ids, topics } = commandSurfaceUnder(commandsDir);
-    clis.push({ dir, bins, ids, topics });
+    const { ids, topics, modules } = commandSurfaceUnder(commandsDir);
+    clis.push({ dir, bins, ids, topics, modules });
   }
   return clis;
 }
@@ -507,7 +883,31 @@ function audit(root = REPO_ROOT) {
     });
   }
   const stale = LEDGER().filter((e) => !seen.has(`${e.file}\u0000${e.text}`));
-  return { clis, violations, resolved, stale, refusal: null };
+
+  // -- duty two (#17869): every emitted module in the SAME walk must BE a command --
+  const examined = [];
+  const moduleViolations = [];
+  for (const cli of clis) {
+    const r = auditCommandModules(root, cli);
+    examined.push(...r.examined);
+    moduleViolations.push(...r.violations);
+  }
+  const staleModules = staleModuleExemptions(new Map(examined.map((m) => [m.file, m])));
+
+  // ⭐ Zero examined is NOT a pass. A CLI package was discovered -- `discoverClis`
+  // requires both its `oclif.bin` declaration and an existing `src/commands` dir -- so a
+  // walk that finds no module inside it means the traversal stopped, not that the tree is
+  // clean. Exit 0 over an empty population is evidence about nothing, and it is the one
+  // shape this duty could fail in silently.
+  const emptyCli = clis.find((c) => c.modules.length === 0);
+  if (emptyCli) {
+    return {
+      refusal: `${emptyCli.dir}/${OCLIF_COMMANDS_DIR} yielded 0 modules -- the walk reached no file, so `
+        + 'the command-class duty would have scored a green over an empty population',
+    };
+  }
+
+  return { clis, violations, resolved, stale, examined, moduleViolations, staleModules, refusal: null };
 }
 
 function main() {
@@ -531,6 +931,42 @@ function main() {
     console.error('that has outlived its cause is a claim nobody is checking.');
     return 1;
   }
+  if (r.moduleViolations.length) {
+    console.error(
+      '✗ check-cli-command-ids: module(s) under src/commands/ that do not default-export a command class:\n',
+    );
+    for (const v of r.moduleViolations) {
+      console.error(`  ${v.file}`);
+      console.error(`    ${v.reason}${v.chain.length ? `  (resolved: ${v.chain.join(' -> ')})` : ''}`);
+    }
+    console.error(
+      '\nThe oclif command table is a GLOB over the emitted tree — packages/cli/package.json\n'
+      + '  "commands": { "strategy": "pattern", "target": "./dist/commands", "glob": "**/*.js" }\n'
+      + 'so EVERY module under src/commands/ is taken to be a command. A module that is not one\n'
+      + 'makes oclif print a "findCommand ... command <id> not found" warning on STDERR for EVERY\n'
+      + '`os` invocation, whatever the user actually ran.\n'
+      + '\n⛔ That is not cosmetic. `os validate --json` writes its payload to stdout, so a consumer\n'
+      + 'reading both streams — this repo\'s own CLI test helper does, and it is the ordinary shape\n'
+      + 'for execFileSync error handling — gets valid JSON followed by that warning, and JSON.parse\n'
+      + 'fails on it. Measured on PR #17859: ONE red in 3247 cases, in a test with nothing to do\n'
+      + 'with the misplaced module. A file that happens not to break a --json parse ships the\n'
+      + 'warning silently to every user of every command.\n'
+      + '\nThe fix: move the helper to packages/cli/src/utils/, which is already where CLI helpers\n'
+      + 'live (schema-migrate.ts, migrate-occupancy-gate.ts, sqlite-occupancy.ts,\n'
+      + 'data-migration-plugins.ts), and import it from the command that needs it.\n'
+      + '\nA module that genuinely must sit under src/commands/ without being a command needs a\n'
+      + 'declared entry in COMMAND_MODULE_EXEMPTIONS in this file, carrying its reason — ⛔ never a\n'
+      + 'silent pass.',
+    );
+    return 1;
+  }
+  if (r.staleModules.length) {
+    console.error('✗ check-cli-command-ids: command-module exemption(s) that no longer reproduce:\n');
+    for (const e of r.staleModules) console.error(`  ${e.file}\n    declared: ${e.why}\n    now: ${e.why_stale}`);
+    console.error('\nDelete the COMMAND_MODULE_EXEMPTIONS entry — an exemption that has outlived its');
+    console.error('cause is a claim nobody is checking.');
+    return 1;
+  }
   for (const e of BASELINED_VIOLATIONS) {
     console.log(`⚠ baselined violation — ${e.file}: "${e.text}"${e.issue ? ` (${e.issue})` : ''}`);
     console.log(`  ${e.why}`);
@@ -542,6 +978,15 @@ function main() {
     + `(${r.clis.reduce((n, c) => n + c.ids.size, 0)} ids derived; ${FIXTURE_EXEMPTIONS.length} declared fixture exemptions, `
     + `${BASELINED_VIOLATIONS.length} baselined violation(s) listed above).`,
   );
+  // ⭐ The EXAMINED count is printed, not just the violation count: `0 violations` over 0
+  // modules and `0 violations` over 63 are the same line otherwise, and only one of them
+  // is a reading.
+  console.log(
+    `✓ check-cli-command-ids: ${r.examined.length} module(s) under `
+    + `${r.clis.map((c) => `${c.dir}/${OCLIF_COMMANDS_DIR}`).join(', ')} examined, all of them `
+    + 'default-export a class whose inheritance chain reaches oclif\'s `Command` '
+    + `(${COMMAND_MODULE_EXEMPTIONS.length} declared exemption(s)).`,
+  );
   return 0;
 }
 
@@ -552,6 +997,11 @@ function list() {
     console.log(`${x.file}:${x.line}\t"${x.text}"\t${x.id ?? '*** UNRESOLVED ***'}`);
   }
   console.log(`\n${r.resolved.length} resolved, ${r.violations.length} unresolved.`);
+  console.log('');
+  for (const m of r.examined) {
+    console.log(`${m.file}\t${m.ok ? m.chain.join(' -> ') : `*** NOT A COMMAND: ${m.reason} ***`}`);
+  }
+  console.log(`\n${r.examined.length} command module(s) examined, ${r.moduleViolations.length} not a command.`);
   return 0;
 }
 
@@ -724,6 +1174,120 @@ function selfTest() {
     live.refusal === null && live.resolved.some((x) =>
       x.file === 'packages/drivers/driver-sql/src/schema-drift.ts' && x.text === 'os migrate multi-value-columns'));
 
+  // -- the command-class predicate, against a scratch tree (no repo state) ---
+  //
+  // Every fixture here is written to disk because the predicate READS FILES: it follows a
+  // relative import into its own source, which is the half a purely in-memory fixture
+  // cannot exercise at all.
+  battery('the command-class predicate, against a scratch tree (no repo state)');
+  const classDir = mkdtempSync(join(tmpdir(), 'cli-cmd-class-'));
+  try {
+    const cmds = join(classDir, 'src', 'commands');
+    mkdirSync(join(cmds, 'topic'), { recursive: true });
+    mkdirSync(join(cmds, '_priv'), { recursive: true });
+    mkdirSync(join(cmds, '__tests__'), { recursive: true });
+    const w = (rel, lines) => writeFileSync(join(cmds, rel), `${lines.join('\n')}\n`);
+
+    w('plain.ts', ["import { Command } from '@oclif/core';", 'export default class Plain extends Command {}']);
+    w('base.ts', ["import { Command } from '@oclif/core';", 'export default class Base extends Command {}']);
+    w('derived.ts', ["import Base from './base.js';", 'export default class Derived extends Base {}']);
+    // The card's own repro: a helper beside the command it serves.
+    w('topic/helper.ts', ['export function helpWith(x) { return x; }', 'export const OTHER = 1;']);
+    // A SCAFFOLDER: `export default` appears inside a template literal, before the real
+    // class. `create.ts`, `generate.ts` and `init.ts` are all this shape in the live tree.
+    w('scaffold.ts', [
+      "import { Command } from '@oclif/core';",
+      'const TEMPLATE = `',
+      'export default class NotMe extends SomethingElse {}',
+      '`;',
+      'export default class Scaffold extends Command { run() { return TEMPLATE; } }',
+    ]);
+    w('bare-class.ts', ['export default class Bare {}']);
+    w('object.ts', ['export default { run() {} };']);
+    w('foreign.ts', ["import { Thing } from 'some-other-pkg';", 'export default class Foreign extends Thing {}']);
+    w('_priv/tool.ts', ['export function tool() { return 1; }']);
+    w('topic/helper.test.ts', ["import { helpWith } from './helper.js';", 'helpWith(1);']);
+    w('__tests__/fixture.ts', ['export const FIXTURE = 1;']);
+
+    const surface = commandSurfaceUnder(cmds);
+    const moduleNames = surface.modules.map((m) => relative(cmds, m).split(sep).join('/')).sort();
+    const verdictFor = (rel) => commandClassVerdict(join(cmds, rel), 'default');
+
+    t('an oclif command is accepted, and the chain names Command',
+      verdictFor('plain.ts').ok && verdictFor('plain.ts').chain.join(' -> ').includes('Command (@oclif/core)'));
+    t('⭐ a command extending ANOTHER command, across files, is accepted',
+      verdictFor('derived.ts').ok && verdictFor('derived.ts').chain.includes('Base'),
+      'a predicate that only accepts `extends Command` false-reds this shape');
+    t('⭐ a helper exporting only plain functions is REJECTED',
+      !verdictFor('topic/helper.ts').ok && verdictFor('topic/helper.ts').reason.includes('no default export'),
+      'this is the card\'s repro; a guard that stays green here is vacuous');
+    t('a SCAFFOLDER whose template literal spells `export default` is accepted',
+      verdictFor('scaffold.ts').ok,
+      'the parse is what makes this decidable -- a template literal is not a statement');
+    t('a class that extends nothing is rejected', !verdictFor('bare-class.ts').ok);
+    t('a default export that is not a class is rejected',
+      !verdictFor('object.ts').ok && verdictFor('object.ts').reason.includes('not a class'));
+    t('a base class from a NON-oclif package is rejected',
+      !verdictFor('foreign.ts').ok && verdictFor('foreign.ts').reason.includes('some-other-pkg'));
+    t('the module population is the EMITTED set: no .test.ts, no __tests__/',
+      !moduleNames.some((m) => m.endsWith('.test.ts')) && !moduleNames.some((m) => m.startsWith('__tests__/')),
+      moduleNames.join(' '));
+    t('⭐ a directory that cannot name an id still contributes its MODULES',
+      moduleNames.includes('_priv/tool.ts'),
+      'tsc emits it and the oclif glob loads it, so the guard must reach it');
+    t('...and contributes no ID -- duty one is untouched by that descent',
+      !surface.ids.has('_priv') && !surface.topics.has('_priv') && surface.ids.has('plain'));
+  } finally {
+    rmSync(classDir, { recursive: true, force: true });
+  }
+
+  // -- the command-module duty on the live repo, by name ---------------------
+  battery('the command-module duty on the live repo, by name');
+  const modulesLive = audit();
+  const liveVerdict = (f) => (modulesLive.examined ?? []).find((m) => m.file === f);
+  const buildTs = liveVerdict('packages/cli/src/commands/build.ts');
+  const migrateIndexTs = liveVerdict('packages/cli/src/commands/migrate/index.ts');
+
+  t('⭐ packages/cli/src/commands/build.ts is accepted, via Compile',
+    Boolean(buildTs) && buildTs.ok && buildTs.chain.includes('Compile'),
+    buildTs ? buildTs.chain.join(' -> ') : 'not in the examined population');
+  t('⭐ packages/cli/src/commands/migrate/index.ts is accepted, via MigratePlan',
+    Boolean(migrateIndexTs) && migrateIndexTs.ok && migrateIndexTs.chain.includes('MigratePlan'),
+    migrateIndexTs ? migrateIndexTs.chain.join(' -> ') : 'not in the examined population');
+  t('...and NEITHER extends `Command` directly, so a narrow predicate would false-red both',
+    Boolean(buildTs) && Boolean(migrateIndexTs)
+    && buildTs.chain.length > 2 && migrateIndexTs.chain.length > 2,
+    'the two cases triage measured, pinned by name rather than by count');
+  t('packages/cli/src/commands/test.ts is EXAMINED -- it is a command, not a test',
+    Boolean(liveVerdict('packages/cli/src/commands/test.ts')),
+    'a bare `grep -v test` over this population silently drops it');
+  t('the examined population is non-trivial',
+    modulesLive.refusal === null && modulesLive.examined.length >= 40,
+    modulesLive.refusal === null ? `${modulesLive.examined.length} modules examined` : modulesLive.refusal);
+  t('every examined module is a command', modulesLive.refusal === null && modulesLive.moduleViolations.length === 0,
+    modulesLive.refusal === null ? modulesLive.moduleViolations.map((v) => v.file).join('; ') : '');
+  t('no command-module exemption is stale',
+    modulesLive.refusal === null && modulesLive.staleModules.length === 0,
+    modulesLive.refusal === null ? modulesLive.staleModules.map((e) => `${e.file}: ${e.why_stale}`).join('; ') : '');
+  // ⭐ The population's DEFINITION is coupled to the CLI build, and the coupling is
+  // checked rather than asserted in prose. `isEmittedCommandModule` drops exactly the
+  // test spellings; if a package's build starts excluding something else under
+  // `src/commands/`, this population silently stops matching what oclif loads -- and the
+  // gate would keep printing a confident count over a set it no longer describes.
+  t('every build exclusion that reaches src/commands/ is one this population already drops',
+    modulesLive.refusal === null && modulesLive.clis.every((c) => {
+      let cfg;
+      try { cfg = readFileSync(join(REPO_ROOT, c.dir, 'tsconfig.build.json'), 'utf8'); } catch { return true; }
+      const excludes = [...cfg.matchAll(/"((?:src|\.\/src)\/[^"]*)"/g)].map((m) => m[1].replace(/^\.\//, ''));
+      return excludes.every((e) => {
+        const rest = e.replace(/^src\//, '');
+        const reaches = rest.startsWith('**/') || rest.startsWith('commands/');
+        if (!reaches) return true;
+        return /\*\.(?:test|spec)\.tsx?$/.test(rest) || rest.includes('__tests__/');
+      });
+    }),
+    'a new exclude under src/commands/ must widen isEmittedCommandModule in the same edit');
+
   // The floor runs BEFORE the verdict below, so a success line can only be
   // printed by a run in which every declared battery registered its cases.
   for (const message of batteryFloorFailures()) cases.push({ name: message, ok: false, detail: '' });
@@ -740,7 +1304,9 @@ function selfTest() {
     + 'a known-bad literal resolves to nothing while its good neighbour resolves; '
     + 'the #12016 rename reds THE SAME literal that was green before it; '
     + 'all six measured noise shapes stay out on the delimiter rule alone; '
-    + 'the fixture ledger is scoped to file AND text; and the live repo returns a green verdict).',
+    + 'the fixture ledger is scoped to file AND text; the command-class predicate follows the '
+    + 'inheritance chain across files and rejects a plain-function helper; and the live repo '
+    + 'returns a green verdict on both duties).',
   );
   selfTestReachedVerdict = true;
   return 0;

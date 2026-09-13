@@ -111,6 +111,19 @@
  * `IDataEngine`'s — `find` stays `Promise<any[]>`, and since #16231 `findOne`
  * and `update` carry the same declared answer shapes their `IDataEngine`
  * counterparts do — and nothing here claims to be the query schema.
+ *
+ * [#16786] `updateById` joins them. Ruling A on #16231 settled the RULE —
+ * #15823's `find()` narrowing extends to the sibling doors — and enumerated
+ * `:148` / `:164`; this member is a door of that family the enumeration
+ * missed, so the reason it narrows is the MEASUREMENT, not the enumeration:
+ * `Promise<any>` was wider than the engine door it forwards to
+ * (`IDataEngine.update`, `Promise<Record<string, any> | number | null>`),
+ * wider than that door's by-id driver exit (`IDataDriver.update`,
+ * `Promise<Record<string, unknown> | null>`), and wider than what every
+ * implementation in the repository returns. `packages/objectql`'s
+ * `ObjectRepository.updateById` declared `Promise<any>` to MATCH this member,
+ * not independently of it — PR #17255 said so in its own docblock — so this
+ * is the half that was left open, not a second one.
  */
 
 import type { EngineTransactionInfo, EngineTransactionOptions } from './objectql-engine.js';
@@ -164,8 +177,23 @@ export interface IScopedObjectRepository {
      */
     update(data: any, options?: Record<string, unknown>): Promise<Record<string, any> | number | null>;
 
-    /** Update a single record by id — the id travels as the first argument. */
-    updateById(id: string | number, data: any): Promise<any>;
+    /**
+     * Update a single record by id — the id travels as the first argument.
+     *
+     * Answers the written record, or `null` when the id matched nothing. This
+     * is the `update` by-id exit and nothing else: the implementation binds
+     * both the payload id and a pure-id `where` and never declares `multi`, so
+     * `resolveEngineUpdateDispatch` returns `by-id` for every call this
+     * signature admits, and the `number` limb `update` carries — the
+     * affected-row COUNT a predicate write resolves (#4639) — is unreachable
+     * from here. One door down, `IDataDriver.update(object, id, data)` declares
+     * exactly `Promise<Record<string, unknown> | null>`.
+     *
+     * ⚠️ A falsy id is not a narrower answer, it is a REFUSAL: `0` and `''`
+     * identify no row, so the dispatch rejects and the call throws rather than
+     * resolving `null`.
+     */
+    updateById(id: string | number, data: any): Promise<Record<string, any> | null>;
 }
 
 /**

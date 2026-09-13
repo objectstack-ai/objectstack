@@ -112,30 +112,32 @@ const MULTI_OBJECT = 'os17343_multi_boolean';
 /** Diagnostics-only; it never changes which rows a read touches. */
 const BYPASS: DriverOptions = { bypassTenantAudit: true };
 
-/** The shape `mapDataError` / `sendError` read off a thrown driver error. */
-interface WireBearingError extends Error {
-  code?: string;
-  status?: number;
-}
-
 /**
- * [#17590] Does the JSON-array MEMBERSHIP spelling actually EXECUTE on this
- * backend?
+ * [#17590, CLOSED] The membership spelling now EXECUTES on every dialect, so
+ * this file no longer carries a per-dialect branch.
  *
- * `multiple: true` is a JSON column on every dialect, but only some of them
- * let a text operator reach it. SQLite stores the serialized array as TEXT, so
- * `GLOB '*x*'` is a real membership test; MySQL coerces its `json` column for
- * `LIKE`; PostgreSQL's `json` has no `LIKE` operator at all and answers
- * SQLSTATE 42883 (`operator does not exist: json ~~ text`), which this driver
- * maps to `DATABASE_ERROR` 500.
+ * What stood here was a predicate excusing the PostgreSQL cell: `multiple:
+ * true` is a JSON column on every dialect, but only some of them let a TEXT
+ * operator reach it — SQLite stored the serialized array as TEXT so `GLOB
+ * '*x*'` was a membership test by accident, MySQL coerced its `json` column for
+ * `LIKE`, and PostgreSQL's `json` has no `LIKE` operator at all (SQLSTATE
+ * 42883 → `DATABASE_ERROR` 500). This card could only pin that divergence and
+ * name the issue that owned it.
  *
- * ⚠️ This is NOT a property of the boolean cell this card owns — it is
- * class-wide across every JSON column, measured on live PostgreSQL 16.13 with
- * this branch's change absent from disk. #17590 owns the ruling. The branch
- * below is what keeps this suite HONEST about it instead of asserting an
- * answer that two dialects give and a third does not.
+ * #17590's ruling (2026-09-12) replaced the text lowering with a real
+ * MEMBERSHIP construct compiled PER DIALECT, so all three now answer the same
+ * rows — including the boolean cell this card owns, which is what "the boolean
+ * cell stays loud until the construct covers it" was waiting for. The rows
+ * below are therefore asserted on every cell, with no branch to be honest
+ * about.
+ *
+ * ⚠️ Consequence for THIS file's construct assertions: `$contains` on a
+ * multi-valued column no longer compiles a pattern match on any dialect. What
+ * this card is about survives unchanged — the declared-type gate must not fire
+ * on a JSON column — so those assertions now read "a real predicate, not the
+ * declared constant", with the shape of that predicate owned by
+ * `sql-driver-17590-json-column-membership.test.ts`.
  */
-const membershipExecutes = (cell: DialectCell): boolean => cell.id !== 'pg';
 
 /**
  * The fixture shape. `flags`/`toggles` are the cell this card owns; `nums` and
@@ -222,9 +224,11 @@ function declareMembershipSweep(cell: DialectCell): void {
      * array really carries `true`. Without this, a green membership row could
      * be a pattern accidentally matching something else entirely.
      *
-     * ⚠️ [#17590] SQLite-only deliberately, and the reason is the finding: on
-     * PostgreSQL the same declaration produces a real `json` column, which is
-     * why the membership filter cannot execute there at all.
+     * ⚠️ SQLite-only deliberately, and the reason outlived #17590: on
+     * PostgreSQL and MySQL the same declaration produces a real `json` column,
+     * so `typeof()` has nothing to say there. What the membership filter is
+     * asking on each backend is now the same question either way — see
+     * `jsonMembershipPredicate`.
      */
     if (cell.id === 'sqlite') {
       it('the column really holds the JSON array text — so the matched rows below are MEMBERSHIP', async () => {
@@ -238,64 +242,37 @@ function declareMembershipSweep(cell: DialectCell): void {
       });
     }
 
-    if (membershipExecutes(cell)) {
-      it('$contains over a multiple:true BOOLEAN answers the rows whose array holds that member', async () => {
-        expect(await ids({ flags: { $contains: 'true' } })).toEqual(['1', '3']);
-        expect(await ids({ flags: { $contains: 'false' } })).toEqual(['1', '2']);
-      });
+    it('$contains over a multiple:true BOOLEAN answers the rows whose array holds that member', async () => {
+      expect(await ids({ flags: { $contains: 'true' } })).toEqual(['1', '3']);
+      expect(await ids({ flags: { $contains: 'false' } })).toEqual(['1', '2']);
+    });
 
-      it('$contains over a multiple:true TOGGLE answers identically — same registry arm', async () => {
-        expect(await ids({ toggles: { $contains: 'true' } })).toEqual(['1', '3']);
-        expect(await ids({ toggles: { $contains: 'false' } })).toEqual(['2', '3']);
-      });
+    it('$contains over a multiple:true TOGGLE answers identically — same registry arm', async () => {
+      expect(await ids({ toggles: { $contains: 'true' } })).toEqual(['1', '3']);
+      expect(await ids({ toggles: { $contains: 'false' } })).toEqual(['2', '3']);
+    });
 
-      /**
-       * The card's positive controls: these two already worked and the repair
-       * must not move them.
-       */
-      it('the multiple:true NUMBER and the tags column beside them are unmoved', async () => {
-        expect(await ids({ nums: { $contains: '1' } })).toEqual(['1', '3']);
-        expect(await ids({ tags_: { $contains: 'red' } })).toEqual(['1', '3']);
-      });
-    } else {
-      /**
-       * [#17590] The NAMED DIVERGENCE, pinned rather than skipped.
-       *
-       * On this backend the column is a real `json` column, not TEXT holding a
-       * serialized array, and `LIKE` has no operator over `json` — so the
-       * membership spelling raises SQLSTATE 42883, which this driver maps to
-       * `DATABASE_ERROR` 500. That is a PRE-EXISTING, CLASS-WIDE gap and not
-       * this card's doing, and the row below is what proves it: `nums` is a
-       * `multiple: true` NUMBER, whose registry carve-out
-       * (`NUMERIC_SCALAR_TYPES.has(type) && !field.multiple`) means the
-       * declared-type gate never fired on it before this change either. It
-       * fails here identically, and it fails identically on a tree with no
-       * part of this change on it — measured on live PostgreSQL 16.13 against
-       * `sql-driver.ts` at this branch's merge base.
-       *
-       * What this card's repair changes on THIS backend is only WHICH wrong
-       * answer the boolean cell gets: a silent `1 = 0` (a `200` with no rows,
-       * indistinguishable from a real empty result) becomes the same loud 500
-       * every other multi-valued class already answered. That is the
-       * fail-LOUD direction, and it is the direction the card's own ruling
-       * demands — ⛔ never a query that quietly matches nothing.
-       *
-       * ⛔ Pinned, not skipped, and pinned on the OPERATOR-SHAPED envelope
-       * rather than on a bare throw: the day #17590 is ruled and the
-       * membership filter starts answering here, this block goes red and
-       * whoever fixes it must come and delete it. A skip would stay green
-       * through the fix and through a regression alike.
-       */
-      it('[#17590] the membership filter is a loud DATABASE_ERROR here — and the multiple:true NUMBER control fails the SAME way', async () => {
-        for (const field of ['flags', 'toggles', 'nums', 'tags_']) {
-          const err = await ids({ [field]: { $contains: 'true' } } as FilterCondition)
-            .then(() => null, (e: unknown) => e as WireBearingError);
-          expect(err, `${field} must still reach the backend, not a declared constant`).toBeInstanceOf(Error);
-          expect(err!.code, field).toBe('DATABASE_ERROR');
-          expect(err!.status, field).toBe(500);
-        }
-      });
-    }
+    /**
+     * The card's positive controls: these two already worked and the repair
+     * must not move them.
+     */
+    it('the multiple:true NUMBER and the tags column beside them are unmoved', async () => {
+      expect(await ids({ nums: { $contains: '1' } })).toEqual(['1', '3']);
+      expect(await ids({ tags_: { $contains: 'red' } })).toEqual(['1', '3']);
+    });
+
+    /**
+     * [#17590] Where the NAMED DIVERGENCE used to be pinned. It said: on
+     * PostgreSQL the column is a real `json` column and `LIKE` has no operator
+     * over `json`, so the membership spelling raised SQLSTATE 42883 — a
+     * `DATABASE_ERROR` 500 — for EVERY multi-valued class, this card's boolean
+     * cell included. It was pinned rather than skipped precisely so that "the
+     * day #17590 is ruled and the membership filter starts answering here, this
+     * block goes red and whoever fixes it must come and delete it". It went
+     * red, and this is that deletion: the rows above now run on the PostgreSQL
+     * cell like any other, and the construct that makes them run is pinned in
+     * `sql-driver-17590-json-column-membership.test.ts`.
+     */
 
     /**
      * The negative control, and the reason this is a carve-out rather than a
@@ -341,14 +318,32 @@ describe('[#17343] the per-dialect construct, compiled — the registerExternalO
   ];
   const typed = (config: SqlDriverConfig) => new CompilerProbeDriver(config).declareMulti();
 
+  /**
+   * [#17590] "A real predicate over the column" per dialect — the pattern
+   * emitter OR the membership construct that replaced it for `$contains`. This
+   * file's question is whether the declared-type gate fired, so it must accept
+   * either; asserting one SHAPE here would make it red on the card that changes
+   * the other, which is exactly what #17590 did to its predecessor.
+   */
+  const REAL_PREDICATE: Record<string, RegExp> = {
+    sqlite: /LIKE|GLOB|json_each\(/,
+    postgres: /LIKE|GLOB|::jsonb @> /,
+    mysql: /LIKE|GLOB|JSON_CONTAINS\(/,
+  };
+
   for (const [label, config] of DIALECTS) {
-    it(`${label}: a multi-valued boolean/toggle compiles a real pattern match, never the constant`, () => {
+    it(`${label}: a multi-valued boolean/toggle compiles a real predicate, never the constant`, () => {
       const d = typed(config);
       for (const field of ['flags', 'toggles']) {
         for (const op of POSITIVE_OPERATORS) {
           const sql = d.compileWhere({ [field]: { [op]: 'true' } } as FilterCondition);
           expect(sql, `${op} over ${field}`).not.toMatch(/1 = 0|1 = 1/);
-          expect(sql, `${op} over ${field}`).toMatch(/LIKE|GLOB/);
+          // [#17590] `$contains` compiles the MEMBERSHIP construct now and the
+          // rest of the family still compiles a pattern match. What this card
+          // is about is neither shape — it is that the declared-type gate does
+          // not fire — so this row asks for "a real predicate over the column",
+          // and the SHAPE per operator is owned by #17590's own file.
+          expect(sql, `${op} over ${field}`).toMatch(REAL_PREDICATE[label]!);
         }
       }
     });
@@ -366,11 +361,15 @@ describe('[#17343] the per-dialect construct, compiled — the registerExternalO
       }
     });
 
-    it(`${label}: the card's positive controls compile exactly as they did`, () => {
+    it(`${label}: the card's positive controls still compile a real predicate`, () => {
       const d = typed(config);
       for (const field of ['nums', 'tags_', 'label']) {
-        expect(d.compileWhere({ [field]: { $contains: 'true' } } as FilterCondition), field).toMatch(/LIKE|GLOB/);
+        expect(d.compileWhere({ [field]: { $contains: 'true' } } as FilterCondition), field)
+          .toMatch(REAL_PREDICATE[label]!);
       }
+      // …and the SCALAR column among them is the one still on the pattern
+      // emitter, which is what keeps the row above from passing vacuously.
+      expect(d.compileWhere({ label: { $contains: 'true' } } as FilterCondition)).toMatch(/LIKE|GLOB/);
     });
   }
 
@@ -391,7 +390,7 @@ describe('[#17343] the per-dialect construct, compiled — the registerExternalO
         expect(managed.compileWhere(filter), field).toBe(external.compileWhere(filter));
       }
       // …and the agreed construct is the working one, not an agreed `1 = 0`.
-      expect(managed.compileWhere({ flags: { $contains: 'true' } })).toMatch(/LIKE|GLOB/);
+      expect(managed.compileWhere({ flags: { $contains: 'true' } })).toMatch(REAL_PREDICATE.sqlite!);
     } finally {
       await managed.getKnex().schema.dropTableIfExists(MULTI_OBJECT).catch(() => {});
       await managed.disconnect?.();
@@ -421,7 +420,8 @@ describe('[#17343] the per-dialect construct, compiled — the registerExternalO
       });
       const membership = d.compileWhere({ many: { $contains: 'x' } });
       expect(membership, `multiple:true ${declared}`).not.toMatch(/1 = 0/);
-      expect(membership, `multiple:true ${declared}`).toMatch(/LIKE|GLOB/);
+      // [#17590] the membership construct on the SQLite cell this sweep runs on.
+      expect(membership, `multiple:true ${declared}`).toMatch(REAL_PREDICATE.sqlite!);
       // …while the SCALAR column of the same class is gated, which is what
       // makes the row above a carve-out reading rather than a dead gate.
       expect(d.compileWhere({ one: { $contains: 'x' } }), `scalar ${declared}`).toMatch(/1 = 0/);

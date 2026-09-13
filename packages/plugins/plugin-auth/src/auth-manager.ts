@@ -58,6 +58,7 @@ import {
 } from './auth-session-audit.js';
 import { SESSION_ERASURE_PATHS } from './session-tombstone.js';
 import { envelopeVendorAdminRefusal } from './vendor-admin-refusal-envelope.js';
+import { refuseAnonymousSession } from './anonymous-session-refusal.js';
 import {
   buildBetterAuthRouteOwnership,
   type BetterAuthRouteOwnership,
@@ -70,6 +71,7 @@ import {
 } from './impersonation-bearer-rotation.js';
 import { echoInstalledSessionToken } from './two-factor-rotated-token-echo.js';
 import { resetVerifiedOnTwoFactorReenrollment } from './two-factor-reenrollment-verified-reset.js';
+import { attachSessionToCredentialResponse } from './session-envelope-completion.js';
 import {
   applyPlatformAdminImpersonation,
 } from './admin-impersonate-endpoint.js';
@@ -303,6 +305,21 @@ function readDisableSignUpEnv(): boolean | undefined {
 function readSsoOnlyEnv(): boolean | undefined {
   return readBooleanEnv('OS_AUTH_SSO_ONLY');
 }
+
+/**
+ * [#16384] The auth plugin's shipped `basePath` default — the ONE place this
+ * literal is written. Before this card it existed independently at four
+ * sites: this file's own `configuredBasePath()` fallback below, plus three in
+ * `auth-plugin.ts` (the constructor default and two later re-derivations of
+ * "what if the caller cleared `basePath`?"). A future edit to one could drift
+ * from the other three silently — `configuredBasePath()`'s own fallback is
+ * unfalsifiable by construction on the live path (`AuthPlugin` always supplies
+ * `basePath`, per its constructor default below), so no runtime test could
+ * have caught that drift. Every one of the four readers now evaluates BYTE
+ * IDENTICALLY to before this constant existed — see `configuredBasePath()`'s
+ * docblock for the normalisation chain this does NOT touch.
+ */
+export const DEFAULT_AUTH_BASE_PATH = '/api/v1/auth';
 
 /**
  * Whether this runtime serves the HTTP MCP surface (`/api/v1/mcp`).
@@ -2240,6 +2257,19 @@ export class AuthManager {
           // rotated cookie too. See `two-factor-rotated-token-echo.ts`. This
           // corrects the echoed VALUE only; resolver precedence is untouched.
           await echoInstalledSessionToken(ctx);
+
+          // ── #17234: complete the SessionResponse envelope with the session
+          // the route just committed ────────────────────────────────────────
+          // `/sign-in/email` and `/sign-up/email` answer `{ token, user }`
+          // (plus `redirect` on sign-in) with no `session` member anywhere in
+          // the body or the headers, so `SessionResponseSchema` never parsed
+          // either method's return value. The session is not absent — it is
+          // the row `internalAdapter.createSession` already committed before
+          // the endpoint returned — so this reads it back by the response's
+          // own token, the same seam `/get-session` uses, and attaches it.
+          // See `session-envelope-completion.ts` for the full measurement and
+          // why this can never fabricate an id or an expiry.
+          await attachSessionToCredentialResponse(ctx);
 
           // ── #10700: `verified` must describe the secret stored beside it ──
           // A second `/two-factor/enable` on an already-confirmed account
@@ -5631,7 +5661,22 @@ export class AuthManager {
     //
     // Status and admission are untouched; see the module header for the three
     // narrowings and the measurement behind each.
-    const response = await envelopeVendorAdminRefusal(endpointPath, vendorResponse);
+    const enveloped = await envelopeVendorAdminRefusal(endpointPath, vendorResponse);
+
+    // [#17238] And the anonymous `/get-session` answer becomes the same
+    // declared refusal. better-auth serves `200` + the literal JSON `null`
+    // when no session backs the request, which is a value no
+    // `SessionResponse` can express — so `ObjectStackClient.auth.me()`, which
+    // declares `Promise<SessionResponse>`, resolved OUTSIDE its own type on
+    // the most ordinary call a logged-out caller makes. Ruled by the director
+    // seat (batch #117 item 4): the code moves, the published schema does not.
+    //
+    // Same seam and same reason as the `/admin/` normalization above — this is
+    // the ONE place every vendor route passes through — but ⚠️ NOT the same
+    // kind of change: that one is forbidden to move admission and this one IS
+    // the admission move (`200` -> `401`). `anonymous-session-refusal.ts`
+    // carries the three narrowings that keep every other answer identical.
+    const response = await refuseAnonymousSession(endpointPath, enveloped);
 
     if (response.status >= 500) {
       try {
@@ -5650,6 +5695,9 @@ export class AuthManager {
    * configured value VERBATIM, or the shipped default when nothing is
    * configured. Unchanged from before this card — only the reading of it moved
    * here, so `getBasePath()` and this cannot drift apart by accident.
+   *
+   * [#16384] The fallback is `DEFAULT_AUTH_BASE_PATH`, not a re-typed literal
+   * — see that constant's docblock above.
    *
    * ## ⛔ Never normalise here
    *
@@ -5676,7 +5724,7 @@ export class AuthManager {
    * #16399's decision, not this card's.
    */
   private configuredBasePath(): string {
-    return this.config.basePath || '/api/v1/auth';
+    return this.config.basePath || DEFAULT_AUTH_BASE_PATH;
   }
 
   /**

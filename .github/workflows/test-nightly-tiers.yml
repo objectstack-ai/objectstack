@@ -78,6 +78,12 @@ on:
     # patrol's minute, so two of them never contend for the same runner minute;
     # 05:29 sits after `rerun-safety-nightly` (04:00) and `coverage-nightly`
     # (05:00) have started and well before `showcase-smoke` (07:00).
+    #
+    # ⚠️ Two readers, one fact. This value is restated as `PATROL_SCHEDULE` in
+    # the `env:` block below, where the report step computes the deadline the
+    # card's own `Swept` line is judged against (#17720). Change the cron and
+    # change that env in the same edit, or the card publishes a deadline nobody
+    # schedules.
     - cron: '29 5 * * *'
   workflow_dispatch: {}
   # ⛔ PATHS-FILTERED TO THIS FILE AND THE SWITCH READER IT INVOKES, and that
@@ -121,6 +127,18 @@ env:
   CARD_MARKER: os-nightly-tiers
   # Applied on CREATE only, additively; never rewritten on a refresh.
   CARD_LABELS: 'bug,domain:devx,priority:p1'
+  # This workflow's own `cron:`, restated here so the report step can state the
+  # cadence that makes the card's `Swept` line decidable (#17720). The sibling
+  # patrol anchors carry the same heartbeat reading and one of them fires every
+  # six hours, so a reader who carries a cadence over from a neighbour is wrong
+  # by 4× — which is why each card states its own rather than leaving the
+  # reader to go and read a workflow file.
+  #
+  # ⛔ A literal, not a parse of this file: the report body is inline
+  # `github-script` that no test reaches, so the cheapest honest route is the
+  # one with the least inline logic. The cost is the restatement above, and the
+  # comment at the `cron:` is what pays it.
+  PATROL_SCHEDULE: '29 5 * * *'
 
 jobs:
   tiers:
@@ -440,6 +458,23 @@ jobs:
               '',
             ]);
 
+            // The cadence that makes the `Swept` line below decidable (#17720).
+            // `PATROL_SCHEDULE` is this workflow's own `cron:`, restated in the
+            // `env:` block beside the other single-sourced card strings.
+            // ⛔ Only the daily `M H * * *` form is computed; anything else says
+            // so in the body rather than publishing a deadline derived from a
+            // schedule this did not read.
+            const sweptAt = new Date();
+            const schedule = String(process.env.PATROL_SCHEDULE ?? '').trim();
+            const cronFields = /^(\d{1,2}) (\d{1,2}) \* \* \*$/.exec(schedule);
+            let expectation = `⚠️ expected cadence UNSTATED — PATROL_SCHEDULE is \`${schedule}\`, which is not the daily \`M H * * *\` form this step computes a deadline from`;
+            if (cronFields && Number(cronFields[1]) <= 59 && Number(cronFields[2]) <= 23) {
+              const next = new Date(sweptAt);
+              next.setUTCHours(Number(cronFields[2]), Number(cronFields[1]), 0, 0);
+              if (next <= sweptAt) next.setUTCDate(next.getUTCDate() + 1);
+              expectation = `expected every 24h while this card stands (cron \`${schedule}\` UTC) · next by ${next.toISOString().slice(0, 16)}Z`;
+            }
+
             const filesSection = failing.length > 0
               ? ['## Failing files', '', ...failing.map((f) => `- \`${f}\``), '']
               : extractorExit !== '0'
@@ -451,7 +486,14 @@ jobs:
               '',
               `# ${title}`,
               '',
-              `_Swept ${new Date().toISOString()} · [run log](${runUrl}) · commit \`${process.env.GITHUB_SHA}\` · trigger \`${context.eventName}\` · tiers job result \`${result}\`._`,
+              `_Swept ${sweptAt.toISOString()} · ${expectation} · [run log](${runUrl}) · commit \`${process.env.GITHUB_SHA}\` · trigger \`${context.eventName}\` · tiers job result \`${result}\`._`,
+              '',
+              'The `Swept` line above is this nightly\'s heartbeat, and it states the cadence that makes',
+              '「stalled」 decidable: while the tiers stay red this card is refreshed on that schedule, so a',
+              'timestamp still sitting there past the `next by` deadline means either the standing caller',
+              'died or the nightly went green — nothing here files or closes anything on green, so both',
+              'readings end at this card. ⛔ Do not carry a cadence over from a sibling patrol anchor: they',
+              'differ by up to 4× and each states its own.',
               '',
               'The `e2e` and `live` test tiers — the files named `*.e2e.test.*` and `*.live.test.*` — run here',
               'nightly on `main` under `OS_TEST_TIERS=nightly` and nowhere else (the per-PR and merge-queue',

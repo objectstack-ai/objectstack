@@ -22190,9 +22190,84 @@ function selfTest() {
   // test is the guard around the answer, not the answer.
   const CLI = fileURLToPath(import.meta.url);
   const runCli = (args) => spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', cwd: ROOT });
+
+  // ── Why the runtime's noise floor is MEASURED and not pattern-matched ─────
+  //
+  // Every child spawned by this self-test inherits the run's `NODE_OPTIONS`,
+  // and under some values the RUNTIME writes to the child's stderr before any
+  // user code runs. The measured case: `check-required-contexts.mjs
+  // --verify-required-set` exits 2 = NOT VERIFIED without `--use-env-proxy`
+  // and prescribes exactly that flag, citing #9642 for why the inference it
+  // prevents matters — so a seat that follows one gate's own remedy opens
+  // EVERY child here with two lines:
+  //
+  //   (node:NNN) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, ...
+  //   (Use `node --trace-warnings ...` to show where the warning was created)
+  //
+  // Two cases below used to describe the child's stderr STREAM while meaning
+  // this MODULE's output — one asserting the stream is literally empty, one
+  // asserting the banner sits on its first line. Both are true statements
+  // about the module and both went red for obeying the other gate's advice:
+  // a reported regression that does not exist, in a self-test that runs past
+  // the container's foreground cap and so is expensive to re-read.
+  //
+  // ⛔ The remedy is NOT to stop looking at these children's stderr — that
+  // trades a true assertion for silence. ⛔ Nor is it to match node's warning
+  // SHAPE: the hint line above carries no `[CODE] Warning:` at all, so a
+  // filter written to that description leaves it behind and the cases stay
+  // red, while swallowing a line the MODULE wrote in that same shape.
+  //
+  // So the floor is MEASURED. For each probe an identical child that does
+  // NOTHING runs with the same argv shape, cwd and inherited env, and
+  // whatever IT prints is what this runtime prints unprompted; anything the
+  // probe prints BEYOND that came from the module. No pattern describes the
+  // noise, so this cannot rot when node changes its warning text, and any
+  // line the module writes still reds — including one disguised as a node
+  // warning, which the controls in the entry-guard battery drive. The single
+  // normalisation is node's pid, which differs between any two children by
+  // construction; nothing else about the text is touched.
+  const withoutPid = (stream) => (stream ?? '').replace(/^\(node:\d+\)/gm, '(node:PID)').trim();
+  /** What `probe` wrote on stderr BEYOND what this runtime writes unprompted. */
+  const stderrBeyondRuntime = (probe, baseline) => (
+    withoutPid(probe.stderr) === withoutPid(baseline.stderr) ? '' : withoutPid(probe.stderr)
+  );
+  /**
+   * `probe`'s stderr lines with this runtime's own opening noise removed, so a
+   * case can speak about WHICH line the module wrote first. Only an exact
+   * leading match of the measured floor is removed; anything else is kept.
+   */
+  const moduleStderrLines = (probe, baseline) => {
+    const noise = withoutPid(baseline.stderr);
+    const text = withoutPid(probe.stderr);
+    const own = noise && text.startsWith(noise) ? text.slice(noise.length) : text;
+    return own.split('\n').map((line) => line.trim()).filter(Boolean);
+  };
+
+  // The floor for the CLI children below: same argv shape, same cwd, same
+  // inherited env, and an entry that does nothing at all.
+  const cliNoiseTmp = mkdtempSync(nodePath.join(tmpdir(), 'dispatch-gates-noise-'));
+  let cliBaseline;
+  try {
+    const quietEntry = nodePath.join(cliNoiseTmp, 'runtime-baseline.mjs');
+    writeFileSync(quietEntry, 'export const nothing = 1;\n');
+    cliBaseline = spawnSync(process.execPath, [quietEntry, '--tier', 'packages/spec/src/index.ts'], { encoding: 'utf8', cwd: ROOT });
+  } finally {
+    rmSync(cliNoiseTmp, { recursive: true, force: true });
+  }
+
   const plainRun = runCli(['--tier', 'packages/spec/src/index.ts']);
   t('an unasserted explicit-path run still answers', plainRun.status === 0 && (plainRun.stdout ?? '').trim().length > 0);
-  t('and it opens with the banner, on the FIRST line of stderr', (plainRun.stderr ?? '').split('\n')[0].includes('gate list derived from the tree of'));
+  t(
+    'and it opens with the banner, on the FIRST stderr line THIS module writes',
+    (moduleStderrLines(plainRun, cliBaseline)[0] ?? '').includes('gate list derived from the tree of'),
+  );
+  // The control that keeps the case above from passing on an empty list: the
+  // floor child writes nothing of its own, so subtracting it from ITSELF
+  // leaves no line to mistake for a banner.
+  t(
+    'CONTROL: the floor child writes no stderr line of its own — the subtraction above cannot be vacuous',
+    moduleStderrLines(cliBaseline, cliBaseline).length === 0 && moduleStderrLines(plainRun, cliBaseline).length > 0,
+  );
   t('the banner stays OFF stdout, which is pasted verbatim into claim comments', !(plainRun.stdout ?? '').includes('gate list derived from the tree of'));
   const liveSlug = repoIdentity().slug;
   const assertedRun = runCli(['--tier', 'packages/spec/src/index.ts', REPO_FLAG, liveSlug ?? 'an-owner/a-repo']);
@@ -22362,15 +22437,66 @@ function selfTest() {
       `const m = await import(${JSON.stringify(pathToFileURL(SELF).href)});\n` +
         `console.log('CONSUMER-REACHED', typeof m.maskComments, typeof m.isExtractConfigPath, typeof m.deriveTier);\n`,
     );
-    const imported = spawnSync(process.execPath, [consumer, '--self-test', '--tier', 'packages/spec/src/index.ts'], {
-      encoding: 'utf8',
-      cwd: entryTmp,
-    });
+    // ONE spawn helper for both children below, so the noise floor cannot
+    // drift away from the probe it is the floor for: same argv shape, same
+    // cwd, same inherited env, by construction rather than by two copies.
+    const spawnEntryChild = (entry) => spawnSync(
+      process.execPath,
+      [entry, '--self-test', '--tier', 'packages/spec/src/index.ts'],
+      { encoding: 'utf8', cwd: entryTmp },
+    );
+    const imported = spawnEntryChild(consumer);
     t(
       'imported, the importer reaches its own first statement and the re-exports are there',
       imported.status === 0 && (imported.stdout ?? '').trim() === REACHED,
     );
-    t('imported, this module prints nothing of its own on either stream', (imported.stderr ?? '').trim() === '');
+
+    // The measured noise floor again — see `stderrBeyondRuntime` above for why
+    // this is subtracted rather than pattern-matched. The floor child here is
+    // spawned through the SAME helper as the probe, so the two cannot drift
+    // apart in argv shape, cwd or inherited env.
+    const baselineEntry = nodePath.join(entryTmp, 'runtime-baseline.mjs');
+    writeFileSync(baselineEntry, "console.log('BASELINE-REACHED');\n");
+    const runtimeBaseline = spawnEntryChild(baselineEntry);
+    t('imported, this module prints nothing of its own on either stream', stderrBeyondRuntime(imported, runtimeBaseline) === '');
+
+    // The controls that keep the case above from passing by ignoring
+    // everything. ⚠️ Without them, "prints nothing of its own" and "prints
+    // nothing that is ever looked at" are the same green — and this battery
+    // would have no way to tell a working subtraction from one that answers
+    // '' for every input.
+    const probeImporting = (name, source) => {
+      const target = nodePath.join(entryTmp, name);
+      writeFileSync(target, source);
+      const importer = nodePath.join(entryTmp, `import-${name}`);
+      writeFileSync(importer, `await import(${JSON.stringify(pathToFileURL(target).href)});\n`);
+      return spawnEntryChild(importer);
+    };
+    t(
+      'NEGATIVE CONTROL: importing a module that writes nothing is clean under THIS runtime',
+      stderrBeyondRuntime(probeImporting('quiet.mjs', 'export const nothing = 1;\n'), runtimeBaseline) === '',
+    );
+    t(
+      'POSITIVE CONTROL: one line the imported module writes to stderr still reds',
+      stderrBeyondRuntime(
+        probeImporting('noisy.mjs', "console.error('a line this module wrote itself');\n"),
+        runtimeBaseline,
+      ).includes('a line this module wrote itself'),
+    );
+    // The case that separates a MEASURED baseline from a shape filter: this
+    // line is shaped exactly like one of node's own warnings, so a filter
+    // written to that shape swallows it. Subtracting a measured baseline
+    // cannot — the baseline child never wrote it.
+    t(
+      'POSITIVE CONTROL: an imported line DISGUISED as a node warning still reds',
+      stderrBeyondRuntime(
+        probeImporting(
+          'disguised.mjs',
+          "console.error('(node:4242) [FAKE-CODE] Warning: written by the MODULE, not the runtime');\n",
+        ),
+        runtimeBaseline,
+      ).includes('written by the MODULE, not the runtime'),
+    );
     t(
       "imported by a consumer whose own argv says --self-test, THIS file's self-test does not fire",
       !(imported.stdout ?? '').includes('dispatch-gates self-test:'),

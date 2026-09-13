@@ -7,8 +7,9 @@
  * against a normalized stack, threading the (immutably updated) stack through
  * each entry and turning each rewrite into a structured {@link ConversionNotice}.
  * It is wired into `normalizeStackInput`, so it fires on the single seam every
- * load path funnels through — `defineStack`, `objectstack validate`, `lint`,
- * `info`, and `doctor`.
+ * AUTHORING path funnels through — `defineStack`, `objectstack validate`,
+ * `lint`, `info`, and `doctor`. Data-at-rest load paths reach it by their own
+ * route and with `includeRetired` set; see that option below.
  */
 
 import { ALL_CONVERSIONS } from './registry.js';
@@ -29,9 +30,32 @@ export interface ApplyConversionsOptions {
   onNotice?: (notice: ConversionNotice) => void;
   /**
    * Also apply conversions marked `retiredFromLoadPath` (default `false`).
-   * The load seam never sets this — a retired entry is chain history, not a
-   * live window. The migration chain and the fixture CI set it so graduated
-   * transforms stay replayable forever (ADR-0087 D3).
+   *
+   * **Retirement is an AUTHORING-SURFACE event**, and the default posture is
+   * that surface: `normalizeStackInput` — the single funnel for `defineStack`,
+   * `validate`, `lint`, `compile`, `info`, `doctor`, i18n extraction and
+   * scaffold validation — never sets this, so a live author meets the
+   * tombstone and is taught the canonical spelling instead of having the old
+   * shape silently rewritten. That funnel is the whole jurisdiction the flag
+   * has; it is not a claim about every load path.
+   *
+   * **Data-at-rest load paths set it deliberately** — three call sites today:
+   * `applyConversionsToStoredItem` (`./stored.js`), where it is *pinned*
+   * rather than offered (`StoredConversionOptions` omits the key, so no caller
+   * can turn it off); flow rehydration in the automation engine; and the
+   * artifact-ingestion door (`applyArtifactForwardConversions` in
+   * `@objectstack/metadata-core`, reached from two callers), which opens the
+   * window by comparing the artifact's declared `engines.protocol` floor with
+   * the running spec version. A stored row, a stored flow and a built artifact
+   * have no author to teach, so each replays the FULL chain, retired entries
+   * included — ADR-0087's `## Addendum (2026-07-31)` for the first two, the
+   * #12772 ruling for the third. The fixture CI sets it as well, so graduated
+   * transforms stay covered forever (ADR-0087 D3).
+   *
+   * `objectstack migrate meta` is NOT one of these callers: `applyMetaMigrations`
+   * (`../migrations/chain.js`) looks each step's conversion up in
+   * `ALL_CONVERSIONS` by id and calls its `apply` directly, so it never reaches
+   * this option at all.
    */
   includeRetired?: boolean;
   /**
@@ -46,6 +70,34 @@ export interface ApplyConversionsOptions {
    * rather than silently clobber it.
    */
   reservedNodeTypes?: ReadonlySet<string>;
+  /**
+   * Conversion ids this seam refuses to replay, whatever `includeRetired`
+   * says. Empty/absent by default: every seam replays the whole window it
+   * opened.
+   *
+   * **Why a seam needs this at all.** `includeRetired` opens the window for a
+   * WHOLE CLASS of caller (data at rest), and the entries inside that window
+   * are not one kind. Most are lossless deletes or renames of a shape the
+   * current schema now REFUSES — replaying those is the rescue the window
+   * exists for, because without it the row or artifact is simply unbootable.
+   * A few are DEFAULT FLIPS: the old shape still parses, still means
+   * something, and the rewrite changes what it means. For those the replay is
+   * not a rescue, it is a reinterpretation — and whether it is sound depends
+   * on the CALLER, not on the entry: only a seam that can say "this input
+   * predates the flip" as a FACT rather than a guess may apply one.
+   *
+   * ⇒ The entry cannot answer that (nothing in the item distinguishes a
+   * machine-written row at rest from an author who wrote the same key
+   * yesterday), and `retiredFromLoadPath` does not answer it either — its
+   * jurisdiction is the authoring funnel and nothing else (see that flag's
+   * own docblock on `MetadataConversion`). This option is where a seam says
+   * which entries its own evidence cannot carry.
+   *
+   * ⛔ NOT a second conversion table and never a filter of convenience: the
+   * registry stays the single authority on WHAT converts. A caller passing
+   * this owes a written reason per id, at the call site.
+   */
+  excludeConversionIds?: readonly string[];
 }
 
 /**
@@ -60,13 +112,23 @@ export function applyConversions(
   stack: Record<string, unknown>,
   options: ApplyConversionsOptions = {},
 ): Record<string, unknown> {
-  const { onNotice, onConflict, reservedNodeTypes, includeRetired = false } = options;
+  const { onNotice, onConflict, reservedNodeTypes, includeRetired = false, excludeConversionIds } = options;
+  const excluded = excludeConversionIds && excludeConversionIds.length > 0
+    ? new Set(excludeConversionIds)
+    : null;
   let current = stack;
 
   for (const conversion of ALL_CONVERSIONS) {
+    // The seam's own refusal, read BEFORE the retirement window: a caller that
+    // cannot carry a given entry's precondition does not get it back by
+    // opening the window (see `excludeConversionIds`).
+    if (excluded?.has(conversion.id)) continue;
     // A retired entry is graduated chain history (ADR-0087 D2 window, second
-    // half): the loader no longer accepts its old shape — only `migrate meta`
-    // (and the fixture CI) replays it, via `includeRetired`.
+    // half): the AUTHORING funnel (`normalizeStackInput`) no longer replays it,
+    // so the tombstone teaches the author instead. The data-at-rest seams —
+    // stored-row rehydration, flow rehydration, the artifact-ingestion door —
+    // opt back in via `includeRetired`, as do the fixture CI and any caller
+    // rehydrating rows nobody can be taught (see `includeRetired` above).
     if (conversion.retiredFromLoadPath && !includeRetired) continue;
     const retiresIn = conversion.toMajor + 1;
     const context: ConversionContext = {

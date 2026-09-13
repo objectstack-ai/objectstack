@@ -81,6 +81,12 @@ import { lowerCallables } from '../../src/utils/lower-callables.js';
 // `lowerCallables` is: it ships inside `@objectstack/cli`, so the row below
 // measures the reader in this checkout rather than a built artifact.
 import { collectMetadataStats, type MetadataStats } from '../../src/utils/format.js';
+// [#17528] `os lint`'s OWN rubric, and the metadata-quality scorer that reaches
+// it through `lint/score.js`. Reached as SOURCE, by relative path, for the same
+// reason the two imports above are: both ship inside `@objectstack/cli`, so the
+// rows below measure the readers in this checkout, not a built artifact.
+import { lintConfig } from '../../src/commands/lint.js';
+import { scoreMetadata } from '../../src/lint/score.js';
 // [#15006] The CLI's OWN reads of a package-owned collection. Until that card
 // these were inline expressions inside oclif command bodies — no exported
 // reader, nothing a probe could call — which is why the four rows they carry
@@ -98,6 +104,7 @@ import {
 import {
   PACKAGE_OWNED_COLLECTION_KEYS,
   PROBE_DEFAULT_PERMISSION_SET,
+  PROBE_DIRTY_LABEL_RULE,
   PROBE_FEDERATED_OBJECT,
   PROBE_FUNCTION,
   PROBE_FUNCTION_EFFECT,
@@ -511,6 +518,57 @@ export async function measureShape(project: unknown, projectRoot: string): Promi
   rows.push(countRow(
     'B2/B3 · cli metadata summary (collectMetadataStats — validate, build, info) · every counted collection',
     summaryItems,
+  ));
+
+  // [#17528] `os lint`'s OWN rubric — the hand-written checks at the top of
+  // `lintConfig` (naming, labels, structure, name-field suggestions). #17069
+  // folded the RULE REGISTRY inside that same function and scoped itself
+  // explicitly to that call, naming the two things it left reading the caller's
+  // own stack: this family, and `scoreMetadata`. Under option B both read an
+  // EMPTY stack, so a project with a lint-dirty label got `✓ All checks passed`
+  // while the byte-identical top-level spelling of the same metadata reported
+  // it.
+  //
+  // Counted over the reader's RETURN VALUE, per this file's rule — never over
+  // `project.<collection>`, which would be a second copy of the read the row
+  // watches.
+  //
+  // ⚠️ Narrowed to the ONE rule the zoo provokes on purpose, and the narrowing
+  // is what makes the row a measurement at all: every other finding `lintConfig`
+  // returns on this fixture comes from the rule registry, which already folds,
+  // so an unfiltered count is identical in both shapes before AND after the fix
+  // — a row that can never go red. `PROBE_DIRTY_LABEL` is the label that
+  // provokes it, carried by the MODULE package so this is a cross-package
+  // resolution. ⛔ This row is enumeration, not coverage of the family: the
+  // byte-parity of the WHOLE family across both shapes is pinned separately, in
+  // `test/lint-handwritten-checks-package-fold.test.ts`.
+  const handWritten = lintConfig(project as Record<string, unknown>)
+    .filter((issue) => issue.rule === PROBE_DIRTY_LABEL_RULE);
+  rows.push(countRow(
+    'B2/B3 · cli lint hand-written rubric (lintConfig — naming, labels, structure) · objects',
+    handWritten.length,
+  ));
+
+  // [#17528] The metadata-quality SCORER, the second call site into the reader
+  // above (`lint/score.js`, reached by `os lint --score` and the metadata eval).
+  // It is the sharper half: the linter RAN and read an empty stack, so an
+  // option-B project's rubric was computed over nothing and published
+  // `100/100 (A)` — the #15658 shape, "the linter found nothing" and "the linter
+  // never ran" collapsed into the better-looking one, arriving through the INPUT
+  // rather than through a swallowed crash.
+  //
+  // A separate row from the one above because it is a separate DOOR: the scorer
+  // normalizes its input first (`normalizeStackInput`) and answers a score
+  // rather than a finding list, so a fold that reached `lintConfig` but not this
+  // path would still publish a clean number. Counted over `MetadataScore.issues`
+  // — the reader's return value — with the score rendered beside it.
+  const score = scoreMetadata(project);
+  const scoredHandWritten = score.issues
+    .filter((issue) => issue.rule === PROBE_DIRTY_LABEL_RULE);
+  rows.push(row(
+    'B2/B3 · cli metadata-quality rubric (scoreMetadata — os lint --score, metadata eval) · objects',
+    `${scoredHandWritten.length} hand-written finding(s) · score ${score.score}/${score.grade}`,
+    scoredHandWritten.length === 0,
   ));
 
   // ── B2 · `os verify`'s readers (#15229) ──────────────────────────────────

@@ -27,7 +27,7 @@ edges:
 ```
 
 > An expression in an evaluated slot needs a non-blank `source`: the expression
-> engine evaluates `source` (the canonical persisted form of phase M9.1) and
+> engine evaluates `source` (the canonical persisted form) and
 > cannot evaluate `ast` alone, so an envelope carrying only `ast`, or a `source`
 > that is blank after trimming, would validate and register and then fault at
 > run time. Write `{ dialect: 'cel', source: '…' }`.
@@ -42,10 +42,10 @@ edges:
   `invalid_union` issue at the slot carrying the sentence above; a blank
   `source` inside an envelope surfaces as one `custom` issue at `source`.
 - **`ExpressionSchema` / `ExpressionInputSchema` are NOT narrowed.** They remain
-  the persistence contract (`source` OR `ast`), whose docblock declares that
-  `ast` becomes required in build output at phase M9.2. When AST-only
-  evaluation lands, `EvaluatedExpressionSchema` is the one place to relax, and
-  every evaluated slot follows.
+  the persistence contract (`source` OR `ast`), where `ast` is accepted as an
+  optional opaque structured value and carries no promise of becoming required.
+  If AST-only evaluation is ever chartered, `EvaluatedExpressionSchema` is the
+  one place to relax, and every evaluated slot follows.
 - **`structuralConditionRefusal` no longer admits an `ast`-only envelope** on
   either structural condition slot (`config.condition` on a node,
   `edge.condition`). #15662's refusal admitted it on purpose through a
@@ -70,7 +70,7 @@ edges:
   it. None of them grew a rule of its own.
 
 **What an author does with a refused edge condition.** An edge condition that
-carried only `ast` has no evaluable form under M9.1: author its `source`. A
+carried only `ast` has no evaluable form: author its `source`. A
 whitespace-only condition — envelope or bare string — was never a predicate
 (the engine answered `false`, so that edge never fired): remove the
 `condition` key if the edge was meant to be unconditional, or write the

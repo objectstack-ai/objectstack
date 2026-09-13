@@ -98,7 +98,7 @@ Type: `string[]`
 | **measures** | `string[]` | ✅ | List of metrics to calculate |
 | **dimensions** | `string[]` | optional | List of dimensions to group by |
 | **where** | `any` | optional | Filtering criteria (canonical Query DSL FilterCondition). An authored `FilterArray` is lowered by `parseFilterAST` on the client before the wire; this field admits only the lowered `FilterCondition` (see `FilterArray` in `data/filter.zod.ts`). |
-| **timeDimensions** | `{ dimension: string; granularity?: Enum<'second' \| 'minute' \| 'hour' \| 'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; dateRange?: Enum<'today' \| 'yesterday' \| 'this_week' \| 'last_week' \| 'this_month' \| 'last_month' \| …> \| string[] }[]` | optional | Time-bucketed dimensions. Each entry names a dimension, an optional bucket `granularity`, and an optional `dateRange` — a preset name from the closed date-range vocabulary (e.g. `'last_7_days'`) or an explicit `[start, end]` window; an unrecognised string answers `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` instead of silently widening. |
+| **timeDimensions** | `{ dimension: string; granularity?: Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; dateRange?: Enum<'today' \| 'yesterday' \| 'this_week' \| 'last_week' \| 'this_month' \| 'last_month' \| …> \| string[] }[]` | optional | Time-bucketed dimensions. Each entry names a dimension, an optional bucket `granularity`, and an optional `dateRange` — a preset name from the closed date-range vocabulary (e.g. `'last_7_days'`) or an explicit `[start, end]` window; an unrecognised string answers `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` instead of silently widening. |
 | **order** | `Record<string, Enum<'asc' \| 'desc'>>` | optional |  |
 | **limit** | `number` | optional |  |
 | **offset** | `number` | optional |  |
@@ -109,7 +109,7 @@ Type: `string[]`
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **dimension** | `string` | ✅ |  |
-| **granularity** | `Enum<'second' \| 'minute' \| 'hour' \| 'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional |  |
+| **granularity** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional |  |
 | **dateRange** | `Enum<'today' \| 'yesterday' \| 'this_week' \| 'last_week' \| 'this_month' \| 'last_month' \| …> \| string[]` | optional | Time window for this dimension: a date-range PRESET name from the closed vocabulary in `data/date-range-presets.ts` (today, yesterday, this_week, last_week, this_month, last_month, this_quarter, last_quarter, this_year, last_year, last_7_days, last_30_days, last_90_days — e.g. `'last_7_days'`), or an explicit `[start, end]` array of ISO dates / `{date-macro}` tokens (e.g. `["2023-01-01", "2023-01-31"]`). Any other string is refused at the schema with `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED`. |
 
 
@@ -158,7 +158,7 @@ Type: `string[]`
 | **description** | `string` | optional |  |
 | **type** | `Enum<'string' \| 'number' \| 'boolean' \| 'time' \| 'geo'>` | ✅ |  |
 | **sql** | `string` | ✅ | SQL expression or column reference |
-| **granularities** | `Enum<'second' \| 'minute' \| 'hour' \| 'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>[]` | optional |  |
+| **granularities** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>[]` | optional |  |
 
 ### Nested Shape: `Cube.joins[string]`
 
@@ -202,7 +202,7 @@ Type: `string[]`
 | **description** | `string` | optional |  |
 | **type** | `Enum<'string' \| 'number' \| 'boolean' \| 'time' \| 'geo'>` | ✅ |  |
 | **sql** | `string` | ✅ | SQL expression or column reference |
-| **granularities** | `Enum<'second' \| 'minute' \| 'hour' \| 'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>[]` | optional |  |
+| **granularities** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>[]` | optional |  |
 
 
 ---
@@ -240,9 +240,6 @@ Type: `string[]`
 
 ### Allowed Values
 
-* `second`
-* `minute`
-* `hour`
 * `day`
 * `week`
 * `month`

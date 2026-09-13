@@ -38,7 +38,7 @@ import {
   type QuickJSDeferredPromise,
   type QuickJSHandle,
 } from 'quickjs-emscripten';
-import { resolveSandboxTimeoutMs } from '@objectstack/types';
+import { isNativeErrorName, resolveSandboxTimeoutMs } from '@objectstack/types';
 import type { HookBody, ScriptBody, ExpressionBody, HookBodyCapability } from '@objectstack/spec/data';
 import type {
   ScriptContext,
@@ -1366,28 +1366,6 @@ function hostErrorToVm(vm: QuickJSContext, err: unknown): QuickJSHandle {
 const SANDBOX_FAULT_PROP = '__objectstackSandboxFault';
 
 /**
- * [#17265] The ECMA-262 native error constructors, plus SpiderMonkey's
- * `InternalError` which QuickJS also raises — the third copy of one pattern,
- * and deliberately a copy.
- *
- * `packages/rest`'s `isScriptFaultMessage` (`error-response.ts`) is the
- * original and `packages/objectql`'s `isScriptCrash`
- * (`hook-withheld-readonly-fault.ts`) already keeps its own, for the reason
- * stated there: the importing package must not take a dependency on
- * `@objectstack/rest` for a regex. This package's reason is one step narrower —
- * `@objectstack/runtime` DOES depend on `@objectstack/rest`, but that package
- * declares exactly one export subpath (`"."`) and re-exports nothing from
- * `error-response`, so importing the predicate would mean WIDENING rest's
- * published surface for an internal read.
- *
- * ⛔ Same deliberate omission of a bare `Error:` as both siblings: a body's
- * plain `Error` is the documented way to AUTHOR a refusal, so it is never a
- * crash.
- */
-const NATIVE_ERROR_NAME_RE =
-  /^(?:Type|Reference|Range|Syntax|URI|Eval|Internal|Aggregate)Error(?::|$)/;
-
-/**
  * [#17265] The caller-addressed BUSINESS sentence a sandboxed body threw, or
  * `undefined` when this error is not a body's deliberate refusal.
  *
@@ -1400,11 +1378,18 @@ const NATIVE_ERROR_NAME_RE =
  *    threw this deliberately", and by {@link SandboxError}'s contract the thing
  *    a capability denial, a timeout and a marshalling failure all lack. Its
  *    absence is what keeps every #4431 case marked as a fault;
- *  - NOT a native error name (#7543). A nested body that CRASHED arrives in the
- *    identical shape carrying `TypeError: …`, which is an internal fault and
- *    not a sentence addressed to anyone. Dropping this half would turn a nested
- *    crash into a 400 and move the `an unexpected FAULT is a 500` line that
- *    `domains/actions-fault-vs-rejection.test.ts` pins.
+ *  - NOT a native error name (#7543) — {@link isNativeErrorName}
+ *    (`@objectstack/types`, #17681), the ONE reader `packages/rest`'s
+ *    `isScriptFaultMessage` and `packages/objectql`'s `isScriptCrash` also
+ *    call. A nested body that CRASHED arrives in the identical shape carrying
+ *    `TypeError: …`, which is an internal fault and not a sentence addressed to
+ *    anyone. Dropping this half would turn a nested crash into a 400 and move
+ *    the `an unexpected FAULT is a 500` line that
+ *    `domains/actions-fault-vs-rejection.test.ts` pins. ⛔ Do not re-inline the
+ *    pattern: this file used to keep the THIRD copy of it, because the rule
+ *    lived in `@objectstack/rest` and that package publishes one subpath which
+ *    re-exports nothing from `error-response` — a reason about reaching rest,
+ *    which the shared home in a package all three already depend on removes.
  *
  * ⛔ A READ of the field the runner populated, never a pattern-strip of the
  * `<kind> '<name>' threw:` wrapper off `.message` — the sibling's rule, for the
@@ -1414,7 +1399,7 @@ const NATIVE_ERROR_NAME_RE =
 function sandboxRefusalMessage(error: unknown): string | undefined {
   const inner = (error as { innerMessage?: unknown } | null | undefined)?.innerMessage;
   if (typeof inner !== 'string' || !inner) return undefined;
-  if (NATIVE_ERROR_NAME_RE.test(inner.trim())) return undefined;
+  if (isNativeErrorName(inner.trim())) return undefined;
   return inner;
 }
 

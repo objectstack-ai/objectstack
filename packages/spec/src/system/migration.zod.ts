@@ -320,6 +320,39 @@ export function authorisesIrreversibleAction(flag: DataMigrationFlag | null | un
   return isDataMigrationFlagVerified(flag) && !hasObservedDeviation(flag);
 }
 
+/**
+ * Have this deployment's file-family COLUMNS moved to the bare-id encoding?
+ *
+ * The third arbiter over the same row, and the one a storage driver keys its
+ * WRITE encoding on. It is deliberately stronger than
+ * {@link isDataMigrationFlagVerified}: the backfill and its self-check attest
+ * the VALUES, `columns_moved_at` attests the COLUMNS, and a deployment can
+ * carry the first without the second — that is the ordinary state of every
+ * deployment that ran `os migrate files-to-references --apply` before a column
+ * step existed. So the two facts are conjoined here rather than either one
+ * standing alone:
+ *
+ *  - `columns_moved_at` alone would be a column move with no evidence that the
+ *    values inside those columns were ever converted;
+ *  - `verified_at` alone is the key that must NEVER be used — every
+ *    creation-attested store since 17.0 holds it AND JSON-quoted ids in a JSON
+ *    column, so keying on it would read every existing deployment as moved and
+ *    then write bare ids into a JSON column.
+ *
+ * ## Absence is the legacy encoding, and that is the whole safety property
+ *
+ * No row, an unreadable row, a row whose `columns_moved_at` is null or empty,
+ * a row that is not verified — every one of them answers `false`, which is
+ * today's JSON encoding on every deployment in the world. A consumer that
+ * cannot read this fact must assume it is false; the column's own description
+ * says so, and this predicate is where that sentence is executable.
+ */
+export function hasMovedFileColumns(flag: DataMigrationFlag | null | undefined): boolean {
+  if (!isDataMigrationFlagVerified(flag)) return false;
+  const moved = flag?.columns_moved_at;
+  return moved != null && moved !== '';
+}
+
 // --- Migration journal (ADR-0119 D2, #4617) ---
 //
 // The flag above and the journal below answer DIFFERENT questions, and

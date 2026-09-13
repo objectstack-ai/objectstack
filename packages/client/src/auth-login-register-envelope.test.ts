@@ -2,9 +2,12 @@
 //
 // #17234 — `auth.login` and `auth.register` annotate their return as
 // `SessionResponse` (`BaseResponseSchema.extend(…)`, so `success` is a REQUIRED
-// boolean) and delivered a body that never carried `success` at all. Two
-// departures were measured on the card; this suite closes one and PINS the
-// other as a measurement rather than letting it be invented away.
+// boolean, and `data.session` a required `Session`) and delivered a body that
+// carried neither. Two departures were measured on the card; this suite now
+// closes BOTH: `success` (the previous round) and `data.session` (this one —
+// `/sign-in/email` and `/sign-up/email` now attach the session the request
+// itself already committed, read back through `internalAdapter.findSession`;
+// see `session-envelope-completion.ts` in `plugin-auth`).
 //
 // ## Why the server here is the real one
 //
@@ -27,21 +30,22 @@
 // - `① the declared envelope is delivered` — the defect proper. The judge is a
 //   PARSE against the declaration, not a key spot-check.
 // - `② the residue is exhaustive` — `SessionResponseSchema` still does not
-//   parse, for two reasons that are NOT this card's `success`. Pinned as the
-//   complete issue list so a regression on `success` shows up here as an extra
-//   issue instead of hiding inside "it already failed".
+//   parse, for one reason that is NOT this card's: `data.user.image` (#17235).
+//   Pinned as the complete issue list so a regression on `success` OR
+//   `data.session` shows up here as an extra issue instead of hiding inside
+//   "it already failed".
 // - `③ the instrument can still fail` — the negative control. The same parse,
 //   on the same returned value with `success` taken back out, must report
-//   `success` again. Without it, a green ① could equally mean the assertion
-//   broke.
+//   `success` again (and still report the `data.user.image` residue).
+//   Without it, a green ① could equally mean the assertion broke.
 // - `④ the credential survives byte-identical` — the regression this fix could
 //   most easily have caused. `data.token` is the body's own token, and
 //   `client.token` is still armed from it.
-// - `⑤ data.session is not obtainable on these routes` — the card's second
-//   departure, left OPEN deliberately. This block is the measurement that says
-//   why: no session in the body, none in the headers, and the value only
-//   appears on a SECOND call. If better-auth ever starts serving one, this
-//   block reddens and #17234 can be closed properly.
+// - `⑤ data.session is now obtainable on these routes` — the card's second
+//   departure, closed. The session attached is the SAME row a following
+//   `/get-session` would read — not a second one, not an invented one — and a
+//   fabricated body without a `session` member still fails the parse (the
+//   instrument's negative control, criterion 3(a)).
 // - `⑥ the raw keys survive the lift` — callers were pushed onto `.user` /
 //   `.token` by the very misdeclaration this card fixes.
 
@@ -217,27 +221,27 @@ describe('[#17234] auth.login / auth.register deliver the SessionResponse envelo
     });
   });
 
-  describe('② the residue is exhaustive, and `success` is not in it', () => {
-    // Two issues remain on the FULL declared type, and neither is this card's:
+  describe('② the residue is exhaustive, and neither `success` nor `data.session` is in it', () => {
+    // ONE issue remains on the FULL declared type, and it is not this card's:
     //
-    //   data.session    — block ⑤: these routes serve none. #17234 stays open.
     //   data.user.image — `SessionUserSchema.image` is `z.string().optional()`,
     //                     which does not admit `null`, and better-auth serves
     //                     `"image": null` for a user who never set one. Filed
     //                     as #17235, and NOT specific to these two methods.
     //
     // Pinned as the EXHAUSTIVE list rather than as "it still fails": if
-    // `success` ever regresses it reappears here as a third issue and these
-    // cases redden. It is the residue's tripwire, not an acceptance of it.
-    const RESIDUE = ['data.session', 'data.user.image'];
+    // `success` OR `data.session` ever regress they reappear here as extra
+    // issues and these cases redden. It is the residue's tripwire, not an
+    // acceptance of it.
+    const RESIDUE = ['data.user.image'];
 
-    it('register() reports exactly the two issues that are not `success`', async () => {
+    it('register() reports exactly the one issue that is not this card\'s', async () => {
       const { res } = await registered();
       const issues = SessionResponseSchema.safeParse(res).error?.issues ?? [];
       expect(issues.map((i) => i.path.join('.'))).toEqual(RESIDUE);
     });
 
-    it('login() reports exactly the two issues that are not `success`', async () => {
+    it('login() reports exactly the one issue that is not this card\'s', async () => {
       const { res } = await signedIn();
       const issues = SessionResponseSchema.safeParse(res).error?.issues ?? [];
       expect(issues.map((i) => i.path.join('.'))).toEqual(RESIDUE);
@@ -256,11 +260,23 @@ describe('[#17234] auth.login / auth.register deliver the SessionResponse envelo
         success?: unknown;
       };
       const issues = SessionResponseSchema.safeParse(withoutSuccess).error?.issues ?? [];
-      expect(issues.map((i) => i.path.join('.'))).toEqual([
-        'success',
-        'data.session',
-        'data.user.image',
-      ]);
+      expect(issues.map((i) => i.path.join('.'))).toEqual(['success', 'data.user.image']);
+    });
+
+    it('and reports `data.session` again once the fix is taken back out — a fabricated body without a session still fails', async () => {
+      const { res } = await signedIn();
+
+      // The other half of criterion 3(a): the SAME instrument, on a body this
+      // test fabricates rather than one the server returned, with `session`
+      // removed. This is what makes ① and ⑤'s green readings a real assertion
+      // rather than a schema that stopped checking `data.session` at all.
+      const { data, ...rest } = res as unknown as Record<string, unknown> & {
+        data: Record<string, unknown>;
+      };
+      const { session: _droppedSession, ...dataWithoutSession } = data;
+      const issues =
+        SessionResponseSchema.safeParse({ ...rest, data: dataWithoutSession }).error?.issues ?? [];
+      expect(issues.map((i) => i.path.join('.'))).toEqual(['data.session', 'data.user.image']);
     });
   });
 
@@ -312,50 +328,64 @@ describe('[#17234] auth.login / auth.register deliver the SessionResponse envelo
     });
   });
 
-  describe('⑤ `data.session` is not obtainable on these routes — the open half of #17234', () => {
-    it('neither route carries a session in its body', async () => {
+  describe('⑤ `data.session` is now obtainable on these routes — #17234 closes', () => {
+    it('both routes now carry a session in the body, alongside the pre-existing keys', async () => {
       const reg = await registered();
-      expect(Object.keys(reg.wireBody as object)).toEqual(['token', 'user']);
-      expect(reg.res.data.session).toBeUndefined();
+      expect(Object.keys(reg.wireBody as object)).toEqual(['token', 'user', 'session']);
+      expect(reg.res.data.session).toBeTruthy();
 
       const log = await signedIn();
-      expect(Object.keys(log.wireBody as object)).toEqual(['redirect', 'token', 'user']);
-      expect(log.res.data.session).toBeUndefined();
+      expect(Object.keys(log.wireBody as object)).toEqual(['redirect', 'token', 'user', 'session']);
+      expect(log.res.data.session).toBeTruthy();
     });
 
-    it('nor in any response header — the only credential carrier is a bare token', async () => {
-      const { wireRes } = await signedIn();
-      const names = [...wireRes.headers.keys()];
-      // Nothing header-side is named for a session payload…
-      expect(names.filter((n) => /session/i.test(n))).toEqual([]);
-      // …and the one header that does carry a credential carries a STRING, not
-      // a session object: no `id`, no `expiresAt`, nothing `SessionSchema`
-      // would accept. So deriving `data.session` from the headers is not an
-      // option that was overlooked.
-      const signed = wireRes.headers.get('set-auth-token') ?? '';
-      expect(signed).toBeTruthy();
-      expect(signed.trimStart().startsWith('{')).toBe(false);
-      expect(SessionSchema.safeParse(signed).success).toBe(false);
+    it('the session parses as the declared SessionSchema and names the right user', async () => {
+      const reg = await registered();
+      const regSession = SessionSchema.safeParse(reg.res.data.session);
+      expect(
+        regSession.success,
+        `register()'s data.session did not parse: ${JSON.stringify(regSession.error?.issues)}`,
+      ).toBe(true);
+      expect(reg.res.data.session?.userId).toBe(reg.res.data.user?.id);
+
+      const log = await signedIn();
+      const logSession = SessionSchema.safeParse(log.res.data.session);
+      expect(
+        logSession.success,
+        `login()'s data.session did not parse: ${JSON.stringify(logSession.error?.issues)}`,
+      ).toBe(true);
+      expect(log.res.data.session?.userId).toBe(log.res.data.user?.id);
     });
 
-    it('the session exists only one NETWORK CALL later, via /get-session', async () => {
+    it('is the SAME row a following /get-session reads — a lookup, not an invention', async () => {
       const { client, res } = await signedIn();
 
-      // The positive leg, and the whole reason this card stays open: the value
-      // the declared type names is real and reachable — just not on this route.
-      // Satisfying `data.session` here would mean either a second round trip
-      // inside `login()` (a behaviour change no ruling has authorised) or a
-      // fabricated id and expiry (forbidden outright).
+      // The decisive proof that this is a READ: a second, independent call
+      // through better-auth's own `/get-session` route names the identical
+      // session id and expiry as the one attached to the sign-in response —
+      // one row, read twice, not two arrangements that happen to agree.
       const me = await client.auth.me();
-      const session = SessionSchema.safeParse(me.data.session);
-      expect(
-        session.success,
-        `/get-session did not serve a parseable session: ${JSON.stringify(session.error?.issues)}`,
-      ).toBe(true);
-      expect(me.data.session?.userId).toBe(res.data.user?.id);
-      // …and it really is absent from the sign-in answer, so the two readings
-      // above are about one session and not two arrangements.
-      expect(res.data.session).toBeUndefined();
+      expect(me.data.session?.id).toBe(res.data.session?.id);
+      expect(me.data.session?.expiresAt).toBe(res.data.session?.expiresAt);
+      expect(me.data.session?.userId).toBe(res.data.session?.userId);
+    });
+
+    it('the session token is the SAME unsigned credential the body already carried at `data.token`', async () => {
+      const { res } = await signedIn();
+      // `session.token` is the row's own token column — the same unsigned
+      // string `data.token` already held before this card, not a second
+      // credential this fix introduced.
+      expect(res.data.session?.token).toBe(res.data.token);
+    });
+
+    it('criterion 3(a): a fabricated body with no session still fails SessionSchema', async () => {
+      // The negative control on this instrument specifically: SessionSchema
+      // itself must still be capable of failing, so a green reading above
+      // cannot equally mean the schema stopped checking `id` / `expiresAt` /
+      // `userId` at all.
+      expect(SessionSchema.safeParse(undefined).success).toBe(false);
+      expect(SessionSchema.safeParse({}).success).toBe(false);
+      expect(SessionSchema.safeParse({ id: 'x' }).success).toBe(false); // missing expiresAt, userId
     });
   });
 

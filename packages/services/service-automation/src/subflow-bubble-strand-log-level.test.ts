@@ -38,8 +38,14 @@
  * sibling pins for the same two seams live in `engine-residual-log-cause.test.ts`
  * (sites 12 and 13), which is where the #6499 message-shape half is held.
  *
- * ⚠️ This is the LOG half only. What the child's resumer is TOLD is unchanged
- * and still reads as full success; see `#15556` for that open decision.
+ * This is the LOG half only, and it is UNCHANGED by the #16472 family ruling
+ * that closed #15556's open decision: the door's status code does not move,
+ * so what the child's resumer is TOLD still reads `resumed: true` here. What
+ * changed lives one package over, in `plugin-approvals`'s
+ * `subflow-hosted-approval-strand.test.ts` — the decision result now ALSO
+ * carries the strand as `resumeFailure`, read via
+ * `AutomationEngine.takeSubflowParentStrand` (added for exactly this), a
+ * sibling channel to the log line pinned below, not a replacement for it.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';

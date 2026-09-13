@@ -17,6 +17,7 @@ import { RETIRED_PAGE_COMPONENT_TYPES } from './page.zod';
 // shared source rather than re-spelled here (#6276).
 import { SortItemSchema } from '../shared/enums.zod';
 import { strictObject } from '../shared/strict-object';
+import { ruleArrayFilterError } from './filter-rule-array';
 import type { KeySetGuidance } from '../shared/suggestions.zod';
 // [#13855] The section → field-group reference form, shared with
 // `FormSectionSchema` (view.zod.ts) so one mixing rule serves both escape hatches.
@@ -1850,7 +1851,12 @@ export const ElementNumberPropsSchema = lazySchema(() => strictObject({
    * array, by design). The record form is refused at `filter`; the migration
    * prescription is the `element-number-filter-rule-array` semantic entry.
    */
-  filter: z.array(ViewFilterRuleSchema).optional()
+  filter: z.array(ViewFilterRuleSchema, {
+    error: ruleArrayFilterError({
+      surface: 'this `element:number`',
+      migration: 'element-number-filter-rule-array',
+    }),
+  }).optional()
     .describe('Filter rules narrowing the aggregate — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` input in this map shares. The MongoDB-style record form is refused — see migration `element-number-filter-rule-array`'),
   format: z.enum(['number', 'currency', 'percent']).optional().describe('Number display format'),
   prefix: z.string().optional().describe('Prefix text (e.g. "$")'),
@@ -2230,7 +2236,12 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
    * (`ds.filter ?? props.filter`) is `ElementDataSourceSchema`'s key, not this
    * entry's subject.
    */
-  filter: z.array(ViewFilterRuleSchema).optional()
+  filter: z.array(ViewFilterRuleSchema, {
+    error: ruleArrayFilterError({
+      surface: 'this `element:record_picker`',
+      migration: 'element-record-picker-filter-rule-array',
+    }),
+  }).optional()
     .describe('Filter rules narrowing which records the picker offers — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography the array-declared `filter` doors of this map share. The MongoDB-style record form is refused — see migration `element-record-picker-filter-rule-array`. The binding-level `dataSource.filter` wins outright when both are set'),
   /**
    * Row order (#6276). The flat shorthand for `dataSource.sort`, and the same
@@ -2491,7 +2502,12 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * `filter`; the migration prescription is the
    * `element-data-source-and-object-block-filter-rule-array` semantic entry.
    */
-  filter: z.array(ViewFilterRuleSchema).optional()
+  filter: z.array(ViewFilterRuleSchema, {
+    error: ruleArrayFilterError({
+      surface: 'this `object-grid`',
+      migration: 'element-data-source-and-object-block-filter-rule-array',
+    }),
+  }).optional()
     .describe('Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. THE key, singular — not the plural misspelling. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array`'),
   defaultFilters: z.unknown().optional()
     .describe('Legacy base-filter fallback, read only when `filter` is absent. Prefer `filter`'),
@@ -2705,7 +2721,12 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * at `filter`; see migration
    * `element-data-source-and-object-block-filter-rule-array`.
    */
-  filter: z.array(ViewFilterRuleSchema).optional()
+  filter: z.array(ViewFilterRuleSchema, {
+    error: ruleArrayFilterError({
+      surface: 'this `object-metric`',
+      migration: 'element-data-source-and-object-block-filter-rule-array',
+    }),
+  }).optional()
     .describe('Filter the aggregation is scoped by — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array`'),
   format: z.string().optional().describe("Number format pattern (e.g. '0,0', '$0,0', '0%')"),
   currency: z.string().optional().describe("ISO currency code (e.g. 'USD') — enables currency formatting"),
@@ -2777,7 +2798,12 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * `filter`; see migration
    * `element-data-source-and-object-block-filter-rule-array`.
    */
-  filter: z.array(ViewFilterRuleSchema).optional()
+  filter: z.array(ViewFilterRuleSchema, {
+    error: ruleArrayFilterError({
+      surface: 'this `object-kanban`',
+      migration: 'element-data-source-and-object-block-filter-rule-array',
+    }),
+  }).optional()
     .describe('Base query filter, handed to the wire `$filter` — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array`'),
   /**
    * Row cap (#16503 — the spec half of objectui#8172; decision batch #68,
@@ -2928,7 +2954,12 @@ export const ObjectCalendarPropsSchema = lazySchema(() => strictObject({
    * `filter`; see migration
    * `element-data-source-and-object-block-filter-rule-array`.
    */
-  filter: z.array(ViewFilterRuleSchema).optional()
+  filter: z.array(ViewFilterRuleSchema, {
+    error: ruleArrayFilterError({
+      surface: 'this `object-calendar`',
+      migration: 'element-data-source-and-object-block-filter-rule-array',
+    }),
+  }).optional()
     .describe('Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array`'),
   /**
    * Row order for the fetched events — the same `SortItem` ARRAY form

@@ -35,13 +35,20 @@
  * have written the orphan too. Every case here therefore reads the real
  * directory the real command wrote.
  *
- * ⚠️ Symptom 1 as the card diagnosed it — an `apps.*` provenance record being
- * FILTERED OUT — does not occur, and the third case below is the measurement
- * that says so rather than a pin of a repair. The provenance table is built by
- * `collectFilledFromHashes`, which walks `GENERATED_SECTIONS`
- * (`['objects', 'metadataForms']`) in `@objectstack/platform-objects`, so an
- * `apps.*` record never enters the table to be dropped. What the derived list
- * buys is that the caller's statement stops being true by coincidence.
+ * ⚠️ Symptom 1 as #16242 diagnosed it — an `apps.*` provenance record being
+ * FILTERED OUT — never occurred and still does not. That mechanism is
+ * falsified, and it is NOT what #16872 later fixed: keep the two apart, which
+ * is the whole reason #16872 exists as its own card.
+ *
+ * What changed under #16872 is the POPULATION, one layer up from the
+ * narrowing. `collectFilledFromHashes` used to walk the fixed
+ * `GENERATED_SECTIONS` (`['objects', 'metadataForms']`), so an `apps.*` record
+ * never entered the table AT ALL — not dropped, never written. It now walks
+ * the sections the RUN generated, so under `--no-objects-only` a filled
+ * `apps.*` leaf is recorded like any other source copy, and the third case
+ * below asserts exactly that. The narrowing still decides which of those
+ * records is COMMITTED, and the derived list is what keeps the caller's
+ * statement from being true by coincidence.
  *
  * ## Tier, and why the name carries no `.e2e`
  *
@@ -239,18 +246,28 @@ describe('os i18n extract — the provenance companion accompanies a module (#16
    * The same table survives the multi-section stack module, where the caller now
    * commits `objects` AND `apps` instead of naming one literal.
    *
-   * ⚠️ Two records, not three. `apps.kpi.label` IS a leaf of the emitted module
-   * and it has no provenance record — but it is not narrowed away, it is never
-   * recorded: `collectFilledFromHashes` walks `GENERATED_SECTIONS`, and `apps`
-   * is a HAND_AUTHORED section judged by a different predicate against a
-   * different, hand-maintained file. So this case pins the measurement, not a
-   * repair, and its number would not move if the section list were reverted.
+   * ⭐ THREE records, and the third is the point. This case read TWO until
+   * #16872, and its docblock then said so as a MEASUREMENT rather than a pin of
+   * a repair — `apps.kpi.label` was a leaf of the emitted module with no
+   * provenance record, not narrowed away but never recorded. It is recorded
+   * now: the population `collectFilledFromHashes` walks is the one the run
+   * generated, and this run generated `apps`.
+   *
+   * ⚠️ The record is legitimate precisely because the module BESIDE it
+   * commits that leaf — the contract the narrowing exists to keep ("a record
+   * describes the leaf sitting in a bundle beside it"). Under the default
+   * `--objects-only` the case above still reads TWO, because there the stack
+   * module is not emitted and the narrowing drops the `apps` record. The two
+   * cases together are what say the fix moved the armed path and not the live
+   * one. ⛔ If this ever reads two again, the population was reverted — do not
+   * "fix" it by editing this number.
    */
-  it('keeps every objects record when the stack module commits several sections', () => {
+  it('records every generated leaf when the stack module commits several sections', () => {
     const run = runExtract('stack', CONFIG, ['--no-objects-only', '--no-metadata-forms']);
 
     expect(leavesOnDisk(run.dir, 'ja-JP.objects.generated.ts')).toBe(3);
     expect(companionKeys(run.dir)).toEqual([
+      'apps.kpi.label',
       'objects.kpi_metric.fields.name.label',
       'objects.kpi_metric.label',
     ]);

@@ -47,7 +47,7 @@
 // exists to retire, and would stay green when the engine changes.
 
 import { HttpDispatcher, type ObjectKernel, type HttpProtocolContext } from '@objectstack/runtime';
-import type { ExecutionContext } from '@objectstack/spec/kernel';
+import { SEED_WRITE_EXECUTION_CONTEXT, type ExecutionContext } from '@objectstack/spec/kernel';
 import type { ValidateDataResponse } from '@objectstack/spec/api';
 import type { AutomationResult } from '@objectstack/spec/contracts';
 import type { ServiceObject } from '@objectstack/spec/data';
@@ -238,12 +238,12 @@ export interface VerifyHandle {
 const API_PREFIX = '/api/v1';
 
 /**
- * The write context `AppPlugin` uses to replay a stack's declared `data[]`
- * (`packages/runtime/src/app-plugin.ts`, `SEED_WRITE_OPTIONS`). Spelled here
- * because the runtime keeps that constant module-private; the three flags are
- * the engine's own documented `ExecutionContext` keys, not a dialect.
+ * The write context `AppPlugin` uses to replay a stack's declared `data[]` —
+ * read from the kernel's own {@link SEED_WRITE_EXECUTION_CONTEXT} rather than
+ * re-spelled here, so this fixture writer cannot drift from the seed posture
+ * the platform actually replays with (#17178).
  */
-const SEED_CONTEXT: ExecutionContext = { isSystem: true, skipTriggers: true, seedReplay: true } as ExecutionContext;
+const SEED_CONTEXT: ExecutionContext = SEED_WRITE_EXECUTION_CONTEXT;
 const SYSTEM_CONTEXT: ExecutionContext = { isSystem: true } as ExecutionContext;
 
 function refusalFrom(status: number, body: unknown, fallback: string): VerifyRefusal {

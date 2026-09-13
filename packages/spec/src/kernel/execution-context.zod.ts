@@ -433,3 +433,42 @@ export type ExecutionContext = z.input<typeof ExecutionContextSchema>;
 /** Post-parse shape of {@link ExecutionContext} — defaults applied, transforms run (ADR-0122). */
 export type ExecutionContextParsed = z.infer<typeof ExecutionContextSchema>;
 
+
+/**
+ * The execution context EVERY seed write must use — the one spelling of the
+ * seed-write posture, so a seeder reads it instead of re-deriving it.
+ *
+ * Three flags, and the combination is load-bearing rather than cosmetic:
+ *
+ *   - {@link skipTriggers} is what suppresses record-change AUTOMATION for seed
+ *     rows. A seed is pre-existing END-STATE data, not a stream of user events,
+ *     so firing on-create/on-update flows (notifications, escalations,
+ *     assignments, approvals) for it is semantically wrong. **{@link isSystem}
+ *     alone does NOT suppress dispatch** — only this flag does — and a seed
+ *     path that omitted it once seeded with automation live while the main path
+ *     had it suppressed, a self-trigger loop that wedged first boot (#3760).
+ *   - {@link isSystem} elevates past permission/RLS enforcement and disables
+ *     the SecurityPlugin's auto-injection of `organization_id` / `owner_id`:
+ *     seeds declare those per record, or are intentionally global.
+ *   - {@link seedReplay} (#3433) exempts the write from the object's
+ *     `state_machine` rule, entry check and transitions both, because a seed is
+ *     a snapshot of established facts. Every OTHER validation still runs.
+ *
+ * Because divergence between copies of this value re-opens a boot-wedging
+ * defect, it is declared HERE — beside the {@link ExecutionContext} contract
+ * whose keys it sets — rather than privately per seeder (#17178). It is the
+ * INNER context, deliberately: a seeder composes it into whatever options bag
+ * its call takes (`{ context: SEED_WRITE_EXECUTION_CONTEXT }`), on insert or on
+ * any other operation. ⛔ No options-bag or helper wrapper is exported around
+ * it — the bag belongs to the call site, the posture belongs here.
+ *
+ * Known readers: `SeedLoaderService.SEED_OPTIONS`
+ * (`@objectstack/metadata-protocol`), `AppPlugin`'s `SEED_WRITE_OPTIONS`
+ * (`@objectstack/runtime`, replaying a stack's declared `data[]`) and
+ * `@objectstack/verify`'s `seed(object, rows)` fixture writer.
+ */
+export const SEED_WRITE_EXECUTION_CONTEXT = {
+  isSystem: true,
+  skipTriggers: true,
+  seedReplay: true,
+} as const satisfies ExecutionContext;

@@ -44,9 +44,9 @@
 - reviewers/title/body/labels 的单字段调用同坑,曾把治理面 draft 发布进合并队列。
 - 请审专用路 = REST `POST /pulls/{n}/requested_reviewers`,载荷只有 reviewers/team_reviewers。
 - 它不碰 draft 位;门开席位优先走它,MCP-only 席才用 update 加显式 `draft: true`。
-- undraft 可用路径只有 MCP 这条:传 `draft: false` 落地。
-- 裸 GraphQL 在会话内被拒,它建议的改用 REST 对 undraft 是错的。
-- 裸 REST `PATCH /pulls/{n}` 传 `draft: false` 回 200 而无操作 ⇒ 接口性质,池 0 只能等重置。
+- undraft 两条通道:席位凭据走 `POST .../pulls/{n}/ccr/ready_for_review`,MCP 传 `draft: false`。
+- 2026-09-12 两席实调:裸 GraphQL 会话内被拒,建议的 REST 正是 ccr 路 ⇒ 池 0 不再只能等重置。
+- ⛔ 裸 `PATCH /pulls/{n}` 传 `draft: false` 回 200 而无操作(2026-09-11);读回才作数:`GET /pulls/{n}`。
 - `enable_pr_auto_merge` 恒显式传 `mergeMethod: "SQUASH"`;不传静默退回被禁的 merge-commit = 无操作。
 - 它存的方法恒为 `merge`,不论请求了什么;REST `auto_merge.merge_method` 读回 `merge`。
 - 仓库 `allow_merge_commit:false` 时同样读回 `merge`;无 REST 端点设该方法。

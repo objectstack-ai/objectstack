@@ -1,0 +1,11 @@
+---
+'@objectstack/metadata-protocol': patch
+---
+
+Execute the read-probe's PostgreSQL catalog arm against a live server, closing the one dialect this package pinned as text and never ran.
+
+`read-probe.ts` compiles one non-raising table-presence arm per dialect family. Two were executed against something real — SQLite end to end through a real `SqlDriver`, MySQL on the live server the `Temporal Conformance` job provisions. The PostgreSQL arm (`SELECT 1 WHERE to_regclass('"<table>"') IS NOT NULL`) was pinned character-for-character against all four knex client spellings and run nowhere: this package had no live-PG harness, no `pg` dependency, and its CI step supplied `OS_TEST_MYSQL_URL` alone while filtering vitest to `live-mysql`.
+
+A text pin cannot close that gap, because the failure this module is fenced against is an arm mis-compiled for one dialect: it raises, the `catch` that exists for the expected miss swallows it, and a stored-row data repair silently becomes a no-op. Whether `to_regclass` answers ZERO ROWS rather than raising is a claim about PostgreSQL, not about this repo's string concatenation. `seed-tenancy-backfill.live-postgres.test.ts` now runs every statement the migration builds, both presence directions with the refusal control beside them, the search-path scoping the arm depends on, and the whole backfill end to end — on a live server, in its own derived schema. Ablated (the Postgres arm re-compiled to MySQL's `DATABASE()` form), six of its seven cases go red, reporting `verdict: 'unreadable'` with `detail: "function database() does not exist"` — the exact shape the fence exists to keep out of `'absent'`.
+
+Grade: `patch`, measured rather than defaulted. Not `minor` — no new export, no widened accept-set, no runtime behaviour change of any kind. Not `skip-changeset` either, and that is the measurement worth recording: `dist/` is byte-untouched (grepped for this change's markers: zero hits, against a positive control that hits `dist/index.js` and `dist/index.cjs`), but `package.json` is one of the 27 files `npm pack` ships, and it now carries `pg` and `@types/pg` in `devDependencies`. `skip-changeset` is for a diff that publishes nothing from a released package; this one publishes two manifest lines a consumer never installs, which is still publishing.
