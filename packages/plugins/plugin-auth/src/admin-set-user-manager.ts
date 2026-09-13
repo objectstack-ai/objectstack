@@ -179,13 +179,39 @@ void _assignableToEndpointResult;
 
 type UserRow = { id?: unknown; manager_id?: unknown; source?: unknown };
 
-function refuse(
+/**
+ * A refusal BEFORE it is dressed as an HTTP envelope.
+ *
+ * {@link applyUserManagerLink} answers in this shape so a caller that is not an
+ * HTTP request — the bulk importer's second pass (#18028) — routes the very
+ * same predicates onto its own per-row channel. ⛔ A second copy of the five
+ * refusals inside the importer is the drift #15706 already cost this platform
+ * once; there is ONE derivation and this is it.
+ */
+export interface SetUserManagerRefusal {
+  status: number;
+  code: string;
+  reason: SetUserManagerRefusalReason;
+  message: string;
+}
+
+function deny(
   status: number,
   code: string,
   reason: SetUserManagerRefusalReason,
   message: string,
-): SetUserManagerResult {
-  return { status, body: { success: false, error: { code, message, details: { reason } } } };
+): SetUserManagerRefusal {
+  return { status, code, reason, message };
+}
+
+function envelope(refusal: SetUserManagerRefusal): SetUserManagerResult {
+  return {
+    status: refusal.status,
+    body: {
+      success: false,
+      error: { code: refusal.code, message: refusal.message, details: { reason: refusal.reason } },
+    },
+  };
 }
 
 async function parseJson(request: Request): Promise<Record<string, unknown>> {
@@ -339,32 +365,64 @@ export async function runSetUserManager(
 
   const rawUserId = readId(body, 'userId', 'user_id');
   if (typeof rawUserId !== 'string' || rawUserId.length === 0) {
-    return refuse(400, 'INVALID_REQUEST', 'invalid_body', 'userId is required');
+    return envelope(deny(400, 'INVALID_REQUEST', 'invalid_body', 'userId is required'));
   }
   const userId = rawUserId;
 
   const rawManagerId = readId(body, 'managerId', 'manager_id');
   if (rawManagerId === undefined) {
-    return refuse(
+    return envelope(deny(
       400,
       'INVALID_REQUEST',
       'invalid_body',
       'managerId is required — send null to clear the link, never omit the key',
-    );
+    ));
   }
   if (rawManagerId !== null && (typeof rawManagerId !== 'string' || rawManagerId.length === 0)) {
-    return refuse(
+    return envelope(deny(
       400,
       'INVALID_REQUEST',
       'invalid_body',
       'managerId must be a non-empty user id, or null to clear the link',
-    );
+    ));
   }
   const managerId: string | null = rawManagerId;
 
+  const refusal = await applyUserManagerLink(deps, userId, managerId);
+  if (refusal) return envelope(refusal);
+
+  return {
+    status: 200,
+    body: { success: true, data: { userId, managerId, setBy: actor.id } },
+  };
+}
+
+/**
+ * The ruled refusals and — when they all pass — the write, applied to ONE
+ * `(user, manager)` pair. The seam #18028 needed: `runSetUserManager` is this
+ * function plus body parsing and an HTTP envelope, and the bulk importer's
+ * second pass is this function called once per row.
+ *
+ * Answers `null` when the link was written, or the {@link SetUserManagerRefusal}
+ * that stopped it. Every refusal keeps its `status` and `error.code` so a
+ * caller with an HTTP envelope to fill can render it unchanged, and every
+ * caller that has some other channel — a `rows[]` report, say — still gets the
+ * one discriminator that matters (`reason`) without restating a predicate.
+ *
+ * ⚠️ The caller is responsible for AUTHORIZATION. This function has no view of
+ * who is asking: `runSetUserManager` is reached only through the mount's
+ * ADR-0068 platform-admin gate, and the importer is reached only through the
+ * identical gate on `/admin/import-users`. ⛔ Never call it from a surface that
+ * is not already admin-gated.
+ */
+export async function applyUserManagerLink(
+  deps: SetUserManagerDeps,
+  userId: string,
+  managerId: string | null,
+): Promise<SetUserManagerRefusal | null> {
   const engine = deps.getDataEngine();
   if (!engine) {
-    return refuse(
+    return deny(
       503,
       'SERVICE_UNAVAILABLE',
       'engine_unavailable',
@@ -374,13 +432,13 @@ export async function runSetUserManager(
 
   const user = await findUser(engine, userId);
   if (!user) {
-    return refuse(404, 'RESOURCE_NOT_FOUND', 'user_not_found', 'User not found');
+    return deny(404, 'RESOURCE_NOT_FOUND', 'user_not_found', 'User not found');
   }
 
   // Refusal 5 — the directory owns this identity. Applied to the CLEAR as
   // well as the set: both are writes the next sync would overwrite.
   if (String(user.source ?? '') === 'idp_provisioned') {
-    return refuse(
+    return deny(
       403,
       'PERMISSION_DENIED',
       'idp_provisioned',
@@ -393,7 +451,7 @@ export async function runSetUserManager(
   if (managerId !== null) {
     // Refusal 1 — self-assignment.
     if (managerId === userId) {
-      return refuse(
+      return deny(
         400,
         'INVALID_FIELD',
         'self_assignment',
@@ -404,7 +462,7 @@ export async function runSetUserManager(
 
     const manager = await findUser(engine, managerId);
     if (!manager) {
-      return refuse(
+      return deny(
         400,
         'INVALID_REFERENCE',
         'manager_not_found',
@@ -415,7 +473,7 @@ export async function runSetUserManager(
     // Refusal 4 — cross-organization.
     const screen = await screenCrossOrganization(deps, engine, userId, managerId);
     if (screen.outside) {
-      return refuse(
+      return deny(
         400,
         'INVALID_REFERENCE',
         'cross_organization',
@@ -429,7 +487,7 @@ export async function runSetUserManager(
     // Refusals 2 and 3 — cycle and depth, in one walk.
     const walk = await walkChain(engine, managerId, userId);
     if (walk.kind === 'cycle') {
-      return refuse(
+      return deny(
         409,
         'RESOURCE_CONFLICT',
         'cycle',
@@ -439,7 +497,7 @@ export async function runSetUserManager(
       );
     }
     if (walk.kind === 'existing_loop') {
-      return refuse(
+      return deny(
         409,
         'RESOURCE_CONFLICT',
         'cycle',
@@ -449,7 +507,7 @@ export async function runSetUserManager(
       );
     }
     if (walk.kind === 'too_deep') {
-      return refuse(
+      return deny(
         400,
         'VALUE_OUT_OF_RANGE',
         'max_depth_exceeded',
@@ -469,8 +527,5 @@ export async function runSetUserManager(
   const context = await authSystemWriteContext();
   await engine.update('sys_user', { id: userId, manager_id: managerId }, { context });
 
-  return {
-    status: 200,
-    body: { success: true, data: { userId, managerId, setBy: actor.id } },
-  };
+  return null;
 }

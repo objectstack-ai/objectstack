@@ -63,6 +63,40 @@
  *  - Upsert updates only touch profile fields (UPDATE_ALLOWED_FIELDS);
  *    credentials and the email identity are never modified on update, so a
  *    re-imported CSV can never silently reset an existing user's password.
+ *
+ * ## `manager_id` — admitted, and resolved in a SECOND pass (#18028)
+ *
+ * Ruling `5651634638` row 7: the import tier admits `manager_id`, resolved in a
+ * second pass keyed on the importer's identity key, with every row-level
+ * refusal of the admin write surface applied and an unresolved key reported as
+ * a PER-ROW error.
+ *
+ *  - **What the column holds is an identity key, not a user id.** A CSV author
+ *    has the manager's email or phone, never their `usr_…` id, so the cell is
+ *    read with the same key this importer already keys rows by — one key, ⛔ not
+ *    a second one invented for this column.
+ *  - **Why the pass is SECOND and not inline.** A manager named in row 40 may
+ *    be created by row 90. Resolving inside `createData` would refuse valid
+ *    input whenever the file is not topologically ordered, which no export
+ *    guarantees. So the column is stripped from the row before the write
+ *    (⛔ it never reaches `createData` / `updateData`, and ⛔ it is not added to
+ *    UPDATE_ALLOWED_FIELDS) and the links are applied after `runImport` has
+ *    returned, when every row in the batch exists.
+ *  - **Where the refusals come from.** `applyUserManagerLink` — the same
+ *    derivation `POST /admin/set-user-manager` runs, imported, ⛔ never copied.
+ *    Self-assignment, cycle, depth cap, cross-organization and directory-owned
+ *    identity are that function's to answer, and the refusal it returns is
+ *    reported on the row rather than re-worded here.
+ *  - **A manager problem never costs the row its identity.** The user is
+ *    created either way and the failure rides `rows[].code` / `rows[].error`,
+ *    exactly like the sibling post-write `INVITE_EMAIL_FAILED`; `rows[].manager`
+ *    carries the machine-readable outcome in `rows[].delivery`'s shape. ⛔ Not a
+ *    whole-import failure, and ⛔ not a silent skip.
+ *  - **The pass does not run on `dryRun`.** It is a post-write pass like
+ *    delivery: with nothing created there are no ids to link, and the five
+ *    refusals cannot be evaluated against rows that do not exist. A dry run
+ *    reports `manager: { linked: 0, unresolved: 0, refused: 0 }` and says
+ *    nothing about the links — ⛔ rather than half-answering.
  */
 
 import type {
@@ -74,8 +108,23 @@ import { prepareImportRequest, runImport } from '@objectstack/rest';
 import { generatePlaceholderEmail, isPlaceholderEmail } from './placeholder-email.js';
 import { generateTemporaryPassword, normalizePhoneNumber, isLikelyEmail, type AdminActor, type EndpointResult } from './admin-user-endpoints.js';
 import { SYS_USER_IMPORT_UPDATE_FIELDS } from './sys-user-writable-fields.js';
+import {
+  applyUserManagerLink,
+  type SetUserManagerDeps,
+  type SetUserManagerRefusalReason,
+} from './admin-set-user-manager.js';
 
 export const IMPORT_USERS_MAX_ROWS = 500;
+
+/**
+ * The column a row names its manager in. Its value is the MANAGER'S IDENTITY
+ * KEY — an email or a phone number, the same two the importer keys rows by.
+ *
+ * One spelling, deliberately. The phone column's three historical aliases
+ * (`phone_number` / `phoneNumber` / `phone`) are debt this key does not
+ * inherit: Prime Directive #12 refuses a new dialect on an internal contract.
+ */
+const MANAGER_COLUMN = 'manager_id';
 
 /**
  * Profile fields an upsert row may modify on an EXISTING user — shared with
@@ -249,6 +298,88 @@ function identityKey(email?: string, phone?: string): string {
   return '';
 }
 
+/**
+ * A row's manager outcome — the machine-readable half, carried in
+ * `rows[].delivery`'s shape rather than dug out of a message.
+ *
+ * `'linked'` and `'unresolved'` are this importer's two answers; every other
+ * member is a {@link SetUserManagerRefusalReason} produced by the shared
+ * derivation and passed through verbatim, so the importer and
+ * `POST /admin/set-user-manager` discriminate refusals identically.
+ */
+export type ImportManagerOutcome = 'linked' | 'unresolved' | SetUserManagerRefusalReason;
+
+/**
+ * One row of the endpoint's `data.rows[]` — the generic import row plus the
+ * three things this identity surface adds to it. Named because callers read
+ * `manager` and `delivery` to decide what to show an operator, and an inline
+ * type on one `const` is not something a Console can import.
+ */
+export interface IdentityImportRowResult extends ImportRowResult {
+  /** Returned ONCE, never persisted — `temporary` rows only. */
+  temporaryPassword?: string;
+  /** How this created row's credential was delivered. */
+  delivery?: 'email' | 'sms' | 'temporary';
+  /**
+   * Present only on rows that named a manager. Absent means the row's
+   * {@link MANAGER_COLUMN} cell was empty — ⛔ never "the link silently failed".
+   */
+  manager?: ImportManagerOutcome;
+}
+
+/**
+ * Stamp a row's manager failure.
+ *
+ * `manager` is ALWAYS set — that is this outcome's own channel. `code`/`error`
+ * is the SHARED row error channel the sibling `INVITE_EMAIL_FAILED` also writes
+ * to, so it is claimed only when free: a row whose invitation already failed
+ * keeps that report and still carries its manager verdict on `manager`,
+ * ⛔ rather than one of the two failures overwriting the other into silence.
+ */
+function noteManagerFailure(
+  row: IdentityImportRowResult,
+  outcome: ImportManagerOutcome,
+  code: string,
+  message: string,
+): void {
+  row.manager = outcome;
+  if (row.code === undefined) {
+    row.code = code;
+    row.error = message;
+  }
+}
+
+/**
+ * A manager cell, read as an identity key.
+ *
+ * `'absent'` = the cell was empty, which is not a problem and is not reported.
+ * `'unreadable'` = it held something that is neither an email nor (where the
+ * phoneNumber plugin is wired) a phone number — reported per row, because a
+ * typo in a manager cell must never pass for "this user has no manager".
+ */
+interface ManagerKeyRef {
+  /** The `identityKey()` spelling — `e:<email>` or `p:<phone>`. */
+  key: string;
+  email?: string;
+  phone?: string;
+}
+
+function resolveManagerKey(
+  raw: unknown,
+  phoneEnabled: boolean,
+): ManagerKeyRef | 'absent' | 'unreadable' {
+  const value = typeof raw === 'string' ? raw.trim() : '';
+  if (value.length === 0) return 'absent';
+  if (isLikelyEmail(value)) {
+    const email = value.toLowerCase();
+    return { key: identityKey(email, undefined), email };
+  }
+  if (!phoneEnabled) return 'unreadable';
+  const phone = normalizePhoneNumber(value);
+  if (!phone) return 'unreadable';
+  return { key: identityKey(undefined, phone), phone };
+}
+
 export async function runAdminImportUsers(
   deps: IdentityImportDeps,
   request: Request,
@@ -317,15 +448,25 @@ export async function runAdminImportUsers(
 
   // ── Identity pre-validation (runs for dryRun too) ────────────────────
   const phoneEnabled = deps.phoneNumberEnabled();
-  const results: Array<ImportRowResult & { temporaryPassword?: string; delivery?: 'email' | 'sms' | 'temporary' }> = new Array(prepared.rows.length);
+  const results: IdentityImportRowResult[] = new Array(prepared.rows.length);
   const validRows: Array<Record<string, any>> = [];
   const validIndex: number[] = [];
   // Per-row delivery plan, keyed by identity so createData (which sees a
   // coerced COPY of the row, not the original object) can look it up. `auto`
   // decides each row here; every other policy resolves the same plan for all.
   const planByKey = new Map<string, RowPlan>();
+  // [#18028] The manager cell each row named, and that row's own identity —
+  // both indexed by ORIGINAL row number, which is what the second pass walks.
+  // `undefined` in `managerWanted` means the row named nobody.
+  const managerWanted: Array<ManagerKeyRef | 'unreadable' | undefined> = new Array(prepared.rows.length);
+  const rowIdentities: Array<RowIdentity | undefined> = new Array(prepared.rows.length);
   for (let i = 0; i < prepared.rows.length; i++) {
     const row = { ...prepared.rows[i] };
+    // [#18028] Read the manager cell and STRIP it before anything else sees the
+    // row: it holds an identity key, so leaving it in place would hand a lookup
+    // column an email address. The second pass owns it from here.
+    const wanted = resolveManagerKey(row[MANAGER_COLUMN], phoneEnabled);
+    delete row[MANAGER_COLUMN];
     const identity = resolveRowIdentity(row, { policy, phoneEnabled, emailInviteOk, smsInviteOk });
     if (identity.invalid) {
       results[i] = { row: i + 1, ok: false, action: 'failed', code: identity.invalid.code, error: identity.invalid.error };
@@ -336,6 +477,8 @@ export async function runAdminImportUsers(
     if (identity.email) row.email = identity.email; else delete row.email;
     if (identity.phone) row.phone_number = identity.phone; else delete row.phone_number;
     if (identity.plan) planByKey.set(identityKey(identity.email, identity.phone), identity.plan);
+    if (wanted !== 'absent') managerWanted[i] = wanted;
+    rowIdentities[i] = identity;
     validRows.push(row);
     validIndex.push(i);
   }
@@ -487,6 +630,10 @@ export async function runAdminImportUsers(
 
   // ── Post-write phases (skipped on dryRun) ─────────────────────────────
   const delivery = { emailInvite: 0, smsInvite: 0, temporary: 0 };
+  // [#18028] How the second pass went. Declared out here so the summary
+  // reports the same three keys on a dry run — where the pass does not run —
+  // as it does on a real one.
+  const managerLinks = { linked: 0, unresolved: 0, refused: 0 };
   if (!prepared.dryRun) {
     // One pass over every created row — each is in exactly one of the two
     // maps (or neither, for `none` and updated rows). This single loop serves
@@ -534,6 +681,110 @@ export async function runAdminImportUsers(
       }
     }
 
+    // ── Second pass — the manager links (#18028, ruling row 7) ──────────
+    // It runs HERE, after `runImport` has returned, and that is the whole
+    // point: a manager named in row 40 may be created by row 90, so every row
+    // in the batch has to exist before any key is resolved. A resolve inside
+    // `createData` would refuse exactly that input, and would happen to work
+    // only on a file whose rows were already topologically ordered.
+    if (managerWanted.some((w) => w !== undefined)) {
+      // This batch's landed rows, indexed under BOTH spellings a manager cell
+      // may name them by — a row carrying an email AND a phone is reachable
+      // through either. `identityKey`'s `e:` / `p:` prefixes keep the two
+      // namespaces from colliding.
+      const idByKey = new Map<string, string>();
+      for (let i = 0; i < results.length; i++) {
+        const r = results[i];
+        const ident = rowIdentities[i];
+        if (!r || !r.id || !ident) continue;
+        if (r.action !== 'created' && r.action !== 'updated') continue;
+        if (ident.email) idByKey.set(identityKey(ident.email, undefined), r.id);
+        if (ident.phone) idByKey.set(identityKey(undefined, ident.phone), r.id);
+      }
+
+      // A manager who is NOT in this file is still a valid manager — an org
+      // chart is grown one batch at a time. Memoized per key: a file where 200
+      // rows report to the same person is the ordinary case, not the exotic one.
+      const fromTree = new Map<string, string | null>();
+      const managerDeps: SetUserManagerDeps = {
+        getDataEngine: () => engine,
+        ...(deps.logger ? { logger: deps.logger } : {}),
+      };
+
+      for (let i = 0; i < results.length; i++) {
+        const wanted = managerWanted[i];
+        if (wanted === undefined) continue;
+        const r = results[i];
+        // A row that failed its own write has no id to hang a link on. Its
+        // failure is already reported; the manager cell adds nothing.
+        if (!r || !r.id || (r.action !== 'created' && r.action !== 'updated')) continue;
+
+        if (wanted === 'unreadable') {
+          noteManagerFailure(
+            r,
+            'unresolved',
+            'MANAGER_UNRESOLVED',
+            `The ${MANAGER_COLUMN} cell is neither an email address nor a phone number this deployment `
+              + 'can read, so it names no identity. This row landed; only its manager link did not.',
+          );
+          managerLinks.unresolved++;
+          continue;
+        }
+
+        let managerId = idByKey.get(wanted.key) ?? null;
+        if (!managerId) {
+          if (!fromTree.has(wanted.key)) {
+            try {
+              const where = wanted.email ? { email: wanted.email } : { phone_number: wanted.phone };
+              const found = await engine.find('sys_user', {
+                where, fields: ['id'], limit: 1, context: SYSTEM_CTX,
+              });
+              const hit = Array.isArray(found) ? found[0] : undefined;
+              fromTree.set(wanted.key, hit?.id != null ? String(hit.id) : null);
+            } catch (e) {
+              // A read that FAILED is not the fact "no such user", and it must
+              // not be spelled like one silently. The row is reported as
+              // unresolved either way — the link genuinely was not written —
+              // and the reason it could not be answered is said once, here.
+              fromTree.set(wanted.key, null);
+              deps.logger?.warn(
+                `[AuthPlugin] import-users: the sys_user lookup for manager key '${wanted.key}' FAILED, so `
+                  + 'that row is reported as an unresolved manager rather than a refused one. The user '
+                  + 'itself was created. Remedy: restore read access to sys_user and re-run the manager '
+                  + `link for the affected rows. Cause: ${(e as Error)?.message ?? e}`,
+              );
+            }
+          }
+          managerId = fromTree.get(wanted.key) ?? null;
+        }
+
+        if (!managerId) {
+          noteManagerFailure(
+            r,
+            'unresolved',
+            'MANAGER_UNRESOLVED',
+            `No user matches this row's ${MANAGER_COLUMN} key, in this import or already in the `
+              + 'directory, so the manager link was not written. The rest of this row landed.',
+          );
+          managerLinks.unresolved++;
+          continue;
+        }
+
+        // ⛔ The five refusals are NOT re-derived here. `applyUserManagerLink`
+        // is the same derivation `POST /admin/set-user-manager` runs, and its
+        // refusal — status, code and the `reason` discriminator — is reported
+        // as it came back.
+        const refusal = await applyUserManagerLink(managerDeps, r.id, managerId);
+        if (refusal) {
+          noteManagerFailure(r, refusal.reason, 'MANAGER_REFUSED', refusal.message);
+          managerLinks.refused++;
+          continue;
+        }
+        r.manager = 'linked';
+        managerLinks.linked++;
+      }
+    }
+
     // Run-level audit. Best-effort; NO password material.
     //
     // Corrected rationale (#4940): this used to read "better-auth writes
@@ -575,6 +826,10 @@ export async function runAdminImportUsers(
             skipped: summary.skipped, errors: summary.errors + preErrors,
             // How `auto` (and the fixed policies) split the batch across channels.
             delivery,
+            // [#18028] And how the second pass's manager links went — a run
+            // that linked nobody because every key was unresolved is the shape
+            // an operator most needs to find later.
+            manager: managerLinks,
           }),
         }, { context: SYSTEM_CTX } as any);
       } catch (e) {
@@ -622,6 +877,11 @@ export async function runAdminImportUsers(
           // Per-channel split of the created rows — the value of `auto`: how
           // many rows were invited vs. fell back to a temporary password.
           delivery,
+          // [#18028] The second pass's split. `unresolved` and `refused` are
+          // both per-row failures on rows that otherwise LANDED, so they are
+          // reported here rather than folded into `errors`, which would make
+          // `created` and `errors` disagree about the same row.
+          manager: managerLinks,
           mode,
           matchBy,
         },
