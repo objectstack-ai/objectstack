@@ -371,7 +371,7 @@ model: opus
   "open_questions": [
     { "question": "…", "options": ["A …", "B …"], "recommendation": "A, because …" }
   ],
-  "out_of_scope_findings": ["to file (three classes, dedupe words attached): one-line description", "noted, not filed: one-line observation"]
+  "out_of_scope_findings": ["to file (3 classes, dedupe words): one-liner", "noted, not filed: one-liner"]
 }
 ```
 
