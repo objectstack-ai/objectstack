@@ -1690,7 +1690,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the restore payload: a rebuilt record says it is one': 9,
   'the refusals: a typo must never make this decision': 11,
   'the rate-limit stop, and the two properties that are structural': 8,
-  'the delta walk, driven: the archive catches up with the live board': 17,
+  'the delta walk, driven: the archive catches up with the live board': 18,
 });
 const SELF_TEST_BATTERY_FLOOR = 10;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
@@ -2000,35 +2000,55 @@ export async function selfTest() {
   const liveDir = mkdtempSync(join(tmpdir(), 'board-snapshot-delta-'));
   const busyDir = mkdtempSync(join(tmpdir(), 'board-snapshot-split-'));
   const stopDir = mkdtempSync(join(tmpdir(), 'board-snapshot-resume-'));
+  const idemDir = mkdtempSync(join(tmpdir(), 'board-snapshot-idem-'));
   try {
     // THE REGRESSION, driven from the manifest board-archive actually carried.
-    writeIfChanged(join(liveDir, MANIFEST_NAME), stableJson(measuredHistoryManifest()));
+    //
+    // ⚠️ The BACKLOG below is what makes this a pin rather than a decoration. On
+    // a four-row board the backfill reaches today inside one page, so the row
+    // lands on disk whether or not a delta ran and the case passes over the very
+    // defect it names — measured, by ablating the delta step against a small
+    // board and watching this case stay green. The real archive has thousands of
+    // numbers between the history cursor and today, and 800 requests a run do
+    // not cross them; 900 closed rows with a comment thread each reproduce that
+    // pressure, so the backfill CANNOT reach 2026-09-13 in this run.
     const movedIssue = RAW({ number: 18045, state: 'open', comments: 0, created_at: '2026-09-13T14:59:12Z', updated_at: '2026-09-13T14:50:00Z' });
     const movedClosed = RAW({ number: 17999, state: 'closed', state_reason: 'completed', comments: 0, updated_at: '2026-09-12T09:00:00Z', closed_at: '2026-09-12T09:00:00Z' });
     const movedPull = RAW({ number: 18043, state: 'open', comments: 0, updated_at: '2026-09-13T10:00:00Z', pull_request: { merged_at: null }, draft: true });
     const oldClosed = RAW({ number: 900, state: 'closed', comments: 0, updated_at: '2026-08-03T12:00:00Z', closed_at: '2026-08-03T12:00:00Z' });
-    const liveRows = [movedIssue, movedClosed, movedPull, oldClosed];
+    const backlog = Array.from({ length: 900 }, (_, i) => RAW({
+      number: 1000 + i,
+      state: 'closed',
+      comments: 1,
+      updated_at: new Date(Date.parse('2026-08-03T12:00:00Z') + i * 60000).toISOString(),
+      closed_at: new Date(Date.parse('2026-08-03T12:00:00Z') + i * 60000).toISOString(),
+      thread: [RAW_COMMENT({ id: 700000 + i })],
+    }));
+    const liveRows = [movedIssue, movedClosed, movedPull, ...backlog];
+    writeIfChanged(join(liveDir, MANIFEST_NAME), stableJson(measuredHistoryManifest()));
     const live = fakeBoard({ rows: liveRows, openPulls: [movedPull] });
     t('the row is ABSENT before the run — the state #18045 measured, reproduced on disk', readArchivedCard(liveDir, 18045).ok === false);
     const first = await driveSnapshot({ dir: liveDir, board: live });
-    t('THE REGRESSION: a row updated after the previous manifest stamp is archived on the VERY NEXT run, with the backfill still weeks from reaching it',
+    t('THE REGRESSION: a row updated after the previous manifest stamp is archived on the VERY NEXT run, out of a budget the backfill would otherwise have spent whole',
       readArchivedCard(liveDir, 18045).ok === true && readArchivedCard(liveDir, 18045).issue.updated_at === '2026-09-13T14:50:00Z');
     t('…and so is a CLOSED row that moved, and a pull request — the delta archives every row it sees, not the open issues alone',
       readArchivedCard(liveDir, 17999).issue.state === 'closed' && readArchivedCard(liveDir, 18043).issue.kind === 'pull_request');
+    t('…and the backfill demonstrably could NOT have done it: it ran out of budget inside the backlog, hundreds of rows short of that day',
+      first.stopped?.kind === 'budget' && first.manifest.resume.phase === 'history' && Date.parse(first.manifest.walk.history.cursor) < Date.parse('2026-08-05T00:00:00Z'));
     const listings = live.calls.filter((c) => c.startsWith('/repos/o/r/issues?'));
     t('THE ORDER: the FIRST listing of the run is the delta, and the history listing comes after it — ⛔ a backfill placed first spends everything and the delta never runs',
       listings[0].includes(encodeURIComponent(skewedSince('2026-09-10T15:39:49.484Z')))
       && listings.findIndex((c) => c.includes(encodeURIComponent('2026-08-03T11:51:21Z'))) > 0);
-    t('the backfill still ran in the same run: its cursor moved and the closed row it was walking toward is on disk',
-      first.manifest.walk.history.cursor !== '2026-08-03T11:51:21Z' && readArchivedCard(liveDir, 900).ok === true);
+    t('the backfill still ran in the same run: its cursor moved and the oldest row it was walking toward is on disk',
+      first.manifest.walk.history.cursor !== '2026-08-03T11:51:21Z' && readArchivedCard(liveDir, 1000).ok === true);
     t('the open set is untouched by any of it — complete, no cursor, and not re-enumerated',
       first.manifest.walk.open_set.complete === true && first.manifest.walk.open_set.cursor === null && first.manifest.run.open_set_completed_here === false);
     t('the manifest carries the delta cursor and its completeness BESIDE the history cursor, never merged into it',
-      first.manifest.walk.delta.complete === true && first.manifest.walk.delta.cursor === '2026-09-13T14:50:00Z' && first.manifest.walk.history.cursor !== first.manifest.walk.delta.since);
-    t('`next_since` is the DELTA high-water mark — handing the backfill February cursor over instead would replay months as an increment',
+      first.manifest.walk.delta.complete === true && first.manifest.walk.delta.cursor === '2026-09-13T14:50:00Z' && first.manifest.walk.history.cursor !== first.manifest.walk.delta.cursor);
+    t('`next_since` is the DELTA high-water mark — handing the backfill August cursor over instead would replay weeks as an increment',
       first.manifest.next_since === '2026-09-13T14:50:00Z');
-    t('the board own count is read every run now, so the history phase stops reporting `pending` for as long as the backfill lasts',
-      first.manifest.board.read_at !== null && first.manifest.board.open_issues_count === 2 && first.manifest.count_check.verdict === 'ok');
+    t('THE COUNT CHECK returns: the board own count is bought right after the delta, so a run that stops inside the backfill still reports a verdict instead of `pending`',
+      first.manifest.board.read_at !== null && first.manifest.board.open_issues_count === 2 && first.manifest.count_check.verdict === 'ok' && first.manifest.run.walk_complete === false);
 
     // THE SPLIT, driven: a delta with more to read than its slice.
     writeIfChanged(join(busyDir, MANIFEST_NAME), stableJson(measuredHistoryManifest()));
@@ -2074,13 +2094,16 @@ export async function selfTest() {
     t('…while the delta cursor survives the stop untouched, so the next run re-reads the live board before the backfill again',
       stop.manifest.walk.delta.cursor === '2026-09-13T14:50:00Z' && selectDeltaPlan(stop.manifest).run === true);
 
-    // IDEMPOTENCE, end to end, with the delta in the path.
-    await driveSnapshot({ dir: liveDir, board: fakeBoard({ rows: liveRows, openPulls: [movedPull] }) });
-    const third = await driveSnapshot({ dir: liveDir, board: fakeBoard({ rows: liveRows, openPulls: [movedPull] }) });
+    // IDEMPOTENCE, end to end, with the delta in the path. A board small enough
+    // for one run to finish, so the third run has nothing left to discover.
+    writeIfChanged(join(idemDir, MANIFEST_NAME), stableJson(measuredHistoryManifest()));
+    const idemRows = [movedIssue, movedClosed, movedPull, oldClosed];
+    for (const _ of [1, 2]) await driveSnapshot({ dir: idemDir, board: fakeBoard({ rows: idemRows, openPulls: [movedPull] }) });
+    const third = await driveSnapshot({ dir: idemDir, board: fakeBoard({ rows: idemRows, openPulls: [movedPull] }) });
     t('IDEMPOTENCE survives the delta: a run over a board that has not moved writes nothing at all, manifest included',
       third.written.length === 0 && third.manifestMoved === false && third.manifest.walk_phase === 'incremental');
   } finally {
-    for (const d of [liveDir, busyDir, stopDir]) rmSync(d, { recursive: true, force: true });
+    for (const d of [liveDir, busyDir, stopDir, idemDir]) rmSync(d, { recursive: true, force: true });
   }
 
   const declared = Object.keys(SELF_TEST_BATTERIES);
