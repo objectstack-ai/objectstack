@@ -661,7 +661,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the three read paths: ordered, offline-capable, and named in every refusal': 24,
   'C5: the direction claim checked against the diff (#16448)': 16,
   'C6: the review of record on this head, and the carrier the rule text names (#17302)': 40,
-  'C7: the tier that SERVED the verdict the strip stands on (#17915)': 31,
+  'C7: the tier that SERVED the verdict the strip stands on (#17915)': 42,
   'the exit register is distinct in every direction it must be': 6,
   'the argv contract and the board provenance (#16623)': 42,
   '#17366: the correction comment — the self-solvable exit, and the three things it is not': 65,
@@ -2466,8 +2466,7 @@ const REVIEWED_BY_LINE = AUTHORSHIP_KEY_LINES.get('Reviewed-by');
 const SERVED_TIER_LINE = keyLineRegex('Served-tier');
 
 /**
- * The value token -- an opaque tier identifier, read immediately after the
- * colon and its decoration, exactly like an identity token.
+ * The value token -- an opaque tier identifier.
  *
  * ⭐ Closed on an alphanumeric or a `]`, so a real id keeps its whole shape
  * (a bracketed context suffix included) while a trailing `.` or `,` stays with
@@ -2482,11 +2481,52 @@ const SERVED_TIER_LINE = keyLineRegex('Served-tier');
 const TIER_TOKEN = /^([A-Za-z0-9](?:[A-Za-z0-9._:[\]-]*[A-Za-z0-9\]])?)/;
 
 /**
+ * The STAMP CONTROL that may precede the tier -- `N/M`, measured on the live
+ * corpus and named by the ruling itself.
+ *
+ * ⭐ Corrected from a fixture against the board, which is the correction this
+ * family has had to make before (#17346: the corpus moved and the discriminator
+ * did not). Every record the remediation rounds write spells the value
+ * `75/75 \`<tier>\`` -- the at-tier stamp count over the total, THEN the tier --
+ * and the ruling's own specimen is written the same way. A reader that demanded
+ * the tier token immediately after the colon would have refused every verdict
+ * produced under the rule it enforces, on its first day.
+ *
+ * ⛔ And the count is not decoration to be skipped: it IS the zero-hit control
+ * the discipline requires -- a stamp reading is void unless the same probe
+ * returned a non-zero count on the same transcript -- and a count that is not
+ * FULL is the 「回退证据」 whose own rule text voids the verdict entire. So it
+ * is read, and it is judged: absent, the tier alone decides (the ruling's
+ * minimum, and nothing the ruling permits is refused); present, it must be
+ * non-zero and total.
+ */
+const STAMP_CONTROL = /^(\d+)[ \t]*\/[ \t]*(\d+)(?![\d/])/;
+
+/**
+ * Does a declared stamp control STAND? Absent is vacuous; present must be
+ * total and non-zero. One predicate, so the row and the note cannot disagree.
+ */
+export function servedStampsHold(stamps) {
+  return stamps === null || (stamps.total > 0 && stamps.atTier === stamps.total);
+}
+
+/** The whole reading, as one verdict: at tier, on a control that stands. */
+export function servedTierStands(served) {
+  return served?.state === 'read' && served.value === CONTRACT_REVIEW_TIER && servedStampsHold(served.stamps);
+}
+
+/**
  * What one comment declares about the tier that served it.
  *
- * @returns {{ state: 'missing' }
- *          | { state: 'unreadable', line: string }
- *          | { state: 'read', value: string }}
+ * @returns {{ state: 'missing', stamps: null }
+ *          | { state: 'unreadable', line: string, stamps: object|null }
+ *          | { state: 'read', value: string, stamps: object|null }}
+ *
+ * Every shape carries `stamps`, so a caller never has to test for the key.
+ *
+ * `stamps` is the `N/M` control when the value carried one, `null` when it did
+ * not -- read here, judged by `servedStampsHold`, so the reading and the
+ * verdict stay two steps.
  *
  * Three-valued for the reason `readVerdictAuthorship` is four-valued: a carrier
  * that was never started and one that was started and left unreadable are
@@ -2497,10 +2537,19 @@ export function readServedTier(text) {
   for (const line of String(text ?? '').split(/\r?\n/)) {
     const m = SERVED_TIER_LINE.exec(line);
     if (!m) continue;
-    const token = TIER_TOKEN.exec(stripValueDecoration(m[1]));
-    return token ? { state: 'read', value: token[1] } : { state: 'unreadable', line: quoteLine(line) };
+    let rest = stripValueDecoration(m[1]);
+    let stamps = null;
+    const control = STAMP_CONTROL.exec(rest);
+    if (control) {
+      stamps = { atTier: Number(control[1]), total: Number(control[2]) };
+      rest = stripValueDecoration(rest.slice(control[0].length));
+    }
+    const token = TIER_TOKEN.exec(rest);
+    return token
+      ? { state: 'read', value: token[1], stamps }
+      : { state: 'unreadable', line: quoteLine(line), stamps };
   }
-  return { state: 'missing' };
+  return { state: 'missing', stamps: null };
 }
 
 /**
@@ -2642,9 +2691,11 @@ export function c6RecordNote(pair) {
     `review of record on this head: ${v.where} thread, ${v.id ? `comment ${v.id}` : 'a comment carrying no readable id'} ` +
     `(${v.at ?? 'undated'}) is a \`## Contract review\` comment naming \`${v.sha}\` and carrying a \`Reviewed-by:\` line -- ` +
     'cite it in the provenance comment beside the clear (「凡清标同笔留 provenance 评论,引记录 id 与所判 head」). ' +
-    (v.served.state === 'read' && v.served.value === CONTRACT_REVIEW_TIER
-      ? 'Its `Served-tier:` reads the declared tier, so the strip stands on C7 as well as on this row. '
-      : 'Its `Served-tier:` does NOT read the declared tier — C7 says what it reads, and this pair is adverse. ') +
+    (servedTierStands(v.served)
+      ? 'Its `Served-tier:` reads the declared tier' +
+        (v.served.stamps ? ` on a stamp control of ${v.served.stamps.atTier}/${v.served.stamps.total}` : '') +
+        ', so the strip stands on C7 as well as on this row. '
+      : 'Its `Served-tier:` does NOT stand — C7 says what it reads, and this pair is adverse. ') +
     '⚠️ Existence, not the verdict: whether it reads PASS is precondition ① of the landing check and stays human.'
   );
 }
@@ -2717,21 +2768,35 @@ export function c6RecordNote(pair) {
 export function c7ServedTierBelow(pair) {
   const v = reviewOfRecord(pair);
   if (v.state !== 'found') return null;
-  if (v.served.state === 'read' && v.served.value === CONTRACT_REVIEW_TIER) return null;
+  if (servedTierStands(v.served)) return null;
 
   const where =
     `PR #${pair?.pr}${pair?.draft ? ' (draft)' : ''} / card #${pair?.card}: the verdict the clear stands on -- ` +
     `${v.where} thread, ${v.id ? `comment ${v.id}` : 'a comment carrying no readable id'} ` +
     `(${v.at ?? 'undated'}), naming head \`${v.sha}\``;
+  const stamps = v.served.stamps ?? null;
+  const control =
+    stamps === null
+      ? ''
+      : ` Its stamp control reads ${stamps.atTier}/${stamps.total}` +
+        (servedStampsHold(stamps)
+          ? ', which stands.'
+          : stamps.total === 0
+            ? ' -- a ZERO reading, which is void by the standing control: a zero counts only when the same probe ' +
+              'returns a non-zero stamp count on the same transcript.'
+            : ' -- NOT total, which is the 「回退证据」 the rule text voids a verdict entire for: some messages of ' +
+              'the round were served by something else.');
   const reading =
     v.served.state === 'read'
-      ? `declares \`Served-tier: ${v.served.value}\``
+      ? servedStampsHold(stamps)
+        ? `declares \`Served-tier: ${v.served.value}\``
+        : `declares the tier \`${v.served.value}\` on a stamp control that does not stand`
       : v.served.state === 'unreadable'
         ? `carries a \`Served-tier:\` line with no readable tier token (${v.served.line})`
         : 'carries NO `Served-tier:` line at all, so it declares nothing about what served it';
   const rule =
-    'The rule this row carries is `references/contract-review.md`\'s -- 「同形含首行 `Served-tier:`,值取复核者' +
-    '转录的 harness `model` 盖章;无此行不成裁决」 and 「清标前 `--pair`:裁决 `Served-tier:` ≠ ' +
+    'The rule this row carries is `references/contract-review.md`\'s -- 「同形含首行 `Served-tier:`:值取转录 ' +
+    'harness `model` 盖章,可前置 N/N;无此行不成裁决」 and 「清标前 `--pair`:裁决 `Served-tier:` ≠ ' +
     '`CONTRACT_REVIEW_TIER` ⇒ exit 4,点名 PR、评论、读数」. The value is the HARNESS-STAMPED served-model field ' +
     'of the reviewing round\'s own transcript, ⛔ never the dispatch `model` parameter, which is configuration ' +
     'and not a reading. The comparison is EXACT, never a family or prefix floor -- widening a governance gate\'s ' +
@@ -2743,7 +2808,7 @@ export function c7ServedTierBelow(pair) {
   const boundary =
     '⛔ Verdict-agnostic: no PASS or FAIL token is read to reach this -- what produced the verdict is measurable, ' +
     'what it concluded stays human -- and the constant is read from `dispatch-gates.mjs`, never restated here.';
-  return `${where} -- ${reading}, and the declared tier is \`CONTRACT_REVIEW_TIER\`. ${rule} ${remedy} ${boundary} ${NEVER_WRITES}`;
+  return `${where} -- ${reading}, and the declared tier is \`CONTRACT_REVIEW_TIER\`.${control} ${rule} ${remedy} ${boundary} ${NEVER_WRITES}`;
 }
 
 /**
@@ -3926,7 +3991,7 @@ export function selfTest() {
     lines = [
       '- **Implemented-by:** `claude/issue-13657-x`',
       `- **Reviewed-by:** \`${RECORD_SESSION}\``,
-      `- **Served-tier:** \`${CONTRACT_REVIEW_TIER}\``,
+      `- **Served-tier:** 121/121 \`${CONTRACT_REVIEW_TIER}\``,
     ],
     at = '2026-09-01T08:50:00Z',
     id = 3301,
@@ -4538,6 +4603,22 @@ export function selfTest() {
   t('…and states the reading is the harness stamp, ⛔ not the dispatch parameter', says(belowRow, 'HARNESS-STAMPED') && says(belowRow, 'dispatch `model` parameter'));
   t('…and is verdict-agnostic, and never writes', says(belowRow, 'what it concluded stays human') && says(belowRow, '自查放行'));
   t('an at-tier clear prints the reading in the C6-RECORD note, so a reader of exit 0 can see the strip stood on it', says(pairNotes(completed)[0]?.text, 'Served-tier'));
+  // ⭐ The LIVE spelling, corrected from a fixture against the board. Every
+  // record the remediation rounds write, and the ruling's own specimen, put the
+  // STAMP CONTROL first: `75/75 \`<tier>\``. A reader that demanded the tier
+  // token immediately after the colon would have refused every verdict written
+  // under the rule it enforces, on day one.
+  t('⭐ the LIVE value shape — stamp control, then the tier — reads at tier and stands', servedTierStands(readServedTier(`Served-tier: 75/75 \`${CONTRACT_REVIEW_TIER}\``)));
+  t('…and the count is READ, not skipped', JSON.stringify(readServedTier(`Served-tier: 138/138 \`${CONTRACT_REVIEW_TIER}\``).stamps) === JSON.stringify({ atTier: 138, total: 138 }));
+  t('…on a bulleted, bolded key too — the shape the seats actually post', servedTierStands(readServedTier(`- **Served-tier:** 102/102 \`${CONTRACT_REVIEW_TIER}\``)));
+  t('⛔ a ZERO control is void — a zero counts only against a non-zero stamp count on the same transcript', servedTierStands(readServedTier(`Served-tier: 0/0 \`${CONTRACT_REVIEW_TIER}\``)) === false);
+  t('⛔ a control that is not TOTAL is 回退证据, and the tier alone does not rescue it', servedTierStands(readServedTier(`Served-tier: 12/133 \`${CONTRACT_REVIEW_TIER}\``)) === false);
+  t('⛔ …and that is a C7 row, whose text names the count rather than only the tier', says(c7ServedTierBelow(bare({ prComments: [SERVED(`12/133 \`${CONTRACT_REVIEW_TIER}\``)] })), '12/133') && says(c7ServedTierBelow(bare({ prComments: [SERVED(`12/133 \`${CONTRACT_REVIEW_TIER}\``)] })), '回退证据'));
+  t('⛔ a count with NO tier after it declares no tier — unreadable, never a reading', readServedTier('Served-tier: 75/75').state === 'unreadable');
+  t('⭐ an ABSENT control is vacuous, never a refusal — the ruling\'s minimum is the tier alone', readServedTier(`Served-tier: \`${CONTRACT_REVIEW_TIER}\``).stamps === null && servedStampsHold(null));
+  t('the control is judged by ONE predicate the row and the note both read', servedStampsHold({ atTier: 5, total: 5 }) && !servedStampsHold({ atTier: 5, total: 6 }) && !servedStampsHold({ atTier: 0, total: 0 }));
+  t('⛔ a below-tier value with a PERFECT control is still refused — the control never substitutes for the tier', typeof c7ServedTierBelow(bare({ prComments: [SERVED('99/99 example-below-tier')] })) === 'string');
+  t('the reference fixture itself carries the live shape, so the clean pair is clean for the right reason', says(RECORD_ON_9AF9.body, '121/121') && pairRows(completed).length === 0);
 
   battery('the exit register is distinct in every direction it must be');
   const codes = [EXIT_OK, EXIT_USAGE, EXIT_INCOMPLETE, EXIT_PREREQUISITE_NOT_MET, EXIT_PAIR_ADVERSE];

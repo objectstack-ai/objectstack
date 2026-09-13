@@ -27,7 +27,7 @@
 - spec 席审低档实现者的契约增量,非自身产物;余席条款②复核 = 默认判断档自审加门禁。
 - 复核记录 = 一条评论落 PR 或卡,达档与默认档同形;散文、dev 自评、`os-dev-report` 恒不算。
 - 同形 = `## Contract review` 题头、所审 head sha 码段、①②③ 逐项、独立性对、PASS/FAIL 判词。
-- 同形含首行 `Served-tier:`,值取复核者转录的 harness `model` 盖章;无此行不成裁决。
+- 同形含首行 `Served-tier:`:值取转录 harness `model` 盖章,可前置 N/N;无此行不成裁决。
 - ① derived judgments 逐项:diff 引出的接受集与公开面变化逐条点名判对错。
 - ② semver 定级:变更级别与 changeset 声明一致。
 - ③ 边界旗处置:dev 挂旗与 `open_questions` 逐旗答复或升级。
