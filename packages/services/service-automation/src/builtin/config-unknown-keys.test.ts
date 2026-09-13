@@ -84,8 +84,12 @@ describe('unknown node config keys are rejected (#4277)', () => {
     // `visibleWhen` is edit-distance 4 against `nearestName`'s threshold of 3,
     // so this exact typo gets no did-you-mean. Printing the declared set is
     // what makes the diagnostic actionable regardless.
+    // #17306 added `min`/`max`/`inlineHelpText`/`reference`; the enumeration is
+    // pinned in full rather than sampled, so a key that arrives or vanishes on
+    // this surface has to be acknowledged here.
     expect(msg).toContain(
-      'Declared here: name, label, type, required, options, defaultValue, placeholder, visibleWhen.',
+      'Declared here: name, label, type, required, options, defaultValue, placeholder, '
+      + 'min, max, inlineHelpText, reference, visibleWhen.',
     );
     // …and this particular key has a documented incident, so it also carries
     // its tombstone (the UNKNOWN_KEY_GUIDANCE pattern).
