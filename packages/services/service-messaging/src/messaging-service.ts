@@ -1173,13 +1173,23 @@ export class MessagingService {
             source_id: str(input.source?.id) ?? null,
             actor_id: input.actorId ?? null,
             organization_id: input.organizationId ?? null,
-            // [#17732] The channels fan-out will not even attempt, and why.
-            // NULL — not `[]` — when nothing was suppressed, so the column is
-            // empty on the overwhelmingly common path and a non-null value
-            // always means "something really was dropped".
-            suppressed_channels: suppressed.length > 0 ? suppressed.map((s) => ({ ...s })) : null,
             created_at: this.now(),
         };
+        // [#17732] The channels fan-out will not even attempt, and why —
+        // present ONLY when there is something to say.
+        //
+        // ⛔ Not `suppressed_channels: … ?? null` alongside the keys above. An
+        // insert names its columns, and naming a NEW one on EVERY emit makes
+        // every emit depend on every `sys_notification` schema in the world
+        // already carrying it: a stack whose object predates this column gets
+        // `INVALID_FIELD: Unknown field 'suppressed_channels'` and loses the
+        // whole notification — to record that nothing was suppressed. Written
+        // this way the common path's column set is byte-for-byte what it was
+        // before this change, and the column appears exactly when it carries
+        // information. The pin is in `channel-availability.test.ts`.
+        if (suppressed.length > 0) {
+            row.suppressed_channels = suppressed.map((s) => ({ ...s }));
+        }
         const created = await data.insert(NOTIFICATION_EVENT_OBJECT, row);
         const id = Array.isArray(created) ? created[0]?.id : created?.id ?? created;
         return id != null ? String(id) : `evt_${Math.random().toString(36).slice(2)}`;

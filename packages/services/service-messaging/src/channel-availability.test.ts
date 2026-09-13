@@ -177,9 +177,31 @@ describe('channel availability at fan-out (#17732)', () => {
         expect(rows.map((r) => r.channel).sort()).toEqual(['inbox', 'sms']);
         expect(result.enqueued).toBe(2);
         expect(result.suppressed).toEqual([]);
-        // NULL, not `[]` — the column stays empty on the common path, so a
-        // non-null value always means something really was dropped.
-        expect(data.inserts[0].row.suppressed_channels).toBeNull();
+        // ⭐ ABSENT, not `null` — the insert must not even NAME the new column
+        // when it has nothing to say. An insert names its columns, so a row
+        // that always carries `suppressed_channels` makes every emit depend on
+        // every `sys_notification` schema already having it: a stack whose
+        // object predates the column answers `INVALID_FIELD` and the whole
+        // notification is lost, to record that nothing was suppressed. That is
+        // not hypothetical — it is what this change did to
+        // `service-automation`'s zero-delivery harness before it was fixed.
+        expect(Object.hasOwn(data.inserts[0].row, 'suppressed_channels')).toBe(false);
+    });
+
+    it('the common path writes EXACTLY the column set it wrote before this change', async () => {
+        // The strongest form of the pin above: enumerate the columns, so a
+        // future key added "harmlessly" to every insert has to face this test
+        // rather than a consumer's INVALID_FIELD months later.
+        const data = capturingEngine();
+        const service = new MessagingService({ logger: silentLogger(), getData: () => data.engine });
+        service.registerChannel(channelDouble('inbox').channel);
+
+        await service.emit({ topic: 'deal.won', audience: ['user_1'], payload: { title: 'x' } });
+
+        expect(Object.keys(data.inserts[0].row).sort()).toEqual([
+            'actor_id', 'created_at', 'dedup_key', 'organization_id',
+            'payload', 'severity', 'source_id', 'source_object', 'topic',
+        ]);
     });
 
     it('THE CONTROL, other side: the same channel suppressed once it DOES answer unavailable', async () => {
@@ -331,7 +353,7 @@ describe('channel availability at fan-out (#17732)', () => {
         });
 
         expect(result.suppressed).toEqual([]);
-        expect(data.inserts[0].row.suppressed_channels).toBeNull();
+        expect(Object.hasOwn(data.inserts[0].row, 'suppressed_channels')).toBe(false);
         expect(result.deliveries.find((d) => d.channel === 'nowhere'))
             .toMatchObject({ ok: false, error: "channel 'nowhere' not registered" });
     });
