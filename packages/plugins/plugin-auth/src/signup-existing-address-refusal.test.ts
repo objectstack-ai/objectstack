@@ -94,6 +94,34 @@ const sysPermissionSet = {
   },
 };
 
+/**
+ * [#17897] The junction the grant itself is written to.
+ *
+ * `settleSelfRegistrationGrant` reads `sys_user_permission_set` for an existing
+ * grant before inserting one, and this fixture declared the set but never the
+ * junction — so on case ③, the one case that ADMITS a registrant, that read was
+ * refused by the driver (one `DATABASE_ERROR` line per run, measured at
+ * `225197cdb`). The refusal was caught and reported as "admitted but NOT
+ * granted", which is the very degradation `reportUngrantedSelfRegistrant`
+ * exists to announce — so the admitted-registrant control was passing over a
+ * grant path that never completed. Registering the junction makes the read
+ * SUCCEED and the insert happen; ⛔ the fix is not to quieten the line.
+ *
+ * Declared locally with only the columns that path reads and writes, the same
+ * precedent `sysPermissionSet` above follows, so a fixture adds no dependency
+ * edge from plugin-auth to plugin-security.
+ */
+const sysUserPermissionSet = {
+  name: 'sys_user_permission_set',
+  label: 'User Permission Set',
+  fields: {
+    id: { name: 'id', type: 'text' as const, primaryKey: true },
+    user_id: { name: 'user_id', type: 'text' as const },
+    permission_set_id: { name: 'permission_set_id', type: 'text' as const },
+    organization_id: { name: 'organization_id', type: 'text' as const },
+  },
+};
+
 const engines: ObjectQL[] = [];
 afterEach(async () => {
   while (engines.length) {
@@ -122,6 +150,7 @@ async function bootEngine(): Promise<ObjectQL> {
     engine.registry.registerObject(object as never, '@objectstack/plugin-auth');
   }
   engine.registry.registerObject(sysPermissionSet as never, '@objectstack/plugin-security');
+  engine.registry.registerObject(sysUserPermissionSet as never, '@objectstack/plugin-security');
   await engine.syncSchemas();
   return engine;
 }
