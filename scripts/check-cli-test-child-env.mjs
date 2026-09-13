@@ -522,6 +522,31 @@ export const DELIBERATE = {
  * Pinned in BOTH directions by {@link judge}: an entry that stops matching
  * FAILS, so if those legs are ever rewritten the gate says so rather than
  * carrying a carve-out nobody re-reads.
+ *
+ * ## ⚠️ #12271 changed what the FIRST bullet above is true OF, and the three
+ * entries it adds are a different KIND from the two above
+ *
+ * "keeping `bin/run.js` means oclif reroutes to `src/`" was a statement about
+ * the ENTRY, and it is no longer one: `packages/cli/bin/run.js` now declares
+ * `settings.enableAutoTranspile = false`, which `@oclif/core`'s `tsPath()`
+ * checks AHEAD of `isProd()`, so the published entry resolves `dist/commands`
+ * under every value of `NODE_ENV`. ⛔ The oclif table quoted in this file's
+ * header and failure text is untouched and still correct -- it was measured
+ * against `Config.load()` with DEFAULT settings, which is what any other
+ * spawner of a built oclif entry still gets.
+ *
+ * ⇒ What this rule now buys is narrower and worth stating rather than leaving
+ * for someone to discover while deleting it: it keeps a built-entrypoint spawn
+ * READABLE about the `NODE_ENV` it means, and it is the thing that would notice
+ * if that declaration were ever dropped from `bin/run.js` -- every spawner in
+ * the population would start rerouting again, silently, exactly as before.
+ *
+ * ⭐ The `published-entry-node-env-source-reroute.test.ts` entries are
+ * therefore NOT "the reroute is the point" like the two above. They are the
+ * opposite: that file hands the built entry a `development` / `test` child
+ * precisely to assert the reroute does NOT happen, which is an input this rule
+ * cannot distinguish from the hazard by reading the call. ⛔ Do not read them as
+ * precedent for a spawner that wants `src/`; that is still `bin/run-dev.js`.
  */
 export const DELIBERATE_REROUTE = {
   'packages/cli/test/serve-node-env-production-default.e2e.test.ts::it("NODE_ENV=development (explicit): the gate stays OPEN \u2014 unaffected by the production default")': {
@@ -529,6 +554,15 @@ export const DELIBERATE_REROUTE = {
   },
   'packages/cli/test/serve-node-env-production-default.e2e.test.ts::it("NODE_ENV=test (explicit): the gate stays OPEN \u2014 unaffected by the production default")': {
     why: 'The sibling leg, same argument, one value over. Keyed separately on purpose -- one entry may silence one site, which is what #12531 made possible.',
+  },
+  'packages/cli/test/published-entry-node-env-source-reroute.test.ts::it("resolves commands from dist/ under an ambient NODE_ENV=development")': {
+    why: 'The INVERSE of the two entries above, and #12271 is why it can exist: this leg hands the built entry a development child in order to assert it resolves dist/ ANYWAY, which is what bin/run.js\'s settings.enableAutoTranspile = false now guarantees. The ambient NODE_ENV is the defect\'s input, so it cannot be scrubbed without deleting the regression; and bin/run-dev.js is the wrong entry by construction -- it is the one that is supposed to reach src/.',
+  },
+  'packages/cli/test/published-entry-node-env-source-reroute.test.ts::it("resolves commands from dist/ under an ambient NODE_ENV=test")': {
+    why: 'The sibling leg, one value over. Keyed separately for the #12531 reason the pair above records. test is oclif\'s second non-production value and was never measured before #12271; vitest exporting it on its own worker is exactly the silent inheritance this gate\'s rule-3 header warns about.',
+  },
+  'packages/cli/test/published-entry-node-env-source-reroute.test.ts::it("CONTROL: neutralising the declaration in the child reproduces the card verbatim")': {
+    why: 'The control that must FIRE. Every other assertion in that file is an ABSENCE, so one leg has to defeat the declaration in the child -- via an --import preload, never an edit to bin/run.js on disk -- and watch the card reproduce verbatim. Deleting this entry means deleting the only leg that proves the sibling legs are measuring anything.',
   },
 };
 
@@ -2601,8 +2635,15 @@ export function selfTest() {
       .filter((abs) => builtEntrypointSpawns(abs, readFileSync(abs, 'utf8')).spawns > 0)
       .map((abs) => relative(REPO_ROOT, abs).split(sep).join('/'))
       .sort();
-    t('the built-entrypoint population is exactly the five files that spawn bin/run.js',
+    t('the built-entrypoint population is exactly the six files that spawn bin/run.js',
       JSON.stringify(builtFiles) === JSON.stringify([
+        // [#12271] Joined the population deliberately, and it is the one member
+        // whose subject is the ENTRY rather than `serve`: it spawns `bin/run.js`
+        // with an ambient `development` / `test` child to assert that the
+        // published entry resolves `dist/commands` anyway. See its three
+        // DELIBERATE_REROUTE entries for why that input cannot be scrubbed and
+        // why `bin/run-dev.js` is the wrong entry for it.
+        'packages/cli/test/published-entry-node-env-source-reroute.test.ts',
         'packages/cli/test/serve-mcp-capability-collision.e2e.test.ts',
         'packages/cli/test/serve-mcp-stdio-answers.e2e.test.ts',
         'packages/cli/test/serve-node-env-production-default.e2e.test.ts',
