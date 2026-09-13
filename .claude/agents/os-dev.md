@@ -47,7 +47,7 @@ model: opus
    - 其余 ⛔ 不立卡:观察、死代码、未演练漂移、抛光、风格、文档 nit、命名。
    - 它们进 PR `## Acceptance notes`,报告 `out_of_scope_findings` 记 `noted, not filed: …`,席位 ACCEPT 读。
    - 写 `noted, not filed` 前先答哪一个 PR 或人会碰到这个文件;答不出就写明「承接者:无」。
-   - 先搜再立:关键词 + 文件路径扫 open issues;并行 dev 同一小时立的卡只有这一搜能看见。
+   - 立卡者不查重,只在卡面附 3–5 个查重词;查重归分诊席,⛔ 不扫 open issues、不拉板。
    - 通道先探后选:同容器先测一条 repo-scoped REST 读;通 ⇒ 走 REST 列表端点 + 本地 grep。
    - 通道对照表见 `.claude/skills/pm-dispatch/references/rest-channel.md`,其 ✓ 按座位实测。
    - 403 ⇒ 改用一次定向 MCP `search_issues`,并在报告申报换道。

@@ -55,6 +55,23 @@ export type {
   InvitationPlacementService,
 } from './invitation-placement.js';
 export { bootstrapDeclaredPermissions } from './bootstrap-declared-permissions.js';
+// [#17516] The set-name collision diagnostic. EXPORTED because its whole
+// purpose is to be the ONE derivation every door shares: the runtime door below
+// raises it today, and the compile-time door (`os build` / `os validate`, which
+// lives in another package) must consume these rather than re-deriving either
+// the predicate or the wording — that drift is what this card is about, one
+// layer up.
+export {
+  PERMISSION_SET_NAME_COLLISION,
+  formatPermissionSetNameCollisionDiagnostic,
+  permissionSetNameCollisionDiagnostic,
+  permissionSetNameIsForeign,
+  reportPermissionSetNameCollisions,
+} from './permission-set-name-collision.js';
+export type {
+  CollisionReportSink,
+  PermissionSetNameCollisionDiagnostic,
+} from './permission-set-name-collision.js';
 // [ADR-0094] sys_permission_set pure-projection machinery.
 export {
   permissionSetRowFields,
