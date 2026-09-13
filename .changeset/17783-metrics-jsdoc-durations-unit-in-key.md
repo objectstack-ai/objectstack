@@ -83,7 +83,10 @@ The two mechanical spellings are attested: `maxAgeSeconds` is the token
 `AccessControlConfig.maxAgeSeconds` already carries after this same rule renamed it on
 `system/object-storage.zod.ts`, and it keeps the `age` stem that the sibling `ageBuckets` counts
 buckets of; `intervalSeconds` is the token four seconds-valued cadences already carry. Counted in
-key position across `packages/spec/src`, the seconds suffixes run `Seconds` 40, `Sec` 1, `S` 0.
+key position across `packages/spec/src` at `fc28c1d38`, the base of this change, the seconds
+suffixes run `Seconds` 40, `Sec` 1 (`maxExecutionTimeSec`) and `S` 0 — the two bare `*S` keys on
+that corpus, `maxCommitTimeMS` and `enableRLS`, are a millisecond spelling and a boolean. This
+change takes `Seconds` to 45 at `9b62f54671`.
 
 ## The kit
 
