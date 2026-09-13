@@ -874,7 +874,21 @@ export const CEILINGS = new Map([
   // line-neutral folds among this file's adjacent rule pairs, and re-wrap funding
   // is refused per the 2026-08-17 rule in any case. Landed count, headroom 0,
   // same convention.
-  ['.claude/skills/pm-dispatch/references/platform-readings.md', 451],
+  // Raised 451 → 453 by the THIRTEENTH readings increment, again under the
+  // STANDING one-file exception quoted above rather than a fresh decision
+  // card, and again recorded as a `ruledRaises` record citing it. Spent at ONE
+  // line per deduplicated reading, each written in this file's voice, both
+  // from the Claude Code settings and permissions documentation and marked
+  // 文档载明未实测 in the file's own convention: the repository's shared
+  // `.claude/settings.json` `permissions.deny` is read in a cloud session
+  // and a deny at any scope is evaluated before every allow (+1); and its
+  // reading trap — a denied MCP tool is removed from the tool roster
+  // entirely, so a tool's absence reads as the deny working, never as a dead
+  // MCP server (+1) = +2 exactly. Candidates 2 / landed 2 / already present 0
+  // / refused 0. Nothing paid in place: the two lines sit beside the
+  // invalid-session pair they qualify. Landed count, headroom 0, same
+  // convention.
+  ['.claude/skills/pm-dispatch/references/platform-readings.md', 453],
   // Per-operation REST/GraphQL/git channel mapping — which fleet operation has
   // a REST twin (each row executed in a real session, provenance date carried
   // per row), the handful that are GraphQL-only, and the queue-routing
@@ -1486,6 +1500,23 @@ export const CROSS_FILE_MOVES = new Map([
           // conditions (per-item verification and the candidate / landed /
           // already-present / refused counts) are carried by the raising PR's
           // dedup table and the seat's ACCEPT.
+          ruling:
+            'the standing one-file exception for'
+            + ' `.claude/skills/pm-dispatch/references/platform-readings.md` — pm-dispatch'
+            + ' SKILL.md, verbatim and untranslated: 「唯一例外:`platform-readings.md`'
+            + ' 增量抬上限到落地行数,免决策卡,记 `ruledRaises` 引常设裁决。条件:席位验收评论'
+            + '逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排」',
+          date: '2026-09-13',
+          delta: 2,
+        },
+        {
+          // The THIRTEENTH increment, under the same STANDING exception — the
+          // same words again, for the same reason: a record that quotes no
+          // ruling is RED and each record stands alone. The +2 is accounted for
+          // line by line beside this entry's ceiling above; the exception's
+          // conditions (per-item verification and the candidate / landed /
+          // already-present / refused counts) are carried by the raising PR's
+          // body and the seat's ACCEPT.
           ruling:
             'the standing one-file exception for'
             + ' `.claude/skills/pm-dispatch/references/platform-readings.md` — pm-dispatch'
