@@ -1062,6 +1062,26 @@ export const ERROR_CODE_LEDGER = {
   '@objectstack/plugin-approvals': [
     'FORBIDDEN',
     'RECORD_LOCKED',
+    // [#17909] Second EMITTER of the code — `@objectstack/rest` already
+    // registers it for the THROW path, where the approvals door's
+    // `handleApprovalError` catch maps a `RESUME_FAILED:`-prefixed message to
+    // a 500 whose body names that same code, and the producer's declaration is
+    // never read. This row is the OTHER moment, and it is not that one: the
+    // `resumeFailure` member `ResumeFailureReport` declares
+    // (`contracts/approval-service.ts`) rides a SUCCESS answer, where the door
+    // has no envelope to stamp — `decide` / `recall` are served by
+    // `res.json(out)` (rest-server.ts), which copies the service's result
+    // verbatim, and `packages/rest/src` spells `resumeFailure` nowhere. So the
+    // wire value IS this package's own literal, reachable end to end (the
+    // #8035 test), and the door names no vocabulary here to waive it under.
+    // One code, not three: the member's docblock also names
+    // `RESUME_TARGET_LOST` and `RESUME_IN_PROGRESS`, and this package stamps
+    // neither in a scanned position — `RESUME_TARGET_LOST` is a thrown message
+    // prefix served under rest's row, `RESUME_IN_PROGRESS` is compared, never
+    // constructed, and is emitted by `@objectstack/service-automation`, which
+    // carries its own row. A row for a code this package does not stamp would
+    // be the dead weight this file's gate refuses.
+    'RESUME_FAILED',
   ],
   '@objectstack/plugin-security': [
     // [#7474] `controlled_by_parent` declared with no `master_detail` relation.
