@@ -4,7 +4,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { IDataEngine } from '@objectstack/spec/contracts';
 import { ObjectKernel, Plugin, PluginContext } from '@objectstack/core';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
-import { ObjectQLPlugin } from '@objectstack/objectql';
+import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { MessagingServicePlugin, MessagingService } from '@objectstack/service-messaging';
 
@@ -12,6 +12,7 @@ import { createDispatcherPlugin } from './dispatcher-plugin.js';
 import { DriverPlugin } from './driver-plugin.js';
 import { captureExpectedReadRefusals } from './expected-read-refusal-noise.js';
 import type { IHttpServer } from '@objectstack/spec/contracts';
+import type { ServiceObject } from '@objectstack/spec/data';
 
 /**
  * End-to-end regression for framework #3362 (`#3354 not effective on hono`).
@@ -64,42 +65,136 @@ function fakeAuthPlugin(): Plugin {
 }
 
 /**
- * [#10629] The authz resolver's expected read failures: WITHHELD, and ASSERTED.
+ * ⭐ [#18070] The authz objects this fixture PROVISIONS, and why it now does.
  *
- * This file is the direct sibling `notification-schema-conformance.integration.test.ts`
- * names in its own header, and it carries the same never-provisioned `sys_*`
- * authz reads through `resolveUserAuthzGrants`
- * (`core/src/security/resolve-authz-context.ts`): the fixture provisions the
- * messaging objects and nothing else, so every authenticated request reads six
- * `sys_*` tables that were never created. `tryFind` swallows each one by design
- * — the resolver is fail-closed and must always resolve — but on the way out
- * the driver and the engine each log it. Measured on `origin/main`: 52
- * `refused a read on` lines and 52 matching `ERROR Find operation failed`
- * frames, out of a suite whose five tests all PASS.
+ * Until #18070 these five sat on the ABSENT list below with `sys_setting`, and
+ * every authenticated request in this file read all five through core's
+ * `resolveUserAuthzGrants` (`core/src/security/resolve-authz-context.ts`) and
+ * had every one of those reads REFUSED. `tryFind` classifies a missing table
+ * as "not provisioned" and answers `[]`, so the file stayed green over grant
+ * resolutions that never happened — a green it had not earned, and one it
+ * could not lose if grant resolution broke. The old assertions PINNED that
+ * symptom (they required the refusals to keep arriving) rather than closing
+ * the read; #18070 closes it, so those pins move — deliberately, and they are
+ * replaced rather than deleted (see `expectResolverAuthzReadsSucceed`).
  *
- * PR #10630 ruled the shape for this class and applied it to the sibling; this
- * is the same shape through the shared `expected-read-refusal-noise.ts`, whose
- * header carries the full rationale (⛔ it withholds ONLY a line that names one
- * of these tables AND carries that same table's `no such table` reason, and it
- * COUNTS what it withheld so the assertions below can be a PIN rather than a
- * mute).
+ * ⚠️ Measured on `fb29f62ce` through the capture's OWN `refusals` counter and
+ * ⛔ NOT through a log grep: this file routes its refusals through
+ * `captureExpectedReadRefusals`, which WITHHOLDS the driver line, so
+ * `grep -c "refused a read on"` over a full run of this file reads a clean
+ * **0** while every read is still being refused. The counter read:
+ * `refusals` = { sys_user: 10, sys_member: 10, sys_user_position: 10,
+ * sys_user_permission_set: 10, sys_position: 10, sys_setting: 2 } — 52 in
+ * total, 50 of them resolver-class — with `engineFrames` identical.
+ *
+ * The five are registered LOCALLY below, carrying only the columns that
+ * reading path touches, so this file adds no dependency edge onto
+ * `@objectstack/plugin-auth` or `@objectstack/plugin-security` — the shape
+ * PR #17982 and PR #18067 landed for the same defect. ⛔ The count falls
+ * because the read SUCCEEDS; it is ⛔ not silenced, filtered or re-levelled.
+ *
+ * Columns, and why each is here — every other column of the real objects is
+ * deliberately absent, because no read on this path touches it. `id` is not
+ * declared: the registry supplies the primary key itself, and it is what
+ * `sys_user`'s `id` filter reads.
+ *   `sys_user`                 email (the `current_user.email` owner-RLS fallback)
+ *   `sys_member`               user_id / organization_id (both filters), role
+ *   `sys_user_position`        user_id (filter), position, organization_id
+ *   `sys_user_permission_set`  user_id (filter), permission_set_id, organization_id
+ *   `sys_position`             name (filter), active (`isRowActive`),
+ *                              organization_id (the driver's tenant scope)
+ *
+ * ⛔ `sys_position_permission_set` and `sys_permission_set` are NOT here: the
+ * resolver reaches them only once a `sys_position` row resolves and a
+ * permission-set id is collected, and nothing here seeds either — measured,
+ * neither table appears in this file's refusals, before or after.
  */
-const ABSENT_AUTHZ_TABLES = [
-  'sys_user',
-  'sys_member',
-  'sys_user_position',
-  'sys_user_permission_set',
-  'sys_position',
-  'sys_setting',
-] as const;
+const AUTHZ_RESOLVER_OBJECTS: { owner: string; def: ServiceObject }[] = [
+  {
+    owner: '@objectstack/plugin-auth',
+    def: {
+      name: 'sys_user',
+      label: 'User',
+      fields: {
+        email: { type: 'text', label: 'Email' },
+      },
+    },
+  },
+  {
+    owner: '@objectstack/plugin-auth',
+    def: {
+      name: 'sys_member',
+      label: 'Member',
+      fields: {
+        user_id: { type: 'text', label: 'User' },
+        organization_id: { type: 'text', label: 'Organization' },
+        role: { type: 'text', label: 'Role' },
+      },
+    },
+  },
+  {
+    owner: '@objectstack/plugin-security',
+    def: {
+      name: 'sys_user_position',
+      label: 'User Position',
+      fields: {
+        user_id: { type: 'text', label: 'User' },
+        position: { type: 'text', label: 'Position' },
+        organization_id: { type: 'text', label: 'Organization' },
+      },
+    },
+  },
+  {
+    owner: '@objectstack/plugin-security',
+    def: {
+      name: 'sys_user_permission_set',
+      label: 'User Permission Set',
+      fields: {
+        user_id: { type: 'text', label: 'User' },
+        permission_set_id: { type: 'text', label: 'Permission Set' },
+        organization_id: { type: 'text', label: 'Organization' },
+      },
+    },
+  },
+  {
+    owner: '@objectstack/plugin-security',
+    def: {
+      name: 'sys_position',
+      label: 'Position',
+      fields: {
+        name: { type: 'text', label: 'Name' },
+        active: { type: 'boolean', label: 'Active' },
+        organization_id: { type: 'text', label: 'Organization' },
+      },
+    },
+  },
+];
 
 /**
- * The five read on EVERY grant resolution, i.e. on every authenticated request
- * this file makes. `sys_setting` is deliberately NOT here: it is read on only
- * some routes, so requiring it would turn a single-test `-t` run red without
- * meaning anything — it is still withheld when it does fire.
+ * The five tables above, by name — the set every grant resolution reads and
+ * this fixture now SERVES. `expectResolverAuthzReadsSucceed()` below is the
+ * assertion over them.
  */
-const ALWAYS_READ_AUTHZ_TABLES = ABSENT_AUTHZ_TABLES.filter((t) => t !== 'sys_setting');
+const PROVISIONED_AUTHZ_TABLES = AUTHZ_RESOLVER_OBJECTS.map((o) => o.def.name);
+
+/**
+ * The one table this fixture still does not provision, and the whole of the
+ * capture's declared set now. ⛔ Derived by measurement, not from a prober's
+ * source: after the registration above, `sys_setting` is the only `no such
+ * table` refusal this file still produces (measured: 2 on a full run). It stays
+ * declared so its line stays out of the shared `Test Core` log, and it stays
+ * OUT of any required-channel assertion for the reason it always was — it is
+ * read on only some of this file's routes, so requiring it would turn a
+ * single-test `-t` run red without meaning anything.
+ *
+ * ⭐ Shrinking the declared set is what keeps this capture from becoming a
+ * mute. `captureDriver` forwards an UNRECOGNISED refusal straight to
+ * `console.warn`, so a regression that stops provisioning one of the five is
+ * now LOUD on the driver channel as well as red through
+ * `expectResolverAuthzReadsSucceed()` — where, while the five were declared,
+ * the same regression would have been withheld and merely counted.
+ */
+const ABSENT_AUTHZ_TABLES = ['sys_setting'] as const;
 
 describe('in-app notifications over a real hono server (integration, #3362)', () => {
   let kernel: ObjectKernel;
@@ -139,6 +234,15 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
     // reads this scopes all happen later, per request.
     noise.captureEngine(kernel.getService<unknown>('objectql'));
 
+    // [#18070] The authz resolver's own reads, registered and synced here so
+    // the driver PROVISIONS them rather than refusing them. After bootstrap,
+    // so each needs its own DDL pass.
+    const authzEngine = kernel.getService<ObjectQL>('objectql');
+    for (const o of AUTHZ_RESOLVER_OBJECTS) {
+      authzEngine.registerObject(o.def, o.owner);
+      await authzEngine.syncObjectSchema(o.def.name);
+    }
+
     const httpServer = kernel.getService<IHttpServer>('http.server');
     baseUrl = `http://127.0.0.1:${httpServer.getPort!()}`;
     messaging = kernel.getService<MessagingService>('notification');
@@ -152,6 +256,29 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
       ]);
     }
   }, 30_000);
+
+  /**
+   * ⭐ [#18070] The replacement for `noise.silentChannels(ALWAYS_READ_AUTHZ_TABLES)`
+   * — the same pin, turned around.
+   *
+   * That assertion required each of the five reads to still be REFUSED: it
+   * pinned the symptom, and it is exactly what had to move once the read was
+   * closed. ⛔ It is not simply deleted. What it asserted about grant
+   * resolution — "these five reads really happen on this path" — is asserted
+   * here in the direction the fix runs: each read SUCCEEDS, and answers `[]`
+   * because the state is empty rather than because the table is missing. That
+   * distinction is the whole of #18070.
+   *
+   * ⛔ Remove the `AUTHZ_RESOLVER_OBJECTS` registration in `beforeAll` and
+   * every one of these rejects — which is what makes this a pin and not a
+   * decoration.
+   */
+  const expectResolverAuthzReadsSucceed = async (): Promise<void> => {
+    const data = kernel.getService<IDataEngine>('data');
+    for (const table of PROVISIONED_AUTHZ_TABLES) {
+      await expect(data.find(table, { where: {} })).resolves.toEqual([]);
+    }
+  };
 
   const as = (user: string, path: string, init?: RequestInit) =>
     fetch(`${baseUrl}${path}`, {
@@ -212,16 +339,13 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
     expect(served.status).toBe(200);
     expect((await served.json() as { success: boolean }).success).toBe(true);
 
-    // ── [#10629] The capture is a PIN, not a mute. These lines used to reach
-    // the shared `Test Core` log out of a PASSING test and were read there as a
-    // real failure; they are withheld now and asserted here. Asserted per authed
-    // test rather than in `afterAll` because two tests in this file resolve no
-    // grants at all (discovery, and the anonymous 401), and an `afterAll` would
-    // make a single-test `-t` run of either of them red for no reason.
-    // ⛔ If one of these goes silent the repair is to re-derive the list above,
-    // NOT to relax this: a resolver read that stopped happening is a finding,
-    // and a table that started resolving means this fixture now provisions it.
-    expect(noise.silentChannels(ALWAYS_READ_AUTHZ_TABLES)).toEqual([]);
+    // ── [#18070] The #10629 pin, turned around: this used to assert that the
+    // five resolver reads were still being REFUSED here. They are provisioned
+    // now, so the assertion is that they SUCCEED. Kept per authed test rather
+    // than moved to `afterAll` for the reason the old one was — two tests in
+    // this file resolve no grants at all (discovery, and the anonymous 401) —
+    // and because the read below needs a live engine.
+    await expectResolverAuthzReadsSucceed();
   });
 
   it('lists, marks specific read, then marks all read — flipping receipts and clearing the unread count', async () => {
@@ -268,16 +392,13 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
     expect(receipts.length).toBe(2);
     expect(receipts.every((r: any) => r.state === 'read')).toBe(true);
 
-    // ── [#10629] The capture is a PIN, not a mute. These lines used to reach
-    // the shared `Test Core` log out of a PASSING test and were read there as a
-    // real failure; they are withheld now and asserted here. Asserted per authed
-    // test rather than in `afterAll` because two tests in this file resolve no
-    // grants at all (discovery, and the anonymous 401), and an `afterAll` would
-    // make a single-test `-t` run of either of them red for no reason.
-    // ⛔ If one of these goes silent the repair is to re-derive the list above,
-    // NOT to relax this: a resolver read that stopped happening is a finding,
-    // and a table that started resolving means this fixture now provisions it.
-    expect(noise.silentChannels(ALWAYS_READ_AUTHZ_TABLES)).toEqual([]);
+    // ── [#18070] The #10629 pin, turned around: this used to assert that the
+    // five resolver reads were still being REFUSED here. They are provisioned
+    // now, so the assertion is that they SUCCEED. Kept per authed test rather
+    // than moved to `afterAll` for the reason the old one was — two tests in
+    // this file resolve no grants at all (discovery, and the anonymous 401) —
+    // and because the read below needs a live engine.
+    await expectResolverAuthzReadsSucceed();
   });
 
   it('[#6436] mark-all-read clears an inbox LARGER than the list window — no readCount/unreadCount contradiction', async () => {
@@ -329,15 +450,12 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
     expect(receipts.length).toBe(TOTAL);
     expect(receipts.every((r: any) => r.state === 'read')).toBe(true);
 
-    // ── [#10629] The capture is a PIN, not a mute. These lines used to reach
-    // the shared `Test Core` log out of a PASSING test and were read there as a
-    // real failure; they are withheld now and asserted here. Asserted per authed
-    // test rather than in `afterAll` because two tests in this file resolve no
-    // grants at all (discovery, and the anonymous 401), and an `afterAll` would
-    // make a single-test `-t` run of either of them red for no reason.
-    // ⛔ If one of these goes silent the repair is to re-derive the list above,
-    // NOT to relax this: a resolver read that stopped happening is a finding,
-    // and a table that started resolving means this fixture now provisions it.
-    expect(noise.silentChannels(ALWAYS_READ_AUTHZ_TABLES)).toEqual([]);
+    // ── [#18070] The #10629 pin, turned around: this used to assert that the
+    // five resolver reads were still being REFUSED here. They are provisioned
+    // now, so the assertion is that they SUCCEED. Kept per authed test rather
+    // than moved to `afterAll` for the reason the old one was — two tests in
+    // this file resolve no grants at all (discovery, and the anonymous 401) —
+    // and because the read below needs a live engine.
+    await expectResolverAuthzReadsSucceed();
   }, 120_000);
 });
