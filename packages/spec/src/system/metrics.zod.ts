@@ -135,6 +135,20 @@ export const MetricLabelsSchema = lazySchema(() => z.record(z.string(), z.string
 
 export type MetricLabels = z.input<typeof MetricLabelsSchema>;
 
+// Declared ABOVE its consumer on purpose: `gen:schema` and
+// `check:authorable-surface` run with `OS_EAGER_SCHEMAS=1`, which makes
+// `lazySchema` evaluate its factory at module load, so a const declared after
+// the schema that reads it would be a temporal-dead-zone read. Every tombstone
+// string on this file sits above the schema that consumes it.
+const SUMMARY_MAX_AGE_RETIRED =
+  '`MetricDefinition.summary.maxAge` was renamed to `maxAgeSeconds` in @objectstack/spec 17 — '
+  + 'the unit of a duration-shaped number lives in the key name, not only in the describe '
+  + 'prose. Its unit (seconds) lived in a source JSDoc only and the published description named '
+  + 'none, so a reader of the reference page could not tell 600 seconds from 600 milliseconds. '
+  + 'The new name keeps the `age` stem instead of becoming `durationSeconds`, because the '
+  + 'sibling key `ageBuckets` counts buckets of that same age. Rename the key to '
+  + '`maxAgeSeconds`; the value (seconds) is unchanged.';
+
 /**
  * Metric Definition Schema
  */
@@ -186,9 +200,23 @@ export const MetricDefinitionSchema = lazySchema(() => z.object({
     quantiles: z.array(z.number().min(0).max(1)).optional().default([0.5, 0.9, 0.99]),
 
     /**
-     * Max age of observations in seconds
+     * Max age of observations in seconds.
+     *
+     * Renamed from `maxAge` (#15939 ruling A, executing #14478): the unit lived
+     * in this JSDoc only, and the key carried no `.describe()` at all, so the
+     * reference page published a bare integer. Spelled `maxAgeSeconds` — the
+     * same token `AccessControlConfig.maxAgeSeconds` on `system/object-storage.zod.ts`
+     * already carries after the same rule renamed it — and NOT `durationSeconds`,
+     * the spelling the three window lengths on this file take: this number is an
+     * age bound whose sibling `ageBuckets` counts buckets of that very age, so
+     * dropping the `age` stem would orphan the pair. Tombstoned rather than
+     * deleted because this nested `summary` object is not `.strict()`.
      */
-    maxAge: z.number().int().positive().optional().default(600),
+    maxAgeSeconds: z.number().int().positive().optional().default(600)
+      .describe('Max age of observations in seconds'),
+
+    /** Tombstone for the rename above (#15939 ruling A, executing #14478). */
+    maxAge: retiredKey(SUMMARY_MAX_AGE_RETIRED),
 
     /**
      * Number of age buckets
@@ -333,6 +361,19 @@ const SLO_PERIOD_DURATION_RETIRED =
   + '@objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not '
   + 'only in the describe prose. Rename the key to `durationSeconds`; the value (seconds) '
   + 'is unchanged.';
+
+// Above `ServiceLevelObjectiveSchema`, the schema that reads it — see the
+// eager-evaluation note on `SUMMARY_MAX_AGE_RETIRED`.
+const SLO_BURN_RATE_WINDOW_RETIRED =
+  '`ServiceLevelObjective.errorBudget.burnRateWindows[].window` was renamed to '
+  + '`durationSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in '
+  + 'the key name, not only in the describe prose. Its unit (seconds) lived in a source JSDoc '
+  + 'only and the published description read "Window size", naming none, so a reader of the '
+  + 'reference page could not tell 3600 seconds from 3600 milliseconds. The new name is not '
+  + '`windowSeconds`: the array this object sits in is already called `burnRateWindows`, so the '
+  + 'key would stutter, and it matches the three window and period lengths this file already '
+  + 'spells `durationSeconds`. Rename the key to `durationSeconds`; the value (seconds) is '
+  + 'unchanged.';
 
 export const MetricAggregationConfigSchema = lazySchema(() => z.object({
   /**
@@ -547,9 +588,21 @@ export const ServiceLevelObjectiveSchema = lazySchema(() => z.object({
      */
     burnRateWindows: z.array(z.object({
       /**
-       * Window size in seconds
+       * Window duration in seconds.
+       *
+       * Renamed from `window` (#15939 ruling A, executing #14478): the unit
+       * lived in this JSDoc only and the `.describe()` the reference pages
+       * publish read "Window size", naming none. The fourth window length on
+       * this file, so it takes the same `durationSeconds` the other three take
+       * (#15679); `windowSeconds` would stutter against the enclosing
+       * `burnRateWindows` array exactly as `window.windowSeconds` would have.
+       * Tombstoned rather than deleted because this array-element object is
+       * not `.strict()`.
        */
-      window: z.number().int().positive().describe('Window size'),
+      durationSeconds: z.number().int().positive().describe('Window duration in seconds'),
+
+      /** Tombstone for the rename above (#15939 ruling A, executing #14478). */
+      window: retiredKey(SLO_BURN_RATE_WINDOW_RETIRED),
 
       /**
        * Burn rate multiplier threshold
@@ -591,6 +644,15 @@ export type ServiceLevelObjective = z.input<typeof ServiceLevelObjectiveSchema>;
 /** Post-parse shape of {@link ServiceLevelObjective} — defaults applied, transforms run (ADR-0122). */
 export type ServiceLevelObjectiveParsed = z.infer<typeof ServiceLevelObjectiveSchema>;
 
+// Above `MetricExportConfigSchema`, the schema that reads it — see the
+// eager-evaluation note on `SUMMARY_MAX_AGE_RETIRED`.
+const EXPORT_INTERVAL_RETIRED =
+  '`MetricExportConfig.interval` was renamed to `intervalSeconds` in @objectstack/spec 17 — '
+  + 'the unit of a duration-shaped number lives in the key name, not only in the describe '
+  + 'prose. Its unit (seconds) lived in a source JSDoc only and the key carried no describe at '
+  + 'all, so a reader of the reference page could not tell 60 seconds from 60 milliseconds. '
+  + 'Rename the key to `intervalSeconds`; the value (seconds) is unchanged.';
+
 /**
  * Metric Export Configuration
  */
@@ -618,9 +680,19 @@ export const MetricExportConfigSchema = lazySchema(() => z.object({
   endpoint: z.string().optional().describe('Export endpoint'),
 
   /**
-   * Export interval in seconds
+   * Export interval in seconds.
+   *
+   * Renamed from `interval` (#15939 ruling A, executing #14478): the unit lived
+   * in this JSDoc only and the key carried no `.describe()` at all. Spelled
+   * `intervalSeconds`, the token every seconds-valued cadence in this spec
+   * already carries. Tombstoned rather than deleted because this object is not
+   * `.strict()`.
    */
-  interval: z.number().int().positive().optional().default(60),
+  intervalSeconds: z.number().int().positive().optional().default(60)
+    .describe('Export interval in seconds'),
+
+  /** Tombstone for the rename above (#15939 ruling A, executing #14478). */
+  interval: retiredKey(EXPORT_INTERVAL_RETIRED),
 
   /**
    * Batch configuration
@@ -650,6 +722,30 @@ export const MetricExportConfigSchema = lazySchema(() => z.object({
 export type MetricExportConfig = z.input<typeof MetricExportConfigSchema>;
 /** Post-parse shape of {@link MetricExportConfig} — defaults applied, transforms run (ADR-0122). */
 export type MetricExportConfigParsed = z.infer<typeof MetricExportConfigSchema>;
+
+// Both above `MetricsConfigSchema`, the schema that reads them — see the
+// eager-evaluation note on `SUMMARY_MAX_AGE_RETIRED`.
+const COLLECTION_INTERVAL_RETIRED =
+  '`MetricsConfig.collectionInterval` was renamed to `collectionIntervalSeconds` in '
+  + '@objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not '
+  + 'only in the describe prose. Its unit (seconds) lived in a source JSDoc only and the key '
+  + 'carried no describe at all, so a reader of the reference page could not tell 15 seconds '
+  + 'from 15 milliseconds. The qualifier is kept — `collectionIntervalSeconds`, not '
+  + '`intervalSeconds` — because `MetricExportConfig.intervalSeconds` is a different cadence '
+  + 'one def over. Rename the key to `collectionIntervalSeconds`; the value (seconds) is '
+  + 'unchanged.';
+
+const RETENTION_PERIOD_RETIRED =
+  '`MetricsConfig.retention.period` was renamed to `durationSeconds` in @objectstack/spec 17 — '
+  + 'the unit of a duration-shaped number lives in the key name, not only in the describe '
+  + 'prose. Its unit (seconds) lived in a source JSDoc only and the key carried no describe at '
+  + 'all, so a reader of the reference page could not tell 604800 seconds from 604800 '
+  + 'milliseconds. The new name is not `periodSeconds`: `period` is calendar vocabulary '
+  + 'elsewhere in this spec (`ServiceLevelObjective.period.type` selects rolling or calendar, '
+  + '`PluginRegistryEntry.pricing.billingPeriod` is monthly or yearly), so it would have kept '
+  + 'the ambiguous '
+  + 'half of the name, and `durationSeconds` is what this file already calls a length of time. '
+  + 'Rename the key to `durationSeconds`; the value (seconds) is unchanged.';
 
 /**
  * Metrics Configuration Schema
@@ -704,18 +800,37 @@ export const MetricsConfigSchema = lazySchema(() => z.object({
   exports: z.array(MetricExportConfigSchema).optional().default([]),
 
   /**
-   * Collection interval in seconds
+   * Collection interval in seconds.
+   *
+   * Renamed from `collectionInterval` (#15939 ruling A, executing #14478): the
+   * unit lived in this JSDoc only and the key carried no `.describe()` at all.
+   * Tombstoned rather than deleted because this object is not `.strict()`.
    */
-  collectionInterval: z.number().int().positive().optional().default(15),
+  collectionIntervalSeconds: z.number().int().positive().optional().default(15)
+    .describe('Collection interval in seconds'),
+
+  /** Tombstone for the rename above (#15939 ruling A, executing #14478). */
+  collectionInterval: retiredKey(COLLECTION_INTERVAL_RETIRED),
 
   /**
    * Retention configuration
    */
   retention: z.object({
     /**
-     * Retention period in seconds
+     * Retention duration in seconds.
+     *
+     * Renamed from `period` (#15939 ruling A, executing #14478): the unit lived
+     * in this JSDoc only and the key carried no `.describe()` at all. Named
+     * `durationSeconds` and not `periodSeconds` because `period` is calendar
+     * vocabulary elsewhere in this spec, and because this file already spells a
+     * length of time `durationSeconds` (#15679). Tombstoned rather than deleted
+     * because this nested `retention` object is not `.strict()`.
      */
-    period: z.number().int().positive().optional().default(604800), // 7 days
+    durationSeconds: z.number().int().positive().optional().default(604800) // 7 days
+      .describe('Retention duration in seconds'),
+
+    /** Tombstone for the rename above (#15939 ruling A, executing #14478). */
+    period: retiredKey(RETENTION_PERIOD_RETIRED),
 
     /**
      * Downsampling configuration

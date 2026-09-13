@@ -371,7 +371,24 @@ export const CEILINGS = new Map([
   // entry's landed count in the same PR, so the split banks its own shrink
   // instead of leaving 21,630 tokens of headroom behind for the next author.
   // Lowering is always legitimate (see the shrink-only section in the header).
-  ['skills/objectstack-ui/SKILL.md', 3815],
+  // 3815 -> 3856: the one-app-per-package cap, stated in App Navigation. The
+  // entry page taught an author how to declare an App but never that a
+  // `type: 'app'` package ships exactly ONE, so an agent authored a second App
+  // object and met the cap at `defineStack` load time instead of at authoring
+  // time — the published teaching is the only place that fact can reach them.
+  // No existing text is made redundant by it, so there was nothing in this
+  // file to delete to fund it. Maintainer ruling 2026-09-13, authorizing this
+  // raise, verbatim and untranslated: 「17310 允许增加」.
+  // Arithmetic, in bytes because that is what this convention divides. The
+  // addition is +234 bytes (15260 -> 15494, i.e. 3815 -> 3874, +59 tokens),
+  // which is the number the pre-merge CI run reported. `origin/main` then
+  // deleted the `page` row from the same file's view-type table (-70 bytes),
+  // so the LANDED file is 15424 bytes and the ceiling moves by 41, not 59.
+  // Pinned AT the measurement taken on the merged head — zero headroom, so
+  // the next token added here is paid for by deleting one from this file.
+  // Independently reproducible without running this script:
+  //   ceil($(wc -c < skills/objectstack-ui/SKILL.md) / 4) == ceil(15424 / 4)
+  ['skills/objectstack-ui/SKILL.md', 3856],
   ['skills/objectstack-upgrade/SKILL.md', 8333], //      -2 (was 8335)
 
   // ── the #12392 extension: the rest of the AUTHORED bundle ────────────────
