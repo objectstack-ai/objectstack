@@ -9624,27 +9624,24 @@ export class SqlDriver implements IDataDriver {
     // `sql-driver-17639-distinct-fault-envelope.test.ts` asserts that on a
     // route (a table that was never provisioned) that has no JSON column in it.
     //
-    // ⛔ No BLANKET `isUnresolvableColumnError` arm either — the same gap
-    // #11455 left FILED rather than guessed at, for the same reason one door
-    // over: that refusal's words are "Filter on 'x' names a column that object
-    // 'o' has no column for", and this door names columns in TWO clauses, the
-    // `field` being listed and the WHERE compiled from `filters`. A blanket arm
-    // would tell the author of `distinct(o, 'nosuchcol')` — who passed no
-    // filter at all — that their FILTER was wrong, which is the unsupportable
-    // attribution the #8931 ruling refuses to make. #11541 closed that gap for
-    // `aggregate()` with a clause-attributing classifier; the `distinct()` half
-    // is filed as its own card.
+    // ⛔ And still NO BLANKET `isUnresolvableColumnError` arm — #17857 closed
+    // the gap #17639 left FILED, and it closed it the way #11541 closed the
+    // `aggregate()` one: by ATTRIBUTING the column to a clause of the caller's
+    // own request first. A blanket arm remains forbidden for the reason stated
+    // here since #17639 — it would tell the author of `distinct(o, 'nosuchcol')`,
+    // who passed no filter at all, that their FILTER was wrong — and
+    // {@link SqlDriver.distinctBackendFault} is what makes that claim
+    // unnecessary rather than what makes it safe.
     //
     // Only the EXECUTION is guarded. Every refusal this method composes upstream
     // — `applyFilters`' `INVALID_FILTER` out of {@link assertCompilableComparand}
-    // among them — is raised while the statement is BUILT, so the catch-all
+    // among them — is raised while the statement is BUILT, so the classifier
     // cannot bury a precise refusal under a generic 500.
     let results: unknown[];
     try {
       results = await builder;
     } catch (error) {
-      // [#8931] The terminal catch-all — see {@link SqlDriver.backendStatementFault}.
-      throw this.backendStatementFault(object, error);
+      throw this.distinctBackendFault(object, field, error);
     }
     const values = results.map((row: any) => row[field]);
 
@@ -9657,6 +9654,170 @@ export class SqlDriver implements IDataDriver {
     const kind = this.readPresentationKind(this.coercionKey(builder), field);
     if (!kind) return values;
     return [...new Set(values.map((v: any) => this.presentReadValue(kind, v)))];
+  }
+
+  /**
+   * [#17857] Which envelope a dialect error leaving {@link SqlDriver.distinct}
+   * deserves — the #8790 unresolvable-column refusal reaching the LAST read
+   * door, without the attribution #8931 forbids.
+   *
+   * # The condition, and why the blanket arm stayed forbidden until now
+   *
+   * `find()` and `count()` answer an unresolvable WHERE column with
+   * `INVALID_FILTER` / 400 naming the column (#8790, maintainer ruling
+   * 2026-08-15: one unresolvable WHERE column, one answer, on both read
+   * halves); #11541 brought the same answer to `aggregate()`. `distinct()` was
+   * the fourth call shape and the one still answering `DATABASE_ERROR` / 500
+   * — a SERVER fault for a caller's own typo, one door away from a 400 that
+   * names the column. Measured on better-sqlite3 and on live PostgreSQL 16.13,
+   * one object with a single `title` column:
+   *
+   * ```
+   * count(t,    { where: { nosuchcol: 1 } })  => INVALID_FILTER  400
+   * find(t,     { where: { nosuchcol: 1 } })  => INVALID_FILTER  400
+   * aggregate(t, { groupBy: ['nosuchcol'] })  => INVALID_FIELD   400
+   * distinct(t, 'title', { nosuchcol: 1 })    => DATABASE_ERROR  500  ← this card
+   * distinct(t, 'nosuchcol')                  => DATABASE_ERROR  500  ← this card
+   * ```
+   *
+   * A BLANKET `isUnresolvableColumnError` arm is still refused, and #17639
+   * wrote the reason at the door: this door names columns in TWO clauses — the
+   * `field` being listed and the WHERE compiled from `filters` — so the WHERE
+   * refusal's words ("Filter on 'x' names a column …") would tell the author of
+   * `distinct(o, 'nosuchcol')`, who passed no filter at all, that their FILTER
+   * was wrong. What this method adds is not a safer blanket arm; it is the
+   * attribution that makes the blanket arm unnecessary.
+   *
+   * # The three arms — attribution comes from the CALLER'S OWN REQUEST
+   *
+   * The dialect names the column; it does not name the clause. The clause is
+   * read off the request this driver just compiled, so every claim the refusal
+   * makes is a fact about the caller's own call and never a guess from the
+   * backend's prose:
+   *
+   * 1. the name EQUALS the `field` argument ⇒ a refusal naming the listed
+   *    column ({@link SqlDriver.unresolvableDistinctColumnRefusal},
+   *    `INVALID_FIELD` / 400);
+   * 2. it does not ⇒ the statement's only remaining column sources are the
+   *    WHERE compiled from `filters` and the tenant-scope predicate — both
+   *    filters — so #8790's existing
+   *    {@link SqlDriver.unresolvableFilterColumnRefusal} applies verbatim;
+   * 3. {@link unresolvableColumnNameOf} answers `null` ⇒ the wording parsed by
+   *    nothing. With no name there is no request lookup, so NO attribution is
+   *    supportable — the #17639 terminal envelope stands unchanged. ⛔ Reading
+   *    `null` as license for the WHERE arm would attribute a clause on no
+   *    evidence, which is arm 2's own justification inverted.
+   *
+   * ⭐ Arm 2 is the COMPLEMENT of arm 1, never a search of the `filters` AST for
+   * the name, and that is load-bearing rather than economical. `FilterCondition`
+   * nests (`$and` / `$or` / `$not`, `@objectstack/spec` `LOGICAL_OPERATORS`), so
+   * a key scan has to walk every declared node shape, and every shape it failed
+   * to walk would silently DOWNGRADE that filter's 400 back to the 500 this card
+   * exists to remove — for `{ $or: [{ nosuchcol: 1 }] }`, the exact defect,
+   * re-introduced one nesting level down and invisible to any pin written on a
+   * flat filter. The complement needs no walker to be complete: the compiled
+   * statement is `select distinct <field> from <table> where <filters + tenant
+   * scope>`, and a column reference that is not the `field` can only have come
+   * from a predicate. Pinned by
+   * `sql-driver-17857-distinct-unresolvable-column-refusal.test.ts`.
+   *
+   * ⚠ Arm 1 is judged by EXACT name equality, the discipline #11541 set: a
+   * suffix match ("`title.x` ends in `.x`") would attribute a dotted WHERE key
+   * to the listed field — a false verdict about a clause that may be perfectly
+   * fine — and inspecting the key for a `.` is #8371's axis besides. When the
+   * caller names one missing column in BOTH clauses
+   * (`distinct(o, 'nosuchcol', { nosuchcol: 1 })`), arm 1 wins and its claim is
+   * still true: the listed field really is a column the table lacks.
+   *
+   * # No new dialect recognizer
+   *
+   * Both predicates this method consults ({@link isUnresolvableColumnError},
+   * {@link unresolvableColumnNameOf}) are #8790's, shared with `find()`,
+   * `count()` and `aggregate()`, untouched — the #8926 ruling's refusal of a
+   * per-dialect clause parser applies here exactly as it did one door over.
+   *
+   * Returns the error rather than throwing it, the shape every sibling on this
+   * path uses, so the call site spells its own `throw`.
+   */
+  protected distinctBackendFault(object: string, field: string, error: unknown): Error {
+    if (isUnresolvableColumnError(error)) {
+      const column = unresolvableColumnNameOf(error);
+      if (column !== null) {
+        // Arm 1: the caller's own `field` argument — the one column reference
+        // this method put in the SELECT, read back exactly as it was passed.
+        if (column === field) {
+          return this.unresolvableDistinctColumnRefusal(object, column, error);
+        }
+        // Arm 2: not the listed field ⇒ a predicate named it (the caller's
+        // `filters`, or the tenant-scope wall this method applied above).
+        return this.unresolvableFilterColumnRefusal(object, error);
+      }
+      // Arm 3: recognised class, no parsed name — fall through to the terminal.
+    }
+    // [#8931] The terminal catch-all — see {@link SqlDriver.backendStatementFault}.
+    return this.backendStatementFault(object, error);
+  }
+
+  /**
+   * [#17857] Compose the refusal for the LISTED field of a distinct read whose
+   * column the backend could not resolve, writing the dialect's own message to
+   * the SERVER LOG on the way — the same statement-to-log, name-to-caller split
+   * {@link SqlDriver.unresolvableFilterColumnRefusal} performs for the WHERE
+   * (#7929: the dialect text inlines the statement's bound literals on two of
+   * the three dialects, so it may not travel to the caller).
+   *
+   * # `INVALID_FIELD` / 400 — read off the repo, not chosen
+   *
+   * No code is minted (ADR-0112): `INVALID_FIELD` is a standard-catalog member
+   * and is already this repo's answer for a named column an object does not
+   * have — `assertGroupByFieldsExist` / `assertAggregationFieldsExist`
+   * (`@objectstack/metadata-protocol`, #4254) at the protocol ingress, the
+   * write path at the REST boundary, and
+   * {@link SqlDriver.unresolvableAggregateColumnRefusal} (#11541) for this
+   * condition's aggregate twin. One condition must not carry two codes
+   * depending on which door asked, which is the whole of #8790's ruling.
+   *
+   * ⛔ Not `INVALID_FILTER`: the caller may have passed no filter at all, and
+   * that misattribution is what #8931 refuses. ⛔ Not `INVALID_QUERY`: a
+   * missing column is not a malformed query — the identical call answers
+   * values the moment schema sync runs. ⛔ Not the `DATABASE_ERROR` terminal:
+   * the failure IS attributable here, to a column the caller named.
+   *
+   * # Why refusal beats the empty list
+   *
+   * The wrong answer this refusal displaces is specific: `[]`. A picklist
+   * populated from `distinct()` renders an empty dropdown for a field name
+   * that does not exist, which looks like "no values yet" and is
+   * indistinguishable from a correct answer — the #8790 reasoning
+   * ("can only match zero records") applied to VALUES instead of rows.
+   *
+   * `field` / `object` ride the error the way the ingress door's refusals carry
+   * them, so `@objectstack/rest`'s `INVALID_FIELD` branch serves the same
+   * enriched envelope whichever layer refused. Both are the caller's own
+   * vocabulary — the column name equals the argument they passed, the object
+   * name is the one they passed — so neither discloses anything the caller did
+   * not write.
+   */
+  protected unresolvableDistinctColumnRefusal(object: string, column: string, error: unknown): Error {
+    const detail = (error as { message?: unknown } | null | undefined)?.message;
+    this.logger.warn(
+      `[sql-driver] INVALID_FIELD — the listed distinct column could not be resolved on ` +
+        `'${object}' ('${column}'). The dialect message below is kept server-side because it ` +
+        `inlines the statement bound literals (#7929, #17857): ` +
+        `${typeof detail === 'string' ? detail : String(error)}`,
+    );
+    const err = new Error(
+      `This query lists the distinct values of '${column}', a column that object '${object}' ` +
+        'has no column for, so the read never ran. Listing the values of a field that does not ' +
+        'exist can only answer an empty list, so the query was refused instead of answered with ' +
+        "one. Check the name against the object's fields; if the field was declared recently, " +
+        'run schema sync so the column exists before listing its values.',
+    ) as Error & { code?: string; status?: number; field?: string; object?: string };
+    err.code = StandardErrorCode.enum.INVALID_FIELD;
+    err.status = 400;
+    err.field = column;
+    err.object = object;
+    return err;
   }
 
   // ===================================
