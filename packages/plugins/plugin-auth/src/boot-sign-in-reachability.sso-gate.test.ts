@@ -38,9 +38,30 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AuthPlugin } from './auth-plugin';
-import { NO_SIGN_IN_ACCOUNT_AT_BOOT } from './boot-sign-in-reachability';
-import type { BootProbeEngine } from './boot-sign-in-reachability';
+import {
+  NO_SIGN_IN_ACCOUNT_AT_BOOT,
+  probeSignInAccountsPresence,
+  probeSignInPathWiring,
+  probeSsoProvidersPresence,
+  reportIfNoSignInAccountExists,
+  resolveDelegatedSignInPath,
+  resolveNoSignInAccountReport,
+} from './boot-sign-in-reachability';
+import type {
+  BootProbeEngine,
+  SignInPathWiring,
+  SignInReachabilityFacts,
+} from './boot-sign-in-reachability';
+import { WALLED_OWNER_NO_VERIFICATION_PATH } from './walled-owner-verification-path';
 import type { PluginContext } from '@objectstack/core';
+
+/** The store shape this report speaks about: humans SEEN, accounts SEEN ABSENT. */
+const DEAD_END: SignInReachabilityFacts = { humanUsers: 'present', signInAccounts: 'absent' };
+const NOTHING_WIRED: SignInPathWiring = {
+  ssoOnlyMode: false,
+  socialSignIn: false,
+  enterpriseSso: false,
+};
 
 const ENV_KEYS = [
   'OS_AUTH_SSO_ONLY',
@@ -249,5 +270,187 @@ describe('#15074 — ⛔ the no-SSO dead end is NOT silenced (#14495 / #14353)',
     const { errors, debugs } = await bootWith({ users: HUMANS, accounts: [] });
     expect(errors).toHaveLength(1);
     expect(debugs).toHaveLength(0);
+  });
+
+  it('the WALLED-OWNER NEIGHBOUR is untouched by this gate', async () => {
+    // Suppressing this report hands the hook back to the neighbour, exactly as
+    // it does for every other silent shape. The gate must not silence a second
+    // diagnostic on its way past — that is its own decision, on its own facts.
+    const { errors, logger } = await bootWith(
+      { users: HUMANS, accounts: [] },
+      {
+        OS_AUTH_SSO_ONLY: 'true',
+        OS_TENANCY_POSTURE: 'isolated',
+        OS_PLATFORM_OWNER_EMAIL: 'owner@corp.example',
+      },
+    );
+    expect(errors).toHaveLength(0);
+    const neighbour = logger.warn.mock.calls
+      .map((c) => String(c[0]))
+      .filter((m) => m.includes(WALLED_OWNER_NO_VERIFICATION_PATH));
+    expect(neighbour).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The gate, fact by fact — no I/O, no boot.
+// ---------------------------------------------------------------------------
+
+describe('#15074 — the predicate takes a THIRD fact and defaults to LOUD', () => {
+  it('no wiring argument at all ⇒ the report is unchanged', () => {
+    // Every pre-#15074 caller passes two arguments; the dead end they describe
+    // must keep reporting rather than fall quiet because a parameter is absent.
+    expect(resolveNoSignInAccountReport(DEAD_END)).toContain(NO_SIGN_IN_ACCOUNT_AT_BOOT);
+    expect(resolveNoSignInAccountReport(DEAD_END, NOTHING_WIRED)).toContain(
+      NO_SIGN_IN_ACCOUNT_AT_BOOT,
+    );
+  });
+
+  it.each([
+    ['ssoOnlyMode', { ...NOTHING_WIRED, ssoOnlyMode: true }, /ssoOnlyMode/],
+    ['socialSignIn', { ...NOTHING_WIRED, socialSignIn: true }, /social\/OIDC/],
+    ['enterpriseSso', { ...NOTHING_WIRED, enterpriseSso: true }, /sys_sso_provider/],
+  ])('a delegated path via `%s` ⇒ no report, and the reason NAMES it', (_n, wiring, names) => {
+    expect(resolveNoSignInAccountReport(DEAD_END, wiring as SignInPathWiring)).toBeNull();
+    expect(resolveDelegatedSignInPath(wiring as SignInPathWiring)).toMatch(names as RegExp);
+  });
+
+  it('nothing configured ⇒ there is no reason to name', () => {
+    expect(resolveDelegatedSignInPath(NOTHING_WIRED)).toBeNull();
+    expect(resolveDelegatedSignInPath(undefined)).toBeNull();
+  });
+
+  it('the gate only reaches the shape this report speaks about', () => {
+    // A configured IdP is not a licence to go quiet about other shapes: the two
+    // store facts still decide first, and `unknown` still claims nothing.
+    const wired: SignInPathWiring = { ...NOTHING_WIRED, ssoOnlyMode: true };
+    for (const facts of [
+      { humanUsers: 'absent', signInAccounts: 'unknown' },
+      { humanUsers: 'unknown', signInAccounts: 'unknown' },
+      { humanUsers: 'present', signInAccounts: 'present' },
+    ] satisfies SignInReachabilityFacts[]) {
+      expect(resolveNoSignInAccountReport(facts, wired)).toBeNull();
+      expect(resolveNoSignInAccountReport(facts)).toBeNull();
+    }
+  });
+
+  it('the emitter records the SUPPRESSED shape at `debug` — and only that shape', () => {
+    const logger = { warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    const wired: SignInPathWiring = { ...NOTHING_WIRED, ssoOnlyMode: true };
+
+    expect(reportIfNoSignInAccountExists(DEAD_END, logger, wired)).toBeNull();
+    expect(logger.error).not.toHaveBeenCalled();
+    expect(logger.warn).not.toHaveBeenCalled();
+    expect(logger.debug).toHaveBeenCalledTimes(1);
+    expect(String(logger.debug.mock.calls[0][0])).toContain(NO_SIGN_IN_ACCOUNT_AT_BOOT);
+
+    // An ordinary silent shape stays FULLY silent — the debug line is about the
+    // suppression, not about every boot.
+    logger.debug.mockClear();
+    reportIfNoSignInAccountExists({ humanUsers: 'present', signInAccounts: 'present' }, logger, wired);
+    expect(logger.debug).not.toHaveBeenCalled();
+  });
+
+  it('a sink with no `debug` is not an error, and the boot survives a throwing one', () => {
+    const wired: SignInPathWiring = { ...NOTHING_WIRED, socialSignIn: true };
+    expect(() => reportIfNoSignInAccountExists(DEAD_END, { warn: vi.fn() }, wired)).not.toThrow();
+    expect(() =>
+      reportIfNoSignInAccountExists(
+        DEAD_END,
+        { warn: vi.fn(), debug: () => { throw new Error('sink is down'); } },
+        wired,
+      ),
+    ).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ⛔ #15718's half is NOT taken here.
+// ---------------------------------------------------------------------------
+
+describe('#15074 — `probeSignInAccountsPresence` is left exactly as it was', () => {
+  it('still existence-only: ANY row answers `present`, unusable or not', async () => {
+    // The #15718 direction (one unusable `sys_account` row silences this report
+    // permanently) is an unruled maintainer question. This card gates the
+    // REPORT on a fact the probe never had; the probe's predicate is untouched.
+    const { engine } = engineOver({
+      accounts: [{ id: 'acc_1', provider_id: 'credential', password: 'plaintext-authenticates-nothing' }],
+    });
+    await expect(probeSignInAccountsPresence(engine)).resolves.toBe('present');
+  });
+
+  it('and a configured IdP does not change what the account probe answers', async () => {
+    process.env.OS_AUTH_SSO_ONLY = 'true';
+    const { engine } = engineOver({ users: HUMANS, accounts: [] });
+    await expect(probeSignInAccountsPresence(engine)).resolves.toBe('absent');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The provider probe, and what it costs.
+// ---------------------------------------------------------------------------
+
+describe('#15074 — the `sys_sso_provider` probe is bounded, silent and cheap', () => {
+  it('answers present / absent off one bounded row read', async () => {
+    const { engine, reads } = engineOver({ ssoProviders: [{ id: 'ssop_1' }] });
+    await expect(probeSsoProvidersPresence(engine)).resolves.toBe('present');
+    expect(reads).toEqual([{ object: 'sys_sso_provider', query: { limit: 1 } }]);
+
+    const empty = engineOver({ ssoProviders: [] });
+    await expect(probeSsoProvidersPresence(empty.engine)).resolves.toBe('absent');
+  });
+
+  it('no engine, or a store that throws ⇒ `unknown`, and it never throws', async () => {
+    await expect(probeSsoProvidersPresence(undefined)).resolves.toBe('unknown');
+    const thrower: BootProbeEngine = {
+      async find() { throw new Error('store refused sys_sso_provider'); },
+    };
+    await expect(probeSsoProvidersPresence(thrower)).resolves.toBe('unknown');
+  });
+
+  it('`unknown` keeps the report LOUD — an unreadable store proves no path', async () => {
+    const thrower: BootProbeEngine = {
+      async find() { throw new Error('store refused sys_sso_provider'); },
+    };
+    const wiring = await probeSignInPathWiring(DEAD_END, { features: { sso: true } }, thrower);
+    expect(wiring.enterpriseSso).toBe(false);
+    expect(resolveNoSignInAccountReport(DEAD_END, wiring)).toContain(NO_SIGN_IN_ACCOUNT_AT_BOOT);
+  });
+
+  it('is NOT read on a boot that could never report', async () => {
+    // Not the dead-end shape ⇒ the wiring cannot change anything ⇒ no read.
+    const { engine, reads } = engineOver({ ssoProviders: [{ id: 'ssop_1' }] });
+    const wiring = await probeSignInPathWiring(
+      { humanUsers: 'present', signInAccounts: 'present' },
+      { features: { sso: true } },
+      engine,
+    );
+    expect(wiring.enterpriseSso).toBe(false);
+    expect(reads).toEqual([]);
+  });
+
+  it('is NOT read when a delegated path is already proven from config', async () => {
+    const { engine, reads } = engineOver({ ssoProviders: [{ id: 'ssop_1' }] });
+    await probeSignInPathWiring(DEAD_END, { features: { sso: true, ssoEnforced: true } }, engine);
+    expect(reads).toEqual([]);
+
+    await probeSignInPathWiring(
+      DEAD_END,
+      { features: { sso: true }, socialProviders: [{ id: 'google' }] },
+      engine,
+    );
+    expect(reads).toEqual([]);
+  });
+
+  it('is not read at all when the SSO plugin is off', async () => {
+    const { engine, reads } = engineOver({ ssoProviders: [{ id: 'ssop_1' }] });
+    const wiring = await probeSignInPathWiring(DEAD_END, { features: { sso: false } }, engine);
+    expect(wiring).toEqual(NOTHING_WIRED);
+    expect(reads).toEqual([]);
+  });
+
+  it('an absent public config reads as NOTHING configured — the loud default', async () => {
+    const { engine } = engineOver({ ssoProviders: [{ id: 'ssop_1' }] });
+    await expect(probeSignInPathWiring(DEAD_END, undefined, engine)).resolves.toEqual(NOTHING_WIRED);
   });
 });
