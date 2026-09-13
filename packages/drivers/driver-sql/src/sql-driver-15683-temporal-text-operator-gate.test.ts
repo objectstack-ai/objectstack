@@ -313,7 +313,14 @@ describe('[#15683] the per-dialect construct, compiled', () => {
     const d = new MultiProbeDriver(DIALECTS[0][1]).declareMultiTemporal();
     const membership = d.compileWhere({ milestones: { $contains: '2026-01-05T00:00:00.000Z' } });
     expect(membership).not.toMatch(/1 = 0/);
-    expect(membership).toMatch(/LIKE|GLOB/);
+    // [#17590] This row's own title said "it is JSON membership, not a substring
+    // test" while the assertion under it named the SUBSTRING construct — the
+    // only one that existed when it was written. It is a membership construct
+    // now (`json_each` on this SQLite cell), so the assertion says what the
+    // title always meant. What #15683 is about is unmoved: the declared-type
+    // gate must not fire on a JSON column, whatever the column's members are
+    // compared with.
+    expect(membership).toMatch(/json_each\(/);
     // …while the scalar temporal column beside it is gated as usual, so this is
     // a carve-out for the JSON storage shape and not a hole in the gate.
     expect(d.compileWhere({ on_day: { $contains: '2026' } })).toMatch(/1 = 0/);

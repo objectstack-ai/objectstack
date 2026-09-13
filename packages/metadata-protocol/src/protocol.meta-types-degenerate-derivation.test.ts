@@ -2,7 +2,7 @@
 
 /**
  * [#17501] `GET /meta/types` must not serve an empty JSON Schema for a type
- * that accepts 47 keys.
+ * that accepts 48 keys.
  *
  * ## What was wrong
  *
@@ -23,7 +23,7 @@
  * `additionalProperties: false` 663 to 637). So the fix gates the authoring
  * derivation behind a degeneracy check, and the load-bearing assertion is the
  * BLAST RADIUS: exactly one served type may differ from the pre-fix
- * derivation. A suite that only pinned `action`'s 47 keys would stay green
+ * derivation. A suite that only pinned `action`'s 48 keys would stay green
  * through a later widening to `io: 'input'` for everything — which is the
  * change this card exists to refuse. This one goes red on it.
  *
@@ -147,7 +147,7 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
 
         const properties = served!.properties as Record<string, unknown>;
         expect(properties, '`action` must name its properties').toBeDefined();
-        expect(Object.keys(properties).length).toBe(47);
+        expect(Object.keys(properties).length).toBe(48);
         // A sample an author would actually address, and the one #17500's
         // repeater titles need a node to sit on.
         for (const key of ['name', 'label', 'objectName', 'type', 'params', 'locations']) {

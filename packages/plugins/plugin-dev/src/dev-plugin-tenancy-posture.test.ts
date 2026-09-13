@@ -20,8 +20,10 @@
 // service "is the wall up?" would be circular.
 //
 // ── What is observed, and why it is honest ──────────────────────────────────
-// `@objectstack/organizations` is a cloud-private enterprise package that is
-// genuinely absent from this workspace, so the dynamic import genuinely fails
+// `@objectstack/organizations` is open core since ADR-0132 and IS a member of
+// this workspace, but ADR-0132's entitlement boundary forbids any framework
+// package declaring it (`no-framework-dependents.pin.test.ts`), so it is
+// genuinely unresolvable from `plugin-dev`: the dynamic import genuinely fails
 // and the real catch branch runs. That makes the emitted warning a faithful
 // witness for "the multi-org branch was ENTERED": under the bug there is no
 // warning at all, because the `if` was never taken. The assertions therefore

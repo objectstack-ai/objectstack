@@ -831,11 +831,75 @@ export const RangeOperatorSchema = lazySchema(() => z.object({
  * driver-conformance ledger is empty. Read the open set from a run of that gate
  * rather than from this paragraph.
  *
+ * ### A JSON-stored column changes what `$contains` ASKS (#17590, maintainer ruling via the director seat, 2026-09-12)
+ *
+ * **On a `multiple: true` field or a `JSON_COLUMN_TYPES` member, `$contains: v`
+ * is a MEMBERSHIP test — `v` is a member of the stored array — answered
+ * identically on every SQL dialect and by `driver-memory`. On a scalar string
+ * column it stays the SUBSTRING test this docblock describes above.**
+ *
+ * One operator, two questions, selected by the COLUMN rather than by the
+ * caller. That reads like the "handled at backend level" non-guarantee this
+ * docblock retires, and it is the opposite: the storage shape is DECLARED
+ * metadata the author wrote (`multiple: true`, or a type such as `tags` /
+ * `multiselect`), not a property of whichever backend happens to be running, so
+ * the reading is the same everywhere the declaration is.
+ *
+ * Membership was never a new capability — it is the one operator #7398 left
+ * working on a JSON column after refusing the equality family there, and the
+ * spelling that refusal's own message prescribes (`{ "FIELD": { "$contains":
+ * "a" } }` for membership, an `$or` of them for any-of). What was missing was
+ * the SENTENCE: the drivers executed membership while the contract described
+ * only substring, so nothing said which answer was the promise and which was an
+ * accident of storage. Measured before the ruling, on one fixture:
+ *
+ * | face | `{ tags: { $contains: 'red' } }` over `['redwood']` | how it got there |
+ * |---|---|---|
+ * | `driver-sql` / SQLite | MATCHED — wrongly | `GLOB '*red*'` over the TEXT holding `["redwood"]`, a substring test across element boundaries |
+ * | `driver-sql` / MySQL | MATCHED — wrongly | the same, its `json` column coerced for `LIKE` |
+ * | `driver-sql` / PostgreSQL | `DATABASE_ERROR` 500 | `json` has no `LIKE` operator at all (SQLSTATE 42883) |
+ *
+ * Three answers to one filter, the shape #15683's ruling settled for the
+ * temporal class. Option B — casting the column to text so the pattern match
+ * runs everywhere — was refused precisely because it would have frozen the
+ * left-hand column's cross-element mismatch into a cross-backend contract.
+ *
+ * ### Implementation status, measured per face
+ *
+ * - **`driver-sql`, all three dialects — ANSWERS the membership contract.** The
+ *   construct is compiled per dialect (`jsonMembershipPredicate`): `jsonb`
+ *   containment on PostgreSQL, `JSON_CONTAINS` on MySQL, a `json_each` scan on
+ *   SQLite. Measured on better-sqlite3, live PostgreSQL 16.13 and live MySQL
+ *   8.0.46 over one fixture whose rows make substring and membership disagree.
+ *   `driver-sqlite-wasm` and `driver-turso` inherit it.
+ * - **`driver-memory` — DOES NOT ANSWER IT YET, and reads `multiple: true`
+ *   two ways of its own.** Measured on the same fixture: its live query path
+ *   matches a stored array by substring PER ELEMENT (so `['redwood']` answers
+ *   `$contains: 'red'`, the same over-match the SQL family just lost) and
+ *   answers NOTHING at all for a `multiple: true` NUMBER, while its reference
+ *   matcher answers no array at all. That whole axis — every non-equality arm
+ *   over a stored array, in both directions — is measured and owned by #17286,
+ *   which recorded the semantics as undecided; this ruling is the decision it
+ *   was missing. ⚠️ So an application whose tests run on the in-memory double
+ *   and whose production runs SQL still gets two answers from one filter here.
+ *   Read the open set from that card, ⛔ not from this paragraph.
+ *
+ * The comparand stays a STRING on every column ({@link CONTAINS_DESCRIPTION}),
+ * so a member that is stored as a JSON number or boolean is named by its text:
+ * `{ nums: { $contains: '1' } }` finds the row holding `[1, 2]` and
+ * `{ flags: { $contains: 'true' } }` the row holding `[true, false]`. ⛔ That is
+ * not a lenient alias — it is the only reading under which a `multiple: true`
+ * number or boolean column is filterable at all, and it is decided in the
+ * driver so every dialect gets the same one.
+ *
  * @see FILTER_TEXT_CASES — the conformance standard for every operator here.
  * @see RETIRED_FILTER_OPERATORS — why `$regex` is not in this list.
  * @see https://github.com/objectstack-ai/objectstack/issues/4706 (the ruling)
  * @see https://github.com/objectstack-ai/objectstack/issues/5702 (the SQL family — landed)
  * @see https://github.com/objectstack-ai/objectstack/issues/6520 (the JS faces — landed)
+ * @see https://github.com/objectstack-ai/objectstack/issues/17590 (the membership reading — the SQL family landed)
+ * @see https://github.com/objectstack-ai/objectstack/issues/7398 (the refusal whose prescription this spelling is)
+ * @see https://github.com/objectstack-ai/objectstack/issues/17286 (driver-memory's stored-array axis — open)
  */
 /**
  * The comparand contract the four CASE-SENSITIVE members of this family share

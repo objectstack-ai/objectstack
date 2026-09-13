@@ -2838,6 +2838,25 @@ async function runMigrationGeneration(configPath: string | undefined, flags: { o
 
 // ─── JSON Schema Generator ──────────────────────────────────────────
 
+/**
+ * Error messages for schema nodes that inherently have no JSON Schema form.
+ *
+ * ⛔ Deliberately the SAME single substring `packages/spec/scripts/build-schemas.ts`
+ * matches on, and for the same reason: zod names the offending node kind in the
+ * PREFIX (`Transforms …`, `Function types …`), so a list of kinds here would go
+ * stale against zod while the suffix is what all of them share. Anything this
+ * does NOT recognise is a real conversion failure, and every tier below
+ * re-raises it instead of degrading past it.
+ */
+const KNOWN_UNSUPPORTED_JSON_SCHEMA_PATTERNS = [
+  'cannot be represented in JSON Schema',
+];
+
+function isKnownUnsupportedJsonSchema(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  return KNOWN_UNSUPPORTED_JSON_SCHEMA_PATTERNS.some((p) => msg.includes(p));
+}
+
 async function runSchemaGeneration(flags: { output: string; dryRun?: boolean }): Promise<void> {
     printHeader('Generate Schema');
 
@@ -2849,9 +2868,64 @@ async function runSchemaGeneration(flags: { output: string; dryRun?: boolean }):
       const { ObjectStackDefinitionSchema } = await import('@objectstack/spec');
 
       printStep('Converting to JSON Schema...');
-      const jsonSchema = z.toJSONSchema(ObjectStackDefinitionSchema, {
-        target: 'draft-2020-12',
-      });
+
+      // [#17873] The three-tier ladder `packages/spec/scripts/build-schemas.ts`
+      // already runs for every schema it publishes, with the third tier spelled
+      // as `packages/metadata-protocol/src/protocol.ts`'s `unrepresentable: 'any'`
+      // rather than spec's union-branch projection (a spec-private helper).
+      //
+      // Before this, the call below was the ONE `toJSONSchema` call site in the
+      // repository that neither fell back nor used that convention — and
+      // `ObjectStackDefinitionSchema` has no JSON form in EITHER direction, so
+      // the bare call threw for every repository and every flag combination and
+      // the `catch` at the bottom of this function exited 1. The command could
+      // never reach its own `fs.writeFileSync`.
+      //
+      //   tier 1  output, strict — what this command asked for, kept first.
+      //   tier 2  input, strict  — an IDE schema describes what an author WRITES,
+      //                            and the input side of a transform pipe is
+      //                            plain data (build-schemas.ts carries the
+      //                            full argument).
+      //   tier 3  input, `unrepresentable: 'any'` — the callable leaves
+      //                            (`onEnable`, hook/function `handler`s) have no
+      //                            JSON form in any direction; widening THOSE
+      //                            LEAVES to "accepts anything" is what buys the
+      //                            other 40 members a published schema.
+      let jsonSchema: Record<string, unknown>;
+      let io: 'output' | 'input' = 'output';
+      let widenedUnrepresentable = false;
+      try {
+        jsonSchema = z.toJSONSchema(ObjectStackDefinitionSchema, {
+          target: 'draft-2020-12',
+        }) as Record<string, unknown>;
+      } catch (outputError) {
+        if (!isKnownUnsupportedJsonSchema(outputError)) throw outputError;
+        io = 'input';
+        try {
+          jsonSchema = z.toJSONSchema(ObjectStackDefinitionSchema, {
+            target: 'draft-2020-12',
+            io: 'input',
+          }) as Record<string, unknown>;
+        } catch (inputError) {
+          if (!isKnownUnsupportedJsonSchema(inputError)) throw inputError;
+          widenedUnrepresentable = true;
+          jsonSchema = z.toJSONSchema(ObjectStackDefinitionSchema, {
+            target: 'draft-2020-12',
+            io: 'input',
+            unrepresentable: 'any',
+          }) as Record<string, unknown>;
+        }
+      }
+
+      // Absence must be loud: a degraded artifact says so at the moment it is
+      // produced, rather than leaving an IDE user to discover that some subtree
+      // accepts anything.
+      if (io === 'input') {
+        printInfo('Converted in the authoring (input) direction — the output direction contains a transform with no JSON form');
+      }
+      if (widenedUnrepresentable) {
+        printInfo('Nodes with no JSON form (live callables) are published as unconstrained — they accept any value in this schema');
+      }
 
       // Add metadata
       const schema = {

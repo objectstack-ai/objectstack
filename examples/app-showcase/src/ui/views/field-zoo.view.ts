@@ -152,6 +152,15 @@ export const FieldZooViews = defineView({
      * specimens it acts on Full and reports Minimal as skipped, rather than
      * quietly including it.
      *
+     * #17319 — `showcase_zoo_visible_string` is wired BOTH ways in this file: as a
+     * bare string in the two `bulkActions` lists above (per-record) and here as an
+     * aggregate def. That is deliberate and it stays UNDECLARED: its body
+     * (`predicate-matrix.action.ts`) reads `ctx.recordId` AND `input._selectedIds`
+     * and copes with either, which is the one honest reason to omit `action.execution`.
+     * ⛔ Declaring either contract on it would make the OTHER wiring a lint error
+     * (`action-dispatch-contract-mismatch`) — there is no third enum member for
+     * "both", and no silent default for the omission.
+     *
      * `execution: 'aggregate'` is not decoration — a `custom` def without it is
      * a no-op the parser refuses outright ("the button runs, reports success
      * for every selected record, and does nothing"). Aggregate means ONE
