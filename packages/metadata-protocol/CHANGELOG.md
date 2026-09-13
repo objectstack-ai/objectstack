@@ -1,5 +1,791 @@
 # @objectstack/metadata-protocol
 
+## 17.5.0
+
+### Minor Changes
+
+- 04333d0: The `kernel:ready` migrations ask whether a table exists WITHOUT running a statement that has to be refused, so a normal boot stops printing `[sql-driver] DATABASE_ERROR … no such table` (#17175)
+  
+  Two migrations on the boot hook asked "does this table exist?" with a statement
+  that cannot succeed when the answer is no — `SELECT "tenant_id" FROM
+  "_objectstack_sequences" WHERE 1 = 0` in `seed-tenancy-backfill.ts`, and `SELECT
+  1 FROM sys_setting WHERE 1 = 0` in `sys-setting-identity-index.ts` — and read
+  the refusal as "no". Both are correct on their own terms. Both make
+  `SqlDriver.execute()`'s raw terminal write the statement and the dialect's
+  message to the operator's log on the way out.
+  
+  Measured on this tree against real `better-sqlite3`: exactly one line per probe,
+  on `console.warn` — i.e. **stderr** — carrying both the `DATABASE_ERROR` token
+  and `no such table`. It fires on **every boot** of every install that has never
+  allocated an autonumber, and again on every boot of every kernel that does not
+  register the optional `service-settings`.
+  
+  ⭐ The cost is not the line. It is that operators learn this product prints
+  errors when nothing is wrong, and then miss the one that matters. A consumer told
+  to read the boot log (`objectstack-ai/hotclm`'s `AGENTS.md` names `no such table`
+  as a failing boot) must either ignore an unactionable ERROR every boot or chase a
+  platform-internal probe.
+  
+  **The question is now asked of the CATALOG.** A new shared
+  `migrations/read-probe.ts` compiles one arm per dialect family — `sqlite_master`
+  for SQLite, `to_regclass` for Postgres, `information_schema.tables` scoped with
+  `DATABASE()` for MySQL — each of which returns zero rows for a table that is not
+  there instead of being refused. Both migrations call it; the probe lives once,
+  not once per site.
+  
+  **⛔ Why not in the driver.** Quietening a refusal requires classifying it, this
+  repo has one predicate for that (`isMissingTableError`), and it needs the name of
+  the thing the caller was reading — which the raw path structurally does not have
+  (`rawStatementFaultError` declares no targeted table, and
+  `driver-error-classification.callers.test.ts` fails any in-repo call that omits
+  `readObject`). An unclassified demotion of the driver's raw terminal would
+  quieten real failures too. The caller knows the table; the driver does not.
+  
+  **⛔ The fence, and it is the one way this repair can go wrong.** A catalog arm
+  mis-compiled for some dialect would be refused, caught by the same `catch` the
+  expected miss uses, and read as "the table is not there" — turning a stored-row
+  data repair into a silent no-op on whichever dialect nobody exercised. So the
+  probe answers four verdicts rather than a boolean, and `'unreadable'` is never
+  folded into `'absent'`: it is returned, and reported at `warn`. An unrecognised
+  dialect gets no guessed catalog statement at all — it keeps the caller's own
+  `WHERE 1 = 0` probe, whose refusal is now *classified* with
+  `isMissingTableError(error, table)` rather than swallowed as absence.
+  
+  **Why `minor`.**
+  
+  - `SeedTenancyBackfillStatus` gains `'unreadable'`. It is an OUTPUT union, so no
+    input a caller writes is affected; the one consumer shape that could break is
+    an exhaustive `switch` with a `never` default, which is why this is not a
+    `patch`.
+  - `ensureSysSettingIdentityIndex` gains an optional third parameter
+    (`{ client? }`). Callers that pass two arguments are unchanged and keep
+    today's behaviour exactly — without a client there is no catalog arm and the
+    pre-existing probe runs.
+  - `buildSequencesPresenceSql` and `buildSysSettingPresenceSql` are unchanged in
+    text and still exported. They are no longer what the boot path runs first.
+  - `isResultSet` and `normalizeRows` moved to `migrations/read-probe.ts` and are
+    re-exported from `seed-tenancy-backfill.ts` unchanged, so the package index and
+    every importer see no difference.
+  
+  **What did NOT change.** #10789's ruling stands: a seam that accepts a statement
+  and returns no result set still reports `absent` with the `detail` that separates
+  it. The driver's error channel is untouched — a statement the backend genuinely
+  refuses is still written to the log in full, asserted against the same driver and
+  the same sink in the same test as the silence.
+  
+  **Dialect coverage, stated rather than implied.** The SQLite arm is pinned end to
+  end against a real `SqlDriver` (`packages/runtime`'s
+  `seed-tenancy-autonumber-split.integration.test.ts`); the MySQL arm runs against
+  the live server in `seed-tenancy-backfill.live-mysql.test.ts`, in both directions
+  and with the connected-schema scope measured. ⛔ The **Postgres** arm is NOT
+  MEASURED against a live server: this package has no live-PG harness, no `pg`
+  dependency, and its CI leg supplies `OS_TEST_MYSQL_URL` only while filtering to
+  `live-mysql`. Its statement text is pinned; running it is not.
+- ada2869: fix(metadata-protocol): `insertManyData` reports the dropped-field union at BATCH level instead of naming rows it cannot identify (#17290)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) nothing authored or stored moves: no authorable key, no Zod schema and no stored `sys_metadata` shape changes — `packages/spec` declares no response schema for this face at all, so `objectstack migrate meta` has nothing to visit, `spec-changes.json` has nothing to project and the upgrade guide gains no row. What moves is one optional member on an inline TypeScript response type of a runtime protocol method, and the channel that reaches every affected consumer is the compiler at their own call site, which names the site more precisely than a ledger line could. The `packages/spec` file in this diff is a `.describe()` STRING — customer-facing prose that this change would otherwise leave false — not a schema, a key or an accept set; nothing it declares moves. -->
+  
+  **BREAKING** — `@objectstack/metadata-protocol`'s `insertManyData` no longer hangs
+  `droppedFields` on each entry of `outcomes`; the response itself carries it, beside
+  `outcomes`, exactly as `createManyData` already does. A TypeScript consumer that read
+  the per-row member stops compiling, and the compiler names the site. The set reported
+  is the same set — what is gone is a per-row attribution that could not be computed
+  here and was wrong whenever it mattered. Nothing authored or stored changes shape.
+  
+  **What it got wrong.** Every create-side strip is the engine's, and its
+  `onFieldsDropped` event is the UNION over the batch — the listener signature
+  carries no row index. This seam reconstructed a row set from that union by
+  asking which rows SUPPLIED each dropped name
+  (`[...engineDropped].filter((f) => f in supplied)`), on the stated premise that
+  "the strip only removes keys the ROW ITSELF supplied, so a dropped name belongs
+  to exactly the rows whose supplied payload carried it". Maintainer ruling C
+  falsifies the premise: the static-`readonly` strip runs INSIDE `engine.insert`,
+  AFTER the `beforeInsert` hooks, and exempts keys a hook itself assigned —
+  recorded per row (`hookWrittenKeys: rowHookWrittenKeys[i]`). So in a batch where
+  a hook stamps a protected key on some rows and not others:
+  
+  - row A supplied `approval_status`, no hook write ⇒ stripped, enters the union;
+  - row B supplied `approval_status`, its hook re-assigned it ⇒ **kept and
+    written**;
+  - and row B's outcome carried `droppedFields: [{ fields: ['approval_status'] }]`
+    on a record that still held `approval_status`.
+  
+  A row the batch culled before the strip ran (a per-row validation failure) was
+  named on the same test, having dropped nothing at all.
+  
+  ⇒ A wrong attribution costs the reader a wrong investigation, and the import
+  surface — which prefers this path over `createManyData` — is the consumer most
+  likely to act on it while reconciling what landed.
+  
+  **Why not attribute per row instead.** The honest set is `{rows whose payload
+  carried N}` minus `{rows whose beforeInsert hook assigned N}`, and the second
+  half is computed per row upstream but does not cross this seam. The outcome's
+  own `record` cannot stand in for it: a stripped `readonly` field is RE-DEFAULTED
+  over exactly the keys the strip took, and a stripped `autonumber` is refilled by
+  `applyAutonumbers` — so on both, the key is PRESENT on the row that really did
+  drop it, and a post-hoc "is the key still there?" check would delete true
+  attributions while leaving the hook-exempt false one standing. Comparing values
+  fails on the very case `hookWrittenKeys` exists for: the hook assigning the
+  value the caller also sent. Restoring row precision means giving the engine's
+  drop report a per-row channel, not a reconstruction at the call site.
+  
+  **Prose corrected with it**, by CLAIM rather than by spelling — the docblock
+  that authorised the inference is the thing that re-authorises the next author:
+  `insertManyData`'s own docblock and `createManyData`'s parenthetical
+  (`@objectstack/metadata-protocol`), `mergeDroppedFieldEvents`'s closing
+  sentence, `engine.insertMany`'s docblock claim that "a caller holding the input
+  rows can attribute each name back to the rows that carried it"
+  (`@objectstack/objectql`, TSDoc emitted into its published `.d.ts`), and
+  `CreateManyDataResponseSchema.droppedFields`'s `.describe()` parenthetical
+  (`@objectstack/spec`, a string printed AT the customer).
+  
+  **Unchanged.** `updateManyData` and `batchData` keep per-row `droppedFields`,
+  and they always could: each row is its own `engine.update` / `engine.insert`
+  call, so that call's events are that row's — earned mechanically, not inferred.
+  `createManyData`'s aggregated shape is untouched. No strip changes, no row
+  changes, and the same field names are reported.
+- 854639b: feat(engine)!: `findOne`, `update` and `delete` declare what they answer, and their hook seams are guarded (#16231)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable moves. No spec key, no authored metadata property, no config field, no accepted request shape and no stored artifact changes spelling or shape; `objectstack migrate meta` has nothing to rewrite, `spec-changes.json` has nothing to project and the upgrade guide has no row to gain. What moves is the declared RETURN TYPE of three TypeScript methods (`packages/spec/src/contracts/data-engine.ts`, its `scoped-context.ts` mirrors, and `ObjectQL` itself) plus three new registered ADR-0112 error codes. The rewrite this ships — add the null check the type now demands — is addressed to a TYPESCRIPT CONSUMER and is delivered by the compiler at their own call site, which is the audience the ADR-0087 ledger explicitly does not serve. `type-surface-only` is the category built for exactly this class and it is NOT claimed here, because its predicate 2 (`no-spec-diff`) is mechanically false for this PR: the surface the maintainer ruling names IS `packages/spec/src/contracts/**`. That gap is reported on the card rather than worked around, and the `**BREAKING**` banner below is carried rather than dropped. -->
+  
+  **BREAKING** on three published `.d.ts` surfaces. `ObjectQL.findOne`, `ObjectQL.update` and `ObjectQL.delete` — and the `IDataEngine` / `IScopedObjectRepository` contracts they implement — declared `Promise<any>` and now declare the answers they have always given:
+  
+  - `findOne` → `Promise<Record<string, any> | null>`
+  - `update` → `Promise<Record<string, any> | number | null>`
+  - `delete` → `Promise<boolean | number>`
+  
+  `any` is assignable to everything and admits every property read, so TypeScript consumers of these three methods can stop compiling — most often on the null check the declaration now demands. Shipped as `minor` under the repo's launch-window convention, in which `major` is refused by `check-changeset-no-major` and breaking-ness is carried by this banner plus the ADR-0087 disposition rather than by the level. The governing text is the **WHICH LEVEL** maintainer ruling of 2026-09-04 (decision batch #35, on #15294) recorded at `.github/workflows/pr-automation.yml`; `AGENTS.md`'s "a bug fix in a released package takes a patch changeset — never none" is the floor against `none` and was rejected as the ceiling here, because this PR also widens `@objectstack/objectql`'s index with new exported symbols, which that ruling puts at `minor` on its own.
+  
+  **Why.** `engine.ts` has four `return hookContext.result` sites, one per hook-bearing verb. #15823 closed the `find()` one — an `afterFind` handler that replaced the array made a method declared `Promise<any[]>` resolve to an envelope, silently — and recorded that it could close only that one: the other three declared `Promise<any>` and so carried no declaration a handler could break. A guard cannot exist before a declaration worth guarding does. The maintainer ruled the gap shut (option A, 2026-09-07, director seat summon #17, decision batch #2; option B "declare only, no enforcement" and option C "record `any` as intended" were refused).
+  
+  The shapes are read off the driver contract each engine exit delegates to, not invented: `driver.findOne` and the by-id `driver.update` declare `Record<string, unknown> | null`, `driver.delete` declares `boolean`, and the predicate exits `driver.updateMany` / `driver.deleteMany` declare the affected-row `number` a bulk write resolves (#4639). Row FIELD values stay erased (`Record<string, any>`), which is #15823's precedent extended exactly rather than softened: `find()` declares `Promise<any[]>`, so the CONTAINER is the contract and the rows inside it are `any`. It is also the only spelling that can state "record or null" at all, since `any | null` collapses to `any`.
+  
+  **What is enforced now.** Each seam re-checks `hookContext.result` against its declaration immediately after the `after*` dispatch and ahead of the consumers that already assume the shape, and refuses a value outside it with a registered ADR-0112 envelope — `FIND_ONE_HOOK_RESULT_NOT_RECORD`, `UPDATE_HOOK_RESULT_NOT_WRITE_SHAPE`, `DELETE_HOOK_RESULT_NOT_WRITE_SHAPE`, all `500`, all branchable on `error.code`. Shaping stays legal exactly as it does on `find()`: a handler may mutate what it is handed, drop keys, or assign a different value of a declared shape. The falsy answers are legal and deliberately so — `null` from `findOne`, `null` or a count from `update`, and `false` or `0` from `delete`, the two most ordinary answers that verb gives.
+  
+  **Who has to change something, on the TYPE axis.** A TypeScript consumer that reads a field off `findOne`'s result without a null check, or off `update`'s result without separating the by-id record from the predicate count. In this repository that was measured before anything moved, at the maintainer's instruction: 18 files and 92 compile errors, all repaired here.
+  
+  **What changes at RUNTIME, per door.** TWO things can put an off-declaration value at a seam, and every refusal's `developerMessage` names both: an `after*` handler that assigned one, and a DRIVER whose own exit answered off `IDataDriver`. Each door goes from returning that value silently to refusing it — one door, one registered code, all `500`:
+  
+  - `findOne` — FROM: whatever the `afterFind` dispatch left in `ctx.result`, or whatever `driver.findOne` answered off its declared `Promise<Record<string, unknown> | null>`, returned to the caller as-is and walked first by `maskSecretFields` / `stripSearchCompanionFromRead`. TO: `500 FIND_ONE_HOOK_RESULT_NOT_RECORD`, raised at the seam when that value is neither a record nor `null`.
+  - `update` — FROM: whatever the `afterUpdate` dispatch left in the batch `ctx.result`, or whatever `driver.update` / `driver.updateMany` answered off their declared `Promise<Record<string, unknown> | null>` / `Promise<number>`, returned as-is and read first by `stripSearchCompanion` and the realtime publish. TO: `500 UPDATE_HOOK_RESULT_NOT_WRITE_SHAPE`, raised when that value is outside record-or-count-or-`null`.
+  - `delete` — FROM: whatever the `afterDelete` dispatch left in `ctx.result`, or whatever `driver.delete` / `driver.deleteMany` answered off their declared `Promise<boolean>` / `Promise<number>`, returned as-is to a caller such as `metadata-protocol`'s `deleteData`, which turns `false` into a 404. TO: `500 DELETE_HOOK_RESULT_NOT_WRITE_SHAPE`, raised when that value is neither a boolean nor a number — never on `false` or `0`, which are declared answers.
+  
+  The driver half of each line is not hypothetical: the seven off-contract test doubles this PR repairs are exactly that source, and they are why the refusal sentence names the SEAM instead of accusing the handler.
+- 2bed4c3: fix(objectql)!: a field whose `type` is absent or is not a `FieldType` member is refused at the registration door, and every downstream family default becomes a refusal (#16319)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) nothing an author can write is removed or renamed, and no conversion could repair these bodies: a field with no `type` carries no statement of intent for a conversion to rewrite, which is exactly the finding — the platform cannot know whether the author meant a bounded VARCHAR or an unbounded TEXT, and the two producers guessed differently. The remedy is a human decision per field, so it is prescribed in prose and in the refusal text rather than registered as a mechanical rewrite. -->
+  
+  **BREAKING** for stored metadata only: an object whose declaration carries a field with no `type`, or with a `type` that is not a `FieldType` member, **no longer loads**. Shipped as `minor` under the repo's launch-window convention. Maintainer ruling, 2026-09-10, verbatim: 「16319 一个没写 type(或拼错)的字段 应该禁止加载。这个才是合理的吧?其他同意」.
+  
+  **What you have to do.** Nothing, unless a `sys_metadata` row in your deployment carries such a field. If one does, the startup log names it at `error` level — object, field and reason — and the row is left untouched and still reachable: open it in Studio and give the field a real `FieldType` member, or delete it (`DELETE /api/v1/metadata/object/NAME`). Nothing that passes `FieldSchema` is affected: it has always required `type` and always refused a non-member, so only the doors that skip Zod could ever deliver one.
+  
+  ## What was wrong
+  
+  One declaration produced two different columns. Measured on live PostgreSQL 16.13, driving all three producers from one object:
+  
+  | declaration | driver | `os generate migration --format sql` | `--format ts` |
+  |:---|:---|:---|:---|
+  | `{ maxLength: 100 }`, no `type` | `character varying(100)` | `TEXT` | `TEXT` |
+  | `{ type: 'this_is_not_a_field_type', maxLength: 100 }` | `character varying(255)` | `TEXT` | `TEXT` |
+  
+  `SqlDriver.createColumn` read `field.type || 'string'`, which heads its STRING-family arm and sizes the column from the declared `maxLength` (knex's 255 without one). All four generator loops in `os generate` read `String(fieldDef.type || 'text')`, which heads the TEXT family — unbounded unless the column is keyed. Both directions of harm are in the first row: the platform refuses a 101-character value that both generated tables accept, and a table generated from the same object accepts values the platform will not store.
+  
+  ## What it does now
+  
+  - **One point of closure, at the registration door.** `SchemaRegistry.registerObject` refuses the WHOLE object declaration, with the ADR-0112 envelope (`INVALID_METADATA` + `422`), naming the object, the field and the reason — and offering the spec's own "did you mean?" for a mis-spelling. ⛔ The offending field is never dropped on its own: an object loaded one field short reports success at every authoring surface while the column is never created and every read of it answers `undefined`. Every door goes through this one — declared stacks, package and plugin manifests, `saveMetaItem`, the `sys_metadata` boot rehydration, and raw `registerObject` calls — and all three contributor kinds (`own`, `overlay`, `extend`) are judged, because `ObjectSchema.fields` and `ObjectExtensionSchema.fields` are both `z.record(z.string(), FieldSchema)`.
+  - **The startup policy is revised for this class.** `loadMetaFromDb`'s 「Registered anyway so it stays serveable and fixable」 no longer applies to it. The row does not register; the startup log states the consequence and the fix once, at `error`. The row itself is untouched, and the metadata API's raw-row path still lists it, still serves it with the offending field visible, still accepts a corrected write, and still deletes it — pinned, because a refused row that vanished from Studio would be unfixable.
+  - **Downstream guesses become refusals.** `createColumn` refuses a field that declares no `type` instead of building `varchar(255)` for it. All four `os generate` loops — both migration formats and both `os generate types` loops — refuse an absent or non-member `type` and generate nothing for that object, rather than emitting a table one column short. `fieldTypeToSql`'s docblock is rewritten in the same stroke: its `TEXT` miss branch is now dead residue of a total table, ⛔ not a family default to route anything new to.
+  
+  ## Scope, stated rather than left to be inferred
+  
+  `SqlDriver.createColumn` refuses `type` ABSENCE, not `FieldType` MEMBERSHIP. Membership is refused for the whole object at the registration door, which fronts every route into `syncSchema`, so a non-member cannot reach the driver from a runtime at all. `driver-sql`'s own test corpus declares 388 non-member spellings across ~100 files that drive `initObjects` directly, and `'string'` is a declared `case` arm of that switch whose column shape differs from every member's — so closing that half is a corpus migration with column consequences, deliberately not folded into this change. A pin holds the boundary in both directions.
+  
+  ONE fixture in that corpus is migrated here, because it is the one that crosses the door. `CROSS_FIELD_OBJECT_FIELDS` — exported from this package's root, so a published export and not only a local literal — declared `stage` and `owner` as `'string'`. Four of its five consumers hand it to `driver.initObjects`, which the paragraph above leaves alone; the fifth hands it to `ql.registerObject`, which now refuses the whole object. Both fields are re-spelled `'text'`. That is not a re-typing: `canonicalizeSqlType('varchar(255)')` is `'text'` and `suggestFieldTypeForSqlType('varchar(255)')` is `'text'`, both pinned in `spec/data/type-compat.test.ts`, so `'text'` is the spelling of the column `'string'` was already producing. It does move the emitted column from `varchar(255)` to `TEXT` (measured on sqlite-wasm: `stage varchar(255)` becomes `stage text`), which is inert for this fixture — no index keys either column, `initObjects` is passed no indexes, and the corpus's longest value in them is four characters.
+- d4f5232: **BREAKING** — retire the `type: 'page'` list-view mount and its `pageName` binding.
+  
+  A list view could declare `type: 'page'` and name a published page in `pageName`,
+  and the view was to render nothing of its own and delegate to the page renderer.
+  Only the spec half of that was ever built. **No renderer ever routed the member**:
+  objectui's list-view switch shares its `default:` arm with `case 'grid'`, so a page
+  view has always drawn an empty table where the page was supposed to be, and the
+  three parse refusals that policed the binding policed a mount that never mounted
+  anything. ADR-0049 enforce-or-remove; maintainer ruling 2026-09-09.
+  
+  ## FROM → TO
+  
+  | you wrote (17.4 and earlier) | write instead |
+  | --- | --- |
+  | `{ type: 'page', pageName: 'sales_home', columns: [] }` on a list view | nothing on the view. Delete it, and reach the page from the app's `navigation`: `{ id: 'nav_sales_home', type: 'page', pageName: 'sales_home', label: 'Sales' }` |
+  | `pageName` beside any other list-view `type` | delete the key — it was refused already, and is now a tombstone |
+  | a list view that wanted rows | pick a row-drawing `type` — `grid` and its siblings, all unchanged |
+  
+  **The one-line fix:** delete `type: 'page'` and `pageName` from the list view; put
+  the page behind an app navigation item, which is a different key on a different
+  surface (`PageNavItem.pageName`) and is the page mount that has always rendered.
+  
+  `os migrate meta --from 17` lists the mechanical edits for existing sources; apply
+  them by hand.
+  
+  ## The retirement kit
+  
+  - **`pageName`** — a `retiredKey()` tombstone on `ListViewSchema` and
+    `ObjectListViewSchema`. `tsc` types the key `never`, and a value reaching a parse
+    raises the prescription rather than a bare unrecognized-key report.
+  - **`'page'`** — an enum VALUE, so there is no tombstone to hang a prescription on
+    (the def survives, one value lighter, and the four generated-surface ratchets are
+    blind to that by construction). The `type` enum's own `error` map carries it,
+    keyed on `issue.input` so only the value that used to be legal gets the
+    "was removed" message; every other invalid `type` keeps zod's default text.
+  - **`checkListViewPageMount`** — the exported object-level refinement existed only
+    to police this mount, so it is removed with it, along with its three refusal
+    messages. A downstream mirror that re-attached it (the reason it was exported)
+    should drop the `.superRefine` line; the compiler delivers this one. It held no
+    `ERROR_CODE_LEDGER` row — the three refusals were message constants, not codes.
+  - **`validateViewPageRefs` / `VIEW_PAGE_UNRESOLVED`** (`@objectstack/lint`) — the
+    `os validate` and publish-gate rule that resolved a mount against `stack.pages`.
+    Removed: there is no reference left to resolve. Its nav twin
+    (`validateNavTargetRefs`, on the app navigation item) is **untouched**.
+  - **`RuntimeStackContext.pages`** (`@objectstack/lint`) and the `page` row of
+    `CLOSURE_CONTEXT_KEY_BY_TYPE` (`@objectstack/metadata-protocol`) — the live page
+    universe joined the per-write snapshot for that one rule, and leaves with it. A
+    `PUT /api/v1/meta/view` publish no longer pays a `sys_metadata` round trip for a
+    collection nothing consults. Hosts calling `runRuntimeAuthoringRules` /
+    `evaluateRuntimeAuthoringGate` with an explicit `context.pages` drop that key.
+  - **`defineStack`** — the `validateCrossReferences` branch that resolved a mount's
+    `pageName` against `stack.pages` is gone. The surviving three page references in
+    that function (an app nav item's `pageName`, a modal action's `target` at two
+    rungs) keep their own policy.
+  - **The metadata form** — `view.form.ts`'s `page` section, whose one input was
+    `pageName`, is removed. A form input for an unwritable key is the false-compliant
+    UI half of a retirement.
+  
+  ## What an operator with a STORED page view sees
+  
+  A `sys_metadata` `view` row written before this release can carry `type: 'page'` and
+  a `pageName`. Nothing breaks at read: the ADR-0087 conversion
+  `view-page-mount-removed` (protocol 18) replays on rehydration and strips both keys,
+  so the row is served canonical. `type` is **stripped, not rewritten** — it defaults
+  to `grid` in the schema, so the row lands on exactly what it already rendered
+  without the platform guessing a view type.
+  
+  The strip is announced once per row per process, on whichever seam served it.
+  Grep for `carries a pre-protocol shape` — there are **three** emitters, one per
+  rehydration seam, and they differ:
+  
+  - `[DatabaseLoader] stored view/<name> carries a pre-protocol shape; <notice>`
+  - `[ObjectQLPlugin] stored view/<name> carries a pre-protocol shape; <notice>`
+  - `[Protocol] stored view/<name> carries a pre-protocol shape; <notice> The row
+    itself is unchanged — re-save it (Studio edit -> save, or run
+    "os migrate meta --stored --apply") to persist the canonical shape.`
+  
+  `os migrate meta --from 17` lists the same edits for authored sources;
+  `os migrate meta --stored --apply` rewrites the stored rows so the warn stops, and
+  the next save through `PUT /api/v1/meta/view` heals one row the way it heals any
+  pre-protocol shape.
+  
+  ⚠️ The conversion walks `stack.views[]` in all three persisted spellings; it does
+  **not** reach `objects[].listViews.*`, which no conversion in the registry reaches.
+  An object body still carrying a page mount is refused at its own door with the
+  prescription rather than converted. Measured population for both at the ruling:
+  **zero** authored `type: 'page'` list views in this repository or any consuming app
+  the seats can read — the in-tree `type: 'page'` hits are all app nav items.
+  
+  <!-- adr-0087: registered view-page-mount-removed -->
+- 4062aef: fix(metadata-protocol): the runtime authoring gate judges an OVERRIDDEN item from the body the runtime serves (#16224)
+  
+  The #4463 runtime authoring gate resolves references against the live metadata universe, and since #15950 it gathers that universe from BOTH homes — the `SchemaRegistry` and `sys_metadata`. That fold was **additive**: a stored row contributed a name the registry did not carry and never displaced a registry entry. Where an org or env-wide overlay REDEFINES an item a code package already declares, the gate therefore judged that item's CONTENT from the registry's copy — a body the runtime had already stopped serving.
+  
+  Measured end to end, in one process and one instant. A code package ships `dataset/D` with measure `m`; an env-wide overlay redefines `D` without it:
+  
+  - a dashboard widget bound to `values: ['m']` was **accepted**, and the runtime cannot serve it;
+  - a widget bound to the measure the overlay DOES declare was **refused** `422 widget-measure-unknown`, and the runtime can.
+  
+  One cause, both directions: an acceptance that should have been a refusal and a refusal that should have been an acceptance.
+  
+  The hand-rolled additive merge is replaced by `mergePackageAwareOverlay` with `foldObjectExtendersFromRegistry` as its transform — the merge, and the transform, that `getMetaItems` (the read API behind `GET /meta/:type`) already runs. The gate's universe is now the universe the platform answers reads from, by construction rather than by agreement, and ADR-0048 package slotting arrives with it: an overlay shadows the entry it actually overrides, and two installed packages shipping one `type/name` remain two entries.
+  
+  **#15950's resolved-vs-base distinction is kept by folding, not by declining.** Its argument was never "an overlay must not win" but "an UNRESOLVED body must not win" — the registry's copy of an object is its RESOLVED schema (ADR-0029 D9.2: base layer plus its `extend` contributors), a `sys_metadata` row is the base layer alone — and it names its own remedy, which is what `getMetaItems` does to its winner. Pinned: an `object` overlay wins on its own columns AND keeps the registry's `extend` contributors. For a name the registry does not carry the result is byte-for-byte #15950's additive contribution, pinned in the same process.
+  
+  Graded `minor` rather than `patch`: `PUT /meta/:type` is a published verb and this narrows its accept set. An `active` publish that names a reference the overlay removed now answers `422 INVALID_METADATA` where it answered `200` — one legal published answer replaced by another, not the repair of a value the schema already refused. The write it now refuses is one the runtime could never serve; the write it now accepts is one the runtime always could.
+
+### Patch Changes
+
+- dc709b2: The seed-tenancy backfill's organization probe records the operator channel as is — an empty one included — instead of the placeholder `'unknown error'` (#17167)
+  
+  `packages/metadata-protocol/src/migrations/seed-tenancy-backfill.ts` had one site left
+  that did not follow the rule the rest of the file follows. Where the other four
+  `operatorFacingErrorText` calls record the helper's return value as is, the
+  `sys_organization` probe spelled `operatorFacingErrorText(e) || 'unknown error'`, so a
+  backend that failed WITHOUT saying anything was recorded as having said
+  `'unknown error'` — words no backend produced, in a field an operator reads to find out
+  which probe failed and why.
+  
+  **Measured before and after**, driving `backfillSeedTenancy` at each site in that file
+  with the same three empty-channel shapes (a thrown `''`, a thrown `[]`, an `Error` whose
+  `name` and `message` are both empty) and with `new Error('boom')` as the control:
+  
+  | site | before | after |
+  |---|---|---|
+  | split probe → `result.detail` | `''` | `''` |
+  | **organization probe** → the warning's `organizationProbeError` | **`'unknown error'`** | **`''`** |
+  | duplicate-list probe → the warning's `error` | `''` | `''` |
+  | stamp → the warning's `error` | `''` | `''` |
+  | counter merge → the warning's `error` | `''` | `''` |
+  
+  The control records `'boom'` at every site in both columns.
+  
+  **Why this was not a one-line deletion.** The placeholder was carrying two jobs and only
+  one of them was a record: the site also read `organizationProbeError === ''` as "the probe
+  did not fail", which is how a failed probe is kept out of the benign `no-organization-yet`
+  branch (#9261 — unknown is not zero). Deleting the placeholder and putting nothing in its
+  place was measured: a thrown `''` then reports `no-organization-yet` and warns about
+  nothing, while the control still reports `skipped-ambiguous-organization`. So the failure
+  fact moved into the TYPE — `organizationProbeError` is `string | undefined`, `undefined`
+  means the probe answered, and every string, empty or not, is a failure. The text is then
+  free to say exactly what the backend said.
+  
+  **What does NOT move.** No status value changes for any input: an organization probe that
+  throws still reports `skipped-ambiguous-organization`, whatever its channel holds, and
+  `SeedTenancyBackfillStatus`, `SeedTenancyBackfillResult` and every exported signature are
+  unchanged. This probe's text never reached the returned result in the first place — it is
+  carried only by the warning this migration logs (measured: the control text appears in
+  `result.detail` at the split-probe site and appears nowhere in the returned object at this
+  one).
+  
+  **One operator-visible detail beyond the text.** The warning's structured field is now
+  absent when the probe answered and present-but-empty when it failed silently, so "empty"
+  and "there was no failure" stay distinguishable in the stored line — the one job the
+  placeholder was doing that a reader could have depended on. The sentence in the same
+  warning drops its parenthetical rather than filling it in: `the sys_organization probe
+  FAILED, so the count above is "unknown"` when the backend said nothing.
+- 07f93e0: Seed loader: the pass-2 deferred-reference diagnostics now say which moment they describe
+  
+  `SeedLoaderService` runs inside `AppPlugin.start()`, which the kernel completes for every
+  plugin before it fires `kernel:ready` — where the first-admin handoff
+  (`claimSeedOwnership`) re-owns every `owner_id IS NULL` row of every user-authored object.
+  That handoff is the designed completion of a NULL owner column, so two of the loader's
+  pass-2 lines — `Deferred reference UNRESOLVED after pass 2` and
+  `Deferred reference back-fill FAILED` — were making a bare present-tense claim
+  (`x.owner_id stays NULL`) that the same boot then made false, with nothing in either the
+  log or the table to tell an operator that the other reading existed.
+  
+  Both lines now read `is NULL at the end of pass 2` and carry a scope sentence naming the
+  boot step that can supersede them and stating that a non-NULL value found later is not
+  evidence the reference resolved. Level, error count and remedy are unchanged — this is a
+  scope declaration, not a silencing. The two `Deferred reference DROPPED` lines are
+  deliberately untouched: they report a row that never landed, so no later boot step can
+  write a column of it and their claim survives to the end of boot as written.
+  
+  Nothing an author writes changes. Anything that greps the loader's output for the literal
+  `stays NULL` on these two lines should grep for `is NULL at the end of pass 2` instead.
+- e743fb5: fix(metadata-protocol): the `/references` refusal front-loads its ADR-0110 D3 prescription, so the #5423 bound cannot cut the remedy (#17584)
+  
+  `GET /api/v1/meta/:type/:name/references` refuses an unanswerable target type
+  (`field`, addressed by the composite key `<object>.<field>` that no reference
+  site can hold) with a prescriptive 501: it names the question that IS
+  answerable, `GET /api/v1/meta/object/<owner>/references`. That clause is the
+  half ADR-0110 D3 exists to deliver — the admin "Used by" panel renders an empty
+  answer as *"Nothing in the metadata graph points at this item. Safe to delete."*
+  to an operator whose next click is a delete.
+  
+  Since #16146 the refusal crosses the REST boundary through the shared #5423
+  bound (`CLIENT_MESSAGE_MAX`, 500 characters), which truncates the **tail**. The
+  sentence back-loaded the prescription and interpolates the object name twice, so
+  it grew about three characters per character of name and the remedy was the
+  first thing a long name cost. Measured through the real route on the unrepaired
+  sentence: a 37-character object name beside a 37-character field name composed
+  502 characters and arrived as `…/api/v1/meta/object/<obj>/referenc…` — the
+  opener still readable, the URL cut mid-path, an instruction that 404s if
+  followed. `crm_opportunity_line_item_snapshot_v2` is 37 characters, and nothing
+  caps a metadata name near that (the ceiling is the storing column's
+  `maxLength`; the widest is `sys_metadata.name` at 255).
+  
+  The clauses are re-ordered so truncation costs the **explanation** instead. No
+  behaviour moves: the refusal decides exactly what it decided before, the same
+  `NOT_IMPLEMENTED` / `501` / `refusal` declaration is raised for exactly the same
+  targets, and the bound is untouched. Callers matching on the message's opening
+  words will see the new order; matching on `error.code` is unaffected.
+  
+  FROM: `References to a 'field' item cannot be computed. … Ask the owning object
+  instead: GET /api/v1/meta/object/<owner>/references.`
+  TO:   `Ask the owning object instead: GET /api/v1/meta/object/<owner>/references.
+  References to a 'field' item cannot be computed, because …`
+- 7e74af3: Execute the read-probe's PostgreSQL catalog arm against a live server, closing the one dialect this package pinned as text and never ran.
+  
+  `read-probe.ts` compiles one non-raising table-presence arm per dialect family. Two were executed against something real — SQLite end to end through a real `SqlDriver`, MySQL on the live server the `Temporal Conformance` job provisions. The PostgreSQL arm (`SELECT 1 WHERE to_regclass('"<table>"') IS NOT NULL`) was pinned character-for-character against all four knex client spellings and run nowhere: this package had no live-PG harness, no `pg` dependency, and its CI step supplied `OS_TEST_MYSQL_URL` alone while filtering vitest to `live-mysql`.
+  
+  A text pin cannot close that gap, because the failure this module is fenced against is an arm mis-compiled for one dialect: it raises, the `catch` that exists for the expected miss swallows it, and a stored-row data repair silently becomes a no-op. Whether `to_regclass` answers ZERO ROWS rather than raising is a claim about PostgreSQL, not about this repo's string concatenation. `seed-tenancy-backfill.live-postgres.test.ts` now runs every statement the migration builds, both presence directions with the refusal control beside them, the search-path scoping the arm depends on, and the whole backfill end to end — on a live server, in its own derived schema. Ablated (the Postgres arm re-compiled to MySQL's `DATABASE()` form), six of its seven cases go red, reporting `verdict: 'unreadable'` with `detail: "function database() does not exist"` — the exact shape the fence exists to keep out of `'absent'`.
+  
+  Grade: `patch`, measured rather than defaulted. Not `minor` — no new export, no widened accept-set, no runtime behaviour change of any kind. Not `skip-changeset` either, and that is the measurement worth recording: `dist/` is byte-untouched (grepped for this change's markers: zero hits, against a positive control that hits `dist/index.js` and `dist/index.cjs`), but `package.json` is one of the 27 files `npm pack` ships, and it now carries `pg` and `@types/pg` in `devDependencies`. `skip-changeset` is for a diff that publishes nothing from a released package; this one publishes two manifest lines a consumer never installs, which is still publishing.
+- c3ebe4a: A producer-declared 5xx **refusal** now keeps its message on the wire, at every door that reads the declaration.
+  
+  `ApiErrorSchema.refusal` (`@objectstack/spec`) is the producer-side declaration that a 5xx is a deliberate refusal whose `message` is authored for the caller. Until now nothing read it: all three arms that withhold a declared 5xx's prose could tell only that the producer had declared a *status*, so a refusal and a driver fault were sanitised alike and every producer-declared 5xx refusal reached the caller as `"Internal server error"`.
+  
+  The read is one new function, `declaredRefusalMessage` (`@objectstack/types`), called by all three arms — `declaredServerFaultAnswer` and `resolveErrorResponse`'s 5xx passthrough in `@objectstack/rest`, and `errorResponseBase` in `@objectstack/runtime`. REST's logging follows the same field: a declared refusal is no longer logged as `[REST] Unhandled error`.
+  
+  **What changes for a caller.** A 5xx whose producer sets `refusal: true` beside a `status` (or `statusCode`) in the 500-599 band and a non-empty `code` now carries that producer's message, bounded exactly as a 4xx message is. The first live case is `GET /api/v1/meta/:type/:name/references` for an unanswerable target, whose ADR-0110 D3 sentence ("Ask the owning object instead: …") reaches an operator again.
+  
+  **What does not change.** Everything else, and the default is fail-closed: a declared 5xx that carries no `refusal` is withheld exactly as before, an undeclared 5xx still goes through the leak heuristic, and a rewrap that drops the flag is withheld as a fault. A refusal cannot buy leaky prose past `looksLikeInternalErrorLeak` either — the declaration says the prose is *addressed* to the caller, not that it is *safe*.
+  
+  **For producers.** Setting `refusal: true` on a thrown 5xx is opt-in and additive; a producer that does not set it is unaffected. Platform and driver code must never set it on a fault.
+- b110578: fix(metadata): four `isoFromValidDate` call sites collapse onto the shared canonical-ISO spelling; `MetadataHistoryRecord.recordedAt` gets the terminal value it never had (#16422)
+  
+  ## What was wrong
+  
+  `#14037`/`#14038` landed a narrow per-site helper, `isoFromValidDate`, beside
+  the shared `canonicalIsoInstant` spelling. It rewrote exactly one shape — a
+  valid JS `Date` becomes ISO text — and handed **every other input back
+  untouched**. Four adapter boundaries used it, and each fed a field declared
+  `z.string()` or `z.string().datetime()`:
+  
+  | site | declared as |
+  |:--|:--|
+  | `SysMetadataRepository.rowToEvent` → `MetadataEvent.ts` | `z.string()` |
+  | `DatabaseLoader.rowToRecord` → `MetadataRecord.createdAt` / `.updatedAt` | `z.string().datetime().optional()` |
+  | `DatabaseLoader.getHistoryRecord` → `MetadataHistoryRecord.recordedAt` | `z.string().datetime()` — **required** |
+  | `DatabaseLoader.queryHistory` → the same field, the other door | `z.string().datetime()` — **required** |
+  
+  So a `null`, a `number`, an opaque column and an Invalid `Date` all arrived at a
+  field declared `string`, each wearing an `as string` / `as string | undefined`
+  cast that asserted the opposite. Measured over the seven inputs that
+  distinguish the two helpers, the declared schemas refused **21 of 35** produced
+  values.
+  
+  `recordedAt` was the sharp end: a REQUIRED `z.string().datetime()` for which
+  none of the three available answers was legal — the visible text
+  `"Invalid Date"` fails the refinement, `undefined` fails the required field, and
+  the pass-through fed it the `Date` object, which fails both.
+  
+  ## What it does now
+  
+  Those four sites read `canonicalIsoInstant`, whose return type **is**
+  `string | undefined`, so all four casts are deleted rather than restated. Both
+  sibling definitions of `isoFromValidDate` are gone. The terminal value is chosen
+  per site, from the site's own declared schema:
+  
+  - `MetadataRecord.createdAt` / `.updatedAt` are `.optional()` → `undefined`, the
+    branch an absent column already took. ⛔ No default is invented for a field the
+    schema lets be absent.
+  - `MetadataHistoryRecord.recordedAt` is required → the **epoch**, via a named
+    `recordedAtFallback()` shared by both history doors. ⛔ Not `new Date()`: a
+    `now` stamp is a plausible-looking recording instant nobody measured, and it
+    sorts a version recorded years ago to the top of a newest-first timeline. The
+    epoch invents no fact and sorts to the oldest end. It is also the answer the
+    sibling reader of this same `sys_metadata_history.recorded_at` column already
+    gives (`rowToEvent` and `history()`, both `?? new Date(0).toISOString()`).
+  
+  Schema refusals over the same seven inputs: **21 → 8**. The eight that remain
+  are a `number` and an opaque object at four sites — shapes no driver is measured
+  to materialise for these columns. They now arrive as the declared *type* (a
+  string) that simply is not a valid datetime, so the producer's bug stays visible
+  instead of being papered over.
+  
+  ## One behaviour change worth reading twice — and it is why this is `minor`
+  
+  `DatabaseLoader.stat()` computes `record.updatedAt ?? record.createdAt`. An
+  Invalid `updated_at` used to WIN that `??` — a `Date` is truthy and not nullish —
+  so a row with an unreadable `updated_at` and a good `created_at` published
+  `new Date()` as its `mtime`. It now folds to `undefined` one step earlier and
+  loses the `??`, so the row publishes its `created_at`: a stored instant in place
+  of a fabricated one, and exactly the "same `?? DEFAULT` chain an absent column
+  takes" that `#14078`'s own ruling text prescribes for the shape.
+  
+  ⚠️ **The old answer was LEGAL.** `new Date().toISOString()` satisfies
+  `MetadataStats.mtime`'s `z.string().datetime()` perfectly well, and the
+  pre-existing pin asserted exactly that. So this one site is **not** the repair of
+  a violation — it is one legal published answer replaced by a different legal
+  published answer on a published read verb. Nothing was refused before and is
+  permitted now; a consumer simply receives a different instant.
+  
+  ## Why the two levels differ
+  
+  - **`@objectstack/metadata` — `minor`.** Its four repaired sites, on their own,
+    are the "repairing an implementation that silently violated its own already
+    published declared type" case: the values that changed there are ones
+    `MetadataRecordSchema` / `MetadataHistoryRecordSchema` already refused, and
+    nothing a consumer legitimately received has moved. But this package also
+    carries `stat()`, and that site changes a **legal** published answer, which the
+    paragraph above measures. The level is per package, so the four repaired sites
+    ride along at `minor`.
+  - **`@objectstack/metadata-protocol` — `patch`.** Neither of its two sites moves
+    a legal published answer. `rowToEvent` only stops emitting values
+    `MetadataEventSchema` refused (a `Date`, a `number`, an opaque object in a
+    field declared `z.string()`), and `listCommits` is byte-identical on all seven
+    probe inputs.
+  
+  ⛔ No declared type narrowed, no export was added or removed (neither helper was
+  ever exported), and no envelope or accept set moved — so this is `minor` by the
+  changed-answer row, not a breaking change, and it carries no ADR-0087
+  disposition.
+  
+  ## What deliberately did NOT collapse
+  
+  `listCommits` in `@objectstack/metadata-protocol` keeps its copy. Its docblock
+  promises callers the RAW value back for a non-`Date`, and the shared spelling
+  rewrites the whole domain: swapping it in would ERASE an Invalid `Date` from the
+  response (`undefined` — the one answer ADR-0053 D-F3 refuses, because it silently
+  drops a value that is on disk) and hand a `number` or an opaque object to the
+  commit-timeline sort as `String(value)` rather than verbatim. Measured, that site
+  is byte-identical on all seven inputs before and after this change.
+  
+  `SqlDriver`'s same-named helper is not part of this family at all: it takes
+  `Date` (not `unknown`), both its call sites narrow with `instanceof Date` first,
+  and it is the PRODUCER-side fold ADR-0053 D-F3 governs. It is untouched.
+- 29d00cc: Fix `GET /meta/types` serving an empty JSON Schema for `action`
+  
+  `ActionSchema` is a `ZodPipe`, and the `output` derivation of a pipe carries no
+  properties, so `/meta/types` advertised `action` as
+  `{"$schema": "https://json-schema.org/draft/2020-12/schema"}` — a document that
+  reads as "this type declares no constraints" for a type that accepts 47 keys.
+  The hand-crafted fallback declared for this case never fired, because the
+  conversion did not throw: it succeeded and returned a truthy husk, which
+  short-circuits the `??` that was supposed to reach the fallback.
+  
+  A derivation that comes back with no properties, no union arms, no `$ref` and no
+  `additionalProperties` object is now treated as a non-answer. It is retried in
+  the authoring shape (`io: 'input'`), and if that degenerates too the type is
+  named in a one-shot warning and the hand-crafted fallback decides.
+  
+  Only `action` changes. The `output` derivation remains the served default on
+  purpose: deriving every type with `io: 'input'` was measured across the whole
+  served surface and would move 24 of the 26 types that carry a Zod schema, in the
+  direction of a weaker contract (`required` entries 1132 to 867,
+  `additionalProperties: false` 663 to 637). Gating the retry on degeneracy keeps
+  the change to the one type that was actually broken.
+  
+  Consumers reading `schema` for `action` from `/meta/types` or `/api/v1/meta` now
+  receive its real 47 properties instead of an empty object. No other type's
+  served payload moves, and a type that resolves no Zod schema at all continues to
+  be served with no schema — absence is not the same failure as a derivation that
+  came back empty.
+- 5a95b0e: fix(types,metadata-protocol,metadata,cli): a stored operator record names the dialect again, not the driver's composed refusal
+  
+  Since the raw-SQL seam began declaring its own fault, `SqlDriver.execute()` no longer
+  lets the dialect's error out: it raises `code: DATABASE_ERROR` / `status: 500` with a
+  COMPOSED message that discloses neither the statement nor the diagnostic, and carries
+  the dialect error whole under a non-enumerable `cause`. That envelope is deliberate and
+  is unchanged here.
+  
+  What changed underneath it is what every consumer STORED. Each migration probe, backfill
+  and rename in `@objectstack/metadata-protocol` / `@objectstack/metadata` embedded
+  `error.message` into an operator-facing record, so those records began reading
+  
+      the database refused to run a raw statement
+  
+  where they used to read
+  
+      no such column: foo
+  
+  For a live console that costs nothing — the driver prints the statement and the dialect
+  text to its warn sink one line earlier. For a record read later it costs everything:
+  whoever opens a customer install's backfill result a week on never had that line, and the
+  dialect's words were unrecoverable for them.
+  
+  `@objectstack/types` now exports `operatorFacingErrorText(error)` — a depth-bounded walk
+  of the `cause` chain, shaped like the `matchesDriverError` beside it — and the thirteen
+  stored-record sites plus `os db clean`'s console line read through it:
+  
+  - `runtime-index-preflight` — the per-probe `detail` and the seam-failure fan-out;
+  - `seed-tenancy-backfill` — the `absent` detail, the organization-probe report and the
+    three per-object warnings;
+  - `partial-index-probe` — the `detail` both callers report (and its two module comments,
+    which stated the opposite of what happened);
+  - `migrate-env-id-to-project-id`, `migrate-project-id-to-environment-id`,
+    `migrate-sys-notification-to-event`, `drop-projection-tables` — the per-table `error`;
+  - `os db clean` — the `VACUUM failed` line.
+  
+  Two narrowings are part of the contract, not incidental: an UNDECLARED throw is returned
+  on its own message channel, its `cause` never walked, and a declared envelope that is not
+  the raw-path one — the typed read exits' terminal, which composes a different sentence —
+  is left exactly as it arrived.
+  
+  That message channel is deliberately NOT byte-identical to what the replaced expressions
+  computed. The RULE, rather than a catalogue of cases: an undeclared throw comes back as
+  `messageChannelOf(error) || String(error)` — the thrown value's own string `message`, the
+  string itself when a string was thrown, and `String(error)` when neither yields text. Every
+  difference from the replaced expressions follows from that rule, so read the rule and not a
+  list. Illustrations of it, not an exhaustive set: an empty-message `Error` reads its `name`,
+  which for a named subclass is that subclass's name rather than `Error` / `TypeError`; a
+  thrown non-`Error` reads its own text or `String(error)` where `(e as Error).message` read
+  `undefined`, and where `null` / `undefined` threw a `TypeError` out of the catch, so no
+  record was written at all and the operation aborted; an object carrying a NON-EMPTY string
+  `message` reads it where `err instanceof Error ? … : String(err)` recorded `[object Object]`
+  (one carrying an EMPTY `message` still reads `[object Object]`). A thrown EMPTY string reads
+  `''`, so this channel is neither always prose nor never empty.
+  
+  ## The levels, and why they are not uniform
+  
+  `@objectstack/types` takes **`minor`**: it is the one package here that grows a published
+  surface — `operatorFacingErrorText` is a new export, present in `dist/index.d.ts` and in the
+  export list. A purely additive widening takes at least `minor`.
+  
+  The other four take **`patch`**, because none of them widens anything: they are a bug fix in a
+  released package, which is exactly what `patch` is for. `@objectstack/driver-sql` is named
+  because this change moves its `src/**` — by one ADDED file, the `.test.ts` that pins the helper
+  against a real `SqlDriver.execute()` refusal. Its published `dist/` is byte-unchanged by this
+  PR: no entry point reaches a test file, and `files` packs `dist` only.
+  
+  **Not breaking, and deliberately not marked so.** Nothing is removed, renamed or made stricter:
+  what moves is the TEXT inside an operator-facing `detail` / `error` field, never a field name
+  and never a type. The change these sites were made for is the declared raw-path fault, where
+  the record gains the dialect's words in place of the driver's composed placeholder. Every
+  other throw now reaches these records through the rule above rather than through the
+  expression each site spelled out, so its text can move too — a consequence of the rule, not a
+  bounded list of exceptions. At thirteen of the fourteen sites the rule is the whole record,
+  and some shapes still record `''` there: a thrown empty string, a thrown empty array, and an
+  `Error` whose `name` and `message` are both empty are the ones measured. The fourteenth was
+  `seed-tenancy-backfill`'s organization probe, which kept a `|| 'unknown error'` fallback on
+  top of the rule, so those same three shapes recorded `'unknown error'` there rather than `''`;
+  that fallback was load-bearing — the site read an empty value as "the probe did not fail" —
+  and #17167 removed it in this same release, so all fourteen sites now record the channel as
+  is and that site carries its failure fact structurally. The sentence being replaced is not a value any
+  consumer can have been parsing: it is an opaque human diagnostic. A consumer reading these
+  records gets the dialect's words back where it had been getting a placeholder.
+- 8c9bd8f: docs(metadata-protocol,objectql,cli): comments describing the standalone stamp now name `env_local`, the value the tree actually produces
+  
+  The v5.0 `project` to `environment` rename reached the two remaining stamps in `@objectstack/runtime` and `@objectstack/metadata` in a previous release: `createStandaloneStack` and `MetadataPlugin` both stamp **`env_local`**. Six comments in three other packages still described that stamp as `'proj_local'`, so they named a value nothing in the tree produces any more.
+  
+  No behaviour changes. The reason this is a `patch` rather than a no-publish diff is measured, not assumed: two of the six sites are TSDoc on **exported** interface members (`AssembleMetadataProtocolOptions.runPlatformMigrations`, `ObjectQLPluginOptions.runPlatformMigrations`) and land in the shipped `dist/*.d.ts`, and the `@objectstack/cli` site lands in the shipped `dist/utils/schema-migrate.js` because that package builds with `removeComments` unset. All three packages ship `dist` in `files[]`, so the corrected text is what an author reads on hover after upgrading.
+  
+  The sites were judged individually rather than search-and-replaced, because they are not all the same edit:
+  
+  - Five sites whose verb describing the stamp is present indicative describe today's tree — two of them point the reader at `runtime/src/standalone-stack.ts` to go and look — and take the current spelling.
+  - `packages/cli/src/utils/schema-migrate.ts` names `'proj_local'` as the value the historical arming deduction consumed. There the literal is preserved as history and its present-tense relative clause moves into the past, with today's spelling named beside it; rewriting it to `env_local` would have falsified the record in the other direction.
+  
+  The causal claim at every site is about **presence**, not spelling: the retired gate read `environmentId === undefined`, so it would have misfired identically under either literal. That reading is preserved at all six.
+- 7173d7d: Correct the `summary` column representation stated in the sort-hint TSDoc. Since #16318 an engine-maintained `summary` column is an exact `table.decimal` on tables created after that change and a `table.float` on tables created earlier; the shipped doc comment still said flatly that it is a `table.float`. Comment text only — the sort behaviour it describes is unchanged, and the column type was never what makes a `summary` field sortable (having a provisioned column is).
+- Updated dependencies [7f62536]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [245f360]
+- Updated dependencies [324968e]
+- Updated dependencies [fe71032]
+- Updated dependencies [482d34d]
+- Updated dependencies [c88fa2c]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [baf9745]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [6548118]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [48203ff]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [0fb6f97]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [de62769]
+- Updated dependencies [c9eb773]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [dfeba25]
+- Updated dependencies [0a88a80]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [e7ff9c2]
+- Updated dependencies [758ac40]
+- Updated dependencies [134b410]
+- Updated dependencies [4c42fd1]
+- Updated dependencies [5f392f0]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [f03f6c7]
+- Updated dependencies [86f4246]
+- Updated dependencies [cf79182]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [c3ebe4a]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [2bed4c3]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [71629a1]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [e958468]
+- Updated dependencies [288fe9c]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [b110578]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [522f612]
+- Updated dependencies [6e3462d]
+- Updated dependencies [31064ca]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [f89dd33]
+- Updated dependencies [cca1dc0]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5a95b0e]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [5b5bd36]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [e4fd55d]
+- Updated dependencies [7026141]
+- Updated dependencies [ba17017]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [131851f]
+- Updated dependencies [de1a611]
+- Updated dependencies [db76982]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [ab450f4]
+- Updated dependencies [025588a]
+- Updated dependencies [5505646]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [4ecfd2b]
+- Updated dependencies [7cd5874]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/types@17.5.0
+  - @objectstack/spec@17.5.0
+  - @objectstack/lint@17.5.0
+  - @objectstack/core@17.5.0
+  - @objectstack/formula@17.5.0
+  - @objectstack/metadata-core@17.5.0
+  - @objectstack/metadata@17.5.0
+
 ## 17.4.0
 
 ### Minor Changes

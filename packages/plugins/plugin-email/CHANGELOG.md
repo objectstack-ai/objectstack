@@ -1,5 +1,134 @@
 # @objectstack/plugin-email
 
+## 17.5.0
+
+### Patch Changes
+
+- ca31ff6: Take the fix for the fifteen OSV advisories that turned `Validate Package Dependencies` red on every PR.
+  
+  The advisory database moved; the lockfile did not. `origin/main`'s `pnpm-lock.yaml` is byte-identical to the tree that scanned GREEN the day before and RED the day after, so this is a repo-wide condition rather than any PR's regression, and every one of the fifteen names a published fix version — the take-the-fix path `osv-scanner.toml`'s header describes, not the exemption path. That ledger keeps its zero entries and is untouched here, as is `.github/workflows/validate-deps.yml`.
+  
+  Two published packages change what a downstream install resolves, which is what this changeset grades:
+  
+  - **`@objectstack/plugin-email`** declares `nodemailer` `^9.1.1` (was `^9.0.5`), clearing GHSA-2x7j-588g-ccc2 (7.5), GHSA-cc9r-2j5m-2m83 (6.5), GHSA-wmmp-3585-3rmp (6.5) — all fixed in 9.1.0 — and GHSA-8m3c-c648-2xjj (5.9), fixed in 9.1.1. The range takes the higher of the two fix lines so one floor covers all four. The 10.x major is deliberately not taken.
+  - **`@objectstack/plugin-hono-server`** declares `hono` `^4.13.5` (was `^4.13.2`), clearing GHSA-crvj-82cr-hjcx (5.9), GHSA-g6gw-c38x-mqfc (5.3) and GHSA-gqvv-2mrq-wpjv (6.5).
+  
+  No exported symbol, payload key or accept/reject behaviour of ours moves — the published surface is unchanged and both grade `patch`.
+  
+  The rest of the sweep releases nothing and is named here only so the set is readable in one place: the `sharp` override target lifts to `^0.35.4` (GHSA-rgj7-g3m4-5g8c, 8.9) and the `hono` override target to `^4.13.5`, both target-only lifts whose selectors already sit at the compatibility boundary; the private docs app takes `next` 16.3.3 (GHSA-2xp9-vwfh-vxw4 9.5 and GHSA-p293-qw3h-jr36 9.0, the two Criticals); and the `vitest` devDependency line takes 4.1.11 across the workspace, with `@vitest/coverage-v8` moved in lockstep because its peer on `vitest` is exact (GHSA-82fw-gwwq-j7x9, 5.9, which flagged both `vitest` and `@vitest/mocker`).
+  
+  `hono` was flagged at TWO resolved versions and both are gone: the override lift is what collapses them. The transitive copy `@modelcontextprotocol/sdk` pulled sat exactly on the old `^4.12.34` floor and so was never re-resolved, while our own three declarations floated up to 4.13.2; `^4.13.5` excludes the floor, both edges re-resolve, and the tree now holds one `hono`. A bump that moved only our declarations would have left the transitive copy flagged and the gate red.
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [245f360]
+- Updated dependencies [324968e]
+- Updated dependencies [fe71032]
+- Updated dependencies [482d34d]
+- Updated dependencies [305e7fc]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [9c577c1]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [baf9745]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [6548118]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [48203ff]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [de62769]
+- Updated dependencies [c9eb773]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [dfeba25]
+- Updated dependencies [0a88a80]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [e7ff9c2]
+- Updated dependencies [c744c0a]
+- Updated dependencies [134b410]
+- Updated dependencies [4c42fd1]
+- Updated dependencies [5f392f0]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [f03f6c7]
+- Updated dependencies [cf79182]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [71629a1]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [de1a611]
+- Updated dependencies [db76982]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [ab450f4]
+- Updated dependencies [025588a]
+- Updated dependencies [5505646]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [4215417]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/spec@17.5.0
+  - @objectstack/platform-objects@17.5.0
+  - @objectstack/core@17.5.0
+  - @objectstack/formula@17.5.0
+
 ## 17.4.0
 
 ### Patch Changes

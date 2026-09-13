@@ -1,5 +1,187 @@
 # @objectstack/service-external-datasource
 
+## 17.5.0
+
+### Patch Changes
+
+- 71629a1: refactor(core): one `classifyAdmissionTenancyPosture`, so six admission seams cannot each get the classification wrong (#16013)
+  
+  Six admission doors each hand-wrote the same try/catch on the `tenancy` read that
+  feeds `resolveAuthzContext`: the registry's branded "never registered" rejection
+  (`isServiceNotRegisteredError`, #13905) resolves quietly to `undefined` — the
+  supported no-tenancy composition, where no posture-conditional refusal runs at
+  all — and every other rejection becomes `AuthzStoreUnavailableError('tenancy', err)`
+  (ADR-0112 `SERVICE_UNAVAILABLE` / 503), because the posture is an authorization
+  INPUT and admission was therefore never DECIDED. That is #13906 decision 1
+  option A, and it is the part nobody may get wrong: a quiet `catch` at any one of
+  the six re-opens the defect, where a failure reads as "this check does not apply"
+  and an ex-member's org-stamped API key is admitted.
+  
+  Nothing is broken today — every copy was correct — so this removes a standing
+  hazard rather than fixing a defect. **No admission verdict changes**, on any
+  wiring: the classification is byte-for-byte the decision the six copies made,
+  now made once.
+  
+  - **`@objectstack/core` gains `classifyAdmissionTenancyPosture`** (and the
+    `TenancyServiceResolver` type), exported from the package index beside
+    `effectiveTenancyPosture`. It takes a THUNK and owns the classification only.
+    The thunk is not a style choice: the REJECTION is what gets classified, so the
+    resolution has to happen inside the helper's `try` — a caller that awaited the
+    service first would need a `catch` of its own, which is the thing being
+    deleted.
+  - **The RESOLUTION deliberately did not move.** `rest-server.ts` branches on
+    kernel-vs-provider, and asking twice would let a provider bound to the local
+    kernel answer for a request that resolved to another environment; four seams
+    read `ctx.getKernel()`; `service-storage` reads an already-normalised gate
+    registry; and each seam's reason why a MISSING async accessor must stay quiet
+    is its own argument (the storage door's is its declared degrade-to-ungated
+    contract, the others' is the `KernelBase`/`LiteKernel` host shape). A helper
+    that also owned how the service is reached would be wrong for one of them or
+    grow a flag per seam — the copies again, with an extra step. Every one of
+    those reasons stays written at its seam.
+  - **Folded**: `packages/rest/src/rest-server.ts` (both wirings),
+    `packages/cloud-connection/src/marketplace-install-local-plugin.ts`,
+    `packages/plugins/plugin-sharing/src/sharing-plugin.ts`,
+    `packages/services/service-datasource/src/admin-routes.ts`,
+    `packages/services/service-settings/src/settings-service-plugin.ts`,
+    `packages/services/service-storage/src/storage-service-plugin.ts`.
+  - **Pinned where the decision now lives**:
+    `packages/core/src/security/admission-tenancy-posture.test.ts` drives both
+    rejections at the production seam — a real `ObjectKernel` that never
+    registered `tenancy`, and one whose `tenancy` factory throws — each beside the
+    brand predicate's own answer on that same rejection, so "the outage throws" is
+    distinguishable from a helper that throws at everything. It also holds the
+    constraint mechanically: the helper's source may not name an accessor, a
+    kernel or a plugin context, and it takes exactly one parameter.
+- Updated dependencies [7f62536]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [245f360]
+- Updated dependencies [324968e]
+- Updated dependencies [fe71032]
+- Updated dependencies [482d34d]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [baf9745]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [6548118]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [48203ff]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [9e3c485]
+- Updated dependencies [82cb69f]
+- Updated dependencies [e1796ad]
+- Updated dependencies [c9eb773]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [dfeba25]
+- Updated dependencies [0a88a80]
+- Updated dependencies [2eb4724]
+- Updated dependencies [d46deba]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [e7ff9c2]
+- Updated dependencies [7c2c5ae]
+- Updated dependencies [758ac40]
+- Updated dependencies [be5c602]
+- Updated dependencies [134b410]
+- Updated dependencies [4c42fd1]
+- Updated dependencies [5f392f0]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [f03f6c7]
+- Updated dependencies [cf79182]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [c3ebe4a]
+- Updated dependencies [65ad77d]
+- Updated dependencies [88a9330]
+- Updated dependencies [3cbcedb]
+- Updated dependencies [88a9330]
+- Updated dependencies [3cbcedb]
+- Updated dependencies [bdea10a]
+- Updated dependencies [a61ae59]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [2bed4c3]
+- Updated dependencies [77c801e]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [71629a1]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [288fe9c]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [6e3462d]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [555a89c]
+- Updated dependencies [b90aff8]
+- Updated dependencies [0f38ab0]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5a95b0e]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [de1a611]
+- Updated dependencies [db76982]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [ab450f4]
+- Updated dependencies [025588a]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/types@17.5.0
+  - @objectstack/spec@17.5.0
+  - @objectstack/driver-sql@17.5.0
+  - @objectstack/core@17.5.0
+  - @objectstack/driver-memory@17.5.0
+  - @objectstack/driver-turso@17.5.0
+  - @objectstack/driver-sqlite-wasm@17.5.0
+  - @objectstack/driver-mongodb@17.5.0
+
 ## 17.4.0
 
 ### Patch Changes

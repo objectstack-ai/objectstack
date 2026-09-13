@@ -1,5 +1,202 @@
 # @objectstack/plugin-dev
 
+## 17.5.0
+
+### Patch Changes
+
+- 50bc9c7: Operator-facing text no longer tells an open-source install that multi-organization
+  operation requires a subscription.
+  
+  ADR-0132 moved the `org-scoping` registrar into open core — `@objectstack/organizations`
+  is Apache-2.0, carries no licence check, and declares both walled postures (`group` and
+  `isolated`) as its own constant. The messages an operator actually reads had not followed:
+  
+  - `os serve`'s install remedy for a walled posture ended "this runtime is closed-source and
+    is NOT on the public npm registry ... Without one this bullet is not followable" — it now
+    says the runtime is Apache-2.0 and on the public registry, and notes that a commercial
+    deployment resolves the same package name to its own private, licence-gated build.
+  - The `isolated` posture hint rendered by `os serve` and `os doctor` no longer calls the
+    runtime "enterprise".
+  - `os verify`'s `--org-scoped` flag description drops the same word.
+  - The dev stack's degraded-tenancy warning and its stage-2 mount refusal no longer describe
+    the package as the enterprise runtime.
+  
+  Text only — no control flow, no identifiers, no behaviour change.
+- Updated dependencies [7f62536]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [245f360]
+- Updated dependencies [324968e]
+- Updated dependencies [3a5eaea]
+- Updated dependencies [fe71032]
+- Updated dependencies [482d34d]
+- Updated dependencies [ee6fbd7]
+- Updated dependencies [6059b29]
+- Updated dependencies [89a652b]
+- Updated dependencies [88a072e]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [baf9745]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [4af758d]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [6548118]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [c9246fa]
+- Updated dependencies [48203ff]
+- Updated dependencies [cea85fd]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [1a25f4a]
+- Updated dependencies [c9eb773]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [dfeba25]
+- Updated dependencies [0a88a80]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [e7ff9c2]
+- Updated dependencies [310760d]
+- Updated dependencies [2b6a207]
+- Updated dependencies [2b08a72]
+- Updated dependencies [758ac40]
+- Updated dependencies [134b410]
+- Updated dependencies [4c42fd1]
+- Updated dependencies [76ddab7]
+- Updated dependencies [344d475]
+- Updated dependencies [5f392f0]
+- Updated dependencies [94c9302]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [f03f6c7]
+- Updated dependencies [374d9d3]
+- Updated dependencies [ea4d164]
+- Updated dependencies [cf79182]
+- Updated dependencies [efa2533]
+- Updated dependencies [dd2fd20]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [c3ebe4a]
+- Updated dependencies [a900841]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [0780e88]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [2bed4c3]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [71629a1]
+- Updated dependencies [2266438]
+- Updated dependencies [f8e5790]
+- Updated dependencies [cefe068]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [706ad0f]
+- Updated dependencies [288fe9c]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [96684bb]
+- Updated dependencies [ab56ea3]
+- Updated dependencies [9ca49eb]
+- Updated dependencies [a016f08]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [6e3462d]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [3644fad]
+- Updated dependencies [45c2cf9]
+- Updated dependencies [555a89c]
+- Updated dependencies [b90aff8]
+- Updated dependencies [0f38ab0]
+- Updated dependencies [dfb42c5]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [980dc78]
+- Updated dependencies [5c8f5af]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5a95b0e]
+- Updated dependencies [ca31ff6]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [1c83ca2]
+- Updated dependencies [9b9581b]
+- Updated dependencies [9ca49eb]
+- Updated dependencies [fb7d75f]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [0ced0aa]
+- Updated dependencies [5b5bd36]
+- Updated dependencies [2e8e118]
+- Updated dependencies [d2badf7]
+- Updated dependencies [2a79726]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [470746a]
+- Updated dependencies [ac24458]
+- Updated dependencies [7026141]
+- Updated dependencies [6ff5b56]
+- Updated dependencies [cf6e0a1]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [4280055]
+- Updated dependencies [de1a611]
+- Updated dependencies [e758131]
+- Updated dependencies [db76982]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [ab450f4]
+- Updated dependencies [025588a]
+- Updated dependencies [8c9bd8f]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [ab1c585]
+- Updated dependencies [7cd5874]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/types@17.5.0
+  - @objectstack/runtime@17.5.0
+  - @objectstack/spec@17.5.0
+  - @objectstack/rest@17.5.0
+  - @objectstack/objectql@17.5.0
+  - @objectstack/plugin-auth@17.5.0
+  - @objectstack/plugin-hono-server@17.5.0
+  - @objectstack/core@17.5.0
+  - @objectstack/driver-memory@17.5.0
+  - @objectstack/plugin-security@17.5.0
+  - @objectstack/service-storage@17.5.0
+  - @objectstack/service-i18n@17.5.0
+  - @objectstack/account@17.5.0
+  - @objectstack/setup@17.5.0
+  - @objectstack/service-realtime@17.5.0
+
 ## 17.4.0
 
 ### Patch Changes

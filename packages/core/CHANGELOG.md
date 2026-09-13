@@ -1,5 +1,534 @@
 # @objectstack/core
 
+## 17.5.0
+
+### Minor Changes
+
+- e7ff9c2: `dateRange`'s array arm has ONE arity everywhere: a two-element window, or the ADR-0112 refusal (#17596)
+  
+  The shared conformance kit
+  (`analyticsDateRangeConformanceFindings`) had exactly one array case — a
+  two-element window — so the ARITY of the array arm was governed nowhere and
+  every analytics face was free to invent a meaning for `dateRange:
+  ['2026-01-01']`. Four faces in one package had invented three (#17124), and a
+  fifth — `driver-memory`'s cube face — had invented a fourth.
+  
+  **The kit** now exports `ANALYTICS_DATE_RANGE_NOT_A_WINDOW` and holds every
+  registered face to the rule the `service-analytics` faces already carry: an
+  array that is not two non-empty string bounds is refused with
+  `ANALYTICS_DATE_RANGE_UNRECOGNIZED` / 400. No new rule was invented for it, and
+  the existing two-element window case is untouched — it is this case's control,
+  so "refuse every array" cannot pass.
+  
+  **`driver-memory`** now answers that refusal instead of dropping the window.
+  MEASURED end to end over four rows spanning 2020…2099: `['2026-01-01']`, `[]`
+  and `['2026-01-01', '2026-01-31', '2026-02-01']` each emitted a pipeline
+  byte-identical to one with **no `dateRange` at all** — every row selected, the
+  "plot all of history" failure #3650 was filed about — and `[null, null]`
+  compared instants against the string `'null'` and selected none.
+  
+  **Levels.** `@objectstack/core` is `minor`: it gains a new exported symbol on
+  its index (`ANALYTICS_DATE_RANGE_NOT_A_WINDOW`), and a purely additive widening
+  of a published package's public surface takes at least `minor` whatever the
+  commit type says. `@objectstack/driver-memory` is `patch`: its public surface is
+  byte-unchanged — no new export, no new accepted key or value. Its behaviour does
+  change, from selecting every row to refusing with `400
+  ANALYTICS_DATE_RANGE_UNRECOGNIZED`, and that is a `patch` because the old
+  behaviour was a defect and never a contract: the spec's own refusal wording
+  already said an explicit window is the two-element array, and the #16322
+  migration table already told authors to write a single day as two bounds. A
+  release that stops answering a shape the contract never admitted is a fix, not a
+  feature — and the shapes it now refuses had no correct answer to lose.
+  
+  **If you wrote a one-element array**, write both bounds: `['2026-01-01']`
+  becomes `['2026-01-01', '2026-01-01']`, which selects exactly that day on every
+  face and did so before this change too. The refusal names the shape that
+  arrived, the two-element contract and that spelling.
+- 0da638c: fix(analytics)!: every analytics face lowers the closed `dateRange` preset vocabulary to one window and refuses the rest with `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` (#16322)
+  
+  <!-- adr-0087: not-required (already-registered analytics-time-dimension-date-range-vocabulary-closed) the driver half of #16041 implements the migration that card registered; the accept set narrowed at the contract there, and the prescription an author needs is that entry's, unchanged -->
+  
+  **BREAKING** for an in-process caller that reaches an analytics face PAST the
+  schema door with a string the closed vocabulary does not contain: it used to be
+  answered, and is now refused. Shipped as `minor` under the repo's launch-window
+  convention. The driver half of #16041, whose spec change closed
+  `AnalyticsQuery.timeDimensions[].dateRange`'s string arm to the thirteen
+  dashboard preset names; every value affected here was already refused at
+  `POST /analytics/query` and `/analytics/sql` when that landed.
+  
+  ## What was wrong
+  
+  #16041 closed the contract; the faces behind it never aligned, so the defect it
+  abolished simply moved onto the newly-blessed vocabulary. Measured on the built
+  `driver-memory` dist over five probe rows (2020, 2026-08-31, 2026-09-05, now,
+  2099):
+  
+  | input | before | after |
+  |:--|--:|--:|
+  | `today` | 1/5 | 1/5 |
+  | the other twelve declared presets | **5/5 — 2020 and 2099 included** | a real window each |
+  | `'not a range at all'`, `'Last 7 Days'` | 5/5 | `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` |
+  
+  `driver-memory` recognised exactly `today`: every snake_case preset missed its
+  `startsWith('last ')` branch and fell to a `[range, range]` pseudo-window whose
+  two bounds were the preset's own NAME, which matched every `Date`-typed row
+  under BSON cross-type ordering. Both `service-analytics` SQL strategies lowered
+  the same names — and unrecognised strings, and `today` — to the point window
+  `created_at >= 'last_30_days' AND created_at <= 'last_30_days'`, whose answer is
+  whatever the dialect decides a vocabulary word compares as. So a dashboard
+  asking for one month got all of history on one backend and a nonsense
+  comparison on the other, at HTTP 200 on both.
+  
+  ## What it does now
+  
+  - **One lowering, in `@objectstack/core`.** `resolveAnalyticsDateRangePreset` /
+    `resolveAnalyticsDateRangeString` resolve every declared preset to
+    `{ start, end, endExclusive }`. The window is a pair of `{date-macro}` tokens
+    handed to the existing macro resolver, so `dateRange: 'this_month'` and a
+    `{month_start}` filter token cannot answer differently, and the anchoring on
+    `AnalyticsQuery.timezone` (#16042) plus the one-calendar arithmetic (#15825)
+    come from that resolver rather than from each face.
+  - **One refusal.** `analyticsDateRangeUnrecognizedError` stamps the ADR-0112
+    envelope `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` with the spec's own
+    `analyticsDateRangeRefusalMessage` wording — the same sentence the schema door
+    answers with. `driver-memory`, both SQL strategies and the draft-preview evaluator call
+    it, so "memory and SQL refuse identically" is one function rather than an
+    agreement.
+  - **The upper bound keeps #16179's separation.** A window a face RESOLVED is
+    compared exclusively (`$lt` / `<`) for the ten calendar presets and
+    inclusively for the three rolling `last_N_days`, whose bound is NOW; an
+    explicit `[a, b]` a CALLER wrote is untouched and keeps `$lte`.
+  - The fifteen `driver-memory` date-range pins #16041 retired are reinstated in
+    preset form (DST cells re-measured under calendar semantics, not re-spelled),
+    and one cross-face conformance fixture holds all FOUR faces to the same
+    windows and the same refusal.
+  - **The draft-preview evaluator is the fourth face**, and it is in that fixture
+    for the same reason the other three are. `preview-evaluator.ts` (ADR-0037 P3 —
+    the Live Canvas preview over a pending seed draft) carried the identical
+    `[range, range]` fallback, so a valid `last_30_days` selected NOTHING there,
+    silently, while the published chart beside it answered a real window — across
+    a publish boundary the preview exists to make continuous, since publish
+    materialises the same seed.
+  
+  ## FROM → TO
+  
+  Unchanged from #16041's — the spelling that is refused here is the spelling that
+  was already refused at the door.
+  
+  | you wrote | write instead |
+  |:--|:--|
+  | `dateRange: 'Last 7 days'` / `'last 7 days'` | `dateRange: 'last_7_days'` |
+  | `dateRange: 'last 3 months'` | `dateRange: 'last_90_days'`, or an explicit `['{90_days_ago}', '{today}']` |
+  | `dateRange: '2026-01-20'` (the SQL single-day dialect) | `dateRange: ['2026-01-20', '2026-01-20']` |
+  | `dateRange: ['2026-01-01', '2026-01-31']` | unchanged |
+  
+  The `@objectstack/spec` entry is a `PROVENANCE_WAIVERS` row only: the refusal's
+  code stays registered under `@objectstack/runtime` (the door that names the wire
+  vocabulary), and the waiver records that the shared constructor spelling it
+  lives one package over.
+- f03f6c7: fix(driver-memory)!: an analytics time dimension buckets by its declared `granularity`, and refuses a sub-day one instead of ignoring it (#16178)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is renamed, retired or re-typed. `packages/spec` is untouched: `TimeUpdateInterval` still declares all eight intervals, `AnalyticsQuery.timeDimensions[].granularity` keeps its name, its type and its optionality, and every analytics request body parses byte-identically to before — so `objectstack migrate meta` has nothing to rewrite and this changeset carries no rewrite instructions. What narrows is one BACKEND's accept set at request time: `driver-memory`'s analytics face refuses the three sub-day granularities it cannot label, where it previously accepted them and produced an ungrouped answer. The remedy is a coarser granularity in the request itself, which is data a caller holds rather than an authored artifact with a stored representation; the spec-side narrowing of `TimeUpdateInterval` is filed separately as issue #17296, a `domain:spec` question under ADR-0049, and is deliberately not performed here. The other two packages add exports and relocate an implementation, both additive. -->
+  
+  **BREAKING** in three senses, all on `driver-memory`'s analytics face, landing in
+  the launch window as `minor` under the lockstep convention this cluster's
+  siblings already use:
+  
+  - an accepted request now answers **differently**: a time dimension carrying a
+    `granularity` folds its rows into calendar buckets instead of returning one
+    group per distinct timestamp. Every affected answer was wrong before;
+  - a **trend query answers rows where it used to answer one total**: a
+    `granularity` on a member `dimensions` does not also list is now a group
+    column of its own, so `{measures, timeDimensions: [{dimension, granularity}]}`
+    — the canonical trend shape — comes back one row per bucket, carrying the
+    member and a `fields` entry for it, instead of a single ungrouped total with
+    no such column;
+  - an accepted request is now **refused**: `granularity: 'second' | 'minute' |
+    'hour'` answers `NOT_IMPLEMENTED` / 501 instead of being silently dropped.
+  
+  ## What was wrong
+  
+  `AnalyticsQuery.timeDimensions[].granularity` is declared by the spec and a cube
+  dimension enumerates the granularities it offers (`granularities: ['day']`).
+  `memory-analytics.ts` read neither. The `$group` stage keyed on the raw field
+  path, so a time dimension bucketed **one group per distinct timestamp** — one bar
+  per row in a "new accounts by month" chart, which is the symptom #3588
+  catalogued and repaired for `service-analytics`.
+  
+  Measured through the public entry against the built package, two rows on one UTC
+  calendar day (`2026-09-06T01:00:00Z` and `2026-09-06T23:00:00Z`) under
+  `granularity: 'day'`:
+  
+  | | before | after |
+  |:--|--:|--:|
+  | `granularity: 'day'` | **2 groups**, keyed on the raw instants | 1 group, `2026-09-06` |
+  | no granularity (control) | 2 groups | 2 groups, unchanged |
+  | `granularity: 'hour'` | **2 groups**, silently | `NOT_IMPLEMENTED` / 501 |
+  | same, but with no `dimensions` | **`{count: 2}`** — one total, no time column, and no `fields` entry naming it | `{'events.createdAt': '2026-09-06', count: 2}`, `fields` naming both |
+  | `granularity: 'fortnight'` past the schema door | — | `INVALID_QUERY` / 400 |
+  
+  The emitted pipeline was byte-identical across all three, which is the whole
+  finding: the request was accepted, no warning was emitted, and the key was inert.
+  
+  ## What it does now
+  
+  - **One forward labeller, in `@objectstack/core`.** `bucketDateKey(value,
+    granularity, timezone)` sits beside the inverse `bucketKeyToCalendarRange` and
+    the `calendarPartsInTzOrUtc` primitive it builds on, and it is now the only
+    statement of the rule. `BUCKET_GRANULARITIES` and `isBucketGranularity` name
+    the five granularities that HAVE a canonical key, so a face that must refuse
+    the other three quotes the accepted set instead of hand-listing it.
+  - **`@objectstack/objectql`'s `bucketDateValue` is a delegate**, export name and
+    signature unchanged, answers unchanged — pinned across granularity, timezone
+    and input form rather than asserted. A driver that pushes the bucket down into
+    SQL and this in-memory path must label one instant identically or a drill-down
+    breaks at the seam, and that is now one function rather than an agreement
+    between two.
+  - **A granular time dimension is a group column, listed or not.** `dimensions`
+    no longer decides alone what `$group` keys on: every `timeDimensions` entry
+    carrying a `granularity` is grouped, projected and named in `fields`, deduped
+    against `dimensions` on the resolved member so two spellings of one member
+    stay one column. This is the rule the SQL/ObjectQL face already records
+    (`projectedDimensions`, #4033/#5688) — one set feeding grouping, row mapping
+    and field metadata, because rows carrying a bucket under a `fields` list that
+    never mentions it is a trend chart with no x-axis. ⛔ An entry carrying only a
+    `dateRange` is a predicate and is still **not** projected.
+  - **`driver-memory` folds by granularity before its `$group`.** The pipeline is
+    cut at that stage: the `$match` half still runs in the driver, the bucket keys
+    are written onto the selected rows, and the grouping half runs over those. The
+    key travels under a synthetic field rather than overwriting the row's own, so a
+    member that is both a group key and a measure's aggregand still ranks instants
+    in `max()` while grouping on the label.
+  - **The output vocabulary is the published one** — `2026`, `2026-Q3`, `2026-09`,
+    `2026-09-06`, `2026-W36`. The week label is `YYYY-Www`, never the Monday's
+    `YYYY-MM-DD`: `DriverCapabilitiesSchema.queryDateGranularity` calls this an
+    output contract, and a second spelling is what breaks a drill-down across a
+    backend seam.
+  - **Bucketing honours `AnalyticsQuery.timezone`** — the same reference zone
+    #16042 threaded through the `dateRange` window resolver, so the window that
+    selects the rows and the bucket that folds them agree on where a calendar day
+    starts. The same two rows answer one group in UTC, two in `America/New_York`
+    and two in `Asia/Tokyo`. An absent zone buckets in UTC, the resolver's default.
+  
+    ⚠️ That agreement is about the PRESET arm of `dateRange`, which the resolver
+    reads in the reference zone. An explicit `[start, end]` array is the caller's
+    own **instant** window and keeps its published reading (#16179), while the
+    bucket beside it is always a **calendar** label (ADR-0053) — so an array
+    window and a bucket can still disagree about where a day starts. That
+    combination is legitimate and is not refused; it is stated here rather than
+    left to be discovered.
+  - **`second` / `minute` / `hour` are refused at compile**, in the ADR-0112
+    envelope this driver's other capability gaps speak (`NOT_IMPLEMENTED` / 501,
+    the class `refusePerAggregationFilter` uses for the same reason: the query is
+    spelled correctly, the spec declares the value, and it is this backend that
+    compiles nothing for it). The canonical key vocabulary defines no label for a
+    sub-day bucket, so there is no string another backend's pushed-down SQL would
+    agree with. Passing it through unbucketed is this card's own defect wearing a
+    new name.
+  - **An undeclared granularity is a 400, not a 501.** A 501 says "this backend
+    cannot", which is only honest about a value the contract declares.
+    `TimeUpdateInterval` is checked first, so a spelling it never declared —
+    reachable past the schema door, where `POST /analytics/dataset/query` types
+    `selection.timeDimensions` without Zod-parsing them — answers `INVALID_QUERY`
+    / 400 rather than a 501 asserting the spec declared it. The same separation
+    the `dateRange` half of this face already draws (#16322 / #16041).
+  
+  ## If a caller is refused
+  
+  A stored widget or a request asking for a sub-day granularity was never bucketed
+  by this backend — it received one group per distinct timestamp under an ordinary
+  200. Nothing that worked stops working. Ask for `day` or coarser and the answer
+  is a real bucket; keep the raw timestamps deliberately by dropping the key, which
+  is the behaviour that key used to produce by accident.
+- 71629a1: refactor(core): one `classifyAdmissionTenancyPosture`, so six admission seams cannot each get the classification wrong (#16013)
+  
+  Six admission doors each hand-wrote the same try/catch on the `tenancy` read that
+  feeds `resolveAuthzContext`: the registry's branded "never registered" rejection
+  (`isServiceNotRegisteredError`, #13905) resolves quietly to `undefined` — the
+  supported no-tenancy composition, where no posture-conditional refusal runs at
+  all — and every other rejection becomes `AuthzStoreUnavailableError('tenancy', err)`
+  (ADR-0112 `SERVICE_UNAVAILABLE` / 503), because the posture is an authorization
+  INPUT and admission was therefore never DECIDED. That is #13906 decision 1
+  option A, and it is the part nobody may get wrong: a quiet `catch` at any one of
+  the six re-opens the defect, where a failure reads as "this check does not apply"
+  and an ex-member's org-stamped API key is admitted.
+  
+  Nothing is broken today — every copy was correct — so this removes a standing
+  hazard rather than fixing a defect. **No admission verdict changes**, on any
+  wiring: the classification is byte-for-byte the decision the six copies made,
+  now made once.
+  
+  - **`@objectstack/core` gains `classifyAdmissionTenancyPosture`** (and the
+    `TenancyServiceResolver` type), exported from the package index beside
+    `effectiveTenancyPosture`. It takes a THUNK and owns the classification only.
+    The thunk is not a style choice: the REJECTION is what gets classified, so the
+    resolution has to happen inside the helper's `try` — a caller that awaited the
+    service first would need a `catch` of its own, which is the thing being
+    deleted.
+  - **The RESOLUTION deliberately did not move.** `rest-server.ts` branches on
+    kernel-vs-provider, and asking twice would let a provider bound to the local
+    kernel answer for a request that resolved to another environment; four seams
+    read `ctx.getKernel()`; `service-storage` reads an already-normalised gate
+    registry; and each seam's reason why a MISSING async accessor must stay quiet
+    is its own argument (the storage door's is its declared degrade-to-ungated
+    contract, the others' is the `KernelBase`/`LiteKernel` host shape). A helper
+    that also owned how the service is reached would be wrong for one of them or
+    grow a flag per seam — the copies again, with an extra step. Every one of
+    those reasons stays written at its seam.
+  - **Folded**: `packages/rest/src/rest-server.ts` (both wirings),
+    `packages/cloud-connection/src/marketplace-install-local-plugin.ts`,
+    `packages/plugins/plugin-sharing/src/sharing-plugin.ts`,
+    `packages/services/service-datasource/src/admin-routes.ts`,
+    `packages/services/service-settings/src/settings-service-plugin.ts`,
+    `packages/services/service-storage/src/storage-service-plugin.ts`.
+  - **Pinned where the decision now lives**:
+    `packages/core/src/security/admission-tenancy-posture.test.ts` drives both
+    rejections at the production seam — a real `ObjectKernel` that never
+    registered `tenancy`, and one whose `tenancy` factory throws — each beside the
+    brand predicate's own answer on that same rejection, so "the outage throws" is
+    distinguishable from a helper that throws at everything. It also holds the
+    constraint mechanically: the helper's source may not name an accessor, a
+    kernel or a plugin context, and it takes exactly one parameter.
+- 07150b3: `PluginSchema.version` now accepts the whole of the SemVer 2.0.0 grammar, and `version` becomes the ninth declared key `kernel.use()` enforces.
+  
+  Two declarations in this repository disagreed about what a plugin `version` is, and the disagreement became load-bearing the moment the boot path started running the schema:
+  
+  | Declaration | Grammar | Accepted `1.0.0-alpha.1` / `1.0.0+20230101` |
+  |---|---|---|
+  | `PluginSchema.version` (`@objectstack/spec`, `kernel/plugin.zod.ts`), described `"Semantic Version"` | `/^\d+\.\d+\.\d+$/` | **no** |
+  | `PluginLoader.isValidSemanticVersion` (`@objectstack/core`), the check the boot path has always run | `/^\d+\.\d+\.\d+(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?$/` | **yes** |
+  
+  SemVer 2.0.0 defines prerelease and build metadata as **parts of** a semantic version, so the key's own `describe()` — `"Semantic Version"`, no qualifier — claimed the wide grammar while its regex implemented a subset of it. The spec key was the one that was wrong, and it is the one that moved.
+  
+  **The spec adopts the loader's grammar character for character**, deliberately, rather than a third spelling: that is the check the boot path has always run, so the two declarations now converge exactly and nothing that loaded before is refused now.
+  
+  **`@objectstack/spec` — a WIDENING of a published contract.** `Plugin.json`'s `pattern` in the shipped `json-schema/` tree changes from `^\d+\.\d+\.\d+$` to `^\d+\.\d+\.\d+(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?$`. This is a strict superset — same three-segment core, two **optional** suffix groups — so every string that validated before still validates. A tool that mirrors this schema to validate plugin manifests should widen with it; one that does not will merely keep refusing prerelease versions the platform accepts.
+  
+  **`@objectstack/core` — `version` joins the enforced set, which NARROWS `LiteKernel`.** **BREAKING** accept-set narrowing on a published runtime entry point, shipped as `minor` under the repo's launch-window convention for breaking changes (`scripts/check-changeset-no-major.mjs`). **A plugin object `LiteKernel` accepted before can be refused now.** `assertPluginContract` filtered `version` issues out while the two spellings disagreed; that stopgap is gone. The full enforced set is now **NINE** keys, each refused with the offending key named in the message:
+  
+  - **`id`** — a non-string, or the empty string.
+  - **`type`** — any value outside the closed set `standard`, `ui`, `driver`, `server`, `app`, `theme`, `agent`, `objectql`.
+  - **`staticPath`** — a non-string.
+  - **`slug`** — a non-string, or a string that does not match `/^[a-z0-9-_]+$/`.
+  - **`default`** — a non-boolean.
+  - **`version`** — a non-string, or a string outside the SemVer grammar above. **New in this release.**
+  - **`description`** — a non-string.
+  - **`author`** — a non-string.
+  - **`homepage`** — a non-string, or a string that is not a URL.
+  
+  **`null` is refused on every one of the nine**, and a `type: 'ui'` plugin missing `staticPath` or `slug` is still refused with `PLUGIN_UI_REQUIRED_KEY_MISSING` inside the same envelope.
+  
+  ⚠️ **This supersedes the eight-key enumeration published in `@objectstack/core@17.4.0`.** Both of that release's entries — the `kernel.use()` and the `LiteKernel.use()` enforcement notes — say the enforced set is eight keys and that `version` is excluded, and both point at reconciling the two `version` spellings as separate spec work. This is that work. Those entries stay as written, because they describe what 17.4.0 did; **nine is the current set**, and `version` is no longer excluded from anything.
+  
+  **What actually changes behaviour, stated narrowly.** On **`ObjectKernel`** nothing moves: `PluginLoader.validatePluginStructure` already judged `version` with this exact grammar and still runs first, so a malformed `version` is still refused as `Invalid semantic version`, never as `PLUGIN_CONTRACT_VIOLATION`. On **`LiteKernel`** a plugin object with a malformed `version` — `version: 'v1.0.0'`, say — was **registered** before and is **refused** now, with `PLUGIN_CONTRACT_VIOLATION` at `'version'`. `LiteKernel` has never run the loader's structural checks, so `version` was the one declared key it did not judge at all: such a plugin was green in vitest and refused by `ObjectKernel` at production boot. That is exactly the split the `LiteKernel` convergence closed for the other eight keys, closed now for the ninth.
+  
+  **What is unchanged.** `1.0.0-alpha.1`, `1.0.0+20230101` and `0.0.0-fixture` load on **both** kernels, as they did before — measured, not assumed, and pinned per kernel. A version-less plugin still loads; `version` is `.optional()`. Unknown keys still pass (`PluginSchema` carries no `.strict()`, and the parse output is discarded, so the stored object is the object that was passed in). A class-based plugin keeps its identity, prototype and prototype methods.
+  
+  ⚠️ **The accepted grammar is wider than SemVer 2.0.0 itself**, and this release neither introduced nor widened that fringe: leading zeroes in the numeric core (`01.1.1`) were accepted by **both** spellings before this change and are accepted by both after it, and the loader's prerelease/build classes admit degenerate identifiers SemVer forbids (`1.0.0-alpha..1`, `1.0.0-0123`, `1.0.0+.`). Tightening to the official SemVer regex would have **narrowed** this key rather than widening it, so it is deliberately not done here.
+  
+  **Migration.** Nothing to rename, and nothing to do if your plugin's `version` is a real semantic version. If you register plugins on `LiteKernel` with a `version` string that is not one — a leading `v`, a two-segment `1.0` — spell it `MAJOR.MINOR.PATCH` with optional `-prerelease` and `+build`, or drop the key. The refusal names the plugin and the key.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A regex widening on one declared key of `PluginSchema`, plus the removal of a runtime filter that had excluded that key from an existing check. No metadata key, spec symbol, Zod schema, object definition or stored representation is added, removed or given a different name, so `objectstack migrate meta` has nothing to visit and there is no tombstone to mint. Stored metadata is untouched; what moves is which plugin OBJECTS a boot accepts — strictly more of them at the schema, and on `LiteKernel` the malformed-`version` objects `ObjectKernel` already refused. The channel that reaches an affected plugin author is the refusal itself, which names the plugin and the offending key at `use()`, and which value a malformed `version` should carry is authoring intent no ledger entry can decide. -->
+
+### Patch Changes
+
+- baf9745: Three source comments now state the registered position for the `door: 'none'` boot-refusal codes instead of the pre-#16404 one
+  
+  `SERVICE_NOT_REGISTERED`, `PLUGIN_CONTRACT_VIOLATION` and — as the worked
+  example the `driver-sql` comment cites — `MONGODB_MULTI_TENANT_UNSUPPORTED` are
+  all registered in `ERROR_CODE_LEDGER`. #16649 registered fourteen `door: 'none'`
+  codes under the #16404 door-or-no-door ruling, and re-registered the MongoDB one
+  that #8035 had removed. Three TSDoc comments still asserted the position that
+  preceded that ruling — that these codes are deliberately not wire vocabulary,
+  and that registering one is "not something to start doing at a door" — and each
+  was false the moment #16649 landed. They also pointed at
+  `dispatcher-error-vocabulary.ts`'s `boot-refusal` verdict, which the same PR
+  ratcheted from fourteen rows to zero, so the pointer dangled.
+  
+  These docblocks ship inside each package's `dist/*.d.ts`, which is why this is a
+  published change rather than an internal one: the sentence is what an agent or
+  an IDE reader sees at the point it decides whether the code needs registering.
+  
+  ⛔ No behaviour changes. Every reachability sentence is kept verbatim — none of
+  these codes reaches an HTTP door on this tree — no code is added, removed or
+  re-registered, and no gate moves. With every comment character removed by
+  `scripts/js-comment-mask.mjs`, all three files' executable token streams are
+  byte-identical to the commit this branched from.
+- aaacf1d: Say what the install-time granted permission set actually does: it is REGISTERED at load and refuses nothing.
+  
+  Four shipped sentences claimed the structured `manifest.permissions` / `granted_permissions` set was enforced. Measured on `9bd4344e4`: `SecurePluginContext` — the only reader of `PluginPermissionEnforcer`'s service and hook gates — has zero production construction sites, and `enforceFileRead` / `enforceFileWrite` / `enforceNetworkRequest` are called by nothing at all, `SecurePluginContext` included. So #13457's binding registers a consented set that nothing queries, and the `fs` and `network` classes have no enforcement surface even in principle.
+  
+  Corrected, each to the same truthful split ("registered at load · queried by nothing · refuses no operation"): the `registerGrantedPermissions` docblock, the `PluginPermissions` schema docblock, the `manifest.loading` tombstone prescription, and the ADR-0087 D3 entry that ships that prescription into `docs/protocol-upgrade-guide.md`. The hand-written plugin development guide gains the same note beside its permission table.
+  
+  `plugin-runtime-tier-truthful-text.test.ts`'s coordination pin — which held the permissions half verbatim so it would go red the day that half was corrected — has been discharged and replaced by pins on the truthful text, in both carriers, each with the negative assertion that keeps the retracted sentence from returning beside it.
+  
+  New in `@objectstack/core`: `granted-permissions-not-enforced.pin.test.ts` pins the MEASUREMENT as well as the words, so the claim cannot rot in either direction. It fails the day a production `SecurePluginContext` construction site appears — i.e. the day the ADR-0025 materialize seam lands — and names every text that then becomes false.
+  
+  No behaviour changes: no accept/reject, no registration, no gate is added or removed.
+- 6548118: Sweep the retracted "enforces exactly the consented surface" phrasing repo-wide, not just in the file it shipped on.
+  
+  The #17147 pin read one file, and a post-merge sweep found what that missed: `artifact-granted-permissions.test.ts` carried the retracted sentence as a CASE TITLE — "a CONSENTED entry enforces exactly the consented surface" — beside a sibling titled "registered, and denies". Neither case asserts a refusal; both read a permission bag and check what it answers. But a case title is read as evidence (ADR-0033), and those two said the platform confines plugins while nothing on the tree queries the registry at all.
+  
+  Both titles now name what they assert, the file carries a verb-discipline note (`answers` / `registered` / `bound`; ⛔ never `enforces` / `denies` / `gates` / `refuses` / `blocks` until the seam exists), and the pin's negative assertion is a repo-wide `git grep` excluding only its own specimen — with an anti-vacuity limb so a broken scan cannot read as a clean one.
+  
+  No behaviour, no assertion semantics, and no accept/reject changes.
+- 4c42fd1: fix(core): an absent or empty path is no longer exempt from the ADR-0069 auth gate (#7898)
+  
+  `isAuthGateAllowlisted` answered `true` for a falsy path — it treated "no path"
+  as allow-listed. That is a fail-OPEN default on an authorization seam: any
+  caller that reached the ADR-0069 gate with an absent or empty `path` was exempt
+  on **every** route, and a transport author who simply forgot to populate `path`
+  disabled the gate with no diagnostic of any kind.
+  
+  ```
+  FROM  isAuthGateAllowlisted(undefined)  ->  true   // exempt, on every route
+        isAuthGateAllowlisted('')         ->  true
+  
+  TO    isAuthGateAllowlisted(undefined)  ->  false  // exemption must be earned
+        isAuthGateAllowlisted('')         ->  false
+  ```
+  
+  Exemption is now something a path has to EARN by naming an allow-listed route,
+  so the failure mode of omission is a `403` rather than a bypass. The predicate
+  is split in two so it carries exactly one meaning: a private
+  `matchesAllowlistedRoute` answers the route question for a real, non-empty path
+  — its body is unchanged, the #16839 anchoring rules included — and the exported
+  predicate answers "is this request exempt", which a request with no path is not.
+  
+  **No current caller's behaviour moves.** The caller census was re-run: the same
+  four production call sites, and no fifth. Two of them (`RestServer.enforceAuth`,
+  `shouldDenyAnonymous`) already guard for a non-empty path and so only ever reach
+  the predicate with a real string; a corpus differential against the pre-flip
+  predicate over more than 10,000 paths moves exactly one input — the empty string
+  — and nothing else, in either direction.
+  
+  **The one exemption that remains for a genuinely pathless caller is explicit**,
+  and lives at the one seam that really routes by body: `shouldDenyAnonymous`
+  declares `path` optional and decides the no-path case itself (it denies), ahead
+  of this predicate. That guard is deliberately kept rather than collapsed into
+  the now-agreeing default — a seam's contract should not be re-derived from what
+  a predicate happens to do with a falsy argument.
+  
+  **Known follow-up, tracked as #17625.** The dispatcher's bare-root
+  `` `${prefix}/` `` arrives as `cleanPath === ''` (the trailing slash is
+  stripped), which was exempt via the fail-open default and is not exempt now, so
+  a *gated* session — one carrying an `authGate`, i.e. an expired password or a
+  required MFA enrollment — reaching the bare root gets a `403` instead of the
+  discovery payload. Every named remediation route (`/auth/*`, `/health`,
+  `/ready`, `/discovery`, `/me/apps`, `/me/localization`) is unaffected, so
+  remediation itself stays reachable. Normalising that empty `cleanPath` is step 2
+  of the same ruling and is **not** a tolerance re-added here.
+- cf79182: `isAuthGateAllowlisted` matches allow-listed routes at a mount boundary, so an object named `auth` or a record whose id is `health` no longer bypasses the ADR-0069 authentication-policy gate.
+  
+  The predicate that decides which paths are exempt from the password-expiry / enforced-MFA gate matched with two UNANCHORED tests: `path.includes('/auth/')` matched at any position, and an `endsWith` test over `['/health', '/ready', '/discovery', '/me/apps', '/me/localization']` matched at any depth. A path segment whose VALUE merely spelled one of those tokens therefore carried the exemption — and object names and record ids are tenant-controlled. Both transport seams hand the predicate a data-plane path directly (`HttpDispatcher.enforceAuthGate` passes `cleanPath`, `RestServer.enforceAuth` passes `req.path`), so these were reachable requests. Measured on the built package before the repair: `/data/auth/123`, `/meta/auth/objects`, `/data/x/health` and `/data/xyz/me/apps` were all exempt, while `/auth/me` (exempt) and `/data/contacts/1` (gated) held as controls.
+  
+  - **What replaced them.** The path is read as segments and each test is anchored to a mount base — `/api/v1`, `/api`, or the empty base the dispatcher sees (the hono adapter hands `dispatch()` the app prefix already stripped) — plus at most one environment scope immediately after that base (`/environments/<id>`, or ADR-0006's superseded `/projects/<id>`), because the dispatcher evaluates the gate before its scoped-URL strip. `/auth/…` at that position stays exempt; the five bootstrap reads are EXACT routes there instead of suffixes. The scope is only recognised immediately after a base, which is why `/data/environments/x/health` is not a scoped `/health`.
+  - **This only ever removes exemptions.** Measured, not asserted: over a generated corpus of 111,152 paths, the number that are newly exempt is **0** and 25,979 stopped being exempt. The check is kept as a test, with the pre-anchoring predicate transcribed beside it, so a later widening cannot arrive quietly.
+  - **Every genuinely-exempt shape still is**, pinned in both directions: `/auth/sign-out`, `/health`, `/ready`, `/discovery` (dispatcher shapes); `/api/auth/sign-in`, `/api/v1/auth/change-password`, `/api/v1/auth/me/permissions`, `/api/v1/health`, `/api/v1/me/apps`, `/api/v1/me/localization`; and the scoped `/api/v1/environments/<id>/auth/sign-out`.
+  
+  **If you serve the API from a non-default mount,** an allow-listed route reached as `${basePath}/${version}/…` with `basePath`/`version` moved off `/api` and `v1` is no longer named by the allow-list. That price cannot be avoided: `/rest/v2/health` and `/data/xyz/health` are the same shape, so a rule that accepts an arbitrary base is the defect itself. It costs nothing at either live seam — the dispatcher's path arrives base-stripped, and REST registers its control-plane routes without `enforceAuth` at all — but if you gate a custom mount through this predicate, mount the remediation routes under one of the named bases.
+- Updated dependencies [7f62536]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [245f360]
+- Updated dependencies [324968e]
+- Updated dependencies [fe71032]
+- Updated dependencies [482d34d]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [48203ff]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [c9eb773]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [dfeba25]
+- Updated dependencies [0a88a80]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [758ac40]
+- Updated dependencies [134b410]
+- Updated dependencies [5f392f0]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [c3ebe4a]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [288fe9c]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [6e3462d]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5a95b0e]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [de1a611]
+- Updated dependencies [db76982]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [ab450f4]
+- Updated dependencies [025588a]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/types@17.5.0
+  - @objectstack/spec@17.5.0
+
 ## 17.4.0
 
 ### Minor Changes

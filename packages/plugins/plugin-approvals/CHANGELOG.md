@@ -1,5 +1,210 @@
 # @objectstack/plugin-approvals
 
+## 17.5.0
+
+### Patch Changes
+
+- 4ef8247: fix(approvals): the dead-run sweep classifies every `ExecutionStatus` member, so a `refused` run releases its pending approval (#16433)
+  
+  `ApprovalService.releaseDeadRunRequests` guarded on a hand-copied four-member subset of `ExecutionStatus` — `completed`, `failed`, `cancelled`, `timed_out` — written when that enum had eight members. #14945 then appended `refused`, documented on the enum as *"Terminal, never resumed"*, and the subset did not grow with it. A run in `refused` was therefore skipped by the sweep, so a still-pending approval on it read as ALIVE, was never released, and kept its record lock forever.
+  
+  **Why this is shipped as a fix rather than left alone.** Nothing inside this repo drives a run to `refused` yet — that is #15788 (lane 2 of the #14945 ruling), still open. But `ApprovalService` takes a HOST-supplied automation surface through `attachAutomation`, so a host whose `getRun` already answers with the status the published spec declares sees the corrected behaviour the moment it upgrades, rather than on the day lane 2 lands. That is a real behaviour change in a published package, which is why it carries a bump instead of `skip-changeset`.
+  
+  The repair is not "add `refused`" — that yields a five-member hand-copy with the identical trap re-armed for the tenth member — and it is not "derive the terminal set from the enum" either, since `running` and `paused` are plainly not terminal and a wholesale derivation would default every future member to terminal, i.e. to releasing approvals out from under LIVE runs. Instead the file now declares a **total map** over `ExecutionStatus`, classifying each member `terminal` or `live`, from which the terminal set is derived. A tenth member fails to compile until someone classifies it, and fails a test as well.
+  
+  No API change: the classification is module-internal and the package barrel is untouched.
+- 9540590: `restoreConsumedSuspension` reaches a NESTED run: the ancestors a stranded descendant cascade-failed are journalled too, and the chain is re-armed as one unit
+  
+  `resumeInternal`'s catch arm journalled the consumed suspension of the run that
+  threw, and nothing else. For a nested run the ancestors were handled on both
+  paths with no journal at all: up-bubble (`failAncestors` walks `$parentRunId`
+  and calls `failSuspendedRun` on each suspended ancestor) and delegation (the
+  parent frame sees a failed child with no retryable code and calls
+  `failSuspendedRun` on itself). `failSuspendedRun` was `forgetSuspendedRun(run,
+  'failed')` plus a `failed` log record — it journalled nothing.
+  
+  So the leaf was restorable while every ancestor was recorded `failed` with its
+  pause consumed and no snapshot (`restoreConsumedSuspension(PARENT)` answered
+  `NO_CONSUMED_SUSPENSION`), and restoring the leaf completed it into a parent
+  that never continues: `bubbleToParent` found no parent suspension and logged.
+  The operator ended up worse off than before using the exit.
+  
+  `failSuspendedRun` now journals the pause it consumes whenever the descendant
+  whose failure consumed it is itself repairable — from the same single producer
+  and onto the same durable terminal row as the strand's own snapshot, so the
+  chain is repairable from any replica and after a restart, not only from the
+  process that stranded it. `restoreConsumedSuspension` then repairs the chain as
+  one unit: it walks down to the stranded descendant and up through the ancestors
+  it cascaded into, and re-arms every member DEEPEST FIRST, so an ancestor becomes
+  resumable only after the run it is parked awaiting is parked again. The entry
+  point does not matter — naming any member of the chain repairs all of it — and
+  the continuation is then re-issued once, on the run that was named.
+  
+  Additive on the wire and in the type: the result's existing fields still
+  describe the run the caller named, and the new `chain` key is present only when
+  the repair was a chain repair. `ChainRestoreEntry` is exported for it. The
+  narrower `IAutomationService.restoreConsumedSuspension` contract in
+  `@objectstack/spec` is unchanged and the HTTP door's payload is unchanged — the
+  door answers `{ runId, restored, reason }` as it always did.
+  
+  Every member goes through the same per-run call as a flat restore — its own
+  in-process claim, its own strict live-suspension read, its own two-witness read,
+  its own durable park — so idempotence and the #14333 advance claim hold per run
+  in the chain: a second restore finds every member parked and answers
+  `RUN_SUSPENDED` without minting a second pause anywhere.
+  
+  ⛔ No ancestor is stamped `'stranded'`. That word is the resume result of a run
+  that consumed its OWN pause and then threw downstream, and nothing re-arms an
+  ancestor by resuming it; stamping it would send an operator to retry a recovery
+  that cannot succeed. The parent frame's delegation result still carries no
+  status at all, and an ancestor's repairability is carried by the journal and by
+  this verb's answer.
+  
+  Journalling is EARNED, not applied to every cascade: an ancestor whose
+  descendant is beyond repair is still consumed without a snapshot, because
+  re-arming it would promise a chain repair that could not be completed.
+  
+  **`@objectstack/plugin-approvals`** reports the consequence rather than causing
+  it: `inspectStrandedRequests` asks the engine per run, so a cascade-failed
+  ancestor whose descendant is repairable now comes back `runState:
+  'repairable'` instead of `'unrepairable'`, and restoring either row repairs the
+  pair. `'unrepairable'` keeps its other causes — a run that never paused, a
+  snapshot no longer held, and a cascade whose descendant was itself beyond
+  repair. No plugin logic changed; the docblocks that documented the old
+  limitation did.
+- 6465cc0: Correct the `resolveRecordedContinuation` discriminator's stated invariant in
+  `approval-service.ts` to what was measured. The comment claimed the
+  `action: 'resubmit'` audit row was "at most one per request"; a `resubmit` whose
+  own resume strands opens no next round, so the row stays `returned` and a second
+  `resubmit` after `restoreConsumedSuspension` lands a second such row. The
+  comment now records that more than one row can exist, states why the read is
+  correct anyway (it is a presence check with `limit: 1`, deciding identically on
+  one row or two), and points at the pin that measured it.
+  
+  Prose only — no behaviour change, no door narrowed, no guard touched. The audit
+  trail's one-row-per-advancement shape is accepted residue; requiring one row per
+  advancement is a separate change.
+- Updated dependencies [7f62536]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [245f360]
+- Updated dependencies [324968e]
+- Updated dependencies [fe71032]
+- Updated dependencies [482d34d]
+- Updated dependencies [305e7fc]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [9c577c1]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [baf9745]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [6548118]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [48203ff]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [de62769]
+- Updated dependencies [c9eb773]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [dfeba25]
+- Updated dependencies [0a88a80]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [e7ff9c2]
+- Updated dependencies [758ac40]
+- Updated dependencies [c744c0a]
+- Updated dependencies [134b410]
+- Updated dependencies [4c42fd1]
+- Updated dependencies [5f392f0]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [f03f6c7]
+- Updated dependencies [cf79182]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [c3ebe4a]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [2bed4c3]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [71629a1]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [288fe9c]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [6e3462d]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [cca1dc0]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5a95b0e]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [de1a611]
+- Updated dependencies [db76982]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [ab450f4]
+- Updated dependencies [025588a]
+- Updated dependencies [5505646]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [4215417]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/types@17.5.0
+  - @objectstack/spec@17.5.0
+  - @objectstack/platform-objects@17.5.0
+  - @objectstack/core@17.5.0
+  - @objectstack/formula@17.5.0
+  - @objectstack/metadata-core@17.5.0
+
 ## 17.4.0
 
 ### Minor Changes

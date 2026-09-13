@@ -1,5 +1,258 @@
 # @objectstack/verify
 
+## 17.5.0
+
+### Minor Changes
+
+- 041d9fd: fix(service-analytics)!: `POST /analytics/dataset/query` asks the OBJECT-level read grant before it serves an inline dataset (#16645)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is renamed, retired or re-typed: no `packages/spec` key changes its name, its type or its optionality, no stored shape moves, and every dataset, dashboard and analytics request body parses byte-identically to before — so `objectstack migrate meta` has nothing to rewrite and this changeset carries no rewrite instructions. What narrows is the ACCEPT SET of a published route at REQUEST time: `POST /analytics/dataset/query` (and the `/analytics/query` and `/analytics/sql` doors) now refuse a caller who holds no object-level read grant on an object the request reads, which is the same verdict `GET /data/<object>` already returns for that caller on that deployment. The remedy for a caller who is refused is a GRANT, held in permission-set data rather than in an authored file: the deployment gives the principal read on the object, exactly as it must today to use `/data`. There is no authored artifact and no stored representation for a migration to act on, and the additions to the contract are additive (a new OPTIONAL `ISecurityService.canReadObject`, new optional keys on three option payloads), which is a widening rather than a retirement. -->
+  
+  **BREAKING** in the accept-set sense — an accept-set narrowing on a published
+  route — landing in the launch window as `minor` on all four packages (the
+  lockstep convention: during the window the bump level is not the carrier, this
+  banner and the disposition above are). Nothing that was already admitted
+  becomes refused **except** the requests `GET /data/<object>` refuses today for
+  the same principal, which is the defect. Nothing that was refused becomes
+  admitted.
+  
+  `POST /analytics/dataset/query` now asks the OBJECT-level read grant before it serves an inline dataset, so the analytics door and `GET /data/<object>` reach one admission verdict on every driver.
+  
+  The route accepts an inline dataset definition (`body.dataset`) from any authenticated caller. On a SQL driver the compiled statement ran through the driver's raw `execute()`, which is documented as a tenant-isolation bypass and which no middleware sits in front of — so the request reached the database having passed exactly ONE of the three read layers (the row scope, threaded since ADR-0021 D-C). A caller with **no grant of any kind** on an object received its row count, and with `dimensions` its grouped counts by any column, where the `/data` door answered `403 PERMISSION_DENIED` for the same principal on the same deployment. On the memory driver the identical request fell through to the ObjectQL engine, which applies all three layers in one place, and was refused. The exposure is not opt-in and an application cannot decline it: a deployment shipping 0 datasets and 0 dashboards has the identical surface, because the reachable slot is the inline definition rather than a declared one.
+  
+  **This change NARROWS what the analytics doors accept.** Requests that were already refused by `/data` are now refused by analytics too; nothing that was refused becomes admitted. "Fails closed" is a statement about a WIRED provider: a deployment with no `security` service registered keeps its previous analytics behaviour by design, because on that deployment `/data` carries no object-level gate either and the equivalence is what is being defended.
+  
+  - **`ISecurityService.canReadObject(object, context)`** (`@objectstack/spec`, optional) — the object-level half of a read, the sibling of `getReadFilter`'s row-level half. It exists because the two are not interchangeable: `getReadFilter` answers "which rows" and answers `undefined` — "no row restriction" — for a caller who may not read the object at all, so a door holding only the filter reads a caller with NO grant as a caller with NO restriction. Fails CLOSED. Absence is a defined state and its fallback is **not** "admit": a consumer composes the same verdict from `explain`, which is not optional.
+  - **`@objectstack/plugin-security` implements it** as the middleware's own read gate, arm for arm and in its order — the `isSystem` bypass, the "no permission sets resolved" skip, the #3545 fail-closed refusal on an unresolvable object posture, the ADR-0066 D3 `requiredPermissions` capability AND-gate, the `allowRead` CRUD grant, and the ADR-0090 D10 delegator intersection — from the same primitives the middleware calls, and it is exposed on the registered `security` service.
+  - **`@objectstack/service-analytics` asks it once at the door**, for the base object and every joined object, **ahead of strategy selection**. Placement is the fix: two strategies each enforcing their own copy of three layers is the CAUSE of the divergence, not its remedy, so both strategies — and any strategy added later — inherit one verdict by construction. `AnalyticsServicePlugin` auto-bridges the new `admitObjectRead` hook to the `security` service (`canReadObject`, falling back to `explain`), the same way it already bridges `getReadScope`, and warns loudly at init when no security service is registered. The bridge tells three resolutions apart: an ABSENT `security` service admits (that deployment has no object-level gate on `/data` either, so the two doors still agree, and this is what keeps a deployment shipping no `plugin-security` working as before); a service that cannot be USED — resolving it throws, or it exposes neither `canReadObject` nor `explain` — DENIES and reports at `error`, because `/data`'s middleware does not fall open in those states.
+  - **`@objectstack/verify`** gains `bootStack(app, { databaseDriver: 'sqlite-wasm' | 'memory' })`, because a two-driver equivalence property cannot be measured on one driver — which is how the strategies were allowed to disagree.
+  
+  The refusal is `PERMISSION_DENIED` / 403, the same code and status the engine path already answers, and it names only the object the caller themselves named.
+- 6058cb2: **Clause-②: yes** — new exported symbols on a published package (`bootStackOnce`, `isVerifyRefusal`, and ten new members on the `VerifyStack` every `bootStack` caller already holds), so the accept set a consumer writes against widens. Contract-review tier.
+  
+  Every `VerifyStack` now carries an **in-process handle** on the stack `bootStack` boots — a way to run a hook, a validation rule, a flow, an action, a seed or a read against the REAL engine and assert on what the engine did, instead of writing through HTTP and inferring from persisted rows, or rebuilding the engine's semantics in a test stand-in.
+  
+  New members on `VerifyStack` (the same object `bootStack` returns; `api` / `apiAs` / `signIn` / `signUp` / `stop` are unchanged):
+  
+  - `hooks.run(object, 'insert' | 'update' | 'delete', input, { as })` — one write through the engine's own door as the caller `as` (a bearer token from `signIn` / `signUp`). The bound hook chain, field defaults, declared validations and the SecurityPlugin middleware run inside it, in the engine's order, because this is the very call the REST data ingress makes. Returns what the engine returned; a refusal rejects with the engine's own error (`code`, `statusCode`).
+  - `validate(object, record, { as, mode? })` — the engine's dry-run validation pass (`ObjectQL.validate`), nothing written.
+  - `flows.run(name, params, { as })` / `flows.resume(run, input, { as })` — the runtime's `/automation` trigger and resume routes driven in-process (no Hono, no socket): the caller's resolved identity is forwarded exactly as the route forwards it, and the engine's `AutomationResult` comes back (plus `flowName`, so the value hands straight to `resume`). A never-dispatched refusal or a failed run rejects with the route's ADR-0112 envelope.
+  - `actions.run(object, action, { as, recordId?, params? })` — the `/actions/:object/:action` route driven in-process, the one door carrying the whole action contract (ADR-0066 D4 gate, ADR-0104 param contract, subject-record load, trusted body context). Returns the handler's value.
+  - `seed(object, rows)` / `rows(object, where?, { as? })` — real ObjectQL writes (the platform's own seed-replay context) and reads (system-scoped, or as a caller under that caller's grants and RLS).
+  - `metadata.object(name)` / `objects()` / `items(type)` / `types()` — the booted `SchemaRegistry`, by its own singular type vocabulary.
+  - `tenancy()` — the `tenancy` service AuthPlugin registered (`posture`, `requestedPosture`, `isolationActive`, `degraded`).
+  - `contextFor(token)` — the dispatcher's own request-identity resolution, exposed so a test can drive any kernel service as a real caller.
+  
+  Also new: `bootStackOnce(config, opts?)`, a per-process memo of `bootStack` keyed on the `config` and `opts` object identities — the worker-scoped shared boot `packages/qa/dogfood` kept privately, promoted for suites that run many files under `isolate: false`.
+  
+  Exported types: `VerifyHandle`, `VerifyRefusal` (with the `isVerifyRefusal` predicate), `AsUser`, `FlowRun`, `FlowRunRef`, `EngineRow`.
+  
+  **Zero re-implemented semantics.** Every method is a thin facade over a door the kernel wired at boot; the handle assembles no `ExecutionContext`, orders no hooks, evaluates no permission. The package's own tests pin each method against the real service behind it (the PR's ablation record breaks each service in turn and shows only that method's pin going red), pin `hooks.run` against the REST write on the same row **and** the same refusal, and port one hotcrm exemplar (`opportunity_lifecycle`) onto `hooks.run` as the proof of ergonomics.
+  
+  No boot option was added: the tenancy posture a stack runs under is still chosen by `multiTenant` (the `--multi-tenant` option `os verify` already has) and read back through `tenancy()`. `os verify`, `runCrudVerification` and `runRlsProofs` are unchanged.
+
+### Patch Changes
+
+- 5741ff1: Comment-only correction: the reason `bootStack`'s cross-tenant proofs stand in for `@objectstack/organizations` is now stated as the true one.
+  
+  Those doc comments said the enterprise multi-organization runtime was **cloud-private / not installable in this workspace**. ADR-0132 falsified that: the runtime is open core, Apache-2.0, and published on npm. The effect they describe has not changed, so the text now gives the reason that is actually load-bearing — **ADR-0132's entitlement boundary forbids any framework package DECLARING `@objectstack/organizations`** (`packages/plugins/organizations/src/no-framework-dependents.pin.test.ts`, its mechanical half: "Apps declare it; packages do not"), because the commercial repository ships a licence-gated subclass under the same package name. So `packages/verify` cannot depend on the runtime and cannot resolve it, the `'posture-only'` stand-in stays exactly what it was, and the proof that the real plugin walls tenants still lives in cloud's `security-enterprise` multi-organization integration test.
+  
+  ⛔ **No behaviour, no dependency and no public surface moves.** `BootOptions.multiTenant` accepts and does the same things it did; the only shipped bytes that change are the doc comments carried into `dist/index.d.ts`. Apps that mount the runtime keep declaring it in their own `package.json`, which is and remains the supported wiring.
+- Updated dependencies [7f62536]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [245f360]
+- Updated dependencies [324968e]
+- Updated dependencies [3a5eaea]
+- Updated dependencies [fe71032]
+- Updated dependencies [482d34d]
+- Updated dependencies [e526556]
+- Updated dependencies [305e7fc]
+- Updated dependencies [216b066]
+- Updated dependencies [ee6fbd7]
+- Updated dependencies [6059b29]
+- Updated dependencies [89a652b]
+- Updated dependencies [88a072e]
+- Updated dependencies [9c577c1]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [baf9745]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [4af758d]
+- Updated dependencies [86c5052]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [6548118]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [c9246fa]
+- Updated dependencies [48203ff]
+- Updated dependencies [cea85fd]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [1a25f4a]
+- Updated dependencies [c9eb773]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [dfeba25]
+- Updated dependencies [0a88a80]
+- Updated dependencies [bea41f6]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [e7ff9c2]
+- Updated dependencies [310760d]
+- Updated dependencies [2b6a207]
+- Updated dependencies [2b08a72]
+- Updated dependencies [758ac40]
+- Updated dependencies [c744c0a]
+- Updated dependencies [134b410]
+- Updated dependencies [4c42fd1]
+- Updated dependencies [76ddab7]
+- Updated dependencies [344d475]
+- Updated dependencies [5f392f0]
+- Updated dependencies [40098a4]
+- Updated dependencies [94c9302]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [113050e]
+- Updated dependencies [5d12b16]
+- Updated dependencies [54b3d1d]
+- Updated dependencies [634f23d]
+- Updated dependencies [f03f6c7]
+- Updated dependencies [374d9d3]
+- Updated dependencies [ea4d164]
+- Updated dependencies [cf79182]
+- Updated dependencies [efa2533]
+- Updated dependencies [a36b526]
+- Updated dependencies [dd2fd20]
+- Updated dependencies [92865f6]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [3c557e2]
+- Updated dependencies [80aef80]
+- Updated dependencies [c3ebe4a]
+- Updated dependencies [e66da5c]
+- Updated dependencies [a900841]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [0780e88]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [2bed4c3]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [71629a1]
+- Updated dependencies [2266438]
+- Updated dependencies [f8e5790]
+- Updated dependencies [cefe068]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [706ad0f]
+- Updated dependencies [288fe9c]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [96684bb]
+- Updated dependencies [ab56ea3]
+- Updated dependencies [9ca49eb]
+- Updated dependencies [a016f08]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [6e3462d]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [3644fad]
+- Updated dependencies [45c2cf9]
+- Updated dependencies [0f38ab0]
+- Updated dependencies [dfb42c5]
+- Updated dependencies [9540590]
+- Updated dependencies [ae6dcf6]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [980dc78]
+- Updated dependencies [5c8f5af]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5a95b0e]
+- Updated dependencies [ca31ff6]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [775e5ec]
+- Updated dependencies [9165d5c]
+- Updated dependencies [1c83ca2]
+- Updated dependencies [9b9581b]
+- Updated dependencies [9ca49eb]
+- Updated dependencies [fb7d75f]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [f3b28eb]
+- Updated dependencies [fd5cff2]
+- Updated dependencies [143c715]
+- Updated dependencies [0ced0aa]
+- Updated dependencies [5b5bd36]
+- Updated dependencies [2e8e118]
+- Updated dependencies [d2badf7]
+- Updated dependencies [2a79726]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [470746a]
+- Updated dependencies [ac24458]
+- Updated dependencies [7026141]
+- Updated dependencies [cf6e0a1]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [4280055]
+- Updated dependencies [de1a611]
+- Updated dependencies [e758131]
+- Updated dependencies [db76982]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [ab450f4]
+- Updated dependencies [025588a]
+- Updated dependencies [8c9bd8f]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [4215417]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [ab1c585]
+- Updated dependencies [7cd5874]
+- Updated dependencies [a2509d7]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/types@17.5.0
+  - @objectstack/runtime@17.5.0
+  - @objectstack/spec@17.5.0
+  - @objectstack/rest@17.5.0
+  - @objectstack/objectql@17.5.0
+  - @objectstack/platform-objects@17.5.0
+  - @objectstack/service-analytics@17.5.0
+  - @objectstack/service-automation@17.5.0
+  - @objectstack/plugin-auth@17.5.0
+  - @objectstack/plugin-hono-server@17.5.0
+  - @objectstack/core@17.5.0
+  - @objectstack/plugin-security@17.5.0
+  - @objectstack/plugin-sharing@17.5.0
+  - @objectstack/service-datasource@17.5.0
+  - @objectstack/service-settings@17.5.0
+
 ## 17.4.0
 
 ### Patch Changes

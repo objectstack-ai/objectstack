@@ -1,5 +1,442 @@
 # @objectstack/metadata
 
+## 17.5.0
+
+### Minor Changes
+
+- 854639b: feat(engine)!: `findOne`, `update` and `delete` declare what they answer, and their hook seams are guarded (#16231)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable moves. No spec key, no authored metadata property, no config field, no accepted request shape and no stored artifact changes spelling or shape; `objectstack migrate meta` has nothing to rewrite, `spec-changes.json` has nothing to project and the upgrade guide has no row to gain. What moves is the declared RETURN TYPE of three TypeScript methods (`packages/spec/src/contracts/data-engine.ts`, its `scoped-context.ts` mirrors, and `ObjectQL` itself) plus three new registered ADR-0112 error codes. The rewrite this ships — add the null check the type now demands — is addressed to a TYPESCRIPT CONSUMER and is delivered by the compiler at their own call site, which is the audience the ADR-0087 ledger explicitly does not serve. `type-surface-only` is the category built for exactly this class and it is NOT claimed here, because its predicate 2 (`no-spec-diff`) is mechanically false for this PR: the surface the maintainer ruling names IS `packages/spec/src/contracts/**`. That gap is reported on the card rather than worked around, and the `**BREAKING**` banner below is carried rather than dropped. -->
+  
+  **BREAKING** on three published `.d.ts` surfaces. `ObjectQL.findOne`, `ObjectQL.update` and `ObjectQL.delete` — and the `IDataEngine` / `IScopedObjectRepository` contracts they implement — declared `Promise<any>` and now declare the answers they have always given:
+  
+  - `findOne` → `Promise<Record<string, any> | null>`
+  - `update` → `Promise<Record<string, any> | number | null>`
+  - `delete` → `Promise<boolean | number>`
+  
+  `any` is assignable to everything and admits every property read, so TypeScript consumers of these three methods can stop compiling — most often on the null check the declaration now demands. Shipped as `minor` under the repo's launch-window convention, in which `major` is refused by `check-changeset-no-major` and breaking-ness is carried by this banner plus the ADR-0087 disposition rather than by the level. The governing text is the **WHICH LEVEL** maintainer ruling of 2026-09-04 (decision batch #35, on #15294) recorded at `.github/workflows/pr-automation.yml`; `AGENTS.md`'s "a bug fix in a released package takes a patch changeset — never none" is the floor against `none` and was rejected as the ceiling here, because this PR also widens `@objectstack/objectql`'s index with new exported symbols, which that ruling puts at `minor` on its own.
+  
+  **Why.** `engine.ts` has four `return hookContext.result` sites, one per hook-bearing verb. #15823 closed the `find()` one — an `afterFind` handler that replaced the array made a method declared `Promise<any[]>` resolve to an envelope, silently — and recorded that it could close only that one: the other three declared `Promise<any>` and so carried no declaration a handler could break. A guard cannot exist before a declaration worth guarding does. The maintainer ruled the gap shut (option A, 2026-09-07, director seat summon #17, decision batch #2; option B "declare only, no enforcement" and option C "record `any` as intended" were refused).
+  
+  The shapes are read off the driver contract each engine exit delegates to, not invented: `driver.findOne` and the by-id `driver.update` declare `Record<string, unknown> | null`, `driver.delete` declares `boolean`, and the predicate exits `driver.updateMany` / `driver.deleteMany` declare the affected-row `number` a bulk write resolves (#4639). Row FIELD values stay erased (`Record<string, any>`), which is #15823's precedent extended exactly rather than softened: `find()` declares `Promise<any[]>`, so the CONTAINER is the contract and the rows inside it are `any`. It is also the only spelling that can state "record or null" at all, since `any | null` collapses to `any`.
+  
+  **What is enforced now.** Each seam re-checks `hookContext.result` against its declaration immediately after the `after*` dispatch and ahead of the consumers that already assume the shape, and refuses a value outside it with a registered ADR-0112 envelope — `FIND_ONE_HOOK_RESULT_NOT_RECORD`, `UPDATE_HOOK_RESULT_NOT_WRITE_SHAPE`, `DELETE_HOOK_RESULT_NOT_WRITE_SHAPE`, all `500`, all branchable on `error.code`. Shaping stays legal exactly as it does on `find()`: a handler may mutate what it is handed, drop keys, or assign a different value of a declared shape. The falsy answers are legal and deliberately so — `null` from `findOne`, `null` or a count from `update`, and `false` or `0` from `delete`, the two most ordinary answers that verb gives.
+  
+  **Who has to change something, on the TYPE axis.** A TypeScript consumer that reads a field off `findOne`'s result without a null check, or off `update`'s result without separating the by-id record from the predicate count. In this repository that was measured before anything moved, at the maintainer's instruction: 18 files and 92 compile errors, all repaired here.
+  
+  **What changes at RUNTIME, per door.** TWO things can put an off-declaration value at a seam, and every refusal's `developerMessage` names both: an `after*` handler that assigned one, and a DRIVER whose own exit answered off `IDataDriver`. Each door goes from returning that value silently to refusing it — one door, one registered code, all `500`:
+  
+  - `findOne` — FROM: whatever the `afterFind` dispatch left in `ctx.result`, or whatever `driver.findOne` answered off its declared `Promise<Record<string, unknown> | null>`, returned to the caller as-is and walked first by `maskSecretFields` / `stripSearchCompanionFromRead`. TO: `500 FIND_ONE_HOOK_RESULT_NOT_RECORD`, raised at the seam when that value is neither a record nor `null`.
+  - `update` — FROM: whatever the `afterUpdate` dispatch left in the batch `ctx.result`, or whatever `driver.update` / `driver.updateMany` answered off their declared `Promise<Record<string, unknown> | null>` / `Promise<number>`, returned as-is and read first by `stripSearchCompanion` and the realtime publish. TO: `500 UPDATE_HOOK_RESULT_NOT_WRITE_SHAPE`, raised when that value is outside record-or-count-or-`null`.
+  - `delete` — FROM: whatever the `afterDelete` dispatch left in `ctx.result`, or whatever `driver.delete` / `driver.deleteMany` answered off their declared `Promise<boolean>` / `Promise<number>`, returned as-is to a caller such as `metadata-protocol`'s `deleteData`, which turns `false` into a 404. TO: `500 DELETE_HOOK_RESULT_NOT_WRITE_SHAPE`, raised when that value is neither a boolean nor a number — never on `false` or `0`, which are declared answers.
+  
+  The driver half of each line is not hypothetical: the seven off-contract test doubles this PR repairs are exactly that source, and they are why the refusal sentence names the SEAM instead of accusing the handler.
+- b110578: fix(metadata): four `isoFromValidDate` call sites collapse onto the shared canonical-ISO spelling; `MetadataHistoryRecord.recordedAt` gets the terminal value it never had (#16422)
+  
+  ## What was wrong
+  
+  `#14037`/`#14038` landed a narrow per-site helper, `isoFromValidDate`, beside
+  the shared `canonicalIsoInstant` spelling. It rewrote exactly one shape — a
+  valid JS `Date` becomes ISO text — and handed **every other input back
+  untouched**. Four adapter boundaries used it, and each fed a field declared
+  `z.string()` or `z.string().datetime()`:
+  
+  | site | declared as |
+  |:--|:--|
+  | `SysMetadataRepository.rowToEvent` → `MetadataEvent.ts` | `z.string()` |
+  | `DatabaseLoader.rowToRecord` → `MetadataRecord.createdAt` / `.updatedAt` | `z.string().datetime().optional()` |
+  | `DatabaseLoader.getHistoryRecord` → `MetadataHistoryRecord.recordedAt` | `z.string().datetime()` — **required** |
+  | `DatabaseLoader.queryHistory` → the same field, the other door | `z.string().datetime()` — **required** |
+  
+  So a `null`, a `number`, an opaque column and an Invalid `Date` all arrived at a
+  field declared `string`, each wearing an `as string` / `as string | undefined`
+  cast that asserted the opposite. Measured over the seven inputs that
+  distinguish the two helpers, the declared schemas refused **21 of 35** produced
+  values.
+  
+  `recordedAt` was the sharp end: a REQUIRED `z.string().datetime()` for which
+  none of the three available answers was legal — the visible text
+  `"Invalid Date"` fails the refinement, `undefined` fails the required field, and
+  the pass-through fed it the `Date` object, which fails both.
+  
+  ## What it does now
+  
+  Those four sites read `canonicalIsoInstant`, whose return type **is**
+  `string | undefined`, so all four casts are deleted rather than restated. Both
+  sibling definitions of `isoFromValidDate` are gone. The terminal value is chosen
+  per site, from the site's own declared schema:
+  
+  - `MetadataRecord.createdAt` / `.updatedAt` are `.optional()` → `undefined`, the
+    branch an absent column already took. ⛔ No default is invented for a field the
+    schema lets be absent.
+  - `MetadataHistoryRecord.recordedAt` is required → the **epoch**, via a named
+    `recordedAtFallback()` shared by both history doors. ⛔ Not `new Date()`: a
+    `now` stamp is a plausible-looking recording instant nobody measured, and it
+    sorts a version recorded years ago to the top of a newest-first timeline. The
+    epoch invents no fact and sorts to the oldest end. It is also the answer the
+    sibling reader of this same `sys_metadata_history.recorded_at` column already
+    gives (`rowToEvent` and `history()`, both `?? new Date(0).toISOString()`).
+  
+  Schema refusals over the same seven inputs: **21 → 8**. The eight that remain
+  are a `number` and an opaque object at four sites — shapes no driver is measured
+  to materialise for these columns. They now arrive as the declared *type* (a
+  string) that simply is not a valid datetime, so the producer's bug stays visible
+  instead of being papered over.
+  
+  ## One behaviour change worth reading twice — and it is why this is `minor`
+  
+  `DatabaseLoader.stat()` computes `record.updatedAt ?? record.createdAt`. An
+  Invalid `updated_at` used to WIN that `??` — a `Date` is truthy and not nullish —
+  so a row with an unreadable `updated_at` and a good `created_at` published
+  `new Date()` as its `mtime`. It now folds to `undefined` one step earlier and
+  loses the `??`, so the row publishes its `created_at`: a stored instant in place
+  of a fabricated one, and exactly the "same `?? DEFAULT` chain an absent column
+  takes" that `#14078`'s own ruling text prescribes for the shape.
+  
+  ⚠️ **The old answer was LEGAL.** `new Date().toISOString()` satisfies
+  `MetadataStats.mtime`'s `z.string().datetime()` perfectly well, and the
+  pre-existing pin asserted exactly that. So this one site is **not** the repair of
+  a violation — it is one legal published answer replaced by a different legal
+  published answer on a published read verb. Nothing was refused before and is
+  permitted now; a consumer simply receives a different instant.
+  
+  ## Why the two levels differ
+  
+  - **`@objectstack/metadata` — `minor`.** Its four repaired sites, on their own,
+    are the "repairing an implementation that silently violated its own already
+    published declared type" case: the values that changed there are ones
+    `MetadataRecordSchema` / `MetadataHistoryRecordSchema` already refused, and
+    nothing a consumer legitimately received has moved. But this package also
+    carries `stat()`, and that site changes a **legal** published answer, which the
+    paragraph above measures. The level is per package, so the four repaired sites
+    ride along at `minor`.
+  - **`@objectstack/metadata-protocol` — `patch`.** Neither of its two sites moves
+    a legal published answer. `rowToEvent` only stops emitting values
+    `MetadataEventSchema` refused (a `Date`, a `number`, an opaque object in a
+    field declared `z.string()`), and `listCommits` is byte-identical on all seven
+    probe inputs.
+  
+  ⛔ No declared type narrowed, no export was added or removed (neither helper was
+  ever exported), and no envelope or accept set moved — so this is `minor` by the
+  changed-answer row, not a breaking change, and it carries no ADR-0087
+  disposition.
+  
+  ## What deliberately did NOT collapse
+  
+  `listCommits` in `@objectstack/metadata-protocol` keeps its copy. Its docblock
+  promises callers the RAW value back for a non-`Date`, and the shared spelling
+  rewrites the whole domain: swapping it in would ERASE an Invalid `Date` from the
+  response (`undefined` — the one answer ADR-0053 D-F3 refuses, because it silently
+  drops a value that is on disk) and hand a `number` or an opaque object to the
+  commit-timeline sort as `String(value)` rather than verbatim. Measured, that site
+  is byte-identical on all seven inputs before and after this change.
+  
+  `SqlDriver`'s same-named helper is not part of this family at all: it takes
+  `Date` (not `unknown`), both its call sites narrow with `instanceof Date` first,
+  and it is the PRODUCER-side fold ADR-0053 D-F3 governs. It is untouched.
+- d64bcb6: **BREAKING** — retire the `adr-0030-notification-event` data migration.
+  
+  `migrateSysNotificationToEvent` had no way to be run: zero production callers
+  anywhere in the repo, and no `os migrate` sub-command, while the two sibling
+  members of `CREATION_ATTESTED_MIGRATION_IDS` had both. The runner, its barrel
+  export, its tests, the ruled `sys_migration` receipt-claim matrix, that matrix's
+  pin, and the id's membership in `CREATION_ATTESTED_MIGRATION_IDS` are removed
+  together. Pre-ADR-0030 `sys_notification` rows are not carried by the platform
+  on this line.
+  
+  ## What is gone, and what an upgrader does about it
+  
+  ⭐ **Nothing is renamed and nothing replaces it**, so there is no new spelling to
+  adopt — every item below is a deletion, and the fix is to stop using it.
+  
+  - `migrateSysNotificationToEvent` (`@objectstack/metadata/migrations`) — deleted.
+    No replacement exists, and none is coming: an `os migrate notification-event`
+    sub-command was considered and refused. Delete the call. The compiler delivers
+    this one: the import fails to resolve.
+  - `SysNotificationMigrationResult`, `SysNotificationMigrationOptions` and
+    `SysNotificationMigrationReceipt` (same entry point) — deleted with it. They
+    described that runner's own result, options and receipt and nothing else.
+  - `CREATION_ATTESTED_MIGRATION_IDS` (`@objectstack/spec/system`) — was a
+    three-member tuple and is now a two-member one holding
+    `'adr-0104-file-references'` and `'adr-0104-value-shapes'`. Both ADR-0104 ids
+    keep their sub-commands, their receipt rows and their birth attestation; only
+    the notification id left. Code typed against
+    `(typeof CREATION_ATTESTED_MIGRATION_IDS)[number]` that names the notification
+    id no longer compiles — delete that arm.
+  
+  `NOTIFICATION_EVENT_MIGRATION_ID` (`@objectstack/spec/system`) is **kept**. A
+  deployment attested at birth, or one that made the operator call while the runner
+  shipped, still holds a `sys_migration` row keyed `'adr-0030-notification-event'`,
+  and the constant is that row's name. Nothing writes or reads a row under it any
+  more — `attestFreshDatastore` no longer includes it — and it is not a
+  registration: it gates nothing and never did.
+  
+  ## Reversal path
+  
+  Two answers were considered and both refused: an `os migrate notification-event`
+  sub-command is a permanent operator surface for a migration with no measured
+  demand, and a boot-time invoker is an unattended data rewrite nobody asked for.
+  ⚠️ Nobody has measured whether any live deployment carries pre-ADR-0030
+  `sys_notification` rows. If a **named** deployment turns out to hold rows it
+  needs, the migration returns as an operator-runnable sub-command shaped exactly
+  like `files-to-references` / `value-shapes` — dry-run default, `--apply` gate,
+  documented consequence — under its own card.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable moves and nothing is renamed: no spec key, no config field, no stored-metadata shape, and no replacement spelling for anyone to adopt. The removed surfaces are one runtime function on `@objectstack/metadata/migrations`, its three own result/option/receipt types, and one member of a constant tuple — none of which appears in any authorable document, so `objectstack migrate meta` has nothing it could rewrite and a ledger entry would prescribe a rewrite that does not exist. The consumer-side action is a deletion, delivered by the compiler on the import and by the barrel tombstone beside it. -->
+
+### Patch Changes
+
+- 5a95b0e: fix(types,metadata-protocol,metadata,cli): a stored operator record names the dialect again, not the driver's composed refusal
+  
+  Since the raw-SQL seam began declaring its own fault, `SqlDriver.execute()` no longer
+  lets the dialect's error out: it raises `code: DATABASE_ERROR` / `status: 500` with a
+  COMPOSED message that discloses neither the statement nor the diagnostic, and carries
+  the dialect error whole under a non-enumerable `cause`. That envelope is deliberate and
+  is unchanged here.
+  
+  What changed underneath it is what every consumer STORED. Each migration probe, backfill
+  and rename in `@objectstack/metadata-protocol` / `@objectstack/metadata` embedded
+  `error.message` into an operator-facing record, so those records began reading
+  
+      the database refused to run a raw statement
+  
+  where they used to read
+  
+      no such column: foo
+  
+  For a live console that costs nothing — the driver prints the statement and the dialect
+  text to its warn sink one line earlier. For a record read later it costs everything:
+  whoever opens a customer install's backfill result a week on never had that line, and the
+  dialect's words were unrecoverable for them.
+  
+  `@objectstack/types` now exports `operatorFacingErrorText(error)` — a depth-bounded walk
+  of the `cause` chain, shaped like the `matchesDriverError` beside it — and the thirteen
+  stored-record sites plus `os db clean`'s console line read through it:
+  
+  - `runtime-index-preflight` — the per-probe `detail` and the seam-failure fan-out;
+  - `seed-tenancy-backfill` — the `absent` detail, the organization-probe report and the
+    three per-object warnings;
+  - `partial-index-probe` — the `detail` both callers report (and its two module comments,
+    which stated the opposite of what happened);
+  - `migrate-env-id-to-project-id`, `migrate-project-id-to-environment-id`,
+    `migrate-sys-notification-to-event`, `drop-projection-tables` — the per-table `error`;
+  - `os db clean` — the `VACUUM failed` line.
+  
+  Two narrowings are part of the contract, not incidental: an UNDECLARED throw is returned
+  on its own message channel, its `cause` never walked, and a declared envelope that is not
+  the raw-path one — the typed read exits' terminal, which composes a different sentence —
+  is left exactly as it arrived.
+  
+  That message channel is deliberately NOT byte-identical to what the replaced expressions
+  computed. The RULE, rather than a catalogue of cases: an undeclared throw comes back as
+  `messageChannelOf(error) || String(error)` — the thrown value's own string `message`, the
+  string itself when a string was thrown, and `String(error)` when neither yields text. Every
+  difference from the replaced expressions follows from that rule, so read the rule and not a
+  list. Illustrations of it, not an exhaustive set: an empty-message `Error` reads its `name`,
+  which for a named subclass is that subclass's name rather than `Error` / `TypeError`; a
+  thrown non-`Error` reads its own text or `String(error)` where `(e as Error).message` read
+  `undefined`, and where `null` / `undefined` threw a `TypeError` out of the catch, so no
+  record was written at all and the operation aborted; an object carrying a NON-EMPTY string
+  `message` reads it where `err instanceof Error ? … : String(err)` recorded `[object Object]`
+  (one carrying an EMPTY `message` still reads `[object Object]`). A thrown EMPTY string reads
+  `''`, so this channel is neither always prose nor never empty.
+  
+  ## The levels, and why they are not uniform
+  
+  `@objectstack/types` takes **`minor`**: it is the one package here that grows a published
+  surface — `operatorFacingErrorText` is a new export, present in `dist/index.d.ts` and in the
+  export list. A purely additive widening takes at least `minor`.
+  
+  The other four take **`patch`**, because none of them widens anything: they are a bug fix in a
+  released package, which is exactly what `patch` is for. `@objectstack/driver-sql` is named
+  because this change moves its `src/**` — by one ADDED file, the `.test.ts` that pins the helper
+  against a real `SqlDriver.execute()` refusal. Its published `dist/` is byte-unchanged by this
+  PR: no entry point reaches a test file, and `files` packs `dist` only.
+  
+  **Not breaking, and deliberately not marked so.** Nothing is removed, renamed or made stricter:
+  what moves is the TEXT inside an operator-facing `detail` / `error` field, never a field name
+  and never a type. The change these sites were made for is the declared raw-path fault, where
+  the record gains the dialect's words in place of the driver's composed placeholder. Every
+  other throw now reaches these records through the rule above rather than through the
+  expression each site spelled out, so its text can move too — a consequence of the rule, not a
+  bounded list of exceptions. At thirteen of the fourteen sites the rule is the whole record,
+  and some shapes still record `''` there: a thrown empty string, a thrown empty array, and an
+  `Error` whose `name` and `message` are both empty are the ones measured. The fourteenth was
+  `seed-tenancy-backfill`'s organization probe, which kept a `|| 'unknown error'` fallback on
+  top of the rule, so those same three shapes recorded `'unknown error'` there rather than `''`;
+  that fallback was load-bearing — the site read an empty value as "the probe did not fail" —
+  and #17167 removed it in this same release, so all fourteen sites now record the channel as
+  is and that site carries its failure fact structurally. The sentence being replaced is not a value any
+  consumer can have been parsing: it is an opaque human diagnostic. A consumer reading these
+  records gets the dialect's words back where it had been getting a placeholder.
+- 776d64c: feat(spec)!: the `@objectstack/spec/cloud` subpath is removed — the cloud control plane's contracts leave the open-source spec, and the package & marketplace format moves to `@objectstack/spec/marketplace` (#16325)
+  
+  <!-- adr-0087: registered cloud-subpath-retired -->
+  
+  **BREAKING** — a published subpath export of `@objectstack/spec` is deleted, with no
+  alias and no deprecation window (maintainer, 2026-08-27, verbatim: 「项目在创业阶段，
+  用户也很少，短期不考虑渐进。」). Shipped as `minor` under the repo's launch-window
+  convention, in which `major` is refused by `check-changeset-no-major` and breaking-ness
+  is carried by this banner plus the ADR-0087 disposition; the hand-migration prescription
+  is registered under protocol major 18 as `cloud-subpath-retired`.
+  
+  ## What moved, and why
+  
+  Maintainer direction (2026-09-06, verbatim): 「我一直觉得 cloud 的协议应该放在云端，没必要开源」,
+  ruled option B "cut by owner" on #16325 (director batch #62, 2026-09-07, 「同意」).
+  `packages/spec/src/cloud/` held two families with different owners:
+  
+  - **The cloud control plane's own contracts** — `environment.zod`, `environment-package.zod`,
+    `tenant.zod`, `developer-portal.zod`, `marketplace-admin.zod`, `app-store.zod` (62 JSON-Schema
+    defs, 2087 lines). Their producer and every consumer live in the closed cloud repo; the
+    open-source tree read exactly one type from them. They are gone from `@objectstack/spec`:
+    `environment` and `tenant` are re-declared in the cloud repo (objectstack-ai/cloud#2037), and
+    the other four are deleted outright — zero consumers in any repo (#16526, ruled A). All of it
+    is recoverable from git history at `d5d8d50db`.
+  - **The package & marketplace format** — `package.zod`, `package-version.zod`, `marketplace.zod`,
+    `package-l10n`, `template-manifest.zod` (30 defs, 1400 lines). A package author needs it and the
+    open-source CLI's `os package publish` speaks it, so it STAYS, relocated to `src/marketplace/`
+    and published as `@objectstack/spec/marketplace`. Every def, key and JSON Schema is
+    byte-identical under the new `$id` category (`RENAMED_DEFS`, 32 entries; nothing left the
+    author-facing contract).
+  
+  ## FROM → TO
+  
+  | you wrote | write instead |
+  |:--|:--|
+  | `import { PackageSchema, CreatePackageRequestSchema, … } from '@objectstack/spec/cloud'` | `… from '@objectstack/spec/marketplace'` — same symbols, same shapes |
+  | `import { EnvironmentArtifactSchema } from '@objectstack/spec/cloud'` | `… from '@objectstack/spec/system'` (it was only ever a re-export of that declaration) |
+  | `import type { EnvironmentType } from '@objectstack/spec/cloud'` | `… from '@objectstack/spec/api'` (re-declared beside the discovery fold table that reads it) |
+  | `import { EnvironmentSchema, TenantPlanSchema, ProvisionEnvironmentRequestSchema, … } from '@objectstack/spec/cloud'` | no open-source replacement — these are the cloud repo's own declarations now |
+  | `/docs/references/cloud/<page>` | `/docs/references/marketplace/<page>` for the format pages (redirected); the control-plane pages have no successor |
+  
+  Why the mis-binding hazard closes with this: `client.environments.*` keeps its erased `any`
+  deliberately (#11925/#12036), and the camelCase `Environment` row used to be the obvious-looking
+  binding for it — it compiled and read `undefined` at runtime against the snake_case wire. That
+  type no longer exists in the open-source package, so the wrong binding is structurally
+  impossible rather than warned about in a docblock.
+  
+  `@objectstack/cli` and `@objectstack/metadata` change only an import path (`marketplace` and
+  `system` respectively); no behaviour moves.
+- Updated dependencies [7f62536]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [245f360]
+- Updated dependencies [324968e]
+- Updated dependencies [fe71032]
+- Updated dependencies [482d34d]
+- Updated dependencies [305e7fc]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [9c577c1]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [baf9745]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [6548118]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [48203ff]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [c9eb773]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [dfeba25]
+- Updated dependencies [0a88a80]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [e7ff9c2]
+- Updated dependencies [758ac40]
+- Updated dependencies [c744c0a]
+- Updated dependencies [134b410]
+- Updated dependencies [4c42fd1]
+- Updated dependencies [5f392f0]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [f03f6c7]
+- Updated dependencies [cf79182]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [c3ebe4a]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [2bed4c3]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [71629a1]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [288fe9c]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [6e3462d]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [cca1dc0]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5a95b0e]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [de1a611]
+- Updated dependencies [db76982]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [ab450f4]
+- Updated dependencies [025588a]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [4215417]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/types@17.5.0
+  - @objectstack/spec@17.5.0
+  - @objectstack/platform-objects@17.5.0
+  - @objectstack/core@17.5.0
+  - @objectstack/metadata-core@17.5.0
+  - @objectstack/metadata-fs@17.5.0
+
 ## 17.4.0
 
 ### Minor Changes

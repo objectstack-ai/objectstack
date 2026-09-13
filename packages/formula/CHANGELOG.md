@@ -1,5 +1,204 @@
 # @objectstack/formula
 
+## 17.5.0
+
+### Minor Changes
+
+- 5505646: fix(formula): the strict declaredness env declares `SCOPE_ROOTS` as `dyn`, so a bare reference behind a root name is no longer masked (#16412)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is renamed, retired or re-typed: no `packages/spec` key changes its name, its type or its optionality, no stored shape moves, and every view, form, flow and formula parses byte-identically to before. `objectstack migrate meta` therefore has nothing to rewrite, and this changeset carries no rewrite instructions. What narrows is the ACCEPT SET of published CHECKERS at build time: `validateExpression` and two `@objectstack/lint` rules now report a bare field reference they previously left unjudged, which is the same verdict each of them already returns for that identifier when it is written first in the same predicate. The sources that newly report are already broken at RUN time and were before this change: a bare identifier in a record-scoped site resolves to nothing, the expression evaluates to null and a visibility predicate falls open, which is #1928's class. The remedy is per-source and the diagnostic already names it in full, naming the identifier and the namespace it belongs under; there is no authored artifact and no stored representation for a migration to act on. -->
+  
+  **BREAKING** in the accept-set sense — an accept-set narrowing on published
+  CHECKERS, in the same sense as a route that starts refusing a request it should
+  always have refused — landing in the launch window as `minor` on both packages (during the window the bump level is
+  not the carrier of breaking-ness; this paragraph and the disposition above
+  are). Nothing that was already reported stops being reported, and no source
+  that is correct starts being reported.
+  
+  `firstUndeclaredReference` asks cel-js's checker for the first undeclared
+  identifier in a source. That checker returns exactly ONE error, and the helper
+  acts only on `Unknown variable: X`, so whenever the first error is of another
+  class every undeclared reference behind it in the same source went unjudged and
+  the helper answered `null` — which is also the value that means "every
+  reference is rooted". Four published call sites read that answer, and none of
+  them can tell the two readings apart.
+  
+  The widest way to reach that state was a disagreement between two environments
+  in this package about the same names. The strict env declared every
+  `SCOPE_ROOTS` member (`data`, `config`, `record`, `result`, `item`, `event`,
+  `input`, `user`, …) as `map`, while the permissive env that `celEngine.compile`
+  type-checks in leaves them `dyn`. `map` has no `==`, `<` or `+` overload, so an
+  ordinary comparison on one of those names compiled clean and then faulted `no
+  such overload` in the strict env only — taking the single error slot and
+  silencing everything behind it. An author reaches it by naming an object field
+  or a flow variable after a namespace root and reading it bare, which on a
+  metadata-editing form is not even a coincidence: that layer binds the row under
+  edit as `data`.
+  
+  The strict env now declares those roots `dyn`, which is what the list's own
+  doc-comment already claimed it was for — member access, arithmetic and
+  comparison on a root all deferring to runtime — and which `map` delivered only
+  the first of. The two environments agree about these names, so the class cannot
+  arise rather than being compensated for downstream.
+  
+  What starts reporting, measured on each published surface:
+  
+  - `@objectstack/formula` `validateExpression` with `scope: 'record'` — a bare
+    reference behind a root name is the hard error it always was for the same
+    identifier written first (`ok` was `true` with zero errors; it is now `false`).
+  - `@objectstack/formula` `validateExpression` with `scope: 'flattened'` — the
+    did-you-mean warning reaches a misspelled field behind a root name.
+  - `@objectstack/lint` `visibility-bare-identifier` — a bare identifier behind a
+    root name in a `visibleWhen` predicate is a finding. Per that rule's own
+    message the console otherwise falls open and the element renders
+    unconditionally.
+  - `@objectstack/lint` flow-variable shadowing — a shadowed field read behind a
+    root name is warned. That rule's documented blind spot is now name-local, as
+    its wording always claimed: the colliding name itself is still not reported.
+  
+  ⚠️ One published answer also WIDENS, and it is not a reporting surface.
+  `inferExpressionType` (`@objectstack/formula`, re-exported from the package
+  root; read by `@objectstack/mcp` as `validate_expression.inferredType`) infers a
+  formula's coarse value type through `inferCelType`, which shares this same
+  strict environment. While the roots were `map` there was no `==`, `<` or `+`
+  overload for them, so an expression using a namespace root as a DIRECT OPERAND
+  did not type-check at all and the answer was `'unknown'`. With the roots `dyn`
+  those expressions type-check and the answer is the truthful CEL type:
+  `result + 1` and `record ? 1 : 2` → `'number'`, `record == "x"` → `'boolean'`,
+  `data == "x" ? "a" : "b"` → `'text'`, uniformly for every name on the list. No
+  answer changes from one concrete type to another and nothing narrows to
+  `'unknown'` — `size(record)` and `"a" in record` still answer, and a root that
+  is only the base of a member access (`record.amount > 100`) never consulted this
+  declaration. A consumer that keys off a concrete type therefore sees strictly
+  more expressions classified, never a different classification; for the
+  motivating consumer that means a formula written as `data == "x" ? "a" : "b"` is
+  now correctly seen as text rather than as unprovable. Pinned on both sides in
+  `validate.test.ts`.
+  
+  ⛔ Two first-error classes are NOT closed by this, and both stay pinned. A CEL
+  TYPE name (`type`, `string`, `int`, …) is declared by CEL itself, so no
+  declaration this package makes can reach it; measured on the strict env, the
+  message for `type == 'grid'` is byte-identical under a `map` and a `dyn` root
+  declaration. And `has()` handed a non-select argument still faults its own
+  class, which `@objectstack/lint`'s visibility rule masks at its own call site
+  (#16118) and which nothing else masks.
+  
+  The narrowing this helper is built on is unchanged: it still acts only on
+  `Unknown variable`, so `type(record.x) == string`, comprehension macros, guard
+  idioms, optional chaining and stdlib calls report nothing, and a widening of
+  that regex onto the overload message remains refused.
+
+### Patch Changes
+
+- de62769: `SCOPE_ROOTS`'s docblock says it is a **baseline**, not a per-surface accept set, and points at where the per-surface verdict actually lives
+  
+  The exported `SCOPE_ROOTS` constant carried a docblock that made **a false statement about itself**. Its opening line read *"Namespace roots that a `record`-scoped CEL site may legitimately reference"* — which, read alone, is exactly the per-surface accept-set reading. Ninety lines below, the companion block asserted *"This list is a 'never faults' BASELINE, not a per-surface contract — **the doc-comment above says so**"*. The doc-comment above did not say so; it said close to the opposite.
+  
+  **This is not a docs nit, and the evidence is a card.** The accept-set reading is what a downstream seat took away, and it generated a cross-repo card filed against this package (this one) about a lint/runtime disagreement that is not a disagreement at all: the baseline declares a root, the per-surface gate refuses it, and both are correct.
+  
+  - **The opening line now states the contract it actually is**: the roots the strict check env declares, so that naming one is never itself a fault — and explicitly ⛔ *not* a claim that any surface **binds** the root.
+  - **It points at the per-surface authority by name**: `@objectstack/lint`'s `fieldRuleRootIssue`, judged against that surface's own closed `FIELD_RULE_BOUND_ROOTS` (`record` / `previous` / `parent`). A reader asking "may THIS surface reference this root?" is now sent one hop to the symbol that answers it, instead of reading the answer off this list.
+  - **It names `data` as the standing example** of a root this list declares and the field-rule surface does not bind — the two answers doing their separate jobs, ⛔ not something to repair by editing this list.
+  - **The self-reference is now true.** The companion block cites `SCOPE_ROOTS`'s own doc-comment, which now opens by saying exactly what the citation claims it says.
+  
+  ⛔ **Zero behaviour change.** `SCOPE_ROOTS` keeps all **27** members, byte for byte — no member is added, removed or reordered, and ⛔ `app` is not added (objectstack#16420 closed `not_planned` on that and this does not reopen it). Narrowing was refuted by measurement rather than by preference: six `*.form.ts` metadata-form modules in this repo carry live `data.` predicates. The diff is comment lines only.
+  
+  **This publishes, which is why it is `patch` rather than `skip-changeset`.** `@objectstack/formula`'s `files[]` ships `dist`, and this TSDoc is emitted into the built declarations — measured on the built artifact at three readings: the new text's distinctive phrase present at 1 in both `dist/index.d.ts` and `dist/index.d.mts`, an untouched neighbouring sentence from the same docblock present at 1 as the lit control, and a fabricated phrase at 0 as the dark control. The companion block is a plain `/* */` comment attached to no declaration and reads 0 in `dist` — it is the half that does not ship, and the half that does is the half that was wrong.
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [245f360]
+- Updated dependencies [324968e]
+- Updated dependencies [fe71032]
+- Updated dependencies [482d34d]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [48203ff]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [c9eb773]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [dfeba25]
+- Updated dependencies [0a88a80]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [134b410]
+- Updated dependencies [5f392f0]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [de1a611]
+- Updated dependencies [db76982]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [ab450f4]
+- Updated dependencies [025588a]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/spec@17.5.0
+
 ## 17.4.0
 
 ### Minor Changes

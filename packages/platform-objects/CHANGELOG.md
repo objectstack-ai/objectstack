@@ -1,5 +1,434 @@
 # @objectstack/platform-objects
 
+## 17.5.0
+
+### Minor Changes
+
+- fe71032: feat(driver-sql,objectql,cli)!: the ADR-0104 file-family column step, and the kernel→driver supply that arms it (#15989)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable moves. No `packages/spec` key, no Zod schema, no authored metadata property, no object definition and no accepted request shape changes its spelling, type or legality in this diff: `DataMigrationFlagSchema` and its `columns_moved_at` member landed under #16185 and are READ here, not edited, and the one `packages/spec` edit is a new exported PREDICATE function over that existing type. So `objectstack migrate meta` has nothing to visit, `spec-changes.json` has nothing to project and the upgrade guide has no row to gain — the ledger's whole subject is authored metadata, and what moves here is a physical column's type plus the encoding of the values inside it, on a deployment whose operator ran a command to move them. ADR-0104's row-data side already has its own declared, operator-run surface (`os migrate files-to-references`), which is not a metadata upgrade. The other four categories are closed on facts: every package here publishes to npm, declares no `private` and ships `dist` in `files[]` (not `unpublished`); no ADR-0087 id is minted in this diff (not `registered`) and none pre-dates the base that would cover it (not `already-registered`); and exported declarations DO change — 13 new declarations reaching a package entry (11 on `@objectstack/driver-sql`'s: the 6 values MEDIA_COLUMN_MOVE_DIALECTS, MEDIA_COLUMN_MOVE_ROLLBACK_NOTES, MEDIA_ID_MOVE_WIDTH, isJsonColumnType, mediaColumnMoveDialect, mediaColumnMovePlan and the 5 types MediaColumnMoveDialect, MediaColumnMoveKind, MediaColumnMovePlan, MediaColumnMoveRefusal, MediaColumnMoveScan; plus recordFileColumnMove on `@objectstack/platform-objects/system` and hasMovedFileColumns on `@objectstack/spec`) and 3 new public methods on exported classes (SqlDriver.planMediaColumnMove, SqlDriver.setFileColumnsMovedResolver, ObjectQL.haveFileColumnsMoved) — so neither `runtime-interface-only` nor `type-surface-only` applies. The `**BREAKING**` banner below is carried rather than dropped, because published storage behaviour of `@objectstack/driver-sql` changes. -->
+  
+  **BREAKING** on the published storage behaviour of `@objectstack/driver-sql`. A deployment that runs `os migrate files-to-references --apply` now has its media columns **retyped and their values rewritten** into the bare-`sys_file`-id encoding, and its driver writes bare ids from the next boot. This completes the maintainer ruling on #15041 (「15041 应该改为实际 id 保存。选A，其他同意」) whose encoding half shipped in the previous release.
+  
+  Shipped as `minor` under the repo's launch-window convention, in which `major` is refused by `check-changeset-no-major` and breaking-ness is carried by this banner plus the ADR-0087 disposition rather than by the level.
+  
+  ## The column step
+  
+  `os migrate files-to-references --apply` gains a further step, run **only after** the backfill and its self-check report zero blocking rows — and it moves nothing at all until three gates pass:
+  
+  1. the migration's own gate (zero blocking rows);
+  2. **every** abort pre-check, across **every** planned column, before a single statement runs;
+  3. no refusals — a column the driver could not plan stops the columns it could.
+  
+  **PostgreSQL** and **SQLite** only. ⛔ MySQL is refused by name and belongs to #17788, where its statement ORDER is settled against a real instance rather than transcribed.
+  
+  Per column, the shape is read off the column's **physical type**, not off the dialect: a `json` column is retyped (`ALTER … TYPE varchar(2048) USING (col #>> '{}')`), while a column that is already `varchar` — the population `os generate migration --format sql` creates and a JSON-arm driver fills with quoted ids — has its values unquoted in place. SQLite has only the second shape, since it has no json type.
+  
+  ### ⛔ The abort clause is NOT the one the ADR sketched
+  
+  The #15041 addendum prescribed the retype with nothing in front of it while *requiring* the step to abort "on the first cell that is not a JSON string". Those two sentences contradict each other, and which was wrong was settled by running it. Measured on live PostgreSQL 16.13, `USING (col #>> '{}')` is **accepted** over a row holding an inline metadata blob, because `#>> '{}'` extracts *any* json type as text: the bytes survive, but the column is no longer `json`, so an object becomes a plain string in a column whose declared contents are ids — silently, in a migration that reports success. The director ruling (decision batch #120 item 1) replaced the clause with the pre-check that implements the requirement: `json_typeof(col) IS DISTINCT FROM 'string'` on PostgreSQL, and `json_valid(col) AND json_type(col) <> 'text'` on SQLite, where excluding invalid JSON is what keeps a re-run idempotent over cells a previous run already moved.
+  
+  Both the destructive form and the guarded one are executed side by side, on one fixture, in this release's own test suite — so the difference stays a measurement rather than a comment.
+  
+  ## The kernel→driver supply seam
+  
+  `SqlDriverConfig.fileColumnsMoved` shipped last release and no host outside the driver supplied it. It is supplied now: `ObjectQL.registerDriver` hands every driver that has the seam a closure over the new `ObjectQL.haveFileColumnsMoved()`, which reads `sys_migration.columns_moved_at` — and requires the `adr-0104-file-references` flag to be verified **as well**, since the stamp alone would attest a column move with nothing attesting the values inside it.
+  
+  ⭐ **Every way of not knowing still answers "not moved".** The option omitted, a resolver that throws or rejects or answers a non-`true` value, a resolver that never runs because the host never calls `initObjects`, a driver with no such seam, no `sys_migration` object, no row, an unreadable table, a null or empty stamp — all the JSON arm. That is the encoding every deployment in the world is on, and a driver that guessed the other way would write bare ids into a JSON column.
+  
+  ⛔ **A host that names `fileColumnsMoved` in its own config wins**, in either polarity. The engine only ever fills an empty slot, and never contradicts an explicit composition: overruling a declared `false` is precisely the bare-ids-into-a-JSON-column failure this mechanism exists to prevent.
+  
+  ## New published surface
+  
+  - `@objectstack/spec` — `hasMovedFileColumns(flag)`, the single arbiter of the conjunction above, beside `isDataMigrationFlagVerified` and `authorisesIrreversibleAction`.
+  - `@objectstack/objectql` — `ObjectQL.haveFileColumnsMoved()`, sharing one memoized read (and one `invalidateDataMigrationFlags()`) with `isFileReferencesMigrationVerified()`, so the two answers can never come out of one another's date.
+  - `@objectstack/platform-objects` — `recordFileColumnMove(engine, migrationId)`, which refuses to stamp a deployment with no verified flag row. `readDataMigrationFlag` now carries `columns_moved_at`; it previously dropped it, which made a moved deployment indistinguishable from an unmoved one to every caller.
+  - `@objectstack/driver-sql` — `SqlDriver.setFileColumnsMovedResolver()`, `SqlDriver.planMediaColumnMove()`, and the statement builders `mediaColumnMovePlan` / `mediaColumnMoveDialect` / `isJsonColumnType` with `MEDIA_COLUMN_MOVE_DIALECTS`, `MEDIA_COLUMN_MOVE_ROLLBACK_NOTES` and `MEDIA_ID_MOVE_WIDTH`. The statements live in the package that owns the dialects and measured them; a second copy in the CLI would be a second copy of the clause the ruling got wrong.
+  
+  ## What does NOT change
+  
+  A deployment that does not run `--apply` is byte-for-byte where it was: the column stays `json`, the write still JSON-encodes, and the read still accepts both encodings. A backfill re-run does not set the stamp and — deliberately — cannot clear it either: `recordDataMigrationRun` omits the key rather than writing a preserved value, so a ledger read that FAILS cannot demote a moved deployment back onto the JSON arm. A partial or failed column step records nothing at all, which leaves such a datastore on the arm that reads both encodings.
+  
+  `multiple: true` media is untouched on both arms: its value is a list of ids and a JSON column on every deployment.
+- 9c577c1: fix(platform-objects,cli): the generated i18n staleness predicate judges every section a run generated, not two fixed names
+  
+  `os i18n extract --no-objects-only --fill=default --source-hashes` emits
+  `apps` / `dashboards` / `pages` leaves and fills them from the source locale —
+  leaves carrying exactly the property the GENERATED staleness predicate exists to
+  judge — but the population that predicate walked was the fixed
+  `GENERATED_SECTIONS` list (`['objects', 'metadataForms']`). So no provenance
+  record was written for such a leaf, none was read back, and a `--fill=default`
+  copy left behind by a revised source kept being served as a superseded draft
+  with every i18n gate green. The hand-authored predicate does reach those paths,
+  but it judges against `LOCALE.source-hashes.ts`, which by construction carries
+  no entry for a leaf a generator produced. Neither mechanism covered them.
+  
+  The population now follows the RUN, at both ends:
+  
+  - **write** — `collectFilledFromHashes` takes a new **optional** fourth
+    parameter, `sections?: readonly string[]`, defaulting to `GENERATED_SECTIONS`.
+    `collectGeneratedLeaves` takes the same optional second parameter. Every
+    existing call site compiles and behaves exactly as before; `os i18n extract`
+    passes the sections it actually built.
+  - **read** — `findStaleFills` walks the sections the recorded table itself
+    names. One run wrote that table, so the table is the record of what that run
+    emitted, and the two ends cannot disagree about it. For every table committed
+    today this resolves to `['objects', 'metadataForms']`, so no served byte moves.
+  
+  Adding `'apps'` to `GENERATED_SECTIONS` was the other available shape and is
+  deliberately not taken: it would make `collectSourceLeaves` and
+  `collectGeneratedLeaves` walk one section — two predicates permanently on one
+  path — and it would assert `apps` is always generated, which is false for every
+  bundle set that ships. Both constants are unchanged and pinned unchanged.
+  
+  Widening the generated population is safe in a way widening the hand-authored
+  one would not be, because the rule is self-discriminating per leaf: a record is
+  written only when `value === currentSource` or `previous[path] === hash(value)`,
+  so a leaf someone actually translated satisfies neither and stays
+  legacy-trusted however wide the walk. The section list was the only part of the
+  mechanism that could not tell a fill from a translation.
+  
+  No committed bundle or companion byte moves in this repository. All nine
+  `--source-hashes` configs run the default `--objects-only`, whose commit layer
+  already narrows the run's table to the sections it emits a bundle for. The 387
+  hand-recorded digests across `zh-CN` / `ja-JP` / `es-ES` are neither read,
+  written, shadowed nor lost — `apps` stays in `HAND_AUTHORED_SECTIONS`,
+  `collectSourceHashes` still walks it, and the extractor still never writes that
+  file. Its header now states which table a maintainer keeps for a path that can
+  appear in both, and why the overlap cannot serve wrong text.
+- c744c0a: `apps.account.navigation.nav_connect_agent` is translated in all four locales, so the Connect an Agent page renders the same string behind both doors
+  
+  `@objectstack/mcp` contributes the Connect an Agent page into **two** apps — `setup` (admins) and, since #17646, `account` → Developer (every authenticated user). The translation bundles are keyed `apps.<app>.navigation.<id>`, one namespace per app, and only the `setup` key existed. So `apps.setup.navigation.nav_connect_agent` never answered for the Account door, and one destination rendered two different strings for the same signed-in user:
+  
+  | door | before |
+  |:--|:--|
+  | Setup → Integrations | 「连接智能体」 / 「エージェントを接続」 / "Conectar un agente" |
+  | Account → Developer | `Connect an Agent`, the English literal, in every locale |
+  
+  The population that got the untranslated one is precisely the non-admin on a non-English locale: Account is the only one of the two doors they can open.
+  
+  Adds the key to `en` / `zh-CN` / `ja-JP` / `es-ES`, mirroring the Setup twin's strings verbatim, plus the `#8765` provenance row in each of the three hand-maintained `<locale>.source-hashes.ts` tables (`en` is the source, not a copy of one, so it has no table and gets no row). The recorded digest is `collectSourceHashes(en)['apps.account.navigation.nav_connect_agent.label']` — the repo's own `hashSource`, not a hand-written value.
+  
+  ⛔ No behaviour outside the bundle moves. No nav item, permission, route or page is added: the contribution and the destination already existed and are untouched, and the Setup key is byte-unchanged. This is an additive key on a published payload, which is why it ships `minor` rather than `patch`.
+  
+  Neither gate over this surface could see the gap, and neither is changed here: `pnpm check:app-nav-i18n` scopes itself to `APP_NAME = 'setup'` and skips every contribution targeting another app, and `app-nav-translation-parity.test.ts` walks statically declared nav — the Account entry is contributed at runtime, so no static walk reaches it. Extending the gate is the next step in the standing repair order and lands in `packages/cli/scripts/**` under its own card, deliberately not folded in here.
+- 23aa83c: `DataMigrationFlagSchema` gains `columns_moved_at`, and the `sys_migration` platform object gains the matching column: the deployment-level attestation that a migration's COLUMN MOVE ran here — the step that retypes the migrated columns and rewrites the values they hold into the new encoding.
+  
+  **What it attests** is a fact the ledger could not previously express. `applied_at` says the backfill ran in apply mode; `verified_at` says the self-check passed. Neither says anything about the physical columns, because the backfill and the column move are separate acts and only the first of them had somewhere to be recorded. A deployment can therefore have applied AND verified a migration and still store the legacy encoding. `columns_moved_at` is that second fact, carried as its own member rather than as a widening of either existing one: folding it into `verified_at` would change what an already-verified row authorises on every deployment that has never heard of a column move.
+  
+  **Absence is the contract, not a default.** The member is optional and nullable, and nothing in this change writes it. Null or absent means the columns still hold the legacy encoding — a real, expected steady state on any deployment that has run the backfill but not the move, and never an error state — so every row that exists in the world today, and any consumer that cannot read the member at all, lands on the legacy encoding with no extra logic. A required member, or a default value, would destroy the exact property the mechanism was chosen for.
+  
+  **Nothing reads it yet, and the arbiter is untouched.** `isDataMigrationFlagVerified` — documented as the ONE arbiter for the existing consumers (reap gating, the strict value-shape flip) — is unchanged in this diff, and is now pinned to return the same verdict for a row that omits the new member as it returned before the member existed; `authorisesIrreversibleAction`, which composes it, is pinned the same way. The predicate that will require `columns_moved_at` non-null belongs to the driver work this change unblocks, and reads it in addition to the arbiter, never inside it.
+  
+  This is an additive widening: `DataMigrationFlag` (`z.input` of the schema) gains one optional member, no existing member changes or moves, and no export is added or removed.
+- 4bbf766: Two surfaces the console renders that no translation bundle could address — a `kind: 'slotted'` page's components and a dashboard's global-filter bar — are now addressable (#16772).
+  
+  **BREAKING** (return shape) — `walkAddressedPageComponents` is a published export of `@objectstack/spec` and its return value is now the rebuilt roots pair `{ regions?, slots? }` where it used to be the regions array alone. A caller that only enumerates components through the visitor and ignores the return value is unaffected. A caller that reads the return value binds `const { regions } = walkAddressedPageComponents(doc, visit)` and reads `regions` exactly as it did before; `slots` is the other half of the same rebuild and is present exactly when the input page authors slots. The bump stays `minor` because the launch-window convention `scripts/check-changeset-no-major.mjs` enforces refuses a `major` while the fixed group is in lockstep — during that window the version number carries nothing about breaking-ness, so this banner and the disposition below are the carriers.
+  
+  **`walkAddressedPageComponents` widens in both dimensions.** The shared page walk behind `translatePage` and the CLI extractor (`os i18n extract` / `os i18n coverage`) rooted at `regions[].components[]` only and descended `properties.children` only. A slotted record page authors `regions: []` and puts everything under `slots.<slot>`, so the walk visited nothing on it and `pages.<name>` carried exactly two addressable keys however many components the page authored; a `page:tabs` / `page:accordion` keeps its panels' components under `properties.items[].children`, one level deeper than the descended slot, so a related list inside a tab was unreachable on any page kind. The walk now roots at `regions[].components[]` **and** `slots.<slot>` (one component or an array per slot, regions first, then slots in authored order — both root level for the collision arbitration and for the page-name `page:header` route, so a slotted page's `slots.header` is translated as the page's header), and descends `properties.children` **and** `properties.items[].children` (matched by shape, so a custom container speaking the same vocabulary is walked too; `body` / `footer` remain undescended — a renderer back-compat fallback, not an authorable spelling). The depth cap, the cycle guard and the ruled id arbitration are unchanged.
+  
+  - Signature: the parameter is `AddressedPageRoots` (= `Pick<PageLike, 'regions' | 'slots'>`) instead of `Pick<PageLike, 'regions'>`, and the walk returns the rebuilt roots pair `{ regions?, slots? }` (each key present exactly when present on the input) instead of the regions array alone. `PageLike` gains `slots`. An enumeration-only consumer that ignores the return value needs no change; a consumer reading the returned regions destructures `{ regions }`.
+  - `translatePage` carries the rebuilt `slots` back onto the document.
+  
+  **`dashboards.<name>.globalFilters.<key>` is a new bundle group.** A dashboard's filter bar draws directly above the widget titles the bundle has always translated, and neither a filter's label nor its static option labels had a key. The group is keyed by the filter's `name` (`GlobalFilterSchema.name`, declared as defaulting to `field` — a filter that authors no `name` is keyed by its `field`) and carries `label` and an `options.<value>` map keyed by the option `value` spelled as a string. `translateDashboard` overlays it on the served document, which is what objectui's filter bar already reads; the exported `globalFilterKey()` is the one key derivation both the resolver and the extractor use. `optionsFrom` options are fetched rows and are deliberately not addressable.
+  
+  **`@objectstack/cli`:** `os i18n extract` offers `dashboards.<name>.globalFilters.<key>.label` / `.options.<value>` for every static filter, and `pages.<name>.title` / `.subtitle` for a `page:header` at any root (a slotted page's `slots.header` included) — the component keys under `slots` and tab panels follow from the shared walk with no extractor change.
+  
+  **`@objectstack/platform-objects`:** the shipped Setup bundles (`en`, `zh-CN`, `ja-JP`, `es-ES`) carry the new `dashboards.<name>.globalFilters.created_at.label` entry for the system-overview dashboard's date-range filter, which authors no `name` and is therefore keyed by its `field`.
+  
+  **Why no ADR-0087 ledger entry.** Nothing an author writes moves. The authorable side is purely additive — `dashboards.<name>.globalFilters.<key>` is a new optional group and every bundle that was valid before is valid unchanged — no spec key is retired, no stored `sys_metadata` shape changes, and no conversion or migration id is touched, so `objectstack migrate meta` has nothing to act on. The one incompatible surface is a published function's TypeScript return type, which reaches every affected consumer through the compiler.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) nothing authorable moves: the bundle group is additive, no spec key is retired and no stored metadata shape changes; the one incompatible surface is a published function's TypeScript return type, which the compiler reports and no ledger entry can act on -->
+- 9bd4344: feat(auth)!: adopt better-auth's account-issuer rollback — drop `sys_account.issuer`, retire the backfill, lift the `@better-auth/*` family to an exact `1.7.3` (#17440)
+  
+  <!-- adr-0087: registered sys-account-issuer-retired -->
+  
+  **BREAKING** — a platform object drops a declared field and `@objectstack/plugin-auth`
+  drops six published symbols. Shipped as `minor` under the launch-window convention
+  (`major` is refused by `check-changeset-no-major`; breaking-ness is carried by this
+  banner plus the ADR-0087 disposition above). The hand-migration prescription is
+  registered under protocol major 18 as `sys-account-issuer-retired`.
+  
+  better-auth `1.7.3` removed the issuer-scoped account identity outright
+  (`better-auth/better-auth#10909`): `createLocalAccountIssuer` is deleted,
+  `accountSchema.issuer` is gone, `AccountKey` is `(providerId, accountId)` again, and the
+  `account.issuer` column and its unique index are gone from `get-tables`. There is no
+  drop-in replacement. `#16186` pinned the family at an exact `1.7.2` as a stopgap; this is
+  the durable half, per the maintainer ruling of 2026-09-10 on `#16629`.
+  
+  ## 迁移:FROM → TO
+  
+  | FROM | TO | the one-line fix |
+  |:--|:--|:--|
+  | `sys_account.issuer` (column + `{ fields: ['issuer','account_id'], unique: true }`) | — | nothing replaces it; identity is `(provider_id, account_id)`, declared UNIQUE on `sys_account` since the object was created |
+  | reading `account.issuer` off a row or off `client.accounts.list()` | `sys_sso_provider.issuer`, resolved through the account's `provider_id` | `provider_id` is unique per environment, so it names the authority on its own |
+  | `backfillAccountIssuer(ql, …)` | — | delete the call; there is no successor pass |
+  | `CREDENTIAL_ISSUER` / `oauthIssuerFor(id)` | — | drop the argument; `internalAdapter.createAccount({ userId, providerId, accountId, password })` takes no `issuer` |
+  | `ResolvedSocialProvider`, `BackfillAccountIssuerOptions`, `BackfillAccountIssuerResult` | — | delete the import; the compiler names every site |
+  | `@better-auth/*` at an exact `1.7.2` (eleven members) | an exact `1.7.3` (eleven members) | the family moves as ONE line — `@better-auth/core@1.7.2` and `@better-auth/kysely-adapter@1.7.3` are mutually incompatible in both directions |
+  
+  ## ⭐ Existing deployments: run the pre-flight BEFORE the column is dropped
+  
+  Uniqueness moves from `(issuer, account_id)` to `(provider_id, account_id)` — a
+  **narrower** key. Two rows sharing `provider_id` + `account_id` and differing only in
+  `issuer` are legal under the old key and are ONE account under the new one.
+  
+  ```
+  os migrate account-issuer          # read-only; exits non-zero when the drop must not proceed
+  # … take a backup (the operator's act, and the apply step's precondition) …
+  os migrate apply --allow-destructive
+  os migrate account-issuer          # post-check: reads zero
+  ```
+  
+  The pre-flight reads **rows**, never the index declaration. `syncDeclaredIndexes` logs a
+  plain UNIQUE whose CREATE failed on existing duplicates onto the durability channel and
+  lets the boot continue (`#14902` / `#15479`), so a database can carry the declaration
+  without the constraint — and on such a database the drop does not fail loudly, it
+  degrades silently: the rows become indistinguishable and a sign-in can resolve onto the
+  wrong user's account. `os migrate apply --allow-destructive` re-runs the same pre-flight
+  and refuses the drop before writing any DDL. A read that throws, or a scan that
+  truncates, refuses too — an unread table is not a clean one.
+  
+  ⛔ Colliding rows are never merged or dropped for you: which row survives is application
+  knowledge, and two different people can be behind one colliding key. Keep the row whose
+  provider account is live, delete the rest so a fresh sign-in re-links, and re-run.
+  
+  The boot refusal is unchanged and needs no new machinery: a runtime already refuses to
+  start against unapplied destructive drift, naming the command to run, and never
+  auto-migrates.
+  
+  ## ⚠️ A `provider_id` re-pointed at a different IdP must have its bindings REBUILT
+  
+  This is the one case `issuer` still discriminated. After the drop no column records which
+  IdP vouched for a row, so if a re-pointed provider's new IdP mints a subject the old one
+  had already issued to somebody else, the key resolves that sign-in onto the other
+  person's account. Under the old key that failed loudly (`unable_to_link_account`); under
+  the new one it is silent.
+  
+  ⇒ `sys_sso_provider` now **refuses an `issuer` change while `sys_account` rows are still
+  bound to that `provider_id`** (`RESOURCE_CONFLICT` / 409). Delete the provider's account
+  bindings first; each user re-links on their next sign-in.
+  
+  ## Why the column was a liability, not an asset
+  
+  A credential row whose `issuer` was not the local credential issuer was invisible to
+  `findAccountByKey`, so sign-in failed `INVALID_EMAIL_OR_PASSWORD` behind a "User not
+  found" warn pointing at the `sys_user` row rather than at the account. **Four checklist
+  items had that recorded as a knownGap, each rediscovering it.** Its discriminating power
+  here was near zero anyway: `sys_sso_provider` declares `{ fields: ['provider_id'], unique:
+  true }`, so `provider_id → issuer` is a function within an environment.
+  
+  ## Also in this change
+  
+  `pnpm check:vendor-export-contract` (from `#16186`) keeps its exactness requirement and
+  still resolves every named symbol — its self-test re-anchors from the now-retired
+  `@better-auth/core/db` specimen onto a live edge, and gains a case asserting the two
+  deleted names are imported nowhere. `#11627`'s hash-shadow-key machinery is untouched: it
+  is a generic driver capability serving five UNIQUE members of the >768-char class.
+
+### Patch Changes
+
+- 305e7fc: Name where the organization record page's Members / Invitations / Teams tab strip is declared, at the three places that assert it (#16270)
+  
+  #16270 measured that no object under `packages/platform-objects/src/identity/` declares
+  the `Field.relatedList` prominence key, and inferred from that a two-way disjunction:
+  either the metadata is short three `relatedList: 'primary'` declarations, or the three
+  documents that describe the page as opening on tab-0 **Members** have gone stale.
+  
+  **Neither. The premise is false.** The tab strip is declared metadata —
+  `SysOrganizationDetailPage` in `packages/platform-objects/src/pages/sys-organization.page.ts`,
+  a `kind: 'slotted'` record page for `sys_organization`, `isDefault: true`, handed to the
+  runtime by plugin-auth's `pages: [SysOrganizationDetailPage, SysUserDetailPage]`. Its
+  `slots.tabs` override carries exactly three `record:related_list` tabs — Members,
+  Invitations, Teams, in that order — and objectui's synthesizer pushes that authored node
+  and never calls `buildDefaultTabs`, so the strip replaces the synthesized
+  Details + stacked `Related` one outright and Members really is at index 0. That file was
+  already in the tree at the commit the card measured.
+  
+  `relatedList: 'primary'` is a different mechanism (prominence on a child's lookup field,
+  promoting one derived list to its own tab). The card looked for that key, correctly found
+  none, and read the zero as "declared by no metadata". While the `tabs` slot is present,
+  adding the key would not move this page at all.
+  
+  **What changes here is prose only — no metadata, no behaviour.** The two source comments
+  that assert the tab order and the QA checklist item that grades it now name the page that
+  declares it, so the next reader does not repeat the measurement:
+  
+  - `packages/platform-objects/src/identity/sys-member.object.ts` — the `invite_user`
+    mirror's rationale
+  - `packages/platform-objects/src/identity/invite-entry-toolbar.test.ts` — the file header
+    that states the whole pin's premise
+  - `docs/qa/platform-checklist/areas/identity-auth.json` —
+    `identity-auth.org-membership-team-management`, a new `source` entry plus the revision
+    and history bump its ledger requires. Steps, acceptance clauses, oracles and negatives
+    are unchanged: a grader grades exactly what it graded before, and now knows that a
+    Details + stacked `Related` strip means this page failed to load rather than that the
+    clause was wrong.
+  
+  This package ships its `src` comments in `dist` (measured: the new comment text appears
+  4 times under `packages/platform-objects/dist`, with an exported symbol as the positive
+  control and the test-file header absent at 0), which is why a comment-only diff here
+  takes a changeset rather than the publishes-nothing exemption.
+- c1d54db: feat(spec): a metadata-form repeater's row properties have a name — `DashboardHeaderAction` fields carry a JSON Schema `title`, and `resolveMetadataFormSchemaTitles` overlays a bundle's `metadataForms.<type>.fields.<path>.label` onto a derived JSON Schema (#16458)
+  
+  ## What was wrong
+  
+  The Studio property panel renders `dashboard.header.actions[]` as a table whose
+  column headers read `items.properties[k].title ?? k` from the JSON Schema
+  derived by `z.toJSONSchema(DashboardSchema)`. None of the four item fields
+  (`label`, `actionUrl`, `actionType`, `icon`) carried a `title`, so the fallback
+  arm ran for every locale, English included, and the maker saw machine keys.
+  Nothing could localise them either: the only channel, `resolveMetadataFormLabels`,
+  decorates the `FormFieldSpec` tree, which the table never reads. And the platform
+  catalogs carried `dashboard.fields.header` alone — `dashboard.form.ts` declared
+  no children under the composite, so `os i18n extract` emitted no
+  `header.showTitle` / `header.showDescription` / `header.actions` key and the
+  console shipped a private overlay for exactly those three.
+  
+  ## What changed
+  
+  - **`@objectstack/spec`** — `DashboardHeaderActionSchema`'s four fields author
+    `.meta({ title })` (`Label`, `Action URL`, `Action Type`, `Icon`), so the
+    derived JSON Schema names each column. New export
+    `resolveMetadataFormSchemaTitles(schema, type, bundle, opts)` in
+    `@objectstack/spec/system`: every `metadataForms.<type>.fields.<path>.label`
+    at any locale of the chain becomes the `title` of the node the path addresses,
+    stepping through an array's `items` so a repeater ROW property is addressed
+    as `<repeater>.<property>` (`header.actions.label`) — the same path the
+    extractor emits. Pure; returns the input object itself when nothing applies.
+    `dashboardForm` enumerates the `header` composite's children
+    (`showTitle`, `showDescription`, `actions` with its four row properties) with
+    labels equal to the schema titles, pinned equal in `dashboard.test.ts`.
+    The mechanism is written down in `content/docs/protocol/kernel/i18n-standard.mdx`
+    → "Metadata authoring forms".
+  - **`@objectstack/rest`** — `GET /api/v1/meta` localises each entry's derived
+    `schema` beside its `form`, through that overlay.
+  - **`@objectstack/platform-objects`** — the four generated `metadata-forms`
+    catalogs carry the seven new `dashboard.fields` keys, translated in `zh-CN`,
+    `ja-JP` and `es-ES`.
+  
+  Additive: no key removed, no accept set changed, no parsed output moved.
+  
+  `DashboardSchema.columns` deliberately still declares no `.default(12)`, and
+  the reason is stronger than the one #16458 assumed. The card reasoned that the
+  renderer already falls back to 12, which would make `.default(12)`
+  behaviour-preserving. Measured at objectui `origin/main`
+  (`packages/plugin-dashboard/src/DashboardRenderer.tsx`), it does not: a
+  `columns`-less dashboard is INFERRED from the widget spans — `maxSpan > 4`
+  yields 12 and everything else yields **4** — and the next line switches the
+  whole layout on that value (`hasExplicitColumns = schema.columns != null ||
+  inferredColumns !== 4`, positioned grid vs responsive auto-flow). Declaring the
+  default would therefore both retire the inference and flip every auto-flow
+  dashboard into the positioned grid. A default that silently materialises a key
+  is expensive to take back, so the round stopped at the declared condition and
+  left the key alone; see #16458.
+- 4215417: `sys_user.role`'s field description and its `readonly` comment stop pointing at the retired Set Platform Role action (#15188)
+  
+  Both strings named `set_user_role` / "Set Platform Role", an action retired in #9968 — the description told an operator to press a button that no longer exists anywhere in the product. This is not a source comment: a field `description` is authored data that ships in the published bundle and is extracted into the i18n bundles, so it surfaces in the admin UI's field help and in generated reference material. The correct path was already there and already the only one: platform-admin standing comes from an unscoped `admin_full_access` grant in `sys_user_permission_set` (ADR-0068 D2), which is exactly what the #9968 removal note in the same file says.
+  
+  - **`description`** now reads "Legacy better-auth role scalar (admin, user, …). ObjectStack no longer writes it (ADR-0068 D2) — grant platform-admin standing with an unscoped `admin_full_access` assignment in `sys_user_permission_set`." It states what the column IS (a vendor authentication-layer scalar that stays published as `user.role`) and where the operator actually goes, and it deliberately does not claim the scalar confers nothing: `judgePlatformAdmin` still reads `user.role === 'admin'` as the legacy fallback it has always been, so a pre-D2 deployment carrying the value is not locked out. Saying "this field grants nothing" would have replaced one false sentence with another.
+  - **The `readonly` comment** keeps its ADR-0092 anchor and now states the true reason the field is not editable — nothing writes it since #9968 — instead of naming a writer that is gone.
+  - **`en.objects.generated.ts`** follows by regeneration (`pnpm i18n:extract`), not by hand: the default locale's leaves are rewritten from the source on every run.
+  
+  **Deliberately unchanged, and pinned so it stays that way.** The same file carries a third mention inside the #9968 removal note — *"a working \"Set Platform Role\" button **was** a supported, one-user-at-a-time resurrection channel…"*. It is past tense, it narrates what was removed, and it is true; sweeping it up with the other two would turn a true sentence false. A new test pins the removal note's tombstone opener and that past-tense sentence as occurrence counts over the source text, so both directions fail: deleting the history drops a count to 0, and re-introducing the retired action's name in live prose pushes one past 1.
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [245f360]
+- Updated dependencies [324968e]
+- Updated dependencies [fe71032]
+- Updated dependencies [482d34d]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [48203ff]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [c9eb773]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [dfeba25]
+- Updated dependencies [0a88a80]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [134b410]
+- Updated dependencies [5f392f0]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [2bed4c3]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [cca1dc0]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [de1a611]
+- Updated dependencies [db76982]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [ab450f4]
+- Updated dependencies [025588a]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/spec@17.5.0
+  - @objectstack/metadata-core@17.5.0
+
 ## 17.4.0
 
 ### Minor Changes

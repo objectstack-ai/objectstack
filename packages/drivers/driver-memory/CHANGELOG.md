@@ -1,5 +1,524 @@
 # @objectstack/driver-memory
 
+## 17.5.0
+
+### Minor Changes
+
+- 0da638c: fix(analytics)!: every analytics face lowers the closed `dateRange` preset vocabulary to one window and refuses the rest with `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` (#16322)
+  
+  <!-- adr-0087: not-required (already-registered analytics-time-dimension-date-range-vocabulary-closed) the driver half of #16041 implements the migration that card registered; the accept set narrowed at the contract there, and the prescription an author needs is that entry's, unchanged -->
+  
+  **BREAKING** for an in-process caller that reaches an analytics face PAST the
+  schema door with a string the closed vocabulary does not contain: it used to be
+  answered, and is now refused. Shipped as `minor` under the repo's launch-window
+  convention. The driver half of #16041, whose spec change closed
+  `AnalyticsQuery.timeDimensions[].dateRange`'s string arm to the thirteen
+  dashboard preset names; every value affected here was already refused at
+  `POST /analytics/query` and `/analytics/sql` when that landed.
+  
+  ## What was wrong
+  
+  #16041 closed the contract; the faces behind it never aligned, so the defect it
+  abolished simply moved onto the newly-blessed vocabulary. Measured on the built
+  `driver-memory` dist over five probe rows (2020, 2026-08-31, 2026-09-05, now,
+  2099):
+  
+  | input | before | after |
+  |:--|--:|--:|
+  | `today` | 1/5 | 1/5 |
+  | the other twelve declared presets | **5/5 — 2020 and 2099 included** | a real window each |
+  | `'not a range at all'`, `'Last 7 Days'` | 5/5 | `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` |
+  
+  `driver-memory` recognised exactly `today`: every snake_case preset missed its
+  `startsWith('last ')` branch and fell to a `[range, range]` pseudo-window whose
+  two bounds were the preset's own NAME, which matched every `Date`-typed row
+  under BSON cross-type ordering. Both `service-analytics` SQL strategies lowered
+  the same names — and unrecognised strings, and `today` — to the point window
+  `created_at >= 'last_30_days' AND created_at <= 'last_30_days'`, whose answer is
+  whatever the dialect decides a vocabulary word compares as. So a dashboard
+  asking for one month got all of history on one backend and a nonsense
+  comparison on the other, at HTTP 200 on both.
+  
+  ## What it does now
+  
+  - **One lowering, in `@objectstack/core`.** `resolveAnalyticsDateRangePreset` /
+    `resolveAnalyticsDateRangeString` resolve every declared preset to
+    `{ start, end, endExclusive }`. The window is a pair of `{date-macro}` tokens
+    handed to the existing macro resolver, so `dateRange: 'this_month'` and a
+    `{month_start}` filter token cannot answer differently, and the anchoring on
+    `AnalyticsQuery.timezone` (#16042) plus the one-calendar arithmetic (#15825)
+    come from that resolver rather than from each face.
+  - **One refusal.** `analyticsDateRangeUnrecognizedError` stamps the ADR-0112
+    envelope `400 ANALYTICS_DATE_RANGE_UNRECOGNIZED` with the spec's own
+    `analyticsDateRangeRefusalMessage` wording — the same sentence the schema door
+    answers with. `driver-memory`, both SQL strategies and the draft-preview evaluator call
+    it, so "memory and SQL refuse identically" is one function rather than an
+    agreement.
+  - **The upper bound keeps #16179's separation.** A window a face RESOLVED is
+    compared exclusively (`$lt` / `<`) for the ten calendar presets and
+    inclusively for the three rolling `last_N_days`, whose bound is NOW; an
+    explicit `[a, b]` a CALLER wrote is untouched and keeps `$lte`.
+  - The fifteen `driver-memory` date-range pins #16041 retired are reinstated in
+    preset form (DST cells re-measured under calendar semantics, not re-spelled),
+    and one cross-face conformance fixture holds all FOUR faces to the same
+    windows and the same refusal.
+  - **The draft-preview evaluator is the fourth face**, and it is in that fixture
+    for the same reason the other three are. `preview-evaluator.ts` (ADR-0037 P3 —
+    the Live Canvas preview over a pending seed draft) carried the identical
+    `[range, range]` fallback, so a valid `last_30_days` selected NOTHING there,
+    silently, while the published chart beside it answered a real window — across
+    a publish boundary the preview exists to make continuous, since publish
+    materialises the same seed.
+  
+  ## FROM → TO
+  
+  Unchanged from #16041's — the spelling that is refused here is the spelling that
+  was already refused at the door.
+  
+  | you wrote | write instead |
+  |:--|:--|
+  | `dateRange: 'Last 7 days'` / `'last 7 days'` | `dateRange: 'last_7_days'` |
+  | `dateRange: 'last 3 months'` | `dateRange: 'last_90_days'`, or an explicit `['{90_days_ago}', '{today}']` |
+  | `dateRange: '2026-01-20'` (the SQL single-day dialect) | `dateRange: ['2026-01-20', '2026-01-20']` |
+  | `dateRange: ['2026-01-01', '2026-01-31']` | unchanged |
+  
+  The `@objectstack/spec` entry is a `PROVENANCE_WAIVERS` row only: the refusal's
+  code stays registered under `@objectstack/runtime` (the door that names the wire
+  vocabulary), and the waiver records that the shared constructor spelling it
+  lives one package over.
+- f03f6c7: fix(driver-memory)!: an analytics time dimension buckets by its declared `granularity`, and refuses a sub-day one instead of ignoring it (#16178)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is renamed, retired or re-typed. `packages/spec` is untouched: `TimeUpdateInterval` still declares all eight intervals, `AnalyticsQuery.timeDimensions[].granularity` keeps its name, its type and its optionality, and every analytics request body parses byte-identically to before — so `objectstack migrate meta` has nothing to rewrite and this changeset carries no rewrite instructions. What narrows is one BACKEND's accept set at request time: `driver-memory`'s analytics face refuses the three sub-day granularities it cannot label, where it previously accepted them and produced an ungrouped answer. The remedy is a coarser granularity in the request itself, which is data a caller holds rather than an authored artifact with a stored representation; the spec-side narrowing of `TimeUpdateInterval` is filed separately as issue #17296, a `domain:spec` question under ADR-0049, and is deliberately not performed here. The other two packages add exports and relocate an implementation, both additive. -->
+  
+  **BREAKING** in three senses, all on `driver-memory`'s analytics face, landing in
+  the launch window as `minor` under the lockstep convention this cluster's
+  siblings already use:
+  
+  - an accepted request now answers **differently**: a time dimension carrying a
+    `granularity` folds its rows into calendar buckets instead of returning one
+    group per distinct timestamp. Every affected answer was wrong before;
+  - a **trend query answers rows where it used to answer one total**: a
+    `granularity` on a member `dimensions` does not also list is now a group
+    column of its own, so `{measures, timeDimensions: [{dimension, granularity}]}`
+    — the canonical trend shape — comes back one row per bucket, carrying the
+    member and a `fields` entry for it, instead of a single ungrouped total with
+    no such column;
+  - an accepted request is now **refused**: `granularity: 'second' | 'minute' |
+    'hour'` answers `NOT_IMPLEMENTED` / 501 instead of being silently dropped.
+  
+  ## What was wrong
+  
+  `AnalyticsQuery.timeDimensions[].granularity` is declared by the spec and a cube
+  dimension enumerates the granularities it offers (`granularities: ['day']`).
+  `memory-analytics.ts` read neither. The `$group` stage keyed on the raw field
+  path, so a time dimension bucketed **one group per distinct timestamp** — one bar
+  per row in a "new accounts by month" chart, which is the symptom #3588
+  catalogued and repaired for `service-analytics`.
+  
+  Measured through the public entry against the built package, two rows on one UTC
+  calendar day (`2026-09-06T01:00:00Z` and `2026-09-06T23:00:00Z`) under
+  `granularity: 'day'`:
+  
+  | | before | after |
+  |:--|--:|--:|
+  | `granularity: 'day'` | **2 groups**, keyed on the raw instants | 1 group, `2026-09-06` |
+  | no granularity (control) | 2 groups | 2 groups, unchanged |
+  | `granularity: 'hour'` | **2 groups**, silently | `NOT_IMPLEMENTED` / 501 |
+  | same, but with no `dimensions` | **`{count: 2}`** — one total, no time column, and no `fields` entry naming it | `{'events.createdAt': '2026-09-06', count: 2}`, `fields` naming both |
+  | `granularity: 'fortnight'` past the schema door | — | `INVALID_QUERY` / 400 |
+  
+  The emitted pipeline was byte-identical across all three, which is the whole
+  finding: the request was accepted, no warning was emitted, and the key was inert.
+  
+  ## What it does now
+  
+  - **One forward labeller, in `@objectstack/core`.** `bucketDateKey(value,
+    granularity, timezone)` sits beside the inverse `bucketKeyToCalendarRange` and
+    the `calendarPartsInTzOrUtc` primitive it builds on, and it is now the only
+    statement of the rule. `BUCKET_GRANULARITIES` and `isBucketGranularity` name
+    the five granularities that HAVE a canonical key, so a face that must refuse
+    the other three quotes the accepted set instead of hand-listing it.
+  - **`@objectstack/objectql`'s `bucketDateValue` is a delegate**, export name and
+    signature unchanged, answers unchanged — pinned across granularity, timezone
+    and input form rather than asserted. A driver that pushes the bucket down into
+    SQL and this in-memory path must label one instant identically or a drill-down
+    breaks at the seam, and that is now one function rather than an agreement
+    between two.
+  - **A granular time dimension is a group column, listed or not.** `dimensions`
+    no longer decides alone what `$group` keys on: every `timeDimensions` entry
+    carrying a `granularity` is grouped, projected and named in `fields`, deduped
+    against `dimensions` on the resolved member so two spellings of one member
+    stay one column. This is the rule the SQL/ObjectQL face already records
+    (`projectedDimensions`, #4033/#5688) — one set feeding grouping, row mapping
+    and field metadata, because rows carrying a bucket under a `fields` list that
+    never mentions it is a trend chart with no x-axis. ⛔ An entry carrying only a
+    `dateRange` is a predicate and is still **not** projected.
+  - **`driver-memory` folds by granularity before its `$group`.** The pipeline is
+    cut at that stage: the `$match` half still runs in the driver, the bucket keys
+    are written onto the selected rows, and the grouping half runs over those. The
+    key travels under a synthetic field rather than overwriting the row's own, so a
+    member that is both a group key and a measure's aggregand still ranks instants
+    in `max()` while grouping on the label.
+  - **The output vocabulary is the published one** — `2026`, `2026-Q3`, `2026-09`,
+    `2026-09-06`, `2026-W36`. The week label is `YYYY-Www`, never the Monday's
+    `YYYY-MM-DD`: `DriverCapabilitiesSchema.queryDateGranularity` calls this an
+    output contract, and a second spelling is what breaks a drill-down across a
+    backend seam.
+  - **Bucketing honours `AnalyticsQuery.timezone`** — the same reference zone
+    #16042 threaded through the `dateRange` window resolver, so the window that
+    selects the rows and the bucket that folds them agree on where a calendar day
+    starts. The same two rows answer one group in UTC, two in `America/New_York`
+    and two in `Asia/Tokyo`. An absent zone buckets in UTC, the resolver's default.
+  
+    ⚠️ That agreement is about the PRESET arm of `dateRange`, which the resolver
+    reads in the reference zone. An explicit `[start, end]` array is the caller's
+    own **instant** window and keeps its published reading (#16179), while the
+    bucket beside it is always a **calendar** label (ADR-0053) — so an array
+    window and a bucket can still disagree about where a day starts. That
+    combination is legitimate and is not refused; it is stated here rather than
+    left to be discovered.
+  - **`second` / `minute` / `hour` are refused at compile**, in the ADR-0112
+    envelope this driver's other capability gaps speak (`NOT_IMPLEMENTED` / 501,
+    the class `refusePerAggregationFilter` uses for the same reason: the query is
+    spelled correctly, the spec declares the value, and it is this backend that
+    compiles nothing for it). The canonical key vocabulary defines no label for a
+    sub-day bucket, so there is no string another backend's pushed-down SQL would
+    agree with. Passing it through unbucketed is this card's own defect wearing a
+    new name.
+  - **An undeclared granularity is a 400, not a 501.** A 501 says "this backend
+    cannot", which is only honest about a value the contract declares.
+    `TimeUpdateInterval` is checked first, so a spelling it never declared —
+    reachable past the schema door, where `POST /analytics/dataset/query` types
+    `selection.timeDimensions` without Zod-parsing them — answers `INVALID_QUERY`
+    / 400 rather than a 501 asserting the spec declared it. The same separation
+    the `dateRange` half of this face already draws (#16322 / #16041).
+  
+  ## If a caller is refused
+  
+  A stored widget or a request asking for a sub-day granularity was never bucketed
+  by this backend — it received one group per distinct timestamp under an ordinary
+  200. Nothing that worked stops working. Ask for `day` or coarser and the answer
+  is a real bucket; keep the raw timestamps deliberately by dropping the key, which
+  is the behaviour that key used to produce by accident.
+- 555a89c: fix(driver-memory): refuse a call the engine tenant-scoped, instead of silently answering with every organization's rows (#16589)
+  
+  **BREAKING** for a `driver-memory` deployment that holds more than one organization's rows: an operation the engine tenant-scoped now refuses loudly instead of answering. Shipped as `minor` under the launch-window convention, the same grading the driver's `update()`/`upsert()` type-surface narrowing used.
+  
+  Two predicates decided "is this object tenant-scoped", and they disagreed on the default case. The engine scopes an object **unless** it opts out (`buildDriverOptions`: `execCtx?.tenantId !== undefined && !isTenancyDisabled(objectSchema) && !isFederated`), while this driver's boot guard refused only an explicit opt-**in** (`declaresTenantScope`: `tenancy.enabled === true`). An object that **omits the `tenancy` block entirely** — the common case — therefore fell between them: the engine scoped it, the guard never saw it, the deployment posture really was `single` so the posture check passed, and the driver then discarded the scope and returned every organization's rows. A SQL driver refuses the same read.
+  
+  This driver still implements **no row-level tenant isolation**, and deliberately does not gain any: it declines to answer rather than answering correctly. `assertCallNotTenantScoped` is a third seam beside the two boot seams, and it judges the scope the engine actually handed over (`DriverOptions.tenantId` / `tenantIds`) rather than re-deriving the engine's predicate from object metadata — a driver that re-derived it would drift from the engine the first time that reasoning changed, and drift here is silent exposure. It runs first in every driver door that accepts a `DriverOptions`, so a refusal leaves the store exactly as it found it.
+  
+  **⚠️ Every isolation measurement previously taken on the memory driver is void and must be re-taken.** A suite asserting "tenant A cannot see tenant B's rows" passed here trivially — not because isolation worked, but because both tenants' rows came back to every caller and the assertion was written against a single tenant's fixture. An app that proved out its isolation model on this driver measured nothing.
+  
+  What is unaffected, and why: an object declaring `tenancy: { enabled: false }` is never scoped by the engine (ADR-0066), so the driver never sees a scope for it and serves it unchanged; a caller with no organization context is never scoped either, which is the ordinary dev, example-app and single-organization path. Only a call that actually arrives carrying a tenant scope is refused. A deployment that needs organization-scoped reads in development uses `@objectstack/driver-sql`, whose `:memory:` connection is the closest in-process replacement; a deployment whose data genuinely is platform-global can say so with the ADR-0066 posture, which stops the engine scoping it at all.
+  
+  The refusal reuses the existing `MemoryMultiTenantUnsupportedError` and its `MEMORY_MULTI_TENANT_UNSUPPORTED` code rather than introducing a second error family: the cause is identical, so a host that already recognises the boot refusal recognises this one with no new code and no second code to learn.
+  
+  Also corrects `declaresTenantScope`'s docstring, which closed on a false sentence — "every object in a single-tenant deployment omits the block". A `single` posture constrains the **wall**, not the number of organizations: a `single`-posture run was measured holding 13 `sys_organization` rows, with each row carrying whichever `organization_id` it was written with. The sentence is recorded as superseded rather than deleted, because it is what justified the predicate being an opt-in test.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is removed, renamed or re-shaped: no Zod schema, no spec declaration, no stored representation and no published export changes shape, so `objectstack migrate meta` has nothing to rewrite. The change is a runtime refusal inside one driver, reached through a deployment's choice of driver rather than through authored metadata, and it is delivered to the operator by the refusal itself — which names the isolating driver and the ADR-0066 posture in its own message, at the moment the unsupported call is made. -->
+- b90aff8: fix(driver-memory): a scalar comparand against a stored ARRAY is read as membership on both filter faces, so a filter written to narrow stops returning rows it never selected (#16838)
+  
+  `memory-matcher.ts`'s equality arm ended in `value == condition`. Loose `==` converts a stored ARRAY to a primitive — `['a','b']` becomes the string `"a,b"` — so this package's reference matcher and its live query path (`InMemoryDriver.find`, through mingo) answered the same filter two different ways, in both directions at once:
+  
+  | filter | stored value | reference matcher, before | live query path |
+  |---|---|---|---|
+  | `{ tags: 'a' }` | `['a','b']` | no row | the row |
+  | `{ tags: 'a,b' }` | `['a','b']` | the row | no row |
+  | `{ tags: 'a' }` | `['a']` | the row | the row |
+  
+  The second row is the sharper one: a **false positive**, a filter written to narrow returning a row it should not, which on a read scope is a permission concern rather than a degraded filter. The first is fail-open in the other direction and just as silent — `if (!rows.length)` cannot tell "genuinely none" from "the predicate asked the wrong question".
+  
+  **What changes.** A stored array is now read as its elements, and each is asked the question the arm asks of a scalar: the answer for a row storing an array is the OR of the answers for the rows storing its elements. That is MongoDB's array semantics and therefore mingo's, so the reference face converges on the path this package's users actually run rather than on a third reading nobody wrote. One level only — a nested array is not descended into, matching mingo. `$eq` and `$ne` take the same equality as the implicit spelling, so `$ne` stays the exact complement.
+  
+  **What does not change.** An array in the **comparand** position is still refused (`INVALID_FILTER` / 400) by the shape gate every face of this package runs; this is the VALUE side, which that door does not judge. The live query path is untouched — it already answered membership — so a caller who only ever used `find()` sees no difference. Callers who compared results against the reference matcher, or who ran it directly as a driver double, will see a stored array select on membership instead of on its joined string.
+- 0f38ab0: fix(driver-memory,driver-sql): an explicit `tenancy.enabled: false` opt-out is sticky, so a partial `syncSchema` re-registration no longer flips a platform-global object's UNIQUE partition (#16729)
+  
+  ## What was wrong
+  
+  `InMemoryDriver.syncSchema` recomputed its uniqueness constraints from whatever
+  schema THAT call happened to carry. A second registration without a `tenancy`
+  block — the `{ name, fields }` shape — fell through to the implicit
+  `organization_id` heuristic, so a `unique` field moved from **one row per
+  install** (`scopeField: null`, which is what `tenancy.enabled: false` declares)
+  to **one row per organization**. A duplicate the declaration refuses then
+  landed. Measured at the driver door on `origin/main` `d61139f1ba`:
+  
+  | sequence | second `key: 'K'`, different organization |
+  |:--|:--|
+  | register with `tenancy.enabled: false` | `REFUSED` — `UNIQUE_VIOLATION` / 409 |
+  | …then re-register with `{ name, fields }` | **`LANDED`** |
+  
+  `SqlDriver` running the same sequence refuses in **both** cases: it has kept a
+  sticky `tenantOptOutByTable` since #3249. `driver-memory` had mirrored the inner
+  `computeTenantField` and not the wrapper that consults the record, so "mirrors
+  `computeTenantField` arm for arm" stayed literally true while the pair diverged.
+  
+  It is silent in both directions — nothing logs the flip, and the refusal names
+  the field, never the partition. That is the declared-vs-enforced shape Prime
+  Directive #10 forbids, reached by a state change rather than by a missing check.
+  
+  ## What it does now
+  
+  - **`@objectstack/driver-memory`** gains `computeAndRecordTenantField`, the
+    sticky resolver, and the `TenantOptOutRecord` type for the per-instance record
+    a driver owns. `InMemoryDriver` holds one and resolves through it, handing
+    BOTH declaration surfaces — field-level `unique` and declared `indexes[]` —
+    the same resolved column. `uniqueConstraintsFromFields` and
+    `uniqueConstraintsFromDeclaredIndexes` accept that column as an optional
+    second argument; called with one argument they answer exactly as before.
+    `tenantFieldOf` is unchanged and still a pure function of its argument.
+  - **`@objectstack/driver-sql`**: the shard leaf resolved its tenant column with
+    the BARE `computeTenantField`, so a `rotateShards` sweep carrying no `tenancy`
+    block gave a shard an organization key part the base table's index does not
+    have — one object, two partitions, decided by which physical table a row
+    landed in. It now resolves through the record, keyed by the base table.
+  - **`@objectstack/objectql`**: `LifecycleObjectLike` declares `tenancy`. The
+    Archiver hands that object straight to `cold.syncSchema`, and the published
+    type refused the key while the driver below read it — so an author writing a
+    fresh literal was pushed into producing exactly the partial re-registration
+    above. Same correction #16711 made where the shard leaf narrowed the key off
+    the object it was handed.
+  
+  The record is deliberately narrow. Only the explicit OPT-OUT is sticky: a
+  declared `tenancy.tenantField` is not recorded, matching `SqlDriver`. An object
+  that never declared the opt-out never enters the record, so a genuinely
+  org-scoped object keeps its `organization_id` partition across a partial
+  re-registration — an implementation answering `null` more often would not be
+  stickier, it would be tenant isolation switched off. A carried `tenancy` block
+  stays authoritative in both directions and CLEARS a recorded opt-out.
+  
+  `@objectstack/driver-memory` is `minor` for the two new public-entry exports.
+  The behaviour repairs themselves are `patch`: each restores an implementation to
+  the `tenancy.enabled: false` contract (`isTenancyDisabled`, ADR-0066) it was
+  already declaring, rather than replacing one legal published answer with
+  another. The `objectql` entry is a published type WIDENING — a key the interface
+  refused is now accepted, and nothing that compiled before stops compiling.
+- 9c44eed: fix(spec)!: `TimeUpdateInterval` retires its three sub-day intervals and derives its members from `DateGranularity` (#17296)
+  
+  <!-- adr-0087: registered time-update-interval-sub-day-retired, cube-sub-day-granularities-removed -->
+  
+  ## ADR-0087 disposition
+  
+  `second`, `minute` and `hour` leave a published closed enum that reaches TWO authored sites: an analytics request body's `timeDimensions[].granularity`, and an analytics cube dimension's `granularities[]`, which is stored metadata (`defineCube()` / `defineStack({ analyticsCubes })`). The stored half is rewritten by the D2 conversion `cube-sub-day-granularities-removed`, which strips the retired members from `analyticsCubes[].dimensions.<dim>.granularities` and drops the key entirely when nothing coarser remains (an empty list would read as "offers none", the absent key as "offers all"). The semantic entry `time-update-interval-sub-day-retired` carries the half no transform can decide: a dimension that offered ONLY sub-day intervals needs an author to say what it actually serves. `day`, `week`, `month`, `quarter` and `year` are untouched and parse byte-identically.
+  
+  **BREAKING** for anyone authoring or sending `granularity: 'second'`,
+  `'minute'` or `'hour'`, and for anyone importing the `TimeUpdateInterval`
+  TYPE. Landing in the
+  launch window as `minor` under the lockstep convention this cluster's siblings
+  already use.
+  
+  ## What was wrong
+  
+  `TimeUpdateInterval` declared **eight** intervals. The rest of the contract
+  never carried three of them, and this is the measurement rather than the
+  argument:
+  
+  | layer | declares |
+  |:---|:---|
+  | `TimeUpdateInterval` (`data/analytics.zod.ts`) | **8** — the five below plus `second`, `minute`, `hour` |
+  | `DateGranularity` (`data/query.zod.ts`) — what a `groupBy` entry and every driver bucket expression are typed by | 5 |
+  | `@objectstack/core`'s `BUCKET_GRANULARITIES` — the canonical bucket-KEY output contract a drill-down crosses | 5 |
+  | `driver-mongodb`'s `MONGODB_DATE_GRANULARITIES` | 5 |
+  
+  `DriverCapabilitiesSchema.supports.queryDateGranularity` — the one mechanism a
+  backend has for saying which granularities it buckets natively — is a
+  `z.record(DateGranularity, boolean)`. Measured: `{ day, week, month, quarter,
+  year }` parses; the same record plus `hour` raises `unrecognized_keys: ["hour"]`.
+  **No driver could advertise sub-day bucketing even if it had one.** That is what
+  makes this a retirement rather than a capability gap: a declared value one
+  backend cannot serve is a gap and the contract has a place to say so, but a
+  declared value *no* backend can even claim has no counterpart anywhere in the
+  contract that carries it.
+  
+  Driven against the built packages, two rows fourteen hours apart on one UTC
+  calendar day, before this change:
+  
+  | face | `granularity: 'hour'` | `granularity: 'day'` (control) |
+  |:---|:---|:---|
+  | `driver-memory` analytics | `NOT_IMPLEMENTED` / 501 | 1 group, `2026-09-06` |
+  | `driver-mongodb` bucket builder | `NOT_IMPLEMENTED` / 501 | `$dateToString` `%Y-%m-%d` |
+  | engine in-memory aggregation — the fallback every SQL/ObjectQL analytics query carrying a granularity lands on, since `NativeSQLStrategy` declines on a granularity | **200, 2 groups keyed on the RAW instant** | 1 group, `2026-09-06` |
+  
+  Two honest refusals and one silently wrong answer. No third behaviour, and no
+  backend that bucketed it.
+  
+  ## What changed
+  
+  - `TimeUpdateInterval` is now `z.enum(DateGranularity.options, …)` — the members
+    come from the single source instead of a second literal list that disagreed
+    with it by three members for as long as both existed.
+  - A refusal message splits two populations that are not the same mistake: a
+    **retired** sub-day name gets the retirement and the `os migrate meta --from
+    17` line; anything else gets the vocabulary. `driver-memory`'s own analytics
+    door carries the same split.
+  - `driver-memory`'s `NOT_IMPLEMENTED` / 501 answer for these three is **not
+    silenced** — the declaration it announced is gone, so the class moves to the
+    400 the retirement makes correct. The 501 arm stays, and a pin measures that
+    its population is now empty (`TimeUpdateInterval.options` equals
+    `BUCKET_GRANULARITIES`), so the day one of the two is widened alone it lights
+    up again instead of a freshly declared value being called undeclared.
+  
+  ## What this does NOT decide
+  
+  Sub-day analytics bucketing as a **capability**. Offering it means widening
+  `DateGranularity`, the `queryDateGranularity` record, the canonical bucket-key
+  vocabulary and every driver's bucket expression together — new capability,
+  decided as such, rather than a name that parses in one enum and resolves
+  nowhere.
+
+### Patch Changes
+
+- e7ff9c2: `dateRange`'s array arm has ONE arity everywhere: a two-element window, or the ADR-0112 refusal (#17596)
+  
+  The shared conformance kit
+  (`analyticsDateRangeConformanceFindings`) had exactly one array case — a
+  two-element window — so the ARITY of the array arm was governed nowhere and
+  every analytics face was free to invent a meaning for `dateRange:
+  ['2026-01-01']`. Four faces in one package had invented three (#17124), and a
+  fifth — `driver-memory`'s cube face — had invented a fourth.
+  
+  **The kit** now exports `ANALYTICS_DATE_RANGE_NOT_A_WINDOW` and holds every
+  registered face to the rule the `service-analytics` faces already carry: an
+  array that is not two non-empty string bounds is refused with
+  `ANALYTICS_DATE_RANGE_UNRECOGNIZED` / 400. No new rule was invented for it, and
+  the existing two-element window case is untouched — it is this case's control,
+  so "refuse every array" cannot pass.
+  
+  **`driver-memory`** now answers that refusal instead of dropping the window.
+  MEASURED end to end over four rows spanning 2020…2099: `['2026-01-01']`, `[]`
+  and `['2026-01-01', '2026-01-31', '2026-02-01']` each emitted a pipeline
+  byte-identical to one with **no `dateRange` at all** — every row selected, the
+  "plot all of history" failure #3650 was filed about — and `[null, null]`
+  compared instants against the string `'null'` and selected none.
+  
+  **Levels.** `@objectstack/core` is `minor`: it gains a new exported symbol on
+  its index (`ANALYTICS_DATE_RANGE_NOT_A_WINDOW`), and a purely additive widening
+  of a published package's public surface takes at least `minor` whatever the
+  commit type says. `@objectstack/driver-memory` is `patch`: its public surface is
+  byte-unchanged — no new export, no new accepted key or value. Its behaviour does
+  change, from selecting every row to refusing with `400
+  ANALYTICS_DATE_RANGE_UNRECOGNIZED`, and that is a `patch` because the old
+  behaviour was a defect and never a contract: the spec's own refusal wording
+  already said an explicit window is the two-element array, and the #16322
+  migration table already told authors to write a single day as two bounds. A
+  release that stops answering a shape the contract never admitted is a fix, not a
+  feature — and the shapes it now refuses had no correct answer to lose.
+  
+  **If you wrote a one-element array**, write both bounds: `['2026-01-01']`
+  becomes `['2026-01-01', '2026-01-01']`, which selects exactly that day on every
+  face and did so before this change too. The refusal names the shape that
+  arrived, the two-element contract and that spelling.
+- Updated dependencies [7f62536]
+- Updated dependencies [abc4b83]
+- Updated dependencies [7382c5d]
+- Updated dependencies [ea2940d]
+- Updated dependencies [245f360]
+- Updated dependencies [324968e]
+- Updated dependencies [fe71032]
+- Updated dependencies [482d34d]
+- Updated dependencies [6059b29]
+- Updated dependencies [88a072e]
+- Updated dependencies [d4a1a28]
+- Updated dependencies [baf9745]
+- Updated dependencies [d34f9b6]
+- Updated dependencies [aaacf1d]
+- Updated dependencies [6548118]
+- Updated dependencies [e0e4a56]
+- Updated dependencies [7aae005]
+- Updated dependencies [48203ff]
+- Updated dependencies [ada2869]
+- Updated dependencies [d88a47d]
+- Updated dependencies [23fc5d6]
+- Updated dependencies [2d34f32]
+- Updated dependencies [9e3c485]
+- Updated dependencies [e1796ad]
+- Updated dependencies [c9eb773]
+- Updated dependencies [4342c99]
+- Updated dependencies [132dd13]
+- Updated dependencies [dfeba25]
+- Updated dependencies [0a88a80]
+- Updated dependencies [2eb4724]
+- Updated dependencies [e04a0af]
+- Updated dependencies [6b97a20]
+- Updated dependencies [e7ff9c2]
+- Updated dependencies [758ac40]
+- Updated dependencies [134b410]
+- Updated dependencies [4c42fd1]
+- Updated dependencies [5f392f0]
+- Updated dependencies [0da638c]
+- Updated dependencies [041d9fd]
+- Updated dependencies [f03f6c7]
+- Updated dependencies [cf79182]
+- Updated dependencies [929d9e3]
+- Updated dependencies [8a5240a]
+- Updated dependencies [c1d54db]
+- Updated dependencies [c7af6bd]
+- Updated dependencies [1f0b565]
+- Updated dependencies [23aa83c]
+- Updated dependencies [357f499]
+- Updated dependencies [80aef80]
+- Updated dependencies [c3ebe4a]
+- Updated dependencies [65ad77d]
+- Updated dependencies [a61ae59]
+- Updated dependencies [a54ecaa]
+- Updated dependencies [854639b]
+- Updated dependencies [44c917a]
+- Updated dependencies [613d35a]
+- Updated dependencies [0ee32ed]
+- Updated dependencies [58b36fa]
+- Updated dependencies [4792049]
+- Updated dependencies [53ec0b1]
+- Updated dependencies [71629a1]
+- Updated dependencies [f8e5790]
+- Updated dependencies [d2c1d19]
+- Updated dependencies [681871e]
+- Updated dependencies [54e8234]
+- Updated dependencies [288fe9c]
+- Updated dependencies [d127f9b]
+- Updated dependencies [4bbf766]
+- Updated dependencies [c17b494]
+- Updated dependencies [d414e2b]
+- Updated dependencies [af98a04]
+- Updated dependencies [43cbe14]
+- Updated dependencies [6e3462d]
+- Updated dependencies [c4d1759]
+- Updated dependencies [f7a9740]
+- Updated dependencies [9cdffbe]
+- Updated dependencies [331a1a2]
+- Updated dependencies [9788f1e]
+- Updated dependencies [5f9f846]
+- Updated dependencies [5a95b0e]
+- Updated dependencies [5d527f7]
+- Updated dependencies [5bf2330]
+- Updated dependencies [9165d5c]
+- Updated dependencies [d9e1587]
+- Updated dependencies [07150b3]
+- Updated dependencies [143c715]
+- Updated dependencies [d2badf7]
+- Updated dependencies [d64bcb6]
+- Updated dependencies [d4f5232]
+- Updated dependencies [396eae3]
+- Updated dependencies [ecdfc94]
+- Updated dependencies [de1a611]
+- Updated dependencies [db76982]
+- Updated dependencies [3b1dab9]
+- Updated dependencies [1555ed4]
+- Updated dependencies [776d64c]
+- Updated dependencies [ab450f4]
+- Updated dependencies [025588a]
+- Updated dependencies [f3e3d59]
+- Updated dependencies [9bd4344]
+- Updated dependencies [51efbf1]
+- Updated dependencies [9c44eed]
+- Updated dependencies [bbca441]
+- Updated dependencies [7cd5874]
+- Updated dependencies [7887077]
+- Updated dependencies [29dd1a6]
+  - @objectstack/types@17.5.0
+  - @objectstack/spec@17.5.0
+  - @objectstack/core@17.5.0
+
 ## 17.4.0
 
 ### Minor Changes
