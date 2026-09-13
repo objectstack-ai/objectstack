@@ -65,8 +65,9 @@ export const entry: SemanticMigration = {
     + 'pinned objectui checkout — `.objectui-sha` = `53ded82bf7a494f54e344e19099dbf00854b8694` — names none of it: all 37 exports of '
     + 'tracing.zod.ts and each of the four key names occur 0 times across the 6409 files '
     + 'tracked at that sha (the 404 Span and 40 SpanSchema hits are objectui\'s own HTML '
-    + 'text-span component, TextSpanSchema, an unrelated name), against lit controls '
-    + 'objectstack 10171 and @objectstack/spec 3479 on that same corpus and sha.',
+    + 'text-span component, TextSpanSchema, an unrelated name), against two lit controls on '
+    + 'that same corpus and sha: 10171 hits for the bare token objectstack, and 3479 for the '
+    + 'package specifier @objectstack/spec.',
   acceptanceCriteria:
     'Every author and reader of an OpenTelemetryCompatibility spells exporter.timeoutMs, '
     + 'exporter.batch.exportTimeoutMs and exporter.batch.scheduledDelayMs, and every one of a '
