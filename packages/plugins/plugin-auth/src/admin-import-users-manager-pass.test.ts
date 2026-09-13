@@ -285,8 +285,13 @@ describe('import-users manager pass — an unresolved key is PER-ROW (#18028)', 
     expect(res.status).toBe(200);
     const data = payload(res);
     expect(data.rows[0].manager).toBe('unresolved');
-    expect(data.rows[0].code).toBe('MANAGER_UNRESOLVED');
     expect(String(data.rows[0].error)).toContain('manager_id');
+    // ⛔ No row-level `code`: the obvious `MANAGER_UNRESOLVED` symmetry with
+    // `INVITE_EMAIL_FAILED` needs a `packages/spec` error-code ledger entry
+    // this lane is fenced out of, and `check:dispatcher-error-vocabulary`
+    // refuses an unregistered one. Pinned so the symmetry cannot be restored
+    // without the registration that makes it legal.
+    expect(data.rows[0].code).toBeUndefined();
 
     // Direction 2 — and it is not a whole-import failure. Asserting only the
     // first would pass against an implementation that aborts everything.
@@ -311,7 +316,8 @@ describe('import-users manager pass — an unresolved key is PER-ROW (#18028)', 
 
     const data = payload(res);
     expect(data.rows[0].manager).toBe('unresolved');
-    expect(data.rows[0].code).toBe('MANAGER_UNRESOLVED');
+    expect(String(data.rows[0].error)).toContain('phone number');
+    expect(data.rows[0].code).toBeUndefined();
     expect(data.summary.manager.unresolved).toBe(1);
   });
 
@@ -341,6 +347,9 @@ describe('import-users manager pass — an unresolved key is PER-ROW (#18028)', 
 
     const data = payload(res);
     expect(data.rows[0].code).toBe('INVITE_EMAIL_FAILED');
+    expect(String(data.rows[0].error)).toContain('invitation email failed');
+    // The delivery report keeps the shared `error` slot; the manager verdict is
+    // still readable on its own field, so neither failure is lost to silence.
     expect(data.rows[0].manager).toBe('unresolved');
     expect(data.summary.manager.unresolved).toBe(1);
   });
@@ -404,7 +413,9 @@ describe('import-users manager pass — the refusals are the DELEGATE\'s (#18028
 
     const data = payload(res);
     expect(data.rows[0].manager).toBe('self_assignment');
-    expect(data.rows[0].code).toBe('MANAGER_REFUSED');
+    // The delegate's own message, carried through rather than re-worded.
+    expect(String(data.rows[0].error)).toContain('cannot be their own manager');
+    expect(data.rows[0].code).toBeUndefined();
     expect(data.summary.manager).toEqual({ linked: 0, unresolved: 0, refused: 1 });
     expect(h.userBy('a@x.co')?.manager_id ?? null).toBeNull();
   });
@@ -424,7 +435,7 @@ describe('import-users manager pass — the refusals are the DELEGATE\'s (#18028
     const data = payload(res);
     expect(data.rows[0].manager).toBe('linked');
     expect(data.rows[1].manager).toBe('cycle');
-    expect(data.rows[1].code).toBe('MANAGER_REFUSED');
+    expect(String(data.rows[1].error)).toContain('loop');
     expect(data.summary.manager).toEqual({ linked: 1, unresolved: 0, refused: 1 });
     expect(h.userBy('b@x.co')?.manager_id ?? null).toBeNull();
   });

@@ -2377,6 +2377,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-auth/src/admin-import-users-manager-pass.test.ts",
+      "verb": "update",
+      "pinned": 2
+    },
+    {
       "file": "packages/plugins/plugin-auth/src/admin-import-users.test.ts",
       "verb": "update",
       "pinned": 2

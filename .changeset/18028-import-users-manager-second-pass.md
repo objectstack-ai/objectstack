@@ -36,12 +36,16 @@ exactly as they are on the endpoint, with the endpoint's own `reason`
 discriminator carried through. There is no second copy of those predicates.
 
 **A manager problem never costs the row its identity.** The user is created
-either way; the failure is reported on that row — `rows[].code` is
-`MANAGER_UNRESOLVED` or `MANAGER_REFUSED` and `rows[].manager` carries the
-machine-readable outcome, in the shape `rows[].delivery` already uses. It is
-⛔ not a whole-import failure and ⛔ not a silent skip, and an engine fault
-while linking is reported the same way rather than turning a 200 that created
-N users into a 500 that reports none of them.
+either way; the failure is reported on that row — `rows[].manager` carries the
+machine-readable outcome in the shape `rows[].delivery` already uses
+(`unresolved`, or the refusal's own `reason`), and `rows[].error` carries the
+sentence. It is ⛔ not a whole-import failure and ⛔ not a silent skip, and an
+engine fault while linking is reported the same way rather than turning a 200
+that created N users into a 500 that reports none of them. No `rows[].code` is
+stamped for a manager outcome: a row-level code would have to be registered in
+the `packages/spec` error-code ledger, which this change is fenced out of, so
+the machine-readable half lives on `rows[].manager` instead of on a code the
+vocabulary does not carry.
 
 **New on the response.** `data.summary.manager` is
 `{ linked, unresolved, refused }`, beside `data.summary.delivery`, and the

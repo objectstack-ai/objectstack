@@ -88,10 +88,11 @@
  *    identity are that function's to answer, and the refusal it returns is
  *    reported on the row rather than re-worded here.
  *  - **A manager problem never costs the row its identity.** The user is
- *    created either way and the failure rides `rows[].code` / `rows[].error`,
- *    exactly like the sibling post-write `INVITE_EMAIL_FAILED`; `rows[].manager`
- *    carries the machine-readable outcome in `rows[].delivery`'s shape. ⛔ Not a
- *    whole-import failure, and ⛔ not a silent skip.
+ *    created either way; `rows[].manager` carries the machine-readable outcome
+ *    in `rows[].delivery`'s shape and `rows[].error` carries the sentence.
+ *    ⛔ Not a whole-import failure, and ⛔ not a silent skip. ⛔ And no
+ *    `rows[].code` — see {@link noteManagerFailure} for why that half is fenced
+ *    out of this lane rather than forgotten.
  *  - **The pass does not run on `dryRun`.** It is a post-write pass like
  *    delivery: with nothing created there are no ids to link, and the five
  *    refusals cannot be evaluated against rows that do not exist. A dry run
@@ -331,23 +332,36 @@ export interface IdentityImportRowResult extends ImportRowResult {
 /**
  * Stamp a row's manager failure.
  *
- * `manager` is ALWAYS set — that is this outcome's own channel. `code`/`error`
- * is the SHARED row error channel the sibling `INVITE_EMAIL_FAILED` also writes
- * to, so it is claimed only when free: a row whose invitation already failed
- * keeps that report and still carries its manager verdict on `manager`,
- * ⛔ rather than one of the two failures overwriting the other into silence.
+ * `manager` is ALWAYS set — that is this outcome's own channel, and it is the
+ * machine-readable one: `'unresolved'` and each refusal `reason` are distinct
+ * members of {@link ImportManagerOutcome}, so a caller discriminates on one
+ * field without parsing a sentence.
+ *
+ * ⛔ NO `rows[].code` IS STAMPED, and that is a fence rather than an oversight.
+ * The sibling post-write failure writes `code: 'INVITE_EMAIL_FAILED'`, and a
+ * matching `MANAGER_UNRESOLVED` / `MANAGER_REFUSED` pair would read as the
+ * obvious symmetry — but `check:dispatcher-error-vocabulary` refuses a code
+ * this package's `packages/spec` ledger entry does not register, and
+ * registering one is a `packages/spec` edit this lane is fenced out of
+ * (the closed-vocabulary question for this endpoint's refusals is already
+ * carried by #17995). So the failure rides `error` — the human half — and
+ * `manager` — the machine half — and the row-level code is left to the seat
+ * that owns the vocabulary. ⛔ Reaching for an already-registered code whose
+ * meaning is something else would be the lenient alias Prime Directive #12
+ * refuses.
+ *
+ * `error` is the SHARED row channel that sibling also writes to, so it is
+ * claimed only when free: a row whose invitation already failed keeps that
+ * report and still carries its manager verdict on `manager`, ⛔ rather than one
+ * of the two failures overwriting the other into silence.
  */
 function noteManagerFailure(
   row: IdentityImportRowResult,
   outcome: ImportManagerOutcome,
-  code: string,
   message: string,
 ): void {
   row.manager = outcome;
-  if (row.code === undefined) {
-    row.code = code;
-    row.error = message;
-  }
+  if (row.error === undefined) row.error = message;
 }
 
 /**
@@ -724,7 +738,6 @@ export async function runAdminImportUsers(
           noteManagerFailure(
             r,
             'unresolved',
-            'MANAGER_UNRESOLVED',
             `The ${MANAGER_COLUMN} cell is neither an email address nor a phone number this deployment `
               + 'can read, so it names no identity. This row landed; only its manager link did not.',
           );
@@ -763,7 +776,6 @@ export async function runAdminImportUsers(
           noteManagerFailure(
             r,
             'unresolved',
-            'MANAGER_UNRESOLVED',
             `No user matches this row's ${MANAGER_COLUMN} key, in this import or already in the `
               + 'directory, so the manager link was not written. The rest of this row landed.',
           );
@@ -786,7 +798,6 @@ export async function runAdminImportUsers(
           noteManagerFailure(
             r,
             'unresolved',
-            'MANAGER_UNRESOLVED',
             `The manager link could not be written: ${(e as Error)?.message ?? String(e)}. `
               + 'This row itself landed.',
           );
@@ -794,7 +805,7 @@ export async function runAdminImportUsers(
           continue;
         }
         if (refusal) {
-          noteManagerFailure(r, refusal.reason, 'MANAGER_REFUSED', refusal.message);
+          noteManagerFailure(r, refusal.reason, refusal.message);
           managerLinks.refused++;
           continue;
         }
