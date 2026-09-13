@@ -143,7 +143,7 @@ export const AppInstallResultSchema = lazySchema(() => z.object({
   seededRecords: z.number().int().min(0).default(0).describe('Seed records inserted'),
 
   /** Installation duration in milliseconds */
-  durationMs: z.number().int().min(0).optional().describe('Installation duration'),
+  durationMs: z.number().int().min(0).optional().describe('Installation duration in milliseconds'),
 
   /** Error message if installation failed */
   error: z.string().optional().describe('Error message on failure'),
