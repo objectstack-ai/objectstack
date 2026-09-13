@@ -172,6 +172,8 @@ import {
   staleFindingScreen,
 } from './check-half-states.mjs';
 
+// dispatch-gates: no-path-population -- this tool reads no file in the tree at all; its whole input is the GitHub API (one label-scoped issue listing per board, plus the per-card label read-back each write verifies itself against), so no card's file surface can predict it and the honest derivation is a repo-wide undetermined one (#16904)
+
 const SELF_PATH = fileURLToPath(import.meta.url);
 const API = 'https://api.github.com';
 const TOKEN = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? '';
@@ -947,21 +949,30 @@ function fakeBoard({ cards, failOn = null, afterWrite = null }) {
   return { rest, calls, state };
 }
 
-const OPTIONS = (over = {}) => ({
-  repo: 'o/r',
-  repoSource: '--repo',
-  write: false,
-  json: false,
-  cursor: null,
-  maxCards: DEFAULT_MAX_CARDS,
-  batchSize: DEFAULT_BATCH_SIZE,
-  batchPauseMs: 0,
-  listCap: 25,
-  provenance: '',
-  ...over,
-});
-
 export async function selfTest() {
+  // The run fixture's option bag. Declared HERE rather than at module level,
+  // and that placement is load-bearing: `dispatch-gates`'s module-body mask
+  // blanks self-test BODIES but deliberately never masks top-level VALUE
+  // declarations — an unreferenced top-level const carrying path literals is
+  // how a gate DECLARES its population for that scanner. So a fixture repo slug
+  // spelled at module scope reads as this tool declaring a one-path population
+  // that names no tracked file, which `check:declared-population-live` reds on
+  // (measured, the moment `check:pm-stale-finding` made this a declaring
+  // family). Inside the body it is a fixture again. ⛔ Do not hoist it.
+  const OPTIONS = (over = {}) => ({
+    repo: 'o/r',
+    repoSource: '--repo',
+    write: false,
+    json: false,
+    cursor: null,
+    maxCards: DEFAULT_MAX_CARDS,
+    batchSize: DEFAULT_BATCH_SIZE,
+    batchPauseMs: 0,
+    listCap: 25,
+    provenance: '',
+    ...over,
+  });
+
   const batterySeen = new Map();
   let openBattery = null;
   const battery = (name) => { openBattery = name; };
