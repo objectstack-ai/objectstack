@@ -33,6 +33,13 @@
 // asserts the same invariant this file asserts — every nav id labelled in every
 // locale — over the merged tree.
 //
+// Setup is the extreme of a shape every app of this package can have, though,
+// and the Account app has the mild version of it: ONE contributed entry beside
+// eleven static ones. Both directions below therefore judge a population of
+// `static declaration ∪ runtime contributions` rather than the static walk
+// alone — see `CONTRIBUTED_NAV_IDS` for what that second term is, what it is
+// deliberately not, and how it was measured.
+//
 // This line used to read "Those labels are gated by the coverage ratchet",
 // which was the #5750 defect in one sentence. The ratchet
 // (`scripts/check-i18n-coverage.mjs`) runs `os lint` over STATIC stack configs
@@ -73,28 +80,102 @@ function navIds(app: { navigation?: unknown[] }): string[] {
   return navItems(app).map((item) => item.id);
 }
 
-describe('statically declared app navigation is translated in every locale', () => {
+// ── The second term of the population: runtime contributions ────────────────
+//
+// An app of this package can carry nav entries it does not declare. Another
+// package aims a `navigationContributions[]` entry (ADR-0029 D7) at it BY NAME
+// and the registry folds the items into the named group at runtime; the app
+// object this file imports never changes. Those ids are ordinary menu entries
+// with ordinary labels, and the bundles carry a key for each of them —
+// `apps.<app>.navigation.<id>`, one namespace per app — so a population read
+// off `app.navigation` alone judges them wrong in BOTH directions: their keys
+// look like dead weight to the reverse direction, and a missing translation
+// for one is invisible to the presence direction.
+//
+// So the population is `static declaration ∪ runtime contributions`, and the
+// second term is declared here, per target app.
+//
+// ⛔ NOT a place to list Setup's contributed leaves. Setup is a shell of empty
+// group anchors whose entries all arrive at runtime from a dozen contributors,
+// several of them conditional — writing ~40 ids here would re-declare an owner
+// this file cannot implement, which is the #5750 defect in one edit. Setup's
+// merged tree belongs to `pnpm check:app-nav-i18n` (which boots) and the ids
+// no single boot can decide belong to `setup-nav-dead-key-tombstone.test.ts`
+// (which pins them one by one). `account` is the opposite shape — one
+// contributor, one id — which is the only reason it can be written down.
+//
+// MEASURED, not assumed, on `9ccc4179ee`: a sweep of every `app: '<name>'`
+// contribution target in `packages/` and `examples/` returns `setup` ×20,
+// `account` ×1 and `studio` ×0, and the one `account` entry is
+// `CONNECT_AGENT_UI_BUNDLE.navigationContributions[1]` in
+// `packages/mcp/src/connect-ui.ts` (`group: 'grp_account_developer'`), which
+// `MCPServerPlugin` registers on `kernel:ready` behind `isMcpServerEnabled()`.
+// Worth stating because it is NOT how Setup's arrive: this package owns
+// `SETUP_NAV_CONTRIBUTIONS` itself and `@objectstack/setup` registers it,
+// whereas `@objectstack/account` registers `apps: [ACCOUNT_APP]` and no
+// contributions at all — the Account entry comes from a package on the other
+// side of the dependency graph.
+//
+// Which is also why this is a declaration and not an import. `@objectstack/mcp`
+// is one of the packages this one deliberately does not depend on to run its
+// tests (see the `pages.*` note at the bottom of this file), and a booting gate
+// cannot close it either: `nav_connect_agent` is contributed only where the MCP
+// server is enabled, so from one composition "opted out" and "retired" are the
+// same observation — the same reason `CONDITIONAL_SETUP_NAV_IDS` in
+// `setup-nav-dead-key-tombstone.test.ts` is a hand-kept list. The declaring
+// side is confirmed by grep and named above.
+//
+// WHEN THIS GOES RED: a line here is deleted in the same commit that retires
+// its contribution, never before and never after. Delete it first and the
+// presence direction reds on an entry that still ships untranslated; delete it
+// after, and the reverse direction stays green over four dead keys — which is
+// the exact "dead weight that reads as coverage" this file exists to refuse.
+const CONTRIBUTED_NAV_IDS: Readonly<Record<string, readonly string[]>> = {
+  account: ['nav_connect_agent'],
+};
+
+/**
+ * The ids an app really presents: its static declaration ∪ the ids contributed
+ * into it at runtime. Both directions below judge this set, so the two stay
+ * exact converses of each other.
+ */
+function navPopulation(app: { name: string; navigation?: unknown[] }): string[] {
+  return [...new Set([...navIds(app), ...(CONTRIBUTED_NAV_IDS[app.name] ?? [])])];
+}
+
+describe('every nav id an app presents is translated in every locale', () => {
   for (const app of [STUDIO_APP, ACCOUNT_APP] as Array<{ name: string; navigation?: unknown[] }>) {
     for (const [locale, data] of Object.entries(LOCALES)) {
       it(`${app.name} — ${locale}`, () => {
         const nav = (data.apps?.[app.name]?.navigation ?? {}) as Record<string, { label?: string }>;
-        const missing = navIds(app).filter((id) => !nav[id]?.label);
+        const missing = navPopulation(app).filter((id) => !nav[id]?.label);
         expect(missing, `untranslated nav ids in apps.${app.name}.navigation`).toEqual([]);
       });
     }
   }
 
-  // The reverse direction. A translation for an id the app no longer declares is
+  // The reverse direction. A translation for an id the app no longer presents is
   // dead weight that reads as coverage — `nav_workflows` outlived its menu entry
   // in all four locales and nothing said so.
-  for (const app of [STUDIO_APP] as Array<{ name: string; navigation?: unknown[] }>) {
+  //
+  // "Presents", not "declares": the judged set is `navPopulation`, so a key for
+  // a runtime-contributed entry is coverage of a real menu item, not an orphan.
+  // That distinction is what kept the Account app out of this loop. Judged
+  // against the static walk alone it reports four orphans — the
+  // `apps.account.navigation.nav_connect_agent` key in each locale — for a menu
+  // entry every user with the MCP server enabled actually sees, so the
+  // direction that catches dead keys could not be run over the app at all. The
+  // union is what lets it run. Exempting contributed keys instead would have
+  // bought the same green by giving the assertion up.
+  for (const app of [STUDIO_APP, ACCOUNT_APP] as Array<{ name: string; navigation?: unknown[] }>) {
     for (const [locale, data] of Object.entries(LOCALES)) {
       it(`${app.name} — ${locale} carries no translation for a removed nav id`, () => {
-        const declared = new Set(navIds(app));
+        const declared = new Set(navPopulation(app));
         const translated = Object.keys(data.apps?.[app.name]?.navigation ?? {});
         expect(
           translated.filter((id) => !declared.has(id)),
-          `apps.${app.name}.navigation keys with no declaring nav item`,
+          `apps.${app.name}.navigation keys with no nav item declaring or `
+            + 'contributing them — see CONTRIBUTED_NAV_IDS in this file',
         ).toEqual([]);
       });
     }
