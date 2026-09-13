@@ -109,9 +109,10 @@ HTTP destination configuration
 | **method** | `Enum<'POST' \| 'PUT'>` | optional (default: `"POST"`) |  |
 | **headers** | `Record<string, string>` | optional |  |
 | **auth** | `{ type: Enum<'basic' \| 'bearer' \| 'api_key'>; username?: string; password?: string; token?: string; … }` | optional |  |
-| **batch** | `{ maxSize: integer; flushInterval: integer }` | optional |  |
-| **retry** | `{ maxAttempts: integer; initialDelay: integer; backoffMultiplier: number }` | optional |  |
-| **timeout** | `integer` | optional (default: `30000`) |  |
+| **batch** | `{ maxSize: integer; flushIntervalMs: integer }` | optional |  |
+| **retry** | `{ maxAttempts: integer; initialDelayMs: integer; backoffMultiplier: number }` | optional |  |
+| **timeoutMs** | `integer` | optional (default: `30000`) | Timeout in milliseconds |
+| **timeout** | `never` | optional | [REMOVED] `HttpDestinationConfig.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Its unit (milliseconds) lived in a source JSDoc only and the key carried no `.describe()` at all, so the reference page published a bare 30000. Rename the key to `timeoutMs`; the value (milliseconds) and the 30000 default are unchanged. |
 
 ### Nested Shape: `HttpDestinationConfig.auth`
 
@@ -123,6 +124,23 @@ HTTP destination configuration
 | **token** | `string` | optional |  |
 | **apiKey** | `string` | optional |  |
 | **apiKeyHeader** | `string` | optional (default: `"X-API-Key"`) |  |
+
+### Nested Shape: `HttpDestinationConfig.batch`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **maxSize** | `integer` | optional (default: `100`) |  |
+| **flushIntervalMs** | `integer` | optional (default: `5000`) | Flush interval in milliseconds |
+| **flushInterval** | `never` | optional | [REMOVED] `HttpDestinationConfig.batch.flushInterval` was renamed to `flushIntervalMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Its unit (milliseconds) lived in a source JSDoc only and the key carried no `.describe()` at all, so the reference page published a bare 5000. Rename the key to `flushIntervalMs`; the value (milliseconds) and the 5000 default are unchanged. This is the batch flush on an HTTP log destination — `LoggingConfig.buffer.flushInterval` is a different key with its own rename. |
+
+### Nested Shape: `HttpDestinationConfig.retry`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **maxAttempts** | `integer` | optional (default: `3`) |  |
+| **initialDelayMs** | `integer` | optional (default: `1000`) | Initial retry delay in milliseconds |
+| **initialDelay** | `never` | optional | [REMOVED] `HttpDestinationConfig.retry.initialDelay` was renamed to `initialDelayMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Its unit (milliseconds) lived in a source JSDoc only and the key carried no `.describe()` at all, so the reference page published a bare 1000. Rename the key to `initialDelayMs`; the value (milliseconds) and the 1000 default are unchanged. |
+| **backoffMultiplier** | `number` | optional (default: `2`) |  |
 
 
 ---
@@ -163,9 +181,10 @@ Log destination configuration
 | **method** | `Enum<'POST' \| 'PUT'>` | optional (default: `"POST"`) |  |
 | **headers** | `Record<string, string>` | optional |  |
 | **auth** | `{ type: Enum<'basic' \| 'bearer' \| 'api_key'>; username?: string; password?: string; token?: string; … }` | optional |  |
-| **batch** | `{ maxSize: integer; flushInterval: integer }` | optional |  |
-| **retry** | `{ maxAttempts: integer; initialDelay: integer; backoffMultiplier: number }` | optional |  |
-| **timeout** | `integer` | optional (default: `30000`) |  |
+| **batch** | `{ maxSize: integer; flushIntervalMs: integer }` | optional |  |
+| **retry** | `{ maxAttempts: integer; initialDelayMs: integer; backoffMultiplier: number }` | optional |  |
+| **timeoutMs** | `integer` | optional (default: `30000`) | Timeout in milliseconds |
+| **timeout** | `never` | optional | [REMOVED] `HttpDestinationConfig.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Its unit (milliseconds) lived in a source JSDoc only and the key carried no `.describe()` at all, so the reference page published a bare 30000. Rename the key to `timeoutMs`; the value (milliseconds) and the 30000 default are unchanged. |
 
 
 ---
@@ -297,7 +316,7 @@ Logging configuration
 | **enrichment** | `{ staticFields?: Record<string, any>; dynamicEnrichers?: string[]; addHostname: boolean; addProcessId: boolean; … }` | optional | Log enrichment configuration |
 | **redact** | `string[]` | optional (has default) | Fields to redact |
 | **sampling** | `{ enabled: boolean; rate: number; rateByLevel?: Record<string, number> }` | optional |  |
-| **buffer** | `{ enabled: boolean; size: integer; flushInterval: integer; flushOnShutdown: boolean }` | optional |  |
+| **buffer** | `{ enabled: boolean; size: integer; flushIntervalMs: integer; flushOnShutdown: boolean }` | optional |  |
 | **performance** | `{ async: boolean; workers: integer }` | optional |  |
 
 ### Nested Shape: `LoggingConfig.default`
@@ -353,6 +372,16 @@ Log destination configuration
 | **addTimestampFormats** | `{ unix: boolean; iso: boolean }` | optional |  |
 | **addCaller** | `boolean` | optional (default: `false`) |  |
 | **addCorrelationIds** | `boolean` | optional (default: `true`) |  |
+
+### Nested Shape: `LoggingConfig.buffer`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `true`) |  |
+| **size** | `integer` | optional (default: `1000`) |  |
+| **flushIntervalMs** | `integer` | optional (default: `1000`) | Flush interval in milliseconds |
+| **flushInterval** | `never` | optional | [REMOVED] `LoggingConfig.buffer.flushInterval` was renamed to `flushIntervalMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Its unit (milliseconds) lived in a source JSDoc only and the key carried no `.describe()` at all, so the reference page published a bare 1000. Rename the key to `flushIntervalMs`; the value (milliseconds) and the 1000 default are unchanged. This is the in-process log buffer — `HttpDestinationConfig.batch.flushInterval` is a different key with its own rename. |
+| **flushOnShutdown** | `boolean` | optional (default: `true`) |  |
 
 
 ---

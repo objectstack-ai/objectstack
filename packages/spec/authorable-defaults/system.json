@@ -107,7 +107,7 @@
     "system/FileDestinationConfig:append = true",
     "system/FileDestinationConfig:encoding = \"utf8\"",
     "system/HttpDestinationConfig:method = \"POST\"",
-    "system/HttpDestinationConfig:timeout = 30000",
+    "system/HttpDestinationConfig:timeoutMs = 30000",
     "system/Job:enabled = true",
     "system/KeyRotationPolicy:autoRotate = true",
     "system/KeyRotationPolicy:enabled = false",

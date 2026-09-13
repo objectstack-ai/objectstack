@@ -182,8 +182,12 @@ export const SnapshotTaskViews = defineView({
         { field: 'status' },
         { field: 'estimate_hours' },
       ],
-      // The bare-string `sort` spelling (objectui#2601), kept as authored.
-      sort: 'estimate_hours desc',
+      // [#17053] The bare-string `sort` spelling (objectui#2601) was RETIRED
+      // from `ListViewSchema`; this snapshot tracks the shipped shape through
+      // `defineView`, so it carries the same ordering in the array form the
+      // showcase now authors. The snapshot's SUBJECT is the three nameless
+      // form sections below — untouched.
+      sort: [{ field: 'estimate_hours', order: 'desc' }],
     },
     grid: {
       label: 'Grid',
