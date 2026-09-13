@@ -19,9 +19,18 @@
 // fail-open path — which is what this file now forbids.
 //
 // ── What is observed, and why it is honest ──────────────────────────────────
-// `@objectstack/organizations` is a cloud-private enterprise package genuinely
-// absent from this workspace, so the dynamic import genuinely fails and the
-// real stage-1 catch runs — no stubbing of the thing under test. That makes
+// `@objectstack/organizations` is open core since ADR-0132 and IS a member of
+// this workspace — ⛔ "absent from this workspace" is no longer the reason. The
+// reason is ADR-0132's entitlement boundary: no framework package may declare it
+// (`no-framework-dependents.pin.test.ts`), so it is genuinely unresolvable from
+// `plugin-dev` and the dynamic import genuinely fails and the real stage-1 catch
+// runs — no stubbing of the thing under test. ⚠️ Measured on this file's own
+// runner: a bare ESM `import()` from here answers ERR_MODULE_NOT_FOUND "Cannot
+// find package" with `packages/plugins/organizations/dist` BUILT and unbuilt
+// alike, because Node's ESM resolver does not consult `NODE_PATH` and so never
+// reaches pnpm's hoisted store — i.e. this signal is NOT a function of build
+// state, unlike the `require`-shaped probe #16539 had to move off a workspace
+// name. That makes
 // this file the faithful witness for the ABSENT-package half of #4818's split.
 // The PRESENT-but-refusing half needs the package to resolve, so it lives in
 // `dev-plugin-tenancy-mount-refusal.test.ts`, which mocks it.
@@ -33,8 +42,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // timeout under a parallel `pnpm test`. Each factory throws the shape an absent
 // package produces, so the graceful-degradation branches run for real with zero
 // module resolution on the hot path. `@objectstack/organizations` is
-// deliberately NOT listed: it is really absent, and its real failure is the
-// signal this file reads.
+// deliberately NOT listed: it really does fail to resolve from here, and that
+// real failure is the signal this file reads.
 vi.mock('@objectstack/objectql', () => { throw Object.assign(new Error("Cannot find package '@objectstack/objectql'"), { code: 'ERR_MODULE_NOT_FOUND' }); });
 vi.mock('@objectstack/runtime', () => { throw Object.assign(new Error("Cannot find package '@objectstack/runtime'"), { code: 'ERR_MODULE_NOT_FOUND' }); });
 vi.mock('@objectstack/driver-memory', () => { throw Object.assign(new Error("Cannot find package '@objectstack/driver-memory'"), { code: 'ERR_MODULE_NOT_FOUND' }); });
