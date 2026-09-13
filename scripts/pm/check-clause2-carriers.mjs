@@ -133,6 +133,32 @@
  * naming PLACEMENT rather than spelling, and it is not read as a declaration
  * either — what moved is the sentence, never the accept set.
  *
+ * **POSITION means LINE-INITIAL, never TOP-OF-BODY (#17959).** The key must
+ * open its own line modulo the decoration above; WHICH line it opens is a fact
+ * this reader has never consulted. `readClause2Line` walks every line of the
+ * carrier and answers from the first one that IS a declaration attempt, so
+ * closing-keyword lines, a summary paragraph or a whole section above the
+ * declaration hide nothing. ⚠️ Worth writing down because a human census read
+ * it the other way and reported a merged PR as carrying no declaration at all.
+ * Measured on PR #17819's merged head `b280ae29`, whose body opens with two
+ * `Fixes` lines, a blank, and then a bold-wrapped declaration on line 4: this
+ * reader answers `declared` / `no`, and so does the OTHER gate that reads the
+ * limb — `check-changeset-no-major.mjs` imports THIS function and applies it to
+ * `github.event.pull_request.body`, which is the `Check Changeset` step the
+ * ruling named.
+ *
+ * ⭐ The same PR is the live control for the QUOTED-AND-CONTINUED tell, because
+ * it carried BOTH shapes of one sentence. It was OPENED with the key inside a
+ * backtick span the line then talks on outside of, and `Check Changeset`
+ * refused that (run 34684118255, 2026-09-12T08:47:01Z, exit 1, "a near miss,
+ * not a declaration", LEVEL AXIS NOT MEASURED); the seat rewrote the span as
+ * bold, and the `edited` re-run on the SAME head read it (run 34684357221,
+ * 08:52:36Z, "✓ LEVEL AXIS: this PR declares clause-② `no`"). ⛔ So no accept
+ * set moves for this card: the bold form was already admitted, the
+ * quoted-and-continued form was already refused, and a spelling widened to
+ * make that red go green would have refused the very form this file's own
+ * remedy sentence prescribes. What #17959 adds is the PIN and this paragraph.
+ *
  * **It writes nothing.** No label, ever — hanging or clearing a review gate
  * from a checker would be issuing the review verdict, which is 自查放行 and is
  * the one thing the whole clause-② chain forbids. Same call H31 makes, for the
@@ -667,6 +693,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#17366: the correction comment — the self-solvable exit, and the three things it is not': 65,
   '#17149: a claim that parses to ZERO branches — malformed, never absent': 26,
   '#17098: a key-INITIAL line that DESCRIBES the spelling — the half the fixture did not cover': 48,
+  '#17959: POSITION is the LINE, not the body — the merged #17819 specimen in both its shapes': 10,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -674,9 +701,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // Raised by exactly the one battery #16304 adds, again by exactly the one
 // #17302 adds, and again by exactly the one #17366 adds, so the roster's
 // existing slack is preserved rather than tightened or loosened as a side
-// effect, and once more by the one #17149 adds, by the one #17098 adds, and by
-// the one #17915 adds.
-const SELF_TEST_BATTERY_FLOOR = 20;
+// effect, and once more by the one #17149 adds, by the one #17098 adds, by the
+// one #17915 adds, and by the one #17959 adds.
+const SELF_TEST_BATTERY_FLOOR = 21;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -5088,6 +5115,32 @@ export function selfTest() {
   t('⛔ …so no thread reaches this limb with a null governing claim AND a non-empty claim set — the fallback is dead code, left as it stands', cardDeclaration([
     { id: 1, created_at: '2026-08-30T09:00:00Z', body: 'Claim: session_x · claude/issue-1-old\nClause-②: yes' },
   ]).state !== 'declared');
+
+  // -- #17959: POSITION is the LINE, not the body ---------------------------
+  //
+  // The merged specimen, kept as bytes rather than as a memory of it. PR #17819
+  // opens with two closing-keyword lines and a blank one and carries the
+  // declaration on line 4; the census that produced the filing card read that
+  // body as carrying no declaration, while both gates read `no`. The SAME PR
+  // carried the refused shape first — one sentence, two markdown spans — so the
+  // accepted and the refused form are pinned here as one pair, against one
+  // measured PR, and neither reading is moved by this battery.
+  battery('#17959: POSITION is the LINE, not the body — the merged #17819 specimen in both its shapes');
+  const P17819_HEAD = 'Fixes #17456\nFixes #17762\n\n';
+  const P17819_REASON = ' — the diff adds no exported symbol, no key on a published payload and no registration; '
+    + 'it narrows three existing implementations onto the signatures they already declare.';
+  const P17819_MERGED = P17819_HEAD + '**Clause-②: no**' + P17819_REASON;
+  const P17819_OPENED = P17819_HEAD + '`Clause-②: no`' + P17819_REASON;
+  t('⭐ the MERGED body reads DECLARED — bold-wrapped, on line 4, with closing keywords above it', readClause2Line(P17819_MERGED)?.kind === 'declared');
+  t('…carrying the value the seat wrote, which is what `Check Changeset` printed on run 34684357221', readClause2Line(P17819_MERGED)?.value === 'no');
+  t('…and quoting LINE 4 back, never the first line — the row names the line it actually read', says(readClause2Line(P17819_MERGED)?.line, 'Clause-②: no') && !says(readClause2Line(P17819_MERGED)?.line, 'Fixes'));
+  t('⛔ POSITION is the LINE: the same line alone at the top reads identically', readClause2Line('**Clause-②: no**' + P17819_REASON)?.value === readClause2Line(P17819_MERGED)?.value);
+  t('⛔ …and pushing it further down changes nothing either — no line index is consulted', readClause2Line('a\nb\nc\nd\ne\n**Clause-②: no**' + P17819_REASON)?.value === 'no');
+  t('⭐ the shape the SAME PR was OPENED with is NOT a declaration — the span opens before the key and the line talks on outside it', readClause2Line(P17819_OPENED)?.kind === 'near-miss');
+  t('…reasoned DESCRIBING, the reading `Check Changeset` refused on run 34684118255 at exit 1', readClause2Line(P17819_OPENED)?.reason === 'describing');
+  t('⭐ the two bodies differ by exactly the two decoration markers, and the readings differ with them', P17819_MERGED.replace('**Clause-②: no**', '`Clause-②: no`') === P17819_OPENED && readClause2Line(P17819_OPENED)?.kind !== readClause2Line(P17819_MERGED)?.kind);
+  t('⛔ the reader is CARRIER-agnostic — the same text on this file\'s own carrier, the claim comment, reads the same', cardDeclaration([CLAIM(P17819_MERGED)]).state === 'declared' && cardDeclaration([CLAIM(P17819_MERGED)]).value === 'no');
+  t('⛔ CONTROL: neither reading moved for this card — bold declared and quoted-and-continued described before it too', readClause2Line('**Clause-②: no**')?.value === 'no' && readClause2Line('`Clause-②: no` — yesterday\'s answer')?.reason === 'describing');
 
   // -- The floor: every declared battery RAN, and ran its cases (#13489) -----
   //
