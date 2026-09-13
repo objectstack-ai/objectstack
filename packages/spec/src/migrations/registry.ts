@@ -8929,6 +8929,60 @@ const step18: MigrationStep = {
         + 'duration key — which is not a reader of this schema and is unchanged.',
     },
     {
+      id: 'logging-durations-unit-in-key',
+      surface: 'HttpDestinationConfig `batch.flushInterval` / `retry.initialDelay` / `timeout` and '
+        + 'LoggingConfig `buffer.flushInterval` (system/logging.zod.ts)',
+      replacement: '`batch.flushIntervalMs` (default 5000) / `retry.initialDelayMs` (default 1000) / '
+        + '`timeoutMs` (default 30000) on HttpDestinationConfig, and `buffer.flushIntervalMs` '
+        + '(default 1000) on LoggingConfig — rename the keys; every value (milliseconds) is unchanged',
+      reason:
+        'Director-seat ruling A on #15939, 2026-09-11, carrying the maintainer\'s 「同意」 (decision '
+        + 'batch #115), executing the #14478 rule per file. All four keys named milliseconds in a '
+        + 'source JSDoc — "Flush interval in milliseconds", "Initial retry delay in milliseconds", '
+        + '"Timeout in milliseconds" — and the JSDoc above a key is not what '
+        + '`content/docs/references/**` renders; `.describe()` is, and none of the four carried one at '
+        + 'all. Measured by the `check:duration-unit-keys` census on this tree before the change, all '
+        + 'four read `[name: -] [prose: -]`: no unit in the key and no published prose to supply it, '
+        + 'so `content/docs/references/system/logging.mdx` printed a bare 5000 / 1000 / 30000 / 1000 '
+        + 'and nothing on the page decided milliseconds from seconds. Under the #14478 gate, moving '
+        + 'the unit into the describe alone is itself a violation (unit in prose, none in the name), '
+        + 'so each key is renamed and given the describe it never had in the same stroke. '
+        + '⚠️ `flushInterval` was declared TWICE on this file, in two different defs and with two '
+        + 'different defaults — 5000 on the HTTP destination\'s batch and 1000 on the logging buffer '
+        + '— so they are two keys, each with its own tombstone and its own registered row; the '
+        + 'prescriptions name their def so a reader who lands on one is not sent to the other. The '
+        + '`Ms` suffix is the family\'s own spelling, counted in key position on this tree: 272 '
+        + '`*Ms:` declarations in `packages/spec/src` against 75 `*Seconds:`, and the only competing '
+        + 'unit spellings are 3 `*MS:` and 9 `*Millis:` — every one of them a name fixed outside this '
+        + 'repo (MongoDB\'s `maxCommitTimeMS` and `connectTimeoutMS`, node-postgres\'s '
+        + '`idleTimeoutMillis` and `connectionTimeoutMillis` on `PoolConfigSchema`), so unlike the '
+        + '`Ttl`-versus-`TTL` question a sibling round settled there is no in-repo alternative to '
+        + 'choose between. All three target spellings were already attested as key-position `*.zod.ts` '
+        + 'declarations before this change: `flushIntervalMs` 1 (`kernel/events/integrations.zod.ts`, '
+        + 'same 1000 default), `initialDelayMs` 5, `timeoutMs` 30. Tombstoned with `retiredKey()` '
+        + 'rather than deleted because none of the four enclosing objects — `HttpDestinationConfig` '
+        + 'itself and its nested `batch` and `retry`, and `LoggingConfig`\'s nested `buffer` — is '
+        + '`.strict()`, so a bare deletion would have stripped the value in silence. Why a semantic '
+        + 'entry and not a D2 conversion: `stack.zod.ts` declares no logging collection and neither '
+        + '`LoggingConfigSchema` nor `HttpDestinationConfigSchema` is referenced anywhere in '
+        + '`packages/spec/src` outside `system/logging.zod.ts`, so the chain has no rehydration seam '
+        + 'that runs on an authored logging document — the same reading '
+        + '`tenant-schema-cache-ttl-unit-in-key` recorded for its sibling key. Measured on 4dab2bc5c: '
+        + 'no in-repo runtime reads any of the four — outside `packages/spec/src/system/logging.zod.ts` '
+        + 'and its test the only occurrences are the generated rows in '
+        + '`content/docs/references/system/logging.mdx`, which this rename regenerates; and the pinned '
+        + 'objectui checkout — `.objectui-sha` = `53ded82bf7a494f54e344e19099dbf00854b8694` — spells '
+        + '`flushInterval` 0 times, `initialDelay` 0, `HttpDestinationConfig` 0 and `LoggingConfig` 0 '
+        + 'across its 6409 tracked files, against lit controls `useState` 2304 and `timeout` 702 on '
+        + 'the same corpus.',
+      acceptanceCriteria:
+        'Every HTTP log destination spells `batch.flushIntervalMs`, `retry.initialDelayMs` and '
+        + '`timeoutMs`, and every logging buffer spells `buffer.flushIntervalMs`; authoring any of the '
+        + 'four retired spellings fails to compile and fails to parse with a rename prescription '
+        + 'naming the suffixed key and its def; the parsed defaults are 5000 / 1000 / 30000 / 1000 as '
+        + 'before; and each published describe names milliseconds.',
+    },
+    {
       id: 'memory-persistence-placeholder-refused',
       surface: 'memory driver config `persistence.path` (file persistence and the `auto` ' +
         'override) and `persistence.key` (localStorage and the `auto` override) — values ' +
@@ -10099,6 +10153,60 @@ const step18: MigrationStep = {
         + 'date` (measured both ways on #11757). Existing `sys_scim_provider` '
         + 'tables in deployed databases are left in place untouched, by ruling — '
         + 'no backfill, no reaper, no migrate command.',
+    },
+    {
+      id: 'screen-field-lookup-reference-required',
+      surface:
+        "The `reference` key of a `type: 'lookup'` field on a `screen` node — "
+        + '`flows[].nodes[].config.fields[]` where the node `type` is `screen` and the field '
+        + "`type` is `lookup` (`ScreenFieldConfigSchema`). Nothing is renamed, retired or "
+        + 're-typed and the key set does not move: `reference` was already declared and '
+        + 'already optional in the shape. What narrows is the ACCEPT SET for one value of the '
+        + "sibling `type` — a `lookup` field with no `reference`, or with a blank one, parsed "
+        + 'before this major and is refused now. Every other widget hint is untouched, and a '
+        + '`lookup` field that already names its target parses byte-identically.',
+      replacement:
+        "Name the object whose records the picker offers, beside the type: "
+        + "`{ name: 'resolved_by_article', type: 'lookup', reference: 'crm_knowledge_article' }`. "
+        + 'The value is an object NAME (the canonical id — same string `FieldSchema.reference` '
+        + 'carries), not a label and not a record id. ⚠️ There is deliberately no default and no '
+        + 'inference: a picker pointed at the wrong object is worse than one that refuses to '
+        + 'load, because it offers a human a plausible list of the wrong records and the flow '
+        + 'stores the id it is given. Where the field genuinely has no target object — the '
+        + 'author was using `lookup` to mean "type an id here" — the fix is the other '
+        + "direction: change `type` to `'text'`, which is what that field actually was, and "
+        + 'keep the prose that asked for an id in `inlineHelpText`.',
+      reason:
+        'Maintainer ruling A′, 2026-09-13 (decision batch #130 item 1), verbatim, '
+        + 'untranslated: 「同意」. ADR-0078 forbids metadata that parses, carries no marking and '
+        + 'does nothing — and its own worked example of that state is a `lookup` with no '
+        + '`reference`: the field renders a picker, the picker has no object to query, and '
+        + 'nothing anywhere says so. The key shipped OPTIONAL on this surface one release '
+        + 'earlier, on the argument that flows declaring a bare `lookup` already exist; the '
+        + 'ruling reversed that, holding that a degraded shape which ships is not a reason to '
+        + 'bend the contract to it. ⛔ NOT losslessly convertible, and the reason is the same '
+        + 'one `schedule-flow-acting-organization-required` gives: the remedy is a value the '
+        + 'artifact does not contain. A bare lookup records the field name and nothing about '
+        + 'its intended object, so `objectstack migrate meta` can identify every site but can '
+        + 'answer none of them — and a conversion that guessed (the first object with a '
+        + 'matching-looking name, the flow\'s trigger object) would write an authoritative '
+        + 'wrong answer into metadata a human then trusts. Registered under ADR-0087 D3 rather '
+        + 'than left silent because the change DOES carry a prescription a human can execute, '
+        + 'which is what D3 says a structured TODO is for.',
+      acceptanceCriteria:
+        "Every `type: 'lookup'` field on every `screen` node in the stack declares a non-empty "
+        + '`reference`, and the stack parses: `ScreenFieldConfigSchema` refuses the bare form '
+        + 'with a message addressed to `reference` '
+        + '(`SCREEN_FIELD_LOOKUP_REFERENCE_REQUIRED`), so a full metadata parse — `os lint`, or '
+        + 'any publish — reports one issue per unfixed site and names the FLOW and the FIELD in '
+        + 'its path. Work the list to empty rather than sampling it: a flow whose screen never '
+        + 'reaches that node in testing is refused at publish just the same. For each site, '
+        + 'answer which object the picker was meant to offer — the declaration is the answer, '
+        + "and where there is no such object the field was never a lookup (retype it `'text'`). "
+        + '⚠️ Runs SUSPENDED at a screen before the upgrade rehydrate their `ScreenSpec` from '
+        + 'stored context, so an in-flight run parked on an unfixed screen carries the old '
+        + 'shape: drain or re-drive those rather than assuming the fix reaches them '
+        + 'retroactively.',
     },
     {
       id: 'send-template-input-org-retired',
@@ -13286,6 +13394,39 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // not a stack collection member, not a stored row.
     // See `system-failover-health-check-interval-unit-in-key`.
     'system/FailoverConfig:healthCheckInterval',
+    // #15939 ruling A (per-file remediation of #14478). `batch.flushInterval` said
+    // "Flush interval in milliseconds" in a source JSDoc and carried no
+    // `.describe()` at all, so the reference page published a bare 5000. Renamed to
+    // `flushIntervalMs` — the family's own spelling, 272 key-position `*Ms:`
+    // declarations in `packages/spec/src` and `flushIntervalMs` already declared on
+    // `kernel/events/integrations.zod.ts`. The value and the 5000 default are
+    // unchanged. Tombstoned with `retiredKey()`: the nested `batch` object is not
+    // strict, so a bare deletion would silently strip the key. ⚠️ Not the same key
+    // as `system/LoggingConfig:buffer.flushInterval`, which defaults to 1000 and
+    // has its own row. No D2 conversion: no logging collection on `stack.zod.ts`,
+    // not a stored row. See `logging-durations-unit-in-key`.
+    'system/HttpDestinationConfig:batch.flushInterval',
+    // #15939 ruling A (per-file remediation of #14478). `retry.initialDelay` said
+    // "Initial retry delay in milliseconds" in a source JSDoc and carried no
+    // `.describe()` at all, so the reference page published a bare 1000. Renamed to
+    // `initialDelayMs` — already attested as a key-position declaration 5 times on
+    // this tree. The value and the 1000 default are unchanged. Tombstoned with
+    // `retiredKey()`: the nested `retry` object is not strict, so a bare deletion
+    // would silently strip the key. No D2 conversion: no logging collection on
+    // `stack.zod.ts`, not a stored row. See `logging-durations-unit-in-key`.
+    'system/HttpDestinationConfig:retry.initialDelay',
+    // #15939 ruling A (per-file remediation of #14478). `timeout` said "Timeout in
+    // milliseconds" in a source JSDoc and carried no `.describe()` at all, so the
+    // reference page published a bare 30000. Renamed to `timeoutMs` — already
+    // attested as a key-position declaration 30 times on this tree. The value and
+    // the 30000 default are unchanged. Tombstoned with `retiredKey()`:
+    // `HttpDestinationConfig` is not strict, so a bare deletion would silently
+    // strip the key. ⚠️ The one TOP-LEVEL key of this card's four, so this is the
+    // one whose `authorable-surface/` and `authorable-defaults/` rows move — that
+    // ratchet records `schema.properties` one level deep. No D2 conversion: no
+    // logging collection on `stack.zod.ts`, not a stored row. See
+    // `logging-durations-unit-in-key`.
+    'system/HttpDestinationConfig:timeout',
     // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
     // retire per family). One of the hour/minute/day-shaped deadline keys of the
     // incident-response / training / change-management families: declared on the
@@ -13428,6 +13569,17 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // (launch-window convention) and the prescription lives at the major boundary
     // where `migrate meta` users look.
     'system/Job:timeout',
+    // #15939 ruling A (per-file remediation of #14478). `buffer.flushInterval` said
+    // "Flush interval in milliseconds" in a source JSDoc and carried no
+    // `.describe()` at all, so the reference page published a bare 1000. Renamed to
+    // `flushIntervalMs`. The value and the 1000 default are unchanged. Tombstoned
+    // with `retiredKey()`: the nested `buffer` object is not strict, so a bare
+    // deletion would silently strip the key. ⚠️ Not the same key as
+    // `system/HttpDestinationConfig:batch.flushInterval`, which defaults to 5000
+    // and has its own row — the two spellings were identical and the defaults never
+    // were. No D2 conversion: no logging collection on `stack.zod.ts`, not a stored
+    // row. See `logging-durations-unit-in-key`.
+    'system/LoggingConfig:buffer.flushInterval',
     // #15679 (stack card 4/6 of #14478) — ruling B. `MetricAggregationConfig.window.size`
     // said "Window size in seconds" in prose and nothing else. Renamed to
     // `durationSeconds`, NOT to the gate's mechanical `sizeSeconds`: `size` is

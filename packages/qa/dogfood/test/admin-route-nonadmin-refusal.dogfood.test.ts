@@ -241,6 +241,37 @@ function expectationsFor(targetUserId: string): Record<string, RouteExpectation>
       body: { client_id: 'refusal-probe-client', disabled: true },
       note: 'admin passes the gate and lands on RESOURCE_NOT_FOUND for the unknown client',
     },
+    // ── #16678 — the admin write surface for `sys_user.manager_id` ──────────
+    //
+    // MEASURED against the running stack rather than assumed, because this
+    // file's sharpest edge cuts the OTHER way here and that difference is what
+    // makes the entry trustworthy. `unlock-user` and `oauth2/toggle-disabled`
+    // read and shape-check `body` BEFORE calling `getSession`; this mount runs
+    // `gateAdmin(c)` as its first statement and only then imports and calls the
+    // handler, so authorization is answered ahead of every body read. Fired
+    // three ways at the live stack:
+    //
+    //   EMPTY body            anon 401 UNAUTHENTICATED
+    //                         member 403 PERMISSION_DENIED
+    //                         admin 400 INVALID_REQUEST "userId is required"
+    //   { userId, null }      anon 401 UNAUTHENTICATED
+    //                         member 403 PERMISSION_DENIED
+    //                         admin 200 {"success":true,...,"managerId":null}
+    //
+    // ⇒ the member's 403 is a gate verdict on ANY body here, and the admin is
+    // not turned away: the full `objectstack-gate` contrast.
+    //
+    // The payload CLEARS rather than sets, for two reasons. The clear is
+    // idempotent, so the sweep leaves `manager_id` exactly as it found it
+    // (measured null on the freshly signed-up target); and it still reaches a
+    // 2xx, so the allowed side is a real reading rather than a semantic error.
+    // ⛔ Not a self-assignment body: the admin would get 400 INVALID_FIELD —
+    // still not a gate refusal, but a weaker reading and a worse example.
+    'POST /api/v1/auth/admin/set-user-manager': {
+      bucket: 'objectstack-gate',
+      body: { userId: targetUserId, managerId: null },
+      note: 'the gate runs ahead of any body read, so the member 403 holds even on an empty body; the admin gets 200 from the idempotent clear',
+    },
     // ── #9653: the /admin/sso/* bridges, gated ahead of their delegation ────
     //
     // The ADR-0068 gate runs BEFORE the bridge re-dispatches into better-auth,
