@@ -87,7 +87,6 @@ export const AUTH_SESSION_CONFIG = {
  * |:--------------------------|:-------------------------------|
  * | userId                    | user_id                        |
  * | providerId                | provider_id                    |
- * | issuer                    | issuer                         |
  * | accountId                 | account_id                     |
  * | accessToken               | access_token                   |
  * | refreshToken              | refresh_token                  |
@@ -97,11 +96,16 @@ export const AUTH_SESSION_CONFIG = {
  * | createdAt                 | created_at                     |
  * | updatedAt                 | updated_at                     |
  *
- * better-auth 1.7 restructured account identity by adding a REQUIRED `issuer`
- * naming the authority that vouched for the account id. Every account lookup
- * keys on (issuer, accountId) — `findAccountByKey` / `findAccountOwnerByKey`
- * filter on `issuer` — so an unmapped or unstamped `issuer` means sign-in
- * finds no account at all.
+ * Account identity keys on **(providerId, accountId)** — `findAccountByKey` /
+ * `findAccountOwnerByKey` filter on exactly that pair, and `sys_account`
+ * declares it UNIQUE.
+ *
+ * ⚠️ 1.7.0–1.7.2 briefly keyed on `(issuer, accountId)` and carried a REQUIRED
+ * `account.issuer`; 1.7.3 removed that model outright
+ * (better-auth/better-auth#10909) and #17440 adopted the rollback rather than
+ * owning a fork of it. So there is no `issuer` row in the table above and none
+ * in the map below: an entry for a column better-auth no longer declares maps
+ * nothing, and the column it named is gone from `sys_account`.
  *
  * ⚠️ THE FIELD NAME FLIP-FLOPPED ACROSS THE 1.7 PRE-RELEASES, so read it off
  * the installed version, never off memory. `1.7.0-rc.2` renamed `accountId` →
@@ -115,19 +119,13 @@ export const AUTH_SESSION_CONFIG = {
  * `better-auth-schema-parity.test.ts` is the gate that catches exactly this.
  *
  * `accountId` keeps the existing `account_id` column: same value throughout
- * the rename round-trip, so no data ever moved. `issuer` is a new column,
- * stamped on legacy rows by backfillAccountIssuer() at boot (see
- * backfill-account-issuer.ts) with the synthetic issuers better-auth mints
- * itself: `local:credential` for password accounts and
- * `local:oauth:<providerId>` for OAuth providers that carry no issuer of
- * their own.
+ * the rename round-trip, so no data ever moved.
  */
 export const AUTH_ACCOUNT_CONFIG = {
   modelName: SystemObjectName.ACCOUNT, // 'sys_account'
   fields: {
     userId: 'user_id',
     providerId: 'provider_id',
-    issuer: 'issuer',
     accountId: 'account_id',
     accessToken: 'access_token',
     refreshToken: 'refresh_token',
@@ -953,11 +951,12 @@ export const buildOidcProviderPluginSchema = buildOauthProviderPluginSchema;
 
 // NOTE: there is intentionally no scim mapping constant here, and no
 // `buildScimPluginSchema()`. `@better-auth/scim` hardcodes its models and exposes
-// NO `schema` option — still true of the installed stable `@better-auth/scim@1.7.2`
-// (`SCIMOptions` declares no `schema` / `modelName` / `fields` member at all — its
-// six members are connections, authentication, managedConnections, identity,
-// projection, compatibility; measured 2026-08-19 on the rc, re-measured
-// 2026-08-27 on stable 1.7.1, and again 2026-08-31 on 1.7.2 for #13940), so
+// NO `schema` option — still true of the installed stable `@better-auth/scim@1.7.3`
+// (re-read 2026-09-11: `SCIMOptions` declares no `schema` / `modelName` / `fields`
+// member at all — its six members are still connections, authentication,
+// managedConnections, identity, projection, compatibility; measured 2026-08-19 on
+// the rc, re-measured 2026-08-27 on stable 1.7.1, again 2026-08-31 on 1.7.2 for
+// #13940, and again on 1.7.3 with the family lift), so
 // there is nowhere to hand one. This is no longer true
 // of `@better-auth/sso@1.7.1`, which now accepts one (#8224) — for scim, and for
 // scim alone, the ADAPTER layer is the only available route.

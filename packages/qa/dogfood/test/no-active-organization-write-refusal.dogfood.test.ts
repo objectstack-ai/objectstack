@@ -73,7 +73,7 @@ describe('[ADR-0123 D2 / #8208] a tenant-scoped write with no active organizatio
 
   beforeAll(async () => {
     // `posture-only` is the mode #8208 measured on: it requests the `isolated`
-    // posture (the wall is ACTIVE) without the enterprise organizations runtime.
+    // posture (the wall is ACTIVE) without the organizations runtime.
     stack = await bootStack(showcaseStack, { multiTenant: 'posture-only' });
     ql = stack.kernel.getService<IObjectQLEngine>('objectql');
     adminToken = await stack.signIn();

@@ -118,23 +118,28 @@ const AGGREGATE_VOCABULARY: ReadonlyArray<{
  *    value (or on whether a value exists at all). Left uncorrected on purpose;
  *    the missing refusal is owned by the `needs-user-decision` card for "no
  *    layer refuses an incoherent aggregate / field-type pair".
- *  - `not-on-this-input` — an answer exists in the metadata but not on this
- *    rule's input (`formula.returnType`, which `sourceFieldMeta` does not
- *    carry). Filed rather than guessed.
+ *  - `declared-elsewhere` — the answer is declared on a SECOND key rather than
+ *    on the `FieldType` this axis walks. `formula` is the only member: its
+ *    result type is `FieldSchema.returnType`, which `measureResultType` reads
+ *    as a third input since #16236. On the declared `FieldType` ALONE — which
+ *    is what this axis passes, and what a formula whose type could not be
+ *    proven at authoring really presents — the verdict is no correction. The
+ *    returnType axis has its own walk in
+ *    `formula-return-type-measure.test.ts`.
  */
 type FieldTypeBucket =
   | 'string'
   | 'temporal'
   | 'numeric-correct'
   | 'backend-dependent'
-  | 'not-on-this-input';
+  | 'declared-elsewhere';
 
 const EXPECTED_BY_BUCKET: Record<FieldTypeBucket, string | undefined> = {
   string: MEASURE_RESULT_TYPE_STRING,
   temporal: MEASURE_RESULT_TYPE_TEMPORAL,
   'numeric-correct': undefined,
   'backend-dependent': undefined,
-  'not-on-this-input': undefined,
+  'declared-elsewhere': undefined,
 };
 
 /**
@@ -206,7 +211,7 @@ const FIELD_TYPE_VERDICTS: ReadonlyArray<{
   { type: 'vector', bucket: 'backend-dependent', why: 'a number array in a JSON column' },
   { type: 'json', bucket: 'backend-dependent', why: 'the untyped escape hatch — the value contract is explicitly open (z.unknown())' },
   // ── answerable, but not from this rule's input ──
-  { type: 'formula', bucket: 'not-on-this-input', why: 'FieldSchema.returnType declares it, but sourceFieldMeta returns only { type, defaultCurrency, max } — and returnType is itself optional' },
+  { type: 'formula', bucket: 'declared-elsewhere', why: 'the answer is FieldSchema.returnType, a SECOND key measureResultType takes as its third input (#16236); on the FieldType alone — an unproven formula — there is no correction' },
 ];
 
 describe('A) measureResultType covers both closed vocabularies, member by member', () => {
@@ -229,7 +234,7 @@ describe('A) measureResultType covers both closed vocabularies, member by member
   it('every bucket is populated — the split is real, not three names for one branch', () => {
     const buckets = new Set(FIELD_TYPE_VERDICTS.map((v) => v.bucket));
     expect([...buckets].sort()).toEqual([
-      'backend-dependent', 'not-on-this-input', 'numeric-correct', 'string', 'temporal',
+      'backend-dependent', 'declared-elsewhere', 'numeric-correct', 'string', 'temporal',
     ]);
   });
 
@@ -312,8 +317,17 @@ const dataset = DatasetSchema.parse({
     { name: 'task_count', aggregate: 'count', label: 'Tasks' },
     { name: 'counted_touches', aggregate: 'count', field: 'last_update_at', label: 'Touched' },
     { name: 'counted_subjects', aggregate: 'count', field: 'subject', label: 'Subjects' },
-    { name: 'summed_touches', aggregate: 'sum', field: 'last_update_at', label: 'Summed touches' },
-    { name: 'avg_touch', aggregate: 'avg', field: 'last_update_at', label: 'Average touch' },
+    // ⚠️ [#16737] These two used to aggregate `last_update_at`, and section D's
+    // comment on them read "nothing refuses the pair". That is no longer true:
+    // `sum` / `avg` over a temporal field is now refused at COMPILE time
+    // (`dataset-compiler`, the #16099 leg), so a dataset declaring the pair
+    // cannot exist to be queried. What these two are here to pin is unchanged —
+    // that `sum` / `avg` keep saying `number` — so they moved to the numeric
+    // column and keep pinning it. ⛔ Do not point them back at a temporal field:
+    // that pins a shape the platform refuses, and the suite would be asserting
+    // the absence of this card's fix.
+    { name: 'summed_touches', aggregate: 'sum', field: 'estimate_hours', label: 'Summed estimates' },
+    { name: 'avg_touch', aggregate: 'avg', field: 'estimate_hours', label: 'Average estimate' },
     { name: 'min_estimate', aggregate: 'min', field: 'estimate_hours', label: 'Smallest estimate' },
     { name: 'min_flag', aggregate: 'min', field: 'is_urgent', label: 'Min urgency flag' },
     { name: 'min_payload', aggregate: 'min', field: 'payload', label: 'Min payload' },
@@ -337,7 +351,8 @@ const FIELD_TYPES: Record<string, string> = {
   estimate_hours: 'number',     // numeric-correct
   is_urgent: 'boolean',         // backend-dependent
   payload: 'json',              // backend-dependent
-  margin: 'formula',            // not-on-this-input
+  margin: 'formula',            // declared-elsewhere — and NO returnType here, so this
+                                //   fixture drives the absent tier end to end
   child_total: 'summary',       // numeric-correct
 };
 
@@ -487,7 +502,7 @@ describe('C) both strategy producers move together — the correction is downstr
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('D) the columns that are genuinely numeric keep saying number', () => {
-  it('count / count_distinct / sum / avg over the SAME datetime column, and a derived measure', async () => {
+  it('count / count_distinct over the SAME datetime column, sum / avg over a numeric one, and a derived measure', async () => {
     const result = await objectqlService().queryDataset(
       dataset,
       {
@@ -500,8 +515,10 @@ describe('D) the columns that are genuinely numeric keep saying number', () => {
     // otherwise would be a new bug, so this is a load-bearing control.
     expect(typeOf(result.fields, 'task_count')).toBe('number');
     expect(typeOf(result.fields, 'counted_touches')).toBe('number');
-    // `sum`/`avg` over a temporal column: nothing refuses the pair and the value
-    // is backend-decided, so no type is invented for it.
+    // `sum`/`avg` keep saying `number`, which is correct for them over the
+    // numeric column they now aggregate. [#16737] Over a TEMPORAL column the
+    // pair no longer reaches a type at all — it is refused at compile time, and
+    // `aggregate-datetime-measure-refusal.test.ts` is where that is pinned.
     expect(typeOf(result.fields, 'summed_touches')).toBe('number');
     expect(typeOf(result.fields, 'avg_touch')).toBe('number');
     // A derived measure has no aggregate and is numeric by construction.

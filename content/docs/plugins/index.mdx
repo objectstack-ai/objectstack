@@ -77,9 +77,11 @@ Plugins follow a strict three-phase lifecycle (`init()` → `start()` → `destr
 
 <Callout type="info">
 **Which artifact this page means.** Every plugin taught here is a **kernel code
-plugin** — TypeScript implementing the `Plugin` contract, built by `tsc`, published as
-`@objectstack/plugin-<name>`. That is what `os create plugin` scaffolds. If what you
-want instead is a **metadata package** — declarative objects another stack loads, with
+plugin** — TypeScript implementing the `Plugin` contract, built by `tsc`. That is
+what `os create plugin` scaffolds: by default an unscoped `plugin-<name>` package
+marked `"private": true`, or a publishable `@objectstack/plugin-<name>` under
+`--in-repo` inside a checkout of the ObjectStack monorepo. If what you want instead
+is a **metadata package** — declarative objects another stack loads, with
 no kernel code — the scaffolder is `os init <name> -t plugin`, and
 [Which scaffolder?](/docs/deployment/cli#os-init) routes between the two by artifact
 rather than by the word `plugin`, which the CLI spells the same for both.

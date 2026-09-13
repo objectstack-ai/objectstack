@@ -11,10 +11,12 @@
 export * from './auth-plugin.js';
 export * from './auth-manager.js';
 export * from './ensure-default-organization.js';
-// better-auth 1.7 account-identity backfill. Exported because a host that
-// upgrades outside this plugin's boot path (a migration job, the cloud control
-// plane) needs to stamp `sys_account.issuer` on its own schedule.
-export * from './backfill-account-issuer.js';
+// #17440 — the read-only preflight that guards the retirement of
+// `sys_account.issuer`, plus the re-point guard that answers the one case the
+// retired column still discriminated. Exported because a host that upgrades
+// outside this plugin's boot path (a migration job, the cloud control plane)
+// has to run the probe on its own schedule.
+export * from './account-identity-preflight.js';
 export * from './set-initial-password.js';
 export * from './admin-user-endpoints.js';
 export * from './admin-ban-endpoints.js';

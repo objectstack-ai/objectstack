@@ -2412,6 +2412,29 @@ function buildFixtureTree() {
       "it('y', async () => boot({ dir: '.' }));\n",
   });
 
+  // (26) THE `codeOnly` PROJECTION ITSELF, PINNED (#16299). A `}` sitting
+  // inside a template literal — content `maskCommentsAndLiterals` blanks and a
+  // scanner that merely strips comments does not. Read literally, that stray
+  // `}` closes the `it()` callback's REAL opening brace early, right there
+  // inside the template, before the dynamic `import()` two lines down — so an
+  // under-masked `codeOnly` reports zero function-body ranges reaching the
+  // import and the violation goes SILENT, the same failure mode fixture (25)
+  // pins for the brace scanner's backward walk. Correctly masked, the
+  // template's interior is blanked (delimiters survive, content does not), the
+  // callback's true closing brace is what pairs with its opener, and the
+  // import is reported CLOCKED like any other. This is the shape #16299 named:
+  // the module-scope-vs-CLOCKED verdict hinges on a brace living inside a
+  // string or template, which is the exact content `codeOnly` exists to erase.
+  fixture(root, 'packages/clocked-literal-brace', {
+    'package.json': ARTIFACT_MANIFEST('@fx/clocked-literal-brace'),
+    'src/thing.test.ts':
+      "import { it } from 'vitest';\n" +
+      "it('y', async () => {\n" +
+      '  const label = `already closed }`;\n' +
+      "  await import('@fx/core');\n" +
+      '});\n',
+  });
+
   return root;
 }
 
@@ -2443,7 +2466,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the canary (#8020)': 14,
   'the cross-boundary walk (#8351)': 7,
   'the latent half (#9674)': 8,
-  'the clocked-window rule (#10126)': 10,
+  'the clocked-window rule (#10126)': 12,
   'the import clause is bounded to ONE statement (#12555)': 11,
   'the declared population must stay READABLE by the dispatch deriver': 11,
   'the declaration must still BE the workspace (#11510)': 22,
@@ -2816,6 +2839,22 @@ function selfTest() {
     expect(
       clockedIn('packages/clocked-typed-signature/src/thing.test.ts:6').length === 1,
       'a helper whose multi-line signature ends `}): Promise< { … } > {` was read as not a function body — a SILENT exemption',
+    );
+
+    // …and the `codeOnly` projection itself (#16299): a `}` sitting inside a
+    // template literal, positioned to close the real callback's brace EARLY if
+    // read as code rather than masked as content. Under-masking here does not
+    // fabricate a finding — it does the opposite, and silently: the dynamic
+    // import falls outside every reported range and never reaches `clocked` at
+    // all. `commentsOnly` (which still feeds the import regex) is unaffected —
+    // only `codeOnly`'s brace count decides this verdict.
+    expect(
+      clockedIn('packages/clocked-literal-brace/src/thing.test.ts:4').length === 1,
+      'a `}` inside a template literal closed the real function body early — the dynamic import went unreported',
+    );
+    expect(
+      clockedIn('packages/clocked-literal-brace/src/thing.test.ts:4').every((f) => f.includes("import('@fx/core')")),
+      'the clocked-window finding for the literal-brace fixture lost or renamed its specifier',
     );
 
     // ── the import clause is bounded to ONE statement (#12555) ────────────

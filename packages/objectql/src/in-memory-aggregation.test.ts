@@ -2,6 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { applyInMemoryAggregation, bucketDateValue } from './in-memory-aggregation.js';
+import { bucketDateKey, BUCKET_GRANULARITIES } from '@objectstack/core';
 
 const rows = [
   { region: 'East', closed_at: '2024-01-15', amount: 100, owner: 'alice' },
@@ -490,5 +491,43 @@ describe('applyInMemoryAggregation — per-aggregation filter (#10576)', () => {
       aggregations: [{ function: 'sum', field: 'amount', alias: 'not_won', filter: { stage: { $ne: 'closed_won' } } }],
     } as any);
     expect(out).toEqual([{ not_won: 50 }]);
+  });
+});
+
+// ── [#16178] The delegation, pinned ──────────────────────────────────────────
+//
+// `bucketDateValue` is now a thin delegate to `@objectstack/core`'s
+// `bucketDateKey`, hoisted so `driver-memory`'s analytics face can bucket with
+// the SAME rule without a driver depending on objectql. This suite's cells above
+// already pin the labels; these pin that the two functions cannot come apart —
+// re-inlining a private copy here (the drift `checkDateBucketParity` exists to
+// catch, one layer earlier) turns them red.
+describe('bucketDateValue delegates to the one core labeller (#16178)', () => {
+  const instants = [
+    '2024-05-15T00:00:00Z',
+    '2024-01-01T00:00:00Z',
+    '2024-12-30T00:00:00Z', // ISO week rolls into the next year
+    '2024-02-29T23:30:00Z', // near a tz day boundary
+    Date.parse('2026-01-10T08:30:00Z'), // epoch millis (#3773)
+    null, // the empty bucket (#3839)
+    'not-a-date',
+  ];
+
+  it('answers exactly what bucketDateKey answers, across granularity × timezone', () => {
+    for (const g of BUCKET_GRANULARITIES) {
+      for (const tz of [undefined, 'UTC', 'America/New_York', 'Asia/Tokyo']) {
+        for (const value of instants) {
+          expect(bucketDateValue(value, g, tz)).toBe(bucketDateKey(value, g, tz));
+        }
+      }
+    }
+  });
+
+  it('still emits the canonical week label, which is the half drivers push down', () => {
+    // `YYYY-Www` — NOT the Monday's `YYYY-MM-DD`. A driver that buckets a week
+    // in SQL emits this string; a second spelling breaks a drill-down across
+    // the seam.
+    expect(bucketDateValue('2024-01-01', 'week')).toBe('2024-W01');
+    expect(bucketDateValue('2026-09-06T01:00:00Z', 'week')).toBe('2026-W36');
   });
 });

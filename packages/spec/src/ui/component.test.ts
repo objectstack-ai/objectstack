@@ -23,7 +23,7 @@ import {
   ObjectMetricPropsSchema,
   ObjectKanbanPropsSchema,
 } from './component.zod';
-import { PageComponentSchema, PageSchema, PageComponentType, ElementDataSourceSchema } from './page.zod';
+import { PageComponentSchema, PageSchema, PageComponentType, ElementDataSourceSchema, RETIRED_PAGE_COMPONENT_TYPES } from './page.zod';
 
 describe('PageHeaderProps', () => {
   it('should accept minimal header', () => {
@@ -1552,14 +1552,27 @@ describe('Interactive Elements — element:button', () => {
 // Interactive Elements — element:filter (RETIRED at element grain, #9220)
 // ---------------------------------------------------------------------------
 describe('Interactive Elements — element:filter (retired, #9220)', () => {
-  // The node-level parse never judged `properties` (that is the #5068 props
-  // gate's job), and `type` is an open union — so a stored, not-yet-migrated
-  // node still parses at THIS level. Pinned so the element retirement is not
-  // misread as a node-level refusal.
-  it('still parses at the node level — the refusal lives at the props dispatch', () => {
+  // FLIPPED (#15110). This pin used to read "still parses at the node level —
+  // the refusal lives at the props dispatch", and the docblock above
+  // `ElementFilterPropsSchema` recorded why: "A bare node with empty
+  // `properties` parses clean (the open `type` union accepts any string, so a
+  // node-level refusal is not expressible here)". #14159 built the door that
+  // expresses it; `element:filter` is a member of
+  // `RETIRED_PAGE_COMPONENT_TYPES`, so the node is refused BY NAME wherever it
+  // is written, populated or bare. The located refusal is pinned in the
+  // describe below; this one holds the flip itself.
+  it('no longer parses at the node level — the name is refused, populated or bare', () => {
     expect(() => PageComponentSchema.parse({
       type: 'element:filter',
       properties: { object: 'order', fields: ['status'] },
+    })).toThrow(/`element:filter` element is retired/);
+    expect(() => PageComponentSchema.parse({
+      type: 'element:filter',
+      properties: {},
+    })).toThrow(/`element:filter` element is retired/);
+    // Lit control: a LIVE element in the same namespace is untouched.
+    expect(() => PageComponentSchema.parse({
+      type: 'element:text', properties: { text: 'hi' },
     })).not.toThrow();
   });
 
@@ -1603,12 +1616,21 @@ describe('Interactive Elements — element:filter (retired, #9220)', () => {
 // Interactive Elements — element:form
 // ---------------------------------------------------------------------------
 describe('Interactive Elements — element:form (retired, #9249)', () => {
-  // The node itself stays parseable: the open `type` union accepts any string,
-  // and the migration leaves a bare inert node behind.
-  it('accepts a bare element:form node (the migrated shape)', () => {
+  // FLIPPED (#15110). This pin used to read "accepts a bare element:form node
+  // (the migrated shape)", on the reading the docblock recorded as structural:
+  // "the open `type` union accepts any string, so a node-level refusal is not
+  // expressible here". `element:form` is now a member of
+  // `RETIRED_PAGE_COMPONENT_TYPES`, so the node is refused by name — the bare
+  // migrated shape included, which is the whole point: that is the shape an
+  // author is left holding.
+  it('no longer accepts a bare element:form node — the migrated shape is refused by name', () => {
     expect(() => PageComponentSchema.parse({
       type: 'element:form',
       properties: {},
+    })).toThrow(/`element:form` element is retired/);
+    // Lit control: a LIVE element in the same namespace is untouched.
+    expect(() => PageComponentSchema.parse({
+      type: 'element:button', properties: { label: 'Save' },
     })).not.toThrow();
   });
 
@@ -1641,6 +1663,132 @@ describe('Interactive Elements — element:form (retired, #9249)', () => {
     for (const key of ['object', 'fields', 'mode', 'submitLabel', 'onSubmit', 'aria']) {
       expect(props).not.toHaveProperty(key);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The two element-grain retirements are refused BY NAME at the node (#15110)
+// ---------------------------------------------------------------------------
+
+/**
+ * #15110 — the node-level half of #9220 / #9249, expressed through the door
+ * #14159 built for `user:profile`. Each element's own docblock recorded the
+ * surviving bare node as structural, not intended: "A bare node with empty
+ * `properties` parses clean (the open `type` union accepts any string, so a
+ * node-level refusal is not expressible here)". It is expressible one level up.
+ *
+ * The shape mirrors the `user:profile` describe above deliberately: `code` +
+ * `path` + `params` + the prescription's text are the pin, never a bare
+ * `toThrow()`, which greens on any error.
+ */
+describe('element:filter / element:form are refused by name at the node (#15110)', () => {
+  // `check:doc-authoring` (maintainer ruling 2026-08-12): a prescription
+  // printed at the customer carries no citation-shaped issue id.
+  const ISSUE_ID = /#\d{3,}/;
+  const cases = [
+    { type: 'element:filter', props: ElementFilterPropsSchema, key: 'object',
+      marker: 'list surfaces own their filtering' },
+    { type: 'element:form', props: ElementFormPropsSchema, key: 'object',
+      marker: 'use the object-bound `object-form` block instead' },
+  ] as const;
+
+  it.each(cases)('$type is a member with a prescription that names no issue id', ({ type, marker }) => {
+    const guidance = RETIRED_PAGE_COMPONENT_TYPES.get(type);
+    expect(guidance).toBeTypeOf('string');
+    expect(guidance!).toMatch(new RegExp('^`' + type + '` was removed in @objectstack/spec 17 '));
+    expect(guidance!).toContain('ADR-0049');
+    expect(guidance!).toContain(marker);
+    expect(guidance!).not.toMatch(ISSUE_ID);
+  });
+
+  /**
+   * The anti-drift pin. The node prescription is not new prose: it is the
+   * element-grain TAIL of this element's own `retiredKey` tombstones, with the
+   * per-key head dropped. Holding the two equal BY BYTES is what keeps the
+   * node door and the props door telling one story — the `user:profile` shape
+   * ("one prescription, three doors") reached at a type whose row could not be
+   * `z.never`, because it has six tombstoned keys with more to say.
+   */
+  it.each(cases)('$type: the node prescription is the tombstones\' own tail, byte for byte', ({ type, props, key }) => {
+    const node = RETIRED_PAGE_COMPONENT_TYPES.get(type)!;
+    const tail = node.slice(node.indexOf('\u2014 ') + 2);
+    expect(tail.length).toBeGreaterThan(200);
+    const r = props.safeParse({ [key]: 'x' });
+    expect(r.success).toBe(false);
+    if (r.success) return;
+    expect(r.error.issues[0]!.message).toContain(tail);
+    // ...and the head is the only difference: the key message names the key.
+    expect(r.error.issues[0]!.message).toContain('property `' + key + '`');
+    expect(node).not.toContain('property `' + key + '`');
+  });
+
+  it.each(cases)('$type: PageComponentSchema refuses the node at `type`, bare or populated', ({ type }) => {
+    for (const properties of [undefined, {}, { object: 'order' }]) {
+      const r = PageComponentSchema.safeParse(
+        properties === undefined ? { type } : { type, properties },
+      );
+      expect(r.success, `properties=${JSON.stringify(properties)}`).toBe(false);
+      if (r.success) continue;
+      const located = r.error.issues.filter((i) => i.code === 'custom');
+      expect(located).toHaveLength(1);
+      expect(located[0]!.path).toEqual(['type']);
+      expect(located[0]!.message).toBe(RETIRED_PAGE_COMPONENT_TYPES.get(type));
+      expect((located[0]! as { params?: Record<string, unknown> }).params)
+        .toEqual({ retiredComponentType: type });
+    }
+  });
+
+  it.each(cases)('$type: PageSchema locates it at the element path — the door `os validate` parses', ({ type }) => {
+    const r = PageSchema.safeParse({
+      name: 'board',
+      label: 'Board',
+      regions: [{
+        name: 'main',
+        components: [
+          { type: 'page:header', properties: { title: 'Board' } },
+          { type },
+        ],
+      }],
+    });
+    expect(r.success).toBe(false);
+    if (r.success) return;
+    const located = r.error.issues.filter((i) => i.code === 'custom');
+    expect(located).toHaveLength(1);
+    expect(located[0]!.path).toEqual(['regions', 0, 'components', 1, 'type']);
+    expect(located[0]!.message).toBe(RETIRED_PAGE_COMPONENT_TYPES.get(type));
+  });
+
+  it.each(cases)('$type: the enum error map carries the same prescription', ({ type }) => {
+    expect(PageComponentType.options).not.toContain(type);
+    const r = PageComponentType.safeParse(type);
+    expect(r.success).toBe(false);
+    if (r.success) return;
+    expect(r.error.issues[0]!.code).toBe('invalid_value');
+    expect(r.error.issues[0]!.message).toBe(RETIRED_PAGE_COMPONENT_TYPES.get(type));
+  });
+
+  /**
+   * The kept row is the reason these two are NOT `retiredComponentProps`: six
+   * tombstoned keys each, and a per-key prescription says more than one
+   * whole-bag refusal could. The empty bag still parses AT THE ROW — that door
+   * is simply no longer reachable through `PageComponentSchema`, which is
+   * pinned above. Both halves are load-bearing, so both are pinned.
+   */
+  it.each(cases)('$type: the row keeps dispatching per key, and still accepts the empty bag', ({ type, props, key }) => {
+    expect(Object.keys(ComponentPropsMap)).toContain(type);
+    expect(props.safeParse({}).success).toBe(true);
+    expect(props.safeParse({ [key]: 'x' }).success).toBe(false);
+  });
+
+  it('a LIVE element in the same namespace is untouched — the lit control', () => {
+    for (const type of ['element:text', 'element:number', 'element:image', 'element:divider',
+      'element:button', 'element:record_picker', 'element:text_input']) {
+      expect(RETIRED_PAGE_COMPONENT_TYPES.has(type), type).toBe(false);
+      expect(PageComponentSchema.safeParse({ type }).success, type).toBe(true);
+    }
+    // ...as is the open arm outside the reserved namespaces.
+    expect(PageComponentSchema.safeParse({ type: 'object-grid' }).success).toBe(true);
+    expect(PageComponentSchema.safeParse({ type: 'mcp:connect-agent' }).success).toBe(true);
   });
 });
 
@@ -2004,6 +2152,111 @@ describe('the four `object-*` `filter` doors — one filter orthography platform
       return issuesAtPath(r, 'filter').length === 0;
     });
     expect(recordTakers).toEqual([]);
+  });
+});
+
+describe('`object-grid` / `object-calendar` `sort` — one sort orthography, the array (objectui#8221, decision batch #77, option B)', () => {
+  const SORT_DOORS = ['object-grid', 'object-calendar'] as const;
+  const ARRAY_FORM = [{ field: 'created_at', order: 'desc' }];
+  /**
+   * The legacy OData-ish clause `convertSortToQueryParams` honours at the
+   * objectui pin `53ded82b` (`core/src/utils/sort-query.ts:66-70`) and that
+   * `ObjectGrid.tsx:1845-1846` puts on `$orderby` verbatim. Retired by the
+   * ruling; refused here.
+   */
+  const STRING_FORM = 'created_at desc';
+  type ParseResult = { success: boolean; data?: { sort?: unknown }; error?: { issues: Array<{ path: PropertyKey[]; code: string }> } };
+  type Door = { shape?: Record<string, unknown>; safeParse: (v: unknown) => ParseResult };
+  const door = (type: string) => ComponentPropsMap[type as keyof typeof ComponentPropsMap] as unknown as Door;
+  const issuesAtPath = (r: ParseResult, path: string) =>
+    r.success ? [] : r.error!.issues.filter((i) => i.path.join('.') === path);
+
+  it.each(SORT_DOORS)('%s accepts a SortItem[] and echoes it — the acceptance criterion', (type) => {
+    const r = door(type).safeParse({ objectName: 'showcase_task', sort: ARRAY_FORM });
+    expect(r.success).toBe(true);
+    expect(r.data!.sort).toEqual(ARRAY_FORM);
+  });
+
+  it.each(SORT_DOORS)('%s carries the REAL SortItemSchema, not a lookalike: the direction enum and the required pair are checked', (type) => {
+    // `z.unknown()` echoed every one of these back with `success: true`.
+    const spelledOut = door(type).safeParse({ objectName: 'showcase_task', sort: [{ field: 'created_at', order: 'descending' }] });
+    expect(issuesAtPath(spelledOut, 'sort.0.order').map((i) => i.code)).toEqual(['invalid_value']);
+    // Same code as the misspelling above, and deliberately so: `order` is a
+    // required enum, so an ABSENT direction and a wrong one are one verdict at
+    // one path — the pair is what the schema asks for.
+    const noDirection = door(type).safeParse({ objectName: 'showcase_task', sort: [{ field: 'created_at' }] });
+    expect(issuesAtPath(noDirection, 'sort.0.order').map((i) => i.code)).toEqual(['invalid_value']);
+    const noField = door(type).safeParse({ objectName: 'showcase_task', sort: [{ order: 'asc' }] });
+    expect(issuesAtPath(noField, 'sort.0.field').map((i) => i.code)).toEqual(['invalid_type']);
+  });
+
+  it.each(SORT_DOORS)('%s REFUSES the legacy string clause at the `sort` path — the shape the ruling retires', (type) => {
+    // Reverse verification on the issue envelope: located at `sort`, kind
+    // named. Before this change the same value parsed with zero issues on
+    // both doors (the card's measurement on `@objectstack/spec` 17.2.0, and
+    // the ablation in the landing PR re-runs it against this tree).
+    const r = door(type).safeParse({ objectName: 'showcase_task', sort: STRING_FORM });
+    expect(r.success).toBe(false);
+    const atSort = issuesAtPath(r, 'sort');
+    expect(atSort).toHaveLength(1);
+    expect(atSort[0].code).toBe('invalid_type');
+    expect(atSort[0]).toMatchObject({ expected: 'array' });
+  });
+
+  it.each(SORT_DOORS)('%s REFUSES a bare number at `sort` — the other value `z.unknown()` receipted', (type) => {
+    const r = door(type).safeParse({ objectName: 'showcase_task', sort: 3 });
+    expect(issuesAtPath(r, 'sort').map((i) => i.code)).toEqual(['invalid_type']);
+  });
+
+  it.each(SORT_DOORS)('%s still refuses an undeclared key BY NAME on the same call — the control the card keeps', (type) => {
+    // The control that makes the three readings above verdicts rather than a
+    // schema that reports nothing: key checking was never the thing that was
+    // missing on these doors, the VALUE was.
+    const r = door(type).safeParse({ objectName: 'showcase_task', sort: ARRAY_FORM, bogusProp: 1 });
+    expect(r.success).toBe(false);
+    expect(issuesAtPath(r, 'sort')).toEqual([]);
+    const unrecognized = r.error!.issues.filter((i) => i.code === 'unrecognized_keys') as Array<{ keys?: string[] }>;
+    expect(unrecognized.flatMap((i) => i.keys ?? [])).toContain('bogusProp');
+  });
+
+  it('`sort` agrees with `dataSource.sort` and with the picker shorthand — one shape, four doors', () => {
+    // The map's own copies are the same import (`SortItemSchema`), so this
+    // asks the question the copies could not: do the doors AGREE, value for
+    // value, with the binding every data-bound element already carries.
+    const viaBinding = ElementDataSourceSchema.parse({ object: 'showcase_task', sort: ARRAY_FORM });
+    for (const type of [...SORT_DOORS, 'element:record_picker']) {
+      const value = type === 'element:record_picker'
+        ? { object: 'showcase_task', sort: ARRAY_FORM }
+        : { objectName: 'showcase_task', sort: ARRAY_FORM };
+      const r = door(type).safeParse(value);
+      expect([type, r.success]).toEqual([type, true]);
+      expect([type, r.data!.sort]).toEqual([type, viaBinding.sort]);
+      const refused = door(type).safeParse({ ...value, sort: STRING_FORM });
+      expect([type, issuesAtPath(refused, 'sort').map((i) => i.code)]).toEqual([type, ['invalid_type']]);
+    }
+  });
+
+  it('the census: no `sort` door in ComponentPropsMap takes a string except `record:related_list`, whose string is a DIFFERENT dialect and was not ruled', () => {
+    // Asked over the WHOLE map by shape rather than by the two names above, so
+    // a future entry declaring `sort` as `z.unknown()` is caught here by name.
+    // Guarded the same way as its `filter` twin: the doors pinned above must
+    // be found, or the shape read has gone wrong and the loop is vacuous.
+    const doors = (Object.entries(ComponentPropsMap) as Array<[string, unknown]>)
+      .filter(([, schema]) => {
+        const shape = (schema as Door).shape;
+        return !!shape && 'sort' in shape;
+      })
+      .map(([type]) => type);
+    expect(doors).toEqual(expect.arrayContaining([...SORT_DOORS, 'element:record_picker', 'record:related_list']));
+    const stringTakers = doors.filter((type) => issuesAtPath(door(type).safeParse({ sort: STRING_FORM }), 'sort').length === 0);
+    // ⚠️ `record:related_list` is the ONE deliberate exception and it is pinned
+    // as such, not tolerated: its string is the `'field'` / `'-field'` form
+    // read by `RelatedList.normalizeSortSpec`, a different dialect that never
+    // reaches `convertSortToQueryParams` — measured by objectui#8221's own
+    // implementing round, which narrowed it, established the dialect and then
+    // reverted the narrowing byte-identically. Retiring it was not ruled and
+    // would delete working, spec-legal behaviour.
+    expect(stringTakers).toEqual(['record:related_list']);
   });
 });
 
@@ -2927,6 +3180,66 @@ describe('ObjectKanbanPropsSchema limit — the row cap four objectui faces alre
     expect(shape.limit?.description).toContain('$top');
     expect(shape.limit?.description).toContain('row cap');
     expect(shape.limit?.description).toContain('dataSource.limit');
+  });
+});
+
+// #17260 — the board's per-column quick-add switch, retired by the
+// objectui#8285 director-seat ruling (comment 5583979207, decision batch #91,
+// 2026-09-08; ruled option B: `quickAdd` leaves `object-kanban` and stays only
+// on the React-host `kanban-ui` block). Unlike `limit` above — a key four
+// objectui faces already implemented, so the spec was the half that was wrong
+// — `quickAdd` was FORWARDED and never read: at the pin this repo builds
+// against (`.objectui-sha` = `53ded82bf`) `ObjectKanban.tsx:931` spreads the
+// authored bag into `KanbanRenderer` and `KanbanImpl` gates the affordance on
+// `quickAdd && onQuickAdd` (`:355`, `:368`), while `onQuickAdd` is a
+// host-supplied FUNCTION no producer puts on an `object-kanban` node
+// (`ObjectKanban.tsx` names neither half: 0 each, against 6 for the sibling
+// `onCardClick` in the same file).
+describe('ObjectKanbanPropsSchema quickAdd is retired (#17260)', () => {
+  const kanban = ComponentPropsMap['object-kanban'];
+
+  it('rejects the retired `quickAdd` with the prescription, not a bare unknown-key verdict', () => {
+    // The prescription IS the payload: the author who hits this got
+    // `unknown-prop` from objectui's html tier before — the same message a
+    // typo gets — so the refusal has to say where the control still works.
+    expect(() => kanban.parse({ objectName: 'showcase_task', quickAdd: true }))
+      .toThrow(/`quickAdd`.*removed.*`kanban-ui`/s);
+  });
+
+  it('does not materialize the retired `quickAdd` on a clean parse', () => {
+    expect(kanban.parse({ objectName: 'showcase_task' })).not.toHaveProperty('quickAdd');
+  });
+
+  it('refuses the key by the TOMBSTONE, not by the strict unknown-key arm — the two are different answers', () => {
+    // The control that makes the assertion above a reading: an undeclared
+    // sibling on the same node comes back as `unrecognized_keys`, while the
+    // tombstoned key does not — it is declared, and rejected with its own
+    // guidance. Without this pair a shape that had simply DROPPED the key
+    // would pass the first test on the strict arm's generic message.
+    const retired = kanban.safeParse({ objectName: 'showcase_task', quickAdd: true });
+    expect(retired.success).toBe(false);
+    expect((retired.error?.issues ?? []).map((i) => i.code)).not.toContain('unrecognized_keys');
+
+    const undeclared = kanban.safeParse({ objectName: 'showcase_task', bogusProp: true });
+    expect(undeclared.success).toBe(false);
+    const issue = undeclared.error?.issues.find((i) => i.code === 'unrecognized_keys') as
+      | { keys?: string[] }
+      | undefined;
+    expect(issue?.keys).toEqual(['bogusProp']);
+  });
+
+  it('keeps the neighbouring forwarded keys that ARE read on this path', () => {
+    // The retirement is one key wide. `coverImageField` and
+    // `conditionalFormatting` travel the same forward and ARE read
+    // (`KanbanRenderer` / `bucketCardsIntoColumns` at the same pin), so a
+    // sweep that took the whole forwarded list would be over-wide — this is
+    // the pin that would catch it.
+    const parsed = kanban.safeParse({
+      objectName: 'showcase_task',
+      coverImageField: 'cover',
+      conditionalFormatting: [{ field: 'priority', value: 'high' }],
+    });
+    expect(parsed.success).toBe(true);
   });
 });
 

@@ -29,4 +29,6 @@ export const zhCNGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_permission_set.fields.drift_status.options.other": "3ddcfb750014f293",
   "objects.sys_permission_set.fields.drift_status.options.overlay_shadow": "7371472481b55b52",
   "objects.sys_permission_set.fields.drift_status.options.provenance_skip": "fdd5f01e69fa0245",
+  "objects.sys_position._validations.reserved_identity_name.message": "a23aa7c06745cc95",
+  "objects.sys_user_position._validations.reserved_identity_position.message": "f35df6c1ef1493b0",
 };

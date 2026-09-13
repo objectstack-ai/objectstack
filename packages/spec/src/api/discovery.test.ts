@@ -20,8 +20,9 @@ import {
   type RouteHealthEntry,
   type RouteHealthReport,
   type DiscoveryEnvironment,
+  EnvironmentTypeSchema,
+  type EnvironmentType,
 } from './discovery.zod';
-import { EnvironmentTypeSchema, type EnvironmentType } from '../cloud/environment.zod';
 
 describe('ApiRoutesSchema', () => {
   it('should accept valid minimal routes', () => {

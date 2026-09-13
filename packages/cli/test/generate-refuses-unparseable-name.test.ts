@@ -31,13 +31,46 @@
  * `integration` (behaviour)"), and ⛔ nothing is renamed to make the two cuts
  * agree.
  *
+ * ## ⚠️ WHICH NAME REACHES THIS CHECK CHANGED (#16726)
+ *
+ * A charset gate now sits in FRONT of this one: a name outside the charset
+ * `packages/spec` declares for an object `name` is refused before anything is
+ * derived from it, so it never reaches the compiler at all. `foo.bar` — the
+ * card's measured name — is one of those, and it still exits 1 having written
+ * nothing, which is the defect #16541 was filed about. What it no longer
+ * demonstrates is THIS check: the refusal it now meets is the gate's.
+ *
+ * So the parse check is measured through `class`, added here for that purpose.
+ * It is inside the charset (every character is a lowercase letter), the gate
+ * admits it, and `const class:` is still not a declaration — so it is the name
+ * that proves this command consults the compiler before it writes, and that
+ * the layer in front did not swallow the layer behind. ⛔ Nothing was deleted
+ * to make room for it: every `foo.bar` assertion that is still about the
+ * COMMAND (exit code, no rewrite, nothing on disk) is asserted below unchanged.
+ *
+ * One property genuinely stopped being reachable from here: a name that breaks
+ * the BARREL line as well as the scaffold. A reserved word is legal as an
+ * `export { default as … }` alias, so no charset-legal name breaks both, and
+ * every name that does is now stopped one layer earlier. That half stays
+ * pinned where it still runs — `generate-emission-parses.test.ts`'s CANARY row
+ * measures `foo.bar` against both emissions, with the instrument this command
+ * calls.
+ *
  * ## The control is load-bearing
  *
  * A refusal that fires on everything would satisfy every assertion about
- * `foo.bar` and would be a worse command than the broken one. `order-line`
+ * `foo.bar` and would be a worse command than the broken one. `order_line`
  * runs the whole path — writes the scaffold, writes the barrel — and both of
  * its files are re-read and re-parsed here, so "still works" is a reading
  * rather than an exit code.
+ *
+ * ⚠️ The control was spelled `order-line` until #16726 put a charset gate in
+ * front of this check, and kebab-case is outside the charset spec declares for
+ * an object `name` — so that spelling now stops one layer earlier and would
+ * have made this control measure the OTHER refusal. The two spellings derive
+ * the same everything (`order_line.object.ts`, `orderLine`), so every
+ * assertion below is the one #16541 wrote, byte for byte; only the authored
+ * input moved to a name this command still accepts.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -107,16 +140,19 @@ function parseErrors(source: string): string[] {
 let refusedDir: string;
 let controlDir: string;
 let dryRunDir: string;
+let unparseableDir: string;
 
 let refused: Run;
 let refusedAgain: Run;
 let control: Run;
 let dryRun: Run;
+let unparseable: Run;
 
 beforeAll(async () => {
   refusedDir = mkdtempSync(join(tmpdir(), 'os-g-refuse-'));
   controlDir = mkdtempSync(join(tmpdir(), 'os-g-control-'));
   dryRunDir = mkdtempSync(join(tmpdir(), 'os-g-dryrun-'));
+  unparseableDir = mkdtempSync(join(tmpdir(), 'os-g-unparseable-'));
 
   // Sequential on purpose: cold tsx starts, each loading every command module,
   // in a container several agents share.
@@ -124,11 +160,14 @@ beforeAll(async () => {
   // A second generator, to show the refusal is not one patched call site.
   refusedAgain = await runTsx([CLI, 'generate', 'flow', 'foo.bar'], refusedDir);
   dryRun = await runTsx([CLI, 'generate', 'object', 'foo.bar', '--dry-run'], dryRunDir);
-  control = await runTsx([CLI, 'generate', 'object', 'order-line'], controlDir);
+  // Inside the charset, outside the grammar — the name that reaches THIS
+  // check now that a charset gate stands in front of it (#16726).
+  unparseable = await runTsx([CLI, 'generate', 'object', 'class'], unparseableDir);
+  control = await runTsx([CLI, 'generate', 'object', 'order_line'], controlDir);
 }, RUN_TIMEOUT_MS);
 
 afterAll(() => {
-  for (const dir of [refusedDir, controlDir, dryRunDir]) {
+  for (const dir of [refusedDir, controlDir, dryRunDir, unparseableDir]) {
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -139,21 +178,9 @@ describe('[#16541] `os generate object foo.bar` refuses instead of exiting 0', (
     expect(refused.code).toBe(1);
   });
 
-  it('says it is refusing, and says the emission does not parse', () => {
+  it('says it is refusing, and names the value it refused', () => {
     expect(refused.stdout).toContain('Refusing to generate');
-    expect(refused.stdout).toContain('does not parse');
-  });
-
-  it('names BOTH files the name would have corrupted', () => {
-    expect(refused.stdout).toContain('foo.bar.object.ts');
-    expect(refused.stdout).toContain('index.ts');
-  });
-
-  it('quotes the compiler`s own diagnostic rather than a restatement of it', () => {
-    // The message TypeScript emits for a property access in a binding
-    // position. Asserted because a hand-written "invalid name" line would pass
-    // every other assertion in this block.
-    expect(refused.stdout).toContain("',' expected.");
+    expect(refused.stdout).toContain('foo.bar');
   });
 
   it('⛔ does not rewrite the name into a legal-looking identifier', () => {
@@ -167,6 +194,33 @@ describe('[#16541] `os generate object foo.bar` refuses instead of exiting 0', (
     expect(existsSync(join(refusedDir, 'src', 'objects', 'foo.bar.object.ts'))).toBe(false);
     expect(existsSync(join(refusedDir, 'src', 'objects', 'index.ts'))).toBe(false);
     expect(existsSync(join(refusedDir, 'src'))).toBe(false);
+  });
+});
+
+describe('[#16541] the parse check still refuses, with the compiler`s own words', () => {
+  // `class`, not `foo.bar` — see the header. Everything asserted here is what
+  // #16541 asserted about `foo.bar` before the #16726 gate started answering
+  // for that spelling first.
+  it('exits non-zero and says the emission does not parse', () => {
+    expect(unparseable.code).toBe(1);
+    expect(unparseable.stdout).toContain('Refusing to generate');
+    expect(unparseable.stdout).toContain('does not parse');
+  });
+
+  it('names the file the name would have corrupted', () => {
+    expect(unparseable.stdout).toContain('class.object.ts');
+  });
+
+  it('quotes the compiler`s own diagnostic rather than a restatement of it', () => {
+    // The message TypeScript emits for a reserved word in a binding position.
+    // Asserted because a hand-written "invalid name" line would pass every
+    // other assertion in this block — and because it proves the gate in front
+    // did not answer for this name.
+    expect(unparseable.stdout).toContain("'class' is not allowed as a variable declaration name.");
+  });
+
+  it('writes nothing', () => {
+    expect(existsSync(join(unparseableDir, 'src'))).toBe(false);
   });
 });
 

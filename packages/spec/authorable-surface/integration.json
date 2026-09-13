@@ -76,7 +76,6 @@
     "integration/DataSyncConfig:direction",
     "integration/DataSyncConfig:filters",
     "integration/DataSyncConfig:realtimeSync",
-    "integration/DataSyncConfig:schedule",
     "integration/DataSyncConfig:strategy",
     "integration/DataSyncConfig:timestampField",
     "integration/DeclarativeConnectorEntry:_lock",

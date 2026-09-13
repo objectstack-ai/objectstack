@@ -71,13 +71,16 @@ export const CATEGORY_TITLES: Readonly<Record<string, string>> = {
   ai: 'AI Protocol',
   api: 'API Protocol',
   automation: 'Automation Protocol',
-  cloud: 'Cloud Protocol',
   contracts: 'Contracts Protocol',
   conversions: 'Conversions Protocol',
   data: 'Data Protocol',
   identity: 'Identity Protocol',
   integration: 'Integration Protocol',
   kernel: 'Kernel Protocol',
+  // [#16325] The package & marketplace FORMAT — what a package author writes
+  // and what the marketplace answers with. Relocated out of `cloud/` when the
+  // cloud control plane's own contracts left the open-source spec.
+  marketplace: 'Marketplace Protocol',
   // [#10096] The schema-free `/meta` URL-spelling entry. "Vocabulary", not
   // "Protocol": the entry carries the spelling contract's data and folds
   // without the schema machinery every Protocol category links.

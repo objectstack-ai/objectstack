@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   FilterConditionSchema,
   QueryFilterSchema,
@@ -1832,5 +1835,94 @@ describe('FieldReferenceSchema.addDays (#14104)', () => {
       expect(firstIssue(result)?.path).toEqual(['$in', 0]);
       expect(firstIssue(result)?.message).toContain('$in member at index 0');
     });
+  });
+});
+
+// ============================================================================
+// [#16923] The docblock @examples are RUNNABLE, and same-table
+// ============================================================================
+
+/**
+ * [#16923] `FieldReferenceSchema`'s FIRST `@example` used to spell its `$field`
+ * comparand as the RELATION path `order.owner_id`, captioned as a join ON
+ * clause — while the same block's "Execution support" prose says a dotted path
+ * is refused by SQL push-down with `INVALID_FILTER`, and while `query.joins`
+ * (the only ON clause this protocol ever had) was removed in #4286. The
+ * example was the wrong half, established by RUNNING it rather than reading
+ * it: the schema door admits either spelling, so nothing here can be pinned by
+ * `safeParse` alone — the memory evaluator answers `false` for the dotted
+ * spelling on a flat row and the SQL compiler refuses it
+ * (`sql-driver-cross-field-reference.test.ts`, "a dotted relation path").
+ *
+ * These pins hold the docblock to its own prose from two directions:
+ *
+ * - The `FieldReferenceSchema` block's examples PARSE, on both the
+ *   documentation copy and the enforced copy — an example nobody can run is
+ *   how the previous one drifted.
+ * - No `@example` ANYWHERE in `filter.zod.ts` spells a `$field` value as a
+ *   path. The probe is on the CLAIM (what does an example say a comparand
+ *   looks like), not on one spelling: it is case-insensitive, quote-agnostic,
+ *   and refuses `.` and `/` alike, so a slash-separated or unbackticked
+ *   respelling trips it too.
+ */
+describe('filter.zod.ts docblock @examples (#16923)', () => {
+  const HERE = dirname(fileURLToPath(import.meta.url));
+  const SOURCE = readFileSync(resolve(HERE, 'filter.zod.ts'), 'utf8');
+
+  /**
+   * Every `@example` body in the file, as the raw comment text following the
+   * tag. An example body ends at the blank continuation line (` *`) that this
+   * file's convention puts after every one, or at the end of the docblock —
+   * so the body is the caption and the payload, never the prose after it.
+   */
+  function exampleBlocks(source: string): string[] {
+    return source
+      .split('@example')
+      .slice(1)
+      .map((rest) => rest.split(/^[ \t]*\*[ \t]*$|\*\//m)[0]);
+  }
+
+  /** The JSON payload lines of one `@example` body — the lines that are the example. */
+  function payloads(block: string): string[] {
+    return block
+      .split('\n')
+      .map((line) => line.replace(/^\s*\*\s?/, '').trim())
+      .filter((line) => line.startsWith('{'));
+  }
+
+  /** Every `$field` VALUE inside a chunk of example text, any quote style, any case. */
+  function fieldValues(text: string): string[] {
+    return [...text.matchAll(/["']?\$field["']?\s*:\s*["']([^"']*)["']/gi)].map((m) => m[1]);
+  }
+
+  const blocks = exampleBlocks(SOURCE);
+
+  it('lit control — the file really has @example blocks carrying $field values', () => {
+    // A zero below must mean "no path spellings", never "nothing was read".
+    expect(blocks.length).toBeGreaterThan(1);
+    expect(fieldValues(blocks.join('\n')).length).toBeGreaterThan(1);
+    // Dark control — a spelling that is not in the file returns nothing.
+    expect(fieldValues('{ "$fieldd": "order.owner_id" }')).toEqual([]);
+  });
+
+  it('the FieldReferenceSchema block\'s examples parse — documentation copy AND enforced copy', () => {
+    const block = SOURCE.slice(0, SOURCE.indexOf('export const FieldReferenceSchema'));
+    const examples = exampleBlocks(block).flatMap(payloads);
+    expect(examples.length).toBeGreaterThanOrEqual(2);
+    for (const line of examples) {
+      const value: unknown = JSON.parse(line);
+      expect(ComparisonOperatorSchema.safeParse(value).success, line).toBe(true);
+      expect(FieldOperatorsSchema.safeParse(value).success, line).toBe(true);
+      // …and the whole thing is a legal condition on a field, which is where an
+      // author copies it to.
+      expect(FilterConditionSchema.safeParse({ amount: value }).success, line).toBe(true);
+    }
+  });
+
+  it('no @example in the file spells a $field comparand as a path (dot OR slash)', () => {
+    const offenders = blocks
+      .flatMap((block) => fieldValues(block).map((value) => ({ block: block.trim().slice(0, 80), value })))
+      .filter(({ value }) => /[./]/.test(value));
+    expect(offenders, 'a $field comparand is a column of the SAME row').toEqual([]);
   });
 });

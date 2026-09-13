@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, assert } from 'vitest';
 import { SqlDriver } from '../src/index.js';
 
 /**
@@ -127,10 +127,10 @@ describe('SqlDriver (QueryAST Format)', () => {
       const electronics = results.find((r: any) => r.category === 'Electronics');
       const furniture = results.find((r: any) => r.category === 'Furniture');
 
-      expect(electronics).toBeDefined();
+      assert(electronics !== undefined, 'aggregate() answered no row for the seeded group');
       expect(electronics.total_price).toBe(1625);
 
-      expect(furniture).toBeDefined();
+      assert(furniture !== undefined, 'aggregate() answered no row for the seeded group');
       expect(furniture.total_price).toBe(550);
     });
 
@@ -177,6 +177,7 @@ describe('SqlDriver (QueryAST Format)', () => {
 
       expect(results.length).toBe(2);
       const electronics = results.find((r: any) => r.category === 'Electronics');
+      assert(electronics !== undefined, 'aggregate() answered no row for the seeded group');
       expect(electronics.avg_price).toBeCloseTo(541.67, 1);
     });
 

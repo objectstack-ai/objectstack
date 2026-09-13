@@ -6,8 +6,9 @@
  *
  * The defect: the organizations load used a bare `import()`, which Node ESM
  * resolves against the importer's own realpath — the CLI's, inside the
- * framework workspace. `@objectstack/organizations` is cloud-private and only
- * ever lives in the served app's `node_modules`, so the import could never
+ * framework workspace. `@objectstack/organizations` is host-supplied — ADR-0132's
+ * entitlement boundary forbids any framework package declaring it — so it only
+ * ever lives in the served app's `node_modules` and the import could never
  * succeed: EVERY self-hosted deployment with `OS_TENANCY_POSTURE=group` or
  * `isolated` hit the ADR-0093 D5 fail-fast and exited 1, and the only way past
  * it was `OS_ALLOW_DEGRADED_TENANCY=1` — i.e. the unwalled state D5 exists to
@@ -21,9 +22,10 @@
  * against a real app directory, with a real package in a real `node_modules`
  * and nothing mocked, exercises it.
  *
- * The fixture stands in for the enterprise package (it is not installable in
- * this workspace — that is the whole point), registering the same `org-scoping`
- * service and posture entitlement the real one does. What is under test here is
+ * The fixture stands in for the enterprise package (`packages/cli` may not
+ * declare it — ADR-0132's entitlement boundary — so it does not resolve here;
+ * that is the whole point), registering the same `org-scoping` service and
+ * posture entitlement the real one does. What is under test here is
  * RESOLUTION, not the enterprise semantics: proof that the real plugin walls
  * tenants lives in cloud's security-enterprise multi-org integration test.
  */

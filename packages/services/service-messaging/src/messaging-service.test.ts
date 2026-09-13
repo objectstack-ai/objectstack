@@ -331,6 +331,70 @@ describe('MessagingService', () => {
             expect(rows[0].payload).toMatchObject({ title: 'Deal closed', body: 'Acme', severity: 'info' });
             expect(rows.map((r) => r.recipientId).sort()).toEqual(['user_1', 'user_2']);
         });
+
+        // #16974 — the actor rides the SNAPSHOT, like the rendered content. The
+        // alternative the ruling rejected was re-reading `sys_notification` in
+        // the dispatcher: that costs a read per delivery and lets an event
+        // edited after enqueue rewrite who caused an in-flight send.
+        it('snapshots the actor onto every enqueued delivery row', async () => {
+            const outbox = new MemoryNotificationOutbox(1);
+            service = new MessagingService({ logger: silentLogger(), outbox });
+            service.registerChannel(recordingChannel('inbox').channel);
+
+            await service.emit({
+                topic: 'deal.won',
+                audience: ['user_1', 'user_2'],
+                actorId: 'user_9',
+                payload: { title: 'Deal closed' },
+            });
+
+            const rows = await outbox.list();
+            expect(rows.map((r) => r.payload.actorId)).toEqual(['user_9', 'user_9']);
+        });
+
+        it('leaves the snapshot actor undefined when the emit carries none', async () => {
+            const outbox = new MemoryNotificationOutbox(1);
+            service = new MessagingService({ logger: silentLogger(), outbox });
+            service.registerChannel(recordingChannel('inbox').channel);
+
+            await service.emit({ topic: 'deal.won', audience: ['user_1'], payload: { title: 'T' } });
+
+            expect((await outbox.list())[0].payload.actorId).toBeUndefined();
+        });
+    });
+
+    // #16974 — the P0 (inline fan-out) leg. The same actor reaches the channel
+    // whether or not an outbox is configured; otherwise the column would be
+    // populated on one deployment shape and null on the other.
+    describe('emit() actor projection (P0)', () => {
+        it('projects EmitInput.actorId onto the Notification handed to every channel', async () => {
+            const inbox = recordingChannel('inbox');
+            const email = recordingChannel('email');
+            service = new MessagingService({ logger: silentLogger() });
+            service.registerChannel(inbox.channel);
+            service.registerChannel(email.channel);
+
+            await service.emit({
+                topic: 'deal.won',
+                audience: ['user_1'],
+                actorId: 'user_9',
+                channels: ['inbox', 'email'],
+                payload: { title: 'Deal closed' },
+            });
+
+            expect(inbox.seen[0].notification.actorId).toBe('user_9');
+            expect(email.seen[0].notification.actorId).toBe('user_9');
+        });
+
+        it('leaves the Notification actor undefined when the emit carries none', async () => {
+            const inbox = recordingChannel('inbox');
+            service = new MessagingService({ logger: silentLogger() });
+            service.registerChannel(inbox.channel);
+
+            await service.emit({ topic: 'deal.won', audience: ['user_1'], payload: { title: 'T' } });
+
+            expect(inbox.seen[0].notification.actorId).toBeUndefined();
+        });
     });
 
     describe('emit() L2 event persistence', () => {

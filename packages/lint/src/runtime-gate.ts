@@ -177,23 +177,6 @@ export interface RuntimeStackContext {
    * for (#4463 D4).
    */
   datasets?: readonly unknown[];
-  /**
-   * The live page declarations (stack key `pages`).
-   *
-   * [#13216] The resolution universe `validateViewPageRefs` resolves a
-   * `type: 'page'` list view's `pageName` against. It is carried for the
-   * reason `datasets` is carried and states first: without it a per-write
-   * `view` snapshot holds NO pages at all, so every legitimate page mount
-   * reads as dangling. The widening is the "one-key edit here plus a
-   * `CONTEXT_STACK_KEYS` entry, made when a rule that reads the collection
-   * actually crosses the wall" this docblock describes — the rule crossed in
-   * the same change, never in advance.
-   *
-   * Carrying it in BOTH differential passes also cancels page-derived findings
-   * for every other write type, so a stored page's pre-existing condition is
-   * not some unrelated write's to answer for (#4463 D4).
-   */
-  pages?: readonly unknown[];
 }
 
 /**
@@ -373,7 +356,6 @@ const CONTEXT_STACK_KEY_ORDER = {
   permissions: true,
   books: true,
   datasets: true,
-  pages: true,
 } as const satisfies { [K in keyof RuntimeStackContext]-?: true };
 
 /**
@@ -491,8 +473,8 @@ export function buildRuntimeWriteSnapshots(args: {
   const baseline: AnyRec = {};
   for (const key of CONTEXT_STACK_KEYS) {
     // [#9612] `objects` — and only `objects` — is reduced to the written
-    // item's package closure. The other four collections are already bounded
-    // by what a tenant authors (permission sets, books, datasets, pages), and the
+    // item's package closure. The other collections are already bounded
+    // by what a tenant authors (permission sets, books, datasets), and the
     // measured bill is entirely in what the rules walk over `objects`.
     //
     // ⭐ Narrowing here rather than at either call site is what makes this ONE
@@ -611,25 +593,28 @@ export const WRITTEN_STACK_KEYS: ReadonlySet<string> = new Set(Object.values(TYP
  * construction. This derivation is unchanged — it always rested on the
  * MEMBERSHIP of that set, and it now inherits a set the compiler keeps whole.
  *
- * [#13216] `pages` is the measurement that made the case: adding it touched
+ * [#13216] `pages` was the measurement that made the case: adding it touched
  * FIVE spellings of this one set and only the fifth announced itself — the one
  * the compiler could see, and only after that accumulator was retyped as a
- * mapped type. The pairing is the rule rather than a coincidence. Before the
- * live page universe joined the snapshot, a `page` write's snapshot held exactly
- * one page, so `pages[0]` WAS this write and name-keying it would have been
- * pointless; the moment the universe joins, the index stops meaning anything to
- * the caller (`validatePresetComparands` already runs on `page` writes and emits
- * paths into this collection). Derived, the two move together by construction
- * and the next widening is a one-key edit again.
+ * mapped type. The pairing is the rule rather than a coincidence, and [#17063]
+ * proves it in the other direction: retiring `validateViewPageRefs` with the
+ * `type: 'page'` view mount took the live page universe back out of
+ * `RuntimeStackContext`, and `pages` left this derived set with it, in the same
+ * one-key edit. That is the correct answer and not a regression — a `page`
+ * write's snapshot again holds exactly ONE page, its own, so `pages[0]` IS this
+ * write and name-keying it would say nothing the index does not
+ * (`validatePresetComparands` runs on `page` writes and emits paths into this
+ * collection; positional resolves for it again).
  *
  * ## Measured against the list it replaces (#13390)
  *
- * Same four members in the same order — `objects`, `permissions`, `books`,
- * `pages`. `datasets` falls out on its own, for exactly the reason the old
- * comment had to state by hand: it is context-only, no write type maps into it.
- * So **no member needed a hand-written exception** and none is kept. If a future
- * member ever does need one, state it here WITH its reason — quietly
- * re-introducing a literal is the thing this constant now exists to prevent.
+ * The members and their order are derived, never transcribed — today `objects`,
+ * `permissions`, `books`. `datasets` falls out on its own, for exactly the
+ * reason the old comment had to state by hand: it is context-only, no write type
+ * maps into it. So **no member needed a hand-written exception** and none is
+ * kept. If a future member ever does need one, state it here WITH its reason —
+ * quietly re-introducing a literal is the thing this constant now exists to
+ * prevent.
  */
 const NAME_KEYED_STACK_KEYS: readonly string[] = deriveNameKeyedStackKeys(
   CONTEXT_STACK_KEYS,

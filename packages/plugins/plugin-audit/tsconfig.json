@@ -36,7 +36,19 @@
       // The `paths` precondition holds here: `rootDir` above is `../..` — the
       // `packages/` directory — and the redirected source sits under it at
       // `packages/drivers/driver-sqlite-wasm/src`, so no TS6059 is owed.
-      "@objectstack/driver-sqlite-wasm": ["../../drivers/driver-sqlite-wasm/src/index.ts"]
+      "@objectstack/driver-sqlite-wasm": ["../../drivers/driver-sqlite-wasm/src/index.ts"],
+      // [#15166] Resolve the shared driver-error predicate to SOURCE. The
+      // lost-audit-row report asks `isMissingTableError` whether a failure is
+      // the missing-table cause its datasource remedy was written for, so
+      // without this rule that predicate's type would come from
+      // `types/dist`, making this package's typecheck a verdict about
+      // another package's build state (`pnpm check:type-source-resolution`).
+      // Bare key, exactly as `plugin-security` spells the same entry: it is an
+      // exact match, so it cannot swallow a subpath, and this package imports
+      // none. The `paths` precondition holds — `rootDir` above is `../..`, the
+      // `packages/` directory, and the redirected source sits under it at
+      // `packages/types/src`, so no TS6059 is owed.
+      "@objectstack/types": ["../../types/src/index.ts"]
     }
   },
   "include": [

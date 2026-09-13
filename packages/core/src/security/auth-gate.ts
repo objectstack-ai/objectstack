@@ -119,9 +119,16 @@ function startsWithSegments(segments: readonly string[], prefix: readonly string
   return true;
 }
 
-/** True when `path` is exempt from the auth gate (auth + remediation + health). */
-export function isAuthGateAllowlisted(rawPath: string | undefined | null): boolean {
-  if (!rawPath) return true;
+/**
+ * Does this REAL, non-empty path name an allow-listed route?
+ *
+ * The ROUTE half of the decision, split out of {@link isAuthGateAllowlisted}
+ * (#7898) so that predicate carries exactly ONE meaning. It used to carry two:
+ * a genuine allow-list decision, and "no path" silently reusing the *allow*
+ * answer. This half is reached only with a non-empty string and its body is
+ * unchanged by that split — the anchoring rules below are #16839's, untouched.
+ */
+function matchesAllowlistedRoute(rawPath: string): boolean {
   // Strip query + trailing slashes WITHOUT a regex (avoids ReDoS on a
   // path of many '/'). char 47 = '/'.
   let path = rawPath.split('?')[0] || '/';
@@ -158,6 +165,37 @@ export function isAuthGateAllowlisted(rawPath: string | undefined | null): boole
     }
   }
   return false;
+}
+
+/**
+ * True when `path` is exempt from the auth gate (auth + remediation + health).
+ *
+ * ## FAIL-CLOSED on an absent or empty path (#7898)
+ *
+ * A falsy path is **not exempt**. This used to answer `true` — a fail-OPEN
+ * default: any caller that reached the ADR-0069 gate with an absent or empty
+ * path was silently exempted on EVERY route, and a transport author who simply
+ * forgot to populate `path` disabled the gate without a single diagnostic.
+ * Exemption is now something a path has to EARN by naming an allow-listed
+ * route, so the failure mode of omission is a 403, not a bypass.
+ *
+ * ⚠️ The exemption that remains for a genuinely PATHLESS caller is explicit and
+ * lives at the one seam that really routes by body: `shouldDenyAnonymous`
+ * (`anonymous-deny.ts`) declares `path` optional and decides the no-path case
+ * itself, ahead of this predicate. ⛔ Do not re-derive that tolerance here or
+ * at any other caller — a seam that has a path passes it, and a seam that has
+ * none says so in its own contract.
+ *
+ * ⚠️ One shipped input's answer moves: the dispatcher's bare-root `${prefix}/`
+ * arrives as `cleanPath === ''` (`http-dispatcher.ts` strips the trailing
+ * slash), which was exempt via the fail-open default and is not exempt now.
+ * Normalising that `'' → '/'` at the dispatcher is the ruling's step 2, tracked
+ * as #17625 (`domain:cli`, `Blocked-by: #7898`) — ⛔ not a tolerance to add back
+ * here.
+ */
+export function isAuthGateAllowlisted(rawPath: string | undefined | null): boolean {
+  if (!rawPath) return false;
+  return matchesAllowlistedRoute(rawPath);
 }
 
 /**

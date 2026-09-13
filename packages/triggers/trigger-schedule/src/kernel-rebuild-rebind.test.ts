@@ -103,7 +103,7 @@ describe('#8362 — a rebuilt kernel re-binds scheduled flows (both triggers)', 
         const FLOW = 'nightly_contract_rollup';
         const JOB = `flow-schedule:${FLOW}`;
         const fired: string[] = [];
-        const binding: FlowTriggerBinding = { flowName: FLOW, schedule: DAILY };
+        const binding: FlowTriggerBinding = { flowName: FLOW, schedule: DAILY, organization: 'org_2mtx1w9d0k4bqf7v' };
 
         // ── kernel 1 ──────────────────────────────────────────────────────
         const k1 = cronBackedJobService();
@@ -144,6 +144,7 @@ describe('#8362 — a rebuilt kernel re-binds scheduled flows (both triggers)', 
         const binding: FlowTriggerBinding = {
             flowName: FLOW,
             schedule: DAILY,
+            organization: 'org_2mtx1w9d0k4bqf7v',
             config: {
                 timeRelative: { object: 'xqao_contract', dateField: 'expiry_date', offsetDays: [3] },
             },
@@ -186,7 +187,7 @@ describe('#8362 — a failed bind is reported where an operator sees it', () => 
     it('ScheduleTrigger reports at ERROR, naming the consequence and the remedy', async () => {
         const logger = recordingLogger();
         const trigger = new ScheduleTrigger(() => rejectingService(), logger);
-        trigger.start({ flowName: 'nightly_rollup', schedule: DAILY }, async () => {});
+        trigger.start({ flowName: 'nightly_rollup', schedule: DAILY, organization: 'org_2mtx1w9d0k4bqf7v' }, async () => {});
         await flush();
 
         expect(logger.errors).toHaveLength(1);
@@ -209,6 +210,7 @@ describe('#8362 — a failed bind is reported where an operator sees it', () => 
             {
                 flowName: 'xqao_contract_expiry_reminder_flow',
                 schedule: DAILY,
+                organization: 'org_2mtx1w9d0k4bqf7v',
                 config: {
                     timeRelative: { object: 'xqao_contract', dateField: 'expiry_date', offsetDays: [3] },
                 },

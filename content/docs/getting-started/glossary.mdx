@@ -11,7 +11,7 @@ To navigate the ObjectStack ecosystem effectively, it is helpful to understand t
 The umbrella term for the entire suite of protocols and reference implementations. It is organized into **15 protocol namespaces** grouped into three architectural layers.
 
 ### Protocol Namespace
-A logical grouping of related schemas and types defined with Zod. ObjectStack has 15 protocol namespaces: Data, UI, System, Automation, AI, API, Identity, Security, Kernel, Cloud, QA, Contracts, Integration, Studio, and Shared.
+A logical grouping of related schemas and types defined with Zod. ObjectStack has 15 protocol namespaces: Data, UI, System, Automation, AI, API, Identity, Security, Kernel, Marketplace, QA, Contracts, Integration, Studio, and Shared.
 
 ---
 
@@ -22,7 +22,7 @@ The 15 namespaces collapse into three top-level layers:
 | Layer | Also called | Namespaces it includes | Purpose |
 | :--- | :--- | :--- | :--- |
 | **ObjectQL** | Data Layer | Data | Objects, fields, queries, relations, validation, data access |
-| **Kernel** | Control Layer / System Layer (formerly named "ObjectOS") | Kernel, System, Automation, AI, API, Identity, Security, Cloud, Integration, Studio, QA, Contracts, Shared | Runtime, permissions, automation, plugins, tenants, agent tools, artifact loading |
+| **Kernel** | Control Layer / System Layer (formerly named "ObjectOS") | Kernel, System, Automation, AI, API, Identity, Security, Marketplace, Integration, Studio, QA, Contracts, Shared | Runtime, permissions, automation, plugins, packages, agent tools, artifact loading |
 | **ObjectUI** | View Layer | UI | Apps, views, dashboards, actions, presentation metadata |
 
 Older docs and talks used **ObjectOS** as the name of this control layer. That name now refers exclusively to the commercial ObjectOS runtime environment ([docs.objectos.ai](https://docs.objectos.ai)); the open control layer is called the **Kernel**, described by the System/Kernel/AI/API protocol namespaces below.
@@ -58,8 +58,8 @@ User, organization, and position schemas for identity management.
 ### Security Protocol
 RBAC, permissions, policy, and access-control schemas.
 
-### Cloud Protocol
-Multi-tenant cloud, deployment, environment, and package distribution schemas.
+### Marketplace Protocol
+The package & marketplace format: package identity and translations, immutable package versions, marketplace listing / submission / install shapes, and the template manifest — what a package author publishes and what the marketplace answers with. The cloud control plane's own contracts (environments, tenants, deployment) are not an open-source protocol; they live in the cloud repo.
 
 ### QA Protocol
 Test, validation, and quality-assurance schemas.
@@ -172,7 +172,7 @@ A map within the UI Runtime that links a string identifier (e.g., `"chart.bar"`)
 ## Governance
 
 ### Tenant (Space / Workspace)
-A logical isolation unit in the Cloud Protocol for multi-tenancy, modeled by the `tenant` schema (`cloud/tenant.zod.ts`). A single ObjectStack instance can host multiple tenants. Data is segregated by tenant isolation strategies. "Space" and "Workspace" are informal aliases for the same concept.
+A logical isolation unit for multi-tenancy. Its `tenant` schema is a cloud control-plane contract declared in the cloud repo — it left `@objectstack/spec` with the `./cloud` subpath — so it is not one of the open-source protocol namespaces above. A single ObjectStack instance can host multiple tenants. Data is segregated by tenant isolation strategies. "Space" and "Workspace" are informal aliases for the same concept.
 
 ### FLS (Field-Level Security)
 A granular permission model (Security Protocol) where access control is applied to individual fields (columns), not just the whole object (row).

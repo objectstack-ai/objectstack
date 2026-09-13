@@ -10,6 +10,8 @@
     "CronExpressionInputSchema": "shared/CronExpressionInput",
     "EpochMs": "shared/EpochMs",
     "EvaluatedExpression": "shared/EvaluatedExpression",
+    "EvaluatedExpressionInput": "shared/EvaluatedExpressionInput",
+    "EvaluatedExpressionInputSchema": "shared/EvaluatedExpressionInput",
     "EvaluatedExpressionSchema": "shared/EvaluatedExpression",
     "Expression": "shared/Expression",
     "ExpressionDialect": "shared/ExpressionDialect",

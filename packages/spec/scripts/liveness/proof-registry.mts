@@ -325,6 +325,32 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
   // ── Registered, honestly unbound ────────────────────────────────────────
 
   {
+    id: 'schedule-acting-organization',
+    label: 'Schedule / time-relative acting organization',
+    summary:
+      'a time-triggered flow launches from a job tick, which carries no identity, so the run '
+      + 'reached the #8844 tenancy guard with no organization to offer it. On an install holding '
+      + 'more than one `sys_organization` every tenant-scoped row beneath the run was refused — the '
+      + 'inbox rows a `notify` node emits and the `sys_automation_run` history row — one layer below '
+      + 'anything that summarises a run, so the tick reported `unmeasured=0` and delivered nothing. '
+      + 'The flow now DECLARES its acting organization on the start node and the run executes as it; '
+      + 'a flow declaring none is refused at bind, naming the flow (#16659).',
+    proofId: 'schedule-acting-organization',
+    proofRef:
+      'packages/qa/dogfood/test/schedule-acting-organization.dogfood.test.ts#schedule-acting-organization',
+    bound: false,
+    ledgerBindings: [],
+    blockedReason:
+      'the property it guards — the start-node `config.organization` key — lives inside the flow '
+      + "node `config` slot, which is an OPEN record by design (ADR-0018) and which the ledger "
+      + 'classifies as a CONTAINER rather than per key, so there is no `type.path` entry whose '
+      + '`live` status this proof could gate. What it actually guards is a RUNTIME invariant: which '
+      + 'organization a time-triggered run executes as, and that a flow declaring none is not armed. '
+      + 'It runs unconditionally in the dogfood suite, on both drivers. ⛔ Not bound to `flow.runAs`, '
+      + 'which it merely uses: binding a proof to a property it does not author is the false comfort '
+      + 'the ledger exists to end.',
+  },
+  {
     id: 'flow-runas-userless',
     label: 'Flow runAs — the user-less run',
     summary:

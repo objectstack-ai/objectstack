@@ -499,7 +499,7 @@ export class MetadataManager implements IMetadataService {
   // Realtime service for event publishing
   private realtimeService?: IRealtimeService;
 
-  // ── Cluster wiring (cluster-semantics.mdx §5) ────────────────────────
+  // ── Cluster wiring (`content/docs/kernel/cluster.mdx` §6.2, lane 1) ──
   // When attached via `attachClusterPubSub()`, metadata-change events
   // become cluster-wide:
   //   • Local notifyWatchers() publishes on `metadata.changed` so peers
@@ -3108,8 +3108,8 @@ export class MetadataManager implements IMetadataService {
   protected notifyWatchers(type: string, event: MetadataWatchEvent) {
     this.notifyWatchersLocal(type, event);
 
-    // Cluster fan-out (cluster-semantics.mdx §5). Best-effort: a publish
-    // failure must never block the local update.
+    // Cluster fan-out (`content/docs/kernel/cluster.mdx` §6.2, lane 1).
+    // Best-effort: a publish failure must never block the local update.
     if (this.clusterPubSub) {
       const payload: ClusterMetadataChangedPayload = {
         originNode: this.clusterNodeId,

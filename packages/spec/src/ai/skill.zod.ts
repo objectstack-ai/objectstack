@@ -192,13 +192,13 @@ function checkSkillTriggerConditionValueShape(
  */
 export const SkillTriggerConditionSchema = lazySchema(() => z.object({
   /** Condition field (e.g. 'objectName', 'userRole', 'channel') */
-  field: z.string().describe('Context field to evaluate'),
+  field: z.string().describe('Context field to evaluate').meta({ title: 'Context Field' }),
 
   /** Comparison operator */
-  operator: z.enum(['eq', 'neq', 'in', 'not_in', 'contains']).describe('Comparison operator'),
+  operator: z.enum(['eq', 'neq', 'in', 'not_in', 'contains']).describe('Comparison operator').meta({ title: 'Operator' }),
 
   /** Expected value(s) — an array for `in`/`not_in`, a string for `eq`/`neq` */
-  value: z.union([z.string(), z.array(z.string())]).describe('Expected value or values'),
+  value: z.union([z.string(), z.array(z.string())]).describe('Expected value or values').meta({ title: 'Value' }),
 }).superRefine(checkSkillTriggerConditionValueShape));
 
 export type SkillTriggerCondition = z.input<typeof SkillTriggerConditionSchema>;

@@ -1,23 +1,4 @@
 {
-  "leg1Exemptions": [
-    {
-      "file": "skills/objectstack-pm-dispatch/SKILL.md",
-      "identifier": "backlogRepo",
-      "kind": "skill-owned-config",
-      "note": "A key of the pm-dispatch config file the CUSTOMER writes, read by this skill's own prose. The skill IS the implementation, so there is no repo symbol to grep."
-    },
-    {
-      "file": "skills/objectstack-pm-dispatch/SKILL.md",
-      "identifier": "conventionsFile",
-      "kind": "skill-owned-config",
-      "note": "Same config surface as backlogRepo — customer-authored, consumed by the skill's prose, no repo implementation."
-    },
-    {
-      "file": "skills/objectstack-pm-dispatch/SKILL.md",
-      "identifier": "routingLabelPrefix",
-      "kind": "skill-owned-config",
-      "note": "Same config surface as backlogRepo — customer-authored, consumed by the skill's prose, no repo implementation."
-    }
-  ],
+  "leg1Exemptions": [],
   "leg2Gaps": {}
 }

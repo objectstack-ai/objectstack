@@ -394,8 +394,11 @@ describe('validatePresetComparands — arm 2, the FIELD-TYPED equality / members
             period: { $in: ['last_30_days'] },
             // A `time` column: the ruling names date / datetime only.
             opens_at: 'today',
-            // A registry-injected column: its type is invisible to the graph.
-            created_at: 'last_30_days',
+            // [#16340] A registry-injected column is NOT here any more — its
+            // type is the registry's own and the arm reads it. `id` is: the
+            // driver provisions the primary key, so no definition table
+            // describes it and the arm has nothing to judge.
+            id: 'last_30_days',
             // A field the object does not declare: another rule's finding.
             close_dat: 'last_30_days',
             // The platform's own correct spellings in the judged positions.
@@ -421,6 +424,139 @@ describe('validatePresetComparands — arm 2, the FIELD-TYPED equality / members
       }],
       apps: [{ name: 'crm', filter: { close_date: 'last_30_days' } }],
       pages: [{ name: 'p', components: [{ type: 'list', filter: ['close_date', '=', 'last_30_days'] }] }],
+    })).toEqual([]);
+  });
+
+  // ── [#16340] Registry-injected temporal columns ───────────────────────────
+  //
+  // `created_at` / `updated_at` are `datetime` columns the registry injects on
+  // almost every object; no object AUTHORS them. While the object graph held
+  // injected columns by NAME only, this arm could not read their type and said
+  // NOTHING — measured on `origin/main` d57611dfd3 over the stack below:
+  // `close_date: 'last_30_days'` (authored `date`) was refused while
+  // `created_at: 'last_30_days'` on the same dashboard passed lint and the
+  // runtime publish gate, and the author first learned of it from the engine's
+  // 400 on render.
+  //
+  // ⚠️ These assertions pin the SENTENCE THE AUTHOR READS, not the graph shape
+  // behind it. A pin on `GraphObject.injected` alone can go green while the
+  // author still receives the wrong message — or none.
+  const injectedBoard = (filter: unknown) => ({
+    objects: crmObjects,
+    datasets: crmDatasets,
+    dashboards: [{ name: 'sales', widgets: [widget('w', filter)] }],
+  });
+
+  it('refuses a preset against an injected `created_at`, with the whole author-facing message', () => {
+    const findings = validatePresetComparands(injectedBoard({ created_at: 'last_30_days' }));
+    expect(findings).toHaveLength(1);
+    const f = findings[0];
+    expect(f.severity).toBe('error');
+    expect(f.rule).toBe(FILTER_PRESET_COMPARAND);
+    expect(f.where).toBe('dashboard "sales" · widget "w"');
+    expect(f.path).toBe('dashboards[0].widgets[0].filter.created_at');
+    // Verbatim. The author acts on this text; a re-wording is a decision, not a
+    // refactor, and it should turn this red.
+    expect(f.message).toBe(
+      '"last_30_days" is a dashboard date-range PRESET name, not a filter value. '
+      + 'It is only understood by the dashboard date-filter positions '
+      + "(dateRange.defaultRange, a date global filter's defaultValue), where the "
+      + 'console lowers it to {date-macro} bounds before querying. As a bare "$eq" '
+      + 'comparand nothing resolves it: a declared datetime/date field refuses the '
+      + 'query at the engine (INVALID_FILTER / 400), and any other column compares '
+      + "the literal string. Write the date-macro window instead — e.g. { $gte: "
+      + "'{30_days_ago}' } — or an ISO date such as \"2026-01-15\". Refused at "
+      + 'authoring time so the error surfaces where the filter is written.',
+    );
+    expect(f.hint).toBe(
+      'Presets belong to the dashboard date-filter bar (dateRange.defaultRange, a '
+      + "date global filter's defaultValue). In a filter comparand, write the "
+      + '{date-macro} window the message names, or an ISO date.',
+    );
+  });
+
+  it('refuses every residue position on an injected column, as it already does on a declared one', () => {
+    const findings = validatePresetComparands({
+      objects: crmObjects,
+      datasets: crmDatasets,
+      dashboards: [{
+        name: 'sales',
+        widgets: [
+          widget('bare', { created_at: 'last_30_days' }),
+          widget('eq', { created_at: { $eq: 'last_30_days' } }),
+          widget('ne', { updated_at: { $ne: 'this_week' } }),
+          widget('in', { updated_at: { $in: ['last_30_days'] } }),
+          widget('nin', { created_at: { $nin: ['today'] } }),
+          // Arm 1 caught this one before #16340 — position alone decides it.
+          widget('gte', { created_at: { $gte: 'last_30_days' } }),
+        ],
+      }],
+      views: [{
+        name: 'recent',
+        data: { provider: 'object', object: 'crm_opportunity' },
+        filter: [{ field: 'updated_at', operator: 'equals', value: 'last_7_days' }],
+      }],
+      pages: [{
+        name: 'p',
+        components: [{
+          type: 'list',
+          dataSource: { object: 'crm_opportunity' },
+          filter: ['created_at', '=', 'yesterday'],
+        }],
+      }],
+    });
+    expect(findings.map((f) => f.path)).toEqual([
+      'dashboards[0].widgets[0].filter.created_at',
+      'dashboards[0].widgets[1].filter.created_at.$eq',
+      'dashboards[0].widgets[2].filter.updated_at.$ne',
+      'dashboards[0].widgets[3].filter.updated_at.$in[0]',
+      'dashboards[0].widgets[4].filter.created_at.$nin[0]',
+      'dashboards[0].widgets[5].filter.created_at.$gte',
+      'views[0].filter[0].value',
+      'pages[0].components[0].filter[2]',
+    ]);
+    for (const f of findings) expect(f.message).toContain('is a dashboard date-range PRESET name');
+  });
+
+  it('resolves an injected leaf through a relationship hop, like any other leaf', () => {
+    const findings = validatePresetComparands({
+      objects: crmObjects,
+      datasets: crmDatasets,
+      dashboards: [{
+        name: 'sales',
+        widgets: [widget('hop', { account: { created_at: 'last_30_days' } })],
+      }],
+    });
+    expect(findings.map((f) => f.path)).toEqual([
+      'dashboards[0].widgets[0].filter.account.created_at',
+    ]);
+  });
+
+  it('stays silent where the injection stops — the discriminating controls', () => {
+    // `ownership: 'none'` / `systemFields: false` are the rows where the
+    // registry injects nothing, so the columns do not exist and this rule has
+    // nothing to say (the *-field-unknown rules own that finding). `id` exists
+    // on every row but is the DRIVER's primary key, with no definition behind
+    // it — an addressable column of unknown type, judged by nobody.
+    expect(validatePresetComparands({
+      objects: [
+        { name: 'seed_rows', systemFields: false, fields: { note: { type: 'text' } } },
+        { name: 'crm_opportunity', fields: { close_date: { type: 'date' } } },
+      ],
+      datasets: [
+        { name: 'seeds', object: 'seed_rows', measures: [] },
+        { name: 'deals', object: 'crm_opportunity', measures: [] },
+      ],
+      dashboards: [{
+        name: 'sales',
+        widgets: [
+          widget('optedOut', { created_at: 'last_30_days' }, { dataset: 'seeds' }),
+          widget('pk', { id: 'last_30_days' }),
+          // An injected LOOKUP anchor is not temporal — the type is read, not
+          // the fact that the platform put the column there.
+          widget('anchor', { owner_id: 'this_quarter' }),
+        ],
+      }],
     })).toEqual([]);
   });
 

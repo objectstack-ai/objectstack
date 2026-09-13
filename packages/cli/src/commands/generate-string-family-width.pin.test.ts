@@ -327,20 +327,35 @@ function armMembers(type: string): string[] {
  * The CHARACTER half of `createColumn`'s catch-all, derived rather than listed.
  *
  * The catch-all routes on `JSON_COLUMN_TYPES`, which `driver-sql` seeds from
- * three spec classes — so the character half is every real `FieldType` the
- * switch does not case, minus those three classes, imported and never listed
- * here. ⛔ Never derived from what the generator already answers: a filter that
- * skips a member whose answer has already drifted measures its own claim only
- * where the claim already holds.
+ * two spec classes — so the character half is every real `FieldType` the switch
+ * does not case, minus those classes and minus the file family, imported and
+ * never listed here. ⛔ Never derived from what the generator already answers: a
+ * filter that skips a member whose answer has already drifted measures its own
+ * claim only where the claim already holds.
+ *
+ * ⚠️ [#15989] `FILE_REFERENCE_TYPES` is excluded for a DIFFERENT reason from
+ * the other two, and the difference is the point. It is no longer json-seeded —
+ * the maintainer ruling on #15041 took the family out of `JSON_COLUMN_TYPES`
+ * altogether — but it did not join the character half either: inside the
+ * catch-all it has its own arm, answered per DEPLOYMENT (a json column until
+ * this deployment has moved its media columns, then a `varchar` at the width
+ * this generator already emits). So it belongs to neither half, and folding it
+ * into the character one would assert the catch-all's default width against a
+ * family the generator deliberately gives `VARCHAR(2048)`.
  */
 function characterCatchAllMembers(): string[] {
   const cased = new Set([...createColumnSwitch().matchAll(/case '([^']+)':/g)].map((m) => m[1]));
-  const jsonSeeded = new Set<string>([
-    ...MULTI_OPTION_TYPES,
-    ...STRUCTURED_JSON_TYPES,
-    ...FILE_REFERENCE_TYPES,
-  ]);
-  return [...REAL_FIELD_TYPES].filter((t) => !cased.has(t) && !jsonSeeded.has(t));
+  return [...REAL_FIELD_TYPES].filter((t) => !cased.has(t) && !outsideCharacterCatchAll(t));
+}
+
+/**
+ * Types the catch-all does not answer with `table.string(name)`: the two
+ * json-seeding spec classes, plus the file family's own per-deployment arm.
+ */
+function outsideCharacterCatchAll(type: string): boolean {
+  return MULTI_OPTION_TYPES.has(type)
+    || STRUCTURED_JSON_TYPES.has(type)
+    || FILE_REFERENCE_TYPES.has(type);
 }
 
 /** `createColumn`'s catch-all — where an un-cased type lands. */
@@ -813,24 +828,28 @@ describe('#16091 — the character column both generators emit is the driver\'s'
     // member that had drifted: mutating `radio` or `secret` to `'TEXT'` in
     // `FIELD_TYPE_SQL_MAP` skipped the member and passed all four pin files. A
     // case may not read its subject to decide whether to measure it.
-    const jsonSeeded = new Set<string>([
-      ...MULTI_OPTION_TYPES,
-      ...STRUCTURED_JSON_TYPES,
-      ...FILE_REFERENCE_TYPES,
-    ]);
     const characterCatchAll = characterCatchAllMembers();
-    expect(characterCatchAll).toEqual(catchAll.filter((t) => !jsonSeeded.has(t)));
+    expect(characterCatchAll).toEqual(catchAll.filter((t) => !outsideCharacterCatchAll(t)));
 
     // Controls for the derivation itself. Without these a seed set that failed
     // to import would leave `characterCatchAll` as the whole catch-all (and the
     // sweep red for the wrong reason) or empty (and the sweep vacuous again).
     expect(
       SQL_DRIVER_SOURCE,
-      'driver-sql no longer seeds JSON_COLUMN_TYPES from these three spec classes, so the ' +
+      'driver-sql no longer seeds JSON_COLUMN_TYPES from these two spec classes, so the ' +
       'character half of its catch-all is no longer the complement of them — re-read #16091.',
-    ).toContain('...STRUCTURED_JSON_TYPES, ...FILE_REFERENCE_TYPES, ...MULTI_OPTION_TYPES,');
-    expect(jsonSeeded.has('json')).toBe(true);
-    expect(jsonSeeded.has('color')).toBe(false);
+    ).toContain('...STRUCTURED_JSON_TYPES, ...MULTI_OPTION_TYPES,');
+    // [#15989] The third exclusion is a real arm in the same catch-all, not an
+    // absence: if the driver ever stops asking the file family separately, the
+    // family falls into the character half and this derivation is wrong.
+    expect(
+      createColumnDefaultArm(),
+      "driver-sql's catch-all no longer gives FILE_REFERENCE_TYPES its own per-deployment arm — " +
+      're-read #15989 and the ADR-0104 addendum.',
+    ).toContain('if (FILE_REFERENCE_TYPES.has(type)) {');
+    expect(outsideCharacterCatchAll('json')).toBe(true);
+    expect(outsideCharacterCatchAll('file')).toBe(true);
+    expect(outsideCharacterCatchAll('color')).toBe(false);
     expect(characterCatchAll.length).toBeGreaterThanOrEqual(5);
     // The three members a mutation of this file's own table would land on.
     // `color` is the member this card moved (it carried an invented

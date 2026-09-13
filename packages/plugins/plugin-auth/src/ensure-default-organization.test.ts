@@ -312,8 +312,8 @@ describe('ensureDefaultOrganization (plugin-auth home)', () => {
 });
 
 // [#11973 / #11663 L3, design H4] The trigger predicate — one definition for
-// every wiring (plugin-auth's middleware here; the enterprise organizations
-// package's walled wiring is asked to consume the same export).
+// every wiring (plugin-auth's middleware here; the organizations package's
+// walled wiring is asked to consume the same export).
 describe('isDefaultOrganizationBootstrapTrigger', () => {
   it.each([
     [{ object: 'sys_user', operation: 'insert' }, true],

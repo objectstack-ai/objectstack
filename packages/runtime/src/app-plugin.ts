@@ -23,6 +23,7 @@ import { loadDisabledPackageIds } from './package-state-store.js';
 import type { IJobService, IMetadataService, IObjectQLEngine, II18nService } from '@objectstack/spec/contracts';
 import { normalizeFlowFunctionEntry, type NormalizedFlowFunction } from '@objectstack/spec/automation';
 import { readServiceSelfInfo } from '@objectstack/spec/api';
+import { SEED_WRITE_EXECUTION_CONTEXT } from '@objectstack/spec/kernel';
 import { QuickJSScriptRunner } from './sandbox/quickjs-runner.js';
 import { hookBodyRunnerFactory, actionBodyRunnerFactory } from './sandbox/body-runner.js';
 import { GLOBAL_ACTION_OBJECT_KEY } from './action-execution.js';
@@ -32,16 +33,20 @@ import { countServerTiming, SEMCONV } from '@objectstack/observability';
 import { resolveMetrics } from './observability/observability-service-plugin.js';
 
 /**
- * The write options every seed insert must use — mirrors
- * `SeedLoaderService.SEED_OPTIONS`. `skipTriggers` is the load-bearing part:
- * seed rows are pre-existing end-state data, not user events, so firing
- * "on create" automation for them is semantically wrong and was the vector for
- * a self-trigger loop that wedged first boot. `isSystem` alone does NOT suppress
- * dispatch — only `skipTriggers` does — so the two basic-insert fallbacks below
- * used to seed with automation live while the main path had it suppressed
- * (#3760).
+ * The write options every seed insert must use — the shared
+ * {@link SEED_WRITE_EXECUTION_CONTEXT} posture, wrapped in the options bag
+ * `IObjectQLEngine.insert` takes. It no longer MIRRORS
+ * `SeedLoaderService.SEED_OPTIONS`; both now read the same export, so the two
+ * cannot drift apart (#17178).
+ *
+ * `skipTriggers` is the load-bearing part: seed rows are pre-existing end-state
+ * data, not user events, so firing "on create" automation for them is
+ * semantically wrong and was the vector for a self-trigger loop that wedged
+ * first boot. `isSystem` alone does NOT suppress dispatch — only `skipTriggers`
+ * does — so the two basic-insert fallbacks below used to seed with automation
+ * live while the main path had it suppressed (#3760).
  */
-const SEED_WRITE_OPTIONS = { context: { isSystem: true, skipTriggers: true, seedReplay: true } } as const;
+const SEED_WRITE_OPTIONS = { context: SEED_WRITE_EXECUTION_CONTEXT } as const;
 
 /**
  * Optional per-project context attached when AppPlugin is instantiated by the
@@ -1613,8 +1618,8 @@ export class AppPlugin implements Plugin {
      * the analogous moment, and `claim-seed-ownership.ts` names the missing
      * tenancy half in its own header ("the ownership twin of org-scoping's
      * `claimOrphanOrgRows`, which back-fills `organization_id`") — that back-fill
-     * ships in the enterprise organizations runtime, which a single-tenant install
-     * does not have. This is the open-core half of the same handoff.
+     * ships in the organizations runtime, which a single-tenant install
+     * does not have. This is the always-present half of the same handoff.
      *
      * Cheap by construction: the backfill's first act is one indexed probe of
      * `_objectstack_sequences`, and on any install with no untenanted counter it

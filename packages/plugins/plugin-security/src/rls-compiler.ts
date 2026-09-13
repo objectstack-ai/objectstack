@@ -2,6 +2,10 @@
 
 import type { RowLevelSecurityPolicy } from '@objectstack/spec/security';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+// The contract's own list of kernel-resolved context keys an app may never
+// supply. Consumed — not redeclared — so this merge and `stageRlsMembership`'s
+// resolver screen can never disagree about which keys are reserved.
+import { RESERVED_RLS_MEMBERSHIP_KEYS } from '@objectstack/spec/contracts';
 // [ADR-0056 D4 / ADR-0058 D1] `isSupportedRlsExpression` and `sqlPredicateToCel`
 // used to be DEFINED in this file. #4983 hoisted them into `@objectstack/formula`
 // — verbatim, behaviour-preserving — because `@objectstack/lint` must ask the
@@ -467,10 +471,43 @@ export class RLSCompiler {
     // into `ExecutionContext.rlsMembership`. Merge each set under its key
     // so `field IN (current_user.<key>)` resolves without subquery support.
     // Arrays only; a missing/empty set still fails closed downstream.
-    // We never let a membership key clobber the named fields above.
+    //
+    // A RESERVED key is refused BY NAME, never by "was this field already
+    // defined". The two tests are not the same test, and the difference is
+    // the whole guarantee: `userCtx[key] === undefined` asks whether the
+    // KERNEL happened to resolve a value on THIS request, so on any request
+    // where it did not — an anonymous caller, a principal with no active
+    // organization, a deployment that resolves no `org_user_ids` — the bag
+    // won the name and supplied the authorization vocabulary itself. The
+    // direction is WIDENING: with the key unresolved the predicate would
+    // have joined `deniedBy` and returned {@link RLS_DENY_FILTER} (zero
+    // rows), so a reserved-key entry converted a denial into a satisfiable
+    // filter over attacker-chosen values.
+    //
+    // `RESERVED_RLS_MEMBERSHIP_KEYS` is the contract's own list of "context
+    // keys a membership resolver may never supply … they are resolved by the
+    // kernel and carry authorization meaning an app must not be able to
+    // redefine" (`@objectstack/spec/contracts`). `stageRlsMembership`
+    // screens a RESOLVER's answer against it, but that screen covers only
+    // one producer and only when it runs: it returns at its first line when
+    // no `rls-membership-resolver` is registered, which is every deployment
+    // that has not opted into the ADR-0105 D11 seam, and it never screens
+    // the bag it SEEDS from an already-present `context.rlsMembership` at
+    // all. This merge is the choke point both faces pass through — the read
+    // layer compiles `using` here and the ADR-0058 D4 write gate compiles
+    // `check` here — so the refusal belongs here, where it holds for every
+    // producer including ones outside this repo.
+    //
+    // No new drop reason: a reserved key that is not merged leaves its
+    // variable unresolved, so the predicate takes the existing
+    // unresolved-variable path, joins `deniedBy`, warns with the vocabulary
+    // that already exists and fails CLOSED. Refusing is silent here on
+    // purpose — the observable event is the policy drop, which is already
+    // reported one loop below.
     const membership = (executionContext as any)?.rlsMembership;
     if (membership && typeof membership === 'object') {
       for (const [key, value] of Object.entries(membership)) {
+        if (RESERVED_RLS_MEMBERSHIP_KEYS.includes(key)) continue;
         if (Array.isArray(value) && userCtx[key] === undefined) {
           userCtx[key] = value;
         }

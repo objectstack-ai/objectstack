@@ -258,10 +258,10 @@ directory rather than per file.
 |---|---|
 | `ai/` | 77 |
 | `api/` | 451 |
-| `cloud/` | 83 |
 | `identity/` | 32 |
 | `integration/` | 8 |
 | `kernel/` | 260 |
+| `marketplace/` | 29 |
 | `qa/` | 6 |
 | `shared/` | 20 |
 | `system/` | 351 |

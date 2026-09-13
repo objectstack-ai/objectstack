@@ -10,6 +10,7 @@ import type {
     EnqueueDeliveryInput,
     INotificationOutbox,
     NotificationDeliveryRecord,
+    ReapOptions,
 } from './outbox.js';
 import { hashPartition } from './backoff.js';
 import { toEpochMs } from './audit-timestamp.js';
@@ -66,10 +67,11 @@ interface DeliveryRow {
  * `sys_stamp_audit_update` hook stamps it on every update unconditionally, and
  * `updated_at` is `readonly`, so a caller-supplied value is stripped by
  * `stripReadonlyFields` (#2948) before it reaches the driver — with a WARN per
- * call. `claim()` / `claimDigest()` start with an unconditional reap UPDATE that
- * runs whether or not a row is stale, so on an idle dev server the three claim
- * paths × 8 partitions × a 500 ms dispatcher tick spammed 48 identical warnings
- * a second and drowned the console. Writing the column was already a no-op
+ * call. The visibility-timeout reap is an unconditional UPDATE that runs whether
+ * or not a row is stale — `reap()`, and `claim()` / `claimDigest()` unless told
+ * `skipReap` — and while every claim path ran it per partition, an idle dev
+ * server's three claim paths × 8 partitions × a 500 ms dispatcher tick spammed
+ * 48 identical warnings a second and drowned the console. Writing the column was already a no-op
  * (stripped, then re-stamped); passing it as epoch-ms would also have been the
  * wrong shape for a native TIMESTAMP column (see `toEpochMs`) had it ever
  * survived the strip. Leave it to the platform.
@@ -128,17 +130,16 @@ export class SqlNotificationOutbox implements INotificationOutbox {
         }
     }
 
+    async reap(opts: ReapOptions): Promise<void> {
+        await this.reapExpired(opts.now ?? Date.now(), opts.claimTtlMs);
+    }
+
     async claim(opts: ClaimOptions): Promise<ClaimedDeliveryRecord[]> {
         const now = opts.now ?? Date.now();
 
-        // 1. Reap stale in_flight rows (visibility-timeout recovery).
-        await this.engine.update(
-            this.objectName,
-            { status: 'pending', claimed_by: null, claimed_at: null },
-            // Environment-wide by design: recovers rows a crashed node abandoned,
-            // for every organization. Warrant in `outbox-dispatcher-scope.ts`.
-            dispatcherSweepOptions({ status: 'in_flight', claimed_at: { $lt: now - opts.claimTtlMs } }),
-        );
+        // 1. Reap stale in_flight rows (visibility-timeout recovery) — unless the
+        //    caller already ran `reap()` for this pass (#17610).
+        if (!opts.skipReap) await this.reapExpired(now, opts.claimTtlMs);
 
         // 2. Candidate ids: ready pending rows in our partition. Batched (digest)
         //    rows are excluded — they drain via claimDigest so they collapse.
@@ -179,13 +180,7 @@ export class SqlNotificationOutbox implements INotificationOutbox {
         const now = opts.now ?? Date.now();
 
         // 1. Reap stale in_flight (same as claim).
-        await this.engine.update(
-            this.objectName,
-            { status: 'pending', claimed_by: null, claimed_at: null },
-            // Environment-wide by design: recovers rows a crashed node abandoned,
-            // for every organization. Warrant in `outbox-dispatcher-scope.ts`.
-            dispatcherSweepOptions({ status: 'in_flight', claimed_at: { $lt: now - opts.claimTtlMs } }),
-        );
+        if (!opts.skipReap) await this.reapExpired(now, opts.claimTtlMs);
 
         // 2. All DUE batched rows in our partition — a window is claimed whole, so
         //    we don't apply `limit` (a generous cap guards a pathological backlog).
@@ -334,6 +329,21 @@ export class SqlNotificationOutbox implements INotificationOutbox {
                 'DELIVERY_NOT_ELIGIBLE',
             );
         }
+    }
+
+    /**
+     * The visibility-timeout reap: ONE predicate UPDATE returning every expired
+     * `in_flight` claim to `pending`. No partition in the predicate — it spans
+     * the whole table by construction.
+     */
+    private async reapExpired(now: number, claimTtlMs: number): Promise<void> {
+        await this.engine.update(
+            this.objectName,
+            { status: 'pending', claimed_by: null, claimed_at: null },
+            // Environment-wide by design: recovers rows a crashed node abandoned,
+            // for every organization. Warrant in `outbox-dispatcher-scope.ts`.
+            dispatcherSweepOptions({ status: 'in_flight', claimed_at: { $lt: now - claimTtlMs } }),
+        );
     }
 
     async list(filter?: { status?: DeliveryStatus; notificationId?: string }): Promise<NotificationDeliveryRecord[]> {

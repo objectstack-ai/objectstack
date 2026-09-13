@@ -150,14 +150,20 @@
  * passed". Precondition ① of the landing check is still a human reading a PASS
  * comment on the card.
  *
- * ⭐ C4 is the ONE thing this file reads out of a verdict comment, and it is not
- * the verdict: the `Implemented-by:` / `Reviewed-by:` identity pair the verdict
- * declares about its own AUTHORSHIP (a session id on both, or a `mode:subagent`
- * dev's BRANCH on the left — the grammar note beside AUTHORSHIP_KEYS). No PASS
- * or FAIL token is read to reach it, so the boundary above is narrowed by
- * exactly one fact and not crossed — a self-issued verdict is refused on WHO
- * wrote it, never on what it concluded, and the row is report-only like every
- * other one here.
+ * ⭐ C4 and C6 are the ONLY things this file reads out of a verdict comment, and
+ * neither is the verdict. C4 reads the `Implemented-by:` / `Reviewed-by:`
+ * identity pair the verdict declares about its own AUTHORSHIP (a session id on
+ * both, or a `mode:subagent` dev's BRANCH on the left — the grammar note beside
+ * AUTHORSHIP_KEYS), on a comment recognised in EITHER live dialect — the fenced
+ * `VERDICT:` marker or H51's `## Contract review` heading on this head, one
+ * recognition shared with C6 (#17346, `isVerdictComment`). C6 (#17302) reads
+ * that a review of record EXISTS on the
+ * current head — H51's heading and head-sha facts, plus a `Reviewed-by:` line —
+ * on a pair whose gate was already cleared. No PASS or FAIL token is read to
+ * reach either, so the boundary above is narrowed by exactly two facts and not
+ * crossed — a self-issued verdict is refused on WHO wrote it, an unrecorded one
+ * on WHETHER it was written down, never on what it concluded — and both rows
+ * are report-only like every other one here.
  *
  * ## How a COMPLETED review is told from a gate that never ran (#14155)
  *
@@ -250,6 +256,129 @@
  * PRINTS rather than going quiet, and why it is a fourth reading rather than a
  * silent pass.
  *
+ * ## C6 — a cleared gate with no review of record behind it (#17302)
+ *
+ * The tier policy names the lane seat's own default-tier review, plus the gates,
+ * as the review of record for every lane but spec and skills — and until #17302
+ * nothing named WHERE that review lives or what it must contain. Measured on one
+ * window by the director's leak sweep: five `Clause-②: yes` merges whose
+ * carriers were hung and cleared (or never hung) with NO review-like comment on
+ * the PR or its card except the dev's own `os-dev-report`. Clearing the carrier
+ * was indistinguishable from never reviewing, and `--pair` — the landing
+ * check's own ② — read every one of them as the COMPLETED state and answered 0.
+ *
+ * `references/contract-review.md` now names the record: ONE comment on the PR
+ * or its card, in the shape the tier verdict already has minus the tier line —
+ * 「复核记录 = 一条评论落 PR 或卡,达档与默认档同形」, 「同形 = `## Contract
+ * review` 题头、所审 head sha 码段、①②③ 逐项、独立性对、PASS/FAIL 判词」 — and
+ * makes every clear cite it (「凡清标同笔留 provenance 评论,引记录 id 与所判
+ * head」, 「清标缺引记录即半态」). C6 is the machine half of that sentence: on a
+ * pair in the COMPLETED state (declared `yes`, cleared on both carriers, head
+ * unmoved — `gateBindingState`, unchanged) it reads the PR's thread and the
+ * card's for a comment in H51's measured shape — a level-2 heading beginning
+ * `## Contract review` and this head's sha as a code span, both IMPORTED from
+ * `check-half-states.mjs` rather than restated — that also carries a
+ * `Reviewed-by:` line, read by C4's own key regex. Absent ⇒ a FINDING row and
+ * exit 4; present ⇒ a NOTE naming the comment, so the provenance comment can
+ * cite it; present without the line ⇒ a finding that names the comment and the
+ * missing line.
+ *
+ * ⛔ A FINDING, not an advisory, and the file's own table decides that: the row
+ * is a fact about THIS pair at its own landing moment — a gate cleared with
+ * nothing behind it — and an adverse fact rendered as 0-with-a-message is the
+ * silence this file exists against. It re-blocks no legal workflow: under the
+ * rule text the record precedes the clear, so a pair that followed it reads
+ * clean, and a pair cleared before the text landed owes exactly one comment —
+ * the review its seat already performed, written down — before `--pair` will
+ * answer 0. The sweep stays report-only (rows print, exit 0), so the board-wide
+ * transition costs nothing; only a pair being landed is judged.
+ *
+ * ⛔ What it does NOT read, and why. No verdict WORD: H51 is verdict-agnostic by
+ * construction, this file's header bans verdict-reading as 自查放行, and the
+ * live corpus already writes the word two ways (a fenced `VERDICT: PASS` on the
+ * 2026-09-01 board that C4's discriminator was measured on; `**Verdict: PASS
+ * WITH FINDINGS**` under an `## Contract review` heading on every 2026-09-09
+ * specimen) — a regex for it would be a third spelling, the "check that can
+ * barely fail" #12409 measured. ⭐ #17346 answered the same two dialects the
+ * other way round, and it is worth reading as one decision: C4 now recognises
+ * a verdict COMMENT in both (`isVerdictComment`, H51's two facts reused), while
+ * neither row reads the verdict WORD in either. What a comment IS stays
+ * measurable; what it CONCLUDED stays human. No ①②③
+ * line items: they are prose the seat reads. So exit 0 still means "a review of
+ * record exists on this head and names a reviewer", never "the review passed";
+ * precondition ① of the landing check stays human.
+ *
+ * ## The self-solvable exit — one CORRECTION comment (#17366)
+ *
+ * The declaration limb was a ONE-WAY DOOR, and it was measured five times in
+ * one shift across two roles: a seat writes the line as prose, the reader
+ * above correctly refuses it, and the seat then has NO sanctioned act that
+ * repairs it. The MCP GitHub tool set has no edit-an-issue-comment call, so a
+ * seat holding only that set cannot rewrite the line it wrote; the claim
+ * protocol forbids a second `Claim:`; and this file's own ⛔ forbids the
+ * checker filling the line in. Three closed doors left a green PR — 38 checks,
+ * 0 failures — waiting on somebody OUTSIDE the repository to retype one line.
+ * That is the cost the card priced: not time, a human.
+ *
+ * ⭐ The exit is a FOURTH act, performable with the one tool a seat certainly
+ * has — posting a comment — in a shape fixed tightly enough that reading it
+ * relaxes nothing:
+ *
+ *     Clause-②-correction: 5642248126
+ *     Clause-②: no
+ *     Session: `session_01MCLBsUgfykL74aU716rzVK`
+ *
+ * The FIRST line's key names, in digits, the CLAIM COMMENT ID this comment
+ * corrects. The newest correction naming the card's governing claim supersedes
+ * that claim's declaration — in BOTH directions, so a wrong VALUE is repaired
+ * by the same act as an unreadable one. A correction naming any other comment
+ * is IGNORED WITH A PRINTED REASON, never silently.
+ *
+ * ⛔ Three things it is not, each one a direction this file already refuses:
+ *
+ *   1. **It relaxes no spelling.** The declaration inside a correction is read
+ *      by the SAME `CLAUSE2_KEY_LINE` through the SAME `readClause2Line`, so
+ *      prose in a correction is prose exactly as it is in a claim. What moved
+ *      is WHICH COMMENT may carry the declaration — the same move #16304 made
+ *      when it asked a sibling CARD — never what counts as an answer. #12409's
+ *      boundary moves by not one character, and the card's own five measured
+ *      prose spellings are pinned as negatives in the self-test.
+ *   2. **It is not a second `Claim:`.** The first line carries a key of its
+ *      own, which `CLAIM_COMMENT_MARKER` does not match, so a correction never
+ *      enters the claim pool, never becomes the governing claim and cannot
+ *      re-dispatch the card. It is also excluded from the MISPLACED scan: a
+ *      recognised correction is this limb's designated second carrier, not a
+ *      declaration written in a place the predicate does not look.
+ *   3. **It is not the checker filling anything in.** The value is the seat's
+ *      own, written by the seat, in the fixed spelling. This file reads it and
+ *      still writes nothing.
+ *
+ * ## Attribution: a DECLARED identity, and why that is the honest ceiling
+ *
+ * A correction must be the CLAIMING seat's own act, or it is one seat
+ * declaring on another's behalf — the thing the C2 row's ⛔ forbids. The
+ * carrier is the `Session:` line the claim protocol already makes mandatory
+ * (SKILL.md 〈模板与表〉, 「session ID 不可省」, and 「`mode:subagent` 的 dev 与
+ * PM 同会话同 ID」 — so the session is exactly the granularity of "the claiming
+ * seat"), and a correction is ATTRIBUTED when its `Session:` equals the
+ * governing claim's.
+ *
+ * ⚠️ That is a DECLARED identity, never a verified one. The value is copyable
+ * text, and under this fleet's shared GitHub identity `user.login`
+ * distinguishes nobody — which is precisely why the comparison is on the
+ * declared session rather than on the comment's author. It is the ceiling C4
+ * already works at: what a comment SAYS about its own authorship is
+ * measurable, who typed it is not.
+ *
+ * ⛔ And no branch of it may become a NEW one-way door, which is the defect
+ * this whole section exists to remove. A correction whose session differs from
+ * the claim's, or which carries no `Session:` line, is ignored with a reason
+ * that NAMES AN ACT THE CLAIMING SEAT CAN PERFORM — post one from the claiming
+ * session — rather than a state nobody can leave. And a governing claim that
+ * carries no `Session:` line at all leaves nothing to compare: the correction
+ * APPLIES, and the note says attribution could not be verified and why.
+ * Refusing there would have rebuilt the door one room over.
+ *
  * ## The three read paths — a seat's ACCESS must not decide whether ② is checkable
  *
  * Precondition ② is read by the seat that LANDS the pair, and the carrier
@@ -294,6 +423,11 @@
  *                           head.ref, head.sha, labels ]  (or "pull", one row)
  *             "cards":    { "13476": the `/issues/N` payload }
  *             "comments": { "13476": the `/issues/N/comments` rows }
+ *                         — the SAME bag, keyed by the PR NUMBER, carries the
+ *                         PR's own thread (a PR is an issue at that endpoint),
+ *                         owed by a pair in the COMPLETED state for C6
+ *                         (#17302); omitting it there reads `null` → the pair
+ *                         is UNJUDGED, never a missing record.
  *             "events":   { "13476": the `/issues/N/events` rows }  — optional
  *             "commits":  { "HEAD-SHA": { commit: { committer: { date } } } }
  *                         — optional
@@ -321,8 +455,10 @@
  * carriers' event streams (one page each on this board) and — only once both
  * read cleared — one commit: ≤5 reads for a candidate pair, 2 for every other.
  * A pair whose card declares `Clause-②: no` adds ONE more — its changed-file
- * listing, for C5 (#16448). The sweep pays the listing once and the same
- * per-pair cost for every pair it derives. ⇒ a `--pair` run costs 3–7 requests,
+ * listing, for C5 (#16448) — and a pair in the COMPLETED state adds one more,
+ * in BOTH modes: its PR's own comment thread, for C6 (#17302), cached per PR so
+ * a two-card PR pays once. The sweep pays the listing once and the same
+ * per-pair cost for every pair it derives. ⇒ a `--pair` run costs 3–8 requests,
  * while a 29-PR sweep costs about 60 — which is exactly GitHub's documented
  * anonymous hourly budget, one more reason the run prints the remaining count
  * instead of assuming it.
@@ -378,11 +514,15 @@
  *      "0-with-a-message" the entry for 4 below bans: that ⛔ forbids
  *      rendering an ADVERSE verdict as 0, and this reading is not one.
  *   2  also the answer when a C3 candidate's event stream or head commit could
- *      not be read, or when a `Clause-②: no` pair's changed-file listing could
- *      not be: an unread stream is not a never-hung gate and an unread diff is
- *      not a narrow one, so both are UNJUDGED rather than either verdict.
+ *      not be read, when a `Clause-②: no` pair's changed-file listing could
+ *      not be, or when a COMPLETED pair's PR thread could not be (C6): an unread
+ *      stream is not a never-hung gate, an unread diff is not a narrow one and
+ *      an unread thread is not a missing record, so all are UNJUDGED rather
+ *      than either verdict.
  *   4  they do not — or, since #16448, the declaration reads `no` while the
- *      diff carries a widening tell (row C5). One exit code with several
+ *      diff carries a widening tell (row C5) — or, since #17302, the gate was
+ *      cleared on both carriers and no review of record names the head (row
+ *      C6). One exit code with several
  *      adverse reasons is the shape this table already had: the ROW says which,
  *      and the exit says only "a verdict about this pair, adverse".
  *      Deliberately NOT 3: a verdict about the PAIR must be
@@ -417,16 +557,22 @@ import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from '../invoked-as.mjs';
 import {
   CLAIM_COMMENT_MARKER,
+  CONTRACT_REVIEW_HEADING_MARKER,
   CONTRACT_REVIEW_LABEL,
   DEFAULT_SWEEP_REPO,
   EXIT_PREREQUISITE_NOT_MET,
+  H51_SHA_MIN_HEX,
   PROXY_FLAG,
   SWEEP_REPO_SHAPE,
+  contractReviewHeadMatch,
   deliveryEvidence,
   deliveryEvidenceNote,
+  claimGovernance,
+  claimedBranches,
   governingClaim,
   isGateSemanticLabel,
   labelNames,
+  latestMarkedComment,
   prDeliversCard,
   proxyRearmPlan,
   resolveSweepRepo,
@@ -466,20 +612,26 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#14155: the COMPLETED state, and the three it must stay distinct from': 18,
   'the event reader itself': 9,
   'the cost bound, stated as one predicate both sides read': 6,
-  'C4: the independence clause\'s carrier (maintainer 2026-09-01 「同意 A」)': 52,
+  'C4: the independence clause\'s carrier (maintainer 2026-09-01 「同意 A」)': 89,
   'the #13910 specimen, end to end': 2,
   'pairing, derived from the same relation H8/H31 read': 3,
   'the three read paths: ordered, offline-capable, and named in every refusal': 24,
   'C5: the direction claim checked against the diff (#16448)': 16,
+  'C6: the review of record on this head, and the carrier the rule text names (#17302)': 40,
   'the exit register is distinct in every direction it must be': 6,
   'the argv contract and the board provenance (#16623)': 42,
+  '#17366: the correction comment — the self-solvable exit, and the three things it is not': 65,
+  '#17149: a claim that parses to ZERO branches — malformed, never absent': 26,
+  '#17098: a key-INITIAL line that DESCRIBES the spelling — the half the fixture did not cover': 48,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-// Raised by exactly the one battery #16304 adds, so the roster's existing slack
-// is preserved rather than tightened or loosened as a side effect.
-const SELF_TEST_BATTERY_FLOOR = 15;
+// Raised by exactly the one battery #16304 adds, again by exactly the one
+// #17302 adds, and again by exactly the one #17366 adds, so the roster's
+// existing slack is preserved rather than tightened or loosened as a side
+// effect, and once more by the one #17149 adds, and by the one #17098 adds.
+const SELF_TEST_BATTERY_FLOOR = 19;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -521,8 +673,17 @@ export const CLAUSE2_VALUES = Object.freeze(['yes', 'no']);
  * full-width colon, or the space-separated prose form `Clause ②:` that two of
  * the three measured cards actually wrote. Those are near misses and are
  * reported as such below; they are not declarations.
+ *
+ * ⭐ Three capture groups, and the first two exist for #17098: whether the key
+ * was OPENED with a backtick, and whether that backtick CLOSED before the
+ * colon. The pattern has always tolerated both ticks; what it could not say is
+ * WHICH of them it consumed — and a span closed around the key (a declaration,
+ * merely backticked) differs from a span still open at the colon (the VALUE is
+ * inside quoted text, and the line is a quotation of the spelling) by nothing
+ * else on the line. ⛔ The tolerated decoration is byte-identical to what it
+ * was: the groups report the match, they do not widen it.
  */
-const CLAUSE2_KEY_LINE = /^[ \t]*(?:>[ \t]*)?(?:[-*][ \t]+)?(?:\*\*)?`?Clause-②`?(?:\*\*)?[ \t]*:(.*)$/;
+const CLAUSE2_KEY_LINE = /^[ \t]*(?:>[ \t]*)?(?:[-*][ \t]+)?(?:\*\*)?(`?)Clause-②(`?)(?:\*\*)?[ \t]*:(.*)$/;
 
 /**
  * A line that MENTIONS the clause without being the machine declaration — used
@@ -605,14 +766,108 @@ function hasInlineClause2Key(line) {
  * `Clause-②: YES`, `Clause-②: nope` and an empty value all stay MALFORMED,
  * because none of them opens with the token. The boundary is a character
  * class, not a judgement.
+ *
+ * ⭐ One more shape joins them for #17098: a token followed by an
+ * ALTERNATION. The class above ends at `[A-Za-z0-9_]` and `|` is not in it,
+ * so `yes|no` opened with a valid token and returned `yes` — a MENU read as
+ * a CHOICE, which is how a seat's own spelling instruction became its card's
+ * judgement. It is refused HERE, alongside `Clause-②: <yes|no>` and every
+ * other unfilled template, because it is the same fact about the same slot:
+ * the value was never chosen. `clause2LineDescribes` states the four axes
+ * behind putting it here rather than beside the describing tells.
+ *
+ * ⛔ The refusal is ADJACENCY, never a scan: only a `|` that is the next
+ * non-blank character after the token. The reasoning #13914's control shape
+ * allows may contain a pipe anywhere later — a table column, a shell
+ * pipeline — and is untouched.
  */
 function readValueToken(raw) {
   const rest = String(raw ?? '').replace(/^[ \t]+/, '');
   // Built from CLAUSE2_VALUES so the closed set is declared once: adding a
   // third reading would have to be a deliberate edit to that constant.
-  const token = new RegExp(`^(?:\\*\\*)?(?:\`)?[ \\t]*(${CLAUSE2_VALUES.join('|')})(?![A-Za-z0-9_])`);
+  const token = new RegExp(`^(?:\\*\\*)?(?:\`)?[ \\t]*(${CLAUSE2_VALUES.join('|')})(?![A-Za-z0-9_])(?![ \\t]*\\|)`);
   const m = token.exec(rest);
   return m ? m[1] : null;
+}
+
+/**
+ * Does this MATCHING line describe the declaration instead of making one?
+ * (#17098)
+ *
+ * ## The defect, in one line
+ *
+ * `CLAUSE2_KEY_LINE` decides "is this a declaration?" by POSITION, and a bullet
+ * teaching the spelling puts the key in exactly the position a declaration
+ * does. So a standing-rules bullet quoting both spellings read `declared`, and
+ * on a claim comment whose only key-initial line was that bullet, the
+ * EXPLANATION became the card's declaration — measured fail-closed on #16454
+ * (a true `no` that hung `needs:contract-review` on both carriers) and measured
+ * fail-OPEN on #17277 / #17290, where the declaration limb read `yes` from the
+ * dispatching seat's own boilerplate and `--pair` exited 0, which is a landing
+ * pre-check's precondition ②. ⭐ The seat that documents the spelling is the
+ * seat that defeats the check.
+ *
+ * ## Two STRUCTURAL tells, and neither is a reading of prose
+ *
+ * ⛔ Loosening or tightening the POSITION rule was never available: the header
+ * one section up states why, and the reporter below it fires only where the key
+ * is not line-initial. So both tells below are facts about the line's markdown
+ * STRUCTURE, decided without reading a word of what the seat wrote:
+ *
+ *   TWICE-NAMED — the fixed key appears more than once on the line. A
+ *     declaration names the key once; a line naming it twice is showing both
+ *     spellings, which is the measured shape of the card's own specimen.
+ *   QUOTED-AND-CONTINUED — the key's inline-code span was opened before the
+ *     key, was NOT closed before the colon, closes later on the line, and the
+ *     line then CONTINUES outside that span. The value is inside a quotation
+ *     and the seat is talking about it. ⭐ The continuation is load-bearing in
+ *     both directions: a line that is only the quoted declaration
+ *     (`` `Clause-②: yes` ``, optionally bolded) is a DECLARATION and stays one
+ *     — that spelling is what this file's own remedy sentence teaches, so
+ *     refusing it would make the gate reject the shape it prescribes.
+ *
+ * ## What is NOT a tell here — the alternation, and why
+ *
+ * ⚠️ `readValueToken`'s token class ends at `[A-Za-z0-9_]`, so `Clause-②:
+ * yes|no` opens with a valid token and returned `yes`: a MENU read as a CHOICE.
+ * That is the same defect, and it is repaired one function down — as
+ * `malformed`, ⛔ not as a describing near miss, and the four axes agree:
+ *
+ *   业务需求 — measured: the live specimen (a bulleted, bolded, backticked
+ *     instruction) already fires QUOTED-AND-CONTINUED, so routing the
+ *     alternation to `malformed` costs nothing on any occurrence on the board.
+ *     The only line where the alternation is the SOLE tell is an undecorated
+ *     `Clause-②: yes|no` — a seat that pasted the template and did not choose.
+ *   长远合理性 — one state per fact. "The value slot holds a menu" is one fact
+ *     and it already has a state: `Clause-②: <yes|no>` reads `malformed`
+ *     today, as do `YES`, `nope` and an empty value. A second state for the
+ *     same fact is the dialect direction.
+ *   防 AI 写错 — the two remedies are not interchangeable. `malformed` names
+ *     the two spellings and says CHOOSE; the describing remedy says ADD a line
+ *     above. For an unfilled template the act that exists is choosing, and
+ *     "add a line above" invites a second, duplicate declaration. Strictness
+ *     is identical either way — both are a C2 row at exit 4.
+ *   不扩散 — three near-miss reasons where two structural ones carry every
+ *     measured shape is a widened surface with no pull behind it.
+ *
+ * @param {string} line — the whole line, for the twice-named count.
+ * @param {RegExpExecArray} m — this line's `CLAUSE2_KEY_LINE` match.
+ * @returns {boolean}
+ */
+function clause2LineDescribes(line, m) {
+  const s = String(line ?? '');
+  // TWICE-NAMED. `indexOf` from the last hit, so an overlap cannot double-count.
+  let seen = 0;
+  for (let at = s.indexOf(CLAUSE2_KEY_TEXT); at >= 0; at = s.indexOf(CLAUSE2_KEY_TEXT, at + CLAUSE2_KEY_TEXT.length)) {
+    if (++seen > 1) return true;
+  }
+  // QUOTED-AND-CONTINUED. The span is open at the colon exactly when the key's
+  // leading tick was consumed and its trailing one was not.
+  if (m[1] !== '`' || m[2] === '`') return false;
+  const closesAt = String(m[3] ?? '').indexOf('`');
+  if (closesAt < 0) return false;
+  // Trailing bold and whitespace close the line; anything else continues it.
+  return !/^[ \t]*(?:\*\*)?[ \t]*$/.test(String(m[3]).slice(closesAt + 1));
 }
 
 /** A quoted line for a finding row — capped, because a claim comment can be long. */
@@ -627,39 +882,283 @@ function quoteLine(line, cap = 160) {
  * @param {string} text
  * @returns {{ kind: 'declared', value: 'yes'|'no', line: string }
  *          | { kind: 'malformed', value: string, line: string }
- *          | { kind: 'near-miss', reason: 'inline-key'|'spelling', line: string }
+ *          | { kind: 'near-miss', reason: 'describing'|'inline-key'|'spelling', line: string }
  *          | null}
  *
  * Four-valued on purpose. `declared` and `malformed` are different facts about
  * a line that IS the key; `near-miss` is a fact about a line that is not. Any
  * collapse of these into "no" is the defect #13914 filed.
  *
- * The near miss carries a REASON because the two shapes owe opposite remedies:
- * `spelling` is a line that does not carry the fixed key at all, and `inline-key`
- * is a line that carries it exactly right but not at the start of a line. ⛔ The
- * reason changes the sentence, never the state — both are near misses, and a
- * near miss is not a declaration in either case.
+ * The near miss carries a REASON because the shapes owe different remedies:
+ * `spelling` is a line that does not carry the fixed key at all; `inline-key`
+ * is a line that carries it exactly right but not at the start of a line; and
+ * `describing` (#17098) is a line that carries it exactly right, at the start
+ * of a line, and is QUOTING the spelling rather than declaring a value —
+ * `clause2LineDescribes` holds the two structural tells. ⛔ The reason changes
+ * the sentence, never the state — all three are near misses, and a near miss
+ * is not a declaration in any of the three cases.
+ *
+ * ⭐ A describing line is SKIPPED, not returned: the scan continues past it.
+ * That is the half of #17098 the fixture could not see. `readClause2Line`
+ * returns on the first line that IS a declaration attempt, and a quotation is
+ * not one — so a claim comment whose real declaration sits BELOW its
+ * standing-rules bullet is now read from the declaration, where first-match
+ * previously stopped at the bullet. The describing line is kept only as the
+ * residue to quote back when nothing else on the body reads.
  */
 export function readClause2Line(text) {
   const lines = String(text ?? '').split(/\r?\n/);
+  let read = null;
+  let describing = null;
   let nearMiss = null;
   let inlineKey = null;
   for (const line of lines) {
     const m = CLAUSE2_KEY_LINE.exec(line);
     if (m) {
-      const value = readValueToken(m[1]);
-      if (value !== null) return { kind: 'declared', value, line: quoteLine(line) };
-      return { kind: 'malformed', value: quoteLine(m[1], 60), line: quoteLine(line) };
+      // #17098: a line that QUOTES the spelling is not a declaration attempt,
+      // so it neither answers nor stops the scan. ⛔ It is not `malformed`
+      // either — that state sends the seat to fix a value on a line that was
+      // never making a claim about one.
+      if (clause2LineDescribes(line, m)) {
+        if (describing === null) describing = quoteLine(line);
+        continue;
+      }
+      if (read !== null) continue;
+      const value = readValueToken(m[3]);
+      read = value !== null
+        ? { kind: 'declared', value, line: quoteLine(line) }
+        : { kind: 'malformed', value: quoteLine(m[3], 60), line: quoteLine(line) };
+      continue;
     }
     if (inlineKey === null && hasInlineClause2Key(line)) inlineKey = quoteLine(line);
     if (nearMiss === null && CLAUSE2_NEAR_MISS_LINE.test(line)) nearMiss = quoteLine(line);
   }
+  if (read !== null) return read;
   // The correctly-spelled key wins over a vocabulary near miss wherever the two
   // land in the body: it is the more actionable of the two residues, and reading
-  // order is not a fact about which one the seat should be sent to.
+  // order is not a fact about which one the seat should be sent to. By the same
+  // rule a DESCRIBING line outranks both: it carries the key in the fixed
+  // spelling AND at the start of a line, so of the three it is the one whose
+  // remedy is a single line the seat can write without moving anything.
+  if (describing !== null) return { kind: 'near-miss', reason: 'describing', line: describing };
   if (inlineKey !== null) return { kind: 'near-miss', reason: 'inline-key', line: inlineKey };
   return nearMiss === null ? null : { kind: 'near-miss', reason: 'spelling', line: nearMiss };
 }
+
+// ---------------------------------------------------------------------------
+// The self-solvable exit — one CORRECTION comment (#17366)
+// ---------------------------------------------------------------------------
+
+/**
+ * The correction comment's FIRST-LINE key, and the claim comment id it names.
+ *
+ * Spelled so that it can never be mistaken for the declaration key one section
+ * up: `Clause-②-correction` is not `Clause-②` followed by a colon, so
+ * `CLAUSE2_KEY_LINE`, `hasInlineClause2Key` and `CLAIM_COMMENT_MARKER` all miss
+ * it by construction rather than by ordering. The decoration tolerated is
+ * exactly the decoration `CLAUSE2_KEY_LINE` tolerates — markdown a seat writes
+ * without meaning anything by it — and nothing else.
+ *
+ * The id is DIGITS. ⛔ No angle brackets anywhere in the shape: GitHub's body
+ * sanitizer eats tag-shaped fragments, backticked ones included, so a carrier
+ * spelled with them can be stored short and read as absent — a second one-way
+ * door in a mechanism that exists to remove one.
+ */
+const CLAUSE2_CORRECTION_KEY_LINE =
+  /^[ \t]*(?:>[ \t]*)?(?:[-*][ \t]+)?(?:\*\*)?`?Clause-②-correction`?(?:\*\*)?[ \t]*:[ \t]*`?(\d{1,20})`?(?![0-9])/;
+
+/** The `Session:` line both carriers of the attribution comparison are read from. */
+const SESSION_KEY_LINE = /^[ \t]*(?:>[ \t]*)?(?:[-*][ \t]+)?(?:\*\*)?`?Session`?(?:\*\*)?[ \t]*:(.*)$/;
+
+/**
+ * The session a comment DECLARES about itself, or null.
+ *
+ * Read through the file's one `SESSION_TOKEN`, so a session id has a single
+ * spelling here whether it arrives on a verdict's `Reviewed-by:` line or on a
+ * claim's `Session:` line. The token must be the FIRST thing after the colon,
+ * the same calibration `readValueToken` states: `Session: \`session_x\` (GitHub
+ * \`os-sales\`, skills seat)` reads, and what follows the token is the seat's
+ * prose, which this file does not read.
+ *
+ * ⛔ `Claude-Session:` is a different key and is not matched: only line-start
+ * decoration may precede `Session`, and `Claude-` is not decoration.
+ *
+ * @param {string} text
+ * @returns {string|null}
+ */
+export function readSessionId(text) {
+  for (const line of String(text ?? '').split(/\r?\n/)) {
+    const m = SESSION_KEY_LINE.exec(line);
+    if (!m) continue;
+    const rest = String(m[1] ?? '').replace(/^[ \t]+/, '').replace(/^(?:\*\*)?`?[ \t]*/, '');
+    const hit = SESSION_TOKEN.exec(rest);
+    if (hit) return hit[1];
+  }
+  return null;
+}
+
+/**
+ * Read ONE comment as a correction, or null when it is not one.
+ *
+ * ⭐ The key must be on the comment's FIRST non-blank line, which is what makes
+ * the comment DEDICATED. A correction is a carrier, not a remark: a claim, a
+ * round report or a review that happens to quote the key further down is not
+ * one, and a heading or a mid-line form is not one either. That is the same
+ * call `cardDeclaration` makes about `Claim:` — the carrier is recognised by a
+ * fixed shape, and everything else on the thread is prose.
+ *
+ * The declaration INSIDE the correction is read by `readClause2Line`, the same
+ * reader, over the same `CLAUSE2_KEY_LINE`. A correction whose declaration is
+ * prose, malformed or absent reads `value: null` — it is still recognised as a
+ * correction, so that the row can say what is wrong with it instead of leaving
+ * the seat to guess why nothing changed.
+ *
+ * @param {{ id?: number|string, body?: string, created_at?: string }} row
+ * @returns {{ id: string|null, createdAt: string|null, claimId: string,
+ *   value: 'yes'|'no'|null, line?: string, session: string|null }|null}
+ */
+export function readClause2Correction(row) {
+  const body = String(row?.body ?? '');
+  const first = body.split(/\r?\n/).find((line) => line.trim() !== '');
+  if (first === undefined) return null;
+  const m = CLAUSE2_CORRECTION_KEY_LINE.exec(first);
+  if (!m) return null;
+  const read = readClause2Line(body);
+  return {
+    id: row?.id === undefined || row?.id === null ? null : String(row.id),
+    createdAt: row?.created_at ?? null,
+    claimId: m[1],
+    value: read?.kind === 'declared' ? read.value : null,
+    line: read?.kind === 'declared' ? read.line : read?.line,
+    session: readSessionId(body),
+  };
+}
+
+/** Newest first — by timestamp, falling back to thread order when it is unreadable. */
+function newestFirst(a, b) {
+  const ap = Date.parse(a.createdAt ?? '');
+  const bp = Date.parse(b.createdAt ?? '');
+  if (Number.isFinite(ap) && Number.isFinite(bp) && ap !== bp) return bp - ap;
+  return b.index - a.index;
+}
+
+/**
+ * Which correction, if any, governs this card's declaration — and when none
+ * does, WHY, in a sentence that names an act the claiming seat can perform.
+ *
+ * ⛔ Every `ignored` branch owes a reachable remedy. The card this mechanism
+ * closes was filed because three sanctioned acts were closed at once; a refusal
+ * here that a seat cannot answer would rebuild that door one room over, so the
+ * note always names what to post next.
+ *
+ * @param {{ id?: number|string, body?: string, created_at?: string }[]} commentRows
+ * @param {{ id?: number|string, body?: string }[]} pool — the governing claim rows.
+ * @returns {{ state: 'none' }
+ *   | { state: 'applies', value: 'yes'|'no', detail?: string, note: string }
+ *   | { state: 'ignored', note: string }}
+ */
+function applicableCorrection(commentRows, pool) {
+  const corrections = [];
+  commentRows.forEach((row, index) => {
+    const read = readClause2Correction(row);
+    if (read) corrections.push({ ...read, index });
+  });
+  if (corrections.length === 0) return { state: 'none' };
+
+  const claimById = new Map();
+  for (const row of pool) {
+    if (row?.id === undefined || row?.id === null) continue;
+    claimById.set(String(row.id), row);
+  }
+  const sorted = [...corrections].sort(newestFirst);
+  const names = (c) => `\`${CLAUSE2_CORRECTION_KEY_TEXT}: ${c.claimId}\``;
+  const chosen = sorted.find((c) => claimById.has(c.claimId)) ?? null;
+
+  if (chosen === null) {
+    const known = [...claimById.keys()];
+    return {
+      state: 'ignored',
+      note:
+        `a correction comment is on the thread (${names(sorted[0])}) but it names a comment that is ` +
+        'NOT this card\'s governing claim, so it corrects nothing here and is IGNORED — ⛔ never ' +
+        'silently, because a seat that posted it would otherwise wait on a repair that never ' +
+        'happened. ' +
+        (known.length > 0
+          ? `The governing claim comment's id is ${known.join(' or ')}; post one correction naming it.`
+          : 'The governing claim comment carries no id in this reading, so no correction can be ' +
+            'matched to it — that is a gap in the reading, not a defect in the correction.'),
+    };
+  }
+  if (chosen.value === null) {
+    return {
+      state: 'ignored',
+      note:
+        `the correction comment ${names(chosen)} carries no readable declaration` +
+        (chosen.line ? `; the nearest thing in it is ${JSON.stringify(chosen.line)}` : '') +
+        '. A correction is read by the SAME reader as a claim — the fixed spelling is ' +
+        '`Clause-②: yes` or `Clause-②: no`, exactly those two, on a line of its own — so prose in ' +
+        'a correction is prose. IGNORED; post one carrying the line in that spelling.',
+    };
+  }
+
+  const claimRow = claimById.get(chosen.claimId);
+  const claimSession = readSessionId(claimRow?.body);
+  const shared =
+    `it supersedes claim comment ${chosen.claimId}'s own declaration, which is NOT edited and ` +
+    'still reads as it was written. ⛔ Nothing was filled in on the seat\'s behalf: the value is ' +
+    'the seat\'s, in the fixed spelling, and this script still writes nothing.';
+
+  if (claimSession === null) {
+    return {
+      state: 'applies',
+      value: chosen.value,
+      detail: chosen.line,
+      note:
+        `the declaration is read from a CORRECTION comment (${names(chosen)}) as ` +
+        `\`Clause-②: ${chosen.value}\`, and ${shared} ⚠️ ATTRIBUTION NOT VERIFIED: the governing ` +
+        'claim comment carries no `Session:` line, so there is nothing to compare the correction ' +
+        'against. The reading stands — refusing it would put the card back in the state this ' +
+        'mechanism exists to end — but a reader owes it a second look, and the claim that omitted ' +
+        'the line is the thing to fix (SKILL.md 〈模板与表〉: 「session ID 不可省」).',
+    };
+  }
+  if (chosen.session === null) {
+    return {
+      state: 'ignored',
+      note:
+        `the correction comment ${names(chosen)} carries no \`Session:\` line, so it does not say ` +
+        'whose act it is. A correction is the CLAIMING seat\'s own judgement rewritten, and ⛔ no ' +
+        'seat may declare on another\'s behalf — so the line is required, not decoration. ' +
+        `IGNORED; post one carrying \`Session:\` with the claiming session (\`${claimSession}\`, ` +
+        'which the governing claim declares).',
+    };
+  }
+  if (chosen.session !== claimSession) {
+    return {
+      state: 'ignored',
+      note:
+        `the correction comment ${names(chosen)} declares session \`${chosen.session}\` while the ` +
+        `governing claim declares \`${claimSession}\`. ⛔ A correction is the CLAIMING seat's own ` +
+        'act; a different session rewriting it would be one seat declaring on another\'s behalf, ' +
+        'which is the refusal the C2 row states. IGNORED; the claiming session posts the ' +
+        'correction itself.',
+    };
+  }
+  return {
+    state: 'applies',
+    value: chosen.value,
+    detail: chosen.line,
+    note:
+      `the declaration is read from a CORRECTION comment (${names(chosen)}) as ` +
+      `\`Clause-②: ${chosen.value}\`, attributed to the claiming session \`${claimSession}\` — the ` +
+      'same session the governing claim declares. ⚠️ A DECLARED identity, never a verified one: ' +
+      'the value is copyable text and the fleet writes under one GitHub login, so the comparison ' +
+      `is on what the comments SAY, exactly as C4's is. And ${shared}`,
+  };
+}
+
+/** The key as prose, for the sentences above — declared once, beside the regex that reads it. */
+const CLAUSE2_CORRECTION_KEY_TEXT = 'Clause-②-correction';
 
 /**
  * The declaration limb of one CARD, judged over its comment thread.
@@ -679,6 +1178,20 @@ export function readClause2Line(text) {
  * is the claim comment. `missing` — a claim comment IS there and carries no
  * declaration line; the carrier exists and the line is what is owed.
  *
+ * ⭐ A THIRD fact sits underneath both of them, and it is not a reading of the
+ * declaration at all: WHICH claim comment is the carrier. The designated
+ * carrier is the GOVERNING claim, and governance is resolved by a branch parse
+ * — so a newest claim comment that names no parseable branch used to be
+ * discarded, silently handing this limb an OLDER claim's declaration to read.
+ * That is `claim-branch-unparsed`, and it is returned BEFORE any line is read
+ * from any comment, because every reading below it would be a reading of the
+ * wrong comment. It is neither of the two not-read states above and ⛔ never a
+ * `no`: an unparsed claim is an UNCLASSIFIED result, and the caller accounts it
+ * as UNJUDGED (exit 2) rather than as a verdict about this pair. The measured
+ * cost of the silence is on #16322 — the limb read a superseded `Clause-②: no`
+ * and exited 4 for two rounds — and its sharper half is the sibling that passed
+ * because the older claim happened to agree.
+ *
  * The predicate that separates them is `CLAIM_COMMENT_MARKER`, imported rather
  * than restated: a claim comment is one whose body carries a LINE BEGINNING
  * `Claim:` (or `Claimed:`, optionally blockquoted), and that one spelling is
@@ -690,12 +1203,35 @@ export function readClause2Line(text) {
  *
  * @param {{ body?: string, created_at?: string }[]|null} commentRows — the REST
  *   comment rows, or `null` when the thread could NOT be read.
- * @returns {{ state: 'declared'|'malformed'|'misplaced'|'missing'|'absent'|'unreadable',
- *   value?: 'yes'|'no', detail?: string, nearMissReason?: 'inline-key'|'spelling' }}
+ * @returns {{ state: 'declared'|'malformed'|'misplaced'|'missing'|'absent'|'unreadable'
+ *   |'claim-branch-unparsed',
+ *   value?: 'yes'|'no', detail?: string, nearMissReason?: 'describing'|'inline-key'|'spelling',
+ *   correctionNote?: string, malformedClaim?: object, governingClaim?: object }} —
+ *   `correctionNote` rides alongside for exactly one purpose, the same way
+ *   `nearMissReason` does: the rows below print it. ⛔ It is not part of the state
+ *   union and no verdict, count or exit reads it. `malformedClaim` /
+ *   `governingClaim` ride the same way, on the `claim-branch-unparsed` state only,
+ *   so its sentence can name the comment and say what governance did instead.
  */
 export function cardDeclaration(commentRows) {
   if (!Array.isArray(commentRows)) return { state: 'unreadable' };
-  const claim = governingClaim(commentRows);
+  const governance = claimGovernance(commentRows);
+  // ⛔ FIRST, and ahead of the correction read (#17366) as well as of every
+  // line read below. When the newest claim comment parses to zero branches,
+  // `governing` is an OLDER claim or nothing at all — so the pool the reads
+  // below are built from is the wrong carrier, and a correction naming that
+  // older claim's id would be applied to it too. Every one of those readings
+  // would be about a comment the seat has already replaced, which is the
+  // silence this state exists to end. ⛔ Never resolved by guessing a branch
+  // out of the claim's prose: the reader is not widened here or anywhere.
+  if (governance.malformed) {
+    return {
+      state: 'claim-branch-unparsed',
+      malformedClaim: governance.malformed,
+      governingClaim: governance.governing,
+    };
+  }
+  const claim = governance.governing;
   const claimRows = commentRows.filter((row) => CLAIM_COMMENT_MARKER.test(String(row?.body ?? '')));
   // The governing claim is the one the board is waiting on; when no comment
   // names a branch, every claim-marked comment is still a claim carrier and is
@@ -706,25 +1242,51 @@ export function cardDeclaration(commentRows) {
     : claimRows;
   const pool = governing.length > 0 ? governing : claimRows;
 
+  // The CORRECTION reading comes first (#17366), and it supersedes in BOTH
+  // directions: an unreadable claim declaration and a claim declaration whose
+  // VALUE the seat got wrong are repaired by the same act, because the seat has
+  // no edit for either. `applicableCorrection` never widens what counts as an
+  // answer — the correction's own line is read by `readClause2Line` — so what
+  // this branch changes is WHICH COMMENT carried it, never WHAT was accepted.
+  const correction = applicableCorrection(commentRows, pool);
+  if (correction.state === 'applies') {
+    return {
+      state: 'declared', value: correction.value, detail: correction.detail, correctionNote: correction.note,
+    };
+  }
+  // An IGNORED correction rides along on whatever the thread reads without it,
+  // so the row below can say why the repair did not land. ⛔ It never changes
+  // the state: a correction that was not read is not a declaration.
+  const correctionNote = correction.state === 'ignored' ? correction.note : undefined;
+  const withNote = (o) => (correctionNote === undefined ? o : { ...o, correctionNote });
+
   let malformed = null;
   let nearMiss = null;
   for (const row of pool) {
     const read = readClause2Line(row?.body);
-    if (read?.kind === 'declared') return { state: 'declared', value: read.value, detail: read.line };
+    if (read?.kind === 'declared') return withNote({ state: 'declared', value: read.value, detail: read.line });
     if (read?.kind === 'malformed' && malformed === null) malformed = read;
     if (read?.kind === 'near-miss' && nearMiss === null) nearMiss = read;
   }
-  if (malformed) return { state: 'malformed', detail: malformed.line };
+  if (malformed) return withNote({ state: 'malformed', detail: malformed.line });
 
   // Not in the claim carrier. Is it on the thread at all? That distinction is
   // the whole point of this function.
+  //
+  // ⛔ A recognised CORRECTION comment is skipped here, and that is the #17366
+  // mechanism's own boundary rather than a convenience: a correction is this
+  // limb's designated second carrier, so reading its line as MISPLACED would
+  // send the seat to move a line that is already where the rule puts it. An
+  // IGNORED correction is skipped for the same reason — the note above says
+  // what is wrong with it, and `misplaced` would say something false.
   for (const row of commentRows) {
+    if (readClause2Correction(row) !== null) continue;
     const read = readClause2Line(row?.body);
-    if (read?.kind === 'declared') return { state: 'misplaced', value: read.value, detail: read.line };
+    if (read?.kind === 'declared') return withNote({ state: 'misplaced', value: read.value, detail: read.line });
     if (read?.kind === 'malformed' && malformed === null) malformed = read;
     if (read?.kind === 'near-miss' && nearMiss === null) nearMiss = read;
   }
-  if (malformed) return { state: 'malformed', detail: malformed.line };
+  if (malformed) return withNote({ state: 'malformed', detail: malformed.line });
   // Which of the two not-read states this is, told apart by whether the carrier
   // exists at all. `claimRows` is non-empty exactly when some comment matched
   // the imported claim predicate, and `pool` is derived from it — so this asks
@@ -734,11 +1296,11 @@ export function cardDeclaration(commentRows) {
   // state union and no verdict, count or exit reads it — a near miss with a
   // correctly-spelled key is the same `missing` this function has always
   // returned, and #12409's boundary moves by not one character.
-  return {
+  return withNote({
     state: claimRows.length > 0 ? 'missing' : 'absent',
     detail: nearMiss?.line,
     nearMissReason: nearMiss?.reason,
-  };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -860,9 +1422,43 @@ export function c1CarrierSplit(pair) {
  * "no reading" told a seat neither which of the two it was in nor what to
  * write, and let a round report state one number about two different owings.
  */
+const TEMPLATE_POINTER =
+  'The claim template in `.claude/skills/pm-dispatch/SKILL.md` 〈模板与表〉 already carries the ' +
+  'literal `Clause-②: yes | no` line: COPY the template\'s line rather than composing one. Every ' +
+  'one of the five misses measured in the filing shift was a line composed from memory, and no ' +
+  'seat needs to know this regex to satisfy it.';
+
+/**
+ * The remedy that names WHO can act and HOW — the sentence #17366 was filed to
+ * get, in three parts, because the old one («add the line to that claim
+ * comment») named an act the claiming seat may have no tool for.
+ *
+ * ⛔ Nothing here prescribes a VALUE, and part (3) is a shape, never a fill-in:
+ * the declaration is still the seat's judgement, written by the seat.
+ */
+const CORRECTION_REMEDY =
+  'Remedy — WHO can act, and HOW: the CLAIMING SEAT itself, and it needs no comment edit. ' +
+  `(1) ${TEMPLATE_POINTER} ` +
+  '(2) ⚠️ A claim comment that is ALREADY POSTED cannot be repaired by editing it from every ' +
+  'seat: the MCP GitHub tool set has no edit-an-issue-comment call, and ⛔ a second `Claim:` is ' +
+  'forbidden by the claim protocol. ⛔ Do not wait for somebody outside the repository. ' +
+  '(3) Post ONE new comment on this card whose FIRST line is `Clause-②-correction: 5642248126` — ' +
+  'the numeric id of the claim comment it corrects, digits only — followed by the declaration in ' +
+  'the fixed spelling on a line of its own, and a `Session:` line carrying the claiming session. ' +
+  'The newest correction naming the governing claim SUPERSEDES that claim\'s declaration, in ' +
+  'both directions; one naming any other comment, or declaring a different session, is ignored ' +
+  'with a printed reason. ⛔ Never a second `Claim:`.';
+
 export function c2DeclarationUnreadable(pair) {
   const d = cardDeclaration(pair?.cardComments ?? null);
   const head = `card #${pair.card} (delivering open PR #${pair.pr}${pair.draft ? ' (draft)' : ''})`;
+  // An IGNORED correction is appended to whichever row the thread earns, so a
+  // seat that DID try the self-solvable exit is told why it did not land — ⛔
+  // never left to read a row that describes only the claim and conclude the
+  // correction was never seen (#17366).
+  const withCorrection = (row) => (row === null || d.correctionNote === undefined
+    ? row
+    : `${row} ⚠️ A correction comment WAS posted and did NOT take effect: ${d.correctionNote}`);
   const fixed = `the fixed spelling is \`Clause-②: yes\` or \`Clause-②: no\`, exactly those two`;
   const notADecision =
     'A missing reading is NOT a declared `no`: one of those is a decision and the other is an ' +
@@ -871,26 +1467,62 @@ export function c2DeclarationUnreadable(pair) {
     'the claiming seat\'s behalf; the declaration IS the judgement. ⛔ And do not relax the ' +
     'spelling to accept the prose: a predicate that reads prose is a heuristic, and the measured ' +
     'terminus of that direction is a check that can barely fail.';
+  return withCorrection(c2Sentence(d, head, fixed, notADecision));
+}
+
+/**
+ * The C2 sentence itself, one per state — split out so the correction note is
+ * appended in exactly one place rather than on each branch.
+ */
+function c2Sentence(d, head, fixed, notADecision) {
   switch (d.state) {
     case 'declared':
       return null;
     case 'unreadable':
       return null; // accounted as UNJUDGED by the caller — never silently clean.
+    case 'claim-branch-unparsed':
+      // Same posture, same reason: the carrier itself is unresolved, so this is
+      // UNJUDGED rather than a verdict about the pair, and `pairUnjudged` prints
+      // the whole sentence and raises exit 2. ⛔ Returning a C2 row here would
+      // make an unclassified result exit 4 — a verdict — which is exactly the
+      // reading the filing card refuses ('never a no').
+      return null;
     case 'misplaced':
       return (
         `${head} — the \`Clause-②\` declaration is MISPLACED: the fixed spelling appears on the ` +
         `thread (${JSON.stringify(d.detail)}) but NOT in the card's claim comment, which is the ` +
         'carrier the enqueue gate\'s content limb reads. The thinking was done and written down; ' +
-        `it is in a place the predicate does not look. Move the line into the claim comment — ` +
-        `${fixed}. ${NEVER_WRITES}`
+        `it is in a place the predicate does not look. The line belongs in the claim comment — ` +
+        `${fixed}. ${CORRECTION_REMEDY} ${NEVER_WRITES}`
       );
     case 'malformed':
       return (
         `${head} — the \`Clause-②\` line is MALFORMED: ${JSON.stringify(d.detail)} carries the key ` +
         `but not one of the two values, so there is no reading. ${fixed}. ${notADecision} ` +
-        `${NEVER_WRITES}`
+        `${CORRECTION_REMEDY} ${NEVER_WRITES}`
       );
     case 'missing':
+      // #17098: the key is at the start of a line, spelled exactly right, and
+      // the line is QUOTING the spelling rather than declaring a value. The
+      // state is `missing` and exits 4 exactly as it always did; what changes
+      // is that this line USED TO BE READ as the card's declaration, so the
+      // remedy has to say what the seat is looking at. ⛔ It never tells the
+      // seat to edit the quoted line: an explanation of the protocol is a
+      // correct thing to have written.
+      if (d.nearMissReason === 'describing') {
+        return (
+          `${head} — NO READING on the declaration limb: the thread carries the key in the ` +
+          `fixed spelling and at the START of a line, on ${JSON.stringify(d.detail)}, but that ` +
+          'line QUOTES the spelling rather than declaring a value — it names the key twice, or ' +
+          'holds the key inside an inline-code span the line goes on talking outside of. ⛔ A ' +
+          'quotation of the protocol is not a judgement about this diff, and the two are told ' +
+          'apart by the line\'s markdown structure, never by reading its words. ⛔ There is ' +
+          'nothing to fix on the quoted line — it is a correct thing to have written. What is ' +
+          'owed is a declaration of its OWN, ABOVE it: this limb reads the first line that IS ' +
+          `a declaration attempt, so position is the whole remedy — ${fixed}. ` +
+          `${CORRECTION_REMEDY} ${notADecision} ${NEVER_WRITES}`
+        );
+      }
       // The key is on the thread, spelled exactly right, and simply not at the
       // start of a line. The state is unchanged — it was not read, so it is
       // still `missing` and still exits 4 — but the remedy that ships with the
@@ -905,8 +1537,8 @@ export function c2DeclarationUnreadable(pair) {
           'line-anchored — only whitespace, a blockquote `>`, a list bullet and backtick/bold ' +
           'wrapping may precede the key — so a key that follows another field on a shared line is ' +
           'not read, however correctly it is spelled. ⛔ There is no typo to find on that line. ' +
-          'Remedy: put the `Clause-②: yes|no` line on a line of its OWN in the card\'s claim ' +
-          `comment, unchanged otherwise — ${fixed}. ${notADecision} ${NEVER_WRITES}`
+          'The `Clause-②: yes|no` line belongs on a line of its OWN, unchanged otherwise — ' +
+          `${fixed}. ${CORRECTION_REMEDY} ${notADecision} ${NEVER_WRITES}`
         );
       }
       return (
@@ -914,7 +1546,8 @@ export function c2DeclarationUnreadable(pair) {
         `missing: the card's claim comment is there and carries no \`Clause-②:\` line in the ` +
         'fixed spelling' +
         (d.detail ? `, and the nearest thing on the thread is ${JSON.stringify(d.detail)}` : '') +
-        `. Remedy: add the line to that claim comment — ${fixed}. ${notADecision} ${NEVER_WRITES}`
+        `. That claim comment owes the line — ${fixed}. ${CORRECTION_REMEDY} ${notADecision} ` +
+        `${NEVER_WRITES}`
       );
     default:
       return (
@@ -922,10 +1555,11 @@ export function c2DeclarationUnreadable(pair) {
         'missing: no comment on the card\'s thread is a claim comment, so the carrier this limb ' +
         'reads does not exist and no line could have been read from it' +
         (d.detail ? `; the nearest thing on the thread is ${JSON.stringify(d.detail)}` : '') +
-        '. Remedy: write the claim comment with a first line beginning `Claim:`, then the ' +
-        `\`Clause-②: yes|no\` line; ${fixed}. A heading-style claim (\`## Claim — …\`) is not a ` +
-        'claim comment to this predicate, however complete the reasoning under it. ' +
-        `${notADecision} ${NEVER_WRITES}`
+        '. Remedy — WHO can act, and HOW: the claiming seat, with one comment it can post today. ' +
+        'Write the claim comment with a first line beginning `Claim:`, then the ' +
+        `\`Clause-②: yes|no\` line; ${fixed}. ${TEMPLATE_POINTER} A heading-style claim ` +
+        '(`## Claim — …`) is not a claim comment to this predicate, however complete the ' +
+        `reasoning under it. ${notADecision} ${NEVER_WRITES}`
       );
   }
 }
@@ -941,8 +1575,10 @@ export function c2DeclarationUnreadable(pair) {
  * ⛔ Read through `cardDeclaration` — the same function, the same imported
  * `CLAIM_COMMENT_MARKER`, the same two spellings. Only a `declared` state on a
  * sibling's own claim comment is a carrier here: `misplaced`, `malformed`,
- * `missing`, `absent` and `unreadable` are all NOT declarations on the sibling
- * either, exactly as they are not on the subject card. Nothing about what
+ * `missing`, `absent`, `claim-branch-unparsed` and `unreadable` are all NOT
+ * declarations on the sibling either, exactly as they are not on the subject
+ * card — and the unparsed one least of all, since on that sibling this file
+ * cannot even say WHICH comment would have carried the line. Nothing about what
  * counts as an answer moves in this function; what moves is only which card is
  * being asked.
  *
@@ -988,7 +1624,11 @@ export function siblingDeclarations(pair, pairs) {
  * protocol, so a dispatched card whose declaration line is missing reads
  * `missing` and keeps its C2 row and its exit 4. `malformed`, `misplaced` and
  * `missing` all mean a seat DID read this card and owes it something a
- * legitimate act can supply; none of them is covered here.
+ * legitimate act can supply; none of them is covered here. Neither is
+ * `claim-branch-unparsed`, and for a sharper reason: that state means this file
+ * could not resolve which comment is the carrier AT ALL, so borrowing a
+ * sibling's declaration would answer a question this card has not yet been able
+ * to ask. It is UNJUDGED (exit 2), which the caller reaches before any row.
  */
 export function readsSiblingDeclaration(pair, pairs) {
   if (cardDeclaration(pair?.cardComments ?? null).state !== 'absent') return false;
@@ -1252,6 +1892,44 @@ export function c3DeclaredYesUngated(pair) {
 const VERDICT_MARKER = /^[ \t]*(?:>[ \t]*)?(?:[-*][ \t]+)?(?:\*\*)?`?VERDICT`?(?:\*\*)?[ \t]*:/;
 
 /**
+ * Is this comment a contract-review verdict at all — in EITHER live dialect.
+ *
+ * ⭐ The corpus moved and the discriminator did not (#17346). `VERDICT_MARKER`
+ * was measured on the 2026-09-01 board, where a verdict opened a fenced block
+ * whose first line was `VERDICT: PASS`. Every contract-review verdict measured
+ * on the 2026-09-09 board is written the other way — a `## Contract review`
+ * heading, the reviewed head as a code span, `**Verdict: PASS WITH FINDINGS**`
+ * in bold mixed case — and carries no uppercase `VERDICT:` line anywhere. Read
+ * with the 2026-09-01 marker alone, all four measured specimens answered `null`
+ * (PR #17073 comments 5597841101 / 5600239551, PR #17116 5600627944, PR #17090
+ * 5598904803), so C4 had NO live population: `--pair` exit 0 said nothing about
+ * independence for any pair reviewed in the current dialect, and the
+ * self-review shape this row exists to refuse could not be reached at all.
+ *
+ * ⭐ The second dialect is H51's, IMPORTED and not restated —
+ * `CONTRACT_REVIEW_HEADING_MARKER` plus `contractReviewHeadMatch` against this
+ * pair's head, the same two facts C6 recognises a review of record with. One
+ * recognition, two rows: C4 and C6 can never disagree about what a verdict
+ * comment looks like, which is the drift a second regex here would be.
+ *
+ * ⛔ NOT a regex for the verdict WORD, in either dialect. This file's header
+ * bans verdict-reading as 自查放行, H51 is verdict-agnostic by construction,
+ * and the corpus already spells the word two ways — the "check that can barely
+ * fail" #12409 measured. What is read is that a verdict comment EXISTS and who
+ * it says wrote and reviewed the diff, never what it concluded.
+ *
+ * ⭐ The head is what keeps the heading path honest, and it is REQUIRED for it:
+ * a comment that merely quotes a review heading is not a verdict on this head,
+ * and `contractReviewHeadMatch` answers `null` below `H51_SHA_MIN_HEX`. A
+ * caller with no head in hand therefore gets exactly the 2026-09-01 reading —
+ * the fenced marker alone — rather than a looser one.
+ */
+function isVerdictComment(body, headSha) {
+  if (String(body ?? '').split(/\r?\n/).some((line) => VERDICT_MARKER.test(line))) return true;
+  return CONTRACT_REVIEW_HEADING_MARKER.test(String(body ?? '')) && contractReviewHeadMatch(body, headSha) !== null;
+}
+
+/**
  * The two lines a verdict carries about its own authorship, in the ONE spelling
  * that counts (maintainer 2026-09-01, verbatim and untranslated: 「同意 A」).
  *
@@ -1296,8 +1974,28 @@ const AUTHORSHIP_KEY_LINES = new Map(
  * ruling's own: `claude/…` can never equal `session_…`, so equality on the pair
  * still means exactly what the ruling says it means — the SAME SESSION on both
  * lines — and a branch on the left is silent without a second rule to say so.
+ *
+ * ⛔ `Reviewed-by:` is NOT widened for the isolated review subagent, and that is
+ * the 2026-09-02 ruling held rather than a gap (#17346). Every 2026-09-09
+ * specimen writes the value as prose naming the reviewing MODEL and its
+ * transcript-verification count, because an isolated reviewer has no session of
+ * its own. ⛔ The fixtures below carry the SHAPE and not the model id: the tier
+ * constant has exactly one spelling in this tree (`dispatch-gates.mjs`), and a
+ * review label or fixture that names a model is the thing the maintainer ruled
+ * against — 「needs:fable-review 这个标签不好,下次模型升级怎么办」. Admitting that prose would retire the reading: a value that names no
+ * identity compares to nothing, so the equality test that IS the independence
+ * clause would answer about every pair the way it answers about none. The
+ * remedy is on the WRITING side, and the identity it needs already exists —
+ * the seat that RENDERS or ADOPTS the verdict has a session, and an adoption
+ * record already carries it (specimen 5597841101 names
+ * `session_01Tep4AYXZvyBA7jsvne5KZV` in its own opening sentence, one line
+ * above a `Reviewed-by:` line that names no session at all).
+ * `references/contract-review.md` :35 states it for the author; here a prose
+ * value reads `malformed`, which is a verdict written without its reviewer's
+ * session — a true reading of a real carrier defect, ⛔ never a false positive
+ * to be tolerated away in the reader.
  */
-const SESSION_TOKEN = /^(?:\*\*)?(?:`)?[ \t]*(session_[A-Za-z0-9]+)(?![A-Za-z0-9_])/;
+const SESSION_TOKEN = /^(session_[A-Za-z0-9]+)(?![A-Za-z0-9_])/;
 
 /**
  * A `mode:subagent` dev's identity: the branch the claim protocol names it by.
@@ -1305,16 +2003,44 @@ const SESSION_TOKEN = /^(?:\*\*)?(?:`)?[ \t]*(session_[A-Za-z0-9]+)(?![A-Za-z0-9
  * an alphanumeric, so the seat's reasoning may follow the token — a trailing
  * `,` or `.` belongs to the prose, never to the branch.
  */
-const BRANCH_TOKEN = /^(?:\*\*)?(?:`)?[ \t]*(claude\/[A-Za-z0-9._/-]*[A-Za-z0-9])/;
+const BRANCH_TOKEN = /^(claude\/[A-Za-z0-9._/-]*[A-Za-z0-9])/;
+
+/**
+ * The markdown decoration a VALUE may open with — stripped, in any order and
+ * any repetition, before either token regex is applied.
+ *
+ * ⭐ Measured, and the fix for a genuine asymmetry (#17346). The key regexes
+ * tolerate `**Implemented-by:**` — bold wrapping the key AND its colon — which
+ * is what every 2026-09-09 specimen writes. But the colon inside the bold means
+ * the captured VALUE opens with the closing `**`, and the old token regexes
+ * admitted a leading `**` only when a backtick or the token followed it with no
+ * space between: on `- **Implemented-by:** \`claude/issue-x\`` the value read
+ * `"** \`claude/issue-x\`"` and BOTH tokens answered `null`. So the key was
+ * recognised, the value was not, and the pair read `malformed` on a comment
+ * whose author had written a perfectly good identity — a false positive
+ * produced by the reader, which is a different fact from the corpus's own
+ * prose values and is fixed HERE rather than tolerated downstream.
+ *
+ * ⛔ It strips DECORATION only — spaces, `**`, backticks — never a word. The
+ * near misses the ruling turns on are untouched: `branch \`claude/…\``,
+ * `the dev on claude/…` and the corpus's `isolated <model> subagent` all stop
+ * the strip at their first letter, so the token is still required to be the
+ * FIRST thing after the colon and its decoration.
+ */
+const VALUE_DECORATION = /^(?:[ \t]+|\*\*|`)+/;
+
+function stripValueDecoration(raw) {
+  return String(raw ?? '').replace(VALUE_DECORATION, '');
+}
 
 function readSessionToken(raw) {
-  const m = SESSION_TOKEN.exec(String(raw ?? '').replace(/^[ \t]+/, ''));
+  const m = SESSION_TOKEN.exec(stripValueDecoration(raw));
   return m ? m[1] : null;
 }
 
 /** The `Implemented-by:` value — a session id, or a dev branch. */
 function readImplementerToken(raw) {
-  const rest = String(raw ?? '').replace(/^[ \t]+/, '');
+  const rest = stripValueDecoration(raw);
   const m = SESSION_TOKEN.exec(rest) ?? BRANCH_TOKEN.exec(rest);
   return m ? m[1] : null;
 }
@@ -1343,10 +2069,15 @@ const AUTHORSHIP_KEY_VALUES = new Map([
  * that ⛔ must never turn a historic pair red. `malformed` is a carrier that was
  * STARTED and left unreadable, which is a different fact from never starting it:
  * a comparison needs two IDs, and half a pair compares to nothing.
+ *
+ * `headSha` is what the heading dialect is recognised against, and it is
+ * OPTIONAL: omitted, `isVerdictComment` falls back to the fenced marker alone,
+ * so a caller that has no head reads exactly what this function read before
+ * #17346 rather than something looser.
  */
-export function readVerdictAuthorship(text) {
+export function readVerdictAuthorship(text, headSha) {
+  if (!isVerdictComment(text, headSha)) return null;
   const lines = String(text ?? '').split(/\r?\n/);
-  if (!lines.some((line) => VERDICT_MARKER.test(line))) return null;
 
   const seen = new Map();
   for (const line of lines) {
@@ -1375,7 +2106,47 @@ export function readVerdictAuthorship(text) {
 }
 
 /**
- * The authorship state of one CARD's thread, judged on its GOVERNING verdict.
+ * The threads C4 judges a pair's authorship on — the card's always, the PR's
+ * when it is already in hand.
+ *
+ * ⭐ ONE carrier, two threads, because that is what the rule text says: the
+ * record is 「一条评论落 PR 或卡」, so a reader that consulted only one of them
+ * would answer about where the seat happened to post rather than about the
+ * pair. Measured 2026-09-10 on the corpus that filed #17346: all four live
+ * verdicts sit on the PR thread and NONE of the three delivering cards
+ * (#16657, #16861, #16335) carries a `## Contract review` heading at all —
+ * 0 of 3 — so a card-only C4 stays silent on the live board however good its
+ * discriminator is.
+ *
+ * ⛔ It buys NO read. `pair.prComments` is filled by `gather`'s fourth pass for
+ * the COMPLETED pairs and nobody else (`needsRecordRead`), so this union is
+ * opportunistic by construction: on a completed pair C4 reads card + PR, and
+ * on every other pair state it reads the card thread alone — the same set C2
+ * already fetched, at the same cost.
+ *
+ * ⚠️ The declared LIMIT that follows, stated rather than bought: a verdict on
+ * a PENDING pair's PR thread is INVISIBLE here. That population is a pair whose
+ * gate is still hung — the review is in flight — and buying a thread per open
+ * pair to reach it would double this file's read budget for a fact that the
+ * completed state re-reads a moment later anyway. ⛔ Not a fetch class; the
+ * boundary is the honest answer.
+ *
+ * A card thread that could not be READ is `null` and stays `null` — an unread
+ * thread is never an absent verdict (#4690). A PR thread that was owed and came
+ * back short is `null` too, and is deliberately NOT doubled into this reading:
+ * `reviewOfRecord` already owns that gap and `pairUnjudged` already prints it,
+ * so the pair is UNJUDGED and never renders clean.
+ */
+export function verdictThreadRows(pair) {
+  const card = pair?.cardComments;
+  if (!Array.isArray(card)) return null;
+  const pr = pair?.prComments;
+  return Array.isArray(pr) ? [...card, ...pr] : card;
+}
+
+/**
+ * The authorship state of one pair's verdict threads, judged on its GOVERNING
+ * verdict.
  *
  * ⭐ The newest verdict that carries the pair governs, and the choice is
  * load-bearing rather than tidy: a self-review followed by an independent
@@ -1387,33 +2158,43 @@ export function readVerdictAuthorship(text) {
  * before the carrier existed and cannot be judged, so it neither cleans a pair
  * nor dirties one.
  *
- * @param {{ body?: string, created_at?: string }[]|null} commentRows
+ * ⚠️ Newest-governs is also the ONE direction in which recognising more
+ * verdicts can turn an existing exit 4 into an exit 0: a newer independent
+ * verdict, previously invisible because it was written in the heading dialect
+ * or posted on the PR thread, displaces an older card-thread self-review. That
+ * is this row's own declared remedy arriving through a widened reading, not a
+ * relaxation — the self-review it replaces was cleared by a seat that did not
+ * write the diff, which is exactly what the row asks for — and it is pinned in
+ * both directions in the self-test rather than left to be discovered.
+ *
+ * @param {{ id?: number, body?: string, created_at?: string }[]|null} commentRows
+ * @param {string|null|undefined} headSha the head the heading dialect is recognised against
  * @returns {{ state: 'unreadable', reason: string }
  *          | { state: 'none' }
  *          | { state: 'independent', implementedBy: string, reviewedBy: string }
- *          | { state: 'self-review', session: string, at: string, detail: string }
- *          | { state: 'malformed', at: string, detail: string }}
+ *          | { state: 'self-review', session: string, at: string, id: number|null, detail: string }
+ *          | { state: 'malformed', at: string, id: number|null, detail: string }}
  */
-export function cardVerdictAuthorship(commentRows) {
+export function verdictAuthorship(commentRows, headSha) {
   if (!Array.isArray(commentRows)) return { state: 'unreadable', reason: 'the comment thread could not be read' };
 
   const candidates = [];
   for (const row of commentRows) {
-    const read = readVerdictAuthorship(row?.body);
+    const read = readVerdictAuthorship(row?.body, headSha);
     if (read === null || read.kind === 'legacy') continue;
     const ms = Date.parse(row?.created_at ?? '');
     // ⛔ An undated candidate is not a droppable row: dropping it would move the
     // GOVERNING verdict, which is the whole reading. Refuse, exactly as
     // `carrierGateHistory` refuses an undated gate event.
     if (!Number.isFinite(ms)) return { state: 'unreadable', reason: 'a contract-review verdict comment carries no readable date' };
-    candidates.push({ read, at: String(row.created_at), ms });
+    candidates.push({ read, at: String(row.created_at), id: row?.id ?? null, ms });
   }
   if (candidates.length === 0) return { state: 'none' };
 
   candidates.sort((a, b) => a.ms - b.ms);
   const governing = candidates[candidates.length - 1];
   if (governing.read.kind === 'malformed') {
-    return { state: 'malformed', at: governing.at, detail: governing.read.detail };
+    return { state: 'malformed', at: governing.at, id: governing.id, detail: governing.read.detail };
   }
   const { implementedBy, reviewedBy } = governing.read;
   // ⭐ Equality IS the same-session test, and needs no second rule to be one:
@@ -1423,7 +2204,7 @@ export function cardVerdictAuthorship(commentRows) {
   // reads INDEPENDENT, and only a seat that coded in-session and passed its own
   // diff reads self-review.
   if (implementedBy !== reviewedBy) return { state: 'independent', implementedBy, reviewedBy };
-  return { state: 'self-review', session: implementedBy, at: governing.at, detail: governing.read.line };
+  return { state: 'self-review', session: implementedBy, at: governing.at, id: governing.id, detail: governing.read.line };
 }
 
 /**
@@ -1440,34 +2221,41 @@ export function cardVerdictAuthorship(commentRows) {
  * indistinguishable from one that passed an independent review.
  *
  * The reading costs nothing new: the card's comment thread is already fetched
- * for the declaration limb, so no pair owes an extra request for this row.
+ * for the declaration limb, and the PR's is added only when `gather` already
+ * holds it (`verdictThreadRows`), so no pair owes an extra request for this row.
  */
 export function c4VerdictSelfReview(pair) {
-  const v = cardVerdictAuthorship(pair?.cardComments ?? null);
+  const v = verdictAuthorship(verdictThreadRows(pair), pair?.headSha);
   if (v.state === 'unreadable') return null; // UNJUDGED by the caller — never silently clean.
   if (v.state === 'none' || v.state === 'independent') return null;
 
   const head = `card #${pair?.card} (delivering open PR #${pair?.pr}${pair?.draft ? ' (draft)' : ''})`;
+  const where = `${v.at}${v.id ? `, comment ${v.id}` : ''}`;
   const fixed =
     'the fixed spelling names the identity that produced the diff, read from the implementation ' +
     'claim — `Implemented-by: session_…` for a `mode:remote` dev, `Implemented-by: claude/…` (its ' +
     'BRANCH) for a `mode:subagent` dev, which has no session of its own — and `Reviewed-by: ' +
     'session_…` for the session rendering this verdict, which is a seat and always has one; each ' +
-    'token immediately after its colon, the seat\'s reasoning free to follow it';
+    'token immediately after its colon, the seat\'s reasoning free to follow it. ⭐ An ISOLATED ' +
+    'review subagent has no session either, and its `Reviewed-by:` value is still a session: the ' +
+    'seat that RENDERS or ADOPTS the verdict writes its OWN session there — 「渲染或采纳裁决的席位' +
+    '写自己的 session」 — which every adoption record already carries in its opening sentence. ⛔ ' +
+    'Prose naming the reviewing MODEL is not an identity: it compares to nothing, and this key ' +
+    'admits a session only (2026-09-02 reading a)';
   const legacyIsSilent =
     '⚠️ A verdict carrying NEITHER line is a LEGACY verdict and is silent here — it predates the ' +
     'carrier and ⛔ is never turned red by its absence.';
 
   if (v.state === 'malformed') {
     return (
-      `${head} — its governing contract-review verdict (${v.at}) carries the authorship pair HALF ` +
+      `${head} — its governing contract-review verdict (${where}) carries the authorship pair HALF ` +
       `WRITTEN: ${v.detail}. Both lines or neither — half a pair compares to nothing, so there is ` +
       `no reading of independence here, and a started carrier left unreadable is a different fact ` +
       `from one never started. ${fixed}. ${legacyIsSilent} ${NEVER_WRITES}`
     );
   }
   return (
-    `${head} — its governing contract-review verdict (${v.at}) is a SELF-REVIEW: \`Implemented-by:\` ` +
+    `${head} — its governing contract-review verdict (${where}) is a SELF-REVIEW: \`Implemented-by:\` ` +
     `and \`Reviewed-by:\` name the SAME session \`${v.session}\` (${JSON.stringify(v.detail)}). The ` +
     'in-seat review is a COMPENSATING control for dispatching below the review tier, and every ' +
     'argument for it assumes the reviewer did not write the diff: the clause scopes it to 「低档实现' +
@@ -1571,6 +2359,177 @@ export function wideningUnjudged(pair, repo) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// C6 -- the review of record on this head (#17302)
+// ---------------------------------------------------------------------------
+
+/**
+ * Does this pair owe the review-of-record read -- its PR's own comment thread?
+ *
+ * ⭐ ONLY the completed state: declared `yes`, the gate bound and cleared on
+ * both carriers, head unmoved since (`gateBindingState`, unchanged). That is the
+ * one state in which `references/contract-review.md` says a record must already
+ * exist -- 「复核记录 = 一条评论落 PR 或卡」, 「清标缺引记录即半态」 -- and it is
+ * exactly the state the filing sweep measured five times over: `Clause-②: yes`,
+ * carriers cleared, merged, and the only review-like comment anywhere the dev's
+ * own report. A pair still carrying the gate owes nothing yet (the review is
+ * pending, not missing); a never-hung, half-bound or moved-after-clear pair is
+ * C3's row already, and two rows for one fact is the drift this file avoids.
+ *
+ * Exported and read by BOTH the fetch and the UNJUDGED accounting, the way
+ * `needsGateHistory` and `needsWideningRead` are, so the set that owes the
+ * thread and the set that gets one cannot drift apart. It reads the binding
+ * state, so it can only be true once the event streams and the head commit
+ * have been read -- the record pass in `gather` follows the history pass by
+ * construction.
+ */
+export function needsRecordRead(pair) {
+  return gateBindingState(pair).state === 'completed';
+}
+
+/** The `Reviewed-by:` key line, exactly as C4 reads it -- one spelling, not two. */
+const REVIEWED_BY_LINE = AUTHORSHIP_KEY_LINES.get('Reviewed-by');
+
+/**
+ * The review of record for one pair -- read from the PR's thread AND the card's,
+ * because the rule lets it live on either.
+ *
+ * ## The recognition shape, and why it is H51's and not a new one
+ *
+ * `check-half-states.mjs` H51 already reads "a contract-review verdict on THIS
+ * head" out of a thread, and measured its shape over four live dialects: a
+ * level-2 heading whose line begins `## Contract review`, plus the head sha
+ * written as a code span somewhere in the comment. Both facts are IMPORTED
+ * from it (`CONTRACT_REVIEW_HEADING_MARKER`, `contractReviewHeadMatch`) rather
+ * than restated, and the newest such comment is chosen by the same
+ * `latestMarkedComment` H47 resolves with. The filter is
+ * `latestContractReviewOnHead`'s, spelled out here because that finder returns
+ * an id and not the row, and the row is what the third fact is read from.
+ *
+ * ⭐ The third fact is the CARRIER the rule text names -- 「独立性对」: a
+ * `Reviewed-by:` line, read by C4's own key regex so the two rows cannot
+ * disagree about what one looks like. Its VALUE is not judged here: who
+ * reviewed, and whether that is the implementer, is C4's row. This row asks
+ * only that the record names a reviewer at all, which is what separates a
+ * review of record from a dev's own report -- and from the shape the filing
+ * sweep found on the seat's side: an ACCEPT paragraph carrying the head and the
+ * line under a bold first line, with no heading anywhere.
+ *
+ * ⛔ Not read: the verdict WORD (the file's boundary, and the corpus already
+ * spells it two ways) and the ①②③ items (prose the seat reads).
+ *
+ * @returns {{ state: 'not-owed' }
+ *          | { state: 'unreadable', gaps: string[] }
+ *          | { state: 'absent', read: { pr: number, card: number } }
+ *          | { state: 'unsigned', where: 'PR'|'card', id: number|null, sha: string, at: string|null }
+ *          | { state: 'found', where: 'PR'|'card', id: number|null, sha: string, at: string|null }}
+ */
+export function reviewOfRecord(pair) {
+  if (!needsRecordRead(pair)) return { state: 'not-owed' };
+  const gaps = [];
+  if (!Array.isArray(pair?.prComments)) gaps.push(`PR #${pair?.pr}'s comment thread`);
+  if (!Array.isArray(pair?.cardComments)) gaps.push(`card #${pair?.card}'s comment thread`);
+  const head = String(pair?.headSha ?? '');
+  // A head too short to be matched by H51's span test can never find its
+  // record, so it is a read that could not be made -- never an absent record.
+  if (head.length < H51_SHA_MIN_HEX) gaps.push(`PR #${pair?.pr}'s head sha`);
+  if (gaps.length > 0) return { state: 'unreadable', gaps };
+
+  const tagged = [
+    ...pair.prComments.map((row) => ({ row, where: 'PR' })),
+    ...pair.cardComments.map((row) => ({ row, where: 'card' })),
+  ];
+  const onHead = tagged.filter(
+    ({ row }) =>
+      CONTRACT_REVIEW_HEADING_MARKER.test(String(row?.body ?? '')) &&
+      contractReviewHeadMatch(row?.body, head) !== null,
+  );
+  const newest = latestMarkedComment(onHead.map(({ row }) => row), CONTRACT_REVIEW_HEADING_MARKER);
+  if (!newest) return { state: 'absent', read: { pr: pair.prComments.length, card: pair.cardComments.length } };
+  const { row, where } = onHead[newest.index];
+  const found = {
+    where,
+    id: row?.id ?? null,
+    sha: contractReviewHeadMatch(row?.body, head),
+    at: row?.created_at ?? null,
+  };
+  const signed = String(row?.body ?? '').split(/\r?\n/).some((line) => REVIEWED_BY_LINE.test(line));
+  return signed ? { state: 'found', ...found } : { state: 'unsigned', ...found };
+}
+
+/**
+ * C6 -- a gate cleared on both carriers with no review of record on the head.
+ *
+ * The rule this row carries is the one #17302 landed: the default-tier lanes'
+ * review of record is ONE comment on the PR or its card, in the tier verdict's
+ * own shape minus the tier line, and every clear cites it. Before that text,
+ * clearing the carrier was indistinguishable from never reviewing -- measured
+ * five times in one window by the director's leak sweep -- and this file's own
+ * `--pair` read every one of those pairs as the completed state and answered 0.
+ *
+ * ⛔ A FINDING, and the file's exit table decides that rather than a preference:
+ * the row is an adverse fact about THIS pair at its own landing moment, and an
+ * adverse fact rendered as 0-with-a-message is the silence this file exists
+ * against. It re-blocks no legal workflow -- under the text the record precedes
+ * the clear -- and a pair cleared before the text landed owes exactly one
+ * comment: the review its seat already performed, written down.
+ */
+export function c6NoReviewOfRecord(pair) {
+  const v = reviewOfRecord(pair);
+  if (v.state === 'not-owed' || v.state === 'unreadable' || v.state === 'found') return null;
+
+  const short = String(pair?.headSha ?? '').slice(0, 10);
+  const head =
+    `card #${pair?.card} declares \`Clause-②: yes\`, its gate was bound and cleared on BOTH carriers, and its ` +
+    `open PR #${pair?.pr}${pair?.draft ? ' (draft)' : ''} still sits at the head that was cleared (\`${short}\`)`;
+  const shape =
+    'The record is the comment `references/contract-review.md` names -- 「复核记录 = 一条评论落 PR 或卡,达档与默认档' +
+    '同形」 -- read here in H51\'s measured shape: a level-2 heading beginning `## Contract review`, this head\'s sha ' +
+    'as a code span, and a `Reviewed-by:` line naming the reviewer. Existing tier verdicts already carry all three; a ' +
+    'dev\'s own report, or an ACCEPT paragraph with the head and the line but no heading, is not one -- and ' +
+    '「清标缺引记录即半态」.';
+  const boundary =
+    '⛔ Verdict-agnostic: no PASS or FAIL token is read to reach this -- the PASS half of the landing check stays ' +
+    'human -- and the ①②③ line items are prose the seat reads, not this file.';
+
+  if (v.state === 'unsigned') {
+    return (
+      `${head} -- a \`## Contract review\` comment naming this head exists (${v.where} thread, ` +
+      `${v.id ? `comment ${v.id}` : 'no readable id'}, ${v.at ?? 'undated'}, names \`${v.sha}\`) but carries ` +
+      'NO `Reviewed-by:` line, so it names no reviewer and is not a review of record. ' +
+      `${shape} Remedy: the reviewing seat posts the record with its independence pair (\`Implemented-by:\` / ` +
+      '`Reviewed-by:`) -- the NEWEST heading comment on this head governs, so a corrected record clears the row -- ' +
+      `and cites it in the provenance comment beside the clear. ${boundary} ${NEVER_WRITES}`
+    );
+  }
+  return (
+    `${head} -- and NO review of record exists on this head: ${v.read.pr} comment(s) on the PR thread and ` +
+    `${v.read.card} on the card were read, and none is a \`## Contract review\` comment naming \`${short}\` with a ` +
+    '`Reviewed-by:` line. This is the shape the filing sweep measured five times in one window -- a cleared gate ' +
+    `with nothing behind it, indistinguishable from never reviewing. ${shape} Remedy: the owning seat writes down ` +
+    'the review it already performed, in that shape, on the PR or the card, and cites it in the provenance comment ' +
+    `beside the clear. ${boundary} ${NEVER_WRITES}`
+  );
+}
+
+/**
+ * The C6-RECORD note -- the record WAS found, and here is what to cite.
+ *
+ * A note rather than silence, for the landing seat's next act: the rule makes
+ * the provenance comment name the record's id and the head it judged, and the
+ * run has both in hand. ⚠️ Existence, not the verdict.
+ */
+export function c6RecordNote(pair) {
+  const v = reviewOfRecord(pair);
+  if (v.state !== 'found') return null;
+  return (
+    `review of record on this head: ${v.where} thread, ${v.id ? `comment ${v.id}` : 'a comment carrying no readable id'} ` +
+    `(${v.at ?? 'undated'}) is a \`## Contract review\` comment naming \`${v.sha}\` and carrying a \`Reviewed-by:\` line -- ` +
+    'cite it in the provenance comment beside the clear (「凡清标同笔留 provenance 评论,引记录 id 与所判 head」). ' +
+    '⚠️ Existence, not the verdict: whether it reads PASS is precondition ① of the landing check and stays human.'
+  );
+}
+
 /**
  * Every FINDING row for one pair, in reporting order.
  *
@@ -1594,6 +2553,8 @@ export function pairRows(pair, pairs = null) {
   if (ungated) rows.push({ code: 'C3', text: ungated });
   const selfReview = c4VerdictSelfReview(pair);
   if (selfReview) rows.push({ code: 'C4', text: selfReview });
+  const record = c6NoReviewOfRecord(pair);
+  if (record) rows.push({ code: 'C6', text: record });
   return rows;
 }
 
@@ -1605,10 +2566,30 @@ export function pairRows(pair, pairs = null) {
  * total, a note does neither. Both read `readsSiblingDeclaration`, so the row
  * a pair gets and the count it lands in are decided once.
  */
+/**
+ * The correction reading, as a printed NOTE (#17366).
+ *
+ * ⭐ It PRINTS rather than going quiet, for the reason the fourth reading does:
+ * a pair that answers 0 because a CORRECTION comment carries its declaration is
+ * answering about a carrier the claim comment does not hold, and a seat reading
+ * only `$?` must be able to find out from the run which comment was read. The
+ * row also states, in as many words, that the claim comment was NOT edited —
+ * because the whole value of the shape is that nothing had to be.
+ */
+export function c2CorrectionNote(pair) {
+  const d = cardDeclaration(pair?.cardComments ?? null);
+  if (d.state !== 'declared' || d.correctionNote === undefined) return null;
+  return `card #${pair?.card} (delivering open PR #${pair?.pr}) — ${d.correctionNote}`;
+}
+
 export function pairNotes(pair, pairs = null) {
   const notes = [];
   const sibling = c2SiblingDeclared(pair, pairs);
   if (sibling) notes.push({ code: 'C2-SIBLING', text: sibling });
+  const correction = c2CorrectionNote(pair);
+  if (correction) notes.push({ code: 'C2-CORRECTION', text: correction });
+  const record = c6RecordNote(pair);
+  if (record) notes.push({ code: 'C6-RECORD', text: record });
   return notes;
 }
 
@@ -1624,9 +2605,12 @@ export function pairNotes(pair, pairs = null) {
  *
  * The tally reads the SAME `cardDeclaration` the rows read, so a count can
  * never disagree with the rows printed under it. `declared`, `misplaced`,
- * `malformed` and `unreadable` are counted into neither — each is its own
- * reading with its own row, and an unreadable thread is UNJUDGED rather than
- * either not-read state.
+ * `malformed`, `claim-branch-unparsed` and `unreadable` are counted into
+ * neither — each is its own reading with its own row, and an unreadable thread
+ * or an unresolvable claim carrier is UNJUDGED rather than either not-read
+ * state. ⛔ Counting an unparsed claim under `absent` would be the old silence
+ * wearing a number: it would say "this card has no claim comment" about a card
+ * that has one.
  *
  * ⭐ Since #16304 the `absent` population is split once more, for the same
  * reason it was split from `missing` in the first place: a card with no claim
@@ -1652,6 +2636,47 @@ export function declarationLimbTally(pairs) {
 }
 
 /**
+ * The UNJUDGED sentence for a card whose newest claim comment parses to ZERO
+ * branches (#17149) — the declaration limb's carrier, unresolved.
+ *
+ * ⚠️ It reports a CARRIER problem and says nothing about the declaration: the
+ * card may well carry a correctly-spelled line, and this run cannot tell
+ * whether it is the current one. Reporting it as `missing` would send the seat
+ * looking for a line that is there; reporting it as a `no` would manufacture a
+ * decision nobody made. The sentence names the comment, says what governance
+ * did instead, and gives the one remedy — a `Branch:` line of its own.
+ *
+ * ⛔ Nothing here widens the branch reader. The remedy is on the WRITE side,
+ * which is the same call the sibling script's H34 makes for the claim marker
+ * and for the same standing ruling (⛔ 不放宽谓词).
+ */
+export function claimBranchUnparsedGap(pair, decl) {
+  const m = decl?.malformedClaim ?? {};
+  const governing = decl?.governingClaim ?? null;
+  const which = m.id === null || m.id === undefined ? 'a comment carrying no readable id' : `comment ${m.id}`;
+  const instead = governing
+    ? `governance FELL BACK to an OLDER claim (${governing.createdAt ?? 'undated'}, naming ` +
+      `${(governing.branches ?? []).map((b) => `\`${b}\``).join(', ') || 'no branch'}), so the ` +
+      'declaration this run would otherwise have read is that older comment\'s — a SUPERSEDED ' +
+      'reading, and when it happens to agree with the current one the result is a green that is ' +
+      'right for the wrong reason'
+    : 'NOTHING governs this card, so the limb would otherwise have read `absent` — "no claim ' +
+      'comment was written", which is false: one was';
+  return (
+    `pair PR #${pair?.pr} / card #${pair?.card} — UNJUDGED: the card's NEWEST claim comment ` +
+    `(${which}, ${m.createdAt ?? 'undated'}) matches the claim marker but its \`Branch:\` directive ` +
+    `parses to ZERO branches, so the carrier this limb reads cannot be resolved. ${instead}. ` +
+    'An unparsed claim is an UNCLASSIFIED result, ⛔ never an absent declaration and ⛔ never a ' +
+    'declared `no` — this pair is missing from the readings above, not clean in them and not ' +
+    'adverse in them. Remedy — the CLAIMING SEAT, with one comment: name the branch on a ' +
+    '`Branch:` line of its OWN (`` Branch: `claude/issue-<n>-<slug>` ``), ⛔ not inside the ' +
+    '`Claim:` sentence, which no reader parses. ⚠️ A whole shift of claims reading this way is a ' +
+    'SEAT TEMPLATE fault, not a typo. ' +
+    NEVER_WRITES
+  );
+}
+
+/**
  * What this pair could NOT be judged on — the #4690 half.
  *
  * Returned separately from the rows so a caller can never render an incomplete
@@ -1663,6 +2688,14 @@ export function pairUnjudged(pair) {
   if (!Array.isArray(pair?.cardLabels)) gaps.push(`card #${pair?.card}'s labels`);
   if (!Array.isArray(pair?.prLabels)) gaps.push(`PR #${pair?.pr}'s labels`);
   if (!Array.isArray(pair?.cardComments)) gaps.push(`card #${pair?.card}'s comment thread`);
+  // The thread WAS read and the carrier still cannot be resolved (#17149).
+  // Placed after the read checks so an unread thread is never reported as a
+  // malformed claim, and before every limb below it because each of those
+  // reads a comment chosen by the governance this state says is broken.
+  if (gaps.length === 0) {
+    const decl = cardDeclaration(pair?.cardComments ?? null);
+    if (decl.state === 'claim-branch-unparsed') return claimBranchUnparsedGap(pair, decl);
+  }
   // The gate history is owed by C3 CANDIDATES only — the cost bound and the
   // accounting read one predicate, so a pair can never owe a stream the live
   // reader was never going to fetch. An unread stream is not a never-hung gate.
@@ -1672,10 +2705,19 @@ export function pairUnjudged(pair) {
   }
   // C4's own #4690 half: a verdict this file could not ORDER is not a verdict
   // it read as independent. Reached only once the thread itself read, so the
-  // unreadable-thread gap above is never doubled.
+  // unreadable-thread gap above is never doubled. It reads `verdictThreadRows`
+  // — the same set C4 judges — so the set that is accounted for and the set
+  // that is judged cannot drift apart.
   if (gaps.length === 0) {
-    const authorship = cardVerdictAuthorship(pair?.cardComments ?? null);
-    if (authorship.state === 'unreadable') gaps.push(`card #${pair?.card}'s verdict authorship (${authorship.reason})`);
+    const authorship = verdictAuthorship(verdictThreadRows(pair), pair?.headSha);
+    if (authorship.state === 'unreadable') gaps.push(`pair PR #${pair?.pr} / card #${pair?.card}'s verdict authorship (${authorship.reason})`);
+  }
+  // C6's own #4690 half: the record read is owed by the COMPLETED state only,
+  // and an unread PR thread there is not an absent record. Reached only once
+  // the binding state itself read, so a stream gap above is never doubled.
+  if (gaps.length === 0) {
+    const record = reviewOfRecord(pair);
+    if (record.state === 'unreadable') gaps.push(...record.gaps.map((g) => `${g} (the review-of-record read)`));
   }
   if (gaps.length === 0) return null;
   return (
@@ -2196,6 +3238,23 @@ async function gather(repo, prFilter = null, reader = NETWORK_READER, { readFile
       pair.files = await reader.readPullFiles(repo, pair.pr);
     }
   }
+
+  // Fourth pass -- the review of record, for the COMPLETED pairs and nobody
+  // else (#17302). The PR's own thread is the same endpoint the card's is
+  // (`/issues/N/comments` -- a PR is an issue there), read through the same
+  // `readCardComments`, so the offline document carries it in the same
+  // `comments` bag keyed by the PR NUMBER and no reader grows a seventh method.
+  // One read per completed pair, in BOTH modes: the population is the narrow
+  // window between a clear and a landing, and a cleared gate with no record
+  // behind it is precisely the board fact the filing sweep measured five
+  // times. Cached per PR, so a two-card PR (#16304) pays once.
+  const prThreads = new Map();
+  for (const pair of pairs) {
+    if (!needsRecordRead(pair)) continue;
+    if (!prThreads.has(pair.pr)) prThreads.set(pair.pr, await reader.readCardComments(repo, pair.pr));
+    const rows = prThreads.get(pair.pr);
+    pair.prComments = Array.isArray(rows) ? rows : null;
+  }
   return { pulls, pairs };
 }
 
@@ -2257,12 +3316,26 @@ function renderPair(pair, repo, pairs = null) {
       return EXIT_INCOMPLETE;
     }
     for (const note of notes) console.error(`ℹ️  ${note.code} — ${note.text}`);
+    // Each note is keyed by its CODE, never by count: the sibling reading and
+    // the review-of-record reading are two different facts about the pair, and
+    // a second note kind must not put the first one's sentence in its mouth.
+    const sibling = notes.some((n) => n.code === 'C2-SIBLING');
+    const record = notes.some((n) => n.code === 'C6-RECORD');
+    const corrected = notes.some((n) => n.code === 'C2-CORRECTION');
     console.log(
       `✓ check-clause2-carriers: PR #${pair.pr} / card #${pair.card} — the clause-② declaration is ` +
-        (notes.length > 0
+        (sibling
           ? 'readable in the fixed spelling on a SIBLING card this same PR delivers rather than on ' +
             'this card (the reading above names which, and what it says), and both carriers agree'
-          : 'readable in the fixed spelling and both carriers agree') +
+          : corrected
+            ? 'readable in the fixed spelling on a CORRECTION comment superseding the claim\'s own ' +
+              'line (the reading above names which comment, and says the claim was not edited), and ' +
+              'both carriers agree'
+            : 'readable in the fixed spelling and both carriers agree') +
+        (record
+          ? ', and a review of record names this head (the note above says which comment to cite; ' +
+            'existence, not the verdict)'
+          : '') +
         (widening.state === 'clean'
           ? ', and its diff carries no widening tell. ⚠️ A tell is not a proof and its absence is not one either.'
           : '.'),
@@ -2380,11 +3453,19 @@ export function selfTest() {
   t('a heading-style claim is NOT a claim comment — the thread reads ABSENT, not missing-a-line', cardDeclaration([{ body: '## Claim — PM loop round R1\nBranch: `claude/issue-13476-unresolvable-engine-403`\nDomain: `domain:engine`', created_at: '2026-08-31T10:00:00Z' }]).state === 'absent');
   t('the #13910 shape — a claim comment with no Clause-② line — reads MISSING: the carrier is there, the line is not', cardDeclaration([CLAIM('Domain: `domain:engine`')]).state === 'missing');
   t('⛔ ABSENT and MISSING are two readings, never one — one owes a comment, the other a line', cardDeclaration([{ body: 'a triage note, and nothing that begins a line with the claim key', created_at: '2026-08-31T10:00:00Z' }]).state !== cardDeclaration([CLAIM('Domain: x')]).state);
-  // The substring trap: a claim comment that DESCRIBES the declaration carries
-  // the key as a fragment inside a sentence, never as a line of its own. The
-  // reader is line-anchored, so a description is MISSING and never readable.
+  // A claim comment that DESCRIBES the declaration rather than making one.
+  //
+  // ⚠️ This assertion states a GENERAL property and for a long time had ONE
+  // case under it — prose before the key, which the line-anchored reader never
+  // matched at all. #17098 measured the other half: with the key FIRST, after
+  // markdown decoration, the same describing line read `declared`, so the
+  // sentence was false in general while its own case was green. ⛔ Both halves
+  // are asserted here, at the sentence that claims them; the #17098 battery
+  // below carries the mechanism, the measured specimens and the controls.
   t('a claim comment that only DESCRIBES the line reads MISSING, never declared', cardDeclaration([CLAIM('the dev declares `Clause-②: yes|no` from the diff')]).state === 'missing');
   t('…and it carries no value — a fragment inside prose is not a reading of one', cardDeclaration([CLAIM('the dev declares `Clause-②: yes|no` from the diff')]).value === undefined);
+  t('⭐ …and the same is true KEY-FIRST, which is the half this sentence used to claim without covering', cardDeclaration([CLAIM('- **`Clause-②: yes` / `Clause-②: no`** — the value alone on its line, machine-read.')]).state === 'missing');
+  t('⭐ …carrying no value there either — the fail-OPEN half, where a `yes` was invented out of a spelling lesson', cardDeclaration([CLAIM('- **`Clause-②: yes` / `Clause-②: no`** — the value alone on its line, machine-read.')]).value === undefined);
   t('⛔ neither not-read state is `no`', cardDeclaration([CLAIM('Domain: x')]).state !== 'declared' && cardDeclaration([{ body: 'a triage note, and nothing that begins a line with the claim key', created_at: '2026-08-31T10:00:00Z' }]).state !== 'declared');
   t('the line in a NON-claim comment reads MISPLACED, not absent and not declared', cardDeclaration([CLAIM('Domain: x'), { body: 'Clause-②: yes', created_at: '2026-08-31T11:00:00Z' }]).state === 'misplaced');
   t('a malformed line in the claim comment reads MALFORMED', cardDeclaration([CLAIM('Clause-②: Yes')]).state === 'malformed');
@@ -2428,7 +3509,14 @@ export function selfTest() {
   t('a card with no Clause-② line in its claim comment produces a C2 row', typeof missingLine === 'string');
   t('…and says NO READING in as many words', says(missingLine, 'NO READING'));
   t('…and names the DECLARATION LINE as the thing that is missing', says(missingLine, 'DECLARATION LINE is what is missing'));
-  t('…and sends the remedy to the claim comment that is already there', says(missingLine, 'add the line to that claim comment'));
+  t('…and sends the remedy to the claim comment that is already there', says(missingLine, 'That claim comment owes the line'));
+  // #17366: the remedy names WHO can act and HOW. The sentence it replaced
+  // («add the line to that claim comment») named an act a seat holding only the
+  // MCP tool set has no call for, which is the one-way door the card measured.
+  t('⭐ …and the remedy names WHO can act', says(missingLine, 'WHO can act, and HOW: the CLAIMING SEAT'));
+  t('⭐ …and states that an already-posted claim comment is not editable from every seat', says(missingLine, 'no edit-an-issue-comment call'));
+  t('⭐ …and names the one comment that repairs it, first line and all', says(missingLine, 'Clause-②-correction: 5642248126'));
+  t('⛔ …while still forbidding a second `Claim:`', says(missingLine, 'Never a second `Claim:`'));
   const noClaim = c2DeclarationUnreadable(pair({ cardComments: [{ body: 'a triage note, and nothing that begins a line with the claim key', created_at: '2026-08-31T10:00:00Z' }] }));
   t('a thread with no claim comment produces a C2 row of its own', typeof noClaim === 'string');
   t('…and names the CLAIM COMMENT as the thing that is missing, not the line', says(noClaim, 'CLAIM COMMENT is what is missing'));
@@ -2591,12 +3679,39 @@ export function selfTest() {
 
   // -- #14155: the COMPLETED state, and the three it must stay distinct from --
   battery('#14155: the COMPLETED state, and the three it must stay distinct from');
+  const HEAD_9AF9 = '9af92aa3'; // the head the 2026-09-01 review judged, as the board abbreviated it.
+  const RECORD_SESSION = 'session_01489YWhZEoHT9oXshiyywQy';
+  // The review of record, in the shape measured on every 2026-09-09 specimen:
+  // the `## Contract review` heading, the head as a code span, the independence
+  // pair -- the shape #17302 names for the default-tier lanes too.
+  //
+  // ⭐ The `Implemented-by:` value carries its token FIRST after the colon, and
+  // that is load-bearing rather than tidy (#17346): this fixture is the pair
+  // that must read CLEAN under EVERY row, and C4's grammar has always required
+  // the identity to open the value. Written `branch \`claude/…\`` -- the way two
+  // of the four live specimens write it -- the same comment reads `malformed`
+  // on C4 the moment C4 can see this dialect at all, which is a real carrier
+  // defect and belongs on a defective specimen (the `ADOPTION` fixture below
+  // keeps it), never on the reference one.
+  const RECORD = (
+    sha,
+    lines = ['- **Implemented-by:** `claude/issue-13657-x`', `- **Reviewed-by:** \`${RECORD_SESSION}\``],
+    at = '2026-09-01T08:50:00Z',
+    id = 3301,
+  ) => ({
+    id,
+    created_at: at,
+    body: [`## Contract review (clause ②) — **PASS** · head \`${sha}\``, '', ...lines, '', '### ① Derived judgments', '- none', '### ② semver', '- patch', '### ③ Boundary flags', '- none'].join('\n'),
+  });
+  const RECORD_ON_9AF9 = RECORD(HEAD_9AF9);
   const completed = declaredYes({
     pr: 13864,
     card: 13657,
+    headSha: HEAD_9AF9,
     cardEvents: [CARD_HUNG, CARD_CLEARED],
     prEvents: [PR_HUNG, PR_CLEARED],
     headCommittedAt: HEAD_AT_PASS,
+    prComments: [RECORD_ON_9AF9], // #17302: the completed state now also carries its record.
   });
   t('⭐ the measured 2026-09-01 clear (#13864/#13657) produces NO C3 row — the completed state is clean', c3DeclaredYesUngated(completed) === null, JSON.stringify(gateBindingState(completed)));
   t('…and the pair is CLEAN overall, not merely C3-silent', pairRows(completed).length === 0 && pairUnjudged(completed) === null);
@@ -2723,7 +3838,7 @@ export function selfTest() {
   const SUBAGENT_PAIR = [`Implemented-by: \`${DEV_BRANCH}\``, `Reviewed-by: \`${REVIEW_SESSION}\``];
   t('⭐ a `mode:subagent` dev is named by its BRANCH, and that reads as a first-class pair', readVerdictAuthorship(VERDICT(SUBAGENT_PAIR).body)?.kind === 'pair' && readVerdictAuthorship(VERDICT(SUBAGENT_PAIR).body)?.implementedBy === DEV_BRANCH);
   t('⭐ …so a subagent-dispatched card is SILENT — the reviewing seat did not write the diff', c4VerdictSelfReview(reviewed([VERDICT(SUBAGENT_PAIR)])) === null);
-  t('…and it reads INDEPENDENT rather than unjudged — silence here is a reading, not a gap', cardVerdictAuthorship([VERDICT(SUBAGENT_PAIR)]).state === 'independent' && pairUnjudged(reviewed([VERDICT(SUBAGENT_PAIR)])) === null);
+  t('…and it reads INDEPENDENT rather than unjudged — silence here is a reading, not a gap', verdictAuthorship([VERDICT(SUBAGENT_PAIR)]).state === 'independent' && pairUnjudged(reviewed([VERDICT(SUBAGENT_PAIR)])) === null);
   t('⭐ …while the same-session pair still FIRES: widening the grammar did not disarm the row', typeof c4VerdictSelfReview(reviewed([VERDICT(SELF_PAIR)])) === 'string');
   t('the branch token ends at the branch — the seat\'s reasoning may follow it', readVerdictAuthorship(VERDICT([`Implemented-by: ${DEV_BRANCH} (implementation claim, 16:29Z)`, `Reviewed-by: ${REVIEW_SESSION}`]).body)?.implementedBy === DEV_BRANCH);
   t('…and a trailing sentence mark belongs to the prose, never to the branch', readVerdictAuthorship(VERDICT([`Implemented-by: ${DEV_BRANCH}.`, `Reviewed-by: ${REVIEW_SESSION}`]).body)?.implementedBy === DEV_BRANCH);
@@ -2735,15 +3850,137 @@ export function selfTest() {
   // the governing verdict — why the newest one carrying the pair decides
   t('⭐ a self-review followed by an INDEPENDENT re-review reads clean — the remedy clears the row', c4VerdictSelfReview(reviewed([VERDICT(SELF_PAIR, '2026-09-01T11:21:18Z'), VERDICT(INDEPENDENT_PAIR, '2026-09-01T12:56:27Z')])) === null);
   t('…and the reverse order still fires, so a later self-review is not hidden by an earlier clean one', typeof c4VerdictSelfReview(reviewed([VERDICT(INDEPENDENT_PAIR, '2026-09-01T09:00:00Z'), VERDICT(SELF_PAIR, '2026-09-01T12:56:27Z')])) === 'string');
-  t('…and arrival order does not decide it — the reader sorts', cardVerdictAuthorship([VERDICT(INDEPENDENT_PAIR, '2026-09-01T12:56:27Z'), VERDICT(SELF_PAIR, '2026-09-01T11:21:18Z')]).state === 'independent');
-  t('a LEGACY verdict posted after a self-review does not clean it — it is not a candidate at all', cardVerdictAuthorship([VERDICT(SELF_PAIR, '2026-09-01T11:21:18Z'), VERDICT([], '2026-09-01T13:00:00Z')]).state === 'self-review');
+  t('…and arrival order does not decide it — the reader sorts', verdictAuthorship([VERDICT(INDEPENDENT_PAIR, '2026-09-01T12:56:27Z'), VERDICT(SELF_PAIR, '2026-09-01T11:21:18Z')]).state === 'independent');
+  t('a LEGACY verdict posted after a self-review does not clean it — it is not a candidate at all', verdictAuthorship([VERDICT(SELF_PAIR, '2026-09-01T11:21:18Z'), VERDICT([], '2026-09-01T13:00:00Z')]).state === 'self-review');
 
   // #4690, C4's half: unread is never clean
   t('an UNREADABLE thread produces no C4 row — it is UNJUDGED instead', c4VerdictSelfReview(pair({ cardComments: null })) === null);
-  t('an UNDATED verdict refuses the ordering rather than guessing it', cardVerdictAuthorship([VERDICT(SELF_PAIR, null)]).state === 'unreadable');
+  t('an UNDATED verdict refuses the ordering rather than guessing it', verdictAuthorship([VERDICT(SELF_PAIR, null)]).state === 'unreadable');
   t('…and the unjudged accounting names it, so the pair cannot render as clean', says(pairUnjudged(reviewed([VERDICT(SELF_PAIR, null)])), 'verdict authorship'));
   t('…while a dated, judged verdict adds no gap of its own', pairUnjudged(reviewed([VERDICT(INDEPENDENT_PAIR)])) === null);
   t('C4 costs no extra request — it reads the thread C2 already fetched', needsGateHistory(reviewed([VERDICT(SELF_PAIR)])) === false);
+
+  // -- #17346: the 2026-09-09 dialect, and the reviewer identity it needs ----
+  //
+  // ⭐ The fixtures are the live specimens the card measured, read via
+  // repo-scoped REST on 2026-09-10 and trimmed to what the reader reads: the
+  // heading, the head as a code span, the authorship pair. Under the 2026-09-01
+  // marker alone every one of them answered `null`, so C4 had NO live
+  // population and the self-review shape it exists to refuse was unreachable.
+  const LIVE_HEAD_73 = 'de0bd50469a6c5f20102f67e0901c43fe316567c';
+  const LIVE_HEAD_16 = 'e91934804197f5336aafdcc0bef0a0cccef1be83';
+  const ADOPTING_SEAT = 'session_01Tep4AYXZvyBA7jsvne5KZV';
+  const DEV_16861 = 'session_012zTkyNHJ7TkuN2oXtP5x37';
+  // Dialect ① — comment 5597841101 (PR #17073), a director-seat ADOPTION
+  // record: its own sentence first, H51's heading on a LATER line, the pair
+  // written bare at the end. BOTH values are prose — `branch` puts a word
+  // before the branch token, and `Reviewed-by:` names the summon rather than a
+  // session — and the session the reviewer line owes is one line above it.
+  const LIVE_ADOPTION = {
+    id: 5597841101,
+    created_at: '2026-09-09T07:19:12Z',
+    body: [
+      `**Director seat adoption record** — summon #20, \`${ADOPTING_SEAT}\`. The verdict below is adopted **verbatim** from an isolated contract-review subagent.`,
+      '',
+      '---',
+      '',
+      `## Contract review (\`CONTRACT_REVIEW_TIER\`, isolated seat) — PR #17073 @ \`${LIVE_HEAD_73}\``,
+      '',
+      '**Verdict: PASS WITH FINDINGS**',
+      '',
+      'Implemented-by: branch `claude/issue-16657-raw-exec-operator-detail-cause`',
+      'Reviewed-by: director seat summon #20 (isolated fable subagent, transcript-verified before adoption)',
+    ].join('\n'),
+  };
+  // Dialect ② — comment 5600239551 (PR #17073): heading first, the pair as bold
+  // bullets, the reviewer named by MODEL rather than by a session.
+  const LIVE_BOLD = {
+    id: 5600239551,
+    created_at: '2026-09-09T10:17:06Z',
+    body: [
+      `## Contract review (clause ②) — **PASS WITH FINDINGS**, no blocking item · head \`${LIVE_HEAD_73}\``,
+      '',
+      '- **Implemented-by:** branch `claude/issue-16657-raw-exec-operator-detail-cause` @ `de0bd50469`',
+      '- **Reviewed-by:** isolated review subagent, **transcript-verified**: 105 harness-stamped model fields, one distinct value.',
+    ].join('\n'),
+  };
+  // Dialect ③ — comment 5600627944 (PR #17116): the verdict word bolded INSIDE
+  // the heading, and the implementer's session present but not first after the
+  // colon.
+  const LIVE_HEADING_VERDICT = {
+    id: 5600627944,
+    created_at: '2026-09-09T10:49:48Z',
+    body: [
+      `## Contract review at \`CONTRACT_REVIEW_TIER\` — **Verdict: PASS WITH FINDINGS** (audit reading; director seat, \`session_017Js5kTpTtxieBjPyScgxJ3\`)`,
+      '',
+      `PR #17116 · verdict pinned to head \`${LIVE_HEAD_16}\` · reviewed 10:36Z–10:46Z.`,
+      '- **Reviewed-by:** isolated review subagent, transcript-verified (89 harness stamps), adopted **verbatim** below.',
+      `- **Implemented-by:** the \`domain:services\` seat's dev \`${DEV_16861}\` (\`mode:subagent\`), branch \`claude/issue-16861-already-have-admin-unordered-cap\`.`,
+    ].join('\n'),
+  };
+  // The same 2026-09-09 dialect written the way :35 now names — the ADOPTING
+  // seat's own session on `Reviewed-by:`, the dev's branch on the left.
+  const LIVE_WRITTEN_RIGHT = {
+    id: 5600239552,
+    created_at: '2026-09-09T10:18:00Z',
+    body: [
+      `## Contract review (clause ②) — **PASS WITH FINDINGS** · head \`${LIVE_HEAD_73}\``,
+      '',
+      '- **Implemented-by:** `claude/issue-16657-raw-exec-operator-detail-cause`',
+      `- **Reviewed-by:** \`${ADOPTING_SEAT}\` (adopting seat; the isolated subagent that rendered the text has no session of its own)`,
+    ].join('\n'),
+  };
+  const live = (rows, o) => pair({ headSha: LIVE_HEAD_73, cardComments: [CLAIM('Clause-②: no'), ...rows], ...o });
+
+  // the discriminator, second dialect — H51's two facts, reused and not re-spelled
+  t('⭐ the 2026-09-09 ADOPTION dialect is a verdict — heading on a later line, head as a code span', readVerdictAuthorship(LIVE_ADOPTION.body, LIVE_HEAD_73) !== null);
+  t('⭐ …so is the bold-bullet dialect', readVerdictAuthorship(LIVE_BOLD.body, LIVE_HEAD_73) !== null);
+  t('⭐ …and the one that bolds the verdict word INSIDE the heading', readVerdictAuthorship(LIVE_HEADING_VERDICT.body, LIVE_HEAD_16) !== null);
+  t('⛔ CONTROL — all three read `null` under the 2026-09-01 marker alone, which is the defect #17346 filed', [LIVE_ADOPTION, LIVE_BOLD, LIVE_HEADING_VERDICT].every((r) => readVerdictAuthorship(r.body) === null));
+  t('⛔ the head is REQUIRED for the heading path — a caller with none keeps exactly the 2026-09-01 reading', readVerdictAuthorship(LIVE_BOLD.body, undefined) === null && readVerdictAuthorship(LIVE_BOLD.body, null) === null);
+  t('⛔ …and a heading naming ANOTHER head is not a verdict on this one — a quoted heading stays silent', readVerdictAuthorship(LIVE_BOLD.body, '0ldhead00abc') === null);
+  t('⛔ a head too short for H51\'s span test recognises nothing rather than everything', readVerdictAuthorship(LIVE_BOLD.body, 'de0bd5') === null);
+  t('⛔ the verdict WORD is still not a discriminator in either dialect — bold `**Verdict: PASS**` with no heading and no fenced line is not a verdict', readVerdictAuthorship(`**Verdict: PASS WITH FINDINGS** on head \`${LIVE_HEAD_73}\``, LIVE_HEAD_73) === null);
+  t('⛔ nor is a `###` sub-heading — the marker is H51\'s, so its calibration is inherited, not re-spelled', readVerdictAuthorship(LIVE_BOLD.body.replace(/^## /, '### '), LIVE_HEAD_73) === null);
+  t('⭐ the fenced 2026-09-01 dialect still reads with a head in hand — the new path ADDS, it never displaces', readVerdictAuthorship(VERDICT(SELF_PAIR).body, LIVE_HEAD_73)?.kind === 'pair');
+
+  // the reviewer grammar — HELD, with the remedy on the writing side
+  t('⭐ the 2026-09-09 dialect with a bold `**Reviewed-by:**` and a SESSION reads as a first-class pair', readVerdictAuthorship(LIVE_WRITTEN_RIGHT.body, LIVE_HEAD_73)?.kind === 'pair');
+  t('…with both tokens read — the dev\'s branch on the left, the adopting seat\'s session on the right', readVerdictAuthorship(LIVE_WRITTEN_RIGHT.body, LIVE_HEAD_73)?.implementedBy === 'claude/issue-16657-raw-exec-operator-detail-cause' && readVerdictAuthorship(LIVE_WRITTEN_RIGHT.body, LIVE_HEAD_73)?.reviewedBy === ADOPTING_SEAT);
+  t('⭐ …and C4 judges it NORMALLY: independent, so no row', c4VerdictSelfReview(live([LIVE_WRITTEN_RIGHT])) === null);
+  t('⭐ …while the same dialect naming ONE session on both lines FIRES C4 — the row now has a live population', says(c4VerdictSelfReview(live([{ ...LIVE_WRITTEN_RIGHT, body: LIVE_WRITTEN_RIGHT.body.replace('`claude/issue-16657-raw-exec-operator-detail-cause`', `\`${ADOPTING_SEAT}\``) }])), 'SELF-REVIEW'));
+  const proseRow = c4VerdictSelfReview(live([LIVE_BOLD]));
+  t('⭐ a PROSE `Reviewed-by:` value with no session token reads MALFORMED — the ruling is held, not widened', typeof proseRow === 'string' && says(proseRow, 'HALF'));
+  t('…naming the missing token by what the key admits', says(proseRow, '`Reviewed-by:` carries no readable session ID'));
+  t('…and quoting the offending line back, so the repair is located', says(proseRow, 'isolated review subagent'));
+  t('…and naming the WRITING-side remedy: the rendering or adopting seat writes its OWN session', says(proseRow, '渲染或采纳裁决的席位写自己的 session') && says(proseRow, 'ADOPTS'));
+  t('…and refusing the model name as an identity in as many words', says(proseRow, 'Prose naming the reviewing MODEL is not an identity'));
+  t('…and pointing at the comment, not merely the timestamp', says(proseRow, 'comment 5600239551'));
+  t('⛔ it is NOT a false positive: the adoption specimen carries the seat session one line ABOVE a `Reviewed-by:` line that names none', LIVE_ADOPTION.body.includes(ADOPTING_SEAT) && readVerdictAuthorship(LIVE_ADOPTION.body, LIVE_HEAD_73)?.kind === 'malformed');
+  t('⛔ and the implementer half is measured the same way — a session that is not FIRST after the colon is not the token', readVerdictAuthorship(LIVE_HEADING_VERDICT.body, LIVE_HEAD_16)?.kind === 'malformed' && says(readVerdictAuthorship(LIVE_HEADING_VERDICT.body, LIVE_HEAD_16)?.detail, '`Implemented-by:` carries no readable identity'));
+  t('⭐ so the live corpus reads MALFORMED, never `pair` and never silent — three specimens, three carrier defects', [LIVE_ADOPTION, LIVE_BOLD].every((r) => readVerdictAuthorship(r.body, LIVE_HEAD_73)?.kind === 'malformed') && readVerdictAuthorship(LIVE_HEADING_VERDICT.body, LIVE_HEAD_16)?.kind === 'malformed');
+
+  // the decoration asymmetry the same corpus exposed — key tolerant, value not
+  t('⭐ `- **Implemented-by:** `+backticked value reads — the colon sits INSIDE the bold, which is what every 2026-09-09 specimen writes', readVerdictAuthorship(LIVE_WRITTEN_RIGHT.body, LIVE_HEAD_73)?.implementedBy === 'claude/issue-16657-raw-exec-operator-detail-cause');
+  t('…and the same decoration on `Reviewed-by:` reads its session', readVerdictAuthorship(LIVE_WRITTEN_RIGHT.body, LIVE_HEAD_73)?.reviewedBy === ADOPTING_SEAT);
+  t('⛔ the strip eats DECORATION only, never a word: `branch `+token is still refused', readVerdictAuthorship(VERDICT(['Implemented-by: branch `claude/issue-x`', `Reviewed-by: \`${REVIEW_SESSION}\``]).body)?.kind === 'malformed');
+  t('⛔ …and a bold PROSE value is refused on both keys', readVerdictAuthorship(VERDICT(['Implemented-by: **the dispatching seat**', 'Reviewed-by: **the skills seat, this session**']).body)?.kind === 'malformed');
+  t('⛔ …so the live reviewer prose stays malformed after the fix — the ruling was held, not quietly widened', readVerdictAuthorship(LIVE_BOLD.body, LIVE_HEAD_73)?.kind === 'malformed');
+  t('⭐ the C6 reference record is legal under BOTH rows — a pair for C4, a found record for C6', readVerdictAuthorship(RECORD_ON_9AF9.body, HEAD_9AF9)?.kind === 'pair' && readVerdictAuthorship(RECORD_ON_9AF9.body, HEAD_9AF9)?.implementedBy === 'claude/issue-13657-x');
+
+  // which threads C4 reads, per pair state — stated, and bought for nothing
+  const COMPLETED_BASE = { pr: 13864, card: 13657, headSha: HEAD_9AF9, cardEvents: [CARD_HUNG, CARD_CLEARED], prEvents: [PR_HUNG, PR_CLEARED], headCommittedAt: HEAD_AT_PASS };
+  const onHeadVerdict = (lines, at, id) => ({ id, created_at: at, body: [`## Contract review (clause ②) — **PASS** · head \`${HEAD_9AF9}\``, '', ...lines].join('\n') });
+  const PR_SELF = onHeadVerdict([`- **Implemented-by:** \`${IMPL_SESSION}\``, `- **Reviewed-by:** \`${IMPL_SESSION}\``], '2026-09-01T08:50:00Z', 3401);
+  const PR_INDEP = onHeadVerdict([`- **Implemented-by:** \`${IMPL_SESSION}\``, `- **Reviewed-by:** \`${REVIEW_SESSION}\``], '2026-09-01T08:52:00Z', 3402);
+  t('⭐ on a COMPLETED pair C4 reads the PR thread too — the rule puts the record 「一条评论落 PR 或卡」', typeof c4VerdictSelfReview(declaredYes({ ...COMPLETED_BASE, prComments: [PR_SELF] })) === 'string');
+  t('…and names the PR-thread comment it judged', says(c4VerdictSelfReview(declaredYes({ ...COMPLETED_BASE, prComments: [PR_SELF] })), 'comment 3401'));
+  t('⭐ the union is the DECLARED limit, not a fetch: with no `prComments` in hand C4 reads the card thread alone', c4VerdictSelfReview(declaredYes({ ...COMPLETED_BASE })) === null && verdictThreadRows(declaredYes({ ...COMPLETED_BASE })).length === 1);
+  t('⛔ an unread PR thread is not doubled into C4 — C6 owns that gap, and the pair is UNJUDGED there', c4VerdictSelfReview(declaredYes({ ...COMPLETED_BASE, prComments: null })) === null && says(pairUnjudged(declaredYes({ ...COMPLETED_BASE, prComments: null })), 'review-of-record read'));
+  t('⛔ an unread CARD thread still refuses the whole reading, PR thread in hand or not (#4690)', verdictThreadRows({ cardComments: null, prComments: [PR_SELF] }) === null && c4VerdictSelfReview({ cardComments: null, prComments: [PR_SELF] }) === null);
+  t('⭐ newest-governs spans the two threads: a newer INDEPENDENT verdict on the PR thread clears a card self-review', c4VerdictSelfReview(declaredYes({ ...COMPLETED_BASE, cardComments: [CLAIM('Clause-②: yes'), VERDICT(SELF_PAIR, '2026-09-01T08:40:00Z')], prComments: [PR_INDEP] })) === null);
+  t('⭐ …and the reverse direction is not hidden either: a newer PR-thread self-review fires over an older clean card verdict', says(c4VerdictSelfReview(declaredYes({ ...COMPLETED_BASE, cardComments: [CLAIM('Clause-②: yes'), VERDICT(INDEPENDENT_PAIR, '2026-09-01T08:40:00Z')], prComments: [PR_SELF] })), 'SELF-REVIEW'));
+  t('C4 still costs no extra request — the PR thread it reads is the one the COMPLETED state already owed', needsRecordRead(declaredYes({ ...COMPLETED_BASE, prComments: [PR_SELF] })) === true && needsGateHistory(live([LIVE_BOLD])) === false);
 
   // the reporting order, and the rows that were already there
   t('C4 reports AFTER the three existing rows, and never displaces one', pairRows(pair({ prLabels: [L], cardLabels: [], cardComments: [CLAIM('Clause-②: yes'), VERDICT(SELF_PAIR)] })).map((r) => r.code).join(',') === 'C1,C4');
@@ -2938,6 +4175,73 @@ export function selfTest() {
   t('the reader roster carries the sixth read, so both readers must implement it', READER_METHODS.includes('readPullFiles'));
   t('…and the offline document serves it from its own `files` bag', typeof pairJsonReader({ pulls: [], files: { 13910: [] } }).readPullFiles === 'function');
 
+  // -- C6: the review of record on this head (#17302) -------------------------
+  //
+  // ★ The measured shapes, both directions. The record is the 2026-09-09
+  // board's verdict shape (heading, head as a code span, the independence
+  // pair); the controls are the two shapes the filing sweep found INSTEAD of
+  // one -- a dev's own `os-dev-report`, and a seat's ACCEPT paragraph carrying
+  // the head and a `Reviewed-by:` line under a bold first line with no heading
+  // at all (the skills seat's own, card #17285, 2026-09-10) -- plus H51's
+  // dialects and the states that owe no read.
+  battery('C6: the review of record on this head, and the carrier the rule text names (#17302)');
+  const bare = (o) => declaredYes({ pr: 13864, card: 13657, headSha: HEAD_9AF9, cardEvents: [CARD_HUNG, CARD_CLEARED], prEvents: [PR_HUNG, PR_CLEARED], headCommittedAt: HEAD_AT_PASS, prComments: [], ...o });
+  // the cost bound: only the completed state owes the read
+  t('only the COMPLETED state owes the review-of-record read', needsRecordRead(bare({})) === true);
+  t('⛔ a declared `no` owes none — the gate never rode it', needsRecordRead(pair({ cardComments: [CLAIM('Clause-②: no')] })) === false);
+  t('⛔ a pair still carrying the gate owes none — the review is pending, not missing', needsRecordRead(pair({ prLabels: [L], cardLabels: [L], cardComments: [CLAIM('Clause-②: yes')] })) === false);
+  t('⛔ a never-hung gate owes none — that is C3\'s row, and no row owns a fact twice', needsRecordRead(declaredYes({ cardEvents: [], prEvents: [] })) === false);
+  t('⛔ a half-bound gate owes none', needsRecordRead(declaredYes({ cardEvents: [CARD_HUNG, CARD_CLEARED], prEvents: [] })) === false);
+  t('⛔ a gate whose head MOVED after the clear owes none — the 重挂 row already covers it', needsRecordRead(bare({ headCommittedAt: '2026-09-01T10:30:00Z' })) === false);
+  t('⛔ an unreadable stream owes none — it is already UNJUDGED', needsRecordRead(bare({ cardEvents: null })) === false);
+  // recognition — the measured record, on either carrier
+  const onPr = reviewOfRecord(bare({ prComments: [RECORD_ON_9AF9] }));
+  t('the 2026-09-09 verdict shape on the PR thread reads FOUND', onPr.state === 'found');
+  t('…naming where it was found, its id and the head span it names', JSON.stringify([onPr.where, onPr.id, onPr.sha]) === JSON.stringify(['PR', 3301, HEAD_9AF9]), JSON.stringify(onPr));
+  const onCard = reviewOfRecord(bare({ cardComments: [CLAIM('Clause-②: yes'), RECORD_ON_9AF9] }));
+  t('the same comment on the CARD thread reads FOUND too — the rule lets it live on either', onCard.state === 'found' && onCard.where === 'card');
+  const absentRow = c6NoReviewOfRecord(bare({}));
+  t('⭐ a cleared gate with NO record on either thread is a C6 row', typeof absentRow === 'string');
+  t('…that says NO review of record in as many words, and names the head', says(absentRow, 'NO review of record') && says(absentRow, HEAD_9AF9));
+  t('…and states what was read — both threads, with their counts', says(absentRow, '0 comment(s) on the PR thread') && says(absentRow, '1 on the card'));
+  t('…and quotes the rule it is the carrier for', says(absentRow, '复核记录 = 一条评论落 PR 或卡') && says(absentRow, '清标缺引记录即半态'));
+  t('…and names the shape, so the remedy is executable', says(absentRow, '## Contract review') && says(absentRow, 'Reviewed-by:'));
+  t('…and is verdict-agnostic, and never writes', says(absentRow, 'PASS half') && says(absentRow, '自查放行'));
+  // H51's head-identity test, and its dialects
+  t('⛔ a record naming an OLDER head is not a record on this head — 「head 后移或无结论才重挂」 read forwards', reviewOfRecord(bare({ prComments: [RECORD('0ldhead00')] })).state === 'absent');
+  const ADOPTION = { id: 3302, created_at: '2026-09-01T08:52:00Z', body: `**Director seat adoption record** — the verdict below is adopted verbatim.\n\n---\n\n## Contract review (\`CONTRACT_REVIEW_TIER\`, isolated seat) — PR #13864 @ \`${HEAD_9AF9}\`\n\n- **Reviewed-by:** isolated subagent, adopted by \`${RECORD_SESSION}\`\n- **Implemented-by:** branch \`claude/issue-13657-x\`` };
+  t('a director ADOPTION record — heading on a later line — reads FOUND: H51\'s fourth dialect, line-anchored', reviewOfRecord(bare({ prComments: [ADOPTION] })).state === 'found');
+  t('a blockquoted heading still reads — H51 tolerates the `>` a seat writes without meaning it', reviewOfRecord(bare({ prComments: [{ ...RECORD_ON_9AF9, body: RECORD_ON_9AF9.body.replace(/^## /, '> ## ') }] })).state === 'found');
+  t('⛔ a `###` sub-heading is not the marker', reviewOfRecord(bare({ prComments: [{ ...RECORD_ON_9AF9, body: RECORD_ON_9AF9.body.replace(/^## /, '### ') }] })).state === 'absent');
+  t('⛔ the heading mentioned inside a paragraph is not the marker', reviewOfRecord(bare({ prComments: [{ ...RECORD_ON_9AF9, body: RECORD_ON_9AF9.body.replace(/^## /, 'see the ## ') }] })).state === 'absent');
+  // the two shapes the sweep found INSTEAD of a record
+  const DEV_REPORT = { id: 3303, created_at: '2026-09-01T08:40:00Z', body: `os-dev-report\n\n\`\`\`json\n{ "issue": 13657, "pr": "https://github.com/o/r/pull/13864", "summary": "landed at \`${HEAD_9AF9}\`" }\n\`\`\`` };
+  t('⛔ a bare os-dev-report naming the head is NOT a record — the implementer is not the reviewer', reviewOfRecord(bare({ prComments: [DEV_REPORT], cardComments: [CLAIM('Clause-②: yes'), DEV_REPORT] })).state === 'absent');
+  const SEAT_ACCEPT = { id: 3304, created_at: '2026-09-01T08:45:00Z', body: `**ACCEPT — PR #13864 (head \`${HEAD_9AF9}\`) reviewed in-seat at the contract-review tier** (skills seat, session \`${RECORD_SESSION}\`).\n\n- Implemented-by: os-dev subagent on branch \`claude/issue-13657-x\`.\n- Reviewed-by: the skills seat, this session — independence pair holds.` };
+  t('⛔ a seat\'s ACCEPT paragraph — head and `Reviewed-by:` under a bold first line, NO heading — is NOT a record: the measured 2026-09-10 shape this rule changes', reviewOfRecord(bare({ cardComments: [CLAIM('Clause-②: yes'), SEAT_ACCEPT] })).state === 'absent');
+  // the third fact — the carrier the rule text names
+  const UNSIGNED = RECORD(HEAD_9AF9, ['- **Implemented-by:** branch `claude/issue-13657-x`'], '2026-09-01T08:50:00Z', 3305);
+  const unsignedRow = c6NoReviewOfRecord(bare({ prComments: [UNSIGNED] }));
+  t('a heading comment on this head with NO `Reviewed-by:` line reads UNSIGNED, and is a row', reviewOfRecord(bare({ prComments: [UNSIGNED] })).state === 'unsigned' && typeof unsignedRow === 'string');
+  t('…that names the comment and the missing line, not the whole shape', says(unsignedRow, 'comment 3305') && says(unsignedRow, 'NO `Reviewed-by:` line'));
+  t('…and it is a DIFFERENT sentence from the absent row', unsignedRow !== absentRow);
+  t('…and still never writes', says(unsignedRow, '自查放行'));
+  t('the NEWEST heading comment on this head governs — a signed record after an unsigned one clears the row', reviewOfRecord(bare({ prComments: [UNSIGNED, RECORD(HEAD_9AF9, undefined, '2026-09-01T08:55:00Z', 3306)] })).state === 'found');
+  t('…and an unsigned one after a signed one is the reading, in either arrival order', reviewOfRecord(bare({ prComments: [RECORD(HEAD_9AF9, [], '2026-09-01T08:55:00Z', 3307), RECORD(HEAD_9AF9, undefined, '2026-09-01T08:50:00Z', 3306)] })).state === 'unsigned');
+  t('`Reviewed-by:` is read by C4\'s key regex — bullets, bold and backticks read; a different CASE does not', reviewOfRecord(bare({ prComments: [RECORD(HEAD_9AF9, ['- **`Reviewed-by`**: `session_x`'])] })).state === 'found' && reviewOfRecord(bare({ prComments: [RECORD(HEAD_9AF9, ['REVIEWED-BY: `session_x`'])] })).state === 'unsigned');
+  // #4690, C6's half: unread is never clean
+  t('an UNREADABLE PR thread is UNJUDGED, never clean — no row, and the accounting names the read', c6NoReviewOfRecord(bare({ prComments: null })) === null && says(pairUnjudged(bare({ prComments: null })), 'review-of-record read'));
+  t('a completed pair from a caller that predates the read (no `prComments` at all) is UNJUDGED too — fail-closed', says(pairUnjudged(declaredYes({ pr: 13864, card: 13657, headSha: HEAD_9AF9, cardEvents: [CARD_HUNG, CARD_CLEARED], prEvents: [PR_HUNG, PR_CLEARED], headCommittedAt: HEAD_AT_PASS })), 'PR #13864\'s comment thread'));
+  t('a completed pair whose head sha is too short to match is UNJUDGED, not absent', says(pairUnjudged(bare({ headSha: 'abc' })), 'head sha'));
+  // the completed specimen, whole
+  t('⭐ the #14155 specimen WITH its record still reads CLEAN overall — the landing check\'s ② answers 0 after a legitimate clear', pairRows(completed).length === 0 && pairUnjudged(completed) === null, JSON.stringify(pairRows(completed).map((r) => r.code)));
+  t('…and now prints the C6-RECORD note naming the comment, so the provenance comment can cite it', pairNotes(completed).map((n) => n.code).join() === 'C6-RECORD' && says(pairNotes(completed)[0]?.text, 'comment 3301') && says(pairNotes(completed)[0]?.text, '引记录 id 与所判 head'));
+  t('…and the note says existence, not the verdict', says(pairNotes(completed)[0]?.text, 'stays human'));
+  t('C6 reports AFTER C4 and never displaces a row', pairRows(bare({ cardComments: [CLAIM('Clause-②: yes'), VERDICT(SELF_PAIR)] })).map((r) => r.code).join(',') === 'C4,C6');
+  t('C6 is a FINDING — it rides the exit, not the notes', pairRows(bare({})).some((r) => r.code === 'C6') && pairNotes(bare({})).length === 0);
+  t('the offline document serves the PR thread from the same `comments` bag, keyed by the PR number', Array.isArray(pairJsonReader({ pulls: DOC.pulls, comments: { 13910: [] } }).readCardComments('owner/name', 13910)));
+  t('…and one it omits reads null — UNJUDGED, ⛔ never a missing record', pairJsonReader({ pulls: DOC.pulls }).readCardComments('owner/name', 13910) === null);
+
   battery('the exit register is distinct in every direction it must be');
   const codes = [EXIT_OK, EXIT_USAGE, EXIT_INCOMPLETE, EXIT_PREREQUISITE_NOT_MET, EXIT_PAIR_ADVERSE];
   t('every exit code is distinct — a verdict can never be read as an environment complaint', new Set(codes).size === codes.length, JSON.stringify(codes));
@@ -3020,6 +4324,393 @@ export function selfTest() {
   t('an argv refusal exits USAGE, never a verdict code', EXIT_USAGE !== EXIT_OK && EXIT_USAGE !== EXIT_INCOMPLETE && EXIT_USAGE !== EXIT_PAIR_ADVERSE && EXIT_USAGE !== EXIT_PREREQUISITE_NOT_MET);
   t('⛔ and NOT dispatch-gates\' usage exit of 2, which is this file\'s UNJUDGED verdict', EXIT_USAGE === 1 && EXIT_INCOMPLETE === 2);
 
+  // -- #17366: the correction comment, the self-solvable exit ---------------
+  //
+  // The card's acceptance list, in order: (1) a seat writing per the template
+  // gets a machine-readable declaration without knowing this regex; (2) the
+  // five prose spellings measured in the filing shift STILL do not read; (3)
+  // the state is self-solvable — the claiming seat repairs an unreadable
+  // declaration with ONE comment, no edit of the original, no second `Claim:`,
+  // nobody outside the repository.
+  battery('#17366: the correction comment — the self-solvable exit, and the three things it is not');
+  const C_SESSION = 'session_01MCLBsUgfykL74aU716rzVK';
+  const C_OTHER_SESSION = 'session_01YKEjmbYNvYWJvWGSWx26zK';
+  const C_CLAIM_ID = 5642248126;
+  // The claim carrier as the board actually writes it: the template's lines, a
+  // comment id, and the `Session:` line the protocol makes mandatory.
+  const CLAIMED = (extra, o = {}) => ({
+    id: o.id ?? C_CLAIM_ID,
+    created_at: o.created_at ?? '2026-09-12T00:41:08Z',
+    body:
+      `Claim: PM loop round 1\n` +
+      (o.session === null ? '' : `Session: \`${o.session ?? C_SESSION}\`\n`) +
+      'Branch: `claude/issue-17366-clause2-correction-shape`\n' +
+      `${extra ?? ''}`,
+  });
+  const CORRECTION = (lines, o = {}) => ({
+    id: o.id ?? 5650000001,
+    created_at: o.created_at ?? '2026-09-12T01:00:00Z',
+    body: lines.join('\n'),
+  });
+  const FIXED_CORRECTION = (value = 'no', o = {}) =>
+    CORRECTION(
+      [
+        `Clause-②-correction: ${o.claimId ?? C_CLAIM_ID}`,
+        `Clause-②: ${value}`,
+        ...(o.session === null ? [] : [`Session: \`${o.session ?? C_SESSION}\``]),
+      ],
+      o,
+    );
+
+  // (1) The template's line, read by the same reader a seat never has to know.
+  const TEMPLATE_LINE = 'Clause-②: yes | no';
+  t('⭐ criterion 1: the template\'s key with `no` substituted reads DECLARED', readClause2Line('Clause-②: no')?.value === 'no');
+  t('⭐ …and with `yes` substituted', readClause2Line('Clause-②: yes')?.value === 'yes');
+  t('…and the template line the seat copies is exactly the fixed key, so the two cannot drift', TEMPLATE_LINE.startsWith('Clause-②:'));
+  // ⭐ FLIPPED, as the pre-registration above this line required: the template
+  // line copied WITHOUT choosing used to read `yes`, because `readValueToken`
+  // took the first token after the colon and treated the rest as the seat's
+  // argument — so an UNFILLED template read as a judgement. #17098 refuses the
+  // alternation in `readValueToken`, and the case is kept rather than deleted,
+  // with its expectation moved: the before-state it recorded is the thing the
+  // assertion below is now measuring the absence of.
+  //
+  // ⚠️ It is `malformed` and ⛔ NOT a describing near miss: the line is an
+  // unfilled TEMPLATE — one key, no inline-code span — so the fact about it is
+  // that its value slot holds a menu, which is the fact `Clause-②: <yes|no>`
+  // has always carried. `clause2LineDescribes` holds the four axes.
+  t('⭐ the UNFILLED template line is NOT a declaration — a menu is not a choice (#17098)', readClause2Line(TEMPLATE_LINE)?.kind !== 'declared');
+  t('…and it carries NO value: ⛔ the first alternative is never taken as the answer', readClause2Line(TEMPLATE_LINE)?.value !== 'yes' && readClause2Line(TEMPLATE_LINE)?.value !== 'no');
+  t('…reading MALFORMED, the same state the angle-bracket placeholder has always read', readClause2Line(TEMPLATE_LINE)?.kind === 'malformed' && readClause2Line('Clause-②: <yes|no>')?.kind === 'malformed');
+  t('…and the row quotes the unfilled slot back, so the seat sees what it copied', says(readClause2Line(TEMPLATE_LINE)?.line, 'yes | no'));
+  t('⭐ the C2 rows point at the TEMPLATE rather than at a regex', says(missingLine, '〈模板与表〉') && says(noClaim, '〈模板与表〉'));
+  t('…and tell the seat to COPY it rather than compose one', says(missingLine, 'COPY the template'));
+  t('⛔ and the pointer prescribes no VALUE — the declaration is still the judgement', says(missingLine, 'Do not fill the line in'));
+
+  // (2) The negative control: the five spellings measured on the filing shift.
+  // Rows 2-5 of the card's table are one text ("同上") written on four cards, so
+  // the set is pinned as five INSTANCES of two distinct spellings and named as
+  // such rather than padded into five different strings.
+  const MEASURED_PROSE = [
+    '`Clause-②` holds at `no`.',            // #1, PR #17289's body
+    '条款② **`no`**(复用…)',                 // #2, card #17335's Claim:
+    '条款② **`no`**(复用…)',                 // #3, card #17337 — 同上
+    '条款② **`no`**(复用…)',                 // #4, card #16659 — 同上
+    '条款② **`no`**(复用…)',                 // #5, card #16549 — still unrepaired when the card was filed
+  ];
+  t('⭐ criterion 2: none of the five measured spellings reads as a declaration', MEASURED_PROSE.every((line) => readClause2Line(line)?.kind !== 'declared'));
+  t('⭐ …and none of them declares from a CLAIM comment either', MEASURED_PROSE.every((line) => cardDeclaration([CLAIMED(line)]).state !== 'declared'));
+  t('⛔ …nor does the correction mechanism admit one of them: prose in a correction is prose', cardDeclaration([CLAIMED('Domain: x'), CORRECTION([`Clause-②-correction: ${C_CLAIM_ID}`, MEASURED_PROSE[1], `Session: \`${C_SESSION}\``])]).state !== 'declared');
+  t('the #1 spelling is reported as a SPELLING near miss, so the residue is quoted back', readClause2Line(MEASURED_PROSE[0])?.reason === 'spelling');
+  t('⛔ …and never as an inline-key placement miss — there is no key-plus-colon on that line', readClause2Line(MEASURED_PROSE[0])?.reason !== 'inline-key');
+  t('the #2-#5 spelling reaches NO pattern at all — 条款② carries no `Clause` token', readClause2Line(MEASURED_PROSE[1]) === null);
+  t('…so its card reads MISSING with no residue to quote, which is a true reading and not a silence', cardDeclaration([CLAIMED(MEASURED_PROSE[1])]).state === 'missing');
+  t('⛔ the five instances cover exactly the two carriers the card measured, and both stay unread', readClause2Line(MEASURED_PROSE[0])?.kind !== 'declared' && readClause2Line(MEASURED_PROSE[4])?.kind !== 'declared');
+  t('⛔ CONTROL: the accept set did not move — the fixed spelling still reads, in both values', readClause2Line('Clause-②: yes')?.value === 'yes' && readClause2Line('Clause-②: no')?.value === 'no');
+  t('⛔ CONTROL: and the tolerated decoration still reads, no wider and no narrower', readClause2Line('> - **`Clause-②`**: `no`')?.value === 'no');
+
+  // (3) Self-solvability, end to end: the state, the one comment, the exit.
+  const BROKEN_THREAD = [CLAIMED(MEASURED_PROSE[1])];
+  const REPAIRED_THREAD = [CLAIMED(MEASURED_PROSE[1]), FIXED_CORRECTION('no')];
+  const brokenPair = pair({ cardComments: BROKEN_THREAD });
+  const repairedPair = pair({ cardComments: REPAIRED_THREAD });
+  t('⭐ criterion 3, BEFORE: the card reads MISSING — the declaration limb has no reading', cardDeclaration(BROKEN_THREAD).state === 'missing');
+  t('⭐ …and `--pair` earns a C2 finding, which is its exit 4', pairRows(brokenPair).some((r) => r.code === 'C2'));
+  t('⭐ AFTER one correction comment: the limb reads DECLARED', cardDeclaration(REPAIRED_THREAD).state === 'declared');
+  t('⭐ …carrying the seat\'s own value', cardDeclaration(REPAIRED_THREAD).value === 'no');
+  t('⭐ …and `--pair` has no C2 finding left to raise', pairRows(repairedPair).every((r) => r.code !== 'C2'));
+  t('⛔ and the original claim comment is BYTE-IDENTICAL across the two threads — nothing was edited', BROKEN_THREAD[0].body === REPAIRED_THREAD[0].body);
+  t('⛔ the correction is NOT a second `Claim:` — the claim predicate does not match it', CLAIM_COMMENT_MARKER.test(FIXED_CORRECTION().body) === false);
+  t('⛔ …so the governing claim does not move, and the card is not re-claimed', governingClaim(REPAIRED_THREAD)?.createdAt === governingClaim(BROKEN_THREAD)?.createdAt);
+  t('⛔ nor is the correction read as a MISPLACED declaration — it is the designated second carrier', cardDeclaration(REPAIRED_THREAD).state !== 'misplaced');
+  t('the reading PRINTS: a note names the correction rather than answering 0 in silence', typeof c2CorrectionNote(repairedPair) === 'string');
+  t('…and says the claim comment was NOT edited', says(c2CorrectionNote(repairedPair), 'NOT edited'));
+  t('…and names the comment id it corrects, so a reader can find it', says(c2CorrectionNote(repairedPair), String(C_CLAIM_ID)));
+  t('…and states the attribution ceiling rather than claiming a verification', says(c2CorrectionNote(repairedPair), 'DECLARED identity, never a verified one'));
+  t('…and it rides as a NOTE, never as a finding — pairNotes carries it, pairRows does not', pairNotes(repairedPair).some((n) => n.code === 'C2-CORRECTION') && pairRows(repairedPair).every((r) => r.code !== 'C2-CORRECTION'));
+  t('the sweep counts a corrected card as DECLARED — neither owing a line nor owing a comment', declarationLimbTally([repairedPair]).missing === 0 && declarationLimbTally([repairedPair]).absent === 0);
+
+  // A wrong VALUE is the same door: the seat has no edit for that either.
+  t('⭐ a correction supersedes a READABLE claim declaration too — a wrong value is repairable by the same act', cardDeclaration([CLAIMED('Clause-②: yes'), FIXED_CORRECTION('no')]).value === 'no');
+  t('…and the reverse direction reads the same way', cardDeclaration([CLAIMED('Clause-②: no'), FIXED_CORRECTION('yes')]).value === 'yes');
+  t('the NEWEST correction naming the governing claim wins', cardDeclaration([
+    CLAIMED('Clause-②: yes'),
+    FIXED_CORRECTION('no', { id: 1, created_at: '2026-09-12T01:00:00Z' }),
+    FIXED_CORRECTION('yes', { id: 2, created_at: '2026-09-12T02:00:00Z' }),
+  ]).value === 'yes');
+  t('…and an unreadable timestamp falls back to thread order, never to "fresh"', cardDeclaration([
+    CLAIMED('Clause-②: yes'),
+    FIXED_CORRECTION('yes', { id: 1, created_at: 'not a date' }),
+    FIXED_CORRECTION('no', { id: 2, created_at: 'not a date' }),
+  ]).value === 'no');
+
+  // Every refusal names an act the claiming seat can perform — ⛔ no branch of
+  // this mechanism may be a new one-way door.
+  const wrongId = cardDeclaration([CLAIMED(MEASURED_PROSE[1]), FIXED_CORRECTION('no', { claimId: 4242424242 })]);
+  t('⛔ a correction naming a comment that is not the governing claim does NOT apply', wrongId.state === 'missing');
+  t('…and is ignored with a PRINTED reason, never silently', says(wrongId.correctionNote, 'IGNORED'));
+  t('…that names the id to use instead', says(wrongId.correctionNote, String(C_CLAIM_ID)));
+  t('…and the C2 row carries it, so a seat that tried is told why it did not land', says(c2DeclarationUnreadable(pair({ cardComments: [CLAIMED(MEASURED_PROSE[1]), FIXED_CORRECTION('no', { claimId: 4242424242 })] })), 'did NOT take effect'));
+  const otherSeat = cardDeclaration([CLAIMED(MEASURED_PROSE[1]), FIXED_CORRECTION('no', { session: C_OTHER_SESSION })]);
+  t('⛔ a correction from a DIFFERENT session does not apply — no seat declares on another\'s behalf', otherSeat.state === 'missing');
+  t('…and the reason names both sessions, so the remedy is executable', says(otherSeat.correctionNote, C_OTHER_SESSION) && says(otherSeat.correctionNote, C_SESSION));
+  const noSession = cardDeclaration([CLAIMED(MEASURED_PROSE[1]), FIXED_CORRECTION('no', { session: null })]);
+  t('⛔ a correction with no `Session:` line does not apply — it does not say whose act it is', noSession.state === 'missing');
+  t('…and the reason names the session to write', says(noSession.correctionNote, C_SESSION));
+  const proseCorrection = cardDeclaration([CLAIMED(MEASURED_PROSE[1]), CORRECTION([`Clause-②-correction: ${C_CLAIM_ID}`, MEASURED_PROSE[0], `Session: \`${C_SESSION}\``])]);
+  t('⛔ a correction whose declaration is PROSE does not apply — the same reader judges both carriers', proseCorrection.state === 'missing');
+  t('…and says so by quoting the fixed spelling rather than by going quiet', says(proseCorrection.correctionNote, 'Clause-②: yes'));
+  // ⛔ The one branch that must NOT refuse: a claim with no session leaves
+  // nothing to compare, and refusing there would rebuild the door one room over.
+  const unverifiable = cardDeclaration([CLAIMED(MEASURED_PROSE[1], { session: null }), FIXED_CORRECTION('no')]);
+  t('⭐ a claim carrying no `Session:` line still gets its correction applied — ⛔ no new one-way door', unverifiable.state === 'declared' && unverifiable.value === 'no');
+  t('…and the note says attribution could NOT be verified, and why', says(unverifiable.correctionNote, 'ATTRIBUTION NOT VERIFIED'));
+
+  // The shape itself: what is a correction, and what is merely near one.
+  t('the correction key tolerates the same decoration the declaration key does', cardDeclaration([CLAIMED(MEASURED_PROSE[1]), CORRECTION([`> - **\`Clause-②-correction\`**: \`${C_CLAIM_ID}\``, 'Clause-②: no', `Session: \`${C_SESSION}\``])]).state === 'declared');
+  t('⛔ a MID-LINE correction key is not a correction — the key is read at line start', readClause2Correction({ id: 9, body: `Domain: x · Clause-②-correction: ${C_CLAIM_ID}\nClause-②: no` }) === null);
+  t('⛔ a HEADING form is not a correction either', readClause2Correction({ id: 9, body: `## Clause-②-correction: ${C_CLAIM_ID}\nClause-②: no` }) === null);
+  t('⛔ nor is the key buried below the first line — a correction is a DEDICATED comment', readClause2Correction({ id: 9, body: `Round report.\nClause-②-correction: ${C_CLAIM_ID}\nClause-②: no` }) === null);
+  t('…but a leading BLANK line does not disqualify one', readClause2Correction({ id: 9, body: `\nClause-②-correction: ${C_CLAIM_ID}\nClause-②: no` })?.claimId === String(C_CLAIM_ID));
+  t('⛔ a non-numeric id is not the shape — the id is digits, so no angle-bracketed token can be eaten by the sanitizer', readClause2Correction({ id: 9, body: 'Clause-②-correction: the claim above\nClause-②: no' }) === null);
+  t('⛔ the correction key never reads as the DECLARATION key — `Clause-②-correction:` is not `Clause-②:`', readClause2Line(`Clause-②-correction: ${C_CLAIM_ID}`)?.kind !== 'declared');
+  t('⛔ …and it is not read as an inline-key placement miss either', readClause2Line(`Clause-②-correction: ${C_CLAIM_ID}`)?.reason !== 'inline-key');
+  t('a thread with NO correction reads exactly as it always did', cardDeclaration([CLAIMED('Clause-②: no')]).state === 'declared' && cardDeclaration([CLAIMED('Clause-②: no')]).correctionNote === undefined);
+  t('⛔ CONTROL: the MISPLACED reading survives — a bare declaration in a NON-correction comment is still misplaced', cardDeclaration([CLAIMED('Domain: x'), { id: 7, body: 'Clause-②: yes', created_at: '2026-09-12T01:00:00Z' }]).state === 'misplaced');
+
+  // The `Session:` reader, which both sides of the attribution comparison use.
+  t('the session token is read through the file\'s one SESSION_TOKEN, backticks and all', readSessionId('Session: `session_abc123`') === 'session_abc123');
+  t('…with the seat\'s prose allowed to follow it, the Clause-② calibration', readSessionId('Session: `session_abc123` (GitHub `os-sales`, skills seat), claimed at 00:41Z') === 'session_abc123');
+  t('⛔ `Claude-Session:` is a different key and is not matched', readSessionId('Claude-Session: https://claude.ai/code/session_abc123') === null);
+  t('⛔ a line with no readable token reads null, not a guess', readSessionId('Session: the skills seat') === null);
+  t('⛔ and a body with no session line at all reads null', readSessionId('Claim: round 1\nBranch: `claude/issue-1-x`') === null);
+
+  // The exit register is untouched: the correction is a new INPUT to C2, never
+  // a new verdict family.
+  t('⛔ no new exit code was minted for the correction reading', new Set([EXIT_OK, EXIT_USAGE, EXIT_INCOMPLETE, EXIT_PREREQUISITE_NOT_MET, EXIT_PAIR_ADVERSE]).size === 5);
+  t('…and a repaired pair answers with the SAME code a never-broken one does', pairRows(repairedPair).length === pairRows(pair({ cardComments: [CLAIMED('Clause-②: no')] })).length);
+
+  // -- #17149: a claim that parses to ZERO branches ---------------------------
+  //
+  // The declaration limb's carrier is the GOVERNING claim, and governance is
+  // resolved by a branch parse. A newest claim comment naming no parseable
+  // branch used to be discarded, and this file then read a declaration off a
+  // comment the seat had already replaced — silently, and in BOTH directions:
+  // wrong when the two disagreed, and right-for-the-wrong-reason when they
+  // agreed. The fixtures below are the MEASURED bodies, quoted rather than
+  // paraphrased, so a future widening of the branch reader cannot make this
+  // battery pass by accident.
+  battery('#17149: a claim that parses to ZERO branches — malformed, never absent');
+  // Card #16322, comments 5593513389 (2026-09-08T23:46:51Z) and 5594909614
+  // (2026-09-09T02:35:21Z) as posted: the branch named INSIDE the `Claim:`
+  // sentence, with no `Branch:` line anywhere. The two declare OPPOSITE values,
+  // which is what made the fallback visible at all.
+  const INLINE_OLD = {
+    id: 5593513389,
+    created_at: '2026-09-08T23:46:51Z',
+    body:
+      'Claim: session_01ADLdAs2pVcH17h9tZKWMBg — branch `claude/issue-16322-analytics-daterange-closed-vocabulary-drivers`\n\n' +
+      'Clause-②: no\n',
+  };
+  const INLINE_NEW = {
+    id: 5594909614,
+    created_at: '2026-09-09T02:35:21Z',
+    body:
+      'Claim: session_01ADLdAs2pVcH17h9tZKWMBg — branch `claude/issue-16322-analytics-daterange-closed-vocabulary-drivers`\n\n' +
+      'Clause-②: yes\n',
+  };
+  // The live board, 2026-09-12T02:53Z: the same spelling, a different seat's
+  // template, four claims inside three seconds. Card #16175's newest claim is
+  // branchless while its 2026-09-06 claim parses — and names a DIFFERENT branch.
+  const LIVE_BRANCHLESS = {
+    id: 5642984850,
+    created_at: '2026-09-12T02:53:06Z',
+    body: 'Claim: session_012GKcPZbMoGq7WPzKLfRBTU · claude/issue-16175-staleness-mtime-false-refusal\nClause-②: no\n',
+  };
+  const LIVE_PARSES = {
+    id: 5557414924,
+    created_at: '2026-09-06T06:19:06Z',
+    body: 'Claim: PM loop\nBranch: `claude/issue-16175-regen-sibling-stale-rules`\nClause-②: no\n',
+  };
+  const INLINE_THREAD = [INLINE_OLD, INLINE_NEW];
+  const unparsedDecl = cardDeclaration(INLINE_THREAD);
+  t('⭐ the measured inline spelling reads CLAIM-BRANCH-UNPARSED — the carrier could not be resolved', unparsedDecl.state === 'claim-branch-unparsed');
+  t('⛔ …and NOT `declared`: the line that IS on the thread belongs to a comment this run cannot confirm is current', unparsedDecl.state !== 'declared');
+  t('⛔ …nor `absent`, which would say no claim comment was written — one was', unparsedDecl.state !== 'absent');
+  t('⛔ …nor `missing`, which would send the seat looking for a line that is there', unparsedDecl.state !== 'missing');
+  t('…and it carries NO value — an unclassified result is never a reading', unparsedDecl.value === undefined);
+  t('the state names the comment it could not parse', unparsedDecl.malformedClaim?.id === 5594909614);
+  // The BEFORE-state, quantified rather than recalled: both comments carry a
+  // readable line, and they DISAGREE. That is why reading the wrong one was a
+  // wrong answer and not merely an unlucky one.
+  t('⭐ the superseded comment carried a readable declaration, and the two DISAGREE', readClause2Line(INLINE_OLD.body)?.value === 'no' && readClause2Line(INLINE_NEW.body)?.value === 'yes');
+  // The reading PRINTS, and it is UNJUDGED (exit 2) rather than a verdict.
+  const unparsedPair = pair({ cardComments: INLINE_THREAD });
+  const unparsedGap = pairUnjudged(unparsedPair);
+  t('⭐ the pair is UNJUDGED and the reading prints in full — ⛔ never silence', typeof unparsedGap === 'string' && unparsedGap.length > 0);
+  t('…naming the comment id, so a reader can open it', says(unparsedGap, '5594909614'));
+  t('…and the remedy, which is a `Branch:` line of its OWN', says(unparsedGap, '`Branch:` line of its OWN'));
+  t('…and saying in as many words that this is not a declared `no`', says(unparsedGap, 'never a declared `no`'));
+  t('…and that a whole shift reading this way is a TEMPLATE fault rather than a typo', says(unparsedGap, 'SEAT TEMPLATE fault'));
+  t('⛔ and it raises NO C2 finding — an unclassified result must never be rendered as an adverse verdict', pairRows(unparsedPair).every((r) => r.code !== 'C2'));
+  t('⛔ nor any other finding row on this pair', pairRows(unparsedPair).length === 0);
+  // The live specimen, and the fallback shape at its sharpest: the older claim
+  // names a DIFFERENT branch, so every reader downstream probes the wrong ref.
+  const liveDecl = cardDeclaration([LIVE_PARSES, LIVE_BRANCHLESS]);
+  t('⭐ the live 2026-09-12 specimen reads the same way', liveDecl.state === 'claim-branch-unparsed');
+  t('…and the state names the older claim governance would have fallen back to', liveDecl.governingClaim?.createdAt === '2026-09-06T06:19:06Z');
+  t('⚠️ …whose branch is a DIFFERENT one, so the fallback is not even about the same work', liveDecl.governingClaim?.branches.join(',') === 'claude/issue-16175-regen-sibling-stale-rules');
+  t('…and the printed gap names that older claim rather than leaving the reader to guess', says(pairUnjudged(pair({ cardComments: [LIVE_PARSES, LIVE_BRANCHLESS] })), 'claude/issue-16175-regen-sibling-stale-rules'));
+  // CONTROLS — the accept set did not move in either direction.
+  t('⛔ CONTROL: a well-formed newest claim still governs, and its value is read', cardDeclaration([
+    { id: 1, created_at: '2026-08-30T09:00:00Z', body: 'Claim: old\nBranch: `claude/issue-1-old`\nClause-②: yes' },
+    { id: 2, created_at: '2026-08-31T09:00:00Z', body: 'Claim: new\nBranch: `claude/issue-1-new`\nClause-②: no' },
+  ]).value === 'no');
+  t('⛔ CONTROL: an OLDER branchless claim is spent and raises nothing — governance is correct', cardDeclaration([
+    { id: 1, created_at: '2026-08-30T09:00:00Z', body: 'Claim: session_x · claude/issue-1-old\nClause-②: yes' },
+    { id: 2, created_at: '2026-08-31T09:00:00Z', body: 'Claim: new\nBranch: `claude/issue-1-new`\nClause-②: no' },
+  ]).state === 'declared');
+  t('⛔ CONTROL: #16170\'s bulleted `Branch:` directive still parses, so its card is unaffected', cardDeclaration([
+    { id: 1, created_at: '2026-08-31T09:00:00Z', body: 'Claim: PM loop\n- Branch: `claude/issue-15511-zh-gap-helptext`\nClause-②: no' },
+  ]).state === 'declared');
+  t('⛔ CONTROL: a thread with no claim comment at all still reads ABSENT', cardDeclaration([{ id: 1, body: 'a triage note', created_at: '2026-08-31T10:00:00Z' }]).state === 'absent');
+  t('⛔ CONTROL: an unreadable thread still reads UNREADABLE — never the new state', cardDeclaration(null).state === 'unreadable');
+  // The new state is nobody else's state: it is counted into neither not-read
+  // population and it is not the #16304 fourth reading's `absent`.
+  t('the tally counts it under NEITHER not-read population', declarationLimbTally([unparsedPair]).absent === 0 && declarationLimbTally([unparsedPair]).missing === 0);
+  t('⛔ …and the fourth reading is unavailable on it — a sibling cannot answer a question this card could not ask', readsSiblingDeclaration(unparsedPair, [unparsedPair, pair({ card: 999, cardComments: [CLAIM('Clause-②: yes')] })]) === false);
+  t('⛔ …nor is such a card a CARRIER for a sibling of its own', siblingDeclarations(pair({ card: 999, pr: 13910 }), [pair({ card: 999, pr: 13910 }), { pr: 13910, card: 13476, cardComments: INLINE_THREAD }]).length === 0);
+  // ⛔ The fix is the STATE, not a widening: the branch reader's accept set is
+  // byte-identical, which is what keeps the next unrecognised spelling loud.
+  t('⛔ the branch reader was NOT widened — the inline spelling still parses to zero', claimedBranches(INLINE_NEW.body).length === 0);
+  t('⛔ …and the claim marker still matches it, which is what makes the two-anchor split a STATE', CLAIM_COMMENT_MARKER.test(INLINE_NEW.body) === true);
+
+  // -- #17098: the key-INITIAL describing line ------------------------------
+  //
+  // The one-sided fixture this battery exists to finish is one section up, in
+  // the card-level battery: 「a claim comment that only DESCRIBES the line reads
+  // MISSING, never declared」. Its case put PROSE BEFORE THE KEY, so the line
+  // never matched `CLAUSE2_KEY_LINE` at all and the assertion passed for a
+  // reason narrower than the sentence it was written under. The half it did not
+  // cover — the key FIRST, after markdown decoration — read `declared`, and the
+  // general property the sentence states was false while its own case was green.
+  //
+  // ⭐ Both halves are now pinned, and they are pinned from the MEASURED
+  // specimens rather than from invented ones: the filing card's standing-rules
+  // bullet, and the dispatch-template bullet a second seat measured on #17277 /
+  // #17290 — where this defect fired in the FAIL-OPEN direction, the declaration
+  // limb reading `yes` from the dispatching seat's own boilerplate while
+  // `--pair` exited 0 into a landing pre-check.
+  battery('#17098: a key-INITIAL line that DESCRIBES the spelling — the half the fixture did not cover');
+  // The filing card's specimen (#17098 body), and the second seat's (5636056726).
+  const D_CARD_BULLET = '- **`Clause-②: yes` / `Clause-②: no`** — the value alone on its line, machine-read.';
+  const D_TEMPLATE_BULLET = '- **`Clause-②: yes|no` must appear in the PR BODY at column 0.** `Check Changeset` reads it there…';
+  t('⭐ the filing card\'s own specimen is NOT a declaration', readClause2Line(D_CARD_BULLET)?.kind !== 'declared');
+  t('⭐ …and neither is the second seat\'s measured dispatch-template bullet', readClause2Line(D_TEMPLATE_BULLET)?.kind !== 'declared');
+  t('⛔ neither yields a value — the defect was a `yes` invented out of a spelling lesson', readClause2Line(D_CARD_BULLET)?.value === undefined && readClause2Line(D_TEMPLATE_BULLET)?.value === undefined);
+  t('…both are reasoned DESCRIBING, so the row can say what the seat is looking at', readClause2Line(D_CARD_BULLET)?.reason === 'describing' && readClause2Line(D_TEMPLATE_BULLET)?.reason === 'describing');
+  t('⛔ …and NOT `malformed`, which would send the seat to fix a value on a line that claims none', readClause2Line(D_CARD_BULLET)?.kind === 'near-miss' && readClause2Line(D_TEMPLATE_BULLET)?.kind === 'near-miss');
+  t('…and each quotes ITS OWN line back, capped, so the residue is actionable', says(readClause2Line(D_CARD_BULLET)?.line, 'machine-read') && says(readClause2Line(D_TEMPLATE_BULLET)?.line, 'column 0'));
+  // The card level: the general property, now true of BOTH halves.
+  t('⭐ the card-level reading is MISSING on the key-INITIAL half — the property the sentence states', cardDeclaration([CLAIM(D_CARD_BULLET)]).state === 'missing');
+  t('⭐ …and on the second seat\'s bullet too', cardDeclaration([CLAIM(D_TEMPLATE_BULLET)]).state === 'missing');
+  t('⛔ …carrying no value in either case — this is the fail-OPEN half, where a `yes` reached exit 0', cardDeclaration([CLAIM(D_CARD_BULLET)]).value === undefined && cardDeclaration([CLAIM(D_TEMPLATE_BULLET)]).value === undefined);
+  t('…and the prose-FIRST half still reads MISSING, by its own reason — the two halves are one property, not one mechanism', cardDeclaration([CLAIM('the dev declares `Clause-②: yes|no` from the diff')]).state === 'missing' && cardDeclaration([CLAIM('the dev declares `Clause-②: yes|no` from the diff')]).nearMissReason === 'inline-key');
+
+  // -- the two tells, each pinned ALONE so neither can be carrying the other --
+  t('TELL 1 — the fixed key named TWICE on one line is a quotation of the spelling', readClause2Line('- Clause-②: yes, or Clause-②: no — pick one')?.reason === 'describing');
+  t('TELL 2 — the key inside an inline-code span the line goes on talking outside of', readClause2Line('- `Clause-②: yes` is what a dev writes when the diff touches the spec')?.reason === 'describing');
+  t('⛔ TELL 2 is CONTINUATION, not quoting: the quoted declaration ALONE on its line is a declaration', readClause2Line('`Clause-②: yes`')?.value === 'yes');
+  t('⛔ …and bolded around the span too — that spelling is what this file\'s own remedy sentence teaches', readClause2Line('**`Clause-②: no`**')?.value === 'no');
+  t('⛔ …while a span closed around the KEY was never the shape at all', readClause2Line('`Clause-②`: no — scripts only')?.value === 'no');
+  t('the tells are STRUCTURAL — the same words with the markdown removed declare, and the same markdown with other words describes', readClause2Line('Clause-②: yes is what a dev writes when the diff touches the spec')?.value === 'yes' && readClause2Line('- `Clause-②: no` was yesterday\'s answer')?.reason === 'describing');
+
+  // -- the alternation, refused in the VALUE reader rather than here ---------
+  t('⭐ a bare alternation is refused: `yes|no` is a menu, not a choice', readClause2Line('Clause-②: yes|no')?.kind !== 'declared');
+  t('…in either order, and spaced', readClause2Line('Clause-②: no|yes')?.kind !== 'declared' && readClause2Line('Clause-②: yes | no')?.kind !== 'declared');
+  t('…reading MALFORMED, the state `Clause-②: <yes|no>` has always read — one fact, one state', readClause2Line('Clause-②: yes|no')?.kind === 'malformed' && readClause2Line('Clause-②: <yes|no>')?.kind === 'malformed');
+  t('⛔ the refusal is ADJACENCY, never a scan: a pipe later in the reasoning is the seat\'s argument', readClause2Line('Clause-②: no — see the table | column two')?.value === 'no');
+
+  // -- SKIPPED, not returned: the scan continues past a describing line ------
+  //
+  // What a seat had to do BY HAND on three live cards (#17277 · #17290 · #17596)
+  // was place a real declaration ABOVE the instructional line, because
+  // first-match-wins made position the whole remedy. A describing line is no
+  // longer a match, so the order stops mattering.
+  t('⭐ a real declaration BELOW a describing bullet is read — first-match no longer stops at a quotation', cardDeclaration([CLAIM(`${D_TEMPLATE_BULLET}\nClause-②: no`)]).value === 'no');
+  t('…and ABOVE it, which is what the seat had to do by hand', cardDeclaration([CLAIM(`Clause-②: no\n${D_TEMPLATE_BULLET}`)]).value === 'no');
+  t('⛔ …and the two orders now read the SAME — the defect was that they did not', cardDeclaration([CLAIM(`${D_CARD_BULLET}\nClause-②: yes`)]).value === cardDeclaration([CLAIM(`Clause-②: yes\n${D_CARD_BULLET}`)]).value);
+  t('a MALFORMED line below a describing one still reads malformed — skipping a quotation is not skipping a failure', cardDeclaration([CLAIM(`${D_CARD_BULLET}\nClause-②: probably`)]).state === 'malformed');
+
+  // -- the row: what the seat is told, and what it is NOT told ---------------
+  const describingRow = c2DeclarationUnreadable(pair({ cardComments: [CLAIM(D_TEMPLATE_BULLET)] }));
+  t('a claim comment whose only key line is a quotation produces a C2 row', typeof describingRow === 'string');
+  t('…that says NO READING, so the state is not dressed up as a verdict', says(describingRow, 'NO READING'));
+  t('…and names QUOTING as what the line is doing, rather than sending the seat after a typo', says(describingRow, 'QUOTES the spelling rather than declaring a value'));
+  t('⭐ …and says in as many words that there is nothing to fix on the quoted line', says(describingRow, 'nothing to fix on the quoted line'));
+  t('⭐ …and that the remedy is a declaration of its OWN, ABOVE it', says(describingRow, 'a declaration of its OWN, ABOVE it'));
+  t('…and quotes the line, so the seat can see which one it means', says(describingRow, 'column 0'));
+  t('⛔ …and still refuses to fill the value in on the seat\'s behalf', says(describingRow, 'Do not fill the line in'));
+  t('⛔ …and is a DIFFERENT sentence from the placement row and from the bare missing row — three residues, three remedies', describingRow !== c2DeclarationUnreadable(pair({ cardComments: [CLAIM('Domain: `domain:cli` · Clause-②: no')] })) && describingRow !== c2DeclarationUnreadable(pair({ cardComments: [CLAIM('Domain: x')] })));
+  t('the pair is counted as MISSING in the tally — a not-read declaration, never a clean one', declarationLimbTally([pair({ cardComments: [CLAIM(D_TEMPLATE_BULLET)] })]).missing === 1);
+  t('⛔ …and is NOT a carrier for a sibling card — a quotation cannot answer another card\'s question', siblingDeclarations(pair({ card: 999, pr: 13910 }), [pair({ card: 999, pr: 13910 }), { pr: 13910, card: 13476, cardComments: [CLAIM(D_TEMPLATE_BULLET)] }]).length === 0);
+
+  // -- CONTROLS: #12297 and #13914 are not undone by any of the above --------
+  //
+  // ⛔ Both are deliberate and both were named as un-undoable by the filing
+  // card. #12297: reasoning may FOLLOW the value. #13914: the reading is
+  // FOUR-valued, and no state collapses into another.
+  t('⛔ CONTROL #12297: the token followed by reasoning is still a declaration', readClause2Line('Clause-②: yes — widens the accept set')?.value === 'yes');
+  t('⛔ CONTROL #12297: …including the bold-wrapped parenthesised form seats actually write', readClause2Line('**Clause-②: no**(仅移动 import/注释)')?.value === 'no');
+  t('⛔ CONTROL #12297: …and reasoning that itself contains backticks — a span the KEY never opened is not the key\'s span', readClause2Line('Clause-②: yes — `packages/spec` moves')?.value === 'yes');
+  t('⛔ CONTROL #12297: …and a parenthesised reason after a bulleted, bolded key', readClause2Line('- **Clause-②: no** (scripts only)')?.value === 'no');
+  t('⛔ CONTROL: every decoration the key line has always tolerated still declares', ['Clause-②: yes', '> Clause-②: yes', '- Clause-②: yes', '**Clause-②: yes**', '`Clause-②`: yes', '- **`Clause-②`**: **`yes`**', '> - `Clause-②` : yes'].every((l) => readClause2Line(l)?.value === 'yes'));
+  t('⛔ CONTROL #13914: all four readings remain reachable and distinct', new Set([
+    readClause2Line('Clause-②: yes')?.kind,
+    readClause2Line('Clause-②: probably not')?.kind,
+    readClause2Line('## Clause ②: **yes**')?.kind,
+    String(readClause2Line('Claim: nothing here')),
+  ]).size === 4);
+  t('⛔ CONTROL #13914: …and the near miss is still three-reasoned, never collapsed to one', new Set([
+    readClause2Line('## Clause ②: **yes**')?.reason,
+    readClause2Line('Domain: x · Clause-②: no')?.reason,
+    readClause2Line(D_CARD_BULLET)?.reason,
+  ]).size === 3);
+  t('⛔ CONTROL: the accept set moved for DESCRIBING lines only — the two fixed spellings are byte-identical reads', CLAUSE2_VALUES.every((v) => readClause2Line(`Clause-②: ${v}`)?.value === v));
+  t('⛔ CONTROL: the near-miss and inline-key reporters are untouched — a mid-line key is still placement, not describing', readClause2Line('Domain: `domain:cli` · Clause-②: no')?.reason === 'inline-key');
+  t('⛔ CONTROL: a correction comment\'s own declaration still reads — the describing tells do not reach it', readClause2Correction(FIXED_CORRECTION('no'))?.value === 'no');
+
+  // -- the `pool = claimRows` fallback: measured UNREACHABLE, left alone -----
+  //
+  // The dispatch pointer asked whether `cardDeclaration`'s
+  // `governing.length > 0 ? governing : claimRows` fallback — which reads the
+  // FIRST claim comment by thread order rather than the newest — should be made
+  // recency-aware. It is measured DEAD after #17149, and a dead branch is a
+  // report line rather than a rewrite. The two arms, pinned so the measurement
+  // is re-runnable rather than recalled:
+  //
+  //   `claim` non-null  → it came from a row matching the SAME claim predicate
+  //                       `claimRows` filters on, so `governing` always has
+  //                       that row in it and is never empty.
+  //   `claim` null      → `claimGovernance` returns a null `governing` only
+  //                       when no claim row parses a branch, and that same
+  //                       condition sets `malformed`, which returns
+  //                       `claim-branch-unparsed` ABOVE this line. So a null
+  //                       `claim` that reaches here means there were no claim
+  //                       comments at all, and `claimRows` is empty too.
+  t('⭐ arm 1: a governing claim always leaves a non-empty pool, so the fallback cannot fire', cardDeclaration([
+    { id: 1, created_at: '2026-08-30T09:00:00Z', body: 'Claim: old\nBranch: `claude/issue-1-old`\nClause-②: yes' },
+    { id: 2, created_at: '2026-08-31T09:00:00Z', body: 'Claim: new\nBranch: `claude/issue-1-new`\nClause-②: no' },
+  ]).value === 'no');
+  t('⭐ arm 2: every claim branchless ⇒ CLAIM-BRANCH-UNPARSED, returned above the pool', cardDeclaration([
+    { id: 1, created_at: '2026-08-30T09:00:00Z', body: 'Claim: session_x · claude/issue-1-old\nClause-②: yes' },
+    { id: 2, created_at: '2026-08-31T09:00:00Z', body: 'Claim: session_x · claude/issue-1-new\nClause-②: no' },
+  ]).state === 'claim-branch-unparsed');
+  t('⭐ arm 2: …and NO claim comment at all ⇒ ABSENT, with an empty pool either way', cardDeclaration([{ id: 1, body: 'a triage note', created_at: '2026-08-31T10:00:00Z' }]).state === 'absent');
+  t('⛔ …so no thread reaches this limb with a null governing claim AND a non-empty claim set — the fallback is dead code, left as it stands', cardDeclaration([
+    { id: 1, created_at: '2026-08-30T09:00:00Z', body: 'Claim: session_x · claude/issue-1-old\nClause-②: yes' },
+  ]).state !== 'declared');
+
   // -- The floor: every declared battery RAN, and ran its cases (#13489) -----
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -3076,8 +4767,14 @@ export function selfTest() {
       + 'comment with no line — the fourth reading for a card whose sibling carries the declaration '
       + 'with the controls that keep exit 4 reachable, the 2026-08-31 seven-pair replay, the four gate-binding states ' +
       'replayed from the 2026-09-01 clear, the verdict-authorship pair and its legacy silence, ' +
+      'the review of record on the completed state with the two shapes that are not one, ' +
+      'the correction comment that supersedes a claim declaration with the five measured prose ' +
+      'spellings held out as negatives, ' +
       'the three read paths with their offline reader, the argv contract with its usage and its '
-      + 'refusal, the board provenance line, and the exit register).',
+      + 'refusal, the board provenance line, the claim whose `Branch:` line parses to ZERO '
+      + 'branches — reported as an unresolvable carrier rather than discarded, the key-INITIAL '
+      + 'line that QUOTES the spelling held apart from one that declares a value in BOTH halves '
+      + 'of that property — and the exit register).',
   );
 
   selfTestReachedVerdict = true;

@@ -68,11 +68,11 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - fire = 一次唤醒;fire 到达时上一轮未清空的接续处理,⛔ 不重开、不重排。
 - 批 = 一个上下文里读完的 ≤5 张同族卡,是质量单位,⛔ 不是预算。
 - 班 = 一个会话的任期,只以交接或惰性回收结束。
-- 自设定时器只定下一次唤醒,⛔ 不定本轮长度。
-- 定时器默认在轮末挂、延时 ≤55 分钟;维护者明示可改。
+- 入座即建唯一自绑 cron Routine(`create_trigger`,`own_followup`)作默认唤醒;id 记座位贴说明段。
+- 轮末 `send_later` 是可选加速器:在飞 ≤55 分钟,⛔ 不作唯一唤醒;只定下次唤醒,不定轮长。
 - 探针先行:fire 的第一动作是一次最便宜的车道盘点查询,⛔ 在它之前不读任何长文本。
 - 队列空 + 无在飞 + 无待复核 + 决策箱无新答复 ⇒ 自退。
-- 分诊席跑普通直连会话、默认判断档;达档职责改派显式传 `model` 的契约复审档子代理。
+- 分诊席跑普通直连会话、默认判断档;裁决不在本席,归维护者召唤的总监席。
 - 子代理裁决逐份过转录核验采信,细则见 `references/contract-review.md`。
 - 开轮互斥:fire 开始、首个写动作之前读四个读数,未收班活动任一未满一轮 ⇒ 自退。
 - 读数一、二:最近的收班简报,与晚于它的最新开轮标记。
@@ -158,11 +158,11 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - GitHub API 与工具行为的实测事实表在 `references/platform-readings.md`,做对应操作的那一刻查阅。
 - 核验 main 用 `origin/main`:先 fetch,再 `git grep PAT origin/main -- PATHS` 或 `git show origin/main:PATH`。
 - ⛔ 不用共享检出的工作树核验 main,它的 HEAD 由别的 agent 摆布。
-- 零命中必须用确定存在的邻近词反查,否则零命中不成立。
+- 零命中须用确定存在的邻近词反查;控制词须与主张同主体,否则该零作废,不是阴性。
+- 同主体 = 同语料、同路径形、同包界、同引法、同失效形态:跨行短语配跨行控制词。
 - 仓不可达 ⛔ 不当查过了干净:在 issue 上贴出给对应座位的现成命令,等读数回贴再派。
 - 板面/树/队列读数恒带 UTC 取数时刻;认领、派发令、复核、轮报与座位贴皆同。
-- 时间戳形如 `YYYY-MM-DDThh:mmZ`,树读数另带 ref 或 tip。
-- 无时间戳的读数是格式错误不是现值,读者按未取处理。
+- 时间戳形如 `YYYY-MM-DDThh:mmZ`,树读数另带 ref 或 tip;无时间戳的读数按未取处理。
 - 失效修法按序取:先删容许出错的构造,再让正确形态成唯一拼写,最后才加检查。
 - 自设定时器的文本以先重读状态开头,只写关键判据(若 X 则 Y),其余指针化。
 - 定时器文本 ⛔ 不写结论、不含未经重读即可执行的祈使句。
@@ -188,7 +188,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - objectui 构建产物经 `pnpm objectui:refresh` 回流。
 - 多车道仓 `objectstack`、`objectui`:中央分诊是 `domain:*`/type/定级的唯一生产者。
 - 单车道仓 `cloud`、`objectos`、`hotcrm`、`www.objectos.ai`;未来新仓默认此类。
-- 单车道仓 `repo:*` 席自理机械三务,⛔ 不产 `domain:*`;决策卡默认入 objectstack 收件箱。
+- 单车道仓 `repo:*` 席自理机械三务,⛔ 不产 `domain:*`;决策卡入本仓收件箱,不落 objectstack。
 - 机械三务 = 自扫 sweep、自打 `type`、自做 `finding` 首触定级。
 - 跨仓查重/shadow 检查恒归中央,全仓视图 ⛔ 不下放。
 - 新仓登记是一张清单:座位贴、标签、类别归属、门禁盘点。
@@ -207,7 +207,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 判据:正文抽掉 objectstack 还成立 ⇒ 当场转仓(console/UI 缺陷即转 objectui);不成立才是缝卡。
 - transfer 不可用时重建:出处头 + 裸 `#N` 改全名 + 关源单为 moved。
 - 缝卡收窄为真协调卡:留 objectstack 带 `repo:*`,正文点名读者(哪个座位、哪一步)。
-- 维护者收件箱恒为 objectstack;在飞卡 ⛔ 不中途转仓。
+- 决策收件箱按仓:平台在 objectstack / objectui,元数据项目在本仓;在飞卡 ⛔ 不中途转仓。
 - 规则 2:跨仓 feature 永不是一次派发:父单 + 每仓一 sub-issue,spec/后端先行。
 - 下游带 `Blocked-by: <owner/repo>#<n>`;`Blocked-by` 未关闭/未合并的不派发,对 GitHub 现验。
 - 被链接或同父的两单永不同批。
@@ -232,7 +232,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 任何跨座位请求都是工作(要读数、要开卡、要授权):一律立卡进目标车道队列。
 - ⛔ 座位贴敲门或裁决评论永不作跨座位请求的唯一载体;评论是加速器不是记录。
 - 等待方同一笔把自卡翻 `pm:blocked` + `Blocked-by:` 指向请求卡;⛔ 不设新标签新 sweep。
-- 目标仓不可达时按缝卡规则落 objectstack 带 `repo:*` + 具名读者。
+- 目标仓不可达是读数缺口,不是落点:由可达席在目标仓立卡,此前请求记座位贴或协调卡。
 
 ## 域车道
 
@@ -244,8 +244,8 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 |:--|:--|
 | `domain:engine` | `packages/objectql`、`packages/core`、`packages/formula`(CEL / `matches-filter` / RLS 谓词求值)、`plugin-pinyin-search`;`packages/metadata*`、`packages/platform-objects`;`packages/drivers/driver-*`;退役标签 `domain:engine-core` / `domain:metadata` / `domain:drivers` 只退出流通,GitHub 标签对象保留 |
 | `domain:services` | `packages/services/*`、`packages/connectors/*`、`packages/triggers/*`、`plugin-approvals`、`plugin-webhooks`、`plugin-email`、`plugin-reports`、`embedder-openai`、`knowledge-*`;`plugin-auth`、`plugin-security`、`plugin-sharing`、`plugin-audit`;退役标签 `domain:identity` 同上只退流通 |
-| `domain:devx` | `packages/sdui-parser`、`content/docs/**`、`apps/docs`;`packages/lint`、`scripts/`(门禁类)、`.github/workflows/`(门禁接线);三者与 spec 相交的面按锚定规则的例外归 `domain:spec`,门禁再按 SUBJECT:治理 agent 指令面/governed 面的归 skills,治理代码/文档质量的归本域 |
-| `domain:skills` | governed 面全量(含本文件;统一定义见「governed 面统一定义」行);governed 面的治理执行文件:`.github/CODEOWNERS` + SUBJECT 是 governed 面本身的门禁/审计(现为 `scripts/pm/check-governed-merges.mjs`) |
+| `domain:devx` | `sdui-parser`、`content/docs/**`、`apps/docs`、`docs/qa/**`、`.githooks/`、`docker/README.md`、`examples/**` 仅测试基建面;`packages/lint`、`scripts/`(门禁类)、`.github/workflows/`(接线)三者按锚定规则例外归 `domain:spec`,门禁按 SUBJECT:governed 面归 skills,代码/文档质量归本域 |
+| `domain:skills` | governed 面全量(含本文件;统一定义见「governed 面统一定义」行);非门禁的 `scripts/pm/**`(PM 循环工具);governed 面的治理执行文件:`.github/CODEOWNERS` + SUBJECT 是 governed 面本身的门禁/审计(现为 `scripts/pm/check-governed-merges.mjs`) |
 | `domain:spec` | `packages/spec` 整包:schema 形状、`contracts/**`、退役行为半边、strictness 台账;describe/JSDoc/墓碑散文/错误 guidance 与 alias 表;`packages/spec/scripts/**`、`packages/spec/docs/**` 及按锚定规则的例外归本域的工具链(域边界枚举与席内分派见 `references/lanes/spec.md`) |
 | `domain:cli` | `packages/cli`、`runtime`、`verify`、`packages/qa`、`types`、`packages/rest`、`packages/mcp`、`packages/observability`、`packages/client*`、`cloud-connection`、`create-objectstack`、`packages/adapters/*`、`plugin-hono-server`、`plugin-dev` |
 | (无固定归属,按落点分诊) | `packages/apps/*`、`packages/console`(dist 由脚本生成 ⛔ 不手改;UI 缺陷走 `repo:objectui`)、`examples/*`(归它演练的子系统)、`docs/audits/**` |
@@ -266,11 +266,12 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 贴 = 座位(标签 `pm:seat`),正文固定四段现值:当前 PM / 继承台账 / 热文件串行队 / 说明。
 - 正文只由在任座位 PM 编辑且为权威;标题与 assignee 是派生视图,三者同笔更新。
 - 标题只放慢状态,快状态留在说明段。
-- 接管/移交 = 改正文 + 审计评论(评论只作审计不承载状态),接管压缩是标准步骤。
+- 维护者强制接管令取席位、队列、未起工卡与待落地 PR;⛔ 不取在飞卡,由原认领者跟完。
+- 子代理 dev 的返回消息、探活与续派只在派发会话;落地或 `Release:` 后归新席位。
 - 范围与常设承诺是岗位说明不是状态,版本化在 `references/lanes/<lane>.md`。
 - 贴内只放指向车道文件的指针,升级走技能 PR,⛔ 不手抄接力。
 - 写侧刷新点 = 轮次边界;中途状态由卡上 claim/ACCEPT 评论承载。
-- 读侧只读贴正文 + 晚于正文最后编辑的评论。
+- 读侧只读贴正文 + 晚于正文最后编辑的评论;刷新前读完评论、回执未读敲门,再刷。
 - 热文件串行队是正文具名段:区域写不清就只能整文件串行。
 - 座位贴每仓登记合并是否对外发布及其验证层;登记缺失视为未验证。
 - 无心跳,活性惰性判定:超过一天无自有产出即可降级回收。
@@ -282,8 +283,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 原则错/缺 → skills 席专题;可机械化项 → 门禁/脚本卡,⛔ 不是散文。
 - 平台事实变化 → references 事实表改一行。
 - 三类以 `finding` 入 skills 车道由该席分诊;三类之外默认关 not planned。
-- 经验教训散文不再入技能文本;交接按收尾清单逐步走完,并 `list_triggers` 清点自设定时器。
-- 四段模板、状态词表、接管/退场收尾清单细则见 `references/seat-post-protocol.md`。
+- 接管/移交 = 改正文 + 审计评论(只作审计);收尾清单等细则见 `references/seat-post-protocol.md`。
 - epic 委托不入座位贴体系;`packages/spec` 恒归 spec 座位。
 
 ## Epic 子树车道
@@ -307,8 +307,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 
 - sweep 与首触定级只对多车道仓,单车道仓机械三务自理。
 - 发版板(无板仓跳过)、查重/shadow 检查与代裁通道全仓照跑。
-- 代裁只由达档者产出,⛔ 永不凭自述。
-- 达档者 = 显式传 `model` 的契约复审档子代理(逐份过转录核验),或达档总监席。
+- 代裁只由维护者召唤的总监席产出,⛔ 永不凭自述、⛔ 无子代理裁决。
 - fire 开局只按名加载互斥检查所需工具,`ToolSearch` 用 `select:` 形式。
 - 判定本轮有活之后才加载其余工具。
 - ⛔ 分诊 fresh session 开局不做泛关键词 ToolSearch;可验判据:空转轮 ~4 万 token 以内。
@@ -329,7 +328,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 窗口耗尽未跑完的,下一 fire 从标签状态断点续跑。
 - 排序:队列每轮清空时最新优先;清不空的那一刻起改最老优先。
 - 裸卡数 >15 ⇒ 下一 fire 整轮改域分批集中模式,每批 ≤5 张同族卡,照样跑到清空。
-- 紧急卡直接分诊:维护者点名或 p0 嫌疑 ⇒ 立即起契约复审档分诊子代理,不等定时轮。
+- 紧急卡直接分诊:维护者点名或 p0 嫌疑 ⇒ 立即起默认判断档分诊子代理,不等定时轮。
 - 紧急分诊的授权面 = 分诊本身,⛔ 不写码不认领;产出落卡,与定时轮分诊同格式同效力。
 - 跨仓 pin 链的窗口级兜底也在 sweep,⛔ 只立单不执行 bump。
 - objectui pin 落后且其队列已空 ⇒ 在本仓立/刷新 console bump 单。
@@ -394,9 +393,8 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 条件:席位验收评论逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排。
 - 代裁车道只覆盖代码整理(行为不变的重构)与 bug 修复。
 - 机械边界测试:改动扩大接受集或公开面 ⇒ 人工;拉回已声明契约 ⇒ 代裁车道。
-- 置信门五条全立才可代裁:① 四棱同向;② 不在人工地板;③ 不推翻既有维护者裁决。
-- ④ 执行是否决窗口不是许可门;⑤ 档位硬门达标。
-- 档位未达 ⇒ 本 fire 代裁整体跳过,卡原样留在决策箱走维护者路径。
+- 置信门四条全立才可代裁:① 四棱同向;② 不在人工地板;③ 不推翻既有维护者裁决。
+- ④ 执行是否决窗口不是许可门。
 - 代裁动作:裁定 → 一次标签写入换 `needs-user-decision` 为工作态。
 - 随后卡上贴四棱块 + 结论 + `auto-adjudicated` 标记,轮次报告设代裁清单专节。
 - 一类自裁门:召唤中总监席可免呈自裁一张决策卡,当且仅当三判据全立。
@@ -506,11 +504,12 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 默认判断档给 M/L、裁决实施与任何带设计判断的卡;拿不准就升一档。
 - 上限 = 契约复审档(`CONTRACT_REVIEW_TIER`),给最重协议/流程/编排卡,按卡取用非新默认。
 - 强制条款①:凡改协议语义面的卡一律契约复审档。
-- 协议语义面 = 本 `SKILL.md` 主文件、决策框架拷贝所在文件与 `.claude/agents/os-dev.md`。
+- 协议语义面 = 本 `SKILL.md`、决策框架拷贝所在文件、`.claude/agents/os-dev.md` 与 `skills/**`。
 - 仅 `references/**` 面、或治理面上一行级机械文本改动的卡,降为默认判断档施工。
+- 发布的 `skills/**` 整根随 `npx skills add` 发运,⛔ 无一行级豁免,逐行判机械不作数。
 - 纯机械一行 PM 酌定可至下限档;降档施工的补偿控制 = 复核席跑契约复审档。
 - 降档施工只经契约复审档复核到达维护者,⛔ 不新增标签不新增链。
-- 强制条款②:凡放宽接受集或扩大公开面的卡默认判断档施工、契约复审档复核。
+- 强制条款②:放宽接受集或扩大公开面的卡默认判断档施工;契约复审档复核只在 spec 席。
 - 条款②判据即代裁的机械边界测试与 `references/lanes/spec.md` 席内分派判据,⛔ 不另抄。
 - 负边界:运行时权限/安全行为变更不是条款②,归人工地板安全/权限边界类。
 - 条款②只指已发布契约面,拉回已声明契约不触它;卡面复述仍是条款②。
@@ -520,7 +519,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 机械放宽判别门禁落地前,入队前的席内契约复核是方向自述的补偿控制。
 - 豁免够不到的地板只有维护者裁决能设。
 - 席位档策略:skills 车道外的执行席与分诊席默认判断档会话。
-- 契约复审档留给裁决/复审子代理、skills 席与条款②复核。
+- 契约复审档留给 skills 席与 spec 席的条款②复核,其余席位 ⛔ 永不起该档子代理。
 - 降档出口两条:额度耗尽豁免,与主动预降(余量吃紧可预先降档)。
 - 额度耗尽豁免仅当契约复审档实测不可用才落默认判断档,⛔ 不再往下。
 - 降档的档位与理由记入认领评论 Container & model 行;档位逐次派发显式传参,永不省略。
@@ -568,8 +567,8 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 标记两种拼写等效:HTML 注释形与首行纯文本 `os-dev-report`。
 - ⛔ 仅凭 HTML 注释形式缺失永不读作报告未达;⛔ 永不把没收到失败通知读作还在跑。
 - 探活是每轮巡检的固定动作;完成通知不可靠,缺席什么都不证明。
-- ① 定时器重挂是每次巡检的第一动作,先挂后查,链条对中断免疫。
-- ② 在飞期间主巡检间隔 ≤45 分钟,待命期 60–70。
+- ① 巡检首动作 `list_triggers` 确认 Routine 启用,在飞重挂加速器;唤醒归 Routine,漏挂不断链。
+- ② 在飞期间主巡检间隔 ≤45 分钟,待命期 60–70;节奏维护者明示可改。
 - ③ 已派发未回报的 dev 逐个发状态询问;派发后 ~45 分钟无远程产出即到门槛。
 - 已有远程分支/PR 不豁免探针。
 - ④ 活着 ⇒ 进度与阻塞点;回 no active task; resumed from transcript ⇒ 生前已死,询问即复活。
@@ -608,7 +607,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - governed 面统一定义:`docs/adr/**` + `.claude/**`(全量,含 agents/hooks/settings)+ `skills/**`。
 - governed 面同含 `AGENTS.md` + `CLAUDE.md`;agent 指令文件跨仓同判,仓集读 `GOVERNED_REPOS`,此处不列。
 - 路径面一条命中 ⇒ ACCEPT 换终局四件套,混合 diff ⛔ 不按比例判;要拆让 dev 单独开 PR。
-- ① 复核结论照常写在 issue 上;技能面 PR 的复核席须跑在契约复审档位。
+- ① 复核结论照常写在 issue 上;技能面 hunk 须由契约复审档的席复核,档外席先交 skills 席。
 - ② PR 留给维护者看得见地悬着;终局两条:人工直合即审核记录;授权批准 ⇒ 队列放行。
 - 看得见 = ACCEPT 同笔挂 `needs-user-decision` + 贴终稿「维护者速读」评论;①仍是审核记录。
 - 速读五段固定:改了什么/为什么改/风险与代价(含回滚)/席位意见/你要做的(一个动作)。
@@ -636,11 +635,11 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 
 - 细则见 `references/landing-operations.md`,落地窗口查阅。
 - 条款②入队闸门:翻 ready / 入队前先取 PR 实际 diff;diff 是事实,卡片语义是预测。
-- `--tier` 嫌疑行是提示非裁定;双肢命中任一 ⇒ 无席内契约复审档 PASS 在案 ⛔ 禁止入队。
+- `--tier` 嫌疑行是提示非裁定;双肢命中任一 ⇒ 无席内条款②复核 PASS 在案 ⛔ 禁止入队。
 - 路径肢 = diff 触及契约面 `packages/spec/src/**`,含 error-code-ledger 与 `*.zod.ts` 契约 schema。
 - 声明肢 = 认领评论声明 `Clause-②: yes`,与路径无关;错误的 `no` 是可审计的假申报。
-- 交付后复核由派发席在席内完成:达档 PM 自审,或派契约复审档复核子任务。
-- PASS ⇒ 同席剥标、ready、auto-merge;FAIL ⇒ 补丁轮;⛔ 免复核不放行。
+- 交付后复核由派发席席内完成:spec 席达档,余席默认档加门禁;记录 = 同形评论落 PR 或卡。
+- PASS ⇒ 同席剥标并引记录、ready、auto-merge;FAIL ⇒ 补丁轮;⛔ 免复核不放行。
 - 真正设计分叉照旧进决策箱,席内复核 ⛔ 不替代维护者裁定。
 - 外部评审链降为可选事后审计,非放行前提。
 - `needs:contract-review`(恒英文)由 PR 创建者随可复审契约增量同笔挂:draft PR,或先到的报告。
@@ -749,24 +748,25 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
   用户也很少,短期不考虑渐进。」):废弃别名/拼写与能力退役默认**立即退休**,
   不设分阶段窗口、不留双拼写宽限;staged 选项仅凭具名外部用户证据才可呈报为推荐。
 
+**基本裁决原则**(维护者 2026-09-10 指示,逐字:「我们的项目以objectstack 协议为准,
+文档应该以实际实现为准。协议不正确的应该先修改协议。」):spec 声明 > 实现 > 文档面;
+声明而未兑现是实现缺口,补实现或退役,⛔ 不在消费端收窄;未声明键随实现,文档随之。
 推荐意见必须基于这四条轴给出理由;四轴冲突时如实呈现权衡,
 交维护者拍板。
 - 分歧推荐序按拉动定向:有实测拉动 ⇒ 荐长远形态一次付清;零拉动 ⇒ 荐不扩散。
 - 防错轴破余下平局向响亮/结构性;安全/权限边界与破坏性难逆动作恒在人工地板。
 - ⛔ 此序只排推荐:分歧块照旧升级,四棱同向置信门与代裁面不变。
 - 长远合理性权重恒 ≥50%:推荐以长远的读数领起,四轴冲突时其余各轴合起来投不翻它。
-- 权重按缩小而非扩大特例与契约增生读,⛔ 不据它为投机扩张背书。
-- 权重是推荐规则不是授权规则:50% 不把人工地板的事变成可派发的事。
-- 收件箱由维护者定期消化,⛔ 不 assign 推送。
-- 四维分析从业务的角度写;写法六项与四棱块固定形状见 `references/decision-analysis.md`。
-- 四棱是四轴的卡面序列化,一一对应,也是分诊代裁置信门的输入。
-- 决策通道优先序,卡先于弹窗:凡需维护者裁决,第一动作是落 `needs-user-decision` 卡。
+- 权重只排推荐不授权:读缩小特例与契约增生,⛔ 不背书投机扩张、不放行人工地板事。
+- 四维分析从业务角度写;四棱是四轴的卡面序列化,一一对应,也是分诊代裁置信门的输入。
+- 卡先于弹窗:需裁决先落 `needs-user-decision` 卡;收件箱由维护者定期消化,⛔ 不 assign 推送。
 - 决策卡带选项、推荐、证据与四棱块;被阻塞的执行卡同笔挂 `pm:blocked` + `Blocked-by:`。
 - `AskUserQuestion` 只是在场加速器:仅当维护者在本会话 ~30 分钟内有过人类输入才可发。
 - 每问必带推荐项,被 Skip 或长挂即转卡通道,⛔ 不重弹。
-- 项目总监席:人工召唤,入口 `/pm-dispatch director`;⛔ 无 Routine 无 cron。
+- 项目总监席:维护者在所在仓召唤,入口 `/pm-dispatch director`;⛔ 无 Routine 无 cron。
 - 四职 = `needs:contract-review` 事后审计、决裁勤务、维护者动作台账、governed 合并审计。
-- 总监席档位硬门 = `CONTRACT_REVIEW_TIER`,不达档只做免档整理并停放四职。
+- 总监席档位由维护者按项目人工定,每场记入摘要台账;⛔ 无档位硬门、无免档整理态。
+- 总监席是唯一裁决者:决策箱、代裁与一类自裁只出自本席,⛔ 无子代理无自述。
 - 总监席不占 `domain:*`,永不认领 backlog、永不写码;章程见 `references/lanes/director.md`。
 
 ## 报告契约

@@ -25,6 +25,7 @@ import {
   STRUCTURED_JSON_TYPES,
   COMPUTED_VALUE_TYPES,
   MULTI_CAPABLE_TYPES,
+  NON_TEXT_STORED_VALUE_TYPES,
   isMultiValueField,
   valueSchemaFor,
   referenceTargetOf,
@@ -96,6 +97,31 @@ describe('semantic type classes', () => {
     ]);
     const unclassified = FieldType.options.filter((t) => !classified.has(t));
     expect(unclassified).toEqual([]);
+  });
+
+  /**
+   * [#14079/#15683] `NON_TEXT_STORED_VALUE_TYPES` is a DERIVED set and is
+   * pinned as one: the assertion composes the four classes rather than listing
+   * members, so a type joining `NUMERIC_VALUE_TYPES` flows through without
+   * touching this row, while a member added or dropped by hand fails it.
+   */
+  it('NON_TEXT_STORED_VALUE_TYPES is numeric ∪ boolean ∪ the three temporal classes', () => {
+    const expected = new Set<string>([
+      ...NUMERIC_VALUE_TYPES, ...BOOLEAN_VALUE_TYPES,
+      ...CALENDAR_DATE_TYPES, ...INSTANT_TYPES, ...CLOCK_TIME_TYPES,
+    ]);
+    expect([...NON_TEXT_STORED_VALUE_TYPES].sort()).toEqual([...expected].sort());
+    // The three the #15683 ruling added, by name — so the ruling is readable
+    // here and not only through the composition above.
+    for (const t of ['date', 'datetime', 'time']) {
+      expect(NON_TEXT_STORED_VALUE_TYPES.has(t), t).toBe(true);
+    }
+    // Every string-valued class stays OUT, `json` included: the structured
+    // class is refused by the #15661 DOOR, never by this set.
+    for (const t of [...STRING_VALUE_TYPES, ...SINGLE_OPTION_TYPES, ...MULTI_OPTION_TYPES,
+      ...REFERENCE_VALUE_TYPES, ...FILE_REFERENCE_TYPES, ...STRUCTURED_JSON_TYPES, 'autonumber', 'formula']) {
+      expect(NON_TEXT_STORED_VALUE_TYPES.has(t), t).toBe(false);
+    }
   });
 
   it('the shape classes are mutually disjoint (COMPUTED is the orthogonal who-writes axis: `summary` is numeric AND computed)', () => {

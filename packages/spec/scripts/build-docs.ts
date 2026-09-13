@@ -556,11 +556,6 @@ const SECTION_GROUPS: Record<string, Array<{ section: string; pages: string[] }>
     { section: 'Integration & Data', pages: ['connector', 'webhook', 'bpmn-interop'] },
     { section: 'Approvals & Jobs', pages: ['approval', 'job'] },
   ],
-  cloud: [
-    { section: 'Environments & Packages', pages: ['environment', 'environment-artifact', 'environment-package', 'package', 'package-version', 'template-manifest', 'provisioning'] },
-    { section: 'Marketplace & Distribution', pages: ['marketplace', 'marketplace-admin', 'app-store', 'developer-portal'] },
-    { section: 'Tenancy & Security', pages: ['tenant', 'plugin-security'] },
-  ],
   data: [
     { section: 'Objects & Fields', pages: ['object', 'field', 'validation', 'hook', 'hook-body', 'mapping'] },
     { section: 'Query & Analytics', pages: ['query', 'filter', 'data-engine', 'analytics', 'date-macros'] },
@@ -595,6 +590,15 @@ const SECTION_GROUPS: Record<string, Array<{ section: string; pages: string[] }>
     { section: 'Plugin Security & Dependencies', pages: ['plugin-security', 'plugin-security-advanced', 'plugin-capability', 'plugin-versioning', 'dependency-resolution', 'manifest'] },
     { section: 'Packages', pages: ['package-artifact', 'package-registry', 'package-upgrade'] },
     { section: 'Metadata & Runtime', pages: ['metadata-plugin', 'metadata-loader', 'metadata-protection', 'metadata-persistence', 'misc', 'context', 'execution-context', 'service-registry', 'startup-orchestrator', 'cluster', 'feature', 'cli-extension', 'dev-plugin', 'state-machine'] },
+  ],
+  // [#16325] The package & marketplace FORMAT half of what used to be `cloud/`.
+  // The cloud control plane's own contracts (environment, environment-package,
+  // tenant, developer-portal, marketplace-admin, app-store) left the open-source
+  // spec with the `./cloud` subpath; `environment-artifact` was only ever a
+  // re-export of the `system/` declaration and is documented there.
+  marketplace: [
+    { section: 'Packages & Versions', pages: ['package', 'package-version', 'template-manifest'] },
+    { section: 'Marketplace', pages: ['marketplace'] },
   ],
   system: [
     { section: 'Config & Settings', pages: ['settings-manifest', 'settings-client', 'registry-config', 'auth-config', 'email-config', 'email-template', 'license', 'migration', 'deploy-bundle', 'environment-artifact', 'app-install', 'provisioning', 'tenant'] },
@@ -693,13 +697,13 @@ const CATEGORY_BLURBS: Record<string, string> = {
   ai: 'Agents, tools, skills, RAG and knowledge sources, model registry, conversations.',
   api: 'REST contracts, endpoints, routing, realtime, batch, discovery.',
   automation: 'Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records.',
-  cloud: 'Environments, packages and versions, marketplace, developer portal, tenancy.',
   data: 'Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer.',
   // "API keys" deliberately absent since #8715: the sys_api_key table is
   // declared by @objectstack/platform-objects, not by a spec identity schema.
   identity: 'Users and accounts, organizations, positions, SCIM provisioning.',
   integration: 'The single connector protocol (ADR-0097) — catalog descriptors and provider-bound instances.',
   kernel: 'Plugin lifecycle and manifests, capabilities and security, metadata loading, service registry.',
+  marketplace: 'The package & marketplace format — package identity and versions, listing, publish, review, search, install, template manifests.',
   qa: 'Declarative test suites — scenarios, steps, actions and assertions.',
   security: 'Permission sets, row-level security, sharing rules, tenancy posture.',
   shared: 'Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums.',

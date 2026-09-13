@@ -65,12 +65,42 @@ new StorageServicePlugin({
   s3: {
     bucket: 'my-bucket',
     region: 'us-east-1',
+    keyPrefix: null,   // single tenant: keys sit at the bucket root
     // Optional for S3-compatible services (R2, MinIO, Spaces):
     // endpoint: 'https://r2.cloudflarestorage.com/account-id',
     // forcePathStyle: true,
   },
 });
 ```
+
+#### `keyPrefix` — the key namespace, and why it has no default
+
+`keyPrefix` is **required**. It is the key namespace this deployment is confined
+to (`'env_7'`), or `null` for bucket-root keys.
+
+One bucket shared by several deployments with no namespace has exactly one thing
+keeping one deployment out of another's objects: that every `sys_file` metadata
+check above the adapter was written correctly. One missed check on a route that
+takes an identifier out of a request is then a cross-deployment read, and the
+object store cannot refuse it — what it sees is a well-formed key. A prefix turns
+that into "a caller cannot express the request": it is applied on write, read,
+delete, head, presign, multipart and into `list()`'s `Prefix`, and stripped off
+every key and cursor coming back, so callers only ever see unprefixed keys and
+there is no door through which they reach an unprefixed one.
+
+It has no default because an optional prefix reproduces that gap the first time a
+host forgets to set it, silently — and for the same reason an empty string is
+refused (that is what an unset environment variable looks like) rather than
+treated as "no prefix". Pass `null` to ask for bucket-root keys deliberately.
+
+The value comes from the host that constructs the plugin and has **no key in the
+`storage` settings namespace**: a boundary an administrator inside the deployment
+can set or clear is a preference, not a boundary. A settings-driven adapter
+rebuild carries the host's value.
+
+Changing `keyPrefix` moves the backing store — the old namespace's objects are
+not reachable through the new one — so it is treated exactly as changing the
+bucket is, and the swap prints the migration warning.
 
 ## REST API Endpoints
 

@@ -65,8 +65,9 @@ export * from './embedder.js';
 // contracts had zero implementations and zero call sites in any repo
 // (objectstack / cloud / objectui) — declared-only fiction over the
 // system-side provisioning family retired in the same change (#4535 C16).
-// The living provisioning contract is the `Provision*` family in
-// `@objectstack/spec/cloud`, consumed by the cloud services (service-tenant).
+// The living provisioning contract is the `Provision*` family — declared in
+// `@objectstack/spec/cloud` until #16325, and since then in the cloud repo
+// itself, beside the services that consume it (service-tenant).
 export * from './schema-diff-service.js';
 export * from './external-datasource-service.js';
 export * from './deploy-pipeline-service.js';

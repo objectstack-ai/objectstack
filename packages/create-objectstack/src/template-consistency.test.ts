@@ -207,7 +207,7 @@ describe('bundled template declared version surfaces', () => {
       expect(
         typeof manifest.specVersion,
         `${template}/objectstack.manifest.json must declare specVersion — it is REQUIRED by ` +
-          'TemplateManifestSchema (packages/spec/src/cloud/template-manifest.zod.ts)',
+          'TemplateManifestSchema (packages/spec/src/marketplace/template-manifest.zod.ts)',
       ).toBe('string');
 
       const match = /^\^(\d+)\.\d+\.\d+$/.exec(manifest.specVersion);

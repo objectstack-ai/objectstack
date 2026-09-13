@@ -55,7 +55,10 @@ const adapters = [
     // The constructor only records options; the AWS SDK is imported lazily on
     // first use, so this never touches the network or the peer dependency.
     name: 'S3StorageAdapter',
-    make: () => new S3StorageAdapter({ bucket: 'pin-bucket', region: 'us-east-1' }),
+    // `keyPrefix: null` — bucket-root keys. This suite pins the SHAPE of
+    // `list`, which the key namespace does not move; the namespace's own
+    // behaviour is pinned in `s3-storage-adapter.key-prefix.test.ts`.
+    make: () => new S3StorageAdapter({ bucket: 'pin-bucket', region: 'us-east-1', keyPrefix: null }),
   },
 ] as const;
 

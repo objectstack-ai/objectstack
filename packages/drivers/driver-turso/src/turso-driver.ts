@@ -658,15 +658,19 @@ export class TursoDriver extends SqlDriver {
         this.temporalFilterColumnSql(object, field, columnSql),
       );
 
-      // [#14079] The declared-type half of the text-operator contract, handed
-      // down for the same reason the temporal rule is: the transport keeps no
-      // schema, and `registerRemoteFieldMetadata` → `registerExternalObject`
-      // fills the SAME `numericFields` / `booleanFields` registries the local
-      // compiler reads, keyed by object name. So `isNonTextColumn` answers in
-      // remote mode exactly what it answers in local mode, and a text operator
-      // over a `Field.number` compiles to the contract's constant on both
-      // transports (`turso-local-remote-text-parity` holds them to one row set)
-      // instead of a `GLOB` over the number's storage-class spelling.
+      // [#14079/#15683] The declared-type half of the text-operator contract,
+      // handed down for the same reason the temporal rule is: the transport
+      // keeps no schema, and `registerRemoteFieldMetadata` →
+      // `registerExternalObject` fills the SAME `numericFields` /
+      // `booleanFields` / `dateFields` / `datetimeFields` / `timeFields`
+      // registries the local compiler reads, keyed by object name. So
+      // `isNonTextColumn` answers in remote mode exactly what it answers in
+      // local mode, and a text operator over a `Field.number` — or, since
+      // #15683's ruling, over a `Field.date` / `Field.datetime` / `Field.time`
+      // — compiles to the contract's constant on both transports
+      // (`turso-local-remote-text-parity` holds them to one row set) instead of
+      // a `GLOB` over the number's storage-class spelling or over the temporal
+      // column's canonical ISO text.
       this.remoteTransport.setNonTextColumnResolver((object, field) =>
         this.isNonTextColumn(object, field),
       );
@@ -685,7 +689,9 @@ export class TursoDriver extends SqlDriver {
       // DURABILITY degradation, not a functional one: writes keep succeeding,
       // reads keep returning rows, and the only thing that changed is that a
       // constraint the metadata declares is not enforced — the "looks normal
-      // from the outside" shape AGENTS.md grades at `error`. It is a SEPARATE
+      // from the outside" shape AGENTS.md grades at `error`. [#17609] A declared
+      // PLAIN index it could not create lands here too, for the same reason:
+      // every query still answers, by scanning the table. It is a SEPARATE
       // sink from the `warn` one above precisely so this class does not have to
       // share a level with the diagnostics that are merely informative.
       this.remoteTransport.setDurabilitySink((message) =>
@@ -952,7 +958,15 @@ export class TursoDriver extends SqlDriver {
   // closed all 17 in one sweep, so there is no half-narrowed state to
   // interpret. Keep it that way: a new override here declares `DriverOptions`.
 
-  override async find(object: string, query: DriverQuery, options?: DriverOptions): Promise<any[]> {
+  // [#17690] The return is the contract's own type, and this override needs it
+  // declared HERE: an override re-declares the door in this package's own
+  // `.d.ts`, so the `@objectstack/driver-sql` narrowing does not reach a
+  // consumer holding a `TursoDriver` — measured twice already (#15280 for
+  // `update()`, #17277 for `aggregate()`). It was `Promise<any[]>`, whose `any` is
+  // nested inside a wider type and so was invisible to #15267's
+  // literal-string census. Pinned both halves in
+  // `turso-driver-doors-declared-types.test.ts`.
+  override async find(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
     if (this.isRemote) return this.formatRemoteRows(object, await this.remoteTransport!.find(object, this.toRemoteReadQuery(object, query)));
     return super.find(object, query, options);
   }
@@ -1106,7 +1120,15 @@ export class TursoDriver extends SqlDriver {
     return super.update(object, id, data, options);
   }
 
-  override async upsert(object: string, data: Record<string, any>, conflictKeys?: string[], options?: DriverOptions): Promise<Record<string, any>> {
+  // [#17690] The return is the contract's own type, and this override needs it
+  // declared HERE: an override re-declares the door in this package's own
+  // `.d.ts`, so the `@objectstack/driver-sql` narrowing does not reach a
+  // consumer holding a `TursoDriver` — measured twice already (#15280 for
+  // `update()`, #17277 for `aggregate()`). It was `Promise<Record<string, any>>`, whose `any` is
+  // nested inside a wider type and so was invisible to #15267's
+  // literal-string census. Pinned both halves in
+  // `turso-driver-doors-declared-types.test.ts`.
+  override async upsert(object: string, data: Record<string, any>, conflictKeys?: string[], options?: DriverOptions): Promise<Record<string, unknown>> {
     if (this.isRemote) {
       // [#6944] An upsert is insert-OR-merge, and only the merge leg is safe
       // here: `RemoteTransport.upsert` emits
@@ -1162,8 +1184,21 @@ export class TursoDriver extends SqlDriver {
    * [#6402] `options` is a {@link DriverOptions} for the same reason, closed as
    * one sweep across every override in this file rather than one method at a
    * time — see the block comment above `find()`.
+   *
+   * [#17277] The return is the contract's own
+   * `Promise<Record<string, unknown>[]>`, and this override needs it declared
+   * HERE: an override re-declares the door in this package's own `.d.ts`, so
+   * the `@objectstack/driver-sql` narrowing does not reach a consumer holding a
+   * `TursoDriver` — the same shape #15280 had to fix separately for `update()`.
+   * Both branches already answer it: the remote branch is
+   * `RemoteTransport.aggregate`, declared `Promise<Record<string, unknown>[]>`,
+   * and the local branch is `SqlDriver.aggregate`, narrowed alongside.
    */
-  override async aggregate(object: string, query: DriverQuery, options?: DriverOptions): Promise<any> {
+  override async aggregate(
+    object: string,
+    query: DriverQuery,
+    options?: DriverOptions,
+  ): Promise<Record<string, unknown>[]> {
     if (this.isRemote) return this.remoteTransport!.aggregate(object, this.toRemoteQuery(object, query));
     return super.aggregate(object, query, options);
   }
@@ -1584,7 +1619,15 @@ export class TursoDriver extends SqlDriver {
     return super.bulkCreate(object, data, options);
   }
 
-  override async bulkUpdate(object: string, updates: Array<{ id: string | number; data: Record<string, any> }>, options?: DriverOptions): Promise<Record<string, any>[]> {
+  // [#17690] The return is the contract's own type, and this override needs it
+  // declared HERE: an override re-declares the door in this package's own
+  // `.d.ts`, so the `@objectstack/driver-sql` narrowing does not reach a
+  // consumer holding a `TursoDriver` — measured twice already (#15280 for
+  // `update()`, #17277 for `aggregate()`). It was `Promise<Record<string, any>[]>`, whose `any` is
+  // nested inside a wider type and so was invisible to #15267's
+  // literal-string census. Pinned both halves in
+  // `turso-driver-doors-declared-types.test.ts`.
+  override async bulkUpdate(object: string, updates: Array<{ id: string | number; data: Record<string, any> }>, options?: DriverOptions): Promise<Record<string, unknown>[]> {
     if (this.isRemote) {
       const formatted = Array.isArray(updates)
         ? updates.map((u) => ({ ...u, data: this.toRemoteWriteForms(object, u.data) }))
@@ -1640,6 +1683,20 @@ export class TursoDriver extends SqlDriver {
   // Transactions (remote mode overrides)
   // ===================================
 
+  // ⛔ [#17690] This door stays `Promise<any>`, and that is a NAMED remainder
+  // rather than an oversight. `TursoDriver extends SqlDriver`, whose
+  // `beginTransaction()` publishes `Promise<Knex.Transaction>` — narrower than
+  // the contract's `Promise<unknown>`, the honest direction, and the binding
+  // declaration for an override. Swapping this onto the contract's own type
+  // does not compile (TS2416: `Promise<unknown>` is not assignable to
+  // `Promise<Transaction<any, any[]>>`). So the `any` here is not masking an
+  // un-narrowed door — it is masking a real LSP violation: in remote mode this
+  // returns a libsql transaction while the inherited declaration promises a
+  // knex one. Closing it means widening `SqlDriver`'s honest narrowing
+  // (measured: +14 further consumer sites in the three driver packages, and a
+  // type-safety regression for every `driver-sql` consumer) or restructuring
+  // the remote handle. Both are above an annotation swap; the reasoning is
+  // recorded in `turso-driver-doors-declared-types.test.ts`.
   override async beginTransaction(): Promise<any> {
     if (this.isRemote) return this.remoteTransport!.beginTransaction();
     return super.beginTransaction();

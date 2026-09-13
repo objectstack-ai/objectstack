@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// #5262 — DevPlugin decides whether to load the enterprise multi-org runtime
+// #5262 — DevPlugin decides whether to load the multi-org runtime
 // from the AUTHORITATIVE tenancy posture, never the demoted
 // `OS_MULTI_ORG_ENABLED` boolean.
 //
@@ -20,8 +20,10 @@
 // service "is the wall up?" would be circular.
 //
 // ── What is observed, and why it is honest ──────────────────────────────────
-// `@objectstack/organizations` is a cloud-private enterprise package that is
-// genuinely absent from this workspace, so the dynamic import genuinely fails
+// `@objectstack/organizations` is open core since ADR-0132 and IS a member of
+// this workspace, but ADR-0132's entitlement boundary forbids any framework
+// package declaring it (`no-framework-dependents.pin.test.ts`), so it is
+// genuinely unresolvable from `plugin-dev`: the dynamic import genuinely fails
 // and the real catch branch runs. That makes the emitted warning a faithful
 // witness for "the multi-org branch was ENTERED": under the bug there is no
 // warning at all, because the `if` was never taken. The assertions therefore

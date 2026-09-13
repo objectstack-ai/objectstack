@@ -253,22 +253,60 @@ describe('static `readonly` write strip — caller-facing signal (#4903)', () =>
       expect(att().work_duration).toBe(480);
     });
 
-    it('[#5591] a hook OVERWRITING a key the caller supplied now survives the strip', async () => {
+    it('[#5591] a hook OVERWRITING a key the caller supplied still survives the strip', async () => {
       // The mechanism, restated: the entry snapshot carries the caller's VALUES,
       // and the strip deletes a read-only key only while it still holds the
       // caller's own value. A hook that writes over it has replaced a caller
       // write with a platform write, and platform writes to read-only columns
       // are legitimate. Before #5591 the snapshot was a key SET, so the hook's
       // 999 was deleted and the column kept its stored null.
+      //
+      // [#16344] The hook is now UNCONDITIONAL, and that edit is the point
+      // rather than an accommodation. This case's subject is what happens to a
+      // hook's OWN write to a read-only column the caller also named, and that
+      // verdict is unchanged. The version before #16344 reached it through a
+      // guard — `if (ctx.input.data.work_duration !== undefined)` — which
+      // silently made the case depend on a SECOND fact: that the caller's
+      // forged value is visible to the hook. It no longer is, deliberately, and
+      // the two facts now get one assertion each (the sibling case below).
       storeFor('attendance').set('att_2', { id: 'att_2', status: 'open', work_duration: null });
       engine.registerHook('beforeUpdate', async (ctx: any) => {
-        if (ctx.input.data.work_duration !== undefined) ctx.input.data.work_duration = 999;
+        ctx.input.data.work_duration = 999;
       }, { object: 'attendance' });
 
       await engine.update('attendance', { id: 'att_2', status: 'closed', work_duration: 480 });
       expect(storeFor('attendance').get('att_2')).toMatchObject({ status: 'closed' });
       // The HOOK's value — never the caller's 480.
       expect(storeFor('attendance').get('att_2').work_duration).toBe(999);
+    });
+
+    it('[#16344] a hook that GATES on seeing the caller-forged value does not fire — and the column keeps its stored value', async () => {
+      // The other half of the case above, and the behaviour change this card
+      // ships, asked directly rather than left implicit inside a guard.
+      //
+      // A `beforeUpdate` that keys on "did the caller send this read-only
+      // field" is reading a value the engine has ALREADY refused. Before
+      // #16344 it saw the forgery and could act on it — which is the whole
+      // defect: whatever such a hook derives IS persisted, so the caller
+      // steered a stored value through a column it was never allowed to write.
+      // The value is now hidden, the guard is false, and nothing is derived.
+      //
+      // ⚠️ Read `att_3`'s stored `work_duration` as the verdict: it keeps the
+      // value it had. The caller's 480 did not land (the strip never stopped
+      // working) and no hook-derived value landed either, because the hook
+      // correctly saw nothing to derive from. A hook that WANTS to know what
+      // the caller submitted reads `ctx.submitted`.
+      storeFor('attendance').set('att_3', { id: 'att_3', status: 'open', work_duration: 111 });
+      const gateSaw: unknown[] = [];
+      engine.registerHook('beforeUpdate', async (ctx: any) => {
+        gateSaw.push({ input: ctx.input.data.work_duration, submitted: ctx.submitted?.work_duration });
+        if (ctx.input.data.work_duration !== undefined) ctx.input.data.work_duration = 999;
+      }, { object: 'attendance' });
+
+      await engine.update('attendance', { id: 'att_3', status: 'closed', work_duration: 480 });
+      expect(gateSaw).toEqual([{ input: undefined, submitted: 480 }]);
+      expect(storeFor('attendance').get('att_3')).toMatchObject({ status: 'closed' });
+      expect(storeFor('attendance').get('att_3').work_duration).toBe(111);
     });
 
     it('[#5591] with NO hook on the key, the caller-supplied value is still stripped', async () => {

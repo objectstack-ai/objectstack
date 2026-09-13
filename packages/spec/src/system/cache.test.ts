@@ -238,13 +238,36 @@ describe('CacheWarmupSchema', () => {
     expect(result.concurrency).toBe(20);
   });
 
-  it('should accept scheduled warmup', () => {
-    const result = CacheWarmupSchema.parse({
-      enabled: true,
-      strategy: 'scheduled',
-      schedule: '0 0 * * *',
-    });
-    expect(result.schedule).toEqual({ dialect: 'cron', source: '0 0 * * *' });
+  // ── [#17157] `strategy: 'scheduled'` is RETIRED — the negative leg ─────────
+  //
+  // ⚠️ This is the ONLY instrument this retirement has. An enum-VALUE narrowing
+  // moves no position, no name and no expression-typed slot, so `api-surface/`,
+  // `authorable-surface/`, `json-schema.manifest/` and the ADR-0058 D7 ledger
+  // are all byte-identical across it (the `crypto.hash` / #4391 precedent, and
+  // the retirement playbook's own route table). A green CI run therefore says
+  // nothing about whether the value is gone. These two assertions say it.
+  it('refuses `strategy: \'scheduled\'` and answers with the retirement prescription', () => {
+    expect(() => CacheWarmupSchema.parse({ enabled: true, strategy: 'scheduled' }))
+      .toThrow(/`CacheWarmup\.strategy: 'scheduled'` was removed.*`'eager'`.*`'lazy'`/s);
+    // The prescription names the surviving cron slot rather than a replacement
+    // strategy, because there is no warmup engine to schedule.
+    expect(() => CacheWarmupSchema.parse({ enabled: true, strategy: 'scheduled' }))
+      .toThrow(/schedule\.expression/s);
+  });
+
+  it('dispatches the prescription on the retired value ONLY — a typo keeps zod\'s own message', () => {
+    // Lit control for the assertion above: a value that was never legal must
+    // NOT be told it "was removed", or the error map is matching everything and
+    // the pin above would pass over a schema that refuses nothing in particular.
+    const typo = CacheWarmupSchema.safeParse({ enabled: true, strategy: 'sheduled' });
+    expect(typo.success).toBe(false);
+    if (!typo.success) expect(JSON.stringify(typo.error.issues)).not.toContain('was removed');
+  });
+
+  it('the surviving members still parse — the refusal above is the narrowing, not a dead schema', () => {
+    expect(CacheWarmupSchema.parse({ enabled: true, strategy: 'eager' }).strategy).toBe('eager');
+    expect(CacheWarmupSchema.parse({ enabled: true, strategy: 'lazy' }).strategy).toBe('lazy');
+    expect(CacheWarmupSchema.parse({ enabled: true }).strategy).toBe('lazy');
   });
 });
 

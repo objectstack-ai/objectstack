@@ -69,8 +69,10 @@ import {
   resolveSeedTenancySeam,
   GLOBAL_TENANT,
   ORGANIZATION_TABLE,
+  SEQUENCES_TABLE,
 } from './seed-tenancy-backfill.js';
 import type { SeedTenancyExec } from './seed-tenancy-backfill.js';
+import { TABLE_IS_PRESENT_ROWS, isTablePresenceCatalogSql } from './read-probe.testkit.js';
 
 function createLogger() {
   return { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
@@ -89,10 +91,19 @@ const nonAnsweringSeam: SeedTenancyExec = async () => null;
  * A seam that ANSWERS every probe, with an empty result set in one dialect's
  * spelling. A real install with nothing to repair looks exactly like this: the
  * counter table exists, and no object holds counters on both sides of a split.
+ *
+ * [#17175] "The counter table exists" is now SAID rather than implied. It used
+ * to be implied by not throwing, because the presence probe could only answer
+ * "no" by being refused; the catalog probe answers "no" with zero rows, so a
+ * seam that returns an empty set to EVERY statement is now a seam saying the
+ * table is gone. The empty-set spelling under test is unchanged — it is still
+ * what every other probe gets, which is what keeps this fixture a pin on
+ * `isResultSet` rather than on the presence probe.
  */
 function answeringEmptySeam(spelling: 'sqlite' | 'pg' | 'mysql'): SeedTenancyExec {
   const empty = { sqlite: [], pg: { rows: [], rowCount: 0 }, mysql: [[], []] }[spelling];
-  return async () => empty;
+  return async (sql: string) =>
+    isTablePresenceCatalogSql(sql, SEQUENCES_TABLE) ? TABLE_IS_PRESENT_ROWS : empty;
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -173,7 +184,8 @@ describe('#10789 a seam that returns no result set is ABSENT, not empty', () => 
     // Pre-fix this is also `no-split`, for the same reason and one probe later.
     const result = await backfillSeedTenancy(
       {
-        exec: async (sql: string) => (sql.includes('WHERE 1 = 0') ? [] : null),
+        exec: async (sql: string) =>
+          isTablePresenceCatalogSql(sql, SEQUENCES_TABLE) ? TABLE_IS_PRESENT_ROWS : null,
         client: 'better-sqlite3',
       },
       createLogger() as any,
@@ -263,6 +275,7 @@ describe('#10789 a seam that answers with no rows still reports no-split', () =>
         }
         return { affectedRows: 3 }; // not a result set, by design
       }
+      if (isTablePresenceCatalogSql(sql, SEQUENCES_TABLE)) return TABLE_IS_PRESENT_ROWS;
       if (sql.includes('WHERE 1 = 0')) return [];
       if (sql.includes('LEFT JOIN')) {
         return [
@@ -302,7 +315,7 @@ describe('#10789 the branches this fix must leave alone', () => {
     expect(result.status).toBe('no-driver');
   });
 
-  it('[non-effect] a seam that THROWS is unchanged — that path was never the defect', async () => {
+  it('[#17175 supersedes] a seam that THROWS is now UNREADABLE, not absent', async () => {
     // Throwing is a driver present and refusing LOUDLY, and step 1's `catch`
     // already reported it honestly as `absent`. Only a seam that RETURNS a
     // non-answer was invisible, so only that one changed.
@@ -316,15 +329,30 @@ describe('#10789 the branches this fix must leave alone', () => {
       createLogger() as any,
     );
 
-    expect(result.status).toBe('absent');
-    // No `detail` from the non-answer branch: this one did not take it.
-    expect(result.detail).toBeUndefined();
+    // [#17175] This assertion USED to read `absent`, and the comment above it
+    // used to say a throwing seam "already reported it honestly". Measured
+    // against the presence probe this file pins, that was only half true: the
+    // throw it described was the probe's own `SELECT … WHERE 1 = 0` being
+    // REFUSED because the table is missing, which is an answer. A connection
+    // refusal is not, and folding the two together is what let this repair
+    // decline in silence on a seam that never looked.
+    //
+    // The catalog probe cannot be refused for the reason the old one was — it
+    // does not name the counter table in a FROM clause at all — so any throw on
+    // that arm is a genuine fault, and it is reported. What is preserved, and is
+    // pinned in `read-probe.test.ts`, is the FALLBACK arm: on a dialect with no
+    // catalog statement, a refusal that `isMissingTableError` recognises still
+    // reads `absent`.
+    expect(result.status).toBe('unreadable');
+    expect(result.status).not.toBe('absent');
+    expect(result.detail).toMatch(/ECONNREFUSED/);
   });
 
   it('[non-effect] the split probe throwing still reports absent with the driver message', async () => {
     const result = await backfillSeedTenancy(
       {
         exec: async (sql: string) => {
+          if (isTablePresenceCatalogSql(sql, SEQUENCES_TABLE)) return TABLE_IS_PRESENT_ROWS;
           if (sql.includes('WHERE 1 = 0')) return [];
           throw new Error('no such table: _objectstack_sequences');
         },
@@ -342,6 +370,7 @@ describe('#10789 the branches this fix must leave alone', () => {
     // guards, so a fix that rejected a legitimate answer would silently stop
     // this branch from ever running.
     const exec: SeedTenancyExec = async (sql: string) => {
+      if (isTablePresenceCatalogSql(sql, SEQUENCES_TABLE)) return TABLE_IS_PRESENT_ROWS;
       if (sql.includes('WHERE 1 = 0')) return [];
       if (sql.includes('LEFT JOIN')) {
         return [

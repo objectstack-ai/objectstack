@@ -138,7 +138,9 @@ export interface AnonymousDenyInput {
    * OPTIONAL request path. When a NON-EMPTY string, a control-plane path
    * (auth / health / ready / discovery — see {@link isAuthGateAllowlisted}) is
    * exempt. Body-routed seams (GraphQL) have no meaningful path and pass
-   * `undefined`; see the guard below for why that is load-bearing.
+   * `undefined`, which this seam DENIES — see the guard below, which is this
+   * seam's own contract for the pathless case (#7898) rather than a reading of
+   * what the allow-list predicate does with a falsy argument.
    */
   path?: string | null;
 }
@@ -154,11 +156,19 @@ export function shouldDenyAnonymous(input: AnonymousDenyInput): boolean {
   if (input.userId || input.isSystem) return false;          // authenticated / system
   // Control-plane exemption — ONLY for a real, non-empty path.
   //
-  // ⚠️ `isAuthGateAllowlisted(undefined)` returns `true` (it treats "no path"
-  // as allow-listed for the auth-gate's purposes). A body-routed seam such as
-  // GraphQL has no meaningful request path; if it passed `undefined` straight
-  // through, the allowlist would exempt EVERY anonymous query and silently
-  // reopen exactly the hole #2567 closes. The non-empty guard is mandatory.
+  // ⭐ [#7898] This is THE body-routed seam, and this guard is its own
+  // declared contract — not a workaround for the predicate's default. A
+  // body-routed caller such as GraphQL has no meaningful request path, and
+  // this is the one place in the platform that says what a pathless request
+  // means: it is DENIED, never exempt. Stating it here, at the seam whose
+  // input really is optional, is why every other caller can simply pass the
+  // path it has.
+  //
+  // ⛔ Do not delete this guard as redundant now that
+  // `isAuthGateAllowlisted(undefined)` is itself fail-closed (it answered
+  // `true` before #7898). The redundancy is deliberate: this seam's contract
+  // must not be re-derived from what the predicate happens to do with a falsy
+  // argument, which is exactly how the hole #2567 closes was reopened once.
   if (typeof input.path === 'string' && input.path.length > 0 && isAuthGateAllowlisted(input.path)) {
     return false;
   }

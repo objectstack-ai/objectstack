@@ -4,15 +4,29 @@
 // `PluginMetadata` surface of `@objectstack/core` (#11982 `configSchema`,
 // #12587 `hotReloadable`), recorded in ADR-0025 §3.7.
 //
-// Why the pins live in THIS package: `@objectstack/core` has no `typecheck`
-// script (it is a type-check DEBT ledger entry), so a `@ts-expect-error` there
-// is a phantom pin — no tsc program a `typecheck` script runs ever evaluates
-// it, and `check:type-check-coverage` refuses it. This package's
-// `tsconfig.test.json` program IS run by its `typecheck` script
-// (`check:test-typecheck`, EXACT per-file ratchet: an unlisted file must stay
-// at zero errors), and it resolves `@objectstack/core` to the BUILT
-// `dist/index.d.ts` — so these directives pin the contract consumers actually
-// see. This package is also the retirement's worked replacement: the REST
+// Why the pins live in THIS package: this package's `tsconfig.test.json`
+// program IS run by its `typecheck` script (`check:test-typecheck`, EXACT
+// per-file ratchet: an unlisted file must stay at zero errors), and it
+// resolves `@objectstack/core` to the BUILT `dist/index.d.ts` — so these
+// directives pin the contract consumers actually see.
+//
+// ⚠️ NOT because core cannot compile a pin — this header used to say
+// `@objectstack/core` "has no `typecheck` script (it is a type-check DEBT
+// ledger entry)", and that is false on this tree in BOTH halves. #14613 split
+// a `tsconfig.test.json` out of core's build config and core's `typecheck`
+// NAMES it (via `check:test-typecheck --project`), so a `@ts-expect-error`
+// over there is compiled rather than the phantom pin
+// `check:type-check-coverage` refuses; and core holds no DEBT entry. What
+// core's program cannot do is read core's own PUBLISHED surface: it compiles
+// `src`, so a pin there would read `plugin-loader.ts` — the declaration —
+// not the `.d.ts` the build emits from it. Measured with `tsc --listFiles` on
+// both programs: this one contains `packages/core/dist/index.d.ts` and ZERO
+// files under `packages/core/src/`, while core's own test program contains
+// `packages/core/src/plugin-loader.ts` and ZERO under `packages/core/dist/`.
+// That reason is durable where the script-list one was not. Same placement as
+// `plugin-type-closed-set.pin.test.ts`.
+//
+// This package is also the retirement's worked replacement: the REST
 // server parses its own config at its own seam (#11637,
 // `rest-config-parse-not-cast.test.ts`) precisely because the kernel-side
 // validator could never run.

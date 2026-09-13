@@ -1,11 +1,16 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Cube, Metric, Dimension as CubeDimension, CubeJoin } from '@objectstack/spec/data';
-import { AggregationFunction } from '@objectstack/spec/data';
+import {
+  AGGREGATE_FIELD_TYPE_COMPATIBILITY,
+  AggregationFunction,
+  isAggregateCompatibleWithFieldType,
+} from '@objectstack/spec/data';
 import type { Dataset, DatasetMeasure, DatasetDimension } from '@objectstack/spec/ui';
 import { resolveI18nLabel } from '@objectstack/spec/ui';
 import type { FilterCondition } from '@objectstack/spec/data';
 import { datasetInvalidError } from './dataset-refusal.js';
+import { TEMPORAL_SOURCE_FIELD_TYPES } from './measure-result-type.js';
 
 /**
  * Dataset → Cube compiler (ADR-0021 D-A=(c), WS2).
@@ -153,6 +158,20 @@ export interface DatasetCompileOptions {
    * construction. Rejecting it here would break a path that works today.
    */
   isExternalObject?: (objectName: string) => boolean;
+  /**
+   * [#16737 / #16099] The DECLARED `FieldType` of `field` on `objectName`, or
+   * `undefined` when nothing authoritative can answer. Supplied by the host
+   * from the same `AnalyticsServiceConfig.sourceFieldMeta` the result-column
+   * enrichment reads.
+   *
+   * It is what makes {@link assertAggregateFieldTypeCompatible} decidable at
+   * COMPILE time — the compile leg of the director ruling (decision batch #59,
+   * 2026-09-06: "both legs, table in spec"), whose table is
+   * `AGGREGATE_FIELD_TYPE_COMPATIBILITY` in `@objectstack/spec`. Absent hook,
+   * unknown object, unknown field → the pair is not judged, matching every
+   * other probe on this interface.
+   */
+  declaredFieldType?: (objectName: string, field: string) => string | undefined;
 }
 
 /** Map a dataset measure's aggregate to the Cube metric `type`. */
@@ -178,6 +197,187 @@ function aggregateToMetricType(m: DatasetMeasure): Metric['type'] {
     );
   }
   return m.aggregate as Metric['type'];
+}
+
+/**
+ * The aggregates that DERIVE a new number from the aggregated values, as
+ * opposed to SELECTING one of them. `sum` and `avg` always answer a number
+ * whatever the column holds, so a non-numeric storage form is read as
+ * arithmetic by whichever dialect is underneath — the divergence
+ * {@link assertAggregateFieldTypeCompatible} refuses. `min` / `max` answer a
+ * value of the field's own type and are the other half of the same split
+ * `measureResultType` makes; they are not judged here (see that function's
+ * scope note). `count` / `count_distinct` read no value at all.
+ *
+ * ⛔ This is a SCOPE, never a verdict: which pairs are accepted is read off
+ * `AGGREGATE_FIELD_TYPE_COMPATIBILITY` in `@objectstack/spec` and is not
+ * restated anywhere in this package.
+ */
+const DERIVING_AGGREGATES: ReadonlySet<string> = new Set(['sum', 'avg']);
+
+/**
+ * The one sentence of PRESCRIPTION a refusal adds after naming the accepted
+ * set — chosen by the source field's class, because the author's way forward
+ * is not the same one for every refused pair. ⛔ It prescribes; it never
+ * re-states which pairs are accepted (that is the table's line above it).
+ *
+ * The temporal sentence is the one #16737 measured and shipped, kept verbatim
+ * for the class it was written about. The string/other sentence is the
+ * generalisation this card adds: counting is the aggregate that reads no
+ * arithmetic off a value, so it is what an author who wanted "how much text is
+ * there" actually wants.
+ */
+const REMEDY_BY_SOURCE_CLASS = (fieldType: string): string =>
+  TEMPORAL_SOURCE_FIELD_TYPES.has(fieldType)
+    ? 'For a temporal field, `min`/`max` return a real instant; a DURATION has to be '
+      + 'stored as a number (a computed "days open" field) and aggregated as one.'
+    : 'For a non-numeric field, `count`/`count_distinct` accept every type because they '
+      + 'read no arithmetic off the value; a quantity that should be added up has to be '
+      + 'stored as a numeric field and aggregated as one.';
+
+/**
+ * [#16737 / #16099] Refuse a measure whose AGGREGATE cannot meaningfully consume
+ * its field's declared TYPE — the compile leg of the director ruling (decision
+ * batch #59, 2026-09-06: "both legs, table in spec"; the table is
+ * `AGGREGATE_FIELD_TYPE_COMPATIBILITY` in `@objectstack/spec`, #16353).
+ *
+ * ## The shape this closes
+ *
+ * `{ aggregate: 'avg', field: 'submitted_at' }` over a `Field.datetime`
+ * compiled to `AVG(submitted_at)` and reached the backend, where the ANSWER is
+ * a property of the dialect rather than of the data. Both halves were measured
+ * on this card:
+ *
+ * ```
+ * -- SQLite (better-sqlite3), the canonical storage form (#3912)
+ * select typeof(submitted_at), submitted_at from clm_contract limit 1;
+ *   text|2026-05-19T00:00:00.000Z
+ * select avg(submitted_at) from clm_contract;
+ *   2025.5                      -- text->numeric coercion: the average YEAR
+ *
+ * -- PostgreSQL 16.13
+ * select avg(submitted_at) from clm_contract;
+ *   ERROR:  function avg(timestamp with time zone) does not exist   -- 42883
+ * ```
+ *
+ * ⭐ The SQLite half is the dangerous one, and the reason this refusal is a
+ * refusal rather than a definition: `2025.5` is not a number a reader can tell
+ * is wrong. Fed to `derived: { op: 'difference', of: [avg_a, avg_b] }` it
+ * became `-0.85` on a tile labelled "average cycle time delta" — exactly what a
+ * correct answer looks like. Postgres at least fails loudly; the DEV datasource
+ * in this platform's default flow is SQLite, so the plausible number is what
+ * ships (Prime Directive #12).
+ *
+ * ## Why compile time, and why that also covers `derived`
+ *
+ * `derived` measures reference other measures BY NAME, and the executor expands
+ * a selected derived measure into its `of` dependencies before querying. Both
+ * are downstream of THIS loop: a dataset carrying an incompatible base measure
+ * never finishes compiling, so no `derived` op can be handed its output. That
+ * is the whole of `derived` coverage — there is no second gate to keep in step,
+ * which is why the refusal is placed on the measure and not on the consumer.
+ *
+ * ## ⚠️ Scope: the DERIVING aggregates, and why `min` / `max` still wait
+ *
+ * The verdict is the spec predicate's — ⛔ no row is restated here. What is
+ * scoped is which PAIRS this gate judges at all: those whose aggregate DERIVES
+ * a new number from the values (`sum` / `avg`, {@link DERIVING_AGGREGATES}),
+ * and no other. `min` / `max` SELECT one of the stored values and are not
+ * judged here at all.
+ *
+ * ⛔ That is a deliberate stop, not an oversight, and the line is the one this
+ * package already draws: `measureResultType` branches on exactly this pair of
+ * aggregates, because `min` / `max` return a value of the source field's OWN
+ * type while `sum` / `avg` always return a number (#15768). The defect this
+ * gate exists for is a DERIVED number whose value is decided by the dialect
+ * rather than by the data, so the deriving aggregates are precisely its
+ * population.
+ *
+ * ⛔ Executing the table's `min` / `max` rows from here today would break uses
+ * this platform answers on purpose, measured rather than assumed — #16099
+ * drove it before this scope was written:
+ *
+ * - `min` / `max` over the STRING classes (`text`, `select`, `lookup`,
+ *   `autonumber`, …) are refused by the table and are the subject of a ruling
+ *   going the OTHER way: the table is to be AMENDED to accept them
+ *   (**#17513**). `measureResultType` (#15768) types exactly those results as
+ *   `'string'`, and `__tests__/measure-result-type.test.ts` pins them end to
+ *   end through `queryDataset`. Enforcing them here would pre-empt that
+ *   amendment.
+ * - `min` over `json` and over `formula` are refused by the table, are in NO
+ *   ruling's scope, and are nonetheless driven end to end by the same shared
+ *   fixture as the rows above (`min_payload`, `min_margin`). Because that
+ *   fixture compiles every measure in ONE dataset, a single refused pair reds
+ *   the whole section: subtracting only the string classes and enforcing the
+ *   rest was measured on this card and still failed **15** cases, all of them
+ *   on `min` × `json`. So the `min` / `max` population is ONE question, and it
+ *   is #17513's rather than a set this gate can partly execute.
+ *
+ * The deriving rows carry no such counter-evidence. Their temporal members were
+ * measured on both dialects under #16737 (above); for the rest, no shipped
+ * dataset in this repository pairs `sum` or `avg` with a non-numeric field —
+ * every one of the eleven shipped dataset measures resolves to `number`,
+ * `currency`, `summary` or `progress` — and `sum` × `percent`, which
+ * `analytics-service.ts` has called "incoherent" in a comment since before this
+ * table existed, is refused here on the table's authority at last.
+ *
+ * `boolean` / `toggle` are not a collision in either population: #16750 added
+ * both members to the `sum` / `avg` / `min` / `max` rows on the authority of
+ * maintainer ruling #11152 (booleans aggregate as NUMBERS on every backend,
+ * pinned by `AGGREGATION_CASES`), so the table ACCEPTS them and there is
+ * nothing here to refuse.
+ *
+ * ## Tiering — "cannot answer, do not block", the same as every sibling probe
+ *
+ * - No `declaredFieldType` hook (no data engine wired) → not judged.
+ * - A field the hook cannot resolve → not judged.
+ * - A `min` / `max` measure → not judged HERE (see the scope note).
+ * - A RELATIONSHIP-PATH field (`account.closed_at`) → not judged. The hook
+ *   resolves a column on the BASE object, so it would answer about a different
+ *   column of the same name, or about nothing; the spec module says exactly
+ *   this ("a consumer that cannot resolve a field's type must NOT call the
+ *   predicate with a guess").
+ * - `count` with no field → nothing to judge.
+ *
+ * ⛔ The accepted set is NEVER restated here. It is read off the exported table
+ * so the message cannot drift from the contract it enforces, and so a row
+ * changed in the spec changes this refusal in the same commit.
+ */
+function assertAggregateFieldTypeCompatible(
+  datasetName: string,
+  objectName: string,
+  measure: DatasetMeasure,
+  declaredFieldType?: (objectName: string, field: string) => string | undefined,
+): void {
+  if (!declaredFieldType) return;
+  const aggregate = measure.aggregate;
+  const field = measure.field;
+  if (!aggregate || !field) return;
+  // A dotted reference resolves on a JOINED object; this hook answers for the
+  // base one. Not judged rather than judged wrongly.
+  if (field.includes('.')) return;
+  const fieldType = declaredFieldType(objectName, field);
+  if (!fieldType) return;
+  // Scoped to the DERIVING aggregates — see the scope note above. The VERDICT
+  // still comes from the spec table, never from this condition.
+  if (!DERIVING_AGGREGATES.has(aggregate)) return;
+  if (isAggregateCompatibleWithFieldType(aggregate, fieldType)) return;
+
+  const accepted = AGGREGATE_FIELD_TYPE_COMPATIBILITY[aggregate];
+  // [#5716] `DATASET_INVALID` / 400 — a verdict about the dataset DOCUMENT,
+  // decided from metadata alone before any query runs, and fixable only by the
+  // author who wrote the pair.
+  throw datasetInvalidError(
+    `[dataset-compiler] dataset "${datasetName}" measure "${measure.name}" applies aggregate ` +
+    `"${aggregate}" to field "${field}", which object "${objectName}" declares as ` +
+    `\`${fieldType}\`. That pair is not accepted: "${aggregate}" derives a NUMBER from the ` +
+    `stored values, so over a \`${fieldType}\` column the answer is decided by the SQL ` +
+    `dialect rather than by the data — one coerces the stored form to a number and returns ` +
+    `something plausible, another has no such function and fails at query time — and one ` +
+    `dataset would mean two things on two deployments. ` +
+    `"${aggregate}" accepts: ${accepted.join(', ')}. ` +
+    `${REMEDY_BY_SOURCE_CLASS(fieldType)}`,
+  );
 }
 
 /** Map a dataset dimension type to the Cube dimension `type`. */
@@ -450,6 +650,11 @@ export function compileDataset(
       continue;
     }
     if (m.field) assertDeclared(m.field, 'measure', m.name);
+    // [#16737 / #16099] …and the aggregate ITSELF must be one the field's
+    // declared type can carry. Placed after the join-declaration check so a
+    // dotted field is refused for the reason it is actually wrong (an
+    // undeclared relationship) before this gate stands down on it.
+    assertAggregateFieldTypeCompatible(dataset.name, dataset.object, m, options?.declaredFieldType);
     const metric: Metric = {
       name: m.name,
       // [#6761] Same as the dimension label above — see {@link REGISTRY_LOCALE}.

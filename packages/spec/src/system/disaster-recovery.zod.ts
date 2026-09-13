@@ -1,7 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { CronExpressionInputSchema } from '../shared/expression.zod';
 
 /**
  * Backup Strategy Schema
@@ -16,7 +15,6 @@ import { CronExpressionInputSchema } from '../shared/expression.zod';
  * ```typescript
  * const backup: BackupConfig = {
  *   strategy: 'incremental',
- *   schedule: '0 2 * * *',
  *   retention: { days: 30, minCopies: 3 },
  *   encryption: { enabled: true, algorithm: 'AES-256-GCM' },
  * };
@@ -54,8 +52,15 @@ export type BackupRetentionParsed = z.infer<typeof BackupRetentionSchema>;
 export const BackupConfigSchema = lazySchema(() => z.object({
   /** Backup strategy */
   strategy: BackupStrategySchema.default('incremental').describe('Backup strategy'),
-  /** Cron schedule for automated backups */
-  schedule: CronExpressionInputSchema.optional().describe('Cron expression for backup schedule — cron`0 2 * * *`'),
+  /*
+   * `BackupConfig.schedule` was DELETED here in @objectstack/spec 18 (ADR-0049
+   * enforce-or-remove, #16320): declared, parsed into the cron envelope and read by
+   * nothing — no backup engine exists on the platform, so an automated backup never
+   * ran on it. Deleted outright — no `retiredKey()` tombstone, no D2 conversion, no D3
+   * semantic entry (maintainer ruling 2026-09-10 on the retirement PR). The one cron
+   * slot the platform evaluates is `Job.schedule.expression` (`system/job.zod.ts`): a
+   * backup on a cadence is a job whose handler you write.
+   */
   /** Retention policy */
   retention: BackupRetentionSchema.describe('Backup retention policy'),
   /** Storage destination */
@@ -201,7 +206,6 @@ export type RTOParsed = z.infer<typeof RTOSchema>;
  *   rto: { value: 1, unit: 'hours' },
  *   backup: {
  *     strategy: 'incremental',
- *     schedule: '0 0,6,12,18 * * *',
  *     retention: { days: 90, minCopies: 5 },
  *     destination: { type: 's3', bucket: 'backup-bucket', region: 'us-east-1' },
  *   },
@@ -251,8 +255,15 @@ export const DisasterRecoveryPlanSchema = lazySchema(() => z.object({
   testing: z.object({
     /** Enable periodic DR testing */
     enabled: z.boolean().default(false).describe('Enable automated DR testing'),
-    /** Cron schedule for DR tests */
-    schedule: CronExpressionInputSchema.optional().describe('Cron expression for DR test schedule'),
+    /*
+     * `DisasterRecoveryPlan.testing.schedule` was DELETED here in @objectstack/spec 18
+     * (ADR-0049 enforce-or-remove, #16320): declared, parsed into the cron envelope and
+     * read by nothing — no disaster-recovery test runner exists on the platform, so a
+     * periodic DR test never ran. Deleted outright — no `retiredKey()` tombstone, no D2
+     * conversion, no D3 semantic entry (maintainer ruling 2026-09-10 on the retirement
+     * PR). The one cron slot the platform evaluates is `Job.schedule.expression`
+     * (`system/job.zod.ts`): a DR test on a cadence is a job whose handler you write.
+     */
     /** Notification channel for test results */
     notificationChannel: z.string().optional().describe('Notification channel for DR test results'),
   }).optional().describe('Automated disaster recovery testing'),

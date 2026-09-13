@@ -23,6 +23,8 @@
     "api/ApiTestingUiConfig:path = \"/api-docs\"",
     "api/ApiTestingUiConfig:syntaxHighlighting = true",
     "api/ApiTestingUiConfig:theme = \"light\"",
+    "api/AssembledInstalledPackage:enabled = true",
+    "api/AssembledInstalledPackage:status = \"installed\"",
     "api/AuthFeaturesConfig:organization = false",
     "api/AuthFeaturesConfig:twoFactor = false",
     "api/AuthProviderInfo:type = \"social\"",

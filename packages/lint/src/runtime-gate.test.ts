@@ -253,12 +253,13 @@ describe('runtime publish gate (#4463)', () => {
 
     it('an absent context still yields empty collections, never a throw', () => {
       const s = buildRuntimeWriteSnapshots({ type: 'book', item: { name: 'b1' } })!;
-      // [#13216] `pages` joined CONTEXT_STACK_KEYS with `validateViewPageRefs`
-      // — the collection a `type: 'page'` view's `pageName` resolves against.
-      // The expectation moves rather than being relaxed: the invariant under
-      // test is "every context collection is present and empty", so it has to
-      // name the whole set or it stops measuring the shape it exists for.
-      expect(s.baseline).toEqual({ objects: [], permissions: [], books: [], datasets: [], pages: [] });
+      // [#13216 / #17063] `pages` joined CONTEXT_STACK_KEYS with
+      // `validateViewPageRefs` and left with it — no runtime-crossed rule reads
+      // `stack.pages` any more. The expectation moves rather than being relaxed:
+      // the invariant under test is "every context collection is present and
+      // empty", so it has to name the whole set or it stops measuring the shape
+      // it exists for.
+      expect(s.baseline).toEqual({ objects: [], permissions: [], books: [], datasets: [] });
       expect(s.candidate.books).toEqual([{ name: 'b1' }]);
     });
   });

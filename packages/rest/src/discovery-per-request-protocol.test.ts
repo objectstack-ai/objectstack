@@ -119,6 +119,19 @@ const API_CONFIG = {
  * make this file assert them too, and fail the day either description is
  * reworded. The `enabled` bit is what the environment's own kernel decides,
  * and it is what a client reads.
+ *
+ * [#16674] `services.*.route` is reduced the same way, and for the same
+ * reason: since the substitution pass mirrors the mounted paths onto the
+ * `services` half, that VALUE is a handler overlay carrying THIS SERVER's base
+ * — on a scoped request `services.data.route` reads
+ * `/api/v1/environments/tenant-a/data`, which the producer, who cannot see a
+ * mount, will never say. Comparing it here would assert the mount projection
+ * rather than the kernel's answer, and it has its own pins next door
+ * (`discovery-services-route-follows-mount.test.ts`, which asserts it equals
+ * `routes.X` in the served document). What this file still asserts is the part
+ * the environment's own kernel decides: WHETHER the slot advertises an address
+ * at all — a fact the mirror never changes, since it neither invents a route
+ * on a route-less slot nor withdraws one.
  */
 function substance(doc: any) {
   return {
@@ -126,7 +139,13 @@ function substance(doc: any) {
       Object.entries(doc.capabilities as Record<string, { enabled: boolean }>)
         .map(([k, v]) => [k, v.enabled]),
     ),
-    services: doc.services,
+    services: Object.fromEntries(
+      Object.entries(doc.services as Record<string, Record<string, unknown>>)
+        .map(([slot, info]) => {
+          const { route, ...kernelDetermined } = info;
+          return [slot, { ...kernelDetermined, advertisesRoute: typeof route === 'string' }];
+        }),
+    ),
     locale: doc.locale,
   };
 }

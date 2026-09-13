@@ -2,6 +2,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { createTenancyService, resolveDefaultOrgId } from './tenancy-service.js';
+import { backfillMemberships } from './reconcile-membership.js';
 
 function makeEngine(orgs: Array<{ id: string; slug?: string }>) {
   return {
@@ -292,5 +293,254 @@ describe('posture entitlement declared by the org-scoping runtime', () => {
     });
     expect(t.degraded).toBe(true);
     expect(entitle).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#17010] The organization census — a `single`-posture deployment that HOLDS
+// more than one organization stops booting silently.
+//
+// ADR-0131 §1.2(3) calls that precondition 「a refused boot」 and it is not.
+// ⛔ Boot still PROCEEDS here (ruled 2026-09-10): this suite pins the REPORT,
+// its level, the subjects it must name — and, just as load-bearing, the
+// NEGATIVE CONTROL, because a check that fires on a healthy install is worse
+// than no check at all.
+// ---------------------------------------------------------------------------
+describe('single-posture organization census (#17010)', () => {
+  /** An engine that answers the census — `count` is what makes the reading exact. */
+  function makeCensusEngine(orgs: Array<{ id: string; slug?: string }>) {
+    return {
+      find: vi.fn(async (object: string, query: any) => {
+        if (object !== 'sys_organization') return [];
+        const where = query?.where ?? {};
+        let rows = orgs;
+        if (where.slug !== undefined) rows = rows.filter((o) => o.slug === where.slug);
+        return rows.slice(0, query?.limit ?? rows.length);
+      }),
+      count: vi.fn(async (object: string) => (object === 'sys_organization' ? orgs.length : 0)),
+      insert: vi.fn(async () => ({ id: 'ignored' })),
+    };
+  }
+
+  const makeSink = () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() });
+
+  // Spelled here rather than imported: the census is module-private (it has one
+  // in-file caller), so this literal is the pin — rename the token and this
+  // suite says so, which is the whole point of a grep token an operator keys on.
+  const SINGLE_POSTURE_MANY_ORGANIZATIONS = 'single_posture_holds_many_organizations';
+
+  const orgs = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `org_${i + 1}` }));
+
+  it('reports at ERROR, naming the posture, the COUNT and both remedies', async () => {
+    const engine = makeCensusEngine(orgs(3));
+    const logger = makeSink();
+    const t = createTenancyService({
+      requested: 'single',
+      probeIsolation: () => false,
+      getEngine: () => engine,
+      logger,
+    });
+
+    expect(await t.defaultOrgId()).toBeNull();
+
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(logger.warn).not.toHaveBeenCalled();
+    const [message, meta] = logger.error.mock.calls[0]!;
+    // The grep token an operator keys on.
+    expect(message).toContain(SINGLE_POSTURE_MANY_ORGANIZATIONS);
+    // ① the posture it DECLARED, ② the count it HOLDS — the two facts the card asks for.
+    expect(message).toContain("'single'");
+    expect(message).toContain('3');
+    expect(meta).toEqual({ posture: 'single', organizationCount: 3 });
+    // ③ both remedies, named: declare a walled posture, or hold one organization.
+    expect(message).toContain('OS_TENANCY_POSTURE=group');
+    expect(message).toContain('OS_TENANCY_POSTURE=isolated');
+    expect(message).toContain('HOLD ONE ORGANIZATION');
+    // ④ the consequence, including that the deployment keeps looking healthy
+    //    (AGENTS.md → "Degradation log levels": what an `error` owes its reader).
+    expect(message).toContain('KEEP LOOKING HEALTHY');
+  });
+
+  it('NEGATIVE CONTROL: exactly one organization under `single` stays SILENT', async () => {
+    const engine = makeCensusEngine([{ id: 'org_1', slug: 'default' }]);
+    const logger = makeSink();
+    const t = createTenancyService({
+      requested: 'single',
+      probeIsolation: () => false,
+      getEngine: () => engine,
+      logger,
+    });
+
+    expect(await t.defaultOrgId()).toBe('org_1');
+    expect(logger.error).not.toHaveBeenCalled();
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it('NEGATIVE CONTROL: a store with NO organization yet stays SILENT', async () => {
+    const engine = makeCensusEngine([]);
+    const logger = makeSink();
+    const t = createTenancyService({
+      requested: 'single',
+      probeIsolation: () => false,
+      getEngine: () => engine,
+      logger,
+    });
+
+    expect(await t.defaultOrgId()).toBeNull();
+    expect(logger.error).not.toHaveBeenCalled();
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it('a WALLED posture pays nothing and says nothing — the organizations are declared', async () => {
+    for (const requested of ['group', 'isolated'] as const) {
+      const engine = makeCensusEngine(orgs(3));
+      const logger = makeSink();
+      const t = createTenancyService({
+        requested,
+        probeIsolation: () => true,
+        getEngine: () => engine,
+        logger,
+      });
+
+      expect(await t.defaultOrgId(), requested).toBeNull();
+      expect(engine.count, requested).not.toHaveBeenCalled();
+      expect(logger.error, requested).not.toHaveBeenCalled();
+      expect(logger.warn, requested).not.toHaveBeenCalled();
+    }
+  });
+
+  it('COST: the census costs ONE count() per process, however often it is asked', async () => {
+    const engine = makeCensusEngine(orgs(4));
+    const logger = makeSink();
+    const t = createTenancyService({
+      requested: 'single',
+      probeIsolation: () => false,
+      getEngine: () => engine,
+      logger,
+    });
+
+    await t.defaultOrgId();
+    await t.defaultOrgId();
+    await t.defaultOrgId();
+
+    expect(engine.count).toHaveBeenCalledTimes(1);
+    expect(engine.count).toHaveBeenCalledWith('sys_organization', {}, { context: { isSystem: true } });
+    // Said ONCE, at the first degradation — not once per failed resolution.
+    expect(logger.error).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to warn on a sink that declares no error, and never emits both', async () => {
+    const engine = makeCensusEngine(orgs(2));
+    const logger = { info: vi.fn(), warn: vi.fn() };
+    const t = createTenancyService({
+      requested: 'single',
+      probeIsolation: () => false,
+      getEngine: () => engine,
+      logger,
+    });
+
+    await t.defaultOrgId();
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn.mock.calls[0]![0]).toContain(SINGLE_POSTURE_MANY_ORGANIZATIONS);
+  });
+
+  it('an engine that cannot answer stays silent AND does not latch the census', async () => {
+    // No `count`: every reduced mock embedding. An absence of measurement is
+    // not evidence of a defect — and it must not disable the census either.
+    const countless: any = makeCensusEngine(orgs(3));
+    delete countless.count;
+    const logger = makeSink();
+    let engine: any = countless;
+    const t = createTenancyService({
+      requested: 'single',
+      probeIsolation: () => false,
+      getEngine: () => engine,
+      logger,
+    });
+
+    await t.defaultOrgId();
+    expect(logger.error).not.toHaveBeenCalled();
+    expect(logger.warn).not.toHaveBeenCalled();
+
+    // The engine becomes answerable later (the store came up after this seam
+    // was first reached): the census must still be takeable.
+    engine = makeCensusEngine(orgs(3));
+    await t.defaultOrgId();
+    expect(logger.error).toHaveBeenCalledTimes(1);
+  });
+
+  it('a throwing count, and a throwing logger, never break the resolution', async () => {
+    const engine: any = makeCensusEngine([{ id: 'org_1', slug: 'default' }]);
+    engine.count = vi.fn(async () => {
+      throw new Error('store unreachable');
+    });
+    expect(await createTenancyService({
+      requested: 'single',
+      probeIsolation: () => false,
+      getEngine: () => engine,
+      logger: makeSink(),
+    }).defaultOrgId()).toBe('org_1');
+
+    const loud = makeCensusEngine(orgs(3));
+    const thrower = {
+      warn: vi.fn(),
+      error: vi.fn(() => {
+        throw new Error('sink exploded');
+      }),
+    };
+    expect(await createTenancyService({
+      requested: 'single',
+      probeIsolation: () => false,
+      getEngine: () => loud,
+      logger: thrower,
+    }).defaultOrgId()).toBeNull();
+    expect(thrower.error).toHaveBeenCalledTimes(1);
+  });
+
+  it('a sink with no warn channel at all drops the report instead of throwing', async () => {
+    // The declared sink types both members as optional, so a host CAN inject
+    // `{ info }` alone. The narrowing proves `warn` before it claims the sink,
+    // so such a host gets nothing — quietly, from inside a diagnostic.
+    const engine = makeCensusEngine(orgs(3));
+    const infoOnly = { info: vi.fn() };
+    const t = createTenancyService({
+      requested: 'single',
+      probeIsolation: () => false,
+      getEngine: () => engine,
+      logger: infoOnly,
+    });
+
+    expect(await t.defaultOrgId()).toBeNull();
+    expect(infoOnly.info).not.toHaveBeenCalled();
+  });
+
+  // -------------------------------------------------------------------------
+  // The claim that makes this a BOOT-time reading rather than a lazy one:
+  // `AuthPlugin` runs `backfillMemberships` from its `kernel:ready` hook with
+  // `resolveTargetOrg: () => tenancy.defaultOrgId()`, under a membership policy
+  // that defaults to `auto`. Pinned against the real pass, so the day that
+  // wiring stops reaching this seam, this test says so.
+  // -------------------------------------------------------------------------
+  it('is taken AT BOOT: the kernel:ready membership backfill reaches this seam', async () => {
+    const engine = makeCensusEngine(orgs(3));
+    const logger = makeSink();
+    const tenancy = createTenancyService({
+      requested: 'single',
+      probeIsolation: () => false,
+      getEngine: () => engine,
+      logger,
+    });
+
+    const res = await backfillMemberships(engine, {
+      policy: 'auto',
+      resolveTargetOrg: () => tenancy.defaultOrgId(),
+      logger,
+    });
+
+    // The backfill itself correctly declines to guess (ADR-0093 D6) …
+    expect(res.reason).toBe('no-target-org');
+    // … and THAT is the boot moment the census is taken in.
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(logger.error.mock.calls[0]![0]).toContain(SINGLE_POSTURE_MANY_ORGANIZATIONS);
   });
 });

@@ -4,6 +4,7 @@ import { Command, Flags } from '@oclif/core';
 import { printHeader, printSuccess, printError, printKV, emitJson, errorCodeFields } from '../utils/format.js';
 import { writeAuthConfig } from '../utils/auth-config.js';
 import { ObjectStackClient } from '@objectstack/client';
+import type { RegisterRequest } from '@objectstack/client';
 import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 
@@ -112,7 +113,7 @@ export default class Register extends Command {
         email = await rl.question('Email: ');
       }
       if (!name) {
-        name = await rl.question('Name (optional): ');
+        name = await rl.question('Name: ');
       }
       rl.close();
       if (!password) {
@@ -120,12 +121,12 @@ export default class Register extends Command {
       }
 
       if (!email) throw new Error('Email is required');
+      if (!name) throw new Error('Name is required');
       if (!password) throw new Error('Password is required');
 
       const client = new ObjectStackClient({ baseUrl: flags.url });
-      const registerPayload: { email: string; password: string; name?: string } = { email, password };
-      if (name) registerPayload.name = name;
-      const response = await client.auth.register(registerPayload as any);
+      const registerPayload: RegisterRequest = { email, password, name };
+      const response = await client.auth.register(registerPayload);
 
       const token = response.data?.token ?? (response as any).token;
       const user = response.data?.user ?? (response as any).user;

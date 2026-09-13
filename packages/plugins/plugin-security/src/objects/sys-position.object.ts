@@ -1,6 +1,38 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { reservedIdentityNamesCelList, reservedIdentityNameMessage } from './reserved-identity-names.js';
+
+/**
+ * [#15972] The CEL predicate behind the `reserved_identity_name` rule below,
+ * assembled here so the object literal reads as one line and the two halves of
+ * the condition can each carry their own note.
+ *
+ * ⚠️ `&&` order is load-bearing. CEL absorbs an error on one side of `&&` when
+ * the other side is `false`, so putting the reserved-name test FIRST means the
+ * provenance test is only ever evaluated for a write that already spells a
+ * reserved name. Every other name short-circuits out before `managed_by` is
+ * read at all — which is what keeps the negative control (every other name
+ * still writes) independent of whatever `managed_by` happens to hold.
+ */
+const RESERVED_IDENTITY_NAME_CONDITION =
+  `record.name in ${reservedIdentityNamesCelList()}`
+  // The framework's OWN catalog rows are the exception, and the only one:
+  // `bootstrapBuiltinRoles` seeds exactly these names, per organization,
+  // stamped `managed_by: 'platform'` under an `isSystem` context. `system` is
+  // the legacy pre-A4 spelling of the same provenance — kept in lockstep with
+  // `SYSTEM_ROW_PROVENANCE` (security-plugin.ts), which maps BOTH to "the
+  // platform" — so a legacy row is not frozen by an invariant that lands after
+  // it. ⛔ `package` / `config` are deliberately NOT exempt: a stack that
+  // declares a position named `org_admin` is repurposing a built-in identity,
+  // which is the same defect arriving through the supply chain, and
+  // `bootstrapDeclaredPositions` stamps no provenance at all (the row defaults
+  // to `admin`), so it is refused here like any other tenant-grade write.
+  //
+  // A tenant cannot reach the exemption by CLAIMING it: `managed_by` is
+  // `readonly`, and the admin-door provenance gate refuses a payload that
+  // spells `platform`/`package` outright.
+  + ` && !(record.managed_by in ['platform', 'system'])`;
 
 /**
  * sys_position — Position definitions (ADR-0090 D3).
@@ -334,4 +366,46 @@ export const SysPosition = ObjectSchema.create({
     // (#3391 P1), so omitting it 405s /batch and the *Many routes (#3026).
     apiMethods: ['get', 'list', 'create', 'update', 'delete', 'bulk'],
   },
+
+  // ── [#15972] Reserved built-in identity names ────────────────────
+  //
+  // The prose at the head of this file has said since ADR-0068 that the
+  // framework-reserved built-in identities "MUST NOT be repurposed by a
+  // tenant". ⚠️ That was a COMMENT, not a gate — the names stayed writable,
+  // and every defence against a tenant-minted `platform_admin` was a READER
+  // choosing to consult the capability rung rather than the name. This array
+  // is the enforcement of the sentence that was already here.
+  //
+  // Why the object's `validations`, and not a gate in the security plugin:
+  // the plugin's name gates (the curated-capability one, the provenance one)
+  // guard the ADMIN DOOR. A rule declared here is evaluated by the ENGINE
+  // (`objectql`'s rule validator) on insert, by-id update and multi-row
+  // update, so the data API, the seeders and metadata import are all covered
+  // by ONE refusal carrying ONE code (`VALIDATION_FAILED`) — which is what
+  // stops the two doors answering the same condition with two vocabularies.
+  //
+  // ⚠️ An INVARIANT, not a transition gate (see `ScriptValidationSchema`): the
+  // predicate is re-evaluated against the merged record on every write, so a
+  // row that ALREADY spells a reserved name is refused on any edit until it is
+  // renamed — frozen, not bricked, and deliberately so on a security invariant.
+  // Nothing here rewrites such a row; the read-only census
+  // (`scripts/measure-reserved-identity-name-census.mjs`) is what reports them.
+  validations: [
+    {
+      // `cross_field`, not `script`: the condition genuinely reads two columns
+      // (the name AND its provenance), and only this variant carries `fields`,
+      // which is what attaches the violation to `name` instead of `_record` so
+      // a form can point at the offending input.
+      type: 'cross_field',
+      name: 'reserved_identity_name',
+      label: 'Reserved built-in identity name',
+      description:
+        'ADR-0068 D2 reserves the built-in identity names for the framework. Only the platform’s own '
+        + 'catalog seed may spell one; a tenant- or package-authored position must choose another name.',
+      fields: ['name', 'managed_by'],
+      condition: { dialect: 'cel', source: RESERVED_IDENTITY_NAME_CONDITION },
+      severity: 'error',
+      message: reservedIdentityNameMessage('name'),
+    },
+  ],
 });

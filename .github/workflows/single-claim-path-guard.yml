@@ -17,8 +17,9 @@
 # is authoritative and this file is the invocation.
 #
 # Sibling shape, deliberately copied rather than reinvented: the Part-of
-# Closing-Keyword Guard is this repo's other single-script PR-scoped blocking
-# check, and this takes its job shape, its runtime pin and its trigger set.
+# Closing-Keyword Guard is one of this repo's other single-script PR-scoped
+# blocking checks, and this takes its job shape, its runtime pin and its trigger
+# set.
 name: Single-Claim Path Guard
 
 # `synchronize` is the load-bearing one here, and that is the difference from

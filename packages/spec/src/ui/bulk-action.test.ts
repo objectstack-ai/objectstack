@@ -126,6 +126,17 @@ describe('BulkActionDefSchema (#4457)', () => {
       expect(issues.join('\n')).toContain('`excution` → `execution`');
     });
 
+    it('renames `mode` onto `execution` — the alias an ACTION deliberately lacks', () => {
+      // The def aliases `mode`; `ActionSchema` must NOT, because there `mode`
+      // is a declared key (create/edit/delete/custom) and renaming it would eat
+      // a real declaration — pinned in `action-dispatch-contract.test.ts`. The
+      // two surfaces' alias tables differ by exactly this entry, so without
+      // this assertion deleting the def-side `mode` alias reds nothing while
+      // silently falsifying that comparison.
+      const issues = reject({ name: 'recalc_selection', operation: 'custom', mode: 'aggregate' });
+      expect(issues.join('\n')).toContain('`mode` → `execution`');
+    });
+
     it('refuses a hand-written `actionDef` with the reason, not a spelling hint', () => {
       const issues = reject({
         name: 'recalc_selection',

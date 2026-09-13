@@ -46,7 +46,11 @@ import {
 
 let root: string;
 
-/** The published catalog as measured — `Found 11 skills` in the real run. */
+/**
+ * The published catalog — one entry per `skills/*\/SKILL.md` on this tree; the
+ * real run reports the same count as `Found N skills`. Ten since the published
+ * PM Dispatch skill was deleted (2026-09-10); it was eleven before.
+ */
 const SKILLS = [
   'objectstack-ai',
   'objectstack-api',
@@ -55,7 +59,6 @@ const SKILLS = [
   'objectstack-formula',
   'objectstack-i18n',
   'objectstack-platform',
-  'objectstack-pm-dispatch',
   'objectstack-query',
   'objectstack-ui',
   'objectstack-upgrade',
@@ -109,11 +112,13 @@ beforeAll(() => {
   }
 
   // Phase 3 — the skills installer: two real trees plus a symlink farm, the
-  // layout measured from `npx skills add … --all` (11 skills, 49 real files
-  // per tree, `.claude/skills/*` symlinked into `.agents/skills/`). The COUNT
-  // is faithful on purpose — a 3-skill fixture sits under COLLAPSE_AT and
-  // would exercise the enumerate path while the real tree takes the collapse
-  // path, testing the branch the product does not use.
+  // layout measured from `npx skills add … --all` (one directory per catalog
+  // skill, `.claude/skills/*` symlinked into `.agents/skills/`). The COUNT is
+  // faithful on purpose: the two real trees (two files per skill) sit above
+  // COLLAPSE_AT and take the collapse path the product takes, while the
+  // ten-link farm sits exactly AT it and enumerates — a 3-skill fixture would
+  // put every tree on the enumerate path, testing the branch the product does
+  // not use.
   write('skills-lock.json', '{"version":1}\n');
   for (const skill of SKILLS) {
     for (const tree of ['.agents/skills', 'agent/skills']) {
@@ -191,7 +196,7 @@ describe('created-summary — reachability', () => {
 describe('created-summary — readability', () => {
   it('collapses big trees instead of enumerating them', () => {
     const entries = summarizeTree(root);
-    // 11 skills x 2 files x 2 trees plus a 2050-entry node_modules: an
+    // 10 skills x 2 files x 2 trees plus a 2050-entry node_modules: an
     // enumeration would be thousands of lines. The bar is reachability AND a
     // summary a human reads, so bulk arrives as directory lines.
     expect(entries.length).toBeLessThan(60);
@@ -213,11 +218,31 @@ describe('created-summary — readability', () => {
   it('counts symlinks without following them', () => {
     // `.claude/skills/*` are symlinks into `.agents/skills/`. Following them
     // would double-count that tree and report a size the disk does not hold.
-    const claude = summarizeTree(root).find((e) => e.path === '.claude/skills/');
-    const agents = summarizeTree(root).find((e) => e.path === '.agents/skills/');
-    expect(claude, '.claude/skills/ must appear as its own line').toBeTruthy();
-    expect(claude!.entries).toBe(SKILLS.length);
-    expect(claude!.bytes).toBeLessThan(agents!.bytes);
+    // A ten-skill catalog puts the farm exactly AT COLLAPSE_AT, so it is
+    // ENUMERATED (a directory collapses only above the threshold) and the
+    // property is read off the ten symlink lines themselves: each is one
+    // entry whose size is the link's own bytes — the target path string, as
+    // `lstat` reports it — never the tree it points at. Should the catalog
+    // grow past COLLAPSE_AT again, the farm collapses to one line and this
+    // test moves back to asserting on that line's `entries` and `bytes`.
+    expect(
+      SKILLS.length,
+      'the farm must sit at or under COLLAPSE_AT for the enumerate-path reading below',
+    ).toBeLessThanOrEqual(COLLAPSE_AT);
+    const entries = summarizeTree(root);
+    const links = entries.filter((e) => e.path.startsWith('.claude/skills/'));
+    expect(links.map((e) => e.path).sort()).toEqual(SKILLS.map((s) => `.claude/skills/${s}`).sort());
+    const agents = entries.find((e) => e.path === '.agents/skills/');
+    expect(agents, '.agents/skills/ must still collapse — it holds two files per skill').toBeTruthy();
+    for (const link of links) {
+      const target = path.join('..', '..', '.agents', 'skills', link.path.slice('.claude/skills/'.length));
+      expect(link.kind).toBe('file');
+      expect(link.entries).toBe(1);
+      expect(link.bytes, `${link.path} must be sized as the link, not as its target`).toBe(
+        Buffer.byteLength(target),
+      );
+      expect(link.bytes).toBeLessThan(agents!.bytes / SKILLS.length);
+    }
   });
 
   it('reports a lower bound rather than a wrong number past the budget', () => {

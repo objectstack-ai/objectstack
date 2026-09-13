@@ -693,7 +693,7 @@ export const salesforcePlugin = {
 const monitor = new PluginHealthMonitor(kernel.logger);
 
 // `registerPlugin` takes the PARSED config, so parse it: the schema fills in
-// interval 30000, timeout 5000, failureThreshold 3 and successThreshold 1.
+// intervalMs 30000, timeoutMs 5000, failureThreshold 3 and successThreshold 1.
 monitor.registerPlugin(
   salesforcePlugin.name,
   PluginHealthCheckSchema.parse({ checkMethod: 'healthCheck' }),
@@ -702,9 +702,11 @@ monitor.registerPlugin(
 monitor.startMonitoring(salesforcePlugin.name, salesforcePlugin);
 ```
 
-`startMonitoring` runs one check immediately, then repeats every `interval`
-milliseconds; each run is raced against `timeout`, and the method may be
-synchronous or return a promise.
+`startMonitoring` runs one check immediately, then repeats on the
+`intervalMs` period; each run is raced against `timeoutMs`, and the method may
+be synchronous or return a promise. Both keys carry their unit in the name —
+they were renamed from `interval` / `timeout` in @objectstack/spec 17, and the
+old spellings are refused at `registerPlugin` with the rename.
 
 Only two returned shapes count as a failure: `false`, and an object whose
 `status` is exactly `'unhealthy'` (whose `message`, if any, becomes the
@@ -713,7 +715,7 @@ report's). **Everything else passes** — `true`, `undefined`,
 nowhere to publish latency or row counts: no key beyond `status` and `message`
 is read. Consecutive returned failures move the plugin to `degraded` first, and
 to `unhealthy` only once `failureThreshold` of them accumulate. A check that
-**throws** — including one that exceeds `timeout` — is the separate `failed`
+**throws** — including one that exceeds `timeoutMs` — is the separate `failed`
 status, applied immediately with no threshold.
 
 Recovery is the mirror of that half, and `successThreshold` is its counter: the
@@ -787,7 +789,7 @@ this shape over HTTP — it is an in-process model, not a wire body.
 | :--- | :--- |
 | the plugin's configured `checkMethod` | the custom check ran and returned — `"passed"`, or `"failed"` for the two failing shapes above |
 | `"plugin-loaded"` | no `checkMethod` is configured, **or** the configured name does not resolve to a function on the plugin |
-| `"health-check"` | the check **threw** — a `timeout` overrun included, since the race surfaces it as a rejection. A fixed name, neither the method's nor the default's, and always `status: "failed"` |
+| `"health-check"` | the check **threw** — a `timeoutMs` overrun included, since the race surfaces it as a rejection. A fixed name, neither the method's nor the default's, and always `status: "failed"` |
 
 `metrics.uptimeMs` is in **milliseconds** (`Date.now() - startTime`), unlike
 the seconds-valued `uptime` of `GET /health` above — which is the very

@@ -355,6 +355,14 @@ describe('#7485 publicPicker.sort is retired — not declarable, and not read', 
  * `500 LOOKUP_TARGET_MISSING`, making `publicPicker.object` de-facto REQUIRED
  * while the schema and docs present it as optional.
  *
+ * ⛔ [#12920] What the fix must NOT be, settled by ruling: the repair was
+ * never "read the legacy spellings too". The route read `reference` FIRST and
+ * three legacy spellings after it until 2026-09-09, when the tolerant tail was
+ * retired — director seat summon #20, decision batch #107 item 5, maintainer
+ * verbatim 「其他同意」 = option A, executing the 2026-08-30 stance, verbatim
+ * 「折叠即契约」. This route now reads `reference` and nothing else, and the
+ * cases below pin that.
+ *
  * Every case below omits `object` deliberately: that is the axis under test.
  * The suite above covers the override branch and must stay that way — between
  * them the two branches of the resolution are both pinned.
@@ -385,41 +393,59 @@ describe('#7486 the picker target resolves from the field definition when `objec
 
     // ⛔ [#13137] These are spellings `FieldSchema` REFUSES. There is no fold,
     // so there is no "pre-fold row" for one of these to be — an earlier version
-    // of this comment said there was, and #12920 cites that sentence as its
-    // strongest surviving evidence that stored legacy rows exist. It carries
+    // of this comment said there was, and #12920 cited that sentence as its
+    // strongest surviving evidence that stored legacy rows exist. It carried
     // ZERO observational content about stored data, and neither do these cases.
     //
-    // What is true and what these pin: a def spelling the target this way never
-    // came through `FieldSchema`, and the serving read path replays ADR-0087
-    // conversions (`applyConversionsToStoredItem`) without any schema
-    // validation, so such a def would reach the route verbatim. These cases pin
-    // what the route DOES with one. ⚠️ Whether any exists is #12920's open
-    // production census — ⛔ assert nothing here in either direction.
-    // The fix EXTENDS the chain; one that replaced it would turn these three
-    // green cases into 500s.
+    // ⭐ [#12920] RULED, and these cases now pin the ruling. The open
+    // production census this block used to suspend judgement on — "is a stored
+    // alias-spelled row reachable in a live deployment?" — was answered by the
+    // maintainer, not by a scan: NONE to preserve, consistent with the
+    // 2026-08-27 startup-phase principle (no staged transitions) and with the
+    // in-tree census (zero producers, zero relation fields spelling the target
+    // with an alias, positive controls fired). ⇒ the route's four-spelling
+    // tolerant chain retired; a stored row spelling the target the old way is
+    // a PRODUCER defect, and this route refuses it like every other consumer.
+    //
+    // What is true and unchanged: such a def never came through `FieldSchema`,
+    // and the serving read path replays ADR-0087 conversions
+    // (`applyConversionsToStoredItem`) without any schema validation, so it
+    // WOULD reach the route verbatim. These cases pin what the route does with
+    // one — refuse it, loudly, with the service never called.
+    //
+    // ⚠️ Direction matters: all three are RED against the four-arm chain (it
+    // answers 200 and searches `sys_user`) and green against the one-key read.
+    // ⛔ A pin that passed in both states would be no evidence at all.
     const LEGACY_DEFS: Array<[string, Record<string, unknown>]> = [
         ['referenceTo', { type: 'lookup', referenceTo: 'sys_user' }],
         ['target', { type: 'lookup', target: 'sys_user' }],
         ['options.objectName', { type: 'lookup', options: { objectName: 'sys_user' } }],
     ];
     for (const [spelling, ownerDef] of LEGACY_DEFS) {
-        it(`a stored row spelling the target the LEGACY way (\`${spelling}\`) still resolves`, async () => {
+        it(`a stored row spelling the target the LEGACY way (\`${spelling}\`) is NOT resolved`, async () => {
             const stored = await savedWithoutObject();
             const legacyObject = { ...leadObject, fields: { ...leadObject.fields, owner: ownerDef } };
-            const { findData, lookup } = routesOver(stored, [], legacyObject);
+            // The engine is loaded with a row a resolving route WOULD return,
+            // so the red state is a 200 carrying data, not an empty 200.
+            const { findData, lookup } = routesOver(stored, [{ id: 'usr_1', name: 'Ada', email: 'ada@example.com' }], legacyObject);
             const res = mockRes();
             await lookup.handler({ params: { slug: 'contact', field: 'owner' }, query: {} } as any, res);
 
-            expect(res.statusCode).toBe(200);
-            expect(findData.mock.calls[0][0].object).toBe('sys_user');
+            expect(res.statusCode).toBe(500);
+            expect(res.body.code).toBe('LOOKUP_TARGET_MISSING');
+            // ⛔ Both halves. The status alone cannot separate "refused the
+            // alias" from "resolved it and the search came back empty"; only
+            // the never-called half says the target was never resolved.
+            expect(findData).not.toHaveBeenCalled();
         });
     }
 
-    it('the canonical `reference` WINS over a legacy spelling on the same def', async () => {
-        // Head-of-chain, not merely present-in-chain: a row carrying both (a
-        // partially-migrated def) must follow the canonical key. Appending
-        // `reference` to the tail of the chain would pass every case above and
-        // fail only this one.
+    it('the canonical `reference` still resolves on a def that ALSO carries a legacy spelling', async () => {
+        // A partially-migrated def: the canonical key present, an alias beside
+        // it. `reference` is read and the alias is not consulted at all —
+        // neither to shadow it nor to break it. Before #12920 this pinned
+        // head-of-chain ORDER; with one key left it pins that narrowing the
+        // read did not make a canonical def collateral damage.
         const stored = await savedWithoutObject();
         const bothObject = {
             ...leadObject,
@@ -468,9 +494,11 @@ describe('#7486 the picker target resolves from the field definition when `objec
  * schemas in one day, which is what this file's prose used to say too.
  *
  * ⛔ SCOPE: this pins the SPEC's behaviour and nothing else. It asserts
- * nothing about whether any stored row spells a target the legacy way — that
- * is #12920's open production census, unanswerable from here, and ⛔ no
- * assertion below may be cited as evidence in either direction.
+ * nothing about whether any stored row spells a target the legacy way. That
+ * question — #12920's production census — was closed by the maintainer on
+ * 2026-09-09 ("none to preserve"), ⛔ not from here: it was never answerable
+ * from a schema pin, and no assertion below may be cited as evidence for it in
+ * either direction.
  */
 describe('#13137 `FieldSchema` REFUSES the legacy target spellings, it does not fold them', () => {
     /** `type` is the only required key on `FieldSchema`; everything else is the axis under test. */

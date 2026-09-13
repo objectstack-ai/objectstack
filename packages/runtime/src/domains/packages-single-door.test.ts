@@ -29,7 +29,9 @@
  *   - a found package answers `{ success: true, data: <row> }`: the bare
  *     installed-package row under `data`, with no `package` wrapper and no
  *     `source` key;
- *   - the list answers `{ packages, total }` whose rows carry no `source`;
+ *   - the list answers `{ packages, total, hasMore }` (`hasMore` added by
+ *     #16781, reconciling the door to `ListInstalledPackagesResponseSchema`)
+ *     whose rows carry no `source`;
  *   - the same answers arrive through the environment-scoped URL
  *     (`/environments/:environmentId/packages…`), because since #15859 the
  *     `@objectstack/hono` catch-all's scoped path is stripped to the domain's
@@ -201,11 +203,13 @@ describe('/packages — one implementation, and its 404 wording says which (#145
             expect(Object.keys(r.body).sort()).toEqual(['data', 'meta', 'success']);
         });
 
-        it(`${label} GET /packages answers { packages, total } and its rows carry no source stamp`, async () => {
+        it(`${label} GET /packages answers { packages, total, hasMore } and its rows carry no source stamp`, async () => {
             const r = await send('GET', base);
             expect(r.status).toBe(200);
             expect(r.body?.success).toBe(true);
             expect(r.body?.data?.total).toBe(1);
+            // [#16781] Part of "which door answered": the declared key set.
+            expect(r.body?.data?.hasMore).toBe(false);
             expect(r.body?.data?.packages).toHaveLength(1);
             expect(r.body?.data?.packages[0]?.manifest?.id).toBe(PKG_ID);
             expect('source' in r.body.data.packages[0]).toBe(false);

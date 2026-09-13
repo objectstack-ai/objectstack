@@ -944,4 +944,102 @@ export interface IApprovalService {
 
   /** Audit trail for a request. */
   listActions(requestId: string, context: ExecutionContext): Promise<ApprovalActionRow[]>;
+
+  /**
+   * **Operator verb — re-issue the continuation for a run an operator has
+   * re-armed** (#15389; the maintainer ruling of 2026-09-09, decision batch
+   * #106 item 3, declared here exactly as #16495 declared
+   * `IAutomationService.cancelRun` / `restoreConsumedSuspension`).
+   *
+   * The missing half of `IAutomationService.restoreConsumedSuspension`, for
+   * approvals. That verb re-arms the pause a failed resume consumed and, by
+   * its own contract, deliberately does NOT replay the resume signal — the
+   * continuation must be re-issued. For an `approval` suspension there was
+   * then nobody who could: {@link decide}, {@link recall}, {@link sendBack}
+   * and {@link resubmit} each guard on a LIVE request — `pending` for
+   * {@link decide} and {@link sendBack}, `returned` for {@link resubmit},
+   * and `pending` or the revise window for {@link recall} — and the stranding
+   * call left the row where none of them can issue the continuation it owes.
+   * ⚠️ Not because the row is never `returned`: a stranded send-back leaves
+   * it exactly there, and {@link resubmit} is still no way back — it is
+   * submitter-only, and it owes the `resubmit` edge where the stranded
+   * continuation was the `revise` one. Meanwhile a generic engine resume is
+   * refused at a node declaring `resumeAuthority: 'service'`. The only verb
+   * left was cancel, which discards the branch's downstream work. This is the
+   * issuer that exits that dead end.
+   *
+   * What it does, exactly, and what it does not:
+   *  - it replays the outcome the request ALREADY recorded onto the pause that
+   *    was put back, and replays nothing else;
+   *  - ⛔ it does not re-open, re-decide or rewrite the request row — no
+   *    status, no mirror field and no audit row is written, and a decided
+   *    request still cannot be decided again through the front door;
+   *  - ⛔ it does not relax the node's `resumeAuthority: 'service'`: the resume
+   *    is the implementation's own, through the same single call site that
+   *    stamps that marker;
+   *  - it never answers a silent `false` — a resume that fails again throws
+   *    the same `RESUME_FAILED` envelope the original decision did,
+   *    `repairable` and all, so a second restore-and-continue is possible.
+   *
+   * **Why it takes no {@link ExecutionContext}** — deliberately shaped like
+   * the engine verb it completes. The decision it replays was authorized and
+   * recorded when it was made; re-authorizing it here against a present-day
+   * actor would be a different and wrong question, because the original
+   * approver may be long gone. `requestedBy` / `reason` ride the
+   * implementation's log for the reason they do on the restore: an operator
+   * repair records who asked, and why.
+   *
+   * **No door is declared here, and none is ruled** — the 2026-09-09 ruling
+   * refused a REST/CLI route for this verb. It is an in-process operator
+   * repair, reachable from a host or a console script; a route for it is a new
+   * card, never a widening at a call site.
+   *
+   * **Optional, deliberately** — for the reason `cancelRun` and
+   * `restoreConsumedSuspension` are. Re-issuing a consumed continuation is a
+   * capability of an approvals implementation that can identify the pause it
+   * was refused on; a service that does not declare this member has NO
+   * operator door for it, and a door MUST probe for presence and refuse
+   * fail-closed when it is absent — never answer success for a verb it could
+   * not dispatch, because promising a repair verb that will refuse is worse
+   * than promising nothing.
+   *
+   * @param requestId - The terminal request whose recorded outcome is to be
+   *   re-issued; the run is the one that request has always named
+   * @param options.requestedBy - Who asked; logged
+   * @param options.reason - Why; logged the same way
+   * @returns what was replayed, and whether the run moved
+   */
+  continueRestoredRun?(
+    requestId: string,
+    options?: { requestedBy?: string; reason?: string },
+  ): Promise<{
+    /** True when the restored pause was consumed and the flow moved on. */
+    resumed: boolean;
+    /** The run this continued — the one the request has always named. */
+    runId: string;
+    /**
+     * The outcome that was replayed, exactly as it was first recorded.
+     * Free-form by design, as it is on `StrandedDecisionDetails`: the
+     * vocabulary belongs to the producing service, not to this contract.
+     */
+    decision: string;
+    /** The edge it walked, when the replayed signal names one. */
+    branchLabel?: string;
+    /**
+     * Whether the replayed signal was the literal one the failing door sent
+     * (`journal`), or was rebuilt from the row's recorded outcome
+     * (`reconstructed`) — so a caller can tell an EXACT replay from an
+     * inferred one before it trusts what moved.
+     *
+     * ⚠️ Enumerated here, unlike `restoreConsumedSuspension`'s `refusal`
+     * (#16495 route (i)), and the difference is the point: that one is the
+     * implementation's own open refusal vocabulary, which this contract would
+     * have to keep in step with; this is a closed, binary property of the
+     * replay itself and the caller's branch point. A third provenance is a
+     * spec card, never a widening at a call site.
+     */
+    source: 'journal' | 'reconstructed';
+    /** Set only on the tolerated non-failure: a concurrent resume already had it. */
+    resumeError?: string;
+  }>;
 }

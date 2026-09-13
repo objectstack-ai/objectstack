@@ -28,6 +28,19 @@ import { PLATFORM_CAPABILITY_TOKENS, PLATFORM_ALWAYS_ON_CAPABILITIES } from '@ob
 // boot gate's fix list enumerates the accepted values, and a second literal
 // list would be free to drift the day a posture is added.
 import { TENANCY_POSTURES, type TenancyPosture } from '@objectstack/spec/security';
+// #17329 — the PUBLISHED settlement contract, READ rather than re-derived, so
+// the `objectstack:seed-settled` announcement below asks the one component that
+// knows whether this boot's seeding has come to rest. The service is registered
+// by the runtime this command itself boots (`@objectstack/runtime`'s
+// `declareSeedSource`); `packages/cli` never registers or mutates it — the
+// contract is deliberately read-only, because a consumer that could edit the
+// tally could certify itself.
+import {
+  SEED_SETTLEMENT_SERVICE,
+  type ISeedSettlementService,
+  type SeedSettlementSnapshot,
+  type SeedSuppressionReason,
+} from '@objectstack/spec/contracts';
 import { missingProviderMessage } from '../utils/capability-preflight.js';
 // The mail provider vocabulary, read from the package that materialises the
 // transports rather than restated here (#5132) — `resolveEmailCapabilityArg`
@@ -62,6 +75,20 @@ import {
   MAX_PORT,
   type PortInputSource,
 } from '../utils/port-contract.js';
+// The ONE dev-TLS contract, shared with `dev` (which spawns this command) so the
+// protocol the parent derives and the protocol this process actually binds come
+// from a single reader (#16804). ⛔ Nothing about certificates is declared in
+// this file, and ⛔ nothing anywhere generates one — see that module's header.
+import {
+  devTlsCertFlag,
+  devTlsKeyFlag,
+  resolveDevTlsIntent,
+  readDevTlsMaterial,
+  listenerProtocol,
+  colorizeDevTlsNotice,
+  type DevTlsMaterial,
+  type ListenerProtocol,
+} from '../utils/dev-tls-contract.js';
 import { BootLogCapture, isVerboseBootLevel } from '../utils/boot-log-capture.js';
 import { graftAuthoredRuntimeMembers, isAppPluginLike } from '../utils/graft-runtime-hooks.js';
 // [ADR-0130 D4 / option B, #15006] Every read below that keys off a
@@ -146,8 +173,35 @@ import { SEMCONV, OBSERVABILITY_METRICS_SERVICE, type MetricsRegistry } from '@o
 // to hand off to `createDispatcherPlugin`. Default is fully noop so the
 // CLI imposes no runtime cost when observability isn't configured.
 //
-// Env knobs (also documented in apps/cloud/server/observability.ts — keep
-// the two in sync if you tweak names):
+// Env knobs — the SAME names are also read by the cloud host
+// (`apps/cloud/server/observability.ts`, cloud repo), so keep the two in sync
+// if you tweak NAMES. That duty is live, not stale prose: the cloud file reads
+// these as `process.env` lookups — measured on #15295 for every knob listed
+// below EXCEPT `OS_OTLP_FLUSH_MS`, which was added on this side afterwards and
+// has never been measured against that repository: treat that one as
+// unverified rather than mirrored.
+//
+// ⛔ NAMES only — the DEFAULTS differ on purpose, and unifying them is a
+// telemetry regression rather than a tidy-up: `OS_OBS_SERVICE_NAME` defaults
+// to `objectstack` here and to `objectstack-cloud` there because two
+// deployments are two services; collapsing them merges both into one series.
+//
+// The canonical home for this list is `@objectstack/observability` — the
+// package BOTH sides already import (statically, a few lines above; the cloud
+// file imports it too) — not these comments pointing at each other, which
+// is how the duty decayed to begin with: it is one-sided today, the cloud file
+// carries no reciprocal sentence, so nobody renaming a name over there is
+// prompted to come back here. Until the list lives in that package, this block
+// is it, and moving the cloud half is a change in the cloud repo (#17693).
+//
+// ⚠️ And the carriers are not two but three:
+// `content/docs/deployment/environment-variables.mdx` (`## Observability`)
+// publishes this same list with types and defaults, and it is the one most
+// readers reach first. Its `OS_OBS_SERVICE_NAME` row states the framework
+// default with no note that the cloud host differs on purpose, so the
+// NAMES-only rule above has to be honoured there too. Fixing that page is out
+// of this block's scope; the caveat rides with the canonical-home decision
+// (#17693).
 //   OS_OBS_EXPORTER       noop (default) | console | json | otlp
 //   OS_OTLP_ENDPOINT      OTLP/HTTP root, e.g. https://otlp.grafana.net/otlp
 //   OS_OTLP_HEADERS       comma-separated Key=Value; values may be URL-encoded
@@ -457,6 +511,192 @@ export interface ListeningMessage {
 }
 
 /**
+ * The `objectstack:seed-settled` IPC message — "this boot's seeding has come to
+ * rest" (#17329).
+ *
+ * ## The defect this closes
+ *
+ * `✓ Server is ready` is true about the HTTP SERVER and says nothing about the
+ * APP. `AppPlugin` races its inline seed against a soft budget
+ * (`OS_INLINE_SEED_BUDGET_MS`, default 8s); over budget it hands the rest to a
+ * detached promise and the kernel starts anyway. So the banner can print, the
+ * parent can proceed, and eighty seconds later the continuation emits its error
+ * wall — and a parent that merely spawned the child has no readable signal that
+ * distinguishes that boot from one that seeded cleanly before the banner. Which
+ * side wins is decided by whether the seed fits its budget on a contended box,
+ * so the same command on the same corpus disagrees between two containers.
+ *
+ * Every signal that WOULD distinguish them — the over-budget warning, the error
+ * wall, the completion summary — arrives on the child's inherited stdio. Reading
+ * it costs the boot its TTY. This message is the same fact on the channel the
+ * parent already holds.
+ *
+ * ## When it is sent, and the one guarantee that makes it waitable
+ *
+ * Exactly once per boot, and never before {@link ListeningMessage}: seeding that
+ * settles DURING `runtime.start()` (the ordinary in-budget boot) is latched and
+ * released after {@link publishBoundPort} has driven its three channels, so a
+ * parent that waits for `objectstack:listening` first can never miss this one by
+ * being late. See {@link createSeedSettlementAnnouncer}.
+ *
+ * ## ⭐ `suppressed` is what keeps a waiting parent from hanging forever
+ *
+ * Two deployment shapes register a seed source and then deliberately never run
+ * it, so `app:seeded` never fires and the contract's `pending` stays above zero
+ * for the life of the process: **multi-tenant** (seeds replay per organization
+ * on `sys_organization` insert) and **`skipSeedData`** (an `os migrate` planning
+ * boot that must not write). A message keyed on `pending === 0` would never be
+ * sent in either, and its absence would be indistinguishable from a boot still
+ * writing — the exact ambiguity this card exists to end, one level up.
+ *
+ * So the predicate is {@link SeedSettlementSnapshot.inFlight}, not `pending`:
+ * *nothing is still writing*. Both modes reach `inFlight === 0` inside Phase 2
+ * `start()` (`suppress()` decrements the in-flight tally and records the reason),
+ * so the message is sent on those boots too — carrying the reasons, so a
+ * consumer can say **why** no rows landed instead of waiting for rows that were
+ * never coming. An empty `suppressed` with an empty `sources` is the third
+ * honest answer: this kernel has no seed pipeline at all.
+ */
+export interface SeedSettledMessage {
+  type: 'objectstack:seed-settled';
+  /**
+   * Whether every source that REPORTED an outcome reported a clean one — no
+   * rejected records, no dropped references, no install that came up empty.
+   *
+   * ⛔ Read it against {@link sources}, never alone: it is a verdict on what the
+   * seed summary contains, and a source that finished by throwing may record no
+   * outcome at all. `true` over an empty {@link sources} means "nothing reported
+   * a problem", which on a suppressed boot is simply "nothing ran".
+   */
+  ok: boolean;
+  /**
+   * One entry per source this boot deliberately did not run. Non-empty means
+   * rows these datasets describe were never written by this process, and no
+   * later signal is coming for them.
+   */
+  suppressed: readonly SeedSuppressionReason[];
+  /** Per-source counts — the same array the banner's `Seeds:` row renders. */
+  sources: SeedSourceSummary[];
+}
+
+/**
+ * Read the published settlement tally off the kernel this command booted.
+ *
+ * `undefined` means no seed pipeline registered on this kernel — a FACT by
+ * `kernel:ready`, since every source is declared in Phase 2 `start()`, and
+ * therefore an answer ("nothing to wait for") rather than a not-yet. ⚠️
+ * `getService` THROWS on an unregistered name rather than returning undefined,
+ * hence the `try`.
+ */
+export function readSeedSettlement(
+  kernel: { getService?: (name: string) => unknown } | undefined,
+): SeedSettlementSnapshot | undefined {
+  try {
+    const svc = kernel?.getService?.(SEED_SETTLEMENT_SERVICE) as ISeedSettlementService | undefined;
+    if (!svc || typeof svc.snapshot !== 'function') return undefined;
+    const snapshot = svc.snapshot();
+    // A tally that does not answer the one question is the same as no tally.
+    if (typeof snapshot?.inFlight !== 'number') return undefined;
+    return snapshot;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Has this boot's seeding come to rest?
+ *
+ * ⛔ NOT `pending === 0`. `pending` counts suppressed sources forever by design
+ * (see {@link SeedSettledMessage}), so keying on it would hang every
+ * multi-tenant and `skipSeedData` boot. The question a parent is actually asking
+ * is "is anything still writing", and that is `inFlight`.
+ *
+ * An absent snapshot is settled: no seed pipeline registered, so nothing is
+ * outstanding and nothing more is coming.
+ */
+export function seedingHasSettled(snapshot: SeedSettlementSnapshot | undefined): boolean {
+  return !snapshot || snapshot.inFlight === 0;
+}
+
+/** Build the message from the two things the kernel already knows. */
+export function composeSeedSettledMessage(
+  snapshot: SeedSettlementSnapshot | undefined,
+  sources: SeedSourceSummary[] | undefined,
+): SeedSettledMessage {
+  const list = sources ?? [];
+  return {
+    type: 'objectstack:seed-settled',
+    ok: list.every((s) => s.rejected === 0 && (s.droppedRefs ?? 0) === 0 && !s.emptyInstall),
+    suppressed: snapshot ? [...snapshot.suppressed] : [],
+    sources: list,
+  };
+}
+
+/** What {@link createSeedSettlementAnnouncer} needs from its host. */
+export interface SeedSettlementChannels {
+  /** The live tally — re-read per use, never cached (the contract says so). */
+  readSettlement: () => SeedSettlementSnapshot | undefined;
+  /** The per-source counts the banner renders, or `undefined` if none ran. */
+  readSummary: () => SeedSourceSummary[] | undefined;
+  /** Sends {@link SeedSettledMessage}, when an IPC channel is open. */
+  announceSettled: (message: SeedSettledMessage) => void;
+}
+
+/**
+ * The latch that turns "seeding settled" into ONE message, in the one order it
+ * is safe to send it in.
+ *
+ * ## Why a latch rather than a call at the settle point
+ *
+ * The two clocks this card is about run in EITHER order, and both have to work:
+ *
+ * ```text
+ * in-budget  seed settles ─▶ kernel:ready ─▶ publishBoundPort ─▶ (release) ─▶ send
+ * over-budget            kernel:ready ─▶ publishBoundPort ─▶ (release) … ─▶ app:seeded ─▶ send
+ * ```
+ *
+ * {@link check} is called from both the `app:seeded` and `kernel:ready` hooks;
+ * {@link release} is called once, after {@link publishBoundPort} has driven its
+ * three channels. Before the release nothing is sent, so a settle that happened
+ * during `runtime.start()` cannot overtake `objectstack:listening`; after it,
+ * the first `check` that finds nothing in flight sends and closes the latch.
+ *
+ * ⛔ The `kernel:ready` leg is not redundant with `app:seeded`. A suppressed
+ * boot (multi-tenant, `skipSeedData`) NEVER fires `app:seeded` — `emitSeedSettled`
+ * lives only on the branch that actually seeds — so `kernel:ready` is the only
+ * hook that runs on those boots, and dropping it is exactly how a waiting parent
+ * would hang forever there.
+ *
+ * ⛔ And it is not a poll. Every leg is an event the kernel already emits; the
+ * latch only decides which of them is allowed to be the one that speaks.
+ */
+export function createSeedSettlementAnnouncer(channels: SeedSettlementChannels): {
+  /** Re-evaluate: send iff released, not yet sent, and nothing in flight. */
+  check: () => void;
+  /** Open the gate — call AFTER the bound-port channels have been driven. */
+  release: () => void;
+} {
+  let released = false;
+  let sent = false;
+
+  const check = () => {
+    if (!released || sent) return;
+    const snapshot = channels.readSettlement();
+    if (!seedingHasSettled(snapshot)) return;
+    sent = true;
+    channels.announceSettled(composeSeedSettledMessage(snapshot, channels.readSummary()));
+  };
+
+  return {
+    check,
+    release: () => {
+      released = true;
+      check();
+    },
+  };
+}
+
+/**
  * The three channels {@link publishBoundPort} drives — declared in the ONE
  * order it is safe to drive them in, which is also the order the fields are
  * listed here.
@@ -515,8 +755,21 @@ export interface BoundPortChannels {
  * it can only lose the race often enough for someone to notice — which is
  * precisely the year-of-flakes this replaces.
  */
-export function publishBoundPort(boundPort: number, channels: BoundPortChannels): void {
-  const url = `http://localhost:${boundPort}`;
+export function publishBoundPort(
+  boundPort: number,
+  channels: BoundPortChannels,
+  boundProtocol: ListenerProtocol = 'http',
+): void {
+  // ⭐ The SOCKET's own address, so the scheme has to be the one the socket
+  // actually speaks (#16804). Both consumers of this `url` open it: the runtime
+  // state file is what an external supervisor or health check dials, and the
+  // IPC message is what the `os dev` parent learns the server from. Under
+  // `--cert`/`--key` a hardcoded `http://` here would hand both of them an
+  // address that answers a TLS handshake error — a machine-readable surface
+  // saying something untrue about the process that wrote it. ⛔ Unlike the
+  // canonical origin, this is NOT overridable by `OS_AUTH_URL`: that variable
+  // names where a deployment is REACHED, and this line names what was BOUND.
+  const url = `${boundProtocol}://localhost:${boundPort}`;
   // 1 ─ THE FILE FIRST. Both announcements below send a consumer to it.
   channels.writeRuntimeState({ port: boundPort, url });
   // 2 ─ IPC: the `os dev` parent learns the real port without polling.
@@ -656,6 +909,40 @@ export function runtimeBoundPortChannels(printBanner: () => void): BoundPortChan
 }
 
 /**
+ * The real {@link SeedSettlementChannels} for a booted kernel (#17329).
+ *
+ * Kept OUT of {@link BoundPortChannels} deliberately. Those three are one
+ * ordered publication of ONE number and {@link publishBoundPort} exists to drive
+ * them in the one safe order; this is a different fact arriving on a different
+ * clock, often minutes later. Folding it in would have made the seam either
+ * asynchronous or a liar.
+ *
+ * Best-effort like its sibling: a closed or absent IPC channel is the ordinary
+ * `os serve` case, not an error, and a throw here would be a supervision
+ * nicety taking a healthy server down.
+ */
+export function runtimeSeedSettlementChannels(
+  kernel: { getService?: (name: string) => unknown } | undefined,
+): SeedSettlementChannels {
+  return {
+    readSettlement: () => readSeedSettlement(kernel),
+    readSummary: () => {
+      try {
+        const s: unknown = kernel?.getService?.('seed-summary');
+        return Array.isArray(s) && s.length > 0 ? (s as SeedSourceSummary[]) : undefined;
+      } catch {
+        return undefined;
+      }
+    },
+    announceSettled: (message) => {
+      try {
+        if (typeof process.send === 'function') process.send(message);
+      } catch { /* IPC channel closed — best-effort */ }
+    },
+  };
+}
+
+/**
  * The IDENTITIES a capability provider registers under: full `plugin.name` ids
  * (`com.objectstack.mcp`) and/or exported class names (`MCPServerPlugin`).
  *
@@ -790,10 +1077,12 @@ function anchorServedApp(configArg: string): { configPath: string; configExists:
  * Node ESM resolves a bare `import(pkg)` against the IMPORTER's own realpath.
  * The CLI is reached through a workspace/`link:` dependency, so that realpath is
  * inside the FRAMEWORK workspace: a bare import can only see what the framework
- * itself installed. A package supplied by the app being served — a cloud-private
- * one such as `@objectstack/organizations`, a distribution one such as
- * `@objectstack/service-cluster`, or anything a customer installs into their own
- * project — is invisible to it no matter what the host app declares.
+ * itself installed. A package supplied by the app being served — an app-declared
+ * one such as `@objectstack/organizations` (open core since ADR-0132; a
+ * commercial deployment resolves that same name to its own private build), a
+ * distribution one such as `@objectstack/service-cluster`, or anything a customer
+ * installs into their own project — is invisible to it no matter what the host
+ * app declares.
  *
  * #4719: "resolve from the host root" means "resolve what the host root
  * DECLARES". The host lookup was a CJS require, CJS honours NODE_PATH, and the
@@ -815,7 +1104,7 @@ function anchorServedApp(configArg: string): { configPath: string; configExists:
  *
  *   • cloud#1013 — the binding sat below the AUTH block, so the enterprise
  *     organizations load resolved in the framework workspace, never found the
- *     cloud-private package, and every walled-posture deployment hit the
+ *     then-cloud-private package, and every walled-posture deployment hit the
  *     ADR-0093 D5 fail-fast and exited 1.
  *   • #10645 — the binding sat below the CLUSTER block, so `serve` could not load
  *     an app-declared `@objectstack/service-cluster*` at all: on the published EE
@@ -918,6 +1207,11 @@ export default class Serve extends Command {
       options: [...LOG_LEVELS],
     }),
     verbose: Flags.boolean({ char: 'v', description: 'Verbose output — shortcut for --log-level debug.' }),
+    // #16804 — developer-supplied TLS, declared through the shared contract so
+    // `dev` (which spawns this command) and `serve` cannot drift on the flag
+    // names, the prose, or what half a pair means.
+    cert: devTlsCertFlag(),
+    key: devTlsKeyFlag(),
   };
 
   /**
@@ -1849,6 +2143,38 @@ export default class Serve extends Command {
       this.exit(1);
     }
     const requestedPort = parsedPort;
+
+    // ── The TLS pair, refused here for the same reason the port is (#16804) ──
+    // Ahead of every socket and every import that branches on the protocol, and
+    // BEFORE `resolveAuthBaseUrl` is consulted anywhere: the canonical origin's
+    // fallback tail is derived from this answer, so a pair that will not be
+    // honoured must never reach the resolver as if it would be.
+    const tlsIntent = resolveDevTlsIntent(flags);
+    if (tlsIntent.kind === 'incomplete') {
+      printDiagnostic(colorizeDevTlsNotice(tlsIntent.notice));
+      this.exit(1);
+    }
+    /**
+     * The scheme this process will actually speak — `https` only when a
+     * certificate and a key were BOTH given. Every origin this boot advertises
+     * is built from it, and there is no other way to set it.
+     */
+    const boundProtocol: ListenerProtocol = listenerProtocol(tlsIntent);
+    /**
+     * PEM bytes for the listener, read HERE so an unreadable certificate is
+     * refused by the process that would have bound the socket, naming the flag
+     * and the path — ⛔ never degraded to a plain-http listener (see
+     * `formatUnreadableDevTlsFileNotice`).
+     */
+    let tlsMaterial: DevTlsMaterial | undefined;
+    if (tlsIntent.kind === 'requested') {
+      try {
+        tlsMaterial = readDevTlsMaterial(tlsIntent);
+      } catch (e: any) {
+        printDiagnostic(colorizeDevTlsNotice(String(e?.message ?? e)));
+        this.exit(1);
+      }
+    }
 
     // ── …and it has to BE the port the text SAYS, or say otherwise (#12674) ──
     // `parseInt` is kept as the reader (#12662's ruling: nothing that boots
@@ -3213,7 +3539,13 @@ export default class Serve extends Command {
       if (flags.server && !configHasHonoServer) {
         try {
           const { HonoServerPlugin } = await import('@objectstack/plugin-hono-server');
-          const serverPlugin = new HonoServerPlugin({ port });
+          // `tls` is `undefined` unless --cert/--key were both given and both
+          // files read (#16804) — the adapter then binds a TLS listener with
+          // the same fetch handler. ⛔ Nothing here generates a certificate.
+          const serverPlugin = new HonoServerPlugin({
+            port,
+            tls: tlsMaterial ? { cert: tlsMaterial.cert, key: tlsMaterial.key } : undefined,
+          });
           await kernel.use(serverPlugin);
           trackPlugin('HonoServer');
         } catch (e: any) {
@@ -3538,7 +3870,7 @@ export default class Serve extends Command {
             // additionally reports where the value came from and whether it
             // parses, so an unusable one can be said out loud instead of
             // vanishing into an empty catch (#10202).
-            const baseUrlResolution = resolveAuthBaseUrl(port);
+            const baseUrlResolution = resolveAuthBaseUrl(port, boundProtocol);
             const baseUrl = baseUrlResolution.value;
 
             const socialProviders: Record<string, { clientId: string; clientSecret: string }> = {};
@@ -3677,16 +4009,23 @@ export default class Serve extends Command {
               }
             }
 
-            // Pair: OrganizationsPlugin (multi-org, ENTERPRISE) — must register
-            // BEFORE SecurityPlugin. The multi-org runtime (`organization_id`
+            // Pair: OrganizationsPlugin (multi-org) — must register BEFORE
+            // SecurityPlugin. The multi-org runtime (`organization_id`
             // auto-stamp, per-org seed replay, multi-org default-org bootstrap)
-            // lives in the closed-source `@objectstack/organizations` package
-            // (ADR-0105 D12; it registers the historical `org-scoping` service
-            // SecurityPlugin probes at start() to keep vs strip the wildcard
-            // `tenant_isolation` RLS — so registration order matters). Without
-            // it, deployments are single-org: the open member-management
+            // lives in the `@objectstack/organizations` package (ADR-0105 D12
+            // as amended by ADR-0132; it registers the historical `org-scoping`
+            // service SecurityPlugin probes at start() to keep vs strip the
+            // wildcard `tenant_isolation` RLS — so registration order matters).
+            // Without it, deployments are single-org: the open member-management
             // basics (plugin-auth's default-org bootstrap + better-auth
             // invitations) still work.
+            // ⚠️ ONE NAME, TWO PACKAGES (ADR-0132 D3): the framework publishes
+            // an Apache-2.0 package of that name (`packages/plugins/organizations`),
+            // and a commercial deployment resolves the same name to a private,
+            // licence-gated subclass of it through its own `workspace:*`
+            // declaration. `serve` does not choose between them and must not
+            // try — the host app's own manifest decides, which is exactly what
+            // the host-anchored importer below reads (#4719).
             // [ADR-0105 D1] Key off the resolved POSTURE, not the legacy boolean.
             // Both walled postures (`group` and `isolated`) need this package:
             // gating on `OS_MULTI_ORG_ENABLED` alone would let
@@ -3724,18 +4063,20 @@ export default class Serve extends Command {
               // ── Stage 1: import. Failure here = the package is ABSENT. ──
               try {
                 // Resolve from the HOST APP (cloud#1013). This package is
-                // cloud-private: it is installed in the served app's
-                // node_modules, never in the framework workspace the CLI's own
-                // realpath points at, so a bare import here could never find it
-                // — `objectstack serve` failed the fail-fast below on EVERY
-                // self-hosted walled-posture deployment, and the only way past
-                // it was OS_ALLOW_DEGRADED_TENANCY=1, i.e. exactly the unwalled
-                // state D5 exists to prevent. The host app declares the package;
-                // this resolves it from there.
+                // APP-DECLARED (ADR-0132 D3 — which build of the name a
+                // deployment gets is the host manifest's call, not `serve`'s):
+                // it is installed in the served app's node_modules, never in
+                // the framework workspace the CLI's own realpath points at, so a
+                // bare import here could never find it — `objectstack serve`
+                // failed the fail-fast below on EVERY self-hosted walled-posture
+                // deployment, and the only way past it was
+                // OS_ALLOW_DEGRADED_TENANCY=1, i.e. exactly the unwalled state D5
+                // exists to prevent. The host app declares the package; this
+                // resolves it from there.
                 orgMod = await importFromHost(organizationsPkg);
               } catch (orgErr) {
                 // ADR-0093 D5 — degraded tenancy fails fast. Multi-org was
-                // requested but the enterprise package can't provide tenant
+                // requested but the organizations package can't provide tenant
                 // isolation: `tenant_isolation` RLS would be stripped and every
                 // org boundary inert. A deployment that asked for isolation must
                 // NOT serve traffic pretending to have it (ADR-0049 at the
@@ -3759,7 +4100,6 @@ export default class Serve extends Command {
                   const remedy = formatOrganizationsInstallRemedy(
                     hostImportFailureKind(orgErr),
                     declaration,
-                    hostRoot,
                   );
                   console.error(
                     chalk.red(formatOrganizationsAbsentFatal(tenancyPosture, remedy, cause)),
@@ -4076,7 +4416,7 @@ export default class Serve extends Command {
       //
       // #4719 — this used to be a local re-implementation of that read. It was
       // right, and it was the ONLY place in the boot path that asked the question
-      // the right way: the enterprise organizations load two blocks up asked
+      // the right way: the organizations load two blocks up asked
       // "does it resolve", which a hoisted store answered yes to regardless. Both
       // now go through the one owner in `@objectstack/types/node`, so "declared"
       // cannot mean two different things in one file (Prime Directive #12).
@@ -4598,6 +4938,50 @@ export default class Serve extends Command {
         trackPlugin('ArtifactBootMigrationGate');
       }
 
+      // ── Seed-settlement announcer (#17329) ─────────────────────────
+      // `✓ Server is ready` is true about the HTTP server and says nothing
+      // about the app: past the inline seed budget the rest of the seed runs
+      // detached, so the banner, and any parent that waits for it, can be
+      // eighty seconds ahead of a hundred-line error wall. This is the hop that
+      // makes the settle readable OFF the child's stdio — a second IPC message
+      // beside `objectstack:listening`, on the channel `os dev` already holds.
+      //
+      // ⛔ The producer is NOT new and NOT ours: `@objectstack/runtime` already
+      // declares every seed source and settles it at the exact moment its
+      // boot-time write is done, publishing the tally under the spec's
+      // `seed-settlement` contract. This registers no service and mutates
+      // nothing — it subscribes to two hooks the kernel already fires and reads
+      // a snapshot it already publishes.
+      //
+      // ⭐ Registered as a plugin because `hook` is reachable from a plugin
+      // context and nowhere else — `ObjectKernel.context` is private, and
+      // sniffing past that to reach it would be the coupling the published
+      // contract exists to avoid. Same shape as the artifact gate above.
+      const seedSettlement = createSeedSettlementAnnouncer(runtimeSeedSettlementChannels(kernel));
+      await kernel.use({
+        name: 'com.objectstack.cli.seed-settlement-announcer',
+        version: '1.0.0',
+        init: async (ctx: any) => {
+          // Both legs are load-bearing and neither is redundant:
+          //   `app:seeded`  — the ONLY signal on the over-budget path, where the
+          //                   settle lands after the banner (and after
+          //                   `kernel:ready`). Fires once per config app, so it
+          //                   asks the tally rather than counting itself.
+          //   `kernel:ready`— the only hook that runs at all on a multi-tenant
+          //                   or `skipSeedData` boot, where the source is
+          //                   SUPPRESSED and `app:seeded` never fires. Also the
+          //                   in-budget fast path, where seeding was already
+          //                   done before this line.
+          ctx.hook('app:seeded', () => { seedSettlement.check(); });
+          ctx.hook('kernel:ready', () => { seedSettlement.check(); });
+        },
+      } as any);
+      // ⛔ Deliberately NOT `trackPlugin`ed. That list feeds the banner's
+      // `Plugins:` count and name row, and this subscriber is an internal wiring
+      // detail of the CLI's own announcement — putting it there would grow a
+      // published banner surface on every boot to report a thing an operator
+      // cannot act on.
+
       // Boot the runtime
       await runtime.start();
 
@@ -4814,7 +5198,7 @@ export default class Serve extends Command {
         // the bound one. `baseOrigin` is `null` when the chain produced
         // something unparseable; the banner then prints paths with no origin
         // rather than a confident wrong URL.
-        externalBaseOrigin: resolveAuthBaseUrl(boundPort).baseOrigin,
+        externalBaseOrigin: resolveAuthBaseUrl(boundPort, boundProtocol).baseOrigin,
         ...resolveBannerConfigRow({ relativeConfig, useArtifactFallback, pinnedArtifact }),
         isDev,
         pluginCount: loadedPlugins.length,
@@ -4840,6 +5224,15 @@ export default class Serve extends Command {
         seededAdmin,
         automation: automationSummary,
         seeds: seedSummary,
+        // #17329 — read HERE, inside the banner thunk, so it is the tally as of
+        // the moment the banner prints rather than one sampled earlier in the
+        // boot. On the over-budget path `seedSummary` above is `undefined` —
+        // the summary is recorded only when the load FINISHES — so without this
+        // the transcript of a boot whose seed is still writing is
+        // byte-identical to one that declared no seeds at all, which is how
+        // this defect hid: the louder the seed went on to fail, the more
+        // complete the omission looked at the moment it was read.
+        seedSettlement: readSeedSettlement(kernel),
         // #16630 — what the kernel already knows about this boot, so the ready
         // line can say what state it is ready in. `undefined` on a healthy
         // boot, where the ready block prints exactly what it always has.
@@ -4877,7 +5270,21 @@ export default class Serve extends Command {
       // the file is written BEFORE either channel announces the address that
       // sends a consumer to it. {@link publishBoundPort} carries the race the
       // old order lost, and the reason the repair is not reader-side polling.
-      publishBoundPort(boundPort, runtimeBoundPortChannels(printBanner));
+      publishBoundPort(boundPort, runtimeBoundPortChannels(printBanner), boundProtocol);
+
+      // ── …and one beat later, whether the APP is ready too (#17329) ──
+      // ⭐ AFTER the line above, and that is the whole of the ordering
+      // contract: a parent that waits for `objectstack:listening` and only then
+      // starts listening for the settle can never miss it, because nothing is
+      // sent before this call. On the ordinary in-budget boot seeding settled
+      // minutes of CPU ago and this releases the latched message immediately;
+      // past the budget it arms and the `app:seeded` hook speaks later.
+      //
+      // ⛔ NOT a fourth channel inside `publishBoundPort`. Those three are one
+      // publication of ONE number, ordered so the file exists before anything
+      // names it; this is a different fact on a different clock that frequently
+      // has not happened yet.
+      seedSettlement.release();
 
       // ── Watch the served database file's identity ──────────────────
       // Deleting the data directory under a running server (`rm -rf
@@ -5393,9 +5800,26 @@ export function formatI18nLoadDiagnostic(pkg: string, err: unknown): string {
  *
  * The question each arm answers is **"is the declaration the problem?"**:
  *
- *   - `declared-unresolvable` — the app's `package.json` DOES name the package
- *     and the INSTALL is what is broken. Telling that operator to re-read a
+ *   - `declared-unresolvable` — the app's `package.json` DOES name the package,
+ *     so the DECLARATION is not the problem. Telling that operator to re-read a
  *     file that is already correct is the defect this branch exists to avoid.
+ *     ⚠️ It used to mint an install remedy here too — "Repair the INSTALL: run
+ *     `pnpm install`, check that a production prune did not drop it, and that
+ *     its dist is actually built". DRIVEN, on both shapes this kind covers, it
+ *     was wrong twice over (#17046):
+ *       · a genuinely broken install already gets those three remedies, word
+ *         for word, from `unresolvableMessage` in the `cause:` line printed
+ *         four lines below — so the bullet was a second copy to drift;
+ *       · the #15045 sub-case — a location install this finder cannot tie to
+ *         the declaration — prints a `cause:` that says outright "This is NOT
+ *         an install problem … re-running `pnpm install`, un-pruning a deploy
+ *         and rebuilding a dist all change nothing here", so the two halves of
+ *         one screen contradicted each other. #17046 narrowed that sub-case
+ *         (a correctly linked package now LOADS) but did NOT remove it: pnpm's
+ *         `file:` virtual-store copy and every git / tarball declaration still
+ *         land here.
+ *     So this arm now says only what it uniquely knows — the declaration — and
+ *     defers the remedy, exactly as the next one does.
  *   - `declared-no-loadable-entry` (#14041) — the app declares it, the install
  *     DELIVERED it, and the package's own `exports` names no runtime entry
  *     Node can load. Neither absence applies: there is nothing to declare and
@@ -5423,15 +5847,15 @@ export function formatI18nLoadDiagnostic(pkg: string, err: unknown): string {
 export function formatOrganizationsInstallRemedy(
   kind: HostImportFailureKind | undefined,
   declaration: HostDeclaration,
-  hostRoot: string,
 ): string {
   const pkg = Serve.ORGANIZATIONS_RUNTIME_PKG;
   if (kind === 'declared-unresolvable') {
     return `      • this app DECLARES ${pkg} ` +
       `(${declaration.field}: ${JSON.stringify(declaration.specifier)}) — the\n` +
       '        declaration is NOT the problem and re-reading package.json will not help.\n' +
-      `        Repair the INSTALL in ${hostRoot}: run \`pnpm install\`, check that a\n` +
-      '        production prune did not drop it, and that its dist is actually built — or\n';
+      '        What IS wrong was measured by the importer: the cause below names the\n' +
+      '        directory it consulted and what it found there, and is the authority on\n' +
+      '        whether any install action can change it — or\n';
   }
   if (kind === 'declared-no-loadable-entry') {
     return `      • this app DECLARES ${pkg} ` +
@@ -5441,14 +5865,15 @@ export function formatOrganizationsInstallRemedy(
       '        the remedy is in the package, and the cause below is the authority on what it\n' +
       '        has to publish — or\n';
   }
-  return `      • add ${pkg} (the enterprise multi-org runtime) to THIS APP\n` +
+  return `      • add ${pkg} (the multi-org runtime) to THIS APP\n` +
     "        — declare it in the app's package.json and install; the CLI resolves it from the\n" +
     '          app, not from the framework it is linked out of. Being merely reachable\n' +
     '          through NODE_PATH / a hoisted workspace store is deliberately not enough\n' +
     '          (#4719) — that made this wall depend on how the process was launched.\n' +
-    '          NOTE: this runtime is closed-source and is NOT on the public npm registry —\n' +
-    '          it is distributed with an enterprise / cloud subscription. Without one this\n' +
-    '          bullet is not followable, and one of the two below is your path — or\n';
+    '          NOTE: this runtime is Apache-2.0 and published on the public npm registry\n' +
+    '          (ADR-0132), so this bullet is followable on any install — no subscription.\n' +
+    '          A commercial deployment resolves the same package name to its own private,\n' +
+    '          licence-gated build; the manifest that declares it decides which — or\n';
 }
 
 /**
@@ -5575,11 +6000,35 @@ export interface AuthBaseUrlResolution {
  * `baseOrigin` is spelled `${protocol}//${host}` rather than `URL.origin`
  * because that is what the inline code computed, and the two disagree for
  * non-special schemes (`URL.origin` answers the string `"null"`).
+ *
+ * ## The tail follows the LISTENER, and only the tail (#16804)
+ *
+ * `boundProtocol` names the scheme this process actually bound — `https`
+ * exactly when `--cert`/`--key` were both given, derived in `dev-tls-contract`
+ * from that material and settable nowhere else. It reaches only the built-in
+ * default at the end of the chain, because that default is the one link nobody
+ * configured: it is this process describing its own socket, and once TLS
+ * terminates in-process `http://localhost:<port>` is an address no client can
+ * reach.
+ *
+ * ⛔ Every CONFIGURED link is untouched. `OS_AUTH_URL`, its legacy name and
+ * `OS_BASE_URL` answer a different question — where this deployment is
+ * REACHED, which behind a proxy or a tunnel has no relation to what this
+ * process bound — so they keep winning, https listener or not, and an
+ * `http://` value under a TLS listener is an operator's deliberate statement
+ * rather than a default to override.
+ *
+ * The parameter DEFAULTS to `'http'`, which is what every caller that never
+ * passes it resolved to before this existed: on a tree with no TLS flags in
+ * play the value, the source and the origin are byte-for-byte what they were.
  */
-export function resolveAuthBaseUrl(port: number | string): AuthBaseUrlResolution {
+export function resolveAuthBaseUrl(
+  port: number | string,
+  boundProtocol: ListenerProtocol = 'http',
+): AuthBaseUrlResolution {
   const value = readEnvWithDeprecation('OS_AUTH_URL', 'BETTER_AUTH_URL', { silent: true })
     ?? process.env.OS_BASE_URL
-    ?? `http://localhost:${port}`;
+    ?? `${boundProtocol}://localhost:${port}`;
 
   // Mirrors readEnvWithDeprecation's own precedence (preferred, then legacy),
   // for REPORTING only — the value above is what actually takes effect.

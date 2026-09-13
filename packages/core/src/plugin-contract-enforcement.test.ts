@@ -348,7 +348,7 @@ describe('E — `version` is the NINTH enforced key, and admitting it refused no
      * `version` used to be filtered out of this check. It was, because the two
      * declarations disagreed: `PluginSchema.version` was `/^\d+\.\d+\.\d+$/`
      * and refused the prerelease and build-metadata forms SemVer 2.0.0 defines,
-     * while `PluginLoader.isValidSemanticVersion` — the check the boot path has
+     * while `PluginLoader.isSemverShapedVersion` — the check the boot path has
      * always run — accepted them, deliberately, pinned by `plugin-loader.test.ts`.
      *
      * #16365 settled that in `packages/spec` by WIDENING the schema onto the
@@ -374,6 +374,39 @@ describe('E — `version` is the NINTH enforced key, and admitting it refused no
         for (const version of ['1.0.0-alpha.1', '1.0.0+20230101', '0.0.0-fixture']) {
             expect(PluginSchema.safeParse({ name: 'x', version, init: () => {} }).success).toBe(true);
         }
+    });
+
+    /**
+     * #17070 — the two declarations still share ONE grammar, measured over the
+     * eight strings SemVer 2.0.0 forbids and both of them accept.
+     *
+     * ⭐ This is the convergence assertion for the pair, and it is the reason
+     * #17070 could repair the CLAIM on both sides from a single card: schema and
+     * loader are one accept set with two names on it. If a future edit moves one
+     * spelling and not the other, this fails — and both docblocks that promise
+     * "character for character" become false at the same moment.
+     *
+     * ⛔ The direction here is deliberate and frozen. #16365 ruled widen-never-
+     * narrow, so these eight are pinned as ACCEPTED, not as a defect awaiting
+     * cleanup; `01.1.1` loaded before either card existed. What #17070 changed
+     * is the description on the spec key and the name of the loader's predicate
+     * (`isSemverShapedVersion`), so that the accept set and the claim about it
+     * finally agree.
+     */
+    const SEMVER_FORBIDS = [
+        '01.1.1', '1.01.1', '1.1.01',                                  // §2
+        '1.0.0-0123', '1.0.0-alpha..1', '1.0.0-alpha..', '1.0.0-.',    // §9
+        '1.0.0+.',                                                     // §10
+    ];
+
+    it.each(SEMVER_FORBIDS)('`PluginSchema` accepts %s — the spec half of the shared grammar', (version) => {
+        expect(PluginSchema.safeParse({ name: 'x', version, init: () => {} }).success).toBe(true);
+    });
+
+    it.each(SEMVER_FORBIDS)('and `kernel.use()` boots it — the loader half agrees on %s', async (version) => {
+        const kernel = makeKernel();
+
+        await expect(kernel.use(fixture({ name: `com.example.fringe-${version}`, version }))).resolves.toBe(kernel);
     });
 
     it('and a malformed version is STILL refused by the loader, with its own message', async () => {

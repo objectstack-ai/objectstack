@@ -1507,7 +1507,7 @@ describe('defineStack — ADR-0087 D2 conversion notices', () => {
   });
 });
 
-describe('defineStack - `type: page` view → page cross-reference (#13216)', () => {
+describe('defineStack — the RETIRED `type: page` view mount (#17063)', () => {
   const baseManifest = {
     id: 'com.example.test',
     name: 'test-project',
@@ -1527,47 +1527,74 @@ describe('defineStack - `type: page` view → page cross-reference (#13216)', ()
     kind: 'html' as const,
     source: '<Block type="element:text" text="hi" />',
   };
-  const mount = (pageName: string) => ({ type: 'page' as const, pageName, columns: [] });
 
-  it('accepts a mount whose page the stack declares', () => {
+  // #13216 gave a list view a `type: 'page'` mount and gave
+  // `validateCrossReferences` a FOURTH page-resolving branch to check it with.
+  // #17063 retired both (ADR-0049 enforce-or-remove, maintainer ruling
+  // 2026-09-09, verbatim 「撤」): the render half was never built, so the branch
+  // resolved a reference for a mount that never mounted anything. The mount is
+  // now refused at PARSE, which runs BEFORE any cross-reference walk — so the
+  // branch has nothing left to resolve, and its absence is what these pins
+  // measure. The surviving three page references in that function (an app nav
+  // item's `pageName`, and a modal action's `target` at two rungs) keep their
+  // own `pageNames.size > 0` policy, pinned elsewhere in this file.
+  //
+  // ⛔ The cast is the pin's subject, not a workaround for it: `type: 'page'`
+  // and `pageName` are both UNTYPABLE on a list view now, which is the `tsc`
+  // half of the retirement. Spelled `as unknown as never` so this file's
+  // shrink-only `check:test-typecheck` ratchet sees no new signature.
+  const untypable = (body: Record<string, unknown>) => body as unknown as never;
+
+  it('REFUSES a page mount at parse, with the enum prescription — not a cross-reference error', () => {
     expect(() => defineStack({
       manifest: baseManifest,
       objects: [account],
       pages: [dashboard],
-      views: [{ name: 'account', object: 'account', list: mount('account_dashboard') }],
-    })).not.toThrow();
+      views: [{
+        name: 'account',
+        object: 'account',
+        list: untypable({ type: 'page', pageName: 'account_dashboard', columns: [] }),
+      }],
+    })).toThrow(/'page' was removed from the list-view `type` enum/s);
   });
 
-  it('detects a mount naming a page that does not exist', () => {
-    const config = {
+  it('REFUSES a page mount on `objects[].listViews.<key>` too', () => {
+    expect(() => defineStack({
       manifest: baseManifest,
-      objects: [account],
       pages: [dashboard],
-      views: [{ name: 'account', object: 'account', list: mount('ghost_dashboard') }],
-    };
-    expect(() => defineStack(config)).toThrow('ghost_dashboard');
-    expect(() => defineStack(config)).toThrow('cross-reference validation failed');
+      objects: [{
+        ...account,
+        listViews: { dash: untypable({ type: 'page', pageName: 'account_dashboard', columns: [] }) },
+      }],
+    })).toThrow(/'page' was removed from the list-view `type` enum/s);
   });
 
-  it('detects it on `objects[].listViews.<key>` too', () => {
-    const config = {
-      manifest: baseManifest,
-      objects: [{ ...account, listViews: { dash: mount('ghost_dashboard') } }],
-      pages: [dashboard],
-    };
-    expect(() => defineStack(config)).toThrow('ghost_dashboard');
-  });
-
-  // The deliberate size gate, shared with the nav / modal-action page checks in
-  // the same function: a stack declaring NO pages may be mounting one another
-  // package provides, so the build-time check stands down and lint's
-  // `validateViewPageRefs` is what speaks. Pinning it here keeps the three page
-  // references on ONE policy instead of three.
-  it('stands down when the stack declares no pages at all (lint reports it instead)', () => {
+  it('REFUSES a lone `pageName` on a surviving view type, with its own prescription', () => {
     expect(() => defineStack({
       manifest: baseManifest,
       objects: [account],
-      views: [{ name: 'account', object: 'account', list: mount('provided_elsewhere') }],
-    })).not.toThrow();
+      pages: [dashboard],
+      views: [{
+        name: 'account',
+        object: 'account',
+        list: untypable({ type: 'grid', pageName: 'account_dashboard', columns: ['name'] }),
+      }],
+    })).toThrow(/`view\.pageName` was removed/s);
+  });
+
+  // The refusal does NOT depend on the stack declaring pages. The retired
+  // branch stood down when `pages` was empty (another package might provide the
+  // target); a parse refusal has no such question to ask, so a page mount is
+  // refused identically in a stack that declares no pages at all.
+  it('refuses identically in a stack that declares no pages', () => {
+    expect(() => defineStack({
+      manifest: baseManifest,
+      objects: [account],
+      views: [{
+        name: 'account',
+        object: 'account',
+        list: untypable({ type: 'page', pageName: 'provided_elsewhere', columns: [] }),
+      }],
+    })).toThrow(/'page' was removed from the list-view `type` enum/s);
   });
 });

@@ -461,8 +461,21 @@ const PROBES: readonly Probe[] = [
  */
 function probeSource(probe: Probe): string {
   const src = readFileSync(join(REPO_ROOT, probe.file), 'utf8');
-  if (!probe.within) return src;
-  const from = src.indexOf(`export const ${probe.within}`);
+  return probe.within ? scopedSource(src, probe.within) : src;
+}
+
+/**
+ * The body of ONE exported array literal in `src` — `export const <within>`
+ * up to the closing `\n];` — or the EMPTY string when that export is not
+ * there, per the rule above.
+ *
+ * Extracted so the probe reader and the #17111 docblock-figure pin read the
+ * ledger tables through ONE scoping rule: two copies would let a rename widen
+ * one of them while the other stayed correct, and the wider one would still
+ * mint plausible numbers.
+ */
+function scopedSource(src: string, within: string): string {
+  const from = src.indexOf(`export const ${within}`);
   if (from < 0) return '';
   const to = src.indexOf('\n];', from);
   return to < 0 ? '' : src.slice(from, to);
@@ -1456,5 +1469,262 @@ describe('#7976 — row ↔ proof attribution is mutual', () => {
     expect(
       scanned.some((p) => p.includes('showcase-private-owd.dogfood.test.ts') && /not mutual/.test(p)),
     ).toBe(true);
+  });
+});
+
+// ── #17111 — the docblock's ledger figures are DERIVED, not hand-typed ──────
+//
+// The matrix docblock states the size of BOTH route ledgers in the present
+// tense. It read "94 rows / 19 families" for the nine days after #14503 took
+// three REST package read/delete rows out of the ledger, and it was UNDATED —
+// so nothing in the sentence told a reader it described a past state, and
+// nothing in CI could tell either. It was the sixth hand-typed count to go
+// stale in one triage round, which is why the deliverable here is the
+// derivation and not the corrected constant.
+//
+// ⛔ This pin reads the PROSE, deliberately — not an exported constant. The
+// defect is a sentence that went false; lifting the number out of the sentence
+// into a symbol would leave the sentence free to rot again while the symbol
+// stayed green, which is the same trade that produced the card.
+//
+// ⚠️ It folds the `//` continuations before matching, and that fold is
+// load-bearing rather than tidying: every figure in that docblock WRAPS
+// mid-phrase, so a line-at-a-time literal search for the row/family phrase
+// reads ZERO against the very file that carries it. The control leg below
+// pins that failure, because a zero from an instrument that cannot see the
+// shape is not a reading of absence.
+
+const MATRIX_FILE = 'authz-conformance.matrix.ts';
+
+/** One figure pair the matrix docblock states, and how its ledger spells a row. */
+interface DocblockLedgerClaim {
+  /** Repo-relative ledger path, exactly as the docblock backticks it. */
+  file: string;
+  /** The exported table inside it — the read is SCOPED, never the whole file. */
+  within: string;
+  /** The noun the docblock groups by. */
+  groupNoun: 'families' | 'domains';
+  /** The grouping field — one occurrence per row, counted DISTINCT. */
+  groupRe: RegExp;
+}
+
+const DOCBLOCK_LEDGER_CLAIMS: readonly DocblockLedgerClaim[] = [
+  {
+    file: 'packages/rest/src/rest-route-ledger.ts',
+    within: 'REST_ROUTE_LEDGER',
+    groupNoun: 'families',
+    groupRe: /family: '([^']+)'/g,
+  },
+  {
+    file: 'packages/runtime/src/route-ledger.ts',
+    within: 'ROUTE_LEDGER',
+    groupNoun: 'domains',
+    groupRe: /domain: '([^']+)'/g,
+  },
+];
+
+/** Both ledgers open every row with `route:`, so counting it counts rows. */
+const LEDGER_ROW_RE = /route: '([^']+)'/g;
+
+function allMatches(body: string, re: RegExp): string[] {
+  re.lastIndex = 0; // Fresh lastIndex per read (module-level, `g`-flagged).
+  const out: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(body)) !== null) out.push(m[1]!);
+  return out;
+}
+
+/**
+ * What one ledger table holds TODAY.
+ *
+ * `groupOccurrences` is returned alongside `rows` on purpose: both fields are
+ * one-per-row, so the two counts disagreeing means the scope has swallowed
+ * something that is not a row (a doc-comment spelling `route:`, a type
+ * declaration) and NEITHER number is trustworthy. The check refuses that
+ * instead of reporting the plausible one.
+ */
+function measureLedgerTable(claim: DocblockLedgerClaim): {
+  rows: number;
+  groups: number;
+  groupOccurrences: number;
+} {
+  const body = scopedSource(readFileSync(join(REPO_ROOT, claim.file), 'utf8'), claim.within);
+  const groupValues = allMatches(body, claim.groupRe);
+  return {
+    rows: allMatches(body, LEDGER_ROW_RE).length,
+    groups: new Set(groupValues).size,
+    groupOccurrences: groupValues.length,
+  };
+}
+
+/** `//` continuations folded away, so a phrase split across two comment lines reads as one. */
+function flattenLineComments(src: string): string {
+  return src.replace(/\n[ \t]*\/\/ ?/g, ' ').replace(/[ \t]+/g, ' ');
+}
+
+/**
+ * Every figure the (already-folded) docblock states for one ledger.
+ *
+ * Anchored on the backticked ledger PATH immediately followed by the
+ * parenthesised pair — not on the bare numbers, which also appear in the dated
+ * drift note one paragraph down and must not be pinned as present-tense
+ * claims. Every match is returned so the caller can refuse a SECOND copy: an
+ * unpinned duplicate is exactly how a third carrier of a stale figure appears.
+ */
+function claimedFigures(flat: string, claim: DocblockLedgerClaim): { rows: number; groups: number }[] {
+  const path = claim.file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp('`' + path + '` \\((\\d+) rows / (\\d+) ' + claim.groupNoun + '\\)', 'g');
+  return allMatchPairs(flat, re);
+}
+
+function allMatchPairs(flat: string, re: RegExp): { rows: number; groups: number }[] {
+  const out: { rows: number; groups: number }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(flat)) !== null) out.push({ rows: Number(m[1]), groups: Number(m[2]) });
+  return out;
+}
+
+/** Disagreements between the docblock's stated figures and the ledgers, on folded text. */
+function checkFoldedDocblockFigures(flat: string): string[] {
+  const problems: string[] = [];
+  for (const claim of DOCBLOCK_LEDGER_CLAIMS) {
+    const claimed = claimedFigures(flat, claim);
+    if (claimed.length === 0) {
+      problems.push(
+        `${claim.file}: the docblock states no (N rows / M ${claim.groupNoun}) figure for it — the pin has lost its subject`,
+      );
+      continue;
+    }
+    if (claimed.length > 1) {
+      problems.push(
+        `${claim.file}: ${claimed.length} present-tense figures state its size; exactly ONE pinned copy is allowed`,
+      );
+    }
+    const actual = measureLedgerTable(claim);
+    if (actual.rows !== actual.groupOccurrences) {
+      problems.push(
+        `${claim.file}: the scoped table yields ${actual.rows} \`route:\` but ${actual.groupOccurrences} \`${claim.groupNoun.slice(0, -3)}\`-field occurrences — the scope is reading non-rows, so neither count is a reading`,
+      );
+      continue;
+    }
+    for (const c of claimed) {
+      if (c.rows !== actual.rows) {
+        problems.push(`${claim.file}: docblock says ${c.rows} rows, the table holds ${actual.rows}`);
+      }
+      if (c.groups !== actual.groups) {
+        problems.push(
+          `${claim.file}: docblock says ${c.groups} ${claim.groupNoun}, the table holds ${actual.groups}`,
+        );
+      }
+    }
+  }
+  return problems;
+}
+
+/** Disagreements, from the raw file text. */
+function checkDocblockFigures(text: string): string[] {
+  return checkFoldedDocblockFigures(flattenLineComments(text));
+}
+
+describe("#17111 — the matrix docblock's ledger figures are pinned to the ledgers", () => {
+  const matrixText = (): string => readFileSync(join(HERE, MATRIX_FILE), 'utf8');
+  const REST = DOCBLOCK_LEDGER_CLAIMS[0]!;
+
+  it('CONTROL — both ledger tables are readable and non-trivial (the counts below are readings)', () => {
+    // Without this, every assertion here would be satisfied just as well by
+    // two claims pointed at files that no longer carry the table.
+    for (const claim of DOCBLOCK_LEDGER_CLAIMS) {
+      const { rows, groups, groupOccurrences } = measureLedgerTable(claim);
+      expect(rows, `${claim.file} rows`).toBeGreaterThan(10);
+      expect(groups, `${claim.file} ${claim.groupNoun}`).toBeGreaterThan(1);
+      // One grouping field per row, so these must agree exactly.
+      expect(groupOccurrences, `${claim.file} group-field occurrences`).toBe(rows);
+      expect(groups).toBeLessThanOrEqual(rows);
+    }
+    // …and the scope is what makes those readings OF the table: a renamed
+    // export reads EMPTY rather than falling back to the whole file.
+    const src = readFileSync(join(REPO_ROOT, REST.file), 'utf8');
+    expect(scopedSource(src, 'NO_SUCH_EXPORT')).toBe('');
+    expect(scopedSource(src, REST.within).length).toBeGreaterThan(0);
+  });
+
+  it('CONTROL — the figures WRAP, so folding is the instrument, not decoration', () => {
+    // The card's own instrument failure, pinned: read line-at-a-time, the
+    // claim is not in the file at all. Any future reader reaching for
+    // `git grep -F` on these phrases gets a zero that means nothing.
+    const raw = matrixText();
+    for (const claim of DOCBLOCK_LEDGER_CLAIMS) {
+      expect(claimedFigures(raw, claim), `${claim.file} unfolded`).toEqual([]);
+      expect(claimedFigures(flattenLineComments(raw), claim).length, `${claim.file} folded`).toBe(1);
+    }
+  });
+
+  it('every figure the docblock states equals what its ledger holds TODAY', () => {
+    expect(checkDocblockFigures(matrixText())).toEqual([]);
+  });
+
+  it('a stale ROW count is RED — the #14503 drift, replayed', () => {
+    // Doctored from the MEASURED value, so this case hand-types no count of
+    // its own — the thing the card was filed about.
+    const { rows, groups } = measureLedgerTable(REST);
+    const flat = flattenLineComments(matrixText());
+    const doctored = flat.replace(
+      `(${rows} rows / ${groups} families)`,
+      `(${rows + 3} rows / ${groups} families)`,
+    );
+    expect(doctored, 'the doctoring must land, or this case proves nothing').not.toBe(flat);
+    expect(
+      checkFoldedDocblockFigures(doctored).some((p) =>
+        p.includes(`docblock says ${rows + 3} rows, the table holds ${rows}`),
+      ),
+    ).toBe(true);
+  });
+
+  it('a stale GROUP count is RED too — both halves of the pair are pinned', () => {
+    const { rows, groups } = measureLedgerTable(REST);
+    const flat = flattenLineComments(matrixText());
+    const doctored = flat.replace(
+      `(${rows} rows / ${groups} families)`,
+      `(${rows} rows / ${groups + 1} families)`,
+    );
+    expect(doctored).not.toBe(flat);
+    expect(
+      checkFoldedDocblockFigures(doctored).some((p) =>
+        p.includes(`docblock says ${groups + 1} families, the table holds ${groups}`),
+      ),
+    ).toBe(true);
+  });
+
+  it('DELETING the figure is RED — the pin cannot be silenced by dropping its subject', () => {
+    // Otherwise the cheapest way to green this gate would be to remove the
+    // sentence, which is the claim, not the defect.
+    const { rows, groups } = measureLedgerTable(REST);
+    const flat = flattenLineComments(matrixText());
+    const doctored = flat.replace(`\`${REST.file}\` (${rows} rows / ${groups} families)`, `\`${REST.file}\``);
+    expect(doctored).not.toBe(flat);
+    expect(
+      checkFoldedDocblockFigures(doctored).some((p) => p.includes('the pin has lost its subject')),
+    ).toBe(true);
+  });
+
+  it('a SECOND present-tense copy of a figure is RED — a new carrier cannot arrive unpinned', () => {
+    const { rows, groups } = measureLedgerTable(REST);
+    const one = `\`${REST.file}\` (${rows} rows / ${groups} families)`;
+    const flat = flattenLineComments(matrixText());
+    const doctored = flat.replace(one, `${one} and again ${one}`);
+    expect(doctored).not.toBe(flat);
+    expect(
+      checkFoldedDocblockFigures(doctored).some((p) => /present-tense figures state its size/.test(p)),
+    ).toBe(true);
+  });
+
+  it('the anchor is the PATH, so the dated drift note is NOT pinned as a present-tense claim', () => {
+    // The docblock records "94 rows → 91" as the #14503 transition. That is a
+    // dated attribution, not a claim about today, and a pin keyed on bare
+    // numbers would have to treat it as one.
+    const flat = flattenLineComments(matrixText());
+    expect(flat).toContain('#14503');
+    expect(claimedFigures(flat, REST).length).toBe(1);
+    expect(checkFoldedDocblockFigures(flat)).toEqual([]);
   });
 });

@@ -257,8 +257,26 @@ So, three ways out:
 - **set `OS_ALLOW_DEGRADED_TENANCY=1`** to boot anyway in an explicitly degraded
   single-org state.
 
-If the package is already declared but the install is broken, the message says so
-and tells you to repair the install rather than re-read `package.json`.
+If the package is already declared, the remedy bullet says only that — the
+declaration is not the problem — and hands the remedy to the `cause:` line
+below it, which is the one thing that measured what actually went wrong. There
+are two shapes of that, and they want opposite actions:
+
+- **the install is broken** — never installed, pruned away by a filtered deploy,
+  or pointing at a dist that was never built. The cause names all three and
+  tells you to repair the install rather than re-read `package.json`.
+- **the install is fine and the runtime still could not be verified** — the app
+  declares the package under a `link:` / `file:` path, or a git or tarball URL,
+  and the package sitting at that key carries a different `name` in its own
+  `package.json`. This is neither an install nor a declaration fault, and the
+  cause says so outright: re-running `pnpm install` changes nothing. A `link:`
+  install pointing at exactly the directory the declaration names is verified by
+  that path and loads normally; what reaches this message is the residue where
+  neither the name nor the path ties the directory to the declaration — a
+  `file:` directory install under pnpm (which lands in the virtual store rather
+  than at the declared path), or a URL that names no on-disk location at all.
+  The remedy the cause prints is to make the two names agree, from whichever end
+  you own.
 
 ### A present-but-refusing runtime is a different failure
 

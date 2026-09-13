@@ -9,7 +9,7 @@ the seed loader replaying package fixtures, a plugin's boot reconciler, a
 service self-write, a migration.
 
 This page is **the authority** for what that flag actually does. It exists
-because the flag is not one concept: it is a single boolean read at **108
+because the flag is not one concept: it is a single boolean read at **110
 distinct sites across 20 packages**, and knowing three of those behaviours gives
 no hint that the other hundred-and-four exist. Every documented app-side bug
 traced to `isSystem` had the same shape — the metadata was complete and correct,
@@ -47,16 +47,17 @@ is left open deliberately rather than hidden — see
 
 ## Which `isSystem` this page is about
 
-Four unrelated declarations share the identifier. **This page documents only the
+Three unrelated declarations share the identifier. **This page documents only the
 first.** The others are ordinary metadata fields on a stored document and have
-nothing to do with elevation.
+nothing to do with elevation. (A fourth, `Environment.isSystem` — a
+platform-infrastructure environment, not user data — left this repo with the
+`@objectstack/spec/cloud` subpath in #16325 and is declared in the cloud repo.)
 
 | Declaration | What it is | This page? |
 |:---|:---|:---:|
 | `ExecutionContext.isSystem` — `packages/spec/src/kernel/execution-context.zod.ts#isSystem` | The elevation flag on an operation's context | ✅ |
 | `Object.isSystem` — `packages/spec/src/data/object.zod.ts#isSystem` | Marks a **system object** (protected from deletion; defaults its org-wide sharing to `public` when no `sharingModel` is set) | ❌ |
 | `EmailTemplate.isSystem` — `packages/spec/src/system/email-template.zod.ts#isSystem` | Built-in template; tenants may override but should not delete | ❌ |
-| `Environment.isSystem` — `packages/spec/src/cloud/environment.zod.ts#isSystem` | Platform-infrastructure environment, not user data | ❌ |
 
 The collision is a genuine hazard rather than a naming nit: `Object.isSystem`
 changes an object's **default sharing**, and `ExecutionContext.isSystem` changes
@@ -132,7 +133,7 @@ that silently does not happen.
 
 ### 3. Sharing (`plugin-sharing`)
 
-The largest single consumer — **17 of the 108 sites**.
+The largest single consumer — **17 of the 110 sites**.
 
 | # | Behaviour when `isSystem` | What you get / what you lose | Anchor |
 |:--|:---|:---|:---|
@@ -278,7 +279,7 @@ Ownership injection, `readonly` bypass and sharing materialisation are
 independent decisions, and a seed loader plausibly wants the first two but not
 the third. The concept is nevertheless **staying as one boolean**:
 
-- **Shipped semantics.** `isSystem` is a published contract with 108 read sites
+- **Shipped semantics.** `isSystem` is a published contract with 110 read sites
   in 20 packages. Splitting it is a breaking contract change across all of them.
   (The ruling was taken when the census read 80 sites in 18 packages; the count
   has grown, which strengthens rather than weakens the argument.)
@@ -352,12 +353,12 @@ still holds equal to the census on every pull request:
 | Appearances of the bare identifier `isSystem` in non-test sources | 813 | — |
 | — parsed as a declaration | 23 | ✅ |
 | — parsed as an object-literal / type key (producers and option objects) | 310 | — |
-| — parsed as a property **read** | 114 | ✅ |
+| — parsed as a property **read** | 116 | ✅ |
 | — parsed in some other syntactic position (a local, a cast, a conditional) | 9 | ✅ |
 | — the remainder: text inside comments and string literals | 358 | — |
 | Of those reads: reads of one of the unrelated metadata fields | 6 | ✅ |
-| Of those reads: reads of `ExecutionContext.isSystem` | **108** | ✅ |
-| — behaviour-bearing (rows 1–63 above) | 104 | ✅ |
+| Of those reads: reads of `ExecutionContext.isSystem` | **110** | ✅ |
+| — behaviour-bearing (rows 1–63 above) | 106 | ✅ |
 | — carry the flag onward only (rows 64–67 above) | 4 | ✅ |
 | Packages containing at least one elevation read | **20** | ✅ |
 | Files containing at least one elevation read | 45 | ✅ |
@@ -382,10 +383,10 @@ test files certifies nothing. ⛔ Do not re-add them to `DECLARED_COUNTS` — a
 self-test case in the gate refuses that by name. Re-measure them with
 `node scripts/isystem-census.mjs` when you want them current, and move the date.
 
-**What the enforced declarations row counts.** Not the four field declarations
-above — those are four *distinct fields* that happen to share a name, and only
+**What the enforced declarations row counts.** Not the three field declarations
+above — those are three *distinct fields* that happen to share a name, and only
 the first is elevation. This row counts every position where the parser puts the
-identifier in a **declaring** slot: those four, plus the structural type literals
+identifier in a **declaring** slot: those three, plus the structural type literals
 that restate `ExecutionContext.isSystem`'s shape inline rather than importing it
 (`{ isSystem: true; tenantId?: string }`, `context?: { isSystem?: boolean }`, and
 the `get isSystem()` accessor on the engine's context wrapper). A restatement is

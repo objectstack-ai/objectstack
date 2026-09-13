@@ -102,7 +102,9 @@
  * Neither recovers block state. This file still cannot tell an array element
  * from a call argument, still does not know whether a property sits inside
  * `z.object({`, and ⛔ still has no notion of DIRECTION — a tell, never a
- * proof, exactly as before.
+ * proof, exactly as before. (#17618 later added the ONE bracket fact a hunk
+ * does carry — which delimiter is innermost, over that hunk's own lines — and
+ * nothing more: still no shape, still no direction. Its section is below.)
  *
  * **A fragment of a multi-line string concatenation is not a set member.**
  * #16822's filing left the instrument that proves the variable was accidental:
@@ -216,6 +218,151 @@
  * catches a rename that slips past: `check:api-surface` on any exported name it
  * moves, `check:authorable-surface` on any authorable key, and the ADR-0087
  * registries — instruments a rename must move and a rewording cannot.
+ *
+ * ## The fourth accidental variable #17300 removed — a ledger of REMOVALS
+ *
+ * T2 is "the accept set gains a VALUE", and the ADR-0087 retirement ledger
+ * (`packages/spec/src/migrations/registry.ts`) is a list of values written
+ * BECAUSE an accept set shrank: `RETIRED_KEYS_BY_MAJOR` and
+ * `RETIRED_DEFS_BY_MAJOR` are tombstones, and a step's `conversionIds` names the
+ * D2 conversions that STRIP the retired shape on load. Every retirement adds
+ * rows to them — that is the kit working as designed — so the mechanical
+ * clause-② axis read ADVERSE on the one change class whose direction is most
+ * unambiguously narrowing. Measured on PR #17298 (the maintainer's 「撤」
+ * retirement of the list-view `type: 'page'` mount): three T2 rows, exit 4,
+ * against a declaration that is correct.
+ *
+ * ⛔ The fix is NOT excluding the file, and ⛔ not excluding the generated
+ * regions either. Both are holes rather than repairs — anything a generator
+ * emits there would stop being judged — and neither could have worked anyway:
+ * of the three rows, ONE (`'view-page-mount-removed'`, the conversion id) sits
+ * in the HAND-MAINTAINED `conversionIds` array, outside every `<os-generated …>`
+ * marker. A predicate keyed on position covers two rows of three and leaves
+ * `--pair` at exit 4 on every retirement that registers a conversion, which a
+ * D2 retirement does by definition.
+ *
+ * ⛔ And it is not a lookup in the local tree. That reading was measured and it
+ * is not merely expensive, it is WRONG for the whole population: a retirement
+ * registers its conversion in the SAME PR, so `view-page-mount-removed` is
+ * absent from `src/conversions/registry.ts` in any checkout of `main` (measured
+ * on this tree: 0 occurrences, against a positive control
+ * `turso-config-timeout-to-timeout-ms` reading 1). A seat's worktree is not the
+ * diff's head, and resolving an id against it answers about the wrong commit —
+ * in the direction that keeps the false positive.
+ *
+ * What the DIFF carries instead is the generator's own INPUT. #7297 split those
+ * three tables into `src/migrations/entries/`, one file per entry, precisely so
+ * a retirement writes a FILE instead of appending to a shared tail line; the
+ * file's payload is `export const entry = '<the row>';`, the exact string the
+ * generated row carries. So a row DECLINES only when this same diff ADDS the
+ * declaration that mints it:
+ *
+ *   - `export const entry = 'ui/ListView:pageName';` under
+ *     `packages/spec/src/migrations/entries/**` licenses that one row, and
+ *   - `id: 'view-page-mount-removed',` added to
+ *     `packages/spec/src/conversions/registry.ts` licenses that one id.
+ *
+ * ⚠️ This is the first reading in this file whose evidence spans FILES rather
+ * than a hunk, and the departure is deliberate rather than overlooked: the
+ * generator's input and its output are two files BY CONSTRUCTION (#7297), so a
+ * hunk-local reader cannot see the input however carefully it is written. The
+ * evidence is still positive, still carried by the document being judged, and
+ * still absent by default — a licence is minted by an added line or not at all.
+ *
+ * The sensitivity guarantee is exact string identity, not a shape: an entry
+ * file for `'a/B:c'` buys nothing for `'a/B:d'`; a licence buys nothing for the
+ * same string added to any OTHER file; a row typed by hand between the markers
+ * with no entry file still fires, which is also what `check:migration-registry`
+ * reports; and a genuinely new member of a genuinely closed set in the ledger
+ * file still fires with its own file:line. ⚠️ The quiet direction, stated
+ * rather than left to be found: a regeneration that lands SEPARATELY from the
+ * entry file it emits — the entry added in one PR, `gen:migration-registry` run
+ * in the next — carries no licence in its own diff and still tells. That is the
+ * loud direction and it is the right one; the second PR re-declares or explains.
+ *
+ * ## The fifth accidental variable #17618 removed — a line's SURROUNDINGS
+ *
+ * T1's sentence is "the accept set gains a spelling an author may now write",
+ * and two live pairs raised it against diffs that spell nothing new. Both were
+ * measured on the PRs' own pushed bytes before the reading below was written:
+ *
+ *   - PR #17616 — `+  ctx: z.RefinementCtx,`, the SECOND PARAMETER of an
+ *     exported object-level refinement. `z.RefinementCtx` is a TYPE, nothing
+ *     constructs a shape there, and the diff the row appeared on REFUSES
+ *     metadata that parses today. ⭐ The signature is this repo's own
+ *     prescribed one (the `#16489` convention — `checkListViewPageMount`,
+ *     `checkPageSourceCompleteness`, `checkGlobalFilterDateDefaultValue`), so
+ *     EVERY diff that adds a cross-field refusal raised a widening tell for the
+ *     refusal itself: the instrument read the tightening direction as the
+ *     widening one, which is the inverse of what clause ② exists to catch.
+ *   - PR #17638 — `+  strategy: z.enum(['eager', 'lazy'], {`, an in-shape key
+ *     the same change block removed as `-  strategy: z.enum(['eager', 'lazy',
+ *     'scheduled']).default('lazy')`. The same key, one member FEWER. This one
+ *     was not a cost on the reading: it exited 4 against a correct
+ *     `Clause-②: no` and held a reviewed, green retirement PR out of the queue,
+ *     where the only sanctioned clear is the false `yes` this file already
+ *     refuses to ask an author for.
+ *
+ * ⛔ The second is NOT #16943's budget being too thin. The budget was EARNED —
+ * the removed `strategy:` line is itself T1-shaped and bought one T1 unit — and
+ * then refused at the SPEND, by "a line that DECLARES a closed set is never
+ * spent against the budget". That refusal was written about an OPENER, and an
+ * opener never reaches it: `memberTellKind` already answers `null` for an
+ * opener-only line. So the only lines it ever caught were KEYS whose value
+ * happens to open `z.enum(` / `z.union(` / `z.discriminatedUnion(` /
+ * `z.literal(` — the population it was not written about. Measured on this
+ * tree: `field: z.string()` -> `field: z.string().optional()` declines, while
+ * `kind: z.enum(['a'])` -> `kind: z.enum(['a']).optional()` fires. The
+ * asymmetry was accidental.
+ *
+ * What replaces the blanket refusal is the thing it was protecting: an INLINE
+ * set has no per-member line for T2 to read, so a set widened in place is
+ * visible on the T1 row and nowhere else. A closed-set-valued key may therefore
+ * spend the budget only on three facts the BLOCK carries — a removed line
+ * naming the SAME key, both member lists readable on their own line, and the
+ * added list a SUBSET of the removed one. `z.enum(['a', 'b'])` ->
+ * `z.enum(['a', 'b', 'c'])` still fires; a list that opens on a later line is
+ * unreadable and still fires; another key's removal pays nothing.
+ *
+ * The parameter half reads the added line's SURROUNDINGS, and its claim is
+ * deliberately smaller than the depth-aware `z.object({ … })` reader T1's own
+ * comment refuses — the one whose cheap version fails GREEN by truncating. A
+ * Zod shape body is `{`-delimited BY CONSTRUCTION, so the question is never
+ * "which shape is this line in" but "which bracket is innermost", read over the
+ * line's OWN hunk and answering `null` — keep the tell firing — for every state
+ * it cannot carry honestly: a closer arriving on an empty stack (the hunk began
+ * inside something it was never shown), a string literal that does not close on
+ * its line, a declaration head it does not recognise. Nothing it returns ever
+ * means "no longer inside a shape", which is why it has no truncating failure.
+ *
+ * The price, measured over the 233 commits touching these surfaces in this
+ * tree's history (`e9efc403`): of the 20,193 tell rows the previous reading
+ * raises, 23 now decline and 20,170 stand. All 23 are T1 — no T2, T3 or T4 row
+ * moves. Fifteen are parameters (twelve `ctx: z.RefinementCtx` or
+ * `z.core.$RefinementCtx`, three `input: z.input<typeof …Schema>`) and eight
+ * are existing keys re-spelled to carry `.meta({ title })` or a rewritten
+ * `.describe()` around an IDENTICAL enum. Not one is a key or a member its diff
+ * added. On the tree itself, 16 of the 8,974 T1-shaped lines under
+ * `packages/spec/src/**` sit inside a parameter list, 10 of them annotated
+ * `z.RefinementCtx`.
+ *
+ * ⚠️ The two quiet directions this buys, stated rather than left to be
+ * discovered:
+ *
+ *   1. A PARAMETER ADDED to an ALREADY-exported function is a signature
+ *      widening, and it now goes unreported here. Nothing else in this file
+ *      catches it: T3's listing records that an export EXISTS, and its
+ *      signatures sibling `api-surface-signatures.json` carries 27 `define*`
+ *      helpers (measured on this tree), none of them one of these checks. What
+ *      is NOT lost is the function itself — a newly exported check adds its own
+ *      row to the listing, which is the T3 row PR #17616 still reports.
+ *   2. A widening carried by the CHAINED methods rather than by the member list
+ *      — `.optional()` first among them — now declines on a closed-set-valued
+ *      key. ⛔ Not a new class: #16943 already declines it for every key whose
+ *      value is not a closed set, and this removes the accidental exception
+ *      rather than adding one. In the measured population all eight
+ *      re-spellings are `.meta` / `.describe` rewrites and none adds
+ *      `.optional()`.
  *
  * ## Where the surfaces come from — imported, never hand-copied
  *
@@ -428,6 +575,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'T2 — a new member of a closed set': 13,
   '#16822 — the two accidental variables, and the evidence each one needs': 15,
   '#16943 — the net member/key delta: a replaced line is not a net addition': 23,
+  '#17618 — a PARAMETER is not a key, and a closed set RE-SPELLED around fewer values is not a new one': 24,
+  '#17300 — the retirement ledger is a record of REMOVALS, not a set that gained a value': 27,
   'T3 — a new row in a published entry point': 8,
   'T4 — a new registration in a registry': 10,
   '#16448 acceptance: the four positive controls, each with its file:line': 8,
@@ -542,6 +691,43 @@ export const REGISTRATION_SURFACES = Object.freeze([
     imported: null,
   }),
 ]);
+
+/**
+ * The ADR-0087 retirement ledger, and the two surfaces that MINT a licence for
+ * one of its rows (#17300).
+ *
+ * ⛔ Not a surface any tell fires ON, and ⛔ not an exclusion: `table` is the
+ * one file whose bare-string rows a licence can clear, and the other two rows
+ * are where a licence has to come FROM. Declared here rather than inlined for
+ * the reason `REGISTRATION_SURFACES` is — a renamed path must red in
+ * `--self-test`, not go quiet — and every row is asserted to exist in this tree
+ * by the same battery.
+ */
+export const LEDGER_INPUT_SURFACES = Object.freeze([
+  Object.freeze({
+    glob: 'packages/spec/src/migrations/registry.ts',
+    role: 'table',
+    repo: THIS_REPO,
+    why: 'the ADR-0087 D3 chain: RETIRED_KEYS_BY_MAJOR / RETIRED_DEFS_BY_MAJOR and each step\'s conversionIds — rows written BECAUSE an accept set shrank',
+  }),
+  Object.freeze({
+    glob: 'packages/spec/src/migrations/entries/**',
+    role: 'entry',
+    repo: THIS_REPO,
+    why: "the generator's input (#7297), one file per entry — `export const entry = '<row>'` is the exact string gen:migration-registry emits into the table",
+  }),
+  Object.freeze({
+    glob: 'packages/spec/src/conversions/registry.ts',
+    role: 'conversion',
+    repo: THIS_REPO,
+    why: "the ADR-0087 D2 conversion table — `id: '<id>'` is the registration a step's hand-maintained conversionIds row REFERS to",
+  }),
+]);
+
+/** The one row of {@link LEDGER_INPUT_SURFACES} playing `role`, for a run's repo. */
+export function ledgerSurface(role, repo = THIS_REPO) {
+  return LEDGER_INPUT_SURFACES.find((s) => s.role === role && s.repo === repo) ?? null;
+}
 
 /** Every declared surface, in one list, so a caller can render the whole set. */
 export const ALL_SURFACES = Object.freeze([
@@ -858,6 +1044,12 @@ const COMMENT_LINE = /^[ \t]*(?:\/\/|\/\*|\*|#)/;
  * is a fragment — block state cannot be recovered from one honestly — and a
  * reader that guessed would fail SILENTLY in the direction that matters. The
  * card's own boundary applies: a tell, not a proof.
+ *
+ * What DOES bound it is one bracket fact read in `tellsInFile` (#17618): a
+ * shape body is `{`-delimited by construction, so a match whose innermost open
+ * delimiter — over its own hunk — is a function's `(` is a typed PARAMETER and
+ * declines. Absence of that evidence leaves the match firing, so the regex
+ * above is still the whole tell wherever the hunk says nothing.
  */
 const SCHEMA_PROPERTY = /^[ \t]*(?:'[^']+'|"[^"]+"|\[[^\]]+\]|[A-Za-z_$][\w$]*)[ \t]*\??[ \t]*:[ \t]*(?:z\.|lazySchema\(|strictObject\(|retiredKey\(|[A-Za-z_$][\w$]*Schema\b)/;
 
@@ -927,6 +1119,292 @@ export function rewritesExistingOpener(text, removedTexts) {
   const binding = closedSetOpenerBinding(text);
   if (binding === null || !Array.isArray(removedTexts)) return false;
   return removedTexts.some((r) => closedSetOpenerBinding(r) === binding);
+}
+
+/**
+ * The three bracket pairs a line-shaped reader has to keep apart, and the one
+ * fact the two readings below are built on: a Zod object SHAPE body is
+ * `{`-delimited by construction (`z.object({ … })`, `strictObject(…, { … })`),
+ * so a `name: <schema>` line whose innermost open delimiter is a PAREN is not a
+ * member of one — in TypeScript the only `name: T` form valid directly inside
+ * parentheses is a typed parameter.
+ */
+const BRACKET_CLOSERS = { '(': ')', '[': ']', '{': '}' };
+
+/** The index where the string literal opening at `start` closes, or -1 on this line. */
+function endOfStringLiteral(s, start) {
+  const quote = s[start];
+  for (let k = start + 1; k < s.length; k += 1) {
+    if (s[k] === '\\') { k += 1; continue; }
+    if (s[k] === quote) return k;
+  }
+  return -1;
+}
+
+/** The index of the closer matching the opener at `open`, or -1 if it does not close on this line. */
+function matchingCloser(s, open) {
+  const stack = [s[open]];
+  for (let k = open + 1; k < s.length; k += 1) {
+    const ch = s[k];
+    const next = s[k + 1];
+    if (ch === '/' && next === '*') {
+      const end = s.indexOf('*/', k + 2);
+      if (end === -1) return -1;
+      k = end + 1;
+      continue;
+    }
+    if (ch === '/' && next === '/') return -1;
+    if (ch === "'" || ch === '"' || ch === '`') {
+      const end = endOfStringLiteral(s, k);
+      if (end === -1) return -1;
+      k = end;
+      continue;
+    }
+    if (BRACKET_CLOSERS[ch] !== undefined) { stack.push(ch); continue; }
+    if (ch === ')' || ch === ']' || ch === '}') {
+      if (BRACKET_CLOSERS[stack[stack.length - 1]] !== ch) return -1;
+      stack.pop();
+      if (stack.length === 0) return k;
+    }
+  }
+  return -1;
+}
+
+/** The top-level, comma-separated members between `open` and its closer at `close`. */
+function topLevelMembers(s, open, close) {
+  const out = [];
+  let depth = 0;
+  let from = open + 1;
+  for (let k = open + 1; k < close; k += 1) {
+    const ch = s[k];
+    const next = s[k + 1];
+    if (ch === '/' && next === '*') {
+      const end = s.indexOf('*/', k + 2);
+      if (end === -1 || end > close) break;
+      k = end + 1;
+      continue;
+    }
+    if (ch === '/' && next === '/') break;
+    if (ch === "'" || ch === '"' || ch === '`') {
+      const end = endOfStringLiteral(s, k);
+      if (end === -1 || end > close) break;
+      k = end;
+      continue;
+    }
+    if (BRACKET_CLOSERS[ch] !== undefined) { depth += 1; continue; }
+    if (ch === ')' || ch === ']' || ch === '}') { depth -= 1; continue; }
+    if (ch === ',' && depth === 0) {
+      out.push(s.slice(from, k).trim());
+      from = k + 1;
+    }
+  }
+  out.push(s.slice(from, close).trim());
+  return out.filter((m) => m !== '');
+}
+
+/**
+ * The innermost delimiter still OPEN where one side-line sits, as far as THIS
+ * HUNK shows it — `{ opener: '(' | '[' | '{', head: <the text left of it> }`,
+ * or `null` for "the hunk does not say".
+ *
+ * ⭐ Positive evidence only, and `null` is the whole safety property. The scan
+ * starts at the first line of the line's OWN hunk, so a construct opened before
+ * the hunk is never guessed at: a closer arriving with an empty stack means the
+ * hunk began inside something it was never shown, and a string literal that
+ * does not close on its line means the state cannot be carried across it —
+ * both answer `null`, and both callers read `null` as "keep the tell firing".
+ *
+ * ⛔ This is NOT the depth-aware `z.object({ … })` reader T1's own comment
+ * refuses, and ⛔ it must never be grown into one. It answers exactly one
+ * question — which bracket is innermost — and nothing about WHICH construct
+ * opened it, so it has no truncating failure mode: an unreadable state is
+ * `null`, never "no longer inside a shape".
+ *
+ * @param {{ text: string, hunk: number }[]} side — one SIDE of `patchLines`
+ * @param {number} index — the line's index into that side
+ */
+export function enclosingDelimiter(side, index) {
+  if (!Array.isArray(side) || typeof index !== 'number' || !side[index]) return null;
+  const { hunk } = side[index];
+  let start = index;
+  while (start > 0 && side[start - 1]?.hunk === hunk) start -= 1;
+  const stack = [];
+  let inBlockComment = false;
+  for (let j = start; j < index; j += 1) {
+    const s = String(side[j]?.text ?? '');
+    for (let k = 0; k < s.length; k += 1) {
+      const ch = s[k];
+      const next = s[k + 1];
+      if (inBlockComment) {
+        if (ch === '*' && next === '/') { inBlockComment = false; k += 1; }
+        continue;
+      }
+      if (ch === '/' && next === '*') { inBlockComment = true; k += 1; continue; }
+      if (ch === '/' && next === '/') break;
+      if (ch === "'" || ch === '"' || ch === '`') {
+        const end = endOfStringLiteral(s, k);
+        if (end === -1) return null;
+        k = end;
+        continue;
+      }
+      if (BRACKET_CLOSERS[ch] !== undefined) { stack.push({ opener: ch, head: s.slice(0, k) }); continue; }
+      if (ch === ')' || ch === ']' || ch === '}') {
+        if (stack.length === 0) return null;
+        stack.pop();
+      }
+    }
+  }
+  return stack.length > 0 ? stack[stack.length - 1] : null;
+}
+
+/**
+ * The prefixes that open a PARAMETER list rather than an argument list — the
+ * `function` keyword (named, anonymous, generic, generator) and the three
+ * positions an arrow's parameters open in: after `=`, after `=>`, and as a
+ * callback handed straight to a call or an array.
+ *
+ * ⛔ Deliberately NOT "any identifier before a `(`": a method shorthand goes
+ * unrecognised and its parameters keep telling. That is the loud direction and
+ * it is the one this family takes everywhere — a prefix this list does not know
+ * leaves the tell where it was.
+ */
+const PARAMETER_LIST_HEAD =
+  /(?:\bfunction\b\s*\*?\s*(?:[A-Za-z_$][\w$]*)?\s*(?:<[^<>]*>)?\s*|\bconstructor\s*|(?:=|=>|\(|\[|,)\s*(?:async\s+)?(?:<[^<>]*>)?\s*)$/;
+
+/**
+ * Does this side-line sit inside a function's PARAMETER LIST? (instance 1)
+ *
+ * Two positive conditions, both carried by the hunk: the innermost delimiter
+ * still open is a `(`, and the text left of that paren reads as a callable
+ * declaration head. A Zod shape member can satisfy neither — its body is
+ * brace-delimited — so what this declines is exactly the annotated parameter,
+ * `ctx: z.RefinementCtx` first among them.
+ */
+export function inParameterList(side, index) {
+  const open = enclosingDelimiter(side, index);
+  return open !== null && open.opener === '(' && PARAMETER_LIST_HEAD.test(open.head);
+}
+
+/** A property NAME at the head of a line, in the four spellings `SCHEMA_PROPERTY` admits. */
+const KEYED_PROPERTY_NAME = /^[ \t]*(?:'([^']+)'|"([^"]+)"|(\[[^\]]+\])|([A-Za-z_$][\w$]*))[ \t]*\??[ \t]*:/;
+
+/** The closed-set constructor a property's value opens with, if it opens with one. */
+const CLOSED_SET_CONSTRUCTOR = /z\.(enum|union|discriminatedUnion|literal)\(/;
+
+/**
+ * The key a T1 line names and the closed-set members its value declares INLINE,
+ * or `null` when either half is not readable on this one line.
+ *
+ * ⭐ "Not readable" is the common answer and it is the safe one: a value whose
+ * list opens on a later line (`strategy: z.enum([`) reads `null`, and a `null`
+ * on either side of the comparison below leaves the tell firing.
+ */
+export function keyedClosedSetMembers(text) {
+  const s = String(text ?? '');
+  if (COMMENT_LINE.test(s) || !SCHEMA_PROPERTY.test(s)) return null;
+  const name = KEYED_PROPERTY_NAME.exec(s);
+  if (name === null) return null;
+  const key = name[1] ?? name[2] ?? name[3] ?? name[4];
+  const ctor = CLOSED_SET_CONSTRUCTOR.exec(s);
+  if (ctor === null) return null;
+  const openParen = ctor.index + ctor[0].length - 1;
+  const closeParen = matchingCloser(s, openParen);
+  if (ctor[1] === 'literal') {
+    if (closeParen === -1) return null;
+    const members = topLevelMembers(s, openParen, closeParen);
+    return members.length > 0 ? { key, members } : null;
+  }
+  const openBracket = s.indexOf('[', openParen);
+  if (openBracket === -1 || (closeParen !== -1 && openBracket > closeParen)) return null;
+  const closeBracket = matchingCloser(s, openBracket);
+  if (closeBracket === -1) return null;
+  const members = topLevelMembers(s, openBracket, closeBracket);
+  return members.length > 0 ? { key, members } : null;
+}
+
+/**
+ * Does this added line RE-SPELL a closed-set key the same change block removed,
+ * without the set gaining a value? (instance 2)
+ *
+ * The evidence is three facts the block carries, all required: a removed line
+ * naming the SAME key, both member lists readable inline, and the added list a
+ * subset of the removed one. Equal lists count — a key re-spelled to carry an
+ * `error` map or a `.default()` gained nothing either.
+ *
+ * ⛔ A member the removed list did not carry fails the subset test, so a key
+ * whose enum is widened in place — `z.enum(['a','b'])` -> `z.enum(['a','b','c'])`
+ * — keeps its tell. That case is why the blanket refusal this replaces existed,
+ * and it is the one T2's member tells cannot catch: an INLINE set has no
+ * per-member line to read.
+ */
+export function respellsExistingClosedSetKey(text, removedTexts) {
+  const added = keyedClosedSetMembers(text);
+  if (added === null || !Array.isArray(removedTexts)) return false;
+  return removedTexts.some((r) => {
+    const before = keyedClosedSetMembers(r);
+    if (before === null || before.key !== added.key) return false;
+    return added.members.every((m) => before.members.includes(m));
+  });
+}
+
+/**
+ * The string a bare list element carries, or `null` if the line is not one.
+ *
+ * ⛔ The SAME `BARE_STRING_ELEMENT` shape T2 reads, so "the row that fired" and
+ * "the row a licence is checked against" can never be two different questions —
+ * the drift `memberTellKind` exists to prevent one reading over.
+ */
+export function bareElementValue(text) {
+  const s = String(text ?? '');
+  if (!BARE_STRING_ELEMENT.test(s)) return null;
+  const m = /^[ \t]*(?:'([^']*)'|"([^"]*)")/.exec(s);
+  return m ? (m[1] ?? m[2] ?? null) : null;
+}
+
+/** `export const entry = '<row>';` — the generator's input for ONE ledger row (#7297). */
+const LEDGER_ENTRY_DECLARATION = /^[ \t]*export[ \t]+const[ \t]+entry(?:[ \t]*:[^=]*)?[ \t]*=[ \t]*(?:'([^']+)'|"([^"]+)")[ \t]*;?[ \t]*$/;
+
+/** `id: '<id>',` — one row's registration in the ADR-0087 D2 conversion table. */
+const CONVERSION_ID_DECLARATION = /^[ \t]*id[ \t]*:[ \t]*(?:'([^']+)'|"([^"]+)")[ \t]*,?[ \t]*$/;
+
+/**
+ * The retirement-ledger rows THIS DIFF licenses (#17300).
+ *
+ * A licence is minted by an ADDED line on one of the two input surfaces and by
+ * nothing else: the generator's own per-entry input, or the D2 conversion
+ * registration a `conversionIds` row refers to. Absence of a licence is the
+ * default and leaves every tell firing, which is the loud direction this file
+ * takes everywhere.
+ *
+ * ⛔ Never a position, a region marker or a filename shape — the licence is the
+ * EXACT string the row carries, so an entry for one row buys nothing for its
+ * neighbour. See the header for why the evidence spans files here and why a
+ * lookup in the local tree answers about the wrong commit.
+ *
+ * @param {{ filename?: string, status?: string, patch?: string|null }[]} files
+ * @returns {Set<string>} every row string this diff mints a licence for
+ */
+export function ledgerRowLicences(files, { repo = THIS_REPO } = {}) {
+  const licensed = new Set();
+  const entrySurface = ledgerSurface('entry', repo);
+  const conversionSurface = ledgerSurface('conversion', repo);
+  if (entrySurface === null && conversionSurface === null) return licensed;
+  for (const file of files ?? []) {
+    const filename = String(file?.filename ?? '');
+    if (filename === '' || file?.status === 'removed') continue;
+    const isEntry = entrySurface !== null && hintCovers(entrySurface.glob, filename);
+    const isConversion = conversionSurface !== null && hintCovers(conversionSurface.glob, filename);
+    if (!isEntry && !isConversion) continue;
+    for (const row of patchLines(file?.patch)) {
+      if (row.kind !== 'added') continue;
+      const m = isEntry
+        ? LEDGER_ENTRY_DECLARATION.exec(row.text)
+        : CONVERSION_ID_DECLARATION.exec(row.text);
+      const value = m ? (m[1] ?? m[2]) : null;
+      if (typeof value === 'string' && value !== '') licensed.add(value);
+    }
+  }
+  return licensed;
 }
 
 /** T3 — a row of a published export listing: every entry is a JSON string. */
@@ -1016,10 +1494,12 @@ export function changeBlocks(lines) {
  * Every tell one file's added lines carry.
  *
  * @param {{ filename?: string, status?: string, patch?: string|null }} file
- * @param {{ repo?: string }} [opts]
+ * @param {{ repo?: string, licensed?: Set<string> }} [opts] — `licensed` is the
+ *   whole diff's {@link ledgerRowLicences}; omitted, NOTHING is licensed and
+ *   every row tells, because an unread licence is not a granted one.
  * @returns {{ tell: string, file: string, line: number, text: string, why: string }[]}
  */
-export function tellsInFile(file, { repo = THIS_REPO } = {}) {
+export function tellsInFile(file, { repo = THIS_REPO, licensed = null } = {}) {
   const filename = String(file?.filename ?? '');
   if (filename === '') return [];
   if (file?.status === 'removed') return []; // a deleted file adds nothing.
@@ -1062,6 +1542,11 @@ export function tellsInFile(file, { repo = THIS_REPO } = {}) {
     typeof idx === 'number' && isConcatenationFragment(neighbourOn(side, idx, -1), neighbourOn(side, idx, 1));
   const surfaces = surfaceFlags(filename, repo);
   const { onContractSource } = surfaces;
+  // #17300 — is THIS file the ADR-0087 ledger? A licence clears a row in the
+  // ledger table and nowhere else: the same string added to any other file on
+  // any other surface still tells, with its own file:line.
+  const ledgerTable = ledgerSurface('table', repo);
+  const onLedgerTable = ledgerTable !== null && hintCovers(ledgerTable.glob, filename);
   // #16943 — the REPLACEMENT budget, one per change block, per tell kind.
   //
   // Every removed line in the block that carried a member or a key of kind K
@@ -1072,16 +1557,30 @@ export function tellsInFile(file, { repo = THIS_REPO } = {}) {
   // still fire, with their own file:line. That surplus is the whole sensitivity
   // guarantee: a genuine addition has no removal to pay for it.
   const budgetOfLine = new Map();
+  // #17618 — what the BLOCK removed, in its own text. The block is already the
+  // budget's unit, so the re-spelling evidence below is read against the same
+  // run of lines rather than the hunk: a removal three context lines away is a
+  // different edit and buys nothing here either.
+  const removedOfLine = new Map();
   for (const block of changeBlocks(lines)) {
     const budget = new Map();
+    const removed = [];
     for (const i of block) {
       const r = lines[i];
       if (r.kind !== 'removed') continue;
+      removed.push(r.text);
       if (BARE_STRING_ELEMENT.test(r.text) && fragmentOn(oldFile, oldAt.get(i))) continue;
       const kind = memberTellKind(r.text, surfaces);
+      // #17618 — read on the OLD side too, the way #16822's fragment rule is: a
+      // deleted PARAMETER was never a key, so it must not buy an added one the
+      // right to go unreported.
+      if (kind === 'T1' && inParameterList(oldFile, oldAt.get(i))) continue;
       if (kind !== null) budget.set(kind, (budget.get(kind) ?? 0) + 1);
     }
-    for (const i of block) budgetOfLine.set(i, budget);
+    for (const i of block) {
+      budgetOfLine.set(i, budget);
+      removedOfLine.set(i, removed);
+    }
   }
   for (let i = 0; i < lines.length; i += 1) {
     if (lines[i].kind !== 'added') continue;
@@ -1102,13 +1601,34 @@ export function tellsInFile(file, { repo = THIS_REPO } = {}) {
     // ⛔ A line that DECLARES a closed set is never spent against the budget,
     // however it also reads: an opener carries a declaration, not a member, and
     // #16822's `rewritesExistingOpener` is the reading that judges it.
-    if (kind !== null && !CLOSED_SET_OPENER.test(text)) {
+    // #17618 — a line that DECLARES a closed set may spend the budget only on
+    // positive evidence that the set gained nothing: the same block removed the
+    // SAME key and the inline member list did not grow. Without that evidence
+    // the refusal stands, because an inline `z.enum([…])` widened in place has
+    // no per-member line for T2 to read and this row is the only one that fires.
+    const declaresClosedSet = CLOSED_SET_OPENER.test(text);
+    const spendable = !declaresClosedSet || respellsExistingClosedSetKey(text, removedOfLine.get(i));
+    if (kind !== null && spendable) {
       const budget = budgetOfLine.get(i);
       const paid = budget?.get(kind) ?? 0;
       if (paid > 0) {
         budget.set(kind, paid - 1);
         continue;
       }
+    }
+    // #17300 — a retirement-ledger row this DIFF mints the licence for is a
+    // record that an accept set SHRANK, not a value it gained.
+    //
+    // ⛔ Read AFTER the #16943 budget, deliberately, because the ordering
+    // decides a case: when a block removes a real member and adds BOTH a
+    // licensed tombstone and a genuine member, the tombstone spends the removal
+    // and the genuine member — which now has nothing left to pay with — fires
+    // with its own file:line. Checking the licence first would leave the budget
+    // for the genuine member to spend instead, and buy exactly the silence this
+    // file refuses. The licence is the LAST reading, never the first.
+    if (kind === 'T2' && onLedgerTable && licensed !== null) {
+      const value = bareElementValue(text);
+      if (value !== null && licensed.has(value)) continue;
     }
     // A DECLARED registry is read as a registry first. Its files also sit on
     // the contract source surface (two of the three live under
@@ -1120,6 +1640,11 @@ export function tellsInFile(file, { repo = THIS_REPO } = {}) {
       continue;
     }
     if (kind === 'T1') {
+      // #17618 — a PARAMETER is not a key on a shape. `(value, ctx:
+      // z.RefinementCtx)` is this repo's prescribed signature for an exported
+      // object-level refinement, so without this reading every diff that adds a
+      // cross-field REFUSAL raised a widening tell for the refusal itself.
+      if (inParameterList(newFile, newAt.get(i))) continue;
       rows.push({ tell: 'T1', ...at, why: 'a new key on a Zod object schema — the accept set gains a spelling an author may now write' });
       continue;
     }
@@ -1184,10 +1709,18 @@ export function unreadFiles(files, { repo = THIS_REPO } = {}) {
   return gaps;
 }
 
-/** Every tell in a whole changed-file listing, in file order. */
+/**
+ * Every tell in a whole changed-file listing, in file order.
+ *
+ * The retirement-ledger licences (#17300) are read ONCE, from the whole
+ * listing, and threaded down: the generator's input and its output are two
+ * files by construction, so the reading that clears a tombstone row is the only
+ * one in this file whose evidence a single file cannot hold.
+ */
 export function wideningTells(files, { repo = THIS_REPO } = {}) {
   const rows = [];
-  for (const file of files ?? []) rows.push(...tellsInFile(file, { repo }));
+  const licensed = ledgerRowLicences(files, { repo });
+  for (const file of files ?? []) rows.push(...tellsInFile(file, { repo, licensed }));
   return rows;
 }
 
@@ -1528,6 +2061,42 @@ const FILE_REGISTRY = {
   patch: patchOf(140, "+    'WORKFLOW_STEP_FAILED',"),
 };
 
+// The two live instances of #17618, in the bytes the PRs actually pushed.
+//
+// ⭐ `FILE_REFINEMENT_SIGNATURE` is the `#16489` convention itself — the
+// `(value, ctx: z.RefinementCtx)` signature this repo prescribes for an
+// exported object-level refinement — so the fixture is the CLASS and not one
+// example of it: every PR that adds a cross-field refusal pushes this shape.
+const FILE_REFINEMENT_SIGNATURE = {
+  filename: 'packages/spec/src/ui/dashboard.zod.ts',
+  status: 'modified',
+  patch: [
+    '@@ -350,2 +353,8 @@',
+    ' ',
+    '+export function checkDashboardWidgetStageOrder(',
+    '+  widget: { type?: unknown; options?: { stageOrder?: unknown } | null },',
+    '+  ctx: z.RefinementCtx,',
+    '+): void {',
+    '+  const stageOrder = widget.options?.stageOrder;',
+    '+  if (stageOrder === undefined) return;',
+    ' ',
+  ].join('\n'),
+};
+const FILE_CLOSED_SET_RESPELLING = {
+  filename: 'packages/spec/src/system/cache.zod.ts',
+  status: 'modified',
+  patch: [
+    '@@ -176,3 +194,6 @@',
+    "   enabled: z.boolean().default(false).describe('Enable cache warmup'),",
+    "-  strategy: z.enum(['eager', 'lazy', 'scheduled']).default('lazy')",
+    "-    .describe('Warmup strategy: eager (at startup), lazy (on first access), scheduled (cron)'),",
+    "+  strategy: z.enum(['eager', 'lazy'], {",
+    "+    error: (issue) => (issue.input === 'scheduled' ? WARMUP_STRATEGY_SCHEDULED_RETIRED : undefined),",
+    "+  }).default('lazy')",
+    "+    .describe('Warmup strategy: eager (at startup), lazy (on first access)'),",
+  ].join('\n'),
+};
+
 let selfTestReachedVerdict = false;
 
 export function selfTest() {
@@ -1789,6 +2358,115 @@ export function selfTest() {
   t('`memberTellKind` reads a schema key as T1 and a bare element as T2 on the contract surface', memberTellKind('  extra: z.string(),', { onContractSource: true }) === 'T1' && memberTellKind("  'workflow',", { onContractSource: true }) === 'T2');
   t('⛔ …and an OPENER as neither — an opener-only line declares no member', memberTellKind('export const X = z.union([', { onContractSource: true }) === null);
   t('⛔ …and nothing at all off every surface', memberTellKind('  extra: z.string(),', {}) === null);
+
+  // -- #17618: a parameter is not a key -------------------------------------
+  //
+  // Two live pairs, both measured before the reading was written: PR #16949's
+  // sibling #17616 (the parameter case, report-only at exit 0) and PR #17638
+  // (the re-spelling case, exit 4 — a hard block on a correct, reviewed,
+  // narrowing PR whose only sanctioned clear was to declare a widening that did
+  // not happen). Both declines are bracketed by the firing controls below,
+  // because a reading that can only suppress is untestable in the direction
+  // that matters.
+  battery('#17618 — a PARAMETER is not a key, and a closed set RE-SPELLED around fewer values is not a new one');
+  t('⭐ the live parameter pair — `ctx: z.RefinementCtx` in the `#16489` refinement signature reads no tell', tells(FILE_REFINEMENT_SIGNATURE).length === 0);
+  t('⭐ the live re-spelling pair — an in-shape key whose inline enum LOST a member reads no tell', tells(FILE_CLOSED_SET_RESPELLING).length === 0);
+  t('…and the two together read CLEAN end to end, which is the exit code neither pair could reach', wideningRefusal({ declaration: 'no', files: [FILE_REFINEMENT_SIGNATURE, FILE_CLOSED_SET_RESPELLING] }).state === 'clean');
+  t('⛔ CONTROL — a genuinely new key on a shape still tells, with its own file:line', at(FILE_SCHEMA_KEY)[0] === 'packages/spec/src/kernel/manifest.zod.ts:44');
+  t('⛔ CONTROL — an inline enum WIDENED in place still tells: no per-member line exists for T2 to read', tells({ filename: 'packages/spec/src/a.zod.ts', patch: "@@ -95,2 +95,2 @@\n-  kind: z.enum(['a', 'b']),\n+  kind: z.enum(['a', 'b', 'c'])," }).length === 1);
+  t('⛔ CONTROL — a DIFFERENT key carrying a subset set pays nothing: the removed key is not this one', tells({ filename: 'packages/spec/src/a.zod.ts', patch: "@@ -95,2 +95,2 @@\n-  gone: z.enum(['a', 'b']),\n+  added: z.enum(['a'])," }).length === 1);
+  t('⛔ CONTROL — a set whose list opens on a LATER line is unreadable, so its key keeps telling', tells({ filename: 'packages/spec/src/a.zod.ts', patch: "@@ -95,3 +95,4 @@\n-  strategy: z.enum(['a', 'b']),\n+  strategy: z.enum([\n+    'a',\n+  ])," }).some((r) => r.tell === 'T1'));
+  t('⛔ CONTROL — a real key added AFTER the parameter list closes still tells: the reading does not leak past the `)`', tells({ filename: 'packages/spec/src/a.zod.ts', patch: ['@@ -10,1 +10,7 @@', '+export function check(', '+  value: unknown,', '+  ctx: z.RefinementCtx,', '+): void {}', '+export const S = z.object({', '+  extra: z.string(),', '+});'].join('\n') }).length === 1);
+  t('…and the row it reports is the shape member, never the parameter', tells({ filename: 'packages/spec/src/a.zod.ts', patch: ['@@ -10,1 +10,7 @@', '+export function check(', '+  value: unknown,', '+  ctx: z.RefinementCtx,', '+): void {}', '+export const S = z.object({', '+  extra: z.string(),', '+});'].join('\n') })[0]?.text === 'extra: z.string(),');
+  const PARAM_SIDE = [
+    { text: 'export function checkThing(', hunk: 0 },
+    { text: '  value: unknown,', hunk: 0 },
+    { text: '  ctx: z.RefinementCtx,', hunk: 0 },
+  ];
+  const SHAPE_SIDE = [
+    { text: 'export const S = lazySchema(() => z.object({', hunk: 0 },
+    { text: "  extra: z.string().describe('prose with an unbalanced ( in it'),", hunk: 0 },
+    { text: '  more: z.string(),', hunk: 0 },
+  ];
+  t('`enclosingDelimiter` names the innermost OPEN bracket a hunk shows', enclosingDelimiter(PARAM_SIDE, 2)?.opener === '(' && enclosingDelimiter(SHAPE_SIDE, 2)?.opener === '{');
+  t('⛔ …and a `(` inside a STRING is not a delimiter — a shape member stays a shape member', inParameterList(SHAPE_SIDE, 2) === false);
+  t('a parameter list is read from its declaration head', inParameterList(PARAM_SIDE, 2) === true);
+  t('…including an arrow handed straight to a call', inParameterList([{ text: 'const S = z.object({}).superRefine((', hunk: 0 }, { text: '  ctx: z.RefinementCtx,', hunk: 0 }], 1) === true);
+  t('…and one assigned to a binding', inParameterList([{ text: 'const check = (', hunk: 0 }, { text: '  ctx: z.RefinementCtx,', hunk: 0 }], 1) === true);
+  t('⛔ but NOT a method shorthand — an unrecognised head leaves the tell firing, which is the loud direction', inParameterList([{ text: '  async runThing(', hunk: 0 }, { text: '  ctx: z.RefinementCtx,', hunk: 0 }], 1) === false);
+  t('⛔ a closer with an empty stack is UNDERFLOW — the hunk began inside something it never showed', enclosingDelimiter([{ text: '  }),', hunk: 0 }, { text: '  extra: z.string(),', hunk: 0 }], 1) === null);
+  t('⛔ an unterminated string literal answers `null`, never a carried-over guess', enclosingDelimiter([{ text: "const s = 'opens here", hunk: 0 }, { text: '  extra: z.string(),', hunk: 0 }], 1) === null);
+  t('⛔ and no reading crosses a HUNK boundary', inParameterList([{ text: 'export function checkThing(', hunk: 0 }, { text: '  ctx: z.RefinementCtx,', hunk: 1 }], 1) === false);
+  t('`keyedClosedSetMembers` reads the key and the inline members', JSON.stringify(keyedClosedSetMembers("  strategy: z.enum(['eager', 'lazy'], {")) === JSON.stringify({ key: 'strategy', members: ["'eager'", "'lazy'"] }));
+  t('⛔ …and answers `null` when the list does not close on the line', keyedClosedSetMembers('  strategy: z.enum([') === null);
+  t('⛔ …and `null` for a value that declares no closed set at all', keyedClosedSetMembers('  strategy: z.string(),') === null);
+  t('`respellsExistingClosedSetKey` needs the SAME key and a set that did not grow', respellsExistingClosedSetKey("  strategy: z.enum(['eager', 'lazy'], {", ["  strategy: z.enum(['eager', 'lazy', 'scheduled']).default('lazy')"]) === true);
+  t('⛔ …and declines a gained member', respellsExistingClosedSetKey("  kind: z.enum(['a', 'b', 'c']),", ["  kind: z.enum(['a', 'b']),"]) === false);
+  t('⛔ …and declines another key\'s removal', respellsExistingClosedSetKey("  added: z.enum(['a']),", ["  gone: z.enum(['a', 'b']),"]) === false);
+
+  // -- #17300: the retirement ledger ----------------------------------------
+  //
+  // The card's population is five PRs measured in one lane in one day, every
+  // firing a false positive. Four of them (#17342, #17439, #17463, #17473) are
+  // T1 and #16943's net delta already clears them; the three cases below pin
+  // that so it cannot silently regress. The fifth, PR #17298, is the one that
+  // still refused at exit 4 — three T2 rows on a retirement, two generated into
+  // `<os-generated retired-key:18>` and ONE hand-typed into `step18.conversionIds`
+  // — and every fixture here is taken from that diff rather than invented.
+  //
+  // ⭐ Read the FIRING half first. A reading that can only suppress is
+  // untestable in the direction that matters, so the decline is bracketed on
+  // every side: the same row with no licence, a licence for a neighbouring row,
+  // a licence spent on the wrong file, a genuine member added beside a licensed
+  // one, and the ordering against #16943's budget.
+  battery('#17300 — the retirement ledger is a record of REMOVALS, not a set that gained a value');
+  const LEDGER = 'packages/spec/src/migrations/registry.ts';
+  const LEDGER_KEY_ENTRY = 'packages/spec/src/migrations/entries/retired-keys/18.ui__ListView__pageName.ts';
+  const LEDGER_DEF_ENTRY = 'packages/spec/src/migrations/entries/retired-defs/18.api__HandlerStatus.ts';
+  const CONVERSION_TABLE = 'packages/spec/src/conversions/registry.ts';
+  // PR #17298's own rows, at their own lines on that head.
+  const RETIRED_KEY_ROW = { filename: LEDGER, status: 'modified', patch: patchOf(12837, "+    'ui/ListView:pageName',") };
+  const RETIRED_DEF_ROW = { filename: LEDGER, status: 'modified', patch: patchOf(13540, "+    'api/HandlerStatus',") };
+  const CONVERSION_ID_ROW = { filename: LEDGER, status: 'modified', patch: patchOf(5443, "+    'view-page-mount-removed',") };
+  const KEY_ENTRY_FILE = { filename: LEDGER_KEY_ENTRY, status: 'added', patch: patchOf(13, "+export const entry = 'ui/ListView:pageName';") };
+  const DEF_ENTRY_FILE = { filename: LEDGER_DEF_ENTRY, status: 'added', patch: patchOf(9, "+export const entry = 'api/HandlerStatus';") };
+  const CONVERSION_REGISTRATION = { filename: CONVERSION_TABLE, status: 'modified', patch: patchOf(4820, "+  id: 'view-page-mount-removed',") };
+  const rowsFor = (...files) => wideningTells(files);
+
+  // -- the firing half: what a licence must NOT buy --------------------------
+  t('⛔ a ledger row whose entry file is NOT in this diff still fires — a licence is minted or it is absent', rowsFor(RETIRED_KEY_ROW)[0]?.tell === 'T2');
+  t('…at its own file:line, so the seat is told which row it is', rowsFor(RETIRED_KEY_ROW)[0] && `${rowsFor(RETIRED_KEY_ROW)[0].file}:${rowsFor(RETIRED_KEY_ROW)[0].line}` === `${LEDGER}:12837`);
+  t('⛔ nor does an entry file for a NEIGHBOURING row license this one — the licence is exact string identity', rowsFor(RETIRED_KEY_ROW, { filename: 'packages/spec/src/migrations/entries/retired-keys/18.ui__ListView__virtualScroll.ts', status: 'added', patch: patchOf(13, "+export const entry = 'ui/ListView:virtualScroll';") }).length === 1);
+  t('⛔ nor a conversion registration for a DIFFERENT id', rowsFor(CONVERSION_ID_ROW, { filename: CONVERSION_TABLE, status: 'modified', patch: patchOf(4820, "+  id: 'some-other-conversion',") }).length === 1);
+  t('⛔ a licence clears a row in the LEDGER table and nowhere else — the same string on another contract file still fires', rowsFor({ filename: 'packages/spec/src/ui/view.zod.ts', status: 'modified', patch: patchOf(300, "+    'ui/ListView:pageName',") }, KEY_ENTRY_FILE).length === 1);
+  t('⛔ a genuinely new member added BESIDE a licensed row still fires, and it is the row reported', rowsFor({ filename: LEDGER, status: 'modified', patch: "@@ -12837,0 +12837,2 @@\n+    'ui/ListView:pageName',\n+    'workflow'," }, KEY_ENTRY_FILE).length === 1);
+  t('…named by its own line, never the licensed one', rowsFor({ filename: LEDGER, status: 'modified', patch: "@@ -12837,0 +12837,2 @@\n+    'ui/ListView:pageName',\n+    'workflow'," }, KEY_ENTRY_FILE)[0]?.line === 12838);
+  t('⭐ the licence is read AFTER #16943\'s budget: a removal pays for the tombstone, so the genuine member has nothing left to pay with', rowsFor({ filename: LEDGER, status: 'modified', patch: "@@ -12837,1 +12837,2 @@\n-    'legacy-thing',\n+    'ui/ListView:pageName',\n+    'workflow'," }, KEY_ENTRY_FILE).length === 1);
+  t('⛔ an `export const entry` OUTSIDE the entries directory mints nothing', rowsFor(RETIRED_KEY_ROW, { filename: 'packages/spec/src/ui/view.zod.ts', status: 'modified', patch: patchOf(13, "+export const entry = 'ui/ListView:pageName';") }).length === 1);
+  t('⛔ a REMOVED entry declaration mints nothing — only an added line is evidence', rowsFor(RETIRED_KEY_ROW, { filename: LEDGER_KEY_ENTRY, status: 'modified', patch: "@@ -13,1 +13,0 @@\n-export const entry = 'ui/ListView:pageName';" }).length === 1);
+  t('⛔ `tellsInFile` alone licenses nothing — an unread licence is never a granted one', tellsInFile(RETIRED_KEY_ROW).length === 1);
+  t('⛔ and a licence never reaches a T1 key: the same string as a schema property still tells', rowsFor({ filename: LEDGER, status: 'modified', patch: patchOf(400, '+  pageName: z.string(),') }, { filename: LEDGER_KEY_ENTRY, status: 'added', patch: patchOf(13, "+export const entry = 'pageName';") })[0]?.tell === 'T1');
+
+  // -- the declining half: PR #17298's three rows ----------------------------
+  t('⭐ a generated retired-KEY row whose entry file this diff adds is not a new member', rowsFor(RETIRED_KEY_ROW, KEY_ENTRY_FILE).length === 0);
+  t('⭐ …the retired-DEF table reads the same way, from the same declaration', rowsFor(RETIRED_DEF_ROW, DEF_ENTRY_FILE).length === 0);
+  t('⭐ …and the HAND-MAINTAINED `conversionIds` row, which no region marker could ever have covered', rowsFor(CONVERSION_ID_ROW, CONVERSION_REGISTRATION).length === 0);
+  t('⭐ PR #17298\'s three rows together read CLEAN — the exit code a correct `Clause-②: no` could not reach', wideningRefusal({ declaration: 'no', files: [RETIRED_KEY_ROW, CONVERSION_ID_ROW, KEY_ENTRY_FILE, CONVERSION_REGISTRATION] }).state === 'clean');
+  t('`ledgerRowLicences` reads BOTH input surfaces into one set', (() => { const s = ledgerRowLicences([KEY_ENTRY_FILE, CONVERSION_REGISTRATION]); return s.has('ui/ListView:pageName') && s.has('view-page-mount-removed') && s.size === 2; })());
+  t('…and mints nothing from a listing that carries neither', ledgerRowLicences([RETIRED_KEY_ROW]).size === 0);
+  t('`bareElementValue` reads the row T2 fired on, not a second spelling of it', bareElementValue("    'ui/ListView:pageName',") === 'ui/ListView:pageName' && bareElementValue('  pageName: z.string(),') === null);
+
+  // -- the four T1 instances #16943 already cleared, pinned so they stay clear
+  t('⭐ #17463 — a key whose regex is BYTE-IDENTICAL across the pair is not a new key', tells({ filename: 'packages/spec/src/kernel/plugin.zod.ts', status: 'modified', patch: "@@ -212,1 +212,1 @@\n-  version: z.string().regex(SEMVER).optional().describe('Semantic Version'),\n+  version: z.string().regex(SEMVER).optional().describe('Version: major.minor.patch, …')," }).length === 0);
+  t('⭐ #17473 — a `z.unknown()` whose `.describe()` merely wrapped onto its own line is not a new key', tells({ filename: 'packages/spec/src/ui/component.zod.ts', status: 'modified', patch: "@@ -2583,1 +2583,2 @@\n-  exportOptions: z.unknown().optional().describe('Export config ({ formats, streaming })'),\n+  exportOptions: z.unknown().optional()\n+    .describe('Export config ({ formats, streaming })')," }).length === 0);
+  t('⭐ #17439 — a re-declaration that NARROWS (`z.unknown()` → `z.array(…)`) is not a new key either', tells({ filename: 'packages/spec/src/ui/component.zod.ts', status: 'modified', patch: "@@ -2525,1 +2525,1 @@\n-  sort: z.unknown().optional().describe('Initial sort (array of { field, order })'),\n+  sort: z.array(SortItemSchema).optional()," }).length === 0);
+  t('⛔ …while the SAME key removed in one hunk and added in another still fires — no reading crosses that boundary', tells({ filename: 'packages/spec/src/ui/component.zod.ts', status: 'modified', patch: "@@ -2525,1 +2525,0 @@\n-  sort: z.unknown().optional(),\n@@ -2894,0 +2893,1 @@\n+  sort: z.array(SortItemSchema).optional()," }).length === 1);
+
+  // -- the declared rows still exist -----------------------------------------
+  t('every ledger-input row names a path in THIS tree — a renamed input must red here, not go quiet', LEDGER_INPUT_SURFACES.filter((s) => s.repo === THIS_REPO).every((s) => existsSync(new URL(s.glob.replace(/\/\*+$/, ''), `file://${ROOT}`))), LEDGER_INPUT_SURFACES.filter((s) => !existsSync(new URL(s.glob.replace(/\/\*+$/, ''), `file://${ROOT}`))).map((s) => s.glob).join(', '));
+  t('all three roles are declared, and each exactly once — a missing role would silently license nothing', ['table', 'entry', 'conversion'].every((r) => LEDGER_INPUT_SURFACES.filter((s) => s.role === r).length === 1));
+  t('every ledger-input row carries a `why` and the repo it applies to', LEDGER_INPUT_SURFACES.every((s) => typeof s.why === 'string' && s.why.length > 10 && typeof s.repo === 'string' && s.repo.includes('/')));
+  t('`ledgerSurface` answers for this repo and is inert for another board', ledgerSurface('table')?.glob === LEDGER && ledgerSurface('table', 'objectstack-ai/objectui') === null);
 
   // -- T3 --------------------------------------------------------------------
   battery('T3 — a new row in a published entry point');
@@ -2056,6 +2734,9 @@ export function selfTest() {
       'line-number directions, the unified-diff splitter, the three imported/declared surfaces, the ' +
       'four tells, the two accidental variables #16822 removed and the evidence each declines on, '
       + 'the #16943 net member/key delta with its surplus rule and the quiet direction it buys, ' +
+      '#17618\'s two declines — a parameter list and a closed set re-spelled around fewer values — ' +
+      'each bracketed by the control that still fires, ' +
+      '#17300\'s retirement-ledger licence with the firing controls that bracket it on every side, ' +
       "#16448's four positive controls each with its file:line, its negative controls — " +
       'the same diffs with `yes`, and a removal-only diff with `no` — the local path composed end ' +
       'to end so a binary change to a tell surface cannot read as clean, #17112\'s split count with ' +

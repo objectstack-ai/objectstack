@@ -249,5 +249,33 @@ export function classifyFilterToken(
   const token = m[1];
   if (isContextToken(token)) return { kind: 'context', token: token as ContextToken };
   if (isDateMacroToken(token)) return { kind: 'date-macro', token };
-  return { kind: 'unknown', token, suggestion: CONTEXT_TOKEN_SUGGESTIONS[token.toLowerCase()] };
+  // Own-property guard: the table is a plain object literal, so a bare index
+  // resolves `Object.prototype`'s members for an off-vocabulary token —
+  // `{constructor}` put the `Object` FUNCTION and `{__proto__}`
+  // `Object.prototype` itself into `suggestion`, whose declared type is
+  // `ContextToken`. A TypeScript consumer holds a compile-time guarantee that
+  // is false at runtime, and nothing in the type system will ever flag it.
+  //
+  // The reach is not bounded by the identifier shapes: `FILTER_TOKEN_WRAPPED_RE`
+  // captures `[^{}]+`, anything but braces. What bounds it is that the key is
+  // lower-cased, so only the prototype members whose names are already
+  // lower-case are namable — `constructor` and `__proto__` today. `toString` /
+  // `valueOf` / `hasOwnProperty` are quiet by that casing accident alone, ⛔ not
+  // by a guard, and a future lower-case prototype member would join the noisy
+  // set silently.
+  //
+  // The refusal value is this branch's own declared one: `suggestion` is
+  // optional, so its absence — `undefined` — is what "resembles nothing" already
+  // means here. The guard narrows: every near-miss that answered before is an
+  // own key.
+  //
+  // ⛔ Not a null-prototype table (TS2353 against the `Readonly<Record<…>>`
+  // annotation, or a silent loss of its exhaustiveness check via
+  // `Object.assign(Object.create(null), …)`) and ⛔ not a list of prototype
+  // member names, which the next prototype member defeats.
+  const lower = token.toLowerCase();
+  const suggestion = Object.prototype.hasOwnProperty.call(CONTEXT_TOKEN_SUGGESTIONS, lower)
+    ? CONTEXT_TOKEN_SUGGESTIONS[lower]
+    : undefined;
+  return { kind: 'unknown', token, suggestion };
 }

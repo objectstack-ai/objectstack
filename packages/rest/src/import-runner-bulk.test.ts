@@ -9,6 +9,18 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { runImport, type ImportProtocolLike } from './import-runner';
+
+/**
+ * [#16952] The doubles below are annotated FROM the exported declaration
+ * (`ImportProtocolLike`), never from a hand-written restatement of the shape
+ * the runner happens to send. A local parameter annotation was one of the
+ * three non-authoritative places this card converged: it froze a dialect no
+ * compiler held anyone to, so it kept compiling — and kept passing — after the
+ * runner moved to another one. ⛔ Never widen these back to an inline object
+ * type; that re-opens the seam.
+ */
+type FindArgs = Parameters<ImportProtocolLike['findData']>[0];
+type CreateArgs = Parameters<ImportProtocolLike['createData']>[0];
 import type { ExportFieldMeta } from './export-format.js';
 
 const metaMap = new Map<string, ExportFieldMeta>([
@@ -85,9 +97,9 @@ describe('runImport — bulk create batching (framework#2678)', () => {
     const createManyData = vi.fn(async () => {
       throw new Error('CHECK constraint failed');
     });
-    const createData = vi.fn(async (args: { data: { name: string } }) => {
+    const createData = vi.fn(async (args: CreateArgs) => {
       if (args.data.name === 'r1') throw new Error('CHECK constraint failed: name');
-      return { id: `id_${args.data.name}`, record: { id: `id_${args.data.name}` } };
+      return { id: `id_${String(args.data.name)}`, record: { id: `id_${String(args.data.name)}` } };
     });
     const p: ImportProtocolLike = {
       findData: vi.fn(async () => []),
@@ -107,7 +119,7 @@ describe('runImport — bulk create batching (framework#2678)', () => {
   });
 
   it('falls back to one createData call per row when the protocol has no createManyData', async () => {
-    const createData = vi.fn(async (args: { data: { name: string } }) => ({ id: `id_${args.data.name}` }));
+    const createData = vi.fn(async (args: CreateArgs) => ({ id: `id_${String(args.data.name)}` }));
     const p: ImportProtocolLike = {
       findData: vi.fn(async () => []),
       createData,
@@ -123,10 +135,10 @@ describe('runImport — bulk create batching (framework#2678)', () => {
 
   it('retries a transient createData failure on the no-createManyData fallback path (#3150)', async () => {
     let attempts = 0;
-    const createData = vi.fn(async (args: { data: { name: string } }) => {
+    const createData = vi.fn(async (args: CreateArgs) => {
       attempts++;
       if (attempts === 1) throw new Error('fetch failed'); // one transient blip, then succeeds
-      return { id: `id_${args.data.name}` };
+      return { id: `id_${String(args.data.name)}` };
     });
     const p: ImportProtocolLike = {
       findData: vi.fn(async () => []),
@@ -148,8 +160,9 @@ describe('runImport — bulk create batching (framework#2678)', () => {
     }));
     const updateData = vi.fn(async (args: { id: string }) => ({ id: args.id }));
     // Row 1 ('existing') matches an existing record → update; the rest are creates.
-    const findData = vi.fn(async (args: { query?: { $filter?: { name?: string } } }) =>
-      (args.query?.$filter?.name === 'existing' ? [{ id: 'existing_id', name: 'existing' }] : []));
+    // [#16638] Reads the CANONICAL `where` the runner sends, not `$filter`.
+    const findData = vi.fn(async (args: FindArgs) =>
+      (args.query!.where!.name === 'existing' ? [{ id: 'existing_id', name: 'existing' }] : []));
     const p: ImportProtocolLike = { findData, createData: vi.fn(), updateData, createManyData };
 
     const summary = await runImport({

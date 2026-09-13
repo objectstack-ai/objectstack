@@ -467,6 +467,182 @@ describe('ObjectStoreSuspendedRunStore — run-history retention + durable detai
     });
 });
 
+// ─── What a terminal row does NOT say (#15336) ───────────────────────────────
+
+/**
+ * [#15336] Two declaration-truth residues of #13909 / #13937, each pinned by
+ * the SHAPE that falsifies the sentence rather than by the sentence.
+ *
+ *  1. ⭐ `variables_json`'s presence discriminator holds ONE WAY. The object
+ *     declared presence and "this run had a pause its resume consumed" as
+ *     equivalent; the reverse fails for a run that stranded, was restored and
+ *     then finished. `recordTerminal` upserts the SAME `run_<id>` row with all
+ *     four snapshot columns explicitly NULL — deliberately, so "restorable"
+ *     cannot outlive the condition — which leaves that row byte-identical, in
+ *     those columns, to the row of a run that never paused at all. The second
+ *     test measures that indistinguishability directly, so the claim is not
+ *     "the column is null" but "no reader can recover the difference".
+ *  2. ⭐ A snapshot rebuilt FROM A ROW does not carry the step log as of the
+ *     pause. `steps` are the one field `deserializeConsumedSuspension` takes
+ *     from the row's own `steps_json` rather than from the snapshot, and that
+ *     column holds the WHOLE run's compacted log — the failed attempt
+ *     included. Only the engine's process-local journal trims back to the step
+ *     count at the pause, and that trimmed array is never persisted.
+ *
+ * ⛔ Neither is a behaviour change: both shapes are the ruled design (a
+ * restored run MUST clear what it carried; the terminal row's step log MUST
+ * keep the failure). What was wrong was the text, and these pins are what stop
+ * the corrected text from decaying back.
+ */
+describe('ObjectStoreSuspendedRunStore — what a terminal row does NOT say (#15336)', () => {
+    /** The pause a strand's resume consumed — two steps, as of the pause. */
+    const pauseSnapshot = (): SuspendedRun => ({
+        runId: 'strandy',
+        flowName: 'busy_flow',
+        nodeId: 'hold',
+        nodeType: 'hold',
+        variables: { approved: true },
+        steps: [
+            { nodeId: 'start', nodeType: 'start', status: 'success', startedAt: '2026-01-01T00:00:01.000Z' },
+            { nodeId: 'hold', nodeType: 'hold', status: 'success', startedAt: '2026-01-01T00:00:02.000Z' },
+        ],
+        context: { object: 'crm_deal', tenantId: 'org_1' } as any,
+        startedAt: '2026-01-01T00:00:00.000Z',
+        startTime: 1735689600000,
+        correlation: 'areq_9',
+    });
+
+    /** The step log `recordLog` hands the store: the pause's steps AND the
+     *  failed attempt that ran after the resume consumed it. */
+    const wholeRunSteps = (): RunRecord['steps'] => [
+        ...pauseSnapshot().steps,
+        {
+            nodeId: 'tail', nodeType: 'script', status: 'failure',
+            startedAt: '2026-01-01T00:00:03.000Z',
+            error: { code: 'TAIL_FAILED', message: 'tail exploded' },
+        },
+    ];
+
+    /** The strand: a resume consumed the pause, then a downstream node threw. */
+    const strandRecord = (): RunRecord => ({
+        runId: 'strandy',
+        flowName: 'busy_flow',
+        status: 'failed',
+        startedAt: '2026-01-01T00:00:00.000Z',
+        error: 'tail exploded',
+        // The PAUSE node, not the node that threw (#13937).
+        nodeId: 'hold',
+        steps: wholeRunSteps(),
+        consumedSuspension: pauseSnapshot(),
+    });
+
+    it('writes the snapshot on the strand, then CLEARS all four columns when the restored run finishes', async () => {
+        const engine = createFakeEngine();
+        const store = new ObjectStoreSuspendedRunStore(engine, createTestLogger());
+
+        await store.recordTerminal(strandRecord());
+        const stranded = engine.rows.get('run_strandy');
+        // Positive control for the nulls below: the row really did carry a
+        // restorable snapshot, in all four columns, before the second write.
+        expect(typeof stranded.variables_json).toBe('string');
+        expect(stranded.node_type).toBe('hold');
+        expect(stranded.correlation).toBe('areq_9');
+        expect((await store.loadTerminal('strandy'))!.consumedSuspension).toBeDefined();
+
+        // …an operator restores it, the run resumes and this time it finishes.
+        await store.recordTerminal({
+            runId: 'strandy',
+            flowName: 'busy_flow',
+            status: 'completed',
+            startedAt: '2026-01-01T00:00:00.000Z',
+            steps: wholeRunSteps(),
+        });
+
+        // The SAME row — an upsert, not a second history row.
+        expect(engine.rows.size).toBe(1);
+        const finished = engine.rows.get('run_strandy');
+        expect(finished.variables_json).toBeNull();
+        expect(finished.context_json).toBeNull();
+        expect(finished.screen_json).toBeNull();
+        expect(finished.node_type).toBeNull();
+        expect(finished.correlation).toBeNull();
+
+        const reread = (await store.loadTerminal('strandy'))!;
+        expect(reread.status).toBe('completed');
+        expect(reread.consumedSuspension).toBeUndefined();
+        // Not the drop notice either: the snapshot was not too big, it is gone
+        // because the run that carried it moved on.
+        expect(reread.consumedSuspensionDropped).toBeUndefined();
+    });
+
+    it('⛔ leaves that row indistinguishable from a run that NEVER paused — the direction the column cannot answer', async () => {
+        const engine = createFakeEngine();
+        const store = new ObjectStoreSuspendedRunStore(engine, createTestLogger());
+
+        // A run that stranded, was restored, and finished.
+        await store.recordTerminal(strandRecord());
+        await store.recordTerminal({
+            runId: 'strandy', flowName: 'busy_flow', status: 'completed',
+            startedAt: '2026-01-01T00:00:00.000Z', steps: wholeRunSteps(),
+        });
+        // A run that never paused at all, same flow, same shape of log.
+        await store.recordTerminal({
+            runId: 'plain', flowName: 'busy_flow', status: 'completed',
+            startedAt: '2026-01-01T00:00:00.000Z', steps: wholeRunSteps(),
+        });
+
+        const columns = (id: string) => {
+            const row = engine.rows.get(id);
+            return {
+                variables_json: row.variables_json, context_json: row.context_json,
+                screen_json: row.screen_json, node_type: row.node_type, correlation: row.correlation,
+            };
+        };
+        // The whole finding, in one assertion: the row of a run that DID have a
+        // consumed suspension and the row of one that never had any are equal
+        // across every column the discriminator is read from.
+        expect(columns('run_strandy')).toEqual(columns('run_plain'));
+        // Firing control — the same comparison DOES separate them while the
+        // snapshot is still on the row, so the equality above is a measurement
+        // and not a comparison of two things this helper cannot see.
+        const engine2 = createFakeEngine();
+        const store2 = new ObjectStoreSuspendedRunStore(engine2, createTestLogger());
+        await store2.recordTerminal(strandRecord());
+        await store2.recordTerminal({
+            runId: 'plain', flowName: 'busy_flow', status: 'completed',
+            startedAt: '2026-01-01T00:00:00.000Z', steps: wholeRunSteps(),
+        });
+        const columns2 = (id: string) => {
+            const row = engine2.rows.get(id);
+            return {
+                variables_json: row.variables_json, context_json: row.context_json,
+                screen_json: row.screen_json, node_type: row.node_type, correlation: row.correlation,
+            };
+        };
+        expect(columns2('run_strandy')).not.toEqual(columns2('run_plain'));
+    });
+
+    it('rebuilds a row snapshot with the WHOLE run\'s step log — ⛔ not the steps as of the pause', async () => {
+        const engine = createFakeEngine();
+        const store = new ObjectStoreSuspendedRunStore(engine, createTestLogger());
+        await store.recordTerminal(strandRecord());
+
+        const rebuilt = (await store.loadTerminal('strandy'))!.consumedSuspension!;
+        // Positive control: the rebuild IS the snapshot's — every field that
+        // comes from the four snapshot columns round-trips.
+        expect(rebuilt.nodeId).toBe('hold');
+        expect(rebuilt.nodeType).toBe('hold');
+        expect(rebuilt.correlation).toBe('areq_9');
+        expect(rebuilt.variables).toEqual({ approved: true });
+
+        // `steps` alone do not: they are the terminal row's log, so the failed
+        // attempt the pause never saw comes back inside the "snapshot".
+        expect(rebuilt.steps).toEqual(wholeRunSteps());
+        expect(rebuilt.steps).not.toEqual(pauseSnapshot().steps);
+        expect(rebuilt.steps.map((s) => s.nodeId)).toContain('tail');
+    });
+});
+
 // ─── Trigger attribution columns (#7533) ─────────────────────────────────────
 //
 // The defect was information dropped ON THE WAY TO THE ROW, so these assertions

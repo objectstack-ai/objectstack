@@ -28,11 +28,29 @@
  *
  * ── Severity ─────────────────────────────────────────────────────────────
  *
- * All findings are **warnings**. An orphan key is inert, not broken: it costs a
- * few bytes and one untranslated string, and nothing crashes. That is a weaker
- * failure than the dead references `validate-object-references` /
- * `validate-action-name-refs` report as errors, and the severity should say so
- * (ADR-0072 D1 — a linter that over-states is a linter authors stop reading).
+ * `translation-target-unknown` is an **error**; `translation-option-key-unknown`
+ * stays a **warning**. The split is the difference between a key that points at
+ * nothing and a key that points at the wrong spelling of something.
+ *
+ * The orphan direction used to be a warning on the reading that an orphan key is
+ * inert — a few bytes and one untranslated string, nothing crashes. That reading
+ * was measured wrong in the direction that matters: the key is not inert, it is
+ * **actively misleading**. Grepping its id returns a confident-looking hit in
+ * every locale, which reads as "this surface exists and is translated" — to a
+ * human reviewer and to an AI author alike — long after the navigation entry,
+ * form section or view it was written for was deleted.
+ *
+ * Reported-but-unfailable is the shape that let that happen: the rule named
+ * every orphan, printed the remedy, and exited 0, so a PR that deletes a surface
+ * and leaves its locale keys behind was green on every pipeline on the platform.
+ * The forward half of the same parity (`i18n/missing-*` — an authored surface
+ * with no translation) already fails; the two halves of one parity now have the
+ * same enforceability instead of opposite ones.
+ *
+ * ⚠️ ADR-0072 D1 (a linter that over-states is a linter authors stop reading) is
+ * what keeps this narrow. It is not a licence to promote the neighbours: a
+ * mis-keyed OPTION translation resolves to a declared option's near-miss and its
+ * remedy is a rename, not a deletion, so `checkOptionKeys` keeps `warning`.
  *
  * ── What this rule deliberately does NOT check ───────────────────────────
  *
@@ -121,10 +139,24 @@ const SCREEN_NODE_TYPE = 'screen';
 export const TRANSLATION_TARGET_UNKNOWN = 'translation-target-unknown';
 export const TRANSLATION_OPTION_KEY_UNKNOWN = 'translation-option-key-unknown';
 
-export type TranslationRefSeverity = 'warning';
+export type TranslationRefSeverity = 'warning' | 'error';
+
+/**
+ * The severity every `translation-target-unknown` finding carries.
+ *
+ * Declared once so the two sites that raise the rule cannot drift apart, and so
+ * the rule's gating claim is readable as a value rather than inferred from two
+ * scattered string literals.
+ */
+const TRANSLATION_TARGET_UNKNOWN_SEVERITY = 'error' as const;
 
 export interface TranslationRefFinding {
-  /** Always `warning` — an orphan translation key is inert, not broken. */
+  /**
+   * `error` for `translation-target-unknown` (an orphan key resolves to nothing
+   * and gates the run), `warning` for `translation-option-key-unknown` (a
+   * mis-keyed option resolves to nothing but names something real). See the
+   * module's Severity note.
+   */
   severity: TranslationRefSeverity;
   /** Diagnostic rule id. */
   rule: string;
@@ -726,8 +758,8 @@ function buildUniverse(stack: AnyRec): Universe {
   // real screen the runner pauses on and hands the client a `ScreenSpec.nodeId`
   // for, so its translation key resolves. Reading the flat array would leave
   // every nested screen out of the universe and report each of its keys as an
-  // orphan — a warning-severity false positive, which is exactly the
-  // over-stating ADR-0072 D1 forbids.
+  // orphan — a false positive that now FAILS the run, which is exactly the
+  // over-stating ADR-0072 D1 forbids, at the cost the gating severity sets.
   const flows = new Map<string, FlowFacts>();
   for (const flow of recordsOf(stack.flows)) {
     const flowName = strName(flow.name);
@@ -777,7 +809,14 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
   const universe = buildUniverse(stack);
 
   const orphan = (where: string, path: string, message: string, hint: string) => {
-    findings.push({ severity: 'warning', rule: TRANSLATION_TARGET_UNKNOWN, where, path, message, hint });
+    findings.push({
+      severity: TRANSLATION_TARGET_UNKNOWN_SEVERITY,
+      rule: TRANSLATION_TARGET_UNKNOWN,
+      where,
+      path,
+      message,
+      hint,
+    });
   };
 
   for (let bi = 0; bi < bundles.length; bi++) {
@@ -1223,7 +1262,7 @@ function checkActionParams(
   for (const paramName of rawParams) {
     if (declared.has(paramName)) continue;
     findings.push({
-      severity: 'warning',
+      severity: TRANSLATION_TARGET_UNKNOWN_SEVERITY,
       rule: TRANSLATION_TARGET_UNKNOWN,
       where: `${ctx.where} · param "${paramName}"`,
       path: `${ctx.path}.params.${paramName}`,

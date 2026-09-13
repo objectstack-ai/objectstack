@@ -14,6 +14,7 @@ import type {
   Seed,
 } from '@objectstack/spec/data';
 import { SeedLoaderConfigSchema, isMultiValueField } from '@objectstack/spec/data';
+import { SEED_WRITE_EXECUTION_CONTEXT } from '@objectstack/spec/kernel';
 import { resolveSeedRecord } from '@objectstack/formula';
 import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult, runWithAdvisoryAggregation, type AdvisoryGroup } from '@objectstack/core';
 // [#8442] The repo's ONE recogniser for "this throw is a record-validation
@@ -36,6 +37,39 @@ interface Logger {
 
 /** Default field used for externalId matching on target objects */
 const DEFAULT_EXTERNAL_ID_FIELD = 'name';
+
+/**
+ * [#17177] The scope every pass-2 "this column is NULL" line must carry.
+ *
+ * Those lines are emitted while the load is still running — inside
+ * `AppPlugin.start()`, which the kernel completes for EVERY plugin before it
+ * fires `kernel:ready`. Plenty of boot happens after that point, and some of
+ * it writes the very columns these lines report on: the first-admin handoff
+ * (`claimSeedOwnership`, `@objectstack/plugin-security`) re-owns every
+ * `owner_id IS NULL` row of every user-authored object the moment the first
+ * human is promoted to platform admin. That handoff is not an accident — this
+ * file's own seed-identity comment names it as the designed completion of a
+ * NULL owner column — so a line reading "`x.owner_id` stays NULL" is TRUE when
+ * it is printed and FALSE by the time the app is serving, with nothing in
+ * either reading to tell an operator that the other exists.
+ *
+ * ⛔ The loader cannot repair that by re-reading the table before it returns:
+ * the handoff runs strictly after the loader is done, and an inline seed that
+ * overruns `OS_INLINE_SEED_BUDGET_MS` finishes on the far side of
+ * `kernel:ready` entirely — so the two writes are not even in a fixed order to
+ * read after. What the loader CAN do is say which moment it is describing.
+ * That is this sentence, and it is why the two branches below now say "is NULL
+ * at the end of pass 2" instead of "stays NULL".
+ *
+ * Deliberately NOT carried by the two DROPPED branches: those report a row
+ * that never landed, and no later boot step can write a column of a row that
+ * does not exist, so their claim survives to the end of boot unchanged.
+ */
+const PASS_2_SCOPE_NOTE =
+  'SCOPE: this describes the column as of the END OF PASS 2, not as of the end of boot — a later boot ' +
+  'step can still write it (the first-admin handoff claims every NULL-owned `owner_id` row once that ' +
+  'account is promoted), so finding a non-NULL value in the table later is not evidence that this ' +
+  'reference resolved.';
 
 /**
  * [#8442] What a seed `errors[].message` says when the caught sentence may NOT
@@ -1846,8 +1880,8 @@ export class SeedLoaderService implements ISeedLoaderService {
             // line is not printing.
             const causeSentence = seedFailureCause(err);
             this.logger.error(
-              `[SeedLoader] Deferred reference back-fill FAILED — ${deferred.objectName}.${deferred.field} stays NULL ` +
-                `on record '${recordName}'. The row itself was seeded, so every row counter looks healthy ` +
+              `[SeedLoader] Deferred reference back-fill FAILED — ${deferred.objectName}.${deferred.field} ` +
+                `is NULL at the end of pass 2 on record '${recordName}'. The row itself was seeded, so every row counter looks healthy ` +
                 `while the circular relationship is HALF-WRITTEN: nothing links it to ${deferred.targetObject}.` +
                 `${deferred.targetField} = '${this.formatAttempted(deferred.attemptedValue)}'. Nothing retries this — ` +
                 `fix the write error below (a transient failure that outlasted the retry budget, or a validation rule ` +
@@ -1855,7 +1889,7 @@ export class SeedLoaderService implements ISeedLoaderService {
                 // [#8442] Same cause vocabulary as the pass-1 write sites: the
                 // raw sentence always, MARKED when the payload half withheld it
                 // so an operator can see the reporter did not receive this line.
-                `${seedCauseLabel(err, causeSentence)}: ${causeSentence}`,
+                `${seedCauseLabel(err, causeSentence)}: ${causeSentence}. ${PASS_2_SCOPE_NOTE}`,
               err instanceof Error ? err : undefined,
               {
                 object: deferred.objectName,
@@ -1971,12 +2005,13 @@ export class SeedLoaderService implements ISeedLoaderService {
         const missedValue = this.formatAttempted(stillUnresolved ? missingItem : deferred.attemptedValue);
         this.logger.error(
           `[SeedLoader] Deferred reference UNRESOLVED after pass 2 — ${deferred.objectName}.${deferred.field} ` +
-            `stays NULL on record '${recordName}'. The row itself was seeded, so every row ` +
+            `is NULL at the end of pass 2 on record '${recordName}'. The row itself was seeded, so every row ` +
             `counter looks healthy while the relationship is MISSING: nothing links it to ` +
             `${deferred.targetObject}.${deferred.targetField} = '${missedValue}', because no such ` +
             `${deferred.targetObject} row exists — neither seeded in this load nor already in the database. ` +
-            `Nothing retries this: pass 2 is the last one. Add the missing ${deferred.targetObject} record to ` +
-            `the seed (or fix the natural key that names it) and re-run the seed to complete the link.`,
+            `No further seed pass retries this: pass 2 is the last one. Add the missing ${deferred.targetObject} ` +
+            `record to the seed (or fix the natural key that names it) and re-run the seed to complete the link. ` +
+            PASS_2_SCOPE_NOTE,
           undefined,
           {
             object: deferred.objectName,
@@ -2061,32 +2096,20 @@ export class SeedLoaderService implements ISeedLoaderService {
   // ==========================================================================
 
   /**
-   * Seed writes always run as a privileged system context. This bypasses
-   * RBAC checks (so seeds can target system tables like `sys_*`) and
+   * The seed-write options every write in this loader uses — the shared
+   * {@link SEED_WRITE_EXECUTION_CONTEXT} posture, wrapped in the options bag
+   * the engine's write methods take.
+   *
+   * The posture itself (system-elevated, automation suppressed, state-machine
+   * exempt) and why each flag is load-bearing are documented once, on that
+   * export in `@objectstack/spec/kernel`. What is specific to this loader:
+   * `isSystem` is what lets a seed target system tables like `sys_*` and what
    * disables the SecurityPlugin's auto-injection of `organization_id` /
-   * `owner_id` — seeds either declare those fields explicitly per
-   * record, or are intentionally cross-tenant / global.
-   *
-   * `skipTriggers` suppresses record-change AUTOMATION (autolaunched flow
-   * triggers) for seed writes: a package's seed is pre-existing END-STATE
-   * reference/sample data, not a stream of user events, so firing
-   * on-create/on-update flows (notifications, escalations, assignments,
-   * approvals) for it is semantically wrong and dangerous — a self-triggering
-   * flow can loop and wedge the whole first-boot (2026-07-06 incident).
-   * Lifecycle HOOKS (derived/default fields, validation) still run.
-   *
-   * `seedReplay` (#3433) tells the engine this is curated seed data so the
-   * object's `state_machine` validation rule is skipped — both the
-   * `initialStates` entry-point check on insert and the transition check on
-   * update. A seed is a snapshot of established facts (a `completed` project, a
-   * `closed_won` opportunity), not a record walking its lifecycle, so the FSM
-   * entry/transition guards do not apply. Without this a declared
-   * `initialStates` silently rejects every mid-lifecycle seed row and cascades
-   * its master-detail children — the "installed but no data" failure for
-   * showcase and every marketplace template. All OTHER validation (field
-   * shape, `format`, `cross_field`, `script`, `json_schema`) still runs.
+   * `owner_id`, so seeds either declare those fields explicitly per record or
+   * are intentionally cross-tenant / global. Lifecycle HOOKS
+   * (derived/default fields, validation) still run.
    */
-  private static readonly SEED_OPTIONS = { context: { isSystem: true, skipTriggers: true, seedReplay: true } } as const;
+  private static readonly SEED_OPTIONS = { context: SEED_WRITE_EXECUTION_CONTEXT } as const;
 
   /**
    * The engine write {@link writeRecoveringSummary} guards, as a NAMED callee.

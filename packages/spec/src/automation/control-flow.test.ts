@@ -471,15 +471,27 @@ describe('TryCatchErrorValueSchema', () => {
 // the key gate collide with `validateControlFlow`, which has validated these
 // same regions structurally since ADR-0031?
 //
-// It does not, and the reason is that they answer different questions. The
-// schema rejects undeclared KEYS; the analysis rejects malformed STRUCTURE
-// (single-entry / single-exit / acyclic), which no key check can decide. They
-// meet at exactly one seam — `validateControlFlow` `safeParse`s each region
-// slot before analyzing it, so from #4001 that parse is also where an
-// undeclared region key surfaces. Nothing was duplicated and nothing was
-// removed: the guard's structural prose is untouched, and it simply stopped
-// silently repairing its own input before judging it.
-describe('[#4001] validateControlFlow and the key gate do not fight', () => {
+// The two are no longer disjoint, and since #16134 that is deliberate: the
+// schema rejects undeclared KEYS *and* one structural fact — a duplicate node
+// id — while the analysis rejects malformed STRUCTURE (single-entry /
+// single-exit / acyclic), which no key check can decide. They meet at two
+// seams. The canonical statement of that division is the `control-flow.zod.ts`
+// docblock as #16835 left it (`c3ce76c210`); this block follows it rather than
+// restating the boundary independently.
+//
+// The cases below pin the **#4001** seam only: `validateControlFlow`
+// `safeParse`s each region slot before analyzing it, so that parse is also
+// where a region's undeclared key surfaces. That seam duplicated nothing and
+// removed nothing — the guard's structural prose is untouched, and it simply
+// stopped silently repairing its own input before judging it.
+//
+// The **#16134** seam is pinned elsewhere: `FlowSchema`'s `superRefine` holds
+// ONE node-id space across the top-level `nodes[]` and every region body,
+// judged at every depth `collectFlowGraphs` walks, and past
+// `MAX_REGION_DEPTH` (32) `analyzeRegion`'s own `duplicate node id` line is
+// the only refusal of a within-region duplicate. `flow.test.ts`'s
+// `the seam at MAX_REGION_DEPTH` case pins that hand-off.
+describe('[#4001] validateControlFlow and the key gate meet at the region-slot seam', () => {
   const flowWith = (cfg: Record<string, unknown>, type = LOOP_NODE_TYPE) =>
     ({ nodes: [{ ...node('c1', type), config: cfg }] } as never);
 

@@ -80,8 +80,16 @@ export const CROSS_FIELD_OBJECT_FIELDS: Record<string, Record<string, unknown>> 
   id: { type: 'text', name: 'id' },
   amount: { type: 'number', name: 'amount' },
   budget: { type: 'number', name: 'budget' },
-  stage: { type: 'string', name: 'stage' },
-  owner: { type: 'string', name: 'owner' },
+  // [#16319] `text`, not `string`: `string` is absent from `FieldType`, so
+  // `SchemaRegistry.registerObject` refuses the WHOLE object declaration and
+  // the runtime consumer below never reaches its subject. `text` is not a
+  // re-typing — it is the spelling of the column `string` was already
+  // producing: `canonicalizeSqlType('varchar(255)')` is `'text'` and
+  // `suggestFieldTypeForSqlType('varchar(255)')` is `'text'`, both pinned in
+  // `spec/data/type-compat.test.ts`. Matches `id` / `organization_id` above
+  // and the text columns of CROSS_FIELD_OFFSET_OBJECT_FIELDS below.
+  stage: { type: 'text', name: 'stage' },
+  owner: { type: 'text', name: 'owner' },
   starts_on: { type: 'date', name: 'starts_on' },
   ends_on: { type: 'date', name: 'ends_on' },
   organization_id: { type: 'text', name: 'organization_id' },

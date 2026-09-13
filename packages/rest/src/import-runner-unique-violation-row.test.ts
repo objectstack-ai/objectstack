@@ -35,6 +35,17 @@ import { describe, it, expect, vi } from 'vitest';
 import { DuplicateRecordError } from '@objectstack/objectql';
 import { uniqueViolationColumn } from '@objectstack/types';
 import { runImport, type ImportProtocolLike } from './import-runner';
+
+/**
+ * [#16952] The doubles below are annotated FROM the exported declaration
+ * (`ImportProtocolLike`), never from a hand-written restatement of the shape
+ * the runner happens to send. A local parameter annotation was one of the
+ * three non-authoritative places this card converged: it froze a dialect no
+ * compiler held anyone to, so it kept compiling — and kept passing — after the
+ * runner moved to another one. ⛔ Never widen these back to an inline object
+ * type; that re-opens the seam.
+ */
+type CreateArgs = Parameters<ImportProtocolLike['createData']>[0];
 import { mapDataError } from './error-response.js';
 import type { ExportFieldMeta } from './export-format.js';
 
@@ -73,7 +84,7 @@ const envelope = () => new DuplicateRecordError('task', sqliteRaw(), uniqueViola
 function protocolWith(overrides: Partial<ImportProtocolLike>): ImportProtocolLike {
   return {
     findData: vi.fn(async () => []),
-    createData: vi.fn(async (args: { data: { name: string } }) => ({ id: `id_${args.data.name}` })),
+    createData: vi.fn(async (args: CreateArgs) => ({ id: `id_${String(args.data.name)}` })),
     updateData: vi.fn(),
     ...overrides,
   };
@@ -91,9 +102,9 @@ function expectNothingLeaked(summary: unknown): void {
 describe('[#14723] §1 — the per-row `createData` path', () => {
   it('a `DuplicateRecordError` row reports `UNIQUE_VIOLATION`, and nothing of the driver', async () => {
     const p = protocolWith({
-      createData: vi.fn(async (args: { data: { name: string } }) => {
+      createData: vi.fn(async (args: CreateArgs) => {
         if (args.data.name === 'r1') throw envelope();
-        return { id: `id_${args.data.name}` };
+        return { id: `id_${String(args.data.name)}` };
       }),
     });
 
@@ -111,9 +122,9 @@ describe('[#14723] §1 — the per-row `createData` path', () => {
 describe('[#14723] §2 — the batched `createManyData` path, degraded to per-row writes', () => {
   it('the conflicting row alone reports `UNIQUE_VIOLATION`; its siblings are created', async () => {
     const createManyData = vi.fn(async () => { throw envelope(); });
-    const createData = vi.fn(async (args: { data: { name: string } }) => {
+    const createData = vi.fn(async (args: CreateArgs) => {
       if (args.data.name === 'r1') throw envelope();
-      return { id: `id_${args.data.name}` };
+      return { id: `id_${String(args.data.name)}` };
     });
     const p = protocolWith({ createData, createManyData });
 

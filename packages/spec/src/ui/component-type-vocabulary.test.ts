@@ -17,7 +17,7 @@ import {
   hasReservedComponentNamespace,
   isKnownComponentType,
 } from './component-type-vocabulary';
-import { PageComponentType } from './page.zod';
+import { PageComponentType, RETIRED_PAGE_COMPONENT_TYPES } from './page.zod';
 import { ComponentPropsMap } from './component.zod';
 
 describe('RESERVED_COMPONENT_TYPE_NAMESPACES is derived from the enum', () => {
@@ -51,8 +51,28 @@ describe('KNOWN_COMPONENT_TYPES covers every declared face', () => {
     }
   });
 
-  it('the candidate list is the known set, sorted and stable', () => {
-    expect(KNOWN_COMPONENT_TYPE_CANDIDATES).toEqual([...KNOWN_COMPONENT_TYPES].sort());
+  /**
+   * #15110 — the candidate list is the known set MINUS what the vocabulary
+   * retired by name. Known and writable are different questions: a retired
+   * type stays known (its `ComponentPropsMap` row is kept on purpose), and
+   * `PageComponentSchema` refuses it, so proposing it answers a typo with a
+   * rename the parser rejects. Derived from the retirement map, never restated
+   * — a type retired tomorrow leaves the candidates the day it lands.
+   */
+  it('the candidate list is the known set MINUS the retired types, sorted and stable', () => {
+    const writable = [...KNOWN_COMPONENT_TYPES].filter((t) => !RETIRED_PAGE_COMPONENT_TYPES.has(t));
+    expect(KNOWN_COMPONENT_TYPE_CANDIDATES).toEqual(writable.sort());
+    // The subtraction is not empty — an assertion that held vacuously would
+    // green on a candidate list that had stopped subtracting anything.
+    expect(RETIRED_PAGE_COMPONENT_TYPES.size).toBeGreaterThan(0);
+    for (const retired of RETIRED_PAGE_COMPONENT_TYPES.keys()) {
+      expect(isKnownComponentType(retired), retired).toBe(true);
+      expect(KNOWN_COMPONENT_TYPE_CANDIDATES, retired).not.toContain(retired);
+    }
+    // Lit control: every live enum member IS a candidate.
+    for (const member of PageComponentType.options) {
+      expect(KNOWN_COMPONENT_TYPE_CANDIDATES, member).toContain(member);
+    }
   });
 
   /**

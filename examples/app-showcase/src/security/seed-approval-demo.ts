@@ -91,12 +91,14 @@ interface AuthContextLike {
     createAccount: (account: {
       userId: string;
       providerId: string;
-      issuer: string;
       /**
        * The STABLE better-auth 1.7 spelling. `1.7.0-rc.2` briefly called this
        * `providerAccountId` and stable 1.7.0 renamed it back (#3002) — under
        * the rc.2 spelling the account row is written with no account id and
        * the persona silently stays un-loginable.
+       *
+       * With `providerId` it is the whole account identity again since 1.7.3
+       * (#17440).
        */
       accountId: string;
       password: string;
@@ -177,43 +179,6 @@ async function assignPositions(
 }
 
 /**
- * Read the issuer better-auth actually minted for the DEV ADMIN's local
- * password account, so a persona's credential row is stamped with the same one.
- *
- * ## Why this is read and not written
- *
- * better-auth 1.7 keys account identity on `(issuer, accountId)`:
- * `findAccountByKey` looks a credential up under the issuer better-auth mints
- * for itself, so a row carrying any other value — or none — is INVISIBLE and
- * sign-in fails `INVALID_EMAIL_OR_PASSWORD` behind a "User not found" warn that
- * points at the `sys_user` row, which is fine, rather than at the account, which
- * is not. That one field is the whole reason a hand-hashed password was never
- * enough, and it is what four checklist items had recorded as a knownGap.
- *
- * The value is `plugin-auth`'s to own (`CREDENTIAL_ISSUER` in
- * `backfill-account-issuer.ts`), and an example app re-spelling a platform
- * constant is how the two start disagreeing. So it is DERIVED from the admin
- * account this same runtime already minted: whatever better-auth used there is
- * by construction what a sign-in will look these personas up under.
- *
- * Undefined when it cannot be derived — never a guess. `backfill-account-issuer`
- * makes the same call for the same reason: "a wrong issuer is indistinguishable
- * from a missing one at sign-in, and it also occupies the unique slot the
- * correct row needs."
- */
-async function credentialIssuerFromAdmin(
-  ctx: ApprovalDemoContext,
-  adminUserId: string,
-): Promise<string | undefined> {
-  const account = await findOne(ctx, 'sys_account', {
-    user_id: adminUserId,
-    provider_id: 'credential',
-  });
-  const issuer = account?.issuer;
-  return typeof issuer === 'string' && issuer.length > 0 ? issuer : undefined;
-}
-
-/**
  * Give a provisioned persona a better-auth credential account, so it can
  * actually SIGN IN (#9308 fixture 1).
  *
@@ -231,7 +196,6 @@ async function credentialIssuerFromAdmin(
 async function ensureCredentialAccount(
   ctx: ApprovalDemoContext,
   userId: string,
-  issuer: string,
   password: string,
 ): Promise<boolean> {
   const existing = await findOne(ctx, 'sys_account', {
@@ -250,7 +214,6 @@ async function ensureCredentialAccount(
     await authCtx.internalAdapter.createAccount({
       userId,
       providerId: 'credential',
-      issuer,
       accountId: userId,
       password: hashed,
     });
@@ -395,11 +358,16 @@ export function registerShowcaseApprovalDemo(ctx: ApprovalDemoContext): void {
     if (auditorId) await assignPositions(ctx, auditorId, ['auditor'], organizationId, 'auditor');
 
     // [#9308 fixture 1] Make both personas SIGN-INABLE. Provisioning them as
-    // rows was never the hard half — the credential account was, and the issuer
-    // is the one field that decides whether better-auth can find it. Derived
-    // once from the admin's own account and reused for both personas; when it
-    // cannot be derived, nothing is written (a wrong issuer is worse than an
-    // absent one — see `credentialIssuerFromAdmin`).
+    // rows was never the hard half — the credential account was.
+    //
+    // ⚠️ [#17440] It used to be harder still: better-auth 1.7 keyed accounts on
+    // `(issuer, accountId)`, so this seed had to READ the issuer better-auth
+    // minted for the dev admin and stamp the personas with the same one — a
+    // wrong value was invisible at sign-in and indistinguishable from a missing
+    // one. 1.7.3 rolled that model back and `sys_account.issuer` retired with
+    // it, so the derivation, its failure branch and the whole class of silent
+    // lockout behind it are gone. `(provider_id, account_id)` is the key, and
+    // `internalAdapter.createAccount` supplies both.
     //
     // This is what turns "a second user exists" into "a second user can act":
     // the per-group 会签 demo needs Ada to decide the `finance` group under her
@@ -407,17 +375,9 @@ export function registerShowcaseApprovalDemo(ctx: ApprovalDemoContext): void {
     // viewer gating needs Mei to look at her own pending request, and an
     // out-of-office delegation is only falsifiable when the delegate holds a
     // separate bearer token.
-    const credentialIssuer = await credentialIssuerFromAdmin(ctx, adminId);
-    if (!credentialIssuer) {
-      ctx.logger?.warn?.(
-        '[showcase] approval-demo: could not derive the credential issuer from the dev admin — '
-        + 'demo personas stay un-loginable (sign in as the admin instead)',
-      );
-    } else {
-      for (const personaId of [submitterId, auditorId]) {
-        if (personaId) {
-          await ensureCredentialAccount(ctx, personaId, credentialIssuer, DEMO_PERSONA_PASSWORD);
-        }
+    for (const personaId of [submitterId, auditorId]) {
+      if (personaId) {
+        await ensureCredentialAccount(ctx, personaId, DEMO_PERSONA_PASSWORD);
       }
     }
 

@@ -10,10 +10,12 @@ import { PluginPermissionsSchema } from '../kernel/manifest.zod';
  * # Environment Artifact Envelope
  *
  * THE single declaration of the environment artifact envelope (#4740,
- * #4535 C10 — maintainer route A′). `@objectstack/spec/cloud` re-exports
- * this file; both entry points resolve to these exact symbols, so the
- * chosen entry point can never change the shape a consumer gets (the
- * #4411 dual-source trap, closed for this name).
+ * #4535 C10 — maintainer route A′). `@objectstack/spec/system` is now its
+ * ONLY entry point: `@objectstack/spec/cloud` re-exported this file until
+ * #16325 removed that subpath, and no other entry has ever declared or
+ * re-exported the name, so the chosen entry point can never change the
+ * shape a consumer gets (the #4411 dual-source trap, closed for this name —
+ * pinned by `holdersOf` in `./environment-artifact.test.ts`).
  *
  * Describes the response shape of
  * `GET /api/v1/cloud/environments/:environmentId/artifact` — the assembled

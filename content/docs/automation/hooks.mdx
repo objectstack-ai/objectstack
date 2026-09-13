@@ -24,7 +24,7 @@ cannot express.
 | :--- | :--- |
 | Side effects after a save — create records, notify, call HTTP, request approval | **Flow** (`record_change`) |
 | Anything that pauses: approvals, screens, timers, signals | **Flow** — a hook runs inline and cannot pause |
-| Scheduled or date-relative sweeps ("30 days before `end_date`") | **Flow** (`schedule` / `timeRelative`) |
+| Scheduled or date-relative sweeps ("30 days before `end_date`") | **Flow** (`schedule` / `timeRelative`) — which [declares the organization it runs as](/docs/automation/flows#the-acting-organization) |
 | Mutating the pending record in the same write, before it is saved | **Before hook** |
 | An invariant enforced on every write path, across objects, no matter who writes | **Hook** — the backstop duty itself |
 | Read-side interception (`beforeFind` / `afterFind`) | **Hook** — flows have no read events |
@@ -180,6 +180,12 @@ Mutate the incoming record before it is saved. The engine exposes the pending
 record's fields **directly on `ctx.input`** (a flat view over the internal
 `{ data, options }` wrapper — reads and writes of record fields route through
 `ctx.input.data`):
+
+On **update**, "the incoming record" means *the record the engine intends to
+persist* — a caller-supplied value for a `readonly` field is not on it, and the
+caller's submission is on `ctx.submitted` instead (diagnostics only). See
+[Static `readonly` fields on the write path](/docs/protocol/objectql/security#static-readonly-fields-on-the-write-path)
+for the five rules and the migration.
 
 <Callout type="warn" title="`id` / `options` / `ast` / `data` are RESERVED on the flat `ctx.input` face">
 These four names always resolve to the envelope, never to a record field —

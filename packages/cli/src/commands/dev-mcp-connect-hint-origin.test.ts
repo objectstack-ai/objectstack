@@ -89,7 +89,28 @@ describe('os dev MCP connect hint — origin (#16734)', () => {
    * child's banner (its own call site's expression, verbatim) and then the
    * parent's connect hint, both told the port the server ACTUALLY bound.
    */
-  const boot = (boundPort: number, name = 'hotcrm') => {
+  const boot = (boundPort: number, name = 'hotcrm', boundProtocol: 'http' | 'https' = 'http') => {
+    printServerReady({
+      ...bannerOpts,
+      externalBaseOrigin: resolveAuthBaseUrl(boundPort, boundProtocol).baseOrigin,
+    });
+    printMcpConnectHint({ boundPort, name, boundProtocol });
+    return lines.join('\n');
+  };
+
+  /**
+   * The same boot with the protocol argument WITHHELD from both printers — the
+   * expression this file carried before `--cert`/`--key` existed, character for
+   * character.
+   *
+   * ⭐ This is the ABLATION LEG for acceptance 2 (「无 flag 时逐字节等于今天」,
+   * #16804). The pins below drive it beside {@link boot}'s no-flag case and
+   * require the two to be byte-identical, so the claim "nothing changes without
+   * the flags" is measured rather than asserted: it would go red the day the
+   * derived protocol leaked into the default, and it cannot pass by both legs
+   * being broken in the same direction.
+   */
+  const bootWithoutProtocolArg = (boundPort: number, name = 'hotcrm') => {
     printServerReady({ ...bannerOpts, externalBaseOrigin: resolveAuthBaseUrl(boundPort).baseOrigin });
     printMcpConnectHint({ boundPort, name });
     return lines.join('\n');
@@ -203,10 +224,117 @@ describe('os dev MCP connect hint — origin (#16734)', () => {
     });
   });
 
+  // ── #16804 ─ a TLS listener, and the three surfaces that follow it ──────
+  describe('under --cert/--key the derived origin is https, and everything follows', () => {
+    it('acceptance 1: with OS_AUTH_URL UNSET, banner and hint both give https', () => {
+      // Every chain variable is deleted by `beforeEach`, so the only thing
+      // that can produce `https` here is the listener protocol reaching the
+      // resolver's built-in tail.
+      const output = boot(3000, 'hotcrm', 'https');
+
+      expect(output).toContain('MCP:       https://localhost:3000/api/v1/mcp');
+      expect(output).toContain('Endpoint  https://localhost:3000/api/v1/mcp');
+      expect(output).toContain('Skill     https://localhost:3000/api/v1/mcp/skill');
+      expect(output).toContain(
+        'Connect   claude mcp add --transport http hotcrm https://localhost:3000/api/v1/mcp',
+      );
+      // The plain-http address must not appear anywhere in a TLS boot's output:
+      // it is the one address a client on this port cannot reach.
+      expect(output).not.toContain('http://localhost:3000');
+      expect(mcpOrigins(output)).toEqual(['https://localhost:3000']);
+    });
+
+    it("follows dev's auto-shifted port under TLS too", () => {
+      expect(mcpOrigins(boot(3001, 'hotcrm', 'https'))).toEqual(['https://localhost:3001']);
+    });
+
+    it('acceptance 3: `OS_AUTH_URL` still WINS over the derived https origin', () => {
+      // The override direction that matters in practice: a developer
+      // terminating TLS locally but reached through a tunnel on another host.
+      process.env.OS_AUTH_URL = 'https://tunnel.example.com';
+      expect(mcpOrigins(boot(3000, 'hotcrm', 'https'))).toEqual(['https://tunnel.example.com']);
+    });
+
+    it('acceptance 3, the awkward direction: an http OS_AUTH_URL wins as well', () => {
+      // ⛔ Deliberately NOT "upgraded" to https. `OS_AUTH_URL` names where the
+      // deployment is REACHED — behind a TLS-terminating proxy that forwards
+      // plain http, or in a test harness, that is a deliberate statement about
+      // a different hop, and a default has no standing to overrule it.
+      process.env.OS_AUTH_URL = 'http://proxied.example.com';
+      expect(mcpOrigins(boot(3000, 'hotcrm', 'https'))).toEqual(['http://proxied.example.com']);
+    });
+
+    it('the rest of the configured chain keeps its precedence under TLS', () => {
+      process.env.OS_BASE_URL = 'https://base.example.com';
+      expect(mcpOrigins(boot(3000, 'hotcrm', 'https'))).toEqual(['https://base.example.com']);
+    });
+
+    it('an unusable value stays unusable — TLS does not manufacture an origin', () => {
+      process.env.OS_AUTH_URL = '';
+      const output = boot(3000, 'hotcrm', 'https');
+      expect(mcpOrigins(output)).toEqual([]);
+      expect(output).not.toContain('claude mcp add');
+      expect(output).not.toContain('https://localhost:3000');
+    });
+  });
+
+  // ── #16804 ─ acceptance 2, as an ABLATION rather than a claim ──────────
+  describe('without the flags the output is byte-for-byte what it was', () => {
+    it('the no-flag boot equals the boot that never passes a protocol at all', () => {
+      // Leg A: the call shape this file used before `--cert`/`--key` existed.
+      const before = bootWithoutProtocolArg(3000, 'my-app');
+      lines.length = 0;
+      // Leg B: the same boot through today's call shape, no flags given.
+      const after = boot(3000, 'my-app', 'http');
+
+      expect(after).toBe(before);
+      // And the byte the two legs are about: still plain http, on the bound port.
+      expect(mcpOrigins(after)).toEqual(['http://localhost:3000']);
+    });
+
+    it('the two legs also agree on an auto-shifted port and an ephemeral one', () => {
+      for (const port of [3001, 45064]) {
+        lines.length = 0;
+        const before = bootWithoutProtocolArg(port, 'my-app');
+        lines.length = 0;
+        expect(boot(port, 'my-app', 'http')).toBe(before);
+      }
+    });
+
+    it('and the legs DISCRIMINATE — the https leg differs from both', () => {
+      // Without this, two legs that both silently produced nothing would pass.
+      const plain = bootWithoutProtocolArg(3000, 'my-app');
+      lines.length = 0;
+      const tls = boot(3000, 'my-app', 'https');
+
+      expect(tls).not.toBe(plain);
+      expect(mcpOrigins(plain)).toEqual(['http://localhost:3000']);
+      expect(mcpOrigins(tls)).toEqual(['https://localhost:3000']);
+    });
+  });
+
   // ── What only the source can say ────────────────────────────────────────
   describe('the call site feeds the printer the bound port, and nothing else', () => {
     it('hands `printMcpConnectHint` the ACTUALLY BOUND port', () => {
-      expect(DEV_SOURCE).toContain('printMcpConnectHint({ boundPort: actual,');
+      expect(DEV_SOURCE).toContain('printMcpConnectHint({');
+      expect(DEV_SOURCE).toContain('boundPort: actual,');
+    });
+
+    it('hands it the protocol it FORWARDED, not one derived a second time (#16804)', () => {
+      // The parent's `boundProtocol` comes from the same `tlsIntent` that built
+      // the child's argv, so the scheme the hint prints and the scheme the
+      // child bound cannot part company. A second `resolveDevTlsIntent` call
+      // here would be a second reader, free to disagree.
+      expect(DEV_SOURCE).toContain('boundProtocol,');
+      expect(DEV_SOURCE).toContain('const boundProtocol: ListenerProtocol = listenerProtocol(tlsIntent);');
+      expect(DEV_SOURCE.match(/resolveDevTlsIntent\(/g) ?? []).toHaveLength(1);
+    });
+
+    it('forwards the cert/key PATHS to the serve child through the shared contract', () => {
+      expect(DEV_SOURCE).toContain('...devTlsChildArgs(tlsIntent),');
+      // ⛔ and never the bytes: one reader of the file, one owner of the refusal.
+      expect(DEV_SOURCE).not.toContain('readDevTlsMaterial');
+      expect(DEV_SOURCE).not.toContain('readFileSync(flags.cert');
     });
 
     it('builds no address out of the listening message any more', () => {

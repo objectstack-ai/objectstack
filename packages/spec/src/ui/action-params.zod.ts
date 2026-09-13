@@ -231,15 +231,49 @@ export function validateActionParams(
  * context-less, RLS/FLS-bypassing by design (#2849); the boundary is enforced
  * at invoke time (`ai.exposed` + the ADR-0066 D4 capability gate), not here.
  *
- * `find` is the one member whose argument shape the signature alone never
- * settled: it takes a bare FILTER — the `where` half of a query — and never
- * an ObjectQL query envelope; read its doc comment before writing a handler
- * or a test double against it (#14175).
+ * Two members carry an argument contract the signature alone does not settle,
+ * and both state it on the member: `find` takes a bare FILTER — the `where`
+ * half of a query — and never an ObjectQL query envelope (#14175); `delete`
+ * accepts a single id OR an array of them, both as declared contract, served
+ * one row at a time (#15117). Read those doc comments before writing a handler
+ * or a test double against either.
  */
 export interface ActionEngineFacade {
   insert(object: string, data: Record<string, unknown>): Promise<{ id: string }>;
   update(object: string, id: string, data: Record<string, unknown>): Promise<void>;
-  delete(object: string, id: string): Promise<void>;
+  /**
+   * Delete rows of `object` by id.
+   *
+   * ## Which convention is the contract: BOTH — one id, or an array of them
+   *
+   * `idOrIds` takes a SINGLE id or an ARRAY of ids, and both spellings are
+   * contract, not a runtime tolerance a handler author has to discover by
+   * reading `packages/runtime`. Deleting one row is `delete(object, id)`;
+   * deleting a set is `delete(object, ids)` — a handler that already holds a
+   * list does NOT have to unroll it into a loop to stay on the contract.
+   *
+   * What the array form is, exactly: a convenience over the SAME per-row path,
+   * never a bulk or atomic delete. The `delete` arm of
+   * `packages/runtime/src/action-execution.ts#buildActionEngineFacade`
+   * normalises the argument to a list and issues one `ql.delete` per id, in
+   * order, under the caller's execution context. There is no transaction
+   * around the set: a failure part-way through leaves the ids before it
+   * deleted and the ids after it untouched, and the rejection a caller sees is
+   * the one that stopped it. An empty array deletes nothing and resolves.
+   *
+   * Until #15117 this slot declared `id: string` while the runtime had been
+   * accepting both forms all along, described in a comment there as an
+   * accident of the two handler suites that happened to use them. It was
+   * neither: it is this declaration. The one first-party suite on the array
+   * form (`examples/app-todo/src/actions/task.handlers.ts`) could only reach
+   * it by hand-rolling a copy of this interface — the same hand-written-fake
+   * pattern #14175 found on `find`, one member over — and that copy drifted,
+   * exactly as a copy does. Widening the declaration is what retired it.
+   *
+   * Both accepted forms, and the argument types that stay refused, are pinned
+   * in `action-params.test.ts`.
+   */
+  delete(object: string, idOrIds: string | string[]): Promise<void>;
   /**
    * Read the rows of `object` that match `filter`.
    *

@@ -32,6 +32,13 @@ import {
   createFieldPresenceProbe,
   createRecordOrganizationResolver,
 } from '@objectstack/metadata-core';
+// [#15166] The repo's ONE vocabulary of "which driver failure is a missing
+// table". The datasource remedy below is the remedy for that cause and no
+// other, so deciding whether to print it is exactly this predicate's question.
+// AGENTS.md -> "Degradation log levels": a hand-rolled `err.code === '42P01'`
+// here would be a second de-facto vocabulary that disagrees with the shared one
+// the day a driver is added -- the same argument the imports above make.
+import { isMissingTableError } from '@objectstack/types';
 
 /**
  * Minimal structural view of `NotificationService.emit` (ADR-0030). Declared
@@ -690,6 +697,59 @@ function renderMilestoneSummary(
 }
 
 /**
+ * The identity of an audit-write failure, for the once-per-DEGRADATION rule
+ * (#15166).
+ *
+ * ## Why the `code`, and ⛔ never the message
+ *
+ * This key decides how many `error` lines a failing install can ever print, so
+ * its CARDINALITY is the whole safety argument. AGENTS.md records the
+ * once-per-degradation rule as a deliberate anti-noise choice, and #4420 is
+ * what it was invented against: a per-write line, unbounded in traffic, that
+ * nobody could read.
+ *
+ * A driver names the offending ROW in its message — `UNIQUE constraint failed:
+ * sys_audit_log.id (row aud_8123)`, `duplicate key value violates unique
+ * constraint … Key (id)=(aud_8123)`. Keying on that text would make the cause
+ * set grow one entry per failed write, which is #4420 again wearing the word
+ * "cause". Keying on the `code` does not: every driver this repo ships against
+ * puts a CLOSED vocabulary there — SQLSTATE (`42P01`, `23505`), mysql2's
+ * symbolic names (`ER_NO_SUCH_TABLE`), SQLite's `SQLITE_*` — and ADR-0112 does
+ * the same for the engine's own refusals (`ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED`,
+ * the cause measured on #14927). None of them varies per row.
+ *
+ * So the key is bounded by two sets fixed at BOOT — the declared object
+ * registry and the driver's code vocabulary — and by nothing that grows with
+ * traffic. That is the property the anti-noise rule actually needs; "one line
+ * per distinct cause" without it would just be the falsifier by another name.
+ *
+ * A code that is absent, or is not a scalar, collapses to ONE bucket rather
+ * than growing one: an uncoded fault is "the uncoded fault on this object", and
+ * a thousand of them is still one `error` line.
+ */
+function auditFailureCauseKey(object: string, err: unknown): string {
+  const code = (err as { code?: unknown } | null | undefined)?.code;
+  const bounded = typeof code === 'string' || typeof code === 'number' ? String(code) : '(no code)';
+  // JSON rather than a separator character: an object name and a driver code
+  // are both opaque here, and a key that can collide is a key that silences a
+  // real second cause.
+  return JSON.stringify([object, bounded]);
+}
+
+/**
+ * The cause, for the FIRST LINE the operator reads (#15166).
+ *
+ * The information was already in hand at this call site and was being dropped:
+ * the line printed a fixed remedy and never looked at `err`. The code is what
+ * makes two failures the same failure (see {@link auditFailureCauseKey}), so it
+ * leads; the message is what makes this one legible.
+ */
+function auditFailureCauseSummary(err: unknown, detail: string): string {
+  const code = (err as { code?: unknown } | null | undefined)?.code;
+  return typeof code === 'string' || typeof code === 'number' ? `${String(code)}: ${detail}` : detail;
+}
+
+/**
  * Install audit + activity writers on the given engine. Idempotent per
  * `packageId` — calling twice with the same id replaces the previous
  * registration.
@@ -726,38 +786,72 @@ export function installAuditWriters(
   };
 
   /**
-   * Report a lost audit row — once per process, not once per failed write.
+   * Report a lost audit row — once per CAUSE, not once per failed write.
    *
    * AGENTS.md: "Say it once, at the first degradation, not once per failed
    * write." An audit write runs on EVERY mutation, so a per-write `error` on a
    * systemic cause (the table is unreachable from this connection) would emit
    * one line per write and train everyone to skim `error` — the exact reflex
-   * that made #4420's `warn` unreadable. The first failure carries the full
-   * consequence + fix text; subsequent ones degrade to `debug` so the detail is
-   * still recoverable at a higher log level without drowning the channel.
+   * that made #4420's `warn` unreadable. That much is unchanged.
+   *
+   * [#15166] What changed is the COUNTING UNIT. The dedupe key used to be one
+   * process-wide boolean, so the first failure of ANY cause silenced every
+   * later failure of every OTHER cause for the life of the process: a server
+   * could keep losing rows for hours to a second, unrelated fault with one
+   * `error` line at the top of the log describing the first. The rule's unit is
+   * a DEGRADATION, and a second cause is a second degradation — so the key is
+   * now the failure's identity, {@link auditFailureCauseKey}. A repeat of an
+   * already-reported cause still degrades to `debug`, exactly as before; a NEW
+   * cause gets its own `error` line, once.
+   *
+   * ⛔ The key is deliberately built from the error's `code`, NEVER its
+   * message — see {@link auditFailureCauseKey} for why that is what keeps this
+   * bounded, and why "log every failure at `error`" remains the wrong answer.
    */
-  let auditFailureReported = false;
+  const reportedAuditFailureCauses = new Set<string>();
   const reportAuditWriteFailure = (object: string, action: string, err: unknown): void => {
     const detail = String((err as any)?.message ?? err);
     const logger = (engine as any).logger;
     try {
-      if (auditFailureReported) {
-        logger?.debug?.('Audit write failed (already reported)', { object, action, err: detail });
+      const cause = auditFailureCauseKey(object, err);
+      if (reportedAuditFailureCauses.has(cause)) {
+        logger?.debug?.('Audit write failed (already reported)', { object, action, err: detail, cause });
         return;
       }
-      auditFailureReported = true;
+      reportedAuditFailureCauses.add(cause);
       // The two things an `error` here owes, both in the first line it prints:
       // the CONSEQUENCE, concretely, and the FIX.
+      //
+      // [#15166] Both halves used to be written for ONE cause and printed for
+      // every cause. The consequence sentence asserted that later writes were
+      // losing rows "the same way", which a process-wide key could not support
+      // — it was a false statement to the operator the moment a second cause
+      // appeared. It is true again now that the key IS the cause. And the fix
+      // sentence named the telemetry-datasource split unconditionally, so the
+      // measured `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` refusal sent its
+      // operator to check a datasource that was working perfectly. The remedy
+      // below is the remedy for a MISSING TABLE, so it is printed for that
+      // cause and, for any other, replaced by the driver's own verdict.
+      //
+      // ⛔ Not deleted, and not weakened: `persistAuditTrailRow` writes
+      // `sys_audit_log` AND its `sys_activity` mirror, and ADR-0057 §3.6 routes
+      // both, so the question is asked about both tables.
+      const missingTable =
+        isMissingTableError(err, 'sys_audit_log') || isMissingTableError(err, 'sys_activity');
       const message =
-        'Audit write FAILED — the compliance trail is now INCOMPLETE. The audited write itself SUCCEEDED and is on ' +
-          'disk, so the API returned success and nothing downstream looks broken; only the `sys_audit_log` row that ' +
-          'records who did it never landed, and nothing retries it. Every subsequent audited write is likely losing ' +
-          'its row the same way (this is reported ONCE — raise the log level to `debug` to see the rest). ' +
-          'Fix: confirm `sys_audit_log` is reachable from the connection this write ran on. Its ADR-0057 §3.6 ' +
-          "lifecycle class routes it to the dedicated `telemetry` datasource whenever one is registered (`os dev` " +
-          'provisions one by default as a SIBLING SQLite file), so a "no such table" here usually means the write ' +
-          'executed against a DIFFERENT datasource than the one the table was created in — see framework#5226. ' +
-          'Set `OS_TELEMETRY_DB=0` to keep every lifecycle-classed object on the primary datasource.';
+        `Audit write FAILED (${auditFailureCauseSummary(err, detail)}) — the compliance trail is now INCOMPLETE. ` +
+          'The audited write itself SUCCEEDED and is on disk, so the API returned success and nothing downstream ' +
+          'looks broken; only the `sys_audit_log` row that records who did it never landed, and nothing retries it. ' +
+          'Every subsequent audited write failing THIS WAY is losing its row the same way (this CAUSE is reported ' +
+          'ONCE — raise the log level to `debug` to see the rest; a DIFFERENT cause gets its own `error` line). ' +
+          (missingTable
+            ? 'Fix: confirm `sys_audit_log` is reachable from the connection this write ran on. Its ADR-0057 §3.6 ' +
+              "lifecycle class routes it to the dedicated `telemetry` datasource whenever one is registered (`os dev` " +
+              'provisions one by default as a SIBLING SQLite file), so a "no such table" here usually means the write ' +
+              'executed against a DIFFERENT datasource than the one the table was created in — see framework#5226. ' +
+              'Set `OS_TELEMETRY_DB=0` to keep every lifecycle-classed object on the primary datasource.'
+            : 'Fix: resolve the driver fault quoted at the head of this line on the connection this write ran ' +
+              'on — every audited write that hits it loses its row until it is resolved.');
       // `error` is OPTIONAL on this sink, so `logger?.error?.(…)` printed
       // NOTHING when the host injected one without it — the durability
       // degradation this text describes would then be reported by nobody at

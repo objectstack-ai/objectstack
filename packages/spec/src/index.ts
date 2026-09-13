@@ -257,6 +257,7 @@ export {
   EVALUATED_EXPRESSION_SOURCE_REQUIRED,
   EvaluatedExpressionSchema,
   ExpressionInputSchema,
+  EvaluatedExpressionInputSchema,
   CronExpressionInputSchema,
   TemplateExpressionInputSchema,
   PredicateSchema,
@@ -274,6 +275,7 @@ export type {
   EvaluatedExpressionParsed,
   ExpressionMeta,
   ExpressionInput,
+  EvaluatedExpressionInput,
   Predicate,
   PredicateInput,
 } from './shared/expression.zod';

@@ -30,11 +30,16 @@
  * (`writeTemplateSrcFiles`) and checked through the command's own self-test
  * (`validateScaffold`), so neither half can drift from what `init` really does.
  *
- * Temp projects are created under this package's git-ignored `tmp/` (not
- * `os.tmpdir()`) because the rendered config imports `@objectstack/spec`,
- * which only resolves where Node can walk up into this package's
- * `node_modules`. Keeping them out of `test/` also keeps generated `.ts` away
- * from any glob that collects sources.
+ * Temp projects are created under this package's own `node_modules` (not
+ * `os.tmpdir()`, and not this package's `tmp/`) because the rendered config
+ * imports `@objectstack/spec`, which only resolves where Node can walk up
+ * into this package's `node_modules` -- the same reasoning
+ * `generate-scaffold-validates.test.ts` documents for its own materialized
+ * scaffolds. `node_modules` is git-ignored and already excluded from every
+ * source-walking gate, so a run killed before `afterAll` runs (a timeout, the
+ * container's foreground cap, `ctrl-c`) leaves inert litter behind instead of
+ * files a repo-wide scan can trip over. Keeping them out of `test/` also
+ * keeps generated `.ts` away from any glob that collects sources.
  */
 
 import { describe, it, expect, afterAll } from 'vitest';
@@ -46,7 +51,7 @@ import { TEMPLATES, sanitizeNamespace, writeTemplateSrcFiles } from '../src/comm
 import { validateScaffold, SCAFFOLD_RULE_COMMAND } from '../src/utils/scaffold-validate.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const TMP_ROOT = path.resolve(HERE, '../tmp');
+const TMP_ROOT = path.resolve(HERE, '../node_modules/.init-scaffold-authoring-rules');
 const PROJECT_NAME = 'my-app';
 
 const roots: string[] = [];

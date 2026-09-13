@@ -104,15 +104,22 @@ describe('[#15661] the refused set', () => {
     )));
   });
 
-  it('is WIDER than the SQL faces\' compile-time type-gate set, by exactly the temporal and JSON classes (H4)', () => {
-    // NON_TEXT_STORED_VALUE_TYPES (#14079) = numeric + boolean, the set the
-    // SQL compilers consult BENEATH the door. The door adds the classes whose
-    // stored form is a dialect question — refused here by declaration.
+  it('is WIDER than the SQL faces\' compile-time type-gate set, by exactly the structured-JSON class (H4)', () => {
+    // NON_TEXT_STORED_VALUE_TYPES is the set the SQL compilers consult BENEATH
+    // the door: numeric + boolean (#14079) and, since #15683's ruling, the
+    // three temporal classes. What is left over is the ONE class where the two
+    // sets still disagree — structured JSON, refused here by declaration and
+    // answered by its stored representation beneath. Read as a subset check
+    // plus a named remainder, so a class joining either set moves this row
+    // rather than passing silently.
     for (const t of NON_TEXT_STORED_VALUE_TYPES) expect(TEXT_OPERATOR_DOOR_REFUSED_TYPES.has(t), t).toBe(true);
     const beyond = [...TEXT_OPERATOR_DOOR_REFUSED_TYPES].filter((t) => !NON_TEXT_STORED_VALUE_TYPES.has(t));
-    expect(sorted(beyond)).toEqual(sorted(union(
-      CALENDAR_DATE_TYPES, INSTANT_TYPES, CLOCK_TIME_TYPES, STRUCTURED_JSON_TYPES,
-    )));
+    expect(sorted(beyond)).toEqual(sorted(STRUCTURED_JSON_TYPES));
+    // …and the temporal classes are on BOTH sides now — the #15683 half.
+    for (const t of union(CALENDAR_DATE_TYPES, INSTANT_TYPES, CLOCK_TIME_TYPES)) {
+      expect(NON_TEXT_STORED_VALUE_TYPES.has(t), t).toBe(true);
+      expect(TEXT_OPERATOR_DOOR_REFUSED_TYPES.has(t), t).toBe(true);
+    }
   });
 });
 

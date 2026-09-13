@@ -118,7 +118,6 @@ const DISPLAY: Array<{ name: string; label: string }> = [
   { name: 'objectstack-api', label: 'API' },
   { name: 'objectstack-i18n', label: 'i18n' },
   { name: 'objectstack-formula', label: 'Formula' },
-  { name: 'objectstack-pm-dispatch', label: 'PM Dispatch' },
   { name: 'objectstack-upgrade', label: 'Upgrade' },
 ];
 

@@ -33,7 +33,7 @@ import { checkProtocolCompat, type ProtocolHandshakeManifest } from '@objectstac
  * (`assertProtocolCompat`, raising `OS_PROTOCOL_INCOMPATIBLE`). `specVersion`
  * is retired from the stack config's CLI vocabulary; it keeps its meaning on
  * the unrelated marketplace TEMPLATE manifest
- * (`packages/spec/src/cloud/template-manifest.zod.ts`), which is a different
+ * (`packages/spec/src/marketplace/template-manifest.zod.ts`), which is a different
  * surface and is untouched.
  *
  * ## Why the range is judged by `checkProtocolCompat` and not re-parsed here

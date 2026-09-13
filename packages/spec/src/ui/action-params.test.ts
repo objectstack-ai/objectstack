@@ -468,3 +468,58 @@ describe('#14175 — ActionEngineFacade.find takes a FILTER (the `where` half), 
     expect('where' in envelope && 'where' in nested).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// #15117 — `ActionEngineFacade.delete` takes ONE id, or an ARRAY of ids
+// ---------------------------------------------------------------------------
+
+// The declared slot, read off the interface — not a retyped copy of it, so a
+// re-narrowing back to the single-id `string` this card retired fails HERE,
+// rather than in the first handler that hands the facade a list.
+type DeleteIds = Parameters<ActionEngineFacade['delete']>[1];
+
+// The type-level pin (the tsc channel, `tsc -p tsconfig.test.json`). `Eq` is
+// the strict mutual-assignability test, so the pre-#15117 declaration
+// (`string` alone) does not satisfy it — neither does a slot widened all the
+// way to `unknown`. Exported for the same reason the sibling pins are.
+export type DeleteIdsAcceptsOneOrMany = Assert< Eq< DeleteIds, string | string[] > >;
+
+describe('#15117 — ActionEngineFacade.delete accepts one id or an array, both as contract', () => {
+  it('types the second parameter as `string | string[]` (the tsc channel)', () => {
+    // The value-level half of `DeleteIdsAcceptsOneOrMany` above: literals
+    // annotated with the slot type, so the runtime run exercises the same
+    // declaration the type pin reads.
+    const one: DeleteIds = 'tsk_0001';
+    const many: DeleteIds = ['tsk_0001', 'tsk_0002'];
+
+    expect([typeof one, Array.isArray(many)]).toEqual(['string', true]);
+  });
+
+  it('positive control — both handler conventions compile, and so does the empty set', () => {
+    // The single-id convention (the CRM handler suites).
+    const singleId: DeleteIds = 'tsk_0001';
+    // The array convention (`examples/app-todo`'s `deleteCompletedTasks`),
+    // which before this card was reachable only through a hand-rolled copy of
+    // `ActionEngineFacade` — the workaround the widening retired.
+    const idArray: DeleteIds = ['tsk_0001', 'tsk_0002', 'tsk_0003'];
+    // An empty list deletes nothing and resolves; the member doc says so.
+    const empty: DeleteIds = [];
+
+    expect([singleId, idArray, empty].length).toBe(3);
+  });
+
+  it('refuses at compile time what neither convention admits', () => {
+    // Each `@ts-expect-error` is itself checked: if the slot ever ADMITS one
+    // of these, the directive goes unused and `tsc -p tsconfig.test.json` reds.
+    // @ts-expect-error — an id is a string; a number is not an id under either convention.
+    const numericId: DeleteIds = 42;
+    // @ts-expect-error — the array form is an array of ids, not of numbers.
+    const numericIds: DeleteIds = [1, 2];
+    // @ts-expect-error — one level of array, never a nested one.
+    const nestedIds: DeleteIds = [['tsk_0001']];
+    // @ts-expect-error — "delete nothing" is the EMPTY ARRAY, never a null id.
+    const nullId: DeleteIds = null;
+
+    expect([numericId, numericIds, nestedIds, nullId]).toHaveLength(4);
+  });
+});

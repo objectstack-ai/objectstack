@@ -15,6 +15,17 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { runImport, type ImportProtocolLike } from './import-runner';
+
+/**
+ * [#16952] Annotated FROM the exported declaration (`ImportProtocolLike`).
+ * These doubles used to say `args: any`, which is the erasure this card
+ * retired at the declaration — an implementor that re-states `any` on its own
+ * parameter opts back out of the contract, because the annotation wins over
+ * the contextual type.
+ */
+type CreateArgs = Parameters<ImportProtocolLike['createData']>[0];
+type UpdateArgs = Parameters<ImportProtocolLike['updateData']>[0];
+type CreateManyArgs = Parameters<NonNullable<ImportProtocolLike['createManyData']>>[0];
 import type { ExportFieldMeta } from './export-format.js';
 
 const metaMap = new Map<string, ExportFieldMeta>([['name', { name: 'name', type: 'text' }]]);
@@ -37,15 +48,15 @@ function makeProvider() {
   let idc = 0;
   const p: ImportProtocolLike = {
     findData: vi.fn(async () => []),
-    createData: vi.fn(async (args: any) => {
+    createData: vi.fn(async (args: CreateArgs) => {
       contexts.push(args.context);
       return { id: `d${++idc}`, ...args.data };
     }),
-    updateData: vi.fn(async (args: any) => {
+    updateData: vi.fn(async (args: UpdateArgs) => {
       contexts.push(args.context);
       return { id: args.id, ...args.data };
     }),
-    createManyData: vi.fn(async (args: any) => {
+    createManyData: vi.fn(async (args: CreateManyArgs) => {
       contexts.push(args.context);
       return { records: args.records.map((r: any) => ({ id: `d${++idc}`, ...r })) };
     }),

@@ -127,8 +127,32 @@ import { indexObjectGraph, recordsOf, resolveFieldPath, type ObjectGraph } from 
  *
  * The field key (a bare name, or a dotted relationship path) is then resolved
  * through `resolveFieldPath` (`object-graph.ts`), and the comparand is judged
- * only when the LEAF resolves to an author-declared field of type `date` or
- * `datetime` — the two types the ruling names.
+ * only when the LEAF resolves to a field of type `date` or `datetime` — the
+ * two types the ruling names.
+ *
+ * ### Registry-injected columns are judged too (#16340)
+ *
+ * `created_at` and `updated_at` are `datetime` columns the registry injects on
+ * almost every object, and they are the temporal columns an author reaches for
+ * most — but no object AUTHORS them, so for as long as the object graph
+ * recorded injected columns by name alone this arm could not see their type
+ * and stayed silent on exactly them. Measured on `origin/main` before the fix,
+ * on one dashboard widget over one object declaring `close_date: date`:
+ *
+ * ```
+ * close_date: 'last_30_days'               REFUSED   (authored date column)
+ * created_at: { $gte: 'last_30_days' }     REFUSED   (arm 1 — ordering, field-agnostic)
+ * created_at: 'last_30_days'               SILENT    <- the gap
+ * created_at: { $eq: 'last_30_days' }      SILENT    <- the gap
+ * updated_at: { $in: ['last_30_days'] }    SILENT    <- the gap
+ * stage: 'this_quarter'  (select column)   SILENT    <- correct: the picklist case
+ * ```
+ *
+ * The oracle below no longer asks whether the leaf was AUTHORED, only what it
+ * IS, because `GraphObject.injected` now carries each injected column's own
+ * registry definition. The `select`-column reading the arm exists to protect
+ * is untouched — an injected column's type comes from the platform's own
+ * tables, and not one of them is a picklist.
  *
  * ### What this arm deliberately does NOT judge
  *
@@ -138,9 +162,6 @@ import { indexObjectGraph, recordsOf, resolveFieldPath, type ObjectGraph } from 
  * - a position no ancestor binds (an app-level filter, a dashboard-level
  *   filter outside a widget), a dataset or object the stack does not declare,
  *   an object with no readable field map, a view on a non-`object` provider;
- * - a leaf that resolves only as a registry-INJECTED column (`created_at`,
- *   `updated_at`, …): the object graph carries no type for those — their type
- *   is registry-owned and invisible here (`FieldPathVerdict`'s own contract);
  * - a `time` field: the ruling names `date` / `datetime`, and a wall-clock
  *   column has no preset-shaped authoring slip worth a rule of its own;
  * - a field the object does not declare at all (a typo) — that is the
@@ -275,10 +296,16 @@ function finding(
 // ── Arm 2's field-type oracle ─────────────────────────────────────────────────
 
 /**
- * "Is this field key, resolved against the filter's bound object, an
- * author-declared `date` / `datetime` field?" — the one question arm 2 asks.
- * A key it cannot answer (no bound object, an unresolvable path, an injected
- * leaf, any other type) answers `false`, so the position stays unjudged.
+ * "Is this field key, resolved against the filter's bound object, a `date` /
+ * `datetime` field?" — the one question arm 2 asks. A key it cannot answer (no
+ * bound object, an unresolvable path, a column whose type nothing declares, any
+ * other type) answers `false`, so the position stays unjudged.
+ *
+ * [#16340] It reads `meta.type` on an INJECTED leaf exactly as on an authored
+ * one. There is no `verdict.injected` bail: the marker says WHO wrote the
+ * column, and the ruling turns on what the column IS. The only injected column
+ * with no type behind it is `id` — the driver's primary key — and it falls out
+ * through the same `undefined` type check as any untyped authored field.
  */
 type TemporalFieldOracle = (field: string) => boolean;
 
@@ -288,7 +315,7 @@ function temporalFieldOracle(graph: ObjectGraph, object: string | undefined): Te
   if (!object) return UNBOUND;
   return (field) => {
     const verdict = resolveFieldPath(graph, object, field);
-    if (!verdict || verdict.kind !== 'ok' || verdict.injected) return false;
+    if (!verdict || verdict.kind !== 'ok') return false;
     const type = verdict.meta?.type;
     return typeof type === 'string' && FIELD_TYPED_TEMPORAL_TYPES.has(type);
   };

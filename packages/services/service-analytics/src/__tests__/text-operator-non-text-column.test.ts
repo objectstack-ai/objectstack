@@ -99,12 +99,24 @@ const NON_STRING_ROWS = FILTER_TEXT_CASES.filter(
 );
 
 describe('[#14079] the shared classifier', () => {
-  it('reads NON_TEXT_STORED_VALUE_TYPES — the numeric and boolean classes, never the temporal ones', () => {
+  it('reads NON_TEXT_STORED_VALUE_TYPES — the numeric, boolean and (since #15683) temporal classes', () => {
     for (const t of ['number', 'currency', 'percent', 'rating', 'slider', 'progress', 'summary', 'boolean', 'toggle']) {
       expect(NON_TEXT_STORED_VALUE_TYPES.has(t), t).toBe(true);
       expect(isNonTextDeclaredType(t), t).toBe(true);
     }
-    for (const t of ['text', 'textarea', 'email', 'select', 'lookup', 'json', 'date', 'datetime', 'time']) {
+    // [#15683] The temporal classes joined the set by RULING (maintainer,
+    // 2026-09-05): a text operator over a column DECLARED `date` / `datetime` /
+    // `time` is type-gated exactly like a number, and the SQLite ISO-text match
+    // it used to answer is not a contract. This face reads the set, so the
+    // three arrived with no edit to `isNonTextDeclaredType`.
+    for (const t of ['date', 'datetime', 'time']) {
+      expect(NON_TEXT_STORED_VALUE_TYPES.has(t), t).toBe(true);
+      expect(isNonTextDeclaredType(t), t).toBe(true);
+    }
+    // `json` stays OUT: the door above this face refuses it by declaration
+    // (#15661), but beneath the door a structured column is still answered by
+    // its stored representation — the one class where the two sets disagree.
+    for (const t of ['text', 'textarea', 'email', 'select', 'lookup', 'json']) {
       expect(isNonTextDeclaredType(t), t).toBe(false);
     }
     // Unknown is NOT non-text: a column the host cannot classify keeps its LIKE.

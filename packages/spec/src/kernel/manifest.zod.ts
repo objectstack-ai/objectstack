@@ -21,8 +21,16 @@ import { NavigationContributionSchema } from '../ui/app.zod';
  * Structured permission grants requested by a plugin (ADR-0025 §3.2).
  * Each list scopes one capability surface the plugin may touch. The
  * install-time consent flow (ADR §3.5 step 2) turns this declaration into
- * the persisted `granted_permissions` set enforced at load by the
- * PluginPermissionEnforcer.
+ * the persisted `granted_permissions` set, which the loader REGISTERS on the
+ * PluginPermissionEnforcer at load (#13457).
+ *
+ * ⚠️ **Registered is not enforced.** Nothing queries that registry: the
+ * enforcer's gates are reachable only through `SecurePluginContext`, which
+ * has no production construction site, and its fs/network gates are called
+ * by nothing at all. A grant declared here records which surfaces were
+ * consented to and REFUSES NOTHING today — authoring this block does not
+ * confine the plugin. The per-plugin context that would make it refuse is
+ * the ADR-0025 materialize seam (#17147).
  *
  * The consented set reaches the runtime on the environment artifact
  * envelope — `EnvironmentArtifactSchema.grantedPermissions`
@@ -48,11 +56,19 @@ export const PluginPermissionsSchema = strictObject({
     + 'and this block decides which services, hooks, network hosts and filesystem paths the '
     + 'plugin may touch. The declared keys are `services`, `hooks`, `network` and `fs`.',
   aliases: {
-    // Edit distance cannot reach a two-letter abbreviation from the word it
-    // abbreviates, and `fs` is the one key here an author is most likely to
-    // spell out in full.
+    // These two are the unreachable case: edit distance cannot reach a
+    // two-letter abbreviation from the word it abbreviates, and `fs` is the
+    // one key here an author is most likely to spell out in full.
     filesystem: 'fs',
     paths: 'fs',
+    // `hosts` is the opposite case, and the stronger reason to curate an
+    // entry: it IS within budget of `hooks`. The fallback budget is
+    // `Math.max(2, Math.floor(key.length / 3))` (`shared/suggestions.zod.ts`),
+    // so a 5-character key gets 2, and `hosts`/`hooks` differ by exactly 2.
+    // Without this line the fallback answers `hosts` -> `hooks`, pointing the
+    // author at lifecycle hooks on the one block that also grants network
+    // access. This alias overrides a confident WRONG suggestion rather than
+    // filling a silent gap, and `manifest-unknown-keys.test.ts` pins that.
     hosts: 'network',
   },
 }, {
@@ -309,7 +325,7 @@ export const ManifestSchema = strictObject({
    * Package version following semantic versioning (major.minor.patch).
    *
    * @example "1.0.0"
-   * @example "2.1.0-beta.1"
+   * @example "2.1.0"
    */
   version: z.string().regex(/^\d+\.\d+\.\d+$/).describe('Package version (semantic versioning)'),
   
@@ -700,7 +716,10 @@ export const ManifestSchema = strictObject({
     'marketplace PUBLISH gate only (an unverified publisher requesting the `node` tier is ' +
     'rejected with HTTP 422 and forced to manual review), while load-side enforcement is ' +
     'NOT implemented, so a locally installed plugin is not isolated by the tier it ' +
-    'declares. Use the permission declarations, which are enforced.',
+    'declares. ⛔ Nor do the permission declarations give it back: the install-time ' +
+    'granted set is REGISTERED on the PluginPermissionEnforcer at load and queried by ' +
+    'nothing, so it refuses no operation. Neither surface confines a plugin today — do ' +
+    'not author either one expecting isolation.',
   ),
 
   /**

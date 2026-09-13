@@ -99,7 +99,46 @@ export interface CoverageReport {
     errors: number;
     warnings: number;
   };
+  /**
+   * What this run did with the registry-driven `metadataForms.*` baseline, and
+   * how many keys that decision moved.
+   *
+   * Reported rather than left implicit because the decision moves the
+   * **denominator**: `stats[].expected` and `coveragePercent` mean different
+   * things under the two modes, and a consumer reading a percentage out of
+   * `os i18n check --json` has no other way to tell which one it is holding.
+   * The console hint line is rendered from these same two numbers, so the two
+   * faces of the command cannot disagree about it.
+   *
+   * `excludedKeys` is `0` under `'included'` — never absent, so a machine
+   * consumer keying off presence never has to distinguish "counted them" from
+   * "this version does not tell me".
+   */
+  platformMetadataForms: {
+    mode: PlatformMetadataFormsMode;
+    /** Authored platform keys dropped from the expected set (0 when included). */
+    excludedKeys: number;
+  };
 }
+
+/** The disposition a report actually reached — never `'auto'`, which is a request. */
+export type PlatformMetadataFormsMode = 'included' | 'excluded';
+
+/**
+ * What a caller asks for; {@link resolvePlatformMetadataForms} turns it into a
+ * {@link PlatformMetadataFormsMode}.
+ *
+ *  - `'include'` — count the baseline. The **default**, because `os lint` is
+ *    the other caller and it folds the baseline away at the REPORT seam
+ *    instead, off `CoverageIssue['source']`, so it needs the issues to exist
+ *    in order to count them for its `--include-platform` hint line. ⛔ Flipping
+ *    this default would zero that hint silently; `i18n-platform-bucket.test.ts`
+ *    pins the coupling.
+ *  - `'exclude'` — drop it.
+ *  - `'auto'` — drop it unless this stack authors it (see
+ *    {@link stackAuthorsMetadataForms}).
+ */
+export type PlatformMetadataFormsOption = 'include' | 'exclude' | 'auto';
 
 export interface CoverageOptions {
   /**
@@ -119,6 +158,12 @@ export interface CoverageOptions {
    * errors. Useful for CI gates that demand full translation parity.
    */
   strict?: boolean;
+  /**
+   * How to treat the registry-driven `metadataForms.*` baseline. Defaults to
+   * `'include'` — see {@link PlatformMetadataFormsOption} for why that, and not
+   * `'auto'`, is the default at THIS seam.
+   */
+  platformMetadataForms?: PlatformMetadataFormsOption;
 }
 
 // ─── Bundle helpers ────────────────────────────────────────────────────
@@ -175,6 +220,74 @@ function flattenBundles(bundles: TranslationBundle[]): { merged: TranslationBund
     }
   }
   return { merged, locales: Array.from(localesSet).sort() };
+}
+
+// ─── Who owns the platform baseline ────────────────────────────────────
+
+/**
+ * Does this stack author the registry-driven `metadataForms.*` baseline
+ * itself?
+ *
+ * ## Why the question is asked of the CONFIG and not of a flag
+ *
+ * The `metadataForms.*` family is not walked out of the stack under
+ * examination at all: {@link collectExpectedEntries} builds it from
+ * `METADATA_FORM_REGISTRY` + `DEFAULT_METADATA_TYPE_REGISTRY`, identically for
+ * every config, empty ones included — ~773 Studio-form keys. For an
+ * application that is somebody else's surface: `@objectstack/platform-objects`
+ * ships those translations and the runtime serves them, so an app-shipped copy
+ * would *override* the platform's and go stale at the next upgrade. Counting
+ * them against an app's coverage percentage therefore reports a debt the app
+ * must not pay, which is what made `--strict` / `--threshold` unusable for an
+ * app package — the two flags whose entire purpose is CI gating.
+ *
+ * An unconditional exclusion is the wrong repair and is deliberately not what
+ * this is. It would turn the app side green by deleting the gate on the side
+ * that *does* own those strings: `platform-objects`' own extract config carries
+ * `metadataForms` in every locale bundle it declares, and its coverage number
+ * is a real number about real work. So ownership is **observed**, from the one
+ * place it is already written down — the bundles the stack itself attaches.
+ * Ship the baseline and you are asked to complete it; ship none of it and it
+ * is not yours.
+ *
+ * A non-empty **string leaf** is the test, not the mere presence of the group:
+ * an empty `metadataForms: {}`, or a scaffold of empty strings, is what `os
+ * i18n extract --fill=empty` leaves behind before anyone translates anything,
+ * and reading that as a claim of ownership would hand an app the 773-key debt
+ * on the strength of a placeholder. That is the same rule {@link lookupKey}
+ * applies on every other bundle read: an empty translation is not a
+ * translation.
+ */
+export function stackAuthorsMetadataForms(config: any): boolean {
+  const bundles: unknown[] = Array.isArray(config?.translations) ? config.translations : [];
+  const hasText = (node: unknown): boolean => {
+    if (typeof node === 'string') return node.length > 0;
+    if (!node || typeof node !== 'object' || Array.isArray(node)) return false;
+    return Object.values(node as Record<string, unknown>).some(hasText);
+  };
+  for (const bundle of bundles) {
+    if (!bundle || typeof bundle !== 'object') continue;
+    for (const data of Object.values(bundle as Record<string, unknown>)) {
+      if (!data || typeof data !== 'object') continue;
+      if (hasText((data as Record<string, unknown>).metadataForms)) return true;
+    }
+  }
+  return false;
+}
+
+/** Turn a caller's request into the disposition a report will record. */
+function resolvePlatformMetadataForms(
+  option: PlatformMetadataFormsOption | undefined,
+  config: any,
+): PlatformMetadataFormsMode {
+  switch (option ?? 'include') {
+    case 'exclude':
+      return 'excluded';
+    case 'auto':
+      return stackAuthorsMetadataForms(config) ? 'included' : 'excluded';
+    default:
+      return 'included';
+  }
 }
 
 // ─── Expected key extraction ───────────────────────────────────────────
@@ -501,12 +614,24 @@ export function computeI18nCoverage(config: any, opts: CoverageOptions = {}): Co
   // for two opposite facts.
   const authoredInBundle = (path: string[]): boolean =>
     Object.values(merged).some((data) => lookupKey(data, path) !== undefined);
-  const expected = collectExpectedKeys(config).filter(
+  const authored = collectExpectedKeys(config).filter(
     (key) =>
       key.inline !== undefined
       || inlineLocaleAny(key.inlineLocales) !== undefined
       || authoredInBundle(key.path),
   );
+
+  // The platform baseline is dropped from the POPULATION, not from the issue
+  // list, because this report's headline number is a percentage: an app that
+  // has translated every string it owns reads 38.9% while 773 of its 1265
+  // "expected" keys belong to `@objectstack/platform-objects`. `os lint` folds
+  // the same family away one seam later (`foldCoverageIssues`, keyed on
+  // `CoverageIssue['source']`) and can afford to, because it reports findings
+  // and never a denominator.
+  const platformMode = resolvePlatformMetadataForms(opts.platformMetadataForms, config);
+  const expected =
+    platformMode === 'included' ? authored : authored.filter((key) => key.source !== 'metadataForm');
+  const excludedPlatformKeys = authored.length - expected.length;
   const issues: CoverageIssue[] = [];
   const stats: CoverageStats[] = [];
 
@@ -570,5 +695,6 @@ export function computeI18nCoverage(config: any, opts: CoverageOptions = {}): Co
       errors,
       warnings,
     },
+    platformMetadataForms: { mode: platformMode, excludedKeys: excludedPlatformKeys },
   };
 }

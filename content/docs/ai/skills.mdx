@@ -28,14 +28,14 @@ See [Agents](/docs/ai/agents#you-extend-the-platform-with-skills-not-agents) for
 Skills are distributed through the [skills.sh](https://skills.sh) registry from the [`objectstack-ai/objectstack`](https://github.com/objectstack-ai/objectstack) repository's `skills/` directory.
 
 ```bash
-# New project — create-objectstack installs skills automatically
+# New project — create-objectstack installs them automatically, for one agent
 npm create objectstack@latest my-app
 
-# Existing project — add the whole bundle (re-run to update)
-npx skills add objectstack-ai/objectstack/skills --all
+# Existing project — add the whole bundle for your agent (re-run to update)
+npx skills add objectstack-ai/objectstack/skills --skill '*' --agent claude-code -y
 ```
 
-The bundle is versioned and updated as **one unit** — `--all` is idempotent, so you never track skills individually. For the full per-skill catalog and install options, see the [AI Skills Reference](/docs/ai/skills-reference#installing-skills).
+Name your own runtime after `--agent` (`codex`, `cursor`, …); the bundle lands **once**, in that agent's own directory. It is versioned and updated as **one unit** — re-running the command is idempotent, so you never track skills individually. `--all` installs for every runtime the CLI knows and writes the bundle to **three** destinations instead of one; for that trade-off and the rest of the install options, see the [AI Skills Reference](/docs/ai/skills-reference#installing-skills).
 
 ---
 
@@ -126,7 +126,7 @@ This format ensures AI assistants generate protocol-compliant code.
 
 ## The skill catalog
 
-ObjectStack provides **nine domain-specific skills**, one per protocol domain — Platform, Data, Query, UI, Automation, AI, API, i18n, and Formula — plus **PM Dispatch**, a `process` skill that teaches no schema: it runs the multi-agent backlog → dispatch → review → land loop for a project built on the platform, and the procedure for reporting a platform defect upstream.
+ObjectStack provides **nine domain-specific skills**, one per protocol domain — Platform, Data, Query, UI, Automation, AI, API, i18n, and Formula — plus **Upgrade**, a `process` skill that teaches no schema: it carries a metadata project across a protocol major, running the deterministic conversion chain first and then working the semantic residue the chain cannot express.
 
 The authoritative list (names, domains, and "use when / do not use" boundaries) is generated from each skill's `SKILL.md` frontmatter. See the **[AI Skills Reference](/docs/ai/skills-reference)** for the full catalog with per-skill detail.
 

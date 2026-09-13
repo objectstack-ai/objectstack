@@ -7,7 +7,8 @@ import { DependencyResolutionResultSchema } from '../kernel/dependency-resolutio
 import { UpgradePlanSchema } from '../kernel/package-upgrade.zod';
 import { PackageArtifactSchema } from '../kernel/package-artifact.zod';
 import { ManifestSchema } from '../kernel/manifest.zod';
-import { ArtifactReferenceSchema } from '../cloud/marketplace.zod';
+import { ArtifactReferenceSchema } from '../marketplace/marketplace.zod';
+import { AssembledPackageBodySchema } from '../stack.zod';
 
 /**
  * # Package API Protocol
@@ -43,6 +44,142 @@ export const PackagePathParamsSchema = lazySchema(() => z.object({
 export type PackagePathParams = z.input<typeof PackagePathParamsSchema>;
 
 // ==========================================
+// Installed Package Rows — the two declared manifest STAGES
+// ==========================================
+
+/**
+ * One installed-package row whose `manifest` is the ASSEMBLED package body —
+ * the assembled-stage counterpart of {@link InstalledPackageSchema}.
+ *
+ * ## The stage this exists to name
+ *
+ * `InstalledPackageSchema.manifest` is `ManifestSchema`, the AUTHORING stage:
+ * its `objects` is `z.array(z.string())`, GLOB PATTERNS naming files a
+ * file-based loader should read. What a `defineStack()` host installs is the
+ * ASSEMBLED body, whose `objects` are object DEFINITIONS — `ObjectQL.registerApp`
+ * is handed exactly that and iterates it into `registerObject(objDef, …)`, and
+ * `SchemaRegistry.installPackage` records what it was handed. So the read doors
+ * serve rows the authoring declaration refuses, with a single surviving reason:
+ * the manifest stage.
+ *
+ * That is the mismatch #14242 identified one layer down, and this declaration
+ * follows its ruling rather than re-deriving one. The maintainer's decision
+ * (2026-09-02, road B), quoted at `ArtifactPackageSchema` in `../stack.zod`,
+ * was to «declare the assembled stage rather than widen the authoring one».
+ * ⛔ Widening `ManifestSchema.objects` into a union of both spellings was road
+ * C and was REJECTED by name: a union AT THE KEY makes neither stage checkable,
+ * which is the tolerate-at-the-consumer shape Prime Directive #12 refuses. So
+ * `ManifestSchema` is untouched here — still `strictObject`, still globs — and
+ * the assembled stage gets its own name, built from `AssembledPackageBodySchema`
+ * (#14242's own declaration) rather than a second transcription of it.
+ *
+ * The body half is deliberately typed `Record<string, unknown>`; the reason is
+ * recorded at `AssembledPackageBodySchema` and is not repeated here. The RUNTIME
+ * schema still carries the manifest's every field plus every collection's full
+ * declaration, so a wrong-shaped body is refused exactly as it is there — with
+ * the one measured exception {@link AssembledPackageRecordBodySchema} states
+ * and pins.
+ */
+/**
+ * The assembled package body AS THE REGISTRY RECORDS IT — the same declaration,
+ * with the two collections that have no JSON form left unchecked.
+ *
+ * ## Why this exists at all, measured rather than assumed
+ *
+ * `SchemaRegistry.installPackage` does not store the caller's object; it stores
+ * `toRecordManifest(manifest)`, a structural JSON projection that DROPS
+ * functions, class instances, `Map`, `Set` and every other exotic value. So the
+ * row this API serves is JSON by construction, and two of the assembled body's
+ * 55 collections cannot survive that projection in the shape they declare:
+ *
+ * - `functions` — a `z.function()` branch (a named callable);
+ * - `hooks` — a `z.custom()` branch (a lifecycle handler).
+ *
+ * Those same two are the reason `AssembledPackageBodySchema` has NO JSON Schema
+ * at all: `z.toJSONSchema` refuses a function and a custom type, which is also
+ * why `ArtifactPackageSchema` and `ObjectStackDefinitionSchema` publish none.
+ * Embedding the body verbatim in the two published response schemas below made
+ * BOTH of them disappear from `json-schema/api/`, which the build's own
+ * disappearance ratchet refuses and whose only other remedy is retiring two
+ * published defs. `build-schemas.ts` names the remedy taken here instead:
+ * «make it emit — narrow the unrepresentable member».
+ *
+ * ⛔ The override set is NOT hand-picked, and must never become so. It is the
+ * measured set of shape members with no JSON form, pinned key-by-key in
+ * `./package-api.test.ts`: a new collection with no JSON form reddens there,
+ * naming itself, instead of silently unpublishing these responses again.
+ *
+ * ⚠️ What `unknown` costs, stated plainly: on THIS surface those two keys are
+ * accepted without being checked. It is a widening from today, where both are
+ * refused outright by `ManifestSchema`'s strict close while the door really can
+ * serve them — so the declaration moves from wrong to incomplete, never from
+ * checked to tolerant. Every other key, `objects` included, is checked at the
+ * assembled stage exactly as `AssembledPackageBodySchema` declares it. The
+ * ARTIFACT surface is untouched and keeps both collections fully declared.
+ */
+const AssembledPackageRecordBodySchema = lazySchema(() =>
+  (AssembledPackageBodySchema as unknown as z.ZodObject<z.ZodRawShape>).extend({
+    functions: z.unknown().optional()
+      .describe('Named handler functions, as they survived the record JSON projection'),
+    hooks: z.unknown().optional()
+      .describe('Object lifecycle hooks, as they survived the record JSON projection'),
+  }).describe('One package as assembled, as the registry RECORDS it (JSON only)'));
+
+export const AssembledInstalledPackageSchema = lazySchema(() => InstalledPackageSchema.extend({
+  manifest: AssembledPackageRecordBodySchema.describe('The ASSEMBLED package body this row carries'),
+}).describe('Installed package row whose manifest is the assembled package body'));
+export type AssembledInstalledPackage = z.input<typeof AssembledInstalledPackageSchema>;
+/** Post-parse shape of {@link AssembledInstalledPackage} — defaults applied, transforms run (ADR-0122). */
+export type AssembledInstalledPackageParsed = z.infer<typeof AssembledInstalledPackageSchema>;
+
+/**
+ * One installed-package row at WHICHEVER manifest stage it was installed at —
+ * the element the read doors (`GET /packages`, `GET /packages/:id`) serve.
+ *
+ * ## Why this surface names BOTH stages, where the artifact names one
+ *
+ * #14242 bound the artifact's `packages[]` to the assembled stage ALONE, and
+ * its stated reason is a property of that surface: «a glob in a compiled
+ * artifact names files nobody will read». The installed-packages table is not
+ * a compiled artifact. It is the record of what was installed, and BOTH stages
+ * reach it through DECLARED doors:
+ *
+ * - {@link PackageInstallRequestSchema} declares `manifest: ManifestSchema` —
+ *   the AUTHORING stage — and `POST /packages` hands that body straight to
+ *   `SchemaRegistry.installPackage`, which stores a JSON projection of it;
+ * - a `defineStack()` host reaches the same table through
+ *   `ObjectQL.registerApp`, which installs the ASSEMBLED body.
+ *
+ * ⇒ a read contract naming only the assembled stage would refuse a row this
+ * API's own install contract is declared to produce. Naming only the authoring
+ * stage is the defect this declaration closes. So the row is declared as what
+ * it is: one of two stages, each named by its own closed declaration.
+ *
+ * ## ⛔ This is a union of two whole STAGES, never a tolerant shape
+ *
+ * Road C's defect was a union INSIDE a key: `objects: (string | ObjectDef)[]`
+ * describes no stage, and admits an array that mixes globs with definitions.
+ * This union is over two complete, closed declarations, so every parse is a
+ * FULL parse of one coherent stage and a body belonging to neither — a mixed
+ * `objects` array among them — is refused by both branches and therefore by
+ * this schema. That refusal is pinned in
+ * `packages/runtime/src/domains/packages-read-delete-response-conformance.test.ts`,
+ * beside the two doors, so «it accepts both» can never quietly become «it
+ * accepts anything».
+ *
+ * ⛔ Never relax either branch to make a payload fit. A row that parses through
+ * neither stage is a producer defect, and this is the declaration that has to
+ * keep saying so.
+ */
+export const InstalledPackageAtEitherStageSchema = lazySchema(() => z.union([
+  InstalledPackageSchema,
+  AssembledInstalledPackageSchema,
+]).describe('Installed package row at whichever manifest stage it was installed at'));
+export type InstalledPackageAtEitherStage = z.input<typeof InstalledPackageAtEitherStageSchema>;
+/** Post-parse shape of {@link InstalledPackageAtEitherStage} — defaults applied, transforms run (ADR-0122). */
+export type InstalledPackageAtEitherStageParsed = z.infer<typeof InstalledPackageAtEitherStageSchema>;
+
+// ==========================================
 // 2. List Packages (GET /api/v1/packages)
 // ==========================================
 
@@ -72,7 +209,7 @@ export type ListInstalledPackagesRequestParsed = z.infer<typeof ListInstalledPac
  */
 export const ListInstalledPackagesResponseSchema = lazySchema(() => BaseResponseSchema.extend({
   data: z.object({
-    packages: z.array(InstalledPackageSchema).describe('Installed packages'),
+    packages: z.array(InstalledPackageAtEitherStageSchema).describe('Installed packages'),
     total: z.number().int().optional().describe('Total matching packages'),
     nextCursor: z.string().optional().describe('Cursor for the next page'),
     hasMore: z.boolean().describe('Whether more packages are available'),
@@ -96,7 +233,7 @@ export type GetInstalledPackageRequest = z.input<typeof GetInstalledPackageReque
  * Response for getting a single installed package.
  */
 export const GetInstalledPackageResponseSchema = lazySchema(() => BaseResponseSchema.extend({
-  data: InstalledPackageSchema.describe('Installed package details'),
+  data: InstalledPackageAtEitherStageSchema.describe('Installed package details'),
 }).describe('Get installed package response'));
 export type GetInstalledPackageResponse = z.input<typeof GetInstalledPackageResponseSchema>;
 /** Post-parse shape of {@link GetInstalledPackageResponse} — defaults applied, transforms run (ADR-0122). */

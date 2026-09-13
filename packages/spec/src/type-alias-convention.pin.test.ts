@@ -119,16 +119,10 @@ import type * as M41 from './automation/node-executor.zod.js';
 import type * as M42 from './automation/state-machine.zod.js';
 import type * as M43 from './automation/time-relative-trigger.zod.js';
 import type * as M44 from './automation/webhook.zod.js';
-import type * as M45 from './cloud/app-store.zod.js';
-import type * as M46 from './cloud/developer-portal.zod.js';
-import type * as M47 from './cloud/environment-package.zod.js';
-import type * as M48 from './cloud/environment.zod.js';
-import type * as M49 from './cloud/marketplace-admin.zod.js';
-import type * as M50 from './cloud/marketplace.zod.js';
-import type * as M51 from './cloud/package-version.zod.js';
-import type * as M52 from './cloud/package.zod.js';
-import type * as M53 from './cloud/template-manifest.zod.js';
-import type * as M54 from './cloud/tenant.zod.js';
+import type * as M50 from './marketplace/marketplace.zod.js';
+import type * as M51 from './marketplace/package-version.zod.js';
+import type * as M52 from './marketplace/package.zod.js';
+import type * as M53 from './marketplace/template-manifest.zod.js';
 import type * as M55 from './data/analytics.zod.js';
 import type * as M56 from './data/data-engine.zod.js';
 import type * as M57 from './data/datasource.zod.js';
@@ -205,6 +199,7 @@ import type * as M177 from './data/date-macros.zod.js';
 import type * as M178 from './data/field-value.zod.js';
 import type * as M179 from './data/mapping.zod.js';
 import type * as M180 from './security/sharing.zod.js';
+import type * as M186 from './automation/schedule-organization.zod.js';
 import type * as M114 from './shared/metadata-types.zod.js';
 import type * as M115 from './shared/protection.zod.js';
 import type * as M116 from './stack.zod.js';
@@ -275,7 +270,7 @@ import type * as M184 from './shared/value-domain.zod.js';
 import type * as M185 from './shared/epoch.zod.js';
 
 // ---------------------------------------------------------------------------
-// 811 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 783 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -389,6 +384,8 @@ export type Iso67 = Assert<Eq< z.input< typeof M17.DiscoveryEnvironmentSchema >,
 export type Iso68 = Assert<Eq< z.input< typeof M17.WellKnownCapabilitiesSchema >, z.infer< typeof M17.WellKnownCapabilitiesSchema > >>;
 export type Iso69 = Assert<Eq< z.input< typeof M17.CapabilityDescriptorSchema >, z.infer< typeof M17.CapabilityDescriptorSchema > >>;
 export type Iso70 = Assert<Eq< z.input< typeof M17.DiscoverySchema >, z.infer< typeof M17.DiscoverySchema > >>;
+// [#16325] `EnvironmentTypeSchema` moved here from cloud/environment.zod.ts (was Iso262).
+export type Iso871 = Assert<Eq< z.input< typeof M17.EnvironmentTypeSchema >, z.infer< typeof M17.EnvironmentTypeSchema > >>;
 export type Iso71 = Assert<Eq< z.input< typeof M17.ApiRoutesSchema >, z.infer< typeof M17.ApiRoutesSchema > >>;
 export type Iso72 = Assert<Eq< z.input< typeof M17.ServiceInfoSchema >, z.infer< typeof M17.ServiceInfoSchema > >>;
 export type Iso73 = Assert<Eq< z.input< typeof M17.RouteHealthEntrySchema >, z.infer< typeof M17.RouteHealthEntrySchema > >>;
@@ -632,45 +629,17 @@ export type Iso246 = Assert<Eq< z.input< typeof M42.StateMachineSchema >, z.infe
 // automation/time-relative-trigger.zod.ts
 export type Iso247 = Assert<Eq< z.input< typeof M43.TimeRelativeTriggerSchema >, z.infer< typeof M43.TimeRelativeTriggerSchema > >>;
 
+// automation/schedule-organization.zod.ts
+// [#16659] A bare non-empty string: no transform, no default, no coercion — an
+// organization id is written exactly as it is stored. So input === infer, and an
+// `XParsed` here would be a permanent synonym. The day this schema learns to
+// normalize an id, this line goes red and the ADR's remedy applies.
+export type Iso872 = Assert<Eq< z.input< typeof M186.ScheduleOrganizationSchema >, z.infer< typeof M186.ScheduleOrganizationSchema > >>;
+
 // automation/webhook.zod.ts
 export type Iso248 = Assert<Eq< z.input< typeof M44.WebhookTriggerType >, z.infer< typeof M44.WebhookTriggerType > >>;
 
-// cloud/app-store.zod.ts
-export type Iso249 = Assert<Eq< z.input< typeof M45.ReviewModerationStatusSchema >, z.infer< typeof M45.ReviewModerationStatusSchema > >>;
-export type Iso250 = Assert<Eq< z.input< typeof M45.SubmitReviewRequestSchema >, z.infer< typeof M45.SubmitReviewRequestSchema > >>;
-export type Iso251 = Assert<Eq< z.input< typeof M45.RecommendationReasonSchema >, z.infer< typeof M45.RecommendationReasonSchema > >>;
-export type Iso252 = Assert<Eq< z.input< typeof M45.RecommendedAppSchema >, z.infer< typeof M45.RecommendedAppSchema > >>;
-export type Iso253 = Assert<Eq< z.input< typeof M45.AppDiscoveryResponseSchema >, z.infer< typeof M45.AppDiscoveryResponseSchema > >>;
-export type Iso254 = Assert<Eq< z.input< typeof M45.SubscriptionStatusSchema >, z.infer< typeof M45.SubscriptionStatusSchema > >>;
-
-// cloud/developer-portal.zod.ts
-export type Iso255 = Assert<Eq< z.input< typeof M46.ReleaseChannelSchema >, z.infer< typeof M46.ReleaseChannelSchema > >>;
-export type Iso256 = Assert<Eq< z.input< typeof M46.UpdateListingRequestSchema >, z.infer< typeof M46.UpdateListingRequestSchema > >>;
-export type Iso257 = Assert<Eq< z.input< typeof M46.ListingActionRequestSchema >, z.infer< typeof M46.ListingActionRequestSchema > >>;
-export type Iso258 = Assert<Eq< z.input< typeof M46.AnalyticsTimeRangeSchema >, z.infer< typeof M46.AnalyticsTimeRangeSchema > >>;
-export type Iso259 = Assert<Eq< z.input< typeof M46.TimeSeriesPointSchema >, z.infer< typeof M46.TimeSeriesPointSchema > >>;
-
-// cloud/environment-package.zod.ts
-export type Iso260 = Assert<Eq< z.input< typeof M47.EnvironmentPackageStatusSchema >, z.infer< typeof M47.EnvironmentPackageStatusSchema > >>;
-export type Iso261 = Assert<Eq< z.input< typeof M47.RollbackEnvironmentPackageRequestSchema >, z.infer< typeof M47.RollbackEnvironmentPackageRequestSchema > >>;
-
-// cloud/environment.zod.ts
-export type Iso262 = Assert<Eq< z.input< typeof M48.EnvironmentTypeSchema >, z.infer< typeof M48.EnvironmentTypeSchema > >>;
-export type Iso263 = Assert<Eq< z.input< typeof M48.EnvironmentStatusSchema >, z.infer< typeof M48.EnvironmentStatusSchema > >>;
-export type Iso264 = Assert<Eq< z.input< typeof M48.EnvironmentDriverSchema >, z.infer< typeof M48.EnvironmentDriverSchema > >>;
-export type Iso265 = Assert<Eq< z.input< typeof M48.EnvironmentVisibilitySchema >, z.infer< typeof M48.EnvironmentVisibilitySchema > >>;
-export type Iso266 = Assert<Eq< z.input< typeof M48.EnvironmentCredentialStatusSchema >, z.infer< typeof M48.EnvironmentCredentialStatusSchema > >>;
-export type Iso267 = Assert<Eq< z.input< typeof M48.EnvironmentRoleSchema >, z.infer< typeof M48.EnvironmentRoleSchema > >>;
-export type Iso268 = Assert<Eq< z.input< typeof M48.EnvironmentMemberSchema >, z.infer< typeof M48.EnvironmentMemberSchema > >>;
-
-// cloud/marketplace-admin.zod.ts
-export type Iso269 = Assert<Eq< z.input< typeof M49.ReviewDecisionSchema >, z.infer< typeof M49.ReviewDecisionSchema > >>;
-export type Iso270 = Assert<Eq< z.input< typeof M49.RejectionReasonSchema >, z.infer< typeof M49.RejectionReasonSchema > >>;
-export type Iso271 = Assert<Eq< z.input< typeof M49.PolicyViolationTypeSchema >, z.infer< typeof M49.PolicyViolationTypeSchema > >>;
-export type Iso272 = Assert<Eq< z.input< typeof M49.MarketplaceHealthMetricsSchema >, z.infer< typeof M49.MarketplaceHealthMetricsSchema > >>;
-export type Iso273 = Assert<Eq< z.input< typeof M49.TrendingListingSchema >, z.infer< typeof M49.TrendingListingSchema > >>;
-
-// cloud/marketplace.zod.ts
+// marketplace/marketplace.zod.ts
 export type Iso274 = Assert<Eq< z.input< typeof M50.ArtifactDownloadResponseSchema >, z.infer< typeof M50.ArtifactDownloadResponseSchema > >>;
 export type Iso275 = Assert<Eq< z.input< typeof M50.PublisherVerificationSchema >, z.infer< typeof M50.PublisherVerificationSchema > >>;
 export type Iso276 = Assert<Eq< z.input< typeof M50.MarketplaceCategorySchema >, z.infer< typeof M50.MarketplaceCategorySchema > >>;
@@ -678,13 +647,13 @@ export type Iso277 = Assert<Eq< z.input< typeof M50.ListingStatusSchema >, z.inf
 export type Iso278 = Assert<Eq< z.input< typeof M50.PricingModelSchema >, z.infer< typeof M50.PricingModelSchema > >>;
 export type Iso279 = Assert<Eq< z.input< typeof M50.MarketplaceInstallResponseSchema >, z.infer< typeof M50.MarketplaceInstallResponseSchema > >>;
 
-// cloud/package-version.zod.ts
+// marketplace/package-version.zod.ts
 export type Iso280 = Assert<Eq< z.input< typeof M51.PackageVersionStatusSchema >, z.infer< typeof M51.PackageVersionStatusSchema > >>;
 export type Iso281 = Assert<Eq< z.input< typeof M51.CreatePackageVersionRequestSchema >, z.infer< typeof M51.CreatePackageVersionRequestSchema > >>;
 export type Iso282 = Assert<Eq< z.input< typeof M51.UpdatePackageVersionRequestSchema >, z.infer< typeof M51.UpdatePackageVersionRequestSchema > >>;
 export type Iso283 = Assert<Eq< z.input< typeof M51.PublishPackageVersionRequestSchema >, z.infer< typeof M51.PublishPackageVersionRequestSchema > >>;
 
-// cloud/package.zod.ts
+// marketplace/package.zod.ts
 export type Iso284 = Assert<Eq< z.input< typeof M52.PackageVisibilitySchema >, z.infer< typeof M52.PackageVisibilitySchema > >>;
 export type Iso285 = Assert<Eq< z.input< typeof M52.PackageCategorySchema >, z.infer< typeof M52.PackageCategorySchema > >>;
 export type Iso286 = Assert<Eq< z.input< typeof M52.PackagePublisherSchema >, z.infer< typeof M52.PackagePublisherSchema > >>;
@@ -694,15 +663,8 @@ export type Iso289 = Assert<Eq< z.input< typeof M52.PackageTranslationsSchema >,
 export type Iso290 = Assert<Eq< z.input< typeof M52.CreatePackageRequestSchema >, z.infer< typeof M52.CreatePackageRequestSchema > >>;
 export type Iso291 = Assert<Eq< z.input< typeof M52.UpdatePackageRequestSchema >, z.infer< typeof M52.UpdatePackageRequestSchema > >>;
 
-// cloud/template-manifest.zod.ts
+// marketplace/template-manifest.zod.ts
 export type Iso292 = Assert<Eq< z.input< typeof M53.TemplateManifestSchema >, z.infer< typeof M53.TemplateManifestSchema > >>;
-
-// cloud/tenant.zod.ts
-export type Iso293 = Assert<Eq< z.input< typeof M54.TenantDatabaseStatusSchema >, z.infer< typeof M54.TenantDatabaseStatusSchema > >>;
-export type Iso294 = Assert<Eq< z.input< typeof M54.TenantPlanSchema >, z.infer< typeof M54.TenantPlanSchema > >>;
-export type Iso295 = Assert<Eq< z.input< typeof M54.PackageInstallationStatusSchema >, z.infer< typeof M54.PackageInstallationStatusSchema > >>;
-export type Iso296 = Assert<Eq< z.input< typeof M54.TenantContextSchema >, z.infer< typeof M54.TenantContextSchema > >>;
-export type Iso297 = Assert<Eq< z.input< typeof M54.TenantIdentificationSourceSchema >, z.infer< typeof M54.TenantIdentificationSourceSchema > >>;
 
 // data/analytics.zod.ts
 export type Iso298 = Assert<Eq< z.input< typeof M55.MetricSchema >, z.infer< typeof M55.MetricSchema > >>;
@@ -1692,7 +1654,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 811 isomorphic pins', () => {
+  it('still declares all 783 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2188,7 +2150,41 @@ describe('ADR-0122 type-alias convention', () => {
     // left the isomorphic family the way ADR-0122 prescribes: the `XParsed`
     // alias declared, the pin deleted. -4 converted to `XParsed` pairs; the
     // Iso numbers stay vacant (ids are claims about pins, not positions).
-    expect(pins).toHaveLength(811);
+    //
+    // 811 -> 782 is #16325, the `./cloud` subpath leaving `@objectstack/spec`
+    // (maintainer ruling, option B "cut by owner"): the six control-plane
+    // modules — `cloud/app-store` (6 pins), `developer-portal` (5),
+    // `environment-package` (2), `environment` (7), `marketplace-admin` (5),
+    // `tenant` (5) — left with their 30 pins (module slots M45–M49 and M54 are
+    // vacant), and `EnvironmentTypeSchema` moved with its only open-source
+    // reader to `api/discovery.zod.ts` (M17), where it is pinned again as
+    // `Iso871`. The four package-format modules (M50–M53) moved to
+    // `marketplace/` and kept their pins. -30 + 1.
+    //
+    // 782 -> 783 is #16659's `ScheduleOrganizationSchema`
+    // (automation/schedule-organization.zod.ts, new module slot M186): the
+    // acting organization a time-triggered flow declares, a bare
+    // `z.string().min(1)` — no coercion, no default, no transform, because an
+    // organization id is written exactly as it is stored. The (RISE) case, one
+    // new pin. +1 added.
+    //
+    // ⚠️ Worth one line on how it ARRIVED, because the module is not new — only
+    // its NAME is. It shipped in the same card as `schedule-organization.ts`,
+    // and every gate in this family reads `*.zod.ts` only, so neither this pin
+    // file nor `check:spec-parsed-alias` could see it. Renaming the file to
+    // `.zod.ts` is what asked the question, and the answer was a real ADR-0122
+    // violation (`z.infer` on the bare alias) sitting green behind an extension.
+    //
+    // ⚠️ Its id took a SECOND number on the merge, and that is the interesting
+    // half: this branch authored the pin as `Iso871` while #16325 landed its
+    // own `Iso871` (`EnvironmentTypeSchema`) on `main`. The two additions are
+    // disjoint pins, so the text merge took BOTH lines with no conflict marker
+    // and left two declarations sharing one id — a duplicate-identifier error
+    // tsc catches, but only after a merge that read clean. Renumbered here to
+    // `Iso872`, the next free id after the merged file's maximum; ids are
+    // claims about pins, not positions, so the collision costs nothing but a
+    // number. The merged count is 811 - 30 + 1 + 1.
+    expect(pins).toHaveLength(783);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either

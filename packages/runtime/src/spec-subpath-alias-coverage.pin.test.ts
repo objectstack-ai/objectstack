@@ -121,9 +121,11 @@ describe('every published `@objectstack/spec` subpath resolves to spec SOURCE (#
     // A short population would make every loop below pass vacuously, which is
     // the exact shape of the defect this file pins.
     expect(PUBLISHED_SUBPATHS.length).toBeGreaterThanOrEqual(15);
-    // The three the hand-written enumeration had missed, named individually so
-    // that a filter bug dropping them cannot be invisible.
-    expect(PUBLISHED_SUBPATHS).toContain('@objectstack/spec/cloud');
+    // The three the hand-written enumeration had missed (#9457), named
+    // individually so that a filter bug dropping them cannot be invisible.
+    // `cloud` left the exports map at #16325; `marketplace` — the subpath that
+    // took its package-format half — stands in for it here.
+    expect(PUBLISHED_SUBPATHS).toContain('@objectstack/spec/marketplace');
     expect(PUBLISHED_SUBPATHS).toContain('@objectstack/spec/integration');
     expect(PUBLISHED_SUBPATHS).toContain('@objectstack/spec/studio');
   });

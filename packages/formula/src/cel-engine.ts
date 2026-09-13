@@ -64,7 +64,21 @@ export function buildEnv(now: () => Date, timezone = 'UTC'): Environment {
 }
 
 /**
- * Namespace roots that a `record`-scoped CEL site may legitimately reference.
+ * The "never faults" BASELINE: the namespace roots the strict check env
+ * declares, so that a `record`-scoped CEL site is never faulted for merely
+ * NAMING one. ⛔ It is NOT any surface's accept set — membership here is not a
+ * claim that a surface BINDS the root, and a root this list declares can be
+ * unbound, and so unresolvable, at any individual evaluation site.
+ *
+ * The PER-SURFACE verdict lives in `@objectstack/lint`, never here:
+ * `fieldRuleRootIssue` answers "may THIS surface reference this root?" for the
+ * field-level `*When` surface, against that surface's own closed set
+ * `FIELD_RULE_BOUND_ROOTS` (`record` / `previous` / `parent`). Ask that pair
+ * whenever the question names a surface. A root this list declares and that
+ * surface does not bind — `data` is the standing example (#17409) — is the two
+ * answers doing their separate jobs, ⛔ not a disagreement to repair by editing
+ * this list.
+ *
  * Declared so that member access (`record.foo`) and any arithmetic/comparison on
  * a root both defer to runtime — the strict env faults ONLY on an *undeclared*
  * top-level identifier, i.e. a bare field reference. Generous on purpose: an
@@ -131,8 +145,9 @@ export const SCOPE_ROOTS = [
  * Why widening this list is the safe direction, and where the narrow verdict
  * lives instead (#6290).
  *
- * This list is a "never faults" BASELINE, not a per-surface contract — the
- * doc-comment above says so, and every entry is generous by construction. A
+ * This list is a "never faults" BASELINE, not a per-surface contract —
+ * `SCOPE_ROOTS`'s own doc-comment opens by saying exactly that, and every entry
+ * is generous by construction. A
  * surface that binds a CLOSED set of roots does not express that by hoping the
  * baseline omits the others; it says so at the surface, through
  * `collectCelRootIdentifiers` (that helper reads the AST and is completely

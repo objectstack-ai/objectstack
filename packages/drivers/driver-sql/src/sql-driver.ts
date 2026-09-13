@@ -108,6 +108,16 @@ import {
   type PhysicalColumn,
   type PendingSchemaWork,
 } from './schema-drift.js';
+// [#15989] The ADR-0104 column step's per-dialect statements. Built here, run
+// by `os migrate files-to-references --apply` — see {@link SqlDriver.planMediaColumnMove}.
+import {
+  isJsonColumnType,
+  mediaColumnMoveDialect,
+  mediaColumnMovePlan,
+  type MediaColumnMovePlan,
+  type MediaColumnMoveRefusal,
+  type MediaColumnMoveScan,
+} from './media-column-move.js';
 import {
   undeliveredStorageAttributes,
   formatAttribute,
@@ -229,20 +239,49 @@ export interface AutoNumberReservation {
  * the drift between them is exactly what let array-valued fields (multiselect/
  * checkboxes/tags/repeater/vector) reach the SQLite binder un-serialized and
  * crash with "SQLite3 can only bind numbers, strings, bigints, buffers, and
- * null" (#field-zoo). `image`/`file`/`avatar`/`video`/`audio` hold structured
- * upload metadata; `composite`/`address`/`location`/`record` are objects; the
- * rest are arrays.
+ * null" (#field-zoo). `composite`/`address`/`location`/`record` are objects;
+ * the rest are arrays.
+ *
+ * ⚠️ The FILE family (`image`/`file`/`avatar`/`video`/`audio`) was a member
+ * until the ADR-0104 addendum ruled that its physical column holds the BARE
+ * `sys_file` id in a STRING column rather than a JSON-quoted id in a JSON
+ * column. Its membership is no longer a constant: a SINGLE-VALUE media field
+ * is a JSON column on a deployment that has not moved its columns and a string
+ * column on one that has, so the question is asked per driver instance through
+ * {@link SqlDriver.mediaColumnIsJson} rather than of this set. A
+ * `multiple: true` media field is unaffected — its value is a LIST of ids, it
+ * is a JSON column on every deployment, and `!!field.multiple` already says so
+ * above every type check.
+ *
+ * ⛔ Do not re-add the family here. Every reader of this set treats membership
+ * as deployment-independent, which is exactly what the family stopped being.
  */
 const JSON_COLUMN_TYPES = new Set<string>([
-  // Spec value-shape classes (ADR-0104 D1): structured JSON payloads, the
-  // (pre-D3) inline file metadata objects, and the inherently-array option
-  // types. Membership is owned by @objectstack/spec — a type added there
-  // becomes a JSON column here without touching this file.
-  ...STRUCTURED_JSON_TYPES, ...FILE_REFERENCE_TYPES, ...MULTI_OPTION_TYPES,
+  // Spec value-shape classes (ADR-0104 D1): structured JSON payloads and the
+  // inherently-array option types. Membership is owned by @objectstack/spec —
+  // a type added there becomes a JSON column here without touching this file.
+  ...STRUCTURED_JSON_TYPES, ...MULTI_OPTION_TYPES,
   // Driver-internal aliases (external/introspected columns) — not authorable
   // FieldTypes, so they stay a local extra.
   'object', 'array',
 ]);
+
+/**
+ * The `varchar(n)` width a moved single-value media column gets.
+ *
+ * ⚠️ NOT a taste: it is the width `os generate migration --format sql` already
+ * emits for the family (`VARCHAR(2048)` in `packages/cli/src/commands/
+ * generate.ts`), and the maintainer ruling on #15041 is that the GENERATOR
+ * states the ruled end-state and does not move — the driver is the side that
+ * moves to meet it. A driver that created knex's default `varchar(255)` here
+ * would open a fresh divergence between the two producers of the same column
+ * on the very change that closes the old one.
+ *
+ * Mirrored by {@link SqlDriver.varcharColumnChars}, which is what the drift
+ * detector asks rather than restating the width; the two are pinned equal by
+ * `sql-driver-11565-row-byte-budget.test.ts` for every declared `FieldType`.
+ */
+const MEDIA_ID_VARCHAR_CHARS = 2048;
 
 /**
  * Field types whose value is a numeric scalar. SINGLE SOURCE for the DDL
@@ -1714,6 +1753,74 @@ function refuseRejectedReferenceAlias(column: string): never {
   throw err;
 }
 
+/**
+ * [#16319] Has this field declared a `type` at all?
+ *
+ * The whole predicate the DDL emitter needs, and deliberately no more: it asks
+ * PRESENCE, not membership. Membership is decided one layer up and for the whole
+ * object — see {@link refuseUndeclaredFieldType}.
+ */
+function isDeclaredFieldType(field: { type?: unknown }): boolean {
+  return typeof field.type === 'string' && field.type !== '';
+}
+
+/**
+ * [#16319] DDL-time defence: a field declaration with NO `type` gets no column
+ * — it gets a refusal.
+ *
+ * MAINTAINER RULING, 2026-09-10 (director seat batch #111 item 2): 「一个没写
+ * type(或拼错)的字段 应该禁止加载」, and 「下游默认值全部改拒绝:`createColumn`
+ * 的 `|| 'string'` … 一律改为响亮拒绝 … ⛔ 不再猜族;按构造它们应当不可达,拒绝是
+ * 防御」.
+ *
+ * What it replaces is `createColumn`'s `const type = field.type || 'string'`,
+ * which sized the column from `declaredVarcharLength(field)` — the declared
+ * `maxLength` verbatim, knex's 255 without one — while BOTH `os generate
+ * migration` formats defaulted the SAME declaration to `TEXT`. Two families from
+ * one declaration: measured on live PostgreSQL 16.13, `{ maxLength: 100 }` with
+ * no `type` produced `character varying(100)` here and `TEXT` there, so the
+ * platform refused a 101-character value both generated tables accepted (#16319).
+ *
+ * ⭐ By construction this is now unreachable: `SchemaRegistry.registerObject`
+ * refuses the whole object declaration, and every route into `syncSchema` —
+ * boot rehydration, package and plugin manifests, programmatic registration —
+ * is fronted by it. It stays as defence, and it stays LOUD, because the
+ * alternative is a silent guess and reaching this line means the object was
+ * handed to the driver by a path the registry does not front.
+ *
+ * ⚠️ PRESENCE only, and that boundary is deliberate — ⛔ do not widen it to
+ * `FieldType` membership here without ruling on the cost. A NON-MEMBER `type`
+ * still falls to this switch's own catch-all arm, unchanged: membership is
+ * refused at the registration door for the whole object, which is where the
+ * ruling put the single point of closure and what its acceptance list means by
+ * 「驱动永远到不了」. Measured on this tree: 388 sites across ~100 of this
+ * package's own test files declare a non-member spelling (`'string'` 361,
+ * `'integer'` 17, `'auto_number'` 5, `'varchar'` 4, `'object'` 1) and drive
+ * `initObjects` directly, never through the registry — and `'string'` is a
+ * declared `case` arm of this very switch whose column shape differs from every
+ * member's, so re-typing them is a corpus migration with column consequences,
+ * not a spelling fix.
+ *
+ * `VALIDATION_ERROR` + 400, exactly as {@link refuseRejectedReferenceAlias} one
+ * function up: a standard-catalog member, so no new code is minted and this
+ * package's ledger entry is unchanged.
+ */
+function refuseUndeclaredFieldType(column: string): never {
+  const err = new Error(
+    `[sql-driver] field '${column}' declares no \`type\`, so no column is created for it. ` +
+      `⛔ The driver no longer guesses a family here: it used to build \`varchar(255)\` (or the ` +
+      `declared \`maxLength\`) while both \`os generate migration\` formats built \`TEXT\` from ` +
+      `the same declaration, so the platform refused values the generated tables accepted, in ` +
+      `both directions and silently. \`FieldSchema\` requires \`type\`, and ` +
+      `\`SchemaRegistry.registerObject\` refuses the whole object declaration before any DDL runs ` +
+      `— so reaching this line means the object was handed to \`syncSchema\` by a path that does ` +
+      `not go through the registry. Give the field a \`FieldType\` member, or remove the field.`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.VALIDATION_ERROR;
+  err.status = 400;
+  throw err;
+}
+
 /*
  * [#8445 → #8567] `isUnbackedConflictTargetError` — "is this the conflict
  * target is not a key failure?" — is imported from `@objectstack/types`
@@ -2363,6 +2470,17 @@ const CROSS_FIELD_COMPARISON_OPERATORS: ReadonlySet<string> = new Set([
  * reference), every JSON-stored shape (`multiple: true` and the
  * {@link JSON_COLUMN_TYPES} classes — element-wise semantics SQL comparison
  * operators do not have), and anything else without a scalar stored form.
+ *
+ * ⚠️ The FILE family is refused BY NAME rather than by its old
+ * {@link JSON_COLUMN_TYPES} membership, and the refusal is deployment-
+ * independent on purpose. Once the family left that set its stored form became
+ * a scalar string on a moved deployment — which would have made it `'text'`
+ * here and newly ADMITTED a comparison this function has never emitted. During
+ * the ADR-0104 dual-encoding window one media column can hold a bare id and
+ * another the JSON-quoted form of the same id, so no column-to-column
+ * comparison against the family is provably the memory evaluator's answer.
+ * Refusing a shape that would have agreed costs a caller an error message,
+ * which is the trade this function already states above.
  */
 function crossFieldComparisonClass(
   decl: Record<string, unknown>,
@@ -2370,7 +2488,7 @@ function crossFieldComparisonClass(
   if (decl.multiple) return null;
   const type = String((decl as { type?: unknown }).type || 'string');
   if (type === 'formula') return null;
-  if (JSON_COLUMN_TYPES.has(type)) return null;
+  if (JSON_COLUMN_TYPES.has(type) || FILE_REFERENCE_TYPES.has(type)) return null;
   if (NUMERIC_SCALAR_TYPES.has(type)) return 'numeric';
   if (type === 'boolean' || type === 'toggle') return 'boolean';
   if (type === 'date') return 'date';
@@ -3089,6 +3207,192 @@ function textMatchPredicate(
   const column = fold ? 'LOWER(??)' : '??';
   const comparand = fold ? 'LOWER(?)' : '?';
   return { sql: `${column} ${keyword} ${comparand} ESCAPE ?`, bindings };
+}
+
+/**
+ * [#17590, director ruling 2026-09-12] The JSON scalars a `$contains` comparand
+ * denotes when the column it is aimed at holds a JSON array — the comparand
+ * half of {@link jsonMembershipPredicate}.
+ *
+ * # Why a comparand becomes a SET of candidates and not one value
+ *
+ * The contract declares `$contains`'s comparand a STRING
+ * (`FieldOperatorsSchema.$contains` is `z.string()`), so an author filtering a
+ * `multiple: true` NUMBER writes `'1'` and one filtering a `multiple: true`
+ * BOOLEAN writes `'true'` — the spellings `sql-driver-17343-multi-valued-
+ * boolean-membership.test.ts` already executes. A construct that asked the
+ * backend for the JSON STRING `"1"` would therefore answer nothing on every
+ * numeric and boolean multi-valued column in existence, which is option C
+ * (retire the capability) arriving through the back door — the option the
+ * ruling refused.
+ *
+ * So the comparand is read as the TEXT RENDERING of a member: `'1'` denotes the
+ * JSON string `"1"` OR the JSON number `1`, `'true'` denotes `"true"` OR
+ * `true`. At most two candidates, OR-ed, and the union is what makes the three
+ * dialects answer the same rows — measured over a 13-row fixture on
+ * better-sqlite3, live PostgreSQL 16.13 and live MySQL 8.0.46: 40 of 40 probes
+ * identical, `$contains`/`$notContains` exact complements on every row.
+ *
+ * The number candidate is CANONICALISED through `JSON.stringify(Number(x))`
+ * rather than passed through as written, because the three dialects normalise a
+ * JSON number differently and only the driver can make them agree: `'1.50'`
+ * becomes `1.5` here, and all three then answer the row holding `[1.5, 0]`.
+ *
+ * ⛔ Not a lenient alias layer (Prime Directive #12): both candidates are
+ * readings of ONE declared comparand type against one stored shape, decided
+ * here so every dialect gets the same pair — the opposite of a consumer
+ * tolerating an off-spec input its siblings reject.
+ */
+function jsonMembershipCandidates(value: unknown): string[] {
+  // `String(value)` is the SAME rendering {@link SqlDriver.applyLike} gives the
+  // comparand, so the membership reading of a comparand is never narrower than
+  // the substring reading it replaces. `assertCompilableComparand` has already
+  // refused every shape `String()` cannot render faithfully.
+  const text = String(value);
+  const candidates = [JSON.stringify(text)];
+  if (text === 'true' || text === 'false' || text === 'null') {
+    candidates.push(text);
+    return candidates;
+  }
+  // The JSON number grammar, spelled out rather than reached through
+  // `Number(text)`: `Number` also accepts `'0x10'`, `' 1 '`, `'Infinity'` and
+  // `''`, none of which is a JSON number, and admitting them would make the
+  // candidate set depend on JS coercion rules no dialect shares.
+  if (/^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$/.test(text)) {
+    const parsed = Number(text);
+    if (Number.isFinite(parsed)) {
+      const canonical = JSON.stringify(parsed);
+      if (canonical !== candidates[0]) candidates.push(canonical);
+    }
+  }
+  return candidates;
+}
+
+/**
+ * [#17590, director ruling 2026-09-12] The one place a `$contains` MEMBERSHIP
+ * test over a JSON-stored column becomes SQL — `{sql, bindings}` for knex's
+ * `whereRaw`, with `??` the column, exactly like {@link textMatchPredicate}.
+ *
+ * # The defect this closes
+ *
+ * `$contains` is the membership spelling on a multi-valued column — the one
+ * operator #7398 left working over a JSON column after refusing the equality
+ * family there, and the spelling `jsonColumnOperatorError`'s own prescription
+ * hands callers. Until this function it was lowered by {@link
+ * textMatchPredicate} like any other text operator, so it asked each backend a
+ * question about the SERIALIZATION rather than about the members, and the three
+ * dialects answered three different things:
+ *
+ * | dialect | what `$contains` did on a JSON column | |
+ * |---|---|---|
+ * | SQLite | `col GLOB '*v*'` over the TEXT holding `["a","b"]` | a substring test that USUALLY looks like membership |
+ * | MySQL | `CAST(col AS BINARY) LIKE ?` — the `json` column coerced | the same substring test |
+ * | PostgreSQL | `col LIKE $1 ESCAPE $2` over a real `json` column | **SQLSTATE 42883** `operator does not exist: json ~~ text` → `DATABASE_ERROR` 500 |
+ *
+ * Measured on live PostgreSQL 16.13 before this change: every `JSON_COLUMN_TYPES`
+ * member and every `multiple: true` column answers 42883, while the `varchar`
+ * column beside them answers normally.
+ *
+ * The substring reading is not merely imprecise, it is wrong ACROSS ELEMENTS:
+ * `['redwood']` answers `$contains: 'red'`, and `[10, 21]` answers
+ * `$contains: '1'`. The ruling refused option B (`col::text LIKE`) for exactly
+ * that reason — it would have frozen SQLite's cross-element mismatch into a
+ * cross-backend contract.
+ *
+ * # What is emitted now, and why each cell
+ *
+ * Every arm asks ONE question — *is the comparand's JSON value an element of
+ * the stored array?* — so the answer cannot depend on how a dialect stores or
+ * renders the array:
+ *
+ * - **PostgreSQL → `col::jsonb @> '[<candidate>]'::jsonb`.** The ruling's own
+ *   first option. The candidate is wrapped in an ARRAY rather than compared as
+ *   a bare scalar, which is what makes the construct array-only for free:
+ *   `'"red"'::jsonb @> '["red"]'::jsonb` is FALSE (a scalar contains no array)
+ *   and so is `'{"k":"red"}'::jsonb @> '["red"]'::jsonb`, with no
+ *   `jsonb_typeof` guard and no second reference to the column. The cast is
+ *   needed because `@>` is a `jsonb` operator and this driver's DDL emits
+ *   `json`.
+ * - **MySQL → `JSON_CONTAINS(col, '[<candidate>]')`**, the same array-wrapped
+ *   candidate and the same containment rule, including the same FALSE for a
+ *   scalar or object root. Measured directly on live MySQL 8.0.46 — the cell
+ *   the card carried only as a second-hand reading from #17343's CI.
+ * - **SQLite → a `json_each` scan**, because SQLite has no containment
+ *   operator. `typeof(os_member.key) = 'integer'` is the array-only condition:
+ *   `json_each` gives an array element an INTEGER key, an object member a TEXT
+ *   key and a scalar root a NULL one, so the one predicate answers all three
+ *   the way the containment operators do. The `CASE` over `os_member.type`
+ *   rebuilds each element's JSON TEXT: SQLite surfaces a JSON `true` as the
+ *   INTEGER 1, which `json_quote` would render `1` — indistinguishable from the
+ *   number 1, and a divergence from the other two arms. Taking the TYPE NAME
+ *   for those three cases is exact, because `'true'`/`'false'`/`'null'` ARE
+ *   their own JSON text.
+ * - **`'unknown'` → `null`**, and the caller falls back to the pre-#17590
+ *   `LIKE` shape. `dialectName` is `'unknown'` for a knex client this driver
+ *   does not model (mssql, oracle), where none of the three constructs above
+ *   parses. Emitting the old shape is not an endorsement of it — it is the only
+ *   answer that still RUNS, the same residue {@link textMatchPredicate}'s own
+ *   `'unknown'` arm names.
+ *
+ * # The `json_valid` guard, and why only SQLite has one
+ *
+ * A JSON column on SQLite IS a TEXT column, so bytes that are not JSON are
+ * physically storable — a row written before the field was declared
+ * `multiple: true` really does hold bare text there, which is why this driver
+ * keeps a whole read-side repair for the dialect (`hasLegacyStorageForm`).
+ * `json_each` RAISES on such a cell, so without the guard this change would
+ * turn a filter that works today into a 500 on the one dialect it works on.
+ * With it the cell simply has no members.
+ *
+ * PostgreSQL and MySQL need no guard and would not benefit from one: both
+ * REFUSE malformed bytes into a `json` column at write time — measured, `22P02`
+ * and `ER_INVALID_JSON_TEXT` — so there is nothing on disk for a guard to
+ * catch. The one shape that reaches them is an ADR-0015 EXTERNAL object whose
+ * declared JSON field maps to a foreign `text` column holding non-JSON, where
+ * both answer a loud `DATABASE_ERROR` (`22P02` /
+ * `ER_INVALID_JSON_TEXT_IN_PARAM`) instead of a wrong substring match. That is
+ * the fail-LOUD direction and it is stated here rather than papered over.
+ *
+ * @see jsonMembershipCandidates — the comparand half.
+ * @see SqlDriver.isJsonColumn — the population, unchanged by this card (#17469).
+ * @see https://github.com/objectstack-ai/objectstack/issues/17590
+ */
+function jsonMembershipPredicate(
+  dialect: SqlDialectName,
+  field: string,
+  value: unknown,
+): { sql: string; bindings: unknown[] } | null {
+  const candidates = jsonMembershipCandidates(value);
+  const parts: string[] = [];
+  const bindings: unknown[] = [];
+  for (const candidate of candidates) {
+    if (dialect === 'sqlite') {
+      parts.push(
+        `EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(??) THEN ?? ELSE '[]' END) AS os_member `
+          + `WHERE typeof(os_member.key) = 'integer' AND CASE os_member.type `
+          + `WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' WHEN 'null' THEN 'null' `
+          + `ELSE json_quote(os_member.value) END = ?)`,
+      );
+      bindings.push(field, field, candidate);
+      continue;
+    }
+    if (dialect === 'postgres') {
+      parts.push('??::jsonb @> ?::jsonb');
+      bindings.push(field, `[${candidate}]`);
+      continue;
+    }
+    if (dialect === 'mysql') {
+      parts.push('JSON_CONTAINS(??, ?)');
+      bindings.push(field, `[${candidate}]`);
+      continue;
+    }
+    return null;
+  }
+  // Parenthesised whatever the arity, so the OR of the two candidates can never
+  // re-associate with a sibling predicate when knex splices it into a larger
+  // `WHERE`, and so the negated spelling below negates the WHOLE membership
+  // test rather than its first candidate.
+  return { sql: `(${parts.join(' OR ')})`, bindings };
 }
 
 /**
@@ -4308,6 +4612,47 @@ export type SqlDriverConfig = Knex.Config & {
    * @see {@link SqlDriver.sqliteOpenedEmptyInMemory}
    */
   sqliteAbsentFile?: SqliteAbsentFileMode;
+  /**
+   * Has THIS deployment completed the ADR-0104 column move for the file family
+   * — the step that retypes the media columns and rewrites the values they
+   * hold into the bare-id encoding (`sys_migration.columns_moved_at`)?
+   *
+   * ⛔ This is NOT the `adr-0104-file-references` flag and must never be wired
+   * to it alone. Every creation-attested store since 17.0 — including every
+   * dogfood boot — and every deployment that ran `os migrate
+   * files-to-references --apply` before the column step existed carries that
+   * flag AND JSON-quoted ids in a JSON column. The flag alone therefore cannot
+   * key the write arm; `columns_moved_at` is the evidence that the columns
+   * themselves moved, written by the same act that moves them.
+   *
+   * ## Absence is the JSON arm, and that is the whole safety property
+   *
+   * Omitted, `false`, a resolver that throws, a resolver that never runs — all
+   * four answer "not moved", so the driver keeps today's JSON encoding. Every
+   * row that exists in the world today lacks `columns_moved_at`, and a host
+   * that has not been threaded this option at all is indistinguishable from
+   * one whose deployment has not moved. That is the required direction: a
+   * driver that guessed "moved" would write bare ids into a JSON column.
+   *
+   * A function is resolved ONCE per driver instance, at {@link
+   * SqlDriver.initObjects}, and memoized — the flag lives in `sys_migration`,
+   * which does not exist until schema sync has run, so it cannot be read at
+   * construction time. A host outside that path (`skipSchemaSync`,
+   * `registerObjectMetadata`-only) simply never resolves it and stays on the
+   * JSON arm, which is again the correct fail-toward.
+   *
+   * ## Naming it at all — in EITHER polarity — shuts out the engine's supply
+   *
+   * The ordinary composition does not set this key: `ObjectQL.registerDriver`
+   * hands the driver a resolver over `sys_migration.columns_moved_at` instead
+   * (see {@link SqlDriver.setFileColumnsMovedResolver}). Setting it here says
+   * the host knows its own storage better than the ledger does, so the engine
+   * will not contradict it — and that is true of `false` as much as of `true`,
+   * since a declared `false` overruled to `true` is bare ids in a JSON column.
+   *
+   * @see {@link SqlDriver.setFileColumnsMovedResolver}
+   */
+  fileColumnsMoved?: boolean | (() => boolean | Promise<boolean>);
 };
 
 // ── SQL Driver ───────────────────────────────────────────────────────────────
@@ -4385,6 +4730,73 @@ export class SqlDriver implements IDataDriver {
   protected knex: Knex;
   protected config: Knex.Config;
   protected jsonFields: Record<string, string[]> = {};
+  /**
+   * SINGLE-VALUE file-family columns per table (`image` / `file` / `avatar` /
+   * `video` / `audio`), filled at the same two registration sites as
+   * {@link jsonFields} and on BOTH arms of the ADR-0104 window.
+   *
+   * ## Why a second registry rather than a narrower first one
+   *
+   * `jsonFields` freezes {@link isJsonField}'s answer at REGISTRATION time and
+   * is read by `formatInput` / `formatOutput` on every row. The media arm is a
+   * DEPLOYMENT fact that is not knowable then — `sys_migration` does not exist
+   * until schema sync has run — so keying the codec off `jsonFields` alone
+   * would have frozen the wrong answer on every cold boot. This registry names
+   * the media columns unconditionally and the codec asks {@link
+   * fileColumnsMoved}, a live boolean, at call time. One registry, one
+   * question, and the answer can arrive after registration.
+   *
+   * ⚠️ `multiple: true` media is deliberately NOT here. Its value is a LIST of
+   * ids, it stays a JSON column on every deployment, and it is already covered
+   * by `jsonFields` through `!!field.multiple`.
+   */
+  protected mediaFields: Record<string, string[]> = {};
+  /**
+   * Has this deployment moved its media columns to the bare-id encoding?
+   * `false` until something says otherwise — see
+   * {@link SqlDriverConfig.fileColumnsMoved} for why absence must mean JSON.
+   */
+  protected fileColumnsMoved = false;
+  /** The unresolved resolver from config, cleared once it has been asked. */
+  private fileColumnsMovedResolver?: () => boolean | Promise<boolean>;
+  /**
+   * Did the HOST name {@link SqlDriverConfig.fileColumnsMoved} at
+   * construction, in either polarity (#15989)?
+   *
+   * Distinguishes "the host declared `false`" from "the host said nothing" —
+   * two states the boolean field above cannot tell apart, because both leave
+   * it `false`. Only the second is an empty slot
+   * {@link setFileColumnsMovedResolver} may fill.
+   */
+  private fileColumnsMovedDeclared = false;
+  /**
+   * The columns whose DECLARED type is `boolean` or `toggle` — a READ-COERCION
+   * registry: its readers present the stored form (SQLite INTEGER 0/1, MySQL
+   * `tinyint(1)`) as one JS boolean.
+   *
+   * ⚠️ [#17586] SCALAR only. A `multiple: true` boolean/toggle is deliberately
+   * NOT here — the same carve-out {@link mediaFields} states just above, and
+   * the one `numericFields` / `numericValueFields` carry in both fills. Its
+   * value is a LIST of booleans in a JSON column ({@link isJsonField} reduces
+   * to `!!field.multiple` for these two types, neither being in
+   * `JSON_COLUMN_TYPES`), and "present this as ONE boolean" has no meaning
+   * over an array: `Boolean(v)` is `true` for EVERY non-empty array, so a
+   * stored `[false]` presented as `true` is the OPPOSITE of what is stored,
+   * silently. The fills spell the condition rather than each reader because
+   * no reader needs the entry — measured, all four:
+   *
+   * 1. the [#11635] Postgres aggregate CAST — would emit `cast(?? as int)`
+   *    over a `json` column, which is not a defined cast there;
+   * 2. {@link readPresentationKind} — hands the same one-boolean presenter to
+   *    the `aggregate()` / `distinct()` doors, where the raw cell is the JSON
+   *    STRING `'[false]'` and `Boolean('[false]')` is `true`: the identical
+   *    inversion one door over;
+   * 3. `formatOutput`'s row pass — the [#11782] coercion this registry exists
+   *    for, and where the collapse was filed;
+   * 4. {@link isNonTextColumn} — already carves multi-valued out AT THE READER
+   *    (`&& !this.isJsonColumn(...)`, #17343), so its answer is UNCHANGED by
+   *    the narrowing rather than merely unharmed by it.
+   */
   protected booleanFields: Record<string, string[]> = {};
   protected numericFields: Record<string, string[]> = {};
   /**
@@ -5078,7 +5490,21 @@ export class SqlDriver implements IDataDriver {
     // `schemaMode` / `autoMigrate` / `sqliteJournalMode` / `sqliteAbsentFile`
     // are ObjectStack concerns, not Knex options — strip them before handing
     // the config to Knex.
-    const { schemaMode, autoMigrate, sqliteJournalMode, sqliteAbsentFile, ...knexConfig } = config;
+    const { schemaMode, autoMigrate, sqliteJournalMode, sqliteAbsentFile, fileColumnsMoved, ...knexConfig } = config;
+    // [#15989] Recorded before the branch, and on the KEY rather than on the
+    // value: `fileColumnsMoved: false` is a host declaration just as much as
+    // `true` is, and it must shut the engine's supply seam out — see
+    // {@link setFileColumnsMovedResolver}.
+    this.fileColumnsMovedDeclared = fileColumnsMoved !== undefined;
+    if (typeof fileColumnsMoved === 'function') {
+      this.fileColumnsMovedResolver = fileColumnsMoved;
+    } else if (fileColumnsMoved === true) {
+      // A literal is an assertion by the host, taken as given — it is the
+      // spelling a test cell and an already-resolved caller both want, and it
+      // needs no seam of its own. Anything else (false, undefined) is the
+      // JSON arm the field already holds.
+      this.fileColumnsMoved = true;
+    }
     this.schemaMode = schemaMode ?? 'managed';
     this.autoMigrate = autoMigrate ?? 'off';
     this.declaredJournalMode = sqliteJournalMode;
@@ -5873,7 +6299,14 @@ export class SqlDriver implements IDataDriver {
   // CRUD — IDataDriver core
   // ===================================
 
-  async find(object: string, query: DriverQuery, options?: DriverOptions): Promise<any[]> {
+  // [#17690] The return is the contract's own type. It was `Promise<any[]>`, and the
+  // reason #15267's census never named this door is worth carrying: that census
+  // matched the literal string `Promise<any>`, and here the `any` is NESTED
+  // inside a wider type, so the characters were not there to match. The door
+  // appeared in neither its repaired set nor its excluded set — it was never
+  // seen. Pinned at the type level, both halves, in
+  // `sql-driver-doors-declared-types.test.ts`.
+  async find(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
     return this.findRows(object, query, options);
   }
 
@@ -7619,7 +8052,14 @@ export class SqlDriver implements IDataDriver {
     throw refuseCrossRowIdentityMerge(object, tableName, id, rivals);
   }
 
-  async upsert(object: string, data: Record<string, any>, conflictKeys?: string[], options?: DriverOptions): Promise<Record<string, any>> {
+  // [#17690] The return is the contract's own type. It was `Promise<Record<string, any>>`, and the
+  // reason #15267's census never named this door is worth carrying: that census
+  // matched the literal string `Promise<any>`, and here the `any` is NESTED
+  // inside a wider type, so the characters were not there to match. The door
+  // appeared in neither its repaired set nor its excluded set — it was never
+  // seen. Pinned at the type level, both halves, in
+  // `sql-driver-doors-declared-types.test.ts`.
+  async upsert(object: string, data: Record<string, any>, conflictKeys?: string[], options?: DriverOptions): Promise<Record<string, unknown>> {
     const { _id, ...rest } = data;
     const toUpsert = { ...rest };
 
@@ -8101,7 +8541,14 @@ export class SqlDriver implements IDataDriver {
    * usable — the rollback decision for the caller's OWN work stays the
    * caller's, which is the half of `upsert`'s reasoning that does transfer.
    */
-  async bulkUpdate(object: string, updates: Array<{ id: string | number; data: Record<string, any> }>, options?: DriverOptions): Promise<Record<string, any>[]> {
+  // [#17690] The return is the contract's own type. It was `Promise<Record<string, any>[]>`, and the
+  // reason #15267's census never named this door is worth carrying: that census
+  // matched the literal string `Promise<any>`, and here the `any` is NESTED
+  // inside a wider type, so the characters were not there to match. The door
+  // appeared in neither its repaired set nor its excluded set — it was never
+  // seen. Pinned at the type level, both halves, in
+  // `sql-driver-doors-declared-types.test.ts`.
+  async bulkUpdate(object: string, updates: Array<{ id: string | number; data: Record<string, any> }>, options?: DriverOptions): Promise<Record<string, unknown>[]> {
     // An empty batch issues no statement, exactly as before: a BEGIN/COMMIT
     // pair — and the pool checkout behind it — buys nothing for zero rows.
     if (updates.length === 0) return [];
@@ -8605,11 +9052,24 @@ export class SqlDriver implements IDataDriver {
    *
    * `any` here was not "the object name goes unchecked", it was every check off
    * on the members this body READS: `where`'s filter dialect, `groupBy`'s node
-   * union, `aggregations`' node shape. #5181 narrowed the six methods
-   * `IDataDriver` declares and #6075 followed through on five drivers;
-   * `aggregate` is not on that contract, so neither reached it.
+   * union, `aggregations`' node shape. #5181 narrowed the six methods it swept
+   * and #6075 followed through on five drivers; this door was reached by
+   * neither.
+   *
+   * [#17277] The sentence that used to close the paragraph above —
+   * "`aggregate` is not on that contract" — was FALSE, and it is the whole
+   * reason #15267's census walked past this door: that census asked "is it on
+   * the contract?" and answered from THIS COMMENT rather than from the
+   * contract. `IDataDriver` declares
+   * `aggregate?(object, query, options?): Promise<Record<string, unknown>[]>`,
+   * beside the calling convention that dispatches on
+   * `typeof driver.aggregate === 'function'`. The `?` governs whether the
+   * member EXISTS, not what it returns once it does, so the declared return is
+   * a published promise here exactly as on a required door. The annotation
+   * below is the contract's own, pinned at the type level in
+   * `sql-driver-doors-declared-types.test.ts`.
    */
-  async aggregate(object: string, query: DriverQuery, options?: DriverOptions): Promise<any> {
+  async aggregate(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
     const builder = this.getBuilder(object, options);
     this.applyTenantScope(builder, object, options);
 
@@ -9131,7 +9591,58 @@ export class SqlDriver implements IDataDriver {
     }
 
     builder.distinct(field);
-    const results = await builder;
+    // [#17639] The THIRD read door joins the other two. `find()` and `count()`
+    // have carried the terminal envelope since #8931 and `aggregate()` since
+    // #11455; this one still executed BARE, so any dialect refusal the
+    // statement raised left the driver as the backend's own object — a raw
+    // SQLSTATE in `code`, `status` UNDEFINED, and the compiled statement as the
+    // message. Measured on live PostgreSQL 16.13: this driver stores every
+    // `multiple: true` column as `json`, and `json` defines no equality
+    // operator, so `SELECT DISTINCT` over one is refused by the backend:
+    //
+    //   distinct(t, 'toggles') => THREW code=42883 status=undefined
+    //                             msg=select distinct "toggles" from "…" -
+    //                                 could not identify an equality operator
+    //                                 for type json
+    //
+    // Class-wide across every JSON column — `toggle`/`boolean`/`number` with
+    // `multiple: true` and `tags` all measured, with a scalar `boolean` column
+    // in the same table answering normally as the lit control. A raw `42883` is
+    // on no list `@objectstack/rest` reads, so `mapDataError` had nothing
+    // declared to forward and an ordinary caller shape — list the distinct
+    // values of this column — was logged as an UNHANDLED server fault.
+    //
+    // ⛔ NOT a decision about whether a JSON column should ANSWER a distinct
+    // read; that question is #17590's, on the same columns. Whatever this door
+    // ends up doing, it must not leak the backend's own object — so the
+    // envelope is the half that lands here, exactly as #11455 landed it for
+    // `aggregate()` while its own answer question was still open.
+    //
+    // ⛔ And no `42883` recognizer: the envelope comes from the EXIT, not from
+    // matching a SQLSTATE or the words `equality operator` — the #8926 lesson,
+    // applied in advance. The all-dialect sweep in
+    // `sql-driver-17639-distinct-fault-envelope.test.ts` asserts that on a
+    // route (a table that was never provisioned) that has no JSON column in it.
+    //
+    // ⛔ And still NO BLANKET `isUnresolvableColumnError` arm — #17857 closed
+    // the gap #17639 left FILED, and it closed it the way #11541 closed the
+    // `aggregate()` one: by ATTRIBUTING the column to a clause of the caller's
+    // own request first. A blanket arm remains forbidden for the reason stated
+    // here since #17639 — it would tell the author of `distinct(o, 'nosuchcol')`,
+    // who passed no filter at all, that their FILTER was wrong — and
+    // {@link SqlDriver.distinctBackendFault} is what makes that claim
+    // unnecessary rather than what makes it safe.
+    //
+    // Only the EXECUTION is guarded. Every refusal this method composes upstream
+    // — `applyFilters`' `INVALID_FILTER` out of {@link assertCompilableComparand}
+    // among them — is raised while the statement is BUILT, so the classifier
+    // cannot bury a precise refusal under a generic 500.
+    let results: unknown[];
+    try {
+      results = await builder;
+    } catch (error) {
+      throw this.distinctBackendFault(object, field, error);
+    }
     const values = results.map((row: any) => row[field]);
 
     // Same presentation `find()` gives the column (#3797, #3849) — a caller
@@ -9143,6 +9654,174 @@ export class SqlDriver implements IDataDriver {
     const kind = this.readPresentationKind(this.coercionKey(builder), field);
     if (!kind) return values;
     return [...new Set(values.map((v: any) => this.presentReadValue(kind, v)))];
+  }
+
+  /**
+   * [#17857] Which envelope a dialect error leaving {@link SqlDriver.distinct}
+   * deserves — the #8790 unresolvable-column refusal reaching the LAST read
+   * door, without the attribution #8931 forbids.
+   *
+   * # The condition, and why the blanket arm stayed forbidden until now
+   *
+   * `find()` and `count()` answer an unresolvable WHERE column with
+   * `INVALID_FILTER` / 400 naming the column (#8790, maintainer ruling
+   * 2026-08-15: one unresolvable WHERE column, one answer, on both read
+   * halves); #11541 brought the same answer to `aggregate()`. `distinct()` was
+   * the fourth call shape and the one still answering `DATABASE_ERROR` / 500
+   * — a SERVER fault for a caller's own typo, one door away from a 400 that
+   * names the column. Measured on better-sqlite3 and on live PostgreSQL 16.13,
+   * one object with a single `title` column:
+   *
+   * ```
+   * count(t,    { where: { nosuchcol: 1 } })  => INVALID_FILTER  400
+   * find(t,     { where: { nosuchcol: 1 } })  => INVALID_FILTER  400
+   * aggregate(t, { groupBy: ['nosuchcol'] })  => INVALID_FIELD   400
+   * distinct(t, 'title', { nosuchcol: 1 })    => DATABASE_ERROR  500  ← this card
+   * distinct(t, 'nosuchcol')                  => DATABASE_ERROR  500  ← this card
+   * ```
+   *
+   * A BLANKET `isUnresolvableColumnError` arm is still refused, and #17639
+   * wrote the reason at the door: this door names columns in TWO clauses — the
+   * `field` being listed and the WHERE compiled from `filters` — so the WHERE
+   * refusal's words ("Filter on 'x' names a column …") would tell the author of
+   * `distinct(o, 'nosuchcol')`, who passed no filter at all, that their FILTER
+   * was wrong. What this method adds is not a safer blanket arm; it is the
+   * attribution that makes the blanket arm unnecessary.
+   *
+   * # The three arms — attribution comes from the CALLER'S OWN REQUEST
+   *
+   * The dialect names the column; it does not name the clause. The clause is
+   * read off the request this driver just compiled, so every claim the refusal
+   * makes is a fact about the caller's own call and never a guess from the
+   * backend's prose:
+   *
+   * 1. the name EQUALS the `field` argument ⇒ a refusal naming the listed
+   *    column ({@link SqlDriver.unresolvableDistinctColumnRefusal},
+   *    `INVALID_FIELD` / 400);
+   * 2. it does not ⇒ the statement's only remaining column sources are the
+   *    WHERE compiled from `filters` and the tenant-scope predicate — both
+   *    filters — so #8790's existing
+   *    {@link SqlDriver.unresolvableFilterColumnRefusal} applies verbatim;
+   * 3. {@link unresolvableColumnNameOf} answers `null` ⇒ the wording parsed by
+   *    nothing. With no name there is no request lookup, so NO attribution is
+   *    supportable — the #17639 terminal envelope stands unchanged. ⛔ Reading
+   *    `null` as license for the WHERE arm would attribute a clause on no
+   *    evidence, which is arm 2's own justification inverted.
+   *
+   * ⭐ Arm 2 is the COMPLEMENT of arm 1, never a search of the `filters` AST for
+   * the name, and that is load-bearing rather than economical. `FilterCondition`
+   * nests (`$and` / `$or` / `$not`, `@objectstack/spec` `LOGICAL_OPERATORS`), so
+   * a key scan has to walk every declared node shape, and every shape it failed
+   * to walk would silently DOWNGRADE that filter's 400 back to the 500 this card
+   * exists to remove — for `{ $or: [{ nosuchcol: 1 }] }`, the exact defect,
+   * re-introduced one nesting level down and invisible to any pin written on a
+   * flat filter. The complement needs no walker to be complete: the compiled
+   * statement is `select distinct <field> from <table> where <filters + tenant
+   * scope>`, and a column reference that is not the `field` can only have come
+   * from a predicate. Pinned by
+   * `sql-driver-17857-distinct-unresolvable-column-refusal.test.ts`.
+   *
+   * ⚠ Arm 1 is judged by EXACT name equality, the discipline #11541 set: a
+   * suffix match ("`title.x` ends in `.x`") would attribute a dotted WHERE key
+   * to the listed field — a false verdict about a clause that may be perfectly
+   * fine — and inspecting the key for a `.` is #8371's axis besides. When the
+   * caller names one missing column in BOTH clauses
+   * (`distinct(o, 'nosuchcol', { nosuchcol: 1 })`), arm 1 wins and its claim is
+   * still true: the listed field really is a column the table lacks.
+   *
+   * # No new dialect recognizer
+   *
+   * Both predicates this method consults ({@link isUnresolvableColumnError},
+   * {@link unresolvableColumnNameOf}) are #8790's, shared with `find()`,
+   * `count()` and `aggregate()`, untouched — the #8926 ruling's refusal of a
+   * per-dialect clause parser applies here exactly as it did one door over.
+   *
+   * Returns the error rather than throwing it, the shape every sibling on this
+   * path uses, so the call site spells its own `throw`.
+   */
+  protected distinctBackendFault(object: string, field: string, error: unknown): Error {
+    if (isUnresolvableColumnError(error)) {
+      const column = unresolvableColumnNameOf(error);
+      if (column !== null) {
+        // Arm 1: the caller's own `field` argument — the one column reference
+        // this method put in the SELECT, read back exactly as it was passed.
+        if (column === field) {
+          return this.unresolvableDistinctColumnRefusal(object, column, error);
+        }
+        // Arm 2: not the listed field ⇒ a predicate named it (the caller's
+        // `filters`, or the tenant-scope wall this method applied above).
+        return this.unresolvableFilterColumnRefusal(object, error);
+      }
+      // Arm 3: recognised class, no parsed name — fall through to the terminal.
+    }
+    // [#8931] The terminal catch-all — see {@link SqlDriver.backendStatementFault}.
+    return this.backendStatementFault(object, error);
+  }
+
+  /**
+   * [#17857] Compose the refusal for the LISTED field of a distinct read whose
+   * column the backend could not resolve, writing the dialect's own message to
+   * the SERVER LOG on the way — the same statement-to-log, name-to-caller split
+   * {@link SqlDriver.unresolvableFilterColumnRefusal} performs for the WHERE
+   * (#7929: the dialect text inlines the statement's bound literals on two of
+   * the three dialects, so it may not travel to the caller).
+   *
+   * # `INVALID_FIELD` / 400 — read off the repo, not chosen
+   *
+   * No code is minted (ADR-0112): `INVALID_FIELD` is a standard-catalog member
+   * and is already this repo's answer for a named column an object does not
+   * have — `assertGroupByFieldsExist` / `assertAggregationFieldsExist`
+   * (`@objectstack/metadata-protocol`, #4254) at the protocol ingress, the
+   * write path at the REST boundary, and
+   * {@link SqlDriver.unresolvableAggregateColumnRefusal} (#11541) for this
+   * condition's aggregate twin. One condition must not carry two codes
+   * depending on which door asked, which is the whole of #8790's ruling.
+   *
+   * ⛔ Not `INVALID_FILTER`: the caller may have passed no filter at all, and
+   * that misattribution is what #8931 refuses. ⛔ Not `INVALID_QUERY`: a
+   * missing column is not a malformed query — the identical call answers
+   * values the moment schema sync runs. ⛔ Not the `DATABASE_ERROR` terminal:
+   * the failure IS attributable here, to a column the caller named.
+   *
+   * # Why refusal beats the empty list
+   *
+   * The wrong answer this refusal displaces is specific: `[]`. A picklist
+   * populated from `distinct()` renders an empty dropdown for a field name
+   * that does not exist, which looks like "no values yet" and is
+   * indistinguishable from a correct answer — the #8790 reasoning
+   * ("can only match zero records") applied to VALUES instead of rows.
+   *
+   * `field` / `object` ride the error the way the ingress door's refusals carry
+   * them, so `@objectstack/rest`'s `INVALID_FIELD` branch serves the same
+   * enriched envelope whichever layer refused. Both are the caller's own
+   * vocabulary — the column name equals the argument they passed, the object
+   * name is the one they passed — so neither discloses anything the caller did
+   * not write.
+   */
+  protected unresolvableDistinctColumnRefusal(object: string, column: string, error: unknown): Error {
+    const detail = (error as { message?: unknown } | null | undefined)?.message;
+    // The withholding rule is #7929's and this door's arm is #17857's — ids kept
+    // in the comment, never in the emitted string: a log line reaches operators
+    // and generated surfaces, where `#NNNN` resolves against nothing
+    // (`pnpm check:doc-authoring`).
+    this.logger.warn(
+      `[sql-driver] INVALID_FIELD — the listed distinct column could not be resolved on ` +
+        `'${object}' ('${column}'). The dialect message below is kept server-side because it ` +
+        `inlines the statement bound literals: ` +
+        `${typeof detail === 'string' ? detail : String(error)}`,
+    );
+    const err = new Error(
+      `This query lists the distinct values of '${column}', a column that object '${object}' ` +
+        'has no column for, so the read never ran. Listing the values of a field that does not ' +
+        'exist can only answer an empty list, so the query was refused instead of answered with ' +
+        "one. Check the name against the object's fields; if the field was declared recently, " +
+        'run schema sync so the column exists before listing its values.',
+    ) as Error & { code?: string; status?: number; field?: string; object?: string };
+    err.code = StandardErrorCode.enum.INVALID_FIELD;
+    err.status = 400;
+    err.field = column;
+    err.object = object;
+    return err;
   }
 
   // ===================================
@@ -9723,6 +10402,7 @@ export class SqlDriver implements IDataDriver {
    */
   protected aliasShardBookkeeping(base: string, shard: string): void {
     this.jsonFields[shard] = this.jsonFields[base] ?? [];
+    this.mediaFields[shard] = this.mediaFields[base] ?? [];
     this.booleanFields[shard] = this.booleanFields[base] ?? [];
     this.numericFields[shard] = this.numericFields[base] ?? [];
     this.numericValueFields[shard] = this.numericValueFields[base] ?? [];
@@ -9850,6 +10530,7 @@ export class SqlDriver implements IDataDriver {
     }
 
     const jsonCols: string[] = [];
+    const mediaCols: string[] = [];
     const booleanCols: string[] = [];
     const numericCols: string[] = [];
     const numericValueCols: string[] = [];
@@ -9863,7 +10544,15 @@ export class SqlDriver implements IDataDriver {
       for (const [name, field] of Object.entries<any>(schema.fields)) {
         const type = field.type || 'string';
         if (this.isJsonField(type, field)) jsonCols.push(name);
-        if (type === 'boolean' || type === 'toggle') booleanCols.push(name);
+        // Unconditional, on BOTH arms — see {@link mediaFields}. The read-side
+        // legacy-encoding repair runs on a deployment that has not moved too.
+        if (!field.multiple && FILE_REFERENCE_TYPES.has(type)) mediaCols.push(name);
+        // [#17586] SCALAR only — `&& !field.multiple` is the house spelling
+        // its three neighbours in this block already carry, and this line was
+        // the single omission. See {@link booleanFields}: every reader of this
+        // registry presents its entry as ONE JS boolean, which for a
+        // multi-valued (JSON) column collapses the parsed array to `true`.
+        if ((type === 'boolean' || type === 'toggle') && !field.multiple) booleanCols.push(name);
         if (NUMERIC_SCALAR_TYPES.has(type) && !field.multiple) numericCols.push(name);
         // [#16318] The authorable half only — see {@link numericValueFields}.
         if (NUMERIC_VALUE_TYPES.has(type) && !field.multiple) numericValueCols.push(name);
@@ -9877,6 +10566,7 @@ export class SqlDriver implements IDataDriver {
       }
     }
     this.jsonFields[key] = jsonCols;
+    this.mediaFields[key] = mediaCols;
     this.booleanFields[key] = booleanCols;
     this.numericFields[key] = numericCols;
     this.numericValueFields[key] = numericValueCols;
@@ -9924,6 +10614,7 @@ export class SqlDriver implements IDataDriver {
     this.physicalKeyIndexes.delete(tableName);
 
     const jsonCols: string[] = [];
+    const mediaCols: string[] = [];
     const booleanCols: string[] = [];
     const numericCols: string[] = [];
     const numericValueCols: string[] = [];
@@ -9938,10 +10629,20 @@ export class SqlDriver implements IDataDriver {
         if (this.isJsonField(type, field)) {
           jsonCols.push(name);
         }
+        // Unconditional, on BOTH arms — see {@link mediaFields}. The read-side
+        // legacy-encoding repair runs on a deployment that has not moved too.
+        if (!field.multiple && FILE_REFERENCE_TYPES.has(type)) {
+          mediaCols.push(name);
+        }
         // `toggle` shares boolean storage/affinity, so it needs the same
         // read coercion (stored 1/0 → JS true/false) or it leaks back as a
         // number/string instead of a boolean (#field-zoo).
-        if (type === 'boolean' || type === 'toggle') {
+        // [#17586] SCALAR only, like the three neighbours below: a
+        // `multiple: true` boolean/toggle is a JSON column, and the read
+        // coercion this registry exists for presents ONE JS boolean — which
+        // collapses the parsed array to `true` whatever it holds. See
+        // {@link booleanFields}.
+        if ((type === 'boolean' || type === 'toggle') && !field.multiple) {
           booleanCols.push(name);
         }
         // Numeric scalars are coerced back to JS numbers on read so legacy
@@ -9974,6 +10675,7 @@ export class SqlDriver implements IDataDriver {
       }
     }
     this.jsonFields[tableName] = jsonCols;
+    this.mediaFields[tableName] = mediaCols;
     this.booleanFields[tableName] = booleanCols;
     this.numericFields[tableName] = numericCols;
     this.numericValueFields[tableName] = numericValueCols;
@@ -10077,6 +10779,12 @@ export class SqlDriver implements IDataDriver {
   async initObjects(
     objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[]; lifecycle?: any }>,
   ): Promise<void> {
+    // The ADR-0104 media arm, resolved BEFORE registration because
+    // `registerObjectMetadata` below freezes `isJsonField`'s answer into
+    // `jsonFields` for every media column it sees. Memoized, and every failure
+    // path lands on the JSON arm — see {@link resolveFileColumnsMoved}.
+    await this.resolveFileColumnsMoved();
+
     // In-memory registration FIRST, and deliberately ahead of the DDL gate
     // below: being refused permission to alter a schema is not a reason to stay
     // ignorant of the objects we were just told about. On a datasource we are a
@@ -11156,6 +11864,9 @@ export class SqlDriver implements IDataDriver {
       dialect: this.dialectName,
       keyedColumns,
       varcharColumnChars: (field, keyed) => this.varcharColumnChars(field, keyed),
+      // ADR-0104: the media family's column shape is this deployment's fact,
+      // not the type's — the differ must ask the arm the emitter just used.
+      fileColumnsMoved: this.fileColumnsMoved,
     });
     out.push(...(await this.detectTableIndexDrift(tableName, fields, declaredIndexes, new Set(cols.map((c) => c.name)))));
     return out;
@@ -11365,6 +12076,118 @@ export class SqlDriver implements IDataDriver {
     }
     out.sort((a, b) => (a.table === b.table ? (a.column ?? '').localeCompare(b.column ?? '') : a.table.localeCompare(b.table)));
     return out;
+  }
+
+  /**
+   * Every single-value media column on this datastore that still holds the
+   * legacy encoding, with the statements that move it (#15989).
+   *
+   * The read-only half of the ADR-0104 column step: it enumerates and plans,
+   * and it runs no DDL and no UPDATE. `os migrate files-to-references --apply`
+   * is what executes the plans, and only after its backfill and self-check
+   * have reported zero blocking rows — this method deliberately cannot tell
+   * whether that happened, so it must never be the thing that decides to move
+   * anything.
+   *
+   * ## The shape of each move is read off the COLUMN, never off the dialect
+   *
+   * A media column can already be a string column on a server dialect — `os
+   * generate migration --format sql` emits `VARCHAR(2048)` for the family, and
+   * a JSON-arm driver writes quoted ids into it (#15771, reproduced on live
+   * PostgreSQL 16.13). Deciding `retype` vs `unquote` from the dialect alone
+   * would leave that population full of `"file_…"` behind a `columns_moved_at`
+   * stamp claiming it had been converted. So each target is classified by
+   * introspection.
+   *
+   * ## What is left OUT, and why each omission is not a silent one
+   *
+   *  - a table the datastore does not physically have — nothing to move;
+   *  - `multiple: true` media — a list of ids, a JSON column on every
+   *    deployment and on both arms, and not part of this move at all (see
+   *    {@link mediaFields}, which already excludes it);
+   *  - a column the introspection cannot see — reported as a `refusals` entry
+   *    rather than skipped, because a column silently missing from a move is
+   *    the one way this step can under-report and still look complete;
+   *  - every dialect outside {@link MEDIA_COLUMN_MOVE_DIALECTS} — one refusal
+   *    naming the dialect. ⛔ MySQL lands here on purpose: #17788 owns its
+   *    statement order, on a real instance.
+   */
+  async planMediaColumnMove(): Promise<MediaColumnMoveScan> {
+    const dialect = mediaColumnMoveDialect(this.dialectName);
+    if (!dialect) {
+      return {
+        dialect: this.dialectName,
+        plans: [],
+        refusals: [
+          {
+            table: '*',
+            column: '*',
+            reason: 'dialect_not_supported',
+            // ⛔ No tracker id in the string: this `detail` reaches an operator
+            // reading a migration report, who has no tracker to resolve one
+            // against (`check:doc-authoring`). The card that owns the MySQL
+            // leg is #17788; the reader who can resolve that reads this line.
+            detail:
+              `the ADR-0104 column step has no measured statement for dialect '${this.dialectName}'. ` +
+              'The MySQL leg is tracked separately and is settled against a real instance, because ' +
+              'its statement ORDER is what the ADR leaves open; no other dialect has been ' +
+              'rehearsed. Nothing was planned and nothing ran.',
+          },
+        ],
+      };
+    }
+
+    const plans: MediaColumnMovePlan[] = [];
+    const refusals: MediaColumnMoveRefusal[] = [];
+
+    for (const [tableName] of this.managedObjectFields) {
+      const columns = this.mediaFields[tableName];
+      if (!columns || columns.length === 0) continue;
+      if (!(await this.knex.schema.hasTable(tableName))) continue;
+
+      let physical: IntrospectedColumn[];
+      try {
+        physical = await this.introspectColumns(tableName);
+      } catch (e: any) {
+        refusals.push({
+          table: tableName,
+          column: '*',
+          reason: 'introspection_failed',
+          detail:
+            `could not read the physical columns of '${tableName}' (${e?.message ?? e}), so the ` +
+            'shape of its media columns is unknown and no statement can be chosen for them.',
+        });
+        continue;
+      }
+      const byName = new Map(physical.map((c) => [c.name, c]));
+
+      for (const column of columns) {
+        const found = byName.get(column);
+        if (!found) {
+          refusals.push({
+            table: tableName,
+            column,
+            reason: 'column_absent',
+            detail:
+              `'${tableName}.${column}' is declared as a media field but the datastore has no such ` +
+              'column, so there is nothing here to move and nothing that could be verified moved.',
+          });
+          continue;
+        }
+        plans.push(
+          mediaColumnMovePlan(
+            dialect,
+            isJsonColumnType(found.type) ? 'retype' : 'unquote',
+            tableName,
+            column,
+          ),
+        );
+      }
+    }
+
+    plans.sort((a, b) => (a.table === b.table ? a.column.localeCompare(b.column) : a.table.localeCompare(b.table)));
+    refusals.sort((a, b) => (a.table === b.table ? a.column.localeCompare(b.column) : a.table.localeCompare(b.table)));
+    return { dialect, plans, refusals };
   }
 
   /**
@@ -13517,7 +14340,12 @@ export class SqlDriver implements IDataDriver {
    * flips its operator, which is exactly the ambiguity the emitter-side rule
    * avoids.
    */
-  public temporalFilterValue(objectName: string, field: string, value: any): any {
+  // [#17690] The contract declares this hook `unknown`-returning; the class
+  // published a bare `any`, which is the same family as the promise-shaped
+  // doors above and the one member of it that is synchronous. Pinned through
+  // `ReturnType` rather than `Resolved` in
+  // `sql-driver-doors-declared-types.test.ts`.
+  public temporalFilterValue(objectName: string, field: string, value: any): unknown {
     return this.coerceFilterValue(objectName, field, value);
   }
 
@@ -13573,35 +14401,90 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * [#14079] Is `localField` a column on `table` whose STORED value is never
-   * text — a declared numeric or boolean scalar?
+   * [#14079/#15683/#17343] Is `localField` a column on `table` a text operator
+   * must not be aimed at — a SCALAR column DECLARED numeric, boolean or
+   * temporal?
    *
-   * Reads the two registries `formatOutput`'s read-coercion already reads —
-   * `numericFields` (`NUMERIC_SCALAR_TYPES`, non-`multiple`) and
-   * `booleanFields` (`boolean` / `toggle`) — which `initObjects` and
-   * `registerExternalObject` both fill from the declared field type. Asking
-   * THOSE rather than growing a third list is the same discipline
-   * {@link isJsonColumn} states for `jsonFields`: one registry per column
-   * class, filled at the one place the declaration is read. Spec-side the
-   * same two classes are `NON_TEXT_STORED_VALUE_TYPES`; this driver's registries
-   * add its SQL aliases (`integer` / `int` / `float`) on top, as that
-   * constant's docblock says drivers do.
+   * Reads the registries `formatOutput`'s read-coercion and the temporal seam
+   * already read — `numericFields` (`NUMERIC_SCALAR_TYPES`, non-`multiple`),
+   * `booleanFields` (`boolean` / `toggle`) and, through
+   * {@link SqlDriver.temporalFieldKind}, `datetimeFields` / `dateFields` /
+   * `timeFields` — which `initObjects` and `registerExternalObject` both fill
+   * from the declared field type. Asking THOSE rather than growing another
+   * list is the same discipline {@link isJsonColumn} states for `jsonFields`:
+   * one registry per column class, filled at the one place the declaration is
+   * read. Spec-side the same four classes are `NON_TEXT_STORED_VALUE_TYPES`;
+   * this driver's registries add its SQL aliases (`integer` / `int` / `float`)
+   * on top, as that constant's docblock says drivers do.
    *
    * A table with no entry answers `false`, exactly like {@link isJsonColumn}:
    * a table this driver was never told about has no declared types, and the
    * gate fires only where the column class is KNOWN — never from a guess.
    *
-   * Temporal columns are deliberately NOT here. On SQLite a `Field.datetime` /
-   * `Field.date` / `Field.time` column's stored value IS text (canonical ISO,
-   * ADR-0053), so "the stored value is not a string" is a dialect question for
-   * them and the contract row this predicate serves declares nothing about
-   * them — `NON_TEXT_STORED_VALUE_TYPES`' docblock records the same boundary.
+   * [#15683] Temporal columns joined this predicate by RULING, not by storage.
+   * On SQLite a `Field.date` / `Field.datetime` / `Field.time` column's stored
+   * value IS text (canonical ISO, ADR-0053), so `GLOB '*2026*'` matched a date
+   * by ISO substring here while live Postgres refused the same filter at query
+   * time (SQLSTATE 42883 `operator does not exist: date ~~ unknown`, a
+   * `DATABASE_ERROR` 500) — one filter, three answers across the family, with
+   * MySQL never measured. The maintainer ruled it on 2026-09-05 (recorded on
+   * #15683): 「a text operator over a column whose DECLARED type is temporal is
+   * type-gated exactly like the numeric and boolean classes; the SQLite
+   * ISO-text match is not a contract」. That match is RETIRED, deliberately: a
+   * caller who wants "records in 2026" uses the range operators
+   * (`$gte` / `$lt`, or `$between`), which every dialect answers the same way.
+   *
+   * ⚠️ The gate keys on the DECLARATION, never on the storage class — which is
+   * why {@link temporalFieldKind} rather than a "does this column hold text"
+   * test is the right question. `canonicalDatetimeFields` (whether a column has
+   * been certified canonical) is a REPAIR concern and deliberately not read
+   * here: an uncertified column is still a declared datetime, and gating on
+   * certification would make the answer depend on repair state.
+   *
+   * ⚠️ A MULTI-VALUED column is excluded on EVERY limb, and the exclusion is
+   * load bearing. `multiple: true` stores a JSON TEXT array ({@link
+   * isJsonField}), where `$contains` is not a substring test at all — it is the
+   * MEMBERSHIP spelling, the one operator #7398 left working on a JSON column
+   * after refusing the equality family there, and downstream code depends on it
+   * (`sql-driver-json-column-operator-refusal.test.ts` pins it on both lowering
+   * families). Gating it turns a working membership filter into "matches
+   * nothing" — the fail-CLOSED direction that suite's own table calls out.
+   *
+   * Each limb spells the exclusion where its own registry leaves it unsaid:
+   *
+   * - **numeric** — at the REGISTRY. `numericFields` is filled
+   *   `NUMERIC_SCALAR_TYPES.has(type) && !field.multiple`, so the condition
+   *   never reaches this predicate.
+   * - **temporal** [#15683] — HERE. `dateFields` / `datetimeFields` /
+   *   `timeFields` serve the read-presentation seam, which DOES apply to a
+   *   multi-valued column, so narrowing them would break a seam that is right.
+   * - **boolean** [#17343] — HERE, and this limb had NEITHER until then.
+   *   #14079 landed this predicate describing itself as "a declared numeric or
+   *   boolean SCALAR" and annotated the numeric registry as non-`multiple`, so
+   *   the omission was the gap between that stated scope and `booleanFields`'
+   *   silence, never a ruling that a stored array of booleans is meaningless:
+   *   `boolean` + `multiple: true` is authorable, gets a JSON column here, and
+   *   its `$contains` answered correctly on every other declared class.
+   *
+   *   ⚠️ [#17586] `booleanFields` has SINCE been narrowed at both fills, for a
+   *   defect of its own (the read coercion collapsed a parsed array to a
+   *   single, inverted `true`). So this limb's carve-out is now REDUNDANT —
+   *   and it is kept deliberately, on two grounds: the registry's narrowing is
+   *   a read-coercion decision that must not silently become this gate's
+   *   correctness condition, and the carve-out is what states the rule for the
+   *   limb — a text operator is legal against a JSON column — where the
+   *   registry states only which columns take a coercion. The equivalence that
+   *   makes the two agree (for `boolean`/`toggle`, `isJsonColumn` IS
+   *   `!!field.multiple`) is pinned by execution in
+   *   `sql-driver-17586-multi-valued-boolean-read-inversion.test.ts`, so a
+   *   divergence turns that file red rather than moving this answer.
    */
   protected isNonTextColumn(table: string | null | undefined, localField: string): boolean {
     if (!table) return false;
     return (
       this.numericFields[table]?.includes(localField) === true ||
-      this.booleanFields[table]?.includes(localField) === true
+      (this.booleanFields[table]?.includes(localField) === true && !this.isJsonColumn(table, localField)) ||
+      (this.temporalFieldKind(table, localField) !== null && !this.isJsonColumn(table, localField))
     );
   }
 
@@ -13931,6 +14814,54 @@ export class SqlDriver implements IDataDriver {
    */
   private applyContainsLike(builder: any, method: string, field: string, value: unknown): void {
     this.applyLike(builder, method, field, value, 'contains');
+  }
+
+  /**
+   * [#17590, director ruling 2026-09-12] Emit the MEMBERSHIP reading of
+   * `$contains` / `$notContains` when the column they were aimed at is a JSON
+   * column, and say whether it did.
+   *
+   * Returns `false` — leaving the caller on the pre-#17590 substring emitter —
+   * in exactly two cases, and the two are different in kind:
+   *
+   * 1. **The column is not a JSON column.** On a scalar string column
+   *    `$contains` IS the substring test, unchanged and deliberately so: that
+   *    is the sentence the spec docblock now states on the other side of the
+   *    contract ({@link SqlDriver.isJsonColumn} is the population, taken from
+   *    #17469's reading of what the driver uses TODAY and ⛔ not widened here).
+   * 2. **The dialect has no membership construct** (`'unknown'` — a knex client
+   *    this driver does not model). {@link jsonMembershipPredicate} answers
+   *    `null` there and the old shape still runs.
+   *
+   * The negated spelling composes with the NULL rule rather than replacing it:
+   * a row with no value satisfies `$notContains` (#5298,
+   * {@link SqlDriver.applyNullSafeNegative}), and all three membership
+   * constructs answer NULL — not FALSE — for a NULL column, so the
+   * `col IS NULL OR NOT (…)` wrapper is doing real work and not decoration.
+   * Measured over a 13-row fixture: `$contains` and `$notContains` partition
+   * every row on all three dialects, NULL and empty-array rows included.
+   */
+  private applyJsonMembership(
+    builder: any,
+    method: string,
+    table: string | null | undefined,
+    localField: string,
+    field: string,
+    value: unknown,
+    negate: boolean,
+  ): boolean {
+    if (!this.isJsonColumn(table, localField)) return false;
+    const predicate = jsonMembershipPredicate(this.dialectName, field, value);
+    if (!predicate) return false;
+    const rawMethod = method.startsWith('or') ? 'orWhereRaw' : 'whereRaw';
+    if (!negate) {
+      builder[rawMethod](predicate.sql, predicate.bindings);
+      return true;
+    }
+    this.applyNullSafeNegative(builder, method, field, (qb) =>
+      qb.orWhereRaw(`NOT ${predicate.sql}`, predicate.bindings),
+    );
+    return true;
   }
 
   /**
@@ -14336,8 +15267,15 @@ export class SqlDriver implements IDataDriver {
               );
               break;
             }
+            // [#17590] The MEMBERSHIP reading first: on a JSON column this
+            // operator asks whether the comparand is an ELEMENT of the stored
+            // array, not whether it is a substring of the serialization. Falls
+            // through to the substring emitter for every scalar string column,
+            // which is the other half of the sentence the spec now states.
             case '$contains':
-              this.applyContainsLike(builder, method, field, opValue);
+              if (!this.applyJsonMembership(builder, method, table, localField, field, opValue, false)) {
+                this.applyContainsLike(builder, method, field, opValue);
+              }
               break;
             // [#5702] The case-INSENSITIVE twin of `$contains`, and the
             // replacement `RETIRED_FILTER_OPERATORS` prescribes for `$regex`.
@@ -14349,11 +15287,20 @@ export class SqlDriver implements IDataDriver {
               this.applyLike(builder, method, field, opValue, 'contains', false, true);
               break;
             case '$notContains':
-              // [#5298] NULL-safe: `NOT LIKE` is UNKNOWN for a NULL column, and
-              // "does not contain" is true of a value that is not there.
-              this.applyNullSafeNegative(builder, method, field, (qb) =>
-                this.applyLike(qb, 'orWhere', field, opValue, 'contains', true),
-              );
+              // [#17590] The exact complement of the arm above, on the same
+              // population and the same construct. It moves WITH `$contains`
+              // and cannot be deferred: this operator is declared "the negation
+              // of $contains, on the same comparand contract", so leaving it on
+              // the substring emitter would make the pair non-complementary on
+              // every JSON column — `['redwood']` would answer neither
+              // `$contains: 'red'` nor `$notContains: 'red'`.
+              if (!this.applyJsonMembership(builder, method, table, localField, field, opValue, true)) {
+                // [#5298] NULL-safe: `NOT LIKE` is UNKNOWN for a NULL column, and
+                // "does not contain" is true of a value that is not there.
+                this.applyNullSafeNegative(builder, method, field, (qb) =>
+                  this.applyLike(qb, 'orWhere', field, opValue, 'contains', true),
+                );
+              }
               break;
             case '$startsWith':
               this.applyLike(builder, method, field, opValue, 'starts');
@@ -16072,6 +17019,15 @@ export class SqlDriver implements IDataDriver {
         // `createColumn`'s catch-all, spelled the same way so the two cannot
         // disagree about which types are JSON: everything else is
         // `table.string(name)` at knex's default width.
+        //
+        // ⚠️ The FILE family first, and by the same deployment question the
+        // emitter asks — this mirror is what the drift detector consults
+        // INSTEAD of restating the emitter's cases, so a mirror that answered
+        // `null` for a moved media column would tell the detector no varchar
+        // exists where the emitter had just built one.
+        if (FILE_REFERENCE_TYPES.has(type)) {
+          return this.mediaColumnIsJson() ? null : MEDIA_ID_VARCHAR_CHARS;
+        }
         return JSON_COLUMN_TYPES.has(type) ? null : SqlDriver.DEFAULT_STRING_VARCHAR_CHARS;
     }
   }
@@ -16381,7 +17337,14 @@ export class SqlDriver implements IDataDriver {
       return;
     }
 
-    const type = field.type || 'string';
+    // [#16319] ⛔ Was `const type = field.type || 'string'`. See
+    // {@link refuseUndeclaredFieldType} for what that default cost and why the
+    // answer here is a refusal rather than a different guess. Asked AFTER
+    // `multiple`, exactly where the default stood, so a flagged field is still a
+    // JSON column whatever its element type would have been — the rule the two
+    // generators and `fieldHasColumn` state as well.
+    if (!isDeclaredFieldType(field)) refuseUndeclaredFieldType(name);
+    const type: string = field.type;
     let col: any;
     switch (type) {
       case 'string':
@@ -16725,6 +17688,21 @@ export class SqlDriver implements IDataDriver {
         //
         // A type that genuinely wants the bound belongs in the string-family
         // case above, named — never acquired by falling through to here.
+        //
+        // ⚠️ The FILE family is asked separately, because its answer is a
+        // DEPLOYMENT fact rather than a property of the type (ADR-0104
+        // addendum): a json column until this deployment's columns have moved,
+        // and then a `varchar` at the width the SQL generator already emits for
+        // it ({@link MEDIA_ID_VARCHAR_CHARS}) — not knex's default 255, which
+        // would be a new divergence between the two producers of this column.
+        // `multiple: true` media never reaches here: `createColumn`
+        // short-circuits on `multiple` above the type switch.
+        if (FILE_REFERENCE_TYPES.has(type)) {
+          col = this.mediaColumnIsJson()
+            ? this.jsonColumn(table, name)
+            : table.string(name, MEDIA_ID_VARCHAR_CHARS);
+          break;
+        }
         col = JSON_COLUMN_TYPES.has(type) ? this.jsonColumn(table, name) : table.string(name);
     }
 
@@ -16952,7 +17930,100 @@ export class SqlDriver implements IDataDriver {
     }
   }
 
+  /**
+   * Ask {@link SqlDriverConfig.fileColumnsMoved} once, and never again.
+   *
+   * Called from {@link initObjects} — the one async seam every schema-syncing
+   * posture passes through, and the only place late enough for the flag row to
+   * exist (it lives in `sys_migration`, a table schema sync itself creates) and
+   * early enough to precede `registerObjectMetadata`, which freezes
+   * {@link isJsonField}'s answer for every media column.
+   *
+   * ⛔ EVERY failure lands on the JSON arm, and none of them is reported as an
+   * error: no resolver, a resolver that throws, a resolver that rejects, a
+   * resolver that answers a non-`true` value. Not knowing whether this
+   * deployment moved its columns is the ordinary state of every deployment
+   * that exists today, so it must read as "not moved" in silence — a driver
+   * that guessed the other way would write bare ids into a JSON column.
+   *
+   * The resolver reference is dropped after the first call, which is what makes
+   * this memoized without a second boolean: a repeat `initObjects` (the batched
+   * and deferred-DDL paths both call it more than once) finds nothing to ask.
+   */
+  /**
+   * The kernel→driver supply seam for the ADR-0104 media arm (#15989).
+   *
+   * `ObjectQL.registerDriver` calls this with a closure over the engine's own
+   * `haveFileColumnsMoved()`, which reads `sys_migration.columns_moved_at`.
+   * It is the counterpart of {@link SqlDriverConfig.fileColumnsMoved} for the
+   * ordinary composition, where nobody hand-writes that option: the driver is
+   * constructed in an app's config long before any row can be read, so what
+   * arrives here is the question and {@link resolveFileColumnsMoved} asks it
+   * once, at `initObjects`.
+   *
+   * ## ⛔ A host declaration is never overruled — this fills an empty slot only
+   *
+   * If the config named `fileColumnsMoved` at all (a boolean of either
+   * polarity, or a resolver of the host's own), this is a NO-OP. The host is
+   * the more specific authority about its own storage, and the failure the
+   * engine could cause by overruling a declared `false` is the one this whole
+   * mechanism exists to prevent: bare ids written into a JSON column.
+   *
+   * ## It changes nothing that has already been asked
+   *
+   * After `initObjects` has run once the arm is resolved and frozen — every
+   * media column's `isJsonField` answer is already in `jsonFields` — so a
+   * resolver arriving later would be a promise this driver cannot keep. A
+   * registration after the first `initObjects` therefore leaves the resolved
+   * arm alone; the only thing it could do instead is change the write encoding
+   * of a table whose columns were built for the other one.
+   *
+   * @returns whether the resolver was taken, so a caller can tell an
+   *          installation from a refusal instead of inferring it.
+   */
+  setFileColumnsMovedResolver(resolve: () => boolean | Promise<boolean>): boolean {
+    if (this.fileColumnsMovedDeclared) return false;
+    if (this.fileColumnsMovedAsked) return false;
+    this.fileColumnsMovedResolver = resolve;
+    return true;
+  }
+
+  /** Has {@link resolveFileColumnsMoved} already run to completion? */
+  private fileColumnsMovedAsked = false;
+
+  protected async resolveFileColumnsMoved(): Promise<void> {
+    const resolver = this.fileColumnsMovedResolver;
+    if (!resolver) {
+      // A driver with nothing to ask has still settled its arm: `false`, the
+      // JSON encoding, which is what it will keep for the rest of its life.
+      // Recorded so a resolver supplied AFTER the first `initObjects` is
+      // refused rather than silently changing an already-frozen answer.
+      this.fileColumnsMovedAsked = true;
+      return;
+    }
+    this.fileColumnsMovedAsked = true;
+    this.fileColumnsMovedResolver = undefined;
+    try {
+      this.fileColumnsMoved = (await resolver()) === true;
+    } catch {
+      this.fileColumnsMoved = false;
+    }
+  }
+
+  /**
+   * Is a SINGLE-VALUE media column a JSON column on THIS deployment?
+   *
+   * The one place the ADR-0104 dual-encoding window is asked about, so the DDL
+   * switch, the read-side deserializer registry, the `varchar` mirror and the
+   * drift detector cannot answer it differently. `multiple: true` media is not
+   * this question — it is a list of ids and a JSON column on every deployment.
+   */
+  protected mediaColumnIsJson(): boolean {
+    return !this.fileColumnsMoved;
+  }
+
   protected isJsonField(type: string, field: any): boolean {
+    if (!field.multiple && FILE_REFERENCE_TYPES.has(type)) return this.mediaColumnIsJson();
     return JSON_COLUMN_TYPES.has(type) || !!field.multiple;
   }
 
@@ -17098,6 +18169,35 @@ export class SqlDriver implements IDataDriver {
       }
     }
 
+    // ── ADR-0104: the MOVED media arm ───────────────────────────────────────
+    //
+    // On a deployment whose media columns have moved, a single-value media
+    // field is NOT in `jsonFields` (see {@link isJsonField}), so the loop above
+    // did not touch it and the id reaches the wire BARE — which is the whole
+    // point of the ruling: the column holds the actual `sys_file` id.
+    //
+    // What is left to do is the one value shape the moved column cannot hold.
+    // A legacy INLINE metadata object can still be handed to a write on a
+    // deployment that admits lax media values (`OS_ALLOW_LAX_MEDIA_VALUES`),
+    // and binding a plain object to a `varchar` column is a raw driver-level
+    // TypeError on SQLite and an unusable `[object Object]` on the server
+    // dialects. Serialising it degrades that write to a stored string — the
+    // SAME safety-net posture the SQLite arm below has always taken, applied
+    // on every dialect because after the move every dialect holds this family
+    // in a character column. `formatOutput`'s media pass reads it straight back
+    // as the object it was, so the round trip is unchanged for that population.
+    if (this.fileColumnsMoved) {
+      const mediaFields = this.mediaFields[object];
+      if (mediaFields && mediaFields.length > 0) {
+        for (const field of mediaFields) {
+          const v = copy[field];
+          if (v === undefined || v === null || typeof v === 'string') continue;
+          if (!copied) { copy = { ...copy }; copied = true; }
+          copy[field] = JSON.stringify(v);
+        }
+      }
+    }
+
     if (!this.isSqlite) return copy;
 
     // Safety net: better-sqlite3 can only bind numbers/strings/bigints/buffers/
@@ -17177,6 +18277,52 @@ export class SqlDriver implements IDataDriver {
         }
       }
 
+    }
+
+    // ── ADR-0104: the media family reads BOTH encodings, on every dialect ────
+    //
+    // The addendum's dual-encoding window requires the driver to read a bare id
+    // and a legacy JSON-quoted id throughout, on every dialect. SQLite already
+    // did — its `jsonFields` pass above parses a quoted cell and its `catch`
+    // keeps a bare one, which is why the gap was never a three-dialect one —
+    // but Postgres and MySQL had no arm at all: MEASURED on live PG 16.13, a
+    // JSON-quoted id sitting in a `varchar` column reads back WITH ITS QUOTES.
+    // That column is not hypothetical: `os generate migration --format sql`
+    // emits `VARCHAR(2048)` for this family, so a generator-built deployment on
+    // a server dialect has been storing `"file_01HXYZ"` and handing it back
+    // verbatim (#15771's silent corruption, reproduced on a live cell).
+    //
+    // ⚠️ Runs on BOTH arms, and it is a REPAIR rather than an arm:
+    //
+    //   - moved deployment  — the cell is bare, no leading delimiter, no-op;
+    //     a cell step 3 has not converted yet still reads correctly.
+    //   - unmoved, json column — the client (or the pass above) already parsed
+    //     it, so the value here is not a string, no-op.
+    //   - unmoved, character column — the corrupt population above. THIS is
+    //     the only place the pass changes an answer, and the answer it changes
+    //     it to is the id that was written.
+    //
+    // ⛔ The delimiter test is load-bearing and must not be relaxed to "try
+    // parsing everything": a `sys_file` id is word characters and `-`
+    // (`isFileIdToken`), so an all-digit id would `JSON.parse` to a NUMBER and
+    // `null` / `true` / `false` to non-strings. Only a leading `"`, `{` or `[`
+    // can be a JSON encoding of a media value, and none of the three can begin
+    // an id, a resolver URL (`https:` / `/api/` / `data:` / `blob:`) or a
+    // `data:` URI. A cell that starts with one and does NOT parse keeps its raw
+    // string, exactly as the SQLite arm above does.
+    const mediaFields = this.mediaFields[object];
+    if (mediaFields && mediaFields.length > 0) {
+      for (const field of mediaFields) {
+        const v = data[field];
+        if (typeof v !== 'string' || v.length === 0) continue;
+        const head = v[0];
+        if (head !== '"' && head !== '{' && head !== '[') continue;
+        try {
+          data[field] = JSON.parse(v);
+        } catch {
+          // Not an encoding after all — the raw string IS its value.
+        }
+      }
     }
 
     // Numeric scalars handed back as STRINGS are coerced to numbers, on EVERY

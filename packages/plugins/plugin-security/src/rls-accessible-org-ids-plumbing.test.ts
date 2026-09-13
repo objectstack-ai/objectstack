@@ -299,10 +299,12 @@ describe('[#16518] RLSCompiler.compileFilter resolves `current_user.accessible_o
   });
 
   it('⭐ RESERVED means reserved at the COMPILER too — a membership bag cannot clobber it', () => {
-    // `stageRlsMembership` screens a RESOLVER's answer, but a bag already on the
-    // context is spread through unscreened. Now that the kernel names the field,
-    // the compiler's own "never let a membership key clobber a named field" rule
-    // covers it: the kernel's value wins.
+    // `stageRlsMembership` screens a RESOLVER's answer, but a bag already on
+    // the context is seeded through unscreened. The compiler's merge now
+    // refuses `RESERVED_RLS_MEMBERSHIP_KEYS` BY NAME rather than by "was this
+    // field already defined", so the kernel's value wins here and the bag is
+    // refused even on a request where the kernel resolved nothing
+    // (`rls-reserved-membership-keys.test.ts` pins the absent-kernel half).
     const filter = compiler.compileFilter(
       [policy(SQL_BRIDGE)],
       {

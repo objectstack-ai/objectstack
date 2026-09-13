@@ -17,7 +17,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import type { ConversionNotice } from '@objectstack/spec';
+import { ObjectStackDefinitionSchema, applyConversionsToStoredItem, type ConversionNotice } from '@objectstack/spec';
 import {
   applyArtifactForwardConversions,
   parseRangeFloor,
@@ -260,6 +260,144 @@ describe('the artifact door never stamps a column constraint (ADR-0113, #16693)'
     expect(objects.crm_ticket!.allowPurge).toBeUndefined();
     expect(objects.crm_ticket!.allowRead, 'only the retired bits move').toBe(true);
     expect(result.definition).not.toBe(def);
+  });
+});
+
+/**
+ * #17885 — the artifact door must not replay the DEFAULT-FLIP class.
+ *
+ * `app-hidden-to-unpublished` (#4829, ADR-0045 amended 2026-08-09) rewrites
+ * `app.hidden: true` into `app._unpublished: true`. Both keys are live and
+ * they mean opposite kinds of thing: `hidden` is navigation presentation and
+ * *"never an access gate"* (`ui/app.zod.ts`), while `_unpublished` is the
+ * machine-managed publish gate `filterAppForUser` drops the app on for every
+ * user without `studio.access` / `setup.access`
+ * (`packages/rest/src/rest-server.ts` — untouched by this fix, and correct:
+ * the defect is WHO writes `_unpublished`).
+ *
+ * The entry is `retiredFromLoadPath: true`, which does NOT hold it back here —
+ * that flag's jurisdiction is the authoring funnel and nothing else (#16864's
+ * determination, landed). So before this fix an artifact declaring
+ * `engines.protocol: ^17.0.0` — the range `create-objectstack` stamps — had
+ * every `defineApp({ hidden: true })` in it registered as an unpublished app,
+ * reproducing the very incident the `_unpublished` split was introduced to
+ * end, through the conversion layer.
+ *
+ * Four legs, and the two controls are what make the first two mean anything:
+ * SUBJECT (the window is open and `hidden` survives) · NEGATIVE (a floor the
+ * window is shut for) · POSITIVE, twice (a non-retired conversion AND a
+ * retired one still fire in the subject's own window — the door is narrowed,
+ * not closed) · and the entry itself still firing at the seam it is sound at.
+ */
+describe('the artifact door never turns an authored `hidden: true` into an unpublished app (#17885, #4829)', () => {
+  /** One authored `hidden: true` app, plus a `jsx` page as the live non-retired control. */
+  const hiddenAppDefinition = (protocolRange: string) => ({
+    manifest: {
+      id: 'app.example.hr', name: 'hr', version: '1.0.0', type: 'app',
+      engines: { protocol: protocolRange },
+    },
+    apps: [{ name: 'account', label: 'Account', hidden: true, navigation: [] }],
+  });
+
+  it('leaves `hidden: true` alone on an artifact the retired window IS open for', () => {
+    const def = hiddenAppDefinition('^17.0.0');
+    const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: '17.4.0' });
+
+    // ⭐ ANTI-VACUITY: the window really is open on this input. A green line
+    // below because the door skipped the artifact would prove nothing.
+    expect(result.verdict).toBe('converted-forward');
+    expect(result.authoredFloor).toBe('17.0.0');
+
+    const app = (result.definition as { apps: Record<string, unknown>[] }).apps[0]!;
+    expect(app.hidden, 'the authored navigation choice is untouched').toBe(true);
+    expect(app._unpublished, 'no publish gate is invented for the author').toBeUndefined();
+    expect(result.notices.map((n) => n.conversionId)).not.toContain('app-hidden-to-unpublished');
+    // Copy-on-write: nothing was recognized, so the same reference comes back.
+    expect(result.definition).toBe(def);
+  });
+
+  /**
+   * ⭐⭐ The assertion that actually matters: the door's output is fed to
+   * `ObjectStackDefinitionSchema.parse` in `MetadataPlugin._parseAndRegisterArtifact`,
+   * and THAT object is what reaches registration and then `filterAppForUser`.
+   * A pin on the conversion's return value alone would not have caught a strict
+   * parse that re-introduced the key.
+   */
+  it('registers `hidden: true` — asserted AFTER the strict parse the door feeds', () => {
+    const def = hiddenAppDefinition('^17.0.0');
+    const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: '17.4.0' });
+    expect(result.verdict).toBe('converted-forward');
+
+    const parsed = ObjectStackDefinitionSchema.parse(result.definition) as {
+      apps?: { name: string; hidden?: boolean; _unpublished?: boolean }[];
+    };
+    const registered = parsed.apps!.find((a) => a.name === 'account')!;
+    expect(registered.hidden, 'what registration receives').toBe(true);
+    expect(registered._unpublished, 'what `filterAppForUser` withholds on').toBeUndefined();
+  });
+
+  /**
+   * ⭐ NEGATIVE CONTROL — the instrument can answer "no" for the other reason.
+   * A floor at or above the runtime shuts the window outright, so `hidden`
+   * surviving here says nothing about the fix; it says the leg above was read
+   * on an input where the window was genuinely open.
+   */
+  it('floor ^99.0.0 — the window is shut and nothing is replayed at all', () => {
+    const def = hiddenAppDefinition('^99.0.0');
+    const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: '17.4.0' });
+    expect(result.verdict).toBe('authored-current');
+    expect(result.notices).toEqual([]);
+    expect((result.definition as { apps: Record<string, unknown>[] }).apps[0]!.hidden).toBe(true);
+  });
+
+  /**
+   * ⭐ FIRING CONTROL 1 — a NON-RETIRED conversion still fires in the subject's
+   * own window. `page-kind-jsx-to-html` (ADR-0080) is not retired, so a door
+   * that had stopped converting anything would fail here.
+   */
+  it('still applies a non-retired conversion in that same window', () => {
+    const def = {
+      ...hiddenAppDefinition('^17.0.0'),
+      pages: [{ name: 'landing', kind: 'jsx', source: '<div>hi</div>' }],
+    };
+    const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: '17.4.0' });
+    expect(result.verdict).toBe('converted-forward');
+    expect(result.notices.map((n) => n.conversionId)).toContain('page-kind-jsx-to-html');
+    expect((result.definition as { pages: Record<string, unknown>[] }).pages[0]!.kind).toBe('html');
+    // …and the app in the SAME artifact still keeps its authored key.
+    expect((result.definition as { apps: Record<string, unknown>[] }).apps[0]!.hidden).toBe(true);
+  });
+
+  /**
+   * ⭐ FIRING CONTROL 2 — and the RETIRED window is still open, which is the
+   * control this particular fix could plausibly have broken. Closing the
+   * retired window wholesale would fix #17885 and re-break #12772: an artifact
+   * built by 17.1.0 tooling would again be refused at the tombstone.
+   */
+  it('still replays RETIRED conversions in that same window (#12772 is not reversed)', () => {
+    const def = legacyPermissionDefinition('^17.0.0');
+    const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: '17.4.0' });
+    expect(result.verdict).toBe('converted-forward');
+    const objects = (result.definition as { permissions: { objects: Record<string, Record<string, unknown>> }[] })
+      .permissions[0]!.objects;
+    expect(objects.crm_ticket!.allowRestore).toBeUndefined();
+    expect(objects.crm_ticket!.allowPurge).toBeUndefined();
+    expect(result.notices.length).toBeGreaterThan(0);
+  });
+
+  /**
+   * ⭐ SEAM SCOPE — the entry is refused by THIS DOOR, not removed from the
+   * chain. The stored-row seam, where a `hidden: true` row can only have come
+   * from the pre-split materialization path, still carries the population
+   * across. A fix that had neutered the entry would go green on every leg
+   * above and silently strand those rows.
+   */
+  it('leaves the entry firing at the stored-row seam it is sound at', () => {
+    const row = applyConversionsToStoredItem('app', {
+      name: 'production_management', label: 'Production', hidden: true, navigation: [],
+    }) as Record<string, unknown>;
+    expect(row._unpublished, 'the stored-row seam still converts').toBe(true);
+    expect(row.hidden).toBeUndefined();
   });
 });
 

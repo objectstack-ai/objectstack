@@ -34,6 +34,23 @@ import { SqliteWasmDriver } from './index.js';
 /** `true` for `any` and for nothing else. */
 type IsAny<T> = 0 extends 1 & T ? true : false;
 
+/**
+ * [#17879] MEASURED — the phantom half, and why `ContainsAny` (#17876) is
+ * inert here. Measured across the `.d.ts` boundary this file exists to pin,
+ * with `@objectstack/driver-sql` rebuilt for each leg:
+ *
+ *   door resolves to      `FilterCondition | undefined`
+ *   CONTROL  `filters?: any`                 2 errors here (the `narrowed`
+ *                                             leg + TS2578) => it fires
+ *   NESTED   `filters?: Record<string, any>`  0 errors here, with or without
+ *                                             `ContainsAny` swapped in
+ *
+ * `ContainsAny` distributes over the `| undefined` an optional parameter
+ * carries, answering `boolean`; and it is saturated on the correct door
+ * anyway, since `FilterCondition` is an open map. No swap was made — see the
+ * #17879 report for the two measured repairs.
+ */
+
 describe("SqliteWasmDriver inherits distinct's bare-FilterCondition parameter (#6320)", () => {
   let driver: SqliteWasmDriver;
   let knexInstance: Knex;

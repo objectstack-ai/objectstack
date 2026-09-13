@@ -324,6 +324,81 @@ export default class MigrateApply extends Command {
         return;
       }
 
+      // ── [#17440] REFUSE THE sys_account.issuer DROP ON A DIRTY TABLE ──
+      //
+      // Same placement rule as the gate above, for the same reason: BELOW the
+      // report (the operator sees the plan), ABOVE the confirmation prompt (an
+      // operator is never asked to confirm a run this command has already
+      // decided to refuse) and ABOVE both writes.
+      //
+      // Account uniqueness moved from `(issuer, account_id)` to
+      // `(provider_id, account_id)` when better-auth 1.7.3 rolled the
+      // issuer-scoped identity back. That is a NARROWER key, so rows that were
+      // legal under the old one can be one account under the new one.
+      //
+      // ⛔ The detection mechanism is deliberately not "drop it and let the
+      // constraint fail". On this table it would not fail: `syncDeclaredIndexes`
+      // logs a plain UNIQUE whose CREATE fails on existing duplicates and lets
+      // the boot continue (#14902 / #15479), so a database holding the class
+      // carries no such constraint to violate. The drop would simply make the
+      // rows indistinguishable and let a sign-in resolve onto the wrong user's
+      // account — silently. Hence a row-level pre-flight, run against the live
+      // database at the moment it matters.
+      const dropsAccountIssuer = intended.some(
+        (d) => d.op?.type === 'drop_column' && d.table === 'sys_account' && d.op.column === 'issuer',
+      );
+      if (dropsAccountIssuer) {
+        const { probeAccountIdentityCollisions, formatAccountIdentityPreflightReport } =
+          await import('@objectstack/plugin-auth');
+        const engine = (stack.kernel as { getService?: (n: string) => unknown }).getService?.call(
+          stack.kernel,
+          'objectql',
+        );
+        let preflight;
+        try {
+          preflight = await probeAccountIdentityCollisions(engine as never);
+        } catch (e: any) {
+          // A pre-flight that could not read is not a pre-flight that passed.
+          const detail = e?.message ?? String(e);
+          if (flags.json) {
+            await emitJson({
+              database: stack.dbLabel, created: [], applied: [], skipped: drift, pending,
+              message: 'refused_account_issuer_preflight_unreadable', detail,
+            }, 0, { compact: true });
+            return;
+          }
+          printError(
+            `Refusing to drop sys_account.issuer: the retirement pre-flight could not read the table. ${detail}`,
+          );
+          this.exit(1);
+          return;
+        }
+        if (!preflight.ok) {
+          if (flags.json) {
+            await emitJson({
+              database: stack.dbLabel, created: [], applied: [], skipped: drift, pending,
+              message: 'refused_account_issuer_collisions', preflight,
+            }, 0, { compact: true });
+            return;
+          }
+          console.log('');
+          console.log(formatAccountIdentityPreflightReport(preflight));
+          console.log('');
+          printError(
+            'Refusing to drop sys_account.issuer: dropping it would make the rows above '
+            + 'indistinguishable, and a sign-in could resolve onto the wrong account. Resolve them, then '
+            + 're-run "os migrate account-issuer" as the post-check before applying.',
+          );
+          this.exit(1);
+          return;
+        }
+        if (!flags.json) {
+          printSuccess(
+            `sys_account.issuer retirement pre-flight: clean over ${preflight.scanned} row(s).`,
+          );
+        }
+      }
+
       const totalIntended = intended.length + pending.length;
       if (totalIntended === 0) {
         if (flags.json) { await emitJson({ applied: [], skipped: deferred, created: [], message: 'nothing_safe_to_apply' }, 0, { compact: true }); return; }

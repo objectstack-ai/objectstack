@@ -34,6 +34,7 @@
 
 import {
   FIELD_GROUP_SYSTEM_FIELDS,
+  injectedSystemColumnDefs,
   resolveInjectedSystemColumns,
   unprovisionedInjectedColumns,
 } from '@objectstack/spec/data';
@@ -72,6 +73,39 @@ export const SYSTEM_FIELDS: ReadonlySet<string> = new Set<string>([
  */
 export function injectedColumnsFor(objectDef: unknown): ReadonlySet<string> {
   return resolveInjectedSystemColumns(objectDef).names;
+}
+
+/**
+ * WHAT each injected column on THIS object looks like — the registry's own
+ * definition, keyed by column name (#16340).
+ *
+ * The companion to {@link injectedColumnsFor}: that one answers WHICH columns
+ * are addressable, this one answers what each of them IS. A rule that only
+ * needs to not-flag a name wants the first; a rule that asks a SECOND question
+ * about a resolved leaf — is it temporal? is it a relationship? — needs this,
+ * and before it existed every such rule had to treat an injected leaf as
+ * unanswerable and stay silent (the `filter-preset-comparand` field-typed arm
+ * did exactly that on `created_at` / `updated_at`, the two temporal columns an
+ * author reaches for most).
+ *
+ * Delegates to the spec's `injectedSystemColumnDefs` — the same tables
+ * `applySystemFields` spreads at registration, gated by the same
+ * `resolveInjectedSystemColumns` plan — so the type an author-time rule reads
+ * is byte-for-byte the type the registry injects. ⛔ Never hand-copy a column's
+ * type here: a local `created_at is a datetime` table is the second copy this
+ * module's header forbids, and it drifts silently in the direction that hurts
+ * (a rule judging a column the registry has since re-typed).
+ *
+ * `id` is deliberately ABSENT while {@link injectedColumnsFor} reports it: the
+ * primary key is provisioned by the DRIVER, not by the injection pass, so no
+ * definition table describes it. A caller that resolves a name present in the
+ * name set but missing here has an addressable column of unknown type — which
+ * is the truthful answer, not a gap.
+ */
+export function injectedColumnDefsFor(
+  objectDef: unknown,
+): ReadonlyMap<string, Readonly<Record<string, unknown>>> {
+  return new Map(Object.entries(injectedSystemColumnDefs(objectDef)));
 }
 
 /**

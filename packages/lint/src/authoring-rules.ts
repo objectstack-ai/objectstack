@@ -137,6 +137,7 @@ import { lintFlowPatterns } from './lint-flow-patterns.js';
 import { lintLivenessProperties } from './lint-liveness-properties.js';
 import { lintAutonumberFormats } from './lint-autonumber-formats.js';
 import { lintViewRefs } from './lint-view-refs.js';
+import { validateRetiredPermissionResidue } from './validate-retired-permission-residue.js';
 import {
   lintUniqueDeclarations,
   lintUnscopedDeclaredIndexes,
@@ -299,6 +300,22 @@ export interface AuthoringRuleContext {
    * argument.
    */
   runtimeWriteType?: string;
+  /**
+   * [#16546] `hooks[*].handler` ref strings whose metadata `body` was minted
+   * by `lowerCallables` from the author's inline `handler` function, rather
+   * than authored directly. Set by the CLI commands that lower before they
+   * run this registry (`os build`, `os lint`, `os validate`, scaffold
+   * validate — `lowerCallables`'s own return value, unchanged); ABSENT on the
+   * runtime publish gate, which never receives a `handler` function to lower.
+   *
+   * Read by `validateReadonlyHookWrites` / `validateHookBodyWrites`
+   * (`@objectstack/lint`) through the reference-integrity suite, to report
+   * `path: hooks[i].handler` — the key the author actually wrote — instead of
+   * `hooks[i].body.source`, a key this stack's `body` did not come from the
+   * author for. Absent or not naming a hook's ref means "this hook's `body`
+   * is author-written", and both validators keep reporting `body.source`.
+   */
+  loweredHookRefs?: ReadonlySet<string>;
 }
 
 export interface AuthoringRule {
@@ -914,6 +931,14 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // (the object may come from another installed package — a hedge this rule
   // cannot decide), as did `flow-draft-status-ambiguous` (draft flows DO fire;
   // that one is ambiguity of intent, not a dead flow).
+  //
+  // #16659 added a sixth id, `flow-schedule-organization-missing`, at
+  // `warning`: a time-triggered flow declaring no `config.organization` is
+  // refused at bind, so on the criterion above it belongs with the four — and
+  // it is held at `warning` because an `error` gates `objectstack build`, and
+  // the repo's own shipped example apps carry such flows with no authorable
+  // repair (the only legal value is a `sys_organization.id` minted per install
+  // at runtime). Its own docblock in the rule file records that.
   {
     name: 'validateFlowTriggerReadiness',
     tier: 'gating',
@@ -1002,10 +1027,12 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     run: (stack) => validateSemanticRoles(stack),
   },
   // #2578 / #4449 — a form section's field reference that resolves to nothing
-  // (silently not rendered) and an absolute `colSpan` under a per-surface
-  // derived column count. Advisory: the renderer skips the unknown field and
-  // clamps the span, so nothing is broken — but each is almost certainly an
-  // authoring mistake, and until #4449 this rule ran on no command at all.
+  // (silently not rendered), and a `section.group` naming a field group the
+  // object does not declare. Advisory: the renderer skips the unknown field, so
+  // nothing is broken — but each is almost certainly an authoring mistake, and
+  // until #4449 this rule ran on no command at all. [#17328] It used to carry a
+  // third finding, `absolute-colspan-discouraged`; that one was withdrawn —
+  // `validate-form-layout.ts`'s module note carries the measurement.
   // Pure structured-metadata walk (no lazy dependency), so wiring it to all
   // three costs nothing measurable.
   {
@@ -1217,6 +1244,40 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
         rule: f.rule,
         where: f.where,
         path: f.where,
+        message: f.message,
+        hint: f.hint,
+      })),
+  },
+  // [#17425, director ruling D] The author-time half of #12840's retired-default
+  // residue tolerance. The parse ACCEPTS `allowRestore: false` / `allowPurge:
+  // false` and strips them in silence — deliberately, so that built artifacts
+  // survive — which leaves a non-TypeScript author writing the key a clean pass
+  // and no signal at all. `input: 'normalized'` is load-bearing rather than
+  // conventional here: the evidence is a key the residue stage removes, so a
+  // `parsed` rule would read a stack that can never carry it. Measured: the
+  // ADR-0087 conversion that would otherwise strip it (`permission-allow-
+  // restore-purge-removed`) is `retiredFromLoadPath: true`, so it does not run
+  // inside `normalizeStackInput` and the key reaches this tier intact.
+  {
+    name: 'validateRetiredPermissionResidue',
+    tier: 'advisory',
+    input: 'normalized',
+    commands: ALL,
+    source: 'packages/lint/src/validate-retired-permission-residue.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason:
+      'Ruled scope: the signal belongs at the authoring door over RAW SOURCE, which is ' +
+      'where the authored and the built path are distinguishable. Crossing it needs a measurement ' +
+      "this round did not take — whether the gate's `body` reaches it BEFORE the per-type " +
+      '`safeParse`, whose residue stage strips the only evidence this rule reads. Post-parse the ' +
+      'rule is structurally silent, so wiring it there without that reading would publish a ' +
+      'phantom check, not coverage.',
+    run: (stack) =>
+      validateRetiredPermissionResidue(stack).map((f) => ({
+        severity: f.severity,
+        rule: f.rule,
+        where: f.where,
+        path: f.path,
         message: f.message,
         hint: f.hint,
       })),
@@ -1623,7 +1684,7 @@ export function authoringRulesFor(command: AuthoringCommand): readonly Authoring
  */
 export function runAuthoringRules(command: AuthoringCommand, run: AuthoringRuleRun): AuthoringFinding[] {
   const findings: AuthoringFinding[] = [];
-  const ctx: AuthoringRuleContext = { sduiManifest: run.sduiManifest };
+  const ctx: AuthoringRuleContext = { sduiManifest: run.sduiManifest, loweredHookRefs: run.loweredHookRefs };
   for (const rule of authoringRulesFor(command)) {
     const stack = rule.input === 'normalized' ? run.normalized : (run.parsed ?? run.normalized);
     findings.push(...rule.run(stack, ctx));

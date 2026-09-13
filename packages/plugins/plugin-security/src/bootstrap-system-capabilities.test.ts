@@ -410,7 +410,7 @@ describe('[#8470] the curated half owns its row, not whichever row shares the na
   //
   // Reachability of the other three, measured rather than assumed:
   //  - `admin` — REACHABLE and ordinary. `organization_id` auto-stamping lives
-  //    in the enterprise `@objectstack/organizations` runtime, which is also
+  //    in the `@objectstack/organizations` runtime, which is also
   //    what ACTIVATES every walled posture. A deployment without it is `single`
   //    posture with no stamper, so EVERY Setup-authored capability row lands in
   //    the NULL-organization bucket. This is the default community shape, not

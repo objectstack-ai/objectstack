@@ -228,12 +228,16 @@ describe('#14147 — the exemptions, each one load-bearing', () => {
     expect(o.created?.completed_at, 'the hook wrote it — provenance, not value equality').toBe('2026-01-01T00:00:00Z');
   });
 
-  it('a PLATFORM object is left to its own 403 guard (ADR-0086 / #3004, carried over)', async () => {
-    // `managedBy` / the reserved `sys_` namespace carry dedicated write
-    // governance — a forged `managed_by: 'package'` is REFUSED, and silently
-    // stripping it would swallow the payload that guard exists to reject. That
-    // boundary was ruled on its own merits and is NOT the row ruling C
-    // superseded, so it comes across with the strip.
+  it('a PLATFORM-INTERNAL object is left to its own 403 guard (ADR-0086 / #3004, carried over)', async () => {
+    // The reserved `sys_` namespace, and a `managedBy` bucket whose columns
+    // carry their own fail-closed refusal, have dedicated write governance —
+    // a forged `managed_by: 'package'` is REFUSED, and silently stripping it
+    // would swallow the payload that guard exists to reject. That boundary was
+    // ruled on its own merits and is NOT the row ruling C superseded, so it
+    // comes across with the strip.
+    //
+    // ⚠️ #15719 narrowed WHICH buckets that covers — see the sibling test
+    // below. `engine-owned` is one of the three it keeps.
     const logger = makeCapturingLogger();
     const engine = new ObjectQL({ logger });
     const { driver, creates } = makeRecordingDriver();
@@ -248,7 +252,7 @@ describe('#14147 — the exemptions, each one load-bearing', () => {
     } as any, 'test');
     engine.registry.registerObject({
       name: 'crm_thing',
-      managedBy: 'package',
+      managedBy: 'engine-owned',
       fields: {
         id: { name: 'id', type: 'text', primaryKey: true },
         locked: { name: 'locked', type: 'text', readonly: true },
@@ -257,7 +261,69 @@ describe('#14147 — the exemptions, each one load-bearing', () => {
     await engine.insert('sys_permission_set', { managed_by: 'package' }, { context: { userId: 'u1' } } as any);
     await engine.insert('crm_thing', { locked: 'forged' }, { context: { userId: 'u1' } } as any);
     expect(creates[0].managed_by, 'sys_ object: passed through to its guard').toBe('package');
-    expect(creates[1].locked, 'managedBy object: passed through to its guard').toBe('forged');
+    expect(creates[1].locked, 'engine-owned object: passed through to its guard').toBe('forged');
+  });
+
+  it('#15719 — a USER-WRITABLE bucket is stripped on create, as it already was on update', async () => {
+    // The asymmetry this closes: `managedBy: 'system-data'` means
+    // "platform-defined schema, admin/user-writable DATA" (object.zod.ts), and
+    // it carries no engine write guard for the strip to pre-empt. Before the
+    // 2026-09-05 ruling a non-system caller's CREATE of a static `readonly`
+    // column on such an object was NOT stripped while the same caller's UPDATE
+    // of the same column was.
+    const logger = makeCapturingLogger();
+    const engine = new ObjectQL({ logger });
+    const { driver, creates } = makeRecordingDriver();
+    engine.registerDriver(driver, true);
+    await engine.init();
+    engine.registry.registerObject({
+      name: 'crm_deal',
+      managedBy: 'system-data',
+      fields: {
+        id: { name: 'id', type: 'text', primaryKey: true },
+        title: { name: 'title', type: 'text' },
+        approval_status: {
+          name: 'approval_status', type: 'text', readonly: true, defaultValue: 'draft',
+        },
+      },
+    } as any, 'test');
+    await engine.insert(
+      'crm_deal',
+      { title: 'T', approval_status: 'approved' },
+      { context: { userId: 'u1' } } as any,
+    );
+    expect(creates[0], 'the forged lock never reaches the driver').not.toHaveProperty('approval_status', 'approved');
+    expect(creates[0].approval_status, "…and the field's own defaultValue is re-derived (#3043)").toBe('draft');
+    expect(creates[0].title, 'the rest of the payload is untouched').toBe('T');
+    expect(
+      logger.lines.some((l: { level: string; msg: string }) => l.level === 'warn' && l.msg.includes('approval_status')),
+      'the drop is reported on the same channel every other strip uses',
+    ).toBe(true);
+  });
+
+  it('#15719 — …and the `sys_` namespace still exempts a user-writable bucket', async () => {
+    // Every object SHIPPED with `managedBy` is `sys_`-prefixed (census, 81
+    // declarations, 0 outside the namespace), so the narrowing above reaches
+    // app-authored objects only.
+    const logger = makeCapturingLogger();
+    const engine = new ObjectQL({ logger });
+    const { driver, creates } = makeRecordingDriver();
+    engine.registerDriver(driver, true);
+    await engine.init();
+    engine.registry.registerObject({
+      name: 'sys_user_preference',
+      managedBy: 'system-data',
+      fields: {
+        id: { name: 'id', type: 'text', primaryKey: true },
+        created_at: { name: 'created_at', type: 'text', readonly: true },
+      },
+    } as any, 'test');
+    await engine.insert(
+      'sys_user_preference',
+      { created_at: 'forged' },
+      { context: { userId: 'u1' } } as any,
+    );
+    expect(creates[0].created_at, 'sys_ object: passed through to its guard').toBe('forged');
   });
 });
 

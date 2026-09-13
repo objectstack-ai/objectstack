@@ -29,21 +29,25 @@
  * noted below — because the alternative, a helper that unwraps whatever it is
  * handed, is the message sniffing #16019 exists to remove.
  *
- * ⚠️ That formula is the WHOLE record at eight of this package's nine call
- * sites (thirteen of the fourteen across the change), not at all of them.
- * `seed-tenancy-backfill`'s ORGANIZATION probe still spells
- * `operatorFacingErrorText(e) || 'unknown error'` — the one surviving fallback
- * — so where the channel is EMPTY that record reads `'unknown error'` and
- * never `''`. Measured at that probe: a thrown `''`, a thrown `[]`, and an
- * `Error` whose `name` and `message` are both empty each record
- * `'unknown error'`; the control `new Error('boom')` records `'boom'`. The
- * fallback is load-bearing rather than leftover — this site reads
- * `organizationProbeError === ''` as "the probe did not fail", and with the
- * fallback deleted a thrown `''` routes the run down the benign
- * `no-organization-yet` path instead of the ambiguous one (measured by
- * ablation), which is the "unknown read as zero" confusion #9261 exists to
- * prevent. Whether this record SHOULD be `''` like the other eight is a
- * BEHAVIOUR question, deliberately not taken here; #17167 carries it.
+ * ⚠️ That formula is now the WHOLE record at every site this change touched —
+ * all nine in this package, fourteen across the repository. It was eight of
+ * those nine until #17167: `seed-tenancy-backfill`'s ORGANIZATION probe spelled
+ * `operatorFacingErrorText(e) || 'unknown error'` — the file's last fallback —
+ * so where the channel was EMPTY that record read `'unknown error'` and never
+ * `''`. Measured at that probe before the removal: a thrown `''`, a thrown
+ * `[]`, and an `Error` whose `name` and `message` are both empty each recorded
+ * `'unknown error'`; the control `new Error('boom')` recorded `'boom'`. All
+ * three now record `''` and the control is unmoved.
+ *
+ * ⚠️ The fallback was load-bearing rather than leftover, which is why its
+ * removal is not a one-liner: the site read `organizationProbeError === ''` as
+ * "the probe did not fail", so deleting the placeholder and putting NOTHING in
+ * its place routes a thrown `''` down the benign `no-organization-yet` path
+ * instead of the ambiguous one (measured by ablation, both before and after
+ * #17167) — the "unknown read as zero" confusion #9261 exists to prevent. The
+ * fact now travels in the TYPE (`string | undefined`), so the status arm is
+ * pinned beside the record arm in the empty-channel case below: a re-added
+ * placeholder and a lost discrimination each redden one of them.
  *
  * ⚠️ That channel is a RULE, not byte-identity with what each site used to
  * compute. Every negative pin below throws a NON-EMPTY `new Error(…)`, the
@@ -73,6 +77,7 @@ import {
     ORGANIZATION_TABLE,
     SEQUENCES_TABLE,
 } from './seed-tenancy-backfill.js';
+import { TABLE_IS_PRESENT_ROWS, isTablePresenceCatalogSql } from './read-probe.testkit.js';
 
 /** `rawStatementFaultError`'s composed message, verbatim (`sql-driver.ts`). */
 const COMPOSED =
@@ -226,10 +231,15 @@ describe('[#16657] seed-tenancy-backfill — the stored operator record', () => 
      * The statements the module compiles, dispatched the way
      * `seed-tenancy-backfill.test.ts`'s own fixture dispatches them, with one
      * injectable refusal so a single run can be pointed at one seam at a time.
+     *
+     * `thrown` defaults to the declared raw-statement fault every case below
+     * asserts against; the empty-channel cases (#17167) pass their own value,
+     * which is why it is a parameter rather than a second fixture.
      */
-    function seamExec(refuse: (sql: string) => boolean) {
+    function seamExec(refuse: (sql: string) => boolean, thrown: unknown = rawStatementFault()) {
         return async (sql: string): Promise<unknown> => {
-            if (refuse(sql)) throw rawStatementFault();
+            if (refuse(sql)) throw thrown;
+            if (isTablePresenceCatalogSql(sql, SEQUENCES_TABLE)) return TABLE_IS_PRESENT_ROWS;
             if (sql.includes('WHERE 1 = 0')) return [];
             if (sql.includes('LEFT JOIN')) {
                 return [
@@ -269,6 +279,58 @@ describe('[#16657] seed-tenancy-backfill — the stored operator record', () => 
         const line = log.warn.find((w) => w.message.includes('probe FAILED'));
         expect(line?.message).toContain(DIALECT_TEXT);
         expect(line?.meta?.organizationProbeError).toBe(DIALECT_TEXT);
+    });
+
+    it('[#17167] an EMPTY channel at the organization probe is recorded empty, and still FAILED', async () => {
+        // The site that used to spell `|| 'unknown error'`. Two arms, because
+        // the placeholder was doing two jobs and only one of them was a record:
+        //   · the RECORD arm — the helper's return as is, `''` and all, which
+        //     is what the other four sites in that file do with these shapes;
+        //   · the STATUS arm — an empty channel is still a FAILED probe, so the
+        //     run must stay on the ambiguous path and must not become
+        //     `no-organization-yet` (#9261's "unknown is not zero").
+        // A placeholder coming back reddens the first; a discrimination lost
+        // with it reddens the second.
+        const emptyNameAndMessage = new Error('');
+        emptyNameAndMessage.name = '';
+        const EMPTY_CHANNEL: Array<[string, unknown]> = [
+            ["a thrown ''", ''],
+            ['a thrown []', []],
+            ['an Error whose name and message are both empty', emptyNameAndMessage],
+        ];
+
+        for (const [label, thrown] of EMPTY_CHANNEL) {
+            const log = createLogger();
+            const result = await backfillSeedTenancy(
+                {
+                    exec: seamExec((sql) => sql.includes(ORGANIZATION_TABLE), thrown),
+                    client: 'better-sqlite3',
+                },
+                log.logger,
+            );
+
+            expect(result.status, label).toBe('skipped-ambiguous-organization');
+            const line = log.warn.find((w) => w.message.includes('probe FAILED'));
+            expect(line?.meta?.organizationProbeError, label).toBe('');
+            expect(line?.message, label).not.toContain('unknown error');
+        }
+
+        // The control: the same fixture, a NON-EMPTY channel. Without it, a
+        // record that had stopped being written at all would pass every
+        // assertion above.
+        const control = createLogger();
+        const controlResult = await backfillSeedTenancy(
+            {
+                exec: seamExec((sql) => sql.includes(ORGANIZATION_TABLE), new Error('boom')),
+                client: 'better-sqlite3',
+            },
+            control.logger,
+        );
+        expect(controlResult.status).toBe('skipped-ambiguous-organization');
+        expect(
+            control.warn.find((w) => w.message.includes('probe FAILED'))?.meta
+                ?.organizationProbeError,
+        ).toBe('boom');
     });
 
     it('[collision probe] the warn meta carries the dialect text', async () => {
@@ -319,13 +381,12 @@ describe('[#16657] seed-tenancy-backfill — the stored operator record', () => 
         expect(line?.meta?.error).toBe(DIALECT_TEXT);
     });
 
-    it('an UNDECLARED refusal reads its own message channel at the sites without a fallback', async () => {
-        // "Without a fallback" is eight of this package's nine call sites. The
-        // exception is the ORGANIZATION probe (`|| 'unknown error'`), whose
-        // record for an EMPTY channel is `'unknown error'` rather than `''` —
-        // see the module docblock above, and #17167. This pin drives the
-        // duplicates warning, which carries no fallback, with a NON-EMPTY
-        // message, so it exercises the channel and not the fallback.
+    it('an UNDECLARED refusal reads its own message channel at every site', async () => {
+        // No site here carries a fallback any more — the ORGANIZATION probe's
+        // `|| 'unknown error'` was the last one and #17167 removed it, which
+        // the empty-channel case below pins. This pin drives the duplicates
+        // warning with a NON-EMPTY message, the shape for which the channel is
+        // the whole answer at every site.
         const log = createLogger();
         const bare = async (sql: string): Promise<unknown> => {
             if (sql.includes('rows_holding')) throw new Error('connection terminated unexpectedly');

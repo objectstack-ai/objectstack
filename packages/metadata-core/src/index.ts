@@ -128,3 +128,12 @@ export * from './meta-write-capability.js';
 // re-exports `createFieldPresenceProbe` from its original path, so its public
 // surface is unchanged.
 export * from './record-organization.js';
+
+// [#16319] The field-`type` admission vocabulary — the predicate, the shared
+// sentence and the cross-package discriminator behind the ruled 「禁止加载」
+// refusal. Sunk here by the same criterion as everything above: the enforcing
+// door is `@objectstack/objectql`'s `SchemaRegistry` and the reporting seam is
+// `@objectstack/metadata-protocol`'s `loadMetaFromDb`, objectql depends on
+// metadata-protocol, and a boot log with its own opinion about which
+// declarations the registry will take is the very defect this card closes.
+export * from './object-field-type.js';

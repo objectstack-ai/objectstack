@@ -45,10 +45,6 @@
       "cause": "function",
       "reason": "The union of all four `functions` entry shapes. Its first member IS the bare `z.function()` above, and #16431 (a)'s per-branch projection does drop that member — measured: 1 branch pruned — but the union still does not publish, because the member behind it is FlowFunctionDeclarationSchema, whose required `handler` is itself a live callable. An unprojectable node in a PROPERTY position is not droppable: every document the declaration accepts has that key, so publishing the record without it would describe a shape no runtime value has. Both lowered members are plain JSON and would publish on their own; what this entry now records is a union that cannot be projected while one of its branches requires a callable."
     },
-    "Cloud.EnvironmentArtifactSchema": {
-      "cause": "function",
-      "reason": "Re-export of System.EnvironmentArtifactSchema (system/environment-artifact.zod.ts) — see that entry. Both export names are recorded because the ratchet is keyed by EXPORT, which is the unit that reaches or fails to reach a published surface."
-    },
     "Data.DataEngineContractSchema": {
       "cause": "function",
       "reason": "The engine method contract — `find`/`findOne`/`insert`/`update`/`delete` are `z.function()` members. A CODE interface implemented by an engine, never a document anyone authors or transmits, so no reader loses a reference page."

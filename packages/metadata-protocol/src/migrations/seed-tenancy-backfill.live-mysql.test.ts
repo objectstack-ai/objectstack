@@ -62,6 +62,7 @@ import {
   type SeedTenancySeam,
 } from './seed-tenancy-backfill.js';
 import { currentLiveMysqlDatabase } from './live-mysql-database.testkit.js';
+import { buildTablePresenceSql, readTablePresence } from './read-probe.js';
 
 const MYSQL_URL = process.env.OS_TEST_MYSQL_URL;
 const EXPECT_LIVE = process.env.OS_EXPECT_LIVE_DIALECT_MATRIX === '1';
@@ -194,7 +195,12 @@ describe.skipIf(!MYSQL_URL)('#9381 seed-tenancy backfill on a LIVE MySQL', () =>
     await seedFixture();
     const client = 'mysql2';
     const statements: Array<[string, string, unknown[]]> = [
-      ['presence probe', buildSequencesPresenceSql(client), []],
+      ['presence probe (fallback arm)', buildSequencesPresenceSql(client), []],
+      // [#17175] The statement the boot path actually runs now. It is in this
+      // list for the same reason every other one is: a parse error on MySQL is
+      // invisible to a SQLite-only run, and this arm's failure mode is worse
+      // than a parse error — it is caught and read as "the table is not there".
+      ['presence probe (catalog arm)', buildTablePresenceSql(SEQUENCES_TABLE, client) as string, []],
       ['split probe', buildSplitProbeSql(client), [GLOBAL_TENANT, GLOBAL_TENANT]],
       ['organization probe', buildOrganizationProbeSql(client), []],
       ['collision probe', buildCollisionProbeSql(OBJECT, FIELD, client), []],
@@ -209,6 +215,60 @@ describe.skipIf(!MYSQL_URL)('#9381 seed-tenancy backfill on a LIVE MySQL', () =>
         conn.query(sql, params),
         `${label} must run on MySQL — statement: ${sql}`,
       ).resolves.toBeDefined();
+    }
+  });
+
+  it('[#17175] the catalog presence probe ANSWERS on MySQL — both directions, on the live server', async () => {
+    await seedFixture();
+
+    // Present: the fixture created the counter table, so the catalog names it.
+    const present = await readTablePresence(
+      (sql: string) => conn.query(sql) as Promise<unknown>,
+      { table: SEQUENCES_TABLE, client: 'mysql2', fallbackSql: buildSequencesPresenceSql('mysql2') },
+    );
+    expect(present).toEqual({ verdict: 'present', probe: 'catalog' });
+
+    // ⭐ Absent: a table this database does not have. The probe must ANSWER
+    // rather than raise — on MySQL that means `information_schema.tables`
+    // returning zero rows, which is the assertion a SQLite-only run cannot make.
+    const absent = await readTablePresence(
+      (sql: string) => conn.query(sql) as Promise<unknown>,
+      {
+        table: 'os17175_absent_table',
+        client: 'mysql2',
+        fallbackSql: 'SELECT 1 FROM os17175_absent_table WHERE 1 = 0',
+      },
+    );
+    expect(absent).toEqual({ verdict: 'absent', probe: 'catalog' });
+
+    // ⛔ And the control that makes the line above mean something: the fallback
+    // statement this probe did NOT run is one the server really does refuse, so
+    // "answered zero rows" is a reading about the catalog arm and not about a
+    // table that happens to exist.
+    await expect(conn.query('SELECT 1 FROM os17175_absent_table WHERE 1 = 0')).rejects.toThrow();
+  });
+
+  it('[#17175] the scope is the CONNECTED schema — a same-named table elsewhere is not this one', async () => {
+    // `information_schema.tables` without `table_schema = DATABASE()` sees every
+    // schema on the server, so the arm would answer "present" for a table in a
+    // database this connection is not using. Measured here rather than argued.
+    const other = `${DB}_17175_other`;
+    await conn.query(`CREATE DATABASE IF NOT EXISTS \`${other}\``);
+    try {
+      await conn.query(`CREATE TABLE IF NOT EXISTS \`${other}\`.os17175_elsewhere (id INT)`);
+
+      const verdict = await readTablePresence(
+        (sql: string) => conn.query(sql) as Promise<unknown>,
+        {
+          table: 'os17175_elsewhere',
+          client: 'mysql2',
+          fallbackSql: 'SELECT 1 FROM os17175_elsewhere WHERE 1 = 0',
+        },
+      );
+
+      expect(verdict.verdict).toBe('absent');
+    } finally {
+      await conn.query(`DROP DATABASE IF EXISTS \`${other}\``);
     }
   });
 

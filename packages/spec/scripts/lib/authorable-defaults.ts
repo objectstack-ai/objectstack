@@ -54,6 +54,7 @@
  * internals to track across a Zod major.
  */
 
+import { RENAMED_DEFS, carryAuthorableKey } from './renamed-defs.js';
 import { categoryOfDefKey, serializeShard } from './sharded-artifacts.js';
 
 /** `packages/spec/authorable-defaults/<category>.json` — the #4666 default ratchet. */
@@ -264,6 +265,34 @@ export interface DefaultDiffInput {
  *      would demand a second declaration for one retirement — check (b)
  *      already demands the real one.
  */
+/**
+ * Carry a recorded defaults baseline through the declared def renames
+ * (`RENAMED_DEFS`) — the same discipline the gate applies to the baseline's
+ * KEY set beside it, and for the same reason: a rename moves a def's keys AND
+ * their defaults, and it must not be able to make either look like a change.
+ *
+ * Without this half the two halves of one baseline disagreed (#16325, measured
+ * on the `cloud/` → `marketplace/` category move): the carried key-set said
+ * `marketplace/Package:visibility` already existed, the uncarried defaults map
+ * had no entry under that name, and {@link diffAuthorableDefaults} charged the
+ * rename with 22 `(none) → <value> (added)` flips that no value had made. The
+ * only exit would have been 22 false rows in DEFAULT_CHANGES_BY_MAJOR — a
+ * rename riding the acknowledged-change table, which is exactly what
+ * `scripts/lib/renamed-defs.ts` exists to prevent.
+ *
+ * Only the def part of each key is rewritten (a rename moves keys, it never
+ * renames them); a key whose def is not declared renamed passes through
+ * unchanged, fingerprint included.
+ */
+export function carryDefaultsThroughRenames(
+  defaults: ReadonlyMap<string, string>,
+  renames: Readonly<Record<string, string>> = RENAMED_DEFS,
+): Map<string, string> {
+  const carried = new Map<string, string>();
+  for (const [key, fingerprint] of defaults) carried.set(carryAuthorableKey(key, renames), fingerprint);
+  return carried;
+}
+
 export function diffAuthorableDefaults(input: DefaultDiffInput): ObservedDefaultChange[] {
   const { baseline, current, baselineKeys, currentKeys } = input;
   const changes: ObservedDefaultChange[] = [];

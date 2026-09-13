@@ -304,6 +304,10 @@ import { runImport } from './import-runner.js';
 // [#16581] The public picker's authoring-dialect → parser-grammar lowering.
 import { lowerViewFilterRules } from './view-filter-rule-lowering.js';
 import { prepareImportRequest } from './import-prepare.js';
+// [#17058] The `POST …/analytics/dataset/query` door parse — the half of the
+// analytics family this route never had. See the module header for the
+// measurement that decides its shape.
+import { datasetSelectionRefusal } from './analytics-selection-door.js';
 import { loadExcelJs, type Worksheet } from './xlsx-module.js';
 import { enrichOpenApiWithEndpoints } from './openapi-endpoints.js';
 import { buildBuiltinPaths } from './openapi-builtin-paths.js';
@@ -324,6 +328,7 @@ import {
     sandboxBusinessMessage,
     classifiedRefusalAnswer,
     boundedDeclaredUserMessage,
+    boundedDeclaredRefusalMessage,
     declaredHttpStatus,
     declaredServerFaultAnswer,
     sendThrownError,
@@ -639,6 +644,57 @@ export const DATA_EXPORT_PARAMS: readonly string[] = [
 export const GLOBAL_SEARCH_PARAMS: readonly string[] = [
     'q', 'query', 'objects', 'limit', 'perObject',
 ];
+
+/**
+ * [#16674] Which `services.*` slot each `routes.*` key is the address OF.
+ *
+ * `/discovery` states the same fact twice -- `routes.X` (the flat convenience
+ * map) and `services.Y.route` (the per-slot entry) -- and the discovery handler
+ * below rewrites only the first half to the paths this server actually mounts.
+ * Measured on this file's own composition harness with
+ * `crud: { dataPrefix: '/objects' }`: `routes.data` answered `/api/v1/objects`
+ * while `services.data.route` still answered `/api/v1/data`, a path with
+ * nothing mounted on it -- one document, one deployment, two different data
+ * addresses (AGENTS.md "Route & surface ownership" #4: a machine-readable
+ * surface must not lie, and it must not lie to itself either).
+ *
+ * The mirror this table drives is deliberately a PROJECTION of the finished
+ * `routes` map, never a second computation of the same paths -- the producer
+ * learned that in #14646 ("two derivations of one fact is how `routes` and
+ * `services` drift"), and re-deriving `${realBase}${dataPrefix}` here would
+ * re-open the very gap this closes, one key over.
+ *
+ * Read each pair as *the address of one thing*, never as "these names look
+ * alike": `notifications` maps to the `notification` slot because that is the
+ * spelling difference the producer's own `serviceToRouteKey` carries, and
+ * `storage` names TWO slots because `file-storage` is the deprecated v17 alias
+ * the producer mirrors VERBATIM off the canonical row (#9683) -- updating only
+ * the canonical one would turn a byte-equal copy into a second opinion.
+ *
+ * Route keys with no slot behind them are absent on purpose, not by oversight:
+ * `packages` (the `package` service is deliberately NOT a `CoreServiceName`
+ * slot, so there is no `services.package` entry to mirror onto, #6633),
+ * `datasources`, `email`, `mcp` and `discovery` (surfaces this server mounts
+ * itself, which the protocol's service map never described), and `approvals`
+ * (declared in `ApiRoutesSchema`, emitted by neither producer). `services.search`
+ * is the mirror image: a slot that declares a route with no `ApiRoutesSchema`
+ * key to follow. `discovery-services-route-follows-mount.test.ts` holds this
+ * table complete against the producer, so a newly routed slot fails that pin
+ * instead of silently opting out of the mirror.
+ */
+export const DISCOVERY_ROUTE_KEY_TO_SERVICE_SLOTS: Readonly<Record<string, readonly string[]>> = {
+    data: ['data'],
+    metadata: ['metadata'],
+    ui: ['ui'],
+    auth: ['auth'],
+    analytics: ['analytics'],
+    automation: ['automation'],
+    ai: ['ai'],
+    i18n: ['i18n'],
+    notifications: ['notification'],
+    realtime: ['realtime'],
+    storage: ['storage', 'file-storage'],
+};
 
 /** Platform object backing async import jobs (see sys-import-job.object.ts). */
 const IMPORT_JOB_OBJECT = 'sys_import_job';
@@ -1402,9 +1458,37 @@ async function wiredEngineOrLoud<T>(
  *    SECOND refusal code on this route would fall back to the flat fault answer
  *    until whoever adds it comes here. That is a visible, one-line extension,
  *    not a silent gap.
- *  - **A non-empty message.** This arm exists to relay PROSE; with none
- *    declared there is nothing to relay, and inventing one is the half
- *    {@link declaredServerFaultAnswer} refuses to invent too.
+ *  - **A DECLARED refusal.** [#16146] This was "a non-empty message", and it
+ *    was this arm's own opinion about which producer-declared 5xx keeps its
+ *    prose — the very question the relay could not answer when this was
+ *    written. It can now: the director seat ruled the distinction a
+ *    producer-side declaration on the published ADR-0112 envelope (decision
+ *    batch #58, 2026-09-06, option C) and the producer sets it
+ *    (`findReferencesToMeta`, `metadata-protocol`). So the condition is
+ *    {@link boundedDeclaredRefusalMessage} — the shared relay's own answer,
+ *    bound and all — and this route holds no refusal/fault opinion of its own
+ *    any more.
+ *
+ * ## [#16146] What was RETIRED here, and the one half that could not be
+ *
+ * The ruling says to retire this route-local patch once the relay handles
+ * `/references`, and its PROSE half is retired exactly as ruled: the sentence
+ * now reaches the wire because the relay keeps it at EVERY door, the bound is
+ * the shared one rather than this arm's unbounded pass-through, and deleting
+ * the call below would change no message on this route.
+ *
+ * ⚠️ What deleting it WOULD change is the ENVELOPE, and that is a different
+ * decision. This function also re-dresses the answer into the NESTED ADR-0112
+ * envelope this door's B exit publishes; the relay is flat
+ * (`{ error, code }` through `handleRouteError`), so removing this arm would
+ * put `body.error.code` back to `undefined` on the A exit and re-open the
+ * SECOND half of the defect #15685 measured and pinned positionally in
+ * `rest-server-meta-references-refusal-envelope.test.ts`. Envelope POSITION is
+ * owned by the `check:route-envelope` ratchet and is explicitly a separate
+ * line from vocabulary (ADR-0112's #9232 amendment says so in as many words),
+ * so it is not folded into a prose ruling. What remains here is therefore a
+ * pure position adapter over the shared answer — ⛔ not a second withhold arm,
+ * and ⛔ not a place to add a refusal rule.
  *
  * ⛔ And it does not re-derive `REFERENCE_SITES.unanswerableTargetTypes` to
  * decide whether the target was answerable. That set, its canonical-type fold
@@ -1418,8 +1502,8 @@ function notImplementedRefusalAnswer(
 ): { status: number; body: { error: { code: string; message: string } } } | undefined {
     if (declaredHttpStatus(error) !== 501) return undefined;
     if (error?.code !== 'NOT_IMPLEMENTED') return undefined;
-    const message = typeof error?.message === 'string' ? error.message : '';
-    if (message.length === 0) return undefined;
+    const message = boundedDeclaredRefusalMessage(error);
+    if (message === undefined) return undefined;
     return { status: 501, body: { error: { code: 'NOT_IMPLEMENTED', message } } };
 }
 
@@ -1872,13 +1956,20 @@ export class RestServer {
         // Exemption requires a REAL, non-empty path — mirrors the sibling seam
         // (`shouldDenyAnonymous`, core/src/security/anonymous-deny.ts:122).
         //
-        // ⚠️ `isAuthGateAllowlisted(undefined)` returns `true` (it treats "no
-        // path" as allow-listed). Passed the raw value, a request whose `path`
-        // is absent or empty read as allow-listed on EVERY route, so the gate
-        // did not fire for a session policy says must be blocked — fail-OPEN by
-        // omission. No shipped transport reaches here without a `path` (the
-        // hono adapter sets it at all three request-construction sites), so this
-        // is the default being made safe, not a live bypass being closed (#7432).
+        // ⚠️ `isAuthGateAllowlisted(undefined)` USED to return `true` (it treated
+        // "no path" as allow-listed). Passed the raw value, a request whose
+        // `path` was absent or empty read as allow-listed on EVERY route, so the
+        // gate did not fire for a session policy says must be blocked —
+        // fail-OPEN by omission. No shipped transport reaches here without a
+        // `path` (the hono adapter sets it at all three request-construction
+        // sites), so this was the default being made safe, not a live bypass
+        // being closed (#7432).
+        //
+        // [#7898] The predicate itself is fail-closed at the source now, so this
+        // guard and it agree and this seam's behaviour is unchanged. ⛔ The guard
+        // stays: it is what keeps this seam's answer independent of what the
+        // predicate does with a falsy argument, and `rest-auth-gate.test.ts`
+        // still turns red without it.
         const pathExempt =
             typeof req?.path === 'string' && req.path.length > 0 && isAuthGateAllowlisted(req.path);
         if (gate && req?.method !== 'OPTIONS' && !pathExempt) {
@@ -4594,6 +4685,55 @@ export class RestServer {
                         );
                         if (emailBase) discovery.routes.email = emailBase;
                         else delete discovery.routes.email;
+
+                        // [#16674] Bring the OTHER half of the document in line
+                        // with the same mounted paths. Everything above rewrites
+                        // `discovery.routes.*`; `discovery.services.*.route` is
+                        // the same address stated per slot, and it was never
+                        // brought along -- so a deployment that moved a prefix
+                        // got a document that contradicted itself, and the
+                        // `services` half pointed at a path with nothing on it.
+                        //
+                        // A PROJECTION of the finished `routes` map, key by key
+                        // (`DISCOVERY_ROUTE_KEY_TO_SERVICE_SLOTS` above), so the
+                        // two halves cannot state different answers whatever a
+                        // future substitution does to `routes`. The three guards
+                        // are what keep a DEFAULT deployment byte-identical --
+                        // the whole point of the fix is that it moves only the
+                        // values that are already wrong:
+                        //
+                        //   1. only a slot the producer actually emitted, and
+                        //   2. only one that already declares a `route` -- a
+                        //      route-less slot (`cache`/`queue`/`job`, an
+                        //      unmounted `realtime` channel) must not GAIN a
+                        //      route key here: "no HTTP surface" is a fact this
+                        //      handler does not get to overwrite (#4318, D12),
+                        //      and inventing the key would also reorder the
+                        //      entry for every reader diffing the document;
+                        //   3. only from a route key that survived the pass --
+                        //      a deleted or absent `routes.X` leaves the slot
+                        //      alone rather than blanking it. Withdrawing an
+                        //      advertisement is the ADR-0076 D12 question
+                        //      #4318 owns, not this card's.
+                        //
+                        // On a stock boot every write here assigns the string
+                        // that was already there, which is why the default
+                        // document does not move by a byte.
+                        const advertisedServices = discovery.services as
+                            | Record<string, { route?: string } | undefined>
+                            | undefined;
+                        if (advertisedServices) {
+                            const mountedRoutes = discovery.routes as unknown as Record<string, unknown>;
+                            for (const [routeKey, slots] of Object.entries(DISCOVERY_ROUTE_KEY_TO_SERVICE_SLOTS)) {
+                                const mounted = mountedRoutes[routeKey];
+                                if (typeof mounted !== 'string' || mounted.length === 0) continue;
+                                for (const slot of slots) {
+                                    const entry = advertisedServices[slot];
+                                    if (!entry || typeof entry.route !== 'string') continue;
+                                    entry.route = mounted;
+                                }
+                            }
+                        }
                     }
 
                     // Cross-object atomic batch capability (#3298). `declared ===
@@ -10558,8 +10698,8 @@ export class RestServer {
                     // `publicPicker.object` override, fall back to the
                     // field def on the parent object.
                     const p = await this.resolveProtocol(environmentId, req);
-                    let referenceTo: string | undefined = picker.object;
-                    if (!referenceTo && typeof (p as any).getMetaItems === 'function') {
+                    let referenceObject: string | undefined = picker.object;
+                    if (!referenceObject && typeof (p as any).getMetaItems === 'function') {
                         try {
                             const objectsRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
                                 type: 'object',
@@ -10569,58 +10709,45 @@ export class RestServer {
                             const items: any[] = Array.isArray(r?.items) ? r.items : Array.isArray(r) ? r : [];
                             const obj = items.find((o: any) => o?.name === match.object);
                             const def = obj?.fields?.[fieldName];
-                            // [#7486] `reference` FIRST — it is the canonical
-                            // key on `FieldSchema`, and the ONLY spelling that
-                            // schema accepts. Reading only the legacy spellings
-                            // meant a well-formed object schema carried NONE of
-                            // them, the chain resolved `undefined`, and the
-                            // route answered 500 — making `publicPicker.object`
-                            // de-facto required while the schema and docs
-                            // present it as an optional override.
+                            // [#7486] Resolve the target from the canonical key — and, since
+                            // [#12920], from it ALONE. `reference` is the spelling `FieldSchema`
+                            // accepts, so it is the only spelling a field def can legitimately
+                            // carry.
                             //
-                            // ⛔ [#13137] `data/field.zod.ts` does NOT fold the
-                            // legacy spellings onto `reference`. An earlier
-                            // version of this comment said it did, and that
-                            // sentence is precisely what invited consumers to
-                            // be lenient. Its `aliases` table is a RENAME HINT
-                            // ON A REJECTED KEY, not a normaliser:
-                            // `strictObject` consults `aliases` only from the
-                            // `unrecognized_keys` path (the semantics are
-                            // stated in `spec/src/shared/strict-object.ts`), so
-                            // `relatedTo` / `referenceTo` / `target` /
-                            // `targetObject` / `lookupObject` are REFUSED by
-                            // `FieldSchema` — answered with *"Did you mean
-                            // `referenceTo` → `reference`?"* and never
-                            // rewritten. Pinned three ways (accept /
-                            // alias-refusal-with-hint / unknown-key-refusal
-                            // -without-hint) in
-                            // `public-form-lookup-picker.test.ts`.
-                            // ⇒ ⛔ this chain is NOT licence to be lenient
-                            // anywhere else: nothing upstream folds for you,
-                            // and a producer emitting a legacy spelling emits a
-                            // document the spec refuses by name.
+                            // ⛔ [#12920] This read used to be a four-spelling tolerant chain
+                            // (`reference ?? referenceTo ?? target ?? options.objectName`). It was
+                            // RETIRED by ruling — director seat summon #20, decision batch #107
+                            // item 5, 2026-09-09, maintainer verbatim 「其他同意」 = option A —
+                            // executing the stance recorded 2026-08-30, verbatim 「折叠即契约」:
+                            // the spec spelling IS the contract, and a stored row spelling the
+                            // target the old way is a PRODUCER defect, not a shape this route
+                            // accommodates. The prerequisite that had held execution — whether any
+                            // live deployment holds alias-spelled rows — was answered by the
+                            // maintainer: none to preserve.
                             //
-                            // The tail below reads exactly three spellings —
-                            // `referenceTo`, `target`, `options.objectName` —
-                            // which is NOT the spec's five-entry hint list:
-                            // only the first two appear on it, and
-                            // `options.objectName` appears on no list at all.
-                            // They can reach here only on a STORED row that
-                            // never went through `FieldSchema`, which is
-                            // possible because the serving read path replays
-                            // ADR-0087 conversions
-                            // (`applyConversionsToStoredItem`) and performs no
-                            // schema validation. ⚠️ Whether such a row is still
-                            // reachable in production is #12920's OPEN census —
-                            // ⛔ do not widen this chain here, and do not narrow
-                            // it here either; #12920 decides its fate.
-                            referenceTo = def?.reference
-                                ?? def?.referenceTo
-                                ?? def?.target
-                                ?? def?.options?.objectName;
+                            // Wire-visible consequence, deliberate: a stored def spelling the
+                            // target `referenceTo` / `target` / `options.objectName` now resolves
+                            // NOTHING here, and the route answers `500 LOOKUP_TARGET_MISSING`
+                            // instead of searching the aliased object. Pinned, in both directions,
+                            // in `public-form-lookup-picker.test.ts`.
+                            //
+                            // ⛔ Do not re-widen this read, here or in any sibling consumer —
+                            // widening it back is how the platform came to answer the same
+                            // question differently per consumer. Nothing upstream folds for you:
+                            // [#13137] `data/field.zod.ts`'s `aliases` table is a RENAME HINT ON A
+                            // REJECTED KEY, not a normaliser (`strictObject` consults it solely
+                            // from the `unrecognized_keys` path — the semantics are stated in
+                            // `spec/src/shared/strict-object.ts`), so `relatedTo` / `referenceTo` /
+                            // `target` / `targetObject` / `lookupObject` are REFUSED by
+                            // `FieldSchema`, answered with *"Did you mean `referenceTo` →
+                            // `reference`?"*, and never rewritten. The one place an alias IS
+                            // tolerated is the ADR-0087 conversion layer (`fieldReferenceToAlias`),
+                            // replayed on stored-row rehydration — declared, tested and removable
+                            // on a schedule, which a `??` arm here never was.
+                            referenceObject = def?.reference;
                         } catch {/* ignore */}
                     }
-                    if (!referenceTo) {
+                    if (!referenceObject) {
                         res.status(500).json({
                             code: 'LOOKUP_TARGET_MISSING',
                             error: `Could not resolve referenced object for "${fieldName}"`,
@@ -10668,7 +10795,7 @@ export class RestServer {
                     };
 
                     const pickerRequest: ServerScopedDataRequest<FindDataRequest> = {
-                        object: referenceTo,
+                        object: referenceObject,
                         // [#16337] Canonical QueryAST: `filters` → `where`,
                         // `select` → `fields`, `sort` → `orderBy`. The normalizer
                         // folds each of those aliases onto exactly these keys and
@@ -10686,7 +10813,7 @@ export class RestServer {
                         // all; that the value is now a filter the ingress ACCEPTS
                         // is measured end-to-end, not asserted by the type.
                         query: {
-                            object: referenceTo,
+                            object: referenceObject,
                             limit: maxResults,
                             offset: 0,
                             where: filters,
@@ -10831,6 +10958,29 @@ export class RestServer {
                             code: 'VALIDATION_FAILED',
                             message: 'body.selection.measures must be a non-empty array of measure names.',
                         });
+                    }
+
+                    // [#17058] …and every OTHER member of `selection` had no
+                    // door at all, so a malformed one travelled into
+                    // `dataset-executor` and was answered by whatever the face
+                    // behind it happened to do with it — while the sibling
+                    // routes (`/analytics/query`, `/analytics/sql`) lift the
+                    // identical failure to a 400 at the entry. One family, two
+                    // postures, decided by which door the client knocked on.
+                    //
+                    // The parse is a PROJECTION, never the siblings' schema:
+                    // `selection` is a `DatasetSelection`, which is NOT the
+                    // `AnalyticsQuery` the siblings parse — it carries no
+                    // `cube` and has four members of its own, so the sibling
+                    // schema would 400 every real dashboard widget.
+                    // {@link datasetSelectionRefusal} carries that measurement
+                    // and the reason those four are deliberately left out.
+                    //
+                    // Validation-only: the caller's `selection` is what reaches
+                    // `queryDataset` below, never a parse output.
+                    const selectionRefusal = await datasetSelectionRefusal(selection);
+                    if (selectionRefusal) {
+                        return res.status(selectionRefusal.status).json(selectionRefusal.body);
                     }
 
                     // ADR-0037 P3 — draft data preview: the canvas / preview

@@ -6,10 +6,12 @@ import { createHash } from 'node:crypto';
 import fs from 'fs';
 import path from 'path';
 
-// Type-only (erased at runtime): the three field-type vocabularies below are
-// `satisfies Record<FieldType, …>`, which is what makes a field type added to
-// the spec a named compile error here instead of a silent fallback (#14657).
-import type { FieldType } from '@objectstack/spec/data';
+// [#16319] `FieldType` is now imported as a VALUE below, beside the other
+// `@objectstack/spec/data` helpers — the enum object carries the type of the
+// same name, so the three vocabularies below still read
+// `satisfies Record<FieldType, …>` and a field type added to the spec is still a
+// named compile error here instead of a silent fallback (#14657). The value
+// half is what {@link refuseUndeclarableFieldType} reads.
 // #16091 — IMPORTED, not transcribed. Both are on `@objectstack/spec/data`'s
 // exported surface, and spec is not a driver package: the #5726 constraint the
 // transcriptions below cite forbids a static value import of an
@@ -19,15 +21,25 @@ import type { FieldType } from '@objectstack/spec/data';
 // these, so the part that can be shared is shared and only the part that
 // genuinely lives on `driver-sql` is mirrored.
 import {
+  // [#16319] The closed field-type vocabulary itself, read by
+  // {@link refuseUndeclarableFieldType}. Imported for the same reason as the
+  // four helpers beside it — never transcribed — so a type added to the spec is
+  // admitted by these generators on the same commit.
+  FieldType,
   isNowDefaultToken,
   isRuntimeDefaultToken,
   isTenancyDisabled,
   isUniqueDeclared,
   numericColumnFor,
+  // #16726 — the name gate below. IMPORTED for the same reason as the five
+  // above: it asks the schema whether a name is legal instead of restating
+  // the charset the schema declares.
+  ObjectSchema,
 } from '@objectstack/spec/data';
 import { printHeader, printSuccess, printError, printInfo, printStep, createTimer, isReportedError, CLI_ALIAS } from '../utils/format.js';
 import { metadataFileName } from '../utils/metadata-file-name.js';
 import { findEmissionParseFailures } from '../utils/emitted-source-parses.js';
+import { findBarrelAliasRefusal } from '../utils/importable-binding.js';
 
 // ─── Metadata Type Templates ────────────────────────────────────────
 
@@ -472,6 +484,54 @@ function toSnakeCase(str: string): string {
   return str.replace(/[-]/g, '_').replace(/[A-Z]/g, c => `_${c.toLowerCase()}`).replace(/^_/, '');
 }
 
+/**
+ * Is this a name `os generate` accepts? (#16726)
+ *
+ * ## The declared answer, asked rather than restated
+ *
+ * The accepted set is the charset `packages/spec` ALREADY declares for an
+ * object `name` — maintainer ruling, decision batch #82 (2026-09-08, option
+ * A): a gate, ⛔ no sanitiser, and ⛔ no third charset. So the judge here is
+ * that declaration itself (`ObjectSchema.shape.name`), reached through the
+ * package's exported surface. Nothing in this file states what the charset
+ * IS: a transcription is a second declaration that can drift green while spec
+ * moves, and the ruling asks for the spec's rule, not for a copy of today's
+ * reading of it. The refusal even quotes the schema's own message, so the
+ * pattern the author is shown is the pattern that judged them.
+ *
+ * ## ⛔ Why it returns a REASON and never a repaired name
+ *
+ * The rejected option (B) was to derive a legal identifier the way
+ * `os create` has since #15892. It was refused because it decouples the name
+ * the author wrote from the name that gets emitted, silently: write
+ * `foo.bar`, get `fooBar` in the file, and every later reference the author
+ * types by hand is wrong with nothing announcing it. For metadata written in
+ * bulk that divergence multiplies unseen. So this answers only *may this name
+ * through*, and the caller refuses loudly — ⛔ it never rewrites, and no flag
+ * bypasses it.
+ *
+ * ## What it deliberately does NOT decide
+ *
+ * Whether the TypeScript the accepted name would produce actually PARSES.
+ * That is #16541's check (`findEmissionParseFailures`), it stays exactly where
+ * it landed, and it is a genuinely different question: `class` is inside this
+ * charset and is still refused by the compiler in a `const` binding position,
+ * while `order-line` emits a perfectly parseable `orderLine` and is refused
+ * here. Neither layer shadows the other — `generate-refuses-name-outside-charset.test.ts`
+ * measures both directions.
+ *
+ * @returns `null` when the name is accepted, or the schema's own reason when
+ *          it is not.
+ */
+function nameCharsetRefusal(name: string): string | null {
+  // Reached lazily, inside the call: `ObjectSchema` is a lazy schema, and a
+  // module-top `.shape` read would materialize it for every CLI command
+  // including the ones that never generate anything.
+  const verdict = ObjectSchema.shape.name.safeParse(name);
+  if (verdict.success) return null;
+  return verdict.error.issues[0]?.message ?? 'not a legal object name';
+}
+
 // ─── Field Type Mapping ─────────────────────────────────────────────
 
 /**
@@ -581,6 +641,78 @@ function fieldTypeToTs(fieldType: string, multiple?: boolean): string {
   return multiple ? `${base}[]` : base;
 }
 
+/** [#16319] The closed `FieldType` vocabulary as a Set — built once, off the spec enum. */
+const DECLARABLE_FIELD_TYPES: ReadonlySet<string> = new Set<string>(FieldType.options);
+
+/**
+ * [#16319] The field-`type` a generator will not guess at.
+ *
+ * MAINTAINER RULING, 2026-09-10 (director seat batch #111 item 2): 「一个没写
+ * type(或拼错)的字段 应该禁止加载」, and 「下游默认值全部改拒绝 … ⛔ 不再猜族;
+ * 按构造它们应当不可达,拒绝是防御」.
+ *
+ * All four generator loops in this file read `String(fieldDef.type || 'text')`.
+ * That default put a typeless field in the TEXT family — unbounded unless the
+ * column is keyed — while `SqlDriver.createColumn`'s own `field.type ||
+ * 'string'` put the SAME declaration in the STRING family, sized from the
+ * declared `maxLength` (knex's 255 without one). Measured on live PostgreSQL
+ * 16.13: `{ maxLength: 100 }` with no `type` produced `character varying(100)`
+ * from the platform and `TEXT` from both generated migrations, so the platform
+ * refused a 101-character value both generated tables accepted. The two
+ * `os generate types` loops made a third answer out of the same split
+ * (`string` for a typeless field, `unknown` for a mis-spelled one).
+ *
+ * ⭐ By construction this is now unreachable through any door that reaches a
+ * runtime: `SchemaRegistry.registerObject` refuses the whole object
+ * declaration. A generator, though, reads a config file directly and never
+ * touches the registry — so here the refusal is the only door, not defence.
+ *
+ * ⛔ It refuses the FILE, not the field: emitting a table one column short is
+ * the same silent loss the ruling refuses at the registration door, one artifact
+ * to the left. It names the object, the field and the reason, on this file's own
+ * `generate:`-prefixed convention ({@link numericSqlType} is the sibling).
+ */
+function refuseUndeclarableFieldType(
+  objectName: string,
+  fieldName: string,
+  declared: unknown,
+): never {
+  const absent = declared === undefined || declared === null || declared === '';
+  const shown =
+    typeof declared === 'string' ? `'${declared}'` : (JSON.stringify(declared) ?? String(declared));
+  throw new Error(
+    `generate: object '${objectName}' field '${fieldName}' ` +
+      (absent
+        ? 'declares no `type`'
+        : `declares \`type: ${shown}\`, which is not a member of \`FieldType\``) +
+      `. Nothing is generated for this object. This generator no longer defaults such a field to ` +
+      `the TEXT family: \`SqlDriver.createColumn\` put the same declaration in the STRING family, ` +
+      `so the generated table and the platform's own table disagreed about the column — and since ` +
+      `2026-09-10 the platform refuses to load the declaration at all. \`FieldSchema\` requires ` +
+      `\`type\` and admits only \`FieldType\` members. Give the field a \`FieldType\` member, or ` +
+      `remove the field.`,
+  );
+}
+
+/**
+ * [#16319] The one read of a field's declared `type` in this file.
+ *
+ * Every generator loop asks THIS, so the four of them cannot drift back into
+ * four defaults. Returns the declared member; refuses everything else.
+ */
+function declaredFieldType(
+  objectName: string,
+  fieldName: string,
+  fieldDef: { type?: unknown },
+): string {
+  const declared = fieldDef.type;
+  if (typeof declared !== 'string' || !DECLARABLE_FIELD_TYPES.has(declared)) {
+    refuseUndeclarableFieldType(objectName, fieldName, declared);
+  }
+  return declared;
+}
+
+
 export function generateTypesFromConfig(config: Record<string, unknown>): string {
   const lines: string[] = [
     '// Auto-generated by ObjectStack CLI — do not edit manually',
@@ -620,7 +752,8 @@ export function generateTypesFromConfig(config: Record<string, unknown>): string
     lines.push('  id: string;');
 
     for (const [fieldName, fieldDef] of Object.entries(fields)) {
-      const fType = String(fieldDef.type || 'text');
+      // [#16319] Was `String(fieldDef.type || 'text')`. See {@link declaredFieldType}.
+      const fType = declaredFieldType(name, fieldName, fieldDef);
       const tsType = fieldTypeToTs(fType, !!fieldDef.multiple);
       const required = fieldDef.required ? '' : '?';
       if (fieldDef.label) {
@@ -666,6 +799,58 @@ async function runMetadataGeneration(type: string, name: string, flags: { dir?: 
       console.log(chalk.dim('  Usage: objectstack generate <type> <name>'));
       console.log(chalk.dim('  Example: objectstack generate object project'));
       console.log(chalk.dim('  Alias: os g object project'));
+      process.exit(1);
+    }
+
+    // ⛔ REFUSE a name outside the declared charset, BEFORE anything is
+    // derived from it (#16726).
+    //
+    // Placed here on purpose, and the position is the ruling: every derivation
+    // this command performs — `toSnakeCase` for the metadata name and the
+    // filename, `toCamelCase` for the binding and the barrel alias,
+    // `toTitleCase` for the labels — happens BELOW this line, so a refused
+    // name is never folded into a legal-looking one on the way to a
+    // diagnostic. It sits after the type roster so that `os g <unknown-type>
+    // <name>` still answers about the type, which is the more useful answer.
+    //
+    // What it is NOT: a sanitiser (option B was refused — see
+    // `nameCharsetRefusal`), a charset of this command's own (the judge is
+    // spec's object-`name` declaration), and not a replacement for the parse
+    // check further down, which stays as the backstop it was built to be.
+    const charsetRefusal = nameCharsetRefusal(name);
+    if (charsetRefusal) {
+      printError(`Refusing to generate — \`${name}\` is not a name this command accepts`);
+      console.log('');
+      console.log(`  ${chalk.dim('Name:')} ${chalk.white(name)}`);
+      console.log(`  ${chalk.dim('Rule:')} ${chalk.white(charsetRefusal)}`);
+      console.log('');
+      console.log(chalk.dim(
+        `  That rule is not \`${CLI_ALIAS} g\`'s own: it is the charset \`@objectstack/spec\``,
+      ));
+      console.log(chalk.dim(
+        '  declares for an object `name`, asked of the schema itself. A metadata name',
+      ));
+      console.log(chalk.dim(
+        '  that is refused there has no business being scaffolded here.',
+      ));
+      console.log('');
+      console.log(chalk.dim(
+        '  It refuses instead of folding your name into one that fits, so the name you',
+      ));
+      console.log(chalk.dim(
+        '  write and the name that lands in the file are always the same string.',
+      ));
+      console.log(chalk.dim(
+        // ⛔ The examples are deliberately NOT built from what the author
+        // typed. A suggestion derived from the refused name is option (B)
+        // wearing a prompt: the author accepts it, and the divergence this
+        // gate exists to prevent arrives one keystroke later.
+        `  Nothing was written. Names like \`${CLI_ALIAS} g ${type} customer\` or`,
+      ));
+      console.log(chalk.dim(
+        `  \`${CLI_ALIAS} g ${type} sales_order\` are accepted.`,
+      ));
+      console.log('');
       process.exit(1);
     }
 
@@ -774,10 +959,103 @@ async function runMetadataGeneration(type: string, name: string, flags: { dir?: 
         '  which would decide in silence which names this command accepts. Pick a name',
       ));
       console.log(chalk.dim(
-        `  that survives as an identifier — \`${CLI_ALIAS} g ${type} order_line\` and`,
+        // ⛔ This line used to offer `order-line` as an equal alternative. The
+        // #16726 gate above refuses that spelling before this check is ever
+        // reached, so offering it here would send the author to a second
+        // refusal. The CHECK is untouched — only the advice it prints.
+        `  that survives as an identifier — \`${CLI_ALIAS} g ${type} order_line\` works,`,
       ));
       console.log(chalk.dim(
-        `  \`${CLI_ALIAS} g ${type} order-line\` both work, and both fold to \`orderLine\`.`,
+        '  and binds `orderLine`.',
+      ));
+      console.log('');
+      process.exit(1);
+    }
+
+    // ⛔ REFUSE a barrel alias no consumer can IMPORT BY NAME (#17410).
+    //
+    // The two checks above are each satisfied, correctly, by a name whose
+    // emitted binding is still unusable — and the comment on the parse check
+    // says why in its own words: a reserved word "is illegal as a `const`
+    // binding and legal as an `export { default as … }` alias". `class` is
+    // inside the charset (all lowercase letters), `const classViews:` parses,
+    // `export { default as class } from './class.view'` parses, and
+    // `import { class } from './views'` is a syntax error at the call site.
+    // So `os g view class` exited 0 and wrote a barrel entry that can never be
+    // named — the failure deferred into the author's own file, where it reads
+    // as their mistake.
+    //
+    // The question is the CONSUMER's, which is why it is asked here and not in
+    // the check above: that one asks whether the bytes we write parse, this one
+    // asks whether the binding those bytes publish can be imported. Both ask
+    // the compiler; neither states a rule of its own. ⛔ Not a third charset
+    // (the #16726 ruling forbids one, and none is added — no character is
+    // judged), and ⛔ not a sanitiser: it refuses and rewrites nothing, so the
+    // name the author wrote stays the name that lands.
+    //
+    // Placed LAST of the three on purpose. Each layer asks a strictly narrower
+    // question than the one before — legal characters, then parseable bytes,
+    // then an importable binding — and being last means it changes the verdict
+    // of neither: every name the layers in front already refuse still meets
+    // their diagnostic, with their wording, and `os g object class` is still
+    // the compiler's "not allowed as a variable declaration name" rather than
+    // this. It only ever narrows, and only for names all three would otherwise
+    // have admitted.
+    //
+    // Ahead of the dry-run branch for the same reason the parse check is: a
+    // preview that prints an unusable barrel and exits 0 is the same defect in
+    // preview form.
+    const barrelAlias = toCamelCase(name);
+    const aliasRefusal = await findBarrelAliasRefusal(barrelAlias);
+    if (aliasRefusal) {
+      printError('Refusing to generate — the barrel line this would write could not be imported');
+      console.log('');
+      console.log(`  ${chalk.dim('Name:')}       ${chalk.white(name)}`);
+      console.log(`  ${chalk.dim('Identifier:')} ${chalk.white(barrelAlias)}`);
+      console.log(`  ${chalk.dim('Barrel:')}     ${chalk.white(exportLine)}`);
+      console.log('');
+      console.log(`  ${chalk.white(path.join(dir, 'index.ts'))}`);
+      for (const diagnostic of aliasRefusal) {
+        console.log(chalk.dim(`    ${diagnostic}`));
+      }
+      console.log('');
+      console.log(chalk.dim(
+        `  That line parses — an export clause admits a reserved word as an alias — so`,
+      ));
+      console.log(chalk.dim(
+        `  it would have been written. What cannot be written is the other half: a`,
+      ));
+      console.log(chalk.dim(
+        `  consumer has to name it, and \`import { ${barrelAlias} } from …\` is what the`,
+      ));
+      console.log(chalk.dim(
+        '  compiler refused above. Nothing was written.',
+      ));
+      console.log('');
+      console.log(chalk.dim(
+        `  \`${barrelAlias}\` is a reserved word in this position. The rule is not this`,
+      ));
+      console.log(chalk.dim(
+        '  command\'s and it is not a charset: it is the compiler, asked whether the',
+      ));
+      console.log(chalk.dim(
+        '  binding your name publishes can be imported by that name. Reserved only in',
+      ));
+      console.log(chalk.dim(
+        '  some contexts — `type`, `as`, `from`, `async`, `get`, `set` — are accepted,',
+      ));
+      console.log(chalk.dim(
+        '  because a consumer can import those.',
+      ));
+      console.log('');
+      console.log(chalk.dim(
+        // ⛔ Deliberately NOT derived from what the author typed — a suggestion
+        // built from the refused name is the sanitiser this layer declines to
+        // be, arriving one keystroke later. Same reasoning as the #16726 gate.
+        `  Pick a name that survives as an import binding — \`${CLI_ALIAS} g ${type} order_line\``,
+      ));
+      console.log(chalk.dim(
+        '  works, and binds `orderLine`.',
       ));
       console.log('');
       process.exit(1);
@@ -920,7 +1198,8 @@ function generateClientFromConfig(config: Record<string, unknown>): string {
     lines.push('  id: string;');
 
     for (const [fieldName, fieldDef] of Object.entries(fields)) {
-      const fType = String(fieldDef.type || 'text');
+      // [#16319] Was `String(fieldDef.type || 'text')`. See {@link declaredFieldType}.
+      const fType = declaredFieldType(name, fieldName, fieldDef);
       const tsType = fieldTypeToTs(fType, !!fieldDef.multiple);
       const required = fieldDef.required ? '' : '?';
       lines.push(`  ${fieldName}${required}: ${tsType};`);
@@ -1965,15 +2244,33 @@ function partitionUniqueIndexes(
  * driver's order: `multiple` still wins first, so a flagged field of any type
  * is a JSON column and never reaches the lookup at all.
  *
- * ⚠️ The default is selected by OWN-PROPERTY PRESENCE, not by the value being
- * falsy or nullish, because `null` is now a meaningful ANSWER and every other
- * spelling swallows it: `||` and `??` both fall through on `null` and hand a
- * virtual field a TEXT column again — the exact defect this card closes, one
- * operator to the left. (Measured: the first cut of this fix used `??` and
- * still emitted `"f" TEXT`.) `hasOwnProperty` rather than `in` for the second
- * half of the same care — `in` answers true for `toString` and every other
- * inherited key, and the unvalidated authoring door can deliver one as a
- * `type` string.
+ * ⚠️ The lookup is by OWN-PROPERTY PRESENCE, not by the value being falsy or
+ * nullish, because `null` is a meaningful ANSWER and every other spelling
+ * swallows it: `||` and `??` both fall through on `null` and hand a virtual
+ * field a TEXT column again — the exact defect #14828 closed, one operator to
+ * the left. (Measured: the first cut of that fix used `??` and still emitted
+ * `"f" TEXT`.) `hasOwnProperty` rather than `in` for the second half of the same
+ * care — `in` answers true for `toString` and every other inherited key.
+ *
+ * ⭐ [#16319] `fieldType` IS a `FieldType` member by the time this is called,
+ * and the `: 'TEXT'` arm below is therefore dead rather than a default.
+ *
+ * This function used to be reached with a `type` string that was not a field
+ * type at all — the paragraph above said so, and named the unvalidated
+ * authoring door that delivered it. That door is CLOSED as of the maintainer
+ * ruling of 2026-09-10 (「一个没写 type(或拼错)的字段 应该禁止加载」): every
+ * caller now resolves the field through {@link declaredFieldType}, which refuses
+ * an absent or non-member `type` and generates nothing for the object, and
+ * `SchemaRegistry.registerObject` refuses the same declaration at the platform's
+ * own registration door so it can never reach a runtime either.
+ *
+ * ⛔ So the `: 'TEXT'` arm is NOT a family default to reason from, and ⛔ nothing
+ * new may be routed to it: it is the residue of a total table
+ * (`FIELD_TYPE_SQL_MAP satisfies Record<FieldType, string | null>` makes a
+ * missing member a named `tsc` error), kept only because a total table still
+ * needs an expression on the miss branch. The retired guess it replaces —
+ * TEXT here against `SqlDriver.createColumn`'s STRING family — is what made one
+ * declaration produce two different columns, and refusing is the ruled answer.
  */
 function fieldTypeToSql(
   fieldType: string,
@@ -2085,7 +2382,8 @@ export function generateMigrationSql(config: Record<string, unknown>): string {
     // as DDL that cannot run. Filled by the loop below, read after it.
     const emittedColumns = new Set<string>(['id']);
     for (const [fieldName, fieldDef] of Object.entries(fields)) {
-      const fType = String(fieldDef.type || 'text');
+      // [#16319] Was `String(fieldDef.type || 'text')`. See {@link declaredFieldType}.
+      const fType = declaredFieldType(tableName, fieldName, fieldDef);
       const sqlType = fieldTypeToSql(
         fType,
         !!fieldDef.multiple,
@@ -2247,7 +2545,8 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
     lines.push("    table.string('id').primary();");
 
     for (const [fieldName, fieldDef] of Object.entries(fields)) {
-      const fType = String(fieldDef.type || 'text');
+      // [#16319] Was `String(fieldDef.type || 'text')`. See {@link declaredFieldType}.
+      const fType = declaredFieldType(tableName, fieldName, fieldDef);
       // [#16318 / ADR-0113] `storage.notNull`, never `required` — the same
       // move, for the same recorded reason, as the sql format above. The local
       // name is kept so the emitter below reads unchanged.
@@ -2539,6 +2838,25 @@ async function runMigrationGeneration(configPath: string | undefined, flags: { o
 
 // ─── JSON Schema Generator ──────────────────────────────────────────
 
+/**
+ * Error messages for schema nodes that inherently have no JSON Schema form.
+ *
+ * ⛔ Deliberately the SAME single substring `packages/spec/scripts/build-schemas.ts`
+ * matches on, and for the same reason: zod names the offending node kind in the
+ * PREFIX (`Transforms …`, `Function types …`), so a list of kinds here would go
+ * stale against zod while the suffix is what all of them share. Anything this
+ * does NOT recognise is a real conversion failure, and every tier below
+ * re-raises it instead of degrading past it.
+ */
+const KNOWN_UNSUPPORTED_JSON_SCHEMA_PATTERNS = [
+  'cannot be represented in JSON Schema',
+];
+
+function isKnownUnsupportedJsonSchema(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  return KNOWN_UNSUPPORTED_JSON_SCHEMA_PATTERNS.some((p) => msg.includes(p));
+}
+
 async function runSchemaGeneration(flags: { output: string; dryRun?: boolean }): Promise<void> {
     printHeader('Generate Schema');
 
@@ -2550,9 +2868,64 @@ async function runSchemaGeneration(flags: { output: string; dryRun?: boolean }):
       const { ObjectStackDefinitionSchema } = await import('@objectstack/spec');
 
       printStep('Converting to JSON Schema...');
-      const jsonSchema = z.toJSONSchema(ObjectStackDefinitionSchema, {
-        target: 'draft-2020-12',
-      });
+
+      // [#17873] The three-tier ladder `packages/spec/scripts/build-schemas.ts`
+      // already runs for every schema it publishes, with the third tier spelled
+      // as `packages/metadata-protocol/src/protocol.ts`'s `unrepresentable: 'any'`
+      // rather than spec's union-branch projection (a spec-private helper).
+      //
+      // Before this, the call below was the ONE `toJSONSchema` call site in the
+      // repository that neither fell back nor used that convention — and
+      // `ObjectStackDefinitionSchema` has no JSON form in EITHER direction, so
+      // the bare call threw for every repository and every flag combination and
+      // the `catch` at the bottom of this function exited 1. The command could
+      // never reach its own `fs.writeFileSync`.
+      //
+      //   tier 1  output, strict — what this command asked for, kept first.
+      //   tier 2  input, strict  — an IDE schema describes what an author WRITES,
+      //                            and the input side of a transform pipe is
+      //                            plain data (build-schemas.ts carries the
+      //                            full argument).
+      //   tier 3  input, `unrepresentable: 'any'` — the callable leaves
+      //                            (`onEnable`, hook/function `handler`s) have no
+      //                            JSON form in any direction; widening THOSE
+      //                            LEAVES to "accepts anything" is what buys the
+      //                            other 40 members a published schema.
+      let jsonSchema: Record<string, unknown>;
+      let io: 'output' | 'input' = 'output';
+      let widenedUnrepresentable = false;
+      try {
+        jsonSchema = z.toJSONSchema(ObjectStackDefinitionSchema, {
+          target: 'draft-2020-12',
+        }) as Record<string, unknown>;
+      } catch (outputError) {
+        if (!isKnownUnsupportedJsonSchema(outputError)) throw outputError;
+        io = 'input';
+        try {
+          jsonSchema = z.toJSONSchema(ObjectStackDefinitionSchema, {
+            target: 'draft-2020-12',
+            io: 'input',
+          }) as Record<string, unknown>;
+        } catch (inputError) {
+          if (!isKnownUnsupportedJsonSchema(inputError)) throw inputError;
+          widenedUnrepresentable = true;
+          jsonSchema = z.toJSONSchema(ObjectStackDefinitionSchema, {
+            target: 'draft-2020-12',
+            io: 'input',
+            unrepresentable: 'any',
+          }) as Record<string, unknown>;
+        }
+      }
+
+      // Absence must be loud: a degraded artifact says so at the moment it is
+      // produced, rather than leaving an IDE user to discover that some subtree
+      // accepts anything.
+      if (io === 'input') {
+        printInfo('Converted in the authoring (input) direction — the output direction contains a transform with no JSON form');
+      }
+      if (widenedUnrepresentable) {
+        printInfo('Nodes with no JSON form (live callables) are published as unconstrained — they accept any value in this schema');
+      }
 
       // Add metadata
       const schema = {
@@ -2598,7 +2971,11 @@ export default class Generate extends Command {
 
   static override args = {
     type: Args.string({ description: 'Metadata type to generate (object, view, action, flow, dashboard, app)', required: true }),
-    name: Args.string({ description: 'Name for the metadata (use kebab-case)', required: false }),
+    // ⛔ NOT "use kebab-case" any more (#16726): a name outside the charset
+    // spec declares for an object `name` is refused at the door, and
+    // kebab-case is outside it. What this string advertises and what the
+    // command accepts have to be the same set.
+    name: Args.string({ description: 'Name for the metadata (snake_case)', required: false }),
   };
 
   static override flags = {

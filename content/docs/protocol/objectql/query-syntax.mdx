@@ -1089,10 +1089,32 @@ label→value mapping in the expansion rather than by the operator.
   Postgres, `LIKE` over a binary cast on MySQL), and
   [#6682](https://github.com/objectstack-ai/objectstack/issues/6682) removed
   `driver-mongodb`'s hardcoded `$options: 'i'` and then the case-insensitive regex
-  `driver-memory` used on its query and analytics faces. So running your tests on the
-  in-memory double no longer returns rows a SQL or MongoDB deployment would not —
-  the divergence this callout warned about is closed, and
-  `FILTER_TEXT_CASES` holds all five drivers to it. Whether the expansion should emit
+  `driver-memory` used on its query and analytics faces. **On CASE** — this callout's
+  subject — the divergence it warned about is closed: running your tests on the
+  in-memory double no longer returns rows a SQL or MongoDB deployment would not
+  because of a fold, and `FILTER_TEXT_CASES` holds all five drivers to that rule.
+  ⚠️ **One axis is NOT aligned, it is not a case question, and which answer you see
+  depends on how you reach the data.** **Through the engine** — `ql.find()` and every
+  surface above it (REST `where` / `$filter`, saved reports, list views) — a text
+  operator aimed at a field whose DECLARED type can never store a string is REFUSED
+  with `400 INVALID_FILTER` before any driver dispatch, naming the field and its
+  declared type, by the maintainer ruling on
+  [#15661](https://github.com/objectstack-ai/objectstack/issues/15661): the refused
+  classes are the numeric, boolean, temporal (`date` / `datetime` / `time`) and
+  structured-JSON value classes, and there is no result set to compare. **Beneath that
+  door** — a DIRECT driver call, the path that ruling deliberately leaves answering —
+  each driver's own answer still stands, and they diverge: over a column whose DECLARED
+  type is temporal the SQL family answers a declared no-match — `$contains` and its
+  positive siblings select nothing, `$notContains` selects every valued row — by the
+  maintainer ruling on
+  [#15683](https://github.com/objectstack-ai/objectstack/issues/15683), while
+  `driver-memory` canonicalises such a column to ISO text on write and so still
+  MATCHES the substring. On that one axis the in-memory double does return rows a
+  SQL deployment would not; it is tracked as
+  [#17348](https://github.com/objectstack-ai/objectstack/issues/17348) and
+  `driver-mongodb` is **not measured** for it in either direction. `FILTER_TEXT_CASES`
+  does not cover this axis and is not expected to: every row in that table is keyed on
+  the STORED value, whereas the temporal rule is keyed on the DECLARED type. Whether the expansion should emit
   `$icontains` instead of `$contains` — i.e. whether search is case-insensitive by
   definition — is **settled, not open**:
   [#7641](https://github.com/objectstack-ai/objectstack/issues/7641) ruled that it should,

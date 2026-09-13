@@ -91,6 +91,7 @@
  */
 
 import { ErrorCode, standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
+import { declaresServerFault, looksLikeInternalErrorLeak } from './error-leak.js';
 import { validationFailureDetails, VALIDATION_FAILED_STATUS } from './validation-failure.js';
 
 /** The HTTP answer a thrown error declares. See {@link resolveThrownHttpError}. */
@@ -324,6 +325,93 @@ export type ServerFaultProvenance = 'declared' | 'undeclared';
 export function serverFaultProvenance(thrown: ThrownHttpError): ServerFaultProvenance | undefined {
   if (thrown.status < 500) return undefined;
   return thrown.declaredStatus === undefined ? 'undeclared' : 'declared';
+}
+
+/**
+ * [#16146] The prose a producer DECLARED to be a deliberate 5xx REFUSAL
+ * addressed to its caller — or `undefined` for everything else, which is the
+ * default and stays the default.
+ *
+ * ## What it is
+ *
+ * `ApiErrorSchema.refusal` (`@objectstack/spec`) is the producer-side
+ * declaration ruled by the director seat in decision batch #58 (2026-09-06,
+ * option C): refusal versus fault is a declaration on the published ADR-0112
+ * envelope, NOT a status heuristic and NOT a second allow-list. A producer
+ * that composes a 5xx FOR its caller sets `refusal: true` beside the `status`
+ * and `code` it already declares; a fault declares nothing here and its prose
+ * is withheld exactly as before. That is the third row of the table in that
+ * field's own docblock; the first two rows are unchanged and the second is
+ * still what an undeclared field means.
+ *
+ * ## Why this is ONE function and not a read at each arm
+ *
+ * Three arms withhold a declared 5xx's prose BECAUSE it was declared —
+ * `declaredServerFaultAnswer` and `resolveErrorResponse`'s 5xx passthrough in
+ * `@objectstack/rest`, and `errorResponseBase` in `@objectstack/runtime` — and
+ * the 2026-08-27 ruling on #12509 that governs this family says the rule is
+ * "implemented once at the shared resolver layer so all doors inherit one
+ * rule; no per-registrar variants". A `refusal` read re-derived at each arm is
+ * exactly the divergence {@link serverFaultProvenance} and
+ * {@link demotedDeclaredCode} were extracted to end. ⛔ Do not probe
+ * `error.refusal` at a door; ask here.
+ *
+ * ## The four conditions, and why each one is load-bearing
+ *
+ *  - **`refusal === true`, and only `true`.** The spec declares the key as
+ *    `z.literal(true).optional()`: presence IS the declaration, so a
+ *    `refusal: 'yes'` or `refusal: 1` from a producer that guessed at the
+ *    shape declares nothing and is withheld like any other fault.
+ *  - **A DECLARED status in the 5xx band**, read through both spellings
+ *    (`status` then `statusCode`) and bounded 500-599 — the same band and the
+ *    same two-spelling read `packages/rest`'s `declaredHttpStatus` applies, so
+ *    a producer's answer cannot depend on which field it reached for (#7525),
+ *    and a nonsense `status: 700` is not a declaration here any more than it
+ *    is there. The field QUALIFIES a declared status; it never invents one, so
+ *    a throw that declared no status is untouched and still goes through the
+ *    undeclared-5xx heuristic (#5667).
+ *  - **A non-empty string `code`**, asked through {@link declaresServerFault}
+ *    rather than restated — the same "the producer declared this shape"
+ *    predicate the relay already trusts to decide whether `code` travels, and
+ *    the shape the spec's own table row names (`status >= 500`, a `code`, and
+ *    `refusal: true`). It is why this read gives that function a SECOND live
+ *    production caller rather than replacing it.
+ *  - **The message does not trip {@link looksLikeInternalErrorLeak}.** The
+ *    floor under the whole channel: the declaration decides whether prose is
+ *    ADDRESSED to the caller, and the heuristic decides whether it is SAFE to
+ *    send — a producer cannot buy its way past the driver/SQL filter by
+ *    declaring a refusal. It costs nothing that exists (a refusal is authored
+ *    prose, not a driver dump) and it means the answer here is fail-closed in
+ *    both directions: no declaration ⇒ withheld, a declaration over leaky
+ *    prose ⇒ withheld and logged by the arm exactly as a fault is.
+ *
+ * ⛔ It answers the MESSAGE, not a boolean, for the reason
+ * {@link ThrownHttpError.userMessage} is a text-carrying field: the mark and
+ * the text it releases are one value here too, so no arm can hold "this is a
+ * refusal" while composing a body from some other string. What each arm then
+ * applies is its OWN door's caller-addressed bound — `truncateClientMessage`
+ * in `packages/rest`, none at the dispatcher exit, which is what "bounded
+ * exactly as a 4xx message is" (#5423) means per door.
+ */
+export function declaredRefusalMessage(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null) return undefined;
+  const e = error as {
+    refusal?: unknown;
+    status?: unknown;
+    statusCode?: unknown;
+    code?: unknown;
+    message?: unknown;
+  };
+  if (e.refusal !== true) return undefined;
+  const declaredStatus =
+    typeof e.status === 'number' ? e.status
+    : typeof e.statusCode === 'number' ? e.statusCode
+    : undefined;
+  if (declaredStatus === undefined || declaredStatus < 500 || declaredStatus >= 600) return undefined;
+  if (!declaresServerFault({ status: declaredStatus, code: e.code })) return undefined;
+  const message = typeof e.message === 'string' ? e.message : '';
+  if (message.trim().length === 0) return undefined;
+  return looksLikeInternalErrorLeak(message) ? undefined : message;
 }
 
 /**

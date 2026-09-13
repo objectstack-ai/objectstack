@@ -25,8 +25,8 @@ export type SortDirection = z.input<typeof SortDirectionEnum>;
 
 /** Reusable sort item — field + direction pair used across views, data sources, filters */
 export const SortItemSchema = lazySchema(() => z.object({
-  field: z.string().describe('Field name to sort by'),
-  order: SortDirectionEnum.describe('Sort direction'),
+  field: z.string().describe('Field name to sort by').meta({ title: 'Field' }),
+  order: SortDirectionEnum.describe('Sort direction').meta({ title: 'Direction' }),
 }).describe('Sort field and direction pair'));
 export type SortItem = z.input<typeof SortItemSchema>;
 

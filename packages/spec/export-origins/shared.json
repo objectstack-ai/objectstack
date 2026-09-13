@@ -15,6 +15,8 @@
     "EXTERNAL_ERROR_HTTP_STATUS": "src/shared/external-errors.ts#EXTERNAL_ERROR_HTTP_STATUS (const)",
     "EpochMs": "src/shared/epoch.zod.ts#EpochMs (type)",
     "EvaluatedExpression": "src/shared/expression.zod.ts#EvaluatedExpression (type)",
+    "EvaluatedExpressionInput": "src/shared/expression.zod.ts#EvaluatedExpressionInput (type)",
+    "EvaluatedExpressionInputSchema": "src/shared/expression.zod.ts#EvaluatedExpressionInputSchema (const)",
     "EvaluatedExpressionParsed": "src/shared/expression.zod.ts#EvaluatedExpressionParsed (type)",
     "EvaluatedExpressionSchema": "src/shared/expression.zod.ts#EvaluatedExpressionSchema (const)",
     "Expression": "src/shared/expression.zod.ts#Expression (type)",

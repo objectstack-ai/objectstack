@@ -5,7 +5,6 @@ import { defineStack, normalizeStackInput } from '@objectstack/spec';
 import {
   validateFormLayout,
   FORM_FIELD_UNKNOWN,
-  FORM_COLSPAN_ABSOLUTE,
   FORM_SECTION_GROUP_UNKNOWN,
 } from './validate-form-layout.js';
 
@@ -38,7 +37,7 @@ const groupedObjects = [
 ];
 
 describe('validateFormLayout (#2578)', () => {
-  it('is clean for a well-formed multi-column form (known fields, no colSpan)', () => {
+  it('is clean for a well-formed multi-column form (known fields)', () => {
     const stack = {
       objects,
       views: [
@@ -74,7 +73,19 @@ describe('validateFormLayout (#2578)', () => {
     expect(findings[0].path).toBe('views[0].sections[0].fields[1]');
   });
 
-  it('discourages absolute colSpan and steers to span', () => {
+  // [#17328] RE-JUDGED, not deleted. This test used to be the pin on the
+  // `absolute-colspan-discouraged` wording — it asserted the finding fired on
+  // `colSpan: 2` and that the hint said `span: 'full'`. Both halves were
+  // measured wrong in Chromium at the three surface widths the message named:
+  // the renderer clamps the span to the section's column count, so an absolute
+  // `colSpan` is grid-aligned at EVERY width (0px overflow in every
+  // configuration), and `span: 'full'` — the recommended alternative — compiles
+  // to the same class as `colSpan: 4` and renders pixel-identical to authoring
+  // nothing at the modal width. The rule was withdrawn. What the pin asserts
+  // now is that withdrawal, and it is deliberately PAIRED with a live finding
+  // on the same section: a bare `expect([])` here would keep passing if the
+  // walk stopped reaching this site at all.
+  it('[#17328] an absolute colSpan is no longer a finding — the rule was withdrawn', () => {
     const stack = {
       objects,
       views: [
@@ -85,14 +96,32 @@ describe('validateFormLayout (#2578)', () => {
         },
       ],
     };
-    const findings = validateFormLayout(stack);
-    expect(findings).toHaveLength(1);
-    expect(findings[0].rule).toBe(FORM_COLSPAN_ABSOLUTE);
-    expect(findings[0].hint).toContain("span: 'full'");
-    expect(findings[0].path).toBe('views[0].sections[0].fields[1].colSpan');
+    expect(validateFormLayout(stack)).toEqual([]);
+
+    // POSITIVE CONTROL on the identical shape: the walk does reach
+    // `sections[0].fields[1]`, so the empty result above is a verdict about
+    // `colSpan` and not about an unread site.
+    const reached = validateFormLayout({
+      objects,
+      views: [
+        {
+          name: 'contract_form',
+          data: { provider: 'object', object: 'contract' },
+          sections: [{ columns: 2, fields: ['name', { field: 'ghost_amount', colSpan: 2 }] }],
+        },
+      ],
+    });
+    expect(reached.map((f) => `${f.rule}@${f.path}`)).toEqual([
+      `${FORM_FIELD_UNKNOWN}@views[0].sections[0].fields[1]`,
+    ]);
   });
 
-  it('reports both rules for the same field independently', () => {
+  // [#17328] RE-JUDGED, not deleted. The same fixture used to earn TWO findings
+  // (`form-field-unknown` + `absolute-colspan-discouraged`). With the colSpan
+  // rule withdrawn the surviving assertion is the one that still carries
+  // information: a `colSpan` on an entry does not suppress, duplicate or
+  // relocate the reference finding the entry independently earns.
+  it('a colSpan on the entry does not disturb the reference finding it earns', () => {
     const stack = {
       objects,
       views: [
@@ -103,24 +132,34 @@ describe('validateFormLayout (#2578)', () => {
         },
       ],
     };
-    const rules = validateFormLayout(stack).map(f => f.rule).sort();
-    expect(rules).toEqual([FORM_COLSPAN_ABSOLUTE, FORM_FIELD_UNKNOWN].sort());
+    expect(validateFormLayout(stack).map((f) => `${f.rule}@${f.path}`)).toEqual([
+      `${FORM_FIELD_UNKNOWN}@views[0].sections[0].fields[0]`,
+    ]);
   });
 
+  // [#17328] RE-JUDGED, not deleted. The old assertion was
+  // `[FORM_COLSPAN_ABSOLUTE]` — the colSpan rule was the only thing that could
+  // still speak on an unresolvable binding, which is what made this test
+  // non-empty. With that rule withdrawn the verdict is `[]`, so the test is
+  // PAIRED with the same stack under a resolvable binding; otherwise a walk
+  // that stopped visiting orphan views entirely would look identical.
   it('skips reference-checking when the bound object cannot be resolved', () => {
-    const stack = {
+    const sections = [{ columns: 2, fields: ['whatever', { field: 'x', colSpan: 2 }] }];
+    expect(validateFormLayout({
       objects,
-      views: [
-        {
-          name: 'orphan_form',
-          data: { provider: 'object', object: 'does_not_exist' },
-          sections: [{ columns: 2, fields: ['whatever', { field: 'x', colSpan: 2 }] }],
-        },
-      ],
-    };
-    const findings = validateFormLayout(stack);
-    // No form-field-unknown (object unresolved), but colSpan is still flagged.
-    expect(findings.map(f => f.rule)).toEqual([FORM_COLSPAN_ABSOLUTE]);
+      views: [{ name: 'orphan_form', data: { provider: 'object', object: 'does_not_exist' }, sections }],
+    })).toEqual([]);
+
+    // POSITIVE CONTROL: the identical sections, bound to an object that DOES
+    // resolve, report both dangling names — so the silence above is the
+    // unresolved binding, not an unvisited site.
+    expect(validateFormLayout({
+      objects,
+      views: [{ name: 'bound_form', data: { provider: 'object', object: 'contract' }, sections }],
+    }).map((f) => `${f.rule}@${f.path}`)).toEqual([
+      `${FORM_FIELD_UNKNOWN}@views[0].sections[0].fields[0]`,
+      `${FORM_FIELD_UNKNOWN}@views[0].sections[0].fields[1]`,
+    ]);
   });
 
   it('ignores non-form views (no sections array)', () => {
@@ -295,9 +334,12 @@ describe('#6251 — the view CONTAINER ladder', () => {
         form: { data: { object: 'contract' }, groups: [{ fields: ['name', { field: 'ghost_g', colSpan: 3 }] }] },
       }],
     });
+    // [#17328] RE-JUDGED: the second row was the withdrawn
+    // `absolute-colspan-discouraged` finding on the same entry. The `colSpan: 3`
+    // is deliberately LEFT on the fixture — it is what proves the entry object
+    // shape is read here at all — but it no longer earns a row.
     expect(findings.map((f) => `${f.rule}@${f.path}`)).toEqual([
       `${FORM_FIELD_UNKNOWN}@views[0].form.groups[0].fields[1]`,
-      `${FORM_COLSPAN_ABSOLUTE}@views[0].form.groups[0].fields[1].colSpan`,
     ]);
   });
 
@@ -408,10 +450,13 @@ describe('#6251 — reachable on a REAL parsed app stack', () => {
 
   it('reports every planted defect on that stack — this is the assertion #6251 exists for', () => {
     const { value } = quietly(() => cliTierFor(structuredClone(appShape)));
+    // [#17328] RE-JUDGED: the third row was the withdrawn colSpan finding on
+    // the `ghost_named` entry. The other two rows are the ones #6251 exists for
+    // — one per container rung — and both still fire, so the traversal
+    // assertion this test carries is undiminished.
     expect(validateFormLayout(value!).map((f) => `${f.rule}@${f.path}`)).toEqual([
       `${FORM_FIELD_UNKNOWN}@views[0].form.sections[0].fields[2]`,
       `${FORM_FIELD_UNKNOWN}@views[0].formViews.create.sections[0].fields[1]`,
-      `${FORM_COLSPAN_ABSOLUTE}@views[0].formViews.create.sections[0].fields[1].colSpan`,
     ]);
   });
 
@@ -520,16 +565,26 @@ describe('#16168 — falls back to the container list binding', () => {
     })).toEqual([]);
   });
 
-  it('the colSpan rule is unconditional on the object binding — it already fired on a list-bound container before this fix', () => {
-    // Measured for the changeset: `absolute-colspan-discouraged` sits OUTSIDE
-    // the `known`-gated block (validate-form-layout.ts, the `(b)` comment) —
-    // it needs only `entry.colSpan != null`, never `objName` / `known`. So it
-    // was never actually dead on HotCRM's list-bound views; #16168 only fixes
-    // `form-field-unknown` and `form-section-group-unknown`.
-    const findings = validateFormLayout({
+  // [#17328] RE-JUDGED, not deleted. This was #16168's measurement that
+  // `absolute-colspan-discouraged` sat OUTSIDE the `known`-gated block — it
+  // needed only `entry.colSpan != null`, so it was never dead on HotCRM's
+  // list-bound views and #16168 only ever fixed the two reference rules. That
+  // rule is now withdrawn, so what the same fixture measures is the OTHER half
+  // of the same sentence: on a list-bound container a well-formed field with a
+  // `colSpan` is silent, while a dangling one is not — which is exactly the
+  // #16168 fix still holding, now with nothing riding alongside it.
+  it('[#17328] a list-bound container reports only its reference findings — the colSpan rule is gone', () => {
+    expect(validateFormLayout({
       objects,
       views: [listBoundContainer({ sections: [{ columns: 2, fields: [{ field: 'name', colSpan: 2 }] }] })],
-    });
-    expect(findings.map((f) => f.rule)).toEqual([FORM_COLSPAN_ABSOLUTE]);
+    })).toEqual([]);
+
+    // POSITIVE CONTROL — the #16168 fix itself: the same list-bound rung, a
+    // dangling reference, still reported. Without this the line above would
+    // pass on a container the walk never descends into.
+    expect(validateFormLayout({
+      objects,
+      views: [listBoundContainer({ sections: [{ columns: 2, fields: [{ field: 'ghost_lb', colSpan: 2 }] }] })],
+    }).map((f) => f.rule)).toEqual([FORM_FIELD_UNKNOWN]);
   });
 });

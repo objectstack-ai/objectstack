@@ -359,6 +359,7 @@ const MIN_KEYED_TEXT_COLUMNS = 140;
 
 const SKIP_DIRS = new Set([
   '.git', 'node_modules', 'dist', 'build', 'coverage', '.turbo', '.next', '.cache', '.changeset',
+  'tmp',
 ]);
 
 /** Where shipped object declarations are discovered. */

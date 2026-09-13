@@ -78,16 +78,25 @@ describe('#16095 — INTAKE: a handler-authored hook reaches the readonly family
     expect(findings).toHaveLength(1);
     expect(findings[0].severity).toBe('error');
     expect(findings[0].message).toContain('is_escalated');
-    // The finding is reported on the LOWERED body — the same path `os build`
-    // reports it on for the same hook, so the two commands agree word for word.
-    expect(findings[0].path).toBe('hooks[0].body.source');
+    // [#16546] `body.source` is a key this author never wrote — the body was
+    // MINTED here from their inline `handler`, so the finding points at the
+    // key they actually wrote instead, with a suffix saying why. `os build`
+    // reports the identical `path` and message suffix for the same hook (see
+    // the e2e sibling's parity assertion), so the two commands still agree
+    // word for word — just no longer on the wrong word.
+    expect(findings[0].path).toBe('hooks[0].handler');
+    expect(findings[0].message).toContain('judged on the metadata body lowered from the inline handler');
   });
 
-  it('CONTROL — the identical statement as an explicit `body` fires the same finding', () => {
+  it('CONTROL — the identical statement as an explicit `body` fires the same finding, path UNCHANGED', () => {
+    // [#16546] Non-regression control: this hook's `body` is author-written,
+    // not lowered from a `handler` — `hooks[0].body.source` names a key that
+    // is really there, and the fix must never move it.
     const findings = rulesOf(bodyHook('escalate', WRITE_READONLY_SOURCE), READONLY_RULE);
     expect(findings).toHaveLength(1);
     expect(findings[0].severity).toBe('error');
     expect(findings[0].path).toBe('hooks[0].body.source');
+    expect(findings[0].message).not.toContain('judged on the metadata body lowered from the inline handler');
   });
 
   it('RED — `hook-api-update-readonly-when-field` (warning) fires on an inline handler too', () => {
@@ -99,6 +108,8 @@ describe('#16095 — INTAKE: a handler-authored hook reaches the readonly family
     );
     expect(findings).toHaveLength(1);
     expect(findings[0].severity).toBe('warning');
+    // [#16546] Same fix, this rule's other finding id.
+    expect(findings[0].path).toBe('hooks[0].handler');
   });
 
   it('RED — `hook-body-write-unknown-field` fires on an inline handler writing an undeclared field', () => {
@@ -111,6 +122,9 @@ describe('#16095 — INTAKE: a handler-authored hook reaches the readonly family
     expect(findings).toHaveLength(1);
     expect(findings[0].severity).toBe('warning');
     expect(findings[0].message).toContain('is_escalatd');
+    // [#16546] The sibling validator (`validate-hook-body-writes.ts`) gets the
+    // same fix — same `ctx.loweredHookRefs`, same shared `hookBodyFindingLocation`.
+    expect(findings[0].path).toBe('hooks[0].handler');
   });
 });
 
@@ -227,16 +241,21 @@ describe('#16095 — door: `runScaffoldAuthoringRules` (reached, and not one of 
   };
 
   it('INTAKE — the handler-authored hook IS judged here (it lowers before it parses)', () => {
-    expect(
-      familyOf(
-        handlerHook('escalate', async (ctx: any) => {
-          await ctx.api.object('crm_case').update({ id: ctx.input.id, is_escalated: true });
-        }),
-      ),
-    ).toHaveLength(1);
+    const findings = familyOf(
+      handlerHook('escalate', async (ctx: any) => {
+        await ctx.api.object('crm_case').update({ id: ctx.input.id, is_escalated: true });
+      }),
+    );
+    expect(findings).toHaveLength(1);
+    // [#16546] This door also gets `ctx.loweredHookRefs` (`scaffold-validate.ts`
+    // hands it through the same as `os build` / `os lint` do), so it must not
+    // be the one door still pointing at the un-authored `body.source` key.
+    expect(findings[0].path).toBe('hooks[0].handler');
   });
 
-  it('CONTROL — the identical statement as an explicit `body` fires the same finding', () => {
-    expect(familyOf(bodyHook('escalate_body', WRITE_READONLY_SOURCE))).toHaveLength(1);
+  it('CONTROL — the identical statement as an explicit `body` fires the same finding, path UNCHANGED', () => {
+    const findings = familyOf(bodyHook('escalate_body', WRITE_READONLY_SOURCE));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('hooks[0].body.source');
   });
 });

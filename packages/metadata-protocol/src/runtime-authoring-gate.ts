@@ -383,22 +383,22 @@ export type RuntimePendingDeclarations = RuntimeStackContext;
  *
  * Every metadata type NOT listed here contributes nothing to the closure, and
  * that is the correct answer rather than a gap: a collection is carried
- * because some rule RESOLVES REFERENCES INTO IT, and only these five are read
- * that way (`RuntimeStackContext`'s own docblock records the measurement).
+ * because some rule RESOLVES REFERENCES INTO IT, and only these are read that
+ * way (`RuntimeStackContext`'s own docblock records the measurement).
  *
- * [#13216] `page` is the fifth, and it arrives with the closure case already
- * measured rather than as an afterthought: a package that ships a custom page
- * together with the object view that mounts it publishes BOTH in one batch, so
- * without this row `validateViewPageRefs` would report the sibling page as
- * unresolved for exactly the batch that carries it — the `shyx_customer_ds`
- * shape one collection over.
+ * [#13216 / #17063] `page` WAS the fifth row, added for `validateViewPageRefs`
+ * so that a package shipping a custom page together with the object view that
+ * mounted it did not report its own sibling as unresolved. That rule and the
+ * `type: 'page'` view mount it resolved were retired under ADR-0049
+ * enforce-or-remove, `RuntimeStackContext.pages` went with them, and this row
+ * went with that — the drift guard below is what made the third edit
+ * unforgettable rather than remembered.
  */
 export const CLOSURE_CONTEXT_KEY_BY_TYPE = {
     object: 'objects',
     permission: 'permissions',
     book: 'books',
     dataset: 'datasets',
-    page: 'pages',
 } as const satisfies Readonly<Record<string, keyof RuntimeStackContext>>;
 
 /**
@@ -441,7 +441,8 @@ type NoUnroutedContextCollection<Unrouted extends never> = Unrouted;
  *
  * The set is correct as it stands. #13390's ruling is about what "correct
  * today" costs: adding the `pages` collection had to touch FIVE spellings of
- * this one set and only ONE announced itself, and the unguarded spelling
+ * this one set and only ONE announced itself (#17063 removed it again, and the
+ * same five spellings had to move back), and the unguarded spelling
  * produced correct-LOOKING findings whose `path` the caller could not resolve,
  * with no test and no gate going red. Four of the five can no longer be
  * forgotten. This was the fifth.
@@ -604,14 +605,6 @@ export function evaluateRuntimeAuthoringGate(args: {
      */
     datasets?: readonly unknown[];
     /**
-     * [#13216] Live page declarations — the resolution universe
-     * `validateViewPageRefs` resolves a `type: 'page'` list view's `pageName`
-     * against. Without it every legitimate page mount published through
-     * `PUT /api/v1/meta/view` reads as dangling, so the thread-through is
-     * load-bearing on exactly the door the mount is authored at.
-     */
-    pages?: readonly unknown[];
-    /**
      * [#10377] The declarations this write's own BATCH is publishing alongside
      * it — folded into the five collections above by
      * {@link mergePendingDeclarations} before any rule runs.
@@ -686,7 +679,6 @@ export function evaluateRuntimeAuthoringGate(args: {
             permissions: mergePendingDeclarations(args.permissions ?? [], args.pending?.permissions),
             books: mergePendingDeclarations(args.books ?? [], args.pending?.books),
             datasets: mergePendingDeclarations(args.datasets ?? [], args.pending?.datasets),
-            pages: mergePendingDeclarations(args.pages ?? [], args.pending?.pages),
         },
         ...(args.sduiManifest !== undefined ? { sduiManifest: args.sduiManifest } : {}),
     });

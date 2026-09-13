@@ -38,6 +38,13 @@ import { ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE } from '@objectstack/spec/data
 // [#7536] The `$like` pattern language's shared gate, so this driver refuses
 // the same malformed patterns as every other face.
 import { hasDanglingLikeEscape } from '@objectstack/spec/data';
+// [#16178] The canonical bucket-key vocabulary, quoted rather than hand-listed —
+// the refusal below names the accepted set from its one definition.
+import { BUCKET_GRANULARITIES } from '@objectstack/core';
+// [#16178] and the DECLARED interval vocabulary, quoted the same way, so the
+// refusal can tell a value the contract never declared apart from one it
+// declares and this backend cannot label.
+import { RETIRED_SUB_DAY_INTERVALS, TimeUpdateInterval } from '@objectstack/spec/data';
 import { StandardErrorCode } from '@objectstack/spec/api';
 
 /**
@@ -90,6 +97,104 @@ export function refusePerAggregationFilter(alias: string): never {
   err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
   err.status = 501;
   throw err;
+}
+
+/**
+ * [#16178] A `timeDimensions[].granularity` this backend cannot BUCKET.
+ *
+ * `@objectstack/spec`'s `TimeUpdateInterval` declares eight intervals; the
+ * canonical bucket-key vocabulary (`@objectstack/core`'s
+ * {@link BUCKET_GRANULARITIES}) defines a label for five of them. The three
+ * sub-day names — `second`, `minute`, `hour` — have no canonical key anywhere in
+ * the contract, so there is no label this backend could emit that another
+ * backend's pushed-down SQL would agree with.
+ *
+ * The same NOT_IMPLEMENTED/501 class, and for the same reason, as
+ * {@link refusePerAggregationFilter} (#5907, ADR-0112): the query is spelled
+ * correctly and the spec declares the value, and it is this backend that
+ * compiles no bucket for it — a capability gap, not a mistake in the query.
+ *
+ * Refused rather than passed through, because passing it through is #16178's own
+ * defect wearing a new name: an unbucketed time dimension answers one group per
+ * distinct timestamp under an ordinary 200, which is a chart with one bar per
+ * row and no warning anywhere.
+ *
+ * ## Two conditions, two answers
+ *
+ * "Capability gap" is a claim about THIS BACKEND, and it is only true of a value
+ * the contract actually declares. A caller past the schema door — `POST
+ * /analytics/dataset/query` types `selection.timeDimensions` from
+ * `AnalyticsQuery` and does not Zod-parse it, which is the same door
+ * `analyticsDateRangeUnrecognizedError` documents — can send `'fortnight'`,
+ * and answering that with 501 plus a sentence asserting "the spec declares the
+ * value" tells the caller something false and points them at the backend when
+ * the mistake is in the query. So the vocabulary is checked FIRST: an
+ * undeclared spelling is a 400 validation-class refusal, and only a declared
+ * interval this backend cannot label reaches the 501 arm. Same separation the
+ * `dateRange` half of this face already draws (#16322 / #16041).
+ *
+ * ⚠️ **[#17296] The 501 arm's population is EMPTY as of protocol 18, and the arm
+ * stays anyway.** That card retired the three sub-day names from
+ * `TimeUpdateInterval`, so the declared set and {@link BUCKET_GRANULARITIES} are
+ * now the same five and no value can be declared-but-unbucketable here. The arm
+ * is not dead code being kept for sentiment: it is the guard that catches the
+ * two vocabularies diverging AGAIN, which is the state this whole card
+ * documents. Deleting it would mean the next widening of `TimeUpdateInterval`
+ * alone answers a 400 calling a freshly declared value undeclared — the same
+ * lie in the other direction. `memory-analytics-time-granularity.test.ts` pins
+ * the emptiness so the claim is measured rather than asserted.
+ *
+ * ⚠️ The 400 arm answers the GENERAL `StandardErrorCode.INVALID_QUERY` rather
+ * than a dedicated `ANALYTICS_GRANULARITY_UNRECOGNIZED` — the shape its
+ * `dateRange` sibling uses — because a dedicated code has to be registered in
+ * `packages/spec`'s `error-code-ledger.zod.ts`, which is a contract decision
+ * and a `domain:spec` card, not a driver patch. Recorded here so the choice is
+ * visible when that card is written.
+ */
+export function unsupportedTimeGranularityError(dimension: string, granularity: string): Error {
+  const declaredIntervals = TimeUpdateInterval.options as readonly string[];
+  if (!declaredIntervals.includes(granularity)) {
+    // [#17296] A RETIRED name is not the same mistake as a name that never
+    // existed, and it reaches this arm for a different reason: the author wrote
+    // a spelling the spec declared until protocol 18, so the sentence they need
+    // is the retirement, not the vocabulary. Without this branch an author
+    // upgrading from 17 is told `hour` "is not declared", which is true today
+    // and useless — it reads as a typo and hides the fact that there is no
+    // sub-day bucket to migrate to at any granularity.
+    const retired = (RETIRED_SUB_DAY_INTERVALS as readonly string[]).includes(granularity);
+    const outOfVocabulary = new Error(
+      `Time dimension "${dimension}" asks for granularity "${granularity}", which @objectstack/spec's ` +
+        `TimeUpdateInterval does not declare — the declared intervals are ` +
+        `${declaredIntervals.join(', ')}. ` +
+        (retired
+          ? `It was declared until protocol 18 and was retired there (ADR-0049 enforce-or-remove): no ` +
+            `backend ever bucketed a sub-day interval and none could advertise one, so there is no ` +
+            `finer bucket to migrate to. Ask for the coarsest interval that still answers your ` +
+            `question, or drop the key and group on the raw timestamp deliberately. `
+          : ``) +
+        `This is a mistake in the query rather than a gap in this ` +
+        `backend (driver-memory), so it answers a 400 rather than the 501 a declared-but-unbucketable ` +
+        `interval gets. Ask for one of ${BUCKET_GRANULARITIES.join(', ')}, which this backend buckets.`,
+    ) as Error & { code?: string; status?: number };
+    outOfVocabulary.code = StandardErrorCode.enum.INVALID_QUERY;
+    outOfVocabulary.status = 400;
+    return outOfVocabulary;
+  }
+
+  const err = new Error(
+    `Time dimension "${dimension}" asks for granularity "${granularity}", which this backend ` +
+      `(driver-memory) cannot bucket. The query is spelled correctly and @objectstack/spec's ` +
+      `TimeUpdateInterval declares the value — but the canonical bucket-key vocabulary defines a ` +
+      `label only for ${BUCKET_GRANULARITIES.join(', ')}, and a sub-day bucket has no key any ` +
+      `other backend's pushed-down SQL would agree with. It is refused rather than silently left ` +
+      // The tracker id stays in this function's doc comment, where a reader who can
+      // resolve it is looking; a runtime string reaches operators who cannot.
+      `unbucketed, which answers one group per distinct timestamp. Ask for a coarser ` +
+      `granularity, or drop the key and group on the raw timestamp deliberately.`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
+  err.status = 501;
+  return err;
 }
 
 /**

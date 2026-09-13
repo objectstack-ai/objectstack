@@ -137,7 +137,7 @@ import { isEntrypoint } from './invoked-as.mjs';
 // must not red. A battery BELOW its floor means cases stopped running; the
 // remedy is to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'The base path is DERIVED, and its absence is not an empty population.': 2,
+  'The base path is DERIVED, and its absence is not an empty population.': 4,
   'LOAD-BEARING NEGATIVE: a mount with an exact row is clean.': 1,
   'LOAD-BEARING POSITIVE: a mount added with no row REDDENS, naming the route.': 2,
   'THE RIGHT BOUNDARY, both directions. This is the defect class #10534 fell into.': 4,
@@ -154,7 +154,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#8435 remedy authority. PLACEMENT is pinned here, per-gate, because the': 4,
   'Parse anchors: a moved anchor is a REFUSAL input, never an empty population.': 2,
   'The escaped-quote shape the real notes use is measured, not truncated.': 1,
-  'And the real inputs on disk are readable, so the anchors have not moved.': 2,
+  'And the real inputs on disk are readable, so the anchors have not moved.': 3,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -168,11 +168,15 @@ const UNATTRIBUTED_BATTERY = '(no battery open)';
 
 const ROOT = resolve(new URL('..', import.meta.url).pathname);
 
-/** The two inputs. Module-scope literals, so `dispatch-gates` derives this
- *  family for a diff touching either of them (#10309: a gate nothing can
- *  derive is a gate that runs only when someone remembers it). */
+/** The three inputs. Module-scope literals, so `dispatch-gates` derives this
+ *  family for a diff touching any of them (#10309: a gate nothing can
+ *  derive is a gate that runs only when someone remembers it).
+ *  [#16384] `AUTH_MANAGER_SOURCE` joined the set the day the `basePath`
+ *  fallback in `MOUNT_SOURCE` stopped being a re-typed literal and became an
+ *  identifier declared over there instead — see `deriveBasePath`. */
 const MOUNT_SOURCE = 'packages/plugins/plugin-auth/src/auth-plugin.ts';
 const LEDGER_SOURCE = 'packages/plugins/plugin-auth/src/auth-route-ledger.ts';
+const AUTH_MANAGER_SOURCE = 'packages/plugins/plugin-auth/src/auth-manager.ts';
 
 export const EXIT_CLEAN = 0;
 export const EXIT_FINDINGS = 1;
@@ -230,11 +234,26 @@ const LANE_VERBS = new Set(['all', 'use']);
 /**
  * The auth base path, DERIVED from the plugin rather than re-typed here, so a
  * rename moves this gate with it instead of silently emptying its population.
+ *
+ * [#16384] The fallback used to be a re-typed string literal at this exact
+ * spot; it is now the package's single `DEFAULT_AUTH_BASE_PATH` definition,
+ * imported from `auth-manager.ts` rather than retyped in the plugin. The
+ * literal-string match stays first (still the shape of every OTHER fallback
+ * this gate might meet); when the fallback is a bare identifier instead,
+ * resolve it the same way this function was already justified — one hop
+ * through the module that actually DECLARES it, never a second hardcoded
+ * copy — via `importedSource`, the text of the module the plugin imports the
+ * identifier from.
  */
-export function deriveBasePath(mountSource) {
+export function deriveBasePath(mountSource, importedSource) {
   const masked = maskComments(mountSource);
-  const m = /basePath\s*=\s*this\.options\.basePath\s*(?:\|\||\?\?)\s*'([^']+)'/.exec(masked);
-  return m ? m[1] : null;
+  const m =
+    /basePath\s*=\s*this\.options\.basePath\s*(?:\|\||\?\?)\s*(?:'([^']+)'|([A-Za-z_$][\w$]*))/.exec(masked);
+  if (!m) return null;
+  if (m[1] != null) return m[1];
+  if (importedSource == null) return null;
+  const decl = new RegExp(`export const ${m[2]}\\s*=\\s*'([^']+)'`).exec(maskComments(importedSource));
+  return decl ? decl[1] : null;
 }
 
 /**
@@ -627,6 +646,20 @@ function selfTest() {
   battery('The base path is DERIVED, and its absence is not an empty population.');
   ok(deriveBasePath(FIXTURE_PREAMBLE) === FIXTURE_BASE, 'basePath was not derived from the plugin');
   ok(deriveBasePath('const basePath = 42;') === null, 'a plugin with no derivable basePath did not refuse');
+  // [#16384] The fallback is now a named identifier import in the real plugin,
+  // not a re-typed literal — resolved one hop through the module it is
+  // DECLARED in, never guessed at.
+  ok(
+    deriveBasePath(
+      "const basePath = this.options.basePath || DEFAULT_AUTH_BASE_PATH;\n",
+      "export const DEFAULT_AUTH_BASE_PATH = '/api/v1/auth';\n",
+    ) === FIXTURE_BASE,
+    'an identifier fallback was not resolved through the imported module',
+  );
+  ok(
+    deriveBasePath("const basePath = this.options.basePath || DEFAULT_AUTH_BASE_PATH;\n") === null,
+    'an identifier fallback resolved to something without an imported module to read',
+  );
 
   // -- LOAD-BEARING NEGATIVE: a mount with an exact row is clean.
   battery('LOAD-BEARING NEGATIVE: a mount with an exact row is clean.');
@@ -895,7 +928,7 @@ function selfTest() {
 
   // -- And the real inputs on disk are readable, so the anchors have not moved.
   battery('And the real inputs on disk are readable, so the anchors have not moved.');
-  for (const rel of [MOUNT_SOURCE, LEDGER_SOURCE]) {
+  for (const rel of [MOUNT_SOURCE, LEDGER_SOURCE, AUTH_MANAGER_SOURCE]) {
     ok(existsSync(join(ROOT, rel)), `${rel} does not exist -- this gate's anchor moved`);
   }
 
@@ -981,14 +1014,17 @@ function main() {
 
   const mountAbs = join(ROOT, MOUNT_SOURCE);
   const ledgerAbs = join(ROOT, LEDGER_SOURCE);
+  const authManagerAbs = join(ROOT, AUTH_MANAGER_SOURCE);
   if (!existsSync(mountAbs)) refuse(`${MOUNT_SOURCE} does not exist`);
   if (!existsSync(ledgerAbs)) refuse(`${LEDGER_SOURCE} does not exist`);
+  if (!existsSync(authManagerAbs)) refuse(`${AUTH_MANAGER_SOURCE} does not exist`);
 
   const mountText = readFileSync(mountAbs, 'utf8');
   const ledgerText = readFileSync(ledgerAbs, 'utf8');
+  const authManagerText = readFileSync(authManagerAbs, 'utf8');
 
-  const basePath = deriveBasePath(mountText);
-  if (!basePath) refuse(`no \`basePath\` default could be derived from ${MOUNT_SOURCE}`);
+  const basePath = deriveBasePath(mountText, authManagerText);
+  if (!basePath) refuse(`no \`basePath\` default could be derived from ${MOUNT_SOURCE} (or its import from ${AUTH_MANAGER_SOURCE})`);
 
   const rows = parseLedgerRows(ledgerText);
   if (rows === null) refuse(`the AUTH_ROUTE_LEDGER anchor was not found in ${LEDGER_SOURCE}`);

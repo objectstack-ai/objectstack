@@ -17,6 +17,7 @@
     "builtin-node-config",
     "flow-function",
     "io-node-config",
+    "schedule-organization",
     "schemaless-node-config"
   ]
 }

@@ -529,7 +529,7 @@ describe('attachments permission matrix (#2755)', () => {
   });
 });
 
-// ── (g) tenant isolation — enterprise multi-org boot ─────────────────────
+// ── (g) tenant isolation — multi-org boot ────────────────────────────────
 // #4700: this probe was a bare `import()` resolved against this file's realpath
 // inside the framework workspace, so it was constant-false and block (g) had
 // never executed. Shared host-app resolution + a declarative switch now decide

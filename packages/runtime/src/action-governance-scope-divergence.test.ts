@@ -335,16 +335,35 @@ describe('#14423 (a) — the audit and the router now answer from one identity a
     });
 
     /**
-     * C4 — a BOUNDARY, not a defect, and pinned as one.
+     * C4 — a BOUNDARY, not a defect, and pinned as one. NARROWER since #16610.
      *
      * `metadata` is registered `SCOPED`, so `PluginLoader.getService` mints one
-     * instance per `scopeId`. The audit's accessor
+     * instance per `scopeId`. The kernel's RAW SYNCHRONOUS accessor
      * (`ObjectKernel.getService` → `context.getService`) reads only the static
      * `services` map and `PluginLoader.getServiceInstance`, and the latter
-     * reads `serviceInstances` — never `scopedServices`. So the audit's lookup
-     * cannot see a scoped instance at all, and `plugin.ts` swallows the throw
-     * into "no metadata plane at all". The router's lookup, given the
-     * request's `envId`, gets the env's own plane.
+     * reads `serviceInstances` — never `scopedServices`. So that accessor
+     * cannot see a scoped instance at all: it throws
+     * `Service 'metadata' is async - use await` before any read method runs.
+     * The router's lookup, given the request's `envId`, gets the env's own
+     * plane. That asymmetry is what every assertion below exercises — the
+     * accessor, directly, never the plugin's wiring around it.
+     *
+     * ## What the PLUGIN does with that accessor, after #16610
+     *
+     * `ObjectQLPlugin.resolveGovernanceMetadataService` no longer calls the
+     * synchronous accessor alone, so the throw is no longer swallowed into
+     * "no metadata plane at all". It asks
+     * `ctx.getServiceScoped('metadata', this.environmentId)` FIRST — the
+     * router's own order, mirroring `HttpDispatcher.resolveService` — and
+     * falls back to `ctx.getService('metadata')` only when there is no scope
+     * to name, or the host has no scoped accessor. Where a kernel declares a
+     * single `environmentId`, the audit therefore resolves the SAME cached
+     * instance the router dispatches from.
+     *
+     * ⚠ So do NOT read the paragraph above as a live defect in `plugin.ts`.
+     * It describes the rung the plugin now reaches for SECOND, and this case
+     * pins that rung's behaviour — which is why its assertions stay green and
+     * stay true across #16610.
      *
      * ## Why this stays accused, and why that is CORRECT
      *
@@ -352,16 +371,29 @@ describe('#14423 (a) — the audit and the router now answer from one identity a
      * throw happens at `ctx.getService('metadata')`, before `loadManyKeyed`,
      * `loadDiagnosed` or anything else could run. Keying an enumeration
      * cannot help a caller that never obtained the object to enumerate, and
-     * neither can a by-name rung. A boot-time audit runs OUTSIDE any request
-     * scope by construction; reaching a request-scoped instance from there is
-     * a different change with its own product decision, tracked on its own
-     * card. ⛔ Do NOT "fix" this by weakening what the audit claims.
+     * neither can a by-name rung.
      *
-     * And it is not reachable today: no shipped composition registers
-     * `metadata` as SCOPED — `packages/metadata/src/plugin.ts` registers a
-     * static instance — which is what C5 exercises directly.
+     * ## The boundary that REMAINS — narrower than the one this file used to
+     * describe
      *
-     * So the assertions below pin the BOUNDARY: the accusation, AND the fact
+     * A boot-time audit runs OUTSIDE any request scope by construction. A
+     * kernel serving several environments at once declares no single
+     * `environmentId`, so such an audit has no scope to name, nothing to ask
+     * `getServiceScoped` for, and the synchronous lookup stands: it reports
+     * the handler as undeclared, which is the honest answer for an audit that
+     * cannot know which scope it is auditing. Auditing per environment is a
+     * different inventory with a different lifecycle, not a scope id the
+     * plugin can invent. The honest cross-reference is the BOUNDARY case in
+     * `packages/objectql/src/plugin-governance-scoped-metadata.test.ts`,
+     * which pins that remainder on the plugin side; this case pins the
+     * accessor underneath it. ⛔ Do NOT "fix" either by weakening what the
+     * audit claims.
+     *
+     * And a SCOPED `metadata` is not reachable today in any case: no shipped
+     * composition registers it that way — `packages/metadata/src/plugin.ts`
+     * registers a static instance — which is what C5 exercises directly.
+     *
+     * So the assertions below pin the ACCESSOR: the accusation, AND the fact
      * that its cause is the service lookup rather than any disagreement
      * between two reads of one plane. Pinning the cause is the point — an
      * accusation asserted alone would keep passing if the reads regressed.
@@ -384,10 +416,12 @@ describe('#14423 (a) — the audit and the router now answer from one identity a
             ServiceLifecycle.SCOPED,
         );
 
-        // The audit's lookup — `ctx.getService('metadata')` in plugin.ts, inside its
-        // try/catch. Typed with the slot's CONTRACT, not `any`: the audit reads
-        // `meta.loadMany` off whatever this returns, and erasing the result is
-        // exactly the shape `check:slot-lookup` refuses (#4251).
+        // The audit's FALLBACK rung — `ctx.getService('metadata')`, which
+        // `resolveGovernanceMetadataService` reaches for after its scoped
+        // attempt, inside its try/catch. Typed with the slot's CONTRACT, not
+        // `any`: the audit reads `meta.loadMany` off whatever this returns, and
+        // erasing the result is exactly the shape `check:slot-lookup` refuses
+        // (#4251).
         let auditMeta: IMetadataService | undefined;
         let auditLookupError: string | undefined;
         try { auditMeta = kernel.getService<IMetadataService>('metadata'); }

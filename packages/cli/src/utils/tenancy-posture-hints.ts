@@ -136,6 +136,6 @@ export const TENANCY_POSTURE_FIX_HINTS: Readonly<Record<string, string>> = {
   single: 'one organization, no organization wall — the default',
   group: 'organization wall enforced by the open engine, one shared database',
   isolated:
-    `organization wall + the enterprise ${ORGANIZATIONS_RUNTIME_PKG} runtime `
+    `organization wall + the ${ORGANIZATIONS_RUNTIME_PKG} runtime `
     + "(the legacy spelling 'multi' is accepted and normalizes to this)",
 };

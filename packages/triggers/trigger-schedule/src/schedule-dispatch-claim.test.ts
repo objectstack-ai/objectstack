@@ -42,6 +42,8 @@ const JOB = `flow-schedule:${FLOW}`;
 const CRON: FlowTriggerBinding = {
     flowName: FLOW,
     schedule: { type: 'cron', expression: '0 1 * * *', timezone: 'UTC' },
+    // [#16659] the acting organization every tick of this flow runs as.
+    organization: 'org_2mtx1w9d0k4bqf7v',
 };
 
 /** Inside the 2026-09-07T01:00Z window of `0 1 * * *`. */

@@ -102,8 +102,8 @@ Scaffolds a new ObjectStack project with configuration, TypeScript setup, and in
 
 | The word `plugin` in | Names | What it emits | Built by | Publishable? | Read next |
 |:---------------------|:------|:--------------|:---------|:-------------|:----------|
-| `os init <name> -t plugin` | A **metadata package** — declarative objects another stack loads, no kernel code | `objectstack.config.ts` whose manifest declares `type: 'plugin'`, plus `src/objects/*.object.ts` | `objectstack compile` (its `build` script) | **No** — the emitted `package.json` is `private: true` | [`os init`](#os-init) below, and [Object Metadata](/docs/data-modeling/objects) for the objects it holds |
-| `os create plugin <name>` | A **kernel code plugin** — TypeScript implementing the kernel `Plugin` contract | `src/index.ts` exporting a `Plugin` with `init` / `destroy` | `tsc` (its `build` script) | **Yes** — a publishable `@objectstack/plugin-<name>` package | [`os create`](#os-create) below, then [Plugin Anatomy](/docs/plugins/anatomy) and [Plugin Development](/docs/plugins/development) |
+| `os init <name> -t plugin` | A **metadata package** — declarative objects another stack loads, no kernel code | `objectstack.config.ts` whose manifest declares `type: 'plugin'`, plus `src/objects/*.object.ts` | `objectstack compile` (its `build` script) | **No** — the emitted `package.json` is `private: true`, and no flag lifts it | [`os init`](#os-init) below, and [Object Metadata](/docs/data-modeling/objects) for the objects it holds |
+| `os create plugin <name>` | A **kernel code plugin** — TypeScript implementing the kernel `Plugin` contract | `src/index.ts` exporting a `Plugin` with `init` / `destroy` | `tsc` (its `build` script) | **Only with `--in-repo`** — the default standalone emission is an unscoped `plugin-<name>` marked `private: true`; `--in-repo` emits a publishable `@objectstack/plugin-<name>` | [`os create`](#os-create) below, then [Plugin Anatomy](/docs/plugins/anatomy) and [Plugin Development](/docs/plugins/development) |
 
 Every page under [Plugins & Packages](/docs/plugins) teaches the **kernel code plugin**, so
 `os create plugin` is the scaffolder those pages mean — `os init -t plugin` will not give
@@ -172,11 +172,41 @@ os dev --database file:./data/test.db --auth-secret $(openssl rand -hex 32)
 | `--auth-secret <s>` | `OS_AUTH_SECRET` | Override the dev-fallback secret |
 | `--environment-id <id>` | `OS_ENVIRONMENT_ID` | Environment identifier (default `env_local`) |
 | `-p, --port <n>` | `OS_PORT` / `PORT` | Listen port (default `3000`). In dev a busy port auto-hops to the next free one; the banner shows the actual port. |
+| `--cert <path>` | — | Path to a TLS certificate (PEM). With `--key`, terminate TLS in the dev process and serve `https://localhost:<port>`. Bring your own certificate — none is generated |
+| `--key <path>` | — | Path to the private key (PEM) for `--cert`. Required with `--cert` |
 | `--ui` | — | Force Console UI on (already on by default in dev) |
 | `--compile` | — | Force compiling `objectstack.config.ts` → `dist/objectstack.json` before starting (auto when the artifact is missing; ignored with `--artifact`) |
 | `--fresh` | — | Ephemeral `OS_HOME` in the OS tempdir (clean DB, uploads root, and other `OS_HOME`-keyed state), auto-deleted on exit; implies `--seed-admin`. See the scope note below |
 | `--seed-admin` / `--no-seed-admin` | — | Seed a dev admin (`admin@objectos.ai` / `admin123`) on an empty DB — default on; override with `--admin-email` / `--admin-password` |
 | `-v, --verbose` | — | Verbose output |
+
+##### Serving dev over https
+
+An interactive MCP client (and any OAuth client worth the name) refuses to open a
+sign-in against a plain-http URL, so the self-serve identity path — *interactive
+clients just open a browser login* — cannot be exercised against a dev server on
+`http://localhost`. Hand `os dev` a certificate you already have and it
+terminates TLS itself:
+
+```bash
+os dev --cert ./localhost.pem --key ./localhost-key.pem
+```
+
+Both flags are required together, and an unreadable file is refused rather than
+quietly downgraded to http. With them, every address this boot advertises is
+`https://localhost:<port>`: the two `/.well-known/*` discovery documents, the
+CSRF allow-list, the ready banner's `API:` / `MCP:` rows, the `🤖 MCP server`
+connect hint, and the runtime state file a supervisor reads. Without them nothing
+changes.
+
+Only the built-in default follows the listener. `OS_AUTH_URL` (and
+`OS_BASE_URL`) still win when set — they name where the deployment is *reached*,
+which behind a proxy or a tunnel is a different address from the one this process
+bound — so an explicit value is never rewritten, `http://` ones included.
+
+Where the certificate comes from, and which certificates your client or your
+machine accepts, is yours to decide: ObjectStack generates none and reads no
+store.
 
 By default `os dev` keeps your data between restarts in a project-local SQLite
 file at `.objectstack/data/dev.db` (created on first run). Pass `--database`,
@@ -203,6 +233,67 @@ lifecycle-classed system data (activity streams, job runs, notifications,
 audit) lands there instead of the business DB (ADR-0057). Opt out with
 `OS_TELEMETRY_DB=0`, or point it elsewhere (any mode, including `serve`)
 with `OS_TELEMETRY_DB=<path>`.
+
+##### Waiting for the boot from a parent process
+
+`✓ Server is ready` is true about the **HTTP server**, and deliberately says
+nothing about the app's data. Seeding races a soft budget
+(`OS_INLINE_SEED_BUDGET_MS`, default `8000`); when it runs long the kernel
+starts anyway and the rest of the seed finishes **in the background** — so the
+banner, and anything that waits for it, can be a minute ahead of the seed's own
+result. On a machine where the seed fits its budget the same command settles
+before the banner. Both are normal, and which one you get depends on the box.
+
+So a script that spawns a dev server and wants to act **after the boot has come
+to rest** should not wait on the banner, and should not need to read the child's
+output at all. Spawn with an `ipc` channel and wait for a message:
+
+| Message | Sent by | Means |
+|---|---|---|
+| `objectstack:listening` | `os serve` | The HTTP server is bound. Carries `{ port, url }` — the port actually bound, which in dev may differ from the one requested. |
+| `objectstack:seed-settled` | `os serve` | Nothing is still seeding. Carries `{ ok, suppressed, sources }`. Sent once per boot, always **after** `objectstack:listening`. |
+
+```js
+import { spawn } from 'node:child_process';
+
+const child = spawn('os', ['dev'], { stdio: ['inherit', 'inherit', 'inherit', 'ipc'] });
+
+child.on('message', (msg) => {
+  if (msg?.type !== 'objectstack:seed-settled') return;
+  if (msg.suppressed.length > 0) {
+    console.log(`boot complete — seeds not run this boot (${msg.suppressed.join(', ')})`);
+  } else if (!msg.ok) {
+    console.log('boot complete — but some seed records did not land; see the log above');
+  } else {
+    console.log('boot complete — the app is ready to use');
+  }
+});
+```
+
+**`os dev` spawns `os serve`, and the two channels are not symmetric.** `os dev`
+consumes `objectstack:listening` itself — it is how the `↪ server bound to port`
+line and the MCP connect hint learn the real port — and does **not** relay it.
+It forwards `objectstack:seed-settled` to its own parent verbatim. Spawn
+`os serve` directly if you need both messages in one place.
+
+An `ipc` channel is optional: without one, both sends are no-ops and nothing
+about the command changes. There is no polling to do — if you did not open the
+channel, the messages simply are not sent.
+
+<Callout type="info" title="What `objectstack:seed-settled` promises, and what it does not">
+It is sent when **nothing is still writing** — on success *and* on failure, since
+a seed that failed has still come to rest. Read `ok` together with `sources`
+rather than alone: `ok` is a verdict on the per-source counts the boot recorded,
+and a source that finished by throwing may record no counts at all.
+
+`suppressed` is non-empty when this boot registered a seed source and
+deliberately never ran it — `multi-tenant-replay` (rows are written per
+organization on `sys_organization` insert) or `skip-seed-data` (a planning boot
+that writes nothing). Those sources never settle and no further signal is
+coming for them, which is exactly why the message is sent anyway with the reason
+attached: a consumer that waited for *every* source to finish would wait
+forever.
+</Callout>
 
 #### `os serve`
 
@@ -498,7 +589,7 @@ os compile --json                    # JSON output for CI pipelines
   → Normalizing stack definition...
   → Lowering inline handlers...
   → Validating protocol compliance...
-  → Running author-time rules (44)...
+  → Running author-time rules (45)...
   → Checking capability providers (#3366)...
   → Collecting package docs (ADR-0046)...
   → Writing artifact...
@@ -570,8 +661,10 @@ stopping at the first, so one pass shows the whole hole.
 `os validate`, `os build` and `os lint` share one rule registry, so a config that
 passes any of them will not fail another on schema/predicate/binding grounds — a
 CLI test fails the build if a rule that can gate runs on fewer than all three
-(#4409). In a scaffolded project these are wired as `npm run validate` and
-`npm run build`; your `AGENTS.md` tells coding agents to run `npm run validate`
+(#4409). In a scaffolded project all three are wired as `npm run validate`,
+`npm run build` and `npm run lint` — the three `os init` templates (`app`,
+`plugin`, `empty`) and the `create-objectstack` blank template each declare all
+three scripts; your `AGENTS.md` tells coding agents to run `npm run validate`
 after editing metadata. See
 [Validating metadata](/docs/deployment/validating-metadata).
 </Callout>
@@ -1259,6 +1352,13 @@ only.
 
 Generates properly typed metadata files with barrel index management.
 
+`<name>` is held to the charset `@objectstack/spec` declares for an object
+`name` — lowercase letters, digits and `_`, never starting with a digit. A name
+outside it is refused before anything is derived or written, naming the value
+and the rule; it is **never** rewritten into one that fits, so the name you
+write is the name that lands in the file (`os g object order_line`, not
+`order-line`).
+
 ```bash
 os g object customer        # Generate a Customer object
 os g view customer          # Generate a Customer list view
@@ -1266,7 +1366,7 @@ os g action approve         # Generate an action
 os g flow customer          # Generate an automation flow
 os g dashboard sales        # Generate a dashboard
 os g app crm                # Generate an app definition
-os g skill lead-qual        # Generate an AI skill
+os g skill lead_qual        # Generate an AI skill
 
 os g object task -d lib/    # Override target directory
 os g object task --dry-run  # Preview without writing
@@ -1327,7 +1427,7 @@ third-party extension primitive, authored as `src/skills/<name>.skill.ts` with
 #### `os create`
 
 Scaffolds a **standalone** **kernel code** plugin project (the `Plugin` contract,
-built by `tsc`, publishable; *not* the **metadata package** `os init -t plugin` emits — see
+built by `tsc`; *not* the **metadata package** `os init -t plugin` emits — see
 [Which scaffolder?](#os-init)) into the current directory:
 
 ```bash
@@ -1355,6 +1455,14 @@ The emitted `package.json` declares its `@objectstack/*` dependencies as
 published semver ranges pinned to the version of the CLI that generated it, and
 the emitted `tsconfig.json` is self-contained, so the project installs and
 builds anywhere — a workspace around it is neither needed nor assumed.
+
+That manifest is named `plugin-<name>` — **unscoped** — and carries
+`"private": true`, because `@objectstack` is a scope the developer this command
+scaffolds for cannot publish to: an accidental `npm publish` is refused loudly
+instead of being aimed at a namespace you do not own. To publish it yourself,
+rename it under a scope you control and drop that flag. Only `--in-repo` below
+emits a scoped, publishable `@objectstack/plugin-<name>`, and it lands under
+`packages/plugins/` where every sibling genuinely carries that scope.
 
 **Options:**
 - `-d, --dir <directory>` — Write the project here instead of `./<name>`
@@ -1385,7 +1493,34 @@ os lint --score        # Append a 0-100 metadata quality score (letter-graded)
 os lint --fix          # Show what would be fixed (dry-run)
 os lint --strict       # Warnings fail the run too (exit 1); suggestions stay advisory
 os lint --json         # JSON output for CI
+os lint --skip-i18n    # Skip the translation coverage checks entirely
+os lint --include-platform     # Audit the platform built-in i18n keys too
+os lint --eval --eval-min 80   # Score the bundled generation corpus instead
 ```
+
+**Options.** Every flag the command declares, and its one positional:
+
+| Flag | What it does |
+|---|---|
+| `config` (positional) | Configuration file path. Omitted, the config is auto-detected — see [Config File Auto-Detection](#config-file-auto-detection) |
+| `--json` | Output as JSON, for CI. The verdict fields are described below |
+| `--fix` | Show what would be fixed (dry-run). It prints the suggested fix; it never writes your sources |
+| `--strict` | Fail the run (exit 1) on warning-severity findings too, exactly as an error does; suggestions stay advisory. Without it only errors fail |
+| `--score` | Print a 0-100 metadata-quality score (the lint rubric) for this project |
+| `--skip-i18n` | Skip translation coverage checks |
+| `--include-platform` | Also report i18n coverage for the platform built-in metadata forms — hidden by default because the platform packages ship those translations. This is the flag the `N i18n issue(s) hidden — rerun with --include-platform` hint names |
+| `--i18n-strict` | Treat missing translations in non-default locales as errors |
+| `--default-locale <code>` | Default locale for i18n coverage (the one that must be 100% translated). Defaults to the config's `i18n.defaultLocale`, else `en` |
+| `--eval` | Run the metadata-generation eval over the bundled golden corpus and report scores — a different run, see below |
+| `--eval-min <n>` | Minimum passing score per eval case (default `75`) |
+| `--generator <path>` | Path to a module that default-exports `(prompt, id) => stack`; enables live eval, scoring generated output instead of fixtures. Requires `--eval` |
+
+**`--eval` is a different run, not an extra check.** It short-circuits the
+project lint entirely and scores the bundled generation corpus, so it does not
+combine with the style flags above. `--generator` applies only inside it:
+passed without `--eval` the run exits **1** and says so on both faces, rather
+than accepting a flag nothing outside eval mode reads (which is what it did
+before #15550 — including for a generator path that did not exist).
 
 It does not replace `os validate`: `os lint` never parses the stack against the
 Zod schema (a schema error is `os validate`'s verdict to give), and it emits no
@@ -1735,7 +1870,7 @@ token at all the command exits `1` and tells you to run `os cloud login`.
 | `artifact` (positional) | — | Path to the compiled artifact (default `dist/objectstack.json`) |
 | `-s, --server <url>` | `OS_CLOUD_URL` | Control-plane URL. Default `https://cloud.objectos.ai`, or the URL recorded by `os cloud login` |
 | `-t, --token <key>` | `OS_CLOUD_API_KEY` | Bearer token; `$OS_TOKEN` and `~/.objectstack/cloud.json` are the fallbacks |
-| `--manifest-id <id>` | `OS_PACKAGE_MANIFEST_ID` | Reverse-domain package id. Default: `artifact.manifest.id`, else `local.` + a slug of the artifact name |
+| `--manifest-id <id>` | `OS_PACKAGE_MANIFEST_ID` | Reverse-domain package id. Default: `artifact.manifest.id`, else `local.` + a slug of `manifest.name`, else `local.` + a slug of the artifact filename. A derived default is **not guaranteed usable** — see below |
 | `-v, --version <semver>` | — | Version to publish. Default: `artifact.manifest.version`, else `0.0.0-dev.` + a timestamp |
 | `--display-name <name>` | — | Name shown in the Marketplace (default `artifact.manifest.name`) |
 | `--description <text>` | — | Short package description |
@@ -1756,6 +1891,20 @@ token at all the command exits `1` and tells you to run `os cloud login`.
 | `--license <spdx>` | — | SPDX identifier (`Apache-2.0`, `MIT`, …) |
 | `-n, --note <markdown>` | — | Release notes |
 | `--timeout <ms>` | `OS_CLOUD_TIMEOUT_MS` | HTTP timeout in milliseconds, default `120000`. `0` disables it |
+
+**The derived `local.` id is a candidate, not a guaranteed default.** A derived
+id is held to exactly the rule an explicit one is — `PackageSchema.manifestId`,
+the schema for the very column publish writes — and slugifying has no
+letter-first rule, so a manifest named `2024 App` derives `local.2024-app`,
+which that schema rejects. `os package publish` then **refuses before any
+network call**, quoting the schema and naming which of the three sources above
+the id came from, rather than normalising it into a different permanent
+identifier or forwarding one the control plane would reject: `manifest_id` is
+immutable once published, so an id nobody wrote cannot be renamed afterwards.
+The remedy is the one the refusal prints for that source — pass
+`--manifest-id`, set `manifestId` in `objectstack.manifest.json`, or declare
+`manifest.id` in `objectstack.config.ts` and rebuild. A declared
+`manifest.id` is used or refused, never silently replaced by a derived one.
 
 **`objectstack.manifest.json` supplies the listing fields.** When that file is
 present in the working directory, publish reads `manifestId`, `displayName`,
@@ -1894,7 +2043,7 @@ os g object contact
 os g object opportunity
 
 # 3. Add business logic
-os g flow lead-qualification
+os g flow lead_qualification
 
 # 4. Validate everything
 os validate

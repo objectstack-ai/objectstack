@@ -319,8 +319,9 @@ export type SecurityPolicyParsed = z.infer<typeof SecurityPolicySchema>;
  * `PluginSecurityProtocol` publishes for SBOM/conflict reporting. It carries
  * the resolution outcome (`resolvedVersion`) alongside the constraint.
  *
- * Do NOT confuse it with `PackageDependency` from `@objectstack/spec/cloud`
- * (`cloud/package-version.zod.ts`), which is the DECLARATION-side shape an
+ * Do NOT confuse it with `PackageDependency` from `@objectstack/spec/marketplace`
+ * (`marketplace/package-version.zod.ts`; `@objectstack/spec/cloud` until
+ * #16325), which is the DECLARATION-side shape an
  * author writes into a package manifest (`packageId` / `versionRange` /
  * `optional`). Until #4741 both were named `PackageDependency` and the two
  * key sets are entirely disjoint, so which type a consumer got depended on

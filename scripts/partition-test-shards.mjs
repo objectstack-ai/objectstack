@@ -820,7 +820,7 @@ function selfTest() {
   // Everything above pins that the split is a correct, deterministic, total
   // cover of its input. None of it noticed that the six bins it produced ran
   // 5.0/6.2/6.3/13.6/6.3/9.0 minutes, because a perfectly-balanced split of the
-  // WRONG quantity satisfies every one of those assertions. These five pin the
+  // WRONG quantity satisfies every one of those assertions. These pin the
   // quantity and the outcome.
   battery('the balancing pins (#10472)');
 

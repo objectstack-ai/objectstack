@@ -12,8 +12,8 @@ description: Discovery protocol schemas
 ## TypeScript Usage
 
 ```typescript
-import { ApiRoutesSchema, CapabilityDescriptorSchema, DiscoverySchema, DiscoveryEnvironmentSchema, RouteHealthEntrySchema, RouteHealthReportSchema, ServiceInfoSchema, ServiceSelfInfoSchema, ServiceStatus, WellKnownCapabilitiesSchema } from '@objectstack/spec/api';
-import type { ApiRoutes, CapabilityDescriptor, DiscoveryEnvironment, RouteHealthEntry, RouteHealthReport, ServiceInfo, ServiceSelfInfo, ServiceStatus, WellKnownCapabilities } from '@objectstack/spec/api';
+import { ApiRoutesSchema, CapabilityDescriptorSchema, DiscoverySchema, DiscoveryEnvironmentSchema, EnvironmentTypeSchema, RouteHealthEntrySchema, RouteHealthReportSchema, ServiceInfoSchema, ServiceSelfInfoSchema, ServiceStatus, WellKnownCapabilitiesSchema } from '@objectstack/spec/api';
+import type { ApiRoutes, CapabilityDescriptor, DiscoveryEnvironment, EnvironmentType, RouteHealthEntry, RouteHealthReport, ServiceInfo, ServiceSelfInfo, ServiceStatus, WellKnownCapabilities } from '@objectstack/spec/api';
 
 // Validate data
 const result = ApiRoutesSchema.parse(data);
@@ -159,6 +159,23 @@ Deployment posture a discovery response advertises. Deliberately three coarse bu
 * `production`
 * `sandbox`
 * `development`
+
+
+---
+
+## EnvironmentType
+
+Environment categorical tag (prod/sandbox/dev/test/…)
+
+### Allowed Values
+
+* `production`
+* `sandbox`
+* `development`
+* `test`
+* `staging`
+* `preview`
+* `trial`
 
 
 ---

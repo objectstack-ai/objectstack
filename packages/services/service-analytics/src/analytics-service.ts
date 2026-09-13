@@ -40,6 +40,10 @@ import {
   assertObjectsReadable,
   type ObjectReadAdmissionProvider,
 } from './read-admission.js';
+// [#17130] The ROW-scope half's refusal envelope — the sibling of the
+// object-level `readAdmissionDeniedError` above, and the reason a fail-closed
+// row-scope denial can no longer be re-judged by its wording.
+import { readScopeUnresolvedError } from './read-scope-refusal.js';
 // [#15768] The measure result-type rule — which aggregates return a value of
 // the aggregated field's own type, and which are numeric whatever they read.
 // Owned in its own module so the enumerated verdict per `AggregationFunction`
@@ -72,6 +76,11 @@ import { evaluateAnalyticsQueryOverRows } from './preview-evaluator.js';
 // member as the request spelled it (see `dataset-refusal.ts`'s header for why
 // that code and not `DATASET_INVALID`).
 import { invalidMemberError } from './dataset-refusal.js';
+// [#16206] The `sqlDialect` hook's DECLARED accept set, and the predicate that
+// says whether a host answered outside it. Both live next to the membership set
+// the compilers read, so the contract has one definition and this file states
+// it rather than restating it.
+import { ACCEPTED_SQL_DIALECTS, isUnrecognisedSqlDialectAnswer, type AcceptedSqlDialect } from './text-match-sql.js';
 
 /**
  * Analytics result augmented with drill-through metadata (ADR-0021 D2; see
@@ -237,8 +246,17 @@ function isMissingColumnOfRelation(message: string): boolean {
  * wording, so no tightening of "does this say a relation is missing" can ever
  * exclude it — only asking the more specific question FIRST can. That makes the
  * ORDER the fix, not the pattern.
+ *
+ * [#17130] EXPORTED — module-internal still (it is absent from `index.ts`, and
+ * this package's `exports` map publishes only that entry, so no consumer can
+ * reach it), but reachable from `refusal-wording-collision.test.ts`. That guard
+ * asserts no BARE refusal this package raises can be mistaken for a driver
+ * saying "the table is gone", and it has to ask THIS predicate: a guard
+ * carrying its own copy of the six limbs answers a question about the copy, and
+ * would stay green the moment a limb is added here — precisely the drift it
+ * exists to catch.
  */
-function isMissingSourceError(err: unknown): boolean {
+export function isMissingSourceError(err: unknown): boolean {
   const raw = String((err as { message?: unknown })?.message ?? err ?? '');
   // [#6035] Missing COLUMN is not missing SOURCE — the paragraph above promises
   // column errors stay hard failures, and this is where that promise is kept.
@@ -507,19 +525,65 @@ export interface AnalyticsServiceConfig {
   getAllowedRelationships?: (cubeName: string) => Set<string> | undefined;
   /**
    * Coerce a filter comparand to a temporal column's storage form so a
-   * relative-date / ISO-string value compares correctly on the active driver
-   * (SQLite `Field.datetime` → epoch ms; `Field.date` / native timestamp →
-   * unchanged). Threaded into the StrategyContext and consulted by
-   * `NativeSQLStrategy` when binding filter values. See the contract docs on
+   * relative-date / ISO-string value compares correctly on the active driver.
+   * Threaded into the StrategyContext and consulted by `NativeSQLStrategy` when
+   * binding filter values. See the contract docs on
    * `StrategyContext.coerceTemporalFilterValue` for the full rationale.
+   *
+   * # ⭐ The storage reality this package coerces against — ONE statement (#16737)
+   *
+   * ⛔ This block is the SINGLE place in `service-analytics` that states what a
+   * `Field.datetime` column physically holds. Every other site that needs the
+   * fact links here instead of restating it — {@link
+   * AnalyticsServiceConfig.coerceTemporalFilterColumn} below, the two hook
+   * bridges in `plugin.ts`, `NativeSQLStrategy.temporalColumn` /
+   * `buildFilterClause`, and `ObjectQLStrategy.dateRangeBounds`. Four of those
+   * carried three mutually incompatible accounts of it before this card, which
+   * is what #16737 was filed to end.
+   *
+   * Measured on `origin/main` (`driver-sql`, better-sqlite3), not recalled:
+   *
+   * - **SQLite `Field.datetime` has ONE storage form: canonical UTC TEXT**,
+   *   `YYYY-MM-DDTHH:MM:SS.sssZ` (#3912/#3928). `SqlDriver.storageDatetimeValue`
+   *   canonicalises on the WRITE path, so every accepted input shape folds onto
+   *   the same stored string — a `Date`, an ISO `…Z`, an ISO with an offset, a
+   *   naive wall clock (ADR-0074), an epoch number, an epoch string, a bare
+   *   calendar day — and the `NOW()` column default writes the same
+   *   `strftime('%Y-%m-%dT%H:%M:%fZ', 'now')` bytes. A value the driver cannot
+   *   interpret is preserved verbatim rather than nulled.
+   * - **⛔ The INTEGER epoch is a LEGACY form, not a live write path.** It is
+   *   what a database written BEFORE the convention still holds. `initObjects`
+   *   runs `backfillCanonicalDatetimes` at schema sync to converge such a
+   *   database; `SqlDriver.needsLegacyDatetimeRepair` is the ONE predicate for
+   *   "might this column still hold a pre-canonical value", and it is the only
+   *   thing that makes the column hook below emit anything but the bare column.
+   *   Two cases keep it true: a table not yet backfilled, and an EXTERNAL /
+   *   unmanaged object (`registerExternalObject` never marks its datetime
+   *   columns canonical).
+   * - **Postgres and MySQL never enter that question at all**: the DDL gives
+   *   them a real temporal type (`timestamptz`, `DATETIME(3)`), so there is one
+   *   on-disk shape by construction and nothing to repair.
+   *
+   * ⇒ The mixed INTEGER/TEXT column #3912 fixed is TRANSITIONAL, not the steady
+   * state, and the flat "a SQLite `Field.datetime` IS an INTEGER epoch" (#2034)
+   * has been wrong since #3912 landed. Both hooks stay necessary regardless:
+   * the comparand still has to be canonicalised (an author writes
+   * `'2025-06-18'`, storage holds `'2025-06-18T00:00:00.000Z'`), and the column
+   * still has to be repaired on the un-migrated and external tiers.
    */
   coerceTemporalFilterValue?: (objectName: string, fieldName: string, value: unknown) => unknown;
   /**
    * Normalise the COLUMN side of the same comparison to that storage form — the
-   * other half of the fix, needed because a SQLite `Field.datetime` holds both an
-   * INTEGER epoch (a `Date` write) and ISO TEXT (a REST/JSON write, a `NOW()`
-   * default) at once, so coercing only the comparand matches one of them and
-   * misses the other (#3912). See `StrategyContext.coerceTemporalFilterColumn`.
+   * other half of #3912, and the half that is now conditional.
+   *
+   * The driver answers with the bare column on a converged SQLite column and on
+   * every non-SQLite dialect, and with a repair expression only while
+   * `needsLegacyDatetimeRepair` holds — see the storage-reality block on
+   * {@link AnalyticsServiceConfig.coerceTemporalFilterValue} above, which is
+   * where that fact is stated once. Coercing the comparand alone is therefore
+   * still not sufficient: on an un-migrated or external table it matches
+   * whichever half the writer produced and empties the other.
+   * See `StrategyContext.coerceTemporalFilterColumn`.
    */
   coerceTemporalFilterColumn?: (objectName: string, fieldName: string, columnSql: string) => string;
   /**
@@ -626,11 +690,48 @@ export interface AnalyticsServiceConfig {
    *   that field's storage scale via `percentScaleOf`, so a renderer scales by
    *   declared metadata instead of guessing from the value.
    * - Date bucketing: a date vs datetime dimension drills by the right bound.
+   * - [#16236] Formula result type: `returnType` is what a `formula` field was
+   *   DECLARED to compute, and the only channel it has to the measure
+   *   result-column rule. See the key's own note below.
+   *
+   * ⚠️ [#16236] `returnType` is `FieldSchema.returnType` — the AUTHORING
+   * vocabulary `'number' | 'text' | 'boolean' | 'date'`, whose owner is
+   * `packages/spec/src/data/field.zod.ts`. It is declared `string` here for the
+   * reason its sibling `type` is: this shape is what a HOST answers at runtime,
+   * and a host can answer a word this contract does not accept. ⛔ The accepted
+   * set is NEVER restated at this seam — `measureResultType` reads it off
+   * {@link FORMULA_RETURN_TYPE_RESULT}, which is the one copy, and tiers an
+   * unrecognised word as "cannot answer, do not block".
+   *
+   * ⛔ It is NOT a wire word. `AnalyticsResult.fields[].type` speaks
+   * `DimensionType`, in which `text` is `'string'` and `date` is `'time'`;
+   * relaying this key into that position is the mistake the translation table
+   * exists to prevent.
    */
-  sourceFieldMeta?: (object: string, field: string) => { type?: string; defaultCurrency?: string; max?: number } | undefined;
+  sourceFieldMeta?: (object: string, field: string) => { type?: string; defaultCurrency?: string; max?: number; returnType?: string } | undefined;
   /**
    * [#15684] The SQL dialect of the datasource backing `object` — `'sqlite'`,
    * `'postgres'`, `'mysql'`, or `undefined` when the host cannot answer.
+   *
+   * [#16206] ⭐ Those three names are the WHOLE accepted vocabulary
+   * ({@link AcceptedSqlDialect}), declared here rather than left to be
+   * discovered: this used to be typed as free `string`, so a host that owned a
+   * SQLite datasource and answered the spelling its own stack uses — knex's
+   * `'sqlite3'`, or `'better-sqlite3'`, both of which `driver-sql` itself lists
+   * in `SQLITE_EMIT_CLIENTS` — was read as `'unknown'` and told nothing. ⛔ The
+   * knex aliases are deliberately NOT accepted: a second copy of that driver's
+   * table is the drift this repo keeps paying for, and an unrecognised spelling
+   * is sometimes deliberate (#11756's `'mariadb'`).
+   *
+   * ⇒ Two behaviours follow, and they are opposite on purpose:
+   *
+   * - **A non-empty answer outside the three is DIAGNOSED** — one `warn` naming
+   *   the object, the answer and the accepted set, so a wrong answer stops
+   *   reading as "no answer". It is emitted once per distinct unrecognised
+   *   spelling; the dialect still resolves to `'unknown'`, so nothing about the
+   *   query's behaviour changes.
+   * - **`undefined` stays silent and legal.** The hook is OPTIONAL; "cannot
+   *   answer, do not block" is a supported composition, not a misconfiguration.
    *
    * The three SQL compilers need it for ONE thing: the case-EXACT text family
    * (`$contains` / `$notContains` / `$startsWith` / `$endsWith`, #4706 Q2 = A)
@@ -645,7 +746,7 @@ export interface AnalyticsServiceConfig {
    * that wires nothing keeps the `LIKE` the compilers always emitted —
    * "cannot answer, do not block".
    */
-  sqlDialect?: (object: string) => string | undefined;
+  sqlDialect?: (object: string) => AcceptedSqlDialect | undefined;
   /** Pre-defined datasets to compile + register at construction (ADR-0021). */
   datasets?: Dataset[];
   /**
@@ -767,6 +868,18 @@ export class AnalyticsService implements IAnalyticsService {
   /** [#3867] One-shot flag for the {@link assertInferableCube} stand-down warning. */
   private warnedNoObjectRegistry = false;
   /**
+   * [#16206] The out-of-contract `sqlDialect` answers this service has already
+   * diagnosed — the dedupe key for {@link diagnoseSqlDialectAnswer}.
+   *
+   * ⭐ Keyed on the ANSWER, which is the failure's identity: "your hook says a
+   * word this contract does not accept" is one defect with one fix, whether it
+   * reaches one object or every object. ⛔ Never keyed on anything that grows
+   * with traffic — the set's size is bounded by the number of DISTINCT strings
+   * the host's own hook can return, a property of the host's code fixed before
+   * any query runs, not by how many queries ask.
+   */
+  private readonly diagnosedDialectAnswers = new Set<string>();
+  /**
    * [#8286] Does the executed statement travel back to the caller?
    * See {@link AnalyticsServiceConfig.debugSql} for the switch and its default.
    */
@@ -844,7 +957,21 @@ export class AnalyticsService implements IAnalyticsService {
       // [#15684] The dialect that will run the compiled statement, so the
       // case-EXACT text family picks a construct that IS case-exact there.
       // Same tiering as the hook above: `undefined` keeps today's `LIKE`.
-      sqlDialect: (object: string) => config.sqlDialect?.(object),
+      //
+      // [#16206] This is also the seam where the host's answer ARRIVES, and so
+      // the only place that can tell a wrong answer from no answer — the
+      // compilers downstream see one `'unknown'` for both. The answer is passed
+      // through untouched either way: the diagnostic informs, it does not
+      // correct, and it does not accept a wider vocabulary.
+      sqlDialect: (object: string) => {
+        // ⚠️ Read back as `string`, not as the declared `AcceptedSqlDialect`.
+        // The declaration says what the host is ASKED for; this seam exists
+        // precisely because a host can answer something else at runtime — a
+        // plain JS embedder, or a TS one whose hook is typed `string`.
+        const answered: string | undefined = config.sqlDialect?.(object);
+        this.diagnoseSqlDialectAnswer(object, answered);
+        return answered;
+      },
     };
 
     // Build strategy chain (built-in + custom, sorted by priority)
@@ -867,6 +994,56 @@ export class AnalyticsService implements IAnalyticsService {
     this.logger.info(
       `[Analytics] Initialized with ${this.cubeRegistry.size} cubes, ` +
       `${this.strategies.length} strategies: ${this.strategies.map(s => s.name).join(' → ')}`,
+    );
+  }
+
+  /**
+   * [#16206] Tell a host that ANSWERED the `sqlDialect` hook out of contract.
+   *
+   * ## The defect this closes
+   *
+   * `sqlDialectFor` is tiered "cannot answer, do not block", and that tiering
+   * had a cost nobody was paying attention to: a WRONG answer and NO answer
+   * were the same answer. A host that owned a SQLite datasource and answered
+   * `'sqlite3'` — knex's own canonical spelling, and one `driver-sql` lists in
+   * `SQLITE_EMIT_CLIENTS` — was read as `'unknown'`, silently, and the host that
+   * tried hardest to help got the residue arm with no way to find out. This is
+   * the one line that breaks that identity.
+   *
+   * ## `warn`, not `error`
+   *
+   * Functional degradation, by AGENTS.md's one question: after it, the system is
+   * VISIBLY smaller — a dialect-specific construct is not enabled — and nothing
+   * that claims to be persisted has failed to land. ⛔ Escalating it to `error`
+   * would train everyone to skim `error`.
+   *
+   * ## Why "once" is keyed on the ANSWER, and why that is bounded
+   *
+   * The key is the failure's identity — the out-of-contract spelling — which is
+   * exactly the ruling's own granularity ("a non-empty answer outside them is
+   * diagnosed once"). One misspelling reaching a thousand objects is ONE defect
+   * with ONE fix; the object is named in the line so the host can find the
+   * wiring, but it is not part of the key.
+   *
+   * ⛔ Nothing in the key grows with traffic. Its cardinality is the number of
+   * DISTINCT strings the host's own hook can return — a property of the host's
+   * code, fixed before the first query runs. Ten thousand queries over the same
+   * misconfiguration print one line; the shipped bridge in `plugin.ts` answers
+   * from `SqlDriver.dialectName`, whose return type IS the accept set, so it
+   * cannot reach this path at all.
+   */
+  private diagnoseSqlDialectAnswer(object: string, answered: string | undefined): void {
+    // `undefined`, `null` and `''` are legal, silent non-answers — the optional
+    // hook stays optional. Only a host that said something is told anything.
+    if (!isUnrecognisedSqlDialectAnswer(answered)) return;
+    if (this.diagnosedDialectAnswers.has(answered)) return;
+    this.diagnosedDialectAnswers.add(answered);
+    this.logger.warn(
+      `[Analytics] The sqlDialect hook answered "${answered}" for object "${object}", which is not one of ` +
+      `the accepted dialect names (${ACCEPTED_SQL_DIALECTS.join(', ')}). The answer is read as "unknown", so the ` +
+      `text operators compile the dialect-blind construct instead of this dialect's — same rows a host that wired ` +
+      `no hook at all would get. Answer one of the accepted names, or undefined if this host cannot say. ` +
+      `Reported once per distinct unrecognised answer.`,
     );
   }
 
@@ -1049,6 +1226,14 @@ export class AnalyticsService implements IAnalyticsService {
    *
    * Fail-closed: if the provider throws for an object, the whole query is
    * rejected rather than emitting SQL with that object unscoped.
+   *
+   * [#17130] And the rejection DECLARES itself. This throw lands inside
+   * {@link AnalyticsService.queryDataset}'s catch, whose first question is
+   * `hasDeclaredErrorEnvelope` and whose second is {@link isMissingSourceError}
+   * — six substrings over driver phrasing, three of which are what a registry
+   * or security refusal naturally says. Bare, this refusal reached the caller
+   * as a confident empty chart the day its wording drifted into one of them;
+   * enveloped, it is re-thrown before the wording is ever read.
    */
   private async resolveReadScopes(
     query: AnalyticsQuery,
@@ -1069,7 +1254,10 @@ export class AnalyticsService implements IAnalyticsService {
           `rejecting query (fail-closed, ADR-0021 D-C)`,
           e instanceof Error ? e : new Error(String(e)),
         );
-        throw new Error(
+        // ⛔ The message is unchanged, deliberately: #17130's fix is the
+        // DECLARATION, not a luckier string. Rewording to dodge the sniffer
+        // would leave the next author to rediscover the mine.
+        throw readScopeUnresolvedError(
           `[Analytics] read-scope resolution failed for "${object}"; query denied (fail-closed).`,
         );
       }
@@ -1176,6 +1364,13 @@ export class AnalyticsService implements IAnalyticsService {
     const compiled = compileDataset(dataset, this.relationshipResolver, {
       getObjectDatasource: this.getObjectDatasource,
       isExternalObject: this.isExternalObject,
+      // [#16737 / #16099] …and the aggregate × field-type compatibility table
+      // (`@objectstack/spec`, #16353) is decidable from the same declared type
+      // the result-column enrichment already reads. Same source, one call
+      // shape, so a host that wired `sourceFieldMeta` gets the compile-time
+      // refusal with no second hook to remember.
+      declaredFieldType: (object: string, field: string) =>
+        this.sourceFieldMeta?.(object, field)?.type,
     });
     this.cubeRegistry.register(compiled.cube);
     this.datasetRegistry.set(dataset.name, compiled);
@@ -1640,7 +1835,13 @@ export class AnalyticsService implements IAnalyticsService {
         // holding both halves of the question, the AUTHORED measure (`aggregate`
         // + `field`) and the source field's declared type. A per-producer copy
         // would be four implementations of one rule, free to drift.
-        const resultType = measureResultType(m.aggregate, meta?.type);
+        //
+        // [#16236] The third input is the aggregated field's declared
+        // `returnType` — read off the SAME hook, in the same call, so a formula
+        // measure is typed from metadata the host already had rather than from
+        // a second probe. Absent (an unproven `dyn` expression) or unrecognised
+        // ⇒ the rule declines and the producer's `number` stands.
+        const resultType = measureResultType(m.aggregate, meta?.type, meta?.returnType);
         if (resultType) f.type = resultType;
       }
     }

@@ -63,6 +63,8 @@
     "EvalUser (type)",
     "EvalUserSchema (const)",
     "EvaluatedExpression (type)",
+    "EvaluatedExpressionInput (type)",
+    "EvaluatedExpressionInputSchema (const)",
     "EvaluatedExpressionParsed (type)",
     "EvaluatedExpressionSchema (const)",
     "ExpandViewResult (interface)",

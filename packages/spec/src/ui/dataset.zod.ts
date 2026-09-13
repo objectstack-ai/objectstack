@@ -114,18 +114,18 @@ export const DatasetDimensionSchema = lazySchema(() => strictObject({
   },
 }, {
   /** Referenced by presentations (report rows/columns, widget dimensions). */
-  name: SnakeCaseIdentifierSchema.describe('Dimension name — referenced by presentations'),
-  label: I18nLabelSchema.optional(),
+  name: SnakeCaseIdentifierSchema.describe('Dimension name — referenced by presentations').meta({ title: 'Name' }),
+  label: I18nLabelSchema.optional().meta({ title: 'Label' }),
   /**
    * A field on the base object, OR a relationship path (one or more to-one hops)
    * ending in a field — e.g. `account.region` or `account.owner.region`
    * (ADR-0071 multi-hop). The join chain is DERIVED from the relationship(s)
    * declared in `Dataset.include`; the author never writes a predicate.
    */
-  field: z.string().describe('Base field, or `relationship[.relationship].field` path'),
-  type: z.enum(['string', 'number', 'date', 'boolean', 'lookup']).optional(),
+  field: z.string().describe('Base field, or `relationship[.relationship].field` path').meta({ title: 'Field' }),
+  type: z.enum(['string', 'number', 'date', 'boolean', 'lookup']).optional().meta({ title: 'Type' }),
   /** Default bucketing for date dimensions (day/week/month/quarter/year). */
-  dateGranularity: DateGranularity.optional(),
+  dateGranularity: DateGranularity.optional().meta({ title: 'Date Granularity' }),
 }));
 
 /**
@@ -180,14 +180,15 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
       'a measure has no `description` — its author-facing text is `label`. `description` is declared on the DATASET itself; put the explanation there.',
   },
 }, {
-  name: SnakeCaseIdentifierSchema.describe('Measure name — e.g. "revenue"; defined once'),
-  label: I18nLabelSchema.optional(),
+  name: SnakeCaseIdentifierSchema.describe('Measure name — e.g. "revenue"; defined once').meta({ title: 'Name' }),
+  label: I18nLabelSchema.optional().meta({ title: 'Label' }),
   /** Aggregation function — reuses the canonical query.zod enum. */
-  aggregate: AggregationFunction.optional().describe('Aggregation (sum/avg/count/...); omit when `derived` is set'),
+  aggregate: AggregationFunction.optional().describe('Aggregation (sum/avg/count/...); omit when `derived` is set')
+    .meta({ title: 'Aggregate' }),
   /** Base field, or `relationship[.relationship].field` path. Optional for `count` (count(*)). */
-  field: z.string().optional().describe('Aggregated field; optional for count(*)'),
+  field: z.string().optional().describe('Aggregated field; optional for count(*)').meta({ title: 'Field' }),
   /** Measure-scoped filter (e.g. only won deals for "won_amount"). */
-  filter: FilterConditionSchema.optional(),
+  filter: FilterConditionSchema.optional().meta({ title: 'Filter' }),
   /**
    * Display format — a NUMERAL pattern controlling grouping, decimals and
    * percent: `"0,0.00"`, `"0.0%"`. A `$` in the pattern is still honoured as a
@@ -228,14 +229,14 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
     + 'An amount takes its symbol from `currency`, not from a "$" in the pattern. A DATE-valued '
     + 'measure never reads a date pattern: `"YYYY-MM-DD"` renders the locale default. A date-only '
     + 'value reads `format` as a display style (`short`, `relative`); a datetime value ignores it.',
-  ),
+  ).meta({ title: 'Format' }),
   /**
    * Display currency (ISO 4217, e.g. "USD", "CNY"). Carried onto the result
    * field so presentations render a locale-correct symbol via `Intl` rather
    * than a "$" baked into `format`. Declare it on the measure (the semantic
    * layer) when the aggregated field is a fixed-currency amount.
    */
-  currency: z.string().length(3).optional().describe('Display currency code (ISO 4217)'),
+  currency: z.string().length(3).optional().describe('Display currency code (ISO 4217)').meta({ title: 'Currency' }),
   /**
    * Derived measure — computed from OTHER measures in this dataset by name
    * only. e.g. `{ op: 'ratio', of: ['won_amount', 'total_amount'] }`.
@@ -278,7 +279,7 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
     op: DerivedMeasureOp,
     /** Names of other measures in this dataset (2+ for ratio/difference). */
     of: z.array(SnakeCaseIdentifierSchema).min(1),
-  }).optional(),
+  }).optional().meta({ title: 'Derived From' }),
 }));
 
 /**

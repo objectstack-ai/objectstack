@@ -16,7 +16,7 @@
 - 那是 file-at-destination、非缝卡、待分诊;hotcrm 侧同笔挂 `pm:blocked` 加 `Blocked-by:` 回链。
 - ⛔ 永不在 hotcrm 内绕行:绕行把平台缺口藏进样板,展品从此示范错误写法。
 - `repo:hotcrm` 缝标签只给真协调卡,跨仓次序即卡的实质。
-- 纯 hotcrm 修复住 hotcrm 仓:issue 住在修复落地的仓。
+- hotcrm 自己的卡(含决策卡)都住 hotcrm 仓:issue 住在修复落地的仓,决策入本仓收件箱。
 
 ## 常设承诺
 

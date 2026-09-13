@@ -630,22 +630,43 @@ describe('#14828 — the SQL answers are the platform’s, not this file’s inv
     expect(sqlColumn('this_is_not_a_field_type')).toBeNull();
   });
 
-  // ── Recorded divergence, NOT coverage: FILE_REFERENCE_TYPES (#15041) ─────
+  // ── COVERAGE (#15989): the file family no longer diverges ────────────────
   //
-  // These five are in driver-sql's `JSON_COLUMN_TYPES` (it spreads the class by
-  // name) while this generator gives them a varchar. Unlike the five rows above
-  // that is not a wrong value but two ADR-0104 positions: the driver is pre-D3
-  // (the stored value may still be an inline metadata OBJECT) and #14657 chose
-  // the post-D3 answer (an opaque `sys_file` id STRING). Which side moves is
-  // #15041's question. Asserted here only so the disagreement cannot change
-  // shape unnoticed, and so no reader mistakes this file for having ruled on it.
-  it('#15041 record — the file family diverges from the driver, deliberately unresolved', () => {
+  // ⚰️ This block was labelled 「recorded divergence, NOT coverage」 and asserted
+  // that driver-sql's `JSON_COLUMN_TYPES` DID spread `FILE_REFERENCE_TYPES`
+  // while this generator gave the family a varchar — two ADR-0104 positions,
+  // deliberately unresolved, with the maintainer ruling on #15041 as the thing
+  // that would resolve it. The ruling landed: option A, the physical column
+  // holds the actual `sys_file` id, and 「the driver is the side that moves」.
+  // Its step 3 says this block is retired to coverage WHEN the driver lands,
+  // which is the change this run of the suite is reading. So the same five
+  // types are asserted here for the same values, and the sentence about them
+  // has changed from "these two disagree" to "these two agree".
+  //
+  // The direction is pinned rather than merely un-asserted: the driver must NOT
+  // seed the JSON set from the family any more, which is a control that fires
+  // if the driver change is ever reverted underneath this generator.
+  it('#15041/#15989 — the generator states the ruled end-state and the driver now agrees', () => {
     expect(FILE_REFERENCE_TYPES.size).toBe(5);
+
+    // The retirement's own control: the seeding this block used to assert is
+    // GONE from the driver. A revert on the driver side reddens here first.
     expect(
       SQL_DRIVER_SOURCE,
-      'driver-sql no longer seeds JSON_COLUMN_TYPES from FILE_REFERENCE_TYPES — re-read #15041, ' +
-      'the divergence this records may have been resolved from the other side.',
-    ).toContain('...STRUCTURED_JSON_TYPES, ...FILE_REFERENCE_TYPES, ...MULTI_OPTION_TYPES,');
+      'driver-sql seeds JSON_COLUMN_TYPES from FILE_REFERENCE_TYPES again — that reverses the ' +
+      'maintainer ruling on #15041 (「15041 应该改为实际 id 保存。选A，其他同意」), which this ' +
+      'generator states the end-state of.',
+    ).not.toContain('...STRUCTURED_JSON_TYPES, ...FILE_REFERENCE_TYPES, ...MULTI_OPTION_TYPES,');
+    // Anti-vacuity for the negative above: the neighbouring classes ARE still
+    // spread by name, so the `not.toContain` is reading a live line rather than
+    // passing over a file that was renamed, emptied or moved.
+    expect(SQL_DRIVER_SOURCE).toContain('...STRUCTURED_JSON_TYPES, ...MULTI_OPTION_TYPES,');
+
+    // …and the driver moves the family to a varchar at THIS generator's width,
+    // which is what "the generator does not change" means in practice.
+    expect(SQL_DRIVER_SOURCE).toContain('const MEDIA_ID_VARCHAR_CHARS = 2048;');
+    expect(SQL_DRIVER_SOURCE).toContain('table.string(name, MEDIA_ID_VARCHAR_CHARS)');
+
     for (const type of FILE_REFERENCE_TYPES) {
       expect(sqlColumn(type)).toBe('VARCHAR(2048)');
       expect(tsColumn(type)).toBe(`table.string('f_${type}')`);

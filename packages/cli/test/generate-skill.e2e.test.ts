@@ -163,7 +163,10 @@ beforeAll(async () => {
 
   // Sequential on purpose: cold tsx starts, each loading every command module,
   // in a container several agents share.
-  generated = await runTsx([CLI, 'g', 'skill', 'lead-qualification'], dir);
+  // `lead_qualification`, not `lead-qualification`: the #16726 charset gate
+  // refuses kebab-case at the door. Both spellings derive the same written
+  // file and the same barrel alias, so what this file measures is unchanged.
+  generated = await runTsx([CLI, 'g', 'skill', 'lead_qualification'], dir);
   control = await runTsx([CLI, 'g', 'object', 'customer'], dir);
 
   const skillDir = join(dir, 'src', 'skills');

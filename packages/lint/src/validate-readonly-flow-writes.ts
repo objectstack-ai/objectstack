@@ -150,17 +150,45 @@ export function buildReadonlyIndex(objects: AnyRec[]): Map<string, Map<string, F
 }
 
 /**
+ * The `managedBy` buckets the engine's create-side strip steps around, mirroring
+ * `PLATFORM_INTERNAL_MANAGED_BUCKETS` in
+ * `packages/objectql/src/validation/rule-validator.ts` (#15719). ⛔ Not derived
+ * from it: this package is dependency-free by design and objectql does not
+ * export the set, so the two are held equal by
+ * `validate-readonly-flow-writes.test.ts` naming the same three buckets and the
+ * engine's own tests pinning them against the `@objectstack/spec` enum.
+ *
+ * The split is the enum's own (`object.zod.ts`, "Enforcement happens in three
+ * places", item 3): these three fail closed on a user-context generic write —
+ * `better-auth` via ADR-0092, `engine-owned` / `append-only` via ADR-0103 —
+ * while `platform` / `config` / `system-data` are writable by default and carry
+ * no such guard.
+ */
+const PLATFORM_INTERNAL_MANAGED_BUCKETS: ReadonlySet<string> = new Set([
+  'engine-owned',
+  'append-only',
+  'better-auth',
+]);
+
+/**
  * Objects the engine's CREATE-side static strip does not judge at all — the
  * two object-level exclusions of `staticReadonlyInsertSubject`
- * (packages/objectql/src/validation/rule-validator.ts): a platform object
- * (`managedBy` set, or the reserved `sys_` namespace) carries its own
- * field-write governance (ADR-0086, a 403 guard) that a silent strip must not
- * pre-empt, so `engine.insert` runs no readonly strip on it. A create finding
- * on such an object would describe a strip that never happens.
+ * (packages/objectql/src/validation/rule-validator.ts): a platform-internal
+ * object (a {@link PLATFORM_INTERNAL_MANAGED_BUCKETS} bucket, or the reserved
+ * `sys_` namespace) carries its own field-write governance (ADR-0086, a 403
+ * guard) that a silent strip must not pre-empt, so `engine.insert` runs no
+ * readonly strip on it. A create finding on such an object would describe a
+ * strip that never happens.
+ *
+ * ⚠️ A USER-WRITABLE bucket (`platform`, `config`, `system-data`) is NOT exempt
+ * — #15719 narrowed this from "`managedBy` set to anything" so the strip reaches
+ * the buckets whose data is the user's. Leaving that narrowing out here would
+ * keep suppressing create findings for a strip that now really happens, which is
+ * exactly the silent disagreement this shared helper exists to prevent.
  *
  * ⚠️ Create-verb ONLY. The UPDATE path applies neither exclusion (stated at
- * that function: "This asymmetry is the create side's"), so the update branch
- * of both rules keeps judging these objects. Shared with
+ * that function: "That remaining asymmetry is the create side's"), so the update
+ * branch of both rules keeps judging these objects. Shared with
  * `validate-readonly-hook-writes.ts` for the same reason the index above is.
  */
 export function buildInsertStripExemptObjects(objects: AnyRec[]): Set<string> {
@@ -168,7 +196,9 @@ export function buildInsertStripExemptObjects(objects: AnyRec[]): Set<string> {
   for (const obj of objects) {
     const name = typeof obj.name === 'string' ? obj.name : undefined;
     if (!name) continue;
-    if (obj.managedBy || name.startsWith('sys_')) exempt.add(name);
+    const internalBucket = typeof obj.managedBy === 'string'
+      && PLATFORM_INTERNAL_MANAGED_BUCKETS.has(obj.managedBy);
+    if (internalBucket || name.startsWith('sys_')) exempt.add(name);
   }
   return exempt;
 }

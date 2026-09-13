@@ -1,7 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { CronExpressionInputSchema } from '../shared/expression.zod';
 import { BaseResponseSchema } from './contract.zod';
 
 /**
@@ -559,7 +558,7 @@ export type UndoImportJobResponse = z.input<typeof UndoImportJobResponseSchema>;
  *   name: 'weekly_account_export',
  *   object: 'account',
  *   format: 'csv',
- *   schedule: { cronExpression: '0 6 * * MON', timezone: 'America/New_York' },
+ *   schedule: { timezone: 'America/New_York' },
  *   delivery: { method: 'email', recipients: ['admin@example.com'] },
  * }
  */
@@ -572,8 +571,19 @@ export const ScheduledExportSchema = lazySchema(() => z.object({
   fields: z.array(z.string()).optional().describe('Fields to include'),
   filter: z.record(z.string(), z.unknown()).optional().describe('Record filter criteria'),
   templateId: z.string().optional().describe('Export template ID for field mappings'),
+  /**
+   * Schedule timing configuration.
+   *
+   * `cronExpression` was DELETED here in @objectstack/spec 18 (ADR-0049
+   * enforce-or-remove, #16320): the whole `ExportJobApiContracts` family has zero
+   * consumers, rest-server serves no `/api/v1/data/export` route and `IExportService`
+   * has no provider binding, so the cron was parsed and never fired. Deleted outright —
+   * no `retiredKey()` tombstone, no D2 conversion, no D3 semantic entry (maintainer
+   * ruling 2026-09-10 on the retirement PR). The mechanism that does work is
+   * `Job.schedule.expression` (`system/job.zod.ts`), the one cron slot the platform
+   * evaluates: a recurring export is a job whose handler you write.
+   */
   schedule: z.object({
-    cronExpression: CronExpressionInputSchema.describe('Cron expression for schedule'),
     timezone: z.string().default('UTC').describe('IANA timezone'),
   }).describe('Schedule timing configuration'),
   delivery: z.object({
@@ -702,8 +712,19 @@ export const ScheduleExportRequestSchema = lazySchema(() => z.object({
   fields: z.array(z.string()).optional().describe('Fields to include'),
   filter: z.record(z.string(), z.unknown()).optional().describe('Record filter criteria'),
   templateId: z.string().optional().describe('Export template ID for field mappings'),
+  /**
+   * Schedule timing configuration.
+   *
+   * `cronExpression` was DELETED here in @objectstack/spec 18 (ADR-0049
+   * enforce-or-remove, #16320): the whole `ExportJobApiContracts` family has zero
+   * consumers, rest-server serves no `/api/v1/data/export` route and `IExportService`
+   * has no provider binding, so the cron was parsed and never fired. Deleted outright —
+   * no `retiredKey()` tombstone, no D2 conversion, no D3 semantic entry (maintainer
+   * ruling 2026-09-10 on the retirement PR). The mechanism that does work is
+   * `Job.schedule.expression` (`system/job.zod.ts`), the one cron slot the platform
+   * evaluates: a recurring export is a job whose handler you write.
+   */
   schedule: z.object({
-    cronExpression: CronExpressionInputSchema.describe('Cron expression for schedule'),
     timezone: z.string().default('UTC').describe('IANA timezone'),
   }).describe('Schedule timing configuration'),
   delivery: z.object({

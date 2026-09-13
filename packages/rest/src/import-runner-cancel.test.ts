@@ -14,6 +14,17 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { runImport, type ImportProtocolLike } from './import-runner';
+
+/**
+ * [#16952] The doubles below are annotated FROM the exported declaration
+ * (`ImportProtocolLike`), never from a hand-written restatement of the shape
+ * the runner happens to send. A local parameter annotation was one of the
+ * three non-authoritative places this card converged: it froze a dialect no
+ * compiler held anyone to, so it kept compiling — and kept passing — after the
+ * runner moved to another one. ⛔ Never widen these back to an inline object
+ * type; that re-opens the seam.
+ */
+type CreateArgs = Parameters<ImportProtocolLike['createData']>[0];
 import type { ExportFieldMeta } from './export-format.js';
 
 const metaMap = new Map<string, ExportFieldMeta>([
@@ -40,7 +51,7 @@ function rowsOf(n: number): Array<Record<string, any>> {
 function syncProtocol(): ImportProtocolLike {
   return {
     findData: vi.fn(async () => []),
-    createData: vi.fn(async (args: { data: { name: string } }) => ({ id: `id_${args.data.name}` })),
+    createData: vi.fn(async (args: CreateArgs) => ({ id: `id_${String(args.data.name)}` })),
     updateData: vi.fn(async () => ({})),
     createManyData: vi.fn(async (args: { records: any[] }) => ({
       records: args.records.map((r) => ({ id: `id_${r.name}`, ...r })),

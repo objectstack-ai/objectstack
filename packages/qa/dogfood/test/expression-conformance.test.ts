@@ -79,9 +79,17 @@ const DIALECTS = new Set(['cel', 'cron', 'template', 'js', 'settings-visibility'
  * population with zero `cron` and zero `template` rows in it, while the spec
  * declared 12 such positions. Structurally blind, not merely un-updated — which
  * is why the roster and the rows classifying them landed on one commit.
+ *
+ * `EvaluatedExpressionInputSchema` (#15807) is the EVALUATED sibling — the same
+ * two arms, the string arm non-blank and the envelope arm requiring a non-blank
+ * `source`. `FlowEdgeSchema.condition` moved onto it, and the very commit that
+ * moved it listed it here: without this row the edge condition would have
+ * dropped out of discovery and its `cel-interpret` cover gone STALE — measured,
+ * on that commit's first CI run (#7327's shape, one more time).
  */
 const EXPRESSION_INPUT_SCHEMAS = [
   'ExpressionInputSchema',
+  'EvaluatedExpressionInputSchema',
   'SettingsVisibilityInputSchema',
   'CronExpressionInputSchema',
   'TemplateExpressionInputSchema',

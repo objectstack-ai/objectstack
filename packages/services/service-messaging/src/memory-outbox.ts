@@ -9,6 +9,7 @@ import type {
     EnqueueDeliveryInput,
     INotificationOutbox,
     NotificationDeliveryRecord,
+    ReapOptions,
 } from './outbox.js';
 import {
     NotificationAckError,
@@ -67,17 +68,14 @@ export class MemoryNotificationOutbox implements INotificationOutbox {
         return id;
     }
 
+    async reap(opts: ReapOptions): Promise<void> {
+        this.reapExpired(opts.now ?? this.clock(), opts.claimTtlMs);
+    }
+
     async claim(opts: ClaimOptions): Promise<ClaimedDeliveryRecord[]> {
         const now = opts.now ?? this.clock();
-        // Reap stale in_flight.
-        for (const r of this.rows.values()) {
-            if (r.status === 'in_flight' && (r.claimedAt ?? 0) < now - opts.claimTtlMs) {
-                r.status = 'pending';
-                r.claimedBy = undefined;
-                r.claimedAt = undefined;
-                r.updatedAt = now;
-            }
-        }
+        // Reap stale in_flight — unless the caller already reaped this pass.
+        if (!opts.skipReap) this.reapExpired(now, opts.claimTtlMs);
         const out: ClaimedDeliveryRecord[] = [];
         for (const r of this.rows.values()) {
             if (out.length >= opts.limit) break;
@@ -99,14 +97,7 @@ export class MemoryNotificationOutbox implements INotificationOutbox {
     async claimDigest(opts: ClaimOptions): Promise<ClaimedDeliveryRecord[]> {
         const now = opts.now ?? this.clock();
         // Reap stale in_flight (same as claim).
-        for (const r of this.rows.values()) {
-            if (r.status === 'in_flight' && (r.claimedAt ?? 0) < now - opts.claimTtlMs) {
-                r.status = 'pending';
-                r.claimedBy = undefined;
-                r.claimedAt = undefined;
-                r.updatedAt = now;
-            }
-        }
+        if (!opts.skipReap) this.reapExpired(now, opts.claimTtlMs);
         // Claim every DUE batched row in the partition — a window must be taken
         // whole, so `limit` does not truncate a group here.
         const out: ClaimedDeliveryRecord[] = [];
@@ -184,6 +175,18 @@ export class MemoryNotificationOutbox implements INotificationOutbox {
             r.status = 'pending';
             r.nextAttemptAt = result.nextAttemptAt;
             r.error = result.error;
+        }
+    }
+
+    /** Visibility-timeout recovery: every expired `in_flight` claim reverts to `pending`. */
+    private reapExpired(now: number, claimTtlMs: number): void {
+        for (const r of this.rows.values()) {
+            if (r.status === 'in_flight' && (r.claimedAt ?? 0) < now - claimTtlMs) {
+                r.status = 'pending';
+                r.claimedBy = undefined;
+                r.claimedAt = undefined;
+                r.updatedAt = now;
+            }
         }
     }
 

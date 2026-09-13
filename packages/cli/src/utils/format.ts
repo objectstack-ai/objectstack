@@ -4,7 +4,13 @@ import chalk from 'chalk';
 import type { ZodError } from 'zod';
 import { formatZodIssue, type ConversionNotice } from '@objectstack/spec';
 import type { TenancyPosture } from '@objectstack/spec/security';
+// #17329 — the published settlement contract's own shape. Read, never restated:
+// a second local copy of `{ pending, inFlight, suppressed }` would be free to
+// drift the day a suppression reason is added, and the whole point of asking
+// through the contract is that the two sides cannot disagree.
+import type { SeedSettlementSnapshot } from '@objectstack/spec/contracts';
 import { writeStdoutDirect } from './json-stdout.js';
+import { authoringRuleUnionStack } from './stack-collections.js';
 
 // ─── Constants ──────────────────────────────────────────────────────
 export const CLI_NAME = 'objectstack';
@@ -545,17 +551,78 @@ export interface MetadataStats {
   devPlugins: number;
 }
 
+/**
+ * The metadata summary `os validate`, `os build`/`os compile` and `os info` all
+ * print — counted over the stack the author actually declared, in either
+ * ADR-0130 D4 shape.
+ *
+ * ## Why the fold is INSIDE this function and not at the three call sites
+ *
+ * Until #17527 every member here was `count(config.KEY)` against the TOP LEVEL
+ * alone. On an option-B project — every definition inside `packages[]`, none
+ * flattened up — all three commands reported `Data: 0 Objects`, and
+ * `os validate` raised `No objects defined — this stack has no data model` on a
+ * stack that declares a data model. Under `--strict` that warning is not
+ * cosmetic: it is the gating error, so a CONFORMING project could not pass its
+ * own validator, and the sentence it died on was false on its face.
+ *
+ * Folding at the call sites would have fixed the three commands and left the
+ * reader itself still top-level-only — and the reader is what
+ * `test/option-b-reader-acceptance.pin.test.ts` measures. That pin's probe
+ * CALLS readers; a row can only attach to a callable, and a row shaped like
+ * "assert `config.objects` is non-empty" is explicitly forbidden there because
+ * it is a second copy of the read it watches. So the fold lives here, the probe
+ * calls this function, and the pin goes red if it ever stops resolving
+ * `packages[]`.
+ *
+ * ## Why {@link authoringRuleUnionStack} and not a second fold
+ *
+ * `stack-collections.ts` is the ONE place this package resolves a
+ * package-owned collection, and its rule is strictly additive: a key the top
+ * level already carries WINS, because in today's additive shape that array
+ * already IS the union (`composeStacks` flattened it). That property is exactly
+ * what this reader needs — an object reachable from both the top level and a
+ * `packages[]` entry is counted ONCE, so the corrected number is the union and
+ * never the sum. A second fold written here could not have that property
+ * without re-deriving it, and two folds that disagree is a worse defect than
+ * the one being removed.
+ *
+ * The seam also derives the folded key set from the two schemas rather than a
+ * hand-list, so a metadata family added to the stack schema next month is
+ * folded without anyone remembering to come back here.
+ *
+ * ## What this DOES change beyond the counts
+ *
+ * `authoringRuleUnionStack` resolves package order through
+ * `resolveArtifactPackageOrder`, whose ADR-0112 refusals (a duplicate package
+ * id, a malformed entry) are deliberately not swallowed. `os validate` and
+ * `os compile` already drive that same seam on the same config well above their
+ * `collectMetadataStats` call, so their behaviour on a malformed `packages` is
+ * unchanged. `os info` did not, so it now reports such a stack as a named `422`
+ * through its own `catch` instead of printing `Data: 0 Objects` for an artifact
+ * it could not read — the "absence must be loud" direction, and the reason the
+ * duplicate-id case cannot double-count either.
+ *
+ * A stack whose top level carries its collections — every stack the platform
+ * emits today — is returned by IDENTITY from the seam, so this function's
+ * answer for it is byte-identical to the pre-#17527 one.
+ */
 export function collectMetadataStats(config: any): MetadataStats {
+  // The stack as DECLARED, whichever shape it arrived in. ⛔ Never re-read
+  // `config.KEY` below this line — a member that skipped the fold is exactly
+  // the defect #17527 removed, and it would be invisible in every other member.
+  const stack: any = authoringRuleUnionStack(config);
+
   const count = (val: any) => {
     if (Array.isArray(val)) return val.length;
     if (val && typeof val === 'object') return Object.keys(val).length;
     return 0;
   };
-  
+
   // Count total fields across all objects
   let fields = 0;
-  const objects = Array.isArray(config.objects) ? config.objects :
-    (config.objects && typeof config.objects === 'object' ? Object.values(config.objects) : []);
+  const objects = Array.isArray(stack.objects) ? stack.objects :
+    (stack.objects && typeof stack.objects === 'object' ? Object.values(stack.objects) : []);
   for (const obj of objects as any[]) {
     if (obj.fields && typeof obj.fields === 'object') {
       fields += Object.keys(obj.fields).length;
@@ -563,24 +630,24 @@ export function collectMetadataStats(config: any): MetadataStats {
   }
 
   return {
-    objects: count(config.objects),
-    objectExtensions: count(config.objectExtensions),
+    objects: count(stack.objects),
+    objectExtensions: count(stack.objectExtensions),
     fields,
-    views: count(config.views),
-    pages: count(config.pages),
-    apps: count(config.apps),
-    dashboards: count(config.dashboards),
-    reports: count(config.reports),
-    actions: count(config.actions),
-    flows: count(config.flows),
-    workflows: count(config.workflows),
-    agents: count(config.agents),
-    apis: count(config.apis),
-    positions: count(config.positions),
-    permissions: count(config.permissions),
-    datasources: count(config.datasources),
-    plugins: count(config.plugins),
-    devPlugins: count(config.devPlugins),
+    views: count(stack.views),
+    pages: count(stack.pages),
+    apps: count(stack.apps),
+    dashboards: count(stack.dashboards),
+    reports: count(stack.reports),
+    actions: count(stack.actions),
+    flows: count(stack.flows),
+    workflows: count(stack.workflows),
+    agents: count(stack.agents),
+    apis: count(stack.apis),
+    positions: count(stack.positions),
+    permissions: count(stack.permissions),
+    datasources: count(stack.datasources),
+    plugins: count(stack.plugins),
+    devPlugins: count(stack.devPlugins),
   };
 }
 
@@ -686,6 +753,12 @@ export interface ServerReadyOptions {
    * Credentials of the dev admin seeded on an empty DB this boot (dev only).
    * When present, the banner surfaces them so backend debugging never has to
    * guess the login. Absent when nothing was seeded.
+   *
+   * [#17081] The banner also says what this account SEES, because it is the
+   * only credential a first-run operator is given and it holds no app-declared
+   * capability — in an app that gates navigation on `requiredPermissions` it is
+   * the account that renders an empty menu. See the render site in
+   * {@link printServerReady} for the wording and the restraints on it.
    */
   seededAdmin?: { email: string; password: string };
   /**
@@ -709,6 +782,33 @@ export interface ServerReadyOptions {
    * rejections and empty installs are loud, a clean seed prints one dim line.
    */
   seeds?: SeedSourceSummary[];
+  /**
+   * The kernel's live seed-settlement tally as of the instant the banner prints
+   * (#17329) — `undefined` when no seed pipeline registered on this kernel.
+   *
+   * ## The omission this closes
+   *
+   * {@link seeds} is fed by the `seed-summary` service, and a source only
+   * records its outcome when its load FINISHES. Past the inline seed budget the
+   * load has not finished when the banner prints, so `seeds` is `undefined` and
+   * the `Seeds:` row is ABSENT — making the transcript of a boot that is still
+   * writing byte-indistinguishable from one that declared no seeds at all:
+   *
+   * ```text
+   *   ✓ Server is ready
+   *   …
+   *   Press Ctrl+C to stop          ← and 82 seconds later, 120 ERROR lines
+   * ```
+   *
+   * A reader who sees `Press Ctrl+C to stop` reasonably believes nothing more
+   * is coming. They believe it because the banner in front of them says, by
+   * omission, that seeding is not part of this boot.
+   *
+   * ⛔ Human-facing only. It does NOT replace the `objectstack:seed-settled`
+   * IPC message a parent process waits on — a shell script still cannot wait on
+   * prose, which is why holding the banner was refused as the repair.
+   */
+  seedSettlement?: SeedSettlementSnapshot;
   /**
    * Boot-phase kernel-logger diagnostics replayed from the boot-quiet stdout
    * window (#4012). `ObjectLogger` writes `warn` to stdout, so that window
@@ -905,6 +1005,46 @@ export function printServerReady(opts: ServerReadyOptions) {
       chalk.bold.green(`${opts.seededAdmin.email} / ${opts.seededAdmin.password}`),
     );
     console.error(chalk.dim('      seeded on empty DB · dev only — do not use in production'));
+    // [#17081] Say what this account SEES. It is the only credential a
+    // first-run operator is handed, and the banner used to stop at the line
+    // above — which asserts a login and says nothing about its audience. The
+    // account's standing is `admin_full_access`
+    // (`ADMIN_FULL_ACCESS_CAPABILITIES`, `@objectstack/spec/identity`): every
+    // PLATFORM capability (`setup.access`, `studio.access`, …) plus the `'*'`
+    // view-all/modify-all record bits — and NO app-declared capability, because
+    // a capability an app declares is the app's to grant. So in any app that
+    // gates its apps/tabs/nav on `requiredPermissions` (the `/me/apps` and
+    // `/meta/app` filters), this is by construction the account that resolves
+    // to an empty menu. Measured downstream on `objectstack-ai/ats`: of five
+    // personas, the four the app seeds each render their group and the one the
+    // banner prints renders none — and the operator read the empty shell as a
+    // broken product rather than as a scoped account.
+    //
+    // ⚠️ Three deliberate restraints, each ADR-0115's `:93` amendment applied
+    // here rather than routed around:
+    //   • DIM, not a warning. That paragraph excluded the dev-admin seed from
+    //     the `OS_ALLOW_DEV_PLUGIN` hazard set because "a warning about a
+    //     non-event spends the attention the real ones need". The exclusion is
+    //     KEPT, not overturned: these lines print only inside
+    //     `if (opts.seededAdmin)` — i.e. only when the seed actually fired and
+    //     the operator is holding the credential, so the subject is an event,
+    //     not a non-event — and they add no new line where there was none,
+    //     they finish a line already printed. A yellow `⚠` here would spend
+    //     precisely the attention that paragraph is protecting.
+    //   • It names a REACHABLE route. The same paragraph's rule is that a
+    //     degraded state must be branded "where an operator looks"; a route
+    //     that 404s would be that defect wearing the fix's clothes.
+    //     `Setup → Users` is `SETUP_APP` (`requiredPermissions:
+    //     ['setup.access']`, which this account holds) → the `nav_users`
+    //     contribution (`sys_user`, ungated), whose detail page carries the
+    //     "Grant permission set" related list. Pinned against those
+    //     declarations in `format.server-ready-dev-admin-audience.test.ts`, so
+    //     a rename there cannot leave this sentence pointing at nothing.
+    //   • It changes no seed. What the first run CREATES is a product-shape
+    //     decision and stays exactly as it was; only the banner's words move.
+    console.error(chalk.dim('      platform admin — Setup, Studio and every record, but NO app-declared capability, so'));
+    console.error(chalk.dim('      an app that gates navigation on requiredPermissions may show it an empty menu; grant'));
+    console.error(chalk.dim('      it a permission set under Setup → Users, or sign in as an account your app seeds'));
   }
   console.error('');
   // #8978 — name what actually booted, never a file that was not read.
@@ -932,6 +1072,10 @@ export function printServerReady(opts: ServerReadyOptions) {
   }
   if (opts.automation) printAutomationSummary(opts.automation);
   if (opts.seeds) printSeedSummary(opts.seeds);
+  // #17329 — AFTER the settled summary, never instead of it: a bundle with two
+  // config apps can have one finished (a real `Seeds:` row) and one still
+  // writing, and reporting only the first is the omission this closes.
+  if (opts.seedSettlement) printSeedsStillWriting(opts.seedSettlement);
   if (opts.bootDiagnostics) printBootDiagnostics(opts.bootDiagnostics);
   console.error('');
   console.error(chalk.dim('  Press Ctrl+C to stop'));
@@ -1092,6 +1236,54 @@ function printSeedSummary(sources: SeedSourceSummary[]) {
     return;
   }
   console.error(chalk.dim(`  Seeds:   ${line}`));
+}
+
+/**
+ * Say that seeding is still running, when it is (#17329).
+ *
+ * ## The transcript this repairs
+ *
+ * `printSeedSummary` above can only render sources that FINISHED — the
+ * `seed-summary` service is written by `recordSeedOutcome`, which the seeder
+ * calls at the end of a load. Past the inline seed budget (`AppPlugin` races it
+ * against `OS_INLINE_SEED_BUDGET_MS`, default 8s, then detaches the rest) the
+ * load has not finished when the banner prints, so there is nothing to read and
+ * the row simply does not appear. Measured on one showcase boot at
+ * `OS_INLINE_SEED_BUDGET_MS=1`: a probe read `{"pending":1,"inFlight":1}` at
+ * banner time, and the transcript carried **zero** `Seeds:` rows — identical,
+ * byte for byte, to an app that declares no seeds. Eighty-two seconds later
+ * that same boot emitted 120 `ERROR` lines.
+ *
+ * So the row's absence was carrying a claim ("seeding is not part of this
+ * boot") that the boot went on to contradict. This says *pending* instead.
+ *
+ * ## Why suppressed sources are named rather than counted as pending
+ *
+ * A multi-tenant or `skipSeedData` boot keeps `pending > 0` for the life of the
+ * process ON PURPOSE — those rows are written per organization later, or not at
+ * all. Rendering that as "still writing" would promise a completion that is
+ * never coming, which is the same defect pointed the other way. `inFlight` is
+ * the only half that means work is outstanding; `suppressed` gets its own
+ * sentence saying nothing further is due.
+ */
+function printSeedsStillWriting(settlement: SeedSettlementSnapshot) {
+  const { inFlight, suppressed } = settlement;
+
+  if (inFlight > 0) {
+    const n = `${inFlight} source${inFlight === 1 ? '' : 's'}`;
+    console.error(chalk.yellow(`  ⚠ Seeds:   pending — ${n} still writing`));
+    // The line the ruling asks for in as many words: the banner is not the end
+    // of this boot's output, and a reader at `Press Ctrl+C to stop` needs to
+    // know that before the wall arrives rather than after.
+    console.error(chalk.dim('      seeding continues in the background; its result prints after this banner'));
+  }
+
+  if (suppressed.length > 0) {
+    // Deduplicated: two config apps suppressed for the same cause is one fact
+    // about this deployment, not two.
+    const reasons = [...new Set(suppressed)].join(', ');
+    console.error(chalk.dim(`  Seeds:   not run this boot (${reasons})`));
+  }
 }
 
 export function printMetadataStats(stats: MetadataStats) {

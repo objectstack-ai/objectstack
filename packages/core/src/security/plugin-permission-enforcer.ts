@@ -92,12 +92,34 @@ export class PluginPermissionEnforcer {
    * (ADR-0025 F4). This is the structured `{ services, hooks, network, fs }`
    * grant that the cloud control plane persists to
    * `sys_package_installation.granted_permissions` after the user consents
-   * at install (ADR §3.5 step 2). The runtime calls this when materializing
-   * a third-party plugin so {@link SecurePluginContext} enforces exactly the
-   * consented surface — independent of whatever the manifest *requested*.
+   * at install (ADR §3.5 step 2), and which reaches the runtime on the
+   * environment artifact envelope. `AppPlugin.init()` calls this once per
+   * consent-bearing package an artifact carries (#13457) — the only
+   * production caller.
+   *
+   * ## ⚠️ REGISTERED, NOT ENFORCED — both halves, or the sentence lies
+   *
+   * REGISTERED at load: the consented set lands in this enforcer's registry
+   * and {@link PluginPermissionEnforcer.getPluginPermissions} answers from it.
+   *
+   * NOT ENFORCED: nothing queries that registry. {@link enforceServiceAccess}
+   * and {@link enforceHookTrigger} are reachable only through
+   * {@link SecurePluginContext}, which has ZERO production construction
+   * sites; {@link enforceFileRead}, {@link enforceFileWrite} and
+   * {@link enforceNetworkRequest} are called by nothing at all —
+   * `SecurePluginContext` included, so those three classes have no
+   * enforcement surface even in principle. A registered grant therefore
+   * records what was consented to and denies no operation.
+   *
+   * ⛔ Do not write that this class confines a plugin until a production
+   * construction site exists. `granted-permissions-not-enforced.pin.test.ts`
+   * fails on the claim AND on the measurement, so it goes red the day the
+   * seam lands and tells that author the sentence is theirs to rewrite.
+   * Building the per-plugin context is the ADR-0025 materialize seam
+   * (#17147, Phase 1b of #11333).
    *
    * Prefer this over {@link registerPluginPermissions} for distributed
-   * plugins: it enforces what was granted, not what was declared.
+   * plugins: it registers what was granted, not what was declared.
    */
   registerGrantedPermissions(pluginName: string, granted: GrantedPermissions | null | undefined): void {
     this.permissionRegistry.set(pluginName, buildPermissionsFromGrants(granted));

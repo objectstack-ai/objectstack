@@ -465,14 +465,16 @@ describe('validateReadonlyFlowWrites', () => {
       expect(findings[0].where).toBe('flow "fan_out" › loop "Each" › body › node "C"');
     });
 
-    // The engine's create-side strip does not judge a PLATFORM object at all
-    // (`staticReadonlyInsertSubject`: `managedBy` set, or a `sys_` name — its
-    // own 403 write guard governs it), so a create finding there would
-    // describe a strip that never runs. The UPDATE path applies no such
-    // exclusion, which the update controls pin.
+    // The engine's create-side strip does not judge a PLATFORM-INTERNAL object
+    // at all (`staticReadonlyInsertSubject`: a `sys_` name, or one of the three
+    // `managedBy` buckets whose own 403 write guard governs it), so a create
+    // finding there would describe a strip that never runs. The UPDATE path
+    // applies no such exclusion, which the update controls pin.
     it.each([
       ['a sys_ object', { name: 'sys_audit_entry', fields: { verdict: { type: 'text', readonly: true } } }],
-      ['a managedBy object', { name: 'audit_entry', managedBy: 'engine-owned', fields: { verdict: { type: 'text', readonly: true } } }],
+      ['an engine-owned object', { name: 'audit_entry', managedBy: 'engine-owned', fields: { verdict: { type: 'text', readonly: true } } }],
+      ['an append-only object', { name: 'audit_trail', managedBy: 'append-only', fields: { verdict: { type: 'text', readonly: true } } }],
+      ['a better-auth object', { name: 'identity_row', managedBy: 'better-auth', fields: { verdict: { type: 'text', readonly: true } } }],
     ])('does NOT flag a create_record into %s — outside the create-side strip; the same update_record is still flagged', (_label, platformObject) => {
       const create = {
         name: 'seed_audit',
@@ -488,6 +490,27 @@ describe('validateReadonlyFlowWrites', () => {
       const control = validateReadonlyFlowWrites({ objects: [platformObject], flows: [update] });
       expect(control).toHaveLength(1);
       expect(control[0].rule).toBe(FLOW_UPDATE_READONLY_FIELD);
+    });
+
+    // [#15719] …and the other half of the same narrowing: an app-authored
+    // object in a USER-WRITABLE bucket IS judged on create now, so suppressing
+    // the finding would hide a strip that really happens.
+    it.each([
+      ['platform', 'deal_platform'],
+      ['config', 'deal_config'],
+      ['system-data', 'deal_system_data'],
+    ])('DOES flag a create_record into a `managedBy: %s` object — the strip reaches it', (bucket, objectName) => {
+      const userWritable = { name: objectName, managedBy: bucket, fields: { verdict: { type: 'text', readonly: true } } };
+      const create = {
+        name: 'seed_deal',
+        runAs: 'user',
+        nodes: [{ id: 'c', type: 'create_record', label: 'C', config: { objectName, fields: { verdict: 'ok' } } }],
+        edges: [],
+      };
+      const findings = validateReadonlyFlowWrites({ objects: [userWritable], flows: [create] });
+      expect(findings).toHaveLength(1);
+      expect(findings[0].rule).toBe(FLOW_UPDATE_READONLY_FIELD);
+      expect(findings[0].path).toBe('flows[0].nodes[0].config.fields.verdict');
     });
 
     it('skips a templated objectName and a non-literal fields map on create, as on update', () => {

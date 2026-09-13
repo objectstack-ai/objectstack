@@ -41,7 +41,7 @@ export type ProtocolCompatResult =
   | {
       status: 'incompatible';
       runtimeMajor: number;
-      runtimeVersion: string;
+      protocolVersion: string;
       requiredRange: string;
       source: RangeSource;
       /** Stable, machine-readable diagnostic (also the shape emitted as JSON). */
@@ -55,7 +55,15 @@ export interface ProtocolIncompatibleDiagnostic {
   packageId: string;
   requiredRange: string;
   rangeSource: RangeSource;
-  runtimeVersion: string;
+  /**
+   * The protocol version the manifest was judged against -- `PROTOCOL_VERSION`,
+   * the protocol major padded to a semver ('17.0.0'), never the installed
+   * package version of the runtime. It was spelled `runtimeVersion` until this
+   * release, where a machine consumer read it as a package version with no
+   * prose to disambiguate; the prose in `message` was always unambiguous, the
+   * machine field was not.
+   */
+  protocolVersion: string;
   runtimeMajor: number;
   /** The declared major the package targets, when a single major is determinable. */
   targetMajor: number | null;
@@ -222,9 +230,9 @@ function comparatorAdmitsMajor(comparator: string, runtimeMajor: number): boolea
  */
 export function checkProtocolCompat(
   manifest: ProtocolHandshakeManifest,
-  runtimeVersion: string = PROTOCOL_VERSION,
+  protocolVersion: string = PROTOCOL_VERSION,
 ): ProtocolCompatResult {
-  const runtimeMajor = leadingMajor(runtimeVersion) ?? 0;
+  const runtimeMajor = leadingMajor(protocolVersion) ?? 0;
   const declared = resolveDeclaredRange(manifest);
 
   if (!declared) return { status: 'no-range', runtimeMajor };
@@ -245,13 +253,13 @@ export function checkProtocolCompat(
       : `objectstack migrate meta`;
   const message =
     `package '${packageId}' targets protocol ${declared.range} ` +
-    `(${declared.source}) but this runtime is protocol ${runtimeVersion}. ` +
+    `(${declared.source}) but this runtime is protocol ${protocolVersion}. ` +
     `This is a major-version break. Run: ${migrateCommand}`;
 
   return {
     status: 'incompatible',
     runtimeMajor,
-    runtimeVersion,
+    protocolVersion,
     requiredRange: declared.range,
     source: declared.source,
     diagnostic: {
@@ -259,7 +267,7 @@ export function checkProtocolCompat(
       packageId,
       requiredRange: declared.range,
       rangeSource: declared.source,
-      runtimeVersion,
+      protocolVersion,
       runtimeMajor,
       targetMajor,
       migrateCommand,
@@ -282,10 +290,10 @@ export type WarnFn = (message: string) => void;
  */
 export function assertProtocolCompat(
   manifest: ProtocolHandshakeManifest,
-  runtimeVersion: string = PROTOCOL_VERSION,
+  protocolVersion: string = PROTOCOL_VERSION,
   warn: WarnFn = (m) => console.warn(m),
 ): void {
-  const result = checkProtocolCompat(manifest, runtimeVersion);
+  const result = checkProtocolCompat(manifest, protocolVersion);
   const pkg = manifest.id ?? '<unknown>';
   switch (result.status) {
     case 'ok':
@@ -293,7 +301,7 @@ export function assertProtocolCompat(
     case 'no-range':
       warn(
         `[protocol] package '${pkg}' declares no engines.protocol range; ` +
-          `loading under protocol ${runtimeVersion} without a compatibility check (ADR-0087).`,
+          `loading under protocol ${protocolVersion} without a compatibility check (ADR-0087).`,
       );
       return;
     case 'unparsed-range':

@@ -88,8 +88,9 @@ const taskObject = {
         // expression is `record.title`, so the value is VISIBLY the sort key
         // the caller asked for, which is what makes the silent version so bad.
         //
-        // `subtask_total` is not: `summary` gets a real, maintained float
-        // column (`SqlDriver.createColumn` → `table.float`) and genuinely
+        // `subtask_total` is not: `summary` gets a real, maintained numeric
+        // column (`SqlDriver.createColumn` → `table.decimal` on tables created
+        // since #16318, a `table.float` on earlier ones) and genuinely
         // sorts. It is the control that fails if this gate is ever widened to
         // the spec's `COMPUTED_VALUE_TYPES` (`formula`/`summary`/`autonumber`),
         // which is the WRITE contract and would refuse two working types.
@@ -599,7 +600,8 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
     it('a summary field still sorts, in both directions — the family is `formula`, not "computed"', async () => {
         // CONTROL, and the one that matters most here: `summary` is computed
         // too, and it is NOT in this family. It gets a real maintained column
-        // (`table.float`) and orders correctly — measured on a real SqlDriver
+        // (`table.decimal` on tables created since #16318, `table.float` on
+        // earlier ones) and orders correctly — measured on a real SqlDriver
         // in #6924 (`orderBy <summary> desc` -> E D C B A over 5 4 3 2 1).
         //
         // This is what fails if the gate is ever widened from "materialises no

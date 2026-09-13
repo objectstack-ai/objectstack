@@ -180,7 +180,7 @@ export const PluginSchema = lazySchema(() => z.object({
   // refused `1.0.0-alpha.1` and `1.0.0+20230101` — a declaration refusing part
   // of what it declared.
   //
-  // ⭐ This is `PluginLoader.isValidSemanticVersion`'s spelling character for
+  // ⭐ This is `PluginLoader.isSemverShapedVersion`'s spelling character for
   // character (`packages/core/src/plugin-loader.ts`), deliberately, and not a
   // third grammar invented here. That check is the one the boot path has always
   // run, so adopting it makes the two declarations converge EXACTLY — which is
@@ -196,9 +196,20 @@ export const PluginSchema = lazySchema(() => z.object({
   // degenerate identifier forms SemVer forbids (`1.0.0-alpha..1`, `1.0.0-0123`,
   // `1.0.0+.`). Tightening to the official SemVer 2.0.0 regex would therefore
   // have NARROWED this key — refusing `01.1.1`, which it accepts today — which
-  // is the one thing the #16365 ruling forbids. Closing that fringe is its own
-  // card, on the loader and this key together.
-  version: z.string().regex(/^\d+\.\d+\.\d+(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?$/).optional().describe('Semantic Version'),
+  // is the one thing the #16365 ruling forbids.
+  //
+  // #17070 — so the DESCRIPTION moved instead, and the regex did not. With the
+  // accept set frozen by #16365's ruling, the only side of the declared/enforced
+  // pair still free to move is the claim, and `'Semantic Version'` — bare, with
+  // no qualifier — was the false half: it named a standard this key does not
+  // implement. The describe() below states the grammar actually enforced, in the
+  // shape `ManifestSchema.version` already uses (`kernel/manifest.zod.ts`, whose
+  // TSDoc spells `(major.minor.patch)` rather than leaning on the word SemVer),
+  // so an author reading it can predict the verdict on their own string. The
+  // eight forbidden forms are pinned as ACCEPTED in `plugin.test.ts` — stated
+  // and enforced, not narrated — and `PluginLoader`'s predicate was renamed
+  // `isSemverShapedVersion` in the same change, for the same reason.
+  version: z.string().regex(/^\d+\.\d+\.\d+(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?$/).optional().describe('Version: major.minor.patch, with an optional -prerelease and an optional +build suffix. Looser than SemVer 2.0.0 — leading zeroes (01.1.1) and empty identifiers (1.0.0-alpha..1) are accepted.'),
   description: z.string().optional(),
   author: z.string().optional(),
   homepage: z.string().url().optional(),

@@ -93,12 +93,27 @@
  * defects, zero diagnostics.
  *
  * SCOPE — the annotation must BE `any`, in a position where it erases checking
- * wholesale: a parameter, a variable/property/return annotation, a type alias,
- * or an `as any` / `satisfies any` / angle-bracket assertion. `any` NESTED inside a
- * larger type (`Record<string, any>`, `any[]`, `Promise<any>`) is deliberately
- * NOT flagged — the same line `check-exported-any.ts` draws for the same reason:
- * a nested `any` is a much broader question, and holding the gate at zero false
- * positives is what keeps red meaning broken.
+ * wholesale: a parameter, a variable/property/return annotation, an index
+ * signature, a type alias, or an `as any` / `satisfies any` / angle-bracket
+ * assertion. `any` NESTED inside a larger type (`Record<string, any>`, `any[]`,
+ * `Promise<any>`) is deliberately NOT flagged — the same line
+ * `check-exported-any.ts` draws for the same reason: a nested `any` is a much
+ * broader question, and holding the gate at zero false positives is what keeps
+ * red meaning broken.
+ *
+ * "NESTED" IS A CLAIM ABOUT THE `any`, NOT ABOUT ITS ANCESTRY (#14910). The three
+ * examples above share one property: the `any` is a COMPONENT of a composite type
+ * — a type argument, an element type — filling no annotation slot of its own, so
+ * its direct parent is a TypeReference/ArrayType/TupleType and `parent.type` is
+ * not it. It does NOT mean "somewhere under a type argument". A function type's
+ * return `any` fills the return slot of that function type and is flagged wherever
+ * the function type sits, `Array<() => any>` included: the annotation IS `any`,
+ * every call of such a function is unchecked, and the alternative reading would
+ * hand an author going red the one-token evasion this gate already refuses for
+ * parameters (below) — wrap the offending function type in a type argument and the
+ * gate goes green over an unchanged defect. Nothing here widens the boundary: it
+ * is still `parent.type === node` on the DIRECT parent, one sentence, same
+ * (zero-row) baseline.
  *
  * Casts and locals are in scope, and not for symmetry: a parameter-only rule is
  * defeated by exactly the edit an author reaches for when it goes red — move the
@@ -874,6 +889,22 @@ interface AnyFinding {
  * `any[]`, `Promise<any>` — has a TypeReference/ArrayType parent and is not a
  * finding. That boundary is the gate's zero-false-positive line; widening it is
  * a different question with a different (much larger) baseline.
+ *
+ * The boundary is the DIRECT parent and nothing else (#14910, and the SCOPE
+ * paragraph at the top of this file). `Array<() => any>` IS a finding, labelled
+ * `return type`: the `any`'s parent is the FunctionTypeNode whose return slot it
+ * fills, not the TypeReference above it. "Nested" describes an `any` that is a
+ * component of a composite type, never an `any` that happens to have a type
+ * argument among its ancestors.
+ *
+ * ORDER MATTERS in one place. `ts.isFunctionLike` is true for every
+ * SignatureDeclaration kind, IndexSignatureDeclaration included, so a bare
+ * `[k: string]: any` would fall into the `return type` arm and be reported at a
+ * position it does not occupy (#14910). Flagging it is right — an `any` index
+ * signature erases checking on every keyed access — so the fix is a label, not an
+ * exclusion, and the arm has to come BEFORE the function-like fallback. The label
+ * is half of a finding's row key, so a wrong one is a finding that cannot be
+ * declared or baselined the day such a site appears.
  */
 function describeAnyPosition(node: ts.Node): string | null {
   const parent = node.parent;
@@ -890,7 +921,12 @@ function describeAnyPosition(node: ts.Node): string | null {
   if (ts.isAsExpression(parent) && parent.type === node) return '`as any` assertion';
   if (ts.isSatisfiesExpression(parent) && parent.type === node) return '`satisfies any` assertion';
   if (ts.isTypeAssertionExpression(parent) && parent.type === node) return '`< any >` type assertion';
-  // Return annotations: functions, methods, arrows, getters, signatures.
+  // BEFORE the function-like fallback: an IndexSignatureDeclaration IS a
+  // SignatureDeclaration, so `isFunctionLike` claims it and its `any` would be
+  // reported as a `return type` it does not have.
+  if (ts.isIndexSignatureDeclaration(parent) && parent.type === node) return 'index signature';
+  // Return annotations: functions, methods, arrows, getters, signatures —
+  // including a FunctionTypeNode standing inside a type argument.
   if (ts.isFunctionLike(parent) && parent.type === node) return 'return type';
   return null;
 }
@@ -1542,6 +1578,60 @@ function selfTest(): never {
       );
     }
 
+    // ── RED, positions (#14910): the two shapes whose LABEL was the defect. ──
+    //    Both were already flagged before #14910, so a leg asserting only "it is
+    //    a finding" passes on the broken code and pins nothing. Each leg asserts
+    //    the label string, because the label is half a finding's row key.
+    //
+    //    1. An `any` index signature was reported as `return type`:
+    //       `ts.isFunctionLike` is true for every SignatureDeclaration kind, and
+    //       an IndexSignatureDeclaration is one. Flagging stays; the label is now
+    //       `index signature`.
+    //    2. A function type's return `any` standing inside a type argument is a
+    //       `return type` finding and stays one — the boundary is the DIRECT
+    //       parent, so `Array<() => any>` is the function type's return slot, not
+    //       a "nested" `any`. This leg is the header's rule made executable: the
+    //       day someone reads "nested `any` is deliberately not flagged" as
+    //       ancestry and narrows the arm, it goes red here rather than silently
+    //       handing authors a one-token evasion.
+    const redPositions = path.join(dir, 'red-positions.md');
+    fs.writeFileSync(
+      redPositions,
+      [
+        '# Position fixture', // 1
+        '', // 2
+        '<!-- os:check -->', // 3
+        '```ts', // 4
+        'interface Bag {', // 5
+        '  [key: string]: any;', // 6  ← index signature, NOT a return type
+        '}', // 7
+        'const fns: Array<() => any> = [];', // 8  ← return type, inside a type argument
+        'void fns;', // 9
+        '```', // 10
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    const positions = extractFromFile(redPositions, skillsRoot);
+    check(
+      positions.examples.length === 1,
+      `positions fixture: extracted ${positions.examples.length} block(s), expected 1`,
+    );
+    if (positions.examples.length === 1) {
+      const ex = positions.examples[0];
+      const got = findBareAny(ex.code, 'red-positions.ts')
+        .map((h) => `${ex.bodyStartLine + h.line - 1}:${h.where}`)
+        .sort();
+      const want = ['6:index signature', '8:return type'].sort();
+      check(
+        JSON.stringify(got) === JSON.stringify(want),
+        `positions fixture: got ${JSON.stringify(got)}, expected ${JSON.stringify(want)} — an \`any\` index ` +
+          `signature must be labelled "index signature" (\`isFunctionLike\` matches an IndexSignatureDeclaration, ` +
+          `so it used to read "return type"), and a function type's return \`any\` inside a type argument must ` +
+          `stay a "return type" finding (the boundary is the DIRECT parent, not ancestry)`,
+      );
+    }
+
     // ── GREEN: the same function honestly typed, plus every shape that must
     //    NOT be flagged, plus an UNMARKED block that must not be read at all. ─
     const green = path.join(dir, 'green.mdx');
@@ -1561,15 +1651,20 @@ function selfTest(): never {
         '  const bag: Record<string, any> = {};', // 11 nested — out of scope by design
         '  const rows: any[] = [];', // 12 nested
         `  const kind: Kind = 'any';`, // 13 string literal
-        '  void ctx; void bag; void rows; void kind;', // 14
-        '}', // 15
-        '```', // 16
-        '', // 17
-        'An UNMARKED block — the gate judges only what the author marked:', // 18
-        '', // 19
-        '```ts', // 20
-        'export function unchecked(ctx: any) { void ctx; }', // 21
-        '```', // 22
+        '  const later: Promise<any> = Promise.resolve(1);', // 14 nested (#14910)
+        '  const pair: [any, string] = [1, \'x\'];', // 15 nested, tuple element (#14910)
+        '  void ctx; void bag; void rows; void kind; void later; void pair;', // 16
+        '}', // 17
+        '', // 18
+        'type Widen<T = any> = T;', // 19 nested — a type-parameter DEFAULT, not an annotation (#14910)
+        'type Bags = Record<string, Array<any>>;', // 20 nested, two levels
+        '```', // 21
+        '', // 22
+        'An UNMARKED block — the gate judges only what the author marked:', // 23
+        '', // 24
+        '```ts', // 25
+        'export function unchecked(ctx: any) { void ctx; }', // 26
+        '```', // 27
         '',
       ].join('\n'),
       'utf8',
@@ -2632,7 +2727,10 @@ function selfTest(): never {
   }
   console.log(
     '✅  self-test: flags a bare `any` parameter / variable / property / return / alias / cast in a\n' +
-      '    marked block at the right page line, and flags nothing in an honestly typed one; a\n' +
+      '    marked block at the right page line, and flags nothing in an honestly typed one; an `any`\n' +
+      '    index signature is labelled `index signature` and not `return type`, while a function\n' +
+      '    type\'s return `any` inside a type argument stays a `return type` finding and the nested\n' +
+      '    shapes around it (`Promise<any>`, a `T = any` default, a tuple element) stay unflagged; a\n' +
       '    JSDoc-gutter-wrapped ```tsx block (client SDK surface) extracts, strips and maps lines\n' +
       '    identically, and a misplaced gutter-wrapped marker is still caught as an orphan; a marker\n' +
       '    shown as example text inside another fenced block is not an orphan, while a genuine\n' +
@@ -3049,7 +3147,10 @@ function main() {
         `       that cannot be typed against the real declarations (generated third-party\n` +
         `       code, a partial subtree). An unmarked block is honest; a marked \`any\` is not.\n\n` +
         `  Nested \`any\` (\`Record<string, any>\`, \`any[]\`, \`Promise<any>\`) is NOT flagged\n` +
-        `  — only an annotation, cast or alias that IS \`any\`.`,
+        `  — only an annotation, cast, index signature or alias that IS \`any\`. "Nested" means\n` +
+        `  the \`any\` is a COMPONENT of a composite type, not that a type argument sits\n` +
+        `  somewhere above it: \`Array<() => any>\` is a \`return type\` finding, because that\n` +
+        `  \`any\` IS the function type's return annotation.`,
     );
   }
 

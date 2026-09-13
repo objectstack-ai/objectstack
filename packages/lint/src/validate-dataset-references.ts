@@ -214,9 +214,14 @@ export function validateDatasetReferences(stack: AnyRec): DatasetRefFinding[] {
 
       if (verdict.kind === 'ok') {
         // The entry resolves to a real field — but `include` joins, so the
-        // field must BE a relationship. An injected column's type is
-        // registry-owned and invisible here, so it is unanswerable, not a miss.
-        if (verdict.injected) return;
+        // field must BE a relationship. [#16340] An injected column is judged
+        // on the same axis as an authored one: the graph carries the
+        // registry's own definition, so `owner_id` reads as the `lookup` it is
+        // and `created_at` as the `datetime` it is. The bail that used to sit
+        // here ("its type is registry-owned and invisible") is gone with the
+        // limitation that justified it. The primary key still falls through
+        // the untyped branch below — the DRIVER provisions it and no
+        // definition table describes it.
         const type = verdict.meta?.type;
         if (type && RELATIONSHIP_FIELD_TYPES.has(type)) return;
         findings.push({

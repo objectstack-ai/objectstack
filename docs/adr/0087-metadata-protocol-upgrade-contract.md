@@ -358,6 +358,17 @@ in N+1 — but never deleted": a retired entry is skipped by the loader
 fixture CI. Live-window entries (currently the protocol-15 ADR-0089 visibility
 aliases) stay load-active until they graduate.
 
+> **Superseded for metadata at rest** (2026-07-31, #3903; 2026-09-13, #12772).
+> The paragraph above states the rule for the **authoring** load path and for
+> nothing else, and a reader who stops here carries it to seams where it is
+> false. Retirement is an authoring-surface event: the loader passes a retired
+> entry over so a live author is taught the canonical spelling. Metadata at rest
+> has no author to teach, so it replays the full chain, retired entries
+> included — `sys_metadata` rows unconditionally (the 2026-07-31 addendum
+> below), and a compiled artifact inside the versioned window its own manifest
+> opens (the 2026-09-13 addendum below). Kept in place rather than rewritten,
+> because a superseded decision is still a record (Prime Directive #13).
+
 ### Ratified: the pre-launch launch-window exemption (majors 12–15)
 
 Majors 12–14 shipped breaks as **pre-launch one-step changes with no alias
@@ -758,9 +769,16 @@ checks all four by name (`published`, `no-spec-diff`, `no-metadata-surface-diff`
    was closed to them by the grammar rather than by any judgement about the claim,
    and the gate answered a true sentence about a member the diff never touched
    (#15627). A reference may therefore also be written `<path>#<a>.<b>.<member>`:
-   the object-literal nesting the member sits in, walked **structurally** from the
-   top of the file over a comment- and literal-masked projection, with the member's
-   definition taken from inside the resolved body. Bare references keep their exact
+   the nesting the member sits in, walked **structurally** from the top of the file
+   over a comment- and literal-masked projection, with the member's definition taken
+   from inside the resolved body. A leading segment names an **object literal or a
+   class** — both are containers a published member actually sits in, and reading
+   only the first left a narrowing on a class method in the state #15627 was filed
+   about: measured on `packages/objectql/src/engine.ts`, the dotted spelling was
+   refused outright while the bare `#delete` answered a true sentence about
+   `ObjectQL.delete`, a member the diff never touched (#17279). A **class
+   expression** (`const X = class { … }`) is deliberately not walked — that name
+   belongs to the binding, not to the class. Bare references keep their exact
    previous meaning. ⛔ A line number is never the disambiguator — this file's line
    numbers were measured to rot within one day. A dotted path that resolves to
    **zero** candidates, or to **more than one**, is reported by name and refused,
@@ -818,3 +836,93 @@ their PR touched.
 lands, per the ruling, and one of them (`declare-search-clone-response-contracts`)
 fails predicates 2 and 3 outright — it bumps `@objectstack/spec` and adds
 `packages/spec/src/api/protocol.zod.ts`, so it is not a member of this class.
+
+## Addendum (2026-09-13) — the artifact-ingestion door opens a versioned window (#12772)
+
+The addenda above reach authored source and metadata at rest in `sys_metadata`.
+A third seam was reached by neither: a **compiled artifact**
+(`objectstack build` → `dist/objectstack.json`) is data at rest *with a version
+stamp*, and nothing replayed the chain before its strict parse. Measured on
+#12772: an app built by its pinned released 17.1.0 toolchain carried **75**
+occurrences of `allowPurge` / `allowRestore` that its own source never wrote —
+the released builder injected the then-legal permission bits — and booting that
+artifact on a 17.2.0 runtime was refused at the door by the #12497 tombstone.
+`os migrate meta` could not help: it targets sources, not built artifacts, so
+the only operator remedy found was hand-editing the artifact JSON. The policy
+that closed it shipped inside the v17 line; it lived in the issue and in no
+addendum here, which is the omission this entry corrects (#17894).
+
+**The ruling** (#12772 triage, comment `5443380108`, 2026-08-27), verbatim:
+
+> So the conversion must be a *versioned forward conversion keyed off the
+> artifact's authored `specVersion`*, ⛔ not an unconditional strip — an
+> unconditional strip becomes wrong again the moment M2 lands and the keys are
+> legal once more.
+
+The M2 half is the load-bearing reason and not a stylistic one: #12497 retired
+these keys with the M2 anchor left open (#1883, `pm:on-hold`), so an
+unconditional strip would start deleting legal metadata the day the keys return.
+
+- **The window, and what keys it.** The policy is one function —
+  `packages/metadata-core/src/artifact-forward-conversion.ts#applyArtifactForwardConversions`
+  — and it compares two versions: the **floor** of the range the artifact's
+  manifest declares (`engines.protocol`, ADR-0025) and the `@objectstack/spec`
+  version the process actually runs. `floor < runtime` replays the FULL chain,
+  retired entries included, before the strict parse — the artifact is the
+  "consumer arriving late" D3 keeps every conversion forever for. `floor >=
+  runtime` replays nothing: the artifact claims the current or a newer surface,
+  and the strict parse, tombstones included, stays the authority. That branch is
+  what makes the window *versioned rather than a blanket amnesty*, and it is the
+  branch the M2 return needs. No declared range replays (an artifact of unknown
+  age is old data at rest, and conversions only rewrite shapes they positively
+  recognize); an unresolvable runtime version replays nothing, because amnesty
+  rests on positive version evidence.
+- **⚠️ The shipped key is the DECLARED FLOOR, not the authored version.** The
+  ruling says "authored `specVersion`"; what an artifact manifest actually
+  carries is a protocol *range*, so the implementation keys off that range's
+  floor. The difference is not cosmetic — `^17.0.0` is the range
+  `create-objectstack` stamps, so an app authored today lands inside the window.
+  Recorded here as the as-built reading, because the next two bullets are its
+  consequences.
+- **One policy, not per-door copies** (#12772, the card's own shape). Two
+  in-tree doors consume that one function: the metadata plugin's artifact
+  ingestion (`packages/metadata/src/plugin.ts`) and the runtime app plugin's
+  security bundle (`packages/runtime/src/app-plugin.ts`). ⛔ A door that
+  re-implements the comparison is the drift this bullet exists to forbid.
+- **⛔ The window does NOT admit default flips** (narrowed later, on #16693 and
+  #17885). A retirement whose old shape has no live meaning left is safe to
+  replay here. A DEFAULT FLIP is not: its old shape still parses, still means
+  something on today's authoring surface, and rewriting it is a
+  reinterpretation — sound only where "this input predates the flip" is a fact,
+  and at this door it is a guess, because the key is a declared floor and not an
+  age. The exclusion list is
+  `packages/metadata-core/src/artifact-forward-conversion.ts#DEFAULT_FLIPS_NOT_REPLAYED_HERE`;
+  an entry on it keeps firing at the stored-row seams and under
+  `os migrate meta`, where the old meaning is the only meaning.
+- **Where the window starts, relative to the schema.** A retired key carrying
+  only its *emitted default* parses as inert residue and is stripped silently at
+  the SCHEMA layer (the `acceptRetiredDefaultResidue` stage, ruled on #12845 and
+  recorded in this card's review, comments `5448522858` / `5448958115`); the
+  door's window is not what rescues that class. What the window admits is the
+  class the schema still refuses: a retired key carrying a NON-default value,
+  which keeps the #12497 tombstone at the current version and is convertible
+  only because the artifact says it was authored before the retirement.
+- **The flag's live inventory**, measured for this entry: three
+  `includeRetired: true` literals in runtime source — the artifact policy above,
+  the automation engine's stored-flow canonicalization seam
+  (`packages/services/service-automation/src/engine.ts#canonicalizeStoredFlow`,
+  which `registerFlow` calls), and
+  `packages/spec/src/conversions/stored.ts#applyConversionsToStoredItem` — and
+  **four** runtime callers, because the artifact policy is called by two doors.
+  `stored.ts` **pins** the flag rather than offering it
+  (`packages/spec/src/conversions/stored.ts#StoredConversionOptions` is an
+  `Omit` over `includeRetired`), so no caller can turn the stored-row replay
+  off.
+
+**What this does not decide.** The cloud composed-artifact door
+(`OS_COMPOSED_ARTIFACT_URL`) is a second door in another repository and was
+recorded, not filed, by the #12772 triage: it needs the same treatment and
+should CONSUME this policy rather than reimplement it. Nothing here changes the
+protocol handshake's jurisdiction either — a cross-major gap refuses at
+`checkProtocolCompat` before conversion could matter, and this window is for
+within-line retirements (17.1 → 17.2), which are the case that created it.

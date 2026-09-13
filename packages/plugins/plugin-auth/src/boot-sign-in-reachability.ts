@@ -132,11 +132,68 @@
  * were SEEN and accounts were SEEN ABSENT. Every other shape, `unknown`
  * included, is silent — an absence of measurement is not evidence of a dead
  * end.
+ *
+ * ## [#15074] Why a DELEGATED sign-in path silences this report
+ *
+ * The two store facts above are not, by themselves, the predicate this report
+ * stands in for. They were written for a deployment whose ONLY way in is a
+ * `sys_account` row; on a deployment whose sign-in is DELEGATED to an identity
+ * provider they describe the healthy resting state instead, and the message's
+ * claim — "NOBODY CAN SIGN IN … CANNOT BE RECOVERED FROM INSIDE" — is false
+ * for it. `AuthConfigSchema.ssoOnlyMode` says so in the contract, naming the
+ * `cloud-as-IdP` case explicitly:
+ *
+ *   > managed (IdP-provisioned) users simply hold no local credential
+ *
+ * Measured on the card: a cloud tenant environment (`platform_sso_enabled`)
+ * whose people are provisioned by the control plane and authenticated through
+ * the platform SSO handoff logged this at `error` on EVERY kernel boot —
+ * including a boot that had just served a successful sign-in. A recurring
+ * `error` that is false for a whole deployment class is the failure mode
+ * AGENTS.md → "Degradation log levels" names: it trains operators to skim
+ * `error`.
+ *
+ * So the report takes a THIRD fact — {@link SignInPathWiring}, resolved from
+ * the live runtime by {@link probeSignInPathWiring} — and fires only when this
+ * deployment has no delegated sign-in path either. Three configurations count,
+ * and each is a way in that needs no operator-written `sys_account` row:
+ *
+ *   - **`ssoOnlyMode`** (`OS_AUTH_SSO_ONLY` / config, advertised as
+ *     `features.ssoEnforced`) — the deployment DECLARING that its humans sign
+ *     in through an IdP and hold no local credential. Generic over the IdP,
+ *     which is why a platform-SSO tenant kernel is sure to carry it;
+ *   - **a configured social / OIDC provider** — its credentials are in the
+ *     config, so the path is wired and usable, and a human's account row is
+ *     written at their FIRST sign-in rather than by provisioning;
+ *   - **enterprise SSO with at least one registered IdP** — `plugins.sso` /
+ *     `OS_SSO_ENABLED` AND a `sys_sso_provider` row
+ *     ({@link probeSsoProvidersPresence}). SCIM-provisioned people with an IdP
+ *     behind them are exactly this population.
+ *
+ * ⛔ **The SELF-HOSTED direction is NOT silenced.** A deployment with humans,
+ * zero accounts and no delegated path is still the unrecoverable dead end
+ * #14353 / #14495 describe, and still reports at `error`. So is one that merely
+ * SWITCHED THE SSO PLUGIN ON with no IdP registered: that route signs nobody
+ * in, which is why the gate asks for a provider ROW rather than for the flag —
+ * and why #14353's `FEDERATED SIGN-IN IS WIRED` independence pin keeps its
+ * meaning unchanged. Silencing both shapes at once is the specific failure this
+ * card was warned against.
+ *
+ * ⛔ **The probe is untouched.** {@link probeSignInAccountsPresence} still asks
+ * only whether ANY `sys_account` row exists — tightening it to judge whether a
+ * row is USABLE is #15718's half, it re-decides three pinned #14353
+ * behaviours, and it carries an unruled maintainer question. This card gates
+ * the REPORT on a fact the probe never had; it does not move the probe.
+ *
+ * When the gate suppresses the report the shape is still recorded — at `debug`,
+ * under the same grep token, naming which configuration answered for it — so
+ * "why is this deployment quiet" has an answer in the log and not only here.
  */
 
 import { SystemObjectName } from '@objectstack/spec/system';
 import { isHumanUserRow } from './audience-posture.js';
 import { SELF_REGISTRATION_CLOSED } from './audience-posture.js';
+import { SSO_PROVIDER_OBJECT } from './sso-client-secret.js';
 
 /**
  * The stable NAME of this report — the grep token an operator or a support
@@ -247,6 +304,130 @@ export async function probeSignInReachability(
 }
 
 /**
+ * [#15074] The ONE store shape this report speaks about: humans SEEN, accounts
+ * SEEN ABSENT. Spelled once and read by everything that needs it — the
+ * predicate below, and the wiring resolver that must not pay for a probe on a
+ * boot that could never report.
+ */
+function isNoSignInAccountShape(facts: SignInReachabilityFacts): boolean {
+  return facts.humanUsers === 'present' && facts.signInAccounts === 'absent';
+}
+
+/**
+ * [#15074] Whether at least one enterprise-SSO identity provider is REGISTERED
+ * (`sys_sso_provider`) — the difference between an SSO route that is mounted
+ * and one a human could actually sign in through.
+ *
+ * Bounded to one row and shaped like its two siblings: never throws, and an
+ * unanswerable read is `'unknown'`, which the gate reads as "no delegated path
+ * proven" so an unreadable store keeps the report LOUD rather than quiet.
+ */
+export async function probeSsoProvidersPresence(
+  engine: BootProbeEngine | undefined,
+): Promise<BootStorePresence> {
+  if (!usable(engine)) return 'unknown';
+  try {
+    const rows = await engine.find(SSO_PROVIDER_OBJECT, { limit: 1 }, SYSTEM);
+    return rows.length > 0 ? 'present' : 'absent';
+  } catch {
+    return 'unknown';
+  }
+}
+
+/**
+ * [#15074] What this deployment has configured that can sign a human in
+ * WITHOUT an operator-written `sys_account` row.
+ *
+ * Every member is a WIRING fact, resolved from the live runtime rather than
+ * from the store's contents — the same split the neighbouring
+ * `VerificationPathWiring` makes next door. `false` everywhere is the shape
+ * #14353 was written for: the only way into that deployment is a credential
+ * row, and there are none.
+ */
+export interface SignInPathWiring {
+  /**
+   * `ssoOnlyMode` — `OS_AUTH_SSO_ONLY` or the config key, advertised as
+   * `features.ssoEnforced`. The deployment declaring IdP-only sign-in, which
+   * per its own contract means its managed users hold no local credential.
+   * Generic over the IdP: cloud-as-IdP (platform SSO) included.
+   */
+  ssoOnlyMode: boolean;
+  /** At least one social or OIDC provider is configured (credentials present). */
+  socialSignIn: boolean;
+  /** Enterprise SSO is wired AND at least one `sys_sso_provider` row exists. */
+  enterpriseSso: boolean;
+}
+
+/**
+ * [#15074] The subset of `AuthManager.getPublicConfig()` this gate reads.
+ * Declared structurally so the caller can hand the public config straight over,
+ * and so nothing here depends on the rest of that response.
+ */
+export interface SignInPathConfigView {
+  socialProviders?: unknown[];
+  features?: { sso?: boolean; ssoEnforced?: boolean };
+}
+
+/**
+ * [#15074] Resolve the wiring facts for a boot, paying for the provider probe
+ * only when the answer can change what is reported.
+ *
+ * Two short-circuits, both deliberate: a boot that is not in the dead-end shape
+ * cannot report whatever the wiring says, and a deployment that already has a
+ * delegated path proven from config needs no store read to confirm a second
+ * one. Every other boot pays exactly one bounded row read, and only when
+ * enterprise SSO is switched on.
+ */
+export async function probeSignInPathWiring(
+  facts: SignInReachabilityFacts,
+  config: SignInPathConfigView | undefined,
+  engine: BootProbeEngine | undefined,
+): Promise<SignInPathWiring> {
+  const ssoOnlyMode = config?.features?.ssoEnforced === true;
+  const socialSignIn = (config?.socialProviders?.length ?? 0) > 0;
+  const needsProviderProbe =
+    config?.features?.sso === true &&
+    !ssoOnlyMode &&
+    !socialSignIn &&
+    isNoSignInAccountShape(facts);
+  const enterpriseSso = needsProviderProbe
+    ? (await probeSsoProvidersPresence(engine)) === 'present'
+    : false;
+  return { ssoOnlyMode, socialSignIn, enterpriseSso };
+}
+
+/**
+ * [#15074] The gate itself: the REASON this deployment has a sign-in path that
+ * needs no `sys_account` row, or `null` when it has none.
+ *
+ * A reason rather than a boolean because the suppressed report is still
+ * recorded at `debug`, and "quiet because something is configured" is only
+ * useful to the operator if the line says WHICH thing.
+ */
+export function resolveDelegatedSignInPath(wiring?: SignInPathWiring): string | null {
+  if (!wiring) return null;
+  if (wiring.ssoOnlyMode) {
+    return (
+      "SSO-only sign-in is declared for this deployment (ssoOnlyMode / OS_AUTH_SSO_ONLY), so its " +
+      `humans are provisioned by an identity provider and hold no '${SystemObjectName.ACCOUNT}' row`
+    );
+  }
+  if (wiring.socialSignIn) {
+    return (
+      'a social/OIDC sign-in provider is configured, so a human signs in through it and their ' +
+      `'${SystemObjectName.ACCOUNT}' row is written at that first sign-in`
+    );
+  }
+  if (wiring.enterpriseSso) {
+    return (
+      `enterprise SSO is wired and at least one '${SSO_PROVIDER_OBJECT}' identity provider is ` +
+      'registered, so a human signs in through it without holding a credential row here'
+    );
+  }
+  return null;
+}
+
+/**
  * The predicate and its message, with no I/O — the whole decision, testable
  * fact by fact.
  *
@@ -262,10 +443,19 @@ export async function probeSignInReachability(
  *   - **`unknown` on either fact** — the store was not consulted (no engine,
  *     a probe failure). See the module doc: at `error` level this report makes
  *     a positive claim or none at all.
+ *   - **[#15074] a DELEGATED sign-in path is configured** — the deployment
+ *     signs its humans in through an identity provider, so "humans, zero
+ *     accounts" is its healthy resting state and not a dead end. Omitting
+ *     `wiring` answers as if nothing were configured, which keeps every
+ *     pre-#15074 caller (and the self-hosted deployment they describe) loud.
  */
-export function resolveNoSignInAccountReport(facts: SignInReachabilityFacts): string | null {
+export function resolveNoSignInAccountReport(
+  facts: SignInReachabilityFacts,
+  wiring?: SignInPathWiring,
+): string | null {
   if (facts.humanUsers !== 'present') return null;
   if (facts.signInAccounts !== 'absent') return null;
+  if (resolveDelegatedSignInPath(wiring)) return null;
 
   return (
     `[auth] ${NO_SIGN_IN_ACCOUNT_AT_BOOT}: this deployment has human '${SystemObjectName.USER}' rows ` +
@@ -323,6 +513,13 @@ export function resolveNoSignInAccountReport(facts: SignInReachabilityFacts): st
 export interface BootDiagnosticLogger {
   error?(message: string, ...rest: unknown[]): void;
   warn(message: string, ...rest: unknown[]): void;
+  /**
+   * [#15074] Where the SUPPRESSED shape goes. Optional because it carries no
+   * guarantee and needs none: a sink without it simply records nothing, and the
+   * only thing lost is a trace line. ⛔ Never a channel this report DEGRADES to
+   * — a real dead end is `error` with the `warn` fallback above, never `debug`.
+   */
+  debug?(message: string, ...rest: unknown[]): void;
 }
 
 /**
@@ -338,14 +535,34 @@ export interface BootDiagnosticLogger {
 export function reportIfNoSignInAccountExists(
   facts: SignInReachabilityFacts,
   logger?: BootDiagnosticLogger,
+  wiring?: SignInPathWiring,
 ): string | null {
   let message: string | null = null;
   try {
-    message = resolveNoSignInAccountReport(facts);
+    message = resolveNoSignInAccountReport(facts, wiring);
   } catch {
     return null;
   }
-  if (!message) return null;
+  if (!message) {
+    // [#15074] The one `null` that is worth a line: the dead-end SHAPE is here,
+    // and the only reason it is not a dead end is something this deployment has
+    // configured. Recorded at `debug` under the same grep token so the question
+    // "why is this quiet" is answerable from the log. Every other `null` —
+    // accounts present, no humans, an unanswered probe — stays fully silent.
+    try {
+      const delegated = isNoSignInAccountShape(facts) ? resolveDelegatedSignInPath(wiring) : null;
+      if (delegated) {
+        logger?.debug?.(
+          `[auth] ${NO_SIGN_IN_ACCOUNT_AT_BOOT}: NOT REPORTED — this deployment has human ` +
+          `'${SystemObjectName.USER}' rows and ZERO '${SystemObjectName.ACCOUNT}' rows, which is ` +
+          `the NORMAL state here and not a dead end, because ${delegated}.`,
+        );
+      }
+    } catch {
+      /* a logger that throws must not abort the boot */
+    }
+    return null;
+  }
   try {
     // An `error?.(…)` against a sink without `error` emits NOTHING, so the
     // `warn` fallback is an explicit branch rather than an optional call.

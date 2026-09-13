@@ -42,8 +42,24 @@ export default defineConfig({
       },
     ],
   },
-  // No `test` block: this package had no vitest config until now, so its suite
-  // ran on vitest's defaults. Leaving discovery untouched keeps this file's
-  // only effect the alias above — narrowing `include` here would silently drop
-  // the rest of the package's suite while this gate stayed green.
+  // Discovery is untouched — but this file is NOT "the alias and nothing else".
+  // The `test` block above carries exactly one key, and it is a run-exit fix
+  // (`disableConsoleIntercept`, #10374), not a discovery key: no `include`,
+  // `exclude` or `dir` is set anywhere here, so this package's suite is still
+  // discovered on vitest's defaults, as it was before this file existed.
+  //
+  // Narrowing `include` here would silently drop cases while the gate this file
+  // answers stayed green: `canonical-expression-envelopes.test.ts` (#11480) —
+  // the one suite the alias exists for — reads its population from disk, by
+  // scanning `src/` for `export const X: Page =` and flooring the count, so it
+  // would keep auditing this package's two pages and reporting green while
+  // every other suite here, discovered by vitest, simply stopped running.
+  //
+  // The two claims this paragraph replaces — that this file carried no `test`
+  // block, and that the alias was its sole effect — were true when it was
+  // authored (#11480), and were falsified in place when the disarm landed ABOVE
+  // them and left them standing (#10374/#13522). Deleting or rewriting this
+  // config now costs the disarm as well as the alias. Paraphrased rather than
+  // quoted, so a census grep for the retired wording does not land back on this
+  // file (#16917).
 });

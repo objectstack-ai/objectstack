@@ -101,6 +101,47 @@ describe('lowerCallables', () => {
     });
     expect(out.bodyExtracted).toBe(1);
     expect((out.lowered.hooks as any[])[0].body).toBeDefined();
+    // [#16546] The ref this hook was minted under (its own name here, no
+    // collision) is recorded as body-from-handler — what the two hook
+    // write-set rules read to redirect their finding's `path`.
+    expect((out.lowered.hooks as any[])[0].handler).toBe('contained_hook');
+    expect(out.loweredHookRefs.has('contained_hook')).toBe(true);
+    expect(out.loweredHookRefs.size).toBe(1);
+  });
+
+  it('[#16546] does NOT mark the ref when body extraction fails — no body was minted to misreport', () => {
+    const handler = (ctx: any) => {
+      ctx.record.slug = moduleHelper(ctx.record.name);
+    };
+    const out = lowerCallables({
+      hooks: [{ name: 'slugify_hook_2', handler, events: ['beforeInsert'], object: 'doc' }],
+    });
+    expect(out.bodyExtracted).toBe(0);
+    expect(out.loweredHookRefs.size).toBe(0);
+  });
+
+  it('[#16546] does NOT mark the ref when the hook already carries an author-written `body`', () => {
+    // `lowerCallables` never extracts over an existing `body` (`if (!hook.body)`)
+    // — the `handler` is still lowered to a ref for bundling, but the body
+    // judged by the write-set rules is the one the author wrote, so its `path`
+    // must stay `body.source`.
+    const handler = (ctx: any) => {
+      ctx.record.id = Math.round(Number(ctx.record.raw));
+    };
+    const out = lowerCallables({
+      hooks: [
+        {
+          name: 'authored_body_hook',
+          handler,
+          events: ['beforeInsert'],
+          object: 'doc',
+          body: { language: 'js', source: 'ctx.record.id = 1;' },
+        },
+      ],
+    });
+    expect((out.lowered.hooks as any[])[0].handler).toBe('authored_body_hook');
+    expect((out.lowered.hooks as any[])[0].body).toEqual({ language: 'js', source: 'ctx.record.id = 1;' });
+    expect(out.loweredHookRefs.size).toBe(0);
   });
 
   it('produces a JSON-serializable lowered shape', () => {

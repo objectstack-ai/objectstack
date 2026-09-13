@@ -974,7 +974,15 @@ function selfTest() {
     process.exit(1);
   }
 
-  console.log('✓ self-test: 19 cases');
+  // The verdict DERIVES its number from `batterySeen` — the very ledger the floor
+  // above just evaluated — so the printed count and the floor can never disagree.
+  // What "cases" counts here is BATTERIES that actually ran (the named
+  // scenarios), not `assert(` call sites: the floor above guarantees
+  // `batterySeen.size` equals `declaredBatteries.length` by this point, so
+  // reading it off the runtime ledger rather than the static roster is a
+  // distinction without a difference — and it is the ledger, not the roster,
+  // that a stopped-running battery would actually shrink (#16664).
+  console.log(`✓ self-test: ${batterySeen.size} cases`);
 
   return SELF_TEST_VERDICT;
 }

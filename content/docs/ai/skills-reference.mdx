@@ -15,7 +15,7 @@ ObjectStack ships a set of **domain-specific skills** that teach AI assistants (
 
 Skills install into a project from the [skills.sh](https://skills.sh) registry, reading the `skills/` directory of the [`objectstack-ai/objectstack`](https://github.com/objectstack-ai/objectstack) repository.
 
-**New projects — installed automatically.** `create-objectstack` runs the install step for you during scaffolding:
+**New projects — installed automatically.** `create-objectstack` runs the install step for you during scaffolding, for a single agent runtime: the bundle lands once, in `.claude/skills/`, and the scaffolder's closing summary prints the exact command it ran — with a different agent name for any other runtime you use.
 
 ```bash
 npm create objectstack@latest my-app
@@ -24,20 +24,22 @@ npm create objectstack@latest my-app
 **Existing projects — install the whole bundle:**
 
 ```bash
-npx skills add objectstack-ai/objectstack/skills --all
+npx skills add objectstack-ai/objectstack/skills --skill '*' --agent claude-code -y
 ```
 
-Run the same command again at any time to pull the latest versions — `--all` is idempotent, so updating is one command regardless of how many skills the bundle contains. To choose which skills to add instead of the full set, run `npx skills add objectstack-ai/objectstack/skills` without `--all`. (The `/skills` subpath scopes discovery to the published catalog — always keep it in the command.)
+Name your own runtime after `--agent` (`codex`, `cursor`, …) — the bundle is byte-identical whichever you name, and it lands **once**, in that agent's own directory (`.claude/skills/` for `claude-code`). Run the same command again at any time to pull the latest versions: re-running is idempotent per destination, so updating is one command regardless of how many skills the bundle contains. To choose which skills to add instead of the full set, run `npx skills add objectstack-ai/objectstack/skills` with neither `--skill` nor `--all` and pick from the list. (The `/skills` subpath scopes discovery to the published catalog — always keep it in the command.)
+
+**The multi-runtime opt-in, and what it costs.** Replacing `--skill '*' --agent claude-code -y` with `--all` installs for every runtime the skills CLI knows. It is the same bundle, but it writes it to **three** destinations instead of one — a full real copy in **both** `.agents/` and `agent/`, plus `.claude/` symlinks pointing into `.agents/`. Inside a git repository that means the first `git add -A` stages the bundle twice over, plus the symlinks. Idempotence does not help here: re-running is idempotent *per destination*, and it is the destination count that grows. Name one `--agent` per runtime you actually use instead.
 
 <Callout type="info">
-Skills are versioned as **one bundle**. You do not track or update each skill individually — `--all` always installs the matching set for the `@objectstack/spec` version in your project.
+Skills are versioned as **one bundle**. You do not track or update each skill individually — `--skill '*'` always installs the matching set for the `@objectstack/spec` version in your project.
 </Callout>
 
 ---
 
 {/* BEGIN GENERATED: skills (packages/spec/scripts/build-skill-docs.ts) — DO NOT EDIT */}
 
-ObjectStack ships **11 skills** — one per authoring domain, plus process skills for how a project is delivered. Each is self-contained: an AI assistant loads only the ones a task needs.
+ObjectStack ships **10 skills** — one per authoring domain, plus process skills for how a project is delivered. Each is self-contained: an AI assistant loads only the ones a task needs.
 
 ## Quick Reference
 
@@ -52,8 +54,7 @@ ObjectStack ships **11 skills** — one per authoring domain, plus process skill
 | 7 | [API](#api) | `api` | `skills/objectstack-api/` | Design the server-side API surface that an ObjectStack runtime exposes — REST endpoints, auth providers, realtime channels, error envelopes, batch contracts. |
 | 8 | [i18n](#i18n) | `i18n` | `skills/objectstack-i18n/` | Author ObjectStack translation bundles — object/field labels, view text, app navigation strings, automation messages — and configure locale fallback, coverage reporting, and the source layout. |
 | 9 | [Formula](#formula) | `expression` | `skills/objectstack-formula/` | Author CEL expressions used across ObjectStack — formula fields, field conditional rules (`visibleWhen`, `readonlyWhen`, `requiredWhen`), validation / sharing / visibility predicates, flow conditions, and dynamic seed values. This is the companion skill that objectstack-data, -ui, -api and -automation each tell you to load alongside them. |
-| 10 | [PM Dispatch](#pm-dispatch) | `process` | `skills/objectstack-pm-dispatch/` | Run a project-manager dispatch loop over a GitHub backlog: triage and queue ready issues, claim each one, dispatch it to a parallel developer agent that returns a structured JSON report, review the results against GitHub, and drive accepted pull requests to landing — escalating to the maintainer only what genuinely needs a human decision. Ships the developer-agent operating template the loop injects into every dispatch (no custom agent types required). |
-| 11 | [Upgrade](#upgrade) | `process` | `skills/objectstack-upgrade/` | Upgrade an ObjectStack metadata project across a protocol major — run the deterministic conversion chain, then work the semantic residue the chain cannot express (intent choices, custom code on retired APIs, stale prose) to a decision with the project's owner, and finish with a green `validate` plus a human-readable upgrade report. |
+| 10 | [Upgrade](#upgrade) | `process` | `skills/objectstack-upgrade/` | Upgrade an ObjectStack metadata project across a protocol major — run the deterministic conversion chain, then work the semantic residue the chain cannot express (intent choices, custom code on retired APIs, stale prose) to a decision with the project's owner, and finish with a green `validate` plus a human-readable upgrade report. |
 
 ---
 
@@ -180,20 +181,6 @@ Use when the user is writing an `F`, `P`, or `cel` tagged-template literal, or a
 Do not use for SQL fragments (driver-native) or L2 hook bodies (those belong in objectstack-data).
 
 **Tags:** `cel`, `formula`, `predicate`, `condition`, `validation`, `visibility`, `seed-dynamic`
-
----
-
-### PM Dispatch
-
-**Domain** `process` · **Path** `skills/objectstack-pm-dispatch/`
-
-Run a project-manager dispatch loop over a GitHub backlog: triage and queue ready issues, claim each one, dispatch it to a parallel developer agent that returns a structured JSON report, review the results against GitHub, and drive accepted pull requests to landing — escalating to the maintainer only what genuinely needs a human decision. Ships the developer-agent operating template the loop injects into every dispatch (no custom agent types required).
-
-Use when asked to "work through the backlog", "batch-dispatch issues", "派发 issue 给开发 agent", or to stand up a multi-agent delivery loop in an ObjectStack app project.
-
-Do not use for authoring ObjectStack metadata (the domain skills cover that), for a single already-scoped change you can just make, or as a replacement for the project's own conventions file — that file always wins.
-
-**Tags:** `pm`, `dispatch`, `backlog`, `triage`, `multi-agent`, `delivery`, `github`, `escalation`, `upstream`
 
 ---
 

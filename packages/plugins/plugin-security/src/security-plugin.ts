@@ -28,6 +28,8 @@ import {
   buildContextForUser,
   resolveDelegatorContext,
   intersectFieldMasks,
+  intersectDelegatedScope,
+  d10NarrowingStatement,
 } from './explain-engine.js';
 import type { ExplainDecision, ExplainOperation } from '@objectstack/spec/security';
 import type { II18nService, IMetadataService, IObjectQLEngine } from '@objectstack/spec/contracts';
@@ -94,6 +96,7 @@ import {
   normalizeTenancyPosture,
   postureEnforcesWall,
   postureUsesUnionScope,
+  type ObjectAccessScope,
   type TenancyPosture,
 } from '@objectstack/spec/security';
 import { PLATFORM_CAPABILITY_NAMES } from '@objectstack/spec/security';
@@ -105,6 +108,10 @@ import {
   type SharingWriteVerdict,
   type AuthoredRowWriteVerdict,
   type AuthoredRowWriteOperation,
+  type DelegationNarrowing,
+  SEED_SETTLEMENT_SERVICE,
+  type ISeedSettlementService,
+  type SeedSettlementSnapshot,
 } from '@objectstack/spec/contracts';
 import { matchesFilterCondition } from '@objectstack/formula';
 import { FieldMasker } from './field-masker.js';
@@ -119,6 +126,7 @@ import {
 } from './errors.js';
 import { assertEngineOwnedWriteAllowed } from './system-write-guard.js';
 import { bootstrapPlatformAdmin, shouldReplayBootstrapFor } from './bootstrap-platform-admin.js';
+import { claimSeedOwnership } from './claim-seed-ownership.js';
 import { createPlatformAdminService } from './platform-admin-service.js';
 import {
   backfillOrgAdminGrants,
@@ -1573,6 +1581,58 @@ export class SecurityPlugin implements Plugin {
             return 'own';
           }
         },
+        // [ADR-0090 D10 — maintainer ruling 2026-09-08, consequence 2] The
+        // delegated-read diagnostic. NOT an enforcement path: it decides
+        // nothing, narrows nothing, and never throws outward. It answers the
+        // one question a transport serving a delegated read owes its caller —
+        // "is this count a fact about the object, or about the ceiling?" —
+        // because the caller is an AI that will otherwise report `total: 0` as
+        // an answer (the measured failure on #16549).
+        //
+        // Resolved from the SAME two evaluator calls the CRUD middleware makes
+        // when it stashes `__readScope` (step 2.6), folded by the SAME
+        // `intersectDelegatedScope`. That is what stops it becoming a phantom
+        // check: it cannot report a narrowing the query did not have, and it
+        // cannot miss one the query did.
+        describeDelegationNarrowing: async (object: string, context?: any): Promise<DelegationNarrowing> => {
+          const none: DelegationNarrowing = { narrowed: false };
+          if (context?.isSystem) return none;
+          const delegatorId = context?.onBehalfOf?.userId;
+          if (!context?.userId || !delegatorId) return none;
+          try {
+            const del = await resolveDelegatorContext(this.ql, context);
+            // A dangling delegator is a fail-CLOSED DENIAL upstream, not a
+            // narrowing — the read never returns rows for this to describe.
+            if (del.kind !== 'resolved') return none;
+            const meta = await this.getObjectSecurityMeta(object);
+            const sets = await this.resolvePermissionSetsForContext(context);
+            const delegatorSets = await this.resolvePermissionSetsForContext(del.context);
+            const delegatorScope = this.permissionEvaluator.getEffectiveScope('read', object, delegatorSets, { isPrivate: meta.isPrivate });
+            const declared = this.permissionEvaluator.getDeclaredScope('read', object, sets, { isPrivate: meta.isPrivate });
+            const folded = intersectDelegatedScope(declared, delegatorScope);
+            if (!folded.narrowedByCeiling) return none;
+            return {
+              narrowed: true,
+              statement: d10NarrowingStatement({
+                object,
+                delegatorId: String(delegatorId),
+                effectiveScope: folded.agentLegScope,
+                delegatorScope,
+              }),
+              effectiveScope: folded.agentLegScope as ObjectAccessScope,
+              delegatorScope,
+            };
+          } catch (e) {
+            // ⛔ A diagnostic must never fail a read. Silence is the only safe
+            // direction: it degrades to exactly the behaviour that shipped
+            // before this method existed.
+            this.logger.warn?.(
+              `[security] describeDelegationNarrowing failed for object '${object}' — reporting no narrowing`,
+              e instanceof Error ? e : new Error(String(e)),
+            );
+            return none;
+          }
+        },
         // [#5493 / ADR-0105 D3] Authored-row-write evidence: does an
         // APP-AUTHORED (non-floor) RLS policy admit this row for this write,
         // with the platform's `created_by` ownership floor taken out by
@@ -2247,10 +2307,31 @@ export class SecurityPlugin implements Plugin {
       //      (plugin-sharing), so we pass the scope STRING, not the resolved set.
       if (permissionSets.length > 0) {
         const sc: any = opCtx.context;
+        // [ADR-0090 D10 — maintainer ruling 2026-09-08, option 1] The DELEGATED
+        // principal's own depth is its ceiling's DECLARED depth, and a ceiling
+        // that declares none says nothing about visibility — so the delegator's
+        // depth stands (`intersectDelegatedScope`). Before this, the ceiling's
+        // silence was read as `own` by `getEffectiveScope`'s owner-only default
+        // and every `viewAllRecords` manager collapsed to `own + shares` the
+        // moment an OAuth MCP client asked on their behalf.
+        //
+        // ⛔ VISIBILITY DEPTH only. The ceiling's CRUD bits (step 2.5 above),
+        // its `allowTransfer` refusal (step 2.9), its managed-object write
+        // denies and its private-object exclusion are all decided elsewhere and
+        // are untouched — see the subtraction table on the ceiling sets.
+        const depthFor = (opClass: 'read' | 'write'): { agentLegScope: string; delegatorScope: string } | null => {
+          if (!delegatorSets) return null;
+          const delegatorScope = this.permissionEvaluator.getEffectiveScope(opClass, opCtx.object, delegatorSets, { isPrivate: secMeta.isPrivate });
+          const declared = this.permissionEvaluator.getDeclaredScope(opClass, opCtx.object, permissionSets, { isPrivate: secMeta.isPrivate });
+          return { agentLegScope: intersectDelegatedScope(declared, delegatorScope).agentLegScope, delegatorScope };
+        };
         // The AGENT's own depth drives plugin-sharing's owner-match for the
         // agent identity (unchanged on the non-delegated path).
         if (['find', 'findOne', 'count', 'aggregate'].includes(opCtx.operation)) {
-          sc.__readScope = this.permissionEvaluator.getEffectiveScope('read', opCtx.object, permissionSets, { isPrivate: secMeta.isPrivate });
+          const delegated = depthFor('read');
+          sc.__readScope = delegated
+            ? delegated.agentLegScope
+            : this.permissionEvaluator.getEffectiveScope('read', opCtx.object, permissionSets, { isPrivate: secMeta.isPrivate });
           // [ADR-0090 D10] Stash the DELEGATOR's own read depth SEPARATELY (not a
           // min of the two). The OWD/sharing owner-match is identity-scoped:
           // plugin-sharing re-runs the owner filter under the delegator's
@@ -2258,14 +2339,13 @@ export class SecurityPlugin implements Plugin {
           // intersection. Narrowing __readScope alone would wrongly scope the
           // AGENT's identity to the delegator's depth (owner_id = agentId),
           // hiding the very rows the delegator legitimately owns.
-          if (delegatorSets) {
-            sc.__delegatorReadScope = this.permissionEvaluator.getEffectiveScope('read', opCtx.object, delegatorSets, { isPrivate: secMeta.isPrivate });
-          }
+          if (delegated) sc.__delegatorReadScope = delegated.delegatorScope;
         } else if (['update', 'delete', 'transfer', 'restore', 'purge'].includes(opCtx.operation)) {
-          sc.__writeScope = this.permissionEvaluator.getEffectiveScope('write', opCtx.object, permissionSets, { isPrivate: secMeta.isPrivate });
-          if (delegatorSets) {
-            sc.__delegatorWriteScope = this.permissionEvaluator.getEffectiveScope('write', opCtx.object, delegatorSets, { isPrivate: secMeta.isPrivate });
-          }
+          const delegated = depthFor('write');
+          sc.__writeScope = delegated
+            ? delegated.agentLegScope
+            : this.permissionEvaluator.getEffectiveScope('write', opCtx.object, permissionSets, { isPrivate: secMeta.isPrivate });
+          if (delegated) sc.__delegatorWriteScope = delegated.delegatorScope;
         }
       }
 
@@ -3392,6 +3472,37 @@ export class SecurityPlugin implements Plugin {
     // insert seed rows. Falls back to immediate execution when the
     // kernel does not expose `hook` (test stubs).
     let bootstrapRanOnce = false;
+    /**
+     * Who the seed-ownership claim hands rows to — the admin the last bootstrap
+     * pass promoted, or the one it found already holding the unscoped grant.
+     *
+     * Kept because the claim is not a single pass (see the `app:seeded` hook
+     * below). `bootstrapPlatformAdmin` is the ONE place that answers "who is the
+     * platform admin" from the grant rows — through a two-leg, ordered, bounded
+     * scan that took its own card to get right — so the re-run reads its answer
+     * rather than growing a second copy of that scan here.
+     */
+    let claimTargetAdminUserId: string | undefined;
+    /**
+     * "Has this boot's own seed data finished landing?", asked through the
+     * published `seed-settlement` contract rather than by sniffing the runtime's
+     * internal `seed-datasets` service — that array's presence says a seed
+     * source EXISTS, never whether it has SETTLED, and the gap between those two
+     * facts is the whole defect. `undefined` means no seed pipeline registered
+     * on this kernel, which by `kernel:ready` is a fact and not a not-yet (every
+     * source is declared in Phase 2 `start()`).
+     */
+    const readSeedSettlement = (): SeedSettlementSnapshot | undefined => {
+      try {
+        const svc = (ctx as any).getService?.(SEED_SETTLEMENT_SERVICE) as
+          | ISeedSettlementService
+          | undefined;
+        if (!svc || typeof svc.snapshot !== 'function') return undefined;
+        return svc.snapshot();
+      } catch {
+        return undefined;
+      }
+    };
     // [ADR-0094] Guard so the env-projection wiring runs exactly once even
     // though runBootstrap re-runs (e.g. after the first user insert) —
     // registerMutationProjector replaces idempotently, but the legacy
@@ -3548,7 +3659,16 @@ export class SecurityPlugin implements Plugin {
         }
         const report = await bootstrapPlatformAdmin(ql, this.bootstrapPermissionSets, {
           logger: ctx.logger,
+          // Read per run, never cached: a pass at `kernel:ready` and a replay
+          // after a later sign-up see different tallies, and it is exactly the
+          // difference that decides whether that pass's claim is the last word.
+          seedSettlement: readSeedSettlement(),
         });
+        // Remember the claim's target for the `app:seeded` re-run below. Only
+        // ever overwritten with a real answer: a later pass that returns none
+        // (walled posture, an unreadable engine) must not erase the admin an
+        // earlier pass resolved and leave the re-run with nobody to claim to.
+        if (report?.adminUserId) claimTargetAdminUserId = report.adminUserId;
         // Which organizations this boot seeds. Resolved ONCE per bootstrap run
         // and reused by all four catalog steps, so a sweep costs one
         // organization enumeration rather than four.
@@ -3831,6 +3951,62 @@ export class SecurityPlugin implements Plugin {
       (ctx as any).hook('kernel:ready', runBootstrap);
     } else {
       void runBootstrap();
+    }
+
+    // ── Re-run the seed-ownership CLAIM when the seed actually settles ────────
+    //
+    // The claim used to run exactly once per database lifetime, inside the one
+    // pass that promotes the first admin — and that instant is not the moment
+    // the seed is done. `AppPlugin` races its inline seed against
+    // `OS_INLINE_SEED_BUDGET_MS` (default 8 s) and continues an over-budget
+    // bundle in the BACKGROUND rather than block kernel start, so for any
+    // non-trivial app the seeder is still writing while the claim walks the
+    // registry. Registry order and seed order are unrelated: every object whose
+    // rows land after its walk stayed `owner_id IS NULL` forever, because
+    // nothing re-ran the claim. Measured on a CRM bundle: 73 rows across six
+    // objects, the same loser set on two independent boots.
+    //
+    // ⛔ The fix is NOT to widen `shouldReplayBootstrapFor`. A replayed
+    // bootstrap short-circuits on `already_have_admin` and RETURNS before it
+    // ever reaches the claim, so a wider trigger re-runs a pass that cannot do
+    // the thing that was missed. What re-runs here is the claim itself.
+    //
+    // `app:seeded` is the published settle signal for exactly that background
+    // continuation — the runtime settles the source BEFORE it triggers, so a
+    // consumer inside this hook sees its own signal already reflected in the
+    // tally. It fires once per app bundle, so the first fire is not necessarily
+    // the last; the claim is idempotent (only NULL / `usr_system`-owned rows
+    // match) and every pass reports whether its own reading was final, so
+    // running on each fire costs a no-op walk and buys the guarantee.
+    //
+    // ⚠️ Scope: this moves ownership for exactly the rows the promotion-time
+    // pass missed — the predicates, the target admin and the object filter are
+    // the one-shot pass's own, unchanged. A row a human already owns is not
+    // matched by either predicate and cannot be touched here.
+    //
+    // No admin yet ⇒ nothing to do: an in-budget seed settles before any user
+    // exists, and the promotion that follows does its own claim against a seed
+    // that has already settled.
+    if (typeof (ctx as any).hook === 'function') {
+      (ctx as any).hook('app:seeded', async (payload?: { appId?: string; overBudget?: boolean }) => {
+        const adminUserId = claimTargetAdminUserId;
+        if (!adminUserId) return;
+        try {
+          await claimSeedOwnership(ql, adminUserId, {
+            logger: ctx.logger,
+            seedSettlement: readSeedSettlement(),
+          });
+        } catch (e) {
+          // Best-effort, exactly like the promotion-time call: a failed claim
+          // leaves the rows unowned and the next run claims them, because the
+          // predicate is still true of them. It must not break the boot.
+          ctx.logger.warn('[security] seed-settle ownership claim failed', {
+            appId: payload?.appId,
+            overBudget: payload?.overBudget,
+            error: (e as Error).message,
+          });
+        }
+      });
     }
 
     // Re-run bootstrap after a sys_user write that can change the promotion

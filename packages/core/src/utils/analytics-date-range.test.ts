@@ -37,7 +37,7 @@ import {
   type DateRangePreset,
 } from '@objectstack/spec/data';
 import { resolveFilterToken } from './filter-tokens.js';
-import { zonedDateStartToUtcMs } from './datetime.js';
+import { zonedDateStartToUtcMs, nextUtcCalendarDay } from './datetime.js';
 import {
   resolveAnalyticsDateRangePreset,
   resolveAnalyticsDateRangeString,
@@ -51,6 +51,30 @@ const NOW = new Date('2026-09-09T12:34:56.789Z');
 const ROLLING: readonly DateRangePreset[] = ['last_7_days', 'last_30_days', 'last_90_days'];
 
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+
+/**
+ * Reference instants the END pin sweeps, chosen so a wrong shift cannot hide in
+ * a tidy month: two DST transition days (a 23- and a 25-hour calendar day in
+ * the zones below), both year boundaries, a quarter/month boundary, and a
+ * February.
+ */
+const SWEEP_INSTANTS = [
+    '2026-09-09T12:34:56.789Z',
+    '2026-01-01T00:30:00.000Z',
+    '2026-02-28T10:00:00.000Z',
+    '2026-03-08T08:00:00.000Z',   // America/New_York starts DST — a 23-hour day
+    '2026-03-31T23:00:00.000Z',   // Pacific/Chatham's DST-end week, and a quarter edge
+    '2026-04-05T02:00:00.000Z',   // Pacific/Chatham ends DST — a 25-hour day
+    '2026-11-01T05:30:00.000Z',   // America/New_York ends DST — a 25-hour day
+    '2026-12-31T23:59:00.000Z',
+].map((iso) => new Date(iso));
+
+const SWEEP_ZONES: ReadonlyArray<string | undefined> = [
+    undefined,
+    'Asia/Shanghai',
+    'America/New_York',
+    'Pacific/Chatham',
+];
 
 describe('#16322 — every declared preset resolves to a real window', () => {
     it('resolves all thirteen, and none of them is the name of the preset', () => {
@@ -238,5 +262,83 @@ describe('#16322 — a string outside the vocabulary is REFUSED, not widened', (
         }
         expect(resolveAnalyticsDateRangeString('today', { now: NOW }))
             .toEqual(resolveAnalyticsDateRangePreset('today', { now: NOW }));
+    });
+});
+
+describe('#17341 — the END of every calendar window is one CALENDAR day after the prescription', () => {
+    // The docblock above `PRESET_WINDOW_TOKENS` records WHY this table states
+    // its own ends instead of reading `DATE_RANGE_PRESET_MACRO_WINDOWS`: that
+    // table is written for `$between`, whose bare-day upper bound covers the
+    // whole day, so its end names the day BEFORE the one this table stops at.
+    //
+    // ⛔ That sentence carried a hand-typed count ("the eight period presets")
+    // and went false the moment the spec corrected `today` and `yesterday` to
+    // close on their own last day — a count is a census and a census goes
+    // stale silently. Nothing here counts: the two families are READ OFF the
+    // prescription, so an eleventh preset reds this file instead of rotting
+    // that sentence.
+    const PRESCRIBED_CLOSED = DATE_RANGE_PRESETS.filter(
+        (p) => DATE_RANGE_PRESET_MACRO_WINDOWS[p][1] !== null,
+    );
+    const PRESCRIBED_OPEN = DATE_RANGE_PRESETS.filter(
+        (p) => DATE_RANGE_PRESET_MACRO_WINDOWS[p][1] === null,
+    );
+
+    it('the split is DERIVED from the spec table, and it is the same one `endExclusive` draws', () => {
+        // Two partitions of one vocabulary, computed from opposite sides: the
+        // spec's open arm, and this module's rolling family. They must be the
+        // same set — if they ever diverge, one of the two docblock sentences
+        // that name a family is describing presets that are not in it.
+        expect(PRESCRIBED_CLOSED.length + PRESCRIBED_OPEN.length).toBe(DATE_RANGE_PRESETS.length);
+        expect([...PRESCRIBED_OPEN].sort()).toEqual([...ROLLING].sort());
+        for (const preset of PRESCRIBED_CLOSED) {
+            expect(resolveAnalyticsDateRangePreset(preset, { now: NOW }).endExclusive, preset).toBe(true);
+        }
+        // The control: without it a filter that selected NOTHING would pass
+        // every assertion below by vacuity.
+        expect(PRESCRIBED_CLOSED.length).toBeGreaterThan(0);
+        expect(PRESCRIBED_OPEN.length).toBeGreaterThan(0);
+    });
+
+    it.each([...PRESCRIBED_CLOSED])(
+        "%s stops before the day AFTER the prescription's inclusive last day",
+        (preset) => {
+            const prescribedEnd = DATE_RANGE_PRESET_MACRO_WINDOWS[preset][1]!.replace(/^\{|\}$/g, '');
+            for (const now of SWEEP_INSTANTS) {
+                for (const tz of SWEEP_ZONES) {
+                    const where = `${preset} @ ${tz ?? 'UTC'} @ ${now.toISOString()}`;
+                    const lastDay = String(resolveFilterToken(prescribedEnd, { now, timezone: tz }));
+                    const stopsBefore = nextUtcCalendarDay(lastDay);
+                    expect(stopsBefore, where).not.toBeNull();
+                    const expected = new Date(zonedDateStartToUtcMs(stopsBefore!, tz)).toISOString();
+                    expect(resolveAnalyticsDateRangePreset(preset, { now, timezone: tz }).end, where)
+                        .toBe(expected);
+                }
+            }
+        },
+    );
+
+    it('a CALENDAR day, not 86_400_000 ms — the DST cell that tells the two apart', () => {
+        // Pacific/Chatham leaves DST on the first Sunday of April, so
+        // 2026-04-05 is 25 hours long there — and it is exactly the day
+        // `this_week`'s prescription names as its last. A "+ one day" written
+        // in milliseconds lands an hour inside the window, silently, and every
+        // other assertion in this file still passes.
+        const now = new Date('2026-04-05T02:00:00.000Z');
+        const tz = 'Pacific/Chatham';
+        const lastDay = String(resolveFilterToken('week_end', { now, timezone: tz }));
+        const lastDayStart = zonedDateStartToUtcMs(lastDay, tz);
+        const end = Date.parse(resolveAnalyticsDateRangePreset('this_week', { now, timezone: tz }).end);
+        expect(end - lastDayStart).toBe(25 * 60 * 60 * 1000);
+        expect(end - lastDayStart).not.toBe(24 * 60 * 60 * 1000);
+    });
+
+    it('the open-arm presets have no end to be earlier — `null` on BOTH sides', () => {
+        for (const preset of PRESCRIBED_OPEN) {
+            expect(DATE_RANGE_PRESET_MACRO_WINDOWS[preset][1], preset).toBeNull();
+            const w = resolveAnalyticsDateRangePreset(preset, { now: NOW });
+            expect(w.endExclusive, preset).toBe(false);
+            expect(w.end, preset).toBe(NOW.toISOString());
+        }
     });
 });

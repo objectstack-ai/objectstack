@@ -196,15 +196,27 @@ async function makeLocalBackend(): Promise<Backend & { rootDir: string }> {
   };
 }
 
-async function makeS3Backend(): Promise<Backend> {
+/**
+ * @param keyPrefix the adapter's key namespace, or `null` for bucket-root keys.
+ *   The seed writes bucket keys UNDER that namespace while the cases keep
+ *   supplying and expecting unprefixed caller keys — which is precisely the
+ *   property being asserted: from the caller's side a namespaced adapter must be
+ *   indistinguishable from a bucket-root one, at every door and in the cursor.
+ */
+async function makeS3Backend(keyPrefix: string | null = null): Promise<Backend> {
   fakeS3.reset();
-  const adapter = new S3StorageAdapter({ bucket: 'conformance-bucket', region: 'us-east-1' });
+  const adapter = new S3StorageAdapter({
+    bucket: 'conformance-bucket',
+    region: 'us-east-1',
+    keyPrefix,
+  });
+  const bucketPrefix = keyPrefix === null ? '' : `${keyPrefix}/`;
 
   return {
     adapter,
     async seed(keys) {
       for (const key of keys) {
-        fakeS3.objects.set(key, {
+        fakeS3.objects.set(bucketPrefix + key, {
           size: Buffer.byteLength(key, 'utf8'),
           lastModified: new Date('2026-01-01T00:00:00.000Z'),
         });
@@ -218,7 +230,13 @@ async function makeS3Backend(): Promise<Backend> {
 
 const BACKENDS = [
   { name: 'local', make: makeLocalBackend },
-  { name: 's3', make: makeS3Backend },
+  { name: 's3', make: () => makeS3Backend(null) },
+  // The SAME table, run against an adapter confined to a key namespace. Every
+  // case below supplies unprefixed prefixes and asserts unprefixed keys, so a
+  // row here that passes is a statement that the namespace is invisible to the
+  // caller — including through the cursor, whose encoded key would otherwise
+  // carry the prefix out and back in.
+  { name: 's3 (key-prefixed)', make: () => makeS3Backend('tenant_a') },
 ] as const;
 
 /** Page a prefix to exhaustion, returning one entry per page. */

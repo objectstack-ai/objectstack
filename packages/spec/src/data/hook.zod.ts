@@ -451,6 +451,33 @@ export const HookContextSchema = lazySchema(() => z.object({
    * - delete (bulk, multi:true) — before, PER MATCHED ROW: { id: ID, options: EngineDeleteOptions }
    * - delete (bulk, multi:true) — after, PER MATCHED ROW: { id: ID, options: DriverOptions }
    *
+   * WHICH RECORD `data` IS, on `beforeUpdate` (#16344, maintainer ruling,
+   * decision batch #87, 2026-09-08)
+   *
+   * On the UPDATE verb `input.data` is **the record the engine intends to
+   * persist**, not the caller's submission. A `readonly` field the caller
+   * supplied a value for is stripped from it BEFORE the before phase is
+   * dispatched, so no hook can derive a persisted column from a value the row
+   * will never contain. What a hook that needs the caller's own words reads is
+   * {@link HookContext.submitted} — the same payload as sent, diagnostics only.
+   *
+   * WHICH fields, exactly: the subject set is the update strip's own
+   * (`stripReadonlyFields`), which is author-declared `readonly: true` AND the
+   * types whose value the runtime owns end to end — `autonumber` today
+   * (#5503), implicitly read-only whether or not the author wrote the flag.
+   * Deliberately the same set rather than a second opinion: a pass that hid a
+   * different set from the one enforced below would put the two out of step,
+   * which is the whole failure this ordering exists to remove.
+   *
+   * ⛔ NOT `readonlyWhen`. A conditional lock is judged against the prior
+   * record, per row on the predicate path, and #9107 leaves it hook-writable
+   * on purpose.
+   *
+   * Two things this deliberately does NOT change: a hook's OWN write to a
+   * read-only column still lands (#5591 / #14088 — the enforcement pass stays
+   * after the hooks, where provenance is knowable), and `beforeInsert` is
+   * untouched (ruling C, #14147, keeps the create-side strip post-hook).
+   *
    * DECLARATIVE SURFACE — what an app author is actually handed
    *
    * `bindHooksToEngine` wraps every metadata `Hook` in `wrapDeclarativeHook`,
@@ -554,10 +581,45 @@ export const HookContextSchema = lazySchema(() => z.object({
    *    context carries THE one payload, not a copy — `driver.updateMany` takes
    *    one SET clause for N rows — so a rewrite applies to the whole batch
    *    whichever row's dispatch made it, and rewrites accumulate in dispatch
-   *    order. A rewrite CONDITIONED on the row is therefore out of contract:
-   *    it widens to every matched row instead of scoping itself. Per-row
-   *    `previous` is supplied so a guard can REFUSE (throw), not so a rewrite
-   *    can be aimed.
+   *    order. A rewrite CONDITIONED on the row therefore cannot scope itself:
+   *    whatever one row's dispatch writes is written to every matched row.
+   *    Per-row `previous` is supplied so a guard can REFUSE (throw), and —
+   *    ruled on #16074 — so a `before*` hook can make a
+   *    ROW-INVARIANT-IN-EFFECT rewrite: one whose written KEY SET is the same
+   *    on every matched row AND is assigned IN PLACE
+   *    (`ctx.input.data.customized = true`), such as a provenance stamp that
+   *    writes `customized: true` on every row whose `previous.managed_by` is
+   *    package-seeded. What makes that shape safe is not the hook but the
+   *    engine's `MULTI_UPDATE_HOOK_KEY_DIVERGENCE` refusal (#14099): the
+   *    dispatch records, per row, the payload keys that row's hook chain
+   *    assigned IN PLACE, and if any two rows disagree the WHOLE batch is
+   *    refused before any write — nothing is written, not the first row.
+   *    In-place is the load-bearing half of that condition, not a detail of
+   *    spelling: a hook that REPLACES `ctx.input.data` (assigning
+   *    `ctx.input.data = { ...ctx.input.data, customized: true }`) hands the
+   *    dispatch a fresh object whose keys it cannot attribute, so the
+   *    recording yields nothing and the comparison is SKIPPED — the batch is
+   *    not judged at all, rather than judged and passed. To an operator that
+   *    refusal is an ADR-0112 envelope with `status: 400` and
+   *    `code: 'MULTI_UPDATE_HOOK_KEY_DIVERGENCE'`, carrying `keys` — the sorted
+   *    keys some rows' hooks wrote and other rows' did not (for the stamp above,
+   *    `['customized']`) — and `rows` — how many rows the predicate matched
+   *    (`2` for a two-row batch) — plus `object` naming the target and a
+   *    message that says "Nothing was written" and then names the remedy. So a
+   *    bulk edit over rows that ALREADY disagree on the stamp's condition (one
+   *    row still package-managed, one already customized) is refused whole
+   *    rather than half-stamped; that is the engine working, not the hooks
+   *    misbehaving, and the remedy is the caller's: write those rows by id, or
+   *    from inside the handler through `ctx.api`. Three shapes this rule does
+   *    NOT admit: a rewrite whose written key set differs across rows (that IS
+   *    the refusal above); a rewrite that writes the same key with a per-row
+   *    VALUE — the engine judges key sets, never values (the clock-reading
+   *    audit stamp must pass), so that shape clears the check and applies the
+   *    LAST dispatch's value to every row; and a row-conditioned REPLACEMENT
+   *    of `ctx.input.data`, which silences the recording described above, so
+   *    that shape is judged by nothing at all. All three stay out of contract.
+   *    The refusal's class and both rejected value-comparison variants are
+   *    recorded on `packages/objectql/src/multi-update-hook-key-divergence.ts`.
    *  - `input.id` is NOT a reroute lever (D4). It used to be: on the batch
    *    dispatch `input.id` was present-but-`undefined`, and binding it moved
    *    the write onto the single-id path. A per-row context arrives with `id`
@@ -614,6 +676,89 @@ export const HookContextSchema = lazySchema(() => z.object({
    * The state of the record BEFORE the operation (for update/delete).
    */
   previous: z.record(z.string(), z.unknown()).optional().describe('Record state before operation'),
+
+  /**
+   * Caller Submission (#16344)
+   *
+   * What the CALLER submitted — **diagnostics only, never the persist image**.
+   *
+   * ## The two records a `beforeUpdate` handler now has, and why they differ
+   *
+   * `input.data` is **the record the engine intends to persist**. A statically
+   * `readonly` field the caller supplied a value for is not in it: the engine
+   * has already decided that value will not be stored, so a hook deriving a
+   * column from it would derive a persisted column from a number the row will
+   * never contain. That is not hypothetical — it is the measured defect this
+   * key was ruled for (maintainer, decision batch #87, 2026-09-08): a KPI row
+   * committed `target_value = 400` beside a hook-derived `calc_trace` reading
+   * `目标 1`, with no error, no warning and a 200. A record whose own audit
+   * trail cites values it does not hold.
+   *
+   * `submitted` is the OTHER record: the caller's payload exactly as it
+   * arrived at the engine, snapshotted before any middleware or hook stamp
+   * (the #5591 entry snapshot). It exists because moving the strip ahead of
+   * the hooks would otherwise have DEGRADED, silently, every guard that
+   * reports on what the caller sent — plugin-auth's ADR-0092 identity write
+   * guard is the in-repo instance, and its 403 NAMES the non-whitelisted keys
+   * it found. It reads them from here, so the message is unchanged.
+   *
+   * ## ⛔ Never the persist image, and the boundary is mechanical
+   *
+   * Assigning to this record, or to a key on it, changes NOTHING about the
+   * write — the engine reads `input.data` and nothing else on the way to the
+   * driver. The object is SHALLOW-frozen by the producer, so an assignment to
+   * one of ITS OWN keys throws in strict mode rather than silently editing a
+   * record of what a caller sent. A handler that wants to change what is
+   * written writes `input.data`; a handler that wants to REFUSE a write
+   * throws; a handler that wants to know what the caller asked for reads this.
+   *
+   * ⚠️ SHALLOW is the honest word and the depth matters. The snapshot is a
+   * shallow spread of the caller's payload, so a NESTED object reached through
+   * a key here is the caller's own reference and is mutable — `Object.freeze`
+   * does not travel. That is not a laundering route (a nested mutation on a
+   * hidden read-only key is handed back and stripped; the recorder never saw a
+   * hook write), but it is not a deep guarantee either, and a handler must not
+   * treat a nested read from here as tamper-proof. Deep-freezing was not
+   * chosen: it costs a full walk of every payload on every update, to harden a
+   * face documented as diagnostics-only.
+   *
+   * ⚠️ A value HERE and no matching key in `input.data` means precisely one
+   * thing: the engine refused that field. It does not mean the field is
+   * unknown, absent from the object, or safe to re-apply — re-applying it from
+   * a hook is writing the value the engine just refused, under the hook's own
+   * provenance, which is the forgery `hookWrittenKeys` (#14088) exists to
+   * make impossible.
+   *
+   * ## Where it is bound
+   *
+   * The UPDATE verb, both phases, every dispatch of one caller write — the
+   * batch context and every per-row context spread from it carry the SAME
+   * submission, because one caller write has one submission however many rows
+   * it matches. `id` is present when the caller sent one (including the REST
+   * ingress fold, #6479), because this is what the caller submitted rather
+   * than a payload the engine curated.
+   *
+   * ⛔ NOT bound on `insert` or `delete`, and that is a scope statement rather
+   * than an omission: the create side's strip position is settled POST-hook by
+   * ruling C (#14147, "one semantics, one enforcement point"), so `beforeInsert`
+   * still receives the caller's own values in `input.data` and needs no second
+   * channel to see them. Whether it should is a separate measurement, raised
+   * against #14147 if a create-side leak is ever measured.
+   *
+   * ⛔ NOT marshalled into the sandboxed `body` face, for the same reason
+   * `dispatch.scope` is not: the body surface is assembled key by key
+   * (`buildSandboxContext`), and a key added there is a second published
+   * contract with its own compatibility story. A `body` needing it is the
+   * signal to raise that question, not to add it silently.
+   *
+   * OPTIONAL for the reason `api` and `dispatch` are: making it required would
+   * start rejecting the partial contexts `HookContextSchema.parse` accepts
+   * today. Read it as `ctx.submitted?.[field]` — an ABSENT record reads as
+   * "nothing known about the submission", which is the back-compatible
+   * direction and what every non-update event carries.
+   */
+  submitted: z.record(z.string(), z.unknown()).optional()
+    .describe('What the caller submitted, as sent (update only) — diagnostics only, never the persist image'),
 
   /**
    * Dispatch Marker

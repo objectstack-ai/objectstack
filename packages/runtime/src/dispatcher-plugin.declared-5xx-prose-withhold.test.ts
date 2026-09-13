@@ -283,3 +283,109 @@ describe('[#12281] a DECLARED 5xx has its prose withheld at the dispatcher exit'
         expect(res.body.error.message).toBe('Measure revenue is not additive across the stage dimension.');
     });
 });
+
+/**
+ * [#16146 / #17153] The ONE exception the prose limb above now has, and the
+ * reason this file's seven cases stay red-proof: none of them declares it.
+ *
+ * ## What changed, and what did not
+ *
+ * `serverFaultProvenance` answers WHO named this 5xx. It cannot answer WHAT
+ * KIND it is, so this exit withheld a deliberate REFUSAL — prose a producer
+ * authored FOR its caller — exactly as it withholds a driver fault. The
+ * director seat ruled that distinction a producer-side DECLARATION on the
+ * published ADR-0112 envelope (decision batch #58, 2026-09-06, option C):
+ * `ApiErrorSchema.refusal`, which this exit's own `ErrorResponseSchema` nests.
+ *
+ * This exit is the THIRD of three arms that withhold on a declaration, and the
+ * only one outside `@objectstack/rest`. It reads the same
+ * `declaredRefusalMessage` (`@objectstack/types`) the other two read — ⛔ not a
+ * second copy, for the reason `dispatcher-plugin.ts:691` already gives about
+ * this exact family.
+ *
+ * ## Every case here is a DIFFERENTIAL against a case above
+ *
+ * The `DECLARED` table's row 4 (`{ status: 503, code: 'SERVICE_UNAVAILABLE' }`)
+ * is the fault twin of the first case below: the two throws differ in exactly
+ * one key. That is what makes the reading the field's, rather than the
+ * instrument's.
+ */
+describe('[#16146] …unless the producer DECLARED the 5xx to be a refusal', () => {
+    let logSpy: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => { logSpy = vi.spyOn(console, 'error').mockImplementation(() => {}); });
+    afterEach(() => { logSpy.mockRestore(); });
+
+    /** Prose authored FOR the caller; names nothing tenant-sensitive. */
+    const AUTHORED = 'Cube pipeline cannot be rebuilt while a migration holds it. Ask for cube pipeline_v2 instead.';
+
+    it('a DECLARED REFUSAL keeps its prose verbatim — the fault twin one describe up does not', async () => {
+        const res = await throwFromAnalyticsQuery(
+            declaring({ status: 503, code: 'SERVICE_UNAVAILABLE', refusal: true }, AUTHORED),
+        );
+        expect(res.statusCode).toBe(503);
+        expect(res.body.error.message).toBe(AUTHORED);
+        expect(res.body.error.message).not.toBe(INTERNAL_ERROR_MESSAGE);
+        // The classification is untouched — only the prose moved.
+        expect(typeof res.body.error.code).toBe('string');
+        // Disjoint strings, so the assertion cannot be satisfied by coincidence.
+        expect(AUTHORED).not.toContain(INTERNAL_ERROR_MESSAGE);
+    });
+
+    it('the `statusCode` spelling declares the same refusal — no per-spelling dialect (#7525)', async () => {
+        const res = await throwFromAnalyticsQuery(
+            declaring({ statusCode: 503, code: 'SERVICE_UNAVAILABLE', refusal: true }, AUTHORED),
+        );
+        expect(res.statusCode).toBe(503);
+        expect(res.body.error.message).toBe(AUTHORED);
+    });
+
+    it('⛔ `refusal: true` with NO `code` is not the declared shape — still withheld', async () => {
+        // The spec's own table row is `status >= 500`, a `code`, and the flag.
+        // Fail-closed: a producer that declares half the shape declares nothing.
+        const res = await throwFromAnalyticsQuery(declaring({ status: 503, refusal: true }, AUTHORED));
+        expect(res.body.error.message).toBe(INTERNAL_ERROR_MESSAGE);
+    });
+
+    it('⛔ `true` is the only value — a guessed spelling declares nothing', async () => {
+        for (const value of ['yes', 1, false] as unknown[]) {
+            const res = await throwFromAnalyticsQuery(
+                declaring({ status: 503, code: 'SERVICE_UNAVAILABLE', refusal: value }, AUTHORED),
+            );
+            expect(res.body.error.message, `refusal: ${JSON.stringify(value)}`).toBe(INTERNAL_ERROR_MESSAGE);
+        }
+    });
+
+    it('⛔ SECURITY FLOOR — a refusal cannot buy leaky prose past the heuristic this exit has run since #3867', async () => {
+        const res = await throwFromAnalyticsQuery(
+            declaring(
+                { status: 503, code: 'SERVICE_UNAVAILABLE', refusal: true },
+                'SQLITE_ERROR: no such column: crm_account.secret_policy_field',
+            ),
+        );
+        expect(res.body.error.message).toBe(INTERNAL_ERROR_MESSAGE);
+        expect(JSON.stringify(res.body)).not.toContain('secret_policy_field');
+    });
+
+    it('⛔ the flag QUALIFIES a declared status — it never invents one', async () => {
+        // No `status`/`statusCode`: `errorResponseBase`'s own `httpStatus`
+        // falls back to 500 and `serverFaultProvenance` answers `'undeclared'`,
+        // so #5667's tiering runs and the flag is inert. A leaky message is
+        // therefore still withheld by the heuristic limb.
+        const res = await throwFromAnalyticsQuery(
+            Object.assign(new Error('SQLITE_ERROR: no such column: crm_account.secret_policy_field'), { refusal: true }),
+        );
+        expect(res.statusCode).toBe(500);
+        expect(res.body.error.message).toBe(INTERNAL_ERROR_MESSAGE);
+    });
+
+    it('the untouched error still reaches the operator on a relayed refusal', async () => {
+        // The withhold's compensation is not lost when the withhold is: the
+        // `__obsRecordedError` side-channel still hands `errorReporter` the
+        // original throw, so an operator reading a refusal sees the same object
+        // they see for a fault.
+        const res = await throwFromAnalyticsQuery(
+            declaring({ status: 503, code: 'SERVICE_UNAVAILABLE', refusal: true }, AUTHORED),
+        );
+        expect(String((res as any).__obsRecordedError?.message)).toBe(AUTHORED);
+    });
+});

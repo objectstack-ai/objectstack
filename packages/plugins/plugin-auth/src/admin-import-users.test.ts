@@ -1,11 +1,17 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { runAdminImportUsers, IMPORT_USERS_MAX_ROWS, type IdentityImportDeps } from './admin-import-users.js';
 import type { AdminActor } from './admin-user-endpoints.js';
 
 const ACTOR: AdminActor = { id: 'admin-1', email: 'admin@example.com' };
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const IMPORT_USERS_SOURCE = readFileSync(resolve(HERE, 'admin-import-users.ts'), 'utf8');
 
 function makeRequest(body: unknown): Request {
   return new Request('http://localhost/api/v1/auth/admin/import-users', {
@@ -623,4 +629,34 @@ describe('runAdminImportUsers — CSV payloads', () => {
     expect(data.summary.created).toBe(2);
     expect(m.createUser.mock.calls.map((c) => c[0].body.email).sort()).toEqual(['c1@x.co', 'c2@x.co']);
   });
+});
+
+/**
+ * [#17422] The IMPLEMENTOR half of #16952's contract.
+ *
+ * `ImportProtocolLike` types the three required members, but an EXPLICIT
+ * parameter annotation wins over a contextual type — so `findData(args: any)`
+ * opts this file back out of the contract while `tsc --noEmit` stays green.
+ * Measured on #17422 in this package: with the annotation restored, a probe
+ * reading the retired wire alias (`args.query?.$filter` — the pre-#16950 read
+ * whose `?? {}` default degraded the duplicate probe into match-everything)
+ * type-checks at exit 0; with the annotation gone the same probe is
+ * `TS2339 Property '$filter' does not exist on type 'QueryInput'`.
+ *
+ * ⇒ Nothing else in the repo can see that difference. The behavioural upsert
+ * tests above discriminate the CONSEQUENCE (ablated to the historical read,
+ * two of them go red) but not the opt-out itself: re-annotating the parameter
+ * leaves every one of them green and every gate green. This is that guard.
+ */
+describe('[#17422] the import protocol literal is typed BY `ImportProtocolLike`', () => {
+  it('binds the literal to the exported contract', () => {
+    expect(IMPORT_USERS_SOURCE).toContain('const protocol: ImportProtocolLike = {');
+  });
+
+  for (const member of ['findData', 'createData', 'updateData'] as const) {
+    it(`leaves \`${member}\`'s parameter unannotated, so the contract types it`, () => {
+      expect(IMPORT_USERS_SOURCE).toContain(`async ${member}(args) {`);
+      expect(IMPORT_USERS_SOURCE).not.toMatch(new RegExp(`async\\s+${member}\\s*\\(\\s*args\\s*:`));
+    });
+  }
 });

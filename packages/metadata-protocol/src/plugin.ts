@@ -37,7 +37,7 @@ import {
 } from './migrations/view-definition-active-index.js';
 import {
     ensureSysSettingIdentityIndex,
-    resolveSysSettingIndexExec,
+    resolveSysSettingIndexSeam,
 } from './migrations/sys-setting-identity-index.js';
 import {
     backfillSeedTenancy,
@@ -130,7 +130,7 @@ export interface AssembleMetadataProtocolOptions {
      * Declared, not deduced — the same lesson `authoringChannel` records one
      * field above. The gate used to read `environmentId === undefined`, and
      * `environmentId` is a ROW-SCOPING KEY, not a topology signal: the
-     * standalone stack stamps `'proj_local'` on every `os dev` / `os serve` /
+     * standalone stack stamps `'env_local'` on every `os dev` / `os serve` /
      * `os start` / `os migrate` boot (`runtime/src/standalone-stack.ts`), so
      * the block the gate guards never ran on a self-hosted install at all —
      * #8686's "repairs an install that is ALREADY in that state, which covers
@@ -276,7 +276,7 @@ export function assembleMetadataProtocol(
             // [#9380] The gate is now DECLARED (`runPlatformMigrations`) rather
             // than deduced from `environmentId === undefined`. The deduction was
             // wrong in the direction that mattered: the standalone stack stamps
-            // `'proj_local'`, so this whole block never armed on a self-hosted
+            // `'env_local'`, so this whole block never armed on a self-hosted
             // boot and the three migrations below reached no self-hosted
             // install. The registerApp block above keeps the old predicate on
             // purpose — see the note there.
@@ -318,7 +318,16 @@ export function assembleMetadataProtocol(
                         );
                     }
                     try {
-                        await ensureSysSettingIdentityIndex(resolveSysSettingIndexExec(ql), ctx.logger);
+                        // [#17175] The SEAM, not the bare exec: the presence
+                        // probe compiles a catalog statement for the connected
+                        // dialect, and a dialect nobody resolved is a dialect
+                        // guessed. Without it the probe falls back to the
+                        // `WHERE 1 = 0` statement whose refusal this card is
+                        // about.
+                        const seam = resolveSysSettingIndexSeam(ql);
+                        await ensureSysSettingIdentityIndex(seam?.exec, ctx.logger, {
+                            client: seam?.client,
+                        });
                     } catch (e: unknown) {
                         ctx.logger.warn(
                             '[metadata-protocol] sys_setting row-identity index migration skipped (#8629)',

@@ -5,6 +5,7 @@ import type { AutomationContext, JobSchedule, JobHandler } from '@objectstack/sp
 import {
     ScheduleTrigger,
     normalizeSchedule,
+    resolveBindingOrganization,
     type FlowTriggerBinding,
     type JobServiceSurface,
     type TriggerLogger,
@@ -43,10 +44,30 @@ function silentLogger(): TriggerLogger {
     return { info: () => {}, warn: () => {}, debug: () => {} };
 }
 
+/** Keeps every line, so the refusal suite can read the `error` channel. */
+function recordingLogger(): { logger: TriggerLogger; errors: string[]; warns: string[] } {
+    const errors: string[] = [];
+    const warns: string[] = [];
+    return {
+        logger: {
+            info: () => {},
+            debug: () => {},
+            warn: (msg: string) => void warns.push(String(msg)),
+            error: (msg: string) => void errors.push(String(msg)),
+        },
+        errors,
+        warns,
+    };
+}
+
 function binding(overrides: Partial<FlowTriggerBinding> = {}): FlowTriggerBinding {
     return {
         flowName: 'nightly_health_sweep',
         schedule: { type: 'cron', expression: '0 1 * * *', timezone: 'UTC' },
+        // [#16659] A time-triggered binding carries its acting organization; a
+        // binding without one is refused — see
+        // `ScheduleTrigger — the acting-organization refusal (#16659)` below.
+        organization: 'org_2mtx1w9d0k4bqf7v',
         ...overrides,
     };
 }
@@ -291,5 +312,176 @@ describe('ScheduleTriggerPlugin', () => {
         await flush();
 
         expect(job.jobs.size).toBe(1);
+    });
+});
+
+// ─── The acting-organization refusal (#16659) ───────────────────────
+//
+// The unit half of the card's consequence (3): a time-triggered flow that
+// declares no acting organization is REFUSED at bind, and the refusal reaches
+// the engine rather than only stderr.
+//
+// ⚠️ Every assertion here would pass vacuously against a trigger that refused
+// EVERYTHING, so each limb that expects a refusal is paired with the declaring
+// binding from `binding()` above, which must still arm.
+
+describe('ScheduleTrigger — the acting-organization refusal (#16659)', () => {
+    const orgLess = () => binding({ organization: undefined, config: {} });
+
+    it('THROWS from start(), so the engine cannot record the flow as bound', () => {
+        const job = fakeJobService();
+        const log = recordingLogger();
+        const trigger = new ScheduleTrigger(() => job.service, log.logger);
+
+        // ⭐ The whole of F1: `FlowTrigger.start` is `void`, so a logged-and-
+        // returned refusal is indistinguishable from a successful arm and the
+        // engine sets `boundFlowTriggers` anyway. The throw is the engine's
+        // designed catch path.
+        expect(() => trigger.start(orgLess(), async () => {})).toThrow(/declares no acting organization/);
+        expect(job.jobs.size, 'a refused flow must have no job at all').toBe(0);
+    });
+
+    it('logs the same sentence at `error`, naming the flow, the key and NOT BOUND', () => {
+        const job = fakeJobService();
+        const log = recordingLogger();
+        const trigger = new ScheduleTrigger(() => job.service, log.logger);
+
+        let thrown = '';
+        try {
+            trigger.start(orgLess(), async () => {});
+        } catch (err) {
+            thrown = String((err as Error).message);
+        }
+
+        expect(log.errors, 'the refusal is an `error`, not a `warn`').toHaveLength(1);
+        const line = log.errors[0];
+        expect(line).toContain('NOT BOUND');
+        expect(line, 'the refusal must be attributable to a flow, not to "a flow"').toContain(
+            'nightly_health_sweep',
+        );
+        expect(line, 'it must name the key the author has to write').toContain('organization');
+        // The loud channel and the thrown text the engine's audit points at
+        // must not be able to drift apart.
+        expect(line).toContain(thrown);
+    });
+
+    it('names the near-miss spelling the author actually wrote', () => {
+        const job = fakeJobService();
+        const log = recordingLogger();
+        const trigger = new ScheduleTrigger(() => job.service, log.logger);
+
+        expect(() =>
+            trigger.start(
+                binding({ organization: undefined, config: { organizationId: 'org_written_wrong' } }),
+                async () => {},
+            ),
+        ).toThrow();
+
+        // The start node's `config` is an open record, so `organizationId` was
+        // accepted and then ignored — the refusal is the only place that
+        // becomes visible.
+        expect(log.errors[0]).toContain('organizationId');
+    });
+
+    it('⛔ never picks an organization for the author', () => {
+        const job = fakeJobService();
+        const log = recordingLogger();
+        const trigger = new ScheduleTrigger(() => job.service, log.logger);
+
+        expect(() =>
+            trigger.start(
+                binding({ organization: undefined, config: { organizationId: 'org_written_wrong' } }),
+                async () => {},
+            ),
+        ).toThrow();
+
+        // The refusal names the KEY the author misspelt and never their VALUE:
+        // echoing an id back is one edit away from acting on it, and the one
+        // value in scope here is precisely the one nothing may adopt.
+        expect(log.errors[0]).not.toContain('org_written_wrong');
+        expect(job.jobs.size).toBe(0);
+    });
+
+    it('a hot re-publish that REMOVES the key drops the prior job', async () => {
+        const job = fakeJobService();
+        const log = recordingLogger();
+        const trigger = new ScheduleTrigger(() => job.service, log.logger);
+
+        trigger.start(binding(), async () => {});
+        await flush();
+        expect(job.jobs.size, 'precondition: the declaring binding armed').toBe(1);
+
+        // ⭐ Without the `stop()` that precedes the throw, the previous, still
+        // armed job keeps firing org-less ticks behind an error saying the flow
+        // was refused — the exact "armed, listed and inert" shape this card closes.
+        expect(() => trigger.start(orgLess(), async () => {})).toThrow();
+        await flush();
+        expect(job.jobs.size).toBe(0);
+    });
+
+    it('refusing one flow does not disarm a sibling', async () => {
+        const job = fakeJobService();
+        const log = recordingLogger();
+        const trigger = new ScheduleTrigger(() => job.service, log.logger);
+
+        trigger.start(binding({ flowName: 'declares_one' }), async () => {});
+        await flush();
+        expect(() =>
+            trigger.start(binding({ flowName: 'declares_none', organization: undefined, config: {} }), async () => {}),
+        ).toThrow();
+        await flush();
+
+        expect(job.jobs.has('flow-schedule:declares_one')).toBe(true);
+        expect(job.jobs.has('flow-schedule:declares_none')).toBe(false);
+    });
+
+    it('falls back to `warn` when the logger has no `error` channel', () => {
+        const job = fakeJobService();
+        const warn = vi.fn();
+        const trigger = new ScheduleTrigger(() => job.service, { info: () => {}, warn, debug: () => {} });
+
+        expect(() => trigger.start(orgLess(), async () => {})).toThrow();
+        expect(warn, 'the refusal must still be said, not swallowed').toHaveBeenCalled();
+    });
+});
+
+describe('resolveBindingOrganization (#16659)', () => {
+    it('reads the lifted binding field first', () => {
+        expect(resolveBindingOrganization(binding())).toBe('org_2mtx1w9d0k4bqf7v');
+    });
+
+    it('falls back to the raw start-node config, for an engine that predates the lift', () => {
+        // ⭐ Not redundancy: the binding is a STRUCTURAL mirror, so a host on an
+        // older engine hands this trigger no `organization` field and a `config`
+        // that still carries the author's declaration. Refusing there would
+        // report an engine-version skew as an authoring error.
+        expect(
+            resolveBindingOrganization(
+                binding({ organization: undefined, config: { organization: 'org_from_config' } }),
+            ),
+        ).toBe('org_from_config');
+    });
+
+    it('the lifted field wins over the raw config', () => {
+        expect(
+            resolveBindingOrganization(binding({ config: { organization: 'org_stale' } })),
+        ).toBe('org_2mtx1w9d0k4bqf7v');
+    });
+
+    it.each([
+        ['absent', undefined],
+        ['an empty string', ''],
+        ['a number', 42],
+        ['an object', { id: 'org_x' }],
+        ['null', null],
+    ])('answers null for a value that is %s', (_label, value) => {
+        // A present-but-unusable value takes the refusal path: "declared" must
+        // mean "usable", or a flow admitted by one layer and refused by the next
+        // is the silent hole again.
+        expect(
+            resolveBindingOrganization(
+                binding({ organization: undefined, config: { organization: value } as Record<string, unknown> }),
+            ),
+        ).toBeNull();
     });
 });

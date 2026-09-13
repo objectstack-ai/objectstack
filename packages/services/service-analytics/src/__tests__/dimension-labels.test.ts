@@ -22,6 +22,11 @@ const TASK_FIELDS: Record<string, FieldMetaLite> = {
     ],
   },
   account: { type: 'lookup', reference: 'crm_account' },
+  // #16390 — the other two members of the same declared reference class. The
+  // `user` one deliberately omits `reference`: its target is a constant of the
+  // type, and metadata authored without it is fully specified.
+  assignee: { type: 'user' },
+  parent: { type: 'tree', reference: 'task' },
   created_at: { type: 'date' },
 };
 const ACCOUNT_FIELDS: Record<string, FieldMetaLite> = {
@@ -34,9 +39,14 @@ function deps(overrides: Partial<DimensionLabelDeps> = {}): DimensionLabelDeps {
     getObjectFields: (obj) =>
       obj === 'task' ? TASK_FIELDS : obj === 'crm_account' ? ACCOUNT_FIELDS : undefined,
     fetchRecordLabels: async (target, ids) => {
-      const names: Record<string, string> = { acc1: 'Acme Corp', acc2: 'Globex' };
+      const byTarget: Record<string, Record<string, string>> = {
+        crm_account: { acc1: 'Acme Corp', acc2: 'Globex' },
+        sys_user: { usr_ada: 'Ada Lovelace' },
+        task: { tsk_root: 'Root Task' },
+      };
+      const names = byTarget[target] ?? {};
       const m = new Map<unknown, string>();
-      if (target === 'crm_account') for (const id of ids) if (names[String(id)]) m.set(id, names[String(id)]);
+      for (const id of ids) if (names[String(id)]) m.set(id, names[String(id)]);
       return m;
     },
     ...overrides,
@@ -66,6 +76,26 @@ describe('resolveDimensionLabels', () => {
       { account: 'Acme Corp', budget_sum: 800000 },
       { account: 'Globex', budget_sum: 200000 },
     ]);
+  });
+
+  // ── #16390 — the same class, the same reading ─────────────────────────
+  it('maps a user dimension id → the referenced user\'s display name', async () => {
+    const rows = [{ assignee: 'usr_ada', budget_sum: 3 }];
+    await resolveDimensionLabels('task', [{ name: 'assignee', field: 'assignee' }], rows, deps());
+    // The field declares no `reference`; `sys_user` is the constant of the type.
+    expect(rows).toEqual([{ assignee: 'Ada Lovelace', budget_sum: 3 }]);
+  });
+
+  it('maps a tree dimension id → the referenced record\'s display name', async () => {
+    const rows = [{ parent: 'tsk_root', budget_sum: 4 }];
+    await resolveDimensionLabels('task', [{ name: 'parent', field: 'parent' }], rows, deps());
+    expect(rows).toEqual([{ parent: 'Root Task', budget_sum: 4 }]);
+  });
+
+  it('leaves an unresolved user id untouched, exactly as an unresolved lookup id is', async () => {
+    const rows = [{ assignee: 'usr_gone', budget_sum: 1 }];
+    await resolveDimensionLabels('task', [{ name: 'assignee', field: 'assignee' }], rows, deps());
+    expect(rows).toEqual([{ assignee: 'usr_gone', budget_sum: 1 }]);
   });
 
   it('leaves an unresolved lookup id untouched (no blanks)', async () => {
@@ -164,8 +194,46 @@ describe('resolveDimensionLabels', () => {
         scopeCalls++;
         return undefined;
       });
-      expect(scopeCalls).toBe(0); // scope is only resolved for lookup/master_detail dims
+      // A select dimension resolves from field metadata alone — it reads no
+      // other object, so there is no target scope to resolve. This stays true
+      // after #16390 widened the reference class; the positive counterpart for
+      // the four members that DO read another object is the next case.
+      expect(scopeCalls).toBe(0);
       expect(rows).toEqual([{ status: 'Backlog', n: 1 }]);
+    });
+
+    it('#16390 — a user and a tree dimension resolve the REFERENCED object scope, same as lookup', async () => {
+      const asked: string[] = [];
+      const seen: Array<{ target: string; scope: unknown }> = [];
+      const d = deps({
+        fetchRecordLabels: async (target, ids, scope) => {
+          seen.push({ target, scope });
+          return new Map<unknown, string>(ids.map((id) => [id, `name-${String(id)}`]));
+        },
+      });
+      const rows = [{ account: 'acc1', assignee: 'usr_ada', parent: 'tsk_root', n: 1 }];
+      await resolveDimensionLabels(
+        'task',
+        [
+          { name: 'account', field: 'account' },
+          { name: 'assignee', field: 'assignee' },
+          { name: 'parent', field: 'parent' },
+        ],
+        rows,
+        d,
+        (target) => {
+          asked.push(target);
+          return { organization_id: 'org_A' };
+        },
+      );
+      // Turning a user id into a name is a read of `sys_user`; it must carry
+      // that object's own RLS, not the base object's.
+      expect(asked).toEqual(['crm_account', 'sys_user', 'task']);
+      expect(seen).toEqual([
+        { target: 'crm_account', scope: { organization_id: 'org_A' } },
+        { target: 'sys_user', scope: { organization_id: 'org_A' } },
+        { target: 'task', scope: { organization_id: 'org_A' } },
+      ]);
     });
 
     it('no resolver (no security configured) → unscoped fetch, unchanged behaviour', async () => {

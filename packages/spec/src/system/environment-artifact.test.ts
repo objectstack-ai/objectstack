@@ -39,9 +39,17 @@ import {
 // Maintainer ruling on #4740 (ledger #4535 C10): route A′ — converge on the
 // live wire shape as the SINGLE declaration in ./system, with ./cloud
 // re-exporting it (zero migration for the live consumers). Unlike C16
-// (#4739), the re-export is the SANCTIONED route here: both entries must
-// keep the name, but must resolve it to the ONE ./system declaration. A
-// fresh declaration on ./cloud is the forbidden route (S2 sabotage below).
+// (#4739), the re-export was the SANCTIONED route here: both entries had to
+// keep the name, but had to resolve it to the ONE ./system declaration. A
+// fresh declaration on ./cloud was the forbidden route (S2 sabotage below).
+//
+// #16325 removed the `./cloud` subpath altogether (the cloud control plane's
+// contracts are the cloud repo's, not an open-source protocol), which takes
+// the re-exporting side with it. What survives is the STRONGER form of the
+// same ruling: `./system` is the one declaration AND the one holder — no
+// other entry may name the envelope at all, re-export or fresh declaration
+// alike. The cloud repo's two former import sites already read
+// `@objectstack/spec/system` (step 1 of the chain, cloud#2037).
 //
 // #4642 established that a compile-time conditional-type pin in this package
 // was a no-op until #5286 (tsconfig excluded `**/*.test.ts`; vitest never enables
@@ -61,13 +69,16 @@ const RETIRED_V0_FAMILY = [
 ] as const;
 
 describe('[#4740] `EnvironmentArtifact(Schema)` resolves to the ./system declaration everywhere', () => {
-  it('resolves the export surface: one declaration in ./system, ./cloud re-exports it, the v0 family is gone', () => {
+  it('resolves the export surface: one declaration in ./system, no other entry names it, the v0 family is gone', () => {
     // Anti-vacuity: the baseline must cover the real surface. (This used to
     // enumerate package.json's exports map and build its own `ts.createProgram`
     // right here; `export-origins/` IS that resolution, computed once at build
     // time and checked in — #4796.)
-    expect(EXPORT_ENTRY_POINTS).toContain('./cloud');
     expect(EXPORT_ENTRY_POINTS).toContain('./system');
+    expect(EXPORT_ENTRY_POINTS).toContain('./marketplace');
+    // [#16325] The subpath that used to re-export the envelope is gone; the
+    // holder check below is what replaced the re-export half of this pin.
+    expect(EXPORT_ENTRY_POINTS).not.toContain('./cloud');
     expect(EXPORT_ENTRY_POINTS.length).toBeGreaterThan(10);
 
     // 1. The surviving declaration: `./system` exports the envelope, declared
@@ -89,22 +100,20 @@ describe('[#4740] `EnvironmentArtifact(Schema)` resolves to the ./system declara
       canonical[name] = originOf('./system', name);
     }
 
-    // 2. The re-exporting side: `./cloud` keeps every pre-#4740 name, but
-    //    each resolves to the SAME ./system declaration — the sanctioned
-    //    route A′. A fresh cloud-side declaration flips this red (S2).
+    // 2. The ONLY holder (#16325): `./system` is the one entry that names the
+    //    envelope at all. Until #16325 this limb asserted that `./cloud`
+    //    re-exported every name to the same declaration (route A′); with that
+    //    subpath gone the sanctioned re-export has no host, and any entry that
+    //    starts naming the envelope again — re-export or fresh declaration —
+    //    flips this red. Exact equality, not a subset check.
     for (const name of names) {
-      expect(maybeOriginOf('./cloud', name), `./cloud must keep exporting \`${name}\``).toBeDefined();
-      expect(
-        originOf('./cloud', name),
-        `./cloud must resolve \`${name}\` to the ./system declaration`,
-      ).toBe(canonical[name]);
+      expect(holdersOf(name), `only ./system may export \`${name}\``).toEqual(['./system']);
     }
-    // `Sha256Digest(Schema)` moved with the declaration; ./cloud keeps it by
-    // re-export too.
+    // `Sha256Digest(Schema)` moved with the declaration and has the same one
+    // holder.
     for (const name of ['Sha256Digest', 'Sha256DigestSchema']) {
       expect(maybeOriginOf('./system', name), `./system must export \`${name}\``).toBeDefined();
-      expect(maybeOriginOf('./cloud', name), `./cloud must keep exporting \`${name}\``).toBeDefined();
-      expect(originOf('./cloud', name)).toBe(originOf('./system', name));
+      expect(holdersOf(name), `only ./system may export \`${name}\``).toEqual(['./system']);
       expect(originFileOf('./system', name)).toBe('src/system/environment-artifact.zod.ts');
     }
 
@@ -125,14 +134,12 @@ describe('[#4740] `EnvironmentArtifact(Schema)` resolves to the ./system declara
     }
   });
 
-  it('keeps the runtime namespaces consistent with the compiler view', async () => {
-    const cloud = await import('../cloud/index');
+  it('keeps the runtime namespace consistent with the compiler view', async () => {
     const system = await import('./index');
-    // Re-export means the very same binding, not a lookalike.
-    expect(cloud.EnvironmentArtifactSchema).toBe(system.EnvironmentArtifactSchema);
-    expect(cloud.Sha256DigestSchema).toBe(system.Sha256DigestSchema);
+    // The runtime binding IS the declaration this file imports — not a lookalike.
+    expect(system.EnvironmentArtifactSchema).toBe(EnvironmentArtifactSchema);
+    expect(system.Sha256DigestSchema).toBe(Sha256DigestSchema);
     for (const gone of RETIRED_V0_FAMILY) {
-      expect(gone in cloud, `cloud must not export ${gone}`).toBe(false);
       expect(gone in system, `system must not export ${gone}`).toBe(false);
     }
   });

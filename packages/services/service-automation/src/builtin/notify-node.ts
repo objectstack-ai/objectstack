@@ -321,7 +321,13 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                     // #4354 — nothing was delivered, and the run summary must say
                     // so: a nudge sweep whose messaging service is absent is
                     // precisely the "green but inert" case this counter exists for.
-                    metrics: { acted: 0 },
+                    //
+                    // `selected` is what makes that `acted: 0` READABLE — see the
+                    // block above `metrics` on the emit path below. Without it a
+                    // run whose notify reached nobody folds to
+                    // `selected: 0, acted: 0, unmeasured: 0`, which is the same
+                    // triple a run with no notify node at all reports.
+                    metrics: { selected: recipients.length, acted: 0 },
                 };
             }
 
@@ -439,9 +445,48 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                     //
                     // Waiting for the real outcome is not on the table: a notify
                     // node must not block a flow on a downstream channel.
+                    //
+                    // ── `selected`: what makes a ZERO dispatch readable (#17123) ──
+                    //
+                    // `acted` and `unmeasuredEffect` above answer "what did this
+                    // node cause". Neither can answer "this node tried to notify
+                    // somebody and reached NOBODY", and that answer is the one an
+                    // operator needs: `emit()` has several paths that return
+                    // `delivered: 0, enqueued: 0` after logging a line and nothing
+                    // else — an audience that resolved to no recipient, a
+                    // preference filter that suppressed every (recipient x
+                    // channel) pair, a dedup hit, every enqueue failing. Each of
+                    // them lands here as `{ acted: 0 }`, and a run whose only
+                    // effect-bearing node is this one then folds to
+                    // `selected: 0, acted: 0, unmeasured: 0` — byte for byte the
+                    // summary of a run that had nothing to notify about, and of a
+                    // run whose notify node never executed at all.
+                    //
+                    // ⛔ The fix is NOT to report the zero as `unmeasuredEffect`.
+                    // That flag means "the count is unknown", and this count is
+                    // known and it is zero; claiming otherwise would take the run
+                    // OUT of the broken-sweep filter
+                    // (`selected > 0 AND acted = 0 AND unmeasured = 0`) — the
+                    // platform's own alarm for a green-but-inert sweep — on
+                    // precisely the run that should be inside it.
+                    //
+                    // So the node declares the other half of the pair instead, in
+                    // the key that already means it: `selected` is "records this
+                    // node READ or matched", and the recipients it addressed are
+                    // exactly that. Reporting it costs a delivering run nothing
+                    // (`acted`/`unmeasuredEffect` keep it out of the filter) and
+                    // buys the zero-delivery run its place inside it, which is
+                    // what makes the two runs read differently at all.
+                    //
+                    // It counts audience ENTRIES the node addressed, not resolved
+                    // users: the entry (`role:manager`, a bare id) is what this
+                    // node has: expansion happens inside the messaging service and
+                    // is not reported back. `selected` and `acted` are not
+                    // required to be commensurate anywhere else either — a
+                    // `get_record` selects ten and an update acts on three.
                     metrics: enqueued > 0
-                        ? { ...(delivered > 0 ? { acted: delivered } : {}), unmeasuredEffect: true }
-                        : { acted: delivered },
+                        ? { selected: recipients.length, ...(delivered > 0 ? { acted: delivered } : {}), unmeasuredEffect: true }
+                        : { selected: recipients.length, acted: delivered },
                 };
             } catch (err) {
                 return { success: false, error: `notify failed: ${(err as Error).message}` };

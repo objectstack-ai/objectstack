@@ -16,8 +16,14 @@ function makeObject(name: string, label = name): ServiceObject {
     name,
     label,
     fields: {
-      id: { type: 'id', label: 'ID' },
-      title: { type: 'string', label: 'Title' },
+      // [#16319] `'id'` and `'string'` are NOT `FieldType` members — the fixture
+      // spelled two types the spec has never declared, and the registration door
+      // now refuses the declaration rather than letting the driver guess a
+      // column family for it. `'text'` is what the platform's own `sys_metadata`
+      // uses for both of these (`Field.text`); nothing in this file's subject —
+      // the merged-definition cache — depends on either spelling.
+      id: { type: 'text', label: 'ID' },
+      title: { type: 'text', label: 'Title' },
     },
   } as ServiceObject;
 }

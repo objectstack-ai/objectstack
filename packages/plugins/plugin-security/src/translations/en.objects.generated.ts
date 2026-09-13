@@ -102,6 +102,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       }
+    },
+    _validations: {
+      reserved_identity_name: {
+        message: "'name' cannot spell a framework-reserved built-in identity name (platform_admin, org_owner, org_admin, org_member). These names are ADR-0068 built-in identities: the platform projects them into current_user.positions from their own sources of truth, and a row spelling one is not an assignment of that identity. Choose a different name."
+      }
     }
   },
   sys_capability: {
@@ -440,6 +445,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       updated_at: {
         label: "Updated At"
+      }
+    },
+    _validations: {
+      reserved_identity_position: {
+        message: "'position' cannot spell a framework-reserved built-in identity name (platform_admin, org_owner, org_admin, org_member). These names are ADR-0068 built-in identities: the platform projects them into current_user.positions from their own sources of truth, and a row spelling one is not an assignment of that identity. Choose a different name."
       }
     }
   }

@@ -257,7 +257,7 @@ sections: [{
 | `displayFields` | Fields projected into each result row (plus `id`); the visitor's `q` is `contains`-matched against the **first** entry. At most 5; omitted → `['name']`. |
 | `maxResults` | Rows per request, integer 1–50 (default 20). 50 is a hard server ceiling; there is **no pagination** on this surface (`offset` is pinned to 0), so a leaked endpoint cannot enumerate the table. |
 | `filter` | Static pre-filter rows (same `{ field, operator, value }` dialect as list-view filters), ANDed ahead of the visitor's search. |
-| `object` | The object to search. Optional — omit it and the server resolves the target from the field's own definition on the parent object (its `reference`, or a legacy `referenceTo` / `target` / `options.objectName` on a pre-fold stored row). Declare it only to search something other than what the field points at. |
+| `object` | The object to search. Optional — omit it and the server resolves the target from the field's own definition on the parent object: its `reference` key, and only that key. A stored row spelling the target `referenceTo` / `target` / `options.objectName` is **not** resolved — the route answers `500 LOOKUP_TARGET_MISSING` — because `FieldSchema` accepts no spelling but `reference`. Declare it only to search something other than what the field points at. |
 
 Those four keys are the whole block. It admits exactly what the route enforces
 — an unknown subkey, a 6th display field, or `maxResults: 51` is a **parse

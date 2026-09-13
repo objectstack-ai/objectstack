@@ -49,6 +49,25 @@ import { SqlDriver } from './index.js';
 
 /** `any` defeats ordinary assignability checks; this is the standard detector. */
 type IsAny<T> = 0 extends 1 & T ? true : false;
+
+/**
+ * [#17879] MEASURED — `sqlUpdateIsAny` below is a PHANTOM half against a
+ * NESTED regression, and `ContainsAny` (#17876) does NOT close it. On disk,
+ * reverting only this door in `sql-driver.ts`:
+ *
+ *   door resolves to  `Record<string, unknown> | null`
+ *   CONTROL  `Promise<any>`                       2 errors (both legs)
+ *                                                  => the instrument fires
+ *   NESTED   `Promise<Record<string, any> | null>` 1 error (`Equals` only)
+ *                                                  => half the protection
+ *   the same NESTED run with a `ContainsAny` leg alongside: still GREEN
+ *
+ * WHY it does not close: `ContainsAny` distributes over the union, so
+ * `Record<string, any> | null` answers `boolean` (`true` for the record arm,
+ * `false` for `null`) — and `const leg: boolean = false` compiles. Every
+ * door carrying the not-found arm has this shape. No swap was made; the two
+ * measured repairs are in the #17879 report.
+ */
 /** Exact (mutual, non-`any`) type equality. */
 type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
 

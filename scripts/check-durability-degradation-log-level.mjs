@@ -294,6 +294,10 @@ const READ_INVENTION_BASELINE_PATH = join(
  */
 const DURABILITY_CRITICAL_CALLEES = new Map([
     [
+        'recordLog',
+        "A run's TERMINAL history row was never written — the run itself finished and the caller was told so, so the result envelope, the HTTP status and every counter read clean while `sys_automation_run` simply has no row for it. Nothing retries the write: after the next restart the run is invisible to the Runs surfaces, `inspectStrandedRequests` reads \"no suspension + no terminal row\" as a STRANDED request and `releasePendingForTerminalRuns` reads the same hole as still-alive. The engine states the invariant this entry protects in `recordLog`'s own doc — a history write must NEVER block or break the run that produced it — so the `catch` that keeps the run alive is also the only place the loss can be reported, and a `warn` there is the one level at which an operator is never told (#15944 on the resume path, #16274 on the two initial-execution paths, where the unreported version additionally re-ran the whole flow under `errorHandling.strategy: 'retry'`).",
+    ],
+    [
         'tryInsert',
         "A seeder's insert was refused and the helper answered `null` — the row is simply absent while the seeding pass moves on and its per-boot summary still reads clean. This is the shape #12981 was filed over: the RBAC catalog seeders swallowed refused writes in `catch { return null; }`, and a boot logged \"RBAC catalog seeded\" at `info` over zero landed rows, on a deployed plane, for weeks (#12923). The helper answers its CALLER, which reports the refusal through the #12923 accumulator; what this entry holds is that no caller may re-swallow that answer in a quiet `catch`.",
     ],

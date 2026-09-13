@@ -210,18 +210,61 @@ export function registerIdentityWriteGuard(engine: any, opts: IdentityWriteGuard
       }
     }
 
+    // ── [#16344] What the CALLER submitted, for the DIAGNOSTIC half only ────
+    //
+    // `input.data` is the record the engine intends to persist, and since
+    // #16344 that excludes a statically `readonly` field the caller supplied a
+    // value for: the engine strips it before this hook runs. ENFORCEMENT is
+    // unaffected — a field that never reaches the row cannot be written, and
+    // the loop above still deletes every non-whitelisted key that DID reach it.
+    //
+    // What WOULD have degraded is this guard's whole reason for naming things.
+    // Measured on the pre-#16344 engine and pinned in
+    // `identity-write-guard.test.ts`: `update sys_user { id, role: 'admin' }`
+    // — `role` read-only and not whitelisted — answered
+    // `403 None of the submitted fields (role) are editable`. With the strip
+    // moved ahead of the hooks and this guard still reading only `input.data`,
+    // the identical request answers `(—)`: as strong a refusal, saying nothing
+    // about what was refused. That degradation is the reason the ruling paired
+    // the strip move with a channel, and this is the migration onto it.
+    //
+    // So the field LIST is composed from `ctx.submitted` — the caller's
+    // payload as sent, which the engine publishes for exactly this
+    // (`HookContextSchema.submitted`: "diagnostics only, never the persist
+    // image"). ⛔ Never written back into `data`: re-applying a value the
+    // engine refused, from inside a hook, is the forgery #14088's write
+    // provenance exists to make impossible.
+    //
+    // UNION, not replacement, and both halves are load-bearing: `submitted`
+    // carries fields the ENGINE refused before this hook ever saw them,
+    // `stripped` carries the ones THIS guard refused, and only their union is
+    // "what you sent that is not editable here". Absent `submitted` — a
+    // non-update event, or an engine that does not publish it — degrades to
+    // today's list rather than to nothing.
+    const submitted = ctx.submitted as Record<string, unknown> | undefined;
+    const refused = new Set(stripped);
+    if (submitted && typeof submitted === 'object') {
+      for (const key of Object.keys(submitted)) {
+        if (key === 'id') continue;
+        if (LIFECYCLE_PASSTHROUGH.has(key)) continue;
+        if (whitelist.has(key)) continue;
+        refused.add(key);
+      }
+    }
+    const refusedFields = [...refused];
+
     if (editableRemaining === 0) {
       throw forbidden(
         ctx.object,
-        `None of the submitted fields (${stripped.join(', ') || '—'}) are editable on ` +
+        `None of the submitted fields (${refusedFields.join(', ') || '—'}) are editable on ` +
           `'${ctx.object}' via the data API (ADR-0092). Editable fields: ` +
           `${[...whitelist].join(', ')}. For anything else, ${DEDICATED_SURFACE_HINT}.`,
       );
     }
-    if (stripped.length > 0) {
+    if (refusedFields.length > 0) {
       logger?.warn(
         `[IdentityWriteGuard] stripped non-whitelisted field(s) from user-context update to ` +
-          `'${ctx.object}': ${stripped.join(', ')} (ADR-0092)`,
+          `'${ctx.object}': ${refusedFields.join(', ')} (ADR-0092)`,
       );
     }
   };

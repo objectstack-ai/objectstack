@@ -272,6 +272,47 @@ export class PermissionEvaluator {
   }
 
   /**
+   * [ADR-0090 D10 — ruling 2026-09-08] The access DEPTH these sets actually
+   * **declare** for an operation class, or `undefined` when they declare none.
+   *
+   * The same walk as {@link getEffectiveScope}, minus its two DEFAULTS. Those
+   * defaults are right for a principal standing on its own — a granting set
+   * silent about depth is owner-only, and an object no set mentions is denied
+   * separately — but they are *manufactured* opinions, and the ADR-0090 D10
+   * intersection must not subtract with one. `undefined` = "no opinion": every
+   * set that grants the op is silent on depth (no `readScope` / `writeScope`,
+   * no `viewAllRecords` / `modifyAllRecords`), or no set mentions the object at
+   * all. A set that DOES declare a depth answers here exactly as
+   * `getEffectiveScope` would — widest wins — so a declared ceiling keeps its
+   * full subtractive force.
+   *
+   * ⛔ Not a replacement for `getEffectiveScope`: the non-delegated path still
+   * needs the owner-only default. This is the DELEGATED path's input, folded by
+   * `intersectDelegatedScope` (explain-engine.ts).
+   */
+  getDeclaredScope(
+    opClass: 'read' | 'write',
+    objectName: string,
+    permissionSets: PermissionSet[],
+    opts: { isPrivate?: boolean } = {},
+  ): 'own' | 'own_and_reports' | 'unit' | 'unit_and_below' | 'org' | undefined {
+    const RANK = { own: 0, own_and_reports: 1, unit: 2, unit_and_below: 3, org: 4 } as const;
+    const ORDER = ['own', 'own_and_reports', 'unit', 'unit_and_below', 'org'] as const;
+    let widest = -1;
+    for (const ps of permissionSets) {
+      const op: any = resolveObjectPermission(ps, objectName, opts.isPrivate ?? false);
+      if (!op) continue;
+      if (opClass === 'read' && (op.viewAllRecords || op.modifyAllRecords)) return 'org';
+      if (opClass === 'write' && op.modifyAllRecords) return 'org';
+      const s = opClass === 'read' ? op.readScope : op.writeScope;
+      if (!s) continue;
+      const rank = RANK[s as keyof typeof RANK];
+      if (rank != null && rank > widest) widest = rank;
+    }
+    return widest < 0 ? undefined : ORDER[widest];
+  }
+
+  /**
    * [ADR-0066 D3] Union of `systemPermissions` (capabilities) the caller holds
    * across the resolved permission sets — used to enforce a resource's
    * `requiredPermissions` AND-gate.

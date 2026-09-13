@@ -120,6 +120,7 @@ export {
   FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID,
   FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE,
   FLOW_TRIGGER_UNROUTABLE,
+  FLOW_SCHEDULE_ORGANIZATION_MISSING,
 } from './validate-flow-trigger-readiness.js';
 export type {
   FlowTriggerReadinessFinding,
@@ -226,10 +227,17 @@ export {
 } from './validate-semantic-roles.js';
 export type { SemanticRoleFinding, SemanticRoleSeverity } from './validate-semantic-roles.js';
 
+// [#17328] `FORM_COLSPAN_ABSOLUTE` / `absolute-colspan-discouraged` was
+// WITHDRAWN, not renamed: browser measurement at all three surface widths
+// falsified the misalignment it asserted, and its recommended alternative
+// measured worse than the thing it warned about. The argument is in
+// `validate-form-layout.ts`'s module note. Removing the constant rather than
+// leaving it exported is deliberate: a rule id on the public surface reads as a
+// check the platform performs (Prime Directive #10), and the compiler is the
+// precise channel for telling a consumer that suppresses it.
 export {
   validateFormLayout,
   FORM_FIELD_UNKNOWN,
-  FORM_COLSPAN_ABSOLUTE,
   FORM_SECTION_GROUP_UNKNOWN,
 } from './validate-form-layout.js';
 export type { FormLayoutFinding, FormLayoutSeverity } from './validate-form-layout.js';
@@ -414,8 +422,6 @@ export type { NavTargetRefFinding, NavTargetRefSeverity } from './validate-nav-t
 
 // [#13216] The same page reference on the OTHER surface that can carry one: a
 // `type: 'page'` list view's `pageName`. Advisory, for its nav twin's reason.
-export { validateViewPageRefs, VIEW_PAGE_UNRESOLVED } from './validate-view-page-refs.js';
-export type { ViewPageRefFinding, ViewPageRefSeverity } from './validate-view-page-refs.js';
 
 // [#7912] The servability question about an `object` nav target: not "does the
 // name resolve?" but "can the destination answer a list at all?". Gates, and
@@ -495,6 +501,8 @@ export type {
 } from './validate-object-field-refs.js';
 
 export { validateActionNameRefs, ACTION_NAME_UNDEFINED } from './validate-action-name-refs.js';
+export { validateActionDispatchContract, ACTION_DISPATCH_CONTRACT_MISMATCH } from './validate-action-dispatch-contract.js';
+export type { ActionDispatchContract, ActionDispatchContractFinding } from './validate-action-dispatch-contract.js';
 export type { ActionNameRefFinding, ActionNameRefSeverity } from './validate-action-name-refs.js';
 
 export { validateActionLocations, ACTION_NO_PLACEMENT } from './validate-action-locations.js';
@@ -832,6 +840,16 @@ export {
   // never share the `dead` id: the two ask the author for opposite actions.
   LIVENESS_LIVE_ELSEWHERE_PROPERTY,
 } from './lint-liveness-properties.js';
+
+export { validateRetiredPermissionResidue } from './validate-retired-permission-residue.js';
+export type { RetiredPermissionResidueFinding } from './validate-retired-permission-residue.js';
+export {
+  // [#17425] The one value #12840's residue stage accepts in silence, named at
+  // the authoring door. Published because `f.rule` is what `--json` consumers
+  // and `suppressWarnings` compare against — a rule id no barrel re-exports is
+  // unreachable (`rule-id-barrel-exports.test.ts`).
+  PERMISSION_RETIRED_LIFECYCLE_RESIDUE,
+} from './validate-retired-permission-residue.js';
 
 export { lintAutonumberFormats } from './lint-autonumber-formats.js';
 export type { AutonumberLintFinding } from './lint-autonumber-formats.js';

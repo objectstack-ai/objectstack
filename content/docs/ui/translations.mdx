@@ -244,6 +244,23 @@ A missing string in the **default** locale is an error; missing strings in
 other locales are warnings until you set `--strict` / `--threshold`. The Todo
 example ships a completeness test alongside its bundles — worth copying.
 
+### What counts as *your* coverage
+
+The Studio's own metadata forms (`metadataForms.*` — several hundred keys
+across every metadata type) are translated by `@objectstack/platform-objects`
+and served from there, so they are **not** in your coverage number: an app that
+translated everything it declares reads 100%, not 39%. ⛔ Do not "fix" a low
+number by shipping your own `metadataForms` bundle — yours would override the
+platform's and go stale at the next upgrade.
+
+The rule is **ownership**, read from your own bundles rather than assumed: ship
+translations for that family and you are asked to complete them, which is how
+the platform packages stay gated on the strings they do own. Pass
+`--include-platform` to audit the baseline anyway (`os lint`'s flag, same
+meaning), or `--no-include-platform` to keep it out even though you ship part
+of it. The command prints how many keys it left out, and `--json` carries the
+same two numbers as `platformMetadataForms`.
+
 ### Which locales get checked
 
 Your project decides, and the tooling never assumes. `os lint`, `os i18n check`

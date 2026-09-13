@@ -22,6 +22,7 @@ import { invalidMemberError } from '../dataset-refusal.js';
 import { type LikeShape } from '../like-pattern.js';
 import { textMatchPredicateSql, sqlDialectFor } from '../text-match-sql.js';
 import { nextUtcCalendarDay, resolveAnalyticsDateRangeString } from '@objectstack/core';
+import { explicitDateRangeWindow } from '../date-range-array-arm.js';
 import {
   rebucketCrossObject,
   RECOMBINABLE_METHODS,
@@ -1668,11 +1669,20 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * epoch-ms window would have to be declared, not here). An author who wants an
    * instant window writes it as one; a declared `string` binds as a string. No
    * STORAGE coercion happens here either, deliberately: `NativeSQLStrategy` needs
-   * `coerceTemporal` because it binds into raw SQL and had to learn that a
-   * SQLite `Field.datetime` is an INTEGER epoch (#2034); this path goes through
+   * `coerceTemporal` because it binds into raw SQL and so has to canonicalise
+   * the comparand itself (#2034, then #3912); this path goes through
    * `engine.aggregate()`, where the driver's own CRUD filter coercion applies —
    * the very coercion that already makes a `where` bound on that same column
    * work today.
+   *
+   * ⛔ This sentence used to end "…had to learn that a SQLite `Field.datetime`
+   * IS an INTEGER epoch (#2034)". That flat claim has been wrong since #3912
+   * gave the column one canonical UTC-text storage form; the epoch survives only
+   * in a database not yet backfilled. The reason `NativeSQLStrategy` needs the
+   * coercion is unchanged — it binds outside the driver's builder — and the
+   * storage fact itself is stated in ONE place, on
+   * `AnalyticsServiceConfig.coerceTemporalFilterValue` in `analytics-service.ts`
+   * (#16737).
    *
    * [#16322] A bare string is a member of the CLOSED date-range preset
    * vocabulary (#16041) and is lowered to a real window by
@@ -1690,11 +1700,13 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * a vocabulary word against a timestamp — which is precisely how the two
    * backends came to answer one bad input with opposite wrong answers.
    *
-   * An oddly-sized array (the schema types `dateRange` as a plain `string[]`)
-   * takes its first two entries, a one-entry array degenerating to a point.
-   * `NativeSQLStrategy` drops such a window entirely — but "drop the window"
-   * means "plot all of history", which is the very failure this fixes, so the
-   * fallback here errs toward the narrower query instead.
+   * [#17124] An oddly-sized array is REFUSED with the same envelope, by the one
+   * `explicitDateRangeWindow` every face in this package now calls. ⛔ The
+   * per-face fallback this replaced — take the first two entries, a one-entry
+   * array degenerating to a point — was one of THREE readings of the same
+   * document (the native-SQL face dropped the window to all of history, the
+   * preview face left the upper bound unwritten), and the contract declares the
+   * arm two-element, so there is nothing here to guess.
    */
   private dateRangeBounds(
     cube: Cube,
@@ -1727,8 +1739,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       // on a bound they wrote is the reading this face has published since it
       // existed (#16179), and the driver's own bare-day widening still owns
       // the calendar-day → instant translation for it.
-      const [start, end = start] = td.dateRange;
-      if (start == null) continue;
+      const [start, end] = explicitDateRangeWindow(td.dateRange);
       out.push({
         field: this.resolveFieldName(cube, td.dimension, 'dimension'),
         bounds: { $gte: start, $lte: end },

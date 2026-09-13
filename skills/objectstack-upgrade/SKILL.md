@@ -71,7 +71,7 @@ node -e "console.log(require('fs').readFileSync(require.resolve('@objectstack/sp
 # 3 · acceptance — all four, not three
 os validate                      # green (compare against validate-before.txt)
 tsc --noEmit                     # tombstones type the retired keys as `never`
-os migrate meta --from 17        # must say "Nothing to migrate"
+os migrate meta --from 17 --json # `applied` must be [] (see §3.3)
 # → write .upgrade/REPORT.md (template in §3.4)
 ```
 
@@ -436,8 +436,13 @@ part of it.
 > criterion that closes the gap is the replay:
 >
 > ```bash
-> os migrate meta --from <target-major>    # must report "Nothing to migrate"
+> os migrate meta --from <target-major> --json   # `applied` must be []
 > ```
+>
+> Read `applied`, not the headline: `--to` defaults to the highest major this
+> build carries a step for, which is one PAST the installed major for most of a
+> release line, so `todos` carries the next major's semantic residue — real, but
+> not this upgrade's business.
 >
 > Run both. A report that cites only `validate` cannot see this class at all.
 
@@ -452,7 +457,7 @@ maintainer can read in five minutes and a year from now. Write
 
 **Status:** complete | complete with N open decisions
 **Spec:** <installed @objectstack/spec version>  ·  **Chain:** 16 → 17
-**Verified:** `os validate` green · `tsc --noEmit` green · replay-from-17 applies 0 changes
+**Verified:** `os validate` green · `tsc --noEmit` green · replay-from-17 applies 0 mechanical changes
 
 ## 1 · Mechanical (applied by the chain)
 

@@ -11,6 +11,10 @@ import type { AnalyticsServiceConfig } from './analytics-service.js';
 import type { AnalyticsDriverCapabilities } from './strategies/types.js';
 import { pickDisplayField, type DimensionLabelDeps } from './dimension-labels.js';
 import { assertReadScopeCannotVacate } from './read-scope-sql.js';
+import { readScopeUnresolvedError } from './read-scope-refusal.js';
+// [#16206] The narrowing from a driver's FOUR-name `dialectName` to the THREE
+// this package's config hook declares — see the bridge below.
+import { asAcceptedSqlDialect, type AcceptedSqlDialect } from './text-match-sql.js';
 
 /**
  * The slice of the DECLARED engine contracts this plugin's auto-bridges
@@ -507,9 +511,19 @@ export class AnalyticsServicePlugin implements Plugin {
      * ⛔ The refusal is a THROW, not a louder log over an `undefined`: a log is
      * not a refusal. `AnalyticsService.resolveReadScopes` is the fail-closed
      * seam that already denies the whole query when this provider throws (it
-     * has since ADR-0021 D-C), so serving nothing — the same outcome the
-     * object-level bridge produces — needs no new error code and no new
-     * envelope here.
+     * has since ADR-0021 D-C), so serving nothing is the same outcome the
+     * object-level bridge produces.
+     *
+     * [#17130] It needs no NEW error code — and the clause that used to follow,
+     * "and no new envelope here", was the finding. An envelope is not a second
+     * outcome, it is what stops the outcome being decided by wording:
+     * `queryDataset`'s catch re-throws whatever declares `code` + `status` and
+     * sends everything else to a six-substring sniff over driver phrasing,
+     * three limbs of which (`not registered`, `unknown object`,
+     * `is not a registered object`) are what a security refusal says. This
+     * refusal propagated only because its text happened to miss all six.
+     * {@link readScopeUnresolvedError} carries the code the sibling lowering
+     * stage already owns, so the coincidence is gone without a ledger row.
      */
     type SecurityReadFilterResolution =
       | { kind: 'usable'; svc: SecurityReadFilter }
@@ -572,7 +586,15 @@ export class AnalyticsServicePlugin implements Plugin {
             'A security service is wired on this deployment, so analytics must not fall ' +
             'open and serve rows with no row-level policy applied.',
           );
-          throw new Error(
+          // [#17130] Declared, not bare. `resolveReadScopes` replaces this
+          // error with its own on the dataset path, but this provider is read
+          // by four consumers and a bare refusal is the one kind
+          // `queryDataset`'s catch classifies by WORDING — three of the six
+          // substrings it matches on (`not registered`, `unknown object`,
+          // `is not a registered object`) are exactly what a security refusal
+          // reaches for. ⛔ The message is unchanged: the fix is the
+          // declaration, never a luckier string.
+          throw readScopeUnresolvedError(
             `[Analytics] row-level read scope could not be resolved for "${object}"; ` +
             'query refused (fail-closed).',
           );
@@ -908,9 +930,16 @@ export class AnalyticsServicePlugin implements Plugin {
     // The raw-SQL strategy binds dashboard relative-date tokens (already expanded
     // to ISO strings) directly, bypassing the driver's CRUD coercion. Delegate to
     // the driver — the single source of truth for the on-disk storage convention —
-    // so a `Field.datetime` ISO comparand becomes epoch ms on SQLite, while
-    // `Field.date` text and native-timestamp (Postgres) columns pass through
-    // unchanged. Resolved at call time so plugin-init order does not matter.
+    // so a `Field.datetime` comparand is canonicalised to the SAME form the write
+    // path stores, while `Field.date` text and native-timestamp (Postgres)
+    // columns pass through unchanged. Resolved at call time so plugin-init order
+    // does not matter.
+    //
+    // ⛔ What that form IS is stated in exactly one place —
+    // `AnalyticsServiceConfig.coerceTemporalFilterValue`'s storage-reality block
+    // in `analytics-service.ts` (#16737). Do not restate it here; this comment
+    // used to say "becomes epoch ms on SQLite", which stopped being true when
+    // #3912 made canonical UTC text the one stored form.
     const coerceTemporalFilterValue = (
       objectName: string,
       fieldName: string,
@@ -929,11 +958,19 @@ export class AnalyticsServicePlugin implements Plugin {
       return value;
     };
 
-    // The column half of the same fix (#3912). A SQLite `Field.datetime` column
-    // holds BOTH storage forms — INTEGER epoch from a `Date` write, ISO TEXT from
-    // a REST/JSON write or a `NOW()` default — so coercing the comparand alone
-    // matched whichever half the writer produced and returned an empty window for
-    // the other. Ask the driver for the column expression that normalises both.
+    // The column half of the same fix (#3912), and the half that is CONDITIONAL.
+    // A SQLite `Field.datetime` column written before the canonical convention
+    // can still hold a mix — INTEGER epoch from a `Date` write next to text from
+    // a REST/JSON write — so coercing the comparand alone matched whichever half
+    // the writer produced and returned an empty window for the other. Ask the
+    // driver for the column expression that normalises both; on a converged
+    // column, and on every dialect with a real temporal type, it answers with the
+    // bare column and the comparison stays indexable.
+    //
+    // ⛔ Same rule as the hook above: the storage reality is stated once, on
+    // `AnalyticsServiceConfig.coerceTemporalFilterValue` (#16737). This comment
+    // used to assert the mixed form as the steady state; it is the transitional
+    // one.
     const coerceTemporalFilterColumn = (
       objectName: string,
       fieldName: string,
@@ -964,13 +1001,24 @@ export class AnalyticsServicePlugin implements Plugin {
      * `undefined` on every tier that cannot answer — no data engine, a driver
      * that names no dialect (memory, mongo), a throw — and `undefined` keeps
      * the plain `LIKE`, which is exactly the pre-#15684 behaviour.
+     *
+     * [#16206] ⭐ A FIFTH tier that cannot answer, and the reason this is not a
+     * verbatim pass-through: `SqlDriver.dialectName` is a FOUR-name vocabulary
+     * whose fourth name is `'unknown'` — that driver's own "I cannot say", which
+     * is what it returns for a client it does not model (`'mariadb'`, left
+     * unrecognised on purpose by #11756). The config hook's accept set is the
+     * other THREE, so handing `'unknown'` on verbatim would present a driver
+     * behaving correctly as a host answering out of contract, and every such
+     * deployment would carry a warning about itself. ⇒ The residue is
+     * translated to this hook's own spelling for the same thing, `undefined`.
+     * The dialect the compilers end up with is unchanged either way.
      */
-    const sqlDialect = (objectName: string): string | undefined => {
+    const sqlDialect = (objectName: string): AcceptedSqlDialect | undefined => {
       try {
         const svc = ctx.getService<DataEngineLike>('data');
         const driver = svc?.getDriverForObject?.(objectName) as DialectNamingDriver | undefined;
         const named = driver?.dialectName;
-        return typeof named === 'string' ? named : undefined;
+        return asAcceptedSqlDialect(typeof named === 'string' ? named : undefined);
       } catch {
         // Same tiering as the temporal hooks: an unresolvable driver keeps the
         // dialect-blind construct, which is today's behaviour.
@@ -998,13 +1046,24 @@ export class AnalyticsServicePlugin implements Plugin {
       // of the two moves.
       debugSql: this.options.debugSql,
       // Source-field metadata behind the display chains on result columns:
-      // ADR-0053 currency (`currencyConfig.defaultCurrency`) and percent scale
-      // (`max`, which is what marks whole-percent storage — objectui#3136).
+      // ADR-0053 currency (`currencyConfig.defaultCurrency`), percent scale
+      // (`max`, which is what marks whole-percent storage — objectui#3136) and,
+      // since #16236, a formula field's declared `returnType`.
+      //
+      // [#16236] `returnType` is relayed exactly as the other three are —
+      // straight off the object's declared field, unvalidated and uncoerced.
+      // ⛔ Deliberately NOT narrowed to the accepted four here: this adapter's
+      // job is to carry what the engine declares, and a second copy of that
+      // vocabulary at this seam is one that can drift from
+      // `FieldSchema.returnType`. The one reader (`measureResultType`) holds
+      // the single copy and tiers anything else as "cannot answer".
       sourceFieldMeta: (object: string, field: string) => {
         const f = dataEngine()?.getObject?.(object)?.fields?.[field] as
-          | { type?: string; max?: number; currencyConfig?: { defaultCurrency?: string } }
+          | { type?: string; max?: number; returnType?: string; currencyConfig?: { defaultCurrency?: string } }
           | undefined;
-        return f ? { type: f.type, max: f.max, defaultCurrency: f.currencyConfig?.defaultCurrency } : undefined;
+        return f
+          ? { type: f.type, max: f.max, defaultCurrency: f.currencyConfig?.defaultCurrency, returnType: f.returnType }
+          : undefined;
       },
       // #5033 — the datasource an object is bound to, used ONLY to name the
       // actual cause when a dataset's SQL references a table that is not on the

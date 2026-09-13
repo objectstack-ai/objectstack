@@ -2,10 +2,6 @@
 
 import { z } from 'zod';
 import { HttpMethod } from '../shared/http.zod';
-// [#6287] Type-only: erased at compile time, so this carries no runtime edge
-// from `api/` to `cloud/`. It is what makes the NODE_ENV fold table provably
-// total over the environment taxonomy rather than total by inspection.
-import type { EnvironmentType } from '../cloud/environment.zod';
 
 /**
  * Service Status Enum
@@ -411,6 +407,37 @@ export const ApiRoutesSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * Environment categorical tag — the 7-member taxonomy the NODE_ENV fold table
+ * below is total over.
+ *
+ * Until #16325 this enum was declared by `cloud/environment.zod.ts`, beside the
+ * cloud control plane's own environment row (`sys_environment`). That row and
+ * its siblings are not an open-source protocol — their producer and their
+ * consumers both live in the closed cloud repo — so they left
+ * `@objectstack/spec` with the `./cloud` subpath (maintainer direction,
+ * verbatim: 「我一直觉得 cloud 的协议应该放在云端，没必要开源」). The taxonomy
+ * stays HERE, in the one open-source module that reads it:
+ * `NODE_ENV_TO_DISCOVERY_ENVIRONMENT` is typed
+ * `Record<EnvironmentType, DiscoveryEnvironment>`, which is what makes the fold
+ * provably total over the taxonomy rather than total by inspection (#6287).
+ *
+ * Its relation to the 3-member `DiscoveryEnvironmentSchema` below is a strict
+ * subset: `resolveDiscoveryEnvironment` folds `test` → `development` and
+ * `staging` / `preview` / `trial` → `sandbox` (#4828, #6287), and the subset is
+ * pinned in `discovery-environment-subset.pin.test.ts` (#5676).
+ *
+ * ⚠️ Adding a member here is a decision about the fold table too: a new bucket
+ * does not compile until it says which of the three coarse postures it
+ * advertises — on purpose, because before #6287 `preview` and `trial` reached
+ * `development` through a `??` fallback instead of a decision (#5673).
+ */
+export const EnvironmentTypeSchema = lazySchema(() => z
+  .enum(['production', 'sandbox', 'development', 'test', 'staging', 'preview', 'trial'])
+  .describe('Environment categorical tag (prod/sandbox/dev/test/…)'));
+
+export type EnvironmentType = z.input<typeof EnvironmentTypeSchema>;
+
+/**
  * Discovery Response Schema
  * The root object returned by the Metadata Discovery Endpoint.
  * 
@@ -508,7 +535,8 @@ export type DiscoveryEnvironment = z.input<typeof DiscoveryEnvironmentSchema>;
  *
  * 1. **What they are here.** In this repo's taxonomy an environment is a
  *    provisioned runtime container — isolated database, canonical hostname,
- *    plan tier, per-environment RBAC (`cloud/environment.zod.ts`). A `preview`
+ *    plan tier, per-environment RBAC (the cloud repo's `sys_environment` row —
+ *    declared under `@objectstack/spec/cloud` until #16325). A `preview`
  *    or `trial` environment is that, not an ephemeral developer-class run. The
  *    `development` bucket is reserved for the machine-and-CI class (`development`,
  *    `dev`, `test`); `sandbox` is the enum's provisioned pre-production member,

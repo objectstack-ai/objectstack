@@ -311,10 +311,10 @@ describe('AuthManager', () => {
       expect(capturedConfig.account.fields).toEqual(expect.objectContaining({
         userId: 'user_id',
         providerId: 'provider_id',
-        // 1.7 identity key: (issuer, accountId). The id field kept the
-        // `account_id` column across the rc.2 `providerAccountId` detour and
-        // the stable 1.7 rename back (#3002).
-        issuer: 'issuer',
+        // [#17440] Identity key: (providerId, accountId) — 1.7.3 rolled the
+        // issuer-scoped key back. The id field kept the `account_id` column
+        // across the rc.2 `providerAccountId` detour and the stable 1.7
+        // rename back (#3002).
         accountId: 'account_id',
         accessToken: 'access_token',
         refreshToken: 'refresh_token',

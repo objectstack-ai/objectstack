@@ -14,9 +14,14 @@
  * complementarity holds, on every face. The JS faces read that off the value.
  * A SQL compiler cannot see the value at compile time and reads the DECLARED
  * type instead: `NON_TEXT_STORED_VALUE_TYPES` is the spec's list of the field
- * types whose stored value is never text (the numeric and boolean value
- * classes), and a column in one of them compiles the positive operators to the
- * FALSE constant and `$notContains` to the TRUE constant.
+ * types a text operator must not be aimed at — the numeric and boolean value
+ * classes, plus the three temporal ones since the maintainer's 2026-09-05
+ * ruling on #15683 (「a text operator over a column whose DECLARED type is
+ * temporal is type-gated exactly like the numeric and boolean classes; the
+ * SQLite ISO-text match is not a contract」) — and a column in one of them
+ * compiles the positive operators to the FALSE constant and `$notContains` to
+ * the TRUE constant. This module reads the set, so the temporal classes
+ * arrived here with no edit to the predicate below.
  *
  * ## What compiled before
  *

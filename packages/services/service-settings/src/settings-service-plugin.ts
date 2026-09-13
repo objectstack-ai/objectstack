@@ -334,7 +334,7 @@ export class SettingsServicePlugin implements Plugin {
    *
    * `resolveTenancyPosture()` reads `OS_TENANCY_POSTURE` — what the deployment
    * ASKED for. Under ADR-0093 D4/D5 a deployment that requests `isolated`
-   * without the enterprise organizations runtime is `single` in force, so the
+   * without the organizations runtime is `single` in force, so the
    * requested value would refuse legitimate automation over a wall that is not
    * there. The posture the guards must see is the one the `tenancy` service
    * reports, which is what {@link effectiveTenancyPosture} reads.

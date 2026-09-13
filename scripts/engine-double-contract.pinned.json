@@ -777,6 +777,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.meta-types-degenerate-derivation.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.meta-types-degenerate-derivation.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.meta-types-degenerate-derivation.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.meta-types-mint-door-agreement.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1587,6 +1602,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/seed-loader-summary-scope.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-summary-scope.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-summary-scope.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/seed-loader-summary-stale.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -2157,6 +2187,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/platform-objects/src/system/migration-flag.column-move.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/platform-objects/src/system/migration-flag.test.ts",
       "verb": "update",
       "pinned": 1
@@ -2237,6 +2272,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-approvals/src/recall-strand-discriminator.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/recall-strand-discriminator.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-approvals/src/record-reader-visibility.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -2263,6 +2308,16 @@
     },
     {
       "file": "packages/plugins/plugin-approvals/src/run-status-liveness.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/stranded-resubmit-second-door.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/stranded-resubmit-second-door.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -2343,6 +2398,21 @@
     },
     {
       "file": "packages/plugins/plugin-auth/src/admin-user-endpoints.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/anonymous-session-refusal.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/anonymous-session-refusal.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/anonymous-session-refusal.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -2668,6 +2738,16 @@
     },
     {
       "file": "packages/plugins/plugin-security/src/check-only-write-scope.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/claim-seed-ownership-seed-settle-rerun.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/claim-seed-ownership-seed-settle-rerun.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -3267,6 +3347,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/rest/src/rest-declared-refusal-relay.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/rest-server-meta-cached-etag-door-scope.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/rest/src/rest-server-meta-history-diff-org-scope.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3304,6 +3394,16 @@
     {
       "file": "packages/runtime/src/action-declarative-update.test.ts",
       "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/action-engine-facade-delete-partial-failure.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/action-engine-facade-nullish-id.test.ts",
+      "verb": "delete",
       "pinned": 1
     },
     {
@@ -3522,6 +3622,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/services/service-automation/src/builtin/notify-zero-delivery-visibility.integration.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/services/service-automation/src/builtin/wait-node-degraded-run.test.ts",
       "verb": "update",
       "pinned": 1
@@ -3665,6 +3770,11 @@
       "file": "packages/services/service-messaging/src/messaging-service.test.ts",
       "verb": "findOne",
       "pinned": 6
+    },
+    {
+      "file": "packages/services/service-messaging/src/notification-delivery-retention-sweep.test.ts",
+      "verb": "delete",
+      "pinned": 1
     },
     {
       "file": "packages/services/service-messaging/src/notification-schema-conformance.test.ts",

@@ -4,9 +4,7 @@
 
 ## 范围
 
-- `packages/lint`、`packages/sdui-parser`、`content/docs/**`、`apps/docs`、
-  `scripts/`(门禁类)、`.github/workflows/`(门禁接线)、`.githooks/`、
-  `examples/**` 测试基建面、`docker/README.md`。
+- 本席路径面全量在 SKILL.md 域车道表 `domain:devx` 行,⛔ 不另抄。
 - objectui 的本域面同辖:`.github/`、`scripts/`、构建与发布管线、门禁工具。
 - 边界:守护 skills 的门禁脚本在 `scripts/` 下时归本席,判据是被改文件的路径。
 - SUBJECT 例外与 spec 三面切分在 SKILL.md 域车道表;`.claude/workflows/` 不是 `.claude/skills/`。

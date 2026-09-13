@@ -1,12 +1,12 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { Hook, HookContext } from '@objectstack/spec/data';
+import { defineHook, type HookContext } from '@objectstack/spec/data';
 
 /**
  * Pin the probability to 100% when an opportunity is marked Closed Won,
  * and 0% when Closed Lost. Demonstrates a basic before-update hook.
  */
-export const OpportunityStageHook: Hook = {
+export const OpportunityStageHook = defineHook({
   name: 'opportunity_stage_probability',
   object: 'crm_opportunity',
   events: ['beforeInsert', 'beforeUpdate'],
@@ -16,4 +16,4 @@ export const OpportunityStageHook: Hook = {
     if (input.stage === 'closed_won') input.probability = 100;
     if (input.stage === 'closed_lost') input.probability = 0;
   },
-};
+});

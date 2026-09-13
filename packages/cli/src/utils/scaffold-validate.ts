@@ -88,6 +88,9 @@ export function runScaffoldAuthoringRules(config: unknown): ScaffoldRuleReport {
     normalized: normalized as Record<string, unknown>,
     parsed: result.data as Record<string, unknown>,
     sduiManifest: resolveSduiManifest(),
+    // [#16546] Same ref set the other three doors compute — keeps this
+    // door's hook write-set findings at the same `path` as they are.
+    loweredHookRefs: lowering.loweredHookRefs,
   });
   const { errors, advisories } = splitBySeverity(findings);
 

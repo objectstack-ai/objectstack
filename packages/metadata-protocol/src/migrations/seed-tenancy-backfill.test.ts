@@ -50,6 +50,7 @@ import {
   ORGANIZATION_TABLE,
 } from './seed-tenancy-backfill.js';
 import type { SeedTenancyBackfillResult } from './seed-tenancy-backfill.js';
+import { TABLE_IS_PRESENT_ROWS, isTablePresenceCatalogSql } from './read-probe.testkit.js';
 
 describe('#8686 normalizeRows — one reader for three dialect shapes', () => {
   const rows = [{ object: 'crm_case', field: 'case_number' }];
@@ -405,7 +406,12 @@ describe('#12394 the counter handoff writes the row the driver will read', () =>
     const rows = new Map<string, Record<string, unknown>>();
     for (const row of seed) rows.set(String(row.key_hash), { ...row });
     const exec = async (sql: string, params: unknown[] = []): Promise<unknown> => {
-      if (sql.includes('WHERE 1 = 0')) return []; // presence + key-shape probes
+      // [#17175] The presence question is asked of the catalog now, and a
+      // catalog answering zero rows means ABSENT — so "the counter table is
+      // there" has to be said with a ROW. The `WHERE 1 = 0` line below is still
+      // live: it is the key-SHAPE probe, which still asks by being refused.
+      if (isTablePresenceCatalogSql(sql, SEQUENCES_TABLE)) return TABLE_IS_PRESENT_ROWS;
+      if (sql.includes('WHERE 1 = 0')) return []; // key-shape probe
       if (sql.includes('LEFT JOIN')) {
         return [
           { object: OBJECT, field: FIELD, global_last_value: 38, organization_last_value: 1 },
@@ -537,7 +543,8 @@ describe('#9451 the seed-tenancy repair leaves a durable receipt', () => {
       // Dispatched on the statements the module actually compiles, so a builder
       // that changed shape breaks this fixture rather than silently turning it
       // into a healthy install.
-      if (sql.includes('WHERE 1 = 0')) return []; // presence + key-shape probes
+      if (isTablePresenceCatalogSql(sql, SEQUENCES_TABLE)) return TABLE_IS_PRESENT_ROWS;
+      if (sql.includes('WHERE 1 = 0')) return []; // key-shape probe
       if (sql.includes('LEFT JOIN')) {
         return [
           {
@@ -680,7 +687,8 @@ describe('#9451 the seed-tenancy repair leaves a durable receipt', () => {
     const log = createLogger();
     const result = await backfillSeedTenancy(
       {
-        exec: async (sql: string) => (sql.includes('SELECT 1') ? [] : []),
+        exec: async (sql: string) =>
+          isTablePresenceCatalogSql(sql, SEQUENCES_TABLE) ? TABLE_IS_PRESENT_ROWS : [],
         client: 'better-sqlite3',
         ledger: store.ledger,
       },
@@ -769,6 +777,7 @@ describe('#9451 the seed-tenancy repair leaves a durable receipt', () => {
     const result = await backfillSeedTenancy(
       {
         exec: async (sql: string) => {
+          if (isTablePresenceCatalogSql(sql, SEQUENCES_TABLE)) return TABLE_IS_PRESENT_ROWS;
           if (sql.includes('LEFT JOIN')) {
             return [
               { object: 'sys_migration', field: 'seq', global_last_value: 7, organization_last_value: 2 },
@@ -837,11 +846,23 @@ describe('#12395 zero organizations is a third state, not the ambiguous one', ()
     };
   }
 
-  /** A seam holding one `__global__` counter and `orgs` organizations. */
-  function seam(orgs: string[], opts: { organizationProbeThrows?: boolean } = {}) {
+  /**
+   * A seam holding one `__global__` counter and `orgs` organizations.
+   *
+   * `organizationProbeThrown` names the value the organization probe throws;
+   * omitted, it is a normal driver `Error`. It exists so the EMPTY-channel
+   * shapes (#17167) can be driven through the same seam — and it is compared
+   * against `undefined` rather than reached through `??`, because `''` is not
+   * nullish and is exactly the value under test.
+   */
+  function seam(
+    orgs: string[],
+    opts: { organizationProbeThrows?: boolean; organizationProbeThrown?: unknown } = {},
+  ) {
     const sql: string[] = [];
     const exec = async (statement: string) => {
       sql.push(statement);
+      if (isTablePresenceCatalogSql(statement, SEQUENCES_TABLE)) return TABLE_IS_PRESENT_ROWS;
       if (statement.includes('WHERE 1 = 0')) return [];
       if (statement.includes('LEFT JOIN')) {
         return [
@@ -855,7 +876,11 @@ describe('#12395 zero organizations is a third state, not the ambiguous one', ()
         ];
       }
       if (statement.includes(ORGANIZATION_TABLE)) {
-        if (opts.organizationProbeThrows) throw new Error('connection reset by peer');
+        if (opts.organizationProbeThrows) {
+          throw opts.organizationProbeThrown === undefined
+            ? new Error('connection reset by peer')
+            : opts.organizationProbeThrown;
+        }
         return orgs.map((id) => ({ id }));
       }
       return [];
@@ -937,6 +962,35 @@ describe('#12395 zero organizations is a third state, not the ambiguous one', ()
     expect(log.warn).toHaveLength(1);
     expect(log.warn[0][1]).toMatchObject({ organizationProbeError: 'connection reset by peer' });
     expect(log.warn[0][0]).toContain('probe FAILED');
+  });
+
+  it('[#17167] a probe that failed SILENTLY is still a failure, and the record stays empty', async () => {
+    // The same discrimination as the case above, driven through the shape that
+    // used to need a placeholder to survive it: an operator channel with
+    // nothing in it. The record now says what the backend said — nothing — and
+    // the FACT that it failed rides in the type, not in the text. Both arms are
+    // asserted, because a fix that restored the text by inventing words would
+    // pass the status arm alone, and a fix that dropped the discrimination
+    // would pass the record arm alone.
+    const log = spy();
+    const { seam: s } = seam([], { organizationProbeThrows: true, organizationProbeThrown: '' });
+    const result = await backfillSeedTenancy(s, log.logger as any);
+
+    expect(result.status).toBe('skipped-ambiguous-organization');
+    expect(log.info).toHaveLength(0);
+    expect(log.warn).toHaveLength(1);
+    expect(log.warn[0][1]).toMatchObject({ organizationProbeError: '' });
+    expect(log.warn[0][0]).toContain('probe FAILED');
+    expect(log.warn[0][0]).not.toContain('unknown error');
+
+    // And "empty" still reads apart from "there was no failure" in the STORED
+    // record, which is the job the placeholder used to do: a failed probe keeps
+    // the key with an empty value, a probe that answered drops the key.
+    expect(JSON.stringify(log.warn[0][1])).toContain('"organizationProbeError":""');
+    const answered = spy();
+    await backfillSeedTenancy(seam(['org_a', 'org_b']).seam, answered.logger as any);
+    expect(answered.warn).toHaveLength(1);
+    expect(JSON.stringify(answered.warn[0][1])).not.toContain('organizationProbeError');
   });
 
   it('[snapshot] every list-bearing branch says the list is a probe-time snapshot', async () => {

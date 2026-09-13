@@ -32,6 +32,7 @@
 // ---------------------------------------------------------------------------
 
 import { normalize } from 'node:path';
+import { normalizeStorageKeyPrefix } from './s3-storage-adapter.js';
 
 /** A resolved storage configuration, reduced to what swap decisions need. */
 export interface StorageTarget {
@@ -63,6 +64,18 @@ export interface StorageTargetInput {
   forcePathStyle?: boolean;
   accessKeyId?: string;
   secretAccessKey?: string;
+  /**
+   * S3 key namespace (`S3StorageAdapterOptions.keyPrefix`), or `null`/absent for
+   * bucket-root keys.
+   *
+   * Part of the LOCATION, not merely the fingerprint: two prefixes in one bucket
+   * are two disjoint sets of objects, so moving the prefix strands everything
+   * the old one held exactly as moving the bucket does — which is what the
+   * migration warning is about. Left out of the location, changing a prefix
+   * would swap the adapter with no warning at all, the quiet failure this whole
+   * option exists to remove.
+   */
+  keyPrefix?: string | null;
 }
 
 /** `LocalStorageAdapter`'s default root, mirrored so both sources normalise alike. */
@@ -83,10 +96,19 @@ export function resolveStorageTarget(input: StorageTargetInput): StorageTarget {
   const kind = String(input.kind ?? 'local') === 's3' ? 's3' : 'local';
 
   if (kind === 's3') {
-    // Bucket identity is host + region + bucket. `endpoint` distinguishes an
-    // S3-compatible service (MinIO, R2) from AWS itself, and two different
-    // endpoints are two different stores even for the same bucket name.
-    const location = `s3://${input.endpoint || 'aws'}/${input.region ?? ''}/${input.bucket ?? ''}`;
+    // Bucket identity is host + region + bucket + key namespace. `endpoint`
+    // distinguishes an S3-compatible service (MinIO, R2) from AWS itself, and
+    // two different endpoints are two different stores even for the same bucket
+    // name; two different key prefixes are two different stores inside one
+    // bucket.
+    //
+    // Normalised through the adapter's own function so that `env_7` and `env_7/`
+    // — the same namespace, spelled two ways — do not read as a move. That is
+    // the #4096 shape this file was written for, one field along: an
+    // unnormalised comparison warns "existing files were NOT migrated" on a
+    // configuration that did not change.
+    const prefix = normalizeStorageKeyPrefix(input.keyPrefix ?? null);
+    const location = `s3://${input.endpoint || 'aws'}/${input.region ?? ''}/${input.bucket ?? ''}/${prefix}`;
     return {
       kind,
       location,

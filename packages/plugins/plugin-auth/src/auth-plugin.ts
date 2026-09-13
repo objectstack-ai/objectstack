@@ -35,6 +35,9 @@ import {
   AuthManager,
   resolveOidcProviderEnabled,
   readMcpServerEnabledEnv,
+  // [#16384] The one place `'/api/v1/auth'` is written — see its docblock in
+  // auth-manager.ts. This file no longer carries an independent copy.
+  DEFAULT_AUTH_BASE_PATH,
   type AuthManagerOptions,
 } from './auth-manager.js';
 import {
@@ -44,7 +47,6 @@ import {
 import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
 import { runAttributedToUser } from './auth-actor-attribution.js';
 import type { AuthEventAuditSurface } from './auth-session-audit.js';
-import type { ResolvedSocialProvider } from './backfill-account-issuer.js';
 import { createTenancyService, type TenancyService } from './tenancy-service.js';
 import {
   backfillMemberships,
@@ -80,8 +82,10 @@ import {
   type WalledOwnerAccountState,
 } from './walled-owner-verification-path.js';
 import {
+  probeSignInPathWiring,
   probeSignInReachability,
   reportIfNoSignInAccountExists,
+  type SignInPathConfigView,
 } from './boot-sign-in-reachability.js';
 import { judgePlatformAdmin, isPlatformAdminUser, type PlatformAdminActor } from './platform-admin-gate.js';
 import {
@@ -324,7 +328,7 @@ export class AuthPlugin implements Plugin {
   constructor(options: AuthPluginOptions = {}) {
     this.options = {
       registerRoutes: true,
-      basePath: '/api/v1/auth',
+      basePath: DEFAULT_AUTH_BASE_PATH,
       ...options
     };
   }
@@ -353,35 +357,6 @@ export class AuthPlugin implements Plugin {
         enabled: true,
       };
       config.socialProviders = socialProviders;
-    }
-  }
-
-  /**
-   * The social providers better-auth built for this runtime, straight off its
-   * own context — each one carrying the `accountIssuer` it will key its
-   * accounts by. Read rather than reconstructed: reconstructing it from the
-   * configured ids is exactly the guess that mis-stamped Google links.
-   *
-   * Returns `undefined` when the instance cannot be reached (auth not built
-   * yet, or a host-supplied instance that exposes no context) — the backfill
-   * then falls back to the id-derived issuers and reports what it cannot
-   * resolve, which is the pre-existing behaviour, not a new failure.
-   */
-  private async resolveInstantiatedSocialProviders(
-    ctx: PluginContext,
-  ): Promise<ResolvedSocialProvider[] | undefined> {
-    try {
-      const auth = await this.authManager?.getAuthInstance();
-      const context = await (auth as any)?.$context;
-      const providers = context?.socialProviders;
-      if (!Array.isArray(providers)) return undefined;
-      return providers.filter((p: any) => typeof p?.id === 'string' && p.id);
-    } catch (e) {
-      ctx.logger.warn?.(
-        '[auth] could not read better-auth\'s instantiated social providers — account issuers fall back to the id-derived values',
-        { error: (e as Error)?.message },
-      );
-      return undefined;
     }
   }
 
@@ -552,8 +527,8 @@ export class AuthPlugin implements Plugin {
     // the plugin's first service registration (consumers and tests rely on that
     // ordering). The `isolated` posture derives `isolationActive` from the
     // presence of the `org-scoping` service (registered by
-    // @objectstack/organizations when installed), so the enterprise package
-    // needs no change to light it up; `group` is enforced by the open engine and
+    // @objectstack/organizations when installed), so that package needs no
+    // change to light it up; `group` is enforced by the open engine and
     // never probes. `getService` is a cheap registry lookup and org-scoping
     // registers AFTER plugin-auth, so the probe is deferred to first read
     // (start()/request time).
@@ -1029,7 +1004,7 @@ export class AuthPlugin implements Plugin {
       // `AuthManager` without ever registering the kernel `email` service, and
       // the sibling hook below injects the service into it. Reading BOTH makes
       // this hook's answer independent of hook registration order.
-      let pub: { socialProviders?: unknown[]; features?: { sso?: boolean } } | undefined;
+      let pub: SignInPathConfigView | undefined;
       try { pub = this.authManager?.getPublicConfig(); } catch { pub = undefined; }
       const hasEmailTransport = !!emailSvc || !!this.authManager?.hasEmailTransport();
       const hasFederatedSignIn =
@@ -1052,7 +1027,16 @@ export class AuthPlugin implements Plugin {
       // and the answer handed to the walled-owner probe, so no boot pages
       // `sys_user` twice. Cost on a fresh store is a single bounded page.
       const reachability = await probeSignInReachability(ql);
-      const deadEnd = reportIfNoSignInAccountExists(reachability, ctx.logger);
+      // [#15074] …and the fact that decides whether "humans, zero accounts" is
+      // a dead end AT ALL on this deployment: does it sign people in through an
+      // identity provider, which needs no `sys_account` row of its own? On a
+      // platform-SSO tenant kernel that population is the HEALTHY one, and the
+      // report's "NOBODY CAN SIGN IN" was false on every boot. The resolver
+      // pays for its bounded provider read only when the answer can change what
+      // is reported; a deployment with no delegated path is untouched and still
+      // reports at `error`.
+      const signInPath = await probeSignInPathWiring(reachability, pub, ql);
+      const deadEnd = reportIfNoSignInAccountExists(reachability, ctx.logger, signInPath);
 
       let ownerAccountState: WalledOwnerAccountState = 'unknown';
       if (
@@ -1084,38 +1068,6 @@ export class AuthPlugin implements Plugin {
     // so it runs whenever the runtime boots in development.
     ctx.hook('kernel:ready', async () => {
       await this.maybeSeedDevAdmin(ctx);
-    });
-
-    // better-auth 1.7 resolves every account by (issuer, accountId).
-    // Rows written before the upgrade have no issuer and are therefore
-    // invisible to sign-in, so stamp them once at boot. Idempotent: a database
-    // whose rows already carry the right issuer costs one empty query.
-    //
-    // The providers are handed over as better-auth INSTANTIATED them, because
-    // the issuer is theirs to declare and only they know it — Google names
-    // `https://accounts.google.com`, GitHub names nothing and takes the
-    // synthetic fallback. Deriving it from the configured ids instead is what
-    // stamped Google links with a value sign-in never looks them up under.
-    ctx.hook('kernel:ready', async () => {
-      try {
-        const ql = ctx.getService<IDataEngine>('objectql');
-        if (!ql) return;
-        const { backfillAccountIssuer } = await import('./backfill-account-issuer.js');
-        await backfillAccountIssuer(ql, {
-          logger: ctx.logger,
-          socialProviders: await this.resolveInstantiatedSocialProviders(ctx),
-          socialProviderIds: Object.keys(this.configuredSocialProviders ?? {}),
-          oidcProviderIssuers: Object.fromEntries(
-            (this.options.oidcProviders ?? [])
-              .filter((p): p is typeof p & { issuer: string } => typeof p.issuer === 'string' && !!p.issuer)
-              .map((p) => [p.providerId, p.issuer]),
-          ),
-        });
-      } catch (e) {
-        ctx.logger.warn?.('[auth] account issuer backfill failed', {
-          error: (e as Error).message,
-        });
-      }
     });
 
     // [#8317] The one-off half of the ruling: rows written BEFORE the
@@ -1169,8 +1121,8 @@ export class AuthPlugin implements Plugin {
       // set — how a CONFIG-anchored admin comes into standing), and the
       // legacy `sys_user_permission_set` insert (how `single`-posture
       // first-user promotion lands standing, Choice 4A — retired with the
-      // legacy-grant removal leg). The enterprise organizations package's
-      // walled wiring should consume the same predicate.
+      // legacy-grant removal leg). The organizations package's walled
+      // wiring should consume the same predicate.
       try {
         const ql = ctx.getService<IObjectQLEngine>('objectql');
         if (ql && typeof ql.registerMiddleware === 'function') {
@@ -2085,7 +2037,7 @@ export class AuthPlugin implements Plugin {
   private registerAuthRoutes(httpServer: IHttpServer, ctx: PluginContext): void {
     if (!this.authManager) return;
 
-    const basePath = this.options.basePath || '/api/v1/auth';
+    const basePath = this.options.basePath || DEFAULT_AUTH_BASE_PATH;
 
     // Get raw Hono app to use native wildcard routing
     // Type assertion is safe here because we explicitly require Hono server as a dependency
@@ -2382,6 +2334,51 @@ export class AuthPlugin implements Plugin {
     });
 
     // ────────────────────────────────────────────────────────────────────
+    // #16678 — admin: set (or clear) a user's manager.
+    //
+    // `sys_user.manager_id` drives the approvals `{ type: 'manager' }` rung
+    // and the `own_and_reports` read scope, and had no product write surface
+    // at all: the generic data path refuses it (ADR-0092 D2's managed-update
+    // whitelist is `{name, image, locale}`), the bulk import does not carry
+    // it, and the Console renders it read-only. So the rung expanded to
+    // nobody on every record in any install without a directory sync.
+    //
+    // Same family as `unlock-user` above: an ObjectStack mount on the raw app
+    // ahead of the catch-all, platform-admin gated (ADR-0068), ledgered in
+    // `auth-route-ledger.ts`. The handler runs under a SYSTEM context, so it
+    // reaches the column by context rather than by whitelist — exactly how
+    // `admin-import-users` already reaches `phone_number` and `role` — which
+    // is why no Tier-1 list moves and the column keeps `readonly: true`.
+    // Every refusal (self-assignment, cycle, depth, cross-organization,
+    // directory-owned identity) is enforced in the handler; see
+    // `admin-set-user-manager.ts` for why each one has to live at the write.
+    rawApp.post(`${basePath}/admin/set-user-manager`, async (c: any) => {
+      try {
+        const actor = await gateAdmin(c);
+        if (actor instanceof Response) return actor;
+        const { runSetUserManager } = await import('./admin-set-user-manager.js');
+        // Attribution only — the route's own authorization already happened
+        // in `gateAdmin`. Opening the actor seam here credits the `sys_user`
+        // row to the admin instead of recording it as the system.
+        const { status, body } = await runAttributedToUser(actor.id, () =>
+          runSetUserManager(
+            {
+              getDataEngine: () => this.authManager!.getDataEngine() as any,
+              logger: ctx.logger,
+            },
+            actor,
+            c.req.raw,
+          ),
+        );
+        return c.json(body, status as any);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] set-user-manager failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+      }
+    });
+
+    // ────────────────────────────────────────────────────────────────────
     // #2766 V1 — admin direct user management. `sys_user` CRUD is suppressed
     // (managedBy better-auth), and until now the only add-a-teammate path was
     // the email-dependent invite flow. These routes let a platform admin
@@ -2410,6 +2407,12 @@ export class AuthPlugin implements Plugin {
         // target org (never grab the bootstrap default org in a multi-tenant
         // deployment); single-org resolves the default org.
         getTenancy: () => this.tenancy ?? undefined,
+        // ADR-0093 D1 — the LIVE membership policy, read through the accessor
+        // per call (the deps factory itself runs per request). A captured
+        // value would keep the endpoint auto-binding after an admin switched
+        // the deployment to `invite-only`, which is the exact defect the
+        // accessor exists to prevent.
+        getMembershipPolicy: () => this.authManager!.getMembershipPolicy(),
         logger: ctx.logger,
       });
       // Gate: the shared `gateAdmin` hoisted above the SSO mounts (#9653).
@@ -3152,7 +3155,7 @@ export class AuthPlugin implements Plugin {
     // (including every MCP client bootstrapping from protected-resource
     // metadata) request `/.well-known/oauth-authorization-server/api/v1/auth`
     // — alias it to the same document.
-    const basePath = (this.options.basePath ?? '/api/v1/auth').replace(/\/$/, '');
+    const basePath = (this.options.basePath ?? DEFAULT_AUTH_BASE_PATH).replace(/\/$/, '');
     rawApp.get(`/.well-known/oauth-authorization-server${basePath}`, (c: any) =>
       withDiscoveryCache(authServerHandler, c.req.raw),
     );

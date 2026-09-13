@@ -70,7 +70,33 @@ export const ApproverType = z.enum([
   // (see NON_AUTHORABLE_APPROVER_TYPES). Re-admit only together with a real
   // ownership-queue implementation (queue entity + membership + claim).
   'queue',
-]);
+])
+  // The generated reference page renders THIS string under `## ApproverType`;
+  // the JSDoc above the enum renders nowhere (`renderSchemaSection` prints
+  // `mainDef.description`, which only `.describe()` / `.meta({description})`
+  // fills). Until this string existed the page listed `manager` as a bare
+  // allowed value, so the one rung an author cannot operate on a stock install
+  // read exactly like the nine that work.
+  //
+  // ⛔ It POINTS at the remedy, it does not restate it. The remedy's single
+  // authoritative copy is `MANAGER_ONLY_REMEDY` / `MANAGER_ONLY_ROUTES` in
+  // `packages/lint/src/validate-approval-approvers.ts`, mirrored for readers by
+  // the Approvals guide; a third copy here would be one more line to keep in
+  // step, and a pointer cannot drift into disagreement with what it points at.
+  // That file's `⛔ DEPENDENCY` docblock now names this string among the lines
+  // that go stale if `manager_id` ever gains a product write surface.
+  //
+  // ⛔ Tracker ids stay out of the string itself — it reaches authors and
+  // generated surfaces, neither of whom can resolve one (`check:doc-authoring`
+  // Rule 3).
+  .describe(
+    'Approval step approver type. `manager` is a directory-sync dependency rather than something ' +
+    "an author configures here: it resolves the submitter's `sys_user.manager_id` at runtime, and " +
+    'that column has no product write surface, so until an operator populates it from outside the ' +
+    'product a manager step resolves to nobody and the request waits. `os lint` reports that at ' +
+    'authoring time as `approval-approvers-may-resolve-empty` and carries the graded population ' +
+    'routes and the full remedy; the Approvals guide states the same remedy in prose.',
+  );
 export type ApproverType = z.input<typeof ApproverType>;
 
 /**

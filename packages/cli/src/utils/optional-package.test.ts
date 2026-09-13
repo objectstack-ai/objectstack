@@ -33,6 +33,33 @@ import { pathToFileURL } from 'node:url';
 
 import { loadOptionalPackage } from './optional-package.js';
 
+// [#10126] Pay the first transform of this dist-resolved workspace dep at MODULE
+// LOAD. `@objectstack/cloud-connection` is reached below through
+// `loadOptionalPackage()`, which loads it dynamically from inside an `it()` body --
+// which vitest clocks, while collection is clocked against nothing. See
+// `scripts/check-test-source-alias.mjs` (the clocked-window rule) and #10115 /
+// PR #10120, where the same shape cost 30 ejected merge-queue builds in one night.
+//
+// [#17180] Why this file needed it too, measured with `packages/cloud-connection/dist`
+// BUILT: the probe below took 5005ms and 5043ms across two runs and blew the default
+// 5000ms `testTimeout`, against 856-1003ms for the same import in plain node from this
+// directory. The gap is not import cost -- every workspace package here is a pnpm link
+// whose realpath carries no `/node_modules/` segment, so vitest's default
+// `server.deps.external` inlines it, `dist/` included, and the probe was paying a cold
+// whole-package source-graph transform inside the clock. Paid here it is collection
+// work, which vitest clocks against nothing, and the call below becomes a module
+// registry lookup.
+//
+// The clocked-window rule could not see this one: its reader is a text scanner for a
+// literal `import(...)`/`require(...)` specifier, and here the specifier is an ordinary
+// string argument handed to `loadOptionalPackage()`, which imports a variable. That is
+// a gate gap, filed separately -- not something this file works around.
+//
+// This is a PRELOAD, not a substitute for the assertion: the `it()` below still calls
+// `loadOptionalPackage('@objectstack/cloud-connection')` and still asserts on the real
+// resolution, so a genuinely absent or broken package still fails it.
+import '@objectstack/cloud-connection';
+
 /** A specifier nothing in this workspace resolves — genuinely not installed. */
 const NEVER_INSTALLED = '@objectstack/not-a-real-package-5644';
 

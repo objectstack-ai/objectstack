@@ -167,7 +167,7 @@ describe('doctor — the posture description an operator reads names the declara
   // what is pinned.
   it('leg (i) — the `isolated` fix-list bullet names it, with the spacing intact', () => {
     expect(renderIsolatedBullet()).toBe(
-      `        • OS_TENANCY_POSTURE=isolated — organization wall + the enterprise ${PKG} runtime `
+      `        • OS_TENANCY_POSTURE=isolated — organization wall + the ${PKG} runtime `
       + "(the legacy spelling 'multi' is accepted and normalizes to this)",
     );
   });
@@ -183,8 +183,16 @@ describe('doctor — the posture description an operator reads names the declara
         + 'where it ships from (#10921); a command that prints a package name at operators must name a row in it.',
     ).toContain(PKG);
 
-    // Provenance, read through doctor's own spelling rather than a literal: the
-    // row this advice describes is the enterprise one.
+    // Provenance, read through doctor's own spelling rather than a literal.
+    //
+    // ⚠️ The row stays `edition: 'enterprise'` after ADR-0132 and that is NOT a
+    // contradiction of the reworded hint above. One name now denotes two
+    // packages (ADR-0132 D3): the framework publishes an Apache-2.0 build of it
+    // and a commercial deployment resolves the same name to a private,
+    // licence-gated subclass. The roster row records the ENTITLED variant — its
+    // own note says so — while the operator hint names the PACKAGE, which is
+    // followable on any install. So this assertion still measures roster drift,
+    // and it is deliberately not relaxed to match the prose reword.
     const row = PLATFORM_PLUGIN_WIRED_RUNTIMES[PKG];
     expect(row.edition, `edition drift for the runtime doctor names ('${PKG}')`).toBe('enterprise');
   });
@@ -233,14 +241,14 @@ describe('#12464 CONTROL — these pins can say no', () => {
     // If this instrument could not tell the two apart, leg (i) would be
     // decorative. Anchored on the exact regression interpolation invites.
     const expected =
-      `        • OS_TENANCY_POSTURE=isolated — organization wall + the enterprise ${PKG} runtime `
+      `        • OS_TENANCY_POSTURE=isolated — organization wall + the ${PKG} runtime `
       + "(the legacy spelling 'multi' is accepted and normalizes to this)";
     expect(
-      `        • OS_TENANCY_POSTURE=isolated — organization wall + the enterprise ${PKG} runtime`
+      `        • OS_TENANCY_POSTURE=isolated — organization wall + the ${PKG} runtime`
       + "(the legacy spelling 'multi' is accepted and normalizes to this)",
     ).not.toBe(expected);
     expect(
-      `      • OS_TENANCY_POSTURE=isolated — organization wall + the enterprise ${PKG} runtime `
+      `      • OS_TENANCY_POSTURE=isolated — organization wall + the ${PKG} runtime `
       + "(the legacy spelling 'multi' is accepted and normalizes to this)",
     ).not.toBe(expected);
     // …and says yes to the real thing, so the two `not.toBe`s above are a

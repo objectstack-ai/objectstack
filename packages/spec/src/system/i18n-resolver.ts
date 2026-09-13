@@ -55,6 +55,8 @@
  * here.
  */
 
+import { mapFlowNodeList } from '../conversions/walk.js';
+
 import type { TranslationBundle, TranslationData } from './translation.zod';
 
 /**
@@ -3355,10 +3357,17 @@ export type FlowScreenCopyKey = typeof FLOW_SCREEN_COPY_KEYS[number];
 /**
  * The copy keys `flows.<flow>.screens.<node_id>.fields.<field_name>` carries —
  * the per-FIELD face of {@link FLOW_SCREEN_COPY_KEYS}, measured against
- * `ScreenFieldConfigSchema`. `help` is deliberately absent: the screen field
- * declares nothing help-shaped at all, so a `help` key would parse clean and
- * translate nothing (the ADR-0078 shape #6080 kept out of the page-component
- * face); `options` is absent because `ScreenFieldConfig.options[].value` is
+ * `ScreenFieldConfigSchema`.
+ *
+ * `help` is deliberately absent. ⚠️ Not for its original reason any more: the
+ * screen field used to declare nothing help-shaped, so a `help` key would have
+ * parsed clean and translated nothing (the ADR-0078 shape #6080 kept out of the
+ * page-component face). #17306 gave it `inlineHelpText`, so the string exists —
+ * what does not exist is a key on THIS face for it, and growing the face is a
+ * ruled step against the #7646 enumeration, never a resolver-side accretion.
+ * The exclusion therefore stands with the same outcome and a different reason.
+ *
+ * `options` is absent because `ScreenFieldConfig.options[].value` is
  * unconstrained, so a value-keyed map cannot address the labels. Both are
  * refused by name with guidance at the schema.
  */
@@ -3478,6 +3487,27 @@ export function resolveFlowScreenTitle(
  * `help`) is ignored, never overlaid (the negative `translatePage` pins for
  * the retired `submitLabel`).
  *
+ * **Every screen node, at any DEPTH.** `FlowNode.config` carries ADR-0031
+ * regions — `loop.config.body`, `parallel.config.branches[]`,
+ * `try_catch.config.try`/`.catch` — each holding a full `nodes` array, nesting
+ * arbitrarily, and a `type: 'screen'` node inside one is a real screen: the
+ * executor pauses on it and the client receives its `ScreenSpec.nodeId`. So
+ * `flows.<name>.screens.<node_id>` is authored for it, parses (the bundle
+ * schema is keyed by node id and knows nothing about depth) and must be
+ * overlaid. A flat `flow.nodes.map(…)` walked straight past those, accepting
+ * the translation and silently never applying it — the fourth pass in this
+ * repo to be written against the flat one-liner. The descent is
+ * {@link mapFlowNodeList}'s, which reads `FLOW_REGION_SLOTS_BY_TYPE`: WHERE a
+ * region lives is declared once (`automation/region-slots.ts`) and walked by
+ * one function per unit, so this resolver is not a fifth hand-rolled reader of
+ * that table.
+ *
+ * That helper is also what preserves the identity discipline through the
+ * descent: it returns the SAME `nodes` array when no node under it resolved
+ * anything, and every container `config` on the way down is copied only when a
+ * descendant actually changed — so `nodesChanged` below stays a true reading
+ * and an untouched document still comes back as the same reference.
+ *
  * ⚠️ Deliberately NOT registered in {@link translateMetadataDocument}'s
  * dispatch table: that table reaches the REST metadata boundary by itself
  * (`TRANSLATABLE_METADATA_TYPES` drives `@objectstack/rest`, #3786), which
@@ -3497,14 +3527,14 @@ export function translateFlow<T extends FlowLike>(
 
   const label = lookupFlowLabel(bundle, name, opts);
 
-  let nodesChanged = false;
   const nodes = Array.isArray(flow.nodes)
-    ? flow.nodes.map((node) => {
-        const next = translateScreenNode(node, name, bundle, opts);
-        if (next !== node) nodesChanged = true;
-        return next;
-      })
+    ? mapFlowNodeList(
+        flow.nodes,
+        `flows.${name}.nodes`,
+        (node) => translateScreenNode(node as FlowNodeLike, name, bundle, opts) as Record<string, unknown>,
+      ) as FlowNodeLike[]
     : undefined;
+  const nodesChanged = nodes !== undefined && nodes !== flow.nodes;
 
   if (label === undefined && !nodesChanged) return flow;
   return {

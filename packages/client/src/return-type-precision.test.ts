@@ -107,7 +107,16 @@ import type {
     DuplicatePackageResponse,
 } from '@objectstack/spec/api';
 import type { ResolvedBook } from '@objectstack/spec/system';
-import type { Environment } from '@objectstack/spec/cloud';
+// [#16325] `Environment` — the camelCase row type that used to be the
+// obvious-looking (and false) binding for `client.environments.*` — is no
+// longer a name `@objectstack/spec` offers from ANY entry: the cloud control
+// plane's row contracts left with the `./cloud` subpath and live in the cloud
+// repo beside their producer. The near-miss is therefore pinned at the import
+// rather than at a member read (regression guard 2 below): the day a row type
+// called `Environment` reappears on the package-format subpath, this line
+// stops erroring and the unused directive goes red.
+// @ts-expect-error `Environment` is not exported by `@objectstack/spec/marketplace` (#16325)
+import type { Environment as _RetiredSpecEnvironmentRow } from '@objectstack/spec/marketplace';
 
 declare const client: ObjectStackClient;
 declare const scoped: ScopedEnvironmentClient;
@@ -309,27 +318,52 @@ export async function returnTypePrecisionPins11925(): Promise<void> {
     // ── bound 3/3: the asymmetry named on the card, closed ───────────────
     // `scoped.packages.list` was bound by #8140 because it happened to carry
     // an annotation; its neighbour `get` was not, purely because it lacked
-    // one. Same object literal, same route family. The scoped mount is served
-    // ONLY by the REST registrar, so unlike the global `client.packages.get`
-    // there is one surface and one shape.
-    expectTypeOf(await scoped.packages.get('com.acme.crm')).toEqualTypeOf<{
-        package: InstalledPackage;
-    }>();
+    // one. Same object literal, same route family.
+    //
+    // ⚠️ [#12034] The SHAPE moved after this pin was written; the fact that
+    // the method is BOUND — all #11925 claimed here — did not. What stood in
+    // these lines was "the scoped mount is served ONLY by the REST registrar,
+    // so unlike the global `client.packages.get` there is one surface and one
+    // shape", and #16628 deleted that registrar's `GET /packages/:id`: the
+    // mount named there still exists but serves no read, so the sentence was
+    // reasoning from a surface that was gone. The dispatcher serves this path
+    // — via the `@objectstack/hono` catch-all, which strips the
+    // `/environments/:environmentId` prefix before the `/packages` domain
+    // sees it — and answers the bare row. ⇒ "one surface and one shape" is
+    // still true; the shape is the ROW, and #12034 moved the declaration to
+    // match it.
+    expectTypeOf(await scoped.packages.get('com.acme.crm')).toEqualTypeOf<InstalledPackage>();
 
     // ── direction 2: a WRONG shape must now be rejected ───────────────────
-    // ⚠️ Only ONE of the three below is red before this change, and the split
-    // is stated here rather than glossed, because a suppression that was
+    // ⚠️ Only ONE of the two below was red before #11925's change, and the
+    // split is stated here rather than glossed, because a suppression that was
     // already used is a regression guard and not evidence the binding was
     // needed. Ablation (revert `index.ts` to `origin/main`, keep this file)
     // measured it: the ablated run reports TS2578 at `wrongUpdate` ONLY.
     //
     // `packages.update` was bare `any` before, and `any` IS assignable to
-    // `string`, so its suppression went unused → TS2578. The other two were
-    // never bare: they declared a real envelope (`{ packages: any[]; total }`
-    // and `{ package: any }`) whose MEMBER was the erased part, and an
-    // envelope is not assignable to a bare row or array in either state. Their
-    // suppressions are used before AND after — regression guards against a
-    // future "narrowing" that flattens the envelope away.
+    // `string`, so its suppression went unused → TS2578. `packages.list` was
+    // never bare: it declared a real envelope (`{ packages: any[]; total }`)
+    // whose MEMBER was the erased part, and an envelope is not assignable to a
+    // bare array in either state. Its suppression is used before AND after — a
+    // regression guard against a future "narrowing" that flattens the envelope
+    // away.
+    //
+    // ⚠️ [#12034] A THIRD line stood here and is gone rather than reworded:
+    //
+    //     // @ts-expect-error the scoped detail route answers `{ package }`, not the bare row
+    //     const wrongScopedGet: InstalledPackage = await scoped.packages.get('com.acme.crm');
+    //
+    // labelled, correctly for its time, GREEN IN BOTH STATES. Both halves of
+    // it died with #16628: the claim is false (the route answers the bare row,
+    // so the assignment is legal and the suppression would be UNUSED — TS2578,
+    // a red gate), and the label cannot be restored by flipping the claim,
+    // because a line that is red before #12034 is not green in both states of
+    // #11925 and this paragraph is the record of #11925's ablation, not a
+    // description of today's tree. ⇒ The scoped `get`'s direction-2 evidence
+    // moved, in the same PR, to `returnTypePrecisionPins12034` below, where it
+    // sits beside the three siblings that fail the identical way and where its
+    // red-before measurement belongs.
 
     // GREEN IN BOTH STATES — regression guard, not red-before evidence.
     // @ts-expect-error the route answers `{ packages, total }`, not a bare array
@@ -340,13 +374,8 @@ export async function returnTypePrecisionPins11925(): Promise<void> {
     // @ts-expect-error `packages.update` answers the row, not a string
     const wrongUpdate: string = await client.packages.update('com.acme.crm', { name: 'Acme' });
 
-    // GREEN IN BOTH STATES — regression guard, not red-before evidence.
-    // @ts-expect-error the scoped detail route answers `{ package }`, not the bare row
-    const wrongScopedGet: InstalledPackage = await scoped.packages.get('com.acme.crm');
-
     void wrongList;
     void wrongUpdate;
-    void wrongScopedGet;
 }
 
 /**
@@ -515,20 +544,33 @@ export async function returnTypePrecisionPins13523(): Promise<void> {
  * dispatcher in `packages-write-envelope.test.ts`; that the DECLARATION says
  * so can only be pinned here, for this file's standing reason.
  *
- * ⛔ `packages.get` is deliberately ABSENT from this list. It is the half of
- * #12034 that was NOT shipped: its two mounted surfaces answer different
- * envelopes (dispatcher `success(pkg)`, REST `sendOk(res, { package })`), so
- * no declaration is true on both and binding either member would harden a
- * falsehood — the very defect this function closes for its neighbours. Making
- * it bindable requires converging the PRODUCERS, which is a wire-behaviour
- * ruling of its own.
+ * ⭐ `packages.get` was deliberately ABSENT from this list and is now IN it —
+ * both the global method and its scoped twin. It was the half of #12034 that
+ * did not ship, because its two mounted surfaces answered different envelopes
+ * (dispatcher `success(pkg)`, REST `sendOk(res, { package })`), so no
+ * declaration was true on both and binding either member would have hardened a
+ * falsehood — the very defect this function closes for its neighbours.
+ *
+ * The maintainer ruled Option A on 2026-09-09 (converge on the bare row), and
+ * the convergence then arrived from an unexpected direction: #16628 deleted
+ * the REST twin instead of changing it, so the producers converged by
+ * SUBTRACTION and no producer edit was left for this card to make. The fork is
+ * gone either way, and what it leaves behind is worse than an erasure — a
+ * declaration describing a body no surface emits anywhere — which is why the
+ * scoped member (`InstalledPackage`, never `any`) is the sharper of the two.
  */
 export async function returnTypePrecisionPins12034(): Promise<void> {
-    // ── direction 1: the bare row, on all three ──────────────────────────
+    // ── direction 1: the bare row, on all five ───────────────────────────
     expectTypeOf(await client.packages.install({ id: 'com.acme.crm', version: '1.0.0' }))
         .toEqualTypeOf<InstalledPackage>();
     expectTypeOf(await client.packages.enable('com.acme.crm')).toEqualTypeOf<InstalledPackage>();
     expectTypeOf(await client.packages.disable('com.acme.crm')).toEqualTypeOf<InstalledPackage>();
+    // The two the ruling added. Same row, same projection: the `/packages`
+    // domain builds the detail body and every `list` row with ONE expression,
+    // `withWritableVerdict(qlService, toPackageResponse(pkg))`, so this pin and
+    // the `InstalledPackage[]` on `list` are two readings of one producer.
+    expectTypeOf(await client.packages.get('com.acme.crm')).toEqualTypeOf<InstalledPackage>();
+    expectTypeOf(await scoped.packages.get('com.acme.crm')).toEqualTypeOf<InstalledPackage>();
 
     // ── direction 2: the read the false declaration invited must now FAIL ─
     // ⚠️ RED BEFORE, all three: while the member was `any`, `.package` was a
@@ -551,10 +593,27 @@ export async function returnTypePrecisionPins12034(): Promise<void> {
     // @ts-expect-error no surface sends a `message` alongside the row
     void (await client.packages.enable('com.acme.crm')).message;
 
-    // ── the UNSHIPPED half, pinned as unchanged ──────────────────────────
-    // Not evidence for this card — a guard that `get` is not "tidied up" into
-    // one of the two shapes while the fork is still open.
-    expectTypeOf(await client.packages.get('com.acme.crm')).toEqualTypeOf<{ package: any }>();
+    // ── the half that shipped LAST, same direction, same mechanism ───────
+    // ⚠️ RED BEFORE, both. Each `.package` read below compiled against the
+    // declaration it replaces, so each suppression went UNUSED and tsc
+    // reported TS2578 — and the two get there by different routes, which is
+    // why both are pinned rather than one standing for the pair:
+    //
+    //   client.packages.get  declared `{ package: any }`  — the member existed
+    //     and was `any`, the same erasure-hidden falsehood as the three above.
+    //   scoped.packages.get  declared `{ package: InstalledPackage }` — the
+    //     member existed with a REAL type behind it, so nothing about the read
+    //     looked erased at all. Nothing on any surface has emitted that body
+    //     since #16628.
+    //
+    // After the binding neither row has a `package` key, both suppressions are
+    // used, and the read is refused at the call site where a consumer would
+    // have written it. `(await client.packages.get(id)).package` is exactly the
+    // read the card was filed about.
+    // @ts-expect-error the detail route answers the row; there is no `.package`
+    void (await client.packages.get('com.acme.crm')).package;
+    // @ts-expect-error the scoped detail route answers the row; there is no `.package`
+    void (await scoped.packages.get('com.acme.crm')).package;
 }
 
 /**
@@ -1036,23 +1095,22 @@ export async function returnTypePrecisionPins14314(): Promise<void> {
  *    (`restoredVersion`) whose false declaration this family just paid to
  *    remove.
  *
- * 2. `Environment` is the obvious-looking binding for `client.environments.*` and
- *    is camelCase, while the `/api/v1/cloud/*` control plane those methods
- *    call speaks snake_case (measured from this repo's own CLI consumers:
- *    `p.display_name`, `p.organization_id`, `p.is_default`). Binding it would
- *    typecheck, be false, and break those callers.
+ * 2. `Environment` WAS the obvious-looking binding for `client.environments.*`
+ *    — camelCase, while the `/api/v1/cloud/*` control plane those methods call
+ *    speaks snake_case (measured from this repo's own CLI consumers:
+ *    `p.display_name`, `p.organization_id`, `p.is_default`); binding it would
+ *    have typechecked, been false, and broken those callers. Since #16325 the
+ *    row contract is not published by `@objectstack/spec` at all — it left
+ *    with the `./cloud` subpath — so the guard moved from a member read
+ *    (`specEnvironmentRow.display_name`, which needs the type to exist) to the
+ *    `@ts-expect-error`'d import at the top of this file. The former
+ *    `environmentIsNotTheCloudWireRow` pin had no subject left to read.
  */
 declare const commitRollbackPayload: RollbackToPackageCommitResponse;
-declare const specEnvironmentRow: Environment;
 
 export function commitRollbackResponseIsNotTheVersionRollbackShape(): void {
     // @ts-expect-error the COMMIT-rollback payload carries no version identity
     void commitRollbackPayload.restoredVersion;
-}
-
-export function environmentIsNotTheCloudWireRow(): void {
-    // @ts-expect-error the control plane sends `display_name`; this row declares `displayName`
-    void specEnvironmentRow.display_name;
 }
 
 /**
@@ -1188,7 +1246,8 @@ describe('client SDK return-type precision (#8140)', () => {
         expect(typeof deleteDataResponseIsNotTheMetaResetShape).toBe('function');
         expect(typeof metaResetResponseDeclaresTheWireReceipt).toBe('function');
         expect(typeof commitRollbackResponseIsNotTheVersionRollbackShape).toBe('function');
-        expect(typeof environmentIsNotTheCloudWireRow).toBe('function');
+        // `environmentIsNotTheCloudWireRow` left with its subject (#16325): the
+        // guard is now the `@ts-expect-error`'d import at the top of the file.
     });
 
     it('unwraps exactly one `{ success, data }` envelope — the premise the annotations rest on', async () => {

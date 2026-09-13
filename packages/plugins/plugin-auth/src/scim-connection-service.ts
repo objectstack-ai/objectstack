@@ -52,11 +52,15 @@ import { AsyncLocalStorage } from 'node:async_hooks';
  * writes. An `enterWith` marks only the async resource it runs in and that
  * resource's descendants; the vendor awaits the verifier from the endpoint's
  * own frame and resumes the handler from a continuation captured before the
- * verifier ran. Measured on `@better-auth/scim` 1.7.2: zero
- * `engine.transaction` calls across `POST /Users` + `PATCH /Users/{id}`,
- * `inScimRequestScope()` false inside every identity write. `run(...)` has a
- * callback boundary; every `als.run` the vendor performs underneath nests
- * inside it. Pinned at run time by `scim-transaction-scope.test.ts`.
+ * verifier ran. Measured 2026-09-02 (#14624) on the then-installed
+ * `@better-auth/scim` 1.7.2: zero `engine.transaction` calls across
+ * `POST /Users` + `PATCH /Users/{id}`, `inScimRequestScope()` false inside
+ * every identity write. ⛔ Deliberately anchored rather than restamped to the
+ * lifted family: that reading is an ABLATION of the design that was REJECTED,
+ * and re-running it would mean re-breaking the scope to watch it fail. What
+ * ships is pinned at run time against whatever version is installed, by
+ * `scim-transaction-scope.test.ts`. `run(...)` has a callback boundary; every
+ * `als.run` the vendor performs underneath nests inside it.
  *
  * Read by `objectql-adapter.ts`'s `config.transaction`: SCIM requests get a
  * REAL engine transaction (the atomicity upstream's

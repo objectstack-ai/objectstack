@@ -18,8 +18,7 @@
     },
     "src/api/package-api.test.ts": {
       "TS6133: 'GetInstalledPackageRequestSchema' is declared but its value is never read.": 1,
-      "TS6133: 'UninstallPackageApiRequestSchema' is declared but its value is never read.": 1,
-      "TS6133: '…' is declared but its value is never read.": 2
+      "TS6133: 'UninstallPackageApiRequestSchema' is declared but its value is never read.": 1
     },
     "src/api/rest-server.test.ts": {
       "TS6133: 'RestApiConfigType' is declared but its value is never read.": 1

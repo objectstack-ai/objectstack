@@ -264,6 +264,14 @@ Declare the capabilities your plugin needs in its manifest's `permissions` block
 | `network` | Network hosts the plugin may reach (e.g. `api.acme.com`) |
 | `fs` | Filesystem paths the plugin may access |
 
+<Callout type="warn" title="Declared, not yet enforced">
+  The install-time consent flow records this set and the loader **registers** it on the
+  `PluginPermissionEnforcer`, but nothing queries that registry yet — so a `permissions`
+  block **refuses nothing at runtime today**. Declare it honestly (the cloud marketplace
+  shows it to the installer, and an upgrade that widens it forces re-consent), but do not
+  rely on it to confine your plugin, and do not rely on it to confine anyone else's.
+</Callout>
+
 ### Error Handling
 
 Always use structured errors:

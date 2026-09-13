@@ -25,6 +25,16 @@ import {
   // below, so this package's public API is unchanged.
   isCodeArtifactBody,
   isTenantAuthored,
+  // [#16319] The field-`type` admission vocabulary — the predicate, the shared
+  // sentence and the discriminator name. It lives one package down for the
+  // ordinary reason: the reporting seam is `@objectstack/metadata-protocol`'s
+  // `loadMetaFromDb`, which THIS package depends on, so the reverse import is a
+  // cycle. See the module's own header.
+  describeUndeclarableFieldType,
+  findUndeclarableFieldType,
+  OBJECT_FIELD_TYPE_REFUSED_ERROR_NAME,
+  type ObjectFieldTypeRefusal,
+  type ObjectFieldTypeViolation,
 } from '@objectstack/metadata-core';
 // [#8460] `scalarOverridesPackagedBase` is the #8284 comparison, imported rather
 // than re-spelled: the object FOLD asks the same question one layer down (has
@@ -1132,6 +1142,99 @@ export function warnFunctionalCompleteness(
 }
 
 /**
+ * [#16319] The `error.code` the field-`type` refusal below carries.
+ *
+ * `INVALID_METADATA` — already registered under `@objectstack/objectql` in
+ * `ERROR_CODE_LEDGER`, and already this package's spelling for "a stored or
+ * programmatically-supplied metadata body does not satisfy the spec schema"
+ * (`engine.ts`'s two plugin-view expansion refusals answer with it). ⛔ Not a
+ * new code: minting one widens the published error-code face, which is a
+ * Clause-② contract change and not this repair's to take. The CONDITION is
+ * named by {@link OBJECT_FIELD_TYPE_REFUSED_ERROR_NAME}, which is what a
+ * consumer discriminates on beyond the code — `INVALID_METADATA` is shared with
+ * several unrelated refusals in this package.
+ */
+export const OBJECT_FIELD_TYPE_REFUSED_CODE = 'INVALID_METADATA' as const;
+
+/**
+ * [#16319] A field declaration reached the registration door with a `type` that
+ * is absent, or that is not a member of `FieldType`.
+ *
+ * MAINTAINER RULING, 2026-09-10 (director seat batch #111 item 2), verbatim:
+ * 「16319 一个没写 type(或拼错)的字段 应该禁止加载。这个才是合理的吧?其他同意」
+ *
+ * ⛔ The whole object declaration is refused — the offending FIELD is never
+ * dropped on its own. Loading an object one field short is the shape this
+ * repository tolerates least: every authoring surface reports success, the
+ * column is never created, and reads of it answer `undefined` forever. The
+ * ruling says so in as many words (「⛔ 不静默丢字段」).
+ *
+ * `FieldSchema` has always required `type` and always refused a non-member at
+ * `[type]`, so nothing that PARSES can reach this. What it closes are the doors
+ * that skip Zod: a stored `sys_metadata` row, a raw plugin/package manifest
+ * (`manifest` is `any` on the install path) and a direct
+ * `registry.registerObject(def)` call. Before this refusal those three doors
+ * produced a `varchar(255)` column from `SqlDriver.createColumn`'s
+ * `field.type || 'string'` and a `TEXT` column from both migration generators'
+ * `fieldDef.type || 'text'` — two families from one declaration, so the
+ * platform refused a 101-character value both generated tables accepted.
+ *
+ * Carries the ADR-0112 envelope (`code` + `status`) — the shape this
+ * repository's rejection tests assert against, never a bare throw. A bare
+ * `Error` here would be indistinguishable under `toThrow()` from the ownership
+ * refusal a few lines up (the #14367 lesson).
+ *
+ * ⛔ The class is NOT exported, on the same convention as
+ * {@link ObjectOwnershipConflictError}'s `*_CODE` constant: this package
+ * declares both module realms in its own `exports`, so a consumer holding the
+ * other realm's copy would get `instanceof === false`, silently. Consumers ask
+ * `isObjectFieldTypeRefused` (`@objectstack/metadata-core`), which compares the
+ * error's `name`.
+ */
+class ObjectFieldTypeRefusedError extends Error implements ObjectFieldTypeRefusal {
+  readonly code = OBJECT_FIELD_TYPE_REFUSED_CODE;
+  readonly status = 422;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads (the CLI `--json` envelope). `status` stays for the HTTP doors, which read it. */
+  readonly httpStatus = 422;
+  /** The object whose declaration was refused. */
+  readonly objectName: string;
+  /** The field that carries the unusable `type`. */
+  readonly fieldName: string;
+  /** The `type` exactly as declared — `undefined` when the key is absent. */
+  readonly declaredType: unknown;
+
+  constructor(violation: ObjectFieldTypeViolation) {
+    // ⛔ The wording is NOT written here. `describeUndeclarableFieldType` is the
+    // one sentence this throw and the boot log both print, so the operator who
+    // meets the refusal at `registerObject` and the operator who meets it in the
+    // startup log read the same words about the same row.
+    super(describeUndeclarableFieldType(violation));
+    this.name = OBJECT_FIELD_TYPE_REFUSED_ERROR_NAME;
+    this.objectName = violation.objectName;
+    this.fieldName = violation.fieldName;
+    this.declaredType = violation.declaredType;
+  }
+}
+
+/**
+ * [#16319] The registration-door field-`type` check — the single point of
+ * closure the ruling names.
+ *
+ * Returns the refusal rather than throwing it, so a caller that has to DECIDE
+ * something before the throw can ask the door's own question without growing a
+ * second vocabulary. {@link SchemaRegistry.registerObject} throws what this
+ * returns.
+ *
+ * The judgement itself is {@link findUndeclarableFieldType} in
+ * `@objectstack/metadata-core`; this function only dresses its answer in the
+ * ADR-0112 envelope, because the code belongs to the package that throws.
+ */
+export function objectFieldTypeRefusal(schema: unknown): ObjectFieldTypeRefusal | null {
+  const violation = findUndeclarableFieldType(schema);
+  return violation ? new ObjectFieldTypeRefusedError(violation) : null;
+}
+
+/**
  * Platform namespaces that multiple packages may legitimately share, so the
  * install-time namespace-uniqueness gate (ADR-0048 Phase 1) must never fire on
  * them: the FQN-exempt reserved namespaces (`base`, `system`) plus `sys`
@@ -1971,6 +2074,10 @@ export class SchemaRegistry {
    * @throws {ObjectOwnershipConflictError} ADR-0112 envelope (`code` +
    *   `status: 422`) if trying to 'own' an object that already has a PACKAGED
    *   owner from another package
+   * @throws {ObjectFieldTypeRefusedError} [#16319] ADR-0112 envelope (`code` +
+   *   `status: 422`) if any declared field's `type` is absent or is not a
+   *   `FieldType` member — the WHOLE declaration is refused, on every
+   *   contributor kind. ⛔ The field is never dropped on its own.
    */
   registerObject(
     schema: ServiceObject,
@@ -1983,6 +2090,27 @@ export class SchemaRegistry {
         ? DEFAULT_OVERLAY_PRIORITY
         : DEFAULT_EXTENDER_PRIORITY
   ): string {
+    // [#16319] ⭐ THE FIELD-`type` DOOR — first statement in the method, and
+    // its position is the whole point.
+    //
+    // MAINTAINER RULING 2026-09-10 (director seat batch #111 item 2): 「一个没写
+    // type(或拼错)的字段 应该禁止加载」. This registry is the ONE choke point every
+    // metadata door passes — declared stacks, plugin/package manifests,
+    // `saveMetaItem`, the `sys_metadata` boot rehydration and raw
+    // `registerObject` calls — so one check here closes all of them at once,
+    // which is why the ruling put it here rather than at the four downstream
+    // guesses it also retires.
+    //
+    // ⛔ BEFORE `applySystemFields` and every other materialization below, so
+    // the object and field the refusal names are the AUTHOR's own and never a
+    // platform injection; and ⛔ before the contributor list is opened, so a
+    // refused declaration leaves no half-registered entry behind.
+    //
+    // ⛔ The whole object is refused; the offending field is never dropped on
+    // its own. See {@link ObjectFieldTypeRefusedError}.
+    const fieldTypeRefusal = objectFieldTypeRefusal(schema);
+    if (fieldTypeRefusal) throw fieldTypeRefusal;
+
     // Apply system-field injection (multi-tenant org_id, future owner/audit)
     // BEFORE FQN computation and contributor storage so every consumer of
     // the registered schema (driver syncSchema, REST projector, hooks)

@@ -5,20 +5,37 @@
  * `Field.datetime` dimension must NOT silently return zero rows.
  *
  * Root cause (confirmed): the analytics layer expands relative-date tokens like
- * `{12_months_ago}` to ISO date strings (`"2025-06-18"`). Under better-sqlite3 a
- * `Field.datetime` column is stored as an INTEGER epoch (ms), so the compiled
- * `WHERE col >= '2025-06-18'` is a TEXT-vs-INTEGER affinity compare that is
- * ALWAYS false → empty result, even though the data exists. `Field.date` columns
- * store ISO TEXT and compare fine.
+ * `{12_months_ago}` to ISO date strings (`"2025-06-18"`), and the raw-SQL
+ * strategy binds them OUTSIDE the driver's builder, so nothing canonicalises
+ * them to the column's storage form. `WHERE col >= '2025-06-18'` then compares
+ * an unnormalised comparand against the stored value and is always false →
+ * empty result, even though the data exists.
  *
  * The fix threads the driver's storage-form coercion into NativeSQLStrategy via
  * `StrategyContext.coerceTemporalFilterValue`. These tests assert the strategy:
- *   1. binds the epoch-ms value when the hook reports a datetime column (SQLite),
- *   2. leaves the ISO string untouched when the hook reports no coercion
+ *   1. binds whatever the hook returns, VERBATIM and at the hook's own type,
+ *      when the hook reports a datetime column,
+ *   2. leaves the comparand untouched when the hook reports no coercion
  *      (a `Field.date` text column, OR a native-timestamp dialect like Postgres),
  *      proving no Postgres regression,
  *   3. applies the same handling to `gte`/`lte`/`gt`/`lt`/`equals`, `in`, and the
  *      `dateRange` (timeDimension) path.
+ *
+ * ## ⛔ Two storage forms appear below, and only one of them is current (#16737)
+ *
+ * This file's original narrative said "under better-sqlite3 a `Field.datetime`
+ * column is stored as an INTEGER epoch (ms)". #3912 retired that: a SQLite
+ * `Field.datetime` now has ONE storage form, canonical UTC TEXT, and the epoch
+ * survives only in a database written before the convention and not yet
+ * backfilled. The storage reality is stated once, on
+ * `AnalyticsServiceConfig.coerceTemporalFilterValue` in `analytics-service.ts`.
+ *
+ * The epoch-ms fixture is KEPT rather than re-spelled, because the property
+ * under test is that the strategy binds the hook's return verbatim — and an
+ * epoch hook is the only one that changes both the VALUE and its JS TYPE, which
+ * is what makes "verbatim" decidable. `canonicalTextHook` below adds today's
+ * real driver behaviour beside it, so the suite covers the live form as well as
+ * the one it was written against.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -44,8 +61,10 @@ const cube: Cube = {
 const EPOCH_2025_06_18 = Date.parse('2025-06-18T00:00:00.000Z');
 
 /**
- * A hook that mimics the SqlDriver-under-SQLite behaviour: ISO → epoch ms for the
- * datetime column, value untouched for everything else.
+ * A LEGACY-form hook: ISO → epoch ms for the datetime column, value untouched
+ * for everything else. It is not what `SqlDriver` answers today (see the module
+ * header) — it is the type-changing return that makes "bound verbatim"
+ * observable.
  */
 function sqliteHook(object: string, field: string, value: unknown): unknown {
   if (object === 'compliance_assessment' && field === 'assessed_at' && typeof value === 'string') {
@@ -53,6 +72,20 @@ function sqliteHook(object: string, field: string, value: unknown): unknown {
     return Number.isFinite(ms) ? ms : value;
   }
   return value; // date text / non-temporal / native timestamp → unchanged
+}
+
+/**
+ * [#16737] Today's `SqlDriver`-under-SQLite behaviour: a `Field.datetime`
+ * comparand is canonicalised to the ONE stored form, canonical UTC text
+ * (`YYYY-MM-DDTHH:MM:SS.sssZ`, #3912) — a bare calendar day becoming UTC
+ * midnight. Same contract as {@link sqliteHook}, current spelling.
+ */
+function canonicalTextHook(object: string, field: string, value: unknown): unknown {
+  if (object === 'compliance_assessment' && field === 'assessed_at' && typeof value === 'string') {
+    const ms = Date.parse(/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00.000Z` : value);
+    return Number.isFinite(ms) ? new Date(ms).toISOString() : value;
+  }
+  return value;
 }
 
 function ctxWith(overrides: Partial<StrategyContext>): StrategyContext {
@@ -77,10 +110,34 @@ describe('NativeSQLStrategy — datetime filter storage coercion', () => {
     const { sql, params } = await strategy.generateSql(query, ctx);
 
     expect(sql).toContain('assessed_at >= $1');
-    // The ISO string was converted to its INTEGER epoch storage form — this is
-    // the exact value that matches the stored datetime and fixes "No rows".
+    // The hook's return is bound verbatim, at the hook's own JS type — the
+    // strategy adds no interpretation of its own. (This assertion used to be
+    // described as "the value that matches the stored datetime"; that is the
+    // DRIVER's claim to make, not this suite's — see the module header.)
     expect(params).toEqual([EPOCH_2025_06_18]);
     expect(typeof params[0]).toBe('number');
+  });
+
+  it('binds the CANONICAL UTC text a modern SQLite driver returns (#16737 — the live storage form)', async () => {
+    // The sibling of the epoch case above, against what `SqlDriver` actually
+    // answers on `origin/main`. Both prove the same property — the hook's
+    // return is bound verbatim — so the strategy is correct for the storage
+    // form the driver has TODAY, not only for the one this file was written
+    // against. A bare calendar day arrives as UTC midnight, in full canonical
+    // spelling, and stays a string.
+    const strategy = new NativeSQLStrategy();
+    const ctx = ctxWith({ coerceTemporalFilterValue: canonicalTextHook });
+    const query: AnalyticsQuery = {
+      cube: 'compliance',
+      measures: ['total'],
+      where: { assessed: { $gte: '2025-06-18' } },
+    };
+
+    const { sql, params } = await strategy.generateSql(query, ctx);
+
+    expect(sql).toContain('assessed_at >= $1');
+    expect(params).toEqual(['2025-06-18T00:00:00.000Z']);
+    expect(typeof params[0]).toBe('string');
   });
 
   it('leaves the ISO string untouched when the hook reports no coercion (Postgres / date text — no regression)', async () => {

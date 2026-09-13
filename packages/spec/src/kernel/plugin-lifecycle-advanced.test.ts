@@ -27,8 +27,14 @@ describe('Plugin Lifecycle Advanced Schemas', () => {
   describe('PluginHealthCheckSchema', () => {
     it('should validate health check with defaults', () => {
       const healthCheck = PluginHealthCheckSchema.parse({});
-      expect(healthCheck.interval).toBe(30000);
-      expect(healthCheck.timeout).toBe(5000);
+      // [#17780] Renamed: these two lines pinned `interval` / `timeout`, whose
+      // unit lived in a source JSDoc only. Same values, same defaults; the
+      // names now carry the milliseconds. The old spellings are tombstoned and
+      // their refusal is pinned at the bottom of this file.
+      expect(healthCheck.intervalMs).toBe(30000);
+      expect(healthCheck.timeoutMs).toBe(5000);
+      expect(healthCheck).not.toHaveProperty('interval');
+      expect(healthCheck).not.toHaveProperty('timeout');
       expect(healthCheck.failureThreshold).toBe(3);
       expect(healthCheck.successThreshold).toBe(1);
       // [#12032] The three restart defaults ASSERTED HERE ARE GONE — declared,
@@ -51,8 +57,9 @@ describe('Plugin Lifecycle Advanced Schemas', () => {
       // true right up to the moment it stopped meaning anything at runtime,
       // and it never meant anything at runtime.
       const config = {
-        interval: 60000,
-        timeout: 10000,
+        // [#17780] `interval` / `timeout` renamed to carry their unit.
+        intervalMs: 60000,
+        timeoutMs: 10000,
         failureThreshold: 5,
         successThreshold: 2,
         checkMethod: 'healthCheck',
@@ -110,12 +117,23 @@ describe('Plugin Lifecycle Advanced Schemas', () => {
       expect(result.success && result.data).not.toHaveProperty('somethingElse');
     });
 
-    it('should enforce minimum interval', () => {
-      expect(() => PluginHealthCheckSchema.parse({ interval: 500 })).toThrow();
+    // [#17780] These two pinned the MIN BOUND through the bare spellings. Left
+    // as they were they would have stayed green off the tombstone's refusal
+    // instead of the bound — a pin that can no longer fail. They pin the
+    // suffixed keys now, and the bound is asserted by issue code so a
+    // tombstone refusal could not stand in for it.
+    it('should enforce minimum intervalMs', () => {
+      const result = PluginHealthCheckSchema.safeParse({ intervalMs: 500 });
+      expect(result.success).toBe(false);
+      expect(result.error!.issues.some((i) => i.code === 'too_small')).toBe(true);
+      expect(PluginHealthCheckSchema.parse({ intervalMs: 1000 }).intervalMs).toBe(1000);
     });
 
-    it('should enforce minimum timeout', () => {
-      expect(() => PluginHealthCheckSchema.parse({ timeout: 50 })).toThrow();
+    it('should enforce minimum timeoutMs', () => {
+      const result = PluginHealthCheckSchema.safeParse({ timeoutMs: 50 });
+      expect(result.success).toBe(false);
+      expect(result.error!.issues.some((i) => i.code === 'too_small')).toBe(true);
+      expect(PluginHealthCheckSchema.parse({ timeoutMs: 100 }).timeoutMs).toBe(100);
     });
   });
 
@@ -171,7 +189,10 @@ describe('Plugin Lifecycle Advanced Schemas', () => {
     it('should validate hot reload with defaults', () => {
       const config = HotReloadConfigSchema.parse({});
       expect(config.enabled).toBe(false);
-      expect(config.debounceDelay).toBe(1000);
+      // [#17780] Renamed: this pinned `debounceDelay`, whose unit lived in a
+      // source JSDoc only. Same value, same default, unit now in the name.
+      expect(config.debounceDelayMs).toBe(1000);
+      expect(config).not.toHaveProperty('debounceDelay');
       expect(config.preserveState).toBe(true);
       expect(config.stateStrategy).toBe('memory');
       expect(config.shutdownTimeout).toBe(30000);
@@ -184,7 +205,8 @@ describe('Plugin Lifecycle Advanced Schemas', () => {
         // quiet edit. It used to be listed here and asserted via toEqual below,
         // an assertion that passed precisely BECAUSE the key parsed and did
         // nothing. The key's departure is pinned as a STRIP in its own test.
-        debounceDelay: 2000,
+        // [#17780] `debounceDelay` renamed to carry its unit.
+        debounceDelayMs: 2000,
         preserveState: false,
         stateStrategy: 'memory' as const,
         shutdownTimeout: 60000,
@@ -341,5 +363,64 @@ describe('PluginHealthReport metrics durations carry their unit (#15678)', () =>
     expect(parsed.metrics?.responseTimeMs).toBe(150);
     expect(parsed.metrics?.memoryUsage).toBe(52428800);
     expect(parsed.metrics?.activeConnections).toBe(10);
+  });
+});
+
+// #17780 (ruling A on #15939, executing #14478) — the three remaining
+// duration-shaped keys on this file whose unit lived in a source JSDoc only.
+// `.describe()` is what `content/docs/references/**` publishes and the JSDoc
+// above a key is NOT, so the reader who most needs the unit was the only one
+// who never saw it. `interval`'s describe was the sharpest case: its one
+// unit-shaped token was a "(default: 30s)" parenthetical naming SECONDS for a
+// value carried in milliseconds. All three old spellings are `retiredKey()`
+// tombstones — neither object is `.strict()`, so a bare deletion would be a
+// silent strip.
+describe('plugin lifecycle durations carry their unit (#17780, #14478)', () => {
+  it.each([
+    ['interval', 'intervalMs', 60000],
+    ['timeout', 'timeoutMs', 10000],
+  ])('REFUSES the retired `PluginHealthCheck.%s` with the rename to `%s`', (old, next, value) => {
+    const result = PluginHealthCheckSchema.safeParse({ [old]: value });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === old);
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain(`\`PluginHealthCheck.${old}\` was renamed to \`${next}\``);
+  });
+
+  it('REFUSES the retired `HotReloadConfig.debounceDelay` with the rename', () => {
+    const result = HotReloadConfigSchema.safeParse({ debounceDelay: 2000 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'debounceDelay');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain(
+      '`HotReloadConfig.debounceDelay` was renamed to `debounceDelayMs`',
+    );
+  });
+
+  it('accepts the suffixed keys at the magnitude the retired ones carried', () => {
+    const health = PluginHealthCheckSchema.parse({ intervalMs: 60000, timeoutMs: 10000 });
+    expect(health.intervalMs).toBe(60000);
+    expect(health.timeoutMs).toBe(10000);
+    const reload = HotReloadConfigSchema.parse({ debounceDelayMs: 2000 });
+    expect(reload.debounceDelayMs).toBe(2000);
+    // Unchanged defaults, read off an empty parse.
+    expect(PluginHealthCheckSchema.parse({}).intervalMs).toBe(30000);
+    expect(PluginHealthCheckSchema.parse({}).timeoutMs).toBe(5000);
+    expect(HotReloadConfigSchema.parse({}).debounceDelayMs).toBe(1000);
+  });
+
+  it('publishes the unit in the describe — the text the reference pages render', () => {
+    const health = PluginHealthCheckSchema.shape;
+    expect(health.intervalMs.description).toBe(
+      'How often to perform health checks, in milliseconds',
+    );
+    expect(health.timeoutMs.description).toBe(
+      'Maximum time to wait for health check response, in milliseconds',
+    );
+    expect(HotReloadConfigSchema.shape.debounceDelayMs.description).toBe(
+      'Wait time after change detection before reload, in milliseconds',
+    );
   });
 });

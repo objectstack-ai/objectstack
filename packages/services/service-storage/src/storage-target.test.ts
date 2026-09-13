@@ -85,6 +85,43 @@ describe('resolveStorageTarget', () => {
     expect(t.location).not.toContain('AKIA_PUBLIC');
     expect(t.fingerprint).toContain('super-secret'); // compared, never printed
   });
+
+  // -------------------------------------------------------------------------
+  // #17571 — the key namespace is part of WHERE THE BYTES LIVE
+  // -------------------------------------------------------------------------
+
+  it('puts the S3 key namespace in `location`, not merely in the fingerprint', () => {
+    // Two prefixes in one bucket are two disjoint object sets, so moving the
+    // prefix strands what the old one held exactly as moving the bucket does.
+    // Left out of `location`, a prefix change would swap the adapter with no
+    // migration warning at all.
+    const seven = resolveStorageTarget({ kind: 's3', bucket: 'b', region: 'r', keyPrefix: 'env_7' });
+    const eight = resolveStorageTarget({ kind: 's3', bucket: 'b', region: 'r', keyPrefix: 'env_8' });
+
+    expect(seven.location).toContain('env_7/');
+    expect(needsStorageSwap(seven, eight)).toBe(true);
+    expect(movesStorageLocation(seven, eight)).toBe(true);
+  });
+
+  it('reads a bare and a slash-terminated prefix as ONE namespace — the #4096 shape, one field along', () => {
+    const bare = resolveStorageTarget({ kind: 's3', bucket: 'b', region: 'r', keyPrefix: 'env_7' });
+    const slashed = resolveStorageTarget({ kind: 's3', bucket: 'b', region: 'r', keyPrefix: 'env_7/' });
+
+    expect(bare).toEqual(slashed);
+    expect(needsStorageSwap(bare, slashed)).toBe(false);
+    expect(movesStorageLocation(bare, slashed)).toBe(false);
+  });
+
+  it('separates a namespaced target from a bucket-root one', () => {
+    const root = resolveStorageTarget({ kind: 's3', bucket: 'b', region: 'r', keyPrefix: null });
+    const absent = resolveStorageTarget({ kind: 's3', bucket: 'b', region: 'r' });
+    const scoped = resolveStorageTarget({ kind: 's3', bucket: 'b', region: 'r', keyPrefix: 'env_7' });
+
+    // An absent prefix and an explicit `null` are the same target: both mean
+    // bucket-root, so an existing caller's target does not move.
+    expect(absent).toEqual(root);
+    expect(movesStorageLocation(root, scoped)).toBe(true);
+  });
 });
 
 describe('needsStorageSwap', () => {

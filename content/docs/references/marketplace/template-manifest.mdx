@@ -1,0 +1,78 @@
+---
+title: Template Manifest
+description: Template Manifest protocol schemas
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+`objectstack.manifest.json` — on-disk descriptor for a template / package
+source tree. Strict projection of `CreatePackageRequestSchema` (server-
+managed fields excluded) plus scaffold-time extras (name slug,
+specVersion, namespace, skills, preview, scaffold, readmePath), with
+`manifestId` locally relaxed to OPTIONAL — this file is a source tree, not
+a publish request (#7319; the field's own TSDoc carries the measurement).
+
+Every shipped `objectstack.manifest.json` is parsed against this schema by
+`pnpm --filter @objectstack/spec check:template-manifests`, so the
+`$schema` line those files carry is a verified claim rather than an
+assertion nothing reads.
+
+<Callout type="info">
+**Source:** `packages/spec/src/marketplace/template-manifest.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { TemplateManifestSchema } from '@objectstack/spec/marketplace';
+import type { TemplateManifest } from '@objectstack/spec/marketplace';
+
+// Validate data
+const result = TemplateManifestSchema.parse(data);
+```
+
+---
+
+## TemplateManifest
+
+objectstack.manifest.json — template / package source descriptor
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **displayName** | `string` | ✅ | Display name shown in Studio and Marketplace |
+| **description** | `string` | optional | Short package description |
+| **visibility** | `Enum<'private' \| 'org' \| 'marketplace'>` | optional | Package visibility: private = owner org only; org = all envs in owner org; marketplace = public registry |
+| **category** | `string` | optional | Package category for marketplace discovery (e.g. "crm", "hr", "finance", "devtools") |
+| **tags** | `string[]` | optional |  |
+| **iconUrl** | `string` | optional |  |
+| **homepageUrl** | `string` | optional |  |
+| **license** | `string` | optional |  |
+| **publisher** | `Enum<'objectstack' \| 'partner' \| 'community' \| 'private'>` | optional | Package publisher provenance tier |
+| **isStarter** | `boolean` | optional |  |
+| **translations** | `Record<string, { displayName?: string; description?: string; readme?: string; tagline?: string; … }>` | optional | Locale-keyed overrides; missing keys fall back to base columns |
+| **manifestId** | `string` | optional | Optional declarative default for the published package id (reverse-domain, e.g. com.acme.crm). Absent on a template source tree: `objectstack package publish` falls back to --manifest-id and then to a derived `local.<slug>`. NOT optional on the publish request itself |
+| **name** | `string` | ✅ | CLI slug (kebab-case, no namespace prefix) |
+| **specVersion** | `string` | ✅ | Compatible @objectstack/spec semver range |
+| **namespace** | `string` | optional | Scaffold-only: the template’s own metadata namespace, rewritten by create-objectstack at scaffold time and read back as the fallback source for the template’s original namespace. NOT the publish namespace — publish reads that off the compiled artifact’s manifest.namespace (ADR-0048 addendum §A.2) |
+| **skills** | `string[]` | optional | Skill ids exercised by this template (for docs / picker) |
+| **preview** | `{ screenshots?: string[]; demoUrl?: string }` | optional |  |
+| **scaffold** | `{ variables?: Record<string, any>; postInstall?: string[] }` | optional |  |
+| **readmePath** | `string` | optional | Path (relative to manifest) to long-form README |
+
+### Nested Shape: `TemplateManifest.translations[string]`
+
+Per-locale overrides for a package listing
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **displayName** | `string` | optional | Localized display name |
+| **description** | `string` | optional | Localized short description |
+| **readme** | `string` | optional | Localized long-form readme (markdown) |
+| **tagline** | `string` | optional | Localized short tagline (marketplace listing only) |
+| **screenshotCaptions** | `Record<string, string>` | optional | Per-index screenshot caption overrides |
+
+
+---
+

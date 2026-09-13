@@ -56,6 +56,13 @@ import {
     // (#9454's read-side rule). One predicate on both doors means the swept
     // page set and the served page set cannot drift.
     organizationIdForMetaRead,
+    // [#16319] The field-`type` admission vocabulary. `loadMetaFromDb` asks the
+    // registration door's OWN question — never a second opinion about which
+    // declarations the registry will take, which is the defect class the
+    // 2026-09-10 ruling closes — to choose the sentence it prints and the level
+    // it prints it at.
+    findUndeclarableFieldType,
+    isObjectFieldTypeRefused,
 } from '@objectstack/metadata-core';
 // [#5532] One vocabulary of "which driver read errors are benign", shared with
 // `sys-metadata-repository.ts` in this package and with `DatabaseLoader` in
@@ -369,21 +376,136 @@ function stripServedSystemColumns<T>(type: string, item: T): T {
 let warnedNoRegistryForDataGate = false;
 
 /**
- * Convert a Zod schema to a JSON Schema, returning `undefined` if conversion
- * fails (e.g. unsupported constructs). Cached per schema reference.
+ * [#17501] Does a converted JSON Schema carry any authorable surface at all?
+ *
+ * `z.toJSONSchema()` answers a `ZodPipe` in its default `'output'` mode with a
+ * document that is syntactically a JSON Schema and semantically nothing:
+ * `{"$schema": "..."}` and not one property. It is truthy, so a `?? fallback`
+ * downstream never fires, and the endpoint serves a document that reads as
+ * "this type declares no constraints" when the truth is "this derivation could
+ * not see the type at all".
+ *
+ * A derivation is DEGENERATE when it names no property, offers no union arm,
+ * points at no `$ref` and opens no `additionalProperties` object — i.e. there
+ * is nothing an author or a form renderer could address. Every one of those
+ * four is a real authorable surface, so any one of them present means the
+ * derivation worked.
+ */
+function isDegenerateDerivation(json: Record<string, unknown> | undefined): boolean {
+    if (!json || typeof json !== 'object') return true;
+    const properties = json.properties;
+    if (properties && typeof properties === 'object' && Object.keys(properties).length > 0) return false;
+    for (const arm of ['anyOf', 'oneOf', 'allOf'] as const) {
+        const value = json[arm];
+        if (Array.isArray(value) && value.length > 0) return false;
+    }
+    if (typeof json.$ref === 'string') return false;
+    const additional = json.additionalProperties;
+    if (additional && typeof additional === 'object') return false;
+    return true;
+}
+
+/**
+ * [#17501] One-shot per type: both derivations of this type's schema came back
+ * empty. Keyed by type name, not by schema reference, because the message names
+ * the type and repeating it per request is noise.
+ */
+const _warnedDegenerateDerivation = new Set<string>();
+
+/**
+ * Convert a Zod schema to a JSON Schema, returning `undefined` if no usable
+ * derivation exists — which is what lets the caller's `?? HAND_CRAFTED_SCHEMAS`
+ * arm fire. Cached per schema reference.
+ *
+ * ## [#17501] Why this tries TWICE, and why only sometimes
+ *
+ * `/meta/types` served `action` as `{"$schema": "..."}` — an empty schema for a
+ * type that accepts 48 keys — because `ActionSchema` is
+ * `lazySchema(() => actionObject().refine(...))`, a `ZodPipe`, and the OUTPUT
+ * derivation of a pipe carries no properties. The hand-crafted fallback
+ * declared for exactly this case never fired: conversion did not throw, it
+ * SUCCEEDED and returned a truthy husk.
+ *
+ * The obvious repair — derive everything with `io: 'input'`, the authoring
+ * shape a property panel actually wants, which `reference-sites.ts` already
+ * passes — was measured across the whole served surface and REFUSED. It is not
+ * a repair with a blast radius of one: 24 of the 26 types that carry a Zod
+ * schema answer differently under `input`, and the direction is a WEAKENING of
+ * a published contract — `required` entries 1132 to 867, `additionalProperties:
+ * false` 663 to 637. Serving the authoring shape for every type is a defensible
+ * contract change, but it is a `packages/spec` question with its own review,
+ * not a rider on this bug fix. (The card's own reading that thirteen types
+ * "answer identically" is a TOP-LEVEL PROPERTY COUNT, which cannot see either
+ * keyword; the counts reproduce exactly and the inference from them does not.)
+ *
+ * So the output derivation stays the served default and the authoring
+ * derivation is a RETRY, reached only when the default degenerates. Measured on
+ * the full registry: exactly one type — `action` — takes the retry arm, and the
+ * other 25 stay byte-for-byte identical. `protocol.meta-types-degenerate-derivation.test.ts`
+ * pins that count, which is the assertion that fails if someone later widens
+ * this to every type.
+ *
+ * ## Absence is deliberately NOT degeneracy
+ *
+ * A type with no Zod schema at all (`external_catalog`) never reaches here —
+ * the caller's `zodSchema ? ... : undefined` guard sees to that — and it is a
+ * different, honest shape: nothing is advertised, so nothing lies. This
+ * function judges only a derivation that RAN and came back empty. Widening it
+ * to cover missing schemas would change what absence means at the endpoint and
+ * is out of scope.
+ *
+ * ## A throwing conversion keeps its old path exactly
+ *
+ * If the output derivation THROWS, that is the case `HAND_CRAFTED_SCHEMAS` was
+ * documented for and it returns `undefined` as it always did — no retry. Not
+ * one type's conversion throws today, so retrying there would move no payload
+ * while widening the change past the ruling.
  */
 const _jsonSchemaCache = new WeakMap<z.ZodTypeAny, Record<string, unknown> | null>();
-function toJsonSchemaSafe(schema: z.ZodTypeAny): Record<string, unknown> | undefined {
+function toJsonSchemaSafe(schema: z.ZodTypeAny, typeLabel?: string): Record<string, unknown> | undefined {
     const cached = _jsonSchemaCache.get(schema);
     if (cached !== undefined) return cached ?? undefined;
+
+    let output: Record<string, unknown>;
     try {
-        const result = z.toJSONSchema(schema, { unrepresentable: 'any' }) as Record<string, unknown>;
-        _jsonSchemaCache.set(schema, result);
-        return result;
+        output = z.toJSONSchema(schema, { unrepresentable: 'any' }) as Record<string, unknown>;
     } catch {
+        // Conversion failed outright — the original hand-crafted-fallback case.
         _jsonSchemaCache.set(schema, null);
         return undefined;
     }
+
+    if (!isDegenerateDerivation(output)) {
+        _jsonSchemaCache.set(schema, output);
+        return output;
+    }
+
+    // The default derivation produced a husk. Retry in the authoring shape
+    // before giving up — for a `ZodPipe` this is the derivation that can see
+    // the object at all.
+    try {
+        const authoring = z.toJSONSchema(schema, { unrepresentable: 'any', io: 'input' }) as Record<string, unknown>;
+        if (!isDegenerateDerivation(authoring)) {
+            _jsonSchemaCache.set(schema, authoring);
+            return authoring;
+        }
+    } catch {
+        // Fall through to the loud arm below.
+    }
+
+    // Both derivations are unusable. Say so once, then hand the caller
+    // `undefined` so its `?? HAND_CRAFTED_SCHEMAS` arm decides.
+    if (typeLabel && !_warnedDegenerateDerivation.has(typeLabel)) {
+        _warnedDegenerateDerivation.add(typeLabel);
+        console.warn(
+            `[Protocol] /meta/types: both the output and the authoring derivations of the `
+            + `"${typeLabel}" schema came back empty, so no schema is derived from it — a property `
+            + `panel built for this type will show no fields. Fix the schema so it derives, or `
+            + `declare a HAND_CRAFTED_SCHEMAS entry for "${typeLabel}".`,
+        );
+    }
+    _jsonSchemaCache.set(schema, null);
+    return undefined;
 }
 
 /**
@@ -1872,15 +1994,31 @@ const CLONE_STRIP_FIELDS: readonly string[] = [
  * [#3455] Collapse a batch's per-row `DroppedFieldsEvent`s into one event per
  * `(object, reason)` with the UNION of dropped field names.
  *
- * Used by the bulk-create surface (`createManyData`), whose `{ object, records,
- * count }` response has no per-row slot to hang a `droppedFields` on. The
- * create-side static-`readonly` strip is schema-uniform — every row drops the
- * same set — which makes an aggregated view faithful rather than lossy. (Since
- * #14147 that strip is the ENGINE's, which reports one event per CALL for it,
- * so the aggregation is over the runtime-owned per-row events.) Returns `[]` when nothing was dropped so callers can spread
+ * Used by both bulk-create surfaces at BATCH level. `createManyData`'s
+ * `{ object, records, count }` response has no per-row slot to hang a
+ * `droppedFields` on — a union is the only view that response can represent,
+ * which is the whole reason this collapse exists. `insertManyData` has a
+ * per-row slot and reports here anyway: the slot is real, a per-row answer is
+ * not (its docblock states why), so it reports the union where the union is
+ * true. (Since #14147 that strip is the ENGINE's, which reports one event per
+ * CALL for it, so the aggregation is over the runtime-owned per-row events.)
+ *
+ * ⚠️ So read a name in a merged event as "AT LEAST ONE row dropped this field",
+ * never "every row dropped the same set". Maintainer ruling C (#14147) put the
+ * static-`readonly` strip INSIDE `engine.insert`, AFTER the `beforeInsert`
+ * hooks, where it exempts keys a hook itself assigned — recorded PER ROW and
+ * indexed per row at the call: `packages/objectql/src/engine.ts` hands
+ * `stripReadonlyFields` the option `hookWrittenKeys: rowHookWrittenKeys[i]`,
+ * and that option's only power is to turn a STRIP into a KEEP. A hook that
+ * stamps a protected key on some rows and not others therefore makes those rows
+ * drop DIFFERENT sets, so the union is faithful to the BATCH without being
+ * faithful to any one row.
+ *
+ * Returns `[]` when nothing was dropped so callers can spread
  * `...(x.length ? { droppedFields: x } : {})` and keep the omit-when-empty shape.
- * The per-row `insertMany`/`batch` paths keep row precision instead (they have a
- * per-row result to carry it).
+ * The paths that DO keep row precision — `updateManyData` and `batchData` —
+ * earn it mechanically rather than by inference: each row is its own
+ * `engine.update` / `engine.insert` call, so that call's events are that row's.
  */
 function mergeDroppedFieldEvents(events: DroppedFieldsEvent[]): DroppedFieldsEvent[] {
     if (events.length === 0) return [];
@@ -3005,9 +3143,40 @@ const ARRAY_VALUED_LIST_QUERY_PARAMS: ReadonlySet<string> = (() => {
  * `limit: NaN` — driver-dependent behaviour under a 200, never an error. That
  * is the same class #6928 / PR #7299 refused one layer over on
  * `GET /api/v1/notifications`, and the same rule #6307 / #6877 landed in
- * `packages/rest` (`readSingleQueryValue`); the wording below is theirs
- * verbatim so a caller who repeats a parameter on two different routes is told
- * the same thing twice, not two things once.
+ * `packages/rest` (`readSingleQueryValue` / `repeatedQueryParamMessage`).
+ *
+ * ## The wording below is MODELLED ON theirs — it is not a verbatim copy
+ *
+ * A caller who repeats a parameter on two different routes is told the same
+ * RULE, in two texts that differ in two measured ways (#17813):
+ *
+ *  1. The parameter name is quoted differently — single quotes here
+ *     (`The 'top' query parameter …`), double quotes in `packages/rest`
+ *     (`The "top" query parameter …`) — so the two strings diverge at the
+ *     FIRST quoted character, shared prefix included.
+ *  2. This one appends the `It was NOT applied as a list: …` clause naming
+ *     the `Number(['1','2'])` coercion above. Additive, and absent there.
+ *
+ * ⛔ Neither delta is a stray to "repair" in passing: both texts are the
+ * published output of released endpoints, so aligning the two is a change to
+ * what two doors answer, not a comment fix.
+ *
+ * ## Why the text is copied at all, now that half the reason has gone
+ *
+ * #17672 published `repeatedQueryParamMessage` from `@objectstack/rest`'s
+ * entry, so the sentence that module owns became importable by a sibling
+ * package for the first time — but not from HERE. `@objectstack/rest` is in
+ * neither this package's `dependencies` nor its `devDependencies`, and the
+ * arrow points the other way: `@objectstack/rest` dev-depends on
+ * `@objectstack/metadata-protocol` (`query-multiplicity.ts`'s header records
+ * that as why it cannot derive the filter-slot spellings from here at
+ * runtime). Importing the message would invert a package dependency and
+ * settle where the sentence lives for THREE consumers — this normalizer, the
+ * rest handlers, and the dispatcher domain that already calls the message
+ * function — a layering question deliberately left open. Until it is
+ * answered, the copy is the only form reachable from this package, ⛔ nothing
+ * holds the two texts equal, and an edit to either one does NOT move the
+ * other.
  *
  * `INVALID_REQUEST` / 400 is what {@link conflictingQueryParamsError} in this
  * same normalizer already answers for the IDENTICAL condition reached the other
@@ -3136,7 +3305,7 @@ function unusableFilterError(param: string, detail: string): Error {
  * | type | column | sortable |
  * |---|---|---|
  * | `formula` | none — `SqlDriver.createColumn` returns early; `driver-turso`'s transport skips it with the same `Virtual — no column` note | **no** |
- * | `summary` | `table.float`, maintained by the engine | yes (measured #6924: `orderBy <summary> desc` -> E D C B A over 5 4 3 2 1) |
+ * | `summary` | an engine-maintained numeric column — `table.decimal` on tables created since #16318, `table.float` on earlier ones | yes (measured #6924: `orderBy <summary> desc` -> E D C B A over 5 4 3 2 1) |
  * | `autonumber` | `table.string`, engine-assigned | yes |
  *
  * So the spec's own `COMPUTED_VALUE_TYPES` (`formula`/`summary`/`autonumber`)
@@ -4755,9 +4924,9 @@ export class ObjectStackProtocolImplementation implements
         // This line used to read `if (this.environmentId === undefined)
         // return;` — the carve-out keyed off a ROW-SCOPING key. #6285 measured
         // that short-circuit and found every *regular* serving path safely on
-        // the gated side (`os dev` / `os start` bind `env_local`, the
-        // standalone artifact stack `proj_local`, a cloud per-project kernel
-        // its own), and concluded the only thing behind it was the
+        // the gated side (`os dev` / `os start` and the standalone artifact
+        // stack bind `env_local`, a cloud per-project kernel its own), and
+        // concluded the only thing behind it was the
         // control-plane bootstrap kernel. That conclusion was incomplete, and
         // #6710 measured the counter-example at boot level: the CLI's
         // lightweight host-config assembler (`serve.ts`'s
@@ -4843,8 +5012,9 @@ export class ObjectStackProtocolImplementation implements
         };
         // [#15950] …and the STORED half folded on top of it. The registry is
         // only ONE of the two homes live metadata has; see
-        // {@link foldStoredCollection} for the measured disagreement and for
-        // why the fold is additive.
+        // {@link foldStoredCollection} for the measured disagreement, and
+        // [#16224] for why the fold is the read API's own merge rather than a
+        // second account of it.
         const listCollection = (singularType: string, pluralType: string): Promise<unknown[]> =>
             this.foldStoredCollection(
                 listRegisteredCollection(singularType, pluralType),
@@ -4856,7 +5026,7 @@ export class ObjectStackProtocolImplementation implements
         // `sys_metadata` read and they do not depend on one another, so the
         // store leg costs one round trip of latency for the whole context
         // instead of five.
-        const [objects, permissions, books, datasets, pages] = await Promise.all([
+        const [objects, permissions, books, datasets] = await Promise.all([
             listCollection('object', 'objects'),
             listCollection('permission', 'permissions'),
             listCollection('book', 'books'),
@@ -4864,11 +5034,12 @@ export class ObjectStackProtocolImplementation implements
             // dashboard publish — without it every legitimate board reads as
             // dangling (see RuntimeStackContext.datasets).
             listCollection('dataset', 'datasets'),
-            // [#13216] The resolution universe validateViewPageRefs needs for a
-            // `type: 'page'` view publish — without it every legitimate page mount
-            // reads as dangling (see RuntimeStackContext.pages). Gathered on the
-            // same terms as the four above: per write, on an `active` publish only.
-            listCollection('page', 'pages'),
+            // [#17063] A fifth read, `listCollection('page', 'pages')`, stood
+            // here for `validateViewPageRefs`. Both it and the `type: 'page'`
+            // view mount it resolved were retired under ADR-0049
+            // enforce-or-remove, so no runtime-crossed rule reads `stack.pages`
+            // and this publish no longer pays a `sys_metadata` round trip for a
+            // collection nothing would consult.
         ]);
 
         // [#9612] The closure this write is judged against. Resolved from the
@@ -4885,8 +5056,7 @@ export class ObjectStackProtocolImplementation implements
             permissions,
             books,
             datasets,
-            pages,
-            // [#10377] The batch's own pending drafts join the five
+            // [#10377] The batch's own pending drafts join the
             // collections above. Absent on every non-batch door.
             ...(evt.pending !== undefined ? { pending: evt.pending } : {}),
             ...(packageScope !== undefined ? { packageScope } : {}),
@@ -4928,20 +5098,42 @@ export class ObjectStackProtocolImplementation implements
      * same word, and the side that was wrong is this one: the lint contract
      * says "live", and the registry alone is not that.
      *
-     * ## The fold is ADDITIVE, deliberately
+     * ## The fold is the READ API's own merge — [#16224]
      *
-     * A stored row contributes a name the registry half does not already carry;
-     * it never displaces a registry entry. That is not caution for its own
-     * sake — the registry's copy of an `object` is the RESOLVED schema
-     * (ADR-0029 D9.2: a base layer with its `extend` contributors folded on),
-     * while a `sys_metadata` row is the base layer alone, which is exactly why
-     * {@link getMetaItems} runs {@link foldObjectExtendersFromRegistry} when its
-     * own merge lets an overlay win. Letting a raw row displace the resolved
-     * body here would trade this card's phantom for a subtler one — a field
-     * reference that resolves today reading as dangling — so the universe grows
-     * and nothing in it is rewritten. The residual is stated rather than
-     * hidden: where an org overlay REDEFINES a code-package item, the gate
-     * still judges that item's CONTENT from the registry's version.
+     * #15950's repair contributed store-only NAMES and never displaced a
+     * registry entry, and it wrote the residual that left into this docblock:
+     * where an overlay REDEFINES a code-package item, the gate still judged
+     * that item's CONTENT from the registry's version. #16224 measured that
+     * residual end to end and it is worse than one phantom. A code package
+     * ships `dataset/D` with measure `m`; an env-wide overlay redefines `D`
+     * without `m`. In ONE instant the gate ACCEPTED a widget bound to `m`,
+     * which the runtime cannot serve, and REFUSED a widget bound to the measure
+     * the overlay does declare, which it can — an acceptance that should have
+     * been a refusal and a refusal that should have been an acceptance, from
+     * one cause: a body nobody serves.
+     *
+     * So the additive merge is gone and {@link mergePackageAwareOverlay} — the
+     * merge {@link getMetaItems} performs, with the transform it performs it
+     * with — is what runs here. Two readers of the word "live" now read through
+     * one function.
+     *
+     * ⛔ That is NOT the reversal it can look like. The argument against
+     * additivity's alternative was never "an overlay must not win"; it was
+     * "an UNRESOLVED body must not win" — the registry's copy of an `object` is
+     * the RESOLVED schema (ADR-0029 D9.2: a base layer with its `extend`
+     * contributors folded on) while a `sys_metadata` row is the base layer
+     * alone, so a raw row displacing the resolved body would make a field
+     * reference that resolves today read as dangling. That argument names its
+     * own remedy in the same breath, and {@link getMetaItems} has always
+     * applied it: run {@link foldObjectExtendersFromRegistry} on the winner.
+     * The distinction is therefore kept by FOLDING rather than by declining,
+     * and it is pinned as such — `protocol.runtime-gate-stored-universe.test.ts`
+     * asserts that an `object` overlay wins on its own columns AND keeps the
+     * registry's `extend` contributors.
+     *
+     * The universe still only ever grows a NAME: for a name the registry does
+     * not carry, this is byte-for-byte #15950's additive contribution, and that
+     * arm is pinned alongside the redefinition arm in the same process.
      *
      * ## What the read is scoped to
      *
@@ -5019,15 +5211,14 @@ export class ObjectStackProtocolImplementation implements
         }
         if (rows.length === 0) return registered;
 
-        const seen = new Set<string>();
-        for (const item of registered) {
-            const name = (item as { name?: unknown } | null | undefined)?.name;
-            if (typeof name === 'string') seen.add(name);
-        }
-        const merged = [...registered];
+        // Every readable row, in the shape {@link mergePackageAwareOverlay}
+        // consumes: the converted body plus the row's own package provenance.
+        // Reading a row is the only thing that can fail here, so it is the only
+        // thing this loop does.
+        const overlays: Array<{ data: unknown; packageId: string | undefined }> = [];
         for (const row of rows) {
             const name = row.name;
-            if (typeof name !== 'string' || seen.has(name)) continue;
+            if (typeof name !== 'string') continue;
             let body: unknown;
             try {
                 const raw = row.metadata;
@@ -5049,14 +5240,39 @@ export class ObjectStackProtocolImplementation implements
                 continue;
             }
             if (!body || typeof body !== 'object') continue;
-            const packageId = row.package_id;
-            if (typeof packageId === 'string' && (body as { _packageId?: unknown })._packageId === undefined) {
-                (body as { _packageId?: unknown })._packageId = packageId;
-            }
-            seen.add(name);
-            merged.push(body);
+            overlays.push({
+                data: body,
+                packageId: typeof row.package_id === 'string' ? row.package_id : undefined,
+            });
         }
-        return merged;
+        if (overlays.length === 0) return registered;
+
+        // [#16224] The read API's OWN merge, with the read API's own transform
+        // — not a second implementation of it. `mergePackageAwareOverlay` keys
+        // by ADR-0048 package slot rather than by bare name, so an overlay
+        // shadows the entry it actually overrides and two installed packages
+        // shipping one `type/name` are still two entries; the transform is the
+        // #8027 fold that keeps a winning `object` body at its RESOLVED shape.
+        // Together they are the two lines {@link getMetaItems} runs, which is
+        // the point: the gate's universe is now the same universe the platform
+        // answers `GET /meta/:type` from, by construction rather than by
+        // agreement.
+        const merged = mergePackageAwareOverlay(singularType, registered, overlays, (data) =>
+            this.foldObjectExtendersFromRegistry(
+                singularType, (data as { name?: unknown } | null)?.name, data,
+            ),
+        );
+
+        // A registry entry with no `name` is not addressable by any reference,
+        // so the merge above has no slot for it and drops it. It is carried
+        // through anyway: the rules that judge a collection's own coherence
+        // (`measure-aggregate-incoherent` and its siblings) walk the list by
+        // index and would lose a finding, and this method's contract is that
+        // the universe GROWS. Empty in every ordinary deployment.
+        const unaddressable = registered.filter(
+            (item) => !(item && typeof item === 'object' && 'name' in item),
+        );
+        return unaddressable.length > 0 ? [...merged, ...unaddressable] : merged;
     }
 
     /**
@@ -6321,7 +6537,10 @@ export class ObjectStackProtocolImplementation implements
             // Studio's editor and the runtime overlay validator stay in
             // lock-step (one source of truth).
             const zodSchema = getMetadataTypeSchema(singular);
-            const schema = (zodSchema ? toJsonSchemaSafe(zodSchema) : undefined)
+            // [#17501] `singular` is passed so the degenerate-derivation warning
+            // can name the type it could not derive. A type with NO zod schema
+            // never reaches the converter at all — absence is not degeneracy.
+            const schema = (zodSchema ? toJsonSchemaSafe(zodSchema, singular) : undefined)
                 ?? HAND_CRAFTED_SCHEMAS[singular];
             const form = TYPE_TO_FORM[singular];
             // Phase 2: the authoritative minimal create seed (single source of
@@ -9449,7 +9668,8 @@ export class ObjectStackProtocolImplementation implements
      * the defect they had just been refused for.
      *
      * `rollup`/`summary` was the other half of that wording and is NOT broken
-     * the same way — it does get a real, maintained column (`table.float`;
+     * the same way — it does get a real, maintained column (`table.decimal`
+     * on tables created since #16318, `table.float` on earlier ones;
      * measured: `orderBy <summary> desc` -> E D C B A over values 5 4 3 2 1).
      * It is dropped from the hint because it cannot do THIS job: a rollup
      * aggregates CHILD records (count/sum/min/max/avg), so it cannot carry a
@@ -11916,12 +12136,43 @@ export class ObjectStackProtocolImplementation implements
             // It is folded in anyway because that makes the scope a DECLARED
             // property of the validator instead of an emergent property of the
             // body. Two orgs whose documents are byte-identical today share a
-            // validator by coincidence, not by statement; and any future path
-            // that resolves an org row but falls back to the env-wide body
-            // would answer a 304 pinning the caller to a wrong-scope document
-            // with nothing in the validator to show it. Prepended, and ONLY
+            // validator by coincidence, not by statement. Prepended, and ONLY
             // when present, so an org-less caller's validator stays byte-for-
             // byte the one it is issued today.
+            //
+            // [#16525] ⚠️ The paragraph above used to argue from "any FUTURE
+            // path that resolves an org row but falls back to the env-wide
+            // body". THAT PATH IS PRESENT, and reading it as future is how a
+            // later author concludes the risk has not arrived yet:
+            // `getMetaItem` resolves `(orgId ? findOverlay(orgId) : undefined)
+            // ?? findOverlay(null)`, so an organization with no row of its own
+            // is served the env-wide document under an org-named validator.
+            //
+            // ⭐ AND `request.organizationId` IS THE SUPPLIED MEMBER, not the
+            // effective scope: {@link organizationIdForMetaRead} reduces it to
+            // `undefined` for a type declaring `allowOrgOverride: false`, and
+            // that reduction happens BELOW this line, inside `getMetaItem`. So
+            // a caller that hands this verb a raw organization gets a validator
+            // naming a scope its body was never resolved under.
+            //
+            // ⛔ Neither is a correctness fault, and the reason is the ONE
+            // invariant this block depends on: `content` — the bytes actually
+            // being sent — is inside the hash below. A 304 is therefore
+            // answered only on an exact match over those bytes, so a caller is
+            // only ever pinned to the representation IT received; the cost is
+            // validator FRAGMENTATION (N orgs, one env-wide document, N
+            // validators), which is waste, not error. ⇒ Hashing anything
+            // cheaper than the document — a version marker, the scope alone —
+            // destroys that argument silently. `get-meta-item-cached-etag-
+            // scope.test.ts` §3 is the pin; measured, removing `content` here
+            // reddens exactly one assertion and leaves the rest green.
+            //
+            // ⛔ Do NOT "repair" this by folding the effective value without
+            // reading #16525: it changes every published ETag that carries an
+            // organization, and buys nothing at the only production door —
+            // `@objectstack/rest` computes `organizationIdForMetaRead` BEFORE
+            // it calls (pinned by `rest-server-meta-cached-etag-door-scope.
+            // test.ts`), so supplied and effective already agree there.
             const content = JSON.stringify(item);
             const scope = [
                 request.organizationId ? `org:${request.organizationId}` : undefined,
@@ -12441,8 +12692,9 @@ export class ObjectStackProtocolImplementation implements
         // author-declared `readonly` — so ONE listener carries both, and this
         // seam no longer diffs payloads to recover a strip it performed itself.
         // AGGREGATED: the `{ records, count }` response has no per-row slot, so
-        // a union is the only representable view here. (`insertManyData`, which
-        // HAS a per-row slot, recovers row precision from the same union.)
+        // a union is the only representable view here. (`insertManyData` HAS a
+        // per-row slot and still reports at the top level — the union cannot be
+        // resolved to rows at either seam; see its own docblock.)
         const dropped: DroppedFieldsEvent[] = [];
         const opts: any = { onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); } };
         if (request.context !== undefined) opts.context = request.context;
@@ -12469,27 +12721,70 @@ export class ObjectStackProtocolImplementation implements
      * degradation re-run of the good rows' beforeInsert hooks. Requires an
      * engine with `insertMany` (ObjectQL has it); absent that, callers should
      * fall back to createManyData.
+     *
+     * ## `droppedFields` is BATCH-LEVEL here, and names no row
+     *
+     * This response HAS a per-row slot (`outcomes[i]`) and still reports the
+     * drop set at the top level, which is the one thing about this method worth
+     * writing down. The slot exists; what does not exist is a per-row ANSWER to
+     * put in it.
+     *
+     * Every create-side strip is the ENGINE's — runtime-owned `autonumber`
+     * (#5503) and static author-declared `readonly` (#14147) — and its
+     * `onFieldsDropped` event is the UNION over the batch, the listener
+     * signature carrying no row index. This seam used to reconstruct a row set
+     * from that union by asking which rows SUPPLIED each dropped name
+     * (`[...engineDropped].filter((f) => f in supplied)`). That is not the same
+     * question, and it named rows that are not at fault:
+     *
+     *  - Maintainer ruling C (#14147) put the static-`readonly` strip INSIDE
+     *    `engine.insert`, AFTER the `beforeInsert` hooks, where it exempts keys
+     *    a hook itself assigned — recorded PER ROW
+     *    (`hookWrittenKeys: rowHookWrittenKeys[i]`,
+     *    `packages/objectql/src/engine.ts`). A hook that stamps a protected key
+     *    on some rows and not others makes those rows drop DIFFERENT sets, so a
+     *    row that supplied the name and had it KEPT was reported as having lost
+     *    it — a dropped-field warning on an outcome whose `record` carries the
+     *    value that was written.
+     *  - A row the batch culled before the strip (a validation failure —
+     *    `ok: false`) dropped nothing at all, because the strip loop skips it;
+     *    supplying the name was still enough to have it named.
+     *
+     * ⛔ And the outcome's own `record` cannot repair the inference either, so
+     * a post-hoc "is the key still there?" check is not the cheaper route: a
+     * stripped `readonly` field is RE-DEFAULTED over exactly the keys the strip
+     * took (#3043's contract — a forged `approval_status` comes back `draft`),
+     * and a stripped `autonumber` is refilled by `applyAutonumbers` afterwards.
+     * On both the key is PRESENT on the row that really did drop it, so that
+     * check would delete TRUE attributions while leaving the hook-exempt false
+     * one standing. Comparing values fails for the case `hookWrittenKeys` was
+     * built for in the first place — the hook assigning the value the caller
+     * also sent.
+     *
+     * So the honest set — `{rows whose payload carried N}` minus `{rows whose
+     * beforeInsert hook assigned N}` — is computed per row upstream and is not
+     * reachable through this seam. Rather than name rows on a guess, the union
+     * is reported where it is true: on the response. ⚠️ Read a name here as
+     * "AT LEAST ONE row dropped this field", never "this row dropped it".
+     * Restoring row precision means giving the engine's drop report a per-row
+     * channel (an `onFieldsDropped` signature that carries the row), never a
+     * reconstruction at this call site.
      */
-    async insertManyData(request: { object: string, records: any[], context?: any }): Promise<{ object: string; outcomes: Array<{ ok: boolean; record?: any; error?: unknown; droppedFields?: DroppedFieldsEvent[] }> }> {
+    async insertManyData(request: { object: string, records: any[], context?: any }): Promise<{ object: string; outcomes: Array<{ ok: boolean; record?: any; error?: unknown }>; droppedFields?: DroppedFieldsEvent[] }> {
         this.assertObjectRegistered(request.object); // [#3770]
         const engineInsertMany = (this.engine as any)?.insertMany;
         if (typeof engineInsertMany !== 'function') {
             throw new Error('insertManyData requires an engine with insertMany (framework#3172)');
         }
-        // [#5503/#14147] Every create-side strip is the ENGINE's — runtime-owned
-        // `autonumber` (#5503) and static author-declared `readonly` (#14147) —
-        // and its `onFieldsDropped` event is the UNION over the batch, the
-        // listener signature carrying no row index. This partial-success path HAS
-        // a per-row slot (`outcomes[i]`), and row precision is recoverable
-        // without an index: the strip only removes keys the ROW ITSELF supplied,
-        // so a dropped name belongs to exactly the rows whose supplied payload
-        // carried it. Without this the import surface (which prefers this path
-        // over createManyData) would drop columns with nothing but a server log
-        // to show for it.
-        const engineDropped = new Set<string>();
-        const opts: any = { onFieldsDropped: (e: DroppedFieldsEvent) => { for (const f of e.fields) engineDropped.add(f); } };
+        // [#5503/#14147] The engine's events are collected WHOLE and merged —
+        // the same handling `createManyData` gives them, and for the reason
+        // spelled out on this method: the union is reportable, a row set is not.
+        // Keeping each event also keeps its own `reason`, which the old
+        // flatten-into-a-Set-and-relabel could not.
+        const dropped: DroppedFieldsEvent[] = [];
+        const opts: any = { onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); } };
         if (request.context !== undefined) opts.context = request.context;
-        const outcomes: Array<{ ok: boolean; record?: any; error?: unknown; droppedFields?: DroppedFieldsEvent[] }> = await engineInsertMany.call(
+        const outcomes: Array<{ ok: boolean; record?: any; error?: unknown }> = await engineInsertMany.call(
             this.engine,
             request.object,
             request.records,
@@ -12504,18 +12799,12 @@ export class ObjectStackProtocolImplementation implements
                 if (o?.record) omitInternalFieldsFromWriteResponse(outcomeSchema, o.record);
             }
         }
-        if (Array.isArray(outcomes)) {
-            for (let i = 0; i < outcomes.length; i++) {
-                if (!outcomes[i]) continue;
-                const supplied = (request.records?.[i] ?? {}) as Record<string, unknown>;
-                const mine = [...engineDropped].filter((f) => f in supplied);
-                const events: DroppedFieldsEvent[] = [];
-                if (mine.length > 0) events.push({ object: request.object, fields: mine, reason: 'readonly' });
-                const merged = mergeDroppedFieldEvents(events);
-                if (merged.length > 0) outcomes[i].droppedFields = merged;
-            }
-        }
-        return { object: request.object, outcomes };
+        const merged = mergeDroppedFieldEvents(dropped);
+        return {
+            object: request.object,
+            outcomes,
+            ...(merged.length > 0 ? { droppedFields: merged } : {}),
+        };
     }
     
     async updateManyData(request: UpdateManyDataRequest & { context?: any }): Promise<BatchUpdateResponse> {
@@ -17375,13 +17664,15 @@ export class ObjectStackProtocolImplementation implements
         // the third place the collection set is written down, and the only one
         // that could fall behind SILENTLY: a key added to `RuntimeStackContext`
         // and routed by `CLOSURE_CONTEXT_KEY_BY_TYPE` would simply never be
-        // accumulated here, so a package publishing a page beside the view that
-        // mounts it would keep being refused for the sibling in its own batch —
-        // the `shyx_customer_ds` shape #10377 was filed for. `-?` makes every
-        // key REQUIRED, so the next widening is a compile error at this line
-        // instead.
+        // accumulated here, so a package publishing a dataset beside the
+        // dashboard that binds it would keep being refused for the sibling in
+        // its own batch — the `shyx_customer_ds` shape #10377 was filed for.
+        // `-?` makes every key REQUIRED, so the next widening is a compile error
+        // at this line instead — and [#17063]'s NARROWING was one too, which is
+        // how `pages` left this literal in the same edit it left
+        // `RuntimeStackContext`.
         const pending: { [K in keyof RuntimePendingDeclarations]-?: unknown[] } = {
-            objects: [], permissions: [], books: [], datasets: [], pages: [],
+            objects: [], permissions: [], books: [], datasets: [],
         };
         let any = false;
         for (const d of drafts) {
@@ -21320,14 +21611,36 @@ export class ObjectStackProtocolImplementation implements
                     const verdict = computeMetadataDiagnostics(normalizedType, data);
                     if (verdict && !verdict.valid) {
                         invalid++;
-                        const first = verdict.errors?.[0];
-                        console.warn(
-                            `[Protocol] [metadata_spec_invalid] stored ${normalizedType}/${record.name} fails the ` +
-                            `current spec schema even after conversion` +
-                            (first ? ` (${first.path || '<root>'}: ${first.message})` : '') +
-                            `. Registered anyway so it stays serveable and fixable — correct it in Studio ` +
-                            `(the read carries the full _diagnostics), or delete the sys_metadata row.`,
-                        );
+                        // [#16319] ⭐ THE ONE CLASS THIS POLICY NO LONGER COVERS.
+                        //
+                        // MAINTAINER RULING 2026-09-10 (director seat batch #111
+                        // item 2): a field whose `type` is absent or is not a
+                        // `FieldType` member 「应该禁止加载」, so the row does NOT
+                        // register and 「Registered anyway so it stays serveable and
+                        // fixable」 would be a false receipt for it. `registerObject`
+                        // below throws for exactly this class and the per-record
+                        // catch prints the `error`-level line naming the object, the
+                        // field, the reason and the remedy — one loud statement, not
+                        // this reassuring one followed by a contradiction.
+                        //
+                        // ⛔ The question is asked through the DOOR's own predicate,
+                        // never re-derived here: a boot log with its own opinion
+                        // about what the registry admits is the same two-answers
+                        // defect one layer up. And ⛔ the row is not skipped here
+                        // either — the refusal stays the registry's single act, so
+                        // ablating the door's check makes this row register again.
+                        const willRefuseFieldType =
+                            normalizedType === 'object' && findUndeclarableFieldType(data) !== null;
+                        if (!willRefuseFieldType) {
+                            const first = verdict.errors?.[0];
+                            console.warn(
+                                `[Protocol] [metadata_spec_invalid] stored ${normalizedType}/${record.name} fails the ` +
+                                `current spec schema even after conversion` +
+                                (first ? ` (${first.path || '<root>'}: ${first.message})` : '') +
+                                `. Registered anyway so it stays serveable and fixable — correct it in Studio ` +
+                                `(the read carries the full _diagnostics), or delete the sys_metadata row.`,
+                            );
+                        }
                     }
                     if (normalizedType === 'object') {
                         // Every row here came from `sys_metadata` — a TENANT-authored
@@ -21412,7 +21725,35 @@ export class ObjectStackProtocolImplementation implements
                     loaded++;
                 } catch (e) {
                     errors++;
-                    console.warn(`[Protocol] Failed to hydrate ${record.type}/${record.name}: ${e instanceof Error ? e.message : String(e)}`);
+                    if (isObjectFieldTypeRefused(e)) {
+                        // [#16319] `error`, not `warn` — the AGENTS.md
+                        // "Degradation log levels" question answers YES here:
+                        // after this line the system looks entirely normal
+                        // (boot completes, every other object is served) while a
+                        // row the operator can see in `sys_metadata` is simply
+                        // not part of the runtime. It owes the two things an
+                        // `error` owes, in this first line: the CONSEQUENCE —
+                        // the object is absent, so its table is never created or
+                        // updated and every API for it answers as unknown — and
+                        // the FIX, which is the ruling's own precondition that
+                        // the row stay reachable: it is still readable, still
+                        // writable and still deletable through the metadata
+                        // API's raw-row path (`GET`/`PUT`/`DELETE
+                        // /api/v1/metadata/object/<name>`), because that path
+                        // reads `sys_metadata` directly and never asks the
+                        // registry whether the row registered.
+                        console.error(
+                            `[Protocol] [metadata_field_type_refused] stored ${record.type}/${record.name} is NOT ` +
+                            `registered. ${e.message} Until the row is corrected this object is absent from the ` +
+                            `runtime — its table is never created or updated, and every API for it answers as ` +
+                            `unknown — while the boot completes and everything else looks healthy. The row itself ` +
+                            `is untouched and still reachable: correct it in Studio or with ` +
+                            `PUT /api/v1/metadata/object/${record.name}, or remove it with ` +
+                            `DELETE /api/v1/metadata/object/${record.name}.`,
+                        );
+                    } else {
+                        console.warn(`[Protocol] Failed to hydrate ${record.type}/${record.name}: ${e instanceof Error ? e.message : String(e)}`);
+                    }
                 }
             }
             // #6190 — say out loud which org-scoped rows this filter just
@@ -21798,6 +22139,36 @@ export class ObjectStackProtocolImplementation implements
         // object that owns it, which is where a field is authored and where the
         // reference graph has real edges.
         //
+        // [#17584] ⛔ And the prescription comes FIRST, before the explanation
+        // of why the question is unanswerable. That order is load-bearing, not
+        // style. Since #16146 this refusal crosses the REST boundary through
+        // `boundedDeclaredRefusalMessage`, which applies #5423's shared
+        // `CLIENT_MESSAGE_MAX` (500) by TRUNCATING THE TAIL — and that helper's
+        // own docblock declares the assumption it rests on: "These messages
+        // front-load the main clause … and back-load attribution and issue
+        // numbers, which belong in the log rather than the response."
+        //
+        // This sentence interpolates the object name twice (inside `targetName`
+        // and again as `owner`) and the field name once, so it grows ~3
+        // characters per character of name. Back-loaded, it broke that
+        // assumption at reachable lengths: measured through the real route, a
+        // 37/37 object/field pair composed 502 characters and was delivered as
+        // `…/api/v1/meta/object/<obj>/referenc…` — the opener still readable and
+        // the URL cut mid-path, which is an instruction that 404s if the
+        // operator follows it. `crm_opportunity_line_item_snapshot_v2` is 37
+        // characters, and nothing in `packages/spec` caps a metadata name at
+        // all (#12144: the ceiling is the storing column's `maxLength`, and the
+        // widest is `sys_metadata.name` at 255).
+        //
+        // Front-loaded, truncation costs the EXPLANATION instead — the half an
+        // operator can still act without. ⛔ Do not reorder this back, and ⛔ do
+        // not repair a future overflow by raising the bound or exempting this
+        // door: the bound is the security floor under the refusal channel
+        // (#5423) and the #16146 ruling put this door explicitly under it. The
+        // invariant is pinned at the WIRE, where the bound actually applies, by
+        // `rest-server-meta-references-refusal-envelope.test.ts` — and the
+        // producer-side ORDER by `protocol.reference-target-unanswerable.test.ts`.
+        //
         // ⛔ And it opens with NO bracketed tag. The `[item_locked]`-style tags
         // this file writes elsewhere are lowercase restatements of the throw's OWN
         // declared `code`, so the wire carries the same token on the `code` axis;
@@ -21811,15 +22182,30 @@ export class ObjectStackProtocolImplementation implements
         if (REFERENCE_SITES.unanswerableTargetTypes.includes(singularTarget)) {
             const owner = targetName.includes('.') ? targetName.slice(0, targetName.indexOf('.')) : '<object>';
             const err = new Error(
-                `References to a '${singularTarget}' item cannot be computed. `
-                + `A '${singularTarget}' is addressed by the composite key '<object>.<field>' `
+                `Ask the owning object instead: GET /api/v1/meta/object/${owner}/references. `
+                + `References to a '${singularTarget}' item cannot be computed, because `
+                + `a '${singularTarget}' is addressed by the composite key '<object>.<field>' `
                 + `(here '${targetName}'), while every metadata property that names a field holds the `
                 + `BARE field name — so no reference site can ever match this key and an empty answer `
-                + `would mean "not computable", not "nothing depends on it". `
-                + `Ask the owning object instead: GET /api/v1/meta/object/${owner}/references.`,
+                + `would mean "not computable", not "nothing depends on it".`,
             );
             (err as any).code = 'NOT_IMPLEMENTED';
             (err as any).status = 501;
+            // [#16146] The producer-side declaration ruled by decision batch #58
+            // (2026-09-06, option C): `ApiErrorSchema.refusal` says "the 5xx I
+            // declared is a deliberate REFUSAL whose `message` is authored for
+            // the caller", so the boundary keeps that message instead of
+            // withholding it as a fault. THIS is the throw the ruling names —
+            // the sentence three lines up is prescriptive per ADR-0110 D3 and
+            // reached the wire as "Internal server error" until a route-local
+            // patch caught it one route down. Setting it here is what retires
+            // that patch's refusal/fault opinion: the transport now reads what
+            // the protocol DECLARED instead of matching this route's literals.
+            //
+            // ⛔ Platform and driver code never sets this on a fault, and no
+            // rewrap in this file carries it — a refusal crossing the
+            // overlay-delete rewraps is withheld as a fault, deliberately.
+            (err as any).refusal = true;
             throw err;
         }
 

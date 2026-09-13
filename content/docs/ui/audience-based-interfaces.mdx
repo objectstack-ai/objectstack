@@ -18,6 +18,8 @@ description: The same data serves different audiences. Give end users a curated 
 
 The built-in permission sets already encode this split: `member_default` and `viewer_readonly` do **not** carry `studio.access` / `manage_metadata`, so Studio and schema-design surfaces are invisible to them; `admin_full_access` carries both, while `organization_admin` gets `setup.access` only — the Setup shell is reachable but Studio and schema design stay hidden from org-scoped admins (see [`default-permission-sets.ts`](https://github.com/objectstack-ai/objectstack/blob/main/packages/plugins/plugin-security/src/objects/default-permission-sets.ts)).
 
+**One package, one app.** A package of `type: 'app'` exposes **exactly one** App — `defineStack` refuses a second at load, per ADR-0019 (app-as-consumer-unit) D3. More audiences therefore never mean more apps: they are navigation groups **inside** that one app, gated by `requiredPermissions` exactly as below.
+
 ### 1. Gate the app and its navigation
 
 ```ts
@@ -68,6 +70,6 @@ This is the lesson from Airtable's surfaces: the **Automations tab is visible to
 
 ## See also
 
-- Decision records: **ADR-0047** (run modes), **ADR-0066** (unified authorization, dual-surface gates).
+- Decision records: **ADR-0019** (app-as-consumer-unit — one app per package), **ADR-0047** (run modes), **ADR-0066** (unified authorization, dual-surface gates).
 - [Who can see data / automation / interface](/docs/permissions/access-recipes).
 - Guide: [Security](/docs/permissions); reference: [App schema](/docs/references/ui/app), [Permission schema](/docs/references/security/permission).

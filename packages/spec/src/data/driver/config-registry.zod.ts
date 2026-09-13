@@ -228,12 +228,65 @@ export const DATABASE_DRIVER_SELECTION_ALIASES: readonly string[] = Object.freez
 );
 
 /**
+ * The ONE alias lookup both resolvers go through — an own-property check, then
+ * the read.
+ *
+ * ## Why the bare `TABLE[spelling]` it replaces was wrong
+ *
+ * Both alias tables are built by `Object.fromEntries`, so both inherit
+ * `Object.prototype`, and a bare index resolves an INHERITED member for a
+ * spelling that names one. Both resolvers declare `BuiltinDriverId | undefined`
+ * and both are published (`packages/spec/api-surface/data.json`), so what came
+ * back was neither: measured against the built artifact on the Node 22 baseline
+ * (v22.22.2), `constructor` answered the `Object` FUNCTION and `__proto__`
+ * answered `Object.prototype` — two truthy non-ids out of a pair of functions
+ * whose `undefined` is the entire "this driver is not ours" signal.
+ *
+ * That signal has consumers that are not plain-JS callers. The CLI's
+ * `resolveStorageDriver` (`packages/cli/src/utils/storage-driver.ts`) refuses an
+ * unclaimed operator selection with `if (driverType && !kind)`, so
+ * `OS_DATABASE_DRIVER=constructor` walked PAST the refusal #6345 fork 1 exists
+ * to be — a truthy `kind` that is not a driver id. {@link driverHasLocalDefault}
+ * failed the same way from the other end: a truthy non-id indexed
+ * `DRIVER_LOCAL_DEFAULT` to `undefined`, so a function DECLARED `boolean`
+ * returned `undefined` for `constructor` and `__proto__` where its own doc
+ * promises `true`.
+ *
+ * `toString` and `valueOf` escaped only by accident — `.toLowerCase()` maps them
+ * to `tostring` / `valueof`, which name nothing. An accident of casing is not a
+ * guard, and the two words that ARE already lowercase were not covered by it.
+ *
+ * ## What it changes, and what it cannot
+ *
+ * It NARROWS, strictly: every legal spelling is an own key of its table, so no
+ * value accepted before is refused now, and the only answers that move are the
+ * ones that were never `BuiltinDriverId | undefined` in the first place.
+ *
+ * ⛔ Not a null-prototype table, for the reason the sibling guard in
+ * `src/shared/value-domain.zod.ts` records and this file re-measured: a
+ * `__proto__: null` object literal does not type-check against the
+ * `Readonly<Record<…>>` annotation at all (TS2353), and the
+ * `Object.assign(Object.create(null), …)` spelling that does compile silently
+ * COSTS the annotation — a table missing a driver stopped failing to compile
+ * (TS2741) in a probe of exactly that shape. Deleting a compile-time
+ * exhaustiveness guarantee to close a runtime hole is a bad trade.
+ */
+function lookupDriverId(
+  table: Readonly<Record<string, BuiltinDriverId>>,
+  driver: string,
+): BuiltinDriverId | undefined {
+  const spelling = driver.trim().toLowerCase();
+  if (!Object.prototype.hasOwnProperty.call(table, spelling)) return undefined;
+  return table[spelling];
+}
+
+/**
  * Resolve an authored `datasource.driver` onto its canonical id, or `undefined`
  * when the platform ships no contract for it (a plugin-contributed driver).
  */
 export function resolveDriverId(driver: unknown): BuiltinDriverId | undefined {
   if (typeof driver !== 'string') return undefined;
-  return DRIVER_ID_ALIASES[driver.trim().toLowerCase()];
+  return lookupDriverId(DRIVER_ID_ALIASES, driver);
 }
 
 /** Selection-face lookup, built once so {@link resolveDatabaseDriverId} is a hash hit. */
@@ -255,7 +308,7 @@ const DATABASE_DRIVER_ALIASES: Readonly<Record<string, BuiltinDriverId>> = Objec
  */
 export function resolveDatabaseDriverId(driver: unknown): BuiltinDriverId | undefined {
   if (typeof driver !== 'string') return undefined;
-  return DATABASE_DRIVER_ALIASES[driver.trim().toLowerCase()];
+  return lookupDriverId(DATABASE_DRIVER_ALIASES, driver);
 }
 
 /**
@@ -377,8 +430,48 @@ const DRIVER_CONFIG_JSON_SCHEMAS: Readonly<Record<BuiltinDriverId, () => Record<
  * Takes a CANONICAL id (not an alias) so a caller enumerating drivers cannot
  * quietly get `undefined` for a spelling it thought was covered; use
  * {@link resolveDriverId} first when the id came from authored metadata.
+ *
+ * Total over {@link BUILTIN_DRIVER_IDS} and closed outside it: an id that is not
+ * one of them — including one that names an `Object.prototype` member such as
+ * `constructor`, `toString` or `valueOf` — THROWS a `TypeError` naming the legal
+ * ids. It never answers a non-schema, so a caller reaching this published export
+ * from plain JS, or with an id read from METADATA rather than written in source,
+ * cannot be handed an empty schema that accepts everything. See the guard's own
+ * comment for what each of those words used to return.
  */
 export function getDriverConfigJsonSchemaById(id: BuiltinDriverId): Record<string, unknown> {
+  // ⛔ The own-property guard is load-bearing, not defensive noise, and the
+  // refusal it enables is a THROW rather than an `undefined` on purpose.
+  //
+  // `DRIVER_CONFIG_JSON_SCHEMAS` is an object literal, so it inherits
+  // `Object.prototype`, and the bare `[id]()` this replaces CALLED whatever an
+  // off-vocabulary id resolved to. Measured against the built artifact
+  // (`dist/data/index.mjs`) on the Node 22 baseline (v22.22.2): `constructor`
+  // ran `Object()` and handed back `{}` — an EMPTY JSON Schema, which accepts
+  // every config it is ever asked to judge; `toString` handed back the STRING
+  // '[object Object]' where the signature promises an object; `valueOf` handed
+  // back the registry itself. Only `__proto__` and a plainly absent word threw.
+  // Three quiet wrong answers and two throws, from one lookup.
+  //
+  // The guard collapses all five onto the throw, so the function is TOTAL: a
+  // canonical id gets its schema, and everything else gets a refusal naming the
+  // legal ids. `undefined` was the other in-band spelling and is NOT taken —
+  // this accessor's own doc above exists to say that a caller enumerating
+  // drivers must not be able to get a quiet `undefined` out of it, and
+  // {@link getDriverConfigSchema} is already the optional, alias-following door
+  // for a driver the platform may not know. Widening this return to an optional
+  // would erase the distinction between the two and change a published
+  // signature to do it.
+  //
+  // `TypeError` rather than this module's usual `Error`: the two ids that
+  // already threw threw a `TypeError`, so the class every existing caller can
+  // catch is unmoved and only the message improves.
+  if (!Object.prototype.hasOwnProperty.call(DRIVER_CONFIG_JSON_SCHEMAS, id)) {
+    throw new TypeError(
+      `getDriverConfigJsonSchemaById: ${JSON.stringify(String(id))} is not a built-in driver id ` +
+        `(expected one of ${BUILTIN_DRIVER_IDS.join(', ')}); resolve an authored spelling with resolveDriverId first.`,
+    );
+  }
   return DRIVER_CONFIG_JSON_SCHEMAS[id]();
 }
 

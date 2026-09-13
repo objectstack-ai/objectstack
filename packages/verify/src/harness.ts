@@ -42,8 +42,18 @@ interface InjectableApp {
 }
 
 /**
- * [#5261] Stand-in for the cloud-private `@objectstack/organizations` runtime,
- * mounted by `bootStack({ multiTenant: 'posture-only' })`.
+ * [#5261] Stand-in for the `@objectstack/organizations` runtime, mounted by
+ * `bootStack({ multiTenant: 'posture-only' })`.
+ *
+ * ⚠️ Why a stand-in and not the real package: since ADR-0132 that runtime is
+ * OPEN CORE — Apache-2.0, published on npm — so "it is closed-source" is no
+ * longer the reason and has not been since #16215. What keeps it out of here is
+ * ADR-0132's entitlement boundary: no framework package may DECLARE
+ * `@objectstack/organizations` (`no-framework-dependents.pin.test.ts`, its
+ * mechanical half — "Apps declare it; packages do not"), so `packages/verify`
+ * cannot depend on it and a bare import from here does not resolve it. The proof
+ * that the REAL plugin walls tenants lives in cloud's `security-enterprise`
+ * multi-org integration test.
  *
  * It registers the `org-scoping` service and nothing else. That single fact is
  * what the open core reads to decide whether a REQUESTED organization wall can
@@ -74,6 +84,18 @@ const API_PREFIX = '/api/v1';
 const DEFAULT_ADMIN_EMAIL = 'admin@objectos.ai';
 const DEFAULT_ADMIN_PASSWORD = 'admin123';
 const DEFAULT_AUTH_SECRET = 'objectstack-verify-secret';
+
+/**
+ * The enterprise multi-org runtime this harness mounts under `multiTenant: true`
+ * — the one and only subject `bootStack` resolves from the host app, and the
+ * default of {@link BootOptions.organizationsPackage}.
+ *
+ * Exported for the host-resolution suite's premise case, which pins this value
+ * so a test seam can never quietly become the production subject. ⛔ Deliberately
+ * NOT re-exported from `./index.ts`: it is not part of this package's published
+ * API.
+ */
+export const ORGANIZATIONS_PKG = '@objectstack/organizations';
 
 /**
  * A booted stack: the HTTP surface (`api` / `raw` / `signIn` / `signUp` /
@@ -156,8 +178,9 @@ export interface BootOptions {
    * ## `'posture-only'` — a stand-in, for proving org LIFECYCLE without isolation
    *
    * `multiTenant: 'posture-only'` boots the same shape but registers a built-in
-   * stand-in for the `org-scoping` service instead of requiring the cloud-private
-   * enterprise package. The `tenancy` service then resolves a real, NON-DEGRADED
+   * stand-in for the `org-scoping` service instead of requiring the enterprise
+   * package that no framework package may declare (ADR-0132's entitlement
+   * boundary). The `tenancy` service then resolves a real, NON-DEGRADED
    * `isolated` posture, which is what posture-gated seams key on — above all
    * `POST /auth/organization/create`, which since #5261 refuses whenever the
    * EFFECTIVE posture has no organization wall.
@@ -336,6 +359,36 @@ export interface BootOptions {
    * array order. Default `[]`.
    */
   extraPlugins?: unknown[];
+  /**
+   * The specifier `multiTenant: true` resolves from the host app. Defaults to
+   * the real subject, {@link ORGANIZATIONS_PKG}; ⛔ production callers never
+   * pass it.
+   *
+   * ## Why it exists (#17911, the same repair #16539 / #16552 landed)
+   *
+   * Every verdict this boot path reaches is a statement about what a host root
+   * HAS and, just as load-bearing, what it has NOT got. Until ADR-0132 / #16215
+   * the second half came free: `@objectstack/organizations` was cloud-private,
+   * so a temp host that declared it and did not install it was unresolvable by
+   * construction. It is a tracked workspace package now; pnpm's hoisted store
+   * carries it and every `pnpm exec`-launched runner (vitest's bin shim
+   * included) exports a `NODE_PATH` that reaches that store. From then on a
+   * "declared, not installed" fixture's verdict was a function of whether an
+   * unrelated package had been BUILT — green on CI, whose test graph never
+   * builds it, red on any tree that had run a full local build.
+   *
+   * The visible half of that is a false red. The half that matters is the quiet
+   * one: a fixture whose subject is reachable is no longer deciding what the
+   * host root has, and nothing says so. So a case that needs the absence to be
+   * a property of ITS OWN directory hands in a name this workspace can never
+   * contain (`@fixture/*`) and proves the absence rather than assuming it — and
+   * no workspace name is safe from becoming one.
+   *
+   * ⛔ It does NOT rename the package in the operator-facing sentence: the error
+   * this boot throws names {@link ORGANIZATIONS_PKG} literally, because in every
+   * production boot that is the subject. Only the specifier moves.
+   */
+  organizationsPackage?: string;
 }
 
 /**
@@ -510,8 +563,9 @@ export async function bootStack(
   } else if (opts.multiTenant) {
     // #4700: this used a bare `import()`, which Node ESM resolves against the
     // IMPORTER's realpath — `packages/verify`, inside the framework workspace.
-    // `@objectstack/organizations` is cloud-private and only ever lives in the
-    // host app's `node_modules`, so the import could never succeed and the
+    // `@objectstack/organizations` is host-supplied — ADR-0132's entitlement
+    // boundary forbids any framework package declaring it, so it only ever lives
+    // in the host app's `node_modules` — and the import could never succeed: the
     // message below fired at apps that had already installed the package,
     // telling them to install it again. Resolve from the host app (the project
     // `objectstack verify` runs in) and fall back to this package's own
@@ -531,11 +585,16 @@ export async function bootStack(
     // any caller until each one handed in its base. `(s) => import(s)` here is
     // literally this module's resolver, so the sentence now holds for
     // `bootStack`. Measured: it changes nothing for THIS specifier —
-    // `@objectstack/organizations` is cloud-private and resolves from nowhere
-    // in the framework workspace — and it is what stops the next app-supplied
+    // `@objectstack/organizations` resolves from nowhere in the framework
+    // workspace, because ADR-0132's entitlement boundary means no framework
+    // package declares it — and it is what stops the next app-supplied
     // package added to this path from silently missing `packages/verify`'s own
     // dependencies.
-    const organizationsPkg = '@objectstack/organizations';
+    // #17911: the subject is a parameter with the real package as its default,
+    // so a fixture case whose whole content is "this host root does NOT have
+    // it" can hand in a name the workspace can never supply. Production callers
+    // pass nothing and get `ORGANIZATIONS_PKG` — see BootOptions.organizationsPackage.
+    const organizationsPkg = opts.organizationsPackage ?? ORGANIZATIONS_PKG;
     const hostRoot = opts.hostRoot ?? process.cwd();
     let mod: any;
     try {

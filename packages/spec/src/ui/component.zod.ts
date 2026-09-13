@@ -8,15 +8,16 @@ import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { ExpressionInputSchema } from '../shared/expression.zod';
 import { retiredKey } from '../shared/retired-key';
-// `user:profile`'s retirement prescription — one string, three doors (#14159):
-// the enum's error map and the `PageComponentSchema.type` check in page.zod.ts,
-// and the kept `ComponentPropsMap` row below (`retiredComponentProps`).
+// The retired page-component TYPES' prescriptions — one string per type, three
+// doors (#14159): the enum's error map and the `PageComponentSchema.type` check
+// in page.zod.ts, and the kept `ComponentPropsMap` rows below.
 import { RETIRED_PAGE_COMPONENT_TYPES } from './page.zod';
 // `element:record_picker`'s flat `sort` shorthand is the SAME contract as
 // `ElementDataSourceSchema.sort` (page.zod.ts) — one shape, imported from the
 // shared source rather than re-spelled here (#6276).
 import { SortItemSchema } from '../shared/enums.zod';
 import { strictObject } from '../shared/strict-object';
+import { ruleArrayFilterError } from './filter-rule-array';
 import type { KeySetGuidance } from '../shared/suggestions.zod';
 // [#13855] The section → field-group reference form, shared with
 // `FormSectionSchema` (view.zod.ts) so one mixing rule serves both escape hatches.
@@ -719,10 +720,10 @@ export const PageTabsProps = strictObject({
      *     binds it to the data-source ADAPTER. Same key, two meanings.
      *   * **The row's bare fields are spread flat**, so `status` resolves as
      *     well as `record.status`. The ambient scope is spread AFTER the row,
-     *     so an ambient root (`app`, `features`, `user`, …) wins over a record
+     *     so an ambient root (`features`, `user`, …) wins over a record
      *     field of the same name.
      *
-     * Like the component-node surface it also mounts the ambient `app` /
+     * Like the component-node surface it also mounts the ambient
      * `features` / `os.user` roots, which no ADR rules for a UI predicate
      * (ADR-0068's Non-goals: "only the user object is in scope here").
      *
@@ -1850,7 +1851,12 @@ export const ElementNumberPropsSchema = lazySchema(() => strictObject({
    * array, by design). The record form is refused at `filter`; the migration
    * prescription is the `element-number-filter-rule-array` semantic entry.
    */
-  filter: z.array(ViewFilterRuleSchema).optional()
+  filter: z.array(ViewFilterRuleSchema, {
+    error: ruleArrayFilterError({
+      surface: 'this `element:number`',
+      migration: 'element-number-filter-rule-array',
+    }),
+  }).optional()
     .describe('Filter rules narrowing the aggregate — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` input in this map shares. The MongoDB-style record form is refused — see migration `element-number-filter-rule-array`'),
   format: z.enum(['number', 'currency', 'percent']).optional().describe('Number display format'),
   prefix: z.string().optional().describe('Prefix text (e.g. "$")'),
@@ -2051,10 +2057,13 @@ const elementFilterRetired = (key: string): string =>
  * props gate keeps DISPATCHING on `type: 'element:filter'` and refusing every
  * authored key with the prescription — deleting the row would demote the type
  * to an unregistered custom string the gate deliberately skips, turning a loud
- * retirement back into a silent no-op. A bare node with empty `properties`
- * parses clean (the open `type` union accepts any string, so a node-level
- * refusal is not expressible here); the migration strips the keys and leaves
- * exactly that bare, inert node.
+ * retirement back into a silent no-op. The bare node the migration leaves
+ * behind — it strips the keys and nothing else — used to parse clean, because
+ * the open `type` union accepts any string and a node-level refusal was not
+ * expressible here. It is expressible one level up: `element:filter` is a
+ * member of `RETIRED_PAGE_COMPONENT_TYPES` (page.zod.ts), so
+ * `PageComponentSchema` now refuses the node by name and hands the author the
+ * element-grain tail of these very tombstones.
  */
 export const ElementFilterPropsSchema = lazySchema(() => strictObject({
   surface: 'this `element:filter`',
@@ -2101,10 +2110,13 @@ const elementFormRetired = (key: string): string =>
  * props gate keeps DISPATCHING on `type: 'element:form'` and refusing every
  * authored key with the prescription — deleting the row would demote the type
  * to an unregistered custom string the gate deliberately skips, turning a loud
- * retirement back into a silent no-op. A bare node with empty `properties`
- * parses clean (the open `type` union accepts any string, so a node-level
- * refusal is not expressible here); the migration strips the keys and leaves
- * exactly that bare, inert node.
+ * retirement back into a silent no-op. The bare node the migration leaves
+ * behind — it strips the keys and nothing else — used to parse clean, because
+ * the open `type` union accepts any string and a node-level refusal was not
+ * expressible here. It is expressible one level up: `element:form` is a
+ * member of `RETIRED_PAGE_COMPONENT_TYPES` (page.zod.ts), so
+ * `PageComponentSchema` now refuses the node by name and hands the author the
+ * element-grain tail of these very tombstones.
  */
 export const ElementFormPropsSchema = lazySchema(() => strictObject({
   surface: 'this `element:form`',
@@ -2194,8 +2206,12 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
    * `ViewFilterRule` ARRAY form, `[{ field, operator, value }, ...]`, the one
    * filter orthography the map's array-declared `filter` doors share
    * (`record:related_list`, its nested Add-affordance picker, and — since
-   * #12039 Key 2 — `element:number`; the four `object-*` blocks declare
-   * `filter` as `z.unknown()`, no orthography at all — #15449). Until #14406
+   * #12039 Key 2 — `element:number`; and, since #15449, the four `filter`
+   * doors of the six-entry `object-*` family — `object-grid`,
+   * `object-metric`, `object-kanban` and `object-calendar` — each of which
+   * declares this same `z.array(ViewFilterRuleSchema)`, while that family's
+   * remaining two entries, `object-form` and `object-master-detail-form`,
+   * declare no `filter` key at all). Until #14406
    * this entry alone still said `FilterConditionSchema`, the MongoDB-style
    * record form: the last record-form `filter` in `ComponentPropsMap` after
    * the ui#6206 ruling (2026-08-25, Option B, verbatim 「同意」: one filter
@@ -2220,7 +2236,12 @@ export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
    * (`ds.filter ?? props.filter`) is `ElementDataSourceSchema`'s key, not this
    * entry's subject.
    */
-  filter: z.array(ViewFilterRuleSchema).optional()
+  filter: z.array(ViewFilterRuleSchema, {
+    error: ruleArrayFilterError({
+      surface: 'this `element:record_picker`',
+      migration: 'element-record-picker-filter-rule-array',
+    }),
+  }).optional()
     .describe('Filter rules narrowing which records the picker offers — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography the array-declared `filter` doors of this map share. The MongoDB-style record form is refused — see migration `element-record-picker-filter-rule-array`. The binding-level `dataSource.filter` wins outright when both are set'),
   /**
    * Row order (#6276). The flat shorthand for `dataSource.sort`, and the same
@@ -2481,11 +2502,54 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * `filter`; the migration prescription is the
    * `element-data-source-and-object-block-filter-rule-array` semantic entry.
    */
-  filter: z.array(ViewFilterRuleSchema).optional()
+  filter: z.array(ViewFilterRuleSchema, {
+    error: ruleArrayFilterError({
+      surface: 'this `object-grid`',
+      migration: 'element-data-source-and-object-block-filter-rule-array',
+    }),
+  }).optional()
     .describe('Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares; lowered to the wire `$filter`. THE key, singular — not the plural misspelling. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array`'),
   defaultFilters: z.unknown().optional()
     .describe('Legacy base-filter fallback, read only when `filter` is absent. Prefer `filter`'),
-  sort: z.unknown().optional().describe('Initial sort (array of { field, order })'),
+  /**
+   * Initial row order — the `SortItem` ARRAY form, `[{ field, order }, ...]`,
+   * the one sort orthography every DECLARED `sort` door on this platform
+   * carries: `ElementDataSourceSchema.sort` and `ListPageSchema.sort`
+   * (page.zod.ts) and `element:record_picker`'s flat shorthand above. One
+   * shared schema rather than a third copy — all of them are
+   * `SortItemSchema`, already imported at the top of this file for the picker.
+   *
+   * objectui#8221, decision batch #77, 2026-09-07, maintainer verbatim
+   * 「其他同意」, option B: one `sort` spelling, the array; the legacy string
+   * clause is retired from `@object-ui/core`. Item 4 of that ruling is this
+   * declaration and `object-calendar`'s below — 「`ComponentPropsMap` for
+   * `object-calendar` and `object-grid` constrains the `sort` value to the
+   * array shape (today it accepts anything), so the spec, the registrations
+   * and the helper agree; that is a pull-back to the declared contract,
+   * ordinary tier」.
+   *
+   * The `z.unknown()` this door carried was a read-point record (#7751), the
+   * same vintage as its `filter` neighbour above and not an exception to the
+   * ruling: it receipted an array, a string and a bare NUMBER alike with
+   * `success: true`, while `plugin-grid/src/index.tsx:222` has published
+   * `type: 'array'` all along — so the html tier answered `type-mismatch` on a
+   * value this schema had just accepted.
+   *
+   * Sequenced measurement-first, as this family has to be. Measured at the
+   * objectui pin `53ded82b`: `ObjectGrid.tsx:1457` reads `schema.sort` and the
+   * fetch path at `:1844-1851` carries an explicit `typeof === 'string'` arm
+   * putting the clause on `$orderby` verbatim, beside the array arm that folds
+   * `[{ field, order }]` onto the same parameter. ⚠️ At THIS pin the string is
+   * therefore still lowered, and this door refuses a spelling the pinned
+   * renderer honours — the ruled sequence, not an oversight: objectui#8221's
+   * PR #8758 (merged 2026-09-09, after this pin) drops the string arm from
+   * `convertSortToQueryParams`, and the next pin bump carries it in. The array
+   * is the spelling both ends already agree on today; the header-arrow read at
+   * `:3998` hands `schemaSort` to `parseSchemaSort` as `TableSortItem[]`, the
+   * array shape and not the string.
+   */
+  sort: z.array(SortItemSchema).optional()
+    .describe('Initial row order — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array`'),
   /**
    * REMOVED (#11805, maintainer ruling 2026-08-25, decision-inbox batch 4:
    * 「#11805 退役 defaultSort,不需要major」 — the ADR-0049 enforce-or-remove
@@ -2542,7 +2606,8 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   reorderableColumns: z.boolean().optional().describe('Allow column drag-reorder'),
   frozenColumns: z.number().optional().describe('How many leading columns stay frozen (default 1)'),
   showColumnTypeIcons: z.boolean().optional().describe('Show field-type icons in column headers'),
-  exportOptions: z.unknown().optional().describe('Export config ({ formats, streaming })'),
+  exportOptions: z.unknown().optional()
+    .describe('Export config ({ formats, maxRecords, includeHeaders, fileNamePrefix, streaming }). Unvalidated here (`z.unknown()`), so this list is the whole account of the shape; `ListViewSchema.exportOptions` declares the same five members with their per-member contract'),
   operations: z.unknown().optional().describe('Operation toggles ({ export: false, … })'),
   /**
    * Data source binding — `ViewDataSchema`, the #5090-pinned authority the
@@ -2656,7 +2721,12 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * at `filter`; see migration
    * `element-data-source-and-object-block-filter-rule-array`.
    */
-  filter: z.array(ViewFilterRuleSchema).optional()
+  filter: z.array(ViewFilterRuleSchema, {
+    error: ruleArrayFilterError({
+      surface: 'this `object-metric`',
+      migration: 'element-data-source-and-object-block-filter-rule-array',
+    }),
+  }).optional()
     .describe('Filter the aggregation is scoped by — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array`'),
   format: z.string().optional().describe("Number format pattern (e.g. '0,0', '$0,0', '0%')"),
   currency: z.string().optional().describe("ISO currency code (e.g. 'USD') — enables currency formatting"),
@@ -2689,8 +2759,12 @@ export type ObjectMetricPropsParsed = z.infer<typeof ObjectMetricPropsSchema>;
  * value or bare strings, NOT a field projection), `filter` (:198, the
  * `$filter` handoff), `data` (:217-224), `cardTitle`/`titleField` (:233),
  * `cardFields` (:322), `swimlaneField`/`grouping` (:518-519), and via the
- * forwarded schema `quickAdd`/`coverImageField`/`conditionalFormatting`
- * (`KanbanRenderer`, index.tsx). `groupField` is the DESIGNER's spelling with
+ * forwarded schema `coverImageField`/`conditionalFormatting` (`KanbanRenderer`,
+ * index.tsx — `ObjectKanban.tsx:931` spreads the authored bag into it).
+ * `quickAdd` sat on that forwarded list and is RETIRED (#17260, tombstoned
+ * below): the sentence was true about the FORWARD and false about the READ,
+ * which is how the key kept re-authorizing itself. `groupField` is the
+ * DESIGNER's spelling with
  * zero read points (#7973 class) — aliased to the `groupBy` the board reads.
  * `limit` (#16503) was measured later, at the pin this repo builds against
  * (`.objectui-sha` = `53ded82bf`; re-READ there 2026-09-08, file
@@ -2724,7 +2798,12 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * `filter`; see migration
    * `element-data-source-and-object-block-filter-rule-array`.
    */
-  filter: z.array(ViewFilterRuleSchema).optional()
+  filter: z.array(ViewFilterRuleSchema, {
+    error: ruleArrayFilterError({
+      surface: 'this `object-kanban`',
+      migration: 'element-data-source-and-object-block-filter-rule-array',
+    }),
+  }).optional()
     .describe('Base query filter, handed to the wire `$filter` — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array`'),
   /**
    * Row cap (#16503 — the spec half of objectui#8172; decision batch #68,
@@ -2768,7 +2847,48 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
   cardFields: z.array(z.string()).optional().describe('Fields rendered on each card'),
   swimlaneField: z.string().optional().describe('Field for horizontal swimlanes (in addition to columns)'),
   grouping: z.unknown().optional().describe('View grouping config; its first field is the swimlane fallback'),
-  quickAdd: z.boolean().optional().describe('Show the per-column quick-add affordance'),
+  /**
+   * RETIRED (#17260, ADR-0049 enforce-or-remove — the spec half of the
+   * objectui#8285 director-seat ruling, decision batch #91, 2026-09-08:
+   * option B, `quickAdd` leaves `object-kanban` and stays only on the
+   * React-host `kanban-ui` block).
+   *
+   * Measured at the objectui pin this repo builds against
+   * (`.objectui-sha` = `53ded82bf`): the board forwards the key —
+   * `ObjectKanban.tsx:931` spreads the authored bag into `KanbanRenderer`,
+   * which passes
+   * `quickAdd={schema.quickAdd}` and `onQuickAdd={schema.onQuickAdd}`
+   * (`plugin-kanban/src/index.tsx:196`) — but the affordance is gated on
+   * BOTH (`KanbanImpl.tsx:355` and `:368`), and `onQuickAdd` is a
+   * host-supplied FUNCTION that JSON cannot carry and no producer puts on an
+   * `object-kanban` node. `ObjectKanban.tsx` names neither half of the pair
+   * (0 occurrences each, against 6 for the sibling `onCardClick` in the same
+   * file). So the gate was permanently false and authoring the key was a
+   * parse-clean no-op — the accepted-and-dropped class.
+   *
+   * ⛔ Not a silent one, which is why the retirement is worth more than a
+   * tidy-up: objectui's registry↔spec ledger records the key verbatim as
+   * `ESCALATED (object-kanban.quickAdd — measured NOT honoured)` and its html
+   * tier reported it as `unknown-prop` — the SAME diagnostic a typo gets. An
+   * author following this published contract met a tool that contradicted it
+   * and could not tell which side was wrong. The tombstone collapses both
+   * halves onto one answer.
+   *
+   * The control itself is NOT withdrawn from the platform: it stays on
+   * `kanban-ui`, the block a React host renders directly and can hand the
+   * runtime function to. Sources are stripped by the D2 conversion
+   * `object-kanban-quick-add-removed` (a pure lossless delete — the key never
+   * had an effect to preserve).
+   */
+  quickAdd: retiredKey(
+    '`object-kanban` property `quickAdd` was removed in @objectstack/spec 17 (ADR-0049) — '
+    + 'the board forwarded it, but the per-column affordance is gated on both `quickAdd` and '
+    + '`onQuickAdd`, and `onQuickAdd` is a host-supplied function JSON cannot carry and no '
+    + 'producer ever put on an `object-kanban` node, so authoring it was a parse-clean no-op. '
+    + 'Delete the key. The quick-add control is unchanged on the `kanban-ui` block, where a React '
+    + 'host supplies the `onQuickAdd` slot the control needs. '
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+  ),
   coverImageField: z.string().optional().describe('Image field rendered as the card cover'),
   conditionalFormatting: z.unknown().optional().describe('Card conditional formatting rules'),
 }));
@@ -2834,9 +2954,32 @@ export const ObjectCalendarPropsSchema = lazySchema(() => strictObject({
    * `filter`; see migration
    * `element-data-source-and-object-block-filter-rule-array`.
    */
-  filter: z.array(ViewFilterRuleSchema).optional()
+  filter: z.array(ViewFilterRuleSchema, {
+    error: ruleArrayFilterError({
+      surface: 'this `object-calendar`',
+      migration: 'element-data-source-and-object-block-filter-rule-array',
+    }),
+  }).optional()
     .describe('Base query filter — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` door in this map shares. The MongoDB-style record form is refused — see migration `element-data-source-and-object-block-filter-rule-array`'),
-  sort: z.unknown().optional().describe('Sort for the fetched events'),
+  /**
+   * Row order for the fetched events — the same `SortItem` ARRAY form
+   * `object-grid` declares above, and for the same ruling (objectui#8221,
+   * decision batch #77, option B; the `object-grid` entry carries the verbatim
+   * text). One sort orthography, one shared `SortItemSchema`.
+   *
+   * Measured at the objectui pin `53ded82b`: `ObjectCalendar.tsx:431` hands
+   * `schema.sort` to the shared sink `convertSortToQueryParams`
+   * (`core/src/utils/sort-query.ts`) as the fetch's `$orderby`. ⚠️ That sink
+   * still honours the legacy string clause at this pin — `sort-query.ts:66-70`
+   * — so, exactly as on `object-grid`, this declaration lands ahead of the
+   * consumer-side retirement (objectui#8221's PR #8758, merged 2026-09-09) and
+   * refuses a spelling the pinned helper still lowers. The array arm is
+   * unaffected: the sink folds `[{ field, order }]` into the field-direction
+   * map either way. Unlike the grid, `plugin-calendar/src/index.tsx` declares
+   * no `sort` input at all, so nothing on the registry side moves.
+   */
+  sort: z.array(SortItemSchema).optional()
+    .describe('Row order for the fetched events — the SortItem array form `[{ field, order }, ...]`, the one sort orthography every declared `sort` door on this platform shares; lowered to the wire `$orderby`. The legacy string clause (`name desc`) is refused — see migration `object-block-sort-item-array`'),
   data: z.array(z.unknown()).optional().describe('Pre-fetched records — skips the internal fetch'),
   staticData: z.array(z.unknown()).optional().describe('Static inline records'),
   locale: z.string().optional().describe('Locale override for the calendar chrome'),
@@ -3077,9 +3220,12 @@ export const ComponentPropsMap = {
   // that dispatches on the row (the #5068 props gate, `check-yaml-examples`,
   // the vocabulary's known set) keeps recognising the name and refuses it with
   // the prescription instead of skipping it as an unregistered custom string.
-  // Unlike those two, the WHOLE bag is refused — `{}` included — because the
-  // node itself is refused by name at `PageComponentSchema.type`; a row that
-  // accepted the empty bag would contradict the door one level up.
+  // All three names are refused at the node by `PageComponentSchema.type`; the
+  // rows differ only in what they have to say about a bag that door no longer
+  // lets through. This type never had an authorable key, so the WHOLE bag is
+  // refused — `{}` included. The two elements below carry six tombstoned keys
+  // each, where a per-key prescription says more than one whole-bag refusal
+  // could.
   'user:profile': retiredComponentProps('user:profile'),
 
   // Plugin console widgets — #11575, the #8691/#8744 mechanism two instances

@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { reservedIdentityNamesCelList, reservedIdentityNameMessage } from './reserved-identity-names.js';
 
 /**
  * sys_user_position — User ↔ Position assignment (ADR-0057 D4).
@@ -178,4 +179,46 @@ export const SysUserPosition = ObjectSchema.create({
     // (#3391 P1), so omitting it 405s /batch and the *Many routes (#3026).
     apiMethods: ['get', 'list', 'create', 'update', 'delete', 'bulk'],
   },
+
+  // ── [#15972] Reserved built-in identity names ────────────────────
+  //
+  // THE ROW IS THE EXPOSURE. `position` is free text (it references
+  // `sys_position.name` by convention, not by lookup), this object is
+  // `apiEnabled`, and its bucket is admin/user-writable — so refusing the
+  // reserved names on the position DEFINITION alone closes nothing here: the
+  // platform seeds a `platform_admin` catalog row in every organization, and
+  // an assignment row may name it (or any built-in identity) with no
+  // definition needed at all.
+  //
+  // Nothing legitimate writes one. The built-in identities are a PROJECTION
+  // with their own sources of truth — the unscoped `admin_full_access` grant
+  // for `platform_admin` (`bootstrapPlatformAdmin` writes a
+  // `sys_user_permission_set` row, never one of these), `sys_member.role` for
+  // the `org_*` trio — and the resolver unions those in itself. So an
+  // assignment row spelling one of these names is, in every case, a name
+  // pretending to be an identity, and the refusal takes no provenance
+  // exemption: unlike `sys_position`, this object has no legitimate seeder to
+  // exempt.
+  //
+  // The invariant core's own resolver states from the other side, in a comment
+  // (`resolve-authz-context.ts`): «Read the RUNG — never
+  // `positions.includes(...)`; an ADR-0057 D4 `sys_user_position` row may spell
+  // that very name.» ⚠️ That comment was there the whole time and prevented
+  // nothing. This is the same sentence, on the write path, where it can refuse.
+  validations: [
+    {
+      // `script`, not `cross_field`: one column decides it, and this variant's
+      // strict shape carries no `fields`, so the violation attaches to
+      // `_record`. The message names the column.
+      type: 'script',
+      name: 'reserved_identity_position',
+      label: 'Reserved built-in identity name',
+      description:
+        'ADR-0068 D2 built-in identity names are a projection with their own sources of truth. A stored '
+        + 'assignment row spelling one grants nothing and misrepresents the holder, so it is refused.',
+      condition: { dialect: 'cel', source: `record.position in ${reservedIdentityNamesCelList()}` },
+      severity: 'error',
+      message: reservedIdentityNameMessage('position'),
+    },
+  ],
 });

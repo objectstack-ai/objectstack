@@ -9,8 +9,8 @@ import { dropSourcesContent } from '../../../scripts/tsup-drop-sources-content.m
  *
  * `src/index.ts` is the full plugin: `export *` over ~20 modules, several of
  * which take a **value** import on the better-auth family
- * (`objectql-adapter.ts` → `better-auth/adapters`, `backfill-account-issuer.ts`
- * → `@better-auth/core/db`). Loading the root therefore eagerly evaluates
+ * (`objectql-adapter.ts` → `better-auth/adapters`). Loading the root therefore
+ * eagerly evaluates
  * `better-auth` + `@better-auth/{core,oauth-provider,scim,sso}` + `jose` +
  * `@noble/hashes` + `@objectstack/rest` + `@objectstack/platform-objects`.
  *

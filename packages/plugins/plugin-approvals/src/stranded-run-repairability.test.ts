@@ -2,17 +2,24 @@
 
 /**
  * #15358 — THE REPRODUCTION, and its resolution: `inspectStrandedRequests`
- * labelled a repairable strand and an UNREPAIRABLE cascade-failed ancestor
- * identically; under ruling B′ (2026-09-07) it tells them apart through the
- * engine's dedicated read-only member, `inspectConsumedSuspension`.
+ * labelled a repairable strand and a cascade-failed ancestor identically;
+ * under ruling B′ (2026-09-07) it reports each from the engine's dedicated
+ * read-only member, `inspectConsumedSuspension`, rather than from a shared
+ * `'failed'`.
+ *
+ * ⚠️ **[#15222] then changed what that member ANSWERS for the ancestor.** Its
+ * pause is journalled when the descendant that cascaded into it is repairable,
+ * and `restoreConsumedSuspension` re-arms the chain leaf-first in one call —
+ * so the two rows are both `'repairable'`, and the fact PIN 1 now holds is
+ * that ONE call repairs both. ⛔ Reading this file as "the labels must differ"
+ * is reading the answer to a question that no longer has two answers.
  *
  * The card was filed from a reading of the sources. This file is the drive,
  * against a real `AutomationEngine` and a real `ApprovalService`: one fixture
- * produces both rows, the repair verb an operator would reach for answers
- * `restored: true` for one and refuses the other — and the inspection now
- * reports them as `'repairable'` and `'unrepairable'` (PIN 1), from the SAME
- * engine reading the verb uses (PIN 2), while `getRun` still carries no
- * discriminator (PIN 3 — the wire surface is untouched, by ruling).
+ * produces both rows, the inspection reports each from the engine reading the
+ * repair verb uses (PIN 1, PIN 2), the verb repairs the pair from either end
+ * (PIN 2b), and `getRun` still carries no discriminator (PIN 3 — the wire
+ * surface is untouched, by ruling).
  *
  * ## The two rows, from one fixture
  *
@@ -23,23 +30,34 @@
  *  - CHILD run — the #13909 strand: its resume consumed the pause and the
  *    downstream node threw. The engine journals the consumed suspension, so
  *    `restoreConsumedSuspension` re-arms it. REPAIRABLE.
- *  - PARENT run — the cascade-failed ancestor (#15222's shape): it was parked
- *    at its `subflow` node when the descendant failed, so `failAncestors` ran
- *    `failSuspendedRun` on it, which consumes the pause and journals NOTHING.
- *    `restoreConsumedSuspension` refuses it `NO_CONSUMED_SUSPENSION`. The
- *    engine's own words for a terminal record carrying neither
- *    `consumedSuspension` nor `consumedSuspensionDropped` (`RunRecord`):
- *    "a run that reached a terminal state which was NOT a strand (completed,
- *    cancelled, cascade-failed)". UNREPAIRABLE — and this row's decision did
- *    advance its flow, which is the half the shared label denies.
+ *  - PARENT run — the cascade-failed ancestor: it was parked at its `subflow`
+ *    node when the descendant failed, so `failAncestors` ran `failSuspendedRun`
+ *    on it, which consumes the pause. **[#15222] That consumption is now
+ *    journalled too**, whenever the descendant that cascaded into it is itself
+ *    repairable — so this row is REPAIRABLE as well, and restoring either row
+ *    re-arms the whole chain leaf-first in one call.
  *
- * ## What PIN 1 pins now, and the assertion it replaced
+ * ## What PIN 1 pins now, and the two assertions it replaced
  *
  * PIN 1 was written as a single `toEqual` over both rows recording what the
  * inspection reported before B′ — `['failed', 'failed']` — so that a split
- * relabelling only one of them would still fail it. B′ landed; the same
- * single `toEqual` now records the split, so a regression that folds either
- * row back into the other's label (or into bare `'failed'`) fails it.
+ * relabelling only one of them would still fail it. B′ landed and it recorded
+ * the split, `['unrepairable', 'repairable']`.
+ *
+ * ⚠️ #15222 then removed the condition the split described. The complaint the
+ * split answered was **one label for two remedies**; after #15222 there is one
+ * remedy — restore any member of the chain and every member is re-armed — so
+ * one label is the truthful report, not a fold. PIN 1 therefore records
+ * `['repairable', 'repairable']` AND proves the remedy really is single: the
+ * chain the restore reports covers both runs, and the continuation re-issued
+ * on the leaf carries the parent to `completed`. ⛔ A regression that leaves
+ * the ancestor's pause unjournalled fails it on the second half even if
+ * somebody relabels the first.
+ *
+ * The `'unrepairable'` label is NOT dead and keeps its own drives in
+ * `stranded-request-inspection.test.ts`: a `failed` run that never stranded,
+ * and a cascade whose descendant is itself beyond repair, both still land
+ * there.
  *
  * ## The measurement B′ was ruled on — kept as PIN 3
  *
@@ -55,7 +73,9 @@
  * as a dedicated read-only engine member and leaves the wire untouched; PIN 3
  * now pins that the wire IS untouched, and PIN 5 pins the fail-closed half: a
  * surface that lacks the member reports both rows `'failed'` — never
- * `'unrepairable'`, never dropped.
+ * `'unrepairable'`, never dropped. #15222 leaves that half alone: what moved
+ * is what the member ANSWERS for an ancestor, never whether a surface without
+ * it may guess.
  *
  * ## The control that makes the readings trustworthy
  *
@@ -213,7 +233,7 @@ const DEAL_APPROVAL = {
   ],
 };
 
-describe('#15358 — a cascade-failed ancestor is reported as the repairable strand it is not', () => {
+describe('#15358 · #15222 — a cascade-failed ancestor, reported and now repaired with its strand', () => {
   let data: ReturnType<typeof makeFakeEngine>;
   let service: ApprovalService;
   /** Node id → the message it throws when reached. */
@@ -287,7 +307,7 @@ describe('#15358 — a cascade-failed ancestor is reported as the repairable str
     return { parentReq, parentRunId, childReq, childRunId, childError: err };
   }
 
-  it('PIN 1 — the two rows come back labelled APART: the strand `repairable`, the ancestor `unrepairable`', async () => {
+  it('PIN 1 — both rows come back `repairable`, because [#15222] there is now ONE remedy for the pair', async () => {
     const automation = boot();
     const { parentReq, parentRunId, childReq, childRunId } = await driveBothShapes(automation);
 
@@ -300,12 +320,12 @@ describe('#15358 — a cascade-failed ancestor is reported as the repairable str
     const labelled = out.stranded
       .map(s => [s.requestId === parentReq.id ? 'cascade-failed ancestor' : 'genuine strand', s.runState])
       .sort((a, b) => a[0].localeCompare(b[0]));
-    // The resolution, as one assertion over both rows: before B′ this read
-    // `['failed', 'failed']` (the defect — one label for two remedies). A fold
-    // of either row back into the other's label, or into bare `'failed'` on
-    // an engine that CAN be asked, fails it.
+    // One assertion over both rows, as it always was. It has read three things
+    // in turn: `['failed','failed']` (the #15358 defect — one label for two
+    // remedies), then the B′ split, and now this — because #15222 removed the
+    // second remedy rather than the second label.
     expect(labelled).toEqual([
-      ['cascade-failed ancestor', 'unrepairable'],
+      ['cascade-failed ancestor', 'repairable'],
       ['genuine strand', 'repairable'],
     ]);
 
@@ -313,23 +333,57 @@ describe('#15358 — a cascade-failed ancestor is reported as the repairable str
     // half the report gets right for both rows.
     expect(out.stranded.map(s => s.status)).toEqual(['approved', 'approved']);
     expect(new Set(out.stranded.map(s => s.runId))).toEqual(new Set([parentRunId, childRunId]));
+
+    // ⛔ And the shared label is EARNED, not assumed: ONE call repairs both
+    // runs, so a regression that stops journalling the ancestor's consumed
+    // pause fails here even if somebody relabels the assertion above.
+    const repair = await automation.restoreConsumedSuspension(childRunId, { requestedBy: 'ops' });
+    expect(repair.restored).toBe(true);
+    expect(repair.chain?.map(m => m.runId), 'leaf first, then the ancestor it was parked under')
+      .toEqual([childRunId, parentRunId]);
+    expect(await automation.hasSuspendedRun(parentRunId), 'the ancestor is parked again').toBe(true);
     void childReq;
   });
 
-  it('PIN 2 — the repair verb DOES tell them apart: one is re-armed, the other refused', async () => {
-    // This is the fact the shared label hides, and the operator-visible cost
-    // named on the card: a reported row the repair verb declines.
+  it('PIN 2 — the repair verb repairs the PAIR, and the second ask is the idempotent one', async () => {
+    // What the shared label used to hide was a reported row the repair verb
+    // declined. [#15222] It no longer declines it — it re-arms it in the same
+    // call as the leaf — so what this pin holds is the pair, plus the answer a
+    // second ask about a member already put back must give.
     const automation = boot();
     const { parentRunId, childRunId } = await driveBothShapes(automation);
 
     const child = await automation.restoreConsumedSuspension(childRunId);
     expect(child.restored, 'the genuine strand is repairable').toBe(true);
+    expect(child.chain?.map(m => m.runId), 'and the ancestor rode with it, leaf-first')
+      .toEqual([childRunId, parentRunId]);
+    expect(child.chain?.every(m => m.restored)).toBe(true);
 
+    // The ancestor is already resumable, so asking again puts nothing back —
+    // the per-run idempotence guarantee, reached through the chain rather than
+    // through a second restore of the same run.
     const parent = await automation.restoreConsumedSuspension(parentRunId);
-    expect(parent.restored, 'the cascade-failed ancestor is NOT').toBe(false);
-    // The refusal is named, and its name is the engine's own reading of a
-    // terminal record carrying no consumed-suspension snapshot.
-    expect((parent as { refusal?: string }).refusal).toBe('NO_CONSUMED_SUSPENSION');
+    expect(parent.restored, 'nothing was put back by THIS call').toBe(false);
+    expect((parent as { refusal?: string }).refusal).toBe('RUN_SUSPENDED');
+    expect(parent.chain, 'every member is parked, so there is no chain left to walk').toBeUndefined();
+  });
+
+  it('PIN 2b — EITHER END: naming the ancestor repairs the same chain, in the same order', async () => {
+    // An operator sees the run they know about, which for a nested tree is as
+    // often the parent as the leaf. The verb walks DOWN to the stranded
+    // descendant and re-arms from there, so the entry point does not decide
+    // whether the repair works.
+    const automation = boot();
+    const { parentRunId, childRunId } = await driveBothShapes(automation);
+
+    const fromTop = await automation.restoreConsumedSuspension(parentRunId, { requestedBy: 'ops' });
+
+    expect(fromTop.restored, 'the run the operator named').toBe(true);
+    expect(fromTop.runId, 'and the top-level fields still describe THAT run').toBe(parentRunId);
+    expect(fromTop.chain?.map(m => m.runId), 'deepest first regardless of which end was named')
+      .toEqual([childRunId, parentRunId]);
+    expect(await automation.hasSuspendedRun(childRunId)).toBe(true);
+    expect(await automation.hasSuspendedRun(parentRunId)).toBe(true);
   });
 
   it('PIN 3 — `getRun` carries NEITHER discriminator field, for either run', async () => {
@@ -417,10 +471,13 @@ describe('#15358 — a cascade-failed ancestor is reported as the repairable str
     expect(new Set(out.stranded.map(s => s.runId))).toEqual(new Set([parentRunId, childRunId]));
 
     // Positive control, same engine, same rows: re-attach the full surface and
-    // the split comes back — so the `'failed'` above was the member's absence,
-    // not the rows.
+    // the refinement comes back — so the `'failed'` above was the member's
+    // absence, not the rows. [#15222] What comes back is `'repairable'` for
+    // both, because both really are; the control is that it CHANGES, not which
+    // word it changes to.
     service.attachAutomation(automation);
     const again = await service.inspectStrandedRequests();
-    expect(new Set(again.stranded.map(s => s.runState))).toEqual(new Set(['repairable', 'unrepairable']));
+    expect(new Set(again.stranded.map(s => s.runState))).toEqual(new Set(['repairable']));
+    expect(again.stranded.length, 'both rows, still reported').toBe(2);
   });
 });

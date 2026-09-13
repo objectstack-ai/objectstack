@@ -269,10 +269,24 @@ export const SysAutomationRun = ObjectSchema.create({
     // `RunRecord.consumedSuspensionDropped`), so "present" now has two shapes
     // and only one of them is a restorable snapshot — stated in the
     // description rather than left to the reader of the column.
+    //
+    // [#15336] The description used to state that presence and "this run had a
+    // consumed suspension" imply EACH OTHER. Only the forward direction is
+    // true. The falsifying shape is a run that stranded, was restored and then
+    // finished: `recordTerminal` upserts the SAME `run_<id>` row and
+    // `serializeConsumedSuspension(undefined)` writes explicit NULLs into all
+    // four columns — deliberately, so "restorable" cannot outlive the condition
+    // it describes (`RunRecord.consumedSuspension` in `engine.ts` states the
+    // clearing rule from the producer's side). ⛔ The fix is the TEXT, not the
+    // clearing: nothing reads the reverse direction — `restoreConsumedSuspension`
+    // refuses a snapshot-less row by naming the status it observed and
+    // deliberately declines to say whether the run never paused or lost its
+    // snapshot, which is that direction being unavailable, honestly. The
+    // clearing itself is pinned in `suspended-run-store.test.ts`.
     variables_json: Field.textarea({
       label: 'Variables',
       required: false,
-      description: 'JSON snapshot of the flow variable map at suspend time. On a terminal row its PRESENCE is the discriminator: nothing but the consumed-suspension path writes it there, so variables_json present on a completed/failed row ⇔ the row\'s run had a pause that its resume consumed before a downstream node failed — the store\'s deserializer keys off exactly this. Two shapes on such a row: the snapshot itself (a restorable suspension), or a one-key notice `{"$consumedSuspensionDropped": …}` recording that the snapshot existed and was NOT persisted (over the store\'s row budget) — the notice is not a restorable snapshot; such a run can be restored only by the process that stranded it, while it runs.',
+      description: 'JSON snapshot of the flow variable map at suspend time. On a terminal row its PRESENCE is the discriminator: nothing but the consumed-suspension path writes it there, so variables_json present on a completed/failed row ⇒ the row\'s run had a pause that its resume consumed before a downstream node failed — the store\'s deserializer keys off exactly this. ⛔ It does NOT hold in reverse: the terminal write is an upsert that always writes these columns, NULL included, so a stranded run that was restored and then finished has its row rewritten with NULLs. Absence therefore means "nothing to restore NOW", never "this run never had a consumed suspension" — the restore verb says exactly that when it refuses, naming the status it observed instead of claiming which. Two shapes on such a row: the snapshot itself (a restorable suspension), or a one-key notice `{"$consumedSuspensionDropped": …}` recording that the snapshot existed and was NOT persisted (over the store\'s row budget) — the notice is not a restorable snapshot; such a run can be restored only by the process that stranded it, while it runs.',
       group: 'State',
     }),
 

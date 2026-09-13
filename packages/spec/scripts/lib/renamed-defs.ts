@@ -115,9 +115,10 @@ export const RENAMED_DEFS: Readonly<Record<string, string>> = {
   // (`packageId` / `versionRange` / `optional`), `kernel` is the RESOLVER form
   // the dependency graph walks (`name` / `versionConstraint` / `type` /
   // `resolvedVersion`). Two concepts, not two spellings. The resolver side
-  // takes the descriptive name; `cloud/PackageDependency` keeps the bare one
-  // and is deliberately absent from this table — it is neither source nor
-  // target, and it is emitted byte-for-byte unchanged by this build.
+  // takes the descriptive name; `cloud/PackageDependency` kept the bare one
+  // and was deliberately absent from this table — neither source nor target,
+  // emitted byte-for-byte unchanged by that build. (It is a SOURCE below since
+  // #16325, for the category move to `marketplace/` — a different change.)
   'kernel/PackageDependency': 'kernel/ResolvedPackageDependency', // 4 keys carried
 
   // #5832 / ADR-0112 D9 — `shared/http.zod.ts` declared TWO different enums
@@ -162,6 +163,61 @@ export const RENAMED_DEFS: Readonly<Record<string, string>> = {
   // to prevent. The rename removes the collision at its source, so the baseline
   // stays empty rather than gaining its first exception.
   'system/ServiceStatus': 'system/KernelServiceStatus', // 6 keys carried
+
+  // #16325 — the `./cloud` subpath left `@objectstack/spec` (maintainer ruling,
+  // option B "cut by owner": the cloud control plane's own contracts are the
+  // cloud repo's, not an open-source protocol). The package & marketplace
+  // FORMAT half — `package.zod`, `package-version.zod`, `marketplace.zod`,
+  // `package-l10n`, `template-manifest.zod` — stays and moves to
+  // `src/marketplace/`, so every def it emits changes CATEGORY and nothing
+  // else: the same Zod, the same keys, the same JSON Schema bytes under a new
+  // `$id`. That is exactly the shape this table exists for — a rename that
+  // must carry every key — and NOT the retirement kit, which is reserved below
+  // for the six control-plane files whose defs really did leave
+  // (`RETIRED_DEFS_BY_MAJOR[18]`, one `entries/retired-defs/18.cloud__*.ts`
+  // each).
+  //
+  // Two 0-key defs move category the same way rather than retiring:
+  //   - `cloud/EnvironmentType` — the 7-member environment taxonomy the
+  //     discovery fold table is total over; re-declared in
+  //     `api/discovery.zod.ts`, its only open-source reader.
+  //   - `cloud/Sha256Digest` — was emitted twice, once per entry that exported
+  //     the `system/environment-artifact.zod.ts` declaration (`./cloud`
+  //     re-exported it, #4740 route A′). With `./cloud` gone it is emitted
+  //     once, under `system/` — a rename onto a def that already existed,
+  //     which the manifest rewrite handles by dropping the stale key.
+  'cloud/ArtifactDownloadResponse': 'marketplace/ArtifactDownloadResponse',
+  'cloud/ArtifactReference': 'marketplace/ArtifactReference',
+  'cloud/CreatePackageRequest': 'marketplace/CreatePackageRequest',
+  'cloud/CreatePackageVersionRequest': 'marketplace/CreatePackageVersionRequest',
+  'cloud/ListingStatus': 'marketplace/ListingStatus',
+  'cloud/MarketplaceCategory': 'marketplace/MarketplaceCategory',
+  'cloud/MarketplaceInstallRequest': 'marketplace/MarketplaceInstallRequest',
+  'cloud/MarketplaceInstallResponse': 'marketplace/MarketplaceInstallResponse',
+  'cloud/MarketplaceListing': 'marketplace/MarketplaceListing',
+  'cloud/MarketplaceSearchRequest': 'marketplace/MarketplaceSearchRequest',
+  'cloud/MarketplaceSearchResponse': 'marketplace/MarketplaceSearchResponse',
+  'cloud/Package': 'marketplace/Package',
+  'cloud/PackageCategory': 'marketplace/PackageCategory',
+  'cloud/PackageDependency': 'marketplace/PackageDependency',
+  'cloud/PackageLocale': 'marketplace/PackageLocale',
+  'cloud/PackageManifest': 'marketplace/PackageManifest',
+  'cloud/PackagePublisher': 'marketplace/PackagePublisher',
+  'cloud/PackageSubmission': 'marketplace/PackageSubmission',
+  'cloud/PackageTranslation': 'marketplace/PackageTranslation',
+  'cloud/PackageTranslations': 'marketplace/PackageTranslations',
+  'cloud/PackageVersion': 'marketplace/PackageVersion',
+  'cloud/PackageVersionStatus': 'marketplace/PackageVersionStatus',
+  'cloud/PackageVisibility': 'marketplace/PackageVisibility',
+  'cloud/PricingModel': 'marketplace/PricingModel',
+  'cloud/PublishPackageVersionRequest': 'marketplace/PublishPackageVersionRequest',
+  'cloud/Publisher': 'marketplace/Publisher',
+  'cloud/PublisherVerification': 'marketplace/PublisherVerification',
+  'cloud/TemplateManifest': 'marketplace/TemplateManifest',
+  'cloud/UpdatePackageRequest': 'marketplace/UpdatePackageRequest',
+  'cloud/UpdatePackageVersionRequest': 'marketplace/UpdatePackageVersionRequest',
+  'cloud/EnvironmentType': 'api/EnvironmentType', // 0-key carry: enum def
+  'cloud/Sha256Digest': 'system/Sha256Digest', // 0-key carry: string def, onto its surviving twin
 };
 
 /**
@@ -189,6 +245,87 @@ export function carryAuthorableKey(
  * The last two rules are about entries *interacting*, and only bind once the
  * table holds more than one entry — which #4703 is the first change to do.
  */
+/**
+ * Property names a recorded baseline holds under BOTH a rename's source def and
+ * its target def — the keys the carry would silently collapse (#17383).
+ *
+ * ## Why this is a separate rule from the four in {@link checkRenameTable}
+ *
+ * That function validates the table against the defs a build EMITS, which is
+ * all it can see at its call site. The damage here is not visible there at all:
+ * it lives in the BASELINE, and it is reached by a single, perfectly well-formed
+ * rename. `A → B` where the baseline already records `B:mode` is not two sources
+ * onto one target, so the merge rule never sees it; the source is gone and the
+ * target is emitted, so the decay rules pass; and every carry in
+ * `build-schemas.ts` is a plain `Map.set` keyed by the CARRIED key, so
+ * `A:mode` and `B:mode` land on the same entry and the later write wins.
+ *
+ * The damage is the same one the two-sources rule already refuses, reached by
+ * one rename instead of two: the surviving entry keeps only one of the two
+ * recorded RETIRED states and only one of the two recorded DEFAULTS, and the
+ * loss happens INSIDE the carry, before any comparison runs. So every gate
+ * downstream — check (b)'s live → retired transition, the deletion gate, the
+ * authorable-defaults differ — adjudicates against already-clobbered input, in
+ * both directions: a genuine default change on the merged key can read as no
+ * change at all, and a key whose default never moved can read as `changed`.
+ *
+ * ## What it deliberately does NOT refuse
+ *
+ * A rename onto a def that already exists is a legitimate, in-tree shape —
+ * `cloud/Sha256Digest → system/Sha256Digest` is one, and 24 of the committed
+ * entries have a target that already holds baseline keys once the surface
+ * snapshot has been regenerated under the new name. None of that loses
+ * anything: `Map.set` can only collapse two entries that are the SAME key, so a
+ * merge whose source and target share no property NAME writes every key exactly
+ * once. Refusing a populated target as such would redden the committed table;
+ * the collision — the intersection — is the whole of the damage and the whole
+ * of what is refused.
+ *
+ * Returns one problem line per colliding entry; empty means this baseline
+ * survives the carry intact.
+ */
+export function checkRenameBaselineCollisions(
+  baselineKeys: Iterable<string>,
+  renames: Readonly<Record<string, string>> = RENAMED_DEFS,
+): string[] {
+  const propsByDef = new Map<string, Set<string>>();
+  for (const key of baselineKeys) {
+    const sep = key.indexOf(':');
+    // A bare def key names no property, so it cannot collide with one.
+    if (sep < 0) continue;
+    const def = key.slice(0, sep);
+    let props = propsByDef.get(def);
+    if (props === undefined) propsByDef.set(def, (props = new Set<string>()));
+    props.add(key.slice(sep + 1));
+  }
+  const problems: string[] = [];
+  for (const [from, to] of Object.entries(renames)) {
+    // A self-rename collides with itself on every key; rule 1 of
+    // `checkRenameTable` already names it, and a second line would bury it.
+    if (from === to) continue;
+    const source = propsByDef.get(from);
+    const target = propsByDef.get(to);
+    if (source === undefined || target === undefined) continue;
+    const collisions = [...source].filter((prop) => target.has(prop)).sort();
+    if (collisions.length === 0) continue;
+    problems.push(
+      `${from} → ${to}: the baseline already records ${collisions.length} of this ` +
+        `rename's property name(s) under the TARGET def — ${collisions.join(', ')}. ` +
+        `Carrying the rename collapses each pair onto one key (last write wins), and ` +
+        `takes the losing side's recorded retired state and recorded default with it. ` +
+        `That is the same damage the two-sources-onto-one-target rule refuses, reached ` +
+        `by one rename instead of two, and it happens INSIDE the carry — before any ` +
+        `comparison runs — so the diff this build reports is computed against clobbered ` +
+        `input. Converging two defs on a shared property name is a real change: keep the ` +
+        `rename, and retire the losing side explicitly with \`retiredKey()\` plus its ` +
+        `registered ADR-0087 conversion, exactly as a retirement without a rename would ` +
+        `require. A merge whose two defs share no property name is lossless and is not ` +
+        `refused here.`,
+    );
+  }
+  return problems;
+}
+
 export function checkRenameTable(
   emittedDefs: ReadonlySet<string>,
   renames: Readonly<Record<string, string>> = RENAMED_DEFS,

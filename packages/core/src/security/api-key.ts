@@ -217,7 +217,7 @@ export interface TenancyPostureSource {
  * ⚠️ Deliberately NOT `resolveTenancyPosture()` from `@objectstack/types`, which
  * reads `OS_TENANCY_POSTURE` directly. That answers what the operator ASKED
  * for, not what is ENFORCED: under ADR-0093 D4/D5 a deployment that requests
- * `isolated` without the enterprise `@objectstack/organizations` runtime
+ * `isolated` without the `@objectstack/organizations` runtime
  * resolves to `single` and runs with NO organization wall. Reading the env
  * there would refuse org-less API keys on a deployment whose wall is not even
  * active — breaking working automation to enforce a boundary that does not

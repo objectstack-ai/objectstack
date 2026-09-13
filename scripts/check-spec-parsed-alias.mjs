@@ -558,7 +558,18 @@ export type Iso0 = Assert<Eq< z.input< typeof M0.ColourSchema >, z.infer< typeof
     for (const f of failures) console.error('  - ' + f);
     process.exit(1);
   }
-  console.log('check-spec-parsed-alias --self-test: 18 assertions passed');
+  // The verdict DERIVES its number from `batterySeen` — the very ledger the
+  // floor above just evaluated — so the printed count and the floor can never
+  // disagree, and a block that stops running shrinks the number instead of
+  // leaving a transcribed literal standing (#16664). Unlike the other three
+  // files in this class, this roster holds a SINGLE battery, and what it
+  // counts is assertions that actually RAN this run (every `check(` call), not
+  // `check(` call sites in the source — those are two different facts, and
+  // only the first one is measured here. Summing the whole ledger is exact
+  // because reaching this line means every battery that registered is a
+  // declared one — the set difference above reds otherwise.
+  const assertionsRun = [...batterySeen.values()].reduce((total, count) => total + count, 0);
+  console.log(`check-spec-parsed-alias --self-test: ${assertionsRun} assertions passed`);
 
   return SELF_TEST_VERDICT;
 }

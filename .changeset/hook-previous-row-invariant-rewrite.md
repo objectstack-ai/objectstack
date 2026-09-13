@@ -1,0 +1,16 @@
+---
+"@objectstack/spec": minor
+---
+
+feat(spec): `HookContext` admits a row-invariant-in-effect rewrite by per-row `previous` on a predicate write, kept safe by the engine's key-divergence refusal (#16074)
+
+The `hook.zod.ts` contract said that on a predicate (`multi: true`) write the per-row `previous` is supplied *so a guard can REFUSE (throw), not so a rewrite can be aimed*. Three shipped `beforeUpdate` provenance stamps (`sys_email_template`, `sys_sharing_rule`, `sys_webhook`) read `ctx.previous` per row and write `customized: true` conditioned on it — inside the letter of what the engine allows, outside the stated purpose of the input they use. Maintainer ruling (recorded by the director seat, decision batch #59, 2026-09-06), option 1: **the contract admits the shape.**
+
+The amended D3 clause (`HookContextSchema.input` TSDoc, mirrored in `bulk-write-hook-conformance.ts`) now states:
+
+- Per-row `previous` is supplied so a guard can REFUSE, **and** so a `before*` hook can make a **row-invariant-in-effect rewrite** — one whose written KEY SET is the same on every matched row **and is assigned in place** (`ctx.input.data.customized = true`, not a wholesale replacement of `ctx.input.data`).
+- What makes that shape safe is the engine's `MULTI_UPDATE_HOOK_KEY_DIVERGENCE` refusal (#14099): the dispatch records, per row, the payload keys that row's hook chain assigned **in place**, and if any two rows disagree the whole batch is refused **before any write**. In place is the condition the refusal rests on: a hook that REPLACES `ctx.input.data` leaves the dispatch unable to attribute keys, so the comparison is skipped and the batch is not judged at all.
+- What an operator sees when it fires: an ADR-0112 envelope with `status: 400`, `code: 'MULTI_UPDATE_HOOK_KEY_DIVERGENCE'`, `keys` (the sorted keys some rows' hooks wrote and others did not, e.g. `['customized']`), `rows` (how many rows the predicate matched), `object`, and a message that says "Nothing was written" before naming the remedy. A bulk edit over rows that already disagree on the stamp's condition is refused whole rather than half-stamped; that is the engine working, not the hooks misbehaving, and the remedy is the caller's — write those rows by id, or from inside the handler through `ctx.api`.
+- Three shapes the rule does **not** admit: a rewrite whose written key set differs across rows (that is the refusal itself); the same key written with a per-row VALUE — the engine judges key sets, never values, so that shape clears the check and applies the last dispatch's value to every row; and a row-conditioned REPLACEMENT of `ctx.input.data`, which silences the recording above so that shape is judged by nothing at all. All three stay out of contract.
+
+Purely additive at the contract: no schema key, type or accept set of `HookContextSchema` itself changes, and the engine's behaviour is unchanged — the three stamps become conforming by amendment, and the rule for the next hook author is written down where the contract lives. Option 2 (change the hooks to stop aiming by `previous`) was not adopted: #15302 measured that declining on a predicate write leaves unstamped exactly the rows the next boot overwrites, turning a visible 400 into silent loss of an admin edit.

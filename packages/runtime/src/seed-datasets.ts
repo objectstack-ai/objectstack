@@ -3,7 +3,7 @@
 /**
  * Shared `seed-datasets` registry — the multi-tenant seed-replay contract (#3453).
  *
- * In multi-tenant deployments (enterprise `@objectstack/organizations`) a brand-new
+ * In multi-tenant deployments (`@objectstack/organizations`) a brand-new
  * org gets its own private copy of every artifact's demo data by REPLAYING the
  * kernel's `seed-datasets` list on the `sys_organization` insert (Salesforce-sandbox
  * style). That list must therefore hold the UNION of every seed source: every

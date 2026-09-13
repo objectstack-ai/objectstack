@@ -342,7 +342,7 @@ author-time type error rather than an option that silently does nothing.
 | `sortBy` | a name this widget selects | Order by that dimension or measure. It must be one of this widget's own `dimensions` / `values` entries. |
 | `sortOrder` | `'asc'` \| `'desc'` | Direction for `sortBy` (default ascending). |
 | `limit` | positive integer | Max rows, applied **after** ordering — so "top 10 accounts" is `limit` **plus** `sortBy`. Without `sortBy` the runtime orders by the selected dimensions: deterministic, but not the top of anything. |
-| `stageOrder` | array of **stored** values | Explicit category order for `funnel` / `pyramid`. Stored values, not display labels; omit it to inherit the field's own picklist order. |
+| `stageOrder` | array of **stored** values | Explicit stage order for `funnel`; no other type reads it. Stored values, not display labels; omit to inherit the field's picklist order. |
 
 ```typescript
 // Top 10 accounts by revenue, bucketed monthly for this widget only

@@ -625,14 +625,17 @@ tenant-authored metadata.
 
 ## Seed Data & Fixtures (`defineSeed()`)
 
-Object definition and its seed data live together — writing a `*.object.ts`
-almost always goes with a `*.seed.ts` (test fixtures, reference rows,
-bootstrap data). `defineSeed()` is type-safe: pass the object definition
-and TypeScript checks every record's field keys at compile time.
+Object definition and seed data live together — a `*.object.ts` usually
+pairs with a `*.seed.ts` (fixtures, reference rows, bootstrap data).
+`defineSeed()` is type-safe: TypeScript checks every record's field keys
+against the object definition.
 
-> The factory is named `defineSeed` — **not** `defineDataset`. The `dataset`
-> name is reserved for the unrelated ADR-0021 analytics semantic layer
-> (`defineDataset` from `@objectstack/spec/ui`), which is not a seed factory.
+> The factory is `defineSeed` — **not** `defineDataset`, which is the
+> unrelated ADR-0021 analytics semantic layer (`@objectstack/spec/ui`).
+
+> ⛔ `sys_organization` is platform-bootstrapped — never a seed target; the
+> deployment posture decides how many exist (`rules/security.md`
+> § Multi-tenancy).
 
 ### Quick start
 
@@ -689,8 +692,8 @@ Full Zod shape: `node_modules/@objectstack/spec/src/data/seed.zod.ts`.
 
 ### `externalId` selection
 
-Pick a stable natural business key. **Never use `id`** — UUIDs differ
-across environments.
+Pick a stable natural key. **Never use `id`** — UUIDs differ across
+environments.
 
 | Scenario | Key |
 |:---------|:----|
@@ -705,11 +708,11 @@ For `lookup` fields, supply the **natural key** of the target record (not
 its UUID). The seed runner resolves at load time. Order seeds so parents
 appear before children in the exported array:
 
-> If a lookup value matches no natural key, the loader now falls back to
-> resolving it as the target's `id` — so a reference to a real existing
-> record by internal id resolves instead of dangling to null. Natural keys
-> remain the portable default; rely on the id fallback only for records you
-> didn't seed (e.g. a system user).
+> If a lookup value matches no natural key, the loader falls back to
+> resolving it as the target's `id` — so a reference to an existing record
+> by internal id resolves instead of dangling to null. Natural keys remain
+> the portable default; rely on the id fallback only for records you didn't
+> seed (e.g. a system user).
 
 ```typescript
 const contacts = defineSeed(Contact, {

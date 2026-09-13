@@ -11,7 +11,7 @@
  * the right guard for a payload naming ANOTHER tenant (#2937 / ADR-0105 D5) and
  * it leaves the opposite case wide open: a payload naming NO tenant, written by
  * a caller who HAS no tenant. Nothing downstream fills it either (auto-stamping
- * lives in the enterprise organizations runtime and has nothing to stamp), so
+ * lives in the organizations runtime and has nothing to stamp), so
  * the row landed with `organization_id` NULL and the read wall then hid it from
  * every reader — including the author who had just created it (#8208).
  *

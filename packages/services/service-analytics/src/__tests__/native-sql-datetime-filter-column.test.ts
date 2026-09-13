@@ -3,17 +3,26 @@
 /**
  * Regression #3912 — the COLUMN half of the datetime storage-form fix.
  *
- * `native-sql-datetime-filter.test.ts` covers coercing the comparand to epoch ms.
- * That alone is not enough: a SQLite `Field.datetime` column holds an INTEGER
- * epoch (a `Date` write) and ISO TEXT (a REST/JSON write, a `NOW()` default) at
- * the same time, so an epoch comparand matches the INTEGER rows and misses every
- * TEXT one — a dashboard `dateRange: last_30_days` reading 0 with rows in range.
+ * `native-sql-datetime-filter.test.ts` covers coercing the COMPARAND. That alone
+ * is not enough on the tier this hook exists for: a SQLite `Field.datetime`
+ * column written before the canonical convention, and not yet backfilled, holds
+ * an INTEGER epoch (a `Date` write) next to text (a REST/JSON write, a `NOW()`
+ * default) at the same time, so one comparand matches one half of the rows and
+ * misses the other — a dashboard `dateRange: last_30_days` reading 0 with rows
+ * in range.
  *
- * The fix threads a companion `StrategyContext.coerceTemporalFilterColumn` hook
- * that lets the driver normalise the column reference. These tests assert the
- * strategy applies it to exactly the value comparisons, leaves the null and LIKE
- * predicates on the raw column, and emits byte-identical SQL when the hook is
- * absent (Postgres, non-SQL drivers, legacy wiring).
+ * ⛔ That mixed column is the TRANSITIONAL state, not what a write produces
+ * today; the storage reality is stated once, on
+ * `AnalyticsServiceConfig.coerceTemporalFilterValue` in `analytics-service.ts`
+ * (#16737). What these tests pin is the STRATEGY's half and is independent of
+ * it: whatever expression the driver hands back, it is applied to exactly the
+ * value comparisons, the null and LIKE predicates keep the raw column, and the
+ * SQL is byte-identical when the hook is absent or answers with the bare column
+ * (a converged SQLite column, Postgres, non-SQL drivers, legacy wiring).
+ *
+ * `EPOCH_MS(...)` below is therefore a MARKER, not a claim about emitted SQL:
+ * a hook return that is visibly different from the input column is what makes
+ * "was the hook applied here" decidable in an assertion.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -35,7 +44,13 @@ const cube: Cube = {
   public: false,
 };
 
-/** Stand-in for `SqlDriver.temporalFilterColumnSql` under better-sqlite3. */
+/**
+ * Stand-in for `SqlDriver.temporalFilterColumnSql` on an UN-BACKFILLED SQLite
+ * column — the one tier that still answers with a repair expression. The real
+ * driver emits a `case typeof(...)` CASE; `EPOCH_MS(...)` is a stand-in marker
+ * (see the module header) so the assertions read as "hook applied / not applied"
+ * rather than pinning a driver's SQL text from another package.
+ */
 function sqliteColumnHook(object: string, field: string, columnSql: string): string {
   if (object === 'compliance_assessment' && field === 'assessed_at') {
     return `EPOCH_MS(${columnSql})`;

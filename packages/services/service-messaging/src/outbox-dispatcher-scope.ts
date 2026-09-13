@@ -50,9 +50,11 @@ import type { EngineUpdateOptions } from '@objectstack/spec/data';
  * `multi: true` so they cannot, deliberately. The single-record writes on
  * these same objects are audited under a DIFFERENT op (`update`, not
  * `updateMany`) and they do **not** share one classification:
- * {@link dispatcherAckOptions} carries the sweep warrant to `SqlHttpOutbox.ack`
- * and {@link dispatcherAckCasOptions} carries it to `SqlNotificationOutbox.ack`
- * (a `multi: true` compare-and-set since #11453), while `SqlHttpOutbox.redeliver`
+ * {@link dispatcherAckOptions} carries the sweep warrant to the deprecated
+ * credential-less arity of `SqlHttpOutbox.ack`, and
+ * {@link dispatcherAckCasOptions} carries it to `SqlNotificationOutbox.ack` (a
+ * `multi: true` compare-and-set since #11453) and to `SqlHttpOutbox.ack` handed
+ * a claim credential (since #17634), while `SqlHttpOutbox.redeliver`
  * — request-reachable — carries a threaded tenant and no bypass at all.
  *
  * ⛔ [#11009] `redeliver` is now ALSO a `multi: true` write (its terminal-
@@ -80,6 +82,12 @@ export function dispatcherSweepOptions(
  * [#11453] `SqlNotificationOutbox.ack` no longer uses this helper: its ack
  * grew a status precondition, and a precondition on the by-id path is silently
  * discarded (#11009), so it rides {@link dispatcherAckCasOptions} instead.
+ *
+ * [#17634] Nor does `SqlHttpOutbox.ack` when it is handed a claim credential —
+ * which `HttpDispatcher` always does: its ownership test is a compare-and-set
+ * too, so it rides {@link dispatcherAckCasOptions}. What is left here is that
+ * method's deprecated credential-less arity, a by-id write kept unchanged for
+ * callers written against it.
  *
  * ## Why a second helper instead of {@link dispatcherSweepOptions}
  * These are audited under the driver's **`update`** op, not `updateMany`, and
@@ -131,9 +139,10 @@ export function dispatcherAckOptions(
 
 
 /**
- * [#11453] The write options for **`SqlNotificationOutbox.ack`** — the same
+ * [#11453] The write options for **`SqlNotificationOutbox.ack`** — and, since
+ * #17634, for **`SqlHttpOutbox.ack`** handed a claim credential — the same
  * warrant as {@link dispatcherAckOptions} above, spelled as a PREDICATE write
- * because that ack is now a compare-and-set.
+ * because each of those acks is a compare-and-set.
  *
  * ## Why `multi: true` for a write that still targets ONE row
  *
@@ -159,6 +168,14 @@ export function dispatcherAckOptions(
  * was claimed by a deliberately environment-wide sweep. `redeliver` remains
  * the one write on these objects that must never reach for a bypass: it is
  * request-reachable and threads the caller's tenant instead.
+ *
+ * [#17634] The HTTP site, re-derived rather than inherited: the credentialed
+ * `SqlHttpOutbox.ack` has one caller, `HttpDispatcher.ackAttempt`, reached only
+ * from `runPartition()` — a timer tick under the `http.dispatcher.partition.<n>`
+ * cluster lock, with no HTTP request, session or active organization to thread —
+ * and the row it acks was claimed by the same environment-wide sweep.
+ * `redeliver` stays the one request-reachable write on `sys_http_delivery`, and
+ * it threads the caller's tenant.
  *
  * ## [#11859] Ownership joined the predicate
  *

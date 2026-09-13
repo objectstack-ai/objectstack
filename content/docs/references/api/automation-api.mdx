@@ -144,7 +144,7 @@ const result = AutomationApiErrorCode.parse(data);
 | **id** | `string` | ✅ | Edge unique ID |
 | **source** | `string` | ✅ | Source Node ID |
 | **target** | `string` | ✅ | Target Node ID |
-| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Predicate (CEL) returning boolean used for branching. |
+| **condition** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Predicate (CEL) returning boolean used for branching. An evaluated slot: a bare non-blank CEL string, or an envelope carrying a non-blank `source` — an `ast`-only envelope, and a `source` that is blank after trimming, are refused at authoring because the engine evaluates `source` alone and would otherwise answer a silent `false`. |
 | **type** | `Enum<'default' \| 'fault' \| 'conditional' \| 'back'>` | optional (default: `"default"`) | Connection type: default (normal flow), fault (error path), conditional (expression-guarded), or back (ADR-0044 declared back-edge — traversed normally at run time, but excluded from DAG cycle validation so a revise/rework loop can re-enter an earlier node) |
 | **label** | `string` | optional | Label on the connector |
 | **isDefault** | `boolean` | optional (default: `false`) | BPMN default flow: traverse this edge only when no sibling conditional edge of the same source node matched. Mutually exclusive with `condition`; at most one per source node. |
