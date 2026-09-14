@@ -185,13 +185,22 @@ export const VALUE_DOMAIN_FIELD_TYPES: ReadonlySet<string> = new Set([
  * third answer to "is this field multi-valued". That question has exactly one
  * answer — `isMultiValueField` (`field-value.zod.ts`) — and both of the sets
  * this one unions stay untouched.
+ *
+ * ⚠️ Computed on FIRST USE, never at module top level. `field-value.zod` reaches
+ * back into this module through `shared/strict-object` → `shared/suggestions.zod`,
+ * so on the import orders that enter `field-value.zod` first its `const` bindings
+ * are still in the temporal dead zone while THIS module body runs — measured as
+ * `TypeError: MULTI_CAPABLE_TYPES is not iterable` in six spec suites. Spreading
+ * the sets inside the refinement (which runs at parse time, long after every
+ * module has settled) is the same discipline `lazySchema` applies above.
  */
-const MULTI_DECLARABLE_TYPES: ReadonlySet<string> = new Set([
-  ...MULTI_CAPABLE_TYPES, ...MULTI_OPTION_TYPES,
-]);
+let multiDeclarableTypes: ReadonlySet<string> | undefined;
+function multiDeclarableTypeSet(): ReadonlySet<string> {
+  return (multiDeclarableTypes ??= new Set([...MULTI_CAPABLE_TYPES, ...MULTI_OPTION_TYPES]));
+}
 
 /**
- * What the refusal above offers as a remedy: the declarable set MINUS `radio`.
+ * What the refusal offers as a remedy: the declarable set MINUS `radio`.
  *
  * `radio` is multi-CAPABLE by the value contract — `isMultiValueField` still
  * promotes it, which is the #11437 ruling's untouched half — and is refused at
@@ -199,8 +208,10 @@ const MULTI_DECLARABLE_TYPES: ReadonlySet<string> = new Set([
  * send the author from one refusal straight into another, so it is filtered
  * out mechanically instead of by a second hand-written list.
  */
-const MULTI_DECLARABLE_REMEDY_TYPES: readonly string[] =
-  [...MULTI_DECLARABLE_TYPES].filter((t) => t !== 'radio');
+let multiDeclarableRemedyTypes: readonly string[] | undefined;
+function multiDeclarableRemedyTypeList(): readonly string[] {
+  return (multiDeclarableRemedyTypes ??= [...multiDeclarableTypeSet()].filter((t) => t !== 'radio'));
+}
 
 /**
  * Field types whose value is edited in a MULTILINE text editor whose inline
@@ -2040,7 +2051,7 @@ export const FieldSchema = lazySchema(() => {
   //
   // `radio` is INSIDE the set and is therefore never refused here — its own
   // narrower #11437 check above owns that pair, so the two never double-fire.
-  if (field.multiple === true && !MULTI_DECLARABLE_TYPES.has(field.type)) {
+  if (field.multiple === true && !multiDeclarableTypeSet().has(field.type)) {
     const alternative = REFERENCE_VALUE_TYPES.has(field.type)
       ? 'a `lookup` with `reference` naming the same object (`multiple: true` there stores several related records)'
       : FILE_REFERENCE_TYPES.has(field.type)
@@ -2053,7 +2064,7 @@ export const FieldSchema = lazySchema(() => {
       message:
         `Field "${field.name ?? '<unnamed>'}": \`type: '${field.type}'\` cannot be combined with ` +
         '`multiple: true` — a cell holding several values at once is declared only on ' +
-        `${MULTI_DECLARABLE_REMEDY_TYPES.map((t) => `\`${t}\``).join(', ')}, and \`${field.type}\` is not ` +
+        `${multiDeclarableRemedyTypeList().map((t) => `\`${t}\``).join(', ')}, and \`${field.type}\` is not ` +
         'one of them: the declaration would parse while the widget renders a single value, the SQL ' +
         'driver builds a JSON array column for it, and every `=` filter against that column is then ' +
         `answered 400. Use ${alternative}. For a single value, drop \`multiple\`.`,
