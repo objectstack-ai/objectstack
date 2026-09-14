@@ -469,9 +469,9 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 同笔 `Release:` 行点名已落项与余项去向;余项需换道/拆分加 `pm:retriage`,自队列重新认领。
 - 派发前按序执行原子对:① Assign @me,并把 `pm:dispatched` 与摘 `pm:queue` 放进同一次标签写入。
 - step ① 之后获得 assignee 的直接弃出本批。
-- ② 认领评论(英文),固定形状见 模板与表 节;首行以字面 `Claim:` 开头是机器判据。
-- 巡查谓词只认 `Claim:` 这一个拼写且保持严格,修法是全舰队向它收敛,⛔ 不放宽谓词。
-- session ID 不可省;`mode:subagent` 的 dev 与 PM 同会话同 ID,甄别身份是分支。
+- ② 认领评论(英文)照抄 模板与表 节:`Claim:` 首行,`Branch:`、`Clause-②:` 各占一行且行首。
+- 条款②入队闸门只读认领评论且只读行首键:句中提及与另发评论皆读不到,卡即不可读。
+- 谓词保持严格、⛔ 不放宽;session ID 不可省,`mode:subagent` 下 dev 与 PM 同 ID,身份看分支。
 - `Clause-②: yes | no` 恰这两种拼写,恒英文机器判据;判据:本卡放宽接受集或扩大公开面吗。
 - Container & model 行的档位引当次 `node scripts/pm/dispatch-gates.mjs --tier <paths>` 输出,⛔ 不凭记忆。
 - 末行 Serial constraints cleared 是落在评论里的读数,同包在飞单不点名等于没查。
