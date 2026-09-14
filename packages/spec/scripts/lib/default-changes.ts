@@ -330,5 +330,31 @@ export const DEFAULT_CHANGES_BY_MAJOR: Readonly<Record<number, readonly Declared
         + "the published JSON Schema's `default` himself — the `refresh` description now states "
         + 'the materialized default in words, the `data/Field:unique` precedent.',
     },
+    {
+      key: 'automation/ScreenConfig:mode',
+      from: '(none)',
+      to: '"create"',
+      reason:
+        'The runtime default did NOT move — this declaration makes the protocol state what the '
+        + 'executor was already measured to apply. `screen-nodes.ts` builds the ScreenSpec with '
+        + "`mode: cfg.mode === 'edit' ? 'edit' : 'create'`, so an object-form screen that omits "
+        + "the key rendered the CREATE form before this change and renders it after: measured by "
+        + "running the executor with `config: { objectName }` and reading `result.screen.mode`, "
+        + "which answers `'create'` on both sides. Nothing deployed changes behaviour. What "
+        + 'changes is that the value is now declared where an author and a designer can read it '
+        + '(the published JSON Schema, the generated reference, and the Studio form — whose own '
+        + "descriptor literal has carried `default: 'create'` all along, so this closes a "
+        + 'disagreement between the form and the contract rather than opening one). The flat '
+        + '`fields` branch never reads the key at all — measured on the same run, its emitted '
+        + 'ScreenSpec carries no `mode` — so the materialized value is inert there. A consumer '
+        + "who wants the edit form writes `mode: 'edit'` with a `recordId`, exactly as before; a "
+        + 'consumer reading `ScreenConfigParsed.mode` now sees `"create" | "edit"` where it saw '
+        + '`… | undefined`, and `undefined` never meant anything but create. Declared under the '
+        + "maintainer's ruling on defaults (decision batch #127 item 5): a default the protocol "
+        + 'SHOULD have is declared by the protocol, so a designer never has to invent one. Its '
+        + 'sibling `automation/HttpConfig:method` deliberately gets NO declaration — that '
+        + 'executor applies two different values for an absent key (GET inline, POST durable), '
+        + 'so any single declared default would change what a stored flow sends.',
+    },
   ],
 };
