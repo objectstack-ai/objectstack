@@ -61,7 +61,7 @@ be newly authored, plus the storage decision for the shapes that are now refused
 
 **Storage change (`@objectstack/driver-sql`)**: every site that asked
 `field.multiple` the question "is this value multi-valued" now asks
-`isMultiValueField` — **seventeen expressions across two files**, not one. The
+`isMultiValueField` — **eighteen expressions across two files**, not one. The
 file's own header already called `JSON_COLUMN_TYPES` membership "owned by
 `@objectstack/spec`"; that sentence is now true for the `multiple` half too.
 
@@ -76,7 +76,7 @@ file's own header already called `JSON_COLUMN_TYPES` membership "owned by
   disjunct and its `declaresArray` test, which #15771 bound to the writer's
   predicate and which a pin test holds equal to it.
 
-Only the last of those was named in the ruling; aligning one and leaving sixteen
+Only one of those was named in the ruling; aligning it and leaving seventeen
 would have re-opened #11535 in reverse — the DDL writing a JSON column that the
 read-side deserializer no longer recognises. A column whose field is multi-valued
 by the spec predicate behaves exactly as before; the shapes that change are the

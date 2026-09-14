@@ -658,9 +658,10 @@ export const UNBOUNDED_TEXT_FIELD_TYPES: ReadonlySet<string> = new Set([
  *
  * `createColumn`'s catch-all is `JSON_COLUMN_TYPES.has(type) ? jsonColumn(...)
  * : table.string(...)` and `isJsonField` — the read-side deserializer — is
- * `JSON_COLUMN_TYPES.has(type) || !!field.multiple`. So the writer has always
- * asked about the TYPE as well as `multiple`, while the base-type branch below
- * asked only `field.multiple === true`. A single-value JSON-class field on a
+ * `JSON_COLUMN_TYPES.has(type) || isMultiValueField(field)` (#17469 — was
+ * `|| !!field.multiple`). So the writer has always asked about the TYPE as well
+ * as multi-value, while the base-type branch below asked only
+ * `field.multiple === true`. A single-value JSON-class field on a
  * `varchar`/`text` column was therefore written as JSON and did not exist to
  * the differ, permanently and silently — the additive sync never revisits a
  * column. Two halves disagreeing about which declarations get a json column is

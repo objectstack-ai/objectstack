@@ -256,32 +256,78 @@ function declareReadSweep(cell: DialectCell): void {
         expect(values, 'distinct() over a multi-valued select').not.toEqual([true]);
         expect(values.every((v) => v === true), 'every distinct value coerced to `true`').toBe(false);
       });
-
+    } else {
       /**
-       * …and the refusal/answer really is about the COLUMN CLASS rather than
-       * about this door: a SCALAR boolean answers normally in the same run.
+       * The NAMED DIVERGENCE, pinned rather than skipped — the same posture
+       * #17343's suite takes for the filter-side half of this property.
+       *
+       * PostgreSQL's `json` type defines no equality operator and
+       * `SELECT DISTINCT` needs one, so this door is REFUSED there for every
+       * JSON column. It is pinned as the ADR-0112 envelope #17639 brought to
+       * this door, and on the CLASS rather than on a bare throw: `picks` is a
+       * multi-valued `select` and `tags_` an inherently-multi option type, and
+       * both must fail the SAME way, so a future edit that broke one of them
+       * for a reason of its own stops matching the other and reddens this row.
+       *
+       * ⚠️ [#17469] This row used to be aimed at `toggles` / `flags` —
+       * `toggle` / `boolean` carrying `multiple: true`. That declaration is
+       * refused at the authoring entrance now and is a SCALAR column here, so
+       * it is no longer a member of the class this row is about; the row is
+       * re-aimed at the JSON columns that still exist. ⛔ It was not deleted:
+       * the divergence is still live and still this file's to state.
        */
-      it('the SCALAR boolean answers normally at the same door — the reading is per storage shape', async () => {
-        const values = await driver.distinct(READ_OBJECT, 'scalar_flag', undefined, BYPASS);
-        expect([...values].sort()).toEqual([false, true]);
-      });
-
-      /**
-       * Reader 1, executed — the #11635 Postgres aggregate cast, on the one
-       * dialect it exists for. The SCALAR half deliberately: #11635 exists so a
-       * declared boolean can be aggregated on Postgres at all, and no narrowing
-       * of this registry may cost it.
-       */
-      it('reader 1 — the #11635 cast still answers for a SCALAR boolean', async () => {
-        const aggregated = await driver.aggregate(
-          READ_OBJECT,
-          { aggregations: [{ function: 'max', field: 'scalar_flag', alias: 'm' }] } as never,
-          BYPASS,
-        );
-        // `min`/`max` are pinned as the 0/1 the cast computes (#11152).
-        expect(Number(aggregated[0].m), 'max over a scalar boolean must still compute').toBe(1);
+      it('the NAMED DIVERGENCE — `distinct()` over a JSON column is refused on this backend, as the envelope', async () => {
+        for (const column of ['picks', 'tags_']) {
+          let err: (Error & { code?: string; status?: number }) | undefined;
+          try {
+            await driver.distinct(READ_OBJECT, column, undefined, BYPASS);
+          } catch (e) {
+            err = e as Error & { code?: string; status?: number };
+          }
+          expect(err, `distinct() over ${column} must be refused on this backend`).toBeDefined();
+          expect(err!.code, `code for ${column}`).toBe('DATABASE_ERROR');
+          expect(err!.status, `status for ${column}`).toBe(500);
+          // [#17639] The raw SQLSTATE the caller used to receive is the CAUSE now.
+          expect((err as unknown as { cause?: { code?: string } }).cause?.code, `SQLSTATE for ${column}`)
+            .toBe('42883');
+        }
       });
     }
+
+    /**
+     * …and the refusal/answer really is about the COLUMN CLASS rather than
+     * about this door: a SCALAR boolean answers normally in the same run.
+     *
+     * ⚠️ [#17469] Outside the `distinctExecutes` branch on purpose. It is the
+     * CONTROL for the branch above — on PostgreSQL it is what proves the
+     * refusal is a property of `json` storage and not of a broken door — so
+     * running it only on the cells that never refuse is the one placement that
+     * makes it vacuous.
+     */
+    it('the SCALAR boolean answers normally at the same door — the reading is per storage shape', async () => {
+      const values = await driver.distinct(READ_OBJECT, 'scalar_flag', undefined, BYPASS);
+      expect([...values].sort()).toEqual([false, true]);
+    });
+
+    /**
+     * Reader 1, executed — the #11635 Postgres aggregate cast, on the one
+     * dialect it exists for. The SCALAR half deliberately: #11635 exists so a
+     * declared boolean can be aggregated on Postgres at all, and no narrowing
+     * of this registry may cost it.
+     *
+     * ⚠️ [#17469] Outside the `distinctExecutes` branch on purpose, for the
+     * same reason: the dialect this reader exists for is exactly the one that
+     * branch excludes, so gating it there would run it nowhere it matters.
+     */
+    it('reader 1 — the #11635 cast still answers for a SCALAR boolean', async () => {
+      const aggregated = await driver.aggregate(
+        READ_OBJECT,
+        { aggregations: [{ function: 'max', field: 'scalar_flag', alias: 'm' }] } as never,
+        BYPASS,
+      );
+      // `min`/`max` are pinned as the 0/1 the cast computes (#11152).
+      expect(Number(aggregated[0].m), 'max over a scalar boolean must still compute').toBe(1);
+    });
   });
 }
 

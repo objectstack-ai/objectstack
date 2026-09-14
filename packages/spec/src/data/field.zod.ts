@@ -27,13 +27,7 @@ import {
   discriminateDefaultValueShape,
   suggestDefaultValueToken,
 } from './default-value-shape';
-import {
-  AddressSchema,
-  FILE_REFERENCE_TYPES,
-  MULTI_CAPABLE_TYPES,
-  MULTI_OPTION_TYPES,
-  REFERENCE_VALUE_TYPES,
-} from './field-value.zod';
+import { AddressSchema, FILE_REFERENCE_TYPES, MULTI_CAPABLE_TYPES, MULTI_OPTION_TYPES, REFERENCE_VALUE_TYPES } from './field-value.zod';
 // #7918 — the ISO 4217 / CLDR fraction-digit contradiction check (maintainer
 // ruling 2026-08-12, Option A). One shared verdict for both anchors: the
 // field-level `precision` key and `CurrencyConfigSchema.precision`.

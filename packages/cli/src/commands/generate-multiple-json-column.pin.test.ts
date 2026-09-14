@@ -32,28 +32,34 @@
  * places:
  *
  *   packages/drivers/driver-sql/src/sql-driver.ts  `createColumn`
- *     `if (field.multiple) { this.jsonColumn(table, name); return; }` — stated
- *     above the `switch (type)`, so the element type never gets a vote.
+ *     the multi-value short-circuit — stated above the `switch (type)`, so the
+ *     element type never gets a vote.
  *   packages/drivers/driver-sql/src/sql-driver.ts  `isJsonField`
- *     `JSON_COLUMN_TYPES.has(type) || !!field.multiple`
  *   packages/drivers/driver-sql/src/schema-drift.ts  `fieldHasColumn`
- *     `if (field?.multiple) return true;` — under the comment "Mirrors
- *     `SqlDriver.createColumn` exactly … everything else — including `multiple`
- *     (a JSON column) — gets one."
+ *     — under the comment "Mirrors `SqlDriver.createColumn` exactly …
+ *     everything else — including a MULTI-VALUED field (a JSON column) — gets
+ *     one."
  *
- * The spec's `isMultiValueField` is a DIFFERENT question with a different
- * answer: it is the ADR-0104 D1 VALUE contract ("is the persisted value an
- * array"), and it gates on `MULTI_CAPABLE_TYPES` —
- * `MULTI_OPTION_TYPES.has(type) || (MULTI_CAPABLE_TYPES.has(type) && multiple)`.
- * A generator that asked it instead would answer VARCHAR for a `text` field
- * flagged `multiple: true` while the driver gives that same field a JSON
- * column — reintroducing this very drift one notch narrower. `FieldSchema`
- * does not refuse the combination either (`multiple` is a plain
- * `z.boolean().default(false)` on every field; only `radio` + `multiple` is
- * refused, by name, in `field.zod.ts`'s superRefine), and the CLI generators
- * sit DOWNSTREAM of validation and explicitly serve the unvalidated authoring
- * door. So the column authority is the driver's flag-first rule, and this pin
- * asserts against that.
+ * ⭐ [#17469] WHAT "MULTI-VALUE" MEANS IN THOSE THREE PLACES CHANGED, and this
+ * header is the record of it. Until the maintainer ruling of 2026-09-13
+ * (decision batch #128 item 5, option 1′) they all read `field.multiple` RAW,
+ * and this file argued at length that the spec's `isMultiValueField` was "a
+ * DIFFERENT question" that a generator must not ask. The ruling made it the
+ * SAME question: `FieldSchema` refuses `multiple: true` on every type outside
+ * `MULTI_CAPABLE_TYPES` ∪ `MULTI_OPTION_TYPES`, and all three driver sites now
+ * derive from `isMultiValueField`.
+ *
+ * ⚠️ So the two halves this file exists to hold together have SPLIT on the
+ * retired shapes, and the split is real and is recorded rather than papered
+ * over: `packages/cli/src/commands/generate.ts` still reads `field.multiple`
+ * raw, so `os generate migration` emits JSONB for a `text` field flagged
+ * `multiple: true` while the driver now emits a varchar for it — #14829 in
+ * reverse, one notch narrower. It is BOUNDED, because that declaration is
+ * refused at the authoring entrance and can only reach the generators through
+ * the unvalidated door they explicitly serve. Aligning `generate.ts` is
+ * another lane's card and is deliberately NOT done here; the assertions below
+ * therefore still state what the CLI emits, and the two source-read pins state
+ * what the driver decides, with this paragraph between them.
  *
  * `MULTI_CAPABLE_TYPES` is still imported here rather than transcribed — it is
  * the roster this pin SWEEPS, so a type added to that spec class is measured on
@@ -198,10 +204,17 @@ describe('#14829 — `multiple: true` is one answer across all three surfaces', 
     });
   }
 
-  it('the flag decides before the type — a type outside MULTI_CAPABLE_TYPES too', () => {
+  it('the flag decides before the type in the GENERATORS — a type outside MULTI_CAPABLE_TYPES too', () => {
     // Stated as its own assertion because it is the one place this pin departs
-    // from the spec's value predicate on purpose. `text` is not multi-capable
-    // under `isMultiValueField`, and the driver gives it a JSON column anyway.
+    // from the spec's value predicate.
+    //
+    // ⚠️ [#17469] It is now a DIVERGENCE, not an agreement, and the assertion
+    // is unchanged for that reason: it states what `generate.ts` emits, which
+    // this card does not touch. The driver no longer gives this field a JSON
+    // column — `text` + `multiple: true` is refused at the authoring entrance
+    // and is a varchar there. Bounded by that refusal; aligning `generate.ts`
+    // is another lane's card. ⛔ Do not read this row as "the platform stores
+    // it as JSON" any more.
     expect(MULTI_CAPABLE_TYPES.has('text')).toBe(false);
     expect(sqlColumn('multi_text')).toBe('JSONB');
     expect(tsColumn('multi_text')).toBe("table.jsonb('multi_text')");
@@ -252,19 +265,28 @@ describe('#14829 — `multiple: true` is one answer across all three surfaces', 
     const preSwitch = source.slice(start, switchAt);
     expect(
       preSwitch,
-      'driver-sql no longer short-circuits on `field.multiple` before its per-type switch. ' +
+      'driver-sql no longer short-circuits on MULTI-VALUE before its per-type switch. ' +
       'That short-circuit is the authority this pin and the CLI migration generators mirror ' +
       '(#14829) — re-derive both sides before changing it.',
-    ).toMatch(/if \(field\.multiple\)/);
+    ).toMatch(/if \(isMultiValuedColumn\(/);
     expect(preSwitch).toMatch(/this\.jsonColumn\(/);
   });
 
-  it('driver-sql `fieldHasColumn` still answers the flag before the type', () => {
+  it('driver-sql `fieldHasColumn` still answers multi-value before the type', () => {
     const source = fs.readFileSync(path.join(DRIVER_SQL_SRC, 'schema-drift.ts'), 'utf8');
     expect(source.length).toBeGreaterThan(10_000);
     const start = source.indexOf('export function fieldHasColumn(');
     expect(start, 'fieldHasColumn moved or was renamed in driver-sql').toBeGreaterThan(0);
-    expect(source.slice(start, start + 300)).toMatch(/if \(field\?\.multiple\) return true;/);
+    // [#17469] The window is 600 rather than 300: the predicate is a call to
+    // `isMultiValueField(...)` with its argument object spelled out, which is
+    // three times the width of the `field?.multiple` read it replaced. A
+    // window sized to the old spelling silently stops reaching the `formula`
+    // arm below it, which is the other half of what this pin is for.
+    const body = source.slice(start, start + 600);
+    expect(body, 'fieldHasColumn no longer answers the multi-value question first')
+      .toMatch(/if \(isMultiValueField\(/);
+    expect(body, 'the `formula` arm is no longer inside the read window')
+      .toMatch(/!== 'formula'/);
   });
 
   // ── The former SCOPE FENCE for #14828 — DISCHARGED, and kept as the seam ──
