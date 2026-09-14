@@ -1438,8 +1438,17 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
     // array and re-exposes the same objects), so coercing only for the local
     // read relocates the crash into `packages/spec` instead of removing it —
     // measured on #15793, and measured again here.
+    //
+    // `edges` is the SAME reader one list over, and #16751 reached only the
+    // node lists: `scanErrorLabelledEdges` read `.label` off each member and a
+    // `null` edge threw out of a function contractually typed
+    // `(stack) => Finding[]` (#16910). A linter that throws instead of
+    // reporting takes the gate down on exactly the malformed document it
+    // exists to catch, so the author gets a stack trace where a diagnostic
+    // belongs. Same coercion, same home, and the same onward-handoff
+    // condition: the COERCED array is what goes to `collectFlowGraphs` below.
     const nodes = recordsOf(flow.nodes);
-    const edges = Array.isArray(flow.edges) ? (flow.edges as AnyRec[]) : [];
+    const edges = recordsOf(flow.edges);
 
     // (a) #1874 — date-equality time condition on a record-change start node.
     const start = nodes.find((n) => n.type === 'start');
@@ -1539,7 +1548,16 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
       // at the call site above, and a nested region's node list arrives here
       // with only `Array.isArray` behind it.
       const graphNodes = recordsOf(graph.nodes);
-      const graphEdges = graph.edges as unknown as AnyRec[];
+      // `graph.edges` needed the identical repair, and it is NOT covered by the
+      // coercion at the call site above: a nested region's edge list is read
+      // out of a container's open `z.record` config by `collectFlowGraphs`
+      // behind nothing but `Array.isArray` (`control-flow.zod.ts`, where the
+      // node side is member-filtered since #16752 and the edge side is not), so
+      // it reaches here carrying the producer's word about its members rather
+      // than a check. Measured on this tree: a nested `body.edges` holding a
+      // `null` threw from the same `scanErrorLabelledEdges` frame as the
+      // top-level list did (#16910). Belt and braces, ⛔ not one repair twice.
+      const graphEdges = recordsOf(graph.edges);
 
       // (b) #1315 — wrong interpolation syntax in any node's template values. Flow
       //     node values use SINGLE braces; double-brace `{{ }}` and bare `$ref.x`

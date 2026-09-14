@@ -92,7 +92,7 @@ import {
 // `validateExpression` reads as "not authored"), the CEL rule in
 // `validateExpression('value', …)`. Neither refusal string is spelled here.
 import { AssignmentValueSchema, ASSIGNMENT_VALUE_ENVELOPE_REFUSAL } from '@objectstack/spec/automation';
-import type { FlowNodeParsed } from '@objectstack/spec/automation';
+import type { FlowNodeParsed, FlowEdgeParsed } from '@objectstack/spec/automation';
 // [#17495] The blank-source half of the structural-condition refusal, imported
 // rather than restated: this is the EDGE door's own rule
 // (`FlowEdgeSchema.condition` composes it since #15807) and the very schema
@@ -1165,6 +1165,12 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
     // left empty deserialises to `null`, and `nodes.find(n => n.type === …)` on
     // the very next line dereferenced it (#15793).
     const nodes = recordsOf(flow.nodes);
+    // `edges` is the SAME reader one list over, and #15793 reached only the node
+    // lists (#16910). The edge walk below reads `.id` off each member, so a
+    // YAML `edges:` item left empty threw a `TypeError` out of a rule
+    // contractually typed `(stack) => Issue[]` — the crash `lintFlowPatterns`
+    // was filed for, reached through this rule instead, on the same document.
+    const edges = recordsOf(flow.edges);
     // The record-change target object — `record.*` refs resolve against it.
     const startNode = nodes.find(n => n.type === 'start');
     const startCfg = (startNode?.config ?? {}) as AnyRec;
@@ -1186,7 +1192,15 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
     // dereferences `node.config` in its own region walk. Coercing only the
     // local `nodes` above does not fix the crash, it relocates it into
     // `packages/spec` — measured. Contract-first the caller is what changes.
-    const graphs = collectFlowGraphs({ ...flow, nodes } as { nodes?: FlowNodeParsed[] });
+    // `edges` is coerced and handed on for the identical reason, never
+    // `flow.edges` raw out of the spread: coercing only the local read
+    // relocates the crash instead of removing it — measured on #15793 for
+    // `nodes`, measured again on #16910 for `edges`.
+    const graphs = collectFlowGraphs({
+      ...flow,
+      nodes: nodes as unknown as FlowNodeParsed[],
+      edges: edges as unknown as FlowEdgeParsed[],
+    });
 
     // [#14089] The flattened-scope shadowing pass needs the flow's COMPLETE
     // variable set before any condition is judged, so it is a separate walk over
@@ -1402,7 +1416,13 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
           }
         }
       }
-      for (const edge of graph.edges as unknown as AnyRec[]) {
+      // `recordsOf`, not `as unknown as AnyRec[]` (#16910) — the same reason as
+      // the `graph.nodes` reader above: a NESTED region's edge list is only
+      // `Array.isArray`-checked by `collectFlowGraphs` before it becomes a
+      // graph (the node side of that walk is member-filtered since #16752, the
+      // edge side is not), so it carries the producer's word about its members
+      // and not a check.
+      for (const edge of recordsOf(graph.edges)) {
         const edgeCondWhere = `${at} · edge '${edge.id}' (${edge.source}→${edge.target}) condition`;
         if (!checkStructuralCondition(edgeCondWhere, edge.condition).refused) {
           check(edgeCondWhere, edge.condition, objectName);

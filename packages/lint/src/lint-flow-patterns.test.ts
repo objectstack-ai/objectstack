@@ -2484,3 +2484,124 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
     expect(top).toHaveLength(3);
   });
 });
+
+/**
+ * #16910 — a non-record member of a flow's `edges` list must not throw, and the
+ * VALID edge beside it must still be judged.
+ *
+ * ## Why both halves are asserted, and why the second one is the real one
+ *
+ * A linter that throws instead of reporting takes the whole gate down on
+ * malformed input — and malformed input is exactly what a linter exists to
+ * catch, so the tool failed hardest on the documents it is most needed for and
+ * the author got a stack trace where a diagnostic belongs. That is the defect.
+ * But "no longer throws" is half a contract: a guard that abandoned the whole
+ * edge list would satisfy it and would have traded the crash for silence, which
+ * is strictly worse than the crash because nothing reports it. So every case
+ * below pins the surviving finding by IDENTITY — rule id and `where` — against
+ * a control holding the same flow without the junk member, never by "did not
+ * throw" alone.
+ *
+ * ## The semantics, and why it matches #16751
+ *
+ * The junk member is DROPPED, silently, by `recordsOf`'s `isRec` filter — the
+ * same coercion and the same one home (`object-graph.ts`) #16751 chose for the
+ * seven flow-NODE-list readers, so the two sibling lists on the same flow
+ * member cannot disagree about what a malformed member means. Dropping is not
+ * reporting: a rule that INVENTED a finding about an entry no author wrote is
+ * the phantom half of this same defect class, which is why the control
+ * comparison below is an equality and not a `toBeGreaterThan`.
+ *
+ * ## Both addressing depths
+ *
+ * The flow's own list and a nested region's list are separate readers reached by
+ * separate routes — the second arrives through `collectFlowGraphs`, out of a
+ * container's open `z.record` config, behind nothing but `Array.isArray`, so no
+ * coercion at the call site can reach it. The top-level repair alone left it
+ * throwing; measured, not assumed.
+ */
+describe('a non-record member of a flow `edges` list (#16910)', () => {
+  /** Labelled like an error path, left at the default type: the #3863 shape. */
+  const VALID_EDGE = { source: 'act', target: 'done', label: 'error' };
+  const ENDPOINTS = [
+    { id: 'start', type: 'start', config: {} },
+    { id: 'act', type: 'create_record', config: {} },
+    { id: 'done', type: 'end', config: {} },
+  ];
+
+  /** The four shapes a raw `edges` list can hold that are not a record. */
+  const JUNK: readonly (readonly [string, unknown])[] = [
+    ['null', null],
+    ['undefined', undefined],
+    ['a string', 'x'],
+    ['a number', 42],
+  ];
+
+  const topLevel = (edges: readonly unknown[]) => ({
+    objects: [{ name: 'crm_account', fields: [{ name: 'name', type: 'text' }] }],
+    flows: [{ name: 'crm_flow', nodes: ENDPOINTS, edges }],
+  });
+
+  const nestedRegion = (edges: readonly unknown[]) => ({
+    objects: [{ name: 'crm_account', fields: [{ name: 'name', type: 'text' }] }],
+    flows: [{
+      name: 'crm_flow',
+      nodes: [
+        { id: 'start', type: 'start', config: {} },
+        { id: 'lp', type: 'loop', config: { collection: 'x', body: { nodes: ENDPOINTS, edges } } },
+      ],
+      edges: [],
+    }],
+  });
+
+  const errorLabelFindings = (stack: unknown) =>
+    lintFlowPatterns(stack as Record<string, unknown>)
+      .filter((f) => f.rule === FLOW_ERROR_LABEL_NOT_FAULT);
+
+  describe.each([
+    ["the flow's own list", topLevel, "flow 'crm_flow' · edge 'act' → 'done'"],
+    ["a nested region's list", nestedRegion, "flow 'crm_flow' · loop 'lp' body · edge 'act' → 'done'"],
+  ])('%s', (_label, build, expectedWhere) => {
+    it('judges the valid edge with no junk member beside it (the control)', () => {
+      const fnds = errorLabelFindings(build([VALID_EDGE]));
+      expect(fnds).toHaveLength(1);
+      expect(fnds[0].where).toBe(expectedWhere);
+    });
+
+    it.each(JUNK)('drops %s and still judges the valid edge beside it', (_shape, junk) => {
+      // Half one: the rule returns rather than throwing. `lintFlowPatterns` is
+      // typed `(stack) => FlowLintFinding[]` and its docblock promises it never
+      // throws; before this repair a `null` here broke that promise outright.
+      expect(() => lintFlowPatterns(build([junk, VALID_EDGE]) as Record<string, unknown>)).not.toThrow();
+
+      // Half two — the one that matters: the surviving edge is still JUDGED,
+      // by identity against the control, so a guard that abandoned the list
+      // reds here instead of passing half the assertion.
+      const fnds = errorLabelFindings(build([junk, VALID_EDGE]));
+      expect(fnds).toHaveLength(1);
+      expect(fnds[0].where).toBe(expectedWhere);
+    });
+
+    it.each(JUNK)('invents no finding about %s, which no author wrote', (_shape, junk) => {
+      // The phantom half of the same defect class: dropping a member must be
+      // invisible to the rule table in BOTH directions, so this is an equality
+      // against the control and not a lower bound.
+      expect(lintFlowPatterns(build([junk, VALID_EDGE]) as Record<string, unknown>))
+        .toEqual(lintFlowPatterns(build([VALID_EDGE]) as Record<string, unknown>));
+    });
+  });
+
+  /**
+   * The whole gate, not one rule: `os validate` runs the rule TABLE, so a single
+   * throwing reader takes every other rule's verdict down with it. Measured on
+   * this input, `validateStackExpressions` threw from its own `graph.edges`
+   * reader after `lintFlowPatterns` stopped — the same defect one file over,
+   * repaired in the same change for the same reason.
+   */
+  it.each(JUNK)('takes no rule in the authoring table down with %s', (_shape, junk) => {
+    for (const rule of AUTHORING_RULES) {
+      expect(() => rule.run(topLevel([junk, VALID_EDGE]) as Record<string, unknown>, {}), rule.name).not.toThrow();
+      expect(() => rule.run(nestedRegion([junk, VALID_EDGE]) as Record<string, unknown>, {}), rule.name).not.toThrow();
+    }
+  });
+});
