@@ -31,14 +31,22 @@
  *   15,834  numbers that resolve
  *    2,385  holes in [1, frontier] -- 13.1% of every number ever minted here
  *
- * and, through the citation grammar below, over the two surfaces this gate
- * declares:
+ * and, through the citation grammar below, over the surfaces this gate declares
+ * -- this gate's own `--census --json`, not a hand-rolled instrument:
  *
- *                       citations  cross-repo  non-citation  resolves  UNRESOLVABLE
- *   release pages           1,225          72             0     1,050   103 sites / 71 distinct
- *   package src docblocks  32,941       1,240           405    28,617 2,679 sites / 436 distinct
+ *   33,750  citations judged, across 2,357 files
+ *   28,359    resolve
+ *    1,410    resolve as a PULL REQUEST, not an issue -- the #17444 near-miss class
+ *    1,196    cross-repo, ⛔ UNJUDGED and never a finding
+ *    2,785    UNRESOLVABLE: 103 sites / 71 distinct on the release pages,
+ *             2,682 sites / 439 distinct in package docblocks (449 distinct overall)
  *
- * ⭐ So the card's five instances are the visible edge of ~2,782 sites. That
+ * A second, independent instrument written before this gate existed (a scratch
+ * scan over `git ls-files` with the same projection) answered 2,782 on the same
+ * tree minutes earlier. The two agree to within the three citations the frontier
+ * moved by while they ran, which is the control on the count.
+ *
+ * ⭐ So the card's five instances are the visible edge of ~2,785 sites. That
  * number is what decides this gate's SHAPE, and it decides it twice over:
  *
  *   1. A gate that reds on all of them is the permanently-red gate this repo
@@ -113,9 +121,13 @@
  *
  * ## Wiring -- read this before assuming the gate runs
  *
- * ⛔ NO WORKFLOW INVOKES THIS FILE. `.github/workflows/**` was out of the
- * dispatch's file surface for #17512, and every other gate in this tree is
- * named by a workflow step. So this gate is presently a tool a seat runs, not a
+ * ⛔ NO WORKFLOW INVOKES THIS FILE. The root manifest carries
+ * `check:issue-citations`, which runs the `--self-test` and nothing else -- the
+ * shape `check:pm-half-states` uses for the same reason, because the live modes
+ * need a board and a credential. But `.github/workflows/**` was out of the
+ * dispatch's file surface for #17512, and a census of the manifest's 160
+ * `check:*` keys found every one of them named by a workflow, directly or
+ * through its alias. So this gate is presently a tool a seat runs, not a
  * standing caller, and `scripts/pm/check-half-states.mjs`'s own header states
  * what that is worth: 「an alarm added to a script nobody runs is still
  * silence」. The two homes it wants, and they are different lanes:
@@ -240,8 +252,15 @@ export const CENSUS_17512 = Object.freeze({
   resolvableNumbers: 15834,
   holes: 2385,
   holeRate: '13.1%',
-  unresolvableSites: Object.freeze({ 'release-pages': 103, 'package-docblocks': 2679 }),
-  unresolvableDistinct: Object.freeze({ 'release-pages': 71, 'package-docblocks': 436 }),
+  /* ⚠️ The frontier moved from 18219 to 18221 during the measuring session. It
+   * is a reading with a timestamp, ⛔ never a constant. */
+  citationsJudged: 33750,
+  filesRead: 2357,
+  resolves: 28359,
+  resolvesAsPull: 1410,
+  crossRepoUnjudged: 1196,
+  unresolvableSites: Object.freeze({ 'release-pages': 103, 'package-docblocks': 2682 }),
+  unresolvableDistinct: Object.freeze({ 'release-pages': 71, 'package-docblocks': 439 }),
   /* The card's own control, and the reason a tree-wide verdict is refused: three
    * of the four neighbours it measured RESOLVING on 2026-09-10 answer 404 four
    * days later. */
@@ -700,7 +719,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   grammar: 14,
   causes: 12,
   transport: 7,
-  'scope-contract': 10,
+  'scope-contract': 12,
   'diff-scope': 6,
   'live-corpus': 3,
 });
@@ -844,6 +863,11 @@ export async function selfTest() {
       'every declared surface must be covered by a watch hint — an unhinted surface is a gate no dispatch names');
     check(CENSUS_17512.allocationFrontier - CENSUS_17512.resolvableNumbers === CENSUS_17512.holes,
       'the declared census must be internally consistent (frontier − resolvable = holes)');
+    check(CENSUS_17512.resolves + CENSUS_17512.resolvesAsPull + CENSUS_17512.crossRepoUnjudged
+      + Object.values(CENSUS_17512.unresolvableSites).reduce((a, b) => a + b, 0) === CENSUS_17512.citationsJudged,
+    'the declared census must add up (resolves + pulls + cross-repo + unresolvable = citations judged)');
+    check(CENSUS_17512.neighbourControl.goneSince.length === 3 && CENSUS_17512.neighbourControl.resolving.length === 1,
+      "the card's own neighbour control must be carried as re-measured, not as filed");
   }
 
   /* 5. DIFF SCOPE, over a real repository. ⭐ The both-directions proof the card

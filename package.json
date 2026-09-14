@@ -77,6 +77,7 @@
     "check:watch-hint-literal": "node scripts/check-watch-hint-literal.mjs --self-test && node scripts/check-watch-hint-literal.mjs",
     "check:declared-population-live": "node scripts/check-declared-population-live.mjs --self-test && node scripts/check-declared-population-live.mjs",
     "check:pm-half-states": "node scripts/pm/check-half-states.mjs --self-test",
+    "check:issue-citations": "node scripts/check-issue-citations.mjs --self-test",
     "check:pm-clause2-carriers": "node scripts/pm/check-clause2-carriers.mjs --self-test",
     "check:pm-widening-tells": "node scripts/pm/check-widening-tells.mjs --self-test",
     "check:pm-prior-rulings": "node scripts/pm/check-prior-rulings.mjs --self-test",
