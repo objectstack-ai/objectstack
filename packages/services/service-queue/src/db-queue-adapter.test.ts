@@ -7,6 +7,7 @@ import {
   assertEngineDeleteDispatch,
   resolveEngineDeleteDispatch,
 } from '@objectstack/objectql';
+import { SysJobQueue } from '@objectstack/platform-objects/audit';
 import { DbQueueAdapter } from './db-queue-adapter.js';
 
 /**
@@ -470,5 +471,65 @@ describe('DbQueueAdapter — the due bound is a predicate, not a post-LIMIT filt
     // Dropping `priority` from the claim sort — the card's option 2 — would have
     // made this read in insert order and left the declared field inert.
     expect(handled).toEqual([{ p: 1 }, { p: 50 }, { p: 100 }]);
+  });
+});
+
+/**
+ * [#17612] The guard for the whole class, not for one instance.
+ *
+ * The defect was a DRIFT between two files that never referenced each other:
+ * `claimBatch` sorted by `priority, scheduled_for` while `sys_job_queue`
+ * declared `['queue','status','scheduled_for']`, so the sort's first key was in
+ * no declared index and every poll built a temp B-tree. Nothing failed — each
+ * file was internally consistent. This pin reads the claim query the adapter
+ * ACTUALLY emits and holds it against the declaration `platform-objects`
+ * ACTUALLY ships, so the next edit to either one has to move both.
+ */
+describe('DbQueueAdapter — the claim query and the declared index are held together', () => {
+  /**
+   * The extra ORDER BY term the driver appends to every PAGED read and the
+   * caller never writes: the unique tie-breaker of ADR-0053 D-A1 /
+   * objectstack#4363 (`SqlDriver.orderKeysFor`), which for this object is its
+   * primary key. An index that omits it leaves the planner a sorter to build,
+   * so it is part of what the index must cover — see the plan pin in
+   * `driver-turso/src/turso-local-remote-declared-index-parity.test.ts`.
+   */
+  const PAGING_TIE_BREAKER = 'id';
+
+  /** Does `index` begin with `want`, in that order? */
+  const startsWith = (index: string[], want: string[]) => want.every((f, i) => index[i] === f);
+
+  it('one declared index begins with the claim\'s equality keys, then its sort keys, then the tie-breaker', async () => {
+    const engine = makeFakeEngine();
+    const adapter = new DbQueueAdapter({
+      engine,
+      options: { pollIntervalMs: 60_000, autoStart: false },
+    });
+
+    let claim: { where: any; orderBy: Array<{ field: string }> } | undefined;
+    const inner = engine.find.bind(engine);
+    engine.find = async (table: string, opts: any = {}) => {
+      if (opts?.orderBy?.[0]?.field === 'priority') claim = { where: opts.where, orderBy: opts.orderBy };
+      return inner(table, opts);
+    };
+
+    await adapter.subscribe('any-queue', async () => {});
+    await adapter.publish('any-queue', {});
+    await adapter.pollOnce();
+    if (!claim) throw new Error('[#17612] the claim query never reached the engine — this pin measured nothing');
+
+    // Equality keys seek; sort keys order; the tie-breaker orders last.
+    const equality = Object.keys(claim.where).filter((k) => !k.startsWith('$'));
+    const required = [...equality, ...claim.orderBy.map((o) => o.field), PAGING_TIE_BREAKER];
+    expect(required).toEqual(['queue', 'status', 'priority', 'scheduled_for', 'id']);
+
+    const declared = (SysJobQueue.indexes ?? []).map((i: any) => i.fields as string[]);
+    expect(declared.some((index) => startsWith(index, required))).toBe(true);
+
+    // NEGATIVE CONTROL — the same predicate, asked for the shape this table
+    // declared BEFORE #17612. It must read false, or `startsWith` is answering
+    // true for everything and the assertion above is vacuous.
+    expect(declared.some((index) => startsWith(index, ['queue', 'status', 'scheduled_for', PAGING_TIE_BREAKER])))
+      .toBe(false);
   });
 });
