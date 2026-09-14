@@ -89,7 +89,9 @@ or the `autoStart` option.
 
 `OS_MCP_STDIO_API_KEY` is not optional and has no fallback: a stdio server with
 no resolvable principal **refuses to start** rather than serving data unscoped
-(ADR-0101). Mint a key in Setup → Connect an Agent, or `POST /api/v1/keys`.
+(ADR-0101). Mint a key on the **Connect an Agent** page — under **Account →
+Developer** for any signed-in user, or **Setup → Connect an Agent** for
+platform admins — or `POST /api/v1/keys`.
 
 The legacy `MCP_SERVER_*` spellings are still honoured with a deprecation
 warning.

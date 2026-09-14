@@ -381,7 +381,9 @@ export class MCPServerPlugin implements Plugin {
       if (!apiKey) {
         throw new Error(
           '[MCP] The stdio transport is enabled (OS_MCP_STDIO_ENABLED / autoStart) but OS_MCP_STDIO_API_KEY is not set. ' +
-            'stdio must run under a real identity — mint an API key (Setup → Connect an Agent, or POST /api/v1/keys) and set ' +
+            'stdio must run under a real identity — mint an API key on the Connect an Agent page ' +
+            '(Account → Developer for any signed-in user; Setup → Connect an Agent for admins), ' +
+            'or POST /api/v1/keys, and set ' +
             'OS_MCP_STDIO_API_KEY=osk_.... Refusing to start an unscoped stdio server (ADR-0101).',
         );
       }
