@@ -22,14 +22,25 @@ would put a second hand-written spelling of "this is a tombstone" in a consumer.
 A property that admits nothing and is `required` is kept: dropping it would turn
 "this object admits nothing" into "this object admits anything".
 
-Measured over the whole served registry: 77 such nodes across 14 types, of which
+Measured over the whole served registry: 77 such nodes across 15 types, of which
 5 were reachable as repeater columns — `dashboard.widgets[]`'s `actionUrl`,
 `actionType`, `actionIcon`, `responsive` and `aria`.
 
-**Nothing is un-retired, and no prescription is lost.** The removal is a
+**Nothing is un-retired, and no prescription CHANNEL is destroyed.** The removal is a
 property of ONE emitter. `tsc` still types the key `never`, the parse still
 refuses it with the prescription byte for byte, `packages/spec`'s
 `authorable-surface/` ratchet still lists every retired key as `[RETIRED]`, and
 the generated reference pages still print the full prescription in the
 description column of a `never`-typed row. What this drops is a fourth copy, on
 the one surface whose documented job is to describe what an author MAY write.
+
+Measured consumer-side rather than asserted: of the 77 nodes, exactly **two** —
+`api.cacheTtl` and `job.timeout` — sit where a renderer puts the tombstone's
+`description` in front of an author today, because those two served types carry
+no `*.form.ts` layout and Studio's property panel falls through to a flat,
+schema-driven field list that renders `description` as help text. Both keep the
+full prescription on their generated reference page
+(`references/api/contract.mdx`, `references/system/job.mdx`), so what those two
+lose is the copy that arrived as help text under an editable input the publish
+door refuses. The five repeater columns lose nothing at all: the row-cell
+renderer has no `description` branch.

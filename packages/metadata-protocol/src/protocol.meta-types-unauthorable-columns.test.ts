@@ -17,7 +17,7 @@
  * `saveMetaItem` then refuses.
  *
  * Measured on `origin/main` at 1bdbf82cb5 over the whole served registry:
- * **77 tombstone nodes across 14 types**, of which exactly **5** are reachable
+ * **77 tombstone nodes across 15 types**, of which exactly **5** are reachable
  * as repeater columns — `dashboard.widgets[]`'s `actionUrl`, `actionType`,
  * `actionIcon`, `responsive`, `aria`. Every other tombstone sits where the
  * consumer does not derive its key list from the schema (a top-level property,
@@ -193,7 +193,14 @@ describe('#17502 — the served repeater row offers no column the parse door ref
         expect(offenders).toEqual([]);
     });
 
-    it('control: the class really is non-empty before the strip — 77 nodes across 14 types', () => {
+    // ⚠️ This control derives with zod's DEFAULT (output) arm only, which is
+    // 74 nodes across 14 types. The served payload carries 77 across 15: for
+    // `action` alone `toJsonSchemaSafe` falls through to the `io: 'input'`
+    // retry (#17501), and that arm adds `execute` / `shortcut` / `bulkEnabled`.
+    // The class guard above runs over the SERVED document and covers all 77;
+    // this control deliberately does not re-spell `isDegenerateDerivation`,
+    // whose only copy belongs in the emitter.
+    it('control: the class really is non-empty before the strip — 74 nodes across 14 types on the output arm', () => {
         const byType = new Map<string, number>();
         for (const type of SERVED_TYPES) {
             const before = preStripDerivation(type);
