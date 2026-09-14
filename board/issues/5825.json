@@ -1,0 +1,37 @@
+{
+  "number": 5825,
+  "kind": "issue",
+  "title": "退役 `packages/vscode-objectstack`(移出工作区)—— 维护者 2026-08-06 拍板",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T06:45:02Z",
+  "updated_at": "2026-08-06T08:18:54Z",
+  "closed_at": "2026-08-06T08:18:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5825",
+  "body": "**维护者裁决(2026-08-06):同意退役,移出工作区。** devx 车道 PM 立单(会话 `session_01GX3sL71LFq8m2usg6VqTSE`)。\n\n## 依据(四条实测证据,同向)\n\n1. **从未发布**:VS Code Marketplace 与 Open VSX 双 404(2026-08-06 实测);`.github/workflows/` 零条 vsce/vsix 发布链路——不存在装了扩展的第三方,退役外部爆炸半径为零。\n2. **核心声明从未工作且无人察觉**:#5028 的幽灵 `jsonValidation`(指向从未存在的 schema 文件)静默失效整个生命周期,零用户报告。\n3. **产品主航道相反**:真实 authoring 面是 AI agent(Claude Code)+ `os` CLI;维护者自述已长期不使用 VS Code。\n4. **持续注意力税**:该包被每个全仓门禁扫描,#4917/#5028 两单均为 agent 在其上消耗的轮次。\n\n三轴:业务需求零消费零拉动;长远合理性 = ADR-0049 enforce-or-remove 的包级应用(git 历史保底,未来若有非 AI 用户需求按当时 schema 重建);防 AI 犯错 = 消除休眠包的过期声明陷阱面。\n\n## 执行范围\n\n- 从 pnpm workspace 移除 `packages/vscode-objectstack` 目录(连同其在 `pnpm-workspace.yaml`/lockfile 的痕迹);\n- 全仓清扫对该扩展的提及(README、content/docs、AGENTS/skills 如有)——⛔ `content/docs/releases/` 除外(历史页不改);\n- 各全仓门禁的计数随扫描面自动收缩(check:published-files 的 77 成员数、nul-bytes 文件数等)——如有门禁把成员数写死为断言,按实际数更新并在 PR 说明;\n- changeset:按退役记录先例处置(该包从未发布,无 npm 面;沿 #4607「Releases nothing」式空 frontmatter 记退役理由,或 skip-changeset——dev 按 `.changeset/` 内退役类先例定,报告说明);\n- **Closes #5028**(幽灵声明随宿主消失;#5028 的 pm:on-hold 裁决锚点作废,由本单裁决取代)。\n\n## 恢复路径(留档)\n\ngit 历史完整保留;若未来出现非 AI 用户的真实需求,按当时的 spec schema 重建(今天的代码届时也已过期,留着无复用价值)。\n\n关联:#5028(被本单关闭)、#4917(该包最后一次实质修复)、ADR-0049。"
+}

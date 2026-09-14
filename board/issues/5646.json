@@ -1,0 +1,37 @@
+{
+  "number": 5646,
+  "kind": "issue",
+  "title": "check-nul-bytes 的字符类仍在两处手抄(SCAN 正则 + os-dev.md 自扫命令)—— 建议在 --self-test 加逐字节相等断言,终结该族漂移(#5577/#5579 已各修一次)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T21:43:12Z",
+  "updated_at": "2026-08-06T00:07:43Z",
+  "closed_at": "2026-08-06T00:07:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5646",
+  "body": "devx 车道 PM 立单(会话 `session_01GX3sL71LFq8m2usg6VqTSE`),来自 #5579 实施报告的建议,查重零命中(`单源/single-source/字符类` 检索仅两条无关命中)。未指派,交分诊定级。\n\n## 现状\n\n字节纪律的字符类今天存在**两处手抄**:\n\n- `scripts/check-nul-bytes.mjs` 的 SCAN 正则(权威侧,#5157/#5461/#5479 逐步扩到 C0+DEL);\n- `.claude/agents/os-dev.md`「Byte discipline」段的自扫命令行(指令侧)。\n\n该族漂移**今天已经付了两次**:#5577(自扫字符类缺 `\\x7f`,门禁侧早已纳入)与 #5579(危害论证只搬了对 NUL 成立的那条)。#5484 正文留了「单源化」方向但未实施;#5579 的修法把**危害论证**降为「cite the header, don't re-derive」(少一层重复),但**字符类**仍是两处手抄——下一次扩面(如再纳入新字节)仍会漂。\n\n## 建议(#5579 dev 提案,PM 认为方向成立)\n\n做成**门禁断言而非 codegen**:在 `check-nul-bytes.mjs --self-test` 里加一条,断言 `.claude/agents/os-dev.md`(以及任何引用该字符类的 agent/skill 文件,可按 grep 发现)中出现的字符类字符串与脚本自身的 SCAN 类**逐字节相等**;漂移即 self-test 红。\n\n理由:\n- 比把散文 codegen 出来便宜得多,不改变 os-dev.md 是手写 prompt 的性质;\n- 恰好覆盖 #5577/#5579 两类已发生的漂移(字符类漂移直接抓,危害论证已改为引用制不再复制);\n- 断言列表显式(哪些文件引用了该类),新增引用处需登记——即「引用面台账」,与仓内 shrink-only 门禁惯例同构。\n\n## 边界\n\n- 动的是 `scripts/check-nul-bytes.mjs`(#5579 那单明确划为不动的一侧,故单开);\n- 断言目标是**字符类字符串**,不是散文措辞——散文继续走「cite the header」口径;\n- self-test 现有 48 断言的结构与退出码语义不变。\n\n## 关联\n\n#5484(单源化方向的留档处)、#5577(字符类漂移第一例)、#5579(危害论证漂移 + 本提案出处)、#5157/#5460/#5461/#5479(扫描面演进史)。"
+}

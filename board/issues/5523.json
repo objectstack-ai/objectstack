@@ -1,0 +1,35 @@
+{
+  "number": 5523,
+  "kind": "issue",
+  "title": "plugin-email: insert 返回不同 id 时,outbox drain 钩子在 insert 窗口内读不到 managed 标记 —— 与 send() 自己的投递构成双发竞态",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T15:25:50Z",
+  "updated_at": "2026-08-06T01:56:37Z",
+  "closed_at": "2026-08-06T01:56:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5523",
+  "body": "发现于 #5169(修 `managedRowIds` 泄漏)实现期间,读同一段 try/finally 时看到。**与 #5169 的 diff 无关**(那单修的是\"加了不删\",这单是\"加得太晚\"),因此未在其 PR 里顺手改;按\"观察级\"归档,严重程度请 PM triage 判定。\n\n核验对象:`origin/main` @ `308c7095143c5001ed3a061236bed523df910c4b`。\n\n## 机理\n\n`packages/plugins/plugin-email/src/email-service.ts` `sendInternal()`:\n\n```\nthis.managedRowIds.add(id);            // id = 自己 newId() 生成的\ntry {\n  const res = await this.options.persistence.insert(baseRow);   // ← 钩子在这里面同步跑\n  persistedId = typeof res === 'string' ? res : res?.id ?? id;\n  if (persistedId !== id) this.managedRowIds.add(persistedId);  // ← 只有 insert 返回后才加\n```\n\n`packages/plugins/plugin-email/src/email-plugin.ts` afterInsert drain 钩子(约 553-560 行)读的是**插入结果行自己的 id**:\n\n```\nconst rowId = row.id != null ? String(row.id) : '';     // row = hookCtx.result\nif (!rowId || svc.isServiceManaged(rowId)) return;      // 跳过 send() 自管的行\n```\n\n自建 persistence 若给行分配自己的主键(数据库自增 PK、外部投递系统回执 id),`hookCtx.result.id` 就是那个新 id,而此刻 `managedRowIds` 里只有 `send()` 生成的旧 `id` —— `isServiceManaged(新 id)` 为 **false**,钩子于是认定\"这是应用自己插的 outbox 行\",`setTimeout(…, 0)` 后 `deliverPersistedRow()` 投递一次;`send()` 随后又按自己的路径投递(inline 直接发,queue 模式发 job)。**同一封邮件两次投递、同一行两次终态更新。**\n\n唯一的挡箭牌是竞态:延迟的 drain 会重读行,若 `send()` 的 inline 投递已把行推到 `sent` 就会中止。但 `transport.send` 是真实网络 I/O,通常比 0ms 定时器慢,所以先跑到的是 drain —— 靠 race 兜的正确性,不是设计。\n\n## 今天为什么打不到(与 #5169 同一根引线)\n\n仓内唯一实现原样回传 id:\n\n```\nreturn created?.id ? { id: String(created.id) } : { id: String(row.id) };\n```\n\nObjectQL insert 回传入参 `row.id`,所以 `persistedId === id`,钩子读到的就是已 managed 的那个 id,正常跳过。`EmailPersistence` 是导出的公开接口(`insert(row): Promise` 返回 `{ id: string }` 或 `string`),任何\"我自己决定行 id\"的实现即点燃。\n\n## 为什么不是 #5169 的子项\n\n#5169 的完成范围是\"reserve 了要 release\"(finally 里补删),已由 PR 修掉,且不改变本条:`send()` 在 insert 返回前**无法知道**那个 id,补删的时机与本条的读时机不在同一侧。本条的修法要么在 drain 侧、要么在契约侧,是独立的一个决定:\n\n- **A(收紧契约)**:声明 `EmailPersistence.insert` 必须回传 `row.id`(返回值只作确认),`persistedId !== id` 这条分支连同 #5169 修的 release 一起删掉。合\"declared = enforced\":publish/wire 期校验,自建实现改 id 立刻响,而不是靠竞态。代价:对(目前为零的)自建实现是 breaking,且要说明为什么 id 必须由 service 铸造(附件 storage key `sys_email/attachments/行id/…` 已经先于 insert 用了这个 id —— 这本身就是\"id 必须是 service 铸的\"的一条现存证据)。\n- **B(让钩子认得出)**:drain 钩子改为不只按 `result.id` 判定(例如同时看入参行的 id,或 `send()` 在 insert 前把\"本次调用铸的 id\"以别的方式标记给钩子)。保留\"persistence 可以改 id\"这一自由度,但要在钩子侧多维护一条对应关系。\n\n我倾向 **A**:公开接口上\"随便换 id\"这个自由度目前**没有任何业务拉力**(仓内零使用,示例应用零使用),而它换来的是一条只能靠 0ms 定时器和网络延迟大小来决定发一次还是两次的路径 —— 正是\"AI 写的元数据/集成代码最容易踩、且踩了不响\"的那类宽容消费端。不过这条改的是公开接口语义,需维护者定,故只归档、不带 `pm:queue`。\n\n## 复现用例(写出来即红)\n\n```\nconst persistence = { async insert() { return { id: 'db-pk-7' }; }, async update() {} };\n// 走 email-plugin 的 afterInsert 钩子:hookCtx.result.id = 'db-pk-7'\n// 断言:钩子被调用时 svc.isServiceManaged('db-pk-7') 应为 true(今天是 false)\n```\n\nRelated-to: #5169\n"
+}

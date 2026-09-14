@@ -1,0 +1,33 @@
+{
+  "number": 17661,
+  "kind": "pull_request",
+  "title": "fix(devx): tenant-audit-census self-test fixture built from the page's own number, not the live census",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-11T09:05:15Z",
+  "updated_at": "2026-09-11T09:55:09Z",
+  "closed_at": "2026-09-11T09:55:08Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-09-11T09:55:08Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/17661",
+  "body": "Closes #17437\n\n## What\n\n`scripts/check-tenant-audit-census.mjs`'s self-test built the fixture for its\ntwo `UNENFORCED_PROSE_COUNTS` cases (`⭐ a stale unenforced prose number is NOT\na finding` / `an unenforced prose claim reworded off the page IS a finding`)\nfrom the **live** census (`census.declaredObjects`), not from the page's own\nstated number. That figure is declared unenforced by the gate's own contract\n(`:840`, \"value free, sentence required\"), so the moment the page's stated\nnumber and the live tree disagree, the live-built search string stops\nmatching the page, `.replace()` becomes a silent no-op, and the second case\nfails **for the page**, not for the classifier it exists to pin.\n\nThe fix reads the page's own number with the same `UNENFORCED_PROSE_COUNTS[0]`\npattern the classifier itself uses, and builds both cases' fixtures from\nthat instead. The pair now tests the classifier's behaviour regardless of\nwhether the page and the live census currently agree — which is the gate's\nown contract, restored to its self-test.\n\n## Why\n\nThis is Route 1 from the PM's ruling on #17437: make the self-test\nvalue-free, not the number enforced. The counter over-match issue named in\nthe card (`declaredObjects()` counting nested `name:` literals, not just\ntop-level object declarations) is out of scope here — it is Route 2's\nprerequisite and changes a published figure; see Open Questions below for\nwhether it should be filed separately.\n\n## Verification\n\n- `node scripts/check-tenant-audit-census.mjs` — exit 0 (unchanged; PR-verdict gate).\n- `node scripts/check-tenant-audit-census.mjs --self-test` — exit 0, 19/19 cases\n  pass (unchanged case count and names; battery floor holds).\n- Re-measured on `origin/main` before editing (not the shared checkout — via\n  `git show origin/main:PATH` and a dedicated worktree + fresh `pnpm install`):\n  the page currently states **300** declared objects\n  (`content/docs/permissions/tenant-audit-census.mdx:87,233`) and\n  `runCensus().declaredObjects` is also **300** — they currently agree, so\n  `--self-test` is green on `origin/main` today. This matches triage's R+168\n  correction: the earlier main-red reading came from a working tree that\n  wasn't `origin/main`, and #17436's `--write` regeneration cleared the\n  symptom for this commit, as the card itself predicted it would.\n- Reverse verification (both legs, in-memory only — the real\n  `content/docs/permissions/tenant-audit-census.mdx` was never edited):\n  - **Leg 1 — manufacture a divergence.** Built a synthetic in-memory page\n    where the stated number differs from the live census. The OLD fixture\n    logic (built from `census.declaredObjects`) fails the \"reworded off the\n    page IS a finding\" case exactly as the card describes. The NEW logic\n    (built from the page's own number) passes both cases — the self-test\n    stays green under the divergence that broke it before.\n  - **Leg 2 — reword the sentence away for real.** Built a synthetic\n    in-memory page with the sentence removed entirely\n    (`Across the declared objects`) and ran the actual classifier\n    (`checkPage`) against it directly: it still emits\n    `[unenforced-prose-missing]`. The case this PR keeps is still pinning a\n    real classifier behaviour, not a tautology.\n  - Script: `verify.mjs` (not committed — scratch verification only).\n\n## Risk & rollback\n\nLow. Single-file change to a self-test's fixture construction; no change to\nthe production classifier (`checkPage`), the counter\n(`scripts/tenant-audit-census.mjs`), or the published page. Revert is a plain\none-file revert.\n\n## Boundaries respected\n\n- Did not touch `scripts/tenant-audit-census.mjs` (the counter — its\n  over-matching is a separate, out-of-scope question).\n- Did not touch `content/docs/permissions/tenant-audit-census.mdx`, and did\n  not run `--write`.\n- Did not delete, skip, or weaken the `an unenforced prose claim reworded off\n  the page IS a finding` case — it is still wired and still red on a real\n  rewording (see Leg 2 above).\n\n## Factual correction carried from triage (R+168)\n\nThe original card says `pnpm check:tenant-audit-census` chains both halves.\nThere is no such script — `.github/workflows/lint.yml` (~:1821) invokes the\ngate directly with `node`, and the workflow's own comment says so. The card's\nconclusion (both halves run in CI) is right; the mechanism is not a pnpm\nalias. Not repeated in this PR body's own claims above.\n\n## Open question for triage\n\nWhile reading the classifier for this fix, I did not form a confident answer\non how \"top-level object literal only\" should be defined for\n`declaredObjects()` (the over-match named in the card: the four `actions[]`\nnames on `sys_position` are already in the tally). I'm not filing a separate\ncard for it — flagging it here per the dispatch's instruction so the PM can\nfile it if warranted, rather than guessing at a definition I'm not sure of.\n\n**Clause-②**: no\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_012GKcPZbMoGq7WPzKLfRBTU\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012GKcPZbMoGq7WPzKLfRBTU)_"
+}

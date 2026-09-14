@@ -1,0 +1,33 @@
+{
+  "number": 5865,
+  "kind": "pull_request",
+  "title": "chore(scripts,ci): 决策框架四份副本的结构同构门禁(轴数/轴序/绑定句)(#5798)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/l",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T09:49:36Z",
+  "updated_at": "2026-08-06T10:09:08Z",
+  "closed_at": "2026-08-06T10:09:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T10:09:06Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5865",
+  "body": "Fixes #5798\n\n按 PM 裁定的**方向 A 最小形态**落地:比对两份手写副本的**框架结构**,不逐字比对。⛔ 未做方向 B(单一来源派生)。\n\n## 问题\n\n同一套 binding 决策评估框架在仓库里手写了**四份**,跨三个文件:\n\n| 副本 | 位置 | 面向 |\n|---|---|---|\n| `internal-pm` | `.claude/skills/pm-dispatch/SKILL.md` 第 8 步 | 内部 agent 协议 |\n| `internal-dev` | `.claude/agents/os-dev.md` | 内部 agent 协议 |\n| `published-pm` | `skills/objectstack-pm-dispatch/SKILL.md` 正文 | 第三方(`npx skills add` 直读仓库) |\n| `published-dev` | 同一文件内嵌的 dev-agent 模板 | 第三方 |\n\n此前没有任何门禁比对它们。#5130(2026-08-04)把内部框架由两轴扩为三轴,发布版镜像原封不动,**分叉存在两天**:装了这份 skill 的第三方 PM agent 按两轴呈报,本仓按三轴,直到人工发现,再花一个 issue 加一轮维护者裁决(#5451 / PR #5799)才补齐。本门禁是 #5130 当时缺的那个机制。\n\n## 判据(结构同构,⛔ 刻意不逐字)\n\n- **轴数** —— 每份自洽(声明句的数词 = 绑定句的数词 = 实际写出的轴条数),且四份相等;\n- **轴名序列** —— 经脚本内显式的 `AXIS_MAP`(内部中文 ⇄ 发布英文名词映射表)比对,顺序有意义;\n- **绑定句在位** —— 声明了轴却不把推荐意见绑定到轴上,就不是同一套框架;\n- **文件内其它处对轴数的引述**(`the deep three-axis analysis`)与框架一致 —— #5130 当时也得改这一处;\n- **反休眠**:扫 `.claude/**` 与 `skills/**` 的 markdown,出现第五份带框架指纹却未登记在 `COPIES` 的副本即红(#4291 手工输入清单腐坏的教训)。\n\n⛔ 不逐字比对是刻意的:#5451 裁定 B 让发布版**泛化**(去掉「创业项目」自我描述与本仓单号,扩张姿态改由安装方 conventions 文件声明)。逐字门禁会永久红灯,然后被删掉而不是被遵守。self-test 有一例专门钉这个方向:**只改措辞必须保持绿**。\n\n## 两条设计约束来自既有教训\n\n**提取失败即红(#4690 反模式)**:锚点找不到框架段就失败并点名,绝不静默跳过。\n\n**锚点不含被比对的值(#5680)**:锚点**捕获**数词(`%N%`)而不写死「three」。这一条初稿踩过 —— 英文绑定句的量词与轴数**共变**(三轴写 `all three axes`,两轴写 `both axes`),所以写死 `all` 的锚点等价于把轴数写进锚点。拿**真实的 pre-#5799 树**(`77adf297f^`)一跑,初稿报的是:\n\n```\n• published-pm … the BINDING sentence is not in place: its anchor matched 0 time(s)\n• published-dev … the BINDING sentence is not in place: its anchor matched 0 time(s)\n```\n\n真相是「这份两轴、其它三轴」,而门禁说的是「找不到绑定句」—— 正是 #5680 讲的把「不相等」降级成「提取不到」。改为 `%Q%`(吞掉整个量词、只捕获数词)后,同一棵树报的是:\n\n```\n• the four copies do not agree on the NUMBER of axes — this is the #5130 drift:\n      3 axes  internal-pm  (.claude/skills/pm-dispatch/SKILL.md)\n      3 axes  internal-dev  (.claude/agents/os-dev.md)\n      2 axes  published-pm  (skills/objectstack-pm-dispatch/SKILL.md)\n      2 axes  published-dev  (skills/objectstack-pm-dispatch/SKILL.md)\n• the copies do not agree on the axis NAME SEQUENCE:\n      business-need → long-term-soundness → ai-authoring-safety\n        in: internal-pm, internal-dev\n      long-term-soundness → ai-authoring-safety\n        in: published-pm, published-dev\n```\n\n即准确指出发布版当时缺的是 **business-need 轴**。这是本 PR 最强的一条证据:门禁拿真实的历史现场跑出真实的诊断,不只是过合成 fixture。self-test 里 `two-axis copy phrased \"both axes\" → red on the COUNT, not on extraction` 一例把这个教训钉住(该例还断言错误信息里**不得**出现「找不到」类措辞)。\n\n## 分层理由(为何是根 `scripts/`,不是 `packages/spec`)\n\n既有的 `check:skill-refs` / `check:skill-docs` 住在 spec 包,是因为它们是**生成器**(源为 `packages/spec/src`),并登记在 spec 的 `check:generated` 账本里。本门禁不读 spec 源、不产出任何生成物,只比对两份手写文档,其中一份(`.claude/**`)spec 包本不该知道;放进去还会被拖进那个「有生成器」的账本。跨仓 prose 策略门禁历来住在根 `scripts/`(`check:role-word` / `check:doc-authoring` / `check:nul-bytes` 都从这里扫 `skills/`)。\n\n已跑 `check:generated --reconcile-only` 确认无关联:该账本只读 `packages/spec/package.json`,18 check: + 13 gen: 全部已分类,绿。\n\n## CI 接线\n\n`.github/workflows/lint.yml` 的 **typecheck job**(必需检查、无 paths filter),紧邻 `check:skill-refs`,理由注释引用它那条同源理由 ——「These ship to third parties via `npx skills add`, so the drift is served straight to consumers' agents」。SKILL.md **正文**同样这么发出去,而既有两个门禁只看 frontmatter 与生成索引。放这个 job 也是同一条反休眠理由;`.claude/**` 过滤器尤其会瞎掉,因为有一半副本住在那里。\n\n## 验证\n\n真仓现状比对 **绿**(#5799 已合,首跑即绿,符合本单排序理由):\n\n```\n✓ check-skill-frame-sync: 4 copies of the decision frame are structurally isomorphic across 3 files\n  3 axes: business-need → long-term-soundness → ai-authoring-safety\n  binding sentence present in all 4; 4 count mention(s) agree; 39 markdown files scanned for undeclared copies.\n```\n\n`pnpm check:skill-frame-sync`(self-test + 真仓,CI 即这条)—— 12 例全过,**先红后绿**四个方向都在:\n\n```\n  ✓ baseline: the four real copies are isomorphic\n  ✓ one copy loses an axis, its declared count unchanged → red (count vs entries)\n  ✓ one copy coherently rewritten to two axes → red (cross-copy count)\n  ✓ two-axis copy phrased \"both axes\" → red on the COUNT, not on extraction\n  ✓ an axis is renamed in one copy → red (unmapped axis name)\n  ✓ axes reordered in one copy → red (name sequence)\n  ✓ the binding sentence is removed → red (extraction failure, not a skip)\n  ✓ the declaring sentence is removed → red (extraction failure, not a skip)\n  ✓ a frame count mention drifts from the frame → red\n  ✓ AXIS_MAP misaligned (zh patterns swapped) → red, proving the map is load-bearing\n  ✓ an undeclared fifth copy appears → red (anti-dormancy)\n  ✓ wording-only divergence (the #5451 generalization) → stays GREEN\n✓ check-skill-frame-sync self-test: 12 cases pass.\n```\n\nfixture 用的是**真实文档在内存里的变体**,不是合成样本;每处变异都断言「确实改到了」,所以 fixture 漂移会响亮失败,而不是让一个期望红的用例悄悄变绿(实跑中确实触发过一次:`structurally hard to` 的换行位置对不上,门禁自己报了 `self-test fixture drifted: mutation target not found`)。\n\n其余门禁:\n\n- `node scripts/check-nul-bytes.mjs` → `OK (scanned 5692 tracked text file(s) … no raw ASCII control bytes)`\n- `node scripts/check-workflow-status-functions.mjs`(动了 workflow)→ `OK (scanned 22 workflow file(s), 39 job(s), 21 job-level if: … all naming a status function)`,`--self-test` 34 断言过\n- 改动文件自扫控制字符(`grep -naP` 的 C0 + DEL 字符类)→ 零命中\n- `npx eslint scripts/check-skill-frame-sync.mjs` → 干净\n\n## changeset\n\n无 `.changeset/*.md`:改动面为门禁脚本 + CI + 根 package.json 脚本,**非发布面**,对使用者无行为变化 —— 走 `skip-changeset` 标签路线。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01GX3sL71LFq8m2usg6VqTSE)_"
+}

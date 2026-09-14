@@ -1,0 +1,34 @@
+{
+  "number": 5028,
+  "kind": "issue",
+  "title": "VS Code 扩展的 `jsonValidation` 指向一个不存在的文件 —— `schemas/objectstack.schema.json` 从未存在过,也没有任何脚本生成它",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:on-hold",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T00:29:54Z",
+  "updated_at": "2026-08-06T08:18:54Z",
+  "closed_at": "2026-08-06T08:18:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5028",
+  "body": "在 #4917(修片段 + 加常驻 safeParse gate)的实现过程中发现的旁支,与该单无关,单独记录(Prime Directive #10),**未认领**。\n\n## 现象\n\n`packages/vscode-objectstack/package.json` 声明:\n\n```json\n\"contributes\": {\n  \"jsonValidation\": [\n    {\n      \"fileMatch\": \"objectstack.json\",\n      \"url\": \"./schemas/objectstack.schema.json\"\n    }\n  ]\n}\n```\n\n但 `packages/vscode-objectstack/schemas/` 这个目录在仓库里**不存在**,`objectstack.schema.json` 也不存在。全仓搜索这个文件名只有两处命中:\n\n- 上面这条 `contributes` 声明;\n- `packages/cli/src/commands/generate.ts:911` 的一个**默认输出文件名**(`flags.output ?? 'objectstack.schema.json'`)—— 那是 CLI 在**用户工程里**生成 schema 时的默认名,不是给扩展打包用的产物,也没有任何 build/prepack 脚本把它拷进扩展包。\n\n所以扩展的 README 里写的 \"**JSON Schema Validation** — Validates `objectstack.json` files against the bundled schema\" 是一句 declared ≠ enforced:VS Code 加载这条 contribution 时解析不到 url,该 fileMatch 静默失效,作者写 `objectstack.json` 得不到任何校验。\n\n## 为什么值得单开\n\n和 #4917 是同一类缺陷(扩展对外声明的能力没有任何东西在 CI 里验证过),但落点不同、修法也不同,不适合塞进 #4917 的片段 PR:\n\n- #4917 修的是**片段展开出来的 metadata 形状**,gate 是「展开 → 过 spec schema 的 safeParse」;\n- 这一单要决定的是**扩展要不要真的 bundle 一份 JSON Schema**,以及从哪来。\n\n顺带说明:`vsce` 打包读 `.vscodeignore`(此包没有),不读 `package.json` 的 `files`,所以 `snippets/` 是能进 .vsix 的 —— 缺的确实只有 `schemas/`,不是打包配置问题。\n\n## 需要决定的部分\n\n三条路,选哪条要维护者定:\n\n1. **真的生成并 bundle。** `packages/spec` 已经有 `gen:schema` 产出 JSON Schema(`json-schema/` + `json-schema.manifest.json`),给扩展加一个 build 步骤把对应的那份拷成 `schemas/objectstack.schema.json`。代价:多一条产物同步链路,需要自己的 staleness gate,否则又是一个「#4917 式」的静默过期点。\n2. **删掉这条 contribution。** 扩展不再声称做 `objectstack.json` 的 JSON Schema 校验,README 同步删掉那一行。代价:少一个能力;但 declared 立刻等于 enforced。\n3. **改为指向 CLI 生成的工程内文件。** 让 fileMatch 依赖用户自己跑 `os generate` 产出的 schema。代价:VS Code 的 `jsonValidation.url` 是相对于**扩展**的,不是相对于工作区,这条路需要换成 language-server 侧动态注册,工作量最大。\n\n倾向 2(先让声明诚实),再按需另立一单做 1。但这属于扩展对外能力面的取舍,不猜。\n\n不管选哪条,**都应该有一条 gate 让这件事不能再静默** —— 最便宜的形式是在 #4917 新加的 `packages/vscode-objectstack/test/snippets.test.ts` 旁边加一条:`package.json` 里 `contributes` 引用的每一个相对路径都必须在包内真实存在。这条断言现在就会判红,是这一单的天然验收标准。\n\n关联:#4917(同批发现,已修片段 + 已加片段 gate)、Prime Directive #10。"
+}

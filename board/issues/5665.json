@@ -1,0 +1,37 @@
+{
+  "number": 5665,
+  "kind": "issue",
+  "title": "objectui: DatasetReportRenderer 的 pivot bucket id 用空串 join 维度值、cell key 用空格拼接 —— 与 #5473 同族,且更早合并",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T23:31:48Z",
+  "updated_at": "2026-08-06T00:27:08Z",
+  "closed_at": "2026-08-06T00:27:08Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5665",
+  "body": "实现 objectstack#5473(objectui PR #3414,修 `plugin-dashboard/DatasetWidget.tsx` 的 cell key)时,按「规则消费半径」清扫同名 testid 的其它渲染器发现的。属另一个 widget、另一个包,#5473 的文件面不含它,按 Prime Directive #10 单独开单。\n\n### 位置\n\n`packages/plugin-report/src/DatasetReportRenderer.tsx`(objectui 仓):\n\n```\n// 742\nfunction bucketId(dims: string[], row: Row): string {\n  return dims.map((d) => String(row[d] ?? EMPTY)).join('');   // 空串\n}\n\n// 818(pivot useMemo 内)\nconst rid = bucketId(rows, r);\nconst cid = bucketId(columnsAcross, r);\ncells.set(`${rid} ${cid}`, { row: r, index });                  // 空格\n```\n\n已核对字节:742 行的 `join('')` 是**真空串**,不是被显示吞掉的控制字符(`cat -A` 确认,该文件全文无 `[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]`)。\n\n### 两个缺陷\n\n1. **多维度 bucket 之间完全没有边界**。`bucketId(['region','segment'], …)` 对 `x` + `yz` 和 `xy` + `z` 都产出 `xyz` —— 两个不同的行(或列)桶合并成一个,后写覆盖先写。这比 #5473 修掉的那个更早触发:#5473 里 row id 至少还有一个分隔字符,这里一个都没有。DatasetWidget 的旧用例注释里写的「an empty (or absent) separator collapses these into ONE row header」正是这里的现状。\n2. **cell key 用普通空格拼接 rid/cid** —— 与 #5473 完全同形:维度值含空格(`New York` / `In Progress` / `Closed Won`)时,两行可落进同一个 key。\n\n`cells` 的 value 同时带 `index`,而 drill-through 用它读原始行,所以和 #5473 一样,串格的同时会钻到另一行的记录。全程无报错。\n\n### 为什么现有用例照不到\n\n`packages/plugin-report/src/__tests__/DatasetReportRenderer.test.tsx` 的 pivot fixture 与 dashboard 侧同病:行/列维度各只有一个,值也不含空格。单维度时 `join('')` 与任何分隔符恰好等价,所以缺陷 1 从未被跑到;缺陷 2 需要值含空格,也从未被跑到。\n\n### 建议方向\n\n与 #5473 / PR objectui#3414 同形:bucket id 与 cell key 都走 `JSON.stringify`(该 PR 里落成 `pivotRowId` / `pivotCellKey` 两个 helper),不再依赖「数据不会包含的字符」。注意这里 `bucketId` 同时被 `rowTotalById`(863 行)使用 —— 与 dashboard 侧不同,它三处用的是同一个 encoder,所以换编码时**必须整体换**,否则会把 dashboard 侧刚修掉的「表头与小计各用一套编码」的问题引进来。用例同步扩到多维度 + 含空格的值。\n\n两处是否合并成一个共享 helper(pivot 编码只此一家),请 triage 时一并裁定 —— 两个包各写一份是这次两边同时出问题的根因。\n\n发现来源:objectstack#5473 / PR objectui#3414。严重度按贵重口径判,我按发现原样记。\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 4828,
+  "kind": "issue",
+  "title": "两个 discovery 生产者都在线上返回 schema 未声明的顶层字段(scoping / features / endpoints),且 REST 形状永远无法通过 DiscoverySchema",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T08:55:40Z",
+  "updated_at": "2026-08-06T00:24:51Z",
+  "closed_at": "2026-08-06T00:24:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4828",
+  "body": "发现于 #4817(把 `content/docs/protocol/kernel/http-protocol.mdx` 的 discovery 一节改成两段式时逐字段核对实现),不在该 docs-only PR 范围内修,**未认领**。\n\n## 现象\n\n`/discovery` 属于「机器可读表面」——SDK、codegen、AI 客户端直接读它(AGENTS.md「Route & surface ownership」第 4 条:machine-readable surfaces must not lie)。但两个生产者返回的顶层键,有三个在 `packages/spec/src/api/discovery.zod.ts` 里**根本没有声明**:\n\n| 线上字段 | 谁发出 | spec 里的声明 |\n|:---|:---|:---|\n| `scoping`(`{ enabled, resolution, scoped, environmentId }`) | `registerDiscoveryEndpoints`,`packages/rest/src/rest-server.ts` | 无。`git grep scoping -- packages/spec/src/api/` 只命中 `events.zod.ts` 的注释 |\n| `features`(顶层 `{ search, websockets, files, analytics, ai, notifications, i18n }`) | `HttpDispatcher.getDiscoveryInfo()`,`packages/runtime/src/http-dispatcher.ts` | 无 —— 而且 `DiscoverySchema` 的设计说明里明写「`capabilities`/`features` was removed because it was fully derivable from `services[x].enabled`」(discovery.zod.ts:211) |\n| `endpoints`(`routes` 的重复副本,注释写 \"Alias for backward compatibility with some clients\") | 同上 | 无 |\n\n同时:\n\n- **REST 形状永远无法通过 `DiscoverySchema.parse()`**。该 schema 把 `name` / `environment` / `locale` 声明为**必填**,而 `getDiscovery()`(`packages/metadata-protocol/src/protocol.ts`)三个都不产出,rest-server 也不补。\n- **dispatcher 形状不产出 `capabilities`**(schema 里是可选,所以不报错),于是同一个协议概念被两个生产者用两套互不相交的字段表达:REST 说 `capabilities`,dispatcher 说 `features`。\n- `environment` 在 schema 里是 `z.enum(['production','sandbox','development'])`,dispatcher 直接塞 `getEnv('NODE_ENV', 'development')` 的原始值,`NODE_ENV=test` / `staging` 都会落在枚举外。\n\n之所以没人发现:唯一在协议层实际引用的是 `GetDiscoveryResponseSchema`(`packages/spec/src/api/protocol.zod.ts:122`),它是 `DiscoverySchema.partial().required({version:true}).extend({apiName})`,而 zod object 默认 strip 未知键 —— 于是「未声明的字段」和「缺失的必填字段」两类问题都被这层宽松包装吃掉了,没有任何 gate 在两端比对。这正是 Prime Directive #10 的 declared ≠ enforced 形状,只是方向反过来:enforced 的比 declared 的多。\n\n## 为什么值得单开一条\n\n这不是文档问题(#4817 已按**实现实际返回**的形状把两份示例写对了,包括 `scoping` / `features` / `endpoints`),而是契约问题:文档现在忠实描述了一个 spec 没有声明的线上形状。要么把这三个键补进 schema(并说清 `features` 与 `capabilities` 谁是正,`endpoints` 的退役时间表),要么从生产者删掉。\n\n## 建议的决策点(需要维护者定,不要猜)\n\n1. `features` vs `capabilities`:统一到一个,还是承认两个端点各有一套?若统一,哪个是正、另一个按 ADR-0087 走退役?\n2. `endpoints` 这个 backward-compat 别名还有真实消费者吗?没有就删;有就声明并给退役时间表。\n3. `scoping` 是 REST 层的真实能力协商信息,应当**补进 schema**而非删除 —— 但补在 `DiscoverySchema` 还是一个 REST 专属的扩展 schema 里,取决于第 1 点怎么定。\n4. `DiscoverySchema` 的必填 `name` / `environment` / `locale`:REST 端点补上它们,还是承认 `DiscoverySchema` 描述的只是 dispatcher 形状、REST 形状另有其名?\n\n修改落点在 `packages/spec` / `packages/rest` / `packages/runtime`,与 #4817 的 docs 车道不同,故未并入。\n\n发现于 #4817,未认领 —— 谁开工谁按 AGENTS.md 认领。\n"
+}

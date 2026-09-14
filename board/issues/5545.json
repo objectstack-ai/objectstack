@@ -1,0 +1,36 @@
+{
+  "number": 5545,
+  "kind": "issue",
+  "title": "client SDK 的 `meta.getItem` 没有声明返回类型(载荷为 `unknown`),而并排的 `meta.getItems` 有 —— 同一表面上相邻两个方法的类型化不对等",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T16:51:13Z",
+  "updated_at": "2026-08-06T13:01:34Z",
+  "closed_at": "2026-08-06T13:01:34Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5545",
+  "body": "在 #5449 把 `@objectstack/client` 的测试层接进 tsc 时暴露(`src/client.test.ts(106,16): error TS18046: 'result' is of type 'unknown'`)。基线 `origin/main` @ `9894a723e`。\n\n## 事实\n\n`packages/client/src/index.ts`,`meta` 表面上相邻的两个方法:\n\n```\ngetItems: async (type: string, options?: { packageId?: string }): Promise< GetMetaItemsResponse > => { … }   // :486 有声明\n\ngetItem:  async (type: string, name: string, options?: { packageId?: string }) => {                          // :502 无声明\n  …\n  return this.unwrapResponse(res);\n},\n```\n\n`getItem` 没有返回类型注解,推断出的就是 `unwrapResponse` 的返回类型,调用方拿到 `unknown`,要读任何字段都得先自己断言。测试里那行 `expect(result.name)` 之所以从来没红过,只是因为该文件此前不在任何 tsc program 内(#5449 记录的那个盲区)。\n\n## 影响\n\n- SDK 使用者调 `client.meta.getItem('object', 'customer')` 后无法直接读取字段,必须 `as` —— 而并排的 `getItems` 不需要。这种不对等会诱导调用方对整个 `meta.*` 表面统一 `as any`,把真实的形状错误一并盖掉。\n- 属于 AI 生成的元数据应用最容易踩的一类:消费端容忍(`as`)一旦成为习惯,producer 的形状漂移就没有报警面了。\n\n## 处置\n\n#5449 的 PR 只在测试里把断言从 `result.name` 改成 `expect(result).toMatchObject({ name: 'customer' })` —— 不加 cast,不假装这个表面已被类型化,断言强度不变。真正的修法是给 `getItem` 声明返回类型(spec 里对应的响应 schema),那属于 client SDK 的公开签名,应单独定案。\n\n顺带核对是否还有别的 `meta.*` / `data.*` 方法漏了返回类型注解,一并补齐。\n\n关联:#5449、#4311。\n"
+}

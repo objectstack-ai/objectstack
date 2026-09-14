@@ -1,0 +1,35 @@
+{
+  "number": 5774,
+  "kind": "pull_request",
+  "title": "fix(runtime): 未知 auth 子路径给干净 404,不再外漏内部 TypeError (#5085)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T04:42:44Z",
+  "updated_at": "2026-08-06T04:57:02Z",
+  "closed_at": "2026-08-06T04:57:01Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T04:57:01Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5774",
+  "body": "Fixes objectstack-ai/objectstack#5085\n\n## 前提复核(基于最新 `origin/main` `889ae47`,非 issue 基线 `29c6c9d`)\n\nissue 的判读**成立**,且缺陷在最新 main 上仍然存在。不是静态推断——在 `LiteKernel + HonoServerPlugin + createDispatcherPlugin` 的真实 hono boot 上打了一次探针,拿回的响应体与 issue 贴的**逐字一致**:\n\n```\nPROBE_STATUS=500\nPROBE_BODY={\"success\":false,\"error\":{\"code\":\"INTERNAL_ERROR\",\"message\":\"request.headers.get is not a function\",\"httpStatus\":500}}\n```\n\n责任面确认落在 `packages/runtime`,**不涉 `plugin-auth`**(边界规则不触发):`plugin-auth` 的 `/auth/*` 通配转发的是 `c.req.raw`(真实 Fetch `Request`),`packages/adapters/hono` 两处也都是 `c.req.raw`。全仓唯一把**非 Fetch 请求**交给 better-auth 的产出方,是 `dispatcher-plugin.ts` 的那一条遗留显式路由。\n\n## 成因\n\n`IHttpServer` 交给 handler 的是适配器内部的 `IHttpRequest`,其 `headers` 是 `HonoHttpServer.runHandler` 用 `c.req.header()` 造的**普通对象**,不是 `Headers`。`createDispatcherPlugin` 过去挂了一条 `POST ${prefix}/auth/login`(注释自称「legacy explicit … retained for self-hosted clients」),把这个对象原样喂进 `dispatcher.handleAuth(…, { request: req })`;`/auth` 域再把 `context.request` 整个交给 `IAuthService.handleRequest(request: Request)`,而 better-auth 的 fetch 风格 handler 第一件事就是 `request.headers.get(…)` → `TypeError` → 落到 `errorResponseBase`,那里只在 `looksLikeInternalErrorLeak` 命中时消毒,而该启发式只认 SQL/driver dump,对 `TypeError` 一言不发,于是原文出体。\n\n这条路由对**任何**调用方都不可能工作:`/login` 根本不是 better-auth 端点(既不在 `plugin-auth/src/auth-route-ledger.ts` 里,`content/docs/api/plugin-endpoints.mdx` 也早就白纸黑字写着 \"There is no `/auth/login` route\"),而且 `/auth` 域自 #4113 起**完全不按子路径路由**。它相对于原生应用上的 `/auth/*` 通配唯一多出来的东西,就是一个 500 —— 通配本来会让 better-auth 用真实 `Request` 给出它自己的干净 404。\n\n## 修法(两半,均在 `packages/runtime`)\n\n**① 产出方:删掉那条遗留路由。** 按 Prime Directive #12,修产出方而非在消费方加转换:在这里补一个 Fetch `Request` 转换属于消费方宽容,而且换来的只是一个更贵的 404。删后未知 auth 子路径与其它所有路径一样落给命名空间属主。原位置留下一段 `DELIBERATELY NOT MOUNTED` 注释,记下测量证据与理由,免得下次有人再把它加回来。\n\n**② 出口:`handleAuthRequest` 里 `handleRequest` 的 throw 无条件扣留原文。** auth service 自己拥有路由,所以它抛出的东西在这一层是**不可归因**的:本域没看过子路径、没解析过 body,分不清是调用方写错还是 handler 有 bug。#5462 已经记过「关键词启发式的一次否定不是安全的证据」,#5489 给 `mapDataError` 的终端分支(`UNCLASSIFIED_FAULT`)写下的正是同一条纪律,并且点名 handler `TypeError` 就是落到那里的形状。现在按 #5437/#5464 的惯例无条件扣留:500 + 目录里 `standardErrorCodeForHttpStatus(500)` 的 `INTERNAL_ERROR` + `INTERNAL_ERROR_MESSAGE`,原始错误交服务端日志。\n\n诚实路径零代价:better-auth 自己的失败是**返回 `Response`** 而不是抛(这也是 `AuthPlugin` 通配要主动记录 >=500 *响应* 的原因),所以真实的 401/403/404/422 依旧原样返回。\n\n## 反向验证(方向为**红**,事先预测,三段分开测量)\n\n| 状态 | `POST /api/v1/auth/login` 的线上答复 |\n|---|---|\n| 两半都撤(= 修前 `origin/main`) | `500` `{\"code\":\"INTERNAL_ERROR\",\"message\":\"request.headers.get is not a function\"}` ← 与 issue 逐字吻合 |\n| 只留 ②(路由还在) | `500` `{\"code\":\"INTERNAL_ERROR\",\"message\":\"Internal server error\"}` ← 泄漏没了,但**错误类别仍然错** |\n| 两半都在(本 PR) | `404` |\n\n中间那一档正是「两半都要」的实证:光消毒不删路由,拿到的还是一个语义错误的 500。\n\n把遗留路由加回去,新增的三条断言立刻转红,报错正是缺陷本身:\n\n```\nFAIL src/auth-unknown-subpath.hono.integration.test.ts > answers an unknown auth sub-path with better-auth's own 404\nAssertionError: expected 500 to be 404\nFAIL src/auth-unknown-subpath.hono.integration.test.ts > does not resurrect /auth/login for any verb\nAssertionError: expected 405 to be 404\nFAIL src/auth-forward-fault-sanitization.test.ts > mounts nothing under ${prefix}/auth\nAssertionError: expected [ …(52) ] to not include 'POST /api/v1/auth/login'\n```\n\n(`GET` 那条拿到 `405` 而不是 `404`,是被恢复的 `POST` mount 的错方法回收桶——这本身也是遗留路由多出来的一份噪声。)\n\n## 测试\n\n- `packages/runtime/src/auth-forward-fault-sanitization.test.ts` —— ① 路由表钉死:既钉具体的 `POST /api/v1/auth/login` 不在,也钉更一般的不变式(`/api/v1/auth` 下一条都不许有,因为 `IHttpServer` 路由**只能**拿到 `IHttpRequest`),外加两条 sanity 断言防止空路由表把前两条断言变成空真;② 消毒:TypeError 与非 SQL 的普通 Error 都被扣留,整个序列化 body 里搜不到原文,原始 error 对象**原封**进 `console.error`。阳性对照三条:成功 `Response` 原对象透传(不重新封装)、better-auth 自己的 401 body 不被消毒、空 auth 槽仍然 501(#4113 不变)。\n- `packages/runtime/src/auth-unknown-subpath.hono.integration.test.ts` —— 真实 hono boot,开真实 socket 走 `fetch`。这里的假 auth service 是**故意做成 better-auth 形状**的:它第一件事就是 `request.headers.get('cookie')` 和 `new URL(request.url)`,所以内部请求对象在这里的炸法与线上一致;一个能容忍普通对象 `headers` 的假货会让整个套件在缺陷期间一路绿。通配 mount 复刻了 `AuthPlugin` 的 #4088「404 即不属于我,让路」行为,并且**故意在 bootstrap 之后**注册,让它成为最后一个 matcher —— 对本修法最不利的顺序。\n\n本地实测:`pnpm --filter @objectstack/runtime test` → **101 files / 1456 tests 全绿**;`typecheck` → `tsc --noEmit` 无输出;`@objectstack/hono` 73 tests 全绿;`check:route-envelope` / `check:wildcard-fallthrough` / `check:error-code-casing` / `check:adr-anchors` / `check:nul-bytes` 全绿。\n\n## 范围外发现\n\n已作为 #5772 单独立项(observation-class,`finding` 标签,未认领):`packages/plugins/plugin-auth/IMPLEMENTATION_SUMMARY.md` 的 \"API Routes Registered\" 一节与 `packages/client/CLIENT_SERVER_INTEGRATION_TESTS.md` 的 MSW 示例,仍把 `/api/v1/auth/login`(以及 `/register`、`/logout`、`/session`)列为已注册路由 —— 四条一条都不存在。属文档车道,本 PR 不碰。\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01DWUR56YsttL5sTF72Q75TQ\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01DWUR56YsttL5sTF72Q75TQ)_"
+}

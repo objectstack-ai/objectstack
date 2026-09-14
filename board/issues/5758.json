@@ -1,0 +1,35 @@
+{
+  "number": 5758,
+  "kind": "pull_request",
+  "title": "fix(lint): report a config.timeRelative that is not a descriptor object (#5647)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T04:02:45Z",
+  "updated_at": "2026-08-06T04:21:04Z",
+  "closed_at": "2026-08-06T04:21:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T04:21:02Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5758",
+  "body": "Fixes #5647\n\n## 问题\n\nflow start 节点的 `config.timeRelative` 写成标量(`timeRelative: 'daily'` —— 把 sweep 的**节奏**和**描述符**两个概念揉在一起时最自然的错写)时,**每一层都完全沉默**。\n\n## 前提验证(先在 origin/main 上实测,再写规则)\n\n立单方给的是探针级证据,本 PR 在 API 面和 CLI 面各复证一遍:\n\n| 面 | 现状(main) |\n|:---|:---|\n| `FlowSchema.safeParse` / `defineFlow` | **接受**标量。节点 `config` 是开放槽(ADR-0018),外层没有任何 gate 看进去 |\n| parsed tier | `timeRelative` 仍是 `string` —— schema 既没拒也没实体化掉,规则在两个 tier 都看得见 |\n| `validateFlowTriggerReadiness` | `[]` |\n| `lintFlowPatterns` | `[]` |\n| `os validate`(真实 example app) | 注入标量前后输出**逐字节相同**,exit 0,\"Validation passed\" |\n\n所以前提成立,而且比 #5496 修掉的缺口还差一档。因果链:引擎的路由判据是 `config.timeRelative != null && typeof … === 'object'`,标量从 time-relative 分支**穿过**;该 start 节点再无其他 trigger 键时,`resolveTriggerBinding` 返回 undefined、`activateFlowTrigger` 静默 return。连「描述符是对象但形状错」那一行 bind 期 warn 都没有 —— 因为 trigger 从来没被交到这个 flow。这正是 #3481 在 `triggerType` 上发现的同一个形状(「折叠成无 trigger,到处都看不见」),换了一个键。\n\n## 改动\n\n`packages/lint/src/validate-flow-trigger-readiness.ts` 新增判据 1e + 规则 id `flow-time-relative-descriptor-unroutable`(warning),在 authoring 期报出值、类型和后果,hint 把揉在一起的两个概念拆开:描述符说**扫哪些记录**(`{ object, dateField, 以及 withinDays / offsetDays 二选一 }`),**多久扫一次**是同级键 `config.schedule`。\n\n真实 `os validate` 输出:\n\n```\n⚠ flow \"task_reminder\" › start node: has config.timeRelative = \"daily\" (a string),\nwhich is not the descriptor OBJECT this slot takes — the engine routes a flow to the\ntime-relative sweep only when config.timeRelative is an object, so this one is never\nrouted there and the sweep is never installed. Nothing else on this start node declares\na trigger either, so the flow binds to NOTHING and never fires — with zero diagnostics\nat any layer, not even the one bind-time warn a descriptor that IS an object gets when\nthe trigger refuses it.\n```\n\n### 独立判据,不是放宽 #5496\n\n⛔ 没有动 `isTimeRelative`。它同时喂 §1b 的 unknown-object 与 `isAutoTriggered`,放宽它会把**另外两条已发布规则**的覆盖面当作副作用改掉。两条 id 改为沿引擎自己的路由判据**划分** `config.timeRelative` 的非空取值:\n\n- `typeof === 'object'`(**含数组和 `Date`**)→ 引擎**会**路由,`TimeRelativeTriggerSchema` 给出裁决 → `flow-time-relative-descriptor-invalid`(#5496)。这条路径有 bind 期 warn,规则只是把它提前。\n- 其他一切(`'daily'`、`7`、`true`、函数)→ 引擎**哪儿都不路由**,schema 和 trigger 永远看不到 → 本条。这条路径**没有任何运行时通道**可供提前。\n\n这一点修正了派发单里「非普通对象(标量/数组等)」的措辞:实测数组与 `Date` 的 `typeof` 都是 `'object'`,#5651 落地的规则**已经**报它们(用 schema 自己的话)。若按「非普通对象」实现,数组会被两条规则同时报。测试里有双向的互不越界断言。\n\n### 后果分句按 flow 计算,不统一断言\n\n标量单独出现 = 绑不上任何东西、永不触发(issue 的情形,也是更坏的那个)。但同一个 start 节点若还声明了引擎认识的 trigger,flow **确实**会绑上、会触发 —— 按那个 trigger 的条款,描述符被静默丢弃(每次触发一次、context 上没有记录,而不是每条匹配记录一次)。对这种 flow 说「永不触发」是**假诊断**,而假诊断比没有诊断更没价值。所以后果分句分两种,两种都有测试钉住。\n\n## 验证\n\n- 新用例**先红后绿**:反向验证(把 1e 判据关掉)→ 预判方向为**直红**,实测 10 条失败,含改写后的边界用例。其中「key 缺失/为 null 时沉默」原本是纯负向断言(判据删掉也会绿 —— #5046 那种「因为什么都没产出而绿」),已在同一用例内加了对照,现在也会红。唯一保持绿的是常量身份断言(`…_UNROUTABLE !== …_INVALID`),它本来就没有行为可失去。\n- `pnpm --filter @objectstack/lint test`:**60 files / 1397 tests 全绿**;typecheck、build 绿;eslint 绿。\n- **#5735 的 barrel 门禁首次真实命中**(下方单列)。\n- 消费半径:`pnpm --filter @objectstack/cli test` → **83 files / 825 tests 全绿**。全仓扫描确认 cli / examples / triggers 里**没有任何** fixture 用标量 `timeRelative`,故无 fixture 需要三分诊处置。\n- examples 三 app A/B:app-todo 逐条 finding 与基线相同(只差耗时);crm、showcase 新规则**零命中** —— 包括 showcase 真实的 `timeRelative` sweep flow(#1874)保持沉默,这是最有力的不误报证据。\n- 正向对照:临时注入标量 → `os validate` 两种后果分句都正确渲染(其中一次还暴露了首字母小写的接缝,已修)→ 还原,工作树干净。\n- `node scripts/check-nul-bytes.mjs` 绿;另按控制字符纪律对改动文件做了越过门禁的自查(`grep -naP`),干净。\n\n## #5735 barrel 门禁的首次真实命中\n\n派发单要求顺手验证这条刚落地的门禁。它按设计红了 —— 我**先**加常量、**后**加 barrel 导出,`rule-id-barrel-exports.test.ts` 立刻点名了常量名、它的值和 file:line:\n\n```\nFAIL  every declared rule id constant is exported from a barrel, with its own value\n  \"unreachable\": [\n    \"FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE ('flow-time-relative-descriptor-unroutable')\n     — validate-flow-trigger-readiness.ts:95\",\n  ],\n```\n\n在 `src/index.ts` 补上那一行后转绿。评价:门禁按承诺工作,而且报错信息可直接执行(它连该改哪个文件的哪个 export 块都写了)。#5648 的判断成立 —— 这一行确实是靠「记得住」防不住的,七次同类遗漏之后第八次也没记住。\n\n## severity 建议(不自行升级)\n\n按派发单保持 `warning`,与该文件 never-fire 族一致。但值得 PM 记一笔:本条与族里其他成员有一点不同 —— `flow-trigger-unknown-object` 带「对象可能来自其他已安装包」的跨包免责,是真 advisory;而**标量永远不是描述符**,没有任何合法解读,`os validate` 面上它更接近 `error`。升级会改已发布 severity,应单独一个 PR,不搭本次便车。\n\n## 顺带记录(未做,不在本单范围)\n\n方向 2(让标量 `timeRelative` 也算 `isAutoTriggered`,从而被 `flow-draft-status-ambiguous` 覆盖)按 PM 裁定**未做**。CLI 正向对照顺手拍到了这个缺口的实物:把注入 flow 改成 `type: 'autolaunched'` 后,它**同时**失去了 draft-status 告警(因为 `isAutoTriggered` 为 false)。测试里有一条用例把这个「刻意未改」的行为钉住,并配了对象形对照,免得日后有人误以为 draft 规则坏了。是否要单开,交 PM 定。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01GX3sL71LFq8m2usg6VqTSE)_"
+}

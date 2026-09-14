@@ -1,0 +1,35 @@
+{
+  "number": 5675,
+  "kind": "pull_request",
+  "title": "feat(spec): ADR-0117 scoped 接受 —— owning_business_unit_id 规范名进入登记处 (#4611)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T23:48:27Z",
+  "updated_at": "2026-08-06T01:06:01Z",
+  "closed_at": "2026-08-06T01:06:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T01:06:00Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5675",
+  "body": "Fixes #4611\n\nADR-0105 D13 把 promotion 的第三步写成「按子树的 **scoping field** 回填 `organization_id`」,却没有任何元数据声明「哪个字段承载 BU 归属」。维护者 2026-08-05 裁定**选 1 —— 加速 ADR-0117**;PM 复审进一步裁定本轮取 **Q1=D / Q2=(b)**。本 PR 落地**协议决定的名字面**,不含运行时注入。\n\n## ⚠️ 合并语义:接受的是 scoped 范围,不是全文\n\n维护者合并本 PR **即为接受 ADR-0117 的 `Accepted (D1/D3 scoped)` 状态**,即:\n\n- **D1** —— `ownership` 新增 `business_unit` 一档、`owning_business_unit_id` 记录戳的**命名与语义**;\n- **D3** —— 不变量 `record.organization_id == sys_business_unit(owning_business_unit_id).organization_id`。\n\n**以下四项仍为 Proposed,不随本次合并静默通过**,需各自单独评审:\n\n| 遗留决策 | 内容 |\n|---|---|\n| **D5** | 法人归属做成解析规则而非物化列(ADR 正文自标「⚠️ 偏离父 ADR,需评审」) |\n| **D2 默认值** | `pinned` 是否适合作默认盖章策略(平台既有对象以 CRM 形态居多,直觉相反) |\n| **D8 粒度** | 启用门按对象启用还是按部署一次性启用 |\n| **D4 权限位** | 复用 `allowTransfer` 还是新增 `allowChangeOwningUnit` |\n\n另:**D6 是破坏性契约变更**(`resolveOwnerIds` → `resolveScope`,`packages/spec/src/contracts/sharing-service.ts:415`),不在本 PR 范围内,也不因本次 scoped 接受而获批。\n\n状态行的限定式写法对齐仓内既有先例(ADR-0022 / ADR-0025 / ADR-0038 都在 Status 行标注了范围)。\n\n## 本轮落地了什么\n\n1. **ADR-0117 定稿**为 `Accepted (D1/D3 scoped)`,新增「落地状态」表(协议已接受 / 执行待实现),未决问题列表保留并标明已裁定的那一条。\n2. **`SystemFieldName.OWNING_BUSINESS_UNIT_ID`**(`owning_business_unit_id`)—— 明确标注 **open-core 暂不注入**。该表是**名字登记处而非注入集合**,`tenant_id` / `user_id` / `deleted_at` 是既有三条同类先例。早登记是为了阻断消费方各造一个 `business_unit_id` / `bu_id` / `dept_id`,即 cloud#982 用 `tenant_id`/`org_id`/`space` 付过学费的漂移形态。\n3. **`PUBLIC_FORM_SERVER_MANAGED_FIELDS` 收该名** —— 它是与 `owner_id` / `organization_id` 同类的归属锚点;一旦盖章,匿名面上被伪造的值会把记录推到别的部门墙后。在列存在**之前**拒收是零成本且 fail-closed 的,等列上线后再补名单,中间那个版本就是一个带着发布号的洞。\n4. **`scripts/adr-anchors.json` 锚点** —— 按 AGENTS.md #13,一个「保留但不注入」的条目单独读会像死重量(而本仓正在主动清理死面),锚点把它站在哪个决策上写清楚。\n\n## 刻意不动 `ownership` 枚举 —— 附实测\n\n`packages/objectql/src/registry.ts:359-363` 的 `wantOwner` 是**排除式**判定:\n\n```ts\nconst wantOwner =\n  ownership !== 'org' &&\n  ownership !== 'none' &&\n  !(schema as any).managedBy &&\n  !schema.name.startsWith('sys_');\n```\n\n只排除 `org` / `none`。因此**只加枚举值而不动 registry**,`ownership: 'business_unit'` 会**照常注入 `owner_id`** —— 与 ADR-0117 D1 表格(该档 `owner_id` ❌、`owning_business_unit_id` ✅)**恰好相反**。一次性探针实测(跑完即删,未入库),断言按 D1 写:\n\n```\nAssertionError: ADR-0117 D1: business_unit tier must NOT get owner_id:\n  expected { type: 'lookup', …(6) } to be undefined\n+ Received: { type: \"lookup\", reference: \"sys_user\", label: \"Owner\",\n              system: true, readonly: false, … }\n Test Files  1 failed | 119 passed (120)\n```\n\n即:那不是「惰性新增」,而是把**今天的响亮 Zod 拒绝换成明天的静默错误** —— ADR-0049「spec 不得声明运行时不执行的东西」所禁止的形态,也是「让 AI 写的元数据难以出错」这条轴上最差的一档。故本轮**不加枚举值**,并加 pin 钉住当前的拒绝(且断言错误信息仍列出 user / org / none 三个合法值),注释指向 ADR-0117 与后续实施链,防止后人「顺手补全」。\n\n**pin 的方向说明(不套模板)**:`business_unit` 在本 PR **之前就已被拒绝**,所以这条 pin **不改变行为**,它固化的是一个**既有的正确拒绝**。它不是「先红后绿」型的回归证明 —— 真正的先证红在下一节。\n\n## 先证红\n\n对**闸门本身**证红,证明这次登记是被门禁看守的、而非装饰性的。预测方向:把名字加进拒收名单、但**不**在 conformance 测试里归类,应当以「stray entry — classify it」失败。\n\n```\nFAIL src/system-managed-fields-conformance.test.ts : the denylist is exactly\n     (actively-injected ∪ documented-reserved) — no stray or missing entries\nAssertionError: 'owning_business_unit_id' is on PUBLIC_FORM_SERVER_MANAGED_FIELDS\n  but is neither injected by open-core nor listed as defense-in-depth reserved\n  in this test — classify it: expected false to be true\n Test Files  1 failed (1) | Tests  1 failed | 2 passed (3)\n```\n\n归类到 documented-reserved 后转绿。\n\n## 验证\n\n| 命令 | 结果 |\n|---|---|\n| `pnpm --filter @objectstack/spec test` | **316 files / 8062 tests passed** |\n| `pnpm --filter @objectstack/objectql test` | **119 files / 1923 tests passed** |\n| `pnpm --filter @objectstack/rest test` | **49 files / 737 tests passed** |\n| `pnpm --filter @objectstack/plugin-security test` | **34 files / 731 tests passed** |\n| `pnpm --filter @objectstack/cli exec vitest run test/commands.test.ts` | **14 passed**(枚举 pin,未受影响) |\n| `pnpm --filter @objectstack/spec typecheck` | OK |\n| `check:api-surface` / `check:authorable-surface` / `check:liveness` / `check:dual-source-exports` | 全绿 |\n| `check:adr-anchors` / `check:nul-bytes` | OK(30 anchored files;5582 files 无控制字节) |\n\n**消费半径已扫**:`PUBLIC_FORM_SERVER_MANAGED_FIELDS` 的消费方在 `packages/rest`(表单路由白名单)与 `packages/plugins/plugin-security`(grant strip)—— 都不在被改动的包内,已单独跑绿。`ownership` 枚举的消费方 `packages/cli/test/commands.test.ts:83` 同理已验(本轮枚举未动,故仍绿)。\n\n## 生成物\n\n**零生成物变动。** `check:api-surface` 报 \"public API surface + factory signatures unchanged\" —— `SystemFieldName` 本就是导出符号,新增成员值不进签名基线;`authorable-surface.base.json` 未动,因为本 PR **没有碰 `object.zod.ts`**(authorable 面只在枚举真正落地那一 PR 才会合法移动)。`spec-changes.json` 无 `ownership` 条目,不变。\n\n## changeset:判为 minor(非 patch),理由\n\nPM 建议 patch,但按仓内既有判例,`@objectstack/spec` **新增导出成员**走 minor(见 `.changeset/action-alias-conflict-warning.md` 等)。本次除新增 `SystemFieldName` 成员外,还**收紧了匿名公开表单面的行为**(该名自此不再接受客户端提交值),两者都是用户可见的。patch 会让下游在补丁区间内静默收到一次安全面收紧,方向不对,故取 minor 并在 changeset 内写明行为变更提示。若维护者仍偏好 patch,改动仅一行。\n\n## 后续实施链(本 PR 不实现)\n\n已立两单,均 `Blocked-by` 本 PR:\n\n- **#5677**(`domain:engine-core`):`wantOwner` 由排除式翻为正面清单 + 注入 `owning_business_unit_id` 列 + conformance 归类迁移;\n- **#5678**(`domain:spec`):`ownership` 枚举扩展 `'business_unit'`,**须与 #5677 同 PR 或严格后置** —— 单独落 spec 侧即重现本 PR 所拒绝的形态。#5678 内已写明 CLI 枚举 pin(`packages/cli/test/commands.test.ts:83`)的消费半径与 authorable 生成物预期。\n\nD2 盖章策略、D3 不变量的运行时校验、D4 守卫、D8 迁移、D6 契约变更、D13 工具(cloud#874)均不在此链本轮范围;其中四项**尚未裁定**,实现时若无法回避应回报 needs_decision。"
+}

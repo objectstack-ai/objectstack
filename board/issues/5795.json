@@ -1,0 +1,37 @@
+{
+  "number": 5795,
+  "kind": "issue",
+  "title": "根 `dev` 脚本没有任何一步确认工作区已构建 —— 前置检查只有 check:console-sha,未构建时放行进入 12 段噪音现场",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T05:49:14Z",
+  "updated_at": "2026-08-06T10:12:23Z",
+  "closed_at": "2026-08-06T10:12:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5795",
+  "body": "拆自 objectstack-ai/objectstack#5726(方向 3,分诊当时裁定不作 rider、由 PM 转 devx 车道);cli 车道 PM 立单,`domain:*` 标签待分诊座位补(落点根 `package.json` dev 脚本 / `scripts/`,门禁类归 devx)。查重:与 #5217 **同族不同站点**——#5217 管 `scripts/check-i18n-bundles.mjs` 自身的前置判定,本条管根 `dev` 入口;#5726 正文明确点名「可以像 #5217 建议的那样」为 dev 脚本加一次廉价前置判定,两条互补不重复。\n\n## 现象\n\n根 `dev` 脚本目前唯一的前置检查是 `pnpm check:console-sha`;工作区未构建(如 `packages/drivers/*/dist` 缺失、`packages/spec/dist` 陈旧)时直接放行进 boot,落进 #5726 记录的现场:MODULE_NOT_FOUND 噪音 + 指向错误修法的 fail-fast 建议 + 20+ 条像真实契约漂移的假 TS 错(#5726 正文「假漂移」一节,PR #5789 已按分诊要求把该节留档作疫苗)。\n\nCLI 侧放大器已由 PR #5789(惰性 import)消掉,datasource 消息侧另有单(见下),但「一次 30 秒的构建被包装成一场追查」的入口半边在这里:`dev` 是本地第一入口,一次廉价判定 + 一句「跑 `pnpm build`」能把整个家族拦在门外。\n\n## 修法方向(#5726 正文原案)\n\n`dev` 前置加一次廉价构建完整性判定(判据可以是关键包 dist 存在性探测,细节实现者自选),失败时一句话说清该干什么(`pnpm build`),与 #5217 在 `check-i18n-bundles` 侧的建议同构。纯 DX,无用户可见行为变化,CI 不受影响。\n\n## 参考\n\n- #5726 / PR #5789(发现现场 + 假漂移疫苗)\n- #5217(同族先例,`check-i18n-bundles` 站点,pm:queue 在 devx 车道)\n- datasource 消息半边:见 #5726 拆出的 services 车道单(datasource fail-fast 认出「工作区未构建」成因)"
+}

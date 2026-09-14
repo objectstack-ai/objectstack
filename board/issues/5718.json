@@ -1,0 +1,34 @@
+{
+  "number": 5718,
+  "kind": "issue",
+  "title": "悬空引用巡检:行预算耗尽后剩余对象被静默丢弃 —— 报告里没有任何桶说「这些对象没被看过」",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T02:02:01Z",
+  "updated_at": "2026-08-06T04:21:03Z",
+  "closed_at": "2026-08-06T04:21:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5718",
+  "body": "发现自 #4743 事实二的实现过程(PR 见下方引用)。**未认领。**\n\n## 现象\n\n`packages/objectql/src/integrity/dangling-reference-audit.ts` 的主循环:\n\n```ts\nobjects: for (const { obj, refFields } of prioritise(all)) {\n    if (report.scanned &gt;= maxRows) break;\n```\n\n`maxRows`(默认 `DEFAULT_MAX_ROWS = 5_000`)一旦耗尽,循环直接 `break`,**其后所有对象既没被读、也没被记录到任何桶里**。报告返回的 `dangling: []` / `provenance: []` 对这些对象而言不是「查过了、干净」,而是「压根没看」——但报告里没有任何字段区分这两者。\n\n## 为什么这是缺陷,而不是「预算本来就是抽样」\n\n这个文件自己的设计立场恰恰是反过来的。它为「不完整」造了三个专门的桶,每一个都是为了让沉默无法被读成清白:\n\n- `truncatedObjects` —— 某个对象的行预算用完了,所以只看了样本;\n- `unreadableObjects` —— 试着读了,数据源不给;\n- `aborted`(#4747)—— 运行被叫停了。\n\n注释原话:「Together they are what stops `0 dangling` from ever being read as `everything is fine`」。而**对象级**的预算耗尽是唯一一条没有对应桶的不完整路径:`truncatedObjects` 覆盖的是「一个对象内部读不全」,覆盖不了「这个对象整个没轮到」。\n\n## #4743 让它更容易被踩到(但不是它造成的)\n\n原先只有「带非 readonly 引用字段」的对象才会被读,大量表因为 `refFields.length === 0` 直接跳过、不耗预算。#4743 把 `applySystemFields` 注入的溯源族(`created_by` / `updated_by` / `organization_id`)纳入巡检后,**几乎每个对象都有可审计字段**,预算消耗显著上升,`&gt;= maxRows` 提前触发的概率随之上升。\n\nPR 里已经做了力所能及的缓解——`prioritise` 加了第三档(安全面 → 带业务引用的对象 → 仅溯源的对象),保证有限预算优先花在业务发现上。但那只改变了**谁先被读**,没有解决**没轮到的对象不被记录**。这两件事是独立的,所以分开填。\n\n## 建议方向(留给 triage,不预设)\n\n新增一个诚实桶,例如 `unscannedObjects: string[]`(或 `unscanned: number`,若怕对象多时数组过大),在 `break` 之前把剩余对象名记下来。命名与形状按该文件既有分组风格推导。\n\n## 边界\n\n- 不含 #4743 的分桶本身(已由那一单落地)。\n- 与 #5504(engine.ts 写路径)、#5535(lifecycle-service)无重叠:改动面只在 `dangling-reference-audit.ts` 的主循环与报告类型。\n\nRefs #4551(桶的设计立场)、#4747(`aborted` 是同一族的第三个桶)、#4743(把这条路径的触发概率抬高的变更)。\n\nBlocked-by: #4743\n\n(分诊座位补 2026-08-06:同文件在 #4743 在飞面上——`prioritise` 第三档尚未见于 origin/main 的 integrity 目录——#4743 落地后本单回队。)"
+}

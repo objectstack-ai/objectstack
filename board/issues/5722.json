@@ -1,0 +1,35 @@
+{
+  "number": 5722,
+  "kind": "pull_request",
+  "title": "feat(spec): HookContext.session 补声明 `positions` / `preserveAudit`(#5605)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T02:07:01Z",
+  "updated_at": "2026-08-06T02:43:00Z",
+  "closed_at": "2026-08-06T02:42:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T02:42:59Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5722",
+  "body": "Fixes #5605\n\n按维护者 2026-08-06 的裁定 **A**:两个键都补进 `HookContextSchema.session`,并用 `.describe()` 把边界钉死。\n\n## 这是 #5050 的镜像,不是它的另一半措辞\n\n`session.roles` 是 **declared-never-produced** —— 声明了、没人产,所以 #5050 把它退役成墓碑。这两个键是 **produced-never-declared** —— 引擎在产、消费方在读、文档在教,契约里没有,所以补声明。同一个 `session` 块、方向相反、修法相反,这就是 #5605 单独立单的理由。\n\n## 前提复核(对 `origin/main` 逐条核实,四条全部成立)\n\n- **生产方**:`packages/objectql/src/engine.ts` 的 `buildSession()` —— :1494 写 `positions: execCtx.positions`,:1518 条件写 `preserveAudit`。\n- **消费方**:`packages/objectql/src/plugin.ts:782` `const preserveAudit = session?.preserveAudit === true;`(该处 `session` 形参是 `any`,所以类型层看不见这条读)。\n- **文档在教**:`content/docs/kernel/runtime-services/examples.mdx:37` 与 `sharing-service.mdx:67`,都是 `positions: ctx.session?.positions`。\n- **契约没有**:补之前 `session` 只有 `userId` / `actor` / `organizationId` / `accessToken` / `isSystem` / `skipTriggers` / `skipAutomations` + `roles` 墓碑。\n\n⚠️ issue 指出该文件近期被 #5621 / #5668 连改两次 —— 已基于合并后的当前 `origin/main` 重新定位,行号与结构均以本分支基线为准。\n\n## 先证红(两条通道,都是改动前在 `origin/main` 上实测)\n\n**parse 通道** —— `HookContextSchema` 刻意非 strict(文件头有说明:它是引擎交给 handler 的运行时形状,strict 会让引擎侧任何一次内部增强变成消费方的破坏性变更)。代价就是未声明的键被**静默 strip**:\n\n```\n输入 session: { userId: 'u1', positions: ['sales_manager'], preserveAudit: true }\nparse 输出   : {\"userId\":\"u1\"}\nhas positions     : false\nhas preserveAudit : false\n```\n\n生成的 reference 页恰恰以 `HookContextSchema.parse(data)` 作为消费示例 —— 照文档消费,调用方的任职信息就掉在地上。\n\n**tsc 通道** —— 按 `content/docs/automation/index.mdx` 的写法把 handler 标成 `(ctx: HookContext)`:\n\n```\nerror TS2339: Property 'positions' does not exist on type '{ userId?: string | undefined; ... }'.\nerror TS2339: Property 'preserveAudit' does not exist on type '{ userId?: string | undefined; ... }'.\n```\n\n两页 runtime-services 示例之所以看不出来,是因为它们把 `ctx` 标成了 `any`。**照文档抄 + 照文档标类型 = 编译失败**。\n\n## 改了什么\n\n**1. 两个键的声明**(`packages/spec/src/data/hook.zod.ts`),都放在 `roles` 墓碑**上方** —— 墓碑注释自己写明的排序约束(见下文「渲染器陷阱」)。\n\n- `positions: z.array(z.string()).optional()`\n- `preserveAudit: z.boolean().optional()`\n\n**2. `.describe()` 按裁定措辞钉边界。** 这不是装饰,是这单需要维护者拍板的**全部原因**:`positions` 是**可读上下文,不是授权输入**。hook 可以读它去描述调用方(转给 sharing service 当评估上下文、调整消息、打日志),但**不得**用它自己做访问判断 —— 权限由 security service 在 ExecutionContext 上裁决(能力授予 `permissions`、任职 `positions`、以及派生的 posture,ADR-0095 D3)。一个用这个数组重新决定访问的 hook,是在一个拿不到授权模型的地方重判一件已经判过的事 —— 结构上正是 `roles` 墓碑要防的那个错误,只是换了一代词汇。措辞纪律与 `roles` 退役处方一致,针对的是下一个作者(尤其 AI)。\n\n`preserveAudit` 的 describe 写它真实的消费语义:#3493 的历史导入保留标记,server-set、opt-in、普通写不带,由内置审计 hook 读取,用来保留调用方提交的 `updated_at` / `updated_by` 而不是盖上导入时刻 —— 是一条盖戳策略,同样不是授权输入。\n\n**3. Pin(`packages/spec/src/data/hook.test.ts`,新增一个 describe 块)**,与 #5050 的墓碑块并列,两块互为镜像正好把这张契约表的两个漂移方向都钉住。\n\n## 反向验证(方向先预测,再运行)\n\n预测:删掉任一声明,**两条通道都应转红**。实测:\n\n- parse 通道:`vitest run src/data/hook.test.ts` → `4 failed | 68 passed`(两条 preserve、`buildSession()` 形状、describe 边界)。\n- tsc 通道:`check:test-typecheck` → `src/data/hook.test.ts: 9 type error(s) in a file the ledger does not cover`。该文件**不在** `test-typecheck-debt.json` 里,所以这是硬门,不是被 ledger 兜住的软红。\n\n**一条诚实说明**:新增的 5 条断言里,`keeps both OPTIONAL` 在反向验证下**仍然绿**。它断言的是「缺席」,而键被 strip 之后同样缺席 —— 它是伴随断言,不是 pin(少写 `.optional()` 会让它转红,这是它留下的理由)。测试注释里已如实写明「不要把它当作声明存在的证据」,以免下一个读者把一条因空而绿的断言读成覆盖。这里没有用 `@ts-expect-error`:本单要证的事实是「文档教的代码**能**编译」,所以类型 pin 是一条正向标注读,回退时的失败形态是硬类型错误,而不是 TS2578 未使用指令。\n\n## 生成物与渲染器陷阱(#5606)\n\n`roles` 墓碑注释写明:生成的 reference 把内联对象渲染成**前四个声明键加省略号**,而 `z.never()` 没有 JSON-Schema `type`,会印成 `any` —— 所以墓碑必须待在形状底部,否则 `references/data/hook.mdx` 会开始宣传 `roles?: any`。新键因此加在墓碑**上方**,落在第 8/9 位。\n\n结果:`content/docs/references/data/hook.mdx` 的 session 行**一字未变**,仍是 `{ userId?: string; actor?: string; organizationId?: string; accessToken?: string; … }`。已两路确认 —— `check:docs` 绿(文件无需重新生成),并逐行目视核对生成页。\n\n`pnpm --filter @objectstack/spec check:generated`:**10/10 全绿**(api-surface 读的是 built dist,必须先 `build` 才有效,已 build 后复跑)。\n\n一处**刻意未提交**:跑生成器时 `authorable-surface.base.json` 被重锚到本分支的 merge base,带进了别人落的 `api/Discovery:scoping` 两个键 + baseRev。那不是本次改动的产物,已回退 —— 该 gate 复跑后自述「trails the merge base by 2 key(s) — expected right after a surface change lands」,是信息性提示,不红。删除类 ratchet 的锚点不该搭在无关 PR 里顺带前移。\n\n## 验证\n\n| 命令 | 结果 |\n|:---|:---|\n| `pnpm --filter @objectstack/spec test` | `317 passed (317)` / `8088 passed (8088)`;合入 `main` 后复跑 `8090 passed (8090)` |\n| `pnpm --filter @objectstack/spec typecheck` | 绿(`tsc --noEmit` + `check:test-typecheck` OK),合入后复跑仍绿 |\n| `pnpm --filter @objectstack/spec check:generated` | `All 10 generated artifacts are up to date`,合入后复跑仍 10/10 |\n| `pnpm --filter @objectstack/objectql typecheck` | 绿 |\n| `pnpm --filter @objectstack/objectql test` | `121 passed (121)` / `1970 passed (1970)` |\n| `node scripts/check-nul-bytes.mjs` | OK(另做控制字符自扫,无命中) |\n| 远端 CI(本 PR head) | 24 项 check runs 全部 success/skipped,无 failure |\n\nobjectql 一并跑了,因为它是生产方:`buildSession()` 的返回值现在被真正声明的类型覆盖(此前 `as HookContext['session']` 把两个键遮了过去)。\n\n## 影响面\n\n纯增量:两个键都 optional,形状仍非 strict,现存 context / handler / 存量元数据都不受影响。HookContext 按操作构造、从不落库,没有任何东西需要迁移。changeset 记 `@objectstack/spec` minor。\n\n## 一处如实说明:本地有两个未推上来的提交\n\n本分支在本地还有两个提交没能推送 —— push 被拒,原因是本 PR 已被(非本 session 的动作)标记 ready 并加入 merge queue,排队中的分支不允许更新。两个提交都**不含内容变更**:\n\n1. 一个 `origin/main` 的合并提交(AGENTS.md §10 的合并后复验;merge queue 本身就是把 PR 作为「合并到当前 main 的结果」来构建的,所以这个合并对正确性是冗余的);\n2. 一处**纯注释**措辞订正 —— 上面「诚实说明」那段的行内注释原写作「四条兄弟断言」,准确说法是「五条兄弟里的四条,第五条是 tsc 通道的 pin,vitest 判不了它」。\n\n即入队的 head 与我的最终状态在本 PR 涉及的文件上只差这 6 行注释。留此说明以免后来者对不上分支状态;若需要,订正可作为后续小 PR。\n\n## 附带发现(未在本 PR 修)\n\n**#5720** —— 同两页文档还在教 `ctx.services?.sharing?.canEdit(...)`,而 hook 上下文(引擎构造的 handler ctx 与 body-runner 的沙箱 ctx)**都没有** `services` 这个键(它是 action ctx 的词汇)。可选链短路成 `undefined`,`if (!ok) throw` 于是无条件抛出 —— 照抄这个示例的 hook 会拒掉该对象上的每一次写入。同一个 `ctx: any` 标注同时架空了那段 `{/* os:check */}` 门禁,也正是它掩盖了本单的 TS2339。修法取决于「hook 访问 kernel service 的受支持通道是什么」这个待定问题,故按 Prime Directive #10 单独立单,未在本 PR 顺手改文档。"
+}

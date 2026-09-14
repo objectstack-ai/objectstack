@@ -1,0 +1,35 @@
+{
+  "number": 5850,
+  "kind": "pull_request",
+  "title": "perf(objectql): update() 单 id 前置行门按对象判定需求(#5284),并校准 #4743 事实一的三处注释",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T08:02:03Z",
+  "updated_at": "2026-08-06T08:23:46Z",
+  "closed_at": "2026-08-06T08:23:45Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T08:23:44Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5850",
+  "body": "Fixes objectstack-ai/objectstack#5284\nCloses objectstack-ai/objectstack#4743\n\n## 改了什么\n\n`packages/objectql/src/engine.ts`,`update()` 单 id 分支的前置行门,由\n\n```ts\nneedsPriorRecord(updateSchema) || (this.hooks.get('afterUpdate')?.length ?? 0) > 0\n```\n\n改为按对象问:\n\n```ts\nconst wantsPriorRecord =\n  needsPriorRecord(updateSchema as any) ||\n  this.hasHooksFor('afterUpdate', object) ||\n  this.getSummaryDescriptors(object).length > 0;\n```\n\n前提已核实有效:origin/main 上全局门原样保留(#5754 的 update 派发重构没有动它),而同文件的批量路径早就用 `hasHooksFor('afterUpdate', object)` 问同一个问题 —— 一个文件里两种精度,这次统一到窄的那一侧。\n\n**新门的三项需求 = `priorRecord` 在这条分支上的全部消费方**,逐个核过:\n\n1. `needsPriorRecord(schema)` —— 对象校验规则,以及它涵盖的 `readonlyWhen` / `requiredWhen` / 选项可见性字段谓词;\n2. **本对象**的 `afterUpdate` hook —— handler 与声明式 `condition` 都读 `hookContext.previous`(`hasHooksFor` 与 `triggerHooks` 的过滤逻辑一致:不带 `object` 或写 `'*'` 的注册照样命中每个对象);\n3. 本对象被 roll-up `summary` 聚合 —— `recomputeSummaries(object, result, priorRecord, ...)` 用 `previous` 里的**旧**父 id 重算子记录离开的那个父。\n\n第 3 项是收窄**必须**带上的:没有它,「子记录改挂父记录时重算旧父」这件今天只是**偶然**成立(靠别的对象存在 afterUpdate hook 顺带捞到前置行)的事情,会在按对象化之后彻底失效,把一次多余的读换成一个静默过期的汇总值。带上它之后,这条路径第一次自己声明需求 —— 也顺手修好了「部署里一个 afterUpdate hook 都没有时旧父不重算」的既有缺口。\n\n## ⚠️ #4784 预告的陷阱:实测方向与 issue 描述相反,`beforeUpdate` **不**计入\n\nissue 正文(与派发要点)要求把「本对象任一 update 侧 hook,before/after 皆算」计入,理由是「只有 `beforeUpdate` 且 condition 读 `previous` 的对象会失去前置读,按 #4775 fail-loud 打回」。**实测把这条推理证伪了**,证据是 engine.ts 自身的时序:\n\n- `triggerHooks('beforeUpdate')` 在 5480 行(收窄前行号),前置行读在 5533 行,`hookContext.previous` 的赋值在 5726 行(**写入之后**);\n- 也就是说 `update()` 的这次读**永远到不了 before 阶段**。探针在未改动的 origin/main 上跑过(bare engine,对象 B 有 afterUpdate hook 让全局门为真):`beforeUpdate` 的 `ctx.previous === undefined`;一个 `previous.done != true && record.done == true` 的 `beforeUpdate` condition **今天就已经**被 #4775 打回(`Unknown variable: previous ... not bound for this operation`),与门是否为真无关。\n\n所以把 `beforeUpdate` 计入这道门,买到的是**一次没有读者的读**;而且它会把 `hook-condition-previous-scope.test.ts` 里那条现存的 pin(「只有 `record`-only before-hook condition 的对象不读任何前置行」= 0 次 findOne)直接压红 —— 那条 pin 不能删断言换绿,它现在反而更承重了:它钉的正是「`beforeUpdate` 不计入」。\n\ndelete 侧(#5272)之所以计入 `beforeDelete`,是因为那条路径**先读、后派发、当场绑定**,before 阶段是真读者。两侧不对称是时序不同,不是遗漏,已写进代码注释。\n\n**那么 kernel 里的 `beforeUpdate` hook 为什么能读到 `previous`?** 来自另一个生产者:`plugin.ts` 的内建 `sys_fetch_previous_update`(`object: '*'`,priority 5)自己做了一次 `ql.findOne`。它不受本门约束,所以收窄拿不走任何人的绑定 —— 新测试直接驱动了这个形状来证明两者不打架。顺带发现同一行前置状态在装了 plugin-audit 的部署里被读 **3 次**(内建 + audit 的 `captureBefore` + 引擎本门),已按 PD #10 平铺记录为 #5846,**未在本 PR 内修**。\n\n## 省下多少 —— 诚实的口径\n\n取决于 hook **怎么注册**,不取决于有多少个:\n\n- **按对象注册**的(record-change flow trigger 的 `object: binding.object`、plugin-sharing 的按规则重算、plugin-auth 的 `sys_user` 快照刷新、所有元数据编写的 hook)从此不再向邻居收税 —— 这是本 PR 的收益面;\n- **完全不带 `object`** 的(plugin-audit 的 `writeAudit`、service-storage 的文件引用回收)本来就在每个对象上真的执行,`hasHooksFor` 正确地答「命中」,所以在装了它们的部署里这道门依然恒真、省不下读。让这两处在注册面上表达它们 handler 里已经在做的过滤(plugin-audit 用的是 `SKIP_OBJECTS`),是 #5846 的内容。\n\n也就是说:issue 里「plugin-audit 一旦启用,平台范围每次单记录 update 都吃到这次读」这句话在**现象**上成立,但归因需要修正 —— 它不是「在多对象上注册」,而是**全局注册**;因此本 PR 单独并不能让那类部署省下这次读,它把门修正确,#5846 负责让收益兑现。\n\n## 反向验证(方向是先预测、后运行)\n\n预测:把门改回全局形态,只有两条新 pin 变红,其余全绿(尤其两条 `beforeUpdate` 用例必须**保持绿**,因为它们钉的是时序而不是门)。实测完全一致:\n\n```\n× object A pays NO prior read while only object B has an afterUpdate hook\n  AssertionError: expected 1 to be +0\n× a roll-up summary keeps its OLD-parent recompute with no hooks registered anywhere\n  AssertionError: expected +0 to be 1\nTests  2 failed | 28 passed (30)\n```\n\n## 测试\n\n新增 `packages/objectql/src/engine-update-prior-read-scope.test.ts`(8 例,全部通过真实引擎 + 计数 stub driver;`findOne` 按对象计数,因为改挂父记录时 #4441 的悬空检查会读**父**对象一次,总数会把两件事混在一起):\n\n- 对象 B 有 afterUpdate 时,对象 A 的单 id update **不再**多付 findOne(0);\n- 有 hook 的那个对象照付(1),且 `previous` 就是库里那一行;\n- `object: '*'` 的注册仍然让每个对象都读(1)—— 松了只是多查一次,紧了会漏掉本要触发的 hook;\n- 没有任何 hook 时 `needsPriorRecord` 仍强制读,且 `readonlyWhen` 真的按**存储态**把改名丢掉(次数与效果一起断言:读了却没用会过第一条、挂第二条);\n- 没有任何 hook 时 roll-up 的旧父重算仍然成立(两个父都对);\n- `beforeUpdate` 在前置行**已在手**时依旧观察到 `previous === undefined`,而同一次写的 `afterUpdate` 拿到完整行;\n- `previous.*` 的 `beforeUpdate` condition 在「读了」与「没读」两种配置下**同样**被拒 —— 判决权在时序不在门;\n- 由更早的 before-hook(内建 `sys_fetch_previous_update` 的形状,经 `ctx.ql` 取行)供给的 `previous` 不被收窄干扰:condition 正常求值,引擎**不再**追加自己的读(总计 1 次,就是 hook 自己那次)。\n\n`hook-condition-previous-scope.test.ts`:**一条断言未删**,只把描述旧门的那段文档注释校准到新门,并写明它的第一条 pin 现在更承重(它驱动的对象带一个 `beforeUpdate` hook,正是新门刻意不计入的那类)。\n\n命令与结果(容器级验证锁串行,`--maxWorkers=2`):\n\n```\npnpm --filter @objectstack/objectql test    → Test Files 126 passed (126) / Tests 2073 passed (2073)\npnpm --filter @objectstack/objectql typecheck → tsc --noEmit(无输出)\n```\n\n消费半径(引擎 hook 面的下游)逐个跑过,全绿:\n\n```\nplugin-audit           7 files / 112 tests\nplugin-sharing        13 files / 347 tests\nservice-automation    64 files / 762 tests\ntrigger-record-change  5 files /  55 tests\nruntime              101 files / 1458 tests\n```\n\n门禁:`node scripts/check-nul-bytes.mjs` OK;`node scripts/check-engine-double-contract.mjs` OK(新测试用的是**真引擎 + 假 driver**,不构成 engine double)。\n\n## Rider:#4743 事实一的三处注释校准(不改任何行为)\n\n同文件纯注释,按 2026-08-03 裁决与其后的追记执行:\n\n1. `assertReferencesResolve` 里 `readonly` 收窄的紧邻注释:改写为陈述**独立成立**的原则(这个检查只回答「调用方点名的引用」;非系统调用方写进 readonly 字段的值在写入前已被 `stripReadonlyFields` / `stripReadonlyForInsert` 剥掉,留下的必然是平台自己写的,本就在检查的自述范围之外;删掉这个 `continue` 会开始拒绝平台自身的写入),并按 PD #13 把决定 id 留在代码里。`actor ?? 'system'` 哨兵降为**历史引用**:说明它是这条收窄被**发现**的方式(dogfood gate),以及 #4556 拆掉它之后为什么隔壁巡检的整体跳过要重新定范围 —— 不再把收窄描述成绕 bug 的临时补丁。\n2. + 3. `inspectDanglingReferences` docblock 结尾的 `@link` 文案(即车道待办里记作 ~2876 与 ~2997 的同一处,行号已漂):`readonly skip` → **readonly SPLIT** —— #5719 已把 readonly 引用改为照读、findings 进 `provenance` / `provenanceUndetermined` 桶;并按 #5718 校准 \"bounded-scan honesty\" 半句:不完整性现在每一层都有桶(表内 `truncatedObjects`、预算没走到的表 `unscannedObjects`、数据源拒绝的 `unreadableObjects`、被叫停的 `aborted`)。\n\n本 PR 以 `Closes #4743` 收尾该单;**事实二已由 PR #5719 交付**。\n\n## changeset\n\n`@objectstack/objectql` patch —— 写明性能语义(何时不再多付一次读、省下多少取决于注册面)与不变的正确性保证(`previous` 语义、#4775 fail-loud 形态、after-hook 分发)。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019Q7oc7ASjh8yxyS3Yz78We)_"
+}

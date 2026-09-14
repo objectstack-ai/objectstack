@@ -1,0 +1,35 @@
+{
+  "number": 5588,
+  "kind": "issue",
+  "title": "发布出去的 `/api/v1/openapi.json` 描述的 built-in 路由一条都不存在 —— 10 个 operation 真实 boot 全部 404(证伪 #5456 的「当前未漂移」)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T19:54:21Z",
+  "updated_at": "2026-08-06T07:05:42Z",
+  "closed_at": "2026-08-06T07:05:42Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5588",
+  "body": "发布出去的 `GET /api/v1/openapi.json` 里,**built-in 路由那一段描述的每一条路径都不存在**。真实 boot 逐条探测,文档里的路径全部 404;真实路由在另一个前缀上。任何人拿这份文档生成客户端,生成出来的客户端每一个数据调用都会 404。\n\n基线:`origin/main` @ `5acb93add`。在 #5456 的前提复核中量到(#5456 的 body 断言「当前未漂移,7 条与今天的路由面一致」——**该断言被本单证伪**),按 Prime Directive #10 单独立单。\n\n## 真实 boot 实测\n\n```\npnpm dev:crm -- --fresh -p 39177\nGET /api/v1/openapi.json  →  200, 151 paths（{object} 已按 CRM 对象展开）\n```\n\n逐条探测文档描述的路径 vs 真实路由:\n\n```\n文档里的（展开后）路径                     真实结果\n/api/crm_contact                       404   {\"error\":\"Not found\"}\n/api/meta                              404   {\"error\":\"Not found\"}\n/api/meta/types                        404   {\"error\":\"Not found\"}\n/api/.well-known/objectstack           404   {\"error\":\"Not found\"}\n\n真实路由                                  结果（401 = 路由在,鉴权挡住）\n/api/v1/data/crm_contact               401   {\"error\":\"UNAUTHENTICATED\",...}\n/api/v1/meta                           401\n/api/v1/discovery                      200\n/.well-known/objectstack               200   ← dispatcher 在根上服务,不在 /api 下\n```\n\n动词也错。文档写 `PUT {object}/{id}`,真实是 `PATCH`——服务器对 `PUT` 明确回 405:\n\n```\nPUT   /api/v1/data/crm_contact/xyz   →  405\nPATCH /api/v1/data/crm_contact/xyz   →  401\n```\n\n## 逐条对照\n\n`packages/spec/scripts/build-openapi.ts` 的 `generateCrudPaths` / `generateMetadataPaths` / `generateDiscoveryPaths` 用 `basePath = '/api'` 手写出 7 条 path / 10 个 operation:\n\n| base spec operation | 真实 rest 路由 | 判定 |\n|---|---|---|\n| `GET /api/{object}` | `GET /api/v1/data/:object` | 路径错(缺 `/v1`、缺 `/data`) |\n| `POST /api/{object}` | `POST /api/v1/data/:object` | 路径错 |\n| `GET /api/{object}/{id}` | `GET /api/v1/data/:object/:id` | 路径错 |\n| `PUT /api/{object}/{id}` | `PATCH /api/v1/data/:object/:id` | 路径错 **且动词错**(PUT 回 405) |\n| `DELETE /api/{object}/{id}` | `DELETE /api/v1/data/:object/:id` | 路径错 |\n| `GET /api/meta` | `GET /api/v1/meta` | 路径错(缺 `/v1`) |\n| `GET /api/meta/types` | **全仓没有这条路由** | 描述了一条谁都不服务的路由(最接近的是 `GET /api/v1/meta`,它返回 types) |\n| `GET /api/meta/{type}` | `GET /api/v1/meta/:type` | 路径错(缺 `/v1`) |\n| `GET /api/meta/{type}/{name}` | `GET /api/v1/meta/:type/:name` | 路径错(缺 `/v1`) |\n| `GET /api/.well-known/objectstack` | **rest 没有这条路由** | dispatcher(`packages/runtime/src/dispatcher-plugin.ts:658`)在**根路径** `/.well-known/objectstack` 上服务;rest 的 discovery 是 `GET /api/v1` + `GET /api/v1/discovery` |\n\n字面比对:**0/10 命中**。补 `/v1` 和 `/data` 之后仍有 **3/10** 对不上。\n\n反方向同样不等:`RestServer.getRoutes()` + 两个 direct-mount registrar 枚举出 **91 条**真实路由;即使只看 base spec 自称覆盖的三个 ledger family(`crud` 6 + `metadata` 17 + `discovery` 2 = **25 条**),文档也只描述了 10 个 operation。\n\n## 为什么没被发现\n\nserve 期的 enrichment(`rest-server.ts` `registerOpenApiEndpoints`)只做四件事:覆写 `servers[0]`(**只写 origin,不含 basePath**)、展开 `{object}`、合并声明式端点、覆写 `info.version`。**没有任何一步重写 path 前缀**。而 `check:generated` 的收尾台账把 `gen:openapi` 记为无门禁(`{ gen: 'gen:openapi', why: 'the OpenAPI document is generated but no check gate compares it to the routes' }`),#5168 补的是产物自洽门(`$ref` 能解析、schema 不降级),不看路由。所以两边各自「正确」,合起来全错,全绿。\n\n现有测试还把错误形状钉住了:`packages/rest/src/rest-openapi-route.test.ts:125` 断言 `body.paths['/api/{object}']['x-template'] === true` —— 它证明了服务出去的文档字面上就带着 `/api/{object}`。\n\n## 处置需要一次契约裁决(本单不预设)\n\n注意 `apiPath` 是**可配置**的(`api.apiPath ?? api.basePath + '/' + api.version`,`rest-server.ts:2830`),所以 `packages/spec` 里的**静态** JSON 原则上无法对所有部署写对前缀——今天写 `/api` 只是错得更彻底,写死 `/api/v1` 也只是对默认部署正确。\n\n- **A** 把模板改成具体的 `/api/v1/data/{object}` 等 —— 最便宜,但把一个可配置值焊进发布产物,是新的漂移源。\n- **B** 模板相对化(只写 `/data/{object}`),由 rest 在 serve 期用自己的 `getApiBasePath()` 拼前缀 —— 和它已经在做的 `{object}` 展开同一条流水线。spec 保持与部署无关。\n- **C** built-in 路由这一段整体由 **rest 产出**(它已经在 `openapi-endpoints.ts` 里产出声明式端点那一段了),spec 只保留它真正拥有的 `components.schemas` / `info` / `securitySchemes`。ADR-0076 意义上的唯一属主本来就是 rest(#5078 已用真实 boot 确权),这样结构上不可能漂移,也就不再需要 #5456 那道对账门。\n\n## 关联\n\n- **阻塞 #5456**(对账门):门要落地,先得决定 base spec 该描述什么;在此之前「模板集合 ↔ ledger 双向相等」在两个方向上都不成立。\n- #5168(自洽门,已修)、#5078(属主确权)、#5371(产物生命周期)、#5487 / #5224(faces announce only what the matcher serves —— 同一类「面在说谎」,那单管的是声明式端点,本单管的是 built-in 路由)。\n- AGENTS.md Prime Directive #10(绝不宣传运行时不提供的能力)。"
+}

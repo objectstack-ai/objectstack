@@ -1,0 +1,37 @@
+{
+  "number": 5085,
+  "kind": "issue",
+  "title": "`/auth/*` 转发层把内部请求对象直接交给 better-auth:未知 auth 子路径(如 `POST /api/v1/auth/login`)返回 500 并外漏内部 TypeError,而非干净 404/405",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T03:07:46Z",
+  "updated_at": "2026-08-06T04:57:02Z",
+  "closed_at": "2026-08-06T04:57:02Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5085",
+  "body": "在 #5078 的实测定级 boot 中发现(2026-08-04,`origin/main` @ `29c6c9d`,showcase,真实 boot 非 grep 推断),**未认领**。查重:`headers.get` 全仓开放 issue 零命中。\n\n## 实测\n\n```\nPOST /api/v1/auth/login\n→ HTTP 500\n{\"success\":false,\"error\":{\"code\":\"INTERNAL_ERROR\",\"message\":\"request.headers.get is not a function\",\"httpStatus\":500}}\n```\n\n阳性对照:`POST /api/v1/auth/sign-in/email`(better-auth 真实路由)→ 200 + `set-cookie: better-auth.session_token=…`,同一 boot 同一转发层,工作正常。\n\n## 判读\n\n`request.headers.get is not a function` 表明 `/auth/*` 的某条转发路径把**内部请求形状**(headers 为普通对象)直接交给了 better-auth 的 fetch 风格 handler(其调用 `request.headers.get()`)。已知路由(sign-in/email)工作正常,说明主转发路径有正确的 `Request` 转换 —— 疑为某个次级/回退分支漏转换。两个问题叠加:\n\n1. **错误类别错了**:不存在的 auth 子路径该是 404/405,现在是 500 —— `/auth/login` 是极易被猜到的路径(行业惯用名),真实用户/集成方会撞上;\n2. **内部错误文案外漏**:raw TypeError message 进了响应体 —— 仓内 5xx 本有 `looksLikeInternalErrorLeak` 消毒惯例(error-envelope 一族),此路径绕过了它。\n\n## 落点初判(分诊改标即可)\n\n初判落 `packages/runtime` 的 auth 域转发层或其请求转换(`domain:cli`);若实读发现转换责任在 `plugin-auth` 侧,分诊时改 `domain:identity`。修法方向:未匹配的 auth 子路径在转发前给干净 404,或补全该分支的 Fetch `Request` 转换;任一情况下 5xx 出口过消毒。\n\n## 复现\n\n`pnpm dev -- --fresh --seed-admin -p <port>`(showcase)→ `curl -X POST http://localhost:<port>/api/v1/auth/login`。\n\n关联:#5078(发现现场)、#3962(「失败说 HTTP」的错误统一先例)、ADR-0076(域属主)。"
+}

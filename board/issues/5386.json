@@ -1,0 +1,36 @@
+{
+  "number": 5386,
+  "kind": "issue",
+  "title": "`controlled_by_parent` derivation ignores the master's ownership and share grants — children are readable (and writable) regardless of parent access",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T03:26:47Z",
+  "updated_at": "2026-08-06T06:48:43Z",
+  "closed_at": "2026-08-06T06:48:43Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5386",
+  "body": "Measured on `17.0.0-rc.2` while verifying a sharing decision in objectstack-ai/hotcrm#549; the app-side report with the full fixture is objectstack-ai/hotcrm#694. Filed unassigned by the hotcrm PM loop.\n\n## The gap\n\n`plugin-security`'s `computeControlledByParentFilter` derives the child filter as `parentFK IN (master ids)`, where the master id set comes from `computeRlsFilter(master, 'find', ctx)` — Layer 0 (tenant) and Layer 1 (`rowLevelSecurity` policies) only, executed under a **system** context.\n\nOwner scope and `sys_record_share` grants are applied by a *different* plugin — `plugin-sharing`'s `buildReadFilter` — which returns `null` for any object whose effective sharing model is not `private`, and `controlled_by_parent` maps to `public`. So the two halves of record-level access never meet on a derived object.\n\nThe function documents the v1 scope itself:\n\n> single level — the master's OWN controlled_by_parent is not traversed transitively; master accessibility is the master's RLS filter (sharing-service grants on the master are not folded in).\n\nThe consequence of \"not folded in\" is stronger than it reads: **an app that authors no `rowLevelSecurity` policy on the master gets an unrestricted master set**, so the derived filter restricts nothing at all. Authoring RLS on the master is not a workaround either — it is ANDed with the sharing filter, so it also cuts off the very rows that were shared in (measured, dead end).\n\n## Measured\n\nReal boot of `ObjectQL` + `plugin-security` + `plugin-sharing` over the app's own config, two accounts owned by another user, one rep holding a territory position that shares exactly one account:\n\n| object | OWD | rep sees |\n|---|---|---|\n| `crm_account` | private | acct_US only — the shared one. Correct. |\n| `crm_contact` | `controlled_by_parent` (account) | **both accounts' contacts**, including the account they cannot read |\n| `crm_quote_line_item` | `controlled_by_parent` (quote) | **both quotes' lines**, though they can read neither quote |\n\nWrite side has the same hole: `assertControlledByParentWrite` checks the master against `computeRlsFilter(master, 'update')` — also empty — so a caller holding `allowEdit` can write children of parents they cannot see. Measured directly: with a quote converted to `controlled_by_parent`, the rep **edited a quote on an account they cannot read**.\n\n## Why this matters beyond one app\n\n`controlled_by_parent` reads, to an author, as \"this child follows its parent's access\" — that is what the name says and what apps model with it. Delivered behaviour is \"readable by anyone holding object-level read\". Line-item objects are the common shape here, and they carry per-line pricing and discounts.\n\nThis is a declared-≠-enforced surface of the worst kind: the app declares a **narrowing** and the engine applies none, with no warning at author time, publish time or runtime. An app author — human or AI — has no signal that the boundary they declared does not exist. hotcrm's own metadata comments, profile comments and security docs all assert the narrow reading and are all wrong; they were written against the name, not against a measurement.\n\n## Suggested direction\n\nResolve master accessibility through the same path a direct read of the master would take — owner scope and `sys_record_share` grants folded in, not RLS policies alone — for both the read filter and the write assertion. If that is not intended for v1, then the mismatch should at least be **loud**: reject or warn at publish time when an object declares `controlled_by_parent` against a master whose access depends on sharing rather than RLS, so the silent case stops being the default one.\n\n## Acceptance\n\n- A child of a `controlled_by_parent` object is invisible to a caller who cannot read its master, when the master's access comes from ownership or a share grant;\n- the same holds for writes;\n- a test fixture covers the ownership/share path specifically (RLS-only coverage is what hides this today)."
+}

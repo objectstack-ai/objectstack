@@ -1,0 +1,36 @@
+{
+  "number": 5370,
+  "kind": "issue",
+  "title": "os-regen 驱动指示的 `gen:schema` 在 merge 未 commit 时运行,会把 authorable-surface 锚点倒退回旧 merge-base —— 生成器写入、门全绿、静默撤销 main 的锚点推进",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T02:11:17Z",
+  "updated_at": "2026-08-06T08:40:07Z",
+  "closed_at": "2026-08-06T08:40:07Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5370",
+  "body": "## 现象(PR #5312 同步接力实测,可复现)\n\nos-regen 合并驱动在 merge 停下时打印的处方是:\n\n```\n⟳ packages/spec/authorable-surface.json\n   not text-merged — it is generated. Regenerate from the merged tree:\n     pnpm --filter @objectstack/spec gen:schema\n```\n\n逐字照做——**在 merge 尚未 commit 时**跑 `gen:schema`——会把 `authorable-surface.base.json` 的锚点**倒退**:\n\n- `build-schemas.ts` 的 `resolveSurfaceBase()` 用 `merge-base(HEAD, origin/main)` 解析锚点;\n- MERGE 状态下 HEAD 仍是合并前的分支 tip,merge-base 是分支的**旧**分叉点;\n- 实测(2026-08-05,分支 `claude/issue-5271-api-metadata-type-registry` 合 `28ad90e`):baseRev 从 main 已推进的 `1c3da1f` 被写回 `5aae790`,#5321 已退役的 109 键(`HttpServerConfig:*` / `EmbedConfig:*` / `NotificationAction:*` 等)整批回到锚点文件。\n\n## 为什么这比一般脏产物更值得修\n\n倒退后的锚点**依然 authentic**——`5aae790` 是 origin/main 祖先、keys 与该 commit 的 surface 逐行一致——所以 `verifyCommittedSurfaceBase`、`check:authorable-surface`、pre-commit 的 os-regen 守卫**全部放行**。没有任何门会拦下它。后果:\n\n1. main 上 #5321 那次锚点推进被静默撤销,文件重新胖 109 键;\n2. PR diff 里出现一次「反向锚点移动」,review 时与 #4650 的攻击形状(手改锚点藏删除)难以一眼区分——尽管这次是生成器写的;\n3. 离线消费者(#5235 的 in-tree 锚点用户)拿到一个比 main 已发布状态更旧的基线。\n\n## 触发条件\n\n分支带 authorable-surface 增量 + merge origin/main 停在冲突/待重生成 + 在 commit 前照驱动提示跑 `gen:schema`。多 agent 并行、spec 车道高频合并的这个仓库里,这是每天都会走到的路径。\n\n## PR #5312 采用的规避(可作修法参考)\n\ndeferred 生成物 reset 到 origin/main → 重建 → **先 commit merge** → 再跑 `gen:schema`(此时 merge-base = 刚合入的 main tip,锚点由生成器正向推进,独立 commit)。\n\n## 候选修法(供 triage,不预设)\n\n- `resolveSurfaceBase()` 检测 MERGE 状态(`$GIT_DIR/MERGE_HEAD` 存在)时改用 `MERGE_HEAD` 与 origin/main 的 merge-base(即被合入的 main tip),或至少拒绝把 baseRev 移向祖先方向(锚点只进不退——`gen:schema` 自己能判定新旧:旧 rev 是新 rev 的祖先);\n- 驱动的打印处方与 AGENTS.md §11 补一句「先 commit,后 gen:schema」;\n- pre-commit 的 os-regen 守卫在锚点 baseRev 相对 committed 版本后退时警告。\n\n第一条最贴「结构上让 AI 写不错」:处方照抄也不会写出倒退锚点。\n\n发现于 #5312 的同步接力;该 PR 未受影响(已按上面的规避处理)。"
+}

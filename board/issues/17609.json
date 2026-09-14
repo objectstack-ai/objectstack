@@ -1,0 +1,37 @@
+{
+  "number": 17609,
+  "kind": "issue",
+  "title": "driver-turso: remote mode never materializes object-level `indexes` — every declared secondary index is absent on production Turso tenant databases, so hot polling queries full-scan",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "pm:done",
+    "priority:p0"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-11T03:32:11Z",
+  "updated_at": "2026-09-11T05:02:36Z",
+  "closed_at": "2026-09-11T05:01:28Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17609",
+  "body": "## 现象（生产实测；租户信息已匿名）\n\n两个**生产**租户库（`driver-turso` remote 模式，`libsql://`）的 `sqlite_master`：\n\n| | 表 | 索引总数 | 其中主键自动索引 | 其余 |\n|---|---|---|---|---|\n| 库 A | 100 | 106 | 100 | 6 = 4 个字段级 `unique` 生成的 `uniq_*` + 2 个 metadata-protocol 原生 SQL 建的 `idx_sys_metadata_overlay_*` |\n| 库 B | 100 | 105 | 100 | 5 个 `uniq_*` |\n\n- `sys_notification_delivery` 声明了 5 个索引（含 1 个对象级 `unique`）→ 两个库里**一个都没有**，只有 `sqlite_autoindex_sys_notification_delivery_1`\n- `sys_job_queue` 声明了 3 个 → 两个库里**一个都没有**\n- 同一批对象定义在本地 `SqlDriver`（better-sqlite3）落地后：`sys_notification_delivery` 6 个、`sys_job_queue` 4 个，**齐全**\n\n同一条领取查询的执行计划：\n\n```sql\nEXPLAIN QUERY PLAN SELECT id FROM sys_notification_delivery\n WHERE status = 'pending' AND partition_key = ? AND next_attempt_at <= ?\n ORDER BY next_attempt_at LIMIT 50\n```\n\n```\n远程租户库 → SCAN sys_notification_delivery\n            USE TEMP B-TREE FOR ORDER BY\n本地       → SEARCH sys_notification_delivery USING INDEX idx_sys_notification_delivery_b3081700\n            (status=? AND partition_key=? AND next_attempt_at<?)\n```\n\n## 原因（读码；`origin/main` `3ef96b471` 仍如此，无在途 PR）\n\nremote 模式下 `TursoDriver.initObjects` 走 `RemoteTransport.syncSchemasBatch`。`remote-transport.ts` 里**所有**索引 DDL 都来自 `buildUniqueIndexDDL`（`:2160`，由 `uniqueIndexesFromFields` 生成——只看**字段级** `unique`），发射点 `:1841` / `:1868` / `:1941` / `:1981`，全文件唯一一条 DDL 模板是 `:2196` 的 `CREATE UNIQUE INDEX IF NOT EXISTS`。\n\n对象级 `indexes: [...]`——无论是否 `unique`——在 remote 路径上**没有任何消费者**。本地的对应物是 `SqlDriver.syncDeclaredIndexes`（`sql-driver.ts:9812`）。\n\n#16570 修的是 `indexes` 进 `initObjects` 参数的**类型面**；`turso-driver.ts` 那段注释自己也写了「the runtime carried both keys the whole time」——但带着键不等于把它渲染成 DDL。这是 ADR-0049「声明无执行点」在 DDL 层的一例：从外面看什么都没坏，代价只出现在账单上。\n\n## 后果（生产实测）\n\n一个租户库 **9 天 1,011.6 亿次行读**，占其所在 Turso 组织的 99.9%，已进入超额计费；该库数据总量 12.7 MB。\n\n机制是三件事叠乘（另两件分卡）：\n\n1. **本卡**：热表没有索引，每条查找都是全表扫描\n2. 通知调度器空闲时每跳仍发 32 条语句（`service-messaging` 另卡）\n3. 投递表持续增长——未配置邮件传输的租户，每条通知写一条必死的 email 投递，保留 90 天（`service-messaging` 另卡）\n\n实测稳态约**每秒 28 次**全表扫描 `sys_notification_delivery`；表每天 +316 行，日读量每天线性 +8 亿。\n\n## 验收\n\n1. remote 模式为**每个**对象级声明索引发射 DDL——非 unique 与 unique、含 nullSafe / 租户键部分——与 `SqlDriver.syncDeclaredIndexes` **同名同键**（`buildIndexName`）。新表随建表批次一起落；**已有表走 retrofit**（`IF NOT EXISTS`，零改数据）\n2. 失败不静默：建不出的索引按 AGENTS.md 降级规则以 `error` 级报出原因（与 #8413 的 unique retrofit 同等待遇）\n3. **对等测试**：同一组对象定义分别经 local `SqlDriver` 与 remote transport 落地，比较 `sqlite_master` 的索引名集合**全等**；至少覆盖 `sys_notification_delivery`、`sys_job_queue`\n4. **开机成本受控**：稳态（索引都已存在）不得每次 kernel 构建为每张表各发一轮语句——沿用 unique retrofit 的批量 / 一次性做法\n5. **回归证据**：remote 面上对上面那条领取查询 `EXPLAIN QUERY PLAN` 为 `SEARCH … USING INDEX`\n\n## 影响面\n\n所有 remote 模式租户库（托管云的每个环境）。修复发布并被消费方 pin 后，已有库靠 retrofit 在下一次 kernel 构建时补齐。\n"
+}

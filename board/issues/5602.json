@@ -1,0 +1,35 @@
+{
+  "number": 5602,
+  "kind": "issue",
+  "title": "turso 迁回本仓后，CLI 的 URL→driver 解析仍对 `libsql://` 抛 UnsupportedDriverError —— runtime 的 provisioning 却把 turso 排在偏好第一位，两处口径相反",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T20:17:22Z",
+  "updated_at": "2026-08-06T07:00:14Z",
+  "closed_at": "2026-08-06T07:00:14Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5602",
+  "body": "**发现于**：#4645 Phase A（`@objectstack/driver-turso` 迁入 `packages/drivers/driver-turso`）。Phase A 只做迁移，**没有**动任何接线；这个单记的是迁移**暴露**出来的口径分叉，需要维护者裁定要不要接。\n\n## 现状（迁移后实测）\n\n同一个仓库里，两处对 `turso` 的态度相反：\n\n**A. runtime 把 turso 当默认首选**\n- `packages/runtime/src/http-dispatcher.ts:1520` —— 环境 provisioning 的偏好顺序：`turso` → `memory` → 任意其他已注册 driver\n- 同文件 `:1495` —— `POST /cloud/environments` 的 `driver` 参数示例即 `memory | turso`\n- `packages/objectql/src/engine.ts:4086` —— turso 专属的瞬时 `fetch failed` 重试\n\n**B. CLI 的 URL 推断明文拒收 turso**\n- `packages/cli/src/utils/storage-driver.ts` `resolveStorageDefinition()` 对 `driverType === 'turso' || 'libsql'` 抛 `UnsupportedDriverError`\n- `packages/cli/src/commands/serve.ts` 把它当 fatal 重抛，boot 直接 exit 1\n- `inferDriverTypeFromUrl()` **仍然**把 `libsql://` / `*.turso.io` 归类成 `turso`（注释写明是故意的：归类了才能响亮拒收，而不是静默掉回 SQLite）\n\n拒收本身是对的、也是有来历的（#3276 那类 declared ≠ enforced：CLI 广告了 `memory`/`turso` 却没有分派分支，两者都静默变成 SQLite-in-memory）。**在 driver 不在本仓的年代，\"不在开源分发里\"就是拒收的完整理由。现在这个理由没了**，接线与否变成一个真正的选择。\n\nPhase A 已做的（仅限真话修复，不改行为）：把拒收信息里\"ships with the ObjectStack cloud / enterprise distribution, not the open-core CLI\"这句已经失真的话，改成\"不是 CLI 从 URL 构造的 driver\"；`content/docs/data-modeling/drivers.mdx`、`self-hosting.mdx`、`environment-variables.mdx` 三处\"开源框架不支持 Turso\"同样改成\"URL 不推断，需显式注册\"。**抛错行为一字未改**，`storage-driver.test.ts` 的四条 pin 全绿。\n\n## 需要裁定的是接线本身\n\n| 选项 | 代价 | 说明 |\n|---|---|---|\n| **A. 维持现状**（`libsql://` 继续响亮拒收，只能显式注册） | 零 | CLI 不新增对 driver 包的依赖；`libsql://` 用户必须写 stack config。runtime 的 provisioning 偏好顺序与 CLI 的 URL 推断本来就是两条路径，不接线不算矛盾——只是读起来像。 |\n| **B. 接进 URL 推断**（`libsql://` → `TursoDriver`） | CLI 新增一条对 `@objectstack/driver-turso` 的依赖（进而拖上 `@libsql/client`），或走可选动态 import + 缺包时响亮报错 | 与 runtime 把 turso 排第一的口径对齐；`os start --database libsql://...`（`start.ts:54` 的 example 里已经这么写了）真的能跑。 |\n\n注意 `packages/cli/src/commands/start.ts:54` 的 `examples` 里已经写着\n`start --database libsql://my-db.turso.io --database-auth-token $TURSO_TOKEN` ——\n**照抄这条 example 今天会 exit 1**。无论裁定哪个选项，这条 example 都得跟着处理（B 则它成真，A 则它得删或改写）。\n\n⛔ 不要在没有裁定的情况下顺手接：给 CLI 加一条 driver 依赖是公共契约面的变化（安装体积、可选 peer 的形状、`libsql://` 从\"响亮失败\"变成\"能连\"）。\n"
+}

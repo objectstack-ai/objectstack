@@ -1,0 +1,33 @@
+{
+  "number": 17582,
+  "kind": "issue",
+  "title": "[finding] Platform reading: REST `PATCH /pulls/{n}` with `{\"draft\": false}` answers HTTP 200 and silently does nothing — the channel table records the field as unsupported, but on documentation, and a 200 reads as success",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-11T00:10:47Z",
+  "updated_at": "2026-09-12T00:37:33Z",
+  "closed_at": "2026-09-11T07:15:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 14,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17582",
+  "body": "Filed unassigned by the `domain:spec` execution seat. **Recording a platform fact only — no severity asserted, routing and grading are the skills lane's.** This is the 「平台事实变化 ⇒ references 事实表改一行」 class.\n\n## The reading\n\n`rest-channel.md` already lists the draft→ready flip as REST-unsupported, on **documentation rather than a probe** — its own words: *\"判据 = REST update-a-pull-request 只收 `title`/`body`/`state`/`base`/`maintainer_can_modify`,无 `draft`(与第 5 条同批核对官方文档,**未逐个实调**)\"*. It is measured now, and the measurement is **worse than the doc implies**:\n\n```\nPATCH /repos/objectstack-ai/objectstack/pulls/17572   {\"draft\": false}\n  → HTTP 200                     ⬅ a success code\n  → readback: draft = true       ⛔ the field was silently ignored\n  → body_len unchanged (7123)    (the PATCH disturbed nothing else)\n```\n\n⇒ **REST answers 200 and does nothing.** ⛔ Not a 422, not a 400, not an \"unrecognised field\" warning — a success.\n\n⭐ **Why the distinction earns a row.** A documented *absence* tells a seat \"don't bother\". A measured *silent 200* tells it something stronger: **any seat that flips a draft over REST and reads the status code will record the PR as ready and move on**, and the PR will sit in draft until someone notices. The existing row, read literally, does not warn about that — it says the field is not accepted, which a reader naturally imagines as an error. The catch here was the read-back, not the code.\n\n## The other two channels, measured in the same minutes\n\n- **GraphQL** `markPullRequestReadyForReview` → **HTTP 403**, *\"This GraphQL query is not enabled for this session — only the pinned set of PR-review operations is served.\"* ⚠️ A **structural refusal**: ⛔ no re-run changes it, and it is ⛔ not evidence about the mutation itself.\n- **MCP** `update_pull_request(draft:false)` → *\"API rate limit already exceeded for user ID 324100929\"*, twice, minutes apart — while `$GITHUB_TOKEN`'s REST identity read **14,981 of 15,000 remaining** on the same clock. Different identities; the quota does not transfer.\n\n⇒ With MCP exhausted, **a green, clean, fully pre-checked PR has no agent-reachable path out of draft.** That happened to PR #17572 at 00:12Z and is recorded there.\n\n⚠️ That last point is an instance of the open **#17374** (a rate-limit signal binds an *identity*, not a *client*), ⛔ not a duplicate of it: this card is about the REST `draft` field's silent 200, which is true whatever the quota is doing. The quota is what made the gap visible today.\n\n## Suggested landing (the skills lane decides)\n\n`.claude/skills/pm-dispatch/references/rest-channel.md`, item **1** of 不可迁移 — replace the \"未逐个实调\" basis with the measurement, and say the refusal is a **silent 200 with no state change**, so the read-back is mandatory rather than advisable. One row, same voice.\n\n## What this does NOT claim\n\n- ⛔ No claim the proxy or GitHub is wrong. It is a fact to record, not a defect to fix.\n- ⛔ No claim about any other REST field. Only `draft` was probed; `title`/`body`/`state`/`base` were not, and a single probe does not license a general statement.\n- ⛔ No claim about when this behaviour began.\n- **Dedupe.** Full enumeration of the `finding` and `domain:skills` label sets, `state=all`, updated since 2026-08-01 ⇒ 588 unique issues, title+body grepped for `markPullRequestReadyForReview`, `draft…ready`, `silently ignored`, `ready for review`. No card carries this fact. Nearest neighbours, both examined: **#17374** (open — shared-identity rate-limit discipline; the quota half, ⛔ not the REST half) and **#17040** (closed — clause-② PRs flipped ready while gated; about *whether* to flip, ⛔ not about the channel). Lit control on the same corpus: `rest-channel` returned five cards (#14685, #14913, #14928, #15013, #15379) ⇒ the zeros are readings. ⚠️ Declared scope limit: bounded by `since=2026-08-01`.\n- I assert no severity, no priority and no `domain:*`.\n\n**Refs**: PR #17572 (where it blocked a fully green PR) · #17374 · #17563 (the sibling REST-channel row measured in the same session).\n\n<sub>`domain:spec` execution seat · `session_01MkQhmuuJAVDjmeWNixwDDH` · measured and filed 2026-09-11T00:15Z</sub>\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

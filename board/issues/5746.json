@@ -1,0 +1,35 @@
+{
+  "number": 5746,
+  "kind": "issue",
+  "title": "protocol/objectql/schema.mdx 的多租户小节教 tenant_id + legacy OS_MULTI_ORG_ENABLED,与平台的 organization_id / ADR-0120 词表不一致",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T03:45:03Z",
+  "updated_at": "2026-08-06T11:26:31Z",
+  "closed_at": "2026-08-06T11:26:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5746",
+  "body": "发现于 #5315(去掉 `TenancyConfigSchema.tenantField` 的 `.default('tenant_id')`)的消费方扫荡,与该单契约无关,按 Prime Directive #10 单独记录,**未在该 PR 中修改**。\n\n## 事实\n\n`content/docs/protocol/objectql/schema.mdx` 的「Multi-Tenant Schemas」小节(约 711–727 行):\n\n```yaml\nname: customer\ntenancy:\n  enabled: true       # Automatically filter by the tenant field (row-level isolation)\n  tenantField: tenant_id\nfields:\n  tenant_id:\n    type: lookup\n    reference: tenant\n    required: true\n```\n\n紧接着的正文:\n\n> When the kernel runs in multi-tenant mode (`OS_MULTI_ORG_ENABLED=true`), the registry also auto-injects an `organization_id` lookup on every user object, and the default `tenant_isolation` RLS policy scopes reads/writes to the caller's tenant …\n\n三处问题:\n\n1. **同一段里两个名字**:示例把租户列叫 `tenant_id`,下一段正文说 registry 注入的是 `organization_id`。这正是 ADR-0120 §Terminology 点名要消除的「两个子系统给同一个概念起不同名字」;该 ADR 已把可授权词汇定死为 `organization`(`tenant` / `org` 一律拒收)。\n2. **引用了一个不存在的对象**:`reference: tenant` —— 平台没有 `tenant` 对象,租户/组织对象是 `sys_organization`。\n3. **`OS_MULTI_ORG_ENABLED` 是 legacy**:`packages/types/src/env.ts:89` 原文 \"Read the LEGACY `OS_MULTI_ORG_ENABLED` boolean\";同文件 129–132 行说明它已被新变量取代(仅在新变量 unset 时才由它派生 `isolated` / `single`)。文档把它当现行开关介绍。\n\n## 影响\n\n`packages/spec` 侧的默认值本身已由 #5315 修正(未声明即 `undefined`,有效租户列由 driver 回落到 `organization_id`),但这一页仍是 AI 作者会照抄的面。照抄它会同时得到:一个按 `tenant_id` 命名的租户列、一个指向不存在对象的 lookup、以及一个 legacy 环境变量。运行时不会立刻报错(driver 的 `computeTenantField` 对不存在的列会跳过并回落),但产出的元数据与平台其余部分(RLS 谓词、写入打戳、autonumber 序列)错位 —— 与 #5315 描述的是同一个失配模式,只是残留在协议文档这一侧。\n\n## 为什么没有在 #5315 里顺手改\n\n改对这一段不是替换一个词。要先决定这个示例的教学意图:是保留「自定义租户列」的演示(那就得换一个 ADR-0120 词表允许的场景,并把 lookup 指向真实存在的对象),还是改成平台默认姿势(省略 `tenantField`,让 driver 回落)。再加上 `OS_MULTI_ORG_ENABLED` 那句需要按 `env.ts` 的现行事实重写。这超出了 #5315 的裁定面(该单只动 `packages/spec/src/data/object.zod.ts` 的 `@example` / `.describe()`,以及 `content/docs/data-modeling/objects.mdx` 这一处直接的授权指引),故单独记录,严重度请 triage 轮次自行判定。"
+}

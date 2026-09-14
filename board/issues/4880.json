@@ -1,0 +1,36 @@
+{
+  "number": 4880,
+  "kind": "issue",
+  "title": "`content/docs/ui/apps.mdx` 完全没有 `areas[]` —— 一个带权限语义的可作者化键零文档覆盖",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T12:43:20Z",
+  "updated_at": "2026-08-06T11:26:31Z",
+  "closed_at": "2026-08-06T11:26:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4880",
+  "body": "v17 rc.2 文档巡检(sweep run 5)中记录的越界发现,未认领。\n\n## 现象\n\n`AppSchema.areas[]` 是真实的可作者化键 —— 侧边栏与 `AppSchemaRenderer` 都按作者写的顺序迭代它 —— 但 `content/docs/ui/apps.mdx` 里**一次都没出现过**。该页的章节是 Basic Structure / App Properties / Navigation Items(含 9 种 item 类型)/ Branding / Mobile Navigation / Complete Example,全部只讲顶层 `navigation` 树。\n\n```\n$ git grep -in \"area\" content/docs/ui/apps.mdx\n(无输出)\n```\n\n手写文档全树同样为零(`content/docs/**`,排除生成的 `references/` 与 `releases/`)。\n\n## 为什么现在值得补\n\n这一轮窗口里有三处改动落在 `areas[]` 上,而作者能读到的散文解释在文档侧一处都没有:\n\n- **#4667** 退役 `areas[].order` —— 没有 renderer 排过序。\n- **#4651** 退役 `areas[].visible` / `areas[].requiredPermissions` —— 这两个不是惰性键,是**fail-open 的闸门**:作者写 `requiredPermissions: ['sales.admin']`,拿到干净的 parse 和存下来的值,而该 area 连同其下全部内容照常下发给**每一个用户**。\n- **#4722** 让服务端权威闸门 `filterAppForUser` 也走 `areas[].navigation`,area **内部**的项级 `requiredPermissions` / `requiresService` 现在由服务端剥离,响应形状随之收紧(被 gate 掉的项不再出现,被滤空的 area 整个剥离)。\n\n于是现在有一条**不对称的安全语义**,而它只活在 changeset、spec 的 `.describe` 处方和 liveness 账本 note 里:\n\n> 项级 `requiredPermissions` / `requiresService` 在两棵树上都由服务端强制;`visible`(CEL)在任何层级**仍然只在客户端求值**。必须永不到达浏览器的东西写 `requiredPermissions`,不要写 `visible`。\n\n一个只读 `/docs/ui/apps` 的作者,今天无从得知 `areas[]` 存在,更无从得知这条不对称 —— 而写错的方向正是「以为 `visible` 能挡住」。\n\n## 建议\n\n在 `content/docs/ui/apps.mdx` 增一节 `## Areas`:什么时候用 areas 而不是顶层 group、`areas[].navigation` 与顶层树的关系、上面那条服务端/客户端闸门的不对称(带 17.0.0 的退役说明),以及一个 Complete Example 级别的样例。措辞可以直接以 `packages/spec/liveness/app.json` 里 `areas.navigation` 的 note 为蓝本(#4722 已改写正确)。\n\n## 与 #4749 的关系\n\n**不是重复,是一对。** #4749 修的是 `packages/spec/src/ui/app.zod.ts` 里 `AREA_REQUIRED_PERMISSIONS_RETIRED` 处方正文(写错 area 级键时报错正文里的那句「the server does not walk `areas`」在 #4722 之后已过时),连带 `app.test.ts` 的 pin。本单修的是**文档页缺整节**。两者措辞应保持一致,谁先做谁定调;建议做后一个的人读一眼前一个的结论。\n\n参考:#4722(项级闸门服务端强制)、#4651(area 级键退役裁决)、#4667(`order` 退役)、#4749(spec 处方措辞)。"
+}

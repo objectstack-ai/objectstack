@@ -1,0 +1,35 @@
+{
+  "number": 5793,
+  "kind": "pull_request",
+  "title": "fix(spec): gen:docs 给「元素是联合类型」的数组补上括号 —— `(string | number)[]`,不再是 `string | number[]` (#5338)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T05:47:08Z",
+  "updated_at": "2026-08-06T06:15:03Z",
+  "closed_at": "2026-08-06T06:15:02Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T06:15:02Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5793",
+  "body": "Fixes #5338\n\n## 前提复核(先于实现,针对 `origin/main` @ `1624f4a`)\n\n立案时的判断全部成立,没有过期:\n\n- `packages/spec/scripts/lib/format-type.ts` 存在,#4912(合入为 PR #5339)引入的\n  `hasTopLevelIntersection()` 与指向本单的注释都在原处;\n- 数组分支仍然是「元素渲染结果后面直接拼 `[]`」,对顶层联合不加括号;\n- 缺陷在已生成的参考页里可以直接 grep 到,例如\n  `content/docs/references/ui/action.mdx:136` 印的是\n  `Record< string, { description?: string; enum?: string | number[]; examples?: any[] } >`。\n\n## 缺陷本身\n\nTypeScript 里 `[]` 的结合优先级高于 `|`,和高于 `&` 是同一回事:\n\n| schema 表达 | 修复前印出 | 印出的东西实际含义 |\n|:---|:---|:---|\n| 数组,元素为 `string` 或 `number` | `string \\| number[]` | 一个 string,**或者**一个 number 数组 |\n| 数组,元素为 `string` 或 `{ id, label, default }` | `string \\| { id: string; … }[]` | 同上,顶层被拆成二选一 |\n\n单元格声明的类型和 schema 声明的**不是同一个**。参考页的类型单元格正是元数据作者\n(尤其是 AI 作者)直接照抄的那一行:照着 `string | number[]` 写下一个裸 string,\nschema 会当场拒绝,而页面看起来是允许的——这正是 #4001 战役在追的「声明与呈现不符」。\n\n## 修法\n\n按立案建议,只有一处:`hasTopLevelIntersection` 放宽为\n`hasTopLevelUnionOrIntersection`,深度扫描同时识别顶层 `&` 与 `|`。\n\n两者本来就是**同一条规则**——`[]` 对这两个运算符都不满足分配律(`A & B[]` 是\n`A & (B[])`,`A | B[]` 是 `A | (B[])`)——所以共用一次扫描,而不是并列两个函数。\n#4912 当时把扫描限定在 `&`,是因为交叉类型元素是那个 PR 自己引入的,而联合侧是既有\n缺陷、重生成 diff 会把真正的 passthrough 修复埋掉;那条注释现在改写成了两半合一的说明。\n\n深度扫描原本就正确忽略 `{}` / `< >` / `[]` / `()` 内部的运算符,所以\n`Enum<'a' | 'b'>[]`、`Record< string, string | number >[]`、\n`{ k?: string | number }[]` 和 markdown 链接都保持原样,不会多出括号。\n\n## 重生成结果与规模\n\n`pnpm --filter @objectstack/spec gen:docs`(输入是本分支合入树里的当前 schema):\n\n- **19 个参考页、42 行单元格、47 处补括号**;\n- `git status` 只有 modified,**没有新增页,也没有被删除的页被复活**;\n- `pnpm --filter @objectstack/spec check:docs` 报告 `240 generated files in sync`(不动点)。\n\n关于规模与立案里「164 处」的差异,这里如实说明,不硬凑:立案的 164 是对**整个\n`json-schema/` 语料**(1608 个文件)按节点扫描得到的**原始站点数**,同一个共享 shape\n在每个引用它的 schema 的 `$defs` 里都被数一次;而参考页对每个 shape 只渲染一次,或者\n干脆渲染成 `$ref` 链接。我在本分支上复测:原始站点数 415(联合 356 + 交叉 59),\n去重后**只有 22 个不同的单元格字符串**,落到页面上就是 42 行 / 47 处。修复后再跑同一\n探针:**渲染成未加括号的站点为 0**。也就是说覆盖是完全的,只是「站点」和「单元格」\n是两个不同的口径。\n\n样例(`content/docs/references/automation/state-machine.mdx`,`|` 是 GFM 单元格转义):\n\n```diff\n-| **entry** | `string \\| { type: string; params?: Record< string, any > }[]` | optional |\n+| **entry** | `(string \\| { type: string; params?: Record< string, any > })[]` | optional |\n```\n\n## 测试\n\n`packages/spec/scripts/format-type.test.ts` 新增 7 个用例(该文件共 19 个,全绿),覆盖:\n基本类型联合、对象变体联合(取真实的 `AiModelsResponse.models` 节点)、\nJSON Schema 的 `type: [a, b]` 数组写法、**联合里嵌数组变体**(取真实的\n`View.list.filter[].value`,外层联合不加括号、内层数组加)、嵌套数组每层各加一次、\n联合里混有交叉变体,以及一组「不该加括号」的反向用例。\n\n**反向验证(方向事先判定,结果如实记录)。** 把扫描收窄回 `&`(即本 PR 之前的\n`hasTopLevelIntersection`)重跑:\n\n```\nTests  5 failed | 14 passed (19)\nFAIL … (#5338) > brackets a union of primitives instead of letting `[]` claim the last variant\nFAIL … (#5338) > brackets a union whose variants are objects (the AiModelsResponse specimen)\nFAIL … (#5338) > brackets a JSON Schema type-array element (`type: [a, b]`), which also renders a union\nFAIL … (#5338) > brackets the ARRAY VARIANT inside a union, leaving the outer union unbracketed\nFAIL … (#5338) > brackets once per array level, so nested arrays stay readable\n```\n\n方向是最常见的那一种(还原缺陷 → 新 pin 变红),因为这些用例断言的是修复**产出的正形状**。\n但新块 7 个用例里只红了 5 个,这一点写进了测试文件的注释而不是含糊带过:\n「联合里混有交叉变体」那条本来就被 `&` 那一半括起来了(它两个运算符都有),\n「不该加括号」那条断言的是括号**不出现**——两条都是诚实的非回归用例,不是死 pin。\n#4912 的交叉侧 pin **全部保持绿**,`({ label: string; value: … } & Record< string, any >)[]`\n行为不变。\n\n其余验证:\n\n- `pnpm --filter @objectstack/spec test` → `319 passed (319)` / `8151 passed (8151)`\n- `pnpm --filter @objectstack/spec typecheck` → `tsc --noEmit` 通过 + `check:test-typecheck: OK`\n- `node scripts/check-nul-bytes.mjs` → OK(5678 个受跟踪文本文件,无裸控制字节)\n\n## Changeset\n\n包含 `.changeset/format-type-union-array-brackets.md`(`@objectstack/spec` patch)——\n本 PR 改的是读者可见的生成参考文档,因此走 changeset 而不是 `skip-changeset`。\n\n## 已知陷阱处理\n\n#5358:任何 spec build/gen 都会顺手改写 `packages/spec/authorable-surface.base.json`。\n本 PR 提交前逐文件核对并 `git checkout --` 还原了该文件,`git show --stat HEAD` 确认\n它**不在**本次提交里。\n\n---\n\n关联:#4912 / PR #5339(同一渲染器,交叉类型侧)、#4001(战役)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01559M8FVm6W6vDLABL3jvdW\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01559M8FVm6W6vDLABL3jvdW)_"
+}

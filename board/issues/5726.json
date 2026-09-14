@@ -1,0 +1,36 @@
+{
+  "number": 5726,
+  "kind": "issue",
+  "title": "objectstack dev 在工作区未构建时刷 12 段无关命令的 MODULE_NOT_FOUND，唯一可执行的那条却指向错误修法",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T02:10:03Z",
+  "updated_at": "2026-08-06T05:59:31Z",
+  "closed_at": "2026-08-06T05:59:31Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5726",
+  "body": "观察类发现（`finding`）。起因是本地 `pnpm dev` 起不来、控制台刷满报错，排查后确认**代码没有 bug**，坏的只是「工作区未构建」这一个前置条件——但诊断输出把它呈现成了十几个互不相关的问题，且唯一可执行的那条指向**错误的修法**。与 #5217 同族（同样是「未构建的工作区被报成 N 个内容问题」），但站点不同，故单独记一笔。\n\n## 现象\n\n在一个依赖装了一半、且 `packages/spec/dist` 陈旧的 worktree 里跑 `pnpm dev`，控制台先刷 **12 段** `MODULE_NOT_FOUND`：\n\n```\n(node:95916) [MODULE_NOT_FOUND] Warning: ModuleLoadError\nmodule: @oclif/core@4.13.1\ntask: findCommand (meta:resync)\nplugin: @objectstack/cli\ncode: MODULE_NOT_FOUND\nmessage: [MODULE_NOT_FOUND] import() failed to load .../cli/dist/commands/meta/resync.js:\n  Cannot find package '.../packages/cli/node_modules/@objectstack/driver-sql/index.js'\n  imported from .../packages/cli/dist/utils/schema-migrate.js\n```\n\n同样的段落重复 6 条命令 —— `meta:resync`、`migrate`、`migrate:apply`、`migrate:plan`、`migrate:value-shapes`、`migrate:files-to-references` —— **一条都不是我调用的命令**（我跑的是 `dev`）。`dev` 又 fork 了子进程，于是 6 × 2 = 12 段。\n\n刷完之后，真正可执行的那条在最后：\n\n```\n✗ datasource 'default': connect failed — Cannot find package '.../@objectstack/driver-sql/index.js' ...\n  (declared boot-critical by the host ... ⇒ fail-fast per ADR-0062 D5).\n  Fix the datasource configuration, or set OS_ALLOW_DRIVER_CONNECT_FAILURE=1 to boot anyway\n  and serve errors until it is reachable.\n```\n\n## 真实原因\n\n只有一个：**`packages/drivers/*` 的 dist 不在**（本次的成因是这 5 个包连 `node_modules` 都没有 —— `pnpm install` 在该 worktree 里没装全 —— 外加 `packages/spec/dist` 陈旧）。\n\n放大成 12 段噪音的是这一行：\n\n`packages/cli/src/utils/schema-migrate.ts:17`\n```ts\nimport { isInPlaceSchemaWork } from '@objectstack/driver-sql';   // 顶层 value import\n```\n\noclif 的 `findCommand` 在**每次** CLI 调用时都会遍历命令表并 `import()` 命令模块，所以只要有**任何一条**命令的 import 链断了，跑**任何**命令都会为它打一段警告。`schema-migrate.ts` 被 6 条命令共用，driver-sql 的 dist 一缺，这 6 条就集体加载失败 —— 哪怕你跑的是 `dev`。\n\n（同文件 16 行的 `import type { ManagedDriftEntry, ... }` 是纯类型导入，不产生运行时依赖，与本条无关。全 `packages/cli/src` 里 driver-sql 的生产代码 value import **只有这一处**，`isInPlaceSchemaWork` 也只在本文件用了 3 次：`schema-migrate.ts:334/335/379`。）\n\n## 为什么值得记一笔\n\n1. **12 段噪音没有一段提到真正的原因或修法。** 它们指向 `meta:resync` / `migrate:*` 这些跟启动毫无关系的命令，读起来像是 CLI 的命令表坏了。\n\n2. **唯一可执行的那条给的是错误修法。** `datasource 'default': connect failed` 的两个建议 —— 「Fix the datasource configuration」和「设 `OS_ALLOW_DRIVER_CONNECT_FAILURE=1`」—— 对这个成因都是错的：datasource 配置是好的；而设了那个开关只会让一个**构建不完整**的工作区\"启动成功\"，然后对所有请求报错。正确修法是 `pnpm build`，一句都没提。一次 30 秒的构建被包装成了一场追查。\n\n3. **它会主动把人带向不存在的 bug。** 我在排查途中跑 `pnpm --filter @objectstack/driver-sql build`，拿到 20+ 条看起来非常像真实类型契约漂移的错误：\n\n   ```\n   src/schema-drift.ts(33,10): error TS2305: Module '\"@objectstack/spec/data\"' has no exported member 'isAppResolvedDefaultToken'.\n   src/schema-drift.ts(442,9): error TS2322: Type '\"default_mismatch\"' is not assignable to type 'SchemaDiffEntryKind'.\n   src/memory-driver.ts(174,12): error TS2416: Property 'supports' ... Type '{}' is missing ... create, read, update, delete, and 27 more.\n   ```\n\n   **这些全部是假象。** `isAppResolvedDefaultToken` 在 `packages/spec/src/data/default-value-tokens.ts:143` 好好地导出着，`'default_mismatch'` 也在 `packages/spec/src/shared/external-errors.ts` 的 `SchemaDiffEntryKind` 联合里 —— 只是**不在陈旧的 `packages/spec/dist` 里**。`pnpm install && pnpm build` 之后全仓 **72/72 绿**，`pnpm dev` 零报错启动。\n\n   特意把这段写下来，是因为它极容易被下一个人当成 driver-sql / spec 的真实漂移去\"修\"，从而在正确的代码上改出真的 bug。\n\n## 复现\n\n```bash\n# 在一个装了依赖但未构建（或 spec/dist 陈旧）的 worktree 里\nrm -rf packages/drivers/*/dist\npnpm dev\n```\n\n## 建议方向（实现者自选）\n\n1. **把那一处 value import 改成惰性的**（首选，改动最小）。在真正需要的函数里 `await import('@objectstack/driver-sql')`，或者把 `isInPlaceSchemaWork` 这个纯谓词挪到不依赖 driver 的模块里。这样 driver 未构建时那 6 条命令仍能被 oclif 发现，12 段噪音直接消失，CLI 对\"缺 driver\"也更健壮。\n\n2. **让 datasource 的 fail-fast 认得这个成因**。`packages/services/service-datasource/src/datasource-connection-service.ts:687-701`：当 connect 失败的底层原因是 `ERR_MODULE_NOT_FOUND` / `Cannot find package '…/dist/…'` 时，判定为「工作区未构建」并提示 `pnpm build`，而不是提示改 datasource 配置或设 `OS_ALLOW_DRIVER_CONNECT_FAILURE=1` —— 后者对这个成因是有害建议。\n\n3.（可选）根 `dev` 脚本目前只有 `pnpm check:console-sha` 一道前置检查，没有任何一步确认工作区已构建。可以像 #5217 建议的那样加一次廉价前置判定，用一句话说清该干什么。\n\n## 影响面\n\n纯内部工具链 / 本地与 worktree 首启 DX，**无用户可见行为变化**。CI 不受影响（CI 里 build 永远在前，跑不出这个形态）—— 和 #5217 一样，只有在本地/worktree 里才撞得到，而本地正是你想复现问题的时候。\n\n## 环境\n\n- commit `e0075962d`\n- pnpm 10.31.0（与 `packageManager` 一致）\n- Node **v25.9.0** —— 满足 `engines.node >=22.0.0`，但 `.nvmrc` 写的是 `22`；如实记录以便复现，本条与 Node 版本无关（类型/解析错误在 `pnpm install && pnpm build` 后全部消失）。\n\n## 附：修好之后的样子\n\n`pnpm install && pnpm build`（72/72 绿）之后，`pnpm dev` 干净启动，只剩两条关于 `packages/console/dist` 的信息/警告 —— 那是 console 单独构建（`pnpm objectui:build`）的正常开发态，不在本条范围内。\n"
+}

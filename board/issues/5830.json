@@ -1,0 +1,35 @@
+{
+  "number": 5830,
+  "kind": "issue",
+  "title": "[finding] #5704 收口后仓内新增一个 driver-memory 测试消费者:plugin-auth/auth-contains-filter.test.ts(#5710 pin 测试,与 #5704 程序不变量的张力,请分诊裁处置)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T07:06:57Z",
+  "updated_at": "2026-08-06T11:26:31Z",
+  "closed_at": "2026-08-06T11:26:31Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5830",
+  "body": "#5704 收口验收时实测发现(main `2a607d2`),按事实记录,unassigned、不代裁决。\n\n## 事实\n\n`git grep -l \"from '@objectstack/driver-memory'\" -- 'packages/**/*.test.ts'`(排除包自身)在 #5704 全部批次合并后仍有 **2** 个命中:\n\n1. `packages/runtime/src/sandbox/undeclared-field-write-driver-split.integration.test.ts` — Q2-B 裁定刻意保留的参照臂,✓ 符合程序;\n2. `packages/plugins/plugin-auth/src/auth-contains-filter.test.ts` — **#5704 survey(基线 `a58c0b5`)之后、今晨经 #5812(#5710 修复,identity 车道,维护者裁决 Q1A/Q2A/Q3B/Q4B)新落地**,并连带 `plugin-auth/package.json:36` 新增 `@objectstack/driver-memory` devDep。\n\n该文件是 #5710 的 pin 测试:第一面钉 better-auth adapter 把 `contains` 发成 `$contains`(契约),第二面用真 `InMemoryDriver` 当后端见证「字面子串匹配」的求值行为。文件头的设计叙事明确引用了 memory/SQL 两族对 `$regex` 的历史分歧(#4706 形状)——即 memory double 在此**可能是刻意选的见证后端**,不是随手拿的。\n\n## 张力\n\n- #5704 程序(维护者 2026-08-06):「driver-memory 在项目内的测试应该被替换为 sqlite 的内存模式」;Q2-B 裁定驱动族分歧参照臂**仅 driver-split 一处**保留。\n- driver-split 文件的 Q2-B 注释写着「the ONLY place in the repository that still consumes it from a test」——本文件落地后该句已失真(注释修订应随本单裁决一并做,勿单独改)。\n\n## 选项(供分诊/车道裁,不代裁决)\n\n- **A 迁 sqlite `:memory:`**:pin 的第二面要的是「一个真实后端按字面子串回答」,`$contains` 是 spec `FILTER_OPERATORS` 成员、每个后端都必须实现,SqlDriver 同样能作见证;与 #5704 程序对齐,plugin-auth 的新 devDep 一并摘除。风险:若 identity 车道选 InMemoryDriver 是刻意钉「历史上分歧的那一侧现在也答对」,换后端会弱化 pin 的指向性。\n- **B 刻意保留**:登记为第二个豁免消费点,随裁决修订 driver-split 注释的「唯一」表述。\n- 处置归属:文件在 identity 域(座位现空缺),程序张力在 drivers 域(#5704/#5499)——请分诊定车道;若判纯机械可并入 #5704 收口尾单执行。\n\n关联:#5704(程序)、#5710/#5812(该测试的来源与裁决)、#5499(冻结令)、#4706(两族分歧形状)。"
+}

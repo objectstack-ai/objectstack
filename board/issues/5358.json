@@ -1,0 +1,36 @@
+{
+  "number": 5358,
+  "kind": "issue",
+  "title": "`check:authorable-surface` 在 `--check` 模式下也会重写 `authorable-surface.base.json` —— 一次纯核验会改工作区,且任何无关 PR 都能因此静默推进删除门的锚点",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T00:38:50Z",
+  "updated_at": "2026-08-06T06:29:00Z",
+  "closed_at": "2026-08-06T06:29:00Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5358",
+  "body": "从 #4912(PR #5339)的 os-regen 同步中记录的观察,由该单 dev 发现并如实上报而非自行处置。**未认领。**\n\n## 现象\n\n`packages/spec/scripts/build-schemas.ts` **每一次运行**都会重新锚定 `packages/spec/authorable-surface.base.json`,**包括 `--check` 模式**。实测:在干净工作树上跑 `pnpm --filter @objectstack/spec check:authorable-surface`,该文件被改写。\n\n两个独立的后果:\n\n### 1. 一个「检查」写工作区(与 #4723 同类)\n\n`check:*` 应当是只读判定。这条与 #4723(`check:docs` 第一步 `gen:schema` 改工作区,#4711 的残洞)是**同一类缺陷的另一处实例**:核验动作带副作用,于是「跑一次门禁」和「产生一次改动」无法分辨,本地跑完门禁再 `git add -A` 就会把它捎带进任何 PR。\n\n### 2. 更要紧的:删除门的锚点可以被无关 PR 静默推进\n\n`authorable-surface.base.json` 的作用是给删除门(ADR-0078 完整性闸门一族)提供**基线**。它自己的描述写着该文件「written only from a git-resolved baseline — never from the build that is being checked」。\n\n但既然任何一次 build/check 都会重锚,那么:**一个与可授权面完全无关的 PR**(比如 #5339,一个只改文档渲染器、`packages/spec/src/**` 零改动的 PR)只要在本地跑过门禁并提交了工作区,就会把 `baseRev` 从 `1c3da1f` 推进到 `c89d18c`,**连带把 110 个 `ui/ComponentAnimation` 族的键从记录中抹掉** —— 而那正是 #4988/#5321 刚刚退役的那批。锚点一旦推进,删除门就**看不见**那次退役了,而且两种状态门禁都判绿,没有任何信号。\n\nPR #5339 的 dev 正是察觉到这一点后**刻意把该文件保持在 main 的字节**并上报,没有自行决定。CI 不受影响(CI 从不提交这次重写),风险面完全在本地工作流。\n\n## 为什么值得修\n\n这是「声明与强制不符」的门禁版本:文件自称只从 git 解析的基线写入,实际每次构建都重写;门禁自称核验,实际改工作区。而它守护的恰恰是**退役是否被如实记录**——一个可以被无关改动静默推进的锚点,等于这道门在最需要它的时候可以被无声关掉。\n\n## 建议修法(未验证,留给分诊)\n\n- `--check` 模式**只读**:比对而不写;要重锚必须显式(`--update-base` 之类),与 #4723 的修法同形。\n- 或:重锚只在 `packages/spec/src/**` 真的变了时才发生,并在 PR 里作为**可见的**改动出现(而不是任何人跑一次门禁就捎带)。\n- 无论哪种,配一条自证测试:干净树上跑 `check:authorable-surface` 后 `git diff --exit-code` 必须为 0。\n\n## 关联\n\n- **#4723**(`check:docs` 第一步 `gen:schema` 改工作区)—— 同类,同在 C 包 #5163 门禁组\n- **#4725** / **#4650**(删除/移除的纪律 vs 门禁)—— 本单是同一条防线上的锚点侧\n- **#4663**(`authorable-surface.json` 字节级 round-trip 门)—— 相邻文件、相邻门\n- #4912 / PR #5339(发现处)、#4988 / #5321(被抹掉的那 110 个键的退役)\n\n⛔ 注意:本单**不是**说 #5339 做错了什么 —— 它刻意保住了 main 的字节并上报,处置正确。"
+}

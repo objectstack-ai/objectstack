@@ -1,0 +1,34 @@
+{
+  "number": 5833,
+  "kind": "pull_request",
+  "title": "test(spec): 门测量 BFS 只留一份实现,并给仪器本身补上对照 (#5056)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T07:20:17Z",
+  "updated_at": "2026-08-06T07:47:24Z",
+  "closed_at": "2026-08-06T07:47:22Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T07:47:22Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5833",
+  "body": "Fixes #5056\n\n## 前提核对(先说结论:issue 仍然成立,但清单跟 issue 写的不一样)\n\nIssue 是 08-04 写的,#4001 战役跑得快。对着 `origin/main`(28f2e04)重新点了一遍拷贝清单:\n\n| 位置 | 状态 |\n|---|---|\n| `packages/spec/src/ui/door-reachability.testkit.ts` | **已存在**,已是重合度(≥ 0.5)版本,已带 `extraRoots` 翻转支持和 `cloneOverlap` |\n| `packages/spec/src/ui/widget.test.ts` | 已 import 该工具,三组对照齐 |\n| `packages/spec/src/ui/i18n.test.ts` | 已 import 该工具,三组对照齐 |\n| `packages/spec/src/ui/chart.test.ts` | ⛔ **仍带内联拷贝,而且是缺陷版** —— 停在「任意单属性命中即判可达」 |\n\n也就是说 issue 建议 1 做了一半:共享工具已经抽出来了,但 **issue 点名的引入处 `chart.test.ts` 自己没迁移**,留下的那份恰好是有 bug 的那份。全仓再无第四份(`visitedDefs` / `childrenOf` 全仓搜过,另一处命中是无关的 `packages/lint/src/validate-responsive-styles.ts`)。\n\n所以本 PR 的实际工作是「迁移最后一份拷贝」,不是「新建共享工具」。\n\n## 改动\n\n1. **`chart.test.ts` 删掉 100 行内联 BFS**,改 import `measureDoors()`。全仓只剩一份实现。\n2. **`chart.test.ts` 补齐缺的对照**。它原本只有正对照,现在补上负对照和合成载体翻转对照(issue 建议 2 要求的三者)。\n3. **新增 `door-reachability.testkit.test.ts`** —— 仪器自己的对照。三个消费者各自为**自己的形状**带对照,却没人为**走图器**带,于是它的两条腿都可能在一片绿里烂掉。\n\n## 两处必须说明的实测修正\n\n### A. issue body 里那行 `.describe()` 复现是**错的**\n\nIssue 写:\n\n```\ndefOf(z.string().describe('x')) === defOf(z.string())  →  true\n```\n\n**本 build 实测为 false。** 两次独立的 `z.string()` 调用建两个独立的 def,压根没有东西可共享。真正成立的是:\n\n```\nconst base = z.string();\ndefOf(base.describe('x')) === defOf(base)              →  true   ← 共享跟着「接收者实例」走\ndefOf(base.describe('x')) === defOf(base.describe('y'))→  true\ndefOf(SnakeCaseIdentifierSchema.describe('a'))\n  === defOf(SnakeCaseIdentifierSchema.describe('b'))   →  true   ← 真正咬到本仓的那条\ndefOf(base.optional()) / .extend() / .strip()          →  false  ← 与 issue 一致\n```\n\n机制和结论都对,一行复现写反了。**共享跟着接收者实例走,不跟着形状走** —— 而这恰恰是 bug 咬本仓的原因:spec 把几十个形状都灌进少数几个**共享叶子实例**,于是每个 `SnakeCaseIdentifierSchema.describe(…)` 彼此 def-同一。\n\n按派发要求把这条事实钉成了测试,但钉的是**修正后**的说法 —— 照 issue 原文钉会钉住一个假命题。zod 升级改了 `clone()` 语义,这组会响。\n\n### B. bridge 那条腿,全仓此前**没有任何测试走到**\n\nIssue 和派发都建议拿 `ChartConfigSchema` 经 `ReportChartSchema.extend()` 当 derived-clone 正对照。实测:\n\n```\nChartConfigSchema   →  direct   (重合度 1.0000)\nReportChartSchema   →  direct\n```\n\n它本来就在图里,判定是 `direct` 而不是 `derived-clone`。三个消费者断言可达的形状**全部**是 `direct`。也就是说:把 bridge 收紧到「永不触发」,三个文件依然全绿。\n\n所以正对照另找了真派生场景,并钉进测试:\n\n```\nPageSchema.extend({ osDoorProbeExtra })  →  derived-clone  (重合度 0.9600)\nObjectListViewSchema.strip()             →  derived-clone  (重合度 1.0000)\n```\n\n## 阈值:保持 0.5,对照没有推翻它\n\n| 形状 | 重合度 | 判定 |\n|---|---|---|\n| `ObjectListViewSchema.strip()`(真派生) | 1.0000 | derived-clone |\n| `PageSchema.extend(…)`(真派生) | 0.9600 | derived-clone |\n| `WidgetManifestSchema`(批 16 假可达) | 0.1053(2/19) | unreachable ✅ |\n| `z.object({ name: z.string(), label: z.string() })`(issue 的负对照) | 0.0000 | unreachable ✅ |\n\n两端离 0.5 都很远。\n\n## 反向验证(方向是**事先**定的:标准红向)\n\n把 `DERIVED_CLONE_MIN_OVERLAP` 临时改回「任意单属性命中」,预测 → 实测:\n\n| 文件 | 预测 | 实测 |\n|---|---|---|\n| `door-reachability.testkit.test.ts` | 红(`WidgetManifestSchema`) | ✅ 红:`expected 'derived-clone' to be 'unreachable'` |\n| `widget.test.ts` | 红(`WidgetManifestSchema`) | ✅ 红:`WidgetManifestSchema must have no door` |\n| `chart.test.ts` | **绿(不变)** | ✅ 绿 |\n| `i18n.test.ts` | 绿 | ✅ 绿 |\n| 负对照 / KNOWN BOUND | 绿 | ✅ 绿 |\n\n`chart.test.ts` 预测为绿并且实测为绿,这条值得单独讲:**迁移它并不改变它自己的任何判定**(它那几个形状重合度是 0.0000,老 bridge 在那儿根本不触发)。迁移的价值是「杀掉真相的第二份拷贝」,不是「改一个答案」—— 那份拷贝的危害在于它是批 17-22 复制粘贴时会拿到的那一份。\n\n## 一个残余边界:钉住了,没有顺手改仪器\n\n重合度的分母是**候选形状自己的键数**,于是一个键很少、且每个键都是共享叶子的形状恒为 1.0:\n\n```\nz.object({\n  name:  SnakeCaseIdentifierSchema.describe('Machine name'),\n  label: I18nLabelSchema.describe('Display label'),\n})\n```\n\n实测重合度 1.0000 → 判 `derived-clone` → 可达。**任何阈值都排不掉**:真 `.strip()` 也是 1.0000 且必须保持可达,两者在「重合度」这一个维度上不可分。\n\n今天代价为零(真实 `no door` 形状都远低于阈值),而且修它需要另一个判据(例如要求共享属性里至少有一个是结构性节点),那是对仪器契约的改动 —— 不该塞进一个测试层 PR。所以:**作为具名 pin 钉住**(用例名以 `KNOWN BOUND` 开头),并作为观察类发现另开 #5828,让后续批次遇到小形状时知道去读那条 pin。\n\n## 验证\n\n```\npnpm --filter @objectstack/spec test        →  320 files / 8176 tests passed   (基线 8164,本 PR +12)\npnpm --filter @objectstack/spec typecheck   →  tsc --noEmit 通过;check:test-typecheck OK\npnpm --filter @objectstack/spec check:generated → 10/10 artifacts up to date\nnpx eslint (三个改动文件)                    →  无输出\nnode scripts/check-nul-bytes.mjs            →  OK (5687 files)\n```\n\n## 范围\n\n严格测试层:仅 `chart.test.ts`、`door-reachability.testkit.ts`、新增 `door-reachability.testkit.test.ts`。未碰任何 `*.zod.ts`、任何 schema 语义、任何 `scripts/`。逐文件核对过 `git status`,`authorable-surface.base.json` **不在** diff 中。\n\n## Changeset\n\n**skip-changeset** —— 纯测试层改动,不发布任何东西,对使用者无可见变化(`*.testkit.ts` 不从 `ui/index.ts` 导出,也不是 tsup entry,`check:api-surface` 已验证导出面无变化)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01559M8FVm6W6vDLABL3jvdW\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01559M8FVm6W6vDLABL3jvdW)_"
+}

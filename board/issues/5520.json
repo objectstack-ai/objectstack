@@ -1,0 +1,36 @@
+{
+  "number": 5520,
+  "kind": "issue",
+  "title": "[17.0-rc2验收] analytics: 不存在的 dimension 500(泄漏 SQL / SQLITE_ERROR)而不是 400 指名字段 —— #4437 只给 measure 加了闸门，dimension 侧对称缺口仍在",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T15:01:50Z",
+  "updated_at": "2026-08-05T23:55:59Z",
+  "closed_at": "2026-08-05T23:55:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5520",
+  "body": "## 现象\n\nanalytics 查询里,一个**引用了不存在字段的 dimension** 会一路走到 SQL,被驱动以 `no such column` 打回,调用方拿到 **500** —— 裸 driver 错误码上线,dataset 面还把**生成的 SQL 原文**回显给调用方。这正是 #4437 为 **measure** 修好的那个 ADR-0112 违背(\"a driver error class should never be the `error.code` for a caller-shaped mistake\"),但 #4437 的修复只覆盖了 measure,**dimension 侧的对称缺口从未被堵**。\n\n对照组(同一类错误,measure 侧)已经被 #4437 修成 `400 INVALID_FIELD` 并指名字段 —— 所以这是一个纯粹的**不对称**:同样是\"查询里点名了对象没有的字段\",measure 得到干净的 400,dimension 掉进 500。\n\n## 复现(hotcrm@0899b4f + @objectstack 17.0.0-rc.2,SQLite file 驱动)\n\n```bash\nTOKEN=... # admin@objectos.ai\n\n# ① 裸 cube 路 /analytics/query —— 不存在的 DIMENSION\ncurl -s -XPOST localhost:4095/api/v1/analytics/query -H \"Authorization: Bearer $TOKEN\" \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"cube\":\"account_metrics\",\"measures\":[\"account_count\"],\"dimensions\":[\"bogus_dim\"]}'\n# → 500 {\"success\":false,\"error\":{\"code\":\"SQLITE_ERROR\",\"message\":\"Internal server error\",\"httpStatus\":500}}\n\n# ② 对照组:同一条路,不存在的 MEASURE(#4437 已修)\ncurl ... -d '{\"cube\":\"account_metrics\",\"measures\":[\"bogus_measure\"]}'\n# → 400 {\"success\":false,\"error\":{\"code\":\"INVALID_FIELD\",\"message\":\"Measure 'bogus_measure' ... which object 'crm_account' does not have. Valid measures: account_count, annual_revenue_sum. ...\"}}\n\n# ③ dataset 路 /analytics/dataset/query —— 不存在的 DIMENSION(HotCRM 所有 dashboard/report 走的就是这条路)\ncurl ... -d '{\"datasetName\":\"account_metrics\",\"selection\":{\"measures\":[\"account_count\"],\"dimensions\":[\"bogus_dim\"]}}'\n# → 500 {\"code\":\"ANALYTICS_QUERY_FAILED\",\n#        \"error\":\"SELECT bogus_dim AS \\\"bogus_dim\\\", COUNT(*) AS \\\"account_count\\\" FROM \\\"crm_account\\\" GROUP BY bogus_dim - no such column: bogus_dim\"}\n#   注意:整条生成的 SQL(表名/列名)被回显给调用方。\n```\n\n两次复现一致。①②③ 均稳定。\n\n## 期望 vs 实际\n\n- **期望**:dimension 解析在构造 SQL **之前**把源字段拿去和承载对象的字段核对,拒绝时用与 measure 侧完全相同的信封(`400 INVALID_FIELD` + `field`/`object`/`param`,并列出可用 dimension)—— 就是 #4437 给 measure 定的那个形状。\n- **实际**:dimension 完全没有闸门,裸 `no such column` 以 500 上线;dataset 面还额外泄漏生成的 SQL 原文。\n\n## 落点分析(读源码 `/home/user/objectstack` @ `cd2efe6`,已领先 rc.2)\n\n- `packages/services/service-analytics/src/analytics-service.ts` 的 `ensureCube()`(L982)在**三处**调用 `assertMeasureFields`(L999 / L1039 / L1047)校验 measure 源字段 —— 这是 #4437 的修复。但整个 `ensureCube` **没有任何** `assertDimensionFields` 一类的对 `query.dimensions` 的校验:dimension 名直接进入 strategy → `GROUP BY <name>` → 驱动 `no such column`。\n- `assertMeasureFields`(L1079,即 #4437 的闸门)会 `err.code='INVALID_FIELD'; err.status=400`,所以 measure 侧能被正确分类;dimension 侧走的是驱动抛出的 `SQLITE_ERROR`,既无 4xx `status` 也不落在 dataset REST 路由的 message 正则名单里,于是落到 `500 ANALYTICS_QUERY_FAILED` 兜底(`packages/rest/src/rest-server.ts` L6467-6491 的信封分支只对已带 4xx status 的错误生效;②message 正则名单不含 `no such column`)。\n- 真实字段被当作未声明 dimension 是可以工作的(`dimensions:[\"phone\"]` → 200,按 phone 分组),与 measure 侧 `number_of_employees` → `SUM` 的自动推断对称 —— 所以缺陷只在**字段不存在**这一支的错误处置,与 #4437 描述的 measure 缺陷同形。\n\n## 查重\n\n- #4437(closed,measure 侧同题):其修复、测试(`measure-source-field-gate.test.ts`)、交接评论均**只覆盖 measure**,dimension 从未在其 scope 内。本单是它遗留的对称缺口,引用旧单。\n- #5352 / PR #5366(REST dataset 路由先读 ADR-0112 信封 + filter 拒收带 `INVALID_FILTER/400`):**不覆盖本单** —— 它修的是\"生产方已带信封但 REST 丢弃\"的通路;dimension 侧的驱动 `no such column` 根本不带信封,补了信封读取也没用,得先给 dimension 加闸门。\n- #5367(open,message 正则兜底的六族脆弱性):**不覆盖本单** —— 那六族都是能识别措辞的 `throw new Error(...)`;dimension 的裸 `no such column` 不在其列。\n\n## 严重度\n\n建议 **p2**。无数字影响(所有 dataset/dashboard/report 的聚合数字在 rc.2 上对账全部正确);HotCRM 出厂 metadata 由 `pnpm validate`(ADR-0021)静态兜住,生产 dashboard 运行时不会撞上。真正会撞的是 Studio 预览、手写查询、外部 API 调用方 —— 他们拿到的是 500 + 泄漏的 SQL,而不是一句指名 dimension 的 400。\n\n环境行:`hotcrm@0899b4f + @objectstack 17.0.0-rc.2`;落点源码 `@objectstack cd2efe6`(领先 rc.2,缺口在该 commit 仍在)。\n"
+}

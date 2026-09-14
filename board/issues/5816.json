@@ -1,0 +1,35 @@
+{
+  "number": 5816,
+  "kind": "pull_request",
+  "title": "fix(security): `controlled_by_parent` 折入主档的归属与共享授权 —— 声明的收窄真正被兑现 (#5386)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T06:21:05Z",
+  "updated_at": "2026-08-06T06:48:43Z",
+  "closed_at": "2026-08-06T06:48:42Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T06:48:42Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5816",
+  "body": "Fixes #5386\n\n## 前提复核(先于实现)\n\nissue 是对 `17.0.0-rc.2` 的测量,先在 `origin/main`(`1624f4ad2`)上核对,**前提成立且未漂移**:\n\n- `packages/plugins/plugin-security/src/security-plugin.ts` 的 `computeControlledByParentFilter` 仍然只用 `computeRlsFilter(master, 'find')` 推导主档 id 集,没有任何 sharing 输入;\n- `assertControlledByParentWrite` 的主档行检查仍然写在 `if (masterWriteFilter)` 里面 —— 主档没写 RLS 时**整段跳过**;\n- `plugin-sharing/src/sharing-service.ts` 的 `effectiveSharingModel` 仍把 `controlled_by_parent` 映射为 `public`,而 `buildReadFilter` 对非 `private` 一律返回 `null`。\n\n两半确实从未相遇。issue 正文那句「sharing grants 未折入」的后果比它读起来严重:主档上**不写 RLS** 的应用得到的是**不受限的主档 id 集**,派生过滤器等于没收窄。\n\n## 方向\n\n采用 issue 的第一方案:主档可达性走与**直接读 / 直接写主档完全相同的路径**。第二方案(publish 时警告)不采用 —— 声明的收窄必须被兑现,警告不是兑现。\n\n关键实现原则是**复用既有合成点**,不在 plugin-security 里手刻一份 sharing 语义(手刻副本是未来分叉的温床):\n\n- **读**:`computeControlledByParentFilter` 现在把主档读 RLS 与 `resolveSharingReadFilter` AND 起来再解析主档 id 集。`resolveSharingReadFilter` 是 #4467 为 `getReadFilter` 建的那个 OWD/共享半边(含 ADR-0057 D1 的深度 stash),这里原样复用,只多加一个可选参数把中间件已解析好的 permission sets 传进去,省掉一次重复解析。\n- **写**:`assertControlledByParentWrite` 在原有的 CRUD `update` + 写 RLS 之外,**无条件**追问 plugin-sharing 的单记录写闸 `canEdit`(归属按写深度放宽、`edit` 级共享、`modifyAllRecords` 旁路)—— 新增的 `resolveSharingCanEdit` 是 `resolveSharingReadFilter` 的写侧对偶,调用的正是 plugin-sharing 自己的中间件对 by-id 写所用的那个闸。**无条件**,正因为写 RLS 那一半在最常见的情形下会被整段跳过。\n\n哪一半生效由**主档自己的有效共享模型**决定 —— `buildReadFilter` / `canEdit` 各自对非 `private`、无 owner 字段、bypass 对象自行返回「不施加限制」—— 所以派生出的可见集与直接 find 主档逐点一致,而不是另立一套判定。\n\n两侧解析失败一律 **fail closed**(主档 id 集为空 / 拒绝写),并写日志,而不是悄悄放宽回全员可见。\n\n## 范围守恒\n\n- v1 的**单层**语义不变:主档自身的 `controlled_by_parent` 仍不递归下钻,这条边界继续写在函数文档注释里,并新增一条测试把它钉住(主档解析恰好一次系统上下文读)。\n- 只动 `packages/plugins/plugin-security/**` + 一个 changeset。plugin-sharing **一行未改** —— 需要的复用点(`buildReadFilter` / `canEdit`)已经是它的公开面。没有触碰 `packages/spec` 或 `packages/objectql`。\n\n## 测试\n\n新增 `packages/plugins/plugin-security/src/controlled-by-parent-sharing.test.ts`(10 例),用**同一组 fixture** 驱动读过滤与写断言两个面 —— 它们是同一个契约(「子随主档访问」)的两个实现面,分开测就看不见它们互相不一致。\n\nfixture 复刻 issue 的测量表:主档 `crm_account`(OWD `private`,**不写任何 RLS**),明细 `crm_contact`(`controlled_by_parent`,必填 master_detail)。三条主档 —— 他人所有且**恰好一条** share grant 的 `acct_us`、他人所有且未共享的 `acct_eu`(**被排除的那一行**,没有它「一致」什么也证明不了)、调用者自己拥有的 `acct_own`。sharing 侧用的是**真实的** `SharingService`(plugin-security 已有的 devDependency),不是 stub —— 复用的是不是同一套语义,由此直接可见。\n\n覆盖 issue 的三条 Acceptance:主档不可读 ⇒ 子不可读;写侧同理;归属/共享路径专门有 fixture。另有:`read` 级 grant 只开读不开写(与直接访问主档的逐动词答案一致)、未装 plugin-sharing 的部署行为不变、sharing 抛错时两个面都 fail closed。\n\n**反向验证 —— 方向是先预测再执行的,预测为「红」并逐条落实。** 把实现还原成 `origin/main` 的样子后:\n\n```\nTests  7 failed | 3 passed (10)\nAssertionError: expected [ 'ct_us', 'ct_eu', 'ct_own' ] to deeply equal [ 'ct_us', 'ct_own' ]\nAssertionError: expected [ 'ct_us', 'ct_eu', 'ct_own' ] to deeply equal [ 'ct_own' ]\nAssertionError: promise resolved \"undefined\" instead of rejecting\nAssertionError: expected [ 'ct_eu', 'ct_own', 'ct_us' ] to not include 'ct_eu'\nAssertionError: expected [ 'crm_account' ] to include 'sys_record_share'\nAssertionError: expected [ 'ct_us', 'ct_eu', 'ct_own' ] to deeply equal []\n```\n\n保持绿的恰好是预测中对本次改动不敏感的三例:直接 find 主档得到的 id 集(不经过被改的函数)、「本就可写的行仍可写」这条正向用例、以及未装 plugin-sharing 的部署。`promise resolved \"undefined\" instead of rejecting` 就是 issue 正文里那句「rep 编辑了自己读不到的账户下的报价」在单元层的复现。\n\n命令与结果:\n\n```\npnpm --filter @objectstack/plugin-security test    Test Files 35 passed | Tests 741 passed\npnpm --filter @objectstack/plugin-security typecheck   (tsc --noEmit, clean)\npnpm --filter @objectstack/plugin-sharing  test    Test Files 13 passed | Tests 347 passed\npnpm --filter @objectstack/plugin-sharing  typecheck   (tsc --noEmit, clean)\nnode scripts/check-nul-bytes.mjs                   OK (5678 files)\nnode scripts/check-engine-double-contract.mjs      OK — 37 pinned, 2 exempt\nnpx eslint (两个改动文件)                          clean\n```\n\n**消费半径的扫描**:本规则的真实集成 pin 在 `packages/qa/dogfood`,不在被改的包里,所以单独跑了两个 CBP 集成用例 —— `controlled-by-parent.dogfood.test.ts` 与 `showcase-invoice-cbp.dogfood.test.ts`(两者都启动了完整 stack,plugin-sharing 在内):`Test Files 2 passed | Tests 8 passed`。它们不受影响的原因可核对:两个 fixture 的主档都是 `public_read_write`,`buildReadFilter` 返回 `null`、`canEdit` 直接为真。\n\n## 兼容性 / 影响面\n\n这是一次**安全收紧**。升级后,此前被越权看到 / 写到的明细行会读不到、写不了 —— 那正是声明本来就要求的边界。changeset 里把这点写在最前面。未装 `plugin-sharing` 的部署行为完全不变。\n\n## 顺带发现(未在本 PR 修)\n\n`getReadFilter`(analytics/raw-SQL 的读作用域提供者)**根本没有调用**派生过滤器,所以 `controlled_by_parent` 对象在那条路径上完全没有主档收窄 —— 与本 issue 同族但不同的缺陷,修好本 issue 也不会碰到它。已另立 #5815。\n\n## 新增测试文件为何不需要 `assertEngineDeleteDispatch`\n\n新测试里的 in-memory store 只声明引擎的**读**面(`find` / `findOne` / `getSchema`),不声明任何写动词 —— 被测代码不经它写入,而一个根本没有该动词的 double 不可能在该动词上比引擎更宽松。`check:engine-double-contract` 因此不把它计入(已实跑确认,见上)。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JwwiU9bjhwy2SWj13ho8uv)_"
+}

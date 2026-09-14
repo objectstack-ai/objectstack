@@ -1,0 +1,37 @@
+{
+  "number": 5378,
+  "kind": "issue",
+  "title": "Author-time expression validator is blind to registry-injected system columns — `record.owner_id` / `created_at` / `organization_id` are rejected as unknown fields",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T02:56:15Z",
+  "updated_at": "2026-08-06T11:47:43Z",
+  "closed_at": "2026-08-06T11:47:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5378",
+  "body": "Found while migrating an app onto the platform's ownership column (objectstack-ai/hotcrm#548). Filed unassigned by the hotcrm PM loop; evidence gathered on `@objectstack/* 17.0.0-rc.2`.\n\n## The defect\n\n`packages/lint/src/validate-expressions.ts` → `buildFieldIndex` resolves CEL field references against the **authored** `fields` map only. Every registry-injected system column is therefore invisible to it, and any expression referencing one is rejected at author time:\n\n```\nexpression-invalid: unknown field owner_id on crm_contact\n```\n\nThe same applies to `record.created_at`, `record.organization_id` — columns the platform itself injects into every object and documents as available.\n\nA second surface has the same blind spot: `highlightFields` entries naming an injected column produce\n\n```\nhighlightFields entry \"owner_id\" is not a field on this object — it is silently skipped by every consumer\n```\n\n## Why it matters\n\nThe platform's own contract says these columns exist on every object — `ownership: 'user'` is documented as *\"injects reassignable owner_id\"*, and the record-level machinery (`plugin-sharing` / `plugin-security`, `OWNER_FIELD = 'owner_id'`) reads exactly that column. So an app that correctly targets the platform ownership model is told by the platform's own linter that the column does not exist.\n\nThe practical consequence is that **apps are pushed into re-declaring system columns** to get author-time validation and UI surfacing to work at all. hotcrm#548 had to declare `owner_id` explicitly on all 12 business objects (carrying `system: true` so the clone path still strips it) purely to satisfy these two author-time checks — injection-only was unworkable:\n\n- 6 objects emitted the `highlightFields … silently skipped` warning;\n- the `contact_welcome` trigger's `has(record.owner_id)` was hard-rejected.\n\nThat is a workaround for a platform gap, and it is exactly the shape this project treats as a defect: a capability that is declared (the column is injected and documented) but not honoured by the enforcement layer (the validator that decides what an author may reference).\n\n## Suggested fix\n\nHave `buildFieldIndex` union the authored fields with the columns the registry injects for that object's `ownership` / system-field configuration, so injected columns resolve like any other field — in expression validation and in the `highlightFields` existence check alike. If re-declaration is intended to be the supported authoring style, then the documentation and the injection behaviour should say so, and the injected-but-undeclared case should stop being silently半-supported.\n\n## Acceptance\n\n- `has(record.owner_id)` validates on an object that does not declare `owner_id`;\n- `highlightFields: ['owner_id']` does not warn on such an object;\n- a test pins both against an object whose only ownership column comes from injection."
+}

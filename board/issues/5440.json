@@ -1,0 +1,33 @@
+{
+  "number": 5440,
+  "kind": "issue",
+  "title": "driver-memory analytics 面:同一字段上的多个算子互相覆盖,`{qty: {$gte:150, $lte:250}}` 只剩最后一个 —— 区间塌成单边,结果被放大",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:on-hold"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T11:51:54Z",
+  "updated_at": "2026-08-06T07:06:00Z",
+  "closed_at": "2026-08-06T07:06:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5440",
+  "body": "做 #5374(`$notContains` 编译成裸 `{$not: 'x'}`)时,为了确认修复没有把 `$match` 的组装弄坏,逐个实测了「一个 `where` 里同一字段带多个算子」会编译成什么。这一条**不属于 #5374 的范围面** —— #5374 裁的是**算子 → 谓词**这一层(映射指向了错的目标),这一条在**谓词 → `$match` 的组装**这一层,#5374 修好之后依然完整存在。按 Prime Directive #10 单独记在这里,unassigned。\n\n## 位置\n\n`packages/plugins/driver-memory/src/memory-analytics.ts`,`query()` Stage 1 的 `$match` 组装循环(约 :180):\n\n```ts\nfor (const filter of normalizedFilters) {\n  const fieldPath = this.resolveFieldPath(cube, filter.member);\n  matchStage[fieldPath] = /* 该条目的谓词 */;   // ← 直接赋值,不合并\n}\n```\n\n`flattenFilterCondition` 对 `{field: {$op1: a, $op2: b}}` 会 push **两条** `NormalizedCubeFilter`,member 都是 `field`。两条都以 `matchStage[fieldPath] = …` 落盘,于是**后一条覆盖前一条**,前一个算子彻底消失。\n\n## 现象(实测)\n\n3 行数据,`qty` 分别为 `100` / `200` / `300`(`id` 分别为 1/2/3)。左列是 `find()`,右列是 analytics 面 —— 两列都是在 #5374 修复**之后**测的,即这条与那条无关:\n\n| `where` | `find()` | analytics | 实际编译出的 `$match` |\n|---|---|---|---|\n| `{qty: {$gte: 150, $lte: 250}}` | `[2]` | **`[1,2]`** | `{qty: {$lt: 250}}` |\n| `{qty: {$ne: 300, $gt: 150}}` | `[2]` | **`[2,3]`** | `{qty: {$gt: 150}}` |\n\n方向是**放大**:丢掉的永远是一个约束,所以行只会变多,不会变少。这与 #5345 / #5373 / #5374 是同一个方向、同一类后果 —— 一个看起来正常的图表统计了它本该排除的行 —— 只是机制换成了「谓词被生成了,但被下一个谓词覆盖掉」。\n\n## 为什么是 bug\n\n1. **`{$gte, $lte}` 是区间的规范写法。** `AnalyticsQuery.where` 是 `FilterCondition`,而 dashboard widget 元数据直接用这个形状表达「金额在某区间」「日期在某窗口」。这恰恰是最常见的多算子写法,不是边角。\n2. **declared ≠ enforced。** `ANALYTICS_FILTER_CAPABILITIES` 声明本面支持这 11 个算子,`assertFilterConditionShape` 也放行了 `{$gte, $lte}` 这个形状 —— 声明能算,实际只算了一半。\n3. **另一半是对的。** live query path 的 `normalizeFieldOperators` 把同字段的多个算子**合并**进一个对象,多个 regex 型算子还会通过 `_multiRegex` 提升成 `$and`。所以这是同一个 driver 的两面对同一个 `where` 给出不同行集 —— #5240 为本包立下的不变量所禁止的形状。\n\n## 建议(不代裁决)\n\n不是一行改。合并本身容易(`matchStage[fieldPath] = {...existing, ...predicate}`),但有两处必须一起想清楚,否则会把一个覆盖换成另一个覆盖:\n\n- **两个 regex 型谓词无法共存于一个对象**(`$contains` + `$contains`,或 `$contains` + `$notContains` 各自带 `$regex`)。live path 为此有 `_multiRegex` → 顶层 `$and` 的提升,cube 管线需要一份等价物。\n- **`$lte` 的 bare-day 半开区间规则**(#4042)会把 `$lte` 写成 `$lt`,与显式的 `$lt` 键相撞;合并时谁赢需要明确。\n\n另一条路是**拒收**同字段多算子(与 #5345 同款),但那会拒掉本面 `find()` 明明能算、且是 widget 常用形状的查询,恐怕不是想要的答案。\n\n## 未验证的部分\n\n- 只测了 `qty` 上的数值算子组合。没有测 regex 型算子的组合(`{name: {$contains: 'a', $notContains: 'b'}}`),因为那正是上面第一个待裁决点,测出来的结果取决于怎么裁。\n- 没有核对 `generateSql` 那一半在同样输入下是否也丢约束(那个出口的算子层缺陷另有 #5433)。\n\n关联:#5374(同文件、同一轮核对里发现;它裁的是算子→谓词层,本条是谓词→`$match` 组装层)、#5345、#5373、#5240(本包两面不得分叉)、#3948(no-silent-drop)。\n"
+}

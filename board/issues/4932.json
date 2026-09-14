@@ -1,0 +1,36 @@
+{
+  "number": 4932,
+  "kind": "issue",
+  "title": "发现型闸门在「什么都没发现」时静默通过:check-doc-authoring 与 check-driver-conformance 缺非空断言",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T16:33:17Z",
+  "updated_at": "2026-08-06T11:55:02Z",
+  "closed_at": "2026-08-06T11:55:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4932",
+  "body": "## 模式\n\n两个闸门都靠「扫描发现目标 → 逐个检查」工作,而发现环节的失败被吞成空集合,空集合又天然通过所有检查。**目录一旦被改名或移走,闸门就变成永远为绿的装饰品**,且没有任何信号。\n\n`scripts/check-doc-authoring.mjs:45`\n\n```js\nconst files = [];\nfor (const r of ROOTS) { try { walk(r, files); } catch {} }\n```\n\n某个 ROOT 不存在 → 静默少扫一批文件。极端情况 `files` 为空 → 「215 files clean」变成「0 files clean」,仍然退出 0。\n\n`scripts/check-driver-conformance.mjs:150`\n\n```js\nconst listDir = (dir) => { try { return readdirSync(dir); } catch { return []; } };\n…\nfunction discoverDrivers() { return listDir(DRIVERS_DIR).filter(…) }\n```\n\n`DRIVERS_DIR` 不存在 → 发现 0 个 driver → 一致性检查无事可做 → 通过。模块头写着「An empty ledger is the intended steady state」,那说的是**账本**(LEDGER)可以为空;**发现结果**为空是完全不同的一件事,不该同样放行。\n\n## 仓库里已有正例\n\ntemporal-conformance 那次(#4081)加过一条明确的非空守卫:「both TZ-skewed steps carry a non-vacuity guard that fails the job if the process zone is UTC or the offset is zero, **so the coverage cannot silently evaporate**」。这里缺的就是同一件东西。\n\n## 建议\n\n两处各加一条下限断言:发现数为 0(或显著低于上次)时 `::error::` 退 1,而不是打印一句「clean」。`check-doc-authoring` 已经在打印文件数,把那个数变成断言即可,成本极低。\n\n## 相关\n\n- 今天的 Release 事故(#4898)是同一类:「什么都没做」被报成成功。\n- #4928 是 GitHub Actions 层的同类:「什么都没跑」被判为通过。\n- `Spec Coverage` 定时任务今天 06:03 失败过一次([run 30788919747](https://github.com/objectstack-ai/objectstack/actions/runs/30788919747)),7 次里 1 次,单次失败暂未定性,一并记在这里备查。\n\n优先级不高 —— 这两处目前都在正常发现到目标(实测 `check-doc-authoring` 报 215 个文件)。记录的是**可蒸发性**,不是当前已蒸发。"
+}

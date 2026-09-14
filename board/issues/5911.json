@@ -1,0 +1,35 @@
+{
+  "number": 5911,
+  "kind": "pull_request",
+  "title": "fix(service-automation): wait 节点五条日志的外来 cause 移出 message,改走 meta (#5737)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T11:28:14Z",
+  "updated_at": "2026-08-06T12:09:49Z",
+  "closed_at": "2026-08-06T12:09:47Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T12:09:47Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5911",
+  "body": "Fixes #5737\n\n`packages/services/service-automation/src/builtin/wait-node.ts` 里有五处把**我们不控制文本**的失败原因(数据源驱动、job 服务、`engine.resume()` 的错误信封)直接拼进日志 message。本 PR 把五处统一改成:**message 单行自足,cause 走 meta**。与 #5048 / PR #5572、#5575 / PR #5639、#5636 / PR #5662、#5661 完全同一套修法,零新词汇。\n\n## 前提复核(rule 6):成立,且行号表**没有**过期\n\n派单里的机制假设 1 预判「五处行号表已过期(今日 58ffcab 触过该文件)」。**实测证伪**:在 `origin/main` 7b005b4 上,五处仍然精确落在 issue 表列出的行号上 —— 58ffcab(#5760)改的是 `objectql`,并未移动本文件的这些行。\n\n我按要求**自己枚举**了该文件所有「外来 cause 进 message」的位点(不限 `Cause:` 拼写),全集就是这五处:\n\n| 行 | 级别 | 参数位 | cause 来源 | 原拼写 |\n|:--|:--|:--|:--|:--|\n| `:98` | `error` | 第三参 | `engine.resume()` 的信封字段 `result.error` | `Cause: ${...}` |\n| `:216` | `warn` | 第二参 | job 服务(`job.schedule` 抛出) | `(${...})` 括号形态,非 `Cause:` |\n| `:323` | `error` | 第三参 | 挂起态存储 / 驱动(**issue 实测的那一条**) | `Cause: ${...}` |\n| `:346` | `error` | 第三参 | `engine.resume()` 抛出 | `Cause: ${...}` |\n| `:387` | `error` | 第三参 | job 服务(`job.schedule` 抛出) | `Cause: ${...}` |\n\n**考察后排除的插值**(留在 message 里,并在代码注释里写明理由):`:362` / `:384` 的 `wakeAt` 是本文件自己写入、又在两个分支之前用 `typeof === 'string'` 加非 NaN 的 `Date.parse` 守过的期限值;`jobName` / `runId` / `node.id` 是平台自己铸造或作者声明的标识符。都不是外来 cause。\n\n## `:98` 单独判断的结论(机制假设 2)\n\n以 helper 实际签名为准:`describeThrownForLog(err: unknown)` 靠鸭子类型读**抛出对象**的 `.issues` / `.message`。而 `:98` 的 cause 是 `AutomationResult.error`,契约里就是 `error?: string`(`packages/spec/src/contracts/automation-service.ts`)—— 一个引擎**已经拼好**的字符串,不是抛出值。传给 helper 有两个后果:字符串上它无处可读;`undefined` 时它会把字面量 `\"undefined\"` 渲染进记录,顶掉原本的 `?? 'store unavailable'` 默认值。\n\n所以这一处按 issue 的 fallback 走 `{ error: result.error ?? 'store unavailable' }` 直接给 meta,**字段名仍是 helper 自己的 `ThrownCauseMeta.error`** —— 五条记录的非校验类 cause 仍只有一个键。已加用例钉住空信封那一支返回 `'store unavailable'` 而不是 `\"undefined\"`。\n\n顺带记一笔可达性:这个信封字符串本身就是引擎把驱动的 `message` 插值进去构造的(`resumeInternal` 的 `STORE_UNAVAILABLE` 返回),所以多行驱动错误是**经两跳**到达这条记录的。\n\n## 危害机制\n\n`ObjectLogger.write()` 一次调用只加一个「时间戳 + 级别」记录头,所以 message 里的换行会把**一条**记录变成多个物理行,后几行既无级别也无时间戳。在 `pretty` / `text` 格式(`os dev` / `os serve` 的默认)下,文件 sink 当成独立记录存,采集器读成无主碎片,`grep ERROR` 只捞到不含任何事实的那一行 —— 而 `:323` / `:346` / `:387` 这三条是 #4632 亲自定为 `error` 的**耐久性诊断**,存在理由就是给人读的(文本自己写着 every wait/approval paused before this restart will hang indefinitely)。cloud#971 即此形态。\n\n## 参数位按 `Logger` 契约选,不凭记忆\n\n`packages/spec/src/contracts/logger.ts`:`warn(message, meta?)` 第二参,`error(message, error?, meta?)` **第三**参(第二参传 `undefined`,否则每条记录都带整个栈,#5575)。两个级别各有一个 spy 用例专门钉参数位。\n\n## 反向验证(方向在跑之前就已预判)\n\n预判:**普通的红**。把拼接式渲染放回去,新钉子必须变红 —— meta 里的 `error` 字段消失、message 重新含换行、`pretty` 下 stderr 从 1 个物理行变回 3 个。没有反转,因为这些断言钉的是「只有修复才会产生的 meta 字段」的**存在**。\n\n实测(`git checkout --` 回退 `wait-node.ts`、测试文件不动):**15 个用例转红**,失败信息正好点名机制 ——\n\n```\nAssertionError: expected '[wait] suspended wait-timer re-arm AB…' not to contain '\\n'\nAssertionError: expected [ …(3) ] to have a length of 1 but got 3\nAssertionError: expected [ Array(1) ] to have a length of 2 but got 1     ← warn 少了 meta 参数\nAssertionError: expected undefined to be 'store unavailable'              ← 空信封那一支\nAssertionError: expected '' to contain 'no such table: sys_automation_run'\n```\n\n随后 `git apply` 复原,全绿。\n\n## 测试\n\n新增 `packages/services/service-automation/src/builtin/wait-node-log-cause.test.ts`(13 例)。照 #5662 / #5661 的先例,凡问题是「按行切分的下游会看到什么」就**读真 `ObjectLogger` 的真字节**,spy 只出现在参数位本身是待验事实的地方:\n\n- 五个接缝各自一例:记录恒为一个物理行、msg 不含换行、后果与修复仍在 msg 里、cause 完整落在 meta 的 `error` 上;\n- `:323` 额外加一例 `pretty` 格式(实测就是在这个格式下取的);\n- `:98` 加空信封回落一例;\n- `error` / `warn` 各一例 spy 钉参数位;\n- 健康路径不多写一个字节;\n- 两例反向验证,把拼接渲染的代价当场量出来。\n\n改动到的既有测试(fixture 分诊,逐条判定而非批量重拼):\n\n- `wait-node-rearm-log-level.test.ts` —— #4632 的级别钉子**一条不动**;它的 capturing logger 原本只收 msg,现在按契约分参数位收,三处 cause 断言从 msg 改读 meta,并**加断**了 msg 不再含 cause;\n- `wait-node.test.ts` —— `:98` 那条 `connection refused` 断言同样改读 meta 并加了反向断言;\n- `plugin-startup-log-cause.test.ts` —— 只简化 `failProbe` 的注释:它原来写着本文件那条记录「still interpolates(out of this issue's scope, filed separately)」,现在不成立了;fixture 本身**保留**,因为那里的 `toHaveLength(1)` 是按接缝计数的,窄化的理由从「躲开一条被搅烂的记录」变成「把捕获限制在它自己点名的那个接缝」。\n\n命令与结果(全程持容器级验证锁、`--max-old-space-size=4096`、`--maxWorkers=2`):\n\n```\npnpm --filter '@objectstack/service-automation' test    →  Test Files 65 passed (65) / Tests 775 passed (775)\npnpm exec tsc --noEmit -p packages/.../tsconfig.json    →  5 errors,全部在 engine.test.ts / nested-region-parity.test.ts\n                                                            这两个我未触碰的文件里(既存,故该包未定义 typecheck 脚本)\n                                                            我改动的 5 个文件:0 error\nnpx eslint --no-inline-config (本 PR 的 5 个文件)        →  exit 0\n```\n\n验证门(从 `.github/workflows/lint.yml` 逐个枚举后跑,非凭记忆挑):\n\n```\npnpm check:durability-log-level    →  24 durability-critical catch seam(s), all loud … (三处 error 未降级、未改 rethrow)\npnpm check:nul-bytes               →  OK (5706 files, no raw ASCII control bytes)\npnpm check:engine-double-contract  →  OK — 64 pinned, 139 DEBT, 2 exempt\npnpm check:init-service-contract   →  OK — 34 declared / 1 self-provided / 3 without provider\npnpm check:resume-authority-declared → OK — wait-node.ts:183 wait → declared (6/6)\npnpm check:startup-registry-verdict  → OK — 40 seam(s), none recording a contradictable verdict\npnpm check:release-notes / check:objectui-changeset / check:role-word / check:adr-anchors / check:doc-authoring → OK\n```\n\n`packages/spec` 未触碰,无 spec 产物重生成。\n\n## 一个字节纪律的自我记录\n\n新测试文件第一稿里,ANSI 引导符**以裸控制字节的形式落进了文件**(写的是转义序列,编辑工具在我正**写到**控制字符时把它实体化了)—— 正是 AGENTS.md 与 `scripts/check-nul-bytes.mjs` 点名的那类事故(#4890 同形)。已改回小写 u 转义序列拼写,`check:nul-bytes` 与 `grep -naP` 自查均干净,并在该函数的 docblock 里留了记录。\n\n## 与 #5660 的关系(派单必答项)\n\n**完全无影响 —— 且 #5660 已于 2026-08-06T04:25:47Z 关闭(completed)**,issue 正文「仍开:#5660」这一句已过期。\n\n理由:#5660 是 `engine.ts` 的 `registerDegradedConnector`(连接器降级路径,`warn`,cause 是 `reason: string` 参数),与本单是**不同文件、不同方法、不同契约**;两者唯一的共同点是复用同一个 `describeThrownForLog`,而本 PR **没有改动**那个 helper(只是新增调用点)。#5660 正文里真正待定的那件事是「`registerDegradedConnector` 签名要不要加 `cause?: unknown`」,本 PR 既没有改那个签名,也没有为它设下任何先例 —— 我的 `:98` 那处虽然同样绕开了 helper,但绕开的理由是「信封字段本就是 `string`,不是抛出值」,与 #5660 选项 A/B 的取舍(要不要把抛出值一路带到报告点)不同源。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015a5qkLzpGXhLL2F5gvJ7dD)_"
+}

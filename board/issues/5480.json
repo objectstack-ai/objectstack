@@ -1,0 +1,35 @@
+{
+  "number": 5480,
+  "kind": "issue",
+  "title": "objectql 的 UPDATE dispatch 没有共享判定函数 —— delete 有 `resolveEngineDeleteDispatch`,update 的同款三分支只是 engine.ts 里的一个内联 throw",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T13:47:43Z",
+  "updated_at": "2026-08-06T05:26:30Z",
+  "closed_at": "2026-08-06T05:26:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5480",
+  "body": "发现于 #5393(flow `update_record` / `delete_record` 补 `multi` 批量意图键)的实现过程,PR 见该单。属 PD #10 的范围外发现,不在 #5393 内修(#5393 的 scope guard 明写 `packages/objectql` 零改动)。\n\n## 事实(origin/main)\n\n`delete` 的派发决策已经被抽成生产者侧的唯一判定,任何测试替身都能 import 它:\n\n- `packages/objectql/src/engine-delete-dispatch.ts` —— `resolveEngineDeleteDispatch` / `assertEngineDeleteDispatch` / `scalarDeleteId` / `ENGINE_DELETE_REJECT_MESSAGE` / `ENGINE_DELETE_DISPATCH_CASES`,全部从 `@objectstack/objectql` 导出;\n- `scripts/check-engine-double-contract.mjs` 以「fake 的 `delete` 是否路由该判定」为门禁,当前 23 pinned / 32 DEBT / 1 exempt。\n\n`update` 的同款三分支没有对应物:\n\n- `packages/objectql/src/engine.ts` 的 update 路径里,标量 `where.id` → 按 id;否则 `options.multi` → `driver.updateMany`;否则 `throw new Error('Update requires an ID or options.multi=true')` —— 这条 throw 是**内联字面量**,既没有导出的常量,也没有可复用的判定函数。\n- `check-engine-double-contract.mjs` 的文件头把这一条列为**刻意不覆盖**:\"every other method a fake engine offers (`find` filter semantics, **update's twin dispatch**, unknown-option rejection). Same family, but each needs its own producer-side predicate extracted first. `delete` had one available because #4434 already paid for it.\"\n\n## 为什么现在值得记\n\n#5393 在 service-automation 里补真实契约测试时,delete 侧可以用 `assertEngineDeleteDispatch` 把假引擎钉死在生产者契约上(该文件已被门禁认作 pinned);update 侧只能退而断言**执行器交给引擎的 options 包**,并在文件头写明「不对引擎会不会接受它发表第二份意见」—— 因为唯一的替代做法是在 fake 里手抄一遍 update 的判定,而那正是 #4434 / #4550 记录的、门禁存在的理由(手抄必然漏掉 `where: { id: { $in: [...] } }` 看着像 id 其实是谓词这一半)。\n\n也就是说:**同一个执行器的两个写入动词,一个能被绑定到生产者契约,另一个结构上不能**,而 `update_record` 的破坏性并不比 `delete_record` 低多少(谓词 update 覆盖整表字段)。\n\n## 建议动作\n\n1. 按 `engine-delete-dispatch.ts` 的形状抽出 `engine-update-dispatch.ts`:`resolveEngineUpdateDispatch` / `assertEngineUpdateDispatch` / `ENGINE_UPDATE_REJECT_MESSAGE`,让 `ObjectQL.update` 自身改用它(生产者与判定必须是同一份,否则又是第二份副本);\n2. `check-engine-double-contract.mjs` 增加 update 切片,基线按实测填(不要 `--fix` 式生成);\n3. 顺带可关掉 #5393 留下的这条不对称:`packages/services/service-automation/src/builtin/crud-bulk-intent.test.ts` 的 update 用例可以升级为同样 pinned。\n\n注:`@objectstack/objectql` 已在 #5393 中加入 `@objectstack/service-automation` 的 devDependencies(无环:objectql 的传递依赖闭包 12 个包不含 service-automation),所以第 3 步不再需要额外的依赖变更。这一点也已回填到 `scripts/engine-double-contract.baseline.json` 里那 8 条 service-automation 条目的 `why` / `closes`。\n\n关联:#5393(本发现来源)、#5197(检测器盲点:零参 `async delete()` 连发现都发现不了)、#4550(门禁本体)、#4434(家族起源)、#4987(metadata-protocol 侧的成环阻塞,与本单无关但同族)。\n"
+}

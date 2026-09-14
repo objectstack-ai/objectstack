@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:devx",
-    "finding",
     "pm:queue",
     "priority:p3",
     "tooling"
@@ -21,7 +20,7 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-09-07T22:32:25Z",
-  "updated_at": "2026-09-08T02:57:10Z",
+  "updated_at": "2026-09-12T00:40:31Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

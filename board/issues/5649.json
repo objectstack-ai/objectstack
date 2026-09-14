@@ -1,0 +1,36 @@
+{
+  "number": 5649,
+  "kind": "issue",
+  "title": "PR 标签写入是「整集替换」而非「新增一个」:agent 与 CI labeler 互相抹标签,已抹掉过一次 skip-changeset 豁免(#5533 只活一秒)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T22:02:48Z",
+  "updated_at": "2026-08-06T00:25:08Z",
+  "closed_at": "2026-08-06T00:25:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5649",
+  "body": "发现于 #5559(os-dev 收尾清单补 `skip-changeset` 硬步骤)的前提核对:逐 PR 拉 timeline 的 `labeled`/`unlabeled` 事件时,发现标签写入双向互抹。查重:仓内无既有单(搜 `label clobber / labeler / sync-labels`、`skip-changeset label` 均无命中;#5620 是 allow-major 从事件载荷读标签的孪生竞态,与本条不同 —— 那是**读**,这是**写**)。\n\n## 事实(六例 timeline,2026-08-05)\n\n**方向一:agent 的写入抹掉 bot 的标签。** 每次 agent 挂 `skip-changeset`,同一秒都伴随一条 **agent 自己发出的 `unlabeled`**,抹掉 bot 刚挂的标签,bot 随后再补挂:\n\n- #5642:`21:32:02` bot 挂 `size/s` → `21:32:06` agent `unlabeled size/s` + 挂 `skip-changeset` → `21:32:17` bot 重新挂 `size/s`\n- #5645:`21:38:42` bot 挂 `documentation` → `21:38:47` agent `unlabeled documentation` + 挂 `skip-changeset` → `21:39:00` bot 重新挂\n- #5538:`16:43:23` agent 一次抹掉 `documentation` + `size/l` + `tests`,bot 于 `16:43:35`/`16:43:37` 全部补挂\n- #5533、#5542 同型\n\n这只有一种解释:挂标签走的是**整集替换**(`PUT /issues/{n}/labels`,或 MCP 的 labels 字段),而不是**新增**(`POST /issues/{n}/labels`)。整集写入把当时读到的标签集覆盖回去,于是并发 bot 刚挂的标签被抹除。\n\n**方向二(有实际代价):bot 的写入抹掉 agent 的 `skip-changeset`。** #5533:\n\n```\n15:46:42 labeled   size/m         by github-actions[bot]\n15:46:44 unlabeled size/m         by os-zhuang        # agent 整集写入,抹掉 size/m\n15:46:44 labeled   skip-changeset by os-zhuang        # 豁免标签落地\n15:46:45 unlabeled skip-changeset by github-actions[bot]   # 一秒后被 CI 抹掉\n15:46:45 labeled   size/m         by github-actions[bot]\n15:46:45 labeled   tests          by github-actions[bot]\n15:47:08 labeled   skip-changeset by os-zhuang        # 只好再挂一次\n```\n\n`skip-changeset` 是 Check Changeset 的**门禁豁免依据**。它被 CI 抹掉一秒,直接制造了 #5559 立单时记录的现象「dev 声明的标签没落到 PR 上」—— 实际是落了又被抹,dev 侧看起来与「没挂」无法区分。\n\n## 为什么值得修\n\n- 豁免标签被抹 = 门禁红一轮 + 一次人工兜底;测试-only / `.claude`-only PR 在本仓是常态形状。\n- 每个被派发的 PR 都在这条路径上,`size/*`、`documentation`、`tests` 的抹除-补挂抖动是每 PR 都在发生的噪声(timeline 里每次两三条冗余事件)。\n- 症状会被误诊成 agent 的流程缺口(#5559 立单与派发词都是这么归因的),排查成本重复付。\n\n## 两个半独立的落点\n\n1. **写入侧(客户端)**:挂单个标签必须走新增语义(`POST .../issues/{n}/labels`,body `{\"labels\":[\"skip-changeset\"]}`),不得整集替换。若 MCP 的 issue label 写入本身是 PUT 语义,则约束落在 agent 指令面(#5559 的新条款已写明「只加一个标签,不要整集写入」)。\n2. **CI 侧**:确认 `actions/labeler@v7.0.0`(`.github/workflows/pr-automation.yml` 的 Auto Label)与 `codelytv/pr-size-labeler@v1.10.4`(Check PR Size)各自是否在做整集同步 —— 方向二说明至少有一个会移除自己没管的标签。若是 labeler 的 `sync-labels` 语义,应显式关掉;若是 size-labeler 的实现,需要评估其对无关标签的处理。\n   ⚠️ pr-automation.yml 今日已被 #5580/#5625 改过,#5620 也在排队动同一文件,改动请先协调避免撞车。\n\n## 复现\n\n```\ncurl -sS -H \"Authorization: Bearer $GITHUB_TOKEN\" \\\n  \"https://api.github.com/repos/objectstack-ai/objectstack/issues/5533/timeline?per_page=100\" \\\n  | node -e '...filter(e => [\"labeled\",\"unlabeled\"].includes(e.event))'\n```\n\n按 `created_at` 排序打印 `event | label | actor`,上文序列即原样可见。\n\nFound-during: #5559(devx 车道第 7 轮,dev 会话 `session_01GX3sL71LFq8m2usg6VqTSE`)的前提核对。unassigned,交 PM 分诊。"
+}

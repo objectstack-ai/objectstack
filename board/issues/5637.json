@@ -1,0 +1,34 @@
+{
+  "number": 5637,
+  "kind": "issue",
+  "title": "finding(objectql): hook 层自带的 logger 接口把 `error` 声明成 `(msg, meta?)`,与 `Logger` 契约的第二参是 `Error` 相反 —— 三处调用点在任何忠于契约的 Logger 下都会丢掉 meta",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T21:11:40Z",
+  "updated_at": "2026-08-06T06:03:16Z",
+  "closed_at": "2026-08-06T06:03:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5637",
+  "body": "做 #5575 时核实 `Logger.error` 的类型契约扫到的,与那一单不同包、不同接缝,按 Prime Directive #10 单开。\n\n### 事实\n\n`packages/spec/src/contracts/logger.ts:37` 声明的契约是:\n\n```ts\nerror(message: string, error?: Error, meta?: Record< string, any >): void;\n```\n\n第二参是 `Error`,`meta` 在**第三**位。`packages/objectql` 的两个模块各自声明了一份**结构化 logger 形状**,把 `error` 写成两参:\n\n- `packages/objectql/src/hook-binder.ts:77-81`\n- `packages/objectql/src/hook-wrappers.ts:26-31`\n\n```ts\nlogger?: {\n  debug: (msg: string, meta?: any) => void;\n  info: (msg: string, meta?: any) => void;\n  warn: (msg: string, meta?: any) => void;\n  error: (msg: string, meta?: any) => void;   // ← 第二参是 meta,不是 Error\n};\n```\n\n于是三个调用点按这份本地方言把 meta 放在第二位:\n\n- `hook-wrappers.ts:341` — `logger.error('[hook] handler failed (onError=log; suppressing)', { … })`\n- `hook-wrappers.ts:394` — `logger.error('[hook] async handler error (fire-and-forget)', { … })`\n- `hook-binder.ts:243` — `logger.error('[hook-binder] failed to bind hook', { … })`\n\n注入进去的是 `ctx.logger`(`plugin.ts:290` / `plugin.ts:1670`)。契约类型能结构化地满足这份本地形状(参数少的一方可赋值,`any` 双向兼容),所以 tsc 一句话都不说 —— 方言与契约的冲突只在**运行时**体现。\n\n### 为什么今天没坏,以及什么时候会坏\n\n只因为宿主注入的实现恰好是 `ObjectLogger`,而它对第二参**按形状分派**(`errorOrMeta instanceof Error`),所以 meta 在第二位也能落进记录。这份宽容本身是契约没有声明的。\n\n契约的另外两个实现 —— `@objectstack/observability` 的 `ConsoleLogger` / `JsonLogger`(`loggers.ts:55` / `113`)—— 忠实按契约来:\n\n```ts\nerror(message: string, error?: Error, meta?: Record< string, unknown >): void {\n    this.emit('error', message, { ...(meta ?? {}), ...(error ? { error: error.message, stack: error.stack } : {}) });\n}\n```\n\n传进去的对象落在 `error` 位,`error.message` / `error.stack` 都是 `undefined`,`meta` 是 `undefined` —— 于是这三条诊断**整块消失**,只剩一句话。`@objectstack/observability` 正是为了「宿主换一个结构化 logger」而存在,今天仓库里没有任何地方 `new JsonLogger(...)`(除了它们自己的 `child()`),所以属于休眠漂移(observation-class),不是用户今天会撞到的 bug —— 但它会在第一个真正接入生产日志栈的宿主那里生效,而且症状是「日志少了字段」,极难归因。\n\n### 建议(不预设结论,这里有两个方向)\n\n1. **把三个调用点改成契约形状**(`error(msg, undefined, { … })`),并把两处本地 logger 接口的 `error` 改成三参 —— 或者干脆 `import type { Logger } from '@objectstack/spec/contracts'`,别再自带方言。注意:`ObjectLogger` 在 #5575 之前会**丢弃**契约的第三参,所以这个方向必须建立在 #5575 的 `packages/core/src/logger.ts` 修复之上(已随 #5575 落地)。\n2. 或者认为「meta 可以出现在 `error` 位」是我们真心想要的能力 —— 那就应该在**契约里声明**(`error?: Error | Record< string, any >`),而不是让一个实现私下宽容、另两个实现静默丢数据。这一步会给每个 `Logger` 实现加上按形状分派的义务,属于契约级决定,不该由实现方言既成事实地推动。\n\n倾向 1:契约先行,消费端不要方言(Prime Directive #12);2 是把一处宽容升级成所有实现的义务,收益只是省掉一个 `undefined`。\n\n### 关联\n\n#5575(核实 `Logger.error` 契约时发现;同一 PR 修好了 `ObjectLogger` 丢弃第三参 meta 的缺陷,并统计出 `metadata` / `metadata-protocol` / `client` / `core/security` 约 15 处按契约书写、此前一直静默丢字段的调用点)、#5048 / PR #5572。"
+}

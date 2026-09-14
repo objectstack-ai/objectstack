@@ -1,0 +1,36 @@
+{
+  "number": 5537,
+  "kind": "issue",
+  "title": "[17.0-rc2验收] analytics: 带 measure-scoped filter / derived 度量的 dataset 查询,响应 fields 丢失维度描述符 → 表头回退成原始维度名(如 \"owner\" 而非 \"Owner\")",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T16:15:19Z",
+  "updated_at": "2026-08-06T00:49:30Z",
+  "closed_at": "2026-08-06T00:49:30Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5537",
+  "body": "## 现象\n\n当一个 dataset 查询的 **measures 里包含带自身 `filter` 的度量(measure-scoped filter 子查询合并路径)或 derived 度量** 时,`POST /api/v1/analytics/dataset/query` 返回的 `fields` 数组会**完全省略维度(dimension)的描述符**。维度值仍在 `rows` 里,但没有对应的 `{name,type,label,format}` 条目。于是任何消费者(console 表格渲染器)拿不到维度列的 `label`,只能回退到原始行键。\n\nHotCRM 「Sales Performance」仪表盘上肉眼可见:同一个 `owner` 维度(dataset 声明 `label:'Owner'`),\n\n- **Open Pipeline by Owner**(度量无 filter)表头渲染为 `Owner` ✅\n- **Win / Loss by Rep**(度量 `won_count`/`lost_count`/… 各带 filter + `win_rate` 是 ratio)表头渲染为小写 `owner` ❌\n\n而同一张 Win/Loss 表若把维度换成字符串维度 `lead_source`,表头显示 `Lead Source` —— 这是**巧合**:console 的回退是「按原始键 humanize」,`lead_source` humanize 恰好得到 `Lead Source`(与真 label 相同),`owner` humanize 得到不变的 `owner`(≠ label `Owner`),于是 `owner` 把这个 bug 暴露了出来。实际上**两种维度的 label/format/type 元数据都丢了**,只是字符串维度被 humanize 掩盖。\n\n## 复现(curl,可直接执行)\n\n```bash\nBASE=http://localhost:4099\nTOKEN=$(curl -s -X POST $BASE/api/v1/auth/sign-in/email -H 'Content-Type: application/json' \\\n  -d '{\"email\":\"admin@objectos.ai\",\"password\":\"admin123\"}' | python3 -c 'import sys,json;print(json.load(sys.stdin)[\"token\"])')\n\n# A) 无 filter 度量 —— fields 含维度 owner ✅\ncurl -s -X POST $BASE/api/v1/analytics/dataset/query -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' \\\n  -d '{\"datasetName\":\"opportunity_metrics\",\"selection\":{\"dimensions\":[\"owner\"],\"measures\":[\"opp_count\"]}}' \\\n  | python3 -c 'import sys,json;print([f[\"name\"] for f in json.load(sys.stdin)[\"fields\"]])'\n# => ['owner', 'opp_count']\n\n# B) 带 filter 的度量 —— fields 丢了维度 owner ❌\ncurl -s -X POST $BASE/api/v1/analytics/dataset/query -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' \\\n  -d '{\"datasetName\":\"opportunity_metrics\",\"selection\":{\"dimensions\":[\"owner\"],\"measures\":[\"won_count\"]}}' \\\n  | python3 -c 'import sys,json;print([f[\"name\"] for f in json.load(sys.stdin)[\"fields\"]])'\n# => ['won_count']            ← 维度 owner 不在 fields 里,但 rows 里有 owner\n\n# C) 字符串维度同样丢失(被 humanize 掩盖) ❌\ncurl -s -X POST $BASE/api/v1/analytics/dataset/query -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' \\\n  -d '{\"datasetName\":\"opportunity_metrics\",\"selection\":{\"dimensions\":[\"lead_source\"],\"measures\":[\"won_count\",\"decided_count\",\"win_rate\"]}}' \\\n  | python3 -c 'import sys,json;d=json.load(sys.stdin);print(\"fields\",[f[\"name\"] for f in d[\"fields\"]],\"rowkeys\",list(d[\"rows\"][0].keys()))'\n# => fields ['won_count','decided_count','win_rate']  rowkeys ['lead_source','won_count','decided_count','win_rate']\n```\n\n复现两次稳定。浏览器侧(chromium + storageState 登录)抓 `sales_dashboard` 五张 table 的 `<thead>`,两次运行都得到:Open Pipeline by Owner → `Owner`;Quota Attainment by Rep → `Owner`(forecast_metrics);**Win / Loss by Rep → `owner`**;Win / Loss by Lead Source → `Lead Source`;pivot → `Stage`。\n\n## 期望 vs 实际\n\n- 期望:无论度量是否带 filter / 是否 derived,响应 `fields` 都应包含被选维度的描述符(name/type/label/format),表头恒显示 `Owner`。\n- 实际:一旦查询走了「measure-scoped filter 子查询合并」或含 derived 度量的路径,`fields` 只剩度量列,维度描述符缺失;维度列的 label/format/type 全部丢失,渲染器回退到原始键。\n\n## 落点分析\n\n`packages/services/service-analytics/src/analytics-service.ts` `queryDataset` 尾部:\n\n- L873–907 把**度量**列的 label/format/currency/percentScale 富化到 `result.fields`(遍历已存在的 field 条目)。\n- L909–923 有一段**专为维度补 label** 的代码,注释即写着 “the measure-only enrichment above left dimension headers bare (the renderer then fell back to the raw dimension name)” —— 但它 `for (const f of result.fields)` **只富化已经存在于 `result.fields` 的维度条目**,不会为缺失的维度**新建** field 条目。\n\n而在带 filter/derived 度量的路径上,度量来自 `dataset-executor.ts` 的补充分组子查询,经 `mergeByDimensions` 合并回主网格(见该文件 L28、L140–194 的 `mergeByDimensions`/`partitionMeasures`)。合并出的 `result.fields` 里**根本没有维度列**(rows 里有,fields 里没有),于是 L909–923 的富化对维度是空操作,原始键泄漏到前端。\n\n建议修复方向(任一):在 executor 的合并路径上把被选维度的 field 描述符补进 `result.fields`;或把 L909–923 改成「维度缺失时新建 field 条目」而非仅富化已存在条目。console 端的 humanize 回退是次要症状,根因在服务端 `fields` 装配。\n\n## 影响面\n\n- 前端:凡使用带 filter/derived 度量的 dataset table(win-rate 家族、任何 measure-level filter 的看板)维度**列表头显示原始键**;数值维度会额外**丢失 format**(如日期维度的 dateGranularity 格式、货币/百分比 scale)。\n- 数据正确、行数正确,仅列元数据丢失 → 归为 p2(体验/一致性,非数据错误)。\n\nHotCRM 关联(仅记录,不在 hotcrm 重复立单):sales_dashboard 「Win / Loss by Rep」表头小写 `owner`。HotCRM 元数据 `opportunity.dataset.ts` 声明 `{ name:'owner', label:'Owner', field:'owner_id', type:'lookup' }` 正确,问题在平台。\n\n## 环境\n\nhotcrm@0899b4f + @objectstack 17.0.0-rc.2;独立 dev server（file DB, --seed-admin, admin@objectos.ai）。\n"
+}

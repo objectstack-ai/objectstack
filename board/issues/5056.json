@@ -1,0 +1,37 @@
+{
+  "number": 5056,
+  "kind": "issue",
+  "title": "#4001 战役的门测量 BFS 会误报「可达」:zod `.describe()` 共享 def 对象,任意单属性 bridge 把无关形状连起来",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T01:13:14Z",
+  "updated_at": "2026-08-06T07:47:24Z",
+  "closed_at": "2026-08-06T07:47:24Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5056",
+  "body": "批 16 的门测量在第一轮把 `WidgetManifestSchema` 报成 **REACHABLE**,而该文件实测**没有任何载体键**(全仓除 `ui/index.ts` 桶文件外无人 import)。差点据此对一个死文件做了 9 个站点的 breaking 收紧。\n\n## 机制\n\n批 15 在 `packages/spec/src/ui/chart.test.ts` 引入的 `reachableFromMetadataRoots()`(批 14 亦用同形状)在 BFS 直达之外补了一条 **derived-clone bridge**,用来认出 `.extend()` / `.strip()` 产生的克隆 —— 克隆与原件不共享身份,但**共享逐属性的 schema 实例**。判据是:\n\n```ts\nfor (const [name, prop] of Object.entries(shape)) {\n  const d = defOf(prop);\n  if (d && bridged.get(d)?.has(name)) return true;   // ← 任意一个属性命中即判可达\n}\n```\n\n两件事叠加就炸了:\n\n1. **zod v4 的 `.describe()` 返回的克隆共享同一个 `_zod.def` 对象**(`clone(inst)` 不传 def 时直接复用 `inst._zod.def`)。实测:`defOf(z.string().describe('x')) === defOf(z.string())` → `true`(`.optional()` / `.extend()` 则为 `false`)。\n2. 于是 `SnakeCaseIdentifierSchema.describe(…)`、`I18nLabelSchema.describe(…)` 这类**共享叶子**,在全仓几十个 schema 上是 **def-同一** 的。\n\n结果:任何一个形状,只要有一个 `name:` 是 described 的 `SnakeCaseIdentifierSchema`、或一个 `label:` 是 described 的 `I18nLabelSchema`,就会和某个活 schema 的同名属性 bridge 上 —— 而 `name` / `label` 几乎是本仓每个可授权形状都有的两个键。`WidgetManifestSchema` 正是这样命中的:20 个键里只有 `name`,`label` 两个命中(重合度 11%),却足以判「可达」。\n\n## 为什么这条比一般的仪器 bug 更该修\n\n误差**只朝一个方向**:它只会产生**假可达**,不会产生假不可达。也就是说它唯一能造成的后果,是让一个批次**对一个死形状做收紧** —— 花掉一次 v17 breaking,换来 #4583 说的那个东西:「a precisely validated dead slot — the more convincing lie」。这正好是本战役 `no door` 类目存在的理由被自己的仪器反向抵消。\n\n批 13 的教训是「验证不等于**找到**门」;这条是它的补集:**验证也不等于相信走图器说找到了门**。\n\n## 已验证可用的修法(批 16 用的就是这个)\n\n把「任意单属性命中」换成**整形状重合度**:某个已访问 object 节点与候选形状在同名键上共享的属性 def 占候选键总数的比例 ≥ 0.5 才算 derived clone。\n\n- `WidgetManifestSchema`:重合 11% → 正确判为不可达。\n- 批 15 那个真·派生场景(`ChartConfigSchema` 经 `ReportChartSchema.extend()`)重合度远高于阈值,判定不变。\n- 负对照 `z.object({ name: z.string(), label: z.string() })`(刻意长得像)判为不可达。\n\n## 建议\n\n1. 把这条 BFS 从 `chart.test.ts` / `widget.test.ts` 各自的副本抽成**一份**共享测试工具(现在是两份拷贝,已经开始漂 —— 战役自己反复在记「真相的第二份拷贝」这个失效模式)。\n2. 抽出时带上正对照 + 负对照 + **合成载体翻转**对照(注入载体后目标必须翻转为可达),三者缺一不可:批 15 已经记过「lazySchema 的 Proxy target 是 function,`typeof v !== 'object'` 会砍掉半张图」,那次是正对照救的;这次是负对照救的。\n3. 剩余批次(17-22)在用这条 BFS 时先确认已换成重合度版本。\n\n## 参考\n\n- #4001 批 16(发现处)· 批 15 #5043(bridge 引入处)· 批 14 #5042(同形状)\n- #4583(「精确校验的死槽」)\n"
+}

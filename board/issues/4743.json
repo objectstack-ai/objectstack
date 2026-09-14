@@ -1,0 +1,34 @@
+{
+  "number": 4743,
+  "kind": "issue",
+  "title": "哨兵拆掉之后：#4441 的 `readonly` 收窄与 #4551 的巡检跳过还需要吗？——注释已过期，跳过范围值得收窄",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T01:24:36Z",
+  "updated_at": "2026-08-06T08:23:46Z",
+  "closed_at": "2026-08-06T08:23:46Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4743",
+  "body": "发现自 #4556 的实现过程（PR #4742）。**未认领。**\n\n#4556 把 `sys_metadata_history.recorded_by` 的哨兵字符串 `'system'` 改成了 `NULL`。那个哨兵正是 #4441 的写入面收窄和 #4551 的巡检跳过在文档里点名的**动机样例**。哨兵没了，两处豁免的处境不再相同，需要分别看。\n\nPR #4742 按 PM 约束**一行未动**这两处，只把判断留在这里。\n\n## 事实一：#4441 的收窄该保留，但注释已经过期并且会误导\n\n`packages/objectql/src/engine.ts`（`assertReferencesResolve` 里的 `if (fields[name]?.readonly === true) continue;`）。\n\n收窄本身**应当保留**：它的成立理由是「只有**调用方提供**的值才由调用方负责」——非系统调用方写 readonly 字段的值在写入前已被 `stripReadonlyFields` / `stripReadonlyForInsert` 剥掉，留下的必然是平台自己写的，本就在这个检查的自述范围之外。这个论证独立于 `recorded_by`。\n\n问题在紧挨着它的那段注释，现在描述的是一个**已经不存在**的状态：\n\n> Found by the dogfood gate rather than by reasoning: `sys_metadata_history.recorded_by` is `Field.lookup('sys_user', { readonly: true })` that the metadata repository fills with `actor ?? 'system'` — a SENTINEL STRING, not a user id … The sentinel-in-a-lookup is a real modelling wart and is filed separately\n\n`actor ?? 'system'` 已经不存在了。下一个读到这段的人会得到一个错误印象：这条收窄是为了绕开一个 bug 的临时补丁，那个 bug 既然修好了，收窄就可以拆。而拆掉它会重新拒绝掉平台自己的写入。按 AGENTS.md Prime Directive #13 的推论（「实现某个决定时把它的 id 留在代码里」），这里要的是把注释改成陈述那条**独立成立**的原则，并把哨兵作为**历史**而非现状来写。\n\n## 事实二：#4551 的巡检跳过值得重新评估，这才是真问题\n\n`packages/objectql/src/integrity/dangling-reference-audit.ts`：**所有 readonly 引用字段整体跳过**。\n\n它自己的文档写明了跳过的两条理由，其中一条现在作废了：\n\n> - **`readonly` reference fields are skipped** … including the audit-provenance family (`created_by` / `updated_by` / `organization_id`, all `readonly: true` from `applySystemFields`) and the `recorded_by` sentinel above.\n\n剔掉 `recorded_by` 之后，被豁免的 readonly 引用字段就只剩审计溯源那一族。而它们是**货真价实的 id**，并且**真的会悬空**：删掉一个用户，他创建过的每一行 `created_by` 就指向一个不存在的行；删掉一个组织同理。这恰恰是一个悬空引用巡检最该报告的一类——「谁创建的」解析不出来，正是审计场景关心的。\n\n也就是说：#4556 消除了「平台会往 readonly 引用列写非 id」这一整类情形，而那是「整体跳过」当初唯一超出「调用方不负责」之外的额外理由。\n\n## 为什么需要维护者决策，不适合顺手改\n\n收窄这个跳过**影响面不小**：任何删过用户的库，一次巡检会瞬间亮起大片 `created_by` / `updated_by` 悬空。这不是 bug 被发现，而是一个既有的、可能被接受的状态被第一次报出来。需要先定：\n\n- **A. 维持现状**（继续整体跳过 readonly）。成本：巡检对审计溯源族永久失明，而这一族现在是它唯一还在豁免的东西——豁免的理由已经从「平台会写非 id」退化成「量大、吵」，那是一个应当明说的取舍，不是一条技术判断。\n- **B. 纳入巡检，但单独分类**（例如报到一个 `provenance` 分组或 `undetermined` 之外的新桶里），让「用户被删过」和「业务外键断了」在报告里可区分。表达力最好，改动最大。\n- **C. 纳入巡检，与普通引用同等对待**。最简单，但一次报出的量可能淹没真正的业务发现，反而降低巡检的可信度——这正是 `dangling-reference-audit.ts` 自己在「Unknown and absent are DIFFERENT answers」一节里最在意的失效模式。\n\n倾向 **B**：这个巡检的既有设计通篇在强调「不同的答案不要混成一个」（`undetermined` / `unreadableObjects` / `truncatedObjects` 都是为此而生），把「引用的是一个被删掉的用户」和「引用的是一个从未存在的业务记录」混在一起，与它自身的设计立场矛盾。但 B 的成本落在报告结构上，且会改变消费者读到的形状，所以由维护者定。\n\n## 边界\n\n- 本 issue 不含 `recorded_by` 本身——那条已由 #4556 / PR #4742 落地。\n- 事实一（注释过期）与事实二（跳过范围）耦合度低，可以拆成两个 PR：前者是纯文档性的、无风险；后者需要上面的决策。\n\nRefs #4441（PR #4511）、#4551（PR #4555）、#4556（PR #4742）。\n"
+}

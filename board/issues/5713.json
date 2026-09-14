@@ -1,0 +1,36 @@
+{
+  "number": 5713,
+  "kind": "issue",
+  "title": "CLI 启动直读 process.env.OS_SMS_PROVIDER / OS_EMAIL_PROVIDER,完全绕过 settings 的 options 表 —— #5204 的闸门看不到这条路",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T01:49:30Z",
+  "updated_at": "2026-08-06T05:02:05Z",
+  "closed_at": "2026-08-06T05:02:05Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5713",
+  "body": "在 #5204(env 覆盖过 options 表)的实现中发现,记录下来交 triage。**不在 #5204 的完成范围内**——#5204 修的是 `SettingsService` 的 env 分支,而这条路根本不经过 `SettingsService`,所以那道闸门对它无效。\n\n## 事实\n\n`packages/cli/src/commands/serve.ts` 在装配 capability plugin 时直接读 `process.env`,把 provider 名字原样塞进插件构造参数:\n\n- `:2346`\n\n  ```\n  const provider = (process.env.OS_SMS_PROVIDER || cfgSms.provider || 'log').toLowerCase();\n  ```\n\n- `:3121`(`resolveEmailCapabilityArg`)\n\n  ```\n  const provider = String(env.OS_EMAIL_PROVIDER || cfgEmail.provider || 'log').toLowerCase();\n  ```\n\n两处都没有拿 provider 去比对任何 options 表。`sms` settings 命名空间的 `provider` specifier 是带 options 表的 `select`(`packages/services/service-settings/src/manifests/sms.manifest.ts:24`),`mail` 同理(`mail.manifest.ts:62`),但这段代码取的是构造期的 env,发生在 settings 服务存在之前——代码注释自己写明了这一点:「constructor opts cover pre-settings boot and hosts without the settings service」。\n\n所以 `OS_SMS_PROVIDER=twilo`(拼错的 twilio)在启动时不会被任何枚举拦住。#5204 关掉的是 `SettingsService.get()` 那扇门;这是另一扇。\n\n## 为什么算一类问题\n\n这与 #5204 是同一个形状(declared ≠ enforced:一个声明了合法值集的配置项,存在一条从 env 到消费方、不经过该值集的路径),只是发生在更早的生命周期阶段,因此不能用同一个修法。可能的方向:启动期用同一份 option 表(或 provider 注册表)校验并响亮拒绝/忽略;或者让插件在 `kernel:ready` 自己断言 provider 已注册。\n\n## 未核实的部分(诚实标注)\n\n我没有追下去看 `SmsServicePlugin` / 邮件插件拿到一个未知 provider 之后会怎样——是响亮失败、还是静默落回 `log`、还是拼进某个 URL。这决定了本条的严重度,但追查它属于 #5204 之外的范围扩张,所以停在这里。如果插件本身已经响亮拒绝未知 provider,那本条降为「消息质量」问题;如果它静默降级,那就是 #5204 的同级缺陷。\n\n## 相关\n\n- #5204 / PR #5711 —— 关掉 `SettingsService` env 分支这扇门(已修)。\n- #5131 —— 写入路径的 options 表执行(已修)。\n"
+}

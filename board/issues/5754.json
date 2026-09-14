@@ -1,0 +1,35 @@
+{
+  "number": 5754,
+  "kind": "pull_request",
+  "title": "refactor(objectql): update 的三分支派发抽成生产者侧唯一判定 + 门禁 update 切片 (#5480)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T03:59:00Z",
+  "updated_at": "2026-08-06T05:26:31Z",
+  "closed_at": "2026-08-06T05:26:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T05:26:29Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5754",
+  "body": "Fixes #5480\n\n范围:issue 的第 1、2 步。**第 3 步(service-automation 测试升级)不在本单** —— `packages/services/**` 属 services 车道,本单落地后依赖已就位、零阻塞,该车道按 #5393 的既有线索自行升级即可(`crud-bulk-intent.test.ts` 的文件头那段「update 没有共享判定,所以只断言 options 包」的说明,届时连同一起改写)。\n\n## 前提复核(先证再做)\n\nissue 的两条前提在 `origin/main @ 488b66c` 上都还成立,实测:\n\n- `packages/objectql/src/engine.ts:5682` 仍是内联字面量 `throw new Error('Update requires an ID or options.multi=true')`,全仓没有对应的导出常量或可复用函数;\n- `scripts/check-engine-double-contract.mjs` 的文件头仍把 \"update's twin dispatch\" 列在「刻意不覆盖」里,理由写明是「等生产者侧判定先被抽出」。\n\n全仓 grep 该消息文本:只有 1 处 throw + 5 处注释/文档散文 + `packages/lint` 里的一条 `dispatchNote` 字符串,**没有任何测试断言它**。所以把文本搬进导出常量是零风险的,措辞也一字未改。\n\n## 1. 生产者侧判定\n\n新增 `packages/objectql/src/engine-update-dispatch.ts`,形状照抄 `engine-delete-dispatch.ts`:`resolveEngineUpdateDispatch` / `assertEngineUpdateDispatch` / `scalarUpdateId` / `ENGINE_UPDATE_REJECT_MESSAGE` / `ENGINE_UPDATE_DISPATCH_CASES`,全部从 `@objectstack/objectql` 导出。**`ObjectQL.update` 自身改用它** —— 生产者与判定是同一份,否则只是第二份副本。\n\n**行为保持**:三分支语义、`$in` 谓词判定、拒绝消息一字未改。有两处 update 与 delete 不同,判定里**照抄而非「改良」**了生产者,并在模块头和测试里写死:\n\n1. `data.id` 不做标量测试,为真即当 id,且优先于 `where` 与 `multi`;\n2. 分支按**真值**(`if (hookContext.input.id)`)而非 `!== undefined`,所以 `where: { id: 0 }` 不走按 id 路径。\n\n比生产者更「聪明」的判定就是第二份意见 —— 正是 #4550 要消除的东西。第 1 点本身是缺陷,已单独归档为 #5748;修的时候两个文件一起翻面,现在那是一次编辑。\n\n### 测试不是对照表,是对照真实引擎\n\n`engine-update-dispatch.test.ts` 用记录型 driver 驱动**真实引擎**跑完 17 条用例,逐例断言引擎实际行为 == 判定裁决。\n\n**反向验证(方向先定后跑)**:抽取之后 `observeEngine` 走的是同一个判定,所以「引擎同意判定」有变成同义反复的风险。真正独立的一半是**分支本身**(`if (hookContext.input.id)` 与那条 `options?.multi` 且 `driver.updateMany` 的判断),它不经过判定。所以预定方向是:扰动**引擎分支**,判定那一半应保持绿、`real ObjectQL.update` 那一半应变红。实测把该分支条件里的 `options?.multi` 一项去掉,只留 `driver.updateMany`:\n\n```\n× real engine agrees with the predicate: predicate on a non-id column, no multi → reject\n× ... $in over ids, no multi ...  × array id ...  × null id ...\n× falsy scalar where.id (0) ...   × empty where ...  × no options ...  × multi explicitly false ...\nAssertionError: real ObjectQL.update: expected 'multi' to be 'reject'\nTests  8 failed | 15 passed (23)\n```\n\n8 条 reject 用例全红,且红的都是 `real ObjectQL.update` 断言,`predicate` 断言一条没红 —— 与预测一致。已还原。\n\n## 2. 门禁 update 切片\n\n`SLICES` 化:一个切片 = 「看替身的哪个成员」+「该成员必须够到哪个生产者判定」,其余(引擎/驱动归属、一层 helper 的间接、账本、双向对账)一份实现服务两个动词。\n\n**基线键从 `file` 变成 `(file, verb)`**,`verb` 是必填、不默认 —— 继承来的动词等于一条谁也读不出范围的豁免,而两个动词确有实质差别(`data.id`)。为此加了 `DECLARED` 不变量:条目的 `verb` 必须是本脚本真的会扫的切片,否则它永远对不上任何东西、变成退不掉的豁免。已负向验证(把某条改成 `\"updat\"` → 门禁 exit 1 并指名该文件)。\n\n一处**判据修正**,不是为 update 特设:**driver-only 成员的否决改为在任意 arity 生效**。原先只在形参少于 2 个时才查,`delete` 侧侥幸没事(驱动的 delete 第二参数这仓一贯写作 `id`),`update` 侧则不然 —— `plugin.integration.test.ts` 的假**驱动**把 update 写成三参数箭头函数 `(_o: string, _i: any, d: any)`,`_i` 就是主键只是没拼成 `id`,于是一个文件里 19 个驱动替身被当成引擎替身。账本里混进误报比账本窄危害更大。**实测:delete 切片一条不变**(108 doubles / 91 files / 27 pinned,零 RECONCILED),因为 delete 的替身本就没有 driver-only 成员。\n\n**自测扩面**并已证明能红:切片隔离、假驱动的 update、零参 update 的两半证据、`update` 不把自己算作 sibling、objectql 自身的相对路径 import。其中最关键的一条是「在 update 体内调用 **delete** 的判定不算 pin」—— 第一版没有这条,我把 `pinnedImportsOf` 扰动成跨切片记账,自测**没有红**;补上这条 fixture 后同样的扰动立刻红:\n\n```\nx self-test: delete's predicate inside update() does not pin the update slice\ncheck-engine-double-contract --self-test: 1 failure(s).\n```\n\n**基线按实测填**,没有 `--fix` 式生成:每条的 `unguarded` 与行号都是门禁自己打印出来的那一行解析来的;每个包的 devDependency 路线是本分支上真跑 `turbo run build --filter=... --dry` 量的(platform-objects 得到 `WARNING Circular package dependency detected: @objectstack/metadata, @objectstack/metadata-protocol, @objectstack/objectql, @objectstack/platform-objects`,service-job / plugin-reports / plugin-security / plugin-webhooks / service-datasource 无环警告),量完即还原;delete 侧账本已量过的包直接引用不重量。每条 `why` 都写明**它不主张什么**:与 #5629 的 delete 批次不同,这批**没有**逐文件的休眠探针,所以没有一条说「这处宽松未被走到」。\n\n顺带把 objectql 自己的 10 个假引擎 update 钉上了(相对路径 import,本包内)—— 其中 4 个文件本就钉了 delete,「一个动词绑得上、另一个绑不上」正是本单的由来。全部套件绿,没有暴露出第二个 #4434。\n\n### 追加一条:合流后的 base 穿越(commit 2)\n\n首轮 CI 在 merge-ref 上红了一条,原因不在两侧任何一方:`packages/services/service-automation/src/plugin-startup-log-cause.test.ts` 由 #5738(来自 #5661)在本分支**测量之后**落进 main,而它落地时 main 还没有 update 切片 —— 所以它自己的 CI 不可能标记它,本账本也不可能记录它;新切片与新文件第一次相遇只发生在 merge-ref 上。\n\n处理:`git merge origin/main`(未 rebase,零冲突),在合流后的树上**重新实测**并补一条 MEASURED DEBT 条目(line 170,1 个未钉替身)。该包已有 `@objectstack/objectql` devDependency,所以 pin 只是一行 —— 但文件在 `packages/services/**`,不在本单范围,归 services 车道与第 3 步同批做。条目同样不带休眠探针主张。\n\n## 验证(合流后重跑的实测输出)\n\n```\npnpm check:engine-double-contract   exit=0   (--self-test + 正式,零 x 行)\n  delete doubles: 108 in 91 test file(s) — 27 pinned, 81 in the shrink-only baseline.\n  update doubles: 127 in 111 test file(s) — 10 pinned, 117 in the shrink-only baseline.\n  OK — 37 pinned, 165 in the DEBT ledger, 2 exempt.\npnpm check:query-options-erasure    exit=0  (ratchet holds:84 unswept sites in 19 files, none new)\nnode scripts/check-nul-bytes.mjs    exit=0  (5652 files, no raw ASCII control bytes)\npnpm --filter @objectstack/objectql typecheck   exit=0\npnpm --filter @objectstack/objectql test        exit=0  →  Test Files 124 passed / Tests 2044 passed\n```\n\ndelete 侧在合流前后都是 108 / 91 / 27 且零 RECONCILED —— 本 PR 的判据修正没有让 delete 门禁的覆盖面缩水一格。另加自查(门禁扫不到的控制字符):`grep -naP` 配 `[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]` 覆盖本 PR 全部改动文件,无命中。\n\n## 范围外发现(PD #10,已归档,本 PR 不修)\n\n- **#5747** — delete 侧的共享判定与 `ObjectQL.delete` 在**假值标量 id** 上不一致:`resolveEngineDeleteDispatch({ where: { id: 0 } })` 答 `by-id`,引擎却 reject(空字符串 id 同)。真实引擎实测两例。也就是说按 `assertEngineDeleteDispatch` 钉死的替身在这一输入上仍比生产者宽松 —— #4434 的形状发生在防线内部,而 `ENGINE_DELETE_DISPATCH_CASES` 里没有假值 id 用例,逐例对照够不到它。update 侧本 PR 已补齐两例。\n- **#5748** — `ObjectQL.update` 的 `data.id` 不做标量测试:`update(o, { id: { $in: [...] } }, { multi: true })` 走按 id 分支,算子对象被当主键绑进 `driver.update`,显式 `multi: true` 被无声吞掉。实测确认(记录到的 driver 调用是 `update` 而非 `updateMany`)。本 PR 按「行为保持」原样保留并写死为断言,修法留给该单裁定。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01V7WetGmnfoXNn8cLieKKmx\n"
+}

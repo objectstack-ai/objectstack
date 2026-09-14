@@ -1,0 +1,36 @@
+{
+  "number": 5812,
+  "kind": "pull_request",
+  "title": "fix(plugin-auth): better-auth 的 `contains` 下译为 `$contains`,比较值不再当正则求值 (#5710)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T06:10:45Z",
+  "updated_at": "2026-08-06T06:47:49Z",
+  "closed_at": "2026-08-06T06:47:48Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T06:47:47Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5812",
+  "body": "Fixes #5710\n\n`packages/plugins/plugin-auth/src/objectql-adapter.ts` 的 `convertWhere()` 把 better-auth 的 `contains` 译成 `{ field: { $regex: value } }`,一个**未转义、来自调用方**的比较值坐进了正则的**模式位**,而且发生在认证路径上。本 PR 把这一支翻成 `$contains`。\n\n## 前提复核(origin/main@`1624f4a`)\n\n- 生产者仍在:`objectql-adapter.ts:137` 是 `filter[fieldName] = { $regex: condition.value }`(翻转前)。\n- 活体消费面仍在:`driver-memory/src/filter-refusal.ts:145-158` 的 `SUPPORTED_FIELD_OPERATORS` 仍为 `new Set([...FILTER_OPERATORS, '$regex', '$options'])`,注释原话仍是「Refusing it here would break a live producer」。\n- 真实调用方仍在:`GET /api/v1/auth/admin/list-users`(`auth-route-ledger.ts:161`)把 `searchOperator`(默认 `contains`)与 `filterOperator` 直接推进 `where`(better-auth `dist/plugins/admin/routes.mjs:358-368`)。\n- 前提成立,按裁决实施。\n\n## 目标算子:`$contains`,不是 `$icontains`(动手前验证的前提)\n\n派发令要求先验证「`$icontains` 仍是纯声明面」再动手 —— 已验证,前提成立:\n\n- `packages/spec/src/data/filter.zod.ts:1086-1096` 的 `FILTER_OPERATORS` **不含** `$icontains`(只有 `$contains`/`$notContains`/`$startsWith`/`$endsWith`);\n- 该文件 1066-1081 行把这件事写成了刻意分期:`$icontains` 「joins this array in the PR that implements it (#5702), not before」;\n- 因此若翻成 `$icontains`,driver-memory 的形状门会先拒收(fail-closed),而任何绕过拒收的面会走匹配器 `default: break` —— 谓词被静默丢弃,过滤放大成全匹配,在认证读路径上是越权读。\n\n所以本单的目标算子是 `$contains`;`$icontains` 的执行面归 #5702。\n\n## 大小写语义(派发令要求写进正文的判断)\n\n**上游期望**:better-auth 的 `Where` 类型自带 `mode?: \"sensitive\" | \"insensitive\"`,**默认 `\"sensitive\"`**(`@better-auth/core/src/db/adapter/index.ts:324-343`)。也就是说 better-auth 的 `contains` 默认要的就是大小写**敏感**的字面子串,这与 #5701 Q2=A 裁定的 `$contains` 契约(大小写敏感)同向。spec 自己的退役处方也明写了这个二选一:`RETIRED_FILTER_OPERATORS.$regex.why` —— 「Write `$icontains` for the case-insensitive substring search …, **or `$contains` for a case-sensitive one**」。\n\n**一处要诚实纠正的说法**:issue 正文与派发令都写了「裸 `$regex` 在 memory 上本来也是大小写敏感的,所以翻转对该 driver 等价」。这句话只对 driver-memory 的**参考匹配器**(`memory-matcher.ts` 的 `match()`,用 `String.includes`)成立,对**查询路径不成立**:\n\n- 查询路径 `normalizeFieldOperators`(`memory-driver.ts:939-941`)把 `$contains` 降为 `new RegExp(escapeRegex(v), 'i')` —— 转义 + **`i` 标志**;\n- 而裸 `$regex` 交给 mingo 时没有任何 flags,是大小写敏感的。\n\n所以在 driver-memory 的**实际查询路径**上,本次翻转把大小写行为从「敏感」改成了「不敏感(全 Unicode 折叠)」。这不是本 PR 引入的越契约行为,而是该 driver 今天既有的状态 —— `scripts/check-driver-conformance.mjs` 的 driver-memory DEBT 行已按测量写明这一点,并指向 #5702 去把它对齐回敏感。本 PR 不钉这条大小写行为(钉了会与 #5702 的对齐相冲突),只把它记录在此。\n\n## 反向验证:先红后绿(实测)\n\n新 pin 先在**未翻转**的代码上跑,四条按预期红:\n\n```\nFAIL src/auth-contains-filter.test.ts > emits `$contains`, never a bare `$regex`, for a `contains` search\nAssertionError: expected { name: { '$regex': 'a.b' } } to deeply equal { name: { '$contains': 'a.b' } }\n\nFAIL ... > does not read `.` as a wildcard — `a.b` matches `a.b`, not `axb`\nAssertionError: expected [ 'a.b', 'axb' ] to deeply equal [ 'a.b' ]\n\nFAIL ... > does not read `^` as an anchor\nAssertionError: expected [ { name: 'a.b', …(6) }, …(1) ] to deeply equal []\n\nFAIL ... > matches a value that is not a legal regex, instead of failing on it\nSyntaxError: Invalid regular expression: /(/: Unterminated group\n  ❯ new Query mingo/cjs/query.js:44:10\n  ❯ _InMemoryDriver.find packages/drivers/driver-memory/src/memory-driver.ts:293:30\n\nTest Files  1 failed | 34 passed (35)\n     Tests  4 failed | 789 passed (793)\n```\n\n翻转后全绿(`Test Files 35 passed (35) / Tests 793 passed (793)`)。\n\n第四条要单独说明:issue 预测非法模式会「静默不匹配」,那是**参考匹配器**那一面的行为(`catch { return false }`);实测**查询路径**是直接抛 `SyntaxError`(mingo 在编译 `Query` 时构造 `RegExp`),连 ADR-0112 信封都没进。两种都是坏答案,只是坏法不同 —— 按实测记录,而不是按预测记录。\n\n## 测试落点\n\n`packages/plugins/plugin-auth/src/auth-contains-filter.test.ts`,两面:\n\n1. **契约面**(spy engine):发出的过滤器就是 `{ name: { $contains: 'a.b' } }`,且整棵树里没有 `$regex`;另加一条词表 pin(`FILTER_OPERATORS` 含 `$contains`、不含 `$regex`)—— 这是「五后端都必须求值」这句话的凭据。\n2. **行为面**(真实 `InMemoryDriver`,经 `createObjectQLAdapterFactory` 的 better-auth 适配器):`a.b` 只命中 `a.b` 不命中 `axb`;`^a` 一行不中;`(` 按字面命中 `x(y`;无元字符的 `xb` 照旧命中 `axb`。\n\n只有契约面看不出「拼对了但求值错了」,只有行为面说不清是哪个算子换来的结果,所以两面都要。测试没有落进 spec 的 `FILTER_TEXT_CASES` 共享一致性表 —— 那是 #5701/#5702 的领地,这里钉的是 adapter 这一个实现面。\n\n为跑行为面,plugin-auth 增加了 `@objectstack/driver-memory` 的 **devDependency**(不进发布产物)。测试里的引擎替身**只声明三个读动词**,写动词是刻意不声明的:种子数据直接经 driver 写入,避免手写一个本测试既不需要、也无法遵守的 delete/update dispatch 契约(`check:engine-double-contract`)。\n\n## 对 #5702 的影响(必答项)\n\n**变简单,且是「解锁」而非「减负」**:#5702 的「校验期响亮拒收 `$regex`」原本被这一个活体生产者挡着(`filter.zod.ts:1150-1155`「Hard order: #5710 flips the producer, then #5702 turns these strings into refusals」、`check-driver-conformance.mjs:279-282`「#5710 flips that producer before any of these four cells may be cleared」)。本 PR 合并后:\n\n- 仓内已无 `$regex` 生产者(全仓扫描:剩下的 `$regex` 出现点都是消费面、退役处方文本或拒收断言),四个 driver 的 `$regex` 求值臂可以按 #5702 计划直接删/改拒收,不再有「会打断登录」的顺序约束;\n- `driver-memory/src/filter-refusal.ts` 的 `SUPPORTED_FIELD_OPERATORS` 里 `$regex`/`$options` 两个额外成员,其唯一存在理由(注释里写死的那句)随之消失,可以整段删掉;\n- `$contains` 大小写对齐(#5702 预算内)的工作量**不变**,但现在多了一个受益者:认证路径的 `contains` 会随对齐一起从「memory 上不敏感」回到契约的敏感,与 better-auth 的 `mode: 'sensitive'` 默认对齐。\n\n一处**给 #5702 的备注**(不另立单,因为这几行正是 #5702 要改的):`packages/spec/src/data/filter-text-conformance.ts:272` 把 `{ $regex, $options }` 说成「The exact shape plugin-auth's adapter can emit」。实测该 adapter 从不发 `$options`(它只写 `{ $regex: value }`),所以那条用例钉的是一个本 adapter 产生不出来的形状 —— 用例本身仍有价值(拒收要同时点名两个拼写),只是这句归因不准。\n\n## 越界发现(已另立单,本 PR 不修)\n\n同一个 `convertWhere()` 上另有两个与本单不同类的缺陷,均按 Prime Directive #10 单独立单:\n\n- **#5813**:`not_in` / `starts_with` / `ends_with` 三个 better-auth 算子在 `convertWhere` 里**没有分支**,谓词被整条丢弃 —— 过滤放大(admin list-users 的 `filterOperator`/`searchOperator` 是活体调用方)。\n- **#5814**:`Where.mode: 'insensitive'` 被整体忽略(`@better-auth/scim` 对 `caseExact: false` 的属性会发它;需要 #5702 的 `$icontains` 执行面才修得了)。\n\n## 验证命令\n\n```\npnpm --filter @objectstack/plugin-auth test        # 35 files / 793 tests passed\npnpm --filter @objectstack/plugin-auth typecheck   # tsc --noEmit,无输出\nnode scripts/check-nul-bytes.mjs                   # OK (5678 files)\nnode scripts/check-engine-double-contract.mjs      # OK — 37 pinned, 165 DEBT, 2 exempt\n```\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 5661,
+  "kind": "issue",
+  "title": "finding(service-automation): plugin.ts 里还有三处外来 `${err.message}` 插进日志 message —— 其中两条是耐久性诊断,正是最不该被切碎的记录",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T23:03:14Z",
+  "updated_at": "2026-08-06T03:37:02Z",
+  "closed_at": "2026-08-06T03:37:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5661",
+  "body": "做 #5636 时对 `packages/services/service-automation/src/plugin.ts` 全文扫同类形态的结果。\n#5048 / PR #5572 修了 flow 绑定四+一处,#5575 / PR #5639 修了 `fail()` 两处,#5636 修了\n`degradeConnectorInstance` 两处;下面三处三单都没覆盖,单开记录。\n\n行号基于 origin/main `5b60b3669`。\n\n### 三处\n\n1. **`plugin.ts:454`** —— manifest 服务不可用(`warn`):\n\n   ```ts\n   ctx.logger.warn(\n       `[Automation] manifest service unavailable; sys_automation_run not registered yet: ${(err as Error).message}`,\n   );\n   ```\n\n2. **`plugin.ts:592-594`** —— 启动时读不到 `sys_automation_run`(`error`):\n\n   ```ts\n   ctx.logger.error(\n       `[Automation] sys_automation_run could not be read at startup — if this persists, suspended runs will NOT ` +\n       `survive a restart. Check that schema sync ran for this datasource: ${(err as Error).message}`,\n   );\n   ```\n\n   `err` 来自 `candidate.probe()`,即**数据源驱动**抛出的错误。\n\n3. **`plugin.ts:931-936`** —— 重启后 wait-timer 重新挂载失败(`error`):\n\n   ```ts\n   ctx.logger.error(\n       `[Automation] suspended wait-timer re-arm FAILED after restart — … Cause: ${(err as Error).message}`,\n   );\n   ```\n\n   `err` 来自 job 服务。\n\n### 为什么第 2、3 条值得单独说\n\n这两条的**存在理由**就是可读性:它们各自的代码注释写明了后果 ——「suspended runs will NOT\nsurvive a restart」、「every wait/approval paused before this restart will hang indefinitely」\n—— 并特意选在 `error` 而不是 `warn`(第 3 条的注释原文:「so it is reported at `error`, not\n`warn`」)。一条被搅烂的耐久性告警,恰好是运维最需要能 `grep` 到、能按字段过滤的那一条。\n这就是 #4632 的原则:被搅烂的诊断比没有诊断更贵。\n\n机制与 #5048 / #5575 / #5636 完全相同:`ObjectLogger` 每次调用只写一条\n`<ts> <LEVEL> <msg>` 记录,带换行的 message 溢出到不带等级头的物理行,文件 sink /\n`docker logs`+journald 送采集 / `grep ERROR` 都把续行读成无法归属的碎片。第 1 条是 `warn`\n→ stdout,冷启动时还会被 `BootLogCapture` 直接丢掉续行(#5636 实测:13 行进,保留 1 行,\n丢 12 行)。\n\n### 刻意不含在内的两处(说明理由,免得下一个人重复扫)\n\n- **`plugin.ts:191`**(`package file ref … could not be read: ${err.message}`)是一个\n  **`throw`**,不是日志记录。#5575 已经把这条界线写进 `thrown-cause-diagnostics.ts`:抛出的\n  message 由内核失败通道原样打印,既不需要单行也不需要有界,多行 dump 在终端里本来就好读。\n  这里应当保持现状。\n- **`plugin.ts:729`**(`runAs:user grant resolver not wired`)是 `debug`,而且 `err` 是内核\n  服务查找失败 —— 是我们自己的单行文本,不是外来值。\n\n### 可达性(finding 而非 bug)\n\n三处的 `err` 都来自我们**不控制文本**的地方(kernel service registry、datasource 驱动、\njob 服务),但今天在库内的实现里这些 message 都是单行。第一个包装了多行 SDK 错误的驱动\n或 job 服务实现会撞上;第 2 条尤其 —— 数据库驱动的多行错误在生态里很常见。\n\n### 修法\n\n与前三单同源、零新词汇:复用同包 `thrown-cause-diagnostics.ts` 的 `describeThrownForLog`,\nmessage 保持不含换行的自足句子,cause 走 meta。位置按 `Logger` 契约:`warn(message, meta?)`\n用第二参,`error(message, error?, meta?)` 用**第三**参(第二参塞原始 error 会附带完整堆栈)。\n新增字段名不得含 `key`/`token`/`secret`/`password` 子串(`ObjectLogger.redactSensitive` 按\n子串匹配,见 #5573)。\n\n第 2、3 条改完后建议顺手确认 `pnpm check:durability-log-level` 仍绿 —— 这两处正在它扫的\n24 个耐久性 catch 接缝里。\n\n### 关联\n\n#5636、#5575 / PR #5639、#5048 / PR #5572、#5573、#4632、#4420(耐久性丢失本身)、cloud#971。"
+}

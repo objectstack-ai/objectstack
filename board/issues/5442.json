@@ -1,0 +1,33 @@
+{
+  "number": 5442,
+  "kind": "issue",
+  "title": "driver-memory analytics 面:`flattenFilterCondition` 对所有算子一律摊平数组比较数,`{qty: {$eq: [100]}}` 变成 `$eq: 100`(`find()` 取 0 行,analytics 取 1 行)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:on-hold"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T11:52:30Z",
+  "updated_at": "2026-08-06T07:06:02Z",
+  "closed_at": "2026-08-06T07:06:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5442",
+  "body": "做 #5374 时,为了确认新的谓词构造表在「比较数是数组」时的行为,逐个实测了标量算子收到数组比较数会怎样。这一条**不属于 #5374 的范围面** —— #5374 裁的是算子映射到了错的目标,这一条在更上游的**降级(lowering)**这一层,#5374 修好之后依然存在。按 Prime Directive #10 单独记在这里,unassigned。\n\n## 位置\n\n`packages/plugins/driver-memory/src/memory-analytics.ts` 的 `flattenFilterCondition`(约 :595):\n\n```ts\nfor (const opKey of opEntries) {\n  const cubeOp = this.mongoOperatorToCubeOperator(opKey, key, `${here}.${opKey}`);\n  const v = wrapper[opKey];\n  out.push({ member: key, operator: cubeOp, values: Array.isArray(v) ? [...v] : [v] });\n}\n```\n\n`Array.isArray(v) ? [...v] : [v]` 是**无差别**的:它对 `$in` / `$nin` 是对的(那两个算子的比较数本来就是列表),对 `$eq` / `$ne` / `$gt` / `$contains` 等标量算子则把「一个数组值」摊成了「列表里的第一个元素」。下游取 `values[0]`,数组性就此丢失。\n\n## 现象(实测,在 #5374 修复之后)\n\n3 行数据,`qty` 分别为 `100` / `200` / `100`(`id` 1/2/3):\n\n| `where` | `find()` | analytics | 说明 |\n|---|---|---|---|\n| `{qty: {$eq: [100]}}` | `[]` | **`[1,3]`** | 数组比较数被摊成标量 `100`,于是匹配上了 |\n| `{qty: {$eq: []}}` | `[]` | `[]` | 巧合一致:摊成 `undefined` 后同样取不到行 |\n\n`find()` 的答案是对的:存的是数字 `100`,`[100]` 是一个数组,mingo 跨类型比较永不相等,所以 0 行。analytics 面把作者写的**数组**当成了**标量**,回答了一个作者没有问的问题。\n\n方向这次是**收窄→放大都可能**:上表是放大(0 → 2 行),但 `{qty: {$eq: [100, 200]}}` 会静默丢掉 `200`,那是收窄。两个方向都是静默的。\n\n## 为什么是 bug\n\n1. **它把一个「什么都匹配不上」的查询变成了「匹配上了」。** 作者写 `$eq: [100]` 大概率是笔误(想写 `$in`),而正确的行为是照实回答 0 行 —— 让笔误可见。摊平之后笔误被**修正成了另一个查询**,作者永远看不到自己写错了。这是 Prime Directive #12 点名的「消费端宽容」形状:在消费端替生产者猜意图,把错误藏起来。\n2. **live query path 不这么做。** `normalizeFieldOperators` 的 `case '$eq'` 是 `result[op] = store(val)`,数组原样进 mingo。所以又是本包两面对同一个 `where` 给出不同行集(#5240)。\n3. **spec 侧允许这个输入。** `FilterCondition` 的 `$eq` 是宽类型,所以这个形状能通过 `assertFilterConditionShape`,不会在门口被拦下。\n\n## 建议(不代裁决)\n\n两条路,请裁:\n\n- **A:按算子决定是否摊平。** 只有 `$in` / `$nin`(以及隐式相等的数组写法)接受列表,其余算子原样保留数组比较数。与 live path 一致,改动小。\n- **B:在门口拒收。** 让 `assertFilterConditionShape` 对标量算子收到数组时报 `INVALID_FILTER`,与 #5347(`$null` 收到非布尔)、#5328(`$between` 形状不对)同款 —— 那两条都是这么裁的,先例更强,而且笔误会得到一个说得出话的 400 而不是 0 行。\n\n倾向 B,因为「0 行」和「作者写错了」在图表上同样看不出区别,而 #5347 / #5328 已经为这一类建立了拒收的惯例;但 B 需要先确认 spec 是否有意允许 `$eq: [...]` 表达「等于这个数组值」(schemaless 存储里数组是合法列值),若有意,则只能走 A。\n\n## 未验证的部分\n\n- 没有测 `$contains` / `$gt` 等其余标量算子收到数组时的行为,只测了 `$eq` / `$ne`。机制是共用的一行代码,推断其余相同,但未实测。\n- 没有确认是否存在真实调用方依赖当前的摊平行为(例如某个把 `$in` 写成 `$eq` 的 widget 元数据)。改之前值得 grep 一遍。\n\n关联:#5374(同文件、同一轮核对里发现;它裁的是算子→谓词层,本条在降级层)、#5347 / #5328(同类「形状不对就拒收」的先例)、#5240(本包两面不得分叉)、#5373。\n"
+}

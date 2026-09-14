@@ -1,0 +1,35 @@
+{
+  "number": 5705,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): 元数据存储读不到不再被讲成「这一项不存在」 (#5532)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T01:27:06Z",
+  "updated_at": "2026-08-06T02:18:42Z",
+  "closed_at": "2026-08-06T02:18:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T02:18:40Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5705",
+  "body": "Fixes #5532\n\n## 这条修的是什么\n\n`sys_metadata` 读不到的时候,协议层会把「读不到」讲成「这一项不存在」。四处\ncustomization-overlay 读各自裹着一个裸 `catch {}`,注释自己就写着 \"DB not\navailable\",然后照 miss 处理;空值一路穿过读链,每个消费方给它起了一个不同却\n同样错的名字:\n\n| 入口 | 故障时的答案 | 真相 |\n|---|---|---|\n| `getMetaItemCached` | `Metadata item object/acct not found` | 读不到 |\n| `getMetaItem` `?state=draft` | `NO_DRAFT` / 404「没有待发布的草稿」 | 读不到 |\n| `getMetaItem` `?preview=draft` | 静默回退成已发布内容 | 读不到 |\n| `getMetaItems` | `items: []`「这个环境一个都没声明」 | 读不到 |\n\n对客户端的后果就是 issue 描述的那个:Studio / Setup 在元数据库故障期把每一个对象\n显示成「不存在」,处置方向和真相完全相反。\n\nADR-0110 D3 已经为这件事立过规矩:miss 与 outage 是两个不同的事实、安全含义相反。\n#5108 按这条修掉了 `DatabaseLoader` 的复数读,#5089 修掉了 `listForIndex`;本 PR 是\n同一条规矩在协议自己的 overlay 读上,**单数与复数、active 与 draft 一并覆盖**。\n\n## 前提复核(issue 是线索,不是规格)\n\n按 issue 的 harness 在合并后的 `origin/main` 上实跑(真 `ObjectStackProtocolImplementation`,\n驱动每个读方法都 reject):\n\n```\nRESOLVE getMetaItem(econnrefused)         -> {\"type\":\"object\",\"name\":\"acct\", …没有 item}\nTHROW   getMetaItemCached(econnrefused)   status=undefined code=undefined\n                                          msg=Metadata item object/acct not found\nTHROW   getMetaItem(state=draft, …)       status=404 code=NO_DRAFT\nRESOLVE getMetaItem(previewDrafts, …)     -> 静默回退成 active 读\nRESOLVE getMetaItems(econnrefused)        -> {\"type\":\"object\",\"items\":[]}\n```\n\n**根因前提成立**,并且 issue 列为「未验证」的两处同型点(draft 分支、复数读)实测\n确属同病,同 PR 一并修。\n\n**次生事实已漂移,如实记录**:issue 写的 wire 结果是「400 无 code,内部措辞逐字上线」。\n那是 #5489 落地前的形状。今天 `mapDataError` 的终末兜底已经是\n`UNCLASSIFIED_FAULT`(`500` + `INTERNAL_ERROR`,措辞 withheld),实测:\n\n```\nmapDataError(new Error('Metadata item object/acct not found'))\n  -> {\"status\":500,\"body\":{\"error\":\"Internal server error\",\"code\":\"INTERNAL_ERROR\"}}\n```\n\n所以本 PR 的 wire 翻转不是 PM 分诊预设的 `400 -> 404`,而是 **`500 -> 404`**。方向不变\n(把错误答案改成对的答案),但值不同,changeset 与测试都按实测写。顺带一提:这也让\n方向 C 比立单时更值得做 —— 一个真的 miss 现在被当成服务器故障回 500。\n\n## 改了什么\n\n**1. 判别按错误类型,不按异常猜**(方向 A)\n\n唯一良性的读失败是「`sys_metadata` 还没建表」:那时确实没有 overlay 行,落回\nregistry 就是真相,首次启动不该爆炸。判定走 `isMissingTableError` —— `DatabaseLoader`\n(#5108)与本包 `SysMetadataRepository`(#4867)问的同一个谓词,一个驱动怪癖只教给\n平台一次。其余一律不良性(保守方向和该谓词自身一致:认不出的错误 **不是** 良性)。\n\n新增一个私有方法 `rethrowUnlessMetadataStoreUnprovisioned`,四处 overlay 读共用。\n\n**2. 故障照实上报**\n\n抛 `status: 503` / `code: SERVICE_UNAVAILABLE`,驱动原始错误挂 `cause`。\n\n- `503` 而不是 `500`:请求本身没有任何问题,这是可能自愈的依赖故障,调用方/代理\n  **应该** 重试 —— 和 `mapDataError` 给 `ERR_DATASOURCE_UNAVAILABLE` 的裁决一致。\n- `SERVICE_UNAVAILABLE` 是标准目录里 503 自己的码(`HttpStatusErrorCodeMap[503]`,\n  ADR-0112),不是新造的字符串;**没有** 往 error-code ledger 里加新词汇 —— 今天没有\n  任何被测量到的消费方需要比「503 元数据面不可用」更细的粒度,按创业期聚焦原则,\n  词汇跟着需要它的实现一起回来。\n- 消息 **不拼接** 驱动报文:#5437 记过原因(5xx 的散文在边界被无条件丢弃,而本文件\n  写侧两个 500 正是当初拼进去、原样上线的标本)。运维照样拿得到 —— 驱动错误在\n  `cause` 上,`logWithheldServerFault` 会把整个对象打出来。\n\n**3. 终末 not found 结构化**(方向 C)\n\n`getMetaItemCached` 的终末 miss 现在带 `status: 404` / `code: RESOURCE_NOT_FOUND`\n(标准目录的 404 floor,也正是这条路由 app 可见性闸门已经在发的那个拼写)。\n\n**⛔ `packages/rest` 生产码一行未改**,`packages/metadata` 也没碰:接住方\n(#5437 / #5464 / #5489)本来就是对的,缺陷在产出方。rest 侧只加了断言测试。\n\n## wire 可见变化\n\n| 场景 | 之前 | 之后 |\n|---|---|---|\n| 元数据存储不可达(单数读) | `500` + `INTERNAL_ERROR`(#5489 前:`400` 逐字上线) | `503` + `SERVICE_UNAVAILABLE` |\n| 元数据存储不可达(`?state=draft`) | `404` + `NO_DRAFT` | `503` + `SERVICE_UNAVAILABLE` |\n| 元数据存储不可达(复数读) | `200 {\"items\":[]}` | `503` + `SERVICE_UNAVAILABLE` |\n| 真的没有这一项 | `500` + `INTERNAL_ERROR` | `404` + `RESOURCE_NOT_FOUND` |\n| `sys_metadata` 尚未建表 | 落回 registry | **不变** |\n\n## 反向验证(方向在跑之前先定)\n\n两半都预判为「普通红」,并且 **红得不一样**,这正是要点:\n\n- 把四处 `} catch { /* DB not available */ }` 还原 → **7 红 / 5 绿**,而且红成 issue\n  报告的形状(单数与 preview 读 RESOLVE 出无 item,复数读 resolve `{items: []}`,\n  draft 读抛 404)。预判是 6(六个 outage 用例);第七个是 miss/outage 对照用例,它的\n  **outage 那一半** 就是那六个之一 —— 如实记下来,不四舍五入。\n- 把终末那句无 code 的 `throw new Error('Metadata item …/… not found')` 还原 →\n  **3 红 / 9 绿**:两个「真 miss 是结构化 404」用例,加上首次启动的良性 miss 用例,\n  全部红在 `status`/`code` 是 `undefined` 上;而每一个 503 用例保持 **绿**。这个分离\n  是刻意的 —— 它证明 404 是方向 C 自己的贡献,不是 outage 拆分的副产品。\n\n「良性 / 健康」那个 describe 是反向的护栏:它专门抓过度收紧 —— 把首次启动、或者一个\n本来就不存在的条目,也讲成故障。\n\n## Fixture 分诊(消费半径,不是编辑包)\n\n改动在 `packages/metadata-protocol`,踩红的 fixture 在 `packages/objectql`:\n`protocol-meta.test.ts` 两个用例把旧行为钉死了 ——\n\"should handle DB errors gracefully and return undefined item\" / \"…return empty items\",\n喂 `new Error('DB down')` 然后断言答案是空值。按三分诊里的 **整条替换**:它们的断言\n之所以通过,正是因为故障被吞掉了。各自换成「不可读 = 上报 503」并 **补上** 良性对照\n(「未建表仍然优雅降级」)—— 老用例里对的那一半保留下来了。\n\n## 测试\n\n新增:\n\n- `packages/metadata-protocol/src/protocol.metadata-store-outage.test.ts`(12 用例)\n- `packages/rest/src/rest-meta-outage-vs-miss.test.ts`(6 用例,只加断言、不动 rest 生产码)\n\n改写:`packages/objectql/src/protocol-meta.test.ts`(2 个旧 fixture → 4 个用例)\n\n跑过(合并 `origin/main` 之后重跑一遍,含 #5682):\n\n```\nmetadata-protocol  45 files / 419 tests  passed\nobjectql          121 files / 1972 tests passed\nrest               52 files /  757 tests passed\nruntime            98 files / 1436 tests passed\ncli                83 files /  825 tests passed\nmetadata           24 files /  495 tests passed\nplugin-security    34 files /  731 tests passed\nplugin-auth        34 files /  786 tests passed\nservice-analytics  51 files /  905 tests passed\nservice-automation 61 files /  730 tests passed\n\npnpm --filter @objectstack/objectql typecheck   -> Done\npnpm check:type-check-coverage                  -> OK (63/78,ledger 未增长)\npnpm check:nul-bytes                            -> OK (5613 files)\npnpm check:durability-log-level                 -> OK (24 seams,全部 loud/rethrow/propagate)\n```\n\n## 范围外发现\n\n同文件里还有两处同族的裸 catch,**不在本 PR 范围**,已另开 issue,按 Prime\nDirective #10 不夹带修:\n\n- `getEffectiveLock` 的 overlay 读 —— 故障时 lock 落成 `'none'`,即保护闸门 **fail-open**;\n- `getMetaItemLayered` 的 overlay 读 —— 故障时 overlay 静默为 `null`,三层视图把\n  「读不到」画成「没有 overlay」。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01V7WetGmnfoXNn8cLieKKmx\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01V7WetGmnfoXNn8cLieKKmx)_"
+}

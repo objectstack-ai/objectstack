@@ -1,0 +1,34 @@
+{
+  "number": 5535,
+  "kind": "issue",
+  "title": "finding(objectql): registerReapGuard 后注册者静默顶掉前者,且注册表私有 —— 第二个注册方察觉不到自己解除了别人的 guard",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T15:51:14Z",
+  "updated_at": "2026-08-06T02:50:02Z",
+  "closed_at": "2026-08-06T02:50:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5535",
+  "body": "在核对 #4672(知识索引对账)时发现的旁支问题,与该 issue 的实现无关,单独记录。\n\n## 现象\n\n`LifecycleService.registerReapGuard(object, guard)` 的实现是一行 set(`packages/objectql/src/lifecycle/lifecycle-service.ts:420-421`),docstring 也明确写了「One guard per object (last registration wins — guards are platform wiring, not user surface)」。同时 `reapGuards` 注册表是 `private`(`:335`),对外没有 `hasReapGuard` / `listReapGuards` 之类的探针,覆盖时也没有 warn。\n\n两点合起来才构成问题:\n\n1. 同一 object 上的第二个注册方**静默顶掉**第一个;\n2. 第二个注册方**无法察觉**自己顶掉了什么——注册表私有、无探针、无日志。\n\n对比同一文件里 #5195 落的 `registerRetentionFloor`:键是 `object::policy::declaredBy`(`:463`),注释写得很直白——「a re-registration replaces rather than accumulates, while two independent consumers of one object both keep their say (the strictest wins)」。也就是说 floor 是**可组合**的,guard 不是。这个不对称目前没有任何地方记录为有意权衡。\n\n## 为什么今天不出事(observation-class)\n\n全仓当前只有 `service-storage` 注册 guard,而且注册在两个**不同** object 上——`sys_file` 与 `sys_upload_session`(`packages/services/service-storage/src/storage-service-plugin.ts:320-337`),不存在碰撞。所以这是一条「今天没人踩到」的记录,不是现网缺陷。\n\n## 什么时候会出事\n\nguard 的语义是「外部副作用先做完,再确认这行可以删」,而 `sys_file` 的 guard 做的正是**字节回收**:确认前先 `storage.delete(row.key)`,失败则 veto 留到下一轮(行是字节的唯一指针,先删行就永久泄漏)。任何第二个消费者在 `sys_file` 上注册,这段字节回收就被整体解除:行照删、字节泄漏,而且没有一行日志说明发生了什么。\n\n第二消费者不是假设场景:#4672 讨论的「派生索引在行消失前按 id 去索引化」就是同一形态,ADR-0057 §3.3 的 amendment 也正是把这种 domain callback 认定为合法形态(「a guard is a domain callback, not a second sweeper」)。也就是说,只要 ADR 鼓励的这条扩展点被第二个包用起来,覆盖就从理论变成日常。\n\n## 处置方向(建议,非裁决)\n\nguard 的契约是「确认才删」,天然可交集组合:同一 object 上的多个 guard 依次执行,只有**全部**确认的 id 才进删除集(任一 veto 即保留到下一轮由下次 sweep 重试)。这与单 guard 时的语义完全兼容,也与 floor 的「最严者胜」同构。\n\n退一步的最小修法:保留 last-wins,但覆盖时打 warn 并提供一个探针,让注册方至少能看见冲突、能选择不注册。\n\n## 参考\n\n- `packages/objectql/src/lifecycle/lifecycle-service.ts:320`(`LifecycleReapGuard` 契约)、`:414-421`(注册)、`:1020`(读取)、`:1083-1111`(`guardedReap`,500 行/批、20 批/sweep)\n- `packages/objectql/src/lifecycle/lifecycle-service.ts:463`(`registerRetentionFloor` 的可组合键,#5195)\n- `packages/services/service-storage/src/storage-service-plugin.ts:320-337`(唯一现役注册方)· `packages/services/service-storage/src/attachment-lifecycle.ts:196+`(字节回收 guard)\n- ADR-0057 §3.3 及其 amendment\n- 关联:#4672(可能出现的第二个注册方类别)、#5194(guard/no-guard reap 的另一条 objectql finding)\n"
+}

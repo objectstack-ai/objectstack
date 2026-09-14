@@ -1,0 +1,36 @@
+{
+  "number": 5684,
+  "kind": "issue",
+  "title": "os-dev 的「Add the one label」条款在 PUT-only 工具面下不可执行 —— 照做就是它要防的整集抹除(实测于 PR #5683)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T00:09:26Z",
+  "updated_at": "2026-08-06T00:37:49Z",
+  "closed_at": "2026-08-06T00:37:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5684",
+  "body": "发现于 #5649 的 CI 侧实施(PR #5683)中对 MCP `issue_write` 写入语义的实测。查重:搜 `issue_write labels PUT`、`os-dev.md skip-changeset label` 均无既有单(仅命中 #5649 本身与 PM 登记表 #4604)。\n\n## 事实\n\n#5650(修 #5559)已落地的 `.claude/agents/os-dev.md` 收尾清单条款写的是:\n\n> **Add** the one label instead of writing the label set — a set-write wipes the `size/*` / `documentation` / `tests` the bots just applied\n\n意图正确。问题是:**os-dev 手上唯一能写标签的工具是 MCP `issue_write` 的 `labels` 字段,而它是整集 PUT。** 于是「只加一个标签」照字面执行 —— `issue_write(labels: ['skip-changeset'])` —— 恰好就是条款要禁止的那次整集抹除。\n\n实测(PR #5683,2026-08-06,写入前标签为 `[\"ci/cd\",\"size/s\"]`):\n\n```\n调用 issue_write(method=update, issue_number=5683, labels=[\"skip-changeset\"])\n回读 GET /pulls/5683 → [\"skip-changeset\"]          # ci/cd 与 size/s 都不见了\n\ntimeline:\n00:07:04  unlabeled  ci/cd           os-zhuang\n00:07:04  unlabeled  size/s          os-zhuang\n00:07:04  labeled    skip-changeset  os-zhuang\n```\n\n对照同一 PR 上传**全集**的一次写入,只产生 `labeled`、零 `unlabeled`:\n\n```\n调用 issue_write(labels=[\"skip-changeset\",\"ci/cd\",\"size/s\"])\n回读 → [\"ci/cd\",\"size/s\",\"skip-changeset\"]\n00:08:04  labeled  ci/cd   os-zhuang\n00:08:04  labeled  size/s  os-zhuang\n```\n\n补充事实(两条都是本次实测,写进单里省得下一个人再验一遍):\n\n- 容器里**没有 `gh` CLI**,未认证 curl 也无法写 —— 真正的新增语义 `POST /issues/{n}/labels` 对 os-dev 当前不可达。\n- MCP `issue_read` 的 `get_labels` 对 PR 号直接报 `Could not resolve to an Issue with the number of 5683`,所以「回读」这一步也不能用它,得走 REST `GET /pulls/{n}` 或 `issue_read get`。\n\n## 为什么值得修\n\n- 条款是**硬步骤**,每个 test-only / workflow-only / `.claude`-only PR 都会执行到它,而本仓这类 PR 是常态形状。\n- 照做的代价不是无害抖动:被抹掉的 `size/*` / `documentation` 以往靠 CI 的标签事件补挂,而 PR #5683 恰好把「标签事件重新拉起两个 labeler job」也关掉了(那些 run 只会把同一集合再 PUT 一遍、零新信息)。**#5683 落地后,agent 抹掉的标签不再有人补挂** —— 这条指令的错误从此不再自愈。\n- 反过来说,#5683 关不掉的另一半(CI 的 PUT 抹掉 agent 刚挂的 `skip-changeset`,#5533 只活一秒)也要靠客户端别再整集覆盖,才谈得上收敛。\n\n## 建议的修法(措辞层面,不改工具)\n\n把条款从「add the one label」改成工具面真正可执行的动作:**先回读当前标签,再把「现有全集 + `skip-changeset`」一次写回**,并写明为什么 —— `issue_write` 的 `labels` 是 PUT,不存在「只加一个」的调用方式;同时把「回读用 REST `GET /pulls/{n}`,别用 `get_labels`」记进去。\n\n⚠️ 落点是 `.claude/agents/os-dev.md`(以及若有同款措辞的 pm-dispatch SKILL),与 #5649 的 CI 侧 PR #5683 无文件重叠,可独立进行。\n\nFound-during: #5649(devx 车道第 8 轮,dev 会话 `session_01GX3sL71LFq8m2usg6VqTSE`)。unassigned,交 PM 分诊。"
+}

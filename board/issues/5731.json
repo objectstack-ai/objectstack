@@ -1,0 +1,35 @@
+{
+  "number": 5731,
+  "kind": "pull_request",
+  "title": "fix(spec): ADR-0087 别名转换按值处置被遮蔽的旧拼法(等值删除、异值双留) (#4923)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T02:26:15Z",
+  "updated_at": "2026-08-06T03:10:10Z",
+  "closed_at": "2026-08-06T03:10:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T03:10:08Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5731",
+  "body": "Fixes #4923\n\n按 issue 线程中已记录的**维护者裁决(2026-08-04)**执行,纯执行、无自由裁量。\n\n## 前提复核(对 origin/main)\n\n裁决前提**仍然成立**,但 issue 正文的定位有一处过期:\n\n- `renameConfigKey` **仍在 `packages/spec/src/conversions/walk.ts`**(现 283 行,issue 写的 235 行是旧行号),并未如派发单推测的那样迁移到 `registry.ts`;#5621 动的是 registry 的语义迁移条目,没搬这个 helper。\n- 短路行为逐字未变:`if (config[to] != null) return null;`。\n- #5516 删掉的那条 `grid_` 碰撞不在本单的别名族里;issue 点名的 5 条 fixture(`flow-node-crud-object-alias`、`flow-node-map-flow-alias`、`flow-node-subflow-flow-alias`、`flow-node-notify-config-aliases` 及其 `liftNotifySourceShape`)**全部仍在**,`after` 半边仍写着被遮蔽的旧拼法。\n\n另有一处仓库内的**主动指认**:`retry-policy-converged` 的注释原文写着「#4923 is queued to revisit that shadowing rule — this entry deliberately relies on the shared helper's semantics rather than open-coding its own, so it moves with that ruling」。这句话直接回答了「裁决该落在哪个 helper 上」——落在共享 helper,而不是只落在 `renameConfigKey`。因此实现落在 `renameKey`,由 `renameConfigKey` 委托,`renameKey` 的其余调用方(datasource driver-config 别名、page:header `description`、`retryDelayMs`)随之统一,不留第二套方言。\n\n## 改了什么\n\n**按值拆分**(`walk.ts`):`renameKey` 遇到两个拼法同时存在时——\n\n- **值结构相等** → 删掉旧拼法 + 照常发 notice。旧拼法不携带规范键没有的信息,属无损卫生,在 D2 契约内;顺带让转换在**形状和 notice 上都幂等**(重放命中「from 不存在」分支)。\n- **值不同** → 返回 `null`,**双键都保留**,不发 notice。作者给一个槽写了两个不同的值,这是真歧义,升级工具替客户择一等于改了客户没同意的配置。活下来的这一对,正是 strict 门能够**点名双键**拒绝的依据。\n\n相等性用**结构比较**而非 `===`:两处分别写出的 `{ status: 'stale' }` 是同一份声明。这个谓词正是 #5005 的 compose 已经在用的那个(「same value composes fine」),抽到 `shared/deep-equal.ts` 共用,免得两个面对「这两个值算不算同一个」给出不同答案(未加入 `shared/index`,不动公共 API 面)。抽取时补了递归深度上限:两个调用点在触顶时都退化为「不相等」,即 compose 报冲突、转换保留双键——都是**朝响的方向**降级,不会静默丢作者的值。\n\n`liftNotifySourceShape` 同理(issue 点名):嵌套部件与扁平键**重复**则算已交代、`source` 照常删除;**不一致**则整个节点**原样不动**(连无歧义的那半也不抬),让 `source` 完整抵达 strict 契约。`wait` 节点的松散键 lift **刻意不纳入**,并在注释里写明理由:它是**跨位置搬迁**、且一个 target 对多个候选名,与「一个槽的两种拼法」不是同一个问题,扩张需要另一次裁决。\n\n**fixture 按新语义修正**:原来 5 条 fixture 的 `after` 半边都靠「值不同」才恰好维持原状,但它们的注释写的是「canonical 已存在 → 别名原样留下」——那是旧规则的措辞,且只覆盖了两分支中的一支。逐条改为:歧义节点改用真正不同的值(`object: 'ticket'` 而非 `'ignored'`,后者读起来像「这个值被忽略」,在新规则下恰是误导),并各补一个**等值节点**演示删除。notify 的 n3 由此从「抬一半、丢 source」变成「原样不动」,n4 新增演示等值冗余,`expectedNotices` 7 到 8。\n\n**批 9 guidance 同步措辞**:活下来的孪生键不再是「dead」——转换现在会删掉等值的那种,所以能抵达该 parse 的键必然携带规范键没有的值。每条处方改为**点名双键 + 要求作出决定**(`builtin-node-config.zod.ts` CRUD 与 `map`、`io-node-config.zod.ts` notify 五条、`schemaless-node-config.zod.ts` script 与 subflow)。\n\n**Rider(#5511)**:protocol-15 `page-component-visibility-to-visibleWhen` 的就地走查换成 #5509 的 `mapPageComponents`,25 行手写遍历变 2 行。\n\n## 验证\n\n**先证红(方向在跑之前就写死在测试注释里)。** 把 `renameKey` 的规则临时还原成旧语义(保留 import,确保红是行为红不是编译红)后跑新增的 7 条:\n\n```\n× deletes an alias whose value EQUALS the canonical key, and emits a notice\n× compares STRUCTURALLY — two separately-authored identical filters are one declaration\n× is idempotent in shape AND notices — the deduped result replays to itself\n✓ keeps BOTH spellings when the values differ — the upgrade tool does not choose\n× judges each pair on its own value — one twin dedupes while its neighbour survives\n× applies the same rule one level up, on a plain dict rename (page header)\n× the surviving pair is refused by the strict gate with BOTH keys named\nTests  6 failed | 1 passed\n```\n\n**这里要如实说明:两个方向的证红结构并不对称,报告模板预设的「两边都 before-red」在本单不成立。**\n\n- **等值 → 删除 + notice**:真的 before-red / after-green,如上 6 条。\n- **异值 → 双保留**:那唯一一条 `✓` 就是它。旧代码对**所有**成对情形都保留双键,所以「双保留」这半**改前改后都是绿的**——它是**回归钉**,不是变更证明。这一方向真正变的是**理由**和**读这条理由的处方**,所以证红落在 strict 门那条上(`not.toMatch(/already won and this key is dead/)`),旧 guidance 的原文正是 `so a surviving object means objectName already won and this key is dead`,红得干净。\n\n**Rider 等价性**:按 #5511 的验收口径,由**既有 fixture** 判定。`pageComponentVisibilityToVisibleWhen` 的 fixture 一个字节未动(diff 里 `apply` 之后直接进 `fixture:`),在全量跑中保持绿。路径构造也逐字相同:`mapPageComponents` 产出 `pages[i].regions[j].components[k]`,与原手写的 `path + .regions[ri].components[ci]`(path = `pages[pi]`)一致;非数组 `regions`/`components`、非 dict region/component 的短路分支也一一对应。**无 fixture 需要修改,故不触发 stop-and-report。**\n\n**绿跑**\n\n```\npnpm --filter @objectstack/spec test\n  Test Files  317 passed (317)\n  Tests  8090 passed (8090)          # 基线 8082,+8 为本单新增\n\npnpm --filter @objectstack/spec typecheck\n  tsc --noEmit && check:test-typecheck: OK\n\npnpm --filter @objectstack/spec check:generated\n  ✓ All 10 generated artifacts are up to date.\n\nnode scripts/check-nul-bytes.mjs\n  OK (scanned 5610 tracked text file(s); no raw ASCII control bytes)\n```\n\n消费半径已按「规则的调用方」而非「改动的包」扫过:`metadata` / `objectql` / `service-automation` / `service-datasource` / `metadata-protocol` / `lint`(即 `applyConversions` 系列与 `normalizeStackInput` 的全部调用方)。\n\n## 生成物\n\n`check:generated` 十项全绿,**没有任何生成物移动**——本单改的是转换的 `apply` 行为与 fixture,而 `spec-changes.json` / `upgrade-guide` 投影的是条目的 id / surface / summary / toMajor,这些一个没动。\n\n`packages/spec/authorable-surface.base.json` 在本地 build 时被 `gen:schema` 重锚了(`baseRev` 指向新的 main,并带进 `api/Discovery:scoping` 等**别人已合并的**键)——与本单无关,按 #5358 已 `git checkout` 剔除,未进提交。\n\n## 风险与边界\n\n- **对存量元数据是「删键」**:等值分支会真的从加载结果里删掉旧拼法。按定义该键不携带任何规范键没有的信息,且每次删除都发 notice(与普通改名同一种 notice,`validate` 输出的种类不变)。\n- **异值的存量 flow 仍会在 17 上硬停**——这是裁决明确选择的结果(不替客户择一),处方现在点名双键。\n- **`wait` / `connector_action` 的 lift 未纳入**,已在代码注释中写明是「不同的问题」而非遗漏。\n\n## Changeset\n\n`@objectstack/spec: patch` —— 没有新增/移除任何可写的键或导出,是既有 D2 转换在一个边界情形上的行为订正,与仓库里同类行为修正(如 `webhook-authoring-surface-bridge` 给 spec 的 patch)同级。变更在升级时对作者可见,changeset 正文写清了作者看得到的两种结果。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018fxLGQdatPbBUvCgiVxg6D)_"
+}

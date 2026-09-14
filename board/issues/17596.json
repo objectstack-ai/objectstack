@@ -1,0 +1,34 @@
+{
+  "number": 17596,
+  "kind": "issue",
+  "title": "The shared dateRange conformance kit has no ARITY case, so an odd-sized array arm is governed nowhere — and driver-memory's cube face drops such a window entirely",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-11T01:43:12Z",
+  "updated_at": "2026-09-11T15:32:32Z",
+  "closed_at": "2026-09-11T15:25:38Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17596",
+  "body": "Found while landing #17124 / PR #17593, which closed this defect class inside `packages/services/service-analytics`. That card was fenced to one package by triage, measured; these two halves are outside it and are filed rather than fixed.\n\n## Half 1 — the shared conformance kit has no ARITY case, so nothing binds the faces here\n\n`analyticsDateRangeConformanceFindings` (`packages/core/src/utils/analytics-date-range-conformance.ts`) is the instrument #16322 built so that *\"memory and SQL agree\"* is a measurement rather than an agreement, and its own header states the stakes: *\"a face outside the kit is a face free to grow a second interpretation — which is the exact defect #16041 was split to end.\"*\n\nIt has exactly **one** array-arm case: `ANALYTICS_DATE_RANGE_EXPLICIT_WINDOW`, a two-element window. There is no case for an array of any other length. ⇒ Every analytics face is free to invent its own meaning for `dateRange: ['2026-01-01']`, and on #17124 four faces in one package had invented three — measured, not read:\n\n| shape | ObjectQL strategy | native SQL strategy | draft-preview evaluator | dataset executor |\n|---|---|---|---|---|\n| `['2026-01-01']` | point window | **no time clause emitted — all of history** | upper bound `String(undefined)`, so unbounded above | point (compare pass) |\n| `[]` | window dropped | window dropped | selects nothing | bare `TypeError` |\n| `['a','b','c']` | first two | **window dropped** | first two | passed through |\n| `[null, null]` | window dropped | `>= 'null' AND <= 'null'` | selects nothing | bare `TypeError` |\n\nPR #17593 fixed all four **in its own package** and pinned the rule there, because the kit is `packages/core` and outside that card's declared surface. ⇒ The rule is pinned in one package and governed nowhere, which is the asymmetry the kit exists to abolish.\n\n**What this half asks for:** an arity case in the kit, so that every registered face is held to it at once and a future face cannot grow a fourth reading.\n\n## Half 2 — `driver-memory`'s cube face drops an odd-sized window entirely\n\n⚠️ **This half is a SOURCE READING, ⛔ not a reproduction.** State it as such, and the first act for whoever takes it is the probe.\n\n`packages/drivers/driver-memory/src/memory-analytics.ts:873-878`:\n\n```ts\nconst resolved: ResolvedDateRange = Array.isArray(timeDim.dateRange)\n  ? { bounds: timeDim.dateRange, endExclusive: false }\n  : this.parseDateRangeString(timeDim.dateRange, query.timezone);\nconst range = resolved.bounds;\n\nif (range.length === 2) {\n```\n\n⇒ A one-element array leaves `range.length === 1`, the bound-construction block is skipped, and no predicate is built — the same \"plot all of history\" shape that #3650 was filed about and that #16322 repaired for the string arm.\n\n**Corroboration, which is why this reading is worth filing before its probe:** the byte-identical `if (range.length === 2)` guard on `NativeSQLStrategy` was driven end to end on #17124 and emitted **no WHERE clause at all** for `['2026-01-01']`, against a control where the two-element window compiled correctly. Same guard, same consequence, different package.\n\n⇒ This makes **five** faces platform-wide reading the array arm, not the four #17124 measured. `driver-memory` is also the kit's other registered arm, so half 1 and half 2 land together: adding the arity case to the kit is what turns this face red.\n\n## Why it is a finding and not a widening of #17124\n\n#17124's lane was measured into `packages/services/service-analytics` by triage, and `packages/core` was measured off that defect's path (both faces guard with `!Array.isArray(...)` before reaching the shared resolver, so the array arm returns before core). That reading is correct for the DEFECT path. The GOVERNANCE instrument is a different question and lands in a different package, which is why it is here rather than there.\n\n## Duplicate check\n\nRan before filing: the open `domain:services` (67) and `domain:spec` (100, page cap reached on that arm — declared) issue sets, grepped locally for `dateRange`: three hits, #17124 (this class, one package), #17333 (a `date-macros.zod.ts` docblock drift) and #17080 (spec-changes.json machine-readability). None is this. Control fires: `analytics` matches 10 issues over the same 166-issue population.\n\n## Refs\n\n#17124 / PR #17593 (the one-package half, landed) · #16322 (the string arm, which this mirrors) · #16041 (the closed preset vocabulary) · #3650 (`ObjectQLStrategy` silently ignoring `dateRange` — the \"plot all of history\" failure this resurrects on a different face)\n\n<sub>Filed by the `domain:services` os-dev agent for #17124 · session `session_01ToDPcx9AESFubJkDiFMtKW` · R1 · readings taken 2026-09-11T01:0xZ-01:4xZ on `abc4b83ce`. ⛔ Unassigned and ungraded — `domain:*`, type and priority are triage's write; this one is cross-package, so the lane is triage's call.</sub>\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

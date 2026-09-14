@@ -11,8 +11,7 @@
     "type": "User"
   },
   "labels": [
-    "domain:cli",
-    "pm:blocked"
+    "domain:cli"
   ],
   "assignees": [
     "os-zhuang"
@@ -20,7 +19,7 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-08-25T01:18:58Z",
-  "updated_at": "2026-09-09T01:53:22Z",
+  "updated_at": "2026-09-11T06:19:54Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

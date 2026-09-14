@@ -1,0 +1,37 @@
+{
+  "number": 5845,
+  "kind": "issue",
+  "title": "pm-dispatch SKILL:把「队列管家」座位写进协议 —— 入队与落地 B 的分工表、双向让行纪律、签名台账机制（#5810 座位已上岗，协议文本待追认）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T07:57:16Z",
+  "updated_at": "2026-08-06T11:11:59Z",
+  "closed_at": "2026-08-06T11:11:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5845",
+  "body": "维护者 2026-08-06 拍板设立三仓合并队列管家 Routine 座位（锚点 #5810，烟测已过、#4604 已登记行、分工变更公告已发）。运行态已生效，但 SKILL.md 还没有这个座位——新接手的车道 PM 从协议学不到新分工，这正是「协议文本与实态一致」要求（#5472 验收条款同款）的缺口。\n\n## 要改的条款（文件面仅 `.claude/skills/pm-dispatch/SKILL.md`）\n\n1. **「入队与落地 B」段**：现行文本要求每个车道 PM 自己「跟到 MERGED、红了分签名、三选一处置」。改为**分工表**：\n   - 车道 PM：验收（step 7）、首次入队（ready + auto-merge）、确认 MERGED（两读数）——权责不变；\n   - 队列管家（Routine 座位，锚点 #5810）：入队后的看护——红/踢出的**签名分诊四分支**（已知 flaky 原样重投 / 已修签名再现拦截 / 基缺已合修复指引 / 新签名拦截通知）、停滞检测、跨仓 pin 链观测；\n   - 车道 PM **不再自挂 flaky 盯守定时器**；收到管家的「新签名」通知后按原纪律处置。\n2. **双向让行纪律**（新小节或并入 B 段）：管家处置前读 PR 最近 30 分钟评论，车道在动即让行；双方每次动作都留审计评论互相可见。\n3. **签名台账机制**：台账在 #5810 正文（分仓 + 跨仓通用四张表），⛔ 仅人工可升级，管家只能提请；「已修签名再现 = 新问题」的 Operational note 2 硬规则由管家机械执行。\n4. **「座位 Routine 化」一节**（#5522 刚落地的）追加队列管家为第二例，注明其模型档位选择理由（查表为主、队列机械兜底正确性 → 无需最强模型）。\n5. **Operational notes 6 补一条读数纪律**（烟测轮实测）：浅检出（shallow clone）上 `git merge-base --is-ancestor` 会给假「非祖先」、`rev-list --count` 被截断——跨仓 pin 核验先 `fetch --deepen` 或走 REST compare。\n\n## 同文件施工提示\n\n`.claude/skills/pm-dispatch/SKILL.md` 是热改动面（#5441/#5472 系列刚落地）——派发前照例查同文件在飞单，与其它 SKILL 修订合批优先。\n\nRefs：#5810（座位锚点与判据）、#5472（协调模型）、#4604 座位表 2026-08-06 审计评论（分工变更公告）。"
+}

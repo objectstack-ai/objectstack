@@ -1,0 +1,35 @@
+{
+  "number": 5902,
+  "kind": "pull_request",
+  "title": "fix(spec): 退休登记按确切 key 判定 —— 无关簇的同名叶子不再替 tombstone 背书 (#4659)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T11:20:56Z",
+  "updated_at": "2026-08-06T11:48:20Z",
+  "closed_at": "2026-08-06T11:48:18Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T11:48:18Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5902",
+  "body": "Fixes #4659\n\n## 前提复核(先证再改)\n\nissue 正文引的是 08-02 的代码,而 `build-schemas.ts` 当天被重写过三次(#5807 / #5851)。所以先按机制复核,不按行号:\n\n`origin/main` 上检查 (b) 的判定逻辑一字未变 —— 取 key 的叶名,和**全部 major** 的所有 conversion / migration `surface` 子句做 `endsWith`:\n\n```ts\nconst surfaces = registeredRetirementSurfaces().flatMap((s) => s.split(' / '));\nconst unregistered = newlyRetired.filter(\n  (k) => !surfaces.some((s) => s.endsWith('.' + k.split(':')[1])),\n);\n```\n\n**实测复现**(改动前,把两个 key 在基线里去掉 `[RETIRED]` 标记,让门禁看到一次 live → retired 跃迁,不新增任何 conversion):\n\n```\n❌ authorable-surface.json is out of date (2 key(s) not recorded).\n     + data/Index:type [RETIRED]\n     + security/RowLevelSecurityPolicy:priority [RETIRED]\n```\n\n检查 (b) **一个字都没说**,运行一路掉到末尾那个「基线没重新生成」的报告器上。前提成立。\n\n顺带量出了暴露面的真实大小:当前 97 条 `[RETIRED]` key,**97 条**的叶名都能在已登记子句里找到匹配 —— 也就是说这道门禁对今天在册的每一个墓碑都是可满足的。\n\n## 改动\n\nPM 裁决的方向 2,原样落地:\n\n- **新增导出 `RETIRED_KEYS_BY_MAJOR`**(`packages/spec/src/migrations/registry.ts`),值是确切的 `` `${defKey}:${name}` `` 字符串,与 `authorable-surface.json` 的写法一致(去掉 `[RETIRED]` 标记)。\n- **检查 (b) 改为对这张表做精确集合判定** —— 没有 `endsWith`,没有取叶名,不从相邻 key 辐射。失败信息打印要粘贴的**那一行**和它该进哪个 major(处方即契约):\n\n  ```\n  ❌ 2 key(s) were tombstoned with no registered retirement:\n       - api/HttpFindQueryParams:distinct\n       - data/Index:type\n     ...\n     1. Declare each retirement by its EXACT key in RETIRED_KEYS_BY_MAJOR\n        (packages/spec/src/migrations/registry.ts) — copy these lines in:\n\n          'api/HttpFindQueryParams:distinct',\n          'data/Index:type',\n\n        under `17: [ … ]` (create the major's array if it is the first).\n     2. Add a D2 conversion in src/conversions/registry.ts naming the surface ...\n  ```\n\n- **新增检查 (b2)**(dispatch 要求的第 (c) 项裁定):表里登记了一个**当前仍然 live** 的 key → 失败。理由是它替一次尚未发生的退休提前放行 —— 墓碑真落地那天,检查 (b) 已经被满足,没人再写下任何东西。反过来,登记了一个本次构建**已不再产出**的 key **不是**错误:墓碑满约两个 major 后由检查 (c) 放行其基线行,登记条目留下并从此指向空,这是预期稳态。相反的裁定(「条目必须永远解析得到」)会逼着每次老化都去删掉登记 —— 记录自己把自己删掉。\n- **conversion 的 `surface` 散文一字未动**。它面向作者、按作者书写元数据的形状表达(`flow.nodes[].outputSchema`),本来就无法可判定地映射回 def key;搬走的是机器事实,不是散文。一次退休仍然两样都要写,失败信息两条都点名。\n- **退休 playbook 同步**(`.claude/skills/spec-property-retirement/SKILL.md` §3/§4):原先那条 checklist 写的正是本单的缺陷本身 —— 「`surface` 必须以裸 key 结尾。匹配是 `surfaces.some((s) =` `> s.endsWith('.' + key))` …… Caveat: 只比最后一段,所以 schema 名从不被检查 —— `dashboard.aria` 就能满足 `ui/FormView:aria`。别指望这道门禁做归属判定。」这条留着就是把下一个退休作者送进已经删掉的路径,所以一并改写。\n\n## 回填语义(dispatch 要求想清楚并机械验证)\n\n**不需要回填,已实测。** 检查 (b) 只在**新的** live → retired 跃迁上触发,而跃迁是相对已提交的 `authorable-surface.json` 基线算的 —— 更早的墓碑在基线里已经是 `[RETIRED]`,`prev.get(k) === false` 永远不成立,不会再触发。\n\n机械验证:未改动的树 + **空表**,跑真实门禁 `check:authorable-surface`,以及沙盒里的完整 `--check`:\n\n```\n  ✓ check:authorable-surface   authorable-surface.json (+ its .base.json anchor) + JSON schemas\n```\n```\n=== exit 0 ===\n```\n\n所以这张表读作「在确切-key 门禁下登记的退休」,不是「历史上的全部退休」。这一点写进了 `RETIRED_KEYS_BY_MAJOR` 的 TSDoc(「Not a backfill of history」),连同一条明确的禁令:**不要**用叶名匹配 conversion registry 去反推缺失的历史 —— 那正是本单删掉的推断。\n\n## registry.ts 的改动行(同日 churn 声明)\n\n`packages/spec/src/migrations/registry.ts` 是 ADR-0087 活跃工作面。本 PR 对它是**纯追加**:在文件末尾 `MIGRATION_MAJORS` 之后新增 1976–2043 行(TSDoc + `RETIRED_KEYS_BY_MAJOR`),**既有行一行未改**(`git diff` 里该文件只有 `+`,没有 `-`)。`src/migrations/index.ts` 只在既有 export 块里多一行名字。\n\n多行拼接字符串会躲开按行 grep,所以反向核对过:`registeredRetirementSurfaces` 全仓 0 命中(已随本 PR 删除),旧文案 `tombstoned with no registered migration` 在代码里 0 命中(仅存于 CHANGELOG 与一条历史 changeset 的散文中)。\n\n已 `git merge origin/main`(合入 4 个新 commit,含 #5854 / #5861 对 `packages/spec` 的改动),合并后重建 + 全量复验。\n\n## 测试\n\n新增 5 个用例,放在既有沙盒文件 `build-schemas-check-mode.test.ts`,单独一个 describe。\n\n**为什么第二个沙盒**:这些用例需要门禁读到**逐例不同**的登记表,而既有沙盒把 `src/` 软链到仓库真身,在那里写就是写进被跟踪的 registry。新沙盒改为 `cpSync` 复制 `src/`(9.8 MB,约 40 ms),它的 `src/migrations/registry.ts` 因此是 fixture。门禁本身没有加任何 test-only 接缝 —— 被替换的表是 fixture 数据,和既有沙盒那条伪造的 `refs/remotes/origin/main` 同性质。\n\n**为什么绿色用例仍然 exit 1**:live → retired 跃迁的存在,等价于「已提交基线与本次产出不一致」,所以每个 fixture 按构造都会被脚本末尾的「基线未重新生成」报告器判为陈旧。那是另一个失败、另一条处方,断言一律按**消息**区分,从不只看退出码 —— 这点在测试注释里写明,没有粉饰。\n\n1. 叶名与无关登记撞车的墓碑**不算**已登记(#4658 复现形状)→ 红。fixture 有效性用一个本地复刻的**旧匹配器**大声断言:`data/Index:type` 的叶名今天仍被 protocol 11 的 `flow.node.type` 命中,`api/HttpFindQueryParams:distinct` 仍被 `data.query.distinct`(另一个 def 的键)命中 —— 哪天不再撞车,这两个 fixture 就不再模拟缺陷,测试当场说出来。\n2. 登记一个 key 只登记**那一个** key:同叶名的邻居照样红。\n3. 两个都按确切名登记 → 检查 (b) 静默(唯一还欠的是重新生成基线)。\n4. 登记项指向一个**仍然 live** 的 key → (b2) 红。\n5. 登记项指向一个**本次构建已不产出**的 key → 绿(老化稳态)。\n\n```\n Test Files  1 passed (1)\n      Tests  36 passed (36)     ← 31 个既有(#5807/#5851 的沙盒用例)全绿 + 5 个新增\n```\n\n全包:\n```\n Test Files  322 passed (322)\n      Tests  8254 passed (8254)\n```\n```\n$ pnpm --filter @objectstack/spec typecheck\ntsc --noEmit ✓\ncheck:test-typecheck: OK\n```\n```\n$ pnpm --filter @objectstack/spec check:generated\n✓ All 10 generated artifacts are up to date.\n```\n`check:dual-source-exports` / `check:exported-any` / `check:nul-bytes` 亦绿。\n\n### 反向验证 —— 方向先定,再跑\n\n把检查 (b) 还原成叶名匹配、并摘掉 (b2),重跑这 5 个用例。**预判 3 红 2 绿**,实测一致:\n\n```\n Tests  3 failed | 2 passed | 31 skipped (36)\n```\n\n- 红的是钉住本次改动的三条:用例 1(旧匹配器静默,`2 key(s) were tombstoned…` 从未出现)、用例 2、用例 4(旧代码根本没有 (b2),整轮 exit 0)。\n- **绿的两条是构造使然,不是漏网**:用例 3 是绿路径断言 —— 旧匹配器同样让这两个 key 通过(正是靠那次撞车),所以两侧都绿;用例 5 断言的是一种**容忍**,旧代码没有 (b2) 可以触发,自然也绿。绿路径与容忍断言在还原实验里不可能变红,这里如实记下,不硬凑成「全红」。\n\n## 范围外发现\n\n- **filed as #5898**:检查 (c) 的「墓碑已满 2 个 major」证明仍在用同一套叶名匹配,而且取 `Math.min`(最早的 major),一律偏向提前放行。实测 `data/Index:type` 的老化时钟被 protocol 11 的 `flow.node.type` 起算,而它自己那条诚实登记 `object.indexes[].type` 在 major 17 —— 当前 major 17 下,这条基线行今天就可以被删掉。没有随本 PR 一起修,是因为检查 (c) 裁决的是**历史**墓碑:当前 97 条 `[RETIRED]` 一条都不在新表里,要改读确切 key 必须先回填这 97 条及其真实退休 major,而唯一能机械推导 major 的来源要么是这条坏掉的匹配器(用坏数据喂新表),要么是 `authorable-surface.json` 的 git 考据(可做,但是一次独立判断)。`build-schemas.ts` 里 `registeredClauseMajors()` 的 TSDoc 已点名 #5898,不留给下一个读者去踩。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01559M8FVm6W6vDLABL3jvdW)_"
+}

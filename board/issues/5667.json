@@ -1,0 +1,35 @@
+{
+  "number": 5667,
+  "kind": "pull_request",
+  "title": "fix(service-analytics,rest): analytics dimension 的源字段闸门 —— 不存在的 dimension 答 400 INVALID_FIELD,dataset 500 不再回显 SQL (#5520)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T23:32:15Z",
+  "updated_at": "2026-08-05T23:55:59Z",
+  "closed_at": "2026-08-05T23:55:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-05T23:55:58Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5667",
+  "body": "Fixes objectstack-ai/objectstack#5520\n\n## 前提重验(对 origin/main,含 #5567/PR #5587、#5526/PR #5634 之后的最新落点)\n\n单子的前提**成立**,且三条复现都在测试双上原样重现:\n\n- `origin/main` 上 `assertDimensionFields` 仍是零命中;`ensureCube()` 的三处校验全部只调 `assertMeasureFields`。\n- 裸 cube 路 `dimensions: [\"bogus_dim\"]` → 生成 `SELECT bogus_dim AS \"bogus_dim\", COUNT(*) … GROUP BY bogus_dim`,驱动答 `no such column`,错误对象上 `code`/`status` 皆为 `undefined`(所以在 REST 面落到 5xx 兜底)。\n- dataset 路 → 同一条语句,错误 message 与单子里贴的一字不差:`SELECT bogus_dim AS \"bogus_dim\", COUNT(*) AS \"account_count\" FROM \"crm_account\" GROUP BY bogus_dim - no such column: bogus_dim`。\n- 「真实但未声明的字段仍可分组」也确认为**既有契约**:`dimensions: [\"phone\"]` 在两条路上都是 200,按 `phone` 分组。闸门必须不误杀它。\n\n## 改了什么\n\n### 1. `assertDimensionFields` —— 对称 #4437 的 measure 闸门\n\n`ensureCube()` 的三条出口(自动推断、augmented、已声明)现在都在注册 cube **之前**紧跟 `assertMeasureFields` 调用新闸门。拒收信封与 measure 侧**完全相同**:`INVALID_FIELD` / 400,带 `field` / `object` / `param`,外加 `dimension` 字段(对称 measure 侧的 `measure`);message 指名字段、列出可用 dimension、附上对象已知字段清单。`query` / `generateSql` / `queryDataset` 三个入口都被覆盖,被拒的查询不会在 cube registry 里留下痕迹(#3867 / #4437 定的同一条规矩)。\n\n**取舍(逐条给代码证据)**\n\n- **校验的是「承载对象有没有这个列」,不是「cube 声明过没有」**。未声明的裸成员按**策略自己会用的列名**去核对 —— `NativeSQLStrategy.resolveDimensionSql` 的回退是 `dim ? dim.sql : member`,`ObjectQLStrategy.resolveFieldName` 同形。所以 `phone` 这类未声明真实字段照常放行(有守卫用例,两条路各一条)。\n- **`timeDimensions` 一并覆盖**。它和 `dimensions` 落进同一个 `cube.dimensions` 袋子(`inferCubeFromQuery` 两者都写进去)、被同一个 `lookupMember` 解析、并且实测同样把 `date_trunc('month', bogus_at)` 送到驱动 —— 是同一个缺陷的同一个 param 变体,不是新面。`param` 报告是哪一个请求键出错。**这一点比单子正文的字面范围略宽,在此显著申报**:若 PM 认为该拆单,删掉 `members` 数组里 `timeDimensions` 那一行 + 两条用例即可。\n- **成员解析镜像 `lookupMember`,包括它故意的最后一档**:点号成员若匹配不到任何声明键,就是交给 JOIN 机器的关系穿越,闸门**不判**(`source: null`)。否则 `owner.region` 会被诬告成 `crm_account` 缺列。\n- **三档 stand-down 与 measure 闸门逐条对齐**:`cube.sql` 不是裸对象名(表达式 cube)、`getObjectFieldNames` 不作答(无 registry 的宿主 / 外部数据源)、源不是裸列。`id` / `created_at` / `updated_at` 无条件放行,与数据面 `resolveQueryFields` 一致。\n- **建议列表用减法算,不照抄**。自动推断路上 `cube.dimensions` 就是从这条查询铸出来的,照抄会把调用方的错别字当成「可用 dimension」推荐回去 —— 与 measure 闸门两趟扫描的理由相同。\n- **measure 先答**。两样都写错时先报 measure(既有信封不动),各自都是真实错误。\n\n### 2. dataset 面回显生成 SQL —— 扩面申报\n\n回显字符串的**构造点不在本仓**:knex 的错误 message 格式就是「语句 - 成因」,所以 SQL 是驱动 message 自带的。收窄只能在对外信封处做,于是本 PR 动了 `packages/rest/src/rest-server.ts` 一行 —— **按派发口径显著申报**:\n\n```\n- res.status(500).json({ code: 'ANALYTICS_QUERY_FAILED', error: msg.slice(0, 500) });\n+ const outward = looksLikeInternalErrorLeak(msg) ? INTERNAL_ERROR_MESSAGE : msg.slice(0, 500);\n+ res.status(500).json({ code: 'ANALYTICS_QUERY_FAILED', error: outward });\n```\n\n这**不是新规则,而是补上缺失的那次应用**:同一个 analytics 的兄弟面 `/analytics/query` 走 `dispatcher-plugin.errorResponseBase`,自 #3867 起就对任何 5xx message 应用共享谓词 `looksLikeInternalErrorLeak`(`packages/types/src/error-leak.ts`)—— 这正是单子里复现 ① 读到 `\"Internal server error\"`、复现 ③ 却吐出整条语句的原因。本 PR 只补这一处应用:\n\n- **分类语义一动未动**:status 仍 500、code 仍 `ANALYTICS_QUERY_FAILED`;#5352 的 ① 信封分支、② 过渡期 message 正则名单(#5367 的地盘)都没碰,并有用例回归钉住。\n- **日志保留完整诊断**:`logError` 在响应之前,改动后日志是唯一一份完整拷贝 —— 用例直接断言语句仍进日志。\n- **不是一律 withhold**:message 不像驱动输出的 500(如「no strategy can handle query」)仍保留原文,有用例钉住;#5437 那条「5xx 一律不带 message」管的是 `sendError` 通路,本路由自建 body,保持 #3867 的分档。\n- **没有任何既有测试断言因此改判**:全仓对该 500 分支的现有断言只看 `statusCode` 与 `body.code`(`analytics-filter-refusal-envelope.test.ts` 三例),两包全量绿。\n\n## 测试\n\n新增两套,共 30 例:\n\n- `packages/services/service-analytics/src/__tests__/dimension-source-field-gate.test.ts`(22 例)—— 结构与深度对称 `measure-source-field-gate.test.ts`:三条 describe 分别是闸门本体、dataset 面、「闸门不许做什么」。含**未声明真实字段仍可分组**的守卫用例(裸 cube 路 + dataset 路各一)、registry 不被污染、`generateSql` 同样受闸、表达式 cube / 点号关系 / 无探针 / 探针答不出四档 stand-down、以及「两样都错时先答 measure」。\n- `packages/rest/src/analytics-dataset-dimension-gate.test.ts`(8 例)—— 调用方视角:bogus dimension 端到端答 400 `INVALID_FIELD` 且响应体里没有 SQL;正向对照(声明维度 200 + 未声明真实字段 200);500 面收窄的三例(带语句的 message 被 withhold 且仍进日志、方言错误码同样 withhold、普通内部故障保留原文);以及 4xx 两条分支未被扰动。\n\n### 反向验证(方向先预测再跑)\n\n**方向 A —— 拿掉 `ensureCube` 里三处 `assertDimensionFields`**:预测 service 套件 10 红 / 12 绿(前两个 describe 里断言「拒收」的用例转红;第三个 describe 全绿,因为它们钉的是本改动**保留**的旧行为;dataset describe 里的「pre-fix 驱动错误确实带着语句」那一例是对照,前后都绿)。**实测:`Tests 10 failed | 12 passed (22)`,方向与条数完全吻合。**\n\n**同一方向在 REST 套件上出现一次预测偏差,如实记录**:预测 3 红,首轮只有 2 红 —— 「响应体里没有 SQL」那一例**在闸门被拿掉时仍然绿**,因为另一半修复(信封收窄)把驱动 message withhold 掉了,body 于是「无泄漏」却并非因为闸门。这正是「绿得不是因为逻辑对」的那类假绿:该用例已改为**同时**断言 400 `INVALID_FIELD` + 无 SQL,重跑得到预测的 3 红。偏差与修法都写进了测试文件头注,连同「本文件吃的是 service-analytics 的**构建产物**,不重新 build 就改 service 什么也证明不了」这条坑。\n\n**方向 B —— 把 500 分支还原成 `error: msg.slice(0, 500)`**:预测 REST 套件 2 红(两条 withhold 用例)/ 6 绿,service 套件不受影响。**实测:`Tests 2 failed | 6 passed (8)`,吻合。**\n\n### 门与全量\n\n| 命令 | 结果 |\n|:---|:---|\n| `pnpm --filter @objectstack/service-analytics test` | `52 files / 927 tests passed`(基线 51/905,新增 1 文件 22 例) |\n| `pnpm --filter @objectstack/rest test` | `50 files / 745 tests passed` |\n| `pnpm --filter @objectstack/runtime test`(另一条 analytics 面) | `97 files / 1428 tests passed` |\n| `pnpm --filter @objectstack/dogfood test`(真实 plugin.ts 探针接线) | `85 passed / 1 skipped, 514 tests` |\n| `tsc --noEmit`(两包) | 各自与基线**同数**:service-analytics 7、rest 2 —— 新文件贡献 **0**(没有照抄兄弟文件 `.catch` 的 4 条 TS2339 债,改用带类型的 `rejection()` / `settle()` 辅助) |\n| `check:type-check-coverage` / `check:nul-bytes` / `check:route-envelope` / `check:error-code-casing` / `check:adr-anchors` / `check:doc-authoring` / `check:wildcard-fallthrough` | 全绿 |\n| `eslint`(改动文件) | 无输出 |\n\n已合入 `origin/main`(`aa25a81d3` / `214f67c76`,均在 cli/client,与本 diff 无重叠),合并后两包全量重跑仍绿。\n\n## 消费半径\n\n闸门只在 `getObjectFieldNames` 接线时生效;全仓该 hook 的接线点只有生产桥 `service-analytics/src/plugin.ts` 与三个测试文件(measure 闸门、本 PR 两套)。生产桥那条路由 dogfood 套件覆盖(真 kernel + 真引擎),全绿 —— 说明闸门在 showcase / CRM 的真实 dashboard、report 元数据上不误杀。compiled dataset 的 `cube.sql` 就是 `dataset.object`(裸对象名),而关系维度的 `dim.sql` 是点号路径(`dataset-compiler` 里 `sql: d.field` 原样透传),前者让闸门对 dataset 生效、后者被点号档跳过 —— 两者都有用例。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BWS4heBoAitLmzCLhcYdbK)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 5851,
+  "kind": "pull_request",
+  "title": "fix(spec): `--update-base` 只许锚点前移,MERGE 态与倒退一律拒绝 (#5370)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T08:08:06Z",
+  "updated_at": "2026-08-06T08:40:07Z",
+  "closed_at": "2026-08-06T08:40:06Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T08:40:05Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5851",
+  "body": "Fixes #5370\n\n## 前提复核(先证伪,再实现)\n\n按重新定价的要求,先在 origin/main(`77adf29`)上核对 #5807(`a3a884d`)的落地形态,再证明根因**仍然存在**:\n\n- #5807 确已把锚点写入收窄为 `--update-base` 一条路径,`gen:schema`/构建/`check:docs` 不再碰它;`scripts/regen-artifacts.mjs` 保留 `gen: 'gen:schema'` 并写明「Re-anchor after the merge is committed, or not at all」。**本单字面复现路径确实消失**。\n- 但根因一行未动。在沙箱里建一个**真实的 MERGE 态**(两侧分叉、`git merge` 停在未 commit),用 #5807 落地版跑 `--update-base`,实测:\n\n```\nEVIDENCE exit=0 anchorBefore=9ce056a879ef anchorAfter=c26ac407eeda\n         older=c26ac407eeda mainTip=e4d113dded9e forkedKeyStillAnchored=false\n```\n\n锚点从 origin/main 上的 `9ce056a`(领先)被写回分支的旧分叉点 `c26ac40`,`data/Object:label` 从锚点里消失,**退出码 0,无任何门禁报警**。前提成立,范围按重新定价执行。\n\n## 改动\n\n两条拒绝,都只作用于 `--update-base`,`gen:schema` 与任何构建的行为完全不变。\n\n### 1. MERGE 态拒绝(生成之前)\n\n`MERGE_HEAD` 存在即拒绝,位置与既有的 `--check --update-base` 互斥拒绝并列,在读取任何 schema 之前退出。\n\n路径经 `git rev-parse --git-path MERGE_HEAD` 解析而不是手拼 `.git/MERGE_HEAD`:AGENTS.md §11 要求每个 agent 都在 linked worktree 里干活,而那里 `.git` 是**文件**,真正的 MERGE_HEAD 在主仓 `.git/worktrees/` 下的每-worktree 目录里 —— 手拼路径会让这条守卫恰好在仓库要求使用的检出形态下失效。实测本 PR 自己的 worktree:\n\n```\ngit-path in this LINKED worktree: /home/user/objectstack/.git/worktrees/objectstack-issue-5370/MERGE_HEAD\n.git is a: FILE\n```\n\n处方与 `regen-artifacts.mjs` 的注释是同一句话的两端:先 commit merge,再重锚。\n\n### 2. 锚点单调性(写入之前)\n\n只有当**已提交的 baseRev 是新解析 rev 的祖先**时才写;两者相同时仍走原有的 \"nothing to re-anchor\"。\n\n放在写入点而不是脚本开头,有两个理由:要写入的 rev 到那里才确定;以及要拒绝的是**写入**而不是**这次运行** —— 一次本来就没东西可写的 `--update-base` 不该被一个 rev 比较变成失败。删除门先裁决、锚点后写的既有次序也因此保持不变。\n\n### 祖先关系判不出来时,拒绝而不是猜\n\n`merge-base --is-ancestor` 按**三种**答案读:`0` 是祖先,`1` 不是祖先,其余(带 `fatal:` 的 `128`、超时的 `null`)是 git 拒绝回答。塞进 `&&`/`||` 链里第三种会塌进第二种,错误就变成了裁决(cloud#1116 付过的学费)。这里 fail closed。\n\nshallow 检出多出**第四种**读法,而且是不对称的:截断只会**丢失**可达性,不会凭空造出可达性,所以 `0` 在任何检出下都成立;而 shallow 下的 `1` 什么都不说明 —— #5358 自己的首次 CI 就是被这个假 `1` 判红的。因此 shallow 只用来决定**否定答案**算不算数,绝不用来丢弃一个肯定答案(否则每一次 shallow 下本该合法的重锚都会被诬告成倒退)。\n\n这条不是纸面推演:本容器的检出就是 shallow,锚点的 `baseRev` 正躺在 `.git/shallow` 里当自己的 grafted root。真实跑一次:\n\n```\n❌ --update-base cannot establish which way authorable-surface.base.json would move (#5370).\n\n   committed baseRev: 5acb93add664\n   resolved baseline: 77adf297fd21   (merge base of HEAD with origin/main)\n\n   This is a shallow checkout: history is truncated, so `merge-base --is-ancestor` reports\n   \"not an ancestor\" about commits that plainly are one — 5acb93add664 is very likely one of\n   them (a `--depth=1` fetch grafts it in as its own root, unreachable from origin/main).\n```\n\n代价是明说的:shallow 检出里一次本来合法的重锚也会被拒,提示给出 `git fetch --unshallow origin` 的出路。`gen:authorable-surface-base` 在 `check-generated.ts` 里属 `EXPLICIT_GENERATORS`(手动专用,`--fix` 不会跑),CI 无任何作业调用它,所以这条 fail-closed 不影响流水线。\n\n## 测试\n\n在 `build-schemas-check-mode.test.ts` 的 `#5358` 块旁新增 `#5370` describe,沿用同一套真 git 沙箱(`refs/remotes/origin/main` 是真 ref)。夹具:三个线性上游 commit,锚点镜像**中间**那个(authentic、是 origin/main 祖先、合法滞后),HEAD 分叉在**最早**那个并把 main 的改动逐字节做了一遍 —— 于是 merge 无冲突且不 stage 任何东西,`git status` 保持全空,「这次运行没写东西」就能直接用空 status 断言,没有 merge 噪声要减。\n\n四个用例:\n\n1. **真 MERGE 态**(`git merge --no-commit --no-ff`,MERGE_HEAD 实存):拒绝、退出 1、输出不含 `Generating JSON Schemas`(即生成之前)、锚点字节不变、工作树干净;同一夹具下**普通构建不被拒**(守卫足够窄,驱动的 `gen:schema` 处方照常);随后按处方 `git commit` 完成 merge 再重锚,**写入成功**且 baseRev 前移到 mainTip —— 拒绝有可用的出路,不只是一条规矩。\n2. **无 merge 的倒退**:同一夹具直接跑,报 BACKWARDS 并写零。\n3. **shallow 下的否定答案不可信**:把 `.git/shallow` 截在 mainTip,此时移动其实是**前移**,断言拒绝理由是截断而**不是** BACKWARDS。\n4. **把 origin/main 倒回锚点之前**:这正是重新定价里字面写的那个夹具,它**到不了**单调性守卫 —— `verifyCommittedSurfaceBase` 先一步以「NOT an ancestor of origin/main」判红,那是另一个事实、另一条处方。用例把这个次序钉住并注明:单调性守卫要拦的是**两个 rev 都 authentic** 的那种倒退,这恰好也是别的门看不见它的原因。\n\n### 反向验证(方向先预测,再运行)\n\n预测:1/2/3 转红(#5807 落地版根本没有这两条拒绝,会照写不误),4 保持绿(它钉的是既有次序)。把 `build-schemas.ts` 换回 #5807 落地版、保留新测试后实跑:\n\n```\n × refuses while a merge is uncommitted — before generating anything — and the commit-first remedy works\n × refuses a re-anchor whose new rev is an ancestor of the committed one, and writes nothing\n × refuses rather than guesses when a NEGATIVE ancestry answer cannot be trusted — a shallow checkout\n Tests  3 failed | 28 passed (31)\n```\n\n与预测一致。#5358 的既有 7 个用例(plain build clean / --check clean / 前移重锚 / already-current no-op / offline powerless / 删除门次序等)全程绿。\n\n### 实跑输出\n\n```\npnpm --filter @objectstack/spec test        → Test Files 319 passed | Tests 8169 passed (319)\npnpm --filter @objectstack/spec typecheck   → tsc --noEmit 通过;check:test-typecheck: OK\nvitest run scripts/build-schemas-check-mode.test.ts → Tests 31 passed (31)\nnode scripts/check-nul-bytes.mjs            → OK (5699 tracked text files, no raw control bytes)\npnpm --filter @objectstack/spec check:authorable-surface → exit 0,工作树无改动\n```\n\n## Changeset\n\n按 #5807 的先例给 `@objectstack/spec` 一个 patch changeset(同一文件类、同一命令的行为变化):`.changeset/authorable-surface-anchor-monotonic.md`。\n\n## 范围外\n\n- `resolveSurfaceBase()` 的常规解析语义、`scripts/regen-artifacts.mjs`、os-regen 驱动本身、`packages/spec/src/**` 一律未动。唯一相邻改动是把 `resolveSurfaceBase()` 里私有的 git runner 提到模块级(cwd/timeout 逐字不变),因为单调性守卫要在脚本另一处用同一个;以及把 `REANCHOR_COMMAND` 常量上移到 `--update-base` 旁边(MERGE 拒绝要引用它,而那条拒绝跑在原声明位置之前)。\n- 原正文候选修法 2(处方散文)已由 #5807 覆盖;候选 3(pre-commit 后退告警)按重新定价由单调性拒绝取代,未实现。\n- 顺带发现、未在本 PR 修:锚点**领先于**解析基线时,普通构建会打印 `trails the baseline at … by 0 key(s)`(方向说反且信息为零),已按 observation-class 单独立单 #5847。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01559M8FVm6W6vDLABL3jvdW)_"
+}

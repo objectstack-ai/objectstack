@@ -1,0 +1,35 @@
+{
+  "number": 5766,
+  "kind": "pull_request",
+  "title": "fix(spec)!: tenancy.tenantField 不再默认 'tenant_id' —— 未声明如实为 undefined,driver 回落为唯一真相 (#5315)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T04:19:13Z",
+  "updated_at": "2026-08-06T05:12:21Z",
+  "closed_at": "2026-08-06T05:12:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T05:12:19Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5766",
+  "body": "Fixes #5315\n\n按 #5315 评论区 2026-08-05 22:31Z 排程注记预记的**方向 2**(否决窗口未被行使):去掉 `TenancyConfigSchema.tenantField` 的默认值,让「未声明」如实表达为 `undefined`,`driver-sql` `computeTenantField` 的既有回落作为唯一真相。依据 ADR-0078(不留没人读的声明)+ ADR-0120 §Terminology(可授权词汇定死 `organization`,`tenant` / `org` 拒收)。\n\n## 一处实现细节:不是单删 `.default()`\n\n**单删 `.default('tenant_id')` 是错的** —— Zod 里 `z.string()` 是**必填**,单删会让 `tenancy: { enabled: true }` 直接 parse 失败,那是个真正的破坏性变更。裁定要的语义(未声明 = `undefined`)对应的是 `.optional()`。三种写法实测:\n\n| 写法 | `parse({ enabled: true })` |\n|:---|:---|\n| `z.string().default('tenant_id')`(改前) | `{\"enabled\":true,\"tenantField\":\"tenant_id\"}` |\n| `z.string()`(单删 default) | **FAIL** — `invalid_type:tenantField` |\n| `z.string().optional()`(本 PR) | `{\"enabled\":true}` |\n\n## 前提复核:消费方清单 + 各自 undefined 处理实测\n\n全仓扫描 `tenantField`(objectstack / objectui / cloud,排除 `node_modules`、`dist`、CHANGELOG)。绝大多数命中是 `driver-sql` 内部 `string | null` 的**局部参数/变量**(`schema-drift.ts` 等),与 spec 声明面无关。**真正读取 spec 声明值**的只有两处:\n\n| # | 消费方 | 位置 | 读法 | undefined 处理 | 会看到物化默认值吗 |\n|:--|:---|:---|:---|:---|:---|\n| 1 | `computeTenantField` | `driver-sql/src/sql-driver.ts:3531` | `tenancyDecl?.tenantField` | truthy 守卫 → 跳过声明分支,回落 `organization_id` | 会(parse 后元数据) |\n| 2 | `authoredTenantColumn` | `lint/src/data-model-rules.ts:88` | `obj?.tenancy?.tenantField` | `typeof === 'string' && trim()`,否则 `'organization_id'` | **不会** —— 读的是作者原文,未经 parse |\n| 3 | `tenantPolicy()` | `spec/src/security/rls.zod.ts:601` | 函数默认参数 `= 'organization_id'` | 与 schema 无关 | 不适用 |\n| 4 | `isTenancyDisabled` ×2 | `object.zod.ts:419`、`lint/validate-org-axis-red-lines.ts:187` | 只读 `.enabled` | 不适用 | 不适用 |\n| 5 | `TenancyConfig` 类型 | `object.zod.ts:2095` | `z.infer` 导出 | **三仓零消费方** | 不适用 |\n\n第 2 条值得单独点名:lint 的注释原文就是 \"The organization column, **as an AUTHOR would have spelled it**\",其测试喂的是 `tenancy: { tenantField: 'tenant_ref' }`(**没有** `enabled`,这个输入根本过不了 `TenancyConfigSchema.parse`)—— 证明该路径读的是未经 parse 的作者原文,物化默认值从来不在它的视野里。\n\n补充核实:\n\n- `SqliteWasmDriver` / `TursoDriver` 均 `extends SqlDriver`,共用 #1 的 `computeTenantField`,无独立实现。\n- `driver-mongodb` 的 tenancy guard(`mongodb-tenancy-guard.ts:96`)只读 `.enabled`。\n- 运行时另有一个**同名但不同**的 `tenancy`(`tenancy.posture` / `tenancy.defaultOrgId()`,ADR-0105 的租户服务),与对象 schema 的 `tenancy` 块无关,不受影响。\n- objectui / cloud 两仓对 `tenantField` 与 `TenancyConfig` 均零代码引用(仅 objectui 一处 CHANGELOG 历史文本)。\n\n**结论:不存在依赖「parse 后 `tenantField` 恒有值」的消费方(运行时或类型),硬前置 1、2 通过,无 #4666 家族停手条件。**\n\n类型面:`TenancyConfig['tenantField']` 由 `string` 变为 `string | undefined`。因零消费方,无一处需要改逻辑,**未使用任何 `!` 或 cast**。\n\n顺带一提,全仓唯一声明了 `tenancy` 块的对象是 `sys_sso_provider`(`{ enabled: false }`),走 `isTenancyDisabled` 直接返回 `null`,压根不读 `tenantField`。物化的 `'tenant_id'` 在本仓真的是零效果。\n\n## 行为等价性:先证红\n\n先按**错误预期**写断言,在**未改动的 `origin/main`** 上跑红:\n\n```\nFAIL  src/sql-driver-tenant-scope.test.ts > #5315 undeclared tenantField resolves to organization_id (parse → driver)\nAssertionError: expected 'organization_id' to be 'tenant_id' // Object.is equality\nExpected: \"tenant_id\"\nReceived: \"organization_id\"\n\n Test Files  1 failed | 62 passed | 4 skipped (67)\n      Tests  1 failed | 860 passed | 46 skipped (907)\n```\n\n`Received: \"organization_id\"` 一行同时给出两个事实:**(a)** 改动前的基线实测值就是 `organization_id`(硬前置 3 要的那条);**(b)** 物化的 `'tenant_id'` 从未抵达 driver —— 它确实是死声明。翻正断言后前后同绿。\n\n**关于验证方向,按实情报告:这条 pin 按设计两侧皆绿**,不是「改前绿改后红」那种反向验证。它证明的是*等价性*,这正是本单要的东西;它的长期职责是防止有人再塞回一个指向不存在列的默认值。真正的红证据是上面那次故意写错预期的运行。\n\n## 测试与门禁\n\n合并 `origin/main`(前移 9 个 commit,无一触及本 PR 文件面)后整体复验:\n\n```\npackages/spec        Test Files  317 passed (317)      Tests  8106 passed (8106)\npackages/lint        Test Files   60 passed (60)       Tests  1383 passed | 4 skipped (1387)\ndriver-sql           Test Files   63 passed | 4 skipped (67)   Tests  861 passed | 46 skipped (907)\n```\n\n`typecheck`:spec / driver-sql / lint 三包全绿。(lint 首轮报 `Cannot find module '@objectstack/formula'` 等,是未构建依赖的老陷阱,补 `pnpm --filter '@objectstack/lint^...' build` 后清零,与本改动无关。)\n\n生成物走 os-regen 四步:`check:generated` 只报 `content/docs/references/**` 一项 stale → `gen:docs` 重生成,`tenantField` 由 `✅ required` 变为 `optional` 并带上新 describe(顺带修正了该页原有的不一致:上方内联类型早已写 `tenantField?: string`,下方属性表却标 required)。合并后复跑 `✓ All 10 generated artifacts are up to date.`\n\n`authorable-surface.base.json` 在每次 spec build 时被重锚,带进 `api/Discovery:scoping`、`ui/ActionSession:*` 等**他人在飞的无关键**,已按 #5358 纪律 `git checkout` 还原,**不进本 PR**(还原后 `check:authorable-surface` 仍 ✓)。`check-nul-bytes` OK,并对本 PR 全部改动文件做了超出该门禁扫描范围的控制字符自查,干净。\n\n## 范围外发现\n\n- **#5746**:`content/docs/protocol/objectql/schema.mdx` 的多租户小节仍教 `tenantField: tenant_id`、指向一个不存在的 `reference: tenant` 对象,并把 legacy 的 `OS_MULTI_ORG_ENABLED` 当现行开关介绍(`packages/types/src/env.ts:89` 原文标注 LEGACY)。改对它要先定该示例的教学意图(保留「自定义租户列」演示 vs 改成平台默认姿势),超出本单裁定面,已另立单,未在本 PR 修改。\n\n本 PR 内 `content/docs/data-modeling/objects.mdx` 是**直接**记录这个键的授权指引,其示例正是 issue 点名的「AI 会照抄」的面,故随 schema 一并更正为「省略即回落 `organization_id`」,并把自定义列的例子换成 `workspace_id`。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018fxLGQdatPbBUvCgiVxg6D)_"
+}

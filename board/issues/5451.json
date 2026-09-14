@@ -1,0 +1,37 @@
+{
+  "number": 5451,
+  "kind": "issue",
+  "title": "已发布 skill `objectstack-pm-dispatch` 仍是两轴决策框架 —— 与 `.claude/` 内部三轴(#5130)分叉,且「创业聚焦」轴是否该泛化给第三方项目未定",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T12:28:32Z",
+  "updated_at": "2026-08-06T07:12:18Z",
+  "closed_at": "2026-08-06T07:12:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5451",
+  "body": "本单在实施 #5130 过程中发现,**未认领**。\n\n## 现象(实测,`origin/main` @ `01c0bae`)\n\n#5130 把内部 agent 协议的决策评估轴由两条扩为三条(新增「实际业务需求」轴 + 创业阶段聚焦原则),落点是 `.claude/skills/pm-dispatch/SKILL.md` 与 `.claude/agents/os-dev.md`。\n\n但**同一套决策框架在已发布目录里还有一份镜像** —— `skills/objectstack-pm-dispatch/SKILL.md`(#4607 发布,catalog 条目 `metadata.domain: process`,无 `metadata.internal`,第三方 ObjectStack 项目可安装),它仍是两轴,共 7 处:\n\n| 行 | 文本 |\n|---|---|\n| 185 | `the deep two-axis` |\n| 452 | `every option on the two fixed axes below.` |\n| 457 | `#### The two-axis decision frame (binding)` |\n| 459 | `Every option in an escalation is analyzed on **both** axes.` |\n| 478 | `Your recommendation must be justified on **both** axes.` |\n| 574 | `Analyze every option on two fixed axes:`(嵌入的 dev-agent 模板) |\n| 583 | `Justify your recommendation on both axes;` |\n\n`.changeset/published-pm-dispatch-skill.md` 明确记过当初的理由:「The two-axis decision frame is kept verbatim **because both axes generalize**」。\n\n## 为什么没在 #5130 里顺手改\n\n#5130 的验收第三条把范围钉死在 `.claude/`:「这是 `.claude/` 内部 agent 工具,不是发布内容,无 changeset 需求」。改已发布 skill 是**用户可见变更**(要 changeset),而且会触发一个 #5130 没有回答的问题(见下),因此按 Prime Directive #10 另立,不夹带。\n\n## 待定的问题(可能需要维护者拍板)\n\n第三条轴的措辞绑的是 ObjectStack 自身处境 ——「我们是一个创业项目,应该先专注于核心能力」,配的先例是本仓的 #5021 / #4988 / #4834。而发布版是 project-agnostic 的。三个选项:\n\n- **A 原样搬过去** —— 「创业项目」这个前提对装这份 skill 的成熟企业项目是错的,等于让别人的 PM agent 按我们的处境做决策。\n- **B 泛化后搬** —— 保留可泛化的内核(实际业务需求 + 判据必须实测 + 无拉动的声明面按 implementation-first 处置 + 已发布零消费能力不因沉没成本获得豁免),去掉「创业阶段」这个自我描述,把扩张姿态改为由项目自己的 conventions 文件声明(发布版本来就是 config-over-hardcoding 的设计)。\n- **C 不搬** —— 承认这条轴不泛化,并在发布版里**显式**注明它是 ObjectStack 内部附加的第三轴,免得下一个读者当成漏改而再开一单。\n\n倾向 **B**:「有没有真实业务拉动」这个判据本身与创业与否无关(成熟项目同样不该为零消费的声明面立项),不泛化的只是「创业阶段」这句自我描述;而 C 会让两份文本长期分叉,恰恰是本单要治的病。但这是**发布内容**的措辞与对外承诺,应由维护者定。\n\nBlocked-by: #5130(内部措辞先落地,发布版照着搬,避免两轮返工)\n"
+}

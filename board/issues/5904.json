@@ -1,0 +1,35 @@
+{
+  "number": 5904,
+  "kind": "pull_request",
+  "title": "fix(lint,spec,objectql): 编写期识别注册表注入的系统列 —— 一份权威派生,registry 与 linter 共用 (#5378)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T11:21:37Z",
+  "updated_at": "2026-08-06T11:47:43Z",
+  "closed_at": "2026-08-06T11:47:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T11:47:42Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5904",
+  "body": "Fixes #5378\n\n## 缺陷\n\n平台在每个业务对象上注入 `owner_id` / `created_at` / `organization_id` 等系统列,文档把 `ownership: 'user'` 写作 *\"injects reassignable owner_id\"*。但编写期两处校验只读**作者声明的** `fields`,注入列一律当作不存在:\n\n- `packages/lint/src/validate-expressions.ts` 的 `buildFieldIndex` → `has(record.owner_id)` 硬拒为 `unknown field owner_id`;\n- `packages/lint/src/validate-semantic-roles.ts` 的 `highlightFields` 存在性检查 → `['owner_id']` 警告 \"is not a field on this object — it is silently skipped by every consumer\"。\n\n即平台自己的 linter 否认平台自己的契约。后果是应用被迫**重声明系统列**才能过编写期:hotcrm#548 在全部 12 个业务对象上显式声明 `owner_id`(6 个对象报 `highlightFields` 警告,`contact_welcome` 的 `has(record.owner_id)` 被硬拒)。declared-but-not-honoured 的标准形状。\n\n在当前 `origin/main` 上两处盲点均复现(含 `record.id` —— 同类,且是最常用的写法):\n\n```\n[error] object 'crm_contact' · validation 'owner_required': unknown field `owner_id` on `crm_contact`\n[error] object 'crm_contact' · validation 'audit_seen':     unknown field `created_at` on `crm_contact`\n[error] object 'crm_contact' · validation 'org_seen':       unknown field `organization_id` on `crm_contact`\n[error] unknown field `id` on `crm_contact`\n[warning] semantic-role-field-unknown objects[0].highlightFields: crm_contact: highlightFields entry \"owner_id\" is not a field on this object\n```\n\n## 权威来源:先找,再消费,不手抄\n\n注入的单一事实源是 registry 的 `applySystemFields()`(`packages/objectql/src/registry.ts`)。`SystemFieldName` 的文档本身就写明它**只是名字注册表、不是注入列集合**,并点名 `applySystemFields()` 为按对象的权威——但那个权威此前**只能靠跑运行时拿到**,而 `@objectstack/lint` 的包契约是 *\"Depends on @objectstack/spec; never on a runtime\"*,根本读不到。于是它自己回答,或干脆不回答。\n\n因此本 PR 把**判定**上提到 spec,并让 registry **消费**它:\n\n- 新增 `resolveInjectedSystemColumns()`(`packages/spec/src/data/injected-system-columns.ts`)—— 纯派生,只读对象自己声明的键;\n- `applySystemFields()` 改为消费该派生(`plan.tenant` / `.audit` / `.owner` / `.owningBusinessUnit`),两处 early-return 折叠进派生;\n- lint 侧 `injectedColumnsFor()`(`system-fields.ts`)转发同一派生,**两个消费面共用同一判定**。\n\n沿用 #3786 为审计字段族确立的分工:**spec 声明有哪些列,registry 拥有每列长什么样**。⛔ lint 里没有第二份列清单,也没有第二份条件。\n\n派生是**纯函数**:实测 `multiTenant` 只影响 `organization_id` 是否 `indexed`,从不影响列是否存在——所以编写期无需任何运行时上下文即可给出与运行时一致的答案。\n\n## 有条件并入(实测矩阵)\n\n不是无条件放行整张系统列名单:\n\n| 对象声明 | 注入 |\n|---|---|\n| 默认 / `ownership: 'user'` | `organization_id` + 审计四列 + `owner_id` + `owning_business_unit_id` |\n| `ownership: 'org'` / `'none'` | **无**任一 ownership 锚(`record.owner_id` 仍是真错误) |\n| `ownership: 'business_unit'` | 有 `owning_business_unit_id`,**无** `owner_id`(ADR-0117 D1 / #5677 正向清单) |\n| `sys_*` 名 / 任意 `managedBy` | 无 ownership 锚 |\n| `tenancy.enabled: false` / `systemFields.tenant: false` | 无 `organization_id` |\n| `systemFields: { audit: false }` | 无审计四列 |\n| `systemFields: false` / `managedBy: 'better-auth'` | 什么都不注入,只剩驱动提供的主键 `id` |\n\n`systemFields: false` 是被折叠进派生的一个真陷阱:它不是对象,朴素的 `sf?.audit !== false` 读法会让审计族仍然开着——旧代码靠 early-return 兜住,现在由派生统一兜住。\n\n## 类型 / 文案\n\n注入列在诊断与补全语义上与授权字段等同:也进入 \"did you mean?\" 候选(`record.ownerid` → 提示 `owner_id`)。\n\n类型健全性索引与 null-guard 索引**刻意**仍只读声明字段,理由写在各自注释:列的 `type` 与可空性属于 registry 的列定义(在 lint 另立一份就是本次要消灭的第二份副本);且 null-guard 喂的是**会中断构建**的判定,擅自并入会让今天能构建的 stack 变红。少覆盖,不误报。\n\n## 反向验证 —— 方向按测试分别预判,两个方向都实测\n\n同一套改动下两类测试的正确预期**不同**,如实记录:\n\n- **Mutant A(把派生里的 `owner` 改成无条件)**:预判 lint 反例测试红、spec 单测红、**parity 测试仍绿**。实测完全吻合——lint 4 条反例红(`ownership: 'none'` / `'org'` 各两面),spec 单测 3 红,parity 28/28 全绿。parity 之所以**抓不到**错条件,正因为 registry 消费同一派生、两侧一起动;它的职责是抓**结构性分叉**,不是抓条件对错。这一点写进了 parity 文件的头注,免得下一个读者误以为它在保证条件正确。\n- **Mutant B(在 registry 里恢复一份手抄 deny-list 条件)**:预判 parity 红。实测 5 红——`ownership: 'business_unit'` 两行(手抄 deny-list 给出 `owner_id` = true,与 D1 的语义正好相反)+ `systemFields: false` 两行(手抄条件没折叠硬 opt-out)+ flags 那条。这才是 parity 真正防的漂移。\n\n条件对错由 lint 反例测试与 spec 单测钉住;结构分叉由 parity 钉住。两层分工。\n\n## 测试\n\n- `pnpm --filter @objectstack/lint test` → **61 files / 1446 passed**(新增 30 条:验收三条 + 全部反例)\n- `pnpm --filter @objectstack/spec test` → **322 files / 8235 passed**(新增派生单测 13 条)\n- `pnpm --filter @objectstack/objectql test` → **127 files / 2107 passed**(新增 parity pin 28 条)\n- 消费半径 `pnpm --filter @objectstack/cli test` → **85 files / 844 passed**;`metadata-protocol` 抽测 **47 files / 461 passed**\n- `typecheck` 三包全绿;`check:api-surface` 重新生成后绿(**0 breaking / 2 added**,纯增量)\n- `node scripts/check-nul-bytes.mjs` 绿 + 改动文件控制字节自扫描零命中\n\n验收三条(issue 原文)逐条:注入-only 对象上 `has(record.owner_id)` 过 ✅;`highlightFields: ['owner_id']` 不警 ✅;双向 pin(`ownership: 'none'` 仍拒、`tenancy` opt-out 仍拒、审计 opt-out 仍拒、真未知字段仍拒、拼错仍拒)✅。\n\n## examples A/B\n\n三个 app `os validate` 改动前后**诊断逐字节一致**(仅 `Load time` / 耗时行不同):`app-crm` 13 warn / 0 err、`app-showcase` 61 warn / 0 err、`app-todo` 4 warn / 0 err。零新增诊断;已显式重声明系统列的对象不受影响(重声明仍合法,并有专门测试钉住)。\n\n## 注入行为零改动\n\n`applySystemFields` 的输出在全条件矩阵 × `multiTenant` 两值上逐列不变(重构前后实跑对照,并由新 parity pin 长期看守)。\n\n**hotcrm#548 的 workaround 自此非必需**——12 个对象上纯为过编写期校验而加的 `owner_id` 重声明可以回收(不在本仓,本 PR 未动 hotcrm,供其 PM 决定)。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01GX3sL71LFq8m2usg6VqTSE)_"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 17467,
+  "kind": "issue",
+  "title": "docs(adr): ADR-0131 §1.2(3) calls a precondition \"today a refused boot\" — nothing refuses it, and #17010 measured the silent boot it describes",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-10T16:10:46Z",
+  "updated_at": "2026-09-12T00:37:25Z",
+  "closed_at": "2026-09-11T07:05:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17467",
+  "body": "Filed by the **`domain:services` execution seat** (session `session_01ToDPcx9AESFubJkDiFMtKW`) out of the at-ACCEPT residue of #17010 / PR #17460. Filed **unassigned and unlabelled**: ⛔ this seat does not produce `domain:*` or grading, and `docs/adr/**` is a **governed** surface that is not this lane's to edit.\n\nRouted here rather than fixed in PR #17460 because a code PR editing `docs/adr/**` is exactly what that guardrail stops. The dev named it in that PR's acceptance notes and stopped; this card is the successor it named.\n\n## The sentence\n\n`docs/adr/0131-total-organization-ownership-no-null-organization-id.md:132`, §1.2 item 3, verbatim:\n\n> 3. The measured leak's precondition — many organizations with Layer 0 inert — **is today a refused boot** ([ADR-0093](./0093-tenancy-mode-and-membership-lifecycle.md) D5, cloud#1020, cloud#1664).\n\n**It is not a refused boot, and it was not one when the sentence was written.** #17010 measured the opposite: a deployment that never *requests* a walled posture and simply *holds* more than one `sys_organization` row under `single` boots, serves, and says nothing. ADR-0093 D5 refuses a **requested-but-absent** wall (degraded tenancy) — a different precondition. The sentence borrows D5's refusal for a case D5 does not reach.\n\n## Why it matters beyond tidiness\n\n⭐ The sentence is not decorative — it is load-bearing inside its own argument. §1.2 is the passage that decides how much the measured NULL-row leak matters, and item 3 is the reason it is discounted: *the precondition can't happen, because that boot is refused.* With the premise false, the discount is unearned, and a reader reaches the opposite conclusion about the leak's reachability than the record intends. ⇒ This is a stale premise inside a decision record, not a typo.\n\n## Measured\n\nOn `origin/main` @ `ecdfc9411`, 2026-09-10T16:10Z:\n\n- Nothing in the boot path refuses a `single`-posture deployment for holding N organizations. #17010's card carries the reproduction; PR #17460 adds a **report at `error`** for exactly this state — deliberately **not** a refusal, because refusing would stop deployments that run today (the card's own measured instance, `objectstack-ai/ats`, is one) and that fork is the maintainer's.\n- ⇒ After #17460 lands the sentence is *more* wrong, not less: the platform will say something about this state, and what it says is a diagnostic, not a refusal.\n\n## ⚠️ Scope fence — one sentence moves, the other must not\n\nThere are **two** occurrences of the phrase \"refused boot\" in this ADR, and only one is false:\n\n| line | text | verdict |\n|---:|:--|:--|\n| **`:132`** | 「…many organizations with Layer 0 inert — **is today a refused boot**」 | **FALSE** — this card's target |\n| `:558` | D11: 「**Degraded tenancy stays a refused boot.**」 | ⛔ **TRUE — do not touch** |\n\n`:558` is correct: ADR-0093 D5 does refuse a boot that *requests* a wall the runtime cannot provide, and `TenancyService.defaultOrgId()` returns `null` before any read on that path. ⇒ A sed over \"refused boot\" would break a true sentence to fix a false one. ⛔ Correct `:132` only, by hand.\n\n## Suggested shape — ⛔ not a proposal this seat is entitled to make\n\nThe owning lane decides. Recorded because the measurement suggests it: state what is actually true — the precondition is **reachable and unreported today** (or, once #17460 lands, **reachable and reported at `error`, not refused**) — and say plainly what that does to §1.2's discount of the leak, rather than deleting the item and leaving the argument with a silent gap.\n\n⚠️ Whether the boot *should* be refused is a **separate, open** question and is the maintainer's; #17010 deliberately left it open and built only a report. ⛔ This card must not be used to decide it by rewording the ADR.\n\n## Governed-surface note\n\n`docs/adr/**` is governed. ⇒ Whoever takes this opens a **draft** PR and leaves the merge to the maintainer; ⛔ no self-merge, ⛔ no auto-merge arming. It also should not ride along in an unrelated code PR — that is the guardrail that produced this card in the first place.\n\n## Dedupe — run with a working control\n\nSemantic search over `objectstack-ai/objectstack`, 2026-09-10T16:10Z:\n\n```\nquery \"ADR-0131 says the many-organizations-with-Layer-0-inert precondition is today a\n       refused boot, but no code refuses it — the ADR sentence is false\"     → 15 results\nquery \"a governed ADR document states something the code does not do —\n       correct a factually stale sentence in docs/adr\"                       → 42 results\nCONTROL: both queries returned non-empty, so the tool answers on this topic and the zero is real.\n```\n\nNearest neighbours, each read and judged **not** a duplicate:\n\n- **#17010** (this card's parent, `pm:dispatched`) — the *silent boot* itself, and its remedy. It does **not** correct the ADR: PR #17460's acceptance notes route that here explicitly. Two halves; neither subsumes the other.\n- **#15214** (open, `pm:blocked`, `target:v18`) — 「the tenancy **docs** state the three sentences」. That card edits `content/docs` tenancy/permissions pages to state ADR-0131's three ownership sentences. Different target (the docs pages, not the ADR record), different sentence, and blocked behind #15193 on the v18 line. ⚠️ Cross-link, not duplicate.\n- **#15453** (closed) and **#15244** (closed) — same *class* (an ADR sentence its own shipped code disproves), different sentences and different ADRs. Precedent for how this is handled, not a duplicate.\n\nRefs: #17010 · PR #17460 · ADR-0131 §1.2(3) at `docs/adr/0131-total-organization-ownership-no-null-organization-id.md:132` · ADR-0093 D5 · `packages/plugins/plugin-auth/src/tenancy-service.ts`"
+}

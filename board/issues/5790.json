@@ -1,0 +1,37 @@
+{
+  "number": 5790,
+  "kind": "issue",
+  "title": "guard-main-checkout.sh 同样只挂 Edit|Write|NotebookEdit,本仓经 Bash 写文件(sed -i / tee / 重定向)可绕过 worktree 强制",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T05:33:59Z",
+  "updated_at": "2026-08-06T11:25:37Z",
+  "closed_at": "2026-08-06T11:25:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5790",
+  "body": "在 objectui 修 objectstack-ai/objectui#3435(PR objectstack-ai/objectui#3452)时顺带发现本仓有同一个洞,故在此单独记录。**未做任何改动**。\n\n## 现状\n\n`.claude/settings.json` 里只有一条 PreToolUse 注册:\n\n```\nmatcher: Edit|Write|NotebookEdit -> \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-main-checkout.sh\"\n```\n\n`.claude/hooks/` 下也只有 `guard-main-checkout.sh` 一个钩子,没有任何挂在 `Bash` matcher 上的东西。\n\n于是同一个写操作换成 Bash 就完全不经过钩子,在共享主 checkout 里一声不响地改文件:\n\n```\nsed -i 's/foo/bar/' packages/spec/src/x.ts\ncat > packages/spec/src/x.ts << EOF\nprintf 'x' > packages/x.ts\npnpm build | tee build.log\ntee / cp / mv / rm / touch 同理\n```\n\n而本仓 CLAUDE.md 给每个 agent 的心智模型是「A PreToolUse hook (.claude/hooks/guard-main-checkout.sh) enforces this — it blocks Edit/Write/NotebookEdit」:声明的强制范围大于实际的强制范围。多 agent 并行改同一个共享 checkout 正是 worktree-first 规则要防的事,这条路径上它没被防住。\n\n## 可能做法\n\nobjectui 侧已经把这件事做完了,可以直接移植而不必重新设计:\n\n- `.claude/hooks/guard-main-checkout-bash.sh`(objectstack-ai/objectui#3452)—— 挂 Bash matcher,精确优先于召回,只认 `>` / `>>` 重定向、`sed -i`、`perl -i`、`tee`、`cp`、`mv`、`rm`、`touch`;仓库判定直接沿用 guard-main-checkout.sh 自己的 git-dir 逻辑;逃生舱复用同一个 `OS_ALLOW_MAIN_EDITS=1`;解析不了一律 fail open;附 70 例自建 fixture 的自测矩阵。\n- 移植时需要注意本仓没有 objectui 的 `guard-shared-stash.sh`,所以 Bash matcher 要新建而不是往已有的数组里加。\n\n## 顺带观察(是否单独立项请 triage 决定)\n\n本仓同样没有 `guard-shared-stash.sh`,即 objectstack-ai/objectui#3430 记录的「stash 栈在所有 worktree 之间共享、一个 agent 的 pop 会取走另一个 agent 的条目」在本仓也完全没有防护。与上面是两个不同的缺陷,只是同一批钩子的移植工作量可以合并考虑。\n\n## 证据\n\n- `/home/user/objectstack/.claude/settings.json` —— PreToolUse 下仅 `Edit|Write|NotebookEdit` 一条\n- `/home/user/objectstack/.claude/hooks/` —— 仅 `guard-main-checkout.sh`\n- `/home/user/objectstack/CLAUDE.md` —— 声明钩子强制 worktree-first\n\n未搜到已有的同类 open issue(按 guard-main-checkout / Bash / worktree / `.claude/settings.json` 等关键词搜过)。\n"
+}

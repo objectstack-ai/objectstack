@@ -1,0 +1,36 @@
+{
+  "number": 5784,
+  "kind": "issue",
+  "title": "[#5704 批次2] B 类替身改名 makeMemoryDriver→makeStubDriver(objectql 22 + runtime 2)+ Q2-B 保留注释",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "priority:p0",
+    "tests"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T05:22:27Z",
+  "updated_at": "2026-08-06T07:02:52Z",
+  "closed_at": "2026-08-06T07:02:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5784",
+  "body": "Part of #5704(批次 2)。维护者 2026-08-06 裁决 **Q1=C / Q2=B**(落档见 #5704 裁决评论)。\n\n## 任务 1:24 个文件的本地替身改名(纯机械,零行为变更)\n\n`makeMemoryDriver()` 是各文件自带的手写 stub(所在包连 `@objectstack/driver-memory` 依赖都没有),命名系统性误导度量与人(#5704 Phase 1 survey 的核心发现)。统一改名 `makeStubDriver()`,调用点与类型随之;注释里把 stub 描述成「memory driver」的散文一并改写为指涉 stub 本身(如「same shape driver-memory uses」→ 指涉 engine 期望的最小 stub 形状)。改名后文件内不得再有指涉 driver-memory 包的字样(确需描述真实语义分叉的散文除外,逐处判断)。\n\n- **packages/objectql(22 个测试文件)**:bulk-write-per-row-hooks、engine-audit-anchor-write、engine-autonumber-runtime-owned、engine-cascade-delete、engine-dangling-reference-audit、engine-data-events、engine-default-value-tokens、engine-filter-alias、engine-lookup-referential-integrity、hook-condition-bulk-previous、hook-condition-fail-loud、hook-condition-merged-record、hook-condition-previous-scope、hook-input-shape-contract、protocol-clone-real-engine、protocol-recorded-by-null、protocol-registry-shadow、protocol-save-meta-repo-path-real-engine、protocol-unknown-query-param、protocol-unregistered-object、query-expression-conformance、secret-fields\n- **packages/runtime(2 个)**:sandbox/nested-write.canary、sandbox/nested-write.integration\n\n以 `git grep -l \"makeMemoryDriver\" packages/objectql packages/runtime`(对 origin/main)实测为准 — survey 基线 `a58c0b5`,先复核前提。\n\n## 任务 2:Q2-B 落地(仅注释)\n\n`packages/runtime/**/undeclared-field-write-driver-split.integration.test.ts` 文件头加注释块:本文件是仓内**唯一刻意保留**的 driver-memory 测试消费点 — 无 schema 语义参照臂,钉「写未声明字段:SQL 族整条拒绝 / 无 schema 族照单全收」的产品分歧;**非迁移遗漏**;#5499 冻结令冻的是缺陷修复投入、不禁止参照使用;引用 #5704 裁决评论。⛔ 不改测试逻辑。\n\n## 边界(⛔)\n\n- ⛔ 不动 rest / plugin-approvals / trigger-record-change 的 7 个 `*.integration.test.ts` — 并行批次 3 正在整体重写它们;\n- ⛔ 不动任何 package.json(runtime 的 driver-memory devDep 因 Q2-B 长期保留);\n- ⛔ 不动 A 类已迁文件(datasource-autoconnect、read-coercion-conformance)、域外剔除 7 文件、cli/serve-driver-banner、service-datasource/sqlite-driver-fallback、spec 两文件;\n- 零运行时代码改动 — diff 只应有测试文件与注释。\n\n## 验收\n\n- 改名范围内 `makeMemoryDriver` 归零(全仓余量只允许在批次 3 的 7 个文件里,等它们自己清);\n- packages/objectql、packages/runtime 受影响测试全绿,vitest 用例计数与改前一致;\n- 测试行为不面向用户 → `skip-changeset` 约定(label 由 PM 代打,报告说明即可)。"
+}

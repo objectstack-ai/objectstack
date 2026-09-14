@@ -1,0 +1,35 @@
+{
+  "number": 5611,
+  "kind": "issue",
+  "title": "RecordDetailsProps 与真实页面的授权形状不符:`sections` 声明为 string[] 但所有页面授权对象形式,`hideFields` 完全未声明",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T20:24:25Z",
+  "updated_at": "2026-08-06T03:42:48Z",
+  "closed_at": "2026-08-06T03:42:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5611",
+  "body": "实施 #5176(为 `RecordHighlightsField` 声明 `readonly`)时,按\"规则消费半径\"清扫 `packages/lint` 下游读取方发现的范围外问题 —— 与 #5176 同一族(声明与授权不一致,靠 props 无解析闸门苟活),但**不是同一个键**,故另开。未在 #5176 的 PR #5607 中修复。\n\n## 实测\n\n`packages/spec/src/ui/component.zod.ts` 的 `RecordDetailsProps` 声明键为:`columns` / `layout` / `sections` / `fields` / `aria`。\n\n**其一 —— `sections` 的类型与所有真实授权相反。** 声明是\"分区 ID 列表\":\n\n```ts\nsections: z.array(z.string()).optional().describe('Section IDs to show (required when layout is \"custom\")'),\n```\n\n而仓库里每一个真实页面授权的都是**对象形式的分区**(带 `label` / `columns` / 嵌套 `fields[]`):\n\n- `examples/app-showcase/src/ui/pages/project-detail.page.ts:49`\n- `examples/app-showcase/src/ui/pages/settings.page.ts:27`\n- `examples/app-showcase/src/ui/pages/task-detail.page.ts:73`\n\n```ts\nsections: [\n  { label: 'Overview', columns: 2, fields: ['name', 'account', 'owner', 'status'] },\n  { label: 'Financials', columns: 2, fields: ['budget', 'spent'] },\n],\n```\n\n仓库自己的 lint 也是按对象形式建模的 —— `packages/lint/src/validate-page-field-bindings.ts:166` 把 `sections` 登记为 `nestedSections`,其类型注释明确写着\"holding `{...}[]` section objects whose `fields[]` are field names\"。\n\n**其二 —— `hideFields` 未声明**,但被一个**已发布的平台页**授权:`packages/platform-objects/src/pages/sys-user.page.ts:106`。\n\n两者今天都能跑通,原因与 #5176 完全一致:`PageComponentSchema.properties` 是 `z.record(z.string(), z.unknown())`,逐组件 props 从不被 parse(#5068 的判定)。lint 源码里那行注释把这个事实说得很直白:\"`sections`/`hideFields` are not in RecordDetailsProps, but every real page authors them (they survive because `properties` is unvalidated)\"。(该注释关于 `sections` 的部分现在略有偏差:`sections` 是**已声明**的,只是**类型**对不上;`hideFields` 才是完全未声明。)\n\n## 为什么现在就值得处理\n\n- **今天已有的损害:声明即文档。** 生成的组件参考 `content/docs/references/ui/component.mdx` 会照着 schema 告诉作者 `sections` 是 `string[]`。一个照着参考写的 AI 作者会授权 `sections: ['overview']` —— 而仓库里没有任何一个页面这么写,lint 也不按这个形状读。这正是 AGENTS.md #0.1 所说的\"第二套事实上的契约\",且方向对 AI 作者最不利(权威文档是错的那一份)。\n- **#5068 的闸门落地时会硬失败,不是静默剥离。** `hideFields` 是未声明键(静默剥离 → 平台页 `sys_user` 的隐藏字段失效);而 `sections` 是**类型冲突**,`z.array(z.string())` 会直接拒绝 `{label,...}` 对象 —— 三个 showcase 页面 + 任何同形状的客户页面都会变成硬解析错误。这比 #5176 的失败模式更响,但影响面更大。\n\n## 需要裁定的方向\n\n不自行猜测,列出选项:\n\n- **A:把 spec 改成与真实授权一致** —— `sections` 改为 `z.array(SectionObject)`(或 `z.union([z.string(), SectionObject])`),并声明 `hideFields`。收益:声明与被兑现的行为成为同一事实,无需迁移任何现存页面;代价:`sections` 的类型变更对任何真按 ID 列表授权的存量数据是破坏性的(需先确认是否存在这类数据)。\n- **B:把页面改成与 spec 一致** —— 三个 showcase 页面 + 平台页改写为 ID 引用形式。代价:需要渲染器真的支持 ID 引用形式(未经证实),且要为 `hideFields` 另找归宿;基本等于推翻现行事实标准。\n- **C:按 ADR-0087 D2 声明成转换层** —— 若两种形状都要长期支持。\n\n**倾向 A**,与 #5176 同样的两轴理由:声明与强制合一,且不需要一次跨仓迁移。但 `sections` 是既有已声明键、改类型带破坏性,超出我的判断范围,故不动、只记录。\n\n## 关系\n\n- 与 #5176 同族但**不同键**,#5176 的 PR #5607 已合规地未越界。\n- 与 #5068 的关系同 #5176:**必须在 props 校验闸门落地之前解决**,否则闸门一接通即产生硬解析错误。建议按 #5176 的先例登记为 #5068 的前置。"
+}

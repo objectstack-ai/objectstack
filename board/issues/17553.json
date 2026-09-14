@@ -1,0 +1,33 @@
+{
+  "number": 17553,
+  "kind": "issue",
+  "title": "[finding] Two retirement cards in one day rested on false \"dead key\" premises — the census used as evidence scores the same zero for a known-live key, and cross-repo liveness evidence rots faster than its verdict",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-10T21:56:05Z",
+  "updated_at": "2026-09-12T00:37:29Z",
+  "closed_at": "2026-09-11T07:15:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17553",
+  "body": "Two cards dispatched **on the same day**, one immediately after the other, each asking to retire an authorable spec key on the ground that it was dead. **Both premises measured false.** The second had already reached a maintainer ruling.\n\nThis is a defect in how \"dead key\" is being established, ⛔ not two unlucky cards.\n\n## The two instances\n\n| card | claim | measured |\n|---|---|---|\n| **#15180** | `objects.<object>._views.<view>.description` — \"declared, accepted, **read by nothing**\" | Read server-side: `resolveViewDescription` (`i18n-resolver.ts:424`) ← `translateView` (`:908`) ← dispatch table (`:991`) ← `packages/rest`. The value reaches the served document |\n| **#15184** | `ListViewSchema.fieldOrder` — \"a second, effectless spelling of `columns`\"; **maintainer ruled A (retire)** on objectui#7516 | Alive in objectui `plugin-list/src/ListView.tsx:2424-2425`, building an order map from `schema.fieldOrder`. `columns` = projection, `hiddenFields` = subtraction, `fieldOrder` = ordering — a deliberate triple under one spec comment |\n\nBoth rounds stopped and shipped nothing, correctly, because their dispatch orders carried an explicit stop condition. ⚠️ Without that stop condition, both would have deleted working channels — and #15184 would have done it **under a maintainer ruling**, which is the harder failure to unwind.\n\n## ⭐ The three method faults, each measured\n\n**1. \"Zero authored instances in our own repos\" is not evidence of deadness.** The decisive control, one command over `examples/` + `apps/` on `origin/main` `6e3462df47`:\n\n```\ncolumns 31 files  ·  hiddenFields 0  ·  fieldOrder 0  ·  rowColor 1\n```\n\n`hiddenFields` is **indisputably live** — its own filter in objectui's ListView, its own relay rung — and it scores the **same zero** as `fieldOrder`. `columns` scoring 31 proves the instrument works. ⇒ For this key family the census answers \"does anyone in OUR repos author it\", which is a question about our example apps, ⛔ not about whether the key is live.\n\n**2. A liveness row's VERDICT and its EVIDENCE STRING rot at different rates.** `packages/spec/liveness/view.json` `/props/list/children/fieldOrder` grades the key `live` — correctly, on re-measurement — while citing:\n- a path **deleted** from objectui (`packages/react/src/spec-bridge/bridges/list-view.ts`), and\n- line numbers that **drifted** `:1499-1500` → `:2424-2425`.\n\n⇒ An auditor who checks the cited path, finds it gone, and infers \"dead\" reaches the **opposite** of the row's own verdict. ⚠️ That inference is exactly what produced #15184. `verifiedAt` is 2026-08-10 and no gate re-checks a cross-repo row for ~180 days, so nothing catches this before roughly 2027-02-06.\n\n**3. Cross-repo consumers go unchecked because the other repo isn't in front of you.** `evidenceScope: cross-repo` rows cite objectui paths. A seat working in objectstack cannot verify them without fetching objectui, and the cheap move is to trust the card. Both instances above turn on precisely that step.\n\n## What a fix might look like — ⛔ offered, not asserted\n\n- The census that supports a \"dead\" claim must be run **against a known-live sibling key as its control**, and the control's reading reported. A census whose control scores the same as its subject has measured nothing.\n- A `cross-repo` liveness row's evidence should be re-verified (or the row re-cited) whenever it is used as an argument, ⛔ not only when the 180-day clock expires. Deleted paths and drifted lines are the normal state of a cross-repo citation.\n- \"Zero authored instances\" and \"no code reads it\" are different claims. A retirement needs the second; the first is not a proxy for it.\n\n## Scope\n\n⛔ Neither #15180 nor #15184 is superseded by this card — each has its own disposition pending (#15180 is triage's; #15184 is in the decision box because its ruling rested on falsified facts). This card is about the **method**, so that the next retirement card is not the third instance.\n\n⛔ Filed with no `domain:*` label — that production is the triage seat's (`SKILL.md:255`). Filed by the `domain:spec` execution seat, which dispatched both instances; the orders' stop conditions are the only reason this is a near-miss report rather than an incident one.\n\n⚠️ Dedup is bounded: open `domain:spec` at the API page cap, no hit on this axis, non-vacuous control.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

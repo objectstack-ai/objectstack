@@ -1,0 +1,37 @@
+{
+  "number": 17610,
+  "kind": "issue",
+  "title": "service-messaging: NotificationDispatcher issues 32 statements per tick on an EMPTY outbox (reap runs per partition, twice) — idle cost scales with partitions × table size and never backs off",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:done",
+    "priority:p1"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-11T03:32:29Z",
+  "updated_at": "2026-09-11T05:12:36Z",
+  "closed_at": "2026-09-11T05:11:03Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17610",
+  "body": "## 现象\n\noutbox **完全为空**（零 pending）时，`NotificationDispatcher` 每一跳仍然：\n\n- `runTick` 遍历 `partitionCount` 个分区（默认 **8**，`dispatcher.ts` 构造函数 `partitionCount ?? 8`）\n- 每个分区 `runPartition` 依次调用 `outbox.claim()` 与 `outbox.claimDigest()`\n- `sql-outbox.ts` 里这两个方法**各自**先跑一次 reap（`UPDATE … WHERE status='in_flight' AND claimed_at < now - claimTtlMs`，代码注释自称 environment-wide），再跑一次候选 `find`，没有候选即返回\n\n⇒ 空闲时每跳 **8 × (2 + 2) = 32 条语句**。其中 reap 逻辑上每跳至多需要 1 次，现在跑 **16 次**。\n\n`intervalMs` 默认 500。`inflightTick` 守卫会跳过重叠的跳，所以实际速率被单跳耗时封顶——远程 Turso 下每条语句一次 HTTP 往返，生产实测稳态约**每秒 28 条**，与 32 条 ÷ 约 1.1 秒/跳吻合。\n\n## 后果（生产实测；租户信息已匿名）\n\n在热表缺索引的租户库上（驱动侧另卡），这 32 条每条都是全表扫描。一个生产租户库在 `sys_notification_delivery` 约 5,700 行时，稳态约 **15 万行读/秒**，9 天 **1,011.6 亿**次读，占其 Turso 组织 99.9%。\n\n**即使驱动侧索引修好**，空闲成本仍是每跳 32 次索引查找、永不停歇、每个温热 kernel 一份。\n\n## 验收\n\n1. **reap 与领取解耦**：reap 每跳至多一次（或更慢的独立节奏，例如 `claimTtlMs` 量级），不再随 分区数 × 2 放大\n2. **空闲退避**：连续若干跳零领取时逐步拉长间隔（上限可配）；有投递入队时立即唤醒。若退避会让新通知的首次投递延迟变长，写明上界\n3. **计数测试防回归**：对空 outbox 跑 N 跳，断言 engine 语句数的上限\n4. **语义不变**：分区锁、至少一次投递、digest 折叠、claim TTL 回收——现有测试全绿\n\n## 同形状，请评估（不强求同卡）\n\n`service-queue` 的 `DbQueueAdapter.claimBatch`（默认 1s 轮询）按 `priority, scheduled_for` 排序，而声明索引是 `['queue','status','scheduled_for']`——排序首键 `priority` 不在索引里；空闲时同样恒定轮询。你若判断应该另立卡，说出来。\n\n驱动缺索引、未配置渠道写死信两张关联卡的编号见本卡评论。\n"
+}

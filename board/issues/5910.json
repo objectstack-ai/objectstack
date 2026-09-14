@@ -1,0 +1,35 @@
+{
+  "number": 5910,
+  "kind": "pull_request",
+  "title": "test(core,metadata,platform-objects): #5619 解锁的另外 6 条各接一行 pin,基线整条删除 (#5855)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T11:27:59Z",
+  "updated_at": "2026-08-06T11:59:24Z",
+  "closed_at": "2026-08-06T11:59:23Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T11:59:23Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5910",
+  "body": "Fixes objectstack-ai/objectstack#5855\n\n#5619(PR #5871,51a587d97)把 `assertEngineDeleteDispatch` / `assertEngineUpdateDispatch` 下沉到 `@objectstack/metadata-core` —— 一个既不依赖 `@objectstack/objectql`、也不依赖本单这三个包的包。那次下沉解除的不只是 metadata-protocol 那 26 条:基线里另有 6 条 (file, verb) 条目卡在**同一个环**上,现在各剩一行 pin。本 PR 就是这 6 行。\n\n## 前提核验(⛔ 不沿用立单时的清单,重读 origin/main 现测)\n\n立单时的结论是在 #5619 的 worktree 上测的,按分诊座位的明令在 `origin/main`(7b005b455)上逐条重测:\n\n| 条目 | verb | origin/main 基线现状 | 剩余动作(实测) |\n|:--|:--|:--|:--|\n| `packages/core/src/utils/migration-journal.test.ts` | delete + update | 在 DEBT,`closes` 已改写为「阻塞已解除」并指向本单 | 加 devDependency |\n| `packages/metadata/src/migrations/migrate-sys-notification-to-event.test.ts` | delete + update | 同上 | 零配置(`dependencies` 已含 metadata-core) |\n| `packages/platform-objects/src/plugin.test.ts` | update | 同上 | 零配置 |\n| `packages/platform-objects/src/system/migration-flag.test.ts` | update | 同上 | 零配置 |\n\n**前提成立,一字未变**:6 条都在、verb 与立单一致、三个包的依赖现状与立单描述一致。谓词的最终导出名与 arity 以 `packages/metadata-core/src/index.ts` 现测为准 —— 构建产物上 `assertEngineDeleteDispatch.length === 1`、`assertEngineUpdateDispatch.length === 2`,即 `assertEngineDeleteDispatch(options)` / `assertEngineUpdateDispatch(data, options)`。\n\n`@objectstack/core` 的 devDep 判据自己重测了一次(⛔ 不引用立单的测量):加上这条边之后\n\n```\n$ npx turbo run build --filter=@objectstack/core --dry\n(无 circular / cyclic 输出)\ntasks: ['@objectstack/core#build', '@objectstack/metadata-core#build', '@objectstack/spec#build']\n```\n\n顺带确认 CI 顺序也是对的 —— turbo 的 `test` 任务 `dependsOn: [\"^build\"]`,所以 `@objectstack/core#test` 现在依赖 `@objectstack/metadata-core#build`,不会出现「测试跑在未构建的 dist 上」。\n\n## 改了什么\n\n1. **四个 fake 引擎的写谓词接到生产者自己的判定上**,一律以 `assertEngineDeleteDispatch(options)` / `assertEngineUpdateDispatch(data, options)` 开头,⛔ 无一处手抄 `if (!where?.id && !multi)`(#5173 / #5191 / #5192 / #5584 各烧掉一轮 CI 的写法);导入一律来自 `@objectstack/metadata-core`,不是 `@objectstack/objectql`(反向边就是 turbo 拒绝的那个环)。\n2. **`@objectstack/core` 新增 devDependency `@objectstack/metadata-core: workspace:*`**。lockfile 只有该 devDep 引起的 3 行增量,⛔ 无全量重解析。\n3. **基线删掉这 6 条整条**。\n\n三个 fake 的 update 调用点都传**标量真值 `data.id`**(迁移 id / 通知行 id),即 `by-id`;`packages/core` 与 `plugin.test.ts` 的两处则根本没有路径驱动到该谓词,pin 之后仍保持原样(`not used` / `{}`),只是把「有朝一日有人从这里写」的那扇门提前关上 —— 这正是 #5629 记录的 dormant-not-harmless。\n\n## 计数(改前读数在 origin/main 上现测)\n\n| | 改前 | 改后 |\n|:--|--:|--:|\n| 基线 entries | 141 | 135 |\n| gate pinned | 64 | 70 |\n| gate DEBT | 139 | 133 |\n| gate exempt | 2 | 2 |\n\n## 反向验证(方向先预测,后运行)\n\n**预测**:把已接线的 `migration-flag.test.ts` 里那行谓词调用临时拿掉,该 (file, verb) 就成了「无守卫的替身 + 基线里已无条目」,门禁必须在 PINNED 不变量上报红并点名它。**运行结果与预测一致**:\n\n```\nx PINNED [update]: packages/platform-objects/src/system/migration-flag.test.ts declares 1 engine\n  double(s) whose update() does not route through assertEngineUpdateDispatch (line 26). ...\n  Open the fake's update with `assertEngineUpdateDispatch(data, options)` from\n  '@objectstack/metadata-core' (where the predicate lives since #5619) ...\n```\n\n恢复该行后门禁退出码 0。\n\n## 验证\n\n```\n$ node scripts/check-engine-double-contract.mjs   # 含 --self-test\ncheck-engine-double-contract: OK — 70 pinned, 133 in the DEBT ledger, 2 exempt.\n\n$ pnpm --filter @objectstack/core --filter @objectstack/metadata --filter @objectstack/platform-objects test\npackages/core test:              Test Files  27 passed (27)   Tests  498 passed (498)\npackages/metadata test:          Test Files  25 passed (25)   Tests  508 passed (508)\npackages/platform-objects test:  Test Files   9 passed (9)    Tests  266 passed (266)\n\n$ pnpm --filter @objectstack/platform-objects typecheck    # tsc --noEmit,通过\n$ pnpm check:nul-bytes                # OK(5706 个文件,无裸控制字节)\n$ pnpm check:type-check-coverage      # OK(core / metadata 无 typecheck 脚本属既有 DEBT,本 PR 未改变)\n$ pnpm check:published-files          # OK(devDep 不进发布面)\n$ npx eslint 四个测试文件               # 0 problems\n```\n\n以上均已在 `git merge origin/main`(⛔ 未 rebase)之后重跑一遍,合入的是纯文档提交,与本 PR 文件面无交集。\n\n## 在飞同族(#5748)\n\n#5748 正在把 `data.id` 的判定翻面(维护者裁 A:`data.id` 同过标量测试)。⛔ 本 PR 不碰 `metadata-core` 源码。推送前复核了 `git log origin/main -- packages/metadata-core/src/engine-update-dispatch.ts scripts/engine-double-contract.baseline.json`,最新一笔仍是 51a587d97(#5871),期间无在飞变更落地。\n\n**本 PR 的 fixture 无一驱动「非标量 `data.id`」形状** —— 四处要么不调用 update,要么传标量字符串 id,在裁决 A 下仍判 `by-id`,语义翻面不会让任何一条用例变红。反过来说,pin 之后这 4 处会**自动继承** #5748 的修法,不需要再逐个改 —— 这正是「导入生产者的判定」相对「手抄一份」的收益。\n\n## changeset:建议 skip-changeset\n\n本 PR 的文件面是**测试 + 一条 devDependency + 基线数据文件**,无任何用户可见行为变化:\n\n- 四个改动文件全是 `*.test.ts`,不进任何包的发布产物(`check:published-files` 绿,`files` 白名单只有 `dist`);\n- `@objectstack/core` 加的是 **devDependency** —— 消费者安装时不解析,不构成对外依赖契约的变化,发不出有意义的 release note;\n- `scripts/engine-double-contract.baseline.json` 是门禁台账,不是运行时。\n\n故未加 `.changeset/*.md`,并已自行给 PR 打上 `skip-changeset` 标签。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_019Q7oc7ASjh8yxyS3Yz78We\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019Q7oc7ASjh8yxyS3Yz78We)_"
+}

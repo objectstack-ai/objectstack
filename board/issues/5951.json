@@ -1,0 +1,35 @@
+{
+  "number": 5951,
+  "kind": "pull_request",
+  "title": "fix(runtime,cli): NODE_ENV 未设置时 /discovery 报 production,doctor 新增缺省提示行 (#5673)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T12:51:15Z",
+  "updated_at": "2026-08-06T13:07:47Z",
+  "closed_at": "2026-08-06T13:07:44Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T13:07:44Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5951",
+  "body": "Fixes objectstack-ai/objectstack#5673\n\n## 问题\n\n同一个「宿主没有设置 `NODE_ENV`」的事实,仓里有两套相反的默认:\n\n| 位置 | 未设置 `NODE_ENV` 时 | 现状 |\n|:---|:---|:---|\n| `os start`(`start.ts:248`) | 强制 `NODE_ENV='production'` | 对齐目标,未动 |\n| `os serve`(`serve.ts:532-533`)/ `doctorNodeEnv()` | `NODE_ENV \\|\\| 'production'` | 对齐目标,未动 |\n| `/discovery` 的 `environment`(dispatcher 生产者) | **`development`** | 本 PR 翻为 `production` |\n\n`environment` 是**机器可读面**上的字段,客户端拿它回答「我在不在生产环境」,并可能据此不显示生产警示、放宽破坏性操作的二次确认。一个忘记设 `NODE_ENV` 的真实生产部署过去会拿到 `development` —— 两种错法里代价更高的那一种。\n\n前提已对 `origin/main`(`a6b3ee7a1`)核实为**仍然成立**:`packages/runtime/src/http-dispatcher.ts:1296` 原文即 `resolveDiscoveryEnvironment(getEnv('NODE_ENV', 'development'))`,`doctorNodeEnv()` 原文即 `env.NODE_ENV || 'production'`。#5895 动过的 `packages/runtime/src/domains/meta.ts` 与本改动不相交。\n\n## 改了什么\n\n**1. runtime 生产者的缺省翻为 `production`(验收 ①)**\n\n`packages/runtime/src/http-dispatcher.ts` —— 只改 `getEnv` 的第二参数,`'development'` → `'production'`。已设置的合法拼法一律原样经共享映射表落枚举,不变。\n\n**#4828 的语义完整保留,且这是另一条规则。** 设了但认不出的拼法(`qa` / `preview` / `uat`)仍然在映射函数内部降级为 `development`,永远不会凭猜测宣称 `production`。缺省不是猜测 —— 是宿主选择不说,对「我在不在生产环境」这个问题,保守答案是「是」。两条规则各有独立用例钉住。\n\n**为什么落在调用方而不是共享映射函数。** 映射函数 `resolveDiscoveryEnvironment` 住在 `packages/spec`,裁定与派发单都把该包划在范围外;裁定点名的落点就是 `http-dispatcher.ts` 的 NODE_ENV 默认。代价如实写进了代码注释,没有藏:见下面「已知残留」。\n\n**2. `os doctor` 新增 `NODE_ENV` 行(验收 ②)**\n\n新增 `nodeEnvCheck()`,与既有 `resolveTenancyPostureOrFinding` 同形 —— 只有「未设置」才产生一行,已设置的环境报告与从前一致:\n\n```\n⚠ NODE_ENV             Not set — this environment is being treated as production\n```\n\n`--verbose` 展开 `fix`(走 #5403 的共享 `renderHealthCheckResult`,不另起格式):两条显式设置命令、「未设即按 production 解读」波及的四个读取方、以及一句「`NODE_ENV` 不能由 `.env*` 提供 —— 它决定加载哪些 `.env*`」。最后这句是必需的:doctor 的整个环境区块讲的都是 `.env*` 归属,不写清楚会直接把读者引向错误的修法。\n\n严重级是 `warning` 而非 `error`,并有用例钉住:`hasErrors` 是 doctor 唯一通往 `process.exit(1)` 的路径,未设 `NODE_ENV` 绝不该让任何人的健康检查转红。\n\n统一默认让缺省变得**安全**,但也让「疏忽」和「有意的生产部署」变得逐字无法区分;这一行是唯一能把两者分开的地方 —— 即裁定里的「让缺省状态响亮而非仅文档化」。\n\n**3. 文档**\n\n`content/docs/protocol/kernel/http-protocol.mdx` 里那张 `NODE_ENV` → `environment` 映射表,原本把「unset / anything else」合成一行。本 PR 拆成两行(缺省 → `production`;认不出的拼法 → `development`),并补上两句话说明为什么是两个不同的问题,以及本地 dev 不受影响的原因。\n\n`content/docs/deployment/environment-variables.mdx` **未动**:该页开篇即声明第三方标准变量名(明确点名 `NODE_ENV`)不在其收录范围,为此新开一行会与该页自身的收录规则冲突。\n\n## 本地 dev 流程影响面盘点(验收 ③)\n\n结论:**没有任何脚本需要显式补 `NODE_ENV=development`,本地开发行为不变。**盘点如下(逐条读源码核实,非推断):\n\n| 链路 | `NODE_ENV` 实际取值 | 是否受影响 |\n|:---|:---|:---|\n| `pnpm dev` / `dev:showcase` / `dev:crm` / `dev:todo` | `development` | 否 |\n| examples 各 app 的 `dev` 脚本(`objectstack dev`) | `development` | 否 |\n| `os dev` → spawn `serve --dev` | `development` | 否 |\n| `os start` | `production` | 否(本来就强制) |\n| 裸 `os serve`(无 `--dev`,未设 `NODE_ENV`) | 未设 | **是** |\n| 以库形式内嵌运行时 / 自建容器入口,未设 `NODE_ENV` | 未设 | **是** |\n\n关键事实:`os dev` 自己**不**设 `NODE_ENV`(`dev.ts:235-243` 有一段注释解释为什么不能设 —— oclif 的 tsx 源码加载器在 `NODE_ENV=development` 下会错处理 CJS 依赖里的 `.json` require),它靠 `--dev` 让子进程的 `serve` 就地设:`serve.ts:490-491` 在 `flags.dev && !process.env.NODE_ENV` 时执行 `process.env.NODE_ENV = 'development'`,且是在任何 runtime 模块被 import **之前**。所以整条本地链路上 `NODE_ENV` 早就是显式的 `development`,`/discovery` 仍报 `development`。\n\n`#5863` 新加的 `check:dev-prereqs` 前置已纳入盘点:`scripts/check-dev-prereqs.mjs` 是「工作区是否已构建」的前置门(按各包 `exports[\".\"]` / `main` 指向的 `dist/` 入口是否落盘判定),全文不读也不设 `NODE_ENV`,与本改动无交集。三条 `dev:*` 脚本与 `dev` 都以它开头,顺序不变。\n\n真正需要动手的只有上表后两行 —— 一个原本就没有显式表态的宿主,现在会被如实当作 production 广播。这正是本 issue 想要的结果,changeset 的迁移说明里写了这一类该怎么做。\n\n## 测试\n\n```\n$ npx vitest run src/discovery-schema-conformance.test.ts   # packages/runtime\n Test Files  1 passed (1)\n      Tests  21 passed (21)\n   ✓ NODE_ENV unset advertises production — never development (#5673)\n   ✓ NODE_ENV empty advertises production — never development (#5673)\n   ✓ NODE_ENV=qa/preview/uat/nonsense is an unrecognised spelling — still development, never production (#4828)\n\n$ npx vitest run src/commands/doctor-node-env-default.test.ts   # packages/cli\n Test Files  1 passed (1)\n      Tests  10 passed (10)\n\n$ pnpm --filter @objectstack/runtime test\n Test Files  102 passed (102)\n      Tests  1474 passed (1474)\n\n$ pnpm --filter @objectstack/cli test\n Test Files  86 passed (86)\n      Tests  854 passed (854)\n\n$ pnpm --filter @objectstack/cli --filter @objectstack/runtime typecheck\n packages/runtime typecheck: Done\n packages/cli typecheck: Done\n\n$ node scripts/check-nul-bytes.mjs\n check-nul-bytes: OK (scanned 5723 tracked text file(s); … no raw ASCII control bytes).\n```\n\n新增的 doctor 端到端用例带显式 60s 超时:真跑一次 `Doctor.run()` 要数秒(要 `git --version`、走工作区、加载 config),用 vitest 默认 5s 会红在超时而不是红在断言上。\n\n## 反向验证(验收 ⑤)\n\n**方向事先预测:撤掉默认翻转 → 新钉子转红,其余保持绿。** 因为旧默认只在 `NODE_ENV` 缺席时才被读到,任何设了值的用例都探测不到这次改动。\n\n把 `getEnv('NODE_ENV', 'production')` 改回 `'development'` 后实测:\n\n```\n× NODE_ENV unset advertises production — never development (#5673)\n  → expected 'development' to be 'production'\n× NODE_ENV empty advertises production — never development (#5673)\n  → expected 'development' to be 'production'\n✓ NODE_ENV=test / staging / production / qa advertises …          (4 条全绿)\n✓ NODE_ENV=qa / preview / uat / nonsense … never production        (4 条全绿)\n Tests  2 failed | 19 passed (21)\n```\n\n与预测逐条吻合:红的恰好是这次新增的两条缺省钉子,#4828 的八条拼法用例一条没动。随后已复原。\n\n## 已知残留(另开 #5936,本 PR 不动)\n\n`/discovery` 有**两个**生产者。本 PR 改的是 `@objectstack/runtime` 的 `HttpDispatcher.getDiscoveryInfo()`(服务 `/.well-known/objectstack` 与 dispatcher 挂载点);经 `@objectstack/rest` 暴露的 `MetadataProtocol.getDiscovery()`(`packages/metadata-protocol/src/protocol.ts:2900`)把真实缺省原样递给共享映射函数,而该函数对缺省仍返回 `development`,因此 REST 侧那份文档在「未设 `NODE_ENV`」这一格上仍是 `development`。\n\n裁定把落点限定在 runtime 侧,并把 `packages/metadata-protocol` 标为跨域文件面(「若必须改它就 STOP」);派发单进一步禁止改 `packages/spec` / `packages/metadata-protocol`。所以此处**如实记录**而不是绕道在别处补一个消费方默认:调用点注释、docs 的 Callout、changeset 三处都写明了这条残留,并指向 #5936。#5936 里给出了两个落点方案(默认收进共享映射函数 vs 在第二个生产者就地补)及倾向,交 maintainer 裁。\n\n同一处附带的文档面漂移也记在 #5936 里:`packages/spec/src/api/discovery.zod.ts` 映射表上方那行 `preserves the pre-existing getEnv('NODE_ENV', 'development') default` 对映射函数自身仍为真、对 runtime 调用方已不为真,须与 #5936 一并处理(该文件在本 PR 范围外)。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01DWUR56YsttL5sTF72Q75TQ)_"
+}

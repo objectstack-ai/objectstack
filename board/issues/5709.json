@@ -1,0 +1,35 @@
+{
+  "number": 5709,
+  "kind": "pull_request",
+  "title": "fix(plugin-email)!: EmailPersistence.insert 必须回传 row.id,改 id 响亮拒绝而非双发 (#5523)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T01:39:15Z",
+  "updated_at": "2026-08-06T01:56:38Z",
+  "closed_at": "2026-08-06T01:56:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T01:56:36Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5709",
+  "body": "Fixes objectstack-ai/objectstack#5523\n\n## 一、前提重验(基线 origin/main `782fc2994`)\n\n立单核验基于 `308c7095`,其后 #5169 / PR #5524 已合入同一文件,行号确实漂了。逐条重验:**前提成立**。\n\n- **机理成立**。`sendInternal()` 只在 `insert` 返回之后才把 `persistedId` 加进 `managedRowIds`(重构前 604-608 行),而 `email-plugin.ts` 的 afterInsert drain 钩子在 `engine.insert` **内部同步**跑、读的是 `hookCtx.result.id`。时序错位,`isServiceManaged(新 id)` 为 `false`,钩子据此认定「这是应用自己插的 outbox 行」并另投一次。\n- **需要更正 issue 的一处措辞**。issue 说「仓内唯一实现原样回传 `row.id`」——实际不是。`email-plugin.ts:485` 的实现回传的是**引擎自己的** id:\n  `return created?.id ? { id: String(created.id) } : { id: String(row.id) };`\n  只因 ObjectQL 尊重传入的 id,结果上才等于 `row.id`。这个区别对本 PR 有利:适配器**转发**而非洗白引擎的回答,所以「某个 driver 改 PK」这一情形对契约校验是**真实可达**的——本 PR 新增的插件级用例正是走这条真实路径复现双发的。\n\n**拆单前置条件核实(决策卡预记):** `EmailPersistence` 声明在\n`packages/plugins/plugin-email/src/email-service.ts`(原 119 行,现 146 行),**不在** `packages/spec`;全仓 `grep` 确认没有任何 `packages/spec` 文件引用它。故按预期**单 PR 完成,未触碰 spec**。\n\n## 二、实现(A 案:收紧契约)\n\n- **契约文档化**:`EmailPersistence` 与其 `insert` 补 TSDoc —— 必须回传 `row.id`,返回值**仅作确认**;并写明为什么是这个方向(id 由 service 铸造且在 insert **之前**就已承重:附件内容已上传到 `sys_email/attachments/{row.id}/…`),以及「存储要用自己主键」的正解(service id 留在 `id` 列,存储主键另开一列)。\n- **删除改 id 自由度**:`persistedId !== id` 分支、`extraManagedId` 变量、以及 #5169 在 `finally` 里对它的 release 一并删除。**一个 id,登记一次,释放一次。**\n- **`persistedId` 降级为 `rowPersisted` 布尔**。insert 的回答本来就只告诉我们「行有没有落地」(原 `rowId = persistedId ?? id` 恒等于 `id`)。留一个只可能等于 `id` 的字符串变量,等于邀请下一位读者把分歧分支加回来。\n- **校验落点 = 运行时首次 insert 返回处**,不是 wire 期。代码证据:`persistence` 是注入的对象(`options.persistence` / `setPersistence()`),`insert` 的返回值无法静态推断,wire 期最多只能查 `typeof insert === 'function'`——那不是本缺陷。按 PM 圈定的「这也可接受」执行,且错误**指名契约、指名实际返回值、在投递之前抛出**。\n- **校验刻意放在 insert 的 non-fatal catch 之外**。insert **抛错**是运维状况(服务照旧 warn + inline 投递兜住);insert **成功却改名**是接线缺陷。二者必须区分:若校验落进 catch 里,它会被降级成一条 warning 然后继续投递——正是要修的那个形状。\n- **判「值」不判「有无」**。回传不带 id(仅未加类型的 JS 实现可达,声明类型要求返回)时无从分歧,钩子读的是**已插入行**上的 id、恒为铸造的那个,双发不可达——照送不误。要修的缺陷是**不同的 id**。\n\n### 一处如实说明:钩子那一次投递无法被抢先\n\n钩子在 `engine.insert` **内部**同步注册的 `setTimeout(…, 0)` 里排程,即 `insert` 尚未返回给 service 时就已排好队。契约校验最早只能在 `insert` 返回后跑,**因此无法取消它**。A 案实际消掉的是 `send()` 自己那**第二**次投递:落地的那一行仍由钩子投递**一次**,同时调用方拿到指名契约的响亮报错。这是「不再双发」,而不是「一次都不发」——插件级用例把这个数字(1,而非 2)钉住了。\n\n另有一点刻意保留的行为:校验抛出时**不**回收已上传的附件字节。行确实落了地(只是主键被改),其 `attachments_json` 仍引用那些 key,删掉才是数据丢失。\n\n## 三、#5169 / PR #5524 测试资产逐条处置\n\n| 资产 | 处置 | 理由 |\n|:---|:---|:---|\n| `email-service.test.ts` — `releases an insert-ASSIGNED row id from the managed set too (#5169)` | **改判** → `rejects an insert that returns a DIFFERENT id, naming the contract, before delivering` | 它钉的是「泄漏被修」,而泄漏的来源(改 id 自由度)已不存在。同一场景,相反判决:拒绝、指名契约、且断言 `transport.send` / `update` **均未被调用**(不是先双发再报错),并断言 `finally` 仍释放了登记。 |\n| ↑ 该用例里的 `managedDuringDelivery`(「managed 窗口必须覆盖 `sent` 终态更新,不得为了释放而收窄」) | **迁移保留** | 这是一条独立事实,不能随场景一起消失。已移入同文件上方的**合规** persistence 用例(`marks its own row managed during send()`),行为覆盖不缩水。 |\n| `email-service.queue-delivery.test.ts` — `releases an insert-assigned id once the job is published (#5169)` | **改判** → `rejects an insert that returns a different id — and publishes NO job (#5523)` | 同上。队列模式**另有独立价值**:引用被替换 id 的 job 会让 **worker** 再发一次,所以拒绝必须落在 publish 之前——用例断言 `queue.published` 长度为 0。 |\n| ↑ 该用例另带的「队列模式提前 return 后仍释放登记」 | **已由既有用例覆盖,不重复** | 上方 `still marks its row managed during the insert` 已断言队列态 send 之后 `isServiceManaged(res.id) === false`。 |\n| `.changeset/email-managed-row-ids-release-persisted-id.md`(#5169 的 changeset) | **删除** | 它**尚未发布**(`plugin-email/CHANGELOG.md` 零处提及 5169),而描述的是本 PR 删掉的那条分支。两者同发会编出自相矛盾的 release note(「insert-assigned id 现已正确释放」+「insert 返回不同 id 直接拒绝」)。本 PR 的 changeset 已把 FROM 态完整叙述进去。**此项如维护者不认同,单独 revert 这一个文件即可。** |\n| `email-service.ts` 中 #5169 的解释性注释 | 随代码删除 | 注释描述的变量已不存在。 |\n\n## 四、新增覆盖\n\n- `email-service.test.ts`:改 id 被拒(且未投递、未终态更新、未泄漏登记);裸字符串确认形式**合规**时放行、**不同**时同样被拒(字符串形式不是绕过契约的口子);回传无 id 视为确认;**insert 抛错仍按 non-fatal 兜住**——最后这条与拒绝用例并排放,是为了钉住「校验不在 catch 里」:若有人把它移进去,拒绝用例会绿得毫无道理,而这条会同时暴露。\n- `email-plugin.outbox-sweep.test.ts`:新增引擎选项 `reKeyInsert`,让 `sys_email` insert 存进并回传另一个 id(自增 PK 的忠实模型),经**真实插件适配器**端到端复现 issue 的机理。transport 刻意做得**比 `setTimeout(0)` 慢**——「唯一的挡箭牌是竞态」那条 race 在这里被故意打输,正如真实网络 I/O。\n\n## 五、Changeset 级别\n\n写 `patch`,并在此说明取舍:该表面**目前无任何外部实现**(仓内实现转发引擎回答,ObjectQL 尊重传入 id),且**声明的 TypeScript 签名未变**(`Promise` 的 `{ id: string } | string` 联合保持原样;「必须等于 row.id」无法用类型表达,故落在 TSDoc + 运行时)。若维护者认为「收紧公开接口契约」应记 `minor`/`major`,改标签即可,正文的 FROM→TO 与一行修法已按 AGENTS.md 第 719 行要求写全。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BWS4heBoAitLmzCLhcYdbK)_"
+}

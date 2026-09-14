@@ -1,0 +1,35 @@
+{
+  "number": 5672,
+  "kind": "issue",
+  "title": "SDK 的 client.capabilities 声明为 WellKnownCapabilities,但两个 discovery 生产者填的是互不相交的键集",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T23:47:39Z",
+  "updated_at": "2026-08-06T09:29:19Z",
+  "closed_at": "2026-08-06T09:29:19Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5672",
+  "body": "发现于 #4828 的实施(界外发现,查重无命中故新开;**未认领**)。\n\n## 现象\n\n`#4828` 把 dispatcher 的顶层 `features` 正名为 `capabilities` 之后,两个 discovery 生产者都发 `capabilities` 了 —— 但**填的键集互不相交**:\n\n| 生产者 | `capabilities` 的键 |\n|:---|:---|\n| `getDiscovery()`(`packages/metadata-protocol`,REST `/discovery` 的上游) | `comments`、`automation`、`cron`、`search`、`export`、`chunkedUpload`、`transactionalBatch` —— 即 `WellKnownCapabilitiesSchema` 的成员 |\n| `getDiscoveryInfo()`(`packages/runtime/src/http-dispatcher.ts`,`/.well-known/objectstack`) | `search`、`websockets`、`files`、`analytics`、`ai`、`notifications`、`i18n` |\n\n只有 `search` 是两边都有的。\n\n而 SDK 侧 `packages/client/src/index.ts` 的 getter:\n\n```ts\nget capabilities(): WellKnownCapabilities | undefined {\n  const raw = this.discoveryInfo?.capabilities;\n  ...\n  return result as unknown as WellKnownCapabilities;\n}\n```\n\n它把结果**断言**成 `WellKnownCapabilities`。所以面对 dispatcher 供的 discovery,`client.capabilities.transactionalBatch` 的静态类型是 `boolean`、运行时是 `undefined` —— 类型在说谎。`comments` / `cron` / `export` / `chunkedUpload` 同理。\n\n`DiscoverySchema.capabilities` 本身是开放的记录类型,所以两边都合法,schema 不会红。\n\n## 为什么不在 #4828 里一起修\n\n#4828 的裁定是「正名取 `capabilities`」,没有裁定两个生产者的**能力词汇表**该不该统一 —— 那是一个新的契约决策(要么让 dispatcher 也按 `WellKnownCapabilities` 词汇表作答,要么承认两套词汇并在 schema 里把它表达出来,要么让 SDK 的 getter 不再撒这个类型谎)。#4828 只是把分裂从「一个发 `features` 一个发 `capabilities`」收敛成「都发 `capabilities`」,分裂的**深度**减小了但没有消失。\n\n需要说明的是:这不是 #4828 引入的回归。在此之前 dispatcher **完全不发** `capabilities`,`client.capabilities` 对 dispatcher 宿主返回的是 `undefined`(每个标志位都拿不到)。#4828 之后至少 `search` 等 7 个键有了真实答案。只是分歧现在更容易被看见,也更容易被误用。\n\n## 决策点(需要维护者定,不要猜)\n\n1. dispatcher 是否应当按 `WellKnownCapabilities` 词汇表作答?它没有 engine/registry 访问权,算不出 `comments`(需要 `sys_comment` 对象)和 `transactionalBatch`(需要 `engine.transaction`),所以「照搬」并不现成。\n2. 还是承认「能力词汇随生产者而不同」,并把这一点写进 `DiscoverySchema.capabilities` 的声明与文档,同时把 SDK getter 的返回类型改成诚实的(部分可用)形状?\n\n任一方向都会改动公开契约形状,故不猜。\n"
+}

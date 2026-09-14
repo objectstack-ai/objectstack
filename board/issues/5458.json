@@ -1,0 +1,37 @@
+{
+  "number": 5458,
+  "kind": "issue",
+  "title": "docs(ui): 两篇 UI 文档说「表单分组派生自 field.group」——漏了 fieldGroups 声明这个授权来源(#5443 的文档面同款)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T12:47:23Z",
+  "updated_at": "2026-08-06T05:10:46Z",
+  "closed_at": "2026-08-06T05:10:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5458",
+  "body": "在 #5443 / PR(`claude/issue-5443-contact-fieldgroups`)期间发现,超出该单文件面(PM 分诊把该单限定在 `examples/app-showcase` 的两个文件 + 测试),单独记录。已在 `origin/main` `01c0baef9` 上核对。\n\n## 现象\n\n`deriveFieldGroupLayout`(`packages/spec/src/data/field-group-layout.ts`,ADR-0085 §5)是渲染器与 i18n walker 共用的唯一派生实现,它的语义是:**只有 `group` 命中对象 `fieldGroups[].key` 的字段才成组**,其余落进末尾未分组桶;一个 `fieldGroups` 都没声明时,整个函数直接 `return null`(第 124 行 `if (declared.length === 0) return null;`),分组根本不适用。`packages/lint` 的 `field-group-undeclared` 规则就是据此报警的。\n\n两篇 UI 文档把这条语义说成了「`field.group` 自己就够」:\n\n1. `content/docs/ui/create-vs-edit-form.mdx` 第 31–33 行\n   - 小节标题:「### 2. The default (edit) form derives from `field.group`」\n   - 正文:「The full edit form materialises each `field.group` into a section. You can omit it entirely and let the platform derive an equivalent grouped form.」\n   - 全文没有出现 `fieldGroups`。读者照做(只写 `group`、省掉 `form`)拿到的是一张平铺表单。\n\n2. `content/docs/ui/field-grouping-and-order.mdx` 第 28 行及其代码样例(第 32–34 行)\n   - 「**1. 语义分组 —— `field.group`(在对象上)** …… auto-generated forms use it as the **default** sectioning」\n   - 紧跟的样例只写了三个带 `group:` 的字段,没有 `fieldGroups`,即「照抄即无效」的样例。\n   - 该文件全文同样没有出现 `fieldGroups`(`grep -n fieldGroups content/docs/ui/field-grouping-and-order.mdx` 无输出)。\n\n这与 #5443 是同一个谎言的两层:#5443 是示例代码的注释,本单是引用那份示例的文档正文。#5443 已经把示例修真(补 `fieldGroups` + 校准注释),但文档面未动 —— PD #10 推论(不要宣传运行时并不提供的能力)。\n\n## 复现\n\n```\ngrep -n \"fieldGroups\" content/docs/ui/create-vs-edit-form.mdx       # 无输出\ngrep -n \"fieldGroups\" content/docs/ui/field-grouping-and-order.mdx  # 无输出\nsed -n 117,125p packages/spec/src/data/field-group-layout.ts        # declared.length === 0 -> return null\n```\n\n## 建议方向(不代拍)\n\n两处都补一句「派生以对象的 `fieldGroups` 声明为授权来源;未声明的 `group` 等同于没写 `group`,`os lint` 报 `field-group-undeclared`」,并把 `field-grouping-and-order.mdx` 的代码样例补上对应的 `fieldGroups` 数组(可直接对齐 #5443 之后的 `examples/app-showcase/src/data/objects/contact.object.ts`,该文件正是这两篇文档「延伸阅读」里链接的实现)。\n\n另可一并核对:`create-vs-edit-form.mdx` 里带 `{/* os:check */}` 的代码块是否被某个文档样例门禁实际编译/校验 —— 如果是,补 `fieldGroups` 时要一并让门禁通过。"
+}

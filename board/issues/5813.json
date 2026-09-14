@@ -1,0 +1,35 @@
+{
+  "number": 5813,
+  "kind": "issue",
+  "title": "plugin-auth: `convertWhere()` 对 `not_in` / `starts_with` / `ends_with` 没有分支,谓词被整条丢弃 —— 认证路径上的过滤放大",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T06:11:20Z",
+  "updated_at": "2026-08-06T08:43:55Z",
+  "closed_at": "2026-08-06T08:43:55Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5813",
+  "body": "实测于 `origin/main@1624f4a`,在实施 #5710(同一个函数的 `contains` 支)时发现。**与 #5710 不同类**:#5710 是「译错了」(`$regex` 把字面值当模式),本单是「根本没译」—— 谓词消失,过滤**放大**。\n\n## 测到的东西\n\n`packages/plugins/plugin-auth/src/objectql-adapter.ts` 的 `convertWhere()` 是一串 `if / else if`,只覆盖 `eq` / `ne` / `in` / `gt` / `gte` / `lt` / `lte` / `contains`。\n\nbetter-auth 的算子词表(`@better-auth/core/src/db/adapter/index.ts:308-320`)是:\n\n```\neq, ne, lt, lte, gt, gte, in, not_in, contains, starts_with, ends_with\n```\n\n对不上的三个 —— **`not_in`、`starts_with`、`ends_with`** —— 落在链尾之外,`filter` 里**不写任何键**。没有 `else` 兜底,没有告警。一个只带这类条件的 `where` 因此编成 `{}`:\n\n- `findMany` / `count` 变成**全表**(受 `limit` 截断);\n- `update` / `delete` / `consumeOne` 走的是「先 `findOne(filter)` 再按 id 写」,`{}` 让 `findOne` 返回**任意一行**(通常是第一行),于是写到了错误的记录上。\n\n## 活体调用方\n\n`GET /api/v1/auth/admin/list-users`(已挂载,`auth-route-ledger.ts:161`)直接把查询参数推进 `where`(better-auth `dist/plugins/admin/routes.mjs:358-368`):\n\n- `searchOperator` 的枚举是 `contains | starts_with | ends_with` —— 后两个命中本缺陷;\n- `filterOperator` 的枚举**就是整张 `whereOperators` 表** —— 含 `not_in`。\n\n所以 `?searchValue=abc&searchOperator=starts_with` 今天返回的是「全部用户」而不是「以 abc 开头的用户」,`?filterField=email&filterOperator=not_in&filterValue=...` 同理不排除任何人。管理台的用户检索是它的主要消费者。\n\n## 为什么这是缺陷而不是「未实现的可选能力」\n\n丢一个谓词不是把结果**变窄**,是**变宽**;在读路径上等于放大可见集合(#3948 反复论证过的形状,driver-memory 的匹配器 `default:` 臂和 objectql 的 `having` 都为此改成了拒收)。这里的放大还发生在**身份表**上。\n\n## 修法(建议)\n\n三个算子在 `FILTER_OPERATORS` 里都有现成对应,一一直译即可:\n\n| better-auth | ObjectQL |\n|:--|:--|\n| `not_in` | `$nin` |\n| `starts_with` | `$startsWith` |\n| `ends_with` | `$endsWith` |\n\n同时把链尾的静默补上:未识别的算子应当**响亮拒收**(抛错),而不是写不出键就算了 —— 否则 better-auth 下次加算子时,这个洞会以同样的方式重开一次。\n\n## 相关\n\n- #5710(同一函数的 `contains` 支译成裸 `$regex`;已提 PR,本单**不**在其范围内)\n- #4706 / #5701 / #5702(算子名实不符母单 / 契约半边 / driver 半边)\n- `starts_with` / `ends_with` 的大小写语义按 #5701 Q2=A 是敏感的,与 `$startsWith` / `$endsWith` 契约一致。\n"
+}

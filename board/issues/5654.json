@@ -1,0 +1,34 @@
+{
+  "number": 5654,
+  "kind": "issue",
+  "title": "`register()` 对「声明 `capabilities.write` 却没有 `save` 方法」的 datasource loader 同样静默跳过 —— #5276 只堵了 delete 一侧,save 一侧的同形缺口还在",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T22:07:57Z",
+  "updated_at": "2026-08-06T05:31:51Z",
+  "closed_at": "2026-08-06T05:31:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5654",
+  "body": "发现于 #5276(PR #5652)实现期,**不在该单的裁决范围内**(PM 明确把方向 1+2 收在 `delete` 上),故单独立卡。**当前无人踩到**,按 observation-class 归档:挂 `finding`,不挂 `pm:queue`,留给分诊决定。\n\n## 事实\n\n`packages/metadata/src/metadata-manager.ts` 的 `register()` 持久化循环:\n\n```ts\nfor (const loader of this.loaders.values()) {\n  if (loader.save && loader.contract.protocol === 'datasource:' && loader.contract.capabilities.write) {\n    await loader.save(type, name, data);\n  }\n}\n```\n\n`loader.save &&` 排在最前面:一个声明了 `protocol: 'datasource:'` + `capabilities.write: true` 却**没有 `save` 方法**的 loader,会被**一声不吭地跳过**——没有 warn,没有 error,什么都没有。随后 `register()` 照常写内存 registry、失效 listCache、广播 `created`/`updated` 事件并 `notifyWatchers`,调用方被告知写入成功。\n\n这与 #5276 描述的 delete 侧缺口是**同一个形状**:`capabilities.write` 声明了能力,执行期却在方法缺席时静默降级,而不是拒绝。区别只在于失败方向——delete 侧丢的是删除,save 侧丢的是持久化(内存 registry 仍有,所以本进程内读得到,重启后消失)。按 AGENTS.md「Degradation log levels」的判据,这属于耐久性/一致性降级(系统看起来一切正常,声称已持久化的东西没落地),连 `warn` 都不该是,应该是拒绝或 `error`。\n\n## #5652 之后的不对称\n\n#5276 的修复(PR #5652)在 `registerLoader()` 上加了门禁:`protocol: 'datasource:'` 且 `capabilities.write: true` ⇒ 必须实现 `delete()`,否则响亮拒绝注册。门禁刻意只覆盖 delete 一侧(PM 裁决的范围),于是现在的状态是:\n\n- 同一个 `capabilities.write` 声明,**delete 侧是 declared = enforced**(注册期就炸);\n- **save 侧仍是 declared ≠ enforced**(注册通过,写入静默丢失)。\n\n如果要收口,最小改动就是在 `registerLoader()` 的同一个校验函数里把 `save` 也列为必需方法(`assertWritableLoaderCanDelete` 相应改名),错误信息同风格。**但这会再次收紧公共接口 `MetadataLoader`**(第三方 loader 的实现面),按仓规范不该由实现方擅自决定,所以只填卡。\n\n## 为什么现在没人踩到\n\n全仓 `protocol: 'datasource:'` 的 loader 只有 `packages/metadata/src/loaders/database-loader.ts`,它 `save` 和 `delete` 都有。仓内其余 loader 都不是 `datasource:` 协议(`MemoryLoader` = `memory:`、`FilesystemLoader` = `file:`、`RemoteLoader` = `http:`),`register()` 从不写它们。所以今天任何用户路径都走不到这个静默分支;它是给第三方/未来 loader 和「AI 照着接口写一个新 loader」留的坑——`save?` 在接口上是可选的,不实现完全合法,而声明 `write: true` 时(在 #5652 之后)只有 `delete` 会被拦下。\n\n严重度不由我判(objectstack#4949:填卡时判的严重度两个方向都不可靠),这里只把事实与范围写清楚。\n\n相关:#5276(delete 侧,已由 PR #5652 关闭)、#5259(unregister 的失效/删除顺序与失败上报)。\n\n发现于会话 `session_01V7WetGmnfoXNn8cLieKKmx`;未认领,留给分诊。\n"
+}

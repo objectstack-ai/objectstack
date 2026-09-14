@@ -1,0 +1,35 @@
+{
+  "number": 5504,
+  "kind": "issue",
+  "title": "[17.0-rc2验收] REST create/update 回包的 record 缺所有 formula 字段(GET/LIST 有)—— applyFormulaPlan 只挂在 find/findOne 上,写路径回包不做公式水合",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T14:30:31Z",
+  "updated_at": "2026-08-06T02:18:42Z",
+  "closed_at": "2026-08-06T02:18:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5504",
+  "body": "## 现象\n\n`POST /data/:object` 与 `PATCH /data/:object/:id` 回包里的 `record` **不含任何 formula 字段**(键整个缺失),而同一记录随后的 GET / LIST 都有值 —— read-your-write 不一致。\n\n## 复现步骤\n\n```bash\nPOST /api/v1/data/crm_account {\"name\":\"PatchEcho\"}\n# → 201,record.display_title === undefined(键缺失)\nGET /api/v1/data/crm_account/<id>\n# → display_title = \"ACC-000016 - PatchEcho\"  ✅\nPATCH /api/v1/data/crm_account/<id> {\"segment\":\"growth\"}\n# → 200,record.display_title 仍缺失\n```\n\n多公式对象更明显 —— `crm_forecast` 的 POST 回包 `expected_amount` / `attainment_pct` / `coverage_ratio` 全部缺失,GET/LIST 均正常求值(30000 / 10 / 0.556)。两次独立运行、多个对象(crm_account、crm_forecast、crm_opportunity_line_item)均复现。\n\n## 期望 vs 实际\n\n- 期望:写操作回包的 `record` 与紧接着的 GET 等价(回包自称是 record,消费方会直接拿来渲染);\n- 实际:回包是入库文档本身,formula(虚拟列)一个都没有,客户端必须额外再 GET 一次。\n\n## 落点分析\n\n`packages/objectql/src/engine.ts`:`applyFormulaPlan` 只有两个调用点 ——\n\n- L4651(`find` 结果)\n- L4783(`findOne` 结果)\n\ninsert / update 的返回路径不经过 formula plan,REST 层(`packages/rest/src/rest-server.ts` POST/PATCH handler → `protocol.createData/updateData`)也原样透传。\n\n## 影响\n\n- 对 `nameField` 指向 formula 的对象(HotCRM 里 account/product/case/campaign/quote/knowledge_article/forecast/lead/contact 全是),create 后直接用回包渲染记录标题会得到空;\n- 集成方在写后需要多一次往返才能拿到派生值,且这种缺失是静默的(键不存在,不是 null),容易被当成「字段没配」误排查。\n\n体验/一致性问题,p2 量级。\n\n## 环境\n\n`hotcrm@0899b4f + @objectstack 17.0.0-rc.2`(REST 验收,admin token,file:SQLite)\n\n查重:搜过 `formula create response`、`write response record formula`、`formula fields missing/undefined/hydrate`,两仓 open+closed 无既有单(#1979 是把 context 穿进 applyFormulaPlan 的读路径工作项,#1530/#3306 是求值本身的缺陷,均不覆盖「写回包不水合」)。"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 5725,
+  "kind": "pull_request",
+  "title": "feat(spec,service-automation,devx): 未声明 resumeAuthority 的 pausing 节点类型不再静默 fail-open (#5561)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T02:08:36Z",
+  "updated_at": "2026-08-06T02:31:46Z",
+  "closed_at": "2026-08-06T02:31:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T02:31:45Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5725",
+  "body": "Refs objectstack-ai/objectstack#5561\n\n维护者 2026-08-06 裁决的**第一步(修正案 C + A,均非 breaking)**。第二步(缺失即 fail-closed)仍挂 #5561 等 breaking 窗口,本 PR 不做。\n\n## 前提重验(origin/main @ 6ddb2ec4a)\n\n- `ActionDescriptor.resumeAuthority` 确实 `.default('any')`(`packages/spec/src/automation/node-executor.zod.ts`);issue 作者记忆中的 **`supportsPause` 字段真实存在**(同 schema,`z.boolean().default(false)`),不是误记。\n- 消费侧唯一读者是 `resolveResumeAuthority`(`engine.ts`,行号已从立单时的 :2575 漂到 :2766),其 `descriptor?.resumeAuthority ?? 'any'` 是本 PR 刻意**不动**的那一行。\n- **探测层为何必须动 spec**(第一轮 needs_decision 的证据,复述以便审阅):`.default('any')` 让「未声明」在注册边界上不可表示 —— 运行时侧,未声明与显式 `'any'` 经 `defineActionDescriptor` 后逐字节相同(zod 4.4.3 实测 `distinguishable? false`);类型侧,`z.infer` 让该字段在输出类型里必填(tsc TS2741),所以连「运行时 undefined」都不是正当信号。四条候选路里 A 是唯一干净且非 breaking 的,C 与之互补且零 spec 依赖。\n\n## A —— spec 一行 + 声明补齐 + 注册告警\n\n1. `resumeAuthority` 由 `.default('any')` 改 `.optional()`。**运行时语义零变化**:`resolveResumeAuthority` 的 `?? 'any'` 本来就在做默认值的事,未声明者今天依旧可被通用 resume 路由继续,只是不再无声。第二步因此收缩成这一个表达式,不再需要 schema 迁移。\n2. `registerNodeExecutor` 新增 `warnIfResumeAuthorityUndeclared`:`supportsPause === true` 且 `resumeAuthority === undefined` → 按类型去重、每 engine 实例一次的响亮 warn(去重字段沿用同包 #4792 `nodeTypeSealOmissionWarned` 的 per-instance 先例)。文本单行自足、写明两个合法值,并明确「显式声明 `'any'` 即可消音且不改变任何行为」—— 否则会把本就该开放的节点逼向 `'service'`。告警只陈述**该描述符缺了声明**这个作者时刻就固定的静态事实,不读任何注册表、不对「本次启动会不会有人后来注册」下判词,所以 `check:startup-registry-verdict` 绿(实测),与 #4792 同款约束。\n3. **四个 builtin 补显式声明**,各自理由写在代码注释里:`screen` / `wait`(通用路由本就是它们的正门)、`subflow` / `map`(闸门会顺 `subflow:` / `map:` 关联走到子 run 判词,#3853,所以本节点这个 `'any'` 不是最终生效的权威 —— 显式写出来才能让「告警在这里沉默」是决定而非缺口)。\n\n### 告警今天会点名的现役类型清单\n\n| 类型 | 位置 | 声明 | 告警 |\n|---|---|---|---|\n| `screen` | `builtin/screen-nodes.ts` | 本 PR 补 `'any'` | 不点名 |\n| `wait` | `builtin/wait-node.ts` | 本 PR 补 `'any'` | 不点名 |\n| `subflow` | `builtin/subflow-node.ts` | 本 PR 补 `'any'` | 不点名 |\n| `map` | `builtin/map-node.ts` | 本 PR 补 `'any'` | 不点名 |\n| `approval` | `plugin-approvals/src/approval-node.ts` | 原有 `'service'` | 不点名 |\n| `approval_revise` | `plugin-approvals/src/approval-revise-node.ts` | 原有 `'service'` | 不点名 |\n\n即**落地后零点名**,只捕未来遗漏。这个零由一条测试钉住,且同一条测试同时断言「四个 pausing builtin 确实被注册且都声明了 `'any'`」—— 否则零点名可能是「什么都没注册」的空绿。\n\n## C —— 仓内静态门 `check:resume-authority-declared`\n\nAST(TypeScript compiler API,与 `check-engine-double-contract.mjs` 同路数)扫 `defineActionDescriptor({...})` 字面量:`supportsPause: true` 且缺 `resumeAuthority` → CI 红,指名文件、行号、类型与两种修法。为什么与运行时告警并存:告警说给读服务器日志的人听(第三方插件的正确频道,而本仓今天一个都没有),而 **#3823 是我们自己仓内的漏声明,该告诉作者的时刻是 PR**。\n\n三个刻意的边界(都写进脚本头与 `--self-test`):\n\n- **只读顶层属性**。`screen` 的描述符嵌着上百行 configSchema JSON Schema,其 `properties` 里可以出现任何同名键 —— 那是作者数据,不是能力声明。正则无法区分,所以读结构。自测两侧都钉了。\n- **只扫发货源码,测试夹具在范围外**。仓内今天有三个未声明的 pausing 夹具,全部是刻意的 —— 尤其 `resume-authority-declaration.test.ts` 必须构造未声明的描述符才能测告警本身;把夹具纳入门会让被测机制无法被测。(与只扫测试的 `check-engine-double-contract.mjs` 正好互为镜像:每个门的范围是它的主体,不是全仓扫射。)\n- **DISCOVERED 不变量**:扫到 0 个描述符判为扫描坏了而非仓库干净(#4868 家族)。\n\n管线接线照最近先例(#5694):`package.json` 的 `check:resume-authority-declared` 先跑 `--self-test` 再跑扫描,`lint.yml` 的 lint job 里紧随 `Engine test-double contract gate`。\n\n## regen 生成物 + 契约面存活核验\n\n- `pnpm --filter @objectstack/spec check:generated` 十项全绿,**唯一实际 stale 的是 `check:docs`**,`--fix` 只重生成了它:`content/docs/references/automation/node-executor.mdx` 一行(`resumeAuthority` 由 `✅` 变 `optional` + 新描述)。\n- `check:api-surface` 与 `check:authorable-surface` 在**真实重建 dist 之后**依旧绿 —— 实测结论:`api-surface.json` 记录导出符号,不记录 schema 成员的可选性(`dist/node-executor.zod-*.d.ts` 已确实变成 `z.ZodOptional`),`authorable-surface.json` 记录键路径而键仍在。**我在决策卡里预估的 api-surface 记账成本实测为零**,如实更正。\n- 序列化面:`RuntimeProtocolSchema.actions` 对未声明者不再带该键。三仓实测零读者(framework 内唯一读者是 `resolveResumeAuthority`;objectui 与 cloud 对 `resumeAuthority` / `supportsPause` / `isAsync` 全仓零命中)。\n- 顺带说明:任何 spec build / check 都会让 `gen:schema` 把 `authorable-surface.base.json` 的 `baseRev` 重锚到当前 merge base 并带进别人已 merge 的键。那不是本 PR 的改动,已 revert;还原后 `check:generated` 仍全绿。\n\n## #5703 的缝(已在三处写明)\n\n`supportsPause` 自身是运行时零强制的声明:暂停的事实来自 `execute()` 返回 `suspend: true`(`engine.ts` 的 `if (result.suspend)`),#3801 闸门也只读 `resumeAuthority`。所以**一个 `execute()` 会暂停、却把 `supportsPause` 留在默认 `false` 的执行器,告警与静态门都看不见,而且照样 fail-open**。这一点写进了:门的报错尾注、`warnIfResumeAuthorityUndeclared` 的 TSDoc、spec 里 `supportsPause` 的字段注释。#5703 走正常分诊。\n\n## 类型债台账的一处如实更正\n\n`scripts/check-type-check-coverage.mjs` 里 `@objectstack/service-automation` 的 DEBT 注记原文是「TS2741: engine.test.ts misses resumeAuthority」。`.optional()` 之后实测那两处 TS2741 **没有消失而是转移**了:同两行字面量同时也漏 `handlerContract`,TS 一次只报一个,于是现在报 `handlerContract`。**计数 2 不变**,我只更正了归因(这句话是被本 PR 改坏的,所以归我修)。另有一处独立事实:该包实测 raw 总数为 5(多出 3 处 `nested-region-parity.test.ts` 的 TS2341,与本 PR 无关、`main` 上即如此),而台账冻结值是 2 —— 该门不重跑 tsc 所以不红;我没有动那个数字(抬高冻结值会把别人的债洗成基线),另行记到 #4311。\n\n## 验证\n\n- `@objectstack/spec`:317 files / 8083 tests 全绿(含新增 2 条 + 替换 1 条 resumeAuthority 用例)。\n- `@objectstack/service-automation`:62 files / 741 tests 全绿(新增 `resume-authority-declaration.test.ts` 11 条;`resume-authority-gate.test.ts` 19 条零回归)。\n- `@objectstack/plugin-approvals`(消费半径):19 files / 446 tests 全绿。\n- `typecheck`:`spec`(含 `check:test-typecheck`,债账 79 files / 691 errors 不变)、`plugin-approvals`、`runtime` 三包全绿。\n- 门:`check:resume-authority-declared`(自测 + 扫描 6/6)、`check:startup-registry-verdict`、`check:adr-anchors`、`check:nul-bytes`、`check:durability-log-level`、`check:type-check-coverage` 全绿;改动文件 eslint 干净;控制字符自查(`grep -naP` 覆盖 gate 盲区)零命中。\n\n### 反向验证(先预测方向,后实测)\n\n1. **删掉一个 builtin 声明 → 门转红**:预测红并指名该类型。实测 `wait-node.ts:157` 被点名、exit 1、计数 6→5。已还原。\n2. **还原 spec 的 `.default('any')` → 告警不可达**:预测「计数类用例转红、沉默类用例保持绿但**是空绿**」。实测正是如此 —— 11 条里 5 条红(全部是数告警条数的),6 条绿;其中「零点名」那条也保持绿,因为四个 builtin 已显式声明,所以它钉的是零点名这个事实,机制由那 5 条钉。spec 侧 2 条(`toBeUndefined` / `Object.hasOwn` 可区分性)同时转红。已还原并重建 dist 复绿。\n3. **C 对 A 的独立性**:同一次还原下 `check:resume-authority-declared` **保持绿**,如预测 —— 它读源码字面量,不读 schema 默认值。这也正是两者并存的意义。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BWS4heBoAitLmzCLhcYdbK)_"
+}

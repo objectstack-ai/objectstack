@@ -1,0 +1,35 @@
+{
+  "number": 5710,
+  "kind": "issue",
+  "title": "plugin-auth: better-auth 的 `contains` 被译成裸 `$regex`,用户输入当正则求值 —— 且是 `$regex` 退役唯一挡路的生产者",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T01:44:27Z",
+  "updated_at": "2026-08-06T06:47:49Z",
+  "closed_at": "2026-08-06T06:47:49Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5710",
+  "body": "实测于 `origin/main@eb26126d5`,在核验 #5701(#4706 裁决 B 案契约半边)的前置前提时发现。**独立缺陷,不依赖任何裁决即可修;同时它是 #5702「`$regex` 响亮拒收」落地前必须先排掉的那块。**\n\n## 测到的东西\n\n`packages/plugins/plugin-auth/src/objectql-adapter.ts:137`,`convertWhere()` 的最后一支:\n\n```ts\n} else if (condition.operator === 'contains') {\n  filter[fieldName] = { $regex: condition.value };\n}\n```\n\n`condition.value` 是 better-auth 传下来的**未转义**比较值,直接坐进 `$regex` 的模式位。它随后的命运按 driver 分叉:\n\n| driver | 求值方式 | 结果 |\n|:--|:--|:--|\n| `driver-memory` | `new RegExp(target, condition.$options \\|\\| '')`(`memory-matcher.ts:209-213`) | **当真正则跑** —— 元字符全部生效 |\n| `driver-sql` / `driver-sqlite-wasm` | 编成子串 `LIKE '%v%'`(`sql-driver.ts:6511`,走 `applyLike`,`%`/`_`/`\\` 有转义) | 子串匹配,元字符是字面量 |\n| `driver-turso` | 同上(local 继承 SqlDriver;remote 见 `remote-transport.ts:1258`) | 子串匹配 |\n\n也就是说 better-auth 的一个 `contains` 查询:\n\n- 在内存 driver 上,`a.b` 会命中 `axb`(`.` 是通配),`^x` 会锚定,`café` 之类无元字符的值才碰巧正确;\n- 在 SQL 上,同样的值是纯子串;\n- 模式非法时(如值里带单个 `(`),`memory-matcher` 的 `catch` 返回 `false` —— **静默不匹配**,不报错。\n\n这正是 #4706 正文描述的缺陷形态,只是发生在**认证路径**上,而且比较值来自用户输入。app 级测试若跑在内存替身上、生产跑 SQL,两边结果不同(hotcrm#630 的形状)。\n\n## 为什么它同时挡着 #5702\n\n`driver-sql` / `driver-turso` / `driver-memory` / `objectql`(`having-filter.ts:37`)四处的 `$regex` 支持**都是为这一个生产者存在的**,代码里已写明。`driver-memory/src/filter-refusal.ts:154-158` 原话:\n\n> **`$regex`** —— not in `FILTER_OPERATORS`, but really produced: plugin-auth's ObjectQL adapter emits `{ field: { $regex: value } }` for a `contains` search. ... **Refusing it here would break a live producer.**\n\n所以 #5702 的「校验期响亮拒收 `$regex`」在这一行翻转之前落地,会直接打断 better-auth 的认证查询。**顺序:先本单,后拒收。**\n\n## 建议的修法(contract-first)\n\n把这一支改成词表里真有的算子:\n\n```ts\n} else if (condition.operator === 'contains') {\n  filter[fieldName] = { $contains: condition.value };\n}\n```\n\n`$contains` 在 `FILTER_OPERATORS`(`spec/src/data/filter.zod.ts:957-968`)里,五后端都实现,且 SQL 侧的 `applyLike` 已带 `%`/`_`/`\\` 转义与显式 `ESCAPE` —— 元字符回归字面量,正是 better-auth 的 `contains` 本意。\n\n一处需要在实施时确认的语义差:`$contains` 的**大小写**行为今天各后端不一(memory/formula 敏感、SQLite/turso ASCII 不敏感、mongo 不敏感、PG 敏感;spec 在 `filter.zod.ts:139` 明写「Case sensitivity should be handled at backend level」)。相对现状而言这个差**不是本单引入的** —— 裸 `$regex` 在 memory 上本来也是大小写敏感的,所以翻转对该 driver 是等价的;但若 #5701 的 Q2(是否同批钉死 `$contains` 大小写语义)有裁决,本单应与之对齐。\n\n## 验证建议\n\n翻转后应有一条 pin:一个带元字符的比较值(如 `a.b`)经 better-auth `contains` 路径,在内存 driver 上**不**命中 `axb` —— 反向验证方向是「先红后绿」(翻转前该断言红,因为裸 `$regex` 会命中)。\n\n相关:#4706(算子名实不符母单)、#5701(契约半边)、#5702(驱动半边拒收)。"
+}

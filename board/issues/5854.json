@@ -1,0 +1,35 @@
+{
+  "number": 5854,
+  "kind": "pull_request",
+  "title": "fix(spec): 根参考索引 `content/docs/references/index.mdx` 纳入生成,不再无主烂尾 (#4759)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T08:35:00Z",
+  "updated_at": "2026-08-06T11:03:33Z",
+  "closed_at": "2026-08-06T11:03:31Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T11:03:31Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5854",
+  "body": "Fixes #4759\n\n按 PM 裁决走**方向 1(纳入生成)**。`content/docs/references/index.mdx` 从此由 `packages/spec/scripts/build-docs.ts` 生成,手写导语保留在**生成器源码**里,协议总表整表生成。\n\n## 先验证前提(结论:成立,且比正文写的更烂)\n\n正文的「:658 preserve 逻辑」确实已过期 —— #5831 重写后 `build-docs.ts` 里**根本没有 preserve 机制**,那两行(旧 :565)只是一段没执行任何逻辑的注释,根 `index.mdx` 是**从未被 `emit()` 过**,整个文件在 sink 的比对面之外。这比「保留不重生」还弱一层:它不是被豁免,是压根没进过门。\n\n正文点的四行,逐条复核:\n\n| 断言 | 复核 |\n|:--|:--|\n| `trigger-registry.zod.ts` 已删、行还在 | ✅ `src/automation/` 无此文件,行在 |\n| `sync.zod.ts` 已删且 `SyncSchema` 从来不是导出 | ✅ 文件无;`sync-retirement.test.ts` 是它留下的墓碑 |\n| `workflow.zod.ts` 不存在 | ✅ `src/automation/` 无此文件 |\n| `ETLSchema` 不存在(实为 `ETLPipelineSchema`) | ✅ `etl.zod.ts` 导出 `ETLPipelineSchema`,发布名 `ETLPipeline` |\n\n派发单点的三处烂账同样复核成立(头部 133 / 导航表 169 / Data 行 19 对小标题 18;`shared/connector-auth.zod.ts` 不在 `shared/index.ts` 导出,`json-schema/shared/` 无对应产物)。**另外扫出两类正文与派发单都没点到的**:\n\n- 一整节 **Hub Protocol(9 行)**,对应 `src/hub/` —— 这个目录早已整删,`scripts/protocol-map.test.ts` 的文件头注释里记的就是同一场事故(「an entire section (`src/hub`) had been deleted wholesale」)。同一坑,另一张表,那张有门禁所以被修了,这张没有所以还在。\n- **4 张 Next Steps 卡片里有 2 张指向不存在的页**(`/docs/getting-started/architecture`、`/docs/guides/cheatsheets/quick-reference`),外加一处 `[…]((/docs/protocol/objectql))` 双括号坏链。\n\n## 改法\n\n**每一格都从「决定生成哪些参考页」的那张表来。** 生成分类页时把 `page slug -> schema 名` 的分组存进 `categoryPageSchemas`,根索引直接渲染它。于是:删掉一个 `.zod.ts` 不可能留下残行,spec 不发布的名字不可能出现,任何一个数字都是它所统领的行的 `reduce` 而不是旁边另记的一笔账 —— 133/169/19-对-18 这类互相矛盾没有地方可住了。成品索引了全部 **1609 个已发布 schema**,对应 **201 个声明它们的文件**。\n\n**「用途」列不复刻。** 现有文案是逐行手写、不可派生的。我实测过唯一像样的派生源(文件级 JSDoc):`getFileDescription()` 取的是全文件第一个 `/** */`,其中至少 6 张页面命中的是内部符号的注释而非文件头(已在 #5059 补测量),照抄会把一种烂账换成另一种。改为列出该页**实际文档化的 schema 名** —— 这是枚举出来的,不是断言出来的,同时让整张表可 Ctrl-F:任给一个 schema 名,一次页内搜索就能定位到声明它的文件。剩下的散文收敛为**每个分类一行**(14 条),由 `blurbCoverage` 双向卡死在「确有页面的分类」上:多一条(分类没了、词还在 = `src/hub` 那种失败)或少一条都直接中止生成。\n\n**手写导语放进生成器源码,而不是在生成区里做保留。** `build-docs.ts` 现存的先例就是这样(分类 `index.mdx` 的那句导语是脚本里的常量),而在 `content/docs/references/` 里保留手写文本恰恰会复原本单要消灭的「无主」状态 —— 那块地方按守则谁都不许手改。生成能保证表格不撒谎,保证不了散文里的链接,所以 `docLinkTargets()` 把页面里每一条 `/docs/...` 链接拿去 docs 树里解析,解析不到就中止生成(上面那 2 张死卡片正是这样被发现并修掉的)。\n\n**顺手补上「生成这件事本身」的门禁。** `manageDir(DOCS_ROOT, owns)` 只认领根级 `index.mdx` 与 `meta.json` 两个文件(`owns` 参数就是干这个的,根级手写 `.mdx` 与各分类子树不受影响)。没有这一句,索引只在「还在被 emit」时才受检 —— 把 `emit()` 删掉,`check:docs` 会以少一个文件的姿态重新变绿,而这正是这张表活了这么久的方式。\n\n## 变更清单\n\n| 文件 | 变更 | 原因 |\n|:--|:--|:--|\n| `packages/spec/scripts/lib/root-index.ts` | 新增 | 渲染器(纯函数)+ `blurbCoverage` + `docLinkTargets`;按本仓惯例抽出以便直接钉测试(同 `schema-index` #4696 / `format-type` #4912 / `schema-name` #4592) |\n| `packages/spec/scripts/build-docs.ts` | 改 | 新增 §2.6 调用渲染器并 `emit`;`categoryPageSchemas` 采集;`CATEGORY_BLURBS` 与三段散文常量;根级 `manageDir`;死链解析 |\n| `packages/spec/scripts/root-index.test.ts` | 新增 | 20 条,渲染器与**已提交产物**两端各一组 |\n| `content/docs/references/index.mdx` | 重生成 | 整表 |\n| `.changeset/root-reference-index-generated.md` | 新增 | 读者可见的生成物变更 |\n\n`git status` 逐文件核过:只有上述 5 个路径。`authorable-surface.base.json` 未出现(#5807 已生效);#5831 删掉的页面**零复活**(`content/docs/references/` 下除 `index.mdx` 外无任何增删)。`schema-index.ts` 只读复用,未改一字。\n\n## 验证(已合入 `e2bfa6c` 后重跑全量)\n\n```\ncheck:docs        ✅ 232 generated files in sync with packages/spec   （原 231,新增的就是根索引)\ncheck:generated   ✓ All 10 generated artifacts are up to date\ntest              Test Files 322 passed / Tests 8242 passed\ntypecheck         tsc --noEmit 通过;check:test-typecheck OK\nBuild Docs        pnpm --filter @objectstack/docs build 通过(MDX 能编译、页面能预渲染)\ncheck-nul-bytes   OK (5700 tracked text files)\nCI                24/24 全绿(head deb072c6)\n```\n\n### 反向验证 —— 四个探针,方向都是**事先**定好的\n\n| 探针 | 预期 | 实测 |\n|:--|:--|:--|\n| A 删掉根索引的 `emit()` | 红:报 stale(不是「变绿只是少查一个文件」) | ✅ `- content/docs/references/index.mdx (stale — spec no longer defines it)` |\n| B 把 #4499/#4738 删掉的两行塞回已提交的 `index.mdx` | 红:`check:docs` 漂移 + 产物侧多条断言 | ✅ `~ …index.mdx (out of date)`,产物测试 **5 条**同时红(文件不存在 / schema 未发布 / 参考页不存在 / 计数自相矛盾 / 死链) |\n| C 给已删的 `src/hub` 留一条 blurb | 生成中止 | ✅ `- hub (blurb, no pages — delete the line)` |\n| D 把一张卡片指回 main 上那条真实死链 | 生成中止 | ✅ `• /docs/getting-started/architecture` |\n\n探针 A 值得单说:它测的不是「有断言会红」,而是「**去掉修复之后门禁会不会安静地缩小自己的比对面**」—— 这正是本单的病理本身。没有那句 `manageDir`,A 的结果会是「绿,231 files in sync」。\n\n### 合并 `main` 时白捡的第五个探针\n\n合 `e2bfa6c` 时 `api/discovery.zod.ts` 在 main 上多了一个 `CapabilityDescriptor`。结果:\n\n1. `check:docs` **报红**,点名 `~ content/docs/references/index.mdx` —— 这个文件在本 PR 之前是它根本看不见的;\n2. `gen:docs` 后,api/discovery 行自动多出该 schema,**frontmatter 的 1608→1609 与 Total 行的 1608→1609 同时移动**,没有人碰过任何一个数字。\n\n即这次真实的上游变更同时演了一遍「漂移会被抓到」和「两个计数不可能各说各话」。修正提交 `deb072c6`。\n\n## 关于 #4723(`check:docs` 的第一步是 `gen:schema`,所以「检查」仍会写受版本控制的产物)\n\n**不受影响,但把它的代价抬高了一点点,不构成新的阻碍。** 本单没有碰 `check:docs` 的构成(仍是 `pnpm gen:schema && tsx scripts/build-docs.ts --check`),也没有新增任何写入路径:根索引走的是既有 `emit`/`flush` sink,`--check` 模式下一个字节都不写。变化在于 #4723 那次「顺带写入」现在会影响到的**读者可见面**变大了 —— `gen:schema` 若改写了 `json-schema/`,随后的 `--check` 就会连带对根索引这张总表给出判断,而不只是对各分类页。这只是让 A/B/C 三条路线的收益更明显,不改变它们各自的成本结构。若要选,我倾向 #4723 的「把 `gen:schema` 从 `check:` 里摘出去、由调用方(CI / `check:generated`)显式先跑」一路:它让「check 不写盘」重新成为可依赖的事实,而这正是本单反向验证探针 A 能被信任的前提。"
+}

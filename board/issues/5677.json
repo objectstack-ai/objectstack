@@ -1,0 +1,34 @@
+{
+  "number": 5677,
+  "kind": "issue",
+  "title": "ADR-0117 D1 执行面:applySystemFields 的 wantOwner 由排除式翻为正面清单 + 注入 owning_business_unit_id",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T23:49:23Z",
+  "updated_at": "2026-08-06T08:04:57Z",
+  "closed_at": "2026-08-06T08:04:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5677",
+  "body": "**Blocked-by:** #5675(ADR-0117 scoped 接受 —— 协议决定与规范名登记)\n\nADR-0117 已按 `Accepted (D1/D3 scoped)` 落地**名字面**(#4611 / PR #5675):`SystemFieldName.OWNING_BUSINESS_UNIT_ID` 已登记并标注「open-core 暂不注入」,同时进入公开表单拒收名单。本单是它的**执行面**。\n\n## 为什么必须先动引擎,而不是先加枚举\n\n`packages/objectql/src/registry.ts:359-363` 的 `wantOwner` 是**排除式**判定:\n\n```ts\nconst ownership = schema.ownership;\nconst wantOwner =\n  ownership !== 'org' &&\n  ownership !== 'none' &&\n  !(schema as any).managedBy &&\n  !schema.name.startsWith('sys_');\n```\n\n只有 `org` / `none` 被排除。因此**任何第四个枚举值都会落进默认分支并被注入 `owner_id`** —— 与 ADR-0117 D1 表格(`business_unit` 档 `owner_id` ❌、`owning_business_unit_id` ✅)恰好相反。#4611 上已用一次性探针实测确认:\n\n```\nAssertionError: ADR-0117 D1: business_unit tier must NOT get owner_id:\n  expected { type: 'lookup', …(6) } to be undefined\n+ Received: { type: \"lookup\", reference: \"sys_user\", label: \"Owner\", … }\n```\n\n这就是为什么 PR #5675 **刻意没有**扩展枚举:只加值不动引擎,等于声明一个语义相反的档位(ADR-0049「spec 不得声明运行时不执行的东西」)。完整选项分析(A/B/C/D 四路及其代价)记录在 #4611 的复核评论中。\n\n## 工作面\n\n1. **`wantOwner` 翻为正面清单** —— `ownership === undefined || ownership === 'user'`。对现有三个值行为完全不变(`org`/`none` 仍排除,`undefined` 仍默认注入),但新值不再默认落入注入分支。**这是本单的关键单点**:翻面之后,枚举扩展才是安全的。\n2. **注入 `owning_business_unit_id` 列** —— 比照同函数内 `organization_id` 的注入形态(lookup → `sys_business_unit`、`system: true`、可空)。按 D1 表格,`user` 与 `business_unit` 两档都得到该列,`org` / `none` 不得。\n3. **conformance 归类迁移** —— `packages/objectql/src/system-managed-fields-conformance.test.ts` 中该名目前在 **documented-reserved** 组;列注入落地后必须移入 **Group A(actively-injected)**,否则会以 stray entry 失败(该组由实时代码推导,测试内已写明这一步)。\n4. **`SystemFieldName.OWNING_BUSINESS_UNIT_ID` 的 JSDoc** 从「NOT injected by open-core」翻为 INJECTED,并同步 `packages/spec/src/data/object.zod.ts` 中 `systemFields` 段落对注入列清单的描述。\n\n## 不在本单范围\n\n- **D2 盖章策略**(`pinned` / `follow_owner` / `transferable`)及其默认值 —— ADR-0117 未决问题,**尚未裁定**,不得在本单顺手选一个;\n- **D3 不变量的运行时校验**、**D4 写入守卫**、**D8 回填与启用门**;\n- **D6 契约变更**(`resolveOwnerIds` → `resolveScope`)—— 破坏性,需与企业版层级解析器同步发布;\n- D13 promotion 工具(cloud#874)。\n\n若实现中发现 D2 的默认值无法回避(例如列的 `required` 语义取决于策略),**停下回报 needs_decision**,不要自行选定 —— 它是 ADR-0117 明确提交评审的四项之一。\n\n## 验收\n\n- 新增 registry 测试:`ownership: 'business_unit'` 不注入 `owner_id`、注入 `owning_business_unit_id`;`'user'` 两列都有;`'org'`/`'none'` 两列都无;\n- 既有 `registry.test.ts:716`(`org`/`none` opt-out)保持绿,证明翻面未改变既有语义;\n- conformance 测试在归类迁移后绿。"
+}

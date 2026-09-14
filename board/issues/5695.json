@@ -1,0 +1,35 @@
+{
+  "number": 5695,
+  "kind": "pull_request",
+  "title": "fix(lint): `flow-runas-unscoped` 跨区域搜索它的数据节点证据 (#5633)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T00:40:06Z",
+  "updated_at": "2026-08-06T01:20:52Z",
+  "closed_at": "2026-08-06T01:20:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T01:20:50Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5695",
+  "body": "Fixes #5633\n\n## 这是什么\n\n`flow-runas-unscoped` 是 flow lint 规则族里唯一的 **build 门禁**成员(`severity: 'error'`)。#5383/PR #5635 给整个规则族接上了 ADR-0031 区域下钻,**唯独**把这条规则留在只读顶层 `nodes`——因为收紧一条门禁规则有它自己的爆炸半径,值得单独一单。本 PR 就是那一单。\n\n规则的 `dataNode` 搜索是「这个 flow 到底有没有做数据操作」的**证据**;而 `loop` body 里的数据节点,和顶层的一样 unscoped——运行时 `resolveRunAsIdentity` 拒绝嵌套写的理由和拒绝顶层写的理由完全相同(#3760),嵌套深度不是它会去查的属性。所以原来漏掉的形状是「**build 过、运行必拒**」,而这恰恰是这条规则当初升到 `error` 要防的形状。\n\n更糟的是,漏掉的不是边角,而是定时 flow 的**默认形状**:查一批、循环、逐条写——写节点几乎总在循环体里。\n\n实测(同一个 flow,只挪动节点位置):\n\n```\nupdate_record 在顶层        -> 1 finding [error]\nupdate_record 在 loop body  -> 0 findings   (本 PR 后:1 finding [error])\n```\n\n## 怎么修的\n\n`dataNode` 搜索改走 `collectFlowGraphs(flow)`,覆盖任意深度的每个区域;**finding 本身保持 flow 级**,和以前完全一样:一条/flow,`where` = ``flow 'x' · runAs``。这一点是设计核心,两个高度分得很清楚:\n\n- **判定是 flow 级的**。`runAs` 是 flow 属性、trigger 是 start 节点的属性,所以「这个 flow 是否 unscoped」每个 flow 只有一个答案——不按区域报,也不按数据节点报。\n- **证据不是 flow 级的**。「有没有碰数据」是关于整个 flow 的问题,`loop` body 和顶层一样属于这个 flow。\n\n区域名字放在 **message** 里而不是 `where` 里:`where` 说哪条声明写错了,message 说去哪儿找证明它的那个节点。\n\n```\nflow 'nightly_sweep' · runAs: schedule-triggered flow runs as `runAs:'user'`, but a\nschedule run has no trigger user — so its data node 'touch' (update_record), in loop\n'loop_rows' body, has no identity to scope to and will be REFUSED at run time.\n```\n\n## 顶层行为逐字节不变\n\n两条都有测试钉住:\n\n1. 证据在顶层时,message **逐字节**和以前一致(不带区域从句)——现有作者看到的文案没有动过一个字节;\n2. 一个 flow 两个高度都有数据节点时,引用的仍是**顶层**那个节点(`collectFlowGraphs` 先产出 flow 自己的图再下钻),即连「引用哪个节点」都没变。\n\n另外 `userLessTriggerKind` 与 `flow.runAs` 的 flow 级判定完全没动。\n\n## 反向验证:先红后绿(方向如预期)\n\n先写测试、后写实现,红的方向和预期一致——嵌套用例产出 0 findings、断言 1 条:\n\n```\nFAIL  #5633 ... > flags a loop-body delete_record the same way\nAssertionError: expected [] to deeply equal [ 'flow-runas-unscoped' ]\n- [ \"flow-runas-unscoped\" ]\n+ []\n\nFAIL  #5633 ... > descends two levels — a loop inside a loop\nAssertionError: expected [] to have a length of 1 but got +0\n\nTest Files  1 failed | 58 passed (59)\n     Tests  4 failed | 1374 passed | 4 skipped (1382)\n```\n\n4 条红的正好是 4 条嵌套用例。**同一次运行里**,顶层孪生用例(逐字节断言 message)、`runAs:'system'` 反例、非 user-less trigger 反例、无数据节点反例全部已绿——即非回归面在改动前就绿,改动后仍绿。实现后:`1382 passed`。\n\n## 保险丝:examples 三 app + docs fixtures 的 A/B 均零新增\n\n按 PM 裁定的硬性保险丝逐项实测,**真 before**(revert 规则源文件 → 重建 `packages/lint` dist → 重跑,已 `grep` 确认 dist 里没有新函数):\n\n`os validate` 三个 app,before/after 逐行 diff,**只差 load-time 计时**:\n\n```\n--- app-showcase ---   10c10  <   Load time: 716ms   >   Load time: 663ms\n--- app-crm ---        10c10  <   Load time: 470ms   >   Load time: 307ms\n--- app-todo ---       10c10  <   Load time: 285ms   >   Load time: 220ms\n```\n\n三个都 `✓ Validation passed`、exit 0、error 计数 0——**零新增 error,零新增 warning**。\n\n`content/docs/**` + `skills/**` 的 flow fixtures 同样 A/B:唯一命中是 `flows.mdx` 的 `contract_expiration_check`,它的证据节点是**顶层** `get_record`,改动前后各 1 条、完全一致(是既存的语料缺陷,已另立 #5692,不在本 PR 范围)。\n\n## 正向对照:error 确实穿透 CLI 面\n\n把 `examples/app-todo` 的 `overdue_escalation` 临时改成「去掉 `runAs`、唯一数据节点挪进 loop body」,`os validate` 真的拒绝(exit 1),文案点名区域:\n\n```\n  ✗ Author-time rules failed (1 issue)\n  • flow 'overdue_escalation' · runAs: schedule-triggered flow runs as `runAs:'user'`, but a\n    schedule run has no trigger user — so its data node 'update_priority' (update_record), in\n    loop 'loop_overdue' body, has no identity to scope to and will be REFUSED at run time.\n      rule: flow-runas-unscoped  at flow 'overdue_escalation' · runAs\n```\n\n之后 `git checkout --` 还原,重跑确认该 app 回到 `✓ Validation passed`;`git status` 干净。\n\n## 验证清单\n\n| 项 | 结果 |\n|---|---|\n| `pnpm --filter @objectstack/lint test` | `59 passed`,`1382 passed` |\n| `pnpm --filter @objectstack/lint typecheck` | 绿 |\n| `pnpm --filter @objectstack/lint build` | 绿 |\n| 消费半径 `pnpm --filter @objectstack/cli test` | `83 passed`,`825 passed` |\n| 消费半径 `pnpm --filter @objectstack/metadata-protocol test` | `43 passed`,`402 passed` |\n| examples 三 app `os validate` A/B | 逐行相同(仅计时差) |\n| `node scripts/check-nul-bytes.mjs` | `OK (scanned 5609 tracked text file(s))` |\n| `npx eslint` 改动文件 | 零输出 |\n| 合入 `origin/main` 后 `check:generated` | `✓ All 10 generated artifacts are up to date` |\n\n规则的消费半径已按调用者枚举扫过:`cli` 的 validate/lint/compile、`metadata-protocol` 的 runtime authoring gate、以及三处 parity 测试的 fixtures——没有 fixture 拼写了本 PR 收紧掉的形状(用「user-less trigger + 区域」双条件全仓 grep 过,命中的只有 spec/engine 的 schema 与执行测试,它们不跑这条规则)。\n\n## changeset\n\n真 changeset(`\"@objectstack/lint\": patch`),正文明确写了这是**一条 build-gating 规则的覆盖面收紧**、爆炸半径、以及「如果你的 build 新红了怎么办」(加 `runAs: 'system'`)——release 汇编从它取材。未碰 `content/docs/releases/`。\n\n## 顺手记录的范围外发现(未在本 PR 修)\n\n- 立单 #5692:`content/docs/automation/flows.mdx` 的 `contract_expiration_check` 教了一个**门禁会拒**的 flow(schedule + 顶层 `get_record` + 无 `runAs`)。**先于本 PR 存在、与本 PR 无关**(证据节点在顶层),同文件 35 行之下的邻居示例反而写对了。\n- 立单 #5693(`finding`,观察级):规则里 `the default \\`runAs:'user'\\`` 这一支在 CLI 面**不可达**——规则是 `input: 'parsed'`,schema 会把默认值实体化,所以什么都没声明的作者会被告知「runs as `runAs:'user'`」。同样先于本 PR 存在。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01GX3sL71LFq8m2usg6VqTSE\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01GX3sL71LFq8m2usg6VqTSE)_"
+}

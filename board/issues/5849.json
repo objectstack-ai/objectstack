@@ -1,0 +1,35 @@
+{
+  "number": 5849,
+  "kind": "pull_request",
+  "title": "feat(spec): ActionSession 补 `positions` 权威键,`roles` 降为弃用别名 (#5779)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T08:01:45Z",
+  "updated_at": "2026-08-06T09:29:19Z",
+  "closed_at": "2026-08-06T09:29:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T09:29:17Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5849",
+  "body": "Fixes #5779\n\n#5613 第二阶段的 **spec 半边**,依维护者「C 骨架 + A 语义」裁定。⛔ `packages/runtime` 零文件触碰(已实测确认,见下)。\n\n## 前提核验(实测 `origin/main` @ `1624f4ad2`)\n\nissue 前提**成立**:`ActionSessionSchema` 在 `packages/spec/src/ui/action-params.zod.ts:206`,`roles` 已标 deprecated,其 docstring 明写「The rename is #5613 phase 2; do NOT add a `positions` key here ahead of it」——本单正是那条禁令等的东西,随本 PR 解除并改写。\n\n## 做了什么\n\n1. **`positions` 为权威键**(`z.array(z.string()).optional()`)。describe 指向 ADR-0090 D3 / `ExecutionContext.positions`,并把现 `roles` describe 里「Never gate PRIVILEGE on this array——问 security service(ADR-0095)」的告诫**原样带过来**:告诫属于**值**而不属于拼法,所以更名必须原样保留。JSDoc 写明双发窗口语义,以及一句必须说破的话——把 `roles.includes('admin')` 改写成 `positions.includes('admin')` 是**迁移了缺陷**,不是迁移了代码。\n2. **`roles` 改写为弃用别名对**:describe 改为「DEPRECATED alias of `positions`」,点名 ADR-0087 条目 id 与 #3280 → #3290 `session.tenantId` 别名下线先例路径;`@deprecated` JSDoc 保留并更新指向。\n3. **ADR-0087 语义迁移条目** `action-session-roles-to-positions`(step17,紧邻 #5621 落的 `hook-context-session-roles-retired`)。定性为**语义迁移而非 D2 数据转换**,两条独立理由:action ctx 每次派发现造、从不落库,**无存量源可改写**(照 #5050 / #4579 / #4657 先例);且这个键唯一被**拼写**的地方是 action body 里的自由代码,声明式 transform 不能安全改写代码中的标识符——正是 ADR-0090 那一波在 step 13 把 `current_user.roles` 交还作者(`cel-current-user-roles-to-positions`)而非做文本替换的同一理由。条目里另写明**故意不立墓碑**:`retiredKey()` 是**拒收**该键,而弃用窗口的全部意义就是让旧拼法继续可用——窗口期立墓碑等于把它要推迟的移除提前执行了。\n4. 生成物走 os-regen:`authorable-surface.json` +1 键(`ui/ActionSession:positions`,与预期一致)、`spec-changes.json`、`docs/protocol-upgrade-guide.md`、reference 页。\n5. changeset:`@objectstack/spec` **minor**,正文是作者视角的迁移处方。\n\n## 兼容性核验(先证红方向,再实测)\n\n**预测写在跑之前**:本单只加 **optional** 键,runtime 的 `action-session-shape-contract.test.ts`(钉 `parse(built)` 深等于 `built` + 键集断言)应当**保持绿**——加可选键既不能拒收原本合法的对象,也不会在缺该键的输入上把键**凭空造出来**;而生产方(仍只发 `roles`)根本没动。\n\n| 时点 | 结果 |\n|:---|:---|\n| 改动**前**基线 | `Test Files 1 passed (1)` / `Tests 10 passed (10)` |\n| 改动**后** | `Test Files 1 passed (1)` / `Tests 10 passed (10)` |\n\n方向与预测一致。这里**不是**「先绿后红」那类反向验证,而是一次**不动**的预测——说明它有意义的,是方向和机制都写在跑之前:若它红了,就意味着契约把生产方带崩了,而弃用窗口存在的全部目的正是不让这件事发生。已在测试块注释里如实标注这一点,没有硬套模板。\n\n**spec 侧先证红**(把 `positions` 声明删掉后实测):\n\n```\n× PRESERVES `positions` through a parse instead of stripping it\n    AssertionError: expected { userId: 'usr_1', …(1) } to have property \"positions\"\n× accepts the DUAL-EMIT shape #5613's runtime half will produce — both keys, one value\n    AssertionError: expected { userId: 'usr_1', …(2) } to deeply equal { userId: 'usr_1', …(3) }\n× pins `positions` as CANONICAL and carries the ADR-0095 privilege boundary\n    TypeError: Cannot read properties of undefined (reading 'description')\n Tests  3 failed | 15 passed (18)\n```\n\n三条按预测转红,已恢复。\n\n**钉什么的判据**:`ActionSessionSchema` 刻意非 strict(平台交给 body 的运行时形状),所以 `safeParse().success` 在这里毫无价值——未声明的键照样「解析成功」然后被静默剥掉。承重断言因此是「parse **保住**了这个键」。这是**键可达性**问题而非**值裁决**问题(schema 对 `positions` 的值除 `string[]` 外不作判断),所以要求更多就是钉了契约没主张的东西。\n\n## 消费半径扫描\n\n`ActionSessionSchema` 的消费方:runtime 的 pin 测试 + `action-execution.ts` 的类型标注 + `sandbox/script-runner.ts` 的注释——均不改。全仓 grep `session.roles` 的其余命中都在 **hook 面**(`skills/objectstack-data/references/data-hooks.md`、`plugin-approvals` 的 #4839 pin、hook.zod/hook.test),是 #5050 已退役的另一张面,与本单无关且未触碰。\n\n## 验证\n\n| 命令 | 结果 |\n|:---|:---|\n| `pnpm --filter @objectstack/spec check:generated` | `✓ All 10 generated artifacts are up to date.` |\n| `pnpm --filter @objectstack/spec typecheck` | `tsc --noEmit` 通过;`check:test-typecheck: OK` |\n| `pnpm --filter @objectstack/spec test` | `Test Files 319 passed (319)` / `Tests 8152 passed (8152)` |\n| runtime pin(兼容性核验) | `10 passed (10)`,改动前后各一次 |\n| `node scripts/check-nul-bytes.mjs` | `OK (scanned 5678 tracked text file(s))`;另对本单所有改动文件做了 `grep -naP` 越界自扫,干净 |\n\n## 两处需要 reviewer 知道的判断\n\n- **`authorable-surface.base.json` 的重锚漂移已剔除**(照 #5358)。`gen:schema` 会把它重锚到 merge base 并带进 8 个**别人**已合并的键(discovery 族,#5672 在飞面),与本单无关,故 revert。闸门对此**非致命**并自报:「trails the merge base by 8 key(s) — expected right after a surface change lands」,已实测确认剔除后仍绿。\n- **生成的 upgrade guide 里 `reason` 必须是单段**。首版我在 `reason` 里用了段落分隔,生成器把它直接插进嵌套 bullet(`  - Why not automatic: ${s.reason}`),换行会把后续段落顶出列表结构、破坏 markdown 层级。已改回单段,与现存全部条目一致;重新生成后 diff 恰为 3 行(条目 + Why not automatic + Done when)。\n\n## 后续\n\n#5613 的 runtime 半边(`buildActionSession()` 双发、两句错注释修正、翻 `action-session-shape-contract.test.ts` 键集断言、major changeset)本单落地后可派。承重翻转点未动,仍在原处。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018fxLGQdatPbBUvCgiVxg6D)_"
+}

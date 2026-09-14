@@ -1,0 +1,36 @@
+{
+  "number": 5762,
+  "kind": "issue",
+  "title": "lint never-fire 族 severity 复审:两条 warning 实感更接近 error(#5496/#5647 dev 报告建议)—— 同批升、单独 PR,不逐条搭车",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T04:12:18Z",
+  "updated_at": "2026-08-06T13:15:49Z",
+  "closed_at": "2026-08-06T13:15:49Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5762",
+  "body": "devx 车道 PM 立单(会话 `session_01GX3sL71LFq8m2usg6VqTSE`),汇集两份 dev 报告的 severity 建议防丢。观察类,未指派,交分诊定级;实施须单独 PR(改已发布规则 severity,`flow-time-relative-*` 两条 surfaces 均为 CLI_AND_RUNTIME,影响 P1 运行时发布门)。\n\n## 候选(均现为 warning,与 `validate-flow-trigger-readiness.ts` 文件现行一致)\n\n| 规则 | 建议出处 | 实感理由 | 反方向考量 |\n|---|---|---|---|\n| `flow-time-relative-descriptor-unroutable`(#5647/PR #5758) | dev 报告 | 标量永远不是描述符,无合法解读、无跨包免责空间;后果是 flow 绑空永不触发且全层零输出 | 升级影响 P1 运行时门 |\n| `flow-time-relative-descriptor-invalid`(#5496/PR #5651) | dev 报告 | 后果同级(声明了 time-relative 触发、运行时永不绑) | 转发的 zod 文案含 history 句,error 显示位上噪音偏大;且不应单独升一条使族内 severity 不成体系 |\n\n对照:`flow-trigger-unknown-object` 带「对象可能来自其他已安装包」跨包免责,是真 advisory,**不在**候选内。\n\n## 处置建议\n\n族内同批评审(含 `flow-trigger-unknown-event` 是否同性质),一次 PR 统一定级;zod history 句的噪音问题若成为 error 化障碍,可在该 PR 内评估折叠展示。两份 dev 报告与 PR 正文(#5651「severity 建议」节、#5758「severity 建议」节)是完整论证记录。\n\n关联:#5496、#5647、#5651、#5758、#5693(同文件措辞观察)。"
+}

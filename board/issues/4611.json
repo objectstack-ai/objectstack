@@ -1,0 +1,35 @@
+{
+  "number": 4611,
+  "kind": "issue",
+  "title": "ADR-0105 D13's \"scoping field\" has no metadata home — the 0105↔0117 linkage gap",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T10:44:03Z",
+  "updated_at": "2026-08-06T01:06:01Z",
+  "closed_at": "2026-08-06T01:06:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4611",
+  "body": "Found while scoping the D13 promotion tool (commercial side, cloud#874). This is a spec-level gap in what ADR-0105 D13 presumes, and its fix already exists as a Proposed ADR — the decision needed is which side moves.\n\n## The gap\n\nADR-0105 D13 prescribes the promotion tool's third step as: *\"backfill `organization_id` on scoped business data **from the subtree's scoping field**\"* — which presumes each scoped object declares **which field carries BU ownership**. No such declaration exists:\n\n- `ownership` on the object schema is `'user' | 'org' | 'none'` (`packages/spec/src/data/object.zod.ts:818`) — no business-unit tier;\n- depth scopes (`unit` / `unit_and_below`) compile to **`owner_id IN (…)`** sets, not to a BU column (`IHierarchyScopeResolver` returns owner ids);\n- `owning_business_unit_id` appears nowhere in code — only in ADR-0117's text;\n- Appendix A of ADR-0105 confirms the current shape is app-level convention only: *\"business objects carry a plant reference.\"*\n\n## The consequence\n\nThe D13 tool cannot discover which rows belong to a promoted subtree. It must take an explicit per-object `{ object: field }` map from the operator — fail-closed and safe (auto-guessing \"any lookup → sys_business_unit\" would conflate *reference* semantics with *ownership* semantics and silently move rows behind the wrong wall). But the promise in D13's text is then not machine-checkable: an object the operator forgets to list silently stays behind in the source org, and the tool's dry-run candidate report is advice, not semantics.\n\n## The fix already has a name\n\nADR-0117 (Proposed, 2026-07-31) introduces exactly the missing declaration: `ownership: 'business_unit'` + the `owning_business_unit_id` stamp, with D3's invariant `record.organization_id == BU(owning_business_unit_id).organization_id` — which is precisely the equation D13's backfill establishes. With 0117 landed, promotion gains a checkable postcondition: *no row whose owning BU lies in the promoted subtree remains in the source org.*\n\n## Decision needed (either/or)\n\n1. **Accelerate ADR-0117 review/landing.** The D13 tool then defaults its scoped-object map from `ownership` metadata; the explicit map becomes an override. Recommended — it is what makes promotion *verifiable* rather than merely configurable.\n2. **Amend ADR-0105 D13's text** to state the scoping field is deployment-supplied, making the explicit per-object map the contract rather than a workaround.\n\nThe D13 tool ships either way with the explicit-map interface (it stays correct as an override under option 1 — no rework).\n\nRefs: ADR-0105 D13 / Appendix A, ADR-0117, cloud#874 (D13 item), cloud#1006 (sibling finding)."
+}

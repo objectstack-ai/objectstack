@@ -1,0 +1,34 @@
+{
+  "number": 5855,
+  "kind": "issue",
+  "title": "[engine-double-contract] #5619 的下沉解锁了另外 6 条被同一个环卡住的条目(core / metadata / platform-objects)—— 现在各是一行 pin",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T08:40:44Z",
+  "updated_at": "2026-08-06T11:59:24Z",
+  "closed_at": "2026-08-06T11:59:24Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5855",
+  "body": "> Blocked-by: #5619\n>\n> (分诊座位 2026-08-06 补入机器半边;理由见本单分诊评论。#5619 合入后即解锁。)\n\n发现于 #5619(把 `engine-delete-dispatch.ts` / `engine-update-dispatch.ts` 下沉到 `@objectstack/metadata-core`)执行过程中。按 Prime Directive #10 单开、未指派。#5619 的文件面被 PM 预裁限定为 **两个 dispatch 模块的搬移 + 13 个 `packages/metadata-protocol` 测试接线 + 基线删该 26 条**,下面这 6 条不在其中。\n\n## 现象\n\n`scripts/engine-double-contract.baseline.json` 里另有 **6 条** 条目,`closes` 明确写着「sink assertEngine{Delete,Update}Dispatch into a package BOTH sides already depend on —— tracked as #5619」:\n\n| 条目 | verb |\n|:--|:--|\n| `packages/core/src/utils/migration-journal.test.ts` | delete + update |\n| `packages/metadata/src/migrations/migrate-sys-notification-to-event.test.ts` | delete + update |\n| `packages/platform-objects/src/plugin.test.ts` | update |\n| `packages/platform-objects/src/system/migration-flag.test.ts` | update |\n\n它们被卡住的原因与 metadata-protocol 那 26 条**完全同一个**:`@objectstack/objectql` 依赖这些包,反向 devDependency 即成环,turbo 2.10.7 直接拒绝任务图。#5619 把两个谓词搬到 `@objectstack/metadata-core` 之后,这个结构性阻塞对它们同样消失了 —— 但 pin 本身没做,`closes` 指向的 #5619 一旦关闭,这个引用就变成指向已关闭 issue 的悬挂处方(即 #5619 自己从 #4987 那里继承的那个形状)。#5619 已把这 6 条的 `closes` 改写成「阻塞已解除 + 剩余动作」并指向本单,本单是接住那个引用的落点。\n\n## 每个包的剩余动作(已在 #5619 的 worktree 上实测)\n\n- **`@objectstack/metadata`**:`dependencies` 已含 `@objectstack/metadata-core`(`workspace:*`)—— **零配置**,直接 `import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core'` 即可。\n- **`@objectstack/platform-objects`**:`dependencies` 同样已含 `@objectstack/metadata-core` —— **零配置**。\n- **`@objectstack/core`**:`dependencies` 只有 `{ @objectstack/spec, zod }`,需要新增一条 devDependency。**已实测**:把 `@objectstack/metadata-core: workspace:*` 加进 `packages/core/package.json` 的 `devDependencies`,`npx turbo run build --filter=@objectstack/core --dry` **无 circular / cyclic 输出**(metadata-core 的依赖面只有 `{ @objectstack/spec, zod }`,不经过 core),随后已还原。这与该条目 `why` 里记录的旧测量(加 `@objectstack/objectql` 边 → turbo 拒绝)是两条不同的边,不矛盾。\n\n## 完成范围\n\n1. 三个包的 fake 引擎 `delete()` / `update()` 分别以 `assertEngineDeleteDispatch(options)` / `assertEngineUpdateDispatch(data, options)` 开头(⛔ 不许手抄 `if (!where?.id && !multi)` —— 那正是 #5173 / #5191 / #5192 / #5584 各烧掉一轮 CI 的写法);\n2. `@objectstack/core` 加 devDependency `@objectstack/metadata-core`;\n3. 跑三个包的 `pnpm test`,把基线里这 6 条整条删掉(gate 是 shrink-only 双向校验);\n4. 计数以实测为准 —— #5619 落地后的读数是 `63 pinned / 139 ledger / 2 exempt`。\n\n## 影响(如实说明,请分诊定级)\n\n与 #5619 同一族:不是用户今天会撞到的缺陷,而是**测试替身比真契约松**的现存缺口(#4434 的形状)。这 6 条的 `why` 里,4 条(#5629 delete 批次)带 per-file dormancy probe 说明当前未被驱动,2 条(#5480 update 切片)明确声明**没有**做 dormancy 探测。域应为 `domain:engine-core`。\n\n## 参考\n\n- #5619 / 本 PR(下沉落地,解除阻塞)、#4550 / PR #4948(gate 与基线落地)、#4434(起因)\n- #5629(delete 批次的 arity 修正)、#5480 / #5754(update 切片)\n"
+}

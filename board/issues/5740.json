@@ -1,0 +1,35 @@
+{
+  "number": 5740,
+  "kind": "pull_request",
+  "title": "fix(service-analytics): `where` 源字段闸门 —— 点名不存在字段的筛选答 400 INVALID_FIELD 而非驱动 500 (#5669)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T03:16:49Z",
+  "updated_at": "2026-08-06T03:38:25Z",
+  "closed_at": "2026-08-06T03:38:24Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T03:38:24Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5740",
+  "body": "Fixes objectstack-ai/objectstack#5669\n\n## 前提重验:成立(在 `origin/main` 3de5ec8a3 上实测)\n\n立单描述逐条对上,而且比单子写的更宽。同一 harness 探针:\n\n```\n① where: {bogus_col: 'x'}（ObjectQL 聚合路）\n   generateSql  → SELECT COUNT(*) AS \"count\" FROM \"crm_account\" WHERE bogus_col = $1\n   executeAggregate 收到 filter: {\"bogus_col\":\"x\"}        ← 没有任何拒收\n\n② where: [['bogus_col','=','x']]（#5334 数组写法）\n   → 与 ① 完全相同的语句、完全相同的引擎 filter\n\n③ where: {$or:[{industry:'tech'},{$and:[{bogus_nested:{$gt:1}}]}]}\n   → WHERE (industry = $1 OR bogus_nested > $2)\n\n④ NativeSQL 路 → 同 ①\n\n⑤ dataset 面 runtimeFilter: {bogus_col:'x'}\n   → SELECT COUNT(*) AS \"account_count\" FROM \"crm_account\" WHERE bogus_col = $1\n\n⑥ dataset 自己声明的 filter: {dropped_column:'x'}\n   → WHERE dropped_column = $1\n```\n\n真驱动上都是 `no such column`,`code`/`status` 皆空,于是 REST 面落 5xx 兜底 —— 与 #4437 / #5520 立单时同形的 ADR-0112 违背。\n\n## 实现\n\n`ensureCube` 的三条路径上,在 measure / dimension 两道闸门之后加 `assertWhereFields`,构造 SQL 之前拒收,信封与两位兄弟完全一致:`INVALID_FIELD` / 400 + `field` / `object` / `param: 'where'`,消息点名字段、可用 filter member、以及对象已知字段清单。`query`、`generateSql`、`queryDataset`(`runtimeFilter` 与 dataset 声明的 `filter` 两半)全覆盖,被拒的查询不在 cube registry 留痕。\n\n`/analytics/dataset/query` **不需要任何改动**:#5352 的信封分支 ① 已经把带 `code` + 4xx `status` 的错误原样带出。正因为这是一条关于「服务抛对形状」与「调用方收到它」之间那道缝的断言(两边的单测都跨不过去),才另加一个 rest 面用例端到端钉住。\n\n### 关键取舍一:字段名取自 **SQL 生产者自己的读取器**\n\nmember 通过 `normalizeAnalyticsFilterTree` + `collectFilterLeaves` 收集 —— 两个策略编译谓词用的就是这一对,而不是另写一个 filter 树遍历器。手写遍历要重新实现 `$and`/`$or`/`$not` 递归、`$`-前缀算子键、`$between` 下沉、`{owner:{region:'NA'}}` → member `owner.region` 的嵌套关系摊平、以及 #5334 的数组下沉;任何一处偏差都表现为「闸门看到的字段」不是「真正进 SQL 的列」—— 两个方向都会出事(幻影拒收,或者漏)。`collectFilterLeaves` 丢弃结构在这里恰好正确:谓词在不在 `$or` 底下,不改变它那一列是否存在。\n\n### 关键取舍二:`kind` 参数是承重的,不是装饰\n\n#5520 的 member→列解析抽到模块级 `resolveMemberSource`,两道闸门共用。新增的 `kind` 参数不是为了整齐:\n\n- `'dimension'`(#5520 调用点)只查 `cube.dimensions`,对应 `resolveDimensionSql` / `resolveFieldName(…, 'dimension')`;\n- `'any'`(本单调用点)dimensions 之后**回落 measures**,对应 filter member 在 `resolveFieldSql` 与 `resolveFieldName(…, 'any')` 里的真实解析。\n\n只查 dimensions 会**误杀今天能跑的查询**:实测,声明 `measures.revenue = {sql: 'annual_revenue'}` 的 cube 在**两个策略上**都把 `where: {revenue: {$gt: 100}}` 编成 `annual_revenue > ?`;dimensions-only 的查法会把 `revenue` 判成缺失列并 400。这条已作为守卫用例入库。\n\n### 关键取舍三:数组 `where` **纳入**闸门 —— 派发说明里此处按现状修正\n\n派发说明预设「`inferCube` 跳过数组 where,所以闸门也不看它」。前半句对、后半句的前提不成立:`inferCubeFromQuery` 的跳过只影响即席 cube 的 dimension **词汇表**,与「哪些列进驱动」无关 —— 自 #5334 起数组 `where` 由 `normalizeAnalyticsFilterTree` 下沉,编出**逐字相同**的谓词(见上方探针 ①/②:同一条语句、同一个引擎 filter)。只闸一种写法会让**同一个笔误有两种答案**,正是这个闸门家族存在的理由所指。\n\n`inferCubeFromQuery` 一行未改,所以 **#5353 原封不动**;而闸门读的是下沉后的 filter 树而非 `cube.dimensions`,所以 #5353 将来的修法也**改不动**本闸门的判定。已在 `inferCubeFromQuery` 的守卫处留注释指向 #5353。\n\n### 刻意不变\n\n- 真实但未声明的字段照常可筛(`where: {phone: '555'}`)—— 闸门问的是「**对象**有没有这个字段」,从不问「cube 声明过没有」。\n- 已声明 member 跟到它真正的列(dimension `assessed` → 列 `assessed_at`),不按 member 名判。\n- `id` / `created_at` / `updated_at` 无条件放行,与数据面 `resolveQueryFields` 一致。\n- 三档 stand-down 与两位兄弟逐字相同:`cube.sql` 非裸对象名、`getObjectFieldNames` 不作答、源非裸列(表达式 `sql`、`*`、点号关系穿越)。\n- **`INVALID_FILTER` 家族不动**。normalizer 直接拒的 `where`(未知算子、零算子字段约束、无法下沉的 infix 数组、未知顶层组合子)本闸门**不判**:catch 后 stand down,拒收留在它原本发生的地方(#5352 / #5367 的地盘)。读不懂那棵树的字段闸门对它无话可说;把这些拒收提前到 `ensureCube` 还会**新增**对 draft-preview 路的拒收 —— 那条路的 `matchesWhere` 从不经过 normalizer。\n\n## 测试\n\n`packages/services/service-analytics` 全量 **55 文件 / 985 例通过**(新增 31 例;基线 954 例全绿)。\n`@objectstack/rest` 全量 **55 文件 / 778 例通过**(新增 5 例)。\n\n新用例对称 `dimension-source-field-gate.test.ts` 的三段结构(闸门本体 / dataset 面 / 「闸门不许做什么」),形状覆盖:组合子嵌套、`$not`(经 #5146 重写后)、`$between` 下沉、数组写法、点号关系、嵌套关系对象、布尔单位元四型、declared dimension 别名、declared measure 别名、无探针、无 `where`。\n\n### 反向验证(先预测方向,后跑)\n\n服务层:移除 `ensureCube` 里三处 `assertWhereFields` → **预测 15 红 / 16 绿并逐条点名,实测正是该 15 例**。\nrest 面:同样移除并重建 `@objectstack/service-analytics`(该文件吃的是**已构建**产物)→ **预测 3 红 / 2 绿,实测正是,每条红都是 `expected 500 to be 400`** —— 即修复前的分类。\n\n两处「不符合模板预设」的方向已在文件头如实写明,而不是留给下一个读者踩:\n\n- 第一段里「先答 measure」一例**保持绿** —— 那条拒收由 #4437 的闸门产生,用例钉的是**顺序**而不是 `where` 判定。\n- 第三段(「闸门不许做什么」)里「自动推断路径上的点号 member」一例**转红**。它放在该段是因为它界定闸门的射程,但它钉的是一个**判定**(以及该判定与 #5520 的一致),不是 stand-down。把段标题读成「必绿」的承诺才是错的。\n\n### 一个被测出来的、纠正了我自己预设的事实\n\n我最初照抄 dimension 闸门的「点号 → stand down」写了用例,它红了。实测原因:自动推断路径上 `inferCubeFromQuery` 把 `stripPrefix('owner.region')` = `region` 铸成 dimension,`lookupMember` 的 legacy 次段查找随即命中,member 解析成**基表列** `region` —— 而这确实是那条路上真正进引擎的列(实测 `executeAggregate` 收到 `{region:'NA'}`)。更关键的是:`dimensions: ['owner.region']` 在 `main` 上**已经**答同一个 `INVALID_FIELD`/`region`。所以这是经 `resolveMemberSource` 共享的**一个**行为,不是 `where` 闸门新造的越界。用例因此改成:点号 stand-down 用**已注册 cube** 验(真有 join 的那一档,两个策略实测一个 JOIN、一个跨对象拒收),另加一例把推断路径上两个键的判定**逐字比对**钉住。\n\n### 门检查\n\n`check:nul-bytes`、`check:error-code-casing`、`check:route-envelope`、`check:durability-log-level`、`check:startup-registry-verdict`、`check:type-check-coverage`、`check:adr-anchors` 全通过;三个改动文件 eslint 干净;控制字符自扫(`grep -naP` 越过 `check:nul-bytes` 的盲区)无命中。\n\n`tsc --noEmit`:`service-analytics` 改动前后同为 **7**(DEBT 既有,无一条出自本 PR 文件),`rest` 为 **2**(与 ledger 记录一致)。两包均为 DEBT 条目(无 `typecheck` 脚本),棘轮只减不增 —— 未增。\n\n未碰 `packages/spec`(构建 spec 时 `authorable-surface.base.json` 产生的本地重锚已还原,不入本 PR),未碰 `content/docs/releases/`。changeset:patch。\n\n## 范围外发现\n\n**#5739**(已立,unassigned,概念缺陷不带标签交 PM 定级):`inferCubeFromQuery` 的 `stripPrefix` 把关系穿越 `owner.region` 铸成基表列 `region`,遮蔽了下游所有解析器的关系穿越档。**基表恰好有同名列时静默筛错列 / 分组错列**,两个策略、两个请求键(`where` 与 `dimensions`)四个组合全部静默通过,NativeSQL 连 JOIN 都不生成(同一策略在已注册 cube 上对同一 member 是正常 JOIN 的),`dimensions` 那一支还把响应列名标成 `\"owner.region\"` 而值来自基表。跨对象信封在这条路上看不见它(收到的是已解析的裸名)。`main` 上即如此,本 PR 不引入也不修复;建议与 #5353 同单收(同一函数的邻居缺陷),但「即席路径要不要支持关系筛选」是产品裁定,故只立单不带 PR。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BWS4heBoAitLmzCLhcYdbK)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 5701,
+  "kind": "issue",
+  "title": "spec: `$regex` 按 ADR-0049 退役 + `$icontains` 入算子词表与 FILTER_LOGIC_CASES(#4706 裁决 B 案 · 契约半边,先行)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p0"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T01:05:40Z",
+  "updated_at": "2026-08-06T05:11:02Z",
+  "closed_at": "2026-08-06T05:11:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5701",
+  "body": "Part of #4706(维护者 2026-08-06 裁决 B 案,裁决与三轴分析见该单 2026-08-06 两条评论)。契约半边,**先行**;驱动半边 Blocked-by 本单。\n\n## 裁定摘录\n\n`$regex` 退役:查询校验期**响亮拒收**,拒收信息点名替代物(`$icontains`);同批新增 **`$icontains`**(大小写不敏感包含;`$istartsWith` / `$iendsWith` 仅当与既有算子族对称性成立时一并加,不强求)。排除项:五后端真正则(turso remote 线协议无法注册 `REGEXP`,结构性不可行)、维持现状(名实不符)。\n\n## 本单范围(packages/spec)\n\n1. **词表**:filter 算子 zod schema / 类型中移除 `$regex`(含 `$options`,它只被 `$regex` 消费 — 实施时核实),新增 `$icontains`;按 ADR-0049 / ADR-0087 退役路线处理注册表与转换记录(适用面按 spec-property-retirement playbook 判断 — 查询算子词表若不属 authorable-surface 轨道,如实记录即可,不硬套)。\n2. **case-set**:`FILTER_LOGIC_CASES` 新增 `$icontains` 用例 — 至少覆盖:双向大小写折叠命中、`%` / `_` / 正则元字符作**字面量**处理(转义纪律沿 `applyLike`,见 #5589 的方言矩阵)、空串/非字符串比较值的拒收形态(循 ADR-0112 信封惯例);外加 `$regex` 的**拒收 pin**(校验期报错,信息含替代物指名)。case-set 落地即由 5×5 conformance 矩阵在各 driver 侧转成待实现红/DEBT — 这是设计内的推进机制。\n3. **全仓 `$regex` 使用面清点**:examples / 测试 / 文档中现存用法随退役同 PR 翻转(裁决实施的 pin sweep 纪律:一轮翻完,翻后的断言仍承重)。\n\n## 边界\n\n- ⛔ 驱动实现不在本单(见驱动半边 sub-issue);本单落地后矩阵红/DEBT 由驱动半边清偿。\n- ⛔ `packages/spec` 生成物按 os-regen 四步纪律(merge 先 commit 再整体重生成,锚点断言按 #5304 措辞)。\n\n**归属**:`packages/spec` → `domain:spec` 座位(shared contract surfaces have one owner);`domain:*` 标签待分诊座位补。"
+}

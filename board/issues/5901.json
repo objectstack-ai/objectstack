@@ -1,0 +1,33 @@
+{
+  "number": 5901,
+  "kind": "pull_request",
+  "title": "docs(skills,docs): 三处 hook 文档不再教「批量写的行级谓词在 ctx.input.ast」(#5670)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T11:15:27Z",
+  "updated_at": "2026-08-06T11:34:06Z",
+  "closed_at": "2026-08-06T11:34:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T11:34:04Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5901",
+  "body": "Closes #5670\n\n纯散文对齐:三处文档/技能面仍在教「批量写的行级谓词在 `ctx.input.ast`」,按 #5273 / PR #5668 已落地的措辞逐处改正。不动引擎、不动 spec、不动 releases。\n\n## 前提核实(对 `origin/main` = `5c94f833c`)\n\n| issue 的断言 | 结果 |\n|:---|:---|\n| 三处文件面仍在 main 上带这句 | ✅ 成立(行号有漂移,按内容定位:`rules/hooks.md:115-116`、`references/data-hooks.md:61-62`、`data-flow.mdx:313`) |\n| 写路径 input 是 `{ id, data, options }` / `{ id, options }` | ✅ `engine.ts:5243` / `5705` |\n| `input: { ast }` 只出现在两条读路径 | ✅ `engine.ts:4776` / `4909`,分别喂 `driver.find` / `findOne`(行号相对 issue 正文有漂移) |\n| 批量写谓词走 `OperationContext.ast`(#2982),不进 `hookContext.input` | ✅ pin 测试三条断言,详见下 |\n| #5038 后批量写 `after*` 按行派发、`input.id` 绑定 | ✅ pin 测试两条断言 |\n| 主句(批量写触发同名事件、没有 `*Many` 事件)仍成立 | ✅ 保留原样 |\n| `content/docs/releases/v16.mdx:185` 带同句但排除在外 | ✅ 未动 |\n| 全仓 docs/skills 只有这三处 | ✅ `grep -rn 'input\\.ast' content/ skills/ docs/ examples/ apps/` 恰好四条命中,第四条是被排除的 releases 页 |\n\n**无断言被证伪。** 唯一偏差是行号漂移,已按内容搜索定位。\n\n## 改了什么\n\n三处删掉「the row-scoping predicate is in `ctx.input.ast`」半句,替换为**同一套措辞**的两句实情:\n\n1. 批量写**不向 hook 暴露**行级谓词 —— 它在引擎内部 `OperationContext.ast`(#2982),composed 的 RLS / sharing 过滤器由此绑定 driver 调用本身,handler 无法放宽;要限定批量,就在**调用方**用 `options.where`。\n2. `after*` 改为**按匹配行**派发,每行是单记录形状,`input.id` 在那里绑定(#5038)。\n\n措辞取自 PR #5668 落在 `packages/spec/src/data/hook.zod.ts:340-357` 的那段(「NOT reachable from `input` at all … scope the batch through `options.where` at the CALLER … dispatch ONCE PER MATCHED ROW」),不自行发明。\n\n### 两处刻意的局部差异\n\n- **issue 编号**:`skills/objectstack-data/` 两份文件本来就带编号引用(`data-hooks.md` 12 处、`rules/hooks.md` 2 处),故补 `(#2982)` / `(#5038)`;`content/docs/api/data-flow.mdx` 全文**零** issue 引用,那处按其本地惯例不引编号。\n- **不写仓内测试路径**:issue 建议「真值可直接引 `hook-input-shape-contract.test.ts`」。三份文件现有引用里没有任何一条指向仓内 `packages/**` 路径,且 skill 经 `npx skills add` 装到第三方项目后那种路径并不存在 —— 真值引用因此放在本 PR 正文,而不是写进发布给客户的文本。\n\n## 验证 —— 反向验证方向说明(重要)\n\n**本单没有可 revert 的代码**,所以模板里「恢复删掉的分支 → 新测试转红」那条对它不适用;照那个形状伪造一段证据比留空更糟。这里的真值验证是另一条:**我写进文档的每一句,都对应 PR #5668 已在 main 上的 pin 测试的一条绿断言**。全文实测:\n\n```\n✓ [#5273] a bulk write carries no `ast` on `input` > POSITIVE CONTROL — a read DOES carry `input.ast`\n✓ [#5273] a bulk write carries no `ast` on `input` > `beforeUpdate` on a bulk write has no `ast` key\n✓ [#5273] a bulk write carries no `ast` on `input` > `beforeDelete` on a bulk write has no `ast` key\n✓ [#5273] `input.id` on a bulk write > `beforeUpdate` leaves `id` undefined (the key exists; nothing binds it)\n✓ [#5273] `input.id` on a bulk write > `afterUpdate` fires per matched row, each naming its own `id`\n✓ [#5273] `input.id` on a bulk write > `afterDelete` fires per matched row, each naming its own `id`\n✓ [#5273] the single-record rows of the table > insert carries `data` — never `doc`\n✓ [#5273] the single-record rows of the table > a batch insert builds ONE context per row (#2922)\n✓ [#5273] the single-record rows of the table > a single-id update binds `id` and `data`\n✓ [#5273] the single-record rows of the table > a single-id delete binds `id` and carries no `data`\n✓ [#5273] a metadata-declared hook reads the same shape > `ctx.input.ast` is undefined on a bulk update through the flat-input proxy\n\nTest Files  1 passed (1)\n     Tests  11 passed (11)\n```\n\n句子 → 断言的映射:「不暴露谓词」← 第 2 / 3 / 11 条(含声明式作者那条路径,正是这句假话原本写给的读者);「`after*` 按行派发、`input.id` 绑定」← 第 5 / 6 条;第 1 条是 #4865 阳性对照(读路径确实带 `ast`),所以这是一次**测量**,不是对着一个到处都不发 `ast` 的引擎空过。\n\n### 门禁\n\n| 命令 | 结果 |\n|:---|:---|\n| `pnpm check:nul-bytes` | OK(5699 文件,另对三个改动文件自扫 `[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]`,零命中) |\n| `pnpm check:doc-authoring` | ✅ 362 files clean |\n| `pnpm check:docs-audit-scope` | ✅ 178 hand-written doc(s) in sync;releases 9 页 review-only |\n| `pnpm check:role-word` | OK(43 baselined,无新增) |\n| `pnpm check:skill-frame-sync` | ✅ 4 copies isomorphic(39 markdown 扫描) |\n| `pnpm check:adr-anchors` | OK(30 anchored) |\n| `--filter @objectstack/spec check:skill-docs` | ✅ Skill docs in sync |\n| `--filter @objectstack/spec check:skill-refs` | ✅ 9 generated files in sync |\n| `--filter @objectstack/spec check:skill-examples` | ✅ 205 prose examples type-check |\n| `pnpm lint`(eslint) | 0 |\n| `--filter @objectstack/objectql test` | **2084 passed (127 files)** |\n\n## changeset:无 → 已自行加 `skip-changeset` 标签\n\n按**实测先例**,不靠猜:\n\n- **`metadata.version` 不 bump。** 全仓历史里只有 `77adf297f`(#5451 / PR #5799)bump 过 skill 版本,那是维护者裁决的「决策框架两轴改三轴」——改的是已安装 agent 遵循的判定程序。而 `skills/objectstack-data/` 自身的内容修改先例是 `72c3c8613`、`cbb6a5ca2`、`28ad90e9a` 三次,**都没有 bump**;其中 `cbb6a5ca2` 改的正是本次这个 `references/data-hooks.md`,改的也正是同一类事情(把一个已不存在的字段从教学里去掉)。另外 `skills/README.md` 的 frontmatter 字段表根本没有收录 `metadata.version`,本单也未触碰任何 `SKILL.md`。\n- **不写 changeset,走 `skip-changeset` 标签。** 这是 `changeset-check` 自己的处方原文(#5292 / #4898 之后):路线 2「releases nothing(`.github/`、`.claude/`、`docs/`、`content/`、examples、tests-only 之类)→ 加 `skip-changeset` 标签 ← PREFERRED」;空 frontmatter changeset 是显式的 last resort(它是 changesets/action 的真实输入,全空集会静默绿着卡住 release)。本单零包源码改动,故取路线 2。\n\n同口径先例:PR #5668(#5273 的 spec 侧修复)也是 `skip-changeset`,无 changeset。\n\n## 顺带发现(PD #10,均未在本 PR 修)\n\n- **#5899** —— 同一句假话在 `packages/spec/src/data/hook.zod.ts:135-140` 的 `HookEvent` 枚举注释里还剩一处(写作「carried in `input`」,无 `.ast` 后缀)。PR #5668 改的是同文件 200 行外的契约表,这段自 `b49ccfdfe` 起未被触及,于是**同一个文件目前自相矛盾**。本单派发面明确排除 `packages/spec/**`,不顺手改。\n- **#5900** —— `references/data-hooks.md` 的 `condition` CEL 绑定一节(`:254-257`、`:274-278`)仍按 #5038 **之前**教:「`multi: true` 批量写 hook 只触发一次,`previous` 无从绑定」,并明令「never reach for `previous` in a hook that can fire on … a `multi: true` write」。这对 `before*` 成立,对 `after*` 不成立 —— `bulk-write-per-row-hooks.test.ts` 用的常量就是 `record.status == \"done\" && previous.status != \"done\"`,按行求值通过。危害方向与本单相反:那处是**禁止**平台已支持并已 pin 的模式。虽在本单文件面内,但属不同断言,按 PD #10 单独立项。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01GX3sL71LFq8m2usg6VqTSE)_"
+}

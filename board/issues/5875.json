@@ -1,0 +1,35 @@
+{
+  "number": 5875,
+  "kind": "pull_request",
+  "title": "fix(plugin-security): 被拒收的 capability 声明不再压掉派生占位,拒收诊断点名授权者 (#4967 Part 1/3)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T10:40:57Z",
+  "updated_at": "2026-08-06T11:00:16Z",
+  "closed_at": "2026-08-06T11:00:14Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T11:00:14Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5875",
+  "body": "Fixes 部分:#4967 Part 1/3(Part 2 → #5870)\n\n本 PR 只做 #4967 的 Part 1(拒收的声明不再压掉派生)与 Part 3(拒收诊断点名授权者)。\nPart 2(`stack.capabilities` 到达 registry、`_packageId` 打戳)已拆到 #5870 的 engine-core\n车道,本 PR 不碰 `packages/objectql` / `packages/runtime` / `packages/lint`。两半都合并后\n才应关闭 #4967,所以正文用 \"Part of\" 语义而非裸 `Fixes #4967`。\n\n## 前提复核(origin/main @ e2bfa6ce3)\n\nissue 描述的机制**仍然成立**,行号未漂:\n\n```\n$ git grep -n \"declaredNames.push\" origin/main -- packages/plugins/plugin-security/\norigin/main:packages/plugins/plugin-security/src/bootstrap-declared-capabilities.ts:174:    out.declaredNames.push(cap.name);\n```\n\n`upsertPackageCapability` 的三条拒收路径(curated 平台名 / 无归属包 / 他包所有)都在这行\n**之后**才决定,一行都不写;而 `security-plugin.ts` 把这份名单交给\n`bootstrapSystemCapabilities` 当\"别派生这些\"的跳过表。于是「无归属包」这条既没写行、\n又占住了名字 —— capability 在任何一行里都不存在。**写下这条声明比不写还糟**。\n\n## Part 1:上报「确认有行的名字」,不是「读到的名字」\n\n判据统一成一句(PM 方向的「派生后是否会 clobber 既有 authored 行」,逐名核实):\n**一个名字压掉派生,当且仅当本遍结束时 `sys_capability` 里确实有它的行。** 保护 authored\n行不被 humanize 占位刷掉,本来就是这份名单的全部用途;而一条没有行的拒收,不存在任何\n需要保护的 authored 行。\n\n三条拒收路径按此各自处置,理由都写进了代码:\n\n| 拒收路径 | 是否上报(压掉派生) | 理由(实测) |\n|---|---|---|\n| curated 平台名 | **是** | curated 那一遍无条件种这些名字,行必然存在;且派生路径根本够不到 curated 名(它已在 `byName` 里),所以这一票对门禁**是 no-op**,但答案是真的 |\n| 他包所有 / admin 自建 | **是** | 行存在,且 label/description 是**作者写的**;派生会把它们刷成 humanize 占位 —— 正是这份名单要防的事 |\n| 无归属包 | **仅当已有行时** | 没有行 = #4967 的洞,回落派生占位,和「从未写过这条声明」时一样 |\n\n顺带修了两处对账缺口:\n\n- 新增 `skippedUnowned` 计数器 —— 这条路径此前**一个计数器都没有**,这正是名单与计数器\n  对不上的原因。现在每条具名声明恰好落进一个计数器。\n- 「无归属包」的判断移到 `tryFind` **之后**。不这么做的话,一个无归属声明撞上 admin\n  自建行时会被放去派生,而派生会覆盖该行的 label/description —— 修一个洞、开一个新洞。\n  这条有独立的反向测试钉住。\n\n`declaredNames` 同时更名为 `materializedNames`(消费侧 `declaredCapabilityNames` →\n`materializedCapabilityNames`)。两个符号都不在包的 `index.ts` 导出面上,改名不影响外部\n契约;而这次的 bug 恰恰是「名字承诺的比值兑现的多」造成的,名字说实话是最便宜的防复发。\n\n## Part 3:级别不动,消息点名授权者\n\n按 #4632 的规则,这是**功能性降级**而非持久性失败,级别维持 `warn`。改的是内容:\nseeder 现在从 `bootstrapPermissionSets`(与派生所读的**同一个数组**,因此「谁授权」与\n「会不会被派生」出自一个来源)建 `capability → permission set` 索引,以参数逐次传入,\n⛔ 不引入任何模块级状态。三种真实后果各有措辞:\n\n```\n[security] declared capability \"showcase.export_data\" has no owning package\n  (granted by showcase_ops): falls back to the back-compat derived placeholder —\n  the grant resolves, but with no package provenance (ADR-0086 D3: uninstall undefined)\n\n  …(granted by no bootstrap permission set): nothing derives it either —\n  the capability is materialized nowhere\n\n  …(granted by showcase_ops): an existing sys_capability row already resolves it\n  and is left as-is — the declaration adds no package provenance\n```\n\nmeta 里另带 `grantedBy: ['showcase_ops', …]` 供结构化消费。\n\n## 一处必须说清的实测偏差(issue 措辞略强)\n\nissue 说「every `systemPermissions` grant naming it is inert」。实测**运行时判定并不查\n`sys_capability`**:`permission-evaluator.ts:267` 直接对 `ps.systemPermissions` 里的字符串\n取并集。所以修复恢复的是**注册表一侧**的 declared = enforced —— 能力有定义记录、在 Setup\n可见可管理、带 provenance、能被 ADR-0066 ⑨ lint 的第 4 类来源解析 —— 而不是「把一个原本\n不生效的授权变成生效」。issue 描述的核心缺陷(拒收 ⇒ 压掉派生 ⇒ 任何一行里都不存在 ⇒\n比不声明还糟)完全属实,只是后果的射程比原文窄一档。changeset 按实测写,没有跟着原文放大。\n\n## 测试(先红后绿,方向先声明后运行)\n\n新增 12 条,复用文件内既有的 `makeQl` 替身(**未新建 fake engine** —— 该文件在\n`engine-double-contract.baseline.json` 里是 `unguarded: 1` 的 shrink-only DEBT 条目,新增\n一个带 `update` 的替身会把它顶成 2 而门禁变红)。\n\n**反向验证 —— 事先预测的方向是「红」**:把删掉的肢体装回去(恢复无条件 push),预期\n3 条依赖修复的 Part 1 钉子转红,其余保持绿。实测完全吻合:\n\n```\n × NO OWNING PACKAGE + no row: falls through, so the derivation materializes it\n × is stable across boots: the refusal re-derives nothing and duplicates nothing\n × materializedNames reconciles with the outcome counters\n Tests  3 failed | 19 passed (22)\n\nAssertionError: expected [ 'showcase.export_data' ] to deeply equal []\n```\n\n两条 `REVERSE:` 开头的测试**按设计保持绿**:它们本来就硬编码旧名单/空名单,钉的是\n「旧行为会掉进洞」和「不检查既有行就会覆盖 admin 行」这两个反面事实,不随实现摆动。\n\n绿:\n\n```\npnpm --workspace-concurrency=2 --filter @objectstack/plugin-security test\n  Test Files  35 passed (35)      Tests  761 passed (761)\n\npnpm --workspace-concurrency=2 --filter @objectstack/plugin-security typecheck\n  tsc --noEmit  (clean)\n\npnpm --workspace-concurrency=2 --filter @objectstack/lint test        # 能力引用解析的消费侧\n  Test Files  61 passed (61)      Tests  1416 passed (1416)\n\nnode scripts/check-engine-double-contract.mjs  → OK (38 pinned, 165 DEBT, 2 exempt)\nnode scripts/check-nul-bytes.mjs               → OK (5697 files)\npnpm check:durability-log-level                → OK (24 seams, 级别未回归)\npnpm check:role-word / check:error-code-casing / check:authz-resolver → OK\neslint(4 个改动文件)                          → clean\n```\n\n## 文件面\n\n`packages/plugins/plugin-security/**`(实现 + 测试)+ 一个 changeset。未触\n`packages/objectql` / `packages/runtime` / `packages/lint` —— lint 对 `systemPermissions`\n的豁免依赖派生后门的存在,而本 PR 正是把这个后门修通,所以不需要动它。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JwwiU9bjhwy2SWj13ho8uv)_"
+}

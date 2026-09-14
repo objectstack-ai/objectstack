@@ -1,0 +1,36 @@
+{
+  "number": 5629,
+  "kind": "issue",
+  "title": "check:engine-double-contract 看不见「delete 少于两个形参」的假引擎 —— 实测 150 个 double 里 91 个(49 个文件)因此不在扫描面内",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T20:53:32Z",
+  "updated_at": "2026-08-06T00:56:15Z",
+  "closed_at": "2026-08-06T00:56:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5629",
+  "body": "发现于 #5197 的实施(收编 `service-automation/src/run-summary.test.ts` 的盲区实例)。按 Prime Directive #10 立单,不自行压级,不在 #5197 的 PR 里顺手修。\n\n## 机制\n\n`scripts/check-engine-double-contract.mjs` 的 `isEngineDeleteShape()` 第一行就是**形参个数**判据:\n\n```js\nfunction isEngineDeleteShape(fn) {\n  const params = fn.parameters ?? [];\n  if (params.length less-than 2) return false;   // ← 这里\n```\n\n它存在的理由是正当的:区分引擎 double 的 `delete(object, options)` 与驱动 double 的 `delete(object, id, options)`,靠第二个形参是 options 还是主键。但 `async delete() { return false; }` 这种**不声明任何形参**的假引擎在这一行就被判为「不是引擎 delete」而**整体退出扫描**——既不进 pinned,也不进 DEBT 台账,不产生任何输出。它不是「已登记的债」,是检测器够不到。\n\n`run-summary.test.ts` 就是这么躲过门禁的:#5197 里 baozhoutao 定位的那个 `async delete() { return false; }` 对谓词删除照单全收,而真引擎对同形状是 reject,门禁一路全绿。对应的生产后果不是假设——#5225 里 showcase 的 `showcase_inquiry_purge` 清扫流从上线起每次 `acted: 0`,单测却全绿。\n\n## 实测口径(不是估计)\n\n把门禁脚本**只**改这一行(`params.length less-than 2` 时返回 true,其余判据——sibling 集、`ID_PARAM`、pinned 判定——全部不动),在 `cc5b048a0`(origin/main)上跑:\n\n| | 现状 | 只放开形参判据 |\n|---|---|---|\n| 发现的 engine double | 59 个 / 58 文件 | **150 个 / 107 文件** |\n| pinned | 25 | 25 |\n| 台账内 | 34 | 125 |\n| 报 PINNED 问题的文件 | 1(#5604) | 53 |\n\n即**当前有约 91 个引擎 double(约 49 个文件)纯粹因为 `delete` 少于两个形参而不在扫描面内**。`run-summary.test.ts` 自己还剩 5 个(:193、:336、:364、:389、:797)——这些的 `delete` 恰好都没有被所在 flow 调用,所以是休眠的宽松,不是在飞缺陷;#5197 只收编了唯一被真正调用的那个(:416)。\n\n## 为什么算门禁缺陷而不是「刻意窄」\n\n脚本自述的 deliberately-narrow 是针对**接缝**(只管 delete dispatch、只管引擎 double),不是针对形参个数;而 DISCOVERED 不变量的原话正是这一类的判据:「a check runs, is green, and structurally cannot reach its subject」(#4868 家族)。零形参的 `delete` 是**扫描面缺口**,不是范围声明。\n\n## 候选修法与代价(供分诊定夺,勿在 #5197 里做)\n\n零形参的 `delete` 不可能是驱动 double —— 驱动的签名是 `delete(object, id, options)`,不声明形参就没有主键位;而引擎 / 驱动的另一个判据 sibling 集(`find`/`findOne`/`insert`/`update` 对 `create`/`bulkCreate`/`checkHealth`)在这种情况下仍然是决定性的。所以**形参数少于 2 时回落到 sibling 证据**,而不是直接 return false,是一个可辩护的收紧。\n\n代价必须一并算清:这会让 53 个文件立刻报红,需要一次性的收编 + MEASURED 台账条目分批落地(逐个判断是收编还是记债),不适合一个 PR 一把梭。#5619 / #4987 的 metadata-protocol 依赖线也会被这一批放大(那些包加 objectql devDependency 的路线本身还没定)。建议按包分批,先把 `delete` 真的被调用的那些收编。"
+}

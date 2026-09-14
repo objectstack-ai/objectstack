@@ -1,0 +1,34 @@
+{
+  "number": 5797,
+  "kind": "pull_request",
+  "title": "test(objectql,runtime): B 类替身改名 makeMemoryDriver→makeStubDriver(26 文件)+ Q2-B 保留注释",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T05:52:48Z",
+  "updated_at": "2026-08-06T07:02:52Z",
+  "closed_at": "2026-08-06T07:02:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T07:02:50Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5797",
+  "body": "Fixes objectstack-ai/objectstack#5784\n\nPart of #5704(批次 2)。维护者 2026-08-06 裁决 **Q1 = C / Q2 = B**。\n\n## 前提复核(对 origin/main `fc5f536`)\n\n派发时 PM 已实测到漂移,本单再次复核并确认:\n\n```\ngit grep -l \"makeMemoryDriver\" origin/main -- packages/objectql packages/runtime  →  26 个文件\n```\n\n- `packages/objectql` **24 个**(issue 正文的 survey 清单是 22 个 .test.ts;实际多出 `engine-data-events.bench.ts`(survey 只数 .test.ts)与基线 `a58c0b5` 之后新落地的 `engine-write-formula-hydration.test.ts`);\n- `packages/runtime` **2 个**(`sandbox/nested-write.canary`、`sandbox/nested-write.integration`)。\n\n**按 fetch 时的 grep 现状全量改名,26 个文件**。前提成立。\n\n## 任务 1:替身改名(纯机械,零行为变更)\n\n`makeMemoryDriver()` 是各文件自带的手写 stub,`packages/objectql` 与被改名的 `packages/runtime` sandbox 两侧都没有 `@objectstack/driver-memory` 依赖 —— 这个名字让 `grep -i memory` 系统性高估 driver-memory 的消费面(#5704 Phase 1 的核心发现)。\n\n- `makeMemoryDriver` → `makeStubDriver`(定义 + 全部调用点);\n- 承接返回值的局部变量 `const mem = ...` → `const stub = ...`(4 个文件),把最后一处标识符层面的 memory 指涉一并清掉;\n- 把「把 stub 描述成 memory driver」的散文改写为指涉 stub 本身(`minimal in-memory driver` → `minimal stub driver` 等,17 处)。\n\n### 两处判断留档(逐处判断的结果)\n\n**1. 刻意保留的散文 —— 描述真实驱动族语义分叉的,原样不动**,这是 issue 明确开的例外:\n\n- `query-expression-conformance.test.ts` 两处:一处说明「Mongo 与 memory driver 把点路径按行解析」,一处枚举「没有原生 `aggregate` 的驱动(driver-rest、driver-memory、部分 SQL 驱动)」—— 都在陈述真实驱动包的行为,不是把本文件的 stub 说成 driver-memory;\n- `engine-default-value-tokens.test.ts` 两处 `memory/mongodb` 驱动族对照同理。\n\n改完后,26 个文件里剩余的 `driver-memory` 字样只有上面枚举的那一处。\n\n**2. stub 对象上的 `name: 'memory'` 字段值不动。** 它不是散文,是驱动对外宣称的身份:引擎用它作 datasource 注册键、写进告警/事件载荷;`engine-autonumber-runtime-owned.test.ts` 更是刻意用 `name: opts.nativeAutonumber ? 'sql' : 'memory'` 让同一个 stub 分饰两个驱动族,那正是该文件的被测对象。改它属于行为变更,与本单「零行为变更」的边界冲突,故不改;若需要一并清理,应作为独立判断另行立单。\n\n## 任务 2:Q2-B 落地(仅注释)\n\n`packages/runtime/src/sandbox/undeclared-field-write-driver-split.integration.test.ts` 文件头新增注释块,写明:\n\n- 这是全仓**唯一刻意保留**的 driver-memory 测试消费点,**不是迁移遗漏**,不要「顺手做完」;\n- 保留理由:本文件钉的是产品分歧(写未声明字段 —— SQL 族整条语句失败 / 无 schema 族照单全收),钉分歧需要两条臂,SQL 臂是 `SqlDriver`,无 schema 臂需要一个「压根没有 schema 可校验」的后端,删了它护栏会静默塌成单边断言;\n- #5499 冻结令冻的是**投入**(缺陷修复、功能开发),作参照实现使用不是投入;\n- 引用 #5704 裁决(维护者 2026-08-06,Q2 = B),并记下推论:`packages/runtime` 的 driver-memory devDep 因此长期保留。\n\n⛔ 测试逻辑一行未改。\n\n## 验证(全部前台阻塞执行,共享 flock 串行)\n\n**用例计数与改前一致**(先 stash 改动跑基线,再 pop 跑同一组文件):\n\n| 范围 | 改前 | 改后 |\n|---|---|---|\n| objectql 受影响 23 个 .test.ts | `Test Files 23 passed / Tests 398 passed` | `Test Files 23 passed / Tests 398 passed` |\n| runtime nested-write 2 个 | `Test Files 2 passed / Tests 3 passed` | 同上(并入 sandbox 全绿) |\n\n**受影响包全绿:**\n\n```\npnpm --filter @objectstack/objectql test   → Test Files 124 passed (124) / Tests 2060 passed (2060)\npnpm --filter @objectstack/runtime  test   → Test Files 101 passed (101) / Tests 1458 passed (1458)\npnpm --filter @objectstack/objectql --filter @objectstack/runtime typecheck  → 两个包 Done\nvitest bench src/engine-data-events.bench.ts → 3 组 bench 全部 ✓(bench 不进 `vitest run`,单独冒烟)\n```\n\n**反向验证(方向为预测的「红」)。** 纯改名没有行为可钉,计数一致本身不能排除「测试根本没调到这个工厂」。于是各挑一个包,把**定义**改回旧名而调用点保持新名,预测应当见红:\n\n- `packages/objectql/src/secret-fields.test.ts` → `18 个用例 FAIL,ReferenceError: makeStubDriver is not defined`;\n- `packages/runtime/src/sandbox/nested-write.canary.test.ts` → `FAIL … \"makeStubDriver is not defined\"`。\n\n两处均按预测见红,还原后全绿 —— 改名后的工厂确实被执行,不是空转。\n\n补充说明(避免把绿读成比实际更强的证据):`packages/objectql` 与 `packages/runtime` 的 `tsconfig.json` 都 `exclude` 了 `**/*.test.ts`(既有 TEST_DEBT,`scripts/check-type-check-coverage.mjs:250` 有登记条目,不在本单范围),所以 tsc 并不覆盖被改的 .test.ts —— 这些文件的改名由 vitest 实跑证明;`engine-data-events.bench.ts` 不是 .test.ts,确实在 tsc 程序里,由 typecheck 覆盖。\n\n## 边界\n\n- diff = 27 个文件,全部是测试/bench 文件与注释,**零运行时代码、零 package.json**;\n- 未动批次 3(#5785)的 7 个 `*.integration.test.ts` —— 全仓 `makeMemoryDriver` 余量正好是这 7 个,等它们自己清;\n- 未动 A 类已迁文件、域外剔除 7 文件、cli/serve-driver-banner、service-datasource/sqlite-driver-fallback、spec 两文件;\n- 构建顺手重新生成的 `packages/spec/authorable-surface.base.json` 已剔出 diff(#5370 纪律)。\n\n## 申报文件面外的一处观察(未改,留给 #5704 收口)\n\n`packages/objectql/src/protocol-batch-atomic.test.ts:23` 的注释写着 stub 是「same shape `driver-memory` uses」—— 正是 issue 正文举的那句示例散文。但该文件在 #5704 survey 里被归为「纯注释 / 不动」的附录项,不在本单申报的 26 个文件面内(它没有 `makeMemoryDriver`),按「越出申报文件面即停」未改。同类的还有 `protocol-data.test.ts:759`。建议 #5704 收口阶段一并扫掉。\n\n## changeset\n\n测试与注释改动,不面向用户 → 按约定 `skip-changeset`(label 由 PM 代打)。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WyvqvKMG6asi9aXjKE6xtx\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WyvqvKMG6asi9aXjKE6xtx)_"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 5354,
+  "kind": "issue",
+  "title": "driver-memory 的两个过滤面对**比较值的种类**给出相反答案:`{f: /re/}`(正则)与 `{f: ['x']}`(数组)各差一个方向 —— 实测",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:on-hold"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T00:24:37Z",
+  "updated_at": "2026-08-06T07:06:07Z",
+  "closed_at": "2026-08-06T07:06:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5354",
+  "body": "修 #5324 / #5328 时给两个过滤面装上共用的**形状**门,顺手把一批比较值种类喂给两个面做对读,发现两处**语义**分叉(形状门不碰,也不该碰)。按 Prime Directive #10 单独记在这里,unassigned。\n\n## 实测原文\n\n单行数据 `{ id: '1', stage: 'won', score: 10 }`,`InMemoryDriver.find` vs `memory-matcher.match`,worktree 基于 `c7406b0ec` + #5324 的修复:\n\n```\n                     live(mingo)   ref(matcher)\n{ stage: /WON/i }    [\"1\"]         []          >>> 分叉\n{ stage: ['won'] }   []            [\"1\"]       >>> 分叉\n```\n\n两条**方向相反**,而且都不涉及 null / 缺字段(那一族是 #5299)。\n\n## 机制\n\n### 1. `RegExp` 比较值 —— mingo 当正则匹配,匹配器当结构相等\n\nmingo 按 MongoDB 语义把 `{field: /re/}` 读作正则匹配。`memory-matcher.checkCondition` 的分派只豁免 `Date` 和 `Array`:\n\n```ts\nif (typeof condition !== 'object' || condition === null ||\n    condition instanceof Date || Array.isArray(condition)) {\n    return value == condition;          // ← RegExp 不在这里\n}\nconst keys = Object.keys(condition);    // RegExp 的自有可枚举键是 []\nconst isOperatorObject = keys.some(k => k.startsWith('$'));   // false\nreturn JSON.stringify(value) === JSON.stringify(condition);   // 'won' vs '{}' → false\n```\n\n于是 `RegExp` 掉进结构相等分支,`JSON.stringify(/WON/i)` 是 `{}`,**永远不匹配**。\n\n顺带记录:`memory-driver.ts` 的 `normalizeFilterCondition` 明确把 `RegExp` 排除在算子对象之外并原样传给 mingo(`!(value instanceof RegExp)`),所以实时路径这一侧是**有意**支持的。\n\n### 2. 数组比较值 —— 匹配器靠 JS 松散相等意外匹配\n\n```ts\nArray.isArray(condition) → return value == condition;\n```\n\n`'won' == ['won']` 在 JS 里是 **true**(数组被 `toString()` 成 `'won'`)。所以匹配器把 `{stage: ['won']}` 读成了「等于 'won'」。mingo 按 MongoDB 语义读作「字段等于该数组,或字段是包含该元素的数组」,标量字段 `'won'` 都不满足 → `[]`。\n\n匹配器这一侧几乎肯定不是有意设计的 —— `['won','lost']` 会因为 `'won' == ['won','lost']`(`'won,lost'`)而不匹配,而 `['won']` 匹配;这是 `toString()` 的巧合,不是任何一种「数组比较值」语义。\n\n## 为什么是 bug\n\n1. **同一个包的两个面,同一个 filter,两个相反答案。** #5240 的裁决理由原话:「a backend whose two halves disagree about what a filter MEANS is exactly the divergence the ruling closes」。#5324 已经把**形状**统一到一个门里,但**语义**仍是两份实现。\n2. 匹配器是 `FILTER_LOGIC_CASES` held 的那一面,也是 `formula` 对照的那一面;实时路径是用户跑的那一面。哪一面「对」需要裁决,但两面同时对两个答案都言之凿凿是明确的缺陷。\n3. `{f: ['x']}` 这种写法在 AI 生成的元数据里很容易出现(作者想写 `$in` 却写成了裸数组)。今天它在两个后端上得到两个答案,且都不报错。\n\n## 为什么 #5324 没有一并修\n\n那一单加的是**形状**门(词汇表、`$between` 元数、组合子操作数、`{field:{}}`),对**语义**一律不碰 —— 它的实现注释里写明了「It decides SHAPE, never MEANING」。这两条是同一个比较值在两个求值引擎里的不同读法,修它要先裁决哪个读法是 canonical,那是一次协议裁决而不是 shape gate 能顺手带走的。\n\n## 建议(不代裁决)\n\n- **`RegExp` 比较值**:`FilterConditionSchema` 没有声明它(`$regex` 才是声明的写法)。可选:(a) 匹配器补上 `condition instanceof RegExp` 分支,与实时路径取齐;(b) 两个面都**拒收**裸 `RegExp`,要求写 `{$regex: …}` —— 与 #5324 「未声明的一律拒收」同向,但会打断今天在实时路径上能用的写法(需先清点是否有生产者)。\n- **数组比较值**:匹配器的 `value == condition` 松散相等几乎肯定该改。可选:(a) 与 mingo 取齐(等于数组,或字段数组包含该元素);(b) 两个面都拒收裸数组、要求 `$in`(`formula` 的 `evalField` 已经是这个态度:`if (Array.isArray(spec)) return false`,即 fail-closed)。注意 `formula` 在这一条上是**第三个**答案。\n\n无论走哪条,建议与 #5299 / #5298 / #5239 一起看 —— 它们是同一族「一个 filter,N 个后端 N 个答案」的裁决。\n\n## 未验证的部分\n\n我没有测 `driver-sql` / `driver-sqlite-wasm` / `driver-mongodb` 在这两个输入上的答案(`driver-sql` 对裸数组比较值会走 `coerceFilterValue` → knex 绑定,预期报错但**没实测**);也没有清点仓内是否真有生产者产出裸 `RegExp` 或裸数组比较值。严重度请 PM 按 triage 定,不代表我判断它低。\n\n关联:#5324 / #5328(实测出这两条的那一单;形状门已统一,语义未动)、#5299(同包两面在「字段没有值」上的三处分叉)、#5298、#5239(一致性表)、#5240(两面必须对 filter 的含义一致)。"
+}

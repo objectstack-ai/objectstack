@@ -1,0 +1,35 @@
+{
+  "number": 5796,
+  "kind": "pull_request",
+  "title": "fix(spec): protocol-17 rationale 改述 area 项级门禁的现状 —— #4722 已关闭「服务端不走 `areas`」那条 caveat (#5337)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T05:51:57Z",
+  "updated_at": "2026-08-06T06:19:59Z",
+  "closed_at": "2026-08-06T06:19:58Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T06:19:57Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5796",
+  "body": "Fixes #5337\n\n## 前提复核(先于实现)\n\n对 `origin/main`(`1624f4a`)逐处核实,三处全部命中,单据属实:\n\n| 位置 | 证据 |\n|---|---|\n| `packages/spec/src/migrations/registry.ts:672–674` | 跨行拼接,`grep \"One honest caveat\"` 命中(单行 grep 整句零命中,正是单据提醒的读数陷阱) |\n| `docs/protocol-upgrade-guide.md:173` | 完整携带该句,现在时 |\n| `.changeset/app-area-fail-open-gates-removed.md:54–58` | 同一句 |\n\n反证一侧同样核实:`packages/rest/src/rest-server.ts` 的 `filterAppForUser` 在 2441 行带 `[#4722]` 注释,2520 行 `filterAreas` 对每一棵 `areas[].navigation` 复用同一个 `filterNav`(2526 行),项级 `requiredPermissions` / `requiresService` 在两棵树被同等强制;2449–2452 行同时写明 `visible`(CEL)与 `requiresObject` 仍只在客户端求值。\n\n一处**补充发现**,与本单口径相关且已一并处理:仓库处于 changesets **pre 模式**(`.changeset/pre.json` 的 `mode: \"pre\"`),所以 `app-area-fail-open-gates-removed.md` 虽然已经进过 `packages/spec/CHANGELOG.md` 的 `17.0.0-rc.2` 段落,**文件本身仍留在 `.changeset/` 里**,并且仍是 v17 GA 发布说明的法定输入 —— 即 PM 裁定「一并改」的效力是真实的,不是改一份已消费掉的稿子。已发布的 `CHANGELOG.md` 属既成历史,本 PR **零改动**。\n\n## 改了什么\n\n### 1. `registry.ts` 的 protocol-17 rationale\n\n- **历史保留、时态锚定**:退役当时的状态叙述(为什么选 route B 而非 route A)一字未删,只把 `checks` / `walks` / `never reads` 改为过去时并前置 `At the time of the retirement`。理由:紧邻一句新写的「#4722 已关闭该边界」,前半段若仍是现在时,同一段落会自相矛盾。这也正是 PR #5336 在 `ui/app.zod.ts` docblock 里采用的处理(`682–689` 行:`at the time of the retirement … read … walked ONLY … never touched`),本 PR 按同一蓝本对齐。\n- **caveat 那句改述**:点名 #4722、点名两棵树与 `areas[].navigation`、点明被门禁的条目根本不进 `/meta` 响应体。\n- ⛔ **不复活 area 级键**:显式写「those stay retired and #4722 gave an area no gate of its own — what it enforces are the items inside one」,措辞不得读成退役被撤销。\n- ⛔ **不带歪 `visible` 的口径**:显式写 `visible`(CEL)与 `requiresObject` 在**每一层**仍只在客户端求值,所以绝不可到达浏览器的东西写在 `requiredPermissions`,永远不写在 `visible` —— 这是 #4722 之后**新出现**的误读风险(「area 现在有门了,那 `visible` 也行吧」),#5336 的处方同样把它钉住了。\n\n措辞蓝本:PR #5336 落地的 `AREA_VISIBLE_RETIRED` / `AREA_REQUIRED_PERMISSIONS_RETIRED`,以及 `packages/spec/liveness/app.json` 的 `areas.navigation` 记录。\n\n### 2. `.changeset/app-area-fail-open-gates-removed.md`\n\n同一句按 PM 裁定一并改(裁定否决窗口已过)。retirement kit 表格两行**未动** —— 它们本来就叫作者把门禁下沉到 area 的 `navigation` 项上,#4722 之后这条建议只是从「壳层强制」升级为「服务端强制」,原文无需改。⛔ `content/docs/releases/` 零改动。\n\n### 3. `docs/protocol-upgrade-guide.md`\n\n**未手改**,由 `pnpm --filter @objectstack/spec gen:upgrade-guide` 重新生成;`check:upgrade-guide` 复验 `up to date`。\n\n## 反向验证(方向:预测为红,实测为红)\n\n把 caveat 那句还原成改前措辞(仅这一句,其余不动)后重跑 `migrations.test.ts`:\n\n```\n× does not repeat the retired \"the server does not walk `areas`\" claim\n× names #4722 and the two trees an item gate is now enforced in\n× does not read as reviving the area-LEVEL keys\n× keeps `visible` client-side only — the half #4722 did NOT change\n Tests  4 failed | 68 passed (72)\n```\n\n第 5 条 `still carries the #4651 history the step exists to explain` **按预期保持绿**:它钉的是被保留的历史前半段,而反向实验只还原了 caveat 一句 —— 这条本就不该随之变红,如实记录而非凑成「五条全红」。\n\n一条 pin 在编写过程中被实测证伪并按事实修正:最初写的 `not.toMatch(/enforced by the shell only/i)` 会连**引用**旧论断的历史陈述一起判红,而新措辞刻意保留了这句引用(读者需要知道旧建议作废,而不是让处方对 `areas[]` 悄悄闭嘴 —— 那会让他以为旧边界仍然成立)。改为钉**时态**:`not.toMatch(/is enforced by the shell only/i)` + `toMatch(/was CLOSED by #4722/)`。\n\n## 测试\n\n```\npnpm --filter @objectstack/spec test\n  Test Files  319 passed (319)\n       Tests  8149 passed (8149)\n\npnpm --filter @objectstack/spec typecheck\n  tsc --noEmit ✓\n  check:test-typecheck: OK\n\npnpm --filter @objectstack/spec check:upgrade-guide\n  protocol-upgrade-guide.md is up to date.\n\nnode scripts/check-nul-bytes.mjs        → OK (5678 tracked text files)\nnode scripts/check-changeset-fixed.mjs  → ✓ fixed group in sync (70 packages)\nnode scripts/check-release-notes.mjs    → OK\nnode scripts/check-doc-authoring.mjs    → ✓ 362 files clean\n```\n\n## Changeset\n\n**带自己的 changeset**(`patch` on `@objectstack/spec`),不走 `skip-changeset`。理由:`MIGRATIONS_BY_MAJOR[17].rationale` 是 `@objectstack/spec` 导出的运行期数据(`os migrate meta` 打印给消费者),`docs/protocol-upgrade-guide.md` 是面向读者的投影 —— 两者都不是纯测试/纯工作流改动。\n\n## 落地前注意\n\n- ⚠️ #5358:任何 spec build/gen 会顺带改写 `packages/spec/authorable-surface.base.json`。已逐文件核 `git status`,该文件**未出现**在本 PR 中(`gen:upgrade-guide` 单独跑不触发它)。\n- ⚠️ `docs/protocol-upgrade-guide.md` 在 `.gitattributes` 的 os-regen 驱动路径上。合入 main 时按四步走:`git merge origin/main` → `git checkout origin/main -- 生成物` → **先提交 merge** → 整体重新生成 → 断言兄弟条目仍在。⛔ merge 未提交时不得跑 gen 脚本(#5370)。\n\n## 越界\n\n本 PR 只碰 `packages/spec/src/migrations/registry.ts`、其生成物、两份 `.changeset/*.md` 与 `migrations.test.ts`。`packages/spec/src/ui/app.zod.ts` / `app.test.ts` 只读未改(PR #5336 已落地)。未发现需另开单的越界缺陷。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01559M8FVm6W6vDLABL3jvdW\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01559M8FVm6W6vDLABL3jvdW)_"
+}

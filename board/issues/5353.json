@@ -1,0 +1,35 @@
+{
+  "number": 5353,
+  "kind": "issue",
+  "title": "observation: `inferCube` 仍把数组 `where` 当「不是筛选」跳过 —— #5334 之后这个 `!Array.isArray` 守卫已经过时",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T00:23:52Z",
+  "updated_at": "2026-08-06T04:59:27Z",
+  "closed_at": "2026-08-06T04:59:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5353",
+  "body": "实现 #5334 时路过,记录一条**观察类**发现(今天没有用户能撞到的行为差异),unassigned、不进队列。\n\n## 位置\n\n`packages/services/service-analytics/src/analytics-service.ts`,`inferCube`(为没有注册 Cube 的自由查询即席合成一个 Cube):\n\n```\nif (query.where && typeof query.where === 'object' && !Array.isArray(query.where)) {\n  // Canonical FilterCondition: top-level keys ... are field names.\n  for (const key of Object.keys(query.where as Record< string, unknown >)) { ... }\n}\n```\n\n`!Array.isArray(query.where)` 这个守卫写于「数组 `where` 不是筛选」的年代。#5334 之后数组 `where` 是**真筛选**(`isFilterAST` → `parseFilterAST` 下沉),于是:数组写法的筛选所涉字段不会被种进即席 Cube 的 `dimensions`,对象写法的会。同一份筛选,两种写法,合成出两个不同的 Cube。\n\n## 为什么今天没有可观察后果(所以是 observation 类)\n\n`NativeSQLStrategy.resolveFieldSql` 在 cube 里找不到该 member 时**回落到裸列名**,所以 WHERE 子句照样编译、照样绑值、取到的行一致(#5334 的等价性用例覆盖的正是这条)。差异只落在即席 Cube 的 `dimensions` 清单上,而该清单在这条路上仅用于字段元数据与列歧义限定 —— 即席 Cube 是单表、无 join,没有歧义可限定。\n\n会变成真缺陷的条件:即席路径将来长出 join,或者字段元数据/歧义限定开始依赖这份 `dimensions`。\n\n## 建议\n\n守卫改成「先下沉再取键」(复用 #5334 落在 `filter-normalizer.ts` 的那次下沉,或直接 `parseFilterAST`),而不是把数组当非筛选跳过。规模很小,但**不该顺手塞进 #5334 的 PR** —— 那单的裁定范围就是 `normalizeAnalyticsFilterTree` 一处。\n\n搜过 open issues(`inferCube` / analytics where dimensions),无同题单。\n\n关联:#5334、#5158(拍板 C)、#5329。\n"
+}

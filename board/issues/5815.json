@@ -1,0 +1,35 @@
+{
+  "number": 5815,
+  "kind": "issue",
+  "title": "`getReadFilter` never applies the `controlled_by_parent` derivation — the analytics read-scope path is missing the master half entirely",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T06:19:40Z",
+  "updated_at": "2026-08-06T08:00:55Z",
+  "closed_at": "2026-08-06T08:00:55Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5815",
+  "body": "Found while implementing #5386 (`controlled_by_parent` master accessibility). Filed unassigned, out of that PR's scope — a different defect in the same family.\n\n## The gap\n\n`SecurityPlugin.getReadFilter` is the read-scope provider bound by the analytics / raw-SQL path (the surface that bypasses the engine and has no other source of scope). Its own doc comment states the contract:\n\n> `getReadFilter` promises \"the same filter the engine middleware AND-s into every find\".\n\nThe engine middleware ANDs **three** things into `ast.where` for a read (`packages/plugins/plugin-security/src/security-plugin.ts`, step 3 of the CRUD middleware):\n\n1. `computeRlsFilter(...)` — tenant Layer 0 + RLS policies;\n2. `computeControlledByParentFilter(...)` — ADR-0055, `masterFK IN (accessible master ids)`;\n3. plugin-sharing's own filter, contributed by the sibling middleware.\n\n`getReadFilter` composes **only 1 and 3** — `andComposeLayers(filter, sharingFilter)`. `computeControlledByParentFilter` is not called anywhere on that path (`git grep -n computeControlledByParentFilter origin/main` returns the middleware call sites and nothing else).\n\n## Consequence\n\nFor an object whose `sharingModel` is `controlled_by_parent`, the analytics path applies **no master derivation at all**. Because such an object also carries no authored RLS by design (that is the whole point of the model — access is derived, not authored) and maps to `public` in plugin-sharing's `effectiveSharingModel`, halves 1 and 3 both commonly return `null`, so the composed scope is `undefined` — no predicate. A caller who cannot read a single master row can still `COUNT(*)` / `GROUP BY` its detail rows. Line-item objects are the usual shape here, so the grouped values are per-line prices and discounts.\n\nThis is the same failure shape #4467 fixed for the OWD/sharing half of that method (a member could `COUNT(*)` an owner-private object they held no share on), one layer over.\n\n## Why it is separate from #5386\n\n#5386 is about *which inputs* the derivation folds into master accessibility (it folded RLS only; PR for it folds in owner scope and `sys_record_share`). This one is about the derivation **not running at all** on a second read surface. Fixing #5386 does not touch it: `getReadFilter` still never calls the function.\n\n## Suggested direction\n\nCall `computeControlledByParentFilter` inside `getReadFilter` and AND it into the same composition, so the two read surfaces enforce identical scoping — the reason `computeRlsFilter` was extracted and shared in the first place. Note the delegator (`onBehalfOf`) branch already fails closed on that path, so only the ordinary caller case needs the extra layer. A pin test should assert `getReadFilter` and the middleware produce the same visible-row set for a `controlled_by_parent` object.\n\n## Acceptance\n\n- `getReadFilter` on a `controlled_by_parent` object returns a scope that restricts to details of masters the caller can reach;\n- a test pins agreement between the middleware-injected `ast.where` and `getReadFilter`'s output for the same object + context;\n- a resolution failure on the added layer denies (fail-closed), matching the surrounding method.\n"
+}

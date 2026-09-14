@@ -1,0 +1,37 @@
+{
+  "number": 4696,
+  "kind": "issue",
+  "title": "build-docs.ts 的 schema→页面索引按「裸名字」全局建表,同名跨 category 的 schema 会被归到错误的页面",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T18:57:56Z",
+  "updated_at": "2026-08-06T07:41:51Z",
+  "closed_at": "2026-08-06T07:41:50Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4696",
+  "body": "在 #4684(C9)实施过程中实证发现的一个独立缺陷。**未在该 PR 内修复**(范围外,按第十条军规立单),**未认领**。\n\n## 现象\n\n`packages/spec/scripts/build-docs.ts` 的 `scanCategories()` 用**裸 schema 名**做全局 key:\n\n```ts\nfor (const { slug, rel } of collectZodFiles(dir)) {\n  // …\n  while ((match = regex.exec(content)) !== null) {\n    const finalName = schemaNameFromExportKey(match[1]);\n    schemaCategoryMap.set(finalName, category);   // ← key 只有名字,没有 category\n    schemaZodFileMap.set(finalName, slug);        // ← 同上\n  }\n}\n```\n\n两张表都不带 category 前缀,所以**同名但分属不同 category 的两个声明会互相覆盖**,谁赢取决于 `CATEGORIES` 的遍历顺序。赢的那一侧的 **slug** 会被用来决定输的那一侧的**页面归属**。\n\n## 实证\n\n`RateLimitConfig` 此前在 `integration/connector.zod.ts` 与 `shared/http.zod.ts` 各有一个声明(#4684 处理的双源)。`shared` 后遍历,于是 `schemaZodFileMap['RateLimitConfig'] = 'http'` 覆盖了 `'connector'`,结果 connector 侧那个 schema 被写进了一个**根本不存在的源文件对应的页面**:\n\n- `content/docs/references/integration/http.mdx` —— 目录下**没有** `integration/http.zod.ts`;\n- 该页面只有一个 section,就是声明在 `integration/connector.zod.ts` 里的 `RateLimitConfig`;\n- `content/docs/references/integration/meta.json` 因此也长期列着一个 `\"http\"` 页。\n\n#4684 把 connector 侧改名为 `ConnectorRateLimitConfig` 后名字不再碰撞,`gen:docs` 自动把它归位到 `integration/connector.mdx`,并**删除**了 `integration/http.mdx`、移除了 meta 里的 `\"http\"` 条目 —— 这就是覆盖关系的直接证据(改名是唯一变量)。\n\n## 为什么值得单独修\n\n1. **它不随双源账清零而自动消失。** 今天 `dual-source-exports.baseline.json` 还剩 16 条,其中 `ConflictResolution` / `DataSyncConfig` / `FieldMapping` / `EnvironmentArtifact` / `PackageDependency` / `TenantPlan` 等都是跨 category 同名,**每一对都可能正在被错误归页**(未逐一核实,建议开工时先枚举)。\n2. **它会让文档说假话。** 页面里的 `Source:` 指针与 `import { X } from '@objectstack/spec/<category>'` 示例是按归页结果拼的,归错页 = 指向一个不含该声明的文件。这属于 AGENTS.md「Machine-readable surfaces must not lie」同一类。\n3. **没有任何门禁能发现它。** `check:docs` 比较的是 `build-docs.ts` 自己的输出与磁盘,生成器错了它就一起错(和 #4592 里 `replace('Schema','')` 那个 bug 同源:两个生成器共享 `lib/schema-name.ts` 是为了不再漂移,但**索引的 key 结构**没有一起收敛)。\n\n## 建议方向(待裁决,不要直接猜)\n\n把两张表的 key 从 `name` 改成 `` `${category}/${name}` ``(与 `build-schemas.ts` 的 def key 口径一致),并在发现同 category 内重名时**报错而不是覆盖**。需要确认的是:跨 category 的**合法 re-export**(同一个声明,多个入口)在新口径下会得到多个条目,归页策略要明确 —— 是按声明所在文件归一次、其余入口只出 import 示例,还是每个 category 各出一页。这会影响 `content/docs/references/**` 的页面集合与 `meta.json`,属于文档 IA 决定。\n\n关联:#4684(发现处)、#4535(双源主单)、#4592(同一对生成器的另一处 key 处理 bug)、#4446(dual-source 门禁)。"
+}

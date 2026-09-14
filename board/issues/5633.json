@@ -1,0 +1,36 @@
+{
+  "number": 5633,
+  "kind": "issue",
+  "title": "`flow-runas-unscoped` (severity error) still searches only top-level nodes — a scheduled flow whose data ops all live in a `loop` body passes the build and is refused at run time",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T21:02:12Z",
+  "updated_at": "2026-08-06T01:20:51Z",
+  "closed_at": "2026-08-06T01:20:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5633",
+  "body": "Found while implementing #5383 (making the flow lint rule family descend into nested regions). Filed unassigned for triage, deliberately **out of scope** for that PR.\n\n`Blocked-by: #5383` — the fix needs the per-region walk that #5383 introduces.\n\n## What\n\n#5383 widened the flow anti-pattern family to every graph in a flow. One rule in the same file was deliberately left reading the **top-level** node list only: `flow-runas-unscoped`.\n\n`packages/lint/src/lint-flow-patterns.ts` (after #5383):\n\n```\nconst runAs = typeof flow.runAs === 'string' ? flow.runAs : 'user';\nconst userLessKind = userLessTriggerKind(flow, startCfg);\nif (userLessKind && runAs !== 'system') {\n  const dataNode = nodes.find((n) => DATA_NODE_TYPES.has(...));   // top-level `nodes` only\n```\n\n`userLessTriggerKind` and `flow.runAs` are genuinely flow-level and correct where they are. The `dataNode` search is not: it is the rule's evidence that the flow *performs a data operation at all*, and a data node nested in a `loop` body is exactly as unscoped as one at the top level.\n\n## Why it matters more than the other family members\n\nThis rule is `severity: 'error'`, and its bar (stated at the top of that module) is \"the runtime REFUSES\". Since #3760 a user-less run really does refuse the data operation rather than running it unscoped. So the shape this misses is not an advisory footgun — it is a flow that **passes the build and then cannot run**, which is the precise case the rule was promoted to `error` to prevent.\n\nIt is also the single most common shape for a scheduled flow: query a set, loop it, write per item. The write is almost always inside the loop.\n\n## Measured\n\nSame flow, `runAs` unset (so the spec default `'user'`), schedule trigger, one `update_record` — moved between the two positions and nothing else changed:\n\n```\nupdate_record at TOP level   -> 1 finding(s) [error]\nupdate_record INSIDE loop body -> 0 finding(s)\n```\n\n## Suggested direction\n\nThe walk is already there after #5383. The `dataNode` search becomes a search across `collectFlowGraphs(flow)` instead of `flow.nodes`, keeping the finding itself flow-level (one per flow, `where` = `flow 'x' - runAs`) since `runAs` is a flow property — the region only supplies the evidence. Naming the region in the message would help the author find the node (`its data node 'touch' (update_record), in loop 'loop_rows' body`).\n\n## Why it was not folded into #5383\n\nTwo reasons, both worth a maintainer's decision rather than a dev's guess:\n\n1. **It widens a build-GATING rule.** Every flow this newly catches goes from green build to failed build. That is the correct outcome — those flows cannot run — but it is a release-note-worthy change with a real blast radius, unlike the advisory members of the family.\n2. #5383 enumerated the affected rules and this was not among them, so folding it in would have been scope creep on a change that already touched the whole family.\n\nVerified against the repo's own example apps: `app-showcase` / `app-crm` / `app-todo` produce **zero** findings from this rule today, nested or not, so no in-tree app would break. The blast radius is entirely in customer / template metadata.\n\n## Related\n\n- #5383 — the region-descent this depends on.\n- #3760 — promoted this rule to `error`; the runtime refusal it is grounded in.\n- #1888, ADR-0049, ADR-0073 D5 — the underlying scoping contract."
+}

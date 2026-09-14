@@ -1,0 +1,35 @@
+{
+  "number": 4923,
+  "kind": "issue",
+  "title": "ADR-0087 别名转换会把「被遮蔽的旧拼法」留在存量元数据里 —— 节点 config 收紧后它从静默丢弃变成执行期硬拒",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T16:28:39Z",
+  "updated_at": "2026-08-06T03:10:10Z",
+  "closed_at": "2026-08-06T03:10:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4923",
+  "body": "发现于 #4001 批 9（PR 见下），**不在该批范围内，未修**。\n\n## 事实（实测,非阅读推断）\n\n`renameConfigKey`（`packages/spec/src/conversions/walk.ts:235`）在**规范键已存在**时什么都不做:\n\n```ts\nexport function renameConfigKey(node: Dict, from: string, to: string): Dict | null {\n  const config = node.config;\n  if (!isDict(config)) return null;\n  if (!(from in config) || config[from] == null) return null;\n  if (config[to] != null) return null; // canonical already wins — nothing to do\n  …\n}\n```\n\n于是每一条走 `renameFlowConfigAliases` 的 ADR-0087 D2 转换,在「作者两种拼法都写了」时,**把退役的那个键原样留在存量元数据里**。这不是猜测——转换自己的 fixture 就把它写成了预期的 `after` 形状:\n\n- `flow-node-crud-object-alias`：`after` = `{ objectName: 'task', object: 'ignored' }`（`registry.ts:931`）\n- `flow-node-map-flow-alias`：`after` = `{ collection, flowName: 'per_row', flow: 'ignored' }`（`registry.ts:1283`）\n- `flow-node-subflow-flow-alias`、`flow-node-notify-config-aliases`(含 `source`) 同形\n\n而且这种情况**一条 notice 都不发**（`emit` 只在真的改名时调用）。\n\n## 为什么现在才要紧\n\n批 9 之前:遮蔽下来的旧键在执行期 parse 被 `.strip` 静默删掉,节点照跑。批 9 把这些 config 契约收成 strict 之后:\n\n- **`notify` / `http` / CRUD 四件套 / `screen` / `map`** —— 这些节点类型在 `registerFlow()` 就已经被 #4277 的描述符键闸门硬拒了,所以遮蔽键**今天就已经是注册期硬错**,批 9 没改变它们的可达行为;\n- **`script` / `subflow`** —— schemaless 类,`validateNodeConfigKeys` 按构造跳过它们。批 9 之后一个存量 `{ flowName, flow }` 的 subflow 节点会在**执行期被拒为 guard**（不可经 `fault` 边路由）,而它今天是能跑的。\n\n批 9 的实测:三个示例 app 的 build 产物共 160 个 flow 节点、52 个带批 9 契约,**0 例命中**——所以这不是一个已发生的回归,是一个存量元数据里可能存在、我们无法从仓库内证伪的形状。\n\n## 需要裁定的是契约,不是实现\n\n两个方向都自洽,**该由维护者定**:\n\n- **A —— 转换负责删掉被遮蔽的旧键**（并发一条 notice）。理由:一个「把旧拼法改写成新拼法」的转换,留着旧拼法就是没转换完;ADR-0087 的承诺是「存量数据继续加载」,而收紧之后「继续加载」要求转换产出契约认得的形状。代价:改的是 ADR-0087 注册表行为,5+ 条 fixture 的 `after` 与 `expectedNotices` 都要动,而且它把「作者写了两个名字」这件事重新变回一次静默的择一(只是多一条 notice)。\n- **B —— 保持现状,让 strict 拒绝并带处方**（批 9 已按这个前提写了 guidance:每条都同时说清「改名」和「删掉死掉的那个孪生键」）。理由:作者写了两种拼法,元数据本身是有歧义的,平台静默择一正是 #4001 要杀的形状。代价:一个今天能跑的存量 flow,在 17 上会硬停——而 ADR-0087 的存在就是为了不发生这件事。\n\n倾向 **A + 保留 B 的处方**:转换把死掉的孪生键删干净(数据在静止态就是规范的),strict 的 guidance 依然留着,给那些不经加载路径直接 parse 契约的调用方。但这条改的是 ADR-0087 注册表的语义,按仓库规矩(「一个已接受的 ADR 到有新 ADR 说话为止都有约束力」)不该由收紧批次顺手带过。\n\n## 建议动的文件（仅清点,未实施）\n\n| 文件 | 动作 |\n|---|---|\n| `packages/spec/src/conversions/walk.ts` | `renameConfigKey` / `renameKey` 在遮蔽情况下删除 `from` 键并返回新 dict（而不是 `null`） |\n| `packages/spec/src/conversions/registry.ts` | 5 条转换的 fixture `after` 半边 + `expectedNotices`;`liftNotifySourceShape` 的遮蔽分支同理 |\n| `packages/spec/src/conversions/conversions.test.ts` | 现有断言记录的是当前的「留着」行为,需改成断言删除 |\n\n## 相关\n\n- #4001 批 9（本发现的来源;三个 config 契约已收紧,guidance 已按 B 写好）\n- ADR-0087 D2;#3903（`applyConversionsToStoredItem` 重放完整链)\n- #4277（`registerFlow` 的描述符键闸门,以及它对 schemaless 类的构造性豁免）"
+}

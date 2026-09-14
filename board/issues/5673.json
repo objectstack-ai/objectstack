@@ -1,0 +1,36 @@
+{
+  "number": 5673,
+  "kind": "issue",
+  "title": "NODE_ENV 未设置时 /discovery 广播 environment=development,而 os start 默认 NODE_ENV=production、CLI doctor 也按 production 解析",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T23:48:00Z",
+  "updated_at": "2026-08-06T13:07:46Z",
+  "closed_at": "2026-08-06T13:07:46Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5673",
+  "body": "发现于 #4828 的实施(界外发现,查重无命中故新开;**未认领**)。\n\n## 现象\n\n同一个「未设置 `NODE_ENV`」的事实,仓里有两套相反的默认:\n\n| 位置 | 未设置 `NODE_ENV` 时的解读 |\n|:---|:---|\n| `packages/cli/src/commands/` 的 `doctorNodeEnv()` | `production`(见 `doctor-env-provenance.test.ts`:`expect(doctorNodeEnv({})).toBe('production')`) |\n| `seed-loader.ts` 的 `resolveSeedEnvFromNodeEnv()` | `undefined` —— 显式表示「宿主没说自己在哪」,由调用方决定含义 |\n| discovery 生产者 | `development`(#4828 之前是 `getEnv('NODE_ENV', 'development')` 直塞,之后是同一默认经映射) |\n\n`seed-loader.ts` 的注释还写着 `os start` 会把 `NODE_ENV` 默认成 `production`。\n\n## 为什么值得单开\n\n`environment` 是**机器可读面**上的字段,客户端拿它回答「我在不在生产环境」。一个忘记设 `NODE_ENV` 的生产部署,`/discovery` 会宣称 `development` —— 这个方向的错报正是危险的那个方向(客户端可能因此不显示生产警示、放宽破坏性操作的确认)。\n\n#4828 的映射函数刻意保留了这个既有默认,没有顺手改:改默认是行为变更,会影响所有本地开发流程(本地开发通常不设 `NODE_ENV`,一改就全都变成 `production`),不属于该单裁定范围。所以那里只保证「识别不了的拼法绝不**宣称** production」,没有解决「未设置时该信谁」。\n\n## 可能的处置(需要维护者定)\n\n1. 三处统一到 `production`(最保守的安全默认),代价是本地开发不设 `NODE_ENV` 时 discovery 会说 production;\n2. 三处统一到「未知」这个显式状态 —— 但 `DiscoverySchema.environment` 是必填枚举,没有「未知」成员,需要先改契约;\n3. 维持现状,但把差异写进文档,并要求生产部署显式设置 `NODE_ENV`(可以加一条 `doctor` 检查)。\n\n第 2 条会改动公开契约形状,故不猜。\n\n参考:#4828(discovery 面的枚举映射),Prime Directive #9(`NODE_ENV` 是第三方边界上的既有例外)。\n"
+}

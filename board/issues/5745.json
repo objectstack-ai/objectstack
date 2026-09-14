@@ -1,0 +1,35 @@
+{
+  "number": 5745,
+  "kind": "issue",
+  "title": "[#5563 附带裁决] SaveMetaItemResponseSchema 补齐实现实际返回的字段(version / seq / state / projectionApplied)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T03:42:04Z",
+  "updated_at": "2026-08-06T10:43:08Z",
+  "closed_at": "2026-08-06T10:43:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5745",
+  "body": "Part of objectstack-ai/objectstack#5563\n\n维护者 2026-08-06 对 #5563 的**附带问题**裁定(裁决评论见该单):`SaveMetaItemResponseSchema` 按「**先补齐 spec 字段**」处置 —— 实现实际返回的 `version` / `seq` / `state` / `projectionApplied` 补进 spec 声明,让 schema 描述真实返回的全集而不是真子集;`version` 正是 ADR-0008 OCC(If-Match)链在用的字段,补进声明同时是给 OCC 链的承载正名。\n\n本单是 contract-first 的 spec 半边,落点 `packages/spec`,按跨座位转移协议转 spec 座位队列(`domain:*` 标签待分诊座位补)。**不阻塞 #5563 主问题**(getItem 信封收敛),两链独立。\n\n## 范围\n\n- `SaveMetaItemResponseSchema` 补 `version` / `seq` / `state` / `projectionApplied` 四字段(逐个对照实现真实产出定 optional/required 与类型;来源证据:#5563 决策评论「实现多发 version/seq/state/projectionApplied」,以 origin/main 实测为准,若实现面已变以实测收窄);\n- 生成物按 spec 车道惯例整体重生成(os-regen 八路径纪律)。\n\n## 下游(拍板后由 cli 车道吸收,不在本单)\n\nspec 字段落地后,`client.meta.saveItem` 的返回类型注解在 cli 车道跟进(#5545 家族的 saveItem 半边)。\n\n## 验收\n\n- schema 与实现真实返回逐字段一致(不再是真子集),`pnpm --filter @objectstack/spec test` 绿;\n- 若发现实现返回的字段与四者有出入,如实在 PR 正文记录并以实测为准。\n\n关联:#5563(裁决锚点)、#5545(下游)、ADR-0008(OCC)。"
+}

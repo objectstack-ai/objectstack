@@ -1,0 +1,34 @@
+{
+  "number": 5194,
+  "kind": "issue",
+  "title": "finding(objectql): LifecycleService 的无 guard reap 每次 sweep 发一条无上限 DELETE —— 首次给存量大表加 retention 时是一条长事务",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T08:28:31Z",
+  "updated_at": "2026-08-06T04:20:09Z",
+  "closed_at": "2026-08-06T04:20:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5194",
+  "body": "观察类 finding,来自 #5179 的实现复核(PM 在派发里专门问过「清理批量要有上限」)。**今天没有用户会撞到**,但记录在案由 PM 定级。\n\n## 事实(`origin/main`)\n\n- `LifecycleService.reap()`(`packages/objectql/src/lifecycle/lifecycle-service.ts:777-783`)在**没有注册 reap guard** 的对象上,一次 sweep 发的是单条 `engine.delete(object, { where: { created_at: { $lt: cutoff }, ...onlyWhen }, multi: true })` —— 匹配多少行删多少行,没有 limit、没有分批;\n- 分批只存在于两条旁路:`guardedReap`(`REAP_GUARD_BATCH_SIZE = 500` × `REAP_GUARD_MAX_BATCHES_PER_SWEEP = 20`,`:924`)和 Archiver(`ARCHIVE_BATCH_SIZE = 500` × 20)。二者的注释都写明分批的理由是「bound one sweep's work, drain the backlog across sweeps」—— 同一个理由对无 guard 的 reap 同样成立,只是没落实;\n- 后果场景:一张已经积了大量行的表**第一次**被加上 retention(正是 #5179 对 `sys_job_queue` 做的事,也是任何新声明 lifecycle 的表的必经一次),那次 sweep 会发一条扫遍历史行的 DELETE。SQLite 上是一条长写事务(单连接池期间其它写者等锁),Postgres 上是一次大 autovacuum 债务。\n- 稳态下没有问题:每小时一扫,增量很小。\n\n## 为什么单独记而不是在 #5179 里改\n\n这是 `LifecycleService` 对**所有** lifecycle 表的共性行为(`sys_activity` 14d、`sys_job_run` 30d 一直如此),不是队列表特有;在 #5179 的文件面(`packages/services/service-queue`)里也够不着。若要修,合适的形状是给无 guard 的 reap 也套上 `BATCH × MAX_BATCHES_PER_SWEEP` 的既有姿态(需要 driver 侧支持带 limit 的 delete,或退化为「读 id → 按 id 删」),代价是要在两种删除路径之间做取舍 —— 值得单独定夺,别当成 #5179 的搭车。\n\nFound-during: #5179 / PR #5192\n"
+}

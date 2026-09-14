@@ -1,0 +1,33 @@
+{
+  "number": 4860,
+  "kind": "issue",
+  "title": "spec `QueryAST` 要求冗余的 `object` 属性，迫使 cloud 侧每个驱动读取点都 `as any` —— 类型检查因此整体失效，`$like` 一类非法运算符得以存活到运行时",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T10:31:33Z",
+  "updated_at": "2026-08-06T01:14:21Z",
+  "closed_at": "2026-08-06T01:14:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4860",
+  "body": "跨分片移交：`Part of objectstack-ai/cloud#1053`（cloud 分片 PM 转入——落点是 `packages/spec` 的查询契约，归主 backlog）。\n\n## 现象\n\n`IDataDriver.find(objectName, query)` 把对象名作为**第一参数**接收，但 `query` 的类型 `QueryAST` 又**要求**一个 `object` 属性。于是任何按自然写法调用的代码都编译不过：\n\n```\nTS2345: Property 'object' is missing in type '{ where: ... }' but required in type 'QueryAST'\n```\n\ncloud 仓 `packages/service-cloud/src/routes/cloud.ts` 里 **~20 个驱动读取点全部**因此写成 `(driver.find as any)(...)`——不是偷懒，是不 cast 就无法通过编译（cloud#1030 的 dev 实测删除后复现上述报错）。\n\n## 为什么值得修：这个冗余属性的真实代价是关掉了整条类型防线\n\n`as any` 一旦挂上，`where` 里的**一切**都不再被检查。cloud#1030 就是实证：`{ $like: \\`${commitId}%\\` }`——一个 spec 未声明、任何驱动都不编译的运算符——安然通过编译存活到运行时，让「按 commit 前缀激活 revision」这条路径每次都 500，且手拼 `%` 还开了一个通配符注入洞（含 `%` 的路径段可匹配并激活未指名的 revision）。\n\n一个为了「多带一份对象名」的冗余声明，换来的是二十个调用点上运算符词表、字段名、比较值类型的全部检查失效。这是 ADR-0049「声明与执行不一致」的类型层版本：类型声明了约束，实践上人人被迫绕过它。\n\n## 建议方向\n\n让驱动查询参数类型不再要求 `object`（例如 `find(objectName, query: Omit<QueryAST, 'object'>)`，或拆出一个不含 `object` 的 `DriverQuery` 类型），而不是在消费侧修 20 个 cast。修好后 cloud 侧可以逐步摘除 `as any`，让 `where` 重新受检——cloud#1030 的新测试替身（运算符词表从 spec 导入、整个 `where` 先编译再执行）已经演示了受检后能拦住什么。\n\n## 关联\n\n- 来源：objectstack-ai/cloud#1053（cloud#1030 实施中发现并验证）\n- cloud#1030 / cloud PR #1055（`$like` → `$startsWith`，本缺陷的直接受害现场）\n- ADR-0049\n\n未指派——记录的 finding，谁开工谁认领。"
+}

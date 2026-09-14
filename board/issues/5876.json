@@ -1,0 +1,35 @@
+{
+  "number": 5876,
+  "kind": "issue",
+  "title": "The back-compat capability derivation refreshes label/description on ANY existing sys_capability row, including admin-authored ones — the comment above it says the opposite",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T10:43:07Z",
+  "updated_at": "2026-08-06T12:43:15Z",
+  "closed_at": "2026-08-06T12:43:15Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5876",
+  "body": "Found while implementing #4967 Part 1 (PR #5875). Out of scope there, filed for triage.\n\n## What\n\n`bootstrapSystemCapabilities`' seed loop updates `label`/`description` on whatever row it\nfinds for a derived name, without looking at `managed_by`:\n\n`packages/plugins/plugin-security/src/bootstrap-system-capabilities.ts` (~100):\n\n```ts\nfor (const def of byName.values()) {\n  const existing = await tryFind(ql, 'sys_capability', { name: def.name }, 1);\n  if (existing[0]?.id) {\n    // Keep label/description fresh, but do NOT clobber admin edits — only\n    // platform-owned display fields are reconciled. `scope` is an\n    // admin-editable classification face …, so it is seed-once …\n    if (await tryUpdate(ql, 'sys_capability', { id: existing[0].id, label: def.label, description: def.description })) {\n```\n\nThe comment claims admin edits are not clobbered. What #2909 T3 actually made seed-once is\n`scope`, and only `scope`. For a **derived** name (as opposed to a curated platform one)\n`def.label` is `humanize(name)` and `def.description` is `Capability name.` — so an\nexisting row's authored `label`/`description` are overwritten with a humanized placeholder\non **every boot**, whoever authored them.\n\n## Measured\n\nPR #5875 added a pin that exercises exactly this shape (it is there to justify a design\nchoice in that PR, not to cover this defect):\n\n`packages/plugins/plugin-security/src/bootstrap-declared-capabilities.test.ts`,\n`REVERSE: dropping that name from the list lets the derivation overwrite the admin row` —\na row `{ name: 'showcase.export_data', label: 'Admin Made', managed_by: 'admin' }` comes\nout of the derivation pass labelled `Showcase Export Data`.\n\n## Reachability\n\nNarrow but real, and it needs the admin row to pre-exist the grant:\n\n1. an admin creates capability `X` in Setup (`managed_by:'admin'` — the only provenance the\n   ADR write-guard leaves admin-writable);\n2. an app whose bootstrap permission set grants `X` via `systemPermissions[]` is installed;\n3. every boot from then on rewrites that row's `label`/`description` to humanized text.\n\nThe reverse order is NOT reachable: once the derivation has created the `managed_by:'platform'`\nplaceholder, the package/platform write-guard blocks the admin from editing it at all, so\nthe more obvious \"admin renames a derived capability\" path fails earlier and differently.\n\nWorth deciding as part of the same question: whether the derived pass should reconcile\ndisplay fields on a row it did not create at all, or only on rows it owns\n(`managed_by:'platform'` created by itself) — the curated half of the loop has a real reason\nto refresh (the platform's own definitions ship new copy), the derived half does not.\n\nNot touched by #5875, which only stops **refused declarations** from suppressing the\nderivation; the clobber above is on a different path and predates it.\n"
+}

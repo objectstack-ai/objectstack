@@ -1,0 +1,35 @@
+{
+  "number": 5605,
+  "kind": "issue",
+  "title": "[spec] HookContext.session 少声明了 `positions` / `preserveAudit` —— 引擎在生产、消费方在读、文档在教,契约里没有(#5050 的镜像方向)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T20:19:58Z",
+  "updated_at": "2026-08-06T02:43:00Z",
+  "closed_at": "2026-08-06T02:43:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5605",
+  "body": "## 背景\n\n#5050 退役的是「声明了、没人生产」的 `session.roles`。在核查它的生产方时,发现**同一个 `session` 块存在方向相反的漂移**:有两个键是**引擎真的在生产、消费方真的在读、文档真的在教**,但 `packages/spec/src/data/hook.zod.ts` 的 `HookContextSchema.session` 里**根本没有声明**。\n\n这不是同一个 bug 的另一半措辞 —— `roles` 是 declared-never-produced,这两个是 produced-never-declared,修法完全不同(前者删,后者补声明),所以单独立单。\n\n## 证据(均对 `origin/main` 核实)\n\n**生产方** —— `packages/objectql/src/engine.ts` 的 `buildSession()`:\n\n- `positions: execCtx.positions`(逐字段构造 session 时直接写入)\n- `...((execCtx as any).preserveAudit ? { preserveAudit: true } : {})`(#3493 的历史导入审计保留标记)\n\n**消费方**:\n\n- `packages/objectql/src/plugin.ts:782` —— `const preserveAudit = session?.preserveAudit === true;`(审计戳 hook 的核心分支;该处 `session` 形参标注为 `any`,所以类型层看不见这条读)\n\n**文档在教**(两页,都把 `positions` 当作喂给 sharing service 的正规写法):\n\n- `content/docs/kernel/runtime-services/examples.mdx:37` —— `positions: ctx.session?.positions,`\n- `content/docs/kernel/runtime-services/sharing-service.mdx:67` —— 同上\n\n**契约里没有** —— `HookContextSchema.session` 声明的键是 `userId` / `actor` / `organizationId` / `accessToken` / `isSystem` / `skipTriggers` / `skipAutomations`(#5050 后再加一个 `roles` 墓碑)。没有 `positions`,没有 `preserveAudit`。\n\n## 为什么这是缺陷而不是无害省略\n\n1. **文档教的代码在类型层编译不过。** 一个按 `content/docs/automation/index.mdx` 的写法把 handler 标注成 `(ctx: HookContext)` 的作者,写 `ctx.session?.positions` 会吃 TS2339;上面两页示例之所以看不出来,是因为它们把 `ctx` 标成了 `any`。**照文档抄 + 照文档标类型 = 编译失败**,这是作者第一次写 hook 就会撞上的。\n2. **`positions` 恰恰是 ADR-0090 D3 之后的权限词汇本体。** `ExecutionContext` 已经把 `roles` 改名成 `positions`(`packages/spec/src/kernel/execution-context.zod.ts:118`,注释原话 \"Formerly `roles`\")。#5050 把 hook 侧最后一处 `roles` 拼法退役之后,hook 能看到的**唯一**任职词汇就是这个未声明的 `positions` —— 契约上等于说「hook 拿不到任职信息」,而运行时明明给了。\n3. **Zod 非 strict 掩盖了它。** `HookContextSchema` 刻意不 strict(见文件头注释),所以 `positions` 在 parse 时被静默 strip。也就是说:**谁真的去 `HookContextSchema.parse(ctx)` 一把,谁就把 `positions` 弄丢了** —— 而生成的 reference 页(`content/docs/references/data/hook.mdx`)恰恰以 `HookContextSchema.parse(data)` 作为示例。\n\n## 需要裁定的点(不要直接猜)\n\n补声明的**语义**要维护者定,两条路差别很大:\n\n- **A. 两个键都补进 `session` 声明**(`positions: z.array(z.string()).optional()`、`preserveAudit: z.boolean().optional()`),配 `.describe()` 写清「仅供 hook 读取,授权由 security service 裁决,这里不是授权输入」。契约与运行时对齐,文档示例可以正常标类型。风险:`positions` 出现在 hook 上下文里,可能被下一个作者读成「可以拿它做授权判断」—— 需要用 `roles` 退役同款的措辞把边界钉死。\n- **B. 认为 hook 本就不该看到任职信息**,那么该删的是 `buildSession()` 的 `positions` 写入 + 两页文档的教法,而不是补声明(即对 `positions` 走 enforce-or-remove 的 remove 一侧)。但注意 `preserveAudit` 有真实消费方(`plugin.ts:782`),它只能走补声明。\n\n我的倾向是 **A**,理由:`preserveAudit` 无论如何都得补(有活的消费方,删不掉),而 `positions` 有两页文档 + sharing service 的真实用法在背书,删它是砍掉一个在用的能力;A 同时消灭「文档教的代码编译不过」这个当下就会撞到的问题。但 `positions` 是否应当出现在 hook 契约上是**安全语义**判断,按 ADR-0095 D3 的口径应由维护者拍板,故不擅自实现。\n\n## 与其他单的关系\n\n- 姊妹单 #5273(`HookContext.input` 的契约注释与引擎实际行为不符)—— 同一张契约表的另一处漂移,但键不同、修法不同,不是重复。\n- 反方向的 #5050(`session.roles` 退役)已在 PR 中,本单不阻塞它:`roles` 的删除与这两个键的补声明互不影响。\n\n发现于 #5050 的生产方核查过程(Prime Directive #10)。\n"
+}

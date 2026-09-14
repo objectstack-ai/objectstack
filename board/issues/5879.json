@@ -1,0 +1,34 @@
+{
+  "number": 5879,
+  "kind": "pull_request",
+  "title": "chore(devx): 补上 Bash 侧的 worktree 强制,堵住 sed -i / tee / 重定向绕过主 checkout 守卫",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T10:49:24Z",
+  "updated_at": "2026-08-06T11:25:37Z",
+  "closed_at": "2026-08-06T11:25:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T11:25:36Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5879",
+  "body": "Fixes #5790\n\n## 问题\n\n`.claude/settings.json` 里 `guard-main-checkout.sh` 只注册在 `Edit|Write|NotebookEdit` matcher 上,所以它只看得见工具化的文件写入。同一个写操作换成 Bash 就完全不经过钩子:\n\n```\nsed -i 's/foo/bar/' packages/spec/src/x.ts\ncat > packages/spec/src/x.ts   # 后接 heredoc 正文\nprintf 'x' > packages/x.ts\npnpm build | tee build.log\ntee / cp / mv / rm / touch 同理\n```\n\n这些命令在共享主 checkout 里一声不响地改文件,而 CLAUDE.md 与 AGENTS.md Prime Directive #11 给每个 agent 的心智模型是「A PreToolUse hook enforces this」。**声明的强制范围大于实际的强制范围** —— 多 agent 并行改同一个共享 checkout 正是 worktree-first 规则要防的事,这条路径上它没被防住。\n\n## 做法:移植而非重新设计\n\nobjectui 侧已经把这件事做完了(objectstack-ai/objectui#3452),本 PR 移植成品,**逻辑逐例保持一致**以免两仓守卫漂移,只本地化三处:issue 引用、注释里的示例路径、自测里的 `pnpm --filter` 包名。\n\n新增 `.claude/hooks/guard-main-checkout-bash.sh`,挂 **新建的** Bash matcher —— 本仓没有 objectui 的 `guard-shared-stash.sh`,所以是新建条目而非并入既有数组;既有 `Edit|Write|NotebookEdit` 条目**一字未动**。\n\n**仓库判定沿用 `guard-main-checkout.sh` 自己的逻辑**。两仓该文件 `diff` 为空(字节相同),所以判定零适配即可移植,两个钩子对「共享 checkout」的定义因此不可能分歧:取目标最近的存在祖先目录 → `git rev-parse --git-dir` → 非 git 仓库(`/tmp`、scratchpad、`$HOME` dotfiles)放行 → git-dir 命中 `*/worktrees/*`(linked worktree)放行 → 其余(共享主 checkout、任何 sibling 仓库)拦截。\n\n**逃生舱沿用同一个 `OS_ALLOW_MAIN_EDITS=1`**,不另起变量:同一条规则,同一个开关。\n\n## 精确优先于召回\n\n在任意 shell 命令里认出写目标本质上是启发式,误拦风险远高于 Edit 的 `file_path`;而一个会拦住自己看不懂的活的钩子迟早被关掉,关掉之后它什么也守不住。所以只认能高置信度读出目标路径的写法:\n\n`>` / `>>` 重定向(含 `2>` 这类带 fd 前缀的)、`sed -i`、`perl -i`、`tee`、`cp`、`mv`、`rm`、`touch`。\n\n读操作永远不拦。**每个 agent 每天都要跑的命令逐条实测未误拦**:`git worktree add|remove`、`git fetch|status|log`、`pnpm install`、`flock ... -c \"pnpm --filter ... test\"`、`node scripts/check-nul-bytes.mjs`、`cat` / `grep` / `ls` / `git -C main grep`。\n\n### 有意留的口子(脚本注释里逐条写明)\n\n- **包装调用**:`bash -c '...'`、`xargs`、`ssh host '...'`、make、以及会写文件的脚本\n- **写操作藏在自己源码文本里的程序**:`node -e`、`python3 -c`、awk —— 目标不是 shell token,没有东西可读\n- 目标里含展开或通配符(`$VAR`、命令替换、`*`、`?`、`~`)—— 不执行就解析不出来\n- payload 没带 cwd 时的相对路径(绝对路径照样判)\n- 子 shell 里的 `cd` 被当成粘性的 —— 分段不报告自己是按哪个分隔符切的\n\n这些是有意为之而不是疏忽:真心要写的人本来就有 `OS_ALLOW_MAIN_EDITS=1`,而这个钩子的目标是 agent 干活干到一半反射性敲出来的 `sed -i`,不是存心绕过的人。**解析不了一律 fail open** —— guard 是防呆不是安防,误杀合法命令的代价高于漏网。\n\n## 写「关于这条禁令」的东西不能触发禁令\n\n两层(#4890 的教训:写规则的那个 PR 不能被自己写的规则拦住):\n\n1. 引号感知的分段 + 词法切分 —— `'...'` / `\"...\"` 里的 `>` 或 `sed -i` 是字面文本。`grep -n \"sed -i\" .claude/` 放行。\n2. **heredoc 正文剥离** —— 正文是文档不是命令。分段是按换行切的,光靠分段这一层会把正文里举例的 `sed -i ...` 当成真命令拦下来。\n\n引入 heredoc 的那一行自己的重定向照样算数 —— 自测矩阵里有成对的 allow / block 两例钉住这个区别。\n\n## 声明 = 强制\n\n`CLAUDE.md` 与 `AGENTS.md` Prime Directive #11 的钩子描述句同步补上 Bash 面,并写明「精确优先、读不拦、解析不了就放行,所以规则仍然大于钩子」。AGENTS.md 那句是权威声明,与 CLAUDE.md 是同一句话的两处副本 —— 只改一处会让主声明继续错着。\n\n## 自测矩阵\n\n`.claude/hooks/guard-main-checkout-bash.selftest.sh` —— 自建 fixture:临时 `git init` 的主仓库 + 它的 linked worktree + 一个非仓库目录,所以矩阵不依赖跑在哪台机器、哪个 checkout 上。不联网、不构建。\n\n```\n70 passed, 0 failed\n```\n\n覆盖:共享主 checkout 的各种写法拦截(16 例)、经分隔符/环境变量前缀/绝对 argv0/`cd` 到达(6 例)、同样的写法落在 linked worktree 放行(8 例)、仓库外(`/tmp`、非仓库目录、`/dev/null`)放行(5 例)、读操作放行(10 例)、写「关于禁令」的东西(7 例)、有意留的口子(6 例)、逃生舱(2 例)、payload 解析不了 fail open(5 例)、无 jq 兜底(5 例)。\n\n## 实测四象限(对真实 checkout,dry:钩子只判决 payload,从不执行命令)\n\n钩子从不执行被判决的命令,所以拿主 checkout 的路径喂 payload 本身就是 dry 的;跑完复查 `git -C /home/user/objectstack status --porcelain` 为空,主检出未被碰过。\n\n| 象限 | 例 | 结果 |\n| --- | --- | --- |\n| 主检出写 | `sed -i` 相对路径、`>` 绝对路径、`pnpm build \\| tee`、`cd main && touch` | 全部 **BLOCK**,报文正确指名 `repo: /home/user/objectstack` |\n| sibling 主检出 | `sed -i \"s/a/b/\" package.json` @ `/home/user/objectui` | **BLOCK**,报文里的修法指名 `objectui` |\n| worktree 内同命令 | 同上四条 @ 本 worktree | 全部 **ALLOW** |\n| 逃生舱 | 同样命令 + `OS_ALLOW_MAIN_EDITS=1` | **ALLOW** |\n| 不可解析 | `bash -c \"...\"`、`$PKG/...`、`*.ts`、`node -e`、`xargs`、空 payload | 全部 **ALLOW**(fail open) |\n\n## 反向验证(先定方向再跑)\n\n能产出拦截的只有 `target_is_shared_checkout` 这一个判定,把它改成恒不命中,只可能**减少**拦截 —— 这里没有任何下游按数量判定的 gate,所以不存在 PR #5046 那种「删掉分支反而多出诊断」的方向。预测:27 条 block 断言全部翻成 allow,43 条 allow 断言一条不动。\n\n在 scratch 副本上把该函数改成恒 `return 1` 后实跑:\n\n```\n43 passed, 27 failed\n```\n\n27 条失败全部是 block 翻 allow(26 条走 `expect` 打印 `want=block got=allow`,第 27 条是手写的绝对路径断言,自带文案),`want=allow got=block` 零条,allow 断言零位移。方向与数量都与预测一致 —— 说明这些 block 用例是真的由该判定产出的,不是因为「什么都没产出」而碰巧通过。\n\n## 生效时点\n\nPreToolUse 钩子在**会话/agent 启动时加载**,所以本 PR 合并后**已在跑的 agent 不受影响**,新会话与新 dispatch 的 agent 才开始受这条 Bash 面强制 —— 这是预期行为,不是漏配。\n\n## 其它\n\n- `bash -n` 两个脚本均通过;`JSON.parse` 校验 `.claude/settings.json` 合法(两条 PreToolUse 条目按序解析出来)。仓内无 `shellcheck`,故未跑。\n- `node scripts/check-nul-bytes.mjs` 绿(新文件已 tracked 后复跑,进入扫描面:5699 个文件)。改动文件另做超出门禁的控制字符自查(C0 去掉 TAB/LF/CR,加 DEL),干净。\n- 两个钩子脚本以 `100755` 入库(可执行位)。\n- 无 changeset:纯 agent 流程/工具改动,不面向用户,不发布任何包 → 走 `skip-changeset` 标签路线。\n- 改动只落在 `.claude/` 与两个 `.md` 声明句:零 `.ts`、零 `packages/`、零 workflow、零 `content/docs/releases/`。\n- **不在本单**:#5790 结尾记录的「stash 栈在所有 worktree 之间共享」(objectui#3430 同族)本仓同样无防护,已留给 triage 决定是否单独立项 —— 本 PR 未碰。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01GX3sL71LFq8m2usg6VqTSE)_"
+}

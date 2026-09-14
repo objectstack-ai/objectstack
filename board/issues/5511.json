@@ -1,0 +1,33 @@
+{
+  "number": 5511,
+  "kind": "issue",
+  "title": "conversions:`page-component-visibility-to-visibleWhen` 就地展开了 region→components 的 copy-on-write 走查,与新的 `mapPageComponents` 是两份同形代码",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T14:38:15Z",
+  "updated_at": "2026-08-06T08:04:13Z",
+  "closed_at": "2026-08-06T08:04:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5511",
+  "body": "范围外发现,从 #4827(PR #5509,登记 `page-header-subtitle-alias`)里掉出来,**不在那个 PR 里修** —— 那单的范围被 PM 限定为「仅 conversion 登记这一件事」。观察类,今天没有任何用户能碰到。\n\n## 事实\n\n`packages/spec/src/conversions/walk.ts` 的存在理由写在它自己的模块注释里:conversion 需要在不可变、不整树克隆的前提下走查深层集合,所以这些 walker 集中一处、只写一遍。`mapFlowNodes` / `mapPages` / `mapCollection` / `mapDatasources` 都在那里。\n\n但 protocol-15 的 `page-component-visibility-to-visibleWhen`(`conversions/registry.ts`)是在条目内部**就地展开**了 `pages[] → regions[] → components[]` 这段 copy-on-write 走查的:约 25 行手写的 `map` + `changed` 标志 + 逐层 `{ ...dict, components: next }`。\n\nPR #5509 给同一段走查加了共享实现 `mapPageComponents`(walk.ts),但只让新条目用了它,没有回改那条已发布的条目 —— 于是同一形状的走查在同一个包里有两份。\n\n## 为什么值得记一笔(以及为什么不急)\n\n不是重复代码的洁癖问题,是**漂移**问题:这段走查的正确性依赖两件今天成立的事 —— `PageComponentSchema` 没有 children 键(嵌套组件都躺在别的组件的自由 `properties` 里),以及 region 级就是 page 组件的全部可达面。哪天这个前提变了(例如 page 组件长出结构化容器槽,像 flow 的 ADR-0031 region 那样),需要改的是**两处**,而只有一处在 walk.ts 里、会被下一个作者找到。`mapFlowNodes` 当年就正好走过这一遭:#4347 给它补上区域递归时,受益的是所有共用它的条目。\n\n不急的原因也很实在:两份实现今天行为一致,各自都有 fixture 钉着,没有任何已知输入能让它们分叉。\n\n## 建议处置\n\n把 `page-component-visibility-to-visibleWhen` 的内联走查换成 `mapPageComponents(stack, mapper)`。它的 fixture pair 与 `conversions.test.ts` 里的专门用例都不用改 —— 行为等价,红了就说明不等价,这本身就是这次改动的验收判据。\n\n关联:#4827 / PR #5509、#4347(`mapFlowNodes` 的区域递归)、ADR-0087 D2"
+}

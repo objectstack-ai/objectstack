@@ -1,0 +1,35 @@
+{
+  "number": 5761,
+  "kind": "pull_request",
+  "title": "fix(metadata): `capabilities.write` 同时约束 `save()` —— 可写 datasource loader 必须实现写入与删除两半 (#5654)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T04:06:01Z",
+  "updated_at": "2026-08-06T05:31:52Z",
+  "closed_at": "2026-08-06T05:31:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T05:31:49Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5761",
+  "body": "Fixes #5654\n\n## 前提复核（先证伪，再动手）\n\n在 `origin/main` 上逐条复核了单子的前提，**成立**：\n\n- `packages/metadata/src/metadata-manager.ts:129` 的 `assertWritableLoaderCanDelete` 只查 `delete`；\n- 同文件 `:665` 的持久化循环把 `loader.save &&` 排在最前，声明了 `protocol: 'datasource:'` + `capabilities.write: true` 却没有 `save()` 的 loader 会被**一声不吭地跳过**；\n- 全仓 `datasource:` 协议的 loader 只有 `DatabaseLoader`，`save`/`delete` 都有 —— 所以今天没有用户路径踩得到，这是留给第三方 / AI 照接口新写 loader 的坑（单子的判断准确）。\n\n## 改动\n\n一句话：**#5276 在 `delete` 一侧立的门禁，补齐 `save` 一侧**。同一个 `capabilities.write` 声明，此前在一个生命周期端点上是强制的、在另一端是装饰性的。\n\n- `assertWritableLoaderCanDelete` → **`assertWritableLoaderContract`**，判据从「必须有 `delete`」扩为「必须同时有 `save` 与 `delete`」，缺哪个查哪个，`registerLoader()` 注册期响亮拒绝。\n- `buildWritableLoaderMissingDeleteMessage` → **`buildWritableLoaderMissingMethodsMessage(loaderName, missing)`**，措辞与 #5652 同族（后果 + 两条修法），按缺失方法各贡献一句后果：\n  - 缺 `save`：`register()` 跳过 → 内存 registry 照写、listCache 照失效、`created`/`updated` 照广播、watcher 照通知 → 调用方被告知写入成功，本进程读得回，**重启即消失**；\n  - 缺 `delete`：#5652 原文逐字保留（`unregister()` 宣告删除但行还在）。\n  - 两个都缺时只抛一次，措辞为 `implements neither a save() nor a delete() method`，修法列出两个签名。\n- 两个符号都不在包 barrel（`packages/metadata/src/index.ts` 只导出 `MetadataManager` 等），改名不触及已发布 API 面。\n- `loaders/loader-interface.ts`：`save?` 补上与 `delete?` 对称的 TSDoc（对 `datasource:` + `write` 而言是强制的、注册期由 `assertWritableLoaderContract` 强制、其余协议合法缺席），`delete?` 上 #5276 那段改为指向加宽后的同一个门禁。纯注释，无签名变化 —— 详见下方「作者面」一节。\n\n## 关于 `:665` 的 `loader.save &&` 短路（按认领评论的方向）\n\n**保留**，并改写成与 `unregister()` 完全对称的两行 + 注释：\n\n```ts\nif (loader.contract.protocol !== 'datasource:' || !loader.contract.capabilities.write) continue;\n// [#5654] Defensive only — unreachable for a registered loader ...\nif (typeof loader.save !== 'function') continue;\nawait loader.save(type, name, data);\n```\n\n推理：`registerLoader()` 是 `this.loaders` 的**唯一写入口**（构造函数的 `config.loaders` 也走它），所以「`datasource:` + `write` + 无 `save`」对已注册 loader 不可达；但 `save?` 在 `MetadataLoader` 接口上仍是可选的（门禁不覆盖的协议合法地没有它），删掉这行的代价是下一行直接 TypeError。所以它从「策略」降级为「类型收窄」，而不是被删除 —— 与 #5652 对 `delete` 的处理一字不差。读取顺序也调成先协议/能力（策略）后方法（收窄），与删除侧一致。\n\n## 反向验证（先定方向，再跑）\n\n**预测**：把门禁的 `save` 一臂摘掉（`WRITABLE_LOADER_METHODS` 只留 `'delete'`），save 侧的拒绝用例应转**红**，delete 侧与作用域/正向用例应保持绿。\n\n**实测**：`Tests 5 failed | 19 passed (24)` —— 方向一致，但**数量与预测差一个**，如实记录：转红的是 5 条而非 6 条。第 6 条（`the delete-only rejection #5276 shipped still reads exactly as it did`）钉的是「只缺 delete 时消息与 #5652 逐字一致」，摘掉 save 一臂后这条消息仍然产生，所以它**应当**保持绿 —— 它本来就不是 save 一臂的钉子。delete 侧 11 条全绿，证明本次改动没有动到 #5276 的既有语义。\n\n## 测试\n\n新增 `packages/metadata/src/metadata-manager-loader-save-contract.test.ts`（13 条），钉住：\n\n1. 缺 `save` 的可写 datasource loader 在 `registerLoader()` 与构造函数两条入口都被拒，且**没有半注册**（不在私有 loaders map 里）；\n2. 消息可执行：点名 loader、点名声明、点名后果（`created`/`updated` 已广播、`gone at the next restart`）、两条修法；并且 `toBe(buildWritableLoaderMissingMethodsMessage(...))` —— 是 builder 那一份文本本身，不是转述（顺带让这个 export 真正被引用）；\n3. 两个方法都缺 → 只抛一次、两个都点名；\n4. 正向用例的**耐久性**：带两个方法的 loader 注册 → `register()` 真的写进 store → 用同一个 store 新建一个 manager（模拟重启）仍读得到 —— 正是静默跳过会丢的那一次重启；\n5. 作用域恰好是 `register()` 作用的组合：只读 `datasource:`、以及 `file:`/`memory:`/`http:`/`s3:` 四种协议即使 `write: true` 且无 `save` 也照常注册；\n6. `DatabaseLoader` 在加宽后的门禁下不受影响。\n\n命令与真实输出（均在共享 verify 锁内、`--max-old-space-size=4096`、`--maxWorkers=2`）：\n\n```\npnpm --workspace-concurrency=2 --filter @objectstack/metadata test\n  Test Files  25 passed (25)\n       Tests  508 passed (508)\n\nnpx vitest run src/metadata-manager-loader-save-contract.test.ts src/metadata-manager-loader-delete-contract.test.ts --reporter=verbose\n  Test Files  2 passed (2)\n       Tests  24 passed (24)\n```\n\n类型：`@objectstack/metadata` 无 `typecheck` script（在 `check-type-check-coverage.mjs` 的 DEBT 账本里）。所以直接跑了 `tsc --noEmit -p packages/metadata/tsconfig.json` 并与改动前对拍：\n\n```\n改动前 92 raw errors  →  改动后 92 raw errors（增量 0；补完 TSDoc 后复跑仍为 92）\n我改动的四个文件中的报错数：0\ncheck:type-check-coverage    OK — 63/78 packages type-checked, 15 DEBT, 1 exempt\n```\n\n其他门禁：\n\n```\ncheck:nul-bytes                 OK（5649 files；另对改动文件做了越过门禁盲区的 grep -naP 自扫，干净）\ncheck:durability-log-level      OK — 24 seams, all loud\ncheck:startup-registry-verdict  OK — 40 seams, none recording a contradictable verdict\neslint --no-inline-config（四个改动文件）  无输出\n```\n\n合入前已 `git merge origin/main`（无冲突，来项不触及 `packages/metadata`），重建依赖后重跑上述 metadata 用例仍 508/508。\n\n## 影响面与 changeset\n\n`.changeset/metadata-loader-save-contract.md`（patch）写明了 FROM → TO：只影响注册自定义 `datasource:` + `write: true` loader 且没有 `save()` 的使用者 —— 此前注册成功并静默丢写，现在注册即抛，错误里同时给出两条修法（实现 `save(type, name, data, options?): Promise< MetadataSaveResult >`，或诚实地声明 `capabilities.write: false`）。仓内唯一的 `datasource:` loader `DatabaseLoader` 两个方法都有，不受影响。\n\n## 作者面：接口 TSDoc 已按 PM 裁决补齐\n\n`delete?` 上本来带着 #5276 写下的「对 `datasource:` + `write` 而言是强制的」那段，而 `save?` 上没有 —— 门禁加宽后，这个不对称正好指反了：接口只讲了一个约束两半的契约的其中一半。已按 PM 裁决（#5654 评论 5200271661）在同一分支追加一次纯注释提交补齐：\n\n- `save?` 用自己的措辞讲同一件事：`register()` 的静默跳过、写入被宣告却没落地、重启即消失，其余协议合法缺席；\n- `delete?` 那段改为按名字指向加宽后的同一个门禁（`assertWritableLoaderContract`，#5276 + #5654），不再描述一个只管 delete 的门禁。\n\n无签名变化、无运行时影响；`tsc` 增量 0、eslint 无输出。"
+}

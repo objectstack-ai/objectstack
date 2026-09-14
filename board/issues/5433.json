@@ -1,0 +1,33 @@
+{
+  "number": 5433,
+  "kind": "issue",
+  "title": "driver-memory analytics 面的 `generateSql` 对 `in`/`notIn`/`set`/`notSet` 输出错误 SQL:回退成 `=` 且只取第一个值(`$in: ['100','200']` → `WHERE code = '100'`)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:on-hold"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T11:12:09Z",
+  "updated_at": "2026-08-06T07:05:57Z",
+  "closed_at": "2026-08-06T07:05:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5433",
+  "body": "做 #5373(cube 比较数往返有损)时,为了钉住 `generateSql` 这个出口,逐个实测了它对各算子输出的 WHERE 子句。发现的这一条**不属于 #5373 的范围面** —— #5373 裁的是**比较数(值)**层面的编码,而这一条在**算子**层面,修复前后都存在,与那个编码无关。按 Prime Directive #10 单独记在这里,unassigned。\n\n## 位置\n\n`packages/plugins/driver-memory/src/memory-analytics.ts`:\n\n- `operatorToSql`(约 :790)—— 映射表里只有 8 个算子:`equals` / `notEquals` / `contains` / `notContains` / `gt` / `gte` / `lt` / `lte`,并以 `return opMap[operator] || '='` 兜底;\n- `generateSql` 的 WHERE 构建循环(约 :450)—— 只取 `values[0]`。\n\n`MONGO_TO_CUBE_OPERATOR` 声明本面支持 11 个算子,其中 `in`(`$in`)、`notIn`(`$nin`)、`set`(`$exists`)在 `operatorToSql` 里**一个都没有**。\n\n## 现象(实测)\n\n3 行固定数据,`code` 是 TEXT 列,分别存 `'100'` / `'200'` / `'100'`:\n\n| `where` | `query()` 取到 | `generateSql()` 输出的 WHERE | 该 SQL 若执行会取到 |\n|---|---|---|---|\n| `{code: {$in: ['100','200']}}` | 3 行(正确) | `WHERE code = '100'` | 2 行 |\n| `{code: {$nin: ['100']}}` | 1 行(正确) | `WHERE code = '100'` | 2 行 |\n| `{code: {$exists: true}}` | 3 行(正确) | `WHERE code = 1` | — |\n\n两个缺陷叠在一起:\n\n1. **算子被兜底成 `=`**。`in` / `notIn` 没有映射,`|| '='` 把它们全变成等值比较 —— `notIn` 因此输出了与 `in` **完全相同**的子句,语义正好相反。`set`(`$exists`)同理,`WHERE code = 1` 与「该字段存在」毫无关系。\n2. **只取第一个比较数**。`values[0]` 让 `$in` 的其余候选值直接消失,即使算子映射对了也还是错的。\n\n注意方向:`query()` 那一半是**对的**(`$in`/`$nin` 有各自的分支,`$exists` 也有),所以这是同一个 driver 的两个出口对同一个 `where` 给出不同含义 —— #5240 为本包立下的不变量所禁止的形状,只是这次分叉在 `generateSql` 一侧。\n\n## 为什么是 bug\n\n`generateSql` 是 `IAnalyticsService` 的**公开方法**,其返回值也是 `AnalyticsResult.sql` 承诺的「生成的 SQL」。它的用途是调试/透明性 —— 让作者看懂自己的查询到底问了什么。一个把 `notIn` 显示成 `in`、把三个候选值显示成一个的 SQL,恰恰在作者最需要它说实话的时候说了假话。\n\n同时这是 declared ≠ enforced 的又一处:`MONGO_TO_CUBE_OPERATOR` 声明本面支持这些算子,`query()` 也确实支持,只有这一个出口没跟上。\n\n## 未验证的部分\n\n- 本仓库内**没有**任何地方执行 `generateSql` 的输出(driver-memory 不连真实数据库,`service-analytics` 有自己的 strategy),所以目前只是「显示错误」而非「取到错误行集」。这一点显著影响严重度,请 triage 时纳入考量。\n- 没有统计 `$between` 等经 #5345 拒收后剩下的算子在本出口是否还有其它缺口(只测了上表三个形状 + #5373 覆盖的比较数形状)。\n\n## 建议(不代裁决)\n\n两条都在 `generateSql` 一侧,建议一起裁:补齐 `operatorToSql` 的映射(`in` → `IN`、`notIn` → `NOT IN`、`set` → `IS NOT NULL`、`notSet` → `IS NULL`),并让 WHERE 构建循环按算子决定用 `values[0]` 还是整个 `values` 列表。若认为「调试用 SQL 不值得维护」,那另一条路是让 `generateSql` 对无法忠实表达的算子**拒收**,与 #5345 同款 —— 但那会拒掉本面 `query()` 明明能算的查询,恐怕不是想要的答案。\n\n关联:#5373(同函数、同一轮核对里发现;它裁的是比较数层,本条是算子层)、#5374(同为本面算子层缺陷,那条在 mingo 出口)、#5345(本面算子层的第一轮裁决,只裁了「无映射就丢弃」)、#5240(本包两面不得分叉)。\n"
+}

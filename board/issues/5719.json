@@ -1,0 +1,35 @@
+{
+  "number": 5719,
+  "kind": "pull_request",
+  "title": "feat(objectql): 悬空引用巡检纳入 readonly 溯源族,单独分桶为 `provenance` (#4743 事实二)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T02:03:44Z",
+  "updated_at": "2026-08-06T02:50:02Z",
+  "closed_at": "2026-08-06T02:50:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T02:50:01Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5719",
+  "body": "Part of #4743 —— **仅事实二**(巡检跳过收窄)。⛔ 事实一(`engine.ts` 里 `assertReferencesResolve` 的过期注释)未做,#5504 在飞同文件,所以这里写 `Part of` 而非 `Fixes`,issue 不随本 PR 关闭。\n\n## 前提核验(动手前对 origin/main 逐条确认)\n\nissue 是线索不是规格,三条前提都在 `origin/main`(39e43c8)上核过:\n\n| 前提 | 结论 | 证据 |\n|:--|:--|:--|\n| 整体跳过仍在 | ✅ 成立 | `dangling-reference-audit.ts:231` `if ((def as { readonly?: unknown })?.readonly === true) continue;` |\n| #4556 的 NULL 化已落 | ✅ 成立 | `packages/metadata/src/loaders/database-loader.ts:585` 是 `recorded_by: historyRecord.recordedBy`,`?? 'system'` 已不存在;`recordedBy` 一路 optional 传入,无上游兜底 |\n| 被豁免的只剩溯源族 | ✅ 成立 | `registry.ts` `AUDIT_FIELD_DEFS`(`created_by`/`updated_by` 均 `lookup → sys_user, readonly: true`)+ `organization_id`(`lookup → sys_organization, readonly: true`);`owner_id` 是 `readonly: false`,本来就在巡检里 |\n\n## 改了什么(按 PM 裁决取方向 B)\n\n`readonly` 不再是「丢弃字段」的理由,而是「findings 归哪个桶」的理由。\n\n新增两个报告键,形状与该文件既有分组一致:\n\n| 键 | 含义 |\n|:--|:--|\n| `provenance: DanglingReference[]` | readonly 溯源引用解析不到行 —— 样本行形状与 `dangling` 完全一致 |\n| `provenanceUndetermined: number` | 溯源引用的目标压根探测不了 |\n\n两个键都是**追加的、类型上 optional**,与 `aborted` 同一处理、同一理由(手写的 report 测试替身仍然满足类型);本模块产出的每一份报告都显式赋值。`dangling` 的语义一字未动。\n\n### 三个判断,每个都有它必须那样的理由\n\n**1. 为什么另起一桶而不是同桶(C)**:「引用了一个被删掉的用户」和「模型声明的外键断了」补救方式不同(通常无事可做 vs. 补种目标行或清链接),混在一起会让后者被前者淹没 —— 这正是该文件「Unknown and absent are DIFFERENT answers」一节最在意的失效模式。\n\n**2. 为什么 `provenance` 单独存在不触发 summary warn**:在任何有年头的库上它每次健康运行都非空。每次都响的告警就是 #4747 刚花代价拆掉的坏告警,会把读者训练到跳过这一行 —— 而下一次 `dangling` 真有东西时也一起被跳过了。所以:**计数随行**(warn 因真实 finding 触发时把两个计数一起带上),**明细常驻**(返回的报告永远带全量行,给主动来问的调用方)。\n\n**3. 为什么 `provenanceUndetermined` 不并进 `undetermined`**:`undetermined` 是**会触发 warn** 的桶。在一个不注册 `sys_user` 的栈上,每一个溯源值都探测为「说不准」—— 那是关于「哪些平台表被挂载」的事实,不是关于被审计数据的事实,并进去等于每次运行都为错误的事情拉响警报。这一条不是假想:现存的 `engine-dangling-reference-audit.test.ts` 里 `expect(out.undetermined).toBe(0/1)` 两处断言,正是靠这个分离才保持原义为真。\n\n### 一处必要的连带改动:扫描顺序加了第三档\n\n纳入溯源族意味着**几乎每个对象都有可审计字段**(`applySystemFields` 到处注入 `created_by`),于是有限的行预算会开始花在只带溯源的表上,而预算本来是为业务发现建的。`prioritise` 因此从两档变三档:安全面 → 带业务引用的对象 → 仅溯源的剩余。理由与 `SECURITY_SURFACE_OBJECTS` 完全同构,只是低一档:预算有限时,顺序决定哪个问题真的被回答。\n\n## 反向验证(方向在跑之前就已预测:**红**)\n\n把整体跳过临时改回去(`if (readonly) continue;`),9 条新用例 **8 条转红**:\n\n```\n× a dangling `created_by` is reported — in `provenance`, not in `dangling`\n× the two buckets never merge — a broken FK and a deleted user are filed apart\n× an unprobeable provenance target counts in `provenanceUndetermined`, never in `undetermined`\n× a table whose ONLY reference is provenance is now read — it used to be skipped whole\n× provenance-only tables are scanned LAST, so a finite budget still answers the business question\n× provenance ALONE does not raise the summary warning\n× …but rides along in the payload once the line fires for a real finding\n× [engine] a readonly lookup that resolves to nothing lands in `provenance`, not `dangling`\nTests  8 failed | 27 passed (35)\n```\n\n**如实报告剩下的 1 条**:`a run with nothing to say still states both provenance buckets explicitly` 两边都绿 —— 它钉的是「键必须显式出现」这一结构性事实(`aborted: false` 的同构用例),按定义不会随行为翻转。另有一条 `a resolvable created_by is not reported at all` 原本也两边绿,已加 `expect(port.probes).toContain('sys_user usr_alive')` 使其转红 —— 沉默必须是「查过且解析成功」,不能是「没人看」。\n\n## fixture 处置:整条替换,而非改写\n\n原 `a READONLY reference field is not audited` 用例**被整条退休**,不是重新拼写。原因写在代码注释里:它的 `expect(out.dangling).toEqual([])` 在新行为下**依然通过** —— finding 只是挪了一个桶,不是消失了。留着它就是一条「因为什么都没产出所以绿」的用例。替换它的是断言「值到底去了哪里」的版本,那才是唯一能转红的写法。同一处置也应用在 `engine-dangling-reference-audit.test.ts` 的哨兵用例上。\n\n## 消费方核验(按巡检的消费半径扫,不按被改包扫)\n\n逐个核过,新增键均安全:\n\n| 消费方 | 读法 | 结论 |\n|:--|:--|:--|\n| `engine.ts` `inspectDanglingReferences` | 原样返回 | 追加键透明 ✅ 未改动 |\n| `lifecycle/lifecycle-service.ts` | 整体赋给 `report.danglingReferences` | 追加键透明 ✅ 未改动 |\n| `lifecycle/lifecycle-service.test.ts` | 手写 report 字面量作测试替身 | **正是新键必须 optional 的原因** —— 必填会让这些字面量类型报错;55 tests 全绿 ✅ 未改动 |\n| `packages/cli` `schema-migrate.teardown.integration.test.ts` | 结构性子集 `{ unreadableObjects, aborted? }` | 追加键透明,1 test 绿 ✅ 未改动 |\n| `index.ts` 类型导出 | 复用既有 `DanglingReference` 作样本行类型 | **无需新增导出** ✅ 未改动 |\n| `packages/cli` `migrate/value-shapes.ts` | 名字撞车但读的是 `scan-value-shapes` 的另一份报告 | 无关 ✅ |\n\n无 snapshot 钉住该报告形状(已全仓查过)。\n\n## 顺带发现(未在本 PR 修)\n\n- **filed as #5718**:行预算 `>= maxRows` 耗尽后 `break`,**其后所有对象既没读也没记进任何桶** —— 而该文件为「不完整」专门造了 `truncatedObjects` / `unreadableObjects` / `aborted` 三个桶,唯独对象级预算耗尽这条路径没有对应桶。本 PR 的第三档排序缓解了「谁先被读」,但没解决「没轮到的不被记录」,两者独立,故分开填。\n- `engine.ts:2876` 的 `@link` 文案仍写着 \"(readonly skip, empty values, unknown ≠ absent)\",现在应为 \"readonly split\"。⛔ 本单不碰 `engine.ts`(#5504 在飞),留给事实一的注释校准一并处理。\n\n## 验证\n\n```\npnpm --filter @objectstack/objectql test       →  Test Files 121 passed (121) / Tests 1978 passed (1978)\npnpm --filter @objectstack/objectql typecheck  →  tsc --noEmit,无输出,exit 0\npnpm --filter @objectstack/cli   test src/utils/schema-migrate.teardown.integration.test.ts\n                                               →  Test Files 1 passed / Tests 1 passed\npnpm check:query-options-erasure               →  ratchet holds: 84 unswept non-test site(s) in 19 file(s), none new\nnode scripts/check-nul-bytes.mjs               →  OK (scanned 5608 tracked text file(s); no raw ASCII control bytes)\n```\n\n已加 changeset(`@objectstack/objectql: minor` —— 报告形状对消费方可见)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01V7WetGmnfoXNn8cLieKKmx\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01V7WetGmnfoXNn8cLieKKmx)_"
+}

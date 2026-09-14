@@ -1,0 +1,33 @@
+{
+  "number": 5763,
+  "kind": "pull_request",
+  "title": "docs(ui): field-group derivation is authorized by `fieldGroups`, not by `field.group` alone (#5458)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T04:13:19Z",
+  "updated_at": "2026-08-06T05:10:47Z",
+  "closed_at": "2026-08-06T05:10:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T05:10:45Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5763",
+  "body": "Fixes #5458\n\n两篇 UI 指南把表单分组说成「派生自 `field.group` 自身」,全文不出现 `fieldGroups`。读者照抄拿到的是一张**平铺表单**。#5443 已修示例层(showcase `contact.object.ts`,正是这两篇「Runnable example」链接的文件),本 PR 修引用它的文档正文。\n\n## 前提复证(当前 main `889ae474`,实测非读码)\n\n`packages/spec/src/data/field-group-layout.ts` 语义逐字核对通过:\n\n| 场景 | `deriveFieldGroupLayout` 实测 |\n|---|---|\n| 文档今日样例(只有 `group`,无 `fieldGroups`) | `null` —— 分组根本不适用 |\n| 同一对象 + `fieldGroups` 声明 | 两段 `contact` / `status`,成员正确 |\n| `group` 值未命中已声明 key | 该字段与**完全没写 `group`** 的字段进同一个尾部无标题桶:`{\"fields\":[\"stage\",\"plain\"]}` |\n\n第三行是「未声明的 `group` 等同于没写 `group`」的直接证据 —— 两者字面进同一个桶。`packages/lint` 侧:文档今日样例报 **3 条 `field-group-undeclared`**(warning);补上声明后 **0 条**;「部分声明 + 一个未命中」同样报。规则注册为 `commands: ALL` = `['validate','build','lint']`,故正文写「`os lint`(以及 `os build` / `os validate`)」。派生实现的唯一性也复核过:消费者是各渲染面与 `packages/cli/src/utils/i18n-extract.ts` 的 `walkObjectSections`。\n\n顺带实测了 #5443 量到的两处「省略 `form` 后的真实差异」,都在当前 main 复现,因此把 §2 原来的 “derive an **equivalent** grouped form” 一并校准:\n\n- `applySystemFields` 注入的 `owner_id` 未被分组 → 落进尾部无标题段(`FIELD_GROUP_SYSTEM_FIELDS` 不含 `owner_id`);\n- 派生段落的键只有 `key` / `label` / `icon` / `description` / `collapse` + 成员 —— **没有 `columns`**,手写的 `columns: 2` 派生给不回来。\n\n## 改动(仅这两篇 mdx)\n\n1. **`content/docs/ui/create-vs-edit-form.mdx`** —— §2 补三要素(授权来源 / 未声明等同没写 / 规则名),`group` 表格行与代码块注释同步;并把 “equivalent” 换成上面两条实测差异。\n2. **`content/docs/ui/field-grouping-and-order.mdx`** —— 语义分组小节补同三要素;样例原是 `fields: {…}` 片段(只有成员侧、没有声明侧),改为自包含的 `ObjectSchema.create` + 对齐 showcase 的 `fieldGroups`,并挂 `{/* os:check */}`。\n\n排查过同一谎言的其余落点:全仓 `group: '…'` 且不提 `fieldGroups` 的文件只剩 4 个(`ui/setup-app.mdx`、`automation/approvals.mdx`、`objectstack-automation/SKILL.md`、ADR-0029),经查全是**另一个** `group`(审批分组 / 导航分组),与 `Field.group` 无关 —— 本次修正半径就是这两篇。\n\n## os:check 门禁:存在,且新样例已实际纳入\n\n`{/* os:check */}` 有真实消费者 —— `packages/spec/scripts/check-skill-examples.ts`,对标记块跑 `tsc --noEmit` 打到**已构建的 spec `.d.ts`**;逐块 opt-in。`create-vs-edit-form.mdx` 原本已在册,`field-grouping-and-order.mdx` **一个标记都没有**(其代码块是片段)。所以修正后的样例不是「顺手过门禁」,而是**新纳入**门禁:\n\n- 改前:`204 marked example(s) across 74 file(s)` ✅,列表中无 `field-grouping-and-order.mdx`\n- 改后:`205 marked example(s) across 75 file(s)` ✅,新增 `content/docs/ui/field-grouping-and-order.mdx:34`\n\n**反向验证**(方向先判后跑,预判「红,且落在注入行」):把新样例的 `label: 'Status'` 改成 `label: 42` → 门禁转红,报在 `content/docs/ui/field-grouping-and-order.mdx:43:23` —— `error TS2322: Type 'number' is not assignable to type 'string'.`,即注入行本身;还原后复绿 205 ✅。证明这 +1 是活覆盖,不是空跑绿。\n\n## 其他验证\n\n- 本地 `pnpm --filter @objectstack/docs build` → `DOCS_BUILD_EXIT=0`(mdx 语法完整)\n- `node scripts/check-nul-bytes.mjs`(含 `--self-test`)✅;改动文件按 `[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]` 自扫**零命中**\n- `check-doc-authoring`(362 files clean)、`docs-audit/check-audit-scope` 均 ✅\n- 本 PR CI:**TypeScript Type Check ✅ / ESLint ✅ / Build Docs ✅**;Build Core、Test Core、Dogfood Regression Gate 按 docs-only filter skip(汇总 job success)。注意 os:check 门禁并非独立 check —— 它是 `lint.yml` 里 **TypeScript Type Check** job 的 “Check skills TypeScript examples compile” 步骤(在 “Build workspace packages” 之后),所以该 job 转绿即代表新纳入的样例在 CI 里真的被编译过。\n- **Check Changeset 首 run 红属已知竞态**:job 于 04:13:24 起跑、`skip-changeset` 标签 04:14:20 才落,标签事件触发的后续两次 run 均已 `skipped`。需 PM 重跑该 check 收尾。\n\n## 边界\n\n未碰 `content/docs/releases/`、`examples/`(#5443 已修)、spec/lint 代码。文档-only,无用户可见行为变更 → 走 `skip-changeset` 标签路线,不写空 frontmatter changeset。\n\n> 附注:本地跑 spec / docs 构建会重写生成物 `packages/spec/authorable-surface.base.json`(其 `baseRev` 自动重锚到 merge base,属该机制的设计内自更新),已 `git checkout --` 还原,不随本 PR 提交。"
+}

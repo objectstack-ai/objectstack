@@ -1,0 +1,33 @@
+{
+  "number": 5799,
+  "kind": "pull_request",
+  "title": "docs(skills): 已发布 skill `objectstack-pm-dispatch` 的决策框架由两轴升为三轴(裁决 B:泛化内核后搬)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T05:55:34Z",
+  "updated_at": "2026-08-06T07:12:18Z",
+  "closed_at": "2026-08-06T07:12:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T07:12:16Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5799",
+  "body": "Fixes #5451\n\n#5130 把内部 agent 协议的决策评估轴由两条扩为三条,但同一套 binding 框架在**已发布目录**里还有一份镜像 —— `skills/objectstack-pm-dispatch/SKILL.md`(#4607 发布,`metadata.domain: process`,无 `metadata.internal`,第三方可 `npx skills add` 安装),它仍是两轴。#5130 刻意把范围钉在 `.claude/`(改发布内容是用户可见变更,且要先拍板泛化与否),本 PR 补齐,两份文本重新同构。\n\n按维护者 2026-08-06 裁决 **B(泛化内核后搬)**,不是原样搬(A)也不是不搬(C)。\n\n## 前提复核\n\nissue 表格的 7 处行号基于 `01c0bae`,已漂移(当前 `main` 为 `1624f4ad2`),按内容重新定位 —— **7 处在当前 `main` 上依然全部是两轴**,前提成立。\n\n## 新增 Axis ①「real business need」(排在两条原有轴之前)\n\n保留可泛化内核四件套:\n\n1. 每个方案**先问**它服务的是真实存在的业务场景,还是投机性能力面;\n2. 判据必须**实测而非推断** —— 谁在写这个键、谁在读这个能力、示例应用与真实部署里的用法;「读起来像有用」不作数;\n3. 无拉动的声明面按 **implementation-first** 处置:收窄声明使 `declared = enforced`(退役,或让词表随未来实现回归),而**不是**为声明补实现;\n4. 已发布但零消费的能力**不因沉没成本获得豁免**。\n\n并写明这条轴会**改变结论**而非陪衬:技术形状相同的两个发现可以仅凭这条轴得出相反裁决(一个因无业务拉动退役,另一个因真实应用自证方向而裁「响亮拒绝而非退役」),只看后两条轴会得出同一个答案。原两轴(项目长远合理性、防 AI 写代码/写元数据 app 犯错)**原文保留**,仅编号后移为 Axis ② / ③。\n\n## 泛化纪律(B 与 A 的区别所在)\n\n- ⛔ 去掉内部版绑定的「我们是一个创业项目」自我描述 —— 发布版是 project-agnostic 的,把我们的处境写进别人的决策机器,会让安装方的 PM agent 按错误前提做决策;\n- ⛔ 不带入本仓专属先例单号(内部版引的 #5021 / #4988 / #4834 / #4936 一律匿名化为「两个技术形状相同的发现」);\n- **扩张姿态改由安装方项目自己的 conventions 文件声明**(核心面尚在成形时从紧、平台面稳定后放宽),接进该 skill **既有的** config-over-hardcoding 机制,而不是新造一条路径:`conventionsFile` 配置项说明、以及「Adapting this loop to your project」表格各加一处,与分支命名、release-note 产物、测试命令走同一条覆写路径(「that file wins」)。\n\n## 7 处措辞逐处升三轴\n\n| 锚点 | 改前 | 改后 |\n|---|---|---|\n| 分诊一节 | `the deep two-axis` | `the deep three-axis` |\n| 升级流程第 2 步 | `every option on the two fixed axes below` | `the three fixed axes below` |\n| 框架标题 | `#### The two-axis decision frame (binding)` | `#### The three-axis decision frame (binding)` |\n| 框架首句 | 分析 `on **both** axes` | `on **all three** axes` |\n| 框架收尾句 | justified `on **both** axes` | `on **all three** axes` |\n| **嵌入的 dev-agent 模板** | `Analyze every option on two fixed axes:` | `on three fixed axes:` + 新轴条目 |\n| **嵌入的 dev-agent 模板** | `Justify your recommendation on both axes` | `on all three axes` |\n\n模板那两处是关键:PM 按三轴呈报而开发 agent 按两轴上报,业务轴每次都要 PM 事后补。\n\n全文一致性 grep 后,`two-axis` / `two fixed axes` / `both axes` **零残留**;唯一保留的 `axes` 旧词是一处 `the other two axes` —— 指 Axis ② / ③ 这「另外两条」,是三轴语境下的**正确**表述(对应内部版的「只看后两条轴」),不是漏改。\n\n`metadata.version` 1.0 → 1.1:已安装 1.0 的第三方据此看到这是一次内容修订(生成器只读 frontmatter 的 `description`,版本号不进生成物,`check:skill-docs` 仍绿)。\n\n## 与内部版对照(同构性可核)\n\n| 轴 / 位置 | 内部 `.claude/`(#5130) | 本 PR 发布版 |\n|---|---|---|\n| 轴数 | 三条固定评估轴 | `three fixed axes` |\n| Axis ① 名 | 实际业务需求 | `Axis ① — real business need` |\n| Axis ① 判据 | 判据来源要求**实测** | `evidence must be measured, not inferred` |\n| Axis ① 姿态 | 创业阶段聚焦原则(引维护者原话) | **泛化**:`How tight that default should be is your project's call` → conventions 文件 |\n| Axis ① 无拉动处置 | implementation-first(退役 / 停车) | `implementation-first — narrow the declaration until declared = enforced` |\n| Axis ① 沉没成本 | 不因沉没成本获得豁免(+ 三个本仓单号) | `no sunk-cost exemption`(单号**去除**) |\n| Axis ① 改变结论 | 会改变结论,正反两例引单号 | `changes verdicts`,两例**匿名化** |\n| Axis ② | 项目长远合理性 | `long-term architectural soundness`(原文,仅编号) |\n| Axis ③ | 防 AI 写代码 / 元数据犯错 | `hard to get wrong`(原文,仅编号) |\n| 收尾绑定句 | 必须基于这三条轴;三轴冲突如实呈现 | `justified on **all three** axes` |\n| dev-agent 模板 | `.claude/agents/os-dev.md`(`three fixed axes` / `all three axes`) | 本文件内嵌模板同措辞 |\n\n## 验证\n\n- `pnpm check:doc-authoring` —— `362 files clean — no bare metadata literals`\n- `pnpm --filter @objectstack/spec check:skill-docs` —— `✅ Skill docs in sync`\n- `pnpm --filter @objectstack/spec check:skill-refs` —— `✅ 9 generated files in sync with packages/spec`\n- `pnpm check:nul-bytes`(含 self-test)—— `scanned 5678 tracked text file(s) … no raw ASCII control bytes`;改动两文件另做越过门禁盲区的自扫(`grep -naP` 覆盖 0x0b/0x0c/0x0e-0x1f),零命中\n- `node scripts/check-changeset-fixed.mjs` —— `\"fixed\" group is in sync with 70 public workspace packages`\n\n**没有「先证红」环节,如实说明**:本改动是纯散文,`two-axis` → `three-axis` 不被任何门禁读取(这正是 #5798 记录的缺口)。把措辞改回去不会让任何测试变红,所以这里唯一有意义的验证是全文一致性 grep 与上面的两版对照表,而不是伪造一个方向性证据。\n\n## changeset 说明(与派发预期不同,如实记录)\n\n`.changeset/published-pm-dispatch-three-axis-decision-frame.md`,**空 frontmatter**,沿 #4607 发布 PR 与 #5130 的同一先例 —— 实测复核:**没有任何 npm 包的 `files` 含 `skills/`**,分发路径是 `npx skills add` 直读仓库。因此没有包可署名:署一个包会凭空造出一条「其发布物未变更」的 release 记录,并把 PM skill 的说明塞进那个包的 CHANGELOG。本次变更对**装这份 skill 的人**可见,但不发布任何包。\n\n`pr-automation.yml` 现行提示把空 frontmatter 列为 last resort、`skip-changeset` 标签列为 preferred;这里仍取空 changeset,因为维护者在 #5451 明确要求「changeset(包名沿 #4607 先例)」,而该先例本身就是空 frontmatter,且它给这段镜像文本留下了可对账的 prose 记录(#4607 与 #5130 都把该框架的理由记在 changeset 里)。#4898 的全空停滞风险不成立:当前 pending 983 条非空 changeset。\n\n## 范围外发现(未在本 PR 修)\n\n- **#5798** —— 同一套 binding 决策框架在 `.claude/` 与已发布 `skills/` 各存一份手写副本,**无任何门禁保持同构**;#5451 本身就是这个缺口实测发火的产物(分叉两天,并额外耗掉一个 issue + 一轮裁决)。已独立立单(非子单:不在 #5451 的完成范围内;`Blocked-by: #5451` 仅为排序 —— 本 PR 合并前任何此类门禁在 `main` 上会天生红灯)。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01GX3sL71LFq8m2usg6VqTSE)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 5738,
+  "kind": "pull_request",
+  "title": "fix(service-automation): 启动路径三条日志的外来 cause 改走结构化 meta (#5661)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T02:58:21Z",
+  "updated_at": "2026-08-06T03:37:02Z",
+  "closed_at": "2026-08-06T03:37:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T03:37:00Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5738",
+  "body": "Fixes objectstack-ai/objectstack#5661\n\n## 前提重验(基于 `origin/main` @ 3de5ec8a3)\n\n三处都在,行号如预期漂了:\n\n| issue 里 | 现状 | 级别 | cause 来源 |\n|:--|:--|:--|:--|\n| `plugin.ts:454` | `plugin.ts:452-456` | `warn` | 内核服务注册表 / `manifest.register()` |\n| `plugin.ts:592-594` | `plugin.ts:590-594` | `error` | `candidate.probe()` → 数据源驱动 |\n| `plugin.ts:931-936` | `plugin.ts:927-936` | `error` | 从 `rearmSuspendedWaitTimers` 逃出来的值 |\n\n「刻意不含的两处」也照旧不动:`plugin.ts:191` 是 throw,`plugin.ts:729` 是 `debug` 且文本是我们自己的单行。\n\n**一处需要修正 issue 的表述。** issue 说第 3 条的 `err` 来自 job 服务;逐条读 `rearmSuspendedWaitTimers` 后不成立 —— 它把自己**建模过**的每一种失败都自己接住并在自己的 `[wait]` 记录上报告(`store.list()` 读取、每次 overdue 的 `resume()`、每次 `job.schedule()`)。所以 `plugin.ts` 这个 catch 是「它没建模的东西」的兜底网,message 里那句 \"job-service error\" 是对最可能肇因的猜测而不是保证。这不改变修法(反而更该结构化交出一个形状无法预测的值),但改变了测试怎么写,也改变了代码注释怎么写 —— 两处都按实际情况记录了,没有照抄 issue 的框架。\n\n## 改法(与前三单同源,零新词汇)\n\n三处都复用同包 `thrown-cause-diagnostics.ts` 的 `describeThrownForLog`:message 是不含换行的自足句子,cause 走 logger 的结构化 meta。参数位按 `Logger` 契约(`packages/spec/src/contracts/logger.ts`)分:\n\n- `warn(message, meta?)` 没有 `Error` 位 → cause 在**第二**参;\n- `error(message, error?, meta?)` → cause 在**第三**参,第二参传 `undefined`(第二参塞原始 error 会让记录额外带堆栈,#5575)。\n\n#4632 要求 `error` 必须在自己的第一行里同时给出「后果」与「修法」—— 两条都完整保留,只是末尾的 `: ${err.message}` / `Cause: ${err.message}` 换成了指向 meta 的一句话:\n\n- probe:`… Check that schema sync ran for this datasource; the driver's own failure is in this record's meta.`\n- re-arm:`… Fix the job-service error in this record's meta and restart …`\n\n没有新增任何 meta 字段名,所以 #5573 的 `key`/`token`/`secret`/`password` 子串禁令自动满足(`describeThrownForLog` 早就把 Zod 的 `keys` 改名成 `unrecognized` 以躲开 `ObjectLogger` 的子串脱敏)。\n\n## 危害:三条不共用同一个下游\n\n- 第 1 条是 `warn` → **stdout**,正是 `serve` 启动静默窗口包住的那条流,而它跑在 `init()` 里 —— 窗口正开着。`BootLogCapture.offer()` 只在物理行上找得到级别头时才保留,所以续行是被**直接丢弃**。\n- 第 2、3 条是 `error` → **stderr**,不经缓冲;危害是 #5575 那一串按行消费者:文件 sink 把续行当成独立记录存,采集端读成无法归属的碎片,`grep ERROR` 只捞到那条不含事实的头行。这两条恰恰是这个 plugin 里最响的耐久性告警(「suspended runs will NOT survive a restart」「every wait/approval paused before this restart will hang indefinitely」)。\n\n## 测试\n\n新增 `packages/services/service-automation/src/plugin-startup-log-cause.test.ts`,13 个用例。照 #5662 的先例**全部让真 `ObjectLogger` 写真字节再读回来** —— spy 只能证明接缝调用了什么,证明不了按行消费者会看到什么,而后者才是 cloud#971 付掉一整条 rc 线的那一半;spy 只在「参数位本身就是被测事实」的三个用例里出现。\n\n三条接缝各自钉住:多行 cause 不进 message、进结构化 meta;参数位正确;无 cause 时输出零字节。第 1 条另有 pretty 格式下「单条 head-bearing 行、事实都在这一行上」的用例。\n\n两处工程取舍写在了代码注释里:\n\n1. **`fakeDataEngine` 只让 probe 那一次读失败**。真实的缺表会让 probe 和 `store.list()` 都失败,而第二次失败由**另一个**接缝报告 —— `wait-node.ts` 的 `[wait] … re-arm ABORTED … Cause:`,它仍在插值。第一版测试正是被它撞红的(stderr 上出现第二条记录)。把 fixture 收窄到 probe,断言才是在量自己点名的那条记录。同理,`plugin-suspended-run-wiring.test.ts` 新增了一个按前缀取单条记录的 `errorRecord()`,因为按 join 后的文本断言分不清匹配来自哪个接缝。\n2. **第 3 条通过替换 `rearmSuspendedWaitTimers` 这一个调用到达**(模块其余部分是真的)。理由见上面的前提重验:用真 store + 真 job 服务构造不出能逃到那个 catch 的失败。与其拿一个不可能发生的 fake 装作可以,不如把这个事实写下来,再让 plugin 自己的 catch、自己的 message 和真 logger 对着一个我们选定的抛出值跑一遍。\n\n**fixture 重新裁决而不是重新拼写**:`plugin-suspended-run-wiring.test.ts` 那条 #4420 的 probe 用例原来断言驱动文本出现在 message 里。它现在双向断言 —— message 里没有、meta 里有。单向断言在 cause 被整个丢掉时也会通过。其 `capturingLogger` 也从只存 `String(msg)` 改成同时存 meta(两个级别的参数位不同,分别处理)。\n\n### 实测数字\n\n```\npnpm --filter @objectstack/service-automation test\n  Test Files  63 passed (63)\n       Tests  754 passed (754)\n```\n\n```\npnpm check:durability-log-level\n  ✓ 24 durability-critical catch seam(s), all loud, rethrowing or propagating (3 propagating, declared)\npnpm check:startup-registry-verdict\n  ✓ 40 startup/open-registry seam(s) across 1446 file(s), 34 read-only (legal), none recording a verdict\npnpm check:init-service-contract        ✓ 34 declared / 1 self-provided / 3 without a workspace provider\npnpm check:type-check-coverage          ✓ 63/78 packages type-checked, ledger unchanged\nnode scripts/check-nul-bytes.mjs        ✓ 5629 files, no raw ASCII control bytes\nnpx eslint (三个改动文件)                 ✓ 0\n```\n\n`tsc --noEmit`(本包无 `typecheck` script,走 DEBT ledger)在三个改动文件上零错误;既有的 5 个错误全在 `engine.test.ts` / `nested-region-parity.test.ts`,与本 PR 无关。\n\n### 反向验证(方向先预测再跑)\n\n预测的是**平实的转红**方向:把三处插值还原,message 重新带上换行、meta 里的 `issues`/`error` 消失、`warn` 的实参数从 2 变 1,于是各接缝的钉子转红;而末尾那两个「量差别」的用例是自己内联渲染两种形态、不读 `plugin.ts`,应当**保持绿**;三个「无 cause 则零字节」的用例也应当保持绿。\n\n实测完全吻合:\n\n```\n❯ src/plugin-startup-log-cause.test.ts (13 tests | 7 failed)\n     × a rejection dump becomes structured issues, never a message spill\n     × a plain multi-line rejection keeps its full text, on one line\n     × calls warn(message, meta) — `warn` has no Error slot\n     × the driver's multi-line failure never reaches the log message\n     × calls error(message, undefined, meta) — the contract's third slot\n     × the escaping cause goes to meta, the consequence stays in the message\n     × calls error(message, undefined, meta) — the contract's third slot\n❯ src/plugin-suspended-run-wiring.test.ts (7 tests | 1 failed)\n     × reports an unreadable table at boot but still attaches the store\n Tests  8 failed | 746 passed (754)\n```\n\n三条接缝各有至少两条钉子转红(1 → 3 条、2 → 2 条、3 → 2 条),两个测量用例与三个零字节用例如预测保持绿。「level 仍是 `error`」那条钉子也如预测保持绿 —— 它钉的是级别,不是形状。\n\n## 范围外发现\n\n`builtin/wait-node.ts` 还有**五处**同类插值,其中三处是 `#4632` 亲自定为 `error` 的耐久性诊断,而且其中一条是本 PR 写测试时在 stderr 上**实测**看到的(整段三行驱动错误塞在 msg 里)。已按 objectstack#4949 搜重后独立立单:**#5737**(`finding` + `domain:services`,未打 `pm:queue`,留给 PM triage 定级)。与 #5660(`engine.ts` 的 `registerDegradedConnector`)不重复 —— 那是另一个文件的另一条记录。本 PR 未碰 `wait-node.ts`。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BWS4heBoAitLmzCLhcYdbK)_"
+}

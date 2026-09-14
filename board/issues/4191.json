@@ -1,0 +1,32 @@
+{
+  "number": 4191,
+  "kind": "issue",
+  "title": "ADR-0053 D-A3：storage-form 轴只锁住了 driver-sql 的 datetime —— 另外五个后端和整条 Field.time 仍在裸奔",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-30T14:45:23Z",
+  "updated_at": "2026-08-06T08:04:09Z",
+  "closed_at": "2026-08-06T08:04:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4191",
+  "body": "D-A3 的矩阵已经立起来了（#4081 已关），但 ADR 为它点名的 **storage-form 轴**只落在一个格子里。\n\n> D-A3's conformance matrix should gain a **storage-form** axis (canonical, legacy-epoch, legacy-naive) and a **server-timezone** axis, since both are now known to have produced dialect-divergent row results.\n> —— `docs/adr/0053-date-and-datetime-semantics.md`，D-B3 的 Consequences\n\n## 现状（已逐个核对，不是推测）\n\n`sql-driver-temporal-conformance.test.ts:107` 有一个 `un-backfilled legacy storage` 的 describe：用 `LegacyStorageDriver.seedLegacyRows` **绕过写入路径**，把同一张表按 writer-form 标签分别注入 INTEGER epoch ms 和 zone-naive TEXT，然后跑全套 `TEMPORAL_CASES`。这个做法是对的，问题是它只有一份。\n\n| 消费者 | canonical | legacy-epoch / legacy-naive |\n|---|---|---|\n| `driver-sql`（datetime） | ✅ | ✅ `:107` |\n| `driver-sql`（**Field.time**） | ✅ `:150` | ❌ |\n| `driver-sqlite-wasm` | ✅ | ❌ |\n| `driver-memory` | ✅ | ❌ |\n| `driver-mongodb` | ✅ | ❌ |\n| `formula` | ✅ | ❌ |\n| `service-analytics`（native-sql / preview） | ✅ | ❌ |\n\n其余六个消费者全部只做 `driver.create(...)` 播种，即\n\n```ts\nat: r.writerForm === 'native' ? new Date(r.at) : r.at,\n```\n\n`wire | native` 两种形态都是**今天的写入路径会产出的东西**。也就是说这些夹具在构造上就不可能含有遗留形态——矩阵测的是「我写进去的我能读回来」，而四次事故里有两次的机理是**读到自己没写过的形态**。\n\n## 为什么 mongo 是最尖的一格\n\n其他后端的遗留数据是过渡态，mongo 的是**永久态**，这是 ADR 明写的设计决定：\n\n> MongoDB gets no automatic backfill — rewriting a real collection is a migration, not a boot step — so a pre-existing collection keeps whatever it holds until migrated\n> —— D-E3\n\n而 mongo 读错形态时的表现是所有后端里最坏的：\n\n> a string comparand never matches a `Date` value, in either direction, **for every operator** —— `$gte` included, not just the upper bound #3777 was about. SQLite's affinity rules at least left one half reachable\n> —— D-E1\n\nSQLite 至少还有一半能匹配上，mongo 是整段窗口静默返回错误行集（#4047 当时的表现是**空集**）。所以：**唯一保证长期持有遗留形态的后端，恰好是唯一没有遗留形态测试的后端，且它的失败模式最安静。**\n\n`driver-memory` 的情况稍好——D-E3 说它在 schema 到达时会收敛已有行（覆盖 `initialData` 夹具和持久化恢复，两者都发生在 schema 声明之前）——但**这个收敛本身也没有被矩阵测过**。\n\n## 为什么 Field.time 那一格必须补\n\n#3994 的成因逐字就是这个：\n\n> INTEGER epoch rows fail `>= '09:00'` because `INTEGER < TEXT`\n> —— D-C 段\n\n`TEMPORAL_TIME_ROWS` 里 `a_midnight` 的 `why` 也已经写着「epoch 0 on SQLite, which sorts before every TEXT row」。但 `:107` 的遗留扫描只跑 `TEMPORAL_CASES`，`Field.time` 的 describe（`:150`）没有对应的遗留版本。**修复 #3994 的那条读取路径，今天没有任何遗留形态的回归锁。**\n\n## 建议形状\n\n把 `LegacyStorageDriver` 的做法从「driver-sql 的一个 describe」提升为矩阵的一条正式轴：\n\n1. **spec 侧**给 `TemporalRow` / `TemporalTimeRow` 加 storage-form 的判定依据（形态本身是各驱动物理层的事，spec 只需声明「这一行在遗留形态下应该长什么样」的语义，不下沉方言拼写）。\n2. **每个消费者**加一个绕过写入路径、直接注入存储层的 describe，跑同一批 `TEMPORAL_CASES` / `TEMPORAL_TIME_CASES`。各驱动的注入手法不同（sql 走 `seedLegacyRows`，mongo 直接 `collection.insertMany` 塞字符串/数字，memory 在 schema 声明前塞 `initialData`），但**断言的行 id 集合必须完全一致**——这正是矩阵的意义。\n3. 优先级：**mongo > Field.time（全后端）> memory 的 schema-到达收敛 > sqlite-wasm / formula / analytics**。\n\n分两步做也可以，第 1 步只做 mongo 的 datetime 就能把最尖的那格封住。\n\n## 验收\n\n遗留形态下的行 id 集合与 canonical 形态**逐格相同**。任何一格不同，都说明该后端的读取修复路径与共识有偏差——这是 #3773 / #3994 / #4047 三次事故共同缺的那个信号。\n\n## 顺带记一笔（不在本 issue 范围）\n\n同一句 ADR 还点名了 **server-timezone 轴**。SQL 侧已部分就位：`Temporal Conformance` job 的 Postgres 服务容器跑在 `Asia/Shanghai`，进程侧自 #4180 起五个非 SQL 包也在 `America/New_York` 下运行且有非空转守卫。但「服务器时区 ≠ 进程时区 ≠ UTC」这个三方错开的组合没有被系统化成矩阵的一条轴。若要立项建议单开。\n\n## 关联\n\n#3773 / #3777 / #3994 / #4047 / #3928；#4081（D-A3 本体，已关）、#4098、#4109、#4147、#4175、#4180；ADR-0053 D-A3 / D-B3 / D-C / D-E1 / D-E3 / D-E4。"
+}

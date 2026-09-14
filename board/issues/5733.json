@@ -1,0 +1,37 @@
+{
+  "number": 5733,
+  "kind": "issue",
+  "title": "objectui: a second hardcoded `aria-label` of \"Resize drawer\" in plugin-detail's RecordDetailDrawer — same literal #5506 localized in NavigationOverlay",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T02:37:53Z",
+  "updated_at": "2026-08-06T03:29:30Z",
+  "closed_at": "2026-08-06T03:29:30Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5733",
+  "body": "Found while sweeping the consumption radius for objectstack#5506 (objectui PR objectstack-ai/objectui#3423). Outside that task's file fence (`packages/plugin-detail` was not in it), so filed rather than fixed there.\n\n(Note for whoever edits this issue: the body below deliberately avoids writing a JSX open-tag literally. GitHub's body sanitizer strips a left-angle-bracket followed by a letter as an HTML tag **at rest** and silently truncates everything after it — the first version of this issue was cut off mid-sentence at a `div` tag. Describe tags, don't paste them.)\n\n## The finding\n\n`packages/plugin-detail/src/RecordDetailDrawer.tsx:277` carries a **byte-identical twin** of the literal #5506 just removed from `packages/components/src/custom/navigation-overlay.tsx`:\n\n- guarded by `{resizable && (` … `)}`\n- a plain `div` element carrying `role=\"separator\"`, `aria-orientation=\"vertical\"`, **`aria-label=\"Resize drawer\"`**, and `onPointerDown={handleResizePointerDown}`\n- className `\"hidden sm:block absolute left-0 top-0 h-full w-1.5 cursor-col-resize …\"`\n\nSame control (a drag-resize handle on a record drawer's left edge), same shape (a separator with no visible label, so the literal **is** the control to a screen reader), same defect: a zh/ja/de session gets one English string in an otherwise localized drawer.\n\nThis is not dormant code — `RecordDetailDrawer` is the detail drawer the console renders, and the handle is only gated on `resizable`.\n\n## Why this should be a one-liner\n\nTwo halves of the fix already exist once objectui PR objectstack-ai/objectui#3423 merges:\n\n1. The key `common.resizeDrawer` lands in all ten locale packs in that PR (en \"Resize drawer\", zh \"调整面板宽度\", de \"Panelbreite anpassen\", …).\n2. `RecordDetailDrawer.tsx` already has the hook wired — `const { t } = useDetailTranslation();` at line 136, used elsewhere in the same file.\n\nSo the change is: add `'common.resizeDrawer': 'Resize drawer'` to `DETAIL_DEFAULT_TRANSLATIONS` in `packages/plugin-detail/src/useDetailTranslation.ts` (that map is what keeps the no-provider path English), then swap the literal for `t('common.resizeDrawer')` at line 277.\n\n## Acceptance\n\n- `RecordDetailDrawer`'s separator announces the session locale's value; a zh session sees no \"Resize drawer\" anywhere.\n- With **no** `I18nProvider` mounted it still resolves to English — `plugin-detail`'s existing suites and the live e2e specs address this chrome by English accessible name with no provider.\n- A test under `packages/plugin-detail/src/__tests__/`, in the shape of objectui's `packages/components/src/__tests__/navigation-overlay-chrome-i18n.test.tsx`.\n\n  Note the trap that PR hit and paid for: `createI18n` calls `instance.use(initReactI18next)`, and `initReactI18next` registers that instance as react-i18next's **module-global default**. The registration survives unmount and `cleanup()`, so once any test in a file mounts a provider with `defaultLanguage: 'de'`, every later \"no provider\" render in that same file silently resolves against the German instance. Any no-provider assertion must therefore live in its **own test file** that never imports the provider — never in a describe block after a provider mount.\n\nBlocked-by: the `common.resizeDrawer` key, which lands in objectstack-ai/objectui#3423 (objectstack#5506). Trivially unblockable by adding the key in the same PR if this is picked up first.\n"
+}

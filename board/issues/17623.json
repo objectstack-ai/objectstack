@@ -1,0 +1,37 @@
+{
+  "number": 17623,
+  "kind": "issue",
+  "title": "service-messaging: HttpDispatcher issues 16 statements per tick on an EMPTY `sys_http_delivery` outbox on a fixed 500 ms interval — same idle shape as #17610, never backs off",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:done",
+    "priority:p2"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-11T04:33:01Z",
+  "updated_at": "2026-09-11T06:40:25Z",
+  "closed_at": "2026-09-11T06:38:49Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17623",
+  "body": "## 现象\n\n`service-messaging` 里的 `HttpDispatcher` / `SqlHttpOutbox` 与 #17610 修复前的 `NotificationDispatcher` **完全同形状**：\n\n- 固定 **500ms** 间隔，**无空闲退避**\n- 每跳遍历 8 个分区；每个分区的领取先跑一次 reap `UPDATE`（谓词不含分区），再跑一次候选 `SELECT`\n- ⇒ outbox 为空时每跳 **16 条语句**（8 reap + 8 select）\n\n来源：#17610 开发席位用一次性探针实测（`ObjectQL` + `SqlDriver`，8 分区，表 `sys_http_delivery`），见 PR #17622 报告的范围外发现。\n\n## 为什么要紧\n\n- 每个温热的租户 kernel 一份，永不停歇；远程 Turso 上每条语句一次 HTTP 往返\n- 在 #17609（远程库缺声明索引）合并并被消费前，每条都是全表扫描；合并后仍是每跳 16 次查找\n- 与 #17610 叠加：一个空闲 kernel 仅通知 + HTTP 两个调度器，修复前合计每跳 48 条\n\n## 修法（复用 #17610 的模式，不另起设计）\n\nPR #17622 已为 `NotificationDispatcher` 落地：\n1. outbox 契约加可选 `reap()`，领取加可选 `skipReap`——reap 每跳一次、分区锁之外\n2. 空闲指数退避到上限（通知侧默认 30s，插件可调），`setTimeout` 链，`stop()` 清除\n3. 入队时唤醒（通知侧经 `setOutbox(outbox, { onEnqueued })`；HTTP 侧对应 `enqueueHttp`）\n\n注意：PR #17622 的退避实现在 `NotificationDispatcher` 内部，未抽成共用 helper。实现本卡时判断是否值得抽出，二者择一并说明。\n\n## 验收\n\n1. 空 outbox 上每跳语句数有上限的计数测试（每跳 ≤ 1 + 分区数）\n2. 空闲退避 + 入队即唤醒，各有测试\n3. 未实现 `reap()` 的旧 outbox 行为不变；分区锁、至少一次投递、claim TTL 回收语义不变\n\n## 顺序\n\n**等 PR #17622 合并后再开工**：两者会同时改 `messaging-service-plugin.ts` 与 `outbox` 契约，并行会产生同文件冲突。\n"
+}

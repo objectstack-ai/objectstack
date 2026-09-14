@@ -1,0 +1,36 @@
+{
+  "number": 5670,
+  "kind": "issue",
+  "title": "hooks 技能与 API 文档仍在教「批量写的行级谓词在 `ctx.input.ast`」——与 #5273 同一句假话,只是另外三个面",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T23:33:39Z",
+  "updated_at": "2026-08-06T11:34:06Z",
+  "closed_at": "2026-08-06T11:34:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5670",
+  "body": "在 #5273(PR #5668)修 `packages/spec/src/data/hook.zod.ts` 的契约注释时发现,PD #10 单独记录。**同一条从未兑现的陈述**还活在另外三个面上,#5273 的文件面不含它们,故未在那个 PR 里动。\n\n## 事实(对 `origin/main` 核实)\n\n`packages/objectql/src/engine.ts` 全仓只有 5 处 `HookContext` 生产点,`input: { ast }` **只出现在两条读路径**(`4640` / `4773`,分别喂 `driver.find` / `findOne`)。写路径构造的是 `{ id, data, options }`(`5243`)与 `{ id, options }`(`5705`);批量写的行级谓词走引擎内部的 `OperationContext.ast`(#2982),从不进 `hookContext.input`。\n\n以下三处仍照旧宣称它在 `ctx.input.ast`:\n\n1. `skills/objectstack-data/rules/hooks.md:116` —— 「the write events fire on bulk `multi:true` operations as well — the row-scoping predicate is in `ctx.input.ast`」\n2. `skills/objectstack-data/references/data-hooks.md:61-62` —— 「the write events fire on bulk `multi:true` operations (the row-scoping predicate is in `ctx.input.ast`)」\n3. `content/docs/api/data-flow.mdx:313` —— 「Bulk writes (`multi: true`) fire the **same** … events as single-id writes, with the row-scoping predicate in `ctx.input.ast`.」\n\n三处都只是**顺带**提到 `input.ast`,主句(「批量写触发同名事件、没有 `*Many` 事件」)本身仍然成立——和 #5273 里那句的结构一模一样。\n\n另外这三处也都**没有描述 #5038 之后的按行形状**:批量写的 `after*` 按匹配行派发,每行是单记录形状、`input.id` 是绑定的。\n\n## 为什么单独提而不是搭 #5273 的车\n\n#5273 经分诊确定的文件面就是 spec 那一个注释块;`skills/**` 与 `content/docs/**` 是另一条车道,同批可能有别的 agent 在改,不搭车以免撞面。\n\n## 为什么不只是「文档小事」\n\n`skills/objectstack-data/` 是 **AI 作者写 hook 时实际读的那份规格**。照它写出来的 `ctx.input.ast` 在批量写上恒为 `undefined`,而这正是文档点名让人去读的字段——#5273 分诊轮的原话是「契约散文对 AI 作者就是规格,假散文即缺陷」。严重程度请分诊轮判,我按发现原样提交。\n\n## 建议\n\n按 #5273 已落地的措辞对齐三处:删掉 `ctx.input.ast` 那半句,补一句「批量写不向 hook 暴露谓词;`after*` 按行派发、`input.id` 在那里绑定」。真值可直接引 PR #5668 新增的 `packages/objectql/src/hook-input-shape-contract.test.ts`。\n\n⚠️ `content/docs/releases/v16.mdx:185` 也带这句,但 releases 是**发布态记录**,按 CLAUDE.md 不在代码 PR 里改,这里不列为待办。\n\n## 关联\n\n- 同源:#5273 / PR #5668(spec 侧那份已修)\n- 相关:#5038(批量写按行语义)、#2982(谓词走 `opCtx.ast` 的原因)\n\nBlocked-by: #5273"
+}

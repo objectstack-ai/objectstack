@@ -1,0 +1,35 @@
+{
+  "number": 5753,
+  "kind": "pull_request",
+  "title": "fix(objectql): bound every lifecycle reap, not just the guarded ones (#5194)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T03:58:00Z",
+  "updated_at": "2026-08-06T04:20:09Z",
+  "closed_at": "2026-08-06T04:20:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T04:20:07Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5753",
+  "body": "Fixes #5194\n\n## 前提核验(基于合并后的 origin/main `488b66c`,含 #5708)\n\n前提成立。`lifecycle-service.ts` 中无 guard 路径仍是单条无上限删除(#5708 之后行号漂到 1089):\n\n```\nguards.length > 0\n  ? this.guardedReap(engine, object, guards, where)\n  : countDeleted(await engine.delete(object, { where, multi: true, context: { ...SYSTEM_CTX } }))\n```\n\n分批仍只存在于 `guardedReap` 与 Archiver 两条旁路,注释写明理由「bound one sweep's work, drain the backlog across sweeps」—— 该理由与是否注册 guard 无关。\n\n## 取舍:统一路径成立,已采用\n\nPM 要求优先评估「无 guard 对象直接走 guardedReap(传空 guard 列表)」。逐条核对后成立:\n\n- **零 guard 无额外副作用**:`for (const guard of guards)` 循环体根本不执行,不会有任何多余回调;\n- **批量与上限语义一致**:零 guard 时恒有 `confirmed.length === rows.length`,收敛条件退化为 `rows.length < REAP_BATCH_SIZE`(短页即排空),500 × 20 上限与余量跨 sweep 排空的语义完全相同;\n- **报告计数语义**:改为「本轮实际删除行数」。原路径取 `countDeleted(driver 返回值)`,driver 不报数时为 `undefined`;分批后每次删除都是单行,逐行累加与逐行 `countDeleted` 求和等价,且恒为已知数 —— 符合 PM「如实反映本轮实际删除数」的要求;\n- **行读取代价**:未测出显著代价,因此**没有**据此否决统一。我也**刻意没有**给无 guard 路径加 `fields: ['id']` 投影:那会让两条路径的读形状分叉,恰是统一要消除的东西,而收益我无法在此测量 —— 无实测支撑的优化不该现在建。\n\n所以 `guardedReap` 更名为 `batchedReap`(它存在的意义是「限住一轮的工作量」,不是「咨询 guard」),无 guard 对象即「零 guard 的交集 = 全部确认」。一条删除路径,而不是两份并行分批实现。\n\n⛔ 未改 driver 契约(没有加带 limit 的 delete),未碰 `engine.ts`、未碰 driver 包。\n\n## 统一必须settle 的三件事(各有测试钉住)\n\n1. **无 id 的候选行在 guard 之前就被丢弃**。有 guard 时,交集靠 id 匹配顺带过滤掉了这类行;零 guard 时没有任何东西收窄,而 `where: { id: undefined }` 配 `multi: true` **根本不是 by-id 删除** —— 引擎 dispatch 取不到标量 id,会路由到 `deleteMany`,跑的是这一批的整个 cutoff 谓词。放在 guard 之前丢弃,也顺带避免 guard 为一个根本删不掉的行回收字节(与 #5535「先收窄再询问」同一理由)。\n2. **分页循环每页检查 #4747 的 abort 位**。`sweep()` 在**对象之间**检查;从前无 guard reap 是两次检查之间的单个 `await`,那就是全部,现在则是最多 20 页的读与删。\n3. **没有 `find` 的引擎无法分页,保留原单条 bulk DELETE**。这是 no-`find` 路径,不是无 guard 路径:此时没有 guard 在等待确认,直接跳过会让 retention 彻底失效,是更坏的取舍。真实引擎恒有 `find`(`ObjectQL.find`,`plugin.ts` 接线),所以生产环境一律分批。\n\n## 代价,写在文件里而不是留给下一个人踩\n\nreap 现在是**每删一行一次 afterDelete hook**,不再是每对象每轮一次 —— 文件头原来那句「at most ONE afterDelete hook fires per object per sweep」自 #5535 起对 guard 对象就已不成立,这次一并改正。\n\n对今天的对象群这是**零代价**,已逐个核对:11 个声明 lifecycle 的平台对象中,10 个在 audit writer 的 `SKIP_OBJECTS` 里(`sys_job_run`/`sys_job_queue`/`sys_automation_run`/`sys_upload_session`/`sys_device_code`/`sys_notification` 及三个 delivery/receipt/inbox、`sys_http_delivery`),本来就不产生 audit 行;唯一被审计的 `sys_file` 因带 reap guard,**本来就是逐 id 删**。\n\n一处如实记录:每轮上限是**按 (对象, where 作用域)** 计的,租户覆写会让一个对象有 N+1 个 pass、各自一份 500 × 20 预算 —— 这是 guard 路径原有性质,本 PR 未改变。\n\n## 测试\n\n新增 `LifecycleService.sweep — unguarded reap batching (#5194)` 五例 + teardown 一例:大表首轮上限(10007 行 → 首轮恰好 10000、`finds` 恰好 20 页、余 7 行次轮排空)、稳态小增量(单页单读)、`onlyWhen` 谓词随候选读生效、无 `find` 回退、无 id 行不落入谓词删除、stop() 中途结束分页。\n\n**既有 fixture 分诊(逐个判,不批量改写)**:\n\n- **整例替换 1 例** —— `a guard on one object never changes the blind reap of others`:它钉的正是被删掉的那条肢(断言无上限 DELETE),留着会因「什么都没产生」而假绿。改为给 `sys_job_run` 真实候选行,断言它被逐 id 删且 `sys_file` 的 guard **从未被调用**(`expect(guard).not.toHaveBeenCalled()`)—— 统一之后「别的对象的 guard 会不会串进来」反而是个更尖锐的问题,不是失效问题。标题里的 \"blind reap\" 一并更名。\n- **改写断言面 3 例** —— 两个租户 governance 用例 + 一个 retention floor 租户用例。它们本来就给 `engine.find` 供租户枚举,所以现在会走分批;被测性质(每个 pass 自己的 cutoff + org 作用域、全局 pass 用 `$or` 覆盖 NULL-org、floor 兜底)完全没变,只是谓词从 `deletes[i].where` 移到了候选读 `finds[i].where`。同时补断言逐 id 删除确实发生,比原来更强而非更弱。\n\n**消费半径扫描**(#5046 的教训 —— 改的是 objectql,坏的 fixture 可能在别的包):`grep` 出所有驱动 `sweep()` 的测试,`packages/services/service-queue`(真实 LifecycleService 跑真实 `SysJobQueue`)与 `packages/qa/dogfood`(真实引擎)都在半径内,已全部跑过。\n\n```\npnpm --filter @objectstack/objectql test        → Test Files 123 passed, Tests 2027 passed\npnpm --filter @objectstack/objectql typecheck   → tsc --noEmit,无输出\npnpm --filter @objectstack/service-queue test   → Test Files 3 passed, Tests 49 passed\npnpm --filter @objectstack/service-storage test → Test Files 21 passed, Tests 283 passed  (#5708 guard 用例在内)\npnpm --filter @objectstack/dogfood test         → Test Files 85 passed | 1 skipped, Tests 513 passed | 3 skipped\npnpm check:query-options-erasure                → ratchet holds;test surface 267 仍在天花板(新测试未引入 any)\nnode scripts/check-nul-bytes.mjs                → OK (5637 files)\neslint 两个改动文件                              → 无输出\n```\n\n**反向验证(方向先判后跑,判的是「红」,结果就是红)**:把 dispatch 改回 `guards.length > 0`(恢复无 guard 单条无上限 DELETE),9 个用例转红 —— 新增 6 例全红,3 个改写的既有租户用例全红。唯一**不**转红的是「无 `find` 引擎保留 bulk DELETE」那例,这正确:该例钉的是回退路径,对 dispatch 的改动本就不敏感。\n\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01V7WetGmnfoXNn8cLieKKmx)_"
+}

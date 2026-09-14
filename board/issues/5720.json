@@ -1,0 +1,35 @@
+{
+  "number": 5720,
+  "kind": "issue",
+  "title": "[docs] runtime-services 的 hook 示例在教 `ctx.services` —— hook 上下文从来没有这个键,照抄的 hook 会拒掉每一次写入",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T02:05:38Z",
+  "updated_at": "2026-08-06T13:00:12Z",
+  "closed_at": "2026-08-06T13:00:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5720",
+  "body": "## 背景\n\n在 #5605(给 `HookContext.session` 补声明 `positions` / `preserveAudit`)核对「文档教的代码能否按 `(ctx: HookContext)` 正常标类型」时发现:补完 `positions` 之后这两页示例**仍然编译不过**,原因不在 `session`,而在同一段示例的另一个键 —— `ctx.services`。它**根本不在任何 hook 上下文里**。\n\n这不是 #5605 的另一半:#5605 是「引擎在产、契约没声明」(补声明即可),本单是「文档在教、任何一端都没有生产者」,两者修法不同,故单独立单。\n\n## 证据(均对 `origin/main` 核实)\n\n**文档在教**(标了 `{/* os:check */}`,即声称「这段应当能编译」):\n\n- `content/docs/kernel/runtime-services/examples.mdx:31-42` —— 第 2 节 \"Hook: check sharing permission before mutation\":\n\n  ```\n  export async function beforeUpdate(ctx: any) {\n    const ok = await ctx.services?.sharing?.canEdit('contract', ctx.input.id, { ... });\n    if (!ok) {\n      throw new Error('PERMISSION_DENIED');\n    }\n  }\n  ```\n\n**引擎不产**(代码注册的 handler 路径)—— `packages/objectql/src/engine.ts:4650` 起,每个 `hookContext` 都是逐字段构造的:\n\n```\nconst hookContext: HookContext = {\n    object, event, input,\n    session: this.buildSession(opCtx.context),\n    provenance: ..., user: ..., api: this.buildHookApi(...),\n    transaction: ..., ql: this\n};\n```\n\n九个键:`object` / `event` / `input` / `session` / `provenance` / `user` / `api` / `transaction` / `ql`。没有 `services`,其余 `triggerHooks` 调用点同构。\n\n**沙箱也不产**(metadata hook body 路径)—— `packages/runtime/src/sandbox/body-runner.ts:310-324` 的 `buildHookSandboxContext` 返回 `input` / `previous` / `user` / `session` / `event` / `object` / `result` / `api` / `log` / `crypto`。同样没有 `services`。**注意对照组**:紧挨着的 `buildActionSandboxContext`(同文件 :326)注释写明 action ctx 约定里**有** `services` —— 即 `services` 是 action 面的词汇,示例把它搬到了 hook 面。\n\n**契约也没有** —— `HookContextSchema` 声明的键与引擎一致,无 `services`(见生成的 `content/docs/references/data/hook.mdx` 属性表)。\n\n## 为什么是缺陷而不是无害笔误\n\n1. **照抄的 hook 会拒掉每一次写入。** `ctx.services?.sharing?.canEdit(...)` 因可选链短路成 `undefined`,`ok` 恒为 `undefined`,于是 `if (!ok) throw new Error('PERMISSION_DENIED')` **无条件抛出**。作者按文档写一个 `beforeUpdate` 授权检查,得到的是「该对象上所有更新一律 403」,而且失败方向是「看起来在正常拒绝」,极难归因到文档。这正是 Prime Directive #10 推论里那句「绝不宣传运行时并不交付的能力」的实例。\n2. **`ctx: any` 让 `{/* os:check */}` 变成一道空门。** `check:skill-examples` 会真的编译这个被标记的块(`packages/spec/scripts/check-skill-examples.ts`),但块内 `ctx` 标成了 `any`,于是**块里每一次属性访问都不被检查** —— 门是绿的,覆盖的却是零。同一个 `any` 同时掩盖了 #5605 的 `ctx.session?.positions`(当时是 TS2339)和本单的 `ctx.services`。一个标了 os:check 又把入参标 `any` 的示例,等于声明「这段编译得过」却什么也没证明。\n3. **正确写法尚待确定,所以更该由维护者定。** hook 里访问 sharing service 的**真实**受支持通道是什么,需要先答:是 `ctx.api`(`buildHookApi`)已经覆盖、还是应当像 action ctx 那样给 hook ctx 也注入 `services`、抑或 hook 就不该直接调 service。示例应改成哪一种,取决于这个答案。\n\n## 建议修法(不预设结论)\n\n1. 先定「hook 访问 kernel service 的受支持通道」;\n2. 按该结论改这两处示例(`examples.mdx` 第 2 节;`sharing-service.mdx:60-70` 的 Example 块用的是裸 `services.sharing`,不带 `ctx.`,是否同病需一并核);\n3. 把示例的 `ctx: any` 换成 `(ctx: HookContext)` —— #5605 落地后 `session.positions` 已可正常标类型,`any` 已无必要,而去掉它才能让 `{/* os:check */}` 真正生效;\n4. 可选:给 `check:skill-examples` 加一条「os:check 块内不得把入参标 `any`」的约束,否则这道门还会被下一个示例同样架空。\n\n## 与其他单的关系\n\n- #5605(本单的发现来源,已在 PR):补 `session.positions` / `preserveAudit` 的声明。修完后这两页的 `session` 读法可正常标类型,但 `ctx.services` 仍编译不过 —— 两者不重叠,#5605 不解决本单。\n- #5670(hooks 技能与 API 文档在教「批量写的行级谓词在 `ctx.input.ast`」)同属「文档教了一个不存在的 hook 面」这一类,但键不同、页不同,修 #5670 不会碰到 `ctx.services`,故不作为其子单。\n- 非阻塞:本单不依赖任何在飞的单。\n\n发现于 #5605 的文档侧核查(Prime Directive #10)。未加标签,交 PM 分诊定级。"
+}

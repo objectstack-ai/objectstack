@@ -1,0 +1,37 @@
+{
+  "number": 5217,
+  "kind": "issue",
+  "title": "check-i18n-bundles 在工作区未构建时把「CLI 没 build」报成 9 个包各自的 bundle 问题",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T10:24:02Z",
+  "updated_at": "2026-08-06T10:12:23Z",
+  "closed_at": "2026-08-06T10:12:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5217",
+  "body": "观察类发现（`finding`，不入 `pm:queue`）。在 #5177 / PR #5211 里定位 CI 红时顺带撞到，与该单实现无关，故未在该 PR 内修。\n\n## 现象\n\n在一个刚建好、装完依赖但**没有构建**的 worktree 里跑：\n\n```\nnode scripts/check-i18n-bundles.mjs\n```\n\n得到的是 9 个包各自「炸了」的报告：\n\n```\n ›   Error: command i18n:extract:packages/plugins/plugin-security/scripts/i18n-extract.config.ts not found\n  plugins/plugin-security        ERROR\n ›   Error: command i18n:extract:packages/services/service-storage/scripts/i18n-extract.config.ts not found\n  services/service-storage       ERROR\n  ...\n\ncheck-i18n-bundles: 9 bundle problem(s)\n\n  • platform-objects: extract failed — no output\n  • plugins/plugin-approvals: extract failed — no output\n  • plugins/plugin-audit: extract failed — no output\n  ...\n```\n\n真实原因只有一个：该门禁跑的是**构建产物** `packages/cli/bin/run.js`（`scripts/check-i18n-bundles.mjs:55` 的 `CLI` 常量），CLI 的 dist 不在时 oclif 找不到 `i18n extract` 这条命令，于是每个包各失败一次。\n\n跑一次 `pnpm exec turbo run build --filter=@objectstack/cli` 之后，同一条命令干净通过（9 个包全 in sync）。\n\n## 为什么值得记一笔\n\n输出把**一个环境前置条件**呈现成**九个内容问题**，而且用词正好指向错误的方向 —— 「bundle problem(s)」「extract failed」会让人以为是 i18n 配置或 bundle 内容坏了。本地复现一条 i18n CI 红时，这一步会先把人带偏一次：CI 里因为构建在前所以永远看不到这个形态，只有本地/worktree 里才撞得到，而本地正是你想复现 CI 的时候。\n\n脚本自己其实已经知道这个前置条件 —— 文件头注释写着「Requires the workspace build (it runs the built CLI), so it belongs after …」—— 只是没有把它变成一次检查。声明了但没强制执行。\n\n## 建议方向（实现者自选）\n\n在进入 per-package 循环**之前**做一次前置判定，失败时用一条话说清楚该干什么，而不是让 N 个包各报一次：\n\n- 判据可以是 CLI 产物是否存在（注意 `bin/run.js` 本身是源文件、未构建时也在，所以要探的是它加载的 dist），\n- 或者更省事：把首个包的 oclif `command … not found` 签名识别出来，直接判定为「工作区未构建」并**立刻**退出，提示 `pnpm exec turbo run build --filter=@objectstack/cli`。\n\n任一种都行，关键是把「9 个 bundle 问题」换成「1 个前置条件没满足 + 修法」。\n\n## 影响面\n\n纯内部工具链 DX，无用户可见影响，今天没有人因此收到错误结果 —— CI 的判定始终是正确的，坏的只是本地复现时的首个诊断步骤。故按观察类归档，交由 PM 定级。\n"
+}

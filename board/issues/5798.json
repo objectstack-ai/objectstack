@@ -1,0 +1,37 @@
+{
+  "number": 5798,
+  "kind": "issue",
+  "title": "同一套 binding 决策框架在 `.claude/` 与已发布 `skills/` 各存一份,无任何门禁保持同构 —— #5130 改一份、另一份静默分叉两天",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T05:54:14Z",
+  "updated_at": "2026-08-06T10:09:08Z",
+  "closed_at": "2026-08-06T10:09:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5798",
+  "body": "实施 #5451 过程中发现,**未认领**。\n\n## 现象(实测)\n\n**决策评估轴框架**这一段 binding 文本在仓库里有两份手写副本:\n\n| 副本 | 面向 | 分发方式 |\n|---|---|---|\n| `.claude/skills/pm-dispatch/SKILL.md` + `.claude/agents/os-dev.md` | 内部 agent 协议 | 不发布 |\n| `skills/objectstack-pm-dispatch/SKILL.md`(内含 dev-agent 模板) | 第三方项目 | `npx skills add objectstack-ai/objectstack/skills` 直读仓库 |\n\n**没有任何门禁检查这两份是否一致。** 后果已经实测发生过一次,就是 #5451 本身:#5130(2026-08-04)把内部版由两轴改为三轴,发布版的镜像原封不动,分叉存在了两天,直到有人手工发现,并且需要额外一个 issue + 一轮维护者裁决(泛化与否)才补上(PR 见 #5451)。分叉期间,装了这份 skill 的第三方 PM agent 按两轴呈报,而本仓按三轴。\n\n对比:这一类漂移在本仓**已经有门禁的先例**,理由写在 `.github/workflows/lint.yml` 里 —— `check:skill-refs` / `check:skill-docs` 覆盖 `skills/*/references/_index.md` 与 catalog 列表,注释明说「These ship to third parties via `npx skills add`, so the drift is served straight to consumers' agents」。**同一条理由完全适用于 SKILL.md 正文里的 binding 框架,但那部分没有覆盖**——现有两个门禁只比对 frontmatter 与生成的索引,不看正文。\n\n## 两种处置方向(哪一种正确请三轴分诊时定)\n\n- **A 加漂移门禁** —— 用锚点比对两份的框架结构(轴数、轴名、绑定句),不要求逐字相同(发布版按 #5451 的裁决 B 刻意泛化了措辞:去掉「创业项目」自我描述与本仓单号,扩张姿态改由安装方 conventions 文件声明)。成本低;但「结构同构、措辞不同」的判据本身要设计,写松了会变成摆设门禁。\n- **B 单一来源派生** —— 让一份从另一份生成(或两份都从一个片段生成),符合本仓 derive-by-reference 原则(PD#12 / #2231 反 fork)。根治;但两份的**受众不同**是真实需求而非偶然(内部版引本仓单号、发布版必须 project-agnostic),纯生成需要一套「内部专属段落」标记机制。\n\n倾向先把判据想清楚再动手:如果只想防「一份改了另一份忘了」,A 的最小形态(轴数 + 轴名锚点)就够,且能立刻挡住下一次 #5130;B 是更彻底但更大的一次改造。\n\n## 备注\n\n- 这不是 #5451 的完成范围内的事(#5451 的验收是「把发布版改成三轴」,已做完),因此**独立立单**而非子单。\n- `Blocked-by: #5451` —— 只是排序:#5451 的 PR 合并前,两份仍是分叉状态,任何这类门禁在 `main` 上会**天生红灯**。合并后再落门禁,首次运行即绿。"
+}

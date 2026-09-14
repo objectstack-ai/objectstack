@@ -1,0 +1,34 @@
+{
+  "number": 5788,
+  "kind": "pull_request",
+  "title": "test(rest): getDiscovery 测试替身发 `routes`,不再发 #4828 已退役的 `endpoints` (#5674)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T05:30:23Z",
+  "updated_at": "2026-08-06T06:02:45Z",
+  "closed_at": "2026-08-06T06:02:43Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T06:02:43Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5788",
+  "body": "Fixes objectstack-ai/objectstack#5674\n\n## 前提复核(基线 origin/main `fc5f536`)\n\nissue 写 14 个文件,派发单实测 15 个 —— 复核结论:**15 个文件 / 16 处**写 `endpoints: { data: … }`,与派发单一致,issue 的 14 偏低。真实 producer(`packages/metadata-protocol/src/protocol.ts:2767` 起)发的是 `routes`(`ApiRoutesSchema`,在 `DiscoverySchema:353` 是**必填**键),`endpoints` 从来没被任何 producer 发过,#4828 已删除并由 `discovery-schema-conformance.test.ts:197-201` 钉死。前提成立。\n\n`openapi-endpoints.*` / `served-endpoints.test.ts:48` / `request-schema-gate.conformance.test.ts:173` 的 `endpoints` 是「声明式端点清单」语义,不是 discovery 键 —— 甄别后不动,已复核。\n\n## 逐文件复核:issue 担心的行为变更,实测中不存在\n\nissue 说改成 `routes` 会让 `if (discovery.routes)` 从假翻真、handler 开始跑路由增补块(含 `probeMcpServeable`),所以要一次一个文件复核断言。逐个文件查完,**没有一个文件会执行那个块** —— 原因不是块被跳过了,而是**这 25 个替身没有一个被喂给 discovery handler**:每个文件驱动的都是 `/api/v1/data/:object`、`/api/v1/meta/:type/:name`、`/batch` 等具体路由,没有一处取 `GET /api/v1/discovery` 的 handler 来调用。\n\n这一点有个很强的旁证:全仓唯一真正调用 discovery handler 的两个 describe 就在 `rest.test.ts`(`discovery — routes.mcp`、`discovery — capabilities.transactionalBatch`),而它们**各自覆盖掉了 `createMockProtocol()` 的 getDiscovery**,换成 `{ routes: { data: '', metadata: '' } }`(`rest.test.ts:2601`)—— 那次覆盖本身就是在说「共享替身的键是错的,这里用不了」。\n\n所以:**没有任何文件的断言需要靠「块不执行」才成立**,派发单里预留的那种例外(显式去掉 routes 键 + 注释说明)一处都没有用到。\n\n## 改动(4 个 commit,26 个文件)\n\n1. `1d2c4f5` — 15 个文件 / 16 处 `endpoints: { data: … }` → `routes: { data: … }`。**纯键名翻正,值保持作者原样**:handler 每次请求都用服务端配置覆写 `data`/`metadata`/`ui`,这些槽位按构造就是占位符,键才是缺陷。另在最容易被抄的那个共享替身(`rest.test.ts` 的 `createMockProtocol()`)上加了 4 行说明。\n2. `7d5ec37` — 另外 10 个文件写 `endpoints: {}`,同一个退役键的退化写法。issue 与派发单的清单来自 `endpoints: { data:` 这个 grep,看不见它们。只修 15 个会让 issue 自己写下的第一条理由(「唯一还在拼写已退役键的地方」)原样留存,所以一并翻正为 `routes: { data: '', metadata: '' }` —— `ApiRoutesSchema` 里 `data`/`metadata` 必填,`routes: {}` 不是合法生产者形状;这个字面量取自仓库里早已存在的正确先例 `rest.test.ts:2601`,而不是另发明一种。这 10 个文件同样一处也不碰 discovery 路由。\n3. `8b92c51` — 新增 pin `packages/rest/src/discovery-double-retired-key.test.ts`。没有它,退役键可以随下一次复制粘贴无声回来:生产面的 conformance 测试只看真实 producer 发出的 body,fixture 层它看不见。\n4. `d51adee` — 修 pin 自身的一个缺陷(见下)。\n\npin 的边界写在文件头,不含糊:只扫 `mockResolvedValue({ … })` 这一种形态(排除自身后实测 **27 处 / 26 个文件**,即本 PR 翻正的 26 处 + `rest-route-ledger.conformance.test.ts` 的 `mockResolvedValue({})` —— 后者 resolve 成裸 `{}`,从来没拼过退役键);**只断言否定面**(不得有 `endpoints`),不要求必须有 `routes` —— handler 是 `if (discovery.routes)`,将来有测试要驱动这条假分支是正当的,`rest-route-ledger` 那处就是现成的例子;并带一条 anti-vacuity 下限(#4642 的教训:扫不到东西的扫描器会以「全部干净」的样子通过)。\n\n### commit 4:pin 自身的缺陷,自查发现\n\n扫描目录下所有 `*.test.ts` **包括 pin 自己**,而它的 docblock 为了说明问题原样引用了带 `endpoints:` 的坏替身。它当时没红,只是因为 docblock 行把键前缀成了 `* `,而 `[{,]\\s*` 这个 lead-in 不接受 `*` —— 也就是说这条钉子的绿由注释排版决定,重排一次 docblock 它就会在自己的散文上失败。改为**显式**排除自身文件名并把理由写在常量旁,不继承这份侥幸。\n\n## 反向验证(方向为事前预测的 RED)\n\n预测:把任一文件改回 `endpoints`,新 pin 应当**变红并点名该文件**(它是新增的钉子,不是既有断言,所以是标准 Red 方向,不是 #5046 那种「诊断变多」或 #5018 那种反转)。两种拼法各验一次:\n\n```\n# ① rest-batch-size-cap.test.ts 改回 `endpoints: { data: … }`\nAssertionError: … expected [ 'rest-batch-size-cap.test.ts' ] to deeply equal []\nTest Files  1 failed (1) | Tests  1 failed | 1 passed (2)\n\n# ② rest-dropped-fields.test.ts 改回 `endpoints: {}`(commit 4 之后复验)\nAssertionError: … expected [ 'rest-dropped-fields.test.ts' ] to deeply equal []\nTest Files  1 failed (1) | Tests  1 failed | 1 passed (2)\n```\n\n两次改回后均转绿。方向与预测一致。\n\n## 测试\n\n```\npnpm --workspace-concurrency=2 --filter @objectstack/rest test\n Test Files  56 passed (56)\n      Tests  784 passed (784)\n```\n\n（改前基线 55 files / 782 tests 全绿,改后 56/784 —— 增量正是新 pin 的 2 条。）\n\n其余本地闸门:`pnpm lint`(仓库级 ESLint,CI 同一条)干净;`pnpm check:type-check-coverage` OK(63/78 包 type-checked);`node scripts/check-nul-bytes.mjs` OK,并按控制字符自查规则对改动文件跑了 `grep -naP` 扫描,无命中。\n\n`@objectstack/rest` **不声明 `typecheck` 脚本**(它在 DEBT + TEST_DEBT 台账里),所以本包的 `pnpm typecheck` 无法运行 —— `ERR_PNPM_RECURSIVE_RUN_NO_SCRIPT`。这是既有台账状态、不是本 PR 造成的;不伪造一条绿的 typecheck 证据。\n\n## 界外发现\n\n- **#5787**(已 filed,未认领,`finding` 标签):`packages/client/src/client.test.ts:36-44` 的 discovery 替身同样拼 `endpoints`,且把 `capabilities` 写成字符串数组(spec 里是 record)。生产类型与生产代码都是对的(`DiscoveryResult = GetDiscoveryResponse`,无一处读 `discovery.endpoints`),同属 observation-class。按「只改本 issue 的范围」不在本 PR 处理;本 PR 的 pin 按包扫描,不覆盖 `packages/client`。\n\n## Changeset\n\ntests-only,不发布任何东西,故无 changeset,已带 `skip-changeset` 标签(读回确认:`tests`, `skip-changeset`)。首个 `opened` 事件那次 Check Changeset 早于打标一步开跑、判红,属已知竞态;打标后由 `labeled` 事件触发的两次 Check Changeset 均为 `skipped`(豁免生效)。\n"
+}

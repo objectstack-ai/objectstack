@@ -1,0 +1,35 @@
+{
+  "number": 5743,
+  "kind": "pull_request",
+  "title": "feat(spec)!: 声明 routes.mcp,并把 discovery 一致性闸门下沉到 routes 一层 (#5679)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T03:28:42Z",
+  "updated_at": "2026-08-06T05:11:19Z",
+  "closed_at": "2026-08-06T05:11:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T05:11:18Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5743",
+  "body": "Fixes #5679\n\n## 结论先说\n\n前提**基本成立,但有一处需要更正**:`routes.mcp` 确实被发出、被 objectui 真实消费、却从未在 `ApiRoutesSchema` 里声明。但 issue 正文那句「dispatcher 侧的 `getDiscoveryInfo()` 不发 `routes.mcp`,只有 REST 这条路径发」是**错的** —— 两个生产者都发。详见下面「premise 更正」一节。\n\n这是 #4828 的同族缺陷低一层,而处置方向与 `endpoints` **相反**:`endpoints` 因零消费者被删,`mcp` 有两个真实消费者(而且它是 objectui 里**唯一**被读的 `routes.*` 键),所以是**补声明**,不是删。\n\n## 为什么是缺陷,不是洁癖\n\n`ApiRoutesSchema` 是普通 `z.object`,默认 **strip** 未知键。所以任何按 spec 严格解析 `/discovery` 的消费者都会把 `routes.mcp` 悄悄丢掉 —— Integrations 的 MCP 连接卡直接空掉,且无任何报错。今天没炸,只是因为 objectui 那两处读的是原始 JSON,没走 schema。\n\n同一次测试运行里能直接看到这个盲区:`DiscoverySchema.safeParse(body)` 在 `mcp` 未声明时**依然是绿的**(被 strip 掉了),只有键集检查能看见它。\n\n## 测得的形状(不是猜的)\n\n先测后声明。两个生产者的实测结果:\n\n| 场景 | `routes.mcp` |\n|:---|:---|\n| REST 未分环境挂载 | `\"/api/v1/mcp\"` |\n| REST **分环境**挂载 (`env_alpha`) | `\"/api/v1/mcp\"` —— 仍是**无环境段**的路径,而同一响应里 `routes.data` 是 `/api/v1/environments/env_alpha/data` |\n| REST,`OS_MCP_SERVER_ENABLED=false` | 键**不存在**(`delete` 掉) |\n| REST,serveability 探测为 false (#4024) | 键**不存在** |\n| dispatcher,注册了合形状的 mcp 服务 | `\"/api/v1/mcp\"` |\n| dispatcher,无 mcp 服务 | 键存在、值 `undefined`(`JSON.stringify` 在传输时丢弃) |\n\n据此声明为 `mcp: z.string().optional()` —— **optional 而非 nullable**:两个生产者都不会发 `null`。`/mcp` 是裸挂载的,所以永远是 unscoped base。\n\n## 改动\n\n1. **`packages/spec`**:`ApiRoutesSchema` 声明 `mcp`,注释里写清测得形状、为何 optional、以及为何与 `endpoints` 处置相反。\n2. **`packages/rest`**:去掉发出点的两处 `as any`。**纯类型改动,发出的响应体逐字节不变** —— 但那个 cast 的消失本身就是结构性证明(见下)。\n3. **闸门**:#4828/#5682 建立的三个 `discovery-schema-conformance.test.ts` 现在除顶层键集外,**也检查 `routes` 一层的键集**,allowance 同样从 `ApiRoutesSchema` 推导(而不是手写数组),与顶层从协议 schema 推导的做法一致。\n   - **只下沉一层,不做全递归** —— 全递归是 #4828 明确的界外项,而且 `capabilities` / `services` 是 `z.record`,键本来就是开放的。\n   - 扩这一层后**没有发现其它未声明的 routes 键**,两个生产者补声明后都归绿,无需 pin 现状、无需开后续单。\n\n## 先证红\n\n两个方向各一条,方向都是事先定好的:\n\n**红证 1 —— 类型(结构性证明)。** `@objectstack/rest` 的 typecheck ratchet 把该包钉在**恰好 2 个**错误。基线确认为 2(两条 `package-routes.ts` 的 TS2345)。在**未声明** `mcp` 的前提下去掉 cast:\n\n```\nsrc/rest-server.ts(3077,46): error TS2339: Property 'mcp' does not exist on type '{ data: string; metadata: string; discovery?: string | undefined; ... }'\nsrc/rest-server.ts(3079,53): error TS2339: Property 'mcp' does not exist on type '{ ... }'\n```\n\n2 → 4,`check:type-check-coverage` 会红。补上声明后回到**恰好 2**,cast 已删除且通过类型检查。\n\n**红证 2 —— 闸门。** 在未声明的 schema 上,新的 routes 键集断言在**两个**生产者上都红:\n\n```\nREST:       undeclared keys inside `routes` on the REST /discovery body: expected [ 'mcp' ] to deeply equal []\ndispatcher: undeclared keys inside `routes` on the getDiscoveryInfo() shape: expected [ 'mcp' ] to deeply equal []\n```\n\n同一次运行里 `satisfies the canonical DiscoverySchema` 保持绿 —— 这正是 strip 盲区本身。\n\n## premise 更正\n\nissue 正文的括号注写着 dispatcher 不发 `routes.mcp`。实测**不成立**:`packages/runtime/src/http-dispatcher.ts` 的 routes 字面量里始终带着这个键\n\n```\nmcp: isMcpServerEnabled() && hasMcp ? `${prefix}/mcp` : undefined,\n```\n\n键恒在,值是路径或 `undefined`。之所以看起来「不发」,是因为 `JSON.stringify` 会丢弃 `undefined` 值 —— 但 `Object.keys()` 看得见,新闸门也就在这个生产者上照样红了。结论:**受影响的是两个生产者,不是一个**,补一次声明同时覆盖两者。\n\n`metadata-protocol` 的 `getDiscovery()` 则确实不发:它的 routes 标注了 `const routes: ApiRoutes`,编译器把它按住在已声明键集内。那一侧的闸门**改动前后都是绿的**(诚实说明:它不是红证,是回归闸门)。\n\n## 验证\n\n| 命令 | 结果 |\n|:---|:---|\n| `packages/rest` 全量 `test` | 51 files / **755 passed** |\n| `packages/spec` 全量 `test` | 317 files / **8084 passed** |\n| `packages/metadata-protocol` 全量 `test` | 44 files / **409 passed** |\n| `packages/runtime` conformance | **10 passed** |\n| `packages/rest` `tsc --noEmit` | **2 errors** = ratchet 基线 |\n| `packages/spec` `typecheck` | OK |\n| `check:nul-bytes` + 控制字符自查 | clean |\n\n中途 `packages/rest` 曾出现 8 条 OpenAPI 用例红 —— 定位为我本地验证顺序的副作用:`check:authorable-surface` 会重跑 `build-schemas.ts` 但不跑 `gen:openapi`,把 `packages/spec/json-schema/openapi.json` 清掉了,而该路由在运行时从磁盘读它,于是返回 503。重跑 `gen:openapi` 后全绿。该目录是 gitignore 的,不进提交,CI 的 `build` 本身就是 `gen:schema && gen:openapi && tsup`,顺序正确。\n\n## 生成物\n\n- `packages/spec/authorable-surface.json`:+1 行 `api/ApiRoutes:mcp`\n- `content/docs/references/api/discovery.mdx`:+1 行表格项(该文件头部标注 AUTO-GENERATED,经 `gen:docs` 重生成)\n- **已剔除无关漂移**:`authorable-surface.base.json` 的 baseRev 重锚(带进 #5682 的两个 `scoping` 键)已 revert —— 闸门对此只报 informational(「trails the merge base by 2 key(s)」),不属本单。\n\n## Changeset\n\n`@objectstack/spec` minor(新声明键)+ `@objectstack/rest` patch。rest 侧是**纯类型**改动、响应体不变,按仓库惯例仍给 patch 以记录 cast 的移除。\n\n已合入最新 `origin/main`(#5721/#5722/#5731 等),无冲突。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018fxLGQdatPbBUvCgiVxg6D)_"
+}

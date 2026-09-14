@@ -1,0 +1,35 @@
+{
+  "number": 5273,
+  "kind": "issue",
+  "title": "`HookContext.input` 的契约注释声明批量写携带 `input.ast`,引擎从不设置它(AST 只在 opCtx 上);同一张表也未描述 #5038 后 after 事件的按行形状",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T13:48:39Z",
+  "updated_at": "2026-08-06T00:27:58Z",
+  "closed_at": "2026-08-06T00:27:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5273",
+  "body": "在 #5038(批量写按行语义)实现过程中发现,PD #10 单独记录。落在 `packages/spec/**`(spec 车道所有),#5038 未触碰该文件。\n\n## 事实(对 `origin/main` 核实)\n\n`packages/spec/src/data/hook.zod.ts` 里 `HookContext.input` 的契约注释逐条列出每种操作的 `input` 形状:\n\n```\n   - find (also fires for findOne): { ast: QueryAST, options: DriverOptions }\n   - insert: { doc: Record, options: DriverOptions }\n   - update (single id): { id: ID, data: Record, options: DriverOptions }\n   - update (bulk, multi:true): { ast: QueryAST, data: Record, options: DriverOptions }\n   - delete (single id): { id: ID, options: DriverOptions }\n   - delete (bulk, multi:true): { ast: QueryAST, options: DriverOptions }\n```\n\n并在下方重申「the row-scoping predicate is carried in `input.ast`」。\n\n`packages/objectql/src/engine.ts` 里 `input: { ast: ... }` **只出现两处**,都是读路径(`beforeFind` / `afterFind`)。写路径构造的是:\n\n- `update()`:`input: { id, data: opCtx.data, options: opCtx.options }`\n- `delete()`:`input: { id, options: opCtx.options }`\n\n批量分支消费的 AST 是 **`opCtx.ast`**(#2982 为让中间件合成的行级过滤真正绑定 driver 而设的那条缝),它从不进 `hookContext.input`。所以照契约写 `ctx.input.ast` 的 hook 作者在批量写上拿到的是 `undefined` —— 而这恰恰是注释点名让人去读的那个字段。\n\n`hook-wrappers.ts` 的 `installFlatInput` 把 `ast` 当作 wrapper key 特判(不下放到 `data`),说明这个形状曾被当真过;今天在写路径上它是一个没有生产者的消费口。\n\n## 第二处漂移(#5038 之后)\n\n同一张表把 `update (bulk, multi:true)` 描述为单一形状。#5038 落地后,批量写的 **after 型**事件按匹配行派发,每行的 `input` 是**单记录形状**(`{ id, data, options }`);仍然整批触发一次的只有 `before*`。下方那句「A bulk (`multi: true`) update/delete fires the SAME `beforeUpdate`/`beforeDelete` events as a single-id write」本身仍然成立(它只谈 before),但这张表读起来会让人以为 after 事件在批量写上也没有 per-row `id`。\n\nZod 契约本身不受影响 —— `input` 是 `z.record(z.string(), z.unknown())`,开放形状,#5038 因此无需改 spec 即可实现按行语义(这一点已在 PR #5270 里核实过)。**纯属注释与实现的漂移,不是 schema 变更。**\n\n## 分级说明\n\n标 `finding`:今天没有用户会撞上它——写路径 hook 作者拿 AST 的实际写法是 `ctx.input.options` / 引擎内部,仓内没有任何 `ctx.input.ast` 的写路径消费者(已 grep 确认)。但它是一条**明确写下来、却从未兑现**的契约陈述,正是 ADR-0049 「declared = enforced」路线要清掉的那一类;而且它会主动误导下一个照文档写 hook 的人(含 AI 作者)。\n\n## 建议\n\n由 spec 车道一次改掉两处:把批量写的 `input` 描述改成引擎实际给的形状(`{ id?, data?, options }`,并说明 after 事件在批量写上按行携带 `id`),删掉「the row-scoping predicate is carried in `input.ast`」这句,或者反过来让引擎真的把 `opCtx.ast` 放进批量写的 `input`(后者要评估是否有人会改它 —— `input` 是 mutable 的,把安全过滤后的 AST 交给 hook 改写需要单独想清楚,因此倾向改注释而不是改引擎)。\n\n## 关联\n\n- 发现于:#5038(批量写按行语义)/ PR #5270\n- 相关:#2982(批量写的行级过滤 AST 走 `opCtx.ast` 的原因)\n- 文件面:`packages/spec/src/data/hook.zod.ts`(spec 车道:#5114 / #4964 / #4854 / #4001)"
+}

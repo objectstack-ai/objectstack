@@ -1,0 +1,35 @@
+{
+  "number": 5500,
+  "kind": "issue",
+  "title": "flow.test.ts 剩下的五类跑不通的 fixture 形状:`{节点id.字段}` 输出引用、assignment 无 `assignments` 包裹、legacy loop、字符串 `filter`、brace-CEL 出边条件",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T14:24:19Z",
+  "updated_at": "2026-08-06T00:40:17Z",
+  "closed_at": "2026-08-06T00:40:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5500",
+  "body": "发现于 #4924 的实施(PR 见下)。#4924 的范围是它列举的四处(CRUD 的 `recordId`、decision 的 `config.condition`、以及那处 `object`),已修;下面这些是**同一个文件、不同缺陷类**的剩余部分,按 Prime Directive #10 单独记录,未在 #4924 的 PR 里顺手改。\n\n文件:`packages/spec/src/automation/flow.test.ts`(行号为 #4924 合入后的位置,先重新定位)\n\n## 1. `{<节点 id>.<字段>}` 这套输出引用方言,引擎从来不绑\n\n引擎只通过 `config.outputVariable`(CRUD / script / subflow / map)和 `iteratorVariable` 把节点产物写进变量表 —— `engine.ts` 里没有任何一处 `variables.set(node.id, …)`。所以这些 token 解析到 nothing:\n\n- `:492` loop 的 `collection: '{get_old_records.records}'`(上游 `get_old_records` 没有 `outputVariable`)\n- `:453` assignment 的 `value: '{create_contact.id}'`(同上,`create_contact` 没有 `outputVariable`)\n\n在 `filter` 里这一类尤其危险:`resolveNodeFilter` 把\"作者写了、插值后消失\"的条件视为 #3810 场景并拒绝执行节点 —— 也就是说照抄这套写法的 CRUD 节点会被判定拒跑(这一条是好的),而在 `collection` / `value` 这类槽位里则是静默解析成空。\n\n## 2. `assign_output` 节点实际上创建了两个名叫 `variable` / `value` 的变量\n\n`:445` 附近:\n\n```\nconfig: { variable: 'contactId', value: '{create_contact.id}' }\n```\n\n`logic-nodes.ts` 的 assignment executor 规范化三种形状,最后一条分支是:**没有 `assignments` 包裹时,顶层 config 键就是变量名**。所以这份 fixture 声明的不是\"把 X 赋给 contactId\",而是两个字面量名为 `variable` 和 `value` 的变量,`contactId`(声明为 `isOutput: true` 的流程变量)始终没被写过。正确形状是 `config: { assignments: { contactId: '…' } }`。\n\n## 3. `loop_records` 是 legacy flat-graph loop,每轮什么都不绑\n\n`:479` 的 loop 节点没有 `config.body`,走的是 `loop-node.ts` 的 legacy 分支:只设 `$loopItems` / `$loopIndex` 就返回 success,不做任何逐项迭代,也不绑 `iteratorVariable`。edges 里 `loop_records → delete_record → loop_records` 的回边只是普通图遍历。\n\n后果:#4924 修好的 delete 节点 `filter: { id: '{item.id}' }` 里那个 `item`,要等这个 loop 改成 ADR-0031 的结构化 `config.body` 形态才真的有值(#4924 的原地注释已经写明这点)。\n\n## 4. `get_old_records` 的 `filter` 是字符串,契约声明的是 record\n\n`:474` 附近:\n\n```\nconfig: { object: 'log_entry', filter: 'created_at < DAYS_AGO(90)' }\n```\n\n两个问题:`object` 是退役拼写(ADR-0087 D2 `flow-node-crud-object-alias` 在加载期改写,规范键是 `objectName`);`filter` 声明为 `z.record(z.string(), z.unknown())`,字符串直接 safeParse 失败,而且 `DAYS_AGO()` 不是任何一层支持的函数。\n\n可跑的等价形状是存在的、但需要拍板,所以没有在 #4924 里猜:`template.ts` 文档化了 `{TODAY() ± N}`(按天偏移),`ComparisonOperatorSchema` 声明了 `$lt`,于是 `filter: { created_at: { $lt: '{TODAY() - 90}' } }` 是候选 —— 但 `$lt` 的 Zod 声明是 `number | date | FieldReference`,不含字符串,所以\"插值后的 ISO 日期串走 record-form where\"这条路是否是我们要教的形状,需要维护者确认。\n\n## 5. `object` 别名在本文件还剩两处;brace-CEL 出边条件还剩三处\n\n- `object:` — `:117`(`FlowNodeSchema` 的 `should accept node with config`)、`:433`(screen flow 的 `create_contact`)、`:474`(见上)。#4924 只改了它列举的那处。\n- 出边 `condition` 写成 `{…}` 模板花括号(#1491):`:978`(`{amount} > 1000`)、`:1000` / `:1001`(`{priority} == \"high\"` / `\"medium\"`)。出边条件是 bare CEL(ADR-0032),`registerFlow` 的表达式校验对 brace 形状是**硬报错**,所以这三处照抄出去的流程注册就失败。\n\n## 为什么记成 finding 而不是缺陷\n\n全部在测试 fixture 里,今天没有用户会撞到;危害与 #4924 同型 —— 这是一份会被(尤其被 AI 作者)照抄的教材。严重度留给 PM 的 triage 轮定。\n\n## 相关\n\n#4924(本 issue 的来源)、#4001(第一类发现的普查)、#4966(同族,`lint-flow-patterns.test.ts`)、#4414、#3810、#1491\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 5248,
+  "kind": "issue",
+  "title": "ADR-0049 enforce-or-remove:`IndexSchema.type` 与 `IndexSchema.partial` 没有任何 DDL 消费者",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p0"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T12:17:31Z",
+  "updated_at": "2026-08-06T09:06:18Z",
+  "closed_at": "2026-08-06T09:06:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5248",
+  "body": "发现于 #4001 批 20 的逐站点测量。**只记录,不在批 20 里动**。\n\n## 事实\n\n`packages/spec/src/data/object.zod.ts` 的 `IndexSchema` 声明了五个键,其中两个没有任何消费者:\n\n| 键 | 消费者 |\n|---|---|\n| `name` | ✅ `syncDeclaredIndexes`(索引名) |\n| `fields` | ✅ `syncDeclaredIndexes`(列) |\n| `unique` | ✅ `syncDeclaredIndexes` + ADR-0120 D3/D4 的 `'organization'` scope |\n| **`type`** | ❌ 无 —— `z.enum(['btree','hash','gin','gist','fulltext'])`,还带 `.default('btree')` |\n| **`partial`** | ❌ 无 —— *\"Partial index condition (SQL WHERE clause for conditional indexes)\"* |\n\n`packages/plugins/driver-sql/src/sql-driver.ts` 的 `syncDeclaredIndexes` 只用 `name`/`fields`/`unique` 建索引(`table.unique(fields, …)` / `table.index(fields, name)`),而 `DeclaredIndexInput`(`packages/plugins/driver-sql/src/schema-drift.ts`)的字段就是 `name` / `fields` / `unique` / `nullSafeColumns`。\n\n> 排除一个容易看错的地方:`sql-driver.ts` 的 `introspectIndexes` 确实读 `partial`,但那是 `parseIndexDdl` 从**数据库自己的 DDL** 里解析出来给漂移检测用的(`isSyncReproducibleIndex`),与声明式元数据的 `IndexSchema.partial` 无关。\n\n## 为什么值得单独处理\n\n`type` 有 `.default('btree')`,所以它不只是被忽略——它会**出现在每一次 parse 的输出里**,让一个从未影响过任何 DDL 的键看起来是生效的配置。这正是 ADR-0078 no-silently-inert-metadata 与 ADR-0049 enforce-or-remove 针对的形状。\n\n`partial` 的情况更具体:console 甚至为它渲染了一个输入框(拼写还漂移成了 `where`,见 #5247),所以这是一个管理员**看得见、填得进去、然后什么也不会发生**的字段。\n\n## 两条路(ADR-0049)\n\n1. **enforce** —— 让 `syncDeclaredIndexes` 真正消费它们。`partial` 需要 `CREATE INDEX … WHERE`(knex 不直接支持,需 raw;SQLite ≥ 3.8.9 / Postgres 支持,MySQL 不支持);`type` 需要按方言映射(`gin`/`gist` 仅 Postgres,`fulltext` 仅 MySQL/部分方言),并要决定不支持的方言上是降级还是拒绝。注意这会和现有的漂移检测互动:`isSyncReproducibleIndex` 目前**正是**用 `index.partial` 把部分索引排除在增量同步之外。\n2. **remove** —— 按 spec-property-retirement 流程退役(`retiredKey` 墓碑 + ADR-0087 conversion + 生成物基线),让写它的人立刻拿到升级说明。\n\n我没有倾向性结论——两条路的成本差异真实存在,而且 `partial` 与 `type` 未必要走同一条(`partial` 有 UI 入口和真实语义,`type` 更像是从未接线的性能旋钮)。\n\n## 阻塞关系\n\n这条与 #5247 一起构成 #4001 收紧 `IndexSchema` 的前置条件:在 `partial` 仍然是死键的情况下把作者从 `where` 指向 `partial`,会构成一条声称超出平台实际交付的 guidance(strictness 台账 finding 18 记录了本战役已发过的四条假 guidance)。\n"
+}

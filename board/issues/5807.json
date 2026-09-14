@@ -1,0 +1,36 @@
+{
+  "number": 5807,
+  "kind": "pull_request",
+  "title": "fix(spec): 重锚 authorable-surface.base.json 改为显式动作 —— 构建不再顺手推进删除门的锚点",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T06:04:26Z",
+  "updated_at": "2026-08-06T06:29:00Z",
+  "closed_at": "2026-08-06T06:28:59Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T06:28:59Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5807",
+  "body": "Fixes #5358\n\n## 前提核验:一半已过期,一半仍然成立\n\n按「issue 是线索不是规格」的要求,先对 `origin/main`(`1624f4ad`)复核了本单的两条现象。\n\n**第 1 条(`--check` 会重写工作区)已经不成立。** `build-schemas.ts` 的锚点写入分支在当前 main 上已经是 `if (drifted && !CHECK)`,`--check` 不写。干净树实测:\n\n```\n$ pnpm --filter @objectstack/spec check:authorable-surface\nℹ️  authorable-surface.base.json trails the merge base by 8 key(s) — ...\n$ git diff --exit-code ; echo $?\n0\n```\n\n**第 2 条(构建/`gen:schema` 路径)完全成立**,也正是三条 issue 评论(#4990 / #5155 / #5660)复现的那条。同一棵干净树:\n\n```\n$ pnpm --filter @objectstack/spec gen:schema\n⚓ authorable-surface.base.json refreshed to 1624f4ad209c (7927 keys) — commit it.\n$ git status --porcelain\n M packages/spec/authorable-surface.base.json\n-  \"baseRev\": \"5acb93add66435880ffed0d3aff79db29ae1e932\"\n+  \"baseRev\": \"1624f4ad209c7cbdf254dc7df109c1f2df6a8751\"\n```\n\n所以本 PR 修的是**写入分支的触发条件**,而不是 `--check` 分支 —— 与评论区三位 dev 的结论一致(「修法覆盖 build 路径而不只是 `--check` 路径」)。`--check` 的只读性作为不变量被补了自证测试,但它今天本来就绿,下面「反向核验」一节如实标注了这一点。\n\n## 为什么这个锚点和它的两个邻居不同\n\n`gen:schema` 写三个受版本控制的产物。其中 `json-schema.manifest.json` 与 `authorable-surface.json` 是**本地源码的投影** —— 重新生成永远是对的,它们的 diff 就是被 review 的改动本身。\n\n`authorable-surface.base.json` 不是任何本地东西的投影:它是**上游某个 commit 的快照**,是 #4650 删除门的基线,而它之所以有资格当基线,恰恰因为受测 commit 改不了它。把它做成「每次构建顺手刷新」,等于让这条保证依赖于「没有人跑过构建」。\n\n代价是可量化的:一次触发 = 110 条删除(#4990 / #5155),而那 110 个正是 #4988/#5321 刚退役的 `ui/ComponentAnimation` 族。锚点越过退役点之后,删除门就再也看不见那次退役 —— 而且推进前后**两种状态门禁都判绿**,因为两者各自自洽(#5660 的观察)。三次都只靠人眼逐行读 `git status` 拦下。\n\n滞后则是**安全方向**的:锚点越旧,离线构建需要交代的键只会更多,不会更少。\n\n## 改法\n\n给锚点一个属于它自己的模式,而不是加一条更聪明的启发式:\n\n| 入口 | 对锚点的行为 |\n|:---|:---|\n| `gen:schema` / 任何 `pnpm build` / `check:docs` | **不写**。滞后时打印一行 ℹ️,说明这不是错误,并给出显式命令 |\n| `check:authorable-surface`(`--check`) | 严格只读(不变);文件缺失/畸形/不真实仍然致命 |\n| `gen:authorable-surface-base`(`--update-base`) | **唯一**写入路径 |\n| `--check --update-base` | 在生成 1600 个 schema **之前**拒绝 —— 一次会修复自己所检测之物的核验永远报不出问题 |\n\n真实性语义一个字没动:`baseRev` 仍须是 `origin/main` 的祖先且键集与该 commit 逐行一致;仍只从 git 解析出的基线写入(绝不从被检查的构建 —— 离线时 `--update-base` 同样无能为力);写入仍在删除门裁决**之后**,所以新的显式命令也无法把基线推过一次未获证明的删除(有测试)。\n\n顺带修正的处方:所有指向该文件的错误信息此前都写「运行 `gen:schema`」,而 `gen:schema` 已经不再碰它 —— 全部改为指向新命令。这正是本单描述的缺陷类别(声明与实际不符),留着就是新的一处。\n\n## 三处不在改动范围、但被显式处理的相邻面\n\n1. **`SURFACE_BASE_DESCRIPTION` 常量刻意逐字未改。** 该字符串是锚点文件规范形式的一部分(`readCommittedSurfaceBase` 把任何差异判为手改并致命),改它就必须同时重锚该文件 —— 而本单的验收标准要求该文件与 `origin/main` 逐字节一致。因此描述里那句 \"Written only by `gen:schema`\" 现在是**欠描述**而非错误:写入者仍是同一个生成器 `scripts/build-schemas.ts`,只是收窄到 `--update-base` 一种模式。收窄方向是安全的。代码里留了注释说明,建议下一次真正重锚时把这句一并带上(那会是一个干净的、被 review 的 diff)。\n2. **`scripts/regen-artifacts.mjs` 只改注释,`gen` 字段仍是 `gen:schema`。** 合并驱动打印的处方会照抄这个字段;若改成 `gen:authorable-surface-base`,驱动就会在 merge 未 commit 时**指示**用户跑那条命令 —— 那正是 #5370 的重演(MERGE 态下 `merge-base(HEAD, origin/main)` 仍是分支旧分叉点,锚点会向后倒退,且倒退后依然 authentic,没有门会拦)。保留 `gen:schema`:对该文件的两个邻居正确,对它自己是无害空操作。注释写清了这个取舍。\n3. **`check:generated` 的账本**新增第三类 `EXPLICIT_GENERATORS`。`UNGATED_GENERATORS` 会谎称「没有门核验它」(`check:authorable-surface` 核验其真实性),`GATED` 又会把它放进 `--fix` 的射程(那正是本次移除的副作用)。新类别要求声明 `gatedBy`,且该门必须是本账本已声明的门,否则 reconcile 失败。\n\n## 测试\n\n新增 `build-schemas-check-mode.test.ts` 的 `#5358` 块(7 例),复用该文件已有的沙箱:把 `scripts/` 拷进临时目录、真建一个带 `refs/remotes/origin/main` 的 git 仓库,生产代码路径逐字节不变。fixture 是真实形状 —— 一个**滞后但真实**的锚点(指向更早的上游 commit,键集与该 commit 的 baseline 逐行一致),提交到干净树后再跑,断言就是本单要求的那条:`git status --porcelain -uno` 为空。\n\n`pnpm --filter @objectstack/spec test`:**319 文件 / 8152 用例全绿**;`typecheck` 绿;`check:merge-driver` 绿;`check:generated --reconcile-only` 绿(`18 check: + 13 gen: scripts, all classified`)。\n\n### 反向核验(方向先说,再跑)\n\n把 `build-schemas.ts` 换回 `origin/main` 的版本、只留新测试,预测「构建路径的两条红、`--check` 那条绿」。实际 5 红 22 绿,与预测一致:\n\n```\n× catches the anchor being edited to hide a deletion（处方字符串已改）\n× is a committed artifact: ... only --update-base creates it\n× a plain build leaves the anchor byte-identical and the working tree clean\n× --update-base on an already-current anchor writes nothing\n× refuses --check --update-base\n```\n\n核心那条的断言就是本单的机制本身:\n\n```\n-   \"baseRev\": \"5a9a43914afabfeb1a81a61f01656c612341e23a\",\n+   \"baseRev\": \"1c9d32fccfc462091465321f34179d2b5cac156f\",\n+     \"data/Object:label\",\n```\n\n**如实说明:`a --check run leaves the anchor byte-identical` 这一条在旧代码下也是绿的。** 它不是修复的证据,而是不变量的钉子 —— 本单第 1 条现象在派单前就已被别的改动修掉了。把它写成红是不诚实的,所以这里标出来。\n\n### 真仓库上的验收证据\n\n```\n$ pnpm --filter @objectstack/spec check:authorable-surface\n$ git diff --exit-code -- packages/spec/authorable-surface.base.json   → 0\n$ pnpm --filter @objectstack/spec gen:schema\nℹ️  authorable-surface.base.json trails the baseline at 1624f4ad209c by 8 key(s)\n   — expected, and not an error: ... `gen:authorable-surface-base` — never a side effect of this build (#5358).\n$ git diff --exit-code -- packages/spec/authorable-surface.base.json   → 0\n$ pnpm --filter @objectstack/spec gen:authorable-surface-base\n$ git status --porcelain -- packages/spec/authorable-surface.base.json → M   （显式命令确实生效）\n```\n\n本 PR 中 `packages/spec/authorable-surface.base.json` 与 `origin/main` **逐字节一致**(上面第三步之后已 `git checkout --` 还原),不含任何一次性重锚。\n\n`check:api-surface` 在本地报红,原因是这个全新 worktree 从未 `build` 过、`packages/spec/dist` 不存在(该门读 built `.d.ts`,即 AGENTS.md 记的 stale-dist 幻影)。本 diff 不含任何 `packages/spec/src/**` 文件,导出面不可能变。\n\n## 对三条相邻单的影响(必答)\n\n- **#5370(merge 未 commit 时 `gen:schema` 让锚点倒退)**:**大幅变简单,但没有变得不必要**。该单复现路径的字面触发点(照抄 os-regen 驱动的处方,在 merge 未 commit 时跑 `gen:schema`)在本 PR 之后消失了 —— `gen:schema` 已经完全不碰锚点。但根因(`resolveSurfaceBase()` 在 MERGE 态下把 `merge-base(HEAD, origin/main)` 解析成分支的旧分叉点)一个字没动,只是现在唯一能走到它的入口变成一条需要人手敲的显式命令。本 PR 特意**不**把驱动的处方改成指向新命令,以免把它重新变成一条被指示的路径。\n- **#4663(`authorable-surface.json` 字节级 round-trip 门)**:**不受影响**。那是另一个文件(`.json`,不是 `.base.json`),而它的写入路径(`surfaceChanged && !CHECK`)本 PR 完全没动。锚点文件自己的字节级 round-trip 检查(`readCommittedSurfaceBase` 比对 `serializeSurfaceBase()`)也原样保留 —— 只是现在写它的模式变少了一种,这只会让「文件里的每个字节都来自生成器」更容易成立。\n- **#4659(检查 (b) 的叶名匹配)**:**不受影响**。`registeredClauseMajors()` / `registeredRetirementSurfaces()` 的 `.split(' / ')` + `endsWith('.' + prop)` 逻辑本 PR 一行未改,判定谁调用它们的时机也没变。\n\n## 越界发现\n\n无。改动严格限于锚点写入分支及其处方,外加两处为保持一致必须同步的账本/注释(见上文第 2、3 点)。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01559M8FVm6W6vDLABL3jvdW\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01559M8FVm6W6vDLABL3jvdW)_"
+}

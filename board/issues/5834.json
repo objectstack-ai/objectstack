@@ -1,0 +1,38 @@
+{
+  "number": 5834,
+  "kind": "pull_request",
+  "title": "chore(vscode): 退役 packages/vscode-objectstack,移出工作区 (#5825)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "domain:devx",
+    "size/xl",
+    "skip-changeset",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T07:28:00Z",
+  "updated_at": "2026-08-06T08:18:54Z",
+  "closed_at": "2026-08-06T08:18:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T08:18:52Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5834",
+  "body": "Fixes #5825\nCloses #5028\n\n维护者 2026-08-06 拍板退役 `packages/vscode-objectstack`,移出工作区。#5028 的幽灵\n`jsonValidation` 声明随宿主一并消失,故本 PR 同时关闭它。\n\n## 退役前复核(逐条对着 origin/main 验)\n\n| issue 正文的依据 | 复核结果 |\n| :--- | :--- |\n| 无 vsce/vsix 发布链路 | ✅ 成立 —— `grep -rn vscode .github/` 零命中,`package: vsce package` 脚本 CI 从不调用,故 Marketplace / Open VSX 上不存在可安装副本 |\n| #5028 幽灵 `jsonValidation` | ✅ 成立 —— 指向 `./schemas/objectstack.schema.json`,包内无 `schemas/` 目录,`files` 白名单亦不含它 |\n| 持续注意力税 | ✅ 成立 —— 该包被每个全仓门禁扫描(见下方计数表) |\n| 「从未发布 / 无 npm 面」 | ⚠️ **不成立**,详见下节 |\n\n## ⚠️ 两个 issue 正文未预见的硬约束\n\n### 一、changesets 会重读已消费的 changeset —— 只删目录会打断整条发布链\n\nRC 模式下 `changeset version` 保留每个已消费的 .md,而 `assemble-release-plan` 对\n`.changeset/` 里 **全部** changeset 做包名解析,命中不在工作区的包即抛错。只删包之后\n`changeset status` 直接红:\n\n```\nError: Found changeset changelog-ships-in-tarball for package\nobjectstack-vscode which is not in the workspace\n```\n\n也就是说,若不处理这两个 changeset,合并后 **每一次 Release 都会失败**。两个文件按\n性质分别处置(而非批量改写):\n\n- `.changeset/vscode-snippets-parse-gate.md` —— **待发布**,frontmatter 只有该包一项。\n  这是 #4917 的 changeset,始终未随任何版本发布;宿主退役后它永远无法 release,\n  整文件删除。\n- `.changeset/changelog-ships-in-tarball.md` —— **已消费**,frontmatter 含 60+ 个包。\n  仅移除 `\"objectstack-vscode\": patch` 一行,其余 60+ 包的 patch 条目与正文一字不动\n  (它们的 CHANGELOG 早已落地,不受影响)。\n\n处置后 `changeset status` 退出码 0,发布计划中零 vscode 命中。\n\n### 二、该包在 npm 上是真实发布面(issue 的「无 npm 面」不成立)\n\n`changeset publish` 发布每个非 private 包,该包既非 private 又带\n`publishConfig.access: public`,因此它在 npm 上有 40+ 个版本:\n\n- `latest` = **16.1.0**(2026-07-22)\n- `rc` = **17.0.0-rc.3**(2026-08-03,即拍板前三天)\n\nissue 正文的「从未发布」只对 VS Code Marketplace / Open VSX 成立 —— 那里确实双 404,\n「没人装着这个扩展」的结论不受影响。但它在 npm 上是活跃发布面,退役后将**静默停更**:\n已发布版本不会消失(npm 不 unpublish),`latest` 就永久停在 16.1.0,没有任何渠道告知\nconsumer 它已退役。\n\n是否补 `npm deprecate objectstack-vscode` 需要 npm 发布凭据,属维护者动作,**已在\n#5825 提出待裁决,不阻塞本 PR 合并**(本 PR 不改变任何已发布版本)。\n\n## 删除面与提及清扫\n\n删除 `packages/vscode-objectstack/**`(12 个文件)。`pnpm-workspace.yaml` 用\n`packages/*` glob,无需改成员列表;lockfile 随 `pnpm install` 收缩 1102 行 /\n125 个包(`@vscode/vsce` 整棵子树)。无任何 manifest 依赖该包。\n\n清扫:`README.md` 包表 · `AGENTS.md` 目录树 · `content/docs/plugins/packages.mdx`\n(删小节 + 计数 73→72、Client/DX 5→4) · `.claude/skills/pm-dispatch/SKILL.md` 的\n`domain:devx` 归属 · `scripts/publish-smoke-pack.mjs` 的 EXCLUDE 条目及注释 ·\n`.changeset/config.json` 的 fixed 锁步组(`check-changeset-fixed.mjs` 对组内不存在的\n包名会红,必须同步)。\n\n**保留白名单**(历史记录类,改动即污染记录):\n\n- `RELEASE_NOTES.md` —— 文件自述「This file is historical.」,那张表是 v4.0.4 时\n  42 包清单的快照\n- `docs/DX_ROADMAP.md` —— 2026-02-13 审计快照,自述基线「14 packages」,早已与今天无关\n- `.changeset/pm-dispatch-domain-table-full-coverage.md` —— 已发布的 changeset 历史\n- `.changeset/pre.json` 的 `initialVersions` —— changesets 自管状态文件;\n  `assemble-release-plan` 只对工作区内的包写入/读取该表,残留键永不被查。手改工具状态\n  文件是 RC 窗口出事的典型原因,故不碰\n- ⛔ `content/docs/releases/` 全程未动\n\n## 安全 overrides:保留选择器,只更正注释\n\n`form-data` 与 `undici` 两条 OSV pin 的唯一传递来源是 `@vscode/vsce`。删除后\n`form-data` 从依赖树彻底消失;`undici` 仅剩 `@ai-sdk/provider-utils` 的 7.29.0 与\njsdom 的 8.9.0,两者都在 `undici@>=7.23.0 <7.29.0` 选择器之外。**两条 pin 现在都不再\n匹配任何东西。**\n\n选择器保留不动:在退役 PR 里顺手摘掉安全 pin 是降低安全姿态,应当是独立决定;留着则\n未来若有传递依赖重新引入,仍会落在已修补版本上。但注释不能继续指向一个已不存在的包,\n故就地记录 `CONSUMER GONE (#5825)` 与保留理由。`brace-expansion` 注释的 minimatch\n消费者清单同理去掉 `@vscode/vsce`(`ts-morph` / eslint / `@typescript-eslint` / glob /\narchiver 仍在,该 pin 依旧生效)。\n\n## 门禁计数对账(删除前 / 后各跑一轮全套)\n\n| 门禁 | before | after | 差值 |\n| :--- | :--- | :--- | :--- |\n| `check:published-files` | 70 publishable / 78 members | 69 / 77 | −1 / −1 |\n| `check:type-check-coverage` | 63/78 covered | 62/77 | −1 / −1 |\n| `check-changeset-fixed` | 70 public packages | 69 | −1 |\n| `check:nul-bytes` | 5687 tracked text files | 5674 | −13 |\n| `check:engine-double-contract` | 37 pinned / 165 DEBT / 2 exempt | 同 | 0(该包无台账条目) |\n| `check-override-consistency` | 2 covered declarations | 2 | 0 |\n\n`check:nul-bytes` 的 −13 与本 PR 删除的文件数**精确相等**(12 个包内文件 + 1 个待发布\nchangeset)。所有计数都由 glob 实时计算并打印,仓内**没有**把成员数写死为断言的门禁,\n因此无断言需要改。\n\n## 验证\n\n- 全套 `check:*` + `lint` + `check-changeset-fixed` + `check-override-consistency`\n  删除前后各跑一轮,**pass/fail 状态零变化**。删除前基线即有 3 个红:\n  `check:i18n` / `check:i18n-coverage`(新 worktree 未 build,`os lint` 无输出 —— 与\n  本 PR 无关)、`check:objectui-pin-fresh`(objectui pin 过期,发布节奏门禁)。三者与\n  本改动无关,删除后表现完全一致。\n- `turbo run build --filter=!@objectstack/docs` → **71/71 successful**(确认无包引用它)\n- `turbo run typecheck` → **124/124 successful**\n- `changeset status` → 退出码 0,零 vscode 命中\n- `node scripts/check-nul-bytes.mjs` → OK;另对全部改动文件做了越过门禁盲区的自扫\n  (`grep -naP` 覆盖 0x00-0x1f),干净\n\n## changeset 路线:`skip-changeset` 标签\n\n存活包零行为改动,而已删除的包**无法**在 changeset 里点名(changesets 对未知包名直接\n抛错),故本 PR 不 release 任何东西。依据 `pr-automation.yml` 的门禁文案 —— #5292\n明确修正过处置顺序:标签是首选,空 frontmatter changeset 是 last resort,因为它是\nchangesets/action 的真实输入,全空集会让 Release 静默绿着空跑(#4898,曾卡住\n17.0.0-rc.2)。故不采用 #4607 式空 frontmatter。\n\n## 恢复路径\n\ngit 历史完整保留(`packages/vscode-objectstack` 至本 PR 父提交为止)。若未来出现非 AI\n用户的真实需求,按当时的 spec schema 重建。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01GX3sL71LFq8m2usg6VqTSE)_"
+}

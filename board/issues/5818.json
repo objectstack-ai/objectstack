@@ -1,0 +1,34 @@
+{
+  "number": 5818,
+  "kind": "pull_request",
+  "title": "docs(spec): ISharingService.canEdit 补上 modifyAllRecords 旁路分支 (#5125)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T06:26:31Z",
+  "updated_at": "2026-08-06T06:53:02Z",
+  "closed_at": "2026-08-06T06:53:01Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T06:53:01Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5818",
+  "body": "Fixes #5125\n\n## 前提复核(先证伪,再动手)\n\n对 `origin/main` @ `5ab0842` 逐条核过 issue 的两个前提,**都成立**:\n\n**(a) 实现确实有第三条 `modifyAllRecords` 写旁路。** `packages/plugins/plugin-sharing/src/sharing-service.ts`:\n\n- `canEdit` 在 366-401 行,分三步:1) ownership(write DEPTH 放宽,`matchesOwnerScope`)→ 2) `WRITE_ACCESS_LEVELS` 的 share 行 → 3) **398-400 行** `return this.hasModifyAllBypass(object, context);`\n- `hasModifyAllBypass` 在 341-351 行,走 late-bound 的 `probe.hasWriteBypass(object, context)`,并且 fail CLOSED(无 security service / probe 抛错 → `false`)。\n\n**(b) 契约文档确实还没这一条。** 改前 `packages/spec/src/contracts/sharing-service.ts` 里 `modifyAllRecords` 只出现 2 次(`canDelete`、`canManageShares`),`canEdit` 的 doc comment 只写到 ownership + share 为止。\n\n**权限名逐层确认过,没有分叉**(任务书要求不能盲抄 `canDelete` 的措辞):`ISecurityService.hasWriteBypass` 的契约就写明是 `modifyAllRecords`(`packages/spec/src/contracts/security-service.ts:220-237`);实现 `packages/plugins/plugin-security/src/security-plugin.ts:676-692` 调 `permissionEvaluator.hasSuperuserWriteBypass`;再往下 `permission-evaluator.ts:296-311` 的 `superuserBypassSets` 在 `bit === 'modify'` 分支上读的正是 `op.modifyAllRecords`。所以 EDIT 路径和 `canDelete` 是**同一个 bit、同一个谓词**,措辞可以直接对齐。\n\n## 改动\n\n一句话级的 doc comment 修正,措辞与 `canDelete` 对齐(`the modifyAllRecords super-user bypass`),另补两句说明这条旁路与 `canDelete` / `canManageShares` 是同一个 `ISecurityService.hasWriteBypass` 谓词、放在最后问、fail closed —— 这三点都是实现里已有的事实,不是新约定。\n\n外加一条**文档对偶 pin**(`packages/spec/src/contracts/sharing-service.test.ts`):三道写门(`canEdit` / `canDelete` / `canManageShares`)的 JSDoc 必须各自点名 `modifyAllRecords`。没有任何东西会对 doc comment 做类型检查,而这次漂移的恰恰是 prose,所以用 TS AST 读接口成员的 leading trivia 来钉。两道反空转保护:成员枚举整体断言(改名不能把断言掏空),外加 `buildReadFilter` 必须**不**含该词作为判别性负例 —— 读路径确实没有 `hasWriteBypass` 分支(View/Modify All Data 持有者读到全部行,是因为 security 层把 read DEPTH 解析成 `org` 而在 sharing 之前短路,`buildReadFilter` 202 行 `if (readScope === 'org') return null;`),所以在那里写上写旁路本身就会是新的漂移。\n\n## 生成物投影:没有\n\n`contracts/` 这一目录**不产任何生成物**,证据三条:\n\n1. `packages/spec/scripts/build-docs.ts:106` 只收 `*.zod.ts`(`if (!entry.name.endsWith('.zod.ts')) continue;`),而 `packages/spec/src/contracts/` 下一个 `.zod.ts` 都没有;\n2. `content/docs/references/contracts/` 里只有 `meta.json`,内容是 `\"pages\": []`;`check:docs` 跑起来自己也这么说 —— `Skipping clean of contracts/ — no JSON schemas found in .../json-schema/contracts`;\n3. `api-surface.json` 的 `./contracts` 条目只记导出名与种类(`\"ISharingService (interface)\"`),不含任何文档正文;本 PR 也没有增删任何导出,所以 `check:api-surface` 结构上不可能动。\n\n跑过的门:`check:docs` ✅(`240 generated files in sync with packages/spec`)、`check:authorable-surface` ✅。⚠️ 两者都会顺手重写 `packages/spec/authorable-surface.base.json`(已知 #5358),已 `git checkout --` 还原,PR 里**没有**这个文件 —— 本 PR 只含上述两个文件。\n\n## Changeset:选 `skip-changeset`\n\n`packages/spec` 发布的 `files` 是 `dist` + `src/**/*.zod.ts`,本文件是普通 `.ts`,源码不随包走;上面已证没有生成物投影;导出面、类型、schema、运行时行为全部零变化。按 `pr-automation.yml` changeset 门自己的处方,这属于\"releases nothing → 打 `skip-changeset` 标签(PREFERRED)\"。同形先例:`.changeset/auth-database-hooks-middleware-claim-corrected.md`(同样是已发布包里的 comment-only 更正,结论 \"Comments only — no runtime behaviour changes, nothing released\")。诚实起见记一句:更正后的文字仍会经 `dist/*.d.ts` 到达 consumer 的 IDE 悬浮提示 —— 但那不改变本 PR 不发布任何东西这一事实,所以走标签而不是 changeset。标签已由我在建 PR 后立即打上。\n\n## 验证\n\n```\npnpm --filter @objectstack/spec test        → Test Files 319 passed (319) | Tests 8145 passed (8145)\nvitest run src/contracts/sharing-service.test.ts → Test Files 1 passed (1) | Tests 3 passed (3)\npnpm --filter @objectstack/spec typecheck   → tsc --noEmit ✅ + check:test-typecheck OK\nnode scripts/check-nul-bytes.mjs            → OK (5684 files, no raw ASCII control bytes)\n```\n\n**反向验证(方向是事先预判的:红)。** 把 `canEdit` 的 doc comment 还原成改前那段,新 pin 应该转红、两条既有断言应该保持绿 —— 实测正是如此:\n\n```\nFAIL  src/contracts/sharing-service.test.ts > [#5125] ... > canEdit / canDelete / canManageShares each name the `modifyAllRecords` bypass\n      → canEdit must document the modifyAllRecords bypass\n Test Files  1 failed (1)\n      Tests  1 failed | 2 passed (3)\n```\n\n还原修正后重跑回到 3 passed。\n\n## 越界发现(已另开 issue,未在本 PR 修)\n\n- **#5817** —— 同一文件的**模块头**(第 15-17 行)还写着 \"`canEdit()` answers the access question for `update` / `delete` operations\",而 ADR-0111 D3 早已把 delete 拆成故意更窄的 `canDelete()`,与它下面 20 行的方法文档直接矛盾。同一类漂移,但任务书把本 PR 的改动面明确限定为 `canEdit` 的 doc comment,故只记录不顺手改。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01559M8FVm6W6vDLABL3jvdW)_"
+}

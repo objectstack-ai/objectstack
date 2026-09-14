@@ -1,0 +1,35 @@
+{
+  "number": 5779,
+  "kind": "issue",
+  "title": "[#5613 第二阶段 · spec 半边] ActionSessionSchema 补 `positions` 键 + `roles` 弃用对 + ADR-0087 语义迁移条目",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T05:10:09Z",
+  "updated_at": "2026-08-06T09:29:18Z",
+  "closed_at": "2026-08-06T09:29:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5779",
+  "body": "Part of objectstack-ai/objectstack#5613\n\n维护者已裁 #5613 走「C 骨架 + A 语义」;第一阶段 #5697/PR #5721 已落地(`ActionSessionSchema` @ `packages/spec/src/ui/action-params.zod.ts:206`,按现状声明,`roles` 标 deprecated)。第二阶段(更名 `roles → positions`)的 **spec 半边**依 schema 自己的 docstring 约定(「do NOT add a `positions` key here ahead of it —— The rename is #5613 phase 2」)必须动 `packages/spec`,按「shared contract surfaces have one owner」转 spec 座位执行(`domain:*` 标签待分诊座位补;cli 车道 PM 立单)。\n\n## 范围(仅 spec 半边)\n\n1. `ActionSessionSchema` 增补 `positions: z.array(z.string()).optional()` 为**权威键**(describe 指向 ADR-0090 D3 / `ExecutionContext.positions`,并沿用现 `roles` docstring 里「Never gate PRIVILEGE on this array」的告诫);\n2. `roles` 保留为**弃用别名对**(弃用窗口内 runtime 双发同值;describe 改写为「deprecated alias of `positions`,迁移见 ADR-0087 条目,移除走 #3280→#3290 `session.tenantId` 别名下线的既有先例路径」);\n3. **ADR-0087 语义迁移条目**:`roles → positions`(action-body ctx.session 面),写明双发窗口与后续移除条件;\n4. 生成物整体重生成(os-regen 八路径纪律,spec 车道串行接力照常)。\n\n## 明确不做(runtime 半边,#5613 本单在 cli 车道)\n\n`buildActionSession()` 双发改造 + 两句错注释修正 + 翻转 `packages/runtime/src/action-session-shape-contract.test.ts` 的键集断言 + changeset(major)+ 文档 —— 由 cli 车道在本单落地后执行;#5613 已挂 `Blocked-by:` 本单。\n\n## 验收\n\n- schema 双键并存且语义标注方向正确(`positions` 权威、`roles` 弃用别名),`z.infer` 类型面允许 runtime 双发不破 tsc;\n- ADR-0087 条目在;生成物与兄弟单条目断言(spec 接力纪律)通过;\n- ⛔ 不动 `packages/runtime` 任何文件(flip anchor 由 runtime 半边翻)。\n\n关联:#5613(裁决锚点 00:55Z 评论 + 解锁 02:42Z 评论)、#5697/PR #5721(第一阶段)、ADR-0090 D3、ADR-0087、#3290(别名下线先例)。"
+}

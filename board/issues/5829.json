@@ -1,0 +1,35 @@
+{
+  "number": 5829,
+  "kind": "issue",
+  "title": "[#5704 收口] 摘除 qa/dogfood 的 driver-memory devDep + 清扫两处「same shape driver-memory uses」附录散文",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "tests"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T07:06:37Z",
+  "updated_at": "2026-08-06T08:05:14Z",
+  "closed_at": "2026-08-06T08:05:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5829",
+  "body": "Part of #5704 收口阶段(批次 2/3 已合并,PR #5797/#5806;本单是留档的两件尾项)。\n\n## 任务 1:摘除 qa/dogfood 的 driver-memory devDep\n\n`packages/qa/dogfood/package.json:37` 的 `\"@objectstack/driver-memory\": \"workspace:*\"` 在 #5715(批次 0)迁移后已无任何真实消费(PR #5715 复核留档:全包仅剩散文提及)。摘除该行 + lockfile 随动。摘前先 grep 全包复核零真实 import(散文提及不算消费)。\n\n## 任务 2:两处附录散文清扫\n\n#5704 survey 附录项、#5797 复核留档:注释仍把本地手写 stub 说成 driver-memory 同形——按批次 2 同款原则改写为指涉 stub 本身:\n\n- `packages/objectql/src/protocol-batch-atomic.test.ts:23`(「same shape `driver-memory` uses」——issue 正文举过的示例散文)\n- `packages/objectql/src/protocol-data.test.ts:759`\n\n以 `git grep -n \"driver-memory\" origin/main -- packages/objectql/src/protocol-batch-atomic.test.ts packages/objectql/src/protocol-data.test.ts` 实测为准。\n\n## 边界(⛔)\n\n- ⛔ 不动 `packages/runtime` 的 driver-memory devDep 与 `undeclared-field-write-driver-split` 注释(Q2-B 裁定长期保留);\n- ⛔ 不动 `plugin-auth/src/auth-contains-filter.test.ts` 及其 devDep(survey 后新落地的消费者,归 finding 单另裁);\n- 零行为变更:diff 只应有 2 个 package 文件(package.json + lockfile)+ 2 个测试文件的注释行。\n\n## 验收\n\n- `packages/qa/dogfood` 无 driver-memory 依赖声明,`pnpm --filter @objectstack/dogfood test` 全绿;\n- 两个测试文件注释不再指涉 driver-memory,所在文件测试绿;\n- 测试/依赖清理不面向用户 → `skip-changeset`(label 由 PM 代打)。"
+}

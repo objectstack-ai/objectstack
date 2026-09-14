@@ -1,0 +1,37 @@
+{
+  "number": 5337,
+  "kind": "issue",
+  "title": "protocol-17 的 migration rationale 仍写着「the server does not walk `areas`」,并投影进生成的升级指南",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T23:39:48Z",
+  "updated_at": "2026-08-06T06:19:59Z",
+  "closed_at": "2026-08-06T06:19:59Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5337",
+  "body": "从 #4749(PR #5336)的实现中记录的越界发现(未认领)。\n\n> **2026-08-04 更新(PM 复核后)**:本单原先记了两条。第 1 条(`AREA_VISIBLE_RETIRED` 的\n> 收尾枚举)经 PM 复核**已扩入 PR #5336 并在那里修掉**,不再属于本单 —— 原文保留在下面的\n> 「已在别处修掉」一节仅作存档,**不要重复实现**。本单现在只剩第 2 条。\n\n## 现象(本单唯一剩下的一条)\n\n`packages/spec/src/migrations/registry.ts`(protocol-17 step 的 `rationale`)仍写着:\n\n> One honest caveat the prescription carries rather than hides — per-item gating INSIDE an\n> area is enforced by the shell only, since the server does not walk `areas`, so anything\n> that must never reach the browser belongs in the top-level tree or in its own app.\n\n#4722 之后这句已不成立:`filterAppForUser` 现在对每一棵 `areas[].navigation` 跑同一个\n`filterNav`(`packages/rest/src/rest-server.ts:1811` 的 `[#4722]` 注释 + 1890 行的\n`filterAreas`),项级 `requiredPermissions` / `requiresService` 在两棵树被同等强制。\n\n这是三处里读者最多的一处:`docs/protocol-upgrade-guide.md` 是 ADR-0087 D4 的纯投影\n(`gen:upgrade-guide`),正是**正在从 16 升到 17 的作者**读的那份文档,而该句在整段里以现在时\n陈述。同一句也留在尚未发布的 `.changeset/app-area-fail-open-gates-removed.md`。\n\n⚠️ 读数陷阱(PM 首次核验踩过,记下以免重复):`git grep \"does not walk\" -- packages/spec/src/migrations/registry.ts` **零命中**,会让人误判本单不实 —— 该句是跨行字符串拼接,横跨 672–674 行,单行 grep 看不见。\n\n## 修法要点(避免踩坑)\n\n- 改 `registry.ts` 的 rationale,**不要手改** `docs/protocol-upgrade-guide.md` —— 它是生成\n  物,改完跑 `pnpm --filter @objectstack/spec gen:upgrade-guide`,`check:generated` 会盯着。\n  (该文档走 os-regen 驱动,这也是它没有混进 PR #5336 的原因。)\n- ⚠️ os-regen 四步在入队前不得省:`git merge origin/main` → `git checkout origin/main -- <生成物>` → **整体重新生成**(⛔ 绝不文本合并)→ 断言兄弟单条目都还在。该驱动会 exit 0、零冲突标记地静默吞掉一侧改动。\n- rationale 的前半段是**退役当时**的状态叙述(#4651 为什么选 route B),那部分是历史、应当\n  保留;要改的只有把 caveat 那句从「仍然如此」改成「#4722 已关闭」。\n- ⛔ 别把 `visible` 自身的口径带歪:项级 `visible`(CEL)**依然**只在客户端求值,#4722 没有\n  碰这一半。\n- ⛔ 退役裁决不动:被强制的是 area **内部的项**,area **级**键保持退役,措辞不得读成复活。\n\n### 未发布 changeset 的口径 —— **已由 PM 裁定,不再上交维护者**\n\n`.changeset/app-area-fail-open-gates-removed.md` 里的同一句**一并改**(裁定见本单\n2026-08-04 分诊评论,留否决窗口)。理由:该句是**以现在时写给读者的操作建议**(「anything\nthat must never reach the browser belongs in the top-level tree」),不是对 #4651 当时状态的\n历史陈述;而 #4722 与 #4651 落在**同一个大版本**里,读 v17 发布说明的人所处的世界已经是\n「服务端走两棵树」,原句会劝他做一次不必要的导航树重构。属恢复性修复,非产品语义决策。\n⛔ 边界:改的是 `.changeset/*.md`(PR 的法定输入),**不是** `content/docs/releases/`。\n\n正确措辞的蓝本:`packages/spec/liveness/app.json` 的 `areas.navigation` note(#4722 已改写),\n以及 PR #5336 改后的两条处方正文。\n\n## 已在别处修掉(存档,勿重复实现)\n\n原第 1 条:`AREA_VISIBLE_RETIRED` 的收尾句把服务端强制的落点枚举成「on the app itself, or on\nitems of the app's top-level `navigation` tree」,#4722 之后漏了 `areas[].navigation` 的项。\n经 PM 复核判定它与 #4749 同文件、同常量块、同一类缺陷,已扩入 **PR #5336** 一并修掉(连同\n`app.test.ts` 的换钉与反向验证)。\n\n参考:#4749 / PR #5336、#4722(实现)、#4651(退役裁决)。"
+}

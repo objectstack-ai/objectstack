@@ -1,0 +1,35 @@
+{
+  "number": 5660,
+  "kind": "issue",
+  "title": "finding(service-automation): registerDegradedConnector 自己那条 warn 仍把 provider 的 reason 插进 message —— #5636 修好 plugin 侧后,同一条冷启动路径上剩下的第四个接缝",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T23:02:43Z",
+  "updated_at": "2026-08-06T04:25:47Z",
+  "closed_at": "2026-08-06T04:25:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5660",
+  "body": "做 #5636 时在同一条 #3017 降级路径上扫到的,但在**另一个文件**(`engine.ts`)、另一个方法里,契约也不同,因此不在那一单范围内,按 Prime Directive #10 单开。\n\n### 现象\n\n`packages/services/service-automation/src/engine.ts:1659`(origin/main `5b60b3669`):\n\n```ts\nregisterDegradedConnector(def: Connector, reason: string, origin: ConnectorOrigin = 'declarative'): void {\n    const parsed = ConnectorSchema.parse(def);\n    this.assertSameOriginOrFree(parsed.name, origin);\n    this.connectors.set(parsed.name, { def: parsed, handlers: {}, origin, state: 'degraded', degradedReason: reason });\n    this.logger.warn(`Connector registered DEGRADED: ${parsed.name} (origin: ${origin}) — ${reason}`);\n}\n```\n\n那个 `reason` 参数就是 #5636 处理的同一个值:`plugin.ts` 的 `degradeConnectorInstance` 把\n`ConnectorUpstreamUnavailableError.message` 原样传进来,而该 message 由**第三方 provider\nfactory** 构造(ADR-0097 明确鼓励第三方去写 provider factory;spec 只定义错误类、不约束\n文本),完全可以是多行。\n\n### 为什么它比 #5636 修掉的那两处更容易被忽略\n\n调用顺序决定了它**先**发生,而且发生在**常见分支**上:\n\n1. `degradeConnectorInstance` → `engine.registerDegradedConnector(husk, info.reason, …)`\n   → **这一条 warn**(husk 注册成功时就会打,也就是每次首次降级都打);\n2. 只有 husk 注册**抛错**时才走到 plugin 侧那条 warn(#5636 已修);\n3. 然后才是 plugin 侧的降级公告 error(#5636 已修)。\n\n也就是说 #5636 修完之后,首次降级的默认路径上仍然留着一条会溢出的 warn。\n\n### 危害机制(与 #5636 同一条,已实测)\n\n- `ObjectLogger` 把 `warn` 送 **stdout**,`serve` 的启动静默窗口只包了\n  `process.stdout.write`,窗口从 config 加载前一直开到 banner 打印;\n- 冷启动的 `materializeDeclaredConnectors(ctx, { fatal: true })` 遇到上游不可达是**降级、\n  不抛错**,所以这条路径在窗口内就会跑;\n- `BootLogCapture.offer()` 只在 `classifyBootLogLine` 能在物理行上找到 `<ts> <LEVEL>` 头时\n  才保留该行,续行**直接丢弃**。\n\n#5636 的 PR 里对一份 13 行的插值 ZodError dump 实测:写出 13 行,缓冲保留 1 行(止于\nZod `[` 的头行)、丢弃 12 行。这里的载荷不是 ZodError 而是 provider 的 message,机制一样。\n即 cloud#971 的原始形态。\n\n### 可达性(为什么是 finding 而不是 bug)\n\n与 #5575 / #5636 同样的理由:今天 `packages/connectors/*/src` 里 `ConnectorUpstreamUnavailableError`\n的 message 在 openapi / mcp / rest / slack 里都是我们自己写的单行文本。第一个把上游 SDK 的\n多行错误塞进该错误类的第三方 provider 插件会撞上。\n\n### 修法上需要先定的一件事(不是零决策)\n\n与 #5636 的两处不同,这里**没有**抛出值可用:`registerDegradedConnector` 的签名只收\n`reason: string`。而且这个字符串同时是 `degradedReason`,会经 `GET /connectors` 和\n`connector_action` 被拒时的文本出去 —— #5636 刻意保持它逐字不变(人透过 JSON 读,不经按行\n切分的消费者)。所以至少两条路:\n\n- **A:签名加一个可选 `cause?: unknown`**,让 `warn` 用 `describeThrownForLog(cause)` 走 meta,\n  `reason` 与 `degradedReason` 一字不动。调用点(只有 plugin.ts 一处)顺手把 `err` 传进来。\n- **B:这条 warn 不再插值 `reason`**,只报 name/origin,reason 作为 meta 字段\n  (`{ degradedReason: reason }`,注意字段名不得含 `key`/`token`/`secret`/`password` 子串,\n  见 #5573)。不动签名。\n\n倾向 **A**:它与 #5048 / #5575 / #5636 建立的形状一致(抛出值一路带到报告点,不在边界先\n拍平成字符串),而且 `ConnectorUpstreamUnavailableError` 本身还带一个 `cause`(底层 connect\n错误),A 之后才有可能把它也渲染出来。B 更小,但把「reason 是给人读的文本」和「日志要结构化」\n这两件事压在同一个字符串上,下一个接缝还会再遇到。\n\n### 关联\n\n#5636 / PR(plugin 侧两处,同一条路径)、#5575 / PR #5639、#5048 / PR #5572、#5573(脱敏按\n子串匹配)、#4632、#3017(降级/重试本身)、cloud#971、ADR-0097。"
+}

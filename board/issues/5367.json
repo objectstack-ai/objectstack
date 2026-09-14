@@ -1,0 +1,35 @@
+{
+  "number": 5367,
+  "kind": "issue",
+  "title": "analytics dataset 路由的 message 正则兜底没有退休时间表:六族拒收仍靠措辞分类,改一个字就换一个 HTTP 码",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T01:44:26Z",
+  "updated_at": "2026-08-06T07:08:03Z",
+  "closed_at": "2026-08-06T07:08:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5367",
+  "body": "实现 #5352(PR #5366)时路过,**不属于该单范围面** —— #5352 正文与 PM 认领评论都明确把这部分列为本单的非目标。按 Prime Directive #10 单独记在这里,unassigned。搜过 open issues(`DATASET_INVALID` / `read-scope-sql` / `ADR-0112 envelope analytics`),没有同题单。\n\n## 现状\n\n#5366 让 `packages/rest/src/rest-server.ts` 的 `POST /analytics/dataset/query` catch **先读 ADR-0112 信封**(`error.code` + 4xx `error.status`),`filter-normalizer.ts` 的九处拒收也全部带上了 `INVALID_FILTER` / 400。\n\n但那串写死的 message 正则**原地留着**,因为它今天还挡着六族**不是 filter 拒收**的错误。实现时逐条核过,六条的生产方全部仍是裸 `throw new Error(...)`,不带 `code`/`status`:\n\n| 正则片段 | 生产方 |\n|---|---|\n| `not declared in the dataset` | `services/service-analytics/src/dataset-compiler.ts:305` |\n| `not backed by a declared relationship` | `services/service-analytics/src/strategies/native-sql-strategy.ts:222` |\n| `not supported by the v1 dataset runtime` | `services/service-analytics/src/dataset-compiler.ts:137` |\n| `read-scope-sql` | `services/service-analytics/src/read-scope-sql.ts`(73 / 107 / 113 / 144 / 163 / 171 / 195 / 200 / 205 / 215) |\n| `not a selected dimension or measure` | `services/service-analytics/src/dataset-executor.ts:436` |\n| `is not a subset of the selected dimensions` | `services/service-analytics/src/dataset-executor.ts:596` |\n\n删掉名单会让这六族从 `400 DATASET_INVALID` 退化成 `500 ANALYTICS_QUERY_FAILED` —— 就是 #5352 刚修好的那个缺陷,换一批错误重演一遍。所以名单必须留到它们各自带上信封为止。\n\n## 为什么值得记一条\n\nPrime Directive #12 对「不得不容忍的迁就」的要求是:**declared、loud、tested、并且 removable on a schedule**。#5366 补齐了前三项(代码注释写明它是过渡态、指向 #5352,回归测试逐条钉住六族仍答 `400 DATASET_INVALID`),但**第四项没有** —— 没有任何 issue 承接「把这六族信封化、然后删掉名单」,于是一个本该有期限的过渡态变成了没有期限的现状。\n\n具体的脆弱性:这六族的 HTTP 状态码由**措辞**决定。`dataset-compiler.ts` 里把 \"is not declared in the dataset's `include`\" 改成 \"is not among the dataset's declared includes\",不改任何逻辑,这个错误就从 400 掉成 500 —— 没有任何测试会红(除非有人专门钉了措辞),没有任何 gate 会响。而措辞在这一族单子里几乎每周都在改,#5352 的正文自己就是这么说的。\n\n## 建议(供分诊,不代表已定)\n\n按包给这六族一个和 `filter-normalizer.ts` 的 `invalidFilterError` 同形的构造器,`DATASET_INVALID` / 400,然后删掉正则名单。可以拆成三份独立落地(`dataset-compiler` / `dataset-executor` / `read-scope-sql` + `native-sql-strategy`),每份落完把名单里对应的那几条删掉 —— #5366 的回归用例已经按条覆盖,删对了会绿,删早了会红。\n\n`read-scope-sql.ts` 那族要单独想一下:它的十处拒收都写着 `(fail-closed)`,是 RLS 读作用域构建失败,严格说未必都是**调用方**的错误(一条写坏的 RLS 策略是管理员的错误,不是发起查询的人的错误)。这一族的正确 code 可能不是 `DATASET_INVALID`,值得单独判一次,不要跟着另外两族一起批量处理。\n\n## 未验证 / 严重度\n\n今天没有用户因此拿到错的状态码 —— 六族目前答的都是对的 400,只是靠一个脆弱的机制答对的。所以这是**观察类**发现(dormant fragility),不是现网缺陷,按 objectstack#4949 打 `finding`、不打 `pm:queue`。严重度请按 triage 定;我在提交时的判断不可靠,#5352 自己就是一个「路过顺手记一条」最后被判为真缺陷的例子。\n\n关联:#5352(本发现的来源)、PR #5366(留下名单并加注释的那次改动)、ADR-0112、Prime Directive #12。"
+}

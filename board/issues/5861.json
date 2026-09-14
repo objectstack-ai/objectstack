@@ -1,0 +1,35 @@
+{
+  "number": 5861,
+  "kind": "pull_request",
+  "title": "feat(spec): SaveMetaItemResponseSchema 声明保存响应的全集字段 version / seq / state / projectionApplied (#5745)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T09:18:57Z",
+  "updated_at": "2026-08-06T10:43:09Z",
+  "closed_at": "2026-08-06T10:43:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T10:43:07Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5861",
+  "body": "Fixes #5745\n\n按 #5563 维护者 2026-08-06 附带裁定「先补齐 spec 字段」,把 `SaveMetaItemResponseSchema` 从真子集补成实现真实返回的全集。**本单只做 spec 半边**;`client.meta.saveItem` 的返回类型注解按裁定留给 cli 车道(#5545 家族),`packages/client` 一行未动。\n\n## 一、先测产出:逐字段实测表\n\n生产者只有一个:`ObjectStackProtocolImplementation.saveMetaItem`(`packages/metadata-protocol/src/protocol.ts`)。REST 路由 `PUT /meta/:type/:name` 把它的返回值原样交给 `res.json()`(`packages/rest/src/rest-server.ts`),所以**协议返回即线上响应体**,无需另测 REST 层。\n\n实测手段:真实 `ObjectQL` 引擎 + 真实 protocol(非 stub),覆盖 publish / draft / 注册 projector 三种情形。\n\n| 字段 | 实测类型 | 出现条件 | 定型 | 依据 |\n|:--|:--|:--|:--|:--|\n| `success` | `boolean` | 恒在 | required(原有) | — |\n| `version` | `string`,实测形如 `sha256:` + 64 位十六进制 | **恒在** | **required** | ADR-0008 OCC 令牌;声明为不透明串,格式不入契约 |\n| `seq` | `number`(整数) | **恒在** | **required** | 元数据事件序号,排序用,非 OCC 令牌 |\n| `state` | `'draft'` / `'active'` 两值 | **恒在** | **required**,`z.enum` | 取自 `mode === 'draft' ? 'draft' : 'active'` |\n| `projectionApplied` | `{ success: boolean; error?: string }` | **仅当该类型注册了 ADR-0094 mutation projector** | **optional** | 缺席 = 没有 projector 跑过,不是投影失败 |\n| `message` | `string` | 恒在 | 维持 optional(原有,未动) | 不在本单范围 |\n\n实测原始输出(publish / draft / 带 projector):\n\n```\nA keys : [\"success\",\"version\",\"seq\",\"state\",\"message\"]\nA shape: version = \"sha256:7aad99c8d969efb5067fff275fb3e5be7ec90f9cd610d41709fcddbf8c34b1f0\"\n         seq = 1, state = \"active\", success = true\nB keys : [\"success\",\"version\",\"seq\",\"state\",\"message\"]   state = \"draft\"\nC keys : [\"success\",\"version\",\"seq\",\"projectionApplied\",\"state\",\"message\"]\nC projection: {\"success\":false,\"error\":\"boom-from-projector\"}\n```\n\n**与裁定字段集无出入** —— 四个字段都真实存在,没有多也没有少;差异只在 `projectionApplied` 是条件性的,已按「以实测收窄」处理为 optional。\n\n## 二、先证红(方向预先写死)\n\n预定方向:**红**,且形态是「静默 strip」而非「解析报错」—— 因为这些是普通 `z.object`,Zod 对未声明键的姿态是丢弃、不是拒收。改前在 `origin/main` 上探针实测:\n\n```\nE input keys  : [\"success\",\"message\",\"version\",\"seq\",\"state\",\"projectionApplied\"]\nE parsed keys : [\"success\",\"message\"]\nE STRIPPED    : [\"version\",\"seq\",\"state\",\"projectionApplied\"]\nE safeParse ok: true          ← 注意:是 true\n```\n\n`safeParse` 为真而数据消失,是最不容易被发现的失败形态。**所以断言必须落在「有没有键被 strip」上,而不是 `safeParse` 的判定** —— 后者改前改后都是绿的,拿它当断言就是一个永远不会红的空检查(#4984 家族)。\n\n补齐后同一探针转绿,并转正为两处常设测试(见下)。\n\n### 反向验证\n\n把 schema 改回 `origin/main` 再跑 conformance,方向与预测一致 —— **红**:\n\n```\nAssertionError: expected [ 'version', 'seq', …(2) ] to deeply equal []\n+ [ \"version\", \"seq\", \"projectionApplied\", \"state\" ]\nTests  3 failed | 2 passed (5)\n```\n\n两个仍绿的用例是**应该**绿的,如实记录:一个断言「没注册 projector 时 `safeParse` 绿」(改前改后都绿,正是上面说的那一点),另一个是死代码绊线。\n\n过程中踩到 AGENTS.md §9 陈旧产物陷阱并已修正:第一次回退后测试仍全绿,查出是 `packages/spec/dist` 没有真正重建(objectql 通过 dist 消费 spec);重建后才拿到上面这份真红。\n\n## 三、`state` 收紧连带的生产端类型修正\n\n新声明的 `state: z.enum(['draft','active'])` 使 `ObjectStackProtocolImplementation` 不再满足 `MetadataProtocol.saveMetaItem`(TS2416):**对象字面量属性会把两个字面量的三元表达式加宽成 `string`**,于是实现的返回类型说 `state: string`,而契约说的是它一直在发的那个闭集。\n\n这正是收紧契约要抓的松动 —— 此前消费者拿到的 `state` 是 `string`,把它和拼错的 `'publshed'` 比较不会有任何类型错误。按 Prime Directive #12 修在**生产端**,只加一处类型断言,**取值不变、运行时行为不变**。\n\n未采用的替代:把 `state` 降级为 `z.string()` 或 `z.string().refine(...)` 可以完全不动 `metadata-protocol`,但那是为绕开文件面边界而明知故犯地弱化契约(Prime Directive #5),并且恰好丢掉「在编写期阻止错误」的那一半价值。\n\n⚠️ **越界说明**:`packages/metadata-protocol` 在本单派发时被列为在飞不触面(因 #5672)。实际核对后判断碰撞风险为零 —— #5672 的改动面是 `getDiscovery()` 的 capabilities 记录,与 `saveMetaItem` 的返回相隔约 5000 行、属不同函数不同关注点。若 PM 认为仍应回避,可将这一行拆出另派,但 spec 侧的 `z.enum` 会随之被迫降级。\n\n证据:`tsc --noEmit -p packages/metadata-protocol` 在本改动下 **63** 个错误,与 `origin/main` 基线一致(该包无 `typecheck` script,是已计量 DEBT 项);**只改 spec 而不加这一行则为 64**,多出来的正是该 TS2416。\n\n## 四、随 main 合入的口径更新\n\n合并 `origin/main` 带进了 PR #5782(#5264):`saveMetaItem` 的 legacy raw-engine 分支已被删除。这与本单改前的独立实测结论一致(我在合并前也测出该分支不可达:`agent` 被 `NOT_CREATABLE` 403 挡在更早位置),并让 required 的依据更干净 —— 从「另一条返回不可达」变成「只有一条返回」。schema 头注释、测试注释、changeset 措辞已相应更新。\n\n因此**本单不再另立死代码 finding** —— 该发现已由 #5264 / PR #5782 覆盖,尾巴由 #5783 跟踪。\n\n## 五、测试\n\n- `packages/spec/src/api/protocol.test.ts`(+76):schema 侧钉住四字段的存在性、可选性与类型。首个用例断言「真实响应体过 parse 后没有任何键被 strip」,即上面那条改前为红的。\n- `packages/objectql/src/save-meta-response-conformance.test.ts`(新增,+203):生产者侧 conformance,驱动**真实** protocol + **真实** ObjectQL 引擎,断言真实响应零 strip;并用 `agent` → `NOT_CREATABLE` 钉住 required 所依赖的前提(不存在第二条无回执的写路径)。\n\n| 验证 | 结果 |\n|:--|:--|\n| `pnpm --filter @objectstack/spec test` | **321 files / 8207 passed** |\n| `pnpm --filter @objectstack/metadata-protocol test` | **47 files / 457 passed** |\n| `pnpm --filter @objectstack/objectql test` | **127 files / 2084 passed** |\n| `typecheck`(spec / objectql / runtime) | 全部 Done |\n| `tsc --noEmit -p packages/metadata-protocol` | 63,与基线一致 |\n| `pnpm --filter @objectstack/spec check:generated` | **10/10 up to date** |\n| `check:nul-bytes` + 控制字符自查 | PASS,无命中 |\n\n## 六、生成物\n\n走 os-regen:`authorable-surface.json`(+4,恰为本单四键)、`content/docs/references/api/protocol.mdx`、strictness-ledger counts(`api/` 394 → 395,即 `projectionApplied` 的嵌套对象)。\n\n`authorable-surface.base.json` 的**重锚漂移已照 #5358 剔除**:每次 `gen:schema` 都会把 `baseRev` 前移并吸进 `mcp` / `scoping` / `$icontains` / `ActionSession:*` / `hideFields` 等**别人的**键 —— 本单是加键,锚点不前移,已逐次还原,最终 diff 中该文件为零改动。\n\n## 七、changeset\n\n`@objectstack/spec` **minor**(新增声明字段),正文写消费者视角变化:此前 parse 后四字段被静默 strip 且类型面不可见,此后可见且有类型。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018fxLGQdatPbBUvCgiVxg6D)_"
+}

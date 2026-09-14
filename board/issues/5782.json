@@ -1,0 +1,35 @@
+{
+  "number": 5782,
+  "kind": "pull_request",
+  "title": "refactor(metadata-protocol): 删除 saveMetaItem 中已不可达的 legacy raw-engine 写入分支 (#5264)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T05:19:15Z",
+  "updated_at": "2026-08-06T06:03:17Z",
+  "closed_at": "2026-08-06T06:03:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T06:03:15Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5782",
+  "body": "Fixes #5264\n\n删除 `packages/metadata-protocol/src/protocol.ts` 中 `saveMetaItem` 的 legacy raw-engine 写入分支(`useRepoPath === false` 那一支:直接 `engine.insert` / `engine.update` 写 `sys_metadata`,无 history 行、无 watch 事件、无 `seq`),并化简 `useRepoPath`。**运行时行为无变化 —— 这条分支在 #5086 / PR #5263 之后已不可达。** `deleteMetaItem` 侧结构对称的分支**一行未动**,只补了「为什么这条还活着」的注释。\n\n---\n\n## 一、不可达性复核(独立复核,结论与 issue 一致,论证可以更短)\n\nissue 正文按类型逐个枚举(`object`/`flow` 恒走 repository、`job`/`agent` 被 403、code-only 未解锁必然抛错、解锁后又走回 repository)。复核后发现不必逐类型枚举 —— **两处判据是同一个布尔表达式作用在同一个键上**:\n\n1. `saveMetaItem` 开头 `request = canonicalizeMetaRequestType(request)`(protocol.ts:123-131,`PLURAL_TO_SINGULAR[type] ?? type`)已把类型键折叠成单数。`PLURAL_TO_SINGULAR` 的每个 value 都不再是它自己的 key(`metadata-collection.zod.ts:111`),所以此后 `singularTypeForRepo === request.type`。\n2. #5086 的 code-only 拒绝是 `if (!overlayAllowed && !runtimeCreateAllowed) throw …`,**不再包在 `environmentId !== undefined` 里**(这正是 PR #5263 的修复本身)。\n3. 被删分支的进入条件是 `!(isOverlayAllowed(singularTypeForRepo) || isRuntimeCreateAllowed(singularTypeForRepo))` —— 与第 2 步的判据互为反面,且两个标志读取器内部各自还会再折叠一次单复数并同时查两种拼写(`isOverlayAllowed` / `isRuntimeCreateAllowed`),所以两次求值不可能给出不同答案。\n4. `OS_METADATA_WRITABLE` 不构成缺口:在那里解锁一个类型会让 `isOverlayAllowed` 为真,于是照样走 repository 路径 —— 一扇门,不是绕过。\n\n因此:凡是能走到分叉点的写入,`useRepoPath` 必为真。**结论:复核成立。**\n\n唯一能让两次求值分歧的交错:在 `saveMetaItem` 中途(destructive-diff / `ensureOverlayIndex` / authoring gate 这几个 `await` 之间)改写 `process.env.OS_METADATA_WRITABLE` 并调用 `resetEnvWritableCache()`。没有任何生产代码这么做,只有测试夹具会碰这两个开关;真出现这种交错,改动后的行为是 repository 的 `assertAllowed()` 给 403,比原先静默走 legacy 路径更正确。如实记在这里,不算缺口。\n\n## 二、反向验证(先定方向,再跑)\n\n**预测的方向:探针不应该被打中,新增 pin 测试在删除前后都是绿的** —— 因为「删除前后都绿」正是死代码的定义,不是回归测试的失败。三步都按这个预测执行并全部命中:\n\n1. **探针(负向)**:在删除前,把 legacy 分支的第一条语句换成 `throw new Error('[PROBE-5264] legacy save branch REACHED …')`,跑三个包:\n   - `metadata-protocol` 46 files / **431 passed**\n   - `objectql` 123 files / **2021 passed**\n   - `runtime` 99 files / **1446 passed**\n\n   全绿 —— 3898 个测试没有一个进入过这条分支。\n2. **正对照(证明探针会响)**:把同一个 `throw` 挪到分叉点 `if (useRepoPath) {` 之前再跑 `metadata-protocol` —— **57 个测试立即失败**(`[PROBE-5264-POSITIVE-CONTROL] reached the fork for api/open_things` …)。说明这套用例确实高频驱动 `saveMetaItem`,「探针没响」是真的没到,不是没跑到。\n3. **新增 pin 的前后对照**:把实现 `git stash` 掉、只留新测试,对**未修改**的 `protocol.ts` 跑 `protocol.code-only-types.test.ts` —— 32 passed;恢复实现后同样 32 passed。前后同绿,与预测一致。\n\n所以新增的 pin 不是「删除的回归测试」,而是**不变量守卫**:它钉的是「任何被接受的保存都必须给出 repository 回执」,一旦有人再引入第二条无 history 的写路径、或把 #5086 的门重新缩回 `environmentId !== undefined`,它会红。\n\n## 三、改动摘要\n\n`packages/metadata-protocol/src/protocol.ts`\n\n- 删掉 `overlayAllowedForRepo` / `runtimeCreateAllowedForRepo` / `useRepoPath` 三个变量与 `if (useRepoPath) { … }` 包裹,repository 路径整体外提一层缩进;删掉其后 93 行 legacy 分支。`singularTypeForRepo` 保留(下面仍在用)。\n- 分叉点的注释改写为「只有一条持久化路径」,并写清 #5086 的门为什么让第二条不可达,以及删除侧为什么不同。\n- **`deleteMetaItem`:可执行代码零改动**。`git diff -w` 里所有非注释变更行都是 `-`,没有一行 `+` 代码(见下方核对)。该分支上新增注释,说明它仍然可达且必要:两级删除授权只在 `environmentId !== undefined` 时才跑,control-plane kernel 上 code-only 的删除就落在这里;#5263 特意没收紧删除侧,因为删除 code-only 历史遗留行是**修复动作**。注释里明确写了「不要为了对称把它一起删掉」。\n- 两处描述 save 侧 legacy 分支为「活路径」的 JSDoc 一并纠正(`migrateStoredMetadata` 的 skip 理由、`historyMetaItem` 返回空数组的理由)—— 二者的**行为未改**,改的只是它们对原因的陈述。\n\n核对命令(用于复审):\n\n```\ngit diff -w packages/metadata-protocol/src/protocol.ts \\\n  | grep -E '^[+-]' | grep -v '^[+-][+-]' \\\n  | grep -vE '^[+-]\\s*(//|\\*|/\\*|\\*/)' | grep -vE '^[+-]\\s*$'\n```\n\n输出全部是 `-` 行,且全部属于 save 侧被删分支。\n\n`packages/metadata-protocol/src/protocol.code-only-types.test.ts`(#5086 的既有套件,新增一个 `#5264` 块,10 个用例)\n\n- stub engine 增加 `writes` 记录(哪张表被写)。两条路径都会 `insert('sys_metadata', …)`,真正的判别式是**有没有同时追加 `sys_metadata_history`** —— 这正是 legacy 分支的定义性缺失。\n- `asks the engine for NOTHING when refusing ${type} on a control-plane kernel`:按被删注释自称的可达条件(`environmentId === undefined` + 非 overlay 类型)构造探针请求,断言 403 且 `writes` 为**空数组** —— 比「没有落行」更强:一次写都没发起。\n- `answers a ${type} save with a repository receipt on a ${label}`:view / hook / theme × 两种 kernel,断言 `seq` 是 number、`state === 'active'`、message 含 `[seq=`、且 `sys_metadata_history` 被追加。legacy 回执恰好是这几项全无的形状(`Saved customization overlay (env-wide) — type=…`,正是 #5086 抓到 showcase 对 `job` 的回答)。\n- `routes ${type} back through the repository once OS_METADATA_WRITABLE unlocks it`:补上不可达论证的最后一环 —— 逃生阀不开第二扇门,解锁后的保存仍是 repository 保存,回执与 history 行俱全。\n\n`packages/metadata-protocol/src/protocol.stored-migration.test.ts`\n\n- 只改注释。该用例钉的是 `migrateStoredMetadata` 对 `agent` 的 skip(**断言一字未动、仍然有效**),但它的理由写的是「否则 `saveMetaItem` 会走 legacy 分支」。按夹具分诊三分法,这属于「re-spell 理由」而非「随被删肢移除」:它钉的不是被删的肢,恰恰是那个一直把这条路径挡在门外的 skip。\n\n`.changeset/save-legacy-raw-engine-branch-removed.md` — patch;如实写明「移除不可达代码,wire 无变化」。\n\n## 四、测试与门禁\n\n| 项目 | 结果 |\n|:--|:--|\n| `pnpm --filter @objectstack/metadata-protocol test` | **46 files / 441 passed**(改动前 431,新增 10) |\n| `pnpm --filter @objectstack/objectql test` | 123 files / **2021 passed** |\n| `pnpm --filter @objectstack/rest test` | 55 files / **778 passed** |\n| `pnpm --filter @objectstack/runtime test` | 99 files / **1446 passed** |\n| `tsc --noEmit -p packages/metadata-protocol` | **63 → 63**,与 origin/main 完全一致(该包无 `typecheck` script,在 `check-type-check-coverage.mjs` 里是已计量 DEBT 项;逐条对比确认未新增) |\n| `pnpm check:nul-bytes` | PASS |\n| `pnpm check:query-options-erasure` | PASS |\n| `pnpm check:adr-anchors` | PASS(protocol.ts 的锚是 ADR-0119 `batchData`,与本改动无关) |\n| `pnpm check:error-code-casing` | PASS |\n| 控制字符自查(`grep -naP` 扫 0x00-0x1f) | 无命中 |\n\n消费半径已按「规则的调用方」扫过:save 路径的真实调用方在 `objectql` / `runtime` / `rest`,三个包的夹具都跑过(探针版与最终版各一遍)。\n\n## 五、范围外发现(本 PR 不动)\n\n删掉这条分支后,`OVERLAY_PERSISTENCE_FAILED` 失去了唯一的生产端发射点(原 protocol.ts:7952),但仍留在 `packages/spec/src/api/error-code-ledger.zod.ts` 的 `@objectstack/metadata-protocol` 名下;`packages/rest` 的两个测试自行构造该 error 来断言 5xx 脱敏与状态带,现在钉的是一个没有生产者的码。同族还有两处已过期的注释:`packages/spec/src/kernel/metadata-plugin.zod.ts`(称 `saveMetaItem` 会把 `agent` 路由到 legacy 分支)与 `packages/rest/src/rest-5xx-message-sanitization.test.ts`(称该分支对 artifact-backed 的 code-only 类型仍可达 —— 这一条其实在 #5263 当天就已过期)。都属观察类、今天没有用户会碰到,且都落在本单硬性文件面之外(spec / rest),故未在此 PR 处理,另行记录。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01V7WetGmnfoXNn8cLieKKmx)_"
+}

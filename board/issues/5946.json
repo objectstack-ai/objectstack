@@ -1,0 +1,35 @@
+{
+  "number": 5946,
+  "kind": "pull_request",
+  "title": "fix(client): `meta.getItem` / `meta.saveItem` 在两个表面标上 spec 已声明的响应类型 (#5545)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T12:44:14Z",
+  "updated_at": "2026-08-06T13:01:34Z",
+  "closed_at": "2026-08-06T13:01:33Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T13:01:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5946",
+  "body": "Fixes objectstack-ai/objectstack#5545\n\n## 前提复核(先证后改)\n\n基线 `origin/main` @ `a6b3ee7a1`。issue 的事实在最新 main 上**仍然成立**,行号已随 main 漂移:\n\n| 位置 | 方法 | 改前注解 | 改前实际类型 |\n|---|---|---|---|\n| `:538` | `ObjectStackClient.meta.getItems` | `Promise< GetMetaItemsResponse >` | ✅ 已有 |\n| `:554` | `ObjectStackClient.meta.getItem` | **无** | `unwrapResponse(res)` 无泛型实参 → `unknown` |\n| `:570` | `ObjectStackClient.meta.saveItem` | **无** | 同上 → `unknown` |\n| `:4685` | `ScopedProjectClient.meta.getItems` | `Promise< GetMetaItemsResponse >` | ✅ 已有 |\n| `:4692` | `ScopedProjectClient.meta.getItem` | **无** | `parent._unwrap(res)` 无泛型实参 → `unknown` |\n| `:4699` | `ScopedProjectClient.meta.saveItem` | **无** | 同上 → `unknown` |\n\n同时复核了两个解锁前提,都已落地:\n\n- **#5563(PR #5895,`d9cac6019`)**:`GET /meta/:type/:name` 的缓存 / 非缓存两条分支现在都经\n  `RestServer.translateMetaEnvelope` 重建同一个信封(`rest-server.ts:2714` 的注释把这点写死了:\n  \"This is the ONE place the single-item read paths rebuild their response body\")。因此\n  `GetMetaItemResponse` 现在是**唯一诚实注解** —— 在 #5563 之前默认(缓存)分支发裸文档,\n  任何一种注解都会在某种服务端配置下撒谎,这正是前任 dev 停手的理由。\n- **#5745(PR #5861)**:`SaveMetaItemResponseSchema` 已含 `version` / `seq` / `state` /\n  `projectionApplied`(`protocol.zod.ts:273`)。实测确认后才标注 —— 对着旧的\n  `{ success, message }` 声明标注会把 ADR-0008 OCC 令牌 `version` 从公开签名里抹掉,\n  那才是前任 dev 拒标 `saveItem` 的原因。\n\n## 改动\n\n四处方法(两个表面 × `getItem`/`saveItem`)标上 spec 已声明的响应类型,类型从\n`@objectstack/spec/api` **import 而非新增**,与并排的 `getItems` 同源;两个类型同时加进\n`packages/client` 既有的 spec 类型再导出块,调用方才有办法给收到的东西命名。\n\n`packages/spec` 一字未动。\n\n## 测试\n\n`client.test.ts` 的 getItem 断言从 `toMatchObject` 权宜写法升级为类型化字段读取,\n`as any` 一并摘掉(该 cast 存在的唯一理由就是这个表面没类型):\n\n```ts\nconst result = await client.meta.getItem('object', 'customer');\nexpect(result.type).toBe('object');\nexpect(result.name).toBe('customer');\nexpect(result.item).toMatchObject({ name: 'customer', label: 'Customer' });\n```\n\n`result.item` 保持结构断言,不是遗漏:`GetMetaItemResponseSchema` 里 `item` 就是\n`z.unknown()`(信封有类型,它装的文档没有),这是 schema 的形状本身。\n\n新增一条 `saveItem` 测试,钉住 save 响应的 OCC 载体(`version` / `seq` / `state`);\n替身按真实路由构造 —— `rest-server.ts:4491` 是 `res.json(result)`,原样发协议层的返回对象。\n\n该测试的 getItem 替身在 #5563 里已翻成信封形状,本 PR 无需再翻。**#5787 记录的替身问题\n(`endpoints` 已退役、capabilities 形状错)不在本 PR 范围**,未顺手修。\n\n命令与结果:\n\n```\n$ pnpm --filter @objectstack/client typecheck\n> tsc --noEmit && pnpm check:test-typecheck\n✓ check:test-typecheck --self-test — 8 semantic case(s) + the parser hold.\ncheck:test-typecheck: OK — @objectstack/client's test layer compiles under\npackages/client/tsconfig.test.json; 3 file(s) / 6 error(s) held in\ntest-typecheck-debt.json (shrink-only, #5286).\n\n$ pnpm --filter @objectstack/client test -- --maxWorkers=2\nTest Files  19 passed (19)\n     Tests  237 passed (237)\n```\n\ndebt 账本未动(仍是 3 文件 / 6 错误,全部是 #5543 的 objectql `registerObject`\nINPUT/OUTPUT 类型问题),`client.test.ts` 不在账本里 —— 按该 gate 的口径,未列入的文件\n必须零错误。\n\n## 反向验证(方向事先预测,结果一致)\n\n预测:摘掉四处注解 → 载荷回落 `unknown` → 类型化读取处报 TS18046。实测:\n\n```\n$ npx tsc --noEmit -p tsconfig.test.json      # 四处注解已临时摘除\nsrc/client.test.ts(124,16): error TS18046: 'result' is of type 'unknown'.\nsrc/client.test.ts(125,16): error TS18046: 'result' is of type 'unknown'.\nsrc/client.test.ts(131,16): error TS18046: 'result' is of type 'unknown'.\nsrc/client.test.ts(147,16): error TS18046: 'saved' is of type 'unknown'.\nsrc/client.test.ts(148,16): error TS18046: 'saved' is of type 'unknown'.\nsrc/client.test.ts(149,16): error TS18046: 'saved' is of type 'unknown'.\nsrc/client.test.ts(150,16): error TS18046: 'saved' is of type 'unknown'.\n```\n\n注解恢复后归零。这条正是 #5449 在 `client.test.ts(106,16)` 报的同一个错 —— 那次是\n测试层刚接进 tsc 时暴露的,这次是我们主动把它请回来确认新断言真的挂在注解上。\n\n## 语义:为什么是 patch\n\n公开签名从 `unknown` 收窄。`unknown` 不允许任何属性读取、也不能赋给有类型的绑定,\n所以改前能编译的表达式改后一样能编译;没有删除任何东西,没有新方法/新选项。非破坏,patch。\n\n## 未做(明确留白)\n\n- `meta.getHistory` ×2:spec 里**没有**任何 history 响应 schema,不凭空发明形状,保持现状。\n  (另注:非作用域表面的那个已带手写内联形状,作用域表面的仍是 `unknown` —— 两者不对等,\n  已在报告里留给 PM 转分诊。)\n- 11 个 `unwrapResponse< any >` 的 `meta.*` 方法(`getPublished` / `listDrafts` /\n  `migrateStored` / `getLegalNextStates` / `getDiagnostics` / `getReferences` /\n  `getBookTree` / `getAudit` / `publishItem` / `rollbackItem` / `diffItem`):产出 `any`\n  不是 `unknown`,且逐条补注解等于逐条定契约,前任 PM 已裁为另案。\n- `meta.getView`:确实产出 `unknown`,但**不能**标 `GetViewResponse` —— 生产端\n  `getUiView` 发的是 `{ list: … }` / `{ form: … }`,spec 声明的是 `{ object, view }`,\n  两者形状不同。这是 #5563 同族的声明/实际背离,已另行立单,不在本 PR 修。\n- `data.*` 两个表面注解齐全(复核确认,无缺口)。\n"
+}

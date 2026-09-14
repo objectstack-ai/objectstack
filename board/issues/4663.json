@@ -1,0 +1,36 @@
+{
+  "number": 4663,
+  "kind": "issue",
+  "title": "`authorable-surface.json` 在 main 上不是 `gen:schema` 的输出 —— 基线手编的字节级实锤(#4650 加固建议)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T15:00:14Z",
+  "updated_at": "2026-08-06T10:39:57Z",
+  "closed_at": "2026-08-06T10:39:22Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4663",
+  "body": "从 #4653(双源 C5)落地时掉出来的范围外发现,**不在 #4653 的 PR(#4662)里修**,单独立案。归 #4650「基线手编漏洞」的加固范围。\n\n## 事实:`authorable-surface.json` 在 main 上不是生成器的输出\n\n`scripts/build-schemas.ts:491` 用 `JSON.stringify(updated, null, 2)` 写这个文件。`JSON.stringify` **不转义**非 ASCII,所以生成器写出的 description 行里是**字面** `—`(U+2014)。\n\n同一个脚本、同一个写法写出的姊妹文件 `json-schema.manifest.json`,在 main 上确实是字面 `—`。但 `authorable-surface.json` 在 main 上是**转义形式** `—` —— 也就是说,它在某一刻被生成器以外的东西写过。\n\n#4662 里我只跑了 `pnpm gen:schema`,没碰这个文件,而它的 description 行就自动变回了字面形式:\n\n```\n-  \"description\": \"Ratchet of every AUTHORABLE key in the spec — what a metadata author may write, ...\n+  \"description\": \"Ratchet of every AUTHORABLE key in the spec — what a metadata author may write, ...\n```\n\n## 转义是什么时候进来的\n\n逐 commit 检查该文件首行的转义状态:\n\n| commit | 状态 |\n|:--|:--|\n| `355e951e1` | 字面(生成器输出) |\n| `a2cd18af1` — #4587 → PR #4603(双源 C2) | 字面(生成器输出) |\n| **`e533b0b1b`** — #4583 → PR #4601(retire `datasource.capabilities`) | **转义(非生成器输出)** |\n| `0c0fbd952` / `c13350b47` / `0a936ea62` / `21676eb5d` | 转义,一路带到 main |\n\n`e533b0b1b` 同时把 key 数从 **8304 → 8291**(−13)。那正是一个 retire 单,减 key 本身合理;但**减 key 的同时该文件不再是生成器输出**,说明这一版是手工写/手工改出来的,而不是 `gen:schema` 重写出来的。\n\n## 为什么这值得单独记一笔\n\n#4535 §2 与 #4650 已经指出「删基线行就是删证据,门禁不会拦」,但那是**推断**;这里是**实锤**:文件在 main 上的字节形态自证它被生成器以外的东西写过,而且是在一个减 key 的 commit 里。\n\n顺带说明这个洞的检测成本几乎为零 —— **只要要求该文件必须与 `JSON.stringify(gen(), null, 2)` 逐字节相等,手编就无所遁形**,不需要去判断被删的行是不是 aged-out tombstone。建议 #4650 的加固至少包含这条字节级 round-trip 检查,它比语义检查更难绕过。\n\n(#4662 已顺手把该行带回生成器形态 —— 那是 `gen:schema` 自己写的,不是我改的。)\n\n关联:#4650(门禁加固本体)、#4535 §2、#4601 / #4583、#4653 / #4662、ADR-0104"
+}

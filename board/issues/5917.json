@@ -1,0 +1,33 @@
+{
+  "number": 5917,
+  "kind": "pull_request",
+  "title": "ci(dx): 两个发现型闸门补「发现数」非空断言 —— 语料/驱动轴静默蒸发即红 (#4932)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T11:36:19Z",
+  "updated_at": "2026-08-06T11:55:02Z",
+  "closed_at": "2026-08-06T11:55:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T11:55:00Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5917",
+  "body": "Closes #4932\n\n两个闸门都靠「扫描发现目标 → 逐个检查」工作,而空集合天然通过所有检查。本单补的是这一族里**下限断言**那一半。\n\n## 先说前提核对:issue 的两条子断言在 origin/main 上都已不成立\n\n按 origin/main(73571306b)逐条实测,#4932 正文点名的两处 `catch {}` 都已经不在了:\n\n| issue 的子断言 | 实测 |\n|:---|:---|\n| `check-doc-authoring.mjs:45` 的 `for (const r of ROOTS) { try { walk(r, files); } catch {} }` 吞掉 ROOT 缺失 | **已修**(#4916)。现在是 `assertRootsResolvable()` 先解析全部 ROOT,死根按名报红;`collectFiles` 里没有任何 catch |\n| `check-driver-conformance.mjs:150` 的 `listDir` 兜底空数组 → 发现 0 个 driver → 无事可做 → 通过 | **已修**(#4930 + #4363)。`listDir` 现在是裸 `readdirSync`;而且 DISCOVERED 不变量本来就在(`discoveredErrors`),零 driver 直接报红,模块头也已经把「账本可空 ≠ 发现结果可空」这条区分写清楚了 |\n\n所以本 PR 不是照抄 issue 的修法,而是修**它们剩下的那一半**——发现环节成功、发现结果为空/偏少,仍然报绿:\n\n- `check-doc-authoring`:全部四个 ROOT 都解析成功、一个文件都没扫到时,旧代码打印 `✓ 0 files clean` 并 exit 0。这正是 issue 正文写的「极端情况」,而 #4916 的断言看不见它。\n- `check-driver-conformance`:DISCOVERED 只在**整根**蒸发时开火,**单行**蒸发时沉默。\n\n## check-doc-authoring:每个 ROOT 至少产出一个 .md/.mdx\n\n`assertRootsResolvable` 只看得见「根不是目录」。根还在、语料搬走了(子树迁出、`SKIP_PATHS` 收得更宽、扩展名换了)时它是满意的:walk 少收一批,打印的计数静默变小,而 `✓ 362 files clean` 与 `✓ 0 files clean` 对读者是同一句话、对 CI 是同一个退出码 —— 这就是 #4932 说的「计数被打印,但从未被断言」。\n\n下限**按根**算而不是按总数:总数会被还有文件的那个根托住(`.claude` 一个就够),而「语料只被读了一部分」恰恰是这道闸不该往语料有利方向解释的判定。断言落在 `collectFiles` 里(不是 `main`),self-test 因此驱动不变量本身而不是它的代理。\n\n**没有加棘轮**:阈值只有「每个声明的根 ≥ 1 个文件」,由本次 walk 现算。高水位棘轮需要有人维护,还会把每次正当删除变成一场跟数字的争论 —— 派发词倾向不加,这里也确实找不到可测不可拍脑袋的阈值来源。\n\n## check-driver-conformance:发现改为「完备」,而不只是「非零」\n\n把 `packages/drivers/driver-sql` 改名成 `sql`,包照样构建、照样测试、照样发布 —— 只有这道闸丢了它,而且丢成「少一行的矩阵 + 绿」。所以发现现在是完备的:DRIVERS_DIR 下每个条目要么是发现到的 driver,要么不是目录,要么在这里按名报红(`unnamed` / `manifestless`),没有任何东西被静默过滤掉。\n\n一个必须说清的细节:今天这类改名**恰好**会被 RECONCILED 抓到(台账里有 driver-sql 的条目),但那只在台账非空时成立,而**空台账是本闸的预期稳态**(#5590 到 #5701 之间就是空的)。模块头自己就写着 RECONCILED 的反向只走 LEDGER —— 所以那是当前 FILTER_TEXT 五行带来的巧合,不是机制。\n\n顺带收掉 #4930 漏下的一处 swallow:manifest 探测的 `catch { return false; }` 会把**任何**读取失败答成「那就不是 driver」。现在只有 ENOENT(即这个过滤器真正要问的问题)才这样解释,其他 errno 直接抛。\n\n## 反向验证:方向先定后跑,四组,含一组颜色不翻的\n\n| 场景 | 预测 | 实测(旧 = origin/main 的脚本副本,同一份夹具) |\n|:---|:---|:---|\n| 四个 ROOT 都在、语料全空 | 旧绿 → 新红 | 旧 `✓ 0 files clean` **exit 0** → 新 **exit 1** |\n| 单根蒸发(content 只剩非 markdown) | 旧绿 → 新红 | 旧 `✓ 3 files clean` **exit 0** → 新 **exit 1**,只点名 `content` 并报出总数 3 |\n| ROOT 被改名(#4916 原案) | 旧红、新红 | 两边都 exit 1,同一句 dead-root 文案 —— 这一半没被削弱 |\n| DRIVERS_DIR 整体移走(#4930 原案) | 旧红、新红 | 两边都 exit 1 |\n| `driver-sql` 改名为 `sql` | **颜色不翻**,诊断改变 | 旧只报 `RECONCILED: ledger entry for driver-sql, which is not a driver package.`(怪台账,点错原因);新多报一条 `DISCOVERED: packages/drivers/sql is a package … but is not named driver-*`。两边都是 2/1 problem(s),都红 |\n\n最后一行是本单唯一「预测就不是 before-green/after-red」的地方,如实记账:今天的台账非空,所以颜色本来就红,新断言改的是**把原因点对**。颜色真正会翻的是空台账稳态 —— 在同一份合成树上跑 origin/main 的发现实现,得到 `discovered=[driver-a]`、`DISCOVERED errors=0`(**绿**),而 `sql` 是个带 package.json 的真包却根本不在矩阵里;这一条已在 self-test 里按 `discoveredErrors` 的判定钉死,不依赖台账当时是什么状态。\n\n## self-test 与门禁实测\n\n两个脚本仓内都已自带 `--self-test`(`package.json` 的 `check:*` 也早已是 `--self-test && ` 的形式),所以是**补用例**,不是新建 self-test。\n\n`check-doc-authoring` 新增:单根为空 → 红且只点名该根、并报出这次真扫到的总数 → 恢复后绿;全空 → 红、点名四个根、总数 0。\n`check-driver-conformance` 新增:两种丢行形状各自报红且点名(即使 driver 已发现非零)、合成树上的三分类(discovered / unnamed / manifestless)、一个 stat 不到的条目是报错而不是更小的轴(dangling symlink,ENOENT)、去掉破坏后判定复原,以及活树上两种丢行数都为 0。\n\n实跑(worktree,origin/main 之上):\n\n```\ncheck:doc-authoring        exit=0   ✓ 362 files clean\ncheck:driver-conformance   exit=0   5 drivers x 6 case-sets,25 covered / 5 DEBT / 0 exempt\ncheck:role-word            exit=0   check:org-identifier   exit=0\ncheck:adr-anchors          exit=0   check:docs-audit-scope exit=0\ncheck:nul-bytes            exit=0   (5704 tracked text file(s))\neslint(两个改动文件)      exit=0\n```\n\n`node scripts/check-nul-bytes.mjs` 之外另做了越界自扫(`grep -naP` 覆盖 `0x01`–`0x1f`/`0x7f`),无命中。\n\n## 发布物\n\ntooling-only,`scripts/**` 两个文件,不发布任何包 ⇒ 无 changeset,PR 带 `skip-changeset` 标签(标签由本座位落,回读结果写在报告里)。CI 挂载点未动(`.github/workflows/lint.yml` 的两处 `run:` 原样)。\n\n## 范围与另行立单\n\n- 文件面严格为 `scripts/check-doc-authoring.mjs` + `scripts/check-driver-conformance.mjs`。未动 workflows、未动 `content/docs/releases/**`;#4928(Actions 层同族)不在本单。\n- 座位互检:动手前把当时全部 11 个 open PR 的文件清单过了一遍(含 #5827 这个同样改 `scripts/` 的),**没有**任何 open PR 在改这两个文件。\n- 顺带核到同族第三处:`scripts/check-single-authz-resolver.mjs` 已补 #4916 那一半,但 `collectScanFiles()` 的返回长度从不断言 —— 根解析成功、一个文件都没扫到仍然绿,而它自己的模块头就写着「nobody reads a count that is not printed」。不在本单文件面内,按 Prime Directive #10 立为 observation-class:#5916(`finding` 标签,未入队、未指派)。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01GX3sL71LFq8m2usg6VqTSE)_"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 5444,
+  "kind": "issue",
+  "title": "driver-memory analytics 面的 `generateSql` 把 `contains` 回显成 `LIKE 'et'`(没有 `%` 通配符)—— 回显的是等值匹配,执行的是子串匹配",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:on-hold"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T11:52:56Z",
+  "updated_at": "2026-08-06T07:06:04Z",
+  "closed_at": "2026-08-06T07:06:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5444",
+  "body": "做 #5374(mingo 出口的 `$notContains` 编译成裸 `{$not: 'x'}`)时,顺手把同一个 `where` 在 `generateSql` 出口的回显也测了。这一条**不属于 #5374 的范围面** —— 那一条在 mingo 出口,这一条在 SQL 回显出口,#5374 修好之后完整存在。\n\n作为 #5433 的 sub-issue 而不是独立 issue,因为修复落点完全在 #5433 的完成范围之内:同一个 `operatorToSql` 映射表 + 同一个 `generateSql` 的 WHERE 构建循环。分开修会让同一个函数被改两次。unassigned。\n\n## 位置\n\n`packages/plugins/driver-memory/src/memory-analytics.ts`:\n\n- `operatorToSql`(约 :800)—— `'contains': 'LIKE'`、`'notContains': 'NOT LIKE'`;\n- `generateSql` 的 WHERE 构建循环(约 :450)—— 把比较数原样交给 `toSqlLiteral`,不加通配符。\n\n## 现象(实测)\n\n3 行数据,`name` 分别为 `alpha` / `beta` / `gamma`(只有 `beta` 含 `et`):\n\n| `where` | `query()` 取到 | `generateSql()` 输出的 WHERE | 该 SQL 若执行会取到 |\n|---|---|---|---|\n| `{name: {$contains: 'et'}}` | `[2]`(正确) | `WHERE name LIKE 'et'` | **0 行** |\n| `{name: {$notContains: 'et'}}` | `[1,3]`(#5374 修复后正确) | `WHERE name NOT LIKE 'et'` | **3 行** |\n\nSQL 的 `LIKE 'et'` 没有 `%`,语义是**等值匹配**(等价于 `= 'et'`),不是子串匹配。正确的回显应当是 `LIKE '%et%'` / `NOT LIKE '%et%'`,比较数里的 `%` 和 `_` 还需要转义(否则作者写的 `50%` 会变成通配符)。\n\n## 为什么是 bug\n\n1. **回显的用途就是让作者看懂自己问了什么。** `generateSql` 是 `IAnalyticsService` 的公开方法,其返回值也是 `AnalyticsResult.sql` 承诺的「生成的 SQL」。一个把「包含 et」显示成「等于 et」的 SQL,恰恰在作者最需要它说实话的时候说了假话 —— 与 #5333 同类,只是那一条是谓词整个丢掉,这一条是谓词还在但含义变了。\n2. **两个出口对同一个 `where` 给出不同含义**,#5240 为本包立下的不变量所禁止的形状,与 #5433 正文里 `in`/`notIn`/`set` 那三条并列。\n3. **大小写这一半是巧合对上的。** mingo 出口是 `/…/i`(#5374 起借用 driver 自己的 `filterSubstringPattern`),而 SQLite 的 `LIKE` 对 ASCII 默认就不区分大小写 —— 所以这一维恰好一致,但那是两个互不相干的默认值碰巧撞上,不是任何人写下的约定。修 `%` 的时候值得顺便把它写成约定。\n\n## 未验证的部分\n\n- 与 #5433 正文的同一条限制:本仓库内**没有**任何地方执行 `generateSql` 的输出,所以目前只是「显示错误」而非「取到错误行集」。这一点显著影响严重度。\n- 没有核对 `%` / `_` 的转义在 `toSqlLiteral` 里该怎么表达(需要 `ESCAPE` 子句还是各方言自理),只指出当前完全没有转义。\n\n关联:父 issue #5433(同函数、同一映射表)、#5374(同一 `where` 的另一个出口)、#5333(回显与执行不一致)、#5240。\n"
+}

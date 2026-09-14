@@ -1,0 +1,36 @@
+{
+  "number": 5068,
+  "kind": "issue",
+  "title": "SDUI 组件 props 没有解析闸门:`PageComponent.properties` 是开放 record,`ComponentPropsMap` 的 29 个站点从不被 parse(#4001 批 17 的 no gate 判定)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T01:54:54Z",
+  "updated_at": "2026-08-06T08:15:04Z",
+  "closed_at": "2026-08-06T05:26:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5068",
+  "body": "## 背景\n\n#4001 批 17 的任务是把 `packages/spec/src/ui/component.zod.ts` 的 29 个 strip 站点收紧为 `strictObject`。测量结果是:**这些站点根本没有 parse**,因此 `.strict()` 在这里什么都不会强制——按 ledger 的分类规则,这是 **`no gate`**(carrier 活着、parse 缺席),不是 `authorable`。\n\n批 17 因此没有收紧该文件,而是记录判定并把「接上闸门」这件事单独立为本 issue(与 批 15 对 `ChartAggregateSchema` 的处理一致:contract-first 的修法属于 `packages/lint` / 载体那一侧,不应塞进 spec 的 strictness 批次里)。\n\n## 事实(三条独立测量,控制组同轮为真)\n\n**1. carrier 是活的,但它是一个开放 record**\n\n`packages/spec/src/ui/page.zod.ts:115`\n\n```\nproperties: z.record(z.string(), z.unknown()).optional().default({}).describe('Component props passed to the widget. See component.zod.ts for schemas.')\n```\n\n`PageComponentSchema` 自 ADR-0089 D3a 起是 `.strict()`,但**严格性不递归**:它守住的是 component 节点自己的键,`properties` 里面是一个未校验的口袋。\n\n**2. BFS 不可达**\n\n从 24 个 metadata-type 根 + `defineStack` 的 `ObjectStackSchema` 出发,复用 `build-schemas.ts` 自己的 `zodChildSchemas` / `zodShapeOf`(#4650 闭包),闭包 6899 个 zod 节点:\n\n- `component.zod.ts` 的 **52 个目标(21 个导出 schema + `ComponentPropsMap` 全部 31 个条目)全部 UNREACHABLE**;\n- 同一轮里 `PageSchema` / `PageComponentSchema` / `PageRegionSchema` / `ThemeSchema` / `ChartConfigSchema` / `ResponsiveConfigSchema` 六个正控制组全部 `root-graph`;\n- 批 13 测定的三个 no-door 形状(`TouchInteractionSchema` / `MotionConfigSchema` / `OfflineConfigSchema`)保持 unreachable。\n\nBFS 在 `PageComponentSchema.properties` 处停下——props schema 挂在任何东西上都没有。\n\n**3. 三个仓库里没有任何生产 parse 点**\n\n`objectstack` / `objectui` / `cloud` 全仓搜索 `.parse(` / `.safeParse(`:命中全部落在 `packages/spec/src/ui/component.test.ts` 与 `inline-action.test.ts`(该文件自己的单测)内。`objectui` 只引用推断出的**类型**并手写平行的 React interface;`cloud` 引用数为 0。\n\n`ui/react-blocks.ts` 只用 `Object.keys(ComponentPropsMap)` 取类型名派生 `RECORD_CONTEXT_BLOCK_TAGS`,不 parse;它的 `REACT_BLOCKS[].schema` 指向 `FormViewSchema` / `ListViewSchema` / `ChartConfigSchema`,没有一个来自 `component.zod.ts`。\n\n## 经验证据(批 14 方法,负控制组同轮为红)\n\n`definePage()` 就是 `PageSchema.parse()`,所以这是活的授权门。对 example 语料里 21 个真实页面:\n\n```\n=== A. unknown key INSIDE `components[].properties` ===\n  parsed clean & key SURVIVED : 10\n  rejected                    : 0\n\n=== B. NEGATIVE CONTROL — 同一个键放到 `properties` 的兄弟位上 ===\n  rejected (expected)         : 10\n  wrongly accepted            : 0\n```\n\n即:未声明的键写进 `properties` 会**原样通过并被保留**;同一个键写在外面一层立刻被拒。负控制组证明探针能测出闸门——这里就是没有闸门。\n\n## 为什么这是个真问题(不是「无害」)\n\n`objectui` 的 `packages/react/src/SchemaRenderer.tsx` 会把 `properties` 整个 hoist 到节点上,然后\n\n```\nReact.createElement(Component, {\n  schema: schemaForComponent,\n  ...componentProps,  // Spread non-metadata schema properties as props\n```\n\n把**除固定 deny-list 外的每一个作者写的键**转发成 React prop(约 457 行)。所以一个拼错的键既不会被拒、也不会被丢,而是安静地流到渲染器,由渲染器忽略——ADR-0078 要消灭的正是这种「作者拿到成功回执、配置被无声忽略」的形状。\n\n`packages/lint/src/validate-page-field-bindings.ts` 的文件头早就把这件事写下来了:\n\n> `PageComponent.properties` is `z.record(z.string(), z.unknown())` — an untyped bag. The typed prop schemas exist (`ComponentPropsMap` in `@objectstack/spec/ui`) but nothing validates `properties` against them, so every field name a component references ships exactly as typed.\n\n## 建议的修法(contract-first,需要维护者定方向)\n\n把 parse 接到载体自己的闸门上,而不是在 spec 里做一个没人调用的 `.strict()`。两个已知约束必须先解决,**这也是为什么不能顺手做**:\n\n1. **`type` 的取值域是开放的**——`PageComponentSchema.type` 是 `z.union([PageComponentType, z.string()])`,现实中存在 `record:line_items` 这类未注册类型(`validate-page-field-bindings` 明确说明未知类型静默跳过)。所以按 `type` 分派解析必须对未注册类型保持开放,否则会拒掉在用的页面。\n2. **现有真实页面写了 props schema 未声明的形状**——同一文件记录:`record:details` 的 `sections[].fields[]` 与 `hideFields[]`、record picker 的 `labelField`,「they pass only because `properties` is unvalidated」。今天直接接上严格解析会打红在用的 example / 客户页面,所以需要先补齐 schema 或先以 warning 级别落地。\n\n可选方向(择一,建议 A):\n\n- **A. 在 publish / lint 侧按 `type` 分派 `ComponentPropsMap` 解析**,未注册类型跳过,先 warning 后 error。好处:与 `validate-page-field-bindings` 同层、同 severity 习惯,不动 `page` 协议形状;坏处:存储路径(metadata REST 写入)仍然不校验。\n- **B. 把 `PageComponentSchema.properties` 改成按 `type` 的判别式 schema**。好处:所有路径(defineStack / REST / Studio)一次性覆盖;坏处:改的是 `page` 协议本身的形状,对开放 `type` 与未声明形状的兼容代价大得多,属于 breaking。\n\n任一方向落地之后,`component.zod.ts` 才重新变成 `authorable`,#4001 的收紧才有意义——届时把 ledger 行从 `no gate` 改回 `authorable` 并排进后续批次。\n\n## 参考\n\n- ADR-0078(no-silently-inert-metadata)、ADR-0089 D3a(page/view strict)\n- #4583(「一个被精确校验的死槽位是更有说服力的谎言」)\n- #4001 批 13(`no door`)/ 批 15(`no gate`,`ChartAggregateSchema` 同形状)\n- ledger:`docs/audits/2026-07-unknown-key-strictness-ledger.md`,`ui/` 两张表的 `component.zod.ts` 行\n"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 17636,
+  "kind": "issue",
+  "title": "client: `environments.delete` still documents a one-call cascade delete and has no `purge` option — once the hosted cloud enforces ADR-0014's two-step delete, SDK users can archive but never purge",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cloud",
+    "pm:done",
+    "priority:p2"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-11T06:15:15Z",
+  "updated_at": "2026-09-11T08:18:30Z",
+  "closed_at": "2026-09-11T08:17:29Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17636",
+  "body": "## 现象\n\n`packages/client/src/index.ts`（`origin/main`）的 `environments.delete`：\n\n```ts\n/**\n * Cascade-delete an environment: cleans up credential/member/package_installation\n * rows, releases the physical database via the provisioning adapter, and\n * removes the `sys_environment` row. Default environments require `force: true`.\n */\ndelete: async (id: string, opts?: { force?: boolean }) => {\n  const qs = opts?.force ? '?force=1' : '';\n```\n\n## 为什么现在要改\n\n托管云的 `DELETE /api/v1/cloud/environments/:id` 正在改为遵守 ADR-0014 的两步删除（objectstack-ai/cloud#2187，PR objectstack-ai/cloud#2188）：\n\n- 活跃环境 → **归档**（响应 `archived: true`，保留期内可恢复）\n- 已归档环境 + `?purge=1` → 才真正拆除\n- `?force=1` 只是「确认这是生产环境」，**永远不等于 purge**\n- `DELETE /cloud/organizations/:id` 在组织名下仍有任何环境时返回 409\n\n该 PR 合并后，这个客户端方法会出现三处与线上不一致：\n\n1. **JSDoc 说谎**：写的是「级联删除、释放物理库、删除行」，实际对活跃环境只归档\n2. **缺 `purge` 选项** ⇒ **SDK 用户完全无法 purge**：`opts` 只有 `force`，而服务端明确拒绝把 `force` 当 purge（重试一次 `?force=1` 就毁掉环境，正是两步删除要防的事故）\n3. **返回类型不完整**：缺 `archived`、`purgeDeferred`、`retentionDays`\n\n## 验收\n\n1. `opts` 增加 `purge?: boolean` → `?purge=1`；`force` 与 `purge` 可同时传（生产环境拆除需要两者）\n2. JSDoc 按两步语义重写：活跃环境归档、`purge` 仅对已归档环境生效、`force` 是生产确认而非 purge\n3. 返回类型声明 `archived`、`purgeDeferred`、`retentionDays`（以服务端实际响应为准，勿凭文档臆造字段——见同文件注释里记录过的 `credential` 教训）\n4. 若客户端文档站有该方法的页面，同步更新\n\n## 顺序\n\n**等 objectstack-ai/cloud#2188 合并后再开工**，以服务端实际响应形状为准。\n"
+}

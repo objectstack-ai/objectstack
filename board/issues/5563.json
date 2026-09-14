@@ -1,0 +1,35 @@
+{
+  "number": 5563,
+  "kind": "issue",
+  "title": "`GET /meta/:type/:name` answers two different body shapes on the same request — the cached branch (the DEFAULT) returns the bare document, the non-cached branch returns the spec-declared `{ type, name, item }` envelope",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T18:27:35Z",
+  "updated_at": "2026-08-06T12:00:12Z",
+  "closed_at": "2026-08-06T12:00:12Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5563",
+  "body": "发现于 #5545 的前提复核(要给 `client.meta.getItem` 补返回类型注解,先去 spec 锚定响应形状)。基线 `origin/main` @ `229d29ea4`。\n\n## 事实\n\n`packages/spec/src/api/plugin-rest-api.zod.ts:773` 为 `GET /meta/:type/:name` 声明了唯一的响应 schema:\n\n```\nresponseSchema: 'GetMetaItemResponseSchema'\n```\n\n`packages/spec/src/api/protocol.zod.ts:193` 里它是三键信封:\n\n```\nGetMetaItemResponseSchema = z.object({\n  type: z.string(),\n  name: z.string(),\n  item: z.unknown(),\n})\n```\n\n但同一条路由在 `packages/rest/src/rest-server.ts:4020` 的 handler 里有两条互斥分支,**响应体形状不同**:\n\n- **缓存分支**(`rest-server.ts:4076` 的条件成立时)→ `res.json(... result.data ...)`(`:4128`)。`result` 来自 `getMetaItemCached`,而 `packages/metadata-protocol/src/protocol.ts:5409-5411` 里它做的正是 `const item = (result as any)?.item;`、`:5441` `return { data: item, ... }` —— 也就是说 `result.data` **是已经拆掉信封的裸元数据文档**。\n- **非缓存分支** → `res.json(... visible ...)`(`:4238`),`visible = await p.getMetaItem(...)`,即 `{ type, name, item, lock, ... }` 信封,与 spec 一致。\n\n关键在于**缓存分支是默认路径**:`packages/spec/src/api/rest-server.zod.ts:285` 是 `enableCache: z.boolean().default(true)`,`rest-server.ts:2796` 也是 `metadata.enableCache ?? true`。于是 spec 声明的那个形状,在**默认配置下反而是取不到的那一个**;信封只在关掉缓存、或 `app` / `doc` / `book` / `?state=draft` / `?preview=draft` / `?package=` 这些绕过缓存的读法下才出现。第三种形状还有 `?layers=true`(`rest-server.ts:4031-4044` 的 `getMetaItemLayered`),与前两者都不同。\n\n仓内早就在注释里承认了这件事,只是当作运行时事实处理而非缺陷 —— `packages/rest/src/import-prepare.ts:18-32` 的 `isMetaEnvelope`:\n\n> Detect the `getMetaItem` response envelope (`{ type, name, item, lock, … }`) … The cached read path and `getMetaItems` element shape hand back the already-unwrapped document instead, so translation helpers must distinguish the two\n\n`rest-server.ts:2631-2637` 同一段话再写了一遍。`isMetaEnvelope` 在 `rest-server.ts` 有 5 处调用,全部是在为「这次拿到的到底是哪种形状」做运行时嗅探。\n\nruntime 那条服务面同病:`packages/runtime/src/domains/meta.ts:247` 命中 protocol 时 `deps.success(data)` 送信封,而 `:216-218` 的 registry 兜底送 `qlService.registry.getObject(name)`(裸文档),`:258-260` 的 metaSvc 兜底同样是裸文档。\n\n## 实测\n\n在 worktree 里对着真 `RestServer` 跑同一条请求(`GET /api/v1/meta/object/customer`,无 query),只切换 protocol 是否提供 `getMetaItemCached`,捕获 `res.json` 的实参:\n\n```\nCACHED  BRANCH BODY = {\"name\":\"customer\",\"label\":\"Customer\",\"fields\":{}}\nNONCACHED BRANCH BODY = {\"type\":\"object\",\"name\":\"customer\",\"item\":{\"name\":\"customer\",\"label\":\"Customer\",\"fields\":{}}}\n```\n\n(探针脚本是一次性的,未提交。)\n\n## 影响\n\n- 同一个公开 endpoint,同一个请求,响应体结构随服务端配置而变 —— 任何消费方都只能运行时嗅探,或者干脆 `as any`。这正是 #5545 卡住的原因:`client.meta.getItem` 想补一个诚实的返回类型注解,而现在**没有一个类型是对的** —— 标信封则默认配置下撒谎,标裸文档则与 spec 声明矛盾。\n- 已有消费方按**裸文档**理解这条路由,与 spec 相反:`packages/client-react/src/metadata-hooks.tsx:113-140` 把 `meta.getItem(...)` 的结果和 `getCached().data`(裸文档)喂进同一个 `data` state,而 `useObject` 自己的 docstring(`:52-64`)读的是 `schema.label` / `schema.fields`。若服务端走到非缓存分支,这些读取全是 `undefined`,且不报错。`packages/client/src/client.test.ts:96-99` 的 mock 同样是裸文档。\n- 属于「声明了却没有强制」的一类:spec 写了唯一响应 schema,生产端有三种形状,没有任何 gate 会发现。AI 生成的消费代码在这种表面上一定会长出 `??` 与 `as any`。\n\n## 处置(需定案,勿直接猜)\n\n统一到一种形状是不可避免的,但选哪一种是公开契约决定,应由 maintainer 拍板:\n\n- **A 全部收敛到 spec 的 `{ type, name, item }` 信封** —— 契约优先,`plugin-rest-api.zod.ts:773` 本来就这么声明。代价:对今天默认配置(缓存分支)的所有读者是破坏性变更。\n- **B 全部收敛到裸文档,并改 spec** —— 贴合 `client-react` / CLI / client 自测的既有预期。代价:丢掉 `type` / `name` / `lock`,而 `lock` 是 ADR-0008 OCC(`If-Match`)那条链在用的,得另找承载;且「裸元数据文档」本身是个很弱的类型,收窄价值有限。\n\n无论哪条,都应在同一次里把 `isMetaEnvelope` 的运行时嗅探删掉 —— 它存在本身就是这个分裂的度量。\n\n关联:#5545(被本单阻塞)、#3847(同族:声明了富形状、两个 surface 都发裸值)。\n"
+}

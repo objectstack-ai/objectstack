@@ -1,0 +1,34 @@
+{
+  "number": 5699,
+  "kind": "issue",
+  "title": "`applyFormulaPlan` 的 `nowSnapshot` 形参零调用者 —— 同一次 insert 里 defaultValue 的 now() 与 formula 的 now() 观察到两个不同瞬时",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T00:57:43Z",
+  "updated_at": "2026-08-06T11:38:37Z",
+  "closed_at": "2026-08-06T11:38:37Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5699",
+  "body": "**Blocked-by: #5504**(同文件在飞:PR #5698 的写路径共享水合点即本单的第三个调用点;其落地后 sweep 回队)。\n\n观察类发现,在 #5504(PR #5698)选水合求值语义时撞到,**当下没有用户会踩到**,故不带 `pm:queue`,请 PM 分诊定级。\n\n## 事实\n\n`packages/objectql/src/engine.ts` 的 `applyFormulaPlan` 声明了第四个可选形参 `nowSnapshot?: Date`:\n\n```\nfunction applyFormulaPlan(plan, records, execCtx?, nowSnapshot?): void {\n  const now = nowSnapshot ?? new Date();\n  ...\n}\n```\n\n全仓 `applyFormulaPlan(` 的调用点在 #5504 之前是两个(find / findOne),之后是三个(加上写路径的共享水合点),**没有任何一个传 `nowSnapshot`**。也就是说这个形参自诞生起就走的是 `?? new Date()` 分支,是一段休眠代码。\n\n## 为什么它当初存在\n\n该函数自己的 docstring 写明了意图:\n\n- 「a `now` pinned ONCE per operation(每行、每个 formula 字段在一次 find 里观察同一个瞬时 —— 确定性,不做逐次求值的 `new Date()` 漂移)」\n- 「The eval context mirrors `applyFieldDefaults` so formula and default expressions see the same shape」\n\n第一条目前由「每次调用 `applyFormulaPlan` 只取一次 `new Date()`」自然满足,所以形参不传也不影响读路径的行内确定性。**第二条则只做到了一半**:`applyFieldDefaults` 与 `applyFormulaPlan` 各自取自己的 `now`。\n\n## #5504 之后新增的可观察面\n\n`engine.insert` 的中间件体开头已经有一个 `nowSnap = new Date()`,交给 `applyFieldDefaults` 用于解析 `defaultValue` 里的 `NOW()` / `current_user` 令牌。#5504 让同一次 insert 在写完之后又做了一次 formula 水合,而它按「与 find/findOne 完全一致」的原则**没有**传 `nowSnap`。于是同一次 insert 内:\n\n- `defaultValue` 里的 `now()` = 写前那一刻;\n- `formula` 里的 `now()` = 写后那一刻;\n\n两者相差一次 driver 往返(通常毫秒级)。跨越秒/日边界时,一个「`created_at` 默认值」与一个「基于 `now()` 的 formula」理论上可以落在不同的日历日上。\n\n需要说清楚的是:**这不是 #5504 引入的新语义**,读路径本来就是读时求值、与写时的 default 瞬时无关;#5504 只是让「同一次操作里两个瞬时」第一次变得可观察。PR #5698 刻意选了「与 find/findOne 逐字一致」而不是「顺手传 nowSnap」,因为分派单明确要求水合语义与读路径一致,且悄悄让写路径比读路径多一条确定性保证会造成两侧不对称。\n\n## 可能的处置(留给分诊)\n\n1. **接上**:insert 水合点传 `nowSnap`,让 default 与 formula 在一次写里共享瞬时。代价是写路径比读路径多一条保证,两侧语义不再逐字相同 —— 需要判定这是想要的。\n2. **退休形参**:确认「一次调用一个 `new Date()`」就是全部需要的确定性,删掉零调用者的 `nowSnapshot`,并把 docstring 里 mirrors `applyFieldDefaults` 的措辞收窄到实际成立的范围(ADR-0049 enforce-or-remove 的精神)。\n3. **维持现状**:承认毫秒级偏差不构成业务问题,但把这一段写进 docstring,免得下一个读者以为形参是活的。\n\n倾向 2 或 3 —— 1 会制造读写不对称,而这个偏差目前没有任何被测量到的业务拉力。真正的价值在于:现在这个形参**看起来**是活的,任何按它推理的人都会推出错误结论。\n\n## 落点\n\n- `packages/objectql/src/engine.ts` —— `applyFormulaPlan` 定义、其 docstring,以及 `insert` 中间件体里的 `nowSnap`\n"
+}

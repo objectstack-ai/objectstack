@@ -1,0 +1,33 @@
+{
+  "number": 5909,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch,os-dev): 增补三条 operational note —— advisory 门禁红着合并、死掉的 dev ≠ 维护者中止、截断判读双读取 (#5741)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T11:25:55Z",
+  "updated_at": "2026-08-06T11:39:59Z",
+  "closed_at": "2026-08-06T11:39:57Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T11:39:57Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5909",
+  "body": "Fixes #5741\n\n(派发令写的是 `Closes #5741` —— duplicate-fix-guard 的关键词集两者同权,这里取仓内现行写法 `Fixes`,与 step 7 复核判据一致。仓内无 `pull_request_template.md`,版式沿用同文件前序单 PR #5877。)\n\n基于合并了 PR #5877 之后的 main(`73571306b`,含 `28de40f11` = #5845/#5877 对本文件的 B 段重写与 notes 6 第四条 bullet)开工。**零发明整合**:三条 note 的正文由原作者(issue 正文)与分诊轮评论拟好,本 PR 只做落稿、锚定证据链、维护编号与计数一致性。\n\n单仓两文件:`.claude/skills/pm-dispatch/SKILL.md`(+70/-1)、`.claude/agents/os-dev.md`(+14)。⛔ 产品码零改动,⛔ 未触碰 `content/docs/releases/`。\n\n## 落点 × 事实源(逐条可比对)\n\n| 条目 | 落点 | 实测事实源 |\n|---|---|---|\n| **note 10** advisory 门禁红着合并会毒化全仓 | Operational notes 新增第 10 条 | PR #5584 的 ESLint job(id `92425566733`)`conclusion: failure`、`completed_at` 19:53:08Z;PR `merged_at` 20:12:26Z ⇒ 红后 **19 分 18 秒**过队合并,同 PR 其余 23 个检查全绿。毒化实例 #5601(job `92432801994`,同一条同行号),热修 PR #5615,治理 issue #5617 |\n| **note 11** 死掉的 dev 子代理 ≠ 维护者中止 | 新增第 11 条 | #5085 评论时间线:08-05 07:00Z「已被维护者手动中止」(推断)→ 08-06 02:42Z 维护者确认误判、门解除;同一单 08-06 04:12Z 另有一次**真**中止(宿主明确回报 stopped by the user),04:14Z 维护者示意重派 |\n| **note 12** 截断判读必须双读取 | 新增第 12 条 | 分诊轮评论 + 本 PR 复测:REST `body` 实测 4321 / 5183 / 4181 字符(#5148 / #5149 / #5164),`body_html` 需 `application/vnd.github.full+json` 才返回(#5148 实测 6958 字符,结尾完整) |\n| **step 7 一行** 报告到达 ≠ CI 收敛 | step 7 复核清单,紧随「测试证据」那条 | #5617 正文「PM 验收纪律同步收紧:arm auto-merge 前核 ESLint 结论为 completed/success(此前只核『无 failure』,在 in_progress 时 arm 会漏)」 |\n| **os-dev 配套一行** 等 CI 收敛再交报告 | `os-dev.md` 的 `Definition of done` 列表(无编号),`skip-changeset` 条之后 | PR #5615 正文第 2 条自述:「push 完开了 draft PR 就直接返回了结构化报告,没有回看自己 PR 的 CI 结论……今后 PR 开完要等 CI 收敛再交报告」 |\n\n## 三处按实测收紧了拟稿\n\n1. **门压时长**:拟稿写「一整天」,实测是 08-05 07:00Z 立门到 08-06 02:42Z 解除 = **近 20 小时**,照实写。\n2. **note 11 补上真中止的对照半边**:拟稿只有误判一侧。同一条 #5085 上两种都出过,而**症状完全一样**(零推送、无分支)—— 所以 note 的判据落在「有无显式信号」(维护者原话,或宿主回报 stopped by the user),而不是落在症状上。这半边是 #5085 04:12Z 评论原话,不是发明。\n3. **那道门的实际形态**:它只写在「认领解除」评论里,标签退回了 `pm:queue` —— 队列视图显示可派发而谁也不敢派,比 `pm:on-hold` 更隐蔽(状态机根本读不到它)。拟稿说的是「立成 `pm:on-hold`」,照实改并保留纪律结论(真要 hold 就 `pm:on-hold` + 带重启条件的评论成对落地)。\n\n另有两处与拟稿的**计数**不符,按实测办:派发令说「四条 operational note」,但 issue 与分诊轮加起来只拟了**三条** note 正文(issue ① / issue ③ / 分诊轮第四条),issue 的 ② 本身就是「step 7 一行 + os-dev 一行」的配套、没有 note 正文 —— 故本 PR 落三条 note,⛔ 不发明第四条。现有 notes 最大编号实测为 **9**,新条顺延为 10 / 11 / 12(与 issue 猜的区间恰好一致,但取自实测)。\n\n## 一致性与不动区\n\n- 段首计数「队列与平台层的**九条**实测结论」→「**十二条**」。全文 `N 条`式引用已逐一 grep,只此一处指 notes 总数。仓内其它文档(含发布版 `skills/objectstack-pm-dispatch/SKILL.md`)无本节计数镜像,无需同步。\n- 交叉引用全部核实存在于现行文本:notes 6 的「零命中必须用一个『确定存在的邻近词』反查」、notes 7 的「更正要发在同样公开的位置」、step 0 的 **Repair first** 分类、step 4 的 **Stale-claim reclaim**、step 5 的「Handing off an interrupted dev」、step 6 的探活、step 7 ACCEPT 的 *once every check on the PR is green*、状态模型的「Label + comment land as a pair」。\n- **既有 notes 1–9 逐字节未动**(`diff` 原 113–243 行,零差异);标题结构与 `origin/main` 逐行相同;决策框架四份拷贝未触碰(同构门禁绿)。\n- os-dev 的新条目加在**无编号**的 `Definition of done` 列表里,不触碰 `resource rule 1/6`、`(rule 6)` 等既有编号交叉引用(同 #5727 的保序做法)。它并显式声明这次等待是**前台阻塞轮询**(等同 resource rule 1 的 `flock`),⛔ 不是可以中途返回的后台守望 —— 否则新条会与 resource rule 6 读起来冲突。\n- 门禁族与 job 的归属是实测的,不是照抄:`grep` `.github/workflows/lint.yml` 确认 `check:route-envelope`(:203)、`check:error-code-casing`(:212)、`check:engine-double-contract`(:382)都是 job `lint`(显示名 **ESLint**)的步骤,typecheck job 显示名为 **TypeScript Type Check**。\n\n## 验证\n\n```\nnode scripts/check-skill-frame-sync.mjs --self-test\n  ✓ check-skill-frame-sync self-test: 12 cases pass.\nnode scripts/check-skill-frame-sync.mjs\n  ✓ 4 copies of the decision frame are structurally isomorphic across 3 files\n    3 axes: business-need → long-term-soundness → ai-authoring-safety\n    binding sentence present in all 4; 4 count mention(s) agree; 39 markdown files scanned\nnode scripts/check-nul-bytes.mjs\n  check-nul-bytes: OK (scanned 5704 tracked text file(s); no raw ASCII control bytes).\nnode scripts/check-doc-authoring.mjs\n  ✓ doc authoring guard: 362 files clean — no bare metadata literals.\nnode scripts/check-role-word.mjs\n  check-role-word: OK (43 baselined file(s), no new occurrences).\n```\n\n改动文件控制字符自扫 `grep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]'` → 零命中。无代码改动 ⇒ 无受影响包可 `test` / `typecheck`;`.claude/` 内部 agent 工具、无发布物 ⇒ **无 changeset**,走 `skip-changeset` 标签路线(同 PR #5877)。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01GX3sL71LFq8m2usg6VqTSE)_"
+}

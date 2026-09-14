@@ -1,0 +1,35 @@
+{
+  "number": 5824,
+  "kind": "issue",
+  "title": "观察：两份仓内开发文档（plugin-auth IMPLEMENTATION_SUMMARY.md / client CLIENT_SERVER_INTEGRATION_TESTS.md）整体已与实现脱节，不止 #5772 修的那两处",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T06:43:44Z",
+  "updated_at": "2026-08-06T11:11:59Z",
+  "closed_at": "2026-08-06T11:11:59Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5824",
+  "body": "在实做 #5772（把两份仓内文档里四条不存在的 auth 端点改成真名）时读到的，**未认领**，不在 #5772 的 PR 范围内（那条 PR 的文件面被限定为「各改一处路由名」）。查重：`is:open IMPLEMENTATION_SUMMARY` 与 `is:open CLIENT_SERVER_INTEGRATION_TESTS` 均零命中。\n\n#5772 修的是这两份文档里一处**可证伪的假路由声明**。修的过程中看到的是：这两份文档整体都停在很早的一个快照上，假路由只是漂移露出水面的那一角。\n\n## 1. `packages/plugins/plugin-auth/IMPLEMENTATION_SUMMARY.md`\n\n通篇是一份「Phase 1 & 2 完成、Phase 3 进行中」的阶段小结，与今天的 `plugin-auth` 对不上：\n\n- `**Version**: 2.0.2`、`**Test Coverage**: 11/11 tests passing (100%)`、`Testing Results` 里贴的是 `src/auth-plugin.test.ts (11 tests)` 的一段输出 —— 而 `src/` 下今天有 `auth-route-ledger.ts`（55 条 SDK 路由台账 + 完整 mounted inventory，#3656）、`auth-route-ledger.conformance.test.ts` 等一大批文件，`File Structure` 一节只列了 `auth-plugin.ts` / `auth-manager.ts` / `auth-plugin.test.ts` 三个。\n- `Current Implementation Status` 写 `🔄 Phase 3: IN PROGRESS` / 「Placeholder responses implemented」/「Need to connect actual better-auth API calls」—— 转发层早已是真实的（catch-all + better-auth，见 `auth-plugin.ts` 的 `rawApp.all(${basePath}/*)`）。\n- `Recent Commits` 一节列着三个 2024 年前后的短 sha。\n\n## 2. `packages/client/CLIENT_SERVER_INTEGRATION_TESTS.md`\n\n自称 \"Test Specification\"，`Test File Structure` 列了 `01-discovery.test.ts` … `13-*.test.ts` 一整套；实际 `packages/client/tests/integration/` 下只有 `01-discovery.test.ts` 与 `README.md`。文中的 TC-AUTH-00x 等测试用例因此都是**没有对应文件**的规格文字，且其断言与 SDK 实际返回形状也对不齐（例如 TC-AUTH-001 断言 `session.token` / `session.expiresAt` 在顶层，而 `client.auth.login` 返回的 `SessionResponse` 把 `token`/`user` 归一进 `data`，见 `packages/client/src/index.ts:2131`）。\n\n## 判读\n\nObservation-class：今天没有用户会撞上 —— 两份都是仓内开发文档，不是发布文档站，`content/docs/` 那侧是对的。危害同样是对下一个读者的：按 `IMPLEMENTATION_SUMMARY.md` 判断插件「还没接上 better-auth」、按 `CLIENT_SERVER_INTEGRATION_TESTS.md` 去找一批不存在的测试文件，都会白跑一趟。严重度按惯例交 PM 分诊，不在此自评。\n\n## 修法方向（需要的是一个决定，不是一次改写）\n\n两份文档的共同问题是**没有维护人也没有校验门**：#5772 的假路由能活到今天，正是因为没有任何东西把它们和实现绑在一起。所以方向上是二选一，倾向前者：\n\n- **退役**：删掉这两份历史快照，把仍有价值的内容并入各自包的 `README.md`（`plugin-auth` 的路由事实源已经是 `src/auth-route-ledger.ts`，有 conformance 测试守着，不需要第二份手抄）；`CLIENT_SERVER_INTEGRATION_TESTS.md` 里还没实现的用例若仍要做，落成 issue 或 `tests/integration/README.md` 的 TODO，而不是一份声称已成体系的 \"specification\"。\n- **重写并挂门**：保留但改成「指向事实源」的薄文档（#5772 已对 auth 路由那节这么做了），其余段落逐条与实现核对一遍。\n\n关联：#5772（本次修的两处假路由）、#5085（假路由的发现现场）、#3656（auth 路由台账）。\n"
+}

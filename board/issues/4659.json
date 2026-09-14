@@ -1,0 +1,36 @@
+{
+  "number": 4659,
+  "kind": "issue",
+  "title": "build-schemas.ts 检查 (b) 用叶名匹配 conversion surface —— 无关簇的 `.type` 就能让一个 tombstone 冒充「已登记迁移」",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T14:35:39Z",
+  "updated_at": "2026-08-06T11:48:19Z",
+  "closed_at": "2026-08-06T11:48:19Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4659",
+  "body": "从 #4658(双源清账 C6)的路线定价实验里掉出来的范围外发现,**不在 #4658 的 PR 里修**,单独立案。与 #4650 同族(都是 authorable-surface 门禁的自我校验漏洞)。\n\n## 事实\n\n`packages/spec/scripts/build-schemas.ts` 检查 (b)(「live → retired 必须有登记的迁移」)这样匹配:\n\n```ts\nconst surfaces = registeredRetirementSurfaces().flatMap((s) => s.split(' / '));\nconst unregistered = newlyRetired.filter(\n  (k) => !surfaces.some((s) => s.endsWith('.' + k.split(':')[1])),\n);\n```\n\n`k` 形如 `automation/Event:type`,`k.split(':')[1]` 只取**叶名** `type`,再拿它跟**全部** major 的所有 conversion surface 做 `endsWith`。匹配完全不看 key 属于哪个 def —— 任何一条无关的 conversion 只要 surface 以同名叶子结尾,就把这个 tombstone 判为「已登记」。\n\n## 实测证据\n\n在 #4658 的定价实验里,我把 `src/automation/state-machine.zod.ts` 的 `EventSchema` 两个 key 同时改成 `retiredKey(...)`,**没有**新增任何 conversion。`pnpm check:authorable-surface` 的输出:\n\n```\n❌ 1 key(s) were tombstoned with no registered migration:\n     - automation/Event:schema\n```\n\n只报了 `schema`。`automation/Event:type` **静默通过** —— 因为 `CONVERSIONS_BY_MAJOR[11]` 里 `flowNodeHttpRename` 的 `surface: 'flow.node.type'` 以 `.type` 结尾。两者毫无关系:一个是 flow 节点的 `type`,一个是 automation 状态机事件的 `type`。\n\n## 为什么要紧\n\n检查 (b) 的整个目的是保证退休进入 `spec-changes.json` / upgrade guide / `os migrate meta`(ADR-0087 D4)。叶名匹配让这个保证对**常见叶名**整体失效:`type`、`name`、`config`、`filter`、`schema` 之外的 `objectName`、`flowName` 等 surface 已在册,任何以它们结尾的 key 都能零迁移文档退休,门禁全绿,消费者只能靠失败才知道。\n\n这与 #4650 是同一类问题:门禁的证据链自己不设防。#4650 是「删基线行没人校验」,本单是「登记检查可被无关条目满足」。\n\n## 建议处置(需维护者裁决,故不自行动手)\n\n把匹配从叶名收紧到**定位到 def 的路径**。两个方向:\n\n1. **surface 里带上 def**。让 conversion 的 `surface` 与 `${defKey}:${name}` 可判定地对应(或加一个显式的 `retires: ['automation/Event:type']` 字段),检查 (b) 改成精确集合匹配。最严格,但要回填现有 conversion。\n2. **保留 surface 的散文形态,另加一个显式登记表**。新增 `RETIRED_KEYS_BY_MAJOR: Record<number, string[]>`,值就是 `${defKey}:${name}`,检查 (b) 只认这张表。改动小,且「declared = enforced」。\n\n倾向 2:它让登记这件事从「碰巧字符串对上」变成作者必须写下确切的 key,正是 AI 生成的元数据最容易蒙混的那一环。\n\n关联:#4650(基线手编漏洞)、#4658(发现现场)、#4535、ADR-0087、ADR-0104"
+}

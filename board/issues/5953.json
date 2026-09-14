@@ -1,0 +1,35 @@
+{
+  "number": 5953,
+  "kind": "pull_request",
+  "title": "fix(rest): 清扫 REST 组合根的槽查找 —— 16 处类型化,契约由 implements 背书 (#4251 B4)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T12:54:24Z",
+  "updated_at": "2026-08-06T13:08:02Z",
+  "closed_at": "2026-08-06T13:08:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T13:08:01Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5953",
+  "body": "Part B4 of #4251 —— REST 组合根批次。本 PR 不 Close 本单,B5–B11 批次留后续。\n\n棘轮基线 **159 → 143 站点 / 34 → 32 文件**,两个文件全清并退出祖父名单,**无新增 key**(`baseline key set verified against 9ce0ca9: no files added`)。无行为变更。\n\n## 站点分布(实测 16 处,比派发单的 15 处多 1)\n\n派发范围写的是 `rest-api-plugin.ts` 14 + `external-datasource-routes.ts` 1;基线文件记的是 **15 + 1**,实测也是 16。多出来的那一处是 `env-registry`:同一行同时命中第四形态(`let envRegistry: any;` 分体声明)与类型实参形态,两条规则各报一次。\n\n| 槽 | 处置 | 依据 |\n|---|---|---|\n| `auth` / `objectql` / `i18n` / `analytics` / `security` / `metadata` | 台账契约 | `ServiceSlotContracts` |\n| `email` / `sharing` / `sharingRules` / `reports` / `approvals` / `external-datasource` | spec 契约 | 契约早已存在,且注册进槽的类都写了 `implements` |\n| `env-registry` | `RestEnvRegistry` | RestServer 构造函数自己声明的形参类型 |\n| `settings` | 具名本地 surface,不入 ledger | B2 决策:service-settings 可选 |\n| `default-project` | 具名窄切片 | 只声明本文件读的一个字段 |\n| 服务存在性探测 | `unknown` | 槽名是运行期参数 |\n\n`objectql` 按 #4404 落地的 `IObjectQLEngine`(而非 `IDataEngine`):消费方够到的是完整引擎——batch 路由背后探测的是 `ql.transaction`。\n\n## 六个\"无契约\"的槽其实都有契约,而且是受检的\n\n这批最大的发现不是缺陷而是**盘点结果**:`email` / `sharing` / `sharingRules` / `reports` / `approvals` / `external-datasource` 在 `packages/spec/src/contracts/` 里本来就有契约,并且各自 provider 注册进槽的那个类都声明了 `implements`(`EmailService implements IEmailService`、`ExternalDatasourceService implements IExternalDatasourceService` …)。所以生产侧形状由编译器每次构建校验,本文件只需具名——即 #4404 用一份受检 claim 取代七个未受检 stand-in 的纪律。**没有为它们新增 ledger 条目**(不动 `packages/spec`),入账与否留给后续决策。\n\n## 包装函数返回注解一并收窄\n\n十处查找位于 `async (environmentId?) => Promise< any | undefined >` 的 provider 内。只改查找会在**下一行**把契约重新擦掉——正是规则文档里记的 KNOWN RESIDUAL(注解在外层函数上,AST 规则原理上看不见)。每个 provider 的返回类型因此一并收窄为自己那个槽的契约。\n\n## 本批未发现死探测 —— 如实记录,而不是凑一个产出\n\n这一族历史上每批都挖出真缺陷(#4361 的 `getMetaItem` 指着一个从来没有该方法的服务、#4321 的 `registerInMemory`),所以我逐一核对了类型化后消费方做的每一处探测:`emailService.send`、`authService.getApi` / `isAuthGateActive`、`svc.queryDataset`、`ql.transaction`、六个 approval 动词、五个 security 方法、五个 federation 方法——**全部命中真实成员与真实 arity**。\n\n一个值得记的次级结论:`external-datasource-routes.ts` 的五处 `svc?.method` 探测在类型化后显出是**冗余但正确**的——契约的方法都是必需成员,所以只要服务解析成功探测必为真,503 分支只由\"服务不存在\"到达,而那正是它的用途。不是恒假分支,不改行为。\n\n## 钉子为什么是运行期测试,而不是类型级断言\n\n`packages/rest/tsconfig.json` 排除自己的 test 文件,且该包**没有 `typecheck` script**(它是 DEBT / TEST_DEBT 台账条目)——所以没有任何 tsc program 编译这些文件。在这里写 `@ts-expect-error` 或 `Assert< Equal< … > >` 会**永不求值**,删掉它每道闸门照样绿:正是 AGENTS.md 禁止、#5286 / #5449 付过代价的 phantom check。\n\n而这次改动真正携带的风险恰好是运行期可测的:provider 是二十参构造函数的第 6..19 个位置参数,形状全都是 `(environmentId?) => Promise< unknown >`,所以**接错槽处处可赋值、编译器一声不响**。新测试(`rest-api-plugin-slot-lookups.test.ts`,5 例)因此钉住:\n\n1. 每个 provider 取回**自己那个槽**注册的实例(形状相同,只有实例同一性能证明);\n2. boot 解析的槽名集合精确相等(`'sharingRules'` 手滑成 `'sharing-rules'` 在这里红,而不是在生产上让一条路由永久 501);\n3. `env-registry` / `default-project` 两个 seam 按 RestServer 声明的形态传入;\n4. 存在性探测不碰占位对象;\n5. 全部可选槽为空时逐个 provider 降级为 `undefined` 且不抛。\n\n### 反向验证(方向先定后验)\n\n预期方向是**红**——因为这正是类型抓不到的那一类。把 `getService< IReportService >('reports')` 改成 `'report'` 一个字符,5 例中 2 例失败,报文直接点名:\n\n```\nAssertionError: reportsServiceProvider must resolve 'reports': expected undefined to be { __slot: 'reports' }\nAssertionError: expected Set{ 'manifest', 'http.server', …(18) } to deeply equal Set{ … }\n```\n\n已还原。\n\n## 验证\n\n| 检查 | 结果 |\n|---|---|\n| `pnpm --filter @objectstack/rest test` | **61 个测试文件 / 838 passed** |\n| `tsc --noEmit -p packages/rest/tsconfig.json` | **2 errors**,与 DEBT 台账记录的 `errors: 2` 精确相等,且都在我没动的 `package-routes.ts`;两个改动文件 0 error |\n| TEST_DEBT 维度 | 临时解除 test 排除后测量:新测试文件贡献 **0** error(#5827 若落地不会因本 PR 变红) |\n| `pnpm check:slot-lookup`(强制模式) | ✓ 143 / 32,none new,no files added |\n| `pnpm eslint`(三个改动文件) | exit 0 |\n| `node scripts/check-nul-bytes.mjs` | OK |\n\n合并 main(2 个 commit)后复跑:`rest-meta-save-receipt-envelope.test.ts`(merge 带进来的 #5265 新测试)先报 2 例失败,**根因是本 worktree 的 `metadata-protocol` dist 过期**(该测试经其 dist 走 save-receipt 路径),重建依赖后 838/838 全绿——与本单勘误记录的同源陷阱,不是 main 红也不是本改动所致。\n\n## 范围外发现\n\n`default-project` 槽有 **3 个生产消费方、0 个生产注册方**:`rest-api-plugin.ts`、`runtime/http-dispatcher.ts:618`、cloud 侧 `objectos-runtime/kernel-resolver.ts:193`;而 6 处注释(含 `rest-server.ts` 两处、`http-dispatcher.ts` 两处、`domain-handler-registry.ts`)都把注册方写成 `createSingleEnvironmentPlugin`,**该函数在 objectstack 与 cloud 两个仓库里都不存在**,cloud 仅在一处测试里 stub 了这个槽。三个消费方都有后续 fallback、降级路径完整,所以今天没有用户可感的故障——但\"单环境默认\"这一级解析永远不会触发。本 PR 只按本文件实际读到的字段具名类型化,不改行为;已另行开单,不在本批扩面。\n"
+}

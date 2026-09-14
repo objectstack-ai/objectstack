@@ -1,0 +1,34 @@
+{
+  "number": 5265,
+  "kind": "issue",
+  "title": "保存成功的回执一律自称 \"customization overlay\",包括注册表声明 supportsOverlay:false 的类型(object / flow / action / seed / hook)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T13:18:35Z",
+  "updated_at": "2026-08-06T12:31:01Z",
+  "closed_at": "2026-08-06T12:31:01Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5265",
+  "body": "观察类发现,由 #5086 的正文点出、在修 #5086(PR #5263)时确认。**纯文案**,不影响持久化行为,所以单独记录而不搭车。\n\n## 事实\n\n`packages/metadata-protocol/src/protocol.ts` 的 `saveMetaItem` 成功回执只有两种句式,都写死了 \"customization overlay\":\n\n```\nSaved customization overlay (org=<id>, state=active) — type=…, name=… [seq=N]\nSaved customization overlay (env-wide, state=active) — type=…, name=… [seq=N]\n```\n\n而 `DEFAULT_METADATA_TYPE_REGISTRY` 里有一批类型明确声明 `supportsOverlay: false`,却按设计可以运行时写入:`object`、`field`、`hook`、`seed`、`mapping`、`flow`、`action`。对这些类型,一次全新创建(不是任何东西的 overlay)也会被回执成 \"saved a customization overlay\"。\n\n真实 boot 实测(showcase,`pnpm dev -- --fresh`):\n\n```\nPUT /api/v1/meta/view/rc3_probe_view\n→ 200 {\"success\":true,…,\"message\":\"Saved customization overlay (env-wide, state=active) — type=view, name=rc3_probe_view [seq=1]\"}\n```\n\n`view` 恰好是 `supportsOverlay: true`,回执没问题;把同一句话发给 `object` / `flow` 的新建就不成立了。\n\n## 为什么不是\"顺手改一下\"\n\n`supportsOverlay` 与 `allowOrgOverride` 在 spec 的 TSDoc 里是**两件事**:前者描述 loader 的合并*能力*,后者是运行时写入的*许可*,而且只有后者被明确指定为 403 `not_overridable` 的判据。所以这句回执要说清楚的是三件事之一 —— 覆盖了一个 artifact / 新建了一条 DB-only 记录 / 写了一条 per-org 行 —— 而这三者在写路径里是能分辨的(`isArtifactBacked` + `organizationId` 已经算过)。也就是说这是\"回执可以说真话但没说\"的问题,不是术语挑刺。\n\n#5086 关心的那一半(`job` / `agent` 根本不该写成功)已由 PR #5263 修掉;剩下的就是这句措辞。\n\n## 建议(留给 triage)\n\n按已算出的事实分句:artifact-backed ⇒ `Saved customization overlay`;无 artifact 的新建 ⇒ `Created <type> '<name>'`;org 维度照旧附在括号里。改动面是 2 处 message 模板 + 对应断言。\n\n参考:#5086 / PR #5263。\n"
+}

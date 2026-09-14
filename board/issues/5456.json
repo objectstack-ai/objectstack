@@ -1,0 +1,32 @@
+{
+  "number": 5456,
+  "kind": "issue",
+  "title": "`gen:openapi` 的 base spec 用 7 条手写 path 描述路由面,与 rest 真实路由无任何对账 —— 漂移了不会红(#5168 的剩余那一半)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T12:46:59Z",
+  "updated_at": "2026-08-06T03:41:30Z",
+  "closed_at": "2026-08-06T03:41:23Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5456",
+  "body": "观察类发现,在 #5168(PR 见该单)实施中量到,越范围,未认领。基线:`origin/main` @ `ed0d2aac0`。\n\n**今天没有用户会撞到**(实测未漂移),所以按 #4949 打 `finding`、不进 `pm:queue`,严重度交分诊定级。\n\n## 背景:#5168 只补了「自洽」,没补「对账」\n\n`check:generated` 自己的收尾行把 `gen:openapi` 记为无门禁,理由写的是:\n\n```\n{ gen: 'gen:openapi', why: 'the OpenAPI document is generated but no check gate compares it to the routes' }\n```\n\n#5168 补的是**产物自洽**门(每个 `$ref` 都要能解析、每个声明的契约 schema 都要真的产出),接在生成器内部、写盘之前。这条 ledger 记的是**另一件事**——「与真实路由对账」——#5168 没有碰,本单单独记。\n\n## 事实\n\n`packages/spec/scripts/build-openapi.ts` 里 `generateCrudPaths` / `generateMetadataPaths` / `generateDiscoveryPaths` 三个函数把路由面**手写**成 7 条 path:\n\n```\n/api/{object}                  get, post\n/api/{object}/{id}             delete, get, put\n/api/meta                      get\n/api/meta/types                get\n/api/meta/{type}               get\n/api/meta/{type}/{name}        get\n/api/.well-known/objectstack   get\n```\n\n这 7 条是模板;真实 boot 时 `packages/rest` 的 enrichment 把 `{object}` 展开成约 199 条 path 并并入声明式端点(#5078 实测)。也就是说**模板本身**是这份文档描述路由面的唯一事实来源,而它与 `packages/rest` 的实际路由注册之间没有任何一处代码或测试做对账。\n\n后果是单向静默:rest 侧新增、改名或退役一条内建路由时,base spec 不会自动跟随,也不会有任何门禁发现两边不一致 —— 发布出去的 `GET /api/v1/openapi.json` 会少描述(或多描述)一条路由,而 `pnpm build`、`check:generated`、所有 rest 测试全绿。\n\n**当前未漂移**:上面 7 条与今天的路由面一致,所以这是休眠缺口而不是在场缺陷。正因为没红过,它也从没被验证过能红。\n\n## 顺带澄清一个提法(可能影响 #5078 旁注的定级)\n\n#5168 与 #5078 都把 `gen:openapi` 的缺口顺带描述成「产物是否最新」。实测:`packages/spec/json-schema/` 在 `.gitignore:61`,产物**不入库**,每次 `pnpm build`(`gen:schema && gen:openapi && tsup`)重新生成,并通过 `files` + `exports[\"./openapi.json\"]` 随包发布。\n\n因此「最新性门」在这里没有对象 —— 没有入库快照可以相对源码变陈旧。`gen:sbom` 同理(ledger 自己的 `why` 就写了它是 release 时产物)。ledger 里 `gen:openapi` 那条 `why` 的措辞是准的(说的是 routes 对账),把它读成「最新性」是本仓另外两处旁注的失准点,建议分诊时按「对账」而不是「最新性」来定级。\n\n（与 #5371 不同:那单是 `gen:schema` 的 `rmSync` 抹掉 `gen:openapi` 产物导致 rest 路由测试假红,是产物生命周期问题;本单是内容与路由的一致性问题。）\n\n## 可能的处置方向(未预设,供分诊)\n\n1. 让 base spec 从 `packages/rest` 的路由台账(`rest-route-ledger.ts`,该文件自述「唯一台账行一直是准的」)派生这 7 条模板,而不是手写 —— 单一事实来源,漂移在结构上不可能;\n2. 保留手写,但加一条对账断言:模板集合与台账声明的内建路由集合必须双向相等,不等即非零退出。比 1 便宜,但两处仍需各自正确;\n3. 判定这 7 条模板是「文档面刻意的简化视图」,把它显式写进注释并降级为不需要对账 —— 若是这个结论,ledger 里那条 `why` 应当一并改写,否则它会一直宣称一个没人打算补的缺口。\n\n跨包(`packages/spec` 的生成器读 `packages/rest` 的台账)是否可接受、以及 1 与 2 之间怎么选,属于契约面的决定,本单不预设。\n\n## 关联\n\n- #5168(自洽门,已修)、#5078、#5371、AGENTS.md Prime Directive #10\n"
+}

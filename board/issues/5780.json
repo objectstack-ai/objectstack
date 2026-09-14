@@ -1,0 +1,35 @@
+{
+  "number": 5780,
+  "kind": "pull_request",
+  "title": "fix(objectql): hook 层用 Logger 契约形状写诊断,不再自带方言 (#5637)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T05:10:23Z",
+  "updated_at": "2026-08-06T06:03:17Z",
+  "closed_at": "2026-08-06T06:03:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T06:03:15Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5780",
+  "body": "Fixes #5637\n\n按分诊/PM 一致裁决的**方向 1**执行:`packages/objectql` 的 hook 层不再自带 logger 方言,改用 `@objectstack/spec/contracts` 的契约形状(PD #12)。⛔ 未改动 spec 契约(方向 2 未采纳)。\n\n## 改了什么\n\n**1. 两处本地 logger 形状 → 契约的 `Pick`**\n\n`hook-wrappers.ts` / `hook-binder.ts` 各自手写的四方法形状删除,改为一个从契约派生的类型别名:\n\n```ts\nimport type { Logger } from '@objectstack/spec/contracts';\n\nexport type HookDiagnosticsLogger = Pick< Logger, 'debug' | 'info' | 'warn' | 'error' >;\n```\n\n取 `Pick` 而不是整个 `Logger`,是因为这一层只调这四个级别(「最小可用面」);完整的 `Logger` 无改动即满足它,而生产上注入的两个 logger(`ctx.logger` / `engine.logger`)正是完整契约实现。`hook-binder` 直接复用 `hook-wrappers` 导出的同一个类型 —— binder 拿到的 logger 原样转交 `wrapDeclarativeHook`,两者的形状必须同源,不能各写各的。\n\n**2. 四个调用点改为契约参数序 `error(msg, undefined, { … })`**\n\nissue 正文点名三个,实际是**四个** —— `hook-wrappers.ts` 的 condition 编译失败诊断是第四个,同缺陷同文件;改类型之后 `tsc` 会直接把它顶红(见下方反向验证),所以它不是扩大范围,而是这次修复的必然一环:\n\n| 文件 | 诊断 |\n|:--|:--|\n| `hook-wrappers.ts` | `[hook] condition formula failed to compile; …`(issue 未列) |\n| `hook-wrappers.ts` | `[hook] handler failed (onError=log; suppressing)` |\n| `hook-wrappers.ts` | `[hook] async handler error (fire-and-forget)` |\n| `hook-binder.ts` | `[hook-binder] failed to bind hook` |\n\n**第二参一律留 `undefined`**:四个点手头的值分别是 `CelFault`(`{ kind, message }`,不是 `Error`)和 `catch` 绑定(类型 `unknown` / `any`,hook handler 可以 throw 任何东西),没有一个在静态上是真正的 `Error`。它们的 message 本来就在 meta 里,原样保留,所以这次改动不增删任何诊断字段。把 catch 值提升进 Error 位会把每个宿主渲染出来的 `error` 从字符串换成 `{ message, stack }` 对象 —— 那是另一个决定,不搭这趟车。\n\n**3. `debug` / `info` / `warn` 与契约签名完全一致(`(message, meta?)`),未改动。**\n\n## 兼容性\n\n`ObjectLogger` 是今天所有宿主实际拿到的实现,自 #5575 起三种形状都认(`(msg, Error)` / `(msg, meta)` / `(msg, undefined, meta)`),所以第二参 `undefined` 渲染出的记录与改动前逐字段相同 —— 对现有部署零行为变化。真正变的是契约的另外两个实现(`@objectstack/observability` 的 `ConsoleLogger` / `JsonLogger`):它们此前会把 meta 整块吞掉(落进 `error` 位 → `error.message` / `error.stack` 皆 `undefined`,`meta` 本身 `undefined`),现在如实记录。\n\n导出类型 `BindHooksOptions` / `WrapDeclarativeOptions` 的 `logger` 字段收窄了,但全仓库(含 examples/apps)除 objectql 自身外没有第二个 `bindHooksToEngine` / `wrapDeclarativeHook` 调用点,包内既有测试传的 `{ debug, info, warn, error }` 字面量也仍然满足新类型 —— 全量 typecheck + 全量测试可证。\n\n## 测试\n\n新增 `packages/objectql/src/hook-logger-contract-shape.test.ts`(5 例)。关键在于用一个**忠于契约**的 logger stub(三个参数分开记录、不做形状分派)去审这些调用点 —— 正是 `ObjectLogger` 的那份宽容让旧缺陷看不见,所以复刻宽容的 stub 什么也测不出来。\n\n- 4 例覆盖四个调用点:断言 `error` 位为空、meta 完整落在第三参(hook / object / event / error 等字段逐一 `toMatchObject`)。\n- 第 5 例是兼容性钉子:真实 `ObjectLogger`(`format: 'json'`,捕获 stderr)必须照常输出全部字段,证明「第二参 undefined 无害」。\n\n```\n✓ onError: 'log' — the suppressed failure keeps its hook/object/event/error meta\n✓ fire-and-forget — the async after-hook failure keeps its meta\n✓ an uncompilable condition keeps the condition source in its meta\n✓ a throwing registerHook is reported with the hook name and cause in meta\n✓ ObjectLogger — emits the hook diagnostic fields on a contract-shaped call\nTest Files 1 passed (1)  Tests 5 passed (5)\n```\n\n合并 `origin/main`(带入 #5760 / #5753 两个同包改动)后重跑全量:\n\n```\npnpm --filter @objectstack/objectql typecheck   → tsc --noEmit,0 error\npnpm --filter @objectstack/objectql test        → Test Files 124 passed (124) / Tests 2042 passed (2042)\n```\n\n门禁(合并后重跑,全绿):`check:nul-bytes`(5659 files,无裸控制字节)、`check:query-options-erasure`(ratchet 84 sites,none new)、`check:engine-double-contract`(27 pinned / 65 debt / 1 exempt)、`check:durability-log-level`、`check:startup-registry-verdict`。\n\n### 反向验证(方向先判后跑)\n\n预判三条,跑完三条全中:\n\n1. **恢复方言参数序 → 4 个契约 stub 用例转红。** 实测:`AssertionError: expected { hook: 'audit_task', …(3) } to be undefined` 等 4 条 —— meta 对象落进了 `error` 位,`meta` 为 `undefined`,正是忠于契约的 logger 会丢字段的那一刻。\n2. **第 5 例(真实 `ObjectLogger`)保持绿。** 这是**预期**的,不是漏网:`ObjectLogger` 按形状分派,两种参数序都认,所以它天然不是判别器,只是兼容性钉子。照实记下,不假装它会翻转。\n3. **`tsc` 也一起转红** —— 这是修复新增的类型级防线,改动前并不存在:\n\n```\nsrc/hook-binder.ts(251,9): error TS2353: Object literal may only specify known properties, and 'hook' does not exist in type 'Error'.\nsrc/hook-wrappers.ts(304,11): error TS2353: …\nsrc/hook-wrappers.ts(376,11): error TS2353: …\nsrc/hook-wrappers.ts(430,15): error TS2353: …\n```\n\n第 3 条正是这单最实质的收益:方言之所以能存活,就是因为契约类型在结构上满足本地形状(参数少的一方可赋值,`any` 双向兼容),`tsc` 一句话都不说。换成契约类型之后,同一个错误再写一次会在编译期被顶回来。\n\n## 范围\n\n仅 `packages/objectql/src/hook-wrappers.ts`、`packages/objectql/src/hook-binder.ts` + 同包新增测试 + changeset(patch)。未碰 engine.ts / integrity / lifecycle / spec / observability / core,未碰 `content/docs/releases/`。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01V7WetGmnfoXNn8cLieKKmx)_"
+}

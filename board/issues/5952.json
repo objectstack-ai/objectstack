@@ -1,0 +1,35 @@
+{
+  "number": 5952,
+  "kind": "pull_request",
+  "title": "feat(lint): never-fire 族三条规则 warning → error,注册表 tier 同步 gating (#5762)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T12:54:20Z",
+  "updated_at": "2026-08-06T13:15:49Z",
+  "closed_at": "2026-08-06T13:15:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T13:15:47Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5952",
+  "body": "Closes #5762\n\n按维护者 2026-08-06 批复(三问全批)执行。族内同批定级,单独 PR,不逐条搭车。\n\n## 定级标准:一个问题,不是「后果有多严重」\n\n本文件的规则此前一律 warning。复审后按**一个**标准重新定级 —— **仅凭这份 stack,是否已经足够断定这个 flow 不会运行**。按后果排序是没用的:这里每条规则描述的都是「不运行的 flow」。\n\n### 升 error(三条)\n\n| 规则 | 判据归属 | 为什么没有别的读法 |\n|---|---|---|\n| `flow-time-relative-descriptor-invalid` (#5496) | `TimeRelativeTriggerSchema` | 判它的正是 trigger 在 bind 时 `safeParse` 的**同一个** schema —— schema 拒的描述符运行时同样被拒,sweep 永不安装 |\n| `flow-time-relative-descriptor-unroutable` (#5647) | 引擎的路由谓词 `typeof … === 'object'` | 判据就是引擎自己的谓词,任何部署都不会把它路由到 time-relative trigger;全族最硬,也是唯一连 bind 时那行 warn 都没有的一条 |\n| `flow-trigger-unknown-event` (#3427/#3457/#3481) | `triggerTypeToHookEvents` 的封闭文法 | 见下,随批复审的实测结论 |\n\n三条的共同点:判据都是**本仓库内发布的契约**,装任何包都改不了答案。\n\n### 维持 warning(两条,反例)\n\n这两条正是本次**不是**「整个文件都升 error」的原因,已作为反例钉进新增测试:\n\n- **`flow-trigger-unknown-object`** —— 本 stack 没定义的对象名**可能由另一个已安装包提供**,而规则看不见那个包的对象。免责是真的,规则自己的 hint 就这么写(新增测试断言:error 级 finding 的 hint 里不得出现 \"another installed package\" / \"can be ignored\",warning 级必须出现)。⛔ 按裁定未动。\n- **`flow-draft-status-ambiguous`** —— draft flow **确实会**触发(只有 `obsolete`/`invalid` 停用),这是意图歧义而非死 flow。升它会拒收一个所有 flow 都正常的 stack。\n\n## 随批复审:`flow-trigger-unknown-event` 实测为同性质,故同 PR 升\n\n裁定要求实测其性质:若同为「确定性死 flow、无跨包免责」则同 PR 升;若有真 advisory 理由则维持并写进报告。**实测结论:同性质,无跨包免责。** 证据:\n\n1. **路由不可扩展。** `engine.ts:1532` 用**硬编码前缀**判定 `triggerType.startsWith('record-')` 即路由给 `record_change` —— 不查注册表。所以装任何包都无法声明一个新的 `record-*` token。\n2. **文法封闭且本地。** `record-change-trigger.ts:115` 的 `/^record-(before|after)-(create|insert|update|delete|write)$/` 与本规则的 `VALID_RECORD_TRIGGER` 逐字对应;不匹配即 `hookEvents.length === 0`,绑不上任何 hook。\n3. **无第二个提供方。** 全仓 `record_change` trigger 只有 `packages/triggers/trigger-record-change` 一个实现,没有可替换的竞争实现给出「另一种读法」。\n4. **数组形式同理**,且引擎那段注释本就把**本规则**点名为 primary catch —— 一个只 warn 的 primary catch 正是 tier 机制要消除的「declared ≠ enforced」。\n\n对照 `flow-trigger-unknown-object`:对象名的跨包免责是**结构性**的(对象由包提供、规则看不见),而 token 文法的免责**不存在**(文法不由安装决定)。两者不同性质,故一升一留。\n\n## 影响面:P1 运行时发布门 —— 实测边界与立单时的假设不同\n\n注册表 tier `advisory` → `gating`(两条 surface 本就是 `CLI_AND_RUNTIME`)。`error` 会让 `state: 'active'` 的元数据写入被拒。\n\n⚠️ **立单/派发时写的影响面是「升 error 后租户保存任意 flow 时既有死 flow 被连带拒收」—— 实测该说法不成立,方向恰好对租户有利。** `validateFlowTriggerReadiness(stack)` 确实收整个 stack,但**运行时门从不把租户的整份 flow 集合交给它**:\n\n- `runtime-gate.ts` 构造的候选快照是 `candidate = { objects, [stackKey]: [item] }` —— flow 写入时 `flows` 数组里**只有正在写入的那一个 item**;\n- 门还会做差分,减掉 baseline(不含该 item 的上下文)已产出的 finding;\n- `RuntimeStackContext` 只有 `objects` 一个通道 —— **已存储的 flow 在结构上进不了快照**。\n\n实测(直接调 `runRuntimeAuthoringRules`):\n\n```\npublishing the DEAD flow itself\n  errors=1  errorRules=[\"flow-time-relative-descriptor-unroutable\"]\npublishing a GOOD flow (dead one already stored elsewhere)\n  errors=0  errorRules=[]\n```\n\n**真实影响面:**\n\n- 被拒的是**死 flow 自己的发布**(含再次发布)—— 这就是裁定要的强制修复,且精确落在有缺陷的那一个 flow 上;\n- 发布 flow A **不会**因为已存储的 flow B 是死 flow 而被拒;租户既有死 flow 继续被读取和服务(ADR-0087 读路径不对称);\n- draft 保存从不过门(#4463 D1),只有发布才过;\n- **真正的连带压力在 CLI 侧**:`os validate` / `os build` / `os lint` 判整份 stack,所以包里含一个死 flow 会让整包转红 —— 修无关 flow 的作者也会看到它。这是本次强制修复的主要着力点。\n\n## zod history 句噪音(裁定第三问):已实测,本 PR **不**折叠,理由如下\n\n裁定允许「若碍事则同 PR 折叠展示」。实测**噪音是真的**:\n\n- history 句 222 字符,内容是 #4001 的沿革叙述;\n- 位置在**「哪个键错了」与「该写什么」之间** —— #5496 那条 finding 全长 709 字符,`Did you mean \\`field\\` → \\`dateField\\`?` 落在最末;\n- CLI 用 `console.log(\"  • \" + where + \": \" + message)` 打**单行**,error 块里作者必须读完才能动手。\n\n但**折叠机制在本 PR 的文件面内都不干净**,故未做:\n\n1. 规则内按结构剥离(正则匹配 `Unrecognized key(s) on …: …. ` + history 句 + ` Did you mean …?`)= 把**生产者的消息结构复制进消费者** —— 恰是本文件模块注释声明要避免的漂移,也违反 contract-first;\n2. 按长度截断会把最有用的 `Did you mean` 切掉(它在末尾),使情况更糟;\n3. 生产者侧没有可查询的把手:`strictObjectDeclarations()` / `directAliasTables()` 都**刻意不进 barrel**(内部接缝),消费者拿不到 history 原文;\n4. 干净的修法在生产者(`strictObject` 把 history 排到末尾或单独暴露),但那涉及 62 个 `strictObject` 站点 / 293 处 history 声明与跨包钉死测试,是 spec 的**授权错误契约对外变更**,应单独立单、单独拍板。\n\n已另立 finding 单记录测量与建议。**不在本 PR 内以「消费者容忍」的方式绕过。**\n\n## 反向验证(方向先预判,两个不同机制,均如预判转红)\n\n1. **tier 声明非自述。** 把 tier 改回 `advisory`(严重度保持 error)→ 预判 `authoring-rule-wiring.test.ts` 的 \"every advisory rule really is advisory\" 转红(它读规则源码核对声明)。实测:`× every advisory rule really is advisory` / ``A rule that can emit `error` is `gating` and must run on all three commands.``\n2. **严重度断言非空转。** 把 `…-unroutable` 降回 warning → 预判新增 severity map 测试转红。实测 2 条红:`× flow-time-relative-descriptor-unroutable is error` 与 #5647 原有那条。\n\n## 仓内自查:三个示例 app 的 `os validate` A/B\n\n裁定要求「若任何 in-repo example/fixture 因此转红,在同 PR 内修掉」。**实测无一转红,无需修改。**\n\n| example | A(升级前) | B(升级后) | 输出 |\n|---|---|---|---|\n| app-showcase | exit 0 | exit 0 | 逐字一致 |\n| app-crm | exit 0 | exit 0 | 逐字一致 |\n| app-todo | exit 0 | exit 0 | 逐字一致 |\n\n原因可从 diff 直接读出:规则文件的非注释改动**只有 `severity:` 字面量**,判据一行未动,所以任何 stack 的 finding **集合**与 `main` 逐字节相同,只有四处 severity 字段变了。三个示例本就不产出这三条 id 的 finding(showcase 唯一的 `timeRelative` 描述符是已被测试钉为 spec-valid 的 Task Due Reminder;全部 `record-*` token 都在文法内)。app-todo 的两条 `flow-draft-status-ambiguous` 仍是 warning —— 正是维持 advisory 的那条在真实示例上的体现。\n\n`record-created`(全仓 12 处、文法外)全部位于**其他规则**的测试 fixture 里,那些测试直接调用各自的规则、不经过本规则,故不受影响(已逐一核对;`validateFlowTriggerReadiness` 不在 reference-integrity suite 成员内)。\n\n## 文档\n\n`content/**` 无任何 lint 规则 severity 表引用这一族 id(已实测搜索),`packages/lint/src/docs` 不存在,故无同步项。⛔ 未动 `content/docs/releases/**`。\n\n## 发布\n\n真 changeset:`@objectstack/lint` **minor**(已发布规则严格度的对外行为变更),正文含升级原因、P1 实测边界与迁移指引(**修死 flow,而非降级规则**)。未用 `skip-changeset`。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01GX3sL71LFq8m2usg6VqTSE)_"
+}

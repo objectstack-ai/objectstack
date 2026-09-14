@@ -1,0 +1,32 @@
+{
+  "number": 3661,
+  "kind": "issue",
+  "title": "元数据面未做字段级权限掩码：/meta 返回完整 fields，导入模板列不受 FLS 约束，客户端 field.permissions 守卫是死代码",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "enhancement"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-27T13:18:13Z",
+  "updated_at": "2026-08-06T08:04:03Z",
+  "closed_at": "2026-08-06T08:04:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3661",
+  "body": "#3547 收尾时的溢出发现（Prime Directive #10：越界发现开 issue，不静默扩范围）。\n\n#3391 一系列工作把 **数据面** 的字段级权限（FLS）泄露堵住了：list 掩码数据、export 表头与 list 可读列对齐（#3498 → #3561 → #3649）。但 **元数据面** 完全没有对应的掩码，症状最明显的地方是导入模板。\n\n## 一、症状：导入模板的列不受调用者字段权限约束\n\nobjectui 的 ImportWizard「下载模板」由 `buildImportTemplateCsv(fields)` 生成，`fields` 来自 `ObjectView.tsx` 对 `objectDef.fields` 的过滤：\n\n```ts\n// objectui/packages/app-shell/src/views/ObjectView.tsx:1795-1801\n.filter(([, def]: [string, any]) =>\n  ['formula', 'summary', 'autonumber'].includes(def?.type) &&\n  !def?.readonly &&\n  def?.permissions?.write !== false,\n```\n\n前两个条件是**编写期**声明（计算字段、readonly），与调用者无关。第三个条件 `def?.permissions?.write !== false` 看起来是权限守卫——**但它是死代码**。\n\n## 二、`field.permissions` 是 declared ≠ enforced\n\n- 该形状**只存在于 objectui**：`objectui/packages/types/src/field-types.ts:83-87` 定义 `permissions?: { read?, write?, edit? }`。\n- `@objectstack/spec` 里**没有**这个键：`packages/spec/src/data/field.zod.ts` 的安全相关键只有 `hidden`（:530）和 `requiredPermissions`（:539）；`object.zod.ts` 也没有字段级 `permissions`。\n- **两个仓库里都搜不到任何写入点** —— 没有 `field.permissions =`，没有 `permissions: { read/write/edit }` 的赋值（非测试）。\n\n所以三个消费点全部永久短路为「允许」（都是 `!field?.permissions` / `!== false` 形式）：\n\n- `objectui/packages/plugin-form/src/ObjectForm.tsx:546`\n- `objectui/packages/app-shell/src/views/ObjectView.tsx:1800`\n- `objectui/packages/plugin-grid/src/ObjectGrid.tsx:1232`\n\n## 三、根因：`/meta` 的 object schema 不做 per-caller 掩码\n\n- 运行时分发：`packages/runtime/src/domains/meta.ts:185-229`，object 分支在 :202-206 原样返回 `protocol.getMetaItem(...)`；全文件唯一的门是 :58-66 的匿名/`requireAuth` 检查。\n- REST：`packages/rest/src/rest-server.ts:2586` 起注册 `GET /meta/:type/:name`，未命中缓存时 :2835 调 `p.getMetaItem(...)`。**per-caller 过滤是存在的，但只按 type 分**——`app` 走 `filterAppForUser`（:2847-2862）、`dashboard` 走 `requiresService`（:2866-2873）、`book`/`doc` 走 audience 门（:2879-2921），**`object` 什么都没有**。\n- 协议层根本拿不到调用者：`packages/metadata-protocol/src/protocol.ts:2007` 的 `getMetaItem` 请求形状里没有 `userId`、没有执行上下文、没有 permission sets。\n- plugin-security 在元数据**读**路径上没有任何注册：`FieldMasker`（security-plugin.ts:287）只在 ObjectQL 引擎中间件里用（`maskResults` @ :1602），协议侧只有 publish/uninstall/authoring 这些**写**门。\n\n后果：一个无权读取某字段的调用者，仍然从 schema 里拿到该字段的**名称、类型、label，以及守卫它的 capability 名**（`requiredPermissions` 也一并下发）。这与 #3391 在 export 表头上堵掉的泄露同构，只是换到了元数据面。\n\n## 四、一个结构性阻碍\n\n`getMetaItemCached` 的 ETag 快路径（`rest-server.ts:2776-2827`）对 `object` 读生效，且缓存键**只含 type/name/locale，没有调用者维度**。在不改缓存键的前提下给该路径加掩码，会把一个用户的掩码后 schema 串给另一个用户。任何方案必须先处理这一点。\n\n## 五、更正一处直觉错误：导入需要的是 editable，不是 readable\n\n讨论中一度想直接复用 #3547 的 `getReadableFields`。**这是错的**——导入是**写**路径，需要的是可写掩码。spec 里的字段权限本来就是两位：\n\n```ts\n// packages/spec/src/security/permission.zod.ts:177-182\nreadable: z.boolean().default(true),\neditable: z.boolean().default(false),\n```\n\n所以要么给 security 服务加一个 `getEditableFields` 对偶（与 `getReadableFields` 同源），要么走下面这条已经能用的路。\n\n## 六、已经存在且能用的通道\n\n`GET /auth/me/permissions`（`packages/plugins/plugin-hono-server/src/hono-plugin.ts:1093`，字段图构建在 :1183 起）已经按调用者返回 `fields: Record<\"object.field\", { readable, editable }>`，objectui 侧也已有消费者：`MePermissionsProvider`（`objectui/packages/permissions/src/MePermissionsProvider.tsx:72`）+ `useFieldPermissions` / `checkField`。\n\n也就是说 UI **有**一条可用的 per-caller 字段权限通道，只是导入模板/表单/表格那三处没走它，走的是永远为空的 `field.permissions`。\n\n## 七、建议的处理顺序\n\n- [ ] **① 低成本止血（objectui）**：让 ImportWizard 的目标字段集改用 `useFieldPermissions` 的 `editable` 位，替换死掉的 `def?.permissions?.write !== false`。同时清理 ObjectForm / ObjectGrid 两处死守卫——要么接真通道，要么删掉，别留「看起来在防」的代码。\n- [ ] **② 决策：`field.permissions` 留还是删**。它是 Phase 3.2.6 的遗留，与 `MePermissionsProvider` 并存但永不填充。按 ADR-0049「enforce-or-remove」，倾向**删除**该形状，统一走 `/auth/me/permissions`；若决定保留则必须有人填充它。\n- [ ] **③ 决策：`/meta` 要不要做 per-caller 字段掩码**。真做的话需要先解决第四节的缓存键问题（把调用者的权限集指纹并入缓存键，或让 object 读绕过共享缓存），并给协议层的 `getMetaItem` 加上下文入参。这一步半径明显更大，建议独立评估——也可能结论是「元数据面不掩码，由 `/auth/me/permissions` 承担」，那就该把这个决策写进 ADR，而不是像现在这样是个未言明的默认。\n\n关联：#3391、#3498、#3547、#3561、#3649。"
+}

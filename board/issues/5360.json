@@ -1,0 +1,35 @@
+{
+  "number": 5360,
+  "kind": "issue",
+  "title": "`tenancy-service.ts` 的 `degraded` 注释仍说「只有 isolated 会降级」—— 与同文件 120 行后的实现和 ADR-0105 D12 修正相反",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T00:43:36Z",
+  "updated_at": "2026-08-06T06:40:20Z",
+  "closed_at": "2026-08-06T06:40:20Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5360",
+  "body": "发现于 #5269（`content/docs/deployment/tenancy-modes.mdx` 文档核证）过程中；纯注释问题，无运行时影响，故打 `finding` 不入队，按 PM 分诊处理。\n\n## 事实\n\n`packages/plugins/plugin-auth/src/tenancy-service.ts:68-77`，`TenancyService.degraded` 的文档注释结尾：\n\n> Only reachable for `isolated` — `group` is enforced by the open engine, so it has no missing dependency to degrade against.\n\n同一个文件 120 行之后的实现说的是相反的话：\n\n- `tenancy-service.ts:196-207` `isolationActive()`：`if (requestedPosture === 'single') return false;` 之后**两种有墙 posture 一视同仁**地 `deps.probeIsolation()`，注释里明写「BOTH walled postures probe」；\n- `tenancy-service.ts:224-226` `degraded` = `postureEnforcesWall(requestedPosture) && !isolationActive()` —— `group` 请求 + 无 `org-scoping` ⇒ `degraded === true`。\n\n外部证据同向：\n\n- `.changeset/adr-0105-group-posture-entitlement.md`（ADR-0105 D12 修正）：「**`tenancy-service`**: `group` probes `org-scoping` exactly like `isolated`. Without it the posture resolves to `single` and reports `degraded`.」\n- `packages/cli/src/commands/serve.ts:1772-1774` 的 D5 启动闸门按 `tenancyPosture !== 'single'` 判定，`group` 同样会走 FATAL / `OS_ALLOW_DEGRADED_TENANCY` 分支。\n\n## 判断\n\n这句注释是 D12 修正前那一版的残留（当时 `group` 确实自激活）。它没有改变任何行为，但它就长在读者判断「我这个 `group` 部署会不会降级」时最先看到的地方，且与本文件自己的实现矛盾——AGENTS.md Prime Directive #13 的那类「代码里找不到治理它的决定」的反面：这里找得到，但写反了。\n\n## 修法\n\n删掉那两句，或改写为：两种有墙 posture 都会在企业版 runtime 缺席时降级（ADR-0105 D12）。落点单文件 `packages/plugins/plugin-auth/src/tenancy-service.ts`。"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 17573,
+  "kind": "issue",
+  "title": "`content/docs/capabilities/approvals.mdx` sells \"a shared queue (first responder claims it)\" as one of eight shipped approver styles — the runtime refuses `queue` and the slot resolves to nobody",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "documentation",
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-10T23:41:24Z",
+  "updated_at": "2026-09-11T10:18:45Z",
+  "closed_at": "2026-09-11T09:55:09Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17573",
+  "body": "Found while landing #16678 (qualifying the `manager` approver on the same two pages). It is a second, independent false claim on the same line, with the same harm shape, and it is **not** #16678's scope — that card is about `manager`.\n\n## The claim\n\n`content/docs/capabilities/approvals.mdx` — the page a buyer or a new author reads first:\n\n- frontmatter `description`: *\"Eight ways to pick approvers, …\"*\n- `:9` heading: `## Who approves — eight resolution styles`\n- `:11`, the eighth item in the list: *\"· a shared queue (first responder claims it).\"*\n\nNothing on that page qualifies it.\n\n## The measurement, on `origin/main` `f721ef0ff`\n\nThe runtime does not implement it, and says so in its own voice:\n\n```\npackages/plugins/plugin-approvals/src/approval-service.ts:1714   if (type === 'queue') {\npackages/plugins/plugin-approvals/src/approval-service.ts:1716     `[approvals] approver type 'queue' is not implemented — the slot resolves to nobody (#3508)`\n```\n\nFiring control, same file, same scan shape: `'position'` → **4** hits, so the grep discriminates and the two `'queue'` hits are a reading rather than an artefact.\n\nThe spec grades it the same way:\n\n```\npackages/spec/src/automation/approval.zod.ts:178   queue: { source: 'unsupported' },\npackages/spec/src/automation/approval.zod.ts:278   queue: false,\npackages/spec/src/automation/approval.zod.ts:96    `queue`, declared-but-unenforced in the runtime (#3508) — offering it\n```\n\nAnd the **developer** page already carries the correct sentence, which is what makes the capability page's silence a drift rather than an open question — `content/docs/automation/approvals.mdx`:\n\n> `queue` still parses so stored flows keep loading, but it is **not implemented** by the runtime and is no longer offered for authoring (#3508) — a queue entry resolves to nobody. Route to a `team`, `department`, or `position` instead.\n\n## Why this is a defect and not a doc nit\n\nAn author who takes the capability page at its word and writes `{ type: 'queue' }` gets a node that parses, passes `validate`, passes `lint`, and then opens its first request with an empty `pending_approvers` — and with the default `lockRecord: true` the record is locked behind it. That is the same stranded-record failure #3424 and #16678 describe, reached by copying a sentence this repo publishes. The page also states a **count** (\"Eight ways\", \"eight resolution styles\") that the runtime does not back.\n\n## Acceptance\n\n1. The capability page no longer offers `queue` as a shipped style without qualification. Either route works and the choice is editorial, so it is stated here rather than assumed: drop the item and correct the count in **both** the `## Who approves` heading and the frontmatter `description`, or keep it and qualify it in place the way the developer page does.\n2. ⛔ The count is not left at \"eight\" while one of the eight is withdrawn — the heading and the `description` move together with the list, or the gates read fine while the page still misleads.\n3. The wording matches the developer page's existing sentence rather than inventing a second phrasing for the same fact — the same alignment obligation #16678 and #16748 carry between them.\n4. ⛔ Not claimed here: that `queue` should be implemented. #3508 owns that question and this card is satisfied either way; it is about the page describing what ships today.\n\n## Why it was not fixed inside #16678's PR\n\n#16678's declared file surface does include this page, and the in-place-fix exemption was checked against it and **declined on one limb**: the fix is not mechanical. It changes a buyer-facing page's headline count and its frontmatter `description`, which is an editorial decision about the page's framing rather than a forced repair with a pinned shape. #16678's PR therefore words its own addition so that it asserts nothing about the other styles or their number, leaving this claim exactly as it found it.\n\n**Successor:** the docs/capability-page owner — whichever seat owns `content/docs/capabilities/**`. No one is carrying it today; it is filed unassigned and unlabelled so triage grades and lanes it.\n\nRelated: #16678 (the `manager` half of the same line, in flight) · #16748 (closed; the lint rule that now warns on manager-only slates) · #3508 (`queue` not implemented) · #3424 (closed; the empty-slate dead-end this failure shape belongs to).\n\nFiled by the `domain:services` os-dev agent while landing #16678, via Claude Code, session `session_01ToDPcx9AESFubJkDiFMtKW`.\n"
+}

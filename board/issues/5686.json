@@ -1,0 +1,34 @@
+{
+  "number": 5686,
+  "kind": "pull_request",
+  "title": "test(spec): 让 flow.test.ts 剩下的跑不通 fixture 形状真的能跑,并逐条钉住 (#5500)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T00:16:41Z",
+  "updated_at": "2026-08-06T00:40:16Z",
+  "closed_at": "2026-08-06T00:40:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T00:40:15Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5686",
+  "body": "Fixes #5500\n\n承 #4924 / PR #5502 在同一文件上的工作。issue 列的五类里,**四类属实并已修**;**第 1 类的机制说法经实测不成立,按 Prime Directive 6 如实回报而不硬套模板**。文件面仅 `packages/spec/src/automation/flow.test.ts`。\n\n行号已按当前 `origin/main` 重新定位(issue 里的行号以 #5502 合入时为准,main 已经移动):`object:` 在 `:118` / `:485` / `:527`(issue 写的是 117/433/474),brace-CEL 出边在 `:978` / `:1000` / `:1001`。\n\n## 第 1 类:前提被证伪,未按 issue 的分析实现\n\nissue 说「`{节点id.字段}` 这套输出引用方言,引擎从来不绑」。**不成立。**\n\n- `service-automation/src/engine.ts:4243-4247` 对每个节点的 `result.output` 逐键写入 `` variables.set(`${node.id}.${key}`, value) ``。\n- `builtin/template.ts:91` 的 `resolveToken` 有一条**扁平键兜底**(`if (variables.has(trimmed)) return variables.get(trimmed);`),正好读这个键。\n- `builtin/crud-nodes.ts:156-158` 的模块文档把它写成**默认绑定**:「Writes the result back to the variable context under `outputVariable` (or under `nodeId.id` / `nodeId.records` by default)」。\n\n实测(临时装一个 probe executor 快照变量表,跑完即删):\n\n```\nCLASS1a  create_contact.id  = \"mock-contact-1785971151173\"\nCLASS1a  has(create_contact) = false\n```\n\n即 `{create_contact.id}` **能解析**,因此 `:499` 那个 token **原样保留**,只在旁边把机制写清楚。\n\nissue 引的另一处 `:492` `'{get_old_records.records}'` 确实解析不到,但原因窄得多、也不是「方言不绑」:`get_record` 只有在 `limit > 1` 时才走 `find` 并输出 `records` 列表,否则走 `findOne` 输出单个 `record`(`builtin-node-config.zod.ts:208-209` 的契约文档明写)。所以修法是给该节点补 `limit`,见下。\n\n## 第 2 类:assignment 缺 `assignments` 包裹 —— 属实\n\n`logic-nodes.ts:129-132` 规范化三种形状,最后一条分支是「没有 `assignments` 包裹时,顶层 config 键就是变量名」。先证红(实测):\n\n```\nCLASS1a  variable var = \"contactId\"      ← 字面量变量名 variable\nCLASS1a  value var    = \"mock-contact-…\" ← 字面量变量名 value\nCLASS1a  contactId    = undefined        ← 声明了 isOutput 的那个,从没被写过\n```\n\n改为 `config: { assignments: { contactId: '{create_contact.id}' } }`。\n\n## 第 3 类:legacy flat-graph loop —— 属实,且比 issue 说的更彻底\n\n`loop-node.ts:70-80` 的 back-compat 分支不只是「不迭代」:它把 `config.collection` 当作**裸变量名**(`variables.get(collectionName)`)而非模板,所以 `'{get_old_records.records}'` 连 `$loopItems` 都没设上。实测:\n\n```\nCLASS3  $loopItems = undefined / has($loopItems) = false\nCLASS3  item       = undefined\n```\n\n改成 ADR-0031 结构化容器:`delete_record` 移入 `config.body`,`iteratorVariable: 'item'` 才是真正绑 `{item.id}` 的东西;主图里 `loop -> delete -> loop` 的回边随之删除,loop 的普通出边就是 after-loop 续接。\n\n## 第 4 类:字符串 `filter` —— 别名部分照修,形状部分已测出**有定论的答案**\n\n`object:` -> `objectName:` 机械照修。字符串 `filter` 实测直接 safeParse 失败:\n\n```\nCLASS4 string filter parses: false\n  {\"expected\":\"record\",\"code\":\"invalid_type\",\"path\":[\"filter\"],\n   \"message\":\"Invalid input: expected record, received string\"}\n```\n\n关于形状:issue 提的候选是 `{ created_at: { $lt: '{TODAY() - 90}' } }`,并担心 `$lt` 的 Zod 声明不含 string。**实测下来这个担心指错了地方,而且有一个不用猜的更好答案:**\n\n- `GetRecordConfigSchema.filter` 是 `z.record(z.string(), z.unknown())`(`builtin-node-config.zod.ts:219`),值一律 `unknown` —— 两个候选**都 parse 绿**,`ComparisonOperatorSchema` 在这条路上**根本不参与校验**。\n- 真正该用的是 **spec 自带的 filter 占位符方言**:`{90_days_ago}` 命中 `DATE_MACRO_PARAM_RE`,`isKnownFilterToken('90_days_ago') === true`,于是 `interpolateFilter`(`template.ts:216-235`,#3810 的槽位归属移交)把它**原样透传**给查询引擎的 `resolveFilterTokens` 展开;`date-macros.zod.ts:26-28` 明确把「flow node filters」列为该机制的消费者。\n\n实测两个候选的落点:\n\n```\nA  {TODAY() - 90}  -> {\"created_at\":{\"$lt\":\"2026-05-07\"}}   ← 在 flow 层就被吃掉\nB  {90_days_ago}   -> {\"created_at\":{\"$lt\":\"{90_days_ago}\"}} ← 透传给拥有该槽位的方言\n```\n\n采用 **B**。这不是猜:它是 spec 为这个槽位声明的方言,两处文档都点名。\n\n另补 `limit: 200` + `outputVariable: 'oldRecords'` —— `limit` 是让上游产出**数组**的契约细节(否则 loop 拿到单条 record 会直接报「did not resolve to an array」),不是调参。\n\n**残留的契约问题已单独立 finding:#5685** —— `ComparisonOperatorSchema` 的 `$gt/$gte/$lt/$lte` 声明为 `number | date | FieldReference` 不含 string,而平台自己的日期宏解析器只能产出字符串(`filter-tokens.ts:18-19` 的规范示例就是 `{ $gte: '2026-01-01' }`),一方调用方(`lifecycle-service.ts:991`、`outbox-sweep.ts:160`)也一律传 `.toISOString()`。该 schema **零运行期消费者**,今天不产生失败,故按 observation-class 记录、未在本 PR 顺手改。\n\n## 第 5 类:`object` 别名 + brace-CEL 出边 —— 属实\n\n三处 `object:` 改 `objectName:`。三处 brace-CEL 出边条件改裸 CEL,先证红(实测 `registerFlow` 是硬报错):\n\n```\nCLASS5 registerFlow threw: Flow 'm3' has 1 invalid expression (ADR-0032 §1a).\n  Predicates … must not wrap references in `{…}` template braces;\n  template slots (e.g. `loop.collection`) require them\n```\n\n顺带一提:这条报错本身证明了第 3 类里 `collection` 用花括号是**对的** —— 模板槽位要花括号,谓词槽位不要,两者的区别正是这几条钉子要守的东西。\n\n## 钉法与反向验证\n\n每类都按 #5502 在本文件的惯例加了契约断言,并且**逐条把坏形状放回去验证确实转红**(方向事先预测,全部为「红」):\n\n| 还原的形状 | 转红的用例 |\n|:---|:---|\n| `objectName` -> `object` | `should accept node with config` |\n| `assignments` -> `{ variable, value }` | `should accept screen flow for user input` |\n| 去掉 loop 的 `body` | `should accept scheduled flow` |\n| `filter` 记录形 -> 原字符串 | `should accept scheduled flow` |\n| 去掉 `limit` | `should accept scheduled flow` |\n| 出边条件加回花括号(两处) | `should accept conditional edge type` / `should validate a decision with default and conditional branches` |\n\n**反向验证抓到了我自己第一版钉子里的一个幽灵断言,值得记一笔**:`ExpressionInputSchema`(`shared/expression.zod.ts:93`)会把裸字符串谓词规范化成 `{ dialect: 'cel', source }` 信封,所以对 **parse 之后**的 `condition` 写 `expect(condition).not.toContain('{')` 是在对一个**对象**断言,无论谓词写成什么都恒绿 —— 把花括号放回去时测试照样全绿,才暴露出来。现在两处都改读 `condition.source`,并在注释里写明这个坑。(#5502 原有的那处 `String(guarded?.condition)` 读的是**未 parse 的原始 fixture**,是真断言,未动。)\n\n## 验证\n\n```\npnpm --filter @objectstack/spec test       → 316 files / 8060 tests passed\npnpm --filter @objectstack/spec typecheck  → tsc --noEmit OK + check:test-typecheck OK\nnode scripts/check-nul-bytes.mjs           → OK (5581 files, no raw control bytes)\n```\n\n另外对本仓做了同形状普查:`DAYS_AGO` 别处无出现;其余 brace-CEL 命中点(`engine.test.ts:385/391`、`validate-expressions.test.ts` 若干)都是**故意的负向 fixture**(断言必须被拒),正确,未动。\n\n## 变更集\n\n纯测试改动,无用户可见行为变化,未加 changeset(tests-only)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_018fxLGQdatPbBUvCgiVxg6D)_"
+}

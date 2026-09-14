@@ -1,0 +1,34 @@
+{
+  "number": 5284,
+  "kind": "issue",
+  "title": "`update()` 的前置行门是全局的(`hooks.get('afterUpdate').length > 0`),任一对象注册 afterUpdate 就让所有对象的单 id update 多付一次读",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T15:48:21Z",
+  "updated_at": "2026-08-06T08:23:46Z",
+  "closed_at": "2026-08-06T08:23:46Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5284",
+  "body": "在实现 #5272(单记录 delete 绑定 `hookContext.previous`)时发现,PD #10 记录,**未在该 PR 内修改**(越界即停)。\n\n## 事实\n\n`packages/objectql/src/engine.ts`,`update()` 单 id 分支的 demand-driven 前置行门:\n\n```ts\nif (needsPriorRecord(updateSchema as any) || (this.hooks.get('afterUpdate')?.length ?? 0) > 0) {\n    const priorAst: QueryAST = { object, where: { id: hookContext.input.id }, limit: 1 };\n    priorRecord = await driver.findOne(object, priorAst, hookContext.input.options as any);\n}\n```\n\n`this.hooks.get('afterUpdate')` 返回的是**全部** `afterUpdate` 注册项,不区分对象。而引擎自己另有一个按对象回答同一问题的谓词 —— `hasHooksFor(event, object)`(同文件,`private hasHooksFor`),#5038 的批量 update / 批量 delete 路径用的正是它:\n\n```ts\nif (this.hasHooksFor('afterDelete', object)) { ... }\n```\n\n于是同一件事在同一个文件里有两种精度:批量路径按对象问,单 id update 按全局问。\n\n## 影响\n\n只要**任意一个**对象注册了 `afterUpdate` hook,**所有**对象的每一次单 id `update()` 都会多做一次 `driver.findOne`。这在真实部署里不是边角情形:plugin-audit 之类的插件会在多对象上注册 `afterUpdate`,一旦启用,平台范围内每次单记录 update 都吃到这次读。\n\n这**不是正确性缺陷** —— 门只会过度取,不会漏取,`previous` 的语义一律正确;纯粹是每次写多一次数据库往返。严重度我判断不准(读放大是否已在真实负载上可见,我没有测量数据),按 #4949 的纪律平铺记录,交 PM 分诊定级。\n\n## 修法(若采纳)\n\n把该门换成按对象:\n\n```ts\nif (needsPriorRecord(updateSchema as any) || this.hasHooksFor('afterUpdate', object)) {\n```\n\n⚠️ **收窄这条门有一个已被代码注释预告的陷阱**,必须一并处理。同一处 [#4784] 的注释写着:\n\n> Deliberately: adding a \"does the condition reference `previous`?\" analysis on top would be dead code today. If this gate is ever NARROWED (e.g. scoped per object), hook conditions reading `previous` must be counted into the new demand test — pinned by `hook-condition-previous-scope.test.ts`.\n\n也就是说,今天一个 `beforeUpdate` hook 的 `condition` 里写 `previous.*`,是靠「本对象或别的对象存在 afterUpdate hook」顺带捞到的前置行才求得出值的。改成按对象之后,一个**只有 `beforeUpdate` hook**、且其 `condition` 读 `previous` 的对象会失去这次读,该 hook 立刻按 #4775 fail-loud 打回 —— 也就是把 #5272 刚在 delete 侧修掉的那类故障,在 update 侧造出来。所以按对象化的门必须把「本对象存在 **任一** update 侧 hook(before/after 皆算)」计入需求测试,而不只是 `afterUpdate`。\n\n#5272 的 delete 侧新门就是按这个形状写的(`hasHooksFor('beforeDelete', object) || hasHooksFor('afterDelete', object) || 有 roll-up summary`),可直接对照。\n\n## 关联\n\n- 发现于:#5272 / PR #5283(单记录 delete 绑定 `previous`)\n- 相关:#5038(按对象的 `hasHooksFor` 由该单引入)、#4784(上述注释的出处)、#4775(求不出值 = 失败,是这条门收窄后的失败形态)\n"
+}

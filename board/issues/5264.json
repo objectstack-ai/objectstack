@@ -1,0 +1,34 @@
+{
+  "number": 5264,
+  "kind": "issue",
+  "title": "saveMetaItem 的 legacy raw-engine 分支在 #5086 的门之后已不可达 —— 一段 grep 找得到、运行时永不执行的代码",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T13:18:11Z",
+  "updated_at": "2026-08-06T06:03:17Z",
+  "closed_at": "2026-08-06T06:03:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5264",
+  "body": "观察类发现,来自 #5086 的修复(PR #5263)。**当前不影响任何用户行为**,记录下来是因为它正好是 AGENTS.md \"Route & surface ownership\" 第 1 条点名的那种输入:`grep` 找得到、运行时永远不跑、于是被人(或 agent)当成活代码去推理。\n\n## 事实\n\n`packages/metadata-protocol/src/protocol.ts` 的 `saveMetaItem` 里,持久化分成两条路:\n\n```ts\nconst overlayAllowedForRepo = ObjectStackProtocolImplementation.isOverlayAllowed(singularTypeForRepo);\nconst runtimeCreateAllowedForRepo = ObjectStackProtocolImplementation.isRuntimeCreateAllowed(singularTypeForRepo);\nconst useRepoPath = overlayAllowedForRepo || runtimeCreateAllowedForRepo;\n```\n\n`useRepoPath === false` 的那条 legacy raw-engine 分支(直接 `engine.insert` / `engine.update` 写 `sys_metadata`,没有 history 行、没有 watch 事件、没有 `seq`,消息形如 `Saved customization overlay (env-wide) — type=…`)自称的可达条件是注释里写的:\n\n> only reachable in control-plane bootstrap (`environmentId === undefined`) for non-overlay-allowed types like `object`, `flow`, `agent`\n\n这条注释在两个方向上都已经不准:\n\n1. `object` / `flow` 现在都是 `allowOrgOverride: true` 或 `allowRuntimeCreate: true`,一直走 repository 路径,不落这条分支;\n2. 真正会落到这里的,只有两个标志都是 false 的类型 —— 也就是 `job` / `agent`。而 PR #5263 之后,这类类型在更早的位置就被 403 拒了。\n\n于是 `useRepoPath === false` 的取值组合只剩:类型 code-only,但 `OS_METADATA_WRITABLE` 又没有解锁它 —— 那一支现在必然抛错。`OS_METADATA_WRITABLE` 一旦解锁,`isOverlayAllowed` 为真,又走回 repository 路径。**结论:这条分支不可达。**\n\n## 为什么值得记一笔\n\n- 它是\"legacy 写路径长什么样\"的现存样板,读代码的人会据此推断 `sys_metadata` 有一条不写 history 的合法写入口 —— 现在没有了。\n- `deleteMetaItem` 里有一段结构对称的 legacy 分支,那一条**仍然可达且仍然必要**(删除一条 code-only 的历史遗留行是修复动作,PR #5263 特意没有收紧删除侧)。两段长得几乎一样、可达性却相反,这种并排是最容易读错的形状。\n\n## 可能的处置(留给 triage)\n\n删掉 save 侧那条分支,把 `useRepoPath` 化简掉,并在 delete 侧那条留下\"为什么这条还活着\"的说明;或者反过来,认为它是未来某个新类型的兜底而保留 —— 那就该有一条测试证明它可达。两种都行,但\"注释说它为 control-plane 存在、而 control-plane 早就不走它\"这个状态不该留着。\n\n参考:#5086 / PR #5263。\n"
+}

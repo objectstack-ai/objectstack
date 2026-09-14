@@ -1,0 +1,36 @@
+{
+  "number": 5737,
+  "kind": "issue",
+  "title": "finding(service-automation): builtin/wait-node.ts 里还有五处外来 cause 插进日志 message —— 其中三处是 #4632 亲自标为 error 的耐久性诊断,且已实测被切碎",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T02:54:10Z",
+  "updated_at": "2026-08-06T12:09:49Z",
+  "closed_at": "2026-08-06T12:09:49Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5737",
+  "body": "做 #5661(PR 见其正文)时,在同一条冷启动路径上**实测**到的旁生发现:`plugin.ts` 的 probe 接缝修好之后,同一次 boot 的 stderr 上仍然出现一条把整段多行驱动错误塞进 message 的记录 —— 它来自 `packages/services/service-automation/src/builtin/wait-node.ts`,不在 #5048 / #5575 / #5636 / #5660 / #5661 任何一单的范围内。\n\n## 实测证据\n\n给 `sys_automation_run` 的读取注入一个三行的驱动错误后,一次 boot 的 stderr 上有两条记录。第一条(#5661 修好的 probe 接缝)干净:\n\n```\n{\"level\":\"error\",\"msg\":\"[Automation] sys_automation_run could not be read at startup … the driver's own failure is in this record's meta.\",\"error\":\"SQLITE_ERROR: no such table: sys_automation_run\\n  at Database.prepare …\\n  hint: …\"}\n```\n\n第二条没有:\n\n```\n{\"level\":\"error\",\"msg\":\"[wait] suspended wait-timer re-arm ABORTED — … resume(runId). Cause: SQLITE_ERROR: no such table: sys_automation_run\\n  at Database.prepare …\\n  hint: …\"}\n```\n\n注意 cause 在 **msg 里面**。JSON 格式下 `JSON.stringify` 把换行转义了所以还是一行;`pretty` / `text` 格式(`os dev` / `os serve` 的默认)下 `ObjectLogger.write()` 一次调用只加一个「时间戳 + 级别」记录头,于是这一条变成三个物理行、后两行无级别无时间戳 —— 文件 sink 当成三条独立记录存,`grep ERROR` 只捞到不含任何事实的那一行。这正是 cloud#971 的形态。\n\n## 五处\n\n| 行 | 级别 | cause 来源 | 备注 |\n|:--|:--|:--|:--|\n| `wait-node.ts:98` | `error` | `engine.resume()` 返回的错误信封 `result.error` | 定时唤醒时 store 不可达;`Cause: ${result.error ?? 'store unavailable'}` |\n| `wait-node.ts:216` | `warn` | job 服务(`job.schedule` 抛出) | flow 执行期,不在 boot 静默窗口内,但仍是 `warn`,走 stdout |\n| `wait-node.ts:323` | `error` | 挂起态存储 / 数据源驱动 | **上面实测的那一条**;`#4632` 耐久性诊断 |\n| `wait-node.ts:346` | `error` | `engine.resume()` 抛出 | overdue 运行再也叫不醒;`#4632` |\n| `wait-node.ts:387` | `error` | job 服务(`job.schedule` 抛出) | 唤醒 job 没排上;`#4632` |\n\n后三处的严重性和 #5661 的第 2、3 条是同一档:`pnpm check:durability-log-level` 扫的 24 个耐久性接缝里就包含 `rearmSuspendedWaitTimers`,而这三条记录的**存在理由**就是可读性 —— 文本自己写着「every wait/approval paused before this restart will hang indefinitely」。一条被搅烂的耐久性告警恰是运维最需要能 grep 到的(#4632)。\n\n## 与 #5661 的关系,以及为什么单独立单而不是子任务\n\n#5661 的范围是 `plugin.ts` 三处,正文明确列出「刻意不含的两处」,`wait-node.ts` 根本不在其视野内 —— 它是 `plugin.ts` 那个 catch **被调用方**内部的记录。两单没有依赖关系:#5661 已经落地,这五处照旧。所以按 objectstack#4949 的规矩独立立单,不作子任务。\n\n同族已闭:#5048 / PR #5572(flow 绑定四+一)、#5575 / PR #5639(`fail()` 两处 + `ObjectLogger` 三参分派)、#5636 / PR #5662(`degradeConnectorInstance` 两处)、#5661(`plugin.ts` 三处)。仍开:#5660(`engine.ts` 的 `registerDegradedConnector` 自己那条 warn)。\n\n## 修法(与前四单同源,零新词汇)\n\n复用同包 `thrown-cause-diagnostics.ts` 的 `describeThrownForLog`:message 保持单行自足,cause 走 meta。按 `Logger` 契约选参数位 —— `warn(message, meta?)` 用第二参,`error(message, error?, meta?)` 用**第三**参(第二参传 `undefined`,否则每条记录都带栈)。新增字段名不得含 `key` / `token` / `secret` / `password` 子串(#5573)。\n\n`wait-node.ts:98` 需要单独判断一下:那里的 cause 是 `engine.resume()` 的错误**信封字段**而不是抛出值,`describeThrownForLog` 的入参形状对不上,可能该走 `{ error: result.error }` 直接给 meta。\n\n改完后确认 `pnpm check:durability-log-level` 仍绿(三处 `error` 不得降级、不得改成 rethrow),并注意 `plugin-startup-log-cause.test.ts` 里 `fakeDataEngine` 的 `failProbe` 注释:它现在刻意只让 probe 那次读失败,就是为了绕开本单这条记录;本单修好后那条注释可以简化。\n\n## 可达性\n\n五处 cause 都来自我们不控制文本的地方(数据源驱动、job 服务、engine 的 resume 信封),今天库内的驱动均单行 —— 所以这是 `finding` 而不是事故报告。第一个包装多行 SDK 错误的驱动/job 实现即撞上,第 323 行尤其(数据库驱动多行错误在生态里常见,上面的实测就是照这个形状造的)。"
+}

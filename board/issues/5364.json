@@ -1,0 +1,36 @@
+{
+  "number": 5364,
+  "kind": "issue",
+  "title": "元数据保存的 422 也丢掉 union 分支处方:一个 view 保存失败只回一条 `path:\"\" message:\"Invalid input\"`，Studio 无字段可高亮",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T01:10:45Z",
+  "updated_at": "2026-08-06T00:51:34Z",
+  "closed_at": "2026-08-05T21:49:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5364",
+  "body": "在做 #5014（REST `zodIssuesToFields` 展开 `invalid_union`，PR #5362）时顺手核出的第四个消费者，**不在那单的文件面内，故独立记录，未在该 PR 中修改**。\n\n## 落点\n\n`packages/metadata-protocol/src/protocol.ts:7128`（`saveMetaItem` 的 spec-conformance 检查）：\n\n```ts\nconst parsed = schema.safeParse(request.item);\nif (!parsed.success) {\n    const issues = parsed.error.issues.map((i) => ({\n        path: i.path.join('.'),\n        message: i.message,\n        code: i.code,\n    }));\n    const summary = issues.slice(0, 3).map((i) => `${i.path || '(root)'}: ${i.message}`).join('; ');\n    ...\n    (err as any).code = 'INVALID_METADATA';\n    (err as any).status = 422;\n    (err as any).issues = issues;\n```\n\n（源码里 `'(root)'` 那处实际写的是尖括号包住 root 的字面量。）\n\n和 #5014 一样：只映射顶层 issue，`issue.errors` 里每个分支的真实拒绝理由（含 #4001 那批 `strictObject` 的策展处方）在 `.map()` 处被丢弃。差别在于**这条路径才是 spec 里那些处方真正的归宿**——view / dashboard / flow 这些 overlay 类型走的就是它，而 REST 的 `zodIssuesToFields` 只服务数据路由的 ingress schema。\n\n## 实测（`origin/main` @ `553a47fda`，用 `getMetadataTypeSchema('view')`，即该函数 `resolveOverlaySchema` 用的同一个 schema）\n\n输入一个 list view，`columns[0].summary` 写了未知键：\n\n```\n{ name:'task_list', object:'task', type:'list', label:'Tasks',\n  columns: [{ field:'title', summary: { type:'sum', fieldd:'amount' } }] }\n```\n\n客户端/Studio 拿到的 `issues` 全文：\n\n```\n[ { \"path\": \"\", \"message\": \"Invalid input\", \"code\": \"invalid_union\" } ]\n```\n\n422 的 message 摘要行：`root: Invalid input`（root 外面是尖括号）。\n\n而被丢掉的分支里躺着的是：\n\n```\nbranch[1] unrecognized_keys []        Unrecognized key(s) on this view container: `type`, `columns`. Until #4001 closed these shapes …\nbranch[2] invalid_value    [\"type\"]   Invalid option: expected one of \"grid\"|\"kanban\"|\"gallery\"|…\nbranch[3] invalid_value    [\"type\"]   Invalid option: expected one of \"simple\"|\"tabbed\"|\"wizard\"|…\n```\n\n即:**一个字段名都没有**到达作者，`path` 是空串，Studio 表单没有任何东西可以高亮——注释里写的「so the Studio form can highlight the offending field」在顶层是 union 的类型上不成立。`ViewSchema` 顶层本身是 union（`view.zod.ts:2332` 的 `z.preprocess(stripViewConsoleDecorations, z.union([...]))`），所以 view 类型的**每一次**保存失败都退化成这一条。\n\n## 与已有单的关系\n\n同一缺陷的四个消费者，判定必须一致（否则同一个错误在终端/API/Studio 说法不同）：\n\n- `packages/spec` `formatZodError` —— #4971，已合入 `546ab3c49`（PR #5342）\n- `packages/rest` `zodIssuesToFields` —— #5014，PR #5362（本单发现者）\n- `packages/cli` `formatZodErrors` —— #5341，未做\n- `packages/metadata-protocol` `saveMetaItem` 的 422 —— **本单**\n\n建议修法与前三处一致：照抄 #4971 的 `selectUnionBranches` 策略（丢弃只报根部 KIND 不匹配的分支；报得最少的分支胜出——这条是防止一个未知键被 N 个分支各报一遍；`unrecognized_keys` 破平局；并列全出且有上限；嵌套 union 按绝对路径递归）。注意 `issues[]` 的条数会变，属 wire 可见改动；这条路径不走 ADR-0114 的 `fields[]` 目录（它透传 zod 原始 `code`），是否顺手对齐目录需要单独裁决。\n\n未打标签，留给 PM 分诊。\n"
+}

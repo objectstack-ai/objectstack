@@ -1,0 +1,35 @@
+{
+  "number": 5874,
+  "kind": "pull_request",
+  "title": "docs(plugin-auth,client): 退役两份已脱节的仓内开发文档快照 (#5824)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T10:38:43Z",
+  "updated_at": "2026-08-06T11:11:59Z",
+  "closed_at": "2026-08-06T11:11:58Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T11:11:58Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5874",
+  "body": "Fixes #5824\n\n**docs-only (deletions), skip-changeset requested** —— 两份被删的文件都不在各自包 `package.json` 的 `files` 发布清单里(`plugin-auth` / `client` 均为 `[\"dist\",\"README.md\",\"CHANGELOG.md\"]`),本 PR 不发布任何包,故不提交空 changeset,改由 `skip-changeset` 标签走豁免(#5804 先例)。\n\n## 裁决与前提\n\nPM 已裁决取**退役**路线(不选「重写并挂门」)。实做前逐条核对 `origin/main@e2bfa6ce3`,issue 前提**全部成立**:\n\n- `packages/plugins/plugin-auth/IMPLEMENTATION_SUMMARY.md` 在,陈旧标记原样存续:`:43` `All tests passing (11/11)`、`:191` `🔄 **Phase 3: IN PROGRESS**` 配「Placeholder responses implemented / Need to connect actual better-auth API calls」、`:213` `**Version**: 2.0.2`、`:214` `11/11 tests passing (100%)`;`File Structure` 只列 3 个 src 文件,而实际 `src/` 下有 61 个文件(含 `auth-route-ledger.ts` 与其 conformance 测试)。\n- `packages/client/CLIENT_SERVER_INTEGRATION_TESTS.md` 在,`Test Suite Structure` 列 `01`…`13` 一整套 + `helpers/`,而 `packages/client/tests/integration/` 下实际只有 `01-discovery.test.ts` 与 `README.md`。\n\n## 改动逐个文件\n\n**删除(2)**\n\n- `packages/plugins/plugin-auth/IMPLEMENTATION_SUMMARY.md`(-216)\n- `packages/client/CLIENT_SERVER_INTEGRATION_TESTS.md`(-808)\n\n**承接价值内容(2)**\n\n- `packages/plugins/plugin-auth/README.md` —— README 原本已有 `API Routes` 一节且四条真名(`sign-in/email` / `sign-up/email` / `sign-out` / `get-session`)已经正确,**唯一缺的是事实源指引**,也正是让这份手抄不再漂移的那半句。补上:单一事实源 = [`src/auth-route-ledger.ts`](https://github.com/objectstack-ai/objectstack/blob/main/packages/plugins/plugin-auth/src/auth-route-ledger.ts)(#3656,由 `src/auth-route-ledger.conformance.test.ts` 对 `auth.api` 实表校验),README 下方列表明确降级为 reading aid,并写明与台账冲突时以台账为准 + 那四条假路由的由来(#5085 / #5772)。⛔ 阶段小结 / 版本号 / 测试计数一律**不搬**。\n- `packages/client/tests/integration/README.md` —— 这份接收文档**自己也带着一份虚构清单**(17 个测试文件,含 #3612 已删除的 `permissions` / `workflow` / `realtime` / `views`),把假规格删了却留下它,等于换个地方放。故:实际清单改成如实的一行 `01-discovery.test.ts` 并写明「按清单读,不要从编号推断套件」;未实现部分落成**主题级 TODO**(⛔ 不抄旧断言 —— 旧断言与 SDK 实际返回形状已对不齐,例如 TC-AUTH-001 断言 `session.token` / `session.expiresAt` 在顶层,而 `SessionResponse` 把 `token` / `user` 归一进 `data`),并要求按当前 `packages/client/src/index.ts` 的返回形状写、路由名取自 auth 台账;显式标注 #3612 已删的四个 namespace 不要补测试;末尾注明旧全文可查 git 历史(附 `git log --diff-filter=D` 命令)。CI 那节删掉「见 CLIENT_SERVER_INTEGRATION_TESTS.md 的示例 workflow」,改为如实说明今天没有 workflow 在跑。\n\n**引用面清理(3 个文件 / 5 处)** —— `git grep -n \"IMPLEMENTATION_SUMMARY\\|CLIENT_SERVER_INTEGRATION_TESTS\" origin/main` 全仓 7 处命中,除 1 处在被删文件自身外逐条处置:\n\n- `content/docs/api/client-sdk.mdx:148` —— Callout 里「Integration test specifications live in …」改指 `packages/client/tests/integration/README.md`。\n- `content/docs/api/client-sdk.mdx:690` —— 这句 **Test coverage** 声称集成测试覆盖 15 个 namespace,其中 `permissions` / `workflow` 是同一份文档上方(:138)刚说过「#3612 已删除,从无服务端路由」的两个 —— 即被删规格的转述,本身就是一句假覆盖声明。改成如实:namespace 的广覆盖来自**单元**测试,活服务器集成测试今天只有 discovery 一项,其余在 backlog;逐方法的协议覆盖看下方 compliance matrix。\n- `content/docs/api/client-sdk.mdx:700` —— 「Integration Test Specifications」条目改指同一个 README 并改写描述。\n- `packages/client/README.md:306` —— 链接改指 `./tests/integration/README.md`。\n- `packages/client/tests/integration/01-discovery.test.ts:7` —— `@see` 注释改指同目录 README(本 PR 唯一的非 md 改动,纯注释)。\n\n清理后全树重扫,仅剩接收文档里那段**墓碑说明文字**(纯 code span,非链接),⛔ 无悬空链接。\n\n## 发布清单 / 门禁核查\n\n- 两份被删文件均**不在** `files` 发布清单(见开头),删除不改变任何已发布产物;`pnpm check:published-files` 绿。\n- 不在任何门禁脚本的扫描清单里:`check-doc-authoring` 的 ROOT 是 `skills` / `content` / `docs` / `.claude`,不含 `packages/**`;`docs-audit` 的 scope 由 `content/docs/**/*.mdx` 派生,本 PR 只改 mdx **内容**、不增删 mdx 文件,scope 不变。\n\n## 验证(全部前台跑完,真实输出)\n\n```\npnpm check:nul-bytes        ✓ self-test 56 assertions;OK (scanned 5695 tracked text file(s) … no raw ASCII control bytes)\npnpm check:doc-authoring    ✓ 362 files clean — no bare metadata literals\npnpm check:docs-audit-scope ✓ scope is in sync with content/docs/: 178 hand-written doc(s)\npnpm check:published-files  ✓ 69 publishable package(s) … declare a `files` whitelist\npnpm --filter @objectstack/client test        Test Files 19 passed (19) / Tests 236 passed (236)\npnpm --filter @objectstack/client typecheck   tsc --noEmit 通过;check:test-typecheck OK(3 file(s)/6 error(s) 为既有 debt,未增)\npnpm --filter @objectstack/plugin-auth test   Test Files 36 passed (36) / Tests 820 passed (820)\npnpm --filter @objectstack/plugin-auth typecheck  tsc --noEmit 通过\n```\n\n`plugin-auth` 的 36 个测试文件里包含 `auth-route-ledger.conformance.test.ts` —— README 新指的事实源本身仍被守着。\n\n另:新增/改写的每一个相对链接目标都实测存在(`auth-route-ledger.ts`、`auth-route-ledger.conformance.test.ts`、`CLIENT_SPEC_COMPLIANCE.md`、`tests/integration/README.md`)。\n\n## 范围外\n\n`packages/plugins/plugin-auth/ARCHITECTURE.md` 按裁决不在本单范围(其 \"Before\" 框定正确,#5772 已论证)。\n\n关联:#5772(本次退役文档里那两处假路由的窄修)、#5085(假路由发现现场)、#3656(auth 路由台账)、#3612(client 四个 namespace 的删除)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JwwiU9bjhwy2SWj13ho8uv\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JwwiU9bjhwy2SWj13ho8uv)_"
+}

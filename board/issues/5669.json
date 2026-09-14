@@ -1,0 +1,35 @@
+{
+  "number": 5669,
+  "kind": "issue",
+  "title": "analytics: `where` 里点名不存在的字段仍然一路到驱动 —— #4437(measure)/ #5520(dimension)之后,filter 面是同一个缺陷剩下的第三个 param",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T23:33:20Z",
+  "updated_at": "2026-08-06T03:38:25Z",
+  "closed_at": "2026-08-06T03:38:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5669",
+  "body": "## 现象\n\n`ensureCube()` 现在有两道源字段闸门 —— `assertMeasureFields`(#4437,`param: 'measures'`)与 `assertDimensionFields`(#5520 / PR #5667,`param: 'dimensions' | 'timeDimensions'`)。**`query.where` 的字段名没有任何闸门**:一个点名不存在字段的筛选条件被原样编译进 `WHERE`,由驱动答 `no such column`,调用方拿到 500(dataset 面还会拿到带整条语句的 message —— PR #5667 已把该路由的 5xx 信封收窄,所以泄漏这一半已闭,但**分类**这一半仍是 500)。\n\n注意 `inferCubeFromQuery` 会把 `where` 的顶层键也铸成 dimension(`analytics-service.ts` 的 `query.where` 循环),所以从\"cube 词汇表\"角度看它和 dimension 是同一类成员;但闸门读的是 `query.dimensions` / `query.timeDimensions` 两个请求键,`where` 不在其中。\n\n## 复现(测试双,ObjectQL aggregate 路,`crm_account` 有 id/name/phone/industry/annual_revenue)\n\n```\nPOST /analytics/query {\"cube\":\"crm_account\",\"measures\":[\"count\"],\"where\":{\"bogus_col\":\"x\"}}\n```\n\n实测(PR #5667 开发期探针,同一 harness 下 dimension 侧已答 400):\n\n```\n生成 SQL: SELECT COUNT(*) AS \"count\" FROM \"crm_account\" WHERE bogus_col = $1\nexecuteAggregate 收到调用 → 条件进了引擎,没有任何拒收\n```\n\n在真 SQLite 驱动上这就是 `no such column: bogus_col`,`code`/`status` 皆空,于是 REST 面落 5xx 兜底 —— 与 #5520 立单时 dimension 侧的形状完全一致。\n\n## 期望\n\n与 measure / dimension 两侧同形:构造 SQL 之前把 `where` 的字段名拿去和承载对象的字段核对,拒收用同一个信封(`400 INVALID_FIELD` + `field`/`object`/`param: 'where'`)。数据面自 #4315/#4254 起就是这么答的(`resolveQueryFields`),所以同一个笔误在 `/data` 与 `/analytics` 两条路上应当一个形状。\n\n## 与既有单子的关系(已查重)\n\n- #4437(closed,measure)、#5520 / PR #5667(dimension + timeDimensions):同一缺陷家族的前两个 param;**都不覆盖 `where`**。\n- #5352(closed)/ PR #5366、#5367(open):管的是 filter **算子/结构**拒收怎么带信封、怎么退休 message 正则名单 —— 那些拒收判的是\"这个 filter 能不能编译\",**不是\"这个字段存不存在\"**。`{bogus_col: 'x'}` 是一个结构完全合法、算子完全合法的 filter,`filter-normalizer` 没有理由拒它,所以本单不在 #5367 的地盘。\n- #5353(open,`inferCube` 的 `!Array.isArray(where)` 守卫已过时):相邻但不同 —— 那是\"数组 where 被当成没有筛选跳过\",本单是\"字段名从不核对\"。两者都动 `where`,实现时留意顺序。\n\n## 实现提示\n\n闸门本体大概是 `assertDimensionFields` 的三档 stand-down 照抄(`cube.sql` 须为裸对象名、`getObjectFieldNames` 须作答、源须为裸列),难点在**遍历 filter 树**取字段键:要跳过 `$and`/`$or`/`$not` 等组合子与 `$`-前缀算子键,点号路径按关系穿越放行(同 dimension 闸门),并且要和 `filter-normalizer` 对同一棵树的读法保持一致,否则会出现\"闸门看到的字段\"与\"真正进 SQL 的列\"不是一回事。\n\n严重度按 #5520 的口径估:无数字影响(出厂 metadata 由静态校验兜住),撞点是 Studio 预览、手写查询、外部 API 调用方 —— 他们拿到 500 而不是指名字段的 400。"
+}

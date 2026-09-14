@@ -1,0 +1,36 @@
+{
+  "number": 5671,
+  "kind": "issue",
+  "title": "`trigger-record-change` 的 `input.doc` 防御性 alias 读的是一个没有生产者的键(引擎只建 `input.data`)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T23:34:01Z",
+  "updated_at": "2026-08-06T12:09:48Z",
+  "closed_at": "2026-08-06T12:09:48Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5671",
+  "body": "在 #5273(PR #5668)核对 `HookContext.input` 契约表时发现,PD #10 单独记录。**观察类**(`finding`):今天没有用户会撞上,它是一条永不命中的兜底分支。\n\n## 事实(对 `origin/main` 核实)\n\n`packages/triggers/trigger-record-change/src/record-change-trigger.ts:295-300`:\n\n```ts\nconst inputDoc =\n    input.data && typeof input.data === 'object'\n        ? input.data\n        : input.doc && typeof input.doc === 'object'\n          ? input.doc\n          : undefined;\n```\n\n`input.doc` 这条分支**在任何引擎路径上都不可达**:\n\n- 全仓 `HookContext` 生产点恰好 5 处,全在 `packages/objectql/src/engine.ts`,加上 #5038 的 `buildPerRowAfterContexts`。写事件构造的键是 **`data`**(insert `4879`、update `5243`),**没有一处写 `doc`**。\n- `beforeInsert`/`beforeUpdate` 上 `input.data` 恒为对象,所以三元第一支恒真;`beforeDelete`/`afterDelete` 根本不带 `data` 也不带 `doc`,落到 `previous` 兜底。两种情况都轮不到 `input.doc`。\n\n该文件自己的注释其实已经写明了真值:\n\n> objectql lifecycle hooks carry the written row under `input.data` (insert / update payload); `id` is on update. (`doc` kept only as a defensive alias.)\n\n`packages/spec` 的契约表当时确实把 insert 写成 `{ doc: Record, options }` —— 那是假的,已由 PR #5668 改成 `{ data, options }` 并加 pin。所以这条 alias 现在连「文档这么说」的依据也没有了。\n\n## 分级说明\n\n标 `finding`:纯休眠代码,行为上零影响。但它是 AGENTS.md PD #12 点名的那类**消费端 `??` 兜底**——「a tolerant fallback fossilizes the wrong convention into a second de-facto contract」——而且是为一个从来不存在的生产者留的。严重程度请分诊轮判。\n\n## 建议\n\n删掉 `input.doc` 分支与类型里的 `doc?:` 声明,只读 `input.data`;真值已被 `packages/objectql/src/hook-input-shape-contract.test.ts`(PR #5668 新增,断言 insert 上下文有 `data`、无 `doc`)钉住。\n\n顺带:`packages/spec/src/data/hook.test.ts:422` 与 `packages/services/service-storage/src/attachment-lifecycle.test.ts:159` 的 fixture 也拼的是 `input: { doc: … }`。两处都只喂开放形状的 `z.record`,不会因此变红,但它们是照旧契约表写的,清理时应一并按引擎真值重拼(fixture 三分法里的「re-spell」)。\n\n## 关联\n\n- 发现于:#5273 / PR #5668\n- 相关:#5670(同源的技能/文档面)"
+}

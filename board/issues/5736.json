@@ -1,0 +1,35 @@
+{
+  "number": 5736,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): the ADR-0010 lock gate must not fail open (#5706)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T02:52:33Z",
+  "updated_at": "2026-08-06T03:32:38Z",
+  "closed_at": "2026-08-06T03:32:37Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T03:32:36Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5736",
+  "body": "Fixes #5706\n\n## 缺陷\n\n`getEffectiveLock` 是 ADR-0010 §3.3 锁闸门的唯一判据来源,两个调用点都是写路径准入 —— `assertLockAllowsWrite`(save / publish / rollback)与 `assertLockAllowsDelete`。它读 overlay 行的那段包在一个裸 `catch` 里,失败就落到 `lock: 'none'`。\n\n`'none'` 在这里不是中性缺省值,而是一条**判定**:「作者没有声明保护」。`evaluateLockForWrite` / `evaluateLockForDelete` 直接把它翻译成「放行」。于是一次**读失败**变成一次**已执行的写**,而那一项的 overlay 行明明声明了保护。\n\n## 前提复核(在 origin/main 上实测,不是照抄 issue)\n\n裸 catch 仍在,`rethrowUnlessMetadataStoreUnprovisioned`(#5705)已可复用,fail-open 可复现。关键是把窗口建模对:issue 说的窗口不是「元数据库全挂」(全挂的话写本身也会失败),而是「**读失败但写成功**」。所以 harness 让**第一条** `sys_metadata` 读(正是闸门自己那条)以 `ECONNREFUSED` 失败,其后的读写全部正常。修复前实测:\n\n| 场景 | 结果 |\n|---|---|\n| `saveMetaItem`,overlay 行 `_lock: 'no-overlay'`,闸门读失败 | **RESOLVED `success: true`**,且 `update:sys_metadata` 真的执行了 |\n| `deleteMetaItem`,overlay 行 `_lock: 'no-delete'`,闸门读失败 | **RESOLVED `success: true`**,且 `delete:sys_metadata` 真的执行了 |\n| 同样两行,闸门读成功 | `403 ITEM_LOCKED`(闸门本身是好的) |\n\n审计侧也如实核过:放行路径写的是它本来就会写的 `outcome: 'allowed'` 行,所以事后没有任何记录显示这次写本该被拒 —— 这正是它长期不可见的原因。\n\n## 修法\n\n按 issue 建议,一处 catch,复用 #5705 刚落在同文件的 `rethrowUnlessMetadataStoreUnprovisioned`,没有发明第二个判别:未建表(`isMissingTableError`)是良性的 —— 那时确实没有 overlay 行,`'none'` 就是真相,首次启动照常;其余一律 `503` / `SERVICE_UNAVAILABLE`,驱动错误挂 `cause`。\n\n`assertLockAllowsWrite` / `assertLockAllowsDelete` 的判定逻辑**未改动** —— 它们拿到 503 自然上抛。这一点是用测试钉住的,不是假设。\n\n**wire 可见变化**(changeset 已写明):元数据存储读故障时,save / publish / rollback / delete 以 503 失败,而不是当作没锁去写。方向是刻意的:拒绝一次不确定的写,好过放行一次本该被拒的写。\n\n## 反向验证(方向在跑之前就先定好)\n\n普通的红。把裸 `catch` 放回去 —— **实测 5 红 / 7 绿**,五条全部以 issue 描述的那个形状失败,断言消息里直接印出放行的返回值:\n\n```\nexpected a rejection, but the call resolved with\n  {\"success\":true,…,\"message\":\"Saved customization overlay (env-wide, …)\"}\n  {\"success\":true,\"reset\":true,…,\"message\":\"Customization overlay deleted — view/v1 …\"}\n```\n\n预测的是 4(第一个 describe 里那四条);第五条是 artifact describe 的最后一例,它本身就是一条 fail-closed 断言,只是为了叙事放在那里。按实测记录,没有凑成预测值。\n\n保持绿的七条是有**原因**地绿,不是空绿:artifact 级锁根本走不到 overlay 读、未建表的首次启动照常保存、健康库上的真 miss 照常放行 —— 少了最后这条,「fail closed」可以靠「什么都拒」来假装满足。\n\n## issue 的「未验证点」:还有没有别的路径读同一行锁状态\n\n枚举了保护信封的全部消费者(`extractProtection` / `resolveLockState`,全仓仅 `protocol.ts` 内四处):\n\n- **`resolveLockState` @ `getMetaItem`** —— **不同病**。它消费的是**已经取到**的 item,而那条读正是 #5705 修好的四处之一,已经 fail-closed;`resolveLockState` 只会看到真读出来的东西。\n- **`resolveLockState` @ `getMetaItemLayered`** —— **同一个 catch 形状**,但消费方是读/展示(Studio 三层对比视图),后果类别不同。**已由 #5707 单独持有**(`finding` 标签),且那单里还留着一个未定的设计选择(整体 503,还是给 `overlay` 加「未知」第三态)。按 scope 纪律不在本 PR 修,也不重复开单。\n\n## 验证\n\n前台同步跑完,全部真实输出:\n\n| 命令 | 结果 |\n|---|---|\n| `pnpm --filter @objectstack/metadata-protocol test` | 46 files / **431 passed** |\n| `pnpm --filter @objectstack/objectql test` | 122 files / **1990 passed** |\n| `pnpm --filter @objectstack/rest test` | 53 files / **760 passed** |\n| `pnpm --filter @objectstack/runtime test` | 98 files / **1436 passed** |\n| `pnpm check:durability-log-level` | ✓ 24 seam(s), all loud/rethrowing |\n| `pnpm check:query-options-erasure` | ✓ ratchet holds, baseline verified against `e6db317` |\n| `pnpm check:type-check-coverage` | ✓ DEBT ledger unmoved(本包无 `typecheck` script,带 28 错的实测 DEBT 条目) |\n| `node scripts/check-nul-bytes.mjs` + 控制字符自查 grep | ✓ clean |\n| `eslint`(改动的两个文件) | ✓ 0 |\n\nobjectql / rest / runtime 是按闸门的**消费半径**扫的,不是按改动包扫的。头一轮它们的「失败」全是新 worktree 里依赖没构建导致的解析错(0 条测试失败),按 AGENTS.md §9 先用 `pnpm --filter` 的 `^...` 形式构建依赖再跑,才是上面的数字。\n\n## 范围\n\n`packages/metadata-protocol/src/protocol.ts` 仅 `getEffectiveLock` 一区(一处 catch + 其 JSDoc)+ 新测试 + changeset。没有碰 #5705 刚落的四处 overlay 读与 `getMetaItemCached`,没有碰 rest / metadata,没有扩审计面。\n\n（顺带记一个实测事实,不是缺陷:`getEffectiveLock` 的 artifact 分支对**任何**非 `'none'` 的打包锁都会短路,不管那把锁是否拦得住当前这个操作 —— 这与「artifact 永远压过 overlay」的既有设计一致,测试里按实测钉住了,没有按我原先的猜测去写。）\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01V7WetGmnfoXNn8cLieKKmx"
+}

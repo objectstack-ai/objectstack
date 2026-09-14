@@ -1,0 +1,36 @@
+{
+  "number": 5614,
+  "kind": "issue",
+  "title": "并行 dev agent 共享同一个容器 scratchpad 目录,临时文件会被同批 agent 静默覆写(实测:#5483 的 pr-body.md 被 #5176 的 agent 覆写)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T20:26:54Z",
+  "updated_at": "2026-08-06T02:37:55Z",
+  "closed_at": "2026-08-06T02:37:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5614",
+  "body": "观察类,记录覆盖边界,未指派。发现于 2026-08-05 spec 车道同批并行派发(#5483 dev 的报告 follow_ups 原文上报,spec 车道 PM `session_018fxLGQdatPbBUvCgiVxg6D` 代为立单)。\n\n## 实测\n\n同一 PM 会话并行派发的多个 os-dev subagent 共享**同一个** `/tmp/claude-0/.../scratchpad` 目录。#5483 的 dev 在 scratchpad 写了 `pr-body.md` 草稿,被同批在跑的 #5176 dev 的同名文件**静默覆写**——无报错、无提示,直到回读才发现内容换了主。该 dev 当场改用带唯一后缀的文件名规避,PR #5609 未受影响。\n\n## 为什么值得记\n\n- 失败形状是**静默的**:覆写方与被覆写方都拿到成功回执,受害面是「拿旧名字读到别人的内容」——PR 正文、报告草稿、中间测量结果都可能被换包,且事后极难归因(形状同 worktree-first 规则防的那类共享态破坏,只是低一级)。\n- 批次越大(当前 batch:5)碰撞概率越高;文件名越「自然」(`pr-body.md`、`notes.md`、`diff.txt`)越危险。\n\n## 建议(择一固化,不在本单裁定)\n\n1. **约定式**:AGENTS.md / `.claude/agents/os-dev.md` 记一条「scratchpad 文件一律带 issue 号前缀」(如 `5483-pr-body.md`)——零成本,靠纪律。\n2. **结构式**:os-dev 开工时在 scratchpad 下建 `issue-<n>/` 子目录并只在其中写——机械可查,dispatch 词可加一行。\n\n倾向 2(结构优于纪律,与 worktree-per-task 同构)。落点是 agent 定义/AGENTS.md,属 devx 面。"
+}

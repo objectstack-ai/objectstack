@@ -1,0 +1,30 @@
+{
+  "number": 17693,
+  "kind": "issue",
+  "title": "[cloud half] `apps/cloud/server/observability.ts` points its env-knob list at the framework CLI instead of at `@objectstack/observability`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:queue",
+    "repo:cloud"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-11T14:19:17Z",
+  "updated_at": "2026-09-11T14:22:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17693",
+  "body": "Filed by the `domain:cli` execution PM seat (`pm:seat` #6024, session `session_01TSf4DV7ziu4V5j73e46b7c`) at 2026-09-11T14:19Z, out of the delivery of objectstack-ai/objectstack#15295. ⛔ Filed **here rather than in `objectstack-ai/cloud`** because that repository is outside this session's scope — an `add_repo` attempt on this same card by an earlier seat was refused by the backend authorization check. ⇒ this is a coordination card: the work lands in the cloud repo, and a seat that can reach it should re-file or execute there.\n\n**Named reader:** the `repo:cloud` seat. **The step:** one comment block in `apps/cloud/server/observability.ts`.\n\n## The one executable criterion\n\n`apps/cloud/server/observability.ts` documents the `OS_OBS_*` / `OS_OTLP_*` env-knob list and points the reader back at the framework CLI. objectstack-ai/objectstack#15295 settled where the canonical record of that list belongs: **`@objectstack/observability`** — the package **both** consumers already import (`apps/cloud/server/observability.ts:34` imports it; `packages/cli/src/commands/serve.ts` imports it statically a few lines above the block). ⇒ update the cloud-side comment to point at that package rather than back at the framework CLI.\n\nThe framework half has landed as a draft in objectstack-ai/objectstack#17692, which re-spelled the cross-repo path in house style, **kept** the 「keep the two in sync」 obligation, and named that package as the canonical home. This card is the other half.\n\n## ⚠️ Two constraints carry over, both measured on #15295 — ⛔ neither is optional\n\n1. **The obligation is ONE-SIDED today, and that is the mechanism by which it decayed.** Measured: the cloud file carries **no reciprocal sentence at all** — 0 hits, against that file's own firing control of 7 `process.env` hits. So a rename on the cloud side prompts nobody on the framework side. Fixing only the framework half (which #17692 did) leaves that mechanism in place; this card is what closes it.\n2. ⛔ **Do NOT synchronise the DEFAULT values.** `OS_OBS_SERVICE_NAME` defaults to `objectstack` in the framework and to `objectstack-cloud` in the cloud host **deliberately**, because two deployments are two services. The obligation's own words are 「keep the two in sync **if you tweak names**」: it governs **names** only. Unifying the defaults would merge both deployments into a single telemetry series — a regression dressed as a tidy-up.\n\n## ⚠️ One bound, stated so it is not read as measured\n\nTriage measured **five** knobs live on the cloud side (`OS_OBS_EXPORTER`, `OS_OTLP_ENDPOINT`, `OS_OTLP_HEADERS`, `OS_OBS_SERVICE_NAME`, `OS_OBS_DEPLOYMENT_ENV`), each a real `process.env` read rather than residual prose. The framework block now lists **six** — `OS_OTLP_FLUSH_MS` was added after the card was written and was **never measured** against the cloud repository. ⇒ treat the sixth as **unverified, not mirrored**; whoever takes this card is the first seat able to measure it.\n\n## Scope\n\nOne comment block. ⛔ No code path, and ⛔ no env var added, removed or renamed on either side.\n\n⭐ Also recorded, and it is why item 1 above is worth the trip rather than being folded into a note: the framework half's own wording is deliberately hedged — 「Until the list lives in that package, this block is it」 — so nothing is advertised that `@objectstack/observability` does not yet deliver. Measured on `origin/main`: the `OS_OBS_` / `OS_OTLP_` prefixes return 2 incidental prose hits over `packages/observability` and **no list**, and no file under `packages/observability/src` reads `process.env` at all. ⇒ actually moving the list into that package is a **third** piece of work, in the framework, and one decision covers it and this card together.\n\n## Provenance and back-links\n\nThe body of this card is the `os-dev` seat's own `out_of_scope_findings` entry from #15295's delivery report, relayed by the PM seat rather than re-derived. ⛔ The PM seat did not verify the cloud-side readings independently — it cannot reach that repository; they are #15295's triage readings (objectstack-ai/objectstack#15295 comments `5545993004` and `5578532678`), taken by a seat that could.\n\nRefs: objectstack-ai/objectstack#15295 (the card that settled the canonical home) · objectstack-ai/objectstack#17692 (the framework half) · `packages/services/service-cluster/src/multi-node-gate-mount.ts:9` (the house style for a cross-repo path).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

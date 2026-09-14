@@ -1,0 +1,37 @@
+{
+  "number": 17634,
+  "kind": "issue",
+  "title": "service-messaging: a late HTTP ack from a REAPED claim overwrites the live re-claim on `sys_http_delivery` — `IHttpOutbox.ack(id, …)` carries no claim credential (the notification outbox fixed this shape in #11859)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:done",
+    "priority:p2"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-11T05:57:15Z",
+  "updated_at": "2026-09-11T08:27:26Z",
+  "closed_at": "2026-09-11T08:24:55Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17634",
+  "body": "## 现象\n\n`sys_http_delivery` 上，**一个已被回收（reap）的认领的迟到 ack，会覆盖另一个节点正在进行的重新认领。**\n\n来源：#17623 开发席位在 PR #17632 期间的一次性探针（针对构建后 dist 的 `MemoryHttpOutbox`）：\n\n1. 节点 A 领取一行，开始发送；A 的认领超过 `claimTtlMs`，被 reap 回 `pending`\n2. 节点 B 重新领取这一行：`in_flight`，`claimedBy = node-B`，正在发送\n3. A 的发送结束，迟到的 `ack` 落下 ⇒ 该行变成 `dead`、`claimedBy = null`、`attempts = 1`——**而 B 还在发送**\n\n## 原因（读码，`origin/main`）\n\n`packages/services/service-messaging/src/sql-http-outbox.ts`：\n\n```ts\nasync ack(id: string, result: HttpAckResult): Promise<void> {\n    … where: { id } …          // 只按 id 写，不校验认领者\n```\n\n- `IHttpOutbox.ack(id, result)` 的签名**不携带认领凭据**\n- `SqlHttpOutbox.ack` 的写条件只有 `{ id }`（经 `dispatcherAckOptions`）\n- `MemoryHttpOutbox.ack` 无条件写\n\n**通知侧早已修过同一形状**：`sql-outbox.ts` 的 `ack(claimed: ClaimedDeliveryRecord, result)` 以 `(claimedBy, claimedAt)` 作为认领凭据做 compare-and-set，读写两半都校验归属（#11859），并对未认领行的 ack 做前置拒绝（#11453）。HTTP outbox 从未获得这层保护。\n\n## 后果\n\n- 一次正在进行、可能成功的投递被标成 `dead`；或者两次投递的结果互相覆盖，最终状态与实际发送结果不一致\n- webhook 可能重复发送，或该送达的被错误记为失败\n- 触发条件是「一次发送耗时超过 `claimTtlMs`，同时另一个调度器实例在轮询同一张表」。多节点部署天然满足后半条；单容器内若同一环境的旧 kernel（`stale` / `draining`）与新 kernel 同时运行各自的调度器，**推测**也可能满足——这一点未实测\n\n**既有缺陷**：PR #17632 既未扩大也未修复它。\n\n## 验收\n\n1. `IHttpOutbox.ack` 携带认领凭据，形状与通知侧 `ClaimedDeliveryRecord` 对齐（新增为兼容形式，不破坏既有调用方——参照 `check-adr-0087-registration` 对契约成员的要求）\n2. `SqlHttpOutbox.ack`：写条件含 `id` + `claimed_by` + `claimed_at` + `status = 'in_flight'`；不匹配时不写，并以 `warn` 记录「认领已不再持有」（与通知侧 `ack refused, claim no longer held` 同口径）\n3. `MemoryHttpOutbox` 同样校验\n4. 测试复现上面的三步序列：迟到 ack 不改变 B 的认领；B 的 ack 正常生效\n"
+}

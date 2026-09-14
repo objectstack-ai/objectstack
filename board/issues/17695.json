@@ -1,0 +1,34 @@
+{
+  "number": 17695,
+  "kind": "pull_request",
+  "title": "docs(permissions): attachments-access states the stored form of a file field as the sys_file id",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-11T14:35:18Z",
+  "updated_at": "2026-09-11T15:30:33Z",
+  "closed_at": "2026-09-11T15:30:31Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": "2026-09-11T15:30:31Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/17695",
+  "body": "Part of #17406\n\n`content/docs/permissions/attachments-access.mdx` told a reader that `Field.file` / `Field.image` store a **file URL** in the record's own column. Since **ADR-0104 D3** the stored value is an opaque `sys_file` id; the `{ id, name, size, mimeType, url }` object is the derived read form. Only that stored-form clause changes.\n\n- **Clause-②: no**\n\n## What changed\n\n```diff\n-`Field.file` / `Field.image` are a **separate** path — those store a file URL\n-in the record's own column and never create a `sys_attachment` row, so nothing\n-on this page applies to them.\n+`Field.file` / `Field.image` are a **separate** path — those store an opaque\n+`sys_file` id in the record's own column (ADR-0104 D3; the\n+`{ id, name, size, mimeType, url }` shape is derived at read time, never\n+stored) and never create a `sys_attachment` row, so nothing on this page\n+applies to them.\n```\n\n## The premise, re-measured on `origin/main` (6465cc0a7c) rather than inherited\n\n**ADR-0104 D3, verbatim** (`docs/adr/0104-field-runtime-value-shape-contract.md`, section `### D3 — File-as-reference: field values point into sys_file`):\n\n> - **Stored form**: an opaque `fileId` string (array when `multiple`) into\n>   `sys_file` — the same shape discipline as `lookup`. The inline\n>   `{url, name, size}` blob is retired from the write path.\n> - **Expanded form**: a spec-owned `FileValueSchema`\n>   `{ id, name, size, mimeType, url }`, produced at read/expand time from the\n>   `sys_file` row. `url` is **derived, never stored** …\n\nD3 wave 2 restates it: *\"File field value becomes an opaque `sys_file` id; the expanded read form is the spec-owned `FileValueSchema` (`url` derived via `/files/:fileId`, never stored).\"*\n\nThe declaring surface agrees. `packages/spec/src/data/field-value.zod.ts:551-557` returns `FileReferenceIdValueSchema` **alone** for `form === 'stored'`, and its `FILE_REFERENCE_TYPES` docblock says the narrowing is where wave 2 landed. `premise_still_valid: true`.\n\n## The half that must not move\n\nThe sentence's second half — no `sys_attachment` row, so nothing on this page applies — is correct and is the sentence's whole job. It is carried through **verbatim**; only the line wrap moved. Proof (whitespace-flattened, occurrence counts via `grep -o | wc -l`, not `grep -c`):\n\n| reading | before | after |\n| --- | --- | --- |\n| `never create a` + backtick-`sys_attachment`-backtick + ` row, so nothing on this page applies to them` | 1 | **1** |\n| `stores? (a\\|the) file URL` | 1 | **0** |\n| `URL in the record'?s own column` | 1 | **0** |\n| `store an opaque` + backtick-`sys_file`-backtick + ` id in the record's own column` | 0 | **1** |\n| dark control (impossible token) | 0 | 0 |\n\n## Census — is the stale claim copied anywhere else?\n\nA false sentence copied across files is this repo's recurring shape, so the count is measured, not assumed. Universe: **402** tracked `.mdx` files under `content/docs/**`, enumerated with `git ls-files` (⛔ not a content grep for a file name). Each file whitespace-flattened first, because the sentence wraps a line break. Six stale-claim patterns:\n\n| pattern | occurrences | carriers |\n| --- | --- | --- |\n| `stores? (a\\|the) file URL` | 1 | `permissions/attachments-access.mdx` |\n| `URL in the record'?s own column` | 1 | `permissions/attachments-access.mdx` |\n| `(file\\|image) (field\\|column)…stores?…URL` | 0 | — |\n| `stores? the URL` | 0 | — |\n| `column…holds?…URL` | 0 | — |\n| `(stored )?value is (a\\|the) URL` | 0 | — |\n| **lit control** `Field.file` | **4** | this page + `releases/v14, v15, v16` |\n| **lit control** `sys_file` | **25** | 15 files |\n| **lit control** `ADR-0104` | **26** | 13 files |\n| **dark control** (impossible token) | 0 | — |\n\nThe zeros are readings: the same instrument returns 4 / 25 / 26 on the lit controls and 0 on the dark one.\n\nA second pass swept every `(file|image|avatar|video|audio) … url …` sentence in all 402 files for *other wordings* of the same claim. It surfaced no further carrier — the remaining hits are unrelated (`file:` libSQL URLs, `os test --url`, the storage-service contract) or already correct (this page's own expanded-form sentence; the 17.0 download note).\n\nThe three `Field.file` mentions in `content/docs/releases/v14|v15|v16.mdx` make **no** stored-form claim — they are feature notes (`FILES_DISABLED` independence, inline-grid upload cells, an approvals attachment field). They are also release-owned and out of bounds for a code PR either way.\n\n**The sibling page is already right and needed no edit**: `content/docs/protocol/objectql/types.mdx:1163-1168` states the post-migration form and scopes the legacy one to a conditional callout. The two pages now agree instead of stating the same fact with opposite defaults.\n\n⇒ **Carrier count: 1.** Corrected here.\n\n## Changeset\n\nNone owed, and the rule that says so is AGENTS.md § *Post-Task Checklist* step 3: `skip-changeset` \"is for a diff that publishes nothing from any released package.\"\n\nMeasured rather than assumed. Of the 80 workspace packages, 70 are non-private; the edited path sits inside **0** of them. Lit control: the same containment predicate run against `packages/spec/src/data/field-value.zod.ts` returns `@objectstack/spec`, so a zero from it is a reading. `content/` is covered by no `pnpm-workspace.yaml` glob and is owned only by the root manifest, which is `private: true`. The `skip-changeset` label is applied and read back.\n\n## Verification\n\nProse-only diff: no schema, no behaviour, no `content/docs/releases/`. Gate families derived from the real change set with `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` (which derives the change set itself from the merge base) rather than from a hand-written path list.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01MkQhmuuJAVDjmeWNixwDDH\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01MkQhmuuJAVDjmeWNixwDDH)_"
+}

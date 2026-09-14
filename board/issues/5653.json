@@ -1,0 +1,36 @@
+{
+  "number": 5653,
+  "kind": "issue",
+  "title": "driver-turso remote transport 的分页读没有 tie-breaker：ORDER BY 原样透传、无序分页读完全不排序 —— 与同驱动 local 面(SqlDriver `orderKeysFor`)分叉，IDataDriver.find 的确定性分页 MUST 在 remote 面不成立",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T22:07:31Z",
+  "updated_at": "2026-08-06T01:08:51Z",
+  "closed_at": "2026-08-06T01:08:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5653",
+  "body": "**发现于** #5590（给 `driver-turso` 补 `PAGINATION_CASES` / `PAGINATION_UNORDERED_CASES` 共享套件）。⛔ 按 #5590 的边界，那个单只补套件、不动实现，所以这条另立。\n\n## 机制\n\n`packages/drivers/driver-turso/src/remote-transport.ts` 的 `buildSelectSQL`（:945）把调用方的 `orderBy` **原样**拼进 SQL，然后直接接 `LIMIT` / `OFFSET`：\n\n- `:960-968` —— ORDER BY 段：只 map 调用方给的 `orderBy` 条目，**不追加任何唯一列**；\n- `:970-977` —— `LIMIT ?` / `OFFSET ?`，与上面那段之间没有任何\"这是分页读\"的判断。\n\n同一个驱动的 local 面走的是 `SqlDriver.orderKeysFor()`（`packages/drivers/driver-sql/src/sql-driver.ts:6675`）+ `paginationTieBreaker()`（:6628），它按 #4363 的三态表办事：\n\n| `orderBy` | 分页 | 结果 |\n|---|---|---|\n| 非空 | 任意 | 调用方的键 + `id` |\n| 空 | 有 `limit`/`offset` | 单独 `id` |\n| 空 | 都没有 | 不加 ORDER BY（#4363 明确的 carve-out） |\n\nremote 面这三格全都落在\"原样透传\"上。于是 `TursoDriver` 一个驱动的两条传输对同一个分页查询给出**不同的排序保证**，而传输模式只由 URL 决定 —— 正是 ADR-0053 D-A1 / #937 一路在关的那条缝。\n\n## 实测（分支 `claude/issue-5590-turso-conformance-suites`，hermetic sqlite stub）\n\n`ORDER BY status ASC` 走 12 行 fixture（`PAGINATION_ROWS`）：\n\n```\nremote: r03,r09,r02,r10 | r01,r12,r08,r06 | r07,r11,r05,r04\n```\n\n每个 status 组内部是**插入顺序**，不是 id 顺序 —— 直接证明没有追加 `id` tie-breaker（local 面同一查询组内是 id 序）。无序分页读同理，返回的是 rowid 序：\n\n```\nremote unordered: r07,r03,r11,r01,r09,r05,r12,r02,r08,r04,r10,r06\n```\n\n## 那为什么 #5590 的共享套件是绿的\n\n因为 hermetic stub 是 `better-sqlite3` 上的 12 行内存表：计划固定、排序器在这个规模上表现稳定，所以\"每行恰好访问一次\"这条性质成立。**这是运气，不是保证**，而且 case-set 自己的文档就写明了这一点不算合规（`packages/spec/src/data/pagination-conformance.ts`）：\n\n> SQL leaves the row order of an unordered read to the plan (insertion order in practice on a small table, and not once it goes parallel, switches to an index scan, or is `VACUUM`ed)\n\n`driver-memory` 那条\"存储自身顺序在两次读之间稳定\"的豁免针对的是 JS 数组，不是 SQL 计划。契约原文（`packages/spec/src/contracts/data-driver.ts:68`）把无 `orderBy` 的分页读称为同一缺陷的**满强度**形态。\n\n所以 #5590 的套件在 remote 面记录的是\"当前机制\"而非\"契约达成\"；那两个套件里各有一条 pin 测试把上面这个插入序的事实钉住，并指到本单。\n\n## 影响\n\n真实 Turso remote endpoint 上，表大到走索引扫描 / 计划变化时，`ORDER BY status LIMIT 50 OFFSET 50` 的并列行排布不被 SQLite 承诺在两条语句之间一致：用户翻页时某条记录出现两次、另一条永远不出现。每一页都是满的、每一行都真实且合法，所以从任何单个响应里都看不出来 —— 这正是 #4363 / objectui#3106 要消灭的那种失败。\n\n## 建议修法（不是这单的实现承诺，供 triage）\n\n在 `buildSelectSQL` 里补上与 local 面**同一条**规则，而不是第二套：分页读（`limit` 或 `offset` 存在）时在调用方排序键之后追加唯一列；未分页且无 `orderBy` 时保持不加 ORDER BY（#4363 的 carve-out 必须一起搬过来，否则会给系统里绝大多数读改计划）。remote 面的表由 `syncSchema` / `syncSchemasBatch` 自己建，`id` 是已知主键，所以 `paginationTieBreaker` 的\"只对自己建的表下判断\"前提在这里也成立。落地后 #5590 里两条 pin 测试要一起改（它们钉的就是当前的无 tie-breaker 行为）。\n\nBlocked-by: #5590"
+}

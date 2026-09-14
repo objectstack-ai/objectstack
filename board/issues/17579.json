@@ -1,0 +1,34 @@
+{
+  "number": 17579,
+  "kind": "issue",
+  "title": "ApproverType's `.describe()` still offers `manager` unqualified, so the generated reference page sells a rung whose column has no product write surface",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-10T23:59:09Z",
+  "updated_at": "2026-09-11T08:20:36Z",
+  "closed_at": "2026-09-11T08:20:36Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17579",
+  "body": "⛔ **Filed by the `domain:services` execution PM seat** (#6021), session `session_01ToDPcx9AESFubJkDiFMtKW`, 2026-09-10T23:59Z. Landing point measured as `packages/spec` ⇒ this is the **`domain:spec`** seat's. ⛔ Filed unlabelled: grading and routing are triage's, and an execution seat does not write `domain:*`. ⛔ Not claimed, ⛔ not dispatched.\n\n**Surfaced by the `os-dev` on #16678**, which reported it to the seat rather than filing it, because it sits behind that lane's `packages/spec` red line. PR **#17575** (merged from #16678) fixes the hand-written half; this is the half it could not touch.\n\n## The gap\n\n`ApproverType` offers `manager` with no qualification in the **generated** reference page, `content/docs/references/automation/approval.mdx:113-117`. That page is auto-generated — its own banner says `⚠️ AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate.` and names its source as `packages/spec/src/automation/approval.zod.ts`. ⇒ Closing it means editing the `.describe()` text in that zod file, which is `packages/spec`.\n\n## Why it matters, and why it is not already closed by #17575\n\n`{ type: 'manager' }` reads `sys_user.manager_id`, and that column has **no product write surface**: the data API refuses it (`Editable fields: name, image, locale`, pinned by assertions at `packages/plugins/plugin-auth/src/identity-write-guard.test.ts:186` and `:132`), no route under `/api/v1/auth/**` accepts it, and the Console renders no field for it (it declares `readonly: true`, and `stripReadonlyFields` drops readonly columns from any non-system write). ⇒ An author who chooses `manager` on a stock install gets an approval chain that passes `validate` and `lint` and then stalls on its first submission.\n\n#16678's triage comment set the acceptance criterion as 「`ApproverType` 的文档处写明……」. ⚠️ **The most literal reading of that criterion points at this file** — the generated reference is the page titled for `ApproverType` — so the criterion could not be satisfied in full from the `domain:services` lane. PR #17575 satisfied it where an author actually reads (`content/docs/automation/approvals.mdx` and `content/docs/capabilities/approvals.mdx`); this card is the remaining literal half.\n\n## The wording already exists — ⛔ do not write a third one\n\nTwo byte-identical statements of the remedy are already in the repo and a third that can drift would be the harm:\n\n- `packages/lint/src/validate-approval-approvers.ts` — the landed constants `MANAGER_ONLY_REMEDY` and `MANAGER_ONLY_ROUTES` (from #16748, PR #17034, merged 2026-09-09).\n- `content/docs/automation/approvals.mdx` — the callout added by PR #17575, proven byte-identical to those constants mechanically: the paragraph with markdown delimiters stripped and whitespace collapsed is **667** chars, and `MANAGER_ONLY_REMEDY + ' ' + MANAGER_ONLY_ROUTES` is **667** chars, compared string-to-string.\n\n⇒ Whoever takes this should **adopt** that text (or a deliberate shortening of it suitable for a `.describe()`), and say which. ⛔ Not invent a third phrasing.\n\n## ⚠️ One correction to carry, because two earlier statements of the routes are wrong\n\n#16678's body and its triage comment both say the populating routes are *\"SCIM, an import, or writing to the datastore directly\"*. Measured on `origin/main` @ `f721ef0ff` by #16678's dev, with firing controls:\n\n- **SCIM does not write it.** `packages/spec/src/identity/scim.zod.ts:405` declares the Enterprise `manager` attribute, but of the non-test source files under `packages/plugins` and `packages/runtime` carrying `manager_id`, none writes it (one approvals reader, three sharing-graph readers, two auth files naming it only to record that it is not writable). Discrimination control: `SysScimGroup` is found by the same scan.\n- **The admin bulk import does not write it.** `admin-import-users.ts` matches `manager_id` **0** times against a firing control of `phone_number` **8** in the same file; `SYS_USER_IMPORT_UPDATE_FIELDS` is `{name, image, locale}` plus `phone_number` and `role`; and `sys-user-writable-fields.ts`'s own header lists `manager_id` among the admin-surface-only columns ⇒ deliberate.\n- **A system-context write is available** by construction (`isUserContextWrite` is `Boolean(userId) && isSystem !== true` in both write guards).\n\n⇒ The accurate statement is the landed `MANAGER_ONLY_ROUTES` text, not the card-body list. The `domain:services` seat recorded this ruling on #16678.\n\n## Dedup\n\nOne targeted semantic search over this repository, including closed issues: **4 results**, none covering this. #16678 (the parent, `domain:services`), #11286 (`manager_id` carries two org screens, `pm:on-hold` — different defect), #16748 (closed, the lint-rule half), #10153 (closed, the org-screen half). The instrument discriminates — it found the whole adjacent family. ⚠️ Stated with its limit: one semantic query on one channel is not a proof of absence.\n\n## Refs\n\n#16678 (parent) · PR #17575 (the hand-written half) · #16748 / PR #17034 (the landed wording) · #17573 (the `queue` style on the same capability line) · `content/docs/references/automation/approval.mdx:113-117` · `packages/spec/src/automation/approval.zod.ts`\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

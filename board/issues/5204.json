@@ -1,0 +1,36 @@
+{
+  "number": 5204,
+  "kind": "issue",
+  "title": "env 来源的 settings 值绕过 manifest 的 options 表校验 —— #5094 在写入 API 上堵住的洞，在 OS_* 覆盖这一侧原样敞开",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T09:10:04Z",
+  "updated_at": "2026-08-06T02:11:29Z",
+  "closed_at": "2026-08-06T02:11:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5204",
+  "body": "来自 #5152 的实现（PR 见下）。**不是 #5152 的搭车**，那边只在自己这一个键的消费端补了拒绝逻辑；这里说的是所有 select/radio/multiselect 键共有的通路。\n\n对着 `origin/main`（`e96ad55c0` 之后合入 #5152 分支时现查）。\n\n## 事实\n\n`SettingsService` 有两条产出「有效值」的路径，只有一条过 options 表：\n\n1. **写入路径** `setMany` → `validatePatch`（`settings-service.ts:731` 一带）。#5094/#5133 把 `sendgrid`/`ses` 从 `mail.provider` 的 options 里摘掉之后，补上了这道 `invalid_option` 校验，理由原话是「`PUT /api/settings/:ns` 是可授权的公开面，脚本、迁移或 AI 生成的 bootstrap 代码可以往 select 里写任意字符串，存下来、读回来，再让每个消费方各自即兴发挥」。有测试钉住（`settings-service.test.ts:431` 起）。\n\n2. **env 路径** `get()`（`settings-service.ts:309-329`）：\n\n   ```ts\n   const envName = envKeyOf(namespace, key);\n   const envRaw = this.env[envName];\n   if (typeof envRaw === 'string') {\n     const def = reg.defaults.get(key);\n     const value = coerceEnvValue(envRaw, def);\n     return { value, source: 'env', locked: true, ... };\n   }\n   ```\n\n   `coerceEnvValue` 只按默认值的类型做形状转换，**不看 `spec.options`**。env 值在 cascade 里优先级最高且 `locked: true`，所以它就是有效值。\n\n结果：`OS_MAIL_PROVIDER=sendgrid` 会被原样交给 mail 插件——正是 #5094 刚摘掉的那个值，从另一扇门走回来了。同理 `OS_BRANDING_THEME_MODE=drak`、`OS_STORAGE_PROVIDER=s4`、`OS_AI_PROVIDER=openal` 等等。\n\n## 为什么算缺陷而不是「运维自己负责」\n\n- 仓库自己的判断已经写在 #5094 的测试注释里：options 表是**执行面**，不是前端约定。那句话对 env 来源同样成立，只是当时没有覆盖到。\n- 失效是静默的：`get()` 不 warn，`/api/settings/:ns` 的读取面会把这个非法值当成 `source: 'env'` 的正常值展示，消费方各自即兴处理（有的 switch 落 default，有的把它当字符串拼进 URL）。\n- 这正是「declared ≠ enforced」的形状：manifest 声明了封闭值域，一条通路不执行它。\n\n## 可能的形状（供定夺）\n\n1. **`get()` 的 env 分支也过 options 表**：不匹配就按 `error` 记一行（写清后果与合法值集），并**忽略该 env 值**回落到 cascade 的下一层。与 #5152 在消费端采取的姿态一致，但放在唯一正确的地方，一次覆盖所有命名空间。\n2. **启动时一次性校验**：`registerManifest` 时扫描该命名空间所有键的 env 覆盖，非法的直接拒绝启动（对照 `OS_TENANCY_POSTURE` 「无法识别的值拒绝启动」的先例）。姿态最硬，也最容易把既有部署拦在门外。\n3. 什么都不做，只在文档里写——但这就是 #5094 明确反对的那种静默。\n\n倾向 **1 + 2 的组合**：注册时报一次（够响、够早），运行时忽略非法值（够安全）。但「拒绝启动 vs 忽略」是姿态决定，不该由实现者自己定。\n\n## 已知的一处已缓解\n\n`auth.membership_policy`（#5152）在 `bindAuthSettings()` 里自己挡了一道：非法值记 `error` 并保持当前策略，不静默落回 `auto`。那是单点补丁，不是这个通路的修复——本 issue 修好后，那段消费端逻辑可以留着当第二道防线，也可以收敛。\n\nFound-during: #5152\n"
+}

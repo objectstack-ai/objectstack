@@ -1,0 +1,37 @@
+{
+  "number": 5245,
+  "kind": "issue",
+  "title": "十份 SKILL.md 的 `compatibility` 仍写「Requires @objectstack/spec 16.x」—— 而它们教的已经是 17 的能力",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T12:05:51Z",
+  "updated_at": "2026-08-06T13:00:45Z",
+  "closed_at": "2026-08-06T13:00:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5245",
+  "body": "发现于 #5238(#5040 E9 文档追平)。**观察类**:今天没有用户会因此撞墙,也没有门在看它 —— 记下来交分诊,不在 E9 单里顺手改(那会把一个跨十份文件的措辞决定塞进一个只该动一份 skill 的 PR)。\n\n## 事实\n\n`skills/` 下十份 SKILL.md 的 frontmatter,九份写着同一句:\n\n```\ncompatibility: Requires @objectstack/spec 16.x (Zod v4 schemas)\n```\n\n(`objectstack-formula` 写 `@objectstack/spec 16.x and @objectstack/formula 16.x`;`objectstack-platform` 写 `16.x and @objectstack/core 16.x … Node 22+`;`objectstack-pm-dispatch` 是唯一一份不按此格式写的。)\n\n仓库当前是 `@objectstack/spec@17.0.0-rc.2`,而 17 是一次**大量移除**的大版本:七个 `App` 键、`DriverCapabilities` 的 31 个位、`restServer.openApi31`、plugin-runtime 家族…… 都在 17 里成为墓碑或 TS2305。\n\n## 为什么是一句真的假话,而不只是过期\n\n`compatibility` 是一份 skill 唯一的自述适用范围。目前这句同时错在两头:\n\n- **对 16 的读者**:skill 正文早已按 17 写。#5238 之后 `objectstack-api` 会明确教「声明式 `apis:` 从 protocol 17 起真实执行」—— 一个照着 `compatibility` 判断自己可以在 16.x 上用这份 skill 的作者,会照抄一段在 16 上被硬拒的声明。\n- **对 17 的读者**:一份自称只支持 16.x 的 skill,在 17 项目里读起来像「可能已经不准了」,于是最该被信的那部分反而被打折。\n\n## 无人看守\n\n没有任何门校验这一行。`check:skill-docs` / `check:skill-refs` 只管生成物同步,`check:skill-examples` 只 typecheck 打了 `os:check` 的代码块 —— 三道门对着一句错的版本声明全部绿。这正是它能整版停在 16.x 的原因。\n\n## 可能的修法(留给分诊定,不预设)\n\n1. **一次性改写**为 17.x —— 最小,但下一个大版本会原样重演;\n2. **改成范围/不写死小版本**(如 `Requires @objectstack/spec >= 17`),把「每次大版本手改十处」这件事从流程里去掉;\n3. **加一道门**:让 `compatibility` 的版本与 `packages/spec/package.json` 的 major 对账(与 `check:skill-docs` 同一条 CI 线),这样它不能再无声漂移 —— 代价是要先定 (1)/(2) 的写法。\n\n方案 3 才是「声明=强制」的那一头,但它依赖先定下写法,所以我不替维护者选。\n\n## 边界\n\n零运行时、零词表;只是 frontmatter 文本 + 可能的一道新门。\n"
+}

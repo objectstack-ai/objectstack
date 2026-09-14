@@ -1,0 +1,35 @@
+{
+  "number": 5786,
+  "kind": "pull_request",
+  "title": "fix(core): logger 脱敏表按词边界匹配,不再吃掉 `keys`/`tokens` 这类普通字段 (#5573)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T05:26:47Z",
+  "updated_at": "2026-08-06T07:21:29Z",
+  "closed_at": "2026-08-06T07:21:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T07:21:28Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5786",
+  "body": "Fixes #5573\n\n按维护者裁决(评论 5199145168)的 **A 案**实施:`packages/core/src/logger.ts` 的 `redactSensitive` 由子串 `includes` 改为 **camelCase / snake_case 分词后的词边界匹配**。默认脱敏表 `['password','token','secret','key']` 本身没有动,`packages/spec/src/system/logging.zod.ts` 的 schema 默认值也没有动 —— 变的只是这张表**怎么用**。\n\n## 现象与实现\n\n旧判定是 `key.toLowerCase().includes(pattern)`,于是任何名字**含有**脱敏词子串的字段整块变成 `***REDACTED***`:`keys`、`keyword`、`keywords`、`keyboard`、`monkey`、`tokens`、`tokenizer`、`secretary`。读者不但丢了事实,还被告知\"这里挡住了一个秘密\",比字段缺失更误导。\n\n新实现三个模块级函数 + 一个私有方法:\n\n- `tokenizeFieldName()` —— 按 camelCase / snake_case / kebab-case / 字母-数字边界分词并小写化。`apiKey`、`api_key`、`API_KEY`、`x-api-key` 都分成 `['api','key']`;`monkey`、`keyword`、`tokenizer` 保持单词一个。\n- `singularizeWord()` —— 只覆盖脱敏词汇会遇到的复数拼法(`keys`/`tokens`/`secrets`/`passwords`/`passes`),并且不会把 `address`/`status` 变成新词。\n- `fieldWordsMatchPattern()` —— 逐词比对;多词 pattern(host 配 `redact: ['apiKey']`)按连续词串匹配。\n- `ObjectLogger.isRedactedFieldName()` —— 递归里唯一的判定入口,pattern 在构造函数里分词一次。\n\n顺带证实了一个**活的** in-tree 命中(原 issue 认为\"目前没有任何 in-tree 调用命中\"):`packages/runtime/src/dispatcher-plugin.ts:562` 当年为躲开脱敏器特意把字段 `key` 改名成 `keyedBy`,但 `'keyedby'.includes('key')` 依然为真 —— 那条限流日志的 `keyedBy` 一直是 `***REDACTED***`,这个 PR 之后才真正显示出限流键是什么。该文件本 PR 不需要改,行为自动恢复。\n\n## 两个边角的取舍(裁决没点名,写在这里请复核)\n\n**1. 全小写连写 `apikey`。** 先实测:纯词边界下 `apikey` 分词只有一个词,**会漏**。不能用\"以 `key` 结尾\"救,因为 `monkey`/`turkey`/`whiskey` 也以它结尾 —— 那正是本单要去掉的误报。任何区分二者的规则都必须在某处编码词法知识,所以做成一张**显式限定词表** `CONCATENATED_SECRET_QUALIFIERS`(`api`/`access`/`refresh`/`client`/`private`/`session`/`ssh`/… 共 31 个):`限定词 + 脱敏词` 连写算命中,别的连写不算。\n\n- 只认**后缀**连写,所以 `secretary`、`keyword`、`keyboard` 保持干净。\n- 表外连写(`foobarkey`)不脱敏。按仓库命名惯例(Prime Directive #3:配置键 camelCase、机器名 snake_case)写成 `fooBarKey` / `foo_bar_key` 就通用命中 —— 全小写连写本来就是惯例外拼法,这张表只是安全网。\n- 方向上它比\"例外表\"(B 案)保守:B 案是从子串往回退、漏一个英文词就误报;这张表是从词边界往外加、漏一个限定词只是回到词边界基线。\n\n**2. 复数。** 裁决点名 `tokens` 不脱敏,但 `apiKeys` 分词为 `api`+`keys`,`keys ≠ key`,纯词边界会让 `apiKeys: ['sk-…']` 漏网 —— 与\"不漏真秘密\"冲突。按派发指示实现为:**复数形变只在与其他词组合时命中**。裸 `keys`/`tokens` 不脱敏(集合与计数),复合词里的 `apiKeys`/`refresh_tokens`/`clientSecrets`/`userPasswords` 照常脱敏。\n\n两个诚实的残留,都已钉成测试而不是留给下一个读者去踩:\n\n- 裸 `passwords` / `secrets` 也不脱敏(裸复数规则一视同仁)。这是维护者词边界决定的直接推论,不是我引入的;要挡的 host 写 `redact: [..., 'passwords']` 显式加回,已有用例。\n- `tokenCount`、`promptTokens`、`completionTokens` **仍然脱敏** —— 词边界分不出词**义**,`token` 作为一个词就是命中,复合复数同理。这三个在本 PR 之前也是脱敏的,**没有回归**,但也没被修好。再收窄意味着要给 `prompt` 和 `api` 这两个限定词排座次,那是维护者的面,不是我能自选的,所以只钉住现状并在此点名。\n\n## PR #5572 的 pin 改判\n\n`packages/services/service-automation/src/thrown-cause-diagnostics.test.ts` 里那条\"原样转发 Zod issues 会被脱敏\"的 pin,按裁决明文授权改判(只动这一条 `it` 的断言与其说明):`toContain('REDACTED')` → `not.toContain('REDACTED')`,并且断言翻到**正面** —— `visibleIf` 出现在输出里、整个 `issues` 结构逐字相等,而不是\"因为什么都没产出所以断言过了\"。\n\n✅ **过期注释已按 PM 裁决订正**(#5573 评论 5200739786,第二个提交 `ccbdbff`)。`thrown-cause-diagnostics.ts` 模块 docblock 用两条理由解释\"为什么压平而不是原样转发\",第一条依据的正是\"按子串脱敏\",本 PR 之后失效。现在:\n\n- 第一条 bullet 标注为**因 #5573 失效的历史理由** —— 裸 `keys` 不再被脱敏 —— 并写明今天判定新增字段的规则:`apiKey` / `api_key` 脱敏,`keys` / `tokens` 不脱敏。\n- 第二条(一条 Zod issue 可能带上整个被拒 `input`,日志记录必须有界)**独自承接**这个决定,仍然成立,措辞改为不再依赖上一条。所以 helper 继续压平 issue,字段名 `unrecognized` 保持不变。\n- `LoggedCauseIssue.unrecognized` 的字段注释复述了同一句已过期的 \"substring redactor\",一并订正(字段名改回是纯 churn,不改)。\n\n纯注释、无行为变化:`eslint` 干净,`thrown-cause-diagnostics.test.ts` 定向复跑 `Test Files 1 passed / Tests 12 passed`。\n\n## 测试\n\n`packages/core/src/logger.test.ts` 新增 `redaction matches whole words, not substrings (#5573)`,88 个用例:\n\n- **真秘密矩阵 42 条全部仍脱敏** —— 脱敏词本身、camelCase、snake_case、SCREAMING_SNAKE、kebab(`x-api-key`)、全小写/全大写连写(`apikey`/`APIKEY`/`accesstoken`/`clientsecret`/`privatekey`)、复合复数(`apiKeys`/`api_keys`/`accessTokens`/`clientSecrets`/`userPasswords`/`apikeys`)。\n- **症状面 14 条不再脱敏** —— `keys`/`keyword`/`keywords`/`keyboard`/`monkey`/`tokens`/`tokenizer`/`secretary`/`donkey`/`turkey`/`whiskey`/`hockey`/`keyedBy`/`tokenizerName`。\n- 嵌套用例:`{ issues: [{ code: 'unrecognized_keys', keys: ['visibleIf'], path: ['nodes', 0] }] }` 逐字幸存(#5573 原始复现);反向的 `{ connector: { auth: { apiKey } } }` 深层仍被打掉。\n- 裸复数 + 显式 opt-in;host 多词 pattern(`redact: ['apiKey']` 命中 `apiKey`/`api_key`/`apikey`,而不放大到裸 `key`)。\n\n```\npnpm --filter @objectstack/core test\n  Test Files  27 passed (27)\n       Tests  498 passed (498)\n\npnpm --filter @objectstack/service-automation test\n  Test Files  64 passed (64)\n       Tests  762 passed (762)\n```\n\n**反向验证(方向先判后跑)。** 预判:把 `isRedactedFieldName` 换回 `includes` 后,**症状面转红、真秘密矩阵保持全绿**(子串是这些拼法上的超集)。实跑与预判一致 —— 17 红,全部落在症状面(14 条 `no longer redacts …` + 嵌套复现 + 裸复数 + 多词 pattern),42 条真秘密矩阵与\"深层嵌套仍脱敏\"保持绿:\n\n```\n× … > no longer redacts keys / keyword / keywords / keyboard / monkey / tokens\n× … > no longer redacts tokenizer / secretary / donkey / turkey / whiskey / hockey\n× … > no longer redacts keyedBy / tokenizerName\n× … > keeps a nested `keys` field readable — the exact #5573 repro\n× … > leaves a BARE plural alone, and honours an explicit opt-in for it\n× … > honours a host-configured multi-word pattern, without widening it to its parts\n✓ … > still reaches a secret nested several levels down\n Test Files  1 failed (1)\n      Tests  17 failed | 71 passed (88)\n```\n\n其中\"多词 pattern\"转红是新匹配器的**净增覆盖**:旧的 `includes` 下 `redact: ['apiKey']` 命不中 `api_key` 字段,现在能。\n\n门禁:\n\n```\npnpm check:type-check-coverage\n  ✓ --self-test — 22 semantic case(s) + 11 observation case(s) hold.\n  OK — 63/78 workspace packages type-checked, 15 in the DEBT ledger (358 frozen raw errors)\n\npnpm check:nul-bytes   → OK (scanned 5654 tracked text file(s); no raw ASCII control bytes)\npnpm check:doc-authoring → ✓ 362 files clean\neslint(改动文件)      → 无输出\n```\n\n`packages/core` / `@objectstack/service-automation` 都没有 `typecheck` script(在 #4311 的 DEBT 台账里),所以类型面的证据是上面那条比对冻结计数的 ratchet —— 计数未增长即本次改动没带进新类型错误。\n\nchangeset:`.changeset/logger-redact-word-boundary.md`(patch),正文含匹配语义 FROM → TO 表与影响面(host 侧自定义 `redact` 的行为变化:靠子串宽匹配\"顺手\"挡住某字段的部署需要显式写进 `redact`;反向收益是同一个词现在跨拼法命中)。\n"
+}

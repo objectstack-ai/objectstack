@@ -1,0 +1,38 @@
+{
+  "number": 4931,
+  "kind": "issue",
+  "title": "Showcase Smoke 定时任务 30 次里 16 次失败(三个图表面板拿不到 chart SVG),且诊断产物上传路径写错 —— 每次失败都无法事后定位",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "domain:devx",
+    "pm:blocked",
+    "target:v17",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T16:32:55Z",
+  "updated_at": "2026-08-06T11:51:20Z",
+  "closed_at": "2026-08-06T11:50:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4931",
+  "body": "## 两个独立缺陷\n\n### 1. 三个图表面板持续失败\n\n[run 30796529117](https://github.com/objectstack-ai/objectstack/actions/runs/30796529117)(2026-08-03 08:12):\n\n```\n3 failed\n  [chromium] › e2e/showcase-smoke.spec.ts:47:7 › surface renders cleanly: Delivery Operations\n  [chromium] › e2e/showcase-smoke.spec.ts:47:7 › surface renders cleanly: Chart Gallery\n  [chromium] › e2e/showcase-smoke.spec.ts:47:7 › surface renders cleanly: Command Center\n31 passed (4.9m)\n```\n\n断言点是 `showcase-smoke.spec.ts:65`:\n\n```js\nconst box = await svg.boundingBox();\nexpect(box, `${surface.name}: no chart SVG`).not.toBeNull();\n// >0 alone previously passed even on a collapsed ~130px-wide chart panel\n```\n\n失败的三个全是带图表的面板,其余 31 项通过。定时运行的历史:**30 次里 16 次失败**,最近连续两天(08-02、08-03)都红,而 07-30 / 07-31 / 08-01 是绿的 —— 时红时绿,不是一次性环境问题。到底是渲染回归还是探测条件不稳,需要看 trace 才能判断,而这正好被第 2 个缺陷挡住了。\n\n### 2. 诊断产物从未上传\n\n```\n##[warning]No files were found with the provided path: examples/app-showcase/playwright-report/.\n          No artifacts will be uploaded.\n```\n\n上传步骤配的是 `examples/app-showcase/playwright-report/`,而 Playwright 实际把截图、trace、error-context 写在 `test-results/` 下:\n\n```\ntest-results/showcase-smoke-surface-renders-cleanly-Command-Center-chromium-retry1/test-failed-1.png\ntest-results/showcase-smoke-surface-renders-cleanly-Command-Center-chromium-retry1/trace.zip\ntest-results/showcase-smoke-surface-renders-cleanly-Command-Center-chromium-retry1/error-context.md\n```\n\n`if-no-files-found: warn` 让这个错配只是一条 warning,于是**每一次失败的证据都在 runner 回收时丢掉了**。这也解释了为什么一个半数失败的探针能长期无人处理 —— 想查也查不了。\n\n第 2 条应当先修:它是第 1 条的**前提**。修好之后下一次夜跑就会留下 trace,届时才谈得上判断图表面板到底怎么了。\n\n## 建议\n\n- 上传路径改为同时覆盖 `playwright-report/` 与 `test-results/`(或改成 Playwright 配置里实际的 `outputDir`);\n- `if-no-files-found` 在**测试失败**的前提下应为 `error` —— 失败却没有产物本身就是一个应当报警的状态,而不是 warning。"
+}

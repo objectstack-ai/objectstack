@@ -1,0 +1,35 @@
+{
+  "number": 5934,
+  "kind": "pull_request",
+  "title": "fix(plugin-security): 派生 capability 只 reconcile 自己那半边的行,admin/package 行不再每 boot 被占位符覆盖 (#5876)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T12:25:57Z",
+  "updated_at": "2026-08-06T12:43:15Z",
+  "closed_at": "2026-08-06T12:43:14Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T12:43:14Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5934",
+  "body": "Fixes #5876\n\n## 缺陷\n\n`bootstrapSystemCapabilities` 的 seed 循环按 `name` 找到行就刷 `label`/`description`,**不看 `managed_by`** —— 而它正上方的注释写的正好相反(`do NOT clobber admin edits`)。#2909 T3 真正做成 seed-once 的只有 `scope`,而且只有 `scope`。\n\n这条循环里有两半:\n\n- **curated 半边**(`PLATFORM_CAPABILITIES`):`label`/`description` 确由平台作者撰写,新版本发新文案是正当的 reconcile;\n- **派生半边**(permission set 的 `systemPermissions[]` 里出现、又无人声明的字符串):`label` 是 `humanize(name)`、`description` 是 `Capability` 加名字加句点(例如 `Capability showcase.export_data.`),**根本不存在“平台作者写的文案”** —— 它是从被授予的那个字符串生成的占位符。\n\n把占位符刷到别人写的行上不是 reconcile,是**每次启动把作者覆盖掉一次**,而且外部看不出任何异常(静默数据丢失)。可达链窄但真实,且要求 admin 行**先于**授权存在:管理员在 Setup 建能力 `X`(`managed_by:'admin'`,ADR-0066 写守卫留给 admin 的唯一 provenance)→ 装上一个 bootstrap permission set 授予 `X` 的应用 → 此后每次启动改写一次。反向顺序不可达:派生占位符一旦建成 `managed_by:'platform'`,写守卫就不再允许 admin 编辑它。\n\n## 改法(窄修:按 `managed_by` 守卫)\n\n派生半边只 reconcile **它自己拥有的行**:非 curated 名下的 `managed_by:'platform'` 行只可能是上一次启动留下的自家占位符。`admin` 行、`package` 行、以及 provenance 缺失的行(`sys_capability.managed_by` 是 `required` + `defaultValue: 'admin'`,所以“证不出是我们的”一律按不是处理)原样保留,并计入新增的 `skippedAuthored`。\n\n`skippedAuthored` 进启动摘要而**不是** warn:能力照常解析、作者写的文案本就是更好的那份,这不是降级(#4632 的判定问题答“否”)。\n\n**curated 半边行为不变** —— 理由如上,issue 正文也已给出。`scope` 两边都仍是 seed-once(#2909 T3)。\n\n注释与行为重新一致:改的是行为,不是把注释改去迁就缺陷。模块头也补上了“两半权限不同”的说明。\n\n### ⛔ 没有静默扩面的那一问\n\nissue 末尾还问了更宽的一问:**派生 pass 是否根本不该 reconcile 任何它没有创建的行**。本 PR **不回答它**,行为改动严格限于 `managed_by` 守卫。\n\n值得记下的一个观察(供该决策件参考,不构成本 PR 的改动):对**派生**半边而言,这两问的答案恰好重合 —— 非 curated 名下的 `platform` 行只可能由这同一段派生逻辑写出,所以“只碰 `platform` 行”实际就等于“只碰自己创建的行”。真正还没回答的是 **curated 半边**要不要也守卫(即平台发新文案是否应当越过一个 admin 行)。那需要先判断 curated 名下出现非 platform 行是否可达 —— 本 PR 不做这个判断,也没有为它写 pin(为一个未定的行为写 pin 等于把它固化)。\n\n## 先红后绿 / 方向\n\n新 pin 在**未修复**的源码上跑,7 条红(方向与预期一致):\n\n- `bootstrap-system-capabilities.test.ts`:admin 行 / package 行 / provenance 缺失行三条,断言 `label`/`description` 保持不变 —— 未修复时全被改写成 `Showcase Export Data` / `Capability showcase.export_data.`;跨启动那条同理;两条计数器断言拿到 `undefined`(字段还不存在)。\n- `bootstrap-declared-capabilities.test.ts`:#5875 留下的那条 REVERSE pin 翻转后红。\n\n### #5875 那条 REVERSE pin 的红绿变化(方向说明)\n\n原 pin 名为 `REVERSE: dropping that name from the list lets the derivation overwrite the admin row`,钉的是**旧事实**:把名字从 `materializedCapabilityNames` 里拿掉,派生逻辑就会把 admin 行改写成 `Showcase Export Data`。它当时在 main 上是**绿**的 —— 它钉的正是本 issue 的缺陷,#5875 用它来说明“unowned 路径为什么要检查已有行”。\n\n修复后该事实不再成立,所以**不是删它**,而是按 PM 指引**翻转为钉新语义**:同一夹具、同样的空跳过表,断言 admin 行原样保留(`Admin Made` / `Admin wrote this.` / `managed_by: 'admin'`),并在注释里写清这条反面事实已被 #5876 修掉、以及跳过表在这个形状上不再是唯一防线。翻转前后:**旧断言在修复后会红(所以必须翻)、新断言在修复前红、修复后绿**。\n\n同时新增一条**正向 pin**,让探针有区分力(守卫不能把正当的 reconcile 一起关掉):\n\n- `DISCRIMINATION (#5876): with the name dropped, a PLATFORM placeholder is still refreshed` —— 同一夹具、同样的空跳过表,只把 provenance 换成 `platform`,reconcile 照旧发生。这条在**修复前后都绿**,这正是它的用处:它是对照组,证明红的那几条红在“provenance”,不是红在“派生逻辑不写了”。\n- `bootstrap-system-capabilities.test.ts` 里的 `POSITIVE CONTROL: still refreshes its OWN platform placeholder` 与 `the guard is scoped to the DERIVED half — curated names still refresh` 是同一目的的另外两条。\n\n层次关系也一并说清:`materializedCapabilityNames`(#4967 Part 1,调用点声明谁已被别的 pass 落地)与本 PR 的守卫(写入点强制执行)是**两层**。对 admin 行这个具体形状,守卫之后跳过表不再是唯一防线;但跳过表仍然表达启动顺序契约,并且覆盖守卫看不见的东西 —— 一个**从未被任何包声明过**的 admin 行不会出现在任何 `materializedNames` 里,那正是本 issue 的可达链,只有写入点的守卫拦得住。\n\n## 验证\n\n```\npnpm --workspace-concurrency=2 --filter @objectstack/plugin-security test -- --maxWorkers=2\n  Test Files  35 passed (35)\n       Tests  768 passed (768)\n\npnpm --workspace-concurrency=2 --filter @objectstack/plugin-security typecheck\n  tsc --noEmit   (无输出 = 通过)\n\nnode scripts/check-nul-bytes.mjs             → OK (5723 files)\nnode scripts/check-engine-double-contract.mjs → OK (70 pinned, 133 DEBT, 2 exempt)\nnode scripts/check-adr-anchors.mjs           → OK\neslint(三个改动文件)                          → 无输出\n```\n\n未新增任何 fake engine:两个测试文件复用各自原有的 `makeQl`(`find`/`insert`/`update`,无 `delete`),`engine-double-contract` 的 DEBT 账本条目计数未变。\n\n以上均在合入最新 `origin/main`(`a6b3ee7a1`)、`pnpm install --frozen-lockfile` 并重建依赖后重跑过一遍。\n\n## 文件面\n\n- `packages/plugins/plugin-security/src/bootstrap-system-capabilities.ts`\n- `packages/plugins/plugin-security/src/bootstrap-system-capabilities.test.ts`\n- `packages/plugins/plugin-security/src/bootstrap-declared-capabilities.test.ts`\n- `.changeset/derived-capability-managed-by-guard.md`(user-visible:admin 写的 label/description 不再每 boot 丢失)\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JwwiU9bjhwy2SWj13ho8uv\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JwwiU9bjhwy2SWj13ho8uv)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 5711,
+  "kind": "pull_request",
+  "title": "fix(service-settings): gate OS_* env overrides on the manifest's declared options table (#5204)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T01:47:52Z",
+  "updated_at": "2026-08-06T02:11:29Z",
+  "closed_at": "2026-08-06T02:11:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T02:11:28Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5711",
+  "body": "Fixes objectstack-ai/objectstack#5204\n\n## 前提重验(先对 origin/main 逐条核实,再动手)\n\nIssue 的两条事实与落点都成立,且比 issue 描述的更严重一层:\n\n1. **写入路径确实过表**:`packages/services/service-settings/src/settings-service.ts` 的 `validatePatch` 里 `OPTION_BEARING_TYPES` + `declaredOptionValues` 校验在位,`invalid_option` 由 `settings-service.test.ts:431` 起的一组用例钉住。\n2. **env 路径确实不过表**:`get()` 的 env 分支只做 `coerceEnvValue(envRaw, def)`,按默认值的类型做形状转换后直接 `return { source: 'env', locked: true }`,全程不读 `spec.options`。\n3. **新发现:同一个 env 覆盖有第三个读取点**,`setMany` 的 pre-flight:\n\n   ```\n   const envRaw = this.env[envKeyOf(namespace, key)];\n   if (typeof envRaw === 'string') throw new SettingsLockedError(namespace, key);\n   ```\n\n   它只看环境变量**是否存在**,不看值是否合法。这条对本单是决定性的:如果只按裁决改读取侧,非法 env 值会变成「读侧 `locked: false`、写侧照旧抛 `SETTINGS_LOCKED`」——设置页把字段渲染成可编辑,保存却失败;更糟的是该键**谁都配不了**(env 值被忽略、UI 被拒),只能改环境变量才能解套,比 #5204 原本的洞更差。所以三个读取点必须共用一个判断,详见下面「locked 语义」。\n\n`auth.membership_policy`(#5152)的那道 `bindAuthSettings` 防线**保留未动**。归并建议见文末。\n\n## 实现\n\n按维护者裁决「方案 1 为主 + 注册时响亮 error(不拒绝启动)」:\n\n- **一个判断,三个调用点**。新增 `effectiveEnvOverride(reg, namespace, key)`:返回「真正生效的 env 覆盖」或 null。`get()`、`setMany` 的写锁、注册时扫描全部走它。报告动作放在这个函数里而不是各调用点,这样将来第四个调用者不可能读到覆盖却让拒绝无声。\n- **一个比较,两条路径**。抽出模块级 `firstRejectedOption(allowed, value)`,env 侧与 `validatePatch` 共用。#5204 的成因正是「两条产出有效值的路径只有一条过表」,再开一份手写比较等于把同样的缺陷推迟。\n- **非法即忽略,不修补、不猜测**。没有诚实的办法猜一个拼错的值原本想选哪个,猜错比不生效更坏(#5152 里 `invite_only` 被读成 `auto` 就是代价)。忽略意味着回落 cascade 下一层。\n- **注册时扫描**(`auditEnvOverrides`):一个永远不会生效的覆盖是**部署配置错误**,运维应该在启动时和其它启动输出一起看到,而不是等谁哪天打开设置页,也不是永远看不到(进程生命周期内没人读的键否则永远沉默)。**只报告,不拒绝启动**:option 表会变,#5094 摘掉 `sendgrid` 之前,`OS_MAIL_PROVIDER=sendgrid` 是当天写下就正确的配置,把升级变成崩溃启动恰好惩罚了这条消息想帮的人。\n- **校验面严格限定**在「声明了非空 options 表的 `select`/`radio`/`multiselect`」。`RegisteredManifest.optionTables` 里**没有**该键 = 没有可执行的枚举 = 行为完全不变(text / boolean / number / password 一律照旧)。\n\n### locked 语义(本单的连带修复)\n\n`setMany` 的写锁改为按「是否真正生效」判断,而不是按环境变量是否存在。**生效的**覆盖照旧锁定该键(读侧 `locked: true`,写侧抛 `SETTINGS_LOCKED`),这条没变、并新增用例钉住,防止过度推广成「env 永不锁定」;**被拒绝的**覆盖什么也不锁,读写两侧一致地认为该键可编辑。\n\n被忽略的 env 值也**不进 `cascadeChain`**:带 `locked: true` 的 env 条目会被下面 `chain.find((e) => e.locked === true)` 捡走,变成「报告一个它根本没提供的值被自己锁住」,与读取面该给调用方的信息正相反。\n\n### error 消息\n\n级别取 `error` 而非 `warn`,依 AGENTS.md「Degradation log levels」的判据:降级之后系统从外面看仍然正常(读取面给出一个完全合理的值、挂着一个完全合理的来源),而运维声明的意图根本没生效——#5152 对 `auth.membership_policy` 是同样的裁断。按同一节「Say it once, at the first degradation」,去重键为「环境变量 + 值」,所以 `getNamespace` 每次页面加载不会刷屏,而一个**新的**坏值仍会被报告(`this.env` 可能是活的 `process.env` 引用)。\n\n消息含变量名、被拒的值、合法值集、后果与修复动作。刻意**不带结构化 meta**:`packages/core/src/logger.ts` 的 `redactSensitive` 按 `includes` 匹配 `key`/`token`/`secret`/`password`,顺手写成 `{ key }` / `{ envKey }` 会被脱敏成 `***REDACTED***`,消息看着完整而诊断已被删掉(#5573 的教训)。`encrypted` specifier 不回显被拒的值,与写入侧同规则。\n\nlogger 经 `SettingsServicePlugin` 注入(`ctx.logger`),未注入时回落 `console.error`——没有 kernel 的场景(单测、control-plane mock、logger 之前的 bootstrap)也必须出声,沉默正是本单要修的病。\n\n## multiselect 形状:按现状核实的结论\n\n`coerceEnvValue` 里**没有任何逗号切分**:仅当声明的 default 是数组/对象时才 `JSON.parse`。所以\n\n- 声明了数组 default 的 multiselect,env 形状是 JSON 数组,逐成员过表;\n- 没有 default 的 multiselect,env 原样是字符串,按标量过表。`\"a,b\"` 因此会被判非法——这不是回归:今天把字符串 `\"a,b\"` 交给期待数组的消费方本来就是坏的,现在改为响亮拒绝。\n\n任一成员非法则**整个 env 值作废**(不做部分接受),否则会造出没人配置过的组合。仓库现无 `multiselect`/`radio` 生产 manifest,这两类由手搭 manifest 的用例覆盖——与 `OPTION_BEARING_TYPES` 注释里既有的理由一致:否则第一个写出 multiselect 的 manifest 会静悄悄重开这个洞。\n\n## 一处需要维护者知道的曝光面(未在本 PR 处理)\n\n`localization.timezone` 声明为 `select`,但表里只有 **17 个策展时区**,而它自己的 description 写的是「IANA zone」;`localization.currency` 同形(9 个 ISO 4217 码,description 写「ISO 4217 code」)。这类「策展便利列表」自 #5131 起在写入侧已经是穷尽式执行边界,本 PR 让 env 侧与之一致——于是一个用 `OS_LOCALIZATION_TIMEZONE=Europe/Zurich` 固定未列出合法 IANA 时区的部署,现在会被忽略并回落(带响亮 error)。\n\n仓库内没有任何地方实际设置这些变量(只有 `packages/rest/src/rest-api-plugin.ts` 注释提及),所以不构成在库回归。张力本身是 #5131 引入、由本 PR 传播到 env 的,已另开 issue 记录,方向是在**生产者**侧修(补全表,或换掉 specifier 类型),而不是在消费侧放宽——因此本 PR 不为它开豁免口子。\n\n## 测试\n\n`packages/services/service-settings`:**243 passed(15 文件)**,其中新增 17 个用例,覆盖:非法值忽略 + error + 回落默认值 / 回落下一层(tenant 行)、合法值照常生效并锁定、无 options 键完全不受影响、注册时一次性 error、注册只报告不拒绝、只报一次而非每次读、注册后出现的**新**坏值仍报告、读取面(`getNamespace`)如实报告生效层且 chain 无 env 条目、无 logger 时回落 console.error、multiselect 整体作废与全合法通过、数值 option 经 env 往返仍匹配、encrypted specifier 不回显值,以及 locked 语义两个方向的钉子。\n\n消费半径全绿:`objectql` 1970、`plugin-auth` 786(含 #5152 membership-policy 全套)、`plugin-email` 297、`rest` 751、`cli` 825、`verify` 17。\n\n`plugin-auth` 那套之所以不受影响:它注入的是 mock 读取面(`settingsStore.values` 直接给 `{ value: 'invite_only', source: 'env' }`),不走真实 `get()`,所以 #5152 这道第二防线仍被真实测着。\n\n### 反向验证(先预测方向,再跑)\n\n预测:把删掉的肢体接回去(env 值无条件返回、`setMany` 按存在性锁定、去掉注册扫描),新钉子应**转红**,且是最普通的方向——本单堵的是一个**根本不存在的检查**,不是 `??` 别名链,所以规范非法的值此前是被**接受**的,不存在 #5009 那类反转。同时,描述改动前既有行为的用例应**保持绿**。\n\n实测一致:**12 红 / 231 绿**。转红的正是 12 个新行为钉子;保持绿的 5 个是「合法覆盖照旧胜出」「生效覆盖照旧锁定写入」「无 options 键不受影响」「全合法 multiselect 通过」「数值 option 往返」。\n\n### 门检查\n\n`check:nul-bytes` OK(5610 文件);改动文件 `grep -naP` 扫控制字节无命中;`check:durability-degradation-log-level` OK(24 个 seam 全响亮);`check:type-check-coverage` OK——本包带 13 错的 DEBT 台账未被移动(实测仍为 13,且无一条落在改动文件里);`check:startup-registry-verdict`、`check:init-service-contract`、`check:error-code-casing`、`check:wildcard-fallthrough` 均 OK;改动文件 eslint 干净。changeset 为 patch。\n\n## 关于 #5152 是否归并的建议(按代码证据,不在本 PR 动手)\n\n**建议保留**,理由是它守的不是同一件事:`bindAuthSettings` 的检查跑在 `isExplicit('membership_policy')` 之后、`patch.membershipPolicy` 之前,守的是「进入 AuthManager 的值必须是 `MembershipPolicy`」——数据来源不止 env,还有存储行(`source: 'global'`/`'tenant'`),而存储行可能带着 option 表收紧之前写下的历史值(`validatePatch` 的 TOUCH 闸门刻意允许这种漂移继续存在,以免把工作区锁死在自己的设置页外)。本 PR 关掉的是 env 这扇门,关不掉那条历史漂移路径。归并会把一个仍然可达的输入暴露给 `AuthManager`。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BWS4heBoAitLmzCLhcYdbK)_"
+}

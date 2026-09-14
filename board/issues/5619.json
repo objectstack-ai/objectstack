@@ -1,0 +1,34 @@
+{
+  "number": 5619,
+  "kind": "issue",
+  "title": "[engine-double-contract] 把 assertEngineDeleteDispatch 下沉到 @objectstack/metadata-core —— 七条 metadata-protocol 基线条目唯一存在的关闭路线(#4987 只修了处方文字)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T20:39:27Z",
+  "updated_at": "2026-08-06T11:00:16Z",
+  "closed_at": "2026-08-06T11:00:16Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5619",
+  "body": "发现于 #4987(台账处方文字修正)执行过程中。#4987 的文件面被显式限定为 `scripts/engine-double-contract.baseline.json` 的 `why`/`closes` 文字,**下沉本身没有落点**,故按 Prime Directive #10 单开、未指派。\n\n## 现象\n\n`scripts/engine-double-contract.baseline.json` 里现有 **7 条** `packages/metadata-protocol/**` 条目,全部因为同一个结构原因无法 pin:\n\n- `protocol-publish-drafts-endpoint-gate.test.ts`(#5206)\n- `protocol-publish-drafts-org-scope.test.ts`(#4987 修文字)\n- `protocol.runtime-authoring-gate.test.ts`(#4987 修文字)\n- `protocol.save-flow-canonicalization.test.ts`(#4987 修文字)\n- `sys-metadata-repository.draft-drain.test.ts`(#4981)\n- `sys-metadata-repository.history-counters.test.ts`(#4867)\n- `sys-metadata-repository.recorded-by.test.ts`(#4987 修文字)\n\n`@objectstack/objectql` 的 `dependencies` 含 `@objectstack/metadata-protocol`(`workspace:*`),所以反向加 devDependency 即成环,turbo 2.10.7 直接拒绝任务图(本轮 #4987 在 worktree 上实测复现,`build` 与 `test` 两个 task graph 都被拒,exit 1,随后回退):\n\n```\n WARNING  Circular package dependency detected: @objectstack/objectql, @objectstack/metadata-protocol\n  x Cyclic dependency detected:\n  | \t@objectstack/objectql#build, @objectstack/metadata-protocol#build\n```\n\n`#4987` 已把这 7 条的 `why`/`closes` 全部改成实测的环 + 下沉路线,但**下沉代码本身未做** —— 而三条早先已改好的条目(#4867 / #4981 / #5206)的 `closes` 写的是「tracked as #4987」。#4987 一旦按其真实文件面(仅台账文字)关闭,这个引用就指向一个只改了措辞的已关闭 issue。本 issue 就是接住那个引用的落点。\n\n## 为什么下沉是可做的(已静态核实)\n\n判据来自同文件 `packages/spec/src/contracts/data-engine.test.ts` 那条 EXEMPT:反向 import 不可行时,唯一出路是下沉到**两边都已依赖**的包。\n\n- 生产者 `packages/objectql/src/engine-delete-dispatch.ts`(168 行)**没有任何 import** —— 纯自包含模块,导出 `ENGINE_DELETE_REJECT_MESSAGE` / `EngineDeleteDispatch` / `EngineDeleteDispatchInput` / `scalarDeleteId` / `resolveEngineDeleteDispatch` / `assertEngineDeleteDispatch` / `EngineDeleteDispatchCase` / `ENGINE_DELETE_DISPATCH_CASES`。下沉是一次**搬移**,不是重构。\n- `@objectstack/metadata-core` 是现成共同依赖:`objectql -> metadata-core`(`workspace:*`)与 `metadata-protocol -> metadata-core`(`workspace:*`)都已存在;`metadata-core` 的 `dependencies` 只有 `{ @objectstack/spec, zod }`,**不含 objectql**,故不引入新环。\n- `@objectstack/spec/contracts` 是另一候选(`spec` 的 `dependencies` 只有 `{ zod }`),但仅当「该谓词属于契约层」成立时才对 —— 需要拍板,不要顺手选。\n\n## 完成范围\n\n1. 把 `engine-delete-dispatch.ts` 搬到 `@objectstack/metadata-core`(或拍板后的 `spec/contracts`),`@objectstack/objectql` 改为 re-export 以保持现有 24 个 pinned 调用点与公共 API 不变。\n2. 7 个 metadata-protocol 测试文件的 fake `delete()` 接上该谓词(从新落点 import),跑 `@objectstack/metadata-protocol` 套件 —— 注意其中若有 fixture 断言 predicate delete 成功,真引擎是拒绝的,按 #5393 之后可用 `multi: true` 表达。\n3. 从基线里**删掉**这 7 条(gate 是 shrink-only 双向校验:文件已无 unguarded double 时条目必须整条消失),`pnpm check:engine-double-contract` 计数从 24 pinned / 34 baseline 变为 31 pinned / 27 baseline。\n4. 顺带(在本 issue 范围内,不必另开):#4867 / #4981 / #5206 三条的 `closes` 里「tracked as #4987」应改指本 issue;这三条还写着「the four/five sibling metadata-protocol entries」,而现在同族共 7 条(各有 6 个 sibling)—— 硬编码计数已漂移。#4987 修的四条已改用免计数措辞(「every other metadata-protocol entry in this ledger」)以避免再漂。若第 3 步整批删除,这两处随之消失。\n\n## 影响(如实说明,请分诊定级)\n\n不是用户今天会撞到的缺陷,而是**测试替身比真契约松**的现存缺口:这正是 #4434 让一整段 REST 路由死掉而套件全绿的形状,gate(#4550)就是为消除它而建。7 个文件里的 fake delete 目前可以接受真引擎会拒绝的调用。域应为 `domain:engine-core`(搬移生产者模块 + 改 7 个测试)。\n\n## 参考\n\n- #4550 / PR #4948(gate 与基线落地)、#4434(起因)\n- #4987(本 issue 的来源:台账处方文字修正)、#4867 / PR #4980、#4981、#5206\n- #5480(objectql 的 UPDATE dispatch 无共享判定函数 —— 相邻不同题:那条是 update 侧缺函数,本条是 delete 侧函数位置错)"
+}

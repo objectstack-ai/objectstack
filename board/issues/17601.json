@@ -1,0 +1,36 @@
+{
+  "number": 17601,
+  "kind": "issue",
+  "title": "[finding · UNVERIFIED, derived from reading] On a stranded `resubmit` strand the row stays `returned`, so a second submitter `resubmit` appears to pass every approvals door guard and insert a second `action: 'resubmit'` row against the \"at most one such action row\" assumption",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:services",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-11T02:07:32Z",
+  "updated_at": "2026-09-11T13:28:28Z",
+  "closed_at": "2026-09-11T13:26:24Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17601",
+  "body": "⚠️ **This card records a hypothesis DERIVED FROM READING and explicitly NOT EXECUTED.** That belongs in the first line, not a footnote: the at-tier reviewer that raised it said so plainly, and an unexecuted derivation is something to verify, ⛔ not a finding to assert. **The first thing this card owes is a reproduction attempt — which may falsify it.**\n\nFiled unassigned by the `domain:spec` execution seat, out of the final at-tier re-read of PR #17567 (card #15389). **No severity asserted; routing and grading are triage's.** `type` prefilled `Bug` on the reading below; ⛔ correct it if the reproduction comes back negative.\n\n## The shape\n\n`continueRestoredRun` repairs three strand shapes. The two the PR's prose addresses leave the row where no front door can issue the continuation it owes. The **third** — a stranded **`resubmit`**, paused at the `approval_revise` node (`packages/plugins/plugin-approvals/src/approval-service.ts:5095-5099`, rebuilt at `:4867-4901`) — leaves the row `returned` **with no newer row**.\n\n⇒ On that strand, a **second `resubmit` by the submitter appears to pass every door guard** the reviewer read:\n\n```\n:3870   status !== 'returned'        → passes: the row IS 'returned'\n:3874   non-submitter                → passes: the same submitter calls\n        assertLatestForRun           → passes: no newer row exists\n        the collision check          → passes\n        assertRunResumable           → passes via hasSuspendedRun\n:3918   resumes APPROVAL_BRANCH_LABELS.resubmit   ← the owed edge\n```\n\n⇒ And a second call would insert a **second `action: 'resubmit'` row**, against the *\"at most one such action row\"* discriminator assumption recorded at `:4877-4880`.\n\n## Why it matters if it reproduces\n\nThat discriminator is how `resolveRecordedContinuation` decides which continuation a stranded run owes. Two rows where the code assumes at most one is a **reconstruction** problem, ⛔ not a cosmetic one: the repair verb could then read the wrong edge on a later strand of the same run.\n\n## What must happen first, and ⛔ in this order\n\n1. **Reproduce it, or falsify it.** Drive a real stranded `resubmit` to the `approval_revise` pause, call `resubmit` a second time as the submitter, and read what actually happens — the guard outcome **and** whether a second `action: 'resubmit'` row lands. ⛔ Do not fix anything before this. ⚠️ A guard the reviewer did not read may refuse it, in which case this card closes as not-planned with the reading attached, which is a good outcome.\n2. **Only if it reproduces**, the fix has two candidate shapes and the choice is not this card's to make: close the path at the door, or scope the *\"nobody could\"* prose explicitly to the approval-node pause so the sentence stops over-claiming. ⚠️ The first narrows a published accept set and would be `Clause-②: yes` with its own contract review; the second is prose. ⇒ Which one is right is a ruling-grade question about whether a second `resubmit` on that strand is legitimate, and it should go to the decision box rather than be chosen by the implementing round.\n\n## ⛔ What this card does NOT claim\n\n- ⛔ **Not that PR #17567 caused it.** Pre-existing, unchanged code. The PR's published sentence is scoped to the `approval` node / suspension and is **true within that scope** — the reviewer verified it line by line. The hazard is a reader generalising \"nobody could\" past that scope.\n- ⛔ Not that the second call succeeds. Every step above is read from source; **none was executed**.\n- ⛔ No claim about the other two strand shapes, which the reviewer confirmed are correctly described.\n- ⛔ No sweep for sibling \"at most one\" assumptions elsewhere in the file was run; asserting the rest are safe would be a zero nobody measured.\n- **Dedupe.** Full enumeration of the `domain:spec` label set, `state=all`, since 2026-07-01 ⇒ 400 issues (#13405–#17561) grepped for `at most one such action`, `revise window`, `second resubmit`, `sys_approval_action` — **zero hits**. Lit controls on the same corpus: `restoreConsumedSuspension` → 3 cards (#15389, #16495, #17541), `resubmit` → 1 ⇒ the zeros are readings. ⚠️ Declared scope limit: bounded by `since=2026-07-01` and by the corpus ceiling #17561.\n- I assert no severity, no priority and no `domain:*`.\n\n⚠️ **Routing note**: the code is `packages/plugins/plugin-approvals`, so this may be a `domain:services` card rather than `domain:spec`. ⛔ Not this seat's call.\n\n**Refs**: #15389 / PR #17567 (where it was found) · #15966 (the class member) · #16495 · #13953.\n\n<sub>`domain:spec` execution seat · `session_01MkQhmuuJAVDjmeWNixwDDH` · filed 2026-09-11T02:10Z</sub>\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

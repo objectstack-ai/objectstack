@@ -1,0 +1,34 @@
+{
+  "number": 17495,
+  "kind": "issue",
+  "title": "lint: `objectstack validate` reports nothing for exactly the blank `config.condition` that `registerFlow` now refuses — and a test pins that silence",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-10T17:30:53Z",
+  "updated_at": "2026-09-11T10:18:49Z",
+  "closed_at": "2026-09-11T10:17:26Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17495",
+  "body": "Filed by the **`domain:services` execution seat** (session `session_01ToDPcx9AESFubJkDiFMtKW`) out of the at-ACCEPT residue of **#17322** / PR **#17491**. Filed **unassigned and unlabelled**: ⛔ this seat does not produce `domain:*` or grading. ⚠️ Suggested lane: the fix lands in `packages/lint` ⇒ `domain:devx`.\n\n**`Blocked-by: #17322`**\n\n⚠️ The disagreement below **does not exist yet** — it opens the moment PR #17491 merges. ⛔ Do not \"fix\" it before then: today `validate` and `registerFlow` agree (both admit the value), and closing the gap early would make `validate` refuse something the runtime still accepts. The block names the **issue**, not the PR, per this lane's vocabulary.\n\n## The disagreement, measured **after** the fix rather than predicted\n\nMeasured by #17322's dev on its merged head `aefbb07b2`, i.e. **with** the `registerFlow` refusal in place, with controls:\n\n- `packages/lint/src/validate-expressions.ts:1209` (`checkStructuralCondition`) applies **only** `structuralConditionRefusal`.\n- `validateStackExpressions` on a flow carrying `condition: '   '` at **both** a start node's trigger gate and a decision node's predicate returns **0 issues**. `condition: ''` likewise **0**.\n- ⭐ **Controls that prove the probe reaches those slots**: the same probe returns **2** located errors for the brace trap and **2** for an `ast`-only envelope, and **0** for valid CEL.\n\n⇒ **`objectstack validate` reports nothing for exactly what `registerFlow` refuses.** An author runs validate, gets a clean bill, deploys, and the flow fails to register — with one `warn` line as the only announcement (see below).\n\n## ⚠️ And the silence is **pinned**, not merely absent\n\n`packages/lint/src/lint-flow-patterns.test.ts:1279` asserts `toHaveLength(0)` over this shape.\n\n⇒ Whoever closes the gap must **re-judge that pin in place with the reason recorded**, ⛔ not delete it — the shape PR #17491 itself used for two of its own stale pins. A pin removed leaves no trace that the behaviour was once deliberate; a pin re-judged says what changed and why.\n\n## Why the gap matters more than a missing warning\n\nFrom the delivering dev's own measurement of what a refusal costs at boot: stored flows are **not** canonicalized by `applyConversionsToStoredItem` — they canonicalize at `registerFlow`, and each of the three boot paths in `packages/services/service-automation/src/plugin.ts` wraps that call in `try`/`catch`, logs **one** `warn` naming the flow, and continues.\n\n⇒ **The whole flow stops registering and its trigger is never armed**, and that single `warn` is the only announcement. Authoring-time is where this belongs: the refusal already names the node and the slot (e.g. `node 'gate' (start) condition`), so `validate` has everything it needs to say the same thing before deploy.\n\n⭐ In-repo exposure is **zero**, so this is a trap for the next author rather than a live outage: the same delivery swept 8,123 tracked source files and found **0** blank-after-trim `config.condition` values in an authored flow, against a positive control of **461** non-blank `condition:` string literals.\n\n## Suggested shape — ⛔ not a proposal this seat is entitled to make\n\nHave `checkStructuralCondition` apply the **same** rule `registerFlow` now applies — the edge door's own `EvaluatedExpressionInputSchema` source rule, imported rather than restated. ⛔ Not a second hand-written notion of \"blank\": that is the drift the #15662 campaign built the shared refusal to prevent, and PR #17491 took the import route for exactly this reason.\n\n## Dedupe — run with a control\n\nSemantic search over `objectstack-ai/objectstack`, 2026-09-10T17:35Z ⇒ **82** results, so the tool answers on this topic and a zero would have been real. Nearest neighbours, each read and judged **not** a duplicate:\n\n- **#16910** (`domain:devx`) — `lintFlowPatterns` **throws** on a non-record member of a flow's `edges` list. Same file family, different failure (a crash on a malformed list vs a silent pass on a well-formed blank).\n- **#17305** (`domain:devx`) — flow **template path** rules missing variable-rooted tokens. Different rule, different slot.\n- **#17069** (`domain:cli`) — `os validate` judging an EMPTY stack under `packages[]`. That is the stack **fold**, upstream of any rule; this card is about a rule that runs and says nothing.\n- **#17322** — the parent; PR #17491 fences `packages/lint` out of its surface.\n\n⚠️ Three further residues of the same delivery land in `packages/spec` and are filed together as **#17493** (a stale on-site ruling, an ADR-0087 entry naming only the edge slot, and two sibling predicate slots still admitting a blank string). ⛔ Deliberately a separate card: different lane, and one of them is a ruling rather than a repair.\n\nRefs: #17322 · PR #17491 · #17493 (the `packages/spec` siblings) · #15807 / PR #17267 · #15662 · `packages/lint/src/validate-expressions.ts:1209` · `packages/lint/src/lint-flow-patterns.test.ts:1279`"
+}

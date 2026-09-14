@@ -1,0 +1,36 @@
+{
+  "number": 5785,
+  "kind": "issue",
+  "title": "[#5704 批次3] 7 个 integration 测试真迁 driver-sql sqlite :memory:(rest ×3 / plugin-approvals ×3 / trigger-record-change ×1)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "priority:p0",
+    "tests"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T05:22:37Z",
+  "updated_at": "2026-08-06T07:02:52Z",
+  "closed_at": "2026-08-06T07:02:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5785",
+  "body": "Part of #5704(批次 3)。维护者 2026-08-06 裁决 **Q1=C** 的真迁半边(落档见 #5704 裁决评论):这 7 个文件名为 integration、实跑手写替身,名不副实,真迁有实际收益。\n\n## 范围:7 个文件,真迁 `@objectstack/driver-sql` + better-sqlite3 `:memory:`\n\n- **packages/rest(3)**:export-integration、import-integration、import-job-integration\n- **packages/plugins/plugin-approvals(3)**:record-lock-multi-update.integration、record-lock-schedule-run.integration、status-mirror-cascade.integration\n- **packages/triggers/trigger-record-change(1)**:record-change-integration\n\n以 `git grep -l \"makeMemoryDriver\" packages/rest packages/plugins/plugin-approvals packages/triggers`(对 origin/main)复核实际文件名 — survey 基线 `a58c0b5`,先复核前提。\n\n## 做法\n\n- 驱动构造用仓库规范形态(examples/app-crm、`cli db clean`、PR #5715 的 `makeDefaultDriver()` 同款):`new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true })`;\n- 3 个包 package.json 加 devDep `@objectstack/driver-sql`(workspace 协议;better-sqlite3 由 driver-sql 的 optionalDependency 提供 — #5715 实测);survey 已核无循环依赖(driver-sql 不依赖这三包);\n- 建表走真实路径:syncSchema,或 ADR-0015 带外 `execute()`(external 模式)— 参照 #5715 的处理;\n- stub 内部存储直读断言(Map/stores 直读)改为经引擎/驱动查询读回;\n- **语义分叉见红逐处处置**:按「以 SQL 族语义为准」改写断言,每处改写在 PR body 留一行处置记录(#5704 风险声明的设计内收益);拿不准的列 open_questions 返回,⛔ 不要静默放松或删除断言 — 改写后的断言必须继续承载等价保真度。\n\n## 边界(⛔)\n\n- ⛔ 不动 packages/objectql 与 packages/runtime 的任何文件(并行批次 2 正在其中改名);\n- ⛔ 不动 undeclared-field-write-driver-split(Q2-B 裁定保留 driver-memory,批次 2 落注释);\n- ⛔ 测试语义不缩水:迁移是换后端,不是删覆盖。\n\n## 验收\n\n- 7 个文件不再含手写 memory 形态 stub,真实 sqlite `:memory:` 后端跑绿;\n- 3 个包 vitest 全绿 + typecheck 过;\n- PR body 含逐处语义分叉处置记录(零分叉也要写明「零分叉」);\n- 测试行为不面向用户 → `skip-changeset` 约定(label 由 PM 代打)。"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 5939,
+  "kind": "pull_request",
+  "title": "feat(plugin-auth): break-glass 守卫 —— ban 不得停用最后一个管理员(ADR-0024 D5.2)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T12:38:15Z",
+  "updated_at": "2026-08-06T13:10:51Z",
+  "closed_at": "2026-08-06T13:10:50Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T13:10:50Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5939",
+  "body": "Fixes #5892\n\n## 前提逐条复核(动手前做的,结论改变了范围)\n\n派发令要求先核对正文三项在 `origin/main` 上的现状。核对结果:\n\n| 要求 | 现状 | 本 PR 做了什么 |\n|:--|:--|:--|\n| ① `sys_user.beforeUpdate`:更新会导致「剩余 0 个未被 ban 的管理员」时拒绝 | **确实缺失**。全仓 `git grep` 对「最后一个管理员 / 计数后拒绝」这一形状零命中(`last admin` / `lastAdmin` / `data.banned` 判定均无命中) | **新实现** |\n| ② `enforced` SSO 不得停用最后一个本地管理员的密码 | **已实现**:`auth-manager.ts` 的 `emailAndPassword` 段(`resolveSsoOnly()` 只强制 `disableSignUp`,从不动 `enabled`)、`getPublicConfig()` 的 `features.ssoEnforced`、以及 `/admin/ban-user` 等三条路径上的 `LAST_LOCAL_CREDENTIAL` 守卫(auth-manager.ts:1239-1300)。**但没有任何测试** | **只补钉,不重写** |\n| ③ 测试 | 两半都没有 | 两个新测试文件 |\n\n所以本 PR 的范围比正文小:第 ② 项一行实现代码都没改。\n\n## ① 新守卫:`last-admin-ban-guard.ts`\n\n`sys_user.banned = true` 是**所有**停用路径的落点 —— better-auth admin 插件的 ban 端点写它,`@better-auth/scim` 把 SCIM `active: false` 映射成同一次 admin ban(这正是 SCIM 会强制打开 admin 插件的原因,ADR-0071)。此前没有任何一层检查这次写入之后还剩下谁:**把最后一个管理员 ban 掉是允许的,而且返回成功**,组织就此被永久锁在自己的环境外面。SCIM 让它从假设变成现实风险 —— 写入由外部系统驱动,提交前没有人看一眼 payload,一个圈错的 IdP 组就够了。\n\n守卫因此长在**写入的那一个咽喉**上,而不是某个端点上:`sys_user` 的 `beforeUpdate`。admin ban 端点、SCIM 的 adapter 写入、导入、脚本、以及以后新增的任何路径都被同一条不变量覆盖;**by-id 与谓词/`multi` 两种写法都守**(谓词那一支是「只读 `input.id`」的守卫必然漏掉的形状)。\n\n**谁算管理员** —— 用平台自己已有的答案,不另发明:\n\n- **平台管理员**:未限定组织(`organization_id = null`)且在有效期内(ADR-0091)的 `admin_full_access` 授权 —— 与 `resolveAuthzContext` 推导 `platform_admin` 所用的是同一份证据(ADR-0068 D2 / ADR-0095 D3),绝不读 `sys_user.role` 字符串;\n- **组织 owner / admin**:`sys_member.role` 的等级 —— 判定走 `invitation-role-cap.ts` 里**唯一那把等级尺**(本 PR 把它导出为 `isOrgAdminGrade`),而不是在守卫里重新拼一个 `role === 'owner'`:手抄版会漏掉 `'owner,member'` 这种逗号拼写,把环境里唯一的 owner 误判成普通成员。\n\n`delegated_admin` 不算(ADR-0105 D8:它只让你够得着端点,本身不带权限)、过期授权不算、不可登录的 `usr_system` 不算 —— 后两者若被算成「还剩一个管理员」,守卫就会替一次真实的锁死放行。\n\n**fail-closed**:管理员群体读不出来、或大到无法枚举时,拒绝这次 ban 而不是猜。这与邻近的 `LAST_LOCAL_CREDENTIAL` 守卫(fail-open)方向相反,是**刻意**的:那边失败的代价是挡住一次合法操作,这边失败的代价是环境被永久锁死。两个方向都写进了各自文件的头注释,并各有一条测试钉住,免得日后有人「统一一下」。\n\n**拒绝信息即操作指引**:错误里点名是哪个用户、这条不变量是什么(ADR-0024 D5.2)、怎样让这次 ban 变合法(先给别人 `admin_full_access` 或 owner/admin 成员身份),以及 —— 如果这次 ban 来自 IdP —— 要改的是 IdP 组而不是这个守卫。\n\n**与 ADR-0092 身份写守卫的关系**:那个守卫回答「**这个调用方**能否经通用数据面写身份表」,并且**按设计放行 system 上下文**(better-auth 自己的 adapter 正是它必须放行的);本守卫回答的是另一个问题「这个**值**能不能被写」,因此对**所有**上下文生效,`isSystem` 也不例外 —— 真正会造成锁死的恰恰是 system 这条路。两者在 `auth-plugin.ts` 的同一个 `kernel:ready` 里一起注册,优先级 10 → 20:用户上下文的调用方仍然先拿到 ADR-0092 的答复(「`banned` 不是数据面可编辑列」),只有合法携带 `banned` 的写入才会走到本守卫。这条顺序有测试钉住。\n\n**顺带修的一处**(同一条路径上的必要半边):守卫抛的是引擎形状的错误(`PERMISSION_DENIED` + 403),REST 数据面的 `mapDataError` 本来就认;但 auth 管线不认,会变成一个空白 500。`withValidationErrorMapping` 因此增加了一条 403 分支,把它映射成 better-auth 的 `APIError('FORBIDDEN')`。一个「产出就是解释」的守卫,不能以「无解释的 500」抵达 IdP。\n\n## ② 密码逃生口:只补钉\n\n`break-glass-local-credential.test.ts` 覆盖既有实现,不改一行:\n\n- enforced SSO(`ssoOnlyMode` 与 `OS_AUTH_SSO_ONLY` 两个开关)下 `emailAndPassword.enabled` 保持 `true`、`disableSignUp` 被强制 `true`,`getPublicConfig()` 同时报 `features.ssoEnforced: true` 与 `emailPassword.enabled: true` —— 这个「叫 UI 藏起来、能力本身仍开着」的落差就是逃生口本身;\n- 另有一条反向对照:显式 `emailAndPassword.enabled: false` 仍然生效 —— 否则上面那条断言对着一个「根本不读这个选项」的实现也会绿;\n- `/admin/ban-user`、`/admin/remove-user`、`/delete-user` 三条路径上,目标是**唯一** `credential` 账户持有人时抛 `LAST_LOCAL_CREDENTIAL`;有第二个密码持有人时放行;目标是 IdP 托管(无本地凭据)时连全表扫描都不做;查询报错时 fail-open。\n\n## 测试\n\n`last-admin-ban-guard.test.ts` **不用假引擎**:守卫的全部工作就是读身份表再判断,假引擎意味着由 fixture 里手写的 `where` 匹配器来决定守卫看见哪些行 —— 也就是让 fixture 而不是产品来回答被测的问题(#5785 点名的那种危险)。所以每条用例都跑在真的 `ObjectQL` 引擎 + 真的 better-sqlite3 `:memory:` 上:引擎派发钩子,SQL builder 编译 `$in` / `$ne`,布尔按 0/1 落库 —— 顺带把 better-auth `supportsBooleans: false` 交给引擎的数字 `1` 这条真实形状也覆盖了。\n\n**反向验证(方向先定后跑)**:文件里有一条 `unguarded: true` 的用例 —— 不注册守卫时,ban 最后一个管理员**成功**且行确实变成 `banned = 1`。这就是 #5892 之前的行为,也是其余每条 `rejects.toThrow` 的对照系。\n\n20 条守卫用例 + 7 条密码逃生口用例,覆盖:两个管理员先后 ban(第一个放行、最后一个拒绝)、非管理员不受影响、平台管理员 vs 组织内限定授权、过期授权、`delegated_admin`、逗号拼写、`usr_system`、重复 ban 已封禁者、unban 与无关写入不触发、谓词与 `$in` 批量、fail-closed 的两种(读失败 / 超过枚举上限)、无管理员环境不被卡死、ADR-0092 顺序,以及经 better-auth adapter 的 SCIM/admin-ban 路径(403 `APIError` 而非 500)。\n\n```\npnpm --filter @objectstack/plugin-auth test\n  Test Files  38 passed (38)\n       Tests  847 passed (847)\n\npnpm --filter @objectstack/plugin-auth typecheck   # tsc --noEmit, 无输出\npnpm --filter @objectstack/plugin-auth build       # DTS/ESM/CJS 均成功\n```\n\n闸门:`check:nul-bytes`、`check:engine-double-contract`(64 pinned,无新条目)、`check:query-options-erasure`(non-test 84 未新增,test 面 267 未移动)、`check:error-code-casing`、`check:role-word`、`check:adr-anchors`、`check:authz-resolver` 全绿;改动文件 `eslint --no-inline-config` 无告警。\n\n## 边界\n\n- 未触碰 `@better-auth/scim` 的模型面 —— 本守卫是本仓自己的 `sys_user` 钩子,与 #3653 的版本挂起无关;\n- 未触碰 `packages/spec` / `packages/objectql`:拒绝时用的是标准目录里已有的 `PERMISSION_DENIED`,而不是新造一个服务码(ADR-0112「通用条件走标准目录」,`rest-server.ts` 对 `RECORD_NOT_ACCESSIBLE` 的处理就是这个先例),因此不需要往 error-code ledger 里加条目;\n- 不变量的作用域是**环境**(「本环境至少留一个能登录的管理员」),不是每个组织。「每个 org 必须保留一个 owner」是另一条更严的策略,牵涉自己的产品决定(唯一 owner 离职时怎么办),没有在这里顺手发明 —— 文件头注释写明了这一点。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JwwiU9bjhwy2SWj13ho8uv)_"
+}

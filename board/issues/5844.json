@@ -1,0 +1,35 @@
+{
+  "number": 5844,
+  "kind": "pull_request",
+  "title": "fix(plugin-auth): `convertWhere()` 补齐 `not_in` / `starts_with` / `ends_with`,未识别算子改为响亮拒收 (#5813)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T07:55:43Z",
+  "updated_at": "2026-08-06T08:43:55Z",
+  "closed_at": "2026-08-06T08:43:53Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T08:43:53Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5844",
+  "body": "Fixes #5813\n\n## 前提复核(改之前)\n\n按分诊要求,不按 issue 正文的旧行号,而是对 `origin/main@f886f291a`(#5710 的 PR #5812 合并**之后**)重读 `convertWhere()`:\n\n- 分支链现在是 `eq` / `ne` / `in` / `gt` / `gte` / `lt` / `lte` / `contains` **八支**,`contains` 支已发 `$contains`(#5812 的成果,本 PR 原样保留其注释);\n- `not_in` / `starts_with` / `ends_with` **零命中**,链尾**无 `else` 兜底** —— 前提成立。\n\n活体调用方也实测过,不是转述 issue:装好的 `better-auth@1.7.0-rc.2` 里\n`dist/plugins/admin/routes.mjs:311-322` 的 `searchOperator` 枚举是 `contains | starts_with | ends_with`、`filterOperator` 枚举就是 `z.enum(whereOperators)`,而 `:360` / `:365` 把它们直接推进 `where`。算子词表(`@better-auth/core/db/adapter`)运行时读出来确认是十一个:`eq, ne, lt, lte, gt, gte, in, not_in, contains, starts_with, ends_with`。\n\n## 改了什么\n\n**一、三个算子按表直译。** 三个 ObjectQL 算子都在 `FILTER_OPERATORS` 里(五后端都必须求值):\n\n| better-auth | ObjectQL |\n|:--|:--|\n| `not_in` | `$nin` |\n| `starts_with` | `$startsWith` |\n| `ends_with` | `$endsWith` |\n\n**二、链尾未识别算子响亮抛错。** 错误信息带算子名、字段名、受支持算子清单和落点文件 —— 信息本身就是操作指引。这是 #3948 一族的 restore-invariant:丢谓词不是把结果变窄而是变宽,「悄悄回答另一个问题」比「拒绝回答」更坏。\n\n`if / else if` 链改成 `switch`,顺带拿到第二道锁:`default` 臂里 `operator` 收敛为 `never`,所以 better-auth 长出第十二个算子而这里没加 `case` 时,`pnpm --filter @objectstack/plugin-auth typecheck` 会先于任何查询报错。运行时那一支拿到的仍是真实算子字符串,进错误信息。\n\n**关于 `operator` 缺省。** `Where.operator` 在 better-auth 侧声明为可选、`@default eq`,其 factory 的 `transformWhereClause` 会在适配器看到之前把默认值物化(`CleanedWhere` 因此是必填形态)。已废弃的裸 `createObjectQLAdapter` 收的是手搓 where,可能没走过 factory,所以缺省在这里显式补上 —— 这是**生产方自己声明的契约**,不是宽容别名;凡是**写出来**的算子,必须在词表里。\n\n## 大小写语义\n\n`starts_with` / `ends_with` 两侧同向,直译不开契约缝:better-auth 的 `Where.mode` 默认 `\"sensitive\"`,`$startsWith` / `$endsWith` 按 #5701 Q2=A 在契约层也是大小写敏感。\n\n## 反向验证:方向是普通的「先红后绿」\n\n把三个 `case` 删掉、`default` 改回静默 `break`(即修复前的语义),27 条里**红 17 条**,方向与预期一致。两条最有说服力的实测输出:\n\n```\nFAIL  a write selects its OWN row, not an arbitrary one\nAssertionError: expected [ 'u_abcz', 'u_xabc', 'u_zed' ] to deeply equal [ 'u_abc1', 'u_abcz', 'u_xabc' ]\n-   \"u_abc1\"      ← 应当留下的第一行,被删了\n+   \"u_zed\"       ← 应当被删的目标行,还在\n\nFAIL  `count` counts the matches, not the table\nAssertionError: expected 4 to be 2\n```\n\n第一条是 #5813 最锋利的一半:对四行表执行「删除 `name` 以 `zed` 开头的用户」,修复前删掉的是表里的**第一行** `u_abc1`。第二条说明谓词被丢时 `count` 给出的不是「稍微偏大的数」,而是**整张表的行数**。\n\n## 测试:三面加一尾\n\n新文件 `packages/plugins/plugin-auth/src/auth-where-operator-coverage.test.ts`,沿用 #5812 在 `auth-contains-filter.test.ts` 建立的两面模式,并补了第三面:\n\n1. **契约面**(spy engine):三个算子各自译出 `$nin` / `$startsWith` / `$endsWith`,并单独断言 `not.toEqual({})` —— 空 filter 是本缺陷的确切形状;另有 `count` 路径与「与邻居条件共存而非互相覆盖」两条。\n2. **词表面**(新增):从 `@better-auth/core/db/adapter` **运行时**读出 `whereOperators`,逐个跑过适配器,断言每个都留下谓词;并把源码里的 `SUPPORTED_WHERE_OPERATORS` 与之钉成同一集合。这是唯一能看见**上游长出新算子**的一面 —— 另外两面只测得到有人记得写 case 的算子,而那正是 #5813 的成因。\n3. **行为面**(真实 `InMemoryDriver`):每个算子一条有排除力的用例(`starts_with 'abc'` 不命中只是**包含** `abc` 的 `x_abc`;`ends_with 'abc'` 反过来只命中它;`not_in` 真的排除列出的行),外加 `count` 与前述写路径。\n4. **链尾拒收**:编造算子 `'fuzzy'`,factory 适配器与裸适配器两条路径都抛错,错误信息含算子名、字段名与受支持清单;并断言**读根本没发生**(拒收就是不回答,不是回答一个更宽的问题)。\n\n行为面的 fake engine 只声明用得到的动词,`delete` 以 `assertEngineDeleteDispatch(options)` 开头(`check:engine-double-contract` 已确认收录为 `pinned [delete]`)。\n\n## 关于 #5814 的接缝(分诊指定必答项,报告里同答)\n\n**结论:变简单,不变难。** 理由见下,并且本 PR 特意留了一条 pin 说明边界。\n\n`mode` 是 `operator` 的**兄弟字段**,不是算子成员,所以链尾拒收读的是 `operator` 而**不波及 `mode`** —— 今天 `mode: 'insensitive'` 仍被忽略(那就是 #5814)。有一条测试专门钉住这个边界:带 `mode: 'insensitive'` 的查询不抛错、照常译出 `$startsWith`。\n\n接缝的形状是这样的:#5814 落地时,**每个 `case` 臂**是「这个算子在 insensitive 下译成什么」的落点(例如 `contains` + insensitive → `$icontains`,#5701 已经把它加进算子词表),而 **`default` 臂**是「这个 mode 在这个算子上无法表示」时该走的拒收位置 —— 同一条接缝,往里一层。改造前它是一串 `if / else if` 加一个隐形的静默出口,`mode` 只能靠再加一串平行分支来接;现在它是一个带穷尽性检查的 `switch`,加一维只需要在既有臂里展开,而且漏掉哪一臂会被 `never` 和词表面测试一起报出来。\n\n**唯一需要注意的顺序**:#5814 的裁决若引入新的 ObjectQL 算子映射,`SUPPORTED_WHERE_OPERATORS` 与词表面那条集合相等断言不需要动(`mode` 不进算子表);要动的是各 `case` 臂内部。\n\n## 范围与不做的事\n\n- 只碰 `packages/plugins/plugin-auth/src/objectql-adapter.ts`、plugin-auth 内新增一个测试文件、一个 changeset,没有越界。\n- **`mode` 不处理**(#5814,决策箱中)。\n- **不钉大小写行为**:driver-memory 的 mingo 路径把 `$startsWith` / `$endsWith` 编成带 `i` 标志的正则,而同包的参考匹配器用 `String.prototype.startsWith`(敏感)。那是 #5702「driver 半边」的预算,不是本单的;所以行为面的 fixture 全部小写、没有任何断言依赖这个分歧怎么收敛。\n\n## 验证\n\n```\npnpm --filter @objectstack/plugin-auth test\n  Test Files  36 passed (36)\n        Tests  820 passed (820)\n\npnpm --filter @objectstack/plugin-auth typecheck\n  (tsc --noEmit,无输出)\n\npnpm --filter @objectstack/runtime test        # plugin-auth 最重的下游消费者\n  Test Files  101 passed (101)\n        Tests  1458 passed (1458)\n\nnode scripts/check-engine-double-contract.mjs\n  OK — 38 pinned, 165 in the DEBT ledger, 2 exempt\n  pinned [delete]  packages/plugins/plugin-auth/src/auth-where-operator-coverage.test.ts\n\nnode scripts/check-type-check-coverage.mjs     # OK\nnode scripts/check-nul-bytes.mjs               # OK(5702 个文件,无裸控制字节)\n```\n\n注:plugin-auth 的 `tsconfig.json` 仍排除 `**/*.test.ts`(既有 TEST_DEBT 台账项,本 PR 未新增排除),所以上面的 `typecheck` 覆盖的是 `objectql-adapter.ts`。新测试文件另行单独跑过 `tsc --noEmit` 确认无类型错误。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JwwiU9bjhwy2SWj13ho8uv\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JwwiU9bjhwy2SWj13ho8uv)_"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 5687,
+  "kind": "pull_request",
+  "title": "docs(os-dev): skip-changeset 硬步骤改为「先回读、写并集」,匹配 PUT-only 的工具面 (#5684)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T00:19:34Z",
+  "updated_at": "2026-08-06T00:37:50Z",
+  "closed_at": "2026-08-06T00:37:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T00:37:48Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5687",
+  "body": "Fixes #5684\n\n单文件、单 hunk:`.claude/agents/os-dev.md` 收尾清单里 `skip-changeset` 那条硬步骤中的写入句。\n\n## 一、前提复核(在 main 上逐字确认,成立)\n\n`origin/main` @ `52daddbe3` 的第 141-143 行仍是 #5650 落地的原措辞:\n\n> **Add** the one label instead of writing the label set — a set-write wipes the `size/*` / `documentation` / `tests` the bots just applied\n\n意图正确,但 os-dev 手上唯一能写标签的工具是 MCP `issue_write` 的 `labels` 字段,而它是**整集 PUT**。于是「只加一个标签」照字面执行 —— `labels: ['skip-changeset']` —— 恰好就是这句要禁止的那次整集抹除。#5683 的受控实验实证(写入前 `[\"ci/cd\",\"size/s\"]`):裸集写入产生同秒两条 `unlabeled` + 一条 `labeled`;写并集只产生 `labeled`、零 `unlabeled`。\n\n同款措辞在仓内没有第二处:`.claude/skills/pm-dispatch/SKILL.md` 与其余 agent 文件 grep 无命中,所以落点确实只有这一处。\n\n## 二、改了什么\n\n写入句改成工具面真正可执行的动作,四个要素:\n\n1. **先回读**当前标签集 —— 并给出可用的读法:REST `GET /repos/{owner}/{repo}/pulls/{n}`(labels 在响应内);同时点明 `issue_read get_labels` 解析不了 PR 号,免得下一个人在那儿卡一轮。\n2. **写并集**(现有集 + `skip-changeset`)—— 唯一可用的写入是整集 PUT,漏一个就是抹一个。\n3. **为什么** —— 一句「Tool surface, not style」并引 #5683 的 A/B 计数,让读者知道这不是风格建议而是工具面事实;附带记下 `POST /issues/{n}/labels` 为何不可达(容器无 `gh` CLI、未认证 `curl` 不能写)。\n4. **写后回读确认** —— 条款原有的回读闭环(读进报告、read 才是收尾)保留。\n\n⛔ 未动:该条款其余要素(硬步骤地位、`.github/labeler.yml` 没有规则、Auto Label 不会代挂、#5533 一秒即失的双向竞态预期、首个 run 的红当信息而非判决、PR 正文声明不等于挂上)、#5642 的 Byte discipline 段、#5630 的 Toolchain traps 段、任何 workflow(CI 侧已由 #5683 修)。\n\n### 一处请 reviewer 拍板的越界(2 个词,同一条款内)\n\n同条款后文两处把这次写入称作 **POST**(`the read, not the POST, is what closes this step`、`a race between that step and your POST`),随本次修改一并改为 `write`。理由:新处方明说唯一可用的写入是整集 PUT、而 `POST /issues/{n}/labels` 不可达;若留着 POST 这个词,条款会一边告诉读者只能 PUT、一边让他去找一条不存在的加法调用 —— 正是本单要消掉的那种不可执行性。改动只换名词,不动这两句承载的要素(回读闭环、双向竞态预期)。若认为超出「只动一句」的边界,回退这 2 个词即可,不影响主改动。\n\n## 三、验证\n\n- `node scripts/check-nul-bytes.mjs` → `OK (scanned 5603 tracked text file(s); skipped 5 binary, 1 non-regular; no raw ASCII control bytes)`;`--self-test` → `56 assertions over a temp git repo (real scan() path)` 全过(#5680 的字符类引用面断言未被误伤 —— 本 PR 不碰那条 `grep -naP` 命令行)。\n- 改动文件自扫门禁盲区(含 DEL):`grep -naP` 零命中。\n- markdown 结构:条款内 `**` 计数 4(两对)、反引号计数 38(偶),续行缩进全 2 空格,列表项未破坏。\n- diff 逐行自查:单文件单 hunk(+14/-7),hunk 上下各 6 行 context 逐字节未变。\n- CI:TypeScript Type Check ✅、ESLint ✅、Test Core ✅、Dogfood Regression Gate ✅、Check Changeset ✅(首 run 00:20:37 的实时回读读到了标签)、Build Core / Build Docs 等按 filter skip(纯 `.claude/` diff)。无红。\n\n## 四、实践自证(新措辞的第一次实测)\n\n本 PR 自己的 `skip-changeset` 就按修正后的处方挂:\n\n```\n1) 回读  REST GET /pulls/5687  (00:19:4xZ)   → 响应无 labels 字段 = 空集\n        (此刻 Check PR Size 00:19:39→00:19:46、Auto Label 00:19:40→00:19:47 仍在飞)\n2) 写并集 = 空集 + {skip-changeset} = [\"skip-changeset\"]   (整集 PUT)\n3) bot 落定后回读 REST GET /pulls/5687        → [\"documentation\",\"size/s\",\"skip-changeset\"]\n```\n\n顺带现场复现了写进条款的另一条工具面事实:`issue_read get_labels`(5687)→ `Failed to get issue labels: Could not resolve to an Issue with the number of 5687.`\n\n诚实交代两点,不粉饰:\n\n- **本次的并集退化成了单元素。** 回读到的是空集(PR 才 25 秒,两个 labeler job 还没写),所以这次 PUT 的载荷与旧措辞照字面执行的结果恰好相同 —— 处方的**可执行性**被完整走通了(读法可用、写法可用、闭环可用),但「并集防抹除」那条腿本次没有被触发。那条腿的实证仍是 #5683 的非空集 A/B。\n- **timeline 事件流这次取不到。** 本会话沙箱拒绝直连 `api.github.com`(classifier 拦 curl),MCP 也没有 timeline / issue-events 工具,所以无法像 #5683 那样引用 `unlabeled` 事件计数。可断言的是:第 2 步 PUT 的载荷就是第 1 步读到的集合的并集,而该集合为空,因此这次写入在结构上不可能移除任何标签;第 3 步回读也显示 bot 的 `documentation` / `size/s` 与我的 `skip-changeset` 三者并存、无一丢失。\n\n## Changeset\n\n`.claude/` 文档-only、无用户可见变更 → 走 `skip-changeset` 标签路线,不写空 frontmatter changeset(#4898 / #5292)。"
+}

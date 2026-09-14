@@ -1,0 +1,36 @@
+{
+  "number": 5674,
+  "kind": "issue",
+  "title": "packages/rest 的 14 个 getDiscovery 测试替身返回 `endpoints`,一个真实生产者从未发过、且已在 #4828 退役的键",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T23:48:20Z",
+  "updated_at": "2026-08-06T06:02:45Z",
+  "closed_at": "2026-08-06T06:02:44Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5674",
+  "body": "发现于 #4828 的实施(界外发现,查重无命中故新开;**未认领**;observation-class,今天没有用户会撞上)。\n\n## 现象\n\n`packages/rest/src/` 下 14 个测试文件的 `getDiscovery` mock 长这样:\n\n```ts\ngetDiscovery: vi.fn().mockResolvedValue({\n  version: 'v0',\n  endpoints: { data: '', metadata: '', ui: '', auth: '/auth' },\n}),\n```\n\n但真实的 `getDiscovery()`(`packages/metadata-protocol/src/protocol.ts`)发的是 **`routes`**,从来没有发过 `endpoints`。`endpoints` 只在 dispatcher 那条路径上存在过(作为 `routes` 的逐字副本),而 #4828 已按 ADR-0049 把它删除。\n\n从键名看(`data`/`metadata`/`ui`/`auth`),这些替身**本意就是** `routes`,只是拼错了对象。\n\n## 为什么今天没事,以及为什么仍值得记一笔\n\n`rest-server.ts` 的 discovery handler 读的是 `discovery.routes`,所以这些替身的 `endpoints` 是惰性的:`if (discovery.routes)` 为假,整个 routes 增补块被跳过。测试断言的是别的东西,一直是绿的。\n\n值得记一笔的原因有两个:\n\n1. 它们是**唯一还在拼写已退役键的地方**。下一个写 rest 测试的人照抄这个替身,退役键就在 fixture 层复活了;\n2. 它们让替身描述了一个**从未存在过的生产者形状**,削弱了这些测试作为「REST 层在真实上游之上做了什么」的证据力。\n\n## 为什么 #4828 没有顺手改\n\n改成 `routes: {...}` 会把 `if (discovery.routes)` 从假翻成真,让 handler 开始执行路由增补(包括 `probeMcpServeable`),这是**行为变更**,14 个文件的既有断言需要逐个复核。#4828 的范围是生产者的线上形状,不是 fixture 保真度,所以按 Prime Directive #10 记在这里而不是扩大那个 PR。\n\n修的时候建议一次一个文件,确认每个文件的断言在 routes 块真的执行之后依然成立。\n\n参考:#4828。\n"
+}

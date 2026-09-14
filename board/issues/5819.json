@@ -1,0 +1,36 @@
+{
+  "number": 5819,
+  "kind": "pull_request",
+  "title": "feat(cli): `libsql://` 接进 URL 推断 —— 可选包 + 动态 import 构造 TursoDriver (#5602)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T06:30:54Z",
+  "updated_at": "2026-08-06T07:00:14Z",
+  "closed_at": "2026-08-06T07:00:12Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T07:00:12Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5819",
+  "body": "Fixes objectstack-ai/objectstack#5602\n\n按维护者 2026-08-06 01:05Z 的 **B-lite** 裁决实施:`libsql://` / `*.turso.io` 接进 CLI 的 URL→driver 推断,形态为 **optional peer + 动态 import**。\n\n## 前提复核(对最新 origin/main)\n\n裁决与正文的前提仍然成立,逐条实测:\n\n- `packages/cli/src/utils/storage-driver.ts` 的 `resolveStorageDefinition()` 对 `turso` / `libsql` 抛 `UnsupportedDriverError`(#5618 Phase A 只软化了措辞,抛错一字未改);\n- `packages/cli/src/commands/serve.ts` 把它当 fatal 重抛,boot exit 1;\n- `packages/cli/src/commands/start.ts` 的 examples 里确有 `start --database libsql://my-db.turso.io --database-auth-token $TURSO_TOKEN` —— 照抄必然 exit 1;\n- `packages/drivers/driver-turso` 确已在本仓(#4645),`TursoDriver` 的 `TursoDriverConfig` 需要 `url`,`authToken` 可选。\n\n顺带实测到一件正文没写的事:`--database-auth-token` 在此前是**只写不读**的 —— `start.ts` / `dev.ts` 把它转发成子进程的 `OS_DATABASE_AUTH_TOKEN`,而 framework 侧没有任何读取点(`git grep` 于 origin/main 只有这两个写入者)。本 PR 让它真正到达 driver 配置。\n\n## 实现\n\n**1. 识别即构造(`storage-driver.ts`)**\n\n`inferDriverTypeFromUrl()` 对 `libsql://` / `*.turso.io` 的分类保持不变(它本来就是为了「不静默掉回 SQLite」而存在),但 `resolveStorageDefinition()` 现在返回真定义:\n\n```ts\n{ driverId: 'turso', config: { url, authToken? }, trackName: 'TursoDriver', label: 'TursoDriver(libsql)' }\n```\n\n不带 `autoMigrate`(`TursoDriverConfig` 没有这个键,塞进去就是一个 driver 静默忽略的配置),不带 `sqliteFilePath`(远端 libSQL 不是磁盘上的 SQLite 主库,不配 telemetry 兄弟库)。\n\n**2. 可选包 + 动态 import(`loadTursoDriverFactory()`)**\n\n新增的 loader 动态 `import('@objectstack/driver-turso')`,把它包成 `IDatasourceDriverFactory`,由 `serve.ts` 通过 `DefaultDatasourcePlugin` **既有的** host-factory 接缝注入 —— 那个 option 的文档原文就写着它存在的理由是「宿主的 default 需要开源 factory 造不出的 driver,比如 turso」。这样 #3826 的一切不变:同一条 connect 路径、同一个 `bootCritical` fail-fast 裁决、同一个 `OS_ALLOW_DRIVER_CONNECT_FAILURE` 逃生舱、Setup → Datasources 里同样的状态留存。CLI 侧只多了构造这一步。\n\n**3. 包缺席时响亮失败,⛔ 无回退**\n\n新 `MissingDriverPackageError` 把精确安装命令带成**数据**(`installCommand`)而不只是句子。消息说明三件事:装什么(`npm install @objectstack/driver-turso`)、它是 optional peer(所以默认安装不含 `@libsql/client`)、以及为什么不回退 SQLite —— 静默降级会让服务器对着一个空的本地库启动,而 libSQL 上的数据原封不动,每一次写入都落在错误的数据库里(#3276 的教训)。import 的原始错误一并保留,否则「没装」会掩盖「装了但 import 崩了」。\n\n失败在**注册 plugin 之前**抛出,`serve.ts` 的 catch 与 `UnsupportedDriverError` 并列重抛为 fatal,所以操作者看到的是安装命令,而不是 boot 后段一个连接错误。\n\n**4. 仍然拒收的形状**\n\n`--database-driver turso` 但没有任何 URL:libSQL 没有可猜的默认值(不像 sqlite 的 `:memory:`、mongodb 的 localhost),继续抛 `UnsupportedDriverError`,而不是用 SQLite 默认值顶上。`UnsupportedDriverError` 因此不是死代码,serve.ts 里那条 `instanceof` 也不是幻影检查。\n\n**5. optional peer 声明**\n\n`packages/cli/package.json` 加 `peerDependencies` + `peerDependenciesMeta.optional`。发布依赖树不变(optional peer 不会被自动安装,`dependencies` / `optionalDependencies` 一字未动)。另加一条 `devDependencies` 指向同一个 workspace 包 —— 只为让仓内 `pnpm dev` 能真的走通这条路径,并让测试里的**类型级 pin** 能解析到真包的 `TursoDriverConfig`;devDependencies 不进消费者的安装树,发布产物的 `.d.ts` 里也没有对该包的类型引用(已核对 `dist/utils/storage-driver.d.ts`,只有字符串字面量与注释)。\n\n## 反向验证(方向:红)\n\n预测的方向就是最朴素的一种:把删掉的拒收臂原样放回去,新的承重 pin 应该转红。实测符合预测 —— `storage-driver.test.ts` **9 failed / 18 passed**,红的正是「declares the turso driver …」「carries the auth token」「routes libsql:// … never SQLite」以及所有需要先拿到 turso 定义的 loader 用例;而「turso 选了但没有 URL 仍然拒收」这条在两个版本下都绿(它守的是幸存的那条拒收,不是新能力)。恢复后 27/27 全绿。\n\n## 测试\n\n- `pnpm --filter @objectstack/cli test`:**85 files / 844 tests 全绿**(含本 PR 新增的 12 条)。\n- `pnpm --filter @objectstack/cli typecheck`:干净通过 —— 其中包含测试里的类型级 pin:CLI 造出的 config 必须可赋给真包的 `TursoDriverConfig`,若 driver 改名 `url` / `authToken`,`tsc` 会红(替身 mock 抓不到这一层)。\n- `pnpm --filter @objectstack/cli build` 通过;`node scripts/check-nul-bytes.mjs`、`check-doc-authoring`、`check-docs-audit-scope`、`check-published-files`、`check-override-consistency`、`eslint` 均绿。\n- ①(包在场)与 ②(包缺席)都用替身 importer 验证 **dispatch**,不连真 turso。\n\n## 文档与 example\n\n- `start.ts` 的 libsql example 改成带说明的 oclif example 对象,说明里写明「需安装可选 driver 包 + 安装命令」;\n- `content/docs/data-modeling/drivers.mdx`(推断表新增一行 + Callout 改写 + Supported Drivers 表新增 Turso 行)、`deployment/self-hosting.mdx`、`deployment/environment-variables.mdx`(`OS_DATABASE_URL` 行改写,补 `OS_DATABASE_AUTH_TOKEN` 行,`OS_DATABASE_DRIVER` 枚举补 `turso`/`mysql`)、`deployment/cli.mdx`(example 注记 + 自动探测那句的措辞)。\n\n## 范围外(已另开单)\n\n`packages/runtime` 的 `standalone-stack.ts` 未动(不属本单):它的 `detectDriverFromUrl()` 至今对 `libsql://` 抛「Unsupported database URL scheme」,而 `os migrate` 正是经 `createStandaloneStack` 启动的 —— 本 PR 之后 `os start --database libsql://…` 能跑、`os migrate` 同 URL 仍会硬失败;同文件的 docstring 也仍写着 driver-turso「ships separately in the ObjectStack Cloud distribution」(该说法在 #4645 之后已不成立)。已另开 issue 记录,未在本 PR 修。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01DWUR56YsttL5sTF72Q75TQ\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01DWUR56YsttL5sTF72Q75TQ)_"
+}

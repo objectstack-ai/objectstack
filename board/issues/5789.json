@@ -1,0 +1,35 @@
+{
+  "number": 5789,
+  "kind": "pull_request",
+  "title": "fix(cli): load driver-sql's schema-work classifier lazily (#5726)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T05:33:25Z",
+  "updated_at": "2026-08-06T05:59:31Z",
+  "closed_at": "2026-08-06T05:59:30Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T05:59:30Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5789",
+  "body": "Fixes objectstack-ai/objectstack#5726\n\n## 问题\n\n`packages/cli/src/utils/schema-migrate.ts:17` 有一处顶层 value import:\n\n```ts\nimport { isInPlaceSchemaWork } from '@objectstack/driver-sql';\n```\n\n这一行的代价**不由「需要 driver 的那条命令」承担**。oclif 的 `findCommand` 在**每次** CLI 调用时都会遍历命令表并 `import()` 每个命令模块,而这个文件被 **9 条命令**共用(`meta:resync`、`migrate`,以及 7 条 `migrate:*`)。所以只要 `packages/drivers/driver-sql/dist` 没构建:\n\n1. 跑**任何**命令(包括 `os dev`)都会为这 9 条各打一段 `MODULE_NOT_FOUND`,刷在你真正要的输出前面(`dev` 还 fork 子进程,于是翻倍);\n2. 更严重的是,这 9 条命令**直接从命令表里消失** —— `os migrate plan` 回答 `Command migrate:plan not found.`。\n\nissue 记录时是 6 条命令 / 12 段;在当前 `origin/main` 上已经涨到 **9 条**(`migrate:meta`、`migrate:recorded-by`、`migrate:resume` 是后来加的)。这个放大器会随 migrate 子命令增加而继续变大。\n\n## 改法(方向 1)\n\n把那一处 value import 改成在**真正用到的地方**惰性加载:\n\n```ts\nasync function loadIsInPlaceSchemaWork() {\n  const { isInPlaceSchemaWork } = await import('@objectstack/driver-sql');\n  return isInPlaceSchemaWork;\n}\n```\n\n`renderPendingSchemaWork` / `summarizePendingSchemaWork` 随之变成 async,`migrate plan` / `migrate apply` 里的 5 处调用点加 `await`。第 16 行的 `import type` 不动 —— 纯类型导入会被完全擦除,不产生运行时边。\n\n**刻意不在 CLI 里重写这个谓词。** 加性 / 原地(additive / in-place)的划分是关于 `PendingSchemaWorkKind` 的事实,声明在 driver 里那个联合类型旁边;CLI 复制一份,就等于哪天 driver 加一个 kind 时它**有权和 driver 不一致** —— 而它不一致的方式,恰恰是把「重写现有行」的工作列在那个承诺「绝不丢数据」的标题下面(#3954)。所以这是「一个定义,晚一点加载」,不是「各写各的」。\n\n同理,`loadIsInPlaceSchemaWork` 刻意**不包 `try`**:渲染时调用方手里已经握着一个活的 SQL driver(要渲染的条目正是 `previewDeferredSchemaWork()` 返回的),模块必然已在 loader 缓存里;万一真加载失败,必须响亮地失败,而不是退回去猜哪些工作会重写数据。\n\n## 实证(把 driver-sql 的 dist 临时 mv 走)\n\n| | `os --version` | `os migrate plan --help` |\n|---|---|---|\n| 改前 | 9 段 MODULE_NOT_FOUND | 9 段 + `Command migrate:plan not found.`(exit 2) |\n| 改后 | **0 段**,干净输出 | **完整 help,exit 0** |\n\n构建产物侧:`packages/cli/dist/utils/schema-migrate.js` 改前有静态的 `import { isInPlaceSchemaWork } from '@objectstack/driver-sql';`,改后只剩动态的 `await import('@objectstack/driver-sql')`。\n\n## 测试\n\n新增 `packages/cli/src/utils/schema-migrate.lazy-driver-import.test.ts`,三条源码级钉子:\n\n1. `packages/cli/src` 的生产代码里不允许有任何 `@objectstack/driver-*` 的静态 value import(`import type` 放行);\n2. `schema-migrate.ts` 仍然通过 `await import()` 依赖 driver-sql —— 防止有人用「在 CLI 里重抄一份谓词」来满足第 1 条;\n3. 两个 async 渲染函数的每个调用点都必须 `await`(丢 await 不是类型错误,只是输出和进程退出赛跑;仓库里已有 `formatOutput` 的同形 eslint 规则)。\n\n之所以是**源码级**断言:缺陷长在 import 图的形状上,这是在编写期决定的,任何「把函数调起来跑一遍」的测试都看不见 —— 本包所有行为测试都跑在一个 driver 恰好已构建的工作区里。\n\n**反向验证(方向:红,与事前预期一致)** —— 把第 17 行的静态 import 放回去,钉子 1 立刻变红并点名:\n\n```\n- []\n+ [ \"utils/schema-migrate.ts: import { isInPlaceSchemaWork } from '@objectstack/driver-sql'\" ]\n```\n\n钉子 2、3 保持绿。这是诚实的方向:放回静态 import 既不会删掉动态 import,也不会把调用点的 await 拿掉,所以只有守护「静态导入形状」的那一条应该动。\n\n`pnpm --filter @objectstack/cli typecheck` 通过;`pnpm --filter @objectstack/cli test` **85 文件 / 836 用例全绿**。\n\n## ⚠️ 给下一个人:issue 里那份「假漂移」清单是假的,别去修\n\n排查这类问题时,你很可能会顺手跑 `pnpm --filter @objectstack/driver-sql build`,然后拿到 20+ 条**看起来非常像真实类型契约漂移**的错误:\n\n```\nsrc/schema-drift.ts(33,10): error TS2305: Module '\"@objectstack/spec/data\"' has no exported member 'isAppResolvedDefaultToken'.\nsrc/schema-drift.ts(442,9): error TS2322: Type '\"default_mismatch\"' is not assignable to type 'SchemaDiffEntryKind'.\nsrc/memory-driver.ts(174,12): error TS2416: Property 'supports' ... Type '{}' is missing ... create, read, update, delete, and 27 more.\n```\n\n**这些全部是假象。** `isAppResolvedDefaultToken` 在 `packages/spec/src/data/default-value-tokens.ts:143` 好好地导出着;`'default_mismatch'` 也在 `packages/spec/src/shared/external-errors.ts` 的 `SchemaDiffEntryKind` 联合里 —— 只是**不在陈旧的 `packages/spec/dist` 里**。`pnpm install && pnpm build` 之后全部消失(issue 报告者实测 72/72 绿)。\n\n正确修法永远是 `pnpm build`,不是去改 driver-sql / spec 的源码。**在正确的代码上「修」出真 bug,是这个 issue 最贵的失败模式** —— 这一节按分诊要求原样保留在这里当疫苗。\n\n## 范围\n\n严格限于分诊裁定的**方向 1**。issue 里的另外两个方向**均未触碰**,留给各自车道立单:\n\n- 方向 2(`packages/services/service-datasource`):让 datasource 的 fail-fast 认出「工作区未构建」这个成因。**现状未变** —— 它仍然建议「Fix the datasource configuration」或设 `OS_ALLOW_DRIVER_CONNECT_FAILURE=1`,对这个成因两条都是有害建议(后者只会让一个构建不完整的工作区「启动成功」,然后对所有请求报错)。\n- 方向 3(根 `dev` 脚本):加一次廉价的前置构建判定。\n\n无用户可见行为变化:纯本地 / worktree 首启 DX;CI 里 build 永远在前,跑不出这个形态。changeset 为 `@objectstack/cli` patch 档。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01DWUR56YsttL5sTF72Q75TQ)_"
+}

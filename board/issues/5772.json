@@ -1,0 +1,36 @@
+{
+  "number": 5772,
+  "kind": "issue",
+  "title": "仓内两处文档仍把 `/api/v1/auth/login`(及 `/register`、`/logout`、`/session`)列为已注册 auth 路由 —— 四条端点均不存在",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T04:41:31Z",
+  "updated_at": "2026-08-06T06:57:41Z",
+  "closed_at": "2026-08-06T06:57:41Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5772",
+  "body": "在 #5085(`/auth/*` 转发层删除遗留 `POST ${prefix}/auth/login` 显式路由)的实读中顺手发现,**未认领**,不在 #5085 的 PR 范围内。查重:`is:open in:body \"auth/login\"` 除 #5085 自身外零命中;`stale docs routes` 一类关键词亦零命中。\n\n## 现象\n\n两处仓内文档把根本不存在的 auth 端点写成「已注册路由」:\n\n1. `packages/plugins/plugin-auth/IMPLEMENTATION_SUMMARY.md:88-92`,标题就是 **\"API Routes Registered\"**:\n\n   ```\n   - `POST /api/v1/auth/login` - User login (stub)\n   - `POST /api/v1/auth/register` - User registration (stub)\n   - `POST /api/v1/auth/logout` - User logout (stub)\n   - `GET /api/v1/auth/session` - Get current session (stub)\n   ```\n\n2. `packages/client/CLIENT_SERVER_INTEGRATION_TESTS.md:642`,MSW mock 示例把 `rest.post('/api/v1/auth/login', …)` 当成「Auth」的代表端点。\n\n## 判读\n\n这四条**一条都不存在**,而且不是「曾经存在后来删掉」:\n\n- 它们不在 better-auth 的真实路由表里 —— `packages/plugins/plugin-auth/src/auth-route-ledger.ts` 自 #3656 起逐条枚举了 55 条 SDK 可达路由 + 完整 mounted inventory,四条名字一条都没有;\n- `content/docs/api/plugin-endpoints.mdx:18` 早已白纸黑字写着 **\"There is no `/auth/login` route\"**,并指向真实端点 `POST /auth/sign-in/email`;\n- 唯一让 `/auth/login` 看起来「存在」的东西是 `packages/runtime/src/dispatcher-plugin.ts` 那条遗留显式挂载,而它对任何调用方都只会 500(这正是 #5085),现已删除。\n\n同族的 `packages/plugins/plugin-auth/ARCHITECTURE.md:74` **不属于本条**:那段 `httpServer.post('/auth/login', …)` 明确写在 \"#### Before (Manual Approach)\" 小节里,是在描述被取代的旧设计,框定正确,不需要改。\n\n## 分级建议\n\nObservation-class:今天没有用户会撞上 —— 这是两份仓内开发文档,不是发布文档站(`content/docs/` 那份是对的)。危害是对下一个读者的:一个照着 `IMPLEMENTATION_SUMMARY.md` 的 \"API Routes Registered\" 去接的集成方会得到 404,而 `CLIENT_SERVER_INTEGRATION_TESTS.md` 的 mock 示例会教人按一个不存在的端点写测试 —— 这正是 Prime Directive #10 「never advertise a capability the runtime doesn't deliver」的文档侧。严重度按惯例交 PM 分诊,不在此自评。\n\n## 修法方向\n\n两份文档各改一处,与 `content/docs/api/plugin-endpoints.mdx` 对齐到 better-auth 的真实端点名(`/auth/sign-in/email`、`/auth/sign-up/email`、`/auth/sign-out`、`/auth/get-session`);`IMPLEMENTATION_SUMMARY.md` 那节若已无人维护,直接指向 `auth-route-ledger.ts` 比手抄一份更不容易再漂。\n\n关联:#5085(发现现场)、#3656(auth 路由台账的来源)。\n"
+}

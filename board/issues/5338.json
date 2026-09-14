@@ -1,0 +1,37 @@
+{
+  "number": 5338,
+  "kind": "issue",
+  "title": "gen:docs 给「元素是联合类型」的数组少了括号,164 处参考页单元格声明了另一种类型(string | number[] ≠ (string | number)[])",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T23:42:41Z",
+  "updated_at": "2026-08-06T06:15:03Z",
+  "closed_at": "2026-08-06T06:15:03Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5338",
+  "body": "从 #4912(PR 修 passthrough 对象被塌缩成 record)的实现中发现的**同类但独立**的缺陷,记录在该单的 out_of_scope_findings 并按 PD#10 立案。**未认领。**\n\n## 症状\n\n`packages/spec/scripts/lib/format-type.ts`(#4912 前为 `build-docs.ts` 内联)的数组分支直接把 `[]` 拼在元素渲染结果后面:\n\n```ts\nreturn `${formatType(prop.items, ctx)}[]`;\n```\n\n当元素本身渲染成**顶层联合类型**时,`[]` 的结合优先级高于 `|`,于是单元格印出的类型和 schema 表达的类型**不是同一个**:\n\n| schema 表达 | 参考页印出 | 印出的东西实际含义 |\n|:---|:---|:---|\n| 数组,元素为 `string` 或 `number` | `string \\| number[]` | 「一个 string,**或者**一个 number 数组」 |\n| 数组,元素为 `string` 或 `{ field, label? }` | `string \\| { field: string; label?: string }[]` | 同上,顶层被拆成二选一 |\n\n正确写法需要括号:`( string \\| number )[]`。\n\n## 规模\n\n对当前 `json-schema/` 全量语料跑修好的 `formatType`,再按深度扫描顶层运算符统计:**164 个数组站点**的元素渲染出顶层 `|`。样例(schema 文件 → 渲染结果):\n\n- `CreateViewRequest.json` → `string \\| number[]`\n- `CreateViewRequest.json` → `string \\| { field: string; label?: string }[]`\n- `CreateViewRequest.json` → `string \\| number \\| boolean[]`\n- `Agent.json` → `string \\| { type: string; params?: Record< string, any > }[]`\n- `AiModelsResponse.json` → `string \\| { id: string; label: string; default: boolean }[]`\n- `AppDefinitionResponse.json` → 两个对象变体的联合 + `[]`\n\n## 与 #4912 的关系(为什么没在那个 PR 里顺手修)\n\n#4912 的修复**引入**了交叉类型元素(`{ 已声明键 } & Record< string, any >`),它有一模一样的优先级问题(`A & B[]` 是 `A & (B[])`)。那一处是该 PR 自己造成的,所以在 PR 内用 `hasTopLevelIntersection()` 深度扫描加了括号,并**只限定 `&`**:\n\n- 联合的 164 处是**既有**缺陷,早于该次渲染器改动;\n- 一并修会让那个 PR 的重生成 diff 从 12 行涨到 ~170 行,真正的 passthrough 修复会被埋掉。\n\n`format-type.ts` 里已留注释指向本单。修法应当很短:把 `hasTopLevelIntersection` 放宽成 `hasTopLevelUnionOrIntersection`(深度扫描已经会正确忽略 `{}` / `< >` / `[]` / `()` 内的运算符),然后 `pnpm --filter @objectstack/spec gen:docs` 重生成并逐页确认。`packages/spec/scripts/format-type.test.ts` 已有该处的括号/非括号用例,照着加联合用例即可。\n\n## 为什么值得修\n\n参考页的类型单元格正是 AI 元数据作者直接抄的那一行(和 #4570 让 import 示例只能来自真实导出面是同一条理由)。一个印出 `string \\| number[]` 的单元格会让作者写出 `string`,而 schema 要的是数组 —— 声明与呈现不符,正是 #4001 战役在追的那类问题。\n\n关联:#4912(同一渲染器,交叉类型侧已修)、#4001(战役)。\n"
+}

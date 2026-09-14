@@ -1,0 +1,37 @@
+{
+  "number": 5704,
+  "kind": "issue",
+  "title": "driver-memory 测试面替代:项目内测试后端迁到 sqlite `:memory:`(#5499 重启条件 · memory 半边,维护者 2026-08-06 立项)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "priority:p0",
+    "tests"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T01:15:19Z",
+  "updated_at": "2026-08-06T08:07:09Z",
+  "closed_at": "2026-08-06T08:07:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5704",
+  "body": "**立项依据**:#5499 裁决原文「driver-memory 是早期为测试便利设计的组件,方向已定为 **sqlite 内存模式**替代……替代迁移若立项,在本单登记排期」+ 维护者 2026-08-06 在 PM 会话确认(「driver-memory 在项目内的测试应该被替换为 sqlite 的内存模式」)。**完成即触发 #5499 的 memory 侧重启条件:名下 5 张挂起缺陷单(#5433/#5440/#5442/#5444/#5354)整批关闭(not planned),包本体的退役决策另行交维护者。**\n\n**mongodb 侧不在本单**:维护者同日确认 mongodb 维持暂停。\n\n## 实测消费面(origin/main @ 2026-08-06 01:2x Z)\n\n**测试文件引用 driver-memory / MemoryDriver(外部,共 41 个文件 / 9 包)**:\n\n| 包 | 文件数 | 备注 |\n|---|---|---|\n| `packages/objectql` | **22** | 主力面。⚠️ 实测**无共享工厂**:各文件自带 `makeMemoryDriver()` 本地定义(22 处),其中部分是**手写同形 stub**(如注释 \"same shape driver-memory uses, small enough to assert against\"),并非全部真依赖包 — 逐文件分诊是第一步 |\n| `packages/runtime` | 5 | |\n| `packages/rest` | 3 | |\n| `packages/plugins/plugin-approvals` | 3 | |\n| `packages/spec` | 2 | |\n| `packages/services/service-datasource` | 2 | |\n| `packages/cli` | 2 | |\n| `packages/triggers/trigger-record-change` | 1 | |\n| `packages/qa/dogfood` | 1 | |\n\n**package.json 依赖声明**:cli、plugin-dev、qa/dogfood、runtime、service-datasource、examples/embed-objectql(+包自身)。\n\n**⛔ 明确不在本单范围**(它们不是「测试」,归包退役决策):runtime provisioning 偏好序里的 `memory` 注册名回退(`http-dispatcher`)、plugin-dev 的开发默认后端、`examples/embed-objectql`(该示例的主题就是内嵌 memory driver)、driver-memory 自己的 15 个测试文件。\n\n## 替代目标\n\n`@objectstack/driver-sql` + `better-sqlite3` `:memory:`(examples/app-crm、app-showcase 与 `cli db clean` 已采用的同款形态,#5499 事实核查确认)。\n\n## 阶段结构\n\n1. **Survey(先行,单独一单)**:41 个文件逐个分诊为三类 —— ① 真依赖包、直接可换 sqlite;② 本地手写 stub、与包无关(只需摘 import 或原样保留);③ 断言了 memory 特有语义的 pin(换后端会红 — 每处红都是真语义分叉,按「以 SQL 族语义为准」定向改写断言,拿不准的单独列出)。产出逐文件处置表,作为后续各包迁移单的输入。\n2. **按包迁移 sub-issue**(file-disjoint,可并行;`domain:*` 按落点包由分诊补):objectql 一单(最重),runtime+rest 一单,其余小包合批或独立由 survey 结果定。\n3. **收口**:41 文件清零后回 #5499 执行重启条件(5 张 on-hold 批量关闭 + 请维护者裁包本体退役)。\n\n## 风险如实声明\n\n- 换后端会暴露 memory 与 SQL 族的语义分叉(#5354/#5369/#5298/#5299 一族正是此类)— 这是**设计内收益**(测试从此压真语义),但意味着迁移单不是纯机械改,每个红都要有处置记录。\n- objectql 22 文件横跨 `domain:engine-core` 车道(现空缺),是吞吐瓶颈 — 执行模型待分诊/维护者定(车道逐单 vs epic 委托)。\n\n排期登记与本单互链见 #5499 评论。"
+}

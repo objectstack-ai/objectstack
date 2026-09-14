@@ -1,0 +1,35 @@
+{
+  "number": 5806,
+  "kind": "pull_request",
+  "title": "test(rest,plugin-approvals,trigger-record-change): 7 个 integration 测试真迁 driver-sql sqlite :memory:(#5704 批次 3)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "size/l",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T06:04:04Z",
+  "updated_at": "2026-08-06T07:02:52Z",
+  "closed_at": "2026-08-06T07:02:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T07:02:51Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5806",
+  "body": "Fixes objectstack-ai/objectstack#5785\n\n#5704 批次 3 的真迁半边(维护者 2026-08-06 Q1=C 裁决)。7 个「名为 integration、实跑手写替身」的文件换成真实后端:`@objectstack/driver-sql` + better-sqlite3 `:memory:`,驱动构造用仓库规范形态(examples/app-crm、`cli db clean`、已合并 PR #5715 的 `makeDefaultDriver()` 同款)。\n\n## 前提复核(对 origin/main `afb83d3`)\n\n`git grep -l \"makeMemoryDriver\" origin/main -- packages/rest packages/plugins/plugin-approvals packages/triggers` 命中且仅命中 issue 列的 7 个文件,前提成立:\n\n- `packages/rest/src/{export,import,import-job}-integration.test.ts`\n- `packages/plugins/plugin-approvals/src/{record-lock-multi-update,record-lock-schedule-run,status-mirror-cascade}.integration.test.ts`\n- `packages/triggers/trigger-record-change/src/record-change-integration.test.ts`\n\n## 做法\n\n- 建表走真实路径:引擎侧 `await engine.syncSchemas()`;kernel 侧(status-mirror-cascade、record-change-integration)驱动是 bootstrap **之后**才注册的,引擎自己的 `init()` 早已跑完,所以显式 `await driver.connect()` 补上引擎本会做的那一步,再 `syncSchemas()` —— 这正是「对象在 boot 之后才上线」的生产路径。\n- 3 个包加 devDep `@objectstack/driver-sql`(workspace 协议);better-sqlite3 由其 optionalDependency 提供,无循环依赖。\n- 每个文件加 `:memory:` 连接的收口(`engine.destroy()` / `driver.disconnect()`),避免一个文件里堆几十个活库。\n- ⛔ 纪律遵守:diff 未触碰任何 getDiscovery / discovery endpoints 替身(留给 #5674 的语境),实测 `git diff -- packages/rest/src | grep -E \"getDiscovery|discovery|endpoints\"` 零命中。\n\n## 逐处语义分叉处置记录\n\n**分叉 1 —— 未写过的列:`undefined` 变 SQL NULL(record-change-integration,#3760 用例)**\n\n原断言 `expect(row?.stamp).toBeUndefined()`。Map 里没有「列」这个概念,没人写过的键就是不存在;真表里列由 DDL 声明存在,没写过就是 NULL。改写为 `expect(row?.stamp ?? null).toBeNull()`,并**新增**一条 `expect(row).toBeTruthy()`(记录本身必须存在 —— 被拒的只是 flow 的写)。处置定性:**按 SQL 族语义改写、并收紧**。刻意没用 `toBeFalsy()`,那会连空串一起放过;现在断言的仍是「没有值落地,尤其不是 'done'」,保真度不降反升。\n\n**分叉 2 —— 手写 `sys_import_job` 镜像早已与真对象漂移(import-job-integration)**\n\n该文件用一个「minimal sys_import_job mirror」当 fixture。换真表后直接见红:`no such column: undo_log`,7 个用例全挂在 `waitForTerminal`。查真对象 `packages/platform-objects/src/audit/sys-import-job.object.ts` 后确认镜像漏了 `undo_log` 与 `reverted_at`(**整个 undo 能力,正是 #3549 的主题**),另有 3 个 datetime 被写成 `text`。Map 什么键都收,所以镜像可以一路烂下去而测试全绿;真表一句话就说破。\n\n处置:按 fixture 三分法的第二档「补声明」,但**手工补两列只是把同一个钟重新上一遍**,所以退一步换成真身 —— 直接 import `SysImportJob`(`@objectstack/platform-objects/audit`,本就是 packages/rest 的**生产依赖**,路由本来就按这个名字写这张表)。镜像漂移这一整类问题就此消失。改后 13/13 绿。\n\n**分叉 3(日志层,非断言层)—— 未声明对象的查询由「静默空集」变「表不存在」**\n\nplugin-approvals / trigger 两处 kernel 用例里,ApprovalService 与权限解析会顺带查 `sys_approval_delegation` / `sys_user` / `sys_member` / `sys_position` 等本用例未注册的对象。Map 替身读时即物化集合、静默返回 `[]`;sqlite 抛 `no such table`,调用方原有的 catch 照旧当空集处理。**判决完全不变**,只是日志多了 ERROR 行;不属于断言分叉,如实记录在此。\n\n**其余 5 处:零分叉。** export-integration(24)、import-integration(28)、record-lock-multi-update(8)、record-lock-schedule-run + status-mirror-cascade(9)一次通过,断言一字未改 —— 包括 `filter`/`orderby`/`$expand`/多值 lookup 与多值 select 的数组往返、boolean 与 date 的存储形态、`search` 与 `searchFields`。被删掉的那些手写 matcher 注释本身就是这次迁移的最好论据(「不认 `$or`/`$and` 会静默返回全部行」「不认 `$contains` 会让搜索成为 no-op 而『它过滤了』的断言照样通过」)—— 这些是 fixture matcher 才会有的故障类,生产引擎没有。\n\n## 方向性验证(预判在先)\n\n真表究竟是不是真的在兜底,还是驱动会像 Map 一样悄悄物化?**预判:拆掉 DDL 一步应当见红,且红在「表不存在」而不是断言不符。** 临时删掉 record-lock-multi-update 的 `await engine.syncSchemas()` 重跑,实测:\n\n```\nERROR Insert operation failed {\"object\":\"opportunity\",\"error\":{\"message\":\n  \"insert into `opportunity` (`amount`, `id`, `name`) values (100, ...) returning * - no such table: opportunity\"}}\n× the issue verbatim: the by-id write is refused, and so are both predicate rewrites\n× refuses an unscoped whole-table update   ... (全红)\n```\n\n方向与预判一致,随即恢复。另有一次非人为的同向证据:分叉 2 的 `no such column: undo_log` 是真表主动判出来的,不是我预设的。\n\n## 验证证据(前台阻塞执行,全程 `flock` 串行 + `--max-old-space-size=4096`)\n\n```\npnpm --workspace-concurrency=2 --filter @objectstack/rest \\\n  --filter @objectstack/plugin-approvals --filter @objectstack/trigger-record-change test\n→ TEST_EXIT=0\n   trigger-record-change  Test Files  5 passed (5)   Tests   55 passed (55)\n   rest                   Test Files 55 passed (55)  Tests  782 passed (782)\n   plugin-approvals       Test Files 19 passed (19)  Tests  446 passed (446)\n```\n\n与迁移前基线逐项相同(rest 55/782、plugin-approvals 19/446),没有用例被删或被跳过。\n\n```\npnpm --filter @objectstack/plugin-approvals --filter @objectstack/trigger-record-change typecheck  → Done ×2\npnpm check:type-check-coverage → OK (63/78 typechecked, ledger 未动)\npnpm check:published-files / check:prerelease-pins / check:driver-conformance → OK\nnode scripts/check-nul-bytes.mjs → OK;7 个文件另做 grep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]' 自扫,零命中\n```\n\n`@objectstack/rest` 无 `typecheck` 脚本(在 `scripts/check-type-check-coverage.mjs` 的 DEBT + TEST_DEBT 台账里,已计量、只减不增);三个包的 tsconfig 都 `exclude` 了 `**/*.test.ts`,本 PR 只动测试文件,台账数字不变,门禁实测通过。\n\n## 申报面与 changeset\n\n变更面 = 7 个测试文件 + 3 个 package.json(仅 devDependencies 各加一行)+ pnpm-lock.yaml(仅 3 条 workspace link,已核)。构建顺带改写的 `packages/spec/authorable-surface.base.json` 已 checkout 还原,不在本 PR 内。\n\n测试行为变更、不面向用户 → **skip-changeset**(label 由 PM 代打)。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WyvqvKMG6asi9aXjKE6xtx)_"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 5598,
+  "kind": "issue",
+  "title": "读路径 `_diagnostics` 是 union 折叠的第五个消费者:Studio 打开一个有缺陷的 view,内联字段错误同样只有一条 `path:\"\" Invalid input`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T20:13:19Z",
+  "updated_at": "2026-08-06T05:26:31Z",
+  "closed_at": "2026-08-06T05:26:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5598",
+  "body": "在做 #5364(saveMetaItem 的 422 展开 `invalid_union`,PR #5596)时核出的**第五个**消费者。#5364 的分诊帖把这条线数成\"四份各自独立的消费端代码\",实测是五份 —— 第五份就在 #5364 同一个包里,但在**读**路径上,不在那单的文件面内,故独立记录。\n\n## 落点\n\n`packages/metadata-protocol/src/metadata-diagnostics.ts:77`(`computeMetadataDiagnostics`):\n\n```ts\nconst parsed = (schema as z.ZodTypeAny).safeParse(candidate);\nif (parsed.success) return { valid: true };\n\nconst errors = parsed.error.issues.map((issue) => ({\n    path: issue.path.map(String).join('.'),\n    message: issue.message,\n    code: issue.code as string,\n}));\n```\n\n和 #4971 / #5014 / #5341 / #5364 完全同一个 `.map()`:只映射顶层 issue,`issue.errors` 里每个分支的真实拒绝理由(含 #4001 那批 `strictObject` 的策展处方)被丢弃。\n\n## 为什么它是独立的一条\n\n#5364 修的是 `saveMetaItem` 的**写**路径 422。这一条是**读**路径:`computeMetadataDiagnostics` → `decorateMetadataItem` / `decorateMetadataItems` 给 `getMetaItems()` / `getMetaItem()` 服务出去的每个文档挂 `_diagnostics` 信封,该文件自己的模块头写明用途是\"so Studio (and any other consumer) can render validity badges, **inline field errors**, and governance dashboards\"。\n\n也就是说:#5364 修好之后,作者**保存**一个有缺陷的 view 能看到字段名了;但**打开**一个库里已经存着的有缺陷的 view,Studio 的内联字段错误仍然是一条没有字段的 `Invalid input`。两条路径的判决会不一致。\n\n`computeMetadataDiagnostics` / `decorateMetadataItem` / `decorateMetadataItems` 都是 `@objectstack/metadata-protocol` 的公开导出(`src/index.ts:29-32`)。\n\n## 实测(`origin/main` @ `e900015`)\n\n用 #5364 那个同样的 view 输入:\n\n```js\ncomputeMetadataDiagnostics('view', {\n  name: 'task_list', object: 'task', type: 'list', label: 'Tasks',\n  columns: [{ field: 'title', summary: { type: 'sum', fieldd: 'amount' } }],\n})\n```\n\n得到:\n\n```json\n{\n \"valid\": false,\n \"errors\": [\n  { \"path\": \"\", \"message\": \"Invalid input\", \"code\": \"invalid_union\" }\n ]\n}\n```\n\n`ViewMetadataSchema` 顶层本身是 union(`view.zod.ts` 的 `z.preprocess(stripViewConsoleDecorations, z.union([...]))`),所以 view 类型的**每一个**有缺陷的存量文档都退化成这一条。\n\n## 这一条的修法应当是最便宜的一次\n\nPR #5596 已经在**同一个包、同一个文件的隔壁**落了 `zodIssuesToMetadataIssues(issues)`,信封形态就是 `{ path, message, code }` 且 `code` 透传 zod 原码 —— 与 `MetadataValidationResult.errors[]` 的形态**完全一致**。所以这一条大概率是:导出/引入该函数,把上面那个 `.map()` 换掉,加读路径的回归测试。⚠️ 注意 `computeMetadataDiagnostics` 先做了 `_diagnostics` 的 strip(`stripDiagnostics`),那一段不要动。\n\n判决必须与另外四处一致(丢弃只报根部 KIND 不匹配的分支;报得最少的分支胜出;`unrecognized_keys` 破平局;并列全出且有上限;嵌套 union 按绝对路径递归),否则同一个错误在保存时和打开时给出两套说法。\n\n## 同族现状\n\n| # | 消费者 | 文件 | 状态 |\n|---|---|---|---|\n| 1 | `formatZodError` | `packages/spec/src/shared/error-map.zod.ts` | ✅ #4971(PR #5342) |\n| 2 | `zodIssuesToFields` | `packages/rest/src/rest-server.ts` | ✅ #5014(PR #5362) |\n| 3 | `formatZodErrors` | `packages/cli/src/utils/format.ts` | ⏳ #5341 待派 |\n| 4 | `saveMetaItem` 的 422 | `packages/metadata-protocol/src/protocol.ts` | ⏳ #5364(PR #5596 待评审) |\n| 5 | `computeMetadataDiagnostics` | `packages/metadata-protocol/src/metadata-diagnostics.ts` | ⏳ **本单** |\n\n值得记一笔的是,这五个里有四个都是**在修上一个的过程中**发现的 —— 这类\"同一机制多份拷贝\"的缺陷靠一次静态扫描数不全。第 5 份修完后,或许值得单独裁决要不要把这套策略收敛成一个共享实现(spec 目前只导出字符串渲染器,三个结构化消费者各抄一份),而不是继续按份数增长。"
+}

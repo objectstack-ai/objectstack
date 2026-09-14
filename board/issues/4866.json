@@ -1,0 +1,36 @@
+{
+  "number": 4866,
+  "kind": "issue",
+  "title": "docs(protocol): widget-contract 的示例教 widget 自己渲染校验文案——会双份显示;`required` 一节也需按 objectui#3222 的结论重写",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T11:01:52Z",
+  "updated_at": "2026-08-06T11:54:45Z",
+  "closed_at": "2026-08-06T11:54:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4866",
+  "body": "objectui#3222 已按**方向 1(objectui 跟随 spec)**落地(objectui PR #3289):`packages/spec` **一个字未改**——契约本来就是对的,是 objectui 从来没实现它。现在 objectui 侧实现了,`content/docs/protocol/objectui/widget-contract.mdx` 有两处需要跟着收口。\n\n这份协议页本身是**排除方向 3 的关键证据**(`:48` 的「the source of truth is `FieldWidgetPropsSchema`」),所以它的正确性直接关系到那次裁定的价值。\n\n## 1. 示例教 widget 自己渲染文案 —— 落地后会双份显示\n\n`:83-100` 的 `CustomRatingField` 示例:\n\n```tsx\nfunction CustomRatingField({ value, onChange, readonly, required, error }: FieldWidgetProps) {\n  return (\n    < div className=\"rating-field\" aria-invalid={!!error} >\n      …\n      {error && < span className=\"error\" >{error}< /span >}   ← 这一行\n```\n\nobjectui 的表单渲染器**已经**用独立的 `< FormMessage / >` 在控件下方渲染这条消息。在 #3222 之前 widget 拿不到 `error`,所以这行永远不执行,问题是隐性的;**现在 widget 真的会拿到了**,照这份文档写出来的第三方 widget 会把同一句话显示两遍。\n\n职责划分(objectui#3222 的裁定,已在 objectui 侧的实现与文档中落地):\n\n| 关注点 | 归属 |\n|---|---|\n| `aria-invalid`(必须落在 input 元素上) | **widget** |\n| 校验消息**文案** | **宿主**(`< FormMessage / >`) |\n| 必填标记 `*` | **宿主**(`< FormLabel >`) |\n\n建议:删掉那一行,并在示例旁写明 `error` 是**布尔信号**,不是待渲染的文案。\n\n## 2. `required` 的措辞需要限定\n\n`:62-63` 现在写「Indicate the required state visually and validate accordingly」。但在 objectui 里必填标记由外层 `FieldContainer` / `< FormLabel >` 画,widget 再画一个就是同样的双份显示——objectui#3222 正是因此**决定不把 `required` 下沉到 widget props**(见 objectui#3290 的分析:真正需要的是输入控件上的 `aria-required`,而那不需要新增契约键)。\n\n`required` 留在 spec 的 schema 里没有问题(它描述的是**契约**,宿主是否传由宿主定),但文档里的这句祈使需要改成「**不要**自己画必填标记;宿主拥有它。你可以用它设 `aria-required`」之类的表述,否则同一份文档同时教出两个双份显示。\n\n## 边界\n\n纯 docs:`content/docs/protocol/objectui/widget-contract.mdx`。**不改 `packages/spec/src/ui/widget.zod.ts`**——契约是对的,只有教法要收口。\n\n关联:objectui#3222、objectui PR #3289、objectui#3290、objectstack#4115。"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 5739,
+  "kind": "issue",
+  "title": "analytics 自动推断路径:`inferCubeFromQuery` 的 stripPrefix 把关系穿越 `owner.region` 铸成基表列 `region` —— 基表恰好有同名列时静默筛/分组错列(两个策略、两个请求键均如此)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T03:14:55Z",
+  "updated_at": "2026-08-06T12:09:49Z",
+  "closed_at": "2026-08-06T12:09:49Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5739",
+  "body": "实现 #5669(`where` 源字段闸门)时路过。**本单不是 #5669 引入的**,现状在 `origin/main`(3de5ec8a3)上即如此,#5669 的 PR 也不改它。\n\n## 位置\n\n`packages/services/service-analytics/src/analytics-service.ts`,`inferCubeFromQuery`(没有注册 Cube 时为自由查询即席合成 Cube)。三个铸造循环都用 `stripPrefix()`:\n\n```\nconst stripPrefix = (m) => (m.includes('.') ? m.split('.').slice(1).join('.') : m);\n...\nfor (const d of query.dimensions || []) { const key = stripPrefix(d); dimensions[key] = { ..., sql: key }; }\n```\n\n`stripPrefix` 的本意是剥掉 `<cube>.<field>` 限定符。但它对**关系穿越**一视同仁:`owner.region` 也被剥成 `region`,并铸出 `dimensions.region = { sql: 'region' }` —— 一个**基表列**的 dimension。\n\n下游每个解析器都先查 cube 的 bag:`lookupMember` 的「plain second-segment lookup (legacy behaviour)」这一档命中 `region`,于是**在到达「synthetic relation traversal」那一档之前就返回了基表列**。关系穿越就此被基表列遮蔽。\n\n## 实测(测试双,`crm_account` 字段含 `id/name/industry/region/owner` —— 注意 `region` 是**基表自己的**列)\n\n四个组合全部静默通过,无任何拒收:\n\n```\n① ObjectQL, where: {'owner.region': 'NA'}\n   → executeAggregate 收到 filter: {\"region\":\"NA\"}          ← 筛的是基表 region\n\n② NativeSQL, where: {'owner.region': 'NA'}\n   → SELECT COUNT(*) AS \"count\" FROM \"crm_account\" WHERE region = $1     ← 没有 JOIN\n\n③ ObjectQL, dimensions: ['owner.region']\n   → groupBy: [\"region\"]\n\n④ NativeSQL, dimensions: ['owner.region']\n   → SELECT region AS \"owner.region\", COUNT(*) ... GROUP BY region       ← 列名标着关系属性,值来自基表\n```\n\n② 尤其值得注意:同一个 NativeSQLStrategy 在**已注册 cube**上对同一个 member 是**正常 JOIN** 的 ——\n\n```\n（authored cube, dimensions: {}）\n→ SELECT COUNT(*) ... FROM \"crm_account\" LEFT JOIN \"owner\" ON \"crm_account\".\"owner\" = \"owner\".\"id\" WHERE \"owner\".\"region\" = $1\n```\n\n差别只在于即席 cube 里被铸进了一个同名 dimension。④ 还多一层:响应列名是 `\"owner.region\"`,值却是基表 `region`,读者无法从结果里看出来。\n\n## 后果分档\n\n- **基表恰好有同名列** → 静默筛错列 / 分组错列,行数与图表都是错的,没有任何错误可读(①②③④)。这是「静默错行」类,比报错更糟。\n- **基表没有同名列** → 落到 `no such column: region`。#5669 之后这一支答 `400 INVALID_FIELD` 且点名 `region`;消息本身是诚实的(进 SQL 的列确实是 `region`),但调用方写的是 `owner.region`,所以指名的字段和他写的不是同一个,读起来仍然费解。\n- 跨对象信封(`planCrossObject`)在这条路上**看不见**它:它收到的是已解析出的裸名 `region`,没有点号可分类,所以既不 JOIN 也不拒收。已注册 cube 上它是会拒的(ObjectQL 答「cannot evaluate a cross-object filter」)。\n\n## 与既有单子的关系(已查重)\n\n搜过 open issues(`inferCube` / `stripPrefix` / analytics cross-object dotted / planCrossObject),无同题单。\n\n- #5353(open,observation):同一个函数的邻居缺陷 —— 那是「数组 `where` 被当成没有筛选跳过」,只影响铸出的 dimension **词汇表**;本单是「点号 member 被铸成基表列并遮蔽关系穿越」,影响**真正进 SQL 的列**。两者都在 `inferCubeFromQuery`,建议同一单里一起收(修 `stripPrefix` 的判定时顺手把数组下沉补上)。\n- #5669 / 本 PR:`where` 闸门。闸门与本单共用 `resolveMemberSource`,所以两个请求键对点号 member 的读法是**一致的**(这一点在 `where-source-field-gate.test.ts` 里以「与已发布的 dimension 闸门逐字一致」的用例钉住了)。一旦本单裁定这个读法该改,两个键会一起改 —— 这正是把解析放进一个函数的目的。\n- #5144(open):dataset 的点号关系 dimension 显示原始值而非 option label —— 相邻但不同层(标签解析,不是列解析)。\n\n## 建议(需要裁定,不建议顺手改)\n\n`stripPrefix` 现在同时承担两件语义不同的事:剥 `<cube>.` 限定符(应该剥)与剥关系路径(不该剥)。分开的判定大致是「首段等于 cube 名 → 剥;否则是关系路径 → 原样铸造,或干脆不铸,交给 JOIN 机制」。但即席 cube 是单表无 join,所以「原样铸造」之后由谁来服务这次穿越、要不要在即席路径上支持关系筛选,是一个产品裁定而不是实现细节 —— 故只立单,不带 PR。"
+}
