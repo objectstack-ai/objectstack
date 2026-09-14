@@ -282,6 +282,7 @@
 - 判定跨天翻面 ⇒ ⛔ 一次拒绝不是能力边界;`permissions.allow` 条目才是仓库侧确定性通道。
 - `rerun_failed_jobs` 复用原 run 的提交与合并 ref,不拿新 main 重算。
 - ⇒ 基上缺已合修复时重跑无效,只能 `git merge origin/main` 推提交;判别看修复合并时间。
+- 读数 2026-09-13:席位 REST `/jobs/{id}/rerun` 403、MCP `rerun_failed_jobs` 201 ⇒ 重跑可做,锁 1 未禁。
 - 同一 head 上轻量兄弟 workflow `success` 加重量级载体 `cancelled` 是普通取代的预期签名。
 - 同名 `failure` 也会被带另一诊断的后一次 `failure` 取代 ⇒ 任何判定前先按名取最新一次。
 - cancel-in-progress 窗口只罩得住慢载体 ⇒ 先比对 run `head_sha` 与 PR 当前 head,不开调查。
