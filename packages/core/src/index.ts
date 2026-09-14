@@ -128,6 +128,12 @@ export * from './dependency-resolver.js';
 // Export Phase 3 components - Package lifecycle management
 export * from './namespace-resolver.js';
 
+// [#17612] The one polling-worker timer loop — tick coalescing, idle backoff
+// and a final stop() — shared by every worker that drains a table
+// (service-messaging's two outbox dispatchers, service-queue's DbQueueAdapter).
+// It lives here because it is a timing primitive belonging to neither domain.
+export * from './dispatch-loop.js';
+
 // Re-export contracts from @objectstack/spec for backward compatibility
 export type { 
     Logger,

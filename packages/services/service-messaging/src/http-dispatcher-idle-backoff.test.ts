@@ -6,7 +6,7 @@
  *
  * The loop used to tick every `intervalMs` (500 ms) forever, whatever it found —
  * the shape #17610 removed from `NotificationDispatcher`. Both dispatchers now
- * run the one `DispatchLoop` (`dispatch-loop.ts`), whose mechanics are pinned in
+ * run the one `DispatchLoop` (`@objectstack/core`), whose mechanics are pinned in
  * full through the notification side in `dispatcher-idle-backoff.test.ts`. This
  * file pins the same behaviour through `HttpDispatcher`, plus what only the HTTP
  * side has: a retry schedule the backoff must not starve, and its own ingress —
