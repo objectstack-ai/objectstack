@@ -702,8 +702,17 @@ describe('Send back for revision (ADR-0044)', () => {
         nodes: [
           { id: 'start', type: 'start', label: 'Start' },
           { id: 'review', type: 'approval', label: 'Review', config: { approvers: [{ type: 'user', value: 'u1' }] } },
-          // The shape ADR-0044 D3 originally prescribed.
-          { id: 'wait_revision', type: 'wait', label: 'Awaiting Revision' },
+          // The shape ADR-0044 D3 originally prescribed. "Bare" here means the
+          // node TYPE — a plain `wait` where the revise window must be an
+          // `approval_revise` node — and that is what this case is about. The
+          // `waitEventConfig` is not optional decoration: a `wait` node with no
+          // block stopped parsing when the contract began requiring it, so
+          // without this the flow never registers and the send-back refusal
+          // below would be measuring a flow that does not exist.
+          {
+            id: 'wait_revision', type: 'wait', label: 'Awaiting Revision',
+            waitEventConfig: { eventType: 'signal', signalName: 'revision_submitted' },
+          },
           { id: 'end', type: 'end', label: 'End' },
         ],
         edges: [
