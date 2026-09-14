@@ -7998,7 +7998,17 @@ const step18: MigrationStep = {
         + 'meant is a business judgment the chain cannot make. Hence a structured TODO rather than an '
         + 'auto-rewrite (ADR-0087 D3 "never silence", ADR-0032 "no silent failure"). Population '
         + 'measured at ruling time: 0 in-tree and 0 in HotCRM (shallow clone c716a2c) — every '
-        + '`multiple: true` there is on `lookup` / `select`.',
+        + '`multiple: true` there is on `lookup` / `select`; re-measured on origin/main 689d606f '
+        + 'by AST sweep, still 0. '
+        + 'WIDER THAN THE JSON-COLUMN DECISION ALONE: every site in driver-sql that asked '
+        + '`field.multiple` "is this value multi-valued" now asks `isMultiValueField` \u2014 the DDL '
+        + 'writer, the read-side deserializer, the varchar-width mirror, the cross-field '
+        + 'comparison class, the four scalar read-coercion registries on both of their fills, '
+        + 'the two MySQL temporal-widening candidate sets, and the schema differ. So a stored '
+        + 'field in the retired shape also LEAVES the JSON read path and ENTERS the scalar one: '
+        + 'its column is no longer deserialized as JSON, the declared-type text-operator gate '
+        + 'applies to it, and a `$contains` against it answers the declared no-match instead of '
+        + 'a membership test.',
       acceptanceCriteria:
         'Every field in the stack parses: `ObjectSchema.parse()` / `objectstack validate` report no '
         + 'issue on the `multiple` path. For each field the refusal names — the message states the '
@@ -8007,7 +8017,8 @@ const step18: MigrationStep = {
         + 'storages differ: the old column holds a JSON array, the new one holds a scalar (dropping '
         + '`multiple`) or a differently-shaped array (changing `type`). Prove the data half by '
         + 'reading one migrated row back through the API and asserting the value shape the new '
-        + 'declaration promises; `=` filters against the field answer rows instead of a 400. Fields '
+        + 'declaration promises; `=` filters against the field answer rows instead of a 400, and a '
+        + '`$contains` against it answers by member rather than the declared no-match. Fields '
         + 'already multi-valued by `isMultiValueField` need no change and must read back '
         + 'byte-identically.',
     },

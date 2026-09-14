@@ -134,7 +134,7 @@ describe('[#17469] the entrance half — the declarations this file used to pin 
     expect(FieldSchema.safeParse({ name: 'refs', type: 'lookup', reference: 'account', multiple: true }).success).toBe(true);
     expect(FieldSchema.safeParse({
       name: 'picks', type: 'select', multiple: true,
-      options: [{ label: 'A', value: 'a' }, { label: 'B', value: 'b' }],
+      options: [{ label: 'Alpha', value: 'alpha' }, { label: 'Beta', value: 'beta' }],
     }).success).toBe(true);
   });
 });

@@ -59,12 +59,34 @@ field that was already multi-valued by that predicate keeps its declaration, its
 storage and its read path byte-identically. What moved is which declarations can
 be newly authored, plus the storage decision for the shapes that are now refused.
 
-**Storage change (`@objectstack/driver-sql`)**: `isJsonField` becomes
-`JSON_COLUMN_TYPES.has(type) || isMultiValueField(field)`. The file's own header
-already called `JSON_COLUMN_TYPES` membership "owned by `@objectstack/spec`"; that
-sentence is now true for the `multiple` half too. A column whose field is
-multi-valued by the spec predicate is a JSON column exactly as before; the shapes
-that change are the ones the schema now refuses at the entrance.
+**Storage change (`@objectstack/driver-sql`)**: every site that asked
+`field.multiple` the question "is this value multi-valued" now asks
+`isMultiValueField` — **seventeen expressions across two files**, not one. The
+file's own header already called `JSON_COLUMN_TYPES` membership "owned by
+`@objectstack/spec`"; that sentence is now true for the `multiple` half too.
+
+- `sql-driver.ts` — the DDL writer (`createColumn`'s multi-value short-circuit),
+  the read-side deserializer (`isJsonField`, both limbs), the `varchar` width
+  mirror (`varcharColumnChars`), the cross-field comparison class
+  (`crossFieldComparisonClass`), the four scalar registries filled by BOTH
+  `registerObjectMetadata` and `registerExternalObject` (`mediaFields`,
+  `booleanFields`, `numericFields`, `numericValueFields`), and the two MySQL
+  temporal-widening candidate sets.
+- `schema-drift.ts` — the differ's `fieldHasColumn`, its `declaresJsonColumn`
+  disjunct and its `declaresArray` test, which #15771 bound to the writer's
+  predicate and which a pin test holds equal to it.
+
+Only the last of those was named in the ruling; aligning one and leaving sixteen
+would have re-opened #11535 in reverse — the DDL writing a JSON column that the
+read-side deserializer no longer recognises. A column whose field is multi-valued
+by the spec predicate behaves exactly as before; the shapes that change are the
+ones the schema now refuses at the entrance.
+
+⛔ Three `field.multiple` reads are deliberately NOT aligned: the three that
+interpolate `', multiple'` into an `uncompilableFieldReferenceError` message.
+They echo what the author DECLARED back to them; they do not ask whether the
+value is multi-valued (the verdict there comes from `crossFieldComparisonClass`,
+which is aligned).
 
 ⚠️ **Two consequences worth reading before you upgrade.**
 
@@ -80,3 +102,10 @@ that change are the ones the schema now refuses at the entrance.
    JSON column. Declare such a column as `object` or `array` (both are
    `JSON_COLUMN_TYPES` members and unchanged), or as the authorable type it
    really is.
+3. `multiple: true` on `boolean` / `toggle` / `number` / `currency` / `percent` /
+   `date` / `datetime` / `time` **ceases to be a supported shape end to end**, as
+   a consequence of the entrance refusal above. Such a column is no longer a JSON
+   column, so it is no longer excluded from the scalar read-coercion registries
+   and the declared-type text-operator gate (`isNonTextColumn`) applies to it: a
+   `$contains` against one answers the declared no-match rather than a JSON
+   membership test. Stored data in that shape is the ADR-0087 entry's subject.
