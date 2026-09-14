@@ -25,7 +25,7 @@
 - 窗口自身权责不变:跟到 MERGED、踢出处置、落地后对账。
 - 转 ready 或挂 auto-merge 前先判受管面:`node scripts/pm/check-governed-merges.mjs --test` 加变更路径。
 - 受管路径全在本技能 `references/` 者事实层:席内达档复核过落地前检三条即转正式入队。
-- 其余为规则层:四件套留 draft 等人合,⛔ 不翻正式不入队;获授权批准后认领席落地。
+- 其余为规则层:四件套留 draft 等人批,⛔ 不翻正式不入队;获授权批准后认领席落地。
 - ⛔ 两层不由席位批准;清标即落地同受此闸,漏判会被队列守卫在 merge group 里拒收。
 - 再读 `mergeable_state`:`dirty` ⇒ 先 merge `origin/main` 再挂;生成物在面上按 A 的固定序。
 - ready + 全绿 ≠ 已入队:队列从不主动拉 PR,入队是显式动作。
