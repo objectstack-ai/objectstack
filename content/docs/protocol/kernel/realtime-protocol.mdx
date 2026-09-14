@@ -341,21 +341,36 @@ for anything else. There is no nested `error` object — a client that reads `ms
 
 ### Receiving Events
 
-When subscribed data changes, server pushes events:
+When subscribed data changes, the server pushes `event` messages.
+
+**`EventMessageSchema` declares five fields of its own** — `subscriptionId`, `eventName`, `object`,
+`payload` and `userId` — on top of the three `BaseWebSocketMessage` fields every message carries.
+They are camelCase, and the record body travels **inside `payload`**, never at the top level.
 
 **Created Event:**
 ```json
 {
+  "messageId": "a41d6c58-92b7-4f0e-8d3a-16b5c7e04912",
   "type": "event",
-  "subscription_id": "sub_1",
-  "event": "created",
+  "timestamp": "2024-01-16T14:30:00Z",
+  "subscriptionId": "9f8c1e42-5b7a-4d33-9e10-6c2f8a91b4d7",
+  "eventName": "data.record.created",
   "object": "task",
-  "data": {
-    "id": "task_456",
-    "title": "New task assigned to you",
-    "status": "todo",
-    "assignee_id": "user_123",
-    "created_at": "2024-01-16T14:30:00Z"
+  "userId": "user_123",
+  "payload": {
+    "id": "0c8b7a36-4e21-4d59-b7f2-3a9e5d1c8046",
+    "type": "data.record.created",
+    "object": "task",
+    "recordId": "task_456",
+    "after": {
+      "id": "task_456",
+      "title": "New task assigned to you",
+      "status": "todo",
+      "assignee_id": "user_123",
+      "created_at": "2024-01-16T14:30:00Z"
+    },
+    "userId": "user_123",
+    "timestamp": "2024-01-16T14:30:00Z"
   }
 }
 ```
@@ -363,20 +378,28 @@ When subscribed data changes, server pushes events:
 **Updated Event:**
 ```json
 {
+  "messageId": "b7e2f409-51ac-4d68-9b30-2c7a8e15d643",
   "type": "event",
-  "subscription_id": "sub_1",
-  "event": "updated",
+  "timestamp": "2024-01-16T15:00:00Z",
+  "subscriptionId": "9f8c1e42-5b7a-4d33-9e10-6c2f8a91b4d7",
+  "eventName": "data.record.updated",
   "object": "task",
-  "data": {
-    "id": "task_456",
-    "status": "in_progress",
-    "updated_at": "2024-01-16T15:00:00Z"
-  },
-  "changes": {
-    "status": {
-      "old": "todo",
-      "new": "in_progress"
-    }
+  "userId": "user_123",
+  "payload": {
+    "id": "5d3c9f71-8a04-4b62-91e7-0f6b2d8a3c15",
+    "type": "data.record.updated",
+    "object": "task",
+    "recordId": "task_456",
+    "changes": {
+      "status": "in_progress"
+    },
+    "after": {
+      "id": "task_456",
+      "status": "in_progress",
+      "updated_at": "2024-01-16T15:00:00Z"
+    },
+    "userId": "user_123",
+    "timestamp": "2024-01-16T15:00:00Z"
   }
 }
 ```
@@ -384,16 +407,50 @@ When subscribed data changes, server pushes events:
 **Deleted Event:**
 ```json
 {
+  "messageId": "c9a04b17-6d38-4e52-8f71-4b2e6c9d0537",
   "type": "event",
-  "subscription_id": "sub_1",
-  "event": "deleted",
+  "timestamp": "2024-01-16T16:00:00Z",
+  "subscriptionId": "9f8c1e42-5b7a-4d33-9e10-6c2f8a91b4d7",
+  "eventName": "data.record.deleted",
   "object": "task",
-  "data": {
-    "id": "task_456",
-    "deleted_at": "2024-01-16T16:00:00Z"
+  "userId": "user_123",
+  "payload": {
+    "id": "e18f2b05-7c46-4a93-b2d0-9e35c7a14f68",
+    "type": "data.record.deleted",
+    "object": "task",
+    "recordId": "task_456",
+    "userId": "user_123",
+    "timestamp": "2024-01-16T16:00:00Z"
   }
 }
 ```
+
+<Callout type="warn">
+  ⛔ **`subscription_id`, `event` and `data` are not fields of this envelope, and `changes` and
+  `reason` are not top-level fields either.** The declared names are `subscriptionId`, `eventName`
+  and `payload`, so a client written from the old fences reads `msg.subscription_id` and `msg.data`
+  and gets `undefined` on both. `changes` is real but sits **one level down**, on the `DataEvent`
+  inside `payload`, and it carries the write's own patch — a flat `{ field: newValue }` map
+  (`publishDataEvent`, `packages/objectql/src/engine.ts`), not the `old` / `new` pairs this page
+  used to show; read the post-state from `payload.after`. `reason` is declared nowhere in the
+  protocol at all — see **Subscribe to Query Results** below.
+</Callout>
+
+**Fields:**
+- `messageId`: UUID for this message (`BaseWebSocketMessage`)
+- `timestamp`: ISO 8601 datetime the message was sent (`BaseWebSocketMessage`)
+- `subscriptionId`: **UUID** of the subscription this event belongs to — the schema declares
+  `z.string().uuid()`, and it is the same UUID the subscribe message declared, so an opaque handle
+  like `"sub_1"` does not parse
+- `eventName`: the event name, dot notation by convention. The platform-checked vocabulary is the
+  closed `DataEventType` / `BulkDataEventType` enums (`packages/spec/src/api/events.zod.ts`) —
+  `data.record.created` / `data.record.updated` / `data.record.deleted`, plus the two bulk siblings
+- `object`: optional object name the event relates to — the one key the old fences had right
+- `payload`: the event body, declared `z.unknown()` on the envelope. The platform's only publisher
+  today is the ObjectQL engine, which emits a `DataEvent` for a single-row write and a
+  `BulkDataEvent` for a predicate write; that is the shape shown above
+- `userId`: optional — the user who triggered the event
+
 
 ### Unsubscribe
 
@@ -492,36 +549,54 @@ the declared subscription carries no query:
 - Evaluate query membership **on the client**: apply the predicate to each event and derive the
   enter/exit transitions yourself by comparing against the set you are already holding
 
-**Example:** Task enters subscription:
+**Example:** a `task` the subscription covers is updated so that it now matches your predicate:
 ```json
 {
+  "messageId": "d2c74f38-9b15-4e06-a7f3-8c1d5b902e47",
   "type": "event",
-  "subscription_id": "sub_3",
-  "event": "updated",
+  "timestamp": "2024-01-16T14:46:00Z",
+  "subscriptionId": "6b3c9e07-2d54-4f18-9c8a-0e7d1b5a4632",
+  "eventName": "data.record.updated",
   "object": "task",
-  "data": {
-    "id": "task_789",
-    "status": "todo",  // Changed from "in_progress" to "todo"
-    "assignee_id": "user_123"
-  },
-  "reason": "entered_query"
+  "payload": {
+    "id": "7a1e4c92-0d63-4f85-b91a-2e6c8d357b04",
+    "type": "data.record.updated",
+    "object": "task",
+    "recordId": "task_789",
+    "changes": { "status": "todo" },
+    "after": { "id": "task_789", "status": "todo", "assignee_id": "user_123" },
+    "timestamp": "2024-01-16T14:46:00Z"
+  }
 }
 ```
 
-**Example:** Task exits subscription:
+**Example:** the same subscription, a `task` updated so that it no longer matches:
 ```json
 {
+  "messageId": "e6f18a03-4d27-4c91-8b52-7a0e3d9c1465",
   "type": "event",
-  "subscription_id": "sub_3",
-  "event": "updated",
+  "timestamp": "2024-01-16T14:47:00Z",
+  "subscriptionId": "6b3c9e07-2d54-4f18-9c8a-0e7d1b5a4632",
+  "eventName": "data.record.updated",
   "object": "task",
-  "data": {
-    "id": "task_456",
-    "status": "done"  // No longer matches "todo" filter
-  },
-  "reason": "exited_query"
+  "payload": {
+    "id": "9c05b7d4-1a68-4e30-97f2-5d8a1c60e3b9",
+    "type": "data.record.updated",
+    "object": "task",
+    "recordId": "task_456",
+    "changes": { "status": "done" },
+    "after": { "id": "task_456", "status": "done" },
+    "timestamp": "2024-01-16T14:47:00Z"
+  }
 }
 ```
+
+⭐ **The two messages are identical in shape — nothing in the envelope says "entered" or "exited".**
+`EventMessageSchema` has no `reason` field, and no runtime tracks query membership to populate one,
+so the earlier `reason: "entered_query"` / `"exited_query"` examples described a signal the contract
+cannot send. The transition is yours to derive: apply your predicate to `payload.after` and compare
+against the set you are already holding.
+
 
 ## Server-Sent Events (SSE)
 
@@ -731,19 +806,33 @@ Real-time subscriptions respect object-level and row-level permissions:
 
 **Example:** User has rule "see only assigned tasks":
 
-```javascript
-// User is assigned task_456
+```json
 {
+  "messageId": "f3b90d67-5a24-4e18-9c07-1b8f2a6d4e35",
   "type": "event",
-  "event": "updated",
+  "timestamp": "2024-01-16T14:51:00Z",
+  "subscriptionId": "9f8c1e42-5b7a-4d33-9e10-6c2f8a91b4d7",
+  "eventName": "data.record.updated",
   "object": "task",
-  "data": { "id": "task_456", "assignee_id": "user_123" },
-  "reason": "entered_query"
+  "userId": "user_123",
+  "payload": {
+    "id": "2d7c1f85-6b39-4a04-8e13-9f05c2b71a68",
+    "type": "data.record.updated",
+    "object": "task",
+    "recordId": "task_456",
+    "changes": { "assignee_id": "user_123" },
+    "after": { "id": "task_456", "assignee_id": "user_123" },
+    "userId": "user_123",
+    "timestamp": "2024-01-16T14:51:00Z"
+  }
 }
-
-// Task reassigned to someone else
-// No event sent - task is now invisible to user
 ```
+
+Reassign `task_456` to someone else and, under the row-level behaviour described above, no further
+message arrives for it: the protocol has no "you lost access" signal to send, so absence of events
+is the whole signal. There is no `reason` field here either. What delivery actually enforces today
+is the implementation-status callout at the top of this page, not this section.
+
 
 ## Scaling Considerations
 
