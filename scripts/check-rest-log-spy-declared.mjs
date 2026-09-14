@@ -83,7 +83,7 @@
 //   node scripts/check-rest-log-spy-declared.mjs
 //   node scripts/check-rest-log-spy-declared.mjs --self-test
 
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -94,6 +94,21 @@ import { ENV_KEY, findSeamOwners, readSeam } from './check-rest-log-declared.mjs
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..');
+
+/* ── The declared path population (#13519 / check-declared-population-live) ───
+ * These literals ARE what this gate reads, and they are deliberately as wide as
+ * its sibling's: locating the seam means asking EVERY workspace package whether
+ * one of its non-test sources reads the environment key, because a SECOND
+ * reader appearing anywhere is an exit-2 measurement failure here. Only the
+ * second half — the test files examined — is narrow, and its directory is
+ * DERIVED from wherever the seam turned out to live, so it cannot be spelled as
+ * a literal without re-introducing the hardcoded package path this gate refuses
+ * to carry. Spelled WITH a separator: a bare single-segment literal builds no
+ * hint at all. The self-test holds these against the walk, so a moved read
+ * reddens here rather than turning this gate silently unnameable by any
+ * dispatch brief. */
+export const WORKSPACE_FILE = 'pnpm-workspace.yaml';
+export const ROOT_DIR_WATCH_HINTS = ['packages/**', 'apps/**', 'examples/**'];
 
 const TEST_FILE_RE = /\.(?:test|spec)\.[a-z]+$/;
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.turbo', 'coverage', 'build']);
@@ -411,7 +426,60 @@ const THROWING_CASES = [
     {}, /contains NO test files/],
 ];
 
-const SELF_TEST_FLOOR = CASES.length + THROWING_CASES.length + 1;
+/**
+ * Cases taken against the REAL tree rather than a fixture: the declared
+ * population has to reach the tree and cover the walk, and the scan has to see
+ * a non-empty population in it. A wrong hint runs perfectly green in production
+ * and shows up only as a dev who was never told this gate reads their surface.
+ */
+const LIVE_TREE_CASES = 5;
+
+const SELF_TEST_FLOOR = CASES.length + THROWING_CASES.length + 1 + LIVE_TREE_CASES;
+
+function liveTreeCases(record) {
+  record(
+    existsSync(join(REPO_ROOT, WORKSPACE_FILE)),
+    `the declared population reaches the tree: ${WORKSPACE_FILE}`,
+    '',
+  );
+  record(
+    ROOT_DIR_WATCH_HINTS.every((h) => h.includes('/')),
+    'every ROOT_DIR_WATCH_HINTS entry is spelled with a separator — a bare segment builds no hint',
+    ` — ${JSON.stringify(ROOT_DIR_WATCH_HINTS)}`,
+  );
+  const roots = ROOT_DIR_WATCH_HINTS.map((h) => h.replace(/\/\*+$/, ''));
+  record(
+    roots.every((r) => existsSync(join(REPO_ROOT, r))),
+    'every declared hint root exists in the tree',
+    ` — ${JSON.stringify(roots)}`,
+  );
+  let uncovered = ['<the workspace walk could not be expanded>'];
+  try {
+    uncovered = workspacePackageDirs(REPO_ROOT)
+      .map((d) => rel(REPO_ROOT, d))
+      .filter((r) => !roots.some((root) => r === root || r.startsWith(`${root}/`)));
+  } catch { /* reported by the assertion below */ }
+  record(
+    uncovered.length === 0,
+    'the hints COVER the workspace walk this gate performs — a narrower declaration under-names it',
+    uncovered.length ? ` — uncovered: ${uncovered.slice(0, 3).join(', ')}` : '',
+  );
+  // Anti-vacuity over the real tree: a scan that selects nothing is the one
+  // failure this gate cannot report as a finding — it would print a perfect
+  // green over a detector that matches nothing.
+  let live = null;
+  let why = '';
+  try {
+    live = scan(REPO_ROOT);
+  } catch (error) {
+    why = ` — threw: ${error.message}`;
+  }
+  record(
+    live !== null && live.observers.length > 0 && live.examined > live.observers.length,
+    'the real tree yields a NON-EMPTY observer population that is a strict subset of its test files',
+    live ? ` — ${live.observers.length} observer(s) of ${live.examined} test file(s)` : why,
+  );
+}
 
 function selfTest() {
   const tmp = mkdtempSync(join(tmpdir(), 'check-rest-log-spy-declared-'));
@@ -468,6 +536,8 @@ function selfTest() {
       }
       record(ok, label, detail);
     }
+
+    liveTreeCases(record);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
