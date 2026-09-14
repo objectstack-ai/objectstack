@@ -346,9 +346,11 @@ describe('makeFakeEngine().delete conforms to ObjectQL.delete (#4550)', () => {
     // `where: { id: { $in: […] } }` only LOOKS like an id: it is a multi-row
     // predicate, so without `multi` the engine rejects it — the exact case a
     // hand-mirrored `if (opts?.where?.id == null)` waves through, and the reason
-    // the mirror had to go rather than be corrected in place. (This fake's
-    // `matches` is equality-only by design — no fixture here sends an operator
-    // predicate — so what is pinned is the dispatch verdict, not `$in` matching.)
+    // the mirror had to go rather than be corrected in place. (What is pinned
+    // here is the DISPATCH verdict, not `$in` matching: the refusal happens in
+    // `assertEngineDeleteDispatch` before `matches` is ever reached, so it
+    // holds whether or not this fake understands the operator — and since
+    // #17612 it does understand a few, `$in` among them.)
     engine.tables.set('sys_job_queue', [{ id: 'a' }, { id: 'b' }, { id: 'c' }]);
     await expect(
       engine.delete('sys_job_queue', { where: { id: { $in: ['a', 'b'] } } }),
@@ -363,5 +365,110 @@ describe('makeFakeEngine().delete conforms to ObjectQL.delete (#4550)', () => {
       engine.delete('sys_job_queue', { id: 'a' } as any),
     ).rejects.toThrow(ENGINE_DELETE_REJECT_MESSAGE);
     expect(rows()).toHaveLength(3);
+  });
+});
+
+/**
+ * [#17612] Head-of-line starvation: the due bound was applied in JS AFTER the
+ * SQL `LIMIT`, so a window full of not-yet-due high-priority rows hid every
+ * already-due row behind them — indefinitely, not just for one tick.
+ *
+ * The numbers below are the reproduction the card carries, re-measured here.
+ * Default `batchSize` is 10, so the candidate window is `10 * 3 = 30`.
+ */
+describe('DbQueueAdapter — the due bound is a predicate, not a post-LIMIT filter', () => {
+  let engine: ReturnType<typeof makeFakeEngine>;
+  let adapter: DbQueueAdapter;
+
+  beforeEach(() => {
+    engine = makeFakeEngine();
+    adapter = new DbQueueAdapter({
+      engine,
+      options: { pollIntervalMs: 60_000, autoStart: false, defaultMaxAttempts: 3 },
+    });
+  });
+
+  /** `n` not-yet-due priority-1 rows, then one already-due priority-100 row. */
+  async function seedStarvation(n: number): Promise<string> {
+    for (let i = 0; i < n; i++) {
+      await adapter.publish('starve', { i }, { priority: 1, delay: 600_000 });
+    }
+    return adapter.publish('starve', { due: true }, { priority: 100 });
+  }
+
+  it('claims the due low-priority row even when the whole candidate window is future-dated work', async () => {
+    const handled: any[] = [];
+    await adapter.subscribe('starve', async (msg) => { handled.push(msg.data); });
+    const dueId = await seedStarvation(30);
+
+    // Was 0 — the 30 priority-1 rows filled the window and the due row was
+    // never a candidate. The queue looked healthy and drained nothing.
+    expect(await adapter.pollOnce()).toBe(1);
+    expect(handled).toEqual([{ due: true }]);
+    expect((engine.tables.get('sys_job_queue') ?? []).find((r: any) => r.id === dueId).status)
+      .toBe('completed');
+  });
+
+  it('CONTROL — one row short of filling the window, the same claim already worked before the fix', async () => {
+    const handled: any[] = [];
+    await adapter.subscribe('starve', async (msg) => { handled.push(msg.data); });
+    await seedStarvation(29);
+
+    // 29 future-dated rows + the due one is exactly 30 = the window, so the due
+    // row rode in on the last slot. This case read 1 before the fix too — which
+    // is what makes the case above a measurement rather than a coincidence.
+    expect(await adapter.pollOnce()).toBe(1);
+    expect(handled).toEqual([{ due: true }]);
+  });
+
+  it('LIMIT now sees the DUE set — the engine hands back one candidate, not a window of thirty', async () => {
+    const claims: Array<{ where: any; limit: number; rows: number }> = [];
+    const inner = engine.find.bind(engine);
+    engine.find = async (table: string, opts: any = {}) => {
+      const rows = await inner(table, opts);
+      if (opts?.orderBy?.[0]?.field === 'priority') {
+        claims.push({ where: opts.where, limit: opts.limit, rows: rows.length });
+      }
+      return rows;
+    };
+
+    await adapter.subscribe('starve', async () => {});
+    await seedStarvation(30);
+    await adapter.pollOnce();
+
+    expect(claims).toHaveLength(1);
+    expect(claims[0].limit).toBe(30);
+    // The over-fetch window is unchanged; what changed is WHICH rows fill it.
+    expect(claims[0].rows).toBe(1);
+    expect(claims[0].where.$or).toEqual([
+      { scheduled_for: null },
+      { scheduled_for: { $lte: expect.any(String) } },
+    ]);
+  });
+
+  it('a row with no `scheduled_for` at all is due — `NULL <= now` is NULL, so it needs its own leg', async () => {
+    const handled: any[] = [];
+    await adapter.subscribe('nulls', async (msg) => { handled.push(msg.data); });
+    await adapter.publish('nulls', { a: 1 });
+    // Not a shape `publish` writes — `sys_job_queue.scheduled_for` is nullable
+    // and a row can reach this table from a migration or a hand-written insert.
+    (engine.tables.get('sys_job_queue') ?? [])[0].scheduled_for = null;
+
+    expect(await adapter.pollOnce()).toBe(1);
+    expect(handled).toEqual([{ a: 1 }]);
+  });
+
+  it('priority still decides the order among DUE rows — the fork this card did NOT take', async () => {
+    const handled: any[] = [];
+    await adapter.subscribe('ordered', async (msg) => { handled.push(msg.data); });
+    await adapter.publish('ordered', { p: 100 }, { priority: 100 });
+    await adapter.publish('ordered', { p: 1 }, { priority: 1 });
+    await adapter.publish('ordered', { p: 50 }, { priority: 50 });
+
+    expect(await adapter.pollOnce()).toBe(3);
+    // Lower number = higher priority (`sys_job_queue.priority`'s own description).
+    // Dropping `priority` from the claim sort — the card's option 2 — would have
+    // made this read in insert order and left the declared field inert.
+    expect(handled).toEqual([{ p: 1 }, { p: 50 }, { p: 100 }]);
   });
 });

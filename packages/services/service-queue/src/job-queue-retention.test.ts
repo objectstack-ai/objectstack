@@ -45,20 +45,33 @@ type Row = Record<string, any>;
  *    (same contract as `db-queue-adapter.test.ts`);
  *  - the Reaper's `delete(table, { where, multi: true })` with a `$lt`
  *    operator, which the row-by-row `where.id` delete of the adapter's own
- *    `purge()` does not exercise.
+ *    `purge()` does not exercise;
+ *  - [#17612] the claim path's `$or` due bound, which `pollOnce()` carries in
+ *    here whether or not a fixture is about it.
  */
 function makeFakeEngine() {
   const tables = new Map<string, Row[]>();
   function matches(row: Row, where: Record<string, any>): boolean {
     for (const [k, v] of Object.entries(where)) {
+      // [#17612] `$or` — the claim path's due bound reaches this fake too, via
+      // the `pollOnce()` these retention fixtures drive. Every OTHER `$` key
+      // stays a loud failure: a double that silently passed an operator it
+      // does not implement is the shape this package refuses.
+      if (k === '$or') {
+        if (!(v as Array<Record<string, any>>).some((leg) => matches(row, leg))) return false;
+        continue;
+      }
       if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
       if (v && typeof v === 'object' && !Array.isArray(v)) {
-        // NULL-safe like SQL: a row with no value never satisfies `$lt`.
+        // NULL-safe like SQL: a row with no value never satisfies `$lt`/`$lte`.
         if ('$lt' in v && (row[k] == null || !(String(row[k]) < String(v.$lt)))) return false;
+        if ('$lte' in v && (row[k] == null || !(String(row[k]) <= String(v.$lte)))) return false;
         if ('$in' in v && !(v.$in as unknown[]).includes(row[k])) return false;
         continue;
       }
-      if (row[k] !== v) return false;
+      // `where: { k: null }` is IS NULL — an absent column and an explicit null
+      // are the same absence.
+      if (v === null ? row[k] != null : row[k] !== v) return false;
     }
     return true;
   }
