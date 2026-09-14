@@ -167,7 +167,10 @@ describe('diffManagedTable — an unbounded text-family field over a pre-existin
     // A multi-value field is a `json` column whatever its element type would
     // have been, and the base-type branch (#11535) already owns that shape.
     // Reporting it here too would give one column two contradictory remedies.
-    const multi = diffBody({ type: 'signature', multiple: true }, staleColumn('varchar', 255));
+    // [#17469] `image`, not `signature`: "multi-valued" is `isMultiValueField`
+    // now, and `signature` + `multiple: true` is refused at the authoring
+    // entrance — it is an ordinary unbounded-text column here, not a json one.
+    const multi = diffBody({ type: 'image', multiple: true }, staleColumn('varchar', 255));
     expect(multi).toHaveLength(1);
     expect(multi[0].op.type).toBe('manual_column_type_change');
   });

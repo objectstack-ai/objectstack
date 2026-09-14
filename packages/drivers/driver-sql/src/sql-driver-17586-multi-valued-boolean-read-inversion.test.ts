@@ -1,118 +1,82 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#17586] A `multiple: true` BOOLEAN / TOGGLE column stops presenting its
- * stored array as a single INVERTED `true`.
+ * [#17586 · retargeted by #17469] A JSON column's stored array survives the
+ * read — and `booleanFields` never contains one.
  *
- * ## The failure this file exists to pin
+ * ## What this file was filed for
  *
- * `formatOutput` runs its `jsonFields` pass first, which `JSON.parse`s the
- * cell into a real array, and then its `booleanFields` pass does
- * `data[field] = Boolean(data[field])`. Every non-empty array is truthy, so
- * the presented value is `true` whatever the array holds:
+ * `formatOutput` runs its `jsonFields` pass first, which `JSON.parse`s the cell
+ * into a real array, and then its `booleanFields` pass does
+ * `data[field] = Boolean(data[field])`. Every non-empty array is truthy, so the
+ * presented value was `true` whatever the array held — and a stored `[false]`
+ * presenting as `true` is not a mis-SHAPED answer, it is the OPPOSITE of what
+ * is stored, with no error anywhere. The repair was at the REGISTRY: narrow
+ * both fills so a multi-valued column is never in `booleanFields`, which moves
+ * all four readers of that registry at once.
  *
- * | declared field                        | written        | stored cell   | read back (before) |
- * |:--|:--|:--|:--|
- * | `{ type: 'boolean', multiple: true }` | `[true, false]`| `[true,false]`| `true` ⚠️ array gone |
- * | `{ type: 'toggle',  multiple: true }` | `[false]`      | `[false]`     | `true` ⚠️ **INVERTED** |
- * | `{ type: 'number',  multiple: true }` | `[1, 2]`       | `[1,2]`       | `[1, 2]` correct |
- * | `{ type: 'tags' }`                    | `['x']`        | `["x"]`       | `['x']` correct |
+ * ## ⭐ What the #17469 ruling did to it
  *
- * ⭐ The `toggle` row is the whole card. A stored `[false]` presenting as
- * `true` is not a mis-SHAPED answer, it is the OPPOSITE of what is stored,
- * with no error anywhere — so this file's central assertion is that
- * `[false]` does not read back as `true`, not merely that it is "no longer a
- * single boolean". A test that only proved the latter would stay green on a
- * repair that presented `false` for `[true]`.
+ * The card's cell was `{ type: 'boolean', multiple: true }` — a shape whose
+ * existence rested on `FieldSchema.multiple` refusing exactly one type
+ * (`radio`). The maintainer ruling of 2026-09-13 (decision batch #128 item 5,
+ * option 1′) gives "multi-valued" ONE definition — `isMultiValueField` —
+ * refuses `multiple: true` at the authoring entrance on every type outside
+ * `MULTI_CAPABLE_TYPES` ∪ `MULTI_OPTION_TYPES`, and derives this driver's
+ * storage decision from it. A `boolean` / `toggle` column therefore **cannot be
+ * a JSON column at all** any more, which is a stronger guarantee than the
+ * registry carve-out was: the collapse has no reachable input.
  *
- * ## The repair, and why it is at the REGISTRY and not at a reader
+ * So the registry rule is restated in the terms that survive — **the two
+ * registries partition the columns: a JSON column is never in `booleanFields`,
+ * and a scalar boolean always is** — and asserted over the multi-valued shapes
+ * that still exist (`select` / `lookup` flagged `multiple: true`, and the
+ * inherently-multi `tags`). Two further rows pin the ruling itself, one per
+ * half, so a revert on EITHER side reddens this file:
  *
- * `&& !field.multiple` is the house spelling of both fills, already written
- * three times in each block (`mediaCols`, `numericCols`, `numericValueCols`);
- * `booleanCols.push(name)` was the single omission, in BOTH fills
- * (`registerExternalObject` and `registerManagedObjectMetadata`) — a repair to
- * one leaves the other live.
+ *   1. `FieldSchema` refuses `boolean` / `toggle` + `multiple: true`;
+ *   2. the driver gives that declaration a plain boolean column and registers
+ *      it in `booleanFields` — registry and storage agreeing, which is exactly
+ *      the invariant the original repair was reaching for.
  *
- * Narrowing the registry moves every reader of `booleanFields` at once, so the
- * card fenced the round on enumerating them first. All four read sites, and
- * what each does for a multi-valued column:
- *
- * 1. **The #11635 Postgres aggregate cast** (`aggregate()`) — gated
- *    `isPostgres && booleanFields[table].includes(fieldExpr)`, emits
- *    `cast(?? as int)`. A `multiple: true` boolean is a JSON column on every
- *    dialect ({@link SqlDriver.isJsonField}), and `cast(json as int)` is not a
- *    defined cast on Postgres — so the registry entry bought this reader a
- *    cast it must not emit. ⇒ does NOT need the column. ⭐ MEASURED on live
- *    PostgreSQL 16.13 by reading the statements the server received: with the
- *    guard the door emits `max("flags")`, without it `max(cast("flags" as
- *    int))` — see the reader-1 row in the live-postgres block below.
- * 2. **`readPresentationKind`** (the `aggregate()` / `distinct()` doors) —
- *    gated `(isSqlite || isMysql) && booleanFields[table].includes(field)`,
- *    returns `'boolean'`, whose presenter is the same `Boolean(v)`. On those
- *    doors the stored cell arrives as the raw JSON **string** `'[false]'`, and
- *    `Boolean('[false]')` is `true` — the identical inversion, one door over.
- *    ⇒ does NOT need the column; it is actively harmed by it.
- * 3. **`formatOutput`'s row pass** — the defect itself. ⇒ does NOT need it.
- * 4. **`isNonTextColumn`** (#14079/#15683/#17343's declared-type gate) — the
- *    one reader that already carved out multi-valued columns AT THE READER,
- *    spelled `booleanFields[table].includes(f) && !this.isJsonColumn(table, f)`.
- *    ⇒ does NOT need the column either, and the narrowing is *behaviour-
- *    identical* there rather than merely safe: for a `boolean`/`toggle` field
- *    `isJsonField` reduces to `JSON_COLUMN_TYPES.has(type) || !!field.multiple`
- *    — and neither type is in `JSON_COLUMN_TYPES` — so `isJsonColumn` on this
- *    class is exactly `!!field.multiple`, the same predicate the fills now
- *    apply. `§ the four readers` below pins that equivalence by execution.
- *
- * ⇒ no reader needs a multi-valued column in `booleanFields`; three of the
- * four are repaired by its absence and the fourth cannot observe it. The
- * carve-out therefore belongs at the registry, which is also where its three
- * neighbours already spell it.
+ * ⛔ Do not restore a `{ type: 'boolean', multiple: true }` array fixture to
+ * "keep the original cell". The column is a boolean column now; writing an
+ * array into it is not a test of this file's subject.
  *
  * ## Controls
  *
- * - **Positive** (must not move): the `multiple: true` NUMBER row and the
- *   `tags` row — both correct before this change, per the card's own table.
- * - **Negative** (the repair must not become a hole): a SCALAR `boolean` /
+ * - **Positive** (must not move): the `tags` row — correct before the original
+ *   change, per the card's own table.
+ * - **Negative** (the rule must not become a hole): a SCALAR `boolean` /
  *   `toggle` still takes the read coercion it exists for — stored `1`/`0` on
  *   SQLite and `tinyint(1)` on MySQL presented as JS `true`/`false` (#11782).
- *   Narrowing by `!field.multiple` must not cost that.
  *
  * ## Which cells execute, and the one door that cannot
  *
- *   - **sqlite** — always, embedded. The cell that carried the defect, so its
- *     rows are the reverse-verification witness (13 red before the guard, all
- *     green after).
- *   - **live postgres** — runs when provisioned. Every ROW-read row above
- *     answers here exactly as it does on SQLite, because `formatOutput`'s
- *     boolean pass was always gated `isSqlite || isMysql` and so never reached
- *     this dialect. Its `distinct()` door is the exception and is pinned as a
- *     NAMED DIVERGENCE instead of an answer — see {@link distinctExecutes},
- *     which carries the two-leg measurement proving the divergence is
- *     class-wide and predates this change.
+ *   - **sqlite** — always, embedded.
+ *   - **live postgres** — runs when provisioned. Every ROW-read row answers
+ *     here exactly as it does on SQLite, because `formatOutput`'s boolean pass
+ *     was always gated `isSqlite || isMysql`. Its `distinct()` door is the
+ *     exception and is pinned as a NAMED DIVERGENCE — see
+ *     {@link distinctExecutes}.
  *   - **live mysql** — runs when provisioned; it takes the same coercion gate
  *     as SQLite, so its rows answer identically.
- *
- * ⚠️ The whole driver-sql suite was run against a live PostgreSQL 16.13 under
- * CI's own configuration (server `Asia/Shanghai`, process `TZ=America/New_York`)
- * to confirm this file is the only thing that moves: `179 passed | 3 skipped`,
- * zero failures.
  *
  * @see SqlDriver.formatOutput — the row-read pass the inversion lived in.
  * @see SqlDriver.readPresentationKind — the `aggregate()`/`distinct()` door.
  * @see SqlDriver.isNonTextColumn — the reader that carves out at the reader.
+ * @see SqlDriver.isJsonField — the storage half of the #17469 ruling.
+ * @see https://github.com/objectstack-ai/objectstack/issues/17469 (the ruling that retargeted this file)
  * @see https://github.com/objectstack-ai/objectstack/issues/17586
  * @see https://github.com/objectstack-ai/objectstack/issues/17343 (the filter half)
  * @see https://github.com/objectstack-ai/objectstack/issues/11782 (the pass)
  * @see https://github.com/objectstack-ai/objectstack/issues/11635 (the PG cast)
- * @see https://github.com/objectstack-ai/objectstack/issues/17639 (the missing
- *   ADR-0112 envelope on the `distinct()` door, measured by this round)
- * @see https://github.com/objectstack-ai/objectstack/issues/17590 (the sibling
- *   `LIKE`-over-`json` divergence on the filter side)
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { Knex } from 'knex';
 import type { DriverOptions } from '@objectstack/spec/data';
+import { FieldSchema } from '@objectstack/spec/data';
 import { SqlDriver, type SqlDriverConfig } from './sql-driver.js';
 import {
   DIALECT_CELLS,
@@ -126,93 +90,79 @@ const READ_OBJECT = 'os17586_multi_boolean_read';
 /** Diagnostics-only; it never changes which rows a read touches. */
 const BYPASS: DriverOptions = { bypassTenantAudit: true };
 
-/** The shape a thrown driver error carries at this door. */
-interface WireBearingError extends Error {
-  code?: string;
-  status?: number;
-}
-
-/**
- * The SQLSTATE the BACKEND raised, read off the envelope's non-enumerable
- * `cause` — where [#17639] put it when it brought the ADR-0112 terminal to
- * this door. Before that card the same value was the caller-visible `code`.
- */
-const sqlstateOf = (err: WireBearingError): string | undefined =>
-  (err as { cause?: { code?: string } }).cause?.code;
-
 /**
  * Can `distinct()` EXECUTE over a JSON column on this backend?
  *
- * `multiple: true` is a JSON column on every dialect, but PostgreSQL's `json`
- * type defines no equality operator, and `SELECT DISTINCT` needs one — so the
- * statement is refused before any row is presented:
- *
- * ```
- * select distinct j from t;
- * ERROR:  could not identify an equality operator for type json
- * ```
- *
- * ⚠️ This is a property of the COLUMN CLASS, not of this card's cell, and not
- * of this card's change. Measured on live PostgreSQL 16.13, two legs, with the
- * fixture's `multiple: true` NUMBER and `tags` columns — neither of which was
- * ever in `booleanFields`, so no part of this change can reach them — failing
- * identically to the boolean cell, and with a SCALAR boolean (a real `boolean`
- * column, not `json`) answering normally in the same run:
- *
- * | leg | `sql-driver.ts` blob | toggles / flags / nums / tags_ | scalar_flag |
- * |:--|:--|:--|:--|
- * | change present  | `f7fe22f8` | all four raise SQLSTATE 42883 | `[false]` |
- * | change reverted | `a2b37dc6` (= merge base, verified on disk by `git hash-object`) | all four raise SQLSTATE 42883 | `[false]` |
- *
- * ⇒ the same failure, byte for byte, on a tree with no part of this change on
- * it. The mirror of the `LIKE`-over-`json` divergence #17590 owns on the filter
- * side, reached through the read door instead.
+ * A JSON column is a JSON column on every dialect, but PostgreSQL's `json` type
+ * defines no equality operator, and `SELECT DISTINCT` needs one — so the
+ * statement is refused before any row is presented (`could not identify an
+ * equality operator for type json`). A property of the COLUMN CLASS, measured
+ * on live PostgreSQL 16.13 across both legs of the original card's change and
+ * unchanged by it — the mirror of the `LIKE`-over-`json` divergence #17590 owns
+ * on the filter side, reached through the read door instead.
  */
 const distinctExecutes = (cell: DialectCell): boolean => cell.id !== 'pg';
 
 /**
- * The card's fixture, plus the two scalar negative controls. `flags`/`toggles`
- * are the cell this card owns; `nums`/`tags_` are the positive controls the
- * card names; `scalar_flag`/`scalar_toggle` prove the read coercion the
- * registry exists for survives the narrowing.
+ * The fixture, after #17469.
+ *
+ * `picks` / `refs` are multi-valued by `isMultiValueField` and therefore JSON
+ * columns — the cell this file's rule now owns. `tags_` is the positive
+ * control. `scalar_flag` / `scalar_toggle` prove the read coercion the registry
+ * exists for is untouched. `retired_flags` is the RULING's own pin: the
+ * declaration the entrance refuses, which reaches this driver only through a
+ * hand-built fixture like this one and is a plain boolean column when it does.
  */
 const READ_FIELDS: Record<string, Record<string, unknown>> = {
   label: { type: 'string' },
-  flags: { type: 'boolean', multiple: true },
-  toggles: { type: 'toggle', multiple: true },
-  nums: { type: 'number', multiple: true },
+  picks: { type: 'select', multiple: true },
+  refs: { type: 'lookup', multiple: true },
   tags_: { type: 'tags' },
   scalar_flag: { type: 'boolean' },
   scalar_toggle: { type: 'toggle' },
+  retired_flags: { type: 'boolean', multiple: true },
 };
 
 /**
- * Row 2 is the card's starred case: `toggles: [false]` — an array whose only
- * member is `false`, stored faithfully, presented as `true` before the repair.
- * Row 3's `flags: [false, false]` is the same failure one width over, so a
- * repair that special-cased a single-element array cannot pass.
+ * Row 2's single-member arrays are the shape a repair that special-cased array
+ * width would get wrong; row 3's two-member arrays are the same read one width
+ * over.
  */
 const READ_ROWS = [
   {
     id: '1', label: 'alpha',
-    flags: [true, false], toggles: [true], nums: [1, 2], tags_: ['red'],
-    scalar_flag: true, scalar_toggle: false,
+    picks: ['a', 'b'], refs: ['r1', 'r2'], tags_: ['red'],
+    scalar_flag: true, scalar_toggle: false, retired_flags: true,
   },
   {
     id: '2', label: 'beta',
-    flags: [false], toggles: [false], nums: [3], tags_: ['blue'],
-    scalar_flag: false, scalar_toggle: true,
+    picks: ['c'], refs: ['r3'], tags_: ['blue'],
+    scalar_flag: false, scalar_toggle: true, retired_flags: false,
   },
   {
     id: '3', label: 'gamma',
-    flags: [false, false], toggles: [true, false], nums: [1], tags_: ['red', 'blue'],
-    scalar_flag: true, scalar_toggle: true,
+    picks: ['a', 'c'], refs: ['r1'], tags_: ['red', 'blue'],
+    scalar_flag: true, scalar_toggle: true, retired_flags: false,
   },
 ] as const;
 
+describe('[#17469] the entrance half — the declaration this file was filed about is REFUSED', () => {
+  it('`FieldSchema` refuses `boolean` / `toggle` + `multiple: true`', () => {
+    for (const type of ['boolean', 'toggle']) {
+      const r = FieldSchema.safeParse({ name: 'flags', type, multiple: true });
+      expect(r.success, `\`${type}\` + multiple: true must be refused at the entrance`).toBe(false);
+    }
+  });
+
+  it('…and still accepts the multi-capable declarations this file now uses — the negative control', () => {
+    expect(FieldSchema.safeParse({ name: 'refs', type: 'lookup', reference: 'account', multiple: true }).success).toBe(true);
+    expect(FieldSchema.safeParse({ name: 'flag', type: 'boolean' }).success).toBe(true);
+  });
+});
+
 for (const cell of DIALECT_CELLS) {
   if (!cell.available) {
-    declareUnprovisionedCell(cell, '[#17586] the multi-valued boolean read presentation');
+    declareUnprovisionedCell(cell, '[#17586] the JSON-column read presentation');
     continue;
   }
   declareReadSweep(cell);
@@ -225,7 +175,7 @@ for (const cell of DIALECT_CELLS) {
  * it compiles.
  */
 function declareReadSweep(cell: DialectCell): void {
-  describe(`[#17586] SqlDriver — reading a multi-valued boolean column (${cell.label})`, () => {
+  describe(`[#17586] SqlDriver — reading a JSON column (${cell.label})`, () => {
     let driver: SqlDriver;
     let knexInstance: Knex;
     let rows: Record<string, any>[];
@@ -244,40 +194,24 @@ function declareReadSweep(cell: DialectCell): void {
       await driver?.disconnect?.();
     });
 
-    it('⭐ a stored `[false]` does NOT present as `true` — the inversion the card is filed for', () => {
-      const beta = rows.find((r) => r.id === '2')!;
-      // The opposite-of-stored assertion, spelled as its own expectation so a
-      // failure reads as the inversion and not as a shape mismatch.
-      expect(beta.toggles, 'toggles: stored [false] presented as `true`').not.toBe(true);
-      expect(beta.flags, 'flags: stored [false] presented as `true`').not.toBe(true);
-      // …and the same failure two members wide.
-      const gamma = rows.find((r) => r.id === '3')!;
-      expect(gamma.flags, 'flags: stored [false,false] presented as `true`').not.toBe(true);
-    });
-
-    it('the stored array survives the read, member for member', () => {
-      expect(rows.find((r) => r.id === '1')!.flags).toEqual([true, false]);
-      expect(rows.find((r) => r.id === '1')!.toggles).toEqual([true]);
-      expect(rows.find((r) => r.id === '2')!.flags).toEqual([false]);
-      expect(rows.find((r) => r.id === '2')!.toggles).toEqual([false]);
-      expect(rows.find((r) => r.id === '3')!.flags).toEqual([false, false]);
-      expect(rows.find((r) => r.id === '3')!.toggles).toEqual([true, false]);
-    });
-
-    it('every member is a real JS boolean, not the stored encoding', () => {
+    it('⭐ a stored array does NOT collapse to a single scalar — the inversion the card is filed for', () => {
       for (const row of rows) {
-        for (const field of ['flags', 'toggles']) {
+        for (const field of ['picks', 'refs', 'tags_']) {
+          expect(row[field], `${field} on row ${row.id} collapsed to a scalar`).not.toBe(true);
           expect(Array.isArray(row[field]), `${field} on row ${row.id}`).toBe(true);
-          for (const member of row[field] as unknown[]) {
-            expect(typeof member, `${field} member on row ${row.id}`).toBe('boolean');
-          }
         }
       }
     });
 
-    it('POSITIVE CONTROLS — the multi-valued number and the tags row are unmoved', () => {
-      expect(rows.find((r) => r.id === '1')!.nums).toEqual([1, 2]);
-      expect(rows.find((r) => r.id === '2')!.nums).toEqual([3]);
+    it('the stored array survives the read, member for member', () => {
+      expect(rows.find((r) => r.id === '1')!.picks).toEqual(['a', 'b']);
+      expect(rows.find((r) => r.id === '2')!.picks).toEqual(['c']);
+      expect(rows.find((r) => r.id === '3')!.picks).toEqual(['a', 'c']);
+      expect(rows.find((r) => r.id === '1')!.refs).toEqual(['r1', 'r2']);
+      expect(rows.find((r) => r.id === '2')!.refs).toEqual(['r3']);
+    });
+
+    it('POSITIVE CONTROL — the tags row is unmoved', () => {
       expect(rows.find((r) => r.id === '1')!.tags_).toEqual(['red']);
       expect(rows.find((r) => r.id === '3')!.tags_).toEqual(['red', 'blue']);
     });
@@ -293,117 +227,59 @@ function declareReadSweep(cell: DialectCell): void {
       expect(rows.find((r) => r.id === '3')!.scalar_toggle).toBe(true);
     });
 
+    /**
+     * ⭐ [#17469] The storage half of the ruling, read end to end: a `boolean`
+     * carrying `multiple: true` is a PLAIN BOOLEAN COLUMN, so it takes the
+     * ordinary scalar coercion and presents the boolean that was written.
+     * Registry and storage agree, which is the invariant the original
+     * registry-narrowing repair was reaching for.
+     */
+    it('[#17469] a RETIRED `boolean` + `multiple: true` reads back as the scalar boolean it now is', () => {
+      for (const row of rows) {
+        expect(typeof row.retired_flags, `retired_flags on row ${row.id}`).toBe('boolean');
+      }
+      expect(rows.find((r) => r.id === '1')!.retired_flags).toBe(true);
+      expect(rows.find((r) => r.id === '2')!.retired_flags).toBe(false);
+      expect(rows.find((r) => r.id === '3')!.retired_flags).toBe(false);
+    });
+
     if (distinctExecutes(cell)) {
       /**
        * Reader 2, executed. `distinct()` returns raw builder output presented
-       * through {@link SqlDriver.readPresentationKind}, so before the repair
-       * this door answered `true` for every row — the same inversion the row
-       * door gave, which is why the card notes the collapse "is not confined
-       * to the row-read door".
+       * through {@link SqlDriver.readPresentationKind}, so a registry that
+       * claimed a JSON column was boolean answered `true` for every row — the
+       * same inversion the row door gave, which is why the card notes the
+       * collapse "is not confined to the row-read door".
        */
-      it('reader 2 — `distinct()` does not collapse the column to a single `true`', async () => {
-        const values = await driver.distinct(READ_OBJECT, 'toggles', undefined, BYPASS);
-        expect(values, 'distinct() over a multi-valued toggle').not.toEqual([true]);
+      it('reader 2 — `distinct()` does not collapse a JSON column to a single `true`', async () => {
+        const values = await driver.distinct(READ_OBJECT, 'picks', undefined, BYPASS);
+        expect(values, 'distinct() over a multi-valued select').not.toEqual([true]);
         expect(values.every((v) => v === true), 'every distinct value coerced to `true`').toBe(false);
       });
-    } else {
-      /**
-       * The NAMED DIVERGENCE, pinned rather than skipped — the same posture
-       * #17343's suite takes for the filter-side half of this property.
-       *
-       * ⛔ Pinned on the CLASS, not on a bare throw. The assertion is not
-       * "the boolean cell fails here" (which would stay green if this change
-       * had broken it); it is "the boolean cell fails EXACTLY as the columns
-       * this change cannot reach do" — `nums` is a `multiple: true` NUMBER
-       * whose registry carve-out (`NUMERIC_SCALAR_TYPES.has(type) &&
-       * !field.multiple`) kept it out of `booleanFields` before this change
-       * and after it, and `tags_` was never a candidate at all. If some future
-       * edit made the boolean cell fail for a reason of its own, its error
-       * would stop matching the control's and this row goes red.
-       *
-       * ⚠️ [#17639] UPDATED BY THE CARD THIS ROW NAMED. When this suite
-       * landed, the error was asserted on the raw SQLSTATE as the CALLER's
-       * `code`, because this door did not wrap it: `distinct()` leaked the
-       * backend's own object — `code` was the raw `42883` and `status` was
-       * `undefined` — the gap #11455 closed for `aggregate()` and left open
-       * here. The note said the SQLSTATE row would go red on purpose when the
-       * envelope landed and that whoever fixed it should come and update this
-       * pin; #17639 has landed it and this is that update.
-       *
-       * The caller now receives the ADR-0112 terminal — `DATABASE_ERROR` /
-       * 500 — and the SQLSTATE rides the non-enumerable `cause`. BOTH halves
-       * are asserted, so this row stays a reading about the BACKEND's refusal
-       * (still the json-equality one, `42883`, on the control and on each
-       * field) and not merely about the wrapper. ⛔ Still no claim that this
-       * door should ANSWER here: that question is #17590's, unchanged.
-       */
-      it('[#17590-family] `distinct()` over a JSON column is refused here — and the untouched NUMBER/tags controls are refused the SAME way', async () => {
-        const errorFor = async (field: string): Promise<WireBearingError> =>
-          driver.distinct(READ_OBJECT, field, undefined, BYPASS).then(
-            () => null as unknown as WireBearingError,
-            (e: unknown) => e as WireBearingError,
-          );
-
-        const control = await errorFor('nums');
-        expect(control, 'the multiple:true NUMBER control must reach the backend').toBeInstanceOf(Error);
-        expect(control.code, 'the control refusal carries the ADR-0112 envelope [#17639]').toBe('DATABASE_ERROR');
-        expect(control.status, 'the control refusal carries a wire status [#17639]').toBe(500);
-        expect(sqlstateOf(control), 'the json-equality SQLSTATE survives as `cause`').toBe('42883');
-
-        for (const field of ['toggles', 'flags', 'tags_']) {
-          const err = await errorFor(field);
-          expect(err, `${field} must reach the backend, not a presented answer`).toBeInstanceOf(Error);
-          expect(err.code, `${field} fails identically to the untouched NUMBER control`).toBe(control.code);
-          expect(sqlstateOf(err), `${field} carries the control's SQLSTATE underneath`).toBe(sqlstateOf(control));
-        }
-      });
 
       /**
-       * …and the refusal really is about the COLUMN CLASS rather than about
-       * this door: a SCALAR boolean is a real `boolean` column on this backend,
-       * has an equality operator, and answers normally in the same run. Without
-       * this row the block above would also pass on a backend where `distinct()`
-       * was simply broken for everything.
+       * …and the refusal/answer really is about the COLUMN CLASS rather than
+       * about this door: a SCALAR boolean answers normally in the same run.
        */
-      it('the SCALAR boolean answers normally at the same door — the refusal is per storage shape', async () => {
+      it('the SCALAR boolean answers normally at the same door — the reading is per storage shape', async () => {
         const values = await driver.distinct(READ_OBJECT, 'scalar_flag', undefined, BYPASS);
         expect([...values].sort()).toEqual([false, true]);
       });
 
       /**
        * Reader 1, executed — the #11635 Postgres aggregate cast, on the one
-       * dialect it exists for.
-       *
-       * ⭐ What this narrowing does to that reader was measured on live
-       * PostgreSQL 16.13 by reading the statements the server actually
-       * received, two legs, `sql-driver.ts` blob verified on disk each time:
-       *
-       * | leg | statement PostgreSQL received | its refusal |
-       * |:--|:--|:--|
-       * | guard present (`f7fe22f8`) | `select max("flags") as "m"` | `function max(json) does not exist` |
-       * | guard reverted (`a2b37dc6`) | `select max(cast("flags" as int)) as "m"` | `cannot cast type json to integer` |
-       *
-       * ⇒ the registry entry really was buying this reader a `cast(?? as int)`
-       * over a `json` column, exactly as the enumeration predicted, and the
-       * guard stops it being emitted. Both shapes are refused by the backend —
-       * a multi-valued aggregand has no answer here either way — so what moves
-       * is only WHICH refusal, not a correct answer becoming an error.
-       *
-       * ⛔ The assertion below is the SCALAR half, deliberately, because that
-       * is the half a regression could silently take away: #11635 exists so a
-       * declared boolean can be aggregated on Postgres at all, and narrowing
-       * the registry must not cost it. Pinning the multi-valued half would mean
-       * asserting one dialect error string against another — brittle, and it
-       * would go red the day #17590's family is ruled.
+       * dialect it exists for. The SCALAR half deliberately: #11635 exists so a
+       * declared boolean can be aggregated on Postgres at all, and no narrowing
+       * of this registry may cost it.
        */
-      it('reader 1 — the #11635 cast still answers for a SCALAR boolean after the narrowing', async () => {
-        const rows = await driver.aggregate(
+      it('reader 1 — the #11635 cast still answers for a SCALAR boolean', async () => {
+        const aggregated = await driver.aggregate(
           READ_OBJECT,
           { aggregations: [{ function: 'max', field: 'scalar_flag', alias: 'm' }] } as never,
           BYPASS,
         );
         // `min`/`max` are pinned as the 0/1 the cast computes (#11152).
-        expect(Number(rows[0].m), 'max over a scalar boolean must still compute').toBe(1);
+        expect(Number(aggregated[0].m), 'max over a scalar boolean must still compute').toBe(1);
       });
     }
   });
@@ -446,59 +322,62 @@ describe('[#17586] the `booleanFields` registry and its four readers', () => {
   const external = (config: SqlDriverConfig) => new RegistryProbeDriver(config).declareExternal();
 
   for (const [label, config] of DIALECTS) {
-    it(`${label}: the registerExternalObject fill keeps multi-valued columns OUT of \`booleanFields\``, () => {
-      const registry = external(config).booleanRegistry();
-      expect(registry, 'multi-valued boolean/toggle must not be registered').not.toContain('flags');
-      expect(registry, 'multi-valued boolean/toggle must not be registered').not.toContain('toggles');
-      // …and the narrowing is a carve-out, not a removal of the class.
-      expect(registry).toContain('scalar_flag');
-      expect(registry).toContain('scalar_toggle');
+    it(`${label}: the two registries PARTITION the columns — no JSON column is in \`booleanFields\``, () => {
+      const d = external(config);
+      const booleans = d.booleanRegistry();
+      const json = d.jsonRegistry();
+      for (const field of json) {
+        expect(booleans, `${field} is a JSON column and must not be in booleanFields`).not.toContain(field);
+      }
+      // Non-vacuity in both directions: the run really saw JSON columns…
+      expect(json).toEqual(expect.arrayContaining(['picks', 'refs', 'tags_']));
+      // …and the boolean class is registered, so this is a partition and not a
+      // registry that gave up on the class.
+      expect(booleans).toContain('scalar_flag');
+      expect(booleans).toContain('scalar_toggle');
     });
 
-    it(`${label}: reader 1 — no Postgres aggregate CAST is bought for a multi-valued column`, () => {
+    it(`${label}: [#17469] a RETIRED \`boolean\` + \`multiple\` is a SCALAR column — registry follows storage`, () => {
+      const d = external(config);
+      expect(d.jsonRegistry(), 'retired_flags must not be a JSON column').not.toContain('retired_flags');
+      expect(d.booleanRegistry(), 'retired_flags is an ordinary boolean column').toContain('retired_flags');
+    });
+
+    it(`${label}: reader 1 — no Postgres aggregate CAST is bought for a JSON column`, () => {
       // The #11635 gate is `isPostgres && … && booleanFields[table].includes(fieldExpr)`.
       // Its registry input is the assertion: absent from the registry, the cast
       // cannot fire, and `cast(json as int)` is never emitted.
-      expect(external(config).booleanRegistry()).not.toContain('flags');
+      expect(external(config).booleanRegistry()).not.toContain('picks');
     });
 
-    it(`${label}: reader 2 — \`readPresentationKind\` no longer claims a multi-valued column is boolean`, () => {
+    it(`${label}: reader 2 — \`readPresentationKind\` never claims a JSON column is boolean`, () => {
       const d = external(config);
-      expect(d.presentationKind('flags'), 'flags').not.toBe('boolean');
-      expect(d.presentationKind('toggles'), 'toggles').not.toBe('boolean');
+      for (const field of ['picks', 'refs', 'tags_']) {
+        expect(d.presentationKind(field), field).not.toBe('boolean');
+      }
       // The scalar column keeps the kind on exactly the dialects that store it
       // as a number — the per-dialect posture #11782 pinned.
       const scalarKind = d.presentationKind('scalar_flag');
       expect(scalarKind, 'scalar_flag').toBe(label === 'postgres' ? null : 'boolean');
     });
 
-    it(`${label}: reader 4 — \`isNonTextColumn\` is BEHAVIOUR-IDENTICAL across the narrowing`, () => {
+    it(`${label}: reader 4 — \`isNonTextColumn\` never gates a JSON column`, () => {
       const d = external(config);
-      // The reader's own carve-out (`&& !isJsonColumn`) already excluded these,
-      // so narrowing the registry cannot move its answer. Both halves pinned:
-      // the multi-valued columns stay outside the gate…
-      expect(d.nonTextColumn('flags'), 'flags').toBe(false);
-      expect(d.nonTextColumn('toggles'), 'toggles').toBe(false);
-      // …and the scalar ones stay inside it, which is what makes this a
-      // carve-out rather than a hole in #14079's declared-type gate.
+      // The reader's own carve-out (`&& !isJsonColumn`) excludes these…
+      for (const field of ['picks', 'refs', 'tags_']) {
+        expect(d.nonTextColumn(field), field).toBe(false);
+      }
+      // …and the scalar ones stay inside the gate, which is what makes this a
+      // carve-out rather than a hole in #14079's declared-type gate. [#17469]
+      // `retired_flags` is inside it too: it is a scalar boolean column now.
       expect(d.nonTextColumn('scalar_flag'), 'scalar_flag').toBe(true);
       expect(d.nonTextColumn('scalar_toggle'), 'scalar_toggle').toBe(true);
-    });
-
-    it(`${label}: the equivalence reader 4 rests on — for boolean/toggle, \`isJsonColumn\` IS \`multiple\``, () => {
-      const d = external(config);
-      const json = d.jsonRegistry();
-      // If these two ever diverge, narrowing the registry would silently move
-      // `isNonTextColumn`'s answer; this is the pin that says they do not.
-      expect(json, 'a multi-valued boolean is a JSON column').toContain('flags');
-      expect(json, 'a multi-valued toggle is a JSON column').toContain('toggles');
-      expect(json, 'a scalar boolean is not').not.toContain('scalar_flag');
-      expect(json, 'a scalar toggle is not').not.toContain('scalar_toggle');
+      expect(d.nonTextColumn('retired_flags'), 'retired_flags').toBe(true);
     });
   }
 
   /**
-   * The two registry fills, side by side. The omission this card repairs was
+   * The two registry fills, side by side. The omission the card repairs was
    * present in BOTH, and they are separate code with no shared helper to make
    * that impossible — so a repair reaching only one leaves the defect live on
    * the other, exactly as #17343's round found.
@@ -510,9 +389,11 @@ describe('[#17586] the `booleanFields` registry and its four readers', () => {
     await managed.initObjects([{ name: READ_OBJECT, fields: READ_FIELDS } as never]);
     try {
       expect(managed.booleanRegistry()).toEqual(ext.booleanRegistry());
-      // …and the agreed registry is the narrowed one, not an agreed omission.
-      expect(managed.booleanRegistry()).not.toContain('flags');
-      expect(managed.booleanRegistry()).not.toContain('toggles');
+      expect(managed.jsonRegistry()).toEqual(ext.jsonRegistry());
+      // …and the agreed registries are the partitioned ones, not an agreed
+      // omission.
+      expect(managed.booleanRegistry()).not.toContain('picks');
+      expect(managed.jsonRegistry()).toContain('picks');
     } finally {
       await managed.getKnex().schema.dropTableIfExists(READ_OBJECT).catch(() => {});
       await managed.disconnect?.();

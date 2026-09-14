@@ -136,7 +136,9 @@ function writeObject(name: string) {
       // without a length, and this is the filter target for every bulk write here.
       kind: { type: 'string' },
       payload: { type: 'json' },
-      tags: { type: 'string', multiple: true },
+      // [#17469] `select`, not `string`: a JSON column by the one multi-value
+      // definition the writer and the deserializer now share.
+      tags: { type: 'select', multiple: true },
       when: { type: 'datetime' },
       day: { type: 'date' },
       clock: { type: 'time' },

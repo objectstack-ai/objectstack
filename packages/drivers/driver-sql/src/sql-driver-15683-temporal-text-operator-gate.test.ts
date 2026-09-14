@@ -287,33 +287,45 @@ describe('[#15683] the per-dialect construct, compiled', () => {
   });
 
   /**
-   * The carve-out this gate must NOT swallow. A `multiple: true` temporal field
-   * is stored as a JSON TEXT array, and there `$contains` is the MEMBERSHIP
-   * spelling — the one operator #7398 left working on a JSON column after
-   * refusing the equality family there. Gating it would turn a working
-   * membership filter into "matches nothing", which is the fail-CLOSED shape
+   * The carve-out this gate must NOT swallow: a JSON column's `$contains` is
+   * the MEMBERSHIP spelling — the one operator #7398 left working on a JSON
+   * column after refusing the equality family there. Gating it would turn a
+   * working membership filter into "matches nothing", the fail-CLOSED shape
    * #7398's own table calls out. Caught by that suite's live row when the gate
    * first landed without this condition; pinned here too, at the predicate, so
    * the two cannot drift apart.
+   *
+   * ⚠️ [#17469] The column carrying it used to be
+   * `{ type: 'datetime', multiple: true }`, and THAT SHAPE NO LONGER EXISTS.
+   * The maintainer ruling of 2026-09-13 gives "multi-valued" one definition —
+   * `isMultiValueField` — which `FieldSchema` enforces at the authoring
+   * entrance and the driver's storage now derives from, and `datetime` is not
+   * a multi-capable type. So a multi-valued TEMPORAL column is unauthorable,
+   * this gate's temporal limb can no longer meet one, and the carve-out is
+   * asserted where it still has a population: an ordinary JSON column.
+   * The second half pins the ruled change itself, so a revert of either side
+   * reddens this row rather than passing quietly.
    */
-  it('a MULTI-VALUED temporal column keeps $contains — it is JSON membership, not a substring test', () => {
+  it('a JSON column keeps $contains — it is membership, not a substring test — and a `multiple` temporal column is no longer one', () => {
     class MultiProbeDriver extends CompilerProbeDriver {
-      declareMultiTemporal(): this {
+      declareMulti(): this {
         this.registerExternalObject({
           name: TEMPORAL_OBJECT,
           fields: {
             label: { type: 'string' },
             on_day: { type: 'date' },
-            milestones: { type: 'datetime', multiple: true },
+            milestones: { type: 'select', multiple: true },
+            // [#17469] Declared, and deliberately NOT a JSON column any more.
+            stamps: { type: 'datetime', multiple: true },
           },
         });
         return this;
       }
     }
-    const d = new MultiProbeDriver(DIALECTS[0][1]).declareMultiTemporal();
+    const d = new MultiProbeDriver(DIALECTS[0][1]).declareMulti();
     const membership = d.compileWhere({ milestones: { $contains: '2026-01-05T00:00:00.000Z' } });
     expect(membership).not.toMatch(/1 = 0/);
-    // [#17590] This row's own title said "it is JSON membership, not a substring
+    // [#17590] This row's own title said "it is membership, not a substring
     // test" while the assertion under it named the SUBSTRING construct — the
     // only one that existed when it was written. It is a membership construct
     // now (`json_each` on this SQLite cell), so the assertion says what the
@@ -324,6 +336,10 @@ describe('[#15683] the per-dialect construct, compiled', () => {
     // …while the scalar temporal column beside it is gated as usual, so this is
     // a carve-out for the JSON storage shape and not a hole in the gate.
     expect(d.compileWhere({ on_day: { $contains: '2026' } })).toMatch(/1 = 0/);
+    // [#17469] The ruled change, stated: `multiple: true` on a temporal type is
+    // NOT multi-valued, so the column is an ordinary declared datetime and the
+    // gate applies to it exactly as it does to the scalar beside it.
+    expect(d.compileWhere({ stamps: { $contains: '2026' } })).toMatch(/1 = 0/);
   });
 
   it('the NON-temporal comparison operators over the same columns are untouched', () => {

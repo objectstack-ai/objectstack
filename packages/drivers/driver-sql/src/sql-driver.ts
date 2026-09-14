@@ -1767,6 +1767,28 @@ function isDeclaredFieldType(field: { type?: unknown }): boolean {
 }
 
 /**
+ * [#17469] Is this column MULTI-VALUED — the one question, asked of the one
+ * predicate `@objectstack/spec` publishes.
+ *
+ * Maintainer ruling 2026-09-13 (decision batch #128 item 5, option 1′): there is
+ * ONE definition of "multi-valued", `isMultiValueField`, and storage follows it.
+ * Every site below used to read `field.multiple` raw, which answered `true` on
+ * types the spec predicate calls single-valued — so the DDL built a JSON array
+ * column, the read-side deserializer agreed with it, and a consumer shaping a
+ * query from the SPEC predicate composed `=` against that column and was
+ * answered 400. `FieldSchema` now refuses the flag on those types at the
+ * authoring entrance, and this is the storage half of the same ruling.
+ *
+ * Takes the resolved `type` rather than reading `field.type`, because the
+ * callers below have already applied their own resolution (`field.type ||
+ * 'string'`, the driver-internal alias default) and two spellings of that
+ * default is how the drift this fixes started.
+ */
+function isMultiValuedColumn(type: string, field: { multiple?: unknown } | null | undefined): boolean {
+  return isMultiValueField({ type, multiple: field?.multiple === true });
+}
+
+/**
  * [#16319] DDL-time defence: a field declaration with NO `type` gets no column
  * — it gets a refusal.
  *
@@ -2487,8 +2509,8 @@ const CROSS_FIELD_COMPARISON_OPERATORS: ReadonlySet<string> = new Set([
 function crossFieldComparisonClass(
   decl: Record<string, unknown>,
 ): 'numeric' | 'text' | 'boolean' | 'date' | 'datetime' | 'time' | null {
-  if (decl.multiple) return null;
   const type = String((decl as { type?: unknown }).type || 'string');
+  if (isMultiValuedColumn(type, decl)) return null;
   if (type === 'formula') return null;
   if (JSON_COLUMN_TYPES.has(type) || FILE_REFERENCE_TYPES.has(type)) return null;
   if (NUMERIC_SCALAR_TYPES.has(type)) return 'numeric';
@@ -10548,16 +10570,18 @@ export class SqlDriver implements IDataDriver {
         if (this.isJsonField(type, field)) jsonCols.push(name);
         // Unconditional, on BOTH arms — see {@link mediaFields}. The read-side
         // legacy-encoding repair runs on a deployment that has not moved too.
-        if (!field.multiple && FILE_REFERENCE_TYPES.has(type)) mediaCols.push(name);
-        // [#17586] SCALAR only — `&& !field.multiple` is the house spelling
-        // its three neighbours in this block already carry, and this line was
-        // the single omission. See {@link booleanFields}: every reader of this
-        // registry presents its entry as ONE JS boolean, which for a
-        // multi-valued (JSON) column collapses the parsed array to `true`.
-        if ((type === 'boolean' || type === 'toggle') && !field.multiple) booleanCols.push(name);
-        if (NUMERIC_SCALAR_TYPES.has(type) && !field.multiple) numericCols.push(name);
+        if (!isMultiValuedColumn(type, field) && FILE_REFERENCE_TYPES.has(type)) mediaCols.push(name);
+        // [#17586] SCALAR only — the house spelling its three neighbours in
+        // this block already carry, and this line was the single omission. See
+        // {@link booleanFields}: every reader of this registry presents its
+        // entry as ONE JS boolean, which for a multi-valued (JSON) column
+        // collapses the parsed array to `true`. [#17469] The exclusion asks
+        // {@link isMultiValuedColumn}, so "excluded from the scalar registries"
+        // and "stored as a JSON column" stay the SAME population.
+        if ((type === 'boolean' || type === 'toggle') && !isMultiValuedColumn(type, field)) booleanCols.push(name);
+        if (NUMERIC_SCALAR_TYPES.has(type) && !isMultiValuedColumn(type, field)) numericCols.push(name);
         // [#16318] The authorable half only — see {@link numericValueFields}.
-        if (NUMERIC_VALUE_TYPES.has(type) && !field.multiple) numericValueCols.push(name);
+        if (NUMERIC_VALUE_TYPES.has(type) && !isMultiValuedColumn(type, field)) numericValueCols.push(name);
         if (type === 'date') dateCols.push(name);
         if (type === 'datetime') datetimeCols.push(name);
         if (type === 'time') timeCols.push(name);
@@ -10633,7 +10657,7 @@ export class SqlDriver implements IDataDriver {
         }
         // Unconditional, on BOTH arms — see {@link mediaFields}. The read-side
         // legacy-encoding repair runs on a deployment that has not moved too.
-        if (!field.multiple && FILE_REFERENCE_TYPES.has(type)) {
+        if (!isMultiValuedColumn(type, field) && FILE_REFERENCE_TYPES.has(type)) {
           mediaCols.push(name);
         }
         // `toggle` shares boolean storage/affinity, so it needs the same
@@ -10644,17 +10668,17 @@ export class SqlDriver implements IDataDriver {
         // coercion this registry exists for presents ONE JS boolean — which
         // collapses the parsed array to `true` whatever it holds. See
         // {@link booleanFields}.
-        if ((type === 'boolean' || type === 'toggle') && !field.multiple) {
+        if ((type === 'boolean' || type === 'toggle') && !isMultiValuedColumn(type, field)) {
           booleanCols.push(name);
         }
         // Numeric scalars are coerced back to JS numbers on read so legacy
         // TEXT-affinity columns (created before they were mapped to a numeric
         // column) still return numbers, not strings — see NUMERIC_SCALAR_TYPES.
-        if (NUMERIC_SCALAR_TYPES.has(type) && !field.multiple) {
+        if (NUMERIC_SCALAR_TYPES.has(type) && !isMultiValuedColumn(type, field)) {
           numericCols.push(name);
         }
         // [#16318] The authorable half only — see {@link numericValueFields}.
-        if (NUMERIC_VALUE_TYPES.has(type) && !field.multiple) {
+        if (NUMERIC_VALUE_TYPES.has(type) && !isMultiValuedColumn(type, field)) {
           numericValueCols.push(name);
         }
         if (type === 'date') {
@@ -11264,7 +11288,7 @@ export class SqlDriver implements IDataDriver {
     if (!this.isMysql) return [];
     const candidates = new Set<string>(AUDIT_TIMESTAMP_COLUMNS);
     for (const [name, field] of Object.entries(fields)) {
-      if ((field?.type ?? 'string') === 'datetime' && !field?.multiple) candidates.add(name);
+      if ((field?.type ?? 'string') === 'datetime' && !isMultiValuedColumn('datetime', field)) candidates.add(name);
     }
     if (candidates.size === 0) return [];
 
@@ -11469,7 +11493,7 @@ export class SqlDriver implements IDataDriver {
     if (!this.isMysql) return [];
     const candidates = new Set<string>();
     for (const [name, field] of Object.entries(fields)) {
-      if ((field?.type ?? 'string') === 'time' && !field?.multiple) candidates.add(name);
+      if ((field?.type ?? 'string') === 'time' && !isMultiValuedColumn('time', field)) candidates.add(name);
     }
     if (candidates.size === 0) return [];
 
@@ -16970,10 +16994,12 @@ export class SqlDriver implements IDataDriver {
    * to the spec enters that pin automatically.
    */
   protected varcharColumnChars(field: any, keyed?: { unique: boolean }): number | null {
-    // `multiple` is decided before the type switch in `createColumn` — a JSON
-    // column, whatever the element type would have been.
-    if (field?.multiple) return null;
+    // Multi-value is decided before the type switch in `createColumn` — a JSON
+    // column, whatever the element type would have been. [#17469] The question
+    // is {@link isMultiValuedColumn}'s, exactly as it is there, so this mirror
+    // cannot answer a different one.
     const type = field?.type || 'string';
+    if (isMultiValuedColumn(String(type), field)) return null;
     switch (type) {
       case 'string':
       case 'email':
@@ -17334,17 +17360,24 @@ export class SqlDriver implements IDataDriver {
     // correct predicates.
     if (field.reference_to !== undefined) refuseRejectedReferenceAlias(name);
 
-    if (field.multiple) {
+    // [#17469] Was `if (field.multiple)`. The DDL writer and {@link isJsonField}
+    // are one source by the {@link JSON_COLUMN_TYPES} header's own contract
+    // ("so the two can't drift"), so the writer asks the same predicate the
+    // reader now asks. A field whose `multiple` the spec does not recognise on
+    // its type no longer gets a JSON column here — and `FieldSchema` refuses
+    // that declaration at the authoring entrance in the same ruling.
+    if (isMultiValuedColumn(String(field.type ?? ''), field)) {
       this.jsonColumn(table, name);
       return;
     }
 
     // [#16319] ⛔ Was `const type = field.type || 'string'`. See
     // {@link refuseUndeclaredFieldType} for what that default cost and why the
-    // answer here is a refusal rather than a different guess. Asked AFTER
-    // `multiple`, exactly where the default stood, so a flagged field is still a
-    // JSON column whatever its element type would have been — the rule the two
-    // generators and `fieldHasColumn` state as well.
+    // answer here is a refusal rather than a different guess. Asked after the
+    // multi-value short-circuit, exactly where the default stood — and a field
+    // with NO type is now refused rather than silently made a JSON column,
+    // which is this ruling's own direction: a type the spec never saw cannot
+    // carry a `multiple` the spec recognises.
     if (!isDeclaredFieldType(field)) refuseUndeclaredFieldType(name);
     const type: string = field.type;
     let col: any;
@@ -18046,8 +18079,8 @@ export class SqlDriver implements IDataDriver {
    * and keep their column unchanged.
    */
   protected isJsonField(type: string, field: any): boolean {
-    if (!field.multiple && FILE_REFERENCE_TYPES.has(type)) return this.mediaColumnIsJson();
-    return JSON_COLUMN_TYPES.has(type) || isMultiValueField({ type, multiple: field.multiple });
+    if (!isMultiValuedColumn(type, field) && FILE_REFERENCE_TYPES.has(type)) return this.mediaColumnIsJson();
+    return JSON_COLUMN_TYPES.has(type) || isMultiValuedColumn(type, field);
   }
 
   // ── SQLite serialisation ────────────────────────────────────────────────────

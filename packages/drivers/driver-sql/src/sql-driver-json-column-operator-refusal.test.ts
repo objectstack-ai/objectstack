@@ -489,7 +489,12 @@ describe('[#7398] the second lowering family — normalised columns', () => {
       name: 'ext_sprint',
       fields: {
         id: { type: 'text', name: 'id' },
-        milestones: { type: 'datetime', name: 'milestones', multiple: true },
+        // [#17469] `select`, not `datetime`: the column is a JSON column here
+        // because it is MULTI-VALUED by `isMultiValueField`, the one definition
+        // the driver's storage now derives from. A `datetime` + `multiple: true`
+        // is refused at the authoring entrance and is a plain temporal column
+        // here, which is a different gate entirely.
+        milestones: { type: 'select', name: 'milestones', multiple: true },
       },
     });
   });

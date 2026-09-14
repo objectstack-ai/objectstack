@@ -36,6 +36,7 @@ import {
   STRUCTURED_JSON_TYPES,
   FILE_REFERENCE_TYPES,
   MULTI_OPTION_TYPES,
+  isMultiValueField,
 } from '@objectstack/spec/data';
 import type { SchemaDiffEntry } from '@objectstack/spec/shared';
 
@@ -542,10 +543,15 @@ export function physicalDefaultIsToken(raw: unknown, token: string): boolean {
 /**
  * Does this metadata field materialise a physical column? Mirrors
  * `SqlDriver.createColumn` exactly: `formula` is virtual (computed, no column);
- * everything else — including `multiple` (a JSON column) — gets one.
+ * everything else — including a MULTI-VALUED field (a JSON column) — gets one.
+ *
+ * [#17469] "Multi-valued" is `@objectstack/spec`'s `isMultiValueField`, the
+ * same question `createColumn`'s short-circuit now asks. Reading `multiple`
+ * raw here would keep a column alive for a declaration the writer no longer
+ * gives one.
  */
 export function fieldHasColumn(field: FieldDef): boolean {
-  if (field?.multiple) return true;
+  if (isMultiValueField({ type: String(field?.type ?? ''), multiple: field?.multiple === true })) return true;
   return (field?.type ?? 'string') !== 'formula';
 }
 
@@ -1068,16 +1074,23 @@ export function diffManagedTable(args: {
     // see {@link JSON_COLUMN_FIELD_TYPES}. `multiple: true` media is a list of
     // ids and stays a json column on every deployment, which the second
     // disjunct already covers on its own.
+    // [#17469] The `multiple` disjunct asks `@objectstack/spec`'s
+    // `isMultiValueField`, the predicate the writer now asks — a differ that
+    // read the flag raw would report a conversion to a column shape the
+    // platform would never create, which is the `⊆` direction this file's
+    // header calls out.
+    const declaresMultiValue = isMultiValueField({ type: declaredType, multiple: field.multiple === true });
     const declaresJsonColumn =
       JSON_COLUMN_FIELD_TYPES.has(declaredType)
-      || field.multiple === true
+      || declaresMultiValue
       || (!fileColumnsMoved && FILE_REFERENCE_TYPES.has(declaredType));
-    // Is the declared VALUE an array? `multiple: true` on any type, plus the
+    // Is the declared VALUE an array? A multi-valued field, plus the
     // inherently-multi option types, whose value is a list with or without the
-    // flag (`MULTI_OPTION_TYPES` — the spec's own class). This, and never
-    // JSON-class membership (which both populations share), is what decides
-    // whether the wrapping remedy is the right repair.
-    const declaresArray = field.multiple === true || MULTI_OPTION_TYPES.has(declaredType);
+    // flag (`MULTI_OPTION_TYPES` — the spec's own class, and already inside
+    // `isMultiValueField`). This, and never JSON-class membership (which both
+    // populations share), is what decides whether the wrapping remedy is the
+    // right repair.
+    const declaresArray = declaresMultiValue || MULTI_OPTION_TYPES.has(declaredType);
     if (declaresJsonColumn && jsonColumnTypeIsLoadBearing(dialect) && acceptsStringifiedJson(col.type)) {
       out.push({
         kind: 'type_mismatch',
