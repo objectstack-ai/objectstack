@@ -203,9 +203,16 @@ export function resolveAnalyticsDateRangePreset(
  * `service-analytics` strategies, because "memory and SQL refuse identically"
  * is a property a shared conformance fixture can only hold if there is one
  * refusal to hold. The wording is the spec's
- * {@link analyticsDateRangeRefusalMessage} — the same sentence the schema door
- * answers with (the #5240 convention: one condition, one wording), quoted
- * rather than restated.
+ * {@link analyticsDateRangeRefusalMessage} (the #5240 convention: one
+ * condition, one wording), quoted rather than restated — asked for the
+ * `'runtime'` ORIGIN, which is the one this constructor has.
+ *
+ * ⚠️ That argument is not decoration (#17598 item ②). Every refusal raised
+ * here is raised PAST the schema door, so the sentence the spec used to return
+ * unconditionally — "Refused at the schema" — was false for every one of
+ * them, and sent an author to inspect a parse call that never ran. The origin
+ * is a parameter precisely so this call site states the truth it alone knows;
+ * ⛔ it is never omitted and there is no default to omit it to.
  *
  * ⚠️ The code is registered under `@objectstack/runtime` (the door that names
  * the wire vocabulary) and this package carries a recorded provenance waiver
@@ -219,7 +226,7 @@ export function resolveAnalyticsDateRangePreset(
  * `selection.timeDimensions` from `AnalyticsQuery` but does not Zod-parse it.
  */
 export function analyticsDateRangeUnrecognizedError(input: unknown): Error {
-  const err = new Error(analyticsDateRangeRefusalMessage(input)) as Error & {
+  const err = new Error(analyticsDateRangeRefusalMessage(input, 'runtime')) as Error & {
     code?: string;
     status?: number;
   };
