@@ -78,7 +78,7 @@
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -455,7 +455,7 @@ function drive(argv) {
 // ── Why the CALLEE NAME is the battery ──
 //
 // This file has no `selfTest()` entry function and no named section banners:
-// the `--self-test` dispatch at the bottom invokes FIFTEEN named callees, each
+// the `--self-test` dispatch at the bottom invokes SIXTEEN named callees, each
 // printing its own line and returning a boolean. So the roster's unit is the
 // CALLEE, and its label is the one the SOURCE ALREADY CARRIES — the function's
 // own name. Nothing is invented and nothing is judged per comment, and a set
@@ -470,10 +470,10 @@ function drive(argv) {
 // (PR #15271, `check-sdui-manifest`) makes a table row a battery. It does so
 // for a file whose SELF-TEST *is* the table: one literal table, one driving
 // loop over it, and a sink that writes only when a row fails. Here the table is
-// a local of ONE callee among fifteen, its rows are evaluated eagerly into
+// a local of ONE callee among sixteen, its rows are evaluated eagerly into
 // booleans before anything loops, and the callee already reduces them to a
 // single printed verdict of its own. Flooring those rows would floor one
-// callee's internals while the other thirteen stayed at callee granularity — a
+// callee's internals while the other fifteen stayed at callee granularity — a
 // roster whose unit changes per entry. The rule: the battery is the unit the
 // DISPATCH names.
 //
@@ -497,6 +497,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   reconcileMixedComparators: 1,
   endToEnd: 1,
   endToEndMixed: 1,
+  endToEndWorktreeRefusal: 1,
   probeLeavesNoMarker: 1,
   ambientGitEnvIsolation: 1,
 });
@@ -507,7 +508,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // key in the literal above, so the roster falls below this number; the
 // roster ↔ dispatch cross-check in the floor block is the other half, and it
 // names WHICH callee was listed twice.
-const SELF_TEST_BATTERY_FLOOR = 15;
+const SELF_TEST_BATTERY_FLOOR = 16;
 
 // The key a registration is filed under when a callee registers no name at all.
 // It is not a declared battery, so it reds by the same set difference rather
@@ -517,7 +518,7 @@ const UNATTRIBUTED_BATTERY = '(no callee named)';
 // The battery ledger, read by `batteryFloorFailures()` from the dispatch block
 // at the very bottom of this file. It is MODULE-level rather than local to a
 // self-test body because this file HAS no self-test body: the registrations
-// happen inside fifteen separate callees and the floor is read at the dispatch's
+// happen inside sixteen separate callees and the floor is read at the dispatch's
 // verdict site, so the ledger has to outlive every one of those frames.
 //
 // ⚠️ Named for the roster's role, deliberately NOT with a self-test spelling:
@@ -529,7 +530,7 @@ const batterySeen = new Map();
 /**
  * Record that a self-test callee RAN.
  *
- * Called as the FIRST statement of each of the fifteen callees the `--self-test`
+ * Called as the FIRST statement of each of the sixteen callees the `--self-test`
  * dispatch invokes — above any early return, so a callee that bails out early
  * still reports that it ran, and the floor is never met by a frame that
  * returned before doing anything.
@@ -542,7 +543,7 @@ function registerCase(name) {
 /**
  * The floor: every declared callee RAN (#13489).
  *
- * Evaluated at the dispatch's verdict site — after all fifteen callees have had
+ * Evaluated at the dispatch's verdict site — after all sixteen callees have had
  * their chance and immediately before the success line — and reached only from
  * the `--self-test` branch, so a production merge-driver run never reads the
  * ledger at all.
@@ -1625,6 +1626,217 @@ function probeLeavesNoMarker() {
 const AMBIENT_ISOLATION_FUSE = 'OS_REGEN_AMBIENT_ISOLATION_INNER';
 
 /**
+ * ⭐ The driver's own closing promise, ENFORCED instead of printed — and the one
+ * arrangement in which it is falsifiable: a LINKED WORKTREE.
+ *
+ * Every deferral `drive()` takes ends by printing "The pre-commit hook will not
+ * let this commit through until you do." Nothing anywhere tested that sentence.
+ * The two cases that come closest each stop one step short, and in the same
+ * direction:
+ *
+ *   - `endToEnd()` above performs a real merge and asserts the marker was
+ *     written — then stops. It never commits, so git never runs a hook.
+ *   - `check-regen-pending.mjs`'s deferred-merge fixture sets
+ *     `core.hooksPath=/dev/null` ("the fixture drives the script itself") and
+ *     WRITES the marker itself. It grades the checker's verdict, never git's
+ *     willingness to invoke it and never the path the driver actually wrote to.
+ *
+ * So the JOINT property — the driver writes a marker that the hook git really
+ * runs reads back — was asserted by neither half. `markPending()` here and
+ * `gitDirPath()` there are two INDEPENDENT `--absolute-git-dir` call sites, and
+ * in a primary checkout that directory and `--git-common-dir` are the SAME
+ * directory: a regression to the common dir keeps every single-tree fixture
+ * green while every real merge in every agent's worktree loses its refusal. A
+ * linked worktree is the only arrangement where the two answers differ — and it
+ * is the arrangement this repo mandates (AGENTS.md Prime Directive #11), so it
+ * is the path every real merge here takes.
+ *
+ * Five legs. Legs 2, 4 and 5 are the controls without which the other two are
+ * free:
+ *
+ *   1. the marker lands in the LINKED worktree's own git dir;
+ *   2. …and NOT in the common one. The discrimination only a linked worktree can
+ *      make: leg 1 alone is satisfied by a driver that writes the common dir,
+ *      whenever the two are the same directory.
+ *   3. the ordinary commit right after the merge is REFUSED — by git, through the
+ *      REAL `.githooks/pre-commit` and the REAL checker, neither of them called
+ *      by this file;
+ *   4. the push is REFUSED too, by the REAL `.githooks/pre-push`;
+ *   5. with the gate CLEAN, that same commit SUCCEEDS, the marker is gone and the
+ *      push goes through. This is the FIRING CONTROL, and it is what legs 3 and 4
+ *      rest on: a hook that always fails — a missing interpreter, a typo'd path,
+ *      node itself erroring — satisfies them both while proving nothing, and that
+ *      failure reads from the outside exactly like "the net holds".
+ *
+ * The real hooks and the real checker are reached through UNTRACKED SYMLINKS
+ * (`scripts/`, `.githooks/`) rather than copies, and that is not a convenience:
+ * `core.hooksPath` is registered as the RELATIVE `.githooks`, which git resolves
+ * against each worktree's own root — the property that lets one shared
+ * `.git/config` arm every linked worktree at once. A hook this file wrote out
+ * would test this file's imitation of `.githooks/pre-commit`; the symlink tests
+ * `.githooks/pre-commit`. Untracked (and `info/exclude`d) so they can never enter
+ * the merge under test.
+ *
+ * The gate itself is the same one-line stub `check-regen-pending.mjs`'s own
+ * fixture uses, selected by `OS_REGEN_GATE_CWD` — what is under test here is the
+ * wiring between driver, git and hook, never `check:spec-changes`'s opinion.
+ */
+function endToEndWorktreeRefusal() {
+  registerCase('endToEndWorktreeRefusal');
+  const root = mkdtempSync(join(tmpdir(), 'os-regen-worktree-'));
+  const primary = join(root, 'primary');
+  const linked = join(root, 'linked');
+  const remote = join(root, 'remote.git');
+  const results = [];
+  const check = (label, cond) => {
+    results.push(Boolean(cond));
+    console.log(`  ${cond ? '✓' : '✗'} ${label}`);
+    return Boolean(cond);
+  };
+
+  // ⚠️ `gitFreeEnv()` on every git child: their subject is the throwaway
+  // repository their own `cwd` names, never the merge this process might be
+  // driving (#16753). The two `git commit` / `git push` calls that must reach a
+  // HOOK add `OS_REGEN_GATE_CWD` on top, because the hook's checker spawns the
+  // gate and the fixture's stub is what it must find.
+  const git = (cwd, args, env = gitFreeEnv()) =>
+    execFileSync('git', args, { cwd, encoding: 'utf8', env, stdio: ['ignore', 'pipe', 'pipe'] });
+
+  try {
+    const target = REGEN_ARTIFACTS[0].path;
+    const gateScript = REGEN_ARTIFACTS[0].check;
+
+    /* The stub gate, and the pin that keeps it honest. `pnpm -s` resolves its own
+     * version from the manifest of the directory it runs in, so a fixture with no
+     * `packageManager` grades whatever Corepack resolves as `latest` instead of the
+     * pnpm this repository pins — the same trap `check-regen-pending.mjs`'s fixture
+     * records. Read off the ROOT manifest rather than written as a literal. */
+    const rootPackageManager = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8')).packageManager;
+    const writeStub = (dir, verdict) =>
+      writeFileSync(
+        join(dir, 'package.json'),
+        `${JSON.stringify(
+          { name: 'os-regen-worktree-fixture', private: true, packageManager: rootPackageManager, scripts: { [gateScript]: verdict } },
+          null,
+          2,
+        )}\n`,
+      );
+
+    // The real checker and the real hooks, reached by name from inside the
+    // fixture. `.githooks/pre-commit` runs `"$(git rev-parse --show-toplevel)"
+    // /scripts/check-regen-pending.mjs`, so `scripts` has to resolve from the
+    // worktree root for the hook to reach anything at all — that indirection is
+    // part of what is under test, not something to route around.
+    const wire = (dir) => {
+      symlinkSync(join(REPO_ROOT, 'scripts'), join(dir, 'scripts'), 'dir');
+      symlinkSync(join(REPO_ROOT, '.githooks'), join(dir, '.githooks'), 'dir');
+    };
+
+    mkdirSync(primary, { recursive: true });
+    git(primary, ['init', '-q', '--initial-branch=main', '.']);
+    git(primary, ['config', 'user.email', 'selftest@objectstack.ai']);
+    git(primary, ['config', 'user.name', 'self-test']);
+    git(primary, ['config', 'merge.os-regen.name', 'regenerate instead of text-merging']);
+    // Absolute, and NOT the value a real clone gets, for `endToEnd()`'s reason:
+    // `$(git rev-parse --show-toplevel)` would resolve to the fixture.
+    git(primary, ['config', 'merge.os-regen.driver', `node "${join(REPO_ROOT, 'scripts/git-merge-regen.mjs')}" %O %A %B %P`]);
+    // RELATIVE, exactly as `setup-git-hooks.mjs` registers it — see the docblock.
+    git(primary, ['config', 'core.hooksPath', '.githooks']);
+
+    const commonDir = realpath(resolve(primary, git(primary, ['rev-parse', '--path-format=absolute', '--git-common-dir']).trim()));
+    // Untracked harness files must never enter the merge under test; `info/exclude`
+    // lives in the COMMON dir, so one write covers both worktrees (#9258 records
+    // what a tracked stub costs a merge in progress).
+    mkdirSync(join(commonDir, 'info'), { recursive: true });
+    appendFileSync(join(commonDir, 'info', 'exclude'), '\n# self-test harness — never track\npackage.json\nscripts\n.githooks\n');
+
+    mkdirSync(join(primary, dirname(target)), { recursive: true });
+    writeFileSync(join(primary, '.gitattributes'), `${target} merge=os-regen\n`);
+    writeFileSync(join(primary, target), '["base"]\n');
+    git(primary, ['add', '-A']);
+    git(primary, ['commit', '-qm', 'base']);
+
+    git(primary, ['checkout', '-qb', 'incoming']);
+    writeFileSync(join(primary, target), '["base","theirs"]\n');
+    git(primary, ['commit', '-qam', 'theirs']);
+    git(primary, ['checkout', '-q', 'main']);
+    writeFileSync(join(primary, target), '["base","ours"]\n');
+    git(primary, ['commit', '-qam', 'ours']);
+
+    // ── The arrangement the incident took: the merge happens in a LINKED worktree.
+    git(primary, ['worktree', 'add', '-q', '-b', 'landing', linked, 'main']);
+    wire(primary);
+    wire(linked);
+    writeStub(linked, 'exit 1'); // a gate that RAN and found the artifact stale
+    git(primary, ['init', '-q', '--bare', remote]);
+    git(linked, ['remote', 'add', 'origin', remote]);
+
+    const linkedGitDir = realpath(git(linked, ['rev-parse', '--absolute-git-dir']).trim());
+    const linkedMarker = join(linkedGitDir, PENDING_MARKER);
+    const commonMarker = join(commonDir, PENDING_MARKER);
+    if (linkedGitDir === commonDir) {
+      return fail('self-test: the linked worktree shares the common git dir — the arrangement under test was never built');
+    }
+
+    git(linked, ['merge', '--no-ff', '-m', 'merge main into landing', 'incoming']);
+
+    // ── Legs 1 and 2 ──────────────────────────────────────────────────────
+    check('the deferral marker lands in the LINKED worktree\'s own git dir',
+      existsSync(linkedMarker) && readFileSync(linkedMarker, 'utf8').includes(target));
+    check('  …and NOT in the shared common git dir, where a sibling worktree would read it',
+      !existsSync(commonMarker));
+
+    // ── Leg 3: git runs the REAL pre-commit, and it refuses ───────────────
+    const hookEnv = { ...gitFreeEnv(), OS_REGEN_GATE_CWD: linked };
+    delete hookEnv.OS_SKIP_REGEN_CHECK;
+    appendFileSync(join(linked, target), '\n');
+    git(linked, ['add', '--', target]);
+    const staleCommit = spawnSync('git', ['commit', '-m', 'ordinary commit after the merge'], {
+      cwd: linked, encoding: 'utf8', env: hookEnv,
+    });
+    const staleOut = `${staleCommit.stdout ?? ''}${staleCommit.stderr ?? ''}`;
+    check('the ordinary commit after the merge is REFUSED — by git, through the real pre-commit',
+      staleCommit.status !== 0);
+    check(`  …naming ${target}, so the refusal is this one and not some other failure`,
+      staleOut.includes(target) && /os-regen:/.test(staleOut));
+
+    // ── Leg 4: and the push is refused too ────────────────────────────────
+    const stalePush = spawnSync('git', ['push', '-q', 'origin', 'landing'], {
+      cwd: linked, encoding: 'utf8', env: hookEnv,
+    });
+    const pushOut = `${stalePush.stdout ?? ''}${stalePush.stderr ?? ''}`;
+    check('the push is REFUSED too, through the real pre-push', stalePush.status !== 0);
+    check('  …by the os-regen leg of it, not by the card-trailer leg beside it',
+      /os-regen:/.test(pushOut));
+
+    // ── Leg 5: THE FIRING CONTROL ─────────────────────────────────────────
+    // Without this, every leg above is satisfied by a hook that can only fail.
+    writeStub(linked, 'exit 0');
+    const cleanCommit = spawnSync('git', ['commit', '-m', 'ordinary commit after the merge'], {
+      cwd: linked, encoding: 'utf8', env: hookEnv,
+    });
+    check('FIRING CONTROL: with the artifact CURRENT the same commit is ACCEPTED',
+      cleanCommit.status === 0);
+    check('  …and the marker is gone, so nothing can get stuck', !existsSync(linkedMarker));
+    const cleanPush = spawnSync('git', ['push', '-q', 'origin', 'landing'], {
+      cwd: linked, encoding: 'utf8', env: hookEnv,
+    });
+    check('  …and the push goes through', cleanPush.status === 0);
+
+    const ok = results.every(Boolean);
+    console.log(ok
+      ? '✓ linked worktree: the driver\'s deferral is REFUSED by the real hooks git runs there'
+      : '✗ linked worktree: the deferral\'s refusal did not hold — see the failing leg(s) above');
+    return ok;
+  } catch (err) {
+    return fail(`self-test: ${err?.stderr?.toString() || err?.message || err}`);
+  } finally {
+    try { git(primary, ['worktree', 'remove', '--force', linked]); } catch { /* the rm below is the real cleanup */ }
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+/**
  * ⭐ The throwaway repositories this file builds must be isolated from the
  * AMBIENT one (#16753 — Tier A of #16644; the incident is #16624).
  *
@@ -1754,7 +1966,7 @@ function ambientGitEnvIsolation() {
 
 if (process.argv.includes('--self-test')) {
   console.log('git-merge-regen --self-test\n');
-  // The fifteen callees as a literal LIST rather than fifteen bare calls, so the
+  // The sixteen callees as a literal LIST rather than sixteen bare calls, so the
   // names this block invokes are data the floor below can cross-check the
   // roster against, in both directions. The names are read off the function
   // declarations themselves (`fn.name`), so a renamed callee moves this list
@@ -1773,6 +1985,7 @@ if (process.argv.includes('--self-test')) {
     reconcileMixedComparators,
     endToEnd,
     endToEndMixed,
+    endToEndWorktreeRefusal,
     probeLeavesNoMarker,
     ambientGitEnvIsolation,
   ];
