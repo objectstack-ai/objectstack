@@ -58,6 +58,7 @@
     "automation/ScheduleState:status = \"active\"",
     "automation/ScheduleState:timezone = \"UTC\"",
     "automation/ScheduleState:totalRuns = 0",
+    "automation/ScreenConfig:mode = \"create\"",
     "automation/StateNode:type = \"atomic\"",
     "automation/TryCatchConfig:errorVariable = \"$error\"",
     "automation/WaitExecutorConfig:conditionMaxPolls = 0",
