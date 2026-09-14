@@ -46,10 +46,18 @@
 // guard that changed colour with the fix would be pinning the fix rather than
 // the invariant. Both predictions were confirmed by running it (see the PR).
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { MetadataManager } from '@objectstack/metadata';
 import { MemoryLoader } from '@objectstack/metadata';
 import { RestServer } from './rest-server';
+
+// [#17865] This file observes the REST fault log, so it declares the level it
+// asserts against instead of inheriting the suite's quiet one. 'info' is the
+// SHIPPED default — what a real caller gets. Paired by
+// scripts/check-rest-log-spy-declared.mjs: an observer that declares nothing
+// is a finding by name.
+beforeAll(() => { vi.stubEnv('OS_REST_LOG', 'info'); });
+afterAll(() => { vi.unstubAllEnvs(); });
 
 // ---------------------------------------------------------------------------
 // The three declarations, each standing for one way a route can exist

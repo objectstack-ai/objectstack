@@ -3846,6 +3846,19 @@ jobs:
       - name: Declared REST fault-log level
         run: node scripts/check-rest-log-declared.mjs --self-test && node scripts/check-rest-log-declared.mjs
 
+      # The pairing half of the one above (#17865, ruling batch #128 item 4).
+      # The `packages/rest` harness now runs at `OS_REST_LOG: 'silent'`, which
+      # takes those 2,095 frame lines to ZERO — and that is safe only while
+      # every test file that OBSERVES the fault log declares its own loud level.
+      # Half of that population announces itself when it breaks: 15 files / 28
+      # test cases go RED the moment the suite is silenced. The other half does
+      # not. Eight files assert that an expected 4xx logs NOTHING, and a
+      # silenced shim makes those pass with every 4xx logged loudly — a phantom
+      # check reached by a legitimate-looking config line. This gate names an
+      # undeclared observer instead. Self-test first.
+      - name: Declared REST fault-log level — observers
+        run: node scripts/check-rest-log-spy-declared.mjs --self-test && node scripts/check-rest-log-spy-declared.mjs
+
       # Live-server database isolation (#10382). CI provisions ONE Postgres and
       # ONE MySQL for the whole temporal-conformance job and points every live
       # leg at them, and every live suite in the repo issues a `drop` when it
