@@ -19,6 +19,7 @@
 
 import {
   normalizeTenancyPosture,
+  postureEnforcesWall,
   TENANCY_POSTURES,
   type TenancyPosture,
 } from '@objectstack/spec/security';
@@ -160,6 +161,149 @@ export function resolveTenancyPosture(): TenancyPosture {
   }
   return resolveMultiOrgEnabled() ? 'isolated' : 'single';
 }
+
+/**
+ * The env variable gating PACKAGE-AUTHORED SCHEDULED WORK — every time-triggered
+ * flow and every declarative `defineJob` a package ships (#17396).
+ *
+ * Exported as a constant so every surface that names it quotes exactly one
+ * spelling: both time triggers, the automation engine's binding audit, the
+ * AppPlugin job loop, `os doctor` and the four deployment docs pages.
+ */
+export const SCHEDULED_WORK_ENV = 'OS_AUTOMATION_SCHEDULED_WORK_ENABLED';
+
+/**
+ * Whether this DEPLOYMENT runs package-authored scheduled work at all.
+ *
+ * ## What it gates
+ *
+ * Everything a package ships that fires on a clock rather than on a caller:
+ *
+ *  - time-triggered FLOWS — a `type: 'schedule'` flow carrying a
+ *    `config.schedule` cadence, and the `timeRelative` sweep that carries its
+ *    cadence in the same slot (`FlowTriggerKind` `schedule` / `time_relative`);
+ *  - package-authored declarative JOBS — `defineJob` entries reaching the job
+ *    service through `defineStack({ jobs })` / a package bundle.
+ *
+ * ⛔ It does NOT gate platform-internal jobs — approvals escalation, the
+ * lifecycle Reaper, the messaging dispatch loop, membership backfill. The
+ * boundary is **authored by a package**, not "runs on the job service": the
+ * platform's own maintenance work is part of the runtime a deployment asked
+ * for, while package-authored scheduled work is arbitrary tenant-supplied load
+ * on a clock the operator never sized.
+ *
+ * ## Why a deployment variable and not metadata
+ *
+ * Maintainer ruling, 2026-09-12, verbatim, untranslated:
+ *
+ * > schedule 是风险很大的模型，尤其在云端，无算是单独多租户还是每库一租户，可能造成极大的资源浪费。对于单租户或着集团版私有部署，我觉得不需要做限制。定时任务 如果不好处理，现在也没想清楚，有没有可能定义为一个环境变量，根据环境变量控制？
+ *
+ * > group 默认也关，云端每库一租户全局默认关
+ *
+ * Whether a clock-driven workload is affordable is a fact about the DEPLOYMENT
+ * — its database, its tenants, its budget — not about the flow. An author
+ * cannot know it and a metadata key would ask them to; so this is read from the
+ * environment at boot, beside {@link resolveTenancyPosture}, and there is
+ * deliberately no spec key for it.
+ *
+ * ## Default OFF, in every posture and every kernel
+ *
+ * Unset means off. A deployment that wants package-authored scheduled work
+ * turns it on explicitly — including a `single` private install and a `group`
+ * one. `group` is not free today and is off for a measured reason rather than
+ * by analogy: it is a WALLED posture, so `resolveSystemWriteOrganization`
+ * refuses an organization-less system insert under it and
+ * `TenancyService.defaultOrgId()` answers `null` (ADR-0093 D3). Which
+ * organization a group-wide sweep's inserts belong to is not yet decided, and
+ * until it is, `group` behaves as walled.
+ *
+ * Accepts `true`/`1`/`on`/`yes`, case-insensitive; anything else — including an
+ * unset variable and an empty string — is off. ⚠️ Deliberately NOT the
+ * `!== 'false'` shape {@link resolveMultiOrgEnabled} uses: that one is opt-OUT
+ * and reads a typo as "on", which for this switch would arm exactly the
+ * workload the operator meant to refuse.
+ *
+ * Reads `process.env` live on each call; memoise at the call site if the result
+ * must be stable for the process lifetime.
+ */
+export function resolveScheduledWorkEnabled(): boolean {
+  const raw = readEnvWithDeprecation(SCHEDULED_WORK_ENV, [], { silent: true });
+  if (raw == null) return false;
+  return ['1', 'true', 'on', 'yes'].includes(String(raw).trim().toLowerCase());
+}
+
+/**
+ * The deployment's scheduled-work policy as one reading — the three states
+ * every binder and every audit surface must agree about (#17396).
+ *
+ * One resolver rather than two reads at each call site, because the three
+ * states are not independent and spelling them apart is how they drift:
+ *
+ * | state | `enabled` | `requiresActingOrganization` | what binds |
+ * |:--|:--|:--|:--|
+ * | OFF (default) | `false` | `false` | nothing — no time trigger arms, no package job schedules |
+ * | ON under `single` | `true` | `false` | every time-triggered flow, carrying NO organization |
+ * | ON under a wall (`group` / `isolated`) | `true` | `true` | only a flow that declares `config.organization` |
+ *
+ * `requiresActingOrganization` is `false` when the switch is OFF because
+ * nothing binds there at all: reporting a declaration requirement for a flow
+ * that is not going to arm either way would put the operator on the authoring
+ * remedy for a deployment decision. The OFF state has its own reason —
+ * {@link SCHEDULED_WORK_DISABLED_REASON} — and it is the one that must be
+ * reported.
+ *
+ * ⚠️ `posture` is what the deployment ASKED FOR, exactly as
+ * {@link resolveTenancyPosture} answers it — whether the wall is actually
+ * ENFORCED is the `tenancy` service's answer. That is the right authority here:
+ * a deployment that asked for `isolated` owes the declaration whether or not
+ * its isolation is currently degraded, and a flow that binds while the wall is
+ * down would otherwise re-arm org-less the moment the wall came back.
+ *
+ * @throws the same refusal {@link resolveTenancyPosture} throws on an
+ * unrecognized `OS_TENANCY_POSTURE` — a typo'd posture must not silently
+ * resolve to `single` and drop the declaration requirement with it.
+ */
+export interface ScheduledWorkPolicy {
+  /** Whether package-authored scheduled work runs on this deployment at all. */
+  readonly enabled: boolean;
+  /** The deployment's REQUESTED tenancy posture. */
+  readonly posture: TenancyPosture;
+  /**
+   * Whether an armed time-triggered flow must declare `config.organization`.
+   * True only under a walled posture with the switch on — the 2026-09-08
+   * ruling on cross-organization scheduled tasks, unchanged.
+   */
+  readonly requiresActingOrganization: boolean;
+}
+
+/** Resolve {@link ScheduledWorkPolicy} from the environment. */
+export function resolveScheduledWorkPolicy(): ScheduledWorkPolicy {
+  const enabled = resolveScheduledWorkEnabled();
+  const posture = resolveTenancyPosture();
+  return {
+    enabled,
+    posture,
+    requiresActingOrganization: enabled && postureEnforcesWall(posture),
+  };
+}
+
+/**
+ * The one sentence a surface prints when package-authored scheduled work is
+ * OFF — so the bind refusal, the engine's binding audit, the CLI startup
+ * summary and Studio cannot drift about WHY a flow is not armed.
+ *
+ * ⛔ It must never read as "binding failed". A binding failure is a defect with
+ * an engineering remedy; this is a deployment POLICY with an operator remedy,
+ * and the two send the reader to different places. The distinction is the whole
+ * of ruled item 6.
+ */
+export const SCHEDULED_WORK_DISABLED_REASON =
+  `disabled by deployment policy — package-authored scheduled work is off on this deployment `
+  + `(${SCHEDULED_WORK_ENV} is unset or not truthy), so no time trigger arms and no packaged `
+  + `\`defineJob\` is scheduled. This is not a binding failure and nothing about the flow needs `
+  + `fixing: set ${SCHEDULED_WORK_ENV}=true to run package-authored scheduled work on this `
+  + `deployment. It is OFF by default in every posture — a clock-driven workload's cost is a `
+  + `fact about the deployment, not about the flow.`;
 
 /**
  * The env variable naming the deployment's PLATFORM OWNER account

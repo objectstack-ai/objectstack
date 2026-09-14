@@ -11,8 +11,10 @@ import {
     normalizeSchedule,
     reportBindFailure,
     refuseMissingOrganization,
+    refuseScheduledWorkDisabled,
     resolveBindingOrganization,
 } from './schedule-trigger.js';
+import { resolveScheduledWorkPolicy } from '@objectstack/types';
 import type { FlowTrigger, FlowTriggerBinding, JobServiceSurface, TriggerLogger } from './schedule-trigger.js';
 
 /**
@@ -283,6 +285,19 @@ export class TimeRelativeTrigger implements FlowTrigger {
     }
 
     start(binding: FlowTriggerBinding, callback: (ctx: AutomationContext) => Promise<void>): void {
+        // [#17396] The DEPLOYMENT gate first, for the reason
+        // `ScheduleTrigger.start` states: every other verdict in this method
+        // describes the flow, and none of them is reached on a deployment that
+        // runs no package-authored scheduled work. A sweep is the case where
+        // that matters most — its descriptor diagnostics are long and specific,
+        // and sending an operator to fix one on a deployment that was never
+        // going to run it is the wrong remedy at the wrong door.
+        const policy = resolveScheduledWorkPolicy();
+        if (!policy.enabled) {
+            this.stop(binding.flowName);
+            refuseScheduledWorkDisabled(this.logger, 'time-relative', binding.flowName);
+        }
+
         const raw = (binding.config as Record<string, unknown> | undefined)?.timeRelative;
         const parsed = TimeRelativeTriggerSchema.safeParse(raw);
         if (!parsed.success) {
@@ -305,8 +320,18 @@ export class TimeRelativeTrigger implements FlowTrigger {
         // sweep would match rows in every tenant and then launch runs able to
         // write into none of them; with it the same value bounds the query and
         // the run (see `sweep`'s `organization` parameter).
+        //
+        // [#17396] …under a WALL. With the switch on and posture `single` the
+        // sweep runs unscoped and its runs carry no organization — which is not
+        // the cross-organization task the ruling forbids, because there is only
+        // one organization there to cross to (PR #17476 refuses a second). The
+        // elevation argument above is why the `single` case is still safe: an
+        // unscoped `isSystem` read on a one-organization install selects that
+        // organization's rows and the platform's NULL-tenant rows, which is
+        // exactly what it selected before #16659 and what the #8844 guard
+        // resolves beneath it.
         const organization = resolveBindingOrganization(binding);
-        if (organization === null) {
+        if (policy.requiresActingOrganization && organization === null) {
             // Drop any prior sweep FIRST: a hot re-publish that removes the key
             // must not leave the previous, still-armed job sweeping org-less
             // behind an error saying it was refused. The call below throws, so
@@ -349,7 +374,12 @@ export class TimeRelativeTrigger implements FlowTrigger {
                         `Object names match exactly; check config.timeRelative.object.`,
                 );
             } else {
-                const inertBecause = organizationScopeIsInertFor(known);
+                // [#17396] Only when the flow declared one. With no
+                // declaration the sweep passes no scope at all, so "your
+                // declaration cannot narrow this" has no declaration to be
+                // about — printing it would invent a containment claim the
+                // author never made.
+                const inertBecause = organization !== null ? organizationScopeIsInertFor(known) : null;
                 if (inertBecause) {
                     // [#16659] ⛔ A DISCLOSURE, never a narrowing. The sweep
                     // passes `context.tenantId` unconditionally and the ENGINE
@@ -421,7 +451,16 @@ export class TimeRelativeTrigger implements FlowTrigger {
                     `[time-relative] bound flow '${binding.flowName}' → sweep '${desc.object}.${desc.dateField}' ${mode} on ${schedule.type}` +
                         (schedule.expression ? ` '${schedule.expression}'` : '') +
                         (schedule.intervalMs ? ` every ${schedule.intervalMs}ms` : '') +
-                        ` as organization '${organization}'`,
+                        // [#17396] Which of the two legal shapes this bind is,
+                        // said on the bind line rather than left to be inferred
+                        // from the metadata: an unscoped sweep is a deployment
+                        // state (`single` + the switch on), not an omission,
+                        // and an operator reading the boot log is owed the
+                        // difference between "sees one organization's rows" and
+                        // "sees every row this install holds".
+                        (organization !== null
+                            ? ` as organization '${organization}'`
+                            : ` with NO acting organization (tenancy posture '${policy.posture}') — the sweep is unscoped and its runs carry no organization`),
                 );
             })
             .catch((err) => {
@@ -440,8 +479,10 @@ export class TimeRelativeTrigger implements FlowTrigger {
         desc: TimeRelativeDescriptor,
         maxRecords: number,
         /**
-         * [#16659] The declared organization. It bounds this sweep TWICE, and
-         * both halves are load-bearing:
+         * [#16659] The declared organization, or `null`.
+         *
+         * When declared it bounds this sweep TWICE, and both halves are
+         * load-bearing:
          *
          *  1. SELECTION — it goes onto the `find` context as `tenantId`, so the
          *     rows this sweep can match are the declared organization's. Without
@@ -449,10 +490,15 @@ export class TimeRelativeTrigger implements FlowTrigger {
          *     run is stamped with.
          *  2. IDENTITY — every run launched from a matched row executes as it.
          *
-         * Required, not optional: `start()` refuses the binding without one, so
-         * a sweep can never be reached with nothing to pass.
+         * [#17396] `null` is now a REACHABLE and legal value, and exactly one
+         * gate admits it: the switch on, tenancy posture `single`. There is no
+         * second organization to cross to there (PR #17476 refuses one), so an
+         * unscoped sweep is not the cross-organization task the ruling forbids
+         * — it is the shape a single-organization install had before #16659.
+         * Under a wall `start()` still refuses an undeclared binding, and with
+         * the switch off nothing binds, so `null` cannot arrive from either.
          */
-        organization: string,
+        organization: string | null,
         callback: (ctx: AutomationContext) => Promise<void>,
     ): Promise<void> {
         const engine = this.getDataEngine();
@@ -508,7 +554,15 @@ export class TimeRelativeTrigger implements FlowTrigger {
                     // is required to stay inside one organization and is talking
                     // to a store that cannot keep it there, and it arrives as a
                     // logged sweep failure rather than as silence.
-                    context: { isSystem: true, tenantId: organization },
+                    //
+                    // [#17396] The scope is OMITTED, not nulled, when the flow
+                    // declares no organization. `buildDriverOptions` reads
+                    // `context.tenantId`; handing it an explicit `undefined` and
+                    // handing it nothing are the same to that reader today, but
+                    // the ruling's words are that the sweep's own query carries
+                    // no scope, and the spelling that cannot be misread as
+                    // "scoped to nothing" is the one that omits the key.
+                    context: { isSystem: true, ...(organization !== null ? { tenantId: organization } : {}) },
                 })) ?? [];
             for (const row of rows) {
                 const id = (row as { id?: unknown }).id;
@@ -559,7 +613,18 @@ export class TimeRelativeTrigger implements FlowTrigger {
                     // match rows in any tenant, so keying on the row would let
                     // one flow write into organizations it never declared —
                     // the cross-organization scheduled task the ruling forbids.
-                    tenantId: organization,
+                    // That prohibition is untouched by #17396: the `single`
+                    // branch below omits the key, it does not fill it from the
+                    // row.
+                    //
+                    // [#17396] ⚠️ RETIRED PIN, with its reason — the same one
+                    // `ScheduleTrigger`'s handler records. The unconditional
+                    // spelling here carried "⛔ Never conditional", which was
+                    // correct while every time-triggered run owed a
+                    // declaration. Under ruling G the absent key is a declared
+                    // deployment state (`single` + the switch on), not a
+                    // forgotten one, and it is unreachable from any other gate.
+                    ...(organization !== null ? { tenantId: organization } : {}),
                     // Expose the record as params too, so flows with named `isInput`
                     // variables matching record fields get them seeded (parity with
                     // the record-change trigger).

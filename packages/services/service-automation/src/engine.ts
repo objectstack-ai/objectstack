@@ -25,6 +25,10 @@ import { FlowSchema, FLOW_STRUCTURAL_NODE_TYPES, validateControlFlow, collectFlo
 // `validate-flow-trigger-readiness`, so the runtime cannot drift from what
 // authoring accepted. See `resolveTriggerBinding`.
 import { resolveFlowTriggerKind, resolveScheduleOrganization } from '@objectstack/spec/automation';
+import {
+    resolveScheduledWorkPolicy,
+    SCHEDULED_WORK_DISABLED_REASON,
+} from '@objectstack/types';
 import { predicateSlotRefusal, resolveFlowNodeExpressions, structuralConditionRefusal } from '@objectstack/spec/automation';
 // [#15137] The `value`-role half of the ledger. Both halves of "is this envelope
 // well-formed?" are IMPORTED, never re-spelled here: the shape rule is
@@ -2064,6 +2068,26 @@ export interface FlowShadowingRecord {
     shadowed: FlowContender[];
 }
 
+/**
+ * [#17396] The two trigger kinds the deployment's scheduled-work switch
+ * governs: the ones launched by a CLOCK rather than by a caller.
+ *
+ * `record_change` and `api` are deliberately absent and the line is not
+ * arbitrary — both are fired by a request that already exists and already
+ * carries an identity, so neither is the unbounded background load the switch
+ * exists to bound. A kind added to `FlowTriggerKind` later is OUTSIDE the
+ * switch until someone decides otherwise, which is the safe default: a new kind
+ * silently falling under a default-OFF switch would be a capability that
+ * disappears on arrival.
+ *
+ * Module-local: the same two tokens are the trigger package's own subject by
+ * construction (it implements exactly these two), so publishing a shared
+ * predicate would add a public name with one caller.
+ */
+function isTimeTriggeredKind(triggerType: string): boolean {
+    return triggerType === 'schedule' || triggerType === 'time_relative';
+}
+
 export class AutomationEngine implements IAutomationService {
     /**
      * ADR-0044: maximum times a single node may be (re-)entered at the top
@@ -3336,6 +3360,33 @@ export class AutomationEngine implements IAutomationService {
         if (!resolved) return;
         const trigger = this.triggers.get(resolved.triggerType);
         if (!trigger) return;
+        // [#17396] The deployment gate, read HERE rather than only inside the
+        // trigger. The trigger has its own copy of this gate and throws, which
+        // is what protects a host that binds without this engine — but a
+        // refusal that arrives as a THROW can only be reported through this
+        // method's catch, and that catch says "Failed to bind", which is the
+        // one thing ruled item 6 forbids this state from reading as. Asking the
+        // policy before `start()` keeps the two apart at the source: nothing is
+        // called, nothing throws, nothing is logged as a failure, and
+        // `getTriggerBindingAudit()` reports the policy reason from the same
+        // resolver.
+        //
+        // ⛔ Not cached on the instance. The resolver reads `process.env` live,
+        // and a host that rebinds after changing the environment — the CLI's
+        // `--fresh` harness, a test flipping the switch between kernels in one
+        // process — must see the value current at the bind.
+        if (isTimeTriggeredKind(resolved.triggerType) && !resolveScheduledWorkPolicy().enabled) {
+            // Said once per flow, at `info`, for the reason the trigger's own
+            // refusal records: this is the DEFAULT state of every deployment
+            // and the deployment declared it, so nothing is wrong and nothing
+            // looks normal-but-broken. The structured channel is the audit
+            // below, which the `kernel:bootstrapped` hook and the CLI startup
+            // summary both read.
+            this.logger.info(
+                `Flow '${flowName}' is not armed on trigger '${resolved.triggerType}' — ${SCHEDULED_WORK_DISABLED_REASON}`,
+            );
+            return;
+        }
         try {
             // A trigger-fired run's result must not vanish (2026-07-17 eval:
             // a failing record-change flow produced zero output — the failure
@@ -4028,9 +4079,20 @@ export class AutomationEngine implements IAutomationService {
             if (this.boundFlowTriggers.has(name)) continue;
             const resolved = this.resolveTriggerBinding(name);
             if (!resolved) continue; // manual / screen flow — nothing to bind
-            const reason = this.triggers.has(resolved.triggerType)
-                ? `trigger '${resolved.triggerType}' is registered but binding failed — see earlier warnings`
-                : `no '${resolved.triggerType}' trigger is registered — add requires: ['triggers'] (record_change/schedule/time_relative/api ship in @objectstack/trigger-*)`;
+            // [#17396] The POLICY branch outranks both binding branches, and
+            // deliberately so. When package-authored scheduled work is off,
+            // neither of the other two reasons is true in any useful sense: the
+            // trigger was never called, so nothing "failed", and registering
+            // the missing trigger would change nothing, so "add
+            // requires: ['triggers']" is a remedy that does not work. ⛔ Never
+            // reported as "binding failed" — a binding failure is a defect with
+            // an engineering remedy, while this is a deployment policy with an
+            // operator remedy, and the two send the reader to different places.
+            const reason = isTimeTriggeredKind(resolved.triggerType) && !resolveScheduledWorkPolicy().enabled
+                ? SCHEDULED_WORK_DISABLED_REASON
+                : this.triggers.has(resolved.triggerType)
+                    ? `trigger '${resolved.triggerType}' is registered but binding failed — see earlier warnings`
+                    : `no '${resolved.triggerType}' trigger is registered — add requires: ['triggers'] (record_change/schedule/time_relative/api ship in @objectstack/trigger-*)`;
             audit.push({ flowName: name, triggerType: resolved.triggerType, reason });
         }
         return audit;
