@@ -12485,7 +12485,11 @@ function notMeasuredEvidenceTerm(recon) {
   if (kind === 'none') return '';
   if (kind === 'derived') {
     if (recon.notMeasured.length === 0) {
-      return ` (a DERIVED zero — all ${accounted} recorded an exit code, none of them is ${code}, and none of them is a kill)`;
+      // ⛔ Byte-identical to what it always said, and it stays true under the
+      // kill rule for a structural reason: this sentence is only ever reached
+      // from the ✓ line, so every derived family is in `ran` — and a killed
+      // family can no longer be there (#18074).
+      return ` (a DERIVED zero — all ${accounted} recorded an exit code and none of them is ${code})`;
     }
     return ` (${derivedFromExit} DERIVED from a recorded ${RUN_RECORD_EXIT_PREFIX}${code}${killedTerm}${claimed > 0 ? `, ${claimed} claimed` : ''})`;
   }
