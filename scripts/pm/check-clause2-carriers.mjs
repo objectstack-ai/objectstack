@@ -11,6 +11,7 @@
  *   node scripts/pm/check-clause2-carriers.mjs --pair 13910 # ONE PR: a pre-arm predicate
  *   node scripts/pm/check-clause2-carriers.mjs --json       # the sweep, for round reports
  *   node scripts/pm/check-clause2-carriers.mjs --self-test  # offline, no network
+ *   node scripts/pm/check-clause2-carriers.mjs --template   # the record, copyable; no network
  *   node scripts/pm/check-clause2-carriers.mjs --help       # usage; no network
  *
  * ## Which board this answers about, and how a reader can tell (#16623)
@@ -696,6 +697,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#17149: a claim that parses to ZERO branches — malformed, never absent': 26,
   '#17098: a key-INITIAL line that DESCRIBES the spelling — the half the fixture did not cover': 48,
   '#17959: POSITION is the LINE, not the body — the merged #17819 specimen in both its shapes': 10,
+  '#18042: the copyable record TEMPLATE — the one machine-read artefact with nothing to copy': 23,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -704,8 +706,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // #17302 adds, and again by exactly the one #17366 adds, so the roster's
 // existing slack is preserved rather than tightened or loosened as a side
 // effect, and once more by the one #17149 adds, by the one #17098 adds, by the
-// one #17915 adds, and by the one #17959 adds.
-const SELF_TEST_BATTERY_FLOOR = 21;
+// one #17915 adds, by the one #17959 adds, and by the one #18042 adds.
+const SELF_TEST_BATTERY_FLOOR = 22;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -2323,7 +2325,9 @@ export function c4VerdictSelfReview(pair) {
     'seat that RENDERS or ADOPTS the verdict writes its OWN session there — 「渲染或采纳裁决的席位' +
     '写自己的 session」 — which every adoption record already carries in its opening sentence. ⛔ ' +
     'Prose naming the reviewing MODEL is not an identity: it compares to nothing, and this key ' +
-    'admits a session only (2026-09-02 reading a)';
+    'admits a session only (2026-09-02 reading a). ⭐ `--template` prints the whole record with both ' +
+    'lines already spelled: COPY it rather than composing one -- every measured miss of this pair was ' +
+    'a line written from memory against a rule that had no template to copy';
   const legacyIsSilent =
     '⚠️ A verdict carrying NEITHER line is a LEGACY verdict and is silent here — it predates the ' +
     'carrier and ⛔ is never turned red by its absence.';
@@ -2635,6 +2639,123 @@ export function readServedTier(text) {
   return { state: 'missing', stamps: null };
 }
 
+// ---------------------------------------------------------------------------
+// The record TEMPLATE — the one machine-read artefact with nothing to copy (#18042)
+// ---------------------------------------------------------------------------
+
+/**
+ * The placeholders the printed record ships with.
+ *
+ * ⭐ Every one of them PARSES through the readers that judge the real thing, so
+ * a seat who copies the block and replaces nothing still gets a record whose
+ * SHAPE is legible — what an unedited paste changes is whose record it is, never
+ * whether it reads. That is exactly the property the four measured misses did
+ * not have: `Implemented-by: branch claude/…` was never copied from anything, it
+ * was composed from the prose rule one file over, and C4 refused all four as
+ * HALF WRITTEN — two of them after they had already reached `main`.
+ *
+ * ⛔ The head placeholder is git's null oid, deliberately and not decoratively:
+ * it is a hex code span, so `contractReviewHeadMatch` recognises the SHAPE and
+ * the template is provably round-trippable — and it can prefix NO real head, so
+ * a record pasted with the placeholder left in is read as a review of some other
+ * head and C6 refuses it. Fail-closed in the one direction that matters.
+ *
+ * ⛔ No angle brackets in any of them. GitHub's body sanitizer eats tag-shaped
+ * fragments, backticked ones included — `CLAUSE2_CORRECTION_KEY_LINE` states the
+ * same fact for the correction carrier — so a placeholder spelled that way would
+ * be eaten out of the very comment a seat pastes it into, and a template whose
+ * placeholders vanish on arrival is worse than no template.
+ */
+export const RECORD_TEMPLATE_PLACEHOLDERS = Object.freeze({
+  headSha: '0'.repeat(40),
+  implementedBy: 'claude/issue-NNNN-slug',
+  reviewedBy: 'session_SEATSESSIONID',
+});
+
+/**
+ * The record itself — the lines a seat copies, and nothing else.
+ *
+ * ⭐ Rendered from the same constants the readers compare against
+ * (`CONTRACT_REVIEW_TIER_NAME` here, the two token grammars above), so the
+ * template cannot teach a spelling this file refuses. The self-test drives THIS
+ * function's output back through `readVerdictAuthorship`, `readServedTier` and
+ * `contractReviewHeadMatch`, which is what makes "copy it" a safe instruction.
+ *
+ * ⛔ The head sha is a code span of its OWN. The live corpus wrote the whole
+ * `Head-sha: …` pair inside one span, and `H51_SHA_SPAN` matches a span that is
+ * hex and nothing else — so that spelling names no head, and a record written it
+ * is read as a review of nothing. The key stays outside the span here.
+ *
+ * @param {{headSha?: string, implementedBy?: string, reviewedBy?: string}} values
+ * @returns {string[]}
+ */
+export function contractReviewRecordLines(values = {}) {
+  const { headSha, implementedBy, reviewedBy } = { ...RECORD_TEMPLATE_PLACEHOLDERS, ...values };
+  return [
+    '## Contract review',
+    '',
+    `Served-tier: \`${CONTRACT_REVIEW_TIER_NAME}\``,
+    `Head-sha: \`${headSha}\``,
+    '',
+    '### ① Derived judgments',
+    '',
+    '### ② Semver level',
+    '',
+    '### ③ Boundary flags',
+    '',
+    `Implemented-by: \`${implementedBy}\``,
+    `Reviewed-by: \`${reviewedBy}\``,
+    '',
+    '**VERDICT: PASS**',
+  ];
+}
+
+/** Where the copyable region starts and ends, so "copy it" names a boundary. */
+export const RECORD_TEMPLATE_FENCE_START = '----- copy from here; replace the three placeholders -----';
+export const RECORD_TEMPLATE_FENCE_END = '----- to here -----';
+
+/**
+ * What `--template` prints: the record, fenced, with the calibration around it.
+ *
+ * ⭐ The notes live OUTSIDE the fence and carry no key-initial line, so nothing
+ * here can be mistaken for a second declaration by any reader in this file —
+ * and a seat who copies the fenced region alone loses none of the record.
+ *
+ * ⭐ The ⛔ note is the whole card: the value is the FIRST thing after the colon.
+ * Prose said so in `references/contract-review.md` and four consecutive readers
+ * wrote a leading word anyway. A template shows it instead of saying it.
+ */
+export function contractReviewTemplateLines(values = {}) {
+  return [
+    'check-clause2-carriers --template — the contract-review record of record, copyable. It is',
+    'ONE comment on the PR or its card; the NEWEST one naming this head governs.',
+    '',
+    '⛔ The value is the FIRST thing after the colon. A leading word — "branch ", "the dev on " —',
+    '   IS the value as far as the reader is concerned, the pair is refused HALF WRITTEN, and a',
+    '   half-written pair is worse than none: a record carrying neither line is a legacy verdict',
+    '   and stays silent, so writing one line badly is the only way to be refused.',
+    '',
+    RECORD_TEMPLATE_FENCE_START,
+    ...contractReviewRecordLines(values),
+    RECORD_TEMPLATE_FENCE_END,
+    '',
+    `  · Served-tier     the constant's NAME, ${CONTRACT_REVIEW_TIER_NAME}, ⛔ never a model id; an`,
+    '                    at-tier/total stamp control may precede it — 75/75, then the constant.',
+    '  · Head-sha        the head you reviewed, 7 to 40 hex in a span of ITS OWN; a span holding',
+    '                    the key as well is not a sha, and the record then names no head.',
+    '  · Implemented-by  the identity that produced the diff, read off the implementation claim:',
+    "                    a mode:subagent dev's BRANCH, a mode:remote dev's session id.",
+    '  · Reviewed-by     the session that RENDERS or ADOPTS the verdict — a session only. Prose',
+    '                    naming the reviewing model is not an identity and compares to nothing.',
+    '  · VERDICT         PASS or FAIL, in caps; FAIL strips the two carriers exactly as PASS does.',
+    '  ⛔ Replace every placeholder. Left in, the null-oid head names no commit and the record is',
+    '     read as a review of some other head — refused, never silently adopted.',
+    '  ⛔ And keep angle brackets out of what you paste: the body sanitizer eats tag-shaped',
+    '     fragments, backticked ones included, so a field spelled that way is stored short and',
+    '     read as absent.',
+  ];
+}
+
 /**
  * The review of record for one pair -- read from the PR's thread AND the card's,
  * because the rule lets it live on either.
@@ -2897,7 +3018,7 @@ export function c7ServedTierBelow(pair) {
         : 'carries NO `Served-tier:` line at all, so it declares nothing about what served it';
   const rule =
     'The rule this row carries is `references/contract-review.md`\'s -- 「同形含首行 `Served-tier:`:值写常量名 ' +
-    '`CONTRACT_REVIEW_TIER`,可前置 N/N;无此行不成裁决」 and 「清标前 `--pair`:`Served-tier:` ≠ 常量名 ⇒ exit 4,' +
+    '`CONTRACT_REVIEW_TIER`;无此行不成裁决,模板见 `--template`」 and 「清标前 `--pair`:`Served-tier:` ≠ 常量名 ⇒ exit 4,' +
     '点名 PR、评论、读数;型号串按 `AGENTS.md` 拒」. The token is the constant\'s NAME, ⛔ never its VALUE: ' +
     '`AGENTS.md` -- 「no model identifier lands in a PR title or body, a comment, a changeset, a doc or a code ' +
     'comment」 -- and a review of record IS a comment, so a token of that shape is refused beside an off-tier one. ' +
@@ -5242,6 +5363,61 @@ export function selfTest() {
   t('⛔ the reader is CARRIER-agnostic — the same text on this file\'s own carrier, the claim comment, reads the same', cardDeclaration([CLAIM(P17819_MERGED)]).state === 'declared' && cardDeclaration([CLAIM(P17819_MERGED)]).value === 'no');
   t('⛔ CONTROL: neither reading moved for this card — bold declared and quoted-and-continued described before it too', readClause2Line('**Clause-②: no**')?.value === 'no' && readClause2Line('`Clause-②: no` — yesterday\'s answer')?.reason === 'describing');
 
+  battery('#18042: the copyable record TEMPLATE — the one machine-read artefact with nothing to copy');
+  //
+  // The card, in one line: `references/contract-review.md` DESCRIBES the record
+  // in prose and the skill shipped nothing to copy, so four in-seat records in
+  // one session wrote `Implemented-by: branch claude/…`, C4 refused all four as
+  // HALF WRITTEN, and two of them reached `main` — where C6 then reads「no
+  // review of record on that head」. The remedy this family prescribes
+  // elsewhere — COPY the template's line rather than composing one — was
+  // unfollowable for this one artefact. So the checker that ENFORCES the shape
+  // now EMITS it, and these cases are what make "copy it" a safe instruction:
+  // the printed bytes are driven back through the very readers that judge a
+  // real record, in both directions.
+  const TPL_TEXT = contractReviewTemplateLines().join('\n');
+  const TPL_RECORD = contractReviewRecordLines().join('\n');
+  const TPL_NULL_HEAD = RECORD_TEMPLATE_PLACEHOLDERS.headSha;
+  const TPL_REAL_HEAD = 'a90a9f26794e5a2c34c1eded83ba0e25087e4433';
+  // The specimen: PR #17986's `## Contract review` comment 5652813288, whose
+  // pair is the measured miss — carried verbatim, and then with the ONE word
+  // removed, so the case isolates the defect to the word rather than asserting
+  // it. ⛔ The session id is the filing epic's own, not a model identifier.
+  const TPL_SPECIMEN = (implemented) => [
+    '## Contract review',
+    '',
+    `\`${TPL_REAL_HEAD}\``,
+    '',
+    `Implemented-by: ${implemented}`,
+    'Reviewed-by: session_015c5G6TmpMKgnusmTpD7Ntt',
+    '',
+    '**VERDICT: PASS**',
+  ].join('\n');
+
+  t('⭐ the PRINTED template round-trips through the reader that judges the real thing', readVerdictAuthorship(TPL_TEXT, TPL_NULL_HEAD)?.kind === 'pair');
+  t('…reading the BRANCH placeholder as the implementer, never the prose around it', readVerdictAuthorship(TPL_TEXT, TPL_NULL_HEAD)?.implementedBy === RECORD_TEMPLATE_PLACEHOLDERS.implementedBy);
+  t('…and the SESSION placeholder as the reviewer', readVerdictAuthorship(TPL_TEXT, TPL_NULL_HEAD)?.reviewedBy === RECORD_TEMPLATE_PLACEHOLDERS.reviewedBy);
+  t('the fenced record ALONE reads the same — the notes around it are not load-bearing', readVerdictAuthorship(TPL_RECORD, TPL_NULL_HEAD)?.kind === 'pair');
+  t('⛔ and the notes cannot be mistaken for a second declaration — no key-initial line outside the fence', readVerdictAuthorship(TPL_TEXT, TPL_NULL_HEAD)?.implementedBy === readVerdictAuthorship(TPL_RECORD, TPL_NULL_HEAD)?.implementedBy);
+  t('filled in with a real head and real identities, it still reads as a pair', readVerdictAuthorship(contractReviewRecordLines({ headSha: TPL_REAL_HEAD, implementedBy: 'claude/issue-18042-contract-review-record-template', reviewedBy: 'session_01DAcomhvR9kKizeYgg89Vo8' }).join('\n'), TPL_REAL_HEAD)?.implementedBy === 'claude/issue-18042-contract-review-record-template');
+  t('its `Served-tier:` line STANDS, read by C7\'s own reader', servedTierStands(readServedTier(TPL_TEXT)));
+  t('⛔ carrying the constant\'s NAME — and no model identifier anywhere in the whole output', readServedTier(TPL_TEXT).value === CONTRACT_REVIEW_TIER_NAME && !isModelIdentifierToken(TPL_TEXT));
+  t('C6\'s two facts hold: the `## Contract review` heading…', CONTRACT_REVIEW_HEADING_MARKER.test(TPL_TEXT));
+  t('…and a head sha in a code span of ITS OWN, which is what makes it findable at all', contractReviewHeadMatch(TPL_TEXT, TPL_NULL_HEAD) === TPL_NULL_HEAD);
+  t('⛔ CONTROL: the live corpus spelling puts the KEY inside the span, and then no head is found', contractReviewHeadMatch(`## Contract review\n\n\`Head-sha: ${TPL_REAL_HEAD}\``, TPL_REAL_HEAD) === null);
+  t('⛔ the head placeholder is git\'s null oid and prefixes NO real head — an unedited paste is refused, never silently adopted', contractReviewHeadMatch(TPL_TEXT, TPL_REAL_HEAD) === null);
+  t('⭐ the measured miss is REFUSED by the same reader — one leading word and the value is gone', readVerdictAuthorship(TPL_RECORD.replace('Implemented-by: `', 'Implemented-by: branch `'), TPL_NULL_HEAD)?.kind === 'malformed');
+  t('…and the refusal names the KEY that is unreadable, not the line that is absent', says(readVerdictAuthorship(TPL_RECORD.replace('Implemented-by: `', 'Implemented-by: branch `'), TPL_NULL_HEAD)?.detail, 'Implemented-by'));
+  t('⭐ the SPECIMEN, verbatim: the value four in-seat records carried, two of them onto `main`', readVerdictAuthorship(TPL_SPECIMEN('branch claude/issue-17780-plugin-lifecycle-duration-units'), TPL_REAL_HEAD)?.kind === 'malformed');
+  t('⭐ …and the SAME record with that one word removed reads clean — the word IS the entire defect', readVerdictAuthorship(TPL_SPECIMEN('claude/issue-17780-plugin-lifecycle-duration-units'), TPL_REAL_HEAD)?.kind === 'pair');
+  t('the template SHOWS the rule prose failed to convey, and says it too', says(TPL_TEXT, 'FIRST thing after the colon'));
+  t('…naming the refusal a leading word earns, so the note and C4\'s row agree', says(TPL_TEXT, 'HALF WRITTEN'));
+  t('the stamp control the rule line traded away survives HERE, where the author copies from', says(TPL_TEXT, '75/75'));
+  t('⛔ no angle bracket anywhere in the output — the body sanitizer eats tag-shaped placeholders', !TPL_TEXT.includes('<') && !TPL_TEXT.includes('>'));
+  t('⛔ nor an unfilled MENU in the record — one value per slot, never the `yes|no` shape this file refuses', !TPL_RECORD.includes('|'));
+  t('`--template` is an honoured flag, so the parse, the usage text and the refusal all know it', KNOWN_FLAGS.has('--template') && argvRefusalLines(['--template']) === null && usageLines().join('\n').includes('--template'));
+  t('⛔ …spelled as taking NO value, so it can never eat the argument after it', KNOWN_FLAGS.get('--template').value === null);
+
   // -- The floor: every declared battery RAN, and ran its cases (#13489) -----
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -5335,6 +5511,7 @@ export const KNOWN_FLAGS = new Map([
   ['--help', { value: null, does: 'print this text and exit 0, without reading any board' }],
   ['-h', { value: null, does: 'the same' }],
   ['--self-test', { value: null, does: "run this file's own battery, offline -- no board is read" }],
+  ['--template', { value: null, does: 'print the copyable contract-review record and exit 0 -- no board is read' }],
   ['--pair', { value: 'N', does: 'judge ONE open PR by number -- a predicate about that pair' }],
   ['--pair-json', { value: 'path', does: 'read the pair from a document (`-` = stdin) instead of the network' }],
   ['--json', { value: null, does: 'emit the sweep on stdout as JSON' }],
@@ -5526,6 +5703,13 @@ async function main(argv) {
     for (const line of usageLines()) console.log(line);
     return EXIT_OK;
   }
+  // ⭐ Beside usage, and for the same reason: a seat asking for the record to
+  // COPY must not be answered with a network sweep -- and the remedy this file
+  // prints in its own refusals has to be reachable from a bare terminal (#18042).
+  if (flagIndex(argv, '--template') !== -1) {
+    for (const line of contractReviewTemplateLines()) console.log(line);
+    return EXIT_OK;
+  }
   const argvRefusal = argvRefusalLines(argv);
   if (argvRefusal) {
     for (const line of argvRefusal) console.error(line);
@@ -5661,6 +5845,10 @@ if (isEntrypoint(import.meta.url)) {
     const cliArgv = process.argv.slice(2);
     if (wantsHelp(cliArgv)) {
       for (const line of usageLines()) console.log(line);
+      process.exit(EXIT_OK);
+    }
+    if (flagIndex(cliArgv, '--template') !== -1) {
+      for (const line of contractReviewTemplateLines()) console.log(line);
       process.exit(EXIT_OK);
     }
     const cliRefusal = argvRefusalLines(cliArgv);
