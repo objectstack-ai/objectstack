@@ -21,10 +21,20 @@
  *     every scripted caller.
  *
  * (2) lives in `src/` deliberately: `packages/cli/tsconfig.json` includes
- * `src`, so `pnpm typecheck` compiles this file and its `@ts-expect-error`
- * directives are real. The same test under `packages/cli/test/` would be a
- * phantom check — no tsc program reads that directory, so every directive in
- * it would evaluate never and deleting them would leave every gate green.
+ * `src` and carries no `exclude` at all, so `pnpm typecheck`'s first leg
+ * (`tsc --noEmit`) compiles this file and its `@ts-expect-error` directives
+ * are real (measured with `tsc --listFiles`).
+ *
+ * ⚠ The contrast this used to draw is FALSE on this tree and is corrected
+ * rather than deleted, because the wrong half is the half a reader copies: the
+ * same test under `packages/cli/test/` would NOT be a phantom check. This
+ * package's `typecheck` is `tsc --noEmit && pnpm check:test-typecheck`, whose
+ * second half runs `--project tsconfig.test.json`, and that config's `include`
+ * names `test/**\/*` — 181 files under `packages/cli/test/` are in that
+ * program, measured with `tsc --listFiles`. Directives in either home are
+ * evaluated. What still separates the two is WHICH leg reads them: `src/`
+ * lands in the unconditional `tsc --noEmit`, `test/` in the test-layer program
+ * whose per-file residue `packages/cli/test-typecheck-debt.json` ratchets.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
