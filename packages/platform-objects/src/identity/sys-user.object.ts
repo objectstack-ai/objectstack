@@ -354,7 +354,7 @@ export const SysUser = ObjectSchema.create({
       // Managed (IdP-provisioned) users hold no local credential — hide the
       // password form so they can't self-mint a password that bypasses
       // enforced SSO. The break-glass owner (env-native, or flipped back when
-      // their break-glass password is set) keeps it. ADR-0024 D4/D5.2.
+      // their break-glass password is set) keeps it. ADR-0135 D4/D5.2.
       visible: 'has(record.id) && record.id == ctx.user.id && has(record.source) && record.source != "idp_provisioned"',
       successMessage: 'Password changed',
       refreshAfter: false,
@@ -839,7 +839,7 @@ export const SysUser = ObjectSchema.create({
     }),
 
     // ── System (auto-managed, hidden from create/edit forms) ─────
-    // Identity provenance (ADR-0024 D4). `idp_provisioned` users were
+    // Identity provenance (ADR-0135 D4). `idp_provisioned` users were
     // JIT-created on first federated login (a `sys_account` exists for an
     // external/OIDC provider — e.g. the cloud-as-IdP `objectstack-cloud`
     // provider, or a customer's own IdP); `env_native` users registered

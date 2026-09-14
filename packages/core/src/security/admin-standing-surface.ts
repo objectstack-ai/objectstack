@@ -6,7 +6,7 @@
  *
  * ## Why this file exists (#8734)
  *
- * `plugin-auth`'s break-glass guard (`last-admin-guard.ts`, ADR-0024 D5.2)
+ * `plugin-auth`'s break-glass guard (`last-admin-guard.ts`, ADR-0135 D5.2)
  * decides whether a pending write can empty the administrator population by
  * testing the payload against three standing-key lists — `MEMBER_STANDING_KEYS`,
  * `GRANT_STANDING_KEYS`, `PERMISSION_SET_STANDING_KEYS`. Those lists are not an
@@ -171,7 +171,7 @@ export const ADMIN_STANDING_SURFACE: Readonly<Record<string, AdminStandingTable>
     role: 'derives',
     reason:
       '[#11663 L2] RECLASSIFIED from `reads-only`. This table used to be read only for the '
-      + '`current_user.email` RLS fallback and the ADR-0024 `ai_seat` synthesis (§7), and the '
+      + '`current_user.email` RLS fallback and the cloud ADR-0024 `ai_seat` synthesis (§7), and the '
       + 'note here said so: "Neither confers administrator standing." That sentence is now FALSE. '
       + 'The config anchor (§6b-config) matches the row\'s own `email` against the deployment\'s '
       + 'declared administrator list and requires `email_verified` to read verified, so a write '

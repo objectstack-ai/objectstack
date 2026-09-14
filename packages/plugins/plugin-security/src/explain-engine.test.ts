@@ -947,7 +947,7 @@ describe('buildContextForUser ↔ resolveUserAuthzGrants parity (#6352)', () => 
       // The measured pre-change divergence, in one fixture: an org role
       // (ADR-0095 D3 `sys_member` projection), a platform-RBAC position
       // (ADR-0057 D4), a permission set the POSITION carries
-      // (`sys_position_permission_set`), and the ADR-0024 `ai_seat` synthesis.
+      // (`sys_position_permission_set`), and the cloud ADR-0024 `ai_seat` synthesis.
       name: 'org role + position-bound permission set + ai_seat',
       tables: {
         sys_user: [{ id: 'u2', email: 'u2@example.com', ai_access: true }],

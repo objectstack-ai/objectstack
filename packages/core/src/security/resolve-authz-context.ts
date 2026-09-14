@@ -1048,7 +1048,7 @@ export async function resolveUserAuthzGrants(
     isTenantAdmin: ORGANIZATION_ADMIN_GRANTS.some((n: string) => grants.permissions.includes(n)),
   });
 
-  // 7. [ADR-0024] Env-side AI seat: synthesize the `ai_seat` capability from the
+  // 7. [cloud ADR-0024 §7] Env-side AI seat: synthesize the `ai_seat` capability from the
   //    boolean sys_user.ai_access (sqlite returns 1/0; memory returns boolean).
   if (!grants.permissions.includes('ai_seat')) {
     const aiAccess = ((await getUserRow()) as { ai_access?: unknown } | undefined)?.ai_access;
