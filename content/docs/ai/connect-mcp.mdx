@@ -11,7 +11,8 @@ about the only thing left to do: **connecting a client and proving it works**.
 
 <Callout type="info">
 To turn the surface off, set `OS_MCP_SERVER_ENABLED=false` — the endpoint then
-returns 404 and the **Setup → Connect an Agent** page disappears with it. See
+returns 404 and the **Connect an Agent** page disappears with it, along with
+both its Setup and Account navigation entries. See
 [environment variables](/docs/deployment/environment-variables#mcp-server).
 </Callout>
 
@@ -94,14 +95,26 @@ Clients that read an `mcpServers` map connect the same way. With an API key:
 
 ## Headless: API keys
 
-Mint a key from **Setup → Connect an Agent** in the Console: the page lives at
-`/_console/apps/com.objectstack.setup/page/connect_agent` (a link in the Setup
-sidebar takes you there), and the **Create key** button sits at the bottom
-under *API keys*. The new key is shown **once**, together with a ready-to-paste
-`x-api-key: osk_...` header line — copy it before you dismiss the panel. The
-same page carries copy-paste connect snippets for Claude Code, Claude Desktop,
-Cursor, VS Code, and Codex, and a download link for the app's `SKILL.md`.
-Existing keys are listed (prefix only) and revoked under **Setup → API keys**.
+Mint a key from the **Connect an Agent** page in the Console. One page, two
+doors — which one you have depends on your permissions:
+
+- **Any signed-in user** — open the avatar menu (top right) → **Profile** to
+  enter the Account app, then **Developer → Connect an Agent** in its sidebar.
+  Direct link: `/_console/apps/com.objectstack.account/page/connect_agent`.
+- **Platform admins** — **Setup → Connect an Agent**, at
+  `/_console/apps/com.objectstack.setup/page/connect_agent`, reached from the
+  Setup sidebar. The Setup app requires the `setup.access` permission, so this
+  door alone is not enough for an ordinary member; the Account one needs none.
+
+On the page, the **Create key** button sits at the bottom under *API keys*. The
+new key is shown **once**, together with a ready-to-paste `x-api-key: osk_...`
+header line — copy it before you dismiss the panel. The same page carries
+copy-paste connect snippets for Claude Code, Claude Desktop, Cursor, VS Code,
+and Codex, and a download link for the app's `SKILL.md`.
+
+Your own keys are listed (prefix only) and revoked under **Account → Developer
+→ API Keys**. Platform admins get the tenant-wide list at **Setup → Access
+Control → API Keys**, which requires `manage_platform_settings`.
 
 Or mint one over REST:
 

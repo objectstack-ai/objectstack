@@ -3517,6 +3517,23 @@ export function workflowEnvValues(entry) {
  * followable by construction, whose author knows which of its literals a caller
  * would be reading and which it would not.
  *
+ * ## What this marker cannot reach, and what does (#17991)
+ *
+ * It is keyed on the MODULE, while whether a contribution is fabricated is a
+ * property of the CALLER — and a module can be both at once. This file's own
+ * globs are a real population for the gate that reads them and a fabrication
+ * for a gate that binds one string constant out of the same file; a declaration
+ * narrow enough for the second blinds the first, and one wide enough for the
+ * first fabricates for the second. ⛔ One declaration cannot be both.
+ *
+ * The half that reaches the caller is `importBindsNoPopulation`, keyed on what
+ * the importer BINDS: a value constant carries no behaviour and no table, so it
+ * reaches none of the module's reads however the module is written. ⛔ It is
+ * deliberately NOT a second marker on the importer — a per-caller opt-out is
+ * the hand-written path map this contract refuses, rewritten one caller at a
+ * time — and it narrows nothing for a table importer, so this marker's ruling
+ * for them stands unchanged.
+ *
  * ## Why a marker IN the module, never a roster in this script
  *
  * Same reason as the two markers above: a roster here is a second copy of a
@@ -5288,21 +5305,87 @@ function anchorAtPackageRoot(hints, scriptPath, moduleBody, tree) {
  * A hint from a followed module is a different CLAIM from one the gate spells
  * itself, so it does not travel unlabelled: entry.hintOrigin records which
  * module contributed it and coveringKey prints that in the via column.
+ *
+ * ## What the follow does NOT decide (#17991)
+ *
+ * Which modules a gate REACHES and what it INHERITS from one are two questions,
+ * and the refusals above answer only the first. The second is answered per
+ * CALLER, by `importBindsNoPopulation`, off the binding that
+ * `firstPartyImportBindings` carries beside each target: an importer that binds
+ * only a value constant reaches none of the module's reads and inherits
+ * nothing, and every other shape inherits exactly what it did. One resolver,
+ * two readings of it — the edge set below is unchanged to the byte.
  */
-const IMPORT_FROM_SPECIFIER = /(?:^|[;\n])[ \t]*(?:import|export)\b[^;]*?\bfrom[ \t]*(['"])([^'"\n]+)\1/g;
+const IMPORT_FROM_SPECIFIER = /(?:^|[;\n])[ \t]*(import|export)\b([^;]*?)\bfrom[ \t]*(['"])([^'"\n]+)\3/g;
 const SIDE_EFFECT_IMPORT = /(?:^|[;\n])[ \t]*import[ \t]*(['"])([^'"\n]+)\1/g;
+const NAMED_BINDING_LIST = /\{([^}]*)\}/;
+const BINDING_IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
 
-export function firstPartyImportTargets(scriptPath, source, { root = ROOT } = {}) {
+/**
+ * What ONE import clause BINDS — the exported names it names, or `whole` when
+ * the clause reaches the module's every export and there is no name list to
+ * read. Every shape this reading cannot resolve to a name list answers `whole`,
+ * which is the inheriting direction and therefore today's behaviour: a rule
+ * that narrowed on a clause it could not parse would drop leads by accident
+ * rather than by measurement.
+ *
+ * `whole` for: the namespace form (the module object reaches every export), a
+ * default binding (a name this module never declares under), the side-effect
+ * form (nothing is bound), a re-export (it republishes names rather than
+ * reading them, and nothing here can tell whether the re-exporter's own callers
+ * open the population), and any braced list carrying something that is not an
+ * identifier.
+ */
+function clauseBinding(keyword, clause) {
+  if (keyword !== 'import') return { names: [], whole: true };
+  const text = String(clause ?? '');
+  if (text.includes('*')) return { names: [], whole: true };
+  const braced = NAMED_BINDING_LIST.exec(text);
+  const outside = (braced ? text.slice(0, text.indexOf('{')) : text).replace(/,/g, '').trim();
+  if (outside.length > 0) return { names: [], whole: true };
+  if (!braced) return { names: [], whole: true };
+  const names = [];
+  for (const part of braced[1].split(',')) {
+    const name = part.trim().split(/[ \t\n]+as[ \t\n]+/)[0].trim();
+    if (name === '') continue;
+    if (!BINDING_IDENTIFIER.test(name)) return { names: [], whole: true };
+    if (!names.includes(name)) names.push(name);
+  }
+  return names.length > 0 ? { names, whole: false } : { names: [], whole: true };
+}
+
+/**
+ * The same resolution as `firstPartyImportTargets` below, carrying the one
+ * thing that function drops: WHAT the importer binds from each module it
+ * reaches. Returned as a Map in the same sorted order the targets list has, so
+ * a caller iterating this Map builds its follow set in the byte-identical order
+ * it built before this seam existed.
+ *
+ * Two different specifiers can resolve to one module (`./x.mjs` from here and
+ * `../pm/x.mjs` from a sibling directory), and one file can import a module
+ * twice; the bindings are UNIONED, so a module bound by name in one clause and
+ * wholly in another answers `whole`.
+ */
+export function firstPartyImportBindings(scriptPath, source, { root = ROOT } = {}) {
   // The same masking hint extraction uses, for the same reason: an import
   // written out in a docblock, or one inside a self-test fixture, is a
   // specifier this script NAMES rather than one it loads.
   const body = maskedModuleBody(String(source));
-  const specifiers = new Set();
-  for (const m of body.matchAll(IMPORT_FROM_SPECIFIER)) specifiers.add(m[2]);
-  for (const m of body.matchAll(SIDE_EFFECT_IMPORT)) specifiers.add(m[2]);
+  const specifiers = new Map();
+  const bind = (specifier, binding) => {
+    const prior = specifiers.get(specifier);
+    if (!prior) {
+      specifiers.set(specifier, { names: [...binding.names], whole: binding.whole });
+      return;
+    }
+    prior.whole = prior.whole || binding.whole;
+    for (const name of binding.names) if (!prior.names.includes(name)) prior.names.push(name);
+  };
+  for (const m of body.matchAll(IMPORT_FROM_SPECIFIER)) bind(m[4], clauseBinding(m[1], m[2]));
+  for (const m of body.matchAll(SIDE_EFFECT_IMPORT)) bind(m[2], { names: [], whole: true });
   const here = nodePath.dirname(nodePath.join(root, scriptPath));
-  const targets = new Set();
-  for (const specifier of specifiers) {
+  const targets = new Map();
+  for (const [specifier, binding] of specifiers) {
     if (!specifier.startsWith('./') && !specifier.startsWith('../')) continue;
     const rel = nodePath.relative(root, nodePath.resolve(here, specifier));
     // One test, three refusals: a path that escapes the repo, one that lands
@@ -5314,9 +5397,105 @@ export function firstPartyImportTargets(scriptPath, source, { root = ROOT } = {}
     // extension-less spellings ESM does not resolve, and the ../<rel> shapes a
     // module body carries as illustration, both land here.
     if (!existsSync(abs) || !statSync(abs).isFile()) continue;
-    targets.add(rel);
+    const prior = targets.get(rel);
+    if (!prior) {
+      targets.set(rel, { names: [...binding.names], whole: binding.whole });
+      continue;
+    }
+    prior.whole = prior.whole || binding.whole;
+    for (const name of binding.names) if (!prior.names.includes(name)) prior.names.push(name);
   }
-  return [...targets].sort();
+  // Sorted with the default string comparison the targets list has always used,
+  // never a locale-aware one: the follow order decides which module a shared
+  // hint is attributed to, and a re-ordering would move rows in output.
+  return new Map([...targets].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+}
+
+export function firstPartyImportTargets(scriptPath, source, { root = ROOT } = {}) {
+  return [...firstPartyImportBindings(scriptPath, source, { root }).keys()];
+}
+
+/**
+ * The exporter half of the binding rule: is NAME declared in this module as a
+ * VALUE — a `const` initialised to one primitive literal?
+ *
+ * Returns `{ literal }` — the string's own text when the value is a quoted
+ * string, and `null` for a number, a boolean or `null` — or `null` for every
+ * other declaration, which is the answer that inherits.
+ *
+ * ## Why this recogniser is deliberately this narrow
+ *
+ * It is read in ONE direction only: a positive answer REMOVES leads, so every
+ * shape it cannot read has to answer negative. It therefore requires the whole
+ * initialiser on the declaration's own line and refuses escapes and template
+ * literals rather than parsing them — an array, an object, a function, a class,
+ * a computed initialiser, a multi-line one, a re-exported binding and a name
+ * this module does not declare at all are all "not a value", and a module whose
+ * export surface this reading cannot see contributes exactly what it
+ * contributed before.
+ *
+ * The module body is masked first, for the reason every reader in this file
+ * masks: a declaration written out in a docblock, or built inside a self-test
+ * fixture, is a declaration this module NAMES rather than one it exports.
+ */
+export function exportedValueConstant(moduleSource, name) {
+  if (typeof name !== 'string' || !BINDING_IDENTIFIER.test(name)) return null;
+  const body = maskedModuleBody(String(moduleSource));
+  const declaration = new RegExp(`(?:^|\\n)[ \\t]*export[ \\t]+const[ \\t]+${name}[ \\t]*=[ \\t]*([^\\n]*)$`, 'm');
+  const m = declaration.exec(body);
+  if (!m) return null;
+  const initialiser = m[1].trim();
+  const quoted = /^('[^'\\\n]*'|"[^"\\\n]*")[ \t]*;[ \t]*$/.exec(initialiser);
+  if (quoted) return { literal: quoted[1].slice(1, -1) };
+  if (/^(?:-?\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?|true|false|null)[ \t]*;[ \t]*$/.test(initialiser)) {
+    return { literal: null };
+  }
+  return null;
+}
+
+/**
+ * Does this import bind NOTHING that can carry the followed module's
+ * population? (#17991)
+ *
+ * `declaredInheritedPopulation` is keyed on the MODULE, and whether a
+ * contribution is fabricated is a property of the CALLER — so one module cannot
+ * serve two importers when one of them reads its population table and the other
+ * takes a single constant out of it. This is the per-caller half, and it asks
+ * the one question the derivation can SEE without a path map: what did the
+ * importer BIND?
+ *
+ * A value carries no behaviour and no table. A caller that binds only value
+ * constants reaches none of the module's reads however the module is written,
+ * so every pair the module would contribute to it is a fabricated lead in the
+ * column a dispatch prompt pastes. Everything else — a function, a class, a
+ * declaration table, a namespace, a default, a re-export — keeps today's
+ * inheritance: the follow exists because a population MOVED into a shared
+ * module must not stop being declared, and a population moves into exactly
+ * those shapes.
+ *
+ * ⭐ One value is NOT inert: a string constant whose own text is one of the
+ * paths the module contributes IS a one-path population, and binding it is
+ * reading it. Measured on this tree, the shape is live — `scripts/adr-anchors.mjs`
+ * exports its anchor directory as a bare string constant — so the exception is
+ * a specimen, not a hypothetical.
+ *
+ * Live cost of the whole rule, measured over the 52 import edges this tree
+ * follows: ONE edge answers true, and it is the card's —
+ * `scripts/pm/check-clause2-carriers.mjs` binding `CONTRACT_REVIEW_TIER` out of
+ * this file and inheriting the workflow directory it never opens. Every other
+ * edge binds a function or a table and is untouched, which is the measurement
+ * that says this rule narrows the fabrication and not the follow.
+ */
+export function importBindsNoPopulation(binding, moduleSource, population = []) {
+  if (!binding || binding.whole) return false;
+  const names = binding.names ?? [];
+  if (names.length === 0) return false;
+  const paths = new Set(population ?? []);
+  return names.every((name) => {
+    const value = exportedValueConstant(moduleSource, name);
+    if (!value) return false;
+    return value.literal === null || !paths.has(value.literal);
+  });
 }
 
 /**
@@ -10937,15 +11116,22 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
   const manifestPrefixes = tree?.prefixes ?? trackedPrefixes([...trackedSet]);
   // A followed module is scanned once however many families import it —
   // invoked-as.mjs is imported by 79 of them.
+  const moduleSources = new Map();
+  const sourceOfModule = (rel) => {
+    if (!moduleSources.has(rel)) moduleSources.set(rel, readFileSync(nodePath.join(ROOT, rel), 'utf8'));
+    return moduleSources.get(rel);
+  };
   const moduleHints = new Map();
   const hintsOfModule = (rel) => {
     if (!moduleHints.has(rel)) {
-      // ONE read, two answers — the module's literals and its own declaration of
-      // which of them a caller INHERITS — so the pair cannot describe different
-      // revisions of a file, the same discipline the trigger paths take above.
-      // A module that declares nothing contributes everything it spells, which
-      // is the behaviour every followed module had before the marker existed.
-      const source = readFileSync(nodePath.join(ROOT, rel), 'utf8');
+      // ONE read, THREE answers — the module's literals, its own declaration of
+      // which of them a caller INHERITS, and (through `sourceOfModule`, which
+      // holds the same bytes) what each of its exported names is declared as —
+      // so no two of them can describe different revisions of a file, the same
+      // discipline the trigger paths take above. A module that declares nothing
+      // contributes everything it spells, which is the behaviour every followed
+      // module had before the marker existed.
+      const source = sourceOfModule(rel);
       const spelled = extractWatchHints(source, rel, { tree });
       const declared = declaredInheritedPopulation(source, spelled);
       moduleHints.set(rel, declared ? declared.population : spelled);
@@ -10997,6 +11183,13 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
   };
   for (const entry of byCheck.values()) {
     entry.imports = [];
+    // The subset of `entry.imports` that CONTRIBUTES a population (#17991).
+    // The edge list stays whole — the gate really does import every module in
+    // it — and what an importer inherits is decided separately, per caller, by
+    // what the caller BINDS. Unioned across the family's files: one file taking
+    // a constant out of a module another file reads the table of is a family
+    // that reads the table.
+    entry.populationImports = new Set();
     entry.runs = [];
     entry.manifests = [];
     entry.reads = [];
@@ -11075,9 +11268,18 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
       // population declared elsewhere can spell it here, which is the direction
       // this file errs in everywhere: a missing lead, never a fabricated one.
       if (entry.selfTest) continue;
-      for (const mod of firstPartyImportTargets(f, source)) {
-        if (gateFiles.has(mod) || entry.imports.includes(mod)) continue;
-        entry.imports.push(mod);
+      //
+      // What the follow INHERITS is decided one line down, and separately
+      // (#17991): the edge is a fact about this file, the population is a fact
+      // about the BINDING. `declaredInheritedPopulation` is keyed per module and
+      // so cannot express it — the same module's globs ARE a real population for
+      // an importer that reads them, and a declaration narrow enough for the
+      // constant-importer would blind that reader.
+      for (const [mod, binding] of firstPartyImportBindings(f, source)) {
+        if (gateFiles.has(mod)) continue;
+        if (!entry.imports.includes(mod)) entry.imports.push(mod);
+        if (importBindsNoPopulation(binding, sourceOfModule(mod), hintsOfModule(mod))) continue;
+        entry.populationImports.add(mod);
       }
       // The SECOND POPULATION FOLLOW, under the same two refusals as the first
       // and for the same reasons (#13511). ⚠️ "Second" counts FOLLOWS, not
@@ -11113,6 +11315,10 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
     // (measured at 0 re-attributions over the live tree).
     const own = new Set(entry.hints);
     for (const mod of entry.imports) {
+      // A value-only importer inherits nothing (#17991) — see
+      // `importBindsNoPopulation`. The edge stays in `entry.imports`, because it
+      // is real; what it does not do is contribute a lead.
+      if (!entry.populationImports.has(mod)) continue;
       for (const hint of hintsOfModule(mod)) {
         if (own.has(hint) || entry.hintOrigin.has(hint)) continue;
         entry.hintOrigin.set(hint, mod);
@@ -20132,6 +20338,159 @@ function selfTest() {
     firstPartyImportTargets('scripts/fixture.mjs', importFixture).join(' · '),
   );
 
+  // ── The per-CALLER half of an inherited population (#17991) ───────────────
+  //
+  // `declaredInheritedPopulation` is keyed on the MODULE, and whether a
+  // contribution is fabricated is a property of the CALLER: the same module's
+  // globs ARE a population for an importer that reads them and a fabrication
+  // for one that takes a single constant out of the file. One declaration
+  // cannot be both, so the caller's own BINDING decides. Fixtures first, in
+  // both directions, then the live shape the card was filed for.
+  const bindingOf = (clause) =>
+    firstPartyImportBindings('scripts/fixture.mjs', `${clause} from './invoked-as.mjs';\n`)
+      .get('scripts/invoked-as.mjs') ?? null;
+  t(
+    'a named import binds its names, read at the EXPORTER\'s spelling rather than the local alias',
+    bindingOf('import { ALPHA, BETA as LOCAL }')?.names.join(' · ') === 'ALPHA · BETA'
+      && bindingOf('import { ALPHA, BETA as LOCAL }')?.whole === false,
+    JSON.stringify(bindingOf('import { ALPHA, BETA as LOCAL }')),
+  );
+  t(
+    'and every clause with no name list to read binds the WHOLE module — namespace, default, mixed, re-export,'
+      + ' side-effect — which is the inheriting direction and therefore the direction an unreadable clause takes',
+    [
+      bindingOf('import * as everything'),
+      bindingOf('import theDefault'),
+      bindingOf('import theDefault, { ALPHA }'),
+      bindingOf('export { ALPHA }'),
+      firstPartyImportBindings('scripts/fixture.mjs', "import './invoked-as.mjs';\n").get('scripts/invoked-as.mjs'),
+    ].every((b) => b?.whole === true && b.names.length === 0),
+  );
+
+  // The exporter half. The fixture carries one declaration of every shape the
+  // recogniser must answer, so a widening or a narrowing of it fails HERE with
+  // the shape named rather than as a lead count nobody can attribute after.
+  const valueExporterFixture = [
+    "export const TIER_NAME = 'a-model-id';",
+    'export const LIMIT = 12;',
+    'export const OPEN = true;',
+    'export const NOTHING = null;',
+    "export const ANCHOR_DIR = 'scripts/adr-anchors';",
+    'export const GLOBS = [',
+    "  'packages/spec/src/**',",
+    '];',
+    'export const TABLE = { where: \'packages/plugins\' };',
+    'export function covers(glob, candidate) {',
+    '  return glob === candidate;',
+    '}',
+    'export class Walker {}',
+    'export const JOINED = ANCHOR_DIR + \'/shards\';',
+    'export const WRAPPED =',
+    "  'scripts/adr-anchors';",
+    'const NOT_EXPORTED = \'x\';',
+    'export { NOT_EXPORTED };',
+  ].join('\n');
+  const valueOf = (name) => exportedValueConstant(valueExporterFixture, name);
+  t(
+    'exportedValueConstant reads a string, a number, a boolean and null as VALUES, and the string carries its own text',
+    valueOf('TIER_NAME')?.literal === 'a-model-id'
+      && valueOf('ANCHOR_DIR')?.literal === 'scripts/adr-anchors'
+      && valueOf('LIMIT')?.literal === null
+      && valueOf('OPEN')?.literal === null
+      && valueOf('NOTHING')?.literal === null,
+    JSON.stringify(['TIER_NAME', 'ANCHOR_DIR', 'LIMIT', 'OPEN', 'NOTHING'].map((n) => [n, valueOf(n)])),
+  );
+  t(
+    'and refuses every other declaration — an array, an object, a function, a class, a computed initialiser,'
+      + ' one wrapped onto a second line, a name re-exported rather than declared, and a name the module never declares',
+    ['GLOBS', 'TABLE', 'covers', 'Walker', 'JOINED', 'WRAPPED', 'NOT_EXPORTED', 'ABSENT'].every((n) => valueOf(n) === null),
+    JSON.stringify(['GLOBS', 'TABLE', 'covers', 'Walker', 'JOINED', 'WRAPPED', 'NOT_EXPORTED', 'ABSENT'].map((n) => [n, valueOf(n)])),
+  );
+
+  // The rule itself, over that one fixture module and one fixture population.
+  const fixturePopulation = ['packages/spec/src/**', 'scripts/adr-anchors'];
+  const binds = (...names) => ({ names, whole: false });
+  t(
+    'a caller that binds ONLY value constants inherits nothing — a value carries no behaviour and no table,'
+      + ' so every pair the module would contribute to it is a fabricated lead',
+    importBindsNoPopulation(binds('TIER_NAME'), valueExporterFixture, fixturePopulation) === true
+      && importBindsNoPopulation(binds('TIER_NAME', 'LIMIT', 'OPEN'), valueExporterFixture, fixturePopulation) === true,
+  );
+  t(
+    'and a table, a function, a class, an unreadable name, a WHOLE-module clause and a mixed list all keep inheriting'
+      + ' — the follow exists because a population MOVED into a shared module, and it moves into exactly those shapes',
+    [
+      binds('GLOBS'),
+      binds('covers'),
+      binds('Walker'),
+      binds('ABSENT'),
+      binds('TIER_NAME', 'GLOBS'),
+      { names: [], whole: true },
+      { names: [], whole: false },
+    ].every((b) => importBindsNoPopulation(b, valueExporterFixture, fixturePopulation) === false),
+  );
+  t(
+    'but a string constant whose own text is one of the module\'s paths is NOT inert: a one-path population is a'
+      + ' population, and binding it is reading it',
+    importBindsNoPopulation(binds('ANCHOR_DIR'), valueExporterFixture, fixturePopulation) === false
+      && importBindsNoPopulation(binds('ANCHOR_DIR'), valueExporterFixture, []) === true,
+  );
+
+  // The live halves. Counts in the names, for the reason the follow's own live
+  // cases carry them: a case that can only be read as "something was found" is
+  // the shape the old pin failed in.
+  const inertEdges = [];
+  const bearingEdges = [];
+  for (const [check, entry] of liveDiscovery.byCheck) {
+    if (entry.selfTest) continue;
+    for (const f of entry.files ?? []) {
+      if (!existsSync(nodePath.join(ROOT, f))) continue;
+      for (const [mod, binding] of firstPartyImportBindings(f, liveSource(f))) {
+        if (liveGateFiles.has(mod)) continue;
+        const edge = [check, mod, binding.whole ? '*' : binding.names.join('+')];
+        if (importBindsNoPopulation(binding, liveSource(mod), liveModuleHints(mod))) inertEdges.push(edge);
+        else bearingEdges.push(edge);
+      }
+    }
+  }
+  t(
+    `the narrowing is NOT vacuous on this tree — ${inertEdges.length} of ${inertEdges.length + bearingEdges.length}`
+      + ` followed import edge(s) bind only value constants`
+      + ` (${inertEdges.map(([c, m, n]) => `${c} -> ${m} {${n}}`).join(' · ') || 'none'})`,
+    inertEdges.length > 0,
+  );
+  const stillFabricating = inertEdges.filter(([check, mod]) => {
+    const entry = liveDiscovery.byCheck.get(check);
+    // A family whose OTHER file reads the same module's population inherits it
+    // on that file's account — the union is the rule, so only an edge no file
+    // of the family bound population-bearingly is owed an empty origin here.
+    if ((entry?.populationImports ?? new Set()).has(mod)) return false;
+    return [...(entry?.hintOrigin ?? new Map())].some(([, origin]) => origin === mod);
+  });
+  t(
+    'and not one of those edges contributes a hint to the family that binds it'
+      + `${stillFabricating.length ? ` — STILL FABRICATING: ${stillFabricating.map(([c, m]) => `${c} <- ${m}`).join(' · ')}` : ''}`,
+    stillFabricating.length === 0,
+  );
+  const bothWays = [...new Set(inertEdges.map(([, m]) => m))].filter((m) => bearingEdges.some(([, bm]) => bm === m));
+  t(
+    'the answer is a property of the CALLER and not of the module — the live tree has'
+      + ` ${bothWays.length} module(s) answering BOTH ways (${bothWays.join(' · ') || 'none'}),`
+      + ' which is the shape no per-module declaration can express',
+    bothWays.length > 0,
+  );
+  const populationLost = bothWays.filter((mod) =>
+    liveModuleHints(mod).length > 0
+    && bearingEdges
+      .filter(([, bm]) => bm === mod)
+      .some(([check]) => !liveModuleHints(mod).every((h) => (liveDiscovery.byCheck.get(check)?.hints ?? []).includes(h))),
+  );
+  t(
+    'and the caller that BINDS the population still inherits every path of it'
+      + `${populationLost.length ? ` — LOST: ${populationLost.join(' · ')}` : ''}`,
+    populationLost.length === 0,
+  );
+
   // The live halves. Counts in the names: a case that can only be read as
   // "something was found" is the shape the old pin failed in.
   const inheriting = [...liveDiscovery.byCheck].filter(([, e]) => (e.hintOrigin?.size ?? 0) > 0);
@@ -20152,8 +20511,13 @@ function selfTest() {
       if (!existsSync(nodePath.join(ROOT, f))) continue;
       const source = liveSource(f);
       own.push(...extractWatchHints(source, f, { tree: liveTree }));
-      for (const mod of firstPartyImportTargets(f, source)) {
+      // Modelled through the BINDING (#17991), never through the bare edge: a
+      // reconstruction that summed every followed module would redden for the
+      // one family whose import binds a value, while the case it feeds asserts
+      // in its own name that a caller decides what it inherits.
+      for (const [mod, binding] of firstPartyImportBindings(f, source)) {
         if (liveGateFiles.has(mod) || direct.includes(mod)) continue;
+        if (importBindsNoPopulation(binding, liveSource(mod), liveModuleHints(mod))) continue;
         direct.push(mod);
       }
       // The second followed edge (#13511), reconstructed here for the same
@@ -20185,7 +20549,13 @@ function selfTest() {
     // The depth bound, family by family: a module reached only through another
     // module is not in the followed set. Non-vacuous wherever a followed
     // module imports something the family does not import itself.
-    const twoHop = direct.flatMap((m) => liveTargets(m)).filter((m) => !direct.includes(m));
+    // "Reached ONLY through another module" is the claim, so a module the
+    // family imports ITSELF is out of the two-hop set however it was bound: an
+    // inert edge (#17991) is absent from `direct` and present in `entry.imports`,
+    // and without this second filter it would read as a depth-2 follow.
+    const twoHop = direct
+      .flatMap((m) => liveTargets(m))
+      .filter((m) => !direct.includes(m) && !(entry.imports ?? []).includes(m));
     if (twoHop.length > 0 && (entry.imports ?? []).some((m) => twoHop.includes(m))) deeperOnly.push(check);
   }
   t(

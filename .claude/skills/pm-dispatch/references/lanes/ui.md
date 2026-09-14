@@ -12,7 +12,6 @@
 
 - 三流分流的残余流归本席:发布库 `@object-ui/*` 与 `apps/*`,判据见 SKILL.md 〈多仓协调〉。
 - objectui 的 `domain:devx` 与 `domain:spec` 卡归各自跨仓车道,⛔ 不归本席。
-- 症状位置不改流向,docs 随所记录的面走,两条同上节,⛔ 不在此另抄。
 - 落点不明留分诊首触,⛔ 不猜、不代判。
 
 ## 常设承诺
@@ -21,6 +20,7 @@
 - 回流后的 console pin bump 是 objectstack 的单张卡,⛔ 永不做本仓 PR 的 rider。
 - 新 `packages/spec` 工作恒归 `domain:spec` 席,已派发卡 ⛔ 不因此转席,见 SKILL.md 〈多仓协调〉。
 - `scripts/pm/**` 单写手恒在 objectstack 侧 ⇒ 本席的工具需求走上游卡带 `Blocked-by:` 回链。
+- 本仓标签/assignee 写走 objectstack `label-write.mjs --repo`,⛔ 不 MCP `issue_write`;被拒转有通道席。
 - 受管面五项含仓根发布 `skills/**`,清单、判据与禁令见 objectui AGENTS.md §9 受管面段。
 - ⇒ 命中即停 draft;⛔ 未获授权批准不 ready 不入队不自合、永不批准,获批后认领席落地。
 - 未命中的 PR 按同节走合并队列落地;changeset 与版本纪律见 objectui AGENTS.md §9。

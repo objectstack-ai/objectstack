@@ -28,7 +28,9 @@
 #
 # Both modes then boot `objectstack dev --fresh` and assert the DECLARED
 # first-run contract (see "the first run this asserts" below):
-#   - GET  /api/v1/auth/get-session              → 200   (anonymous)
+#   - GET  /api/v1/auth/get-session              → 401   (anonymous) with the
+#                                                  ADR-0112 envelope code
+#                                                  UNAUTHENTICATED — see the probe
 #   - GET  /api/v1/auth/config                   → 200, and in `pack` mode the
 #                                                  advertised audience posture
 #                                                  IS the declared `invite_only`
@@ -1007,7 +1009,35 @@ assert_body() {
 }
 
 log "Auth probes (the #3091 failure surface)"
-probe "GET /auth/get-session (anonymous)" 200 "$BASE_URL/api/v1/auth/get-session"
+# ── the anonymous session read is a REFUSAL, not an empty 200 (#17881 / #17238) ─
+# better-auth answers an anonymous `/get-session` with `200` and the literal
+# JSON `null`, and this probe asserted that 200 until #17881 changed it. `null`
+# is a value no `SessionResponse` can express, so `ObjectStackClient.auth.me()`
+# — which declares `Promise<SessionResponse>` — resolved OUTSIDE its own declared
+# type on the most ordinary call a logged-out caller makes. Ruled by the
+# director seat, decision batch #117 item 4 (「17238 B」): the server answers the
+# platform's standard ADR-0112 failure envelope with 401 and
+# `SessionResponseSchema` is UNTOUCHED. The seam is
+# `plugin-auth/src/anonymous-session-refusal.ts`, whose module header carries
+# the ruling and the three narrowings; it converts ONLY a 200 whose body is
+# exactly `null`, on ONLY the `/get-session` path, which is why the signed-in
+# probe further down is still 200 and byte-identical to before.
+#
+# ⚠ 401 here is the DECLARED contract — NOT a regression and NOT a relaxation.
+# This is the #14000 move again: re-pin the smoke to what the code declares and
+# ⛔ do not touch the auth surface. ⛔ Do not "fix" this back to 200; that would
+# re-assert a shape the platform deliberately stopped serving, and it is the
+# relaxation the header above forbids.
+probe "GET /auth/get-session (anonymous — must be REFUSED)" 401 "$BASE_URL/api/v1/auth/get-session"
+# The status alone is NOT the assertion (the same discipline the sign-up refusal
+# below is written under): a 401 also comes out of an origin check, a rate
+# limiter, a proxy in front of the dev server, or any guard added later — each
+# would keep this probe green while saying nothing about the anonymous-session
+# contract. The envelope `code` is the part that pins it, and `UNAUTHENTICATED`
+# is a code this repo owns and publishes (`StandardErrorCode`, ADR-0112's
+# derived-code map `401 -> UNAUTHENTICATED`), ⛔ never a vendor-internal symbol.
+assert_body '.error.code == "UNAUTHENTICATED"' \
+  "the anonymous session read was refused, but NOT by the declared ADR-0112 envelope — a 401 whose .error.code is not UNAUTHENTICATED means some other guard answered, and this probe has stopped measuring the anonymous-session contract"
 
 # ── which contract THIS artifact declares ───────────────────────────────────
 # `GET /auth/config` is public and unauthenticated, and since #11739 it
