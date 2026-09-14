@@ -1441,6 +1441,61 @@ export interface DefineStackOptions {
    * @default true
    */
   strict?: boolean;
+
+  /**
+   * Object names provided by the OTHER packages of the same release artifact
+   * (ADR-0130 D1 — "the release artifact is the co-ownership boundary").
+   *
+   * `defineStack` sees exactly ONE stack, so "defined in objects" and "defined
+   * in the artifact" are the same question for a single-package app and two
+   * different questions for a package that co-owns a namespace with its
+   * siblings. This option is how the second question is asked: the
+   * ARTIFACT-SCOPED reference classes — `permissions[].objects` and
+   * `data[].object` — resolve against this stack's own objects PLUS these
+   * names.
+   *
+   * ⚠️ It widens exactly those two classes and nothing else. `hooks[].object`
+   * and an app's own `navigation` `objectName` stay refused against the
+   * stack's own objects even when the name appears here, because ADR-0130 §1.5
+   * measured both of those refusals and recorded them as the SHAPE of the seam:
+   * *"navigation crosses only through contributions, and the split must follow
+   * hook ownership."* Widening them would delete a decision, not honour one.
+   *
+   * ## Why the two classes cross
+   *
+   * ADR-0130's 2026-09-02 addendum (#14487) rules that **permission sets stay
+   * whole in the `type: app` package** — a set is authored per ROLE, so no
+   * module owns one, and ADR-0086 D3 gives a set exactly one owning package.
+   * Once the app package also owns objects of its own, its sets necessarily
+   * grant on objects owned by its modules. Seed rows are the same shape: data
+   * placed into a co-owned object, not a claim on its definition.
+   *
+   * ## Why an OPTION and not a metadata key
+   *
+   * The addendum is explicit that **no `module` or grouping key is added to a
+   * permission set**, so the opt-in cannot live on the authored item the way
+   * an app nav item's `requiresObject` does. It is a property of the
+   * COMPOSITION this stack is built for, not of the stack's own metadata, and
+   * it therefore leaves `ObjectStackDefinitionSchema` — and every artifact
+   * already built from it — untouched.
+   *
+   * ## The claim is verified, not trusted
+   *
+   * A name listed here that no package in the artifact actually defines is
+   * refused by {@link composeStacks}, with the same `STACK_CROSS_REFERENCE_INVALID`
+   * envelope and the same per-finding message. Omitting the option keeps
+   * today's behaviour byte-for-byte.
+   *
+   * @example
+   * ```ts
+   * const service = defineStack(serviceConfig);              // owns crm_case
+   * const app = defineStack(appConfig, {                     // owns crm_account …
+   *   artifactObjects: service.objects?.map((o) => o.name),  // … grants on crm_case
+   * });
+   * export default composeStacks([service, app], { manifest: 'preserve' });
+   * ```
+   */
+  artifactObjects?: readonly string[];
 }
 
 /**
@@ -1838,17 +1893,34 @@ abstract class StackRefusalError<TIssue = string> extends Error {
  * ADR-0112 envelope exists to remove, and one that five message-substring pins
  * had already come to depend on.
  *
- * ⭐ Why the code names the rule FAMILY and not one item class: there is
- * exactly ONE raise site. {@link validateCrossReferences} returns every
- * finding as a `string[]` and `defineStack` throws the whole set at once, so a
- * single refusal can carry findings from several classes together — a
- * per-class code would have to pick one of several true answers. The classes
- * stay machine-readable in {@link StackCrossReferenceError.issues}, one entry
- * per finding, which is the structured form of what was previously only
+ * ⭐ Why the code names the rule FAMILY and not one item class: a raise site
+ * throws an AGGREGATE. {@link validateCrossReferences} returns every finding as
+ * a `string[]` and `defineStack` throws the whole set at once, so a single
+ * refusal can carry findings from several classes together — a per-class code
+ * would have to pick one of several true answers. The classes stay
+ * machine-readable in {@link StackCrossReferenceError.issues}, one entry per
+ * finding, which is the structured form of what was previously only
  * newline-joined prose. The family is also WIDER than "undefined object": the
  * same aggregate carries the duplicate-action-key, global-`update`-action and
  * mapping `javascript`-transform findings, so a
  * `…_UNDEFINED_OBJECT` spelling would be false for those.
+ *
+ * ⭐ There are TWO raise sites since #18202, one per PASS, and they share this
+ * code deliberately — same rule family, same finding text, two resolution
+ * scopes:
+ *
+ * - `defineStack` — the PER-STACK pass. Header:
+ *   `defineStack cross-reference validation failed (N issues):`.
+ * - `composeStacks` — the ARTIFACT pass, which re-raises the two
+ *   ARTIFACT-SCOPED rules ({@link collectSeedDataObjectErrors},
+ *   {@link collectPermissionGrantObjectErrors}) over the composed object set,
+ *   so a reference that {@link DefineStackOptions.artifactObjects} let past the
+ *   per-stack pass is still refused when NO package in the artifact defines it.
+ *   Header: `composeStacks artifact cross-reference validation failed (N issues):`.
+ *
+ * The HEADER names the pass, which is what a reader needs to know; the `code`
+ * names the rule family, which is what a machine matches on. Splitting the code
+ * per pass would make the pass — not the defect — the machine-readable half.
  *
  * `status: 422` matches both precedents for this defect class
  * (`ObjectOwnershipConflictError`, `NamespaceConflictError` in
@@ -2003,10 +2075,86 @@ class StackTriggerCapabilityRequiredError extends StackRefusalError {
 }
 
 /**
+ * Seed data → object references (#18202, ARTIFACT-SCOPED — see
+ * {@link DefineStackOptions.artifactObjects}).
+ *
+ * Platform objects are runtime-provided seed targets — see
+ * {@link isPlatformObjectName}.
+ *
+ * `resolvable` is the stack's own object names for a single-package stack, and
+ * those plus the rest of the artifact's for a package that co-owns a namespace.
+ * The MESSAGE is identical either way, which is what lets {@link composeStacks}
+ * re-raise this rule over the artifact without inventing a second dialect for
+ * the same finding.
+ */
+function collectSeedDataObjectErrors(
+  config: ObjectStackDefinition,
+  resolvable: ReadonlySet<string>,
+): string[] {
+  const errors: string[] = [];
+  if (!config.data) return errors;
+  for (const dataset of config.data) {
+    if (dataset.object && !resolvable.has(dataset.object) && !isPlatformObjectName(dataset.object)) {
+      errors.push(
+        `Seed data references object '${dataset.object}' which is not defined in objects.`,
+      );
+    }
+  }
+  return errors;
+}
+
+/**
+ * Permission-set / profile object grants → object references (#18202,
+ * ARTIFACT-SCOPED — see {@link DefineStackOptions.artifactObjects}).
+ *
+ * A grant keyed by an object that isn't declared (e.g. a short `lead` instead
+ * of the namespaced `crm_lead`) silently applies to NOTHING: the authenticated
+ * path may namespace-resolve it, but the anonymous / explicit-permission-set
+ * path does not — so the grant is simply lost (e.g. a public Web-to-Lead INSERT
+ * is denied for "roles []"). Fail loudly at build time.
+ * (`validateNamespacePrefix`'s doc already assumes this check lives here.)
+ * Platform objects are legitimate grant targets (e.g. a delegated-admin set
+ * carrying CRUD on the RBAC link tables, ADR-0090 D12) — skip them here.
+ *
+ * `resolvable` carries the same two readings as its seed-data sibling above.
+ */
+function collectPermissionGrantObjectErrors(
+  config: ObjectStackDefinition,
+  resolvable: ReadonlySet<string>,
+): string[] {
+  const errors: string[] = [];
+  if (!config.permissions) return errors;
+  for (const perm of config.permissions) {
+    const grants = (perm as { objects?: Record<string, unknown> }).objects;
+    if (!grants || typeof grants !== 'object') continue;
+    for (const objName of Object.keys(grants)) {
+      if (!resolvable.has(objName) && !isPlatformObjectName(objName)) {
+        errors.push(
+          `Permission '${(perm as { name?: string }).name ?? '(unnamed)'}' grants on object ` +
+            `'${objName}' which is not defined in objects.`,
+        );
+      }
+    }
+  }
+  return errors;
+}
+
+/**
  * Perform strict cross-reference validation on a parsed stack definition.
  * Returns an array of error messages (empty if valid).
+ *
+ * `artifactObjects` (#18202) widens the resolution scope of the two
+ * ARTIFACT-SCOPED classes ONLY — see {@link DefineStackOptions.artifactObjects}
+ * for which two, why those two, and why the rest of this function keeps
+ * resolving against the stack's own objects alone. Omitted (every
+ * single-package stack, which is every stack that does not opt in) the two
+ * scopes are the same Set and this function behaves exactly as it did before
+ * the option existed.
  */
-function validateCrossReferences(config: ObjectStackDefinition): string[] {
+function validateCrossReferences(
+  config: ObjectStackDefinition,
+  artifactObjects?: ReadonlySet<string>,
+): string[] {
   const errors: string[] = [];
   const objectNames = collectObjectNames(config);
 
@@ -2019,6 +2167,14 @@ function validateCrossReferences(config: ObjectStackDefinition): string[] {
   errors.push(...collectGlobalUpdateActionErrors(config));
 
   if (objectNames.size === 0) return errors;
+
+  // The resolution scope of the two ARTIFACT-SCOPED classes. Identical to
+  // `objectNames` unless the caller declared sibling packages, so a stack that
+  // does not opt in cannot observe that this line exists.
+  const artifactScope: ReadonlySet<string> =
+    artifactObjects && artifactObjects.size > 0
+      ? new Set([...objectNames, ...artifactObjects])
+      : objectNames;
 
   // Validate hook → object references
   if (config.hooks) {
@@ -2059,21 +2215,8 @@ function validateCrossReferences(config: ObjectStackDefinition): string[] {
     }
   }
 
-  // Validate seed data → object references (platform objects are runtime-
-  // provided seed targets — see isPlatformObjectName).
-  if (config.data) {
-    for (const dataset of config.data) {
-      if (
-        dataset.object &&
-        !objectNames.has(dataset.object) &&
-        !isPlatformObjectName(dataset.object)
-      ) {
-        errors.push(
-          `Seed data references object '${dataset.object}' which is not defined in objects.`,
-        );
-      }
-    }
-  }
+  // Validate seed data → object references. ARTIFACT-SCOPED (#18202).
+  errors.push(...collectSeedDataObjectErrors(config, artifactScope));
 
   // Validate mapping → object references + executable-transform gate (#2611).
   // A mapping whose targetObject doesn't exist can never be applied by the
@@ -2100,29 +2243,8 @@ function validateCrossReferences(config: ObjectStackDefinition): string[] {
   }
 
   // Validate permission-set / profile object grants → object references.
-  // A grant keyed by an object that isn't declared (e.g. a short `lead` instead
-  // of the namespaced `crm_lead`) silently applies to NOTHING: the
-  // authenticated path may namespace-resolve it, but the anonymous /
-  // explicit-permission-set path does not — so the grant is simply lost (e.g. a
-  // public Web-to-Lead INSERT is denied for "roles []"). Fail loudly at build
-  // time. (`validateNamespacePrefix`'s doc already assumes this check lives here.)
-  // Platform objects are legitimate grant targets (e.g. a delegated-admin set
-  // carrying CRUD on the RBAC link tables, ADR-0090 D12) — skip them here.
-  if (config.permissions) {
-    for (const perm of config.permissions) {
-      const grants = (perm as { objects?: Record<string, unknown> }).objects;
-      if (grants && typeof grants === 'object') {
-        for (const objName of Object.keys(grants)) {
-          if (!objectNames.has(objName) && !isPlatformObjectName(objName)) {
-            errors.push(
-              `Permission '${(perm as { name?: string }).name ?? '(unnamed)'}' grants on object ` +
-                `'${objName}' which is not defined in objects.`,
-            );
-          }
-        }
-      }
-    }
-  }
+  // ARTIFACT-SCOPED (#18202) — the rule's own doc carries why it fails loudly.
+  errors.push(...collectPermissionGrantObjectErrors(config, artifactScope));
 
   // Validate app navigation → object/dashboard/page/report references
   if (config.apps) {
@@ -2815,7 +2937,12 @@ export function defineStack(
     throw new StackCapabilityUnknownError(`${header}\n\n${lines.join('\n')}`, capErrors);
   }
 
-  const crossRefErrors = validateCrossReferences(data);
+  const crossRefErrors = validateCrossReferences(
+    data,
+    options?.artifactObjects && options.artifactObjects.length > 0
+      ? new Set(options.artifactObjects)
+      : undefined,
+  );
   if (crossRefErrors.length > 0) {
     const header = `defineStack cross-reference validation failed (${crossRefErrors.length} issue${crossRefErrors.length === 1 ? '' : 's'}):`;
     const lines = crossRefErrors.map((e) => `  ✗ ${e}`);
@@ -3612,6 +3739,65 @@ function assemblePackageBody(stack: ObjectStackDefinition): AssembledPackageBody
 }
 
 /**
+ * The ARTIFACT pass of the cross-reference gate (#18202, ADR-0130 D1).
+ *
+ * ## What it discharges
+ *
+ * {@link DefineStackOptions.artifactObjects} lets a package's
+ * `permissions[].objects` and `data[].object` name an object one of its SIBLING
+ * packages owns — the shape ADR-0130's 2026-09-02 addendum (#14487) makes
+ * mandatory once the `type: app` package, which keeps every permission set
+ * whole, also owns objects of its own. That option is a PROMISE made at
+ * `defineStack` time about a composition that has not happened yet. This
+ * function is where the promise is redeemed: the composed object set is the
+ * artifact, so a name no package in it defines is refused here, loudly, with
+ * the same envelope and the same per-finding message the per-stack pass uses.
+ *
+ * ## Why it re-checks inputs that never opted in (and why that is free)
+ *
+ * It does not read the option — the option is not recorded on the returned
+ * stack, and deliberately so: recording it would put a composition-time concern
+ * on `ObjectStackDefinitionSchema`, i.e. on every artifact already built. It
+ * instead re-runs the two rules for every input, which is a NO-OP for an input
+ * that did not opt in: that input's references already resolved against its own
+ * objects, and its own objects are a subset of the composed set. Nothing that
+ * composes cleanly today can newly fail here.
+ *
+ * ## The one leniency it inherits verbatim
+ *
+ * An input declaring NO objects is skipped, exactly as
+ * {@link validateCrossReferences}'s `objectNames.size === 0` early return skips
+ * it — that stack's references may be served by a plugin that is not in this
+ * composition at all, and this pass is not the place to reopen that question.
+ * It is also why hotcrm#1449's measurement (an app package declaring no
+ * objects) never saw the defect #18202 reports.
+ *
+ * ## Known boundary
+ *
+ * A stack that opts in and is then NEVER composed has no artifact to be
+ * checked against, and its claim stands unverified — the same shape as
+ * `strict: false`, and for the same reason: the author asserted something only
+ * a composition can confirm. `os build` composes; a stack that does not is not
+ * a package of an artifact.
+ */
+function collectArtifactCrossReferenceErrors(
+  stacks: readonly ObjectStackDefinition[],
+  composedObjects: readonly { name: string }[] | undefined,
+): string[] {
+  const artifactObjectNames = new Set<string>();
+  for (const obj of composedObjects ?? []) artifactObjectNames.add(obj.name);
+  if (artifactObjectNames.size === 0) return [];
+
+  const errors: string[] = [];
+  for (const stack of stacks) {
+    if (collectObjectNames(stack).size === 0) continue;
+    errors.push(...collectSeedDataObjectErrors(stack, artifactObjectNames));
+    errors.push(...collectPermissionGrantObjectErrors(stack, artifactObjectNames));
+  }
+  return errors;
+}
+
+/**
  * Declaratively compose multiple stack definitions into a single unified stack.
  *
  * This eliminates the manual `...spread` merging pattern when combining
@@ -3729,6 +3915,24 @@ export function composeStacks(
   if (opts.manifest === 'preserve') {
     const preserved = preservePackageEntries(stacks);
     if (preserved.length > 0) composed.packages = preserved;
+  }
+
+  // 3b. The ARTIFACT pass of the cross-reference gate (#18202). AFTER the
+  //     collections are concatenated, because it reads the composed
+  //     `permissions` / `data` of each INPUT against the composed `objects`;
+  //     BEFORE anything else can throw on a stack whose references do not
+  //     resolve in the first place. See
+  //     {@link collectArtifactCrossReferenceErrors} for why re-checking every
+  //     input cannot newly refuse a composition that passes today.
+  const artifactCrossRefErrors = collectArtifactCrossReferenceErrors(
+    stacks,
+    objects as readonly { name: string }[] | undefined,
+  );
+  if (artifactCrossRefErrors.length > 0) {
+    const count = artifactCrossRefErrors.length;
+    const header = `composeStacks artifact cross-reference validation failed (${count} issue${count === 1 ? '' : 's'}):`;
+    const lines = artifactCrossRefErrors.map((e) => `  ✗ ${e}`);
+    throw new StackCrossReferenceError(`${header}\n\n${lines.join('\n')}`, artifactCrossRefErrors);
   }
 
   // 4. Named handler functions — merged by name (#5005).
