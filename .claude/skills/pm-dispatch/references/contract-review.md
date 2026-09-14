@@ -28,10 +28,10 @@
 - 同形 = `## Contract review` 题头、所审 head sha 码段、①②③ 逐项、独立性对、PASS/FAIL 判词。
 - 同形含首行 `Served-tier:`:值写常量名 `CONTRACT_REVIEW_TIER`,可前置 N/N;无此行不成裁决。
 - ① derived judgments 逐项:diff 引出的接受集与公开面变化逐条点名判对错。
-- ② semver 定级:变更级别与 changeset 声明一致。
-- ③ 边界旗处置:dev 挂旗与 `open_questions` 逐旗答复或升级。
+- ② semver 定级与 changeset 声明一致;③ 边界旗:dev 挂旗与 `open_questions` 逐旗答复或升级。
 - 独立性件:契约真分叉、dev 挂旗或派发后的跨车道面(含 spec)⇒ 起隔离的达档复核子代理。
 - 只喂卡片、既有裁决与 PR 本体,⛔ 不喂派发令与派发席自己的结论;简报写成对抗性。
+- 隔离复核子代理暂存全写按所审 PR 命名的 `<scratchpad>/pr-<n>/`,⛔ 不读非本轮自写的暂存。
 - 独立性对(机读):`Implemented-by:` 写产 diff 者身份;`mode:subagent` 记分支,`mode:remote` 记 session id。
 - `Reviewed-by:` 写渲染或采纳裁决的席位 session;隔离复核子代理无 session,记采纳它的席位。
 - 两者同 session ⇒ 报 SELF-REVIEW;值紧跟冒号,前置词即不可读;两行皆无的历史裁决恒静默。
