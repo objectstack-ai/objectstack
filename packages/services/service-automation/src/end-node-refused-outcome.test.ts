@@ -36,7 +36,6 @@ import { AutomationEngine } from './engine.js';
 import { InMemorySuspendedRunStore } from './suspended-run-store.js';
 import { installBuiltinNodes } from './builtin/index.js';
 import type { AutomationContext } from '@objectstack/spec/contracts';
-import { defineActionDescriptor } from '@objectstack/spec/automation';
 
 function createTestLogger(): any {
     return { info: () => {}, warn: () => {}, error: () => {}, debug: () => {}, child: () => createTestLogger() };
