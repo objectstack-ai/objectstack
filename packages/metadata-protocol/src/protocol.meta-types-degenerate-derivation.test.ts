@@ -42,6 +42,28 @@
  * instrument agrees with the card wherever the card actually measured, and the
  * canonicalising comparison is what tells content apart from key ordering.
  *
+ * ## [#17502] Why the baseline is now STRIPPED before it is compared
+ *
+ * There are two declared reasons a served payload may differ from the raw
+ * derivation, and this suite owns exactly one of them. #17502 made
+ * `toJsonSchemaSafe` drop every property whose subschema admits no instance —
+ * a `retiredKey()` tombstone — so 15 of the served types legitimately differ
+ * from their raw derivation for a reason that has nothing to do with the
+ * degeneracy retry. Comparing against the raw document would make this pin red
+ * for that reason and blind to its own: a later blanket widening to
+ * `io: 'input'` would arrive inside an already-red assertion nobody could read.
+ *
+ * So the baseline has the SAME strip applied — through the emitter's own
+ * `stripUnauthorableProperties`, never a second spelling — and what remains on
+ * the two sides of the comparison is exactly the retry's blast radius. The
+ * assertion is unchanged in strength: widen the retry to every type and 24
+ * types move, not one.
+ *
+ * The property-count controls keep the CARD's original numbers as their
+ * authority and add back what the strip removed, so the constant still fails
+ * when a live property appears or disappears, and the subtraction is derived
+ * rather than a second hand-maintained table.
+ *
  * Harness: the real `getMetaTypes()` on one protocol instance over a stub
  * engine, so the assertions are about what the endpoint SERVES. A pin taken on
  * a derivation chosen for convenience would not cover the served path at all —
@@ -55,6 +77,10 @@ import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFin
 import { DEFAULT_METADATA_TYPE_REGISTRY, getMetadataTypeSchema } from '@objectstack/spec/kernel';
 import { METADATA_FORM_REGISTRY } from '@objectstack/spec/system';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+// [#17502] The emitter's OWN strip and its predicate — the baseline below is
+// stripped with the same code the server runs, so this pin can never drift
+// into measuring a second, hand-written idea of "admits nothing".
+import { acceptsNothing, stripUnauthorableProperties } from './unauthorable-nodes.js';
 
 /**
  * The whole served surface: every declared metadata type plus every
@@ -110,6 +136,41 @@ function preFixDerivation(type: string): Record<string, unknown> | undefined {
 }
 
 /**
+ * [#17502] The pre-fix derivation with this card's strip applied — the baseline
+ * the blast-radius pin compares against, so the only difference left to find is
+ * the degeneracy retry's.
+ */
+function preFixServedBaseline(type: string): Record<string, unknown> | undefined {
+    return stripUnauthorableProperties(preFixDerivation(type));
+}
+
+/**
+ * [#17502] How many TOP-LEVEL properties the strip removes from this type's
+ * served document.
+ *
+ * Counted on whichever derivation the server can actually use: `action` has no
+ * properties at all on the default arm, so its three tombstones are visible
+ * only on the `io: 'input'` retry that #17501 gave it.
+ */
+function retiredTopLevelCount(type: string): number {
+    const schema = getMetadataTypeSchema(type);
+    if (!schema) return 0;
+    for (const io of ['output', 'input'] as const) {
+        let json: Record<string, unknown>;
+        try {
+            json = z.toJSONSchema(schema as z.ZodTypeAny, { unrepresentable: 'any', io }) as Record<string, unknown>;
+        } catch {
+            continue;
+        }
+        const properties = json.properties as Record<string, unknown> | undefined;
+        if (properties && Object.keys(properties).length > 0) {
+            return Object.values(properties).filter(acceptsNothing).length;
+        }
+    }
+    return 0;
+}
+
+/**
  * Recursive key sort. Two documents that differ only in key ORDER canonicalise
  * to the same string; anything still different after this is real content.
  */
@@ -147,7 +208,11 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
 
         const properties = served!.properties as Record<string, unknown>;
         expect(properties, '`action` must name its properties').toBeDefined();
-        expect(Object.keys(properties).length).toBe(48);
+        // [#17502] 48 is the key set `action` ACCEPTS, and stays the pinned
+        // authority. The served document no longer carries the three that
+        // admit no instance, so they are added back rather than the constant
+        // being lowered — a live key going missing is still red.
+        expect(Object.keys(properties).length + retiredTopLevelCount('action')).toBe(48);
         // A sample an author would actually address, and the one #17500's
         // repeater titles need a node to sit on.
         for (const key of ['name', 'label', 'objectName', 'type', 'params', 'locations']) {
@@ -161,7 +226,7 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
         const moved: string[] = [];
         for (const type of SERVED_TYPES) {
             if (!getMetadataTypeSchema(type)) continue; // absence is not degeneracy — see below
-            const before = preFixDerivation(type);
+            const before = preFixServedBaseline(type);
             const after = served.get(type);
             if (canon(before) !== canon(after)) moved.push(type);
         }
@@ -178,7 +243,7 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
 
         for (const type of SERVED_TYPES) {
             if (type === 'action' || !getMetadataTypeSchema(type)) continue;
-            const before = preFixDerivation(type);
+            const before = preFixServedBaseline(type);
             const after = served.get(type);
             // Raw equality first: these must not move at all.
             expect(JSON.stringify(after), `${type} served payload moved`).toBe(JSON.stringify(before));
@@ -212,7 +277,13 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
         async (type, count) => {
             const served = (await servedSchemas()).get(type as string);
             expect(served, `${type} must be served`).toBeDefined();
-            expect(Object.keys(served!.properties as Record<string, unknown>).length).toBe(count);
+            // [#17502] The card's count is the authority; what the strip
+            // removed is added back, derived, so this stays a control over
+            // LIVE properties rather than a number quietly rewritten.
+            expect(
+                Object.keys(served!.properties as Record<string, unknown>).length
+                + retiredTopLevelCount(type as string),
+            ).toBe(count);
         },
     );
 
