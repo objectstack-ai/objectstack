@@ -3,7 +3,7 @@ title: Error Code Catalog
 description: Complete reference for all ObjectStack error codes with causes, fixes, and retry strategies
 ---
 
-ObjectStack uses a structured error system with **9 error categories** and **51 error codes reachable on the wire**. Every error includes a machine-readable code, HTTP status mapping, and retry guidance.
+ObjectStack uses a structured error system with **9 error categories** and **52 error codes reachable on the wire**. Every error includes a machine-readable code, HTTP status mapping, and retry guidance.
 
 This catalog documents the **wire face** — the codes a client can actually receive. That is not quite the
 `StandardErrorCode` enum: the enum also carries in-process spellings the REST door translates at the
@@ -73,6 +73,61 @@ entry's cross-reference sentence so the in-process one stays findable.
   ]
 }
 ```
+
+### `VALIDATION_FAILED`
+**Cause:** Record-level validation refused the write. This is the code a
+*producer* names — `ValidationError` from the record and rule validators, and
+any error of the same shape (`code: 'VALIDATION_FAILED'` / `name:
+'ValidationError'`) — as opposed to `VALIDATION_ERROR` above, which is *derived
+from the status* when the producer named no code at all. It covers required,
+type, format, length, range and picklist violations, a dangling `lookup` /
+`master_detail` reference (`fields[].code === 'reference_not_found'` — see the
+callout below), a malformed `expectedVersion` / `If-Match` token, and a batch
+row that names no record id.  
+**Fix:** Branch on this code and read `fields[]`. Each entry carries `field`
+(the API name, so a form can focus the right input), `code` from the field-level
+catalog ([ADR-0114](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0114-field-level-error-code-catalog.md)),
+a `message` rendered in the caller's locale, and — where they apply — `label`,
+`constraint`, `value` and `options`. Correct the named values and resend; no
+retry of the same payload can succeed.  
+**Retry:** `no_retry`
+
+<Callout type="warn">
+**Where the per-field list rides is decided by the door, not by the code — and
+it can be empty.** On the `/data` routes the envelope is flat and `fields` is a
+top-level sibling of `code`, always present, `[]` when the producer named none:
+
+```json
+{
+  "error": "Email is not a valid email address",
+  "code": "VALIDATION_FAILED",
+  "fields": [
+    { "field": "email", "code": "invalid_format", "label": "Email",
+      "message": "Email is not a valid email address" }
+  ]
+}
+```
+
+The same throw served through the runtime dispatcher answers the nested
+envelope, and the list rides in `details` instead:
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "VALIDATION_FAILED",
+    "message": "Email is not a valid email address",
+    "httpStatus": 400,
+    "details": { "fields": [{ "field": "email", "code": "invalid_format" }] }
+  }
+}
+```
+
+Both are `400`. A refusal a route *builds* itself rather than throwing — share
+link creation without `object` / `recordId`, for instance — carries the code and
+the sentence and **no `fields` at all**. So read the sentence out of `error` /
+`message`, and treat `fields` as a refinement that may be absent or empty.
+</Callout>
 
 ### `INVALID_FIELD`
 **Cause:** A field name in the request does not exist on the target object. On a
@@ -810,7 +865,7 @@ async function handleApiCall() {
 
 | Status | Category | Common Codes |
 |:---:|:---|:---|
-| 400 | `validation` | `VALIDATION_ERROR`, `INVALID_FIELD`, `MISSING_REQUIRED_FIELD`, `INVALID_QUERY` |
+| 400 | `validation` | `VALIDATION_FAILED`, `VALIDATION_ERROR`, `INVALID_FIELD`, `MISSING_REQUIRED_FIELD`, `INVALID_QUERY` |
 | 401 | `authentication` | `UNAUTHENTICATED`, `EXPIRED_TOKEN`, `INVALID_CREDENTIALS` |
 | 403 | `authorization` | `PERMISSION_DENIED`, `FIELD_NOT_ACCESSIBLE`, `LICENSE_REQUIRED` |
 | 404 | `not_found` | `RECORD_NOT_FOUND`, `OBJECT_NOT_FOUND`, `ENDPOINT_NOT_FOUND` |
