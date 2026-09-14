@@ -339,14 +339,31 @@ jobs:
           endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
           mirror="s3://${R2_BUCKET}/objectstack/board/"
 
-          # `archive/` is a linked worktree, so its `.git` is a FILE and the
-          # pattern `.git/*` does not match it; both spellings are excluded.
+          # The SOURCE is the snapshot directory, NOT the worktree root that
+          # contains it. The snapshot above is written to `archive/board`, so
+          # syncing `archive/` would map `archive/board/X` onto the `mirror`
+          # prefix as `objectstack/board/` + `board/X` — one segment deeper
+          # than the prefix on the line above says the mirror is, and visible
+          # only from the bucket side. Syncing `archive/board/` maps
+          # `archive/board/X` to `objectstack/board/X`, which is the layout a
+          # restore driven from the documented path looks for.
+          #
+          # `--delete` is kept and needs no migration step of its own: the
+          # stale `objectstack/board/board/` tree is inside this sync target
+          # and has no local counterpart, so the first run after this change
+          # removes it. ⛔ The target is never widened to `objectstack/` to
+          # achieve the same mapping — that would put `objectstack/snapshots/`
+          # inside a `--delete` target and eat the daily tarballs, the failure
+          # the comment above already warns about.
+          #
+          # No `.git` filter is needed here: `archive/` is a linked worktree,
+          # so its `.git` is a FILE at `archive/.git`, which is outside this
+          # source (filters match paths relative to the source directory).
           # No pipe between the command and `$?` — see the snapshot step.
           set +e
-          aws s3 sync archive/ "$mirror" \
+          aws s3 sync archive/board/ "$mirror" \
             --endpoint-url "$endpoint" \
             --delete --no-progress \
-            --exclude '.git' --exclude '.git/*' \
             > "$RUNNER_TEMP/r2-sync.log" 2>&1
           code=$?
           set -e
