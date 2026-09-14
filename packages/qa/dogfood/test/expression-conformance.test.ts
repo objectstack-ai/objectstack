@@ -244,11 +244,17 @@ const TOP_LEVEL_DECL = /^(?:export\s+)?(?:const|function|class)\s+([A-Za-z_][A-Z
  * the union member on its own line, `system/metrics.zod.ts` and
  * `system/tracing.zod.ts` both spell it that way — attributes to the nearest
  * preceding key at STRICTLY SMALLER indentation, bounded by the enclosing
- * top-level declaration. Strictly smaller is what makes it right rather than
- * nearly right: walking back to the nearest key of ANY indentation lands on a
- * SIBLING inside the union's structured arm (`percentile:` in
- * `ServiceLevelIndicatorSchema.successCriteria`), and would classify a slot
- * nobody declared while leaving the real one uncovered.
+ * top-level declaration. The indentation constraint is what makes it right
+ * rather than nearly right, and that is measured, not assumed: dropping it and
+ * walking back to the nearest key of ANY indentation lands on a SIBLING inside
+ * the union's structured arm — `percentile:` instead of `successCriteria` in
+ * `ServiceLevelIndicatorSchema` — which classifies a slot nobody declared AND
+ * leaves the real one uncovered, both reported. ⚠️ STRICTLY smaller vs merely
+ * not-deeper is NOT distinguishable on today's tree (measured: relaxing `<` to
+ * `<=` changes no key, because every sibling key inside a structured arm is
+ * DEEPER than the member line, not level with it). `<` is kept as the stricter
+ * of the two on the rule rather than the reading: a key at the SAME indentation
+ * as the hit is its sibling, never the slot it mounts.
  */
 function scanFile(abs: string, file: string): FileScan {
   const out: FileScan = { declarations: [], aliases: [], unattributed: [] };
