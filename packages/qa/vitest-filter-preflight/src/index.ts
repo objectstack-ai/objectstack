@@ -2,28 +2,22 @@
 
 /**
  * A vitest FILE FILTER that selects nothing must say so — even when the rest
- * of the same run selects something (#17853).
+ * of the same run selects something (#17853, #17978).
  *
  * ## The defect this closes, and the half vitest already covers
  *
  * `vitest run` reads bare positional arguments as FILE FILTERS. When EVERY
  * filter selects nothing, vitest is already loud and this module adds nothing:
  * `printNoTestFound()` prints `No test files found, exiting with code 1`
- * together with the filters and the projects, and the run is red. Measured on
- * this tree, vitest 4.1.11:
- *
- *     pnpm --filter @objectstack/cli exec vitest run --project unit \
- *       test/i18n-extract-companion-orphan.test.ts
- *     => exit 1, `No test files found, exiting with code 1`
+ * together with the filters and the projects, and the run is red.
  *
  * ⭐ THE GAP IS THE PARTIAL CASE, and it is the one that costs dispatch rounds.
  * Once at least one filter selects a file, the filters that selected NOTHING
- * are dropped with no diagnostic of any kind. Measured on this tree, same
- * binary, two unit-tier files plus one integration-tier file, `--project unit`:
- * the run prints the same `Test Files (2)` summary as the run naming only the
- * two, and `diff` over the two captures is empty but for timestamps and
- * durations. The discarded path's name appears NOWHERE in vitest's own output
- * — the one occurrence in a captured terminal is pnpm's echo of the argv in
+ * are dropped with no diagnostic of any kind. The run prints the same
+ * `Test Files N passed` summary as the run that named only the surviving paths,
+ * and `diff` over the two captures is empty but for timestamps and durations.
+ * The discarded path's name appears NOWHERE in vitest's own output — the one
+ * occurrence in a captured terminal is pnpm's echo of the argv in
  * `ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL`, which pnpm prints only when the run was
  * already red and which is therefore absent from exactly the green run that
  * needed it.
@@ -37,6 +31,55 @@
  * `--project unit` over a named set, read green, pushed, and CI went red on
  * `Test Core` with the failing assertion inside an integration-tier file that
  * the local run had discarded.
+ *
+ * ⭐ AND IT IS NOT `--project`-SPECIFIC. A bare `vitest run <real> <typo>` with
+ * no `--project` at all takes the same code path: exit 0, `Test Files 1 passed`,
+ * the typo named nowhere. Detecting that needs exactly what detecting the
+ * narrowed case needs — knowledge of the package's FULL test population — which
+ * is why both live here rather than in two mechanisms.
+ *
+ * ## ⛔ WHY THERE IS EXACTLY ONE COPY OF THIS FILE (#17978)
+ *
+ * `matchesVitestFilter` below is a TRANSCRIPTION of a private vitest code path.
+ * Eight packages in this repo declare vitest `projects` and every one of them
+ * needs it. Copying the transcription per package means eight readings of
+ * vitest's internals drifting from vitest and from each other, and every drift
+ * fails SILENTLY GREEN — the same failure direction as the defect. One copy is
+ * the only version of this that survives a vitest bump: on an upgrade, re-read
+ * `TestProject.filterFiles` and `parseFilter` in `dist/chunks/cli-api.*.js`
+ * ONCE, here.
+ *
+ * ## ⛔ WHY CONSUMERS IMPORT THIS FILE BY RELATIVE PATH, not by its package name
+ *
+ * This package's `exports` points straight at `src`, so the obvious call site
+ * would be `import { … } from '@objectstack/vitest-filter-preflight'`. MEASURED
+ * on this tree and rejected:
+ *
+ *   - Vite bundles a config's RELATIVE imports through esbuild, which transpiles
+ *     TypeScript. It EXTERNALISES bare specifiers instead, resolving them to a
+ *     real path and leaving Node to load it. Resolved here, that path is a
+ *     `.ts` file.
+ *   - Node ≥ 22.18 strips types by default, so the bare form loads — with no
+ *     warning, which is exactly what makes it dangerous. Re-run with
+ *     `NODE_OPTIONS=--no-experimental-strip-types` and the config does not load
+ *     at all: `TypeError [ERR_UNKNOWN_FILE_EXTENSION]: Unknown file extension
+ *     ".ts"`, `failed to load config from …`. That is EVERY test in the
+ *     consuming package, not a degraded diagnostic.
+ *   - This repo declares `engines.node: ">=22.0.0"`. So on a supported Node the
+ *     bare form turns a silent-drop defect into a total harness outage.
+ *
+ * ⛔ The other two escapes are worse, not better. Building this package to
+ * `dist` would make eight test harnesses' CONFIG LOAD depend on build state —
+ * and `pnpm --filter <pkg> exec vitest run <file>`, the very invocation this
+ * card is about, runs no build, so a missing `dist` is again a config-load
+ * crash. Authoring it as plain `.mjs` would drop the types, and the types are
+ * load-bearing: `CliParseResultOptions` is declared STRUCTURALLY so that a
+ * vitest upgrade renaming one of the three options it reads is a type error
+ * here instead of a silent decline.
+ *
+ * ⇒ Each consumer spells a relative path to `src/index.js`, which esbuild
+ * inlines and transpiles. The same mechanism `packages/cli/vitest-tiers.ts`
+ * already uses for `../../scripts/nightly-tiers.mjs`.
  *
  * ## ⛔ WHY THIS IS NOT A REPORTER, which was the first thing tried
  *
@@ -53,8 +96,8 @@
  *         resolved.reporters.push(['github-actions', {}]);
  *     }
  *
- * So `reporters: ['default', preflight]` has two costs, one measured here and
- * one that would only have shown up in CI:
+ * So `reporters: ['default', preflight]` has two costs, one measured and one
+ * that would only have shown up in CI:
  *   - it pins `default` where an agent terminal would have got `agent`, which
  *     changed a control run's output by two lines — a direct violation of the
  *     requirement that a healthy narrowed run stay byte-identical; and
@@ -74,42 +117,35 @@
  * table, and a predicate built on a guess is exactly the artifact this card was
  * filed about.
  *
- * The other input is the two tier arrays the config already derives and hands
- * to the projects as their `include`. That is what makes the derivation exact
- * rather than approximate: each project's `include` IS an exact-path list (the
- * config header's `:613`) and the two are a partition (`:583`), so what a run
- * will collect for a filter is computable from the same arrays vitest is about
- * to be given. ⛔ No second derivation and no second walk — a copy of a fact
- * already on disk is how the frozen tier list went stale before #14554.
- *
- * `matchesVitestFilter` is a transcription of `TestProject.filterFiles` as
- * shipped in vitest 4.1.11 (`dist/chunks/cli-api.*.js`), and the `:LINE` suffix
- * is stripped exactly as `parseFilter` strips it. Transcribed, not invented:
- * the whole value of this preflight is that its idea of "selected" equals
- * vitest's. On a vitest upgrade, re-read those two functions.
+ * The other input is each project's POPULATION. How a caller obtains one is the
+ * one thing that differs across the eight packages, and it is the reason a
+ * straight port of the `packages/cli` original could not serve any of the other
+ * seven — see `exactAndGlobPopulations` below.
  *
  * ## ⛔ Every uncertainty resolves to SILENCE, never to a guess
  *
  * The preflight declines — printing nothing, leaving the run exactly as it was
  * — whenever it cannot model the invocation: an argv `parseCLI` refuses, a
- * `--project` value that is not one of the tier names (a negation or a glob),
- * or a `--changed` / `--related` run, where nothing was named by hand. Silence
- * is the status quo, so declining can never make a run worse than it is today;
- * a guess could.
+ * `--project` value that is not one of the population names (a negation or a
+ * glob), or a `--changed` / `--related` run, where nothing was named by hand.
+ * Silence is the status quo, so declining can never make a run worse than it is
+ * today; a guess could.
  *
  * ## Direction ②, the half that makes this accurate rather than merely loud
  *
  * `renderLostFilterNotice` returns the EMPTY STRING when no filter was lost,
  * and nothing is written in that case. A normal run — no filters, or filters
  * that all selected something — contributes zero bytes of new output.
- * `test/vitest-project-filter-preflight.test.ts` pins both directions and pins
- * that this module is still wired into `vitest.config.ts`, because a preflight
- * nobody invoked is the same phantom check in a new place.
+ * `test/filter-preflight.test.ts` pins both directions and
+ * `test/config-wiring-sweep.test.ts` pins that every config that declares
+ * `projects` still invokes this module, because a preflight nobody invoked is
+ * the same phantom check in a new place.
  */
 
+import { readdirSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 
-/** Populations to match a filter against, by name — `{ unit, integration }`. */
+/** Populations to match a filter against, by project name — `{ repo, local }`. */
 export type Populations = Readonly<Record<string, readonly string[]>>;
 
 /** One positional filter: what the caller typed, and the path vitest matches with. */
@@ -145,6 +181,17 @@ export interface LostFilter {
 
 const EMPTY: Invocation = { filters: [], projects: [], opaque: true };
 
+/**
+ * The test-file family vitest's own `configDefaults.include` names —
+ * `**\/*.{test,spec}.?(c|m)[jt]s?(x)` — as a basename predicate.
+ *
+ * ⛔ Deliberately NOT vitest's glob engine: see `testFilesUnder`.
+ */
+const TEST_FILE = /\.(test|spec)\.[cm]?[jt]sx?$/;
+
+/** Directory names never walked. Both are in vitest's default `exclude` too. */
+const NEVER_WALKED: readonly string[] = ['node_modules', 'dist'];
+
 /** `parseFilter`, vitest 4.1.11: a trailing `:<digits>` is a line number. */
 export function splitLineSuffix(filter: string): CliFilter {
   const colon = filter.lastIndexOf(':');
@@ -173,6 +220,77 @@ export function matchesVitestFilter(relFile: string, filter: string, root: strin
     testFile.includes(filter.toLocaleLowerCase()) ||
     testFile.includes(relativePath.toLocaleLowerCase())
   );
+}
+
+/**
+ * Every test file under `root`, package-root-relative, POSIX-separated, sorted.
+ *
+ * ⭐ THIS IS DELIBERATELY A SUPERSET of what any one glob project will collect,
+ * and the superset direction is the whole safety argument (#17978). A population
+ * that is too BIG can only ever make this preflight say LESS than it could: a
+ * filter is reported lost only when it matches NOTHING in the population, and
+ * matching nothing in a superset implies matching nothing in the real set. ⇒ a
+ * false accusation against a healthy run is structurally impossible, and any
+ * drift between this walk and vitest's collection can only under-report. A
+ * population that were too SMALL would have the opposite, unacceptable failure
+ * mode.
+ *
+ * ⛔ NOT vitest's own glob engine (tinyglobby) with the project's own patterns.
+ * That would be a SECOND inheritance of vitest's internals — the exact thing
+ * this module exists to stop multiplying — and it would buy nothing, because the
+ * superset already cannot accuse.
+ *
+ * Only `node_modules` and `dist` are skipped. Both are in vitest's default
+ * `exclude`, so skipping them cannot drop a file vitest would collect; skipping
+ * FEWER directories than vitest is always safe here, skipping more is not.
+ */
+export function testFilesUnder(root: string): string[] {
+  const found: string[] = [];
+  const walk = (dir: string, prefix: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        if (NEVER_WALKED.includes(entry.name)) continue;
+        walk(join(dir, entry.name), prefix ? `${prefix}/${entry.name}` : entry.name);
+      } else if (entry.isFile() && TEST_FILE.test(entry.name)) {
+        found.push(prefix ? `${prefix}/${entry.name}` : entry.name);
+      }
+    }
+  };
+  walk(root, '');
+  return found.sort();
+}
+
+/**
+ * Populations for the shape SEVEN of the eight packages have: one project whose
+ * `include` is an EXPLICIT LIST `L`, paired with one project whose `include` is
+ * a GLOB that excludes `L`.
+ *
+ * ⚠️ This is the component the `packages/cli` original had no need of and could
+ * not express, which is why porting that file was not an option for any of the
+ * other seven: its `Populations` is a record of CONCRETE paths and a glob
+ * pattern cannot be a member of one. `packages/cli` satisfies the concrete-path
+ * contract only as a by-product of a tier walk it already performed for
+ * unrelated reasons (#13504 / #14554), so it passes its two exact arrays to
+ * `runFilterPreflight` directly and never calls this function.
+ *
+ * The exact project's population is `L` itself — exact, not a superset, because
+ * `L` IS the `include`. The glob project's is `testFilesUnder(root)` minus every
+ * exact list, which is a superset of whatever the glob collects for the reason
+ * that function's docblock gives.
+ */
+export function exactAndGlobPopulations(options: {
+  readonly root: string;
+  /** The exact-`include` projects, by name — usually `{ repo: REPO_TESTS }`. */
+  readonly exact: Populations;
+  /** The name of the glob project, e.g. `'local'`. */
+  readonly globProject: string;
+}): Populations {
+  const { root, exact, globProject } = options;
+  const claimed = new Set(Object.values(exact).flat());
+  return {
+    ...exact,
+    [globProject]: testFilesUnder(root).filter((rel) => !claimed.has(rel)),
+  };
 }
 
 /**
@@ -205,8 +323,8 @@ export function parseInvocation(argv: readonly string[], parse: CliParse): Invoc
  * ⛔ Not `Record<string, unknown>`: an interface has no index signature, so
  * vitest's `CliOptions` is not assignable to one, and the cast that would paper
  * over it is exactly what stops a vitest upgrade from reporting a renamed
- * option here as a type error. `packages/cli/test/…preflight.test.ts` passes the
- * real `parseCLI` in unaltered, so this compatibility is pinned, not assumed.
+ * option here as a type error. `test/filter-preflight.test.ts` passes the real
+ * `parseCLI` in unaltered, so this compatibility is pinned, not assumed.
  */
 export interface CliParseResultOptions {
   readonly project?: string | string[] | undefined;
@@ -238,7 +356,7 @@ export function lostFilters(
   if (opaque || filters.length === 0) return [];
   const names = Object.keys(populations);
   const selected = projects.length ? projects : names;
-  // A `--project` value that is not a plain tier name (a negation, a glob) is
+  // A `--project` value that is not a plain project name (a negation, a glob) is
   // not modelled here. ⛔ Decline rather than half-answer.
   if (selected.some((name) => !names.includes(name))) return [];
 
@@ -259,11 +377,18 @@ export function lostFilters(
  * ⛔ The empty string is the contract, not an implementation detail: it is what
  * keeps a healthy run byte-identical. Anything that would print on a healthy
  * run belongs somewhere else.
+ *
+ * ⚠️ `packageName` is a PARAMETER because the original hardcoded
+ * `@objectstack/cli` in the `run it:` line (#17978 carries that finding): a
+ * shared notice that prints another package's filter name would send the reader
+ * to a command that runs the wrong suite — a wrong answer, which is worse here
+ * than no answer.
  */
 export function renderLostFilterNotice(
   lost: readonly LostFilter[],
   totalFilters: number,
   selectedProjects: readonly string[],
+  packageName: string,
 ): string {
   if (lost.length === 0) return '';
 
@@ -280,12 +405,12 @@ export function renderLostFilterNotice(
     lines.push(`     ${filter.spelled}`);
     lines.push(
       foundIn.length
-        ? `       lives in the ${foundIn.map((n) => `\`${n}\``).join(' / ')} tier; this run selected ${selected}.`
+        ? `       lives in the ${foundIn.map((n) => `\`${n}\``).join(' / ')} project; this run selected ${selected}.`
         : '       matches no test file in this package at all — check the path.',
     );
     if (foundIn.length) {
       lines.push(
-        `       run it:  pnpm --filter @objectstack/cli exec vitest run --project ${foundIn[0]} ${filter.path}`,
+        `       run it:  pnpm --filter ${packageName} exec vitest run --project ${foundIn[0]} ${filter.path}`,
       );
     }
     lines.push('');
@@ -294,8 +419,8 @@ export function renderLostFilterNotice(
   lines.push(
     '     ⛔ Nothing below counts the path(s) above: the file count, the pass/fail',
     '        totals and the exit code are about the OTHER named paths only.',
-    '        To run every tier, which is what CI runs:',
-    '          pnpm --filter @objectstack/cli test',
+    '        To run every project, which is what CI runs:',
+    `          pnpm --filter ${packageName} test`,
     '',
   );
   return lines.join('\n');
@@ -303,13 +428,17 @@ export function renderLostFilterNotice(
 
 /**
  * The once-guard key. ⛔ It lives on a SCOPE OBJECT (`globalThis` in a real
- * run), never in a module-level binding: vitest loads this config once per
- * project, each load gets its own module instance, and a module-level flag
- * therefore guards nothing. Measured before this existed — three projects'
- * worth of loads printed the notice three times at the top and three more at
- * exit, six copies of one diagnostic.
+ * run), never in a module-level binding: vitest loads a config once per project,
+ * each load gets its own module instance, and a module-level flag therefore
+ * guards nothing. Measured before this existed — three projects' worth of loads
+ * printed the notice three times at the top and three more at exit, six copies
+ * of one diagnostic.
+ *
+ * ⚠️ The key is deliberately NOT package-scoped even though the module is now
+ * shared: one `vitest run` process loads the config of exactly one package, so
+ * a per-package key would only add a way for the guard to miss.
  */
-const ANNOUNCED = '__objectstackCliFilterPreflightAnnounced';
+const ANNOUNCED = '__objectstackVitestFilterPreflightAnnounced';
 
 /**
  * Run the preflight for this process and, if anything will be lost, say so
@@ -330,11 +459,13 @@ export function runFilterPreflight(options: {
   argv: readonly string[];
   root: string;
   populations: Populations;
+  /** The name a `pnpm --filter` takes for the package being run. */
+  packageName: string;
   parse: CliParse;
   write?: (text: string) => void;
   scope?: Record<string, unknown>;
 }): string {
-  const { argv, root, populations, parse } = options;
+  const { argv, root, populations, packageName, parse } = options;
   const write = options.write ?? ((text: string) => void process.stderr.write(text));
   const scope = options.scope ?? (globalThis as unknown as Record<string, unknown>);
   const invocation = parseInvocation(argv, parse);
@@ -342,6 +473,7 @@ export function runFilterPreflight(options: {
     lostFilters(invocation, populations, root),
     invocation.filters.length,
     invocation.projects,
+    packageName,
   );
   if (!notice) return '';
   if (scope[ANNOUNCED]) return notice;

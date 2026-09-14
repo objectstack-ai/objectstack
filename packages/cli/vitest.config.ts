@@ -644,7 +644,7 @@
 import { defineConfig } from 'vitest/config';
 import path from 'path';
 import { parseCLI } from 'vitest/node';
-import { runFilterPreflight } from './vitest-filter-preflight.js';
+import { runFilterPreflight } from '../qa/vitest-filter-preflight/src/index.js';
 import { integrationTestFiles, unitTestFiles } from './vitest-tiers.js';
 
 // The two tiers, DERIVED from what the files DO — never written down — over
@@ -656,18 +656,29 @@ import { integrationTestFiles, unitTestFiles } from './vitest-tiers.js';
 export const INTEGRATION_FILES = integrationTestFiles(__dirname);
 export const UNIT_FILES = unitTestFiles(__dirname, INTEGRATION_FILES);
 
-// #17853 — say so when a path named on the command line will run no tests. It
-// is invoked HERE, at config load, and ⛔ deliberately NOT as a `test.reporters`
-// entry: naming that option replaces vitest's own reporter defaulting instead
-// of extending it, which measurably changes a healthy run's output and would
-// drop the `github-actions` reporter in CI. `vitest-filter-preflight.ts` carries
-// both measurements. It reads the argv through vitest's own exported parser and
-// the SAME two derived arrays the projects below take as their `include` — ⛔
-// never a second derivation — and writes nothing whatever unless a named path
-// selects nothing.
+// #17853 / #17978 — say so when a path named on the command line will run no
+// tests. It is invoked HERE, at config load, and ⛔ deliberately NOT as a
+// `test.reporters` entry: naming that option replaces vitest's own reporter
+// defaulting instead of extending it, which measurably changes a healthy run's
+// output and would drop the `github-actions` reporter in CI. The ONE shared
+// transcription of vitest's `TestProject.filterFiles` —
+// `packages/qa/vitest-filter-preflight` — carries both measurements, and it is
+// imported by RELATIVE PATH rather than by its package name for a third measured
+// reason recorded in its header. It reads the argv through vitest's own exported
+// parser and the SAME two derived arrays the projects below take as their
+// `include` — ⛔ never a second derivation — and writes nothing whatever unless a
+// named path selects nothing.
+//
+// ⭐ This package is the ONE of the eight that needs no walked population: both
+// of its projects take an exact-path `include`, as a by-product of the tier walk
+// it already performs for unrelated reasons (#13504 / #14554). So it hands the
+// two arrays over directly and never calls `exactAndGlobPopulations`. That
+// asymmetry is exactly why a port of this package's former local copy could not
+// serve the other seven — #17978 carries the measurement.
 runFilterPreflight({
   argv: process.argv,
   root: __dirname,
+  packageName: '@objectstack/cli',
   populations: { unit: UNIT_FILES, integration: INTEGRATION_FILES },
   parse: parseCLI,
 });

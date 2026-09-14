@@ -3,6 +3,11 @@
 import { configDefaults, defineConfig } from 'vitest/config';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { parseCLI } from 'vitest/node';
+import {
+  exactAndGlobPopulations,
+  runFilterPreflight,
+} from '../qa/vitest-filter-preflight/src/index.js';
 
 // #16466 -- two vitest projects, two turbo tasks. `repo` owns the tests that read
 // outside this package (the list is vitest.repo-tests.json, which
@@ -11,6 +16,33 @@ import path from 'node:path';
 // `test:repo` only, so `test` stays cacheable across changes elsewhere in the
 // repo. `extends: true` keeps the root options (aliases included) on both.
 const REPO_TESTS: string[] = JSON.parse(readFileSync(path.join(__dirname, 'vitest.repo-tests.json'), 'utf8'));
+
+// #17853 / #17978 — say so when a path named on the command line will run no
+// tests. Invoked HERE, at config load, and ⛔ deliberately NOT as a
+// `test.reporters` entry: naming that option replaces vitest's own reporter
+// defaulting instead of extending it, which measurably changes a healthy run's
+// output and would drop the `github-actions` reporter in CI. The ONE shared
+// transcription of vitest's `TestProject.filterFiles` carries both measurements,
+// and it is imported by RELATIVE PATH rather than by its package name for a
+// third measured reason recorded in its header. It reads the argv through
+// vitest's own exported parser and writes nothing whatever unless a named path
+// selects nothing.
+//
+// `local` takes a GLOB `include`, so its population is derived as a deliberate
+// SUPERSET — every test file under this package, minus `REPO_TESTS` — which
+// makes a false accusation structurally impossible and leaves drift able only
+// to under-report. ⛔ Not a second run of vitest's own glob engine.
+runFilterPreflight({
+  argv: process.argv,
+  root: __dirname,
+  packageName: '@objectstack/spec',
+  populations: exactAndGlobPopulations({
+    root: __dirname,
+    exact: { repo: REPO_TESTS },
+    globProject: 'local',
+  }),
+  parse: parseCLI,
+});
 
 export default defineConfig({
   test: {
