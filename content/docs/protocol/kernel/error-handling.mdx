@@ -5,7 +5,9 @@ description: Global error codes, response formats, and debugging strategies for 
 
 import { AlertCircle, Bug, Shield, Info, AlertTriangle, XCircle, Radio, Zap } from 'lucide-react';
 
-The **Error Handling Protocol** defines standardized error codes, response formats, and debugging strategies across all ObjectStack APIs (HTTP, WebSocket).
+The **Error Handling Protocol** defines the standardized error codes, the **two** response
+envelopes that carry them, and debugging strategies across the ObjectStack APIs (HTTP,
+WebSocket).
 
 ## Why Standardized Errors Matter
 
@@ -43,7 +45,7 @@ write an unwrapping helper.
   <Card
     icon={<Bug />}
     title="Faster Debugging"
-    description="Error codes + request IDs = find root cause in seconds. Save hours of log hunting."
+    description="Error codes + the X-Request-Id response header = find root cause in seconds. Save hours of log hunting."
   />
   <Card
     icon={<Info />}
@@ -216,7 +218,9 @@ ObjectStack uses standard HTTP status codes:
 | **500** | Internal Server Error | Server-side error |
 | **503** | Service Unavailable | Server overloaded or maintenance |
 
-**Important:** Even on error, response body always includes JSON error object.
+**Important:** an error response always carries a JSON body naming the condition — but in
+one of **two** envelopes. Read
+[Error Response Envelopes](#error-response-envelopes) before branching on it.
 
 ## Error Codes
 
@@ -914,6 +918,31 @@ work, and it is why a client must read the body's shape rather than the route's 
 
 ## Error Handling Best Practices
 
+### ✅ Normalise the Envelope Once, at the Edge
+
+Write one reader, use it everywhere, and ⛔ never let an envelope check spread across your
+codebase. Everything below assumes this function has already run.
+
+**Good:**
+```javascript
+/** Normalise either ObjectStack error envelope into one shape. */
+function readError(body) {
+  const nested = body !== null && typeof body === 'object' && 'success' in body;
+  const err = nested ? (body.error ?? {}) : body;
+  return {
+    // `code` is absent when a producer declared a status but no code — keep it
+    // undefined rather than inventing one.
+    code: nested ? err.code : body?.code,
+    message: nested ? err.message : (typeof body?.error === 'string' ? body.error : undefined),
+    // Marked by the producer as addressed to the end user; render verbatim.
+    userMessage: nested ? err.userMessage : body?.userMessage,
+    // Per-field detail: `fields` is a top-level sibling on the flat door.
+    fields: nested ? undefined : body?.fields,
+    nested,
+  };
+}
+```
+
 ### ✅ Use Error Codes, Not Messages
 
 **Bad:**
@@ -925,8 +954,10 @@ if (error.message.includes('not found')) {
 
 **Good:**
 ```javascript
-if (error.code === 'RESOURCE_NOT_FOUND') {
-  // Reliable - code never changes
+const { code } = readError(body);
+// Both families' "missing" codes — they differ by door, so handle both.
+if (code === 'RESOURCE_NOT_FOUND' || code === 'RECORD_NOT_FOUND' || code === 'OBJECT_NOT_FOUND') {
+  // Reliable - the code vocabulary is closed and versioned
 }
 ```
 
@@ -934,40 +965,53 @@ if (error.code === 'RESOURCE_NOT_FOUND') {
 
 **Bad:**
 ```javascript
-alert(error.message);  // "VALIDATION_ERROR: Field 'email' constraint 'format' failed"
+alert(body.error.message);  // undefined on the flat envelope, and raw copy on the nested one
 ```
 
 **Good:**
 ```javascript
-const userMessages = {
-  'VALIDATION_ERROR': 'Please check your input and try again',
+const { code, message, userMessage } = readError(body);
+
+const generic = {
+  'VALIDATION_FAILED': 'Please check your input and try again',
+  'VALIDATION_ERROR': 'That request was not valid. Please check it and try again.',
   'UNAUTHENTICATED': 'Please log in to continue',
   'RATE_LIMIT_EXCEEDED': 'Too many requests. Please wait a moment.',
 };
 
-showToast(userMessages[error.code] || 'An error occurred');
+// `userMessage` is text the producer MARKED as addressed to the end user, so it
+// wins over your generic substitution. `message` is the fallback of last resort.
+showToast(userMessage ?? generic[code] ?? message ?? 'An error occurred');
 ```
 
 ### ✅ Handle Field-Specific Validation Errors
 
+Per-field detail comes from the flat `/data` door as `VALIDATION_FAILED`, with `fields` as
+a **top-level sibling**. ⛔ There is no `details.fields` bag on either envelope.
+
 **Good:**
 ```javascript
-async function handleSubmit(data) {
-  try {
-    const response = await api.createAccount(data);
-    return response.data;
-  } catch (error) {
-    if (error.code === 'VALIDATION_ERROR') {
-      // Show errors next to fields
-      error.details.fields.forEach(({ field, message }) => {
-        setFieldError(field, message);
-      });
-    } else {
-      // Show general error
-      showToast(error.message, 'error');
+async function handleSubmit(payload) {
+  const response = await fetch('/api/v1/data/account', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const body = await response.json();
+  if (response.ok) return body;
+
+  const { code, message, fields } = readError(body);
+  if (code === 'VALIDATION_FAILED') {
+    // Annotate the inputs…
+    for (const { field, message: fieldMessage } of fields ?? []) {
+      setFieldError(field, fieldMessage);
     }
-    throw error;
+    // …and show the joined sentence, which is what `error` already carries.
+    showToast(message, 'error');
+  } else {
+    showToast(message ?? 'An error occurred', 'error');
   }
+  throw new APIError(body);
 }
 ```
 
@@ -984,18 +1028,23 @@ async function fetchWithRetry(url, options = {}, maxRetries = 3) {
       const data = await response.json();
       
       if (!response.ok) {
-        // Check if error is retryable
-        if (data.error.code === 'RATE_LIMIT_EXCEEDED') {
-          const retryAfter = data.error.details.retryAfterSeconds || 1;
+        const { code } = readError(data);
+        if (code === 'RATE_LIMIT_EXCEEDED') {
+          // Prefer the HEADER: it is present on every 429, whereas the
+          // `details` bag is a property of this one writer.
+          const retryAfter = Number(response.headers.get('Retry-After'))
+            || data?.error?.details?.retryAfterSeconds
+            || 1;
           await sleep(retryAfter * 1000);
           continue;
-        } else if (data.error.code === 'INTERNAL_ERROR') {
+        } else if (code === 'INTERNAL_ERROR' || code === 'SERVICE_UNAVAILABLE'
+                   || code === 'ERR_DATASOURCE_UNAVAILABLE') {
           // Exponential backoff
           await sleep(Math.pow(2, attempt) * 1000);
           continue;
         } else {
           // Don't retry validation errors, auth errors, etc.
-          throw new APIError(data.error);
+          throw new APIError(data);
         }
       }
       
@@ -1011,38 +1060,48 @@ async function fetchWithRetry(url, options = {}, maxRetries = 3) {
 
 ### ✅ Log Request IDs for Debugging
 
+⛔ The request id is **not** in the response body, in either envelope. Read it from the
+`X-Request-Id` **response header**, and stamp your own timestamp — no body carries one.
+
 **Good:**
 ```javascript
-try {
-  await api.createAccount(data);
-} catch (error) {
+const response = await fetch('/api/v1/data/account', init);
+if (!response.ok) {
+  const body = await response.json();
+  const { code, message } = readError(body);
+  const requestId = response.headers.get('X-Request-Id');
+
   console.error('Account creation failed', {
-    requestId: error.requestId,
-    code: error.code,
-    message: error.message,
-    timestamp: error.timestamp
+    requestId,
+    code,
+    message,
+    at: new Date().toISOString(),   // your clock — the body has no `timestamp`
   });
-  
+
   // Send to error tracking service
-  Sentry.captureException(error, {
-    extra: { requestId: error.requestId }
-  });
+  Sentry.captureException(new APIError(body), { extra: { requestId } });
 }
 ```
 
 ### ✅ Handle Network Errors
+
+⛔ **Do not branch on `data.success`.** It is absent from every flat body, so `!data.success`
+is true for a perfectly successful `/data` response and your client throws on its own
+happy path. Branch on `response.ok` — the HTTP status — which is correct for both
+envelopes.
 
 **Good:**
 ```javascript
 try {
   const response = await fetch('/api/v1/data/task');
   const data = await response.json();
-  
-  if (!data.success) {
-    throw new APIError(data.error);
-  }
-  
-  return data.data;
+
+  // The STATUS decides success, not a body flag.
+  if (!response.ok) throw new APIError(data);
+
+  // Unwrap only what the nested envelope wraps; the flat door returns the
+  // payload directly.
+  return (data !== null && typeof data === 'object' && 'success' in data) ? data.data : data;
 } catch (error) {
   if (error instanceof TypeError && error.message === 'Failed to fetch') {
     // Network error - server unreachable
@@ -1060,24 +1119,39 @@ try {
 
 ## Debugging with Request IDs
 
-Every API response includes a `requestId` for debugging:
+The request id travels as a **response header**, not as a body field. ⛔ Neither envelope
+carries `requestId`, and no writer puts one there — a client reading `body.requestId` or
+`body.error.requestId` gets `undefined` on every route.
+
+**Composition:** the id is attached by the observability instrumentation wrapper. A
+deployment that does not compose it emits no id at all; one that does echoes a **valid
+inbound** `X-Request-Id` and otherwise mints `req_<hex>`. The header name is configurable
+(`observability.requestIdHeader`), defaulting to `X-Request-Id`.
 
 **Request:**
 ```http
 POST /api/v1/data/account
 Content-Type: application/json
-X-Request-ID: my-custom-id-123
+X-Request-Id: my-custom-id-123
 
 { "name": "Acme Corp" }
 ```
 
 **Response:**
-```json
-{
-  "success": true,
-  "data": { ... },
-  "requestId": "my-custom-id-123"
-}
+```http
+HTTP/1.1 201 Created
+X-Request-Id: my-custom-id-123
+Content-Type: application/json
+
+{ "object": "account", "id": "acc_124", "record": { "...": "..." } }
+```
+
+⚠️ An inbound id is **validated** before it is echoed: a value that is empty, over-long or
+outside the accepted character set is discarded and a fresh `req_<hex>` is minted instead.
+Do not assume the id you sent is the id that was logged — read it back off the response.
+
+```javascript
+const requestId = response.headers.get('X-Request-Id');
 ```
 
 **Server logs:**
@@ -1104,7 +1178,7 @@ Track error rates by code:
 // Metrics dashboard
 {
   "error_rates": {
-    "VALIDATION_ERROR": 0.05,  // 5% of requests
+    "VALIDATION_FAILED": 0.05,  // 5% of requests
     "UNAUTHENTICATED": 0.02,      // 2% of requests
     "RATE_LIMIT_EXCEEDED": 0.01,      // 1% of requests
     "INTERNAL_ERROR": 0.0001     // 0.01% of requests (🚨 alert if > 0.01%)
@@ -1122,7 +1196,7 @@ Track error rates by code:
 **Warning alerts:**
 - `RATE_LIMIT_EXCEEDED` spike (may indicate DDoS or integration bug)
 - `UNAUTHENTICATED` spike (credential leakage?)
-- `VALIDATION_ERROR` spike on new form (bad client-side validation)
+- `VALIDATION_FAILED` spike on a new form (bad client-side validation)
 
 ### Error Budgets
 
@@ -1142,17 +1216,22 @@ error_budget:
 
 ## Security Considerations
 
+These are rules for **writing a producer**. The examples are in the nested envelope; the
+same rules hold verbatim on the flat one, where the structured context would ride as
+top-level siblings instead.
+
 ### ❌ Never Leak Sensitive Info
 
 **Bad:**
 ```json
 {
+  "success": false,
   "error": {
     "code": "UNAUTHENTICATED",
     "message": "Password incorrect for user john@acme.com",
     "details": {
-      "attempted_password": "Password123!",  // 🚨 NEVER DO THIS
-      "actual_password_hash": "bcrypt$..."    // 🚨 NEVER DO THIS
+      "attempted_password": "Password123!",
+      "actual_password_hash": "bcrypt$..."
     }
   }
 }
@@ -1161,13 +1240,24 @@ error_budget:
 **Good:**
 ```json
 {
+  "success": false,
   "error": {
     "code": "UNAUTHENTICATED",
-    "message": "Invalid credentials",
-    "details": null
+    "message": "Invalid credentials"
   }
 }
 ```
+
+⚠️ `details` is **omitted**, not set to `null`. Both writers spread an absent optional
+away, so a key with nothing to say does not reach the wire at all.
+
+<Callout type="info">
+**5xx prose is withheld structurally, not by a keyword filter.** On the flat door a
+producer-declared 500 has its message replaced with a fixed `Internal server error`
+sentence before the body is written, so there is no phrasing — deliberate or accidental —
+that carries driver text, SQL or a stack trace to a client. A 4xx message is addressed *to*
+the caller and is kept, truncated rather than replaced.
+</Callout>
 
 ### ❌ Don't Confirm Resource Existence
 
@@ -1175,24 +1265,26 @@ error_budget:
 ```json
 // Attacker probes: DELETE /api/v1/data/account/acc_123
 {
-  "error": {
-    "code": "PERMISSION_DENIED",
-    "message": "You don't have permission to delete this account"
-  }
+  "error": "You don't have permission to delete this account",
+  "code": "FORBIDDEN"
 }
 // Attacker learns: Account acc_123 exists! 🚨
 ```
 
 **Good:**
 ```json
-// Return RESOURCE_NOT_FOUND for both "doesn't exist" and "exists but no permission"
+// Answer the same "not found" for "doesn't exist" and "exists but not visible"
 {
-  "error": {
-    "code": "RESOURCE_NOT_FOUND",
-    "message": "Account not found"
-  }
+  "error": "Record acc_123 not found in account",
+  "code": "RECORD_NOT_FOUND",
+  "object": "account"
 }
 ```
+
+This is the same reasoning behind the platform's own withholding: `DELETE_RESTRICTED`
+names the blocking object unconditionally but **omits** `dependentCount` when the caller's
+own permissions would not have let them count those rows, and `PERMISSION_DENIED` never
+enumerates the grants you lack.
 
 ### ✅ Rate Limit Error Responses
 
@@ -1202,16 +1294,20 @@ Even error responses can be abused:
 // Attacker tries to enumerate user emails
 for (let i = 0; i < 1000000; i++) {
   await register({ email: `user${i}@example.com` });
-  // Response: "UNIQUE_VIOLATION" or "VALIDATION_ERROR"
+  // Response: "UNIQUE_VIOLATION" or "VALIDATION_FAILED"
 }
 ```
 
-**Solution:** Rate limit failed registration attempts:
+**Solution:** rate limit failed registration attempts. The inbound limiter answers ahead of
+every route, in the nested envelope:
 ```json
 {
+  "success": false,
   "error": {
     "code": "RATE_LIMIT_EXCEEDED",
-    "message": "Too many failed registration attempts"
+    "message": "Rate limit exceeded. Retry after the interval in the Retry-After header.",
+    "httpStatus": 429,
+    "details": { "retryAfterSeconds": 45, "resetAt": "2026-08-03T12:00:45.000Z" }
   }
 }
 ```
