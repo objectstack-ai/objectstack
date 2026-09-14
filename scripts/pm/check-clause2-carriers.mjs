@@ -4700,6 +4700,9 @@ export function selfTest() {
   t('⭐ the constant\'s VALUE — a literal model identifier — is REFUSED, though it is what this row once required', typeof identityRow === 'string');
   t('…and the refusal ⛔ never quotes the token back, so a refusal is not a second violation', !says(identityRow, CONTRACT_REVIEW_TIER) && says(identityRow, 'NOT quoted back here'));
   t('…and it names `AGENTS.md`\'s rule, which is WHY the accepted token changed', says(identityRow, 'AGENTS.md') && says(identityRow, 'a comment, a changeset, a doc or a code comment'));
+  // ⛔ The specimen below is a model NOBODY has shipped, so it identifies no
+  // model and spelling it lands no identifier -- the same device
+  // `check-commit-card-trailers.mjs` uses to prove its own rule binds a SHAPE.
   const shapeRow = c7ServedTierBelow(bare({ prComments: [SERVED('claude-example-9-9')] }));
   t('⛔ a model id nobody has shipped binds too — the refusal reads a SHAPE, never a list', typeof shapeRow === 'string' && !says(shapeRow, 'claude-example-9-9'));
   t('⇒ the two refusals differ exactly on quoting: a safe token is echoed, an identifier is never', says(belowRow, BELOW) && !says(identityRow, CONTRACT_REVIEW_TIER));
