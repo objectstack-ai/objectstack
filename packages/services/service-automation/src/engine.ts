@@ -2222,6 +2222,34 @@ export class AutomationEngine implements IAutomationService {
      * which trigger to `stop()` when a flow is unregistered/disabled.
      */
     private boundFlowTriggers = new Map<string, string>();
+    /**
+     * [#17396] Flows {@link activateFlowTrigger} refused to arm because
+     * package-authored scheduled work is switched off on this deployment.
+     *
+     * ## Why a record and not a re-read
+     *
+     * `getTriggerBindingAudit()` runs long after the bind — at
+     * `kernel:bootstrapped`, in the CLI startup summary, on every Studio poll —
+     * and the switch is an ENVIRONMENT value that can move in between. Asking
+     * the environment again at read time was the first spelling and it is
+     * measurably wrong: a flow the engine never even offered to its trigger was
+     * reported as `binding failed — see earlier warnings`, which is the one
+     * thing ruled item 6 forbids this state from reading as, and it pointed at
+     * warnings that do not exist. The record answers the question the audit
+     * actually asks — *why is this flow not armed* — with what happened.
+     *
+     * ## Why this is not a recorded startup verdict (AGENTS.md)
+     *
+     * The repo's rule forbids recording a conclusion drawn from a registry that
+     * is still filling, because a provider registering a moment later cannot
+     * undo the record. None of that applies: the input is an environment
+     * variable, not a registry, and the record is not terminal —
+     * {@link activateFlowTrigger} DELETES the entry the moment a flow gets past
+     * the gate, and {@link unregisterFlow} drops it with the flow. A later
+     * registration under a switched-on deployment clears it by the ordinary
+     * path.
+     */
+    private readonly policyDisabledFlows = new Set<string>();
     /** Connectors registered by integration plugins, keyed by connector name (ADR-0018 §Addendum). */
     private connectors = new Map<string, RegisteredConnector>();
     /** Connector provider factories keyed by provider name (ADR-0097 §2 — `openapi`/`mcp`/`rest`/…). */
@@ -3358,8 +3386,6 @@ export class AutomationEngine implements IAutomationService {
         if (this.boundFlowTriggers.has(flowName)) return;
         const resolved = this.resolveTriggerBinding(flowName);
         if (!resolved) return;
-        const trigger = this.triggers.get(resolved.triggerType);
-        if (!trigger) return;
         // [#17396] The deployment gate, read HERE rather than only inside the
         // trigger. The trigger has its own copy of this gate and throws, which
         // is what protects a host that binds without this engine — but a
@@ -3367,26 +3393,46 @@ export class AutomationEngine implements IAutomationService {
         // method's catch, and that catch says "Failed to bind", which is the
         // one thing ruled item 6 forbids this state from reading as. Asking the
         // policy before `start()` keeps the two apart at the source: nothing is
-        // called, nothing throws, nothing is logged as a failure, and
-        // `getTriggerBindingAudit()` reports the policy reason from the same
-        // resolver.
+        // called, nothing throws, nothing is logged as a failure.
         //
-        // ⛔ Not cached on the instance. The resolver reads `process.env` live,
-        // and a host that rebinds after changing the environment — the CLI's
+        // ⚠️ AHEAD of the trigger lookup, deliberately. With the switch off,
+        // registering the missing trigger would change nothing, so reporting
+        // "no 'schedule' trigger is registered — add requires: ['triggers']"
+        // hands the operator a remedy that cannot work. The switch outranks it
+        // because it is the fact that decides the outcome.
+        //
+        // ⛔ The POLICY is not cached — the resolver reads `process.env` live,
+        // so a host that rebinds after changing the environment (the CLI's
         // `--fresh` harness, a test flipping the switch between kernels in one
-        // process — must see the value current at the bind.
+        // process) sees the value current at the bind. What IS recorded is the
+        // REFUSAL, on {@link policyDisabledFlows}, and that is the difference
+        // between the two: see its own docblock for why the audit must read
+        // what happened rather than re-derive it from an environment that may
+        // have moved since.
         if (isTimeTriggeredKind(resolved.triggerType) && !resolveScheduledWorkPolicy().enabled) {
-            // Said once per flow, at `info`, for the reason the trigger's own
-            // refusal records: this is the DEFAULT state of every deployment
-            // and the deployment declared it, so nothing is wrong and nothing
-            // looks normal-but-broken. The structured channel is the audit
-            // below, which the `kernel:bootstrapped` hook and the CLI startup
-            // summary both read.
-            this.logger.info(
-                `Flow '${flowName}' is not armed on trigger '${resolved.triggerType}' — ${SCHEDULED_WORK_DISABLED_REASON}`,
-            );
+            if (!this.policyDisabledFlows.has(flowName)) {
+                this.policyDisabledFlows.add(flowName);
+                // Said once per flow while it stays refused, at `info`, for the
+                // reason the trigger's own refusal records: this is the DEFAULT
+                // state of every deployment and the deployment declared it, so
+                // nothing is wrong and nothing looks normal-but-broken. The
+                // structured channel is the audit below, which the
+                // `kernel:bootstrapped` hook and the CLI startup summary read.
+                this.logger.info(
+                    `Flow '${flowName}' is not armed on trigger '${resolved.triggerType}' — ${SCHEDULED_WORK_DISABLED_REASON}`,
+                );
+            }
             return;
         }
+        // Past the gate the refusal no longer describes this flow: either it
+        // binds below, or it fails/waits for its trigger with a reason of its
+        // own. Cleared BEFORE the trigger lookup so a flow whose trigger has
+        // not arrived yet is reported as waiting for a trigger, not as
+        // policy-disabled — with the switch on, the missing trigger really is
+        // the reason.
+        this.policyDisabledFlows.delete(flowName);
+        const trigger = this.triggers.get(resolved.triggerType);
+        if (!trigger) return;
         try {
             // A trigger-fired run's result must not vanish (2026-07-17 eval:
             // a failing record-change flow produced zero output — the failure
@@ -4019,6 +4065,10 @@ export class AutomationEngine implements IAutomationService {
         // of names; a genuinely deleted flow leaves one harmless string.
         this.flowStatusDisabled.delete(name);
         this.flowVersionHistory.delete(name);
+        // [#17396] Dropped with the flow, unlike `flowLedgerDisabled` above:
+        // that one mirrors a DURABLE row and must survive, while this records
+        // an in-process bind attempt that no longer has a subject.
+        this.policyDisabledFlows.delete(name);
         this.logger.info(`Flow unregistered: ${name}`);
     }
 
@@ -4088,7 +4138,16 @@ export class AutomationEngine implements IAutomationService {
             // reported as "binding failed" — a binding failure is a defect with
             // an engineering remedy, while this is a deployment policy with an
             // operator remedy, and the two send the reader to different places.
-            const reason = isTimeTriggeredKind(resolved.triggerType) && !resolveScheduledWorkPolicy().enabled
+            //
+            // ⛔ Read from the RECORD, never re-derived from the environment
+            // here. Re-deriving was the first spelling and it was measured
+            // wrong: the audit is read long after the bind, so an environment
+            // that moved in between — an operator setting the switch, a test
+            // restoring it — makes this method report *binding failed* for a
+            // flow whose trigger was never called. The record says what
+            // HAPPENED; `activateFlowTrigger` clears it the moment the flow
+            // gets past the gate.
+            const reason = this.policyDisabledFlows.has(name)
                 ? SCHEDULED_WORK_DISABLED_REASON
                 : this.triggers.has(resolved.triggerType)
                     ? `trigger '${resolved.triggerType}' is registered but binding failed — see earlier warnings`

@@ -3426,6 +3426,62 @@ describe('AutomationEngine - the deployment switch (#17396)', () => {
         expect(audit[0].reason).not.toBe(SCHEDULED_WORK_DISABLED_REASON);
     });
 
+    it('the audit reports what HAPPENED, not what the environment says when it is read', () => {
+        // ⭐ REGRESSION PIN. The first spelling re-derived the reason inside
+        // `getTriggerBindingAudit()` from a live `resolveScheduledWorkPolicy()`
+        // read. The audit is read long after the bind — `kernel:bootstrapped`,
+        // the CLI startup summary, every Studio poll — so an environment that
+        // moved in between made it report `binding failed — see earlier
+        // warnings` for a flow whose trigger was NEVER CALLED, pointing the
+        // reader at warnings that do not exist. That is precisely the reading
+        // ruled item 6 forbids, reached by a route the ruling's own words do
+        // not describe. Caught by the dogfood sweep suite, pinned here.
+        delete process.env[SCHEDULED_WORK_ENV];
+        const engine = new AutomationEngine(createTestLogger());
+        const rec = recordingTrigger('schedule');
+        engine.registerTrigger(rec.trigger);
+        engine.registerFlow('digest', scheduleFlow('digest'));
+        expect(rec.started, 'control: the flow really was refused by policy').toHaveLength(0);
+
+        // The environment moves, and nothing re-registers the flow.
+        process.env[SCHEDULED_WORK_ENV] = 'true';
+
+        const audit = engine.getTriggerBindingAudit();
+        expect(audit.map((a) => a.flowName)).toEqual(['digest']);
+        expect(
+            audit[0].reason,
+            'the flow is still unarmed because the policy refused it — the switch moving later does not turn that into a binding failure',
+        ).toBe(SCHEDULED_WORK_DISABLED_REASON);
+        expect(audit[0].reason).not.toMatch(/binding failed/);
+    });
+
+    it('a flow that gets past the gate drops the record, so the reason is its own', () => {
+        // The other direction, and what keeps the record from becoming a
+        // permanent label: once the switch is on and the flow is registered
+        // again, whatever happens next owns the reason.
+        delete process.env[SCHEDULED_WORK_ENV];
+        const engine = new AutomationEngine(createTestLogger());
+        engine.registerFlow('digest', scheduleFlow('digest'));
+        expect(engine.getTriggerBindingAudit()[0]?.reason).toBe(SCHEDULED_WORK_DISABLED_REASON);
+
+        process.env[SCHEDULED_WORK_ENV] = 'true';
+        // Registering the trigger re-attempts activation for every flow.
+        engine.registerTrigger({
+            type: 'schedule',
+            start() {
+                throw new Error('the job service refused');
+            },
+            stop() {},
+        });
+
+        const audit = engine.getTriggerBindingAudit();
+        expect(audit).toHaveLength(1);
+        expect(
+            audit[0].reason,
+            'a real bind failure after the gate opened must read as one — the policy record must not outlive the policy',
+        ).toMatch(/binding failed/);
+    });
+
     it('is read at BIND, not cached, so flipping the switch changes the next registration', () => {
         // The CLI's `--fresh` harness and any test that flips the switch
         // between kernels in one process depend on this.
