@@ -83,6 +83,7 @@
     "check:pm-closed-card-sweep": "node scripts/pm/sweep-closed-cards.mjs --self-test",
     "check:pm-stale-finding": "node scripts/pm/sweep-stale-finding.mjs --self-test",
     "check:pm-post-stamped": "node scripts/pm/post-stamped.mjs --self-test",
+    "check:pm-label-write": "node scripts/pm/label-write.mjs --self-test",
     "check:pm-board-snapshot": "node scripts/pm/board-snapshot.mjs --self-test",
     "check:pm-changeset-deadline-census": "node scripts/pm/changeset-deadline-census.mjs --self-test",
     "check:pm-governed-merges": "node scripts/pm/check-governed-merges.mjs --self-test",

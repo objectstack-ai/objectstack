@@ -1211,6 +1211,32 @@ jobs:
       - name: Stamped-post helper self-test
         run: pnpm check:pm-post-stamped
 
+      # Label-write helper self-test (#18085) — same family and the same split
+      # as the step above. The LIVE path mutates a card's labels and assignees,
+      # so it is emphatically not a thing CI runs against the board; the offline
+      # half is all CI can hold.
+      #
+      # What the self-test instruments is the set of rules a clean tree cannot
+      # exercise, every one of which is silent when it breaks: the union /
+      # difference arithmetic that decides what gets written at all; the ONE-OF
+      # state refusal (H29's finding, asked of the TARGET, at the one moment the
+      # pair is still one keystroke from correct); that a 404 on a directed
+      # DELETE is the label already being gone rather than a refusal; that a 403
+      # with the quota exhausted must NOT reach the whole-set fallback, because
+      # rate-limit refusal binds the shared identity and switching channels to
+      # keep writing is the same act as retrying; and the assignee echo on that
+      # fallback, without which a labels-only whole-set write silently
+      # un-assigns the card. Weakening any of them leaves every ordinary
+      # invocation just as green — the tool would simply write the wrong thing
+      # and read it back happily — which is the shape `check:self-test-wired`
+      # requires this step for.
+      #
+      # The fake board it drives models `PATCH /issues/{n}` DESTRUCTIVELY, on
+      # purpose: a fake that merged instead would pass every assertion here
+      # while the echo went untested.
+      - name: Label-write helper self-test
+        run: pnpm check:pm-label-write
+
       # Board-snapshot archiver self-test (#17390) — same family and the same
       # split as every step around it. The LIVE run reads the whole board over
       # REST and commits the result to an orphan branch, so it is not a thing
