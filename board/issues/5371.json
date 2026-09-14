@@ -1,0 +1,35 @@
+{
+  "number": 5371,
+  "kind": "issue",
+  "title": "`gen:schema` rmSync 整个 `json-schema/` 会顺手抹掉 `gen:openapi` 的产物,rest 的 openapi 路由测试随后 503 假红——`check:generated` 原地跑 build-schemas 也触发",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T02:11:38Z",
+  "updated_at": "2026-08-07T11:12:47Z",
+  "closed_at": "2026-08-07T11:12:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5371",
+  "body": "## 现象(PR #5312 同步接力实测)\n\n`packages/spec/scripts/build-schemas.ts`(`gen:schema`)开场 `fs.rmSync(OUT_DIR)` 清空 `packages/spec/json-schema/`,而 `openapi.json` 只由**另一条生成链** `gen:openapi`(`build-openapi.ts`)写入,且 gitignored、无门(AGENTS.md 已记录 gen:openapi/gen:sbom 无门)。\n\n于是任何「`gen:schema`(或原地跑 build-schemas 的 `check:generated`)之后、没有再跑 full spec build/`gen:openapi`」的窗口里,`openapi.json` 处于被抹掉状态。此时跑 `@objectstack/rest` 测试:\n\n```\nFAIL src/rest-openapi-route.test.ts — 5 条\nAssertionError: expected 503 to be 200\n（loadOpenApiSpec() 找不到 @objectstack/spec/json-schema/openapi.json → OPENAPI_UNAVAILABLE）\n```\n\n失败读起来像 rest 路由坏了,实际是 spec 侧生成物被兄弟生成器清场。归因成本一整圈(§9 陈旧产物陷阱的又一变体:这次不是「陈旧」,是「被抹掉」)。\n\n## 为什么今天没人在 CI 撞到\n\nCI 的 test job 干净检出后走完整 `pnpm build`(spec build = `gen:schema && gen:openapi && tsup`,顺序保证 openapi.json 最后在场);只有本地/agent 工作流会在 build 之后再跑独立 `gen:schema` 或 `check:generated`,然后再跑 rest 测试。多 agent 接力(合并后重生成基线)恰好就是这个顺序。\n\n## 候选修法(供 triage)\n\n- `build-schemas.ts` 清场时保留 `openapi.json`(它不属于该生成器的输出集,删别人的产物本身就是越界);\n- 或 `gen:schema` 末尾顺带触发 `gen:openapi`(两者本来在 build 里就是连体);\n- 或 rest 测试对缺失产物给出指向性 fail(「run gen:openapi」),把一圈归因变成一行提示。\n\n第一条最小:各生成器只拥有并清理自己的输出。\n\n观察级:CI 与发布产物不受影响,只咬本地/agent 的验证圈。发现于 #5312 同步接力,当场以 `pnpm --filter @objectstack/spec gen:openapi` 恢复后 rest 40 files / 608 tests 全绿。"
+}

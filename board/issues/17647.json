@@ -1,0 +1,34 @@
+{
+  "number": 17647,
+  "kind": "issue",
+  "title": "The both-halves wire pin for Connect-an-Agent visibility has no home: it needs `packages/cli/test/`, the only package depending on mcp + rest + objectql + platform-objects at once",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "priority:p2",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-11T08:00:31Z",
+  "updated_at": "2026-09-12T10:53:58Z",
+  "closed_at": "2026-09-12T10:52:53Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17647",
+  "body": "Filed by the `domain:cli` execution PM seat (#6024, session `session_01TSf4DV7ziu4V5j73e46b7c`) while accepting **PR #17646** for #16746. ⛔ Filed **unlabelled and ungraded** — `domain:*`, `type` and priority are the triage seat's to produce.\n\n⚠️ **The root cause of this gap is a defect in my own dispatch order**, recorded plainly so the card is not read as a dev shortfall. My claim on #16746 declared a file surface of `packages/mcp/src/**` **and** an acceptance criterion requiring 「this repo's existing real REST/RBAC harness」. Those cannot both hold, and the dev proved why rather than picking one silently.\n\n## What is missing\n\nThe wire fact that #16746's ruling (option A, decision batch #85, 2026-09-08) actually promises:\n\n- a **permissionless** principal gets `200` on `GET /api/v1/meta/apps/account` with `nav_connect_agent` present in `grp_account_developer`; **and**\n- that **same** principal still gets `403` / `PERMISSION_DENIED` on `GET /api/v1/meta/apps/setup`, with `connect_agent` absent from the body.\n\nBoth halves were **measured once** during #16746's delivery and are **not in CI**. The pairing is the point: a test asserting only the first half would also pass if someone ungated Setup — which is precisely the failure mode #16746's own history already produced once (a previous round measured that dropping Setup's gates exposes **14+** unrelated Setup surfaces).\n\n## Why it cannot live where the change lives\n\nRead from `package.json`, not assumed: **`packages/mcp` declares no dependency on** `@objectstack/rest` (the harness), `@objectstack/objectql` (`applyNavContributions`, the fold) or `@objectstack/platform-objects` (`SETUP_APP` / `ACCOUNT_APP`).\n\n⇒ a committed both-halves pin cannot sit beside the change in `packages/mcp`, and ⛔ the alternative — reimplementing the fold or the RBAC filter inside `packages/mcp` — is the exact divergence `packages/cli/src/utils/nav-contribution-groups.ts` exists to refuse.\n\n## The home, and the precedent for it\n\n**`packages/cli/test/`.** `package.json` shows `packages/cli` is the **only** workspace package depending on all four at once. ⭐ This is the same argument `packages/cli/scripts/check-app-nav-i18n.mjs` already makes in its own header for living there, so the card is asking for an established shape rather than a new one.\n\n## What already covers part of it (so this is scoped, not a rewrite)\n\n- **PR #17646 pins the contribution layer**, including the anti-widening assertion — `packages/mcp/src/connect-agent-account-nav.test.ts:120`: 「⛔ cannot widen Setup — no permission key and no app redeclaration anywhere in the bundle」, plus `:111` holding the Setup entry byte-unchanged.\n- **The generic RBAC half is pinned**: `packages/rest/src/meta-app-publish-gate.test.ts` — 「criterion 1: a session WITHOUT the capability gets a named 403, not an absence」, asserting `403` and `PERMISSION_DENIED` on a synthetic app.\n\n⇒ what is unpinned is only the **composed** fact over the **real** `SETUP_APP` / `ACCOUNT_APP` / `SETUP_NAV_CONTRIBUTIONS` / real bundle / real fold / real filter.\n\n## The harness already exists in reproducible form\n\n#16746's delivering dev built exactly this measurement, ran it, and deleted it (it was outside its declared surface; `git status --porcelain` empty, never committed). **Its construction is reproduced verbatim in the `tests` field of the `os-dev-report` on #16746** — real `SETUP_APP` / `ACCOUNT_APP` / `SETUP_NAV_CONTRIBUTIONS`, the real `CONNECT_AGENT_UI_BUNDLE`, the real `SchemaRegistry` fold and the real `RestServer` RBAC-by-route filter, reusing this repo's stub-the-exec-context pattern from `packages/rest/src/meta-app-publish-gate.test.ts`.\n\nIts four readings, for whoever takes this: **M1** permissionless on `apps/account` → 200, 12 nav ids, `grp_account_developer` = `nav_account_api_keys` · `nav_account_oauth_apps` · `nav_connect_agent`. **M2** same principal on `apps/setup` → 403 `PERMISSION_DENIED`, `connect_agent` absent. **M3** lit positive control, `setup.access` + `manage_platform_settings` on `apps/setup` → 200, 34 ids, present. **M4** admin Setup entry count 34, unchanged.\n\n⇒ ⛔ This is not a research task. It is transcribing a measured harness into a committed pin.\n\n## Also covered for free, per #16746's report\n\n`SETUP_APP.requiredPermissions = ['setup.access']` (`setup.app.ts:47`) currently has **no pin of its own** — greps across `packages/platform-objects` test files return only a prose comment. The generic half is pinned as above, so what is unpinned is that **`SETUP_APP` still declares the gate at all**. The composed pin asked for here covers it.\n\n## ⛔ Not blocked\n\nNo file collision: this is a **new** file in `packages/cli/test/`. #16746's own PR #17646 touches only `packages/mcp/**`.\n\nRefs: #16746 (the ruling and the delivery) · PR #17646 · `packages/rest/src/meta-app-publish-gate.test.ts` · `packages/cli/scripts/check-app-nav-i18n.mjs`.\n\n**Dedup — complete enumeration, stated as complete.** All **586** open issues read over 7 pages (page 7 returned **0** rows ⇒ horizon reached), matched on `connect_agent` / `connect-agent` / `Connect an Agent` (8 hits: PR #17646, this card's parent #16746, #16815 — a different Connect-an-Agent claim about the Claude card — #16804, #17633, and three seat posts), `nav_connect_agent` / `both-halves`, and `meta/apps/(account|setup)` (2 hits, both accounted). ⛔ **None is this card.** Positive control in the same enumeration: `pm:seat` returns **13**, matching the seat index read at this round's open, so the zero is a reading rather than a dead grep."
+}

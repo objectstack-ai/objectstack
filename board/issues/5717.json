@@ -1,0 +1,36 @@
+{
+  "number": 5717,
+  "kind": "issue",
+  "title": "[finding] `queryDataset` 里还有第二个 message 嗅探器 `isMissingSourceError`,命中即静默返回空结果 —— `dataset-compiler` 的一条拒收措辞已经命中它,只因抛点在 try 之外才没出事",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T01:54:15Z",
+  "updated_at": "2026-08-06T23:55:46Z",
+  "closed_at": "2026-08-06T23:55:46Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5717",
+  "body": "## 观察\n\n#5352 / #5367 处理的是 `rest-server.ts` 里那串「按 message 措辞决定 HTTP 码」的正则。`packages/services/service-analytics/src/analytics-service.ts` 里还有**第二个同类嗅探器**,而且它的后果比选错状态码更重:命中即把错误换成一个空结果。\n\n```\n// analytics-service.ts:83\nfunction isMissingSourceError(err: unknown): boolean {\n  const msg = String((err as { message?: unknown })?.message ?? err ?? '').toLowerCase();\n  return (\n    msg.includes('no such table') ||\n    (msg.includes('relation') && msg.includes('does not exist')) ||\n    msg.includes(\"doesn't exist\") ||\n    msg.includes('not registered') ||\n    msg.includes('unknown object') ||\n    msg.includes('is not a registered object')\n  );\n}\n```\n\n命中后 `queryDataset` 的 catch(`analytics-service.ts:700`)会 `logger.warn` 一句然后\n`return { rows: [], fields: [], totals: [] }` —— 也就是 widget 画一个自信的空图,而不是报错。\n这个降级本身是刻意的(对象没在本 kernel 挂载时 widget 应当显示「无数据」而非 500),#5033 已经把跨库那一支拆出来单独响亮报错。问题在于**判据是措辞**。\n\n## 已经存在的一次命中(今天无害)\n\n`dataset-compiler.ts:260` 的拒收原文:\n\n> `[dataset-compiler] dataset \"X\" includes relationship \"R\" which does not exist on object \"O\".`\n\n它同时含 `relation`(在 `relationship` 里)和 `does not exist` → `isMissingSourceError` 返回 **true**。\n\n今天不出事的唯一原因是**抛点在 try 之外**:`queryDataset` 先 `const compiled = this.registerDataset(dataset)`(第 626 行,`compileDataset` 在这里抛),而那个 try/catch 在第 697 行才开始。也就是说这是一条已经装好但没接电的雷:\n\n- 把编译移进 try(或未来任何一处 executor / strategy 的拒收措辞里出现「relation…does not exist」),该拒收就会被吞成空结果 —— 无异常、无 4xx、无 5xx,只有一条 warn 日志和一张空图。这正是 #5033 立单时描述的「populated table 上 Total Spend: 0」那一类症状。\n- 反方向也成立:驱动侧一条真正的「表不存在」如果换了措辞(不同驱动/不同版本),降级失效,widget 变 500。\n\n属于 observation 类:今天没有用户会撞到,`grep` 也不会告诉你两条措辞正在互相纠缠。\n\n## 可能的方向(不预判,留给 triage)\n\n- **A. 判据换成结构而非措辞**:让「源缺失」由驱动侧带 code(例如 `ERR_DATASOURCE_UNAVAILABLE` 已在 `ERROR_CODE_LEDGER` 里)或由 `isRegisteredObject` 探针回答,`isMissingSourceError` 退化为兼容层并排到 code 判据之后。\n- **B. 最小防守**:降级路径只对「不带 ADR-0112 信封的错误」生效 —— 一个已经自称 4xx 的拒收(#5367 之后 `dataset-compiler` 的两处就是)永远不该被降级成空结果。这一条无论 A 做不做都成立,且能直接把上面那条雷拆掉。\n- **C. 收紧 `relation`/`does not exist` 这一支**,让它只匹配 Postgres 的实际措辞(`relation \"x\" does not exist`,带引号的关系名),而不是任意同时含两个词的句子。\n\n## 参考\n\n- `packages/services/service-analytics/src/analytics-service.ts:83`(`isMissingSourceError`)、`:112`(`missingSourceRelation`)、`:626`(编译点)、`:697`-`:730`(降级 catch)\n- `packages/services/service-analytics/src/dataset-compiler.ts:260`(命中的那条措辞)\n- #5033(降级过宽导致 cross-datasource 被藏起来,已收窄)、#5352 / #5367(同一个「按措辞分类」反模式在 REST 面的两轮清理)"
+}

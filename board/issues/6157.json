@@ -1,0 +1,33 @@
+{
+  "number": 6157,
+  "kind": "pull_request",
+  "title": "feat(showcase): 动作显隐矩阵——四个动作面 × 三种 visible 写法 × requiredPermissions × 每种字段类型的谓词",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "size/l",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T03:53:52Z",
+  "updated_at": "2026-08-07T06:44:09Z",
+  "closed_at": "2026-08-07T06:44:08Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T06:44:07Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6157",
+  "body": "给 `showcase_field_zoo` 加一整套**可证伪**的动作门控夹具，覆盖决定「按钮出不出现」的两件事：`visible`（记录上的 CEL 谓词）与 `requiredPermissions`（ADR-0066 D4 能力门）。\n\n配套的 objectui 修复：objectstack-ai/objectui#3548（closes objectui#3492 / #3501）。本 PR 是那两个修复的**实测夹具**，也是它们的验收现场。\n\n## 为什么需要它\n\n一个门由**四个各自过滤自己列表**的面求值：列表工具栏 / 行内 kebab / 记录页头 / 批量选择栏。它们已经在两个方向上跑偏过：批量栏整个忽略 `requiredPermissions`（行 kebab 藏、勾选后又冒出来，objectui#3492）；关系字段在一个面上绑成展开记录、另一个面上绑成外键，同一条谓词一真一假（objectui#3501）。**任何只测单个面的用例都看不见这类 bug。**\n\n两条种子记录是可证伪性的来源：**Specimen — Full**（字段全填）必须出现，**Specimen — Minimal**（多数为 null）必须消失 —— 写错的表现是按钮出现在错误的地方，而不是一个悄悄变绿的测试。\n\n## 内容\n\n**`src/ui/actions/predicate-matrix.action.ts`**\n\n- **四面一致性** —— `showcase_zoo_relation_gate` 是最利的一条：`record.f_lookup == record.f_lookups[0]`，两个操作数都是 lookup，谁被展开谁就变成对象、比较就静默为假。`gated_columns` 视图把 `f_lookup` 设为列（于是被 `populate=`）、默认列表两个都不展开 —— 同样的记录、同样的谓词，两个视图必须给出同一结论。两个字段都不是默认列表的列，同时也把 `$select` 投影压上测试台。\n- **三种 `visible` 写法** —— 裸 CEL 字符串 / `` P`…` `` 标签模板 / `{ dialect, source }` 信封，同一条谓词并排钉住；三者若在同一条记录上分歧，就是某个渲染器把某一种当特例了。**布尔不在此列**：`ExpressionInput` 不接受它，`objectstack build` 发不出这种形状，由 objectui 自己的单测钉（不在这里假装覆盖）。\n- **`requiredPermissions`** —— 持有 / 不持有 / 两个取 AND / 空声明四种，四个面同一结论。\n- **字段类型谓词园** —— 每种字段类型一条 `visible`：lookup（单/多/空）、master_detail、tree、user、文本族、数值族、时间族、布尔/选项族、json / location / address / composite / repeater / vector，以及 AND / OR / NOT / 三元。**全部对着真实 runtime 的 CEL 引擎实测过**，不是照着规范猜的。\n\n**`src/security/capabilities.ts`** —— 新增 `showcase.restricted_ops`：**定义了但不授予任何权限集**。这是 ADR-0066 三方分离里通常被省掉的、可证伪的那一半 —— 没有一个「谁都不持有」的能力，就没有东西能在某个面停止应用门控时报警，而那正是批量栏当初整个忽略 `requiredPermissions` 却无人察觉的原因。\n\n**`src/ui/views/field-zoo.view.ts`** —— 默认列表（列窄，被门控的字段都不是列）、`gated_columns`（把关系字段提为列，于是被展开）、`inline_bulk_defs`（`bulkActionDefs` + `execution: 'aggregate'`，弹窗报告合格/跳过拆分）。默认列表另带一条关系字段的条件格式规则。\n\n## 顺带钉住三条实测得到的作者规则\n\n1. 必须 `record.` 前缀（裸字段在页头路径是未声明变量，抛错→fail-closed 隐藏）；\n2. 遍历/调方法前必须判空 —— `null` 没有成员也没有方法，不判空在 Minimal 上直接 fault，而 fault 在行/批量面 fail-closed、在宽松路径 fail-open；\n3. 用 `contains()` / `matches()`，**不要** `startsWith()` / `endsWith()` —— 后者不是 CEL，objectui 会降级到遗留 JS 引擎并打 deprecation 警告，服务端引擎则根本不认。\n\n## 一个故意留下的红色夹具\n\n`showcase_zoo_dialect_split`：同一条 `.contains()` 谓词，在行内 kebab 里正常、在记录页头被判抛错并隐藏 —— 页头不走 CEL 引擎（objectstack-ai/objectui#3521，实测控制台原话已附在该单里）。按仓库「绝不粉饰未交付的能力」的规矩，不改写成能过的写法，而是留成一屏可对比的现场；#3521 落地后这个按钮应当出现在页头，那就是它的验收条件。\n\n同样明说的取舍：归属谓词的自然写法 `record.owner_id == os.user.id` **编译不过** —— 平台注入列不在发布的对象 metadata 里，作者时校验判 `unknown field`。已报 objectstack-ai/objectstack#6113，showcase 里退到自己声明的 `user` 字段并在注释里写清原因，不绕过。\n\n## 测试\n\n`pnpm validate` exit 0（无新增 error）、`pnpm typecheck` 通过、`pnpm test` 146 passed。\n\n真机实测（showcase :3100 + objectui console dev :5181）：`$select` 实际带上谓词读的 34 个非列字段；三个记录面结论一致；四种 `requiredPermissions` 表现符合预期；`gated_columns` 下 `populate=f_lookup,f_master_detail` 时关系比关系仍为真；聚合批量弹窗正确报「1 条所选记录不符合条件，将被跳过」。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

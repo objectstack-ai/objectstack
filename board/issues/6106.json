@@ -1,0 +1,34 @@
+{
+  "number": 6106,
+  "kind": "issue",
+  "title": "rc.4 发布前置:v17 升级指南收录两条 console 破坏性迁移 + console 段 pin 区间行更新 + vendored changeset 的 flow 条目补 BREAKING 标注",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T01:59:33Z",
+  "updated_at": "2026-08-07T02:35:24Z",
+  "closed_at": "2026-08-07T02:35:24Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6106",
+  "body": "**rc.4 发布前置单**(维护者 2026-08-07 宣布今日发 v17.0.0-rc.4,指示按发布优先级处理)。缺口三处,全部来自 #6089→PR #6097(console pin 刷新)验证时的如实记录 —— 当时按纪律「只报不改」,现在到了改的时刻。\n\n## 缺口(PR #6097 正文已逐项取证)\n\n1. **`content/docs/releases/v17.mdx` 的「Breaking changes & migration」章节完全不含两条 console 破坏性迁移**:\n   - `042e09d77` — widget 元数据收敛到 `field` 单键,退役 `schema`(objectui#3233);\n   - `6e794a19e` — flow 节点几何收敛到 spec 的 `FlowNode.position`,退役自有 `ui: { x, y }`(objectui#3172)。\n   实测 `field-widget` / `withFieldCarrier` / `FieldWidgetComponentProps` / `objectui#3233` / `FlowNode.position` / `node.ui` / `objectui#3172` 在整个 `content/docs/` 下 **0 命中**。两条作者侧破坏性迁移目前只活在 `.changeset/`(发布记录的输入层),RC 期间正在升级的作者在文档站上读不到 —— rc.4 一发,这就是新用户第一眼撞上的坑。\n2. **同页 console 段标题的 pin 区间行陈旧**:仍写 `bundled objectui advanced 4a4829d0ef39 → 785b8a5d432c`,#6097 落地后实际已是 `→ f995a452d2ca`(第 1969 行附近)。属事实错误,按 CLAUDE.md 第三条走 dedicated docs-only PR 修正正当。\n3. **`.changeset/console-f995a452d2ca.md` 的 flow 几何条目缺 BREAKING 标注**(#6099 记录的机制性盲区在本次的实例):widget 那条条目自带 `**BREAKING (v17)**`(源 changeset 首段有标注,digest 读首段);flow 那条的破坏性陈述在源 changeset 正文靠后段落,digest 读不到 ⇒ 编译出的发布记录里它读起来像普通行为修复。**源头(objectui 侧 changeset)确实声明了破坏性**,本条是把源头真相还原到 vendored 条目上的一行文字修正 —— ⛔ 不改 digest 脚本(那是 #6099 的机制问题,另案),只改这一处已落地的静态文本。\n\n## 交付形态(⛔ 拆两个 PR,不合一)\n\n- **PR A(docs-only)**:`content/docs/releases/v17.mdx` —— 在 Breaking changes & migration 章节按该页既有条目格式补两条迁移(迁移写法的源材料 = objectui@f995a452 的两份 changeset 正文 + objectui#3233/#3172),并更新 console 段 pin 区间行。⛔ 除此页外不碰任何文件;走 `skip-changeset`。\n- **PR B(changeset 文本一行)**:`.changeset/console-f995a452d2ca.md` 的 flow 条目行补 `**BREAKING (v17)** — ` 前缀,格式与同文件 widget 条目逐字对齐。⛔ 不碰任何其他文件;该 PR 本身改的就是 changeset 文件,无需 skip-changeset(dev 核实 Check Changeset 判定)。\n\n## 时间敏感性\n\nrc.4 计划**今日**发。两个 PR 都是小改动,应赶在 release run 之前落地,使 rc.4 的发布记录与文档站同时诚实。\n\n## 关联\n\n- #6089 / PR #6097 —— 缺口的取证出处(console pin 刷新)\n- #6099 —— digest 只认 major 级破坏性的机制盲区(本单第 3 项是其实例修正,机制修复不在本单)\n- #4732 —— 同形前例当时记录的同一落点问题(框架 B:changeset + 独立 docs-only PR)\n- objectui#3233 / objectui#3172 —— 两条迁移的源 issue\n\n## 落点\n\n`content/docs/**` + `.changeset/`(文本)⇒ 按 SKILL 兜底读法落 devx;`domain:*` 标仍留分诊座位。"
+}

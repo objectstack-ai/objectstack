@@ -1,0 +1,34 @@
+{
+  "number": 17528,
+  "kind": "issue",
+  "title": "os lint's hand-written checks and `scoreMetadata` still read the top level alone: a packages[]-only project gets `✓ All checks passed` and a rubric computed over nothing (the half #17069 did not scope)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-10T19:28:29Z",
+  "updated_at": "2026-09-12T10:27:01Z",
+  "closed_at": "2026-09-12T10:25:39Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17528",
+  "body": "## Symptom\n\n`os lint` runs two independent families: the shared #4409 author-time **rule registry**, and its own **hand-written checks** at the top of `lintConfig` (naming, labels, empty field maps, name-field suggestions). The registry now judges an ADR-0130 D4 / option-B stack correctly (#17069). The hand-written family still does not — it reads `config.objects` and friends off the **top level only**, so a project whose definitions live in `packages[]` gets `✓ All checks passed` on a stack it never opened.\n\n`scoreMetadata` reaches the same function, so the metadata-quality score is computed over the same empty view.\n\n## Minimal repro — one object, authored two ways\n\nBoth configs declare the identical object. The only difference is where it lives.\n\n`packages[]` (ADR-0130 D4 / option B):\n\n```ts\nexport default {\n  manifest: { id: 'com.example.ob', name: 'ob', version: '1.0.0', type: 'app', namespace: 'ob', engines: { protocol: '^17' } },\n  packages: [\n    { manifest: { id: 'com.example.ob', name: 'ob', version: '1.0.0', type: 'app', namespace: 'ob',\n        objects: [\n          { name: 'ob_order', label: 'order', sharingModel: 'private',\n            fields: { number: { type: 'text', label: 'Number' } } },\n        ] } },\n  ],\n};\n```\n\nTop level — same object, same defects:\n\n```ts\nexport default {\n  manifest: { id: 'com.example.ob', name: 'ob', version: '1.0.0', type: 'app', namespace: 'ob', engines: { protocol: '^17' } },\n  objects: [\n    { name: 'ob_order', label: 'order', sharingModel: 'private',\n      fields: { number: { type: 'text', label: 'Number' } } },\n  ],\n};\n```\n\nMeasured on branch `claude/issue-17069-union-fold-validate-lint` at `7191b900` — i.e. WITH #17069's registry fix already in — through the real binary:\n\n```\npackages[]   os lint   exit 0    ✓ All checks passed (95ms)\n\ntop level    os lint   exit 0    ⚠ Label \"order\" should start with an uppercase letter\n                                   convention/label-case        at objects[0].label\n                                 ℹ Object \"ob_order\" has no nameField and no name-like field …\n                                   object/missing-name-field    at objects[0].fields\n                                 1 warning(s), 1 suggestion(s) (75ms)\n```\n\nTwo findings on one shape, zero on the other, for byte-identical metadata.\n\n## Cause, located\n\n`packages/cli/src/commands/lint.ts`\n\n```\nexport function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue[] {\n  ...\n  const objects: any[] = Array.isArray(config.objects) ? config.objects : [];\n```\n\nand the same top-level reads for the other collections this family walks. #17069 folded the stack at the **registry call site inside this function**, deliberately scoped the way `compile.ts` scopes it, so the two families in one function now read two different stacks — the registry sees the folded one, the hand-written checks see the author's.\n\nSecond call site, same blindness, different consequence:\n\n```\npackages/cli/src/lint/score.ts:123   issues = lintConfig(normalized) as LintIssue[];\n```\n\n⚠️ The scorer is the sharper half. #15658 established the principle for this exact function: *\"The linter found nothing\" and \"the linter never ran\" collapsed into the better-looking one.* Here the linter runs and reads an empty stack, so an option-B project's rubric is computed over nothing — the same indistinguishable-from-perfect verdict, arriving through the input rather than through a swallowed crash.\n\n## Not just a wider fold — a scoping question\n\n`authoringRuleUnionStack` (`packages/cli/src/utils/stack-collections.ts`) would fix the reads mechanically, but folding at `lintConfig`'s entry moves `scoreMetadata` and every hand-written check at once, and the scorer's contract is *\"a pure function of a stack\"*. Whether the score should be per-project or per-package on a multi-package artifact is a decision, not a wiring detail — which is why this is filed rather than folded into #17069's PR (#17524), whose ruling scoped it to the rule table's input.\n\n## Why it is not covered today\n\n`test/option-b-reader-acceptance.pin.test.ts` holds `OPTION_B_LOSSES` empty — \"every subsystem must see its collections in BOTH shapes\" — and stays green here because its probe carries no row for `lintConfig`'s hand-written family or for `scoreMetadata`. Same gap as #17527: a reader older than the probe, never enumerated, so it sits under the floor rather than over it.\n\n## Where it was found\n\nDriving #17069's controls: the clean option-B project must exit 0 on all three commands, and it does. Varying the object's *quality* rather than its references is what separates \"the fold reached this family\" from \"there was nothing to say\".\n\n⛔ Deduplication: one targeted `search_issues` call over open and closed (repo `/search/*` is refused by this session's egress proxy, HTTP 403 — verified this session). 26 results, 12 read out; positive control fired (#17527, filed minutes earlier, and #17069 both returned). Nearest neighbours rejected: #16284 (open — which SCHEMAS `convention/label-case` reaches; an axis about schema coverage, not about which stack the family is handed), #15658 (closed — `scoreMetadata` swallowing a `lintConfig` CRASH into `issues: []`; same indistinguishability, different cause), #15922 (closed — an unread-field rule that does not exist yet). No card names this family's stack-shape blindness.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 5692,
+  "kind": "issue",
+  "title": "docs corpus teaches a flow the build REJECTS: `flows.mdx` `contract_expiration_check` is a schedule flow with a top-level `get_record` and no `runAs: 'system'`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T00:31:01Z",
+  "updated_at": "2026-08-06T23:55:45Z",
+  "closed_at": "2026-08-06T23:55:45Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5692",
+  "body": "Found while implementing #5633 (widening `flow-runas-unscoped` to nested regions). Filed unassigned for triage, deliberately **out of scope** for that PR — the finding is **pre-existing and unchanged** by it.\n\n## What\n\n`content/docs/automation/flows.mdx` teaches, as its worked \"Scheduled flow\" example:\n\n```typescript\nexport const contractExpirationCheck: Flow = {\n  name: 'contract_expiration_check',\n  label: 'Contract Expiration Check',\n  type: 'schedule',\n  status: 'active',\n  nodes: [\n    { id: 'start', type: 'start', label: 'Start', config: {\n        triggerType: 'schedule',\n        schedule: { type: 'cron', expression: '0 0 * * *', timezone: 'UTC' },\n    } },\n    { id: 'find_expiring', type: 'get_record', label: 'Find Expiring Contracts' },\n    { id: 'notify_owners', type: 'notify', label: 'Notify Owners' },\n    { id: 'end', type: 'end', label: 'End' },\n  ],\n  ...\n};\n```\n\nNo `runAs`. A schedule run resolves **no** trigger user, so the effective `runAs` is the spec default `'user'` and the `get_record` has no identity to scope to — which `flow-runas-unscoped` reports at `severity: 'error'`, i.e. **an author who copies this snippet gets a failed build**, and if they force it past, a run the engine refuses (#3760).\n\n## Measured\n\nRun against the rule as-is on `origin/main` (`414395b9a`), the snippet transcribed verbatim:\n\n```\n1 x flow-runas-unscoped  <-  flows.mdx contract_expiration_check\n      error: schedule-triggered flow runs as the default `runAs:'user'`, but a schedule run has\n      no trigger user - so its data node 'find_expiring' (get_record) has no identity to scope\n      to and will be REFUSED at run time.\n```\n\nThe same probe over the neighbouring examples returns **0** — they are correct:\n\n```\n0 x flow-runas-unscoped  <-  flows.mdx renewal_reminder (runAs: 'system')\n0 x flow-runas-unscoped  <-  SKILL.md scheduled update (runAs: 'system')\n```\n\n## Why it matters\n\nTwo independent reasons, and the second is the sharper one:\n\n1. **The corpus contradicts itself in the same file.** ~35 lines below the broken snippet, the time-relative example gets it right and even carries the rationale as a comment: `runAs: 'system', // a sweep has no trigger user - elevate explicitly`. And the property table in the same document (`flows.mdx`, the `runAs` row) already states the rule in prose: *\"declare `'system'` for schedule / time-relative / API triggers\"*. So the document explains the constraint twice and then violates it once, in the example most likely to be copied wholesale.\n2. **This is the corpus AI authors from.** `check-doc-authoring.mjs`'s own header states the case for treating `content/docs/` as corpus: a bad sample there is copied into app code by the next agent that reads it. Nothing type-checks or lints fenced blocks against the authoring rules, so a snippet can teach a shape the gate rejects indefinitely — this one has.\n\n## Fix\n\nOne line: add `runAs: 'system'` to `contract_expiration_check`, ideally with the same one-line rationale the neighbouring example carries. Docs-only.\n\nWorth considering separately (**not** proposed here, and larger): nothing extracts fenced flow snippets and runs the authoring rules over them, which is the general mechanism that let this survive. `check-doc-authoring.mjs` scans for the bare-literal anti-pattern and `check:skill-examples` type-checks; neither evaluates a snippet's *semantics*. If that gate is wanted it should be its own issue.\n\n## Not caused by #5633\n\nThe evidence node here is `find_expiring`, a **top-level** `get_record`, so the rule flagged this snippet before #5633 and flags it identically after. The A/B over the docs/skills flow fixtures was run in both directions while implementing #5633 and is byte-identical — 1 hit on this snippet on both sides, 0 everywhere else. It is a corpus defect, not a regression, and it is not in #5633's scope.\n\n## Related\n\n- #5633 — where this was found (widens the same rule to nested regions).\n- #3760 — the runtime refusal this rule is grounded in, and its promotion to `error`.\n- #4913 / #4929 — why `content/docs/` and `.claude/` count as corpus."
+}

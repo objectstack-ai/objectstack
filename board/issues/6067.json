@@ -1,0 +1,35 @@
+{
+  "number": 6067,
+  "kind": "pull_request",
+  "title": "fix(plugin-sharing): hierarchy resolver 按权威字段拿到调用方活动组织 (#5859)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T16:36:39Z",
+  "updated_at": "2026-08-07T01:16:09Z",
+  "closed_at": "2026-08-07T01:12:44Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T01:12:44Z",
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6067",
+  "body": "Fixes #5859\n\n契约半边(#5858 / PR #5973)已合入 `origin/main`(`abeb375`),producer 半边即本 PR。\n本单三项**已全部落地**:① 权威字段填充、② 姿态感知的 fail-closed 门(按 #5859 的裁决取\n**C**,裁决见 issue 留档)、③ 真实 seam 测试。\n\n## 前提复核(对 origin/main,post-#5973)\n\n| 事实 | 复核结果 |\n|:--|:--|\n| `plugin-sharing/src/sharing-service.ts` 那处 `(context as any).organizationId ?? null` | **仍在**(#5973 的机械补齐未触及此处,行号漂移但形状不变) |\n| 仓内是否有传输层写过 `organizationId` 到执行上下文 | **零处**。`rest-server.ts` 与 `runtime/src/security/resolve-execution-context.ts` 都只 `tenantId: authz.tenantId` |\n| 活动组织到底装在哪 | `resolveAuthzContext`(`@objectstack/core`)`tenantId = session.activeOrganizationId`;API-key 路径 `tenantId = sys_api_key.organization_id`;`ExecutionContext.tenantId` 注释即「Current organization/tenant ID (resolved from session.activeOrganizationId)」 |\n| 真实 HTTP boot 实测 | 在 dogfood showcase 全栈 boot(`bootStack` + 真实登录 + 真实请求)里插桩打印进入 `resolveOwnerScopeIds` 的 context:键集为 `userId, tenantId, email, positions, permissions, systemPermissions, posture, isSystem, org_user_ids, accessible_org_ids, timezone, locale, __kernel, __readScope` —— **有 `tenantId` 键、无 `organizationId` 键** |\n\n结论:前提成立,该读取**结构性恒 null**,DEPTH 的组织收窄从 ADR-0057 起就没生效过。\n\n## ① 修复本体(producer 按权威字段填充)\n\n- `organizationId` ← 执行上下文的活动组织(新增 module-private `activeOrganizationId(context)`,doc 写清 provenance 与「这不是消费端 `?? tenantId` 兜底」的区别);\n- `tenantId` 作为 `@deprecated` 兼容别名**原样继续携带**(#5858 明确不删,仓外 resolver 可能仍读它);\n- 无活动组织 → 如实传 `null`(契约类型即 `string | null`);空白字符串归一为 `null`,不让假 id 混进 resolver 查询与日志;\n- resolver 抛错的静默回退改为**留声**(`logger.warn`)。判定不变(owner-only),但「resolver 炸了」与「层级里确实没别人」此前完全同形。\n\n同一映射在 `plugin-security` 的 Layer-0 租户墙里早已在用\n(`computeTenantLayer0Filter({ organizationId: context?.tenantId })`),两层 enforcement\n现在按同一字段的同一值收窄。\n\n## ② 姿态感知的组织门(裁决 C)\n\n`SharingService` 新增 late-bound `tenancy` 姿态探针 —— **读法照抄 `SecurityPlugin` 为\nLayer-0 墙读 `tenancy` 服务的那段**(`try { ctx.getService('tenancy') } catch { null }`,\n与既有 `securityService` / `hierarchyResolver` 同形),由 `SharingServicePlugin` 接线。\n按 **ADR-0105 D1** 的既有分叉决定「没有活动组织」意味着什么,与\n`computeTenantLayer0Filter` 对同一问题的答案逐条同形:\n\n| 姿态 | 缺权威组织时 | 依据 |\n|:--|:--|:--|\n| `single` | **照常展开 DEPTH**(行为不变) | 那是唯一隐含租户,不是「所有组织」;ADR-0057 D1 的 20 条 e2e 正是在这一形态下钉住的 |\n| `group` / `isolated` | **拒绝**:不咨询 resolver,回落 owner-only,`warn` 点名 ADR-0095 D1 / ADR-0105 D1 与 #5973 的 fail-closed 义务原文(「no org」不是「every org」) | 有墙即有租户维度;Layer 0 在同一情形下也是拒绝(`RLS_DENY` / 空访问集) |\n| **解析不出**(未接线 / 探针抛错 / 词表外的值) | **按有墙处理** | 未知姿态不是 `single` 的证据;把它读成 single 恰恰会在配置已可疑的部署上恢复展开。周围守卫同惯例:`securityService` 缺失 → owner-only,`hierarchyResolver` 缺失 → owner-only |\n\nlegacy 形状 `isolationActive: false` 是一句**肯定的**「无墙」声明,按 `single` 处理;\n`isolationActive: undefined` 仍算解析不出。\n\n为什么不是无条件拒绝:实测证明「无活动组织」是本仓**受支持的部署形态** ——\n`@objectstack/verify` harness 故意 `autoDefaultOrganization: false`,注释自述它证明的是\n隔离谱系的两端之一 *pure single-tenant (no org, no scoping)*;我先实现的无条件版本让\nADR-0057 D1 的端到端证明红了 6 条(`showcase-scope-depth{,-write,-fallback}`)。裁决取 C\n后这 20 条全绿,而有墙姿态的洞按新钉子闭合。\n\n## ③ 测试:改用真实 seam 产生的 context\n\n新增 `exec-context-seam.testkit.ts`:组织**只**以真实登录携带它的方式进入\n(better-auth `session.activeOrganizationId` + `sys_member` 行),经由两条 HTTP 入口\n共用的解析器 `resolveAuthzContext` 产出上下文,测试**从不书写任何租户字段名**。\n手工构造 `{ userId, organizationId }` 的旧喂法正是本缺陷躲过全部单测的原因。\n\n新增钉子(`sharing-service.test.ts`,12 条):\n\n- seam 形状钉:上下文带 `tenantId`、**不带** `organizationId`(所以 producer 必须映射);\n- resolver 收到的 `organizationId` **非空且等于活动组织**(并检别名 `tenantId` 原样);\n- **#5852 对照**:`group` 姿态成员(同时属 org_a / org_b、活动 org_a)对**兄弟组织**记录\n  `canManageShares` = false,同组织记录仍 = true(不过度收紧);\n- **写路径半径**:`canEdit` / `canDelete` 跨组织均 false,`buildWriteFilter` 的 owner 集合\n  不含兄弟组织的 owner —— **fixture 里没有任何 owner-only RLS 兜底**,共享服务是唯一的门\n  (即 #5852 点名的无兜底部署形态);\n- **姿态分叉两个方向**:`single` + 无组织 ⇒ resolver 照常被咨询、DEPTH 工作、且拿到的是\n  **显式 `null`**(键在、值为 null);`group` / `isolated` + 无组织 ⇒ resolver 一次都不被\n  咨询、判定 false、warn 文案含 ADR 依据(`it.each` 两个姿态各一条);\n- 姿态**解析不出**的四种形态(未接线 / 返回 null / 抛错 / 词表外)全部拒绝;\n- legacy `isolationActive: false` 视为无墙;\n- 空白组织:`single` 下归一为 `null` 传下去,有墙下与缺席同样拒绝;\n- resolver 抛错 → owner-only 且留声。\n\n既有 DEPTH fixture 分诊(3 条):`canManageShares` 的三条 DEPTH 用例改喂 seam context ——\n判定不变,但分支现在跑在运行时真实产出的上下文形状上。\n\n## 反向验证(两轮,方向均先判后跑)\n\n**第一轮(映射)**:把 producer 改回 `(context as any).organizationId ?? null` →\n预判红,实测 `Tests 6 failed | 348 passed`,含\n`× #5852 flip … AssertionError: expected true to be false`(**201 在服务层复现**)与\n`× hands the resolver a NON-EMPTY organizationId … expected null not to be null`。\n唯一**不**红的是 seam 形状钉 —— 它钉的是传输层而非本修复,如实说明不硬凑。\n\n**第二轮(姿态门)**:删掉门 → 预判「只有有墙方向红、`single` 方向必须保持绿」,实测:\n\n```\n× group posture: no active organization → the resolver is NOT consulted, loudly\n× isolated posture: no active organization → the resolver is NOT consulted, loudly\n× an UNRESOLVABLE posture is not evidence of `single` — it refuses too\n× a blank organization is ALSO an absent one under a wall\n Tests  4 failed | 355 passed (359)\n```\n\n`single` 方向的两条钉子按预判**保持绿** —— 它们钉的是「门必须不误伤单租户」,与门的存在\n无关,这正是本次裁决要买的东西。\n\n## 验证(全部前台阻塞执行)\n\n```\npnpm --filter @objectstack/plugin-sharing test        → 13 files / 359 tests passed\npnpm --filter @objectstack/plugin-sharing typecheck   → tsc --noEmit 无输出\nnpx eslint (本 PR 的 4 个改动文件)                     → 无输出\nnode scripts/check-nul-bytes.mjs                      → OK (5782 files)\nnode scripts/check-org-identifier.mjs                 → OK (1666 files)\n消费半径 e2e(ADR-0057 D1 全栈 boot,含插件接线):\npnpm --filter @objectstack/dogfood exec vitest run \\\n  test/showcase-scope-depth.dogfood.test.ts test/showcase-scope-depth-write.dogfood.test.ts test/showcase-scope-depth-fallback.dogfood.test.ts\n                                                      → 3 files / 20 tests passed\n```\n\n最后这条同时是**接线的端到端证据**:那 20 条 e2e 里调用方确实没有活动组织,所以只有当\n`ctx.getService('tenancy')` 真的解析出 `single` 时它们才可能绿 —— 探针没接上、抛错或解析\n失败都会按「有墙」拒绝并让它们变红。\n\n## 端到端 201 → 403 的诚实边界\n\n#5852 的 201 需要**企业版 resolver**(`@objectstack/security-enterprise`,cloud 私有)\n才能复现;本仓的多组织 harness 也依赖 cloud 私有的 `@objectstack/organizations`\n(`multiTenant: true`),因此**真正的 201/403 端到端在本仓不可运行** —— 不做假。\n本 PR 能给的等价证据是:服务层的 201→403 翻转(反向验证第一轮)+ 真实 HTTP boot 里\ncontext 键集的实测 + 全栈 boot 里姿态探针的接线证明。企业侧对照复测应在\ncloud#919 / cloud#1148 一侧带上。\n"
+}

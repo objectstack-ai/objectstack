@@ -1,0 +1,35 @@
+{
+  "number": 5606,
+  "kind": "issue",
+  "title": "[docs-gen] 生成的 reference 把 `retiredKey()` 墓碑渲染成 `any` —— 嵌套两层时连 `[REMOVED]` 处方都没有,退役键读起来像自由槽",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T20:20:28Z",
+  "updated_at": "2026-08-07T01:35:42Z",
+  "closed_at": "2026-08-07T01:35:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5606",
+  "body": "## 现象\n\n`packages/spec/scripts/lib/format-type.ts` 的 `formatType()` 没有 `z.never()` 分支。`retiredKey()` 生成的 JSON Schema 节点是 `{ \"not\": {} }` —— 没有 `type`、没有 `$ref`、没有 `enum`,于是一路落到函数末尾的 `return prop.type || 'any'`,**类型格印成 `any`**。\n\n顶层键还好:它有自己的表行,描述列会带上 `[REMOVED] …` 处方。**嵌套进内联 shape 摘要的键就没有这个补偿了** —— 摘要只印 `k?: type`(前 4 个键,`INLINE_KEY_LIMIT`),描述无处安放。\n\n## 当下就在页面上的实例(`origin/main`,非假设)\n\n`content/docs/references/ui/theme.mdx`:\n\n- **第 130 行**:`| **fontFamily** | { base?: string; heading?: any; mono?: any } | optional |  |` —— `heading` / `mono` 都是 #5021 退役的墓碑(`packages/spec/src/ui/theme.zod.ts:236,239`),它们嵌套两层、**没有自己的表行**,所以整页**没有任何一处**出现它们的 `[REMOVED]` 处方。描述列还是空的。作者看到的就是「`heading` 可以随便写」。\n- **第 102 行**:`| **typography** | { fontFamily?: object; fontSize?: any; fontWeight?: any; lineHeight?: any; … } |` —— 这三个同样是 #5021 的墓碑;它们各自有表行(131-133 行)带处方,所以危害轻一些,但摘要行仍然在宣传退役键。\n\n同类还有 `waitEventConfig` 的 `timeoutMs?: any`(`flow-node-wait-timeout-keys-removed` 退役)等。\n\n## 为什么值得修\n\n这是 ADR-0033 陷阱正对着文档的一面:reference 页是 AI 作者的主要输入,`heading?: any` 读起来不是「已删除」,而是「这个槽存在,而且不校验」—— 比退役前的 `heading?: string` **更鼓励**去写它。写了之后 parse 会带着处方硬拒,但那是在作者已经产出一份错元数据之后。\n\n## 修法(供参考,未实现)\n\n`formatType()` 加一个显式分支:JSON Schema 节点为 `{ not: {} }`(即 `Object.keys(prop.not).length === 0`)时返回 `never`。这既是**准确的 TypeScript**(`retiredKey()` 的输入类型就是 `never`),也让内联摘要自证:`heading?: never` 不会被任何人误读成自由槽。\n\n⚠️ 注意 blast radius:全仓 `retiredKey()` 墓碑约 28 处,类型格会从 `any` 变成 `never`,`content/docs/references/**` 需要整体重生成 —— 属于机械改动但 diff 不小,应当单独一个 PR,别搭在别的改动上。`packages/spec/scripts/format-type.test.ts` 可以直接钉这个渲染(#4912 把这个函数抽出来就是为了能单测)。\n\n另一个可选项(可与上面叠加):内联摘要跳过 `never` 成员再计入 `INLINE_KEY_LIMIT`,让摘要只展示活键。\n\n## 发现路径\n\n来自 #5050(退役 `HookContext.session.roles`)。该 PR 里墓碑一开始留在原位,恰好是 `session` 的第 4 个键,`references/data/hook.mdx` 立刻开始印 `roles?: any`;PR 内的规避办法是把墓碑挪到 shape 底部让它落进 `…` 省略号 —— 那是**绕开**,不是修好,而且只对「墓碑不在前 4 位」的情况有效。渲染器本身的缺陷就是本单。\n"
+}

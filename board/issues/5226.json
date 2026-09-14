@@ -1,0 +1,38 @@
+{
+  "number": 5226,
+  "kind": "issue",
+  "title": "`objectstack dev --fresh` 上 sys_audit_log 表不存在 —— 每次元数据写入都以 ERROR + 「Audit write failed」告终,审计轨迹静默丢失",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T11:05:13Z",
+  "updated_at": "2026-08-07T09:19:06Z",
+  "closed_at": "2026-08-05T00:53:40Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5226",
+  "body": "发现于 #5112(#5040 E8 收官验收)的真实 boot 探针。**与 E8 无关的存量缺陷**,按 Prime Directive #10 单独立项。\n\n## 事实(showcase 真实 boot,`objectstack dev --fresh -p <port> --seed-admin`,47 plugins,含 Audit)\n\n一次 `PUT /api/v1/meta/api/<name>`(Studio 元数据写)之后,日志里成对出现:\n\n```\nERROR Insert operation failed {\"object\":\"sys_audit_log\",\"error\":{\"message\":\n  \"insert into `sys_audit_log` (...) values (...) returning * - no such table: sys_audit_log\", ...}}\nWARN  Audit write failed {\"object\":\"sys_metadata\",\"action\":\"create\",\n  \"err\":\"... - no such table: sys_audit_log\"}\nERROR Insert operation failed {\"object\":\"sys_audit_log\", ...}\nWARN  Audit write failed {\"object\":\"sys_metadata_history\",\"action\":\"create\", ...}\n```\n\n写本身返回 200,业务数据落库正常;**只有审计行没写进去**,因为表在这个全新数据库里根本没被创建。\n\n## 为什么这是 error 级而不是噪音\n\n按 AGENTS.md 的「Degradation log levels」判据:降级之后系统从外面看**完全正常**(写入 200,数据在),而它声称会持久化的东西没有落地 —— 这是 durability / data-consistency 一类,不是 functional 一类。审计轨迹是合规面,丢失通常在很久以后、由无法把症状连回这一行的人发现。`WARN Audit write failed` 这一条按该规则应当是 `error`;更重要的是,表缺失本身是要修的。\n\n## 待查的两个方向(未下结论)\n\n1. AuditPlugin 是否把 `sys_audit_log` 通过 manifest 注册进了 schema sync —— 若注册了,为什么 fresh DB 上没有建表;\n2. 还是它依赖某个在 dev 组合里没被装配的 service/对象包。\n\n## 复现\n\n```\npnpm dev:showcase -- --fresh -p 39720 --seed-admin --log-level debug\n# 登录后做任意一次元数据写,例如 PUT /api/v1/meta/api/anything\ngrep \"sys_audit_log\" <dev log>\n```\n\n关联:#5112(发现于此)、AGENTS.md「Degradation log levels — warn vs error」、#4420(同一类:写入落空只留下没人读的日志)。"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 5186,
+  "kind": "issue",
+  "title": "`check:durability-log-level` 结构性看不见「读接缝把故障答成空值」这一类 —— #4825 / #5108 全家都在闸门盲区里",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T08:09:44Z",
+  "updated_at": "2026-08-06T14:28:44Z",
+  "closed_at": "2026-08-06T14:28:44Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5186",
+  "body": "发现于 #5108(`DatabaseLoader` 读故障吞成空结果)实现期,**不在该单范围内**,故单独立卡。**未认领 —— 只是记录。观察类,今天没有用户会撞到。**\n\n## 现象\n\n`scripts/check-durability-degradation-log-level.mjs` 是 #4632 那条规则的机械执行者。它的判据是:\n\n> `catch` 块里调了 `DURABILITY_CRITICAL_CALLEES` 词表里的操作,而日志级别低于 `error` 且没有 rethrow → 红。\n\n这个模型对**写/DDL** 接缝是合身的,对**读**接缝则**结构性地表达不了**。两条都不成立:\n\n1. **词表是按 callee 名字匹配的**,而读接缝的 callee 是 `find` / `findOne` / `count` 这种彻底通用的名字 —— 加进词表会把全仓库每一处数据读取都拖进来,不可行。词表现有 9 项(`syncSchema`、`initObjects`、`writeRecord`、`dropPromotedDraftRow`…)清一色是写/DDL 语义的专名。\n2. **更根本的:读接缝的错误形态不是「日志太轻」,而是「编了一个返回值,且一行都不记」。** `catch { return []; }` 在闸门眼里连一个可判级别的日志调用都没有 —— 它检查的那个维度在这里是空的。#5108 修掉的那五处正是这个形状:`catch {}` → `[]` / `false` / `null`,零日志。#4825(`nextEventSeq` 的 `catch { return 1 }`)是同一族,而且是最贵的那半(写进去的数是错的)。\n\n也就是说:**这个族已经在这一个包里出现过三次(#4728 → #4825 → #5108),每次都是人读出来的,闸门一次都没有帮上忙,而且照现在的模型也帮不上。**\n\n## 这一类的可判据形状\n\n三次实例长得一模一样,可以描述:\n\n- 一个 `catch` 包着一次**读**(driver/engine 的 `find` / `findOne` / `count`,或它们的薄封装);\n- `catch` 体里**没有任何日志**,也没有 rethrow;\n- 而是 `return` 一个**该方法的空值/零值**(`[]` / `false` / `null` / `0` / `1`)。\n\n判据的关键不在「调了什么」,而在「**没读到,却编了一个答案出来**」。良性豁免也已经有现成词汇:`isMissingTableError()`(`packages/metadata/src/errors.ts` 专门为跨包导出它而存在)—— 一个 `catch` 只要按错误类型区分过、且只在良性分支返回空值,就应当放行。#4825 和 #5108 修完之后的代码正好就是这个形状,可以直接当 fixture。\n\n## 为什么不该塞进别的单\n\n- **不是 #4754 的子集。** #4754 是「`saveMetaItem` 这个**写** callee 不在词表里,加进去会红 8 处」—— 一个具体的清账,做法就是加一个词表条目 + 逐处判。它完整落地也覆盖不到读接缝:词表法本身就是这里行不通的那个办法。\n- **不是 #5108 的子集。** #5108 修的是 `DatabaseLoader` 那五处的行为;闸门能不能防住这一族的**下一次**是另一件事,而且要动 `scripts/`(#5108 的派单文件面里没有这块,刻意没越界)。\n\n## 建议方向(裁决留给维护者)\n\n1. 给现有脚本加一条**独立规则**(不走 `DURABILITY_CRITICAL_CALLEES`):`catch` 无日志无 rethrow + `return` 空值 + 块内含读调用 → 红,除非 `catch` 里出现按错误类型的区分(`isMissingTableError` 之类)。必然需要一份 baseline —— 全仓库这个形状的 `catch` 大概率不少,而且相当一部分是合法的功能性降级;\n2. 或者判定这一族**不适合机械判**(误报率过高),转而只在 AGENTS.md 里把「读接缝不得编造答案」写成明文规则,靠 review 兜 —— 但那样就要接受它会再犯,并且明说这个取舍;\n3. 或者收窄到只扫**元数据/持久化层**的读接缝(`packages/metadata`、`packages/metadata-protocol`、`packages/objectql` 的存储缝),把误报面压到可管的范围,再逐步放开。\n\n两条不是本卡要定的;要定的是「这一族目前完全没有机械保护,而它已经复发三次」这一点。\n\n## 复现\n\n```bash\n# 现状:五处 `catch {} → 空值` 的读接缝(#5108 修复前的 database-loader.ts)\n# 对闸门完全透明 ——\nnode scripts/check-durability-degradation-log-level.mjs\n# → OK,12 durability-critical catch seam(s), all loud or rethrowing\n```\n\n## 关联\n\n#4632(立规矩)、#4728 / #4825 / #5108(同一族的三次复发)、#4754(词表覆盖的另一半:写接缝)、AGENTS.md「Degradation log levels — `warn` vs `error`」「Absence must be loud」、`packages/metadata/src/errors.ts`(良性判据的现成词汇)。\n"
+}

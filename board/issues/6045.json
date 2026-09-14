@@ -1,0 +1,35 @@
+{
+  "number": 6045,
+  "kind": "pull_request",
+  "title": "fix(service-analytics): dataset 降级路径先读 ADR-0112 信封,再读措辞 (#5717)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T15:34:58Z",
+  "updated_at": "2026-08-06T23:55:46Z",
+  "closed_at": "2026-08-06T23:55:44Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T23:55:44Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6045",
+  "body": "Fixes #5717\n\n## 前提复核(立单行号已过期,以 origin/main `b5bdf48` 现状为准)\n\n| 立单说法 | 现状 | 结论 |\n|---|---|---|\n| 嗅探器 `isMissingSourceError` | `analytics-service.ts:92` | 在 |\n| 降级 catch | `:795`(`isMissingSourceError` 判据在 `:796`) | 在 |\n| compiler 命中措辞 | `dataset-compiler.ts:281-284`,且 #5963 后自带 `DATASET_INVALID`/400 | 在,且已带信封 |\n| 抛点在 try 之外 | 编译在 `:722`(`registerDataset`),try 在 `:793` 才开始 | 成立 —— 雷仍未接电 |\n\n前提全部成立,`premise_still_valid: true`。\n\n## 改了什么(范围 B + C,均落在 `analytics-service.ts` 一个文件)\n\n**B(主判据)** —— catch 里新增优先分支:带 ADR-0112 信封的错误原样上抛,先于任何读措辞的逻辑。\n\n信封判据抄仓内既有惯例、不发明第二种:`rest-server.ts` 的 `/analytics/dataset/query` catch 用的就是 `typeof status === 'number'` + 非空字符串 `code`(`envelopeStatus`/`envelopeCode`)。\n\n**状态码区间刻意不入判据**,这一点与派发令里的示例(`status` 小于 500)不同,理由写在代码注释里:400 那一支是本单的明面(一条 `DATASET_INVALID`/400 变成空网格),但**已声明的 5xx**(`read-scope-sql.ts` 的 `READ_SCOPE_COMPILE_FAILED`/500 —— fail-closed 的 RLS 下推)被吞掉只会更糟:一个服务端故障被画成一张自信的空图,没有任何人被告知。两者的共同事实是「生产者已经回答了分类问题」,措辞启发式没有资格重新打开它。issue 正文 B 的原话也正是「降级路径只对**不带 ADR-0112 信封的错误**生效」,4xx 是其动机实例而非判据本身。\n\n**C(可选支,做了)** —— postgres 那一支从 `includes('relation') && includes('does not exist')` 收紧为锚定 postgres 真实措辞的 `/relation\\s+[\"'`]?[A-Za-z0-9_$.]+[\"'`]?\\s+does not exist/i`,与同文件里**已经存在**的兄弟函数 `missingSourceRelation` 用的是同一条模式(`metadata/src/utils/schema-sync-errors.ts` 也是这个形状)。收紧后「是不是缺了什么」与「缺的是什么」这两个函数不会再在这一支上互相矛盾。\n\n### C 的量化(实测,13 条仓内真实措辞)\n\n| 措辞 | 收紧前 | 收紧后 |\n|---|---|---|\n| sqlite/libsql `no such table: t` | HIT | HIT |\n| sqlite 经 knex(SQL 前缀) | HIT | HIT |\n| postgres `relation \"t\" does not exist` | HIT | HIT |\n| postgres schema 限定 `relation \"public.acct\" …` | HIT | HIT |\n| postgres 缺列(写路径)`column \"c\" of relation \"t\" …` | HIT | HIT |\n| postgres 缺列(读路径)`column \"c\" does not exist` | — | — |\n| mysql `Table 'app.t' doesn't exist` | HIT | HIT |\n| objectql `Datasource '…' … is not registered.` | HIT | HIT |\n| rest `Object 'x' is not registered` | HIT | HIT |\n| analytics `CUBE_NOT_FOUND`(#3867) | HIT | HIT |\n| **dataset-compiler 关系拒收** | **HIT** | **—** |\n| read-scope `nested/relation value …` | — | — |\n| analytics measure 闸门(#4437) | — | — |\n\n**13 条里只有 1 条改判,就是那条雷;没有任何真实驱动措辞改判** —— 这正是「收紧而非改变 #5033 行为」的证据。\n\n## 为什么不把编译点移进 try(实测后的判断)\n\n派发令把这一步留给实测。结论:**不移**,并说明未覆盖面。\n\n移进去会让 `registerDataset` 路径上的**裸**错误新落入降级面:`dataset-compiler.ts:135` 的内部不变量(`non-derived measure … has no aggregate`)、以及宿主提供的 `relationshipResolver` / `getObjectDatasource` / `isExternalObject` 三个回调抛出的任何东西 —— 其中宿主回调抛 `Object 'x' is not registered` 一类会**新**被吞成空网格。那是把宽容度朝与本单相反的方向扩大(「Absence must be loud」/「prefer failing to falling back」),而本单要的是收窄。\n\n雷本身不需要靠移编译点来拆:测试里直接把**真实 producer 造出来的那个错误对象**从 try 内部抛出(见下),这与「编译点被移进来」在 catch 看来是同一件事,却不引入上面那片新面。\n\n## 测试\n\n新增 `packages/services/service-analytics/src/__tests__/dataset-degradation-envelope.test.ts`(11 例),两块:\n\n1. **带信封不降级** —— 三例都用**真实 producer** 捕获的错误对象,不是手抄字符串:\n   - `CUBE_NOT_FOUND`/404(`assertInferableCube`,消息里含「is not a registered object」,收紧后**仍然**命中嗅探器 —— 这一例专门隔离 B,任何措辞收紧都救不了它);\n   - 已声明 5xx(`READ_SCOPE_COMPILE_FAILED` 形状,措辞为合成,注释里写明为什么必须合成);\n   - **compiler 那条拒收本体**(`compileDataset` 真跑出来的错误,含 `DATASET_INVALID`/400),从 try 内部抛出 —— 雷被正式拆除的直接断言。外加同一措辞**剥掉信封**的裸 Error 一例:那一例只有 C 能救。\n2. **#5033 语义原样保留** —— `no such table`、postgres 真实措辞、mysql 措辞照旧降级为 `{rows: [], fields: [], totals: []}` + warn;裸的「join 表缺失」照旧响亮报跨库拓扑错误;裸的语法错误照旧上抛。\n\n### 反向验证(方向在跑之前就写死了,并且是**分裂**的)\n\n预测:两条防线互相独立,单独回退任何一条,另一条仍然接住 compiler 那一例 —— 所以「回退就全红」在这里是错误期待。实测(逐个回退,11 例):\n\n| 回退 | 结果 | 红的是 |\n|---|---|---|\n| 只回退 B | 2 红 / 9 绿 | `CUBE_NOT_FOUND`、已声明 5xx |\n| 只回退 C | 1 红 / 10 绿 | 裸措辞的 compiler 拒收 |\n| 两条都回退 | **4 红 / 7 绿** | 上面三例 + **带信封的 compiler 拒收**(雷本身,唯一需要两条防线同时消失才会引爆的一例) |\n\n最后一行我第一版预测写的是 3 红(两个单退集合的并集),实测 4 —— 差的那一例正是雷本身。测试文件头把这个更正**留在原处**而不是悄悄改掉,因为那第四行才是这一单的发现。四种状态下 #5033 的五条用例**全绿**,这就是「刻意宽容未被触动」的证据形态。\n\n## 验证记录(全部前台阻塞执行,持容器级 `flock` 锁,`--max-old-space-size=4096`)\n\n- `pnpm --filter @objectstack/service-analytics exec vitest run --maxWorkers=2` → **61 files / 1127 tests passed**\n- `packages/rest` 消费半径(路由侧读信封的 7 个用例文件:`analytics-dataset-refusal-envelope` / `analytics-dataset-unlisted-refusal-envelope` / `analytics-dataset-dimension-gate` / `analytics-dataset-where-gate` / `analytics-filter-refusal-envelope` / `analytics-read-scope-refusal-envelope` / `analytics-routes`)→ **7 files / 84 tests passed**\n- `lint.yml` 逐个枚举后跑过的门:`pnpm lint`(全仓 ESLint)、`check:nul-bytes`、`check:doc-authoring`、`check:adr-anchors`、`check:route-envelope`、`check:error-code-casing`、`check:wildcard-fallthrough`、`check:durability-log-level`、`check:startup-registry-verdict`、`check:engine-double-contract`、`check:slot-lookup`、`check:query-options-erasure`、`check:release-notes`、`check:type-check-coverage` —— 全 PASS(该包在 DEBT 账本里冻结 3 个错误,新测试文件没有改变计数)\n- 控制字节自扫:`grep -naP` 扫三个改动文件的控制字节区间 → 干净\n\n未触:`packages/spec`、drivers、`buildQuery` 粒度判据(#6003 面)、各拒收 throw 本体(#5963 面)。\n\n## 必答项:对 #6007(compareTo 合并键错位)的影响\n\n**完全无影响**,与预期一致。#6007 落在 `dataset-executor.ts` 的 compareTo 行合并逻辑(合并键构造),本 PR 只改 `analytics-service.ts` 里 `queryDataset` catch 的**分类顺序**与嗅探器的一条正则;两者不共享函数、不共享数据流。唯一的接触面是「若 compareTo 路径抛 `datasetInvalidError`,它现在保证不被降级」—— 那是本 PR 给 #6007 所在文件的**保障**,不改变 #6007 要修的合并行为,既不使其变简单也不使其变难、更不使其变得不必要。\n\n## 出界发现\n\n- 已立 #6035(`finding`,未派单):postgres **写路径**的缺列措辞 `column \"c\" of relation \"t\" does not exist` 内含一整段缺表措辞,收紧前后**都**命中嗅探器,而嗅探器自己的文档写明「不含列/语法错误」。只读面上不产生该措辞(SELECT 说的是 `column \"c\" does not exist`,不含 `relation`),属 observation 类;仓内已有先例(`rest-server.ts:825` 先摘缺列再判缺表)。本 PR 在 `isMissingSourceError` 的注释里指名了这条残留与 issue 号,不在本单顺手改 —— 它超出 C 的既定范围(C 是「只匹配 postgres 真实缺表措辞」,而这条措辞字面上**就是**它)。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015a5qkLzpGXhLL2F5gvJ7dD)_"
+}

@@ -1,0 +1,38 @@
+{
+  "number": 5471,
+  "kind": "issue",
+  "title": "空 frontmatter changeset 相对 `skip-changeset` 标签零收益、单向风险 —— 「禁止空 changeset 进 .changeset/」的决策证据(#5292 结案后无处存放)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T13:15:23Z",
+  "updated_at": "2026-08-07T01:25:01Z",
+  "closed_at": "2026-08-07T01:25:01Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5471",
+  "body": "**这不是待办工单,是一条决策证据的存放点。** 不带 `pm:queue`、不指派,由维护者裁定是否立项。\n\n## 为什么单独开一条\n\n#5292 提出过一个备选方案:「若认为空 changeset 在某些场景下确实是正当声明,那就需要在闸门之外再加一道:禁止空 frontmatter 的 changeset 进入 `.changeset/`,让『声明』只走标签这一条路。」\n\ndevx 车道 2026-08-05 的分诊把它明确划到本单之外(牵动 changesets/action 的输入语义与发布机器行为,#4898/#4899/#4901 一族),留待维护者认可后另行立项。\n\n问题在于:#5292 会被 PR #5467 关掉,这个提案连同下面这条证据就跟着一起沉底了。所以把它单独记在这里。\n\n## 新证据:空 changeset 相对标签是零收益、单向风险\n\n处理 #5292 时顺手实测了「空 frontmatter changeset 到底产出了什么」,结论比原 issue 的描述更强:\n\n**它什么都不产出。**\n\n- 取三个**已被 `changeset version` 消费过**的空 changeset(`adr-0044-revise-service-owned-note`、`ci-node-22-pin`、`duplicate-fix-guard`),把各自正文原句 grep 全仓 `CHANGELOG.md` → **各 0 处命中**;\n- 对照组:任取一个非空 changeset 的正文首句 → 命中 `packages/spec/CHANGELOG.md` 与 `packages/cli/CHANGELOG.md`,**2 处**。\n\n机制上也讲得通:空 frontmatter 不点名任何 package,summary 是挂在 release 上的,零 release 即零挂载点,正文因此进不了任何 CHANGELOG。\n\n于是两条出路的收益/风险表变成**完全单向**:\n\n| | `skip-changeset` 标签 | 空 frontmatter changeset |\n|:---|:---|:---|\n| 满足 Check Changeset 闸门 | 是 | 是 |\n| 产出 CHANGELOG 条目 | 否 | **否**(实测) |\n| 是否成为 changesets/action 的输入 | **否** | **是** |\n| 全空时触发 0 秒静默不发版分支(#4898) | 不可能 | **可能** |\n\n即:空 changeset 没有任何标签给不了的东西,却独家带来 #4898 的风险面。它作为「声明」手段没有存在理由 —— 这正是「干脆禁掉」这个方案的核心论据,而在写 #5292 时这一条还只是推测。\n\n## 现状盘点(`origin/main` @ `61fde5e44`)\n\n- `.changeset/*.md`(不含 README)共 1065,其中**空 frontmatter 172**;\n- `pre.json` 为 `mode: pre` / `tag: rc`,记录 860 个已消费 id;那 172 个空文件里 **140 个已记录**(RC 模式保留的残留)、**32 个未记录**(下一次 release run 的待消费输入);\n- 32 个里 26 个在历史根提交即存在(无法再归因),6 个可归因且全部来自只碰非发布路径的 PR —— **未发现无主残留**;\n- **0 秒分支当前未被触发**:待消费的 changeset 里还有 173 个非空,`hasNonEmptyChangesets` 为真。\n\n明细见 PR #5467 的正文。\n\n## 若要立项,值得先想清楚的两点\n\n1. **既有的 172 个空文件怎么办。** 直接禁止新增 + 存量豁免?还是随下一次 `changeset pre exit` 一并清掉?后者要确认 `changeset version` 对空文件的删除行为(本次未验证)。\n2. **禁在哪一层。** 加一道 PR 闸门(和 Check Changeset 同层,只拦新增)最轻;改 `changeset` 配置/包装脚本让它压根写不出空 frontmatter 更彻底,但会碰发布机器。这两者的取舍属于发布面,不该由 devx 车道自行决定。\n\n相关:#5292(文案已由 PR #5467 修正)、#4898(被静默卡死的那次发布)、#4899、#4901。\n出处:PR #5467 的验收过程。"
+}

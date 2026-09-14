@@ -1,0 +1,32 @@
+{
+  "number": 6113,
+  "kind": "issue",
+  "title": "作者时表达式校验不认识平台注入列：`record.owner_id == os.user.id` 被判为 unknown field，最常见的归属谓词编译不过",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T02:13:46Z",
+  "updated_at": "2026-08-07T06:05:26Z",
+  "closed_at": "2026-08-07T06:05:26Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6113",
+  "body": "`applySystemFields` 给每个业务对象注入 `owner_id` / `organization_id` / `created_by` / `updated_by` / `owning_business_unit_id`，它们是**真实存在的列**（REST 读回来就在 payload 里），但**不出现在 `/meta/object/<name>` 发布的 `fields` 里**。作者时表达式校验（`expression-invalid`）拿发布的 `fields` 当字段全集，于是最常见的归属谓词直接编译失败：\n\n```ts\ndefineAction({\n  name: 'x', objectName: 'showcase_field_zoo', type: 'script',\n  visible: 'record.owner_id == os.user.id',\n});\n```\n\n```\n✗ Author-time rules failed\n• stack · action 'x' visible: unknown field `owner_id` on `showcase_field_zoo`\n    source: `record.owner_id == os.user.id`\n    rule: expression-invalid\n```\n\n## 为什么这条值得修，而不是绕过\n\n`record.owner_id == os.user.id` 是「只有记录所有者才看得到这个按钮」的标准写法，也是绝大多数应用写的第一条 `visible`。现在的结果是：\n\n- **构建期直接红**，作者只能改用一个自己声明的字段（showcase 里只好退到 `f_user`），或者放弃这条谓词；\n- 而运行时这条谓词是**完全正常工作**的 —— 列在、值在、CEL 求得出来。所以这是纯粹的校验器盲区，不是运行时限制；\n- 同一个盲区还波及消费方：objectui 的 `$select` 投影同样按「对象声明的字段」过滤谓词引用，`owner_id` 会被当成拼写错误丢掉（objectui#3501 里只能单独硬编码一份平台列名单来兜住，见 `PLATFORM_RECORD_COLUMNS`）。两边各自维护一份「平台注入了哪些列」的猜测，正是同一个事实没有权威出口的症状。\n\n复现：`examples/app-showcase` 里任何一个 `defineAction` 写上 `visible: 'record.owner_id == os.user.id'`，`pnpm validate` 即报上述错误（本单发现于 objectui#3501 的 showcase 覆盖工作）。\n\n## 方案（三选一，倾向 1）\n\n1. **让注入列成为字段全集的一部分**：`applySystemFields` 注入时给字段打 `system: true` 并照常进 `fields`，`/meta/object` 发布它们（前端已有 `isSystemManagedField` 按 `system` 标志把它们排除出默认列，所以「发布」不等于「显示」）。校验器与所有消费方从此读同一个权威来源。\n2. 校验器侧单独把注入列名单并进已知字段集合 —— 修得快，但把「平台注入了哪些列」这个事实又抄了一份。\n3. 明确宣布这些列不可在表达式中引用，并在错误信息里给出替代写法 —— 需要同时回答「那归属谓词该怎么写」，目前没有答案。\n\n## 验收\n\n`visible: 'record.owner_id == os.user.id'` 能通过 `objectstack validate`，且运行时行为与校验通过后的预期一致；消费方不再需要各自维护平台列名单。\n"
+}

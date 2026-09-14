@@ -1,0 +1,36 @@
+{
+  "number": 4671,
+  "kind": "issue",
+  "title": "decide: `system-data` 默认 affordance 是否应包含 CSV `import`(RBAC 关联表批量绑定)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T15:47:00Z",
+  "updated_at": "2026-08-07T05:34:23Z",
+  "closed_at": "2026-08-07T05:34:23Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4671",
+  "body": "从 #4660 拆出,**不阻塞该 PR 合并**。#4660 按现状(默认含 `import`)落地,本 issue 追踪是否收窄。\n\n## 需要裁决的一句话\n\n`system-data` 桶的默认 affordance 目前是 `create/edit/delete/import/exportCsv: true`。**`import` 是否应从默认值中移除,改为按对象显式 opt-in?**\n\n## 为什么单独拿出来\n\nv16 的 `managedBy: 'system'` 默认 LOCKED,8 个成员各自用 `userActions: { create, edit, delete }` 重开写入——**没有一个重开 `import`**,所以 CSV 导入在 v16 解析为 `false`。v17 的 `system-data` 默认可写且这些 `userActions` 块已删除,于是 `import` 变成 `true`。\n\n受影响的是三张 RBAC 关联表:\n\n- `sys_user_position`\n- `sys_user_permission_set`\n- `sys_position_permission_set`\n\n后果:管理台上出现「CSV 批量绑定权限集 / 岗位」的入口。\n\n## 不是什么\n\n**授权没有被绕过。** affordance 只决定 UI 入口是否出现;CSV 导入写的每一行仍然逐条经过 `DelegatedAdminGate`、RLS 与权限集裁决。一个无权授予某权限集的 admin,通过 CSV 也授不出去。\n\n## 那么风险在哪\n\n在**杠杆**,不在授权边界:逐行点选授权时,一次误操作影响一个人;一份错误 CSV 就是一次批量授权,且没有天然的复核节奏。这三张表恰好是整个 RBAC 的授予面。\n\n## 溯源(为什么这条没被真正裁决过)\n\n#3355 上 09:49 / 09:59 那两条确定 `system-data` 与默认 affordance 的评论,署名带 Claude Code 脚注,是**早前的 agent 会话**写的,不是维护者本人。实现 agent 据此把\"默认含 `import`\"当作已拍板事项执行,并主动把该后果标记为 security-adjacent、指出\"裁决时可能未考虑批量绑定权限集这一具体场景\"。它是对的——作出该裁决的是上游 agent。\n\n## PM 建议\n\n桶默认给 `create/edit/delete/exportCsv`,**不含 `import`**;需要导入的对象写 `userActions: { import: true }` 显式开启。\n\n理由是这样两边都不牺牲:桶依然完整描述其成员(8 个对象仍不需要写任何 `userActions` 回收权限,不重演 v16「每个成员各自抠回一个动词」的形状),同时把高杠杆的批量授予变成一次显式选择。\n\n## 若裁决为\"收窄\"\n\n改动很小,且已有 pin 兜底:\n\n- `packages/spec/src/data/object.zod.ts` 的 `CRUD_AFFORDANCE_DEFAULTS` 中 `system-data` 行去掉 `import`;\n- #4660 已在 4 个包中为该 flip 埋了逐对象 before/after 等价 pin,收窄后需同步这些 pin 的期望值——**它们会直接变红,不会静默通过**;\n- 若某个对象确实需要导入,加 `userActions: { import: true }`。\n\n若裁决为\"保持现状\",关闭本 issue 即可,无需改动。"
+}

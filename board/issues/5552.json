@@ -1,0 +1,36 @@
+{
+  "number": 5552,
+  "kind": "issue",
+  "title": "shared/mapping.zod.ts 的 javascript 变换 describe 推荐 dialect=\"js\",而 ExpressionDialect 只有 cel/cron/template —— 照着写会被拒",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T17:17:46Z",
+  "updated_at": "2026-08-07T03:18:15Z",
+  "closed_at": "2026-08-07T03:18:15Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5552",
+  "body": "发现于 #5515(修 `SYNC_ARCHITECTURE.md` L3 示例的 `transform.type: 'custom'`)时,给示例挑真实联合成员的过程中量到,不在该 PR 范围内。\n\n## 事实\n\n`packages/spec/src/shared/mapping.zod.ts` 的 `FieldMappingTransformSchema`,`javascript` 分支:\n\n```\nz.object({\n  type: z.literal('javascript'),\n  expression: ExpressionInputSchema.describe('JS expression (dialect=\"js\" recommended). e.g. value.toUpperCase()'),\n}).describe('Custom JavaScript transformation'),\n```\n\n而 `packages/spec/src/shared/expression.zod.ts:42`:\n\n```\nexport const ExpressionDialect = z.enum(['cel', 'cron', 'template']);\n```\n\n没有 `js`。`'js'` 这个方言在 #3278 就退役了(ADR-0058 addendum,同文件 40 行的注释自己写着)。所以 describe 让作者写的那个显式信封 —— `expression: { dialect: 'js', source: 'value.toUpperCase()' }` —— 会被 `ExpressionSchema` 的枚举直接拒收。\n\n实测(`ConnectorFieldMappingSchema`,同一个 `FieldMappingTransformSchema`):\n\n```\ntransform: { type: 'javascript', expression: 'value / 100' }\n→ parse 成功,规范化为 { type: 'javascript', expression: { dialect: 'cel', source: 'value / 100' } }\n```\n\n也就是说:唯一走得通的写法是裸字符串简写,而它落到的方言是 **cel**,不是 JS。describe 里那句 `value.toUpperCase()` 作为 CEL 表达式也是不成立的(CEL 没有这个方法)。一个成员叫 `javascript`、describe 说 dialect 用 `js`、实际只能是 cel —— 三处互相打架,而 describe 是会流进生成文档和 JSON Schema 的那一处。\n\n## 影响\n\n`describe` 文本进 `content/docs/references/**` 和 `gen:schema` 产物,是 AI 作者最直接读到的一行。这正是 Prime Directive #10 的反面:宣传了一个运行时不兑现的方言名。\n\n## 未验证 / 需要裁定的部分\n\n`FieldMappingTransform` 目前在 objectstack 全仓**没有任何消费者**(grep `FieldMappingTransform` 只有 `mapping.zod.ts` 自己的 `z.infer` 别名一行),即整个变换联合是 declared-but-unenforced,`javascript` 成员尤其如此 —— 没有任何运行时会去执行这个表达式。所以本单的处置有两条路,需要裁定:\n\n- **A. 只修 describe**:改成如实描述\"裸字符串简写会被包成 `dialect: 'cel'`\",并换一个 CEL 里成立的例子。成本最低,但把一个跑不起来的成员写得更像能跑。\n- **B. 按 ADR-0049 enforce-or-remove 处理整个 `javascript` 成员(乃至整个变换联合)**:没有引擎就是 absent,和 #4911 退役 `rateLimitConfig` 同一个路数。\n\n倾向 B 的方向判断,但联合里其余四个成员(`constant` / `cast` / `lookup` / `map`)的存活状态没量过,先记事实。"
+}

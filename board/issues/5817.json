@@ -1,0 +1,37 @@
+{
+  "number": 5817,
+  "kind": "issue",
+  "title": "spec 契约文档漂移:ISharingService 模块头仍称 canEdit() 回答 update/delete,ADR-0111 D3 已把 delete 拆给 canDelete()",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T06:25:15Z",
+  "updated_at": "2026-08-07T00:41:34Z",
+  "closed_at": "2026-08-07T00:41:34Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5817",
+  "body": "`packages/spec/src/contracts/sharing-service.ts` 顶部的**模块头文档**(第 15-17 行,`origin/main` @ `5ab0842`)写:\n\n> 2. **Per-record gating** — `canEdit()` answers the access question for `update` / `delete` operations. Returns `true` when the caller may modify the record, `false` otherwise.\n\n但同一文件第 139-161 行的 `canDelete()`(ADR-0111 D3)说的正好相反 —— delete 是一道**故意比 `canEdit` 窄**的独立门:\n\n> The verb boundary: a share widens *which rows* a principal reaches, never *which verbs* they may use — so delete is **ownership (widened by write DEPTH) or the `modifyAllRecords` super-user bypass ONLY**, and an `edit` share does NOT confer it\n\n实现侧同样是两道门(`packages/plugins/plugin-sharing/src/sharing-service.ts`:`canEdit` 在 366 行、`canDelete` 在 424 行,后者不含 share 分支)。所以模块头是 ADR-0111 D3 拆分 `canDelete` **之前**的遗留文字,今天与它下面 20 行的方法文档直接矛盾。\n\n**影响**:这个模块头正是跨包调用方进文件后读到的第一段。照它写的做,会以为\"删除也走 `canEdit`\",于是既可能给 delete 用错门(把 `edit` share 当成删除授权,即 ADR-0111 D3 明确拒绝的语义),也可能反过来以为不存在 `canDelete` 这道门。没有 schema / 类型变化,纯文档。\n\n**修法**:一句话 —— 把第 2 条拆成 `canEdit()`(update)与 `canDelete()`(delete,更窄),措辞与下方两个方法文档对齐。\n\n发现于 #5125(其 PR 的任务书把改动面限定为 `canEdit` 的 doc comment,故不并入)。未认领。"
+}

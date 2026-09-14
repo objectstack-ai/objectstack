@@ -1,0 +1,35 @@
+{
+  "number": 5935,
+  "kind": "issue",
+  "title": "ADR-0094 addendum's sys_capability row still says label/description \"refresh each boot\" — true only for the curated half after #5876",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T12:26:44Z",
+  "updated_at": "2026-08-07T00:22:51Z",
+  "closed_at": "2026-08-07T00:22:51Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5935",
+  "body": "Found while implementing #5876 (PR #5934). Out of scope there — that PR's file surface was deliberately limited to the seeder, its two test files and a changeset, and an ADR text change is a governed edit that deserves its own review (Prime Directive #13). Filed for triage.\n\n## What\n\n`docs/adr/0094-sys-permission-set-pure-projection.md`, the per-type decisions table in the 2026-07-14 addendum, `sys_capability` row:\n\n> **Resolved (#2909 T3)**: seed-not-clobber holds — `label`/`description` are platform-owned and refresh each boot; `managed_by`/`active` were already preserved; `scope` is an admin-editable classification face and is now **seed-once** (insert only).\n\nAfter #5876 that sentence describes only **half** of what `bootstrapSystemCapabilities` does:\n\n- **curated** names (`PLATFORM_CAPABILITIES`) — unchanged: `label`/`description` genuinely are platform-authored, and a new platform version legitimately ships new copy, so the row is refreshed each boot;\n- **derived** names (a string a bootstrap permission set grants via `systemPermissions[]` that nothing declared) — `label` is `humanize(name)` and `description` is a generated `Capability` sentence. Nothing about them is \"platform-owned\" copy, and as of #5876 the derived half refreshes them only on rows it owns (`managed_by:'platform'`), never on `admin`/`package`-authored rows.\n\n## Why it is worth a line and not a shrug\n\nThe row's headline claim — \"seed-not-clobber holds\" — was in fact **false** for derived names before #5876 (that is the defect #5876 fixed), and the addendum's own general invariant one screen above states the rule correctly and unambiguously:\n\n> the seeder must not clobber an environment-edited record\n\nSo this is not a decision reversal — the code now matches the ADR's stated invariant more closely than before. What is left is a parenthetical in the summary table that reads, on its own, as licence to refresh display fields on any row. That is exactly the shape Prime Directive #13 warns about: the next author reads the table row, not the invariant, and \"fixes\" the guard back out.\n\n## Suggested amendment (one row, no decision content)\n\nSplit the display-field clause by half, e.g.:\n\n> `label`/`description` refresh each boot **for the curated platform definitions** (platform-authored copy); the back-compat **derived** placeholders (`humanize(name)`) reconcile only rows the derivation itself owns (`managed_by:'platform'`) and never an admin/package-authored row (#5876). `managed_by`/`active` preserved; `scope` **seed-once** (insert only).\n\n## Class\n\nObservation — documentation precision on an accepted ADR. Nothing a user hits today; the runtime behaviour is already correct and pinned (`bootstrap-system-capabilities.test.ts`, `derived defaults never clobber an authored row (#5876)`). No `pm:queue` requested.\n\nNot blocked by anything; #5934 can merge independently.\n"
+}

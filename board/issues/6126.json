@@ -1,0 +1,35 @@
+{
+  "number": 6126,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): listCommits 把 commit store outage 上抛 503,不再答成「无历史」 (#5980)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T02:48:43Z",
+  "updated_at": "2026-08-07T03:11:34Z",
+  "closed_at": "2026-08-07T03:11:33Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T03:11:32Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6126",
+  "body": "Fixes objectstack-ai/objectstack#5980\n\n## 前提复核\n\n单据在 `9e3709a` 分诊,该文件今天已被 #5998、#6051 两次大改并 MERGED,行号全部漂移。以下逐条按**内容**在 `origin/main`(合并基 `a65ff1c63`)重定位实读:\n\n| 前提 | 结论 | 实读 |\n| --- | --- | --- |\n| `listCommits()` 结尾 `} catch { return []; }`,零日志零区分 | 成立 | 函数在 `protocol.ts:9857`(单据写 :9706,漂 +151 行),`catch` 原样 |\n| JSDoc 含 \"Returns [] if the commit store is unavailable\" | 成立(确为跨行折行,单行 grep 零命中) | `protocol.ts:9853-9855`,整段读取确认 |\n| 处方 `rethrowUnlessMetadataStoreUnprovisioned()` 同文件已有,修法无新依赖 | 成立;**计数与单据不符,如实报告** | 定义 `:3161`;**实际调用点 6 处**(`:3383 / :3439 / :3614 / :3679 / :4051 / :7211`),另 6 处 JSDoc 交叉引用,合计 13 处提及。单据与分诊评论写的「12+ 处调用点」把文档引用一并计入了。**不影响结论**:处方在同文件同类读上已成建制,本次修改无新 import、无新依赖。 |\n| baseline 有 `protocol.ts::listCommits` 条目,shrink-only | 成立 | `scripts/durability-read-invention.baseline.json`,`verdict: unfixed-degradation`,`tracked_by: #5980` |\n\n前提全部成立(第三条的计数按实测修正),按单据处方实施。\n\n## 处置\n\n`packages/metadata-protocol/src/protocol.ts`,只动 `listCommits` 的 `catch` 与其 JSDoc:\n\n```ts\n} catch (error) {\n    // [#5980] Benign (the table has not been provisioned) falls through;\n    // everything else is a read that did not happen and leaves as a 503.\n    this.rethrowUnlessMetadataStoreUnprovisioned(error);\n    return [];\n}\n```\n\nJSDoc 删掉 \"Returns [] if the commit store is unavailable\"。这句的问题不只是描述了缺陷,是把缺陷**写成了契约**,后来者照着读就不会再怀疑它。换成如实措辞:`[]` 只表示「确实没有提交历史」(首启未 provision / 无人 apply 过),outage 一律 503 上抛、驱动原始错误挂 `cause`。\n\n**为什么是缺陷而非设计** —— ADR-0110 D3:miss 与 outage 是意义相反的两个事实。后果面朝向 revert,因为这条时间线正是 `revertCommit` 的选择面:\n\n- `GET /packages/:id/commits` → `{ commits: [] }`,故障期间 UI 显示「无可回滚项」,运维判断做反;\n- `rollbackToPackageCommit` 过滤的正是这个 `[]` → 一次都没回滚,却返回 `success: true`。\n\n第二条是本 seam 比同族其它读更尖的地方:**别的读答错的是一个问题,这一处把一次没做的写报成了完成**。已在测试里实测复现(见下)。\n\n`scripts/durability-read-invention.baseline.json` 摘除该条目(shrink-only,修好即摘)。\n\n## 测试与反向验证(预测先写死,再运行)\n\n新增 7 例,放在既有的 `protocol.metadata-store-outage.test.ts` —— #5532 / #5707 / #5840 同一份规矩的 covers 文件,共用 `expectStoreUnavailable`,使四处 seam 的信封不会各自漂移。\n\n**Lap A —— 把 `catch` 临时改回裸 `return []`**\n\n方向预测(运行前写死):ordinary red,**只翻 outage 半边**。预测 4 红 / 3 绿(新增例),既有 18 例全绿。\n\n实测:**`Tests 4 failed | 498 passed (502)`** —— 完全命中。\n\n翻红的正是 4 个 outage 例,其中 `rollbackToPackageCommit` 那例的实测输出就是缺陷本身:\n\n```\nFAIL … > rollbackToPackageCommit stops reporting `success: true` for a rollback it never performed\nAssertionError: expected a rejection, but the call resolved with\n  {\"success\":true,\"revertedCommits\":[],\"failed\":[]}\n```\n\n3 个 benign / healthy 例全绿 —— 这个分离是「第四处读加入同一条规矩」与「listCommits 现在一律抛」的区别所在。\n\n**Lap B —— 限肢还原、baseline 条目已摘(账本与代码互相钉死)**\n\n预测:闸门红。实测红,并且直接指出落点:\n\n```\n✗ 1 read seam(s) invent an empty answer for a read that failed, and tell nobody\n  packages/metadata-protocol/src/protocol.ts:9919  (in listCommits())\n    guards  : find() at line 9900 — a multi-row read (IDataDriver.find)\n    found   : catch logs nothing at all and returns `[]` at line 9920\nEXIT=1\n```\n\n即:修复缺席而条目已摘 → 红;修复在场而条目未摘 → 按该文件头声明的 shrink-only 语义同样红。两个方向都钉住。\n\n## 命令与真实输出\n\n```\n$ pnpm --workspace-concurrency=2 --filter @objectstack/metadata-protocol test -- --maxWorkers=2\n Test Files  49 passed (49)\n      Tests  502 passed (502)      # 合并 origin/main 后完整重跑,同样 502/502\n\n$ node scripts/check-durability-degradation-log-level.mjs\n✓ durability-degradation log levels: 24 durability-critical catch seam(s), all loud, …\n✓ read-seam invention (#5186, 3 package roots): 64 read seam(s), none invents an\n  unreported empty answer (6 return an empty value on a type-discriminated benign\n  branch) (2 baselined).          # 摘条目后 3 → 2\n\n$ node scripts/check-engine-double-contract.mjs\ncheck-engine-double-contract: OK — 73 pinned, 133 in the DEBT ledger, 2 exempt.\n\n$ node scripts/check-nul-bytes.mjs\ncheck-nul-bytes: OK (scanned 5863 tracked text file(s); … no raw ASCII control bytes).\n```\n\n`typecheck`:**`@objectstack/metadata-protocol` 没有 `typecheck` 脚本**(`package.json` 的 scripts 只有 `build / dev / clean / test / test:watch`),如实记录,不伪造 —— #4311 台账那一类。类型正确性由 `pnpm --filter '@objectstack/metadata-protocol^...' build`(含 DTS,exit 0)与全量 vitest 覆盖。\n\n合并纪律:`git fetch origin main` → `git merge-tree` 预检(exit 0,无冲突路径)→ `git merge origin/main`(非 rebase)。合入带来 `packages/metadata` 与 `packages/spec` 改动,已重装依赖、重建依赖包并完整重跑,仍 502/502。\n\n## 必答项\n\n**#5841(同文件另一处退休手抄 `/no such table/i`)——不触其面,不改其定价。**\n#5841 的落点是 `loadMetaFromDb` 的 hydration catch(`protocol.ts:10659` 一带),已经在用 `isMissingTableError`,并带 #5897 的 `storeUnavailable` 返回值。本 PR 只动 `listCommits` 的 catch,两处相距数百行、入口不同、调用方不同。方向上是互相加强而非改价:两处最终都问同一个 `isMissingTableError` 谓词,本 PR 又少了一处手抄的机会。\n\n**#4636(`loadMetaFromDb` packageId,决策箱)——无交叠,与预期一致。**\n#4636 的面是 `loadMetaFromDb` 的 packageId 语义,本 PR 一行未动该函数,也未动它读的任何字段。\n\n**#6051 刚落的 degraded 读法 —— 同一措辞体系,`rethrowUnlessMetadataStoreUnprovisioned` 语义无变化。**\n实读确认该 guard 在 #6051 后仍是 `if (isMissingTableError(error)) return; throw metadataStoreUnavailableError(error);`,未被改写。#6051 加的是**另一条**通路:`readItemFromMetadataService` / `getDiagnosed`,针对 MetadataService(loader 链)那半边——它**故意不抛**,因为两个调用方要同一事实却处置不同。两者措辞体系一致(同为 503 `SERVICE_UNAVAILABLE`,`ErrorCode` 词表内,`cause` 带原始错误,消息含 \"unknown\" 不含 \"not found\",由同一个 `expectStoreUnavailable` / `expectLoaderOutage` 断言),差别只在错误来源能否以 throw 抵达本层。`listCommits` 是 engine 直读,失败以 throw 抵达,因此走 guard 这条,与 #5532 / #5707 同形。\n\n**revert 面 —— 只测只答,未顺手修;结论:后端无需跟进,UI 侧亦无正确性缺口。**\n- `rollbackToPackageCommit`:已在本 PR 覆盖(见 Lap A 实测),503 正确穿透,不再产出 `success: true` 假回执。\n- 路由 `GET /packages/:id/commits`(`packages/runtime/src/domains/packages.ts:347`):`catch (e) => deps.errorFromThrown(e, 500)`,而 `HttpDispatcher.errorFromThrown`(`http-dispatcher.ts:718-724`)优先读 `e.status`,故 503 原样上线、`code: SERVICE_UNAVAILABLE` 进 `details`。**无需改动。**\n- objectui `packages/app-shell/src/preview/commitHistory.ts:36`:`if (!res.ok) throw new Error(...)`,故 503 在 UI 侧以异常呈现,**不会**被渲染成「无历史」。**无需跟进。** 唯一可议之处是那句异常文案是通用的 `commits HTTP 503`,操作者看不到「commit store 不可达、可重试」这层意思 —— 属观察类文案打磨,不是缺陷,未立案亦未顺手改,在此点名供 PM 裁量。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019Q7oc7ASjh8yxyS3Yz78We)_"
+}

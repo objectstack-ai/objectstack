@@ -1,0 +1,35 @@
+{
+  "number": 6256,
+  "kind": "pull_request",
+  "title": "fix(spec): 检查 (c) 的墓碑老化时钟按确切 key 起算,不再用叶名匹配 (#5898)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T12:13:07Z",
+  "updated_at": "2026-08-07T12:52:43Z",
+  "closed_at": "2026-08-07T12:52:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T12:52:41Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6256",
+  "body": "Fixes #5898\n\n## 前提复核(issue 立单于 08-06,`build-schemas.ts` 此后又落了 #6200)\n\n**两半都仍然成立**,在 `origin/main` @ `07c68b011` 上复核:\n\n- 叶名匹配原样还在,只是行号变了(立单时 `:1418`,现在 `packages/spec/scripts/build-schemas.ts:1677`):\n  `const matches = [...clauseMajors.entries()].filter(([clause]) => clause.endsWith('.' + prop));`\n- `data/Index:type` 这个实测样本**可复现**:叶名 `type` 命中 protocol 11 的 `flow.node.type`,\n  `Math.min` 把时钟起算在 major 11,而它自己的登记 `object.indexes[].type` 是 major 17。\n\n分诊评论说的「#4659 的 PR #5902 已合入、`RETIRED_KEYS_BY_MAJOR` 已存在」也复核属实。\n#6200 只动了输出目录归属(`lib/json-schema-out-dir.ts`),与检查 (c) 无关。\n\n## 处置方向:方向 1 的**终点**,但不伪造回填\n\nIssue 倾向方向 1(把 97 条历史墓碑的退休 major 回填进 `RETIRED_KEYS_BY_MAJOR`),\n硬性约束是「回填的准确性必须逐条可复核,不能推导一半就当事实写下」。\n\n**测量结论:两条可机械推导的来源都无法诚实定年,所以回填这一步被证伪了。**\n\n1. **叶名匹配喂新表** —— 正是 #4659 拿掉的推断,而且在这份真实数据上**双向可证伪**:\n   97 条里它判定为「已老化、今天可删」的只有 2 条,而**两条都是误判**,机制还不一样:\n\n   | key | 被谁定年 | 实际 |\n   |---|---|---|\n   | `data/Index:type` | protocol 11 `flow.node.type`(`flow-node-http-callout-rename`,flow 节点的类型) | 自己的登记 `object.indexes[].type` 是 major **17**,早了六个 major |\n   | `api/RestApiConfig:requireAuth` | major 12 `api.requireAuth` | 那是 `rest-requireauth-default-flip`,一次**安全默认值翻转**,该 step 自己写着 \"No metadata shape changed\"。真正的退休是 protocol 17 的 conversion `stack.api.requireAuth`(#3963)。同一 surface,**不同种类**的变更,早了五个 major |\n\n   第二条是本次新发现的:它不是「无关簇撞叶名」,而是「同一 surface 上更早的另一类变更」——\n   叶名匹配的失效面比 issue 记录的更宽。\n\n2. **`authorable-surface.json` 的 git 历史** —— 实测该文件生于 `cc6016554`(2026-07-31),\n   当时 `packages/spec/package.json` 是 `17.0.0-rc.0`;其 79 次提交跨越的 spec 版本只有\n   `17.0.0-rc.0 / rc.1 / rc.2`。也就是说「首次带上 `[RETIRED]` 的 commit」会把 **97 条\n   全部定在 major 17** —— 那是基线文件的**出生日期**,不是考据。\n\n⇒ 采用方向 1 的终点(检查 (c) 改读 `RETIRED_KEYS_BY_MAJOR`、按确切 `${defKey}:${name}` 判定,\n`build-schemas.ts` 里叶名匹配彻底消失),但对 97 条历史行采用 issue 自己规定的\n**fail-closed** 处置:定不出年份就不写,没有条目就无法证明年龄,基线行不许删。\n要删其中一行是一次有意的、可复核的动作 —— 确定真正的 major、写下确切 key,由检查 (b2)\n复核该条目仍指向一个本次构建确实 tombstone 的 key。\n\n## 可删墓碑数:before / after\n\n同一把尺子量两个口径,结论一致:\n\n| 口径 | 墓碑数 | before(叶名匹配) | after(确切 key) |\n|---|---|---|---|\n| `authorable-surface.base.json`(检查 (c) 离线用的 in-tree anchor) | 97 | **2** | **0** |\n| `authorable-surface/`(当前已提交分片) | 100 | **2** | **0** |\n\n变成不可删的就是上表那两条,**两条都是误判**,所以这次收紧**没有让任何一条诚实老化的行\n失去可删性**。这正是决定方向的那次测量:逐条人工回填 97 行,今天不会改变任何一条的裁决\n(95 条本来就被拦着,放行的 2 条本就不该放行),纯粹是 97 行不可复核的人工判断换零收益。\n\n## 反向验证\n\n**预测先写下再跑**(`scratchpad/issue-5898/predictions.md`),恢复缺陷 = 把检查 (c) 的\n`registeredAt` 改回叶名匹配 + `Math.min`,新测试全部保留:\n\n| # | 测试 | 预测 | 实际 |\n|---|---|---|---|\n| 1 | 主 sandbox:`data/Object:type` 删除被拒(#5898 pin) | 红 | ✅ **红** — 缺陷下 gate `exit 0`,删除被放行 |\n| 2 | `DELETED_UNREGISTERED` 文案指向 `RETIRED_KEYS_BY_MAJOR` | 红 | ❌ **绿 —— 预测落空** |\n| 3 | 新 box:声明在 major 11 ⇒ 可删 | 绿(预测其**不具鉴别力**) | ✅ 绿,如预测 |\n| 4 | 新 box:声明在当前 major ⇒ 不可删 | 红(低置信) | ✅ **红** |\n| 5 | 新 box:表清空 ⇒ 叶名撞车仍被拒 | 红 | ✅ **红** |\n\n**落空的那条,如实记录**:第 2 条我预测会红,实际是绿。原因是我执行的是**部分**恢复 ——\n只把 `registeredAt` 的**取值**改回叶名匹配,没有把**文案**一并改回。该 fixture 的叶名\n(`zzRetiredButUnregistered4650`)不匹配任何子句,于是照样走 `registeredAt === undefined`\n分支、打印新文案,断言继续通过。结论要说准:**第 2 条是文案 pin,不是针对叶名匹配的行为\npin**,只有在完整回退(含文案)时才会红。真正的行为 pin 是第 1、4、5 条。第 3 条按预测\n不具鉴别力(`compactLayout` 自己也登记在 major 11,缺陷下同样放行),保留它是为了覆盖\naged-out 正路,不作为 pin 主张 —— 这一点在测试注释里写明了。\n\n## Fixture 处置(逐条,不是批量改写)\n\n- `DELETED_UNAGED`(`ai/Agent:triggerPhrases`)→ **整条替换**为 `DELETED_LEAF_COLLIDER`\n  = `data/Object:type`,即 issue 的样本形状。旧 fixture 测的「已登记但太新」这条分支\n  现在必须先有声明,已迁到新 box。\n- `DELETED_AGED`(`data/Object:compactLayout`)→ **迁走**。主 sandbox 把 `src/` 做成\n  符号链接,改不了 registry,而 aged-out 现在是一条关于该表的主张。\n- `DELETED_UNREGISTERED` → **保留**,只更新文案断言。\n\n新增 `build-schemas.ts — check (c) dates a tombstone by its exact key (#5898)` 块,\n仿 #4659 的 box(拷贝 `src/`)以便替换 `RETIRED_KEYS_BY_MAJOR`。\n\nfixture 有效性守卫是响的:`.type` 必须仍被某条 ADR-0087 子句登记、且该 major 已老化\n(否则 pre-#5898 的匹配器本来就会拒,pin 失去鉴别力)、且该 key 未被真实登记 —— 三条\n任一不成立就失败并说明要换什么。\n\n## 消费半径清扫\n\n`registeredClauseMajors` 与旧文案在全仓已无残留;`RETIRED_KEYS_BY_MAJOR` 的消费者逐个看过。\n`.claude/skills/spec-property-retirement/SKILL.md` 里点名 #5898、说「gate (c) 仍按叶名读子句」\n的那段现在是**错的**,已改写,并补上「该条目同时起算老化时钟 / 历史墓碑不可删 / ⚠ 定不出\n年份的行不要写」。\n\n## Changeset:命名包 patch(已测量,非默认)\n\n`scripts/` 不在 `packages/spec` 的 `files` 白名单里,scripts-only 通常取 `skip-changeset`\n(先例 #6102 / #6222)。但本 PR 动了 registry(`src/migrations/registry.ts` 的 JSDoc),\n**实测发布字节确实移动**:`RETIRED_KEYS_BY_MAJOR` 的文档注释出现在 `dist/index.d.ts` 与\n`dist/index.d.mts` 中(`grep -rl \"Historical tombstones\" dist/` 命中两者),而 `dist` 在\n白名单内。导出**值**未变,变的是一个已发布公共符号的契约文档。⇒ 取命名包 patch changeset。\n\n## 验证\n\n- `pnpm --filter @objectstack/spec test` — **331 files / 8432 tests passed**\n- `build-schemas-check-mode.test.ts` 单跑 — **51 passed**(含 4 条新增)\n- `pnpm --filter @objectstack/spec typecheck` — 通过(`tsc --noEmit` + `check:test-typecheck`)\n- `npx eslint` 三个改动文件 — 无输出\n- `pnpm --filter @objectstack/spec check:authorable-surface` — 对**真实基线**跑通,\n  `✅ Successfully generated 1622 schemas.`\n- `node scripts/check-nul-bytes.mjs` — OK(5935 文件);改动文件另做\n  `grep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]'` 自扫,干净\n- `check-empty-changeset` / `check-skill-frame-sync` / `check-skill-frame-freshness` /\n  `check-doc-authoring` — 全绿\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_014wsZeReNTqiceBfLb5Pyf5\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_014wsZeReNTqiceBfLb5Pyf5)_"
+}

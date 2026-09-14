@@ -1,0 +1,34 @@
+{
+  "number": 6014,
+  "kind": "issue",
+  "title": "rule-validator 里 RUNTIME_OWNED_FIELD_TYPES 的排除理由对 summary 是错的:summary 是「存储列」不是「读时计算」",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T14:56:08Z",
+  "updated_at": "2026-08-07T02:52:15Z",
+  "closed_at": "2026-08-07T02:52:15Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6014",
+  "body": "观察类发现,来自 #5749 / PR #6013 的实现过程。**今天没有用户会踩到**,不改变任何运行时行为 —— 记下来是因为它是一段**会误导下一个作者**的 load-bearing 理由。\n\n## 现象\n\n`packages/objectql/src/validation/rule-validator.ts`,`RUNTIME_OWNED_FIELD_TYPES` 上方的 TSDoc 写道:\n\n```\n * Deliberately NOT `formula` / `summary`: those are computed on read from a\n * plan, never stored from the write payload, so there is no caller value to\n * strip. Keep this set to types whose value is (a) persisted and (b) issued by\n * the runtime.\n```\n\n`formula` 部分是对的(读时按 plan 求值)。**`summary` 部分不对**:roll-up 汇总字段是**实打实的物理存储列**,`engine.ts` 的 `recomputeSummaries()` 就是用 `this.update(desc.parentObject, { id: parentId, [desc.summaryField]: value })` 把聚合结果**写进去**的;读路径直接读这一列(正因为如此,`[\"task_count\",\"=\",0]` 这类筛选才是库内比对 —— 也正是 #5749 那个「筛选静默漏行」的成因)。PR #6013 之后,insert 也会往这一列落初值。\n\n## 为什么值得记一笔\n\n这段注释是「为什么 summary 不在 `RUNTIME_OWNED_FIELD_TYPES` 里」的理由本身。**结论(不 strip)是对的**,但给出的理由站不住:真正的理由不是「没有值可 strip」,而是「这一列确实是 runtime 维护的,但历史导入/种子数据需要能显式写入初值,而 `#5503` 的 strip 只针对 caller-supplied 且没有 `preserveAudit` 豁免的类型」。\n\n风险在于下一个作者按注释的字面意思去「修正代码以匹配注释」—— 把 `summary` 加进 `RUNTIME_OWNED_FIELD_TYPES`,那么带汇总初值的历史导入/种子写入会被静默 strip 掉,而注释会让这个改动看起来像是在还债。\n\n## 建议\n\n改注释,不改行为:把 summary 从「computed on read」那句里摘出来,单独说明它是 persisted 但故意不 strip,以及理由。顺手可以核一下 `record-validator.ts` 里 `// Remaining types (formula/summary/autonumber outputs, ...)` 那句是否也隐含同样的误解。\n\n严重度请 PM 按自己的标准判,我这边只按「事实不符 + 会误导」如实记录。\n"
+}

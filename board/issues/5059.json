@@ -1,0 +1,37 @@
+{
+  "number": 5059,
+  "kind": "issue",
+  "title": "两张公开参考页的正文被 #4001 的内部注释顶替(#3746 陷阱 1 已实际发生两次)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T01:14:12Z",
+  "updated_at": "2026-08-07T03:38:26Z",
+  "closed_at": "2026-08-07T03:38:26Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5059",
+  "body": "#4001 正文「踩过的坑」第 1 条早就写明:`scripts/build-docs.ts` 的 `getFileDescription()` 取模块里**第一个** `/** */` 块原样做参考页描述,所以在 schema 的文件级 JSDoc **之前**插入辅助代码块,会把公开文档页的内容换成内部注释。\n\n这件事已经**落到 main 上两次**了,`check:docs` 抓不到 —— 它只比对生成物与源码是否一致,而这里两者是一致的:源码里第一个 doc block 确实就是那段内部注释。\n\n## 现状\n\n`content/docs/references/data/mapping.mdx` 第 8 行(页面正文首句):\n\n```\nShared history for this file (#4001).\n```\n\n`content/docs/references/system/translation.mdx` 第 8 行:\n\n```\nShared history sentence for every shape in this file (#4001).\n\nTranslation data has the most literal version of the silent-strip failure in\n\nthe whole spec: a misspelled group or key is dropped, the bundle saves or\n```\n\n即:**Translation 协议参考页**开篇讲的是本仓收紧战役的历史沿革,而不是 translation 是什么。对着这页学写 `*.translation.ts` 的人(尤其是 AI 作者)拿到的第一段是完全无关的内部叙事。\n\n## 成因\n\n两个文件都把 `const *_HISTORY = '…'`(带 `/** */` 文档注释)放在了文件里第一个 schema 的 JSDoc **之前**:\n\n- `packages/spec/src/system/translation.zod.ts` —— `/** Shared history sentence for every shape in this file (#4001). … */` 在 `LocaleSchema` 之后、任何带 JSDoc 的 schema 之前,成了全模块第一个 doc block。\n- `packages/spec/src/data/mapping.zod.ts` —— 同形状。\n\n## 修法\n\n把这两个 history 常量的 `/** */` 换成 `//` 行注释(或整体挪到文件第一个 schema 的 JSDoc 之后),然后 `pnpm --filter @objectstack/spec gen:schema && gen:docs` 重新生成这两页。批 15 已经对 `chart.zod.ts` 做过一模一样的修正(「把 #3746 陷阱的警告本身移出 doc block」),照抄即可。\n\n## 顺带:能不能让它有门禁\n\n`check:docs` 结构上看不见这一类。可行的机械判据是:参考页正文首句命中 `#\\d{3,}` / `Shared history` / `Until #` 这类**只可能出自内部注释**的模式就失败 —— 窄、无假阳,且正好覆盖这个战役会持续制造的形状(每个批次都在往文件里加 history 常量)。若认可,可并入这件一起做。\n\n由 #4001 批 16 在检查自己会不会踩同一个坑时扫出(批 16 自己按批 15 的做法用 `//` 规避了)。范围外,故单开,不在批 16 的 PR 里改。\n"
+}

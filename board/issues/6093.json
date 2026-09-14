@@ -1,0 +1,35 @@
+{
+  "number": 6093,
+  "kind": "pull_request",
+  "title": "feat(scripts): check-override-consistency 增加 override 消费者体检与自失效上界报告",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T00:53:47Z",
+  "updated_at": "2026-08-07T02:00:23Z",
+  "closed_at": "2026-08-07T02:00:22Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T02:00:22Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6093",
+  "body": "Fixes #6046\n\n按 #5835 裁 A 的配套正交项落地:`scripts/check-override-consistency.mjs` 增加两份体检,\n**都是 report,一律不改退出码**。\n\n## 一、前提复核(落地前对 `origin/main` 实测,非照抄 issue 正文)\n\n| issue 正文的说法 | 实测结果 | 结论 |\n| --- | --- | --- |\n| `form-data` 随 #5825 失去唯一消费者、现为空转 | 依赖树中 **0 个**消费者 | ✅ 成立 |\n| `undici` 同样空转 | **2 个**消费者:`@ai-sdk/provider-utils@5.0.16` 依赖 undici 7.29.0;`jsdom@30.0.1` 依赖 undici 8.9.0 | ❌ **不成立**,undici 仍在树里 |\n| 空转的就这两条 | 实际 **4 条**:`form-data`、`@tootallnate/once`、`react-router`、`@sveltejs/kit` | ⚠️ issue 低估了 |\n\n两点说明:\n\n- **issue 的核心前提成立且比正文更强** —— 「空转 override 完全不可见」正是被这次实测坐实的:\n  除了正文点名的 form-data,另有三条空转 override 同样没人发现。立项理由不但没被推翻,还更充分。\n- **undici 仍然被点名**,但走的是第二份体检(自失效上界形状),而不是「零消费者」。\n  验收要求的「两条 override 都被点名报告、exit 仍 0」在实跑里成立,只是 undici 的点名理由\n  换成了真实的那个。⛔ 没有为了凑 issue 正文而把 undici 硬报成零消费者。\n\n## 二、设计:为什么消费者普查做在**包名**一级\n\n一个很自然的替代方案是「统计落在 override selector 范围内的解析数」。这个方案是错的,\n因为 `pnpm-lock.yaml` 记录的是 **override 生效之后**的解析结果:一条正在干活的 override\n早就把命中项抬到了 target 之上、也就抬出了自己的 selector。\n\n实测:**28 条 override 里,落在自己 selector 内的解析数全部为 0** —— 正在干活的那些也一样。\n也就是说该信号根本分不出「空转」和「正在生效」,一用就是全员误报。\n\n包名的有无是 lockfile 唯一能诚实给出的信号:名字在 `importers` + `snapshots` 里都不出现,\n这条 override 就确实没有任何可改写的对象。脚本头注释里把这条限制写死了,免得下一个人再走一遍。\n\n## 三、为什么是 report 而不是 red\n\n裁决原文即「报告而非 red」。空转 override 是合法的纵深防御姿态 —— 不花成本,且一旦哪个依赖\n把包重新引进来就立刻生效。所以体检输出里带了明确的保留指引,防止下一个 agent 顺手删:\n\n> `#5835 ruling A` decided exactly this for the form-data / undici OSV pins — KEEP THEM.\n> Do not \"tidy up\" an entry listed here without a ruling that says to.\n\n**脚本语言**:`scripts/*.mjs` 全族 0 处 CJK(实测),故脚本输出沿用英文保持族内一致,\n中文说明放在 PR / commit 里 —— 与仓库「GitHub 可见文本用中文」的约定并不冲突。\n\n## 四、self-test:17 条断言,双向\n\n接进新增的 `check:override-consistency` 命令链,`validate-deps.yml` 改调该命令链而非裸脚本\n(不接线即 phantom check)。除新增两份体检外,**顺带把既有的 declared-range 主规则也补上了\n双向覆盖** —— 这个脚本此前完全没有 self-test。\n\n```\n  ✓ lockfile parses into a consumer index\n  ✓ unparseable lockfile -> census skipped, never a crash\n  ✓ lockfile that is not a mapping -> census skipped\n  ✓ transitive consumer present (snapshot pulls undici) -> NOT reported\n  ✓ workspace importer counts as a consumer (semver) -> NOT reported\n  ✓ zero consumers (nothing pulls form-data) -> REPORTED\n  ✓ census reports only the idle one out of a mixed set\n  ✓ bound equal to the target floor (the #5032 undici shape) -> REPORTED\n  ✓ bound below the target floor (uncovered gap) -> REPORTED\n  ✓ bound above the target version line (the durable shape) -> NOT reported\n  ✓ selector with no upper bound -> NOT reported\n  ✓ inclusive upper bound covers the target -> NOT reported\n  ✓ declared range that reaches the target -> no violation\n  ✓ declared range that cannot reach the target -> violation\n  ✓ no implicit prereleases: ^1.7.0 does not reach 1.7.0-rc.2\n  ✓ declaration outside the selector scope -> override does not apply\n  ✓ declaration inside the selector scope -> override applies\n\n✓ self-test passed (17 assertions)\n```\n\n## 五、现状实跑(`pnpm check:override-consistency`,exit 0)\n\n```\n[report] Consumer census: 4 of 28 override(s) name a package NOTHING in the dependency tree depends on.\n  - 'form-data@<4.0.6': '>=4.0.6'  — 0 consumers\n  - '@tootallnate/once@<2.0.1': '2.0.1'  — 0 consumers\n  - 'react-router@<8.3.0': '^8.3.0'  — 0 consumers\n  - '@sveltejs/kit@<2.69.1': '^2.69.1'  — 0 consumers\n\n  These are REPORTS, not failures. An override with no consumer today is a\n  legitimate defence-in-depth posture: it costs nothing and pins the version\n  in advance if any dependency reintroduces the package. #5835 ruling A\n  decided exactly this for the form-data / undici OSV pins — KEEP THEM.\n  Do not \"tidy up\" an entry listed here without a ruling that says to.\n\n[report] Self-expiring selectors: 26 of 28 override(s) use a selector that excludes their own target.\n  - 'minimatch@<10.2.3' -> '10.2.3'\n  - 'tar@>=2.0.0 <7.5.11' -> '^7.5.11'\n  - 'form-data@<4.0.6' -> '>=4.0.6'\n  - 'undici@>=7.23.0 <7.29.0' -> '^7.29.0'\n  - 'better-auth@<1.7.0-rc.2' -> '1.7.0-rc.2'\n  ...(better-auth 家族等 20 行省略)...\n  - '@hono/node-server@<2.0.5' -> '^2.0.10'   (gap: 2.0.5 .. 2.0.10 matches nothing)\n  - 'fast-uri@<3.1.5' -> '^3.1.5'\n  - 'hono@<4.12.34' -> '^4.12.34'\n\n  Also REPORTS, not failures. ...\n\n✓ 2 published-manifest declaration(s) covered by pnpm-workspace.yaml overrides all resolve to their override targets.\n```\n\n⚠️ **需要维护者留意的一个量级问题**:自失效上界形状实测命中 **26 / 28** —— 它是本文件的\n既有普遍写法,不是本次新增的回归。所以这一栏被刻意写成「standing ledger」的口气,每行只留\n`key -> target`(逐行重复的解释合并到段末讲一次),只有严格更差的那一种(上界**低于** target\n下限、中间留出谁都不覆盖的空窗)才额外标 `gap`,当前只有 `@hono/node-server` 一条。\n若维护者希望把这一栏收窄(例如只报 OSV 安全 pin、跳过 better-auth 预发布兼容 pin),\n可另开跟进单 —— 本单按裁决「点名 undici 形状」的字面要求实现,而 undici 的形状恰好就是\n这 25 条共享的那一种,所以**要点名 undici 就必然要点名同形状的其余各条**,不能只挑一条报。\n\n## 六、反向验证(方向在跑之前先声明)\n\n| 方向 | 预言 | 实测 | 结果 |\n| --- | --- | --- | --- |\n| 1. 删掉普查(`findIdleOverrides` 直接返回空) | 「零消费者报出」+「混合集只报空转那条」2 条转红 | 正好这 2 条红,其余 15 绿 | ✅ 符合 |\n| 2. 给 form-data 在 fixture 里造一个真实消费者 | 同样 2 条转红(不再被报为空转) | 正好这 2 条红 | ✅ 符合 |\n| 3. `lte` 改成 `lt` | **恰好 1 条**红(undici 等值上界),gap 那条保持绿 | 正好 1 条红,gap 绿 | ✅ 符合 |\n| 4. 真 lockfile 上注入一条 form-data 消费边(内存态,不落盘) | 普查从 false 翻成 true | 翻转成立,`git status` 确认 lockfile 未被改动 | ✅ 符合 |\n\n方向 2 第一次跑出来是**全绿**,但那是**探针坏了不是断言不敏感**:替换目标写成了\n`'undici: 7.29.0',`,而源码里数组元素是 `'      undici: 7.29.0',`(引号在空格之前),\nreplace 静默变成 no-op。加了「替换目标必须命中、替换必须改变文件」的守卫后重跑才得到上表结果。\n⛔ 没有把那次假绿当成结论 —— 记在这里是因为「mutation 没生效」和「断言不敏感」在输出上长得一模一样。\n\n方向 3 的预言之所以精确到「恰好 1 条」,是要证明 undici 是被 `lte` 里的**等值**那一半接住的,\n而不是碰巧被 gap 那半覆盖 —— 若两条同时转红,说明断言没有真正区分这两种子形状。\n\n## 七、门禁\n\n| 门禁 | 结果 |\n| --- | --- |\n| `pnpm check:override-consistency` | exit 0,两份体检均报出 |\n| `npx eslint scripts/check-override-consistency.mjs` | 干净 |\n| `node scripts/check-nul-bytes.mjs` | OK(5834 个文件,无裸控制字节) |\n| `grep -naP` 自查改动三个文件的控制字节 | 无命中 |\n| `node scripts/check-workflow-status-functions.mjs` | OK(工作流改动后复跑) |\n\n## 八、范围\n\n- 改动仅 3 个文件:`scripts/check-override-consistency.mjs`、根 `package.json`(一行命令链)、\n  `.github/workflows/validate-deps.yml`(改调命令链 + 注释)。\n- ⛔ **未触碰** `pnpm-workspace.yaml` / `pnpm-lock.yaml`,未增删任何 override ——\n  今日 OSV 公告波(js-yaml / mermaid)是 #6088,另座位在办,与本单 diff 完全不相交。\n- scripts-only、不发版,故**无 changeset**,PR 带 `skip-changeset` 标签。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BDmDsu2575gDxeMCxXhDE3)_"
+}

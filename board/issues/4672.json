@@ -1,0 +1,37 @@
+{
+  "number": 4672,
+  "kind": "issue",
+  "title": "知识库 object source 需要对账通道:事件管新鲜度,对账管正确性(批量写后索引会陈旧)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue",
+    "repo:objectstack"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T15:58:27Z",
+  "updated_at": "2026-08-06T14:42:16Z",
+  "closed_at": "2026-08-06T14:42:16Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4672",
+  "body": "从 #4639 的裁决中拆出,unassigned。\n\n> **2026-08-05 范围改判(维护者批准方案 C,见评论)**:本单收窄为「reap guard 去索引化」—— 知识插件注册 lifecycle reap guard,在行删除前按 id 去索引,零新增契约面、不碰 `packages/objectql`、不建对账子系统;应用层谓词写(updateMany/deleteMany)的部分**诚实不覆盖**(文档 + 既有 warn 说明),待真实 object 源出现再按 #4606 的 enforced-先行原则回看。原正文保留作背景。\n>\n> Blocked-by: #5535(reap guard 需先获得交集组合语义,否则第二注册方静默顶掉 sys_file 字节回收)\n\n## 背景\n\n#4639 给谓词写(`multi: true` → `IDataDriver.updateMany`/`deleteMany`)加了诚实的聚合事件 `data.records.updated` / `data.records.deleted`,载荷是 `{ id, type, object, matched, userId?, timestamp }`。\n\n这修好了 webhook 通路(新增 opt-in 的 `bulk_update` / `bulk_delete` 触发器),但**修不好知识同步**,而且这不是 #4639 的实现留下的缺口——是驱动契约的性质:\n\n- 知识索引是**逐记录投影**;\n- `matched: 40` 不指代任何一条记录,`KnowledgeService.handleRecordUpsert` / `handleRecordDelete` 都需要记录体或 id,适配器也不接受谓词。\n\n所以谓词写之后,该 object 的知识索引会**陈旧**,且这条订阅链路无法自愈。#4639 的实现里已经让它**出声**(`knowledge-service-plugin.ts` 对 `data.records.*` 打 warn 指明索引可能陈旧),但出声不是修复。\n\n## 现实影响\n\n最主要的陈旧来源是 `LifecycleService` 的保留期回收(`packages/objectql/src/lifecycle/lifecycle-service.ts` 的 `reapWhere`),它按谓词删记录。注意**不能**把它改成逐记录扇出:ADR-0057 §3.3 有硬规则——\n\n> the LifecycleService's own deletes/rotations are not audited or activity-logged (otherwise cleanup re-feeds the tables it is draining — the same self-audit trap ADR-0052 already guards). **Aggregate one summary row at most.**\n\n逐记录扇出正是该规则禁止的形态(N 条事件重新灌回正在清理的表)。所以这条路封死,对账是唯一出路。\n\n> ⚠️ 2026-08-05 核对:上句「对账是唯一出路」已被推翻 —— ADR-0057 amendment 的 reap guard 是被认可的 domain callback 形态,见核对评论。\n\n## 处置方向(原文,历史背景)\n\n给 object source 加周期性/可触发的**对账**:枚举索引条目,与源对象比对,删除源已不存在的条目(并补上索引缺失的行)。设计要点:\n\n- 触发方式:定时 + 收到 `data.records.*` 后标记该 object \"需要对账\"(避免全量轮询);\n- 与 `LifecycleService` 的关系:对账是知识服务自己的职责,不要塞进 lifecycle sweep(ADR-0057 §3.3 \"no bespoke sweepers\" 的对偶——反过来也不该把别人的清理逻辑塞进 lifecycle);\n- 成本控制:分批、可中断,不能在大对象上把索引后端打满。\n\n## 参考\n\n- #4639 — 批量事件契约(本 issue 的来源)\n- `packages/services/service-knowledge/src/knowledge-service-plugin.ts` — 当前对 `data.records.*` 的 warn\n- ADR-0057 §3.3 及其 amendment(reap guard)— 本单现行方案的依据\n- ADR-0052 — 自审计陷阱\n- #4606 — 知识库定位裁决(parked;本单方案 C 在其「零新增承诺」边界内执行)\n\nBlocked-by: #5535"
+}

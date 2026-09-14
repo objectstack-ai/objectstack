@@ -1,0 +1,35 @@
+{
+  "number": 6169,
+  "kind": "issue",
+  "title": "release: 17.0.0-rc.4 published from a10cbc77 but the version commit never landed on main — 2026-08-03 shape repeated; merge it back before ANY further release action",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T05:32:57Z",
+  "updated_at": "2026-08-07T08:19:53Z",
+  "closed_at": "2026-08-07T07:55:07Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6169",
+  "body": "## Facts (all measured 2026-08-07 ~05:30Z)\n\n- **The publish is real**: 69 tags `*@17.0.0-rc.4` (138 ls-remote lines incl. peeled), ALL pointing at one commit `a10cbc77a1e83a382d4a190879b39d588435a04d` — `chore: version packages (rc)`, github-actions[bot], **2026-08-07 04:17:39Z**. npm confirms: `npm view @objectstack/spec@17.0.0-rc.4 version` → `17.0.0-rc.4`; `dist-tags.rc` → `17.0.0-rc.4`.\n- **Cut from** `36fc938` (#6150) — i.e. it contains #6149's version reconciliation and everything merged up to 04:1xZ (incl. #6078 / #6107 / #6142), so the computed rc.4 numbers are correct. Commits after 36fc938 (#6153, #6156, #5827, #6158, #6154, #6166…) ride the next rc.\n- **Not an ancestor of main**: absent from the last 60 main commits; merge-base with main is its parent 36fc938. Same failure shape as 2026-08-03 (#6135, rc.3 / `c6a52d3`), one version later.\n- **What the orphaned commit carries**: 153 files, +33604/−79 — the rc.4 `package.json` bumps, the **compiled CHANGELOGs**, and the `.changeset/pre.json` bookkeeping. Zero `.changeset/*.md` deletions (prerelease mode consumes via `pre.json`, not file deletion).\n- **The bypass also skipped the release gates**: `.objectui-sha` in the published tree is `f995a452` — the stale pin. The 7 releasing objectui changesets (#6159) are absent from rc.4's record; `check:objectui-pin-fresh` (required on #4935) never ran because the lane didn't go through #4935. That is the v16 loss shape recurring — second occurrence evidence for the root-cause issue.\n\n## Why this must be fixed before anything else in the release lane\n\nmain's `package.json` still say `17.0.0-rc.3`, so every regeneration of `changeset-release/main` computes **rc.4 again** — a version npm now already has. The branch has in fact regenerated after the publish (head `a1e65f22` ≠ `a10cbc77`), so **⚠️ merging #4935 as it stands is the collision trap, not the fix**. Do not merge #4935 and do not run the publish lane again until this issue closes.\n\n## Remedy (measured, clean)\n\n`git merge-tree --write-tree origin/main a10cbc77` → **exit 0, no conflicts**. So:\n\n1. Push the published commit as a branch: `git push origin a10cbc77a1e83a382d4a190879b39d588435a04d:refs/heads/release/rc4-merge-back`\n2. Open a PR (base `main`), label `skip-changeset` (release bookkeeping; `.changeset/**` must not be touched beyond what the commit itself carries), land it through the merge queue.\n3. After it lands, `changeset-release/main` regenerates from rc.4 state → #4935 becomes the **rc.5** PR, and the dry-run check is simply \"does #4935 now propose rc.5?\".\n\nOrdering vs #6159 (console bump): independent — its changeset is a new file, no conflict either way; it now targets rc.5 (see note there).\n\n## Related\n\n#6135 / #6149 (rc.3 instance + field-level reconciliation) · root-cause issue: see the companion issue filed together with this one · #6159 (missed window) · #3340 (the gate the bypass skipped) · #4935"
+}

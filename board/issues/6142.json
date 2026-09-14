@@ -1,0 +1,35 @@
+{
+  "number": 6142,
+  "kind": "pull_request",
+  "title": "fix(drivers): `undefined` 比较数一律拒收 —— 闸落在任何发射器/守卫之前,两个毛病同闸消灭 (#6050)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T03:23:45Z",
+  "updated_at": "2026-08-07T04:02:06Z",
+  "closed_at": "2026-08-07T04:02:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T04:02:05Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6142",
+  "body": "Fixes objectstack-ai/objectstack#6050\n\n按 issue #6050 的裁决落档(2026-08-07,**B 案:`undefined` 比较数一律响亮拒收**,`INVALID_FILTER` / 400,#5347-A 同族信封)实施。\n\n## 前提复核(先做的第一件事)\n\n五格矩阵在最新 `origin/main`(`cba7454df`,立单时记的是 `efedd289f`)**逐格复现**,而且多量了四格。同一个 `TursoDriver`、同一条 filter、同一份 fixture(`d` 在 1-2 有值、3-4 为 NULL),答案取决于它是用哪个 `url` 构造的:\n\n| filter | LOCAL(继承 `SqlDriver`) | REMOTE(`RemoteTransport`) |\n|---|---|---|\n| `{ d: undefined }` | 抛裸 knex `Undefined binding(s)`(`code`/`status` 均 undefined) | `['3','4']` |\n| `{ d: { $eq: undefined } }` | 同上 | `['3','4']` |\n| `{ $not: { d: undefined } }` | 同上(compiling WHERE) | `['1','2']` |\n| `{ d: { $ne: undefined } }` | `['1','2']` | `['1','2']` |\n| `{ $not: { d: { $ne: undefined } } }` | `[]` | `['3','4']` |\n| `{ d: { $in: [undefined] } }` | 抛裸 knex | `[]` |\n| `{ d: { $nin: [undefined] } }` | 抛裸 knex | `['3','4']` |\n| `{ d: { $gt: undefined } }` | 抛裸 knex | `[]` |\n| `{ $or: [{ d: undefined }, { a: 'x' }] }` | 抛裸 knex | 全表 |\n\n对照组 `{d: null}` / `{$eq: null}` / `{$ne: null}` 两面一致且正确 —— 毛病只在 `undefined` 这一个值上。\n\n## 两个毛病,一道闸\n\n**A —— 抛出的那几格没有 ADR-0112 信封。** knex 的 `Undefined binding(s) detected when compiling SELECT` 既无 `code` 也无 `status`,`mapDataError` 落默认分支,一条「调用方 filter 写坏了」的错误以不透明 500 到达客户端。#1116 / #4436 为这条通路清点过同类形态,唯独漏了这格。\n\n**B —— 守卫与它自己的发射器分裂。** `$ne` 发射器读 `coerced == null`(宽松 ⇒ `undefined` 编译成 `IS NOT NULL`,一条 **TOTAL** 谓词),而必须钉住这个发射器的两张极性表读 `=== null`(严格 ⇒ 判它「不 total」且「NULL 行满足它」)。`nullGuardForFieldSpec` 于是把一条已 total 的谓词包成 `d IS NULL OR d IS NOT NULL` —— 恒真 —— 取反后恒假,答 `[]`。这正是 **#5298 立的不变量在它自己的定义处被破坏**:每张极性表钉的是它自己发射器的拼写。\n\n闸落在比较数进入**任何**发射器或守卫**之前**,两个毛病同闸消灭 —— knex 再也见不到 undefined 绑定,守卫与发射器对 undefined 的分歧变成**不可达**,而不是「被修好」。\n\n- **`driver-sql`**:`reduceFilterKey` 的校验走查(与 `$null` / `$exists` 拒收并排),**外加** `applyFilters` 的平铺映射分支 —— `{ d: undefined }` 进不了走查(`typeof undefined` 不是 `'object'`,构不成 `hasMongoOperators`),而它恰是这个 bug 最常见的拼写。两处共用一个函数,#5240 已经为「同一形状两处两判」付过一次账。\n- **`driver-turso`**:`buildWhereSQL` 入口做一次**整棵子树的前置走查**。必须前置:逐键编译会先把 `$not` 的操作数交给 `nullSafeNegationOperand`(一个守卫)。\n- 顺带把两侧 `== null` / `|| === undefined` 的拼写统一收严成 `=== null`(#5347 收紧 `$null` 臂时给的理由:宽松拼写在闸被挪走后会悄悄恢复回答一个没人裁决过的取值)。\n\n**拒收位置逐个清点**:直接比较数、单值算子比较数(`$eq`/`$ne`/`$gt`/`$gte`/`$lt`/`$lte` 与 LIKE 族)、列表算子数组的**成员**(`$in`/`$nin`/`$between`),以及嵌在 `$and`/`$or`/`$not` 里的以上各位。`$null` / `$exists` 的 `undefined` **保持它们自己的**布尔域拒收措辞(那条消息更贴切 —— #5240「一个条件一种措辞」两个方向都适用)。两驱动的拒收句子逐字一致。\n\n## ⛔ `null` 一字未动\n\n`{ f: null }`、`{ $eq: null }` → `IS NULL`;`{ $ne: null }` → `IS NOT NULL`;`$null: true/false` 不变;`null` 仍是合法 `$in` 成员;`$not` 下同。三个测试文件各带一段 `null` 对照块钉这件事。\n\n## 调用方清点(issue 的前置要求)\n\n- **静态**:grep 仓内 `where`/`filter` 字面量里的可选链与动态装配点 —— 生产面用的都是 `if (x) where.k = x` 或 `?? null`,即裁决建议的作者侧修法本身,**零个**依赖旧行为。\n- **实测**:**全仓 build(71 tasks 全过)+ 全仓 test(135 个任务 134 成功)**。唯一失败是 `@objectstack/dogfood` 的 `semantic-roles.dogfood.test.ts` 在满载下 `beforeAll` 10s 超时,单独重跑 5/5 通过 —— 与本改动无关的负载抖动。两个 example app 均 build 通过,dogfood 会真正把 showcase stack 起起来跑。⇒ **没有依赖 remote 现行 IS NULL 行为的生产调用方**,不触发「停手」条件。\n\n## 测试\n\n- 新增 `packages/drivers/driver-sql/src/sql-driver-undefined-comparand-refusal.test.ts`(28 例)\n- 新增 `packages/drivers/driver-turso/src/remote-transport-undefined-comparand-refusal.test.ts`(29 例)\n- `turso-local-remote-null-parity.test.ts` 补上 **undefined 格**(#6047 刻意未覆盖的那一列):13 个位置 × 两 transport,同码、同 status、同句子,外加一段 `null` 对照。\n\n### 反向验证(方向**先**预判,**再**实测)\n\n预判:**不是**一个方向。拒收用例该红,对照用例该绿,而且 driver-sql 侧的红该由**两种不同机制**产生 —— 因为未修的驱动本来就用两种方式回答这一族。\n\n实测(只删两处 `assertDefinedComparands` 调用,其余不动):\n\n- **driver-sql:22 failed / 6 passed**(共 28)。留绿的 6 个正好是全部对照块。红的机制是混合的:多数位置红在**抛出** knex 的裸 `Undefined binding(s)` —— 一个没有 `code`/`status` 的 Error,所以 `refusalOf` 正常返回、只有信封断言失败。⚠️ **一个只断言「它抛了」的测试会在本 issue 所针对的那个驱动上保持绿色** —— 这就是每一例都断言 `code` 与 `status` 的原因。其余(`$ne`、LIKE 族、`{ $not: { … $ne: undefined } }`)红在**答了**:从未抛过,且 `{$not:{$ne:undefined}}` 答 `[]`,即毛病 B 的恒真式。\n- **driver-turso:20 failed / 9 passed**(共 29),20 个**全部**红在 `refusalOf` 的「本该拒收,却编译成了 …」分支 —— 即全部靠「答出来」,与预判一致(这个 transport 从不抛)。留绿的 9 个是对照:`null` 块、节点位拒收、`where` 缺席、布尔域用例、常规词表。\n\n### 门禁\n\n```\npnpm --filter @objectstack/driver-sql --filter @objectstack/driver-turso typecheck   → Done / Done\npnpm --filter @objectstack/driver-sql   test  → Test Files 65 passed | 4 skipped   Tests 906 passed | 46 skipped\npnpm --filter @objectstack/driver-turso test  → Test Files 24 passed              Tests 788 passed\nnode scripts/check-nul-bytes.mjs → OK (5860 files, no raw ASCII control bytes)\n```\n\n## 实测但**未**改的其余无值语义面 → #6125\n\nissue「落点」节要求裁决后逐格实测其余面。做完了,记录如下 —— 同一个 `{ d: undefined }`,**仓内五种读法**:\n\n| 求值面 | `{ d: undefined }` | 读法 |\n|---|---|---|\n| `driver-sql` / turso LOCAL | 抛裸 knex | 崩 |\n| turso REMOTE | `['3','4']` | `undefined ≡ null` |\n| `driver-memory`(mingo) | `['3','4']` | `undefined ≡ null` |\n| `formula` `matchesFilterCondition` | 只匹配**键缺失**的行 | `undefined ≢ null` |\n| `service-analytics` `read-scope-sql` | `\"t\".\"d\" = ?` bound `null` | `= NULL` → 匹配零行 |\n\n三条都是**语义争议**而非实现细节,派工单明确要求「有语义争议只记录留后续单、不扩大 diff 赌时限」:formula 的读法会顺手替 #5299 拍板;read-scope-sql 只会抛 `READ_SCOPE_COMPILE_FAILED` / **500**(与本裁决的 400 不是一个信封,且 read scope 是平台自己编译的、不是调用方输入);driver-memory / mongodb 是 #5499 的冻结面,按裁决**零行为改动**。已如实立单 **#6125**(`finding`,未指派,带 `Blocked-by: #6050`),其中也写明了本 PR 落地后 driver-memory 会在这一格上与 driver-sql 不一致 —— 那是裁决接受的代价,不是回归。\n\n## changeset\n\n`.changeset/undefined-comparand-refusal.md`(driver-sql + driver-turso 双 patch),升级说明写明「undefined 比较数从静默/崩溃变为 400 拒收,作者侧修法是显式判空或用 `null` / `$null`」,并附两种正确写法。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WyvqvKMG6asi9aXjKE6xtx\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WyvqvKMG6asi9aXjKE6xtx)_"
+}

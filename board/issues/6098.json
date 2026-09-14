@@ -1,0 +1,35 @@
+{
+  "number": 6098,
+  "kind": "issue",
+  "title": "`zodShapeOf` 的 unwrap 面比三个同族 walker 窄:缺 union 分支与 `prefault`(#5317 修完管道方向后剩下的两格)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T01:14:46Z",
+  "updated_at": "2026-08-07T11:45:47Z",
+  "closed_at": "2026-08-07T11:45:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6098",
+  "body": "发现于 #5317 实施途中(observation-class:两格今天都被 fail-closed 兜住,没有已知的错误产物)。\n\n`packages/spec/scripts/lib/zod-graph.ts` 的 `zodShapeOf` 是 #5317 从 `build-schemas.ts` 抽出来的;它有三个同族 walker,做的是同一件事(把一个 Zod 节点解到对象 shape):\n\n- `packages/spec/scripts/liveness/check-liveness.mts` 的 `unwrap` / `shapeOf`\n- `packages/spec/src/kernel/metadata-authoring-lint.ts` 的 `unwrap` / `keyPosture`\n- `packages/spec/src/system/metadata-form-zod-reconciliation.test.ts` 的 `unwrap` / `keysOf`\n\n#5317 已经把**管道方向**这一格对齐了(`z.preprocess` 走 OUT)。剩下两格仍然只有 `zodShapeOf` 缺:\n\n## 事实 1 —— 没有 union 分支\n\n`zodShapeOf` 只认 `object`,遇到 `union` 返回 `null`。三个同族 walker 都合并 union 成员的键(check-liveness 的 `shapeOf` 带着 #3095 的注释,说的正是「一个 metadata type 可能注册一组 shape 的 UNION 而不是单个对象」)。\n\n后果,#5317 实测:`view` 是注册表里唯一的 `z.preprocess` **根**,其 OUT 是 `z.union`(#5074 的 console-decoration 剥离)。#5317 把方向修对之后,`pipeAuthorableSide(view)` 从 `transform` 变成了 `union` —— 但 `zodShapeOf(view)` 依然是 `null`,因为没有 union 分支。所以「preprocess 根能被解出真实 shape」这句话对 `view` **今天仍然不成立**,方向修对是必要但不充分。\n\n`packages/spec/scripts/zod-graph.test.ts` 里有一条测试把这个状态诚实钉住了(`documents that view's preprocess OUT is a union, so it still derives no shape`),加 union 分支的人会先撞到它。\n\n## 事实 2 —— wrapper 集合缺 `prefault`\n\n`zodShapeOf` 的 `SHAPE_WRAPPER_TYPES` 是 `optional / nullable / default / catch / readonly / nonoptional`。三个同族 walker 的对应列表都**还有 `prefault`**。一个 `prefault` 包着的对象在 `zodShapeOf` 下解不出 shape。\n\n#5317 特意没有顺手加:它没被测量过,而 `zodShapeOf` 喂的是 derived-clone 桥,任何解出更多 shape 的改动都会**新增桥项**。\n\n## 为什么是 observation-class 而不是缺陷\n\n两格的后果都落在 `computeSurfaceReachability` 的 `reachableVia`,而那里解不出 shape 时 `return 'root-graph'`(fail closed —— 宁可多要一个 tombstone,不静默放宽)。所以当前表现是**保守**,不是错答;而且 `reachableVia` 只在 #4650 删除门禁发现「基线行被删」时才被调用,平时的 `gen:schema` 根本不走。今天没有用户能撞到。\n\n## 修的时候注意(#5056)\n\n这两格任何一格补上,都会让更多节点解出 shape,从而给 `bridged` 表新增 (propName → propSchemaInstance) 项 —— 这正是 #5056 提醒过的、会把死形状标成可达(`null` → `derived-clone`)的桥。所以不是加一行就完事:\n\n- 跑 `pnpm --filter @objectstack/spec gen:schema` + `check:generated`;\n- 逐条解释可达性判定的移动,尤其是任何变成 `derived-clone` 的条目;\n- 参考 #5317 的做法:在 `computeSurfaceReachability` 末尾临时 dump 全部 def 的 `reachableVia` 判定,改前改后各跑一次做 diff。#5317 用这个办法量到「管道方向修正只移动 1 条判定、0 条新桥」,分片生成物零 diff。\n\n两格建议放**同一个 PR** 一起量:它们改的是同一个函数的同一片 unwrap 面,分开做要把上面那套测量跑两遍。"
+}

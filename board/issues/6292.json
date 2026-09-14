@@ -1,0 +1,35 @@
+{
+  "number": 6292,
+  "kind": "pull_request",
+  "title": "fix(service-analytics): 响亮拒收 dotted measure,点名调用方原拼写 (#5918)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T13:09:46Z",
+  "updated_at": "2026-08-07T13:39:27Z",
+  "closed_at": "2026-08-07T13:39:26Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T13:39:25Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6292",
+  "body": "Fixes objectstack-ai/objectstack#5918\n\n按 2026-08-07 03:19Z 维护者裁决实施 **选项 3——响亮拒收 dotted measure**:带 `code`/`status` 的 400,点名调用方写的原拼写。\n\n## 问题(实测,`origin/main` `01faeb13a`)\n\n`inferCubeFromQuery` 的 measures 铸造循环无差别剥点号首段。对象 `crm_account` 恰好自己有一列 `region` 时:\n\n```\nmeasures: ['owner.region_count_distinct']\n  NativeSQL → SELECT COUNT(DISTINCT region) AS \"owner.region_count_distinct\" FROM \"crm_account\"\n  ObjectQL  → aggregations: [{field:'region', method:'count_distinct',\n                              alias:'owner.region_count_distinct'}]\n```\n\n没有 JOIN、没有任何错误:响应列名标着关系属性,值来自基表 —— 调用方从结果里看不出来。基表没有同名列时则落到 #4437 的 `400 INVALID_FIELD`,消息诚实(进 SQL 的确实是 `score`)却点名了调用方从没写过的字符串(他写的是 `owner.score_sum`)。\n\n## 为什么是拒收,而不是照 #5739 铸成穿越\n\n#5739 把三个 **dimension 形状**的铸造点改成原样铸造,依据是「拒收会拒掉今天已经正确编译的查询」。该依据在 measures 上不成立:`lookupMember` 的 synthetic 穿越档是 dimension-only(`if (kind === 'dimension')`),dotted measure **没有**一个已经正确的穿越答案可以收敛过去;照原样铸造只会把 `total.sum` 这种手滑拼写从干净的 400 变成 ObjectQL 那句不带 code/status 的 `cannot evaluate a cross-object measure`。两面真的不同,母单理由不搬运 —— 裁决评论已明确写下这一点。\n\n手滑拼写(`total.sum`)与真穿越意图(`owner.amount_sum`)**都**吃这个 400:二者在这条路径上词法不可区分,要分开就得先建选项 1/2 需要的字段元数据能力(`getObjectFieldNames` 只给字段名,不给类型/关系目标),而那是一张要自己论证的能力单。\n\n**对外行为收紧是裁决要点**:今天静默通过的查询开始返回 400 —— 正因为今天它们在静默聚合错列。\n\n## 改动\n\n- 新增 `mintableMeasureKey(member, cubeName)`:剥 cube 名限定符,其余任何点号一律 `invalidMemberError` 拒收 —— `INVALID_FIELD` / 400 / `member`(原拼写)/ `param: 'measures'` / `cube`,即 #4437 家族既有的形状与既有码表成员,**未新增任何 ledger 成员**。\n- **两个 measure 铸造点共用这一条规则**。这一点是实测后加宽的,请重点看:即席路径会把推断出的 cube **注册**进 registry,所以同一条查询从第 2 个请求起走的是 `ensureCube` 的 augmentation 循环而不是 `inferCubeFromQuery`。同一 service 两次查询实测:\n\n  ```\n  ① measures: ['count']                       → SELECT COUNT(*) …            (预热 registry)\n  ② measures: ['owner.region_count_distinct']  → SELECT COUNT(DISTINCT region) AS \"owner.region_count_distinct\"\n  ```\n\n  只拒收其中一处,线上任何一台跑过一次查询的服务都会原样保留本单报告的静默错列。issue 正文点的是第一个铸造点(报告人是在冷启动下实测的),但验收标准是行为;要交付裁决写明的结果就必须覆盖「铸造」这件事本身,而不是它的其中一处代码位置。\n- augmentation 循环先按**原拼写**查 cube 已声明的 measure。这不是顺手整理:反向实验证明,不加这一步,原本能跑的「cube 自己声明的 dotted measure」会被本次拒收一起带走(详见下文反向验证)。\n- 两个策略天然同裁:拒收发生在策略解析之前。`/analytics/sql`(`generateSql`)同样拒收 —— dry run 不该把错的 SQL 交出去。被拒的查询不污染 registry(与 #3867 / #4437 同一条规矩)。\n\n不动的面:cube 名限定符(`crm_account.region_count_distinct`)照旧剥、照旧跑;非点号 measures(`region_count_distinct` / `count` / `created_at_max`)完全不变;cube 自己声明的 measure 是**授权的**不是铸造的,所以「Cube 的 measure 在自己的 `sql` 里点名关联列」这条正规穿越写法依旧编出 JOIN(拒收消息就把调用方指向这条路);dotted **dimension** 依然穿越,#5739 的裁决不动。\n\n`assertMeasureFields` 里的 `stripPrefix` 刻意**没有**跟着收窄:它是 resolver(镜像 `lookupMember` 的分档),不是铸造点;变的是能走到它面前的东西。\n\n## 测试\n\n- 新增 `dotted-measure-refusal.test.ts`(14 例):issue 实测的两个形状 × 两个策略、手滑拼写、`generateSql` 面、registry 不被污染;warm registry 的三例(NativeSQL / ObjectQL / 授权 cube);以及「不动的面」五例。\n- 改写两条既有钉的语义(它们钉的正是被本次改动移走的那一层):`measure-source-field-gate.test.ts` 的 `refuses the dotted spelling…naming what it stripped to` 与 `infer-cube-relation-traversal.test.ts` block 5 的同族钉 —— 现在钉的是「同样的 `INVALID_FIELD`/400/`param`,同样不进 SQL,但点名的是原拼写,且不再带这个 gate 的 `field`」。两处注释都写明了是哪一层换了手。\n\n**反向验证(方向在跑之前先写下)**:把两个铸造点都还原成 blanket strip ⇒ block 1+2 全红(它们断言的是「点名原拼写的拒收」且断言什么都没执行,还原后这些查询会成功并产出上面引用的那条 SQL,所以不可能靠「什么都没产生」蒙混过关);block 3 里「cube 自己声明的 dotted measure 仍能跑」这一例**也会红**,因为 blanket strip 会绕过 cube 自己声明的 dotted 键、铸出一个基表并不存在的列并让 #4437 拒掉 cube 自己的词汇表。**预测 10 红 / 4 绿,实测正是这一组。**\n\n命令与结果:\n\n```\npnpm --filter @objectstack/service-analytics test   → 63 files / 1220 tests passed\npnpm --filter @objectstack/service-analytics build  → Build success (ESM/CJS/DTS)\nnpx tsc --noEmit -p tsconfig.json                   → 10 errors,与 ledger 记录的 10 完全一致(全部先于本 PR 存在,\n                                                       无一条在新增/改写的代码里)\npnpm --filter @objectstack/rest test                → 63 files / 861 tests passed\npnpm --filter @objectstack/runtime test             → 105 files / 1506 tests passed\nnode scripts/check-nul-bytes.mjs                    → OK (5949 files)\nnode scripts/check-error-code-casing.mjs            → OK (3118 files, ADR-0112)\nnode scripts/check-empty-changeset.mjs              → OK (1 declaring changeset)\nnode scripts/check-adr-anchors.mjs                  → OK\n```\n\n消费半径已按规则清点:依赖 `@objectstack/service-analytics` 的是 rest / runtime / cli / qa-dogfood / verify;全仓(含 `examples/` 与 objectui)搜过 `measures` 数组里的点号拼写,除 cube 名限定符外没有任何一处依赖被拒收的形状。\n\n## 一处顺带查到、未在本 PR 内修的\n\n`content/docs/api/client-sdk.mdx` 与 `content/docs/api/data-api.mdx` 的示例是 `cube: 'account'` 配 `measures: ['revenue.sum', 'count']` —— 首段不是 cube 名,正是本单说的形状。它**在本 PR 之前就已经是 400**(剥出尾段 `sum`,`account` 没有这一列),不是本次改动弄坏的,只是本次改动之后这个示例会明确读成「不支持的写法」。已按 Prime Directive #10 另行开单 objectstack-ai/objectstack#6291(未指派),不搭本 PR 的车。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015a5qkLzpGXhLL2F5gvJ7dD)_"
+}

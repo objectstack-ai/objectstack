@@ -1,0 +1,36 @@
+{
+  "number": 6070,
+  "kind": "issue",
+  "title": "check-single-authz-resolver 的 walk 只收 `.ts`,`packages/` 下 12 个 `.mts` 从不被扫描(observation)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T16:54:23Z",
+  "updated_at": "2026-08-07T13:39:00Z",
+  "closed_at": "2026-08-07T13:39:00Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6070",
+  "body": "在 #5916(PR #6056)补扫描语料下限断言时顺带量到的残余,**与该 PR 的修法正交**,不在其申报面内,故单独记录。\n\n## 观察\n\n`scripts/check-single-authz-resolver.mjs` 的 `walk()` 收集条件是:\n\n```js\nelse if (e.endsWith('.ts') && !e.endsWith('.test.ts') && !e.endsWith('.d.ts')) out.push(p);\n```\n\n`'x.mts'.endsWith('.ts')` 为 **false**(`ts` 前一个字符是 `m` 而非 `.`),`.cts` 同理。所以声明的扫描根 `packages/` 下的 `.mts` / `.cts` 一个都不进语料 —— 检查 (1)「不存在重复的请求上下文解析器」这个结论,是在**不包含它们**的集合上得出的。\n\n`origin/main@efedd28` 实测:\n\n```\npackages/ 下 .mts/.cts:   12\npackages/ 下 .ts:       3053\n```\n\n12 个文件全部在 `packages/spec/scripts/` 下(`check-strictness-ledger.mts`、`liveness/*.mts` 等构建/存活性脚本)。\n\n## 今天是休眠的,不是漏判\n\n逐个查过这 12 个文件,**没有任何一个**同时引用 `sys_user_role` 与 `sys_user_permission_set`,即没有一个会触发该门禁的启发式。所以今天没有真实漏判,用户也碰不到 —— 按 observation 归档,不带 `pm:queue`,请分诊裁定。\n\n风险是形状上的:若日后有请求上下文解析逻辑落到 `.mts`/`.cts`(或仓库整体迁移扩展名),这道门会在**看不见它**的情况下继续印绿,正是 #4930 / #5916 这一族反复关的那种\"门跑了但没读到\"。\n\n## 与 #5916 的关系(为什么不是同一件事)\n\n- #5916 落地的是**按根下限**:每个 `SCAN_ROOTS` 条目至少产出 1 个文件。本条它**结构上看不见** —— `packages/` 产出 3053 个 `.ts`,远在下限之上,而那 12 个文件照样不在语料里。\n- 也**不是**维护者在 #5916 明确否掉的高水位棘轮(那是\"语料缩水但非空\"的通用问题)。本条是一个具体的、可判定的扩展名过滤问题:声明要扫 `packages/`,实际只扫了它的一个扩展名子集。\n\n## 可能的修法(供分诊参考,未实现)\n\n1. 把过滤器放宽到 `/\\.(m|c)?ts$/` 并保持 `.d.ts` / `.test.ts` 排除 —— 语料变大,需确认那 12 个脚本不会误触发启发式(实测不会);\n2. 或明确记录\"只扫 `.ts` 是有意的\",把理由写进模块头,让下一个读者不必重新推导。\n\n按 1 更贴近\"声明即执行\":门禁声称读遍 `packages/`,那就该真的读遍。\n\n相关:#5916(按根下限,已由 PR #6056 落地)、#4930 / #4916(死根按名报错)、#4932(同族先例)、#4690(「提取失败必须红」出处)。\n"
+}

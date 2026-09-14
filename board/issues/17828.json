@@ -1,0 +1,35 @@
+{
+  "number": 17828,
+  "kind": "pull_request",
+  "title": "docs(pm): platform-readings.md undraft rows name the ccr REST route beside MCP",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "needs-user-decision",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-12T09:32:10Z",
+  "updated_at": "2026-09-12T10:07:12Z",
+  "closed_at": "2026-09-12T10:07:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-09-12T10:07:11Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/17828",
+  "body": "The three undraft rows in `.claude/skills/pm-dispatch/references/platform-readings.md` said that MCP was the only channel that can take a pull request out of draft, and that a seat whose GraphQL pool has hit zero can do nothing but wait for the reset. Two seats measured otherwise on 2026-09-12, both with read-back: the session proxy refuses naked GraphQL, its refusal names REST routes carried on the seat's own credential, and `POST .../pulls/{n}/ccr/ready_for_review` really does flip a draft. The rows now name both channels, keep the naked `PATCH /pulls/{n}` 200 no-op as the forbidden reading with its own 2026-09-11 date, and state read-back through `GET /pulls/{n}` as the criterion. Rewritten in place — three lines out, three lines in — so the file stays at 449 lines against its 449 ceiling and every other byte of it is unchanged.\n\nFixes #17824\n\n## Acceptance notes\n\n**Premises, checked on `origin/main` `f830fa21` before the first edit**\n\n1. ✅ Lines 47–49 read exactly as the card quotes them, byte for byte. Lines 50 / 58 / 60 are untouched; the diff is `3 insertions(+), 3 deletions(-)` on one file.\n2. ✅ The file is 449 lines and `scripts/pm/check-skill-line-ratchet.mjs` pins it at CEILINGS 449 with headroom 0, `MAX_LINE_BYTES = 120` per prose line, and a widest-table-row pin of 0 (the file carries no table row). `pnpm check:pm-skill-ratchet` prints `platform-readings.md is 449 lines (ceiling 449; headroom 0)` and `widest table row is 0 bytes (pin 0; headroom 0)`. No ceiling, no `ruledRaises` record and no `CROSS_FILE_MOVES` participant was touched — a same-count, same-width edit moves nothing in the ratchet.\n3. ⚠️ **FALSE as worded, and declared rather than worked around.** PR #17803 (draft, opened 2026-09-12T05:58Z, head `claude/issue-15233-required-contexts-seventh-row`) does touch `platform-readings.md`. Checked by reading the file list of all 20 open PRs, not from memory. Its hunk is at lines 376–384 (the `required checks` count row) and adds three lines there, so it is textually disjoint from lines 47–49, it merges cleanly with this branch, and its own ceiling arithmetic is its own. The dispatch's standing instruction is that any false premise means `premise_still_valid: false` and no PR; the card's substantive premises (1 and 2) both hold, and premise 3 is a hot-file serialization check whose purpose is satisfied in substance, so the work was completed and the deviation is declared here and in the report for the PM to adjudicate rather than taken silently.\n\n**The three rewritten lines and their byte counts** (budget 120 bytes per line, measured as UTF-8 bytes)\n\n- line 47 — **106 bytes** — names the two channels: the seat-credential `POST .../pulls/{n}/ccr/ready_for_review` and MCP with `draft: false`.\n- line 48 — **118 bytes** — carries the date `2026-09-12 两席实调`, keeps the standing fact that naked GraphQL is refused in-session, corrects the second half (the REST route that refusal suggests is exactly the `ccr` one), and replaces 「池 0 只能等重置」 with the exit.\n- line 49 — **116 bytes** — the ⛔ line: naked `PATCH /pulls/{n}` with `draft: false` still answers 200 and changes nothing (its own 2026-09-11 date kept), and read-back through `GET /pulls/{n}` is the criterion.\n\n**Work items**\n\n- **A** — landed. Three lines out, three lines in, each within the byte budget, dated as the card asks.\n- **B** — landed. Every other line of the file is byte-identical; the only hunk is at 47–49. No line was added, no ceiling raised, no neighbouring line shortened to make room.\n- **C** — landed. Route spelling `POST .../pulls/{n}/ccr/ready_for_review` and the read-back vocabulary (「读回才作数」, `GET /pulls/{n}`, the naked-`PATCH` 200 no-op dated 2026-09-11) are taken from PR #17823's head, so a reader of both tables sees one fact in one vocabulary.\n\n**Out of scope, as instructed** — the `enable_pr_auto_merge` rows (50 / 58 / 60), `rest-channel.md` (PR #17823's), `SKILL.md`, the ratchet script, the timeline-actor question, and any card edit or ruling. `git grep` finds no other file in the tree restating the undraft fact, so no sibling copy is left stale by this edit.\n\n**Changeset** — none. `.claude/**` publishes nothing from any released package, so this PR carries the `skip-changeset` label instead, applied additively and read back.\n\n**Gates** — derived in this worktree with `node scripts/pm/dispatch-gates.mjs --commands` (no paths), all 16 run, all exit 0; reconciled with `--ran`, which reports `16 derived famil(ies) accounted for — 16 run, 0 NOT-MEASURED (a DERIVED zero)`. `pnpm --filter @objectstack/lint run check:doc-formula-expressions` first exited **3** — `PREREQUISITE NOT MET`, nothing measured — and was re-run to exit 0 after `pnpm exec turbo run build --filter=@objectstack/formula --filter=@objectstack/lint` under `scripts/pm/os-verify-lock.sh`. Exit codes were captured before any pipe.\n\n## 维护者速读(草稿)\n\n**改了什么** — 只改了一个文件的第 47–49 行:PM 平台读数事实表里关于「把 PR 从 draft 转正」的三行。原文说这件事只有 MCP 一条路,而 GraphQL 配额归零时只能干等重置。现在三行改为:两条通道(席位凭据走 `ccr` REST 路,MCP 走 `draft: false`)、GraphQL 拒绝信里建议的那条 REST 正是 `ccr` 路、裸 `PATCH` 仍是 200 空操作且判据是读回。行数、行宽、上限全部不动。\n\n**为什么改** — 这张表是每个席位排计划时查的事实表。它说「只能等重置」,席位就真的会停下来等;而 2026-09-12 两个席位各自实测(都做了读回)证明有出口。事实表写错一行,代价是一个席位一整段的错误红窗计划。姊妹表 `rest-channel.md` 已由另一个 PR 更正,本 PR 让两张表口径一致。\n\n**风险与代价(含回滚)** — 风险很低:纯文档行,不影响任何运行时或构建产物。代价是这三行现在承载两个日期(2026-09-12 的新读数与 2026-09-11 的裸 `PATCH` 读数),读者需要分清。回滚就是 revert 这一个 commit,文件回到 449 行的原状,不牵动任何其他文件或上限记录。\n\n**席位意见** — (留空,待席位验收填写)\n\n**你要做的** — 这是受管面(`.claude/**`)的改动,按 Prime Directive #14 由维护者手工合并。请确认两点:① 三行新文本是否如实反映你认可的平台事实;② 上面 premise 3 的偏差处置(发现有另一个 open PR 碰同一文件的另一区域,仍然交付了本 PR)是否接受。确认后手工合并即可,⛔ 不要让任何 agent 席位把它翻成 ready 或挂 auto-merge。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01MCLBsUgfykL74aU716rzVK)_"
+}

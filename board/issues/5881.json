@@ -1,0 +1,35 @@
+{
+  "number": 5881,
+  "kind": "issue",
+  "title": "ADR-0057 D10 的 dashboard `requiresService` 组件门禁在 `GET /meta/:type/:name` 的缓存分支(默认路径)被完全跳过",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T10:54:13Z",
+  "updated_at": "2026-08-07T12:52:43Z",
+  "closed_at": "2026-08-07T12:52:43Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5881",
+  "body": "发现于 #5563 实施(信封收敛)期间的旁证测量,与该单的改动无关 —— 改前改后同样成立。基线 `origin/main` @ `55c74deeb`。\n\n## 事实\n\n`packages/rest/src/rest-server.ts` 的单条元数据读取 handler 里,ADR-0057 D10 的 dashboard 组件门禁(`filterDashboardForUser`,按 `widget.requiresService` 剔除指向未注册可选服务的磁贴)**只写在非缓存分支**里:\n\n```\n} else {\n    // 非缓存分支\n    const envelope = await p.getMetaItem({...});\n    ...\n    if (RestServer.metaTypeSingular(req.params.type) === 'dashboard' && visible) {\n        ... visible = this.filterDashboardForUser(visible, serviceGate);\n    }\n```\n\n而进入缓存分支的条件是:\n\n```\nif (metadata.enableCache && p.getMetaItemCached && !isAppType && !isDraftRead\n    && !previewDrafts && !packageScoped && req.params.type !== 'doc' && req.params.type !== 'book')\n```\n\n`app` 被 `!isAppType` 显式排除在缓存之外(注释写明:正是为了让 per-user RBAC 过滤能跑),`doc` / `book` 也被排除(§6.7 audience 是 per-caller)。**`dashboard` 没有被排除**。而 `enableCache` 默认为 `true`(`packages/spec/src/api/rest-server.zod.ts` 的 `enableCache: z.boolean().default(true)`)。\n\n于是:默认配置下,一次 `GET /api/v1/meta/dashboard/:name` 走缓存分支,`filterDashboardForUser` 一次都不会执行。\n\n## 实测\n\n在 worktree 里对着真 `RestServer` 跑一次探针(protocol 同时提供 `getMetaItem` 与 `getMetaItemCached`,`serviceExistsProvider` 报告 `org-scoping` 未注册,dashboard 有两个组件,其中 `w_orgs` 声明 `requiresService: 'org-scoping'`),捕获 `res.json` 的实参:\n\n```\ncachedCalls:   1\nwidgetsServed: [ \"w_users\", \"w_orgs\" ]\n```\n\n`w_orgs` 被原样送出。把同一请求切到非缓存分支(`metadata.enableCache: false`),门禁生效、`w_orgs` 被剔除 —— 这条断言现在钉在 `packages/rest/src/rest.test.ts` 的 `filterDashboardForUser` 一组里(#5563 PR 内),该用例显式关掉缓存才跑得出绿,注释里也记了这条为什么。\n\n(探针脚本是一次性的,未提交。)\n\n## 影响\n\nADR-0057 D10 的立论是「服务端是权威的可见性门禁」—— 客户端的隐藏只是礼貌。这里默认配置下门禁根本不运行,所以:\n\n- 在没有该可选服务的部署里,console 会渲染一块绑定到缺失服务的死磁贴(D10 原文点名的场景:单租户运行时里的 Organizations KPI);\n- 与 `app` 的处置不对称:`app` 为了让 per-user 过滤能跑而特意绕开缓存,`dashboard` 的门禁却写在只有绕开缓存才会到达的分支里 —— 两处是同一天同一个 ADR 的两半;\n- 属于「声明了却没有强制」:门禁代码在、测试在(测试直接调私有方法或关掉缓存,因此一直绿),没有任何 gate 会发现默认路径上它不执行。\n\n## 可能的处置(未定,交分诊)\n\n- A:把 `dashboard` 加进缓存排除条件(与 `app` 同款),代价是 dashboard 读失去 ETag 快路径;\n- B:门禁提到分支之外,缓存与非缓存两条路径出口处统一跑一次(需要注意 ETag 是 per-published-checksum 而门禁是 per-deployment 的,不是 per-caller,所以共享 ETag 未必不安全);\n- B 看起来更贴合「一次读取一个出口」,但 ETag/缓存键与门禁结果的关系需要确认,不代拍。\n\n关联:#5563(在其实施中测得,两者互不阻塞)、ADR-0057 D10。"
+}

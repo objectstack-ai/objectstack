@@ -1,0 +1,36 @@
+{
+  "number": 5688,
+  "kind": "issue",
+  "title": "analytics: 只用来限定「日期区间」的 timeDimension 被补上默认 dateGranularity，于是网格被静默按月拆分 —— 「按 Owner 统计」加个日期筛选就变成「按 Owner × 月」",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T00:20:14Z",
+  "updated_at": "2026-08-06T14:55:42Z",
+  "closed_at": "2026-08-06T14:55:42Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5688",
+  "body": "立单于 #5537 的实施过程（PR 见该单）。**与 #5537 的 fields 装配无关**：下面的复现跑在 #5537 从未影响的那条「无 measure filter 单查询」路径上，且在 `origin/main`（c36abfe98，含 #5587/#5634/#5667）与 #5537 的分支上**逐字节同样**复现。范围外，单独立单。\n\n## 现象\n\n一个 dataset selection 只把日期维度用作**窗口**（`timeDimensions: [{ dimension, dateRange }]`，不带 `granularity`，也**不**把它列进 `selection.dimensions`）——这正是 dashboard 日期区间筛选器的产物，executor 自己的注释就把它称作 \"a dashboard date-range filter is the usual source\"——结果网格却**额外按该日期维度分桶**：多出一列没人选过的时间列，行数按月裂开。\n\n## 复现\n\ndataset（关键条件：日期维度声明了显式 `dateGranularity`）：\n\n```\ndimensions:\n  - { name: owner,      field: owner_id,   type: lookup, label: Owner }\n  - { name: close_date, field: close_date, type: date,   label: Close Date, dateGranularity: month }\nmeasures:\n  - { name: opp_count,  aggregate: count,  label: Opps }\n```\n\n三条数据：`u1 @2026-01`、`u1 @2026-02`、`u2 @2026-01`。\n\nselection —— 只按 owner 分组，日期只当窗口：\n\n```\n{ dimensions: ['owner'],\n  measures: ['opp_count'],\n  timeDimensions: [{ dimension: 'close_date', dateRange: ['2026-01-01', '2026-02-28'] }] }\n```\n\n实测响应：\n\n```\nfields [{\"name\":\"owner\",\"type\":\"string\",\"label\":\"Owner\"},\n        {\"name\":\"close_date\",\"type\":\"time\"},          <-- 没人选过这一列\n        {\"name\":\"opp_count\",\"type\":\"number\",\"label\":\"Opps\"}]\nrows   [{\"owner\":\"u1\",\"close_date\":\"2026-01\",\"opp_count\":1},\n        {\"owner\":\"u1\",\"close_date\":\"2026-02\",\"opp_count\":1},   <-- u1 被拆成两行\n        {\"owner\":\"u2\",\"close_date\":\"2026-01\",\"opp_count\":1}]\n```\n\n期望：2 行（`u1: 2`、`u2: 1`），`fields` 为 `owner` + `opp_count`。\n\n## 落点\n\n`packages/services/service-analytics/src/dataset-executor.ts` `buildQuery`（origin/main c36abfe98 L888-L909）：\n\n```\nconst resolvedTimeDims = selTimeDims.map((t) => {\n  if (t.granularity) return t;\n  const granularity = granularityFor(t.dimension);   // L899\n  return granularity ? { ...t, granularity } : t;\n});\n```\n\n`granularityFor` 走 `resolveDimensionGranularity(selection, name, datasetDefault)`，`datasetDefault` 即「dataset 显式声明过 `dateGranularity`」时编译出的单元素 `cube.granularities`。于是一个**只有 `dateRange`** 的条目被补上 `granularity: 'month'`；而一旦条目带上 granularity，它就是 GROUP BY 项、并且按 #4033 被 `projectedDimensions`（`objectql-strategy.ts` L1130，native 侧同义）投影成结果列。\n\n这条补默认值**本身是刻意的**，`buildQuery` 上方的长注释写明了理由：`compareTo` 需要的正是「窗口条目不得**抑制**分桶」，否则主网格按月、比较网格按原始时间戳，两边维度键对不上，每个 compare 列都空。所以两种需求在同一处打架：\n\n- 该日期维度**被选为维度**时，补默认粒度是对的（#3588/#4870 的修复）；\n- 该日期维度**只是窗口**时，补默认粒度把「筛选」变成了「再加一层分组」。\n\n判据看起来应该是「这个 dimension 是否出现在 `selection.dimensions`（或调用方自己写了 granularity）」，但这属于会改变响应形状的契约取舍，不该由我在 #5537 里顺手猜，故立单。\n\n## 触发条件与影响面\n\n必要条件（三者同时）：dataset 的该日期维度声明了显式 `dateGranularity`；selection 的 `timeDimensions` 条目**不**带 `granularity`；`selection.dateGranularity` 未设。HotCRM 一类 dataset 普遍声明 `dateGranularity`，dashboard 的日期区间筛选器又普遍只发 `dateRange`，因此可达性不低。\n\n命中时是**行数与列集都变**（不是纯元数据问题）：一个「Won by Owner」表加上日期筛选后每人一行变成每人每月一行，KPI 单值卡会拿到多行里的第一行。\n\n附带的次要症状（同一根因，同一条路径）：这样投影出来的时间列在 `fields` 里只有 `type` 没有 `label` —— `analytics-service.ts` 的维度 label 富化（L915 起）只遍历 `selection.dimensions`，看不到只在 `timeDimensions` 里的列。#5537 的 PR 把这一点当作**两条路径一致的既有行为**钉住了（`dataset-dimension-field-descriptors.test.ts` 里成对的控制用例），并明确指向本单。\n\n## 不重复\n\n已搜：`timeDimensions dateGranularity`（命中 #3650/#3777，均已关闭且是另一件事：前者是 `dateRange` 被忽略，后者是上界打在 datetime 列上）、`dataset-executor buildQuery grouping`、`dateRange granularity bucket dashboard widget rows`、`date range filter extra column group by month widget` —— 无 open 重复。\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 17618,
+  "kind": "issue",
+  "title": "[finding] `check-clause2-carriers` T1 reads a function PARAMETER annotated `ctx: z.RefinementCtx` as a new authorable key — so every PR that adds an object-level refusal raises a widening tell for the refusal itself",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-11T04:13:19Z",
+  "updated_at": "2026-09-12T05:31:32Z",
+  "closed_at": "2026-09-12T03:34:35Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17618",
+  "body": "## Summary\n\n`check-clause2-carriers`' **T1** widening tell reads any added source line shaped `identifier: z.Something` as *\"a new key on a Zod object schema — the accept set gains a spelling an author may now write\"*. It does not require that line to be inside a Zod object shape, so a **TypeScript function parameter annotated with a zod type** matches it.\n\nMeasured on PR #17616, whose diff **narrows** an accept set and adds no key at all:\n\n```\n$ node scripts/pm/check-clause2-carriers.mjs --pair 17616\n    T1 packages/spec/src/ui/dashboard.zod.ts:434 — a new key on a Zod object schema —\n       the accept set gains a spelling an author may now write\n    + ctx: z.RefinementCtx,\n```\n\nLine 434 is the second parameter of an exported refinement check:\n\n```ts\nexport function checkDashboardWidgetStageOrder(\n  widget: { type?: unknown; options?: { stageOrder?: unknown } | null },\n  ctx: z.RefinementCtx,          // <- T1 reports this as an authorable key\n): void {\n```\n\n`z.RefinementCtx` is a TYPE, not a schema; nothing constructs a shape here and no accept set gains a spelling. The exact opposite is true of the diff the row appears on — it adds a `superRefine` that **refuses** metadata which parses today.\n\n## Why it is worth a card rather than a shrug\n\nThe row is report-only, so nothing is mis-labelled by it. The cost is on the reading, and it is the same cost #16943 recorded for **T2**:\n\n> the C5 row it raises cannot be cleared except by declaring Clause-② yes on a change that does not widen\n\nHere the pair does declare `yes` (correctly, for the narrowing), so C5 fires for the *other* reason and the T1 line is the only evidence it prints. A reviewer reading *\"the accept set gains a spelling an author may now write\"* against a narrowing PR has to open the file to find out it is a function parameter. A tell that is wrong in the direction opposite to the change is the shape that gets a diagnostic ignored, and then ignored on the run where it was right.\n\n⭐ The false positive is also **systematic, not incidental**: `(value, ctx: z.RefinementCtx)` is the repo's own prescribed signature for an exported object-level refinement (the `#16489` convention — `checkListViewPageMount`, `checkListViewCalendarVisualization`, `checkPageSourceCompleteness`, `checkGlobalFilterDateDefaultValue`). So **every** PR that adds one of these checks — which is to say every PR that adds a cross-field REFUSAL — will raise a T1 widening tell for the parameter of the function doing the refusing.\n\n## Discriminator\n\nBoth probes on the same run, so this is not an artifact of how it is written:\n\n| line added by PR #17616 | T1 |\n| --- | --- |\n| `  ctx: z.RefinementCtx,` (a function parameter) | **reported** as a new authorable key |\n| `  stageOrder: z.array(...).optional()` — the real shape member, UNCHANGED by the diff | not reported (correctly — it is not an added line) |\n\nAnd the control that shows T1 is not simply reporting every added `z.` line: the same diff adds `const WIDGET_TYPE_DEFAULT = 'metric';` and several `.superRefine(...)` / `.describe(...)` lines, none of which are reported.\n\n## Suggested repair, and the trap in it\n\nThe obvious narrowing — require the match to sit inside a `z.object({ … })` / `strictObject(…, { … })` shape body — is a depth-aware read over a comment-and-string mask, which is exactly the reader `scripts/check-widget-option-census.mjs` had to build for the same question (its header measures four cheaper readers that each fabricate or truncate). ⚠️ The cheap version fails GREEN: a reader whose scope ends at the first `})` truncates, reports fewer tells, and a widening tell that goes missing is worse than one that fires twice.\n\nA cheaper and possibly sufficient discriminator: exclude a match whose line sits inside a **parameter list** — between an unclosed `(` opened by a `function` / arrow declaration and its `)`. That is a smaller claim than \"is it a schema shape\" and it covers the whole systematic class above.\n\n## Where\n\n- `scripts/pm/check-clause2-carriers.mjs` — the T1 tell.\n- Reproduce: `node scripts/pm/check-clause2-carriers.mjs --pair 17616` (exit 4; the C5 row prints both tells).\n\n## Related\n\n- #16943 — the same class on **T2** (a replaced string property value read as \"a new member of a closed set\"), closed.\n- #17098, #17346 — other `check-clause2-carriers` reading defects, open.\n- Found while landing #17344 finding 1 (PR #17616). ⛔ Not fixed there: that PR's face is `packages/spec/src/ui/dashboard.zod.ts`, and a PM-tooling change does not belong in a PR carrying a published-surface narrowing.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

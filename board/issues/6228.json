@@ -1,0 +1,35 @@
+{
+  "number": 6228,
+  "kind": "pull_request",
+  "title": "fix(service-automation): resumeInternal 存储不可达的日志 cause 移出 message,改走 meta (#5912)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T11:17:43Z",
+  "updated_at": "2026-08-07T11:50:29Z",
+  "closed_at": "2026-08-07T11:50:27Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T11:50:27Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6228",
+  "body": "Fixes objectstack-ai/objectstack#5912\n\n## 前提复核(先做的事)\n\nissue 正文按 `7b005b4` 写的是 `:3017`,分诊按 `9e3709a` 复核为 `:3017`。本次在 `origin/main` `1549605f6` 上**按内容定位**,该行现在漂到 **`engine.ts:3040`**,文本逐字一致:\n\n```\n`[automation] durable suspended-run store unreachable while resuming '${runId}': ${message}`\n```\n\n**前提成立**,只是行号漂了(#6153 昨日改过同包其它文件)。`${message}` 来自 `loadSuspendedRunStrict`,即**数据源驱动**自己的失败文本 —— 我们不控制它有几行。\n\n## 危害(实测,不是推演)\n\n`ObjectLogger.write()` 一次调用只加一个「时间戳 + 级别」记录头,message 里的换行把**一条**记录切成多个物理行,后几行无级别无时间戳。`pretty` / `text`(`os dev` / `os serve` 默认)下文件 sink 当独立记录存,`grep ERROR` 只捞到不含事实的那一行。\n\n本 PR 的测试量到:一个三行 better-sqlite3 驱动错误把这条告警切成 **3 个物理行**,只有第 1 行带 `ERROR` 头。cloud#971 即此形态。\n\n## 改法(同族第六次套既定模板,零新词汇)\n\n复用同包 `thrown-cause-diagnostics.ts` 的 `describeThrownForLog`:\n\n- **message 单行自足**,并补齐 #4632 要求的后果与修法(挂起态**未被消费**、运行仍停在原处、存储恢复后可原样重试),末尾指明 cause 在本记录 meta 里;\n- cause 走 `Logger` 契约(`packages/spec/src/contracts/logger.ts`)`error(message, error?, meta?)` 的**第三**参,**第二参传 `undefined`** —— 第二参是 `Error` 槽,放原始 error 会让每条记录带整个栈(#5575 的坑);\n- **未新增任何 meta 字段名**:直接用 helper 自己的 `error` / `issues`,天然不含 key/token/secret/password 子串(#5573)。\n\n这是这条 resume 路径上**最后一处**。#5737(PR #5911)修完 wait 节点五处后,同一次「resume 时存储不可达」产生两条记录:wait-node 那条已是干净单行,engine 这条仍被切碎;本次之后两条都干净。\n\n## 刻意**不动**的两处(各自钉上回归测试)\n\n按 issue 与分诊评论钉死的范围,⛔ 未扩面:\n\n1. **`:3022`(现 `:3045`)返回值信封 `AutomationResult.error` 仍逐字拼接驱动文本。** 它是给调用方读的结构化返回值,经 REST 出去是 JSON 字符串字段、不按行切分;#5636 对 `degradedReason` 是同源取舍,且 PR #5911 已让 wait-node 侧把它整体放进 meta、由 `JSON.stringify` 转义完整保留。`describe('… envelope is byte-identical to before')` 三条用例逐字钉住(多行 / 单行 / `STORE_UNAVAILABLE` 不退化成 `RUN_NOT_FOUND` 的 #4420 性质)。\n2. **级别仍是 `error`。** 运行在盘上而 resume 没落地,正是 #4632 定义的耐久性降级。单独一条用例钉级别不下调。\n\n## 反向验证 —— 方向先声明,再跑\n\n**预判**:还原被删的拼接肢(cause 塞回 message、去掉 meta 第三参)⇒ 4 条**拼接钉转红**;**级别钉保持绿**(还原不改级别);**3 条信封钉保持绿** —— 后者不动正是它们存在的意义,不是漏测。\n\n**实跑,与预判逐条相符(4 红 4 绿)**:\n\n```\n× the driver's multi-line failure never reaches the log message\n    AssertionError: expected '[automation] durable suspended-run st…' not to contain '\\n'\n× stays one physical line in `pretty`, the format `os dev` / `os serve` default to\n    AssertionError: expected [ …(3) ] to have a length of 1 but got 3\n× calls error(message, undefined, meta) — the contract's third slot\n× renders a single-line driver failure in exactly the same shape — the fix is unconditional\n✓ stays at `error` — a parked run that did not resume is a #4632 durability degradation\n✓ keeps the multi-line driver text spliced in, verbatim\n✓ keeps a single-line driver text spliced in, verbatim\n✓ reports STORE_UNAVAILABLE rather than RUN_NOT_FOUND — #4420 still holds\n```\n\n`1 → 3` 那条就是危害本身的读数。\n\n## 测试\n\n新增 `packages/services/service-automation/src/resume-store-unreachable-log-cause.test.ts`(8 例)。断言在**真实 `ObjectLogger` 的真实字节**上读(#5662 / #5661 / #5737 的先例):spy 只用在「参数槽本身就是待验事实」的那一条。\n\n`resume()` 先走的 gate 用的是**降级版**读取器(`loadSuspendedRun`),它把同一个失败吞成 stdout 上的 `warn`;测试只抓 **stderr**,把待验接缝与它隔开。\n\n未引入任何新的 fake ObjectQL engine(用的是手写 `SuspendedRunStore`),因此不涉及 `assertEngineDeleteDispatch`;`pnpm check:engine-double-contract` 仍绿。\n\n```\npnpm --filter @objectstack/service-automation test\n  Test Files  67 passed (67)\n       Tests  797 passed (797)\n\npnpm --filter @objectstack/service-automation build          ✓ DTS Build success\nnpx tsc --noEmit -p tsconfig.json  ⇒ 5 errors(3 nested-region-parity.test.ts + 2 engine.test.ts)\n  —— 与 check-type-check-coverage.mjs 的 DEBT 台账 errors: 5 逐条吻合,本 PR 新增文件贡献 0\n\npnpm check:durability-log-level      ✓ 24 durability-critical catch seam(s), all loud\npnpm check:startup-registry-verdict  ✓ 40 seam(s), none recording a contradictable verdict\npnpm check:engine-double-contract    ✓\npnpm check:empty-changeset           ✓\npnpm check:resume-authority-declared ✓\nnode scripts/check-nul-bytes.mjs     ✓ OK (5923 tracked text file(s))\n```\n\n## Changeset\n\n走 **changeset**(`@objectstack/service-automation: patch`),不走 `skip-changeset`:这不是纯测试 / 纯 workflow 改动,而是**运维可见的日志形状变更** —— 按 `Cause` 位置 grep 这条记录的日志查询需要改成读记录的 `error` 字段。同族前五单(#5048 / #5575 / #5636 / #5661 / #5737)无一例外都写了 changeset,PR #5911 的 `.changeset/wait-node-log-cause-meta.md` 是最近的同包先例。\n\n## 顺带发现(未在本 PR 修,已另开单)\n\n`engine.ts` 的 `loadSuspendedRun`(降级版读取器)在 `logger.warn` 里有**完全同形**的拼接。它在另一个方法、另一条分支上,分诊已把本单范围钉死在 `:3017` 一处,故按 Prime Directive #10 单开为 observation-class finding,未在此 PR 顺手扩面。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015a5qkLzpGXhLL2F5gvJ7dD)_"
+}

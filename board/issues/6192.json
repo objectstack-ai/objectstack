@@ -1,0 +1,34 @@
+{
+  "number": 6192,
+  "kind": "pull_request",
+  "title": "fix(ci): Check Changeset 以 merge-base 为差异起点,main 漂移不再算作本 PR 新增",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T10:26:05Z",
+  "updated_at": "2026-08-07T10:48:36Z",
+  "closed_at": "2026-08-07T10:48:34Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T10:48:34Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6192",
+  "body": "Fixes #6129\n\nCheck Changeset 的差异起点从冻结的 `github.event.pull_request.base.sha` 改为**与 base 分支的 merge-base**,让判定只取决于本 PR 自己那侧 —— 同一份 diff,早跑晚跑同判。\n\n## 机制(在真实两父提交上验过,不是推的)\n\n`actions/checkout@v7` 在 `pull_request` 事件上默认签出 merge ref(`refs/pull/N/merge`),HEAD 是一个合并提交,parent^1 = 建 ref 那一刻的 main tip,parent^2 = PR head。而 `base.sha` 在 PR **创建时**冻结,不随 main 前进。两者之间的 main 漂移,整段被 `--diff-filter=A` 记成「本 PR 新增」。\n\n在临时仓库里复刻 #6117 的形状(PR 只改 workspace 文件、零 changeset;其间 main 合入两个别人的带 changeset PR):\n\n```\nHEAD parents  = 492a4da ba2aa1b\n  parent^1    = 492a4da  main: merge someone else #B     <- main tip\n  parent^2    = ba2aa1b  pr: pin onlyBuiltDependencies   <- PR head\nmerge-base(origin/main, HEAD) = 492a4da   == origin/main? YES   == HEAD^1? YES\n\nOLD  git diff --diff-filter=A $BASE_SHA HEAD      -> ADDED=2\n       impostor: .changeset/last-admin-guard-permission-set-row.md\n       impostor: .changeset/seed-autonumber-read-outage.md\nOLD3 git diff --diff-filter=A $BASE_SHA...HEAD    -> ADDED=2   (三点不是修法)\nNEW  git diff --diff-filter=A $MERGE_BASE HEAD    -> ADDED=0\n\nverdict OLD: GREEN -- \"This PR adds 2 changeset(s).\"  <<< 假绿\nverdict NEW: RED (正确:本 PR 确实一个都没加)\n```\n\n对照组(PR 自己真加了 changeset):OLD=3(2 个冒名 + 1 个自己的),NEW=1,且点名的正是自己那个文件 —— 没有矫枉过正。\n\n**两个看着像修法、实际不是的写法**,都写进了 workflow 注释:\n\n- `git diff base.sha...HEAD`(三点)。三点 = `merge-base(base.sha, HEAD)..HEAD`,而 `base.sha` **本来就是** HEAD 的祖先,自己就是自己的 merge base,计数一动不动(实测仍是 2)。\n- `HEAD^1`。在 merge ref 上对,但哪天有人给 checkout 加了 `ref:`,parent^1 就变成 PR 的上一个提交 —— 静默地全错。`merge-base` 在**两种** checkout 下都对,所以选它。\n\n## checkout 保持不变\n\n不需要改。merge-base 在 merge ref 上恰好落在 parent^1,diff 出来就是本 PR 自己那侧。改签 head ref 会换掉本 job 每一步看到的整棵树(`pnpm install --frozen-lockfile` 与脚本读到的 head 都变),为零收益付大得多的爆炸半径。\n\n## 三个消费者\n\n1. **计数步骤**(`ADDED`):吃 `$MERGE_BASE`。\n2. **`check-empty-changeset.mjs --base`**:同一个 `$MERGE_BASE`。同款偏差、方向相反 —— 冻结 base.sha 会把 main 新增的空 changeset 报到一个碰都没碰过该文件的作者头上(假**红**)。\n3. **脚本自己的 base 语义**:`scan()` 内部把 base 解析为 `merge-base(base, head)`。CI 路径上这一步幂等(传进去的已是 merge base);它修的是**另一半** —— 默认 `--base origin/main` 的本地路径。`changeset pre exit` 从 main 删掉已消费的 changeset 之后,两点 diff 会把未 rebase 分支上仍带着的存量空 changeset 全读成「本分支新增」。实测:2 个 fixture 在 main 上被删 → 两点 diff 报 2 条假红,merge-base 报 0 条。workflow 注释里那句「deferred to the next `changeset pre exit`」就是这个触发条件。\n\n新增一个 `Resolve the diff base` 步骤统一算一次并写进 `$GITHUB_OUTPUT`,两个消费者读同一个值 —— 一个地方可审计。算不出来时**响亮失败**(#4690),绝不回退到冻结 sha:那正是本单要杀的缺陷。步骤还会把漂移量打进日志(`main has moved N commit(s) since it was frozen`)—— #6129 藏这么久,一部分原因就是没有任何一行日志说过 diff 从哪个提交开始。\n\n## `check-changeset-no-major.mjs`:实测未受影响\n\n它既不读 `--base` 也不做任何 git diff,`readdirSync('.changeset')` 扫的是签出树上的整个目录,压根不存在 base 选取问题。方向上也不同:多出来的文件只会让它更容易判**红**(保守),不会产生假绿;何况 RC 窗口内它整个让路。#5620 的 allow-major 步骤逐字未动:\n\n```\n$ git diff origin/main -- .github/workflows/pr-automation.yml \\\n    | grep -E '^[+-].*(allow-major|check-changeset-no-major|accidental major)'\n(零命中)\n```\n\n`skip-changeset` 豁免路径同样一行未改:新步骤带着和其它步骤完全相同的 `if: steps.labels.outputs.skip != 'true'`,#5580 的实时读标签仍是权威。\n\n## self-test:21 → 36 条断言\n\n⛔ 本单明确要求「不要只改 workflow 而不动 self-test」。新增的是两个方向 **加上**消费者断言:\n\n- **漂移不得改变判定**:真实两父的 merge ref fixture,空 changeset 来自 main 那侧 → 0 violation。\n- **同一个 fixture 用冻结 base.sha 判** → 1 violation,把缺陷本身钉成事实(顺带钉住「冻结祖先就是自己的 merge base,merge-base 救不了这个写法,必须调用方停止钉死」)。\n- **本 PR 自己加的空 changeset 仍须判红**:字节级相同的漂移,只是文件换到 PR 那侧 → 仍然 1 violation。少了这条,一个「干脆少看点」的假修复也能让漂移那条变绿。\n- **同 diff 同判**:base 分支跑多远,violation 数不变。\n- **DELETED-ON-MAIN**:`changeset pre exit` 形状,钉住 `scan()` 内部那半。\n- **消费者断言**:直接读 `pr-automation.yml`,断言计数与 `--base` 都吃 `$MERGE_BASE`、且没有任何 `git diff` 拿冻结 sha 当端点。只驱动 `scan()` 的 self-test **看不见**假绿所在的那半(它在 YAML 里);少了这组,明天把 workflow 改回冻结 sha,36 条断言一条都不会红 —— 那就是「换个形状回来」。\n\n## 反向验证(方向先声明,再跑)\n\n| 撤销哪半 | 声明的预期 | 实测 |\n| --- | --- | --- |\n| 只撤 workflow(`git checkout origin/main -- pr-automation.yml`) | 4 条消费者断言红,`scan()` 那些**不动** | 正是 4 条,全部是消费者断言 |\n| 只撤脚本(`scan()` 直接用 raw base) | DELETED-ON-MAIN ×2 + #4690 抛错 ×1 红;**merge ref 漂移那几条仍绿** | 正是这 3 条 |\n\n第二行值得读一遍,它不是模板预期:在 merge ref 上,base **分支 tip** 本来就是 parent^1,所以哪怕不做 merge-base,从分支 tip 两点 diff 也已经是无漂移的。也就是说 —— CI 那半的漂移是被**消费者断言**钉住的,不是被 `scan()` 内部的 merge-base 钉住的。两半各有各的钉子,报告如实写成两行而不是合并成一句。\n\n## 门禁\n\n`node scripts/check-empty-changeset.mjs --self-test` 36 条绿;`pnpm check:empty-changeset` 真跑绿;`pnpm check:workflow-status-functions` 绿(新步骤是 step 级 `if:` 读 `steps.*.outputs.*`,明确在该门禁 scope 之外);`pnpm check:nul-bytes` 绿 + 对改动文件另跑了一遍控制字符自扫(零命中);eslint 绿;YAML 解析通过、步骤顺序正确。\n\n本 PR 只动 workflow 与 scripts,不发布任何包,按路线 2 打 `skip-changeset` 标签。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BDmDsu2575gDxeMCxXhDE3)_"
+}

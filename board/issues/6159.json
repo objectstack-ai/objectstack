@@ -1,0 +1,35 @@
+{
+  "number": 6159,
+  "kind": "issue",
+  "title": "chore(console): bump objectui pin f995a452 → a4cff5b (17 commits / 7 releasing changesets) — required before cutting rc.4",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T04:01:12Z",
+  "updated_at": "2026-08-07T07:28:55Z",
+  "closed_at": "2026-08-07T07:28:55Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6159",
+  "body": "Part of the rc.4 release train. Follow-up to the objectui lane's landed window (latest: objectui#3541).\n\n## Why now\n\nThe objectui merge queue is **empty** as of filing (2026-08-07 ~04:00Z) and its `main` head is `a4cff5b` — the lane's rc.4 window has fully landed. Meanwhile `.objectui-sha` on `origin/main` is `f995a452d2ca97fcc4b92ec6d004ee5571f3d6b7` (last bumped this morning via #6097), which now lags **17 commits / 7 releasing changesets**.\n\n**This blocks the rc.4 cut**: `check:objectui-pin-fresh` runs **enforcing** on the Version Packages release PR (#4935) per `.github/workflows/objectui-pin-freshness.yml` — a stale pin turns the release lane red. That gate exists because v16 was cut with a lagging pin and silently lost 4 frontend changes from the release record (#3340).\n\n## What rides this bump (all declared `patch`; verified at filing)\n\n- `predicate-eval-failures-warn-once` (objectui#3541) — **frontend half of target:v17 board item #5149**: visibility-predicate evaluation failures now warn once with source text + reason instead of failing silently\n- `context-selector-per-selector-scope-key` (objectui#3531) — second declared context selector no longer mirrors the first (objectui#3500)\n- `safe-translation-fallback-replace-all` (objectui#3510) — fallback interpolation replaces all placeholder occurrences\n- `create-target-org-translated-3517`, `collaboration-reaction-picker-accessible-name-3478` — i18n / a11y fixes\n- `react-predicate-input-reexports-core` (objectui#3511), `record-form-page-dead-i18n-defaultvalue-3469` — refactors, behaviour-identical\n\n## How\n\nRun `scripts/bump-objectui.sh` from a dedicated objectstack worktree with a sibling objectui checkout at the **current** objectui `origin/main` head (re-read at claim time; `a4cff5b` as of filing). Precedent: #6097. Do not hand-edit `packages/console/dist` (not tracked; built by `build-console.sh`).\n\n## Caveats\n\n- **#6099** (open): the bump digest only flags `major`-declared breaking changes, while objectui declares v17-window breaking as `minor` + body annotation. Checked at filing: all 7 changesets in this range declare `patch` and none carries a breaking annotation — re-verify if the range has grown by execution time.\n- **Ordering**: must merge **before** #4935 (the release PR regenerates on each main push and must include this bump's `@objectstack/console` changeset). No file overlap with queued #6149 (it touches only `package.json` version fields; this bump touches `.objectui-sha` + a new `.changeset/*.md`)."
+}

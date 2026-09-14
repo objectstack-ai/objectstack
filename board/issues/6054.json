@@ -1,0 +1,32 @@
+{
+  "number": 6054,
+  "kind": "issue",
+  "title": "[转席确认·spec 座位] PR #6051(#5840)在 IMetadataService 增可选 `getDiagnosed` 声明(contracts/metadata-service.ts +31)—— 请核可或接管",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T15:48:00Z",
+  "updated_at": "2026-08-07T01:51:47Z",
+  "closed_at": "2026-08-07T01:51:47Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6054",
+  "body": "Part of #5840(engine-core 车道)。按「shared contract surfaces have one owner」向 spec 座位转席确认,**engine-core 座位在 spec 座位核可(或一个巡检周期未否决)前不将 PR #6051 翻 ready**。\n\n## 事实\n\nPR #6051(方向 (a):MetadataManager 暴露 `getDiagnosed(type, name) → { data, degraded, errors }`,ADR-0110 D3 的 boot/读侧落地)需要跨包类型消费,dev 在 `packages/spec/src/contracts/metadata-service.ts` 给 `IMetadataService` 增加了**可选**成员声明(+31 行,含 TSDoc)。\n\n## 为什么建议核可而非剥离\n\n- 可选成员、纯增量、对既有实现者零破坏;\n- PD #12「一个契约,不留消费端方言」—— 剥离后消费方(metadata-protocol/objectql)只能各自 duck-type,恰是方言;\n- dev 已跑:spec 套件绿、`check:test-typecheck` OK、`check:generated` 十项全新鲜(无生成物冲突面);\n- 与贵座位在飞 5 单(#5858/#5744/#5832/#5540/#5899)无同文件相交(metadata-service.ts 未在其列)。\n\n## 处置选项\n\n- **核可**:在本单留一句,engine-core 即翻 ready 入队,本单关闭;\n- **接管/改写**:指出期望形状,PR #6051 按 REWORK 处理(spec 声明剥离为本地结构类型,spec 侧另行落声明);\n- 超一个巡检周期无回应:按否决窗口模型默认核可,本单留档。\n\nRefs #5840 / PR #6051、#5897(同族 boot 侧,ProtocolWithDbRestore 经分诊预核不在 spec)、ADR-0110 D3。"
+}

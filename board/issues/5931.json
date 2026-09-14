@@ -1,0 +1,35 @@
+{
+  "number": 5931,
+  "kind": "issue",
+  "title": "datasource `pool` 声明在 memory 驱动臂同样被静默丢弃(#5714 的姊妹臂,裁决未覆盖)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:queue"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T12:16:52Z",
+  "updated_at": "2026-08-07T11:53:46Z",
+  "closed_at": "2026-08-07T11:53:46Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5931",
+  "body": "发现于 #5714(sqlite / sqlite-wasm 臂静默丢 `pool`)的实现工作,与该 PR 的裁决范围无关,单独记录。\n\n## 事实\n\n`createDefaultDatasourceDriverFactory` 的 `memory` 臂只把 `buildMemoryConfig(spec)` 传给 `InMemoryDriver`,`spec.pool` 从未被读取:\n\n- `packages/services/service-datasource/src/default-datasource-driver-factory.ts` — memory 分支(现 :449-452)只传 `buildMemoryConfig(spec)`,而该函数(:273-278)只读 `spec.config`,不碰 `spec.pool`。\n- `InMemoryDriver` 根本没有连接池概念 —— 与 sqlite 臂\"驱动自己决定连接策略\"是同一形状,只是更彻底:这里没有任何东西可以承接 `pool`。\n\n## 实测(worktree,#5714 分支的临时探针,通过工厂真实构造)\n\n```\nmemory + pool{min:3,max:9}   driver config = {\"persistence\":false}   pool = undefined\nsqlite + pool{min:3,max:9}   knex.client.config.pool = {\"createTimeoutMillis\":15000}   live pool = {\"min\":1,\"max\":1}\npostgres + pool{min:3,max:9} knex config.pool = {\"min\":3,\"max\":9}     live pool = {\"min\":3,\"max\":9}\n```\n\n## 为什么单独记录而不是顺手修\n\n#5714 的维护者裁决(2026-08-06,裁 B)明确把响亮拒绝的范围定在 **sqlite / sqlite-wasm 两臂**:\"公开 authoring 面收紧已获维护者授权\"是对那个集合授权的。把 `memory` 加进拒绝集合是**再一次收紧公开 authoring 面**,属于超出裁决的契约决策,按纪律必须回到分诊而不是由实现方自己扩。\n\n因此 #5714 的 PR 里,`POOL_UNSUPPORTED_DRIVER_IDS` 只含 `sqlite` / `sqlite-wasm`,并在模块注释里指名本单 —— 让下一个读者看到这是**已知且被刻意划界**的洞,而不是漏看。\n\n## 仓内标本\n\n未发现:`driver: 'memory'` 的 9 处声明没有一处带 `pool`。所以这是\"可写、会被静默吞掉\"的 authoring 面缺陷,不是今天有人正在踩的线上问题 —— 严重度请分诊定。\n\n## 候选修向\n\n- **A**:把 `memory` 并入 #5714 的拒绝集合(一行:`POOL_UNSUPPORTED_DRIVER_IDS`),错误消息复用同一 helper(需要为 memory 换掉 sqlite 特有的那句解释)。\n- **B**:维持现状,理由是 memory 是 dev/test 驱动、没人写 `pool`。但这正是 #5714 修好的那句\"声明的配置要么生效要么响亮拒绝\"的反面。\n\nBlocked-by: #5714(拒绝 helper 与其 API 由该 PR 落地;本单只需扩集合 + 消息)"
+}

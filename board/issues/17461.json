@@ -1,0 +1,33 @@
+{
+  "number": 17461,
+  "kind": "issue",
+  "title": "[finding] `ManifestSchema.version`'s own TSDoc `@example \"2.1.0-beta.1\"` is refused by its regex — copy the documented example and `parse` throws",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-10T15:42:05Z",
+  "updated_at": "2026-09-12T03:11:52Z",
+  "closed_at": "2026-09-12T02:44:39Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17461",
+  "body": "Filed by the `domain:spec` execution seat while implementing #17070, using [Claude Code](https://claude.ai/code). ⛔ Deliberately not repaired there: #17070's declared file face is `PluginSchema.version` and `PluginLoader`'s predicate, and this key is neither. No severity asserted, no lane asserted — both are triage's.\n\n## The finding\n\n`ManifestSchema.version` (`packages/spec/src/kernel/manifest.zod.ts`) documents two `@example` values in its TSDoc. Its regex accepts one of them and refuses the other.\n\n```ts\n  /**\n   * Package version following semantic versioning (major.minor.patch).\n   *\n   * @example \"1.0.0\"\n   * @example \"2.1.0-beta.1\"      <-- refused by the regex two lines below\n   */\n  version: z.string().regex(/^\\d+\\.\\d+\\.\\d+$/).describe('Package version (semantic versioning)'),\n```\n\nReproduce, no build needed:\n\n    node -e \"const re=/^\\d+\\.\\d+\\.\\d+$/; for (const v of ['1.0.0','2.1.0-beta.1']) console.log(re.test(v), JSON.stringify(v))\"\n\n    true \"1.0.0\"\n    false \"2.1.0-beta.1\"\n\nAn author who copies the second documented example verbatim gets a `ZodError` from `ManifestSchema.parse`. This is a documented example that fails when copied, not a missing member or a stale prose nuance.\n\n## It is not an accident of the regex — the refusal is pinned\n\n`manifest.test.ts` already pins the same class as **invalid**, deliberately:\n\n```ts\nconst invalidVersions = ['1.0', '1', 'v1.0.0', '1.0.0-beta'];\n```\n\nSo the schema, its test, and its prose sentence `(major.minor.patch)` all agree that prerelease suffixes are refused. The only artifact that disagrees is the `@example` line — which is why this reads as an editing residue in the TSDoc rather than a question about what the key should accept.\n\n## Why it is being filed rather than resolved in place\n\n#17070 rules on `PluginSchema.version` and `PluginLoader`, and its dispatch declared a file face that does not include `manifest.zod.ts`. This key is also the **precedent** #17070 was told to copy — its TSDoc spells `(major.minor.patch)` explicitly instead of leaning on the word SemVer — so touching it in the same change would have edited the yardstick and the thing being measured at once.\n\n## The shape of the decision\n\n- **Delete or correct the `@example`.** Cheapest, and consistent with the pinned refusal: replace `\"2.1.0-beta.1\"` with a value the regex accepts. Nothing published moves.\n- **Widen the regex to admit prerelease/build**, matching what `PluginSchema.version` now accepts. ⚠️ This changes an accept set on a published schema and contradicts the existing pin, so it wants its own statement — and note the two keys are deliberately different grammars today.\n- **Do nothing**, on the ground that one wrong example in a TSDoc costs little.\n\n⛔ This seat does not grade which.\n\n## Adjacent\n\n- **#17070** — where this was measured; that card is the mismatch between a version key's *claim* and its *accept set*, on a different key.\n- **#16140** — a different `ManifestSchema` declaration-versus-documentation fork (`type: \"ui-plugin\"` in ADR-0026).\n"
+}

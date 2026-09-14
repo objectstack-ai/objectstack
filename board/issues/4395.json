@@ -1,0 +1,36 @@
+{
+  "number": 4395,
+  "kind": "issue",
+  "title": "ConnectorActionDescriptor declares nothing about whether an action reads or writes, so the platform cannot count what a connector_action did",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "pm:queue"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-31T10:52:54Z",
+  "updated_at": "2026-08-07T07:52:15Z",
+  "closed_at": "2026-08-07T07:52:15Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4395",
+  "body": "Package: `@objectstack/spec` (`packages/spec/src/integration/connector-descriptor.ts`)\nFound while wiring #4354's per-run summaries into `connector_action`.\n\n## The gap\n\n`ConnectorActionDescriptor` describes an action's *shape* and nothing about its *effect*:\n\n```ts\nexport interface ConnectorActionDescriptor {\n  readonly key: string;\n  readonly label: string;\n  readonly description?: string;\n  readonly inputSchema?: Record<string, unknown>;\n  readonly outputSchema?: Record<string, unknown>;\n}\n```\n\nSo `crm.push_opportunity` and `crm.lookup_account` are indistinguishable to the runtime. Nothing in the authorable `Connector` schema fills this in either — `registerConnector` reads `actions` for dispatch only.\n\n## Why it matters now\n\n#4354 makes every flow run report `selected` / `acted`, and `selected > 0 AND acted = 0` over consecutive runs is the broken-sweep alert. For a `connector_action` the platform has to pick one of three answers, and two of them are wrong:\n\n- **`acted: 0`** understates a Salesforce create. Every healthy connector-driven sweep then trips the alert, and operators learn to ignore it — which disables the detector for the flows that really are dead.\n- **`acted: 1`** overstates a lookup. A sweep whose only \"action\" is a connector *read* then looks busy forever, so the alert never fires. That is #4354's original bug restored, one layer out.\n- **unknown** is the honest one, and it is what shipped: the executor reports `metrics: { unmeasuredEffect: true }`, the run summary carries an `unmeasured` tally, and the documented alert became `selected > 0 AND acted = 0 AND unmeasured = 0`.\n\nThat is correct but weaker than it needs to be. A connector-driven flow currently contributes **no** signal at all: it can neither confirm work happened nor be flagged for doing none. Every ObjectStack app whose automation runs through connectors is in that blind spot.\n\n## Proposal\n\nLet the action declare its effect, and let the runtime count it:\n\n```ts\nexport interface ConnectorActionDescriptor {\n  readonly key: string;\n  readonly label: string;\n  readonly description?: string;\n  readonly inputSchema?: Record<string, unknown>;\n  readonly outputSchema?: Record<string, unknown>;\n  /**\n   * What the action does upstream. `read` never mutates; `write` does.\n   * Absent keeps today's behaviour — the run reports the effect as uncountable.\n   */\n  readonly effect?: 'read' | 'write';\n}\n```\n\nThen `connector_action` reports `acted: 1` for a successful `write`, `acted: 0` for a `read`, and falls back to `unmeasuredEffect` only when the connector declared nothing. Optional on purpose: existing connectors keep working and lose nothing, and declaring it is a strict improvement rather than a migration.\n\nWorth considering alongside it: a count rather than a boolean, for bulk actions that report how many upstream records they touched (`outputSchema` often already carries one). That can follow — the read/write split is the part that unblocks the alert.\n\nNote the ADR-0076 D12 angle: this is a machine-readable surface that is currently *silent* rather than wrong, which is the right failure. The proposal is to let it be accurate.\n\nRelated: #4354 (the summaries this feeds), #4347 (the silent-failure class both exist to surface).\n"
+}

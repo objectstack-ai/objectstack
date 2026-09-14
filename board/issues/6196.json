@@ -1,0 +1,33 @@
+{
+  "number": 6196,
+  "kind": "pull_request",
+  "title": "ci(dx): TEST_DEBT 的隐藏测试文件数改由闸门实时导出，删掉手写 `tests` 字段 (#5826)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T10:30:05Z",
+  "updated_at": "2026-08-07T10:47:34Z",
+  "closed_at": "2026-08-07T10:47:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T10:47:33Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6196",
+  "body": "Fixes objectstack-ai/objectstack#5826\n\n## 做了什么\n\nTEST_DEBT 每条条目有**两个**手写数字。#5278 / PR #5827 给 `errors` 装上了真棘轮（每次 `--re-measure` 重跑 `tsc --noEmit`，实测 > 记录即红），`tests` 没有——而 `tests`（被 tsconfig 排除、因而对 tsc 隐形的测试文件数）恰恰是这个脚本**每次运行都已经算出来的量**：`testCoverage()` 返回的 `pkg.testFiles`，亚秒级、不需要编译器，`evaluate()` 里就在用它判 TESTS_COVERED。\n\n两个数字需要**相反**的修法，这也是它们是两单的原因：`errors` 不跑编译器就不可知，所以「冻结 + 重测」是它唯一可用的形状；文件数是**免费**的，所以正确的修法是删掉副本、直接读活数（issue 的选项 1，也是本文件自己在 #5286 毕业 `packages/spec` 时就写下过的结论）。\n\n- **19 条 TEST_DEBT 条目的 `tests` 字段全部删除。** `errors` 值与 note 一律未动，包括 #5827 新增的五条 Option A 记档余量（objectql 355 / rest 163 / lint 42 / service-storage 52 / mcp 63）及其 note。\n- **摘要行改为实时导出**：新增纯函数 `hiddenTestFiles(packages, TEST_DEBT)`，按包求和本次扫描得到的 `pkg.testFiles`。输出从「N files」变为「N files hidden as counted by this run」。\n- **RECONCILED 增一条**：TEST_DEBT 条目再带 `tests` 字段即红。这是**结构性拒绝**，哪怕今天的数值恰好正确——见下。\n- **note 散文同样去重**：四条 note 复述了闸门现在实时导出的文件总数（plugin-security「across 35 test files rather than 34」、service-sms「across 5 test files rather than 3」、mcp「file count moved 8 -&gt; 9」、objectql「file count went 87 -&gt; 127」）。这是同一个「两个事实源」缺陷下沉一层，改成保留**事件**（哪个 PR 加了哪个文件、文件数动了而错误数没动）、不再留数字副本。\n- **台账顶部注释重写**：说明为什么 `errors` 记、文件数不记，以及这两者需要相反的修法。\n\n## 为什么不是「加一条对账」\n\n新增的检查在数值**一致**时也拒绝（self-test 里那条 fixture 写的就是 `tests: 7` 对 `testFiles: 7`）。理由是：一致只是「写下那一刻」的属性，不是这个字段的属性；改成「不一致才红」会把「新增一个干净的测试文件」变成一次记账费，而 #5278 的裁决明确排除了这个方向（改善不得制造记账 churn）。删字段 + 结构性拒绝，是唯一按构造消除漂移、且代码比现状更少的选项。\n\n## 漂移实测（issue 正文的表已过期，这里是本分支上重量的）\n\n#5827 昨夜（约 03:5xZ）刚把 12 个漂移的 `tests` 刷成实测值。今天在 `origin/main @ 80f7dc6a3` 上重量，**19 条里已有 3 条重新漂移**：\n\n| 包 | #5827 记录 | 本次实算 | 差 |\n|:---|---:|---:|---:|\n| `@objectstack/objectql` | 130 | 135 | +5 |\n| `@objectstack/runtime` | 102 | 105 | +3 |\n| `@objectstack/formula` | 16 | 17 | +1 |\n| 合计（19 条） | **534** | **543** | **+9** |\n\n（三个数字都用 `find packages/formula/src packages/runtime/src packages/objectql/src -name '*.test.ts' -o -name '*.spec.ts' | wc -l`（逐包）独立复核过：17 / 105 / 135，与闸门实算一致。objectql 的 +5 来自 #6158 / #6165 / #6171 等本窗口新增的测试文件。）\n\n也就是说：一次「刷新副本」的有效期，就是到下一个测试文件落地为止——这正是本单的论点，与今天差值是不是 0 无关。\n\n## 反向验证（方向为**先声明后运行**：应当变红）\n\n把删掉的字段原样放回一条条目（objectql `tests: 130`），闸门必须红；这是新检查不是幽灵检查的证明。\n\n```\n$ node scripts/check-type-check-coverage.mjs        # 放回 tests: 130 之后\ncheck-type-check-coverage: 1 problem(s)\n\n  • @objectstack/objectql: TEST_DEBT entry carries a hand-written `tests` count -- that number is\n    DERIVED from this run's own scan ... Delete the field; the summary reports the live count (#5826).\nexit=1\n```\n\n移除后立刻恢复绿。摘要总数在两种状态下都是 543——即恢复的副本不再参与任何计算，这是「删掉副本」而非「换个地方读副本」的证据。\n\n## 验证\n\n```\n$ node scripts/check-type-check-coverage.mjs --self-test\n✓ check:type-check-coverage --self-test — 23 semantic case(s) + 16 observation case(s) + 11 re-measure case(s) hold.\n\n$ node scripts/check-type-check-coverage.mjs\ncheck-type-check-coverage: OK — 62/77 workspace packages type-checked (plus the root), 15 in the DEBT\nledger (457 frozen raw errors, ...), 1 exempt.\n  test layer: 19 package(s) still exclude their own tests (543 files hidden as counted by this run,\n  1648 frozen raw errors in TEST_DEBT).\n\n$ flock /tmp/os-heavy-verify.lock -c 'pnpm exec turbo run build --filter=./packages/* --filter=./packages/*/*'\n Tasks:    70 successful, 70 total\n\n$ flock /tmp/os-heavy-verify.lock -c 'pnpm check:type-check-debt'     # 完整 --re-measure\n  ℹ @objectstack/service-storage: DEBT records 52, tsc now reports 42 (-10) -- the entry can be lowered.\n  ℹ @objectstack/objectql: TEST_DEBT records 355, tsc now reports 344 (-11) -- ...\n  ℹ @objectstack/rest: TEST_DEBT records 163, tsc now reports 153 (-10) -- ...\n  ℹ @objectstack/mcp: TEST_DEBT records 63, tsc now reports 53 (-10) -- ...\n  ℹ @objectstack/lint: TEST_DEBT records 42, tsc now reports 32 (-10) -- ...\ncheck-type-check-coverage --re-measure: OK — 34 ledger entr(ies) re-measured in 223.3s, 2054 raw tsc\nerror(s) total, none above its recorded number.\n\n$ pnpm exec eslint scripts/check-type-check-coverage.mjs        # 无输出\n$ node scripts/check-nul-bytes.mjs\ncheck-nul-bytes: OK (scanned 5920 tracked text file(s); ... no raw ASCII control bytes).\n```\n\n五条 `ℹ ... can be lowered` 是 #5827 记档余量的既有输出（本 PR 未动那些 `errors` 与 note），不是本 PR 引入的。\n\n## 新增/更新的 self-test 用例\n\n语义层 1 条：\n\n- `a TEST_DEBT entry that writes the derived file count down fails, even when it is right today` —— 副本与实算相等（7 对 7）仍拒绝，钉死「结构性拒绝，不是对账」。\n\nobservation 层 5 条（`hiddenTestFiles`）：总数取自活扫描；台账外的包不计入；**同一份台账、多一个测试文件、总数自动跟随**（本单要消除的漂移，钉成正向断言）；条目指向不存在的包时计 0 而不抛；未扫描到的包读作 0 而不是 NaN。\n\n另有 3 条既有 fixture 去掉了 `tests` 键。\n\n## 发布面\n\n`scripts/` 只在仓库根，根 package 是 `private: true`，不在任何包的 `files` 白名单里——本 PR 不发布任何东西，故走 `skip-changeset` 标签而非 changeset（#6059 已禁止空 frontmatter changeset，所以只能二选一）。\n\n## 范围\n\n只改 `scripts/check-type-check-coverage.mjs`。未碰任何包的源码 / tsconfig / typecheck 脚本（不做毕业），未碰 `packages/spec/scripts/**`，未碰 `content/docs/releases/`，未改动任何 `errors` 数值或其 note。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_014wsZeReNTqiceBfLb5Pyf5\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_014wsZeReNTqiceBfLb5Pyf5)_"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 6090,
+  "kind": "issue",
+  "title": "[finding] dependabot 报默认分支 7 个依赖漏洞(2 high / 4 moderate / 1 low)—— 请分诊定级与归属",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T00:32:41Z",
+  "updated_at": "2026-08-07T00:51:45Z",
+  "closed_at": "2026-08-07T00:51:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6090",
+  "body": "推送时 remote 提示(2026-08-06/07 夜间):\n\n> GitHub found 7 vulnerabilities on objectstack-ai/objectstack's default branch (2 high, 4 moderate, 1 low)\n\n详情:https://github.com/objectstack-ai/objectstack/security/dependabot\n\n按事实记录,unassigned,交分诊:① 读 dependabot 清单定级(哪 2 个 high、涉及哪些包、是否触达生产面);② 按落点包分车道;③ 若是纯 devDep/传递依赖的低危形态,按仓例批量升级单处理。本单只登记信号来源,不代判严重度。"
+}

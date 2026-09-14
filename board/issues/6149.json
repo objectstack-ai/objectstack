@@ -1,0 +1,34 @@
+{
+  "number": 6149,
+  "kind": "pull_request",
+  "title": "chore(release): 发版状态对账 —— main 版本对齐 2026-08-03 已发布的 17.0.0-rc.3",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T03:34:23Z",
+  "updated_at": "2026-08-07T04:03:30Z",
+  "closed_at": "2026-08-07T04:03:28Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T04:03:28Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6149",
+  "body": "Fixes #6135\n\n发版状态对账:把 main 各 `package.json` 的 `version` 字段对齐到 2026-08-03 实际发布的状态,让 changesets 下一次计算出 **rc.4** 而不是已被 npm 占用的 rc.3。\n\n## 一、问题复现(先证伪再动手)\n\nissue 的前提**成立**,并且在本 PR 里被直接跑出来了。发布提交找到了:\n\n```\nc6a52d3a4efed4c53b08cbdd623c1443cd453089\nMon Aug 3 16:35:19 2026 +0000  github-actions[bot]\nchore: version packages (rc)\ngit merge-base --is-ancestor c6a52d3a4 origin/main  ->  NOT ancestor\n```\n\n即「version packages」提交确实发布了、打了 tag,但**从未进入 main 的祖先链**。\n\n## 二、事实源 = 08-03 原子推送的 tag 集\n\n`git ls-remote --tags origin` 全量 14391 行,去重(每 tag 有普通与 `^{}` peeled 两行)后 7196 个 tag。筛选结果:\n\n- 全仓**所有**以 `-rc.3` 结尾的 tag 共 **69** 个,**全部**指向同一个提交 `c6a52d3a4`,且**全部**是 `17.0.0-rc.3`;\n- 非 `17.0.0` 版本族的 rc.3 tag:**0 个**;\n- `example-*` / `dogfood` / `showcase` 相关 tag:**0 个**(私有包 changesets 从不打 tag)。\n\n> 说明:issue 正文提到的「138 个 tag」= 69 × 2(ls-remote 的普通行 + peeled 行),与此处一致。\n\n额外交叉验证:把 `c6a52d3a4` 整棵树取下来逐个读 `package.json`,**69 个 tag 的版本号与该提交里对应包的 `version` 字段逐一相等,零例外**。tag 集是该提交在「可发布包」上的投影,两个独立事实源互证。\n\n## 三、npm 交叉验证(10 个公共包,超出要求的 6 个)\n\n| 包 | `npm view pkg@17.0.0-rc.3 version` | `dist-tags.rc` |\n|---|---|---|\n| @objectstack/spec | 17.0.0-rc.3 | 17.0.0-rc.3 |\n| @objectstack/cli | 17.0.0-rc.3 | 17.0.0-rc.3 |\n| @objectstack/core | 17.0.0-rc.3 | 17.0.0-rc.3 |\n| @objectstack/plugin-auth | 17.0.0-rc.3 | 17.0.0-rc.3 |\n| @objectstack/runtime | 17.0.0-rc.3 | 17.0.0-rc.3 |\n| @objectstack/objectql | 17.0.0-rc.3 | 17.0.0-rc.3 |\n| @objectstack/types | 17.0.0-rc.3 | 17.0.0-rc.3 |\n| @objectstack/metadata | 17.0.0-rc.3 | 17.0.0-rc.3 |\n| @objectstack/rest | 17.0.0-rc.3 | 17.0.0-rc.3 |\n| @objectstack/hono | 17.0.0-rc.3 | 17.0.0-rc.3 |\n\n**10/10 一致**,无一例外。目标版本 rc.4 确认未被占用:`@objectstack/spec|cli|core@17.0.0-rc.4` 均为 `E404`。\n\n## 四、改了什么\n\n68 个包的 `package.json` `version` 字段:`17.0.0-rc.2` → `17.0.0-rc.3`。**仅此一处**。\n\n69 个 tag 对应 68 个改动,差额来自 `objectstack-vscode`(见下)。\n\n改法是逐文件正则替换后做 JSON 往返比对(`json.loads` 两侧弹出 `version` 后断言剩余对象**完全相等**),从结构上保证除 version 外无任何字段变动;`connector-openapi` 用的是 4 空格缩进,缩进原样保留。\n\n## 五、未对账的包(workspace 内存在但不在 tag 集中)—— 一律不动\n\n| 包 | main 现值 | 08-03 发布提交 | private | 不动的原因 |\n|---|---|---|---|---|\n| @objectstack/driver-turso | 17.0.0-rc.2 | 该提交中**不存在** | false | 08-03 **之后**才加入 workspace。npm 上该包最新为 6.9.0,17.x 从未发布、无 `rc` dist-tag,即它从未参与 17 系列 rc 发布。写成 rc.3 等于宣称一次不存在的发布 |\n| @objectstack/dogfood | 0.0.40-rc.2 | 0.0.40-rc.3 | true | 私有包,不发 npm、不打 tag,无版本号占用风险 |\n| @objectstack/downstream-contract | 0.0.38-rc.2 | 0.0.38-rc.3 | true | 同上 |\n| @objectstack/example-crm | 4.0.92-rc.2 | 4.0.92-rc.3 | true | 同上 |\n| @objectstack/example-todo | 4.0.92-rc.2 | 4.0.92-rc.3 | true | 同上 |\n| @objectstack/example-showcase | 0.3.14-rc.2 | 0.3.14-rc.3 | true | 同上 |\n| @objectstack/example-embed-objectql | 0.0.32-rc.2 | 0.0.32-rc.3 | true | 同上 |\n| @objectstack/http-conformance | 0.0.6-rc.2 | 0.0.6-rc.3 | true | 同上 |\n| @objectstack/docs | 4.2.1 | 4.2.1 | true | 本来就一致,无需改 |\n| @objectstack/spec-monorepo | 4.0.1 | 4.0.1 | true | 本来就一致,无需改 |\n\n反向的一个:`objectstack-vscode@17.0.0-rc.3` **有 tag 但 workspace 里已无该包** —— `packages/vscode-objectstack/` 在 08-03 之后被删除,故无处可写。这就是 69 个 tag 对应 68 个改动的差额。\n\n## 六、rc.4 干跑证明(在一次性临时副本中执行,用后即删)\n\n两个副本各含**完全相同的 1260 个** `.changeset/*.md`,唯一差别是 `version` 字段:\n\n**BEFORE(未对账的 origin/main,rc.2)**\n\n```\n🦋  warn You are in prerelease mode\n🦋  All files have been updated. Review them and commit at your leisure\nBEFORE spec  -> 17.0.0-rc.3      # 撞上 npm 已发布版本 —— 正是本 issue 描述的故障\n```\n\n**AFTER(本 PR 对账后,rc.3)**\n\n```\n@objectstack/spec       17.0.0-rc.3 -> 17.0.0-rc.4\n@objectstack/cli        17.0.0-rc.3 -> 17.0.0-rc.4\n@objectstack/core       17.0.0-rc.3 -> 17.0.0-rc.4\n@objectstack/runtime    17.0.0-rc.3 -> 17.0.0-rc.4\n@objectstack/objectql   17.0.0-rc.3 -> 17.0.0-rc.4\n```\n\n逐包核对:**68 个改动包全部计算为 `17.0.0-rc.4`,零例外**(`tagged pkgs NOT computing to 17.0.0-rc.4: NONE`)。\n\n`driver-turso` 虽然停留在 rc.2 未动,但它在 `.changeset/config.json` 的 `fixed` 组内,干跑显示它被 fixed 组统一扫到 **17.0.0-rc.4** —— 即「不动它」不会在 fixed 组里留下版本裂缝。\n\n### 一处与验收表述不符,如实报告\n\n验收项写的是「示例包同族递增」。实测**并非如此**,而且不应如此:示例/私有包不在 fixed 组内,干跑结果是 `4.0.92-rc.2 → 4.0.92-rc.3`(仍是 rc.3 档),不会进入 rc.4 档。原因是本 PR 按 tag 集口径只对账了公共包。\n\n这不影响本 issue 要修的故障:私有包不发 npm,不存在版本号被占用、`changeset publish` 跳过的问题。留作维护者决定的一个可选项见下。\n\n## 七、验收结果\n\n| 项 | 结果 |\n|---|---|\n| 1a `git diff --name-only` 全是 package.json | 68/68,非 package.json 文件数 **0** |\n| 1b 逐行 diff 只有 version 字段 | 非 version 字段的增删行数 **0**;删除侧唯一值 `\"17.0.0-rc.2\"`,新增侧唯一值 `\"17.0.0-rc.3\"` |\n| 2 `.changeset/` 零变更 | `git status --porcelain .changeset/` → **0 行** |\n| 2b `workspace:*` 依赖未动 | diff 中含 `workspace:` 的增删行 **0** |\n| 3 rc.4 干跑 | spec → **17.0.0-rc.4**(见上) |\n| 4 lockfile 无实质 diff | `pnpm install` 后 `git status --porcelain pnpm-lock.yaml` → **0 行**(内部依赖全为 `workspace:*`,版本号变动不入锁) |\n| 4b `node scripts/check-nul-bytes.mjs` | `OK (scanned 5875 tracked text file(s); ... no raw ASCII control bytes)` |\n| 5 构建 | `pnpm --workspace-concurrency=2 --filter '@objectstack/cli...' build` → **exit 0**(cli 及其全部依赖) |\n\n额外跑的发布相关门禁,全部 PASS:`check:prerelease-pins`、`check:empty-changeset`、`check:published-files`、`check:override-consistency`、`check:node-version`。\n\n根 `version` 脚本链上的两个同步脚本确认为 no-op(两者都只取 **major**,17 未变):\n\n```\n✓ PROTOCOL_VERSION already 17.0.0 — in lockstep with @objectstack/spec@17.0.0-rc.3\n✓ blank template already pins ^17.0.0 — in lockstep with create-objectstack@17.0.0-rc.3\n```\n\n## 八、关于 changeset 与标签\n\n本 PR 是发版状态对账,不是用户可见变更,**正确形态就是不带 changeset**(而且 `.changeset/**` 是 rc.4 的原料,一个字节都不能动),故挂 `skip-changeset` 标签。\n\n## 九、待维护者确认(不阻塞本 PR)\n\n上表第五节的 7 个**私有** rc 系包(dogfood / downstream-contract / example-crm / example-todo / example-showcase / example-embed-objectql / http-conformance)在 08-03 的发布提交里同样被 rc.2 → rc.3 提升过,但因私有而无 tag、无 npm 痕迹。本 PR 按派发口径(事实源 = tag 集)未动它们,代价是它们的版本号会**永久比公共包低一档**。\n\n若希望 workspace 与 08-03 发布提交**完全**一致,可在本 PR 追加这 7 个包的同样一行改动(纯记账,无功能影响);若认为「未发布就不该记账」,则维持现状即可。请维护者择一。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JwwiU9bjhwy2SWj13ho8uv)_"
+}

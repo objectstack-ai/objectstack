@@ -1,0 +1,34 @@
+{
+  "number": 5755,
+  "kind": "issue",
+  "title": "finding(objectql): Archiver 的 20 批循环不看 #4747 的 abort 位 —— teardown 期间仍会继续读写正在关闭的 datasource",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T03:59:24Z",
+  "updated_at": "2026-08-06T13:35:06Z",
+  "closed_at": "2026-08-06T13:35:06Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5755",
+  "body": "观察类 finding,来自 #5194 / PR #5753 的实现。**今天没有用户会撞到**,记录在案由 PM 定级。\n\n## 事实(`origin/main` + PR #5753)\n\n`LifecycleService` 的 #4747 契约是「stop() 抬起 abort 位,sweep 在每个 leg boundary 检查」。目前检查点有两处:\n\n- `sweep()` 的**对象之间**(`lifecycle-service.ts:579` 附近,`if (this.stopped) return report`);\n- reap 的**每页之间**(`:1202`,`if (this.abort.aborted) break`)—— 这是 PR #5753 加的,因为它把无 guard reap 从「两次检查之间的单个 `await`」变成了最多 20 页的读+删。\n\n`archiveObject()` 的批量循环(`:1047`,`for (let batch = 0; batch < ARCHIVE_MAX_BATCHES_PER_SWEEP; batch++)`)**没有**这个检查。一轮 archive 最多 20 批 × 500 行,每批是 `hot.find` + 每行一次 `cold.upsert` + 一次 `hot.bulkDelete` —— 即最多一万次跨两个 datasource 的写。stop() 在其中任何一点落下,循环都会把剩余批次跑完。\n\n这正是 #4747 描述的形状:「a sweep already in flight would keep reading and deleting through an engine whose datasource the host is closing underneath it — the reads fail as `Unable to acquire a connection`」。reap 那一侧已经补上,archive 这一侧没有。\n\n## 为什么现在不会有人撞到\n\n- archive 策略要求已配置 cold datasource(`archive.to`),未配置时 `archiveObject` 直接 `skipped: 'archive-pending'` 返回,一行都不搬;\n- 目前仓库里没有平台对象声明 `archive`(声明 lifecycle 的 11 个对象走的是 retention/ttl);\n- 触发条件还要叠加「teardown 恰好落在一次大批量归档中途」。\n\n所以这是一条为将来第一个真声明 `archive` 的部署准备的洞,不是当下的故障。\n\n## 修法\n\n与 `:1202` 同款一行:循环体开头 `if (this.abort.aborted) break;`。注意 archive 的安全规则是「归档成功才热删」,按批 break 不破坏它 —— 每批的 upsert→bulkDelete 已经成对完成,未开始的批次留给下一轮。\n\nFound-during: #5194 / PR #5753\n"
+}

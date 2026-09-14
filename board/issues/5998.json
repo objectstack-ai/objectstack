@@ -1,0 +1,35 @@
+{
+  "number": 5998,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol,objectql): loadMetaFromDb 用返回值表达「没读到存储」,boot 侧不再把 outage 记成空库 (#5897)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T14:09:54Z",
+  "updated_at": "2026-08-06T14:36:38Z",
+  "closed_at": "2026-08-06T14:36:36Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T14:36:36Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5998",
+  "body": "Fixes objectstack-ai/objectstack#5897\n\n## 前提复核(裁决要求,开工第一件事)\n\nPM 裁 A 带两条前提,均在 `origin/main` 上复核成立:\n\n**前提 1 —— 返回值的生产消费方仍只有 `restoreMetadataFromDb`。** 成立。\n`git grep -n loadMetaFromDb` 全仓命中中,**读返回值**的非测试代码只有\n`packages/objectql/src/plugin.ts:1140`。其余源码命中全部是注释\n(`registry.ts:1444`、`metadata-core/src/objects/index.ts:14`、\n`plugin-security/src/permission-set-projection.ts:264`、\n`driver-sql/src/sql-driver.ts:1796`、`metadata-protocol/src/plugin.ts:39`),\n测试侧 5 个文件调用它但都是断言,不构成生产消费方。\n\n**前提 2 —— `ProtocolWithDbRestore` 不在 `packages/spec` 公开契约面。** 成立。\n`git grep -ln ProtocolWithDbRestore` 全仓**只命中一个文件**\n`packages/objectql/src/plugin.ts`;`packages/spec` 零命中。该接口是消费侧自己\n声明的结构化(鸭子)类型,不是 wire contract。\n\n## 改了什么\n\n`loadMetaFromDb` 的返回值 `{ loaded, errors, invalid }` 没有任何字段能表达\n「这次水合根本没读到存储」—— 读不到的数据库与真正的空库都答 `loaded: 0`。\n唯一消费方因此无从分支:它唯一的分支只是在两条日志之间做选择,而「什么都没\n回来」那一侧是 **debug** 级的 `No persisted metadata found in database`。于是\n一个字都没读到持久化元数据的 kernel,在 debug 级上宣称「本来就没有」,然后\n照常报告 ready。\n\n代价不是假设,写在 plugin.ts 自己的 Phase 2 注释里:registry 为空时\n`registry.getObject` 把「读不到」答成「没声明」—— unknown-column 查询守卫、\nhooks、relationships 静默降级,overlay 对象既不建表也不桥接。ADR-0110 D3\n(outage ≠ miss)在 boot 侧的落地,继 #5108 / #5089 / #5532 / #5707 之后。\n\n**生产端**(`packages/metadata-protocol/src/protocol.ts`):返回值加\n`storeUnavailable: boolean`,只在**已经打印** `[Protocol] DB hydration skipped`\n的那条分支上置位 —— 即 `isMissingTableError` 判为非良性的读失败。#5841 刚落地的\n「未建表」良性分支不置位,那里 `loaded: 0` 确是事实。\n\n**消费端**(`packages/objectql/src/plugin.ts`):`ProtocolWithDbRestore` 声明该\n字段并读它,outage 打 **error** 级,按 AGENTS「Degradation log levels」交付两样\n东西 —— 后果(什么都没恢复、kernel 仍报健康、哪些能力静默降级)与修法(查\n`sys_metadata` 背后的数据源:连接、凭据、表是否存在,然后重启)。可读的空库照旧\ndebug。分支顺序刻意把 outage 放最前:一次没发生的读,它的计数不该压过「读没成功」\n这件事。\n\n## 刻意没做\n\n- **不改控制流。** boot 继续降级运行 —— 对着读不到的 overlay 存储拒绝启动,会把\n  一次瞬时故障变成彻底停机。变的只是「降级」不再被当成「健康」。\n- **不是 `errors` 的超集。** `errors` 数的是「行到了、水合失败」,这个位说的是\n  「行集根本没到」。命名取 `storeUnavailable` 而非裸 `degraded`,正是为了不被读成\n  「哪里出了点事」;新增了一条用例钉住「坏行不置位」这一面。\n- **不碰** `loadMetaFromDb` object 分支的 `packageId` 登记行(#4636 决策箱在途),\n  **不碰** `metadata-manager.ts`(#5840 的面),**不改**生产端那条 `warn`:它和\n  消费端的 `error` 是同一事件的两个高度 —— 前者报驱动原文(调试用),后者报代价与\n  修法。留住前者,才让后者能是唯一那句「后果」陈述。\n\n## 对鸭子类型实现者的影响:零破坏(取舍如实说明)\n\n`ObjectQLPlugin` 用结构化匹配拿 `protocol` 服务,新字段在**消费侧声明为\noptional**(与既有的 `invalid` 同例),旧 shim 照常通过类型检查,并被读成「不是\noutage」—— 正是它此前唯一能表达的判定,行为逐字不变(有专门用例钉住)。\n\n取舍值得点名:optional 意味着**无法强迫**第三方 shim 开始上报 outage,这类 shim\n会和今天一样沉默。改成 required 可以让这件事无法忽略,代价是为一个目前只有一个\n仓内生产者会置位的位,破坏所有外部实现者。仓内生产者\n(`ObjectStackProtocolImplementation`)自己声明并返回 **required**,所以每个真实\nObjectStack kernel 实际走的那条路是全覆盖的。\n\n## 测试与反向验证(方向先预测,后运行)\n\n生产端扩展 #5841 的相邻文件 `protocol.load-meta-hydration-benign.test.ts`(而非\n另开孤立文件):其中「事实 2 等价性」用例被**翻面** —— 它原本断言 outage 与空库\n不可分辨,并留了「契约长出表达方式时这条断言 EXPECTED 要翻,别删」的注记;现在断言\n两者可分辨,**且只由该位分辨**(所有计数仍逐字相等,downstream 无法从\n`loaded`/`errors`/`invalid` 重建这个区别、长出第二套弱问法)。\n\n消费端新建 `packages/objectql/src/plugin-restore-metadata-outage.test.ts`(跨包,\n无相邻文件可扩)。协议替身只声明 `loadMetaFromDb` —— 既是类型守卫探测的全部面,\n也是该方法调用的全部面;不声明任何写动词,故没有 `delete`/`update` dispatch 需要\n`check:engine-double-contract` 扫描,也没有守卫可手抄。\n\n反向验证做了**两肢**,方向均在运行前写死在文件头,结果与预测逐条相符:\n\n- **肢 A —— 删生产端 `storeUnavailable = true`:** 生产端 4 红(ECONNREFUSED、\n  非 Error 拒绝、未识别措辞、outage-vs-空库),13 绿(全部良性措辞 + 工作存储\n  对照 + `stored-conversions`)。\n- **肢 B —— 删消费端 `if (storeUnavailable)` 分支:** 消费端 4 红,5 绿。\n\n⚠️ 一条与模板预设不符、如实记下:**肢 A 不会让消费端变红**。消费端用例喂的是\n协议**替身**(直接投喂返回契约),所以只有肢 B 能翻它。要证消费端读了这个位,\n必须删消费端的读,而不是删生产端的写 —— 两肢各证一半,合起来才是完整链路。\n\n## 命令与真实输出\n\n```\npnpm --filter @objectstack/metadata-protocol test\n  Test Files  49 passed (49)        Tests  487 passed (487)\n\npnpm --filter @objectstack/objectql test\n  Test Files  129 passed (129)      Tests  2140 passed (2140)\n\npnpm --filter @objectstack/objectql typecheck\n  tsc --noEmit → Done\n\npnpm --filter @objectstack/runtime test      (boot 路径联测)\n  Test Files  102 passed (102)      Tests  1474 passed (1474)\n\nnode scripts/check-durability-degradation-log-level.mjs\n  OK — 24 durability-critical catch seam(s), all loud, rethrowing or propagating\nnode scripts/check-startup-registry-verdict.mjs\n  OK — 40 seam(s) across 1455 file(s), none recording a contradictable verdict\nnode scripts/check-nul-bytes.mjs\n  OK (5754 tracked text files; no raw ASCII control bytes)\npnpm --filter @objectstack/spec check:generated\n  All 10 generated artifacts are up to date.\n```\n\n`typecheck` 第一轮真红过一次,如实记:`Logger` 契约声明的是\n`error(message, error?: Error, meta?)`,两参写法只在 `ObjectLogger` 上过得去\n(它额外容忍 meta 占 error 槽),对声明契约是越界。已按契约把计数放第三槽、\nerror 槽留空(这里确实没有 Error 可传:驱动原文已由生产端在 `warn` 上打过),\n并在用例里按位置钉住。\n\n推送前已 `git merge origin/main`(7 个提交,无冲突,⛔ 未 rebase),重装、重建\nspec 与 objectql 依赖链后全部重跑 —— 以上数字即合并后的结果。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_019Q7oc7ASjh8yxyS3Yz78We\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019Q7oc7ASjh8yxyS3Yz78We)_"
+}

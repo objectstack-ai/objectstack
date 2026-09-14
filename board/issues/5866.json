@@ -1,0 +1,35 @@
+{
+  "number": 5866,
+  "kind": "issue",
+  "title": "dev agent 的 binding 决策框架又回到两轴 —— 派发提示词取自落后 173 个提交的共享主检出,#5798 的门禁按设计管不到这条通道",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T09:53:43Z",
+  "updated_at": "2026-08-07T02:13:14Z",
+  "closed_at": "2026-08-07T02:13:14Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5866",
+  "body": "实施 #5798 过程中发现,**未认领**。#5798 的门禁**不覆盖**这条通道(理由见下),所以不是它的子单也不依赖它。\n\n## 观测事实(实测,`origin/main@aac90a55e`)\n\n共享主检出 `/home/user/objectstack` 停在分支 `claude/pm-dispatch-devx-987d90`(`01c0baef9`),`git rev-list --count HEAD..origin/main` = **173**。该分支上三份决策框架副本**全部**还是 #5130 之前的两轴形态:\n\n```\n.claude/agents/os-dev.md:182:      **Analyze every option on two fixed axes — this framing is\n.claude/agents/os-dev.md:196:      Your recommendation must be justified on both axes; ...\n.claude/skills/pm-dispatch/SKILL.md:1003: **每个方案必须沿两条固定评估轴\n.claude/skills/pm-dispatch/SKILL.md:1013: 推荐意见必须基于这两条轴给出理由;两轴冲突时 ...\nskills/objectstack-pm-dispatch/SKILL.md:452:  every option on the two fixed axes below.**\nskills/objectstack-pm-dispatch/SKILL.md:574:  Analyze every option on two fixed axes:\n```\n\n而 `origin/main` 上这三个文件早已是三轴(#5130 改内部、PR #5799 补齐发布版)。两棵树的 diff:`os-dev.md` 101 行、`pm-dispatch/SKILL.md` **755 行**、发布版 60 行。\n\n**本次派发的 dev agent(我)拿到的 system prompt 里,这段 binding 文本是两轴的**,与上面 `os-dev.md:182/196` 的措辞逐字一致(`two fixed axes` / `both axes`,两条 bullet 分别是「长远合理性」与「防 AI 写错」,**缺 business-need 轴**),与 `origin/main` 的三轴版本不一致。\n\n## 推断(与事实分开陈述)\n\n派发提示词是从这棵**停在旧分支的工作树**装配的(逐字匹配旧副本、不匹配 main),而不是从 `origin/main`。同一机制下 PM 自己的操作协议也是旧的 —— `pm-dispatch/SKILL.md` 差了 755 行。\n\n## 后果\n\n这正是 #5130 → #5451 → #5798 一路在治的那个病(agent 按过时框架呈报),只是换了条通道:**不是「两份副本互相分叉」,而是「派发时读到的那棵树整体过时」**。落到实处:本轮 dev agent 若需要 `needs_decision` 升级,会按两轴分析 —— 而 #5130 的裁决明确说三轴里的 business-need 轴**会改变结论**,不是陪衬(#5021 与 #4936 同形状不同判,只看后两轴会得出同一个错答案)。PM 收到两轴呈报后要么退回重做,要么漏掉那条轴。\n\n## 为什么 #5798 的门禁管不到\n\n`scripts/check-skill-frame-sync.mjs`(PR #5865)判的是**同一棵树内四份副本是否同构**。那棵旧树里四份**一致地**都是两轴,所以门禁在它上面是**绿**的 —— 这是按设计的正确行为,同构成立;「与 main 的新鲜度」是另一条不变量,门禁没有也不该有这个判据。**请不要因为 #5798 合了就认为这条已经修掉。**\n\n## 可选处置(未实施,交维护者/PM 裁)\n\n1. 派发前强制 `git fetch` 并从 `origin/main` 读 agent 定义与 skill 正文(治本,但要定「读哪个 ref」的规矩);\n2. PM 循环开始时把主检出对齐 `origin/main`(简单,但长命分支落后是 git 常态,靠纪律维持);\n3. 给 agent 定义加「新鲜度」自检:派发时比对工作树副本与 `origin/main` 的框架结构,不一致就响亮拒绝派发(与 #5798 的门禁同族,判据可复用 `AXIS_MAP`)。\n\n倾向 1 或 3:2 依赖人记得做,正是 #5130 失手的同一类原因。\n\n## 备注\n\n- 严重度请分诊时定 —— 本轮实际未触发 `needs_decision`,所以危害是潜在的;但通道是活的,不是休眠代码。\n- 未在 PR #5865 里顺手改:超出 #5798 验收范围(Prime Directive #10),且处置方向需要拍板。"
+}

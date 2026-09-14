@@ -1,0 +1,35 @@
+{
+  "number": 6059,
+  "kind": "pull_request",
+  "title": "ci(changeset): PR 层闸门禁止新增空 frontmatter changeset,并把 skills/** 的正解写进处方 (#5471, #5947)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "size/l",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T15:57:21Z",
+  "updated_at": "2026-08-07T01:25:01Z",
+  "closed_at": "2026-08-07T01:25:00Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T01:25:00Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6059",
+  "body": "Fixes #5471\nFixes #5947\n\n按 #5471 的 10:44Z 已批裁决落地:**PR 层闸门,新增的空 frontmatter changeset 直接红并指向 `skip-changeset` 标签路径;存量全部豁免、不清理、不碰发布机器。** 同时并轨 #5947 —— 把 `skills/**` 的正解写进处方文本,让 git log 考古者与处方读者拿到同一个答案。\n\n## 前提复核(先证后写)\n\n三条前提都对 `origin/main` 实测过,均成立:\n\n| 前提 | 实测 | 结论 |\n|:---|:---|:---|\n| 处方现状:路线 2 PREFERRED / 路线 3 LAST RESORT | `pr-automation.yml` 原文即是 | 成立 |\n| 存量空 changeset 实数 | `efedd289f` / `9e3709a` 两点各测:**1230 份 non-README,182 份空 frontmatter** | 成立(issue 正文的 172 是两天前的旧值,#5947 的 182 与我实测一致) |\n| `skills/**` 先例链走路线 3 | `77adf297f`(PR #5799,2026-08-06 06:57 UTC)新增 `.changeset/published-pm-dispatch-three-axis-decision-frame.md`,内容确为 `---` / `---` 空 frontmatter | 成立,且确实晚于处方改口一天 |\n| #5947 的「没有包可署名」推理 | `skills` 不在 `pnpm-workspace.yaml` 的 packages 列表;根包 `private: true`;全仓无任何 package 的 `files` 收录 `skills` | 前提为真,但结论应是路线 2 |\n\n182 这个数字**只写在注释里并锚定 sha**(`182 at efedd289f`),不进代码逻辑 —— 它是会漂的量,不该有第二个消费方。\n\n## 落点选择:新增 `scripts/check-empty-changeset.mjs`,而非在步骤里加 shell\n\nPM 给的两个选项里选了脚本,三个理由:\n\n1. **两种失败是两件事,该有两条错误信息。** 现有步骤答的是「一份 changeset 都没有」,新闸答的是「你加的这份什么都没声明」。塞进同一个 shell 块就得共用一段文案,而这两句话给作者的下一步动作完全不同。\n2. **shell 块自测不了。** 本仓 `check-*.mjs` 的 `--self-test` 惯例正是为此;红/绿双向 fixture 只有落在脚本里才能被 CI 每次执行。`--self-test` 已接进命令链(在真跑之前),不是 phantom check。\n3. YAML 里解析 frontmatter 是脆的。脚本复用了 `check-changeset-no-major.mjs` **同一形状**的 entry 正则 —— 两道闸读同一个 frontmatter 块,对「什么算一条声明」必须同口径,否则其中一道在 judge 另一个文件。\n\n`package.json` 只加一行 `check:empty-changeset` 接线(本地可跑 + 对齐仓内惯例)。已确认 `check:generated` 元闸只核对 `packages/spec/package.json`,根包这行不在它的辖区(实跑 `--reconcile-only` 绿)。\n\n## 豁免机制:按 diff 判,并且比「是否新增文件」更稳一档\n\n裁决给的判据是「该空 changeset 是否已在 base 上存在」。我实现成一条**关于空声明集合**的规则,而不是关于新增文件的规则:\n\n> 一份 changeset 违规,当且仅当它在 HEAD 上是空声明,**且**(它在 base 上不存在 **或** 它在 base 上是非空的)。\n\n四行判据表:\n\n| diff 状态 | HEAD | base | 判定 |\n|:---|:---|:---|:---|\n| A 新增 | 空 | — | **红**(新空文件) |\n| M 修改 | 空 | 非空 | **红**(就地掏空) |\n| M 修改 | 空 | 空 | 豁免(存量,本 PR 没造出新的空声明) |\n| 任意 | 非空 | — | 绿 |\n\n第 2 行是「更稳的判法」那部分,值得单独论证:把一份存量非空 changeset 的 frontmatter 条目删掉,产生的是一份**全新的空声明** —— 危害与新建一个文件一字不差,而 `--diff-filter=A` 对它完全看不见。多花约十行换掉这个显而易见的绕过口。第 3 行则保证存量不会因为「顺手改了正文里一个错别字」被误伤,这是 `--diff-filter=AM` 下豁免仍然成立的那一行。\n\n**没有任何清单。** 182 个文件名的硬编码清单是会腐烂的高水位(下一次合并就不准),而「base 上不存在或非空」是同一句话的免维护写法。存量因此天然全部豁免,本 PR 一个存量文件都没动。\n\n## 自验:红/绿双向,fixture + 真仓两遍\n\n`--self-test` 建**真的临时 git 仓库**(两个真 commit)跑**同一个导出的 `scan()`** —— 本闸的主题就是两个 commit 之间的 diff,用非真 commit 的 fixture 等于在测一段不会上线的代码路径。21 条断言,覆盖 PM 点名的四种情形加三种边界:\n\n```\n✓ check-empty-changeset --self-test: 21 assertions over real temp git repos (real scan() path)\n```\n\n| fixture | 方向 | 结果 |\n|:---|:---|:---|\n| 新增空 changeset(`skills/**` 变更,#5799 原样形状) | 红,且点名文件 | 通过 |\n| 存量空 changeset 不动 | 绿 | 通过 |\n| 新增非空 changeset | 绿 | 通过 |\n| `skills/**`-only PR 完全不带 changeset(路线 2) | 绿(本闸无话可说) | 通过 |\n| 存量非空 changeset 被掏空 | 红,kind=emptied | 通过 |\n| 存量空 changeset 只改正文 | 绿,记为 exempt | 通过 |\n| 新增无 frontmatter 围栏的文件 | 红,kind=added-unfenced | 通过 |\n| `.changeset/README.md` | 永不判定 | 通过 |\n| base 解析不出来 | 退出 1(缺输入即失败,#4690) | 通过 |\n\n**真仓反向验证**(方向在跑之前先声明,结果与预测一致):\n\n预测:在本分支真加一份空 changeset 并提交 → 闸变红并点名;撤掉 → 变绿。实测:\n\n```\n# 加一份 .changeset/reverse-verify-empty.md(空 frontmatter)后:\nThis PR adds an empty-frontmatter changeset:\n   .changeset/reverse-verify-empty.md\n     new file, empty frontmatter -- declares no package\nEXIT=1\n\n# git reset 撤掉后:\n✓ No empty-frontmatter changeset introduced by this diff (0 declaring changeset(s) added).\nEXIT=0\n```\n\n同一轮还在真仓上验了第 2/3/4 行:掏空真实的 `.changeset/action-alias-conflict-warning.md` → 红且 `kind=emptied`;同一个 commit 里新增的非空 changeset 与被改了正文的存量空文件 `.changeset/adr-0044-revise-service-owned-note.md` **都没有进 violations**。所有反向验证提交均已 `git reset --hard` 撤回,不在本分支。\n\n**存量豁免的真数据证明**:对 `origin/main` 自身跑闸(HEAD=base=origin/main,即 182 份空文件全在场)→ 绿。豁免不是靠清单成立的,是靠闸根本不读目录成立的。\n\n解析器交叉校验:`--list` 报 `1230 changeset(s): 182 empty-frontmatter, 1048 declaring`,与我用完全独立的一段 awk 数出来的 1230/182 逐位相同。\n\n## #5947:处方文本改口\n\n- 路线 2 显式列入 `skills/**`,并把那句会自我复制的推理正面驳掉:「`skills/` 不随任何 npm 包发布,没有包可署名」**前提为真**(已实测),但**结论是标签**,因为空 changeset 同样名不到任何包,还额外背上 #4898。\n- 路线 3 标为 **(CLOSED)**,并说明存量豁免。这一段是必须改的 —— 闸落地后再留着「路线 3 也满足本闸且仍然合法」就是一句假话,会把作者领进第二次红。\n- 计数步骤上方的注释同步改口:计数行为一字未变,变的是「计数不再是最后一句话」。\n\n## 不碰的东西\n\n- ⛔ **#5620 的 allow-major 步骤逐字未动** —— `git diff origin/main -- .github/workflows/pr-automation.yml | grep -E '^[-+].*(allow-major|check-changeset-no-major|accidental major)'` **零命中**,新步骤是插在它上方的纯新增。\n- ⛔ 发布机器、`.changeset/config.json`、changesets/action 行为、`changeset pre exit`:全部未触及。存量清理按裁决留给 pre exit 时另单处理。\n- ⛔ 存量 182 份空 changeset:一份都没改、没删。\n\n量级 S,单 commit 可秒回滚。\n\n## 标签读现状不读载荷(#5580 / #5625 的学费)\n\n新步骤挂的是与上面每一步**同一个** `steps.labels.outputs.skip` 守卫,也就是第一步那次**实时**标签复读,而不是事件载荷 —— rerun 能翻绿。\n\n这留下一格,注释里写明而非默认:同时带 `skip-changeset` 标签**和**一份新空 changeset 的 PR 不会被拦(整个 job 被豁免)。补上它意味着让本步骤跳出 job 级豁免,而那样它只在「标签晚于事件到达」时才触发 —— 一道会红掉这个 PR、绿掉另一个一模一样 PR 的闸。一致的豁免优于不确定的闸;何况这一格没有动机:已经拿到标签的作者再加这个文件什么都换不到。\n\n## 本 PR 自己走哪条路\n\nworkflow + scripts,不发布任何包 → **路线 2,`skip-changeset` 标签**,不带 changeset。本单要禁的正是那份空文件,不能让这个 PR 自己成为反例。\n\n## 本地验证\n\n```\nnode scripts/check-empty-changeset.mjs --self-test   → 21 assertions,绿\npnpm check:empty-changeset                           → self-test + 真跑,绿\nnpx eslint scripts/check-empty-changeset.mjs --no-inline-config → 0\npnpm check:workflow-status-functions                 → 34 assertions + 22 workflow 扫描,绿\npnpm check:type-check-coverage                       → 绿\npnpm --filter @objectstack/spec check:generated --reconcile-only → 绿\nnode scripts/check-nul-bytes.mjs                     → 5781 文件,零控制字节\npython3 yaml.safe_load(pr-automation.yml)            → 解析通过,changeset-check 共 8 步\n```\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01BDmDsu2575gDxeMCxXhDE3\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BDmDsu2575gDxeMCxXhDE3)_"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 17674,
+  "kind": "issue",
+  "title": "Studio: picklist option `label` publishes as an empty string when only `value` is filled — options render blank at runtime, with no warning",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "repo:objectui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-11T10:22:37Z",
+  "updated_at": "2026-09-12T02:02:40Z",
+  "closed_at": "2026-09-12T02:02:21Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17674",
+  "body": "## What happens\n\nIn App Builder, adding a **Picklist** field gives each option row **two** inputs: `placeholder=\"value\"` and `placeholder=\"Label\"`. Filling only `value` publishes the options as `{\"value\":\"low\",\"label\":\"\"}`.\n\nAt runtime the record form's dropdown then renders **blank rows** — the empty `label` is not backed off to `value`, and **nothing warns at publish time**.\n\n## Repro (17.4.0, `objectstack dev`)\n\n1. New writable package → **New object** → **Form** → **Add field** → Type = `Selection · Picklist`.\n2. Click `Add value` ×3 and fill only the `value` boxes (`low`, `medium`, `high`). Leave `Label` empty.\n3. **Publish**, then open the object's list → **New**.\n\n**Actual**\n- `GET /api/v1/meta/object/<obj>/published` → `\"options\":[{\"value\":\"low\",\"label\":\"\"}, …]`\n- the record form's select shows **three blank options**\n\n**Expected** — either fall back to `value` when `label` is empty, or block/warn at publish time.\n\n## Why it matters\n\nIt silently produces an unusable picker. Nothing in Studio or the publish step signals it; the only way to find out is to open the runtime form and look at the dropdown. In our case it was caught in a screen-recording rehearsal, i.e. after the object was already published and filmed.\n\n## Provenance\n\nFound while producing a product film in `steedos-labs/video-studio` (internal), issue #357, on a read-only clone of `objectstack-ai/hotcrm` @ `c716a2c` with `@objectstack/* 17.4.0` (same version as platform trunk at the time). Reported by the executing session; filed here by the video lane's PM per our cross-repo finding-transfer flow.\n\n**This is a finding, not a claim on anyone's time — filed unassigned.** No duplicate found (nearest existing: #5150, which is about `defaultValue` in the create dialog — different mechanism)."
+}

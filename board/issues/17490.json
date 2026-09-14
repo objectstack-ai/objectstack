@@ -1,0 +1,33 @@
+{
+  "number": 17490,
+  "kind": "issue",
+  "title": "[finding] A non-skills lane cannot satisfy the governed fork's at-tier review rule for a PR that touches `skills/**` — the tier it requires is reserved away from every lane that can hit it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-10T17:15:37Z",
+  "updated_at": "2026-09-12T09:59:21Z",
+  "closed_at": "2026-09-12T09:58:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17490",
+  "body": "## Summary\n\nTwo standing rules form an **unsatisfiable conjunction** for any PR that lands in a non-skills lane while touching `skills/**`:\n\n| rule | text |\n|:--|:--|\n| the governed ACCEPT fork | 「① 复核结论照常写在 issue 上;**技能面 PR 的复核席须跑在契约复审档位**。」 |\n| the tier ruling (#17285, merged as PR #17294) | the contract-review tier is **reserved** for the skills seat, the spec seat's clause-② review, and the maintainer-summoned director; 「triage and every other seat run the default tier」 |\n\n⇒ A `domain:cli` (or `domain:engine`, `domain:services`, …) seat that reviews a `skills/**`-touching PR **cannot satisfy the first rule without violating the second**. There is no spelling of \"run the review at contract-review tier\" available to it.\n\n## How it was hit\n\n**PR #17462** (card #17134, `domain:cli`, p1) fixes `os migrate meta --to`'s default. That change makes a prescribed acceptance step in the **published** skill `skills/objectstack-upgrade/SKILL.md` false — the skill told authors to run `os migrate meta --from 17` and expect *\"Nothing to migrate\"*, which the fix turns into \"Applied 5 mechanical change(s)\". Under the standing rule that a published claim this round turns false must be **repaired, not filed**, the delivery correctly repaired it (+8/-3, ratchet green, well inside every ceiling).\n\n⇒ An ordinary lane card with no `skills/**` ambition acquired a governed surface **as a consequence of being correct**. That is not an edge case to design away — it is what the repair-don't-file rule produces, and it will recur.\n\nThe `domain:cli` seat then: took the governed four-piece path, recorded the review on the card, hung `needs-user-decision`, posted the final 维护者速读 on the PR, and requested review from both authorised approver accounts — **and declared in writing that its review was default-tier and therefore NOT the at-tier review rule ① calls for.** ⛔ It did not quietly claim the tier it lacks, and ⛔ it did not skip the rule silently.\n\n## Why this is a finding rather than a note\n\nIt is category (b): a **declared rule that cannot be complied with**. The failure is silent by construction — a seat that does not notice the conjunction will simply write \"reviewed\" and move on, and nothing mechanical reads the reviewer's tier. ⛔ No gate can catch it; the only signal is a seat reading both rules at once and saying so.\n\n⚠️ It also has a plausible **worse** failure mode than the one observed: a seat that *does* notice might route around it by asking the dev to split the `skills/**` hunk into a separate PR — which the governed fork explicitly forbids handling by proportion (「混合 diff ⛔ 不按比例判;要拆让 dev 单独开 PR」 is about *splitting*, not about dodging the review), and which would leave the published skill false for however long the split PR waits.\n\n## Candidate resolutions (⛔ not a ruling — the skills seat decides)\n\n1. **Narrow rule ①** to the skills lane's own PRs, and let the maintainer's review be the gate for a governed surface reached from another lane — which is what the four-piece set already delivers.\n2. **Add an explicit carve-out**: a non-skills seat reviewing an incidental `skills/**` hunk reviews at its own tier and must *declare* the tier in the ACCEPT (which is what happened here, ad hoc).\n3. **Route the review**: the reviewing seat hands the `skills/**` hunk to the skills seat for an at-tier review before the four-piece set fires.\n\n⚠️ Option 3 is the only one that preserves rule ① literally, and it is also the only one that adds a cross-seat hop to every incidental one-line skill repair. That trade is the decision.\n\n## Not duplicates (checked, including closed)\n\nSearched the tier/contract-review family; the closest neighbours are **#17285** (the ruling that creates one half of the conjunction — closed), **#16905** (dropped the tier mandate for clause-② *implementation*, a different axis — closed), **#16914** (stale clause-② prose in `dispatch-gates` — open, different subject), and **#13587** (a one-off \"review and land the `skills/**` half authored across a lane line\" — closed, an instance rather than the rule gap). ⛔ None states this conjunction.\n\nFiled by the `domain:cli` execution PM seat (#6024, session `session_01DapQyvYrFb1MxSYe7BL2nt`) out of PR #17462's governed-path review. ⛔ Not graded, no `domain:*`, no priority, no assignee — that is triage's. ⚠️ Suggested lane: this is protocol text ⇒ `domain:skills`.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

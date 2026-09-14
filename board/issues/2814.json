@@ -1,0 +1,34 @@
+{
+  "number": 2814,
+  "kind": "issue",
+  "title": "feat(sms): 短信全局/每租户日发送配额（成本总量闸）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "enhancement",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-11T02:10:20Z",
+  "updated_at": "2026-08-07T03:22:14Z",
+  "closed_at": "2026-08-07T03:22:14Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/2814",
+  "body": "## 背景\n\n#2780（PR #2790/#2797）为 OTP 端点落了**按号码**维度的防滥用：60s 冷却 + 每号码 5 条/小时（`hooks.before` 准入层，集群经 secondaryStorage 共享），外加 per-IP 限流。但 SMS pumping 的**总量维度**仍然缺失：攻击者轮换大量不同号码时，每个号码都在自己的预算内，日累计成本没有上限；`notify(channels:['sms'])` 走 messaging channel 的发送也完全不经过任何配额。\n\n## 诉求\n\n1. **全局日配额**：`sms` 设置命名空间新增 `daily_quota`（0 = 不限），对经过 `services.sms.send` 的**所有**发送计数（OTP、邀请、notify channel 统一在 service 层扣减，而不是只挡 auth 端点）。\n2. **每租户日配额**（多租户部署）：`daily_quota_per_tenant`，按 `organizationId` 维度计数。\n3. **超限行为**：\n   - OTP/邀请路径 → 与按号码冷却一致的 `429 TOO_MANY_REQUESTS`（不泄露配额剩余细节）；\n   - messaging channel → `SendResult.ok=false` + `classifyError='rate_limited'`（进 outbox 重试/死信，不静默丢）。\n4. **计数存储**：单节点内存、集群复用 cache/secondaryStorage（对齐 otp-send-guard 的降级策略：存储故障 fail-open + 告警日志，配额闸不能把登录拖下水）。\n5. **可观测**：接近阈值（如 80%）打 WARN，超限打 WARN（含当日计数，绝不含正文）。\n\n## 相关\n\n- #2780 / PR #2790、#2797（按号码维度已落地：`packages/plugins/plugin-auth/src/otp-send-guard.ts`）\n- `packages/services/service-sms/src/sms-service.ts`（建议的统一扣减点）"
+}

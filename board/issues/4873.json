@@ -1,0 +1,38 @@
+{
+  "number": 4873,
+  "kind": "issue",
+  "title": "`os migrate` 成功时退出码是随机非零值(208/171/176/163/62…),`--version` / `--help` 却干净退出 0",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T11:32:24Z",
+  "updated_at": "2026-08-07T11:39:36Z",
+  "closed_at": "2026-08-07T11:39:36Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4873",
+  "body": "发现自 #4813 的实现过程(PR 见下)。**未认领。** 与 #4813 是不同的 bug —— 修好 #4813 之后它照旧复现。\n\n## 现象\n\n一条**成功**的 `os migrate` 子命令(JSON 正常输出、`✅ Graceful shutdown complete` 正常打印、stderr 全空)退出码是一个**每次都不一样的非零值**:\n\n```bash\ncd examples/app-crm\nfor i in 1 2 3; do\n  rm -f /tmp/t.db*\n  OS_DATABASE_URL=\"file:/tmp/t.db\" node ../../packages/cli/bin/run.js migrate recorded-by --json >/dev/null 2>&1\n  echo \"run $i exit=$?\"\ndone\n# run 1 exit=208\n# run 2 exit=171\n# run 3 exit=176\n```\n\n同一条命令在其它时刻还观察到 `62`、`163`、`169`。#4813 的正文里记录的 `214` / `238` 也是同一个现象。\n\n对照组 —— 同一个 `bin/run.js`,不走 schema stack 的子命令**干净退出 0**:\n\n```\nnode ../../packages/cli/bin/run.js --version  → exit=0\nnode ../../packages/cli/bin/run.js --help     → exit=0\n```\n\n所以问题不在 CLI 框架本身,而在 `bootSchemaStack` 系子命令的退出路径上。\n\n## 与 #4813 的关系(重要,别合并成一条)\n\n#4813 是「内核的 init/start 超时守卫定时器不清除,进程干完活还空转 120 秒」。它**不是**这条的原因:\n\n| | 挂起时长 | 退出码 |\n|:--|:--|:--|\n| #4813 修复前 | 122.4s | 163 |\n| #4813 修复后 | 3.1s | 62 / 169 / 208 / 171 / 176 |\n\n两次都是同一个构建链、同一条命令,唯一差别是 `packages/core/src/kernel.ts` 的守卫改动。**时长被修好了,退出码没有。**\n\n这一点值得单独强调,因为 #4813 的正文把不稳定退出码归因于「进程挂太久被外部杀掉」。现在证明**不是** —— 没有任何东西杀它,它自己在 3 秒后退出,退出码依旧随机非零。那个归因是错的,修好挂起并不会顺带修好退出码。\n\n## 为什么值得修\n\n一条成功的命令返回非零码,对**任何**按退出码判断成败的调用方都是直接的假失败:CI 步骤、`set -e` 脚本、Makefile、容器 entrypoint。而且它是随机的,所以「特判某个码」这种兜底也做不了。\n\n`--json` 的存在说明这条命令本来就是设计给程序消费的;程序消费的第一件事就是退出码。\n\n## 线索(未定位到根因)\n\n- 值域看着像 0–255 的随机数,而不是某个有意义的错误码 —— 更像**原生层异常退出**(退出时的 native addon 崩溃 / abort),而不是某处 `process.exit(n)` 传了业务数字。\n- stderr 全空,没有堆栈、没有 `unhandledRejection`、没有 `Warning:`,Node 侧看起来一切正常 —— 这也支持「JS 之后的阶段出的事」。\n- `packages/core/src/utils/env.ts` 有 `safeExit(code = 0)`,但 CLI 的 migrate 路径里没有直接调用点,值得从那里往下追。\n- 数据源是 libsql/sqlite(`OS_DATABASE_URL=\"file:…\"`),teardown 时关连接池的原生句柄是一个值得先看的嫌疑点。\n\n## 复现\n\n```bash\ncd examples/app-crm\nrm -f /tmp/t.db*\nOS_DATABASE_URL=\"file:/tmp/t.db\" node ../../packages/cli/bin/run.js migrate recorded-by --json\necho \"exit=$?\"\n```\n\nRefs #4813、#4747。\n"
+}

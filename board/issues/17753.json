@@ -1,0 +1,35 @@
+{
+  "number": 17753,
+  "kind": "pull_request",
+  "title": "docs(spec, core): the install-time granted permission set is REGISTERED at load and refuses nothing — say so, and pin the measurement (#17147)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-12T02:22:45Z",
+  "updated_at": "2026-09-12T03:48:21Z",
+  "closed_at": "2026-09-12T03:38:52Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-09-12T03:38:52Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/17753",
+  "body": "## ⛔ #17147 stays OPEN — this PR is not its closer\n\n> ⚠️ **Incident, recorded here because this very heading caused it.** It originally spelled a closing keyword immediately before the number while denying it in prose. GitHub's reference parser matches keyword-plus-number and ignores the surrounding negation — the #8131 shape `check-partof-closing-keyword.mjs` exists to block, and whose RULE 3 was red on this PR saying so. On this PR's merge the card was auto-closed as COMPLETED at 2026-09-12T03:38:53Z. It has been reopened, and #13458's `Blocked-by:` line was checked and had not been released. The sentence written to prevent the close performed it.\n\n#17147 asks for the opposite of what this lands: it asks that the registered grant start **refusing**. This PR states, in every shipped carrier, that it **does not**. The card stays open and keeps its `needs-user-decision` grade — the maintainer's A/B/C question is answered **B** (say it truthfully now), ⛔ not withdrawn.\n\n`Blocked-by: #17147` on **#13458** (Phase 2, retire the legacy `string[]` arm) is unchanged and still load-bearing: retiring the legacy arm while the structured replacement refuses nothing is exactly the shape this correction exists to keep visible.\n\n## The measurement, on `9bd4344e4`\n\n| probe | result |\n|---|---|\n| `new SecurePluginContext(` outside tests | **0** |\n| callers of `enforceFileRead` / `enforceFileWrite` / `enforceNetworkRequest` | **0** — `SecurePluginContext` included |\n| `os plugin install` / `.osplugin` loader / `sys_plugin_installation` | **none of the three exist** |\n| artifact `packages[]` payload | `sys_package_version.manifest_json` — metadata; the blob never reaches a runtime |\n| `contains_code` readers in this repo | **0** |\n\n⇒ #13457 / #17137 gave `registerGrantedPermissions` its first production caller. Nothing queries the registry it fills, and two of the four grant classes have **no enforcement surface even in principle** — so the consented set records what is allowed and denies no operation.\n\n## The ruling this executes\n\nMaintainer, 2026-09-12, **option B** — the same option ruled for the sibling half of this very sentence in **#11330** (2026-08-30, verbatim「同意」): *say it truthfully now*; building the per-plugin context stays a separate, separately designed direction, fenced to the ADR-0025 install-flow design effort by ruling `5486840233`.\n\n## What changed\n\nFour shipped sentences claimed enforcement. Each is corrected to one truthful split — **registered at load · queried by nothing · refuses no operation**:\n\n- `PluginPermissionEnforcer.registerGrantedPermissions` docblock (the retracted sentence was *\"so `SecurePluginContext` enforces exactly the consented surface\"*)\n- `PluginPermissionsSchema` docblock — `spec/kernel/manifest.zod.ts`\n- the `manifest.loading` tombstone prescription, which ships into **six** generated reference pages\n- the ADR-0087 D3 entry `plugin-manifest-loading-retired`, which ships the same prescription into `docs/protocol-upgrade-guide.md`\n\nplus a `Callout` beside the permission table in the hand-written `content/docs/plugins/development.mdx`.\n\nGenerated artifacts regenerated from those sources: `content/docs/references/**` (6 pages), `docs/protocol-upgrade-guide.md`, `packages/spec/spec-changes.json`, `packages/spec/src/migrations/registry.ts`. `check:docs` / `check:migration-registry` / `check:upgrade-guide` / `check:spec-changes` all report in-sync.\n\n## The mechanical half — why this cannot rot in either direction\n\n`plugin-runtime-tier-truthful-text.test.ts`'s coordination pin held the permissions half **verbatim** so it would go red the day that half was corrected (*\"#11333 owns it\"*). It did its job. It is discharged and replaced by pins on the truthful text in **both** carriers, each keeping the negative assertion that stops the retracted sentence returning *beside* the new one.\n\n`packages/core/src/security/granted-permissions-not-enforced.pin.test.ts` (new) pins the **measurement** as well as the words:\n\n- zero production `SecurePluginContext` construction sites;\n- zero callers of the three fs/network gates;\n- both halves present on the docblock, retracted sentence absent;\n- a behavioural case: a registered grant answers `getPluginPermissions` and gates nothing;\n- a positive control, so a broken scan can never read as \"no offenders\".\n\n⇒ **It fails the day the ADR-0025 materialize seam lands**, and its failure message names every text that becomes false at that moment — including objectui's `PluginDisclosure.tsx`, corrected in objectstack-ai/objectui#TBD.\n\n**Ablated three ways**, each turning it red: a fake production construction site; the retracted sentence restored; the tombstone reverted to `which are enforced`.\n\nClause-②: no — no new key lands on any published payload. The diff is docblocks, two tombstone/prescription strings, one hand-written docs page, their generated projections, and one new test file; `PluginPermissionsSchema`, `EnvironmentArtifactSchema` and every other schema keep their exact key sets (`packages/spec`'s own suite, 13434 tests, is green on that).\n\n> ⚠️ **`Part-of PR must not also close its card` is red and stays red.** Its RULE 2 forbids a card-relation trailer in any *commit* message, and this branch's commit ends `Refs #17147 · …`. The gate's own log states the position: the check is advisory (absent from the required-context registry, and its workflow subscribes to no `merge_group` event), `Refs` lands as a reference and moves **no** card, and ⛔ the repair it refuses to ask for is a history rewrite — forbidden in this repository. Recorded here so the red is read rather than acted on.\n\n## Not in this PR\n\n- **`docs/adr/0025-plugin-package-distribution.md` §3.7** (*\"service/hook/file/network already enforced\"*) carries the same claim. `docs/adr/**` is a governed surface (Prime Directive #14), so it is split into its own PR that stays draft for maintainer merge.\n- **No behaviour change.** No accept/reject, no registration, no gate added or removed.\n\nRefs #17147 · #11333 · #13457 · #13458 · #11330 · `5486840233`\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n\n"
+}

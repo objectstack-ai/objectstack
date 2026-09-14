@@ -1,0 +1,34 @@
+{
+  "number": 17767,
+  "kind": "pull_request",
+  "title": "docs(ui): filter the dashboards Global Filters example on the dotted path it means",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-12T03:42:49Z",
+  "updated_at": "2026-09-12T04:13:00Z",
+  "closed_at": "2026-09-12T04:12:58Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": "2026-09-12T04:12:58Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/17767",
+  "body": "Clause-②: no\n\nCloses #16268\n\n## The premise triage left open, settled first\n\nTriage reserved one reading for the claiming seat: does `opportunity` declare a `region` field? It decides whether the example is *misleading* or *directly illegal*. Measured before touching the example:\n\n- **The page never declares `opportunity`'s fields at all.** It names `object: 'opportunity'` and stops. So the question has no literal answer on the page.\n- **No `opportunity` object exists anywhere in the shipped tree.** The name appears only in unit-test fixtures. The CRM example ships `crm_opportunity`, which declares no `region` and whose dataset carries no `include`.\n- **But the page's own dataset is affirmative evidence.** It reaches region as `field: 'account.region'` through `include: ['account']`. That join is only necessary if `opportunity` has no own `region` — had it one, the dimension would have been written `field: 'region'`.\n\n**Verdict: directly illegal under the page's own implied reading, undecidable under a literal one.** The fix below is green under *both*, so nothing here hangs on the undecidable half.\n\n## Which fix, and why\n\n**Fix 2 — the dotted form** — as triage preferred, and its criterion stands unchallenged: this page's reader genuinely wants to filter by the customer's region, so fix 1 (swap in `stage`) would route around the confusion rather than teach the rule, and the harm on this card is precisely that the reader inferred the wrong rule.\n\nTwo supporting readings taken before committing to it:\n\n- Dotted filter fields are really supported, not merely tolerated: `resolveFieldPath` walks them hop by hop, and `packages/lint/src/validate-widget-bindings.test.ts` pins the clean shape green — *\"is silent on the clean shape — a dotted path through a declared include\"*.\n- The page's dataset already declares `include: ['account']`, so the sibling rule `dashboard-filter-field-not-included` has nothing to say.\n\nThe explicit `name: 'region'` is kept and now earned: left to default, the filter's variable key would be `account.region`, dots and all, in every expression and binding. The prose below the block now says so, which turns the retained name into a second lesson rather than a leftover.\n\n## Acceptance 1 — measured, not assumed\n\nTranscribed the page's own declarations into a stack and ran the real `validateWidgetBindings` from a freshly built `packages/lint`, under both readings of the open premise:\n\n| Reading | Example | `dashboard-filter-field-unknown` | Other rules |\n| :--- | :--- | :--- | :--- |\n| `opportunity` has no own `region` (page-implied) | old, `field: 'region'` | **1 finding, severity error** | 0 |\n| `opportunity` has no own `region` (page-implied) | new, `field: 'account.region'` | **0** | 0 |\n| `opportunity` owns `region` (counterfactual) | old, `field: 'region'` | 0 | 0 |\n| `opportunity` owns `region` (counterfactual) | new, `field: 'account.region'` | **0** | 0 |\n\nThe error the old example raises, verbatim:\n\n```\ninherits dashboard filter `region(region)`, but object `opportunity`\n(dataset \"sales\") has no field `region`.\n```\n\nRow 2's zero across *all* rules is the `include` clause reporting satisfied as well. The before/after pair is a one-off proof run from the scratchpad against the built `dist`; it leaves no test file behind.\n\n## Acceptance 3 — the reverse-read, zeros included\n\n**On this page.** Every other `region` on the page is a widget `dimensions` entry selected from the dataset by name — the correct side of the namespace boundary, untouched and still correct.\n\nOne site examined and deliberately left alone: the Per-Widget Filter Bindings block comments `// Default binding: dateRange -> created_at, region -> region.` That belongs to a *different* illustrative dashboard which declares no `globalFilters` and no dataset, and the statement stays true for any dashboard whose region filter names a field the widget's object owns. It involves no dimension and so carries none of this card's harm. Changing it to `account.region` would have been worse: it would smuggle an implicit `include` requirement into an example that shows no dataset. Recorded rather than edited.\n\n**On pages linking here** — seven pages link to this one (`capabilities/analytics`, `getting-started/quick-start`, `ui/apps`, `ui/index`, `ui/pages`, `ui/reports`, `ui/views`). **Zero** repeat the inference; none reuses the `region` filter example. `deployment/validating-metadata` already states the rule correctly. `ui/translations` keys global-filter translations by the filter's `name` — kept as `region`, so that key is unmoved.\n\n**Made-false sweep across the tree: zero.** No sentence outside this page depends on the old spelling.\n\n## Changeset — skip, measured\n\nNo package's `files[]` carries `content/`; the only consumer of `content/docs` is `apps/docs`, which is `private: true` and publishes nothing. Positive control on the same measurement: it reads `dist` in 23 packages' `files[]` and prints `packages/spec`'s full list, so the zero is a real zero and not an empty probe. `skip-changeset` is applied as a **label**.\n\n## Gates\n\nAll 40 families derived by `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` from the real change set: green. `check:skill-examples` — the gate that type-checks the `os:check` fences this diff edits — first returned a prerequisite failure (`packages/client-react` unbuilt), which is not a verdict; after building that package it reports **258 prose examples type-check across 3 surfaces**. Control-byte self-scan on the edited file: zero hits; `check-nul-bytes` green.\n\nVerified at `591d48a8b0`.\n\n## 验收备注\n\n- 反向读在本页发现一处 `region -> region` 的绑定注释,判为独立示例、未改,理由见上;归 `noted, not filed`。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012GKcPZbMoGq7WPzKLfRBTU)_"
+}

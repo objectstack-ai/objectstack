@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:devx",
-    "finding",
     "pm:queue",
     "priority:p2",
     "tooling"
@@ -21,7 +20,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-04T21:33:08Z",
-  "updated_at": "2026-09-09T02:54:21Z",
+  "updated_at": "2026-09-12T00:41:03Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

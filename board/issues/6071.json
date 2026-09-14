@@ -1,0 +1,36 @@
+{
+  "number": 6071,
+  "kind": "issue",
+  "title": "两处手写的 ExecutionContext 组装已漂移:REST 传输不带 `principalKind` / `onBehalfOf`,而 explain / security 会读它",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T16:59:43Z",
+  "updated_at": "2026-08-07T11:14:38Z",
+  "closed_at": "2026-08-07T11:14:38Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6071",
+  "body": "**来源**:#5859(producer 半边)实施时的越界发现,未在该 PR 修复。\n\n## 事实(已核 origin/main)\n\n`resolveAuthzContext`(`@objectstack/core`)被提取出来正是为了让两个 HTTP 入口不再漂移。\n但**从授权信封组装成 `ExecutionContext` 的那一步仍是两份手写副本**:\n\n- `packages/runtime/src/security/resolve-execution-context.ts`(dispatcher / MCP 入口)\n- `packages/rest/src/rest-server.ts`(`execCtx = { … }`,`os serve` / `dev` 的数据与元数据路由)\n\n两份的字段集**已经不一致**:runtime 那份按 ADR-0090 D9/D10 设置\n`ctx.principalKind`(`human` / `guest` / `agent`)与 `ctx.onBehalfOf`,rest-server 那份\n**完全不设**。\n\n消费方是存在的,且在 enforcement 面:\n\n- `plugin-security/src/explain-engine.ts:95` — `if (!context?.userId || context?.principalKind === 'guest') return 'EXTERNAL';`\n- `plugin-security/src/security-plugin.ts:2557` — `const isAgent = context?.principalKind === 'agent';`\n- `observability/src/perf-timing.ts:475` — `service` / `system` 的披露闸门\n- `explain-engine.ts:1122` — explain 输出里回显 `principalKind`\n\n## 实测\n\n在 dogfood showcase 全栈 boot(真实登录 + 真实 HTTP 请求)里插桩打印到达\n`plugin-sharing` 的执行上下文,键集为:\n\n```\nuserId, tenantId, email, positions, permissions, systemPermissions, posture,\nisSystem, org_user_ids, accessible_org_ids, timezone, locale, __kernel, __readScope\n```\n\n`__kernel` 说明这是 rest-server 那条组装路径;`principalKind` **不在键集里**。\n\n## 影响面(未评级 — 交分诊)\n\n同一个请求经 dispatcher 与经 REST 会在这两个字段上得到不同上下文,\n所以读 `principalKind` 的判断在 REST 面**从不成立**(guest 分支、agent 分支)。\n是否有用户今天就撞到,取决于这些分支在 REST 面各自还有没有别的等效前置判断\n(`security-plugin.ts:950` 明确写了「按委托 LINK 判断而非 `principalKind` 标签」,\n提示至少 agent 那一路可能另有兜底)—— 请分诊评级,不要按本文的语气推断严重性。\n\n## 建议方向(非裁决)\n\n把「授权信封 → ExecutionContext」的组装收成**一处共享函数**(与\n`resolveAuthzContext` 同一 package),两个传输各自只做传输特有的补充\n(REST 的 `__kernel` / `authGate`,dispatcher 的 OAuth scopes)。#5859 是这一族在\n**下一跳**的活标本:producer 读的 `organizationId` 是**两份组装都没写过**的键,\n于是整条 DEPTH 租户隔离恒不生效,而两侧看起来都合规。\n\nRefs:#5859、#5852、ADR-0090 D9/D10、ADR-0095 D2\n"
+}

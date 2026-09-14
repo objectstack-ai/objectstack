@@ -1,0 +1,35 @@
+{
+  "number": 6144,
+  "kind": "issue",
+  "title": "[skill] 拒收类用例必须断言 code+status,不能只断言「它抛了」—— 否则在裸 Error 的驱动上恒绿(#6142 实测)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T03:25:29Z",
+  "updated_at": "2026-08-07T12:05:29Z",
+  "closed_at": "2026-08-07T12:05:29Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6144",
+  "body": "来自 PR #6142(#6050 实施)的反向验证实测,值得写进 os-dev / pm-dispatch 的验证纪律条款。unassigned,交 devx 车道分诊。\n\n## 事实\n\n#6142 给 `undefined` 比较数装拒收闸时做反向验证(删掉闸、看哪些用例转红),实测结果**分两种机制**:\n\n- `driver-sql` 侧 22 红中,**多数红在「抛出 knex 的裸 `Undefined binding(s)`」**——那是一个 `code` / `status` 均为 `undefined` 的 Error;\n- `driver-turso` remote 侧 20 红**全部红在「本该拒收却编译出了 SQL」**(该 transport 从不抛)。\n\n推论(PR 原文):**一个只断言「它抛了」的拒收用例,会在本 issue 所针对的那个驱动上保持绿色**——因为未修的驱动本来就抛,只是抛的是没有信封的裸错。这类用例看似钉住了拒收,实则对「缺 ADR-0112 信封」这一族缺陷完全失明。\n\n## 建议条款(不代裁决,供 devx 定稿)\n\n拒收/错误类用例的最低断言集:**错误的 `code` 与 `status`**(ADR-0112 信封),而不是 `expect(...).toThrow()` 或 `rejects.toThrow()` 单独使用;若措辞是契约的一部分(#5240「一个条件一种措辞」),再加首句断言。\n\n关联:#6142 / #6050(出处)、#1116 / #4436(信封清点的历史单)、#5240(措辞一致)、#5347(拒收先例)。"
+}

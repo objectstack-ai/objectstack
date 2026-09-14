@@ -1,0 +1,36 @@
+{
+  "number": 5887,
+  "kind": "issue",
+  "title": "docs/plugins/packages.mdx 仍把 legacy `OS_MULTI_ORG_ENABLED=true` 当启用 multi-org 的方式 —— 照做够不到 `group` posture",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T10:58:15Z",
+  "updated_at": "2026-08-06T14:00:19Z",
+  "closed_at": "2026-08-06T14:00:19Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5887",
+  "body": "## 现象\n\n`content/docs/plugins/packages.mdx:335`（`@objectstack/organizations (enterprise)` 小节）：\n\n> **When to use**: Multi-organization SaaS where every row is scoped to an organization. Enable by setting `OS_MULTI_ORG_ENABLED=true` and installing `@objectstack/organizations`; …\n\n这是本仓库唯一还把 `OS_MULTI_ORG_ENABLED` 当作**启用开关**教给读者的地方（其余页面已经改成 `OS_TENANCY_POSTURE`）。\n\n## 为什么是缺陷\n\n`packages/types/src/env.ts:89-122` 逐字写明该布尔已被 **DEMOTED**（ADR-0105 D1）：`OS_TENANCY_POSTURE` 才是权威开关，legacy 布尔只在 posture 未设置时作为回落**输入**被读一次。两条后果，读者照本页做就会踩：\n\n1. **够不到 `group` posture。** `resolveTenancyPosture()` 里 `OS_MULTI_ORG_ENABLED=true` 只能派生出 `isolated`；`group`（`organization_id IN accessible_org_ids`，ADR-0105 D2 的 union/MOAC 语义）没有任何 legacy 布尔拼法可以选中。本页把 multi-org 的入口写成一个只能到达三分之一 posture 的开关。\n2. **教出「按这个布尔判断部署是否 multi-org」的习惯。** env.ts 的注释把这条直接叫 bug，并点名两个已发生的缺陷（cloud#1020 的 EE licence gate、#5233 的 `organization/create` 在纯 posture 部署上 403）。`content/docs/deployment/tenancy-modes.mdx` 已有一整段 \"Never gate application code on `OS_MULTI_ORG_ENABLED`\" 与本页对着写。\n\n## 建议改法（一页之内）\n\n把该 bullet 的开关换成 `OS_TENANCY_POSTURE=group|isolated`，legacy 布尔至多以「仍被兼容读取」的身份带一句或直接不提，并链到 `/docs/deployment/tenancy-modes`（posture 解析表、degraded 引导都在那里，不必在插件页重复）。`OS_ALLOW_DEGRADED_TENANCY=1` 那半句是准确的，可保留。\n\n## 来源\n\n#5746（`content/docs/protocol/objectql/schema.mdx` 同病）修复过程中扫到的邻页同类问题，按 Prime Directive #10 单独登记，未在那个 PR 里顺手改（文件面只限一页）。\n"
+}

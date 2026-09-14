@@ -1,0 +1,35 @@
+{
+  "number": 5744,
+  "kind": "issue",
+  "title": "[#5588 裁 C · 第二棒] build-openapi.ts 摘除 built-in 路由段生成 —— spec 静态产物只保留 components.schemas / info / securitySchemes",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T03:41:52Z",
+  "updated_at": "2026-08-06T13:54:01Z",
+  "closed_at": "2026-08-06T13:54:01Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5744",
+  "body": "Part of objectstack-ai/objectstack#5588\nBlocked-by: #5588\n\n维护者 2026-08-06 对 #5588 裁定 **C**(裁决评论见该单):built-in 路由段的唯一产出方移交 `packages/rest`(ADR-0076 属主,#5078 确权)。本单是 contract-first 拆分的**第二棒(spec 半边)**,落点 `packages/spec`,按跨座位转移协议转 spec 座位队列(`domain:*` 标签待分诊座位补)。\n\n## 范围\n\n1. `packages/spec/scripts/build-openapi.ts` 摘除 `generateCrudPaths` / `generateMetadataPaths` / `generateDiscoveryPaths` 三个手写路由段生成函数及其调用 —— 发布的静态 openapi 产物不再携带任何 built-in 路由描述(它们 0/10 命中真实路由,见 #5588 正文对照表),只保留 spec 真正拥有的 `components.schemas` / `info` / `securitySchemes`;\n2. #5168 的产物自洽门按新产物形状调整覆盖面(`$ref` 可解析、契约 schema 真产出的断言保留,path 相关断言随段移除);\n3. `check:generated` 收尾台账里 `gen:openapi` 那条 `why`(\"no check gate compares it to the routes\")随实施改写 —— C 之下无两方可对账,该缺口的表述已失准(#5456 已依此关闭 not planned)。\n\n## 为什么 Blocked-by #5588(第一棒先行)\n\n服务出的 `/api/v1/openapi.json` = spec 静态产物 + rest serve 期 enrichment。若 spec 先摘段,rest 补齐落地前服务出的文档将**缺失** built-in 段(比错误描述更糟的空窗)。第一棒(rest 在 serve 期丢弃静态旧段、自产正确段)合入后,静态段变为纯冗余,本单摘除才是零行为变化的清理。\n\n## 验收\n\n- `pnpm --filter @objectstack/spec build` 绿,产物中 `paths` 不含手写 built-in 段;\n- 真实 boot 下 `GET /api/v1/openapi.json` 的 built-in 段仍在且正确(由第一棒的 rest 产出承载,回归对照 #5588 正文的探测表);\n- #5168 门与 `check:generated` 台账措辞与新现实一致。\n\n关联:#5588(裁决锚点)、#5456(已关,重开条件在其关闭评论)、#5168、#5078、ADR-0076。"
+}

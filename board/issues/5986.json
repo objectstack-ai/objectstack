@@ -1,0 +1,33 @@
+{
+  "number": 5986,
+  "kind": "pull_request",
+  "title": "feat(scripts): durability 闸门新增「读接缝编造空值」规则 —— #4728/#4825/#5108 这一族终于有闸门了 (#5186)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "size/xl",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T13:56:57Z",
+  "updated_at": "2026-08-06T14:28:45Z",
+  "closed_at": "2026-08-06T14:28:43Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T14:28:43Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5986",
+  "body": "Fixes #5186\n\n按维护者 2026-08-06 10:44Z 的「**裁 3——收窄先行**」落地。\n\n## 前提复核(先证再做)\n\n三条事实全部在 `origin/main` 上核过,issue 的判断成立:\n\n| issue 说 | origin/main 实况 |\n|---|---|\n| 词表清一色写/DDL 专名 | `DURABILITY_CRITICAL_CALLEES` 现有 **13** 项(issue 写的 9 项之后又长了 4 个),`syncSchema` / `initObjects` / `writeRecord` / `dropPromotedDraftRow` / `saveMetaItem` / `persistAuditTrailRow` …,无一读语义 |\n| 闸门判据是「日志级别」 | `analyzeSourceFile` 判 `loud`/`quiet`/`rethrow`/`propagates`,读接缝的 `catch { return [] }` 在这四个维度上**全是空的** |\n| #5108 修完的形状可直接当正面 fixture | `DatabaseLoader` 五处读现在都走 `rethrowUnlessTableUnprovisioned(error)`,`nextEventSeq` 走 `if (isMissingTableError(error)) return 1; throw error;` |\n\n## 这一版做了什么\n\n在**同一个脚本、同一个 CI step** 里加了**第二条规则**,与第一条不共享词表、不共享 baseline、不共享判决:\n\n> `try` 块里有一次**读**(`IDataDriver` 的 `find`/`findOne`/`count`,或同文件薄封装)\n> ＋ `catch` **一行日志都没有**\n> ＋ 某条路径 `return` 了一个**空值/零值**(`[]` / `false` / `null` / `undefined` / `{}` / 空字符串 / `0` / `1`)\n> ＋ 这条路径**没有**按错误类型区分过\n> → 红\n\n判据的关键不在「调了什么」,而在「**没读到,却编了一个答案出来**」。\n\n**豁免**就是 #4825 / #5108 修完留下的形状:`isMissingTableError`(`packages/metadata/src/errors.ts`)。行内写或经 `rethrowUnlessTableUnprovisioned` 这类「重抛式 guard」都认,两种极性都认:\n\n```ts\ncatch (e) { if (isMissingTableError(e)) return []; throw e; }   // 认\ncatch (e) { if (!isMissingTableError(e)) throw e; return []; }  // 也认\ncatch (e) { this.rethrowUnlessTableUnprovisioned(e); return []; } // 也认(会跟进 guard 体)\n```\n\n豁免是**声明的、且仍要结构证明**:\n- 手抄的 `e.code === '42P01'` / `/no such table/i` **不算**——那正是 #5841 在 `loadMetaFromDb` 刚退休掉的第二套词表,判红是本意;\n- 区分了、但两个分支都返回空值 → 仍然红(「提到了 `isMissingTableError`」式的存在性检查会直接放行它);\n- guard 只区分、不重抛 → 不授予豁免;同文件里一个从不问错误类型的函数(哪怕它总是抛)也不授予——`indexFunctionBodies` 按裸名索引,不设这道门就会被同名方法蹭到许可。\n\n**扫描面**收窄到 `packages/metadata` / `packages/metadata-protocol` / `packages/objectql`。收窄不只是成本考虑:`find`/`findOne`/`count` 是彻底通用的名字,**是 SCOPE 让它们意味着「存储缝」而不是「任意数据读取」**。\n\n## 度量与 baseline\n\n扫描面内 **64 处读接缝,3 处命中**,全部进新的 shrink-only `scripts/durability-read-invention.baseline.json`(本 PR 是闸门单,文件面 `scripts/` + `.changeset/`,不改被扫的包):\n\n| 条目 | verdict | 说明 |\n|---|---|---|\n| `protocol.ts` 的 `listCommits` | `unfixed-degradation` | commit store 读不到答成 `[]`,JSDoc 自己写着这是设计 → 已立 #5980 |\n| `engine.ts` 的 `seedAutonumber` | `unfixed-degradation` | **#4825 那一半的活体**:读失败从 `0` 起号,与既有行撞号,零日志 → 已立 #5979 |\n| `engine.ts` 的 `referenceExists` | `reviewed-legitimate` | `null` 不是编造:签名是 `Promise< boolean or null >`,JSDoc 明写「`false` 只在探测跑成功且没找到时,`null` 是根本没跑成」,故障是**经返回值交给调用方**的。规则读语法不读返回类型,故记录复核结论而不是放宽规则 |\n\nbaseline 的 key 是 **`file`::`enclosing function`**,不是 `file`::`callee`——callee 永远是 `find`,而 `protocol.ts` 九千行、`engine.ts` 五千行,文件级许可的盲区大到能藏下一个 #5108。这与 `FAILURE_PROPAGATION_SITES` 的粒度取法同源。\n\n## 反向验证(方向事先预判为「红」,结果符合)\n\n把 #4825 + #5108 的修复全部**还原**(去掉 5 处 guard 调用、把 `nextEventSeq` 改回 `catch { return 1 }`),闸门在它们**当年修的那 6 处里红了 5 处**:\n\n```\n✗ 5 read seam(s) invent an empty answer for a read that failed, and tell nobody\n  database-loader.ts:307  (in nextEventSeq())\n  database-loader.ts:805  (in loadMany())\n  database-loader.ts:827  (in exists())\n  database-loader.ts:866  (in stat())\n  database-loader.ts:893  (in list())\n```\n\n**第 6 处 `load()` 看不见,这是如实记录的局限**,不是漏测:它返回的是 `{ data: null, loadTime: … }` —— 空答案被包在**信封**里,而规则读的是被 `return` 的表达式。放宽成「对象字面量里有一个空值属性就判」会把三个包里每一个 result envelope 都按其中一个属性判掉,那个误报率是会让闸门被关掉的量级(而被关掉的闸门比没有闸门更糟,因为它还报成功)。信封形状的空答案需要**另一条判据**(声明的返回类型),不是这一条的松版。脚本头部把这条与另外两条局限一起写在「Honest limitations」里。\n\nbaseline 的 shrink-only 也双向验过:删掉一条 → 红(该 seam 重新报出);加一条对不上的 → 红(stale entry 报出)。\n\n## 为什么放在同一个脚本里\n\n「独立规则」按裁决是指**不走 `DURABILITY_CRITICAL_CALLEES` 词表**(判据独立),不是指独立文件。放在同一脚本换来三件事:\n\n1. **零 CI 接线**:`check:durability-log-level` 本来就是「self-test && audit」,两条规则都被覆盖,`package.json` 与 `lint.yml` 一行不动(lint.yml 属 spec-tooling 座位在飞面,本单 ⛔ 不碰);\n2. 共享一次 AST pass 与 `walkSameTick` / `loggerLevel` / `indexFunctionBodies` 等工具;\n3. 「catch 里有没有日志」这个问题**被抽成了 `collectLoggedLevels()` 给两条规则共用**——两份拷贝就是两套「这个 catch 说过话」的事实来源,会照着 `@objectstack/metadata/errors` 存在要防的那种方式漂移。\n\n两条规则的报告、baseline、staleness 检查各自独立,任一条红不遮蔽另一条。\n\n## 自检\n\n脚本自带 fixture 从 **35 → 61** 例(原 35 例全部保持绿,验证 `collectResponse` 抽取无回归),新增 26 例全部来自仓库真实代码而非想象:**通过样例是 #4825 / #5108 修完的代码**,**命中样例是它们修之前的形状**。一个已经复发三次的族,闸门必须双向钉在这三次实例上,否则第四次照样绿灯过。\n\n## 关于 changeset\n\n本 PR 只动 `scripts/`(根 package 是 `private: true`,`scripts/` 不进任何发布产物),**不发布任何东西**,故按 `pr-automation.yml` 明示的路线 2 走 `skip-changeset` 标签,而不是写一个不指名任何包的空 changeset(路线 3 是 last resort,#4898 那次静默停发的原因)。\n\n## 越界说明\n\n- **未改 `AGENTS.md`**:该文件不在本单申报面内。但「Degradation log levels」末尾的 **It has teeth** 段现在只描述了 `check:durability-log-level` 的一半(且「baseline 目前是空的」这句容易被读成整条命令的 baseline 都是空的)。已作为观察类发现立卡 **#5981**,建议补一段指路牌。⚠️ 这不是被否决的「方向 2」——闸门已经落地,那里补的只是索引。\n- **未改被扫的包**:`listCommits` / `seedAutonumber` 两处真实缺陷已分别立卡 #5980 / #5979,并在 baseline 条目里用 `tracked_by` 指了回去。\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01BDmDsu2575gDxeMCxXhDE3\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BDmDsu2575gDxeMCxXhDE3)_"
+}

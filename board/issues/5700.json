@@ -1,0 +1,35 @@
+{
+  "number": 5700,
+  "kind": "issue",
+  "title": "Three pre-existing flow-lint fixtures bind the loop item with `itemVar`, a key `LoopConfigSchema` rejects — the nested-region tests describe a `loop` no author can write",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T00:59:07Z",
+  "updated_at": "2026-08-07T01:47:32Z",
+  "closed_at": "2026-08-07T01:47:32Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5700",
+  "body": "Found while implementing #5633. Filed unassigned, **observation-class** (`finding`, no `pm:queue`): no shipped behaviour is wrong — this is test fixtures describing a container the schema rejects, so the coverage they advertise is weaker than it reads.\n\n## What\n\n`packages/lint/src/lint-flow-patterns.test.ts` binds the loop item with **`itemVar`** in three pre-existing fixtures:\n\n- `loopBodyFlow()` — the shared `loop`-body helper introduced by #5383, used by most of that PR's nested cases;\n- the nested-loop case inside the `#5383` block;\n- the nested-loop case inside the `#5482` (`flow-multi-write-unfiltered`) block.\n\n`LoopConfigSchema` (`packages/spec/src/automation/control-flow.zod.ts`) is a `strictObject`, and the declared key is **`iteratorVariable`**. `itemVar` is neither declared nor aliased, so it is reported as an `unrecognized_key` rather than dropped (#4001):\n\n```\nREJECTED  itemVar             unrecognized_keys=[[\"itemVar\"]]     (the only issue)\nPARSES    iteratorVariable    unrecognized_keys=[]\nREJECTED  itemVariable        unrecognized_keys=[[\"itemVariable\"]]  (declared alias -> guidance)\n```\n\n(`itemVariable` is deliberately registered as an alias so the edit-distance suggester cannot send an author to `indexVariable` — see the comment above `LoopConfigSchema`'s `aliases`. `itemVar` is not in that set.)\n\n## Why the tests do not notice\n\nRegion collection reads `config.body`. `collectFlowGraphs` / `regionSlotsOf` never look at the item-binding key, so a fixture spelling `itemVar` descends and gets scanned exactly like a correct one — every assertion in those cases passes for the right reason about the *rule*, while the fixture describes a `loop` an author cannot write. Nothing in the suite parses these fixtures, so nothing goes red.\n\nThat is the same shape this very file already documents for a trigger descriptor — the `#4966` note above the time-relative case, which added `expect(TimeRelativeTriggerSchema.safeParse(...).success).toBe(true)` precisely because *\"a fixture the runtime would refuse teaches the wrong shape to every reader of this file\"*. This is that finding one container down.\n\n## Scope, and what is already fixed\n\nFixtures **added by #5633** (PR #5695) are already correct: re-spelled to `iteratorVariable`, given the `label` that `FlowNodeSchema` requires on the body nodes, and pinned against `LoopConfigSchema` in both directions (fixture parses green; the near-miss spelling really is rejected, so the pin has teeth). That PR deliberately did **not** touch the three pre-existing fixtures — they are not exposed by its change, and re-spelling someone else's fixtures is scope creep on a build-gating PR.\n\nSo what remains is exactly those three call sites.\n\n## Fix\n\nMechanical: `itemVar` to `iteratorVariable` at the three sites, plus the `label` the body nodes need if the fixture is to parse fully, plus a `LoopConfigSchema` pin on the shared `loopBodyFlow` helper so the whole family cannot rot back. Worth checking in the same pass whether other container fixtures in the flow-lint tests spell undeclared keys on `parallel` branches or `try_catch` regions — the audit is one `safeParse` per fixture and is the durable half of the fix.\n\nNote the flow-level `label` requirement is a **separate** and much broader convention in this file: essentially none of its fixtures are full-`FlowSchema`-green (`FlowSchema` requires `label` on the flow and on every node), because the suite passes hand-written raw literals rather than parsed stacks. Bringing the whole file to full-flow-parse-green is a different, larger decision and is **not** proposed here — the narrow claim is that a **key** a fixture writes should be a key the schema accepts.\n\n## Related\n\n- #5633 / PR #5695 — where this surfaced; its own fixtures are already correct and pinned.\n- #4966 — the same finding class on a trigger descriptor, in the same test file.\n- #4001 — why an undeclared container key is now reported instead of silently dropped.\n- #5383 / #5482 — the PRs that introduced the three fixtures."
+}

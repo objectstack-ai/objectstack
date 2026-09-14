@@ -1,0 +1,36 @@
+{
+  "number": 6008,
+  "kind": "issue",
+  "title": "[finding] `check:merge-driver` 的两个 --self-test 没有任何 workflow 在跑 —— 合并驱动的规则回归只在有人手工跑根脚本时才现形",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T14:38:53Z",
+  "updated_at": "2026-08-07T00:22:51Z",
+  "closed_at": "2026-08-07T00:22:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6008",
+  "body": "在 #4723(PR #6000)里给 `scripts/check-regen-pending.mjs --self-test` 加了一条断言时发现的,与该单无关,单独记录。\n\n## 现象\n\n根 `package.json`:\n\n```\ncheck:merge-driver = node scripts/git-merge-regen.mjs --self-test && node scripts/check-regen-pending.mjs --self-test\n```\n\n这条命令**没有出现在任何 workflow 里**。\n\n## 实测(origin/main)\n\n```\n$ for f in $(git ls-tree -r --name-only origin/main .github/workflows/); do\n    git show origin/main:$f | grep -Hn \"merge-driver\" /dev/stdin | sed \"s|/dev/stdin|$f|\"\n  done\n(空 —— 零命中)\n\n$ # 反查:同类的根 check 脚本确实在 lint.yml 里\n$ ... grep -Hn \"check:nul-bytes\" ...\n.github/workflows/lint.yml:121:      # The command name stays `check:nul-bytes` for continuity ...\n.github/workflows/lint.yml:124:        run: pnpm check:nul-bytes\n```\n\n零命中已按惯例用邻近词反查过,grep 本身是好的。\n\n`.githooks/pre-commit` 跑的是 `check-regen-pending.mjs` 的**主路径**(无 pending marker 时直接退出),不是 `--self-test`。所以两个 self-test 在 CI 上从未执行。\n\n## 它们守的是什么\n\n- `git-merge-regen.mjs --self-test`:`.gitattributes` 与 `scripts/regen-artifacts.mjs` 的双向对账、`gen:`/`check:` 名字在 spec 的 package.json 里可解析、pre-commit 在 index 里可执行、`merge.os-regen.driver` 在当前 worktree 可解析,外加一次端到端合并证明。\n- `check-regen-pending.mjs --self-test`:陈旧判定规则的危险方向(「该说 stale 时说了 fresh」)。\n\n这些都是 #4675 那套「生成物不走文本合并」的地基。对账一旦失衡,合并驱动会对某个路径**静默失效** —— 而 `git-merge-regen.mjs` 自己的注释就说,这类失衡「只有跑 self-test 才看得见」。\n\n## 为什么标 finding 而不是缺陷\n\n今天没有用户会撞到:驱动是好的,对账是平的(本地跑 `pnpm check:merge-driver` 全绿)。这是一道**覆盖面的洞**,不是一个已发生的故障 —— 与 #4690 同类(一道被归档为「在别处跑」的门禁,实际哪里都没跑),只是这次是根脚本而非 spec 门禁。\n\n## 可能的方向\n\n`lint.yml` 里已经有一排同形状的根 `check:*` 步骤(`check:nul-bytes` / `check:i18n` / `check:doc-authoring` …),加一步 `pnpm check:merge-driver` 即可,亚秒级到数秒级。是否值得占一个必需步骤,交 PM 裁。\n"
+}

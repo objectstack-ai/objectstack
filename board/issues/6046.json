@@ -1,0 +1,36 @@
+{
+  "number": 6046,
+  "kind": "issue",
+  "title": "check-override-consistency 增加「override 有无消费者」体检(报告而非 red)—— #5835 裁 A 的配套正交项",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T15:40:01Z",
+  "updated_at": "2026-08-07T02:00:23Z",
+  "closed_at": "2026-08-07T02:00:23Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6046",
+  "body": "来源:#5835 维护者裁决(2026-08-06 10:44Z 全舰队批复):**裁 A 保留 form-data / undici 两条 OSV override,配套批准本体检立项**。由 devx 座位按裁决拆单(会话 `session_01BDmDsu2575gDxeMCxXhDE3`),#5835 随本单立卡关闭。\n\n## 背景(#5835 实测)\n\n`pnpm-workspace.yaml` 的两条 OSV override(`form-data@<4.0.6`、`undici@>=7.23.0 <7.29.0`)随 #5825(vscode-objectstack 退役)失去唯一消费者,现为空转 —— 而**空转完全不可见**:`scripts/check-override-consistency.mjs` 只校验「override 命名的包若出现在可发布包 declared range 里,range 必须能解析到 target」,**没有消费者的 override 被直接跳过**。一条不可见的安全声明两头都危险:既可能被误信为在生效,也可能被下一个 agent 顺手删掉。\n\n## 要做的(按裁决范围)\n\n1. `check-override-consistency.mjs` 增加消费者体检:对每条 override 统计当前依赖树中的消费者数,**零消费者 ⇒ 报告(informational),⛔ 不 red**(裁决原文「报告而非 red」—— override 空转是合法的纵深防御姿态,体检的目的是可见性,不是禁止)。\n2. **undici 上界自失效形状纳入体检范围**(裁决把 #5835 正文备忘归入本单):override 选择器上界与 target 相等/相邻时(`<7.29.0` → `^7.29.0`,#4961/#5032 的自失效形状)同样以报告形式点名。\n3. `--self-test` 语料照本脚本既有惯例;红/绿两向(有消费者不报、零消费者报出、自失效形状报出)。\n\n## 验收\n\n- 现状实跑:两条空转 override 被点名报告,exit 仍 0;\n- 体检输出含消费者计数与「保留系 #5835 裁 A 的姿态」指引(防下一个 agent 顺手删);\n- self-test 接进 `check:override-consistency` 命令链(不接线即 phantom check)。\n\n关联:#5835(裁决锚点)、#5825/PR #5834(空转成因)、#4961/#5032(自失效选择器形状)。"
+}

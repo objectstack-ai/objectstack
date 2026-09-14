@@ -1,0 +1,37 @@
+{
+  "number": 6000,
+  "kind": "pull_request",
+  "title": "fix(spec): check:docs 不再以 gen:schema 开头,生成交给调用方 (#4723)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T14:15:52Z",
+  "updated_at": "2026-08-06T14:56:53Z",
+  "closed_at": "2026-08-06T14:56:50Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T14:56:50Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6000",
+  "body": "Fixes #4723\n\n## 前提复核(在当前 origin/main 上实测)\n\n单子正文引用的那行仍在,今天四次合并(#5807/#5851/#5902/#5971)都没动它。**前提成立**,现象原样复现:\n\n```\n$ git status --porcelain packages/spec/json-schema.manifest.json\n M packages/spec/json-schema.manifest.json      ← 手工改旧(删掉 ui/WidgetSource)\n   md5 = f9237c0caeb9d007fb5d03d6e6506ff0\n\n$ pnpm --filter @objectstack/spec check:docs\ncheck:docs exit=0                               ← 绿\nreal 0m8.966s\n   md5 = 66f382332217c4af0eb857b405944bc8      ← 被写回去了\n\n$ git status --porcelain packages/spec/json-schema.manifest.json\n                                                ← 空:本地改动被这条「检查」吃掉了\n```\n\n## 路线选择:实测否掉了 A,走精化的 B\n\n派单允许「若实测 A(`--no-snapshots` 模式)代价更小则可选 A」。实测结论是 **A 不更便宜,而是更贵**,所以走 B:\n\n| 命令 | 耗时 | 写 gitignored `json-schema/` | 写 tracked 投影 |\n|:---|---:|:---|:---|\n| `check:docs`(修复前) | 8.97s | 是 | **是 ← 缺陷** |\n| `check:authorable-surface`(`--check`) | 4.90s | **是(1609 个文件)** | 否(#4711) |\n| `tsx scripts/build-docs.ts --check` 单跑 | 1.84s | 否 | 否 |\n\n关键测量是中间那行:**`build-schemas.ts --check` 本身就已经是「只写 gitignored 产物」的那个模式** —— 它完整重建 `json-schema/`,并且拒绝碰任何 tracked 文件。所以路线 B 需要的「显式先跑一步」**已经存在、已经在跑**,就在两个真实调用点上(lint.yml 的步骤顺序、`check:generated` 的 GATED 顺序)。\n\nroute A 要新加第四个模式位到一个 1639 行、带沙箱测试的脚本里,还要定义它与 `--check` / `--update-base` 的三对互斥,**并且仍然保留 check:generated 里那次重复生成**。B 反而把重复生成也一起省了。\n\n⚠️ 另有一条不能选的:让 `check:generated` 自己显式跑 `gen:schema`。那会在 `check:authorable-surface` 之前把 tracked 投影修好,把那道门禁变成永远绿的 —— 缺陷穿上修复的外衣。**合格的「先跑一步」必须是不写 tracked 文件的那种生成**,这个约束把方案空间收敛到了 `--check`。\n\n## 改了什么\n\n1. `check:docs` = `tsx scripts/build-docs.ts --check`,不再生成任何东西。\n2. **新鲜度从「隐式保证」改为「显式断言」。** 原来的第一步顺手保证了 `json-schema/` 描述的是当前源码;直接删掉它,只是把「改工作区」换成更糟的**假绿** —— 对着编辑前生成的树报告「文档已同步」,而这正是这道门禁存在的理由(加了个 `.describe()`、改了个 key)。所以 `build-docs.ts` 在**所有模式**下先断言该树存在且不旧于 `src/`,否则红着退出并给出命令。写模式尤其要拒绝:陈旧树上的 `gen:docs` 不会失败,它会**写出**陈旧页面 —— 就是 `readsDist` 那个坑挪一个产物。\n3. 规则 `schemaTreeIsStale()` 与 `distIsStale()` 同住 `scripts/check-regen-pending.mjs`(同一个问题、三个消费方:生成器 / pre-commit 钩子 / merge driver 的提示)。与 `distIsStale` 唯一的有意差别:排除 `.test.ts` —— 测试文件不是 `build-schemas.ts` 的输入,算进去会让每个纯测试 PR 都被要求跑一次没有意义的 `gen:schema`,而一道乱叫的门禁就是下一个人会删掉的门禁。\n4. `check:generated` 的 GATED 表**声明**这条依赖(`readsSchemaTree: 'check:authorable-surface'`),reconciliation 在生产者缺失或排在消费者之后时失败 —— 数组字面量的顺序是一条真实依赖,不该靠巧合表达。\n5. 调用点全量清点后同步:`lint.yml`(纯注释 + 步骤顺序的 ⚠️ 说明,**未新增步骤、未调整顺序**,与 parked PR #5827 无冲突)、`regen-artifacts.mjs` / `git-merge-regen.mjs` / pre-commit(`readsSchemaTree` 走 `readsDist` 同款拒绝路径)、AGENTS.md(「`check:docs` 不再自足」)。`apps/docs` build 与 retirement skill 的门禁循环都以 `gen:schema` / `pnpm build` 开头,天然新鲜,无需改动。\n\n## 验收(单子的原文标准)\n\n清洁树上、并且**先手工把 tracked 投影改旧**:\n\n```\n$ md5sum packages/spec/json-schema.manifest.json\nf9237c0caeb9d007fb5d03d6e6506ff0      ← 已改旧\n\n$ pnpm --filter @objectstack/spec check:docs\ncheck:docs exit=0\nreal 0m2.052s                          ← 8.97s → 2.05s\n\n$ md5sum packages/spec/json-schema.manifest.json\nf9237c0caeb9d007fb5d03d6e6506ff0      ← 原样,没被修\n$ git status --porcelain packages/spec/json-schema.manifest.json\n M packages/spec/json-schema.manifest.json      ← 本地改动还在\n```\n\n整条 `check:generated`(同样从改旧的 manifest 出发):\n\n```\n  ✗ check:authorable-surface   authorable-surface.json (+ its .base.json anchor) + JSON schemas\n  ✓ check:docs                 content/docs/references/**\n✗ 2 of 10 artifact(s) stale\n=== 之后 md5 仍是 f9237c0...,git status 里那条 M 仍在 ===\n```\n\n**报告,而不是修复。** 修复前同一条命令跑完,manifest 已被写回、`git status` 干干净净 —— 一份红色报告配一个已经被悄悄修好的文件,正是单子说的那个状态。\n\n(`check:api-surface` 在这个全新 worktree 里是红的,原因是它自己报的 `readsDist`:`Is the package built?` —— 与本 PR 无关。)\n\n护栏的四个方向都实测过:树缺失 → 红并给出命令;`src` 比树新 → 红;树比 `src` 新 → 绿;**只 touch 一个 `.test.ts` → 仍然绿**(那条有意的排除)。\n\n## 反向验证(方向是先预测再跑的)\n\n预测:把删掉的 `gen:schema` 那截装回去,新增的组合 pin 应当**变红**(标准方向 —— 这不是 `??` 链,不涉及反转)。\n\n```\n$ # 把 check:docs 改回 \"pnpm gen:schema && tsx scripts/build-docs.ts --check\"\n       × is true of every check: script in this package\n       × leaves check:docs as the read-only half it is named for\nAssertionError: `check:docs` runs the generator(s) `gen:schema`:\n Tests  2 failed | 6 passed (8)\n```\n\n## 关于「自证清洁测试」的形状,说明一句\n\n派单要求按 #5358 先例 pin 成测试。#5358 是端到端跑脚本再断言 `git status --porcelain` 为空,因为那里的写操作**埋在一个 1600 行脚本内部**,只有跑一遍才看得见。这里不是:写操作是 **package.json 里的一行组合**,所以 pin 在源码层更强而不是更弱 ——\n\n- 它不需要执行任何东西就能看见回归;\n- 它不会像 spawn 出来的运行那样在 gitignored 输入缺失时**静默退化**(`turbo run test` 恰好就让这个包处于该状态,`root-index.test.ts` 里写着这件事)。\n\n所以 pin 写成了**类**而不是那一个实例:**任何 `check:` 脚本都不得组合 `gen:` 脚本**(`check-generated-ledger.test.ts`),外加 `check:docs` 具名的那条。端到端证据在上面的「验收」小节,是手工实测的真实输出。这是刻意的取舍,写在这里而不是伪装成模板要求的形状。\n\n## 验证\n\n- `pnpm --filter @objectstack/spec test` → **324 files / 8284 tests passed**(含 `build-schemas-check-mode.test.ts` 单独复跑 **36 passed** —— 该脚本的门禁语义一行未动)\n- `pnpm --filter @objectstack/spec typecheck` → 通过(`tsc --noEmit` + `check:test-typecheck`,79 files / 691 errors 的 shrink-only 账本无变化)\n- `pnpm check:merge-driver` → 通过(含新增的 `json-schema/` 缺失即 STALE 自测)\n- `pnpm check:generated --reconcile-only` → 通过,并新增一行叙述:`↳ check:docs renders from json-schema/, generated by check:authorable-surface above it.`\n- `pnpm check:nul-bytes` → OK(5752 个文件);改动文件另跑了越过门禁盲区的自扫描,无控制字节\n- `eslint` 改动文件 → 0\n- 新增 14 个测试(6 个新鲜度规则 + 8 个账本/组合)\n\n## 变更集\n\n`patch` on `@objectstack/spec` —— `check:docs` 的行为对开发者可见(不再自足、不再改工作区),不是纯 CI 编排。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01559M8FVm6W6vDLABL3jvdW)_"
+}

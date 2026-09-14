@@ -1,0 +1,35 @@
+{
+  "number": 5921,
+  "kind": "pull_request",
+  "title": "fix(driver-turso): RemoteTransport 拒收条件层的 `$`-算子键 —— 不再编译成静默空集/全表写 (#5769)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T11:40:47Z",
+  "updated_at": "2026-08-06T13:38:13Z",
+  "closed_at": "2026-08-06T13:38:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T13:38:11Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5921",
+  "body": "Fixes objectstack-ai/objectstack#5769\n\n## 前提复核(先做的事)\n\n单子的前提在 `origin/main`(`5c94f833c`)上**逐条实测确认**,并且比正文所述更严重一格。捕获客户端 + 三行 fixture(`d_won`/`d_lost`/`d_open`):\n\n```\n{ $eq: 'won' }                 → SELECT * FROM \"deal\" WHERE \"$eq\" = ?         → []\n{ $gt: 5 }                     → SELECT * FROM \"deal\" WHERE \"$gt\" = ?         → []\n{ $null: true }                → SELECT * FROM \"deal\" WHERE \"$null\" = ?       → []\n{ $where: 'return true' }      → SELECT * FROM \"deal\" WHERE \"$where\" = ?      → []\n{ $and: 'x' }                  → SELECT * FROM \"deal\" WHERE \"$and\" = ?        → []\n{ $or: [{}, { $where: 'x' }] } → SELECT * FROM \"deal\"(整句没有 WHERE)        → 全部三行\n```\n\n前五行就是维护者实测过的**静默空集**。补一条机理:SQLite 把「解析不到列的双引号标识符」降级成字符串字面量 → 语句编得出、跑得通、一行不匹配;而在关掉该规则的构建上(本仓测试用的 better-sqlite3 即 `SQLITE_DQS=0`)会报 `no such column`,`RemoteTransport.find` 自己的未知列兜底又把它吞成 `[]`。**两条路,一个答案**,调用侧都区分不出「没有匹配的行」和「过滤器根本没编出来」。\n\n最后一行是单子正文没有预料到的一格,也是真正付出代价的一格,而且**不依赖任何方言怪癖**:`{}` 是 `$or` 的 TRUE 单位元,整组被吸收,连同那个畸形兄弟**已经编出来**的子句一起被丢掉,语句整个丢掉了 WHERE。实测:\n\n```\nupdateMany({ $or: [{}, { $where: 'x' }] }, { stage: 'ARCHIVED' })\n  → UPDATE \"deal\" SET \"stage\" = ?   （无 WHERE）\n  → stages [\"won\",\"lost\",\"open\"] → [\"ARCHIVED\",\"ARCHIVED\",\"ARCHIVED\"]\n```\n\n一个一行都没点名的过滤器改写了整张表。这就是单子正文里「写路径上谓词恒假或恒真,取决于落侧」的**恒真**那一侧,而且它落在了「连谓词都没有」这个更宽的位置上。\n\n## 改了什么\n\n`buildWhereSQL` 的条目循环开头加一道节点级闸:条件层任何 `$` 开头、又不是三个已声明组合算子的键,一律 `INVALID_FILTER` / 400 拒收,**且不发出任何语句**。六个建 WHERE 的入口(find / findOne / count / aggregate / deleteMany / updateMany)全部覆盖。\n\n**消息分两种,裁定只有一个。** 节点位置的 `$eq` 和节点位置的 `$where` 不是同一个错误:前者是真算子写高了一层(手写或 AI 生成的过滤器漏掉字段名时最常见的形态),修法是把字段名补上;后者协议在任何层级都没有声明,修法是别用。两者都以同一个 `INVALID_FILTER` / 400 和同一句开头拒收 —— 首句与 `driver-sql` / `driver-memory` 逐字相同(#5240「一个条件一种措辞」),只有收尾的指路方向不同。**没有任何东西 branch 在这个区分上**:`MISPLACED_FIELD_OPERATORS` 只决定印哪句话,永远不决定是否拒收,所以往 spec 的 `FILTER_OPERATORS` 里加名字改不动本闸的判决(#5701 那条「它是运行时 allowlist 不是词表」的告诫)。\n\n**顺带补上的同族缺口:非数组的 `$and` / `$or`。** `{ $and: 'x' }` 此前从两个 `Array.isArray` 判断底下漏过去,落进**同一条字段路径**、编成 `WHERE \"$and\" = ?` —— 和 `{ $eq: 'won' }` 结局逐字相同。不修它就等于把闸开在它赖以定义的那三个键上留个洞;`SqlDriver` 的 `assertFilterNodeList` 早已按名拒收,补上后 local/remote 在这里也一致。`$not` 取单个操作数而非列表,按形状由下一层的 `buildSubFilterSQL` 拒收,措辞不变(用例钉住了这条边界)。\n\n**闸放在发射循环里,而不是另起一趟校验遍历** —— 与 `SqlDriver` 的落点相反,理由是这个编译器的性质不同。`SqlDriver` 的发射器会被布尔单位元整段跳过,所以闸放发射器上会变成「取决于兄弟节点」的条件闸(PR #5368 的完整论证)。本编译器没有这个缺口:它的 `$and` / `$or` 分支是**先把每个元素都编完**再应用单位元规则的 —— 上面第六行实测就是这个事实本身(`{ $where: 'x' }` 被编了出来,然后才被丢掉)—— 所以条目循环本身已经走遍整棵树。(c) 组的三个用例正是这一点垮掉时会红的用例。\n\n## 为什么 remote 是最后一面\n\n`objectstack#5348` 裁定拒收,PR #5368 在 `SqlDriver` 的校验遍历落地,`driver-sqlite-wasm` 与 Turso **local** 继承。`RemoteTransport` 是独立的过滤器编译器,继承不到任何一点,于是同一个 `TursoDriver`、同一个过滤器,只因构造时的 `url` 不同就给两个答案,而且方向是反的:local 严、remote 松 —— 这是最容易让 bug 一路走到生产还没被测出来的方向。新增的 local/remote 一致性 describe 块把这条叉钉死:六个形态,两个 transport,同样的 `code` / `status`。\n\n## 反向验证(方向是事先定的:红)\n\n新用例整份跑在**未打补丁**的 `origin/main` 源码上:**59 个用例 46 红 13 绿**。\n\n绿的 13 个正是控制组:既有行为的字节一致性断言、六个邻接拒收各自的措辞、以及 —— 值得单独说 —— `$nor` 那条 local/remote 一致性用例。它在补丁前就已经是绿的,因为 remote 侧的 `$nor` 是被 #1058/#1066 的**比较值守卫偶然拦下**的(数组不可绑定),信封恰好也对。这正是单子正文点名的那条「偶然拦下」,补丁后它改由本闸按正确的措辞拒收(消息从「`'deal.$nor'` 的比较值是数组」变成「`where.$nor` 不是已声明的组合算子」),不再把 `$nor` 报成 `deal` 的一个**字段**。\n\n## fixture 处置\n\n`remote-transport-not-operator.test.ts` 的 `$not: { $eq: 'won' }` 一例是**整例替换**,不是改写期望值。它此前钉的正是本 PR 删掉的那条肢体,而且它自己的注释就写着理由:「残留的 `\"$eq\"` 列是调用方写高了一层的内层条件,本地 `SqlDriver` 也一样把条件层 `$eq` 当列名交给 Knex —— 收紧它是 #1077,刻意不在本次做」。那条理由已经过期:#5348 / PR #5368 让 local 变严了,remote 成了最后一面,而 #1077 就是本单。替换后它仍然证明这个文件本来要证明的事:拒收点名的是**内层**的 `$eq`、位置是 `where.$not.$eq`,`$not` 一路到底都还是它被声明的那个算子。\n\n其余 fixture 无一需要动。已按规则消费半径排查:`RemoteTransport` 只被 `TursoDriver` 消费(全仓 grep,包外引用全是注释),`toRemoteFilter` 对 `$` 键原样透传、不合成任何节点层 `$` 键,全仓也没有别的 fixture 在条件层写 `$` 算子键(`service-analytics` 的 `$nor` 用例走它自己的编译器)。\n\n## 共享一致性表\n\n验收条款里的「若共享一致性表已覆盖 remote 面则加轴」经核**不适用**:`FILTER_LOGIC_CASES` 没有「这条必须被拒收」的表达方式 —— `FilterLogicCase.expected` 是行 id 列表,空列表意思是「匹配到零行」,恰恰是本裁定**没有取**的那个答案。这一点是该表自己的文档写明的(「Enrolling this case needs the shape extended first … deliberately not invented here」,针对 #5240 的同类困境)。所以新用例按本包既有惯例(一缺陷族一文件:comparand-refusal / null-comparand-refusal / top-level-where / not-operator)落在 `remote-transport-node-operator-refusal.test.ts`,与 `driver-sql` 的孪生文件 `sql-driver-out-of-contract-filter-input.test.ts` 对齐。\n\n## `:462` 的顺带项:不做,已拆单 #5907\n\n维护者点名的 `remote-transport.ts:462` `Unsupported aggregate function` 裸 `Error`,实测后**没有**在本 PR 收尾,理由是实测推翻了「remote 单面」这个前提:\n\n- `packages/drivers/driver-sql/src/sql-driver.ts:6753`(`mapAggregateFunc`,由 `SqlDriver.aggregate:3103` 调用)**逐字相同的裸 `Error`**,`code` / `status` 同样 `undefined`。只修 remote 会让 remote 变 `INVALID_QUERY`/400、local 仍是裸 `Error` —— 一个条件、两种线上身份、取决于 `url`,正是本单花整单去关的那类叉,方向反过来。\n- 而且这一句今天同时承担两种性质不同的条件:协议没声明的函数名(`median`,调用方写错了)和**协议声明了、没有任何 SQL 后端编译**的函数(`count_distinct` / `array_agg` / `string_agg`,`AggregationFunction` 声明 8 个、两处各编 5 个)。后者是能力缺口不是调用方的错,`driver-memory` 的 #5345 已经为过滤器算子画过这条线;合成一句会告诉一个写 `count_distinct` 的看板作者说他打错字了。\n\n两面同改 + 第二类怎么答,需要一次会波及四个后端的裁定,已按 Prime Directive #10 拆为 **objectstack-ai/objectstack#5907**(未指派)。\n\n## 验证\n\n```\npnpm --workspace-concurrency=2 --filter @objectstack/driver-turso typecheck\n  → tsc --noEmit（无输出)\n\npnpm --workspace-concurrency=2 --filter @objectstack/driver-turso test -- --maxWorkers=2\n  → Test Files  21 passed (21)\n  →      Tests  691 passed (691)\n```\n\n均在合入最新 `main`(`73571306b`)、重装依赖并重建上游依赖包之后跑过(合入的 5 个提交未触及 `driver-turso` 或 `packages/spec/src/data`)。`node scripts/check-nul-bytes.mjs` OK,改动文件另做过控制字符自查。\n\n合法过滤器一个字节都没变:三个组合算子的嵌套、`$and: []` / `$or: []` / `$or: [{}, …]` / `$not: {}` 的布尔单位元、字段层算子、隐式相等、`IS NULL`,以及六种既有拒收各自的措辞 —— (f)、(g) 两组把它们逐条钉住。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WyvqvKMG6asi9aXjKE6xtx\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WyvqvKMG6asi9aXjKE6xtx)_"
+}

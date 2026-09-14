@@ -1,0 +1,34 @@
+{
+  "number": 17527,
+  "kind": "issue",
+  "title": "os validate, os build and os info all report `Data: 0 Objects` for a project whose metadata lives only in packages[] — collectMetadataStats reads the top level alone, and under --strict the false `No objects defined` warning gates",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-justin",
+    "id": 323634890,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-10T19:26:14Z",
+  "updated_at": "2026-09-12T05:37:51Z",
+  "closed_at": "2026-09-12T05:36:09Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17527",
+  "body": "## Symptom\n\n`collectMetadataStats` counts every collection at the **top level only**, so on an ADR-0130 D4 / option-B project — every definition inside `packages[]`, none flattened to the top — all three commands that print the metadata summary report a project that declares **nothing**, and `os validate` raises two warnings that are false on their face.\n\nUnder `--strict` the false warning is not cosmetic: it is a **gating error**.\n\n## Minimal repro\n\n`objectstack.config.ts`, no top-level `objects`, one clean `packages[]` entry (the lookup resolves, so nothing else can gate):\n\n```ts\nexport default {\n  manifest: { id: 'com.example.ob', name: 'ob', version: '1.0.0', type: 'app', namespace: 'ob' },\n  packages: [\n    { manifest: { id: 'com.example.ob', name: 'ob', version: '1.0.0', type: 'app', namespace: 'ob',\n        objects: [\n          { name: 'ob_order', label: 'Order', sharingModel: 'private',\n            fields: {\n              number: { type: 'text', label: 'Number' },\n              ghost: { type: 'lookup', label: 'Ghost', reference: 'ob_order' },\n            } },\n        ] } },\n  ],\n};\n```\n\nMeasured on branch `claude/issue-17069-union-fold-validate-lint` at `7191b900`, through the real binaries:\n\n```\nos validate            exit 0    Data: 0 Objects\n                                 ⚠ No objects defined — this stack has no data model\n                                 ⚠ No apps or plugins defined — this stack may not do much\nos validate --strict   exit 1    ✗ Strict mode: warnings treated as errors\nos build               exit 0    Data: 0 Objects\nos info                exit 0    Data: 0 Objects\n```\n\nControl — the identical object authored at the TOP LEVEL, same command:\n\n```\nos validate --strict   exit 1    Data: 1 Objects  2 Fields\n                                 ⚠ No apps or plugins defined — this stack may not do much\n```\n\nOne warning instead of two, and a non-zero object count. The extra `No objects defined` line and the zeroed summary are produced by the reader, not by the stack.\n\n## Cause, located\n\n`packages/cli/src/utils/format.ts:548`\n\n```\nexport function collectMetadataStats(config: any): MetadataStats {\n  ...\n  const objects = Array.isArray(config.objects) ? config.objects :\n    (config.objects && typeof config.objects === 'object' ? Object.values(config.objects) : []);\n  ...\n  return { objects: count(config.objects), objectExtensions: count(config.objectExtensions), ... };\n```\n\nEvery member is `count(config.KEY)` against the top level. Three call sites, all affected:\n\n```\npackages/cli/src/commands/compile.ts:832   const stats = collectMetadataStats(config);\npackages/cli/src/commands/info.ts:43       const stats = collectMetadataStats(config);\npackages/cli/src/commands/validate.ts:462  const stats = collectMetadataStats(config);\n```\n\n`packages/cli/src/utils/stack-collections.ts` already ships the fold this reader needs — `authoringRuleUnionStack` fills exactly the package-owned collections the top level does not carry, and returns a top-level stack by identity — but whether the summary should be folded, or should learn to report per-package counts, is a **presentation decision this card does not make**. That is why it is filed rather than folded into #17069's PR.\n\n## Why it is not covered today\n\n⭐ `test/option-b-reader-acceptance.pin.test.ts` is the acceptance pin for the option-B reader program and its `OPTION_B_LOSSES` ledger is **empty** — \"every subsystem must see its collections in BOTH shapes\". It stays green here because its probe (`test/fixtures/option-b-reader-probe.ts`) carries **no row for `collectMetadataStats`**. That pin's own header names this exact failure mode as the thing it exists to catch: *\"a NEW reader nobody enumerated, arriving in a later change ⇒ RED on arrival\"*. This reader is older than the probe and was never enumerated, so it arrived under the floor instead of over it. A row for it belongs with whatever fix lands.\n\n## Relationship to #17069\n\nFound while landing #17069 (PR #17524), and **not created by it**: #17069 wires the union fold into the two commands' author-time **rule table input**, deliberately scoped the way `compile.ts` scopes it — a rule input that reaches no writer and no printer. The summary is a different reader on a different path, and it reads `config` directly, before any fold. `os build` shows the same `0 Objects` on the same stack both before and after that change.\n\n## Where it was found\n\nDriving the #17069 non-vacuity control — a CLEAN option-B project, which must exit 0 on all three commands. It does; it just reports the project as empty while doing so.\n\n⛔ Deduplication: one targeted `search_issues` call over open and closed (repo `/search/*` is refused by this session's egress proxy, HTTP 403 — verified this session). 13 results read out. Nearest neighbours rejected: #14512 (open — the option-B EMITTER half, \"stop serializing the metadata twice\"; this is a reader, and it is broken in the shape #14512 produces, not by it), #17069 (this card's parent finding — rule-table input, a different reader), #4698 (closed — \"declared but never read\" metadata, an unrelated class). No card names `collectMetadataStats` or the metadata summary.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

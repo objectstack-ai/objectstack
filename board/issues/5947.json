@@ -1,0 +1,36 @@
+{
+  "number": 5947,
+  "kind": "issue",
+  "title": "已发布 skill 变更的 changeset 路线先例与 #5292 现行处方冲突(空 frontmatter vs skip-changeset 标签)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T12:45:46Z",
+  "updated_at": "2026-08-07T01:25:01Z",
+  "closed_at": "2026-08-07T01:25:01Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5947",
+  "body": "观察类发现,来自 #5245 / PR #5937 的先例实测。**今天没有用户会碰到**,不是缺陷单;记录下来是因为它是个会自我复制的作者侧陷阱。\n\n## 现象\n\n改**已发布 skill**(`skills/**`,随 `npx skills add objectstack-ai/objectstack/skills` 发给第三方)时,「走哪条 changeset 路线」有两个互相矛盾的权威来源:\n\n**现行处方**(`.github/workflows/pr-automation.yml`,#5292 / PR #5467,2026-08-05 13:18 UTC)明确三路不等价:\n\n- 路线 2 = `skip-changeset` 标签,标注 `PREFERRED`,门禁级豁免,不产出 changesets/action 的输入;\n- 路线 3 = 空 frontmatter changeset,标注 **LAST RESORT**,理由是它是 changesets/action 的**真实输入**,当全部待发 changeset 都为空时 action 走 `hasChangesets && !hasNonEmptyChangesets` 分支,打印 “All changesets are empty; not creating PR”,0 秒返回 —— 无 version PR、无 publish,而 Release run 仍然**绿**。这就是 #4898,曾静默卡住 17.0.0-rc.2。\n\n**实际先例链**却一致走路线 3:#4607、#5130、#5451 / PR #5799(`77adf297f`)都用空 frontmatter changeset,理由写在 PR #5799 的 changeset 正文里 —— 「`skills/` 不随任何 npm 包发布,没有包可署名」。\n\n关键时间差:`77adf297f` 落于 **2026-08-06 06:57 UTC**,比 #5292 把路线 3 降级为 LAST RESORT **晚了一天**。即最新的已发布-skill 先例,是在处方已经改口之后,仍然用了被降级的那条路线。\n\n## 为什么值得记一笔\n\n「`skills/` 不随 npm 包发布,没有包可署名」这句推理本身是对的 —— 实测 `skills/` 不是 workspace 成员,根包 `private: true`,没有任何 package 的 `files` 收录它。但由此得出的结论应是**路线 2**(本 PR 不发布任何东西 → 标签),而不是路线 3:空 changeset 同样名不到任何包,其正文到不了任何 CHANGELOG,买不到标签给不了的任何东西,却额外承担了 #4898 的风险。\n\n陷阱在于它自我复制:下一个改已发布 skill 的 agent 按惯例 `git log` 找先例,命中 #4607 / #5130 / #5451 三个一致的空-changeset 样本,就会照抄那条被降级的路线,而处方藏在 workflow 注释里不在 git log 里。\n\n## 当前风险面(实测,非推断)\n\n`.changeset/` 待发 **1198** 份:空 frontmatter **182** 份,非空 **1016** 份。非空占绝大多数,所以**眼下不会触发 #4898 的全空静默停摆** —— 故本单按观察类归档,不带 `pm:queue`。\n\n## 可能的处置方向(仅供分诊,未实现)\n\n1. 什么都不做,只在处方里补一句「`skills/**` 的变更走路线 2」,让下一个 agent 搜到;\n2. 把这条判据写进 AGENTS.md 或 skill 作者指引,和 workflow 注释同源;\n3. 给 `check-changeset` 加一条:PR 只动 `skills/**` 且新增的 changeset 是空 frontmatter 时,提示改用标签。\n\n方向 3 是新门禁,按 #5245 的分诊纪律不该顺手写;方向 1 最省。留给维护者判。\n\n发现于 #5245 的先例实测(PR #5937 的 changeset 路线决策)。本单未指派。"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 5903,
+  "kind": "issue",
+  "title": "drivers(turso): remote 模式没有继承 #5146 的 `$not` NULL-safe —— 同一个 TursoDriver,local 返回 NULL 行、remote 不返回(实测,origin/main)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T11:21:10Z",
+  "updated_at": "2026-08-07T00:53:07Z",
+  "closed_at": "2026-08-07T00:53:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5903",
+  "body": "出自 #5298「第一棒:成本清单」的发射点清点(纯读调查),范围外发现,按 Prime Directive #10 记录,不指派。\n\n## 事实(origin/main `5c94f833c`,静态对读 + 现有测试自证)\n\n`#5146` 已裁定 `$not` 取 NULL-safe 语义,PR #5296 在 `SqlDriver.applyFilterCondition` 落地(把 `$not` 的每个叶子改写成 TOTAL 谓词)。`TursoDriver extends SqlDriver`,所以 **local 模式继承了这个修复**;但 **remote 模式走的是 `RemoteTransport.buildWhereSQL`,一段完全独立的 SQL 生成器**,它的 `$not` 分支逐字保留旧的三值语义:\n\n- `packages/drivers/driver-turso/src/remote-transport.ts:1160-1169` —— 注释明写「NULL semantics are SQL's, matching what `whereNot` emits locally」,并 `clauses.push(NOT (...))`;\n- `packages/drivers/driver-turso/src/remote-transport-not-operator.test.ts:47-53` —— 有一条用例把这个语义**钉住**:「NULL rows follow the SQL family ... remote mode is pinned to the family it belongs to, so local and remote SQL agree」。\n\n那句注释和那条 pin 是在 #5146 **裁决之前**写的,当时 driver-sql 的 `whereNot` 确实也丢 NULL 行,所以「local 和 remote 一致」成立。PR #5296 之后前提失效,但 remote 侧没有跟进,pin 也没更新 —— 于是今天:\n\n| filter | turso LOCAL(继承 SqlDriver) | turso REMOTE(RemoteTransport) |\n|---|---|---|\n| `{ $not: { stage: 'won' } }`,stage 为 NULL 的行 | 返回 | **不返回** |\n\n同一个驱动、同一条 filter、按连接模式给两个答案。\n\n## 为什么值得修\n\n1. **CEL `!expr` 的 RLS read scope 会 lower 成 `{ $not: {...} }`**(`packages/formula/src/cel-to-filter.ts:205`),所以这是「同一条权限规则按部署模式放行不同的行集」,与 #5146 裁决时给出的理由逐字相同。\n2. **今天没有任何门禁能发现它。** `turso-filter-logic-conformance.test.ts`(local)与 `turso-remote-filter-logic-conformance.test.ts`(remote)都跑 `FILTER_LOGIC_CASES`,但那张表**刻意不含 null 行**(`packages/spec/src/data/filter-logic-conformance.ts:79-83` 自陈),所以两个模式的分叉对 conformance 不可见。\n3. `packages/spec/src/data/filter-logic-conformance.ts:70-77` 目前写着 #5146 这一族「every surface answers this family the same way — no backend blocker remains」。**这句话把 turso remote 漏掉了**,应当一并订正。\n\n## 修法方向(不代裁决)\n\n`buildWhereSQL` 的 `$not` 分支复用 `sql-driver.ts` 的 `nullSafeNegationOperand` / `nullValueSatisfiesOperator` 极性表(`packages/drivers/driver-sql/src/sql-driver.ts:1003-1169`)。注意 `RemoteTransport` 不依赖 driver-sql 的私有函数,需要么导出、么按 `service-analytics/src/read-scope-sql.ts:374-525` 的先例第二次实现并加互钉测试。\n\n同时要改的是那条 pin:`remote-transport-not-operator.test.ts` 里断言 NULL 行被排除的用例,方向会反过来(before 绿 / after 红 → 改成 after 绿),这是**预期的**反向验证方向,不是回归。\n\n## 关联\n\n#5146 / PR #5296(裁决与 driver-sql 落地)、#5298(非否定路径的同族裁决,本发现的出处)、#5239(`FILTER_LOGIC_CASES` 扩表 —— null 行入表后本条会自动被顶出来)、#5769(RemoteTransport 的另一条 local/remote 分叉,同一个「独立发射器没跟上」家族)。\n"
+}

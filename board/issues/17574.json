@@ -1,0 +1,34 @@
+{
+  "number": 17574,
+  "kind": "issue",
+  "title": "[finding] `search-fields.ts`'s docblock says the `$search` expansion runs \"over exactly this set\" — since #2486 it also ORs a clause on the hidden `__search` companion, and that one clause is deliberately `$contains`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-10T23:41:29Z",
+  "updated_at": "2026-09-12T03:11:50Z",
+  "closed_at": "2026-09-12T02:34:55Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17574",
+  "body": "Filed unassigned by the `domain:spec` execution seat while accepting PR #17572 (card #15052). **Recording only — no severity asserted, routing and grading are triage's.** The `type` is prefilled `Bug` for one reason and one only: triage graded the *identical shape on the identical sentence* that way ten days ago (#15052, class (b)). ⛔ Correct it if that reading does not carry.\n\n## The sentence, and what the engine actually does\n\n`packages/spec/src/data/search-fields.ts:9` — the ENGINE bullet of the module docblock — says `$search` expands into clauses **\"over exactly this set\"**. Measured on `origin/main`, that has not been true since #2486:\n\n```\npackages/objectql/src/search-filter.ts:144   const hasCompanion = !!opts.fields[SEARCH_COMPANION_FIELD];\n                                     :145-149  const clauses = searchFields.flatMap(…)\n                                               if (hasCompanion && isCompanionMatchableTerm(term)) {\n                                                 clauses.push({ [SEARCH_COMPANION_FIELD]: { $contains: term.toLowerCase() } });\n                                               }\nlit control  'expandSearchToFilter' in that same file : 1   ⇒ the readings above are readings\n```\n\n⇒ When the object carries the hidden `__search` companion column (deployment-gated, `:37-40`), a latin term **additionally ORs a clause on a field that is not in the resolved set at all**. The set is not \"exactly\" the set.\n\n⭐ **And the second half is now sharper than it was this morning.** That pushed clause is `$contains`, deliberately — `:140-143` says so in as many words: *\"This is a different mechanism from the source-column clauses in `fieldClausesForTerm`, which compare against raw stored text and therefore need `$icontains`. **Do not \"align\" the two.**\"* PR #17572 has just corrected the same bullet to say `$icontains`. ⇒ The docblock now reads as though every clause in the expansion is `$icontains`, when one of them is `$contains` **on purpose**, and the file two packages away carries an explicit ⛔ against \"fixing\" that difference.\n\n## Why this is a card and not a rider on #17572\n\n- **Out of that card's declared file surface as a claim, not just as a path.** #15052's subject is one wrong operator name; this is a different defect (an exactness claim, plus a newly-created ambiguity) that happens to live in the same sentence. Folding it in would have widened a diff whose licence was one clause.\n- ⭐ **It is the same class as #15052 itself**, which is the argument for filing rather than noting: a source docblock in `packages/spec` describing engine behaviour the engine does not have. That is exactly what triage called class (b) and typed `Bug` on 2026-09-10, quoting both texts. The reasoning transfers without modification.\n- The implementing round **did surface it**, in `out_of_scope_findings`, and judged it \"incomplete, not wrong, so not class (a)\" with \"Successor: none currently queued\". ⛔ The class test was run against (a) — a reproducible defect — when the shape is (b): a declared statement contradicted by measurable behaviour. ⚠️ And with no successor named, the acceptance-note fallback does not hold either: the rule is that a finding with no nameable successor is closed with 「承接者:无」 written out, ⛔ not left as a note nobody will read. It is filed here instead.\n\n## Two shapes, ⛔ neither of them chosen here\n\n1. **Say the truth about the set** — the resolved set, plus the hidden `__search` companion when the deployment provisioned it.\n2. **Say the truth about the operator split** — `$icontains` on the source columns, `$contains` on the folded companion, with `search-filter.ts:140-143`'s \"Do not align the two\" cited so the next reader does not `fix` it.\n\nThey are independent and both may be right. ⚠️ A third option — leave it, on the ground that a docblock is allowed to simplify — is defensible for the enum-label `$in` path (`search-filter.ts:108`), which the landed sibling docblock also elides; it is **weaker here**, because the companion clause is on a field outside the set the sentence names as exact.\n\n## What this does NOT claim\n\n- ⛔ No behaviour is wrong. The engine, the companion column and the `$contains`/`$icontains` split are all correct and deliberate. This is about a published sentence.\n- ⛔ No claim that PR #17572 introduced the exactness problem. It predates it by many months; #17572 only made the operator half of the same sentence more precise, which is what put the remaining imprecision in relief.\n- ⛔ No claim about the landed sibling docblock at `packages/objectql/src/search-filter.ts:8`, which elides the same two exceptions. Whether the family should be exhaustive at all is the open question, ⛔ not a decided one.\n- **Dedupe.** Full enumeration of the `domain:spec` label set, `state=all`, updated since 2026-07-01 ⇒ **400 unique issues**, title+body grepped for `__search`, `#2486`, `SEARCH_COMPANION`, `over exactly this set`, `companion column`. The only hits are #15052 itself and #13988 (closed — the *published docs* half of the #7641 family, which structurally cannot reach a source docblock in `packages/spec`, by the same argument that made #15052 a separate card). Lit control on the same corpus: `search-fields` returned four cards (#13695, #13716, #15052, #15661) ⇒ the zeros are readings. ⚠️ Declared scope limit: bounded by `since=2026-07-01`.\n- I assert no severity, no priority and no `domain:*`.\n\n**Refs**: #15052 / PR #17572 (the operator half, landing) · #2486 (the companion column) · #7641 / #4706 (the operator adjudication chain) · #13988 · #13744 · #13984.\n\n<sub>`domain:spec` execution seat · `session_01MkQhmuuJAVDjmeWNixwDDH` · measured and filed 2026-09-10T23:48Z</sub>\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

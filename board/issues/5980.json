@@ -1,0 +1,35 @@
+{
+  "number": 5980,
+  "kind": "issue",
+  "title": "`MetadataProtocol.listCommits` 把 commit store 读不到答成 `[]` —— ADR-0067 时间线上「无历史」与「读不到」不可分辨(零日志,JSDoc 里写着这是设计)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T13:50:58Z",
+  "updated_at": "2026-08-07T03:11:34Z",
+  "closed_at": "2026-08-07T03:11:34Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5980",
+  "body": "发现于 #5186(为「读接缝把故障答成空值」这一族新增闸门)实施期,由新规则在 `packages/metadata-protocol` 扫出;**不在该单文件面内**(#5186 是纯 `scripts/` 闸门单,不改被扫包),故单独立卡并已作为 baseline 条目记录在 `scripts/durability-read-invention.baseline.json`。\n\n## 现象\n\n`packages/metadata-protocol/src/protocol.ts` 的 `listCommits()`(约 9720–9745 行,以 origin/main 为准):\n\n```ts\n/**\n * List the commit timeline for a package, newest-first (ADR-0067). Returns\n * [] if the commit store is unavailable.        ←← JSDoc 自己就这么写\n */\nasync listCommits(request): Promise< …[] > {\n  try {\n    const rows = (await this.engine.find('sys_metadata_commit', { where, … })) as any[];\n    // … 映射 + 按 createdAt 倒序 …\n    return mapped;\n  } catch {\n    return [];\n  }\n}\n```\n\n`catch` 里:**没有任何日志、没有 rethrow、没有按错误类型区分**。\n\n## 为什么这是缺陷而不是设计\n\n这是 ADR-0110 D3(miss 与 outage 是两个意义相反的事实,消费方不得把其中一个读成另一个)在 ADR-0067 提交时间线上的违反,与 #5108 在 `DatabaseLoader` 修的、#5532 在**同一个文件**的 `getMetaItems` 修的是同一形状:\n\n- 存储读不到 → 调用方看到「这个 package 没有任何提交历史」;\n- 「没有提交历史」与「有 12 次提交但库连不上」在返回值上**完全一致**;\n- 一行日志都没有,整条链路上没有任何地方说过这次读失败了。\n\n后果面朝向 revert:提交时间线是 `revertCommit` 的选择面。历史被答成空的那一刻,UI 上「无可回滚项」,而实际上有——一次故障期间的运维判断会因此做反。\n\n同一个文件几千行之上已经有了正确形状的处方:`rethrowUnlessMetadataStoreUnprovisioned()`(#5532 引入),它问 `isMissingTableError`,良性放行、其余包成 503 上抛。`listCommits` 只是没走它。\n\n## 修法\n\n```ts\n} catch (error) {\n  this.rethrowUnlessMetadataStoreUnprovisioned(error);   // 良性(表未建)放行\n  return [];                                            // 首启确实没有提交\n}\n```\n\n`isMissingTableError` 与该 guard 在本文件里都已经在用,无新依赖。\n\n## 验收\n\n- `sys_metadata_commit` 未 provision(首启)→ 仍返回 `[]`,不抛、不噪;\n- 驱动报连接错误 / 超时 / 权限失败 → 上抛(503 信封),调用方能把 outage 与 miss 分开;\n- 更新 JSDoc:删掉「Returns [] if the commit store is unavailable」这句(它现在描述的是缺陷);\n- 修好后删除 `scripts/durability-read-invention.baseline.json` 里的 `packages/metadata-protocol/src/protocol.ts::listCommits` 条目(shrink-only,条目失效即红)。\n\n## 关联\n\n#5186(新增本族闸门,本卡由它扫出)、#5532(同文件、同处方,`getMetaItems`)、#5108(同族,`DatabaseLoader` 五处读)、#5841(同文件另一处,退休手抄的 `/no such table/i`)、#4825 / #4728(同族)、ADR-0110 D3、ADR-0067、AGENTS.md「Absence must be loud」。"
+}

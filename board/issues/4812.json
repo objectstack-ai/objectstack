@@ -1,0 +1,35 @@
+{
+  "number": 4812,
+  "kind": "issue",
+  "title": "packages/lint 绕过 @objectstack/formula 直接 parse CEL —— 两个解析入口对「什么能解析」会给出不同答案",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T08:16:14Z",
+  "updated_at": "2026-08-07T03:37:42Z",
+  "closed_at": "2026-08-07T03:37:42Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4812",
+  "body": "发现于 #4763(PR #4810)的 PM 复核。**未认领**;落点在 `packages/formula` + `packages/lint`,不在本 PM 车道内,按 Prime Directive #10 只记录不修。\n\n## 现象\n\n#4763 新增的 `packages/lint/src/validate-null-guards.ts` 直接从第三方库取 CEL 解析器:\n\n```ts\nimport { Environment } from '@marcbachmann/cel-js';\nimport type { ASTNode } from '@marcbachmann/cel-js';\n// …\nast = getParseEnv().parse(source).ast;\n```\n\n而 `@objectstack/formula` 是本仓**唯一的 CEL 封装**(其 package.json 自述:「ObjectStack canonical expression engine — CEL (cel-js) + ObjectStack stdlib + dialect registry」),`packages/lint` 本来就依赖它。\n\n## 为什么这不只是「多一个依赖」\n\n`packages/formula/src/cel-engine.ts` 在解析**之前**会重写源码,而且注释明确写了这么做的理由:\n\n```\n// Same nullable-ternary rewrite as compile/evaluate so \"what parses\" agrees\nconst compiled = buildEnv(() => new Date(0)).parse(rewriteNullableTernary(source));\n```\n\n也就是说 formula 认为**裸 cel-js 的可解析集与平台实际接受的可解析集不一致**,并用 `rewriteNullableTernary` 把两者对齐。`packages/lint` 这条新路径没有这层重写,于是:\n\n- 一个 formula 会重写后成功解析、运行时正常接受的谓词,\n- 在 lint 这边可能**直接解析失败**。\n\n而新闸门对解析失败的处理是**静默跳过**(`catch { return [] }`,注释写的是「syntax is another gate's verdict」)。两者叠加的后果:**某些形状的谓词会悄无声息地逃过 null-guard 闸门** —— 闸门以为自己检查过了,实际一条都没查。\n\n方向上这是**欠强制**而非误拒(不会把合法元数据拒掉),所以 #4810 不因此阻塞;但它正是本仓这两天反复在修的那个形状:**两条路径对同一个概念各自持有一份实现,迟早给出不同答案**(参见 #4770 把 `materializeDeclaredFields` 提取成共享 helper 的理由 —— 「`record.done == true` 不能因为谁在求值而有两种含义」)。这里是同一件事,换成了「什么算可解析的 CEL」。\n\n版本目前没有漂:两边都是 `@marcbachmann/cel-js@^8.0.0`。但这只是今天为真,而语义漂移(`rewriteNullableTernary`)**现在就存在**。\n\n## 为什么当时没在 #4810 里修\n\n两条路都不通:\n\n- 扩 `@objectstack/formula` 的导出面 → 那是另一个 PM 车道的包(#4604 分片裁定),#4810 的作者被明确禁止改;\n- 在 `packages/lint` 里复制一份 `rewriteNullableTernary` → 那是把一份漂移换成两份,更糟。\n\n所以直接引 cel-js 是当时约束下的正确选择,问题记在这里。\n\n## 建议方向\n\n让 `@objectstack/formula` 导出一个**规范的 parse-to-AST 入口**(带它自己的重写与 limits),`packages/lint` 改用它。这样「什么能解析」在全仓只有一个答案,顺带也让 lint 免于直接依赖第三方解析器。\n\n`packages/formula` 已经导出了 `lowerCelAst` / `collectCelRootIdentifiers` / `isPushdownableCel` 等 AST 层能力,说明这个入口在概念上已经存在,只是没有以「给我 AST,我自己走」的形式暴露出来。\n\n## 验收建议\n\n- `packages/lint` 不再直接依赖 `@marcbachmann/cel-js`(从其 `package.json` 移除);\n- `validate-null-guards.ts` 经由 formula 的规范入口取 AST;\n- 一条测试钉住:formula 会重写、裸 cel-js 解析不了的那一类形状,在 null-guard 闸门里**能被正常判定**(而不是静默跳过)—— 这是本 issue 真正要消灭的洞。\n\n## 关联\n\n- 来源:#4763 / PR #4810\n- 同类形状先例:#4770(`materializeDeclaredFields` 从两处收敛成一处共享 helper)\n- 相邻:#4811(同一 PR 记录的未覆盖求值面)"
+}

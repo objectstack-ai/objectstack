@@ -1,0 +1,35 @@
+{
+  "number": 5993,
+  "kind": "pull_request",
+  "title": "feat(plugin-auth): break-glass 守卫的 delete 半边 —— 最后一个管理员也删不掉 (#5941)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T14:00:16Z",
+  "updated_at": "2026-08-06T14:34:48Z",
+  "closed_at": "2026-08-06T14:34:46Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T14:34:46Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5993",
+  "body": "Fixes #5941\n\n## 前提复核(先于实现)\n\n对 `origin/main`(#5939 已合入,`61dc08ead`)逐条核对,issue 前提**成立**:\n\n- `last-admin-ban-guard.ts` 只注册 `beforeUpdate`,delete 路径上没有任何「还剩几个管理员」的判定;\n- `auth-manager.ts:1239-1300` 的守卫先查目标是否持有本地 `credential` 账户(`targetCred`),**不持有则整段跳过** —— enforced SSO 下 IdP 托管 / SCIM JIT provision 出来的管理员正好是这一类;\n- `identity-write-guard.ts` 的 `rejectWrite('delete')` 按 ADR-0092 D2 设计放行 `isSystem`,而 better-auth adapter 的删除正是 system。\n\n⇒ 一条完整可达链:IdP 把最后一个管理员移出组 → SCIM `DELETE /Users/{id}` → 行被删 → 环境无人可管。\n\n## 硬前置的实测(`beforeDelete` 能不能拿到判定所需的行集)\n\n分诊要求「拿不到就 STOP」。**拿得到**,实测结论(同时写进了模块头注释):\n\n| 派发形状 | `input.id` | `input.options.where` | `ctx.previous` |\n|:--|:--|:--|:--|\n| by-id(`delete(obj, { where: { id } })`,better-auth adapter 与级联递归都是这个) | 标量 id | `{ id }` | 已绑定(整行) |\n| 谓词 / `multi` | present-but-undefined | 行域谓词(如 `{ id: { $in: […] } }`) | **undefined** |\n\n关于 #5929 的引擎内建预取:`sys_fetch_previous_delete`(`object: '*'`,`beforeDelete`,priority 5)与引擎自己的 #5272 预取都**只在 `input.id` 存在时**取行,批量派发上一律不绑。所以守卫**完全不消费 `ctx.previous`**:它要的是目标 **id 集**而不是行快照,而基于 `previous` 的实现会在 by-id 上正确、在恰恰能一次扫掉全部管理员的批量路径上失明。\n\n**与 HookContext 契约表的关系(#5964 今天刚落地,值得说清)**:契约表说「行级谓词 NOT reachable from `input` at all」—— 那说的是 composed `ast`(生效谓词,filters 中间件会往上叠 RLS / sharing 收窄),钉子测试断言的也正是 `'ast' in input === false`。而 `before*` 期间 `input.options` **仍是调用方那只 engine options 包**:`engine.ts` 在 `triggerHooks('beforeUpdate')`(5516)与 `triggerHooks('beforeDelete')`(6137)**返回之后**(5517 / 6152)才把它重建成 `DriverOptions`。守卫读的就是这只包里的 `where`,与 ban 半边同一份代码。中间件只收窄不放宽 ⇒ 把调用方谓词当目标集是**上界近似**:可能拒掉一个实际会删更少行的写,永远不会漏掉删更多行的写 —— fail-closed 方向。契约表那两处 `before` 行把 `options` 记成 `DriverOptions` 的措辞另记为 **#5997**(观察类,未在本 PR 修)。\n\n## 改了什么\n\n一条不变量,两个写入口,共用同一份管理员枚举(`resolveAdminUserIds`,ADR-0024 D5.2):\n\n| 写法 | 钩子 |\n|:--|:--|\n| `sys_user.banned = true` | `beforeUpdate`(#5892,已有) |\n| 删 `sys_user` 行 | `beforeDelete`(**本次**) |\n\n- **装在写上**,不是端点上:SCIM adapter delete、`/admin/remove-user`、导入、脚本一并覆盖;\n- **by-id 与谓词/multi 都守**,包括无谓词的 `multi`(会清表的那种);\n- **对 `isSystem` 生效** —— 真正会锁死环境的正是 system 那条;\n- **fail-closed**:枚举读失败或超出 `maxScan`,拒绝而不是猜;\n- 拒绝**按调用方实际动作措辞**(`Refusing to delete 'usr_…'`,而不是「ban」),带 ADR-0024 D5.2 依据、补救办法、以及「若来自 IdP,是 SCIM deprovision 范围过宽」的指向。\n\n`PERMISSION_DENIED` → `FORBIDDEN` 的映射**无需补**:`withValidationErrorMapping` 是逐方法包装适配器的,#5939 加的 403 arm 原样覆盖 `delete`,测试从适配器面驱动证实(403 + `PERMISSION_DENIED`,非 500)。\n\n⛔ **未动** `auth-manager.ts:1239-1300` 的 fail-open HTTP 守卫段(分诊明令):它继续守它的 credential 版不变量,两层并存 —— 头注释把「为什么两者方向相反且都对」写清楚了。\n\n**更名**:`last-admin-ban-guard.ts` / `registerLastAdminBanGuard` → `last-admin-guard.ts` / `registerLastAdminGuard`。它现在注册两个钩子,旧名会低估装了什么;该导出与 #5939 同属未发布周期(CHANGELOG 里还没有它),仓内外均无第三方消费者,changeset 里写了 FROM → TO。\n\n## 测试(先红后绿,真实输出)\n\n新增 18 个用例,全部落在同一个真 `ObjectQL` + better-sqlite3 `:memory:` 引擎上(沿用 #5939 的 harness:没有假引擎,`where` 由真 SQL builder 编译,布尔以 0/1 落盘)。下面是**合并 `origin/main`(含 `07f1822a9` 的 NULL-safe `$ne`,守卫的 `sys_member` 扫描正用 `$ne`)之后**重跑的结果:\n\n```\npnpm --filter @objectstack/plugin-auth test\n Test Files  38 passed (38)\n      Tests  866 passed (866)\n\npnpm --filter @objectstack/plugin-auth typecheck   # tsc --noEmit,无输出即通过\n```\n\n**反向验证(方向事先预测:红)** —— 把 `beforeDelete` 的注册摘掉重跑同一批 fixture:\n\n```\n Tests  11 failed | 28 passed (39)\n × two org admins: deleting the first is allowed, deleting the last is refused\n × the reachable chain: an IdP-managed last admin (no local credential) removed by a SYSTEM caller is refused\n × a predicate that would sweep every administrator is refused\n × an unpredicated `multi` delete — the one that empties the table — is refused\n × a failing identity read refuses the delete and names the reason\n × removing the LAST administrator is refused with a 403 APIError\n …(共 11 条)\n```\n\n留绿的 28 条正是「本就该放行」的那些(非管理员、还剩别的管理员、已被 ban 的管理员、ban 半边全部用例),即方向正确而非用例失效。文件底部另有一条常驻的 `unguarded: true` 反向用例:pre-#5941 引擎删掉最后一个管理员并**报成功**,留下一个能登录、什么都管不了的密码持有者 —— issue 描述的终局状态。\n\n覆盖面:① 两管理员删一个允许 / 删最后一个拒绝;② IdP 托管(无本地 credential)最后管理员经 system 上下文删除 → 拒绝(issue 可达链本体,fixture 里连 `sys_account` 都按 issue 的样子种上,以此钉住守卫**不看**凭据);③ 谓词 / `$in` / 无谓词 multi;④ 非管理员、已 ban 管理员、scoped 授权持有人、`delegated_admin`、`usr_system` 不受影响或不计数;⑤ 枚举失败与 maxScan 溢出 fail-closed;⑥ 用户上下文的 delete 仍先拿到 ADR-0092 的答案(优先级 10 → 20);⑦ 适配器面(SCIM `DELETE /Users/{id}`)403 `APIError`。\n\n另跑:`check:nul-bytes`、`check:engine-double-contract`、`check:adr-anchors`、`check:durability-log-level`、`check:startup-registry-verdict`、`check:error-code-casing`、`check:role-word`、eslint(改动文件)—— 全绿。本 PR 未引入新的假引擎(fail-closed 用例的替身只实现 `registerHook` + `find`),不涉及 `assertEngineDeleteDispatch`。\n\n## 与 #5942 的关系(必答项)\n\n**变简单一点点,不变难。** 本 PR 没有新增第三种「谁算管理员」的拼写:delete 半边复用的正是 ban 半边那份 `resolveAdminUserIds`,它只调用唯一那把等级尺 `isOrgAdminGrade`(`invitation-role-cap.ts`,`parseOrgRoles` 会 `.toLowerCase()`)。#5942 的收口动作(把 `auth-manager.ts:3625-3634` 那 6 行手抄版换成 `isOrgAdminGrade`)因此仍是同一处、同样大小的改动。\n\n唯一的变化是**赌注变大**:等级尺现在有三个消费者(invitation cap、ban 守卫、delete 守卫),其中两个是安全判定路径。若 `sys_member.role` 真的存进 `Owner` / `ADMIN`,两个 break-glass 守卫都会把该行**算作管理员**(于是可能放行删掉另一个真管理员),而 `/sso/register` 门禁仍算他不是 —— 分歧的方向和 #5942 记的一致,只是覆盖面从一条路径变成两条。定价可据此排序,但改动量不变。\n\n## 顺带发现(均未在本 PR 修)\n\n- **#5978** —— 同一条不变量的第三条写法:改/删 `sys_member` 行、撤 `admin_full_access` 授权,能在**不动用户行**的前提下拿掉最后一个管理员的身份,两个钩子(都挂在 `sys_user` 上)都看不见。模块头注释里点名,测试里也钉了一条「删 `sys_member` 不受本守卫管辖」的现状用例,好让它被守住的那天是被**有意**改掉的。\n- **#5997**(`finding`)—— 上面那段契约表措辞:`before*` 的 `input.options` 被记成 `DriverOptions`,实测那里仍是调用方的 engine options(含 `where`),而两个 break-glass 守卫正读它;钉子测试只钉了 `ast` 那一半。"
+}

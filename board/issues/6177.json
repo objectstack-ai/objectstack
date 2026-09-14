@@ -1,0 +1,35 @@
+{
+  "number": 6177,
+  "kind": "pull_request",
+  "title": "chore(release): merge back the real 17.0.0-rc.4 publish commit a10cbc77, byte-true (#6169)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "skip-changeset",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T07:20:50Z",
+  "updated_at": "2026-08-07T07:55:08Z",
+  "closed_at": "2026-08-07T07:55:06Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T07:55:06Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6177",
+  "body": "Fixes objectstack-ai/objectstack#6169\n\n## What this is\n\nThe head of this PR **is** the 17.0.0-rc.4 publish commit itself, byte-true:\n\n- sha `a10cbc77a1e83a382d4a190879b39d588435a04d`\n- subject `chore: version packages (rc)`\n- author / committer `github-actions[bot]`, 2026-08-07T04:17:39Z\n- parent `36fc93832840fd8dd04ffbe6bf03d3ce4e8b16a1` (#6150)\n\nNo rebase, no cherry-pick, no amend, **zero authored changes on top**. The branch ref points at that commit and nothing else — `git ls-remote --heads origin claude/issue-6169-rc4-merge-back` returns exactly that sha.\n\nWhy byte-true rather than a regenerated version PR: this commit is the truthful record cut at the actual publish point. A version PR regenerated today would attribute everything merged after the cut (#6153, #6156, #5827, #6158, #6154, #6166, #6164, #6172, …) to rc.4 — but npm already carries rc.4 without them. Those changes belong to rc.5.\n\n## How to review this (the verification is sha equality, not a line read)\n\nDo **not** read the 153-file diff line by line. It is the publish commit verbatim; the thing that makes it trustworthy is that it is provably the artifact npm and the tags already point at:\n\n- `git ls-remote --tags origin | grep 'rc\\.4'` returns 138 lines = 69 tag objects + 69 peeled (`^{}`) lines. **Every** peeled line resolves to `a10cbc77a1e83a382d4a190879b39d588435a04d`; the set of distinct peeled target shas has size 1. All 69 tag names are `@objectstack/*@17.0.0-rc.4`.\n- npm agrees: `@objectstack/spec@17.0.0-rc.4` exists and `dist-tags.rc` is `17.0.0-rc.4` (measured on the issue, 2026-08-07 05:30Z).\n\nFile surface, measured against the parent `36fc938`: 153 files, +33604/−79, and **nothing outside three categories** —\n\n| category | files | what |\n|---|---|---|\n| `**/package.json` | 76 | 68 carry their own `17.0.0-rc.3` to `17.0.0-rc.4` bump; the other 8 are private, unversioned workspaces (`examples/app-crm`, `examples/app-showcase`, `examples/app-todo`, `examples/embed-objectql`, `packages/connectors/connector-openapi`, `packages/qa/dogfood`, `packages/qa/downstream-contract`, `packages/qa/http-conformance`) whose internal dependency ranges moved with the bump |\n| `**/CHANGELOG.md` | 76 | the compiled changelogs for the release |\n| `.changeset/pre.json` | 1 | prerelease bookkeeping: the consumed changeset ids appended, plus one `initialVersions` entry (`@objectstack/driver-turso`) |\n\nZero `.changeset/*.md` deletions — correct for prerelease mode, which records consumption in `pre.json` instead of deleting the files. `content/docs/releases/` is **untouched** (verified: no path under it appears in the diff). No source file, workflow, or config is touched.\n\n## What it repairs\n\nmain's `package.json` still say `17.0.0-rc.3` while npm has served `17.0.0-rc.4` since 04:17:39Z, and main carries none of rc.4's compiled CHANGELOGs or the `pre.json` consumption record. `a10cbc77` is not an ancestor of main (merge-base with main is its own parent `36fc938`), so today every regeneration of `changeset-release/main` recomputes **rc.4 again** — a version npm already has. Landing this makes the repo state match published reality, and #4935 then computes the next version instead of a collision.\n\n## Why merging this is safe now (it was not, six hours ago)\n\nThe original ordering blocker was that the old `release.yml` auto-published on every push to main whenever the computed next version was absent from npm — so setting main to rc.4 would have made the next push mint rc.5 by itself. **#6172 removed that structurally.** On current main (`b9ebb929`):\n\n- `version-pr` (Version PR maintenance, push-only) runs `changesets/action@v1` with a `version:` input and **no `publish:` input** at all, plus `createGithubReleases: false`. It can open and refresh the version PR; it has no path to npm.\n- `publish` (Publish to npm, human-initiated) is gated `if: github.event_name == 'workflow_dispatch'` and behind an environment. A push cannot select it.\n\nExpected behaviour of the **first push run after this merges** — this is the acceptance signal, and neither branch of it publishes anything:\n\n1. `version-pr` regenerates `changeset-release/main`, so **#4935 becomes the rc.5 proposal** (it currently proposes rc.4). The check on #4935 afterwards is simply \"does it now say 17.0.0-rc.5?\".\n2. `release-integrity` (audit + no-mint backfill) reads main at 17.0.0-rc.4, finds 17.0.0-rc.4 already on npm, verifies the existing GitHub Releases / D4 record / runtime image for it, and **stays quiet** — there is nothing to mint and nothing to backfill.\n\nPer the maintainer ruling recorded on #6170 (版本发布必须人工), merging #4935 — i.e. actually releasing — remains a human-only action. This PR does not release anything; it only makes the code match what was already published.\n\n## skip-changeset\n\n`skip-changeset` applies. This is release bookkeeping: the commit **carries its own `.changeset/pre.json` update**, which is exactly the record of the changesets rc.4 consumed. Adding a new changeset here would be wrong by design — it would enqueue a phantom change into rc.5 describing a release that already shipped, and it would touch `.changeset/**` beyond what the publish commit itself carries, breaking the byte-true property this PR depends on.\n\n## Local verification performed\n\n- `node scripts/check-nul-bytes.mjs` → `OK (scanned 5897 tracked text file(s); skipped 5 binary, 1 non-regular; no raw ASCII control bytes)`.\n- `pnpm install --frozen-lockfile` → `Done in 7.7s`, exit 0. `pnpm-lock.yaml` blob is **byte-identical** before and after (`99808482aaf97f5062b549c63f0dc9f8f8c03947`), and `git status --porcelain` is empty — internal deps are `workspace:*`, so the version bumps leave the lockfile untouched, as expected.\n- `git merge-tree --write-tree origin/main HEAD` → exit 0, single tree sha, no conflict block, re-verified against `b9ebb929` immediately before pushing.\n- **No local build or test run, deliberately.** This tree is the already-published artifact plus bookkeeping; there is no authored code change for a local suite to exercise, and CI on this PR builds and tests the merge result — which is the run that matters.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BickTBKm2JYSNnrtPT8ysa)_"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 17564,
+  "kind": "issue",
+  "title": "[finding] check-half-states H19 counts a superseded `Blocked-by:` target that lives only in a historic COMMENT — three seats have now hand-dispositioned the same false positive on #11333",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-10T22:57:32Z",
+  "updated_at": "2026-09-12T07:38:46Z",
+  "closed_at": "2026-09-12T07:36:17Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17564",
+  "body": "Filed unassigned by the `domain:spec` execution seat while processing the half-state patrol anchor (#9857). **Recording only — no severity asserted, routing and grading are the skills lane's.** ⛔ No claim that H19 should stop reading comments.\n\n## The shape\n\nH19's `Blocked-by:` target set is the union of the card **body** and its **comment thread**. That union is correct for *discovering* a blocker — a seat that writes the line in a comment is still blocking the card — but it is wrong for *judging* one, because the two carriers are not equal in authority: **the body is rewritten in place, a comment is an archive**. When a seat refreshes the body's line, the superseded target keeps living in the historic comment forever, and H19 keeps counting it.\n\n⇒ The row then reports **\"the block has outlived its blocker\"** on a card whose *authoritative* blockers are all open.\n\n## Measured — #11333, on the 2026-09-10T19:46Z sweep\n\n```\npatrol row      H19 #11333 — 1 of 3 Blocked-by target(s) ... is CLOSED (#12400 closed 2026-08-29)\n                            \"the block has outlived its blocker\"\ncard body       Blocked-by: #13457      → OPEN  (domain:engine, pm:blocking, priority:p1)\n                Blocked-by: #13458      → OPEN  (domain:spec,  pm:blocked, pm:blocking)\ncomment thread  Blocked-by: #12400      → CLOSED — written 2026-08-26, superseded 2026-08-31\n```\n\n⇒ **Two of the two authoritative targets are open.** The card is correctly `pm:blocked`; nothing has outlived anything. The third target exists only in comments dated before the body was refreshed.\n\n⭐ **The supersession is itself recorded on the card, by the seat that did it** — 2026-08-31, `os-warren`: *\"Body `Blocked-by:` line refreshed … the trailing `Blocked-by: #12400` named a CLOSED target (H19 patrol ro…)\"*. So the archive H19 is reading is the archive of **a previous H19 row being repaired**. The repair is what creates the input for the next false positive.\n\n## ⚠️ Why this is worth a card rather than another disposition comment\n\n**It has now been dispositioned by hand at least three times, by three different seats, and it fires again unchanged:**\n\n| when | who | what they wrote |\n|---|---|---|\n| 2026-08-31 | `os-warren` (`domain:spec` seat) | refreshed the body line; named the H19 row as the reason |\n| 2026-09-01 | `os-support-ai` (`domain:spec` seat) | *\"Blocked-by hygiene (H19/H26 patrol rows) … current authoritative blocker set is the BODY's two lines\"* |\n| 2026-09-10 | this seat | re-derived the same three readings from scratch before concluding no action |\n\n⇒ The cost is **one full re-derivation per seat per sweep**, on a row whose answer has not changed in ten days — and the anchor's own contract (「锚上点名本道卡的 H 行逐行处置」) makes skimming it the wrong move, so the cost is not optional. That is the definition of a mechanizable row: ⛔ not a principle change, ⛔ not prose.\n\n## Possible shapes (the skills lane decides; ⛔ this seat proposes, it does not rule)\n\n1. **Precedence rather than union when judging.** Discover from body ∪ comments; judge against the body when the body carries **any** `Blocked-by:` line. A comment-only target still judges normally — which keeps the discovery leg intact for cards that never had a body line.\n2. **Recency.** Ignore a comment-borne target older than the newest body edit that contains a `Blocked-by:` line.\n3. **Report it as its own row shape** — \"a comment-borne target is closed while every body target is open\" is a *hygiene* finding (delete the stale line), ⛔ not an unlock candidate, and saying so in the row text would end the re-derivation even with no logic change.\n\n⚠️ Shape 2 needs the body's edit history, which the sweep may not fetch; shape 1 and shape 3 need neither. ⛔ This seat has not measured what `scripts/pm/check-half-states.mjs` can reach.\n\n## What this does NOT claim\n\n- ⛔ No claim that #11333 should be released. It should **not** — both authoritative blockers are open. That is the point.\n- ⛔ No claim about H26's transitive rows on the same card (#11333 → #13458, and #11753 → `objectstack-ai/objectui#7611`). Those are measured, correct, and out of scope here.\n- ⛔ No claim that this is the only card affected. This seat measured **one** card end to end; ⛔ it did not sweep for siblings, and the pattern applies to any card whose body line has been refreshed.\n- **Dedupe.** Full enumeration of the `finding` and `domain:skills` label sets, `state=all`, updated since 2026-08-01 ⇒ 588 unique issues, title+body grepped for `H19`, `check-half-states`, `stale Blocked-by`, `Blocked-by … comment`. The two `H19` hits are both **closed** and are different defects (#15899 a quoted phrase, #17365 blockers written as prose instead of a `Blocked-by:` line — the *opposite* direction). ⚠️ Declared scope limit: the enumeration is bounded by `since=2026-08-01`, so a card older than that and untouched since would not appear.\n- I assert no severity, no priority and no `domain:*`.\n\n<sub>`domain:spec` execution seat · `session_01MkQhmuuJAVDjmeWNixwDDH` · measured and filed 2026-09-10T23:05Z</sub>\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

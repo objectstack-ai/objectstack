@@ -1,0 +1,37 @@
+{
+  "number": 5803,
+  "kind": "issue",
+  "title": "objectui: shadcn-sync 的 registry 缓存会把 403/HTML 错误响应当成正常数据缓存 1 小时,一次网络抖动毒化后续所有 --check",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T06:00:02Z",
+  "updated_at": "2026-08-06T13:52:54Z",
+  "closed_at": "2026-08-06T13:52:54Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5803",
+  "body": "发现于 objectstack#5505 / objectui PR #3455 的实施过程,与该 PR 无关,单独记录。\n\n## 现象\n\n`scripts/shadcn-sync.js` 的 `fetchUrl` 不检查 HTTP 状态码:\n\n```js\nhttps.get(url, (res) => {\n  let data = '';\n  res.on('data', (chunk) => { data += chunk; });\n  res.on('end', () => {\n    try { resolve(JSON.parse(data)); } catch (e) { resolve(data); }\n  });\n})\n```\n\n非 JSON 的响应体(403 页面、代理错误页、502 HTML)会走 `catch` 分支被当作**成功结果**原样 resolve。紧接着 `fetchRegistry` 无条件把它写进磁盘缓存:\n\n```js\nconst data = await fetchUrl(url);\ncacheStats.misses++;\ntry {\n  await fs.mkdir(CACHE_DIR, { recursive: true });\n  await fs.writeFile(cacheFileFor(url), JSON.stringify({ url, fetchedAt: Date.now(), data }));\n}\n```\n\n缓存 TTL 是 1 小时(`CACHE_TTL_MS`),所以一次瞬时失败会让之后一小时内的 `pnpm shadcn:check` **不再重试**,持续基于垃圾数据报告。\n\n## 实测证据\n\n在 egress 拦截 `ui.shadcn.com` 的环境里连跑两次 `pnpm shadcn:check`:\n\n- 第一次:46 个组件全部 fetch 到 `Host not in allowlist: ui.shadcn.com...` 文本\n- 第二次汇总行:`Registry: 46 cached, 0 fetched (cache TTL 60min — --no-cache to force live)`\n\n即错误响应被完整缓存并在第二次运行中被当作有效数据取用,一次真实请求都没发。\n\n## 影响\n\n网络恢复后,开发者本地的 `--check` 在一小时内仍报 46 个 error,且看不出原因是缓存(汇总行说的是 \"cached\",容易被读成\"已是最新\")。`--update` 不读缓存(注释里明确写了写操作不走缓存),因此不会写出坏文件 —— 影响面限于 `--check` / `--diff` 的可信度与本地 DX。\n\n## 建议方向\n\n1. `fetchUrl` 检查 `res.statusCode`,非 2xx 直接 reject;\n2. `fetchRegistry` 仅在拿到**可解析且形状正确**(有 `files[0].content`)的响应时才写缓存。\n\n两者独立,任一条都能挡住这个场景;第 2 条同时能挡住 registry schema 变更的情况。\n\n## 备注\n\nobjectui PR #3455 已在 `--check` 侧就地加了防御:registry 返回不可用内容时按 fetch error 处理,不会让它流进比较逻辑、也不会误报\"补丁失效\"。但那只是让新增的闸门免疫,缓存毒化本身仍在。\n"
+}

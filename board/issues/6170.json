@@ -1,0 +1,35 @@
+{
+  "number": 6170,
+  "kind": "issue",
+  "title": "release workflow: publish pushes tags + npm but its version commit never reaches main — twice now (rc.3 c6a52d3, rc.4 a10cbc77); landing the commit must be part of the publish lane",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T05:33:18Z",
+  "updated_at": "2026-08-07T07:14:00Z",
+  "closed_at": "2026-08-07T07:14:00Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6170",
+  "body": "## The recurring defect\n\nTwo releases, same shape:\n\n| release | publish commit | published | landed on main? | cleanup cost |\n|---|---|---|---|---|\n| 17.0.0-rc.3 (2026-08-03) | `c6a52d3` | 69 tags + npm ✅ | ❌ never | #6135 → #6149 (68-file field reconciliation, 4 days later) |\n| 17.0.0-rc.4 (2026-08-07 04:17Z) | `a10cbc77` | 69 tags + npm ✅ | ❌ never | #6169 (merge-back, same day) |\n\nThe lane that runs `changeset version && changeset publish` pushes **tags** (unprotected) and publishes to npm, but the version commit itself never reaches protected `main` — presumably the bot's direct push is rejected by branch protection and the failure is swallowed. Verify against the run logs around 2026-08-07T04:17:39Z.\n\nLeft unfixed, every publish poisons the next one: main keeps stale versions, `changeset-release/main` recomputes an npm-occupied version, and someone hand-reconciles after the fact. The compiled CHANGELOGs and `pre.json` bookkeeping live only on orphaned commits until then.\n\n## Second defect in the same lane: it bypasses the release gates\n\n`check:objectui-pin-fresh` is **required on the Version Packages PR (#4935)** precisely so a release cannot ship with a stale console pin (#3340, after v16 silently lost 4 frontend changes). The 04:17Z run did not go through #4935, so the gate never ran — and rc.4 shipped `.objectui-sha = f995a452`, dropping the 7-changeset objectui window (#6159) from the release record. A gate that is required on a PR the lane can skip is not a gate.\n\n## Options\n\n1. **Publish lane lands its own commit**: instead of pushing `main`, push a branch + auto-open a PR (auto-merge via the queue). Mechanical, keeps the dispatch lane usable.\n2. **Forbid the bypass**: publishing happens ONLY via merging the Version Packages PR (#4935 flow) — where the required checks (changeset gate, objectui-pin-freshness) actually run. The dispatch/manual lane, if kept at all, refuses to publish when its base ≠ current main or when the freshness gate would fail.\n3. Both (2 as policy, 1 as the belt for whatever lane remains).\n\nRecommendation: **(3)**. The maintainer picks; whichever option, the invariant is: *a publish that does not land its bookkeeping commit is a lie to the next release*.\n\n## Related\n\n#6169 (rc.4 instance, merge-back) · #6135 / #6149 (rc.3 instance) · #3340 (freshness gate) · #6121 (freshness workflow required-set observation) · #6162 (pin-watch mechanical output — closes the \"nobody files the bump\" half; this issue closes the \"the lane can skip the gate\" half)"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 5693,
+  "kind": "issue",
+  "title": "`flow-runas-unscoped`'s \"the default `runAs:'user'`\" wording is unreachable on the CLI surface — the parse materializes the default, so an author who declared nothing is told they declared it",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T00:31:26Z",
+  "updated_at": "2026-08-07T00:53:07Z",
+  "closed_at": "2026-08-07T00:53:07Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5693",
+  "body": "Found while implementing #5633. Filed unassigned, **observation-class** (no `pm:queue`): nothing is blocked and the remedy in the `hint` is correct either way — the defect is that a deliberate distinction in the diagnostic is dead on the surface that matters.\n\n## What\n\n`packages/lint/src/lint-flow-patterns.ts` branches the message on whether `runAs` was **authored** or **defaulted**:\n\n```ts\nconst runAs = typeof flow.runAs === 'string' ? flow.runAs : 'user';\n...\nconst declared = typeof flow.runAs === 'string' ? `\\`runAs:'${runAs}'\\`` : `the default \\`runAs:'user'\\``;\n```\n\nThe rule is wired `input: 'parsed'` (`authoring-rules.ts`), and the flow schema supplies `'user'` as `runAs`'s default — so by the time the rule runs on the CLI, `flow.runAs` is the string `'user'` whether the author wrote it or not. The `'the default …'` arm is therefore never taken on `os validate` / `os build` / `os lint`.\n\n## Measured\n\nA real example flow (`examples/app-todo/src/flows/task.flow.ts`, `overdue_escalation`) with its `runAs` line **deleted entirely** — the author declared nothing — through `os validate`:\n\n```\n  x Author-time rules failed (1 issue)\n  - flow 'overdue_escalation' - runAs: schedule-triggered flow runs as `runAs:'user'`, but a\n    schedule run has no trigger user - so its data node 'update_priority' (update_record), in\n    loop 'loop_overdue' body, has no identity to scope to and will be REFUSED at run time.\n      rule: flow-runas-unscoped\n```\n\n`runs as` **`runAs:'user'`** — the explicit arm, for a flow with no `runAs` key. The unit tests take the other arm (`the default runAs:'user'`) only because they pass raw, unparsed stack literals straight to `lintFlowPatterns`, so the test suite proves the branch works while no shipped surface can reach it.\n\n## Why it is worth recording rather than shrugging at\n\nIt reads as an accusation the author can disprove by looking at their file. Someone who wrote no `runAs` is told their flow \"runs as `runAs:'user'`\", which invites the reading *\"I never wrote that — the tool is confused\"*, exactly when the tool is right and the fix is one line away. The author-vs-default distinction is real and useful (it separates \"you wrote something incoherent\" from \"you inherited a default that does not fit a user-less trigger\"), and it is currently invisible where it would help.\n\nIt is also a small instance of a shape this repo has paid for before: a branch that is exercised only by tests whose input shape differs from production's. Cf. #4984 (fixtures spelling rejected aliases kept tests green while the rule was dead) — same mechanism, much lower stakes.\n\n## Possible directions (a maintainer's call — not proposed here)\n\n1. **Read the authored value.** Have the rule consult the pre-parse stack for `runAs` presence, so the distinction survives. Costs a second input to a rule that is otherwise cleanly `parsed`.\n2. **Drop the distinction.** Delete the dead arm and always print `runAs:'user'`, keeping the message honest about what it can actually know. Cheapest; loses a genuinely useful nuance.\n3. **Re-word so it is true either way** — e.g. *\"runs under `runAs:'user'` (the default when none is declared)\"* — one sentence, no new input, no dead branch.\n\n(3) looks like the best value for the size of the problem, but this is a diagnostic-wording contract and the person who wrote the distinction may have wanted (1).\n\n## Not caused by #5633\n\nPre-existing: #5633 only widened where this rule looks for its **evidence node** and left the `declared` branch untouched. The behaviour above reproduces identically on `origin/main` at `414395b9a`. Confirmed with real `os validate` output in both directions.\n\n## Related\n\n- #5633 — where this surfaced.\n- #3760 — the rule's promotion to `error`."
+}

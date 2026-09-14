@@ -1,0 +1,35 @@
+{
+  "number": 6061,
+  "kind": "pull_request",
+  "title": "refactor(service-storage): 摘除 Local/S3 适配器的 `list(prefix)` 实现与测试 (#5541)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T16:07:26Z",
+  "updated_at": "2026-08-07T01:13:39Z",
+  "closed_at": "2026-08-07T01:13:37Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T01:13:37Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6061",
+  "body": "Fixes #5541\n\n`#5540` 摘掉了 `IStorageService.list?(prefix)` 这个契约成员;本 PR 是它的**实现半** —— 摘掉两个出厂适配器自己的 `list` 实现、它们的测试,以及各自 `track()` 指标词表里那个再也产不出来的 `'list'` 标签。\n\n## 范围核对(⛔ 不重做 PR #5983 已完成的部分)\n\n开工第一步读了 `efedd28`(PR #5983)的终态 diff。它已原子落地:spec 契约成员 + `SwappableStorageService.list` 代理透传 + 该文件两处测试 + 文档 + ADR-0087 D3 登记。这些**一律没有再动**。`swappable-storage-service.ts:74-76` 留的指向本单的注释也保持原样。\n\n本 PR 只做剩下的四处(两个生产者 + 它们的测试):\n\n| 文件 | 改动 |\n|---|---|\n| `local-storage-adapter.ts` | 删 `list`(单层 `readdir`、把子目录当文件返回);`track()` 词表去掉 `'list'` |\n| `s3-storage-adapter.ts` | 删 `list`(单发 `ListObjectsV2`,`IsTruncated` / `ContinuationToken` 都不读,过 1000 个对象静默截断);`track()` 词表去掉 `'list'` |\n| `local-storage-adapter.test.ts` | 退役两条「列目录」用例 —— 它们钉的正是被删的语义(两个 fixture 都恰好在一层深,那是该实现唯一看得见的深度),留着只能靠保留方法才绿 |\n| `local-storage-adapter.metrics.test.ts` | 一条用例去掉 list 断言;`list() does not double-count head per entry` 整条退役(它钉的是被删实现的内部细节) |\n| `swappable-storage-service.test.ts` | 删 `FakeAdapter.list` —— #5983 之后它已无人调用,是个「真适配器都没有的表面」的假体残留 |\n| `storage-adapter-list-retirement.test.ts`(新增) | 留钉:断言两个适配器都不再暴露 `list` |\n\n## 零消费方证据(全仓引用面)\n\n摘除前后同一条查询,`packages/services/service-storage/` 内:\n\n```\n# origin/main(改前)\n$ git grep -n \"\\.list(\" origin/main -- packages/services/service-storage/\nlocal-storage-adapter.metrics.test.ts:39:  await storage.list('a');\nlocal-storage-adapter.metrics.test.ts:52:  await storage.list('p');\nlocal-storage-adapter.test.ts:81:          const files = await adapter.list('docs');\nlocal-storage-adapter.test.ts:89:          const files = await adapter.list('nonexistent');\n\n# HEAD(改后)—— 同一条查询\n$ git grep -n \"\\.list(\" HEAD -- packages/services/service-storage/\n(no matches)\n```\n\n改前的四处全部是**测试**,没有一处产品代码调用 —— 这与 #5266 的分析一致:唯一的仓内调用点是 #5983 已删掉的代理透传。跨包声明式 + 带引号精确名两种查法(`storage.list(` / `storageService.list(` / `adapter.list(` / `async list(` / `list?(prefix`)在 `packages/` `examples/` `apps/` `scripts/` 全仓扫过,除 `packages/spec` 的退役登记文本外,命中的 `async list(...)` 全是**同名不同物**:metadata loader 的 `list(type)`、messaging outbox 的 `list(filter)`、`suspended-run-store` 的 `list()`,与存储无关。存储侧零残余。\n\n## 必答项:`StorageFileInfo` 是否随之退役?\n\n**不退役 —— 它仍有消费方,`list` 从来不是它唯一的生产者。** 实测:\n\n- `IStorageService.getInfo(key)` 的返回类型就是它,而 `getInfo` 是契约的**必选**成员(`packages/spec/src/contracts/storage-service.ts:124`),#5540 没有动它;\n- 三处实现照旧返回它:`local-storage-adapter.ts:184`、`s3-storage-adapter.ts:198`、`swappable-storage-service.ts:70`;\n- spec 自己的契约测试也仍在用它做 `getInfo` 的返回标注。\n\n所以 changeset 措辞按「成员摘除、类型保留」写,没有任何类型退役的语句。\n\n## 反向验证(方向**先声明**,再跑)\n\n预判写在动手之前:把 `list` 加回两个适配器,**新留钉应变红,而包的 build(tsup DTS,即 tsc)应保持绿**。后半句才是这条钉子存在的理由 —— class 携带接口未声明的多余成员**不是**类型错误,这正是 #5540 changeset 对适配器作者的承诺原文(「an implementation left in place still compiles」),所以 tsc 守不住这条线。\n\n两半都如预判:\n\n```\n# 加回 list 后 —— 留钉变红(两个适配器各一条)\nFAIL src/storage-adapter-list-retirement.test.ts > LocalStorageAdapter exposes no list member\n  AssertionError: expected [ 'rootDir', 'partsDir', …(23) ] to not include 'list'\nFAIL src/storage-adapter-list-retirement.test.ts > S3StorageAdapter exposes no list member\n  AssertionError: expected [ 'options', 'clientPromise', …(25) ] to not include 'list'\n  Tests  2 failed | 1 passed (3)\n\n# 同一状态下 —— build 依旧绿,tsc 一声不吭\n$ pnpm --filter @objectstack/service-storage build   →  BUILD_EXIT=0\n  DTS ⚡️ Build success in 5130ms\n```\n\n随后已还原,`git diff --stat` 与还原前逐字节一致。留钉里第三条用例(仍暴露 `upload`/`download`/`delete`/`exists`/`getInfo`)是防镜像失效的:一个「适配器什么方法都没有」的空壳同样会让前两条绿。\n\n## 验证\n\n门是从 `.github/workflows/lint.yml` 逐条枚举跑的,不是凭记忆挑的。\n\n- `pnpm --filter @objectstack/service-storage test` → **22 files / 282 tests passed**(含新留钉 3 条)\n- `pnpm --filter @objectstack/service-storage build` → DTS 成功(该包无 `typecheck` script,tsc 走 tsup DTS 这条道,与 #5983 commit message 记录的一致)\n- `turbo run build`(service-storage + 全部三个下游 `cli` / `plugin-dev` / `dogfood` 及其依赖闭包)→ **62 tasks successful**,证明删除对下游零类型影响\n- lint job 全部 root 门 + typecheck job 非 spec 门:`lint`(ESLint)、`check:slot-lookup`、`check:query-options-erasure`、`check:nul-bytes`、`check:doc-authoring`、`check:docs-audit-scope`、`check:role-word`、`check:adr-anchors`、`check:org-identifier`、`check:authz-resolver`、`check:service-providers`、`check:route-envelope`、`check:error-code-casing`、`check:wildcard-fallthrough`、`check:init-service-contract`、`check:durability-log-level`、`check:startup-registry-verdict`、`check:objectui-changeset`、`check:release-notes`、`check:release-body`、`check:node-version`、`check:workflow-status-functions`、`check:published-files`、`check:engine-double-contract`、`check:resume-authority-declared`、`check:type-check-coverage`、`check:driver-conformance`、`check:stall-guard`、`check:skill-frame-sync`、`check:i18n`、`check:i18n-coverage` → **全 PASS**\n- ⛔ 未触 `packages/spec`,未重生成任何 spec 产物(`git status -- packages/spec content/docs docs/` 为空)\n\n## changeset\n\n`.changeset/storage-adapter-list-implementations-removed.md`,`@objectstack/service-storage: patch`。按约束写得响亮:两个方言各自错在哪、**该成员从未有过仓内消费方**、以及未来按需回归的形状指引 —— 回来时是带游标的 `list(prefix, { cursor, limit })`,返回一页 + 续传 token,并要求 nested keys / 目录项 / 超 1000 对象三类 adapter-conformance 用例证明两个后端答案一致,**不继承坏签名**(#5266 维护者裁决原文)。取 patch 而非 major:契约破坏是 #5540 的、已在那里发布;这里同时如实列出直接持有具体类 `LocalStorageAdapter` / `S3StorageAdapter` 调 `.list()` 的下游该改成什么,没有藏。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015a5qkLzpGXhLL2F5gvJ7dD)_"
+}

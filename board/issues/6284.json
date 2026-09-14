@@ -1,0 +1,34 @@
+{
+  "number": 6284,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): 记录两条维护者已批元判据 + 决策卡前提刷新纪律 (#6140)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T13:01:01Z",
+  "updated_at": "2026-08-07T13:39:00Z",
+  "closed_at": "2026-08-07T13:38:59Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T13:38:59Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6284",
+  "body": "Fixes #6140\n\n维护者 2026-08-07 决策箱第 2 轮拍板的三项,落到 PM 技能里。三项都是**元判据**:它们存在的\n理由不是多一条规矩,而是**让一整族近似单不再逐张排队等裁决**,所以写成 PM 执行的条款,而\n不是历史叙述。两份文本各随本文件语种。\n\n## 1. `.claude/skills/pm-dispatch/SKILL.md`(内部件,中文条款)\n\n### 落点 A —— step 8「第三档」之后,升级流程编号表之前(新增 26 行)\n\n**before**:step 8 的升级判据族是三块 —— 升级门槛(英)→ 不升级四类(英)→「第三档:带\n前提的裁决」(中)→ 升级流程编号表(英)。三块讲的都是**单张单**怎么判。\n\n**after**:在「第三档」之后新增第四块中文条款「**两条元判据 —— 一整族近似单默认不进决策\n箱(维护者 2026-08-07 决策箱第 2 轮拍板)**」,开头显式回指上文(「上面的『不升级四类』说\n的是单张单自带裁决;这两条说的是一族形状相同的单不必逐张问」),两条各带**适用判据 + 出处**:\n\n- **静默丢弃的声明,默认并入既有拒收集。** 已声明的键在某一支被静默忽略,而更早的裁决已把\n  同一个键在兄弟支上定成响亮的编写期错误 → 新支默认并入既有拒收集,复用母单裁决直接入队,\n  ⛔ 不另开决策箱槽位。出处 #5714 → #5931(`memory` 支只是那条裁决的一词之差的外延,却白\n  占了一个槽位)。\n  ⚠️ **#5739/#5918 边界与本条同段陈述**(issue 明确要求,分段就会被用过头):继承的是**裁决\n  连同它的理由**,不是「拒收」两个字;母单理由**被实测为分支特有**时本条不适用 —— #5739 的\n  理由「拒收会连带拒掉今天已经能跑的查询」在度量面上被证伪,所以 #5918 另裁一次是对的。判法\n  写成机械动作:把母单的理由拿到新支上复核一遍再决定复用与否。\n- **一个操作两个实现,默认治理侧胜出。** 带治理的那一侧(权限闸、用户同意、去重、审计留痕)\n  是默认幸存者,另一侧改绑到它并删除 —— 不是两侧对齐,也不是保留双写;反向裁只在产品语义\n  明确要求时成立,且那条语义必须写进裁决正文。出处 cloud#896(hostname)定案形状、cloud#1147\n  三个待答问题(重装 = UPSERT / 卸载 = 软停用 / 外部词表 = manifest id)全部落在治理侧、\n  objectstack#4636 的 B 选项同形。\n\n**为什么落这里**:两条都是「**何时不升级**」的默认,与不升级四类同族;但它们是**带出处的维护者\n裁决**,而该文件记录裁决的既有惯例是「独立中文条款块 + 适用判据 + 出处」(发版板、版本发布必须\n人工、第三档皆此形),塞进那份英文四项短列表会与列表体例冲突,也放不下必须同段的边界。放在\n「第三档」之后而非之前,是为了不打断「第三档」开头对『上面把结果二分成……』的回指。\n\n### 落点 B —— 升级流程编号表的第 1 条(新增 9 行,原 1/2/3 顺延为 2/3/4)\n\n**before**:`Whenever a dev returns needs_decision …` 之后的编号表第 1 条直接是「裁决落在它所属\n的 issue 上」。\n\n**after**:新增第 1 条「**先刷新卡片的前提 —— 落卡与复升级都适用**」,把刷新写成**落卡前的清单\n步骤**而不是提醒:每条前提都是有保质期的读数(main 一天 ~18 合并,跨仓事实按小时变),落卡前\n与旧卡重新推到维护者面前前各复核一遍,失效的就地改写或撤卡;**隔夜没动过的卡默认按「前提未经\n验证」处理,而不是按「还在等答复」处理**。出处:cloud#1148 的 A/B 卡在写下前 ~50 分钟就已失效\n(它等的上游 PR 已经合了),cloud#812 一张卡带三条过时前提。\n\n**为什么顺延而不是追加**:刷新是**落卡之前**的动作,排在「卡放哪里」「卡怎么写」之后就不再是\n纪律。已核对全仓无任何文本引用这三条的序号(仅有的两处 `step 8 的模式` / `step 8 的锚点规则`\n是按语义引用,不受影响)。\n\n## 2. `skills/objectstack-pm-dispatch/SKILL.md`(发布件,英文泛化)\n\n该文件**存在对应结构面**:step 8 同样有 escalation bar → `Named non-escalation classes` 列表 →\n`When something does pass the bar:` 编号表。故按 #5451 route B 加泛化版:\n\n- `Named non-escalation classes` 列表新增两项(插在收尾那条 `A developer agent's needs_decision …\n  falls into the classes above` **之前**,使那条催收句仍然覆盖全表):\n  `A declaration silently dropped on a new arm, when a sibling arm already has a ruling`(含同段\n  边界:carries over 的是 ruling **together with its rationale**,母单理由被实测为分支特有时\n  不适用)与 `Two implementations of one operation`(治理侧默认幸存,`declared = enforced` 收尾)。\n- 编号表新增第 1 条 `Refresh the card's premises first — before writing it, and again before\n  re-escalating it.`,原 1/2/3 顺延为 2/3/4。\n\n泛化处理:⛔ 不带本仓 issue 号;`cloud#896` 类具体案例改写为机制描述(治理面 = authorization\ngates / user consent / de-duplication / audit trail);`#5739` 的具体理由抽象成\n「a 'refusing this would reject usage that already works' argument」这一**论证形状**;\n`~18 merges/日` 抽象为「an active main branch takes on the order of a dozen or more merges a day」。\n⛔ 全文仍 **0 处** `role`(`check:role-word` 绿,该文件不在 baseline 内,新增一次即红)。\n\n## frame-sync 证明(⛔ 未触碰三轴决策框架)\n\n改前改后各跑一次,输出**逐字节相同**(`diff` 无差异):\n\n```\n✓ check-skill-frame-sync self-test: 12 cases pass.\n✓ check-skill-frame-sync: 4 copies of the decision frame are structurally isomorphic across 3 files\n  3 axes: business-need → long-term-soundness → ai-authoring-safety\n  binding sentence present in all 4; 4 count mention(s) agree; 40 markdown files scanned for undeclared copies.\n```\n\n发布件的编号表第 2 条正是该门的 `published-pm` start 锚点所在(`and analyze every option on the\nthree fixed axes below.`),顺延只改了行首数字、未动锚点文本;新增条款刻意**不提**该框架,避免撞上\n门的 FINGERPRINTS / MENTION_PATTERNS(`fixed axes` / `条评估轴` / `N-axis frame`)。\n\n`check:skill-frame-freshness` 亦绿(`the decision frame in this tree is current with origin/main`;\n`1/3 framework files are byte-identical to the ref` 是本 PR 改了另两份文件的**框架外散文**所致,\n该门明示 `wording differences are not drift`)。\n\n## 门禁(全部在 `git add` 之后跑)\n\n| 门 | 结果 |\n| --- | --- |\n| `check:skill-frame-sync` ×2(改前/改后) | ✓ 绿,两次输出逐字节相同 |\n| `check:skill-frame-freshness` | ✓ 绿(12 self-test + 实检) |\n| `check:doc-authoring` | ✓ 绿(365 files clean) |\n| `check:role-word` | ✓ 绿(44 baselined file(s), no new occurrences) |\n| `check:nul-bytes` | ✓ 绿(5955 tracked text files, no raw ASCII control bytes) |\n| `pnpm lint`(ESLint) | ✓ 绿,无输出 |\n| `check:skill-docs` | ✓ `Skill docs in sync` |\n| `check:skill-refs` | ✓ `9 generated files in sync with packages/spec` |\n| `check:skill-examples` | ✓ `208 prose examples type-check against @objectstack/spec`(需先 build spec) |\n\n## 范围与 changeset\n\n纯文档改动,两份 SKILL.md,**不发布任何包、无用户可见运行时变化**,故无 changeset(挂\n`skip-changeset`)。⛔ 未新增任何代码块(纪律条款不带示例),⛔ 未触碰 `content/docs/releases/`、\n测试套件、其他 skill;与同文件族的 #6236(Dispatch backends 一节)落点不相交,本支从当前\n`origin/main`(e4a03d2)切出。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BDmDsu2575gDxeMCxXhDE3)_"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 17682,
+  "kind": "issue",
+  "title": "Should a nested hook refusal's wire sentence match `/data` byte-for-byte? The action door still ships the `hook NAME threw:` wrapper, and closing that needs `SANDBOX_ERROR_PASSTHROUGH` widened — a declared decision about what sandboxed code may read",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-11T11:23:36Z",
+  "updated_at": "2026-09-12T02:30:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17682",
+  "body": "Blocked-by: objectstack-ai/objectui#9151\n\nFiled by the `domain:cli` execution PM seat (`pm:seat` #6024, session `session_01TSf4DV7ziu4V5j73e46b7c`) out of PR #17679's acceptance, as the open question its delivering dev raised and correctly declined to answer. ⛔ Not graded, no `domain:*`, no priority, no assignee.\n\n⚠️ **Deliberately NOT in the decision box yet.** It is pre-staged with its analysis complete, because it cannot be answered until objectui#9151 establishes whether the wrapper text ever reaches a user. Putting it to the maintainer now would be asking a question whose premise is unmeasured. ⇒ the `Blocked-by:` line above is the trigger; when that card resolves, this becomes a one-read decision rather than a fresh investigation.\n\n## The state after PR #17679\n\nPR #17679 makes a nested sandboxed hook refusal answer a **4xx with the business sentence** instead of `500 INTERNAL_ERROR`. What it deliberately did **not** change is the sentence's shape:\n\n| door | what the caller receives for one hook refusal |\n|:--|:--|\n| `/api/v1/data/:object/:id` | the bare sentence — `A contract cannot be submitted without a version file` |\n| `/api/v1/actions/:object/:action` | the flattened wrapper — `action 'x' threw: SandboxError: hook 'guard' threw: <sentence>` |\n\n⇒ two doors, one refusal, two sentences. ⭐ PR #17679 left the action door's sentence **byte-identical to what the 500 already carried**, which is why it is a status fix and not a message change — and it is pinned as such.\n\n## Why closing it is a decision and not a repair\n\nThe nested body's clean `innerMessage` does not survive the VM hop into the action's sandbox. Carrying it across means adding a member to **`SANDBOX_ERROR_PASSTHROUGH`**, the host-to-VM marshalling allowlist, and `packages/runtime/src/sandbox/script-runner.ts`'s own docblock makes widening that allowlist a **declared decision, never a consumer-side accretion**.\n\n⚠️ That allowlist governs **what untrusted sandboxed code can read**. ⇒ this is a security/permission boundary, which is on the maintainer floor — ⛔ not a `domain:cli` seat call and ⛔ not a rider on a p2 status fix.\n\n## The three routes, and why one is already excluded\n\n**A — leave it.** The status/code defect is closed; the sentence is exactly what the 500 already carried, so nothing regressed. The wrapper-on-the-wire gap stays recorded.\n⭐ *The delivering dev's recommendation, and this seat's, for now.*\n\n**B — widen `SANDBOX_ERROR_PASSTHROUGH` with `innerMessage`,** so both doors ship one identical sentence. Small diff; a declared decision about the sandbox boundary.\n\n**C — strip the wrapper at the action door instead.** ⛔ **Already excluded on the contract's own words,** not on preference: `error-response.ts`'s `sandboxBusinessMessage` docblock forbids exactly this — *\"deliberately a READ of a field the sandbox populated, never a pattern-strip of the wrapper off `.message`\"* — because it would also rewrite a plain error whose own prose happens to contain `threw:`. ⇒ ⛔ do not re-propose C.\n\n## 四棱分析(预置,待 objectui#9151 解锁后呈报)\n\n**① 用户今天撞到什么.** 状态半边已修,所以调用方拿到的是 4xx 与业务原文。剩下的差异只是句子**前缀**:动作门带 `hook 'x' threw:` 包装,`/data` 门不带。⚠️ 这条前缀是否真的到达人眼,**取决于控制台是否渲染它** —— 而那正是 objectui#9151 要测的东西。若控制台从不显示这句话,本卡的用户影响是**零**。\n\n**② 契约面.** 两个门对同一次拒绝给出两种句子,这本身就是 `sandboxBusinessMessage` 当初被导出要防的「门间分歧」形态(#7525 / #8016)。但 ⛔ 没有任何已声明契约要求两门句子逐字相同 —— 所以这是**一致性诉求**,不是 declared≠enforced 缺陷。\n\n**③ 代价与风险.** B 的改动很小,但它动的是**沙箱能读什么**这条边界;`script-runner.ts` 明写此类放宽必须是显式裁决。⇒ 风险不在代码量,在边界语义。A 的代价是把不一致留在线上,并把它记在 PR 的验收注里。\n\n**④ 可逆性.** B 一旦发布即固化:放宽过的 marshalling 允许集再收回是破坏性变更。A 完全可逆 —— 任何时候都能升级成 B。⇒ ⭐ **不确定时,A 是那个保留选择权的选项。**\n\n## 维护者速读\n\n动作接口和 `/data` 接口对**同一条业务拒绝**给出的句子不一样:`/data` 给干净的原话,动作接口在原话前面多一层 `hook 'x' threw:` 的调试包装。状态码那一半已经修好了,这里只剩这层前缀。\n\n把它们统一需要放宽沙箱能读取的字段白名单 —— 那是一条「不受信代码能看到什么」的安全边界,按规矩必须您裁,⛔ 不能由车道自己顺手改。\n\n⚠️ 但现在还**不必**决定:这层前缀到底有没有真的显示给用户,取决于控制台的渲染,而那正在 objectui#9151 里测。若控制台根本不显示这句话,这张卡的用户影响就是零,A 即终局。\n\n⇒ 等 objectui#9151 有读数后再回来一句话:**A(先不动,记录)还是 B(放宽白名单,两门统一)?**\n\n## Refs\n\n#17265 (parent) · PR #17679 (the ① fix) · objectui#9151 (the blocker — does the sentence reach a user at all) · #11588 (`sandboxBusinessMessage`) · #11684 (the `/analytics` precedent) · #12034 / #17419 (the response-shape surface, separately fenced)"
+}

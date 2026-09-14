@@ -1,0 +1,35 @@
+{
+  "number": 6047,
+  "kind": "pull_request",
+  "title": "fix(driver-turso): remote 模式对齐 NULL-safe 语义 —— $not/$ne/$nin/$notContains 四算子 + $exists 拒收闸 (#5903)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T15:40:24Z",
+  "updated_at": "2026-08-07T00:53:24Z",
+  "closed_at": "2026-08-07T00:53:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T00:53:06Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6047",
+  "body": "Fixes objectstack-ai/objectstack#5903\n\n#5298 NULL-safe 程序的终棒。前置 PR #5921 / #5962 / #6004 / #6006 均已 MERGED,本 PR 基于合入它们之后的 origin/main。\n\n## 前提复核(实测,不是转述)\n\n`TursoDriver` 有两个 filter 编译器:local/replica 继承 `SqlDriver.applyFilterCondition`,remote 走 `RemoteTransport.buildWhereSQL` 这个独立发射器。#5146(PR #5296)与 #5298(PR #5962)两次裁决只落在前者 —— 于是**同一个 driver 对同一条 filter,按构造它的 `url` 给两个答案**。\n\n在共享 fixture(`FILTER_LOGIC_ROWS`,1-2 行 `d` 有值、3-4 行 NULL)上实测 `origin/main` @ `b5bdf48af`:\n\n| filter | LOCAL | REMOTE(修复前) |\n|---|---|---|\n| `{ d: { $ne: 'v1' } }` | `['2','3','4']` | `['2']` |\n| `{ d: { $nin: ['v1'] } }` | `['2','3','4']` | `['2']` |\n| `{ d: { $notContains: 'v1' } }` | `['2','3','4']` | `['2']` |\n| `{ $not: { d: 'v1' } }` | `['2','3','4']` | `['2']` |\n| `{ d: { $exists: 'yes' } }` | `INVALID_FILTER` | `['1','2']` |\n| `{ d: { $ne: null } }` | `['1','2']` | `['1','2']`(已一致) |\n\n前四行证实了本单标题的 `$not`,并把 PM 扩程注记的另外三个算子逐一坐实;第五行是 `$exists` 闸 —— 注意它的**分叉方向**:PR #5962 让 local 先严格之后,#1116 当初立的那道「不要单独收紧,免得制造 local/remote 分叉」栅栏,本身变成了分叉。\n\n## 改了什么(全部在 remote 侧,local 一行未动)\n\n**1. `$not` NULL-safe(#5146)** — 取反前先把操作数**逐叶** totalise,`NOT (…)` 对每一行都是 TRUE/FALSE 而不落入 SQL 的 UNKNOWN。\n\n- 守卫挂在**叶子**而不是 `NOT` 上:De Morgan 只对二值叶子成立,把守卫提到 `$not` 之上(操作数是 `$or` 时)会把 JS 后端排除的行放回来。\n- 极性**按算子各自的答案**,不是一律 `OR col IS NULL`:`{ $not: { a: { $ne: 5 } } }` 意思是「a 是 5」,无值行必须排除;一刀切会把它排除的行原样送回 —— 本文件反复付过学费的静默放宽。\n- 守卫以 filter **树结构**发射(`$null` 约束 + `$and`/`$or` 节点)交回 `buildWhereSQL`,所以每一对括号都是那个编译器自己写的。\n\n**2. `$ne` / `$nin` / `$notContains` 非否定路径 NULL-safe(#5298)** — 发射 `(col IS NULL OR <原谓词>)`。\n\n- 统一 OR 展开,**不用**方言等价物(`IS DISTINCT FROM` / `IS NOT` / `<=>`):`NOT LIKE` 根本没有这种形式,一个编译器为一条裁决扛两种形状;SQLite 拼写依赖本仓不 pin 的引擎版本(remote 端跑的是对端 libSQL,比本地那对更不受控);实测执行计划相同。\n- **`$ne: null` 保持 `IS NOT NULL` 不变** —— 极性看**比较数**,不看算子名。\n- ⚠️ **括号不可省**:`buildWhereSQL` 用裸 ` AND ` 拼接同级子句,裸 `OR` 会结合得更松 —— `a = ? AND b IS NULL OR b <> ?` 会被解析成 `(a = ? AND b IS NULL) OR b <> ?`,返回调用方 `a` 谓词明确排除的行。测试里有专门钉这一格的用例。\n\n**3. `$exists` 非布尔比较值拒收(#5369,按 #5347-A)** — `INVALID_FILTER` / 400,与 `$null` 同信封、首句与 `driver-sql` 逐字一致。语义按 #5298 ③ 裁的「有值」,`$exists: true` / `false` 编译结果一字未改。栅栏当初写明了自己的解除条件(#5299 裁决 + 不制造 local/remote 分叉),两条今天都已满足。\n\n**4. `FILTER_LOGIC_CASES` 入表 N1(`$ne`)/ N4(`$not`)两行**,并把表文档里「RULED but not yet enrolled」的 family 2 与 blocker 矩阵改写为毕业记录 —— 本单是这两行共同的最后一个 blocker,Cube 面已由 #5977 清除。\n\n## 关于「第三次实现」\n\npolarity 表在本包内是第三份(`driver-sql` / `read-scope-sql` 之后)。选择复制而非导出,理由写在文件头:\n\n1. `remote-transport.ts` 的模块契约明写「No local SQLite or Knex dependency」,而 `driver-sql` 的入口会拉进 knex;\n2. #5298 立下的不变量是「每张极性表钉的是**它自己发射器**的拼写」(`read-scope-sql` 按真值读 `$null`,`driver-sql` 按恒等读,各自匹配自家发射器),而不是「三份源码字面相同」;\n3. `driver-sql` 那份对非节点的 `$or` 元素会抛 `TypeError`(它靠 `reduceFilterKey` 前置拦截),本编译器是**发射时**才拒收 —— 直接导入会把 `{ $not: { $or: [null] } }` 的具名拒收换成一个裸 TypeError。\n\n复制owed 一个「漂移即红」的互钉,这就是新增的 `turso-local-remote-null-parity.test.ts`:同一个 driver 的两个 transport 跑同一批 filter,**先断言两边相等,再断言等于裁决要求的行集** —— 只断相等会被「两边一起错」满足。\n\n## 验证\n\n- **反向验证(方向先判后跑,与派发词预判一致)**:只回退 `remote-transport.ts`、测试与表保持新期望 →`turso-remote-filter-logic-conformance` 上新入表的 N1/N4 两格 + count 聚合共 3 格转红,parity 套件红 11 格,而 `turso-filter-logic-conformance`(LOCAL)**全程全绿** —— 正是「分叉只在 remote」的正证。补回后全绿。\n  - 一处值得记下的**非**红:回退后 `$not $ne` / `$ne: null` / `$not $null` / `$not $exists` 四个**反向**用例仍是绿的。这是对的,也是这套用例的价值 —— 它们本来就已正确,而如果实现用的是一刀切 `OR col IS NULL`,红的就会是它们。\n- **11 个 harness 全绿**:driver-sql 878、driver-memory 524、driver-sqlite-wasm 254、driver-mongodb translation 34 + 真 mongod conformance 26(`OS_TEST_MONGODB_MEMORY_SERVER_ENABLED=1` 显式跑通,该套件按 #5517 默认 opt-out)、service-analytics 1120、formula 367、driver-turso local + remote。\n- **消费半径清扫**:`grep` 全仓 `FILTER_LOGIC_CASES` 消费方(11 个 harness + 1 个 ledger)与 `driver-turso` / `RemoteTransport` 的包外引用;driver-turso 之外无任何 fixture 钉 remote 的 SQL 串。`node scripts/check-driver-conformance.mjs` OK(driver-turso × FILTER_LOGIC = ok)。\n- `pnpm --filter @objectstack/driver-turso test` 745 passed / 23 files;`@objectstack/spec` 8309 passed / 325 files;两包 `typecheck` Done;`eslint` 干净;`check:generated` 10/10 up to date;`check-nul-bytes` OK + 控制字符自扫描零命中。\n- 合入 origin/main(`efedd289f` 动了 packages/spec)后按 §9/§10 重建 spec 并全部重跑,结果同上。\n\nchangeset:`@objectstack/driver-turso` patch,带升级说明(依赖 remote 静默丢弃无值行的查询要改写成显式 `$and` + `$null: false`)。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WyvqvKMG6asi9aXjKE6xtx\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WyvqvKMG6asi9aXjKE6xtx)_"
+}

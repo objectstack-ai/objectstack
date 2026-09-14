@@ -1,0 +1,35 @@
+{
+  "number": 6060,
+  "kind": "pull_request",
+  "title": "fix(lint): `flow-runas-unscoped` 用一句两读皆真的措辞命名有效身份 (#5693)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T16:05:07Z",
+  "updated_at": "2026-08-07T00:53:08Z",
+  "closed_at": "2026-08-07T00:53:06Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T00:53:06Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6060",
+  "body": "Fixes #5693\n\n按分诊两轮裁定走**方向 (3)**:一句两读皆真的措辞,无新输入、无死支。⛔ 方向 (1)(规则增读 pre-parse stack)未做;也没有需要升级到 `needs_decision` 的开放问题 —— 理由写在「改了什么」一节里(本仓在同一机制上已有裁定过的先例)。\n\n## 前提复核(先证伪再实现)\n\nissue 的核心断言成立,并且我实测出一处它没有的**修正**,这处修正让方向 (3) 更站得住:\n\n| 面 | 作者未写 `runAs` | 作者写了 `runAs:'user'` |\n|:---|:---|:---|\n| `os validate` / `os build` | explicit 支(**唯一可达**) | explicit 支 |\n| `os lint` | explicit 支(**唯一可达**) | explicit 支 |\n| runtime publish gate(#4463) | **default 支** | explicit 支 |\n\n- **CLI 侧 issue 说对了**,机制比它写的更强一层:`FlowSchema.runAs` 带 `.default('user')`,registry 把规则接为 `input: 'parsed'`;`os lint` 本身**不** Zod-parse(`runAuthoringRules('lint', { normalized: config })`,`authoring-rules.ts:1035` 无 `parsed` 时回落 normalized),照理应该逃过 —— 但 `defineStack` / `defineFlow` 在**定义时**就 `parse`(`stack.zod.ts:1245` `ObjectStackDefinitionSchema.safeParse` 后返回 `result.data`),所以连 `os lint` 拿到的也是默认值已物化的 stack。实测确认:两条命令对「没写 runAs」的作者打的都是 explicit 支。\n- **issue 没有的一条:default 支并非全局死支。** runtime publish gate 判的是逐字原文 body(`protocol.ts:7724` 注释 \"Keep the body verbatim\",schema 检查后 `request.item` 不被 parsed 结果替换),所以那一面两支都可达。\n\n也就是说,缺陷比 issue 描述的更整齐一点:**同一个 flow 被两个 shipped 面告知两件不同的事**,而在作者最先遇到的那个面上,拿到的恰是读起来像指控的那支。\n\n## 改了什么\n\n删掉 `typeof flow.runAs === 'string'` 的三元,换成一个常量 `RUNAS_EFFECTIVE_IDENTITY`:\n\n```\nruns under `runAs:'user'` (the default when none is declared)\n```\n\n括号是对**取值**的陈述,不是对作者的指控,所以对确实写了 `runAs:'user'` 的人同样为真。这不是新发明的写法,而是本仓在**同一机制**上已有的做法 —— `flow-draft-status-ambiguous`(`validate-flow-trigger-readiness.ts:480`)说 `has status 'draft' (the default when none is authored)`,它的行内注释写的正是同一个原因:「authored or defaulted(`defineFlow` parses at definition time, so the two are the same here)」。**这条先例也是不需要升级决策的理由**:同一诊断措辞合同在本仓已被裁定过一次,方向 (3) 就是那次的结论,不存在两种读法导向不同架构的岔口。\n\n`'user'` 写死而不是从 `flow.runAs` 插值,是刻意的:分支已排除 `'system'`,enum 只有这两个值,而每一个能走到这句话的面上取值都已被 schema 认可(CLI 是 parsed;runtime gate 在 gate 之前已按 overlay schema `safeParse`)。插值会重新长出一条只有 off-spec 字面量才能喂到的支 —— 正是这次要删掉的那个形状。\n\n只有措辞变了:命中的 flow、`severity: 'error'`、`where`、`hint`、以及嵌套证据节点的 region 从句都不变。\n\n## 实跑证据(照 issue 的实测方法)\n\n`examples/app-todo` 的 `overdue_escalation`,只改 `runAs` 一行(测完已还原,不在本 PR diff 里):\n\n**BEFORE — 作者未写 `runAs`**\n\n```\nos validate: flow 'overdue_escalation' · runAs: schedule-triggered flow runs as `runAs:'user'`, but a\n             schedule run has no trigger user — so its data node 'get_overdue_tasks' (get_record) …\nos lint:   ✗ flow 'overdue_escalation' · runAs: schedule-triggered flow runs as `runAs:'user'`, but a\n             schedule run has no trigger user — so its data node 'get_overdue_tasks' (get_record) …\n```\n\n**BEFORE — 作者写了 `runAs:'user'`**:与上面逐字相同(这就是「区分不可达」的直接证据)。\n\n**AFTER — 两种输入 × 两条命令,四次输出完全相同:**\n\n```\nflow 'overdue_escalation' · runAs: schedule-triggered flow runs under `runAs:'user'`\n(the default when none is declared), but a schedule run has no trigger user — so its\ndata node 'get_overdue_tasks' (get_record) has no identity to scope to and will be\nREFUSED at run time.\n```\n\nruntime publish gate 直调 `runRuntimeAuthoringRules({ type: 'flow', item })`,改前无 `runAs` 键走 default 支、有键走 explicit 支;改后两者同样收敛到上面这一句。\n\n三个 example app 的 `os validate` 均通过(app-todo / app-crm / app-showcase),无新增发现。\n\n## 测试:把「可达性」钉住,不再让死支只被裸字面量喂绿\n\n新增 `#5693` 一组四个用例,并且**两个形状分工不同、只有第二个有牙** —— 这点写在用例注释里,不含糊:\n\n- **parsed 形状**(`FlowSchema.parse`,production 输入):先断言 `parsed.runAs === 'user'` 对两种作者输入都成立,再断言消息逐字相同。它证明的是**分支为什么无意义**;分支若复活,这个用例**照样绿** —— 这正是缺陷本身。\n- **unparsed 形状**(runtime gate 的输入):是唯一还能区分两种作者输入的形状,因此是防复活的那道闸。\n- 加一条「同一 flow,两个面说同一句话」的对照。\n- 另有一条把 registry 接线钉住:`AUTHORING_RULES` 里 `lintFlowPatterns` 的 `input` 必须是 `'parsed'`。\n\n既有走 default 支的两个用例按新措辞更新(含 #5633 那条逐字断言的 top-level twin)。新 fixture 补齐了 `FlowSchema` 要求的 `label`(flow 与每个 node),否则它根本 parse 不过 —— parse 不过的 fixture 证明不了任何关于 parsed 面的事。\n\n**反向验证(方向先声明后跑)。** 第一次把整条三元原样放回时,四个用例连同两个老用例一起红 —— 但那一次同时撤掉了括号,证不出想证的东西,如实记在这里。于是做了**隔离版**:只让「CLI 不可达的那一支」不同,可达支保留新措辞。预期 parsed 绿 / unparsed 红,实测正是如此:\n\n```\n隔离版(分支复活,可达支措辞不变):\n  ✓ PARSED input: the two authoring choices are literally the same object here\n  × UNPARSED input: an absent key and an explicit one still get the same sentence\n  × says the same thing to both surfaces about the same flow\n  × leaves the TOP-LEVEL twin without a region clause (no regression)\n  × flags a schedule flow whose runAs is unset\n  Tests  4 failed | 104 passed (108)\n```\n\n## Changeset\n\n带 changeset,`@objectstack/lint` **patch**:`lint` 是发布包,这句话是每个 `os validate` / `os build` / `os lint` 使用者都会看到的诊断正文,措辞变更用户可见 —— 但没有 API/行为/severity 变化,所以是 patch 而非 minor。\n\n顺带**改了 #5633(PR #5695)那份尚未发布的 changeset 里的样例输出**:它逐字引用了旧句子,与我这份同处一个发布窗口,不改的话编译出来的 release notes 会自相矛盾地给出一句从未 ship 过的措辞。只动样例和一句「byte-identical」的措辞,不动它的任何结论。\n\n## 验证\n\n- `pnpm --filter @objectstack/lint test` → `Test Files 61 passed (61)` / `Tests 1457 passed (1457)`\n- `pnpm --filter @objectstack/lint typecheck` → 干净\n- `eslint packages/lint/src/lint-flow-patterns{,.test}.ts` → 无输出\n- `pnpm check:nul-bytes` → `OK (scanned 5780 tracked text file(s) … no raw ASCII control bytes)`;另按逐字节自扫改动文件,无控制字节\n- `check:release-notes` / `check:adr-anchors` / `check:doc-authoring` / `check:engine-double-contract` / `check:error-code-casing` 全绿\n\n## 范围\n\n严格限于申报文件面:`packages/lint/src/lint-flow-patterns.ts`、其测试文件、`.changeset/`。⚠️ 同文件家族的 #5700(loop fixture 的 `itemVar`)本轮**未触碰** —— 本 PR 新增的 loop 类 fixture 一律用 canonical 的 `iteratorVariable`。\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01BDmDsu2575gDxeMCxXhDE3"
+}

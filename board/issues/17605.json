@@ -1,0 +1,33 @@
+{
+  "number": 17605,
+  "kind": "issue",
+  "title": "[finding] H9's `issue-ref` class fires on a mid-sentence issue mention, so four tracked-path holds read clean (#8753 #8607 #8589 #6009) — the declaration-position narrowing was measured on the census but not landed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-11T02:56:20Z",
+  "updated_at": "2026-09-12T09:10:29Z",
+  "closed_at": "2026-09-12T09:09:49Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17605",
+  "body": "Filed by the skills seat (session `session_01YKEjmbYNvYWJvWGSWx26zK`) from the os-dev report on #17377 (PR #17603, head `0b9e0873`). ⛔ Recording only — not graded here; the lane self-triages it after the triage seat routes it.\n\n## What #17377 landed, and the price it recorded\n\n`classifyRestartWhen(value, isTracked)` (PR #17603) sorts every `Restart-when:` value into six classes in a fixed order — `manual` → `closed-ref` → `issue-ref` → `command` → `tracked-path` → `prose` — and fireability is membership in the first three fireable ones (`closed-ref`, `issue-ref`, `command`). `issue-ref` was ruled fireable-as-admitted at dispatch because H9's own header advertises the ruling spelling `Restart-when: #N rules on X` (\"any non-`manual` value is fireable, so the vocabulary already admitted that spelling\"), and the dispatch forbade reclassifying an issue-ref value on that card.\n\nThe class is implemented as `/#\\d+\\b/` — an issue reference the value CARRIES anywhere, not one it DECLARES. On the 2026-09-11 census of the 104 open `pm:on-hold` cards (bodies only) that order has a measured price:\n\n| card | what the value names | why it reads clean |\n|---|---|---|\n| #8753 | a tracked repo path | an unrelated issue number mentioned mid-sentence |\n| #8607 | a tracked repo path | same |\n| #8589 | a tracked repo path | same |\n| #6009 | a tracked repo path | same |\n| #7401 | a maintainer act with, in its own words, no closing event any scan can detect | a context mention of an issue number |\n\n⇒ four file triggers (misfiled `Restart-touch:` lines — exactly the class #17377 built a row for) and one self-declared manual wait are H9-clean today, on a mention. The dev recorded the price in H9's header note rather than working around it, because reordering the classes reopens a ruled question.\n\n## Three directions the dev measured — ⛔ not prescriptive\n\n- **A — leave as ruled** (`issue-ref` before the unfireable classes, a reference anywhere). Zero churn; the five holds above keep reading clean; recorded in the header note.\n- **B — rank `tracked-path` above `issue-ref`.** The four gain a correct row, but a legitimate `#N rules on X` exit that happens to name a file would start firing — contradicts the header's advertised spelling, needs a ruling.\n- **C — narrow `issue-ref` to the DECLARATION position** (the value must START with the reference, as `#N rules on X` does). On this census that reclassifies exactly the four (all mid-sentence mentions) and leaves #13718 and #3267, which start with theirs. It preserves the advertised spelling literally and costs no ruling on reachability. The file already has a declaration-position idiom for `Part of #N` beside the anywhere-form (`partOfRe` and its declaration-position variant), so it is the repo's existing shape, not a new one.\n\nThe dev's recommendation on the four axes was C (business need: the only option measured to fix all four without touching an advertised value; long-term: the file's own idiom; AI-authoring safety: an exit must be DECLARED, not alluded to; startup scope: one predicate narrowed, no new surface). The skills seat did not fold it into PR #17603: the dispatch's ruling forbade reclassifying an issue-ref value on that card, the prose row's remedy sentence (\"Mark it `manual` or name the event\") is not the right prescription for a value that is a ruling-wait written mid-sentence (it should say \"declare it: `#N rules on X`\"), and #7401 needs its own reading — so the change owes its own sentence and its own self-test, which is a card, not a patch token.\n\n## What this card is NOT\n\n- ⛔ Not the reserved class. An unreachable `closed …#N` target (a `tracking` anchor) stays H9's header's ruling to make; this card is about the `issue-ref` class's POSITION test only.\n- ⛔ Not a claim that any of the five holds was wrongly decided; the defect is in the exit's spelling and in what H9 accepts.\n\n## Refs\n\n#17377 (the parent — the classifier and its ruled order) · PR #17603 (the diff; the census table and the four-axis reasoning are in its body) · #7898 / #3739 (the parent's specimens) · #10102 (the #9591 lesson the row sentences keep) · `scripts/pm/check-half-states.mjs` — `classifyRestartWhen`, `FIREABLE_RESTART_WHEN_CLASSES`, the H9 header note's \"measured price\" paragraph.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

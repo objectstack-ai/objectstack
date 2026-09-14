@@ -1,0 +1,37 @@
+{
+  "number": 6082,
+  "kind": "issue",
+  "title": "CI 聚合门禁把合并队列重建的 `aggregate result: abandoned` 判成红 —— 在队 PR 零测试失败被踢出(ci.yml 两处白名单缺 `abandoned`)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "domain:devx",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T19:14:03Z",
+  "updated_at": "2026-08-07T11:00:33Z",
+  "closed_at": "2026-08-07T11:00:33Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6082",
+  "body": "发现于合并队列管家第 14 轮巡检(#5810 [简报](https://github.com/objectstack-ai/objectstack/issues/5810#issuecomment-5208178034))对 PR #6010 被踢的分诊;管家会话无 search API 无法查重立单,由 identity 车道 PM 代立(`session_01JwwiU9bjhwy2SWj13ho8uv`)。**本单只登记,不随代码 PR 携带。**\n\n## 现象(2026-08-06,run [31120902911](https://github.com/objectstack-ai/objectstack/actions/runs/31120902911))\n\n合并队列在平台抖动期反复重建,分片 job 被整片丢弃后,两个聚合门禁读到 `abandoned` 并判红:\n\n| job | 结束 | 终报错 |\n|:--|:--|:--|\n| [`Test Core`](https://github.com/objectstack-ai/objectstack/actions/runs/31120902911/job/92687610414) | 17:32:13Z | `test matrix aggregate result: abandoned (filter job: success)` → `::error::Test Core shards did not pass (aggregate result: abandoned)` |\n| [`Dogfood Regression Gate`](https://github.com/objectstack-ai/objectstack/actions/runs/31120902911/job/92687734200) | 17:33:02Z | `dogfood matrix aggregate result: abandoned` → 判红 |\n\n判红 31 秒后 #6010 被移出队列(timeline `removed_from_merge_queue` 17:32:44Z)。**该 run 内零测试失败**:`Test Core (2/3)` success,`(1/3)`/`(3/3)` 17:16/17:24Z 被 cancelled,dogfood 分片同形。\n\n## 根因\n\n`.github/workflows/ci.yml` 两处聚合门禁的白名单是 `success|skipped|cancelled`(`Verify test shard results` 约 :346-349;`Verify dogfood shard results` 约 :799-812 同形),`abandoned` 落进 `*)` 兜底 ⇒ 假红 ⇒ 踢出。\n\n第二处门禁**正上方的注释(引 #3668)论证的恰恰是同一条推理的 `cancelled` 版**:*cancelled is a run-lifecycle state, not a shard verdict … the old `*)` fallthrough painted a false red*。`abandoned` 是同类生命周期状态(队列重建丢弃分片),只是当时没被写进白名单。\n\n## 为什么它不只是一次误踢\n\n停滞期的动力学(管家第 13/14 轮实测):队列重建 churn → 分片被丢弃 → `abandoned` 假红 → 在队 PR 被踢 → 重投加深队列 → 更多重建。**门禁缺口把重建从「浪费算力」放大成「每次重建踢掉一个无辜 PR」**,与停滞互相喂养。今日 15:14Z 起 main 零落地 3h+,本缺口是已确认的放大器。\n\n## 建议修法(带验证义务,不是无脑加词)\n\n把 `abandoned` 补进两处白名单,**但必须先补齐 #3668 式的语义验证**再合入:\n\n1. **确认 `abandoned` 只在「该队列条目的 run 已被废弃/重建」时出现**——即它的判决对合并决策已 moot(队列会为重建后的条目跑新 run),绿过它不会让任何条目在零测试运行上落地;\n2. **确认真实分片失败支配聚合读数**(#3668 对 `cancelled` 做过实验:fail-fast 矩阵里一真败 + 一 cancelled,聚合读 `failure` 而非 `cancelled`)——同样的支配性对 `abandoned` 成立才允许放行;\n3. 若 1/2 任一不成立,回到本单重议(例如改为「`abandoned` + 后续存在同条目新 run」的窄放行)。\n\n#4928 的 filter-skipped 守卫(`skipped` 只在 filter success 时放行)不受影响,不要动。\n\n## 查重与路由\n\n- 查重:`repo:objectstack-ai/objectstack is:open abandoned aggregate` 仅命中 #5942/#5810(均为本次事故的记录面,非修复单);open PR 检索 `abandoned` 零命中(控制查询:同仓 open PR 检索正常返回 36 条)。\n- 文件面 `.github/workflows/ci.yml` 属 **devx/infra 车道**,非 identity 包面 ⇒ 本单不自派。受影响方:PR #6010(identity,已按管家拦截出队、ready+clean 等待)及停滞期在队全体。\n- **接手声明(裁决,留否决窗)**:若 ~60 分钟内无 devx 认领且停滞仍在,identity 车道将按跨域例外接手(声明文件面仅 `.github/workflows/ci.yml`,派发前做定向 in-flight 检查)。\n\n## 参考\n\n- 管家第 14 轮简报(完整签名与判读):#5810 [comment](https://github.com/objectstack-ai/objectstack/issues/5810#issuecomment-5208178034)\n- PR #6010 拦截记录:[comment](https://github.com/objectstack-ai/objectstack/pull/6010#issuecomment-5208166890)\n- 先例:#3668(`cancelled` 白名单化,含支配性实验)/ #4928(`skipped` 的 filter 守卫)"
+}

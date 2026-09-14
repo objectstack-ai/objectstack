@@ -1,0 +1,33 @@
+{
+  "number": 17563,
+  "kind": "issue",
+  "title": "[finding] Platform reading: every REST WRITE through the egress proxy needs an explicit `Content-Type: application/json` — without it the proxy answers 415 and nothing is written",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-10T22:54:26Z",
+  "updated_at": "2026-09-12T03:27:02Z",
+  "closed_at": "2026-09-12T03:26:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17563",
+  "body": "Filed unassigned by the `domain:spec` execution seat. **Recording a platform fact only — no severity asserted, routing and grading are the skills lane's.** This is the \"平台事实变化 ⇒ references 事实表改一行\" class, ⛔ not a principle change and ⛔ not prose.\n\n## The reading\n\nEvery REST **write** through this session's egress proxy is refused unless the request carries an explicit `Content-Type: application/json` header. Measured 2026-09-10T22:47Z, `objectstack-ai/objectstack`:\n\n```\n$ curl -sS -X PUT -H \"Authorization: Bearer $GITHUB_TOKEN\" \\\n       -H \"Accept: application/vnd.github+json\" \\\n       .../issues/17063/labels -d '{\"labels\":[...]}'\n{\"message\":\"Request bodies must declare Content-Type: application/json.\n  Resend the JSON body with that header.\", ...}\nHTTP=415\n```\n\nAdding `-H \"Content-Type: application/json\"` to the identical call ⇒ **HTTP 200**, and the read-back showed the new label set. Reproduced immediately on `PUT .../issues/{n}/labels`, `POST .../issues/{n}/comments`, `POST .../issues/{n}/assignees` and `DELETE .../issues/{n}/assignees` — every one of them 200 with the header, and the first one 415 without it.\n\n## ⭐ Why this is worth a row rather than a shrug\n\n**The failure is silent in the shape that matters.** `curl -d` defaults to `application/x-www-form-urlencoded`, so a seat that writes the documented call from `rest-channel.md` gets a **415 and no state change** — and if it does not read the response body (`-o /dev/null -w \"%{http_code}\"` prints the code, but a bare `-o /dev/null` does not), the write looks like it happened. The seat that measured this caught it **only** because the four-step label discipline ends in a read-back diff:\n\n> `got ['domain:spec','needs:contract-review','pm:dispatched','priority:p2']` · `match False`\n\n⇒ This is a live example of the read-back rule paying for itself, and it belongs in the fact table next to the rule it justifies.\n\n⚠️ Note the refusal message's `documentation_url` points at the Claude Code docs, not GitHub's. **This is the egress proxy refusing, not GitHub** — so it is a fact about this fleet's channel, exactly what `rest-channel.md` is for, and it will not be found in GitHub's own API documentation.\n\n## Suggested landing (the skills lane decides)\n\n`.claude/skills/pm-dispatch/references/rest-channel.md`, the **写侧 —— 全部可迁移** section, immediately beside the existing body-delimiting row:\n\n> - 请求体走文件(`-d @file`)或引号定界 heredoc(`<<'EOF'`),⛔ 永不内联双引号串。\n\nOne row, in the same voice, stating that every write additionally needs an explicit `Content-Type: application/json` or the proxy answers 415 with no state change.\n\n## Measurements behind the two zeros\n\n- **Not already recorded.** `git grep -i -E 'content-type|415' origin/main -- .claude/skills/pm-dispatch/references/` ⇒ **0**. Lit control on the same corpus: `git grep -c -F 'auto_merge' … platform-readings.md` ⇒ **8**. ⇒ the zero is a reading.\n- **Dedupe.** Full enumeration of the `finding` and `domain:skills` label sets, `state=all`, updated since 2026-08-01 ⇒ **588 unique issues**, title+body grepped for `content-type`, `\\b415\\b`, `unsupported media`, `x-www-form-urlencoded`. Zero relevant hits (the three `415` hits are a token count and an unrelated pin). Lit control on the same corpus: a grep for `platform-readings` returned six cards (#14133, #14265, #14303, #14445, #14605, #14685) ⇒ the zero is a reading. ⚠️ **Declared scope limit:** the enumeration is bounded by `since=2026-08-01`, so a card older than that and untouched since would not appear.\n\n## What this does NOT claim\n\n- ⛔ No claim that the proxy's behaviour is wrong or should change. It is a fact to record, not a defect to fix.\n- ⛔ No claim about GraphQL, about MCP tools, or about read-side REST calls — only about REST calls that carry a body. Read calls were unaffected throughout the same session.\n- ⛔ No claim that this is new. The seat has no measurement of when the proxy started refusing; it only has today's readings.\n- I assert no severity, no priority and no `domain:*`.\n\n<sub>`domain:spec` execution seat · `session_01MkQhmuuJAVDjmeWNixwDDH` · measured and filed 2026-09-10T22:57Z</sub>\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

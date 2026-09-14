@@ -1,0 +1,35 @@
+{
+  "number": 17769,
+  "kind": "pull_request",
+  "title": "test(core, runtime): the retracted verb survived in two case titles — sweep it repo-wide instead of reading one file",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-12T03:45:00Z",
+  "updated_at": "2026-09-12T04:25:27Z",
+  "closed_at": "2026-09-12T04:25:25Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-09-12T04:25:25Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/17769",
+  "body": "Follow-up to #17753, found by a post-merge sweep rather than by the pin that PR added. ⛔ #17147 stays OPEN — this PR is not its closer.\n\n> ⚠️ Worded this way deliberately. The earlier phrasing put a closing keyword immediately before the number, and GitHub's reference parser matches the keyword plus the number and ignores the negation around it — so on #17753's merge the card was auto-closed as COMPLETED (reopened since; see that PR's body).\n\nClause-②: no — no new key lands on any published payload. Two test-case titles, one test header note, one widened assertion in a test file, one changeset.\n\n## What the single-file pin missed\n\n#17753's negative assertion read `plugin-permission-enforcer.ts` and checked the retracted sentence was gone from it. It was. But `packages/runtime/src/security/artifact-granted-permissions.test.ts` — the file #13457 added — carried the same phrasing as a **case title**:\n\n> `it('a CONSENTED entry enforces exactly the consented surface and nothing beside it', …)`\n\nnext to a sibling titled `… — registered, and denies`.\n\n**Neither case asserts a refusal, and neither could.** Both read a permission bag through `getPluginPermissions` and check what it *answers*; nothing on the tree queries that registry, because `SecurePluginContext` has no production construction site and the fs/network gates have no caller at all. A case title is read as evidence (ADR-0033) — those two told a reader the platform confines plugins, which is exactly the defect #17147 exists to remove, in the one place a `grep` for the *docblock* would never look.\n\n## The fix, and why the pin changes shape\n\n- Both titles now name what they assert: `bag ANSWERS yes to …` / `its bag answers NO to everything`.\n- That file's header states the verb discipline out loud: **`answers` / `registered` / `bound`**, ⛔ never `enforces` / `denies` / `gates` / `refuses` / `blocks` until the seam exists — and points at the pin that decides when it does.\n- `granted-permissions-not-enforced.pin.test.ts`'s negative assertion becomes a **repo-wide `git grep`** over the same pathspecs as its other sweeps, excluding only its own specimen. The needle is held once as `RETRACTED` so the sweep and the single-file read cannot drift apart.\n- **Anti-vacuity limb:** the raw result must still *contain* this file's own specimen, so a scan that is broken or looking at nothing cannot pass as a clean repo — `.filter` alone would hide both.\n\n**Ablated:** restoring the old case title turns the sweep red and names the offending file.\n\n`check:cross-package-test-inputs` still OK (28 packages); `@objectstack/core` `test:repo` and `@objectstack/runtime` `src/security` both green (6 and 141 tests).\n\n## The general lesson, recorded\n\nA text pin that reads **one file** proves that file. This claim lived in six carriers across three repos, and the cheap correct shape was a sweep with an anti-vacuity control from the start.\n\nRefs: #17147 · #13457 · PR #17753\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n"
+}

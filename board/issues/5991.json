@@ -1,0 +1,35 @@
+{
+  "number": 5991,
+  "kind": "pull_request",
+  "title": "feat(runtime)!: action ctx.session 双发 positions(权威)+ roles(弃用别名) (#5613)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T13:58:39Z",
+  "updated_at": "2026-08-06T15:06:17Z",
+  "closed_at": "2026-08-06T15:06:15Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T15:06:15Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5991",
+  "body": "Fixes objectstack-ai/objectstack#5613\n\n#5613 phase 2 的 **runtime 半边**(spec 半边为 #5779 / PR #5849,已在主干 `d4e080937`)。维护者裁定「C 骨架 + A 语义,contract-first 两阶段」:契约先立、生产者随后。本 PR 就是那个「随后」。\n\n## 前提复核(实测,非照抄 issue)\n\n以最新 `origin/main`(`5582e1821`)为基线逐条实测:\n\n- `packages/spec/src/ui/action-params.zod.ts` 的 `ActionSessionSchema` **已含** `positions`(权威键)+ 弃用别名对,ADR-0087 语义迁移条目 `action-session-*-to-positions` 已在 `packages/spec/src/migrations/registry.ts`、`spec-changes.json`、`docs/protocol-upgrade-guide.md` 三处就位 —— 契约面确实已解锁;\n- `buildActionSession()` 现址 `packages/runtime/src/action-execution.ts:768`(issue 正文的 689-695 行号已漂),仍只发别名键,值取自 `ec.positions`;docstring 仍自称 \"mirroring the hook `ctx.session` shape (#3280)\";\n- 两处调用点仍在:`packages/runtime/src/domains/actions.ts:333`、`action-execution.ts:999`(均只是 `session: buildActionSession(deps, ec)`,形状变化直接流过,无需改动);\n- 预埋翻转点(键集 `toEqual` 断言)仍在 `packages/runtime/src/action-session-shape-contract.test.ts`。\n\n前提成立。\n\n## 改了什么\n\n**1. `buildActionSession()` 双发(`packages/runtime/src/action-execution.ts`)**\n\n```ts\n...(Array.isArray(ec.positions) && ec.positions.length\n    ? { positions: ec.positions, roles: ec.positions }\n    : {}),\n```\n\n一个数组、两个键名,由构造保证同值(不是两次可能漂开的读取)。**「非空才写」语义原样保留**:无 positions(或 `positions` 非数组)时两个键都不出现 —— `'positions' in ctx.session` 与别名键的 `in` 判定同真同假;无身份信封时整个 session 仍是 `undefined` 而非 `{}`(#3712)。\n\n**2. 两句错注释修正**\n\n- 「mirroring the hook `ctx.session` shape」自 #5050 起就是错的(hook 侧同名键已退役,且 hook session 本就是另一套键集、另一个生产者 `buildSession()`)—— 删除该自述,改为如实说明:形状由 `ActionSessionSchema` 声明、本函数是其唯一生产者、一致性由 pin 测试守;\n- 原「⚠️ 两句被登记为 WRONG,留给 phase 2 一起改」的临时段落随之退场,替换为弃用窗口的正式说明(权威 `positions` / 别名 / 迁移条目 / 移除路径 #3280→#3290)+ 「两个拼法都不是授权输入」的警示。\n\n**3. 翻转预埋断言 + 承载双发同值(`action-session-shape-contract.test.ts`)**\n\n键集断言翻为含 `positions` 的新形态,并把窗口期的承重事实钉住:两个键**都对着 `ec.positions` 断言**(而不是互相比对),所以「其中一个改从别处取值」也过不了;新增一条「别名绝不单独出现」,是窗口关闭那天删别名的方向性保险。\n\n**4. 真实 dispatch 验证(`http-dispatcher.test.ts`)**\n\n迁移条目的验收口径写明「Verify against a real dispatch, not a fixture」,故补了一条走 `dispatcher.handleActions` 的用例:持有 positions 的调用者发起 action,断言 **body 实际收到的** `ctx.session.positions`,以及同值的别名。\n\n**5. `ScriptContext.session` 收窄 —— 收的是联合,不是 `ActionSession` 单型**\n\nissue 第 4 条要求用 spec 的 `ActionSession` 收窄。实测后按「缩回最小面并说明」处理:这个 seam **确实同时承载 hook session 与 action session**(`body-runner.ts` 的 `buildSandboxContext` / `buildActionSandboxContext` 两个写入方),把它声明成 `ActionSession` 单型,正是本 issue 要消灭的「一个键名两种现实」的同型错误 —— 只是换到类型面上。因此新增并导出:\n\n```ts\nexport type ScriptSession = ActionSession | HookContext['session'];\n```\n\n`session?: unknown` → `session?: ScriptSession`。#5697 当初留 `unknown` 的理由(收窄会逼 seam 的每个消费者去判别 body 种类)这次是**实测**而非再假设:两个写入方从 `any` 赋值,唯一读取方 `quickjs-runner` 的 `setObjectJson` 收 `unknown`,全仓(objectstack / objectui / cloud)`ScriptContext` 无 runtime 包外引用。所以今天没有任何站点需要判别,而联合类型正是让将来需要判别的站点被 tsc 抓住。收窄面止于 runtime 包内。\n\n**6. changeset(major)+ 文档**\n\n`.changeset/action-session-positions-runtime-dual-emit.md`,`@objectstack/runtime: major`,正文带 FROM → TO 迁移处方(改读 `positions`;别名在窗口内仍解析,窗口关闭按 #3280→#3290 路径移除;**不要**把 `…includes('admin')` 的访问判断改名成 `positions.includes('admin')` —— 那是把缺陷改名而不是把读改对),并把 `ScriptContext.session` 的收窄作为第二处 breaking 明写。\n\n文档面实测:全仓没有任何 hooks/actions 文档在教 action 侧的旧拼法(`skills/objectstack-data` 讲的是 hook 侧已退役的那个键,`content/docs/references/ui/action-params.mdx` 是 #5849 已重生的生成物)。唯一真正教 action body `ctx` 的手写面是 `skills/objectstack-ui/SKILL.md`,在其「Action body context (`ctx`)」小节补了 `ctx.session.positions` 的权威读法 + 「不是授权输入」的警示 + 指向升级指南的迁移指路。\n\n> **该小节改过一次,原因值得记录**:初版在技能文档里直接写出弃用别名的示例,被 `check:role-word`(ADR-0090 D3 的 shrink-only 棘轮)判红 —— 保留词计数 2 → 5。棘轮是对的:技能文档是**授权写法**的教学面,只该教权威拼法;别名与迁移处方留在其本来的渠道(changeset + `docs/protocol-upgrade-guide.md`,均不在棘轮扫描面内)。已按此重写,`node scripts/check-role-word.mjs` 现报 `OK (43 baselined file(s), no new occurrences)`。\n\n## 验证\n\n**反向验证 —— 方向事先预测,结果与预测一致。** 预测:这是最常见的「红」向,而非 #5046 式的「诊断变多」或 #5009 式的「反转」—— 因为断言的是**产出对象的精确键集**,而被撤掉的正是产出该键的那条肢,缺席可直接观测(不存在「计数归零导致断言因空而绿」的陷阱)。把双发撤回只留别名后实测:\n\n```\n× builds exactly the declared keys …\n  → expected 3 keys to deeply equal [ 'organizationId', 'positions', …(2) ]\n× carries `ec.positions` verbatim under BOTH …\n  → expected undefined to deeply equal [ 'sales_rep', 'org_admin' ]\n× emits the alias only alongside the canonical key …\n  → expected the built key list to include 'positions'\n× omits `userId` entirely for an org-scoped call with no user\n  → expected 2 keys to deeply equal [ 'organizationId', 'positions', …(1) ]\n Tests  4 failed | 7 passed (11)\n```\n\n真实 dispatch 用例同向变红:`expected undefined to deeply equal [ 'sales_rep', 'org_admin' ]`(`http-dispatcher.test.ts:3659`)。随后已还原。\n\n**正向**(均在共享 verify 锁内、`--max-old-space-size=4096`):\n\n- `pnpm --filter @objectstack/runtime test`(`--maxWorkers=2`):**Test Files 102 passed (102) / Tests 1476 passed (1476)**;\n- `turbo run test --concurrency=2`(全仓):**135 successful, 135 total**;\n- `turbo run typecheck --concurrency=2`(全仓):**125 successful, 125 total** —— 收窄没有溢出 runtime 包;\n- `turbo run build --filter='!@objectstack/docs' --concurrency=2`:**71 successful, 71 total**;\n- `pnpm lint`(eslint --no-inline-config,全仓):无输出即绿;lint job 的 24 个 `check:*` 逐条本地跑过,全 OK;\n- spec 侧 `check:skill-docs` / `check:skill-refs` / `check:skill-examples` / `check:docs` / `check:spec-changes` / `check:upgrade-guide`:全部 in sync;\n- `node scripts/check-nul-bytes.mjs`:`OK (scanned 5738 tracked text file(s))`。\n\n⛔ 未动 `packages/spec`,未动 `content/docs/releases/`。\n\n## 窗口关闭时要做什么(留给后来者)\n\n移除别名的那一次改动,应当同时:producer 去掉别名键、`action-session-shape-contract.test.ts` 的键集期望与「双发同值」断言随之收缩、`http-dispatcher.test.ts` 的别名断言删除、spec 侧按迁移条目处置(条目已明说窗口期内**不**立 tombstone)。技能文档无需改动 —— 它从一开始就只教权威拼法。\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01DWUR56YsttL5sTF72Q75TQ\n"
+}

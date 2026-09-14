@@ -1,0 +1,34 @@
+{
+  "number": 5870,
+  "kind": "issue",
+  "title": "`capabilities` 不在 ObjectQL `metadataArrayKeys` 注册缝里 —— app 声明的 capability 永远拿不到 registry provenance(#4967 Part 2 拆出)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T10:12:51Z",
+  "updated_at": "2026-08-06T14:18:39Z",
+  "closed_at": "2026-08-06T14:18:39Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5870",
+  "body": "Part of #4967(其 Part 2 按 contract-first 拆出,转 `domain:engine-core` 队列)。拆分依据:services 车道 PM 2026-08-05 的锚定评论 + 存量裁决轮(维护者 2026-08-06 委托,`session_01LeEfA7CFwbJb7JJmXm2KM3`)的入队裁定,两者一致指示「派发时 Part 2 拆 sub-issue 转 engine-core」;标签按该记录在案的路由结论施加(identity 车道执行拆分,`session_01JwwiU9bjhwy2SWj13ho8uv`)。\n\n## 缺陷(#4967 Part 2 原文要点,已于 origin/main 复核仍成立)\n\n`bootstrapDeclaredCapabilities` 解析 provenance 用 `cap._packageId ?? cap.packageId`,其中 `_packageId` 这一半对 app 声明的 capability **永远不会有**:\n\n- `AppPlugin` 通过 `metadata.registerInMemory(type, item.name, item)` 暴露 stack 安全元数据(`packages/runtime/src/app-plugin.ts` ~628),而 `MetadataManager.registerInMemory` 只做 `this.registry.get(type).set(name, data)` —— **不盖任何章**;\n- 盖章路径是 `SchemaRegistry.registerItem(type, item, 'name', packageId)`(内部 `applyProtection(item, { packageId })`),入口在 `ObjectQLEngine.use()` 走硬编码的 `metadataArrayKeys` 清单(`packages/objectql/src/engine.ts` ~1735,仓内共两处)—— 清单含 `'roles', 'permissions', 'profiles', 'sharingRules', 'policies'`,**`'capabilities'` 不在其中**。\n\n后果:permission sets 有章、能物化;capabilities 永远无章到达,`readDeclared(ql, 'capability')` 返回 `[]`。文档里写成「registry 章缺席时的 fallback」的作者侧 `packageId` 实际上是**必填**,但 schema 是 `.optional()`,漏写的失败形态只是一条 boot warn + 一条永不生效的授权(declared ≠ enforced,授权面出洞)。\n\n## 建议修法(#4967 原文)\n\n把 `capabilities` 接进与 `permissions` 相同的 provenance 盖章缝(`metadataArrayKeys` → `SchemaRegistry.registerItem`);若裁定不这么做,则 `CapabilityDeclarationSchema.packageId` 的「fallback」自述必须改掉 —— 不能继续描述一个从不发生的章。\n\n## 与 Part 1 的关系(无阻塞,互补)\n\n#4967 Part 1(被拒收的声明仍进 `declaredNames` 压掉 back-compat 派生)落 `packages/plugins/plugin-security`,由 identity 车道独立修;两半无先后依赖 —— Part 1 让「被拒收」不再变成洞,本单让「app 声明」不再必然被拒收。两半都落地后,#4967 才整体闭环(其正文含完整 repro)。\n\n## 验收\n\n- app 包声明的 capability 经 `use()` 注册后携带 registry provenance(`_packageId` 有章),`readDeclared(ql, 'capability')` 能读到;\n- 一条 pin 钉住 `metadataArrayKeys` 与实际盖章行为的一致性(或等价的注册缝测试);\n- 若走「改自述」路线,schema `.describe()` 与文档同步且有 pin。"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 5747,
+  "kind": "issue",
+  "title": "engine-delete-dispatch 的共享判定与 ObjectQL.delete 在「假值标量 id」上不一致 —— `where: { id: 0 }` 判定答 by-id,引擎却 reject",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T03:52:19Z",
+  "updated_at": "2026-08-07T01:12:46Z",
+  "closed_at": "2026-08-07T01:12:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5747",
+  "body": "发现于 #5480(抽 `engine-update-dispatch.ts` 时逐条对照 delete 侧的既有形状),PR 见该单。属 PD #10 的范围外发现,不在 #5480 内修(#5480 是 update 侧的行为保持重构,不动 delete 侧语义)。\n\n## 事实(origin/main @ 488b66c,已实测)\n\n`engine-delete-dispatch.ts` 的自我描述是「**the one answer** to what does `ObjectQLEngine.delete` do with this call」,`engine-delete-dispatch.test.ts` 的文件头把这条性质写成了它存在的理由:\n\n> A shared predicate that drifted from `ObjectQL.delete` would be worse than no predicate at all: every fake engine pinned to it would be confidently, uniformly wrong, and the gate over them would report success.\n\n这条性质在**假值标量 id** 上不成立:\n\n- `resolveEngineDeleteDispatch({ where: { id: 0 } })` 返回 `{ kind: 'by-id', id: 0 }` —— `scalarDeleteId` 只排除 `null` / 数组 / 算子对象,`0` 是合法的 `number`;\n- `ObjectQL.delete('task', { where: { id: 0 } })` 抛 `Delete requires an ID or options.multi=true`。\n\n原因在 `engine.ts`:判定的结果先落进 `const id = dispatch.kind === 'by-id' ? dispatch.id : undefined`,分支却按 `if (hookContext.input.id)` ——**真值**测试。`0` / `''` 为真值假,于是落到 `else if (options?.multi && driver.deleteMany)`,再落到 reject。\n\n实测(记录型 driver 驱动真实引擎,`packages/objectql`):\n\n```\n✓ FINDING A: delete predicate says by-id for where.id=0 but the engine REJECTS it\n✓ FINDING A2: same for where.id=\"\"\nTests  2 passed\n```\n\n断言内容:`resolveEngineDeleteDispatch({where:{id:0}}).kind === 'by-id'`,而 `await engine.delete('task', {where:{id:0}})` 抛出的正是 `ENGINE_DELETE_REJECT_MESSAGE`;`id: ''` 同。\n\n## 为什么值得记\n\n这正是该模块和 `check:engine-double-contract` 门禁存在的那一类问题,只不过发生在防线内部:\n\n1. 一个按 `assertEngineDeleteDispatch(options)` 钉死的假引擎会**接受** `delete(o, { where: { id: 0 } })`(判定不抛),而真服务器拒绝它 —— 门禁认定为 pinned 的替身在这一输入上仍然比生产者宽松,这就是 #4434 的形状;\n2. `ENGINE_DELETE_DISPATCH_CASES` 里没有任何假值标量 id 的用例,所以「真实引擎 == 判定」的逐例对照跑不到它 —— 检查在跑、是绿的、但结构上够不到这个输入(#4868 家族)。\n\n可达性:`id: 0` 对自增主键少见;`id: ''` 则是「路径段为空 / 表单字段未填」直传 `where.id` 的常见形状。两者都不是纯理论输入。\n\n## 建议动作\n\n先定方向,再动代码 —— 两条路语义不同,不要猜:\n\n- **A. 判定向引擎看齐**:`resolveEngineDeleteDispatch` 末尾改真值测试(`if (id)`),假值标量落到 `multi`/`reject`。这是**如实描述生产者**的一份判定,与 #4550 的立场一致(#5480 抽 update 侧时正是这么做的:`ObjectQL.update` 的分支同样是真值测试,所以 `resolveEngineUpdateDispatch` 也写成真值测试,并在模块头写明第 3 点)。\n- **B. 引擎向判定看齐**:`engine.ts` 的两个分支改成 `dispatch.kind === 'by-id'` 而不是 `if (hookContext.input.id)`。这会**改变行为** —— `where: { id: 0 }` 从 reject 变成按 id 删除 —— 因此需要单独评估 hook 清空 id 的那条语义(`engine.ts` 里 delete 的 reject 分支注释明写「re-asked here because a beforeDelete hook may have cleared the id since」,清空用的正是真值语义)。\n\n不论选哪条,`ENGINE_DELETE_DISPATCH_CASES` 都应补上 `where: { id: 0 }` / `where: { id: '' }` 两例,让逐例对照从此覆盖这一半。update 侧已在 #5480 补齐(`falsy scalar where.id (0), no multi → reject` + `multi with a FALSY data.id`),delete 侧还没有。\n\n关联:#4550(判定本体)、#4434(家族起源)、#5480(发现来源,update 侧的同款抽取)、#5629 / #5694(门禁的发现面)。\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 6110,
+  "kind": "pull_request",
+  "title": "docs(changeset): vendored console 条目里给 flow 几何迁移补回 BREAKING (v17) 标注 (#6106)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T02:11:18Z",
+  "updated_at": "2026-08-07T02:35:24Z",
+  "closed_at": "2026-08-07T02:35:23Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T02:35:23Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6110",
+  "body": "Part of #6106 (PR B of 2 — closes via PR A)\n\nrc.4 发布前置的 **PR B**。改动面是**一个文件一行**:`.changeset/console-f995a452d2ca.md`。\n\n## 为什么\n\n同一份 vendored changeset 里并排躺着两条 v17 破坏性迁移,标注却只有一条:\n\n- widget 元数据单载体(objectui `042e09d77` / objectui#3233)—— 源 changeset **首段**就写了 `**BREAKING (v17)**`,digest 读首段,所以标注跟着进来了;\n- flow 节点几何(objectui `6e794a19e` / objectui#3172)—— 源 changeset 同样声明了破坏性(「Breaking for anyone reading `node.ui` off a flow draft: after the author's first edit the key is gone and the coordinates live under `node.position`.」),但那句在正文**靠后段落**,digest 读不到 ⇒ vendored 条目丢了标注,编译出的发布记录里它读起来像一次普通行为修复。\n\n本 PR 只做一件事:**把源头已经声明过的真相还原到这一行**。\n\n## 改动(before → after)\n\n```\n- - **minor** — The flow designer writes node geometry as the spec's `FlowNode.position`, not its own `ui: { x, y }` (objectui#3172). (objectui `6e794a19e`)\n+ - **minor** — **BREAKING (v17)** — The flow designer writes node geometry as the spec's `FlowNode.position`, not its own `ui: { x, y }` (objectui#3172). (objectui `6e794a19e`)\n```\n\n前缀与同文件 widget 条目**逐字节一致**(实测,非目测):\n\n```\nflow   prefix bytes: 2d202a2a6d696e6f722a2a20e28094202a2a425245414b494e472028763137292a2a20e2809420\nwidget prefix bytes: 2d202a2a6d696e6f722a2a20e28094202a2a425245414b494e472028763137292a2a20e2809420\nBYTE-IDENTICAL PREFIX: True\n```\n\n(`e28094` = U+2014 EM DASH,两侧各一个半角空格。)\n\n## 边界\n\n- ⛔ **不改 digest 脚本**(`scripts/objectui-changeset-digest.mjs`)—— 「digest 只读首段」是 #6099 记录的机制盲区,属另案;本 PR 只修这一处已落地的静态文本。\n- ⛔ 不重新生成该文件、不调整条目顺序、不动 frontmatter(仍是非空的 `\"@objectstack/console\": minor`)。\n- 已核实**没有任何门禁把这个 vendored 文件按字节钉死**:`objectui-changeset-digest.mjs` 只在自测的临时仓里写 `console-*.md`,不读校验仓内已落地的那份。\n\n## Check Changeset 的实际判定(已实跑,不是推断)\n\n首跑 **红**。读日志而非猜测,原因是判定条件为「本 PR **新增**了几个 changeset」而不是「本 PR 是否改动了 changeset 文件」:\n\n```\nBASE_SHA: 0664488a81c2dc854bb9e83305ff585fec0087c5\nThis PR adds no changeset. There are TWO ways forward …\n  2. It releases nothing … apply the 'skip-changeset' label.   PREFERRED\n     The label is a gate-level exemption. It produces NO input for\n     changesets/action, so it cannot affect a release.\n```\n\n本 PR 修的是一份**已经 pending** 的 changeset 的正文措辞,`ADDED = 0`,所以门禁按设计判红。两条路里只有 route 2 是对的:再 `pnpm changeset` 新增一份,等于凭空给 `@objectstack/console` 多声明一次发布,那才是错的。故已按门禁自述加 `skip-changeset` 标签并重跑该 job,重跑 **绿**。\n\n(顺带记录:issue #6106 里「本 PR 改的就是 changeset 文件,无需 skip-changeset」的预判**不成立** —— 判定看的是新增数,不是文件面。)\n\n## 验证\n\n| 门禁 | 结果 |\n|:--|:--|\n| `node scripts/check-empty-changeset.mjs --self-test` | `21 assertions over real temp git repos (real scan() path)` |\n| `node scripts/check-empty-changeset.mjs` | `No empty-frontmatter changeset introduced by this diff (0 declaring changeset(s) added).` |\n| `node scripts/check-changeset-no-major.mjs` | **EXIT=0** —— 标注是散文不是 `major` 声明,已实测而非假设(输出里的 pending-major notice 全部来自既有的其它 changeset,本文件不在其中) |\n| `node scripts/check-changeset-fixed.mjs` | `.changeset/config.json \"fixed\" group is in sync with 69 public workspace packages.` |\n| `pnpm check:objectui-changeset` | digest + range 两套 self-test 全绿(`objectui-range --self-test: all checks passed`) |\n| `node scripts/check-nul-bytes.mjs` | `OK (scanned 5857 tracked text file(s) … no raw ASCII control bytes).` |\n\nCI:ESLint / TypeScript Type Check / Check Changeset(重跑)均 **success**。改动面:`1 file changed, 1 insertion(+), 1 deletion(-)`。\n\n## 关联\n\n- 配套 **PR A**:`content/docs/releases/v17.mdx` 收录这两条迁移 + console 段 pin 区间行更新。\n- #6099 —— 机制修复(digest 只认首段)另案。\n"
+}

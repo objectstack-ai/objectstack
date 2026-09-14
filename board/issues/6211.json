@@ -1,0 +1,35 @@
+{
+  "number": 6211,
+  "kind": "pull_request",
+  "title": "fix(spec): gen:docs 内联形状里的长枚举按测得阈值省略,并印出被隐藏的成员数 (#5340)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T10:58:36Z",
+  "updated_at": "2026-08-07T11:33:31Z",
+  "closed_at": "2026-08-07T11:33:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T11:33:29Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6211",
+  "body": "Fixes objectstack-ai/objectstack#5340\n\n## 先复价:立单时的行号与文件归属都已过期,但**前提仍然成立**\n\n按派发要求先在 `origin/main` 上核实,不沿用立单时的坐标:\n\n- `INLINE_KEY_LIMIT` 与内联摘要装配确实在 **`packages/spec/scripts/lib/format-type.ts`**(不在 `build-docs.ts`);\n- #5606 / PR #6058 的墓碑剔除、#5729 / PR #6127 的 `formatLiteral()` 都在本文件,且 #5729 的定价答复属实 —— 成员字符串已归一化,本单只需在 `formatEnum` 里接手一个已经排好的 `string[]`。\n\n**~900 字符的实例仍然复现**(`content/docs/references/ui/bulk-action.mdx` 的 `BulkActionDef.params`)。而且量了整个语料后发现:**立单时那个实例远不是最坏的** —— 261 个成员的错误码词表被内联进 13 个 `api/*.mdx` 的 `error` 形状里,共 80 行,**单个单元格 6242 字符**。\n\n## 读者现在看到什么,完整词表还在哪里\n\n一个被省略的枚举渲染成:\n\n```\ntype: Enum<'text' | 'textarea' | 'email' | 'url' | 'phone' | 'password' | 'secret' | … +42 more>\n```\n\n`…` 沿用本文件已有的「还有更多」记号(键省略用的就是它),`+42 more` 是**让这次省略在信息上安全的那一半**:纯前缀截断会让页面看起来是完整的而实际不是 —— 读者无法区分「一个 7 项的词表」和「49 项里的前 7 项」。这些页面是 AI 作者的权威输入(ADR-0033),一个靠省略说谎的页面比一个过宽的单元格更糟(与 #5059 同类)。⛔ 所以没有做无标记截断。\n\n完整词表在哪里,按读者会先撞到的顺序:\n\n1. **词表自己那一行永不省略。** `ctx.inShapeSummary` 只在摘要的 `{ … }` 之下被置位,所以下面四种位置全部原样打印每一个成员:schema 自己的行(`BulkActionParam.type`、`ErrorResponse.code`)、顶层联合分支(`Enum< … > | string`,即 `PageComponent.type` 那个形状)、顶层 `Record< string, Enum< … > >`、以及顶层枚举的数组。**量过:805 个内联位置里有 457 个,同一页上就有这份完整拷贝**(`BulkActionDef.params` 就是 —— 往下两节的 `BulkActionParam.type` 带着全部 49 项;每个 `api/*.mdx` 的 `error` 形状也是,它的码表印在 `ErrorResponse.code` 上)。\n2. 剩下 348 个,该页上确实只有这一处,**由计数本身承担**「这是一个 N 项词表的样本」这句话;`json-schema/` 下的 JSON Schema 仍然是它一直以来的权威。\n\n标记**不能**做成指向 (1) 的锚点:Zod 会把枚举内联,到达 `formatType` 的节点是一个裸的 `{ type: 'string', enum: [...] }`,既没有 `$ref` 也没有名字可链;硬造一个等于去猜页面上哪个小节恰好带着同一批成员。\n\n## 阈值是量出来的,不是拍的\n\n语料:216 个生成页 / 8541 个类型单元格 / 1768 处 `Enum`,其中 805 处在摘要内联位置。这 805 处的 body 宽度是明显**双峰**的,每字符的分布密度正好在 80 处塌掉:\n\n| body 宽度 | (48,56] | (56,64] | (64,80] | (80,100] | (100,200] | >200 |\n|---|---|---|---|---|---|---|\n| 出现数 | 57 | 51 | 57 | 31 | 51 | 109 |\n| 每字符密度 | 7.1 | 6.4 | **3.6** | **1.6** | 0.5 | — |\n\n80 以下是读者本来就想看全的短词表(`'asc' | 'desc'`、四项的控件模式),80 以上是**清单**。\n\n候选阈值实测(在真实语料上跑,不是估算):\n\n| 方案 | 命中 / 805 | >200 字符的单元格 | p99 单元格宽 | 省下字符 |\n|---|---|---|---|---|\n| 现状 | 0 | 246 | 643 | 0 |\n| budget=24 | 635 (79%) | 111 | 216 | 460411 |\n| budget=40 | 371 (46%) | 128 | 222 | 452598 |\n| **budget=80** | **189 (23.5%)** | **145** | **247** | **442985** |\n| budget=120 | 134 | 169 | 262 | 436962 |\n| 成员数上限=4 | 291 | 134 | 240 | 445644 |\n\n收紧到 24 要多省略 446 处,只多省 4% 的字符 —— 因为宽度几乎全在那 ~91 个巨型清单里,任何阈值都抓得到。**固定成员数上限在每一档都更差**:上限 4 会把 `Enum<'a' | 'b' | 'c' | 'd' | 'e'>`(31 字符,完全可读)也切掉,却仍留下 134 个 200+ 的单元格。\n\n另外加了一条**「标记必须挣回自己的位置」**的守卫:只超出一两个成员的 body,省下的还不如 `… +N more` 本身占的多。没有这条守卫时,189 次省略里有 29 次省下的字符少于标记占的位置(其中 14 次只藏了一个成员、省 2–3 个字符)—— 拿一个真实拼写换一个计数和一次页面改写,是净亏。加上之后实际生效 **160 处**,另有 31 处(body 81–107)原样保留,阈值因此不是 81 处的悬崖。\n\n## 重生成结果(独立 commit)\n\n`gen:schema && gen:docs` 产物,未手改。42 页 / 144 行,**方向单一**:\n\n- 144 行**全部变短,0 行变长**,共移除 462,140 字符,单行最大 -6266;\n- 144 行**全部带 `… +N more` 标记** —— 无一行是无标记截断(已机器核对:diff 里新增行中不含标记的有 0 行);\n- 900 字符以上的单元格 76 → 4;200 字符以上 246 → 145;p99 643 → 247;**p95 保持 145 不变**(普通单元格不动,这正是目的);\n- 摘要内联位置的最大枚举宽度 6092 → 107;`wholeCell` / `topUnion` / `inRecord` 三类位置一处未动。\n\n剩下最宽的单元格是 `api/contract.mdx` 的 `code`,6092 字符 —— 错误码词表**自己那一行**,故意不动,因为它是该页上唯一一份完整拷贝。\n\n## Pin 与反向验证(两个方向都实测,不是预测)\n\n新增 15 条 pin(`packages/spec/scripts/format-type.test.ts`),覆盖派发要求的三档:阈下不变、阈上带标记省略、边界;外加 #5729 / #5606 的交叉影响与「无 ctx 不省略」的显式降级声明。\n\n- 还原改动前的枚举分支(任何深度都不省略):**7 failed | 44 passed**。7 个红全是断言 `… +N more` 的用例。\n- 无条件省略(`formatEnum(prop.enum, true)`,即这次改动最显然的一行版本):**5 failed | 46 passed** —— `NOT elided` 那组里的 4 条,加上「无 ctx 不省略」那条。\n\n第一版注释里我预测的是「6 failed | 41 passed」和「那五条」,**两个都猜错了**,已按实测数字改写(#5729 的注释里也记过同样的自我更正)。`leaves short enums inside a summary` 是两个方向下都绿的那条,原因诚实地写在注释里:两项枚举在哪一版都在预算内,所以它守的是**预算**而不是**位置**。\n\n## 验证\n\n```\npnpm --filter @objectstack/spec test          → 330 files / 8435 tests passed\npnpm --filter @objectstack/spec typecheck     → tsc --noEmit + check:test-typecheck OK\npnpm --filter @objectstack/spec check:generated → 10/10 artifacts up to date\npnpm --filter @objectstack/spec check:docs    → 232 generated files in sync\nnode scripts/check-nul-bytes.mjs              → OK (5920 files)\n```\n\n消费半径已扫:`formatType` 只有 `build-docs.ts` 三处调用,其他包没有任何 fixture 拼写内联枚举(grep 过),所以不存在 #5046 那种「改在 lint、坏在 cli fixture」的跨包遗漏。\n\n## 一点观察(仅建议,本 PR 不做)\n\n`format-type.ts` 的摘要装配面现在同时承载三件事:墓碑剔除(#5606)、逐值引号(#5729)、宽度省略(本单)。我认为**目前仍是内聚的**,理由与是否该抽取的判断写在给 PM 的报告里,这里不展开,也**没有**在本 PR 里做任何抽取。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_014wsZeReNTqiceBfLb5Pyf5)_"
+}

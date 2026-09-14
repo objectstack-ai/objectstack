@@ -1,0 +1,35 @@
+{
+  "number": 5915,
+  "kind": "issue",
+  "title": "showcase-smoke 夜跑没有可浏览的 HTML 报告 —— CI 的 reporter 列表里没有 html,playwright-report/ 是空气",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "domain:devx",
+    "finding",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T11:31:33Z",
+  "updated_at": "2026-08-06T17:01:29Z",
+  "closed_at": "2026-08-06T17:01:29Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5915",
+  "body": "观察类发现,记录自 #4931 第 2 缺陷的实测(PR #5913)。**今天没有用户会撞到它**,\n修完 #5913 之后诊断也已经可行(raw trace / 截图 / error-context 会上传),所以打\n`finding`、不入队;是否值得做请分诊裁。\n\n## 事实(实测,非推测)\n\n`examples/app-showcase/playwright.config.ts` 的 reporter 是按 `CI` 分叉的:\n\n```\nCI=1 求值 playwright.config.ts:\n  reporter = [[\"github\"],[\"list\"]]\n```\n\n两个 reporter 都只写 stdout,**没有 html reporter**,因此\n`examples/app-showcase/playwright-report/` 这个目录在 CI 下从来不会被创建 ——\n它不是「装错了东西的目录」,而是空气。\n\n这正是 #4931 第 2 缺陷的成因的另一半:上传步骤长期配着这条路径,于是\n`##[warning]No files were found with the provided path` 每次失败都出现一遍。\nPR #5913 把上传路径改到真实的 `outputDir`(`examples/app-showcase/test-results/`),\n并**刻意没有**把 `playwright-report/` 一并列上 —— 列一条永远为空的路径等于留一条\n死声明,还会让下一个读者以为有一份可浏览的报告。\n\n## 剩下的缺口\n\n夜跑失败后能拿到的是原始诊断件:`trace.zip`(可 `playwright show-trace` 打开,\n含完整时间线 / DOM 快照 / console)、`test-failed-1.png`、`error-context.md`。\n**够用**,但没有那份把多个失败聚在一起、带索引和内嵌 trace 链接的 HTML 报告 ——\n一次 3 个面板同时失败时,后者省下的是逐个 `show-trace` 的来回。\n\n## 可选方案\n\n- **A. CI 的 reporter 列表补 `html`**:\n  `[['github'], ['list'], ['html', { open: 'never' }]]`,并在 workflow 的失败上传\n  里加回 `playwright-report/`。代价:一次 workflow + 一次 config 改动,产物体积\n  变大(HTML 报告会把 trace 复制进 `data/`)。\n- **B. 不做**:`trace.zip` 已经是信息量最大的那一件,HTML 报告只是索引层;\n  一个非阻塞的夜间探针也许不值得为浏览体验加一层产物。\n\n倾向 B,除非第 1 缺陷的诊断实际走到了「一次要开三个 trace,来回翻很痛」那一步 ——\n那时 A 的收益才是被真实需求拉出来的,而不是我们替未来假设的。按启动期聚焦原则,\n先不加这层能力面。\n\n## 边界\n\n- 与 #4931 第 1 缺陷(三个图表面板时红时绿)**无关**,不是它的成因。\n- 未认领,仅记录。\n"
+}

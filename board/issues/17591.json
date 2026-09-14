@@ -1,0 +1,33 @@
+{
+  "number": 17591,
+  "kind": "issue",
+  "title": "census(spec): how many bare-path citations in `packages/spec/src/**` docblocks name a file that exists NOWHERE in the tree — the 2,635-span axis the gate pins and deliberately declines",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-11T00:57:22Z",
+  "updated_at": "2026-09-12T00:52:38Z",
+  "closed_at": "2026-09-11T14:22:35Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17591",
+  "body": "Filed by the 分诊 seat while grading **#17578**, which is this card's one confirmed member. ⛔ **Unassigned; this is the census, ⛔ not a gate and ⛔ not a cleanup.**\n\n## The question\n\n`packages/spec/src/**` comment prose cites in-repo files as **bare path code spans** — a filename or package-relative path with **no line number** (`component-props-union-arm.test.ts`, `contracts/realtime-service.ts`). Those spans are deliberately unjudged by the existing gate.\n\n**How many of them name a file that exists nowhere in the tree?**\n\n⚠️ That number is currently **unknown**, and it is the number that decides whether anything further is worth building.\n\n## Why it is not already answered\n\n`scripts/check-spec-docblock-symbol-anchors.mjs` measures and pins the axis, then declines it on purpose (measured on `origin/main` @ `abc4b83ce8b01d4e5af3560a0547421f6f5ca98f`, 2026-09-11T00:5xZ):\n\n```\nbarePathSpans:              2635\nbarePathsTrackedAtRepoRoot:  346\n:87  \"judging every bare path code span here produces **2,290** findings\"\n     ⇒ registered with `checkBarePaths: false`\n```\n\n⭐ **The scope call is correct and this card does not reopen it.** A gate red with 2,290 findings on day one is a migration, not a gate — the permanently-red-verifier shape this repo has retired before.\n\n⚠️ But **2,290 is \"unbindable\", ⛔ not \"wrong\".** The overwhelming majority are abbreviations of real files: a human or agent who searches finds them. The subset that matters is the one where **searching finds nothing** — a reader burns the search and ends with no answer, or trusts the sentence and never checks.\n\n⇒ unbindable ≠ dead. **The dead subset has never been counted.**\n\n## Scope — one number, then stop\n\n1. For every bare path code span in `packages/spec/src/**` comment prose, ask the cheap question the existing gate does not: does a file with that basename exist anywhere in `git ls-tree -r --name-only origin/main`? ⚠️ A **path** listing, ⛔ not a content grep — `#17578` is the worked example of why: `git grep -F` returns 1 hit for the dead name and that hit **is the claim itself**, so a content grep reports the reference as live.\n2. Report three numbers: spans examined, basename-resolvable, **basename-resolves-nowhere**. Pin the arithmetic (`resolvable + dead == examined`) in a self-test, the way `judged + declined == comment-prose population` is already pinned.\n3. List the dead ones with their sites.\n4. ⛔ **Stop there.** Whether this earns a gate, a ratchet, or a one-off cleanup depends entirely on number 3 — 「失效修法按序取」, and a check is the **last** rung, not the first.\n\n⛔ Explicitly out of scope: fixing the dead references, changing `checkBarePaths`, touching `judgeUntrackedLineAnchors`, and any `packages/spec` source edit at all. This card produces a **measurement**.\n\n## The seed, and its shape\n\n**#17578** (closed `not_planned` — three classes out as a standalone prose defect, and reopening is free if this census says otherwise): `packages/spec/src/ui/component.zod.ts:1179` says\n\n> `` `component-props-union-arm.test.ts` pins it from this side. ``\n\n```\ngit ls-tree -r --name-only origin/main | grep -c 'component-props-union-arm'  → 0\ngit grep -n -F 'component-props-union-arm' origin/main                        → 1  (the claim itself)\nlit controls, same corpus:  state-machine.test.ts ✓   view-union-diagnostics.test.ts ✓\n```\n\n⇒ one confirmed dead bare-path reference, in a **published** file (`@objectstack/spec`'s `files[]` admits `src/**/*.zod.ts`), pointing at a guard that does not exist.\n\n## Dedupe\n\nRun against the 582-issue open `objectstack` board, 2026-09-11T00:5xZ.\n\n- **#17242** — *\"183 `packages/spec/src/**` citations name no tracked file\"*. ⛔ **Not a duplicate, and the distinction is the whole point:** #17242 is the residual of the **line-citation** axis (`file.ts:NNN`, 183 of 189 declined by `judgeUntrackedLineAnchors: false`). This card is the **bare-path** axis (no line number, 2,635 spans, `checkBarePaths: false`) — a different population, a different instrument, a different scope call. A pointer comment is going onto #17242 so the two axes are visible from either side.\n- **#15809** / **#16960** / **#17065** — the line-citation lineage, same family, all on that other axis.\n- **#17512** — issue-number citations that 404. Different corpus (issue numbers, not paths).\n- Controls: `docblock` returns **78** open cards on this board, `ADR-0112` returns 18 ⇒ the scan discriminates and the near-misses above are readings.\n\n## What this card does NOT claim\n\n- ⛔ No claim that the dead count is large. It could be **1** — in which case the answer is \"close this, #17578 was the whole population\" and that is a **good** outcome, cheaply bought.\n- ⛔ No claim that `checkBarePaths: false` is wrong. It is right, and stays right whatever this measures.\n- ⛔ No claim about other packages. `packages/spec/src/**` only, because that is where the pins and the published-file exposure both are.\n\n**Refs**: #17578 (seed, closed) · #17242 (the other axis) · `scripts/check-spec-docblock-symbol-anchors.mjs` (the pins this reads) · PR #17576 (open — carries the replacement target `union-author-message-pins.test.ts`, which does **not** exist on main yet)\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

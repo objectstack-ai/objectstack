@@ -1,0 +1,36 @@
+{
+  "number": 5885,
+  "kind": "issue",
+  "title": "[skill] pm-dispatch:services 车道 08-05/06 班次交接沉淀的 10 条 SKILL 更新建议(28 PR / 两次 CI 红 / 三次前提证伪)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T10:57:49Z",
+  "updated_at": "2026-08-06T23:55:46Z",
+  "closed_at": "2026-08-06T23:55:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5885",
+  "body": "来源:services 车道前任 PM 会话 `session_01BWS4heBoAitLmzCLhcYdbK` 的交接清单(该班 28 PR 合并、两次 CI 红、三次前提证伪的实测沉淀;维护者 2026-08-06 转交现任 services 座位处置)。本单为**留档 + 待实施件**。\n\n⚠️ 同文件族协调:#5741(三条 operational note)、#5845(队列管家座位协议文本)同改 `.claude/skills/pm-dispatch/SKILL.md`。三单应合并实施或严格串行,分开并行合会互相冲掉。\n\n## 高价值(建议必改)\n\n1. **派发模板:门清单必须从 workflow 文件枚举,禁止凭记忆挑。** 出处:#5738 首轮 CI 红 —— dev 本地跑了六个门但漏 `check:engine-double-contract`(不在其记忆清单里);改为「从 lint.yml 逐个列门跑全」后被后续四个 dev 继承,再无门红。应为模板硬性条款而非口口相传。\n2. **派发模板:PM 附带的机制性指导必须标注「假设,须实测」。** 出处:三次前提证伪 —— #5561(「注册告警无需动 spec」:Zod default 抹掉未声明,不可表示)、#5808(「500 自动进 withhold 路径」:启发式 11/11 不认,只删名单会把泄漏搬进 500 body)、#5669(「数组 where 闸门不看」:下沉后逐字同谓词)。三次 dev 都用实测顶回并保住了裁决意图。模板应区分「**裁决(不可重裁)**」与「**PM 机制假设(鼓励证伪)**」两个区块。\n3. **共享身份配额纪律成章。** 该班约六次配额耗尽,含一次「读成功写被拒」卡在转 ready 半途。有效模式:把**待执行动作的完整状态写进 send_later 定点文本**(幂等、抗上下文丢失),10–12 分钟阶梯重试至成功;search 与 core 是独立配额可互为退路;绝不忙轮询。\n4. **「CI 绿→转 ready」的定点驱动成为标准步骤。** CI success webhook 不可靠是环境明示的;该班全部 13 次转 ready 均由 6–9 分钟 send_later 定点驱动,零漏接。skill 应把「ACCEPT 后挂 flip 定点」写成标准动作并给推荐延时。\n\n## 中价值\n\n5. **补丁续派原 dev 而非新派。** #5738/#5808 两次 CI 红、#5561 分析→实现、#5808 裁决→收尾,四次 SendMessage 续派全部一轮成功 —— 上下文保留省掉全部重验。写明适用判据(claim 未变、上下文仍有效)与例外。\n6. **认领评论模板固化四字段:分支 / worktree / 文件面 / 串行约束已清(点名前序 PR)。** 该结构让竞态复读与串行判断都是 30 秒的事;同包严格串行让 ~18 merges/日环境下 28 个 PR 零合并冲突。\n7. **与分诊座位 Routine 的时序规则。** #5367 上 Routine 17:00 晋级、车道 18:08 持有,70 分钟内对同一 finding 出了相反处置(且处置评论写「留 finding」标签却是 `pm:queue` —— 评论与标签失同步)。需要:分诊座位存在时车道 PM 不再自跑分诊轮;持有/晋级单通道;处置评论必须连带改标签。\n\n## 低成本顺手改\n\n8. 派发模板加一行:「spec build 会重锚 `authorable-surface.base.json`,revert 勿入提交」—— 知识在 #5358/#5370/#4723,但该班至少 5 个 dev 各自独立重新发现。\n9. 收尾规程加:「PR/issue 正文发出后回读校验」—— 两次裸 ESC 字节实体化、两次 GitHub sanitizer 吞内容,都是回读才抓到。\n10. A-项核验的具体命令形(`git grep &lt;symbol&gt; origin/main -- &lt;generated-file&gt;`)入文,现为口头惯例。\n\n## 处置\n\n- 操作性条款 **1/2/4/5/6/8/9** 已由现任 services 座位(会话 `session_015a5qkLzpGXhLL2F5gvJ7dD`)即刻纳入本班派发/收尾流程(不改文件即可执行);\n- SKILL 文本落地为 docs-only PR(`.claude/skills/pm-dispatch/SKILL.md`,协议工具面):请分诊座位路由,建议与 #5741 / #5845 同批实施,walkthrough 归维护者。"
+}

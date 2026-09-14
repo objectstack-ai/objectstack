@@ -1,0 +1,36 @@
+{
+  "number": 5278,
+  "kind": "issue",
+  "title": "[finding] DEBT ledger counts in check-type-check-coverage.mjs drift silently — @objectstack/metadata-protocol records 28, actually reports 63",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T15:20:57Z",
+  "updated_at": "2026-08-07T04:28:31Z",
+  "closed_at": "2026-08-07T04:28:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 13,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5278",
+  "body": "Observation-class finding, recorded while working #5206 (step 2, engine half). **Nothing is red today** — no gate fails, no user is affected. Filing per Prime Directive #10 so the PM's triage round grades it rather than my own severity guess.\n\n## What I measured\n\n`@objectstack/metadata-protocol` has no `typecheck` script, so it carries a DEBT entry in `scripts/check-type-check-coverage.mjs`:\n\n```js\n'@objectstack/metadata-protocol': {\n  errors: 28,\n  note: 'code-tier 9 (was read as 2 at 21 raw); the rest is config-tier (TS2835) and noise (TS7006).',\n},\n```\n\nMeasured on `origin/main` (commit `0f2fdcde1`), with the package's whole dependency chain freshly rebuilt so no stale `.d.ts` is in play:\n\n```\n$ pnpm --workspace-concurrency=2 --filter \"@objectstack/metadata-protocol...\" build   # deps current\n$ pnpm exec tsc --noEmit -p packages/metadata-protocol | grep -c \"error TS\"\n63\n```\n\n**63 actual vs 28 recorded** — 2.25x. I confirmed this on `origin/main` itself, with my branch's changes reverted, so it is pre-existing drift and not an artifact of #5206 (my branch measures 63 as well; the two error sets `diff` identical, delta 0).\n\n## Why it stays green\n\nThe ratchet never re-measures. It only asserts a DEBT entry *exists and is positive* (`scripts/check-type-check-coverage.mjs`, the DEBT branch):\n\n```js\nif (!entry || typeof entry.errors !== 'number' || entry.errors <= 0) {\n  problems.push(\n    `${pkg.name}: DEBT entry has no measured error count -- run its \\`tsc --noEmit\\`, ...`\n  );\n}\n```\n\nSo `errors: 28` and `errors: 1` are equally acceptable to the gate, and a package's real count can grow without bound while the ledger keeps reporting the number someone measured months ago. The drift is almost certainly just accreted test files (the note itself attributes the bulk to config-tier TS2835 and noise TS7006, both of which arrive one new test file at a time).\n\n## Why it is worth recording anyway\n\nAGENTS.md is explicit that \"DEBT is frozen debt, not a permission slip. Every entry below was measured.\" A number that has silently drifted 2.25x no longer describes the debt it claims to freeze, which costs the ledger the one property that makes it more than a permission slip: an entry that says 28 reads as \"nearly graduated\" to the next author sizing up whether to onboard the package, when the real cost is more than double that. Same shape as the ledger problems the file's own header comments describe (a count \"read as 2 at 21 raw\").\n\nI did **not** touch the ledger in #5206's PR — the delta my change introduces is 0, so nothing there obliged me to re-measure, and silently rewriting another package's recorded debt inside an unrelated fix is exactly the kind of scope creep #10 asks me to file instead.\n\n## Options (for triage, not a recommendation I acted on)\n\n1. **Ratchet the numbers** — have the check re-run `tsc --noEmit` per DEBT package and fail when the real count *exceeds* the recorded one. Turns the ledger into a true ratchet (debt may shrink, never grow) and makes graduation visible. Cost: a full per-package `tsc` pass in CI, which is not cheap, and it would fail `main` immediately until every entry is re-measured.\n2. **Re-measure the entries once** and leave the gate as-is. Cheap, restores accuracy today, drifts again tomorrow.\n3. **Graduate `@objectstack/metadata-protocol`** by fixing the code-tier errors and adding a `typecheck` script — the ledger entry then gets deleted per the file's own graduation rule. Scoped to one package; says nothing about the other entries.\n\nWorth noting that if option 1 is chosen the same question applies to `TEST_DEBT`, which records counts the identical way and is validated by the identical presence-only check.\n\n## Repro\n\n```\ngit checkout origin/main\npnpm install --frozen-lockfile\npnpm --workspace-concurrency=2 --filter \"@objectstack/metadata-protocol...\" build\npnpm exec tsc --noEmit -p packages/metadata-protocol | grep -c \"error TS\"   # 63, ledger says 28\n```\n"
+}

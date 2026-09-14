@@ -1,0 +1,35 @@
+{
+  "number": 6150,
+  "kind": "pull_request",
+  "title": "fix(cli): dev watcher 重建后不再无声——重建成功后自动重启 serve 子进程(默认开,--no-restart 可退) (#5148)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T03:41:45Z",
+  "updated_at": "2026-08-07T04:03:30Z",
+  "closed_at": "2026-08-07T04:03:28Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T04:03:28Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6150",
+  "body": "Fixes #5148\n\n## 选档:第 2 档(重建成功后自动重启 serve 子进程,nodemon 式),默认开启\n\n三档验收(分诊 2026-08-06 03:57Z)中选 **第 2 档**,理由:\n\n- **第 3 档(仅诚实提示)修不掉根因成本**:提示后仍要人手重启,edit/verify 循环每轮多一次手工动作;且「看到提示才知道要重启」对 AI agent 循环是持续税。\n- **第 1 档(热换元数据)是 ADR-0008 的目标态,但当前运行时的 reload 路径只做了一部分**:MetadataPlugin 的 artifact watcher 会重载 registry、为**新对象**补 DDL + seeds(15.1)、广播 SSE HMR;而编译产物里的 **hook 体**与**既有对象的视图注册面**只在 boot 装载(issue A/B 两节实测钉死)。把这条路补全是运行时级工程,超出本单 CLI 缝的范围。\n- **第 2 档以确定性换实现量**:boot-time 全量装载是当前唯一保证「运行中 = 盘上」的路径,重启即收敛,且实现完全落在 `dev.ts` 既有的 fork 缝上。\n\n实测重启一轮(小 app、sqlite)约 3–5s,由 kernel 优雅停机 + 全量 boot 构成;对 dev 循环可接受,且换来的是结论可信。\n\n### 状态坑的处理(派发单点名的三项)\n\n| 风险 | 处理 |\n|:--|:--|\n| 端口占用竞态 | 严格 **SIGTERM → 等 `exit` → 再 spawn** 串行;旧进程退出后才起新进程,不并发抢端口(Node server 带 SO_REUSEADDR,TIME_WAIT 不阻塞重绑) |\n| sqlite 文件锁 | 同一串行序保证旧连接先关;dev.db / --fresh tempdir 环境变量由父进程持有,重启间保持同一数据库,seed-admin 幂等(仅空库) |\n| 处理中的请求 | 随重启丢弃 —— nodemon 式 dev 的固有语义,较「静默陈旧」是严格改善;PR 不掩饰这一点 |\n| 连续保存 | 既有 250ms 编译防抖 + coordinator 在 `stopping` 态吸收后续重启请求(即将到来的 boot 读的就是最新 artifact),合并为一次重启 |\n| 卡死子进程 | SIGTERM 8s 未退出 → SIGKILL 升级,响亮打印 |\n| 重启失败 | spawn 失败或重启后的子进程自行退出 → 响亮打印并以子进程码退出 dev(保持 #5148 前「父随子退」契约) |\n| 信号与孤儿 | 父进程 SIGINT/SIGTERM 转发给子进程(覆盖非 TTY 场景);`process.on('exit')` 兜底 SIGTERM,任何父进程退出路径都不留孤儿 server |\n\n### 退出语义(与改动前对齐)\n\n不是 coordinator 发起的子进程退出(崩溃、外部 kill)仍然让父进程以 `code ?? 0` 跟随退出 —— 与改动前 `serveChild.on('exit', code => process.exit(code ?? 0))` 完全一致;重启后的子进程若 boot 即崩,响亮打印后同样退出(未引入 nodemon 的 crashed-waiting 态,保持语义变更最小)。\n\n### 逃生口 `--no-restart`\n\n保留旧「只重建不重启」行为,但消灭其静默:每次重建都打印「⚠ auto-restart is off … the running server keeps the build it booted with」,watch banner 也按当前模式如实措辞(旧 banner 暗示热更新,`✓ recompiled — server will auto-reload` 一并删除)。\n\n## 启动期变体(作者 08-05 21:34Z 补充,分诊纳入验收)\n\nboot 时(未传 `--compile`、artifact 已存在)比对 `objectstack.config.ts` + `src/**`(剔除 watcher 同一套 ignore:node_modules / .git / .objectstack / dist / *.test.*)与 artifact 的 mtime;任一源更新则响亮警告并点名修法,**不 gate 启动**:\n\n```\n⚠ dist/objectstack.json is OLDER than your sources — this boot serves the STALE build.\n   newest source: src/hello.view.ts (25s newer than the artifact)\n   fix: run `objectstack build` or start with `--compile`, or save a watched file to trigger a rebuild + restart.\n```\n\nstaleness 走查与 chokidar watcher 共享同一份 ignore 列表(`DEV_WATCH_IGNORED`),两者判定同一源面,不会出现「能触发重建的文件不参与陈旧判定」的缝。\n\n## 可测缝\n\n新模块 `packages/cli/src/utils/dev-restart.ts`(沿用 `resolveDefaultDevDbUrl` 的抽缝先例):\n\n- `assessArtifactStaleness` — 启动期陈旧判定(真实 tmpdir + utimes 控制 mtime 测试);\n- `ServeRestartCoordinator` — 重启决策状态机(`idle → running ⇄ stopping → shutdown`),以 FakeChild 注入测试:重启序、吸收合并、自行退出跟随、shutdown 优先于 respawn、SIGKILL 升级、spawn 失败响亮、孤儿兜底、旧子进程迟到 exit 事件忽略;\n- `formatMtimeGap` / `isDevWatchIgnored` — 纯函数测试。\n\n22 个用例,`dev-restart.test.ts`。\n\n## 手测记录(2026-08-07,worktree 构建的 CLI,scratch app:1 object + 1 view + 1 beforeInsert hook,sqlite/--fresh)\n\n按 issue A/B 两节方向复现,方向在动手前预判(A:hook 新体无需手动重启即生效;B:视图新 label 无需手动重启即出现;改前两者恒 stale——issue 实测钉死)。\n\n**1)B 节(视图元数据),默认档(自动重启):**\n\n- 基线:`GET /api/v1/meta/views?object=probe_item` → `\"label\":\"Probe List v1\"`;\n- 不停 server,改 `src/hello.view.ts` 的 label → v2,日志:\n\n  ```\n  ↻ recompiling (src/hello.view.ts)...\n  ✓ recompiled in 2648ms\n  ↻ restarting server to apply the new build (src/hello.view.ts)...\n  [HonoServerPlugin] Server stopped\n  ...\n  ✓ server restarted — the new build is live\n  ```\n\n- 复读同一端点 → `label now: Probe List v2` ✅(无任何手动动作)。\n\n**2)A 节(hook 体):**\n\n- 基线:`POST /api/v1/data/probe_item` → 记录 `stamp: hook-v1`(beforeInsert hook 写入);\n- 不停 server,改 hook 体 `hook-v1` → `hook-v2`,等重启完成,再 POST → `new record stamp: hook-v2` ✅。\n\n**3)连续保存合并:** 同时改 view + hook 两个文件 → 日志仅一轮 `↻ recompiling (2 files)... → ✓ recompiled → ↻ restarting → ✓ server restarted`,复读两面均为 v3 ✅。\n\n**4)信号与孤儿:** 对 dev 父进程 PID 执行 `kill -INT`(非 TTY,无进程组代发)→ 父子进程均退出、端口释放、`--fresh` tempdir 清除 ✅。四轮手测结束后 `lsof` 复查 47231-47234 全部空闲,无遗留进程/tempdir。\n\n**5)`--no-restart` 档:** banner 变为 `👁 watching … — rebuild on change (auto-restart off — running server keeps its build)`;改 label v3→v4 后:\n\n  ```\n  ✓ recompiled in 2331ms — artifact updated on disk\n  ⚠ auto-restart is off (--no-restart): the running server keeps the build it booted with — restart dev to apply\n  ```\n\n  实测 server 仍答 `Probe List v3` 而盘上 artifact 已是 v4——旧行为保留但不再无声 ✅(顺带:子进程内 MetadataPlugin 的 reload 在本轮同样未令 `/meta/views` 收敛,与 issue B 节在 origin/main 上的结论一致,前提复核成立)。\n\n**6)启动期变体:** 无 server 运行时 `touch src/hello.hook.ts`,不带 `--compile` 起 dev:\n\n  ```\n  ⚠ dist/objectstack.json is OLDER than your sources — this boot serves the STALE build.\n     newest source: src/hello.hook.ts (56s newer than the artifact)\n     fix: run `objectstack build` or start with `--compile`, or save a watched file to trigger a rebuild + restart.\n  ```\n\n  boot 未被 gate(照常起服)✅。**反向:** artifact 比源新时(watcher 刚重建过)同一检查静默 ✅——第一次跑该测试时另一实例的 watcher 恰好在 touch 后 4s 重建了 artifact,staleness 检查如实判「不陈旧」不打印,恰好把反方向也验了。\n\n## 不做/顺带说明\n\n- 运行时侧的部分 reload 路径(MetadataPlugin artifact watcher、SSE HMR、新对象 seeds)**原样保留**:重启前子进程可能先完成一次自身 reload,无害;`/api/v1/dev/metadata-events` POST 端点不动。\n- 第 1 档(真热换)仍是 ADR-0008 的目标态;等运行时能全量原位换装后,本重启可再退位为可选。\n- `content/docs/getting-started/your-first-project.mdx` 一行注释从 `hot reload` 改为 `rebuild + server restart on change`,与实际行为一致。\n- 同族不同题:#4513(/meta/objects 报构建产物)不在本单范围。\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_015a5qkLzpGXhLL2F5gvJ7dD)_"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 6153,
+  "kind": "pull_request",
+  "title": "fix(service-automation): runAs:'system' 的 create_record 按 ADR-0118 染全三列——组织、属主、创建者禁 NULL (#5494)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T03:49:14Z",
+  "updated_at": "2026-08-07T04:14:34Z",
+  "closed_at": "2026-08-07T04:14:32Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T04:14:32Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6153",
+  "body": "Fixes #5494\n\n## 根因\n\n`resolveRunDataContext`(`packages/services/service-automation/src/runtime-identity.ts`)的 `runAs:'system'` 分支把触发上下文的 `userId` / `tenantId` 整个丢弃,只返回 `{ isSystem: true, actor, positions: [], permissions: [] }`。而三列的平台盖章恰好全部键在被丢弃的信息上:\n\n- `created_by` —— ObjectQL 审计钩子 `sys_stamp_audit_insert` 从 `session.userId` 盖章(`packages/objectql/src/plugin.ts:840`),上下文无 user ⇒ NULL;\n- `owner_id` —— 安全中间件 3.5 步「空 owner 自动染 acting user」(`plugin-security/src/security-plugin.ts:1353`),但整条中间件在 `isSystem` 上第一行短路(`:772`),盖章步骤连同被跳过 ⇒ NULL;\n- `organization_id` —— 驱动层租户机制从上下文 `tenantId` 填充(driver-sql:「injects organization_id on inserts that omit it」,`sql-driver.ts:1443`),cloud 侧 org 中间件也在 `isSystem` 上短路 ⇒ 上下文无 org ⇒ NULL。\n\n于是用户手动触发的 system 清扫流程建出的每一行三列全 NULL:落在组织分区之外(唯一索引跨 NULL 不生效、org 作用域查询看不见,hotcrm#698 的重复编号即此),也落在所有 owner/creator 作用域授权之外——issue 步骤 3 的「admin 都 403」。步骤 4/5 的翻转(补 owner 后同一调用 200)证明判定键在行内容而非调用者。\n\n## 接缝选择\n\n修在 writer 侧(`service-automation`),两点,均以「上下文携带完整染色信息」为主、节点侧只补平台机制够不到的一列:\n\n1. **system 分支原样带过触发身份(`userId` + `tenantId`)**。`runAs` 声明的是授权姿态而非身份(ADR-0073 D2),提权不等于匿名(#3783 审批镜像的 `{ isSystem: true, userId }` 即此形);与 action-body 缝已合入的 `{ ...caller, isSystem: true }` 信封(hotcrm#548 同族修复,changeset `action-body-execution-context`)同形——「different writer, same root shape」,平台对「提权但有触发人」的写者从此一个姿态。`isSystem` 独自决定授权(中间件在读到 `userId` 之前就短路,带上身份不放大任何权限);身份驱动的是归因盖章(`created_by`/`updated_by`、审计 actor)、驱动层 `organization_id` 填充、以及下游 record-change 级联的触发身份(原来 system 流程自己的写触发的 `runAs:'user'` 流程一律被 #3760 拒绝,现在与审批镜像一致地继承触发人)。\n2. **`create_record` 节点补 `owner_id` 填充**(`stampSystemInsertOwner`,策略与 `resolveRunDataContext` 同文件共置):所有权锚的平台盖章在 `isSystem` 短路之后没有任何引擎侧通道,payload 是唯一载体。fill-only、schema 声明该列才染;染 acting user——与同一触发在 `runAs:'user'` 下会得到的默认一致。**不是**把系统身份塞进 owner:ADR-0118 D6 明确 `owner_id` 归业务归属轴、系统不拥有业务记录;ADR-0073 D3 明确禁止把自动化主体染进 owner(owner-RLS 会把行藏起来)。\n\n**无用户的运行(schedule)三列保持不染**,这是契约而非缺口:没有 acting user 时,ADR-0118 D1 规定 actor 类列的系统表示就是 null,哨兵串(#4556 的病灶)与伪用户(ADR-0118 背景节论证)都是被禁的替代品;ADR-0073 的 automation principal(真正给这类运行的身份)是 M2、按「首个真实消费者」门控,本 PR 不越权预建。`svc:flow:*` actor 标签 + `flowRunId` 继续承担溯源(ADR-0118 D5)。issue 期望里的「flow 声明的运行身份」在现 spec 中不存在(`FlowSchema.runAs` 仅 `'system' | 'user'`),流程作者今天可用 `fields.owner_id` 显式指派(fill-only 保证作者值优先)。\n\n## 复现翻转证据(测试内复刻 issue 步骤 3→5)\n\n`runas-system-stamping.integration.test.ts`,真栈:ObjectKernel + ObjectQLPlugin(审计钩子)+ driver-sql(better-sqlite3 `:memory:`,租户列注入)+ 真 AutomationEngine/CRUD 节点 + 真 SecurityPlugin(默认权限集,`owner_only_writes`/`owner_only_deletes` RLS 键在 `created_by`):\n\n- 成员触发 `runAs:'system'` 清扫 → 行三列 = 触发人/触发人/触发 org → **同一成员上下文** PATCH、DELETE 均放行(200 半边);\n- 无用户触发(schedule 形)同一流程 → 行三列 NULL → **同一成员上下文** PATCH、DELETE 均 PermissionDenied(403 半边)。两次尝试之间调用者零变化,只有行内容不同——正是 issue 步骤 4/5 的判据。\n\n**反向验证(方向先于运行判定)**:把修复 patch 撤掉重跑验收文件,预测「三列用例、fill-only 用例、翻转正例变红;无用户用例、user 路径回归、翻转反例保持绿」——实测 3 红 3 绿与预测完全一致(红:三列全 NULL、`created_by` 断言失败、成员 PATCH 被拒;绿:三处边界行为不变)。\n\n## 行为变化说明(评审请重点看这条)\n\n`runAs:'system'` 且触发上下文带 org 的运行,其数据操作(读/改/删)在驱动层按 `(org = 触发 org OR org IS NULL)` 作用域——与 action-body 缝已合入的姿态一致:租户墙在提权下依然成立,org-NULL(修复前遗留/全局)行经 OR-NULL 臂仍可达。schedule 触发的运行不带 org,行为不变。既有 in-repo 流程(showcase/CRM 清扫)均单 org,不受影响。旧测试中「system 运行不带 userId」的钉子(crud-runas / runas-grant-resolution / record-lookup-expand 共 4 处)按新契约改写并注明 #5494——那些钉子钉的正是本缺陷。\n\n## 验证清单\n\n- [x] `@objectstack/service-automation` 全量 test:66 files / 781 tests 全绿(含合并最新 main 后复跑)\n- [x] 新验收 6 用例全绿;撤修复重跑 3 红 3 绿,方向与预测一致\n- [x] 消费半径回归:`trigger-schedule` 42/42(schedule 无用户钉子不变)、`trigger-record-change` 5 files、`plugin-approvals` 19 files(#3783 镜像级联)全绿\n- [x] typecheck:包内 `tsc --noEmit` 新增 0 错(存量 5 处为 main 既有,`check:type-check-coverage` OK)\n- [x] build:`service-automation` 及依赖闭包构建通过\n- [x] root 门:`check:nul-bytes` / `check:adr-anchors` / `check:durability-log-level` / `check:startup-registry-verdict` / `check:engine-double-contract` / `check:resume-authority-declared` 全 OK;改动文件 eslint 0 错\n- [x] changeset:`@objectstack/service-automation` patch(修缺陷,契约为 ADR-0118 既有)\n- [x] `packages/spec` `check:generated`:10 artifacts up to date(合并 main 后)"
+}

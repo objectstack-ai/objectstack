@@ -1,0 +1,37 @@
+{
+  "number": 5301,
+  "kind": "issue",
+  "title": "plugin-dev 没有 ADR-0093 D5 的 fail-fast：dev 栈请求了组织墙但企业包缺失时，只 warn 就继续跑无墙",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T16:21:24Z",
+  "updated_at": "2026-08-07T01:27:30Z",
+  "closed_at": "2026-08-07T01:27:30Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5301",
+  "body": "发现于 #5262 的开发（会话 `session_015W6nhsDrz6zWQc8je12a1t`），**不在该 PR 范围内**：#5262 只订正各站点读哪个 knob，不改任何站点的失败语义。按 Prime Directive #10 单独归档，不指派。\n\n## 缺陷\n\n`packages/plugins/plugin-dev/src/dev-plugin.ts` 在请求了有墙 posture 时会尝试加载企业 `@objectstack/organizations`；加载失败只打一条 `logger.warn` 就继续 boot：\n\n```ts\nif (multiTenant) {\n  try {\n    const mod: any = await import(organizationsPkg);\n    this.childPlugins.push(new mod.OrganizationsPlugin());\n  } catch {\n    ctx.logger.warn(`  ✘ tenancy posture '...' requested but @objectstack/organizations (enterprise) not installed — running single-org, organization wall INACTIVE (ADR-0093 D5)`);\n  }\n}\n```\n\n`packages/cli/src/commands/serve.ts` 在**同一个事实**上的处理是 ADR-0093 D5 的 fail-fast：分两阶段（import 失败 = 包缺失，construct/mount 失败 = 插件自己拒绝），缺包时除非 `OS_ALLOW_DEGRADED_TENANCY=1` 否则 `process.exit(1)`，且该 hatch 明确**不**覆盖 mount 阶段的拒绝（#4818）。\n\n于是同一台机器上：\n\n| 入口 | 请求 `isolated`、企业包缺失 | 结果 |\n|---|---|---|\n| `objectstack serve` | 拒绝启动（除非显式 `OS_ALLOW_DEGRADED_TENANCY=1`） | 安全 |\n| `DevPlugin` | warn 后继续 | **无墙服务流量**，且没人显式同意过 |\n\n即 ADR-0093 D5「请求了隔离就不得在没有隔离的情况下服务流量」在 dev 装配路径上没有被强制。#5262 修好读数之后这条反而**更容易被触发**：在此之前，只设 `OS_TENANCY_POSTURE` 的 dev 栈根本不进这个分支（那是 #5262 本身的缺陷）；现在它会进分支、会尝试加载、会失败，然后走这条只 warn 的路。\n\n## 为什么单独归档而不是顺手补\n\n把 `process.exit(1)` 加进 `plugin-dev` 是**行为变更**，不是 knob 订正：\n\n- `DevPlugin` 是库形态的装配插件，不是 CLI 进程的所有者，`process.exit` 在这里的正当性和在 `serve.ts` 里不同（serve 的注释明确说明它必须 `process.exit` 而非 `throw`，因为它嵌在会吞异常的 AuthPlugin `try` 里；plugin-dev 的调用环境不同，`throw` 可能才是对的——`assertNotProduction()` 就是 `throw`）。\n- 语义要跟 `OS_ALLOW_DEGRADED_TENANCY` 对齐还是另立一套（dev 场景下要不要更宽松），是维护者的判断。\n\n## 建议\n\n对齐 `serve.ts` 的 D5 语义：请求了有墙 posture 而企业包不可用时，除非 `OS_ALLOW_DEGRADED_TENANCY` 为真否则拒绝 init（用 `throw`，与同文件 `assertNotProduction()` 一致——`kernel.use()` 只登记、`initPluginWithTimeout` 不 catch、`bootstrap()` 会 rethrow，所以 throw 能真的中止 boot）。是否也照 #4818 分 import / mount 两阶段，一并请维护者定。\n\n出处：#5262 的 PR（分支 `claude/issue-5262-posture-misreads`）。\n"
+}

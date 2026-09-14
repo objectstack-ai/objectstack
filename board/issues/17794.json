@@ -1,0 +1,35 @@
+{
+  "number": 17794,
+  "kind": "pull_request",
+  "title": "skills(pm-dispatch): a mid-task narrowing names its replacement owner and the moment",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "needs-user-decision",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-12T05:17:55Z",
+  "updated_at": "2026-09-12T06:28:06Z",
+  "closed_at": "2026-09-12T06:28:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-09-12T06:28:05Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/17794",
+  "body": "Fixes #17729\n\nA mid-task note that narrows a standing clause and names neither who takes the narrowed duty over nor when it acts leaves the dev holding half a contract. The measured instance was a live dual-carrier split that the seat had to repair by hand. This lands the rule in the runbook section where the dispatch-word rules live.\n\n## The edit: one clause, riding an existing bullet by density\n\n`.claude/skills/pm-dispatch/references/dispatch-runbook.md` line 222, inside the in-flight-overlap interception group (lines 220-222).\n\nBefore (23 bytes):\n\n```text\n- ⛔ 不硬造 diff。\n```\n\nAfter (119 bytes, cap 120):\n\n```text\n- ⛔ 不硬造 diff。中途收窄标准条款须点名替换承接人与时点,缺一 dev 报 blocked 不半执行。\n```\n\nThe appended clause is 96 bytes. The file is still 241 lines: no line added, no rule deleted, no re-wrap used as payment, ceiling untouched.\n\n## The four elements, mapped to the words\n\n| Element | Words that carry it |\n|:---|:---|\n| (a) an instruction that narrows a standing contract mid-task | 中途收窄标准条款 |\n| (b) names the replacement owner | 须点名替换承接人 |\n| (c) and the moment the replacement acts | 与时点 |\n| (d) a narrowing naming neither is refused by the dev (report `blocked`) rather than executed half | 缺一 dev 报 blocked 不半执行 |\n\n`标准条款` is the term the file and `.claude/agents/os-dev.md` already use for the standing clauses (see line 226 「条件性标准条款…」 and line 231 「信封断言本体是 os-dev 标准条款」), so the clause names the same object the contract does.\n\n## Why this host\n\nLines 220-222 are the runbook's one rule group about a note sent to a dev **mid-task**: the seat intersects each round's newly landed PRs with the in-flight file surfaces and sends a four-sentence warning. Line 222 is that group's tail rule about how the dev must not contort to comply with such a note (do not manufacture a diff). The new clause is the same channel's other failure mode — the note that narrows instead of warning — and the dev-side posture it prescribes (refuse, report `blocked`) is the same kind of rule as the one already there.\n\nIt is also the only bullet in the section that can hold the clause at all. Free bytes re-measured on this branch against the 120-byte convention: line 222 has 97 free; the next largest are line 211 with 70, line 230 with 69, lines 214 and 228 with 63, line 201 with 61. The clause is 96 bytes, so no semantically closer host had room even in principle — the semantic choice and the byte budget point at the same line, and no trade-off had to be made.\n\n## Governed verdict\n\n`node scripts/pm/check-governed-merges.mjs --test .claude/skills/pm-dispatch/references/dispatch-runbook.md` :: exit 3\n\n```text\ngoverned-surface predicate: 1 of 1 path(s) hit the register (5 surfaces, repo-agnostic).\n  ⛔  GOVERNED — a human merge is the review record for this PR (#9495 regime).\n      .claude/** ×1 — the agent instruction tree (skills, agents, hooks, settings)\n```\n\nThis PR stays draft. No seat flips it ready, enqueues it, or arms auto-merge; the maintainer hand-merges after the skills seat's review.\n\n## Gates\n\nDerived with `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` (no paths passed: the script derives the change set itself from the merge base) and reconciled with `--ran` on the final diff at `902f019c`:\n\n```text\nRun reconciliation — 14 derived, 14 run, 0 NOT-MEASURED, 0 UNRUN.\n✓ dispatch-gates --ran: 14 derived famil(ies) accounted for — 14 run, 0 NOT-MEASURED\n  (a DERIVED zero — all 14 recorded an exit code and none of them is 3).\n```\n\nAll 14 exited 0. The ratchet's own verdict lines:\n\n```text\n✓ check-skill-line-ratchet: .claude/skills/pm-dispatch/references/dispatch-runbook.md: widest table row is 0 bytes (pin 0; headroom 0).\n✓ check-skill-line-ratchet: .claude/skills/pm-dispatch/references/dispatch-runbook.md is 241 lines (ceiling 241; headroom 0).\n```\n\n`pnpm --filter @objectstack/lint run check:doc-formula-expressions` first exited 3 (PREREQUISITE NOT MET — `@objectstack/formula` and `@objectstack/lint` unbuilt in a fresh worktree; nothing measured). After `pnpm exec turbo run build --filter=@objectstack/formula --filter=@objectstack/lint --concurrency=2` under `scripts/pm/os-verify-lock.sh` (VERDICT command-exit 0), it re-ran :: exit 0.\n\nControl-character self-scan over the changed file (`grep -naP` over the control ranges): no hits. Repo-wide `pnpm lint` is CI's run; the narrowed reading here is total — `pnpm exec eslint --no-inline-config --format json` over the one changed file reports `File ignored because no matching configuration was supplied`, i.e. the eslint config matches zero of this PR's files, so this diff cannot move any untouched file's verdict.\n\nNo changeset: `.claude/**` is the skip-changeset fast track — nothing in any package's `files[]` moves.\n\n## Acceptance notes\n\n- noted, not filed: the dispatch word asked for `node scripts/pm/dispatch-gates.mjs --commands .claude/skills/pm-dispatch/references/dispatch-runbook.md` (with a path); `.claude/agents/os-dev.md` says to derive without paths so the script reads the real change set from the merge base. The os-dev clause wins per its own conflict rule, and the two agree here anyway (one path, committed). Carrier: the next runbook edit that touches the derivation sentence.\n\n## 维护者速读(草稿)\n\n**改了什么** — `dispatch-runbook.md` 〈派发词构造细则〉第 222 行末尾加一句:中途收窄标准条款的指令必须点名替换承接人与时点,缺一由 dev 报 `blocked`,不半执行。文件仍是 241 行,不动 ceiling,不删任何规则。\n\n**为什么改** — 实测事故:座位中途把「挂/清 `needs:contract-review`」收归自己,却没说另一半由谁、在何时做;dev 已挂了 PR 侧、停下来报了旗(正确行为),卡与 PR 的双载体半态一直活着,直到座位手工补挂。规则把这种半态从「靠 dev 临场判断」变成「派发侧必须写全,否则 dev 拒收」。\n\n**风险与代价(含回滚)** — 风险是 dev 对一条本来还能推进的收窄指令报 `blocked`,多一轮往返;代价上限是一轮。回滚成本为零:单行单句,`git revert` 即回到原句。\n\n**席位意见** — (留空,待 skills 座位定稿成评论)\n\n**你要做的** — 这是受管面(`.claude/**`),按 #9495 规矩由你手工合并;先看上面「四要素对照表」确认这一句确实四件事都说到了,再看措辞是否合你对这份文件语气的要求(一 bullet 一规则、⛔/⇒ 记号、无卡号)。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01MCLBsUgfykL74aU716rzVK)_"
+}

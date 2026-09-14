@@ -1,0 +1,35 @@
+{
+  "number": 6258,
+  "kind": "pull_request",
+  "title": "feat(tooling): SKILL.md compatibility 声明与仓库实际大版本对账门禁",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "size/l",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T12:16:16Z",
+  "updated_at": "2026-08-07T12:56:16Z",
+  "closed_at": "2026-08-07T12:56:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T12:56:13Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6258",
+  "body": "Fixes #5331\n\n## 背景\n\n`skills/*/SKILL.md` frontmatter 的 `compatibility:` 行是一份 skill **唯一的自述适用范围**,并且随 `npx skills add objectstack-ai/objectstack/skills` 原样发给第三方。此前没有任何门看守它:\n\n- `check:skill-docs` / `check:skill-refs` 只比对**生成物**与 `packages/spec/src`;\n- `check:skill-examples` 只 typecheck 打了 `os:check` 的代码块。\n\n三道门对着一句错的版本声明**全绿**。实证即 #5245:仓库已在 `17.0.0-rc.2`(七个 `App` 键、`DriverCapabilities` 31 位、`restServer.openApi31`、plugin-runtime 家族在 17 里已是墓碑或 TS2305),而十份 SKILL.md 里九份仍写 `Requires @objectstack/spec 16.x` —— **教 17 的能力、自称 16 兼容**,静默漂移了整个大版本周期。\n\n#5245 手工改正了值;本单修的是**产生漂移的机制**。这正是 #5331 从 #5245 拆出时的分工。\n\n## 先核实了「实际落地的措辞」,而不是照原单想象\n\n#5245 给了三个写法并明确拒绝替维护者选:①改写成 `17.x`、②不钉小版本的范围写法(如 `>= 17`)、③加门禁(本单)。**本单的门禁契约必须对齐实际落地的那一个** —— 若落地的是②,一个要求精确大版本的门禁上线即红。\n\n核实结果(`origin/main` @ `01faeb13a`):**落地的是方案①,精确大版本钉**,拼写为 `Requires @objectstack/spec 17.x (Zod v4 schemas)`。9 份带钉(7 份单钉 + `objectstack-formula` / `objectstack-platform` 各带一个附加包),2 份折叠块不钉。`packages/spec/package.json` = `17.0.0-rc.5`。所以门禁对账的是**精确大版本**。\n\n> 原单只提到 `objectstack-pm-dispatch` 一份折叠块;实际是**两份**(另一份是 `objectstack-upgrade`),见下。\n\n## 做了什么\n\n新增 `scripts/check-skill-compatibility-version.mjs`,把每份 SKILL.md 声明的 `@objectstack/…` 大版本与工作区实际 `package.json` 对账,不一致即红,报错带「哪份文件 / 声明值 / 实际值 / 怎么改」:\n\n```\nskills/objectstack-ai/SKILL.md\n    declared: @objectstack/spec 16.x   (frontmatter `compatibility:`)\n    actual:   @objectstack/spec 17.0.0-rc.5  → major 17   (packages/spec/package.json)\n    fix: edit the `compatibility:` line to read \"@objectstack/spec 17.x\".\n    This is the drift #5245 found by hand: skills taught 17 while declaring 16.\n```\n\n按包**名**(而非目录名)建映射,因此 `@objectstack/core` / `@objectstack/formula` 这类附加钉同样对账;钉了一个不存在的包名也报红。\n\n### 落点\n\n根 `scripts/`,与邻居 `check:skill-frame-sync` 同一层 —— 理由也相同:spec 包里的那几道 skill 门是**生成器**,源是 `packages/spec/src`、产物在其 `check:generated` 账本里;本门禁不生成任何产物、不读 spec 源码,它比对的是手写 frontmatter 与**全工作区** package.json,那是 spec 包没有理由持有的知识。跨仓 prose 策略门一贯落在根 `scripts/`(`check:role-word`、`check:doc-authoring`、`check:nul-bytes` 都从这里扫 `skills/`)。已用 `check:generated --reconcile-only` 确认根脚本不需进 spec 包账本。\n\n接进 `.github/workflows/lint.yml` 的 `TypeScript Type Check` job,紧挨 `check:skill-frame-sync`。**不加 paths filter**:加了 `skills/**` 过滤反而会瞎掉另一半输入 —— `packages/*/package.json` 的大版本 bump 才是让声明变陈旧的那一下。\n\n### 引 #4690 为戒:一切缺输入都是红,不做静默 skip 退出 0\n\n- `skills/` 不存在、或没有任何 skill 目录 → 红\n- skill 目录里没有 SKILL.md → 红\n- 没有 frontmatter、`compatibility:` 键缺失或为空 → 红\n- 非豁免文件声明不出任何钉 → 红\n- **全仓一个钉都没扫到** → 红(这条最关键:若日后措辞整体改成方案②的范围写法,本门禁会**响亮报红**,逼出一次决策,而不是悄悄匹配为空、退化成绿色 no-op)\n- 半钉的行(一个包钉了、另一个只是裸提及)→ 红,堵住「有一个钉就算过」的洞\n\n### 两份折叠块:豁免,理由写进代码,且每次运行重新校验\n\n| 文件 | 理由 | 校验锚 |\n|---|---|---|\n| `objectstack-pm-dispatch` | 流程 skill,不 import 工作区任何东西,没有「与之兼容」的大版本;正文自述「No @objectstack/spec dependency」 | 该自述句仍在 |\n| `objectstack-upgrade` | 跨大版本升级 skill,正确于 **TARGET major**;钉当前大版本反而是错的 | 正文「at the TARGET major」仍在 |\n\n豁免不是空白支票:\n\n- 理由文本被改掉 → 豁免**自失效**,文件退回普通规则(红);\n- 豁免只覆盖「**可以不钉**」,**不覆盖已有的钉** —— 豁免文件若长出钉,照样对账,错了照样红;\n- 豁免文件真长出钉之后,该豁免已无事可做 → 报红要求删条目(反休眠);\n- 豁免指向一份扫不到的文件 → 报红(陈旧条目)。\n\n## 反向验证(预测**先写后跑**)\n\n预测写在 `predictions.md` 后才动手,逐条对照:\n\n| # | 变异 | 预测 | 实测 | |\n|---|---|---|---|---|\n| R1 | `objectstack-ai` 的 `17.x` → `16.x` | 红,报错含 文件/声明值/实际值/修法 | 红,四要素齐全(见上方报错原文) | ✅ |\n| R2 | 保留 R1 变异,**摘掉对账那一步**(只留解析+存在性断言,即今天的现状) | 绿,变异完全无人察觉 | 绿,`EXIT=0` | ✅ |\n| R3 | 整行删掉 `compatibility:` | 红(声明缺失),不是「无声即通过」 | 红,`frontmatter has no compatibility: key` | ✅ |\n| R4 | 全部改写成方案②范围写法(零钉) | 红,而不是静默 no-op | 红,9 处 `declares no pinned major` | ✅ |\n| R5 | 豁免条目指向不存在的文件 | 红(陈旧豁免) | 红,self-test 覆盖 | ✅ |\n| R6 | 两份折叠块,未变异 | 绿(经校验的豁免) | 绿 | ✅ |\n| R7 | 抹掉豁免文件里的理由句 | 红(豁免自失效) | 红,`no longer matches that justification` | ✅ |\n| R8 | 半钉的行 | 红(裸提及那个) | 红 | ✅ |\n\n**无落空预测**。R2 值得单独说:摘掉对账后,门禁不但放行了 `16.x`,汇总行还照旧印出 `11 pinned major(s) all match the workspace` —— 一句字面为假的成功报告。这正是 #4690 那个失败模式的样子,也是为什么 R2 这一格必须是绿:它证明**对账那一步**才是承重的,解析和存在性断言都不是。\n\n## 自测 / 门禁不会腐化成 no-op\n\n`--self-test` 18 例,红路径逐条钉死(含上表 R1/R3/R4/R5/R7/R8,及「钉了不存在的包」「空扫描」「无工作区包」),外加两条走真实文件系统的发现层断言(临时 fixture 树里「skill 目录缺 SKILL.md → 红」、真实树扫描非空)。按仓库惯例注册为 `check:skill-compatibility`,先跑 self-test 再跑真扫。\n\n## 验证\n\n```\n$ pnpm check:skill-compatibility\n✓ check-skill-compatibility-version self-test: 18 cases pass.\n✓ check-skill-compatibility-version: 11 SKILL.md file(s) reconciled against 77 workspace packages\n  11 pinned major(s) all match the workspace (@objectstack/spec is 17.x)\n  2 justified exemption(s), each with its stated reason still true of the file.\n\n$ pnpm lint                          # 全仓 ESLint,EXIT=0\n$ pnpm check:nul-bytes               # 5949 文件,无裸控制字节\n$ pnpm check:doc-authoring           # 365 文件 clean\n$ pnpm check:published-files         # 69 publishable package 全绿\n$ pnpm check:workflow-status-functions   # 22 workflow / 41 job 全绿\n$ pnpm --filter @objectstack/spec check:generated --reconcile-only   # 根脚本不需进 spec 账本\n```\n\n**门禁在当前 `origin/main` 上是绿的** —— 不是靠放宽换来的:上表 R1–R8 证明它在该红的地方都红。\n\n## Changeset\n\n**`skip-changeset`** —— 本 PR 不发布任何东西:\n\n- 根 `package.json` 是 `private: true`(`@objectstack/spec-monorepo`),只加了一行 script 注册;\n- `scripts/` 不在任何已发布包的 `files` 白名单里(`check:published-files` 枚举了 69 个包的白名单);\n- `.github/workflows/` 是 CI 配置。\n\n没有落在 `packages/lint` 之类已发布包里,所以按三选一规则取 `skip-changeset`,不写 changeset(空 frontmatter changeset 是被 #6059/#5471 的门禁禁止的)。\n\n## 边界\n\n零运行时、零词表、零 spec 改动。未碰 `packages/spec/src/**/*.zod.ts`、严格度账本、`content/docs/releases/`。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_014wsZeReNTqiceBfLb5Pyf5)_"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 6151,
+  "kind": "issue",
+  "title": "[转席确认·spec 座位] PR #6147(#4795)新增 seed-settlement 契约(contracts/seed-settlement.ts,4 导出)—— 请核可或接管",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T03:45:11Z",
+  "updated_at": "2026-08-07T13:09:17Z",
+  "closed_at": "2026-08-07T13:09:17Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6151",
+  "body": "按跨席协议与 #6054 先例,engine-core 执行席报备一份落在 spec 车道面上的契约新增,请 spec 座位核可、收窄或接管。\n\n## 事实\n\nPR #6147(Fixes #4795,维护者裁 A)在 `packages/spec/src/contracts/seed-settlement.ts` 新增:\n\n- `ISeedSettlementService`(只读 `snapshot(): { pending, inFlight, suppressed }`)\n- `SEED_SETTLEMENT_SERVICE` 槽名常量\n- `SeedSuppressionReason = 'multi-tenant-replay' | 'skip-seed-data'`\n- `SeedSettlementSnapshot` 类型\n\napi-surface 已按 os-regen 四步序重生成,增量恰为上述 4 导出。\n\n## 为什么落在 spec(dev 三点论证,PR 正文有全文)\n\n生产者在 runtime(AppPlugin),消费者在 platform-objects;platform-objects 只依赖 spec 与 metadata-core,runtime 不依赖 platform-objects —— spec 是唯一能承载两侧同源导入的位置(PD #12 contract-first)。槽名用 spec 导出常量,不落消费者手写字面量。\n\n## 处置窗口\n\n维护者今日在线且已批冻结收尾(本 PR 属收尾单),故本单不设巡检周期窗口:spec 席或维护者任何时点可评论收窄/否决;契约为**可选槽位形态**(服务缺席 = 「本内核无 seed 管线」的合法事实),事后收窄不构成破坏性变更。无异议则本单由 spec 席或后续座位关闭归档。\n\n执行席 PM `session_019Q7oc7ASjh8yxyS3Yz78We`(冻结期,本席不再巡检此单,移交在案)。"
+}

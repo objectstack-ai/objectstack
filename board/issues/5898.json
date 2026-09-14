@@ -1,0 +1,34 @@
+{
+  "number": 5898,
+  "kind": "issue",
+  "title": "build-schemas.ts 检查 (c) 的「墓碑已满 2 个 major」证明仍用叶名匹配 —— 无关簇的登记可以替一次退休提前起算",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T11:12:40Z",
+  "updated_at": "2026-08-07T12:52:42Z",
+  "closed_at": "2026-08-07T12:52:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5898",
+  "body": "从 #4659(检查 (b) 收口到确切 key)的范围外残留。#4659 只搬走了检查 (b);检查 (c) 的同一套叶名匹配原封不动地留了下来,`build-schemas.ts` 里的注释现在明确写着这一点。\n\n## 事实\n\n`packages/spec/scripts/build-schemas.ts` 的检查 (c)(#4650,「删掉一条 `authorable-surface.json` 基线行必须自带证明」)承认三种证明,其中第一种是「墓碑已老化」:base 里这条是 `[RETIRED]`,**且**它的 surface 在 ADR-0087 登记表里的 major 比当前 major 至少早 `TOMBSTONE_AGE_MAJORS`(= 2)。\n\n判定「它的 surface 登记在哪个 major」用的是:\n\n```ts\nconst matches = [...clauseMajors.entries()].filter(([clause]) => clause.endsWith('.' + prop));\n...\nconst registeredAt = Math.min(...matches.map(([, major]) => major));\n```\n\n`prop` 是 key 的**叶名**,`clauseMajors` 是 `CONVERSIONS_BY_MAJOR` / `MIGRATIONS_BY_MAJOR` 里**全部 major** 的全部 ` / ` 子句。和 #4659 修掉的那条完全同构:不看 key 属于哪个 def,任何以同名叶子结尾的无关子句都算数,而且取的是 `Math.min` —— **最早**的那个 major。\n\n## 为什么要紧\n\n两个后果,都朝「放行」的方向:\n\n1. **有没有登记**判错:`matches.length === 0` 才报「no conversion/migration clause matching」。一条无关登记就能让一个从没被登记过的墓碑通过这一关。\n2. **老化时钟起算点**判错,而且是取最早值,所以一律偏向提前放行。实测:`data/Index:type` 的叶名 `type` 命中 protocol 11 的 `flow-node-http-callout-rename`(`flow.node.type`,flow 节点的类型,和索引类型毫无关系),`Math.min` 于是把它的时钟起算在 major 11 —— 它自己那条诚实的登记 `object.indexes[].type` 是 major 17。当前 major 17 下,前者已满 2 个 major、后者一天都没满。也就是说这条基线行今天就可以被删掉,而它的退休对消费者可见才不过一个 major。\n\n删掉基线行的后果正是 #4650 立这道门禁的理由:检查 (a)/(b) 读的就是这个文件,行没了,证据也就没了。\n\n## 为什么 #4659 没有一起修\n\n检查 (b) 只在**新的** live → retired 跃迁上触发,所以它可以要求作者当场写下确切 key,新表 `RETIRED_KEYS_BY_MAJOR` 从空表开始、不需要回填(#4659 已实测空表在 `main` 上全绿)。\n\n检查 (c) 相反:它裁决的是**历史**墓碑 —— 当前 97 条 `[RETIRED]` 全部早于 `RETIRED_KEYS_BY_MAJOR`,一条都不在表里。要让它改读确切 key,必须先把这 97 条(以及它们各自真正的退休 major)回填出来,而唯一能机械推导 major 的来源要么是这条坏掉的叶名匹配(用坏数据喂新表),要么是 `authorable-surface.json` 的 git 历史(可做,但是一次独立的考据 + 判断,不该塞进 #4659 的 diff)。所以 #4659 把它留下并在代码注释里点名,而不是顺手改成一个没人验证过的映射。\n\n## 处置方向(未定,供 triage)\n\n1. **补齐历史映射**:从 `authorable-surface.json` 的 git 历史逐条推出每个 `[RETIRED]` key 首次出现的 commit → 当时的 `packages/spec/package.json` major,回填进 `RETIRED_KEYS_BY_MAJOR`,检查 (c) 改读该表。最彻底,一次性成本在考据。\n2. **只收紧「有没有登记」这一半**:要求匹配子句的 def 段与 key 的 def 可判定对应,老化时钟维持现状。半步,叶名耦合仍在。\n3. **把老化证明换成另一个事实**:例如以基线行自身首次带上 `[RETIRED]` 的 commit 为时钟起点(与方向 1 同源,但不需要把结果落成表)。\n\n倾向 1 —— 它让检查 (b) 和 (c) 读同一张表,叶名匹配从 `build-schemas.ts` 里彻底消失;但回填的准确性必须逐条可复核,不能推导一半就当事实写下。\n\n关联:#4659(检查 (b) 已收口)、#4658(发现现场)、#4650(检查 (c) 的来历)、ADR-0087、ADR-0104\n"
+}

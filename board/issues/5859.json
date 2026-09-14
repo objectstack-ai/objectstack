@@ -1,0 +1,36 @@
+{
+  "number": 5859,
+  "kind": "issue",
+  "title": "[#5852 producer 半边] `resolveOwnerScopeIds` 按权威字段填充 hierarchy resolver context + 补「resolver 收到的 org 非空」断言",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T08:52:58Z",
+  "updated_at": "2026-08-07T01:16:10Z",
+  "closed_at": "2026-08-07T01:12:46Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5859",
+  "body": "Part of #5852(contract-first 拆分第二棒,由分诊座位拆)。\n\nBlocked-by: #5858\n\n## 事实(已核 `origin/main`)\n\n`packages/plugins/plugin-sharing/src/sharing-service.ts:875-880`:\n\n```ts\nconst ids = await resolver.resolveOwnerIds(\n  {\n    userId: me,\n    organizationId: (context as any).organizationId ?? null,\n    tenantId: (context as any).tenantId ?? null,\n  },\n  scope,\n);\n```\n\n真实 HTTP boot 下 spy 抓到的实参是 `{ userId, organizationId: null, tenantId: \"97579948-…\" }` —— 即 producer **从不填** `organizationId`,而企业版 resolver 只读它。整条 DEPTH 租户隔离于是永不生效,实测后果见 #5852(`group` 姿态下普通成员对**兄弟组织**记录 `POST /data/:obj/:idB/shares` 得 **201**;去掉 BU 锚后同一请求 403,对照行证明翻转的正是 DEPTH 分支)。\n\n爆炸半径不止共享管理:`resolveOwnerScopeIds` 同样喂给 `matchesOwnerScope` → `canEdit` / `canDelete` / `buildWriteFilter`。探针那个 app 的写路径另被 `member_default` 的 `owner_only_writes`(keyed on `created_by`)挡下,所以只观测到共享管理一路;**不带这条 owner-only RLS 的部署,跨组织 edit/delete 同样放行**。\n\n## 完成范围(本单)\n\n1. 按 #5858 定下的**权威字段**填充 resolver context(⛔ 不是在 consumer 侧加 `?? tenantId` 兜底 —— 那是 #5852 明确不推荐的宽容消费者模式);\n2. 补一条**断言/门**:真实 exec context 进来时 resolver 收到的权威 org **非空**;权威字段为空时按 #5858 的 doc 义务 **fail-closed**,⛔ 不得继续按「无租户约束」构建 owner set;\n3. 测试必须用**真实 seam 产生的 context**,⛔ 不许再手工构造 `{ userId, organizationId }` —— 这正是本缺陷躲过全部单测的原因(cloud `resolver-org.test.ts` 喂的是运行时从不产生的形状;framework 侧 `canManageShares` 的 DEPTH 单测用 stub resolver)。与 #3695(authority-less gate context)同一族。\n\n## 阻塞理由\n\n权威字段由 #5858 定;在它落地前填哪个字段没有权威答案,先做等于把猜测钉进代码。#5858 合入后本单即解锁。\n\nRefs:ADR-0057、ADR-0111 D1 DEPTH、ADR-0105 D2/D6;cloud#919(已 `pm:blocked` 等本族)、cloud#921\n"
+}

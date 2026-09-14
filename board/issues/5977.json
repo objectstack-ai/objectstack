@@ -1,0 +1,34 @@
+{
+  "number": 5977,
+  "kind": "issue",
+  "title": "[#5298 第二批] filter-normalizer(Cube 面)NULL-safe 对齐:先实测既有 NULL 行为,分叉则改写;N1 入表按后落地者规则",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T13:42:27Z",
+  "updated_at": "2026-08-06T14:55:25Z",
+  "closed_at": "2026-08-06T14:55:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5977",
+  "body": "裁决依据:#5298「四项确认落档」评论(维护者 2026-08-06)——实施面①裁定全扩分批,本单是第二批;方向④:非否定路径 `$ne`/`$nin`/`$notContains` **包含 NULL 行**。第一批(PR #5962:driver-sql 五出口 + read-scope-sql + formula $exists)已 MERGED。\n\n## 任务\n\n1. **先实测**:`packages/services/service-analytics/src/strategies/filter-normalizer.ts` 的 notEquals/notIn/notContains 降级路径(约 :267-275,极性表副本约 :710-719)对 NULL 行的**既有行为**——#5298 成本清单明记此面未测(容器无 Cube 实例);用其真实消费端(native-sql 一致性 harness / MemoryAnalyticsService 路径)驱动实测,别静态读码下结论。\n2. 与裁决方向分叉的,改写对齐(参照 PR #5962 中 read-scope-sql 的形态:OR 展开、复用极性判定);**已一致则记录证据、一行不改**。\n3. **N1 入表判定**:FILTER_LOGIC_CASES 的 N1(`$ne` 含 NULL 行)按「后落地者入表」规则(#5298 PM 裁定评论)——若 #5903(turso remote)届时已 MERGED,本 PR 补 N1 入表(spec 表文档 RULED-but-not-yet-enrolled 小节有现成行,复制即可);未落地则如实留给 #5903,报告说明。\n4. 反向验证方向预判:若第 2 步有改写,native-sql harness 的 N1 格(现红,见 PR #5962 表文档小节)应转绿。\n\n## 边界(⛔)\n\n- ⛔ 不动 `like-pattern.ts` / `strategies/objectql-strategy.ts`(#5234 在飞,同包不同文件,后落地者 rebase);\n- ⛔ 不动任何 driver 包(turso remote 归 #5903);\n- ⛔ 不动 driver-memory/mongodb(#5499 冻结)。\n\n## 验收\n\n- filter-normalizer 对三算子的 NULL 行为与裁决一致(实测证据,非推断);service-analytics 全绿 + 相关 conformance harness 全绿;若有行为改写 → changeset。"
+}

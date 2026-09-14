@@ -1,0 +1,37 @@
+{
+  "number": 5317,
+  "kind": "issue",
+  "title": "`build-schemas.ts` 的 `zodShapeOf` 对 `z.preprocess` 走错管道方向(#4488 已在 check-liveness 修过的同一个盲点)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "repo:objectstack"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T18:39:43Z",
+  "updated_at": "2026-08-07T03:37:03Z",
+  "closed_at": "2026-08-07T03:37:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5317",
+  "body": "发现于 #5074 实施途中(observation-class:今天没有用户能撞到,但盲点是真的,且会随下一个 preprocess 根注册复发)。\n\n## 事实\n\n`packages/spec/scripts/build-schemas.ts:687`:\n\n```ts\nif (def.type === 'pipe' && def.in instanceof z.ZodType) return zodShapeOf(def.in, depth + 1);\n```\n\n管道有两种,授权面在相反的一侧:\n\n- `a.transform(fn)` —— 授权面是 **IN**(`a` 是被接受的输入形状);\n- `z.preprocess(fn, schema)` —— IN 是那个 **transform**,授权面是 **OUT**。\n\n这里无条件取 `def.in`,所以对 preprocess 根拿到的是 transform,`zodShapeOf` 返回 `null`。\n\n**这个盲点在本仓已经有过一次实例并被修过**:`scripts/liveness/check-liveness.mts:196` 的 `unwrap` 带着 #4488 的注释,说的正是同一件事 —— `TranslationItemSchema` 的 retired-dialect preprocess 守卫(#3778)让 `translation` 一度「walked to no shape,ungovernable」。那次只修了 liveness 一处;`build-schemas.ts` 这处没跟上。\n\n#5074 又在两处碰到同一个盲点(`kernel/metadata-authoring-lint.ts`、`system/metadata-form-zod-reconciliation.test.ts`),都在 #5074 的 PR 里按 #4488 的写法修了。`build-schemas.ts` **故意留着没动**,因为它的行为改变会移动生成基线(见下),超出 #5074 的范围。\n\n## 为什么归为 observation-class 而不是缺陷\n\n`zodShapeOf` 在这里只喂 `computeSurfaceReachability` 的 **derived-clone 桥**,而:\n\n- BFS 的 `visited` 闭包走的是 `zodChildSchemas`,它递归遍历 def 的所有值(含 `def.out`),所以**可达性本身不受影响**;\n- 取不到 shape 时该函数 `return 'root-graph'`(fail closed,宁可多要一个 tombstone 也不静默放宽)。\n\n所以当前表现是**保守**,不是错答。今天没有已知的错误产物。\n\n## 但值得修\n\n1. 它是「同一个盲点、第二次出现」—— #4488 的教训只落在一个文件里,没有落成规则。三处独立复发(liveness/#4488、authoring-lint 与 form-reconciliation/#5074)说明这是模式,不是巧合。\n2. `translation` 今天就是 preprocess 根注册,所以这条分支**现在就在走错方向**,只是后果被 fail-closed 兜住了。\n\n## 修的时候注意\n\n改成 #4488 的写法(IN 侧解开后若是 `transform` 则改走 OUT)会让 `translation` 这类 preprocess 根**第一次拿到真实 shape**,derived-clone 桥因此可能新增 bridge 项,`authorable-surface.json` / 可达性判定有可能移动。所以这不是一行改动就完事:要跑 `pnpm --filter @objectstack/spec check:generated`,并逐条解释产生的 diff(尤其是任何从 `root-graph` 变成 `derived-clone` 的条目 —— 那正是 #5056 提醒过的、会把死形状标成可达的桥)。\n\n参考实现:`packages/spec/scripts/liveness/check-liveness.mts:191-205`。\n同一 PR 里可以顺手加一条断言,把「preprocess 根能被解出 shape」钉住,免得第四次复发。"
+}

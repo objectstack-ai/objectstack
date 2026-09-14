@@ -1,0 +1,36 @@
+{
+  "number": 5716,
+  "kind": "issue",
+  "title": "analytics dataset 路由:另有九处「作者/调用方形状」的 dataset 拒收仍答 500 —— 它们从来没进过 #5352 的正则名单,所以 #5367 的信封化也没覆盖到",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T01:53:42Z",
+  "updated_at": "2026-08-06T13:30:27Z",
+  "closed_at": "2026-08-06T13:30:27Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5716",
+  "body": "## 背景\n\n#5352 / PR #5366 让 `POST /analytics/dataset/query` 的 catch 先读 ADR-0112 信封,并留下一串写死的 message 正则兜底(六族)。#5367 / PR(本单的来源)把其中五族信封化成 `DATASET_INVALID` / 400 并删掉对应正则条目,只留 `read-scope-sql` 一条。\n\n实现 #5367 时逐条读了 `service-analytics` 的全部 `throw new Error(...)`,发现一个 #5352 和 #5367 都没覆盖的集合:**另有九处同样是调用方 / dataset 作者形状的拒收,它们既没有信封、也从来没进过那串正则,所以今天答的是 `500 ANALYTICS_QUERY_FAILED`** —— 与已修好的五族是同一个缺陷,只是当初没被点名,因此也没有被任何退休时间表接管。\n\n## 清单(行号基于 origin/main + #5367 的提交)\n\n`packages/services/service-analytics/src/dataset-compiler.ts`\n\n| 行 | 拒收 | 触发者 |\n|---|---|---|\n| 237 | dataset 的 JOIN 跨 datasource(#5115 的编译期闸门) | dataset 作者 |\n| 260 | `include` 里的 relationship 在对象上不存在 | dataset 作者 |\n| 271 | `include` 路径超过 `MAX_JOIN_HOPS` 跳数上限 | dataset 作者 |\n\n`packages/services/service-analytics/src/dataset-executor.ts`\n\n| 行 | 拒收 | 触发者 |\n|---|---|---|\n| 466 | `dateRange` 里的日期解析不出来 | 请求(`selection.timeDimensions[].dateRange`) |\n| 511 | `compareTo.dimension` 点名的 timeDimension 没有 `dateRange` | 请求(`selection.compareTo`) |\n| 524 | `compareTo` 但整个 selection 没有任何带 `dateRange` 的 timeDimension | 请求 |\n| 532 | `compareTo.dimension` 有歧义(多个 timeDimension 带 `dateRange`) | 请求 |\n\n`packages/services/service-analytics/src/strategies/native-sql-strategy.ts`\n\n| 行 | 拒收 | 触发者 |\n|---|---|---|\n| 468 | cube 上没有这个 measure(#4157 把 `COUNT(*)` 静默兜底改成拒收的那一处) | 请求(`selection.measures`) |\n| 487 | measure 的 `type` 不认识 | cube / dataset 作者 |\n\n七处的输入直接来自 HTTP 请求体的 `selection`,两处来自调用方内联 POST 的 dataset(Studio 预览)或作者保存的 dataset。全部符合 4xx。\n\n## 为什么值得单独立一条\n\n- 这九处的**外部可见行为今天是错的**:一个 dashboard widget 写错 measure 名、`compareTo` 没给日期窗、`include` 写了个不存在的 relationship —— 作者读到的是 `500 ANALYTICS_QUERY_FAILED`(「平台坏了」),ops 告警按 5xx 计数。这正是 #5352 的立单理由,只是换了一批错误。\n- #5367 的范围被 PM 硬性圈在「正则名单里的那六条」,不能顺手扩;它们也不该被塞进 #5367 的 PR —— 那会把 500 → 400 的行为变更混进一个声称「外部行为不变」的 PR 里。\n- 已经有了落点:`packages/services/service-analytics/src/dataset-refusal.ts` 的 `datasetInvalidError`(`DATASET_INVALID` / 400),#5367 建的。逐处判一次 code(多数是 `DATASET_INVALID`;468 那处也许更贴 `INVALID_FIELD`,与 `assertMeasureFields`/`assertDimensionFields` 的 #4437 / #5520 同形),然后加端到端断言即可。\n\n## 明确不在此列\n\n- `dataset-compiler.ts:135`(non-derived measure 没有 aggregate)与 `native-sql-strategy.ts:139`(`Cube not found`)是内部不变量,spec refinement / 上游注册已经保证;到达即我们的 bug,500 是诚实答案。#5367 的 `dataset-refusal.ts` 头注释已把这条界线写下,并有一条 pin 测试。\n- `read-scope-sql.ts` 十处 fail-closed:输入是管理员写的 RLS 策略,不是调用方输入,正确的 code/status 是 #5367 单独留的开放问题,不要一起做。\n\n## 验收建议\n\n1. 逐处判 code/status(给出理由),通过 `datasetInvalidError` 或按需新增同形构造器抛出。\n2. 每处至少一条生产方单测(code/status/message 指名内容)+ 端到端 REST 断言,形状照 `packages/rest/src/analytics-dataset-refusal-envelope.test.ts`。\n3. changeset 必须写明这是**可见的行为变更**(500 → 4xx),照 #5352 changeset 里 \"Observable behaviour change — read this if you alert or retry on status\" 那一段的写法。"
+}

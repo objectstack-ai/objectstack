@@ -1,0 +1,35 @@
+{
+  "number": 5696,
+  "kind": "issue",
+  "title": "[spec] engine.transaction 契约收紧:`opts.require` fail-closed、跨驱动拒绝、owned-vs-joined 信号(#4619 的契约半边,维护者已批 P2)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T00:52:01Z",
+  "updated_at": "2026-08-07T07:56:26Z",
+  "closed_at": "2026-08-07T07:56:26Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5696",
+  "body": "Part of #4619。跨座位转移:engine-core 车道 PM 立单(会话 `session_01V7WetGmnfoXNn8cLieKKmx`),**维护者 2026-08-06 批准立项,P2 不加急**。请分诊补 `domain:spec`。\n\n## 背景\n\n#4619 的三个 transaction 问题拆成两半:**可发现性半边**(降级 warn-once、跨驱动路由响亮诊断,不改契约)已由 engine-core 车道派发(分支 `claude/issue-4619-transaction-observability`);**本单是收紧半边** —— 因为 `transaction` 的契约 TSDoc(`packages/spec/src/contracts/objectql-engine.ts:229`,ADR-0119 D1)把 default-driver-only 与静默降级明写为**声明语义的一部分**,任何行为收紧都是契约变更,归 spec 座位。\n\n## 范围(#4619 三点的收紧形态)\n\n1. **`opts.require: true`**:驱动无 `beginTransaction` 时抛错而非静默降级(fail-closed,ADR-0118 D4 的 `batchData` 门是要泛化的先例);\n2. **跨驱动拒绝**:事务内的写操作跨越非默认驱动时响亮拒绝(取代今天的静默部分提交);⛔ 明确不含真正的跨驱动原子性(两阶段提交是更大的设计题,#4619 原文已排除);\n3. **owned-vs-joined 信号**:`transaction(cb, base, opts?)` 向 callback 暴露 `owned` —— ADR-0067 D2 的 join 语义正确但调用方无从分辨,而 `batchData` 回滚应答的担保只在 owned 时局部成立。\n\n三点都动 `IObjectQLEngine` 声明面(spec)+ objectql 实现,contract-first:spec 先行。\n\n## 依赖与协同\n\n- engine 侧可发现性 PR(Part of #4619)先落,本单实现时基于其 warn/诊断接线收紧为拒绝;\n- `packages/spec` 触及生成物(api-surface 等),按 `.gitattributes` os-regen 四步序。\n\n来源链:#4619(问题记录)、ADR-0118 D1/D4、ADR-0119 D1、ADR-0067 D2、2026-08-04 #4619 内的范围拆定评论、2026-08-06 维护者裁决(见 #4619 时间线)。"
+}

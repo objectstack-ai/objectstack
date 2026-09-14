@@ -1,0 +1,36 @@
+{
+  "number": 5714,
+  "kind": "issue",
+  "title": "datasource `pool` 声明在 sqlite / sqlite-wasm 驱动臂被静默丢弃(pg / mysql 生效)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T01:50:00Z",
+  "updated_at": "2026-08-06T14:34:43Z",
+  "closed_at": "2026-08-06T13:28:04Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5714",
+  "body": "发现于 #5704 批次 0 的迁移工作(把 `datasource-autoconnect.test.ts` 换到 sqlite `:memory:` 时核对连接池行为),与该 PR 无关,单独记录。\n\n## 事实\n\n`createDefaultDatasourceDriverFactory` 的 `postgres` / `mysql` 臂都把 `buildSqlPool(spec)` 传给 `SqlDriver`,而 `sqlite` 臂走 `resolveSqliteDriver(...)`,**完全不传 pool**:\n\n- `packages/services/service-datasource/src/default-datasource-driver-factory.ts` — sqlite 分支只传 `filename` / `dev` / `schemaMode` / `autoMigrate`。\n- `packages/services/service-datasource/src/sqlite-driver-fallback.ts` — `ResolveSqliteDriverOptions` 根本没有 pool 字段,`buildNative()` 构造 `SqlDriver` 时也没有。\n\n`sqlite-wasm` 臂同理(`SqliteWasmDriver` 也不接 pool)。\n\n## 实测(worktree,service-datasource dist,通过工厂真实构造)\n\n```\nsqlite   + pool{min:3,max:9}   config.pool = {\"createTimeoutMillis\":15000}         live pool = {\"min\":1,\"max\":1}\npostgres + pool{min:3,max:9}   config.pool = {\"min\":3,\"max\":9,\"createTimeoutMillis\":15000}  live pool = {\"min\":3,\"max\":9}\n```\n\nsqlite 拿到的是 knex sqlite dialect 自己的默认值,声明的 `{min:3,max:9}` 没有到达任何地方,也没有任何提示。\n\n现网标本:`examples/app-crm` 的 `CrmDatasource` 声明了 `pool: { min: 1, max: 5 }`(`examples/app-crm/src/datasources/crm.datasource.ts`),实际得到 `{min:1,max:1}`。\n\n## 为什么值得记一笔\n\n这正是 #4410 那一轮在清的「声明了但没人读」的形状 —— `datasource.pool` 是 strict schema 上的可授权键,pg/mysql 认它、sqlite 不认,差异既没文档也没告警。\n\n## 但修法不是简单接上去(所以这里不带方案)\n\n对 `filename: ':memory:'` 的 sqlite,**照着 `max` 大于 1 接上去反而是错的**:knex 的 better-sqlite3 每取一条连接就 `new Database(':memory:')`,即开出一个互相看不见的空库,写进 A 读不到 B。knex 自己的 sqlite dialect 默认 `{min:1,max:1}` 就是为了躲这个坑。\n\n所以三条路各有代价,需要裁决而不是猜:\n\n- **A. 接上去**:对文件型 sqlite 正确,对 `:memory:` 引入静默数据丢失 —— 除非同时对 `:memory:` 强制 `{min:1,max:1}`。\n- **B. 显式拒绝**:sqlite datasource 声明 `pool` 时在 authoring / publish 校验里报错并说明「sqlite 连接池由驱动决定」,契约优先,作者立刻知道。同时要把 app-crm 的声明删掉。\n- **C. 从 sqlite 的配置契约里移除 `pool`**:走 ADR-0049 enforce-or-remove。\n\n倾向 B 或 C(取决于 `pool` 是否按驱动分契约),但这是公开契约形状问题,留给维护者定。\n\n复现脚本(在 `packages/services/service-datasource/` 下,先 build):\n\n```js\nconst { createDefaultDatasourceDriverFactory } = await import('./dist/index.js');\nconst f = createDefaultDatasourceDriverFactory();\nconst h = await f.create({ name: 'ds', driver: 'sqlite', config: { filename: ':memory:' }, pool: { min: 3, max: 9 } });\nconsole.log(h.driver.knex.client.config.pool, h.driver.knex.client.pool.min, h.driver.knex.client.pool.max);\n```"
+}

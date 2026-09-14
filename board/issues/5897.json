@@ -1,0 +1,34 @@
+{
+  "number": 5897,
+  "kind": "issue",
+  "title": "loadMetaFromDb 的返回值无法表达「没读到存储」—— restoreMetadataFromDb 把 outage 记成 debug 级 \"No persisted metadata found\",boot 照常报告健康(ADR-0110 D3 的 boot 侧)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T11:11:26Z",
+  "updated_at": "2026-08-06T14:36:38Z",
+  "closed_at": "2026-08-06T14:36:38Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5897",
+  "body": "来自 #5841 的事实 2(该单按范围裁定只交付事实 1,事实 2 测量后立单)。测量证据与修向分析见 PR #5889 报告,此处摘录并附 PM 裁决。**未指派;标签交分诊。**\n\n## 事实(#5841 的 dev 实测,origin/main)\n\n`loadMetaFromDb` 的返回值 `{ loaded, errors, invalid }` 没有任何字段能表达「这次水合根本没读到存储」。其返回值的**唯一**生产消费方是 `packages/objectql/src/plugin.ts:1140` 的 `restoreMetadataFromDb`,且**没有任何调用方对 `loaded: 0` 做分支处置** —— 唯一分支是选哪条日志:读不到存储的 boot 在 kernel 日志里被写成 **debug 级**的 \"No persisted metadata found in database\"。\n\n下游后果(plugin.ts Phase 2 自己的注释已写明):registry.getObject 返回空 → unknown-`$select` guard / hooks / relationships **silently degrade**;没读到的 overlay 对象既不建表也不桥接,kernel 照常 ready。自托管运维在 boot 期只有日志一个信号,而这个信号是 debug 级的「库是空的」。\n\n## 修向(dev 的四案分析,原文见 #5841 报告)\n\n- **A(dev 推荐)**:返回值加诊断位(如 `storeUnavailable` / `degraded`),`restoreMetadataFromDb` 读它并按 AGENTS「Degradation log levels」升到 error。改返回契约 + `objectql/src/plugin.ts:23` 的 `ProtocolWithDbRestore` 接口声明与消费分支;面小、不改控制流;与 #5840 的方向 (a)(诊断版读法)同形,可共用。\n- **B**:非良性时抛出(#5532/#5705 的 503 同语义)—— 语义最纯,但把「可降级继续」的 boot 升级成失败路径,且 `restoreMetadataFromDb` 现有 catch 会重新吞掉,不同步改消费方等于没改。\n- **C**:只把消费方 `loaded===0` 分支从 debug 升 warn —— 空库与 outage 仍不可分,把两个相反事实继续用同一个名字叫,workaround。\n- **D**:不修。\n\n## PM 裁决(第三档:带前提,否决窗口开放)\n\n**裁 A**,前提两条(实施 dev 开工先核,任一不成立即报 fork、⛔ 不许静默改道):\n1. `loadMetaFromDb` 返回值的消费方仍然只有 `restoreMetadataFromDb` 一个(#5841 测量时如此);\n2. `ProtocolWithDbRestore` 是 objectql 内部接口声明,不在 `packages/spec` 公开契约面上(若实测它已进 spec,转 `domain:spec` 座位)。\n\n依据:ADR-0110 D3(outage ≠ miss)已是本仓在 DatabaseLoader(#5108)、listForIndex(#5089)、协议 overlay 读(#5532/#5705/#5843)的既定方向,A 是同一条规矩的 boot 侧落地 —— 属 restore-invariant,不占维护者决策位;B 过重(boot 应 degrade loudly 而非 die),C 属 workaround(两个相反事实一个名字),D 违背 D3。\n\n## 协调\n\n- **#5840**(MetadataManager.get() 丢 degraded 判定,已排队):同族相邻,A 的诊断位形状可与其方向 (a) 共用;两单派发时注意 `plugin.ts` / `metadata-manager.ts` 文件面切分,先派者在报告里回答对后派者的必答项。⚠️ #5840 若选 (b)(degraded 时抛),boot 侧**不宜照抄**(会让首启之外的任何读失败起不来)—— #5841 的 dev 已预警。\n- #5841(事实 1,PR #5889)只换良性判定谓词,与本单无文件级依赖。\n\nRefs #5841 / PR #5889、#5840、ADR-0110 D3、#5108、#5089、#5532。"
+}

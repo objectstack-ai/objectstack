@@ -1,0 +1,36 @@
+{
+  "number": 5932,
+  "kind": "issue",
+  "title": "settings 写入路径只执行 required / options / pattern —— 声明的 min / max / minLength / maxLength 一条都不校验(auth.password_min_length 可被写成 1)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T12:17:37Z",
+  "updated_at": "2026-08-07T11:12:10Z",
+  "closed_at": "2026-08-07T11:12:10Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5932",
+  "body": "在 #5712(localization options 表)的核查中发现,记录下来交 triage。**不在 #5712 的完成范围内** —— #5712 处理的是 `select` 的 options 词表,这条是同一个 `validatePatch` 里另外四个**已声明但完全未执行**的约束。\n\n## 事实\n\n`packages/spec/src/system/settings-manifest.zod.ts` 的 `SpecifierSchema` 声明了五类值约束,`pattern` / `min` / `max` / `minLength` / `maxLength`。\n`packages/services/service-settings/src/settings-service.ts` 的 `SettingsService.validatePatch`(约 :899-1025)**只有三个分支**:`required`、`options`(#5131)、`pattern`。`min` / `max` / `minLength` / `maxLength` 在整个写入路径上没有任何读取点 —— grep 全仓,这四个键在 `service-settings` 里只出现在 manifest 字面量中,没有消费者。\n\n实测(worktree 内探针,`SettingsService` + 内存后端):\n\n```\nnumber quota   declared min:0 max:100  — 写 -500,读回 -500;写 999999,读回 999999\ntext   code    declared minLength:2 maxLength:4 — 写 \"X\",读回 \"X\";写 \"ABCDEFGHIJ\",读回 \"ABCDEFGHIJ\"\nslider ratio   declared min:0 max:1    — 写 42,读回 42\n```\n\n## 为什么不是休眠项:已上线的 manifest 真的在声明这些边界\n\n不是「没人用的能力」,而是**在库的声明与执行不一致**,且落点包含安全项:\n\n| 文件:行 | 键 | 声明 | 写入侧实际 |\n|:---|:---|:---|:---|\n| `packages/services/service-settings/src/manifests/auth.manifest.ts:85-90` | `password_min_length` | `min: 6, max: 64` | 接受 `1`(甚至负数) |\n| `auth.manifest.ts:94-100` | `password_max_length` | `min: 16, max: 256` | 接受任意值 |\n| `auth.manifest.ts:128-131` | `password_min_classes` | `min: 1, max: 4` | 接受任意值 |\n| `auth.manifest.ts:139-142` | `password_history_count` | `min: 0, max: 24` | 接受负数 |\n| `auth.manifest.ts:150-153` | `password_expiry_days` | `min: 0, max: 3650` | 接受负数 |\n| `ai.manifest.ts:189/193/197/216/288/294` | temperature / max_tokens / timeout / 等 6 项 | `min`/`max` | 接受任意值 |\n\n即 `PUT /api/settings/auth` 写 `password_min_length: 1` 会被接受并生效,而 UI 的数字框声明的下限是 6。攻击面不是「绕过 UI」本身,而是 Prime Directive #10 的正面形状:**声明了却没执行**,下游(better-auth 口令策略)按写入值工作,没有任何一层把它拉回声明的区间。\n\n## 与 #5131 的关系(为什么算同一族)\n\n#5131 关掉的正是同一个洞的 `options` 那一半:在它之前 options 表「只是前端约定」,`PUT /api/settings/:ns` 什么都收。`min`/`max`/`minLength`/`maxLength` 今天仍停在 #5131 之前的状态。修法应当与 #5131 同形:在 `validatePatch` 里补分支,发 `out_of_range` / `too_short` / `too_long` 一类 `FieldError`(`packages/spec/src/api/errors.zod.ts` 已有的码里挑,ADR-0114 的 `constraint` 字段带上 `{ min, max }`),并沿用 #5131 的 TOUCH 闸门语义 —— 只校验本次 patch 触及的键,避免历史漂移把工作区锁死。\n\n需要一并决定的一点:env 侧(#5204)目前只对 options 表做拒收。若补 min/max,应同样走 `effectiveEnvOverride` 那一个判定点,而不是在 env 路径上开第二份实现(#5204 的成因就是同一比较有两份)。\n\n## 影响面(已核实)\n\n- 写入侧:活的,任何有 `setup.write` 的调用方(REST / 脚本 / AI 生成的引导代码)都能写越界值。\n- env 侧:`OS_AUTH_PASSWORD_MIN_LENGTH=1` 同样不被拦。\n- 未核实:各消费者(better-auth 策略、AI 服务)对越界值的实际容忍度 —— 这决定严重度是「配置面不一致」还是「可利用」,建议 triage 时定。\n\n## 相关\n\n- #5131 —— options 表在写入路径上的执行(同一函数,同一族)。\n- #5204 —— env 侧与写入侧对齐 options 表。\n- #5712 —— localization options 表的词表问题(发现本条的上下文)。\n- #2814 —— sms 配额将新增 `daily_quota`(`0 = 不限`),若按 `min: 0` 声明,今天同样不会被执行。\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 5912,
+  "kind": "issue",
+  "title": "finding(service-automation): engine.ts 的 resumeInternal 把驱动错误插进 message —— #5737 修完后,这条 resume 路径上仅剩的一处外来 cause 拼接",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:queue"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T11:29:07Z",
+  "updated_at": "2026-08-07T11:50:29Z",
+  "closed_at": "2026-08-07T11:50:29Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5912",
+  "body": "做 #5737(PR #5911)时在**同一条 resume 路径**上扫到的旁生发现,但在**另一个文件、另一个方法**里,因此不在那一单范围内,按 Prime Directive #10 / objectstack#4949 单开。\n\n## 现象\n\n`packages/services/service-automation/src/engine.ts:3014`(origin/main `7b005b4`),`resumeInternal` 读挂起态存储失败的那一支:\n\n```ts\ntry {\n    run = await this.loadSuspendedRunStrict(runId);\n} catch (err) {\n    const message = (err as Error).message;\n    this.logger.error(\n        `[automation] durable suspended-run store unreachable while resuming '${runId}': ${message}`,\n    );\n    return {\n        success: false,\n        code: 'STORE_UNAVAILABLE',\n        error: `Durable suspended-run store unreachable for run '${runId}' — retry once the store is available: ${message}`,\n    };\n}\n```\n\n`message` 来自 `loadSuspendedRunStrict`,即**数据源驱动**自己的失败文本 —— 我们不控制它有几行。它被插进 `logger.error` 的 message(第 3017 行)。\n\n## 为什么 #5737 没有覆盖它,以及为什么现在它更显眼\n\n#5737 修的是 `builtin/wait-node.ts` 的五处。其中 `:98` 那处的 cause 正是**这里第 3022 行造出来的信封字符串** —— 也就是说驱动的多行文本经这个信封两跳到达 wait-node 的记录。PR #5911 已经把**信封那一跳**接住了(落 meta),但**第 3017 行这条 `logger.error` 自己**照旧拼接。\n\n所以修完 #5737 之后,同一次「resume 时存储不可达」会产生两条记录:wait-node 那条现在是干净的一行,engine 这条仍会被切碎。\n\n## 危害机制(与同族四单同一条)\n\n`ObjectLogger.write()` 一次调用只加一个「时间戳 + 级别」记录头,message 里的换行把**一条**记录变成多个物理行,后几行无级别无时间戳。`pretty` / `text`(`os dev` / `os serve` 默认)下文件 sink 当独立记录存,`grep ERROR` 只捞到不含事实的那一行。`error` 走 stderr,不经 `serve` 的启动静默缓冲,所以危害是**被误读**而非被丢弃(与 #5661 第 2、3 条同形)。cloud#971 即此形态。\n\n级别本身是对的:存储不可达而运行仍在盘上,是 #4632 定义的耐久性降级,`error` 不应下调。\n\n## 可达性(为什么是 finding)\n\n与 #5575 / #5636 / #5661 / #5737 同样的理由:今天库内的驱动错误均为单行,所以这是 `finding` 而不是事故报告。第一个包装多行 SDK 错误的驱动撞上 —— 数据库驱动的多行错误(Postgres 的 `detail:` / `hint:` 续行、better-sqlite3 包装器)在生态里很常见,#5737 的实测就是照这个形状造的。\n\n## 修法(同族既定模板,零新词汇)\n\n复用同包 `thrown-cause-diagnostics.ts` 的 `describeThrownForLog`:message 保持单行自足,cause 走 meta。按 `Logger` 契约(`packages/spec/src/contracts/logger.ts`)选参数位 —— `error(message, error?, meta?)` 用**第三**参,第二参传 `undefined`,否则每条记录都带整个栈(#5575)。新增字段名不得含 key / token / secret / password 子串(#5573)。\n\n一个需要顺带判断的点(不是阻塞项):第 3022 行的**信封字段** `error` 是否也该停止插值。倾向**不动** —— 它是给调用方读的结构化返回值(经 REST 出去时是 JSON,不经按行切分的消费者),#5636 对 `degradedReason` 就是刻意保持逐字不变的;而且 PR #5911 已经让 wait-node 侧把它整体放进 meta,多行文本由 `JSON.stringify` 转义后完整保留。\n\n## 关联\n\n#5737 / PR #5911(wait-node 五处,本发现的来源)、#5661(`plugin.ts` 三处)、#5636 / PR #5662、#5575 / PR #5639、#5048 / PR #5572、#5660(同在 `engine.ts` 但在 `registerDegradedConnector`,已闭)、#5573、#4632、#4420、cloud#971。\n"
+}

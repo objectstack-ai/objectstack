@@ -1,0 +1,35 @@
+{
+  "number": 6006,
+  "kind": "pull_request",
+  "title": "feat(driver-turso): remote 模式补 canonical 时间列 backfill 通道(分批、可恢复、完成标记) (#5770)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T14:23:41Z",
+  "updated_at": "2026-08-06T14:55:42Z",
+  "closed_at": "2026-08-06T14:55:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T14:55:41Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6006",
+  "body": "Fixes objectstack-ai/objectstack#5770\n\n承接 cloud#1005,按维护者 2026-08-03 的**方案 1** 裁定落地。方案 2(DDL 亲和性对齐)等 staging 存量探针另议、不在本单;方案 3(在 `@objectstack/driver-sql` 公共表达式里加启发式)已被否决,本 PR 未触碰该表达式一个字节。\n\n## 前提复核(基于 origin/main `d82b85fee`,含 #5921 拒收闸)\n\n派单前先在 origin/main 上实测,两个后果都成立,但**后果 B 的实际形态比原单描述更尖锐**,如实记录在下面。\n\n**后果 A —— 成立。** remote 模式下:\n\n```\ncanonicalDatetimeFields['probe']            -> undefined\nneedsLegacyDatetimeRepair('probe','at')     -> true\ntemporalFilterColumnSql('probe','at','\"at\"')\n  -> (case when typeof(\"at\") in ('integer','real')\n        then strftime('%Y-%m-%dT%H:%M:%fZ', \"at\"/1000.0, 'unixepoch')\n        else coalesce(strftime('%Y-%m-%dT%H:%M:%fZ', \"at\"), \"at\") end)\n```\n\n`registerExternalObject` 会填 `datetimeFields` / `timeFields`,但从不填 canonical 标记 —— 因为填标记的只有 Knex 路径的 `backfillCanonicalDatetimes`,remote 永不经过。于是修复表达式恒定生效:正确,但不可索引,且没有出口。\n\n**后果 B —— 成立,但形态与原单不同。** 原单记为「这一群 legacy 行在 remote 任何 filter 都匹配不到」。实测:`'1753660800000.0'`(TEXT 亲和下的 pre-#942 epoch)确实永远转不过来 —— 它是共享修复表达式的**不动点**(`typeof` 分支进不去,`strftime` 解析不了,`coalesce` 原样返回)—— 但它并非匹配不到任何 filter,而是**按 TEXT 比较进了错误的窗口**,双向都错:\n\n```\nwhere at between '2025-07-01T…' and '2025-08-01T…'  -> ['ok']            该行属于此窗口却被漏掉\nwhere at <= '2030-01-01T…'                          -> ['legacy','ok']   该行不属于此窗口却被命中\n```\n\n字典序上 `'1753660800000.0'` 排在所有 `'2…'` 之前,所以是假阴 + 假阳同时存在。成因与修法与原单一致,只是描述需要更准 —— 这一条也写进了新套件的文件头。\n\n## 落地\n\n新增 `packages/drivers/driver-turso/src/remote-canonical-backfill.ts` 与 `TursoDriver.backfillRemoteCanonicalTemporal()`,在 remote 的 `initObjects` / `syncSchema` 之后自动运行(与 local 在 `initObjects` 里调用 backfill 的位置一一对应),同时公开供运维用更大预算把大表跑到底。\n\n- **分批**:每条 `UPDATE` 至多改 `batchSize` 行,借 `rowid IN (SELECT … LIMIT ?)` 子查询限量。没有用 `UPDATE … LIMIT`,那需要 libSQL 不保证的编译选项;`buildCreateTableSQL` 从不发 `WITHOUT ROWID`,所以 rowid 一定在。\n- **可恢复**:不引入任何断点表或状态。WHERE 守卫本身就是断点 —— 它选中的正是尚未 canonical 的行,中断在任何位置都不回滚已转换的行,下次从余量继续。已收敛的列重跑只花**一条语句、零写入**。\n- **完成标记**:写进 `canonicalDatetimeFields` / `canonicalTimeFields` —— 与 local **完全相同的消费点**(`needsLegacyDatetimeRepair`),两种 transport 因此靠同一条规则拿回可索引形态,而不是两条。⚠️ 未新增任何公开 schema 或持久化标记,所以没有需要维护者拍板的契约选择。\n- **后果 B 的可解部分**:把纯数字文本按 `cast(col as real)` 喂回**驱动自己的**表达式 —— typeof 变成 'real',于是走它原本就有的 integer/real 分支。因此本仓不存在第二套 epoch 转换规则,「canonical 是什么」仍然只有一个定义。\n- **不可解残留如实记录**:只解释 1e12 ≤ v 且 v 小于 4102444800000(2001-09-09 ~ 2100-01-01)。下界是为了让 epoch **秒**永不入界 —— 2100 年前的秒值最大约 4.1e9,若按毫秒解释会把 `'1753660800'`(2025-07-28)静默改写成 1970-01-21(已实测)。界外的行原样留在盘上并计入 `unresolvedEpochTextRows`,不猜。\n\n### 设计中被自己的测试纠正的一处\n\n完成标记最初只看「非不动点行数」。写用例时发现这是错的:**未转换的 TEXT epoch 恰恰是共享修复的不动点**,所以一张全是 legacy epoch 行的表测出来残留为 0,会被判定为「已完成」→ 标记 canonical → 而已标记的列下次会被跳过 → 这批行**永远转不过来**。现在的门是两个计数(残留 + 在界内待转),用例 `a budget-stopped run withholds the mark` 把这个陷阱钉死并写明了原因。\n\n## 正确性姿态不变(ADR-0053 D-B3 / cloud#1003)\n\nbackfill 是**性能出口,不是正确性前提**。任何失败(远端不可达、标识符非法、预算耗尽)都只导致该列不被标记、读侧继续带修复、答案照旧正确,且不会让 boot 失败 —— 连非法标识符都是 report 而非 throw。用例里有「标记与不标记答案完全一致」的直接断言。\n\n## 验证\n\n```\npnpm --workspace-concurrency=2 --filter @objectstack/driver-turso typecheck   -> clean\npnpm --workspace-concurrency=2 --filter @objectstack/driver-turso test        -> 22 files / 711 tests passed\npnpm --workspace-concurrency=2 --filter @objectstack/driver-turso build       -> success\nnode scripts/check-nul-bytes.mjs / check-driver-conformance.mjs\n     / check-adr-anchors.mjs / check-changeset-fixed.mjs                      -> OK\n```\n\n基线 691 条,新增 20 条。\n\n**反向验证(方向事先预判,结果与预判一致)**:摘掉 `initObjects` / `syncSchema` 两处自动调用后,断言新能力的 6 条转红;两条 legacy conformance sweep 保持绿(它们现在显式清标记,与接线正交);直接调模块的分批/续跑/D-B3/标识符用例也保持绿(不经过接线)。恢复后 711/711 全绿。\n\n## fixture 处置\n\n`turso-remote-temporal-conformance.test.ts` 的两条 legacy sweep 原本带一句注释:「remote 模式没有 backfill 会把列标成 canonical,所以不需要像 local 那样清标记」。本 PR 让这句话失效,所以两条 sweep 现在:\n\n1. 显式清除 canonical 标记(与 driver-sql 的 `LegacyStorageDriver.forgetCanonical` 同一做法与同一理由);\n2. 断言修复**确实仍在生效**(`needsLegacyDatetimeRepair` 为 true)。\n\n这不是削弱用例,而是让 fixture 真正建立它名字所宣称的状态 —— 此前「未 backfill」是因为压根没有 backfill 而**碰巧**成立;现在它是 fixture 必须自己声明的状态,并且是一个真实可达的状态(backfill 撞上批次预算或跑不起来的库),正是 D-B3 要求继续答对的那一个。\n\n已按消费半径扫描过闸外:仓内 canonical 标记的消费方只有 driver-sql / driver-sqlite-wasm / driver-turso 三处,前两者未触碰;仓内也没有 driver-turso 之外的 remote 模式时间列 fixture。\n\n⛔ 未触碰 #5921 的条件层拒收闸与 `buildWhereSQL`;⛔ 未改 `content/docs/releases/`。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WyvqvKMG6asi9aXjKE6xtx)_"
+}

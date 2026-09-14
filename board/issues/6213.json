@@ -1,0 +1,35 @@
+{
+  "number": 6213,
+  "kind": "pull_request",
+  "title": "fix(service-analytics): compareTo 把比较桶键平移回当期,让「日期维度即网格维度」时的同比真正对齐 (#6007)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T10:59:33Z",
+  "updated_at": "2026-08-07T11:27:06Z",
+  "closed_at": "2026-08-07T11:27:05Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T11:27:05Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6213",
+  "body": "Fixes objectstack-ai/objectstack#6007\n\n## 问题\n\n趋势图 + 同比是 `compareTo` 最常见的形状:日期维度既写进 `selection.dimensions`(它就是图表的时间轴),又被 `compareTo` 用作锚点。这个形状下比较趟**从来没有对齐过**。\n\n比较趟查询的是**平移后**的窗口,所以它的行按平移后的桶键落地;而 `mergeByDimensions` 按 `selection.dimensions` 元组建键 —— `2025-01` 不等于 `2026-01`,于是**没有一条**比较行合并得进去,全部作为新行追加。两趟各自只报告了自己那一半,`fillEmptyGroups` 把另一半填成自信的 `0`,再加上平移后的桶键坐在网格里,而它们落在调用方筛选窗口之外:\n\n```\n[{\"close_date\":\"2025-01\",\"opp_count__compare\":5,\"opp_count\":0},\n {\"close_date\":\"2025-02\",\"opp_count__compare\":7,\"opp_count\":0},\n {\"close_date\":\"2026-01\",\"opp_count\":1,\"opp_count__compare\":0},\n {\"close_date\":\"2026-02\",\"opp_count\":2,\"opp_count__compare\":0}]\n```\n\n一个 2 桶窗口的「今年 vs 去年同期」:四行、每行一个 0、两行在窗口外。现在:\n\n```\n[{\"close_date\":\"2026-01\",\"opp_count\":1,\"opp_count__compare\":5},\n {\"close_date\":\"2026-02\",\"opp_count\":2,\"opp_count__compare\":7}]\n```\n\n## 修法(维护者 2026-08-07 裁决,方向 1)\n\n合并之前,把每个比较桶键用**当期的说法**重述一遍。新增 `alignedCompareBucketKey`,在 `runCompare` 里改名成 `__compare` 列的同一处调用。\n\n- **`previousYear`** —— 窗口是按日历年平移的,所以逆运算就是按日历年往前推一年:对桶自己的首日做平移再重新分桶。`2025-01` → `2026-01`、`2025-Q1` → `2026-Q1`、`2025-W03` → `2026-W03`。它刻意是 `shiftRange` 那套年运算的**精确逆运算**(含 `setUTCFullYear` 的溢出行为),窗口与桶键因此不可能对「一年」有两种理解。\n- **`previousPeriod`** —— 任意天数窗口没有日历对应物,所以按**桶序(bucket ordinal)**对齐:上一窗口的第 n 个桶对上本窗口的第 n 个桶,n 各自从自己窗口的起点数起。这条是裁决特意补的语义。\n\n**序号由日历算出,不是数组下标。** 「把两趟的键各自排序后按下标配对」是最顺手的写法,也是错的:本期网格里某个桶没有数据,它就不在那个数组里,于是其后**每一个**桶都错位一格,比较列落到邻居身上。已按此专门钉了一条(`2025-03` 必须落到 `2026-03` 而不是 `2026-04`)。\n\n**响应形状不变** —— 仍是每个 measure 各自的 `__compare` 后缀列,行仍是网格维度元组,objectui#3337 正在收敛的那条契约面不受影响。\n\n**不确定时一律保持改动前的行为**,而不是猜:空桶(两条聚合路径上键都是 `null`,两趟本来就互相合并)、未分桶的日期维度(分组的是原始时间戳,不是桶键)、以及平移回来落在当期窗口之外的桶(两个等长的天数窗口可以切出不同的桶数,桶序规则会有一个没有对家的末桶 —— 把它挪到调用方没要过的桶上,是拿一行显眼的异物换一行看起来很合理的错值)。\n\n范围严格限定在坏掉的那个形状:锚点必须是**网格维度**(仅作窗口的锚点两趟都不是列,#5688 之后本来就对齐)且必须**被分桶**。两趟通过同一个新抽出的 `granularityOf` 读桶大小,所以这里重述的桶大小按构造就是查询分组用的桶大小。\n\n## 为什么旧 pin 没抓住\n\n`dataset-selection-window.test.ts` 的「buckets the compareTo pass identically」用例,其 fake 无视 `filter`、两趟都返回 `created_at: '2026-06'`,合并因此**必然**成功。它真正钉住的东西(两趟解析出同一 GROUP BY 粒度,#4870)它钉得很好,本 PR 里也仍然绿;但任何忽略窗口的 fake 都够不到下面那一层。所以新测试文件里的 fake **真的分桶**:按下推的 `filter` 过滤行集再分组,这才是比较趟返回平移桶键的原因。\n\n## 测试\n\n- `dataset-window-timedimension-bucketing.test.ts:392`「bucketed anchor」按裁决**有意翻红**,改写为成对的 2×2,并把它此前断言的四行原样保留在注释里(它当初就是指着本单钉的)。文件头的成对叙述同步更新。\n- 新增 `dataset-compare-bucket-alignment.test.ts`(75 例):issue 原样复现、窗口外零幻影行、空档不移位、day/week/month/quarter/year 五种粒度、多维网格只对齐锚点列、measure-scoped filter 穿过对齐缝(#4820 × #6007)、`previousPeriod` 的日桶与月桶桶序、以及三条**必须不动**的对照(仅窗口锚点 / 未分桶锚点 / #4870 那个忽略窗口的 fake)。\n- `bucketKeyAtOrdinal` 是本包唯一自己铸造桶键的地方,它铸出的键要和运行时 `GROUP BY` 产出的键**逐字节相等**,所以对 `@objectstack/core` 的 `bucketKeyToCalendarRange`(同一套词汇的规范逆函数)做了 55 例往返钉,而不是靠眼看 —— 这正是 `bucketDateValue` 自己的文档提醒过的「手抄副本查不出自己的漂移」。\n\n**反向验证(方向事先预测:标准红)。** 把对齐关掉(`granularity` 恒为 `undefined`)重跑:12 条对齐钉全红且退回 issue 里那四行;三条对照与 55 条往返钉**全绿** —— 证明它们钉的是自己声称的东西,没有偶然耦合到本次改动。随后按逐字节 diff 确认已还原。\n\n```\npnpm --workspace-concurrency=2 --filter @objectstack/service-analytics test\n  Test Files  62 passed (62)\n       Tests  1206 passed (1206)\n\nnpx turbo run build --concurrency=2      → 72 successful, 72 total\nnode scripts/check-nul-bytes.mjs         → OK (5920 files)\ncheck:empty-changeset / check:engine-double-contract\ncheck:type-check-coverage / check:type-check-debt   → 全绿\n```\n\n`tsc --noEmit` 在本包报 19 个错,**全部先于本 PR 存在**且都在我没碰的文件里(`analytics-service.test.ts` / `measure-source-field-gate.test.ts` / `objectql-timedimension-projection.test.ts`);本 PR 新增与修改的三个文件 0 错,`check:type-check-debt` 的账本对本包无漂移。\n\n> 注:上一版正文里 `< measure >__compare` 被 GitHub 的正文净化器当作 HTML 标签吞掉了(`<` 后接字母),已改写为不含裸 `<` 的说法。\n"
+}

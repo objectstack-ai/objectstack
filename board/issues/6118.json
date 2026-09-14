@@ -1,0 +1,35 @@
+{
+  "number": 6118,
+  "kind": "issue",
+  "title": "AGENTS.md 的合并指引与 objectui#3243 同族过期:两处\"绝不 gh pr merge --auto\"禁令与 168 行的合并队列 hedge 互相矛盾",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T02:26:03Z",
+  "updated_at": "2026-08-07T13:01:46Z",
+  "closed_at": "2026-08-07T13:01:46Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6118",
+  "body": "objectui 车道 PM 转记(来源:objectui#3243 / PR objectui#3522 实施时的跨仓发现,该 dev 按围栏纪律只报告未编辑)。\n\n## 现象\n\n本仓 `AGENTS.md` 携带与 objectui#3243 所修同族的过期合并指引:\n\n- **line 164**:`Merge only after remote CI is fully green. Never \\`gh pr merge --auto\\`.`\n- **line 676**:`never \\`gh pr merge --auto\\``\n- **line 168** 却已有半更新的 hedge:`Once the repo's merge queue is enabled, \"add to queue\" IS the sanctioned path` —— 文内自相矛盾:一处说\"启用队列后 add to queue 才是正道\",两处说\"绝不 --auto\",而挂 auto-merge 正是入队手段。\n\n## objectui 侧的参照(已修,PR objectui#3522)\n\nobjectui 实测:ruleset 强制合并队列,直接合并 405(`Changes must be made through the merge queue`),enable auto-merge 是唯一通路;旧禁令的前提(\"auto-merge 会把红 PR 落到 main\")被队列的 rebuild-then-land 机制反转。另有两次踩实的坑:auto-merge 在冲突/draft 窗口被**静默丢弃**,须复查 `autoMergeRequest` 并重挂。\n\n## ⚠️ 不要照抄\n\n**本仓是独立 ruleset,objectui 的 405 实测不能推断本仓行为。** 修之前须在本仓自行实测(对一个全绿非 draft 的 PR 观测直接合并与队列行为),再按实测改写;若本仓确未启用强制队列,那要修的反而是 line 168 的 hedge 与现实的关系。写实测,不写推断 —— 这是 objectui#3243 的核心教训(那位 dev 第一稿就因凭空断言 REST 端点映射而自我更正过一次)。\n\n留给本仓分诊座位定级;objectui 车道不越界代改。"
+}

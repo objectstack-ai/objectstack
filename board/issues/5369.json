@@ -1,0 +1,33 @@
+{
+  "number": 5369,
+  "kind": "issue",
+  "title": "`$exists` 的比较值不是布尔时,三个后端面给出三个答案,driver-memory 自己的两个面在 `'yes'` 上就已分叉 —— 实测,`$null`(#5347)的同族另一轴",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T02:00:15Z",
+  "updated_at": "2026-08-06T13:42:51Z",
+  "closed_at": "2026-08-06T13:42:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5369",
+  "body": "修 #5347 / #5348(PR #5368)时,按 PM 要求核对 driver-sql 的守卫表 `nullValueSatisfiesOperator` 能否随 `$null` 的拒收一并收紧,清点到紧邻的 `$exists` arm 带着同款的 `=== false` 二分。实测后确认它也分叉,而且比 `$null` 更散。**不在 #5347 范围内**(PM 裁定只覆盖 `$null`),按 Prime Directive #10 单独记在这里,unassigned。\n\n## 实测原文\n\nfixture 两行 —— `{id:'1', stage:'won'}`、`{id:'2', stage:null}`(注意第二行:**键在,值为 null**)。三个求值面:\n\n```\n                    driver-sql      driver-memory find     driver-memory match\n                    (better-sqlite3) (mingo)                (参考匹配器)\n$exists: 0          [\"1\"]           []                     [\"2\"]\n$exists: 'yes'      [\"1\"]           [\"1\",\"2\"]              [\"1\"]\n$exists: ''         [\"1\"]           []                     [\"2\"]\n```\n\n对照组(布尔值,方向一致):\n\n```\n$exists: true       [\"1\"]           [\"1\",\"2\"]              [\"1\"]\n$exists: false      [\"2\"]           []                     [\"2\"]\n```\n\n## 机制:三处按三种规则读同一个比较值\n\n**driver-sql**(`sql-driver.ts`,`applyFilterCondition` 的发射器 switch,`$null` arm 下一条):\n\n```ts\ncase '$exists':\n  (builder as any)[opValue === false ? whereNull : whereNotNull](field);\n```\n\n—— **`=== false` 恒等**。除字面 `false` 外一律 `IS NOT NULL`,所以 `0` 和 `''` 都读作「存在」。\n\n**driver-memory 的 mingo 面**(`memory-driver.ts` `normalizeFieldOperators`):\n\n```ts\ncase '$exists': case '$regex': case '$options':\n  result[op] = val;\n```\n\n—— 原样交给 mingo,mingo 按 **truthy** 读。所以 `0` / `''` 读作「不存在」,`'yes'` 读作「存在」。\n\n**driver-memory 的参考匹配器**(`memory-matcher.ts`):\n\n```ts\ncase '$exists':\n  const exists = value !== undefined && value !== null;\n  if (exists !== !!target) return false;\n```\n\n—— 也按 **truthy**(`!!target`),但它的 `exists` 定义是「**有值**」(`!== undefined && !== null`),而 mingo 的是「**键存在**」。所以在 `stage: null` 那一行上两者必然相反,`$exists: 'yes'` 就已经分开:mingo 说 `[\"1\",\"2\"]`,matcher 说 `[\"1\"]`。\n\n三个规则:`=== false` 恒等 / truthy + 键存在 / truthy + 有值。\n\n## 为什么这是独立的一条,而不是 #5299 或 #5347 的一部分\n\n- **与 #5299 不同轴。** #5299 问的是「`$exists` 的语义是『键存在』还是『有值』」—— 那是**布尔比较值下**的语义分歧,需要一次语义裁决。本条问的是「比较值**根本不是布尔**时怎么办」,是形状问题,答案不依赖 #5299 怎么裁:无论 `$exists` 最终定义成哪一种,`$exists: 0` 都没有一个不靠猜的读法。两条可以独立修,也可以一起修。\n- **与 #5347 同族但被明确排除。** #5347 的 PM 裁定只覆盖 `$null`;PR #5368 因此**刻意没有**收紧 `$exists`,并在 `nullValueSatisfiesOperator` 里留了注释说明理由:该守卫表的 `case '$exists': return value === false` 必须继续与发射器的 `opValue === false` 读法一致,**单独收紧守卫表而不加配套的比较值闸门,是制造分叉而不是消除分叉**。PR 里也有一条用例把今天的 `$exists` 行为钉住,证明它没被顺手改动。\n\n## 为什么值得修\n\n1. **`$null` 的理由逐字适用。** spec 的 `FieldOperatorsSchema` 声明 `$exists: z.boolean().optional()`(与 `$null` 同一处),非布尔是越界输入;而 `where` 走到驱动时没有任何一层按 `FieldOperatorsSchema` 校验过。AI 生成的元数据把 `$exists: \"true\"` / `$exists: 1` 写出来完全可能,字符串 `\"false\"` 是 truthy —— 与 #5347 记录的陷阱一模一样。\n2. **`$exists` 落在权限面上。** 与 `$null` 同级:RLS scope 里判断「字段有没有值」是常规写法。\n3. **今天没有任何门禁能发现它。** 共享表 `FILTER_LOGIC_CASES` 刻意不含 null 处理(#5299 已记录这一点),所以三个面的分歧不会被任何 conformance 顶出来。\n\n## 建议(不代裁决)\n\n与 #5347 取同一条路 —— **非布尔比较值一律拒收**(`INVALID_FILTER` / 400),落点与 #5368 的 `$null` 闸门完全对称:\n\n- **driver-sql**:`reduceFilterKey` 的校验遍历上(不是发射器 —— 发射器会被布尔单位元短路,#5327 / #5368 的理由);拒收之后 `nullValueSatisfiesOperator` 的 `case '$exists': return value === false` 可随之收紧为 `value === true`(方向注意:`$exists` 与 `$null` 相反 —— 一个 NULL 列满足 `$exists` 当且仅当调用方问的是 `false`)。\n- **driver-memory**:`filter-refusal.ts` 的 `assertFieldConstraintShape`,与 `$null` 那条并排一行。两个过滤面自动同时生效。\n- **driver-mongodb**:`translateFieldOperators` 的 `$exists` arm,与 `$null` 那条并排。\n- **cloud `RemoteTransport`**:同款 `=== false` 二分(`$null` arm 紧邻),归 cloud#1116 那条的配套,建议同时做。\n\n代价与 #5347 相同:这是收紧,今天靠 truthy/falsy 巧合工作的调用方会拿到 400。#5347 的裁定已经为这一类代价定了调,所以本条大概率是同一句话的重复适用,而不是一次新裁决 —— 但仍请 PM 明确裁一次,不要由实现方代拍。\n\n**注意先后**:若 #5299 先裁定了 `$exists` 的语义(键存在 vs 有值),本条的修复会顺带把两个 JS 面的实现对齐;若本条先修,#5299 的裁决面会缩小到只剩布尔输入。两条不冲突,任意顺序都可以。\n\n## 未验证的部分\n\n- **driver-sqlite-wasm / cloud TursoDriver(local)**:未单独实测,但两者都继承 `SqlDriver` 的同一段发射器代码,预期与 driver-sql 一致(#5368 已对 `$null` / 节点位置越界 `$op` 两条实测确认过这条继承链确实传递行为)。\n- **cloud RemoteTransport**:代码对读确认带同款 `=== false` 二分,未对 `$exists` 单独跑数。\n- **`@objectstack/formula` 的 `matchesFilterCondition`**:未测。#5299 已记录它与 driver-memory 在**布尔** `$exists` 上就不一致,非布尔下大概率是第四个答案。\n- 没有量化真实元数据里出现非布尔 `$exists` 的频率。\n\n严重度请按 triage 定,不代表我判断它低 —— 我只是按范围没有在 #5368 里顺手改。\n\n## 关联\n\n#5347 / PR #5368(`$null` 的同款,已裁定 A 并落地四家后端;本条被明确排除在外)、#5299(`$exists` 在**布尔**比较值下的语义分歧,另一轴,未决)、#5240(`{field:{}}` 四后端拒收)、#5324 / #5328(拒收你无法求值的东西)、#5296(`nullValueSatisfiesOperator` 守卫表)、objectstack-ai/cloud#1116(remote Turso 的 `$null`,同族)。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Pbu27iNUfQCHeuS551Rqo7)_"
+}

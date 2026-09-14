@@ -1,0 +1,35 @@
+{
+  "number": 5729,
+  "kind": "issue",
+  "title": "参考文档生成器把数值字面量 z.literal(2) 渲染成带引号的 '2',数值型联合被记成字符串型",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T02:20:32Z",
+  "updated_at": "2026-08-07T03:14:34Z",
+  "closed_at": "2026-08-07T03:14:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5729",
+  "body": "实施 #5611 时实测到的范围外问题,只记录不修。\n\n## 实测\n\n`packages/spec/scripts/build-docs.ts` 渲染 `z.literal(number)` 时加了引号,把数值字面量写成字符串字面量。\n\n现存实例 —— `FormSectionSchema.columns`(`packages/spec/src/ui/view.zod.ts:1502-1510`)声明为:\n\n```ts\ncolumns: z.union([\n  z.enum(['1', '2', '3', '4']),\n  z.literal(1), z.literal(2), z.literal(3), z.literal(4),\n]).default(1).transform(...)\n```\n\n生成的 `content/docs/references/ui/view.mdx:184` 却是:\n\n```\n| **columns** | `Enum<'1' \\| '2' \\| '3' \\| '4'> \\| '1' \\| '2' \\| '3' \\| '4'` | optional |  |\n```\n\n后半段的四个 `'1' | '2' | '3' | '4'` 就是那四个**数值** `z.literal(1..4)`,被渲染成了带引号的字符串字面量。参考文档因此读起来像\"这个键只收字符串\",而它实际同时收 `2` 和 `'2'`。\n\n## 为什么今天不痛、但值得记\n\n`FormSectionSchema.columns` 恰好**两种都收**(联合里字符串 enum 和数值字面量都在),所以照文档写 `'2'` 目前能过 —— 今天没有用户会踩到,故打 `finding` 不进队列。\n\n但这是个**装了引信的错误**:任何\"只收数值\"的字面量联合都会被记成只收字符串,而参考文档正是 AI 作者唯一的权威来源。#5611 实施中就直接撞上了:`RecordDetailsProps.sections[].columns` 本打算写成 `z.union([z.literal(1), ..., z.literal(4)])`,生成的参考显示为 `columns?: '1' \\| '2' \\| '3' \\| '4'`,而 schema 只收数值 `2` —— 照参考写就是硬解析错误。PR 里改用了 `z.number().int().min(1).max(4)` 绕开(接受集合完全相同,且渲染为诚实的 `integer`),并在代码注释里写明了原因。\n\n也就是说:这个渲染缺陷已经在**改变 schema 的写法**,这是它值得记下来的真正理由 —— 绕开一次是工程判断,绕开成惯例就是让生成器的缺陷反向定义契约。\n\n## 修复方向\n\n`build-docs.ts` 的字面量渲染按 `typeof value` 决定是否加引号:字符串加引号,数值/布尔不加。修完后 `view.mdx` 的 `FormSectionSchema.columns` 应变为 `Enum<'1' \\| '2' \\| '3' \\| '4'> \\| 1 \\| 2 \\| 3 \\| 4`,#5611 里的那处也可以按需改回字面量联合。"
+}

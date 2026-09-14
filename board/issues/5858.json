@@ -1,0 +1,36 @@
+{
+  "number": 5858,
+  "kind": "issue",
+  "title": "[#5852 契约半边] `HierarchyScopeContext` 未声明 `organizationId` / `tenantId` 哪个权威 —— producer 只填一个、consumer 只读另一个,两边都「符合契约」",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T08:52:37Z",
+  "updated_at": "2026-08-06T14:55:04Z",
+  "closed_at": "2026-08-06T14:55:04Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5858",
+  "body": "Part of #5852(contract-first 拆分第一棒,由分诊座位拆)。**本单只做 spec 契约面**;producer 填充与断言在 #5852 的 identity 半边,cloud consumer 同步在 objectstack-ai/cloud 的对应单。\n\n## 事实(已核 `origin/main`)\n\n`packages/spec/src/contracts/sharing-service.ts:396`:\n\n```ts\nexport interface HierarchyScopeContext {\n  userId: string;\n  organizationId?: string | null;\n  tenantId?: string | null;\n}\n```\n\n两个字段都是 optional、都可为 null,**doc 没有任何一句说哪一个承载「调用方的活动组织」**。于是:\n\n- **producer**(`packages/plugins/plugin-sharing/src/sharing-service.ts:875-880`)照抄 ExecutionContext,实测填出 `{ organizationId: null, tenantId: \"<活动组织>\" }` —— 框架的 `ExecutionContextLike { userId, tenantId, timezone }` 本来就以 `tenantId` 承载活动组织,plugin-security 的 RLS 也是从 `ExecutionContext.tenantId` 取 `current_user.organization_id`;\n- **consumer**(cloud `packages/security-enterprise/src/hierarchy/resolver.ts`)只读 `context.organizationId`,拿到 null 就把自己文档里写明的 \"belt-and-braces 租户隔离\" 整条跳过。\n\n两边**各自符合这份契约**,合起来是一个实测可达的跨组织越权(#5852 有 201/403 对照实测)。含糊的是契约本身,不是任何一侧的实现。\n\n## 完成范围(本单)\n\n1. 在 `HierarchyScopeContext` 上**明确单一权威字段**并写进 doc 注释 —— 依据是运行时事实:框架里真实承载活动组织的是 `tenantId`;\n2. 另一个字段保留为 **deprecated 别名**并在 doc 注释里写明「resolver 不得单独依赖它」。⛔ **不在本单删除 `organizationId`** —— 它在 `api-surface.json:3597` 的公开面上,删除走 ADR-0049 enforce-or-remove / ADR-0087 退役单独立单裁决,**不做 rider**;\n3. `IHierarchyScopeResolver.resolveOwnerIds` 的 doc 补一句实现方义务:**权威字段为空时必须 fail-closed**,⛔ 不得静默按「无租户约束」构建 owner set —— 这正是本次越权的形状;\n4. 按仓内惯例更新生成物 / api-surface 基线。\n\n## 为什么修在契约而不是在 consumer 加 `?? tenantId`\n\n#5852 已论证:consumer 兜底是宽容消费者模式 —— 契约仍然含糊,下一个 resolver 实现还会踩同一个坑,而这一类失效是**静默**的(隔离不生效不报错,只是多返回了别的组织的 owner id)。\n\n## 解锁关系\n\n- 本单落地后解锁 #5852 的 identity 半边(producer 按权威字段填充 + 断言)\n- 下游:objectstack-ai/cloud 的 `@objectstack/security-enterprise` resolver 同步单\n- Refs:ADR-0057、ADR-0111 D1 DEPTH、ADR-0105 D2/D6;cloud#919、cloud#921\n"
+}

@@ -13,7 +13,6 @@
   "labels": [
     "domain:spec",
     "enhancement",
-    "finding",
     "pm:queue",
     "priority:p3"
   ],
@@ -21,7 +20,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-05T14:58:41Z",
-  "updated_at": "2026-09-07T03:05:02Z",
+  "updated_at": "2026-09-12T00:40:55Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

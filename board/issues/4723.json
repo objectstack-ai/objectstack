@@ -1,0 +1,36 @@
+{
+  "number": 4723,
+  "kind": "issue",
+  "title": "`check:docs` 的第一步是 `gen:schema` —— 修好 #4711 之后,「检查改工作区」仍从这里漏进来",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T22:11:13Z",
+  "updated_at": "2026-08-06T14:56:52Z",
+  "closed_at": "2026-08-06T14:56:52Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4723",
+  "body": "在实现 #4711(`build-schemas.ts --check` 不再写 `json-schema.manifest.json`)时撞到的,与该单是同一缺陷类别但**不同入口**,按 Prime Directive #10 单独记录。\n\n## 现象\n\n`packages/spec/package.json`:\n\n```json\n\"check:docs\": \"pnpm gen:schema && tsx scripts/build-docs.ts --check\",\n```\n\n`gen:schema` 是**生成器**,不是检查:它在 `json-schema.manifest.json` / `authorable-surface.json` 陈旧时会把这两个 **tracked** 文件写掉。于是 `check:docs`(以及包含它的 `check:generated`)仍然是一条「跑一次门禁,工作区被改」的路径 —— 正是 #4711 的现象,只是换了个入口。\n\n## 实测(在 #4711 的修复分支上,即 `--check` 自身已经不写了)\n\n```\nmanifest staled by hand:  94234b0acb9f79122580537e997dd84b\n$ git status --porcelain packages/spec/json-schema.manifest.json\n M packages/spec/json-schema.manifest.json\n\n$ pnpm --filter @objectstack/spec check:docs\ncheck:docs exit=0\nmanifest after check:docs: 94ddfeb6032474c1e62661a0fd6dca03\n$ git status --porcelain packages/spec/json-schema.manifest.json\n                          ← 空:本地改动被这条「检查」吃掉了\n```\n\n## 为什么修完 #4711 之后这条反而更值得看一眼\n\n`check:generated` 的执行顺序里 `check:authorable-surface` 在前、`check:docs` 在后(`scripts/check-generated.ts` 的 `GATED` 表),而且它**不会因为前面失败就停**。所以在 manifest 陈旧的情况下,跑一次 `check:generated` 的结果是:\n\n1. `check:authorable-surface` 红,报「manifest is out of date,去跑 gen:schema」(#4711 修好的部分);\n2. 随后 `check:docs` 里的 `gen:schema` **把它写好了**;\n3. 开发者回头一看工作区 —— 干净的,或者多了一个自己没写的 diff。\n\n一份红色报告配一个已经被悄悄修好的文件,比修之前更难解释。\n\n## 关于 CI\n\n线上不会漏(干净 checkout + 顺序执行),这条主要是本地/agent 并行开发的困惑成本,以及「一个名字叫 check 的脚本会写 tracked 文件」这个语义漏洞本身。\n\n## 可能的方向(需要维护者定,不要照抄)\n\n`build-docs.ts` 需要磁盘上的 `packages/spec/json-schema/`(gitignored 产物),这才是 `check:docs` 前面挂 `gen:schema` 的原因。所以至少三条路:\n\n- **A. 给 `build-schemas.ts` 一个「只写 gitignored 产物」的模式**(例如 `--no-snapshots`),`check:docs` 用它。改动最小,但多一个模式位,得想清楚它和 `--check` 的关系。\n- **B. 让 `check:docs` 依赖 `build` 的产物**而不是每次现场生成。语义最干净(检查就是检查),代价是它不再自足,顺序依赖要写进 CI 与文档。\n- **C. `build-docs.ts` 改成直接从 Zod 源产出内存里的 schema**,不再经过磁盘。最彻底,改动也最大。\n\n倾向 B 或 A;但这会动到 `check:generated` / 合并驱动(`scripts/regen-artifacts.mjs`)对「check 证明 currency」的假设,值得先拍板再动手。\n\n关联:#4711(同类缺陷,manifest ratchet 自身,已修)、#4675 / PR #4702(生成物合并驱动 —— 「a plausible generated file is an invisible error」)、#4203 / #4232(`check:generated` 分类不一致的历史)。"
+}

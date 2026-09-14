@@ -1,0 +1,36 @@
+{
+  "number": 5164,
+  "kind": "issue",
+  "title": "`_views` translation keys have three producers that disagree on the spelling — a default-only `list` container can never resolve",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T07:18:04Z",
+  "updated_at": "2026-08-07T03:14:06Z",
+  "closed_at": "2026-08-07T03:14:06Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5164",
+  "body": "Found while fixing #4854 (the resolver read fields the served document does not have). That fix makes `objects.<object>._views.<bare key>` resolve for `listViews` / `formViews` entries. This issue is the **residual**: for one common authoring shape the key the extractor writes and the key the runtime identity yields are still different strings, so the translation can never be found no matter which side you author against.\n\nFiled unassigned — recording the finding, not claiming it.\n\n## The divergence, measured\n\nThree surfaces derive a `_views` key, and they do not agree:\n\n| surface | file | key it produces for a container's default `list` |\n|---|---|---|\n| view-document composer (runtime identity) | `packages/spec/src/ui/view.zod.ts` `expandViewContainerWithDiagnostics` | `<object>.default` → bare key **`default`** |\n| i18n extractor (writes the bundle skeleton) | `packages/cli/src/utils/i18n-extract.ts:453` | **`list`** |\n| translation-reference lint (validates keys) | `packages/lint/src/validate-translation-references.ts` `collectViewRecord` | accepts **both** the map key and the inner `name` |\n\nComposer:\n\n```ts\nconst key = typeof defaultList.name === 'string' && defaultList.name ? defaultList.name : 'default';\n```\n\nExtractor:\n\n```ts\npushViewEntries(out, viewObjectName(view.list) ?? containerObject, view.list.name ?? 'list', view.list);\n```\n\nMeasured against the real composer:\n\n```\ncontainer { list: { label: 'All Tasks', type: 'grid', data: { provider: 'object', object: 'task' }, columns: ['title'] } }\ncomposer  -> [\"task.default\"]     // bare key `default`\nextractor -> objects.task._views.list.label\n```\n\nSo an app whose object declares only a default `list` — no `listViews` — gets a skeleton keyed `list`, a runtime view keyed `default`, and an English label on screen forever. It is invisible in `examples/app-crm` only by luck: its default `list` is structurally identical to `listViews.all`, so the composer's signature dedupe collapses the two and the live key becomes `all`. The `_views.list` entry in `examples/app-crm/src/translations/crm.translation.ts` is dead weight that looks correct.\n\n## Second, related spelling question\n\n`collectViewRecord` deliberately accepts a `listViews.<key>` entry's **inner `name`** as a legal `_views` key (\"authors write either\"), but the runtime identity for such an entry is derived from the **map key** only — `expandViewContainer` never reads the inner `name` except for the default `list`/`form`. So a bundle keyed by the inner name passes lint and resolves to nothing. No view in this repo's own apps carries an inner `name`, so this is currently theoretical; it is the same contract question one layer over.\n\n## Why this needs a decision rather than a patch\n\nPer Prime Directive #12 the cure belongs at the **producer**, not in `resolveViewLabel` — teaching the resolver to try `default`, then `list`, then `config.name` would fossilize three dialects for one key and is exactly the consumer-side tolerance the directive bans. The decision is which spelling is canonical:\n\n- **A. Canonical = the runtime identity's bare key** (`default`). Extractor changes `?? 'list'` → `?? 'default'`; lint narrows to the map key / default key; existing bundles with `_views.list` need a conversion entry or a release note. Pro: one key, derived from the identity the registry actually assigned, and the lint can then *enforce* it — an AI-authored bundle either matches or is rejected loudly. Con: touches shipped bundles.\n- **B. Canonical = `list`.** Composer names the default list `<object>.list` instead of `<object>.default`. Pro: no bundle churn. Con: `default` is the registry identity that appears in URLs, overlay rows (`sys_metadata`), and `normalizeViewMetadata` baselines — renaming it is a far wider blast radius than renaming a translation key.\n\nRecommendation: **A**, and tighten `collectViewRecord` to the same single spelling in the same change, so \"declared = enforced\" holds for view translation keys.\n\n## Repro\n\n```bash\npnpm --filter @objectstack/spec build\n# then, against src:\nnode -e \"0\" # see the measurement snippet above; expandViewContainer('task', { list: {...} }) -> ['task.default']\n```\n"
+}

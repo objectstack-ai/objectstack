@@ -1,0 +1,36 @@
+{
+  "number": 5551,
+  "kind": "issue",
+  "title": "integration/connector.zod.ts 的 20 个裸名别名仍是 z.infer,与 #4963 确立的 X / XParsed house convention 相反(作者写的是 ConnectorInput)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T17:17:18Z",
+  "updated_at": "2026-08-07T05:35:25Z",
+  "closed_at": "2026-08-07T05:35:21Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5551",
+  "body": "从 #5515 拆出。#5515 的第四条诊断(`syncConfig.schedule` 的裸 cron 字符串编译不过)在那张单里是**按&#34;改示例注解&#34;解的**(PR 把 `SYNC_ARCHITECTURE.md` 的 L3 示例改成 `const sapConnector: ConnectorInput = …`),根因没有动 —— 这里记的就是根因。\n\n## 事实\n\n`packages/spec/src/integration/connector.zod.ts:742/744`:\n\n```\nexport type Connector = z.infer&lt; typeof ConnectorSchema &gt;;\n/** Authoring input for {@link Connector} — defaulted fields are optional. */\nexport type ConnectorInput = z.input&lt; typeof ConnectorSchema &gt;;\n```\n\n即**裸名 = parsed 形状**,作者形状挂在 `XInput` 上。这是仓库里的第三种命名:\n\n| 文件 | 裸名 | 作者形状 | 出处 |\n|:---|:---|:---|:---|\n| `shared/retry-policy.zod.ts` 及绝大多数兄弟 | `z.input`(作者写的) | 裸名 | house convention |\n| `automation/etl.zod.ts` | `z.input` | 裸名,parse 结果是 `XParsed` | #4963 / PR #5514 翻过来的 |\n| `integration/connector.zod.ts` | `z.infer` | `ConnectorInput` | 本单 |\n\n后果和 #4963 一模一样:`const c: Connector = { … }` 这条**唯一的裸注解authoring 门**编译不过,因为 `enabled` / `status` / `connectionTimeoutMs` / `syncConfig.strategy` / `syncConfig.direction` / `syncConfig.batchSize` / `syncConfig.deleteMode` / `syncConfig.realtimeSync` / `syncConfig.conflictResolution` / 字段映射的 `required` / `syncMode` / webhook 的 `method` / `timeoutMs` / `isActive` / `signatureAlgorithm` 在 `z.infer` 下全是必填,且 `syncConfig.schedule` 是 `CronExpressionInputSchema` 的 **transform 输出**(`{ dialect, source }` 信封),裸 cron 字符串被拒。文档示例照抄进去就是这个后果,#5515 的红证据是逐字量出来的四条诊断之一。\n\n## 与 #4963 的差别:迁移面不为空\n\n`etl.zod.ts` 当时可以直接翻,因为 objectstack / objectui / cloud 里都没有 parse 站点。本文件不是:\n\n- 该文件有 **20 个 `z.infer` 裸名别名**(`Connector` / `ConnectorFieldMapping` / `DataSyncConfig` / `WebhookConfig` / `SyncStrategy` / `ConnectorConflictResolution` / …)。\n- `ConnectorSchema` 是 **live parse path**:`defineConnector()` 就在同文件 748 行 `return ConnectorSchema.parse(config)`,返回类型标的是裸 `Connector`;`DeclarativeConnectorEntrySchema` 走 `stack.zod.ts`。\n- 枚举类别名(`SyncStrategy` 等)`z.input` 与 `z.infer` 同构,翻不翻都一样;真正有形状差的是对象类。\n\n所以这是一次**真实的 breaking rename**,需要按 #4963 的路数单独裁定后再做,不能顺手带过。\n\n## 建议的处置\n\n按 #4963 的结论迁移:裸名改为 `z.input`(作者形状),parse 结果改名 `XParsed`,`ConnectorInput` 作为过渡别名保留一版还是直接删,连同 `defineConnector` 的返回类型一起在同一个 PR 里定。需要先确认 20 个别名里哪些真有形状差(枚举可豁免),以及 objectstack / objectui / cloud 三仓的 importer 面。\n\n## 现状不是无人看守\n\n#5515 的 PR 加了 `packages/spec/src/integration/connector-author-shape.test.ts`,里面有一组探针把&#34;同一份字面量在 `ConnectorInput` 下绿、在 `Connector` 下红&#34;钉死了。真做这次翻转时,那组探针会直接变红,是迁移的第一处落点。\n\n---\nBlocked-by: #5515"
+}

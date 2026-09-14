@@ -1,0 +1,36 @@
+{
+  "number": 5051,
+  "kind": "issue",
+  "title": "`composeStacks` 的 `i18n` 仍是 last-wins —— #5005 裁决否掉的那个形状,只剩这一个键还在用",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T01:05:05Z",
+  "updated_at": "2026-08-07T12:15:19Z",
+  "closed_at": "2026-08-07T12:15:19Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5051",
+  "body": "发现于 #5005 实现过程,与本单修复无关(#5005 的主题是**被丢掉的**键,`i18n` 没被丢),按 Prime Directive #10 单独立单,**未认领**。\n\n## 事实\n\n#5005 落地后,`composeStacks` 的非数组顶层键统一为**同值放行 / 冲突报错**。唯一的例外是 `i18n`:\n\n```ts\n// packages/spec/src/stack.zod.ts — composeStacks 第 2 步\n// 2. i18n — last-wins (single object, not array). Pre-existing strategy,\n//    deliberately untouched by #5005; see COMPOSE_KEY_DISPOSITIONS.\nfor (let i = stacks.length - 1; i >= 0; i--) {\n  if (stacks[i].i18n) {\n    composed.i18n = stacks[i].i18n;\n    break;\n  }\n}\n```\n\n实测(#5005 的控制用例钉住了现状):\n\n```ts\nconst a = defineStack({ manifest: A, i18n: { defaultLocale: 'en'    } });\nconst b = defineStack({ manifest: B, i18n: { defaultLocale: 'zh-CN' } });\ncomposeStacks([a, b]).i18n   // → { defaultLocale: 'zh-CN' } —— a 的声明无声消失\n```\n\n## 为什么值得单独看一眼\n\n维护者 2026-08-04 在 #5005 上裁决 **⛔ 不做 last-wins**,理由是「静默安全降级 —— 先声明的栈被后组合者无声覆盖」。`i18n` 就是字面意义上的 last-wins:一个装了 CRM(`defaultLocale: 'zh-CN'`)和某个附加包(`defaultLocale: 'en'`)的组合栈,谁在数组里靠后谁定语言,作者不会收到任何提示。\n\n后果比 `api` / `server` 轻(是本地化而非授权),这也是 #5005 明确把它留在范围外的原因 —— 它是这里**唯一本来就有明确、可工作策略**的键,改它会打断今天真在依赖它的组合,而 #5005 修的是「键消失」。但改完之后它成了整个顶层键面上唯一的不一致,值得单独定一次。\n\n## 待裁决(不要猜)\n\n- **A. 与其余非数组键对齐** —— 同值放行、冲突报错带处方。一致、响亮;代价是今天靠 last-wins 覆盖语言配置的组合会开始报错(仓内实测无真实调用点,外部未知)。\n- **B. 保留 last-wins,但冲突时 warn 一次并点名** —— 不破坏现有组合,把静默变成有声。比 A 弱,但零破坏。\n- **C. 维持现状** —— 认定本地化配置的后者优先是**刻意**语义,并把这个理由写进 docblock,免得下一个人再提一次。\n\n`ComposeStacksOptionsSchema` 上不建议为此加旋钮:#5005 已裁决显式覆盖机制留给定制故事真拉动时统一设计,单给 `i18n` 开一个口子会预支那个设计。\n\n关联:#5005(合成语义裁决与实现)、#4910。"
+}

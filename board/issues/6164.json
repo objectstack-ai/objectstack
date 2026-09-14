@@ -1,0 +1,34 @@
+{
+  "number": 6164,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): steward pin-watch mechanical output + Guardrails「版本发布必须人工」(#6162, #6170)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T04:23:58Z",
+  "updated_at": "2026-08-07T07:05:14Z",
+  "closed_at": "2026-08-07T07:02:42Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T07:02:42Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6164",
+  "body": "Fixes #6162\n\n## Authorization\n\nMaintainer-authorized `.claude/` tooling PR (Guardrails exception, #5925-6; precedents #5597 / #5872). Two maintainer rulings from 2026-08-07, quoted verbatim:\n\n**Ruling 1** (pin-watch duty, option A of the anti-forgetting proposal):\n\n> A. 队列管家加一条例行职责(推荐,先做)。\n\n**Ruling 2** (after the rc.4 auto-publish incident #6169 / #6170):\n\n> 刚才我也没提出要求,是哪个ai自己替我发了 rc.4,版本发布必须是人工的。这个要写入规范。\n\nPer the same Guardrails clause this PR is **not self-accepted**: it stays draft until another seat or the maintainer walks it through.\n\n## What changed (one file: `.claude/skills/pm-dispatch/SKILL.md`, 2 commits, +33/−2)\n\n**Commit 1 — steward pin-chain watch gains a mechanical output (#6162):**\n\n1. **New paragraph in 「入队与落地 B」** — the duty itself:\n   - **Trigger 1 (pre-release, objectui → objectstack)**: `.objectui-sha` lags objectui `main` **and** objectui's merge queue is empty (the window-settled predicate) ⇒ file/refresh the console-bump chore in objectstack `pm:queue`. Template = #6159 (lag readings, releasing-changeset list, `bump-objectui.sh` procedure, #6099 breaking-annotation re-check, ordering vs the Version Packages PR).\n   - **Trigger 2 (post-release, objectstack → cloud)**: a new rc/stable tag family is observed ⇒ file the same-shape `.objectstack-sha` bump chore in cloud's queue (cloud's `check:pin-staleness` stays advisory — the output is an issue, not a new gate).\n   - **Boundaries**: one open chore max (refresh by comment, never a second issue); coordination rule 3 (accepting seat files the linkage chore) stays the first producer — this duty is the window-level backstop; new pin-toolchain findings still go to the anchor issue as 提请 only. The steward still **never executes the bump** — its authority face (no code, no claims, no merges) is unchanged.\n2. **Steward duty-table row** in the same section — appends the mechanical output to the pin-chain-watch entry.\n3. **「现役两例」 enumeration** (座位 Routine 化 section) — kept in sync with the table so the two enumerations don't diverge.\n\n**Commit 2 — Guardrails: 「版本发布必须人工」 (#6170):**\n\n4. All AI seats (PM / dev / Routine / queue steward) are forbidden every publish action: running `changeset publish` / `pnpm run release`, pushing version tags, dispatching Release-class workflows, **merging Version Packages (`chore: version packages`) PRs**. Release-adjacent work (release board, pin bumps, version reconciliation, post-publish verification) stays with the seats; the publish itself happens only by the maintainer's own hand. Unauthorized publish traces (tags / npm versions appearing without a human action) are incident-filed — never \"repaired\" by a counter-publish. Precedent recorded in the rule: the 2026-08-07 rc.4 auto-publish (#6169 / #6170) — the existence of a mechanical lane does not constitute authorization; a seat that finds such a lane reports it as a defect, not uses it as a tool.\n\n## Why\n\n- Commit 1: `check:objectui-pin-fresh` (required on the release PR, #3340) prevents **loss**, not **lateness** — tonight's #6159 existed only because the maintainer happened to ask in chat. This converts that hand-step into a steward-round mechanical product.\n- Commit 2: rc.4 shipped with **nobody clicking anything** — `release.yml` runs on every push to main and its `recover-publish` step published the freshly versioned workspace (mechanism confirmed with run evidence on #6170). The workflow fix is #6170's; this commit lands the policy half so no seat ever treats a publish lane as usable authority.\n\n## Activation note\n\nThe live steward Routine's prompt instructs it to read SKILL 「入队与落地」 A/B on every fire, so the pin-watch duty activates on merge. The pasted prompt block on anchor #5810 (clause 6, currently hint-comment only) is deliberately **not** body-patched from this session — full-body PATCH on a co-edited anchor is the #5885 corruption class; the revised clause is posted as a comment on #5810 for the maintainer's next UI re-copy (flagged as follow-through in #6162).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01BickTBKm2JYSNnrtPT8ysa"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 5811,
+  "kind": "issue",
+  "title": "`/analytics/query` 仍把 RLS 策略字段名回显给调用方 —— read-scope 拒收的泄漏在姐妹面上没堵,#5367 只堵了 dataset 路由",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T06:06:23Z",
+  "updated_at": "2026-08-07T12:34:22Z",
+  "closed_at": "2026-08-07T03:07:16Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5811",
+  "body": "## 现状\n\n#5367(维护者 2026-08-06 裁决,方案 B)把 `read-scope-sql.ts` 的十处 fail-closed 拒收改成 `READ_SCOPE_COMPILE_FAILED` / 500,并让 `POST /analytics/dataset/query` **withhold 任何声明了服务端故障(`status >= 500` 且带 `code`)的生产方 message**。理由之一是这些 message 点名 RLS 策略的字段名与比较值:\n\n```\n[read-scope-sql] unsafe field identifier \"secret_policy_field\" — refusing to build read scope (fail-closed).\n[read-scope-sql] unsupported operator \"$regex\" on \"owner_email\" (fail-closed).\n[read-scope-sql] \"approved_by_manager\" has a nested/relation value which is not supported in a read scope (fail-closed).\n```\n\n这些内容来自管理员写的 sharing rule / permission set,由 security 服务编译后经 `getReadScope` 交给 analytics —— **调用方(租户)从来没写过它们,也不该能从错误体里读出来**。\n\n**同一批拒收在姐妹面上没有被堵。** `/analytics/query` 经 `dispatcher-plugin.errorResponseBase`(`packages/runtime/src/dispatcher-plugin.ts:445`)退出,它的 message 判据是:\n\n```ts\nconst message =\n    httpStatus >= 500 && looksLikeInternalErrorLeak(raw)\n        ? INTERNAL_ERROR_MESSAGE\n        : raw || 'Internal Server Error';\n```\n\n而 `looksLikeInternalErrorLeak`(`packages/types/src/error-leak.ts:47`)是对 **SQL/驱动措辞** 的启发式(`sqlite_`、`SQLSTATE`、以 `SELECT`/`INSERT INTO`/`UPDATE`/`DELETE FROM` 开头、`constraint failed`/`unique constraint`/`foreign key`)。实测把上面十一种 message 形态逐条喂进去:\n\n```\nECHOED   [read-scope-sql] unsafe field identifier \"owner id\" — refusing to buil…\nECHOED   [read-scope-sql] unsafe alias identifier \"crm opportunity\" — refusing …\nECHOED   [read-scope-sql] read scope must be a filter object (fail-closed).\nECHOED   [read-scope-sql] \"$and\" requires an array (fail-closed).\nECHOED   [read-scope-sql] unsupported top-level operator \"$nor\" (fail-closed).\nECHOED   [read-scope-sql] bare array value for \"region\" — use { $in: [...] } (f…\nECHOED   [read-scope-sql] \"owner\" has a nested/relation value which is not supp…\nECHOED   [read-scope-sql] $in for \"region\" needs an array (fail-closed).\nECHOED   [read-scope-sql] $nin for \"region\" needs an array (fail-closed).\nECHOED   [read-scope-sql] $between for \"amount\" needs [min,max] (fail-closed).\nECHOED   [read-scope-sql] unsupported operator \"$regex\" on \"owner\" (fail-closed…\n```\n\n**11/11 全部 ECHOED** —— 即 `errorResponseBase` 会把策略内容原样写进 `error.message`,状态码是 500(`err.status` 被采纳)但正文没有被收口。\n\n`read-scope-sql.ts` 的 `compileScopedFilterToSql` 在 `NativeSQLStrategy.applyReadScope` 与 `ObjectQLStrategy` 的回显 SQL 两条路上都会跑,而这两条路都服务 `/analytics/query`,所以这条面是真实可达的,不是理论问题。\n\n## 为什么没在 #5367 里一起做\n\n#5367 的题目是 dataset 路由那串 message 正则名单的退休。这条泄漏在本单之前就存在、且在**另一条路由**上,把它一起改会把一次可见行为变更(该面 message 从可读变为收口)夹带进一个以「退休正则名单」为题的 PR。按 PD #10 单独立项。\n\nPR #5808(#5367 的第二个 PR)里的规则是就地写在 `rest-server.ts` ③ 分支内的三行判断,**故意没有**抽成共享谓词 —— 只有一个消费者时提升就是推测性面。本单是第二个消费者出现的时刻。\n\n## 建议方向(不预判)\n\n- **A(推荐形状)**:把 PR #5808 的判据提升成 `@objectstack/types` 里与 `looksLikeInternalErrorLeak` 同居的一个小谓词 —— 例如 `declaresServerFault(err)`(`status >= 500` 且有非空 `code`)—— 然后两个边界(`rest-server.ts` 的 analytics dataset ③ 分支、`dispatcher-plugin.errorResponseBase`)都读它。`error-leak.ts` 的文件头本来就写着「‘不要把内部细节发给客户端’是 HTTP 边界的属性,不是某个 router 的属性,所以谓词放在这里」,这正是它说的那种情况。\n- **B**:只在 `errorResponseBase` 内联同样的判断。省事,但两处实现一条规则,是 #3843/#3867 反复付过学费的形状。\n- **C**:把 `looksLikeInternalErrorLeak` 教会认 `[read-scope-sql]`。**不建议** —— 那是往回加措辞嗅探,与 #5352/#5367 刚清掉的机制同族。\n\n无论选哪个都要注意**不能**把 withhold 放宽到「所有 5xx」:#5667 刻意保留了未声明 5xx 的可读性(自产故障 \"no strategy can handle query …\" 应当照旧可读),PR #5808 的用例两侧都钉了这一点,新实现要沿用。\n\n## 验收建议\n\n1. 规则落地后,`/analytics/query` 面加端到端用例:read-scope 拒收 → 500,`error.message` 为 `Internal server error`,body 不含策略字段名,`error.details.code` 为 `READ_SCOPE_COMPILE_FAILED`(`errorResponseBase` 已经会把 `err.code` 放进 `details`,#3842),完整原文在日志/errorReporter 侧。\n2. 反向:未声明 5xx 在该面仍然可读(#5667 分级不被吃掉)。\n3. changeset 写清这是**可见行为变更**(该面 message 由可读变收口),照 #5352 changeset 里 \"Observable behaviour change\" 那一段的写法。\n\n## 参考\n\n- `packages/runtime/src/dispatcher-plugin.ts:445`(`errorResponseBase`)、`:468`-`:472`(message 判据)、`:480`-`:483`(`details.code`)\n- `packages/types/src/error-leak.ts:47`(`looksLikeInternalErrorLeak`)及其文件头关于「边界属性」的表述\n- `packages/services/service-analytics/src/read-scope-sql.ts`(十处拒收 + `readScopeCompileError`)\n- PR #5808 / #5367(dataset 路由侧的声明式 withhold 与裁决)、#5520 / #5667(该 dataset 路由 5xx 收窄的两轮)、#3867(启发式的出处)"
+}

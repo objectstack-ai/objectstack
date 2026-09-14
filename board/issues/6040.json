@@ -1,0 +1,35 @@
+{
+  "number": 6040,
+  "kind": "issue",
+  "title": "[finding] 共用定窗计数件住在 plugin-auth 里,消费方要为 90 行计数背上整个 better-auth",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T15:28:09Z",
+  "updated_at": "2026-08-07T10:54:30Z",
+  "closed_at": "2026-08-07T10:54:30Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6040",
+  "body": "## 观察\n\n`packages/plugins/plugin-auth/src/rate-limit-storage.ts` 里的 `incrementFixedWindow()` / `createLazyCounterStore()` / `InProcessCounterStore` 是**仓内唯一**的定窗计数件，#4790 的交叉说明也明确要求后来者复用而不是写第三份。它们确实被复用了，而且已经跨出了 auth：\n\n- `packages/runtime/src/security/inbound-rate-limit.ts`（#4910，`logPrefix` 选项就是为它加的）\n- `packages/runtime/src/endpoint-policy.ts`\n- 本次 #2814 的 `packages/services/service-sms/src/sms-daily-quota.ts`\n\n问题在于它只能从包根导入（`@objectstack/plugin-auth` 的 `exports` 只有 `\".\"`），而该包的 `index.ts` 是 `export *` 一大串，其中 `objectql-adapter.ts` 直接 `import { createAdapterFactory } from 'better-auth/adapters'`、`backfill-account-issuer.ts` 直接 `import … from '@better-auth/core/db'` —— 都是**值导入**，会在模块加载时被急切求值。\n\n于是任何想用这 90 行计数的包，都要把 `better-auth` + `@better-auth/{core,oauth-provider,scim,sso}` + `jose` + `@noble/hashes` + `@objectstack/rest` + `@objectstack/platform-objects` 一起装上并加载。`@objectstack/runtime` 本来就依赖 plugin-auth，代价隐形；`@objectstack/service-sms` 在 #2814 之前只有 `@objectstack/core` + `@objectstack/spec` 两个工作区依赖，之后为了一个计数器多出上面整串（plugin-auth 的 dist 本身 ~320 KB）。\n\n## 为什么现在只记录、不动手\n\n改法（把计数件提到中立包，或给 plugin-auth 加一个子路径 export）要动 `packages/plugins/plugin-auth` 的文件，是 identity 车道领地；#2814 的派发令明确 ⛔ 不动那里，所以按 Prime Directive #10 记录为 finding。\n\n## 今天没有人踩到\n\n没有用户可见症状：依赖方向不成环，构建、类型检查、测试全绿，实际部署里 plugin-auth 基本总在场。这条是架构负债，不是缺陷 —— 严重度交 PM 分诊。\n\n## 可能的方向（不预设结论）\n\n1. 给 plugin-auth 的 `exports` 加一个 `\"./rate-limit-storage\"` 子路径，消费方按子路径导入，避开 index 的急切求值（改动最小，依赖树不变但加载面变小）；\n2. 把计数件提到中立包（`@objectstack/core` 或新的小包），plugin-auth 反过来消费它（最干净，但牵动 4 个现有消费方）；\n3. 维持现状，在被复用第 4 次时再议。"
+}

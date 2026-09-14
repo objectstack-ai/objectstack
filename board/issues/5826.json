@@ -1,0 +1,35 @@
+{
+  "number": 5826,
+  "kind": "issue",
+  "title": "[finding] TEST_DEBT 的 `tests` 字段是闸门自己已经算出来的数字,却手写在台账里 —— 19 条中 12 条已漂(runtime 记 66,实测 101)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T07:00:10Z",
+  "updated_at": "2026-08-07T10:47:34Z",
+  "closed_at": "2026-08-07T10:47:34Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5826",
+  "body": "Observation-class finding,做 #5278(PR 见其中)时顺手量到。**今天没有任何东西是红的**,没有闸门失败,没有用户受影响。\n\n## 背景\n\n#5278 给 `scripts/check-type-check-coverage.mjs` 的 DEBT / TEST_DEBT **`errors`** 数字装上了真棘轮:每次 `--re-measure` 重跑 `tsc --noEmit`,实测 > 记录即红。那一单的范围到此为止。\n\n但 TEST_DEBT 条目有**两个**手写数字:\n\n```js\n'@objectstack/runtime': { tests: 66, errors: 220, note: '…' },\n```\n\n`errors` 现在被重测了,`tests` 没有。而 `tests`(该包被 tsconfig 排除掉、因而对 tsc 隐形的测试文件数)恰恰是这个脚本**每次运行都已经算出来的量** —— `testCoverage()` 返回的 `pkg.testFiles`,亚秒级、无需构建,`evaluate()` 里就在用它判 TESTS_COVERED。\n\n## 实测(main @ `5ab08428`,#5278 重测前)\n\n| 包 | 台账 `tests` | 闸门实算 `testFiles` |\n|:---|---:|---:|\n| `@objectstack/runtime` | 66 | 101 |\n| `@objectstack/objectql` | 87 | 125 |\n| `@objectstack/lint` | 39 | 61 |\n| `@objectstack/rest` | 35 | 56 |\n| `@objectstack/plugin-auth` | 26 | 34 |\n| `@objectstack/plugin-approvals` | 13 | 19 |\n| `@objectstack/formula` | 13 | 16 |\n| `@objectstack/driver-mongodb` | 7 | 15 |\n| `@objectstack/plugin-sharing` | 11 | 13 |\n| `@objectstack/platform-objects` | 8 | 9 |\n| `@objectstack/trigger-record-change` | 4 | 5 |\n| `@objectstack/verify` | 2 | 4 |\n\n19 条里 12 条已漂,方向**全部向上**,最大 66 → 101(+53%)。剩下 7 条精确。\n\n（#5278 的 PR 已把这 12 个数字更新到实测值,所以下表在该 PR 落地后是准的 —— 但机制没变,明天再加一个测试文件就又漂了。）\n\n## 为什么它一直是绿的\n\n和 #5278 的机制同源但更简单:`evaluate()` 从不比较 `tests` 和 `testFiles`,只在 `errors` 上做非空/正数断言。`tests` 纯粹是给人读的描述性数字,没有任何一方核对它。\n\n区别在于:`errors` 需要跑编译器才知道,所以「冻结 + 重测」是唯一选择;`tests` 是**免费**的 —— 闸门已经在算了,只是没拿它和台账对账。\n\n## 为什么值得记一笔\n\n台账文件自己的注释里已经写下过这个论点(#5286 毕业 `packages/spec` 时留的):\n\n> The number that used to sit here (272 files / 902 errors) was also stale by 23 files, which is the other argument for a measurement the gate derives.\n\n也就是说「该导出的数字不要手写」这条结论仓库里已经得出过一次,只是没有推广到剩下 19 条。一个同时存在「手写副本」和「实时算法」的数字就是两个事实源,而这正是 #5278 那一类漂移的定义。\n\n## 选项\n\n1. **删掉 `tests` 字段,改由闸门实时导出**。摘要行和 note 里的「隐藏了多少文件」改读 `pkg.testFiles`。结构上不可能再漂,零新增成本(数字本来就在算),diff 覆盖 19 条条目。推荐方向。\n2. **保留字段,加一条对账**:`tests !== testFiles` 时报错。会把「新增一个干净的测试文件」变成红 —— 对一个本该被鼓励的动作收记账费,和 #5278 裁决里「改善不得制造记账 churn」的原则相反。\n3. **保留字段,不一致时打 informational 行**。不红,但一旦有人加测试文件就变成常驻噪音,而常驻噪音是闸门被忽略的起点。\n4. **只定期重量**。就是 #5278 已经否决过的选项 2。\n\n我倾向 1:这是唯一一个把漂移**按构造消除**而不是靠巡查的选项,而且它比现状的代码更少。\n\n范围外未做:#5278 的派发令把文件面框在棘轮逻辑 + 台账数字更新,删字段是形状变更,留给分诊定。\n"
+}

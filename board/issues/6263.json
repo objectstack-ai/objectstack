@@ -1,0 +1,34 @@
+{
+  "number": 6263,
+  "kind": "pull_request",
+  "title": "docs(adr-0122): D6 点明同构 pin 的编译期证明落在 check:test-typecheck 一步",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T12:35:55Z",
+  "updated_at": "2026-08-07T13:04:56Z",
+  "closed_at": "2026-08-07T13:04:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T13:04:54Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6263",
+  "body": "Fixes #6183\n\n## 问题\n\nADR-0122 的 D6 正文写:\n\n> tsc proves the exemption on the same run that type-checks the package\n\n字面不准确。`packages/spec` 的 `typecheck` 是**两步**:\n\n```\ntypecheck => tsc --noEmit && pnpm check:test-typecheck\n```\n\n第一步走 BUILD 配置 `tsconfig.json`,而它 `exclude` 了 `**/*.test.ts`;pin 文件 `packages/spec/src/type-alias-convention.pin.test.ts` 正是一个 `*.test.ts`,**根本不在裸 tsc 的 program 里**。真正证明这些同构 pin 的是第二步 `check:test-typecheck`,它把 test 层放回 tsc 面前(`tsconfig.test.json`,#5286)。\n\n## 我自己复现了这个实测(没有沿用 issue 正文的结论)\n\n扰动选了一个 blast radius 最小的被钉叶子:`MCPApprovalPolicySchema`(pin 文件里的 `Iso22`)。它是一个 `z.enum`,唯一的消费点 `MCPToolBindingSchema.approval` 本来就写了 `.default('never')`,所以给这个 schema 本体加 `.default('never')` 只会翻掉它自己那一条 pin,不会连带污染别的文件计数。\n\n**基线(未扰动),两步皆绿:**\n\n```\nBARE_TSC_BASELINE_EXIT=0\n\n✓ check:test-typecheck --self-test — 8 semantic case(s) + the parser hold.\ncheck:test-typecheck: OK — @objectstack/spec's test layer compiles under\npackages/spec/tsconfig.test.json; 79 file(s) / 691 error(s) held in\ntest-typecheck-debt.json (shrink-only, .../issues/5286).\nCHECK_TEST_TYPECHECK_BASELINE_EXIT=0\n```\n\n**扰动后(`MCPApprovalPolicySchema` 加 `.default('never')`):**\n\n```\n=== STEP 1: bare tsc --noEmit (tsconfig.json, excludes **/*.test.ts) ===\nSTEP1_BARE_TSC_EXIT=0\n\n=== STEP 2: pnpm check:test-typecheck (tsconfig.test.json) ===\n✓ check:test-typecheck --self-test — 8 semantic case(s) + the parser hold.\ncheck:test-typecheck: 1 problem(s)\n\n  • src/type-alias-convention.pin.test.ts: 1 type error(s) in a file the ledger\n    does not cover. Fix them — this file is inside the checked zone, which is\n    the point of tsconfig.test.json. ...\n\nSTEP2_CHECK_TEST_TYPECHECK_EXIT=1\n```\n\ntest-project 面的原始 tsc 报错(确认 D6「naming the alias」这半句仍成立 —— 行号精确落在点名该 schema 的那一行):\n\n```\nsrc/type-alias-convention.pin.test.ts(282,28): error TS2344: Type 'false' does not satisfy the constraint 'true'.\n```\n\n`282` 行即 `export type Iso22 = Assert< Eq< z.input< typeof M5.MCPApprovalPolicySchema >, ... > >`。\n\n实测后扰动已完整回滚(`git diff` 干净),本 PR 的 diff 只有 ADR 一个文件。\n\n## 结论未变 —— 这不是「门变弱了」\n\n`grep type-alias-convention packages/spec/test-typecheck-debt.json` 无命中:**pin 文件没有 debt ledger 条目,所以它在那个面上的基线是零错误,新增一个就足以让门变红**。门咬得住,而且咬在 ledger 不覆盖的文件上。本次订正的只是「哪一步证明」,顺带把「零错误基线」这另外半个保证也写进 D6 —— 原文没写,而它正是 `1 type error(s) in a file the ledger does not cover` 这句报错为什么足够的原因。\n\n## 改动前 / 改动后\n\n**改动前:**\n\n> ... in `packages/spec/src/type-alias-convention.pin.test.ts`. tsc proves the exemption on the\n> same run that type-checks the package, and the file goes red — naming the alias — the\n> day one stops being true. An exemption nobody can state falsely ...\n\n**改动后:**\n\n> ... in `packages/spec/src/type-alias-convention.pin.test.ts`. tsc proves the exemption on every\n> `pnpm typecheck` run, and the file goes red — naming the alias — the day one stops being\n> true.\n>\n> Which of that command's two **steps** proves it is worth stating precisely, because it is\n> not the obvious one. `packages/spec`'s `typecheck` script is\n> `tsc --noEmit && pnpm check:test-typecheck`, and the bare `tsc` runs the BUILD config,\n> whose `**/*.test.ts` exclusion keeps this `*.test.ts` pin file out of its program\n> entirely. The proof therefore lands in the **second** step, which puts the test layer back\n> in front of tsc over `tsconfig.test.json` (#5286). Measured, by giving a pinned schema a\n> `.default()`: the bare `tsc --noEmit` stays at exit 0, and `check:test-typecheck` is what\n> turns red, naming the file — `1 type error(s) in a file the ledger does not cover`. That\n> last phrase is the other half of the guarantee: the pin file carries no\n> `test-typecheck-debt.json` entry, so its baseline on that surface is **zero** errors and a\n> single new one fails the gate. An exemption nobody can state falsely ...\n\n## 范围\n\n仅 `docs/adr/0122-schema-type-alias-naming-convention.md` 一个文件。**未**改动 `packages/spec` 的 `typecheck` / `check:test-typecheck` 脚本、pin 文件、`test-typecheck-debt.json`、任何 `*.zod.ts`,也未改动任何门禁行为。\n\nD7 的「one artifact, two jobs — the gate gets a machine-readable exemption list and tsc keeps every entry on it honest」保持原样:那句话没有指定步骤,依然成立。\n\n## 门禁\n\n```\ncheck-adr-anchors: OK (37 anchored file(s), every governing ADR still referenced).\ncheck-nul-bytes: OK (scanned 5949 tracked text file(s); skipped 5 binary, 1 non-regular; no raw ASCII control bytes).\n```\n\n## Changeset\n\n`skip-changeset`。`docs/adr/**` 位于仓根,不在任何 package 的 `files` 白名单里(`packages/spec` 的 `files` 为 `dist`/`json-schema`/`liveness`/`prompts`/`llms.txt`/`README.md`/`src/**/*.zod.ts`/`CHANGELOG.md`/`api-surface`/`spec-changes.json`),全仓 `package.json` 检索 `docs/adr` 零命中 —— 本 PR 不发布任何东西,故打标签而非写 changeset(空 frontmatter changeset 是被门禁禁止的)。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_014wsZeReNTqiceBfLb5Pyf5)_"
+}

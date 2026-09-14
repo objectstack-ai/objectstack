@@ -1,0 +1,36 @@
+{
+  "number": 5837,
+  "kind": "issue",
+  "title": "spec 生成物按 category 分片：拆掉三个单体 ratchet 文件的合并队列串行税（维护者 2026-08-06 已拍板）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "priority:p0"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T07:36:15Z",
+  "updated_at": "2026-08-07T00:28:10Z",
+  "closed_at": "2026-08-07T00:28:10Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5837",
+  "body": "## 裁决记录\n\n维护者 2026-08-06 于 PM 会话（`session_01LeEfA7CFwbJb7JJmXm2KM3`）拍板：**「分片 + 缩盘子」**。第一层（重分诊外移 / 同族打包 / 决策形单转决策箱）已由该会话逐单留言给分诊与 spec 座位；本 issue 是第二层结构性修复的落地载体。先立此存照，防「裁决只在会话里」的过夜半状态。\n\n## 问题：串行税的真正强制点在 GitHub 服务端，不在 os-regen 驱动\n\n- `merge=os-regen`（#4675）只在本地 git 生效。**合并队列在服务端重建 PR 时不跑自定义 merge driver**，两个都动过 `packages/spec/authorable-surface.json`（310KB 单体排序数组）的 PR 在队列里是纯文本冲突，第二个必然被踢 → spec 车道只能一次放行一单（2026-08-04/05 夜 10 连 PR 的串行接力形态即由此而来），落地天花板实测 ~12 单/天。\n- driver 自己的注释里有测量：一个下午 4 次合并 9 处冲突，**零真语义冲突**，全部是集合并集。我们在为「单体文件」这个形状付税，不是为真冲突付。\n- 配套坑位已各自立单：#5370（锚点倒退）、#5371（rmSync 误伤）、#4868（绝对路径）。\n\n## 方案：三个热点文件按 category 分片\n\n`authorable-surface.json` / `json-schema.manifest.json` / `api-surface.json` 的内容都是 `\"ai/AIModelConfig:maxTokens\"` 这类按前缀天然分组的排序字符串——按 category 拆成 `authorable-surface/ai.json`、`authorable-surface/flow.json`…（`api-surface.json` 按 entrypoint 拆）。动不同 category 的两个 PR 从此文件不相交：**服务端文本冲突消失，队列可并行放行**；os-regen 与四步重建收窄到同 category 撞车的少数情形。\n\n这是本仓自己验证过两次的模式：`.changeset/*.md` 一 PR 一文件永不冲突（CLAUDE.md 释义），#5107 把 strictness 台账数字拆成生成物。\n\n**范围外（有意）**：`spec-changes.json`（按版本键控、低冲突）、`api-surface-signatures.json`（1.3KB 小映射）维持现状；`content/docs/references/**` 本已按页分文件。\n\n## 三轴（存档）\n\n- **实际业务需求**：实测——12 单/天落地天花板、08-03 一天三次静默吞（#4809/#4846/#4841）、夜间十连接力的人力形态；spec 是三仓上游，contract-first 下该车道流量只涨。\n- **项目长远合理性**：changeset 模式在本仓两处已证；不改任何协议语义，纯落地形状优化。\n- **防 AI 犯错**：单体文件 + 静默吞是 AI 最典型的坑（CI 绿、数据错）；分片后「兄弟单条目还在吗」从内容考古变成文件级存在性检查，机械可验。\n\n## 建议拆分（contract-first 顺序，由承接座位展开为 sub-issue）\n\n1. **S1 布局 + 生成器**：定分片键（category / entrypoint）与目录命名；`gen:schema` / `gen:api-surface` 等改为输出分片。\n2. **S2 门禁 + 锚点**：`check:authorable-surface` 及各 ratchet 闸改读分片；#5304 的 `authorable-surface.base.json` 锚点机制适配（锚点随之分片或改读聚合视图，authenticity 判据不弱化）。\n3. **S3 消费方**：MCP `spec_changes` 工具、docs build、其它读这三个文件的站点改读分片（或运行时聚合函数）。\n4. **S4 收尾**：`.gitattributes` 更新（os-regen 路由到分片路径）、退役单体文件、`docs/` 说明。\n\n## 验收判据\n\n- 两个动**不同** category 的 spec PR 可同时在合并队列成链落地，互不相踢、无需人工重建。\n- ratchet 语义不变：key 无墓碑消失仍然红（gen:schema 现有保证逐条保留）；#5304 锚点 authenticity 判据不弱化。\n- `gen:*` 幂等：干净树上重跑零 diff。\n\n## 路由建议（交分诊座位定标，立单者不打 domain 标签）\n\n落点全在协议工具链文件面（`scripts/**`、`packages/spec/scripts/**`、门禁），建议 `domain:spec-tooling`（C 包 #5163）+ `pm:queue`。⛔ 实施时不做任何单的 rider；⛔ 不碰 `content/docs/releases/`。\n\nRefs: #4675 · #5370 · #5371 · #4868 · #5304 · #5163"
+}

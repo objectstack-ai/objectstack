@@ -1,0 +1,36 @@
+{
+  "number": 5944,
+  "kind": "issue",
+  "title": "[docs] `services.data` 页的 Example 也是 hook 语境混搭 —— `ctx.input.contact_id` 配上 hook 拿不到的 `services.data`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T12:41:57Z",
+  "updated_at": "2026-08-06T14:32:39Z",
+  "closed_at": "2026-08-06T14:32:39Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5944",
+  "body": "## 事实(对 `origin/main` 核实)\n\n`content/docs/kernel/runtime-services/data-service.mdx:42-51`:\n\n```\n## Example\n\nconst contact = await services.data.get('contact', ctx.input.contact_id);\nconst orders = await services.data.find('sales_order', {\n  filter: { contact_id: contact.id },\n  sort: [{ field: 'created_at', order: 'desc' }],\n  top: 20,\n});\n```\n\n`ctx.input.…` 只有 **hook 上下文**(和沙箱 body)才有这个读法,而 hook 上下文**没有 `services` 键** —— #5720 已实测钉死:引擎五处 `hookContext` 构造点逐键构造(`object` / `event` / `input` / `session` / `provenance` / `user` / `api` / `transaction` / `ql`),`buildHookSandboxContext` 同样不产;把示例按 `(ctx: HookContext)` 如实标注即 `TS2339: Property 'services' does not exist`。\n\n即这段 Example 把「hook 的 `ctx.input`」和「hook 拿不到的 `services.data`」拼在一起,和 #5720 修掉的 `examples.mdx` / `sharing-service.mdx` 是同一族缺陷,只是这一页没被 #5720 的裁定与派发面点名(#5720 的 PR #5938 严格按派发面只改那两页,故此处按 PD #10 单独记录,未夹带)。\n\n## 为什么仍算缺陷\n\n`services.data` 本身不是幻觉:runtime-services 索引页的 binding note 写明这是**契约签名面**,开放框架不往 hook ctx 注入 `services`,托管运行时才提供该绑定。缺陷在于 Example 用 `ctx.input` 把它写成了 hook 代码 —— 照抄进 hook 会在 `services` 上 `TypeError`(比 #5720 的「无条件 403」响,但同样是文档教了运行时不交付的形状)。\n\n顺带一处措辞待核:同页 `- **Canonical source:** packages/client/src/index.ts` 指的是客户端 SDK,与「runtime service」标题的关系值得在修这页时一并说清。\n\n## 建议修法(与 #5720 已落地的形状对齐)\n\nPR #5938 给这两页定了模式,照搬即可:\n\n- 若要示范 **hook** 里的跨对象读,改用 hook 的真实通道 `ctx.api.object('contact').findOne({ where: { id } })`(#5938 的 examples.mdx 第 2 节就是这个形状,已进 `os:check` 真编译);\n- 若这页要保留 `services.data` 的签名示范,就**去掉 `ctx.` 的 hook 味道**(用普通入参),并像 #5938 给 `sharing-service.mdx` 加的那样,说明这是持有该绑定的代码(托管运行时)在调用。\n\n## 关联\n\n- #5720 / PR #5938(同族,runtime-services 另两页,已 docs-only 修完并给出模式)\n- #5943(`check:skill-examples` 禁 os:check 块内入参标 `any`)—— 注意本页 Example **没有** os:check 标记,所以此处不是\"空门\",而是\"根本没进门\":同一族缺陷的另一种藏法,修这页时值得考虑是否补标(补了就得真过)。\n\n未加标签、未认领,交 PM 分诊定级。"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 5787,
+  "kind": "issue",
+  "title": "packages/client 的 discovery 测试替身也拼 `endpoints`(#4828 退役键)、且 `capabilities` 拼成数组",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T05:29:31Z",
+  "updated_at": "2026-08-07T02:33:11Z",
+  "closed_at": "2026-08-07T02:33:11Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5787",
+  "body": "发现于 #5674 的实施(界外发现,查重无命中故新开;**未认领**;observation-class,今天没有用户会撞上)。\n\n## 现象\n\n#5674 清掉了 `packages/rest/src` 里 25 个拼 `endpoints` 的 `getDiscovery` 替身。repo 范围复查(按「规则的消费半径」而不是按被改的包扫)时,发现同一个退役键在另一个包里还活着一处:\n\n`packages/client/src/client.test.ts:36-44`,`connect()` 的 discovery 响应替身:\n\n```ts\nconst fetchMock = vi.fn().mockResolvedValue({\n  ok: true,\n  json: async () => ({\n    version: 'v1',\n    apiName: 'ObjectStack',\n    capabilities: ['metadata', 'data', 'ui'],\n    endpoints: {}\n  })\n});\n```\n\n两处与真实形状不符,方向不同:\n\n1. **`endpoints`** —— 真实 producer 发 `routes`(`ApiRoutesSchema`,`DiscoverySchema` 里必填),从来没发过 `endpoints`;该键只在 dispatcher 那条路径上作为 `routes` 的逐字副本存在过,#4828 已按 ADR-0049 删除,并由三处 `discovery-schema-conformance.test.ts` 钉死。\n2. **`capabilities: ['metadata', 'data', 'ui']`** —— `DiscoverySchema` 把 `capabilities` 声明为 `Record` (键 → `{ enabled, features?, description? }`),不是字符串数组。这个替身描述的是一个更早的、且已经不存在的形状。\n\n## 为什么今天没事\n\n- 生产类型是对的:`DiscoveryResult = GetDiscoveryResponse`(`packages/client/src/index.ts:131`),即 spec 类型,里面没有 `endpoints`;\n- `packages/client/src` 的生产代码**没有一处**读 `discovery.endpoints`(全仓 grep 只命中注释与无关的 auth/OAuth 端点措辞);\n- 该用例只断言 `expect(fetchMock).toHaveBeenCalled()`,不碰 body 的任何键。\n\n所以它是惰性的 —— 和 #5674 里那 25 个替身完全同一个类别:替身描述了一个从未存在过(或早已改掉)的生产者形状,削弱了它作为「client 在真实上游之上做了什么」的证据力,并且是下一次复制粘贴的种子。\n\n## 建议的修法\n\n替身改成真实 `/discovery` body 的形状(`routes: { data: '/api/v1/data', metadata: '/api/v1/meta' }`,`capabilities` 用 record 形态),tests-only。\n\n#5674 的 PR 里已经加了一条 pin(`packages/rest/src/discovery-double-retired-key.test.ts`),但它按包扫描,**只覆盖 `packages/rest/src`**。修这一条时可以顺带判断:是把该 pin 提成跨包的 repo 级 gate,还是在 client 里放一条同样的本地 pin —— 这是个取舍,不要默认扩大。\n\n参考:#5674、#4828、ADR-0049。\n"
+}

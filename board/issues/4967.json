@@ -1,0 +1,36 @@
+{
+  "number": 4967,
+  "kind": "issue",
+  "title": "A refused capability declaration still suppresses the back-compat derivation, so the capability exists nowhere — and an app-declared capability can never get registry provenance",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T17:29:34Z",
+  "updated_at": "2026-08-06T14:29:51Z",
+  "closed_at": "2026-08-06T14:29:51Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4967",
+  "body": "Found while fixing #4774 item 2 (the showcase's `showcase.export_data` warning). The showcase side is fixed there by authoring the ADR-0086 D3 `packageId` fallback; **this issue is the platform half**, which #4774's PM direction asked to be split out rather than worked around in the example.\n\nTwo defects in one chain. Together they turn \"an app declares a capability\" into \"a permission set grants a capability that exists nowhere\", announced by a single `warn`.\n\n## Part 1 — a REFUSED declaration is still reported as declared\n\n`SecurityPlugin` seeds `sys_capability` in two passes and deliberately tells the second pass to skip anything the first already declared:\n\n`packages/plugins/plugin-security/src/security-plugin.ts` (~2002):\n\n```ts\nconst capOutcome = await bootstrapDeclaredCapabilities(ql, this.metadata, { logger: ctx.logger });\ndeclaredCapabilityNames = capOutcome.declaredNames;\n// …\nawait bootstrapSystemCapabilities(ql, this.bootstrapPermissionSets, {\n  logger: ctx.logger,\n  declaredCapabilityNames,   // ← \"skip these, a package owns them\"\n});\n```\n\nBut `declaredNames` is filled **before** the upsert decides anything —\n`packages/plugins/plugin-security/src/bootstrap-declared-capabilities.ts` (~172):\n\n```ts\nfor (const cap of caps) {\n  if (!cap?.name) continue;\n  out.declaredNames.push(cap.name);          // ← unconditional\n  const packageId = cap._packageId ?? cap.packageId ?? undefined;\n  await upsertPackageCapability(ql, cap, packageId, out, options.logger);\n}\n```\n\n`upsertPackageCapability` has three refusal paths that return without writing a row: a curated platform name (`skippedPlatform`), **no owning package**, and a name owned by another package (`skippedForeign`). Each of those names is nevertheless in `declaredNames`, so `bootstrapSystemCapabilities` skips deriving it too.\n\nThe back-compat derivation is the only thing that used to make a referenced-but-undeclared capability resolve. So the net effect of *adding* an explicit declaration that gets refused is **strictly worse than not declaring it at all**: the placeholder that would have existed is now suppressed, and nothing replaces it. The capability exists in no row, and every `systemPermissions` grant naming it is inert.\n\nThe comment above the call states the intended contract exactly — \"SKIPPING any name a package already declared (so the placeholder never clobbers the authored capability)\" — and a refused declaration is not an authored capability there is anything to protect.\n\n**Suggested fix:** report only the names that actually landed (seeded / updated / claimed). A refused declaration should fall through to the derived placeholder, not into a hole. That also makes the outcome counters and `declaredNames` agree, which they currently do not.\n\n## Part 2 — `stack.capabilities` never reaches the registry, so `_packageId` is never stamped\n\n`bootstrapDeclaredCapabilities` resolves provenance as `cap._packageId ?? cap.packageId`. The `_packageId` half can never fire for an app-declared capability:\n\n- `AppPlugin` surfaces stack security metadata through `metadata.registerInMemory(type, item.name, item)` (`packages/runtime/src/app-plugin.ts` ~628) — and `MetadataManager.registerInMemory` only does `this.registry.get(type).set(name, data)`. It stamps nothing.\n- The stamping path is `SchemaRegistry.registerItem(type, item, 'name', packageId)`, which calls `applyProtection(item, { packageId })`. That is reached from `ObjectQLEngine.use()`, which walks a hardcoded `metadataArrayKeys` list (`packages/objectql/src/engine.ts` ~1735). That list carries `'roles', 'permissions', 'profiles', 'sharingRules', 'policies'` — **`'capabilities'` is not in it.**\n\nSo permission sets get stamped and materialize; capabilities are never registered through that seam and always arrive unstamped. `readDeclared(ql, 'capability')` returns `[]` and the metadata-service fallback yields the unstamped objects.\n\nThe consequence is that the author-declared `packageId` — documented as the *fallback* for when the registry stamp is absent — is in practice **mandatory**, with nothing saying so. Omitting it is accepted at authoring time (it is `.optional()`), and the failure appears as one boot `warn` plus an inert security grant.\n\n**Suggested fix:** register `capabilities` through the same provenance-stamping seam as `permissions`. Failing that, `CapabilityDeclarationSchema.packageId` should stop describing itself as a fallback for a stamp that never happens.\n\n### Repro\n\n```bash\nrm -rf examples/app-showcase/.objectstack\npnpm --filter @objectstack/example-showcase exec objectstack dev --fresh -p 39774 --log-level warn\n```\n\nOn `main` @ 6bc93dc, before #4774's showcase-side fix:\n\n```\nWARN [security] capability has no owning package — not materialized {\"name\":\"showcase.export_data\"}   (×3)\n```\n\nand `OpsPermissionSet.systemPermissions: ['setup.access', 'showcase.export_data']` grants a capability with no row anywhere.\n\n## Part 3 (smaller) — is one `warn` the right volume? (#4632)\n\nRaised in #4774's PM direction and recorded here rather than guessed at. \"This app grants a permission that will never exist\" is a security declaration that reads as enforcement and enforces nothing — the ADR-0049 \"declared ≠ enforced\" shape. It is *functional* degradation, not durability, so #4632's rule points at `warn` rather than `error`. But it is currently a `warn` **per capability, emitted from the seeder**, which names the capability and not the permission set(s) that grant it, so the reader is not told the consequence.\n\nThe cheap improvement is probably not the level but the message: name the grantors, i.e. \"`showcase.export_data` is granted by `showcase_ops` and will not exist\". Note also that `validateCapabilityReferences` (`packages/lint/src/validate-capability-references.ts`) deliberately does **not** lint `systemPermissions` — \"it is the declaration side, and a package legitimately introduces new capabilities there\" — which is correct while the derivation back-door exists, and is exactly what Part 1 breaks.\n\nFiled unassigned per Prime Directive #10.\n"
+}

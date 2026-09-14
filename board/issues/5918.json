@@ -1,0 +1,35 @@
+{
+  "number": 5918,
+  "kind": "issue",
+  "title": "analytics 自动推断路径:`measures` 上的关系穿越点号 member 仍被剥成基表列 —— `owner.region_count_distinct` 静默聚合基表 `region`(#5739 裁决未覆盖的第四个铸造点)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:queue"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T11:37:41Z",
+  "updated_at": "2026-08-07T13:39:27Z",
+  "closed_at": "2026-08-07T13:39:27Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5918",
+  "body": "实现 #5739(裁 B:即席推断路径支持关系穿越)时**实测发现并刻意留在范围外**。本单不是 #5739 的 PR 引入的,也不被它修复。\n\n## 位置\n\n`packages/services/service-analytics/src/analytics-service.ts`,`inferCubeFromQuery` 的 **measures** 铸造循环。\n\n#5739 把该函数里三个 **dimension 形状**的铸造点(`dimensions` / `where` 的字段键 / `timeDimensions`)从「剥掉任何点号首段」改成「只剥真正的 `cube.` 限定符」,于是 `owner.region` 原样铸造并走 JOIN 穿越。**`measures` 循环保持原样**(仍是无差别剥首段),理由写在该循环的注释里 —— 见下面「为什么 #5739 没有顺手改」。\n\n## 实测(在含 #5739 改动的分支上;`crm_account` 字段 `id/name/industry/region/owner`,注意 `region` 是**基表自己的**列)\n\n查询 `measures: ['owner.region_count_distinct']`,两个策略都静默通过、无任何拒收:\n\n```\nNativeSQL\n→ SELECT COUNT(DISTINCT region) AS \"owner.region_count_distinct\" FROM \"crm_account\"\n                        ↑ 基表列                ↑ 别名标着关系属性        ↑ 没有 JOIN\n\nObjectQL\n→ executeAggregate 收到 aggregations:\n  [{ field: \"region\", method: \"count_distinct\", alias: \"owner.region_count_distinct\" }]\n\n两者铸出的 measure 键都是 `region_count_distinct`(getMeta: `crm_account.region_count_distinct`)\n```\n\n这与 #5739 正文里的 ④ 是**同一个形状**:响应列名标着关系属性 `owner.region_count_distinct`,值却来自基表 `region`,调用方无法从结果里看出来。#5739 已把 `dimensions` / `where` / `timeDimensions` 三个键上的这个形状消掉,`measures` 是剩下的第四个。\n\n分档同 #5739:\n\n- **基表恰好有同名列** → 静默聚合错列(上面的实测),行数/图表都是错的,没有任何错误可读;\n- **基表没有同名列** → 落到 #4437 的 `400 INVALID_FIELD`,点名剥出来的尾段。实测 `measures: ['owner.score_sum']` 答 `Measure 'owner.score_sum' … aggregates field 'score', which object 'crm_account' does not have` —— 消息本身诚实(进 SQL 的确实是 `score`),但调用方写的是 `owner.score_sum`。\n\n## 为什么 #5739 没有顺手改(实测,不是猜测)\n\n`lookupMember` 的 synthetic relation-traversal 那一档是 **dimension-only** 的:\n\n```\nif (kind === 'dimension') return { sql: member, type: 'string' };\n```\n\n所以 dotted **measure** 没有一个「已经正确的穿越答案」可以收敛过去 —— #5739 裁 B 的依据(数组 where 写法今天已编出正确 JOIN,拒收会拒掉与已正确行为等价的查询)在 measures 上**不成立**。\n\n而且实测:若把 measures 也改成原样铸造,`measures: ['total.sum']`(一个 `total_sum` 的**手滑拼写**,不是穿越)会从 #4437 的 `400 INVALID_FIELD` 退化成 ObjectQL 的 `cannot evaluate a cross-object measure` —— 一个**不带 code/status** 的 5xx 级错误,而且诊断是错的(它不是穿越)。`measure-source-field-gate.test.ts` 的用例 `refuses the dotted spelling the same way, naming what it stripped to` 正是钉这条的,#5739 落地时它红了一次,遂把 measures 排除在改动外并在代码里写明原因。\n\n所以这一支需要**自己的裁定**,而不是把 #5739 的判定复制过来。\n\n## 裁定时需要回答的\n\n1. 即席路径要不要支持**关系穿越 measure**(`SUM(\"owner\".\"amount\")` + LEFT JOIN)?NativeSQL 有能力(`qualifyAndRegisterJoin` 对 measure 的 `sql` 一视同仁);ObjectQL 没有(`planCrossObject` 对跨对象 measure 是响亮拒收),这与 dimension 的情形一致。\n2. 如果支持,`total.sum` 这类**非穿越的手滑拼写**要怎样保住 #4437 的 `400 INVALID_FIELD`?二者今天在词法上不可区分(都是「点号 + 尾段」)。可能的判定:首段是否为基表的 lookup 字段名 —— 但即席路径上没有字段元数据可查(`getObjectFieldNames` 只给字段名列表,不给类型/关系目标),这可能才是本单真正的成本所在。\n3. 如果不支持,是否应当**响亮拒收** dotted measure(带 `code`/`status` 的 400,点名调用方写的 `owner.region_count_distinct`),以消掉静默错列?这一档不需要新的元数据能力,代价最小。\n\n## 查重\n\n搜过三仓 open issue / open PR:`inferCubeFromQuery` / `stripPrefix` / analytics dotted measure / cross-object measure —— 无同题单。#5739(本单的兄弟,dimension 侧)已落地;#5353 / #5669 / #5740 均不覆盖 measures 键。\n"
+}

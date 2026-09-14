@@ -1,0 +1,35 @@
+{
+  "number": 6044,
+  "kind": "issue",
+  "title": "flaky(service-datasource): `datasource-pool-support.test.ts` 的「sqlite WITHOUT a pool still builds」在合并队列全量跑间歇红 —— 今日已踢 2 个不相关 PR(#5999、#5973)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:queue"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T15:34:27Z",
+  "updated_at": "2026-08-07T02:20:25Z",
+  "closed_at": "2026-08-07T02:20:25Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6044",
+  "body": "队列健康事项,按「发现 flake 的 PM 立单而不是静默重排绕过」纪律归档。**未指派,标签交分诊**(落点 `packages/services/service-datasource` → 应属 `domain:services`)。\n\n## 签名\n\n- 失败用例:`src/__tests__/datasource-pool-support.test.ts > #5714 — the driver factory rejects a pool it cannot honour > sqlite WITHOUT a pool still builds exactly as b…`(队列分诊评论的日志抽取截断,完整名以日志为准)\n- 来源:PR #5954(#5714,sqlite/sqlite-wasm 臂 pool 响亮拒绝),2026-08-06 13:28Z 合入 —— 该测试为当日新增\n\n## 命中记录(均为合并队列**全量**构建,受害 PR 自身 CI 全绿、改动包不含该测试)\n\n1. PR #5999(metadata-core delete 判定,engine-core 车道)—— 队列构建 [31111166282](https://github.com/objectstack-ai/objectstack/actions/runs/31111166282),14:43Z 被踢,queue-triage 评论在该 PR;\n2. PR #5973(spec HierarchyScopeContext,spec 车道)—— 同签名出现于其线程,该 PR 其后 14:55Z 落地 ⇒ **间歇性**(非 main 硬红)。\n\n同窗 stderr 里的 `sql-driver-unique-tenancy` 噪音为 stderr 输出非失败项,勿混入签名。\n\n## 影响与处置建议\n\n队列失败税全车道共担(今日 24h 内队列共 9 次失败构建)。建议 services 车道:复核该用例在全量并发/共享容器环境下的隔离性(端口/文件/pool 状态泄漏是常见形状),修复或隔离;修复前队列管家 Routine 可凭本单提请把签名计入 #5810 台账做原样重投分诊。\n\nRefs #5714 / PR #5954、#5931(姊妹臂决策单,非同题)、#5810(管家锚点)、PR #5999 与 #5973 的 queue-triage 评论。"
+}

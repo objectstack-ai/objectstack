@@ -1,0 +1,32 @@
+{
+  "number": 6200,
+  "kind": "pull_request",
+  "title": "fix(spec): gen:schema clears only its own outputs, sparing gen:openapi's openapi.json",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T10:40:07Z",
+  "updated_at": "2026-08-07T11:12:47Z",
+  "closed_at": "2026-08-07T11:12:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T11:12:46Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6200",
+  "body": "Fixes objectstack-ai/objectstack#5371\n\n## 问题\n\n`packages/spec/json-schema/` 有**两个写入方**：\n\n- `gen:schema`（`build-schemas.ts`）写 `json-schema/{category}/{Name}.json` 与打包的 `objectstack.json`；\n- `gen:openapi`（`build-openapi.ts`）只写一个文件 `openapi.json`。\n\n而 `build-schemas.ts` 的清场是把**目录本身**删掉（`fs.rmSync(OUT_DIR, { recursive: true })`，origin/main `:285`），于是顺手抹掉了兄弟生成器的产物。\n\n`pnpm build` 看不见这件事，因为它是 `gen:schema && gen:openapi && tsup`，`openapi.json` 总是最后被重写；**凡是停在 `gen:schema` 之后的入口都会中招** —— `check:authorable-surface` 就是原地跑 `build-schemas.ts --check`，`check:generated` 又跑它。整棵树 gitignored、`gen:openapi` 无门禁（`check:generated` 自己打印 `Generated but ungated (2): gen:openapi, gen:sbom`），所以**没有任何东西报告这个洞**，红只会在两个包之外冒出来：`@objectstack/rest` 的 openapi 路由测试 `expected 503 to be 200`，对着一份根本没碰过它们的 diff。四次独立复现（#5371 本身，以及 #5126 / #5588 / #5672 实施途中），每次一整圈归因成本。\n\n## 前提复核（重新定价）\n\n按派单要求先在 `origin/main`（`80f7dc6a3`）复核 #5837 分片（PR #6069）之后的现状，**前提成立**：\n\n- `OUT_DIR` 仍是 `path.resolve(PKG_DIR, 'json-schema')`（`:73`），分片改的是 `json-schema.manifest/` 与 `authorable-surface/` 两个**已入库**产物的目录布局，不是 `OUT_DIR`；\n- `fs.rmSync(OUT_DIR, { recursive: true, force: true, … })` 仍在 `:285`，仍然整目录清场；\n- `openapi.json` 仍然只由 `build-openapi.ts:179` 写入同一目录；\n- 该目录下今天只有这一个「别人的产物」：`build-schemas.ts` 只写 category 目录与 `objectstack.json`，`gen:sbom` 写的是 monorepo 根的 `sbom.json`，不在此列。\n\n## 修法（正文候选①：各生成器只拥有并清理自己的输出）\n\n新增 `packages/spec/scripts/lib/json-schema-out-dir.ts`，承载**所有权登记表**与清场函数：\n\n- `FOREIGN_JSON_SCHEMA_ARTIFACTS` —— 声明「住在 `json-schema/` 下、但属于别的生成器」的产物，值是**写回它的命令**，这样文件不见时读一行就知道补救办法；\n- `clearOwnedOutputs()` —— 逐个删除顶层条目、保留登记表声明的那些，目录本身留下；重试与退避形状原样保留（CI 文件系统竞态是它们存在的理由），删不掉的条目**报告**而不是吞掉；\n- `build-openapi.ts` 从这张表 import 自己的产物名（`OPENAPI_ARTIFACT_NAME`），而不是再拼一次字符串 —— 改名时声明跟着走，登记表无法与它保护的生成器脱节（declared = enforced，不是一句注释）。\n\n**为什么排除项是 deny-list 而不是 allow-list**（写在 lib 头部）：「只删我产出的路径」读起来更像所有权的字面拼法，却恰恰会破坏清场本身的目的 —— category 目录是从 `build-schemas.ts` 自己的 `Protocol` 表推导的，某个 namespace 离开该表的当天，它的目录也就离开了 allow-list，`json-schema/{gone}/` 会活过之后每一次 build，并且**随发布包一起出货**（`json-schema` 在 spec 的 `files` 白名单里）。deny-list 保持清扫是全量的 —— 这正是「no stale files remain」一直以来的含义 —— 只放行另一个生成器**已声明**的产物。\n\n## 验收证据（按 issue 描述的顺序端到端跑）\n\n完整 build 之后单独跑 `gen:schema`，并预先埋入 stale 探针：\n\n```\nCleaning output directory: …/packages/spec/json-schema\n  ↳ kept openapi.json — owned by gen:openapi (packages/spec/scripts/build-openapi.ts) (#5371)\n```\n\n- `openapi.json` md5 前后一致：`f6f36414a6e969e849624cf955fdc914`；埋入的 `zzStaleProbe.json` / `zzstalecat/` 均已被清掉（清场仍是全量的）。\n- 紧接着 `pnpm --filter @objectstack/spec check:generated` → **10/10 全绿**，且 `openapi.json` 仍在（17 个顶层条目）。\n- 同一 worktree 再跑 `@objectstack/rest`：**62 files / 854 tests 全绿**；单独跑两个当事文件 `rest-openapi-route.test.ts` + `rest-endpoint-surfaces-served-only.test.ts` → **24/24 绿**。假红不再复现。\n\n## 反向验证（方向：预测为红，实测为红）\n\n把删掉的肢体装回去（在清场前补一句 `fs.rmSync(OUT_DIR, { recursive: true })`），新增的两条端到端 pin 立刻转红，且报的正是现场四次报告里的那条 `ENOENT`：\n\n```\nFAIL scripts/build-schemas-check-mode.test.ts > … (#5371) > leaves gen:openapi's artifact byte-identical …\nError: ENOENT: no such file or directory, open '/tmp/build-schemas-check-As5Q2J/json-schema/openapi.json'\n```\n\n脚手架已移除，`git diff` 无残留。\n\n## 测试\n\n两层，缺一不可：\n\n- `scripts/json-schema-out-dir.test.ts`（新，7 例，毫秒级）—— 嵌套目录、退避次数、删不掉的条目如何上报、缺目录时的 no-op，以及把旧的整目录 rm 作为**对照**记下来；\n- `scripts/build-schemas-check-mode.test.ts` 里新增 `#5371` describe（2 例，真实沙箱跑真实脚本）—— 写模式与 `--check` 各一条。`--check` 单列，因为它才是现场报告的触发点：一个名字里带 `check:` 的命令删掉构建产物，正是这个坑难以联想到的原因。单测无法替代它：如果调用方哪天改回 `fs.rmSync(OUT_DIR, …)`，只有跑真实脚本的这一半会红。\n\n## 变更集\n\n**无 changeset，改用 `skip-changeset` 标签**：`scripts/` 不在 `@objectstack/spec` 的 `files` 白名单里（`dist` / `json-schema` / `liveness` / `prompts` / `llms.txt` / `README.md` / `src/**/*.zod.ts` / `CHANGELOG.md` / `api-surface` / `spec-changes.json`），本 PR 全部改动都在 `scripts/` 与测试里；发布产物字节不变（`pnpm build` 里 `gen:openapi` 依旧最后写 `openapi.json`）。即 pr-automation 说的 route 2：本 PR 不发布任何东西。\n\n## 仍然留在门口的另一半 —— #5757\n\n按 #5371 的分诊交叉链接说明：本 PR 采用的是候选①，所以**门禁缺口依旧存在** —— `openapi.json` 被运行时读盘，却没有任何 freshness / existence 门禁（`check:generated` 自报 `Generated but ungated (2)`）。本 PR **不**关闭 #5757；它在此落地后晋级入队。这里只是不再有兄弟生成器主动删它。\n\n## 门禁与本地验证\n\n- `pnpm --filter @objectstack/spec typecheck` ✓（`tsc --noEmit` + `check:test-typecheck`，debt 台账未变）\n- `pnpm exec eslint`（本 PR 全部改动文件）✓\n- `pnpm check:nul-bytes` ✓（5920 个文件），并对改动文件做了越界自扫（`grep -naP`）✓\n- `pnpm check:published-files` ✓\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_014wsZeReNTqiceBfLb5Pyf5)_"
+}

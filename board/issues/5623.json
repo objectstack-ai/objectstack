@@ -1,0 +1,36 @@
+{
+  "number": 5623,
+  "kind": "issue",
+  "title": "`check:liveness` 的 stale-evidence 检测只 ⚠ 不判红 —— ADR-0087 证据路径可以静默腐烂,且摘要行的 “N resolved” 数的是路径总数不是解析成功数",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T20:44:35Z",
+  "updated_at": "2026-08-07T02:54:41Z",
+  "closed_at": "2026-08-07T02:54:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5623",
+  "body": "**发现于**:#4645 Phase A(PR #5618)的反向验证,原始测量记录在该 PR body「liveness evidence 路径守卫」一节。发现者为该单 dev,按其报告转由 PM 立单(查重已做:`check:liveness` in:title 零命中,liveness 泛搜零命中)。\n\n## 实测(objectstack,#4645 Phase A 分支)\n\n把 `packages/spec/liveness/query.json` 的 5 条 evidence 路径**故意改坏**(指回迁移后已不存在的 `packages/plugins/driver-sql/...`),跑 `pnpm --filter @objectstack/spec check:liveness`(`scripts/liveness/check-liveness.mts` 的 `checkEvidence`):\n\n```\n⚠ 5 'live' entr(ies) cite a missing file:\n    query/fields → packages/plugins/driver-sql/src/sql-driver.ts\n    query/where → packages/plugins/driver-sql/src/sql-driver.ts\n    query/orderBy → packages/plugins/driver-sql/src/sql-driver.ts\n    query/limit → packages/plugins/driver-sql/src/sql-driver.ts\n    query/offset → packages/plugins/driver-sql/src/sql-driver.ts\n```\n\n- 逐条点名 ✅ —— 但这是 **`⚠` 警告,不是 `✗`**,**退出码两种状态下都是 0**。\n- 摘要行 `evidence paths: 330 resolved against this checkout` 里的 **330 是 local 路径总数,不是解析成功数** —— 改坏 5 条之后它仍然显示 330,\"resolved\" 一词失真。\n\n## 影响\n\nADR-0087 的证据链断裂不挡任何 CI:目录重组、文件更名这类常规动作可以让 `live` 判定引用一个不存在的文件而无人发现 —— declared(「证据在此」)≠ enforced(无 gate 兜底)。#4645 这次是 dev 主动做反向验证才发现;下一次大概率是静默腐烂。\n\n## 注意的反面(先回答再动手)\n\n同一 reporter 里 ⚠ 与 ✗ 的分级在别处是**刻意设计**(发现 dev 的观察)。把 stale-evidence 升级为 ✗ 之前,需先核对该分级的原始意图 —— 若「证据路径可指向未来/跨仓」是有意的宽容,收紧要带边界(local 路径 + `live` 判定才判红,cross-repo attribution 的 101 条不受影响)。\n\n## 处置建议\n\n1. `live` 条目引用**本仓缺失文件** → `✗` 判红(cross-repo attribution 维持现状);\n2. 摘要行改为真实解析计数,或把 \"resolved\" 改成 \"declared\"。\n"
+}

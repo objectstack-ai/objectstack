@@ -1,0 +1,37 @@
+{
+  "number": 5891,
+  "kind": "issue",
+  "title": "`content/docs/ui/apps.mdx` 的 App Properties 表漏了三个可作者化键;`contextSelectors` / `defaultAgent` 全手写文档树零覆盖",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T11:03:57Z",
+  "updated_at": "2026-08-06T14:20:26Z",
+  "closed_at": "2026-08-06T14:20:26Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5891",
+  "body": "实现 #4880(PR #5890,给该页补 `## Areas` 一节)时记录的越界发现,**未认领**。#4880 只负责 `areas[]` 一个键,本单是同一页上**剩下的同类缺口**。\n\n## 现象\n\n`packages/spec/src/ui/app.zod.ts` 的 `APP_KEYS`(由 `app.test.ts` 做漂移守卫)声明的作者面是:\n\n```\nname, label, description, icon, branding, active, isDefault,\nhidden, navigation, areas, contextSelectors, homePageId,\nrequiredPermissions, defaultAgent, protection\n```\n\n而 `content/docs/ui/apps.mdx` 的 App Properties 表只列了 10 个:`name` / `label` / `description` / `icon` / `active` / `isDefault` / `navigation` / `areas`(#4880 刚补)/ `branding` / `requiredPermissions`。\n\n漏掉的作者面键:**`contextSelectors`**、**`defaultAgent`**、**`hidden`**(`homePageId` 已于 17.0.0 退役,该页已有覆盖;`protection` / `_lock*` 是 ADR-0010 运行时封装,不算作者面)。\n\n其中两个不只是「表里没有」,而是**整个手写文档树零覆盖**:\n\n```\n$ grep -rl \"contextSelectors\" content/docs --include=*.mdx | grep -v \"references/\\|releases/\"\n(无输出)\n$ grep -rl \"defaultAgent\"    content/docs --include=*.mdx | grep -v \"references/\\|releases/\"\n(无输出)\n```\n\n即只存在于生成的 `content/docs/references/` 里 —— 与 #4880 里 `areas[]` 完全同一形状的缺口。\n\n## 为什么值得补\n\n- **`contextSelectors` 有真实业务拉力,不是投机能力面**:spec 的 `.describe` 说明它声明侧边栏级 \"scope\" 下拉,且**当前值会以 `id` 命名注入为导航模板变量**;Studio 自己的 package scope 就用它(`useAppContextSelectors`)。一个作者要复用这套「作用域下拉 + 导航模板变量」的机制,今天在手写文档里找不到任何入口。\n- **`defaultAgent`** 是 app 级 AI 入口的绑定点,同样零散文。\n- 这一页是作者写 app 的**唯一**手写入口,表本身读起来像「全集」,所以漏项不是「少写一行」,而是把键变成不可发现。\n\n## 建议范围\n\n给 App Properties 表补 `contextSelectors` / `defaultAgent` 两行,并为 `contextSelectors` 增一小节(它带模板变量语义,一行表格说不完;`areas` 的先例见 PR #5890)。\n\n## ⚠️ `hidden` 请单独判定,不要顺手写进来\n\n`hidden` 的**语义本身正在争议中**:#4829(`pm:on-hold`,bug)记录 `filterAppForUser` 把 app 的 `hidden` 当作 builder-only 访问闸门,导致内置 account app 对所有普通用户返回 404 —— 而 spec 的 `.describe` 写的是「从 App Switcher 隐藏,shell 改由头像菜单暴露」。两者不是同一件事。\n\n所以:**`hidden` 的文档化应当 blocked-by #4829**,先定语义再写散文,否则写哪一版都可能立刻过时。本单若被派发,建议只做 `contextSelectors` / `defaultAgent`,`hidden` 留给 #4829 落地后。\n\n参考:#4880(`areas[]` 零覆盖,同类)/ PR #5890(其实现,可作为本单的体例先例)、#4829(`hidden` 语义争议)。\n"
+}

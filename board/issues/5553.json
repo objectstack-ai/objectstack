@@ -1,0 +1,35 @@
+{
+  "number": 5553,
+  "kind": "issue",
+  "title": "docs-gen: 模块 JSDoc 按行拆成段落,跨行的行内代码跨度被切断 —— 5 张参考页正文露出裸反引号和 `\\{` 转义痕迹",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T17:17:46Z",
+  "updated_at": "2026-08-07T13:08:12Z",
+  "closed_at": "2026-08-07T13:08:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5553",
+  "body": "在实施 #5452(`.describe()` 的花括号转义)时,给生成语料做配平扫描顺带发现的另一条独立缺陷。**不同函数、不同根因**,故单独立单:#5452 改的是 `escapeMdxDescription` 的定界符配对,本单在 `getFileDescription`。\n\n## 现象(origin/main @ `5acb93add`,#5452 的 PR #5550 重生成后依然如此)\n\n`packages/spec/scripts/build-docs.ts` 的 `getFileDescription` 把模块级 JSDoc 的每一行用 `\\n\\n` 连接:\n\n```ts\n.map(line => line.replace(/^\\s*\\*\\s?/, '').trim())\n.filter(line => line)\n.map(line => line.replace(/^@see\\s+/, 'See also: '))\n.join('\\n\\n')                                   // ← 每个源码行 = 一个段落\n```\n\n于是**任何跨源码行的 Markdown 构造都被段落边界切断**。行内代码跨度不能跨空行,所以两边的反引号都当字面量渲染出来。\n\n扫描生成语料(排除围栏代码块,统计反引号数为奇数的行)得 **10 行 / 5 张页面 = 5 个被切断的跨度**:\n\n```\ncontent/docs/references/automation/flow-function.mdx:22,24\ncontent/docs/references/security/explain.mdx:8,10\ncontent/docs/references/shared/expression.mdx:16,18\ncontent/docs/references/system/doc.mdx:24,26\ncontent/docs/references/system/settings-client.mdx:10,12\n```\n\n最直观的一处,`automation/flow-function.mdx:22-24`:\n\n```\nvariable so a later DECLARATIVE node persists it (`update_record fields: \\{\n\nai_category: '\\{aiResult.ai_category\\}' \\}`). Data I/O stays on the flow graph.\n```\n\n读者看到的是两个段落,中间一个孤立的反引号开头、另一个反引号结尾 —— 而源码里它本是一个完整的行内代码例子:\n\n```ts\n// packages/spec/src/automation/flow-function.zod.ts:13-15\n * variable so a later DECLARATIVE node persists it (`update_record fields: {\n *   ai_category: '{aiResult.ai_category}' }`). Data I/O stays on the flow graph.\n```\n\n`security/explain.mdx:8` 同理把 `` `explain(principal, object, operation)` `` 从中间劈开。\n\n## 为什么 `\\{` 会露出来(次生现象)\n\n同一函数末尾对花括号做无差别反斜杠转义:\n\n```ts\n.replace(/\\{/g, '\\\\{').replace(/\\}/g, '\\\\}')   // Escape { } for MDX\n```\n\n它不区分「在代码跨度里」还是「在正文里」。跨度**没被切断**时,`\\{` 落在行内代码内部,而代码跨度里反斜杠不是转义符,读者就会看到字面的 `\\{`。上面 5 处因为跨度已经断了,`\\{` 反而当正文转义正常渲染成 `{` —— 两个缺陷互相掩盖,所以肉眼扫过去只觉得「反引号有点怪」。\n\n注意这条转义路径和 #5452 修的是**两条不同的路径**:`.describe()` 走 `escapeMdxDescription`(包进行内代码),模块 JSDoc 走这里(反斜杠转义)。#5452 的修复不触及本单。\n\n## 修法方向(未验证)\n\n两点都在 `getFileDescription` 里:\n\n1. **段落切分**应按 JSDoc 的空行切,而不是按每个源码行切 —— 即连续非空行合并为一段(用空格连接),空行才开新段。这同时修好跨行的链接、粗体等其它构造。\n2. **花括号转义**应像 `escapeMdxDescription` 那样感知反引号:已在行内代码里的花括号不需要任何转义(代码跨度天然不被 MDX 当表达式解析),不在代码里的才需要处理。\n\n改完重跑 `pnpm --filter @objectstack/spec gen:docs`,验收:上面的奇数反引号扫描归零,且 `flow-function.mdx` 那句恢复成单个完整的行内代码例子、不含 `\\{`。\n\n## 影响面\n\n5 张已发布参考页的正文段落,读者今天访问就能看到。纯展示层,无运行时/协议语义。\n"
+}

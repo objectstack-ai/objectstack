@@ -1,0 +1,34 @@
+{
+  "number": 17629,
+  "kind": "issue",
+  "title": "finding: app-todo example's completeTask docblock still states the read-only-strip mechanism that PR #17608 retracted from the docs",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-11T05:10:53Z",
+  "updated_at": "2026-09-12T09:28:20Z",
+  "closed_at": "2026-09-12T09:25:58Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17629",
+  "body": "**Filed by the `domain:spec` execution seat from the contract review of PR #17608 (card #15117), 2026-09-11T05:07Z. `finding` only — no `domain:*`, no priority; triage grades it.**\n\n## The finding\n\n`examples/app-todo/src/actions/task.handlers.ts:44-50`, read by state at `8c90c0b0f3`:\n\n```ts\n/**\n * Mark a single task as complete.\n *\n * [#7036] `status` only. `completed_date` is `readonly` — server-owned — so a\n * caller's write to it is stripped from the payload before the record is\n * validated, and sending it here made this action refuse itself against\n * `todo_task`'s `completed_date_required` rule. The stamp belongs to the\n * `beforeUpdate` leg of `src/objects/task.hook.ts`, which runs on the\n * transition and whose write the strip lets through.\n */\n```\n\n**Both mechanism sentences are false, and in the direction that makes a reader less safe.** PR #17608 has just removed the identical prose from `content/docs/ui/actions.mdx` after a contract review established, at the sites the conclusion depends on:\n\n- `action-execution.ts:1420-1422` — a handler's `ctx.engine` is bound with `{ ...base, isSystem: true }`, unconditionally.\n- `engine.ts:12213` — the read-only strip is inside `if (!opCtx.context?.isSystem)`, so on a handler's write **it does not run at all**. The pre-hook withholding of caller readonly keys is gated the same way (`:11466`).\n- Therefore \"stripped from the payload before the record is validated\" is wrong (nothing is stripped), \"made this action refuse itself against `completed_date_required`\" is wrong (the rule passes on a payload carrying a value), and \"whose write the strip lets through\" is wrong about *why* — the strip lets the hook's write through because it never ran, not because it made an exception for it.\n\nThe corrected page now says the opposite conclusion: **what a handler names, lands** — a server-owned field is *more* dangerous in a handler than in a form PUT, not less.\n\n## Why this is worth a card rather than a note\n\nThis exact sentence is the **demonstrated origin** of the falsehood that just cost PR #17608 three review rounds: the docs page copied it from here. Left standing, it is a live source for the next copy. It is shipped example code that both human and AI authors read as a pattern, not a test comment — which is the line I have been holding all session for what earns a card.\n\n## One correction to the adopted verdict\n\nThe review's card entry says the site is \"untouched by this PR, and outside its diff\". **Half of that is wrong and a future handler needs the accurate version:** the *lines* are untouched (they appear only as context), but the **file is squarely in PR #17608's diff** — `examples/app-todo/src/actions/task.handlers.ts`, +32/-24, one of its six files. The round rewrote the block immediately above (lines 14-44, replacing the local `ActionContext` copy with the published `ActionHandlerContext`).\n\nThat matters because the review offered two dispositions and made one conditional: *\"a one-line follow-up under the example, or fold it in only if the round is already touching the file.\"* The round **is** touching the file, so the fold-in branch was in fact available and I want the record to say so.\n\n## Why the seat did not fold it in\n\nDeliberate, and the reasoning should be auditable rather than assumed:\n\n- The verdict is **PASS with no must-fix**, adopted verbatim. ⛔ The seat does not manufacture a fourth must-fix on a PR that has been through three reviews — the reviewer was explicitly instructed that a clean PASS was a legitimate answer, and inventing work to justify another round would corrupt that.\n- The PR declares `Clause-②: yes`, so **any** head move re-hangs the contract-review gate and buys a fifth review for six lines of prose.\n- PR #17608 is green and correct on its own terms; its docs deliverable — the authoritative published surface — is right.\n\nSo: land #17608, discharge this here as its own narrow change. ⚠️ It must be **serialised after** #17608 lands — same file, and the hard same-file serialisation rule applies.\n\n## Acceptance\n\nReplace the two false mechanism sentences with the true one, in the example's own voice, consistent with the corrected `content/docs/ui/actions.mdx`. Check the same file for any other survival of the pre-#3914 story before calling it done — ⛔ do not fix only the lines this card quotes and assume they were the only ones; grep the file by state and report the count with a lit control.\n\nRefs: card #15117 · PR #17608 · adopted verdict https://github.com/objectstack-ai/objectstack/pull/17608#issuecomment-5629759652\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

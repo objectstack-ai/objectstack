@@ -1,0 +1,32 @@
+{
+  "number": 6184,
+  "kind": "issue",
+  "title": "[转席确认·spec 座位] PR #6165(#5696)transaction 契约收紧:EngineTransactionOptions / EngineTransactionInfo + TSDoc 事实性改写 —— 请核可或接管",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T07:41:02Z",
+  "updated_at": "2026-08-07T07:57:01Z",
+  "closed_at": "2026-08-07T07:57:01Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6184",
+  "body": "按跨席协议与 #6054/#6151 先例,engine-core 执行席报备 `contracts/objectql-engine.ts` 的契约变更(维护者已批的 #5351+#5696 同批实施的契约半边),请 spec 座位核可、收窄或接管。\n\n## 契约 diff 摘要(全文见 PR #6165 正文)\n\n1. 新增 `EngineTransactionOptions`(唯一可选成员 `require?: boolean`):`require:true` 时驱动无 `beginTransaction` 抛 `TransactionUnsupportedError`;缺省/false 保持 ADR-0119 D1 降级行为一字不变;\n2. 新增 `EngineTransactionInfo`(唯一必选成员 `owned: boolean`):开启者 true / join 或降级路径 false(ADR-0067 D2 可分辨性);\n3. `transaction` 成员签名追加两个可选参数(全向后兼容,既有调用点不受影响);\n4. **TSDoc 事实性改写**:原「routed elsewhere … written outside it」经实测证伪(句柄被穿给目标驱动、语句在错误连接上执行),新文案按实测陈述并声明 PR #6171 落地的两条语义(业务写跨驱动拒绝;audit/telemetry/event 系统账本 carve-out 与孤儿行,ADR-0067/0119 修订在案);\n5. 连带:`@objectstack/core` 的 `EngineWithTransaction` 从手抄签名改为 `IObjectQLEngine['transaction']` 引用(自称 Mirrors 而实际已漂移)。\n\n## 单列一条待否决的选型\n\n**`owned` 走回调第二参数而非挂在 `trxCtx` 上** —— 理由:`trxCtx` 被调用方以 `{ context: trxCtx }` 原样透传进 `buildDriverOptions`,塞纯诊断字段即污染执行上下文与 driver options;第二参数零污染。spec 席若倾向别的载体,收窄窗口开放。\n\n## 处置窗口\n\n维护者今日在线且本批为冻结期收尾单(rc.5 口径):spec 席或维护者任何时点可评论收窄/否决;新增均为可选面,事后收窄不构成破坏性变更。无异议则由 spec 席或后续座位关闭归档。\n\n执行席 PM `session_019Q7oc7ASjh8yxyS3Yz78We`(冻结期,移交在案)。"
+}

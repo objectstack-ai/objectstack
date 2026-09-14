@@ -1,0 +1,35 @@
+{
+  "number": 5962,
+  "kind": "pull_request",
+  "title": "fix(drivers,analytics,formula): $ne / $nin / $notContains 在 $not 之外也 NULL-safe (#5298)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T13:03:09Z",
+  "updated_at": "2026-08-06T13:41:25Z",
+  "closed_at": "2026-08-06T13:41:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T13:41:23Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5962",
+  "body": "Fixes objectstack-ai/objectstack#5298\n\n第二棒:实现(第一批)。按 2026-08-06「四项确认落档」评论执行。\n\n## 前提复核\n\n裁决评论与成本清单与 `origin/main` 一致,五个发射点锚点行号逐一实测吻合(`sql-driver.ts` 的 6478 / 6500 / 6514 与 6112 / 6124,`nullValueSatisfiesOperator` 在 1003-1043)。#5234 在飞同文件,零文本重叠。spec 表文件复核无并发改动。\n\n## 改了什么\n\n**方向:包含 NULL 行。** SQL 是三值逻辑,`NULL` 与 `'won'` 比较为 UNKNOWN 而不是 TRUE,`WHERE` 只保留 TRUE;JS 家族用两值求值把这些行都返回。裁定取 JS 家族的答案,与 #5146 对 `$not` 的裁定同向。\n\n- **driver-sql** —— 五个出口改 NULL-safe:主发射器的 `$ne` / `$nin` / `$notContains`,加上易漏的 normalized datetime 旁路 `applyNormalizedComparison`。统一 OR 展开 `(col IS NULL OR …)`,不用方言等价物(成本清单 §2 的三条理由,§3 的执行计划实测)。正向比较逐字符不变;`$ne: null` 仍是 `IS NOT NULL`;`$not` 路径的逐叶守卫按原样保留。\n- **driver-sql** —— `$exists` 非布尔比较值拒收(`INVALID_FILTER` / 400),与 `$null` 闸并排落在 `reduceFilterKey`。⚠️ 按成本清单 §7:发射器的 `opValue === false` 与极性表的 `value === false` **一字未改** —— #5369 正文「收紧为 `value === true`」方向写反了,极性表回答的是「NULL 列是否满足该算子」,而 NULL 列恰在调用方要求 `$exists: false` 时满足它。只更新了注释理由。\n- **service-analytics `read-scope-sql`** —— 同款三个出口。与 driver-sql 同一个 PR 是要害而非顺手:同一条 RLS 规则读侧走这里、写侧走 formula,只对齐一侧得到的正是那个缺陷。\n- **formula** —— `$exists` 从「键存在」改为「有值」,与 `$null` 成严格互补。\n- **spec `FILTER_LOGIC_CASES`** —— fixture 新增可空列 `d`(1-2 有值、3-4 NULL),**11 个 harness 全量接入**;顺带订正模块文档两处事实错误(独立实现由「五个」改为**七个**,补上 turso remote 与 filter-normalizer;原「#5146 一族 every surface answers the same way」漏掉 turso remote)。\n\n## ⚠️ 一处需要维护者裁决:N1 / N4 暂未入表\n\n裁决 ② 要求「先入 N1(`$ne`)/ N4(`$not`)/ N5(`$null`)」并「11 harness 全量接入」,同一句还写明「**门禁不装已知红,不教任何 agent 忽略红**」。接入后实测,这三条约束在**两个明确排除在本批之外**的后端上不可同时满足:\n\n| harness | N1 `$ne` | N4 `$not` | N5 `$null` | blocker |\n|---|---|---|---|---|\n| driver-turso REMOTE | 红 | 红 | 绿 | #5903(⛔ 本单不动) |\n| filter-normalizer(native-sql) | 红 | 绿 | 绿 | 本裁决第二批(⛔ 本单不动) |\n| 其余 9 个 harness | 绿 | 绿 | 绿 | —— |\n\n成本清单 §5 只测了 driver-memory 对 N2/N3 的冲突,没有把「全量接入」与 turso remote / filter-normalizer 的分批连起来测。\n\n**本 PR 采取的保守状态**:fixture 列 `d` 接入全部 11 个 harness(这是昂贵的管道工作,且完全无争议),`$null` 的两条(N5)入表 —— 它们今天在 11 个 harness 上全绿,且正是「fixture 真的存住了 NULL」的对照;N1 / N4 **不入表**,改为写进模块文档的「RULED but not yet enrolled」小节,附实测矩阵与两个 blocker,后续 PR 复制即可入表。\n\n理由是裁决 ② 自己的原则(不装已知红)与这张表**自身写明的协议**(「a red row here does not enforce a ruling ... Add the rows in the PR that closes the gap, not before」)同向。但「是否改为把 filter-normalizer 与 turso remote 并进本批,让三格一次到位」是维护者的取舍,不由本 PR 代拍 —— 见结构化报告的 `open_questions`。\n\n## 反向验证\n\n方向**预先判定**,实测吻合:\n\n1. **新格位在未打补丁基线上 SQL 族应红。** 实测:driver-sql / wasm / turso local / native-sql 全部在 N1 上红,报 `expected [ '2' ] to deeply equal [ '2', '3', '4' ]`;打补丁后全绿(turso remote 与 filter-normalizer 例外,见上表)。\n2. **4 处 #5146 刻意留的「out of scope」对照门 before 绿 after 红 → 翻面后全绿。** `sql-driver-not-null-safe.test.ts` 与 `read-scope-not-null-safe.test.ts` 各两处,翻面并在翻面处写明引用 #5298 裁决而非 #5146 的范围注记。\n3. **额外发现的第 5、6 处对照门**,同族同处置:`sql-driver-out-of-contract-filter-input.test.ts` 的 `'$exists is deliberately NOT tightened here'`(#5347 刻意留给 #5299/#5369 的敞口)与同文件 `$ne` 的一行,以及 `matches-filter-not-null-safe.test.ts` 的 `'known disagreement with driver-memory (NOT ruled on by #5146)'` 块。\n4. **冻结面零行为变化的正向证据**:driver-memory 518 / driver-mongodb 204 全绿,源码零改动。\n\n## 验证\n\n全部前台阻塞执行,共享 flock 串行。\n\n```\nspec              323 files / 8267 tests  passed\ndriver-sql         64 files /  876 tests  passed (4 files / 46 skipped)\ndriver-memory      17 files /  518 tests  passed   ← 冻结面,源码零改动\ndriver-mongodb     10 files /  204 tests  passed   ← 冻结面,源码零改动\ndriver-sqlite-wasm 18 files /  252 tests  passed\ndriver-turso       20 files /  636 tests  passed   ← local + remote 两面\nservice-analytics  58 files / 1061 tests  passed\nformula            16 files /  365 tests  passed\nrest               59 files /  830 tests  passed\ntypecheck          spec / driver-sql / driver-memory / driver-mongodb /\n                   driver-sqlite-wasm / driver-turso / formula  全部 Done\n                   (service-analytics 无 typecheck 脚本)\nspec check:generated   10/10 up to date\ncheck-nul-bytes        OK(另做 0x00-0x1f 自扫,changed files 零命中)\n```\n\n`packages/rest` 首轮 15 红全部是 OpenAPI 路由用例(与 filter 无关,含 503),重建其依赖后 830 全绿 —— AGENTS.md §9 的 stale artefact 陷阱,不是本改动。\n\n## 范围外\n\n- `filter-normalizer`(Cube 面)—— 本裁决第二批,未动。\n- `driver-turso` remote transport —— #5903,未动。\n- `driver-memory` / `driver-mongodb` —— #5499 冻结,未动。\n- `packages/objectql` 的 `having-filter.ts`(#5905,第五求值面)—— 属 engine-core 车道,按分诊座位的交叉链接评论,只需裁决记录,不入本 diff。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WyvqvKMG6asi9aXjKE6xtx)_"
+}

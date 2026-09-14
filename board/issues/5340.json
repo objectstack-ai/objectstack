@@ -1,0 +1,36 @@
+{
+  "number": 5340,
+  "kind": "issue",
+  "title": "gen:docs 内联形状里的长枚举不省略,单个类型单元格可达约 900 字符(BulkActionDef.params 实例)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T23:46:32Z",
+  "updated_at": "2026-08-07T11:33:31Z",
+  "closed_at": "2026-08-07T11:33:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5340",
+  "body": "PM 复核 PR #5339(#4912)时记录的观察类发现,**未认领**,按 PD#10 立案。不是该 PR 造成的缺陷,但被它放大到可见。\n\n## 现象\n\n`formatType` 渲染内联对象时,对已声明键**做**了数量省略(超过 4 个印 `…`),但对单个键的**类型宽度**不做任何约束。当某个键的类型是长枚举时,整段形状会撑爆表格单元格。\n\n实例(#4912 修复后的 `content/docs/references/ui/bulk-action.mdx`,`BulkActionDef.params` 行):\n\n```\n({ name: string; label?: string; help?: string; type: Enum<'text' | 'textarea' | 'email' |\n'url' | 'phone' | 'password' | 'secret' | 'markdown' | 'html' | 'richtext' | 'number' |\n'currency' | 'percent' | 'date' | 'datetime' | 'time' | 'boolean' | 'toggle' | 'select' |\n… 共约 50 个字段类型 … | 'vector'>; … } & Record<string, any>)[]\n```\n\n单个单元格约 900 字符。同一页的 `BulkActionParam.type` 行**已经**完整印过一次这份词表,所以内联位置的这一份是第二份拷贝。\n\n## 定性(为什么不是 #4912 的返工项)\n\n`#4912` 之前该单元格是 `Record<string, any>[]` —— 更短,但**把已声明键整个抹掉**,那是实打实的错误信息。修复后的单元格是**正确但冗长**的。净变化是正向的:作者现在能读到 `name` 与 `type` 是必填(且这两个键就排在最前面)。所以复核判为 ACCEPT,把宽度问题独立记录,而不是让一个正确的修复回退。\n\n长枚举内联本身**早于** #4912(任何带枚举键的内联形状都如此,如 `gallery` 的 `coverFit`),只是那些枚举短,没撑爆。\n\n## 可能的修法(未验证,留给分诊)\n\n- 内联位置的枚举超过 N 个值时印 `Enum<'text' | 'textarea' | … +47>`,并保留指向该 schema 自己那一行/页的完整词表(该页通常已有);\n- 或对内联形状整体设字符预算,超出即退化为 `object`(与嵌套对象保持 opaque 的既有策略同源)。\n\n两种都要逐页确认重生成 diff,与 #4912 同一文件面(`packages/spec/scripts/lib/format-type.ts`),⛔ 不得手改生成的 `.mdx`。\n\n## 相关\n\n#4912 / PR #5339(内联形状恢复声明键)、#5338(同一渲染器的数组括号缺陷,164 处)。三单同文件面,**须串行**,不得同批并行。"
+}

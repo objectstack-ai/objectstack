@@ -1,0 +1,36 @@
+{
+  "number": 5351,
+  "kind": "issue",
+  "title": "ambient 事务句柄跨数据源泄漏:凡在事务中执行的被审计写入,合规审计行全部静默丢失(#5226 的真实根因)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T00:21:34Z",
+  "updated_at": "2026-08-07T08:58:23Z",
+  "closed_at": "2026-08-07T08:58:23Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5351",
+  "body": "从 #5226 的实施中证伪原前提后定位到的**真实缺陷**,严重度高于原单。由 PR #5350 的 dev 实测发现,落点在 engine 车道、超出该单声明文件面,故独立立单。**未认领。**\n\n## 先说 #5226 的前提被证伪了\n\n#5226 断言「`dev --fresh` 上 `sys_audit_log` 表根本没建」。实测(`origin/main` 1792384e8)**不成立**:\n\n```\nAuditPlugin: system tables provisioned — sys_audit_log→telemetry, sys_activity→telemetry,\n                                         sys_comment→com.objectstack.driver.sql\n```\n\n| 文件 | 有 `sys_audit_log`? | 行数 |\n|:--|:--|:--|\n| `dev.db`(主库) | 否 | — |\n| `dev.telemetry.db` | **是** | **50** |\n\n`sys_audit_log` 的 `lifecycle.class: 'audit'` 被 ADR-0057 §3.6 路由到专用 `telemetry` 数据源,`os dev` 默认以兄弟文件提供一个。表建好了,审计也确实在落盘。#4887 记录过这个「在另一个 store 里」的误诊形状。\n\n原单列出的两个待查方向**双双被排除**:AuditPlugin 确实通过 manifest 注册进 schema sync;dev 组合也没有缺任何 service/对象包。\n\n## 真实缺陷\n\n同一次 boot 的完整计数:`sys_audit_log` insert 尝试 **52** 次、成功 **50** 次、失败 **2** 次,且失败的两次堆栈**全部**带 knex 的 `trxClient.query` 帧,成功的没有一次带。\n\n机制:\n\n1. `protocol.saveMetaItem` 在**主数据源**上开启事务;\n2. 事务内写 `sys_metadata` 触发 `afterInsert` 钩子 → 审计写;\n3. `getDriver('sys_audit_log')` **正确**解析到 telemetry 驱动;\n4. 但 `buildDriverOptions`(`packages/objectql/src/engine.ts:1609`)把 `txStore` 里的 ambient 事务句柄**无条件**塞进 driver options —— 那个句柄属于**主库连接**;\n5. knex 的 `.transacting(trx)` 于是把语句发到主库执行,而主库没有这张表 → `no such table: sys_audit_log`。\n\n即 ADR-0067 D2「加入已开启的 ambient 事务」在应用时**没有校验该事务是否属于同一个 driver**。`origin/main` 上该处注释自陈「Explicit wins; ambient is the safety net」—— 漏的正是这张网:\n\n```ts\nconst tx = execCtx?.transaction !== undefined\n  ? execCtx.transaction\n  : this.txStore.getStore()?.transaction;   // ← 不问这个 tx 属于哪个数据源\n```\n\n## 影响面(比 #5226 描述的宽得多)\n\n**不限于元数据写。** 用 `POST /api/v1/batch` + `transaction: true` 写一条普通业务记录 `showcase_category`,同样丢审计行:\n\n```\nAudit write failed {\"object\":\"showcase_category\"}\nAudit write failed {\"object\":\"sys_metadata\"}\nAudit write failed {\"object\":\"sys_metadata_history\"}\n```\n\n**结论:凡是在事务中执行的被审计写入,其合规审计行都会丢失** —— 只要该部署启用了 lifecycle 数据源分流(`os dev` 默认开;生产上设了 `OS_TELEMETRY_DB` 亦然)。业务写本身成功、接口 200、数据在盘上,只有「谁做的」那一行没了,且**无人重试**。\n\n受影响的是**每一个 lifecycle class 为 `audit` / `telemetry` / `event` 的对象**,不止审计。判别式是**数据源分流,不是 plugin 作者身份**;反证:`sys_comment` 没有 lifecycle class、留在主库,从不失败。\n\n## ⚠️ 需要维护者拍板的语义问题(已挂 `needs-user-decision`)\n\n问题:当 ambient 事务内的一次写入解析到**与开启该事务的数据源不同**的数据源时,引擎应当怎么做?今天它静默地把外来事务句柄穿过去、在错误的连接上执行 —— 那就是本缺陷。任何修法都必须选定语义,而这个选择改变的是 ADR-0067 对**所有多数据源部署**的事务契约,不只是审计。\n\n> 以下四选项与推荐由 PR #5350 的 dev 给出。PM 原先在本单写过一版三选项分析,**已被这一版取代** —— 它多出选项 D,并指出 C 在当前 driver 契约下不可交付,比 PM 那版准确。\n\n- **A —— 同源校验后自动提交**:`buildDriverOptions` 仅在解析到的 driver 就是该事务的属主时才穿入 ambient trx(需要 `txStore` 记录属主 driver,对引擎事务核心是一处小增补)。跨数据源写入在事务之外执行。**代价**:外层事务回滚时审计行仍然留下 —— 一条描述「从未发生的写入」的孤儿账目。\n- **B —— 同源校验后拒绝**:跨数据源写入抛具名错误,强制调用方显式选择。**代价**:把今天的静默丢数据换成硬失败,而这些路径在单数据源部署上是好的;每一个被审计的事务写入都会中断,直到逐个调用点更新。\n- **C —— 按数据源开嵌套事务**:在第二个 driver 上开伴随事务,一起提交/回滚。**代价**:需要 driver 并不具备的两阶段提交语义;提交中途失败会让两个存储互相矛盾 —— 用一个新的持久性风险替换当前这个。\n- **D —— 取消分流**:让带 lifecycle class 的对象留在主数据源(dev 里 `OS_TELEMETRY_DB` 默认关)。**代价**:放弃 ADR-0057 §3.6 的增长隔离目标;是掩盖而非修复引擎缺陷,任何把某个对象路由到第二数据源的部署照样会被咬。\n\n**推荐:A,并把孤儿行的后果写进代码 + 修订 ADR。**\n\n*项目长远合理性*:A 在**生产者**处修复 —— 引擎的事务路由,错误假设就住在那里 —— 而不是教审计插件绕开它;消费端的绕行正是 PD#12 禁止的 `??` 回退形态,而且会把其它所有跨数据源写入继续留在坏状态。它也保住了 ADR-0057 §3.6 的增长隔离,而 D 把它丢掉。B 与 C 在原子性上更纯粹,但在当前 driver 契约下都不可交付:C 需要 driver 没有的两阶段提交,B 把静默丢失变成一批今天健康的路径集体启动即失败。对一个**只追加的合规账本**,多记(A 的孤儿行)是正确的失败方向 —— 一条对应已回滚写入的审计行是可对账的麻烦,而一条**已提交写入却缺失的审计行是不可恢复的合规空洞**,那正是今天在发的版本。\n\n*防 AI 写元数据犯错*:A 是唯一让该不变量**结构化且可检查**的选项 —— 引擎拒绝把不属于某 driver 的事务句柄交给它,于是任何插件作者(人或 AI)都无法靠写一个普通钩子重现这个缺陷,也不需要知道数据源分流的存在才能写对。随后必须把孤儿行语义写进 ADR-0067 并按 PD#13 锚定,好让下一个读者知道自己站在哪条裁决上。\n\n由于 A 仍然改变了一条已记录 ADR 的事务语义,需要维护者拍板 + ADR 修订。\n\n## 与其它单的关系\n\n- **#5226**:原单的第二个缺陷(日志级别应为 `error` 而非 `WARN`)已由 **PR #5350** 落地(PM 已把该 PR 的 `Fixes` 改为 `Refs`,不会误关)。原单主缺陷即本单。\n- **#4887**:同形状的「在另一个 store 里」误诊先例。\n- **#4420**:同类「写入落空只留没人读的日志」。\n- ADR-0057 §3.6(lifecycle 分流)、ADR-0067 D2(ambient 事务)。\n\n## 验收建议\n\n- 回归测试:在**主库事务内**写一个被审计对象,断言审计行确实落在 telemetry 数据源上(⛔ 不要断言「没有报错」—— 当前缺陷下不报错的路径也是错的)。\n- 反证测试:`sys_comment`(无 lifecycle class)路径行为不变。\n- 覆盖普通业务对象 + `POST /api/v1/batch` `transaction: true`,不只元数据写。\n\n## 顺带(留给接手 engine 的人)\n\n`os dev` 一次 boot 打印了两次 `Schema sync complete {synced:94, skipped:2, total:96}` —— 对 96 个对象跑了两遍完整同步(`ObjectQLPlugin.start` Phase 1 与 Phase 3)。非用户可见,本单不处理,记在这里只因为它正好在引擎修复要读的那条代码路径上。"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 5956,
+  "kind": "pull_request",
+  "title": "fix(objectql): Archiver 的批循环尊重 #4747 的 teardown abort 位",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T12:55:36Z",
+  "updated_at": "2026-08-06T13:35:06Z",
+  "closed_at": "2026-08-06T13:35:04Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T13:35:04Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5956",
+  "body": "Fixes objectstack-ai/objectstack#5755\n\n## 前提复核(先于实现)\n\n按 issue 的 lead 逐条对 `origin/main`(`a6b3ee7a1`)实读,**前提成立**(行号已漂,按内容定位):\n\n| 检查点 | 分诊记录(`f205c32`) | 本次实读(`a6b3ee7a1`) | 结论 |\n|---|---|---|---|\n| `sweep()` 对象之间 | :571 / :598 | `:571` `if (this.stopped) return report;`、`:598` 同款 | 在 |\n| `batchedReap` 每页之间 | :1202(PR #5753) | `:1202` `if (this.abort.aborted) break;` | 在 |\n| `archiveObject` 批之间 | :1047–1056 确无 | `:1047` 的 `for` 批循环(上界 `ARCHIVE_MAX_BATCHES_PER_SWEEP`)循环体直接以 `await hot.find(...)` 开头 | **确无** |\n\n一轮 archive 的量级也与正文一致:20 批 × 500 行,每批 = 1 次 `hot.find` + 每行 1 次 `cold.upsert` + 1 次 `hot.bulkDelete`,即最多约一万次**跨两个 datasource** 的读写。stop() 落在其中任何一点,循环都会把剩余批次跑完 —— 这正是 #4747 停掉的形状,reap 那侧已由 #5753 补上,archive 这侧没有。\n\n## 改动\n\n`archiveObject()` 批循环体开头一行,与 `:1202` 同款:\n\n```ts\nif (this.abort.aborted) break;\n```\n\n外加一段注释,写清两件事:为什么 `sweep()` 的对象间检查不够(一轮 archive 是 20 页跨两个 datasource 的读写),以及**为什么按批 break 不破坏 archive 的安全规则**「归档成功才热删」—— 在飞的那一批会把 `upsert` → `bulkDelete` 这一对做完,未开始的批次原样留在热库,交给下一轮 sweep 重新读。没有重构循环本身。\n\n⛔ 同文件的 #5756(reap 每轮预算按「(对象, where 作用域)」计)是语义取舍、分诊持有中,本 PR **未触碰**。\n\n## 测试(`packages/objectql/src/lifecycle/lifecycle-service.test.ts`)\n\n驱动真 `LifecycleService` + 计数 stub 冷热双 driver(每一条腿都记账:页读、逐行拷贝、热删),加在 `teardown (#4747)` describe 里,与 `stop() mid-reap` 那条并列:\n\n1. **对照** —— `an archive nobody calls off runs its whole 20-batch budget`:不抬 abort 位时页读 20 次、拷贝 10 000 行、热删 20 批,余下 500 行留给下一轮。\n2. **主用例** —— `stop() mid-archive ends the batch loop instead of running out the page budget`:在第 2 批的第一行 `cold.upsert` 处抬起 abort 位,断言\n   - 页读只有 2 次(第 3–20 批**一次 `hot.find` 都没发**);\n   - 拷贝恰好 1000 行,热删 `[500, 500]`;\n   - **成对不变量**:`hotDeleted.flat()` 逐项等于 `copied` —— 冷库收下的每个 id 都被热删,且没有任何未被冷库收下的 id 被热删,**两个方向都没有半批**;\n   - 余下 9500 行仍在热库,等下一轮。\n\n`archive.keep` 有意未在该 fixture 上声明:冷侧 prune 是循环**之后**的单次调用,本 PR 不改那条腿,fixture 也就不去断言它。\n\n### 反向验证(方向先预测,后运行)\n\n预测:**标准红** —— 去掉新检查后主用例转红,对照用例保持绿(它从不抬 abort 位,本就无法区分两个版本,这正是它作为对照而非第二个 pin 的原因)。\n\n实跑与预测一致:\n\n```\n✓ ... > an archive nobody calls off runs its whole 20-batch budget 22ms\n× ... > stop() mid-archive ends the batch loop instead of running out the page budget 29ms\n  → expected [ 500, 500, 500, 500, 500, 500, …(14) ] to have a length of 2 but got 20\n Test Files  1 failed (1)\n```\n\n恢复该行后 72/72 全绿。\n\n## 验证\n\n```\npnpm --filter @objectstack/objectql typecheck   → tsc --noEmit,无输出(通过)\npnpm --filter @objectstack/objectql test        → Test Files 128 passed | Tests 2118 passed\nnode scripts/check-nul-bytes.mjs                → OK(5723 个文件,无裸控制字节)\nnode scripts/check-engine-double-contract.mjs   → OK — 70 pinned, 133 DEBT, 2 exempt\neslint(两个改动文件)                            → 无输出\n```\n\n上述数字取自 `git merge origin/main`(⛔ 未 rebase)之后的重跑 —— 合入的 `metadata-protocol/protocol.ts` 与 `objectql/protocol-meta.test.ts` 与本改动包重叠,故按 AGENTS §9/§10 重建依赖后整包重跑。\n\n新测试**未引入新的 fake engine**:复用文件内既有的 `captureEngine`;新增的冷热 stub 是 **driver** 替身(`find`/`upsert`/`bulkDelete`/`deleteMany`),不含引擎 `delete`/`update` 派发面,`check:engine-double-contract` 复跑仍为 OK。\n\n## 影响面\n\n今天不可达:archive 策略要求已配置 cold datasource,仓内无平台对象声明 `archive`,未配置时直接 `skipped: 'archive-pending'`。这是为**首个声明 `archive` 的部署**做的预防,changeset 按 `@objectstack/objectql` patch 记。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_019Q7oc7ASjh8yxyS3Yz78We"
+}

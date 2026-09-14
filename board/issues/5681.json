@@ -1,0 +1,36 @@
+{
+  "number": 5681,
+  "kind": "issue",
+  "title": "lint.yml 的控制字节集合仍是散文手抄:#5646 锁住了字符类字符串,散文枚举还剩一处未走 cite-the-header",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T23:58:09Z",
+  "updated_at": "2026-08-07T05:13:26Z",
+  "closed_at": "2026-08-07T05:13:26Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5681",
+  "body": "发现于 #5646(PR #5680)的实施,做全仓引用面盘点时测到。按 Prime Directive #10 单独记录,**未**在那个 PR 里扩大范围 —— #5646 的边界写明「断言目标是字符类字符串,不是散文措辞」。\n\n## 事实\n\n同一批扫描字节今天有两类写法,#5646 之后处置不同:\n\n| 形态 | 位置 | #5646 之后 |\n|:--|:--|:--|\n| 可粘贴的 PCRE 字符类 | `.claude/agents/os-dev.md:311`(自扫命令行)、`scripts/check-nul-bytes.mjs:9`(脚本头「Equivalently」行) | **已锁**:`--self-test` 断言与 `IS_SCANNED` 表派生结果逐字节相等,漂移即红 |\n| 散文枚举同一批字节 | `scripts/check-nul-bytes.mjs:6`、`.github/workflows/lint.yml:98`(「Raw control-byte guard」步骤注释) | **未锁**,仍是人肉同步 |\n\n`.github/workflows/lint.yml:98` 起的注释把集合逐段念了一遍(0x00 起的那一串、以及末尾单独一枚 DEL),并复述了两条危害论证。#5579 已经把 `os-dev.md` 的危害论证改成「cite the gate script's header, don't re-derive it」,lint.yml 这处是同一族里**最后一处仍在复述**的地方。\n\n## 为什么是 observation-class 而不是缺陷\n\n- 这段是 YAML 注释,步骤本身只跑 `pnpm check:nul-bytes`,**没有任何行为依赖它**;写错了不会假绿也不会假红。\n- 今天实测**没有漂**:注释里的集合与脚本一致(#5460 手工同步过一轮)。\n- 危害是下一次扩面时的**读者误导**:CI 步骤注释是很多人排查门禁失败时第一眼看的东西,而它是唯一一处既不被断言覆盖、又长得像权威声明的集合陈述。#5461 自己就承认过「语义变化写在脚本头、报错文案和 CI 步骤三处」;#5484 提的根治方向明确包含「让指令**与 CI 注释**引用它而不是各抄一份」,而 #5484 已按一行修法关闭(#5577),CI 注释这一半没做。\n\n所以没有用户今天会撞到,严重度交分诊定 —— 按 #4949 的口径原样上报,不自行压。\n\n## 可能的修法(未实施,一行到几行)\n\n把 lint.yml 那段注释里的**字节枚举与危害复述**换成一句指向 `scripts/check-nul-bytes.mjs` 头部的引用(#5579 对 `os-dev.md` 的做法),保留步骤名与「作者应写转义而不是字节」这句 actionable 结论。这样这一族里就只剩两处**可粘贴的**字符类,而它们已被 #5646 的断言锁住。\n\n需要留意的取舍:CI 注释的读者常常只在网页上看 workflow 文件,不会跳去读脚本;`os-dev.md` 那次能改成纯引用是因为 agent 本来就会去读脚本。所以「引用 + 一句话摘要」可能比「纯引用」更合适 —— 具体口径值得在实施时定,不宜在本条里预设。\n\n## 关联\n\n#5646 / PR #5680(锁住字符类字符串的那一单,本条的发现处)、#5579(cite-the-header 口径的确立)、#5484(根治方向的留档处,已关闭)、#5157 / #5460 / #5461(扫描面演进与三处手抄的自陈)。\n"
+}

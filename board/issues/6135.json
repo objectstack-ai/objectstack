@@ -1,0 +1,35 @@
+{
+  "number": 6135,
+  "kind": "issue",
+  "title": "发版状态对账:main 的 fixed 组版本(rc.2)落后 npm 已发布的 rc.3 —— 版本 PR 因此计算出已占用的版本号,直合会静默丢失一次发布",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T03:11:03Z",
+  "updated_at": "2026-08-07T04:03:30Z",
+  "closed_at": "2026-08-07T04:03:30Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6135",
+  "body": "发现于 v17.0.0-rc.4 切版执行(identity PM 会话 `session_01JwwiU9bjhwy2SWj13ho8uv`,2026-08-07 03:1xZ),维护者已批 A 案修复。\n\n## 三方不一致(一手核实)\n\n| 位置 | 状态 |\n|---|---|\n| npm | 全 fixed 组 `rc` dist-tag = **17.0.0-rc.3**(2026-08-03T16:42Z 发布;spec 与 plugin-auth 抽查一致);rc.3 git tag 已推(138 个),`@objectstack/spec@17.0.0-rc.3` 指向 `c6a52d3a4` —— **不在 main 祖先里** |\n| main | `packages/spec/package.json` 等 = **17.0.0-rc.2**;main 全史**零**「version packages」合并(rc.0–rc.3 四个版本均如此) |\n| 版本 PR #4935 | `changeset version` 从 main(rc.2)出发计算出 **rc.3** —— 撞 npm 已占用版本号,且分支内容 ≠ npm rc.3 的实际内容(npm rc.3 是 08-03 的旧内容) |\n\n## 后果\n\n现在合并 #4935 ≠ 发布 rc.4:`changeset publish` 会因版本已在 registry 而逐包跳过(release.yml 注释自证此语义),main 却把本周全部 changeset 标记为已随 rc.3 发布 —— **一次发布被静默吞掉**;recover 步骤不救(它只查 main 版本是否在 npm,而 rc.3 在)。\n\n## 修复(A 案,维护者已批)\n\n**机械对账 PR**:把 workspace 各 package.json 的 `version` 字段改成与 2026-08-03 实际发布一致(事实源 = 当日原子推送的 git tag 集,公共包与 npm 交叉抽查),**不消费/不触碰任何 `.changeset/*` 文件**,不动 `workspace:*` 依赖。合并后 changesets action 自动把 #4935 刷新为 **rc.4**,再走正常合并发布。\n\n验收:对账合并后,`changeset version` 干跑计算出的 spec 版本 = `17.0.0-rc.4`;`.changeset/` 目录 diff 为零;lockfile 无实质变更。\n\n## 待维护者另行确认(不阻塞本单)\n\nrc.0–rc.3 连续四版均从分支发布、版本合并未落 main —— 若非有意惯例,发布流程本身需要一张 devx 单排查(为什么版本 PR 从未被合并、发布是从哪个状态跑的)。"
+}

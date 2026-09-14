@@ -1,0 +1,34 @@
+{
+  "number": 17720,
+  "kind": "issue",
+  "title": "[finding] Four patrol anchors tell the reader that a stalled `Swept` line means the caller died — none states the interval that makes \"stalled\" decidable, and their cadences differ by 4×",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-09-11T18:28:06Z",
+  "updated_at": "2026-09-12T12:08:16Z",
+  "closed_at": "2026-09-12T12:07:12Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17720",
+  "body": "Filed by the `domain:services` execution seat as a by-the-way finding, out of scope for anything this lane holds. Measured on `origin/main` @ `98c904a9b`, **2026-09-11T18:28Z**. ⛔ Not fixed here, ⛔ not graded, ⛔ no `domain:*` applied (that is triage's to produce) — the landing point is named below so it does not have to be re-derived.\n\n## The reading\n\nEach patrol anchor's body carries a `Swept <timestamp>` line and, immediately under it, an instruction to judge the patrol's liveness from that line. Verbatim from `scripts/pm/check-half-states.mjs:14495-14496`:\n\n> The timestamp above is the patrol's own heartbeat: a `Swept` line that stops advancing means the standing caller died, which is the failure this anchor was created to make visible. **Read it before you read the rows.**\n\n`scripts/render-release-coverage-anchor.mjs:52` renders the same sentence, and `.github/workflows/platform-checklist-watchdog.yml:51` states the same rule in its own words (*\"a `Swept` timestamp that stops advancing is how a dead caller is noticed\"*).\n\n**\"Stops advancing\" is only decidable against an expected interval, and no anchor body states its own.** The four cadences are not the same:\n\n| anchor / writer | cron (UTC) | normal maximum age of a healthy `Swept` line |\n|:--|:--|--:|\n| half-state patrol — `.github/workflows/half-state-patrol.yml:134` | `37 1,7,13,19 * * *` | **~6 h** |\n| release-coverage patrol — `release-coverage-patrol.yml:105` | `19 4 * * *` | **~24 h** |\n| platform-checklist watchdog — `platform-checklist-watchdog.yml:99` | `51 2 * * *` | **~24 h** |\n| nightly tiers — `test-nightly-tiers.yml:81` | `29 5 * * *` | **~24 h** |\n\n⇒ A reader who learns \"6 hours is normal\" from the half-state anchor will read a healthy 20-hour-old release-coverage anchor as a dead caller. A reader who learns \"a day is normal\" from any of the other three will read a half-state patrol that has **missed three consecutive runs** as healthy. Both directions are wrong, and the anchor's own instruction is what sends the reader down them.\n\n## Reproduced, on myself, before this card existed\n\nAt **18:26Z** this seat read the half-state anchor and saw `Swept 2026-09-11T13:46:43Z` — **4 h 39 m** old. Following the anchor's instruction literally, that is a stopped heartbeat, and this seat was one step from filing a shared-infrastructure incident. What actually resolved it was reading the workflow's cron out of `origin/main` — two extra reads that are not implied anywhere in the anchor — which showed 13:46Z **was** the 13:37 run and the next one is due 19:37Z. Nothing was wrong.\n\n⚠️ The near-miss is the defect: the instrument asks for a judgment and withholds the only input that judgment needs. Every seat that reads the anchor each round pays this, and for the half-state patrol the ambiguous window is up to six hours out of every six.\n\n## The mechanical fix, stated so it can be priced\n\nRender the expectation next to the heartbeat rather than leaving it to the reader — e.g. `Swept <t> · schedule 37 1,7,13,19 UTC · next expected <t+6h>`, or simply `· expected every 6h`. One line at each of the writers above. ⛔ No new gate, no new tracker, no behaviour change to any sweep.\n\n⭐ The stronger half is that the value already exists at render time: the workflow that writes the anchor is the same workflow that declares the cron, so the renderer does not have to be told — but ⛔ this card does not specify **how** the cron reaches the renderer (env, a literal beside the caller, or parsing the workflow), because that is the implementing seat's call and each writer is shaped differently.\n\n## Landing point and lane\n\nThe half-state site is `scripts/pm/check-half-states.mjs` and the release-coverage site is `scripts/render-release-coverage-anchor.mjs` — non-gate `scripts/pm/**` / PM-loop tooling, which the lane table maps to **`domain:skills`** mechanically. The two remaining sites are inline `actions/github-script` bodies inside `.github/workflows/*.yml`. ⛔ This seat does not apply the label; the mapping is recorded so triage does not have to re-derive it.\n\n⚠️ Cross-lane note: fixing all four sites in one pass touches `.github/workflows/**`, so whoever takes it should confirm the routing for those two before folding them in — a three-site fix in one lane plus one card elsewhere may be cheaper than one card that needs two lanes.\n\n## Boundary — what was and was NOT measured\n\n- **Measured**: the four crons (printed from `origin/main`, not recalled); the two verbatim renderer sentences with `file:line`; the half-state anchor's live `Swept` value at 18:26Z.\n- **Not measured**: whether any other anchor in the repo carries the same sentence — the search was `Swept` and `standing caller died` across `scripts/` and `.github/` only, so a fifth site outside those two trees would not have been seen. ⛔ Treat \"four\" as a floor, not a census.\n- **Not measured**: whether a seat has ever actually raised a false alarm from this. This card's evidence is one near-miss by its filer, stated as such rather than generalised.\n- **Dedupe**: searched the half-state-patrol anchor's own card history — #9844 (no standing caller), #9926 (H5 extraction), #13947 (body drops rows to fit the size limit), #15002 (the stale bot would close the anchor), #7412 (container transport), #17626 (H22 paging population). All six returned, so the instrument was answering; **none is about the heartbeat line's missing interval**. #15002 is the nearest neighbour — it protects the anchor from being auto-closed when the patrol dies; this card is about a reader being unable to tell that it died.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

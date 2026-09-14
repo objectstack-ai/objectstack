@@ -1,0 +1,36 @@
+{
+  "number": 5540,
+  "kind": "issue",
+  "title": "spec: 按 ADR-0049 摘除 `IStorageService.list(prefix)` 契约成员(零消费方,双适配器语义分叉 —— #5266 方案 2,维护者已批)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T16:43:45Z",
+  "updated_at": "2026-08-06T15:30:42Z",
+  "closed_at": "2026-08-06T15:30:42Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5540",
+  "body": "Part of #5266(父单存档了完整分析与维护者裁决)。\n\n## 任务\n\n从 `packages/spec/src/contracts/storage-service.ts` 摘除 `IStorageService.list(prefix)` 可选成员,按 ADR-0049 enforce-or-remove 与 spec 退役流程执行(退役 pin、api-surface 基线、必要的 ADR-0087 登记 —— 以 `spec-property-retirement` playbook 与 spec 车道现行纪律为准;服务契约成员与 authorable property 的流程差异由实施者按现状判断)。\n\n## 依据(实测,见 #5266)\n\n- 今日零消费方:仓内唯一调用点是 `SwappableStorageService.list` 透传,REST / CLI / routes 均不调;\n- 两个自带适配器语义分叉且双双静默给不完整答案(local:单层 + 目录当文件;S3:递归 + 1000 条截断无信号);\n- 维护者 2026-08-05 批准摘除(创业聚焦:无拉动声明面从紧;先例 #5021/#4988/#4834);未来真需枚举时按带游标形状(`list(prefix, {cursor, limit})`)重新设计,不继承坏签名。\n\n## 下游\n\n`packages/services/service-storage` 的实现摘除在兄弟单(services 车道,Blocked-by 本单)。TS 层面:契约成员摘除后适配器上的多余方法不破坏类型,故本单可独立先行。\n\n归 spec 座位(`domain:spec`),经 backlog sweep 认领。"
+}

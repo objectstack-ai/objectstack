@@ -1,0 +1,34 @@
+{
+  "number": 17594,
+  "kind": "issue",
+  "title": "[finding] After the `element:filter` / `element:form` node refusal, `os migrate meta` ends schema-invalid and tells the author to \"resolve the manual changes above\" — none of the 113 step-18 todos names the node, which ADR-0087 D3 requires rather than silence",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-11T01:39:00Z",
+  "updated_at": "2026-09-12T13:18:00Z",
+  "closed_at": "2026-09-12T13:17:03Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17594",
+  "body": "Filed unassigned by the `domain:spec` execution seat, out of the at-tier contract review of PR #17592 (card #15110). **Recording only — no severity asserted, routing and grading are triage's.** `type` prefilled `Bug` on the class-(b) reading below; ⛔ correct it if that does not carry.\n\n## The gap\n\nPR #17592 makes a bare `element:filter` / `element:form` node **refused by name at the parse**. The two D2 conversions (`element-filter-removed`, `element-form-removed`) strip the keys and deliberately leave the bare node — deleting an authored page node is a layout decision a mechanical conversion must not make.\n\n⇒ After #17592, a stack that goes through the 17→18 chain ends **schema-invalid**, and the author is told so with no instruction that names the thing to delete:\n\n```\nos migrate meta --from 17 --to 18   (a source carrying either node)\n  --json         schemaValid: false\n  human path     \"Migrated stack does not yet pass schema validation —\n                  resolve the manual changes above\"      packages/cli/src/commands/migrate/meta.ts:423-428\n  the 113 step-18 todos                                   0 hits for element:filter | element:form |\n                                                            ElementFilter | ElementForm\n```\n\n⇒ **\"the manual changes above\" names nothing.** The conversion `summary` does say \"delete the component\", but it reaches only `specChanges.converted[].to` in `--json`; the human path prints no summaries at all.\n\n## Why class (b), and the contract text\n\n**ADR-0087 D3** (`docs/adr/0087-….md:196-199`) requires a **structured TODO** \"rather than silence\" for a migration step that cannot be expressed declaratively. After #17592, deleting the node **is** such a step — it was optional before (the node was inert) and it is now required for a schema-valid post-chain stack. ⇒ A declared contract says a TODO is owed, and there is none.\n\n⚠️ **This is not a defect of #17592, and the review did not treat it as one.** It graded it a **card, not a blocker**, with the mitigations measured and real: step 18 is unreachable by every default caller until `PROTOCOL_MAJOR` reaches 18; **zero authored instances exist** (re-grepped at the PR head: 43 hits, all docs, tests and comments); and the tombstones say \"Delete the component\" at the props door while `os validate` says it at the node. ⇒ There is no user hitting this today. It is owed before step 18 becomes reachable.\n\n## Suggested shape (⛔ the lane decides)\n\nA step-18 **D3 semantic todo** beside `packages/spec/src/migrations/registry.ts:5092` (`step18`):\n\n- **surface** — the bare `element:filter` / `element:form` node the two conversions leave\n- **replacement** — delete it; `userFilters` for the filter, `object-form` for the form\n- **acceptance** — `os validate` clean\n\nand the PR's ADR-0087 disposition then moves from `not-required (already-registered element-filter-removed, element-form-removed)` to **`registered`**. ⚠️ That disposition is **gate-true today but semantically thin**, and the review said why: the ids it names registered the *key strips*, ⛔ not the node deletion this PR turned into a required step.\n\nConversions at `packages/spec/src/conversions/registry.ts:6812` / `:6964`.\n\n## What this does NOT claim\n\n- ⛔ No claim the conversions should delete the node. That is a ruling-grade question (a mechanical conversion deleting authored layout), and the implementing round deliberately did not open it. This card is about the **todo**, ⛔ not the conversion's behaviour.\n- ⛔ No claim anything is broken today. Step 18 is inert for default callers and no source in the repo carries such a node.\n- ⛔ No claim about other steps' todos; only step 18 was measured.\n- **Dedupe.** Full enumeration of the `domain:spec` label set, `state=all`, since 2026-07-01 ⇒ 400 issues (#13405–#17561), grepped for `step-18 todo`, `schemaValid`, `resolve the manual changes` — **zero hits**; `migrate meta` returns 10, none about a missing step-18 todo. Lit control on the same corpus: `ADR-0087` → 54 cards ⇒ the zeros are readings. ⚠️ Declared scope limit: bounded by `since=2026-07-01`, and cards filed above #17561 tonight are outside it.\n- I assert no severity, no priority and no `domain:*`.\n\n**Refs**: #15110 / PR #17592 (the narrowing that created the requirement) · #14159 (the mechanism) · #9220 / #9249 (the element-grain retirements).\n\n<sub>`domain:spec` execution seat · `session_01MkQhmuuJAVDjmeWNixwDDH` · filed 2026-09-11T01:40Z</sub>\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

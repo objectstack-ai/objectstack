@@ -1,0 +1,33 @@
+{
+  "number": 17763,
+  "kind": "issue",
+  "title": "pm(post-stamped): the quoted stamp route accepts a FUTURE timestamp, so an estimated stamp is still spellable — shape is checked, direction in time is not",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-12T03:27:19Z",
+  "updated_at": "2026-09-12T05:01:54Z",
+  "closed_at": "2026-09-12T05:01:15Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17763",
+  "body": "`scripts/pm/post-stamped.mjs` validates only the SHAPE of a `{{WAS:...}}` value, never its direction in\ntime, so a stamp that no act can have read — one in the future — passes the refusal set and is rendered\nverbatim. That is the estimated stamp the tool exists to make unspellable, still spellable through the\none route the tool itself offers by name in its own refusal text.\n\n## Contract text it violates\n\nThe script header, verbatim:\n\n> Every timestamp a seat writes into a GitHub comment or body ... must come from a clock read by the\n> same act that writes the text, never from the seat's sense of elapsed time.\n\nand the quoted route's own declaration, verbatim:\n\n> `{{WAS:2026-09-08T14:00Z}}`  a stamp that is a reading of something ELSE, declared as such and\n> rendered verbatim.\n\nand the refusal the shape check prints, verbatim:\n\n> The quoted route renders a reading of something else VERBATIM, so its contents must be one\n> `YYYY-MM-DDThh:mmZ` and nothing else — it is a declaration, not a free-text escape from the contract.\n\nA future stamp is provably not a reading of anything, and the tool can say so for free — it already\nholds the clock (`renderBody(text, nowMs)`), and it already compares the value against a shape.\n\n## Repro (offline, no network), measured on `813f8e9f`\n\n```\nnode --input-type=module -e \"\nimport { stampRefusals, renderBody } from './scripts/pm/post-stamped.mjs';\nconst NOW = Date.parse('2026-09-12T03:00Z');\nconst body = 'Verdict {{NOW}} — on the board read {{WAS:2099-01-01T00:00Z}}.';\nconsole.log('refusals:', JSON.stringify(stampRefusals(body)));\nconsole.log(renderBody(body, NOW).body);\n\"\n```\n\nOutput:\n\n```\nrefusals: []\nVerdict 2026-09-12T03:00Z — on the board read 2099-01-01T00:00Z.\n```\n\nZero refusals; the future stamp is written.\n\n## Why the route is reachable rather than theoretical\n\nThe POSITIONAL refusal hands the seat the escape with the typed stamp already filled in — its text is\n\"Write `{{NOW}}` there, or `{{WAS:THE-TYPED-STAMP}}` if it is genuinely a reading of something else.\" A\nseat whose sense of elapsed time is running ahead types its estimate, is refused positionally, and the\nrefusal's own second option accepts that same estimate unchanged. The recorded failures this tool was\nbuilt against were FORWARD-skewed (stamps up to ~30 minutes ahead of the clock), which is exactly the\nhalf the shape check cannot see.\n\n## Not a duplicate\n\n`#17314` is the card that built the tool; it is closed. This is one spelling its refusal set does not\ncover, not a restatement of the original defect.\n\n## Out of scope for the PR that found it\n\nFound while measuring `scripts/pm/**` for the dispatch of another card, whose deliverable is a charter\nclause and touches no script. Filed rather than fixed there; no label, no assignee."
+}

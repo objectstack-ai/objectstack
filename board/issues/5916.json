@@ -1,0 +1,37 @@
+{
+  "number": 5916,
+  "kind": "issue",
+  "title": "check-single-authz-resolver 的扫描语料没有下限断言:根解析成功但一个文件都没扫到仍然绿(observation)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T11:34:10Z",
+  "updated_at": "2026-08-07T00:53:07Z",
+  "closed_at": "2026-08-07T00:53:07Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5916",
+  "body": "## 模式\n\n与 #4932 完全同族,第三个门禁。实现 #4932 时顺手核到的,不在那一单的文件面内,单独记账。\n\n`scripts/check-single-authz-resolver.mjs` 已经补过 #4916 那一半 —— 每个 `SCAN_ROOTS` 先解析,死根按名报错:\n\n```js\nfunction collectScanFiles(root = ROOT, roots = SCAN_ROOTS) {\n  assertRootsResolvable(root, roots);\n  const out = [];\n  for (const rel of roots) walk(join(root, rel), out);\n  return out;   // <- 长度从不断言\n}\n```\n\n缺的是另一半:**根解析成功、但走完一个文件都没收到**,`out` 为空 → 检查 (1) 遍历空集合 → 零 error → 绿。目录还在、可读,`assertRootsResolvable` 满意;语料搬走了(子树迁出 `packages/`、扩展名换了、walk 的过滤条件收窄)这件事没有任何断言看得见。\n\n## 它自己的模块头已经把问题写出来了\n\n`scripts/check-single-authz-resolver.mjs:23-36` 那段:\n\n> `walk()` used to open with … the scan cannot tell you it never ran; only its (unprinted) file count could, and nobody reads a count that is not printed.\n\n那一段接着说,`packages/` 整体改名今天之所以会被下游抓到,是因为两个 DELEGATOR 恰好也在同一个根下,并明说这是「luck, not coverage」。补一条扫描数下限就把这份运气换成机制。\n\n## 为什么是 observation,不是当前缺陷\n\n`SCAN_ROOTS = ['packages']`,今天有数千个 `.ts`,实测扫描数远大于零 —— 记录的是**可蒸发性**,不是已蒸发,和 #4932 正文的定性一致。\n\n## 修法(与 #4932 落地的形状一致)\n\n`collectScanFiles` 里按根统计:任一声明的根产出 0 个文件即抛错、按名报红。参 PR(#4932)给 `scripts/check-doc-authoring.mjs` 的 `EmptyRootError` —— 下限取「每个声明的根至少 1 个文件」,由本次 walk 现算,不引入需要维护的高水位棘轮;并在 self-test 里钉红/绿两个方向(单根为空 → 红且只点名该根;全空 → 红且报总数 0;恢复 → 绿)。\n\n## 相关\n\n- #4932 —— 同族,check-doc-authoring 与 check-driver-conformance 两处已修。\n- #4916 / #4930 —— 死根按名报错的两次落地,是本条缺的那一半的另一半。\n- #4690 —— 「提取失败必须红」的出处。\n"
+}

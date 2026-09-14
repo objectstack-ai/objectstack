@@ -1,0 +1,36 @@
+{
+  "number": 5613,
+  "kind": "issue",
+  "title": "[runtime] action body 的 `ctx.session` 仍在生产 `roles`(值是 `ec.positions`)—— 自称「mirroring hook ctx.session」,而 hook 侧该键已按 ADR-0049 退役",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T20:25:57Z",
+  "updated_at": "2026-08-06T15:06:16Z",
+  "closed_at": "2026-08-06T15:06:16Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5613",
+  "body": "## 事实\n\n`packages/runtime/src/action-execution.ts` 的 `buildActionSession()`(第 689-695 行)构造 action body 的 `ctx.session`:\n\n```ts\nreturn {\n    ...(ec.userId != null ? { userId: String(ec.userId) } : {}),\n    ...(ec.tenantId != null ? { organizationId: String(ec.tenantId) } : {}),\n    ...(Array.isArray(ec.positions) && ec.positions.length ? { roles: ec.positions } : {}),\n};\n```\n\n它的文档注释原话是:*\"Build the action-body `ctx.session` from the request ExecutionContext, **mirroring the hook `ctx.session` shape** (#3280) so an action author reads the caller's active org under the SAME blessed name as a hook author.\"*\n\n调用点两处:`packages/runtime/src/domains/actions.ts:296` 与 `packages/runtime/src/action-execution.ts:920`。\n\n## 三个问题叠在一起\n\n1. **它把 ADR-0090 D3 明令禁止的拼法重新引入了。** 值取自 `ec.positions` —— `ExecutionContext` 已经在 ADR-0090 D3 把 `roles` 改名为 `positions`(`packages/spec/src/kernel/execution-context.zod.ts:118`,注释原话 \"Formerly `roles`\"),这里等于在边界上又把 `positions` 翻译回 `roles` 交给作者。ADR-0090 D3 禁的正是这个拼法;#4839 删掉 plugin-approvals 两处 `roles.includes('admin')` 时,理由也正是「不要第二套权限方言」。\n\n2. **「mirroring hook ctx.session」这句注释现在是错的,而且是危险方向的错。** #5050 已按 ADR-0049 把 `HookContext.session.roles` 退役(墓碑 + 语义迁移)。所以现在两张面对同一个键名给出两种现实:hook 侧 —— 键已退役、写它会 tsc 报错 + parse 拒收;action 侧 —— 键还在,而且**真的有值**。同一个平台里同名同位的字段,一个作者在 hook 里读到 `undefined`(以前)/ 报错(现在),在 action 里读到一串 position 名。\n\n3. **没有任何 schema 声明 action ctx。** `actionContext` 是裸 `any`(两处调用点都是 `const actionContext: any = {...}`),沙箱侧 `ScriptContext.session?: unknown`(`packages/runtime/src/sandbox/script-runner.ts:71`)。所以这个键既没有契约、没有文档表、也没有闸门 —— 它只存在于运行时对象里,是 declared-nowhere / produced-anyway,连 liveness 台账都够不着它。\n\n## 需要裁定(不要直接猜)\n\n三条路,选哪条影响 action body 的公开契约:\n\n- **A. 改名为 `positions`,值不变。** 与 `ExecutionContext` / sharing service / ADR-0090 D3 词汇统一,一处方言消失。代价:**breaking** —— 现存 action body 里 `ctx.session.roles` 的读会静默变 `undefined`(裸 `any`,没有任何东西会报错),所以必须配 ADR-0087 语义迁移 + changeset;而且因为没有 schema,连墓碑都无处可挂,处方只能落在 changeset 和文档上。\n- **B. 直接删。** 如果结论是「action body 本就不该拿到任职信息、要判权限就走 security service」,那就删掉这条 spread。同样 breaking、同样静默。\n- **C. 先给 action ctx 立 schema(声明 = 强制),再在其上做 A 或 B。** 最贵,但这是唯一能让下一次同类漂移**被闸门看见**的路 —— 现状之所以能长这么久,正是因为 action ctx 完全在契约之外。\n\n我倾向 **C 的骨架 + A 的语义**(先声明 action 上下文契约,同时把键正名为 `positions`),理由是两条轴都指向它:长期看,一个每天被客户 action body 读、却没有任何 schema 的运行时上下文,就是下一个 #5050 的温床;而「让 AI 写的元数据/代码难写错」这条更直接 —— 现在一个模型作者在 hook 里被硬拒、在 action 里被放行,它学到的是「`roles` 有时候能用」,这正是最坏的一课。但这是**公开契约 + 安全词汇**的双重决定,按 AGENTS.md Prime Directive #12 / #13 应由维护者裁定,故只登记不实现。\n\n## 与其他单的关系\n\n- 发现于 #5050(退役 `HookContext.session.roles`)的消费半径扫描。**#5050 不受影响、也不被本单证伪**:action 的 `ctx.session` 是另一个对象,永远不会变成 HookContext,没有任何 schema 读它。#5050 的墓碑注释、changeset、语义迁移条目里都已显式点名这个邻居,免得后人拿它来「推翻」hook 侧的零生产方结论(#4865 的教训)。\n- 同批发现的另两单:#5605(`HookContext.session` 少声明 `positions` / `preserveAudit`)、#5606(生成的 reference 把墓碑渲染成 `any`)。\n\n按 Prime Directive #10 登记,不在 #5050 的 PR 内修。\n\nBlocked-by: #5779"
+}

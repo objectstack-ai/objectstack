@@ -1,0 +1,34 @@
+{
+  "number": 5835,
+  "kind": "issue",
+  "title": "`form-data` 与 `undici` 两条 OSV override 失去唯一消费者,现在空转 —— 保留还是退役需一次裁决",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T07:30:58Z",
+  "updated_at": "2026-08-06T15:40:29Z",
+  "closed_at": "2026-08-06T15:40:26Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5835",
+  "body": "观察类 finding,#5825 退役 `packages/vscode-objectstack` 时发现(PR #5834)。**今天没有任何用户/CI 面受影响**,门禁全绿,故不带 `pm:queue`,交 PM triage 定级。\n\n## 事实\n\n`pnpm-workspace.yaml` 的 `overrides` 里这两条:\n\n```yaml\n'form-data@<4.0.6': '>=4.0.6'\n'undici@>=7.23.0 <7.29.0': '^7.29.0'\n```\n\n按各自注释,唯一传递来源都是 `@vscode/vsce`(form-data 直接经它;undici 经 `@vscode/vsce` → `cheerio`)。`@vscode/vsce` 是 `packages/vscode-objectstack` 的 devDependency,随 #5825 退役一并离开依赖树(`pnpm install` 后 -125 个包)。删除后实测:\n\n- **`form-data`** —— 从依赖树**彻底消失**,lockfile 零解析条目。选择器匹配不到任何东西。\n- **`undici`** —— 仅剩两个副本,`@ai-sdk/provider-utils` 的 **7.29.0** 与 jsdom 的 **8.9.0**,两者都在 `>=7.23.0 <7.29.0` 这个左闭右开区间**之外**。选择器同样匹配不到任何东西。\n\n即两条 pin 现在都是空转声明。`check-override-consistency.mjs` 对它们保持绿 —— 该门禁只校验「override 命名的包若出现在可发布包的 declared range 里,range 必须能解析到 override target」,一条没有消费者的 override 会被直接跳过,所以**没有任何门禁会告诉你它空了**。\n\n## PR #5834 的处置(以及为什么没顺手删)\n\n保留选择器不动,只在注释里就地记录 `CONSUMER GONE (#5825)` 与保留理由。理由:在一个包退役 PR 里顺手摘掉安全 pin 是**降低安全姿态**,应当是独立决定;而留着的成本是零 —— 若未来某个传递依赖重新引入 form-data 或 7.2x 的 undici,pin 仍会把它按到已修补版本上。同时把 `brace-expansion` 注释里 minimatch 消费者清单中的 `@vscode/vsce` 去掉(`ts-morph`/eslint/`@typescript-eslint`/glob/archiver 仍在,那条 pin 依旧生效)。\n\n## 待裁决\n\n**这两条空转 pin 保留还是退役?**\n\n- **A. 保留(现状)** —— 零成本的纵深防御,未来传递依赖重新引入时自动生效。代价:`overrides` 块里长期躺着两条无消费者的声明,读者需靠注释才知道它们空转。\n- **B. 退役** —— `overrides` 只保留真正在生效的条目,块更短更可信。代价:未来重新引入时不再有网,且需要有人盯着 OSV 重新加回。\n\n**倾向 A**,但这是安全姿态问题,值得维护者明确一次而不是靠某个 PR 的顺手判断。若选 A,可考虑另加一个「override 有无消费者」的体检(**报告而非 red**)—— 目前空转是完全不可见的,而不可见的安全声明既可能被误信为在生效,也可能被下一个 agent 顺手删掉。\n\n## 顺带记录:`undici` 这条仍是 `<FIXED` 形状\n\n`'undici@>=7.23.0 <7.29.0': '^7.29.0'` 的上界正好等于其 target,即 #4961 警告、#5032 亲历过的自失效形状 —— 7.29.0 自己哪天中招,选择器就不再覆盖它。文件里已有 #5032 的完整教训记录,此处仅并列备忘,不属本 finding 的诉求。\n"
+}

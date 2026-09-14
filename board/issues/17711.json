@@ -1,0 +1,35 @@
+{
+  "number": 17711,
+  "kind": "pull_request",
+  "title": "docs(spec): scope the text-operator door's formula prose to the judgement it states",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "protocol:data",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-11T17:12:24Z",
+  "updated_at": "2026-09-12T01:47:50Z",
+  "closed_at": "2026-09-12T01:47:48Z",
+  "closed_by": {
+    "login": "os-bill",
+    "id": 324100929,
+    "type": "User"
+  },
+  "merged_at": "2026-09-12T01:47:48Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/17711",
+  "body": "Part of #17400\n\nProse only. The verdict function, its sets, the class table, the probe object and every case are byte-identical; no logic, no accept set, no behaviour moves.\n\n- **Clause-②: no**\n\n## The fork this card set, and which branch the measurement supports\n\nThe card offered two: **(a)** the prose is wrong, or **(b)** the implementation drifted. Measured here: **(a)**.\n\n`textOperatorDoorVerdict` does exactly what the prose says about *it* — the `spec-table-says` column below is the function's own answer for all five formula shapes, and it matches the ruling. What is false-as-written is the prose's claim about **where that judgement takes effect**: the module frames itself throughout as the door \"at the engine's field-aware seam\", and at that seam a formula filter never arrives.\n\n### My own contradicting measurement\n\nA probe driving the real engine (`ObjectQL` + a recording driver + this module's own probe object), `$contains` over each field:\n\n| key | type | returnType | spec table says | engine seam does | code | status |\n|:--|:--|:--|:--|:--|:--|:--|\n| `f_formula_number` | formula | number | door-refusal | refused | `INVALID_FIELD` | 400 |\n| `f_formula_text` | formula | text | **passes** | refused | `INVALID_FIELD` | 400 |\n| `f_formula_boolean` | formula | boolean | door-refusal | refused | `INVALID_FIELD` | 400 |\n| `f_formula_date` | formula | date | door-refusal | refused | `INVALID_FIELD` | 400 |\n| `f_formula_untyped` | formula | — | **deferred** | refused | `INVALID_FIELD` | 400 |\n| `f_number` | number | — | door-refusal | refused | `INVALID_FILTER` | 400 |\n| `f_boolean` | boolean | — | door-refusal | refused | `INVALID_FILTER` | 400 |\n| `f_date` | date | — | door-refusal | refused | `INVALID_FILTER` | 400 |\n| `f_text` | text | — | passes | **reached driver** | — | — |\n| `f_select` | select | — | passes | **reached driver** | — | — |\n\nThe five formula rows carry three different declared verdicts and the seam answers all five identically, with a **different code** from this door's own — so `returnType` is never the deciding fact, and none of the three verdicts is observable.\n\n**Lit control (the bottom five rows).** The same probe reproduces the table exactly where the assertion does hold: `number` / `boolean` / `date` refused with this door's `INVALID_FILTER` 400, `text` / `select` through to the driver. A probe that called everything a contradiction would prove nothing; this one discriminates.\n\nThe probe was temporary and is not in the diff.\n\n### Why not (b)\n\nNothing shows the code drifted. The earlier refusal is deliberate and recorded: `assertFilterIsMaterializable` refuses every formula filter because no driver materialises a column for one, `packages/spec/src/migrations/registry.ts` carries it as the `engine-find-formula-filter-refused` entry with a migration remedy, and `filter-dotted-head.ts` says the same of formula heads. Reordering the ladder would answer one condition with two wire codes chosen by `returnType` — the card's option 3, explicitly a maintainer's decision. Nothing here touches it.\n\n## Census — the card reported 1 site, there are 7\n\n| # | site | file |\n|:--|:--|:--|\n| 1 | the `Deferred` bullet in the module header | `filter-text-operator-declared-type.ts` |\n| 2 | the sentence the card quotes | same |\n| 3 | the \"How the engine suite consumes\" prescription, incl. \"a refusal can only be this door's\" | same |\n| 4 | `TextOperatorDoorVerdict`'s `deferred` doc | same |\n| 5 | the class table's `formula` row `note` | same |\n| 6 | the deferred formula case `note` | same |\n| 7 | the barrel comment | `packages/spec/src/data/index.ts` |\n\nSite 3 uses neither the word \"formula\" nor \"seam\" — a word-level grep misses it. It prescribes that every case is either a refusal by this door or a driver read; for the formula rows neither holds, which is why the engine suite already partitions them out.\n\n**Lit controls for the census.** A fabricated phrase scored 0 while a known-present symbol scored 35. Text that mentions formula and the doors and is **correct** was not flagged: `packages/objectql/src/text-operator-declared-type-door.ts` (documents this divergence deliberately), `migrations/registry.ts`, `filter-dotted-head.ts`, `field-value.zod.ts`, `filter-text-conformance.ts`.\n\n**Deliberately not rewritten:** the maintainer's verbatim ruling quote in the header blockquote. Rewriting a quoted ruling rewrites the ruling. 0 blockquote lines appear in the diff.\n\n## Verification\n\n- `pnpm --filter @objectstack/spec test` — 473 files, 13432 tests, all pass\n- `pnpm --filter @objectstack/spec typecheck` — clean\n- the named consumer, `engine-text-operator-declared-type-door.test.ts` — 22 tests pass\n- 71 derived gate commands run; 69 exit 0. The two non-zero are `check:dual-build-cjs-loads` and `check:lean-entry-closure`, both exit 3 `PREREQUISITE NOT MET`, which those scripts define as NOT MEASURED — they need a full-repo build.\n- `eslint . --no-inline-config` over the whole repo: 6635 files, 0 errors\n- `check:nul-bytes` exit 0\n\n## Changeset\n\nRequired, and measured rather than assumed. The rule is that a changeset may be skipped only when nothing published moves, where published means what the package's `files[]` actually ships. `@objectstack/spec` is not private and its `files[]` includes `dist`. After a rebuild, the new `note` text appears 8 times under `dist/` and the new doc prose 2 times (in the `.d.ts` consumers read), against a positive control of 4 and a fabricated control of 0. Published bytes move, so: `patch`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01MkQhmuuJAVDjmeWNixwDDH\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01MkQhmuuJAVDjmeWNixwDDH)_"
+}

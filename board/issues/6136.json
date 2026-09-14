@@ -1,0 +1,35 @@
+{
+  "number": 6136,
+  "kind": "issue",
+  "title": "docs-gen: 无标题的 `{@link ../x.zod.ts}` 被渲染成「链接套链接」—— 2 张已发布参考页正文里能直接看到",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T03:11:09Z",
+  "updated_at": "2026-08-07T13:08:11Z",
+  "closed_at": "2026-08-07T13:08:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6136",
+  "body": "在实施 #5059(参考页开篇取块规则)时,给渲染管线补 pin 用例顺带扫出。**与 #5059 不同根因、不同代码段**(#5059 改的是选哪个 doc block,本单在选定之后的**渲染链**),故单独立单。与 #5553 同处一条渲染链但也是**第三条独立缺陷**:#5553 是按行拆段落 + 花括号无差别转义,修好那两点也不会修好这一条。\n\n## 现象(origin/main `8195184e`)\n\n`packages/spec/scripts/lib/file-description.ts`(#5059 从 `build-docs.ts` 抽出前是 `getFileDescription()`)对模块 JSDoc 依次做两次替换:\n\n```ts\n// 1) 先把 {@link target} 换成 markdown 链接\n.replace(/\\{@link\\s+([^}]+?)\\s*\\}/g, (_m, target) => {\n  const route = sourcePathToDocsRoute(target.trim());\n  return route ? `[${target.trim()}](${route})` : `\\`${target.trim()}\\``;\n})\n// 2) 再把「正文里裸露的源码路径」也换成链接\n.replace(/(?<!\\()\\b((?:\\.\\.\\/)?[\\w-]+\\/[\\w.-]+\\.zod\\.ts)\\b(?!\\))/g, (_m0, p) => { … })\n```\n\n第 (1) 步产出的是 `[../a/b.zod.ts](/docs/references/a/b)` —— 链接**文本**里就是那条路径。第 (2) 步的前后瞻只排除了「前面是 `(`」和「后面是 `)`」,而这里路径前面是 `[`、后面是 `]`,所以第二次照样命中,再包一层。\n\n落到已发布页面上(两处,`grep -rn '\\[\\.\\./\\[' content/docs/references/`):\n\n```\ncontent/docs/references/automation/etl.mdx:54:\nSee also: [../[integration/connector.zod.ts](/docs/references/integration/connector)](/docs/references/integration/connector) for the Enterprise Connector layer\n\ncontent/docs/references/integration/connector.mdx:102:\nSee also: [../[automation/etl.zod.ts](/docs/references/automation/etl)](/docs/references/automation/etl) for the ETL Pipeline layer (data engineering)\n```\n\n读者看到的是一个链接文本里又嵌了一个链接 —— MDX 渲染后是残缺的方括号与重复文字,不是一条可点的「另见」。\n\n## 触发条件\n\n只有**无标题**形式 `{@link 路径}` 会中招;带标题的 `{@link 路径 | 文本}` 走的是上面那条更靠前的替换,产出的链接文本是「文本」而不是路径,第 (2) 步匹配不到。两处受害都来自 `@see` 标签(`@see ../integration/connector.zod.ts` 先被改写成 `See also: …`,再被第 (2) 步吃掉),形状与 `{@link}` 无标题分支等价。\n\n## 修法方向(未验证)\n\n第 (2) 步的职责是「补上正文里裸露的路径」,所以它必须跳过**已经在 markdown 链接内**的路径 —— 与 `escape-mdx.ts` 需要感知反引号跨度是同一类问题。可行做法:第 (2) 步只在链接语法之外的片段上跑(先按 `\\[[^\\]]*\\]\\([^)]*\\)` 切段),而不是靠加长前后瞻(前后瞻挡不住嵌套)。\n\n验收:`grep -rn '\\[\\.\\./\\[' content/docs/references/` 归零,且上面两句恢复成单个可点链接。#5059 已把这段渲染抽到 `lib/file-description.ts` 并配了 `scripts/file-description.test.ts`,新用例可直接加在那里,不必跑整个生成器再 grep `.mdx`。\n\n## 影响面\n\n2 张已发布参考页的正文各一处,读者今天访问就能看到。纯展示层,无运行时/协议语义。\n\n范围外,故单开,不在 #5059 的 PR(#6134)里改 —— 那个 PR 只改选块规则,渲染链一字未动(它的 pin 用例特意用带标题的 `{@link … | …}` 形式,并在注释里写明「不 pin 这条已知缺陷,pin 了等于追认」)。"
+}

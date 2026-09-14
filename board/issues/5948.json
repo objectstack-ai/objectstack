@@ -1,0 +1,36 @@
+{
+  "number": 5948,
+  "kind": "issue",
+  "title": "`GET /ui/view/:object/:type` 发的是 `{list}` / `{form}`,spec 的 `GetViewResponseSchema` 声明的是 `{object, view}` —— 同一路由声明与实际两种形状(#5563 同族)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T12:45:58Z",
+  "updated_at": "2026-08-07T13:38:24Z",
+  "closed_at": "2026-08-07T13:38:24Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5948",
+  "body": "在 #5545(client SDK 补返回类型注解)里测绘到:`ObjectStackClient.meta.getView` 是 `meta.*` 上第 7 处真正产出 `unknown` 的方法,但**不能**按 spec 补注解 —— 因为生产端和 spec 对这条路由的响应形状不一致。这与 #5563 是同一族缺陷,只是换了一条路由。\n\n## 事实(基线 `origin/main` @ `a6b3ee7a1`)\n\n**spec 声明**(`packages/spec/src/api/protocol.zod.ts:702`):\n\n```ts\nexport const GetViewResponseSchema = lazySchema(() => z.object({\n  object: z.string().describe('Object name'),\n  view: ViewSchema.describe('View definition'),\n}));\n```\n\n**REST 路由**(`packages/rest/src/rest-server.ts:4861`)把协议层返回值原样发出:\n\n```ts\npath: `${uiPath}/view/:object/:type`,\n...\nconst view = await p.getUiView({ object: …, type: … });\nres.json(view);\n```\n\n**生产端**(`packages/metadata-protocol/src/protocol.ts:4046` `getUiView`)两条 return 都不是那个形状:\n\n- `:4070` — `return { list: { type: 'grid', object, label, columns, sort, searchableFields } };`\n- `:4107` — `return { form: { type: 'simple', object, label, sections } };`\n\n即:实际是 `{ list: … }` / `{ form: … }`(按请求的 `type` 二选一),spec 声明的是 `{ object, view }`。没有 `object` 顶层键,也没有 `view` 键。\n\n**后果**:`packages/client/src/index.ts` 的 `meta.getView`(现 :676)只能保持 `unwrapResponse(res)` 无泛型 → 调用方拿 `unknown`。标 `GetViewResponse` 会撒谎(告诉调用方去读一个不存在的 `.view`),标 `{list}|{form}` 则是在 SDK 侧单方面推翻 spec 声明 —— 这正是 #5563 定案前 `getItem` 的处境。所以 #5545 的 PR **没有**动 `getView`,把它留在这里。\n\n补充一个第三种形状的痕迹:`packages/client/src/client.test.ts` 现有的 getView 用例(#3611 那条)替身发的是 `{ success: true, data: { type: 'list' } }` —— 只钉 URL 不读载荷,所以形状分裂一直没被任何断言碰到。\n\n## 处置(待分诊定方向)\n\n两个方向互斥,择一:\n\n- **A 改 spec**:把 `GetViewResponseSchema` 改成实际发的判别联合(`{ list }` / `{ form }`),类似 #5745 对 save 响应做的「补齐到真实 body」。代价:`GetViewResponse` 是公开导出类型,改形状对下游是破坏性的。\n- **B 改生产端**:`getUiView` 改发 `{ object, view }`,让声明成为真相。代价:`meta.getView` 的现有消费者(若有)要改读法;需要先测绘 objectui 侧有没有读 `.list` / `.form`。\n\n按 contract-first,方向应由「哪个形状是长期正确的」决定,而不是由哪边改动小决定 —— 这条留给维护者/分诊。\n\n关联:#5545(测绘出处)、#5563(同族:`GET /meta/:type/:name` 的形状分裂,已定案收敛)、#5745(同族:save 响应声明是真实 body 的真子集,已补齐)。"
+}

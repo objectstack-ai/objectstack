@@ -1,0 +1,35 @@
+{
+  "number": 5907,
+  "kind": "issue",
+  "title": "drivers(sql,turso): `Unsupported aggregate function` 两面都是裸 `Error`(code/status 皆 undefined),且三个 spec 已声明的聚合函数无任何 SQL 后端编译",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T11:23:01Z",
+  "updated_at": "2026-08-07T11:33:12Z",
+  "closed_at": "2026-08-07T11:33:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5907",
+  "body": "从 #5769 的实测中带出(该单只做条件层拒收闸;维护者在 #5769 正文点名同轮该看 `remote-transport.ts:462`,但实测发现它不是单面问题,单独修 remote 会**制造**一条 local/remote 叉,故按「明确说明不做及理由」拆出本单)。\n\n## 事实一:同一条件,两处裸 `Error`\n\n- `packages/drivers/driver-turso/src/remote-transport.ts:462`\n  `throw new Error(\"Unsupported aggregate function: \" + funcRaw)`\n- `packages/drivers/driver-sql/src/sql-driver.ts:6753`(`mapAggregateFunc`,由 `SqlDriver.aggregate:3103` 调用)\n  `throw new Error(\"Unsupported aggregate function: \" + func)`\n\n两处都不带 `code` / `status`。在 `origin/main`(`5c94f833c`)上实测 remote 面:\n\n```\naggregate({ aggregations: [{ function: 'median' }] })\n  → THREW code=undefined status=undefined msg=\"Unsupported aggregate function: median\"\n```\n\n`mapDataError` 读 `error.code` / `error.status` 组装信封,两者皆无 → 落默认分支 →\n只剩一个 `error` 字段装消息文本、没有 `code`,并按 500 一类记日志,而这本是 400 类\n的调用方错误。这正是 #1116/#1117 给过滤器拒收补信封的同一个缺口,只是换了个入口。\n\n**只修 remote 会把事情变坏**:remote 变成 `INVALID_QUERY`/400,local(`SqlDriver`,\nTurso local 继承)仍是裸 `Error` —— 一个条件、两种线上身份、取决于 `url`,正是\n#5769 花整单去关的那类叉,方向反过来而已。所以这单的落点是**两面同改**。\n\n## 事实二:三个 spec 已声明的聚合函数没有任何 SQL 后端编译\n\n`packages/spec/src/data/query.zod.ts:108` `AggregationFunction` 声明 8 个:\n\n```\n'count', 'sum', 'avg', 'min', 'max', 'count_distinct', 'array_agg', 'string_agg'\n```\n\n`SqlDriver.mapAggregateFunc` 与 `RemoteTransport.aggregate` 各自只编译前 5 个,\n后 3 个落同一句 `Unsupported aggregate function`。`driver-mongodb`\n(`mongodb-aggregation.ts:139/144/147`)和 `driver-memory`\n(`memory-analytics.ts:866`,`count_distinct`)则实现了其中若干 —— 即**声明 ≠ 实现**,\n且各后端实现的子集还不一样(Prime Directive #10)。\n\n于是 `:462` 这一句今天同时承担两种性质不同的条件:\n\n1. **协议根本没声明的函数名**(`median`)—— 调用方写错了,`INVALID_QUERY` / 400 一类;\n2. **协议声明了、这个后端编不出的函数**(`count_distinct` / `array_agg` / `string_agg`)\n   —— 不是调用方的错,是能力缺口。\n\n`driver-memory` 的 `filter-refusal.ts` 已经为过滤器算子画过这条线(#5345:\n`unknownFieldOperatorError` 之于「协议没有这个算子」,对比「协议有、这个面降不下去」),\n把两者合并成一句会告诉一个写 `count_distinct` 的看板作者说他打错字了。\n\n## 建议落点(需要一次裁定,故不夹带在 #5769 里)\n\n- 两处同改,取 ADR-0112 标准目录的码,**一个条件一种措辞**(#5240 的规矩),\n  并加拒收表用例把 `code`/`status` 钉住;\n- 第 2 类怎么答需要维护者裁一次:`NOT_IMPLEMENTED` 一类的能力缺口码,还是先按\n  `INVALID_QUERY` 统一、把三个未实现的声明按 ADR-0049 enforce-or-remove 单独处理。\n  这条裁定会同时影响 `driver-sql` / `driver-sqlite-wasm` / `driver-turso`(两面)\n  四个后端,所以值得单开。\n\n## 复现\n\n```ts\n// remote\nconst t = new RemoteTransport(); t.setClient(client);\nawait t.aggregate('deal', { aggregations: [{ function: 'median' }] });\n// local\nawait new TursoDriver({ url: ':memory:' }).aggregate('deal', { aggregations: [{ function: 'count_distinct', field: 'stage', alias: 'n' }] });\n```\n\n两者都抛 `Unsupported aggregate function: …`,`code` / `status` 均为 `undefined`。\n"
+}

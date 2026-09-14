@@ -1,0 +1,37 @@
+{
+  "number": 5805,
+  "kind": "issue",
+  "title": "objectui: shadcn-check.yml 用 continue-on-error 吞掉 shadcn:check 的退出码,该周期任务无法对任何失败告警",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "pm:queue",
+    "repo:objectui"
+  ],
+  "assignees": [
+    "yinlianghui"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T06:00:25Z",
+  "updated_at": "2026-08-06T13:52:54Z",
+  "closed_at": "2026-08-06T13:52:54Z",
+  "closed_by": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5805",
+  "body": "发现于 objectstack#5505 / objectui PR #3455 的实施过程,单独记录。\n\n## 现象\n\n`.github/workflows/shadcn-check.yml` 里跑 `pnpm shadcn:check` 的那一步带 `continue-on-error: true`:\n\n```yaml\n- name: Check component status (online)\n  id: check\n  run: |\n    echo \"Checking component status against Shadcn registry...\"\n    pnpm shadcn:check > check.txt\n    cat check.txt\n  continue-on-error: true\n```\n\n该 workflow 只在 `schedule`(每周一)和 `workflow_dispatch` 触发,**不在 PR 上跑**;而这一步无论退出码是什么都算通过。因此这个任务在任何情况下都不会把 job 标红,只会上传一份 artifact 等人主动去看。\n\n## 为什么现在值得重看\n\n在 PR #3455 之前 `shadcn:check` 永远退出 0(它纯粹是状态报告),`continue-on-error` 是合理的。该 PR 给它加了**真实的失败语义**:当已声明的本地补丁从磁盘文件里丢失、或已无法重新施加到当前上游时,以非零码退出。这是第一次 `shadcn:check` 的退出码承载信息 —— 而这个 workflow 恰好把它丢掉。\n\n需要说明:PR #3455 的 PR 级闸门并不依赖这个 workflow,而是 `scripts/__tests__/shadcn-local-patches.test.ts`(纯离线,在 `ci.yml` 里跑),所以补丁不变量本身是被守住的。这里缺的是**另一半**:上游挪了锚点导致\"下次同步会失败\"的提前预警 —— 那一条需要联网访问 registry,只有这个周期任务在跑,而它现在无法告警。\n\n## 影响\n\n上游 shadcn 改动了 `Sheet`/`Dialog` 关闭按钮结构的那一周,唯一能提前发现的信号会被静默吞掉,直到有人手动去翻 artifact 或直到有人真的跑 `--update` 撞上拒绝写入。\n\n## 建议方向\n\n需要区分两类失败,不宜简单把 `continue-on-error` 去掉:\n\n- **registry 不可达 / 网络问题** → 应继续容忍(这正是当初加 `continue-on-error` 的原因);\n- **已声明补丁失效**(退出码 1)→ 应让 job 失败,或至少自动开 issue。\n\n该 workflow 后半段已经有\"发现更新就开 issue\"的逻辑(用 `labels: ['maintenance', 'shadcn-sync', 'dependencies']`),把补丁失效接进同一条路径可能比让 job 红更合适 —— 请 PM 定夺。\n"
+}

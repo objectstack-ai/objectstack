@@ -1,0 +1,35 @@
+{
+  "number": 6050,
+  "kind": "issue",
+  "title": "drivers: `undefined` 比较数被发射器读作 null、却被守卫/校验读作「值」—— turso local 抛裸 knex 错、remote 静默答 IS NULL(实测,origin/main)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T15:42:42Z",
+  "updated_at": "2026-08-07T04:02:06Z",
+  "closed_at": "2026-08-07T04:02:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6050",
+  "body": "出自 #5903 的实施(PR #6047)—— 给 remote 侧写 NULL-safe 极性表时,为把每一格对齐到「守卫必须匹配它自己的发射器」这条 #5298 不变量,逐格复核了 `undefined` 比较数,发现一族与 #5903 同类但**成因不同**的分叉。范围外,按 Prime Directive #10 记录,不指派。\n\n## 事实(`origin/main` @ `efedd289f`,同一个 `TursoDriver`,共享 fixture:1-2 行 `d` 有值、3-4 行 `d` 为 NULL)\n\n| filter | turso LOCAL(继承 SqlDriver) | turso REMOTE(RemoteTransport) |\n|---|---|---|\n| `{ d: undefined }` | **抛** `Undefined binding(s) detected when compiling SELECT`(knex 裸 Error) | `['3','4']` |\n| `{ d: { $eq: undefined } }` | **抛** 同上 | `['3','4']` |\n| `{ $not: { d: undefined } }` | **抛** `Undefined binding(s) … compiling WHERE` | `['1','2']` |\n| `{ d: { $ne: undefined } }` | `['1','2']` ✅ | `['1','2']` ✅ |\n| `{ $not: { d: { $ne: undefined } } }` | `[]` | `['3','4']` |\n\n两个可分开的毛病:\n\n### A. 抛出的那三格没有 ADR-0112 信封\n\nLOCAL 抛的是 knex 的 `Undefined binding(s) …`,`code` 与 `status` 都是 `undefined` —— 正是 #1116 / #4436 为这条通路装信封时清点过的形态,只是这一格漏在名单外。`mapDataError` 落默认分支,客户端拿到一个没有 `code` 的 500,而它其实是一条 caller 写坏的 filter。\n\n### B. `$ne: undefined` 一格,driver-sql 的极性表与它**自己的发射器**互相矛盾\n\n`sql-driver.ts` 的发射器读 `coerced == null`(宽松相等,所以 `undefined` 走 `whereNotNull`,编译成 `IS NOT NULL` —— 一条 TOTAL 谓词):\n\n```\ncase '$ne':\n  if (coerced == null) (builder)[…'whereNotNull'](field);\n```\n\n但同文件的两张守卫表读的是**严格相等**:\n\n- `operatorIsNullTotal('$ne', undefined)` → `undefined === null` → `false`(判它「不 total」,与发射器矛盾)\n- `nullValueSatisfiesOperator('$ne', undefined)` → `undefined !== null` → `true`(判「NULL 行满足它」,与 `IS NOT NULL` 相反)\n\n两处一起,`nullGuardForFieldSpec` 得出 `allowNull`,于是 `$not` 的操作数被改写成 `d IS NULL OR d IS NOT NULL` —— 恒真 —— 取反后恒假,答 `[]`。remote 侧(PR #6047 的表,两格都按 `== null` 语义写,与它自己的发射器一致)答 `['3','4']`。\n\n这正是 #5298 立的那条不变量:「每张极性表钉的是它自己发射器的拼写,不变量是**守卫与发射器一致**,不是三份源码字面相同」。driver-sql 这一格恰好没有对上自己。⚠️ 因此 **`['3','4']` 是按该驱动自身发射器推出的正确答案,`[]` 是错的** —— 但这句话是本单的分析,不是裁决。\n\n## 为什么值得修(不是纯理论)\n\n`undefined` 过不了 JSON 往返,所以只会从**进程内**代码来 —— 而那正是它最危险的地方:`{ owner_id: ctx.user?.id }` 里 id 缺失时,remote 会把整条谓词静默变成 `owner_id IS NULL`,匹配所有环境级(env-wide)行,而不是响亮地失败。同一条规则在 local 上抛错、在 remote 上放行,是 #5903 刚关掉的那个「按连接模式给两个答案」家族的又一格,只是这次触发键是比较数的**形态**而不是算子。\n\n## 需要一次裁决(所以本单不自带修法)\n\n`undefined` 比较数应当:\n\n- **A 案:与 `null` 同义**,四个发射面统一编译成空值谓词(remote 现行为),守卫表相应读 `== null`;\n- **B 案:拒收**(`INVALID_FILTER` / 400,同 #5347-A 的信封),理由是 spec 的 `FieldOperatorsSchema` 没有声明 `undefined` 这个比较数,「声明即强制」;`{ field: undefined }` 与「没有这个键」在 JS 里不可区分,而两者语义相反(前者是谓词,后者是无约束)。\n\nB 案与本仓 contract-first 的方向更一致,但会改变 remote 今天已经在答的行为,且要先量一遍仓内有没有依赖 A 案的调用方 —— 请裁决方拍。\n\n## 落点\n\n- `packages/drivers/driver-sql/src/sql-driver.ts`:`operatorIsNullTotal` / `nullValueSatisfiesOperator` 的 `$eq` / `$ne` 两臂(严格 vs 宽松相等),以及 `$eq: undefined` 交给 knex 前缺一道闸;\n- `packages/drivers/driver-turso/src/remote-transport.ts`:同名两函数已按 `== null` 写,若裁 B 案需一并改;\n- 其余无值语义面(`read-scope-sql.ts`、`formula/matches-filter.ts`、`driver-memory`、`driver-mongodb`)未逐格实测,裁决后需按 #5298 的清点方式补测。\n\n## 关联\n\n#5903 / PR #6047(同族,不同成因:那单是裁决没落到独立发射器,本单是守卫没对上自己的发射器)、#5298(NULL/无值语义族的裁决入口与「守卫匹配发射器」不变量的出处)、#5146、#5347 / #5369(比较数按声明拒收的先例)、#1116 / #4436(ADR-0112 信封,毛病 A 的清点来源)。\n\n会话:`session_01WyvqvKMG6asi9aXjKE6xtx`"
+}

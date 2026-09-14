@@ -1,0 +1,36 @@
+{
+  "number": 6049,
+  "kind": "pull_request",
+  "title": "ci(spec): check:skill-examples 拒绝 os:check 块内的裸 any (#5943)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "skip-changeset",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T15:41:30Z",
+  "updated_at": "2026-08-07T00:22:51Z",
+  "closed_at": "2026-08-07T00:22:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T00:22:50Z",
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6049",
+  "body": "Fixes objectstack-ai/objectstack#5943\n\n## 前提复核(先于实现)\n\n对 `origin/main`(`739f496`)实测,issue 前提**成立**:\n\n- `packages/spec/scripts/check-skill-examples.ts` 已有两道反空转断言 —— orphan marker、零块 `fail()` —— 但**没有**任何 `any` 相关检查;\n- 全库被标记块实测 **208** 块,其中裸 `any` 入参 **3** 条,全在同一块内。\n\n## 这道门补的是什么\n\n`os:check` 标记是作者的声明:「这段应当能编译」。块内一旦出现裸 `any`,声明即空转 —— 该值上的每一次属性访问都不再被检查,`tsc` 全绿却什么也没证明。#5720 是实测标本:两段被标记的 hook 示例写着 `beforeUpdate(ctx: any)`,读的 `ctx.services` 在 hook 上下文里根本不存在(引擎逐键构造九键、沙箱十键均不产),照抄的 hook 会因可选链短路无条件抛 `PERMISSION_DENIED`;同一个 `any` 此前还掩盖了 #5605 的 `ctx.session?.positions`。\n\n实现落在 issue 建议的位置:`extractFromFile` 之后、写 build dir 之前,对每个**被标记块**做 AST 扫描(`ts.createSourceFile`),报到 `页面:行:列` 并给出两条处方。\n\n## 三个「待承接方实测后定」的细节,按实测定下\n\n**1. 范围 —— 入参 + 断言 + 局部变量,但只管「本身就是 `any`」的位置。**\n\n判定条件是 `parent.type === node`:参数、变量、属性、返回类型、类型别名,以及 `as any` / `satisfies any` / 尖括号断言。**嵌套** `any`(`Record< string, any >`、`any[]`、`Promise< any >`)刻意**不报** —— 与 `check-exported-any.ts` 划的是同一条零误报线(该脚本原文:「a type with `any` somewhere inside it is NOT flagged … drawing the line here keeps the gate at zero false positives so red keeps meaning broken」)。\n\n把断言与局部变量一并纳入,不是为了对称,而是因为**只管入参的规则会被「参数标红时作者顺手做的那一步编辑」绕过**:把 `any` 下移一行(`const c: any = ctx`)或塞进访问(`(ctx as any).services`),缺陷分毫未动而门重新变绿。实测代价为零:全库 208 块里 `as any` 0 条、`const/let: any` 0 条。\n\n**2. 既有基线 —— 3 条,一次改净,不建棘轮。**\n\n3 条全在 `content/docs/protocol/kernel/lifecycle.mdx:515/516/524`,同一个生成式迁移示例。该块**逐字复现** `os generate migration` 的 Knex 输出(`packages/cli/src/commands/generate.ts` 确实产出 `up(db: any)` 与 `(table: any)`),且**不 import 任何 `@objectstack/spec`** —— 给它标注类型会让文档对 CLI 的实际产物说谎,typecheck 它也证明不了任何 spec 契约。故按门自己给的处方二处理:**去掉该块的 `os:check` 标记**(标记是渲染为空的注释,页面正文一字未改)。余下 **207** 块全部编译通过,无棘轮文件、无豁免名单 —— 基线是零并保持为零。\n\n**3. `--self-test` —— 红/绿双向,外加误报边。**\n\n跑真实的 `extractFromFile`,三个 fixture:\n\n- **红(docs `.mdx`)**:#5720 的原形 `beforeUpdate(ctx: any)`,断言恰好 1 条命中、`where === 'parameter \\`ctx\\`'`、**页面行号字面量 9**;\n- **红(skills `.md`)**:四个非入参位置(`as any` / `const loose: any` / `type Loose = any` / 返回 `any`)各一条,行号逐条钉死;\n- **绿**:同一个函数改标真实 `HookContext` 后 0 条,并同块塞入 `Record< string, any >`、`any[]`、`'any'` 字面量联合、注释里的英文 \"any\" —— 四种形状真实存在于语料,报任何一个都会逼出一次无缺陷的全库改写;同文件另有一个**未标记**块写着 `ctx: any`,断言只提取到 1 块(门只审作者标记过的东西)。\n\n页面行号换算(`bodyStartLine + line - 1`)被钉成字面量而非重算 —— 那是会静默漂移的一环,指错行的诊断比没有诊断更糟。\n\n用 AST 而非正则,是因为语料是散文:`'any'` 出现在字符串字面量联合里、JSDoc 里、以及注释中的普通英文。实测正则按行扫会报出 3 条这类行,**无一是类型标注**。\n\n包脚本改为 `--self-test && audit`,与 `check:exported-any` / `check:dual-source-exports` 一致(CI 该段的注释原文就是「Self-tests first, like exported-any」)。\n\n## 反向验证(方向先判、后跑)\n\n预判:**红**。在改文档**之前**、门刚写完时对真实语料跑,应当报出探针量到的那 3 行。实跑逐字命中:\n\n```\n✗ os:check block(s) annotate values `any` — the marker claims\n\"this compiles\" while every property access on that value goes unchecked:\n\n  content/docs/protocol/kernel/lifecycle.mdx:515:30  parameter `db`\n  content/docs/protocol/kernel/lifecycle.mdx:516:57  parameter `t`\n  content/docs/protocol/kernel/lifecycle.mdx:524:32  parameter `db`\n```\n\n去掉标记后转绿:`✅ 207 prose examples type-check against @objectstack/spec`。\n\n## 验收对照\n\n| issue 验收项 | 结果 |\n| --- | --- |\n| os:check 块把入参标 `any` ⇒ 门红,报页面 + 行号 + 处方 | ✅ 上方实跑输出(含列号) |\n| 现存块全绿 | ✅ 207 块(208 减去撤标记的那块) |\n| `--self-test` 覆盖红/绿两个方向 | ✅ 红 5 条命中 + 绿 0 误报 + 行号字面量 |\n\n## Changeset:走 `skip-changeset` 标签,不是空 changeset\n\n派单给的先例是 `.changeset/per-package-typecheck-coverage.md` 式的空 frontmatter changeset。**实测后没有照搬**,因为该先例早于 #5292 对这条处方的修正:`pr-automation.yml` 的 `changeset-check` 现在把三条路排了优先级,并把空 frontmatter changeset 明确降为 **LAST RESORT**,理由是它与标签**不等价** ——\n\n- 标签是**门级豁免**,不向 `changesets/action` 提供任何输入,不可能影响发布;\n- 空 changeset 是**真实输入**:当待处理集合全为空时,action 走 `hasChangesets && !hasNonEmptyChangesets` 分支,打印 \"All changesets are empty; not creating PR\" 后 0 秒返回 —— 无 version PR、无 publish,而 Release 那一跑**仍然全绿**。这就是 #4898,它静默卡住了 17.0.0-rc.2。\n- 且空 changeset 不指名任何包,正文到不了任何 CHANGELOG。工作流原文:「If you are unsure, take route 2.」\n\n本 PR 确实不发布任何东西:`packages/spec` 的 `files` 字段(`dist` / `json-schema` / `liveness` / `prompts` / `src/**/*.zod.ts` / …)**不含 `scripts/`**,改动只有一个开发脚本、`package.json` 的 `scripts` 字段接线,以及一行渲染为空的文档注释。故按工作流自己的处方走**路线 2**:已在 PR 建好后立即打上 `skip-changeset`(与既有 `size/m` 做并集写入,不覆盖 bot 刚打的标签),并撤下先写的那份空 changeset。\n\n## 本地验证\n\n- `check:skill-examples`(自测 + 审计):`✅ 207 prose examples type-check against @objectstack/spec`\n- `pnpm --filter @objectstack/spec typecheck`:通过(`tsc --noEmit` + `check:test-typecheck`)\n- 脚本本体单独 strict 编译:`scripts/**` 不在两个 tsconfig project 内,故另跑 `tsc --ignoreConfig --strict` 单文件校验,0 error\n- `pnpm --filter @objectstack/spec exec vitest run --maxWorkers=2`:325 files / 8308 tests 全通过\n- `pnpm exec eslint packages/spec/scripts/check-skill-examples.ts`:0\n- `pnpm check:doc-authoring`:362 files clean\n- `node scripts/check-nul-bytes.mjs`:OK(5779 tracked text files,无裸控制字节)\n\n## 不在本单范围\n\n`#5837`(spec artifact 分片)正在改读三个生成产物的 `packages/spec/scripts/**`;本文件不读 `authorable-surface.json` / `json-schema.manifest.json` / `api-surface.json` 中的任何一个,`build-schemas.ts` / `build-docs.ts` / `.gitattributes` 一律未碰,确认无交叠。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_014wsZeReNTqiceBfLb5Pyf5"
+}

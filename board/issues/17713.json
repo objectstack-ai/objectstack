@@ -1,0 +1,35 @@
+{
+  "number": 17713,
+  "kind": "issue",
+  "title": "registerHook accepts event names the engine never dispatches — read filters on beforeFindOne/beforeCount silently never run",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:engine",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-11T17:56:02Z",
+  "updated_at": "2026-09-12T11:50:01Z",
+  "closed_at": "2026-09-12T10:33:04Z",
+  "closed_by": {
+    "login": "os-musk",
+    "id": 323835826,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17713",
+  "body": "## Problem\n\n`engine.registerHook(event, handler)` accepts an event name the engine never dispatches. It logs a warning, registers the handler anyway, and the handler silently never runs.\n\nThe engine dispatches `beforeFind` / `afterFind` and the insert / update / delete pairs. `beforeFind` covers both `find` and `findOne`. `count()` and `aggregate()` dispatch **no** hook: they run through the middleware chain only, with the query AST on the operation context.\n\nA downstream consumer registered read filters on `beforeFindOne` and `beforeCount`, expecting them to scope single-record reads and list totals. They sat inert through every boot, with about 40 \"never dispatches\" warnings per boot. The effect:\n\n- Single-record reads were still filtered, because `beforeFind` covers `findOne`.\n- `count` was not. A `limit`ed list returned a `total` counting rows the caller could not see.\n- `aggregate` was not either. A `groupBy` query was not narrowed by the filter at all.\n\n## Proposal\n\n1. **Refuse at registration** when the event is outside the dispatchable set, in line with ADR-0078 (\"no silently inert metadata\"). At minimum, make the warning an error in strict or test mode.\n2. **Name the seam in the message.** For `beforeCount` and `beforeFindOne` specifically, say that `beforeFind` already covers `findOne`, and that `count` / `aggregate` filtering belongs in middleware (`operation: 'count' | 'aggregate'`).\n3. **Document** in the hook reference that read filters written as hooks do not apply to `count` / `aggregate`, and show the middleware equivalent.\n\n## Acceptance\n\n- Registering an undispatchable event fails loudly: it throws, or at least fails in strict mode.\n- A test covers each event name that the engine exposes but never dispatches.\n- The hook documentation lists which operations each event covers.\n"
+}

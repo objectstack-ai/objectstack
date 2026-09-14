@@ -1,0 +1,35 @@
+{
+  "number": 6128,
+  "kind": "issue",
+  "title": "lint(devx): view/page 谓词(visibleWhen/visibleOn 等)的裸标识符构建期静态校验 —— #5149 裁决拆单",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T02:49:56Z",
+  "updated_at": "2026-08-07T13:13:42Z",
+  "closed_at": "2026-08-07T13:13:42Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6128",
+  "body": "按 #5149 维护者裁决(2026-08-06 08:29Z 裁决评论 + 10:39Z 半裁落地评论「诉求 3 拆 devx 另立单——已放行」)代立。**本单未认领,标签交分诊**(预判落点 `packages/lint` → devx 车道)。\n\n## 要求(裁决原文口径)\n\n把**裸标识符解析校验**扩到 view/page 的谓词表达式(`visibleWhen` / `visibleOn` 及同族):谓词里引用的标识符必须能在绑定约定下解析(值绑定在 `record.` / `previous.` 等命名空间下),裸字段名(如 `status == 'active'` 而非 `record.status == 'active'`)在**构建期**报 **error 级或 gating**——坏谓词根本发不出去。\n\n## 为什么现有两道闸都放行(#5149 Repro 1 实测)\n\n- ADR-0032 的标识符闸**不遍历 views**;\n- ADR-0089 D3b 只查**别名/错根**,不查裸标识符。\n\n两闸之间正好漏掉「作者按文档示例写了裸字段名 → 谓词永远解析失败 → 控制台 fail-open 静默显示」这条链。运行时半边(每谓词 warn 一次)由 #5149 已放行诉求 2 落地中;本单是构建期半边,两半边独立可落。\n\n## 验收建议\n\n- #5149 Repro 1 的谓词形状(裸字段名)在 lint 下必红;\n- `record.` 前缀的正确写法必绿;\n- 与 #4953(服务端 CEL 全量 vs 稀疏绑定语义分叉)不合并——不同层,但实现时值得读它避免把「稀疏绑定下合法」的形状误杀。\n\nRefs:#5149(来源单与裁决)、ADR-0032、ADR-0089 D3b、#4953(相邻非重复)。"
+}

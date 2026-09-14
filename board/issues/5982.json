@@ -1,0 +1,35 @@
+{
+  "number": 5982,
+  "kind": "pull_request",
+  "title": "test(service-sms): sms settings provider 表 ↔ transports 双向契约测试 (#5773)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "size/m",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T13:51:35Z",
+  "updated_at": "2026-08-06T14:18:40Z",
+  "closed_at": "2026-08-06T14:18:38Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T14:18:38Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5982",
+  "body": "Fixes #5773\n\nmail 侧自 #5094 起有一道可执行的闸门,把 `mail.manifest.ts` 的 provider 取值与 `EMAIL_TRANSPORT_PROVIDERS` / `makeTransport` **双向**锁死;sms 侧一直只是两份独立维护的字面量「恰好一致」,任一方向漂移都不会有任何东西报警。PR #5771(#5713)把 sms transports 的词表提成具名导出 `SMS_TRANSPORT_PROVIDERS` 之后,写这道测试的原料齐备,本 PR 补上。\n\n## 前提复核(实施前,基于 origin/main `5582e18`)\n\n正文四条事实全部成立,无一失效:\n\n- `SMS_TRANSPORT_PROVIDERS = ['log','aliyun','twilio'] as const` 在 `transports/index.ts:27`,`isSmsTransportProvider()` 在 :38,均经 `service-sms/src/index.ts:13-14` 出包;`SmsProviderTag` 由数组派生。\n- `sms.manifest.ts` 的 `provider` select 仍是三项字面量,未变。\n- `sms.manifest.test.ts` 仍只断言 schema / 权限 / 两个密钥字段,**无任何取值集合比对**。\n- `grep smsSettingsManifest` 全仓命中只在 `service-settings` 包内部,transport 侧无消费者。\n\n## 落点判定(正文列的第一步待决项)\n\n**实测两个方向都不成环**,所以这不是被依赖图逼出来的选择,而是架构选择:\n\n| 方向 | 依赖闭包(含自身 devDeps) | 成环? |\n|---|---|---|\n| `service-settings` | core, metadata-core, platform-objects, spec, types | 不含 service-sms |\n| `service-sms` | core, spec | 不含 service-settings |\n\n**选了「测试住 `service-sms`(transport owner),`service-settings` 作 devDependency」**,与 mail 先例同向(`plugin-email` 持 `mail-manifest-providers.contract.test.ts`,`service-settings` 是它的 devDependency,test-only 无运行时边)。理由:`service-settings` 是与具体 provider 无关的 manifest 注册表,它为 mail / sms / storage… 各发一张表;若让它反向 import 每一个 provider 实现,每加一张表就多一条边,注册表逐步变成所有实现的汇聚点。**由 provider 自证它满足已发布的契约**,箭头才只有一个方向。\n\n一条不构成区分度、但值得写明的事实:**两侧今天都不会对这个测试文件做类型检查** —— `service-sms` 有 `typecheck` 脚本但 tsconfig 排除了 `**/*.test.ts`(TEST_DEBT 在册),`service-settings` 则根本没有 `typecheck` 脚本(DEBT 在册)。所以此项不参与落点判定,由上面的分层理由定。\n\n## 测试内容(两层比对,照 mail 先例)\n\n第一层 —— 集合等价,**两个方向各自独立成 `it`**(正文要求「各自变红」),断言信息点名漂移的取值:\n\n- `offers no provider the transports cannot build (⊆)` —— 提供了却没有 transport(#5094 的 `sendgrid`/`ses` 形状)\n- `hides no provider the transports can build (⊇)` —— 有 transport 却选不到(#5094 的 `resend` 形状)\n- 外加 `lists each provider exactly once` —— 集合等价看不见重复项\n\n第二层 —— 可构建性:每个下拉项都要 `makeSmsTransport` 出**正确的 transport 类**(不是「没抛异常」);再加 `isSmsTransportProvider` 与下拉框同词表(#5713 的 CLI 启动期拒收判据必须与 settings 面同一份词表),以及默认值 `log` 既在表内又可构建。\n\n## 反向验证(方向先预测,含一次预测落空)\n\n三个探针,每次改完重新 build `service-settings` 再跑(测试读的是构建产物):\n\n| 探针 | 预测 | 实测 |\n|---|---|---|\n| A:manifest 加假 provider `sendgrid_sms` | ⊆ 红并点名 | ✅ 3 红:⊆ 点名 `[\"sendgrid_sms\"]`、无 build recipe、predicate 拒收 |\n| B:manifest 删掉 `twilio` 选项 | ⊇ 红并点名,**恰好 1 条** | ⚠️ **首轮实测 2 条**,见下 |\n| C:从数组侧删掉 `twilio` | ⊆ 红 + fixture 覆盖红 | ✅ 3 红,均点名 `twilio` |\n\n**探针 B 首轮预测落空,而且落空是有价值的**:多出来的第二条红来自我原先照抄 mail 先例写的三行 `expect(byProvider.twilio).toBeInstanceOf(TwilioSmsTransport)` —— 那三行把词表在本文件里又抄了**第三遍**,而这正是本测试存在的理由(「一份字面量可以靠改另一份字面量来『修好』」)。它的副作用是双向的:删一项时重复报红,加一项时反而**静默不覆盖**(新 provider 没有对应断言行也不会红)。\n\n改法:把 build 参数与期望类合并成 `PROVIDER_FIXTURES` 表,并加一条 `exercises every provider in the vocabulary` 断言表的键集 ≡ `SMS_TRANSPORT_PROVIDERS`。改完后 B 恰好 1 红(⊇ 点名 `[\"twilio\"]`),A 仍 3 红,C 变成 3 红(新增的 fixture 覆盖断言接住了「加了 provider 没加 fixture」)。\n\n该断言**刻意写成运行时断言而非 `Record< SmsProviderTag, … >` 类型层穷尽**:本包 tsconfig 排除自己的测试文件,类型层写在这里没有任何 tsc program 会求值 —— 就是 #5286 的 phantom check 形状,删掉它每道闸门照样绿。\n\n## 其余改动\n\n- `sms.manifest.ts` provider 表处加注释(「a CONTRACT, not a menu of aspirations」形),指名执行它的测试文件路径与两个方向。\n- `scripts/check-type-check-coverage.mjs` 的 service-sms TEST_DEBT:`tests: 3 → 4`。实测(临时解除 exclusion 跑 `tsc --noEmit`)错误数**仍是 1**(`transports.test.ts` 那条既有 TS2493),新文件本身零类型错误 —— 数在动、错误没动,note 里写明了。\n\n## 验证\n\n逐条枚举 `.github/workflows/lint.yml`,凡 diff 可能触及的全跑(容器级验证锁 + heap 上限 + `--filter` 范围化):`lint` / `check:nul-bytes` / `check:type-check-coverage` / `check:published-files` / `check:engine-double-contract` / `check:startup-registry-verdict` / `check:durability-log-level` / `check:service-providers` / `check:adr-anchors` / `check:doc-authoring` / `check:i18n` / `check:i18n-coverage` 全绿;`service-sms` + `cli` typecheck 绿;`service-settings` 15 文件 243 测试、`service-sms` 4 文件 39 测试全绿。\n\n(`check:i18n` / `check:i18n-coverage` 首轮红是新 worktree 的前置未满足 —— 未构建 CLI、未全量 build,AGENTS.md §9 那一类;补上 `turbo run build` 后两者均绿,与本 diff 无关。)\n\n## ⛔ 无 changeset\n\n最终 diff = 新测试 + 一段源码注释 + 一条 devDependency + lockfile + 一个 ledger 计数,**不含任何运行时行为变化**,按 issue 要求不写空 changeset。已自行打 `skip-changeset` 标签。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015a5qkLzpGXhLL2F5gvJ7dD)_"
+}

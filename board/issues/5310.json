@@ -1,0 +1,36 @@
+{
+  "number": 5310,
+  "kind": "issue",
+  "title": "`ApiEndpointSchema.path` 的 `.describe()` 举的例子会被 ADR-0121 D1 当场拒绝 —— 而这段文案正是 Studio 端点表单显示给作者的提示",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T17:42:24Z",
+  "updated_at": "2026-08-07T00:41:34Z",
+  "closed_at": "2026-08-07T00:41:34Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5310",
+  "body": "越范围发现,记录于 #5271 实现期,**不在该 PR 内修**(该 PR 的文件面是注册表与 schema 绑定,改 `.describe()` 会动生成基线,而同批有四个 PR 正在动生成物)。\n\n## 事实\n\n`packages/spec/src/api/endpoint.zod.ts`:\n\n```ts\npath: z.string().regex(/^\\//).describe('URL Path (e.g. /api/v1/customers)'),\n```\n\n举的例子是 `/api/v1/customers`。而 ADR-0121 D1 把声明路径收紧成了 `运行前缀 + /apps/ + 命名空间 + 子路径`,publish 门(`namespaceGate`)对任何落在 carve-out 之外的路径直接拒绝。也就是说:**这个 schema 自己举的例子,publish 会拒**。\n\n## 为什么现在才要紧\n\n#5271 之前 `api` 没有注册 schema,`/meta/types` 不为它出 JSON Schema,Studio 只能给一个 raw-JSON 文本框 —— 这段 `.describe()` 没有渲染面。#5271 之后它**成为 metadata-admin 表单里那个字段的说明文字**,也进入 `objectstack.json` 生成的 JSON Schema。于是一段会被拒绝的示例,变成了作者(很常是 AI 作者,ADR-0033)照抄的第一手提示。\n\n`ApiMappingSchema` 那几个 `.describe()` 同理值得一并复核。\n\n## 建议(不预判)\n\n把示例换成 carve-out 形状,并说明命名空间段派生自 `manifest.namespace`(ADR-0121 D2)而非作者自由字段 —— 门函数的拒绝文案里已经有一份措辞可以复用,不需要新发明判据。\n\n改动会移动 `authorable-surface.json` / `json-schema.manifest.json`,按 os-regen 四步整体重生成。\n\n## 关联\n\n#5271(出处)、ADR-0121 D1/D2、#5040 E7。\n"
+}

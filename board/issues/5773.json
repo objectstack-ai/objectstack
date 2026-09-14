@@ -1,0 +1,36 @@
+{
+  "number": 5773,
+  "kind": "issue",
+  "title": "sms settings 的 provider options 表与 SMS transports 之间没有契约测试 —— mail 有,sms 没有(#5094 同形,目前两端恰好一致)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T04:41:34Z",
+  "updated_at": "2026-08-06T14:18:40Z",
+  "closed_at": "2026-08-06T14:18:40Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5773",
+  "body": "在 #5713(CLI 启动期拒绝表外 `OS_SMS_PROVIDER`,PR #5771)中发现,记录下来交 triage。**不在 #5713 的完成范围内** —— #5713 修的是 `os serve` 的构造期读取路径,这条是 settings 下拉框与 transports 之间的一致性,两个不同的面。\n\n## 事实\n\n**mail 侧有一道可执行的契约闸门,sms 侧没有对应物。**\n\n- `packages/services/service-settings/src/manifests/mail.manifest.ts:5-28` 的文件头把 `PROVIDER_OPTIONS` 明确称为「a CONTRACT, not a menu of aspirations」,并指向执行它的测试:\n  `packages/plugins/plugin-email/src/mail-manifest-providers.contract.test.ts` —— 它把 manifest 里的取值与 `EMAIL_TRANSPORT_PROVIDERS` / `makeTransport` **双向**比对,任一方向漂移即红。\n- `packages/services/service-settings/src/manifests/sms.manifest.ts:24-29` 的 `provider` 是同一形状的 `select`(`log` / `aliyun` / `twilio`),但仓库里没有任何测试把它与 `makeSmsTransport` 能建的 tag 集合比对。`sms.manifest.test.ts` 只断言 manifest 能通过 `SettingsManifestSchema`、命名空间的权限、以及两个密钥字段是 `password` + `encrypted`,不涉及取值集合。\n\ngrep 佐证:`smsSettingsManifest` 的全部引用只在 `service-settings` 包内部(`index.ts` / `manifests/index.ts` / `sms.manifest.ts` / `sms.manifest.test.ts`),没有任何 transport 侧的消费者。\n\n## 为什么算一类问题\n\n这正是 #5094 已经付过一次学费的形状:mail 的下拉框曾提供 `sendgrid` / `ses` 而背后没有 transport(选中、校验通过、保存成功、然后什么都不发),同时真正有 transport 的 `resend` 根本选不到。修法是让两边由一个词汇表 + 一道契约测试锁死。sms 现在有两份独立维护的字面量,只是**恰好一致**,没有任何东西在它们分开时报警。\n\nPR #5771 把 sms transports 的词汇表提成了具名导出 `SMS_TRANSPORT_PROVIDERS`(`packages/services/service-sms/src/transports/index.ts`),所以写这道契约测试的原料现在是现成的:比对 `sms.manifest.ts` 的 `provider` options 与 `SMS_TRANSPORT_PROVIDERS`,双向。\n\n## 严重度(诚实标注)\n\n**今天没有用户会撞上** —— 两端都是 `log` / `aliyun` / `twilio`,集合相等。这是一条休眠的漂移风险,不是现存缺陷,所以按 observation-class 打 `finding` 标签、不入 `pm:queue`,请 triage 分级。\n\n一个已知的落地障碍:mail 的契约测试住在 `plugin-email` 里(它依赖 `service-settings`)。sms 的对应测试要么住在 `service-sms`(需要新增对 `service-settings` 的依赖 —— 应先确认不成环),要么住在 `service-settings` 里反向 import `service-sms`。选哪边是这条 issue 需要决定的事情之一。\n\n## 相关\n\n- #5713 / PR #5771 —— 启动期对表拒绝(不同的面:构造期 env,不是 settings 下拉框)。\n- #5094 —— mail 侧同形漂移的原始案例,以及那道契约测试的来源。\n- #5131 —— options 表在写入路径上的执行。\n"
+}

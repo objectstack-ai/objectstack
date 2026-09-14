@@ -1,0 +1,35 @@
+{
+  "number": 6107,
+  "kind": "pull_request",
+  "title": "fix(plugin-auth): break-glass 守卫扩到 sys_permission_set,并把「零管理员」从引导期豁免里分辨出来 (#6084)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T02:07:42Z",
+  "updated_at": "2026-08-07T02:40:00Z",
+  "closed_at": "2026-08-07T02:39:59Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T02:39:59Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6107",
+  "body": "Fixes #6084\n\n## 现状与缺陷\n\nbreak-glass 不变量(cloud ADR-0024 D5.2)此前守三张表:`sys_user`(ban / 删行,#5892 / #5941)与 `sys_member` / `sys_user_permission_set`(撤销 standing,#5978)。\n\n**第四条写法绕开全部三条。**「谁是 platform admin」是**按名字**解析的 —— `resolveAdminUserIds` 先 `where: { name: 'admin_full_access' }` 取那条 `sys_permission_set` 行,再去读指向它 id 的授权行。删掉那一行、或把它改个名字之后:授权行还在、`sys_user` 行原封不动、`sys_member` 行原封不动,而所有 platform admin 同时不再被枚举为管理员。\n\n**放大缺陷 —— 比第四个钩子更要紧的那一半。** 两个判据都以「这个环境有管理员吗?没有就放行」开场(`enforce` 的 `admins.size === 0`、`enforceStanding` 的 `before.size === 0`)。引导期本就没有 break-glass 账号可保护,在那个窗口里拒绝一切身份写会是守卫拿一个空测量值自造政策。可是 `admin_full_access` 行没了的环境**读起来正是零管理员**,于是豁免生效,ban / 删用户 / 降级 / 撤授权**一并放行**。所以这一条写法不只是锁死环境,还在锁死的路上把 #5892 / #5941 / #5978 三条守卫一起解除 —— 同族四条路径里唯一会让既有守卫整体失效的一条。\n\n## 改动\n\n### ① 同形状扩到第四张表\n\n`sys_permission_set` 的 `beforeUpdate` + `beforeDelete`,复用 #5978 的 `enforceStanding` / `applyPending`,`PendingStandingWrite` 多认一张表;注册形状照 #6086 六钩子的既有样子(同 `packageId`、priority 20、`object` 过滤),现在共八个钩子。\n\n**枚举第一段 scan 现在也对 pending 做模拟并重测 `name`**:\n\n```ts\nconst adminSetIds: string[] = [];\nfor (const rawSet of sets) {\n  const set = applyPending(rawSet, pending, SystemObjectName.PERMISSION_SET);\n  if (!set) continue;                            // 被这次写删掉\n  if (set.name !== ADMIN_FULL_ACCESS) continue;  // 被改名 —— 行还在,含义没了\n  const sid = toId(set.id);\n  if (sid) adminSetIds.push(sid);\n}\n```\n\n与 grant 半边重测 `permission_set_id` 同理:scan 自己的 `where` 只证明了写**之前**那行叫什么。\n\n**静态跳过键只有 `name` 一个**(`PERMISSION_SET_STANDING_KEYS`),因为枚举只读这一列。所以每一次 projection 回填、每一次 `os meta resync`、每一次 Setup 里编辑权限集(写的是 `label` / `description` / 权限 JSON,见 `permissionSetRowFields`)**一次读都不花**。`id` 刻意不在表里:这台引擎上 update 的 `data.id` 是**寻址**用的(`resolveTargetIds` 就从它解析目标),不是在提议一个新主键 —— 上面两张表的键表排除 `id` 也是同一个理由。\n\n数据门自己已经拒绝改名(ADR-0094),那不是这道守卫的覆盖面;这一道守的是不经数据门的引擎级与 system-context 写。\n\n### ② 收紧引导期豁免\n\n「零管理员」拆成它本来混在一起的两种状态:\n\n| 状态 | 判定 | 行为 |\n|---|---|---|\n| **真引导期** | 没有任何证据说这里曾经有过 platform admin | 照旧放行 |\n| **刚被清空** | 仍存在无组织范围、有效期内的 `sys_user_permission_set` 授权行,而它指向的 `sys_permission_set` 行已经不在了 | fail-closed 拒写,报文点名那些悬空授权行 |\n\n**fresh-install 不变的证明方式**:判据选的是**悬空授权行**,因为它在正常路径上根本写不出来 —— 每一个生产者都先插权限集、再读回 id 写授权行(`bootstrapPlatformAdmin` 第 1 步 seed 权限集、第 2 步才提拔第一个用户,权限集缺席时返回 `admin_permission_set_missing` 而不是发授权)。全新环境要么一条授权行都没有,要么授权行指向的权限集都在,两种都不触发。测试里有一条「真引导期照常放行」的钉专门量这一点,另有三条钉分别量「指向仍存在的权限集的无组织范围授权行不算证据」「组织范围的悬空授权行不算」「过期的悬空授权行不算」。\n\n**残留说清楚**:改名不留下悬空授权行,这条判据看不见它;那条路径改由 ① 在写入处拦下,所以残留只剩一种状态 —— 守卫尚未注册时落下的改名。曾考虑把判据放宽成「不存在 `admin_full_access` 行 **且** 存在无组织范围授权行」(能覆盖改名),被否掉:它会改变「seed 顺序先写授权行」的全新环境的答案,而不改变全新环境的答案正是这条判据唯一不能碰的红线。文件头注释把这个取舍原样记了下来。\n\n判据是**刻意的过近似**:指向别的已删权限集的悬空无组织范围授权行也会触发。守卫分辨不了两者(要比对的名字随行一起没了),而在一个既零管理员、又有授权行指向虚空的环境里拒写,是 fail-closed 的方向。\n\n`sys_permission_set` 的拒绝报文结尾**不走 SCIM 那句**:IdP 不写这张表,写它的是元数据删除、`os meta` 与包卸载,报文点名的是这些门(测试里有一条负向断言钉住「不出现 SCIM group mapping」)。\n\n## 测试\n\n新增 24 条(`last-admin-guard.test.ts`,全部跑在真 ObjectQL + better-sqlite3 `:memory:` 上,沿用文件既有的「不写 fake engine」纪律)。\n\n**反向验证,方向在跑之前就定了:RED,常见的那一种。** 把两处实现改动撤回、只留新测试 → **13 红 / 11 绿**,红的正是每一条新拒绝钉,绿的正是「不过度收紧」四条 + 「真引导期」三条 + 无守卫基线两条(它们描述的就是改动前的行为,必须保持绿)。红的完整列名:\n\n- path 4:THE REPRODUCTION(删行被拒)/ RENAMING it is refused too / THE PATH ITSELF / the refusal explains itself / a rename to a DIFFERENT name is what is refused / 无谓词 `multi` 删除 / 谓词改名 / fails CLOSED / maxScan 溢出\n- 放大缺陷:THE REGRESSION PIN(被清空的环境拒绝 ban)/ …and the user delete and the grant revoke with it / the refusal names the evidence / after the fourth path is REFUSED, the other three guards still answer\n\n改动装回后:`last-admin-guard.test.ts` **104 passed (104)**(24 新 + 80 既有)。\n\n消费半径按 #6086 先例清扫 —— 守卫新拦的是 `sys_permission_set` 的引擎级写,所以按**调用方**扫:\n\n| 命令 | 结果 |\n|---|---|\n| `pnpm --filter @objectstack/plugin-auth test` | **38 files / 967 passed** |\n| `pnpm --filter @objectstack/plugin-auth typecheck` | 通过 |\n| `pnpm --filter @objectstack/plugin-security test`(权限集 projection / bootstrap / cleanup 的家) | **35 files / 768 passed** |\n| `pnpm --filter @objectstack/runtime test` | **102 files / 1476 passed** |\n| dogfood 里 10 个碰 `sys_permission_set` 的 suite(含三个真的经数据门 `DELETE /data/sys_permission_set/{id}` 的) | **10 files / 77 passed, 1 skipped** |\n| `node scripts/check-nul-bytes.mjs` | OK(5848 个文件,无裸控制字节);另按扩展面自扫无命中 |\n\ndogfood 那三个是这次清扫的关键:它们在**完整栈**(守卫已注册)里删真的权限集行,全部照常通过 —— 元数据删除 / 包重置这些正当路径没有被新钩子挡住。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JwwiU9bjhwy2SWj13ho8uv)_"
+}

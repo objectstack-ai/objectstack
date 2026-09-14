@@ -1,0 +1,34 @@
+{
+  "number": 17756,
+  "kind": "pull_request",
+  "title": "docs(adr-0025): the granted permission set is REGISTERED at load and enforces nothing — §3.7 said the opposite (#17147)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-12T02:35:07Z",
+  "updated_at": "2026-09-12T08:44:26Z",
+  "closed_at": "2026-09-12T08:44:25Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-09-12T08:44:25Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/17756",
+  "body": "## ⛔ Governed surface — stays DRAFT for maintainer merge\n\n`docs/adr/**` is a governed surface (Prime Directive #14). This PR is **not** queued, **not** armed for auto-merge, and is **not** flipped out of draft. It is split out of **#17753** precisely so that PR's code / spec / test / generated-docs half can land the ordinary way.\n\n⛔ #17147 stays OPEN — this PR is not its closer either. See #17753 for why the card stays open.\n\n> ⚠️ Worded this way deliberately. The earlier phrasing put a closing keyword immediately before the number, and GitHub's reference parser matches the keyword plus the number and ignores the negation around it — so on #17753's merge the card was auto-closed as COMPLETED (reopened since; see that PR's body).\n\n## ⚠️ CI state before you merge — one red remains, and it is advisory\n\n| check | state | why |\n|---|---|---|\n| `Check Changeset` | **cleared** | This PR releases nothing (one file under `docs/adr/`), so the gate's own prescription applies: the `skip-changeset` label, applied live. ⛔ An empty-frontmatter changeset is explicitly not a third option (#5471). |\n| `Part-of PR must not also close its card` | **red, and staying red** | RULE 2 only: the single commit on this branch ends `Refs #17147`, and that rule forbids **any** card-relation trailer in a commit message. RULE 3 (the body half) is clear — the body carries no closing keyword, verified with the gate's own regex. |\n\nThe Part-of red is **not** a required context (absent from the required-context registry; its workflow subscribes to no `merge_group` event), `Refs` lands as a reference and moves **no** card, and the gate's own log states that the repair is ⛔ never a history rewrite. So it is a red to read, not to act on. Nothing else is outstanding.\n\n## The two corrections\n\n**§3.7 Permissions** carried the parenthetical *\"(service/hook/file/network already enforced)\"*. Measured on `9bd4344e4`:\n\n| | |\n|---|---|\n| persisted consent record + re-consent on a widening upgrade | ✅ live, §3.8 as written |\n| artifact carriage + `AppPlugin.init()` → `registerGrantedPermissions` | ✅ live (#13457) |\n| anything that **queries** the registry | ❌ `enforceServiceAccess` / `enforceHookTrigger` reachable only via `SecurePluginContext` (zero production construction sites); `enforceFileRead` / `enforceFileWrite` / `enforceNetworkRequest` called by **nothing at all** |\n\nThe bullet now states that split and names §3.5 step 7's per-plugin context as the **materialize seam** ruling `5486840233` assigns to this ADR's own install-flow design work — tracked as #17147, deliberately not built here.\n\n**The Status line** is stale in the *other* direction: the 2026-07-16 audit says install-time consent is unimplemented, and it has since landed for package installs. Replaced with a 2026-09-12 audit that separates what landed (consent, carriage, registration) from what did not — no `os plugin install`, no `.osplugin` loader, and no runtime path on which a distributed plugin's code executes; an environment artifact carries `sys_package_version.manifest_json` and never the blob.\n\n## Related\n\n- **#17753** — the framework half: four shipped sentences corrected, generated docs regenerated, and `granted-permissions-not-enforced.pin.test.ts`, which pins the measurement and **goes red the day the seam lands**. That pin's failure message names this note; delete the §3.7 block in the same PR.\n- **objectstack-ai/objectui#9235** — the console consent panel, which told the installer the same thing.\n- **#13458** — Phase 2 stays `Blocked-by: #17147`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n\n"
+}

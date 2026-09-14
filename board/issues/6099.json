@@ -1,0 +1,35 @@
+{
+  "number": 6099,
+  "kind": "issue",
+  "title": "objectui pin bump 生成的 console changeset 对破坏性变更零标注 —— digest 只认 `major` 声明级别,而 objectui 在 v17 窗口内把破坏性声明为 `minor` + 正文标注",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T01:15:12Z",
+  "updated_at": "2026-08-07T13:39:27Z",
+  "closed_at": "2026-08-07T13:39:27Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6099",
+  "body": "**未认领。** 发现于 #6089 的 pin 刷新(PR #6097),不在那个 PR 的范围内,单开记录。\n\n## 现象\n\n`scripts/objectui-changeset-digest.mjs` 里,\"这条是不是破坏性变更\"的判据是**声明级别等于 `major`**:\n\n```js\nconst breaking = releasing.filter((r) => r.level === 'major').length;\n```\n\n它只驱动一件事 —— 生成的 `@objectstack/console` changeset 末尾那句提示:\n\n```\n⚠️ N of these declare a **major** (breaking) bump in objectui …\n```\n\n但 objectui 在 v17 发布窗内**不用 `major` 声明破坏性变更**,而是 `minor` + 正文标注(与本仓 `check-changeset-no-major.mjs` 的窗口约定同源:窗口外一个 `major` 会把整个 lockstep 组顶上去)。于是判据与约定错位,`breaking` 恒为 0,那句提示**永远不触发**。\n\n## 实测(PR #6097 的区间 `f5bc4c78be76...f995a452d2ca`)\n\n区间里有**两条确凿的 v17 破坏性变更**,digest 判定 `breaking = 0`:\n\n| objectui commit | changeset | 声明级别 | digest 判定 |\n|:--|:--|:--|:--|\n| `042e09d77` `refactor(types,react,components,fields)!` | `field-widget-single-metadata-carrier.md` | `minor` | 非破坏性 |\n| `6e794a19e` `fix(app-shell)!` | `flow-node-geometry-is-spec-position.md` | `minor` | 非破坏性 |\n\n区间内 64 条 releasing changeset:14 `minor` / 50 `patch` / **0 `major`**。也就是说,连提交标题上带 `!` 的那两条,在 digest 眼里都与一条普通 patch 无异。\n\n## 为什么这值得单开\n\n**不是\"丢失\"**——两条都在清单里,级别正确、摘要完整,#4731 修好的那部分是稳的。问题在**能不能被认出来**,而这一点目前取决于 changeset 作者是否碰巧在**正文首段**自报家门(digest 取的正是首段):\n\n- `042e09d77` 的首段以 `**BREAKING (v17)**` 开头 ⇒ 条目里能看见;\n- `6e794a19e` 的破坏性陈述(\"Breaking for anyone reading `node.ui`\")在正文靠后的段落 ⇒ **首段读不到**,生成出来的条目就是一句普通行为修复:\n\n```\n- **minor** — The flow designer writes node geometry as the spec's `FlowNode.position`, not its\n  own `ui: { x, y }` (objectui#3172). (objectui `6e794a19e`)\n```\n\n于是\"作者升级时会踩到的破坏性迁移\"能不能进入平台发布记录的视野,靠的是**上游作者的排版习惯**,而不是机制。这正是 #4731 自己写下的那条理由的另一半 —— \"Breaking changes are the single class that must never vanish from a release record\";#4731 解决了\"进不去\",剩下\"进去了但认不出来\"。#3340 关心的也是同一条链路的完整性。\n\n## 两种读法(留给分诊定级)\n\n- **具体缺陷**:v17 的发布说明正由这批 changeset 编译,PR #6097 的那份已经带着两条未标注的破坏性迁移进了 `@objectstack/console` 的 CHANGELOG 输入层 —— 现在就在生效。\n- **观察项**:发布记录仍由人工整理编译,漏标不必然传导到最终页面。\n\n按\"立案时判定的严重度两个方向都不可靠\"(#4949 的经验)的原则,如实记两读法,不自打级别标签。\n\n## 可能的落点(不预设结论)\n\n1. 判据从\"级别 = `major`\"扩到\"级别 = `major` **或** 正文命中破坏性标注(`BREAKING`、`!` 型提交)\";\n2. 让 digest 读提交标题里的 conventional-commit `!`(#4731 明确反对**用类型当过滤器**,但把 `!` 当作**附加**信号、不改变收录集,与那条理由不冲突 —— 需要维护者判断这算不算破线);\n3. 约定上游:v17 窗口内破坏性 changeset 的首段必须以标注开头(纯约定,无强制)。\n\n三条各有代价,尤其 2 与 #4731 的\"declaration over inference\"取向的边界需要维护者裁定,故不在 #6097 里顺手改。\n\n## 关联\n\n- #4731 —— digest 改成\"读 objectui 声明\"的那次(本条是它的余量)\n- #4843 —— 同一判据的另一个消费者(release 页 Console 段)\n- #3340 —— pin 落后导致前端 changeset 漏掉的原始失效模式\n- #6089 / PR #6097 —— 本次发现的现场\n"
+}

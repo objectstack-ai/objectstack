@@ -1,0 +1,35 @@
+{
+  "number": 5856,
+  "kind": "issue",
+  "title": "`callData` 的 `action === 'batch'` 分支静默返回 `results: []` —— 当前不可达,一旦接线就是「成功地什么也没做」",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T08:44:34Z",
+  "updated_at": "2026-08-07T12:41:15Z",
+  "closed_at": "2026-08-07T12:41:15Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5856",
+  "body": "发现于 #5672 的实施(界外发现,查重无命中故新开;**未认领**)。**观察类**:今天没有任何用户路径能走到它,所以标 `finding`、不排队。\n\n## 现象\n\n`packages/runtime/src/action-execution.ts:350`:\n\n```ts\nif (action === 'batch') {\n    // Batch operations — not yet supported via direct service dispatch\n    return { object: params.object, results: [] };\n}\n```\n\n同一函数里其它未知 action 走的是 `throw { statusCode: 400, message: \\`Unknown data action: ${action}\\` }`,`aggregate` 在引擎缺能力时走 `throw { statusCode: 503 }`。只有 `batch` 这一支是**返回成功**,而且返回的是一个形状合法、语义为「批处理跑完了,零结果」的响应体。\n\n## 为什么现在不疼\n\ndispatcher 的 data 域(`packages/runtime/src/domains/data.ts`)只把 `query` 一个自定义 action 路由到 `callData`;`batch` 没有入口。文件里那句 `// 1. Custom Actions (query, batch)` 的注释还留着 `batch`,是这条分支唯一的「曾经打算接线」的痕迹。原子跨对象 `/batch` 实际由 `@objectstack/rest` 的 `registerBatchEndpoints` 挂载,与这条分支无关。\n\n我是在为 #5672 确定 dispatcher 的 `capabilities.transactionalBatch` 该答什么时扫到它的。结论没变(dispatcher 不交付 `/batch`,故答 `false`),这条分支反而是**支持**该结论的证据之一:即便它可达,它也不开事务、不做任何写入。\n\n## 为什么仍然值得记一笔\n\n这是「declared ≠ enforced」最难查的一种形状 —— 不是 501,不是 400,而是 **200 + 空结果**。\n\n- 消费者拿到 `{ results: [] }` 与「批处理成功但没有匹配项」无法区分,重试逻辑、幂等逻辑、审计都会把它当成一次成功的空操作;\n- 它落在 `callData` 里,而 `callData` 是 dispatcher data 域、MCP `run_action` 桥、actions 域共用的执行入口。今天不可达靠的是**上游路由表恰好没列 `batch`**,不是这条分支自身的守卫 —— 与 ADR-0115 Evidence 5 / #4451 里那些「slot 存在但无人注册」的条目同类:约束在别处,一次看似无害的路由扩表就能把它变活。\n\n## 建议处置(不猜,列选项)\n\n1. **删**(倾向):ADR-0049 enforce-or-remove。没有生产者、没有消费者、没有路由,落到默认的 `Unknown data action: batch` → 400,与其它未知 action 一致;同时清掉 `domains/data.ts` 那句注释里的 `batch`。\n2. **改抛 501**:若确实打算日后在 dispatcher 侧接线,保留分支但换成 `throw { statusCode: 501 }`,让「未实现」响亮 —— 与 `capabilities.transactionalBatch: false` 的语义对齐,消费者的 `/batch` 探测会得到与 `declared === enforced` 一致的答案。\n\n两条都不改动任何在线行为(该分支不可达),差别只在**接线那天**它是安全失败还是静默成功。"
+}

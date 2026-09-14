@@ -1,0 +1,35 @@
+{
+  "number": 5800,
+  "kind": "issue",
+  "title": "`endpoint-policy.ts` 的 `anonymousDenial()` 注释重复了 #5632 那句「same envelope」——它写的正是另一个信封",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T05:57:32Z",
+  "updated_at": "2026-08-07T12:41:16Z",
+  "closed_at": "2026-08-07T12:41:16Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5800",
+  "body": "发现于 #5632(PR 见文末)的实现过程,**不在该 PR 内修**:#5632 的分诊预裁把文件面锁定为 `packages/core/src/security/anonymous-deny.ts` + 那一个 dogfood 测试文件,本条落在第三个文件上,越界。Filed unassigned,待分诊。基线:`origin/main` `f205c32`。\n\n## 事实\n\n`packages/runtime/src/endpoint-policy.ts:273`:\n\n```\n/** The 401 every seam on this platform answers — same code, same message, same envelope. */\nfunction anonymousDenial(): EndpointPolicyVerdict {\n    const { status, body } = apiErrorResponse({\n        code: ANONYMOUS_DENY_CODE,\n        httpStatus: ANONYMOUS_DENY_STATUS,\n        message: ANONYMOUS_DENY_MESSAGE,\n    });\n    return { verdict: 'deny', status, body };\n}\n```\n\n前两项(same code / same message)成立;**第三项不成立**。`apiErrorResponse`(`packages/runtime/src/error-envelope.ts:129`)返回的是\n\n```\n{ status: input.httpStatus, body: { success: false, error: buildApiError(input) } }\n```\n\n即 wrapper 信封。而 REST seam(`@objectstack/rest` `enforceAuth` → `ANONYMOUS_DENY_BODY`)写的是扁平 `{ error, message }`。**两者不是同一个信封** —— 这正是 #5632 认定 `ANONYMOUS_DENY_BODY` 那句 docstring 在说谎的同一条事实,只是长在第二个地方,而 #5632 的正文并没有枚举到这一处。\n\n## 为什么值得单独记\n\n- 与 #5632 同类:声明与实际不符,发生在注释层(PD #10 的形状)。#5632 已把 `anonymous-deny.ts` 那句窄化并配了 conformance 用例;这一句留在原地,下一个读者(尤其 AI)照样会得到「全平台同一个信封」的错误印象,而且这次是在**产出 wrapper 的那一侧**读到的,更容易被当成权威。\n- 两个 live 信封是 ADR-0112 2026-07-30 修正案记录在案的既有事实,收敛归 envelope-convergence 线(#3843 family)。本条**不涉及任何 wire 改动**,只是把注释改成事实。\n\n## 建议处置\n\n改注释即可,一行:说明 code / message 与 REST seam 一致,envelope 是 dispatcher 自己的 wrapper(`{ success: false, error: { code, message, httpStatus } }`),并指向 `ANONYMOUS_DENY_BODY` 已经窄化后的那段说明。`packages/runtime` 的行为一行不动。\n\n## 查重\n\n按关键字 + 文件路径搜过 open issues:`endpoint-policy.ts` 零命中、`anonymousDenial` 零命中、`ANONYMOUS_DENY` 零命中、`envelope 401 comment` 零命中。#5632 本身已由 PR 覆盖,其预裁范围明确不含本文件。\n\n关联:#5632、ADR-0112(2026-07-30 修正案 / #4007)、#3843、PR #5631。"
+}

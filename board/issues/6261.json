@@ -1,0 +1,35 @@
+{
+  "number": 6261,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): boot 重水合按行的真实 package_id 登记对象归属 (#4636 裁 B 收官)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T12:28:07Z",
+  "updated_at": "2026-08-07T13:04:15Z",
+  "closed_at": "2026-08-07T13:04:14Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T13:04:14Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6261",
+  "body": "Fixes objectstack-ai/objectstack#4636 — 维护者 2026-08-07 裁决 **B** 的**第二步:boot 半边**,本单收官。PR1(#6219,已合入 `c9bf94009`)已把写路径切到真实 package id 并加上服务端强制盖章;本 PR 落地剩下的一行,两侧从此说同一句话。\n\n## 问题\n\n`loadMetaFromDb` 的 object 分支从 `engine.find('sys_metadata', …)` 返回的行上读 `record.packageId`。但这些行是**数据库行**,列名是 snake_case 的 `package_id`:`sys_metadata` 对象声明 `package_id`,`SysMetadataRepository` 写 `package_id`,`getMetaItems` 读 `r.package_id`,**紧邻的非 object 分支**三行之下就写着 `(record as …).package_id`。只有这一支拼成了 camelCase,于是表达式恒为 `undefined || 'sys_metadata'` —— 无论行有没有绑定包,每次 boot 都登记在哨兵下。\n\n## 为什么这不只是个分类瑕疵\n\n归属键**就是**包过滤键(`getAllObjects(packageId)` 匹配 `contributor.packageId`,runtime `meta.ts` 的侧边栏直接消费)。PR1 之后写路径记的是 `app.` 加真实 slug,所以残留缺陷正好是**重启形状**的:对象创建时在自己所属包的过滤里,重启之后就不见了。\n\n更要紧的是**重启后的第一次编辑**。两侧键不一致时,这次保存会以另一个键重新认领归属,`registerObject` 抛 `already owned by package \"sys_metadata\"`,而 `applyObjectRegistryMutation` 把它 catch 成 `console.warn`:保存返回 `success: true`、行也确实落盘,但内存 schema 停在 boot 时的版本 —— **这一笔编辑被静默丢弃**,新字段在下一次重启前都不可用。\n\n这是 cloud#970 在 PR1 之后的形态:**不是** `403`(两侧都盖 `_provenance: 'org'`,overlay 门是开的),而是一次被吞掉的 ownership 冲突。所以 pin 测试断言的不是「保存成功」,而是**演进后的字段真的进了 schema**。\n\n## 改了什么\n\n1. `packages/metadata-protocol/src/protocol.ts` —— 一行读法:`record.packageId` → `(record as { package_id?: string | null }).package_id`。用 `||` 而非 `??`,与写路径的 `request.packageId || 'sys_metadata'` 对称:空绑定就是「没有包」,哨兵只标记这一件事。该分支**已经**在盖 `_provenance: 'org'`,本 PR 不动盖章。\n2. `packages/objectql/src/registry.ts` —— `isTenantAuthored` 契约注释终版:摘掉 PR1 加的「这半句描述的是契约,还不是代码」标注,改成「两侧都按真实 package id 登记」。注释的**结论**(`_packageId !== 'sys_metadata'` 无法回答 provenance)不变。\n\n## 前提复核(在 `origin/main` 上)\n\n| 前提 | 结论 | 证据 |\n| --- | --- | --- |\n| P1 PR #6219 已在 main | ✅ | `c9bf94009 fix(metadata-protocol): 对象 overlay 写路径的 ownership 键切真实 package id …(#6219)` |\n| P2 该行仍是 `record.packageId \\|\\| 'sys_metadata'` | ✅ | `protocol.ts:10765`(立单时 ~8958,派发词记 :10657,已再漂移;按内容定位) |\n| P3 PR1 的 tripwire 用例原样在 | ✅ | `protocol-writepath-object-ownership.test.ts:365` `[tripwire] a package-bound rollback still 409s`,本 PR 一字未动 |\n\n## 测试\n\n新增 `packages/objectql/src/protocol-boot-object-package-binding.test.ts`(5 例)。放在 objectql 而非被测代码旁,理由与 PR1 同:断言对象是**真** `SchemaRegistry`,而 objectql 依赖 metadata-protocol,只有这个方向能同时握住两半。\n\n用例不手搓行,而是**跑一遍真实写路径持久化、再把落盘的行交给一个全新的 registry + protocol** —— 列名拼写正是本 PR 的全部主题,手搓 fixture 会让它与仓库实际写出的形状脱钩。\n\n- package-bound 行:落盘的行确实带 `package_id`(且**没有** `packageId`)→ boot 后归属是 `app.myapp`;\n- `_provenance` 仍是 `'org'`(本 PR 不改盖章,显式钉住);\n- 侧边栏过滤:重启后 `getAllObjects('app.myapp')` 重新看得见,且不串到 `app.otherapp`;\n- **重启面**:boot 之后的第一次编辑 → `due_date` 真的进内存 schema、归属仍是 `app.myapp`、落盘仍是一行且仍绑在包上;\n- package-less 行:哨兵照旧,`_provenance: 'org'`,不混进任何包的过滤(回归)。\n\n```\npnpm --workspace-concurrency=2 --filter @objectstack/metadata-protocol --filter @objectstack/objectql test\n\npackages/metadata-protocol test:  Test Files  49 passed (49)\npackages/metadata-protocol test:       Tests  502 passed (502)\npackages/objectql test:  Test Files  138 passed (138)\npackages/objectql test:       Tests  2254 passed (2254)\n```\n\n`packages/objectql` `pnpm typecheck`(`tsc --noEmit`)通过、零输出。`metadata-protocol` 没有 `typecheck` 脚本(在 type-check-coverage 的 DEBT ledger 里),与 PR1 相同。\n\n门:\n\n```\ncheck-engine-double-contract: OK — 77 pinned, 133 in the DEBT ledger, 2 exempt.   (本 PR 前 75 pinned;新文件的两个 double 已 pinned)\ncheck-nul-bytes: OK (scanned 5944 tracked text file(s); no raw ASCII control bytes)\n```\n\n## 反向验证(方向先写死,再实测)\n\n⚠️ 同 PR1 的测量条件:objectql 的测试经 package exports 解析到 metadata-protocol 的 **`dist/`**,不是 src。下列结果都是**改完重建 dist 之后**的。\n\n**肢 A —— 还原那一行读法(回到 `record.packageId`)。** 预测写在跑之前,逐条:\n\n| 用例 | 预测 | 实测 | 符合? |\n| --- | --- | --- | --- |\n| 真实 package id | 红 | 红 `expected 'sys_metadata' to be 'app.myapp'` | ✅ |\n| `_provenance: 'org'` | **绿**(本 PR 不动盖章) | 绿 | ✅ |\n| 侧边栏过滤 | 红 | 红 `expected [] to deeply equal [ 'myapp_invoice' ]` | ✅ |\n| 重启后第一次编辑 | **红,但不在 `success` 上** —— `saved.success` 仍为 `true`(不会 403:两侧都盖 `'org'`,门是开的),红在 `due_date` 断言,因为 `registerObject` 抛 `already owned` 被吞成 warn | 红,正在 `due_date`:`expected [ 'organization_id', …(8) ] to include 'due_date'`;`success` 断言先行通过;stderr 印出 `[Protocol] registerObject failed for myapp_invoice: Object \"myapp_invoice\" is already owned by package \"sys_metadata\". Package \"app.myapp\" cannot claim ownership.` | ✅ |\n| package-less 哨兵 | 绿 | 绿 | ✅ |\n\n`Tests 3 failed | 2 passed (5)` —— 逐例符合预测,**范围与方向都没有偏差**。特别记一句:这一支**没有** 403,和裁决前 dev 实测的「boot 单独修」形态不同,正是因为 PR1 已经把盖章补上;红的是归属、包过滤,以及被 `console.warn` 吞掉的那笔编辑。\n\n## 必答项\n\n**#5079 终版定价 —— 成因分析不需要更新,`removeRuntimeShadow` 与本 PR 的结构不相交。** PR1 已实测的机制在 boot 侧原样成立:`removeRuntimeShadow` 扫的是 `this.metadata.get(type)` 里的复合键 `pkg:name` 兄弟项,判据 `it._packageId !== 'sys_metadata'` 也是对**那个 Map** 求值;而 object 这一片永远只有裸键 —— boot 的 object 分支和 `applyObjectRegistryMutation` 一样只调 `registerObject`(动的是 `objectContributors`),`plugin.ts` 对 `type === 'object'` 显式 `return`(注释:objects are registered differently (ownership model)),全仓没有任何路径以 packageId 调 `registerItem('object', …)`。所以复合兄弟项从不存在,循环走不到那个判据。本 PR 搬的仍是 `objectContributors` 的键,是 `removeRuntimeShadow` 从不触碰的另一个结构。**#5079 的成因分析(「object 分支本就无 shadow 可摘」)在 #4636 完整落地后依然成立,无需重写,也不应再被定价成「等 #4636」。**\n\n**#6215 —— 零依赖确认。** 本 PR 只动 `loadMetaFromDb` 的一行读法与一段注释,`sys-metadata-repository.ts` 一字未动,`rollbackMetaItem` / `restoreVersion` 一字未动。#6215 的成因(`restoreVersion` 调 `put` 不传 `packageId`,`put` 用 `whereFor(ref, state, opts.packageId ?? null)`,`null` 是谓词而非「任意包」)与 boot 读法无关;两个方向都不阻塞。\n\n**PR1 tripwire —— 原样未动确认。** `protocol-writepath-object-ownership.test.ts` 整个文件本 PR 未修改(`git diff` 不含该文件),`[tripwire] a package-bound rollback still 409s` 仍在 :365,仍绿。#6215 修好那天它照常翻红,把接手的人指向上一条用例里已经写好的 ownership 断言 —— 这条链路完好。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_019Q7oc7ASjh8yxyS3Yz78We)_"
+}

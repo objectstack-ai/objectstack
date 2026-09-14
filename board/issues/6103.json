@@ -1,0 +1,33 @@
+{
+  "number": 6103,
+  "kind": "pull_request",
+  "title": "test(lint): loop fixtures 改拼 canonical 的 iteratorVariable 并上 schema pin (#5700)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T01:21:49Z",
+  "updated_at": "2026-08-07T01:47:32Z",
+  "closed_at": "2026-08-07T01:47:31Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T01:47:31Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6103",
+  "body": "Fixes #5700\n\ntest-only,无 changeset(`skip-changeset`)。文件面仅 `packages/lint/src/lint-flow-patterns.test.ts`;未动 `packages/spec`,未动 `packages/lint/src/` 下任何规则源。\n\n## 前提复核(基于 origin/main@be59695,已含 #5693 → PR #6060)\n\n前提新鲜。三处 fixture 仍以 `itemVar` 绑定循环项:\n\n| 站点 | 原行号 | 出处 |\n| --- | --- | --- |\n| `loopBodyFlow()` 共享 helper | 1103 | #5383 |\n| 嵌套 loop 用例 | 1163 | #5383 |\n| 嵌套 loop 用例 | 1518 | #5482 |\n\n`LoopConfigSchema`(`packages/spec/src/automation/control-flow.zod.ts:163`)是 `strictObject`,声明键为 `iteratorVariable`;`itemVar` 既非声明键、也不在 `aliases`(那里只登记了 `itemVariable`,用途是压过 edit-distance 建议器,避免把想要 ITEM 的作者指向 `indexVariable`)。实测:\n\n```\n=== outer itemVar (main 上的状态)\n    success=false\n    - code=unrecognized_keys path=[] keys=[\"itemVar\"]\n      msg=Unrecognized key(s) on this loop container config: `itemVar`. Until #4001 an\n          undeclared key here was dropped silently — ...\n```\n\nregion 收集只读 `config.body`,所以这些 fixture 照常下潜、断言照常通过。规则本身没错,错的是 fixture 描述了一个作者写不出来的 `loop` —— #4966 在 trigger 描述符上的同类发现,下沉一层。\n\n`:518` / `:533`(#5695 自带的 pin 与 near-miss)本来就正确,不在本单面内,未改动。\n\n## 改了什么\n\n1. **三处改拼** `itemVar` → `iteratorVariable`。\n2. **body 节点补 `label`**(`FlowNodeSchema.label` 是必填,#5695 对自带 fixture 的同样处理);#5383 嵌套用例的 `loop_touchpoints` 节点本身也缺 `label`,一并补上。属于「补声明」而非「重拼」:fixture 本就不是 spec-valid,补齐后它只剩那一处**故意埋的**缺陷(decision 的惰性 `config.condition` / `reset` 的无 filter `multi: true`)。\n3. **三处 loop config 提成具名常量并各自 pin** `LoopConfigSchema` 全绿。提成常量是为了让 pin 读到 fixture **真正下潜的那个对象**,而不是一份会静默漂移的重抄副本。\n\n### 为什么嵌套用例要各自 pin(实测,不是推断)\n\n`FlowNodeSchema.config` 声明为 `z.record(z.string(), z.unknown())` —— 开放记录。所以外层 parse 会**整块接受**内层容器的 config:\n\n```\n=== 外层 canonical,内层 loop 写 itemVar\n    success=true      ← 外壳 pin 全绿,看不见内层\n=== 同一份内层 config 直接 parse\n    success=false\n    - code=unrecognized_keys keys=[\"itemVar\"]\n```\n\n这条盲区已经作为**一条断言**写进测试(`does NOT see into a nested container's config — the inner pins are load-bearing`),免得后来者把顶层一条 pin 误当成整棵树的覆盖。\n\n### 门槛的选择:full green 还是 key 级\n\n- **loop 三处 + `parallel` @630**:fixture 本身可做到完全可 authoring,用 **full `safeParse` green** —— 沿用 #5695 写下的理由(这些规则判的是 VALUE 结论,证据节点必须**真的可达**于一个**真的可写**的容器内)。\n- **另两处 `parallel`**:分支节点缺 `label`,那是 #5700 正文**明确另案**的全文件约定。这里用 key 级门槛 `refusedKeys(...)`,判据沿用本仓 `validate-security-posture.test.ts:501-513` 已写下的那条:**被拒的 KEY 与被拒的 VALUE 是两回事**。对 key 级规则强行要求 full-parse-green 会删掉正当覆盖;反过来对 value 级规则只要 `unrecognized_keys` 干净则会养出幻检查。\n\n## 容器键位审计(本单 durable 半边)\n\n按容器 slot 全表清点(`FLOW_REGION_SLOTS`:`loop.body` / `parallel.branches` / `try_catch.try` / `try_catch.catch`):\n\n| 容器 | 文件内 fixture 数 | 结论 |\n| --- | --- | --- |\n| `loop` | 6 | 3 处本单修复;`loopConfig()` @510 与两层嵌套 @622/627 早已 canonical 且实测全绿,未动 |\n| `parallel` | 3 | **审计干净 —— 0 处未声明键**;3 处都已加审计断言 |\n| `try_catch` | 0 | 文件内没有该容器的 fixture,如实报告,不为凑数造一个 |\n\n`parallel` 三处的 `name` / `nodes` / `edges`,以及 `twin_regions` 分支边上的 `condition` / `isDefault`,实测全部是已声明键。\n\n审计断言**有牙**:往一个分支塞 `bogusKey: 1`,断言按名报红 —— 详见下方回归验证第 4 段。\n\n## 全量测试\n\n`pnpm --filter @objectstack/lint test`:\n\n```\n Test Files  61 passed (61)\n      Tests  1457 passed | 4 skipped (1461)\n```\n\n基线(改动前,同一 worktree)为 1453 passed / 4 skipped;+4 恰为本 PR 新增的 4 条 `it`。\n\n## 回归验证(方向先声明,后运行)\n\n预先声明的三条预期:(1) 还原 site 1 → 外壳 pin 报红;(2) 还原 site 2 → **只有它自己的内层 pin 报红,外壳 pin 保持绿**(这才证明内层 pin 是承重的,而非冗余);(3) 还原 site 3 → 同理。三条全部命中。\n\n**1. 还原 site 1(`loopLeadsConfig` 改回 `itemVar`)**\n\n```\n× pins loopBodyFlow's `loop` config against LoopConfigSchema\n× does NOT see into a nested container's config — the inner pins are load-bearing\n Tests  2 failed | 110 passed (112)\n```\n\n**2. 还原 site 2(#5383 嵌套)**\n\n```\n× pins that inner loop container against LoopConfigSchema (#5700)\n FAIL  #5383 — flow-inert-node-condition descends into a loop body > pins that inner loop container ...\n Tests  1 failed | 111 passed (112)\n```\n\n只红了内层那一条,外壳 pin **仍然绿** —— 与上面 `FlowNodeSchema.config` 是开放记录的实测一致。\n\n**3. 还原 site 3(#5482 嵌套)**\n\n```\n× pins that inner loop container against LoopConfigSchema (#5700)\n FAIL  lintFlowPatterns — unbounded bulk write (#5482) > inside a nested region (#5383 / #5635) > pins that inner loop container ...\n Tests  1 failed | 111 passed (112)\n```\n\n**4. 审计断言有牙(往 `twin_regions` 分支塞未声明键)**\n\n```\n× does NOT merge two regions into one bag — a shared node id is not a fan-out\nAssertionError: expected [ Array(1) ] to deeply equal []\n+   \"branches.0: Unrecognized key(s) on this parallel branch: `bogusKey`. ...\"\n Tests  1 failed | 111 passed (112)\n```\n\n四处均已还原,末次全量为上面的 61 files / 1457 passed。\n\n## 其余门禁\n\n| 门禁 | 结果 |\n| --- | --- |\n| `pnpm --filter @objectstack/lint typecheck` | 干净(`tsc --noEmit` 无输出) |\n| `npx eslint packages/lint/src/lint-flow-patterns.test.ts` | 干净(exit 0) |\n| `node scripts/check-nul-bytes.mjs` | `OK (scanned 5839 tracked text file(s); ... no raw ASCII control bytes)` |\n| 越过门禁的自扫 `grep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]'` | 无命中 |\n\n## 不在本单范围\n\n- 全文件 full-`FlowSchema`-green(每个 flow、每个节点补 `label`):#5700 正文明确另案,未做。\n- `packages/spec` 未动;`packages/lint/src/` 下任何规则源未动。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BDmDsu2575gDxeMCxXhDE3)_"
+}

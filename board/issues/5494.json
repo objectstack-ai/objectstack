@@ -1,0 +1,36 @@
+{
+  "number": 5494,
+  "kind": "issue",
+  "title": "Automation `create_record` under `runAs:'system'` inserts rows with `owner_id`/`organization_id`/`created_by` all NULL — records born untouchable even by admin",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T14:17:36Z",
+  "updated_at": "2026-08-07T04:14:34Z",
+  "closed_at": "2026-08-07T04:14:34Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5494",
+  "body": "Part of objectstack-ai/hotcrm#700\n\nFound during HotCRM's 17.0 GA acceptance sweep on `@objectstack/*` **17.0.0-rc.2**, flow phase. Same root shape as the `ctx.api` action-body stamping gap HotCRM hit earlier (hotcrm#548), but a **different writer**: the automation engine's `create_record` node under `runAs:'system'`. Filed separately so the fix isn't assumed covered by whichever patch closes the action-path variant.\n\n## Reproduction (observed live, timestamps from the acceptance run's devserver2.log)\n\n1. 08:13:03 — manual trigger of a `runAs:'system'` scheduled sweep (`contract_renewal`) created a task and an opportunity via `create_record` nodes.\n2. Both rows: `owner_id = NULL`, `organization_id = NULL`, `created_by = NULL` (the app-level `owner` lookup gets a value; the platform columns do not).\n3. 08:19 — as **admin**: `DELETE` → **403 FORBIDDEN**; repair `PATCH {owner_id:…}` → **403** as well.\n4. 08:20 — a demo-scaffolding flow's 10-minute claim pass stamped `owner_id` on the rows.\n5. After that: the same PATCH/DELETE → **200**.\n\nStep 4/5 is the tell: nothing about the caller changed between the 403 and the 200 — only the row's `owner_id` did.\n\n## Impact\n\nDemo scaffolding is a crutch real installs don't have: **every record a scheduled sweep creates is born admin-untouchable** — renewal tasks/opportunities, stalled-deal tasks, snapshot rows. Nobody can edit, complete, reassign, or delete them without DB-level intervention.\n\n`organization_id = NULL` additionally leaves such rows **outside the org partition**: unique indexes on `(organization_id, …)` don't bite across the NULL boundary and org-scoped queries may not see the rows (this produced a duplicate visible-number pair in hotcrm#698's evidence).\n\n## Expected\n\nADR-0118 (#4608) defines the non-user-actor contract: explicit `isSystem`, fail-closed, no NULL ambiguity. The engine knows the org and could stamp it; for ownership, stamp a system/service identity or the flow's declared operating identity — anything but NULL.\n\nRefs (checked for duplicates): #4608 (the contract ADR, closed), #5378 (author-time validator vs system columns — different defect). Sibling app-side report: objectstack-ai/hotcrm#700."
+}

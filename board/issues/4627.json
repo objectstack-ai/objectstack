@@ -1,0 +1,35 @@
+{
+  "number": 4627,
+  "kind": "issue",
+  "title": "MetadataEventType 是 13 类型的封闭枚举,但可注册的 metadata 类型远多于此——枚举外类型的 realtime 事件合同缺位,需裁决覆盖面",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T12:09:14Z",
+  "updated_at": "2026-08-07T04:19:16Z",
+  "closed_at": "2026-08-07T04:19:16Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4627",
+  "body": "#4602 实施时的范围外发现,按第十条军规立案,unassigned。\n\n## 现象\n\n`MetadataEventType`(`packages/spec/src/api/events.zod.ts`)只声明 13 个 metadata 类型 × 3 动作:object/field/view/app/agent/tool/flow/action/workflow/dashboard/report/role/permission。但 `MetadataManager.register()` 接受任意 `type` 字符串,`DEFAULT_METADATA_TYPE_REGISTRY` 里可注册的类型(`translation`、`datasource`、`page`、`hook`、`trigger`、`validation` 等)远多于枚举覆盖。\n\n#4602 落地后的行为(declared = enforced,已 pin 测试):枚举外类型**不发布** realtime 事件(debug 日志),因为不存在可合法交付给 `(event: MetadataEvent) => void` 回调的事件形状——发一个每个合规消费者都必须拒绝的事件更糟。同时 `client.subscribeMetadata(type: string)` 的参数仍是宽的 `string`,订阅 `translation` 编译全绿、永远收不到事件——类型系统没把\"这个类型没有 realtime 合同\"暴露给作者。\n\n## 需裁决(两轴)\n\n1. **收窄消费端**:`subscribeMetadata` 的 `type` 参数改为从 `MetadataEventType` 派生的联合类型(`'object' | 'view' | …`),订阅无合同的类型直接编译报错——AI 写订阅代码时结构性防错。\n2. **扩枚举**:若产品上要求所有(或更多)可注册类型都有 realtime 事件,把枚举改为模板字面量类型或扩到与 type registry 对齐——但需要先回答\"哪些类型该有事件\"这一产品问题,且模板字面量会弱化 exhaustive 校验。\n\n两者不互斥;1 是纯类型收紧,成本低、先行价值高。\n\n参照:#4602(实施与 pin)、#3197(声明无消费的事件枚举)。"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 5249,
+  "kind": "issue",
+  "title": "需要决策:strictness 台账的 Class 词汇缺一个判定 —— \"被消费者全面把守的形状片段\"(#4001 批 19 / BaseNavItemSchema)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T12:18:47Z",
+  "updated_at": "2026-08-07T05:07:42Z",
+  "closed_at": "2026-08-07T05:07:42Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5249",
+  "body": "来自 #4001 批 19。**测量已经做完且无歧义;悬而未决的是用哪个词记录它**,而这个词是机读的,所以我没有猜。\n\n## 测量结果(已完成)\n\n`ui/app.zod.ts` 的最后一个 strip 站点是 `BaseNavItemSchema`。台账把它记为 `verify`,附带的指令是\"确认成员的 strictness 是否已经覆盖它\"。**答案是已经覆盖,而且台账当时的前提错了两处:**\n\n1. **成员不是 `.extend()` 这个基底,而是 spread `...BaseNavItemSchema.shape`。** 两者机制不同,这个区别正是 finding 16 的全部内容:`.extend()` 产生的克隆**继承**基底的 unknown-key 姿态(所以关掉两个 `view` 授权 schema 会连带关掉 Studio 往返 overlay,把平台自己写的形状变成 422),而 `...shape` 只是把逐键 schema 复制进一个**全新的** `z.object`,姿态是新对象自己的。双向实测过,因为\"关掉基底会连带关掉成员\"和\"关掉基底是 no-op\"是互斥的断言:\n\n   ```ts\n   strictBase.extend({ b }).safeParse({ a:'x', zzz:1 }).success              // false —— 继承\n   z.object({ ...strictBase.shape, b }).safeParse({ a:'x', zzz:1 }).success  // true  —— 不继承\n   z.object({ ...openBase.shape, b }).strict().safeParse({ a:'x', zzz:1 })   // false —— 姿态是新对象自己的\n   ```\n\n2. **九个分支各自已经 `.strict()`** 并带 `navItemUnknownKeyError`。逐分支通过真实的门(`AppSchema.navigation`,按 `type` 判别的 discriminatedUnion)断言过,同一次运行里有正控制(基底贡献的每个键——包括没有任何分支自己声明的 `requiresService`——都被 ACCEPT)和负控制(未声明键被 REJECT)。\n\n基底还是**模块私有**且全仓零 `.parse()`。`.strict()` 是 PARSE 的属性,所以关掉它保证是 no-op —— 而 #4583 明确指出 no-op 收紧并非中性(*\"a precisely-validated dead slot is the more convincing lie\"*)。\n\n结论:**不改姿态**。这部分不需要决策。\n\n## 需要决策的部分:`Class` 单元格写什么\n\n台账的 `Class` 是**机读**的(小计是对它做算术),枚举值只有八个:`authorable` · `verify` · `mixed` · `split` · `wire` · `open` · `no door` · `no gate`。对这个形状,**没有一个是诚实的**:\n\n| 候选 | 机械上是否匹配 | 它规定的后续动作 | 问题 |\n|---|---|---|---|\n| `no door` | ✅ carrier 缺席 + parse 缺席,正是两轴表的定义 | ADR-0049 退役 | **破坏性**。这套词汇是活的,九个分支都在带它;退役基底 = 删掉九个分支的共享键。台账自己写着\"读错方向,规定的动作不只是浪费而是破坏性的\" |\n| `no gate` | ❌ carrier 并非\"活着但没 parse\" | 在 carrier 自己的门上接 parse | 门**已经存在**,就在成员上 |\n| `authorable` | ❌ | 收紧它 | 这正是 reverse-pin 讨论里说的误读:把一个 parse 不到的形状标成\"强制范围\",等着下一次 sweep 来\"把活干完\" |\n| `verify`(当前值) | 语义是\"待检查\" | 去做检查 | 检查**已经做完了**;继续挂着会让下一个人重做一遍 |\n\n`view.zod.ts` 的 `FormFieldBaseSchema` 是最近的先例,记为 `authorable` 并保持打开 —— 但**那个基底是真的被 `.extend()` 的**,所以关掉它会改变行为,它是一扇真实的、有意留给消费者的门。`BaseNavItemSchema` 不是同一个形状。\n\n## 两个选项\n\n**A. 加第九个判定词**(例如 `covered`:carrier 缺席、parse 缺席,但词汇在每个消费者处都被完整把守;后续动作是**无**)。\n\n- 需要动 `packages/spec/scripts/lib/strictness-ledger-doc.ts` 的 `VERDICTS` / `BUCKETS` / `BUCKET_OF`,以及计数生成器的分桶。\n- 长期健全性:这是战役里第二次遇到\"两轴表返回的词规定了错误动作\"——第一次是批 15,当时的答案就是**加一个词**(`no gate`),而不是四舍五入到最近的错误答案。同一个问题第二次出现,倾向于说明词汇表确实缺了一格,而不是这个站点特殊。\n- 让 AI 写的元数据更难出错:这一格是**给未来的 agent 看的路标**。`no door` 会把下一个 agent 指向\"退役这个 vocabulary\",而那是九个分支共享键的删除操作 —— 这正是\"消费者侧宽容\"的镜像失败:一个宽松/错误的**分类**让错误在下游放大。加词是在**编写时**结构性地阻止误读。\n- 成本:改机读契约,现有行需要复核是否有别的站点其实属于新格(我只测了这一个)。\n\n**B. 沿用 `FormFieldBaseSchema` 先例,记为 `authorable` 并保持打开,靠散文承载差异。**\n\n- 成本最低,不动契约。\n- 长期代价要说清楚:`authorable` 的公开含义是\"ruling 的强制范围\",小计会把它算进\"还没做完的活\"。战役已经明确记录过,一个停在有意底线上的行与一个没人做完的行,reverse pin 分辨不出,**只有 `Class` 列能分辨**——用 `authorable` 等于主动放弃这个唯一的分辨手段,并把散文当作唯一防线。散文防不住 sweep;这份台账自己就记着这类\"把活干完\"的事故。\n\n## 我的建议\n\n**A**,但两条轴上都要说实话:\n\n- **长期健全性**:批 15 已经证明这个词汇表是可以增长的,而且增长的理由和这次一模一样——两个判定失败于同一个测量(没有 parse)但方向相反,合并它们会把下一批指向恰好错误的动作。这次是第三个方向:**没有 parse,但也不需要 parse,因为词汇在每个消费者处都已被把守**。把它塞进 `no door` 会在台账里留下一条指向破坏性动作的记录。\n- **让 AI 写的代码更难出错**:这一格的读者主要是后续 agent。选 A 是在分类层面做\"声明即强制\";选 B 是把正确性推给散文,也就是这份台账反复记录会失效的那一层。\n\n但 A 的成本是真实的,而且**只有一个已知实例**——如果维护者认为一格判定词不该为单个站点而生,B 是可以接受的,前提是接受上面写明的长期代价。我不替这个取舍下结论。\n\n## 现状\n\n批 19 **不改姿态,也不改 `Class` 单元格**(保持 `verify`),因为 `verify` 是唯一一个对结论不发表主张的既有值,并且让小计停在原处 —— 无论最终选哪个,这都是诚实的数字:这个站点既没有关闭,也还没有被重新分类。\n\n测量记录在三处:`BaseNavItemSchema` 的 JSDoc、`packages/spec/src/ui/app-strictness-batch19.test.ts`(含机制本身的双向断言,以及一条\"任何分支停止拒绝未知键就报错\"的守卫——那是唯一会让这个判定需要重取的变化)、以及台账的 `ui/` 行。\n"
+}

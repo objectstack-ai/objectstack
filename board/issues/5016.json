@@ -1,0 +1,36 @@
+{
+  "number": 5016,
+  "kind": "issue",
+  "title": "action param 的 `options[]` 该不该讲字段级的逐选项词汇(`color` / `visibleWhen`)? —— 三处形状,三种拼法",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "xuyushun441-sys",
+    "id": 255036401,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-03T20:29:22Z",
+  "updated_at": "2026-08-07T12:47:30Z",
+  "closed_at": "2026-08-07T12:47:30Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5016",
+  "body": "#4001 批 14 把 `ActionParamSchema.options[]` 收成了 `strictObject({ label, value })` —— **它一直以来的契约**,只是从「靠删除来执行」变成了说出口。收紧本身不删任何能用的东西(见下面的实测),但测量过程暴露出一个独立的能力问题,这里存档,不在批 14 里猜。\n\n## 现状:同一个概念,仓里有三种拼法\n\n| 位置 | 形状 | posture |\n|---|---|---|\n| `data/field.zod.ts` `SelectOptionSchema` | `label` / `value` / `color` / `default` / `visibleWhen` | `strictObject`(已关) |\n| `ui/action.zod.ts` `ActionParamSchema.options[]` | `label` / `value` | `strictObject`(批 14 关的) |\n| `ui/bulk-action.zod.ts` `BulkActionParamSchema.options[]` | `label` / `value` + 开放 | `.passthrough()`(#4909) |\n\nobjectui 那侧还有第四份:`SelectOptionMetadata`(`packages/types/src/field-types.ts`)—— `label` / `value` / `color` / `icon` / `disabled` / `visibleWhen`。注意 `icon` / `disabled` **在 spec 里任何一处都没有声明**,只活在 objectui 自己的接口里。\n\n## 实测(2026-08-03)\n\n**1. action 的门今天就在剥。** 一个 action 是注册 metadata type,所以作者写的 param 是经 `getMetadataTypeSchema('action')` 到达 objectui 的。拿真实 payload 过这道门:\n\n```\noptions: [{ label: 'Overload', value: 'overload',\n            color: 'red', visibleWhen: \"record.status == 'open'\", icon: 'x', disabled: false }]\n```\n\nparse 成功,出来的是:\n\n```json\n{\"label\":\"Overload\",\"value\":\"overload\"}\n```\n\n四个键在任何 renderer 看到它们之前就没了,而且报告成功。**所以批 14 的收紧没有拿走任何在工作的东西**,只是把静默变成了响亮。\n\n**2. 但渲染侧其实读得懂其中两个。** dialog 走 `paramToField` -> `field.options` -> `getLazyFieldWidget('select')` -> `SelectField`,而 `SelectField` 通过 `useCascadingOptions` -> `resolveCascadingOptions` 解析逐选项 `visibleWhen`(ADR-0058 / #2284);`color` 则被 grid/detail 的展示渲染器读(`packages/fields/src/index.tsx` 的 `option?.color`)。也就是说:**唯一挡在作者和一个能工作的逐选项门控之间的,就是 spec 的这道剥离。**\n\n**3. 字段回退那条路也不通。** 直觉上的处方「把 param 写成 field-backed,继承字段自己的选项」对这两个键是**假的** —— `resolveActionParams` 的 `normaliseOptions` 把每个条目重建成 `{ label, value }`。两个方向都丢。批 14 的 guidance 因此刻意**没有**给出这条建议(账本 finding 18:错误里的文案是行为,自信而错的处方比没有更糟)。\n\n## 要判的事\n\naction param 的选项列表该不该讲 `SelectOptionSchema` 已经声明、对象表单已经兑现的那套逐选项词汇?\n\n- **A. 维持 `{ label, value }`**(批 14 的落点)。契约最小、最诚实。代价:一个已经接好线的门控能力被合约挡着,而且这个不对称本身就是 AI 作者会踩的坑。\n- **B. 让它复用 `SelectOptionSchema`**(`.extend()` 覆写 `label` 为 `I18nLabelSchema`、`value` 为 `z.string()`,`.extend()` 会继承 strict)。一套词汇,N 个面。代价:`normaliseOptions` 必须同步停止重建条目,否则声明了却不兑现 —— 又是一次 declared != enforced;且要判 `color` / `default` 在这条路上是否真被读,否则是声明惰性键。\n- **C. B 再加上把 `icon` / `disabled` 补进 `SelectOptionSchema`**,让 spec 和 objectui 的选项词汇彻底对齐。代价最大,但这是唯一让「四份拼法」收敛成一份的选项。\n\n个人倾向 **B**,并且**必须**和 `normaliseOptions` 的修改同一个 PR 落地 —— 单独放开 spec 会造出一个声明了、门也过了、渲染器却收不到的键,正好是 ADR-0078 要消灭的那种。但这跨 framework + objectui 两个仓,且要先做一次 `color` / `default` 的逐键 liveness 审计,不适合塞进一个收紧批次。\n\n另注:批 14 之所以没跟 `bulk-action` 走 `.passthrough()`,是因为 #4909 的两条理由在这里都不成立 —— 那边的 def 是「left as-authored」逐字到达 grid(没有这道 spec 门),且 objectui 的 `BulkActionParam` 声明了显式的 `[key: string]: unknown` 兜底;这边的目标类型 `SelectOptionMetadata` 是**封闭**接口。目标词汇封闭,正是「声明」胜过「容忍」的场合。\n\n发现于 #4001 批 14,未指派。\n"
+}

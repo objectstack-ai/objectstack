@@ -1,0 +1,37 @@
+{
+  "number": 5862,
+  "kind": "issue",
+  "title": "check-i18n-coverage 也是「声明了但没强制」的构建前置 —— 未构建时抛未捕获异常，并把成因指向 examples/app-crm 的配置",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T09:45:22Z",
+  "updated_at": "2026-08-06T23:55:46Z",
+  "closed_at": "2026-08-06T23:55:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5862",
+  "body": "观察类发现（`finding`，不入 `pm:queue`）。在实现 #5217（`scripts/check-i18n-bundles.mjs` 加构建前置判定）时撞到同一族的**第四个站点**，与该单实现无关、文件面也不同，按 Prime Directive #10 只记录不顺手修。\n\n## 现象\n\n`scripts/check-i18n-coverage.mjs` 与 #5217 修的那个门禁是 `lint.yml` 里**紧邻的两步**（`Check generated translation bundles…` → `Check no new untranslated declared labels`），并且带着**同一句**声明式前置：\n\n- `scripts/check-i18n-coverage.mjs:31` — `// Requires the workspace build (it runs the built CLI), so it belongs after the …`\n- `scripts/check-i18n-coverage.mjs:42` — `const CLI = 'packages/cli/bin/run.js';`\n\n同样只是注释，没有检查。在装完依赖但未构建的 worktree 里（`packages/cli/dist` 缺失）跑 `node scripts/check-i18n-coverage.mjs`：\n\n```\nfile:///home/user/objectstack-issue-5217/scripts/check-i18n-coverage.mjs:101\n    if (!raw.trim()) throw new Error(`os lint produced no output for ${configPath}`);\n                           ^\nError: os lint produced no output for examples/app-crm/objectstack.config.ts\n    at countI18nIssues (…/check-i18n-coverage.mjs:101:28)\n    at …/check-i18n-coverage.mjs:118:25\nNode.js v22.22.2\n```\n\n退出码 1。\n\n## 与 #5217 的关系：同类不同形\n\n#5217 那边是「一个原因报成九个结果」；这边是**一个未捕获异常 + 一段 node 栈**，并且那句话把读者的注意力指向 `examples/app-crm/objectstack.config.ts` —— 一个完全无辜的示例配置。真实成因同样只有一个：跑的是构建产物 `packages/cli/bin/run.js`（oclif 从 `dist/commands` 解析命令），CLI 没 build 时 `os lint` 什么也没输出。\n\n家族里已有的三条：#5217（`check-i18n-bundles`，devx，本人 PR 在飞）、#5795（根 `dev` 入口）、#5794（datasource fail-fast 不认识该成因）。本条是第四个站点，不落在前三条任何一条的完成范围内（#5217 的文件面被派发词明确限定为 `check-i18n-bundles.mjs` 一个文件），故独立立单，不作子单，也不构成 `Blocked-by`。\n\n## 建议方向（实现者自选）\n\n与 #5217 落地的形状同构即可：进入 per-config 循环之前一次前置判定 + 失败时一句修法（`pnpm exec turbo run build --filter=@objectstack/cli`），而不是让第一个 config 抛异常。#5217 的 PR 里那个判定是纯函数 + `--self-test` 语料的形式（`oclifCommandFileFor` 从 CLI 自己的 `oclif.commands.target` 推导产物路径 + `looksLikeMissingCliCommand` 认 oclif 的换行签名），可以直接照抄同一形状；注意 oclif 会把那句 `command … not found` 硬换行成两三行，逐行正则匹配不到。\n\n## 影响面\n\n纯内部工具链 DX。CI 永远命中不到（构建步骤在这两个门禁之前，见 `lint.yml` 的 `Build workspace packages`），今天没有人因此拿到错误结果；坏的只是本地/worktree 复现 i18n CI 时的首个诊断步骤。故按观察类归档，交由 PM 定级。"
+}

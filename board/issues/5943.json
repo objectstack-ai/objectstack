@@ -1,0 +1,35 @@
+{
+  "number": 5943,
+  "kind": "issue",
+  "title": "[spec] `check:skill-examples` 应拒绝 os:check 块内把入参标 `any` —— 标记了却零覆盖的空门",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T12:40:17Z",
+  "updated_at": "2026-08-07T00:22:51Z",
+  "closed_at": "2026-08-07T00:22:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5943",
+  "body": "## 背景与授权\n\n从 #5720 拆出。维护者 2026-08-06 已在 #5720 的裁决评论中**预批本项立项**(原文:「**附带批准**:os:check 块禁 `ctx: any` 的门禁约束立项(落 spec scripts,可同 PR 或由承接方拆单)」),#5720 的实现 PR 选择拆单交付,故本单只做门禁,不含文档改写。\n\n未加 `pm:*` 标签,交分诊路由定级。\n\n## 问题\n\n`{/* os:check */}`(`.mdx`)/ `<!-- os:check -->`(`skills/**`)是**作者的声明**:「这段应当能编译」。`packages/spec/scripts/check-skill-examples.ts` 会把每个被标记的块真的丢给 `tsc --noEmit` 编译 —— 但块内一旦把入参标成 `any`,该参数上**每一次属性访问都不再被检查**,门是绿的,覆盖的却是零。\n\n#5720 是这道空门的实测标本:两段被标记的 hook 示例写着 `export async function beforeUpdate(ctx: any)`,读的 `ctx.services` 在 hook 上下文里**根本不存在**(引擎逐键构造九键、沙箱十键均不产),照抄的 hook 会因可选链短路无条件抛 `PERMISSION_DENIED`、拒掉每一次写入 —— 而 `check:skill-examples` 一直是绿的。把同一段函数体的 `any` 换成如实的 `HookContext` 再编译,立刻两处报同一条:\n\n```\nerror TS2339: Property 'services' does not exist on type '{ object: string; event: …; input: Record< string, unknown >; … }'\n```\n\n同一个 `any` 同时掩盖了 #5605 的 `ctx.session?.positions`(当时是 TS2339)和 #5720 的 `ctx.services`。一个标了 os:check 又把入参标 `any` 的示例,等于声明「这段编译得过」却什么也没证明 —— 与该脚本已有的两道反空转断言(orphan marker、零块 `fail()`)同一族,只是缺了这一条。\n\n## 建议约束\n\n在 `packages/spec/scripts/check-skill-examples.ts` 的提取阶段(`extractFromFile` 之后、写 build dir 之前)对**被标记块**加一条静态检查:参数标注为 `any`(含 `Promise< any >`、`Record< string, any >` 之外的裸参数标注、`(ctx: any)` / `(ctx: any, x: any)` / `function f(ctx: any)` / 箭头函数同形)即失败,报到 `页面:真实行号`,并给出处方(标真实类型,或去掉 os:check 标记)。\n\n待定的细节,建议由承接方按现状实测后定,不要预设:\n\n- **范围**:只管**入参**标注,还是也管块内 `as any` / 局部变量 `: any`?(#5720 的实现里,`ctx.api` 因契约声明为 `api: z.unknown()` 必须窄化,示例用的是一个具名局部类型 `as CrossObjectApi` —— 若把 `as any` 一并禁掉,要确认现存 207 块里有多少要跟着改。)\n- **既有基线**:实测当前被标记块里还有多少 `any` 入参;若非零,是一次改净还是先建棘轮(repo 内 `check:*` 棘轮惯例)。\n- **自测**:按脚本自身的惯例补 `--self-test`(红/绿双向:标了 `any` 的块必须红,改成真实类型必须绿)。\n\n## 验收\n\n- 一个 os:check 块把入参标 `any` ⇒ 门红,报页面 + 行号 + 处方;\n- 现存 207 块(#5720 落地后)全绿;\n- `--self-test` 覆盖红/绿两个方向。\n\n## 关联\n\n- 父单 #5720(runtime-services hook 示例教了不存在的 `ctx.services`;docs-only 修法已单独交付)\n- #5605(`HookContext.session` 补 `positions` / `preserveAudit` 声明 —— 被同一个 `any` 掩盖的另一半)"
+}

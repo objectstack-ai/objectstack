@@ -1,0 +1,34 @@
+{
+  "number": 6030,
+  "kind": "pull_request",
+  "title": "docs(skills): objectstack-ui 的 App 例子不再教 defaultAgent: 'sales_copilot' (#5985)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T15:13:46Z",
+  "updated_at": "2026-08-07T00:22:52Z",
+  "closed_at": "2026-08-07T00:22:50Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T00:22:50Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6030",
+  "body": "Fixes #5985\n\n## 问题\n\n`skills/objectstack-ui/SKILL.md` 的 App 例子(带 `os:check` 标记)教:\n\n```\ndefaultAgent: 'sales_copilot',          // optional AI copilot binding\n```\n\nADR-0063 §2 撤回了租户 / 应用包级自定义 agent,`app.defaultAgent` 的可解析集合\n收窄到两个平台 agent(`ask` / `build`,别名可解析)。这行 parse 得过、build 得过、\n`os:check` 也过 —— 因为 `defaultAgent` 的类型就是 `string`,字符串就是字符串 ——\n运行期却绑不上任何东西,静默回落平台默认。\n\n`skills/` 随 `npx skills add objectstack-ai/objectstack/skills` 原样发给第三方,\n是 AI 写元数据时第一个读的语料;`sales_copilot` 这种「像真的一样」的名字被逐字\n抄进业务包的概率很高。\n\n**前提已对 `origin/main` 复核成立**,三处独立佐证均为仓内实测而非推断:\n\n- `packages/spec/src/ui/app.zod.ts` 的 `defaultAgent` JSDoc:「the resolvable\n  values are the two platform agents… a name that is not a platform agent will\n  not resolve at chat time」;\n- `packages/lint/src/validate-ai-agent-authoring.ts` 头注释:stack-authored\n  agent 在 chat 上 404,且不能经 `app.defaultAgent` 钉住;\n- objectui `packages/app-shell/src/hooks/surfaceAgent.ts:82`\n  —— `const bounded = isBuiltinAgentName(appDefaultAgent) ? appDefaultAgent : undefined;`\n  表外的名字是**拒收**(丢弃)而不是透传,注释写明「so a roster cannot be\n  smuggled in via app metadata」。\n\n## 选的路线:删掉该行(数据类 app)\n\n按 PM 分诊给的两个合法方向,判断依据是**该示例 App 本身的性质**。例子里的\n`crm_enterprise` / 'Enterprise CRM' 是标准的数据类 app —— leads、opportunities、\nsaved view、dashboard、report、approval requests,整棵导航树没有一处 authoring\n语境。故按 ADR-0063 它本就该省掉这个 key:`ask` 是隐式默认。\n\n这与 #5891 / PR #5984 刚落地的 `content/docs/ui/apps.mdx` 「Default Agent」一节\n逐条对齐(同一发现的来源),该节写的就是:\n\n- **Omit it** on a data app —— `ask` is the implicit default;\n- **Set `'build'`** on an *authoring* surface(Studio 是内置例子)。\n\n改法上没有直接删空,而是照**同块 `hidden:` 的既有写法**留一条注释掉的示例 ——\n因为 PM 分诊要求「注释『optional AI copilot binding』必须跟着改(说明可解析集合\n只有 ask/build)」,而整行删空就没有落点承载这条语义了。同时这样保留了 key 在语料\n里的可发现性:AI 仍知道 `defaultAgent` 存在,但读到的是收窄后的真语义。\n\n```\n  // defaultAgent: 'build',                // ADR-0063 §2 — the resolvable set is exactly two\n                                           // platform agents: `ask` (data surface) / `build`\n                                           // (authoring, e.g. Studio). Any other name parses\n                                           // but binds nothing at chat time. A data app like\n                                           // this one omits the key — `ask` is the default.\n```\n\n原注释「optional AI copilot binding」正是让人以为可以随便起名的那句,已整句替换。\n三条事实写进注释:可解析集合恰好是两个平台 agent、表外名字 parse 得过但绑不上、\n数据类 app 省掉此 key。\n\n`sales_copilot` 这个**字面量不再出现在 `skills/` 任何位置**\n(`git grep -n \"sales_copilot\" -- skills/` 空)。刻意没有把它作为反例写进注释:\n文档正文里点名它是安全的(apps.mdx 就那么做),但 skill 的**代码块**里出现该字面量,\n恰好是本单要消除的复制粘贴风险。\n\n## 反向验证:方向是「绿 → 绿」,不是「绿 → 红」\n\n先声明预期方向再跑的:本单**不可能**出现「还原缺陷 → 门禁转红」。`defaultAgent`\n的类型是 `string`,`'sales_copilot'` 与 `'build'` 一样类型检查通过;缺陷是运行期\n解析事实,不是类型事实。若还原后能转红,issue 正文「parse 得过、build 得过、\n`os:check` 也过」这一核心论断就是假的,这个坏例子当初也就进不了仓。\n\n实测确认了这个预期:把 `defaultAgent: 'sales_copilot'` 原样放回后重跑\n\n```\n✅ 208 prose examples type-check against @objectstack/spec\nEXIT=0\n```\n\n**门禁对这一类缺陷结构性失明** —— 这正是它当初得以发布的原因,也正是 issue 正文\n建议 2(给取值加 lint)想补的那一层。按分诊裁定,建议 2 是新门禁面,**不在本单\n范围**,未夹带。\n\n## Changeset:按 `skills/**` 先例走 `skip-changeset`\n\n`skills/` 是已发布内容但不经 changeset 发版。查同类先例,今日 `skills/**` 的 PR\n一律 `skip-changeset` 标签、无 changeset:\n\n- **#5937**(`0d1bc15`,今日碰过本文件的那一笔,九份 SKILL.md 的 compatibility\n  声明改 17.x)—— 实测其提交文件清单**零个** `.changeset/` 条目;\n- **#5901**(三处 hook 文档)、**#5989**(data-hooks 的 condition 一节)同样。\n\n照抄该先例:本 PR 不提交 changeset,建 PR 后立即打 `skip-changeset` 标签。\n\n## 自验(全部前台阻塞执行,build/test 持 `flock /tmp/os-heavy-verify.lock`)\n\n基线 rebase 到当时的 `origin/main`(`b5bdf48`),本文件上游无并发改动。\n先 `pnpm --filter '@objectstack/spec^...' --filter @objectstack/spec build`\n(`check:skill-examples` 读的是构建出的 `dist/*.d.ts`),再逐条跑覆盖 `skills/`\n的五道门禁:\n\n| 门禁 | 结果 |\n| --- | --- |\n| `check:skill-examples` | ✅ 208 prose examples type-check against @objectstack/spec(含本例 `skills/objectstack-ui/SKILL.md:472`) |\n| `check:doc-authoring` | ✓ 362 files clean — no bare metadata literals(自检 + 全量) |\n| `check:skill-frame-sync` | ✓ 12 cases pass;4 copies structurally isomorphic |\n| `check:skill-docs` | ✅ Skill docs in sync(`skills/README.md`、`content/docs/ai/skills-reference.mdx`) |\n| `check:skill-refs` | ✅ 9 generated files in sync with packages/spec |\n\n字节纪律:`node scripts/check-nul-bytes.mjs` → OK(5778 tracked text files);\n对本文件另做定向自扫 `grep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]'` → 无命中。\n\n改动面严格等于申报文件面:`skills/objectstack-ui/SKILL.md` 一个文件,+5/-1。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01BDmDsu2575gDxeMCxXhDE3\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BDmDsu2575gDxeMCxXhDE3)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 6003,
+  "kind": "pull_request",
+  "title": "fix(service-analytics): 只当窗口用的 timeDimensions 条目不再被补默认粒度、不再静默拆网格 (#5688)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T14:20:36Z",
+  "updated_at": "2026-08-06T14:55:42Z",
+  "closed_at": "2026-08-06T14:55:41Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T14:55:41Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6003",
+  "body": "Fixes #5688\n\n## 前提重验(对 origin/main `628b028`,含 fb3d99b/#5808 与 #5963/#5716)\n\n**前提成立,三个必要条件逐字复现。** 以正文的 dataset 与三条数据实测,输出与立单描述逐字节一致:\n\n```\nfields [{\"name\":\"owner\",\"type\":\"string\",\"label\":\"Owner\"},{\"name\":\"close_date\",\"type\":\"time\"},{\"name\":\"opp_count\",…}]\nrows   [{\"owner\":\"u1\",\"close_date\":\"2026-01\",\"opp_count\":1},\n        {\"owner\":\"u1\",\"close_date\":\"2026-02\",\"opp_count\":1},\n        {\"owner\":\"u2\",\"close_date\":\"2026-01\",\"opp_count\":1}]\n```\n\n附带症状同样成立:被投影的 `close_date` 在 `fields` 里只有 `type` 没有 `label`;同一 dataset 里把 `close_date` 写进 `selection.dimensions` 时则有 `label: \"Close Date\"` —— 富化循环只读 `selection.dimensions` 的盲区。\n\n## 改动\n\n按裁决「回填判据收窄」,落在 `buildQuery` 的 `resolvedTimeDims` 一处:未写 `granularity` 的条目**仅当**该 dimension 是本次查询的网格维度、或 `selection.dateGranularity` 已设时才回填默认粒度(条目自带 `granularity` 的走不到这里,照旧分桶并投影,#4033 不变)。\n\n`resolveDimensionGranularity` **未改**:它回答「桶多大」,不回答「要不要分桶」。两个问题拆开写在注释里,因为它们在同一处打架正是本单的成因 —— dataset 维度的 `dateGranularity` 说的是「这个日期**被分组时**怎么渲染」,不是「请按它分组」。\n\n## compareTo 的对齐语义(同场必答项)\n\n**定义**:compareTo 不隐含分桶需求;它锚定的条目按与其它条目**完全相同**的判据决定是否分桶,主趟与比较趟因此**按构造**得到同一结论 —— `runCompare` 经 `runMeasurePass` 回到同一个 `buildQuery`,网格维度与 `selection.dateGranularity` 都相同,只有 `dateRange` 被平移。\n\n- **锚定条目被选中 / 显式粒度** → 两趟都分桶,#3588/#4870 的刻意修复原样保留(用例断言两趟 groupBy 都是 `{field:'close_date', dateGranularity:'month'}`)。\n- **锚定条目纯窗口** → 两趟都不分桶,收窄不是「保住」而是**修好**了对齐。`mergeByDimensions` 一直只按 `selection.dimensions` 建键,回填出来的桶列从来不在合并键里:实测同一 owner 被裂成多行时,比较值落在索引最后写入的那一行上,其余行读到一个自信的 `0`。\n\n实测(比较窗口内**有**数据,且 u1 的比较值跨两个月 = 1 + 2,单月凑不出来):\n\n```\n改前  [{owner:u1, close_date:'2026-01', opp_count:1, opp_count__compare:0},\n       {owner:u1, close_date:'2026-02', opp_count:1, opp_count__compare:2},\n       {owner:u2, close_date:'2026-01', opp_count:1, opp_count__compare:1}]\n改后  [{owner:u1, opp_count:2, opp_count__compare:3},\n       {owner:u2, opp_count:1, opp_count__compare:1}]\n```\n\nKPI 单值卡(`dimensions: []`)同理:改前是两行月桶、卡片读第一行,改后一行 `{opp_count:3, opp_count__compare:4}`。\n\n**PM 机制假设 1 未被证伪** —— 未发现「窗口-only 不分桶」与「compareTo 对齐」不可同时满足的形状,不报 fork。\n\n## label 富化盲区(#5691 现状 + 顺手收掉)\n\n先读了 #5691:它是 #5537 的 PR,已 **closed/merged**(2026-08-06T00:49:29Z),不是待认领的单,无撞车。它把盲区作为**成对控制用例**钉在 `dataset-dimension-field-descriptors.test.ts` 里并指向本单。\n\n修法:`fields` 的维度 label 富化,查找集合从 `selection.dimensions` 扩到「本次 selection 通过 `timeDimensions` 引用到的 dataset 维度」。**扩的是查找,不是投影** —— 循环仍然只富化 `result.fields` 里已经存在的条目,所以停留为纯窗口的条目不产生列、也拿不到描述符(#5691 在该处写下的「只富化、不造列」边界原样保留,并另加注释说明为什么没有并进 `selectedDims`:钻取元数据与行值 label 解析回答的是另一个问题,动它们会改钻取载荷与行值,而不是表头)。\n\n## 翻 pin:承重,不是删断言\n\n`dataset-dimension-field-descriptors.test.ts` 的成对控制用例是明写的翻转靶,两条都翻了,并且都**加重**了:\n\n- 除列集外,新增断言网格实质 —— 一个 owner 一行、窗口内三条记录聚成一桶(改前是 2 + 1 两行),以及「没有哪一行带着描述符没提的列」;\n- 两个 block 的用例仍然逐列相同,收敛关系不变。\n\n新增 `dataset-window-timedimension-bucketing.test.ts`(11 例)钉住收窄判据的**三条正向臂**与**反向臂**、compareTo 成对双向行为、以及一条「dataset 未声明 `dateGranularity`」的对照(证明声明本身就是触发条件,而不是假定)。\n\n## 反向验证(先预测方向,再跑;拆成两半各自隔离)\n\n方向普通(红),无反转、无计数移动。\n\n- **只还原 executor 收窄**:预测 8 红 —— block 1 四例 + compareTo 窗口-only 两例 + 翻转的 #5537 两例;block 2 四条守卫与 compareTo 分桶锚定例保持绿。**实测 8 红,逐例吻合**。\n- **只还原 analytics-service 的 label 扩集**:预测 1 红 —— 仅「条目自带 granularity 且未被选中」那条的 label 断言。**实测 1 红**,正是该例。\n\n两半各自承重,互不代偿。\n\n## 范围与门禁\n\n- ⛔ 未触 #5963 刚信封化的四处 throw;`dataset-refusal-envelope` / `filter-refusal-envelope` / `unlisted-refusal-envelope` / `read-scope-refusal-envelope` 与 `dataset-compare-dimension-resolution` 全绿,拒收到达条件无变化(判据只影响 granularity 回填,不影响 `dateRange` 是否存在)。\n- ⛔ 未触 `packages/spec`、dataset-compiler、strategies 的拒收面。\n- 消费半径已清扫:`packages/rest`(62 文件 / 854 例绿)、`packages/qa/dogfood` 的 analytics/temporal 四个文件(18 例绿,其中 #4033 那条走的正是「条目自带 granularity」这条保留分桶的路径)。`examples/app-crm`、`app-showcase` 确有声明 `dateGranularity` 的 dataset(可达性属实),但仓库内无一处 fixture 把窗口-only 条目与声明了 `dateGranularity` 的维度组合起来,故无其它 fixture 需要改判。\n\n## 必答项:对 #5717(`isMissingSourceError` 嗅探器)的影响\n\n**完全无影响**,三条独立理由:\n\n1. 位置不同 —— 嗅探器包在 `DatasetExecutor.execute()` 的 `catch` 上(`analytics-service.ts` :796),判的是**驱动抛出的 relation-missing 错误**;本改动只动 `buildQuery` 里成功路径的 granularity 判据,不新增、不消除、不改写任何异常。\n2. 到达条件不变 —— 收窄只可能让某条 timeDimensions 条目**不再**进入 GROUP BY,而 `isMissingSourceError` 关心的是表/关系是否存在,与是否分桶正交。\n3. 已实测 —— `dataset-cross-datasource-registration.test.ts` 等相关用例全绿,未出现新的空结果吞没路径。\n\n既没让它变简单,也没让它变难,更没让它变得不必要。\n\n## 验证\n\n`.github/workflows/lint.yml` 逐个枚举全跑(lint / slot-lookup / query-options-erasure / nul-bytes / doc-authoring / docs-audit-scope / role-word / adr-anchors / org-identifier / authz-resolver / service-providers / route-envelope / error-code-casing / wildcard-fallthrough / init-service-contract / durability-log-level / startup-registry-verdict / objectui-changeset / release-notes / release-body / node-version / workflow-status-functions / published-files / engine-double-contract / resume-authority-declared),全绿;typecheck 侧 `check:type-check-coverage`(本包 3 error 的实测台账**未移动**)/ `check:driver-conformance` / `check:stall-guard` 全绿。\n\n`@objectstack/service-analytics`:59 文件 / 1092 例(改前基线)→ **60 文件 / 1103 例全绿**。\n\nchangeset 已加(用户可见行为变更:窗口-only selection 的**行数与列集**同时变化 —— 此前多出的月列与裂行消失)。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015a5qkLzpGXhLL2F5gvJ7dD)_"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 5984,
+  "kind": "pull_request",
+  "title": "docs(ui): 给 apps.mdx 补 contextSelectors / defaultAgent 两个作者面键 (#5891)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T13:52:19Z",
+  "updated_at": "2026-08-06T14:20:26Z",
+  "closed_at": "2026-08-06T14:20:24Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T14:20:24Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5984",
+  "body": "Fixes #5891\n\n## 为什么\n\n`content/docs/ui/apps.mdx` 的 App Properties 表是作者写 app 的**唯一**手写入口,读起来像作者面的全集;而 `packages/spec/src/ui/app.zod.ts` 的 `APP_KEYS` 里的 `contextSelectors` 与 `defaultAgent` 既不在这张表里,也在整个手写文档树**零覆盖**(此前只存在于生成的 `content/docs/references/ui/app.mdx`)。对作者来说这不是「少写一行」,而是把两个键变成不可发现 —— 与 #4880 / PR #5890 处理的 `areas[]` 完全同一形状的缺口。\n\n## 改了什么\n\n只动 `content/docs/ui/apps.mdx` 一个文件,体例照 PR #5890(`## Areas`)的先例:表格行 + 需要展开的键单独小节。\n\n1. **App Properties 表补两行**,各自链到自己的小节:`contextSelectors`(排在 `areas` 之后)、`defaultAgent`(排在 `requiredPermissions` 之后)。\n2. **新增 `## Context Selectors`**\n   - 语义:侧边栏顶部(导航树之上)的作用域下拉;当前值以选择器自身的 `id` 命名发布,按模板变量注入导航项 —— 与 `current_user_id` / `current_org_id` 同一套替换。\n   - 注入落点逐条列出:object 项的 `recordId` 与 `filters` 各值、`page` / `component` 项的字符串 `params` 值;解析不到的变量整条从 URL 里丢掉,而不是留空。\n   - `optionsSource` 子表(`endpoint` / `valueKey` 默认 `id` / `labelKey` 默认 `name` / `filter`),以及 `filter` 谓词的 `eq`(默认)`ne` `in` `nin`。\n   - 「选择器是**强制作用域**」一节:没有 All 行、也没有键能要一个;列表解析出来且尚无具体选中时壳层**自动选中第一项**;`allValue` 是「尚未具体选中」的哨兵值而不是 All 选项。\n   - 「Retired selector keys」callout:17.0.0(#4509 / ADR-0049)退休的 `includeAll` / `placement`,连同各自的处方 —— 与页面既有的 app 级 / area 级退休 callout 同体例。\n   - 例子取平台自身 Studio 的 package scope(`packages/platform-objects/src/apps/studio.app.ts` 的真实形状),带 `{/* os:check */}` 标记。\n3. **新增 `## Default Agent`**:可解析值只有 `ask` / `build` 两个平台 agent —— 数据类 app 省略即得 `ask`,授权类(authoring)surface 写 `'build'`;ADR-0063 撤回了租户/包级自定义 agent,所以表外的名字(如 `sales_copilot`)parse 得过但绑不上,解析时回落平台默认。附一条 callout 说明它绑的 in-product chat runtime 属 ObjectOS,开源版没有可绑的 chat surface。\n4. Related 补一条到 [AI Agents](/docs/ai/agents) 的链接。\n\n## 事实来源(每条断言都在 origin/main 上核过)\n\n| 断言 | 出处 |\n| :--- | :--- |\n| 键集 / 必填性 / 默认值 | `packages/spec/src/ui/app.zod.ts` `AppContextSelectorSchema`(`id` `label` `optionsSource` 必填;`allValue` 默认 `''`、`persist` 默认 `'query'`;`valueKey`/`labelKey` 默认 `id`/`name`) |\n| 模板变量注入语义 | 同上 `AppContextSelectorSchema` 的 JSDoc + `AppSchema.contextSelectors` 的 `.describe` |\n| 注入落点 / 解析不到即丢弃 | objectui `packages/layout/src/NavigationRenderer.tsx` 的 `applyNavTemplate` 与 `resolveHref`(object `recordId`、object `filters`、page `params`、component `params`) |\n| 侧边栏渲染位置、自动选中第一项、无 All 行 | objectui `packages/app-shell/src/layout/ContextSelectors.tsx`(`useAppContextSelectors` / `SelectorControl`),挂载点见 `AppSidebar.tsx` / `UnifiedSidebar.tsx` |\n| `includeAll` / `placement` 退休处方 | `app.zod.ts` 的 `CONTEXT_SELECTOR_RETIRED_KEY_GUIDANCE` |\n| Studio package scope 的真实用法 | `packages/platform-objects/src/apps/studio.app.ts` |\n| `defaultAgent` 绑定语义与可解析集合 | `app.zod.ts` `defaultAgent` 的 JSDoc/`.describe`(ADR-0063 §1/§2);解析链见 cloud `packages/service-ai/src/agent-runtime.ts` `resolveDefaultAgent`(app.defaultAgent → `ask` → 首个 active);「表外名字回落平台默认」另有 cloud 用例 `agent-load-platform-gate.test.ts` 直接盯住 |\n| 开源版无 in-product chat | `content/docs/ai/agents.mdx` 既有 callout |\n\n新增的「One scope per app today」callout 同样是核过的实现事实,不是推测:`ContextSelectors.tsx` 把选中值反射到 URL 上**一个固定 query key**,而每个声明的 selector 都从同一个 key 读回(`contextValues[sel.id] = (params.get('package') ?? saved) || …`),所以第二个 selector 会镜像第一个而不是独立作用域。写进文档是为了不让作者照着数组类型声明出一份静默失效的元数据;objectui 侧的实现缺陷另行归档,不在本 PR 修。\n\n## 自验\n\n- `node scripts/check-doc-authoring.mjs --self-test && node scripts/check-doc-authoring.mjs` → `✓ doc authoring guard: 362 files clean`\n- `pnpm --filter @objectstack/spec run check:skill-examples` → `✅ 208 prose examples type-check against @objectstack/spec`;抽取清单里本页从 3 块变 4 块(新增 `content/docs/ui/apps.mdx:512`),即新例子确实被对着**真实 spec 的 d.ts** 编译过\n- **反向验证(方向预判:红)**:往新例子里塞一个已退休的 `placement: 'topbar'`,门禁如期转红,并且报错把 selector 的合法键集原样列了出来 —— `error TS2353: … 'placement' does not exist in type '{ id: string; label: string; optionsSource: {…}; icon?…; allValue?…; persist?… }'`,反过来证实了本 PR 表格里的键集与「退休键在 parse 期被拒」的说法;移除探针后复跑回绿\n- `node scripts/docs-audit/check-audit-scope.mjs` → `✓ docs-accuracy-audit scope is in sync with content/docs/: 178 hand-written doc(s)`\n- MDX 语法:用 `@mdx-js/mdx@3.1.1` 的 `compile()` 单独编译本页通过(并用一份故意写坏的 MDX 验证过该 harness 不是空跑)\n- `node scripts/check-nul-bytes.mjs` 通过;另按控制字节纪律对本文件跑了 `grep -naP '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]'`,零命中\n\n## Changeset\n\n**不带 changeset**,按 PM 裁定走 `skip-changeset` 标签路线:本 PR 只改手写文档页,不发布任何包(空 changeset 会滞留发布,#4898,所以不提交空文件)。标签已在 PR 建好后由本 agent 补上(读回既有标签后写并集,避免覆盖 bot 刚打的 `size/*` 等)。\n\n## 范围\n\n严格按分诊裁定只做 `contextSelectors` / `defaultAgent` 两键。⛔ **`hidden` 没有写** —— 其语义正由 #4829 争议中(`filterAppForUser` 当 builder-only 访问闸门 vs spec `.describe` 的「只从 App Switcher 隐藏」),先定语义再写散文。⛔ 未碰 `packages/spec/**`、未碰 `content/docs/releases/`。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01BDmDsu2575gDxeMCxXhDE3\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BDmDsu2575gDxeMCxXhDE3)_"
+}

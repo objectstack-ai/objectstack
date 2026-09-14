@@ -1,0 +1,36 @@
+{
+  "number": 4636,
+  "kind": "issue",
+  "title": "loadMetaFromDb object branch reads `record.packageId` from a snake_case row — always undefined, every object overlay registers under the 'sys_metadata' sentinel at boot",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "repo:objectstack"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T12:25:14Z",
+  "updated_at": "2026-08-07T13:04:15Z",
+  "closed_at": "2026-08-07T13:04:15Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4636",
+  "body": "Found while implementing #4624 (PR #4635). **Unassigned — nobody is on this.** Recording only, per Prime Directive #10.\n\n## Evidence\n\n`loadMetaFromDb`'s **object** branch (`packages/metadata-protocol/src/protocol.ts`, ~line 8958 on current `main`) registers each hydrated object row with:\n\n```ts\nthis.engine.registry.registerObject(\n    { ...(data as Record<string, unknown>), _provenance: 'org' } as any,\n    record.packageId || 'sys_metadata',\n);\n```\n\nBut `engine.find('sys_metadata', ...)` returns rows keyed by the object's **snake_case** field names — `package_id`, not `packageId`:\n\n- the `sys_metadata` object declares `package_id` (`packages/metadata-core/src/objects/sys-metadata.object.ts`);\n- `SysMetadataRepository` writes `parentRowData.package_id = ...` (`sys-metadata-repository.ts` ~386-388) and maps `row.package_id → packageId` explicitly when it wants camelCase (~784);\n- `getMetaItems` in the same file reads the same query's rows as `r.package_id` (~2588, ~2606).\n\nSo `record.packageId` is **always `undefined`** and the `|| 'sys_metadata'` fallback always wins: every object overlay row — including rows genuinely bound to a package (`package_id = 'app.<slug>'` etc.) — registers into the SchemaRegistry under the `'sys_metadata'` sentinel `sourcePackage` at boot, silently dropping its package binding.\n\n## Why it matters\n\nThe cloud#970 fix comment right above this line documents the intent: pass the row's real package id but stamp `_provenance: 'org'` so the tenant-authored row is not misread as code-shipped. Half of that intent is dead: the provenance stamp works, the package binding never arrives. Consequences of registering under the sentinel instead of the real package id include the sidebar package filter / provenance classification not seeing the boot-hydrated object as belonging to its package (the same concern the read-side hydration explicitly handles by surfacing `record.package_id`, ~2596-2609), and `registry.getObject`-side package bookkeeping diverging between \"created this session\" (write path, real id) and \"restarted\" (boot path, sentinel).\n\n## Suggested fix\n\nRead `(record as { package_id?: string | null }).package_id || 'sys_metadata'` — matching every other consumer of this query's rows. Needs a pin test (boot-hydrate an object row with `package_id` set; assert the registry records the real package binding, and that cloud#970's `_provenance: 'org'` + editability still hold). Check `registerObject`'s package bookkeeping for whether the sentinel-vs-real-id switch has any other observable effects before landing (i.e. confirm this does not resurrect the cloud#970 `not_overridable` trap — the `_provenance: 'org'` stamp is what guards it now).\n\nNot fixed in #4635 because it is the object branch (out of that issue's scope) and changes boot-time registry state for object rows — it deserves its own pin test and review."
+}

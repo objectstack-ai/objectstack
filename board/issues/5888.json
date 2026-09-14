@@ -1,0 +1,37 @@
+{
+  "number": 5888,
+  "kind": "issue",
+  "title": "protocol/kernel/config-resolution.mdx 教的 tenant/user config API 在仓库里零实现（`config.setTenant()` / `setUserPreference()` / `objectstack_tenant_config`）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T10:58:37Z",
+  "updated_at": "2026-08-07T00:03:09Z",
+  "closed_at": "2026-08-07T00:03:09Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5888",
+  "body": "## 现象\n\n`content/docs/protocol/kernel/config-resolution.mdx` 用可复制的 TS 示例教一套分层配置 API，其中至少三个符号在仓库里搜不到任何实现：\n\n- `context.config.setTenant('stripe.apiKey', …, { tenantId: 'acme-corp' })`（约 191 行）\n- `context.config.setUserPreference('locale', 'de')`（约 222 行）\n- 存储层 `CREATE TABLE objectstack_tenant_config (tenant_id UUID NOT NULL, …)`（约 206-212 行）\n\n实测（`origin/main`，worktree HEAD `5c94f833c`）：\n\n```\ngrep -rn \"setTenant\\b|objectstack_tenant_config\" --include=*.ts packages core   → 0 hits\ngrep -rn \"setUserPreference|config\\.setTenant|TenantConfig\" --include=*.ts packages core apps  → 0 hits（排除 *.test.ts 后仍为 0）\n```\n\n## 为什么值得登记\n\n这页在 `docs-accuracy-audit` 的 scope 内（178 页之一），且是 `protocol/kernel/**` 目录 —— 该目录此前正因为审计 scope 列表烂掉而漏审两个月（#4781 / #4817 的历史）。页面本身是\"protocol\"位阶，读者（含 AI 作者）会当作平台契约照抄；而 `objectstack_tenant_config` 那张表连命名都与平台事实相反：平台的租户列是 `organization_id`（registry 注入，lookup 到 `sys_organization`），`tenant_id` 不是任何现存表的列名。\n\n两种可能的处置，需要 triage 决定哪一种：\n\n1. **能力从未落地** → 这页整段是幻影能力，按 Prime Directive #10「never advertise a capability the runtime doesn't deliver」删除或改写成\"planned\"；\n2. **能力换了形状/换了包** → 找到真实 API 后按实际签名重写（并顺带把 `tenant_id` 改成 `organization_id` 词表）。\n\n我没有继续往下追第 2 种可能（不在 #5746 的文件面内），所以缺陷范围以\"这页教的符号在本仓库不存在\"为准，不断言它在别处也不存在。\n\n## 来源\n\n#5746（`content/docs/protocol/objectql/schema.mdx` 多租户小节按代码重写）过程中扫 `content/docs` 里 `tenant_id` 残留时发现，按 Prime Directive #10 单独登记。\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 5429,
+  "kind": "issue",
+  "title": "`os doctor` 的两条 ledger 健康行都锁在 `isolated` posture 之内 —— 换个 posture，同一个坏 ledger 一行都不报",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T11:08:26Z",
+  "updated_at": "2026-08-06T14:30:29Z",
+  "closed_at": "2026-08-06T14:30:29Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5429",
+  "body": "实施 #5413（doctor 消费 `list()` 的 `skipped` 产出 `HealthCheckResult`）时核验发现；**未在该 PR 里改** —— 该单的接线口径由分诊限定为「D5e 消费 skipped」，改动这条行的**可达条件**属另一个决策。\n\n## 事实\n\n`packages/cli/src/commands/doctor.ts`。两条关于 ledger 的健康行 —— #5412 的目录级 `Could not read the installed-package ledger`，和 #5413 新加的条目级 `N installed-package ledger entries could not be read` —— 都只在 ADR-0120 D5e 那个 advisory 块里产生，而该块的入口是：\n\n```\nif (postureReading.ok && postureGatesGlobalUniques(postureReading.posture)) {\n  printStep(\"Checking unique scopes against the 'isolated' tenancy posture...\");\n  const { advisories, ledgerFailure, skippedLedgerEntries } = await findUnscopedGlobalUniques(...);\n```\n\n且 `findUnscopedGlobalUniques()` 自己第一行就是：\n\n```\nif (!postureGatesGlobalUniques(posture)) return { advisories: [], skippedLedgerEntries: [] };\n```\n\n`postureGatesGlobalUniques()` 只对 `isolated` 为真。于是在 `single` / `group` posture 下，`readInstalledPackageEntries()` **根本不被调用**：ledger 读不读得动、条目坏没坏，`os doctor` 一个字都不会说。\n\n这不是 #5413 引入的 —— #5412 的行本来就在同一个门里面。#5413 只是让第二条行继承了同一个可达条件，因此值得单独记一笔。\n\n## 为什么这可能是个缺陷\n\n「这个环境的 unique 在 `isolated` 下是否危险」**是**一个 posture 问题，锁在门里完全正确。\n但「`.objectstack/installed-packages/` 里有文件读不出来」**不是** —— 它在任何 posture 下都同样为真、同样意味着已装应用在 boot 时消失。诊断命令在 `single` posture 下对此完全沉默。\n\n缓解（也是本条判轻的原因）：#5413 之后，**boot 侧**的 `rehydrate()` 会对每个损坏条目 `warn`，与 posture 无关。所以操作者不是全无信号，只是**诊断命令**这条路上没有 —— 属 #4801 / cloud#1020「诊断面与运行时不一致」家族的一个小切面。\n\n## 复现路径\n\n```\nOS_TENANCY_POSTURE=single      # 或 group\n.objectstack/installed-packages/broken.json   # 截断的 JSON\nos doctor                       # 关于 ledger：无任何一行\nOS_TENANCY_POSTURE=isolated\nos doctor                       # ⚠ Unique scope  1 installed-package ledger entry could not be read …\n```\n\n## 决策点（不预设，留给分诊）\n\n- **A. 把「ledger 可读性」提成一条 posture 无关的独立健康检查**，D5e 只保留 unique 的判断：语义上最干净（两件事本来就不同源），但要新起一个 name 列，且要想清楚它与 D5e 那条行同时出现时会不会重复。\n- **B. 维持现状**，理由是 boot 侧的 `warn` 已经覆盖了运行时后果，doctor 只在它本来就要读 ledger 的时候顺带报告。\n- **C. 让 `readInstalledPackageEntries()` 无条件跑，只有 unique 的判定受 posture 门控**：改动最小，但会让一次 `single` posture 的 doctor 也去读 ledger 目录，需确认没有别的副作用。\n\n倾向 A（诊断面不该因为一个无关的 posture 而对同一个事实失明），但这是 doctor 报告面的结构决策，需维护者拍板。\n\n## 备注\n\n- 已按关键词搜过 open issues（`doctor` + `ledger` / `posture` / `unique scope`），无重复。\n- 打 `finding` 标签：今天不会有用户因此被静默坑到（boot 侧已有 `warn`），是诊断面的覆盖缺口而非活跃缺陷 —— 但严重度留给分诊评级。"
+}

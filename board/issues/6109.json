@@ -1,0 +1,34 @@
+{
+  "number": 6109,
+  "kind": "pull_request",
+  "title": "docs(releases): v17 升级指南收录两条 console 破坏性迁移,console 段 pin 区间推到 f995a452d2ca (#6106)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T02:10:56Z",
+  "updated_at": "2026-08-07T02:35:24Z",
+  "closed_at": "2026-08-07T02:35:23Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T02:35:23Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6109",
+  "body": "Fixes #6106\n\nrc.4 发布前置的 **PR A(docs-only)**。只改 `content/docs/releases/v17.mdx` 一个文件,不含任何代码/脚本改动,因此没有 changeset(走 `skip-changeset`)。这是 CLAUDE.md「不要在代码 PR 里改 `content/docs/releases/`」条款所指的那条正当路径:专门的 docs-only PR 修正该页的事实错误。\n\n## 为什么现在改\n\nPR #6097 把 console pin 推到 objectui `f995a452d2ca`,随之 vendored 进来两条 **作者侧破坏性迁移**。它们此前只活在 `.changeset/`(发布记录的输入层),整个 `content/docs/` 下对 `withFieldCarrier` / `FieldWidgetComponentProps` / `FlowNode.position` / `node.ui` **零命中** —— rc.4 一发,正在升级的作者在文档站上读不到,这是新用户第一眼撞上的坑。\n\n## 改了什么(三处 hunk)\n\n### 1. 「Breaking changes & migration」新增两条 `###` 条目\n\n插在 `### Dead spec clusters removed` 与 `### Smaller breaking changes` 之间(不动任何既有条目顺序)。格式对齐同章节里唯一的 objectui 来源前例 `### An action param's picker target is 'reference', and only 'reference' (objectui#3203)`:声明句式标题 + 源链接括注、`diff` 迁移块、加粗小结句。\n\n- **`### Field widgets receive their metadata on one key, 'field' (objectui#3233)`** —— `FieldWidgetComponentProps` 不再声明 `schema`;两个生产者收敛,约 30 处 `field || schema` 消失。给出两段机械迁移:读法去掉 fallback;能被 `SchemaRenderer` 派发的 widget 用 `withFieldCarrier` 包一次注册。点名受影响者(第三方 widget 继续读 `props.schema` 会拿到 `undefined` 并静默渲染空态),并保留源 changeset 的两条「没变的东西」——宿主元数据(SDUI JSON)不变、`schema` 仍是非 field-widget 组件的通用 SDUI prop。\n- **`### Flow node geometry is the spec's 'FlowNode.position' (objectui#3172)`** —— 三处写入点统一写 `position: { x, y }`,画布在首个 patch 上把遗留 `ui` 抬到 `position` 并删键。保留源 changeset 的关键定性:**这是行为修复而非改名**(`FlowNodeSchema` 自 #4001 起 `.strict()`,`ui` 是 `unrecognized_keys`,服务端 422 —— 拖一下节点就存不了流程);读取侧向后兼容(`manualPosition()` 优先 `position`、回落遗留 `ui`),但那是迁移路径不是第二契约。\n\n两条正文均取自 objectui@`f995a452d2ca` 的源 changeset(`field-widget-single-metadata-carrier.md` / `flow-node-geometry-is-spec-position.md`)与 objectui#3233 / objectui#3172。\n\n### 2. console 段 pin 区间行(原第 1969 行)\n\n```\n- ### New in Console — bundled objectui advanced `4a4829d0ef39 → 785b8a5d432c`\n+ ### New in Console — bundled objectui advanced `4a4829d0ef39 → f995a452d2ca`\n```\n\n并在该段说明后补四行(既有的 143 commits / five pin moves 叙述原样保留,不重写):\n\n```\n+ Two later pin moves carried the bundle on to `f995a452d2ca` — 129 further\n+ commits, enumerated in `console-f5bc4c78be76` and `console-f995a452d2ca`. The\n+ two author-facing breaking migrations in that range are documented under\n+ *Breaking changes & migration* above.\n```\n\n数字是实测的,不是估的:`git rev-list --count --no-merges 785b8a5d432c..f995a452d2ca` = **129**,与两份 pin changeset 自报的 31 + 98 non-merge commits 吻合;`git merge-base --is-ancestor` 确认该区间内的 pin 落点只有 `f5bc4c78be76` 与 `f995a452d2ca` 两次(其余 console changeset 的 sha 都不在 `785b8a5d432c` 之后)。\n\n### 3. rc.1 窗口开头的同一陈旧事实(独立 hunk,可单独回退)\n\nIssue 只点名了第 2 处,但那句话与它是**同一个事实的另一处落点**;只改标题行会让该页在一屏之内自相矛盾(上面说推进到 `f995a452d2ca`,下面说 pin **unchanged** 在 `785b8a5d432c`)。故按事实更正,行数不变(5 行换 5 行):\n\n```\n- and docs). The Console pin is **unchanged** at `785b8a5d432c`, so the objectui\n- delta rc.2 bundles is the one already documented in the section above; there is\n- no new Console delta this round. (If `scripts/bump-objectui.sh` advances the pin\n- before the cut, that range needs its own section — objectui `main` has moved\n- past `785b8a5d432c`.)\n+ and docs). The Console pin was `785b8a5d432c` when this window was written and\n+ has since advanced to `f995a452d2ca` in two moves; that delta is carried by the\n+ range on *New in Console* above and enumerated in the two pin changesets. Its\n+ two author-facing breaking migrations are documented with the other breaking\n+ changes above.\n```\n\n若维护者认为这一处应留给 rc.4 的发布记录统一处理,这是**独立的第三个 hunk**,单独 revert 不影响前两处。\n\n## 验证\n\n纯文本改动,没有反向验证可做(不存在会因这次改动翻转的断言);跑的是 CI 对 `content/docs/**` 实际会跑的门禁,全绿:\n\n| 门禁 | 结果 |\n|:--|:--|\n| `pnpm check:release-notes` | `OK — every released major has a curated, navigable release page.` |\n| `pnpm check:doc-authoring` | self-test 通过 + `363 files clean — no bare metadata literals.` |\n| `pnpm check:docs-audit-scope` | `178 hand-written doc(s)` 同步 + `9 page(s) under content/docs/releases/ review-only` |\n| `pnpm check:adr-anchors` | `OK (34 anchored file(s), every governing ADR still referenced).` |\n| `pnpm check:nul-bytes` | `OK (scanned 5857 tracked text file(s) … no raw ASCII control bytes).` |\n| `pnpm check:prerelease-pins` | self-test 通过 + `No stable release yet for 11 prerelease pin(s)` |\n| MDX 可解析性 | `apps/docs` 的 `fumadocs-mdx` 重新生成通过;另用 `@mdx-js/mdx@3.1.1` 直接 `compile(v17.mdx, { format: 'mdx' })` → **MDX COMPILE OK** |\n\n改动面:`1 file changed, 90 insertions(+), 6 deletions(-)`,只有 `content/docs/releases/v17.mdx`。\n\n## 关联\n\n- 配套 **PR B**:`.changeset/console-f995a452d2ca.md` 的 flow 条目补 `**BREAKING (v17)**` 标注(同一 issue 的第 3 项,单独 PR)。\n- #6099 —— digest 只读首段导致该标注丢失的机制盲区,**不在本 PR 范围**。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BDmDsu2575gDxeMCxXhDE3)_"
+}

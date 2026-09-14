@@ -1,0 +1,35 @@
+{
+  "number": 17745,
+  "kind": "pull_request",
+  "title": "fix(ci): refuse card relations in commit messages at push, and re-scope the PR-time gate to the body",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "size/xl",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-09-12T01:54:27Z",
+  "updated_at": "2026-09-12T03:10:07Z",
+  "closed_at": "2026-09-12T03:10:05Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": "2026-09-12T03:10:05Z",
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/17745",
+  "body": "Part of #17727\n\nThe card-trailer rule was enforced on the pull request, over its commit list. By the time it spoke, the cheap repair was gone: a new commit on top JOINS that list, and removing the message is the history rewrite this repository forbids — so two rounds, hours apart, each paid a full redo (a new branch, the diff re-applied, a new PR, the old one closed as superseded). This moves the refusal to the moment the repair is still free, closes the spelling gap that let the forbidden form through, and re-scopes the PR-time gate now that the squash message comes from the body.\n\n## Three parts\n\n**1. A pre-push refusal — `scripts/check-commit-card-trailers.mjs`, called from `.githooks/pre-push`.**\nIt judges exactly the commits a push would publish: the local sha, minus the remote sha the push protocol hands it, minus every remote-tracking ref. Everything it judges is therefore UNPUBLISHED, which is what lets it prescribe an ordinary reword instead of a rewrite — the whole trade the move buys. It adds no grammar: the three relation extractors are the half-state sweep's, imported and read at `markdown: false` (a commit message is not markdown, so backticks do not defuse a trailer). A fourth shape is new — a bare `#N` in TRAILER position, where a declaration needs no keyword beside it; a reference in ordinary body prose is deliberately left alone.\n\n`.githooks/pre-push` keeps the os-regen deferral refusal it carried, unchanged in behaviour. The ref lines git writes on stdin used to be drained and discarded; they are now read once and handed to the check whose whole input they are.\n\n**2. The spelling gap — `partOfRe` and `refsRe` in `scripts/pm/check-half-states.mjs`.**\nMeasured before the change, on the commit surface:\n\n| spelling | before | after |\n|---|---|---|\n| `Part of #N` | HIT | HIT |\n| `Part-of #N` | MISS | HIT |\n| `Part of: #N` | MISS | HIT |\n| `Part-of: #N` | MISS | HIT |\n| `Refs #N` | HIT | HIT |\n| `Refs: #N` | MISS | HIT |\n| `Fixes: #N` | HIT | HIT |\n\nEvery dispatch order in this repo lists `Part-of` as a forbidden form, so a dev who greps for it before pushing gets 0 and trusts a net with no thread in that square. The separator is now the one `closingKeywordRe` already ships (an optional colon), and the word takes a hyphen where it takes a space — a strict superset, so nothing that matched before stops matching. `Refs:` is the same colon gap in the sibling relation and is the git-trailer spelling of that declaration; it is fixed in the same edit. `Ref`, `References` and `Parts of` stay out, as before.\n\nOne pinned case flipped and was replaced rather than reworded: it asserted that `Refs: #N` was *not* the spelling, which pinned the gap rather than a decision.\n\n**3. The PR-time gate is re-scoped — `check:partof-closing-keyword`.**\nIts RULE 2 rested on one premise: the squash message is assembled from the COMMIT MESSAGES. That premise is gone — `squash_merge_commit_message` is `PR_BODY` (paired with `PR_TITLE`, the only combination GitHub accepts it in), so every squash, queue merges included, lands the body. RULE 2 and its commit-list input are removed; the gather step and the `pull-requests: read` scope it needed go with them. RULE 1 and RULE 3 are untouched, the numbering is left alone (the numbers are the order the rules were learned), and the header now says where RULE 2 went and what the move gives up: a hook is registered per clone, so a clone that never ran `pnpm install` pushes unchecked. That is the ruled trade; CI holds the self-test.\n\n## Measured, live\n\nFour legs on this branch, against the real hook (`core.hooksPath=.githooks`):\n\n- LIT — the two real commits of this PR pushed clean: `check:commit-card-trailers: 2 commit message(s) on this push carry no card relation.`\n- DARK — a commit carrying `Part of #17727` refused the push, exit 1, naming `commit 1c4b62ca7 (\"chore: dark control leg one\")`, `line 3`.\n- DARK — the colon spelling `Part-of: #17727` refused, naming `commit 1bb31a97e`, `line 3`. This is the form that passed before this PR.\n- DARK — a bare reference in trailer position (`Issue: #17727`) refused, naming `commit d18d3e2d2`, `line 3`, as a trailer declaration rather than as a relation.\n\nEach dark leg was an empty commit, removed with `git reset --hard` to the pushed tip afterwards; the branch tip is unchanged by them.\n\n## Self-tests\n\n- `check:commit-card-trailers` — 56 cases, 8 batteries with a pinned floor. Includes the three substring shapes that must stay GREEN, each measured against the hand grep this replaces: the stem in ordinary prose (`a closed ten-member enum`), in an identifier (`findClosestMatches`), and in an ordinary word (`fixture`) — a bare-stem grep flags all three, and this must not.\n- `check:partof-closing-keyword` — 45 cases (from 82: RULE 2's batteries moved out), roster and floor updated in the same edit so the removal cannot read as batteries that stopped running.\n- `check:pm-half-states` — 3616 cases (from 3606).\n\n## Acceptance notes\n\n- The residual this PR does not close: a hook is per-clone and reports to nobody, so enforcement depends on `pnpm install` having run in that clone. Noted, not filed — the ruling chose this trade explicitly, and the alternative (a PR-time read of a commit list whose text no longer lands) is what this PR removes.\n- `.claude/agents/os-dev.md` gains its one-line pointer in a separate PR: it is a governed surface with its own merge path.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01MCLBsUgfykL74aU716rzVK)_"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 5331,
+  "kind": "issue",
+  "title": "SKILL.md `compatibility` 行无任何门禁对账 —— 声明的 spec 版本可与仓库实际版本无限期漂移(#5245 方案③拆出)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T23:29:30Z",
+  "updated_at": "2026-08-07T12:56:15Z",
+  "closed_at": "2026-08-07T12:56:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5331",
+  "body": "从 #5245 的分诊裁定拆出(方案③,门禁根治半边;#5245 本体只做方案①的十行文案止血)。按 PD#10 归档,未指派。\n\n## 缺陷\n\n`skills/*/SKILL.md` frontmatter 的 `compatibility:` 行没有任何门校验:\n\n- `check:skill-docs` / `check:skill-refs` 只管生成物同步;\n- `check:skill-examples` 只 typecheck `os:check` 代码块;\n- 没有任何检查把该行声明的 `@objectstack/spec` 大版本与 `packages/spec/package.json` 的实际版本对账。\n\n实证即 #5245:仓库已在 `17.0.0-rc.2`(7 个 App 键、DriverCapabilities 31 位等已成墓碑),十份 SKILL.md 里九份仍写 `Requires @objectstack/spec 16.x` —— 教 17 能力、自称 16 兼容,静默漂移了整个大版本周期。\n\n## 建议形态\n\n新门禁(落点 `scripts/` 或 `packages/lint`,C 包 #5163 门禁组文件面):\n\n1. 解析每份 SKILL.md frontmatter 的 `compatibility:` 行,抽出 `@objectstack/spec <major>.x` 声明(措辞契约以 #5245 方案①落地后的格式为准;`skills/objectstack-pm-dispatch/SKILL.md` 的折叠块格式需单独处理或豁免并写明理由);\n2. 与 `packages/spec/package.json` 的当前 major 对账,不一致即红,报错信息带「哪份文件、声明值、实际值、怎么改」;\n3. 接进 `ci.yml` 现有 docs/lint 门禁族 —— ⛔ 引以 #4690 为戒:门禁必须接进 workflow 且缺输入时响亮失败,不做静默 skip 退出 0。\n\n## 依赖与排序\n\n- 硬前置:#5245(方案①)先落地,否则门禁上线即红十处;\n- 归 C 包门禁组容量排期(#5163 接收方会话 `session_01FTszibd6C8sUCCZnM4VcrL` 在册),优先级低于卡上既有门禁 7 单。\n\nBlocked-by: #5245\n\n关联:#5245(止血半边)、#5163(C 包 program card)、#4690(「无输入静默绿」反面教材)。"
+}

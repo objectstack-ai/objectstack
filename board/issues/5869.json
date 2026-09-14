@@ -1,0 +1,36 @@
+{
+  "number": 5869,
+  "kind": "issue",
+  "title": "数据 API:集合算子 `not_in`/`in` 的比较值是标量(非数组)时答 500 DATABASE_ERROR,而不是带信封的 400 —— 而这个形状是 spec 合法的 ViewFilterRule",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T09:59:15Z",
+  "updated_at": "2026-08-07T11:48:32Z",
+  "closed_at": "2026-08-07T11:48:32Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5869",
+  "body": "objectui#3470(PR 见下方 Refs)实施过程中的**范围外发现**,只记录不修、不指派。实测证据如下。\n\n## 实测\n\n后端:已发布 `@objectstack/*@17.0.0-rc.2` + `examples/app-showcase`,`objectstack dev --seed-admin --fresh`;对象 `showcase_task`,`status` 为 select。\n\n```\nGET /api/v1/data/showcase_task?$filter=[[\"status\",\"not_in\",[\"done\"]]]   -> 200,8 行(与 [\"status\",\"!=\",\"done\"] 基线同 8 行)\nGET /api/v1/data/showcase_task?$filter=[[\"status\",\"not_in\",\"done\"]]     -> 500 {\"code\":\"DATABASE_ERROR\"}\nGET /api/v1/data/showcase_task?$filter=[[\"status\",\"nin\",\"done\"]]        -> 500 {\"code\":\"DATABASE_ERROR\"}\nGET /api/v1/data/showcase_task?$filter=[[\"status\",\"notin\",\"done\"]]      -> 500 {\"code\":\"DATABASE_ERROR\"}\n```\n\n即:**集合算子 + 标量比较值 = 500**。`not_in`/`nin`/`notin` 三种拼法一致,说明是规范化之后的同一条路径。\n\n作为对照,同一批探针里形状错误的**算子拼法**是响亮且正确的 400:`[[\"status\",\"not in\",[\"done\"]]]`(带空格,不在 `VALID_AST_OPERATORS`)→ `400 INVALID_FILTER`。所以问题不在拒收机制本身,而在这一类比较值形状根本没被拒收就下到了 DB 层。\n\n## 为什么这是个缺陷而不是脏输入\n\n`ViewFilterRuleSchema.value` 声明为 `string | number | boolean | null | (string|number)[]`,**没有按算子约束形状**。因此\n\n```json\n{ \"field\": \"status\", \"operator\": \"not_in\", \"value\": \"done\" }\n```\n\n是一条 **spec 合法**的 `ViewFilterRule`,可以正常写进 `ListViewSchema.filter` / `ViewTab.filter` 并通过发布校验。它下降成 AST 三元组 `[\"status\",\"not_in\",\"done\"]` 后又能通过 `isFilterAST`(该谓词只看算子与结构,不看值形状),于是一路走到 DB 层才炸。\n\n可达性:objectui 侧 `plugin-list` 的 `normalizeFilterCondition` 只对**数组**值做 in/not-in 展开,标量值原样上线,所以作者写一个标量 `not_in` 的 tab preset,点开就是 500。\n\n## 期望\n\n与 #5348 / #5346 同一个口径:在收口点按形状拒收,给 ADR-0112 信封的 `400 INVALID_FILTER`,点名是哪个算子、哪个成员、期望什么形状 —— 而不是 500 DATABASE_ERROR(把服务端内部失败暴露成客户端错误的错误类别,也无法告诉作者该改哪个字段)。\n\n一并建议评估:`in` 的标量值、以及 `between` 的非二元组值,是否落在同一条路径上(本次只测了 `not_in` 族,未展开)。\n\n## 与既有账的关系\n\n同属 #3948 / #4209 点名的「过滤器形状错误未被响亮拒收」大类,与 #5234(`$in`/`$nin` 列表里的非 `$field` 对象成员 → **静默零行**)是同一轴的**不同格**:\n\n- #5234 的症状是**静默空谓词**(fail-closed,不抛错),入口是 ObjectQL 对象语法的列表**成员**形状;\n- 本条的症状是 **500 抛错**,入口是数据 API 的 **AST 三元组**面、比较值**整体**不是数组。\n\n修法很可能能共用 PR #5223 装在比较发射器上的那道形状守卫(同一收口点、同一信封),但因为症状与入口面都不同,先按标准立独立条目,是否并入 #5234 的完成范围请 PM 裁决。\n\nRefs:#5234、#5346、#5348、#5369、#3948、#4209;发现于 objectui#3470(objectui PR:`claude/issue-3470-userfilters-operator-table`)。\n"
+}

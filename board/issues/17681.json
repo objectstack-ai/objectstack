@@ -1,0 +1,33 @@
+{
+  "number": 17681,
+  "kind": "issue",
+  "title": "[finding] The native-error-name regex now has THREE copies across three packages, each with a written reason — and the consolidation target is blocked by the same one-export-subpath wall in `@objectstack/rest`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-11T11:22:45Z",
+  "updated_at": "2026-09-12T12:09:05Z",
+  "closed_at": "2026-09-12T12:07:12Z",
+  "closed_by": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17681",
+  "body": "Filed by the `domain:cli` execution PM seat (`pm:seat` #6024, session `session_01TSf4DV7ziu4V5j73e46b7c`) out of PR #17679's acceptance review. ⛔ Not graded, no `domain:*`, no priority, no assignee.\n\n## What landed, and why a third copy was the right call in that PR\n\nPR #17679 (card #17265) repairs a nested sandboxed hook refusal being marked as the sandbox's own fault. To tell a deliberate refusal from a crash it needs the crash predicate — and it spells a **third** copy of the native-error-name regex rather than importing one:\n\n| copy | package | its stated reason for being a copy |\n|:--|:--|:--|\n| `isScriptFaultMessage` | `packages/rest/src/error-response.ts` | the original |\n| `isScriptCrash` | `packages/objectql/src/hook-withheld-readonly-fault.ts` | the importing package must not take a dependency on `@objectstack/rest` for a regex |\n| `sandboxRefusalMessage`'s `NATIVE_ERROR_NAME_RE` | `packages/runtime/src/sandbox/quickjs-runner.ts` | `@objectstack/runtime` **does** depend on `@objectstack/rest`, but that package declares exactly one export subpath (`\".\"`) and re-exports nothing from `error-response`, so importing the predicate would mean **widening rest's published surface for an internal read** |\n\n⭐ **The third reason is this seat's own doing and is recorded as such.** The dispatch order for #17265 declared that route a `Clause-②` trap and told the dev to prefer an in-package route. It took it, documented the copy, and named both siblings. ⛔ Nothing in PR #17679 should be changed for this card.\n\n## The defect this card carries\n\nThree copies of a **safety-relevant classifier** — the predicate that decides whether a sandboxed body's throw is a business refusal (4xx, message relayed) or a crash (5xx, message withheld). #16013's argument for extracting exactly this class applies verbatim: *the classification is the part nobody may get wrong*, so **one tested helper is worth more than N correct copies that must each stay correct forever**.\n\n⚠️ **A divergence between these three is not a style problem.** One copy learning about a new native error name and the others not means the same throw is a refusal at one door and a crash at another — which is the door-disagreement shape #7525 / #8016 keeps producing, and the reason `sandboxBusinessMessage` was exported in the first place.\n\n⛔ This seat is **not** asserting the copies currently disagree. All three carry the same ECMA-262 list plus SpiderMonkey's `InternalError`, read today. The card is that nothing holds them together.\n\n## Why the delivering dev's acceptance note does not discharge it\n\nIts note reads: *\"Consolidation would be one reader in `@objectstack/types`, which both `rest` and `runtime` already import for exactly this class of cross-door rule — but that widens a published surface and is a declared decision, not a rider. **Who meets it:** the next card that adds a fourth boundary asking this question.\"*\n\nApplying the Acceptance-notes test — 「哪一个 PR 会碰到这个文件?说得出具体 PR 或人 ⇒ 写进去。⛔ 说不出 ⇒ 兜底不成立」 — *\"the next card that adds a fourth boundary\"* is a **condition, not a carrier**: it names no PR and no person, and it only fires when the problem has already got worse. ⇒ the fallback does not hold and a card is owed. ⭐ The dev's reasoning is otherwise accepted in full; this is the same disposition as #17672, for the same rule.\n\n## ⭐ The interesting part — the same wall blocks all three\n\nTwo of the three reasons reduce to one fact: **`@objectstack/rest` declares exactly one export subpath (`\".\"`) and `packages/rest/src/index.ts` re-exports nothing from `error-response`.** Measured on `origin/main`, with a positive control: `git grep -n \"error-response\" origin/main -- packages/rest/src/index.ts` → **0**; same term across `packages/rest/src` → **40+** hits in siblings, so the channel is alive.\n\n⇒ ⚠️ **This is the third card this round whose shape is decided by that one wall.** #17672 is the repeated-`?version=` refusal that cannot reach `refuseRepeatedQueryParams` for the same reason. A consolidation that picks `@objectstack/types` as the home — as the dev suggests — sidesteps the wall rather than moving it, and may be the better answer precisely because it does not require ruling on rest's export surface at all.\n\n## What a fix would decide (⛔ not decided here)\n\n1. **One reader in `@objectstack/types`**, which both `rest` and `runtime` already import for this class of cross-door rule. ⚠️ Widens a published surface ⇒ a declared decision, and `Clause-②: yes`.\n2. **Widen `@objectstack/rest`'s export surface** so `error-response`'s predicates are importable. ⚠️ Also `Clause-②: yes`, and it would unblock #17672 in the same stroke — which is an argument for considering the two together.\n3. **Rule that copies are correct here** and add a parity test across the three, so a divergence is caught rather than prevented. ⚠️ Cheapest, and it is the option that leaves three copies standing; #16013's own argument is that N correct copies is the thing to avoid.\n\n⛔ Not decided here, and ⚠️ option 1 vs 2 is a published-surface question, which is on the maintainer floor rather than this seat's.\n\n## Not duplicates\n\n- **#16013** (closed) — created `classifyAdmissionTenancyPosture` and folded six seams; a different predicate on a different subject (tenancy posture, not crash-vs-refusal).\n- **#17114** (open, `pm:dispatched`, this lane) — folds two remaining copies of that *tenancy* classifier. ⭐ Same **shape** and an instructive precedent for how this lane handles it, ⛔ not the same predicate and not the same packages.\n- **#17672** (open) — the repeated-query-parameter rule's reachability. Same wall, different rule."
+}

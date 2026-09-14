@@ -1,0 +1,36 @@
+{
+  "number": 5148,
+  "kind": "issue",
+  "title": "`objectstack dev` watcher rebuilds dist/objectstack.json but the running server keeps serving the metadata it booted with",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "yinlianghui",
+    "id": 6219465,
+    "type": "User"
+  },
+  "labels": [
+    "domain:cli",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T06:25:00Z",
+  "updated_at": "2026-08-07T04:03:30Z",
+  "closed_at": "2026-08-07T04:03:30Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5148",
+  "body": "## Summary\n\n`objectstack dev` announces `👁 watching objectstack.config.ts, src for changes` and does rebuild `dist/objectstack.json` when a source file changes. **The running server does not pick the rebuild up.** It keeps executing and serving the metadata it booted with, indefinitely, for both hook bodies and view metadata. Only a process restart applies a change.\n\nThere is no error, no warning, and no visible difference — the watcher's rebuild looks like a successful hot reload.\n\n## Why this is worse than \"hot reload is not implemented\"\n\nThe artifact on disk and the behaviour of the server disagree, silently. That makes every edit/verify loop in dev mode capable of producing a **false result in either direction**, and the failure is indistinguishable from the change itself being wrong:\n\n- Fix something, save, re-test → still broken → conclude \"my fix does not work\" and go rewrite correct code.\n- Break something, save, re-test → still fine → conclude \"this code is not load-bearing\" and delete it.\n\nWe hit the second one directly. A/B-ing two variants of one hook against a dev server without restarting compares one build against itself, and both variants \"passed\". The wrong conclusion was already written into a source comment before it was caught.\n\n## Reproduction (measured 2026-08-04, `@objectstack/runtime` / `@objectstack/cli` `17.0.0-rc.1`, Node v22.22.2, driver-sql/sqlite)\n\nApp: an object `crm_customer_rating` with an `afterInsert`/`afterUpdate`/`afterDelete` hook that clears three columns on a parent record when the last approved child is deleted.\n\n**A. Hook bodies do not reload**\n\n1. `rm -rf .objectstack/data dist && pnpm dev` (`objectstack dev -p 4001 --compile`). Wait for ready.\n2. Confirm the behaviour: create a child, approve it, `DELETE /api/v1/data/crm_customer_rating/<id>` → parent's three columns clear. ✅\n3. Without stopping the server, edit the hook body so the delete path is the first thing that returns:\n   ```ts\n   const isDelete = event === 'afterDelete';\n   if (isDelete) return;              // <- disable the whole delete path\n   ```\n4. Wait for the watcher. Confirm the rebuild really landed **on disk**:\n   ```console\n   $ python3 -c \"import json;print('if (isDelete) return;' in json.dumps(json.load(open('dist/objectstack.json'))))\"\n   True\n   ```\n5. Repeat step 2 against the still-running server.\n\n   **Expected:** the parent keeps its values (the delete path is disabled).\n   **Actual:** the parent's columns clear — i.e. the *old* hook body ran.\n6. Restart the process (no other change). Repeat step 2 → the parent keeps its values. The new body is live only now.\n\n**B. View metadata does not reload either**\n\n1. With the server running, edit an object's `form` view in `src/views/*.view.ts`: rename a section label and remove a field from it.\n2. Wait for the watcher; confirm `dist/objectstack.json` contains the new label.\n3. `GET /api/v1/meta/views?object=<object>` → **the old** `config.sections` comes back (old label, field still present), and the console's create dialog renders the old layout.\n4. Restart → the endpoint and the dialog both show the new layout.\n\n## Impact\n\n- Any agent or developer iterating in `pnpm dev` can measure the wrong thing without any signal that they did.\n- It interacts badly with the fact that `dist/` is gitignored and `objectstack dev` only recompiles when `dist/objectstack.json` is absent: `git pull` does not touch `dist/`, clearing the database does not touch `dist/`, and now neither does saving a file while the server runs. The downstream symptom is always the same — \"the code is new, the running app is old\".\n\n## What would fix it, in rough order of preference\n\n1. **Reload the artifact after a watcher rebuild** — re-register hook bodies and view/object metadata into the live server.\n2. If a live swap is not safe for all metadata kinds, **restart the child process automatically** after a successful rebuild (nodemon-style), which is what the watcher already implies.\n3. At minimum, **stop implying otherwise**: log something like `rebuilt dist/objectstack.json — restart required for changes to take effect` on every rebuild, and say so in the `watching …` banner. A truthful message is far better than a silent stale server.\n\nHappy to test a fix against this app; the repro above is scripted on our side."
+}

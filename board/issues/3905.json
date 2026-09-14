@@ -1,0 +1,36 @@
+{
+  "number": 3905,
+  "kind": "issue",
+  "title": "Skills are declared the only third-party extension primitive, but nothing in the open distribution consumes them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-07-28T17:35:08Z",
+  "updated_at": "2026-08-07T02:49:43Z",
+  "closed_at": "2026-08-07T02:49:43Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/3905",
+  "body": "## The gap\n\n`stack.zod.ts:294-317` and ADR-0063 §2 both name **skills as the only third-party extension primitive**:\n\n> ### 2. Skills (+ tools / MCP) are the only third-party extension primitive\n> Therefore: third parties author `*.skill.ts` and tools / MCP connectors. `*.agent.ts` is **closed to third parties**.\n\nIn the open framework, nothing consumes them.\n\n**This is not a claim that the missing agent runtime is a bug.** ADR-0063's own header says the open distribution is deliberately MCP-only:\n\n> the open framework exposes AI only via `@objectstack/mcp` (BYO-AI) and ships no in-product `ask` / `build` chat\n\nThat decision (cloud ADR-0025) is fine. The gap is what it leaves behind: the `skill` / `tool` / `mcp` metadata types still ship in the open spec, are authorable, are **actively linted**, and reach no runtime here.\n\n## Evidence\n\n**1. Authorable, and validated.** `SkillSchema` (`packages/spec/src/ai/skill.zod.ts:64`), `ToolSchema` (`ai/tool.zod.ts:106`), `MCPServerRefSchema` / `MCPToolBindingSchema` (`ai/mcp.zod.ts:47,88`) are all in the open spec and declared on `stack`. Two lint rules in this repo check skill metadata seriously — `validateAiToolReferences` and `validateAiSurfaceAffinity` (`packages/lint/src/reference-integrity-suite.ts`), both wired into `os validate` / `lint` / `compile`. An open-source author naming a nonexistent tool in a skill gets an error today.\n\n**2. No consumer.** Grep for `SkillSchema` / `ToolSchema` across `packages/`, excluding `spec/` and tests: **empty**. The consumers — `SkillRegistry`, `AgentRuntime` — live in `cloud/packages/service-ai`.\n\n**3. MCP never reads them.** The HTTP surface (`packages/mcp/src/mcp-http-tools.ts`) registers 11 fixed native tools — `list_objects`, `describe_object`, `validate_expression`, `query_records`, `aggregate_records`, `get_record`, `create_record`, `update_record`, `delete_record`, `list_actions`, `run_action` — and no code path reads `skill` metadata. The server also implements no `prompts/*` primitive (grep for `prompts/list` / `prompts/get` / `listPrompts`: empty).\n\nSo in the open distribution: author a skill → it validates → it lints → **nothing ever runs it, and nothing says so.**\n\nThat is the same declared-but-unenforced shape as the two defects just fixed under #3820 (`agent.tools` silently stripped, #3894/#3904; `skill.permissions` dead key, hotcrm#511). This one is larger because the spec advertises it as *the* extension path.\n\n## Naming collision (worth fixing regardless)\n\n`packages/mcp/src/skill.ts` is **not** the `skill` metadata type. It is the portable `SKILL.md` distributable (ADR-0036 Amendment C) that teaches an external agent — Claude Code, Codex, Gemini CLI — to drive ObjectStack over MCP. Two unrelated concepts, one word, in the same repo. Anyone grepping `skill` in `packages/mcp` finds the wrong one first.\n\n## What to decide\n\nThe question is what authoring a `skill` should mean in a BYO-AI distribution. Two coherent answers:\n\n**A. Give it a consumer — project skill `instructions` onto MCP `prompts`.**\nA skill has two halves with very different value over MCP:\n- *Tool binding* (`tools[]`, `surface`) — **poor fit.** In MCP the model lives client-side; the server exposes a flat tool list. Server-side per-skill tool filtering fights the client's own agent loop, and AI-exposed Actions already flow through `list_actions` / `run_action`, so `action_<name>` is reachable today.\n- *Instructions* (playbooks, judgment, persona) — **natural fit.** This is precisely MCP's `prompts` primitive, which the server does not implement yet. A tenant-authored skill would become a prompt any MCP client can list and fetch.\n\nUnder A, the tool-binding half gets documented as cloud-runtime-only, and skills authored in the open distribution remain meaningful in cloud.\n\n**B. Mark the AI metadata family cloud-only** — the way `stack.agents` was marked platform-internal in #3885. Then `os validate` should stop reporting errors to open-source users about metadata their distribution cannot run.\n\n**A is my recommendation** — the instructions half has real standalone value to MCP clients, and it keeps \"a skill authored in OSS also works in cloud\" true. But this is a product-boundary decision, not a cleanup, so it needs a maintainer call before any implementation.\n\nEither way, **the status quo should not persist**: linting an author's work against a runtime their distribution does not ship is the failure mode this repo's ratchets exist to prevent.\n\n## Related\n\n- #3820 (parent) — AI metadata positioning; the three defects fixed under it are the smaller instances of this shape\n- ADR-0063 §2 (extension primitive), cloud ADR-0025 (open = MCP-only), ADR-0109 (tool authoring model), ADR-0036 Amendment C (the `SKILL.md` distributable)\n- A separate cloud-side finding blocks the same promise from the other direction: `ASK_AGENT.skills` is a hardcoded 4-item allow-list intersected by `resolveActiveSkills`, and the persona carries `protection.lock: 'full'` — so a third-party `surface: 'ask'` skill registers successfully and is silently never activated. Filing separately against `cloud`."
+}

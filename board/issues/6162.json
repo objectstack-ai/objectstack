@@ -1,0 +1,35 @@
+{
+  "number": 6162,
+  "kind": "issue",
+  "title": "queue steward: give the cross-repo pin watch a mechanical output — file-or-refresh the bump chore when a window settles (release-lane pin watch)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T04:19:01Z",
+  "updated_at": "2026-08-07T07:02:44Z",
+  "closed_at": "2026-08-07T07:02:44Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6162",
+  "body": "## Problem\n\nThe required freshness gate (`check:objectui-pin-fresh` on the Version Packages PR, #3340) prevents **loss** — you cannot cut a release with a stale pin — but not **lateness**: the red light turns on at cut time, and the bump chore still has to be filed and driven by hand at that moment. Tonight's instance #6159 was filed manually only because the maintainer happened to ask in chat; nothing mechanical converts \"the objectui window has settled\" into a queued action. Coordination rule 3 (the seat accepting a `repo:objectui` PR files the linkage chore) is per-PR on paper but the work lands per-window in practice — it did not fire tonight.\n\nThe queue steward (#5810) already carries \"cross-repo pin-chain observation\" as a duty, but its only outputs are briefing mentions and a hint comment — observation with no mechanical product.\n\n## Maintainer decision (2026-08-07, in the PM session; quoted verbatim)\n\n> A. 队列管家加一条例行职责(推荐,先做)。\n\nSelecting option A of the proposal: the steward's pin watch gains a mechanical output — file-or-refresh the bump chore when a window settles. (Option B, a standing auto-bump draft PR, stays a possible later upgrade and is blocked on #6099.)\n\n## Design\n\nTwo triggers, each producing ONE chore issue (the steward still **never executes the bump** — its authority face is unchanged: no code, no claims, no merges):\n\n1. **objectui → objectstack (pre-release side)**: `.objectui-sha` lags objectui `main` **and** objectui's merge queue is empty (the window-settled predicate) ⇒ file/refresh a console-bump chore in objectstack `pm:queue`. Template = #6159 (lag readings, releasing-changeset list, `bump-objectui.sh` procedure, #6099 breaking-annotation re-check, ordering constraint vs the Version Packages PR).\n2. **objectstack → cloud (post-release side)**: a new rc/stable tag family is observed ⇒ file the same-shape `.objectstack-sha` bump chore in cloud's queue (cloud's `check:pin-staleness` stays advisory — the output is an issue, not a new gate).\n\nBoundaries:\n- **One open chore max**: search for the open same-title chore first; if it exists, refresh it with a comment updating the range — never open a second.\n- **Rule 3 stays the first producer**: the accepting seat filing at accept time is still correct; this duty is the window-level backstop, and collisions are absorbed by the one-open-chore cap.\n- New pin-toolchain findings (digest blind spots etc.) still go to the anchor issue as 提请 only.\n\n## Implementation\n\n- `.claude/skills/pm-dispatch/SKILL.md`: new paragraph in 「入队与落地 B」 + the steward duty-table row + the 现役两例 enumeration (PR to follow; Fixes this issue).\n- #5810 body: revise prompt clause 6 (currently says hint-comment only) to match, so the copy-block stays canonical.\n- **Maintainer follow-through (UI-only)**: the live Routine's prompt was pasted from #5810; after the SKILL PR merges, re-copy the revised clause 6 into the Routines UI prompt. Until then the duty still activates weakly via the prompt's standing instruction to read SKILL 「入队与落地」 A/B each fire.\n\n## Related\n\n#5810 (steward anchor) · #6159 (tonight's hand-filed instance, template) · #6099 (digest breaking-annotation blind spot — prerequisite for any future auto-bump) · #6121 (adjacent freshness-workflow observation) · #3340 (the freshness gate this complements) · SKILL Multi-repo coordination rule 3"
+}

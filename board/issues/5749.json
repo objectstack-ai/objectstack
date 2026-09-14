@@ -1,0 +1,35 @@
+{
+  "number": 5749,
+  "kind": "issue",
+  "title": "Field.summary 的 count 汇总：从未有过子记录的父行停在 NULL，删光子记录才变 0 —— 同一个「零」两种值，筛选 = 0 静默漏行",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T03:55:13Z",
+  "updated_at": "2026-08-07T00:53:07Z",
+  "closed_at": "2026-08-07T00:53:07Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5749",
+  "body": "浏览器 dogfood 时发现（最新 main `5e3c83bd0` + objectui `5a24ad9cb89c`，showcase 应用，SqlDriver/better-sqlite3）。\n\n## 现象\n\n`Field.summary({ function: 'count' })` 汇总字段，**同一个「零个子记录」的状态会有两种不同的值**：\n\n| 父行经历 | 子记录数 | `task_count` |\n|---|---|---|\n| A. 新建后从未有过子记录 | 0 | **`null`** ❌ |\n| B. 加了 1 条子记录 | 1 | `1` ✓ |\n| C. 把那条子记录删掉 | 0 | `0` ✓ |\n\nA 和 C 是**同一个逻辑状态**（该项目下 0 条任务），却读出两个不同的值。`count` 在空集上有定义且等于 0，`null` 是「未知」，二者不是一回事。\n\n## 影响：筛选静默漏行\n\n这不是显示问题。showcase 种子数据里 `Legacy Sunset` 就是 A 类（从未有过任务）：\n\n```\n零任务的项目共 2 个：\n  Legacy Sunset  → task_count = NULL\n  ROLLUP PROBE   → task_count = 0\n\nfilter [\"task_count\",\"=\",0]  → 只返回 [\"ROLLUP PROBE\"]\nfilter [\"task_count\",\"<\",1]  → 只返回 [\"ROLLUP PROBE\"]\n```\n\n也就是说「**列出所有还没有任务的项目**」这个再普通不过的查询，**恰好漏掉了那些从来没建过任务的项目** —— 而那正是现实中这个查询最想找的一批行。漏掉的是行，不是格式，且无任何报错。\n\n同理受影响的还有：排序（null 与 0 落在不同分组）、`GROUP BY`、以及任何以该字段为输入的公式字段（null 会继续向下传播）。\n\n## 真实原因\n\n`packages/objectql/src/engine.ts` 的 `recomputeSummaries()`：\n\n- **第 4225 行的兜底是对的** —— `if (value == null) value = (desc.fn === 'count' || desc.fn === 'sum') ? 0 : null;`，聚合返回空时确实会落成 0。这也正是上表 C 能拿到 0 的原因。\n- **问题在第 4202–4205 行的父行选取**：待重算的 `parentId` 集合**只从本次写入的子记录里取**（`recs` 与 `prevs` 的 `desc.fkField`）：\n\n```ts\nconst ids = new Set<string>();\nfor (const r of recs)  { const v = r?.[desc.fkField]; if (v != null && v !== '') ids.add(String(v)); }\nfor (const p of prevs) { const v = p?.[desc.fkField]; if (v != null && v !== '') ids.add(String(v)); }\n```\n\n于是**一个从未出现在任何子记录写入里的父行，永远不会进入 `ids`，它的汇总字段一次也不会被写过**，就停留在插入时的默认值 `null`。\n\n删除子记录之所以能得到 0，是因为被删的那条子记录进了 `prevs`，父行因此被选中重算了一次 —— 这恰好反证了：坏的不是兜底逻辑，而是**父行选取这一步**。\n\n`descriptors` 是按**子对象**索引的（`getSummaryDescriptors(childObject)`），所以父对象自己 insert 时也不会顺带初始化自己的汇总字段。\n\n## 复现\n\nshowcase 应用，登录后在浏览器控制台跑（`account` 为必填、`status` 受状态机约束，故用 `planned`）：\n\n```js\nconst call=(m,u,b)=>fetch(u,{method:m,credentials:'include',headers:{'content-type':'application/json'},body:b?JSON.stringify(b):undefined}).then(r=>r.json());\nconst o={};\ncall('GET','/api/v1/data/showcase_account?top=1')\n .then(r=>{o.acct=r.records[0].id; return call('POST','/api/v1/data/showcase_project',{name:'ROLLUP PROBE',account:o.acct,status:'planned',health:'green',budget:1});})\n .then(r=>{o.id=r.id; return call('GET','/api/v1/data/showcase_project/'+o.id);})\n .then(r=>{o.A_从未有子记录=r.task_count;  // → null\n   return call('POST','/api/v1/data/showcase_task',{title:'PROBE',project:o.id,estimate_hours:7,status:'todo'});})\n .then(r=>{o.tid=r.id; return call('GET','/api/v1/data/showcase_project/'+o.id);})\n .then(r=>{o.B_一条子记录=r.task_count;    // → 1\n   return call('DELETE','/api/v1/data/showcase_task/'+o.tid);})\n .then(()=>call('GET','/api/v1/data/showcase_project/'+o.id))\n .then(r=>{o.C_删光后=r.task_count; return o;});  // → 0\n```\n\n实测输出：`{A_从未有子记录: null, B_一条子记录: 1, C_删光后: 0}`。\n\n## 建议方向（实现者自选）\n\n1. **父行 insert 时初始化汇总字段**：以父对象为索引再取一份 descriptor（当前 `getSummaryDescriptors` 只按子对象索引），在父行创建时把 `count`/`sum` 落成 0。语义最正，且一次性解决存量以外的所有新数据。\n2. **读取时兜底**：查询投影阶段把 `count`/`sum` 型 summary 字段的 `null` 视作 0。改动小，但**治不了筛选** —— `filter task_count = 0` 是在库里比对的，除非把兜底下推进 SQL（`COALESCE`），否则漏行照旧。因此若选这条，必须同时处理筛选下推。\n3. 存量数据需要一次回填（对所有汇总字段为 null 的父行重算一遍）。\n\n个人倾向 1 + 3：让「零」在库里就是 0，筛选、排序、公式全都自然正确。\n\n## 影响面\n\n`Field.summary` 的 `count` / `sum` 汇总字段，所有驱动通用（这是 objectql 引擎层，不是 SQL 驱动层）。任何「按汇总值筛选/排序」的列表视图、报表、看板都可能少行。本次在 showcase 的 `showcase_project.task_count` 上复现，`total_estimate`（`sum`）同样受影响（同一父行为 `null`）。\n"
+}

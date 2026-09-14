@@ -1,0 +1,37 @@
+{
+  "number": 5122,
+  "kind": "issue",
+  "title": "`runtime` 导出的 `HttpServer` 包装器静默丢弃 `IHttpServer` 的全部可选成员(`getPort` / `getRawApp` / `setFallbackHandler`)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:cli",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T05:27:04Z",
+  "updated_at": "2026-08-07T03:46:24Z",
+  "closed_at": "2026-08-07T03:46:24Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5122",
+  "body": "观察类发现,记录于 #5090(#5040 E3)实现期间。**今天没有用户会撞上**:该类在仓内零组合点。\n\n## 事实\n\n`packages/runtime/src/http-server.ts` 的 `HttpServer implements IHttpServer` 是一个委派包装器(构造函数吃一个 `IHttpServer`,把 `get/post/put/delete/patch/use/listen/close` 转发给它)。它**只转发必选成员**,`IHttpServer` 上的可选成员一个都不转发:\n\n- `getPort?()` —— 测试与 conformance 套件靠它寻址 `listen(0)` 的临时端口;\n- `getRawApp?()` —— 框架原生逃生口(cloud-connection ×2、metadata HMR 路由、cloud serverless 均 feature-detect 它);\n- `setFallbackHandler?()` —— #5080 新落的兜底 seam,声明式 `apis:` 端点**唯一**的进入通路(#5090 实现)。\n\n后果的形状是一致的:消费者按契约做 `typeof server.X === 'function'` 探测,包装器让探测**恒为 false**,于是能力静默缺席 —— 底层适配器明明提供了。对 `setFallbackHandler` 而言意味着:把 `HonoHttpServer` 包进 `HttpServer` 再注册为 `http.server` 的 host,其声明式端点永远 404,且没有任何一行日志说明为什么。\n\n## 为什么标 `finding` 而不是缺陷\n\n`new HttpServer(` 在本仓(含 examples)**零出现**;它只从 `packages/runtime/src/index.ts` 公开导出。所以这是「导出的公共 API 与它宣称实现的契约不符」,不是任何现网路径上的故障。真实的 host 都直接注册适配器实例。\n\n不过它是 **public API**,外部 host 可以用它 —— 且随着 `IHttpServer` 继续长出可选成员(#5080 刚加一个),缺口只会变宽。\n\n## 可能的处置(留给分诊,不预判)\n\n1. **转发可选成员**(条件转发:底层有才暴露,保持 feature-detect 语义正确);\n2. **退役该类** —— 若它确实从未被组合过,`ApiRegistry`(#4939)的先例适用:退役一个「从未被装配」的件比修它更长远;\n3. 顺带:`@objectstack/http-conformance` 目前不对 `setFallbackHandler` 做任何断言(可选成员,不属其必测面),所以第二个实现该成员的适配器与 Hono 版行为分叉不会变红 —— 若走方案 1,这里是自然的守卫落点(ADR-0076 OQ#10)。\n\n关联:#5080(契约成员)、#5090(Hono 侧实现 + 消费端探测)、ADR-0076 D11/OQ#10。"
+}

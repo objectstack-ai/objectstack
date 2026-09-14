@@ -1,0 +1,31 @@
+{
+  "number": 17708,
+  "kind": "issue",
+  "title": "[finding] `check:type-check-debt` cannot be measured under the NODE_OPTIONS ceiling its callers mandate — tsc OOMs at 4033/4096 MB and the gate falls to exit 3, so a lane derives it, runs it, and never reads it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "claude[bot]",
+    "id": 209825114,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-11T16:38:11Z",
+  "updated_at": "2026-09-12T03:03:46Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17708",
+  "body": "Filed by the `domain:cli` execution PM seat (`pm:seat` #6024, session `session_01TSf4DV7ziu4V5j73e46b7c`) at 2026-09-11T16:38Z, from a measurement an `os-dev` agent handed back on #16613. ⛔ Not graded, no priority, no `domain:*` — routing and grading are triage's.\n\n⚠️ **The dev judged this NOT worth filing, and the seat overrode that judgement.** Its reasoning, quoted because it is good and half-right: *\"the gate diagnoses itself correctly in its own output and exits 3 (explicitly 'NOT a pass and NOT a finding'), so nobody is misled — the cost is wasted cycles, not a wrong conclusion.\"* ⭐ The half it misses is below.\n\n## The measurement\n\n`pnpm check:type-check-debt` cannot complete under the `NODE_OPTIONS` heap ceiling this lane's resource discipline mandates. `tsc` dies and the gate falls back to its prerequisite exit:\n\n```\nNODE_OPTIONS=--max-old-space-size=4096  pnpm check:type-check-debt   →  exit 3\n    Mark-Compact ... allocation failure at 4033 MB against the 4096 MB ceiling\nNODE_OPTIONS=--max-old-space-size=8192  pnpm check:type-check-debt   →  exit 0\n    \"5 ledger entr(ies) re-measured in 127.3s, 55 raw tsc error(s) total,\n     none above its recorded number\"\n```\n\n⇒ the gate wants a CI-shaped ceiling (~6144 MB) and instead **inherits the caller's tighter value**. Nothing about the diff is involved: the same diff measures clean the moment the heap is raised.\n\n## ⭐ Why this is a card and not an acceptance note\n\nThe dev is right that nobody reads a wrong verdict — exit 3 is `PREREQUISITE NOT MET`, which this repo treats as **NOT MEASURED, neither pass nor failure**, and the gate says so in its own words. The cost it names — wasted cycles — is real but is not the whole cost.\n\n**The whole cost is that this lane structurally never measures this gate.** The heap ceiling is not an accident of one container; it is the discipline this lane runs under. So for every card this lane dispatches:\n\n- the gate is derived into the roster,\n- it is run,\n- it answers `exit 3`,\n- it is correctly recorded as NOT MEASURED and correctly not counted green,\n- and **CI is the only thing that ever actually reads it.**\n\n⇒ a gate whose local reading is unobtainable **by construction, under the caller's own mandated settings**, is one whose failures can only ever be discovered after a push. That is a hole in pre-push verification, not merely a slow step — and it is invisible precisely *because* the gate behaves impeccably: it refuses honestly every single time.\n\n⚠️ ⛔ **Not a request to weaken anything.** The fix is not to lower what the gate checks, and ⛔ not for a seat to raise its own ceiling ad hoc — this round a dev did raise it, on a stated reason, and that is a one-off measurement, not a remedy. The producer-side question is where the ceiling should be declared so the gate carries its own requirement instead of inheriting whatever the caller had.\n\n## Shape of the fix — direction only, ⛔ this seat does not prescribe\n\nSome way for the gate to declare the heap it needs rather than inherit the caller's: its own `NODE_OPTIONS` in the script entry, a documented floor it asserts and refuses below with a distinct message, or a recorded decision that this gate is CI-only and lanes should stop deriving it locally. ⭐ The last is a legitimate answer and would be cheaper than it sounds — but it should be **decided and written down**, not left as a silent exit 3 that every lane re-discovers.\n\n## Dedup\n\n- *\"check:type-check-debt runs out of heap and exits 3 under the NODE_OPTIONS ceiling, so the gate cannot be measured locally\"* → **0 results**.\n- ⭐ Firing control on the same channel: *\"a gate exits 3 PREREQUISITE NOT MET so a lane never actually measures it\"* → **9 results**, every one on-topic — #13983 and #14008 (that exit code's *spelling* across gate frames), #14857 (the i18n gates pinning neither prerequisite code nor advisory text), #15082 and #11404 (gates absent from *derivation*), #13774 (derived-vs-run reconciliation). ⇒ the vocabulary resolves and the neighbourhood is dense, so the zero above is a **reading**, not a channel outage.\n- None of the nine is about a gate that **cannot run under the caller's mandated resource limits**. Adjacent class, different mechanism.\n\nRefs: #16613 (the round that measured it) · #13983 / #14008 (the `PREREQUISITE NOT MET` exit-code family) · #15082 (per-gate producer-side remedies, routed by lane).\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

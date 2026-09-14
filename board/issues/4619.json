@@ -1,0 +1,36 @@
+{
+  "number": 4619,
+  "kind": "issue",
+  "title": "fix(objectql): engine.transaction hardening — silent degrade, default-driver-only, and no owned-vs-joined signal (ADR-0118 D1 caveats)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T11:20:47Z",
+  "updated_at": "2026-08-07T09:19:12Z",
+  "closed_at": "2026-08-07T09:19:12Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4619",
+  "body": "ADR-0118 D1 declares `transaction` on `IObjectQLEngine` and writes its caveats into the contract TSDoc as *declared meaning* rather than hidden behaviour. Declaring them is not fixing them. These are the three, recorded while scoping #4612.\n\nAll three are in `ObjectQL.transaction()`, `packages/objectql/src/engine.ts:4934-4973`.\n\n## 1. Silent degrade when the driver has no `beginTransaction` (`:4952-4954`)\n\n```ts\nif (!drv?.beginTransaction) { return callback(baseContext); }\n```\n\nThe callback runs with **no transaction and no rollback**, and the caller cannot tell. Every in-tree driver implements `beginTransaction` (it is required on `IDataDriver`), so this path exists for test doubles and foreign engines — but a caller asking for a transaction and silently not getting one is the failure mode that made `batchData`'s `atomic` flag a lie for as long as it was (ADR-0118 D4). Proposal: warn-once, or an explicit `opts.require: true` that throws instead of degrading. ADR-0118 D4's `batchData` gate is the fail-closed pattern to generalize.\n\n## 2. Default-driver-only (`:4950`)\n\n```ts\nconst drv = this.drivers.get(this.defaultDriver) as any;\n```\n\nObjects mapped to another datasource via `setDatasourceMapping` are written **outside** the transaction with no diagnostic, so a multi-datasource \"atomic\" write partially commits. Refusing loudly when the operations inside a transaction span drivers would be a real improvement over today's silent partial commit; genuine cross-driver atomicity is a much larger design question (two-phase commit) and is explicitly *not* what this asks for.\n\n## 3. No owned-vs-joined signal (`:4946-4948`)\n\nPer ADR-0067 D2 a nested `transaction()` **joins** the ambient transaction and returns without owning commit/rollback. That is correct, but the caller cannot distinguish \"I own this transaction\" from \"I joined someone else's\". It matters for any caller whose *response* claims durability: `batchData`'s rolled-back response (ADR-0118 D4) asserts prior ops were undone, which is only locally guaranteed when it owns the transaction. Today's callers are all top-level so the claim holds; nothing enforces that it keeps holding. Proposal: `transaction(cb, base, opts?)` surfacing an `owned` signal to the callback.\n\nRefs: ADR-0118 D1, ADR-0034, ADR-0067 D2, #4612."
+}

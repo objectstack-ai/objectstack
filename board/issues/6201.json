@@ -1,0 +1,35 @@
+{
+  "number": 6201,
+  "kind": "pull_request",
+  "title": "fix(service-settings): settings 写入路径与 env 路径执行声明的 min / max / minLength / maxLength (#5932)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T10:41:04Z",
+  "updated_at": "2026-08-07T11:12:11Z",
+  "closed_at": "2026-08-07T11:12:09Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T11:12:09Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6201",
+  "body": "Fixes objectstack-ai/objectstack#5932\n\n## 前提核实(先于实现)\n\n按 Prime Directive「issue 是线索不是规格」,先在 `origin/main` 上核实,而不是照抄正文:\n\n- **四个键在写入路径仍零读取点** —— `grep` 全包,`min` / `max` / `minLength` /\n  `maxLength` 只出现在 `manifests/` 字面量里,`src/*.ts` 无任何消费者(唯一命中是\n  `translations/es-ES.ts` 里西班牙语单词 \"minúscula\" 的子串)。\n- **探针实测**(worktree 内,`SettingsService` + 内存后端,跑通后删除):正文列的三个\n  形状全部复现 —— `number quota` 声明 `min:0 max:100` 写 `-500` / `999999` 均被接受;\n  `text code` 声明 `minLength:2 maxLength:4` 写 `\"X\"` / `\"ABCDEFGHIJ\"` 均被接受;\n  `slider ratio` 声明 `min:0 max:1` 写 `42` 被接受。另加两条:`auth.password_min_length`\n  写 `1` 和 `-3` 均被接受;`OS_AUTH_PASSWORD_MIN_LENGTH=1` 被当作 `source: 'env'`、\n  `locked: true` 的生效值送出,且零日志。\n- **#5131 的分支形状现状**:`validatePatch` 里 `required` / `options` / `pattern`\n  三分支俱在,TOUCH 闸门(`patchKeys.has(key) || deps.some(...)`)在原位可直接继承。\n\n**前提成立。**\n\n## 改了什么\n\n与 #5131(同一函数上 `options` 的那一半)同形,是同一族的第三个成员。\n\n### 写入路径 —— `validatePatch` 补取值窗口分支\n\n发**既有码表**里的 `FieldError`(ADR-0114 D2):`min_value` / `max_value` /\n`min_length` / `max_length` —— 与 `record-validator.ts` 对同一类越界发出的码一致。\n`constraint` 带**完整窗口**(`{ min, max }`;长度类另带 `actual`),这正是\n`errors.zod.ts` 自己的示例形状(`max_value` 上带 `{ min: 0, max: 120 }`):客户端渲染\n输入框需要整个窗口,而不只是被突破的那一侧。\n\n⛔ **`packages/spec` 一行未改** —— `SpecifierSchema` 早已声明这五类约束,\n`FieldErrorCode` 里 `min_value` / `max_value` / `min_length` / `max_length` 四个成员\n现成可用,无需新增码。分诊定的 STOP 条件未触发。\n\n### TOUCH 闸门 —— 直接继承\n\n新分支坐在同一个循环里、同一道闸门之后。除了 #5131 原有的理由,还多一条:取值窗口在\n产品生命周期里会被**收紧**(口令下限从 6 提到 8),窗口下方的老工作区必须仍能编辑与之\n无关的设置,只在重写该键时才被告知。\n\n### env 侧 —— 走 `effectiveEnvOverride` 那一个判定点\n\n⛔ 没有开第二份实现。option 表与取值窗口在同一个函数里依次判定,共用同一组比较函数;\n`reportRejectedEnvOverride` 从「只会说 option」泛化成接三个句子片段,于是去重、加密键\n不回显、consequence/fix 三段话被两族复用,而不是旁边长出第二个 reporter。结论也就随之\n一致:被拒的 override 不生效、不贡献 cascade 条目、**不锁定该键**(#5204 立的\n`locked` 一致性规则,第二族免费继承)、并且只报一次。\n\n### 刻意不判的东西\n\n取值窗口只裁决**可比较的值**:`min`/`max` 只看数字(含经 JSON / 表单往返变成字符串的\n数字),`minLength`/`maxLength` 只看字符串。布尔、数组、对象**不做强制转换** ——\n`Number(true)` 是 1、`Number([])` 是 0,把布尔按 \"1\" 拒掉等于就一个本检查从未被要求\n过问的**形状**发明裁决,那是 `invalid_type`,另一个约束、另一个负责人。空值仍归\n`required` 管。\n\n### 一个判断请复核:按声明取,不按 `type` 取\n\n约束从**声明**读,而不是从 specifier 的 `type` 读 —— 与旁边按类型收口的 options 检查\n不同。这个差异是 spec 定的,不是偏好:`SpecifierSchema` 的 superRefine 把 options 表\n**绑定**到 `select`/`radio`/`multiselect` 三型(缺表即拒),所以「必须声明表的类型」与\n「值要被表检查的类型」是同一个集合,不存在会漂移的第三份清单;而它没有把四个窗口键绑定\n到任何类型(doc 注释写 `number`/`slider` 与 `text`/`textarea`,schema 只查\n`min ≤ max` 的次序)。在这里自拟一份类型清单,恰恰**就是**那份会漂移的第三清单,并且会\n把本 issue 原样复制到下一层:窗口键声明在清单外的类型上,照样解析、照样渲染、照样不执行。\n\n## 测试\n\n新增 22 条,正文点名的形状全部钉住。\n\n| 钉的东西 | 测试 |\n|:---|:---|\n| number 越界两向 | `refuses a number below the declared min` / `above the declared max` |\n| text 长度两向 | `refuses a string shorter than minLength and longer than maxLength` |\n| slider 越界 | `refuses a slider outside its declared window` |\n| **TOUCH 语义** | `checks the window only when the patch TOUCHES the key` —— 在 `max: 1000` 下写 900、再以 `max: 100` 重注册:未触及的历史越界键**不拦**,只有重写该键才拒,reset 仍清得掉 |\n| **env 同判定点** | `ignores OS_AUTH_PASSWORD_MIN_LENGTH=1 …` —— 落回 default、`locked: false`、无 env cascade 条目、一条日志 |\n| **口令策略端到端** | `closes the password-policy hole end-to-end on the real auth manifest` —— 真 `auth.manifest.ts` 写 `1` → `min_value` + `constraint: { min: 6, max: 64 }` + `value: 1`;`history_count: -1`、`expiry_days: -1` 同拒;`12` 仍放行 |\n| 六键覆盖 | `covers the rest of the six password-policy keys` —— `password_min_classes` / `password_max_length` |\n| 边界含端点 | `accepts every value inside the window, bounds INCLUSIVE` —— 否则 `password_history_count: 0`(声明 `min: 0`,且是**关闭**该检查的值)会被误拒 |\n| 宽松面 | 未声明窗口不管;不可比较的形状不管;加密键不回显;每键只发一个 FieldError |\n\n**反向验证 —— 方向先判后跑:预判是常规 Red**(新钉的都是「只有新分支才产生的拒绝」,\n既非计数型闸门也非 canonical-first `??` 链,不存在反转或「诊断变多」的情形)。把\n`settings-service.ts` 单文件 checkout 回 `origin/main` 重跑:**16 条转红,与预判一致**\n—— 全部是断言拒绝的那些;6 条宽松面/边界断言保持绿(它们断言的是**接受**,而接受也是\n改动前的行为);既有 253 条全绿。恢复实现后 269/269 全绿。\n\n```\n# 还原实现前(origin/main 的 settings-service.ts)\n Test Files  1 failed | 14 passed (15)\n      Tests  16 failed | 253 passed (269)\n\n# 恢复实现后\n Test Files  15 passed (15)\n      Tests  269 passed (269)\n```\n\n其余:\n\n```\npnpm --filter @objectstack/service-settings build   → Build success (DTS 43.18 KB)\npnpm --filter @objectstack/service-sms      test    → 5 files / 70 tests passed\npnpm --filter @objectstack/cli              test    → 89 files / 902 tests passed\npnpm --filter @objectstack/verify           test    → 4 files / 17 tests passed\nnode scripts/check-type-check-coverage.mjs          → OK(service-settings 直测 tsc 仍是 13,与 DEBT 账本记录一致,未增)\ncheck:nul-bytes / error-code-casing / empty-changeset / adr-anchors /\ndurability-log-level / route-envelope / engine-double-contract → 全 PASS\n```\n\n`service-settings` 无 `typecheck` script(在 `check-type-check-coverage.mjs` 的 DEBT\n账本里,记 13),所以用直跑 `tsc --noEmit -p tsconfig.json` 计数核实:改动前后同为 13。\n\n## 消费半径清扫(不只扫改动的包)\n\n`validatePatch` 跑在每次 `setMany` 上,所以按**规则的消费半径**而不是按被改的包清扫:\n\n- 逐个 import 全部 10 份 manifest,扫「`default` 落在自己声明的窗口外」—— 42 个声明窗口的\n  specifier,**0 处违例**,没有 manifest 会因此变得不可写。\n- 全仓 grep 落在有窗口的键上的 `OS_*` 值:`OS_BRANDING_WORKSPACE_NAME` 在\n  `settings-routes.test.ts`(`'X'`,1 字符)、`envelope.conformance.test.ts`\n  (`'Locked Co'`,9 字符)、`settings-service.test.ts`(`'EnvCorp'`,7 字符),\n  声明 `[1, 60]`,全部在窗口内。`OS_AUTH_PASSWORD_REJECT_BREACHED` 是 toggle,无窗口。\n- 顺带修了一处**跨包的过时陈述**:`packages/services/service-sms/src/sms-daily-quota.ts`\n  的注释按 issue 号点名了 #5932,说「`SettingsService` 声明 min/max 但 `validatePatch`\n  今天不执行,所以 `min: 0` 是惰性的,钳位放在消费侧」。这句话正是被本 PR 证伪的,所以\n  一并更正(**只改注释,断言一条未动**)。钳位本身**保留**,而且不是出于沉没成本 ——\n  它的三类输入今天仍然可达:非数字形状(`true` / `'unlimited'` / `{n:5}`,本检查刻意不判\n  形状)、小数(`100.5` 本就在 `min: 0` 内,向下取整是这个 reader 的规则)、以及闸门\n  之前存下的历史行(TOUCH 语义使然)。\n\n## 如实记录:未核实项(不扩范围)\n\n正文「**未核实各消费者对越界值的实际容忍度**」本 PR 同样**未核实**,按分诊指示如实记录\n而不扩范围:本 PR 关的是「声明了却没执行」这个产出侧的洞,没有去测 better-auth 口令策略\n或 AI 服务拿到越界值时各自会怎样。这决定的是本条严重度算「配置面不一致」还是「可利用」,\n仍是 triage 的判断,不是本 PR 的结论。\n\n另外,`SpecifierSchema` 的 `step`(`ai.manifest.ts:189` 声明 `step: 0.1`)属于同一族的\n第五个键,同样在写入路径无读取点。它是否算值约束(值必须落在步进网格上)还是纯 UI\naffordance,是**产品判断而非实现细节** —— 按分诊定的同一条界线不自行决定,未在本 PR 内\n处理,已另行按观察类记录为 #6199(`finding`,未入 `pm:queue`,未认领)。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_015a5qkLzpGXhLL2F5gvJ7dD)_"
+}

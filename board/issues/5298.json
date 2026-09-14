@@ -1,0 +1,35 @@
+{
+  "number": 5298,
+  "kind": "issue",
+  "title": "非否定路径上的 `$ne` / `$nin` / `$notContains`:driver-sql 排除 NULL 行,driver-memory / formula 返回它们(#5146 只裁定了 `$not`)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "target:v17"
+  ],
+  "assignees": [
+    "os-zhuang"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-04T16:07:56Z",
+  "updated_at": "2026-08-07T00:53:36Z",
+  "closed_at": "2026-08-06T13:41:25Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 12,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5298",
+  "body": "修 #5146 时实测到的邻接分叉,**不在该单范围内**(维护者的拍板明确只覆盖 `$not`)。\n这里按 Prime Directive #10 记录。\n\n## 事实(实测,`main@88b9b2d5c` + PR #5296 的分支;这几条路径 PR #5296 未改动)\n\nfixture:`1: stage='won'`、`2: stage='lost'`、`3: stage=NULL`、`4: stage=NULL`。\n\n| filter | driver-sql 编译 | driver-sql 返回 | driver-memory | formula `matchesFilterCondition` |\n|---|---|---|---|---|\n| `{ stage: { $ne: 'won' } }` | `stage <> 'won'` | `2` | `2,3,4` | `2,3,4` |\n| `{ stage: { $nin: ['won'] } }` | `stage not in ('won')` | `2` | `2,3,4` | `2,3,4` |\n| `{ stage: { $notContains: 'w' } }` | `stage NOT LIKE '%w%'` | `2` | `2`(另一处分叉,另单) | `2,3,4` |\n\n成因与 #5146 同源:SQL 里 `NULL <> 'won'` 是 UNKNOWN 而不是 TRUE,`WHERE` 只留 TRUE;\nJS 家族用两值逻辑求值,`undefined !== 'won'` 直接为真。区别只在于 #5146 的宿主是\n`$not`,这里是**算子本身**。\n\n## 为什么单独记\n\nPR #5296 只把 **`$not` 内部**的叶子编译成全域谓词(这是 #5146 拍板的范围),`$not`\n之外的比较**逐字符未变** —— 刻意的:改动非否定路径会影响每一条普通查询的 SQL 形状与\n索引利用,属于另一个量级的决定,需要单独拍板。所以今天的状态是:\n\n- `{ $not: { stage: 'won' } }` → 三家一致(NULL 行返回);\n- `{ stage: { $ne: 'won' } }` → 仍然分叉(SQL 少三行)。\n\n对使用者而言,这个不一致是可见的:同一条「不是 won」的列表过滤,SQL 数据源上看不到\nstage 为空的记录,内存数据源上看得到;RLS 写侧 `check`(formula)与读侧 SQL 也会对\n同一条规则给出不同答案。\n\n## 需要拍板的\n\n`$ne` / `$nin` / `$notContains` 是否也采用 NULL-safe 语义(`col IS NULL OR col <> v`)?\n\n- **取 NULL-safe**:与 #5146 的裁定同向、与 JS 家族一致、declared = enforced 只剩一种\n  答案;代价是所有 `$ne`/`$nin` 谓词的 SQL 形状改变(可能影响索引利用),且这是**每一条\n  普通查询**都会走的路径,不像 `$not` 那样局限在一个本就不可 sargable 的形状里。\n- **保持三值、改 JS 家族**:与 SQL 用户直觉一致,但要改两个 JS 后端(2:1 的少数派方向),\n  且 CEL / 过滤器作者写 `stage != 'won'` 时的意图会系统性落空 —— 与 #5146 拍板时给出的\n  理由相反。\n- **第三种**:显式让作者写出来(`{ $or: [{ stage: { $null: true } }, { stage: { $ne: 'won' } }] }`),\n  即维持现状但在 spec 契约里把「`$ne` 不含 NULL 行」写明,由文档而非实现消除歧义。\n\n建议与 #5146 的 spec 半边、#5239 的 `FILTER_LOGIC_CASES` 扩表一并考虑:无论选哪个,\n跨驱动 case 都应该把 null 行的去留写进那张表(它今天**刻意**不含 null 处理,所以这类\n分叉现在没有任何门禁能发现)。\n\n## 关联\n\n#5146(`$not` 的同源分叉,已拍板 NULL-safe)、PR #5296(实现,含逐算子极性表可直接\n复用)、#5239(conformance 表)、#5240(`{ field: {} }` 的三个答案)、cloud#1076。\n"
+}

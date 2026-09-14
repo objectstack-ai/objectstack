@@ -1,0 +1,36 @@
+{
+  "number": 5867,
+  "kind": "issue",
+  "title": "[design] 字段运行时值形状升为 spec 一等契约（fieldRuntimeType + FileRef/RecordRef）、动作 handler 类型化、file-as-reference",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "target:v17"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T09:58:09Z",
+  "updated_at": "2026-08-07T10:21:17Z",
+  "closed_at": "2026-08-07T10:21:17Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5867",
+  "body": "Part of objectstack-ai/objectui#2731\n\n> **本单由分诊座位按跨座位转移协议自 objectui#2731 移交。** 原单是 objectui 仓的 design/tracking 单，但它要求的**基础改动全部落在 `packages/spec` 与本仓**，objectui 只是消费方 —— 按「shared contract surfaces have one owner」，`packages/spec` 一律归 `domain:spec` 座位。原单已转 `pm:blocked`。\n>\n> ⛔ **这是一张决策卡，不是可派发的开发单**（`needs-user-decision`）：它要求先立 ADR 再动代码，且其中一段涉及**已存储数据的迁移形状**。\n\n## 待维护者拍板的三个问题\n\n### Q1 — 值形状契约要不要进 `packages/spec`，键在 `FieldType` 还是渲染部件？\n\n现状：spec 的 `FieldType` 是扁平 `z.enum`，**不声明任何运行时值形状**，只有 `multiple` 暗示 \"Stores as Array/JSON\"。objectui 侧 #2714/#2720 已经建了一张**渲染部件为键**的值形状测试网，作为回归护栏有效，但原单的判断是**层次放错了**：\n\n> 到达后端的运行时值是 **`FieldType`(+`multiple`) 的属性，不是部件的属性** —— 两个渲染器可以给 `select` 选不同部件，但都必须产出 `string` / `string[]`。\n\n提案：spec 导出纯函数 `fieldRuntimeType(type, { multiple }) → RuntimeType` 作为单一真相，objectui 的表降级为**一致性检查**（\"渲染器产出 spec 声明的形状\"）。\n\n### Q2 — `FileRef` / `RecordRef` 两个具名引用类型要不要立？\n\n- **`FileRef`**（fileId 字符串）覆盖 `file`/`image`/`video`/`audio` 的**每一个边界**。依据：storage 契约本身就是 fileId（`packages/spec/src/api/storage.zod.ts` 的 `CompleteUploadRequest { fileId }`），而表单/记录侧存整个 `{file_id, name, url, size, mime_type}` 描述符的做法是**反规范化的例外**；描述符改为**读时展开**（与 `lookup` 同形）。\n- **`RecordRef`**（记录 id 字符串）覆盖 `lookup`/`user`/`owner`/`master_detail`。\n\n概念上 file 与 lookup 统一为「对已存实体的引用」—— 原单认为这是最不容易让 AI 作者搞错的模型。\n\n### Q3 — 动作 handler 的类型流要不要做（`defineActionHandler()` / codegen）？\n\n现状：action 用 `target` 按名字绑定 handler，`params` 是运行时元数据，**类型零流动** —— 写 handler 的人（AI 或人类）拿不到任何契约告诉它某个 param 到手是 `string[]` 还是 `FileRef`。原单称这是 AI 编写错误的结构性根因。配套第二件：**动作端点入参校验**（对象 CRUD 已由 ObjectQL 校验，缺口在自定义动作端点）。\n\n## ⚠️ 一段真实数据迁移（拍板时必须单独定 appetite）\n\n`file-as-reference` 是这套设计里**唯一**的存量数据/展示迁移：现有记录存的是描述符，`FileCellRenderer`/`ImageCellRenderer` 直接读 `.url`/`.name`，seed 数据同形。原单自己的建议是**门控在「`$expand` 足够好」之后**再做，且与 Q1/Q2/Q3 分开排期。⇒ 本座位建议：即使 Q1–Q3 批准，这一段也应作为独立卡片单独拍。\n\n## 依赖顺序（原单给出，本座位未改）\n\n1. **ADR**（`docs/adr/`）：钉死 `fieldRuntimeType`、`FileRef`/`RecordRef` 统一、类型化 handler、三消费方模型 —— design-first，阻塞其余全部；\n2. `packages/spec`：`fieldRuntimeType` + 两个具名类型（**纯增量、无迁移**，是地基）；\n3. 本仓 (a)：`defineActionHandler()` / codegen 从 `params` 推导 handler 参数类型（AI 正确性收益最大，framework 侧先做这条）；\n4. 本仓 (b)：动作端点入参校验；\n5. 本仓 (c)：file-as-reference 存储 + 读时展开（⚠️ 上面那段迁移，单独排期）；\n6. objectui：`FileField`/`ImageField` 产出 `FileRef`、退役 `serializeParamValues` 的 file 特判、把 #2714 的网改为消费 spec 的一致性检查（`mapFieldTypeToFormType` 的部件选择留在渲染器，那确实是渲染器的事）。\n\n## 查重（立单前已做，三仓各搜一遍）\n\n`fieldRuntimeType` / `FileRef` / \"value-shape\" 关键词在本仓 open issue 与 PR 中**无同题单**。最近的相邻单是 #4633（导入 dry-run 对 address/location 结构化值形状不预检，`domain:cli`，已在队列）—— 那是**导入路径的预检缺口**，与本单「值形状契约放在哪一层」不是同一件事，但若本单获批，#4633 的预检可以直接消费 `fieldRuntimeType` 而不必再手写一份形状表。**建议拍板时一并知会 cli 座位。**\n\n## 关联\n\n- objectui#2731（原单，本单的 `Part of` 源）· objectui#2714 / #2720（部件为键的值形状网 ⇒ 将降级为一致性检查）· objectui#2698 / #2710（`serializeParamValues` file→fileId，被 `FileRef` 吸收）· objectui#2709（`select+multiple` → `string[]`）\n- ADR-0059（共享部件渲染动作参数）\n- `packages/spec/src/data/field.zod.ts`（`FieldType`）· `packages/spec/src/api/storage.zod.ts`（fileId 契约）· `packages/spec/src/ui/action.zod.ts`（`params` / `target` 绑定）\n\n---\n\n本单由分诊座位 Routine（#5474 试点）代立，⛔ 不构成认领；`domain:spec` 座位可在拍板后自行接管。"
+}

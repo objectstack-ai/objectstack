@@ -1,0 +1,36 @@
+{
+  "number": 4725,
+  "kind": "issue",
+  "title": "json-schema.manifest.json 的「deliberate removal」删行仍是纪律而非门禁 —— #4650 的同类洞,上移一层(整 schema 级)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "pm:dispatched",
+    "pm:queue",
+    "tooling"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-02T23:49:27Z",
+  "updated_at": "2026-08-06T13:54:18Z",
+  "closed_at": "2026-08-06T13:54:18Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/4725",
+  "body": "## 背景\n\n#4650 堵住了 `authorable-surface.json` 的手编删行捷径:被删基线行现在必须在门禁内自证(aged-out tombstone / 从元数据根不可达 / 整 def 已不再发出)。\n\n但第三条路径把「整 def 消失」的裁判权交给了 `json-schema.manifest.json` 的 #2978 ratchet —— 而那个 ratchet 对删行的要求只有一句注释:\n\n> remove a key ONLY for a deliberate retirement\n\n**没有任何机器校验这一条。** 与 #4650 修复前的 authorable-surface 完全同构:manifest 的「missing」检查读的是同 commit 里可手改的文件,把要删的 schema 的 manifest 行一起删掉,`missing` 恒空,门禁静默通过。`check:api-surface` 也只是新鲜度门(快照需再生成),对「删除是否正当」不置一词。\n\n## 影响\n\n删除一个**从元数据根可达**的整 schema(export + manifest 行 + baseline 行一起删)时:\n\n- authorable-surface 检查 (c):def 不再发出 → 按路径 3 放行(打印 notice,指向 manifest ratchet);\n- manifest ratchet:行已删 → 绿;\n- api-surface:再生成即绿。\n\n三个门都绿,唯一的防线是 PR review 里有人注意到 export 删除。子树删除的最上层引用 prop 仍会触发 (c) 红(引用它的父 def 掉了一个 prop),真正裸奔的是「根级/顶层 def 整个删除」这一形状。\n\n## 建议方向(供排期时评估)\n\n对 manifest 删行套用与 #4650 相同的证明结构:相对 merge-base 消失的 manifest key,要求「该 def 从元数据根不可达」(gen:schema 已在内存里持有真 Zod 图与可达性判定,复用即可)或「对应 ADR-0087 登记 + aged-out」;否则红。\n\n## 关联\n\n#4650(per-key 层的同类修复,含可达性 BFS 实现)、#2978(manifest ratchet 立单)、#4643(整 def 删除的实例,当时判定无害)。"
+}

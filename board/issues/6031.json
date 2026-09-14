@@ -1,0 +1,34 @@
+{
+  "number": 6031,
+  "kind": "pull_request",
+  "title": "docs(protocol): 按 SettingsService 真实契约重写 config-resolution(#5888)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T15:13:56Z",
+  "updated_at": "2026-08-07T00:03:09Z",
+  "closed_at": "2026-08-07T00:03:08Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T00:03:08Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6031",
+  "body": "Fixes #5888\n\n## 结论先行\n\n取证结果指向 issue 正文的**处置 2**(能力换了形状),而不是处置 1(能力从未落地):\n\n- 页面教的那套 `context.config.*` API **零实现**;\n- 但这套分层配置能力**真实存在**,叫 `SettingsService`(`@objectstack/service-settings`,ADR-0007),存储是 `sys_setting` / `sys_secret`,对外是 `/api/settings`。\n\n所以本 PR 是**按真实签名重写**,不是删页。页面本身必须保留:`content/docs/protocol/kernel/meta.json` 收录它,`protocol/kernel/index.mdx` 链它两次,`plugin-spec.mdx` 结尾链它一次。\n\n改动量:`269 +` / `810 −`,单文件。**这是一次近乎全量的重写**,请按此预期审阅。\n\n## 取证过程(逐符号对 origin/main 验存)\n\n扫描面 `packages/ apps/ examples/` 的 `*.ts` / `*.tsx`。\n\n**阳性对照(证伪「扫描器坏了」)**:同一扫描面对页面自己点名的 `envKeyOf` 命中 8 处(`packages/services/service-settings/src/settings-service.types.ts:247` 等),`coerceEnvValue` 命中 6 处(`settings-service.ts:1255`)。零命中因此成立。\n\n### 零实现符号(含分诊补充的 5 处)\n\n| 符号 | 原行号 | 命中 |\n|:---|:---|:---|\n| `context.config`(整个对象) | 全页 | **0** |\n| `setUserPreference()` | 129 / 224 / 754 | **0** |\n| `setTenant()` | 132 / 192 / 534 | **0** |\n| `admin.setTenantConfig()` | 500 / 505 / 749 | **0** |\n| `objectstack_tenant_config` | 207 | **0** |\n| `objectstack_user_preferences` | 234 | **0** |\n| `objectstack_secrets` | 565 | **0** |\n| `ConfigValidationError` | 656 | **0** |\n| `aws-secrets-manager` + 四家外部密钥托管 | 589–613 | **0**(`AwsKmsCryptoProvider` 等在 `contracts/crypto-provider.ts` 只作为**宿主自备**的注释出现,仓库不含实现) |\n| Zod `.meta({ secret: true })` | 547–557 | **0**(真实是 specifier 的 `encrypted`) |\n| 视图 `onSave` | 533 | **0** |\n\n### 整页核对额外发现的幻影(超出 issue 与分诊清单)\n\n- **配置文件层不存在**:CLI 的候选名只有 `objectstack.config.{ts,js,mjs}`(`packages/cli/src/utils/config.ts:57-61`)。`.yml` / `.json` 零命中,`objectstack.config.{env}.ts` / `.production.ts` 按 `NODE_ENV` 选文件零命中。原页 264–271 / 319–378 / 762–798 整段据此删除。\n- **`defineStack()` 不收那些键**:`ObjectStackDefinitionSchema` 的顶层键是元数据集合(`objects` `apps` `views` `datasources` `plugins` `server` …),没有 `database` / `http` / `features` / `stripe` / `secrets`。`defineStack` 对未声明键是 **warn + 丢弃**(`warnUnknownAuthoringKeys`),原样照抄会静默失效。\n- **`plugins` 形状相反**:真实是 `plugins: z.array(z.unknown())`,不是 `{ enabled: [...] }`。\n- **数组语义写反了**:原页「Arrays are replaced, NOT concat」;真实 `COMPOSE_KEY_DISPOSITIONS` 里 `plugins: 'concat'`,所有数组集合都是 concat。\n- **没有 deep merge**:`SettingsService.get()` 取 cascade 链上第一个非空条目,不做任何合并。原页 402–476 整段是幻影。\n- **六层写错成五层**:真实是 `env > global > tenant > user > default`。原页把 `global` 整层漏掉,却多出了不存在的 `runtime` 和 `file`。\n\n### 词表纠正(`tenant_id` → organization)\n\n`sys_setting` **自身没有租户列**,租户行靠 `scope='tenant'` 区分。全平台租户身份是 **organization**:session 携带 `organizationId`,引擎只在对象确实声明了 `tenant_id` 列时才据此打戳(`packages/objectql/src/plugin.ts:798`)。全仓声明 `tenant_id` 字段的对象只有一个 —— `sys_audit_log`,且它是 `Field.lookup('sys_organization', …)`。\n\n补充一点比 issue 更精确的表述:issue 说「`tenant_id` 不是任何现存表的列名」略微过头,它确实作为驱动层列存在一处;但实质成立 —— 它从不是 `sys_setting` 的列,且语义上就是 organization。\n\n## 重写后的内容(全部可验)\n\n`SettingsService` 的 `get` / `getNamespace` / `createClient` / `set` / `setMany` / `resetNamespace` 真实签名;`envKeyOf` 命名规则与 `coerceEnvValue` 强制类型;#5204 的「越界 env 值被忽略而非修复,且不产生 cascade 条目」;`sys_setting` 行标识 `(namespace, key, scope, user_id)`;`encrypted` specifier 经 `ICryptoProvider` 落 `sys_secret`、`LocalCryptoProvider` 用 AES-256-GCM 且生产环境 fail loud;`/api/settings` 四条真实路由;错误码表 `SETTINGS_LOCKED` / `SETTINGS_UNKNOWN_KEY` / `SETTINGS_UNKNOWN_NAMESPACE`。\n\n**「scope 是声明出来的,不是调用方选的」** 单列一节 —— 这正是 `setTenant()` / `setUserPreference()` 按当前架构不可能存在的结构性原因:`setMany` 从 `reg.scopes.get(key)` 取 scope 落盘,调用方无从指定。\n\n## 关于「planned」措辞的边界\n\n按 PM 指示,⛔ 未写任何「未来将有」的路线图散文。未落地的能力收敛成页尾一个 4 条的现状说明(`Outside this contract`),每条陈述现状而非承诺。原页已有的 `os config` CLI「planned」告示保留同样处理。\n\n## 防复发:给核心示例加了 `os:check`\n\n页面中心的 manifest 示例加了 `{/* os:check */}` 标记,`check:skill-examples` 会把它抽出来对**已构建的 spec 声明**做 `tsc --noEmit`。\n\n反向验证(先定方向、预期 **red**):把 `scope: 'tenant'` 改成 `scope: 'organization'` 后重跑,门确实变红并点名:\n\n```\ncontent/docs/protocol/kernel/config-resolution.mdx:100:3\n    error TS2322: Type '\"organization\"' is not assignable to type '\"global\" | \"tenant\" | \"user\"'.\n```\n\n已还原。标记是活的,不是惰性装饰 —— 这页以后再漂移会当场红。\n\n## 自验(全部前台阻塞执行,重装后完整重跑)\n\n| 检查 | 结果 |\n|:---|:---|\n| `check:nul-bytes`(+ 自检) | `OK (scanned 5763 tracked text file(s))` |\n| 控制字符自扫(超出门的盲区) | 编辑文件零命中 |\n| `check:doc-authoring` | `✓ 362 files clean` |\n| `check:docs-audit-scope` | `✓ scope 与 content/docs/ 同步:178 篇` |\n| `check:skill-examples` | `✅ 208 prose examples type-check`,且本页 `:92` 确认被抽取 |\n| `pnpm --filter @objectstack/docs build`(= CI `Build Docs`) | 通过 |\n\n`Build Docs` 抓到一个轻量门看不见的真实缺陷:首版文件尾部混入了两行工具闭合标签,MDX 报 `Unexpected closing slash`。已修,并完整重跑至绿。\n\n## Changeset\n\n按派发令走 docs-only 路线,**不提交空 changeset**;本 PR 不发布任何包,请验收时打 `skip-changeset`。\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01BDmDsu2575gDxeMCxXhDE3)_"
+}

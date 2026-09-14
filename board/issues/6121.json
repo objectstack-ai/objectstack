@@ -1,0 +1,35 @@
+{
+  "number": 6121,
+  "kind": "issue",
+  "title": "objectui-pin-freshness.yml 的注释在邀请把 `Console Pin Freshness` 加进 required 集,而它没有 `merge_group` 触发器——照做即合并队列全死锁(observation)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T02:33:41Z",
+  "updated_at": "2026-08-07T12:41:15Z",
+  "closed_at": "2026-08-07T12:41:15Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/6121",
+  "body": "观察类发现,来自 #5617 审计面(2026-08-07,devx 座位派发的全量 workflow 审计)。**未认领,交分诊。** 今天没人被咬——因为还没人照注释做;但维护者今日正在做 required 集配置轮,风险窗口是活的,故立案不靠记性。\n\n## 事实\n\n- `.github/workflows/objectui-pin-freshness.yml` 第 34-41 行注释**明文邀请**:『A maintainer must add the `Console Pin Freshness` context to the branch-protection rule for main』。\n- 而该 workflow 的触发器只有 `pull_request(branches: main)` + `workflow_dispatch`,**没有 `merge_group:`**。\n- GitHub 合并队列在 `gh-readonly-queue/**` 世代上求值分支保护的 required checks;一个在队列世代上**根本不产生 context** 的名字被 required 后,**每个队列世代都会永久等待** ⇒ 整队死锁(#3622 同类)。\n- 更讽刺的是同一文件自述『a required context that reports nothing leaves every PR stuck』——它知道这条规则,但只想到了 PR 一半,漏了队列一半。\n\n## 修法(一行)\n\n给该 workflow 加 `merge_group:` 触发器,之后再按注释邀请加入 required 集才是安全的。顺带把注释改为「加 required 前确认 merge_group 触发器在」。\n\n## 关联\n\n- #5617(审计出处;其表 B 有完整判据)\n- #3622(required 不上报 context 的死锁原型)\n- ⛔ 分诊注意:在修法落地前,**任何人不要**把 `Console Pin Freshness` 加进 required 集。"
+}

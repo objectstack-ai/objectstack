@@ -1,0 +1,35 @@
+{
+  "number": 5971,
+  "kind": "pull_request",
+  "title": "fix(spec): manifest 删行相对 merge-base 自证 —— 整 schema 消失不再只是纪律 (#4725)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T13:28:24Z",
+  "updated_at": "2026-08-06T13:54:18Z",
+  "closed_at": "2026-08-06T13:54:16Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-06T13:54:16Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/5971",
+  "body": "Fixes #4725\n\n## 前提核验：成立,并且实测过\n\n`build-schemas.ts` 自本单立单起被重写了四次(#5807 / #5851 / #5902 + 中间轮),所以先对着当前 `origin/main` 逐条核验:\n\n- `manifest` 在 L424 从 `MANIFEST_PATH` 读盘 —— **本 commit 可随手改的那份文件**;\n- `missing = manifest.schemas − generatedKeys`(L447),没有任何一处从 git 取过 manifest;\n- 检查 (c) 的 `goneDefs` 出口原话:`whole-schema removals are adjudicated by json-schema.manifest.json (#2978) and check:api-surface`;\n- `build-api-surface.ts` 的 `--check` 是对已提交快照的比对,失败提示是 `If intentional, run gen:api-surface and commit the updated snapshots` —— 纯新鲜度门。\n\n没有任何 #4650 时代的删除证明覆盖到这一层。\n\n**实测复现(修复前,沙箱里跑真源码,非模型化):** 删掉 `src/data/index.ts` 里**一行** `export * from './validation.zod';`。`ObjectSchema` 是直接 `from './validation.zod'` 导入 `ValidationRuleSchema` 的,所以这 7 个 def 依旧从 `object` 元数据根**可达**、依旧解析真实元数据、它们的 116 个 key 依旧被作者书写 —— 消失的只是 JSON Schema、manifest 行和 ratchet 对它们的记录。再按 #2978 注释所允许的 \"deliberate retirement\" 手删 7 行 manifest、手删 116 行 baseline(不删的话检查 (a) 先红):\n\n```\nSTEP 1  写模式 gen:schema          exit 0\nSTEP 2  CI 形状 --check            exit 0\nauthorable keys silently dropped:  116\n```\n\n检查 (c) 打印的正是那句 `def no longer emitted by this build; whole-schema removals are adjudicated by json-schema.manifest.json (#2978)` —— 交给了一个什么也不说的裁判。\n\n## 改了什么\n\n### 1. manifest deletion gate(`scripts/build-schemas.ts`)\n\n按 #4650 的同一结构重新锚定:相对 **merge-base(HEAD, origin/main) 的 manifest** —— 本 commit 改不动的那一份 —— 计算「离开已发布集合」的 def(`baseSchemas` 里、本次构建**不产出**、且不在 `RENAMED_DEFS` 里),每一个都必须有登记,否则红。\n\n比较的右侧刻意是 `generatedKeys`(本次真正产出的集合)而不是树里的 manifest 文件:文件正是 PR 能改的那一半,改它就是本单的旁路。\n\n它跑在检查 (c) **之前** —— 这一步是让 (c) 那句「交给 manifest 裁判」从循环变成真裁决的关键;(c) 的措辞也同步更新,不再声称 `check:api-surface` 参与裁判(它不参与)。\n\n### 2. `RETIRED_DEFS_BY_MAJOR`(新导出,`src/migrations/registry.ts`)\n\n`RETIRED_KEYS_BY_MAJOR` 的上一层同胞,值是确切的 `${category}/${SchemaName}`(`'identity/Session'`),写法就是 manifest 里的写法。沿用 #4659 的**精确集合判定**:不取叶名、不按前缀、不从相邻条目辐射。失败时直接打印要粘贴的那几行和该进哪个 major。\n\n配套**镜像检查**(#5902 的 (b2) 同形):表里登记了一个本次构建**仍在发布**的 def —— 一次没有任何东西消费的登记 —— 直接失败。没有它,真正的删除可以在几个月后别人的 PR 里落地,而门禁早已被满足、当时没有任何人写下任何东西。镜像不需要 git,任何环境都跑。\n\n### 3. manifest 自身的 description\n\n它此前写的 `remove a key ONLY for a deliberate retirement` 正是 issue 引用的那句「唯一的要求、且没有任何机器校验」。现在它指向这道门和这张表,并纳入陈旧判定(`descriptionStale`),所以不会再和代码漂移 —— 打开这个文件准备删行的人读到的,就是当前的程序。\n\n## 关键判断:为什么是「声明」而不是「可达性」\n\n派单给了两条路,并要求给证据。**issue 建议的 (a) 复用可达性在本层用不了,而且是静默地用不了:**\n\n`reachableVia(defKey)` 的第一行是 `const schema = zodByDefKey.get(defKey); if (!schema) return null;`,而 `zodByDefKey` 只在产出循环里 `.set()` —— **只装本次构建产出的 def**。一个刚刚不再被产出的 def 必然答 `null`,而 `null` 在 #4650 的语义里就是「不可达 ⇒ 放行」。也就是说:直接复用可达性,会对**这道门要拦的每一类删除**开绿灯,而且是安静地开。\n\n加宽 BFS 救不了这一点:def 已经从源码里没了,没有图可以走。要在本层拿到「删除前是否可达」,只能引入一个**新的已提交投影**(把可达性写进 manifest,或另立一个 root-set 快照)—— 那是更大的形状变更,且每次 root 图变动都会产生噪声 diff。所以本层唯一诚实的证据是**声明**,沿用 #5902 为 key 层定下的先例。\n\n派单要求「measure current main's history for real whole-def removals」:近四天 `main` 上整-def 删除约 15 次(#4988/#5321 一次删 32 行、#4936/#5065 删 13 行、#4739/#4752 删 6 行、#4834/#4878 删 5 行……),其中既有可达形状也有仅声明形状。也就是说**纯 reachability 这条路不仅静默失效,业务上也不成立**:这类删除是常态,必须有一条能走的路,而这条路必须留下记录。每次一行、门禁把那行原样打给你,是这个记录最小的形态。\n\n**为什么这不是「把手改从一个文件搬到另一个文件」:** 真正的牙齿是 merge-base 锚定 —— 今天这件事**根本没有被检测**。检测之后,它从「一个 1613 行生成文件里少了一行」(review 里不可见)变成「migrations 登记表里一条具名退休 + 一个 major」(review 里就是它本身),再加上镜像检查堵掉预登记。这与 #5902 为 key 层做的交易完全同形。\n\n## 离线语义:沿用 #5235,不新造第三种\n\n- **镜像检查**不需要 git,任何环境都跑;\n- **比较**在解析不到 origin/main 时打印说明并跳过 —— 与 `verifyCommittedSurfaceBase` 拿不到它要校验的 commit 时的做法一致。那些环境是已合并的**不可变树**(镜像构建阶段、离网、fork、历史 tag 重放),「这个 PR 相对 main 删了什么」在那里不是一个存在的问题。跳过不会让任何构建失败,所以**不需要**为它再加一个 in-tree 锚点(#5235 给 surface 加锚点是因为那道门在离线环境**失败**,不是因为它需要离线覆盖)。\n\n`authorable-surface.base.json` **未出现在本 PR** —— 逐文件核过 `git status`。\n\n## 测试\n\n新增第三个沙箱(`build-schemas-check-mode.test.ts`),原因是结构性的:门读的是**merge-base 的 manifest**,所以 `json-schema.manifest.json` 必须是一个**被 git 跟踪、且提交内容与工作区不同**的文件 —— 第一个沙箱只提交 surface,在那里跟踪 manifest 会让每次 `seedManifest()` 弄脏 #5358 断言为干净的树;而登记表要逐用例不同,需要复制而非 symlink `src/`。生产代码路径逐字节不变,只有 fixture 数据。\n\n9 条新用例:\n\n| 用例 | 断言 |\n|:--|:--|\n| 负控:没有东西离开已发布集合 | 静默 + exit 0 |\n| **旁路复现** | exit 1,点名两个 def,打印可粘贴的表行与 major,并回报 merge base |\n| 写模式同样拒绝 | exit 1,manifest 字节不变 |\n| 已登记的删除放行 | 打印「哪个 major 登记的」,exit 0 |\n| 登记按 DEF 逐个判定 | 登记了姊妹的那个,另一个照红 |\n| 镜像:登记了仍在发布的 def | exit 1 |\n| 改名不是删除 | `RENAMED_DEFS` 源 def 从 base manifest 消失 → 绿 |\n| 离线 | 比较打印说明并跳过、绿;镜像照红 |\n| **端到端(真源码)** | 删掉 barrel 行 + 手删 manifest/baseline → exit 1,7 个 def 全部点名;并断言输出里**没有**旧判决 `carry their own proof` / `baseline deletion(s) since` |\n\n**反向验证(方向先判后跑,方向如预测:修复前绿 → 修复后红)。** 同一套 harness、同一个 fixture,只换 `scripts/` 的版本:\n\n```\n修复前:  STEP 1 exit 0 / STEP 2 exit 0,116 个 key 静默丢失\n修复后:  STEP 1 exit 1 / STEP 2 exit 1\n          ❌ 7 schema(s) left the published set with no registered removal (#4725)\n               - json-schema/data/ConditionalValidation.json\n               … (7 个全部点名)\n             1. Declare each removal by its EXACT def key in RETIRED_DEFS_BY_MAJOR\n                (packages/spec/src/migrations/registry.ts) — copy these lines in:\n                  'data/ConditionalValidation',\n                  … under `17: [ … ]`\n```\n\n本地全量:\n\n```\npackages/spec test          323 files / 8276 tests passed   (沙箱 45 = 原 36 + 新 9)\npackages/spec typecheck     tsc --noEmit + check:test-typecheck OK\ncheck:generated             ✓ All 10 generated artifacts are up to date\nnode scripts/check-nul-bytes.mjs   OK (5726 files)\n```\n\n`api-surface.json` 因新增导出整体重生成,diff 是单行 `+ \"RETIRED_DEFS_BY_MAJOR (const)\"`。\n\n## 对 #4723 的定价(必答项)\n\n**变简单一点点,方向不变,不会变难,也没有被本单取消。**\n\n#4723 想把 `gen:schema` 从 `check:docs` 里摘出来,理由是「一个 check 在树脏的时候写生成物」。本单把 `gen:schema` 的写面**往回收了一格**:`json-schema.manifest.json` 的 description 纳入陈旧判定后,写模式的三个写点(manifest / surface / json-schema 目录)各自的触发条件都变得可判定,而**新增的这道门在两种模式下行为完全一致、且永不写盘** —— 它是纯验证。所以「把 gen:schema 从 check: 里摘掉,调用方显式跑」这条路径不会因为本单多出新的写副作用要处理。\n\n一处需要 #4723 的实现者知道:本门读 merge-base 需要 `origin/main` 可解析,和 `check:authorable-surface` 现有的解析路径**共用同一次 git 解析**(`gitResolvedAnchor`),没有第二次。若 #4723 把 `gen:schema` 拆成独立步骤,这道门必须跟着 `--check` 一起走,而不是留在 `gen:` 一侧 —— 否则 CI 的验证面会少掉它。\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01559M8FVm6W6vDLABL3jvdW\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01559M8FVm6W6vDLABL3jvdW)_"
+}

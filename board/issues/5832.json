@@ -1,0 +1,36 @@
+{
+  "number": 5832,
+  "kind": "issue",
+  "title": "shared/http.zod.ts 的两个不同 enum 发布成同一个 JSON Schema 名 `HttpMethod`，后写覆盖前写 —— 参考页只描述了 5 值那份，7 值的线上契约（HEAD/OPTIONS）不见了",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "qq9340100"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T07:10:37Z",
+  "updated_at": "2026-08-06T14:18:39Z",
+  "closed_at": "2026-08-06T14:18:39Z",
+  "closed_by": {
+    "login": "qq9340100",
+    "id": 313832657,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5832",
+  "body": "在 #4696（PR #5831）实施过程中实证发现的独立缺陷。**不在 #4696 范围内**（该单红线是「不碰 `packages/spec/src/**`」），单独立案。\n\n## 现象\n\n`packages/spec/src/shared/http.zod.ts` 在**同一个文件里**声明了两个**内容不同**的 enum，而它们经 `schemaNameFromExportKey` 剥掉 `Schema` 后缀后**同名**：\n\n```\n// packages/spec/src/shared/http.zod.ts\n:20  export const HttpMethod = z.enum(['GET','POST','PUT','DELETE','PATCH','HEAD','OPTIONS']);   // 7 值\n:31  export type HttpMethod = z.infer<typeof HttpMethod>;\n:37  export const HttpMethodSchema = lazySchema(() => z.enum(['GET','POST','PUT','PATCH','DELETE']));  // 5 值\n:39  export type HttpMethodType = z.infer<typeof HttpMethodSchema>;\n```\n\n`HttpMethod` → `HttpMethod`，`HttpMethodSchema` → `HttpMethod`。`build-schemas.ts` 按命名空间导出顺序逐个写 `json-schema/{category}/{Name}.json`，**后写覆盖前写**，实测结果：\n\n```\n$ node -e \"console.log(JSON.stringify(require('./packages/spec/json-schema/shared/HttpMethod.json').enum))\"\n[\"GET\",\"POST\",\"PUT\",\"PATCH\",\"DELETE\"]\n```\n\n即 `json-schema/shared/HttpMethod.json`、bundled `objectstack.json` 的 `$defs['shared/HttpMethod']`、以及 `content/docs/references/shared/http.mdx#httpmethod` **只描述 5 值那份**。\n\n## 影响\n\n7 值的那份才是 `api/*` 的线上契约 —— `api/discovery.zod.ts:482`、`api/endpoint.zod.ts:60`、`api/plugin-rest-api.zod.ts:130`、`api/rest-server.zod.ts:200` 都 `import { HttpMethod } from '../shared/http.zod'` 并用它做 `method` 字段。一个照着 `references/shared/http` 写 `HEAD` 或 `OPTIONS` 路由的作者，会以为这两个方法非法；而反过来，任何按发布出去的 JSON Schema 做校验的下游（IDE 自动补全、codegen、AI 元数据作者）拿到的也是被截断的那一份。属于 AGENTS.md「Machine-readable surfaces must not lie」。\n\n## 为什么没有任何门禁发现它\n\n`check:dual-source-exports` 比对的是**导出名**的符号身份：`HttpMethod` 与 `HttpMethodSchema` 是两个不同的导出名，它看不出问题（`dual-source-exports.baseline.json` 当前是 `entries: []`，全绿）。而碰撞发生在**剥掉 `Schema` 后缀之后的 schema 名**上 —— 与 #4592 同族的「后缀剥离改变了名字身份」问题，只是这次落在碰撞检测上而不是拼写上。\n\n`build-schemas.ts` 自己也不报：它对 `generatedSchemas.set(defKey, …)` 是无条件覆盖，没有「这个 def key 已经写过」的检查。\n\n（对照：#4696 给 **docs 索引**加了「同 category 内同名 = 硬报错」。本单是同一个道理在 **JSON Schema 发布侧**的缺口 —— 那边的键是 `${category}/${name}`，同样会被静默覆盖。）\n\n## 建议方向（待裁决，不预设）\n\n1. **改名**（与 #4684 对 `RateLimitConfig` 的做法一致）：把 5 值那份改成一个不与 7 值那份碰撞的名字（它的类型别名已经叫 `HttpMethodType` 了，`HttpMethodSubsetSchema` 之类是顺理成章的），两者各自发布。\n2. **合并**：确认 UI/view 数据源确实不需要区分，直接复用 7 值那份，删掉 5 值那份。\n3. 无论选哪个，都应在 `build-schemas.ts` 里补一条「同一个 def key 被写第二次 = 报错」的守卫，否则下一个同形状的碰撞仍然静默。\n\n三个选项在「真实业务需求 / 长期正确性 / 让 AI 写的元数据不容易出错」三轴上的取舍需要维护者定，本 issue 只做记录。\n\n## 复现\n\n```\npnpm --filter @objectstack/spec gen:schema\nnode -e \"console.log(require('./packages/spec/json-schema/shared/HttpMethod.json').enum)\"   # 5 值\ngrep -n \"export const HttpMethod\" packages/spec/src/shared/http.zod.ts                       # 两处声明\n```\n\n关联：#4696（发现处，PR #5831）、#4592（同族的后缀剥离缺陷）、#4446 / #4411（dual-source 门禁看不到这一类）。"
+}

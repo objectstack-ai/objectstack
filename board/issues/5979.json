@@ -1,0 +1,35 @@
+{
+  "number": 5979,
+  "kind": "issue",
+  "title": "ObjectQL `seedAutonumber` 把读故障答成 `return 0` —— 对已有 N 行的表重新从 1 发号,自增号与既有行相撞且零日志(#4825 同族,活体)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "baozhoutao"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-06T13:50:32Z",
+  "updated_at": "2026-08-07T02:36:39Z",
+  "closed_at": "2026-08-07T02:36:39Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5979",
+  "body": "发现于 #5186(为「读接缝把故障答成空值」这一族新增闸门)实施期,由新规则在 `packages/objectql` 扫出;**不在该单文件面内**(#5186 是纯 `scripts/` 闸门单,不改被扫包),故单独立卡并已作为 baseline 条目记录在 `scripts/durability-read-invention.baseline.json`。\n\n## 现象\n\n`packages/objectql/src/engine.ts` 的 `seedAutonumber()`(约 2051–2087 行,以 origin/main 为准):\n\n```ts\nprivate async seedAutonumber(object, field, prefix, execCtx?): Promise< number > {\n  try {\n    const rows = await this.find(object, { fields: ['id', field], limit: 5000, context: execCtx } as any);\n    let max = 0;\n    // … 从已有值里取出最大计数 …\n    return max;\n  } catch {\n    return 0;\n  }\n}\n```\n\n`catch` 里:**没有任何日志、没有 rethrow、没有按错误类型区分**,直接编了一个 `0` 出来。\n\n## 为什么这是 #4825 那一半(写进去的数是错的)\n\n这是「读接缝把故障答成空值」家族里**最贵**的形状,和 #4825 的 `nextEventSeq` 的 `catch { return 1 }` 完全同构:\n\n- 表里已经有 N 行、自增号已经发到 `PRE-000123`;\n- 一次连接抖动 / 超时 / 权限失败让这次 `find` 抛出;\n- `catch` 答 `0`,计数器从头开始,下一批自增号**与已存在的行相撞**;\n- 插入**成功**,一行日志都没有,`success` 与行计数全部读起来正常。\n\n和「字节没落盘」不同,这是**落盘的值是错的**——重试不修,重启不修。\n\n值得一提的是:**这个风险 issue 代码里已经写着**。同一个 `try` 块上方的注释(#4371 的修复注释)原文就说:\n\n> the catch below would have swallowed the guard's rejection into \"seed from 0\", i.e. duplicate autonumbers.\n\n即:读那半边在 #4371 修好了,`catch` 这半边留在原地。\n\n## 修法(与 #4825 / #5108 同一处方)\n\n按错误类型区分,只在良性分支返回零值:\n\n```ts\nimport { isMissingTableError } from '@objectstack/metadata/errors';\n\n} catch (error) {\n  // 良性且仅良性:表尚未 provision,确实没有行,从 0 起号不会撞任何东西\n  if (isMissingTableError(error)) return 0;\n  throw error;   // 其余一律上抛:调用方不得用没读到的数据推算号段\n}\n```\n\n⚠️ 需要确认的落点问题(实现时判断,不在本卡预判):`@objectstack/objectql` 依赖 `@objectstack/metadata` 是否成立/是否会成环。若不成立,`packages/metadata/src/errors.ts` 的头注释已经把三条路线写清楚了(其中方案 2「沉到公共依赖 `@objectstack/types` / `@objectstack/spec/shared`」当时只是被判为「那一轮 out of scope」,并未被否决)——这正是需要该方案的那个调用方。\n\n## 验收\n\n- `seedAutonumber` 的 `catch` 只在 `isMissingTableError` 为真时返回 0,其余上抛;\n- 有测试钉住:表未建 → 从 0 起号且不抛;驱动报连接错误 → 上抛,不发号;\n- 修好后删除 `scripts/durability-read-invention.baseline.json` 里的 `packages/objectql/src/engine.ts::seedAutonumber` 条目(该 baseline 是 shrink-only,条目失效即红)。\n\n## 关联\n\n#5186(新增本族闸门,本卡由它扫出)、#4825(同族、同形状,history `event_seq`)、#5108(同族,`DatabaseLoader` 五处读)、#4728(同族起点,DDL 侧)、#4632(规则)、#4371(同一个 `try` 里读那半边的修复,其注释预言了本卡)、AGENTS.md「Degradation log levels」「Absence must be loud」。"
+}

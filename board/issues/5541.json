@@ -1,0 +1,36 @@
+{
+  "number": 5541,
+  "kind": "issue",
+  "title": "service-storage: 摘除 Local/S3 适配器与 SwappableStorageService 的 `list` 实现及测试(#5266 方案 2 的实现半,随 spec 契约摘除)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "labels": [
+    "domain:services",
+    "pm:dispatched",
+    "pm:queue"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-05T16:43:58Z",
+  "updated_at": "2026-08-07T01:13:39Z",
+  "closed_at": "2026-08-07T01:13:39Z",
+  "closed_by": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/5541",
+  "body": "Part of #5266(父单存档完整分析与维护者裁决)。\n\n## 任务\n\nspec 侧契约成员摘除(#5540)落地后,清理实现半:\n\n- `packages/services/service-storage/src/local-storage-adapter.ts` 的 `list`(~:192,单层 readdir + 目录当文件);\n- `s3-storage-adapter.ts` 的 `list`(~:214,无翻页静默截断);\n- `SwappableStorageService.list` 透传及其「适配器无 list 则 reject」分支;\n- 相关测试;changeset(patch,说明成员已从契约摘除、无消费方受影响)。\n\n## 约束\n\n- 与同包其它在飞/排队单(现无)按同包串行;\n- 摘除要响亮:CHANGELOG 说明该成员从未有过仓内消费方,及未来按需回归的形状指引(带游标)。\n\nBlocked-by: #5540\n\n归 services 车道。"
+}

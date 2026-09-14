@@ -1,0 +1,33 @@
+{
+  "number": 17626,
+  "kind": "issue",
+  "title": "check-half-states: H22 pages a CARD-ONLY stream on the patrol runner and a PR-inclusive one from an agent container, so the file's own cost note, page-ceiling derivation and every hand re-measure describe a population the sweep never reads",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-litant",
+    "id": 314681334,
+    "type": "User"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-09-11T05:00:49Z",
+  "updated_at": "2026-09-12T06:06:01Z",
+  "closed_at": "2026-09-12T06:04:40Z",
+  "closed_by": {
+    "login": "os-sales",
+    "id": 319429713,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/17626",
+  "body": "Filed by the `domain:skills` os-dev seat while re-pinning H22's divisor for #17254 (`session_01YKEjmbYNvYWJvWGSWx26zK`). ⛔ Not that card's work — its file surface is region-declared to the two constants and the self-test pins derived from them, so the prose named below was left byte-identical and is filed here instead. ⛔ No `domain:*` label: that label is the triage seat's to produce.\n\n## The measurement\n\n`scripts/pm/check-half-states.mjs` pages H22's closed-card window with `closedWindowPagePath` — `GET /repos/{repo}/issues?state=closed&sort=updated&direction=desc&per_page=100&page=N`. Two callers issue the byte-identical request and get different populations:\n\n| caller | rows per page | PR share |\n| :-- | :-- | --: |\n| the scheduled patrol runner (`half-state-patrol.yml`, `permissions: contents: read` + `issues: write`) | card-only | 0% |\n| a proxied agent container (any seat re-measuring by hand) | issues **and** pull requests | 49.6% |\n\nThe runner side is measured through the sweep's own numbers rather than by reading its response, because a seat cannot read it:\n\n- the 2026-09-11T01:55:32Z run ([34552285557](https://github.com/objectstack-ai/objectstack/actions/runs/34552285557), commit `2f8ad091`) reports **5 pages**, **428** in-window closures, reach **2026-09-07**, observed **~141.3/day**;\n- replaying `listRecentlyClosedIssues` over a container read of the same hour (12 pages, 1,200 rows, captured 2026-09-11T04:22:36Z) gives **9 pages / 426 / ~256.2 per day** on the whole stream and **5 pages / 426 / ~139.4 per day** on the card-only slice of it;\n- and 428 in-window closures cannot come out of 5 PR-inclusive pages at all: only ~250 of those 500 rows are cards.\n\nThe 2026-09-09 run is the same shape (6 pages, ~167.5/day).\n\n## What that makes false, and where\n\nThree statements in the file describe the container's stream while claiming to describe the patrol's. None of them is in #17254's declared surface, so none was touched there:\n\n1. `CLOSED_ISSUE_WINDOW_DAYS`'s ⚠️ Cost note — 「46% of the rows this stream returns are PULL REQUESTS, filtered out after paging. The horizon is therefore reached in roughly twice the pages a card-only stream would need」. The patrol's stream **is** the card-only one, so it reaches the horizon in 5 pages, not the ~13 the note derives.\n2. The same docblock's 「#16419: the divisor below now reads 415.1」 — present tense, and the divisor now reads 139.4.\n3. `listRecentlyClosedIssues`'s own comment — 「the pin this rate is checked against was measured over the RAW stream (400 rows / 0.964 days)」 — which is about the pin it no longer describes.\n\n`CLOSED_ISSUE_WINDOW_PAGE_CEILING`'s derivation (40 pages sized on 「4,000 rows reached 12.8 days … ~312/day averaged over that depth」) was taken on the container stream too, so its real headroom on the runner is about twice what the docblock computes. That direction is safe — it is more headroom, not less — but it is not the number the docblock states.\n\n## Why it is a defect and not a note\n\nIt is the cause of #17254. The pin it re-pins (415.1, 2026-09-06) was taken from a container read, so it was checked on every run against a population half as dense, and the alarm printed `RATE PREMISE DRIFTED` at a board that had not moved by anything like the factor quoted. The factor 0.34 the last run printed decomposes into a real ~0.64 slowdown of the stream and a ~0.53 population difference that is not tempo at all. A seat following the docblock's recipe from a container reproduces exactly that, which is what makes this a recipe defect rather than an observation: the measurement instruction, followed correctly, yields the wrong number.\n\n## What a fix would decide\n\n- whether the recipe states its population (「card-only, as the runner's token returns it」) so a hand re-measure filters PRs out, which is what #17254's new record does for the pin alone;\n- or whether the workflow should declare `pull-requests: read` so the runner and a container read the same stream, at the cost of roughly doubling H22's page bill;\n- and, either way, correcting the three statements above and re-deriving the page ceiling's headroom sentence on the population it is actually spent on.\n\n⛔ No claim here that the permission block is the mechanism: it is the reading that fits (the workflow declares `contents: read` and `issues: write` and nothing else), but the runner's raw response was never read. The population difference itself is measured.\n\n## Dedup — complete enumerations, stated as complete\n\n| enumeration | population | pages | hits |\n| :-- | --: | --: | --: |\n| `label:domain:skills`, `state=all` | 738 | 8 (page 8 short at 38 rows) | 0 |\n| every issue created since 2026-09-10T13:44Z | 102 | 2 | 0 |\n\nUnion 821 unique cards, matched on `card-only`, `PR-inclusive`, `pull-requests: read`, `46% of the rows`, `population the sweep/patrol`, `issues: write` over titles **and** bodies. Positive control in the same enumeration: `MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY` returns #17254, #16419 and #16393, so the zero above is a reading and not a dead channel. ⛔ No free-text `search_issues` was used.\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

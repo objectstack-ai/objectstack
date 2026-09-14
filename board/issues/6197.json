@@ -1,0 +1,36 @@
+{
+  "number": 6197,
+  "kind": "pull_request",
+  "title": "feat(plugin-auth): 定窗计数件独立成 `./rate-limit-storage` 子路径入口 (#6040)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-08-07T10:34:12Z",
+  "updated_at": "2026-08-07T10:54:30Z",
+  "closed_at": "2026-08-07T10:54:29Z",
+  "closed_by": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "merged_at": "2026-08-07T10:54:28Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/6197",
+  "body": "Fixes #6040\n\n按分诊晋级裁定，**只做方向 1**（给 plugin-auth 加 `\"./rate-limit-storage\"` 子路径 export）。方向 2 的中立包迁移不做 —— 其触发条件（第 4 个消费方）未满足。\n\n## 前提实测（逐条，全部成立）\n\n| # | 前提 | 实测结果 |\n|:--|:--|:--|\n| 1 | `rate-limit-storage.ts` 静态子图不含 better-auth | ✅ 全文件唯一 import 是第 3 行 `import type { BetterAuthRateLimitStorage } from '@better-auth/core'` —— `import type`，编译期擦除，运行期为零 |\n| 2 | plugin-auth `exports` 只有 `\".\"` | ✅ `origin/main` 上确实只有一个入口 |\n| 3 | 三个消费点从包根导入 | ⚠️ 成立但**计数偏低** —— 见下节 |\n| 4 | 在飞分支零相交 | ✅ 遍历 897 个 remote 分支，与本单文件面零相交 |\n\n## ⚠️ 与派发令的一处偏差：消费点是 9 个，不是 3 个\n\nissue 正文和派发令都点名三个消费文件。实测 `grep -rn \"from '@objectstack/plugin-auth'\"` 全仓，**除 `qa/dogfood` 与 `packages/verify`（它们真的要 `AuthPlugin` / `reconcileMembership`）之外，其余每一个根导入都只取计数件符号**，共 9 个文件：\n\n```\npackages/runtime/src/security/inbound-rate-limit.ts      createLazyCounterStore  (值导入)\npackages/runtime/src/endpoint-policy.ts                  createLazyCounterStore  (值导入)\npackages/runtime/src/dispatcher-plugin.ts                CounterStore            (类型)\npackages/runtime/src/security/inbound-rate-limit.test.ts CounterStore            (类型)\npackages/runtime/src/endpoint-policy.test.ts             CounterStore            (类型)\npackages/runtime/src/api-endpoint-step.test.ts           CounterStore            (类型)\npackages/services/service-sms/src/sms-plugin.ts          createLazyCounterStore  (值导入)   ← 派发令未列\npackages/services/service-sms/src/sms-daily-quota.ts     incrementFixedWindow 等 (值导入)\npackages/services/service-sms/src/sms-daily-quota.test.ts CounterStore           (类型)\n```\n\n关键的一条是 `sms-plugin.ts` —— 它是 service-sms 的**插件入口**，也走根导入取 `createLazyCounterStore`。**只切 `sms-daily-quota.ts` 而留下它，本 PR 对 service-sms 的实际加载图就是空操作**：整串 better-auth 照样在插件注册时被急切求值，也就是本 issue 唯一想消掉的那笔成本。所以 9 个全切。类型导入本来就会被擦除、不花运行期成本，一并切是为了让不变量成为一句可 grep、可钉死的话：「计数件符号一律不从包根来」。\n\n## 改了什么\n\n1. **`packages/plugins/plugin-auth/package.json`** —— 新增 `\"./rate-limit-storage\"` 子路径；`build` 从 `tsup --config ../../../tsup.config.ts` 改为 `tsup`（读包内配置）。\n2. **`packages/plugins/plugin-auth/tsup.config.ts`**（新增）—— 两个 entry，`splitting: false`。形状照抄 `packages/types/tsup.config.ts`（`./node`）与 `packages/core/tsup.config.ts`（`./logger`），这两个包的第二 entry 是同一个动机、同一个写法。\n3. **9 个消费点**只改 import 行，别的一个字没动。\n4. **回归钉** `rate-limit-storage-isolation.test.ts`（5 例）。\n5. **changeset**：plugin-auth minor（新增公开入口）、runtime / service-sms patch（import 切换会进各自 dist）。\n\n**根导出保持不变** —— index 仍 `export *` 出全部符号，存量根导入方零破坏。这是加入口，不是搬家。\n\n## `exports` 写法：偏离派发令的「照抄 `.`」，理由是实测\n\n派发令要求新子路径「照抄既有 `.` 入口的形状」。照抄前先量了一下全仓：\n\n```\norigin/main 上 packages/ + apps/ 全部带 types 的 exports 条件：\n  TYPES_FIRST  84\n  TYPES_LAST    1   ← 就是 plugin-auth 自己的 \".\"\n```\n\n即「照抄」会把全仓**唯一**的那个反例复制一份，而且是在新铸一个公开入口的时刻。conditions 是 first-match-wins，`types` 排在 `import`/`require` 之后只会被偶然读到。所以新入口按 84:1 的主流写法（`types` 优先），并顺手把 `\".\"` 也归一 —— 这是零语义改动（tsup 同时产出 `.d.ts` 与 `.d.mts`，两种顺序今天都能解析，下面 tsc 三档实测为证），留一个文件内两种顺序反而像是手滑。这一处偏离在此显式申报，若 reviewer 认为 `\".\"` 该原样不动，我改回来。\n\n## 实测数字\n\n**构建产物**（`pnpm --filter @objectstack/plugin-auth build`）：\n\n```\nESM  dist/rate-limit-storage.mjs     3.71 KB      dist/index.mjs   330.28 KB\nCJS  dist/rate-limit-storage.js      4.94 KB      dist/index.js    337.94 KB\nDTS  dist/rate-limit-storage.d.ts    6.59 KB      dist/index.d.ts  199.13 KB\n```\n\n**模块图探针**（在 `packages/services/service-sms/` 下跑真实解析）：\n\n```\nrequire('@objectstack/plugin-auth/rate-limit-storage')\n  → require.cache: 1 个模块，better-auth 命中 0\n  → exports: InProcessCounterStore, createLazyCacheRateLimitStorage,\n             createLazyCounterStore, incrementFixedWindow\n\nrequire('@objectstack/plugin-auth')\n  → require.cache: 109 个模块，better-auth 命中 2\n  → better-auth/dist/adapters/index.mjs, @better-auth/core/dist/db/index.mjs\n```\n\n**产物内的 better-auth 字符串命中**：`rate-limit-storage.mjs` 0、`rate-limit-storage.js` 0、`index.mjs` 160、`index.js` 160。子路径产物顶层 `import` / `require(` 语句数为 0 —— `splitting: false` 让它是自足 bundle，不是名义上的切分。（`.d.ts` 里 3 处是那条 `import type`，运行期不存在。）\n\n**运行期 + 类型两面**：ESM `await import(...)` 解析成功并跑通一次 `incrementFixedWindow`（`{\"count\":1,\"resetAt\":...}`）；一个最小消费样例 `tsc --noEmit` 在 `module/moduleResolution = nodenext` 与 `esnext/bundler` 两档均 exit 0。\n\n## 回归钉能抓住什么\n\n`rate-limit-storage-isolation.test.ts` 走真实 import 图，形状沿用 `packages/types/src/node-isolation.test.ts`（#4700）为 `./node` 立的那套：\n\n1. 子路径入口可达范围内出现任何 better-auth **值导入** → 红（`import type` 放行）；\n2. 可达的**外部包集合**必须等于白名单 `[{ '@better-auth/core', typeOnly }]` —— 用白名单而不是 better-auth 黑名单，因为贵的那个 import 未必拼作 better-auth：`@objectstack/rest` 和 `@objectstack/platform-objects` 都会把全家带进来，黑名单会放行；\n3. `packages/runtime/src` / `packages/services/service-sms/src` 下任何文件从**包根**取计数件符号 → 红（按目录扫描而非文件名，消费文件改名不会悄悄让检查失效）；\n4. **空转守卫**：根入口若不再值导入 better-auth → 红。那时前两条会因为「没有东西可查」而变绿，切分也就不再买到任何东西，该重新测量而不是让套件为错误的理由通过；\n5. `package.json` 确实发布该子路径，且 `files` 覆盖 `dist`。\n\n刻意做**源码级**扫描而非探 `dist/`：读构建产物的门禁会随本地构建状态时绿时红，正是 `scripts/check-published-files.mjs` 给自己划的那条界（\"a gate that passes or fails by accident is worse than one with a stated boundary\"）。dist 层的读数是真的，但一次性，所以写在上面这段里而不是钉进套件。\n\n## 反向验证（先定方向，再跑）\n\n预判：**两处回填都应让新钉子转红**。实跑：\n\n- 往 `rate-limit-storage.ts` 加一行 `import { createAdapterFactory } from 'better-auth/adapters'` → 第 1 条红（`src/rate-limit-storage.ts -> better-auth/adapters`）、第 2 条红（白名单多出一项）；\n- 把 `sms-plugin.ts` 的 import 改回包根 → 第 3 条红（`packages/services/service-sms/src/sms-plugin.ts -> { createLazyCounterStore, type CounterStore } from the package root`）。\n\n`Tests 3 failed | 2 passed`，方向与预判一致；回填撤销后恢复 5/5 绿。\n\n## 验证\n\n| 项 | 结果 |\n|:--|:--|\n| `turbo run test --filter=plugin-auth --filter=runtime --filter=service-sms` | **33/33 tasks 绿** |\n| plugin-auth `test` | Test Files 39 passed (39) / Tests **972 passed (972)** |\n| runtime `test` | Test Files 105 passed (105) / Tests **1506 passed (1506)** |\n| service-sms `test` | Test Files 5 passed (5) / Tests **70 passed (70)** |\n| 三包 `typecheck` | 33/33 tasks successful |\n| `pnpm check:published-files` | ✓ 69 publishable packages，覆盖 every entry point（新子路径在内） |\n| `node scripts/check-nul-bytes.mjs` | OK，scanned 5923 tracked text files，no raw ASCII control bytes |\n| `pnpm check:empty-changeset` | ✓ |\n| `eslint`（改动文件） | exit 0 |\n\n日志里的 `ERROR Find operation failed` / `DEGRADED BOOT` 是 runtime 既有降级用例自己制造的噪声，不是失败 —— 33 个 task 全成功。\n\n## 范围外发现\n\n无。\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JwwiU9bjhwy2SWj13ho8uv)_"
+}
