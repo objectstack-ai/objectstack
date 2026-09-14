@@ -28,8 +28,24 @@ import { registerNotifyNode } from './notify-node.js';
  * was called: the finding is precisely that those two records contradict each
  * other, so an internal call-count assertion would pass while the defect stands.
  *
- * On `origin/main` the first test fails with `acted: 1` — the notify node
- * counts `EmitResult.delivered`, which in outbox mode is an ENQUEUED count.
+ * At the time #7747 landed, the first test failed with `acted: 1` — the notify
+ * node counted `EmitResult.delivered`, which in outbox mode is an ENQUEUED count.
+ *
+ * ## Amended by #18050 — the first case's durable record is now EMPTY
+ *
+ * #7747's repro boots without `push` registered, and back then the durable
+ * fan-out enqueued a row for it anyway that the dispatcher could only
+ * dead-letter. #18050 fixed that at the producer: `enqueueDeliveries` refuses an
+ * unregistered channel before it writes, reporting the same failed
+ * `DeliveryOutcome` the inline path always did. So the first test's scenario
+ * moved buckets — from "an effect I cannot count YET" (`unmeasured: 1`, the
+ * dispatcher decides later) to "an effect I have counted and it is zero"
+ * (`acted: 0, unmeasured: 0`, refused synchronously).
+ *
+ * ⛔ That is not this file's invariant weakening. #7747's invariant is "the
+ * summary must not out-count what the durable record shows was delivered", and
+ * it is asserted below against a bound that went from 0-non-dead-rows to
+ * 0-rows-at-all. What changed is the producer, not what is demanded of it.
  */
 
 function silentLogger(): any {
@@ -107,7 +123,7 @@ function notifyFlow(channels: string[]) {
 }
 
 describe('notify run summary vs. the durable delivery record (#7747)', () => {
-    it('does not report a countable act for a delivery that dead-letters on an unregistered channel', async () => {
+    it('reports a MEASURED zero — not a countable act — for an unregistered channel on the durable path', async () => {
         // 1) Boot without the `push` channel registered.
         const { outbox, dispatcher, engine } = bootOutboxStack([recordingChannel('inbox').channel]);
 
@@ -115,29 +131,44 @@ describe('notify run summary vs. the durable delivery record (#7747)', () => {
         engine.registerFlow('nudge', notifyFlow(['push']));
         const run = await engine.execute('nudge');
 
-        // 3a) The durable record: the dispatcher dead-letters the row, because
-        //     no transport for `push` exists.
+        // 3a) The durable record: NOTHING — and that is the #18050 change.
+        //     This assertion used to read `toHaveLength(1)` + `status: 'dead'`:
+        //     the durable fan-out enqueued a row for a channel with no transport
+        //     and the dispatcher dead-lettered it on attempt ONE. That row was
+        //     itself the defect #18050 fixed, so `enqueueDeliveries` now refuses
+        //     the channel up front and writes no row at all. The tick is kept
+        //     deliberately: it proves nothing APPEARS later either, which is a
+        //     strictly stronger statement than the old "a row exists and is dead".
         await dispatcher.tick();
         const rows = await outbox.list();
-        expect(rows).toHaveLength(1);
-        expect(rows[0].channel).toBe('push');
-        expect(rows[0].status).toBe('dead');
-        expect(rows[0].error).toContain("channel 'push' not registered");
+        expect(rows).toHaveLength(0);
 
         // 3b) The record an operator reads. The run still SUCCEEDS — the flow
-        //     did everything it can do synchronously, and failing it would make
-        //     a channel that registers a moment later retroactively break the
-        //     flow. What must not survive is the claim that it DELIVERED:
-        //     `acted` is the count the broken-sweep alert trusts, and the honest
-        //     answer at the moment the run settles is "an effect I cannot count
-        //     yet" — which the platform already spells `unmeasured`, and which
-        //     is not the same as `acted: 0` alone (that would claim the run did
-        //     nothing, and trip the alert on every healthy notify).
+        //     did everything it can do synchronously. What must not survive is
+        //     the claim that it DELIVERED.
+        //
+        //     ⚠️ `unmeasured` moved 1 -> 0 here, and that is the POINT, not a
+        //     relaxation. `unmeasuredEffect` means "the count is unknown because
+        //     the dispatcher decides later". Since #18050 there is no later: the
+        //     refusal is synchronous, so the count is KNOWN and it is zero —
+        //     exactly the reading `notify-node.ts` demands ("this count is known
+        //     and it is zero; claiming otherwise would take the run OUT of the
+        //     broken-sweep filter ... on precisely the run that should be inside
+        //     it"). `selected: 1, acted: 0, unmeasured: 0` puts this run INSIDE
+        //     the `selected > 0 AND acted = 0 AND unmeasured = 0` alert, which is
+        //     where a notify that reached nobody and never will belongs.
+        //
+        //     It is also what makes the two fan-out paths agree: the inline case
+        //     four tests down asserts this same triple and calls it "correctly
+        //     eligible for the broken-sweep alert". The durable path is not a
+        //     duplicate of it — it is the other side of the seam this file
+        //     exists for, and it is the side that used to disagree.
         expect(run.success).toBe(true);
-        expect(run.summary).toMatchObject({ acted: 0, unmeasured: 1 });
+        expect(run.summary).toMatchObject({ selected: 1, acted: 0, unmeasured: 0 });
 
-        // The finding itself, as one assertion: the summary must not out-count
-        // what the durable record shows was actually delivered (here: nothing).
+        // The #7747 finding itself, unchanged in force: the summary must not
+        // out-count what the durable record shows was actually delivered. With
+        // no row at all the bound is 0, so this is tighter than it was before.
         const notDead = rows.filter((r) => r.status !== 'dead').length;
         expect(run.summary!.acted).toBeLessThanOrEqual(notDead);
     });

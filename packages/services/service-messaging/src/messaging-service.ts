@@ -879,8 +879,9 @@ export class MessagingService {
      * The single notification ingress. Writes the L2 event, resolves the
      * audience, and fans the result out to its channels. An unregistered
      * channel, or a channel that throws, is reported as a failed delivery — it
-     * never aborts the rest of the fan-out. A `dedupKey` that matches an
-     * existing event short-circuits: the event id is returned and no new
+     * never aborts the rest of the fan-out, and on the durable path it costs no
+     * `sys_notification_delivery` row either (#18050). A `dedupKey` that matches
+     * an existing event short-circuits: the event id is returned and no new
      * deliveries are produced.
      *
      * A channel that answers `isAvailable: { available: false }` for the tenant
@@ -1036,11 +1037,14 @@ export class MessagingService {
      *    default would mute every channel that has not been updated, which is a
      *    far worse failure than the workless rows this exists to stop.
      *    `channel-availability.test.ts` pins it from both sides.
-     * 2. **An UNREGISTERED channel is left alone.** It has no implementation to
-     *    ask, so it keeps today's path exactly: the inline fan-out reports it as
-     *    a failed delivery, the outbox enqueues a row the dispatcher
-     *    dead-letters. That is a real, separate defect — it is filed, ⛔ not
-     *    widened into this ruling.
+     * 2. **An UNREGISTERED channel is not answered here.** It has no
+     *    implementation to ask, so this consult cannot reach it and its absence
+     *    is ⛔ NOT a suppression: `suppressed_channels` answers "why can this
+     *    TENANT not send", and an unregistered channel is a composition fact.
+     *    Both fan-out paths refuse it instead, reporting one failed
+     *    {@link DeliveryOutcome} per `(recipient × channel)` and writing no
+     *    delivery row at all — inline in {@link MessagingService.fanOut}, on the
+     *    durable path in {@link MessagingService.enqueueDeliveries} (#18050).
      * 3. **A throw is AVAILABLE.** Fail-open, matching the preference filter one
      *    step down: a broken probe must degrade into today's behaviour, never
      *    into a silent notification outage. Logged at `warn` — the degradation
@@ -1085,6 +1089,28 @@ export class MessagingService {
      * dispatcher does the actual send + retry; here `ok` means "accepted for
      * delivery" (enqueued), not yet delivered — progress is observable on the
      * `sys_notification_delivery` row.
+     *
+     * ## An UNREGISTERED channel is refused here, not enqueued (#18050)
+     *
+     * A channel nobody registered has no transport to reach, so a row written
+     * for it is a row the dispatcher can only dead-letter on attempt ONE —
+     * `processRow` / `processDigestGroup` both ack `dead: true` the moment
+     * `getChannel()` answers nothing. Writing it costs an insert, a claim, an
+     * update and a retained terminal row per recipient, to record a fact known
+     * before the first write.
+     *
+     * The refusal is reported as the SAME failed {@link DeliveryOutcome} the
+     * inline path already produces for this case, so "nothing was sent and here
+     * is why" has one shape on both paths and the caller's `failed` count keeps
+     * its meaning.
+     *
+     * ⛔ NOT folded into `sys_notification.suppressed_channels`. That vocabulary
+     * answers "why can this TENANT not send on this channel" — a per-tenant
+     * configuration fact an operator filters and reports on. An unregistered
+     * channel is a COMPOSITION fact: identical for every tenant in the process,
+     * and fixed by mounting the channel, not by configuring the tenant.
+     * Recording it there would make a per-tenant report assert a
+     * deployment-wide misconfiguration.
      */
     private async enqueueDeliveries(
         outbox: INotificationOutbox,
@@ -1107,8 +1133,23 @@ export class MessagingService {
             actorId: input.actorId,
         };
         const deliveries: DeliveryOutcome[] = [];
+        // [#18050] Counted, not logged in place: an emit to a 500-recipient
+        // audience would otherwise print 500 identical lines for one missing
+        // channel. Said ONCE per channel below, with the volume it refused —
+        // which is the number an operator needs to size the misconfiguration.
+        const refused = new Map<string, number>();
         for (const { recipient, channels, notBefore, digest } of targets) {
             for (const channel of channels) {
+                if (!this.channels.has(channel)) {
+                    refused.set(channel, (refused.get(channel) ?? 0) + 1);
+                    deliveries.push({
+                        channel,
+                        recipient,
+                        ok: false,
+                        error: `channel '${channel}' not registered`,
+                    });
+                    continue;
+                }
                 try {
                     const id = await outbox.enqueue({
                         notificationId,
@@ -1129,6 +1170,13 @@ export class MessagingService {
                     deliveries.push({ channel, recipient, ok: false, error: (err as Error)?.message ?? String(err) });
                 }
             }
+        }
+        for (const [channel, count] of refused) {
+            this.ctx.logger.warn(
+                `[messaging] emit: channel '${channel}' is not registered; refused ${count} ` +
+                `delivery row(s) the dispatcher could only dead-letter. Register the channel ` +
+                `(or drop it from this notify's channel list) — nothing was sent on it.`,
+            );
         }
         return deliveries;
     }
