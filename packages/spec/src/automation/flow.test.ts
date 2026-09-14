@@ -211,13 +211,24 @@ describe('FlowNodeSchema', () => {
       'parallel_gateway', 'join_gateway', 'boundary_event',
     ] as const;
 
+    // The two type-scoped config blocks: a bare node of these types no longer
+    // parses, because the block is the whole of what the type declares (see
+    // `BPMN — Wait Event Configuration` below for the refusals themselves).
+    // Named here as DATA rather than skipped, so this list keeps covering every
+    // type in the seed set instead of quietly shrinking by two.
+    const REQUIRED_BLOCK: Record<string, Record<string, unknown>> = {
+      wait: { waitEventConfig: { eventType: 'timer', timerDuration: 'PT1H' } },
+      boundary_event: { boundaryConfig: { attachedToNodeId: 'node_http', eventType: 'error' } },
+    };
+
     types.forEach(type => {
       const node: FlowNode = {
         id: `node_${type}`,
         type,
         label: type,
+        ...REQUIRED_BLOCK[type],
       };
-      expect(() => FlowNodeSchema.parse(node)).not.toThrow();
+      expect(() => FlowNodeSchema.parse(node), type).not.toThrow();
     });
   });
 
@@ -1369,14 +1380,138 @@ describe('BPMN — Wait Event Configuration', () => {
     expect(result.success).toBe(true);
   });
 
-  it('should accept wait node without waitEventConfig (backward compatible)', () => {
+  /**
+   * ⛔ REVERSED — this block used to read
+   * `it('should accept wait node without waitEventConfig (backward compatible)')`
+   * and asserted `success: true` with `waitEventConfig` undefined. That accept
+   * was the defect: measured end to end (PR #17937's
+   * `absent-config-node-characterization.test.ts`), the document it blessed ran
+   * to `{ success: true, suspend: true }` with no job armed though a job service
+   * was answering, no `waitUntil` persisted and not one log line at any level —
+   * a run parked forever, reporting success, from the state a freshly created
+   * node is in. "Backward compatible" named the compatibility and not its cost.
+   *
+   * The maintainer's ruling (decision batch #127 item 5) settles the direction:
+   * the protocol is the source of truth and a required key has no "unset
+   * behaves as", so the shape is refused at the contract rather than defaulted
+   * anywhere. Both directions are pinned — the refusal AND the shapes that must
+   * keep parsing, because a refusal that also swallowed legal documents would
+   * be the same class of defect pointing the other way.
+   */
+  it('REFUSES a wait node with no `waitEventConfig` block at all, naming the key', () => {
     const result = FlowNodeSchema.safeParse({
       id: 'wait_simple',
       type: 'wait',
       label: 'Simple Wait',
     });
-    expect(result.success).toBe(true);
-    expect(result.data?.waitEventConfig).toBeUndefined();
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find(i => i.path.join('.') === 'waitEventConfig');
+    expect(issue, 'the refusal is addressed at the block, not the node').toBeDefined();
+    expect(issue!.message).toContain('`waitEventConfig`');
+    // The remedy is in the rejection, not only in the docs: an author (or an
+    // agent) who reads only this string can fix the node from it.
+    expect(issue!.message).toContain("eventType: 'timer'");
+    expect(issue!.message).toContain("'signal'");
+  });
+
+  it('REFUSES a timer wait with no `timerDuration`, naming the key', () => {
+    const result = FlowNodeSchema.safeParse({
+      id: 'wait_timer',
+      type: 'wait',
+      label: 'Wait',
+      waitEventConfig: { eventType: 'timer' },
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find(i => i.path.join('.') === 'waitEventConfig.timerDuration');
+    expect(issue).toBeDefined();
+    expect(issue!.message).toContain('`timerDuration`');
+    expect(issue!.message).toContain('PT1H');
+  });
+
+  it('REFUSES a timer wait whose `timerDuration` is blank — the executor reads it as no duration', () => {
+    for (const timerDuration of ['', '   ']) {
+      const result = FlowNodeSchema.safeParse({
+        id: 'wait_timer', type: 'wait', label: 'Wait',
+        waitEventConfig: { eventType: 'timer', timerDuration },
+      });
+      expect(result.success, `timerDuration: ${JSON.stringify(timerDuration)}`).toBe(false);
+    }
+  });
+
+  it('CONTROL — every shape that still parses: the refusals are scoped to what they name', () => {
+    // A declared timer wait: the one the showcase authors.
+    expect(FlowNodeSchema.safeParse({
+      id: 'w', type: 'wait', label: 'Wait',
+      waitEventConfig: { eventType: 'timer', timerDuration: 'PT1H' },
+    }).success).toBe(true);
+    // A numeric-string duration — quoted milliseconds, the spelling the
+    // `timeoutMs` tombstone prescribes.
+    expect(FlowNodeSchema.safeParse({
+      id: 'w', type: 'wait', label: 'Wait',
+      waitEventConfig: { eventType: 'timer', timerDuration: '60000' },
+    }).success).toBe(true);
+    // The four non-timer event types carry no duration and must not be asked
+    // for one: their resumer is named, not counted.
+    for (const eventType of ['signal', 'webhook', 'manual', 'condition']) {
+      expect(FlowNodeSchema.safeParse({
+        id: 'w', type: 'wait', label: 'Wait',
+        waitEventConfig: { eventType, signalName: 'order_paid' },
+      }).success, eventType).toBe(true);
+    }
+    // And the requirement is per NODE TYPE: nothing else acquired a block.
+    expect(FlowNodeSchema.safeParse({ id: 'n', type: 'script', label: 'S' }).success).toBe(true);
+    expect(FlowNodeSchema.safeParse({ id: 'n', type: 'screen', label: 'S' }).success).toBe(true);
+  });
+
+  /**
+   * Nested in an ADR-0031 region, the refusal is reached through the REGION
+   * CONTRACT, not through `FlowSchema` — measured here rather than assumed,
+   * because the two doors answer differently and only one of them is the door
+   * a run actually passes through.
+   *
+   * `parseFlowNodeRegions` parses each region slot with `safeParse` and, on a
+   * refusal, leaves the region RAW and continues (its own comment says so: a
+   * refused region is left for `validateControlFlow` to name). That policy
+   * predates this change and is not specific to `waitEventConfig` — it is why the
+   * flow-level parse below is GREEN with a block-less wait sitting in the loop
+   * body. The contract that refuses it is `LoopConfigSchema`, which is what
+   * `loop`'s executor parses its config through at execute time
+   * (`parseNodeConfig` → a guard refusal), so the nested shape still cannot
+   * run; it is refused one door later and by node id.
+   */
+  it('nested in a region: the flow parse leaves it raw, and the REGION contract refuses it by path', () => {
+    const loopConfig = (bodyNode: Record<string, unknown>) => ({
+      collection: '{rows}', iteratorVariable: 'row',
+      body: { nodes: [bodyNode], edges: [] },
+    });
+    const bare = { id: 'pause', type: 'wait', label: 'Wait' };
+    const declared = {
+      id: 'pause', type: 'wait', label: 'Wait',
+      waitEventConfig: { eventType: 'timer', timerDuration: 'PT1H' },
+    };
+    const flowWith = (bodyNode: Record<string, unknown>) => ({
+      name: 'nested', label: 'Nested', type: 'autolaunched',
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'loop', type: 'loop', label: 'Loop', config: loopConfig(bodyNode) },
+      ],
+      edges: [{ id: 'e1', source: 'start', target: 'loop' }],
+    });
+
+    // Door 1 — the flow parse: green, and the body node comes back UNPARSED.
+    const flowParse = FlowSchema.safeParse(flowWith(bare));
+    expect(flowParse.success).toBe(true);
+
+    // Door 2 — the region contract the `loop` executor parses through: refused,
+    // anchored on the block, at the node's own index inside the body.
+    const refused = LoopConfigSchema.safeParse(loopConfig(bare));
+    expect(refused.success).toBe(false);
+    expect(refused.error!.issues.map(i => i.path.join('.'))).toContain('body.nodes.0.waitEventConfig');
+
+    // CONTROL — the declared body node passes both doors, so the refusal above
+    // is the missing block and not the region fixture.
+    expect(FlowSchema.safeParse(flowWith(declared)).success).toBe(true);
+    expect(LoopConfigSchema.safeParse(loopConfig(declared)).success).toBe(true);
   });
 });
 
@@ -1491,6 +1626,29 @@ describe('BPMN — Boundary Event', () => {
       expect(faultEdge).toBeDefined();
       expect(faultEdge!.source).toBe('api_error_boundary');
     }
+  });
+
+  /**
+   * The contract half only. `boundary_event` has NO executor registered at all
+   * — measured in the same run that measured `wait`: the dispatch fails with
+   * `NO_EXECUTOR` before any config block is read, identically whether the
+   * block is absent or fully populated, and the seal warns about the type at
+   * boot. So unlike `wait` there is no silent executor branch behind this, and
+   * nothing in `service-automation` changes for it. What the refusal fixes is
+   * the authoring surface: a node that named neither its host activity nor its
+   * trigger used to parse clean.
+   */
+  it('REFUSES a boundary_event node with no `boundaryConfig` block at all, naming the key', () => {
+    const result = FlowNodeSchema.safeParse({
+      id: 'be_bare',
+      type: 'boundary_event',
+      label: 'Boundary',
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find(i => i.path.join('.') === 'boundaryConfig');
+    expect(issue).toBeDefined();
+    expect(issue!.message).toContain('`boundaryConfig`');
+    expect(issue!.message).toContain('attachedToNodeId');
   });
 });
 

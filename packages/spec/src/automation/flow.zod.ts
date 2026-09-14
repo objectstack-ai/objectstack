@@ -236,8 +236,114 @@ export const FlowVariableSchema = lazySchema(() => strictObject(
  * mode so that failure can never come back silently.
  */
 export const FlowNodeSchema = lazySchema(() => flowNodeObject().transform(
-  (node, ctx) => parseEndNodeConfig(parseFlowNodeRegions(node), ctx),
+  (node, ctx) => parseEndNodeConfig(requireTypeScopedConfig(parseFlowNodeRegions(node), ctx), ctx),
 ));
+
+/**
+ * Refuse a `wait` / `boundary_event` node that carries **no configuration block
+ * at all** — the third half of the node transform above.
+ *
+ * ## The document this closes
+ *
+ * `eventType` has always been REQUIRED *inside* each block, so
+ * `waitEventConfig: {}` was already a loud parse error. The BLOCK itself was
+ * optional, which made "omit the key" and "omit the block" two documents with
+ * two verdicts — and the accepted one was the silent one. That is the state a
+ * freshly created node is in, so it is a document an author could really save:
+ * measured end to end (PR #17937's `absent-config-node-characterization.test.ts`),
+ * `engine.execute()` on a block-less `wait` node answered
+ * `{ success: true, suspend: true }`, scheduled no job **though a job service was
+ * answering**, wrote no `waitUntil`, and emitted not one log line at any level.
+ * The run parked forever and reported success. The control — the same node with
+ * `{ eventType: 'timer', timerDuration: 'PT1H' }` — armed the job and persisted
+ * the deadline, so the zeros were a reading of this path and not of a dead
+ * harness.
+ *
+ * ## Why refusal, and why no default
+ *
+ * Maintainer ruling, decision batch #127 item 5, verbatim and untranslated:
+ * 「16678 具体解释，计划用哪个字段判断经理。其他同意」 — carrying option C′ as
+ * presented: the protocol is the source of truth; a designer never invents a
+ * default the protocol does not apply; a default the protocol *should* have is
+ * declared by the protocol; **a required key has no "unset behaves as"**. So
+ * `eventType` gets no `.default('timer')` here and none on the designer side
+ * (objectui#9354 deletes those declarations): a wait node says what it waits
+ * for, or it does not parse. A deliberate indefinite park, if one is ever
+ * wanted, is its own declared `eventType` — never the absence of configuration.
+ *
+ * The alternative considered and NOT taken (triage's reading on the closed
+ * duplicate #17939) was to warn and keep parsing. A warning on the authoring
+ * path an AI agent drives is read by nobody: the agent gets a success envelope
+ * and reports "done" over a flow that hangs.
+ *
+ * ## Where the refusal lands
+ *
+ * On the NODE contract, next to {@link parseEndNodeConfig} because both answer
+ * the same question — "this node type owes a block the outer shape cannot
+ * demand". Issues are raised under the block's own key, so a flow-level parse
+ * reports a TOP-LEVEL node at `nodes[i].waitEventConfig`, the address
+ * `formatZodError` prints for any other node key.
+ *
+ * ⚠️ A node nested in an ADR-0031 REGION BODY is refused at a different door, at
+ * a different time — ⛔ it is NOT "checked exactly like a top-level one", and
+ * saying so on a published surface would be false. {@link parseFlowNodeRegions}
+ * parses each region slot with `safeParse` and, on a refusal, leaves that region
+ * RAW and continues (its own comment says so: a refused region is left for
+ * `validateControlFlow` to name). That policy predates this change and is not
+ * specific to `waitEventConfig`, and the consequence is measurable:
+ * `FlowSchema.safeParse` of a flow whose `loop` body holds a block-less `wait`
+ * answers `success: true`. What refuses the nested node is the REGION contract —
+ * `LoopConfigSchema` / `ParallelConfigSchema` / `TryCatchConfigSchema` — at
+ * `body.nodes[i].waitEventConfig`, which is the same contract the container
+ * node's executor parses its config through at execute time, so the nested shape
+ * still cannot RUN; it is refused one door later and by node id. Both halves are
+ * pinned in `flow.test.ts` ("nested in a region: the flow parse leaves it raw,
+ * and the REGION contract refuses it by path"), and the ADR-0087 entry's
+ * `acceptanceCriteria` states the same thing for whoever migrates a stack.
+ *
+ * ⚠️ `boundary_event` gets the contract half ONLY: the platform registers no
+ * executor for that type at all (`NO_EXECUTOR` plus a startup `warn`, measured
+ * in the same characterization run), so unlike `wait` there is no silent
+ * executor branch to retire behind this.
+ */
+function requireTypeScopedConfig<T extends {
+  id?: unknown;
+  type: string;
+  waitEventConfig?: unknown;
+  boundaryConfig?: unknown;
+}>(node: T, ctx: z.RefinementCtx): T {
+  if (node.type === 'wait' && node.waitEventConfig === undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['waitEventConfig'],
+      message:
+        "a `wait` node requires a `waitEventConfig` block saying what resumes it — the block is what "
+        + 'the executor reads, and a node without one used to park the run forever while reporting '
+        + 'success. Declare the resume condition, e.g. '
+        + "`waitEventConfig: { eventType: 'timer', timerDuration: 'PT1H' }` for a delay (QUOTE the "
+        + "number: a bare numeric string is read as milliseconds, so '60000' is a 60s wait), or "
+        + "`waitEventConfig: { eventType: 'signal', signalName: 'order_paid' }` for an external "
+        + "producer to resume. `eventType` is one of 'timer' | 'signal' | 'webhook' | 'manual' | "
+        + "'condition' and has no default — an indefinite park is a declared `eventType`, never an "
+        + 'absent block.',
+    });
+  }
+  if (node.type === 'boundary_event' && node.boundaryConfig === undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['boundaryConfig'],
+      message:
+        'a `boundary_event` node requires a `boundaryConfig` block naming the host activity it '
+        + 'watches and what fires it — without one the node declares nothing at all. Declare it, '
+        + "e.g. `boundaryConfig: { attachedToNodeId: 'api_call', eventType: 'error', errorCode: "
+        + "'TIMEOUT' }`. `eventType` is one of 'error' | 'timer' | 'signal' | 'cancel' and has no "
+        + 'default. ⚠️ This node type is a BPMN interop representation: the runtime registers no '
+        + 'executor for it, so a flow that reaches one at run time fails with NO_EXECUTOR — use a '
+        + '`try_catch` region (ADR-0031) for native error handling.',
+    });
+  }
+  return node;
+}
 
 /**
  * Parse a structural `end` node's `config` against {@link EndConfigSchema}
@@ -249,17 +355,29 @@ export const FlowNodeSchema = lazySchema(() => flowNodeObject().transform(
  * through exists for it (no descriptor `configSchema` at `registerFlow()`, no
  * execute-time `parse()`). Without this pass an `end` node carrying
  * `{ outcome: 'refused' }` and no `message`, or a `message` no outcome would
- * ever render, parsed clean and ran as a plain completion. Applied at the NODE
- * level so an `end` nested in a region is checked exactly like a top-level
- * one, and the parsed (defaulted) config is written back — `parsed` means
+ * ever render, parsed clean and ran as a plain completion. Applied on the NODE
+ * contract, and the parsed (defaulted) config is written back — `parsed` means
  * parsed, as for regions. A node with no `config` is left without one: the
  * default `outcome` is `completed` either way, and materialising a config
  * block on every plain terminal would be a shape change nobody asked for.
  *
- * Issues are re-raised under `['config', …]`, so a flow-level parse reports
- * them at `nodes[i].config.message` — the same address `formatZodError`
- * prints for any other node key. A hoisted `function` for the same reason
- * {@link flowNodeObject} is one (trap 2 above).
+ * Issues are re-raised under `['config', …]`, so a flow-level parse reports a
+ * TOP-LEVEL node at `nodes[i].config.message` — the same address
+ * `formatZodError` prints for any other node key. A hoisted `function` for the
+ * same reason {@link flowNodeObject} is one (trap 2 above).
+ *
+ * ⚠️ This docblock used to say the pass ran "at the NODE level so an `end`
+ * nested in a region is checked exactly like a top-level one". It does not, for
+ * the same reason spelled out under {@link requireTypeScopedConfig} — read it
+ * there rather than here, so the two cannot drift. Measured on this file:
+ * `FlowNodeSchema.safeParse` of a top-level `end` carrying
+ * `{ outcome: 'refused' }` and no `message` answers `false`, while
+ * `FlowSchema.safeParse` of a flow whose `loop` body holds that identical node
+ * answers `true` and only `LoopConfigSchema` refuses it, at
+ * `body.nodes.0.config.message`. The refusal is real either way — the container
+ * node's executor parses its config through that same region contract — but it
+ * is a different door at a different time, so ⛔ do not read this pass as a
+ * flow-level guarantee about region bodies.
  */
 function parseEndNodeConfig<T extends { type: string; config?: unknown }>(node: T, ctx: z.RefinementCtx): T {
   if (node.type !== 'end' || node.config === undefined) return node;
@@ -493,7 +611,46 @@ function flowNodeObject() { return strictObject(
       + 'Run `os migrate meta --from 16` to list the mechanical edits for existing '
       + 'sources; apply them by hand.',
     ),
-  }).optional().describe('Configuration for wait node event resumption').meta({ title: 'Wait Event' }),
+  }).superRefine((wec, ctx) => {
+    // A timer with nothing to count is the forever-hang in its second
+    // spelling. `parseIsoDuration` is the executor's only source for the wake
+    // deadline and it reads exactly this key: with no value it computes no
+    // deadline, so no one-shot job is scheduled, no `waitUntil` is persisted
+    // for a later boot's re-arm pass to find, and the node still answers
+    // `{ success: true, suspend: true }` — a run parked until something
+    // external calls `resume(runId)`, on a node whose author asked for a delay.
+    // Refused at authoring instead, with the key named, for the same reason
+    // `errorHandling.strategy: 'retry'` refuses `maxRetries: 0` above: a
+    // declared capability the runtime does not deliver (PD #10) is a defect at
+    // the contract, not a runtime degradation to log.
+    //
+    // Blank is absent. The value is a string and the executor's parse of `''`
+    // (or of any whitespace) yields no duration at all, so accepting it here
+    // would leave one byte of difference between the shape this refuses and a
+    // shape that hangs identically.
+    //
+    // ⚠️ SCOPE: this refinement lives on the BLOCK, so it is NOT gated on
+    // `type: 'wait'` — any node type carrying a `waitEventConfig` is held to it,
+    // and a `start` node spelled `waitEventConfig: { eventType: 'timer' }`
+    // parsed before this change and is refused after it. That is deliberate and
+    // it only ever narrows; ⛔ do not "fix" it by gating on the node type, which
+    // would re-admit the duration-less timer wherever the key is spelled.
+    if (wec.eventType === 'timer' && (wec.timerDuration ?? '').trim() === '') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['timerDuration'],
+        message:
+          "`waitEventConfig.eventType: 'timer'` requires a `timerDuration` — a timer wait with no "
+          + 'duration computes no deadline, schedules no wake-up job and parks the run forever while '
+          + "reporting success. State the wait, e.g. `timerDuration: 'PT1H'` (ISO 8601), and QUOTE a "
+          + "bare number: the key is a string and a numeric string is read as milliseconds, so "
+          + "`timerDuration: '60000'` is the same 60s wait as `'PT1M'`. For a pause with no deadline "
+          + "use an `eventType` that names its resumer instead ('signal' / 'webhook' / 'manual' / "
+          + "'condition') — `wait` has no timeout, so nothing ever fails or resumes a wait on a "
+          + 'deadline it did not ask for.',
+      });
+    }
+  }).optional().describe("Configuration for wait node event resumption. REQUIRED on a `type: 'wait'` node — the block is the whole contract, and a wait node without one parses into a run that parks forever reporting success. Under `eventType: 'timer'` a `timerDuration` is required too.").meta({ title: 'Wait Event' }),
 
   /**
    * Boundary Event Configuration (for 'boundary_event' nodes)
@@ -536,7 +693,7 @@ function flowNodeObject() { return strictObject(
     timerDuration: z.string().optional().describe('ISO 8601 duration for timer boundary events'),
     /** Signal name — only for signal boundary events */
     signalName: z.string().optional().describe('Named signal to catch'),
-  }).optional().describe('Configuration for boundary events attached to host nodes').meta({ title: 'Boundary Event' }),
+  }).optional().describe("Configuration for boundary events attached to host nodes. REQUIRED on a `type: 'boundary_event'` node — without it the node names neither the activity it watches nor what fires it.").meta({ title: 'Boundary Event' }),
 }); }
 
 /**

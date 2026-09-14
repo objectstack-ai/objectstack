@@ -108,33 +108,55 @@ job) pins this: it asserts the file's **bytes** across a refused run, because th
 broken and the fixed script both exit non-zero here and only the file tells them
 apart.
 
-#### After the pin moves: run the declaration-parity ratchet (#5960)
+#### After the pin moves: regenerate the committed manifest (#5960, #12924)
 
 The bump has a second half, and it is not optional:
 
 ```bash
-pnpm sdui:manifest    # rebuild objectui at the new pin, dump sdui.manifest.json, run the ratchet
+node scripts/gen-sdui-manifest-node.mjs \
+  --objectui-version {the @object-ui version the new pin ships}
 ```
 
-`sdui.manifest.json` is objectui's registry-inputs dump — the right-hand side of
-ADR-0082 D4's spec↔registry **declaration-parity ratchet** (`scripts/gen-sdui-manifest.sh`
-produces it and runs the ratchet against it; note it is *not* `scripts/build-console.sh`,
-which the ADR named until #5960 corrected it). That file changes when — and only when —
-this pin moves, so **the pin bump is the ratchet's trigger, and its only one.**
+Read that version from the objectui checkout's `packages/core/package.json` — the bump
+already required that checkout. **That command writes the two tracked files, and nothing
+else writes them:** the repo-root `sdui.manifest.json` and its provenance record
+`scripts/sdui-manifest.record.json`. It installs the published `@object-ui/*` packages
+into a temp dir and serializes the registry through `@objectstack/sdui-parser`, so it
+needs neither a browser nor an objectui build (it does need
+`packages/sdui-parser/dist` — `pnpm --filter @objectstack/sdui-parser build`).
 
-This is an **on-demand gate by decision** (maintainer ruling, 2026-08-07). No workflow
-produces the manifest and none should: the only producer drives a Playwright chromium
-over objectui's built console and reads `window.__MANIFEST`, so wiring it into this
-repo's CI would put a full objectui build plus a browser download on every matching PR.
-The trade is deliberate — honest on-demand coverage over expensive full coverage —
-and it is safe because the gate has no unearned green: since #4690 a missing, unreadable,
-malformed or empty manifest **exits 1** rather than skipping. The one failure mode left is
-that nobody runs it, which is what this step exists to close. `scripts/bump-objectui.sh`
-and `scripts/build-console.sh` both print the reminder when they finish.
+Two required lint steps read that tracked pair on **every PR**, so skipping this step
+reds the bump PR rather than leaving it quietly uncovered:
 
-Needs a Playwright browser (`pnpm exec playwright install chromium-headless-shell`). When
-the ratchet fires, the fix is a spec/overlay edit or an explicit `--update` to re-accept
-the baseline — see ADR-0082 D4 and its addendum 2.
+- `node scripts/check-sdui-manifest.mjs` — shape, `sha256` against the record, and the
+  record's `objectuiSha` against the live `.objectui-sha`. Moving the pin is what makes
+  the last one fail, and its failure text prints the exact regeneration call.
+- ADR-0082 D4's spec↔registry **declaration-parity ratchet**, which `lint.yml` runs
+  `--strict` with `MANIFEST="$PWD/sdui.manifest.json"`. It is baseline-ratcheted, so only
+  divergence new since `packages/spec/react-declaration-parity.baseline.json` reds.
+
+**`pnpm sdui:manifest` is a different command and does not do this.** It
+(`scripts/gen-sdui-manifest.sh`) builds objectui at the pin, drives a Playwright chromium
+over the built console to read `window.__MANIFEST`, writes
+`packages/console/dist/sdui.manifest.json` — **gitignored** — and runs the same parity
+ratchet against that untracked copy. It is an independent read of the registry straight
+from a browser, and `cut-rc.yml` runs it once per release cut; what it never does is
+touch the tracked pair, so it cannot clear either gate above. Note the browser dump lives
+in `scripts/gen-sdui-manifest.sh`, *not* `scripts/build-console.sh`, which the ADR named
+until #5960 corrected it.
+
+Keeping that browser dump **out of per-PR CI** is a maintainer ruling (2026-08-07): it
+would put a full objectui build plus a browser download on every matching PR. #12924
+changed the ratchet's input, not that ruling — the manifest is checked in now, so the
+ratchet runs per-PR off the tracked artefact with no browser anywhere. Neither gate has
+an unearned green: since #4690 a missing, unreadable, malformed or empty manifest
+**exits 1** rather than skipping.
+
+`scripts/bump-objectui.sh` and `scripts/build-console.sh` both print the reminder when
+they finish. When the ratchet fires, the fix is a spec/overlay edit or an explicit
+`--update` to re-accept the baseline — see ADR-0082 D4 and its addendum 2. The browser
+dump additionally needs a Playwright browser
+(`pnpm exec playwright install chromium-headless-shell`).
 
 #### If the dispatch container's Playwright browser doesn't match the revision
 
@@ -253,8 +275,13 @@ So the process is:
    `@objectstack/console` changeset for `OLD_PIN..NEW_PIN` from objectui's own
    declared changesets (`scripts/objectui-changeset-digest.mjs`). This is the
    mechanism that keeps the release record honest, and it is the whole of it.
-4. **Then the declaration-parity ratchet** — see "After the pin moves" above; the
-   bump is that ratchet's only trigger.
+4. **Then the committed manifest is regenerated in that same PR.**
+   `node scripts/gen-sdui-manifest-node.mjs --objectui-version {the @object-ui version
+   the new pin ships}` rewrites the tracked `sdui.manifest.json` and
+   `scripts/sdui-manifest.record.json`; `scripts/check-sdui-manifest.mjs` reds the bump
+   PR until it does, and ADR-0082 D4's declaration-parity ratchet reads that same tracked
+   artefact. `pnpm sdui:manifest` writes neither file — it dumps to the gitignored
+   `packages/console/dist/`. See "After the pin moves" above.
 5. **Releases build against the pin as committed.** Both `cut-rc.yml` and
    `release.yml` read `.objectui-sha` and build the Console SPA at it. Neither
    resolves objectui `main`; neither moves the pin.

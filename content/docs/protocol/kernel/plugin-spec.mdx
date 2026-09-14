@@ -700,11 +700,11 @@ Plugins are distributed as **NPM packages** for easy versioning and distribution
   ],
   
   "dependencies": {
-    "@objectstack/core": "^2.0.0"
+    "@objectstack/core": "^17.0.0"
   },
   
   "devDependencies": {
-    "@objectstack/cli": "^2.0.0",
+    "@objectstack/cli": "^17.0.0",
     "typescript": "^5.3.0"
   },
   
@@ -723,7 +723,12 @@ Plugins are distributed as **NPM packages** for easy versioning and distribution
 
 The `typescript` floor above mirrors `SCAFFOLD_TYPESCRIPT_RANGE` in
 `packages/cli/src/commands/init.ts` — that constant, not this snippet, is the
-authority the scaffolders emit from.
+authority the scaffolders emit from. The two `@objectstack/*` ranges have an
+authority in the same file: every `@objectstack/*` package in this monorepo is
+published on one shared release version, and the scaffolders caret-pin each
+dependency to the version of the CLI that generated the project
+(`getCliVersion()`). A hand-written example cannot carry that live value, so it
+carries the **current major's floor** — track it when the major moves.
 
 ### Publishing to NPM
 

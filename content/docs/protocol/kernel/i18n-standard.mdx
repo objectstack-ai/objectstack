@@ -232,7 +232,12 @@ translation workbench editing and automated coverage detection.
 There is exactly **one** shape. A file-authored bundle is a map of locale code →
 `TranslationData`; a `translation` metadata item authored at runtime is one
 `TranslationData` plus the `locale` it translates. The resolvers, `os i18n
-extract`, `os i18n check`, and the Studio editor all read the same keys.
+extract`, `os i18n check`, and the Studio editor all read the same keys, and
+every key in this shape is derived from **where a label sits in the metadata** —
+never from the label's own value. Two dialects that once appeared alongside it
+are retired and read by nothing: the `o.{object}` shape below, and the flat
+`<namespace>.<prop>` shape recorded under
+[ObjectQL Integration](#objectql-integration).
 
 ```typescript
 // One locale of a TranslationBundle (e.g. zh-CN)
@@ -259,7 +264,7 @@ const zh: TranslationData = {
   dashboards: { sales_overview: { label: '销售概览' } },
   pages: { landing: { title: '欢迎' } },
   globalActions: { export_csv: { label: '导出 CSV' } },
-  messages: { 'common.save': '保存' },
+  messages: { commonSave: '保存' },
 };
 ```
 
@@ -298,7 +303,7 @@ export default defineTranslation({
       fields: { name: { label: '客户名称' } },
     },
   },
-  messages: { 'common.save': '保存' },
+  messages: { commonSave: '保存' },
 });
 ```
 
@@ -307,97 +312,103 @@ resolve, and a silent skip is exactly what makes a missing translation hard to
 diagnose. Items are merged over the static file bundles, so an authored value
 wins over a shipped one for the same key.
 
-### Directory Structure
+### Where a bundle lives
+
+A bundle is a **TypeScript module handed to `defineStack`**, not a directory the
+loader walks. `defineTranslationBundle` validates it at authoring time, and how
+you split those modules across your source tree is your own convention:
+
+> `fileOrganization` was removed — no runtime ever read it; how you split bundle
+> files is a convention of your source tree, and the loader reads whatever
+> `translations` you hand `defineStack`
+>
+> — `TranslationConfigSchema` guidance, `packages/spec/src/system/translation.zod.ts`
+
+One directory *is* read, by the file adapter. `I18nServicePlugin({ localesDir })`
+loads **one JSON file per locale, named for the locale**, each holding a whole
+`TranslationData`:
 
 ```
 my-plugin/
   i18n/
-    en/
-      common.json          # Common translations
-      account.json         # Account object translations
-      errors.json          # Error messages
-    de/
-      common.json
-      account.json
-      errors.json
-    es/
-      common.json
-      account.json
-      errors.json
+    en.json              # the `en` entry — one whole TranslationData
+    de.json
+    zh-CN.json
 ```
+
+The directory is read with a `.json` suffix filter and the locale is the file's
+own basename, so a per-namespace subdirectory (`i18n/en/account.json`) loads
+**nothing**: the entries are directories, no locale is registered, and every
+lookup returns the key it was given — the raw dotted key renders on screen, in
+every locale.
 
 ### Translation File Format
 
+One locale of a bundle, as JSON — the same groups a `TranslationData` declares:
+
 ```json
-// i18n/en/account.json
+// i18n/en.json
 {
-  // Simple strings
-  "account": "Account",
-  "accounts": "Accounts",
-  
-  // Nested keys
-  "fields": {
-    "name": "Account Name",
-    "industry": "Industry",
-    "revenue": "Annual Revenue"
+  "objects": {
+    "account": {
+      "label": "Account",
+      "pluralLabel": "Accounts",
+      "fields": {
+        "name": { "label": "Account Name", "help": "Legal company name" },
+        "industry": {
+          "label": "Industry",
+          "options": { "technology": "Technology", "finance": "Finance" }
+        }
+      },
+      "_views": { "all_accounts": { "label": "All Accounts" } }
+    }
   },
-  
-  // Interpolation
-  "welcome": "Welcome, {{name}}!",
-  "accountCount": "You have {{count}} accounts",
-  
-  // Pluralization
-  "itemCount": "{{count}} item",
-  "itemCount_plural": "{{count}} items",
-  
-  // Context-specific
-  "delete": "Delete",
-  "delete_confirm": "Are you sure you want to delete {{name}}?",
-  
-  // Rich formatting
-  "lastUpdated": "Last updated {{date, datetime}}",
-  "totalValue": "Total: {{amount, currency}}",
-  
-  // Arrays (for select options, etc.)
-  "industries": [
-    { "value": "technology", "label": "Technology" },
-    { "value": "finance", "label": "Finance" },
-    { "value": "healthcare", "label": "Healthcare" }
-  ]
+  "messages": {
+    "welcome": "Welcome, {{name}}!",
+    "accountCount": "You have {{count}} accounts"
+  }
 }
 ```
 
 ```json
-// i18n/de/account.json
+// i18n/de.json
 {
-  "account": "Konto",
-  "accounts": "Konten",
-  
-  "fields": {
-    "name": "Kontoname",
-    "industry": "Branche",
-    "revenue": "Jahresumsatz"
+  "objects": {
+    "account": {
+      "label": "Konto",
+      "pluralLabel": "Konten",
+      "fields": {
+        "name": { "label": "Kontoname", "help": "Offizieller Firmenname" },
+        "industry": {
+          "label": "Branche",
+          "options": { "technology": "Technologie", "finance": "Finanzen" }
+        }
+      },
+      "_views": { "all_accounts": { "label": "Alle Konten" } }
+    }
   },
-  
-  "welcome": "Willkommen, {{name}}!",
-  "accountCount": "Sie haben {{count}} Konten",
-  
-  "itemCount": "{{count}} Artikel",
-  "itemCount_plural": "{{count}} Artikel",
-  
-  "delete": "Löschen",
-  "delete_confirm": "Möchten Sie {{name}} wirklich löschen?",
-  
-  "lastUpdated": "Zuletzt aktualisiert am {{date, datetime}}",
-  "totalValue": "Gesamt: {{amount, currency}}",
-  
-  "industries": [
-    { "value": "technology", "label": "Technologie" },
-    { "value": "finance", "label": "Finanzen" },
-    { "value": "healthcare", "label": "Gesundheitswesen" }
-  ]
+  "messages": {
+    "welcome": "Willkommen, {{name}}!",
+    "accountCount": "Sie haben {{count}} Konten"
+  }
 }
 ```
+
+Three rules the shape enforces, all of them closed since #4001:
+
+- **The top level is the declared group set and nothing else** — `objects`,
+  `apps`, `messages`, `globalActions`, `dashboards`, `datasets`, `pages`,
+  `flows`, `settings`, `metadataForms`, `settingsCommon`. A group invented
+  beside them (`"account"`, `"fields"`, `"list"`, `"industries"`) is rejected
+  **by name** at both authoring doors, with the group to use instead named in
+  the rejection.
+- **Field options are a map keyed by the option's stored `value`** — never an
+  array of `{ value, label }` pairs, and never the display label. See
+  [Orphan Keys and Option Keys](#orphan-keys-and-option-keys).
+- **`{{param}}` substitution is the only transformation `t()` performs.** There
+  is no ICU engine, no CLDR plural selection, and no `{{date, datetime}}` /
+  `{{amount, currency}}` formatter — a `key_plural` sibling is an ordinary key
+  that nothing selects. See [Pluralization](#pluralization).
 
 ### Metadata authoring forms (`metadataForms`)
 
@@ -459,24 +470,34 @@ what the overlay writes back as the node's `title`.
 
 The contract is `t(key, locale, params?)` — the target locale is always passed
 explicitly, and the key itself is returned when no translation is found (there
-is no `defaultValue` option).
+is no `defaultValue` option). The key is a **dot path into `TranslationData`**,
+so it starts at one of the eleven declared groups.
 
 ```typescript
 const i18n = kernel.getService('i18n');
 
 // Translate a key for a given locale, with {{param}} interpolation
-const message = i18n.t('account.welcome', 'en', { name: 'John' });
+const message = i18n.t('messages.welcome', 'en', { name: 'John' });
 // en: "Welcome, John!"
 // de (locale 'de'): "Willkommen, John!"
 
-// Dot-notation resolves nested keys
-const fieldLabel = i18n.t('account.fields.name', 'de');
+// The dot path walks the group structure to a string leaf
+const fieldLabel = i18n.t('objects.account.fields.name.label', 'de');
 // "Kontoname"
 
 // Missing keys fall back to the fallbackLocale, then return the key string
-const label = i18n.t('account.fields.unknown', 'en');
-// "account.fields.unknown"
+const label = i18n.t('objects.account.fields.unknown.label', 'en');
+// "objects.account.fields.unknown.label"
 ```
+
+Because the path is walked segment by segment, a **`messages` id that itself
+contains a dot is unreachable through `t()`**: `messages` is a flat
+`Record<string, string>`, so `{ 'common.save': 'Save' }` is one key *named*
+`common.save`, while `t('messages.common.save', …)` looks for a nested `common`
+object and finds none. Keep message ids single-segment
+(`messages.commonSave`) — the rule
+`packages/plugins/plugin-audit/src/translations/messages.ts` states for its own
+bundle, for the same reason.
 
 ### Pluralization
 
@@ -489,8 +510,8 @@ application code before calling `t()`.
 
 ```typescript
 // Target behaviour (not yet wired into the file adapter):
-i18n.t('account.itemCount', 'en', { count: 1 }); // "1 item"
-i18n.t('account.itemCount', 'en', { count: 5 }); // "5 items"
+i18n.t('messages.itemCount', 'en', { count: 1 }); // "1 item"
+i18n.t('messages.itemCount', 'en', { count: 5 }); // "5 items"
 ```
 
 **Planned plural forms:**
@@ -503,10 +524,10 @@ The intent is to use **Unicode CLDR plural rules** to select the correct form.
 
 ```typescript
 // Distinct keys for distinct contexts — both resolved with t(key, locale)
-const deleteButton = i18n.t('account.delete', 'en');
+const deleteButton = i18n.t('messages.deleteButton', 'en');
 // "Delete"
 
-const deleteConfirmation = i18n.t('account.delete_confirm', 'en', {
+const deleteConfirmation = i18n.t('messages.deleteConfirm', 'en', {
   name: 'Acme Corp',
 });
 // "Are you sure you want to delete Acme Corp?"
@@ -776,41 +797,47 @@ The engine registers the collection as `translation` metadata (the governed
 // then pass the target locale explicitly: t(key, locale, params?)
 const i18n = ctx.getService('i18n');
 
-const label = i18n.t('crm.account.fields.name', 'en');
+// The key addresses the bundle declared above — every plugin's bundle is
+// deep-merged into the same per-locale TranslationData, so the object's own
+// name is what separates them, not a per-plugin prefix.
+const label = i18n.t('objects.crm_account.fields.name.label', 'en');
 // en: "Account Name"
 // de (locale 'de'): "Kontoname"
 
 // Cross-plugin translation access — keys from any installed plugin resolve
-const welcome = i18n.t('crm.account.welcome', 'en');
+const welcome = i18n.t('messages.crmWelcome', 'en');
 // Works if @mycompany/crm plugin is installed
 ```
 
 ## ObjectQL Integration
 
-ObjectQL objects and fields can be **automatically translated**:
+ObjectQL objects and fields are **automatically translated**, and the author
+writes no keys at all: the label is
+[form 1](#form-1-is-one-locales-text) — plain source-locale text — and the
+bundle entry is addressed by where that label sits in the metadata.
 
 {/* os:check */}
 ```typescript
-// Object definition
+// Object definition — labels are the default locale's TEXT, not keys
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 export const Account = ObjectSchema.create({
   name: 'account',
   sharingModel: 'private',
-  label: 'account.label',           // Translation key
-  pluralLabel: 'account.pluralLabel',
+  label: 'Account',
+  pluralLabel: 'Accounts',
   icon: 'building',
-  
+
   fields: {
     name: Field.text({
-      label: 'account.fields.name', // Translation key
+      label: 'Account Name',
     }),
-    
+
     industry: Field.select({
-      label: 'account.fields.industry',
+      label: 'Industry',
       options: [
-        { value: 'technology', label: 'account.industries.technology' },
-        { value: 'finance', label: 'account.industries.finance' },
+        { value: 'technology', label: 'Technology' },
+        { value: 'finance', label: 'Finance' },
       ],
     }),
   },
@@ -818,30 +845,57 @@ export const Account = ObjectSchema.create({
 ```
 
 ```json
-// i18n/en/account.json
+// i18n/de.json — keyed by position: objects.<object>.fields.<field>.label,
+// and an option map keyed by the option's stored `value`
 {
-  "label": "Account",
-  "pluralLabel": "Accounts",
-  "fields": {
-    "name": "Account Name",
-    "industry": "Industry"
-  },
-  "industries": {
-    "technology": "Technology",
-    "finance": "Finance"
+  "objects": {
+    "account": {
+      "label": "Konto",
+      "pluralLabel": "Konten",
+      "fields": {
+        "name": { "label": "Kontoname" },
+        "industry": {
+          "label": "Branche",
+          "options": { "technology": "Technologie", "finance": "Finanzen" }
+        }
+      }
+    }
   }
 }
 ```
 
-**ObjectUI resolves these label keys against the i18n service** when rendering,
-so a field whose `label` is `'account.fields.name'` displays "Account Name" in
-`en` and "Kontoname" in `de`. The raw label value stored on the metadata is the
-translation key; the rendered locale is supplied by the request's resolved
-locale.
+**The key comes from the label's position, never from the label's value.**
+`resolveObjectFieldLabels` and its siblings in
+`packages/spec/src/system/i18n-resolver.ts` build
+`objects.<object>.fields.<field>.label` from the object and field names and
+look *that* up; the authored string is only ever the fallback they return when
+no bundle carries the key. So the `account` object above renders "Account Name"
+in `en` straight off the metadata and "Kontoname" in `de` out of the bundle —
+with nothing dotted stored on the metadata at all.
+
+<Callout type="warn">
+  **Retired: the flat `<namespace>.<prop>` dialect.** Until this page was
+  corrected, these two sections authored `label: 'account.fields.name'` and
+  paired it with a per-namespace bundle file (`i18n/en/account.json`) holding
+  `{ "fields": { "name": "Account Name" } }`. Neither half is read by anything:
+  `TranslationDataSchema` rejects `label` / `fields` / `list` / `industries` as
+  top-level groups at both authoring doors (#4001), and the file adapter loads
+  only `<locale>.json` from `localesDir`, so a per-namespace subdirectory
+  registers no locale at all. A label authored that way rendered its own raw
+  dotted key on screen, in every locale — the same failure the retired
+  `{ key, defaultValue }` map form produced.
+</Callout>
 
 ## ObjectUI Integration
 
-ObjectUI automatically translates labels, placeholders, and error messages:
+ObjectUI automatically translates labels, placeholders, and error messages, on
+the same positional keys — a view's own label under
+`objects.<object>._views.<view>.label`, keyed by the **bare authoring key**,
+never by the `<object>.<key>` identity the registry assigns the served
+document. Mind which key that is: `listViews` / `formViews` entries keep the
+key their author wrote, while an unnamed default `list` is expanded as
+`default` (and a default `form` as `form`), so the view below is addressed at
+`_views.default` — `_views.list` resolves nothing.
 
 ```typescript
 // View definition — `defineView` takes a container of named views
@@ -850,7 +904,7 @@ ObjectUI automatically translates labels, placeholders, and error messages:
 export default defineView({
   list: {
     type: 'grid',
-    label: 'account.list.title', // Translation key (i18n label)
+    label: 'Accounts', // source-locale text, not a key
     data: { provider: 'object', object: 'account' },
     columns: [
       'name', // Column label auto-translated from the ObjectQL field definition
@@ -860,25 +914,12 @@ export default defineView({
 ```
 
 ```json
-// i18n/en/account.json
+// i18n/de.json
 {
-  "list": {
-    "title": "Accounts"
-  },
-  "actions": {
-    "create": "New Account"
-  }
-}
-```
-
-```json
-// i18n/de/account.json
-{
-  "list": {
-    "title": "Konten"
-  },
-  "actions": {
-    "create": "Neues Konto"
+  "objects": {
+    "account": {
+      "_views": { "default": { "label": "Konten" } }
+    }
   }
 }
 ```
@@ -1042,56 +1083,65 @@ export default defineStack({
 
 ## Best Practices
 
-### 1. Use Namespaces for Organization
+### 1. Let the group structure be the organization
 
 ```json
-// ✓ GOOD: Organized by feature
+// ✓ GOOD: one object's translatable content under its own name
+{
+  "objects": {
+    "account": { "label": "Account" },
+    "contact": { "label": "Contact" },
+    "opportunity": { "label": "Opportunity" }
+  }
+}
+
+// ✗ BAD: a per-feature group invented at the top level — rejected by name
 {
   "account": { "label": "Account" },
-  "contact": { "label": "Contact" },
-  "opportunity": { "label": "Opportunity" }
-}
-
-// ✗ BAD: Flat structure
-{
-  "accountLabel": "Account",
-  "contactLabel": "Contact",
-  "opportunityLabel": "Opportunity"
+  "contact": { "label": "Contact" }
 }
 ```
 
-### 2. Provide Context in Keys
+### 2. Provide context in message ids
+
+Only `messages` ids are yours to name — every other key is derived from the
+metadata, so there is nothing to choose. Keep them single-segment and
+self-describing:
 
 ```json
-// ✓ GOOD: Context clear
-{
-  "delete_button": "Delete",
-  "delete_confirm_message": "Are you sure?"
-}
+// ✓ GOOD: context clear, one segment
+{ "messages": { "deleteButton": "Delete", "deleteConfirmMessage": "Are you sure?" } }
 
-// ✗ BAD: Ambiguous
-{
-  "delete": "Delete",
-  "confirm": "Are you sure?"
-}
+// ✗ BAD: ambiguous, and a dotted id `t()` can never walk to
+{ "messages": { "delete": "Delete", "confirm.message": "Are you sure?" } }
 ```
 
-### 3. Don't Translate Technical Identifiers
+### 3. Don't translate technical identifiers
+
+An option map is keyed by the option's stored `value` and carries only the
+display text — the value itself never appears on the right-hand side:
 
 ```json
-// ✓ GOOD: Labels translated, values not
+// ✓ GOOD: labels translated, values are the keys
 {
-  "industries": [
-    { "value": "technology", "label": "Technology" },
-    { "value": "finance", "label": "Finance" }
-  ]
+  "objects": {
+    "account": {
+      "fields": {
+        "industry": {
+          "options": { "technology": "Technologie", "finance": "Finanzen" }
+        }
+      }
+    }
+  }
 }
 
-// ✗ BAD: Values translated (breaks code)
+// ✗ BAD: the stored value translated (breaks every query and filter)
 {
-  "industries": [
-    { "value": "technologie", "label": "Technologie" }
-  ]
+  "objects": {
+    "account": {
+      "fields": { "industry": { "options": { "technologie": "Technologie" } } }
+    }
+  }
 }
 ```
 

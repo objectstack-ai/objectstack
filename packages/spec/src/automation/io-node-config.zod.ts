@@ -335,7 +335,23 @@ export const HttpConfigSchema = lazySchema(() => strictObject({
 }, {
   /** Target URL (execute-time required). */
   url: z.string().describe('Target URL'),
-  /** HTTP method — default GET inline, POST when durable. */
+  /**
+   * HTTP method — default GET inline, POST when durable.
+   *
+   * ⛔ **No `.default()`, and that is the measured answer, not an omission.**
+   * The executor applies TWO values for an absent key, decided by `durable`:
+   * run with `config: { url }` it calls `fetch` with `GET`; run with
+   * `config: { url, durable: true }` against a ready outbox it enqueues `POST`
+   * (`http-nodes.ts`: `method: cfg.method ?? 'POST'` on the durable arm,
+   * `const method = cfg.method ?? 'GET'` on the inline one). A static
+   * `.default('GET')` would materialise `GET` at parse time, the durable arm's
+   * `??` would never fire again, and every stored durable callout that omits
+   * the method would silently change from POST to GET — a protocol-declared
+   * default the runtime does not apply, which is precisely the defect the
+   * maintainer's ruling on defaults (decision batch #127 item 5) forbids.
+   * Contrast `ScreenConfigSchema.mode` in `builtin-node-config.zod.ts`, where
+   * one value IS applied and is therefore declared.
+   */
   method: z.string().optional().describe('HTTP method (default GET; POST when durable)'),
   /** Request headers. */
   headers: z.record(z.string(), z.string()).optional().describe('Request headers'),
