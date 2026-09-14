@@ -570,8 +570,32 @@ export const ScreenConfigSchema = lazySchema(() => strictObject({
   /** Object form only: variable bound to the saved record's id. */
   idVariable: z.string().optional()
     .describe("Object form only: variable bound to the saved record's id"),
-  /** Object form only: create (default) or edit. Any value other than 'edit' behaves as create. */
-  mode: z.enum(['create', 'edit']).optional().describe('Object form only: create or edit'),
+  /**
+   * Object form only: create or edit.
+   *
+   * `.default('create')` is DECLARED because the executor APPLIES it, measured
+   * rather than inferred: `screen-nodes.ts` builds the ScreenSpec with
+   * `mode: cfg.mode === 'edit' ? 'edit' : 'create'`, so an object-form screen
+   * with the key absent renders the create form — confirmed by running the
+   * executor with `config: { objectName }` and reading `result.screen.mode`,
+   * which answers `'create'`. Declaring it is the whole of the maintainer's
+   * ruling on defaults (decision batch #127 item 5): a default the protocol
+   * should have is declared BY THE PROTOCOL, so the authoring surface, the
+   * generated reference and the designer all read one answer instead of each
+   * inventing their own.
+   *
+   * ⚠️ Read only on the OBJECT-FORM branch. A flat `fields` screen never
+   * consults it — measured on the same run, the emitted ScreenSpec carries no
+   * `mode` key at all — so the materialised value is inert there rather than a
+   * second meaning.
+   *
+   * ⛔ Its sibling `http` key deliberately does NOT get this treatment: see
+   * `HttpConfigSchema.method` in `io-node-config.zod.ts`, where the executor
+   * applies two different values depending on `durable`, so there is no single
+   * default to declare and declaring one would change what a stored flow sends.
+   */
+  mode: z.enum(['create', 'edit']).default('create')
+    .describe("Object form only: create (default) or edit; 'edit' needs a recordId to name its target"),
   /** Object form only: id of the record `mode: 'edit'` edits. Interpolates `{token}`. */
   recordId: z.string().optional()
     .describe("Object form only: id of the record to edit (required for mode: 'edit' to be useful)"),

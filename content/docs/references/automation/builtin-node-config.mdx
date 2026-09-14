@@ -211,7 +211,7 @@ Value the variable takes: a string (`{token}` flow interpolation — a sole toke
 | **waitForInput** | `boolean` | optional | Pause to show the screen even with no fields; false forces a server pass-through |
 | **objectName** | `string` | optional | Render this object's full create/edit form instead of a flat field list |
 | **idVariable** | `string` | optional | Object form only: variable bound to the saved record's id |
-| **mode** | `Enum<'create' \| 'edit'>` | optional | Object form only: create or edit |
+| **mode** | `Enum<'create' \| 'edit'>` | optional (default: `"create"`) | Object form only: create (default) or edit; 'edit' needs a recordId to name its target |
 | **recordId** | `string` | optional | Object form only: id of the record to edit (required for mode: 'edit' to be useful) |
 | **defaults** | `Record<string, any>` | optional | Object form only: prefilled values |
 

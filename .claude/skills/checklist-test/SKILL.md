@@ -120,7 +120,7 @@ expected-fail 探针 —— 永不在真实缺陷上把条款打成绿。
 **issue 是纯文本 —— 永不放图。** 截图只为让你和子代理**现场**得出判定;它们是判断辅
 助,随运行环境一起丢弃。持久报告需要的是**复现规则,不是图片**。
 
-用 `issue_write`(github MCP)立单:
+经 REST 代理 `POST .../issues` 立单(`Content-Type: application/json`;⛔ 永不 MCP `issue_write`,锁 1 已拒):
 
 - **标题** —— `QA run · <selector> (<已判定>/<总数>) · <sha8> · <date> · <counts>`:恰好
   一种形状、严格解析,`(<已判定>/<总数>)` **强制**;语法与退役写法见

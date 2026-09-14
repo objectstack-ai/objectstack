@@ -332,9 +332,19 @@ describe('wait timer teardown when the pause ends another way (#5512)', () => {
   it('cancels nothing for a timer wait that armed no job (no parseable duration)', async () => {
     const { ctx, scheduled, cancelled } = fakeJobCtx();
     registerWaitNode(engine, ctx);
-    // No `timerDuration` ⇒ no deadline ⇒ nothing scheduled; the pause carries
-    // the degraded `timer:<nodeId>` correlation instead of a job name.
-    engine.registerFlow('wait_flow', waitFlow({ eventType: 'timer' }));
+    // An UNPARSEABLE `timerDuration` ⇒ no deadline ⇒ nothing scheduled; the
+    // pause carries the degraded `timer:<nodeId>` correlation instead of a job
+    // name. This case used to be spelled `{ eventType: 'timer' }` with the key
+    // ABSENT, which the contract now refuses at parse — so the fixture moved to
+    // the shape that still reaches this branch. ⚠️ That it still reaches it is a
+    // residual: the contract can require the key but cannot evaluate the string,
+    // so a malformed (or zero-valued) duration reproduces the old silent park —
+    // `parseIsoDuration` returns `undefined` for it exactly as it did for the
+    // absent key. ⚠️ NO card exists for that yet: it is reported in this PR's
+    // acceptance notes for triage to file, and THIS fixture is its repro. ⛔ Do
+    // not read the line above as a filing. What this test is about is the
+    // TEARDOWN, and that is unchanged.
+    engine.registerFlow('wait_flow', waitFlow({ eventType: 'timer', timerDuration: 'not-a-duration' }));
 
     const paused = await engine.execute('wait_flow');
     expect(scheduled).toEqual([]);
