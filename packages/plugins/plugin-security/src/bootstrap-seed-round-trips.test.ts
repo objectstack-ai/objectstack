@@ -628,7 +628,12 @@ describe('#11096 — the batched read preserves the provenance branches', () => 
     expect(r.skippedForeign).toBe(1);
     expect(r.materializedNames).toEqual(['crm.cap.0']);
     expect(ql.rows[0].package_id).toBe('com.example.a');   // untouched
-    expect(warns.some((w) => w.includes('owned by another package'))).toBe(true);
+    // [#18023] The loudness is pinned on the stable grep TOKEN, not on prose:
+    // the wording moved when the refusal grew a diagnostic record, and a pin on
+    // a sentence re-reds on every rewording without ever asking the question it
+    // was written to ask. The record on the outcome is the other half.
+    expect(warns.some((w) => w.includes('capability_name_collision'))).toBe(true);
+    expect(r.collisions?.map((d) => d.name)).toEqual(['crm.cap.0']);
   });
 
   it('still CLAIMS a derived platform placeholder for an explicit declaration', async () => {
@@ -699,7 +704,9 @@ describe('#11096 — the batched read preserves the provenance branches', () => 
     expect(r.skippedForeign).toBe(1);
     expect(ql.rows).toHaveLength(1);
     expect(ql.rows[0].package_id).toBe('com.example.a');
-    expect(warns.some((w) => w.includes('owned by another package'))).toBe(true);
+    // [#18023] Token, not prose — see the sibling case above.
+    expect(warns.some((w) => w.includes('capability_name_collision'))).toBe(true);
+    expect(r.collisions?.map((d) => d.declaredBy)).toEqual(['com.example.b']);
   });
 });
 
