@@ -19,11 +19,18 @@
  * here only because this package's `tsconfig.json` does NOT exclude the
  * test-file glob — it has no `TEST_DEBT` entry in
  * `scripts/check-type-check-coverage.mjs` and reports zero errors, which is the
- * measurable baseline these pins move away from. The sibling `driver-mongodb`
- * package DOES exclude its tests, so the identical pin written there would be
- * the phantom check AGENTS.md's `PINS_CHECKED` invariant warns about — it is
- * deliberately not written; mongodb's narrowing is held by `tsc` over its
- * source plus the repo-wide `check:type-check-debt` re-measure.
+ * measurable baseline these pins move away from.
+ *
+ * ⚠ The sentence about the sibling is corrected, not deleted, because the
+ * wrong version is the one a reader carries to that package. `driver-mongodb`'s
+ * BUILD config does still exclude its tests, but the identical pin written
+ * there would NOT be a phantom check: its `typecheck` is
+ * `tsc --noEmit && pnpm check:test-typecheck`, whose second leg runs
+ * `--project tsconfig.test.json`, and that config's `include` is `src/**\/*`
+ * with no test exclusion — 30 of its `src` test files are in that program,
+ * measured with `tsc --listFiles` (0 in its build program, the firing control).
+ * What differs between the two packages is now only WHICH leg of `typecheck`
+ * resolves the directive, not whether anything does.
  *
  * The `expect()` calls only give the assertions a home vitest will run.
  */

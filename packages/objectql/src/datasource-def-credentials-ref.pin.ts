@@ -21,12 +21,23 @@
  * A runtime test therefore cannot cover this card: the runtime never changed.
  * The accepted set of a public method did, and only `tsc` can see that.
  *
- * WHY A `.pin.ts` AND NOT A `*.test.ts`: `packages/objectql/tsconfig.json`
- * excludes `**\/*.test.ts`, so a `@ts-expect-error` written in a test file here
- * is a phantom check — no tsc program the `typecheck` script runs would ever
- * evaluate it, and deleting the directive would leave every gate green. This
- * file IS in that program. Same convention, and same reasoning, as
- * `register-object-authored-shape.pin.ts`. It carries no executable pin: the
+ * WHY A `.pin.ts` AND NOT A `*.test.ts`, stated to today's tree: a `.pin.ts`
+ * is not a test file, so `packages/objectql/tsconfig.json`'s exclusion of
+ * `**\/*.test.ts` does not reach it and `typecheck`'s unconditional first leg
+ * (`tsc --noEmit`) compiles it. Same convention, and same reasoning, as
+ * `register-object-authored-shape.pin.ts`.
+ *
+ * ⚠ It is NOT that a directive in a `*.test.ts` here would go unevaluated —
+ * this docblock used to say so, and that is FALSE on this tree. This package's
+ * `typecheck` is `tsc --noEmit && tsc --noEmit -p tsconfig.scripts.json &&
+ * pnpm check:test-typecheck`, and the last leg runs
+ * `--project tsconfig.test.json`, whose `include` is `src/**\/*` with no test
+ * exclusion: 299 of this package's `src` test files are in that program,
+ * measured with `tsc --listFiles` (0 in the build program — the firing control
+ * for the exclusion, and where the old sentence came from). The correction is
+ * kept rather than the sentence deleted, because the wrong version is the one
+ * a sibling file copies.
+ * It carries no executable pin: the
  * assertions live in a function nobody calls, and the companion
  * `datasource-def-credentials-ref.test.ts` covers the runtime half.
  */

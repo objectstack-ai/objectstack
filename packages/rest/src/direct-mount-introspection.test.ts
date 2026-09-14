@@ -52,8 +52,15 @@
 
 // Relative imports carry their `.js` extension: under `moduleResolution:
 // nodenext` an extension-less one does not resolve, every symbol it names
-// becomes `any`, and the callbacks over those symbols then report TS7006 — the
-// pile that dominates this package's TEST_DEBT entry (AGENTS.md, Build & Test).
+// becomes `any`, and the callbacks over those symbols then report TS7006
+// (AGENTS.md, Build & Test). ⚠ The tail of that sentence used to name "the
+// pile that dominates this package's TEST_DEBT entry"; there is no such pile
+// and no such entry on this tree — `packages/rest/test-typecheck-debt.json`
+// has `entries: {}` and `scripts/check-type-check-coverage.mjs` holds no
+// `@objectstack/rest` key in `DEBT` or `TEST_DEBT`. The layer is at ZERO, so a
+// TS7006 introduced here is red on arrival with no entry to widen — which
+// makes the extension MORE load-bearing than the old sentence implied, not
+// less.
 import { describe, it, expect, vi } from 'vitest';
 import { RestServer } from './rest-server.js';
 import { mountAndRecordDirectRoutes } from './direct-mount-composition.js';
