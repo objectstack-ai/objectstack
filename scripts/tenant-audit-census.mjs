@@ -545,11 +545,90 @@ export function resolveReceiver(recvNode, sf, decls, index, depth = 0) {
 }
 
 /**
+ * ⭐ WHAT COUNTS AS A DECLARED OBJECT -- the definition, written down here
+ * because the walk that preceded it had none.
+ *
+ * A declared object is a **top-level object declaration** in a `*.object.ts(x)`
+ * file: a `const` / `export const` whose initializer is an object literal, or a
+ * call whose first object-literal argument is one -- `ObjectSchema.create({…})`,
+ * the only spelling in this corpus today -- and that literal carries a `name:`
+ * string literal. ⛔ A literal NESTED inside that declaration is never one, at
+ * any depth.
+ *
+ * ## Why DEPTH is the whole rule
+ *
+ * `name:` is not this corpus's object-identity key alone. It is also the grid
+ * column identity (`inlineColumns: [{ name: 'quantity' }, …]`), the validation
+ * rule id (`validationRules: [{ name: 'discount_cap' }, …]`), the action name,
+ * the list-view name and the index name. The walk this replaces recursed into
+ * every object literal unconditionally and recorded every `name:` matching
+ * `/^[a-z][a-z0-9_]*$/`, so it recorded all of those too: 300 "declared
+ * objects" out of 112 object files that declare 117 (#17663).
+ *
+ * ⭐⭐ The damage was NOT confined to a printed figure. This name set is the
+ * census's discriminator for `any`-typed receivers: {@link runCensus}'s RESCUE
+ * promotes an `unresolved` write call to `engine` -- that is, to PLACED --
+ * exactly when its first argument names something in this set. Over-matching
+ * therefore WIDENS the predicate that decides whether a write call site is
+ * placed at all, and `quantity`, `amount`, `receipt` and `discount_cap` were in
+ * it. The same set answers each placed site's tenancy posture
+ * (`enabled` / `disabled` / `undeclared-name`), so a name in the set by accident
+ * answers that question by accident too.
+ *
+ * ⇒ The rule is the DECLARATION SITE, not a callee name. Keying on
+ *   `ObjectSchema.create` would make the registry a function of one helper's
+ *   identifier; keying on the top-level declaration keeps it a fact about the
+ *   file's shape, which is what "declares an object" means.
+ *
+ * ⛔ A `*.object.ts(x)` file this finds nothing in REFUSES rather than
+ * contributing nothing -- see {@link declaredObjects}. Silently contributing
+ * nothing is the direction that shrinks the RESCUE set, and a shrunk set
+ * un-places live write call sites; absence has to be loud here.
+ */
+export function topLevelObjectDeclarations(sf) {
+  const found = [];
+  for (const statement of sf.statements) {
+    if (!ts.isVariableStatement(statement)) continue;
+    for (const decl of statement.declarationList.declarations) {
+      let init = decl.initializer;
+      while (init && (ts.isAsExpression(init) || ts.isParenthesizedExpression(init)
+             || (ts.isSatisfiesExpression && ts.isSatisfiesExpression(init)))) init = init.expression;
+      if (init && ts.isCallExpression(init)) init = init.arguments.find((a) => ts.isObjectLiteralExpression(a));
+      if (!init || !ts.isObjectLiteralExpression(init)) continue;
+      const entry = readDeclarationLiteral(init);
+      if (entry) found.push(entry);
+    }
+  }
+  return found;
+}
+
+/**
+ * The two facts a declaration literal carries: its `name` and whether it opts
+ * out of tenancy. ⛔ Reads the literal's OWN properties and does not descend --
+ * descending is the defect {@link topLevelObjectDeclarations} exists to stop.
+ */
+function readDeclarationLiteral(lit) {
+  let name = null;
+  let tenancyDisabled = false;
+  for (const prop of lit.properties) {
+    if (!ts.isPropertyAssignment(prop) || !prop.name) continue;
+    const key = ts.isIdentifier(prop.name) || ts.isStringLiteralLike(prop.name) ? prop.name.text : null;
+    if (key === 'name' && ts.isStringLiteralLike(prop.initializer)) name = prop.initializer.text;
+    if (key === 'tenancy' && ts.isObjectLiteralExpression(prop.initializer)) {
+      for (const q of prop.initializer.properties) {
+        if (ts.isPropertyAssignment(q) && ts.isIdentifier(q.name) && q.name.text === 'enabled'
+            && q.initializer.kind === ts.SyntaxKind.FalseKeyword) tenancyDisabled = true;
+      }
+    }
+  }
+  return name ? { name, tenancyDisabled } : null;
+}
+
+/**
  * Every object the tree DECLARES, with its tenancy posture.
  *
- * Tenancy is enabled by DEFAULT: `isTenancyDisabled()` reads
- * `tenancy.enabled === false` and nothing else, so the registry only has to
- * find the objects that opt OUT. Two do, today.
+ * {@link topLevelObjectDeclarations} is the definition of "declares"; this
+ * applies it to every `*.object.ts(x)` in the tree and keeps the machine names.
  *
  * The name set doubles as the census's discriminator for `any`-typed receivers
  * -- see {@link runCensus}.
@@ -560,27 +639,22 @@ export function declaredObjects(root = ROOT) {
     if (!/\.object\.tsx?$/.test(rel)) continue;
     const text = readFileSync(join(root, rel), 'utf8');
     const sf = parseSourceFile(rel, text);
-    const visit = (n) => {
-      if (ts.isObjectLiteralExpression(n)) {
-        let nm = null;
-        let disabled = false;
-        for (const prop of n.properties) {
-          if (!ts.isPropertyAssignment(prop) || !prop.name) continue;
-          const key = ts.isIdentifier(prop.name) || ts.isStringLiteralLike(prop.name) ? prop.name.text : null;
-          if (key === 'name' && ts.isStringLiteralLike(prop.initializer)) nm = prop.initializer.text;
-          if (key === 'tenancy' && ts.isObjectLiteralExpression(prop.initializer)) {
-            for (const q of prop.initializer.properties) {
-              if (ts.isPropertyAssignment(q) && ts.isIdentifier(q.name) && q.name.text === 'enabled'
-                  && q.initializer.kind === ts.SyntaxKind.FalseKeyword) disabled = true;
-            }
-          }
-        }
-        if (nm && /^[a-z][a-z0-9_]*$/.test(nm) && !objects.has(nm)) objects.set(nm, { file: rel, tenancyDisabled: disabled });
-        else if (nm && disabled) objects.set(nm, { file: rel, tenancyDisabled: true });
-      }
-      ts.forEachChild(n, visit);
-    };
-    visit(sf);
+    const declarations = topLevelObjectDeclarations(sf);
+    if (declarations.length === 0) {
+      throw new Error(
+        `tenant-audit-census: ${rel} is named *.object.ts(x) but declares no TOP-LEVEL object -- `
+        + 'refusing to walk past it. Every object file in this corpus declares its objects as '
+        + '`export const X = ObjectSchema.create({ name: … })` at file scope; a declaration this '
+        + 'cannot see is one the RESCUE in runCensus() can no longer place, which un-places live '
+        + 'write call sites rather than merely lowering a count. Either declare the object at file '
+        + 'scope, or teach topLevelObjectDeclarations() the new spelling in the same change.',
+      );
+    }
+    for (const { name, tenancyDisabled } of declarations) {
+      if (!/^[a-z][a-z0-9_]*$/.test(name)) continue;
+      if (!objects.has(name)) objects.set(name, { file: rel, tenancyDisabled });
+      else if (tenancyDisabled) objects.set(name, { file: rel, tenancyDisabled: true });
+    }
   }
   if (objects.size === 0) {
     throw new Error(
@@ -1345,6 +1419,76 @@ export function selfTest() {
     })(), 'false');
   t('a context key still reads as carried', carries('{ context: ctx }'), 'true');
 
+  // ── ⭐ THE DECLARED-OBJECT REGISTRY: depth is the rule (#17663) ────────────
+  // A smaller number proves nothing on its own, so each case is a CONTROL PAIR:
+  // the declaration that must still be counted, beside the nested `name:` in the
+  // same file that must not be. The fixtures are cut down from the two files the
+  // card measured -- `expense-report.object.ts` (two declarations) and
+  // `invoice.object.ts` (`inlineColumns`, whose `name` is the grid's column
+  // identity, not an object's).
+  const declaredIn = (src) =>
+    topLevelObjectDeclarations(parseSourceFile('selftest.object.ts', src)).map((d) => d.name).join(',');
+
+  t('a single top-level declaration is counted',
+    declaredIn("export const A = ObjectSchema.create({ name: 'showcase_account' });\n"),
+    'showcase_account');
+  t('⭐ a file that genuinely declares TWO objects still counts two',
+    declaredIn(
+      "export const ExpenseReport = ObjectSchema.create({ name: 'showcase_expense_report' });\n"
+      + "export const ExpenseLine = ObjectSchema.create({ name: 'showcase_expense_line' });\n"),
+    'showcase_expense_report,showcase_expense_line');
+  t('⭐ `inlineColumns` entries are grid COLUMN identities, not declared objects',
+    declaredIn(
+      "export const Invoice = ObjectSchema.create({\n"
+      + "  name: 'showcase_invoice_line',\n"
+      + "  fields: {\n"
+      + "    invoice: Field.lookup('showcase_invoice', {\n"
+      + "      inlineColumns: [{ name: 'product' }, { name: 'quantity' }, { name: 'amount' }],\n"
+      + "    }),\n"
+      + '  },\n'
+      + '});\n'),
+    'showcase_invoice_line');
+  t('validation-rule names are not declared objects',
+    declaredIn(
+      "export const Account = ObjectSchema.create({\n"
+      + "  name: 'showcase_account',\n"
+      + "  validationRules: [{ name: 'tax_id_format' }, { name: 'discount_cap' }],\n"
+      + '});\n'),
+    'showcase_account');
+  t('action / list-view / index names are not declared objects',
+    declaredIn(
+      "export const User = ObjectSchema.create({\n"
+      + "  name: 'sys_user',\n"
+      + "  actions: [{ name: 'invite_user' }, { name: 'ban_user' }],\n"
+      + "  listViews: [{ name: 'all_users' }],\n"
+      + "  indexes: [{ name: 'idx_sys_user_org' }],\n"
+      + '});\n'),
+    'sys_user');
+  t('a declaration nested inside a function is NOT top-level',
+    declaredIn("function make() { return ObjectSchema.create({ name: 'nested_object' }); }\n"), '');
+  t('a bare top-level object literal declaration is counted',
+    declaredIn("const A = { name: 'bare_object' };\n"), 'bare_object');
+  t('a declaration behind an `as` assertion is counted',
+    declaredIn("export const A = ObjectSchema.create({ name: 'asserted_object' }) as never;\n"),
+    'asserted_object');
+  t('⛔ a file with no top-level declaration yields NOTHING to declare -- the shape declaredObjects() refuses on',
+    declaredIn("export default ObjectSchema.create({ name: 'default_exported' });\n"), '');
+
+  // The tenancy posture rides on the same literal, and only on the TOP-LEVEL one.
+  const disabledIn = (src) =>
+    topLevelObjectDeclarations(parseSourceFile('selftest.object.ts', src)).map((d) => String(d.tenancyDisabled)).join(',');
+  t('a top-level `tenancy.enabled: false` is read as an opt-out',
+    disabledIn("export const K = ObjectSchema.create({ name: 'sys_api_key', tenancy: { enabled: false } });\n"), 'true');
+  t('an object with no tenancy block is tenancy-ENABLED by default',
+    disabledIn("export const K = ObjectSchema.create({ name: 'sys_user' });\n"), 'false');
+  t('⛔ a NESTED literal cannot opt anything out -- it is not a declaration at all',
+    declaredIn(
+      "export const K = ObjectSchema.create({\n"
+      + "  name: 'sys_user',\n"
+      + "  actions: [{ name: 'ban_user', tenancy: { enabled: false } }],\n"
+      + '});\n'),
+    'sys_user');
+
   const failed = cases.filter((c) => !c.ok);
   for (const c of failed) console.error(`  ✗ ${c.name} -- ${c.detail}`);
   if (failed.length > 0) {
@@ -1354,7 +1498,10 @@ export function selfTest() {
   console.log(
     `✓ tenant-audit-census self-test: ${cases.length} cases pass (an \`as const\` context, an `
     + 'elevated SPREAD, an unresolvable spread refusing to answer `false`, an unreadable '
-    + 'options argument refusing to answer "carries no context", and the ordinary verdicts).',
+    + 'options argument refusing to answer "carries no context", the ordinary verdicts -- plus '
+    + 'the declared-object registry in BOTH directions: a file declaring two objects still '
+    + 'counts two, while `inlineColumns`, validation-rule, action, list-view and index names '
+    + 'in the same file count none).',
   );
   return 0;
 }
