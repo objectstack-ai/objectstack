@@ -1823,11 +1823,18 @@ function endToEndWorktreeRefusal() {
     });
     check('  …and the push goes through', cleanPush.status === 0);
 
-    const ok = results.every(Boolean);
-    console.log(ok
-      ? '✓ linked worktree: the driver\'s deferral is REFUSED by the real hooks git runs there'
-      : '✗ linked worktree: the deferral\'s refusal did not hold — see the failing leg(s) above');
-    return ok;
+    if (!results.every(Boolean)) {
+      // ⛔ Through `fail()`, never a bare `return false`: the verdict LINE at the
+      // dispatch counts returned booleans, but the EXIT CODE is set only here. A
+      // callee that reported a failure by returning false alone printed
+      // "✗ … inconsistent" and exited 0 — and `pnpm check:merge-driver` chains
+      // this file with `&&`, so the gate read that as a pass. The dispatch now
+      // sets the code from its own count as well, and this stays a `fail()` so
+      // the failing callee is named in the same place every other one is.
+      return fail('self-test (linked worktree): the deferral\'s refusal did not hold — see the failing leg(s) above');
+    }
+    console.log('✓ linked worktree: the driver\'s deferral is REFUSED by the real hooks git runs there');
+    return true;
   } catch (err) {
     return fail(`self-test: ${err?.stderr?.toString() || err?.message || err}`);
   } finally {
@@ -2003,6 +2010,13 @@ if (process.argv.includes('--self-test')) {
   for (const breach of floorBreaches) fail(`self-test floor: ${breach}`);
 
   const failures = results.filter((ok) => !ok).length + floorBreaches.length;
+  // ⛔ The exit code is set from the SAME count the verdict line is printed from.
+  // It used to come only from `fail()`, which every callee happened to call — so
+  // the two agreed by convention rather than by construction, and the first
+  // callee to report a failure by returning `false` alone would print
+  // "✗ … inconsistent" and exit 0. `pnpm check:merge-driver` chains this file
+  // with `&&`: a zero there is the gate passing. One count, one verdict, one code.
+  if (failures > 0) process.exitCode = 1;
   console.log(
     failures === 0
       ? `\n✓ merge driver wiring is consistent (${NOT_DRIVER_MANAGED.length} path(s) deliberately excluded).`
