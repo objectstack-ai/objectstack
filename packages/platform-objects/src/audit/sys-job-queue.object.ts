@@ -202,28 +202,39 @@ export const SysJobQueue = ObjectSchema.create({
   //   WHERE queue = ? AND status = 'pending'
   //         AND (scheduled_for IS NULL OR scheduled_for <= ?)
   //   ORDER BY priority ASC, scheduled_for ASC
-  // and a paged read carries one more ORDER BY term the caller never wrote:
-  // the unique tie-breaker the deterministic-paging contract appends
-  // (ADR-0053 D-A1 / objectstack#4363, `SqlDriver.orderKeysFor`), which for
-  // this object is `id`. So the ORDER BY the planner actually sees is
-  // `priority, scheduled_for, id`, and an index that stops at `scheduled_for`
-  // still leaves the planner building a sorter over every pending row in the
-  // queue — which is what `['queue','status','scheduled_for']` did: measured
-  // `USE TEMP B-TREE FOR ORDER BY` on both Turso faces, because the sort's
-  // FIRST key, `priority`, appeared in no declared index at all.
+  // and `['queue','status','scheduled_for']` served the equality prefix and
+  // then left the planner to sort: the sort's FIRST key, `priority`, appeared
+  // in no declared index at all, so every 1s poll built a temp B-tree over
+  // every pending row in the queue — `USE TEMP B-TREE FOR ORDER BY`, measured
+  // on both Turso faces. Putting `priority` between the prefix and
+  // `scheduled_for` is what removes that sort.
   //
-  // Five columns is the shortest form that serves the whole ORDER BY; the pin
-  // is `turso-local-remote-declared-index-parity.test.ts`, which reads the
-  // plan off both faces.
+  // ⚠️ It does NOT remove the sorter entirely, and the reason is worth knowing
+  // before anyone "finishes the job": a PAGED read carries one more ORDER BY
+  // term the caller never writes — the unique tie-breaker of the
+  // deterministic-paging contract (ADR-0053 D-A1 / objectstack#4363,
+  // `SqlDriver.orderKeysFor`), which here is `id`. So the planner's ORDER BY
+  // ends `…, id ASC` and a bounded per-tie-group sorter remains
+  // (`USE TEMP B-TREE FOR LAST TERM OF ORDER BY`).
   //
-  // It REPLACES `['queue','status','scheduled_for']` rather than joining it,
-  // so the table carries three indexes as before: the equality prefix
-  // `queue, status` is unchanged — `getQueueSize` and `purge` keep the same
-  // seek — and no reader in this repo uses `scheduled_for` as an index RANGE
-  // (the claim's due bound is a residual filter on index rows, and the
-  // retention reaper is keyed on `created_at`).
+  // ⛔ Do not close that last term by appending `id` to this index. `id` is an
+  // unbounded `Field.text` — as it is on every platform object here — and
+  // `pnpm check:keyed-text-bounds` refuses a text-family column a declared
+  // index keys on without a `maxLength`, because `driver-sql` emits it TEXT and
+  // MySQL then rejects `ALTER TABLE … ADD INDEX` with
+  // ER_BLOB_KEY_WITHOUT_LENGTH, leaving the object registered with its index
+  // silently absent. Bounding a primary key's column type on a provisioned
+  // table is its own piece of work, not a rider on a sort fix.
+  //
+  // Four columns, and the table still carries three indexes: this REPLACES
+  // `['queue','status','scheduled_for']` rather than joining it. The equality
+  // prefix `queue, status` is unchanged, so `getQueueSize` and `purge` keep the
+  // same seek, and no reader in this repo uses `scheduled_for` as an index
+  // RANGE (the claim's due bound is a residual filter on index rows, and the
+  // retention reaper is keyed on `created_at`). The plan is pinned on both
+  // faces in `driver-turso/src/turso-local-remote-declared-index-parity.test.ts`.
   indexes: [
-    { fields: ['queue', 'status', 'priority', 'scheduled_for', 'id'] },
+    { fields: ['queue', 'status', 'priority', 'scheduled_for'] },
     { fields: ['idempotency_key', 'queue'] },
     { fields: ['status'] },
   ],

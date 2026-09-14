@@ -490,16 +490,23 @@ describe('DbQueueAdapter — the claim query and the declared index are held tog
    * The extra ORDER BY term the driver appends to every PAGED read and the
    * caller never writes: the unique tie-breaker of ADR-0053 D-A1 /
    * objectstack#4363 (`SqlDriver.orderKeysFor`), which for this object is its
-   * primary key. An index that omits it leaves the planner a sorter to build,
-   * so it is part of what the index must cover — see the plan pin in
-   * `driver-turso/src/turso-local-remote-declared-index-parity.test.ts`.
+   * primary key.
+   *
+   * ⚠️ It is deliberately NOT part of what the index must cover. `id` is an
+   * unbounded `Field.text`, and `pnpm check:keyed-text-bounds` refuses a
+   * text-family column a declared index keys on without a `maxLength` —
+   * MySQL rejects the index DDL outright (ER_BLOB_KEY_WITHOUT_LENGTH). So the
+   * plan keeps a sorter bounded to rows tying on the WHOLE indexed prefix; the
+   * two-face pin in
+   * `driver-turso/src/turso-local-remote-declared-index-parity.test.ts` is where
+   * that residue is measured, and `sys-job-queue.object.ts` carries the reason.
    */
   const PAGING_TIE_BREAKER = 'id';
 
   /** Does `index` begin with `want`, in that order? */
   const startsWith = (index: string[], want: string[]) => want.every((f, i) => index[i] === f);
 
-  it('one declared index begins with the claim\'s equality keys, then its sort keys, then the tie-breaker', async () => {
+  it('one declared index begins with the claim\'s equality keys and then its sort keys, in order', async () => {
     const engine = makeFakeEngine();
     const adapter = new DbQueueAdapter({
       engine,
@@ -518,10 +525,10 @@ describe('DbQueueAdapter — the claim query and the declared index are held tog
     await adapter.pollOnce();
     if (!claim) throw new Error('[#17612] the claim query never reached the engine — this pin measured nothing');
 
-    // Equality keys seek; sort keys order; the tie-breaker orders last.
+    // Equality keys seek; sort keys order.
     const equality = Object.keys(claim.where).filter((k) => !k.startsWith('$'));
-    const required = [...equality, ...claim.orderBy.map((o) => o.field), PAGING_TIE_BREAKER];
-    expect(required).toEqual(['queue', 'status', 'priority', 'scheduled_for', 'id']);
+    const required = [...equality, ...claim.orderBy.map((o) => o.field)];
+    expect(required).toEqual(['queue', 'status', 'priority', 'scheduled_for']);
 
     const declared = (SysJobQueue.indexes ?? []).map((i: any) => i.fields as string[]);
     expect(declared.some((index) => startsWith(index, required))).toBe(true);
@@ -529,7 +536,10 @@ describe('DbQueueAdapter — the claim query and the declared index are held tog
     // NEGATIVE CONTROL — the same predicate, asked for the shape this table
     // declared BEFORE #17612. It must read false, or `startsWith` is answering
     // true for everything and the assertion above is vacuous.
-    expect(declared.some((index) => startsWith(index, ['queue', 'status', 'scheduled_for', PAGING_TIE_BREAKER])))
-      .toBe(false);
+    expect(declared.some((index) => startsWith(index, ['queue', 'status', 'scheduled_for']))).toBe(false);
+
+    // ⛔ And the tie-breaker stays OUT of the declaration — on purpose, and not
+    // by oversight. Appending it is what `check:keyed-text-bounds` refuses.
+    expect(declared.some((index) => index.includes(PAGING_TIE_BREAKER))).toBe(false);
   });
 });
