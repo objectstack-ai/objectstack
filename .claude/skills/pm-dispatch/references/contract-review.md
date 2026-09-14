@@ -26,7 +26,7 @@
 - 逐车道:spec 席达档审契约增量;余席默认档自审加门禁、挂标;豁免仅独立性件与保险丝。
 - 复核记录 = 一条评论落 PR 或卡,达档与默认档同形;散文、dev 自评、`os-dev-report` 恒不算。
 - 同形 = `## Contract review` 题头、所审 head sha 码段、①②③ 逐项、独立性对、PASS/FAIL 判词。
-- 同形含首行 `Served-tier:`:值取转录 harness `model` 盖章,可前置 N/N;无此行不成裁决。
+- 同形含首行 `Served-tier:`:值写常量名 `CONTRACT_REVIEW_TIER`,可前置 N/N;无此行不成裁决。
 - ① derived judgments 逐项:diff 引出的接受集与公开面变化逐条点名判对错。
 - ② semver 定级:变更级别与 changeset 声明一致。
 - ③ 边界旗处置:dev 挂旗与 `open_questions` 逐旗答复或升级。
@@ -53,7 +53,7 @@
 - ⛔ 自述档位与传参皆非读数;条款②的 `mode:subagent` 派发恒保留标至席内复核完成。
 - 读数不达档 ⇒ 改走转录核验的复核子代理;标签原样留置,队列外等待是安全态。
 - 保险丝只测座位自会话:`mode:subagent` 里 `get_session` 量的是派发会话,⛔ 不作互证。
-- 清标前 `--pair`:裁决 `Served-tier:` ≠ `CONTRACT_REVIEW_TIER` ⇒ exit 4,点名 PR、评论、读数。
+- 清标前 `--pair`:`Served-tier:` ≠ 常量名 ⇒ exit 4,点名 PR、评论、读数;型号串按 `AGENTS.md` 拒。
 - 施工档只取 harness `model` 盖章或认领 Container & model 行;`Co-Authored-By` = 署名常量 ⛔ 非证据。
 - 产出裁决的每轮都须读到契约复审档位,见回退证据 ⇒ 裁决整体作废。
 - 父会话只可逐字采纳或整体作废(核验失败、越范围、格式不完整),⛔ 永不改写润色。

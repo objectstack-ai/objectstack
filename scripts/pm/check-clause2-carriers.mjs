@@ -188,11 +188,13 @@
  * current head — H51's heading and head-sha facts, plus a `Reviewed-by:` line —
  * on a pair whose gate was already cleared. C7 (#17915) reads the third
  * provenance line, `Served-tier:` — WHAT served the round that produced the
- * verdict, stamped by the harness into the reviewer's own transcript and copied
- * into the record, ⛔ never the dispatch `model` parameter, which is
- * configuration and not a reading — and refuses a clearance whose value is not
- * EXACTLY `CONTRACT_REVIEW_TIER`, the comparison that constant's own docblock
- * declares and that nothing in this tree performed before. No PASS or FAIL
+ * verdict, which the reviewing seat reads out of its own transcript's
+ * harness-stamped `model` field, ⛔ never off the dispatch `model` parameter,
+ * which is configuration and not a reading — and refuses a clearance whose
+ * token is not EXACTLY the NAME `CONTRACT_REVIEW_TIER`, the identifier-free
+ * spelling `AGENTS.md` requires of a comment (#18060), on the comparison that
+ * constant's own docblock declares and that nothing in this tree performed
+ * before. No PASS or FAIL
  * token is read to reach any of the three, so the boundary above is narrowed by
  * exactly three facts and not crossed — a self-issued verdict is refused on WHO
  * wrote it, an unrecorded one on WHETHER it was written down, an off-tier one on
@@ -2475,14 +2477,18 @@ export const REVIEWED_BY_LINE = AUTHORSHIP_KEY_LINES.get('Reviewed-by');
  * about itself, read with `Reviewed-by:`'s own discipline (#17915).
  *
  * ⭐ A fact about what PRODUCED the verdict, never the verdict. `Reviewed-by:`
- * says WHO rendered it; this says WHAT SERVED the round that rendered it, and
- * the rule text makes its value the harness-stamped served-model field of the
- * reviewer's own transcript -- 「值取复核者转录的 harness `model` 盖章」 -- ⛔
- * never the dispatch `model` parameter, which is CONFIGURATION and not a
- * reading. That distinction is the whole defect: a passed parameter and a
- * served tier can differ, and until this row nothing in the tree compared them,
- * so a round served below tier cleared a carrier indistinguishably from one
- * served at it.
+ * says WHO rendered it; this says WHAT SERVED the round that rendered it. The
+ * READING behind it is the harness-stamped served-model field of the reviewer's
+ * own transcript, ⛔ never the dispatch `model` parameter, which is
+ * CONFIGURATION and not a reading -- that distinction is the whole defect: a
+ * passed parameter and a served tier can differ, and until this row nothing in
+ * the tree compared them, so a round served below tier cleared a carrier
+ * indistinguishably from one served at it.
+ *
+ * ⛔ But the reading stays in the transcript and the LINE carries only the
+ * constant's NAME -- 「值写常量名 `CONTRACT_REVIEW_TIER`」 -- because a record is
+ * a GitHub comment and `AGENTS.md` lets no model identifier land in one
+ * (#18060). See `CONTRACT_REVIEW_TIER_NAME` for why that costs no evidence.
  *
  * ⛔ The key is read ANYWHERE in the comment, on its own line. The rule text
  * asks the author to put it FIRST (「同形含首行 `Served-tier:`」) because a
@@ -2537,9 +2543,59 @@ export function servedStampsHold(stamps) {
   return stamps === null || (stamps.total > 0 && stamps.atTier === stamps.total);
 }
 
+/**
+ * The ONE token a `Served-tier:` line may carry -- the constant's NAME, ⛔ never
+ * its VALUE (#18060).
+ *
+ * ⭐ `AGENTS.md` is unqualified about the surface: 「no model identifier lands in
+ * a PR title or body, a comment, a changeset, a doc or a code comment」 -- and a
+ * review of record IS a comment. The first spelling of this row compared the
+ * token to the constant's VALUE, so a record could clear a carrier ONLY by
+ * carrying a model identifier into the very artifact that rule names; the gate
+ * would have cemented the violation rather than a habit. The NAME is governed
+ * text, carries the same fact, and lands no identifier.
+ *
+ * ⭐ Nothing evidential is lost, and that is why this needed no ruling to trade
+ * away: the line was never the reading. 「⛔ 自述档位与传参皆非读数」 -- the
+ * reading is the seat's transcript grep against the constant's value, which
+ * produces no repository artifact at all. What the line carries is the
+ * DECLARATION plus its `N/N` stamp control, and both survive the rename.
+ *
+ * ⛔ Still EXACT: this is the one accepted token, no family and no prefix floor.
+ */
+export const CONTRACT_REVIEW_TIER_NAME = 'CONTRACT_REVIEW_TIER';
+
+/**
+ * The id form of a model name -- the word claude, a hyphen, a model word.
+ *
+ * A SHAPE and not a list, so a model nobody has named yet binds for the same
+ * reason the shipped ones do -- the same rule `check-commit-card-trailers.mjs`
+ * binds over a trailer value, spelled here rather than imported because that
+ * file is the pre-push entrypoint and this one is imported by the merge-queue
+ * guard. The battery pins the two together through the constant's own value.
+ */
+const MODEL_IDENTIFIER_FORM = /\bclaude-[a-z]+(?:[-.][a-z0-9]+)*\b/i;
+
+/**
+ * Is this token a model identifier -- the thing `AGENTS.md` keeps out of a
+ * comment?
+ *
+ * Two limbs: the constant's own VALUE, which is the token this row used to
+ * REQUIRE (so a record written correctly under the old rule is named for what
+ * it is, never read as an ordinary off-tier miss), and the id SHAPE.
+ *
+ * ⛔ A caller must NEVER echo a token this returns true for: quoting it back
+ * would put the identifier straight into the artifact the rule is about, which
+ * is how a refusal becomes a second violation.
+ */
+export function isModelIdentifierToken(value) {
+  const text = String(value ?? '');
+  return text === CONTRACT_REVIEW_TIER || MODEL_IDENTIFIER_FORM.test(text);
+}
+
 /** The whole reading, as one verdict: at tier, on a control that stands. */
 export function servedTierStands(served) {
-  return served?.state === 'read' && served.value === CONTRACT_REVIEW_TIER && servedStampsHold(served.stamps);
+  return served?.state === 'read' && served.value === CONTRACT_REVIEW_TIER_NAME && servedStampsHold(served.stamps);
 }
 
 /**
@@ -2719,7 +2775,7 @@ export function c6RecordNote(pair) {
     `(${v.at ?? 'undated'}) is a \`## Contract review\` comment naming \`${v.sha}\` and carrying a \`Reviewed-by:\` line -- ` +
     'cite it in the provenance comment beside the clear (「凡清标同笔留 provenance 评论,引记录 id 与所判 head」). ' +
     (servedTierStands(v.served)
-      ? 'Its `Served-tier:` reads the declared tier' +
+      ? 'Its `Served-tier:` names the tier constant' +
         (v.served.stamps ? ` on a stamp control of ${v.served.stamps.atTier}/${v.served.stamps.total}` : '') +
         ', so the strip stands on C7 as well as on this row. '
       : 'Its `Served-tier:` does NOT stand — C7 says what it reads, and this pair is adverse. ') +
@@ -2791,6 +2847,21 @@ export function c6RecordNote(pair) {
  * workflow: the sweep stays report-only, only a pair being LANDED is judged,
  * and the pair owes exactly one act -- the reviewing seat posts the record
  * again carrying the reading its own transcript already stamped.
+ *
+ * ## The token is the constant's NAME, and an identifier is named as one (#18060)
+ *
+ * The first spelling of this row compared the token to the constant's VALUE, so
+ * a record could clear a carrier ONLY by carrying a model identifier into a
+ * GitHub comment -- which `AGENTS.md` forbids in terms, naming「a comment」
+ * without qualification. A gate is much harder to walk back than a habit, so
+ * the accepted token is now `CONTRACT_REVIEW_TIER_NAME` and a token of
+ * identifier SHAPE -- the old spelling included -- is refused with a remedy
+ * that names that rule and ⛔ never quotes the token back. Quoting it would put
+ * the identifier in one more artifact, which is how a refusal becomes a second
+ * violation.
+ *
+ * ⛔ The row is not WIDENED by any of this: the line is still required, a
+ * missing one is still a refusal, and the accepted token is still exactly one.
  */
 export function c7ServedTierBelow(pair) {
   const v = reviewOfRecord(pair);
@@ -2815,27 +2886,38 @@ export function c7ServedTierBelow(pair) {
               'the round were served by something else.');
   const reading =
     v.served.state === 'read'
-      ? servedStampsHold(stamps)
-        ? `declares \`Served-tier: ${v.served.value}\``
-        : `declares the tier \`${v.served.value}\` on a stamp control that does not stand`
+      ? isModelIdentifierToken(v.served.value)
+        ? 'spells its `Served-tier:` token as a MODEL IDENTIFIER rather than the constant\'s NAME -- ⛔ the token ' +
+          'is NOT quoted back here, because printing it would land the identifier in one more artifact'
+        : servedStampsHold(stamps)
+          ? `declares \`Served-tier:\` as \`${v.served.value}\``
+          : `declares the tier \`${v.served.value}\` on a stamp control that does not stand`
       : v.served.state === 'unreadable'
         ? `carries a \`Served-tier:\` line with no readable tier token (${v.served.line})`
         : 'carries NO `Served-tier:` line at all, so it declares nothing about what served it';
   const rule =
-    'The rule this row carries is `references/contract-review.md`\'s -- 「同形含首行 `Served-tier:`:值取转录 ' +
-    'harness `model` 盖章,可前置 N/N;无此行不成裁决」 and 「清标前 `--pair`:裁决 `Served-tier:` ≠ ' +
-    '`CONTRACT_REVIEW_TIER` ⇒ exit 4,点名 PR、评论、读数」. The value is the HARNESS-STAMPED served-model field ' +
-    'of the reviewing round\'s own transcript, ⛔ never the dispatch `model` parameter, which is configuration ' +
-    'and not a reading. The comparison is EXACT, never a family or prefix floor -- widening a governance gate\'s ' +
-    'accept set is the maintainer\'s decision.';
+    'The rule this row carries is `references/contract-review.md`\'s -- 「同形含首行 `Served-tier:`:值写常量名 ' +
+    '`CONTRACT_REVIEW_TIER`,可前置 N/N;无此行不成裁决」 and 「清标前 `--pair`:`Served-tier:` ≠ 常量名 ⇒ exit 4,' +
+    '点名 PR、评论、读数;型号串按 `AGENTS.md` 拒」. The token is the constant\'s NAME, ⛔ never its VALUE: ' +
+    '`AGENTS.md` -- 「no model identifier lands in a PR title or body, a comment, a changeset, a doc or a code ' +
+    'comment」 -- and a review of record IS a comment, so a token of that shape is refused beside an off-tier one. ' +
+    '⛔ Nothing evidential rides on that spelling, because the line was never the reading (「⛔ 自述档位与传参皆非读数」): ' +
+    'the reading is the seat\'s own grep of the HARNESS-STAMPED served-model field of the reviewing round\'s ' +
+    'transcript, ⛔ never the dispatch `model` parameter, which is configuration and not a reading -- a grep that ' +
+    'leaves no repository artifact, which is why it may compare against the constant\'s value where this line may ' +
+    'not carry it. The comparison is EXACT, never a family or prefix floor -- widening a governance gate\'s accept ' +
+    'set is the maintainer\'s decision.';
   const remedy =
     'Remedy: re-review this head at the declared tier and post the record carrying the reading, or -- if the round ' +
-    'WAS at tier -- post the record again with the line its transcript already stamped; the NEWEST heading comment ' +
-    'on this head governs, so a corrected record clears this row without touching the carrier.';
+    'WAS at tier -- post the record again; either way its `Served-tier:` line spells the constant\'s NAME, ' +
+    'optionally prefixed by the `N/N` stamp control the seat read off its own transcript. ⛔ A record whose token ' +
+    'is a model identifier is refused even when the round WAS at tier, on `AGENTS.md`\'s comment rule -- the repair ' +
+    'is to re-post it in the identifier-free spelling, never to widen this row. The NEWEST heading comment on this ' +
+    'head governs, so a corrected record clears this row without touching the carrier.';
   const boundary =
     '⛔ Verdict-agnostic: no PASS or FAIL token is read to reach this -- what produced the verdict is measurable, ' +
     'what it concluded stays human -- and the constant is read from `dispatch-gates.mjs`, never restated here.';
-  return `${where} -- ${reading}, and the declared tier is \`CONTRACT_REVIEW_TIER\`.${control} ${rule} ${remedy} ${boundary} ${NEVER_WRITES}`;
+  return `${where} -- ${reading}, and the accepted token is the NAME \`CONTRACT_REVIEW_TIER\`.${control} ${rule} ${remedy} ${boundary} ${NEVER_WRITES}`;
 }
 
 /**
@@ -4010,15 +4092,16 @@ export function selfTest() {
   // ⭐ The `Served-tier:` line is part of the reference shape since #17915, for
   // the same reason the independence pair is: this fixture is the pair that
   // must read CLEAN under EVERY row, and a record that declares nothing about
-  // what served it is refused by C7 -- 「无此行不成裁决」. Its VALUE is the
-  // imported constant, never a spelled model id: the tier has exactly one value
-  // site in this tree and a fixture is not a second one.
+  // what served it is refused by C7 -- 「无此行不成裁决」. Its token is the
+  // constant's NAME, ⛔ never its value and never a spelled model id (#18060):
+  // a record is a GitHub comment, the tier keeps exactly one value site in this
+  // tree, and a fixture is not a second one.
   const RECORD = (
     sha,
     lines = [
       '- **Implemented-by:** `claude/issue-13657-x`',
       `- **Reviewed-by:** \`${RECORD_SESSION}\``,
-      `- **Served-tier:** 121/121 \`${CONTRACT_REVIEW_TIER}\``,
+      `- **Served-tier:** 121/121 \`${CONTRACT_REVIEW_TIER_NAME}\``,
     ],
     at = '2026-09-01T08:50:00Z',
     id = 3301,
@@ -4578,10 +4661,12 @@ export function selfTest() {
   // populations this row must never reach, which are the ones that owe no
   // verdict at all.
   //
-  // ⛔ No specimen spells a real model id. The at-tier one uses the IMPORTED
-  // constant, the below-tier one an obviously synthetic value, and the
-  // near-miss ones are DERIVED from the constant -- the tier keeps exactly one
-  // value site in this tree, and a fixture is not a second one.
+  // ⛔ No specimen spells a real model id in SOURCE. The at-tier one uses the
+  // constant's NAME, the below-tier one an obviously synthetic value, and the
+  // near-miss ones are DERIVED from the name -- the tier keeps exactly one
+  // value site in this tree, and a fixture is not a second one. The one
+  // specimen that carries the VALUE reaches it through the IMPORTED constant,
+  // and it is there to prove the identifier is REFUSED (#18060).
   battery('C7: the tier that SERVED the verdict the strip stands on (#17915)');
   const TIER_LINES = (value) => [
     '- **Implemented-by:** `claude/issue-13657-x`',
@@ -4593,7 +4678,7 @@ export function selfTest() {
   const BELOW = 'example-below-tier';
   // the three the ruling names
   t('⭐ AT TIER — the reference record declares the constant and earns NO C7 row', c7ServedTierBelow(bare({ prComments: [RECORD_ON_9AF9] })) === null, JSON.stringify(reviewOfRecord(bare({ prComments: [RECORD_ON_9AF9] })).served));
-  t('…and it declares it with the IMPORTED constant, so the tier still has ONE value site in this tree', RECORD_ON_9AF9.body.includes(CONTRACT_REVIEW_TIER));
+  t('…and it declares it with the constant\'s NAME, so the record a seat posts carries NO model identifier', RECORD_ON_9AF9.body.includes(CONTRACT_REVIEW_TIER_NAME) && !RECORD_ON_9AF9.body.includes(CONTRACT_REVIEW_TIER));
   const belowRow = c7ServedTierBelow(bare({ prComments: [SERVED(BELOW)] }));
   t('⭐ BELOW TIER — a clearance standing on an off-tier verdict is a C7 row', typeof belowRow === 'string');
   t('…naming the PR, the verdict comment and the served value — the three the refusal owes', says(belowRow, 'PR #13864') && says(belowRow, 'comment 3401') && says(belowRow, BELOW));
@@ -4606,13 +4691,25 @@ export function selfTest() {
   const unreadableRow = c7ServedTierBelow(bare({ prComments: [SERVED('')] }));
   t('a `Served-tier:` line with no readable token is STARTED-and-unreadable, not missing', reviewOfRecord(bare({ prComments: [SERVED('')] })).served.state === 'unreadable' && typeof unreadableRow === 'string');
   t('…and the row quotes the line back, so the residue is actionable', says(unreadableRow, 'no readable tier token'));
-  t('⛔ a FAMILY prefix is refused — the comparison is EXACT, never a floor', typeof c7ServedTierBelow(bare({ prComments: [SERVED(CONTRACT_REVIEW_TIER.split('-')[0])] })) === 'string');
-  t('⛔ …and so is a value that merely STARTS with the constant', typeof c7ServedTierBelow(bare({ prComments: [SERVED(`${CONTRACT_REVIEW_TIER}-example-suffix`)] })) === 'string');
-  t('the value must be FIRST after the colon — prose in front is read as the value and compares unequal', readServedTier(`Served-tier: read 139/139 as ${CONTRACT_REVIEW_TIER}`).value === 'read');
-  t('decoration around the key reads, exactly as it does for `Reviewed-by:`', readServedTier(`- **Served-tier:** \`${CONTRACT_REVIEW_TIER}\``).value === CONTRACT_REVIEW_TIER && readServedTier(`> Served-tier: ${CONTRACT_REVIEW_TIER}`).value === CONTRACT_REVIEW_TIER);
-  t('⛔ a different CASE is a different key — one convention for machine spellings', readServedTier(`SERVED-TIER: ${CONTRACT_REVIEW_TIER}`).state === 'missing');
-  t('the line is read anywhere in the comment — the rule asks the AUTHOR for the top, the reader refuses nobody over placement', c7ServedTierBelow(bare({ prComments: [RECORD(HEAD_9AF9, [...TIER_LINES(CONTRACT_REVIEW_TIER).slice(0, 2), '', 'some prose', ...TIER_LINES(CONTRACT_REVIEW_TIER).slice(2)])] })) === null);
-  t('the NEWEST record on this head governs — a corrected record clears the row without touching the carrier', c7ServedTierBelow(bare({ prComments: [SERVED(BELOW), SERVED(CONTRACT_REVIEW_TIER, '2026-09-01T08:53:00Z', 3403)] })) === null);
+  t('⛔ a FAMILY prefix is refused — the comparison is EXACT, never a floor', typeof c7ServedTierBelow(bare({ prComments: [SERVED(CONTRACT_REVIEW_TIER_NAME.split('_')[0])] })) === 'string');
+  t('⛔ …and so is a value that merely STARTS with the constant', typeof c7ServedTierBelow(bare({ prComments: [SERVED(`${CONTRACT_REVIEW_TIER_NAME}_EXAMPLE_SUFFIX`)] })) === 'string');
+  // ⭐ #18060 — the accepted token is the constant's NAME, and the spelling this
+  // row once REQUIRED is now itself a refusal: `AGENTS.md` lets no model
+  // identifier land in a comment, and a review of record IS a comment.
+  const identityRow = c7ServedTierBelow(bare({ prComments: [SERVED(CONTRACT_REVIEW_TIER)] }));
+  t('⭐ the constant\'s VALUE — a literal model identifier — is REFUSED, though it is what this row once required', typeof identityRow === 'string');
+  t('…and the refusal ⛔ never quotes the token back, so a refusal is not a second violation', !says(identityRow, CONTRACT_REVIEW_TIER) && says(identityRow, 'NOT quoted back here'));
+  t('…and it names `AGENTS.md`\'s rule, which is WHY the accepted token changed', says(identityRow, 'AGENTS.md') && says(identityRow, 'a comment, a changeset, a doc or a code comment'));
+  const shapeRow = c7ServedTierBelow(bare({ prComments: [SERVED('claude-example-9-9')] }));
+  t('⛔ a model id nobody has shipped binds too — the refusal reads a SHAPE, never a list', typeof shapeRow === 'string' && !says(shapeRow, 'claude-example-9-9'));
+  t('⇒ the two refusals differ exactly on quoting: a safe token is echoed, an identifier is never', says(belowRow, BELOW) && !says(identityRow, CONTRACT_REVIEW_TIER));
+  t('the identifier predicate binds the constant\'s own VALUE, so a tier bump cannot slip past it', isModelIdentifierToken(CONTRACT_REVIEW_TIER) && !isModelIdentifierToken(CONTRACT_REVIEW_TIER_NAME) && !isModelIdentifierToken(BELOW));
+  t('⛔ and the row is NOT widened by any of it — one accepted token, and a missing line is still a refusal', servedTierStands(readServedTier(`Served-tier: \`${CONTRACT_REVIEW_TIER_NAME}\``)) && !servedTierStands(readServedTier('Served-tier: `CONTRACT_REVIEW_TIER_X`')) && readServedTier('no line here').state === 'missing');
+  t('the value must be FIRST after the colon — prose in front is read as the value and compares unequal', readServedTier(`Served-tier: read 139/139 as ${CONTRACT_REVIEW_TIER_NAME}`).value === 'read');
+  t('decoration around the key reads, exactly as it does for `Reviewed-by:`', readServedTier(`- **Served-tier:** \`${CONTRACT_REVIEW_TIER_NAME}\``).value === CONTRACT_REVIEW_TIER_NAME && readServedTier(`> Served-tier: ${CONTRACT_REVIEW_TIER_NAME}`).value === CONTRACT_REVIEW_TIER_NAME);
+  t('⛔ a different CASE is a different key — one convention for machine spellings', readServedTier(`SERVED-TIER: ${CONTRACT_REVIEW_TIER_NAME}`).state === 'missing');
+  t('the line is read anywhere in the comment — the rule asks the AUTHOR for the top, the reader refuses nobody over placement', c7ServedTierBelow(bare({ prComments: [RECORD(HEAD_9AF9, [...TIER_LINES(CONTRACT_REVIEW_TIER_NAME).slice(0, 2), '', 'some prose', ...TIER_LINES(CONTRACT_REVIEW_TIER_NAME).slice(2)])] })) === null);
+  t('the NEWEST record on this head governs — a corrected record clears the row without touching the carrier', c7ServedTierBelow(bare({ prComments: [SERVED(BELOW), SERVED(CONTRACT_REVIEW_TIER_NAME, '2026-09-01T08:53:00Z', 3403)] })) === null);
   // the populations this row must never reach
   t('⛔ a `Clause-②: no` pair that never carried the label is NEVER refused for lacking the line', c7ServedTierBelow(pair({ cardComments: [CLAIM('Clause-②: no')] })) === null);
   t('⛔ a pair still carrying the gate owes nothing yet — the review is pending, not off tier', c7ServedTierBelow(pair({ prLabels: [L], cardLabels: [L], cardComments: [CLAIM('Clause-②: yes')] })) === null);
@@ -4635,14 +4732,14 @@ export function selfTest() {
   // STAMP CONTROL first: `75/75 \`<tier>\``. A reader that demanded the tier
   // token immediately after the colon would have refused every verdict written
   // under the rule it enforces, on day one.
-  t('⭐ the LIVE value shape — stamp control, then the tier — reads at tier and stands', servedTierStands(readServedTier(`Served-tier: 75/75 \`${CONTRACT_REVIEW_TIER}\``)));
-  t('…and the count is READ, not skipped', JSON.stringify(readServedTier(`Served-tier: 138/138 \`${CONTRACT_REVIEW_TIER}\``).stamps) === JSON.stringify({ atTier: 138, total: 138 }));
-  t('…on a bulleted, bolded key too — the shape the seats actually post', servedTierStands(readServedTier(`- **Served-tier:** 102/102 \`${CONTRACT_REVIEW_TIER}\``)));
-  t('⛔ a ZERO control is void — a zero counts only against a non-zero stamp count on the same transcript', servedTierStands(readServedTier(`Served-tier: 0/0 \`${CONTRACT_REVIEW_TIER}\``)) === false);
-  t('⛔ a control that is not TOTAL is 回退证据, and the tier alone does not rescue it', servedTierStands(readServedTier(`Served-tier: 12/133 \`${CONTRACT_REVIEW_TIER}\``)) === false);
-  t('⛔ …and that is a C7 row, whose text names the count rather than only the tier', says(c7ServedTierBelow(bare({ prComments: [SERVED(`12/133 \`${CONTRACT_REVIEW_TIER}\``)] })), '12/133') && says(c7ServedTierBelow(bare({ prComments: [SERVED(`12/133 \`${CONTRACT_REVIEW_TIER}\``)] })), '回退证据'));
+  t('⭐ the LIVE value shape — stamp control, then the tier — reads at tier and stands', servedTierStands(readServedTier(`Served-tier: 75/75 \`${CONTRACT_REVIEW_TIER_NAME}\``)));
+  t('…and the count is READ, not skipped', JSON.stringify(readServedTier(`Served-tier: 138/138 \`${CONTRACT_REVIEW_TIER_NAME}\``).stamps) === JSON.stringify({ atTier: 138, total: 138 }));
+  t('…on a bulleted, bolded key too — the shape the seats actually post', servedTierStands(readServedTier(`- **Served-tier:** 102/102 \`${CONTRACT_REVIEW_TIER_NAME}\``)));
+  t('⛔ a ZERO control is void — a zero counts only against a non-zero stamp count on the same transcript', servedTierStands(readServedTier(`Served-tier: 0/0 \`${CONTRACT_REVIEW_TIER_NAME}\``)) === false);
+  t('⛔ a control that is not TOTAL is 回退证据, and the tier alone does not rescue it', servedTierStands(readServedTier(`Served-tier: 12/133 \`${CONTRACT_REVIEW_TIER_NAME}\``)) === false);
+  t('⛔ …and that is a C7 row, whose text names the count rather than only the tier', says(c7ServedTierBelow(bare({ prComments: [SERVED(`12/133 \`${CONTRACT_REVIEW_TIER_NAME}\``)] })), '12/133') && says(c7ServedTierBelow(bare({ prComments: [SERVED(`12/133 \`${CONTRACT_REVIEW_TIER_NAME}\``)] })), '回退证据'));
   t('⛔ a count with NO tier after it declares no tier — unreadable, never a reading', readServedTier('Served-tier: 75/75').state === 'unreadable');
-  t('⭐ an ABSENT control is vacuous, never a refusal — the ruling\'s minimum is the tier alone', readServedTier(`Served-tier: \`${CONTRACT_REVIEW_TIER}\``).stamps === null && servedStampsHold(null));
+  t('⭐ an ABSENT control is vacuous, never a refusal — the ruling\'s minimum is the tier alone', readServedTier(`Served-tier: \`${CONTRACT_REVIEW_TIER_NAME}\``).stamps === null && servedStampsHold(null));
   t('the control is judged by ONE predicate the row and the note both read', servedStampsHold({ atTier: 5, total: 5 }) && !servedStampsHold({ atTier: 5, total: 6 }) && !servedStampsHold({ atTier: 0, total: 0 }));
   t('⛔ a below-tier value with a PERFECT control is still refused — the control never substitutes for the tier', typeof c7ServedTierBelow(bare({ prComments: [SERVED('99/99 example-below-tier')] })) === 'string');
   t('the reference fixture itself carries the live shape, so the clean pair is clean for the right reason', says(RECORD_ON_9AF9.body, '121/121') && pairRows(completed).length === 0);
