@@ -446,22 +446,36 @@ should fall back to `body.error?.code` when `body.code` is absent.
 
 #### `MISSING_REQUIRED_FIELD`
 **HTTP Status:** 400 — with one documented exception, which answers **422** (see below)  
-**Meaning:** Required field is missing
+**Meaning:** Required field is missing  
+**Envelope:** **both** — the 422 master-reference refusal is thrown at the `/data` door
+(flat); the 400 form is written by a `sendError` route module (nested)
 
-**Example:**
+⚠️ On a `/data` **write**, an ordinary missing required field does not answer this code at
+all — it answers `400 VALIDATION_FAILED` with the field named in `fields`, above. This
+code is the one the *master-access gate* and the package-publish route use.
+
+**Flat** (the 422 exception, on the `/data` door):
+```json
+{
+  "error": "[Security] Missing master reference: insert on 'invoice_line' did not supply 'invoice_id'. A controlled_by_parent detail derives its access from its master, so 'invoice_id' must carry a master record id on every write.",
+  "code": "MISSING_REQUIRED_FIELD",
+  "object": "invoice_line"
+}
+```
+
+**Nested** (the 400, on `POST /api/v1/packages/publish`):
 ```json
 {
   "success": false,
   "error": {
     "code": "MISSING_REQUIRED_FIELD",
-    "message": "Missing required field: name",
-    "details": {
-      "field": "name",
-      "constraint": "required"
-    }
+    "message": "Missing required fields: manifest, metadata"
   }
 }
 ```
+
+⛔ Neither body carries a `details` bag. On the flat 422 there is no `fields` array either
+— see the table below for why.
 
 **Exception — an absent `controlled_by_parent` master reference answers 422 with no `fields`.**
 An object whose `sharingModel` is `controlled_by_parent` derives its access from a master
@@ -508,20 +522,21 @@ deriving it from this page.
 resolves to nothing, not a value of the wrong type. On a list read it also covers an
 unreserved query parameter, which `GET /data/:object` reads as a field filter.
 
+**Envelope:** flat — built by the `/data` door's `INVALID_FIELD` arm, so it is never
+nested. `field` and `object` are **top-level siblings**, not a `details` bag.
+
 **Example:**
 ```json
 {
-  "success": false,
-  "error": {
-    "code": "INVALID_FIELD",
-    "message": "Unknown field 'age' on object 'contact'",
-    "details": {
-      "field": "age",
-      "object": "contact"
-    }
-  }
+  "error": "Unknown field 'age' on object 'contact'",
+  "code": "INVALID_FIELD",
+  "field": "age",
+  "object": "contact"
 }
 ```
+
+⚠️ `field` is present only when the refusal named one; `object` is present when the door
+knows which object was addressed.
 
 The [error catalog's `INVALID_FIELD` entry](/docs/api/error-catalog#invalid_field) carries
 the authoritative cause text — it enumerates every read axis this one code answers on
@@ -532,31 +547,50 @@ off-request `backfillSummaryNulls` case.
 
 #### `RESOURCE_NOT_FOUND`
 **HTTP Status:** 404  
-**Meaning:** Requested resource doesn't exist
+**Meaning:** Requested resource doesn't exist  
+**Envelope:** nested — this is the code the `sendError` route modules and the
+status-derived dispatcher door answer 404 with
 
-**Example:**
+**Example** — `GET /api/v1/datasources/warehouse`:
 ```json
 {
   "success": false,
   "error": {
     "code": "RESOURCE_NOT_FOUND",
-    "message": "Account with id 'acc_999' not found",
-    "details": {
-      "resource": "account",
-      "resource_id": "acc_999"
-    }
+    "message": "Datasource \"warehouse\" does not exist."
   }
 }
 ```
 
+⛔ No `details.resource` / `details.resource_id` bag: no emitting site writes one. The
+resource is named in `message`.
+
+<Callout type="info">
+**The `/data` door answers a different code.** A record missing from a CRUD route is
+`RECORD_NOT_FOUND` in the flat envelope, with the object as a top-level sibling — see
+[HTTP API](/docs/protocol/kernel/http-protocol):
+
+```json
+{
+  "error": "Record acc_999 not found in account",
+  "code": "RECORD_NOT_FOUND",
+  "object": "account"
+}
+```
+
+A *registered object* that does not exist is `OBJECT_NOT_FOUND`, also flat. Branch on all
+three if you handle both families.
+</Callout>
+
 **How to fix:**
-- Verify resource ID is correct
-- Check user has permission to see resource (row-level security)
-- Resource may have been deleted
+- Verify the resource id is correct
+- Check the user has permission to see the resource (row-level security)
+- The resource may have been deleted
 
 #### `UNIQUE_VIOLATION`
 **HTTP Status:** 409  
-**Meaning:** The write collides with a unique constraint — a record already holds that value
+**Meaning:** The write collides with a unique constraint — a record already holds that value  
+**Envelope:** flat — built by the `/data` door's duplicate-record arm, so it is never nested
 
 **Example:**
 ```json
@@ -582,36 +616,42 @@ never crosses HTTP. The refusal is emitted as the flat body shown above, and
 
 #### `DELETE_RESTRICTED`
 **HTTP Status:** 409  
-**Meaning:** Operation violates database constraint
+**Meaning:** The record is still referenced by dependent records that cannot be cleared  
+**Envelope:** flat — built by the `/data` door's `DELETE_RESTRICTED` arm, so it is never
+nested
 
-**Example:**
+**Example** — `DELETE /api/v1/data/account/acc_123`:
 ```json
 {
-  "success": false,
-  "error": {
-    "code": "DELETE_RESTRICTED",
-    "message": "Cannot delete account with active opportunities",
-    "details": {
-      "resource": "account",
-      "resource_id": "acc_123",
-      "constraint": "foreign_key",
-      "related_object": "opportunity",
-      "related_count": 5
-    }
-  }
+  "error": "This Account is still referenced by 5 Opportunity record(s) through “Account”. Delete or reassign them first.",
+  "code": "DELETE_RESTRICTED",
+  "developerMessage": "Cannot delete account (acc_123): 5 dependent opportunity record(s) reference it via account_id. Delete or reassign them first, or set deleteBehavior:'cascade' on opportunity.account_id.",
+  "dependentObject": "opportunity",
+  "dependentCount": 5,
+  "object": "account"
 }
 ```
 
+**Two sentences, deliberately.** `error` is the **end-user** half — localized, display
+labels only, rendered verbatim in a toast. `developerMessage` is the **builder** half — API
+names and the `deleteBehavior:'cascade'` remedy — in a field no user-facing surface reads.
+
+⚠️ `dependentCount` is **absent**, not zero, when the caller's own permissions would not
+have let them count the dependents; `dependentObject` is named either way. Treat a missing
+`dependentCount` as "withheld", never as "none".
+
 **How to fix:**
-- Delete related records first
-- Enable cascade delete on object schema
-- Archive instead of delete (soft delete)
+- Delete or reassign the related records first
+- Set `deleteBehavior: 'cascade'` on the referencing field
+- Archive instead of deleting (soft delete)
 
 ### Rate Limiting
 
 #### `RATE_LIMIT_EXCEEDED`
 **HTTP Status:** 429  
-**Meaning:** Too many requests, rate limit exceeded
+**Meaning:** Too many requests, rate limit exceeded  
+**Envelope:** nested — built by the inbound rate limiter, which sits **ahead of every
+route**, so it is never flat whichever family you were calling
 
 **Example:**
 ```json
@@ -619,14 +659,18 @@ never crosses HTTP. The refusal is emitted as the flat body shown above, and
   "success": false,
   "error": {
     "code": "RATE_LIMIT_EXCEEDED",
-    "message": "Rate limit exceeded",
+    "message": "Rate limit exceeded. Retry after the interval in the Retry-After header.",
+    "httpStatus": 429,
     "details": {
       "retryAfterSeconds": 45,
-      "resetAt": "2024-01-16T14:31:00Z"
+      "resetAt": "2026-08-03T12:00:45.000Z"
     }
   }
 }
 ```
+
+This is one of the few refusals that genuinely carries a `details` bag — the limiter
+passes one. The code itself is derived from the 429 status.
 
 **HTTP Headers:**
 ```http
@@ -660,7 +704,8 @@ async function fetchWithRetry(url, options = {}, maxRetries = 3) {
 
 #### `QUOTA_EXCEEDED`
 **HTTP Status:** 429  
-**Meaning:** Monthly/daily quota exceeded
+**Meaning:** Monthly/daily quota exceeded  
+**Envelope:** none — no producer emits it
 
 **Not emitted today.** `QUOTA_EXCEEDED` is a registered member of the standard
 error-code catalog (`StandardErrorCode`, `packages/spec/src/api/errors.zod.ts`),
@@ -676,44 +721,70 @@ on the wire is `RATE_LIMIT_EXCEEDED` above, whose `Retry-After` header and
 
 #### `INTERNAL_ERROR`
 **HTTP Status:** 500  
-**Meaning:** Internal server error
+**Meaning:** Internal server error  
+**Envelope:** **both** — every door has a 500 terminal, and each writes its own envelope
 
-**Example:**
+**Flat** (the `/data` door's terminal for an error nothing classified):
+```json
+{
+  "error": "Internal server error",
+  "code": "INTERNAL_ERROR"
+}
+```
+
+**Nested** (a `sendError` route module — here the settings routes):
 ```json
 {
   "success": false,
   "error": {
     "code": "INTERNAL_ERROR",
-    "message": "An internal error occurred",
-    "details": {
-      "requestId": "req_abc123",
-      "support_url": "https://support.acme.com/request/req_abc123"
-    }
+    "message": "Failed to write namespace"
   }
 }
 ```
 
-**Important:** Never leak stack traces or sensitive internals to clients.
+**Important:** the message on a 5xx is **withheld by construction**, not by a heuristic.
+The flat door replaces a declared-5xx message with the fixed `Internal server error`
+string, so no phrasing a producer picks — deliberate or accidental — can carry driver text
+or a stack trace to a client.
+
+⛔ No `details` bag and no `requestId` in the body. The request id is a **response
+header** — see [Debugging with Request IDs](#debugging-with-request-ids).
 
 **How to fix:**
-- Retry request (may be transient)
-- Check server status page
-- Contact support with `requestId`
+- Retry the request (it may be transient)
+- Check the server status page
+- Contact support with the `X-Request-Id` value from the response headers
 
 #### `SERVICE_UNAVAILABLE`
 **HTTP Status:** 503  
-**Meaning:** Server temporarily unavailable
+**Meaning:** A dependency the route needs is not registered, or is unhealthy  
+**Envelope:** **both** — thrown by shared guards and written by `sendError` route modules
 
-**Example:**
+**Nested** (the datasource admin routes, when the service is not composed):
 ```json
 {
   "success": false,
   "error": {
     "code": "SERVICE_UNAVAILABLE",
-    "message": "Service temporarily unavailable"
+    "message": "The external-datasource service is not available."
   }
 }
 ```
+
+**Flat** (the `/data` door — here an object whose datasource is refused or unreachable):
+```json
+{
+  "error": "The datasource for this object is not available",
+  "code": "ERR_DATASOURCE_UNAVAILABLE",
+  "datasource": "warehouse",
+  "object": "shipment"
+}
+```
+
+⚠️ The flat family's own 503 carries the **more specific** `ERR_DATASOURCE_UNAVAILABLE`
+rather than the generic code, with `datasource` and `reason` as top-level siblings — it is
+built by an arm, so it never degrades to `SERVICE_UNAVAILABLE`. Handle both.
 
 **HTTP Headers:**
 ```http
@@ -723,7 +794,10 @@ Retry-After: 300
 
 ## Error Response Examples
 
-### Validation Error (Multiple Fields)
+Each example below is labelled with the envelope it is in, because the envelope is a
+property of the door — see [Error Response Envelopes](#error-response-envelopes).
+
+### Validation Error (Multiple Fields) — flat, `/data` door
 
 **Request:**
 ```http
@@ -743,40 +817,37 @@ HTTP/1.1 400 Bad Request
 Content-Type: application/json
 
 {
-  "success": false,
-  "error": {
-    "code": "VALIDATION_ERROR",
-    "message": "Validation failed for 3 fields",
-    "details": {
-      "fields": [
-        {
-          "field": "name",
-          "message": "Name is required",
-          "constraint": "required",
-          "value": ""
-        },
-        {
-          "field": "email",
-          "message": "Invalid email format",
-          "constraint": "format",
-          "value": "not-an-email"
-        },
-        {
-          "field": "revenue",
-          "message": "Revenue must be positive",
-          "constraint": "min",
-          "value": -1000,
-          "expected": 0
-        }
-      ]
+  "error": "Name is required; Invalid email format; Revenue must be at least 0",
+  "code": "VALIDATION_FAILED",
+  "fields": [
+    {
+      "field": "name",
+      "code": "required",
+      "message": "Name is required",
+      "label": "Name"
     },
-    "requestId": "req_abc123",
-    "timestamp": "2024-01-16T14:30:00Z"
-  }
+    {
+      "field": "email",
+      "code": "invalid_email",
+      "message": "Invalid email format",
+      "label": "Email",
+      "value": "not-an-email"
+    },
+    {
+      "field": "revenue",
+      "code": "min_value",
+      "message": "Revenue must be at least 0",
+      "label": "Revenue",
+      "constraint": { "min": 0 }
+    }
+  ],
+  "object": "account"
 }
 ```
 
-### Permission Denied
+⚠️ The request id is **not** in the body. Read it from the `X-Request-Id` response header.
+
+### Write Denied by Record Sharing — flat, `/data` door
 
 **Request:**
 ```http
@@ -790,24 +861,26 @@ HTTP/1.1 403 Forbidden
 Content-Type: application/json
 
 {
-  "success": false,
-  "error": {
-    "code": "PERMISSION_DENIED",
-    "message": "Insufficient permissions to delete accounts",
-    "details": {
-      "resource": "account",
-      "resource_id": "acc_123",
-      "required_permission": "account:delete",
-      "user_permissions": ["account:read", "account:write"],
-      "hint": "Contact your administrator to request delete permission"
-    },
-    "requestId": "req_def456",
-    "timestamp": "2024-01-16T14:35:00Z"
-  }
+  "error": "You do not have access to change or delete this record. Contact the person who owns it, or your administrator, if you need to make changes.",
+  "code": "FORBIDDEN",
+  "object": "account"
 }
 ```
 
-### Rate Limit Exceeded
+⚠️ **`FORBIDDEN`, not `PERMISSION_DENIED`.** A by-id write the sharing rules refuse carries
+`FORBIDDEN`; `PERMISSION_DENIED` is what the capability and identity guards carry. Both are
+403s in the same envelope on this door, so branch on either — ⛔ but do not assume one code
+covers every 403.
+
+⚠️ The refusal is thrown as `FORBIDDEN: <sentence>` and the door **strips** the
+`CODE: ` prefix before writing the body, because the code already rides the `code` axis.
+⛔ Do not match on a leading code prefix in `error`.
+
+⛔ The body deliberately names neither the permission you lack nor the permissions you
+hold — see [Security Considerations](#security-considerations). The thrown error carries a
+`details` bag internally; the flat door does not relay it.
+
+### Rate Limit Exceeded — nested, ahead of every route
 
 **Request:**
 ```http
@@ -825,16 +898,19 @@ Content-Type: application/json
   "success": false,
   "error": {
     "code": "RATE_LIMIT_EXCEEDED",
-    "message": "Rate limit exceeded: 1000 requests per minute",
+    "message": "Rate limit exceeded. Retry after the interval in the Retry-After header.",
+    "httpStatus": 429,
     "details": {
       "retryAfterSeconds": 45,
-      "resetAt": "2024-01-16T14:31:00Z"
-    },
-    "requestId": "req_ghi789",
-    "timestamp": "2024-01-16T14:30:15Z"
+      "resetAt": "2026-08-03T12:00:45.000Z"
+    }
   }
 }
 ```
+
+⚠️ The same route answered the two envelopes above and below: the `/data` refusals are
+flat, and the limiter's 429 in front of the very same path is nested. That is the rule at
+work, and it is why a client must read the body's shape rather than the route's prefix.
 
 ## Error Handling Best Practices
 
