@@ -18,11 +18,21 @@
  * summaries (`.turbo/runs/*.json`, uploaded per shard) carry per-PACKAGE
  * execution windows and nothing finer.
  *
- * REPORT ONLY. Nothing here may redden `Test Core` -- that is the required
- * branch-protection context, and a diagnostics step that can fail it buys a
- * measurement at the price of the merge queue. Every workflow step that runs
- * this carries `if: always()` and `continue-on-error: true`, and the tool
- * itself degrades to a named refusal rather than throwing.
+ * REPORT ONLY IN `ci.yml`. Nothing in that workflow may redden `Test Core` --
+ * that is the required branch-protection context, and a diagnostics step that
+ * can fail it buys a measurement at the price of the merge queue. Every
+ * `ci.yml` step that runs this carries `if: always()` and
+ * `continue-on-error: true`, and the tool itself degrades to a named refusal
+ * rather than throwing.
+ *
+ * -- and that is a property of `ci.yml`, NOT of this script (#17097). This
+ * docblock used to claim it of "every workflow step that runs this", which
+ * made the `--capture`/`--merge` guard read as a licence covering the
+ * self-test too. `--self-test` runs in lint.yml's `Lint & Repo Gates` job with
+ * NO `continue-on-error`: a red verdict there is the whole point, and it is
+ * the only instrument watching the parsing rules below -- a clean tree cannot
+ * tell a working parser from a weakened one, which is what the naive-parser
+ * controls in the battery exist to say out loud.
  *
  * ## THE MEASUREMENT THAT CHOSE THE ROUTE (route (a): parse the stream)
  *
