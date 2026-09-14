@@ -324,7 +324,8 @@ export class TimeRelativeTrigger implements FlowTrigger {
         // [#17396] …under a WALL. With the switch on and posture `single` the
         // sweep runs unscoped and its runs carry no organization — which is not
         // the cross-organization task the ruling forbids, because there is only
-        // one organization there to cross to (PR #17476 refuses a second). The
+        // one organization there to cross to (plugin-auth's org-create posture
+        // gate refuses a second). The
         // elevation argument above is why the `single` case is still safe: an
         // unscoped `isSystem` read on a one-organization install selects that
         // organization's rows and the platform's NULL-tenant rows, which is
@@ -492,7 +493,8 @@ export class TimeRelativeTrigger implements FlowTrigger {
          *
          * [#17396] `null` is now a REACHABLE and legal value, and exactly one
          * gate admits it: the switch on, tenancy posture `single`. There is no
-         * second organization to cross to there (PR #17476 refuses one), so an
+         * second organization to cross to there (plugin-auth's org-create
+         * posture gate refuses one), so an
          * unscoped sweep is not the cross-organization task the ruling forbids
          * — it is the shape a single-organization install had before #16659.
          * Under a wall `start()` still refuses an undeclared binding, and with

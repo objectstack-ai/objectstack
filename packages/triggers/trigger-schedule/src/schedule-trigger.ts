@@ -348,10 +348,14 @@ export function refuseScheduledWorkDisabled(
  * where it applies — a flow declares its organization or it is not armed, no
  * fan-out, no organization is ever chosen for it — but it applies to the
  * postures that have a wall to be crossed. On a `single` deployment with the
- * switch on there is exactly one organization (PR #17476 refuses a second), the
- * run carries none, and every tenant-scoped insert beneath it resolves that one
- * through the #8844 guard, so there is no cross-organization task to forbid and
- * nothing for an author to declare. With the switch OFF this refusal is not
+ * switch on there is exactly one organization — plugin-auth's ORG-CREATE
+ * POSTURE GATE refuses a second: `auth-manager.ts`'s `beforeCreateOrganization`
+ * answers 403 "Creating additional organizations is disabled on this
+ * deployment." whenever `multiOrgPostureEffective()` is false, pinned in
+ * `org-create-posture-gate.test.ts`. So the run carries none, every
+ * tenant-scoped insert beneath it resolves that one organization through the
+ * #8844 guard, there is no cross-organization task to forbid and nothing for
+ * an author to declare. With the switch OFF this refusal is not
  * reached at all: {@link refuseScheduledWorkDisabled} answers first, because a
  * deployment that runs no scheduled work owes no authoring remedy.
  *
@@ -700,9 +704,9 @@ export class ScheduleTrigger implements FlowTrigger {
                     // ruling G an absent `tenantId` is a DECLARED state rather
                     // than a forgotten one — the `single` posture with the
                     // switch on, where the deployment holds exactly one
-                    // organization (PR #17476 refuses a second) and the #8844
-                    // guard resolves it for every tenant-scoped insert beneath
-                    // the run. It is reached only through that gate: under a
+                    // organization (plugin-auth's org-create posture gate
+                    // refuses a second) and the #8844 guard resolves it for
+                    // every tenant-scoped insert beneath the run. It is reached only through that gate: under a
                     // wall the bind above still refuses an undeclared flow, and
                     // with the switch off nothing binds at all. ⛔ The key is
                     // OMITTED rather than set to `undefined` — the ruling says

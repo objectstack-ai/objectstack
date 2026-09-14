@@ -3429,10 +3429,11 @@ describe('AutomationEngine - the deployment switch (#17396)', () => {
     it('the audit reports what HAPPENED, not what the environment says when it is read', () => {
         // ⭐ REGRESSION PIN. The first spelling re-derived the reason inside
         // `getTriggerBindingAudit()` from a live `resolveScheduledWorkPolicy()`
-        // read. The audit is read long after the bind — `kernel:bootstrapped`,
-        // the CLI startup summary, every Studio poll — so an environment that
-        // moved in between made it report `binding failed — see earlier
-        // warnings` for a flow whose trigger was NEVER CALLED, pointing the
+        // read. The audit is read long after the bind — `kernel:bootstrapped`
+        // and the CLI startup summary, its only two callers — so an
+        // environment that moved in between made it report `binding failed —
+        // see earlier warnings` for a flow whose trigger was NEVER CALLED,
+        // pointing the
         // reader at warnings that do not exist. That is precisely the reading
         // ruled item 6 forbids, reached by a route the ruling's own words do
         // not describe. Caught by the dogfood sweep suite, pinned here.

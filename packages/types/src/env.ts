@@ -289,8 +289,16 @@ export function resolveScheduledWorkPolicy(): ScheduledWorkPolicy {
 
 /**
  * The one sentence a surface prints when package-authored scheduled work is
- * OFF — so the bind refusal, the engine's binding audit, the CLI startup
- * summary and Studio cannot drift about WHY a flow is not armed.
+ * OFF — so the bind refusal, the engine's binding audit and the CLI startup
+ * summary cannot drift about WHY a flow is not armed.
+ *
+ * ⚠️ Those are the surfaces that carry it, and Studio is NOT one of them. Its
+ * only status door is `GET /automation/_status`, whose rows are
+ * `FlowRuntimeState` (`@objectstack/spec` `contracts/automation-service.ts`) —
+ * a shape with no reason field at all — so a policy-disabled flow reaches
+ * Studio as `bound: false` and nothing more. ⛔ Do not write that Studio
+ * reports this reason until a reason reaches that wire shape: declared is not
+ * delivered.
  *
  * ⛔ It must never read as "binding failed". A binding failure is a defect with
  * an engineering remedy; this is a deployment POLICY with an operator remedy,

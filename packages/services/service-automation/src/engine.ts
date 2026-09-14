@@ -2229,8 +2229,9 @@ export class AutomationEngine implements IAutomationService {
      * ## Why a record and not a re-read
      *
      * `getTriggerBindingAudit()` runs long after the bind — at
-     * `kernel:bootstrapped`, in the CLI startup summary, on every Studio poll —
-     * and the switch is an ENVIRONMENT value that can move in between. Asking
+     * `kernel:bootstrapped` and in the CLI startup summary, its only two
+     * callers — and the switch is an ENVIRONMENT value that can move in
+     * between. Asking
      * the environment again at read time was the first spelling and it is
      * measurably wrong: a flow the engine never even offered to its trigger was
      * reported as `binding failed — see earlier warnings`, which is the one

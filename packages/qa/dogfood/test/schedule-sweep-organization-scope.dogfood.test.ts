@@ -236,8 +236,8 @@ for (const databaseDriver of ['sqlite-wasm', 'memory'] as const) {
     //
     // With the switch OFF neither trigger arms anything, and every such flow is
     // listed in `getTriggerBindingAudit()` — the surface the automation
-    // plugin's `kernel:bootstrapped` warning, the CLI startup summary and
-    // Studio all read — with a DISTINCT reason: *disabled by deployment
+    // plugin's `kernel:bootstrapped` warning and the CLI startup summary read,
+    // its only two callers — with a DISTINCT reason: *disabled by deployment
     // policy*, ⛔ NEVER "binding failed".
     //
     // ⭐ That distinction is the whole of the ruled item, and it is not
@@ -291,7 +291,7 @@ for (const databaseDriver of ['sqlite-wasm', 'memory'] as const) {
       expect(entry!.triggerType).toBe('time_relative');
       expect(
         entry!.reason,
-        'the reason must be the one sentence every surface shares, so the audit, the CLI summary and Studio cannot drift',
+        'the reason must be the one sentence every surface shares, so the audit and the CLI summary cannot drift',
       ).toBe(SCHEDULED_WORK_DISABLED_REASON);
       expect(entry!.reason, 'and it must name the switch the operator has to set').toContain(SCHEDULED_WORK_ENV);
       // ⭐ The prohibition, pinned by absence because the branch it must not

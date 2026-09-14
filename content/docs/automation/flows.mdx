@@ -2109,10 +2109,15 @@ key for it.
 
 <Callout>
 While the switch is off, such a flow is listed in the `os dev` / `os start`
-startup summary, in `getTriggerBindingAudit()` and in Studio as **disabled by
-deployment policy** — a distinct reason, never "binding failed". Nothing about
-the flow needs fixing; the deployment has not asked for it. `os doctor` prints
-the effective value.
+startup summary and in `getTriggerBindingAudit()` as **disabled by deployment
+policy** — a distinct reason, never "binding failed". Nothing about the flow
+needs fixing; the deployment has not asked for it. `os doctor` prints the
+effective value.
+
+Studio does **not** carry that reason today: `GET /automation/_status` reports
+each flow as `bound` or not and has no field to say why, so a policy-disabled
+flow is indistinguishable there from one whose trigger is missing. Read the
+startup summary or the audit for the reason.
 
 ⛔ Platform-internal scheduled work — approvals escalation, the lifecycle
 Reaper, the messaging dispatch loop, membership backfill — is **not** gated by

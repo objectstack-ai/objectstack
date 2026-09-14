@@ -364,8 +364,9 @@ for (const databaseDriver of ['sqlite-wasm', 'memory'] as const) {
     // ⭐ [#17396] The other half of pin (3), and the reason (3) had to gain the
     // words "under a wall". Ruling G leaves the 2026-09-08 refusal exactly as
     // it is where a wall exists, and removes it where one does not: under
-    // `single` the deployment holds exactly one organization by contract (PR
-    // #17476 refuses a second), so there is no cross-organization task to
+    // `single` the deployment holds exactly one organization by contract
+    // (plugin-auth's org-create posture gate refuses a second), so there is
+    // no cross-organization task to
     // forbid and nothing an author could usefully declare.
     //
     // ⛔ Not a relaxation pinned by its absence. The SAME flow object and the
