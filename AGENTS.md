@@ -270,8 +270,8 @@ localStorage / auth gotchas.
     spent once per PR: the OWNING seat then lands it, later pushes included, re-queuing after an ejection or a rebase on
     its own pre-landing check; this gate does not re-review it. Hand-authored governed content needs that approval; a PR
     whose only governed paths are register rows the queue leg regenerates byte-exact clears with zero approvals — an
-    uncertified recompute, drift or a hand-authored sibling keeps it governed. Unapproved, the bypass direct merge
-    (人工直合) is the only landing. **Landing is tiered**: a PR whose governed paths all lie under
+    uncertified recompute, drift or a hand-authored sibling keeps it governed. Unapproved, no seat lands it: the
+    ending is that approval, then the owning seat. **Landing is tiered**: a PR whose governed paths all lie under
     `.claude/skills/pm-dispatch/references/` lands through the queue after the skills seat's contract-tier review; every
     other governed path is the rules layer and waits for the maintainer's word, which the director seat requests as ONE
     batch of at most five rows — the approval stays the maintainer's click. ⛔ **No agent seat submits an approving
@@ -281,7 +281,7 @@ localStorage / auth gotchas.
     **Already armed or queued when you read this?** Convert it back to **draft** AND disable auto-merge — draft is
     what removes queue membership, disabling alone drops only the arming — then confirm from the remote that it is in
     neither the queue nor `origin/main`. **Draft is no barrier by itself — the barrier is this directive**, and a
-    human merge IS the review record, ⛔ not a relaxation. Behind it: the queue guard refuses an unpinned governed
+    spent approval IS the review record, ⛔ not a relaxation. Behind it: the queue guard refuses an unpinned governed
     diff; CODEOWNERS routes review requests for `docs/adr/` only, so nothing summons the maintainer on the other four;
     the post-merge audit (`scripts/pm/check-governed-merges.mjs`) lists every governed-surface merge with its approver
     and merger — a merger the maintainer does not recognise, or any agent approval, is a seat violation, filed and
