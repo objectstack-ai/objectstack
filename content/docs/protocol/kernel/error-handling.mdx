@@ -25,7 +25,12 @@ API 4: HTTP 200 OK with { status: "error", ... }
 - Debugging is nightmare (where did this error originate?)
 - Monitoring/alerting is inconsistent
 
-**Solution:** ObjectStack enforces a **single error format** across all communication channels. Every error has a machine-readable code, human-readable message, and context for debugging.
+**Solution:** ObjectStack answers every error with a machine-readable `code`, a human-readable message and context for debugging, drawn from one closed code vocabulary ([ADR-0112](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0112-error-code-vocabulary-and-ledger.md)).
+
+⚠️ What it does **not** do is put them all in one **envelope**. The platform writes
+**two** error envelopes, and which one you receive is a property of the door that
+answered — see [Error Response Envelopes](#error-response-envelopes) below before you
+write an unwrapping helper.
 
 ## Business Value Delivered
 
@@ -52,30 +57,148 @@ API 4: HTTP 200 OK with { status: "error", ... }
   />
 </Cards>
 
-## Standard Error Response
+## Error Response Envelopes
 
-Every error follows this structure:
+ObjectStack has **two** live error envelopes. There is no third, and there is no
+universal one.
+
+### The rule
+
+> **The envelope is decided by the door that wrote the body — never by the error code
+> and never by the HTTP status.**
+
+Two corollaries, and both of them bite:
+
+- **A refusal a writer *builds* always carries that writer's envelope.** `UNIQUE_VIOLATION`,
+  `DELETE_RESTRICTED` and `INVALID_FIELD` are built by the `/data` door's classification
+  arms, so they are **always flat**. `RATE_LIMIT_EXCEEDED` is built by the inbound rate
+  limiter, so it is **always nested**.
+- **A refusal that is *thrown* and classified at the boundary carries the envelope of
+  whichever door caught it.** `PERMISSION_DENIED`, `RESOURCE_NOT_FOUND`,
+  `SERVICE_UNAVAILABLE` and `INTERNAL_ERROR` are all thrown by shared guards and reach
+  clients in **either** envelope depending on the route.
+
+So do not derive the envelope from the code. Derive it from the body you are holding:
+
+```javascript
+// The one discriminator that cannot go stale: the top-level `success` flag.
+const isNested = body !== null && typeof body === 'object' && 'success' in body;
+
+const code    = isNested ? body.error?.code    : body.code;
+const message = isNested ? body.error?.message : body.error;
+```
+
+<Callout type="warn">
+**`error` means two different things.** In the nested envelope `error` is an **object**
+holding `code` and `message`. In the flat envelope `error` is the **message string
+itself**. Reading `body.error` as the same thing in both is the single most expensive
+mistake on this page — `body.error.code` is `undefined` against a flat body, and
+`String(body.error)` is `[object Object]` against a nested one.
+</Callout>
+
+### Nested envelope — `{ success, error: { … } }`
+
+The envelope [`BaseResponseSchema`](https://github.com/objectstack-ai/objectstack/blob/main/packages/spec/src/api/contract.zod.ts)
+declares. Written by two writers:
+
+- `sendOk` / `sendError` in `packages/types/src/response-envelope.ts` — the shared pair
+  every converted route module writes through.
+- `buildApiError` / `apiErrorResponse` in `packages/runtime/src/error-envelope.ts` — the
+  runtime HTTP dispatcher's door, and the inbound rate limiter.
 
 ```json
 {
   "success": false,
   "error": {
-    "code": "error_code",
-    "message": "Human-readable description",
-    "details": { /* Additional context */ },
-    "requestId": "req_abc123",
-    "timestamp": "2024-01-16T14:30:00Z"
+    "code": "UNAUTHENTICATED",
+    "message": "Sign in to create share links"
   }
 }
 ```
 
 **Fields:**
-- `success`: Always `false` for errors
-- `error.code`: Machine-readable error code (use for conditionals)
-- `error.message`: Human-readable message (show to users or developers)
-- `error.details`: Additional context (field names, constraints, etc.)
-- `error.requestId`: Unique request identifier for debugging
-- `error.timestamp`: When error occurred (ISO 8601)
+- `success` — always `false` for errors.
+- `error.code` — the machine-readable code. Closed vocabulary: the parameter is typed to
+  `ErrorCode`, so an unregistered spelling cannot reach this field.
+- `error.message` — the human-readable message.
+- `error.httpStatus` — the status, repeated in the body. Written by the **dispatcher**
+  writer on every body it builds; no `sendError` call site passes one today, so it is
+  absent from the route-module bodies.
+- `error.details` — optional structured context, present only where the emitting route
+  passes one. Not a general-purpose bag: it appears on a handful of refusals
+  (rate limiting, settings validation, partial-delete reports) and nowhere else.
+- `error.declaredCode` — optional. An author's own `code` when it is **not** a member of
+  the closed vocabulary, demoted to this sibling rather than overwriting `code`.
+- `error.userMessage` — optional. Text a producer marked, at throw time, as addressed to
+  the end user; render it verbatim when present.
+
+⛔ **No `requestId` and no `timestamp`.** Neither field is written into any error body by
+either writer. The request id travels as a **response header** — see
+[Debugging with Request IDs](#debugging-with-request-ids).
+
+### Flat envelope — the ADR-0112 `/data` door
+
+Written by `packages/rest/src/error-response.ts` (`structuredCodeAnswer` classifies the
+condition, `resolveErrorResponse` / `mapDataError` answer it). The structured context the
+nested envelope would nest under `details` rides as **top-level siblings** here.
+
+```json
+{
+  "error": "A record with this email already exists",
+  "code": "UNIQUE_VIOLATION",
+  "field": "email",
+  "object": "account"
+}
+```
+
+**Fields:**
+- `error` — the human-readable message, **a string**.
+- `code` — the machine-readable code. **Optional**: ADR-0112 invents nothing for the half
+  a producer did not name, so a refusal that declared a status but no code arrives with
+  `error` alone. Branch on `code` only after checking it is there.
+- `object` — the object the refusal is about, when the door knows it.
+- `declaredCode` / `userMessage` — the same two optional channels as above, as top-level
+  siblings.
+- **Per-condition siblings**, present only on the arm that builds them: `field`
+  (`UNIQUE_VIOLATION`, `INVALID_FIELD`), `fields` (`VALIDATION_FAILED`),
+  `developerMessage` + `dependentObject` + `dependentCount` (`DELETE_RESTRICTED`),
+  `currentVersion` + `currentRecord` (`CONCURRENT_UPDATE`), `datasource` + `reason`
+  (`ERR_DATASOURCE_UNAVAILABLE`), `issues` (a spec-validation throw).
+
+⛔ **No `success`, no `details`, no `requestId`, no `timestamp`.** The flat door writes
+none of them.
+
+### Which route families answer which
+
+| Route family | Envelope | Writer |
+|---|---|---|
+| `{base}/data/*` — CRUD, `query`, `batch`, `createMany` / `updateMany` / `deleteMany`, `clone`, import / export, reports, approvals, sharing rules | **flat** | `packages/rest/src/error-response.ts` |
+| `{base}/meta/*`, `{base}/ui/*`, discovery and search on the `@objectstack/rest` door, for anything **thrown** out of a handler | **flat** | the same door, via `handleRouteError` |
+| `/api/v1/storage/*` | nested | `storage-routes.ts` → `sendError` |
+| `/api/settings/*` | nested | `settings-routes.ts` → `sendError` |
+| `/api/v1/share-links/*` | nested | `share-link-routes.ts` → `sendError` |
+| `/api/v1/packages/*` | nested | `package-routes.ts` → `sendError` |
+| `/api/v1/datasources/*` | nested | `admin-routes.ts`, `external-datasource-routes.ts` → `sendError` |
+| `/api/v1/i18n/*` | nested | `i18n-service-plugin.ts` → `sendError` |
+| every route on a host served by the **runtime HTTP dispatcher** (`/meta`, `/auth`, `/ai`, `/automation`, `/packages`, `/ui`, `/security`, `/notifications`, `/analytics`, `/mcp`, `/keys`, `/actions`, `/share-links`, `/i18n`) | nested | `buildApiError` / `apiErrorResponse` |
+| the inbound rate limiter, ahead of every route | nested | `inbound-rate-limit.ts` |
+
+<Callout type="warn">
+**The `/meta` family is split by door, not by path.** A host that serves `/meta` through
+the runtime dispatcher answers nested — that is the shape the
+[error catalog's `/meta` examples](/docs/api/error-catalog) publish. A host that serves it
+through `@objectstack/rest` answers the flat body for the *same* refusal, because the same
+thrown error is classified by a different door. Read the body, not the path.
+</Callout>
+
+<Callout type="info">
+**Two envelopes is the measured state, not the target state.** Some older registrars on
+the `@objectstack/rest` door still emit bodies that are neither — an `error` string with no
+`code`, or a `code` sibling with no `success` above it. That drift is tracked and
+shrink-only: `pnpm check:route-envelope` is the authority on which files carry it and how
+much is left. Write clients against the discriminator above, which is correct for the
+conforming bodies and fails loudly rather than silently on the rest.
+</Callout>
 
 ## HTTP Status Codes
 
@@ -97,25 +220,38 @@ ObjectStack uses standard HTTP status codes:
 
 ## Error Codes
 
+Every entry below names the **envelope** its example is written in, and which door emits
+it. A code that reaches clients in both envelopes says so and shows both bodies — that is
+the rule from [Error Response Envelopes](#error-response-envelopes) applied per code, not
+an inconsistency.
+
 ### Authentication & Authorization
 
 #### `UNAUTHENTICATED`
 **HTTP Status:** 401  
-**Meaning:** No authentication credentials provided or invalid credentials
+**Meaning:** No authentication credentials provided or invalid credentials  
+**Envelope:** **both** — thrown by shared guards, so the answering door decides
 
-**Example:**
+**Nested** (a `sendError` route module — here `POST /api/v1/share-links`):
 ```json
 {
   "success": false,
   "error": {
     "code": "UNAUTHENTICATED",
-    "message": "Authentication required",
-    "details": {
-      "hint": "Include 'Authorization: Bearer <token>' header"
-    }
+    "message": "Sign in to create share links"
   }
 }
 ```
+
+**Flat** (the `@objectstack/rest` door — here the sign-in gate on the generated API docs):
+```json
+{
+  "error": "This documentation requires sign-in",
+  "code": "UNAUTHENTICATED"
+}
+```
+
+⛔ No `details` bag rides either body: no emitting site passes one for this code.
 
 **How to fix:**
 - Include valid JWT token in `Authorization` header
@@ -124,7 +260,8 @@ ObjectStack uses standard HTTP status codes:
 
 #### `INVALID_TOKEN`
 **HTTP Status:** 401  
-**Meaning:** Token is malformed or invalid
+**Meaning:** Token is malformed or invalid  
+**Envelope:** nested — emitted only by the storage routes, on a rejected upload/download token
 
 **Example:**
 ```json
@@ -132,13 +269,13 @@ ObjectStack uses standard HTTP status codes:
   "success": false,
   "error": {
     "code": "INVALID_TOKEN",
-    "message": "JWT token is invalid",
-    "details": {
-      "reason": "signature_verification_failed"
-    }
+    "message": "Invalid or expired token"
   }
 }
 ```
+
+⛔ No `details.reason`: the emitting site deliberately does not disclose *why* the token
+failed.
 
 **How to fix:**
 - Check token hasn't been tampered with
@@ -147,46 +284,52 @@ ObjectStack uses standard HTTP status codes:
 
 #### `EXPIRED_TOKEN`
 **HTTP Status:** 401  
-**Meaning:** JWT token has expired
+**Meaning:** Authentication token expired  
+**Envelope:** none — no producer emits it
 
-**Example:**
-```json
-{
-  "success": false,
-  "error": {
-    "code": "EXPIRED_TOKEN",
-    "message": "JWT token expired",
-    "details": {
-      "expired_at": "2024-01-16T10:00:00Z",
-      "current_time": "2024-01-16T14:30:00Z"
-    }
-  }
-}
-```
+**Not emitted today.** `EXPIRED_TOKEN` is a registered member of the standard error-code
+catalog (`StandardErrorCode`, `packages/spec/src/api/errors.zod.ts`), and that
+registration is its only occurrence outside tests — no ObjectStack producer writes it to a
+response. Because nothing emits it, it has no envelope and no example: ⛔ do not write a
+client branch against it.
 
-**How to fix:**
-- Refresh token using refresh token flow
-- Re-authenticate user
-- Check token lifetime settings (typically 15-60 minutes)
+An expired credential surfaces as `INVALID_TOKEN` above (the storage token gate does not
+distinguish expiry from malformation) or as `UNAUTHENTICATED` from the session guards.
 
 #### `PERMISSION_DENIED`
 **HTTP Status:** 403  
-**Meaning:** Authenticated but insufficient permissions
+**Meaning:** Authenticated but insufficient permissions  
+**Envelope:** **both** — the identity and last-admin guards *throw* it, so the answering door decides
 
-**Example:**
+**Flat** (a `/data` write refused by the ADR-0092 identity-write guard):
+```json
+{
+  "error": "Identity table 'sys_user' is managed by better-auth (ADR-0092): direct update via the data API is disabled — use the dedicated auth surface instead (invite / create-user / admin endpoints, or the better-auth API).",
+  "code": "PERMISSION_DENIED",
+  "object": "sys_user"
+}
+```
+
+⚠️ The guard throws `PERMISSION_DENIED: <message>`, and the door **strips** that prefix
+before writing the body: the code already rides the `code` axis, so restating it inside
+the sentence would ship one fact twice. ⛔ Do not match on a leading `CODE:` — it is
+removed.
+
+**Nested** (a `sendError` route module — here the datasource admin routes):
 ```json
 {
   "success": false,
   "error": {
     "code": "PERMISSION_DENIED",
-    "message": "Insufficient permissions to access this resource",
-    "details": {
-      "required_permission": "account:write",
-      "user_permissions": ["account:read"]
-    }
+    "message": "Managing datasources requires the `manage_platform_settings` capability."
   }
 }
 ```
+
+⛔ Neither body enumerates the required or held permissions. Nothing emits a
+`required_permission` / `user_permissions` bag — telling an unauthorized caller exactly
+which grant would have worked is the disclosure the
+[Security Considerations](#security-considerations) below rule out.
 
 **How to fix:**
 - Request permission from administrator
@@ -195,51 +338,111 @@ ObjectStack uses standard HTTP status codes:
 
 ### Validation Errors
 
+#### `VALIDATION_FAILED`
+**HTTP Status:** 400  
+**Meaning:** Per-field record validation failed on a write  
+**Envelope:** flat — built by the `/data` door's validation arm, so it is never nested
+
+This is the code that carries **per-field** detail. The `fields` array is a **top-level
+sibling** of `code`, not a `details.fields` bag.
+
+**Example** — `POST /api/v1/data/account` with a bad email and an out-of-range number:
+```json
+{
+  "error": "Invalid email format; Revenue must be at least 0",
+  "code": "VALIDATION_FAILED",
+  "fields": [
+    {
+      "field": "email",
+      "code": "invalid_email",
+      "message": "Invalid email format",
+      "label": "Email",
+      "value": "not-an-email"
+    },
+    {
+      "field": "revenue",
+      "code": "min_value",
+      "message": "Revenue must be at least 0",
+      "label": "Revenue",
+      "constraint": { "min": 0 }
+    }
+  ],
+  "object": "account"
+}
+```
+
+**Field entry shape:** `field` (the API name, so a form can focus the input), `code` (a
+`FieldErrorCode` — `required`, `invalid_email`, `min_value`, `max_length`, `invalid_option`,
+`rule_violation`, … — the closed per-field catalog in
+`packages/spec/src/api/errors.zod.ts`), `message` (rendered in the caller's locale),
+and optionally `label`, `constraint`, `value`, `options`.
+
+⚠️ `fields` is always present on this arm, and is `[]` when the thrown error carried none.
+The top-level `error` string is the field messages joined with `; ` — show it verbatim in
+a toast, and use `fields` to annotate inputs.
+
+**How to fix:**
+- Check field constraints in the object schema (`GET /api/v1/meta/object/{object}`)
+- Validate input client-side before submission
+- Show field-specific errors in the UI
+
+**Client-side handling:**
+```javascript
+if (body.code === 'VALIDATION_FAILED') {
+  for (const { field, message } of body.fields ?? []) {
+    showFieldError(field, message);
+  }
+}
+```
+
 #### `VALIDATION_ERROR`
 **HTTP Status:** 400  
-**Meaning:** Input validation failed (schema validation)
+**Meaning:** The request is malformed — the generic "you sent something wrong" code  
+**Envelope:** **both**, and one emitter writes neither (see the warning below)
 
-**Example:**
+⛔ **Not the per-field code.** `VALIDATION_ERROR` never carries a `fields` array and never
+carries a `details.fields` bag. For per-field write validation, read `VALIDATION_FAILED`
+above.
+
+Where it comes from:
+- **Derived from the status.** `VALIDATION_ERROR` is what `HttpStatusErrorCodeMap`
+  (`packages/spec/src/api/errors.zod.ts`) maps HTTP **400** to. A door handed a refusal
+  that names a 400 and no code labels it `VALIDATION_ERROR` from the status alone — so it
+  is the code you see for the whole family of malformed requests that named nothing more
+  specific.
+- **Query-parameter refusals.** `refuseUnknownQueryParams` and `refuseRepeatedQueryParams`
+  answer 400 `VALIDATION_ERROR` for an unrecognised or repeated query parameter.
+
+**Nested** (the dispatcher door, status-derived — `GET /api/v1/packages/:id?version=1&version=2`):
 ```json
 {
   "success": false,
   "error": {
     "code": "VALIDATION_ERROR",
-    "message": "Validation failed for 2 fields",
-    "details": {
-      "fields": [
-        {
-          "field": "email",
-          "message": "Invalid email format",
-          "constraint": "format",
-          "value": "not-an-email"
-        },
-        {
-          "field": "age",
-          "message": "Must be at least 18",
-          "constraint": "min",
-          "value": 15,
-          "expected": 18
-        }
-      ]
-    }
+    "message": "The \"version\" query parameter was supplied 2 times. Supply it at most once — this endpoint will not choose between conflicting values.",
+    "httpStatus": 400
   }
 }
 ```
 
-**How to fix:**
-- Check field constraints in object schema (`GET /api/v1/meta/object/{object}`)
-- Validate input client-side before submission
-- Show field-specific errors in UI
-
-**Client-side handling:**
-```javascript
-if (error.code === 'VALIDATION_ERROR') {
-  error.details.fields.forEach(({ field, message }) => {
-    showFieldError(field, message);
-  });
+**Flat** (the `@objectstack/rest` form-submit door):
+```json
+{
+  "code": "VALIDATION_ERROR",
+  "error": "This form declares no fields, so it cannot accept a submission. Wire the fields it collects into the form's sections and publish it again."
 }
 ```
+
+<Callout type="warn">
+**The two query-parameter helpers write a third shape.** On the `@objectstack/rest` door,
+`refuseUnknownQueryParams` and `refuseRepeatedQueryParams` write
+`{ "error": { "code": "VALIDATION_ERROR", "message": … } }` — nested per ADR-0112, but with
+**no `success` flag above it**, so the discriminator in
+[Error Response Envelopes](#error-response-envelopes) reads them as flat and `body.code`
+comes back `undefined`. That is tracked, shrink-only drift, not a third contract:
+`pnpm check:route-envelope` pins it. Until it converges, a client that must survive it
+should fall back to `body.error?.code` when `body.code` is absent.
+</Callout>
 
 #### `MISSING_REQUIRED_FIELD`
 **HTTP Status:** 400 — with one documented exception, which answers **422** (see below)  
