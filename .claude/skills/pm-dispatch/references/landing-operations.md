@@ -24,17 +24,17 @@
 - 契约复核 PASS 落地的 PR 到窗口时已 ready 且 auto-merge 在挂,见 `contract-review.md`。
 - 窗口自身权责不变:跟到 MERGED、踢出处置、落地后对账。
 - 转 ready 或挂 auto-merge 前先判受管面:`node scripts/pm/check-governed-merges.mjs --test` 加变更路径。
-- 一条命中 ⇒ 整 PR 改走人工合并道:复核照写 + 留 draft + 向授权批准人请审 + 状态评论。
-- ⛔ 不翻 ready、不入队;清标即落地同受此闸,漏判会被队列守卫在 merge group 里拒收。
+- 受管路径全在本技能 `references/` 者事实层:席内达档复核过落地前检三条即转正式入队。
+- 其余为规则层:四件套留 draft 等人合,⛔ 不翻正式不入队;获授权批准后认领席落地。
+- ⛔ 两层不由席位批准;清标即落地同受此闸,漏判会被队列守卫在 merge group 里拒收。
 - 再读 `mergeable_state`:`dirty` ⇒ 先 merge `origin/main` 再挂;生成物在面上按 A 的固定序。
 - ready + 全绿 ≠ 已入队:队列从不主动拉 PR,入队是显式动作。
 - 零 `enqueued` 事件按序查三条:① `mergeable_state` 是否 `dirty`。
 - ② enable-auto-merge 调用根本没落地,重发与效果验证序列见 `platform-readings.md`。
 - ③ PR 碰 `.github/workflows/**` 而 token 缺 workflows 权限。
-- 确认 MERGED 的同一动作里给 `Part of` 卡收口,`Fixes` 卡代关但标也须摘。
+- 确认 MERGED 同一动作里给 `Part of` 卡收口、`Fixes` 卡代关但标也须摘,⛔ 不拆到下轮巡检。
 - `Part of` 卡开着不摘 `pm:dispatched`,无在飞物的卡就永远算进 `label:pm:dispatched is:open`。
 - 摘标换回 `pm:queue` 或按剩余物定级,加一条写清交付了什么、剩下归谁的评论。
-- 摘标与 MERGED 确认是一个动作,⛔ 不拆到下轮巡检。
 - 同刻读相关卡 `closed_by_pull_requests`,确认没有卡被正文闭合关键词误关。
 - 每次合并后重拉一次车道盘点与预期状态对账,⛔ 不留给下轮巡检。
 - 取 open 卡清单对照预期 diff:预期之外从 open 消失的,就是被闭合关键词静默误关的卡。
