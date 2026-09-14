@@ -23918,22 +23918,29 @@ function selfTest() {
       'READING A — a bare cap-kill code is UNRUN, never run: the run left no verdict to read',
       !readingA.ok && readingA.ran.length === 0 && readingA.notMeasured.length === 0 && readingA.unrun.length === 1,
     );
+    // ⛔ `?.` and not `[0].why`: when this classification regresses the array is
+    // EMPTY, and a pin that throws on the regression it exists to catch takes
+    // the whole battery down with it — every case after it stops reporting, so
+    // an ablation can no longer show which of them the regression moved. A pin
+    // must FAIL, and be named while failing.
+    const why0 = (entry) => entry?.why ?? '';
+    const reason0 = (entry) => entry?.reason ?? '';
     t(
       '...and the unrun row NAMES the recorded code, so the runner can see what this tool read',
-      readingA.unrun[0].why.includes(`${RUN_RECORD_EXIT_PREFIX}${RUN_RECORD_KILL_EXITS.TIMEOUT}`) && readingA.unrun[0].why.includes('no verdict'),
+      why0(readingA.unrun[0]).includes(`${RUN_RECORD_EXIT_PREFIX}${RUN_RECORD_KILL_EXITS.TIMEOUT}`) && why0(readingA.unrun[0]).includes('no verdict'),
     );
     const capReason = 'cap-killed at the container foreground ceiling';
     const readingD = runReconciliation({ derived: ['pnpm check:a'], record: killRecord(RUN_RECORD_KILL_EXITS.TIMEOUT, capReason) });
     t(
       `READING D — a kill code PLUS a reasoned claim is ${marker}: the honest runner's declaration WINS over the run line beside it`,
       readingD.ok && readingD.ran.length === 0 && readingD.unrun.length === 0 && readingD.notMeasured.length === 1
-        && readingD.notMeasured[0].source === RUN_RECORD_NOT_MEASURED_KILL_SOURCE
-        && readingD.notMeasured[0].exitCode === RUN_RECORD_KILL_EXITS.TIMEOUT,
+        && readingD.notMeasured[0]?.source === RUN_RECORD_NOT_MEASURED_KILL_SOURCE
+        && readingD.notMeasured[0]?.exitCode === RUN_RECORD_KILL_EXITS.TIMEOUT,
     );
     t(
       '...and its row carries BOTH halves of the record — the code this tool read and the reason the runner stated',
-      readingD.notMeasured[0].reason.includes(`${RUN_RECORD_EXIT_PREFIX}${RUN_RECORD_KILL_EXITS.TIMEOUT}`)
-        && readingD.notMeasured[0].reason.includes(capReason),
+      reason0(readingD.notMeasured[0]).includes(`${RUN_RECORD_EXIT_PREFIX}${RUN_RECORD_KILL_EXITS.TIMEOUT}`)
+        && reason0(readingD.notMeasured[0]).includes(capReason),
     );
     // ⭐ The double-count control. Reading D accounts for ONE family through two
     // doors, and `accounted` must still be 1 — a total that counted it twice
@@ -23952,7 +23959,7 @@ function selfTest() {
         `a recorded ${RUN_RECORD_EXIT_PREFIX}${code} is a kill: UNRUN bare, ${marker} when declared — and run in neither`,
         bare.ran.length === 0 && bare.unrun.length === 1 && bare.notMeasured.length === 0
           && declared.ran.length === 0 && declared.unrun.length === 0 && declared.notMeasured.length === 1
-          && declared.notMeasured[0].source === RUN_RECORD_NOT_MEASURED_KILL_SOURCE,
+          && declared.notMeasured[0]?.source === RUN_RECORD_NOT_MEASURED_KILL_SOURCE,
       );
     }
     // CONTROL, and it is the load-bearing half: a VERDICT still reads as run.
@@ -23973,8 +23980,9 @@ function selfTest() {
     );
     t(
       'the label names the signal where one is known, and the signal NUMBER where it is not',
-      runRecordKillLabel(143).includes('SIGTERM') && runRecordKillLabel(137).includes('SIGKILL')
-        && runRecordKillLabel(149).includes('signal 21') && runRecordKillLabel(RUN_RECORD_KILL_EXITS.TIMEOUT).includes('timeout'),
+      (runRecordKillLabel(143) ?? '').includes('SIGTERM') && (runRecordKillLabel(137) ?? '').includes('SIGKILL')
+        && (runRecordKillLabel(149) ?? '').includes('signal 21')
+        && (runRecordKillLabel(RUN_RECORD_KILL_EXITS.TIMEOUT) ?? '').includes('timeout'),
     );
     // A kill code beside a claim with NO reason is the shape the docblock above
     // refuses by name: an unexplained refusal is what a cap-killed run wears.
@@ -23985,7 +23993,7 @@ function selfTest() {
     t(
       'a kill code beside an UNREASONED claim stays UNRUN — the claim costs a reason here exactly as it does alone',
       !killUnreasoned.ok && killUnreasoned.unrun.length === 1 && killUnreasoned.notMeasured.length === 0
-        && killUnreasoned.unrun[0].why.includes(`${RUN_RECORD_EXIT_PREFIX}143`),
+        && why0(killUnreasoned.unrun[0]).includes(`${RUN_RECORD_EXIT_PREFIX}143`),
     );
     // ── The contradiction line, read off the RENDERING ──────────────────────
     // ⭐ Read from the rendered text and not from `conflicts`: the array being
