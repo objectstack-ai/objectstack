@@ -172,6 +172,91 @@
 #
 # The os-regen path list is read from .gitattributes AT RUN TIME — the one copy
 # that cannot rot is the one that does not exist.
+#
+# ## Step 1's conflict report partitions by GENERATEDNESS, not by routing (#18047)
+#
+# The partition used to be a set difference against the `merge=os-regen` list:
+# conflicted MINUS routed was labelled "NON-generated". That names the complement
+# of a ROUTING decision after a property of the FILE, and the two are not the
+# same set — `scripts/regen-artifacts.mjs`'s `NOT_DRIVER_MANAGED` exists exactly
+# to hold the paths a generator touches that are deliberately NOT routed.
+# Measured on origin/main: `git check-attr merge` answers `unspecified` for
+# `packages/spec/src/migrations/registry.ts` (the lit control, an
+# authorable-surface shard, answers `os-regen`), so a conflict there drew the
+# "NON-generated files — resolve those by hand" message WITH its "do not resolve
+# generated files textually" line three lines below it. Two sentences about one
+# file, and nothing saying which governs. `.gitattributes` calls that same file
+# "generated, committed, unsharded, NOT_DRIVER_MANAGED" and says every
+# registration touches it by construction, so this is not an exotic path.
+#
+# The conflicted set is therefore partitioned into THREE classes, generatedness
+# first and routing second:
+#
+#   1. neither routed nor declared — an ordinary hand-written file. Today's
+#      message, unchanged, and now the only one carrying the blanket "do not
+#      resolve generated files textually" line, which is true of a set that by
+#      construction holds no generated file.
+#   2. ROUTED and conflicted — necessarily a MIXED row the driver declined to
+#      defer. Today's message, unchanged: that is #14733's fix and it is right.
+#   3. declared in `NOT_DRIVER_MANAGED` — generator-touched, deliberately
+#      unrouted. A new message, because neither of the other two is true of it.
+#
+# ## Class 3 is not ONE instruction, and the ledger is what shows it
+#
+# "Resolve by regeneration" is correct for three of the ledger's thirty tracked
+# entries and WRONG for the rest, so membership alone cannot carry the message:
+#
+#   `packages/spec/src/migrations/registry.ts`, `skills/README.md` and
+#   `content/docs/ai/skills-reference.mdx` are MIXED — a generator owns the text
+#   between a marker pair, a human owns everything outside it. A conflict INSIDE
+#   a region is resolved by rerunning that generator and by nothing else; the
+#   prose outside it is a hand merge. The module's own header names these three
+#   as the files `NOT_DRIVER_MANAGED` "turns away", and one more of that shape
+#   (`content/docs/permissions/tenant-audit-census.mdx`) is reached through a
+#   directory entry rather than named outright.
+#
+#   the fifteen `test-typecheck-debt.json` ledgers, `docs-import-surface.
+#   baseline.json` and their neighbours are SHRINK-ONLY RATCHETS whose own
+#   entries say a merge must NEVER recompute them: a mid-merge regeneration
+#   records whatever the half-merged tree happens to compile to and enters it as
+#   merge noise instead of as red. `objectui-lockstep.json` cannot be
+#   regenerated here at all (it needs a sibling checkout), and the scaffold
+#   templates' generator refuses a file it did not already stamp. Every one of
+#   these is resolved BY HAND and regenerated later, or not at all.
+#
+# So class 3 prints one of two per-path readings, and the discriminator is ⛔ NOT
+# the entry's `gen` field. `gen` is an ACCOUNTING field (#13731) — recorded where
+# the generator appears in no `REGEN_ARTIFACTS` row — so every ratchet above
+# carries one, while `docs-import-surface.baseline.json`, which `gen:docs` really
+# does write, carries none. Keying the message on it would send seventeen paths
+# to a regeneration their own ledger entry forbids: this card's defect again, one
+# class over.
+#
+# The discriminator is the MARKER PAIR IN THE CONFLICTED FILE, which is the
+# property the message actually depends on — a file with generated regions has a
+# part a regeneration restores and a part it cannot. Both vocabularies the tree
+# writes are recognised, and both are spelled here as a CONSUMER of a convention
+# the generators own; `check-role-word.mjs` spells the second one once for the
+# same reason and states the rule: a rename happens at the generators and
+# arrives here, never the other way round.
+#
+# ## The caveat the remedy itself needs — the discarded side's prose
+#
+# "Take either side, commit the merge, then regenerate" is sound only while the
+# discarded side changed nothing OUTSIDE the generated regions. Measured on
+# PR #17835: `registry.ts` was resolved that way and two hand-authored append
+# regions outside the markers — a step's `conversionIds` and its `rationale` —
+# were dropped silently, so a 17-to-18 conversion stopped applying while a
+# 115-family gate sweep stayed GREEN. `check:migration-registry` exit 0 proves
+# the file equals its generated sources and nothing more; it is not a witness
+# for the prose, and the one thing that caught the loss was a fixture that
+# happened to exercise the dropped id.
+#
+# So the script does not merely repeat "check the discarded side": it reads both
+# sides out of the index it already holds (`:2:` ours, `:3:` theirs), strips the
+# generated regions from each, and REPORTS whether the remainders differ. The
+# question is answered where it is asked, rather than delegated to an operator
+# who has just been told the file is safe to take a side of.
 
 set -euo pipefail
 
@@ -192,6 +277,120 @@ usage:
 
 Run INSIDE the feature branch's worktree, on a clean tree.
 EOF
+}
+
+# --- the generated-but-deliberately-unrouted ledger ---------------------------
+
+# `NOT_DRIVER_MANAGED` from scripts/regen-artifacts.mjs, read AT RUN TIME for the
+# same reason .gitattributes is read at run time: the one copy that cannot rot is
+# the one that does not exist. One line per TRACKED entry,
+# `<path or pattern><TAB><regeneration command>`.
+#
+# `untracked: true` rows are skipped — they are gitignored build output git never
+# merges, so they cannot appear in a conflict set and a pathspec naming them
+# could only mislabel a neighbour.
+#
+# The command is built by the module's own `ownerRunCommand`, never assembled
+# here: #13585 is what a second assembler costs, and the string this script
+# PRINTS has to be the command the `pre-commit` gate SPAWNS.
+#
+# Failure is the caller's to report, loudly — a silent empty list would put every
+# conflicted generated path back in the non-generated class, which is this
+# card's own defect with the evidence removed.
+read_not_driver_managed() {
+  node --input-type=module -e '
+const { pathToFileURL } = await import("node:url");
+const mod = await import(pathToFileURL(process.argv[1]).href);
+if (!Array.isArray(mod.NOT_DRIVER_MANAGED)) throw new Error("NOT_DRIVER_MANAGED is not an array");
+if (typeof mod.ownerRunCommand !== "function" || typeof mod.ownerOf !== "function") {
+  throw new Error("ownerRunCommand/ownerOf are not both exported");
+}
+for (const e of mod.NOT_DRIVER_MANAGED) {
+  if (e.untracked) continue;
+  process.stdout.write(e.path + "\t" + (e.gen ? mod.ownerRunCommand(mod.ownerOf(e), e.gen) : "") + "\n");
+}
+' "$1" 2>/dev/null
+}
+
+# The regeneration command recorded for a ledger row, or the empty string.
+# $1 = path or pattern, $2 = the rows.
+ndm_command_for() {
+  printf '%s\n' "$2" | awk -F'\t' -v want="$1" '$1 == want { print $2; exit }'
+}
+
+# Both generated-region marker vocabularies the tree writes, as awk `index()`
+# probes rather than a regex, so no spelling here needs escaping twice.
+#
+# ⛔ Neither token is this script's to rename: they belong to the generators that
+# emit them (`build-migration-registry.ts` writes the first, `build-skill-docs.ts`
+# the second), and `check-role-word.mjs` states the rule for a consumer that has
+# to spell one — the rename happens at the generator and arrives here.
+GENERATED_REGION_PROBE='
+  index($0, "</os-generated ") || index($0, "END GENERATED:") { hit = 1 }
+  index($0, "<os-generated ")  || index($0, "BEGIN GENERATED:") { hit = 1 }
+  END { exit hit ? 0 : 1 }
+'
+
+# Drop every generated REGION from stdin, keeping the marker lines themselves so
+# a moved or deleted marker still reads as a difference. What survives is the
+# hand-written remainder — the half no regeneration can restore.
+GENERATED_REGION_STRIP='
+  index($0, "</os-generated ") || index($0, "END GENERATED:") { inside = 0; print; next }
+  index($0, "<os-generated ")  || index($0, "BEGIN GENERATED:") { print; inside = 1; next }
+  inside != 1 { print }
+'
+
+# Report ONE class-3 conflict: which sub-shape it takes, the command that
+# resolves it when there is one, and — for the marked shape — whether taking a
+# side would silently drop the other side's hand-written text.
+# $1 = path, $2 = its recorded regeneration command (may be empty).
+report_ndm_conflict() {
+  rn_path="$1"
+  rn_cmd="$2"
+  rn_ours="$(mktemp "${TMPDIR:-/tmp}/os-regen-merge-ours.XXXXXX")"
+  rn_theirs="$(mktemp "${TMPDIR:-/tmp}/os-regen-merge-theirs.XXXXXX")"
+  rn_sides=both
+  git show ":2:$rn_path" >"$rn_ours" 2>/dev/null || rn_sides=partial
+  git show ":3:$rn_path" >"$rn_theirs" 2>/dev/null || rn_sides=partial
+
+  if cat "$rn_ours" "$rn_theirs" | awk "$GENERATED_REGION_PROBE"; then
+    echo "    ⚠ $rn_path — GENERATED IN MARKED REGIONS, deliberately NOT driver-managed." >&2
+    echo "      ⛔ Do NOT hand-merge the generated regions — resolve them by REGENERATION:" >&2
+    echo "      take either side to reach a committable state, commit the merge (step 3)," >&2
+    if [ -n "$rn_cmd" ]; then
+      echo "      then run its generator and commit that as its own commit:" >&2
+      echo "        $rn_cmd" >&2
+    else
+      echo "      then run its generator and commit that as its own commit (this entry" >&2
+      echo "      records no generator — read its \`why\` in scripts/regen-artifacts.mjs)." >&2
+    fi
+    if [ "$rn_sides" = both ]; then
+      rn_diff="$(diff <(awk "$GENERATED_REGION_STRIP" "$rn_ours") \
+                      <(awk "$GENERATED_REGION_STRIP" "$rn_theirs") | grep -c '^[<>]' || true)"
+      if [ "$rn_diff" -gt 0 ]; then
+        echo "      ⚠ THE TWO SIDES DIFFER OUTSIDE THE GENERATED REGIONS ($rn_diff line(s))." >&2
+        echo "        Taking a side DROPS the other side's hand-written text there —" >&2
+        echo "        silently, and with every gate green: a \`check:\` on this file proves" >&2
+        echo "        it equals its generated sources and is no witness for the prose." >&2
+        echo "        ⛔ Carry those lines over BEFORE you regenerate." >&2
+      else
+        echo "      ✓ the two sides are identical outside the generated regions, so taking" >&2
+        echo "        either side drops no hand-written text." >&2
+      fi
+    else
+      echo "      ⚠ only one side of this path is in the index, so the outside-the-regions" >&2
+      echo "        check was NOT made — ⛔ make it by hand before taking a side." >&2
+    fi
+  else
+    echo "    ⚠ $rn_path — generator-touched and deliberately NOT driver-managed." >&2
+    echo "      It carries no generated-region markers, so there is no half a" >&2
+    echo "      regeneration would restore: resolve it BY HAND (semantic merge, both" >&2
+    echo "      intents stack). ⛔ Do NOT regenerate it as part of this merge — the" >&2
+    echo "      ledger keeps the driver off it because a mid-merge recompute describes" >&2
+    echo "      the half-merged tree; its \`why\` in scripts/regen-artifacts.mjs is the" >&2
+    echo "      authority on what it may be regenerated from, and when." >&2
+  fi
+  rm -f "$rn_ours" "$rn_theirs"
 }
 
 # --- the sequence ------------------------------------------------------------
@@ -363,37 +562,114 @@ mode_run() {
 
     NL='
 '
+    TAB="$(printf '\t')"
     regen_set="$NL"
     for c in "${regen_conflicts[@]+"${regen_conflicts[@]}"}"; do regen_set="$regen_set$c$NL"; done
+
+    # Class 3: conflicted paths DECLARED in `NOT_DRIVER_MANAGED` — generated and
+    # deliberately unrouted (see the header). Read here rather than beside the
+    # .gitattributes list on purpose: the ledger is only ever a question about a
+    # conflict, so a clean run pays nothing for it and prints nothing new.
+    ndm_rows=''
+    ndm_read_ok=yes
+    if ! ndm_rows="$(read_not_driver_managed "$(git rev-parse --show-toplevel)/scripts/regen-artifacts.mjs")"; then
+      ndm_read_ok=no
+      ndm_rows=''
+    fi
+
+    # One `git diff` per ledger ROW rather than one over all of them: the row
+    # that matched is what carries the regeneration command, and a single
+    # all-patterns call cannot say which one did. Bounded by the ledger (tens of
+    # rows), on a path that is already printing a failure report — and ⛔ never
+    # with an empty pathspec, which `git diff --diff-filter=U --` reads as
+    # EVERYTHING, promoting every conflict into class 3. An empty ledger here
+    # runs no `git diff` at all.
+    ndm_conflicts=()
+    ndm_set="$NL"
+    ndm_cmd_rows="$NL"
+    ndm_row=''
+    while IFS= read -r ndm_row; do
+      if [[ -z "$ndm_row" ]]; then continue; fi
+      ndm_pattern="$(printf '%s' "$ndm_row" | cut -f1)"
+      ndm_cmd="$(printf '%s' "$ndm_row" | cut -f2)"
+      ndm_hit=''
+      while IFS= read -r ndm_hit; do
+        if [[ -z "$ndm_hit" ]]; then continue; fi
+        # Routed wins: a path in both lists is class 2, and `git-merge-regen.mjs`
+        # refuses that overlap in its own reconciliation anyway.
+        case "$regen_set" in
+          *"$NL$ndm_hit$NL"*) continue ;;
+        esac
+        case "$ndm_set" in
+          *"$NL$ndm_hit$NL"*) continue ;;
+        esac
+        ndm_conflicts+=("$ndm_hit")
+        ndm_set="$ndm_set$ndm_hit$NL"
+        ndm_cmd_rows="$ndm_cmd_rows$ndm_hit$TAB$ndm_cmd$NL"
+      done < <(git diff --name-only --diff-filter=U -- "$ndm_pattern")
+    done < <(printf '%s\n' "$ndm_rows")
+
     non_regen_conflicts=()
     for c in "${all_conflicts[@]+"${all_conflicts[@]}"}"; do
       case "$regen_set" in
-        *"$NL$c$NL"*) ;;
-        *) non_regen_conflicts+=("$c") ;;
+        *"$NL$c$NL"*) continue ;;
       esac
+      case "$ndm_set" in
+        *"$NL$c$NL"*) continue ;;
+      esac
+      non_regen_conflicts+=("$c")
     done
 
-    if [ "${#regen_conflicts[@]}" -eq 0 ]; then
-      echo "✗ merge stopped on conflicts in NON-generated files — resolve those by hand" >&2
-      echo "  (semantic merge, both intents stack), then rerun this script to redo the" >&2
-      echo "  generated-artifact half. ⛔ Do not resolve generated files textually." >&2
-    elif [ "${#non_regen_conflicts[@]}" -eq 0 ]; then
-      echo "✗ merge stopped on conflicts in GENERATED files the driver declined to defer" >&2
-      echo "  (MIXED — a generated half plus hand-written prose; see its notice above)." >&2
-      echo "  Hand-resolve the prose; the anchor numbers do not matter here — take" >&2
-      echo "  either side of them, then run the regeneration command the driver printed" >&2
-      echo "  above, then continue with step 4:" >&2
-      printf '    %s\n' "${regen_conflicts[@]}" >&2
+    if [ "$ndm_read_ok" = no ]; then
+      echo "⚠ could NOT read NOT_DRIVER_MANAGED from scripts/regen-artifacts.mjs, so" >&2
+      echo "  generatedness was not consulted for this report: a generated file that is" >&2
+      echo "  deliberately unrouted is named below as though it were hand-written." >&2
+      echo "  ⛔ Check every path named here against that ledger before resolving it." >&2
+    fi
+
+    if [ "${#ndm_conflicts[@]}" -eq 0 ]; then
+      if [ "${#regen_conflicts[@]}" -eq 0 ]; then
+        echo "✗ merge stopped on conflicts in NON-generated files — resolve those by hand" >&2
+        echo "  (semantic merge, both intents stack), then rerun this script to redo the" >&2
+        echo "  generated-artifact half. ⛔ Do not resolve generated files textually." >&2
+      elif [ "${#non_regen_conflicts[@]}" -eq 0 ]; then
+        echo "✗ merge stopped on conflicts in GENERATED files the driver declined to defer" >&2
+        echo "  (MIXED — a generated half plus hand-written prose; see its notice above)." >&2
+        echo "  Hand-resolve the prose; the anchor numbers do not matter here — take" >&2
+        echo "  either side of them, then run the regeneration command the driver printed" >&2
+        echo "  above, then continue with step 4:" >&2
+        printf '    %s\n' "${regen_conflicts[@]}" >&2
+      else
+        echo "✗ merge stopped on conflicts in BOTH non-generated and generated files:" >&2
+        echo "  non-generated (resolve by hand — semantic merge, both intents stack):" >&2
+        printf '    %s\n' "${non_regen_conflicts[@]}" >&2
+        echo "  generated, MIXED — the driver declined to defer these (see its notice" >&2
+        echo "  above). Hand-resolve the prose; the anchor numbers do not matter here —" >&2
+        echo "  take either side of them, then run the regeneration command the driver" >&2
+        echo "  printed above:" >&2
+        printf '    %s\n' "${regen_conflicts[@]}" >&2
+        echo "  Resolve both, then rerun this script to redo the generated-artifact half." >&2
+      fi
     else
-      echo "✗ merge stopped on conflicts in BOTH non-generated and generated files:" >&2
-      echo "  non-generated (resolve by hand — semantic merge, both intents stack):" >&2
-      printf '    %s\n' "${non_regen_conflicts[@]}" >&2
-      echo "  generated, MIXED — the driver declined to defer these (see its notice" >&2
-      echo "  above). Hand-resolve the prose; the anchor numbers do not matter here —" >&2
-      echo "  take either side of them, then run the regeneration command the driver" >&2
-      echo "  printed above:" >&2
-      printf '    %s\n' "${regen_conflicts[@]}" >&2
-      echo "  Resolve both, then rerun this script to redo the generated-artifact half." >&2
+      echo "✗ merge stopped on conflicts, and some are in files a generator writes which" >&2
+      echo "  are deliberately NOT driver-managed — ⛔ neither the non-generated rule nor" >&2
+      echo "  the MIXED one governs those, so each is named below with its own:" >&2
+      for c in "${ndm_conflicts[@]}"; do
+        report_ndm_conflict "$c" "$(ndm_command_for "$c" "$ndm_cmd_rows")"
+      done
+      if [ "${#non_regen_conflicts[@]}" -gt 0 ]; then
+        echo "  non-generated (resolve by hand — semantic merge, both intents stack):" >&2
+        printf '    %s\n' "${non_regen_conflicts[@]}" >&2
+      fi
+      if [ "${#regen_conflicts[@]}" -gt 0 ]; then
+        echo "  generated, MIXED — the driver declined to defer these (see its notice" >&2
+        echo "  above). Hand-resolve the prose; the anchor numbers do not matter here —" >&2
+        echo "  take either side of them, then run the regeneration command the driver" >&2
+        echo "  printed above:" >&2
+        printf '    %s\n' "${regen_conflicts[@]}" >&2
+      fi
+      echo "  Resolve every class above by ITS OWN rule, then rerun this script to redo" >&2
+      echo "  the generated-artifact half." >&2
     fi
     exit 1
   fi
@@ -521,6 +797,7 @@ st_fixture() {
 
   mkdir -p gen src
   printf 'gen/**   merge=os-regen\n' > .gitattributes
+  st_write_ndm_ledger ''
   printf 'ManifestConfig\nPreviewModeConfig\nRuntimeConfig\n' > gen/baseline.txt
   printf 'both v0\n' > gen/both.txt
   printf 'mainonly v0\n' > gen/mainonly.txt
@@ -610,6 +887,7 @@ DRIVER
 
   mkdir -p gen src
   printf 'gen/**   merge=os-regen\n' > .gitattributes
+  st_write_ndm_ledger ''
   printf 'hand-written prose: original\n' > gen/mixed.txt
   printf 'source v1\n' > src/app.txt
   if [ "$both" = both ]; then
@@ -670,6 +948,117 @@ data/*.json               merge=os-regen
 ATTRS
   git add -A
   git commit -qm 'route three paths, with prose that quotes the literal'
+}
+
+# Write a fixture `scripts/regen-artifacts.mjs` exporting the three names the
+# ledger reader requires. The fixtures carry one for the same reason they carry
+# their own `.gitattributes` and their own driver: the reading MECHANISM is what
+# is under test here, and pinning it against the real ledger would make every
+# case a hostage to a disposition somebody legitimately changes. The real
+# ledger's own shape is pinned separately, in case 9d.
+#
+# $1 is the entry list, as JS array elements.
+st_write_ndm_ledger() {
+  mkdir -p scripts
+  {
+    printf '// fixture ledger — the shape scripts/regen-artifacts.mjs exports.\n'
+    printf 'export const NOT_DRIVER_MANAGED = Object.freeze([\n'
+    printf '%s\n' "$1"
+    printf ']);\n'
+    printf 'export function ownerOf(entry) { return entry.owner ?? "@fixture/owner"; }\n'
+    printf 'export function ownerRunCommand(owner, script) { return "pnpm " + script; }\n'
+  } > scripts/regen-artifacts.mjs
+}
+
+# Build a fixture in $1 whose conflicts are all UNROUTED, and whose ledger
+# declares three of the four — the shape this script was blind to until #18047.
+# One fixture carries every reading class 3 has to make:
+#
+#   generated/marked.txt        declared + marker pair, and the two sides differ
+#                               OUTSIDE the regions — the PR #17835 shape, where
+#                               taking a side drops hand-written text silently
+#   generated/regions-only.txt  declared + marker pair, differing only INSIDE
+#                               the regions — the firing control for the finding
+#                               above, which would otherwise be unfalsifiable
+#   ledgers/whole.json          declared, NO markers — a ratchet-shaped file,
+#                               where "resolve by regeneration" is the WRONG
+#                               instruction and the ledger says so
+#   build/ignored.json          declared `untracked`, yet tracked here — the
+#                               reader drops those rows, so this must NOT be
+#                               read as class 3
+#   src/plain.txt               ⛔ NOT declared and not routed — today's class 1,
+#                               and the discriminating half of the reading: the
+#                               card's own dark-control note says an unlisted
+#                               path reads exactly like a non-generated one, so
+#                               a fixture that only proved "listed ⇒ class 3"
+#                               would pass with the membership test deleted.
+st_fixture_ndm_conflict() {
+  fx="$1"
+  rm -rf "$fx"
+  mkdir -p "$fx"
+  git init -q --bare -b main "$fx/origin.git"
+  git clone -q "$fx/origin.git" "$fx/work" 2>/dev/null
+  cd "$fx/work"
+  git config user.email selftest@example.invalid
+  git config user.name os-regen-merge-selftest
+  git config commit.gpgsign false
+
+  mkdir -p gen generated ledgers build src
+  printf 'gen/**   merge=os-regen\n' > .gitattributes
+  printf 'untouched\n' > gen/untouched.txt
+  st_write_ndm_ledger "  { path: 'generated/marked.txt', gen: 'gen:fixture-marked', why: 'fixture' },
+  { path: 'generated/regions-only.txt', gen: 'gen:fixture-regions', why: 'fixture' },
+  { path: 'ledgers/whole.json', gen: 'gen:fixture-whole', why: 'fixture' },
+  { path: 'build/ignored.json', gen: 'gen:fixture-ignored', untracked: true, why: 'fixture' },"
+  st_marked_file generated/marked.txt table:1 original row-a
+  st_marked_file generated/regions-only.txt table:2 stable row-x
+  printf '{ "entries": 1 }\n' > ledgers/whole.json
+  printf '{ "ignored": 1 }\n' > build/ignored.json
+  printf 'plain v0\n' > src/plain.txt
+  git add -A
+  git commit -qm seed
+  git push -q origin main
+
+  git checkout -q -b feature
+  st_marked_file generated/marked.txt table:1 BRANCH row-a-BRANCH
+  st_marked_file generated/regions-only.txt table:2 stable row-x-BRANCH
+  printf '{ "entries": 2 }\n' > ledgers/whole.json
+  printf '{ "ignored": 2 }\n' > build/ignored.json
+  printf 'plain BRANCH\n' > src/plain.txt
+  git add -A
+  git commit -qm 'feature: edit every declared path plus one undeclared one'
+
+  git worktree add -q "$fx/mainwt" main
+  (
+    cd "$fx/mainwt"
+    git config user.email selftest@example.invalid
+    git config user.name os-regen-merge-selftest
+    git config commit.gpgsign false
+    st_marked_file generated/marked.txt table:1 MAIN row-a-MAIN
+    st_marked_file generated/regions-only.txt table:2 stable row-x-MAIN
+    printf '{ "entries": 3 }\n' > ledgers/whole.json
+    printf '{ "ignored": 3 }\n' > build/ignored.json
+    printf 'plain MAIN\n' > src/plain.txt
+    git add -A
+    git commit -qm 'main: edit the same paths differently'
+    git push -q origin main
+  )
+  cd "$fx/work"
+  git worktree remove "$fx/mainwt"
+  git fetch -q origin main
+}
+
+# A file generated only BETWEEN a marker pair, written the way the tree writes
+# one. $1 path, $2 region id, $3 the word the hand-written lines carry, $4 the
+# row inside the region.
+st_marked_file() {
+  {
+    printf 'hand-written intro: %s\n' "$3"
+    printf '// <os-generated %s>\n' "$2"
+    printf '%s\n' "$4"
+    printf '// </os-generated %s>\n' "$2"
+    printf 'hand-written outro: %s\n' "$3"
+  } > "$1"
 }
 
 mode_self_test() {
@@ -914,6 +1303,120 @@ mode_self_test() {
     "$(printf '%s' "$mut_out" | grep -c '^    #$' || true)" 1
   st_case 'mutated: and the count is one too high' \
     "$(printf '%s' "$mut_out" | sed -n 's/^→ os-regen paths (from .gitattributes, \([0-9]*\) patterns):$/\1/p')" 4
+  cd "$here"
+
+  # --- 9. CLASS 3: generated, deliberately NOT routed (#18047). The trap this
+  #        closes is the exact inverse of case 6's: these paths are not routed,
+  #        so the old set difference labelled them "NON-generated" and sent them
+  #        to a hand merge — while the same message's third line forbids
+  #        resolving a generated file textually. Neither sentence could be
+  #        obeyed, and `.gitattributes` says a registration touches such a file
+  #        by construction.
+  st_fixture_ndm_conflict "$tmp/j"
+  out="$(bash "$SELF" 2>&1)" && rc=0 || rc=$?
+  st_case 'a declared-but-unrouted conflict fails the run' "$rc" 1
+  # THE ABSENCE ASSERTIONS (#18047): neither class-1 sentence may be printed
+  # over a set that now contains generated files.
+  st_case 'and does NOT call the whole set a non-generated-file conflict' \
+    "$(printf '%s' "$out" | grep -c 'conflicts in NON-generated files' || true)" 0
+  st_case 'and does NOT forbid textual resolution across the whole set' \
+    "$(printf '%s' "$out" | grep -c 'Do not resolve generated files textually' || true)" 0
+  # The marked shape: resolve the regions by regeneration, and the command is
+  # the ledger's own, built by `ownerRunCommand` rather than assembled here.
+  st_case 'the marked file is named as generated in marked regions' \
+    "$(printf '%s' "$out" | grep -c '⚠ generated/marked.txt — GENERATED IN MARKED REGIONS' || true)" 1
+  st_case 'and both marked files are sent to REGENERATION, not to a hand merge' \
+    "$(printf '%s' "$out" | grep -c 'Do NOT hand-merge the generated regions' || true)" 2
+  st_case "and carries the ledger's own regeneration command" \
+    "$(printf '%s' "$out" | grep -c 'pnpm gen:fixture-marked' || true)" 1
+  # THE ADDENDUM'S CAVEAT, answered rather than delegated: both sides edited
+  # prose outside the regions, so taking either one drops the other's text.
+  st_case 'and REPORTS that the two sides differ outside the generated regions' \
+    "$(printf '%s' "$out" | grep -c 'THE TWO SIDES DIFFER OUTSIDE THE GENERATED REGIONS' || true)" 1
+  st_case 'and counts the hand-written lines at stake' \
+    "$(printf '%s' "$out" | sed -n 's/.*DIFFER OUTSIDE THE GENERATED REGIONS (\([0-9]*\) line(s)).*/\1/p')" 4
+  # THE FIRING CONTROL for that finding — without it the report above could be
+  # a constant. Same marker pair, both sides differing only INSIDE the regions.
+  st_case 'and clears the file whose sides differ only inside the regions' \
+    "$(printf '%s' "$out" | grep -c 'identical outside the generated regions' || true)" 1
+  # The unmarked shape: a ratchet-shaped declared file. ⛔ Regeneration is the
+  # WRONG instruction for it, and its ledger entry is what says so.
+  st_case 'the declared file with no markers is NOT sent to regeneration' \
+    "$(printf '%s' "$out" | grep -c '⚠ ledgers/whole.json — generator-touched' || true)" 1
+  st_case 'and is told NOT to regenerate as part of this merge' \
+    "$(printf '%s' "$out" | grep -c 'Do NOT regenerate it as part of this merge' || true)" 1
+  # THE DISCRIMINATING HALF. An UNLISTED path must still read as class 1 — the
+  # card's dark-control note: `unspecified` is the default, so "not listed"
+  # and "not generated" look identical from the routing side alone.
+  st_case 'an unlisted, unrouted path is still reported as non-generated' \
+    "$(printf '%s' "$out" | grep -cE '^    src/plain[.]txt$' || true)" 1
+  st_case 'and is NOT given any class-3 reading' \
+    "$(printf '%s' "$out" | grep -c '⚠ src/plain.txt' || true)" 0
+  # An `untracked` ledger row is dropped by the reader, so a tracked file at
+  # that path is class 1 — and `git-merge-regen.mjs --self-test` is what reds
+  # the day such a path really becomes tracked.
+  st_case 'a row declared untracked buys no class-3 reading' \
+    "$(printf '%s' "$out" | grep -c '⚠ build/ignored.json' || true)" 0
+  st_case 'and that path is reported as non-generated instead' \
+    "$(printf '%s' "$out" | grep -cE '^    build/ignored[.]json$' || true)" 1
+  cd "$here"
+
+  # --- 9b. THE DISCRIMINATING MUTATION for case 9. Empty the ledger read and
+  #         watch the whole set collapse back into class 1 — which is the
+  #         defect #18047 reported, reproduced on demand. Same perl/\Q..\E
+  #         literal replacement 6b and 8b use, keyed off the reader's skip line.
+  mutated_ndm="$tmp/mutated-ndm-os-regen-merge.sh"
+  MUT_ANCHOR='  if (e.untracked) continue;' \
+  MUT_INSERT='  if (true) continue;' \
+    perl -0777 -pe 's/\Q$ENV{MUT_ANCHOR}\E/$ENV{MUT_INSERT}/' "$SELF" > "$mutated_ndm"
+  st_case 'the ledger mutation actually changed the script text' \
+    "$(diff -q "$SELF" "$mutated_ndm" >/dev/null 2>&1; echo $?)" 1
+  st_case 'and the mutated script still parses' \
+    "$(bash -n "$mutated_ndm" >/dev/null 2>&1; echo $?)" 0
+  st_fixture_ndm_conflict "$tmp/j-mutated"
+  mut_out="$(bash "$mutated_ndm" 2>&1)" && mut_rc=0 || mut_rc=$?
+  st_case 'mutated: the class-3 reading is gone (proves case 9 bites)' \
+    "$(printf '%s' "$mut_out" | grep -c 'GENERATED IN MARKED REGIONS' || true)" 0
+  st_case 'mutated: and the generated file is called NON-generated again' \
+    "$(printf '%s' "$mut_out" | grep -c 'conflicts in NON-generated files' || true)" 1
+  st_case 'mutated: with the instruction it cannot obey, back alongside it' \
+    "$(printf '%s' "$mut_out" | grep -c 'Do not resolve generated files textually' || true)" 1
+  cd "$here"
+
+  # --- 9c. THE REAL LEDGER, pinned against the module itself rather than
+  #         against the fixture that models it — case 8a's discipline, one
+  #         surface over. The fixtures prove the reading mechanism; this proves
+  #         the surface it reads still has the shape and still declares the path
+  #         the card is about. If a later change routes that file or drops its
+  #         entry, this reddens and the classification gets revisited instead of
+  #         silently reverting to the old label.
+  ndm_real="$(read_not_driver_managed "$(dirname "$SELF")/../regen-artifacts.mjs")" || ndm_real=''
+  st_case 'the real ledger is readable and non-empty' \
+    "$([ "$(printf '%s' "$ndm_real" | grep -c . || true)" -gt 0 ] && echo yes || echo no)" yes
+  st_case 'and still declares the migrations registry (the card s path)' \
+    "$(printf '%s\n' "$ndm_real" | awk -F'\t' '$1 == "packages/spec/src/migrations/registry.ts"' | grep -c . || true)" 1
+  st_case 'and records the generator that resolves its regions' \
+    "$(printf '%s\n' "$ndm_real" | awk -F'\t' '$1 == "packages/spec/src/migrations/registry.ts" { print $2 }' \
+       | grep -c 'gen:migration-registry' || true)" 1
+  st_case 'control: a fabricated path is not in it' \
+    "$(printf '%s\n' "$ndm_real" | awk -F'\t' '$1 == "packages/spec/no-such-ledger-entry.json"' | grep -c . || true)" 0
+  st_case 'control: that file really is unrouted, so it can only reach class 3' \
+    "$(cd "$(dirname "$SELF")/../.." && git check-attr merge -- packages/spec/src/migrations/registry.ts)" \
+    'packages/spec/src/migrations/registry.ts: merge: unspecified'
+
+  # --- 9d. AN UNREADABLE LEDGER IS LOUD, never a silent class-1 sweep. This is
+  #         the failure mode that would restore the defect with the evidence
+  #         removed: no ledger, no generatedness, every conflict labelled
+  #         non-generated again — so the run says so in as many words.
+  st_fixture_ndm_conflict "$tmp/k"
+  git rm -q scripts/regen-artifacts.mjs
+  git commit -qm 'drop the ledger the reader needs'
+  out="$(bash "$SELF" 2>&1)" && rc=0 || rc=$?
+  st_case 'an unreadable ledger still fails the run' "$rc" 1
+  st_case 'and says the ledger could not be read' \
+    "$(printf '%s' "$out" | grep -c 'could NOT read NOT_DRIVER_MANAGED' || true)" 1
+  st_case 'and makes no class-3 claim it cannot support' \
+    "$(printf '%s' "$out" | grep -c 'GENERATED IN MARKED REGIONS' || true)" 0
   cd "$here"
 
   if [ "$st_fail" -ne 0 ]; then
