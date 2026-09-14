@@ -8,8 +8,11 @@ fix(spec)!: `timeDimensions[].dateRange`'s array arm is exactly two string bound
 <!-- adr-0087: registered analytics-date-range-array-two-bounds-required -->
 
 **BREAKING** accept-set narrowing at `timeDimensions[].dateRange` — shipped as
-`minor` under this repo's launch-window convention for breaking changes, the same
-grade every other accept-set narrowing on this schema has taken. The maintainer
+`minor` under this repo's launch-window convention for breaking changes
+(`scripts/check-changeset-no-major.mjs`), which is the grade that convention
+prescribes rather than the grade a precedent set: the string-arm closing on this
+same schema (#16322) declared `"@objectstack/spec": patch`, so `minor` here RAISES
+the level above the `fix` floor rather than repeating what came before. The maintainer
 ruling calls it a "major changeset"; under the launch window that phrase maps to
 the protocol MAJOR the migration registers against (18), not to the changeset's
 bump level, which `scripts/check-changeset-no-major.mjs` reserves. The semantic
