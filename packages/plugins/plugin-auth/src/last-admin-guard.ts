@@ -14,7 +14,7 @@
  *     with an OPTIONAL host callback, so since #14360 the ban is landed by
  *     `plugin-auth`'s own `identity.reconcileUser` (`auth-manager.ts` ->
  *     `user-ban-write.ts`) — the same column and the same hook, a different
- *     author. SCIM still forces the admin plugin on (ADR-0071), which is what
+ *     author. SCIM still forces the admin plugin on (ADR-0134), which is what
  *     supplies the column and the `BANNED_USER` sign-in refusal.
  *  2. **deleting the `sys_user` row** (#5941) — how every *remove* lands:
  *     better-auth's `/admin/remove-user` and `/delete-user`, an import, a

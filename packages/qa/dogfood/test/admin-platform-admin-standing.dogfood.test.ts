@@ -300,7 +300,7 @@ describe('#9482: what an ObjectStack platform admin gets from every /admin/ rout
     // `/admin/` 501s unless better-auth's admin plugin is on, and `bootStack`
     // exposes no auth-plugin override. `OS_SCIM_ENABLED` is the one env knob
     // that reaches it — `buildPluginList` resolves `admin: pluginConfig.admin ??
-    // scimEffective` (ADR-0071, SCIM forces admin on). Read when the auth
+    // scimEffective` (ADR-0134, SCIM forces admin on). Read when the auth
     // manager is constructed, so it must precede boot.
     priorScim = process.env.OS_SCIM_ENABLED;
     process.env.OS_SCIM_ENABLED = 'true';

@@ -30,7 +30,7 @@ export const SysScimConnectionBinding = ObjectSchema.create({
   // ADR-0010 §3.7 — managed by better-auth; tenants may not edit schema.
   protection: {
     lock: 'full',
-    reason: 'Identity table managed by better-auth (@better-auth/scim) — see ADR-0071.',
+    reason: 'Identity table managed by better-auth (@better-auth/scim) — see ADR-0134.',
     docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   description: 'Lifecycle state for a SCIM provisioning connection, including its decommission state machine',

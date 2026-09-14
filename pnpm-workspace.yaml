@@ -91,7 +91,7 @@ onlyBuiltDependencies:
 #     `scimProvider` model, no generate-token endpoint, seven replacement
 #     models: scimUser, scimGroup, scimGroupMember, scimSubject,
 #     scimConnectionBinding, scimIdentityTombstone, scimProjectionGrant),
-#     because moving it was the ADR-0071 feature migration tracked by #3653 —
+#     because moving it was the ADR-0134 feature migration tracked by #3653 —
 #     NOT the version bump #3002 did for the rest of the family. That
 #     migration has LANDED (#3653, epic #11632): the seven stable models are
 #     provisioned as platform objects, connections are runtime data resolved

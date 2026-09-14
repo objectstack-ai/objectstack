@@ -109,7 +109,7 @@ export const SysUser = ObjectSchema.create({
     // `requiresFeature: 'admin'` (#2874) — when the plugin is off the UI
     // hides them instead of rendering buttons that 404. SCIM deployments
     // keep them: SCIM forces the admin plugin (and `features.admin`) on
-    // (ADR-0071). UI surfaces them under the row menu AND the
+    // (ADR-0134). UI surfaces them under the row menu AND the
     // record-detail header (`record_header`, overflowing into the ⋯
     // "More" menu) so platform admins can manage an account from either
     // the Users list or an open user record — without dropping to SQL or

@@ -55,7 +55,7 @@ export const AUTH_MODEL_TO_PROTOCOL: Record<string, string> = {
   // op via resolveProtocolName. For scim that is the only available route; for
   // sso it is now a CHOICE (see #8224 — moving it onto the plugin option is an
   // open architecture question, deliberately not decided here). Off by default
-  // (OS_SSO_ENABLED / OS_SCIM_ENABLED). See ADR-0024 / ADR-0071.
+  // (OS_SSO_ENABLED / OS_SCIM_ENABLED). See ADR-0024 / ADR-0134.
   ssoProvider: 'sys_sso_provider',
   // (rc.1's one scim model, `scimProvider` → `sys_scim_provider`, retired
   // under #11757: stable 1.7.x no longer derives that model.)

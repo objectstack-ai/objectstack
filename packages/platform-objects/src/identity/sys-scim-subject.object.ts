@@ -26,7 +26,7 @@ export const SysScimSubject = ObjectSchema.create({
   // ADR-0010 §3.7 — managed by better-auth; tenants may not edit schema.
   protection: {
     lock: 'full',
-    reason: 'Identity table managed by better-auth (@better-auth/scim) — see ADR-0071.',
+    reason: 'Identity table managed by better-auth (@better-auth/scim) — see ADR-0134.',
     docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   description: 'Per-user SCIM provisioning link — one row per user any SCIM connection provisions',

@@ -4,7 +4,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 /**
  * sys_scim_connection_credential — ObjectStack-owned bearer credentials for
- * SCIM provisioning connections (#3653, ADR-0071).
+ * SCIM provisioning connections (#3653, ADR-0134).
  *
  * Stable `@better-auth/scim` stores NO credential of its own: the rc.1
  * `/scim/generate-token` endpoint and `scimProvider.scim_token` column are
@@ -47,7 +47,7 @@ export const SysScimConnectionCredential = ObjectSchema.create({
   // ADR-0010 §3.7 — platform-managed identity table; tenants may not edit schema.
   protection: {
     lock: 'full',
-    reason: 'ObjectStack-owned SCIM credential store (#3653) — see ADR-0071.',
+    reason: 'ObjectStack-owned SCIM credential store (#3653) — see ADR-0134.',
     docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   description: 'Bearer credentials (one-way digests) that authenticate SCIM provisioning connections',

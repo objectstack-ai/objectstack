@@ -542,7 +542,7 @@ describe('[#5892] the SCIM / admin-ban path: refused as a 403, not an opaque 500
     // declared is dropped before the engine ever sees it — the write would
     // "succeed" and change nothing. That is also the production wiring: SCIM
     // forces the admin plugin on precisely because `active: false` lands as its
-    // ban (ADR-0071), and `buildAdminPluginSchema()` is the same mapping
+    // ban (ADR-0134), and `buildAdminPluginSchema()` is the same mapping
     // `AuthManager` passes.
     adapter = (createObjectQLAdapterFactory(engine) as unknown as (o: unknown) => typeof adapter)({
       plugins: [admin({ schema: buildAdminPluginSchema() })],

@@ -26,7 +26,7 @@ export const SysScimProjectionGrant = ObjectSchema.create({
   // ADR-0010 §3.7 — managed by better-auth; tenants may not edit schema.
   protection: {
     lock: 'full',
-    reason: 'Identity table managed by better-auth (@better-auth/scim) — see ADR-0071.',
+    reason: 'Identity table managed by better-auth (@better-auth/scim) — see ADR-0134.',
     docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   description: 'Role/entitlement grants projected onto platform users by SCIM provisioning',

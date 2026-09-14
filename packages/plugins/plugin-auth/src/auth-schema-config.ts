@@ -969,7 +969,7 @@ export const buildOidcProviderPluginSchema = buildOauthProviderPluginSchema;
 // it could drift from the live one with every gate green, and the next reader
 // could not tell which was authoritative (ADR-0049 enforce-or-remove). Do not
 // re-add one unless the plugin grows a `schema` option AND it is passed there.
-// See ADR-0071.
+// See ADR-0134.
 
 // ---------------------------------------------------------------------------
 // Helper: build device-authorization plugin schema option
