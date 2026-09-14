@@ -274,17 +274,26 @@ node "${FRAMEWORK_ROOT}/scripts/assert-console-spec-injection.mjs" \
 BYTES="$(du -sk "$TARGET" 2>/dev/null | awk '{print $1}')"
 echo "✓ @objectstack/console dist ready (${BYTES} KB) from objectui@${PINNED_SHA:0:12}"
 
-# ADR-0080/0081: the public-tier SDUI manifest and the spec↔registry react-block
-# declaration-parity ratchet are intentionally NOT generated here — they require a
-# real browser (Playwright) to enumerate the console registry, and the console
-# build must not drag in a browser dependency. Regenerate them on demand instead:
-#   pnpm sdui:manifest        (see scripts/gen-sdui-manifest.sh)
+# ADR-0080/0081: neither SDUI manifest is generated here, and the spec↔registry
+# react-block declaration-parity ratchet is not run here either. Two different files
+# wear that name, and the difference is what the reminder below exists to carry:
+#
+#   sdui.manifest.json (repo root) + scripts/sdui-manifest.record.json — TRACKED,
+#     written only by `node scripts/gen-sdui-manifest-node.mjs`, which installs the
+#     published @object-ui packages (no browser). `scripts/check-sdui-manifest.mjs`
+#     in the required lint job reds once the pin moves and they have not followed,
+#     and ADR-0082 D4's ratchet reads the tracked manifest on every PR (#12924).
+#   packages/console/dist/sdui.manifest.json — GITIGNORED, written by
+#     `pnpm sdui:manifest` (scripts/gen-sdui-manifest.sh), which needs a real browser
+#     to enumerate the console registry. Nothing gates it; the console build must not
+#     drag in a browser dependency, so it stays on demand (#5960).
 #
 # The reminder names the TRIGGER, not just the command (#5960): `pnpm objectui:refresh`
 # runs bump-objectui.sh and then this script, so this is the last output an operator
-# sees while moving the pin — and the pin bump is the ratchet's only trigger, by
-# decision. bump-objectui.sh prints the same step; this repeats it because that one
-# has scrolled past a whole console build by now.
+# sees while moving the pin. bump-objectui.sh prints the same step; this repeats it
+# because that one has scrolled past a whole console build by now.
 echo "ℹ SDUI manifest + declaration-parity ratchet are decoupled from the console build."
-echo "  Run 'pnpm sdui:manifest' whenever you move the objectui pin — that is the"
-echo "  ratchet's only trigger, on demand by decision (#5960). Requires Playwright."
+echo "  Moved the objectui pin? Regenerate the TRACKED manifest — the required lint gate:"
+echo "      node scripts/gen-sdui-manifest-node.mjs --objectui-version {the version the new pin ships}"
+echo "  It writes sdui.manifest.json + scripts/sdui-manifest.record.json. 'pnpm sdui:manifest'"
+echo "  writes neither: it is the browser dump to the gitignored packages/console/dist/."
