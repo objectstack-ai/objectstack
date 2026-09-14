@@ -265,6 +265,27 @@
  *     DOOR TYPING half — see `checkDoorTyping` below, which is structural
  *     rather than vocabulary and is why this gate's name now undersells it: it
  *     guards both HTTP doors, not only the dispatcher.
+ *   - [#15723] A code can reach the wire with NO `code` token near it at all.
+ *     `APIError.from(status, record)` copies `record.code` onto the body, so
+ *     the ARGUMENT is the stamp — and when the record is a member expression on
+ *     an imported code table (`BASE_ERROR_CODES.X`, better-auth's own
+ *     documented idiom) the member NAME is the code. Every `code`-anchored
+ *     pattern in BOTH gates is structurally blind there: no quote, no `code:`,
+ *     no `.code =`. So the position produced no site AND no unresolved, which
+ *     is the one way the "REPORTED as unresolved, never dropped" bound cannot
+ *     notice itself failing — a fourth instance after #9223's, #13233's and
+ *     #13790's, and this one was measured rather than reasoned: with the live
+ *     member's ledger entry deleted from disk, this gate exited 0.
+ *     `apierrorarg` closes it, per emitted member and NOT by importing the
+ *     vendor's table — registering a vendor's whole vocabulary would make this
+ *     repo's accept set follow a table it does not own. What it costs and what
+ *     it found is `APIERROR_ARGUMENT_POSITION_CENSUS`.
+ *     ⚠️ Still bounded, and the bound is stated so nobody reads the shape as
+ *     covering the vendor's own lanes: a code the VENDOR emits from inside its
+ *     own routes (the `invite_only` lane the card measured) is not written in
+ *     this repo at all, so no source scan reaches it. Closing that needs a
+ *     declared, audited list of vendor members — a separate decision about the
+ *     accept set, deliberately not taken here.
  */
 
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
@@ -322,6 +343,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '[#13790] The INLINE literal EXPRESSION at an object-literal `code:`.': 40,
   '[#14742] THE REGEX LITERAL, across all FOUR shared textual primitives.': 39,
   "[#16649] Every published package's src/ is a ledger member, never classified away.": 25,
+  '[#15723] THE APIError ARGUMENT POSITION: the record is the stamp.': 44,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -691,6 +713,73 @@ export const SHAPES = [
   // for a kebab one, nobody's by declaration), so refusing it in the regex
   // costs this shape nothing and keeps the published population honest.
   { name: 'objlitexpr', re: /\bcode:(?!\s*'[^']*'\s*[,;}\n])\s*/g, resolve: 'objlitexpr', lowercase: 'here' },
+  // [#15723] The ARGUMENT POSITION of `APIError.from(status, record)` and
+  // `new APIError(status, record)` — the FIFTH stamp position, and the first
+  // one with no `code` token anywhere near the value.
+  //
+  // `APIError.from` copies `record.code` onto the body it constructs, so the
+  // record IS the stamp. When that record is a MEMBER EXPRESSION on a binding
+  // this file imports — `BASE_ERROR_CODES.USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL`,
+  // better-auth's own documented idiom, live in `auth-manager.ts` — the member
+  // NAME is the code: a vendor code table built by `defineErrorCodes` maps each
+  // KEY to `{ code: <that key>, message }`, and the repo's own restated records
+  // (`admin-impersonate-endpoint.ts`'s `USER_NOT_FOUND`) carry the same shape.
+  //
+  // No shape in either gate reached here. `objlit` / `objlitconst` /
+  // `objlitexpr` need a `code:` anchor and there is none; `assign*` need a
+  // `.code =`; `check:error-code-casing` needs a QUOTED literal beside the
+  // token `code` and the argument carries neither quote nor token. So the
+  // position produced no site AND no unresolved — the silence this gate's
+  // "REPORTED as unresolved, never dropped" bound cannot notice, in a fourth
+  // position after #9223's, #13233's and #13790's. Controlled measurement, not
+  // inference: with the one live member's ledger entry deleted from disk, this
+  // gate still exited 0.
+  //
+  // The regex is a CANDIDATE generator, not the shape. Four guards in
+  // `deriveSites` decide, and what each costs on the real tree is a row in
+  // APIERROR_ARGUMENT_POSITION_CENSUS:
+  //   ① argument ONE, never argument zero — argument zero is the HTTP status
+  //      NAME (`'UNPROCESSABLE_ENTITY'`), better-call's vocabulary and not an
+  //      ADR-0112 code. Reading it would invent a finding at every one of the
+  //      30 candidate calls on this tree.
+  //   ② a MEMBER EXPRESSION, nothing else. An object literal at this position
+  //      carries its own `code:` and is `objlit` / `objlitconst`'s (24 of the
+  //      30); a bare identifier names a local record whose own object literal
+  //      those shapes already read (5 of the 30). Annexing either would derive
+  //      one site twice under two names.
+  //   ③ the OBJECT must be a binding this file IMPORTS (`importedBindings`):
+  //      static, `await import()` destructuring, or the `Promise.all([import…])`
+  //      form this repo's own plugin-auth uses. This is the guard the ruling
+  //      names, and it is what makes "the member name is the code" an inference
+  //      about a CODE TABLE rather than about any dotted expression.
+  //   ④ the MEMBER must be spelled in ADR-0112 D1's value space
+  //      (`^[A-Z][A-Z0-9_]*$`). A table whose keys are not codes cannot have a
+  //      key read as one.
+  //
+  // ⭐ Guards ③ and ④ fail LOUD, not silent: a member expression this shape
+  // cannot turn into a code goes to `unresolved` (reason `vendor-member`), so
+  // an import spelling `importedBindings` does not know REDS this gate instead
+  // of going quiet. That is the opposite of every other shape's failure
+  // direction and it is deliberate — the price a published recogniser normally
+  // pays is silence, and at THIS position silence is the entire defect.
+  //
+  // ⛔ Named separately rather than folded into an existing shape, for the
+  // reason `objlithelper` and `objlitexpr` both record: SHAPES is a PUBLISHED
+  // list whose price is that an unrecognised spelling reports nothing, so a
+  // recogniser hiding under an existing name cannot be counted, pinned or
+  // ratcheted apart from the one it borrows.
+  //
+  // `lowercase: 'here'` for the reason every indirect shape carries it: there
+  // is no quoted literal beside a `code` token for `check:error-code-casing` to
+  // match, so delegating would be a hole rather than a hand-off. Guard ④ means
+  // this shape never hands `keep` a lower-case value at all — it reports one as
+  // unresolved instead.
+  {
+    name: 'apierrorarg',
+    re: /\b(?:new\s+APIError|APIError\s*\.\s*from)\s*\(/g,
+    resolve: 'apierrorarg',
+    lowercase: 'here',
+  },
 ];
 
 /**
@@ -1515,6 +1604,77 @@ export const INLINE_LITERAL_EXPRESSION_CENSUS = Object.freeze({
    * accepts it.
    */
   falsePositionsUnderTheLooseAnchor: 1,
+});
+
+/**
+ * ## [#15723] What the `apierrorarg` widening costs and what it found
+ *
+ * Measured through this gate's OWN primitives (`SHAPES`, `sliceBalanced`,
+ * `splitTopLevel`, `importedBindings`, `walkSources`) over the scanned
+ * population, so the numbers are the shape's, not a paraphrase of it.
+ *
+ * ⭐ Read `newSites: 0` with `siteWhenDeregistered: 1` beside it, or it reads as
+ * "nothing here". The one live member expression on this tree —
+ * `BASE_ERROR_CODES.USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL` in `auth-manager.ts`
+ * — IS registered, by #15587, which is why the widening derives no site today.
+ * What was missing was never the registration; it was anything that would have
+ * REQUIRED it. `siteWhenDeregistered` is the controlled measurement of exactly
+ * that: delete the ledger entry from disk and this shape derives the site, so
+ * the gate that exited 0 on the parent commit now reds. Both directions are
+ * pinned by `--self-test`.
+ *
+ * ⚠️ A reading is a count plus the tree it was taken against — see `measuredOn`.
+ */
+export const APIERROR_ARGUMENT_POSITION_CENSUS = Object.freeze({
+  measuredOn: 'objectstack-ai/objectstack @ 2d3d1c969',
+  anchor: 'new APIError( … ) and APIError.from( … )',
+  /** Calls the anchor reaches in the scanned population, and the files holding them. */
+  candidateCalls: 30,
+  files: 5,
+  /**
+   * What sits in ARGUMENT ONE at each of those calls. `objectLiteral` and
+   * `bareIdentifier` are guard ②'s cost — both are already read by `objlit` /
+   * `objlitconst`, at the object literal itself in the first case and at the
+   * local record's declaration in the second, so annexing them here would
+   * derive one site under two names. Verified per call, not assumed: of the 24
+   * object literals, 15 carry a literal or constant `code:` those shapes
+   * resolve, 1 carries a runtime-valued one (`code: refusal.error`, the #9460
+   * out-of-reach bound) and 8 carry no `code` key at all (the vendor's default
+   * for the status); each of the 5 bare identifiers names a local record whose
+   * own `{ code: 'X', … }` object literal `objlit` already reads.
+   */
+  secondArgumentByClass: Object.freeze({
+    objectLiteral: 24,
+    bareIdentifier: 5,
+    memberExpression: 1,
+    absent: 0,
+    other: 0,
+  }),
+  /** Of the member expressions, how many pass guard ③ and how many do not. */
+  memberOnImportedBinding: 1,
+  memberOnUnknownObject: 0,
+  /** Of those passing guard ③, how many pass guard ④. */
+  memberOutsideTheValueSpace: 0,
+  /** The live one, named — a count with no subject cannot be re-derived. */
+  liveMember: 'BASE_ERROR_CODES.USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL',
+  liveMemberFile: 'packages/plugins/plugin-auth/src/auth-manager.ts',
+  /** Sites, verdict rows and unresolved entries this widening adds TODAY. */
+  newSites: 0,
+  newVerdictRows: 0,
+  newUnresolved: 0,
+  /**
+   * Sites it derives with the live member's ledger entry deleted from disk —
+   * the teeth the `newSites: 0` above does not show. Before this shape existed
+   * that same deletion left the gate at EXIT=0.
+   */
+  siteWhenDeregistered: 1,
+  /**
+   * Unregistered WIRE codes hiding at this position on this tree: none, because
+   * #15587 registered the one. The widening is therefore ENFORCEMENT, not a
+   * live-defect fix — the defect it fixes is that nothing required #15587's
+   * registration and nothing would require the next one.
+   */
+  unregisteredWireCodesHiding: 0,
 });
 
 const isTestFile = (rel) =>
@@ -2485,6 +2645,135 @@ export function splitTopLevel(args, report = null) {
 }
 
 /**
+ * [#15723] The first TOP-LEVEL `:` of a binding element — the rename colon of
+ * `{ code: local }` — or `-1`. Depth-tracked so a nested pattern, a type
+ * argument or a parenthesised default keeps its own colons.
+ */
+function topLevelColon(text) {
+  let depth = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const c = text[i];
+    if (c === '(' || c === '[' || c === '{' || c === '<') depth += 1;
+    else if (c === ')' || c === ']' || c === '}' || c === '>') depth -= 1;
+    else if (opensLiteralAt(text, i)) i = skipStringLiteral(text, i).end;
+    else if (c === ':' && depth === 0) return i;
+  }
+  return -1;
+}
+
+/**
+ * [#15723] The LOCAL NAMES a binding pattern or an import clause introduces.
+ *
+ * Published rather than left inside `importedBindings`, and pinned by
+ * `--self-test`, because it is the half that decides guard ③ of `apierrorarg`:
+ * a name this function does not extract is a name the shape will not call
+ * imported.
+ *
+ * Recognised, each with a `--self-test` case: a bare identifier (`d`) · an
+ * object pattern (`{ a, b }`) · an array pattern (`[a, b]`) · a rename, in both
+ * the pattern spelling (`{ a: b }`) and the import spelling (`a as b`,
+ * `* as ns`) · a rest element (`...rest`) · a default (`{ a = 1 }`) · and any
+ * of those nested inside another.
+ *
+ * ⚠️ The failure direction is the safe one, and that is the whole reason this
+ * is allowed to be a textual recogniser at all: a spelling it misses does not
+ * silence `apierrorarg`, it makes the member expression UNRESOLVED and reds the
+ * gate. Extend it and add a case in the same edit — ⛔ never route around it.
+ */
+export function bindingNames(pattern, depth = 0) {
+  const out = new Set();
+  if (depth > 8) return out;
+  const text = String(pattern ?? '').trim();
+  if (!text) return out;
+  // `a as b` / `* as ns` — the import clause's rename. The LOCAL is the right
+  // half, which is the only half a member expression can be written against.
+  const renamed = /^(?:\*|[A-Za-z_$][\w$]*)\s+as\s+([A-Za-z_$][\w$]*)$/.exec(text);
+  if (renamed) return new Set([renamed[1]]);
+  if (/^[A-Za-z_$][\w$]*$/.test(text)) return new Set([text]);
+  if (!/^[{[]/.test(text) || !/[}\]]$/.test(text)) return out;
+  for (const rawPart of splitTopLevel(text.slice(1, -1))) {
+    let part = rawPart.trim();
+    if (!part) continue;
+    // A rest element binds its own name; a default binds the left half. `=` is
+    // cut at its first top-level occurrence that is not `==`, `>=` or `=>`,
+    // because a default VALUE may contain any of those.
+    part = part.replace(/^\.\.\./, '').trim();
+    let depthAt = 0;
+    for (let i = 0; i < part.length; i += 1) {
+      const c = part[i];
+      if (c === '(' || c === '[' || c === '{' || c === '<') depthAt += 1;
+      else if (c === ')' || c === ']' || c === '}') depthAt -= 1;
+      else if (c === '>' && part[i - 1] !== '=') depthAt -= 1;
+      else if (opensLiteralAt(part, i)) i = skipStringLiteral(part, i).end;
+      else if (c === '=' && depthAt === 0 && part[i + 1] !== '=' && part[i + 1] !== '>' && !'!<>='.includes(part[i - 1])) {
+        part = part.slice(0, i);
+        break;
+      }
+    }
+    part = part.trim();
+    if (!part) continue;
+    // `{ code: local }` — the local is the RIGHT half, and it may itself be a
+    // nested pattern.
+    const colonAt = topLevelColon(part);
+    const inner = colonAt >= 0 ? part.slice(colonAt + 1) : part;
+    for (const name of bindingNames(inner, depth + 1)) out.add(name);
+  }
+  return out;
+}
+
+/**
+ * [#15723] Every local name this FILE binds through an import — the object half
+ * of `apierrorarg`'s guard ③.
+ *
+ * Three declared spellings, each pinned by `--self-test`:
+ *
+ *   ① `import <clause> from '<spec>'` — the static form, in all of its clause
+ *      shapes. `import type` is excluded: a type binding cannot be the object
+ *      of a value member expression.
+ *   ② `const <pattern> = await import('<spec>')` (and the `require` and
+ *      non-awaited spellings) — the DYNAMIC form, which is how `auth-manager.ts`
+ *      binds `BASE_ERROR_CODES` and therefore the spelling the card is about.
+ *   ③ `const [<patterns>] = await Promise.all([ import(…), … ])` — the batched
+ *      dynamic form, live in `admin-impersonate-endpoint.ts`. Confirmed by
+ *      reading the `Promise.all` argument list for an `import(` rather than by
+ *      trusting the array pattern alone, so an ordinary `Promise.all` of
+ *      non-imports binds nothing here.
+ *
+ * ⚠️ FILE-scoped, not lexically scoped: a binding introduced inside one
+ * function counts for the whole file. That over-approximates on purpose. The
+ * under-approximating alternative — resolving scopes textually — fails by
+ * declining, and declining at this position means an unresolved red on correct
+ * code; over-approximating can at worst read a same-named local as the vendor
+ * table, which is a finding an author can answer by renaming or registering.
+ * The direction is chosen, not accidental.
+ *
+ * ⚠️ Give it the `maskComments`ed source: an import written in a comment binds
+ * nothing.
+ */
+export function importedBindings(source) {
+  const names = new Set();
+  const add = (pattern) => {
+    for (const name of bindingNames(pattern)) names.add(name);
+  };
+  // ① static
+  for (const m of source.matchAll(/\bimport\s+(?!type[\s{])([^;'"]+?)\s+from\s*['"]/g)) {
+    for (const part of splitTopLevel(m[1])) add(part);
+  }
+  // ② dynamic, directly destructured or bound whole
+  for (const m of source.matchAll(
+    /\b(?:const|let|var)\s+(\{[^{}=]*\}|\[[^[\]=]*\]|[A-Za-z_$][\w$]*)\s*=\s*(?:await\s+)?(?:import|require)\s*\(/g,
+  )) {
+    add(m[1]);
+  }
+  // ③ dynamic, batched through Promise.all
+  for (const m of source.matchAll(/\b(?:const|let|var)\s+(\[[^=]*?\])\s*=\s*(?:await\s+)?Promise\s*\.\s*all\s*\(/g)) {
+    const inner = sliceBalanced(source, m.index + m[0].length - 1);
+    if (inner !== null && /\bimport\s*\(/.test(inner)) add(m[1]);
+  }
+  return names;
+}
+
+/**
  * [#13227] The leading MODIFIER RUN of a TypeScript parameter, enumerated from
  * the grammar rather than approximated.
  *
@@ -2826,6 +3115,10 @@ export function deriveSites({ registered, files, readFile, packageDirs = new Map
               matches.map((m) => m.index + m[0].indexOf('code')),
             )
           : null;
+      // [#15723] `apierrorarg`'s guard ③ asks the FILE which names it imports —
+      // one pass per file, and only when the shape that needs it has candidates.
+      const imported =
+        shape.resolve === 'apierrorarg' && matches.length ? importedBindings(stripped) : null;
       for (const m of matches) {
         let code = m[1];
         let emitAs = shape.name;
@@ -3033,6 +3326,47 @@ export function deriveSites({ registered, files, readFile, packageDirs = new Map
           const inlineValues = literalCodeValues(raw);
           if (!inlineValues || !inlineValues.length) continue;
           for (const value of inlineValues) emit(value, shape.name);
+          continue;
+        } else if (shape.resolve === 'apierrorarg') {
+          // [#15723] `APIError.from(status, record)` / `new APIError(status,
+          // record)`. The four guards the SHAPES entry publishes, cheapest
+          // first; what each costs on this tree is a row in
+          // APIERROR_ARGUMENT_POSITION_CENSUS.
+          const argsText = sliceBalanced(stripped, m.index + m[0].length - 1);
+          // An argument list that never closes is the scanner losing its place,
+          // not a call with no arguments. Nothing to read, and nothing to claim.
+          if (argsText === null) continue;
+          const args = splitTopLevel(argsText);
+          // ① ARGUMENT ONE. Argument zero is the HTTP status name and argument
+          // two onwards is `headers` — neither is an ADR-0112 code. A missing
+          // or empty argument one is `APIError.fromStatus`-shaped: no record,
+          // no stamp.
+          const record = (args[1] ?? '').trim();
+          if (!record) continue;
+          // ② A MEMBER EXPRESSION, nothing else. An object literal here carries
+          // its own `code:` and belongs to `objlit`/`objlitconst`; a bare
+          // identifier names a local record whose object literal those shapes
+          // already read. Reporting either here would derive one site twice
+          // under two names — the double-count a published shape list cannot
+          // notice.
+          const member = /^([A-Za-z_$][\w$]*)\s*\.\s*([A-Za-z_$][\w$]*)$/.exec(record);
+          if (!member) continue;
+          const [, objectName, memberName] = member;
+          // ③ The OBJECT is a binding this file IMPORTS, and ④ the MEMBER is
+          // spelled in ADR-0112 D1's value space. Both failures are REPORTED,
+          // never dropped: at this position there is no `code` token for any
+          // other pattern in either gate to fall back on, so a silent decline
+          // here is the exact blindness this shape exists to end.
+          if (!imported?.has(objectName) || !/^[A-Z][A-Z0-9_]*$/.test(memberName)) {
+            addUnresolved(unresolved, {
+              file: rel,
+              shape: shape.name,
+              value: record,
+              reason: 'vendor-member',
+            });
+            continue;
+          }
+          emit(memberName, shape.name);
           continue;
         } else if (shape.resolve === 'template' && !/^[A-Za-z][A-Za-z0-9_]*$/.test(code)) {
           // Interpolated: no literal exists to check against the registry. It
@@ -3336,6 +3670,17 @@ export function reconcile({
             `reason a DECLARATION can answer, because the source may hold no remedy: add a row to ` +
             `UNRESOLVED_CODE_HELPERS in ${DECLARATION} with a door, a verdict and the evidence — or, if ` +
             `the callers can spell literals, make them and let it become ordinary sites.`
+          : u.reason === 'vendor-member'
+          ? `${u.file}: '${u.value}' (${u.shape}) is handed to APIError as the error RECORD, and this ` +
+            `scan cannot read a code out of it. Either its object is not a binding this file imports — ` +
+            `so the table it reads is out of reach, and a third-party constant stays out of reach by ` +
+            `this gate's declared bounds — or the member is not spelled in ADR-0112 D1's value space, ` +
+            `so the member name is not the code. Reported rather than dropped: at this position there ` +
+            `is no \`code\` token for any other pattern in either gate to see, so declining quietly is ` +
+            `the blindness this shape exists to end. Three ways out: restate the record locally as a ` +
+            `\`{ code: 'X', message }\` const (which \`objlit\` then reads — the practice ` +
+            `admin-impersonate-endpoint.ts already follows), import the table so the member resolves, ` +
+            `or teach importedBindings() the import spelling and add a --self-test case in the same edit.`
           : u.reason === 'reassigned'
           ? `${u.file}: '${u.value}' (${u.shape}) is a \`let\`/\`var\` this file also REASSIGNS, so its ` +
             `initializer is not the set of codes it stamps and reducing it would report a value the ` +
@@ -3493,6 +3838,11 @@ function selfTest() {
       `report(diag('OBJ_HELPER_ONE', 'x'));`,
     // [#13790] the inline literal expression, written at the stamp.
     objlitexpr: `send(res, { code: down ? 'INLINE_ONE' : 'INLINE_TWO', status: 503 });`,
+    // [#15723] the APIError argument position — a vendor code table member,
+    // with no `code` token anywhere near the value.
+    apierrorarg:
+      `import { APIError, BASE_ERROR_CODES } from '@better-auth/core/error';\n` +
+      `throw APIError.from('UNPROCESSABLE_ENTITY', BASE_ERROR_CODES.VENDOR_MEMBER_ONE);`,
   };
   // [#13233] Every PUBLISHED shape carries a sample, checked rather than
   // assumed. The per-shape loop below iterates `samples`, not `SHAPES`, so a
@@ -5842,6 +6192,209 @@ function selfTest() {
     ok(none.length === 0, 'a registered code under packages/spec/src derives no site — the ledger row is the way out');
   }
 
+  // ── [#15723] THE APIError ARGUMENT POSITION ────────────────────────────
+  //
+  // The shape with no `code` token near its value, so nothing else in either
+  // gate can be leaned on if a case here stops running. Positive and negative
+  // fixtures for every guard, plus the two-direction pin the card asks for:
+  // an unregistered emitted member DERIVES a site, and registering it makes the
+  // site go away.
+  battery('[#15723] THE APIError ARGUMENT POSITION: the record is the stamp.');
+  {
+    const REL = 'packages/plugins/plugin-auth/src/a.ts';
+    const derive = (source, reg = registered) =>
+      deriveSites({ registered: reg, files: [{ rel: REL, source }], readFile: () => '' });
+    const argSites = (source, reg) => derive(source, reg).sites.filter((s) => s.shape === 'apierrorarg');
+    const argUnresolved = (source, reg) =>
+      derive(source, reg).unresolved.filter((u) => u.shape === 'apierrorarg');
+
+    // ── bindingNames: the half that decides "is this object imported" ─────
+    const names = (p) => [...bindingNames(p)].sort().join(',');
+    ok(names('d') === 'd', 'bindingNames dropped a bare identifier binding');
+    ok(names('{ a, b }') === 'a,b', 'bindingNames dropped an object-pattern binding');
+    ok(names('[a, b]') === 'a,b', 'bindingNames dropped an array-pattern binding');
+    ok(
+      names('{ a: b }') === 'b',
+      'bindingNames returned the PROPERTY of a renaming pattern instead of the local it binds',
+    );
+    ok(names('a as b') === 'b', "bindingNames dropped an import clause's `as` rename");
+    ok(names('* as ns') === 'ns', 'bindingNames dropped a namespace import');
+    ok(names('{ ...rest }') === 'rest', 'bindingNames dropped a rest element');
+    ok(names('{ a = 1 }') === 'a', 'bindingNames was confused by a default value');
+    ok(
+      names('[{ x }, { y }]') === 'x,y',
+      'bindingNames did not recurse into patterns nested inside an array pattern',
+    );
+
+    // ── importedBindings: the three declared spellings, and what is NOT one ─
+    const imports = (src) => importedBindings(src);
+    ok(imports(`import d from 'x';`).has('d'), 'importedBindings missed a default import');
+    ok(
+      imports(`import d, { a as b } from 'x';`).has('b') && imports(`import d, { a as b } from 'x';`).has('d'),
+      'importedBindings missed half of a mixed default+named import clause',
+    );
+    ok(
+      !imports(`import type { T } from 'x';`).has('T'),
+      'importedBindings counted a TYPE-only import — a type cannot be the object of a value member expression',
+    );
+    ok(
+      imports(`const { APIError, BASE_ERROR_CODES } = await import('@better-auth/core/error');`).has(
+        'BASE_ERROR_CODES',
+      ),
+      'importedBindings missed the DYNAMIC destructured import — the spelling this card is about',
+    );
+    ok(imports(`const ns = await import('x');`).has('ns'), 'importedBindings missed a whole dynamic import');
+    ok(
+      imports(`const [{ APIError }, { TBL }] = await Promise.all([import('a'), import('b')]);`).has('TBL'),
+      'importedBindings missed the Promise.all batched import form this repo uses',
+    );
+    ok(
+      !imports(`const [{ a }, { b }] = await Promise.all([one(), two()]);`).has('a'),
+      'importedBindings treated an ordinary Promise.all as an import — the argument list is read, not assumed',
+    );
+
+    // ── POSITIVE: every spelling that must derive a site ──────────────────
+    const positives = {
+      'static import': `import { TBL } from 'v';\nthrow APIError.from('CONFLICT', TBL.POS_ONE);`,
+      'dynamic destructured import (the live spelling)':
+        `const { APIError, TBL } = await import('@better-auth/core/error');\n` +
+        `throw APIError.from(\n  'UNPROCESSABLE_ENTITY',\n  TBL.POS_ONE,\n);`,
+      'the constructor': `import { TBL } from 'v';\nthrow new APIError('FORBIDDEN', TBL.POS_ONE);`,
+      'a namespace import': `import * as vendor from 'v';\nthrow APIError.from('CONFLICT', vendor.POS_ONE);`,
+      'a renamed named import': `import { BASE as TBL } from 'v';\nthrow APIError.from('CONFLICT', TBL.POS_ONE);`,
+      'the Promise.all batched import':
+        `const [{ APIError }, { TBL }] = await Promise.all([import('a'), import('b')]);\n` +
+        `throw APIError.from('NOT_FOUND', TBL.POS_ONE);`,
+    };
+    for (const [what, source] of Object.entries(positives)) {
+      const found = argSites(source);
+      ok(
+        found.length === 1 && found[0].code === 'POS_ONE',
+        `apierrorarg derived ${JSON.stringify(found)} for ${what} — expected one site for 'POS_ONE'`,
+      );
+    }
+    ok(
+      argSites(`import { TBL } from 'v';\nthrow APIError.from('CONFLICT', TBL.POS_ONE);`)[0].file === REL,
+      'an apierrorarg site is filed against the wrong file',
+    );
+
+    // ── ⭐ BOTH DIRECTIONS: the registration is what makes the site go away ─
+    const live =
+      `const { APIError, BASE_ERROR_CODES } = await import('@better-auth/core/error');\n` +
+      `throw APIError.from(\n  'UNPROCESSABLE_ENTITY',\n  BASE_ERROR_CODES.USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL,\n);`;
+    ok(
+      argSites(live, new Set(['SOMETHING_ELSE'])).some(
+        (s) => s.code === 'USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL',
+      ),
+      'the UNREGISTERED emitted vendor member derived no site — the gate would stay green exactly as it ' +
+        'did before this shape existed',
+    );
+    ok(
+      argSites(live, new Set(['USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL'])).length === 0,
+      'the REGISTERED emitted vendor member still derived a site — registration must be the way out, or ' +
+        'the gate reds on correctly registered code',
+    );
+
+    // ── NEGATIVE: what this shape must NOT claim ──────────────────────────
+    const objLit = `throw APIError.from('CONFLICT', { code: 'OBJ_AT_ARG', message: 'x' });`;
+    ok(argSites(objLit).length === 0, 'apierrorarg annexed an OBJECT LITERAL argument that is objlit\'s');
+    ok(
+      derive(objLit).sites.some((s) => s.code === 'OBJ_AT_ARG' && s.shape === 'objlit'),
+      'the object literal at the argument position stopped being reported by objlit — guard ② hands it ' +
+        'over, it does not drop it',
+    );
+    const bareId = `const rec = { code: 'BARE_AT_ARG', message: 'x' };\nthrow APIError.from('CONFLICT', rec);`;
+    ok(argSites(bareId).length === 0, 'apierrorarg annexed a BARE IDENTIFIER argument');
+    ok(
+      derive(bareId).sites.some((s) => s.code === 'BARE_AT_ARG' && s.shape === 'objlit'),
+      "the local record's own object literal stopped being reported — guard ② relies on objlit reading it",
+    );
+    ok(
+      !argSites(`import { TBL } from 'v';\nthrow APIError.from('UNPROCESSABLE_ENTITY', TBL.POS_ONE);`).some(
+        (s) => s.code === 'UNPROCESSABLE_ENTITY',
+      ),
+      'apierrorarg read ARGUMENT ZERO — the HTTP status name is better-call vocabulary, not an ADR-0112 code',
+    );
+    ok(
+      argSites(`import { TBL } from 'v';\nthrow APIError.fromStatus('UNAUTHORIZED', { message: 'x' });`).length === 0,
+      'the anchor matched APIError.fromStatus — it takes a BODY, not a code record',
+    );
+    ok(
+      argSites(`import { TBL } from 'v';\nthrow new APIError('FORBIDDEN');`).length === 0,
+      'apierrorarg claimed something at a call with no second argument',
+    );
+    ok(
+      argSites(`import { TBL } from 'v';\nthrow OtherError.from('CONFLICT', TBL.POS_ONE);`).length === 0,
+      'the anchor matched a call that is not APIError',
+    );
+    ok(
+      deriveSites({
+        registered,
+        files: [{ rel: REL, source: `// throw APIError.from('CONFLICT', TBL.POS_ONE);\nexport const x = 1;` }],
+        readFile: () => '',
+      }).sites.length === 0,
+      'a call written inside a COMMENT derived a site — the vendor idiom is quoted in this repo\'s docblocks',
+    );
+    ok(
+      argSites(`import { TBL } from 'v';\nthrow APIError.from('C', TBL.POS_ONE, { 'x-a': '1' });`).some(
+        (s) => s.code === 'POS_ONE',
+      ),
+      'a third (headers) argument stopped the shape reading argument one',
+    );
+
+    // ── The two LOUD declines: reported as unresolved, never dropped ──────
+    const foreignObject = `throw APIError.from('FORBIDDEN', ERR.SOME_MEMBER);`;
+    ok(argSites(foreignObject).length === 0, 'a member on a NON-imported object was claimed as a code');
+    ok(
+      argUnresolved(foreignObject).length === 1 &&
+        argUnresolved(foreignObject)[0].reason === 'vendor-member',
+      'a member on a NON-imported object was dropped SILENTLY — guard ③ must fail loud, because at this ' +
+        'position no other pattern in either gate has a `code` token to fall back on',
+    );
+    const lowerMember = `import { TBL } from 'v';\nthrow APIError.from('FORBIDDEN', TBL.notFound);`;
+    ok(argSites(lowerMember).length === 0, "a member outside ADR-0112 D1's value space was claimed as a code");
+    ok(
+      argUnresolved(lowerMember).length === 1 && argUnresolved(lowerMember)[0].reason === 'vendor-member',
+      'a member outside the value space was dropped SILENTLY — guard ④ must fail loud too, or a table ' +
+        'whose keys are not codes hides the one key that is',
+    );
+    ok(
+      reconcile({
+        sites: [],
+        declared: [],
+        registered,
+        unresolved: argUnresolved(foreignObject),
+        declaredHelpers: [],
+      }).some((f) => f.kind === 'unresolved-constant' && /APIError/.test(f.text)),
+      'a vendor-member unresolved produced no finding in reconcile — an unresolved nobody reports is the ' +
+        'silence this shape exists to end',
+    );
+
+    // ── The census is INTERNALLY consistent, so the printed bounds cannot
+    //    quote a decomposition that does not add up ─────────────────────────
+    const c = APIERROR_ARGUMENT_POSITION_CENSUS;
+    const byClass = Object.values(c.secondArgumentByClass).reduce((a, b) => a + b, 0);
+    ok(
+      byClass === c.candidateCalls,
+      `APIERROR_ARGUMENT_POSITION_CENSUS classes sum to ${byClass} but ${c.candidateCalls} candidate calls ` +
+        'are claimed — the printed bound would decompose a population it never measured',
+    );
+    ok(
+      c.memberOnImportedBinding + c.memberOnUnknownObject === c.secondArgumentByClass.memberExpression,
+      'the census splits the member expressions into a total that is not the member-expression count',
+    );
+    ok(
+      c.newSites === 0 && c.siteWhenDeregistered === 1,
+      'the census no longer records BOTH directions — `newSites: 0` alone reads as "nothing here", and ' +
+        'the whole point is that the zero is a REGISTRATION, not an absence',
+    );
+    ok(
+      /@ [0-9a-f]{7,40}$/.test(c.measuredOn),
+      'APIERROR_ARGUMENT_POSITION_CENSUS.measuredOn names no commit — a count without the tree it was ' +
+        'taken against is not a reading',
+    );
+  }
+
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -6088,6 +6641,28 @@ function main() {
     `${SCANNER_LITERAL_BLIND_SPOTS.regexRecogniser.missed} missed against the TypeScript parser — see ` +
     `SCANNER_LITERAL_BLIND_SPOTS.regexRecogniser. ` +
     `See INLINE_LITERAL_EXPRESSION_CENSUS in this file, pinned by --self-test.`;
+  const api = APIERROR_ARGUMENT_POSITION_CENSUS;
+  const apiBound =
+    `\n  [#15723] the ARGUMENT POSITION of ${api.anchor} IS now in this gate's population — the ` +
+    `\`apierrorarg\` shape. \`APIError.from\` copies the record's \`code\` onto the body, so the ARGUMENT ` +
+    `is the stamp, and a member expression on an IMPORTED code table names the code in the member. It is ` +
+    `the first stamp position with no \`code\` token near its value, so every \`code\`-anchored pattern in ` +
+    `this gate AND in check:error-code-casing was structurally blind to it — no site and no unresolved, ` +
+    `the one silence the "REPORTED, never dropped" bound cannot notice. Measured on ${api.measuredOn}: ` +
+    `${api.candidateCalls} candidate call(s) in ${api.files} file(s); argument one is an object literal in ` +
+    `${api.secondArgumentByClass.objectLiteral} (already objlit/objlitconst's), a bare identifier in ` +
+    `${api.secondArgumentByClass.bareIdentifier} (a local record whose own object literal they read) and ` +
+    `a member expression in ${api.secondArgumentByClass.memberExpression} ` +
+    `(${api.memberOnImportedBinding} on an imported binding, ${api.memberOnUnknownObject} not) ` +
+    `⇒ ${api.newSites} new site(s), ${api.newVerdictRows} verdict row(s), ${api.newUnresolved} unresolved ` +
+    `and ${api.unregisteredWireCodesHiding} unregistered wire code(s) hiding. ⭐ Read that ` +
+    `${api.newSites} beside siteWhenDeregistered=${api.siteWhenDeregistered}: the one live member ` +
+    `(${api.liveMember}, ${api.liveMemberFile}) IS registered, and deleting its ledger entry from disk now ` +
+    `derives the site where this gate used to exit 0. Registration per EMITTED MEMBER, never by importing ` +
+    `the vendor's table — a vocabulary this repo does not own must not become its accept set. ` +
+    `⚠️ Bounded: a code the VENDOR emits from inside its own lanes is written in no source here, so no ` +
+    `scan reaches it; closing that needs a declared, audited vendor allow-list and is a separate decision ` +
+    `about the accept set. See APIERROR_ARGUMENT_POSITION_CENSUS in this file, pinned by --self-test.`;
 
   if (argv.includes('--report')) {
     console.log('Derived sites (code / shape / file):');
@@ -6100,13 +6675,13 @@ function main() {
       const doors = [...new Set(pending.filter((d) => d.code === p).map((d) => d.door))].join(',');
       console.log(`  ${p.padEnd(40)} door=${doors}`);
     }
-    console.log(`\n${bounds}${inlineBound}`);
+    console.log(`\n${bounds}${inlineBound}${apiBound}`);
   }
 
   if (findings.length) {
     console.error(`\ncheck-dispatcher-error-vocabulary: ${findings.length} finding(s)\n`);
     for (const f of findings) console.error(`  [${f.kind}] ${f.text}\n`);
-    console.error(bounds + inlineBound);
+    console.error(bounds + inlineBound + apiBound);
     process.exit(1);
   }
 
@@ -6114,7 +6689,7 @@ function main() {
     `check-dispatcher-error-vocabulary: OK — ${sites.length} unregistered code-stamping site(s), all classified; ` +
       `${new Set(pending.map((d) => d.code)).size} awaiting a ledger entry (#8846).`,
   );
-  console.log(bounds + inlineBound);
+  console.log(bounds + inlineBound + apiBound);
 }
 
 // Exports bindings, so an import for those exports alone must run nothing (#10667).
